@@ -20,7 +20,7 @@ one Elektron publish for your instrument.
 | aPLib depack and pack | done — Gate B, and smaller than stock on every section |
 | Rebuild with replaced sections, re-signed and verified | done — Gate C |
 | Declarative patches with guards | done |
-| A disassembler validated against objdump | done — Gate F; Capstone fails, Ghidra still to check |
+| A disassembler validated against objdump | done — Gate F; **Ghidra passes**, Capstone fails |
 | Recovery path proven on hardware | **not yet — do this before flashing anything** |
 | A patch confirmed on the instrument | not yet — Gate E |
 | A fourth LFO | Phase 2 |
@@ -69,7 +69,7 @@ Measured from the two images, 2026-09-07. Evidence in `docs/ele3-format.md`.
 ## Testing
 
 ```
-pytest -m "not slow"     # 48 tests, about 12 seconds
+pytest -m "not slow"     # 53 tests, about 16 seconds
 pytest                   # adds the 3 MB MAIN OS rebuild, about 35 seconds
 ```
 
