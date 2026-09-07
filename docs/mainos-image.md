@@ -49,7 +49,7 @@ wsl -u root apt-get install -y binutils-m68k-linux-gnu
 `dnfw` finds it there and calls through `wsl`, translating the temporary file
 to a `/mnt/<drive>/...` path, so nothing else has to care where it lives.
 
-## Gate F — PASSED 2026-09-07
+## Gate F — CLOSED 2026-09-08
 
 **The rule: no reverse-engineering starts on a decoder that has not been
 checked against objdump.** Run it with `dnfw validate-disasm`. Agreement is
@@ -93,16 +93,62 @@ Octatrack on 30 August 2026 (6,757 undecodable instructions, 4,543 of them
 longer than two bytes). Their conclusion holds here: r2's m68k backend is
 Capstone-based, so **radare2 reads this firmware wrongly and does not say so.**
 
-### Still to validate: Ghidra
+### Ghidra — PASSES, with one characterised caveat
 
-Ghidra is the tool actually wanted for this work — decompiler, cross
-references, types — and it has not been through this gate yet. `dnfw
-validate-disasm --against` currently knows only Capstone; comparing Ghidra
-needs its disassembly exported in some form that can be parsed into the same
-`Instruction` records, and `image/instruction.py:compare` then does the rest.
+Ghidra 12.1.3, language `68000:BE:32:Coldfire`, imported with the Binary loader
+at `0x40000400` and `-noanalysis`. The export script sweeps **linearly and does
+not follow flow**, because that is what `objdump -D` does and a comparison is
+only fair if both engines were asked the same question.
 
-Until that is done, treat Ghidra output as unverified. If it passes, use Ghidra
-for the work and keep objdump as the reference for anything that matters.
+Measured over `0x40001000` + **512 KB**:
+
+| | |
+|---|---|
+| objdump instructions | 165,086 |
+| boundaries Ghidra got right | 164,691 (99.76%) |
+| divergences | 395, in **99 runs** |
+| runs beginning on bytes objdump declined to decode | 93 |
+| runs beginning on a real instruction | **6** |
+
+**All six were examined by hand, and none of them is code.** Four sit directly
+after a switch dispatch:
+
+```
+40073d5e:  48 c0            extl %d0
+40073d60:  4e fb 08 02      jmp %pc@(0x40073d64,%d0:l)
+40073d64:  00 ba 01 1a ...  <- the jump table starts here
+```
+
+`JMP (d8,PC,Xn)` followed by its table. The bytes after it are offsets, and
+**both** engines invent instructions from them — objdump reads `oril
+#18481372,%d2`, Ghidra reads `ori.l #0x11a00dc,(0x11a,PC)`. Neither is right,
+because neither is wrong: a linear sweep cannot know a jump table is data. The
+remaining two clusters sit inside runs of `.short` for the same reason.
+
+So **Ghidra misread no real instruction in 512 KB**, and the disagreements are
+confined to padding and jump tables — exactly the places a linear sweep is
+meaningless. Ghidra's own analyser, which we disabled for fairness, follows
+flow and would not disassemble those bytes at all.
+
+`dnfw validate-disasm` still reports FAIL on strict equality, which is correct
+and deliberate: the tool counts, a person judges. What it flags is a shortlist
+of six things to look at, and looking at them is the work.
+
+**Ghidra is cleared for use on this firmware.** Keep objdump as the reference
+for anything that matters, and re-run the gate against a new Ghidra version
+before trusting it.
+
+### The two engines side by side
+
+Same span, `0x40001000` + 64 KB:
+
+| | objdump | Ghidra | Capstone |
+|---|---|---|---|
+| agreement with reference | — | 99.90% | 98.95% |
+| divergence runs | — | 9 | 106 |
+| runs beginning on real code | — | **0** | **97** |
+
+That last row is Gate F in one line.
 
 ## It was built with GCC, and the C++ names are still in it
 

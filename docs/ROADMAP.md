@@ -13,7 +13,7 @@ build, and what is already settled.
 | **A** | Transport round-trip is byte-identical on both images | **done** |
 | **B** | `depack(pack(x)) == x`, including adversarial input | **done** |
 | **C** | A rebuild with recompressed sections verifies, signature included | **done** |
-| **F** | The disassembler in use agrees with `objdump -m m68k:cfv4e` | **done for Capstone** (it fails, as expected); Ghidra still to check |
+| **F** | The disassembler in use agrees with `objdump -m m68k:cfv4e` | **done** — Ghidra passes, Capstone fails |
 | **Recovery** | The Early Start-up Menu reflashes stock firmware | **not started — gates all hardware work** |
 | **D** | A recompressed but unchanged image boots | not started |
 | **E** | A patch we wrote is visible on the instrument | not started — patch is written and builds |
@@ -23,16 +23,15 @@ and the reasoning are in `docs/flashing.md`.
 
 ### What is left in Phase 1
 
-- Set up the Ghidra project, run `dnfw symbols --ghidra` against it, and put
-  Ghidra through Gate F before trusting a byte of its output. That needs its
-  disassembly exported in a form `image/instruction.py` can compare; the
-  comparison itself already exists.
+- Run `dnfw symbols --ghidra` against a Ghidra project to seed the 454 RTTI
+  names, and start reading `11LfoPageView`.
 - The hardware sequence.
 
 The reference decoder is `m68k-linux-gnu-objdump` from Ubuntu's
-`binutils-m68k-linux-gnu`, reached through WSL. Capstone has been measured and
+`binutils-m68k-linux-gnu`, reached through WSL. **Ghidra 12.1.3 with the
+`68000:BE:32:Coldfire` language passes** and is cleared for use. Capstone
 **fails**, which also condemns radare2, whose m68k backend is Capstone — the
-numbers are in `docs/mainos-image.md`.
+numbers for both are in `docs/mainos-image.md`.
 
 ## Phase 2 — the fourth LFO
 
