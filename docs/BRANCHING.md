@@ -74,9 +74,31 @@ is the point at which it has done its job by making the decision explicit.
 ### The server-side guard
 
 The local hook cannot protect the repository from a clone that never installed
-it. Branch protection on `main` — require a pull request, disallow force
-push — is the only version that actually holds, and only the owner can set it.
-Not yet enabled.
+it. Branch protection on `main` is the only version that actually holds, and
+only the owner can set it. **Enabled 2026-09-07:**
+
+| Setting | |
+|---|---|
+| Pull request required before merging | yes |
+| Approving reviews required | 1 |
+| Force pushes | blocked |
+| Branch deletion | blocked |
+| Required status checks | none |
+| Enforced for administrators | no |
+
+Two consequences worth knowing before they surprise someone.
+
+**One approval is required and GitHub does not let you approve your own pull
+request.** On a repository with one contributor that means the review box can
+never be ticked the normal way, so a merge goes through the administrator
+route below rather than through an approval.
+
+**Administrators are not bound**, which is what makes that route exist. The
+owner can still merge without an approval and, if it ever becomes necessary,
+force-push. That is deliberate: the protection is here to stop accidents and
+to stop anyone else, not to lock the owner out of their own repository. It does
+mean the rule about not pushing to `main` is still a rule rather than a
+mechanism, for exactly one person.
 
 ## What this does not change
 
