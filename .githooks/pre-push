@@ -1,0 +1,26 @@
+#!/bin/sh
+# Refuse any push whose target on the remote is `main`.
+#
+# `main` is merged into through a reviewed MR by the repository owner. This
+# hook exists so that pushing to it has to be a decision rather than a slip --
+# a `git push` typed from the wrong branch, or a tool that helpfully pushes the
+# current branch to its upstream.
+#
+# Install once per clone:  git config core.hooksPath .githooks
+#
+# It can be bypassed with --no-verify, deliberately. Real enforcement is branch
+# protection on the remote, which only the owner can configure; see
+# docs/BRANCHING.md.
+
+protected='refs/heads/main'
+
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    if [ "$remote_ref" = "$protected" ]; then
+        echo "pre-push: refusing to push to $remote_ref." >&2
+        echo "  main is merged into by the repository owner, through an MR." >&2
+        echo "  Push your branch instead and open one. See docs/BRANCHING.md." >&2
+        exit 1
+    fi
+done
+
+exit 0
