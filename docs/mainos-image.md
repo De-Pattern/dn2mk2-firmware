@@ -8,55 +8,101 @@ Section id 3 of the ELE3 container: the code the instrument runs.
 | load address | `0x40000400` | `0x40000400` |
 | byte order | big-endian | big-endian |
 
-## It is 68k-family, and almost certainly ColdFire V4e
+## It is ColdFire, and that is now measured rather than inferred
 
 The image opens `46 FC 27 00` — `MOVE #$2700,SR`, masking interrupts, the
-classic first instruction of a 68k-family reset path. Counting opcodes across
-the DN2 image: 11,285 `RTS` (`4E75`), 25,503 `JSR.L` (`4EB9`), 2,041 `LINK`
-(`4E56`), 2,378 `UNLK` (`4E5E`).
+classic first instruction of a 68k-family reset path, at `0x40000410` behind a
+16-byte header. Counting opcodes across the DN2 image: 11,285 `RTS` (`4E75`),
+25,503 `JSR.L` (`4EB9`), 2,041 `LINK` (`4E56`), 2,378 `UNLK` (`4E5E`).
 
-**The variant is inferred, not measured here.** `sambanks/octabam` patches the
-Octatrack's main CPU, establishes it as **ColdFire V4e**, and loads its MAIN OS
-at **`0x40000400`** — the same address we measure on both Digitones, arrived at
-independently. One Elektron platform, one convention. That is strong, and it is
-still inference: nothing in this repository has yet disassembled a
-ColdFire-only instruction and confirmed it decodes.
+**Confirmed 2026-09-07 by disassembling it.** `m68k-linux-gnu-objdump -m
+m68k:cfv4e` decodes instructions that exist on ColdFire and on no 68000-series
+part. At `0x400015f4` and `0x400015fa`:
 
-Settling it is Gate F, below.
+```
+400015f4:  7f dc    mvzw %a4@+,%d7
+400015fa:  71 00    mvsb %d0,%d0
+```
 
-## Do not trust radare2 on this CPU
+`MVS` and `MVZ` are ColdFire ISA_B. Their encoding is `0111rrr1`, the MOVEQ
+opcode space with bit 8 set, which is undefined on the 68000 through 68060.
+There are **2,166** such halfwords in `0x40000400`–`0x40098000` alone.
 
-octabam measured r2's m68k backend against this exact architecture on
-**30 August 2026**, and the result is worse than "some instructions fail":
+This also matches `sambanks/octabam`, which established the Octatrack's CPU as
+ColdFire V4e and loads its MAIN OS at **`0x40000400`** — the same address we
+measure on both Digitones. One Elektron platform, one convention.
 
-- 6,757 instructions below `0x40098000` cannot be decoded.
-- 4,543 of them are longer than two bytes.
-- r2 assumes an undecodable opcode was two bytes, so each extension word is
-  then decoded as a **separate, ordinary-looking instruction**. The stream
-  desynchronises and the disassembly *invents plausible code that is not
-  there*.
-- The bulk is `mvz` (4,539) and `mvs` (1,834) — ordinary ColdFire ISA_B moves
-  used throughout, not exotic audio code. Their example: at `0x40003664`, r2
-  reports `invalid / btst.l d4,(a0) / invalid / btst.l d4,(a0)` where the
-  actual instructions are `msacl %d0,%a1,%acc2` and `msacl %d0,%a2,%acc3`.
+## Getting a disassembler that can read it
 
-Any tool whose m68k support predates ColdFire has the same failure mode, and it
-fails *silently*. **`m68k-elf-objdump -m m68k:cfv4e` is the reference.**
-`dnfw disasm` uses it and nothing else, and tells you to install it rather than
-falling back to something that would answer wrongly.
+Ubuntu's `binutils-m68k-linux-gnu` provides `m68k-linux-gnu-objdump`, and its
+BFD carries ColdFire even though `objdump -i` does not say so — that option
+lists the coarse architecture (`m68k`) and nothing about sub-machines, so
+support is tested by decoding a ColdFire-only instruction rather than read off
+a capability list. `image/objdump.py` does exactly that.
 
-### Gate F — validate any other disassembler before using it
+On Windows, the shortest route is WSL:
 
-Not yet done; `m68k-elf-objdump` is not installed on this machine.
+```
+wsl -u root apt-get install -y binutils-m68k-linux-gnu
+```
 
-1. Install m68k-elf binutils.
-2. `dnfw extract <image> --section 3 -o out/` then import
-   `section_3_MAIN_OS.aplib.bin` into Ghidra as raw binary, big-endian, base
-   `0x40000400`.
-3. Disassemble the same 4 KB span in both and diff.
-4. Record here which Ghidra language setting agrees, the span, and the date.
-   **No reverse-engineering work starts on a disassembler that has not passed
-   this.**
+`dnfw` finds it there and calls through `wsl`, translating the temporary file
+to a `/mnt/<drive>/...` path, so nothing else has to care where it lives.
+
+## Gate F — PASSED 2026-09-07
+
+**The rule: no reverse-engineering starts on a decoder that has not been
+checked against objdump.** Run it with `dnfw validate-disasm`. Agreement is
+judged on instruction boundaries, not on how each engine spells the result,
+because a boundary disagreement means one side has desynchronised and
+everything it prints afterwards is fiction.
+
+Reference: `m68k-linux-gnu-objdump` 2.42, `-m m68k:cfv4e`, `-z`.
+
+### Capstone — FAILS, and this is why radare2 cannot be trusted here
+
+Capstone offers m68k modes for the 68000, 010, 020, 030, 040 and 060, and
+**no ColdFire mode**. Measured over `0x40001000` + 64 KB of real DN2 code:
+
+| | |
+|---|---|
+| objdump instructions | 19,117 |
+| boundaries Capstone got right | 18,916 (98.95%) |
+| divergences | **201** |
+
+The 201 break down into three kinds, and two of them are not what you would
+guess:
+
+| Count | What happened |
+|---|---|
+| 111 | A ColdFire-only `MVS`/`MVZ`. Capstone emits a two-byte `.byte` — but the real instruction can be **six** bytes: `73 f9 40 57 3e 80` is `mvzw 0x40573e80,%d1`. |
+| 81 | Capstone has no instruction at that address at all: the downstream wreckage of the above. |
+| 9 | The **opposite direction** — Capstone decodes `00 00 2f 0a` as `ori.b #$a,d0`, a 68k instruction ColdFire dropped. objdump correctly rejects it. |
+
+That third row is the one worth remembering. The problem is not only that
+Capstone is missing instructions ColdFire added; it also happily accepts
+instructions ColdFire removed. Both directions produce plausible-looking code
+that is not there.
+
+Across the wider window `0x40000400`–`0x40098000`, Capstone fails on 2,055 of
+195,649 instructions and assigns **two bytes to every single one of them** —
+which is the desync mechanism stated as a measurement.
+
+This independently reproduces, on the Digitone II, what octabam measured on the
+Octatrack on 30 August 2026 (6,757 undecodable instructions, 4,543 of them
+longer than two bytes). Their conclusion holds here: r2's m68k backend is
+Capstone-based, so **radare2 reads this firmware wrongly and does not say so.**
+
+### Still to validate: Ghidra
+
+Ghidra is the tool actually wanted for this work — decompiler, cross
+references, types — and it has not been through this gate yet. `dnfw
+validate-disasm --against` currently knows only Capstone; comparing Ghidra
+needs its disassembly exported in some form that can be parsed into the same
+`Instruction` records, and `image/instruction.py:compare` then does the rest.
+
+Until that is done, treat Ghidra output as unverified. If it passes, use Ghidra
+for the work and keep objdump as the reference for anything that matters.
 
 ## It was built with GCC, and the C++ names are still in it
 
