@@ -20,6 +20,7 @@ one Elektron publish for your instrument.
 | aPLib depack and pack | done — Gate B, and smaller than stock on every section |
 | Rebuild with replaced sections, re-signed and verified | done — Gate C |
 | Declarative patches with guards | done |
+| A disassembler validated against objdump | done — Gate F; Capstone fails, Ghidra still to check |
 | Recovery path proven on hardware | **not yet — do this before flashing anything** |
 | A patch confirmed on the instrument | not yet — Gate E |
 | A fourth LFO | Phase 2 |
@@ -47,7 +48,8 @@ A `.zip` as Elektron ship it is accepted anywhere a `.syx` is.
 | `dnfw patch list [--image IMG]` | show declared patches, and whether they apply |
 | `dnfw patch apply <image> -o OUT` | apply patches and rebuild |
 | `dnfw symbols <image> [--ghidra FILE]` | the C++ names GCC left in the image |
-| `dnfw disasm <image> ADDR [N]` | disassemble a span (needs `m68k-elf-objdump`) |
+| `dnfw disasm <image> ADDR [N]` | disassemble a span (ColdFire V4e, via objdump) |
+| `dnfw validate-disasm <image> ADDR [N]` | Gate F: check another disassembler against objdump |
 
 `build` and `patch apply` re-load and re-verify their own output before writing
 it. Nothing leaves this tool that it cannot check.
@@ -67,9 +69,14 @@ Measured from the two images, 2026-09-07. Evidence in `docs/ele3-format.md`.
 ## Testing
 
 ```
-pytest -m "not slow"     # 41 tests, about 8 seconds
-pytest                   # adds the 3 MB MAIN OS rebuild, about 30 seconds
+pytest -m "not slow"     # 48 tests, about 12 seconds
+pytest                   # adds the 3 MB MAIN OS rebuild, about 35 seconds
 ```
+
+Gate F needs an m68k objdump; on Windows,
+`wsl -u root apt-get install -y binutils-m68k-linux-gnu`. Without it those
+tests skip and say so. Capstone (`pip install capstone`) is optional and only
+used as the engine under test.
 
 Corpus-dependent tests skip cleanly when `00_Resources/` is absent, and say so.
 

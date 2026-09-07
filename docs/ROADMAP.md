@@ -13,20 +13,26 @@ build, and what is already settled.
 | **A** | Transport round-trip is byte-identical on both images | **done** |
 | **B** | `depack(pack(x)) == x`, including adversarial input | **done** |
 | **C** | A rebuild with recompressed sections verifies, signature included | **done** |
-| **F** | The disassembler in use agrees with `m68k-elf-objdump -m m68k:cfv4e` | not started — needs binutils installed |
+| **F** | The disassembler in use agrees with `objdump -m m68k:cfv4e` | **done for Capstone** (it fails, as expected); Ghidra still to check |
 | **Recovery** | The Early Start-up Menu reflashes stock firmware | **not started — gates all hardware work** |
 | **D** | A recompressed but unchanged image boots | not started |
 | **E** | A patch we wrote is visible on the instrument | not started — patch is written and builds |
 
-A, B and C are `pytest`. F needs a toolchain install. Recovery, D and E need
-the instrument; the order and the reasoning are in `docs/flashing.md`.
+A, B, C and F are `pytest`. Recovery, D and E need the instrument; the order
+and the reasoning are in `docs/flashing.md`.
 
 ### What is left in Phase 1
 
-- Install m68k-elf binutils, run Gate F, record the result in
-  `docs/mainos-image.md`.
-- Set up the Ghidra project and run `dnfw symbols --ghidra` against it.
+- Set up the Ghidra project, run `dnfw symbols --ghidra` against it, and put
+  Ghidra through Gate F before trusting a byte of its output. That needs its
+  disassembly exported in a form `image/instruction.py` can compare; the
+  comparison itself already exists.
 - The hardware sequence.
+
+The reference decoder is `m68k-linux-gnu-objdump` from Ubuntu's
+`binutils-m68k-linux-gnu`, reached through WSL. Capstone has been measured and
+**fails**, which also condemns radare2, whose m68k backend is Capstone — the
+numbers are in `docs/mainos-image.md`.
 
 ## Phase 2 — the fourth LFO
 
