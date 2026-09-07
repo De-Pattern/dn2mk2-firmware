@@ -21,8 +21,8 @@ one Elektron publish for your instrument.
 | Rebuild with replaced sections, re-signed and verified | done — Gate C |
 | Declarative patches with guards | done |
 | A disassembler validated against objdump | done — Gate F; **Ghidra passes**, Capstone fails |
-| Recovery path proven on hardware | **not yet — do this before flashing anything** |
-| A patch confirmed on the instrument | not yet — Gate E |
+| Recovery path proven on hardware | done — stock reflash through the Early Start-up Menu |
+| A patch confirmed on the instrument | not yet — Gate D then Gate E, both unblocked |
 | A fourth LFO | Phase 2 |
 
 ## Install and run

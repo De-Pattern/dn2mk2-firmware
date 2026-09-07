@@ -1,8 +1,8 @@
 # Flashing, and getting back
 
-**Nothing in this file has been done yet.** It is the procedure, written before
-it is needed, which is the point of it. Results get recorded here as they
-happen, with dates.
+**Step 1 is done: the way back is proven.** The rest of the procedure was
+written before it was needed, which is the point of it. Results are recorded
+here as they happen, with dates.
 
 ## The order, and why it is this order
 
@@ -14,22 +14,34 @@ failure tells you which part is wrong.
 Use DNX's `.dnx` backup. Firmware and user data are separate, and a firmware
 flash should not touch projects — but "should not" is not a backup.
 
-### 1. Prove the way back, with stock firmware
+### 1. Prove the way back, with stock firmware — DONE 2026-09-08
 
-**This gates every other hardware step.**
+**This gated every other hardware step, and it passed.** Stock
+`Digitone_II_OS1.10E.syx` was sent to a Digitone II through the Early Start-up
+Menu; the transfer reached 100%, the device rebooted, and it came up normally.
 
-1. Power the instrument holding `FUNC` to reach the **Early Start-up Menu**.
-2. Confirm there is an `OS UPGRADE` entry. Photograph the menu.
-3. Send the **stock, unmodified** `Digitone_II_OS1.10E.syx` to it over MIDI.
-4. Record below: the route, how long it took, what the screen showed at each
-   stage, and what a failure would look like.
+The route, as actually used:
 
-The point is that this route lives in the bootloader, not in MAIN OS, so it
-should still work when a MAIN OS we built does not. Until it has actually been
-used once, that is a belief.
+1. Hold **`FUNC`** while powering the instrument on to reach the **Early
+   Start-up Menu**, then press **`TRIG 4`** to select **OS UPGRADE**.
+2. Connect the computer's MIDI **OUT** to the device's MIDI **IN** with a DIN
+   cable. **USB MIDI does not work for this** — Elektron's own transfer tool
+   says so, and the bootloader only listens on the DIN port.
+3. Send the `.syx` with Elektron Transfer's **SysEx Transfer** window, which
+   shows "Recovery mode" and a percentage.
+4. The device shows `RECEIVING...` with a progress bar while it runs.
 
-If step 2 or 3 does not behave as expected — **stop**. Do not flash anything
-modified.
+Interface used: a Focusrite USB MIDI interface.
+
+**It is slow, and that is arithmetic rather than a fault.** MIDI DIN runs at
+31,250 baud, ten bits to the byte, so 3,125 bytes per second. The 2,209,184-byte
+image therefore cannot take less than **about 12 minutes**, and will take
+somewhat longer. That figure is derived, not measured — the actual duration was
+not timed. Do not interrupt it.
+
+**Why this matters more than it looks.** This route lives in the bootloader,
+not in MAIN OS, so it still works when a MAIN OS we built does not. It is the
+reason anything modified can be flashed at all.
 
 ### 2. Gate D — a rebuild that changes nothing
 
@@ -75,4 +87,6 @@ that can be run again.
 
 | Date | Step | Result |
 |---|---|---|
-| | | *nothing yet* |
+| 2026-09-08 | Recovery path, stock 1.10E via Early Start-up Menu | **Pass.** Transfer reached 100%, device rebooted, came up normally. |
+| | Gate D — recompressed, unchanged | not yet |
+| | Gate E — the PERSONALIZE patch | not yet |
