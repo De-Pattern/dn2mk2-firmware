@@ -89,6 +89,8 @@ Corpus-dependent tests skip cleanly when `00_Resources/` is absent, and say so.
 | `docs/mainos-image.md` | the CPU, the load address, and which disassembler to trust |
 | `docs/flashing.md` | the recovery path, and the order hardware steps happen in |
 | `docs/ROADMAP.md` | the gates, and the Phase 2 LFO4 investigation |
+| `docs/lfo-parameters.md` | the LFO parameter tables, and what a fourth LFO needs |
+| `docs/service-commands.md` | the factory service command strings, including the serial number |
 | `docs/references.md` | prior art, what each is good for, and its licence |
 
 ## Licence
