@@ -73,6 +73,41 @@ photograph the screen.
 That closes Phase 1: unpack, modify, repack, re-sign, flash, observe, as a loop
 that can be run again.
 
+## When Transfer will not send
+
+Elektron Transfer logs to
+`%APPDATA%\Elektron Overbridge\Transfer.log`. **Read it before suspecting the
+image** — on 2026-09-08 a stalled send was diagnosed there in one look.
+
+The failure looked like a rejected file: the SysEx Transfer window showed no
+progress bar and no percentage, while stock firmware sent normally from the same
+window, same cable, same port. The log said otherwise:
+
+```
+14:45:29  Trying to send OS for Unknown
+14:45:48  error Couldn't open midi output due to exception: MIDI Device already in use
+```
+
+Two things to take from it.
+
+**The port is the usual fault, not the file.** A send that hangs leaves the MIDI
+output open, so every retry afterwards fails with `MIDI Device already in use`
+until Transfer is restarted.
+
+**Transfer does not validate the image.** It logs
+`This syx is for Unknown, not Model:Cycles` for a **stock** Digitone II OS file
+exactly as it does for one we built — it recognises neither, and sends both. So
+Transfer accepting a file is not evidence the file is good, and Transfer
+stalling on one is not evidence the file is bad.
+
+**Clicking Send once is not enough.** In the same session stock needed three
+attempts before the log showed streaming begin. If no progress appears within a
+second or two, click Send again; if that fails, restart Transfer.
+
+Streaming is visible in the log as a run of
+`Waiting for: 41.96 milliseconds in legacy sysex send` — one per 128-byte
+packet, which is DIN MIDI's rate and confirms the transfer is genuinely moving.
+
 ## Standing rules
 
 - **Verify before sending.** `dnfw inspect` on the file you are about to flash.
