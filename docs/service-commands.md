@@ -45,19 +45,72 @@ Audio and sequencer: `#DUMP_AUDIO`, `#RECEIVE_AUDIO`, `#PLAY_STEREO`,
 UI test: `#START_UI_TEST`, `#ABORT_UI_TEST`, `#UI_TEST_POLL`, `#SHOW_MSG`,
 `#TEST_STATUS`, `#RESET_ARM`, `#RESET_POLL`, `#SHOW_TEST_COMPLETE_SIGN`.
 
-## What `#READ_SERIAL` gives back
+## `#READ_SERIAL`, disassembled — 2026-09-08
 
-The format strings sitting immediately after it:
+The string-pool reading below was upgraded to a code reading after the DNX
+session pointed out, correctly, that four strings sitting near each other is
+the order a compiler emitted literals in, not a binding. It is now bound.
+
+**The comparison is in the chain**, at `0x400d0338`, between `#DUMP_UI_CALIBRATION`
+and `#WRITE_SERIAL`:
 
 ```
-#READ_SERIAL
-%.14s
-SERIAL NUMBER CRC ERROR
-NO SERIAL NUMBER
+400d0338:  pea 0x402022a3        "#READ_SERIAL"
+400d033e:  movel %d2,%sp@-       the received line
+400d0340:  jsr %a4@              the comparator
+400d0346:  bnes 0x400d038a       no match -> try #WRITE_SERIAL
+400d0348:  movel %fp,%d7 ; addil #-128,%d7    d7 = fp-128, a local buffer
+400d0350:  movel %d7,%sp@- ; jsr %pc@(0x400cf532)   read_serial(&buf)
+400d035e:  tstl %d0
+400d0362:    d0 == 0   reply("%.14s
+", buf)
+400d0376:    d0 == -2  reply("SERIAL NUMBER CRC ERROR
+")
+400d0380:    otherwise reply("NO SERIAL NUMBER
+")
 ```
 
-So a **14-character serial**, CRC-protected, and two failure replies for a bad
-checksum and for an unprogrammed unit.
+`0x402022b0` **is** `"%.14s
+"` and it is passed with the buffer the getter
+filled. The 14 is now bound to the serial by code, not by adjacency.
+
+### The record, from `read_serial` at `0x400cf532`
+
+```
+400cf53a:  pea 0x402ebc3c ; pea 0x16 ; movel #0x3C0000,%sp@-
+400cf54a:  jsr 0x4012783a          read 22 bytes from offset 0x3C0000
+400cf550:  pea 0x4 ; pea 0x40201f12 ; pea 0x402ebc3c
+400cf560:  jsr 0x4016fc8c          compare the first 4 bytes against "SERI"
+400cf56c:  bnes -> return -1       no magic  -> NO SERIAL NUMBER
+400cf56e:  pea 0x16 ; pea 0x402ebc3c ; pea 0xffffffff
+400cf57c:  jsr %pc@(0x400cec84)    CRC-32 over all 22 bytes, init 0xFFFFFFFF
+400cf584:  cmpil #0xDEBB20E3,%d0
+400cf58a:  bnes -> return -2       bad CRC   -> SERIAL NUMBER CRC ERROR
+400cf590:  pea 0xe ; pea 0x402ebc40 ; movel %d3,%sp@-
+400cf59c:  jsr 0x4016fd7c          copy 14 bytes from +4 to the caller
+```
+
+So the stored record is **22 bytes**, and every field is accounted for:
+
+| Offset | Size | Field |
+|---|---|---|
+| +0 | 4 | magic `"SERI"` (the literal at `0x40201f12`) |
+| +4 | **14** | the serial, copied out and printed with `%.14s` |
+| +18 | 4 | CRC-32 |
+
+`0xDEBB20E3` is the standard CRC-32 residue for a message with its own CRC
+appended, which is what makes the check a single comparison over all 22 bytes.
+
+**It lives at offset `0x3C0000`** (3,932,160), fetched by `0x4012783a` — a
+reader with 12 call sites across the image. Whether that offset is into flash,
+the MMC, or something else is **not yet established**; identifying
+`0x4012783a` would say.
+
+### What this still does not establish
+
+That any particular unit **has** a valid record. `NO SERIAL NUMBER` is a real
+branch, reached whenever the magic is absent, and nothing here has been run
+against hardware.
 
 Nearby, `#STATUS` is followed by a block that looks like a device identity
 report:
