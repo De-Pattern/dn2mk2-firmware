@@ -62,15 +62,19 @@ and `#WRITE_SERIAL`:
 400d0348:  movel %fp,%d7 ; addil #-128,%d7    d7 = fp-128, a local buffer
 400d0350:  movel %d7,%sp@- ; jsr %pc@(0x400cf532)   read_serial(&buf)
 400d035e:  tstl %d0
-400d0362:    d0 == 0   reply("%.14s
+400d0362:    d0 == 0   reply("%.14s
+
 ", buf)
-400d0376:    d0 == -2  reply("SERIAL NUMBER CRC ERROR
+400d0376:    d0 == -2  reply("SERIAL NUMBER CRC ERROR
+
 ")
-400d0380:    otherwise reply("NO SERIAL NUMBER
+400d0380:    otherwise reply("NO SERIAL NUMBER
+
 ")
 ```
 
-`0x402022b0` **is** `"%.14s
+`0x402022b0` **is** `"%.14s
+
 "` and it is passed with the buffer the getter
 filled. The 14 is now bound to the serial by code, not by adjacency.
 
@@ -221,8 +225,18 @@ IFACE #1  class=0x0a CDC-Data                          2 endpoints
 ```
 
 **The subclass is 0x02, Abstract Control Model** — the virtual-COM-port
-profile — not the 0x01 Direct Line Control the Windows PnP record suggested.
-A stale registry entry is weaker evidence than the descriptor itself.
+profile.
+
+A Windows PnP record on the author's machine shows a `PID_FFFF` device with
+subclass **0x01**, Direct Line Control. That is **not** a contradiction and was
+briefly written up here as one, wrongly. That record's `DeviceDesc` is
+`Elektron Digitone` with `REV_0001` — a Digitone 1 — while these descriptors
+are Digitone II 1.10E. A compatible id is built from what the device actually
+sent, so both readings are true of their own instrument. **A DN2 descriptor
+does not correct a DN1 enumeration.**
+
+The endpoint layout above is therefore a DN2 fact. Do not assume it for a DN1;
+that would need a DN1 image.
 
 The same descriptor set appears in the **`updater` section** (id 4, raw, loads
 at `0x80000400`) at `+0x799d`/`+0x79d7`, so the bootstrap image presents this
@@ -247,10 +261,20 @@ it back.
 
 ## What would settle it
 
-1. **Follow `0x40111264`** into the `0x4011xxxx` region to find what registers
-   `0x400cf906`, and whether its input comes from the CDC-Data bulk OUT
-   endpoint. `0x40110fe2` is a dead end — it is a two-line setter that stores
-   its arguments into globals at `0x443dde20` and `0x443dde24`.
+1. **Find what fills the command buffer.** Both of the dispatcher's entry calls
+   turned out to be dead ends: `0x40110fe2` stores its two arguments into
+   globals at `0x443dde20`/`0x443dde24` and returns, and `0x40111264` stores one
+   into `0x40285858` and returns. Two-instruction setters, not channel opens.
+   The function immediately after them decrements counters at `0x443de2e0`,
+   `0x443de2dc`, `0x443de2d8` and increments `0x464b2bb0`, which is the shape of
+   a timer tick — so the `0x4011xxxx` region looks like a scheduler, and those
+   calls register the dispatcher as something periodic rather than opening a
+   port.
+
+   That leaves the line reader unfound. It is inside `0x400cf906` somewhere
+   between the prologue and the first comparison, and locating it wants a
+   proper Ghidra function pass rather than more disassembly by hand — Ghidra is
+   cleared for exactly this (`docs/mainos-image.md`).
 2. **Find what selects `PID 0xFFFF`**, and what returns the unit to normal.
    Until that is known, nothing about this mode is reversible on demand, which
    is the part that matters before anything is plugged in.
