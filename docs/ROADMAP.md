@@ -14,8 +14,8 @@ build, and what is already settled.
 | **B** | `depack(pack(x)) == x`, including adversarial input | **done** |
 | **C** | A rebuild with recompressed sections verifies, signature included | **done** |
 | **F** | The disassembler in use agrees with `objdump -m m68k:cfv4e` | **done** — Ghidra passes, Capstone fails |
-| **Recovery** | The Early Start-up Menu reflashes stock firmware | **not started — gates all hardware work** |
-| **D** | A recompressed but unchanged image boots | not started |
+| **Recovery** | The Early Start-up Menu reflashes stock firmware | **done 2026-09-08** — the way back is proven |
+| **D** | A recompressed but unchanged image boots | next — unblocked |
 | **E** | A patch we wrote is visible on the instrument | not started — patch is written and builds |
 
 A, B, C and F are `pytest`. Recovery, D and E need the instrument; the order
