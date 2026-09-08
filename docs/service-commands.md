@@ -45,19 +45,85 @@ Audio and sequencer: `#DUMP_AUDIO`, `#RECEIVE_AUDIO`, `#PLAY_STEREO`,
 UI test: `#START_UI_TEST`, `#ABORT_UI_TEST`, `#UI_TEST_POLL`, `#SHOW_MSG`,
 `#TEST_STATUS`, `#RESET_ARM`, `#RESET_POLL`, `#SHOW_TEST_COMPLETE_SIGN`.
 
-## What `#READ_SERIAL` gives back
+## `#READ_SERIAL`, disassembled — 2026-09-08
 
-The format strings sitting immediately after it:
+The string-pool reading below was upgraded to a code reading after the DNX
+session pointed out, correctly, that four strings sitting near each other is
+the order a compiler emitted literals in, not a binding. It is now bound.
+
+**The comparison is in the chain**, at `0x400d0338`, between `#DUMP_UI_CALIBRATION`
+and `#WRITE_SERIAL`:
 
 ```
-#READ_SERIAL
-%.14s
-SERIAL NUMBER CRC ERROR
-NO SERIAL NUMBER
+400d0338:  pea 0x402022a3        "#READ_SERIAL"
+400d033e:  movel %d2,%sp@-       the received line
+400d0340:  jsr %a4@              the comparator
+400d0346:  bnes 0x400d038a       no match -> try #WRITE_SERIAL
+400d0348:  movel %fp,%d7 ; addil #-128,%d7    d7 = fp-128, a local buffer
+400d0350:  movel %d7,%sp@- ; jsr %pc@(0x400cf532)   read_serial(&buf)
+400d035e:  tstl %d0
+400d0362:    d0 == 0   reply("%.14s
+
+", buf)
+400d0376:    d0 == -2  reply("SERIAL NUMBER CRC ERROR
+
+")
+400d0380:    otherwise reply("NO SERIAL NUMBER
+
+")
 ```
 
-So a **14-character serial**, CRC-protected, and two failure replies for a bad
-checksum and for an unprogrammed unit.
+`0x402022b0` **is** `"%.14s
+
+"` and it is passed with the buffer the getter
+filled. The 14 is now bound to the serial by code, not by adjacency.
+
+### The record, from `read_serial` at `0x400cf532`
+
+```
+400cf53a:  pea 0x402ebc3c ; pea 0x16 ; movel #0x3C0000,%sp@-
+400cf54a:  jsr 0x4012783a          read 22 bytes from offset 0x3C0000
+400cf550:  pea 0x4 ; pea 0x40201f12 ; pea 0x402ebc3c
+400cf560:  jsr 0x4016fc8c          compare the first 4 bytes against "SERI"
+400cf56c:  bnes -> return -1       no magic  -> NO SERIAL NUMBER
+400cf56e:  pea 0x16 ; pea 0x402ebc3c ; pea 0xffffffff
+400cf57c:  jsr %pc@(0x400cec84)    CRC-32 over all 22 bytes, init 0xFFFFFFFF
+400cf584:  cmpil #0xDEBB20E3,%d0
+400cf58a:  bnes -> return -2       bad CRC   -> SERIAL NUMBER CRC ERROR
+400cf590:  pea 0xe ; pea 0x402ebc40 ; movel %d3,%sp@-
+400cf59c:  jsr 0x4016fd7c          copy 14 bytes from +4 to the caller
+```
+
+So the stored record is **22 bytes**, and every field is accounted for:
+
+| Offset | Size | Field |
+|---|---|---|
+| +0 | 4 | magic `"SERI"` (the literal at `0x40201f12`) |
+| +4 | **14** | the serial, copied out and printed with `%.14s` |
+| +18 | 4 | CRC-32 |
+
+`0xDEBB20E3` is the standard CRC-32 residue for a message with its own CRC
+appended, which is what makes the check a single comparison over all 22 bytes.
+
+**The stored CRC must be little-endian for that residue to appear.** Fed
+big-endian the same 22 bytes yield `0xC7BF6731` instead. Checked against a
+synthetic record by the DNX session, 2026-09-08 — so the record is
+`"SERI"` + 14 bytes + **CRC-32 little-endian**. Worth noting because the CPU is
+big-endian and every other multi-byte field in this firmware is too; a
+little-endian field here suggests the record is written by something other than
+this firmware, most likely a factory tool. That last part is inference. The
+endianness is not: it is what makes the check the code performs succeed.
+
+**It lives at offset `0x3C0000`** (3,932,160), fetched by `0x4012783a` — a
+reader with 12 call sites across the image. Whether that offset is into flash,
+the MMC, or something else is **not yet established**; identifying
+`0x4012783a` would say.
+
+### What this still does not establish
+
+That any particular unit **has** a valid record. `NO SERIAL NUMBER` is a real
+branch, reached whenever the magic is absent, and nothing here has been run
+against hardware.
 
 Nearby, `#STATUS` is followed by a block that looks like a device identity
 report:
@@ -120,10 +186,13 @@ reply `0x400054b4` (takes a string pointer), and a precondition check at
 
 ### It is a line protocol, and that is a real constraint
 
-Every message in this region ends **`
-`** — `UNIT IN FACTORY TEST MODE
+Every message in this region ends **`
+
+`** — `UNIT IN FACTORY TEST MODE
+
 `,
-`WRONG UI CARD
+`WRONG UI CARD
+
 `, and the rest. CRLF-terminated text into a ~32-byte stack
 buffer is a **byte stream**, which is not how SysEx is framed.
 
@@ -144,12 +213,80 @@ called with `0x80008`) against data at `0x40370e9c` and `0x402ebe40`.
 Naming it means following those two calls into the RTOS layer. That is the
 remaining work, and it is still entirely offline.
 
+## The firmware carries a USB CDC-ACM device — found 2026-09-08
+
+Prompted by the DNX session finding a stale Windows PnP record for
+`VID_1935/PID_FFFF` with a Communications-class interface and no driver bound.
+That device is **in this firmware**, and its descriptors are complete.
+
+`0x402e1126` (high speed) and `0x402e1171` (full speed), both followed by the
+device descriptor `VID 0x1935 / PID 0xFFFF`, `bDeviceClass 0xEF` (Miscellaneous
+— an IAD composite):
+
+```
+IAD      first=0 count=2 class=0x02 sub=0x02 prot=0x01
+IFACE #0  class=0x02 CDC   sub=0x02 (ACM)  prot=0x01   1 endpoint
+   Header 1.10 / ACM / Union(0,1) / Call Management
+   EP 0x83  IN   interrupt   maxpkt 512 (64 at full speed)   notification
+IFACE #1  class=0x0a CDC-Data                          2 endpoints
+   EP 0x02  OUT  bulk        maxpkt 512 (64)
+   EP 0x82  IN   bulk        maxpkt 512 (64)
+```
+
+**The subclass is 0x02, Abstract Control Model** — the virtual-COM-port
+profile.
+
+A Windows PnP record on the author's machine shows a `PID_FFFF` device with
+subclass **0x01**, Direct Line Control. That is **not** a contradiction and was
+briefly written up here as one, wrongly. That record's `DeviceDesc` is
+`Elektron Digitone` with `REV_0001` — a Digitone 1 — while these descriptors
+are Digitone II 1.10E. A compatible id is built from what the device actually
+sent, so both readings are true of their own instrument. **A DN2 descriptor
+does not correct a DN1 enumeration.**
+
+The endpoint layout above is therefore a DN2 fact. Do not assume it for a DN1;
+that would need a DN1 image.
+
+The same descriptor set appears in the **`updater` section** (id 4, raw, loads
+at `0x80000400`) at `+0x799d`/`+0x79d7`, so the bootstrap image presents this
+interface too.
+
+For completeness, the other Elektron USB device descriptors in MAIN OS:
+`0x1034` (the DN2 as a normal MIDI device), `0x0b34` (Overbridge), `0x0134`
+(twice), `0x0004`, `0x001e`. Only `0xFFFF` has CDC interfaces; the rest are
+Audio/MIDI-Streaming.
+
+### What this does and does not establish
+
+**Established:** the firmware can present a USB CDC-ACM serial port under
+`PID 0xFFFF`, with the endpoints above, and the updater can too.
+
+**Not established:** that the `#COMMAND` parser is fed from that port. Two
+facts fitting each other is not a proven link — a CRLF line protocol reading
+into a 32-byte stack buffer, and a CDC-ACM interface in the same image, are
+strongly suggestive and nothing more. `0x400cf906` still has no identifiable
+caller. Also unknown: what puts a unit into `PID 0xFFFF` mode and what brings
+it back.
+
 ## What would settle it
 
-1. **Follow `0x40111264` and `0x40110fe2`** into the `0x4011xxxx` region to find
-   what registers `0x400cf906`. That names the transport.
-2. **Confirm or refute the serial reading** — if it is a UART, there should be
-   a baud rate and a pin configuration near the driver.
+1. **Find what fills the command buffer.** Both of the dispatcher's entry calls
+   turned out to be dead ends: `0x40110fe2` stores its two arguments into
+   globals at `0x443dde20`/`0x443dde24` and returns, and `0x40111264` stores one
+   into `0x40285858` and returns. Two-instruction setters, not channel opens.
+   The function immediately after them decrements counters at `0x443de2e0`,
+   `0x443de2dc`, `0x443de2d8` and increments `0x464b2bb0`, which is the shape of
+   a timer tick — so the `0x4011xxxx` region looks like a scheduler, and those
+   calls register the dispatcher as something periodic rather than opening a
+   port.
+
+   That leaves the line reader unfound. It is inside `0x400cf906` somewhere
+   between the prologue and the first comparison, and locating it wants a
+   proper Ghidra function pass rather than more disassembly by hand — Ghidra is
+   cleared for exactly this (`docs/mainos-image.md`).
+2. **Find what selects `PID 0xFFFF`**, and what returns the unit to normal.
+   Until that is known, nothing about this mode is reversible on demand, which
+   is the part that matters before anything is plugged in.
 3. **Then, and only then, `#HELLO`.** It takes no arguments, changes nothing,
    and a reply of `HOW DO YOU DO?` would confirm the whole picture at zero risk.
 
