@@ -105,6 +105,15 @@ So the stored record is **22 bytes**, and every field is accounted for:
 `0xDEBB20E3` is the standard CRC-32 residue for a message with its own CRC
 appended, which is what makes the check a single comparison over all 22 bytes.
 
+**The stored CRC must be little-endian for that residue to appear.** Fed
+big-endian the same 22 bytes yield `0xC7BF6731` instead. Checked against a
+synthetic record by the DNX session, 2026-09-08 — so the record is
+`"SERI"` + 14 bytes + **CRC-32 little-endian**. Worth noting because the CPU is
+big-endian and every other multi-byte field in this firmware is too; a
+little-endian field here suggests the record is written by something other than
+this firmware, most likely a factory tool. That last part is inference. The
+endianness is not: it is what makes the check the code performs succeed.
+
 **It lives at offset `0x3C0000`** (3,932,160), fetched by `0x4012783a` — a
 reader with 12 call sites across the image. Whether that offset is into flash,
 the MMC, or something else is **not yet established**; identifying
