@@ -49,9 +49,19 @@ So a fourth LFO may need no storage-version bump at all. **This is evidence,
 not proof.** Reserved bytes say Elektron left room; they do not say the runtime
 can use it.
 
-### The first question, which decides how big this is
+### The first question is answered: it is a table
 
-**Is the LFO count a constant the code reads, or is it structural?**
+**`docs/lfo-parameters.md`.** Each LFO is a block of ten 60-byte records in one
+flat array, and the three blocks are identical but for the page label, a group
+number, the ids and the controller numbers. Nothing is hard-coded to three.
+
+The constraint is the id space: LFO3 ends at id 24 and Chorus starts at 25, so
+a fourth block cannot simply continue the sequence. What else indexes that
+space is the next thing to find out, along with whether anything stores the
+table's length.
+
+The original framing, kept because it is still the right question to ask of the
+*engine* as opposed to the table:
 
 Find the code that indexes the `30 + 8*p + 2*lfo` grid and look at the `3`:
 
