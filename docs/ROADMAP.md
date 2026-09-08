@@ -54,10 +54,19 @@ can use it.
 flat array, and the three blocks are identical but for the page label, a group
 number, the ids and the controller numbers. Nothing is hard-coded to three.
 
-The constraint is the id space: LFO3 ends at id 24 and Chorus starts at 25, so
-a fourth block cannot simply continue the sequence. What else indexes that
-space is the next thing to find out, along with whether anything stores the
-table's length.
+The constraint is the id space, but **not** in the way this paragraph first
+said. It claimed LFO3 ends at 24 and Chorus starts at 25, so a fourth block
+could not continue the sequence. Walking the whole array killed that: it is 320
+records covering the entire instrument, and 68 of the 100 ids in use are
+claimed by more than one group. Chorus's 25 and LFO3's 24 are not in one
+sequence.
+
+The real constraint is that one LFO4 block is shared by every track type that
+has LFOs, so its eight ids must be free in all of them at once. That points at
+`100-107`. It stays arithmetic until we know what consumes the table and
+whether the id is bounded -- and **nothing in MAIN OS holds the table's
+address**, so the consumer is still unidentified. `dnfw params --ids` reports
+the space; `docs/lfo-parameters.md` carries the evidence.
 
 The original framing, kept because it is still the right question to ask of the
 *engine* as opposed to the table:
