@@ -120,10 +120,13 @@ reply `0x400054b4` (takes a string pointer), and a precondition check at
 
 ### It is a line protocol, and that is a real constraint
 
-Every message in this region ends **`
-`** — `UNIT IN FACTORY TEST MODE
+Every message in this region ends **`
+
+`** — `UNIT IN FACTORY TEST MODE
+
 `,
-`WRONG UI CARD
+`WRONG UI CARD
+
 `, and the rest. CRLF-terminated text into a ~32-byte stack
 buffer is a **byte stream**, which is not how SysEx is framed.
 
@@ -144,12 +147,60 @@ called with `0x80008`) against data at `0x40370e9c` and `0x402ebe40`.
 Naming it means following those two calls into the RTOS layer. That is the
 remaining work, and it is still entirely offline.
 
+## The firmware carries a USB CDC-ACM device — found 2026-09-08
+
+Prompted by the DNX session finding a stale Windows PnP record for
+`VID_1935/PID_FFFF` with a Communications-class interface and no driver bound.
+That device is **in this firmware**, and its descriptors are complete.
+
+`0x402e1126` (high speed) and `0x402e1171` (full speed), both followed by the
+device descriptor `VID 0x1935 / PID 0xFFFF`, `bDeviceClass 0xEF` (Miscellaneous
+— an IAD composite):
+
+```
+IAD      first=0 count=2 class=0x02 sub=0x02 prot=0x01
+IFACE #0  class=0x02 CDC   sub=0x02 (ACM)  prot=0x01   1 endpoint
+   Header 1.10 / ACM / Union(0,1) / Call Management
+   EP 0x83  IN   interrupt   maxpkt 512 (64 at full speed)   notification
+IFACE #1  class=0x0a CDC-Data                          2 endpoints
+   EP 0x02  OUT  bulk        maxpkt 512 (64)
+   EP 0x82  IN   bulk        maxpkt 512 (64)
+```
+
+**The subclass is 0x02, Abstract Control Model** — the virtual-COM-port
+profile — not the 0x01 Direct Line Control the Windows PnP record suggested.
+A stale registry entry is weaker evidence than the descriptor itself.
+
+The same descriptor set appears in the **`updater` section** (id 4, raw, loads
+at `0x80000400`) at `+0x799d`/`+0x79d7`, so the bootstrap image presents this
+interface too.
+
+For completeness, the other Elektron USB device descriptors in MAIN OS:
+`0x1034` (the DN2 as a normal MIDI device), `0x0b34` (Overbridge), `0x0134`
+(twice), `0x0004`, `0x001e`. Only `0xFFFF` has CDC interfaces; the rest are
+Audio/MIDI-Streaming.
+
+### What this does and does not establish
+
+**Established:** the firmware can present a USB CDC-ACM serial port under
+`PID 0xFFFF`, with the endpoints above, and the updater can too.
+
+**Not established:** that the `#COMMAND` parser is fed from that port. Two
+facts fitting each other is not a proven link — a CRLF line protocol reading
+into a 32-byte stack buffer, and a CDC-ACM interface in the same image, are
+strongly suggestive and nothing more. `0x400cf906` still has no identifiable
+caller. Also unknown: what puts a unit into `PID 0xFFFF` mode and what brings
+it back.
+
 ## What would settle it
 
-1. **Follow `0x40111264` and `0x40110fe2`** into the `0x4011xxxx` region to find
-   what registers `0x400cf906`. That names the transport.
-2. **Confirm or refute the serial reading** — if it is a UART, there should be
-   a baud rate and a pin configuration near the driver.
+1. **Follow `0x40111264`** into the `0x4011xxxx` region to find what registers
+   `0x400cf906`, and whether its input comes from the CDC-Data bulk OUT
+   endpoint. `0x40110fe2` is a dead end — it is a two-line setter that stores
+   its arguments into globals at `0x443dde20` and `0x443dde24`.
+2. **Find what selects `PID 0xFFFF`**, and what returns the unit to normal.
+   Until that is known, nothing about this mode is reversible on demand, which
+   is the part that matters before anything is plugged in.
 3. **Then, and only then, `#HELLO`.** It takes no arguments, changes nothing,
    and a reply of `HOW DO YOU DO?` would confirm the whole picture at zero risk.
 
