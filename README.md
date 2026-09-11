@@ -22,8 +22,9 @@ one Elektron publish for your instrument.
 | Declarative patches with guards | done |
 | A disassembler validated against objdump | done — Gate F; **Ghidra passes**, Capstone fails |
 | Recovery path proven on hardware | done — stock reflash through the Early Start-up Menu |
-| A patch confirmed on the instrument | not yet — Gate D then Gate E, both unblocked |
-| A fourth LFO | Phase 2 |
+| A patch confirmed on the instrument | **done** — Gates D and E boot through the normal update path |
+| Our images through the recovery path | **open** — they stall at ~80%; fix built, awaiting a test (`docs/flashing.md`) |
+| A fourth LFO | Phase 2 — the parameter table is mapped; what reads it is not |
 
 ## Install and run
 
