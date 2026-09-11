@@ -113,12 +113,16 @@ new-code the feature cannot avoid.
 
 Each stage is independently flashable and observable, so a failure localises.
 
-1. **Repurpose the table (same-length).** Rewrite ten ERR records as LFO4's
-   parameters, copied field-for-field from LFO3 with a `LFO4` label and fresh
-   CC/NRPN. The parameters now *exist* at ids 1..12; nothing shows them yet.
-   Verify with `dnfw` that the image is valid, and — once flashed — that a DNX
-   read of a saved project is unaffected and no existing page changed. This is a
-   pure `patch/` job, no caves.
+1. **Repurpose the table (same-length).** — **DONE 2026-09-11**, offline.
+   `scripts/build_lfo4_test.py` clones LFO3's ten records into the dead ERR slots
+   (ids 1-5,7-9,11,12), clearing MIDI CC/NRPN so nothing collides, and builds
+   `00_Resources/02_Builds/lfo4-test_DN2_1.10E.syx`. Verified: 277 bytes change,
+   all inside the ids 1-12 region; LFO3 untouched; every integrity field
+   reproduces (content checksum `0xb1cf1c89`, HMAC, padding, window). A fourth
+   LFO's parameter block now *exists* in the table. Nothing shows it yet (Stage
+   2) and it is not proven to modulate (the engine gate). Flashing it is a
+   **safety and mechanism test**: confirm the device still boots and its existing
+   pages are unchanged, which de-risks repurposing on real hardware.
 2. **Add the fourth page-view.** An `LfoPageView` instance whose id list names the
    ten repurposed ids, plus the SPH-remap id (§3). This is the new-code step.
 3. **Wire the `[MOD]` navigation** to the fourth page — the stage that makes it
