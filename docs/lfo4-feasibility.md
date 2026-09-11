@@ -161,12 +161,23 @@ Two things are now established about the engine, narrowing the gate:
   LFO block). That is one of the per-LFO count sites this document predicted —
   the kind of `< 3` bound a fourth LFO must raise.
 
-What is left is to find the **per-tick generator loop** — where each LFO's phase
-is advanced and its output computed — and confirm its count is a raisable bound
-(a `< 3` / `moveq #3`) rather than three unrolled instances. The leads: the
-`0x40035f32` handler's `< 3` neighbourhood, and any read of a sound object at
-`30 + 2*lfo` in a loop. This is the make-or-break to finish before the UI stage,
-but it is now a ColdFire read, not a cross-CPU one.
+The read path is now mapped end to end, which locates the generator by
+elimination. Drawing a parameter goes: page renderer `FUN_40016f38` → value
+getter `FUN_40064786` → resolver `FUN_400635d0`, and the resolver **reads the
+current, already-modulated value out of the track/sound engine state** — an
+object reached as `page_view[0x1a]` (the engine), with the value living far
+inside it (`+0x4f2e0`, read via a `+0x28` vtable method). So the modulated value
+is *stored* in engine state; the LFO computation that *writes* it runs on a
+separate real-time tick.
+
+**That write-side tick is the generator, and it is the remaining target.** It
+advances each LFO's phase, computes its waveform, scales by depth, and writes the
+modulated value into `page_view[0x1a]`'s state. To find it: identify the class of
+`page_view[0x1a]` (the per-track sound engine) and read its update method, or
+find what writes the `+0x4f2e0` state region. Confirm there its LFO count is a
+raisable bound (`< 3` / `moveq #3`) rather than three unrolled instances — and
+`0x40035f32`'s `if (uVar1 < 3)` beside `case 0x1e` is a first such site. It is a
+ColdFire read throughout, not cross-CPU.
 
 ## What is not yet known, and is next
 
