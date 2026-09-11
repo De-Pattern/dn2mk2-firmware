@@ -1,5 +1,9 @@
 # The MAIN OS image
 
+> The runtime memory layout — code, constants, the .data/BSS
+> initializer, and the SDRAM at `0x80000000` where mutable state lives — is in
+> `docs/memory-map.md`.
+
 Section id 3 of the ELE3 container: the code the instrument runs.
 
 | | DN2 1.10E | DN1 1.42A |
