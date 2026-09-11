@@ -49,6 +49,29 @@ wsl -u root apt-get install -y binutils-m68k-linux-gnu
 `dnfw` finds it there and calls through `wsl`, translating the temporary file
 to a `/mnt/<drive>/...` path, so nothing else has to care where it lives.
 
+### Ghidra runs natively on Windows — no WSL needed for it
+
+Only objdump needs WSL. Ghidra's headless analyzer is Java and runs directly:
+
+```
+C:\Tools\jdk-21.0.12.1+1              JDK 21 (Temurin), for JAVA_HOME
+C:\Tools\ghidra_12.1.3_PUBLIC         set as GHIDRA_HOME
+```
+
+`ghidraun-gate-f.bat` is the Windows twin of `run-gate-f.sh` — same scripts,
+same `-noanalysis` linear sweep, but through `analyzeHeadless.bat` because the
+shell launcher mishandles a Windows JDK path. `ghidranalyze.bat` runs a full
+auto-analysis pass and keeps the project, so `DecompileFunction.java` can read a
+routine afterwards. Two gotchas met while setting this up, both recorded so they
+are not met again: `launch.properties` must be plain UTF-8 with **no BOM**, and
+a `%~dp0` script path ends in a backslash that will escape the following quote
+in a `.bat` unless it is stripped.
+
+**Gate F still gates everything**, and its reference is objdump, so a section is
+not cleared for reading until `dnfw validate-disasm` agrees on it — which needs
+WSL. Ghidra passing on MAIN OS (below) does not automatically clear the
+bootstrap section: different bytes, and its load base is not yet pinned.
+
 ## Gate F — CLOSED 2026-09-08
 
 **The rule: no reverse-engineering starts on a decoder that has not been
