@@ -127,6 +127,30 @@ code that receives, checks and writes a recovery image. It needs the validated
 Ghidra setup (`docs/mainos-image.md`, Gate F), which lives on the machine with
 WSL and objdump.
 
+### A first look at the flash routine — 2026-09-11, PRE–GATE-F
+
+Ghidra now runs on the flashing-less machine (`docs/mainos-image.md`), and a
+first decompile of the bootstrap was taken. **It is not yet trustworthy**: Gate
+F has not cleared this section, and the load base is not pinned (references
+reach below the tried base of `0x80010000`, so the payload very likely loads
+lower). Recorded as a lead, not a fact.
+
+The section-flashing routine reads: read a section, decompress it to RAM,
+**CRC-32 it** — the compare constant is `0xDEBB20E3`, the standard CRC-32
+residue, the same one the serial record uses — a **version check**, then erase
+and program flash in **512-byte chunks** with a percentage bar. It carries two
+hard size caps (`< 0x10001` compressed, `< 0xf001` decompressed), so *this*
+routine flashes a small section, not the 3 MB MAIN OS. **The large-section path
+is the one that stalls at ~80% and is the one to read** — after Gate F clears
+the section and the load base is fixed.
+
+If the CRC is computed the way the caps suggest — a running residue to
+`0xDEBB20E3` over the decompressed bytes — then a decompressor that produced
+even one wrong byte (a far match past a small window, say) would fail the CRC,
+not hang. A hang points instead at the copy or decompress step never
+terminating, which is where the unpadded-length hypothesis lives.
+
+
 ## When Transfer will not send
 
 Elektron Transfer logs to
