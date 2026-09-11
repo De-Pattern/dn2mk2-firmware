@@ -134,11 +134,20 @@ parameters exist, show, and be editable. Whether a fourth LFO actually
 *modulates* is a separate question in the sound engine. The DN2's synthesis runs
 on a SHARC DSP (the `Digisharc` classes are its interface), and how many LFO
 generators a voice runs — a constant, or an array — is not yet established.
-DNX found the persisted sound object reserves a fourth LFO slot
-(`30 + 8*param + 2*lfo`, the fourth unused), so the *storage* has room; the
-*engine* that reads it is the unknown. **This is the first thing to settle
-before committing to a build**, because if the engine cannot run a fourth LFO,
-the feature is cosmetic.
+DNX verified from hardware captures that the persisted sound object's LFO grid
+is `30 + 8*param + 2*lfo`, with LFO1/2/3 at strides 30/32/34 and **the fourth
+slot of each group of eight unused** — "there is room for a fourth LFO here too"
+(`DNX/docs/dn2-format.md`). So the *storage* side is settled: a fourth LFO's
+settings already have a reserved home in every sound.
+
+What is left is one read: the MAIN OS code that consumes that grid — the per-tick
+modulation update that advances each LFO's phase, computes its output, and
+applies it to the destination. If it loops `lfo` 0..2, a fourth is a bound
+change; if it reads all four slots and ignores the last, less. **This is the
+first thing to settle before committing to a build**, because if the engine
+cannot be made to run a fourth LFO, the parameters would show but not modulate.
+The clean way in is to find where a sound object is read at offset `30 + 2*lfo`
+in a loop, or the destination-apply that consumes an LFO's value.
 
 ## What is not yet known, and is next
 
