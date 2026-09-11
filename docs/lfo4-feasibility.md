@@ -8,45 +8,47 @@ cross-checked against the bytes.
 
 ## Verdict
 
-**Feasible in principle, but it is a code-cave and relocation project, not a
-patch.** It cannot be done as the same-length edits the current `patch/` model
-supports. A working build needs: relocating the 320-record parameter table to
-free space, repointing ~56 base references, raising ~43 bound immediates,
-patching the hardcoded per-LFO id sites, and constructing and wiring a fourth
-page-view. That is several stages, each verifiable on its own, and it is
-realistically multi-session work. No part of it looks impossible; the cost is
-breadth and the need to add code, not any single hard wall.
+**Feasible, and the parameter table no longer needs relocating** — that was the
+first read, and a better path was found. The table has **15 unused "ERR" filler
+records** (ids 1-5, 7-9, 11-15, 17-18), none referenced by address, reachable
+only by id-indexing. A page-view's id list can point to any ids, so LFO4 can
+**repurpose 10 of these dead slots in place**: same-length edits to ten 60-byte
+records, no relocation, no base repointing, no bound changes. The hardest cost in
+the original plan is gone.
+
+What remains is real but smaller: rewrite ten ERR records as LFO4's parameters
+(copied from LFO3, relabelled), add a fourth page-view whose id list names those
+ten ids, wire the `[MOD]` navigation to it, and confirm the **audio engine** can
+run a fourth LFO at all. The last is the true open gate; the rest is patch-shaped.
 
 ## The change set, itemised
 
-### 1. Grow the parameter table — the hardest part
+### 1. The parameter table — repurpose, do not grow
 
-The table is a flat array, `record[id] = 0x401e29d0 + id*60`, ids 1..320, and it
-ends exactly at id 320. **There is no slack after it** — the bytes immediately
-past the last record are another lookup table. So ten new records (ids 321–330,
-+600 bytes) cannot be appended in place.
+The table is a flat array, `record[id] = 0x401e29d0 + id*60`, ids 1..320. It
+ends at 320 with no slack, so it cannot be *grown*. It does not need to be. Its
+head carries **15 unused records** whose short name is `ERR` — ids 1-5, 7-9,
+11-15, 17-18 — placeholders next to the real head entries (Machine Type id6,
+Track Level id10, Global Mix Mode id16). Each is a valid 60-byte record that
+just displays `ERR`, and **none is referenced by address** (only by id-index),
+so overwriting one changes nothing but what that id resolves to.
 
-The table must move. It is ~19.3 KB (321 × 60), and **56 sites in code hold an
-absolute literal pointing into its base** (53 at `0x401e29a0`, plus a few
-neighbours). Relocating it means:
+LFO4 needs ten parameter records. Take ten of the fifteen ERR slots — say ids
+1,2,3,4,5,7,8,9,11,12 — and rewrite each with LFO3's field layout: the same
+handler pointers, ranges and flags, a `LFO4` page label, and fresh controller
+and NRPN numbers. Ten same-length record edits. The page-view (below) points its
+id list at those ten ids; they need not be contiguous.
 
-- copy the table into a code cave (free space in the section),
-- append the 10 LFO4 records,
-- repoint all 56 base literals to the new address,
-- raise the bound (below).
+This removes relocation, the 56 base repoints, and the bound sweep entirely. The
+one caveat: confirm no existing page lists these ids (none should — they are the
+`ERR` fallback), which a hardware boot plus a DNX project read settles.
 
-Alternatively the table could stay and only a *fourth LFO's* ten records live in
-a cave, reached by a special-cased base when `id > 320` — but that means editing
-every accessor to branch, which is more sites than relocating the base. Moving
-the whole table is the cleaner option.
+### 2. The length bound — not touched
 
-### 2. Raise the length bound — ~43 sites
-
-The table length is not stored; it is a bounds immediate compiled into every
-accessor: `cmpi #321` at 32 sites, `#320` at 11, and one `#311`. Every one that
-guards an id in 321..330 must be raised (`321→331`, `320→330`). Miss one and the
-parameters it guards clamp to id 0 and vanish. Finding them is mechanical — they
-all sit beside a `lea` of the table base — but it must be exhaustive.
+Because LFO4 reuses ids 1..18 rather than adding 321..330, every id stays inside
+the existing `< 321` bound. The ~43 bound immediates (`#321`×32, `#320`×11,
+`#311`×1) need no change at all. This is the whole benefit of repurposing over
+appending.
 
 ### 3. The per-LFO hardcoded id sites
 
@@ -64,9 +66,9 @@ anywhere else that enumerates the three (the p-lock id derivation DNX found,
 (`0x400634ea`) reads the page's id list indirectly through instance fields at
 offsets 124 and 144 — so each LFO page carries (a pointer to) its own list of 8
 ids. LFO1's is 75–82-ish, LFO2's 85–…, LFO3's 95–…. A fourth page needs its own
-`LfoPageView` instance whose list points at the ten new ids (321–330), plus its
-page label. Constructing an object and its descriptor at boot is new code and
-new data — a cave.
+`LfoPageView` instance whose list points at the ten new ids (the ten repurposed ERR ids), plus its
+page label. Constructing an object and its descriptor at boot is the main piece
+of genuinely new code and data — a cave, or an unused existing structure.
 
 ### 5. Wire the fourth `[MOD]` page
 
@@ -81,35 +83,48 @@ shrinks a lot; if not, it is more new code.
 
 Each stage is independently flashable and observable, so a failure localises.
 
-1. **Bounds sweep, no growth.** Find and list all ~43 bound sites; verify by
-   raising them to `#331` with the table unchanged and confirming the instrument
-   still boots and behaves (nothing uses ids 321–330 yet, so this is inert — it
-   proves the site list is complete and correct).
-2. **Relocate the table** to a cave, repoint the 56 bases, no new records.
-   Byte-for-byte identical behaviour is the pass condition — the table is just
-   somewhere else.
-3. **Append the 10 records** (ids 321–330), copied from an LFO block with a new
-   page label. They exist but nothing shows them yet; check with `dnfw` that the
-   image is valid and DNX that a saved project is unaffected.
-4. **Add the fourth page-view** and its id list in a cave, and the SPH-remap id.
-5. **Wire the MOD navigation** to the fourth page. This is the stage that makes
-   it visible and is the real test.
+1. **Repurpose the table (same-length).** Rewrite ten ERR records as LFO4's
+   parameters, copied field-for-field from LFO3 with a `LFO4` label and fresh
+   CC/NRPN. The parameters now *exist* at ids 1..12; nothing shows them yet.
+   Verify with `dnfw` that the image is valid, and — once flashed — that a DNX
+   read of a saved project is unaffected and no existing page changed. This is a
+   pure `patch/` job, no caves.
+2. **Add the fourth page-view.** An `LfoPageView` instance whose id list names the
+   ten repurposed ids, plus the SPH-remap id (§3). This is the new-code step.
+3. **Wire the `[MOD]` navigation** to the fourth page — the stage that makes it
+   visible, and the real UI test.
+4. **Confirm the engine** (§ below) actually generates a fourth LFO and applies
+   it to the chosen destination. If the audio engine is hardcoded to three LFOs,
+   the parameters will show but not modulate — that is the gate to prove before
+   calling it done.
 
-Stages 1–3 are within reach with the tooling in hand plus a code-cave applier
-(`patch/cave.py`, still to be built — the roadmap's Phase-2 mechanism). Stages 4
-and 5 need the page-view construction and MOD navigation read first.
+Stage 1 is within reach right now with the existing patch model. Stages 2–3 need
+a code-cave applier (`patch/cave.py`, the roadmap's Phase-2 mechanism) and the
+page-view / MOD-navigation reads below. Stage 4 is the make-or-break.
+
+## The audio engine — the true open gate
+
+Everything above is the **control and UI** side: making a fourth LFO's
+parameters exist, show, and be editable. Whether a fourth LFO actually
+*modulates* is a separate question in the sound engine. The DN2's synthesis runs
+on a SHARC DSP (the `Digisharc` classes are its interface), and how many LFO
+generators a voice runs — a constant, or an array — is not yet established.
+DNX found the persisted sound object reserves a fourth LFO slot
+(`30 + 8*param + 2*lfo`, the fourth unused), so the *storage* has room; the
+*engine* that reads it is the unknown. **This is the first thing to settle
+before committing to a build**, because if the engine cannot run a fourth LFO,
+the feature is cosmetic.
 
 ## What is not yet known, and is next
 
+- **The engine LFO count** (above) — the make-or-break.
 - Does the `[MOD]` navigation already allow a fourth page? (Read the MOD-key
-  handler and the page-count it uses.)
-- Where do the LFO page descriptors (the id lists at instance fields 124/144)
-  live, and how are the three instances constructed? (Trace the two `LfoPageView`
-  vptr writers, `0x40101306` and `0x401a2aea`.)
-- Is there enough contiguous free space in MAIN OS for a ~20 KB table cave plus
-  a page-view? (Scan for a run of zero/padding bytes.)
+  handler and the page count it uses. The premise that Elektron left a vacant
+  slot, if true, shrinks Stage 3.)
+- How a `LfoPageView` instance is constructed and given its id list (the fields
+  at offsets 124/144), so a fourth can be built — trace the vptr writers
+  `0x40101306` and `0x401a2aea`.
 
-Answering these turns the staged plan into concrete addresses. None of it
-changes the verdict: achievable, sizable, and the right first build is Stage 1 —
-the bounds sweep — because it is inert, provable, and the foundation for the
-rest.
+The verdict stands and is better than the first read: the table is now a
+same-length patch, not a relocation. The remaining work is a page-view, the MOD
+wiring, and — first — proving the engine can run a fourth LFO.
