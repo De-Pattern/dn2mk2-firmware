@@ -149,14 +149,24 @@ slot of each group of eight unused** — "there is room for a fourth LFO here to
 (`DNX/docs/dn2-format.md`). So the *storage* side is settled: a fourth LFO's
 settings already have a reserved home in every sound.
 
-What is left is one read: the MAIN OS code that consumes that grid — the per-tick
-modulation update that advances each LFO's phase, computes its output, and
-applies it to the destination. If it loops `lfo` 0..2, a fourth is a bound
-change; if it reads all four slots and ignores the last, less. **This is the
-first thing to settle before committing to a build**, because if the engine
-cannot be made to run a fourth LFO, the parameters would show but not modulate.
-The clean way in is to find where a sound object is read at offset `30 + 2*lfo`
-in a loop, or the destination-apply that consumes an LFO's value.
+Two things are now established about the engine, narrowing the gate:
+
+- **It is on ColdFire, not the SHARC.** When an LFO modulates a parameter the
+  DN2 shows that value moving on the parameter page, and the page is drawn by
+  MAIN OS — so the modulated value, and therefore the LFO computation, lives on
+  the ColdFire side that the tooling reads. The worst case (a SHARC-only engine
+  needing a different disassembler) is ruled out.
+- **A hardcoded 3-LFO site is found in the engine path.** The LFO speed handler
+  `0x40035f32` carries `if (uVar1 < 3)` beside its `case 0x1e` (offset 30, the
+  LFO block). That is one of the per-LFO count sites this document predicted —
+  the kind of `< 3` bound a fourth LFO must raise.
+
+What is left is to find the **per-tick generator loop** — where each LFO's phase
+is advanced and its output computed — and confirm its count is a raisable bound
+(a `< 3` / `moveq #3`) rather than three unrolled instances. The leads: the
+`0x40035f32` handler's `< 3` neighbourhood, and any read of a sound object at
+`30 + 2*lfo` in a loop. This is the make-or-break to finish before the UI stage,
+but it is now a ColdFire read, not a cross-CPU one.
 
 ## What is not yet known, and is next
 
