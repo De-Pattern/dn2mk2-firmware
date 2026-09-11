@@ -119,10 +119,13 @@ Each stage is independently flashable and observable, so a failure localises.
    `00_Resources/02_Builds/lfo4-test_DN2_1.10E.syx`. Verified: 277 bytes change,
    all inside the ids 1-12 region; LFO3 untouched; every integrity field
    reproduces (content checksum `0xb1cf1c89`, HMAC, padding, window). A fourth
-   LFO's parameter block now *exists* in the table. Nothing shows it yet (Stage
-   2) and it is not proven to modulate (the engine gate). Flashing it is a
-   **safety and mechanism test**: confirm the device still boots and its existing
-   pages are unchanged, which de-risks repurposing on real hardware.
+   LFO's parameter block now *exists* in the table, **labelled "LFO4"** -- an
+   `LFO4` string was written into a verified-safe slot of unreferenced padding
+   (`0x4026eff6`) and the block's page-label pointers repointed to it, so the
+   records read as LFO4 rather than an LFO3 clone. Nothing displays them yet
+   (Stage 2) and they are not proven to modulate (the engine gate). Flashing it
+   is a **safety and mechanism test**: confirm the device still boots and its
+   existing pages are unchanged.
 2. **Add the fourth page-view.** An `LfoPageView` instance whose id list names the
    ten repurposed ids, plus the SPH-remap id (§3). This is the new-code step.
 3. **Wire the `[MOD]` navigation** to the fourth page — the stage that makes it
@@ -135,6 +138,24 @@ Each stage is independently flashable and observable, so a failure localises.
 Stage 1 is within reach right now with the existing patch model. Stages 2–3 need
 a code-cave applier (`patch/cave.py`, the roadmap's Phase-2 mechanism) and the
 page-view / MOD-navigation reads below. Stage 4 is the make-or-break.
+
+## Code-cave space — a real constraint on the UI stage
+
+Stage 2 (a page-view, and any new code) needs free space to inject into, and the
+obvious free space is not free. MAIN OS ends in a **64,908-byte run of zeros
+from `0x402e1bf4`, but that is BSS** -- zero-initialised runtime RAM, with 102 of
+its addresses referenced by code (e.g. `0x402e2000` from `0x40000460`).
+Overwriting it corrupts runtime state, and appending after it risks colliding
+with the heap. So there is no large safe cave in the trailing zeros, and growing
+the section needs the MAIN OS memory map read first.
+
+What *is* usable: **small runs of unreferenced padding inside the data region**
+(before the BSS) -- e.g. ~1 KB zero runs around `0x4026e000`, with no code
+references. The `LFO4` string above lives in one (`0x4026eff6`), proving the
+technique. These are big enough for strings and small tables, but a full
+page-view instance is a larger ask that the memory-map read must place safely.
+`patch/cave.py` should therefore distinguish unreferenced padding (safe for
+small data) from BSS (never) and from a section-grow (needs the memory map).
 
 ## The audio engine — the true open gate
 

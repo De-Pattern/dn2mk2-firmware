@@ -38,6 +38,12 @@ TABLE = 0x401E29D0  # record[id] = TABLE + id*60  (docs/parameter-table-consumer
 RECORD = 60
 CTRL_OFF = 40  # MIDI controller field (0xffffffff = unassigned)
 NRPN_OFF = 44
+PAGE_OFF = 56  # page-label string pointer (="LFO3" in a cloned LFO3 record)
+
+# A safe slot for a new "LFO4" string: 16 zero bytes of unreferenced padding in
+# the data region (before the BSS at 0x402e1bf4), verified to have no code
+# references. Writing 5 bytes here relabels the block without a code cave.
+LFO4_STR_ADDR = 0x4026EFF6
 
 LFO3_IDS = list(range(95, 105))          # the block we clone
 TARGET_IDS = [1, 2, 3, 4, 5, 7, 8, 9, 11, 12]  # dead ERR slots to repurpose
@@ -66,7 +72,14 @@ def main() -> int:
         clone = bytearray(content[rec_offset(src): rec_offset(src) + RECORD])
         struct.pack_into(">I", clone, CTRL_OFF, 0xFFFFFFFF)  # clear MIDI CC
         struct.pack_into(">I", clone, NRPN_OFF, 0xFFFFFFFF)  # clear NRPN
+        struct.pack_into(">I", clone, PAGE_OFF, LFO4_STR_ADDR)  # relabel page -> "LFO4"
         content[rec_offset(tid): rec_offset(tid) + RECORD] = clone
+
+    # Write the "LFO4" string into the unreferenced padding slot.
+    so = LFO4_STR_ADDR - BASE
+    if content[so: so + 8] != bytes(8):
+        raise SystemExit(f"string slot 0x{LFO4_STR_ADDR:08x} is not free -- refusing")
+    content[so: so + 5] = b"LFO4" + bytes(1)
 
     replacement = compress(section.id, section.dest, bytes(content))
     syx = fwbuild.build(firmware, {MAIN_OS: replacement})
