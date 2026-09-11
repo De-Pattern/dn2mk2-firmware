@@ -143,10 +143,10 @@ page-view / MOD-navigation reads below. Stage 4 is the make-or-break.
 
 Stage 2 (a page-view, and any new code) needs free space to inject into, and the
 obvious free space is not free. MAIN OS ends in a **64,908-byte run of zeros
-from `0x402e1bf4`, but that is BSS** -- zero-initialised runtime RAM, with 102 of
-its addresses referenced by code (e.g. `0x402e2000` from `0x40000460`).
-Overwriting it corrupts runtime state, and appending after it risks colliding
-with the heap. So there is no large safe cave in the trailing zeros, and growing
+from `0x402e1bf4`, but that is the `.data`/BSS initializer** -- the startup
+routine copies `0x402e2000` onward to SDRAM at `0x80000000` and zero-fills BSS
+there (`docs/memory-map.md`). Overwriting it changes the program's initial RAM
+state, and appending after it risks the heap that lives above the SDRAM data. So there is no large safe cave in the trailing zeros, and growing
 the section needs the MAIN OS memory map read first.
 
 What *is* usable: **small runs of unreferenced padding inside the data region**
