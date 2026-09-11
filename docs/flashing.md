@@ -73,6 +73,60 @@ photograph the screen.
 That closes Phase 1: unpack, modify, repack, re-sign, flash, observe, as a loop
 that can be run again.
 
+**Both passed, through the normal update path** — Transfer's drop over USB to
+a running instrument, not the Early Start-up Menu. Gate D booted and behaved as
+stock; Gate E booted and `SETTINGS` shows `DNFW ALIVE!`. Phase 1 is closed.
+
+## Two routes, and they are not equally forgiving
+
+| | Normal update | Recovery |
+|---|---|---|
+| how | Transfer, drag the `.syx` onto a running device over USB | Early Start-up Menu, `TRIG 4`, DIN MIDI |
+| who receives | the running MAIN OS | the **bootstrap** — section 2 of the last OS flashed |
+| works when MAIN OS is broken | no | **yes — the only route that does** |
+| accepted Gates D and E | **yes** | **no — stalls at ~80%** |
+
+The recovery route is the one that matters if a build ever fails to boot, so an
+image that only the normal route accepts is not safe to experiment with.
+
+## Recovery stalls on our images — OPEN
+
+Reported 2026-09-11. Stock 1.10E through the Early Start-up Menu completes
+(2026-09-08). Gates D and E through the same route: Transfer reports 100% sent,
+the device's own bar stops at about 80% and stays there. No error text was
+reported — and the bootstrap has named failures (`LENGTH ERROR`, `CRC CHECK`,
+`VERSION CHECK`, `UPGRADE FAILED`), so a silent stop suggests a hang rather
+than a rejection.
+
+**Two differences from stock were found** that no checksum and no HMAC notices.
+Both are now fixed and enforced by `dnfw inspect`:
+
+1. **Unpadded section.** Elektron pad every compressed section to a multiple of
+   four bytes; our MAIN OS was 1,093,374 bytes stored, two past a boundary. A
+   word-at-a-time copy counting its length down in fours never reaches zero on
+   that — which would hang, silently. *This is the stronger candidate.*
+2. **No match window.** Elektron's streams never reach back more than 1 MiB;
+   ours reached 3 MB back in 2,051 places. A bootstrap that decompresses through
+   a 1 MiB buffer would read garbage there. *But* the first far match sits 24.8%
+   into the upload, and the stall is at ~80%, so on its own this does not
+   explain where the device stops — if its bar tracks bytes received.
+
+Both reproduce against the exact file that was flashed: rebuilding Gate D from
+`main` gives content checksum `0x6303af0e`, the one recorded before the flash,
+and the new checks fail it on both counts.
+
+**Next test:** `gate-d2_DN2_1.10E_recompressed.syx` (content checksum
+`0x716ce858`) through the Early Start-up Menu. It fixes both at once, because
+the goal is a recovery route that works for our images; which of the two
+mattered can be split afterwards with one image carrying each fix, if it is
+worth two more twelve-minute transfers.
+
+**If it still stalls,** stop guessing and read the bootstrap. It ships in every
+`.syx` as section 2 — about 30 KB of ColdFire, strings intact — and it is the
+code that receives, checks and writes a recovery image. It needs the validated
+Ghidra setup (`docs/mainos-image.md`, Gate F), which lives on the machine with
+WSL and objdump.
+
 ## When Transfer will not send
 
 Elektron Transfer logs to
@@ -123,5 +177,7 @@ packet, which is DIN MIDI's rate and confirms the transfer is genuinely moving.
 | Date | Step | Result |
 |---|---|---|
 | 2026-09-08 | Recovery path, stock 1.10E via Early Start-up Menu | **Pass.** Transfer reached 100%, device rebooted, came up normally. |
-| | Gate D — recompressed, unchanged | not yet |
-| | Gate E — the PERSONALIZE patch | not yet |
+| 2026-09-11 (reported) | Gate D — recompressed, unchanged, **normal update** | **Pass.** Boots, behaves as stock. |
+| 2026-09-11 (reported) | Gate E — the PERSONALIZE patch, **normal update** | **Pass.** `SETTINGS` shows `DNFW ALIVE!`. |
+| 2026-09-11 (reported) | Gates D and E through the **recovery** route | **Stall.** Transfer 100%, device bar ~80%, no error text. See above. |
+| | Gate D2 — padded and windowed, **recovery** route | not yet |
