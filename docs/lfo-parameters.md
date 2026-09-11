@@ -7,6 +7,16 @@ constant the code reads or something structural.
 **It is a table.** Each LFO is a block of records in a flat array, and the
 blocks are identical in shape.
 
+> **Revised 2026-09-08, later the same day.** The first version of this
+> document described only the three LFO blocks and concluded that "LFO3 ends at
+> id 24 and Chorus begins at 25", so a fourth block could not simply continue
+> the sequence. Walking the whole array showed that framing was wrong. The
+> array is 320 records covering the entire instrument, and **the parameter id
+> is not unique across it** — 68 of the 100 ids in use are claimed by more than
+> one group. Chorus's 25 is not the successor of LFO3's 24; the two are not in
+> the same sequence at all. The constraint on a fourth LFO is real, but it is a
+> different constraint, and it is in "What this means for a fourth LFO" below.
+
 ## The record
 
 One uniform record per (parameter, presentation), contiguous, no header:
@@ -39,22 +49,99 @@ remaining words are not yet identified**, and the DN1 record's numeric layout
 is different and has not been worked out at all — only its name pointers were
 needed here.
 
-## DN2: the main table, `0x401e3xxx`
+## DN2: one table, 320 records, at `0x401e29d4`
 
-One flat array covering the whole instrument. Walking it: `… Amp, FX, LFO1,
-LFO2, LFO3, Chorus, Delay, Reverb …`. The three LFO blocks are adjacent, and
-**Chorus begins immediately after LFO3**.
+`0x401e29d4 .. 0x401e74d4` — 320 records, 19,200 bytes, covering the whole
+instrument: synth pages, LFOs, effects, mixer, MIDI-track pages and trig
+parameters, in one flat array.
 
-| Block | Group | Records | Parameter ids | First record |
-|---|---|---|---|---|
-| LFO1 | 26 | 10 | **1–8** | `0x401e3b2c` |
-| LFO2 | 27 | 10 | **9–16** | `0x401e3d84` |
-| LFO3 | 28 | 10 | **17–24** | `0x401e3fdc` |
-| Chorus | 16 | — | **25–** | `0x401e4234` |
+Scanning all of MAIN OS for runs of records of this shape finds exactly **two**
+such tables. Plain pointer arrays have to be filtered out first: they match a
+"three string pointers at +48" test at *every* 4-byte offset, whereas a real
+record table matches at one offset only.
 
-Ten records, eight ids. The blocks differ only in the page-label pointer, the
-group number, the ids, the controller and NRPN numbers, and a few defaults.
-Everything else — handler pointers, ranges, flags — is identical between them.
+| Address | Records | What it is |
+|---|---|---|
+| `0x401e29d4` | 320 | the Digitone II parameter set |
+| `0x401bae00` | 183 | the Digitone 1 parameter set — see the warning below |
+
+**The low edge is uncertain.** The 60-byte stride continues below
+`0x401e29d4`, but the record that would begin at `0x401e2998` holds a small
+integer where every other record holds a handler pointer, and the bytes at
+`0x401e29a0` are the target of a dozen `lea` instructions from elsewhere — so
+that region is more likely a separate object the table happens to abut.
+`0x401e29d4` is where the record shape stops being ambiguous, and every count
+here is measured from there.
+
+The first 18 records carry `0xffffffff` in **both** the group and the id field:
+`Error` (repeatedly), `Machine Type`, `Solo`, `Mute`, `Pattern Mute`,
+`Track Level`, `Active Track`, `Global Mix Mode`. They are not addressable by
+(group, id) at all, so something reaches them **by array index**. An `Error`
+record at the head is the shape of an enum whose zero value is the safe
+default.
+
+## The parameter id is not unique
+
+This is the finding that matters, and it is a measurement rather than a reading
+of the layout.
+
+| Group | Recs | Ids | Pages |
+|---|---|---|---|
+| 0 | 38 | 25–33, 35–48, 50–64 | SYN |
+| 1 | 25 | 25–49 | SYN |
+| 2 | 30 | 25–54 | SYN |
+| 3 | 8 | 25–32 | SYN |
+| 5–10 | 3 each | 66–68 | Filter |
+| 11 | 11 | 80–85, 89–92 | Amp |
+| 13 | 11 | 69–79 | Filter |
+| 14 | 2 | 93–94 | Portamento |
+| 15 | 8 | 86–88, 95–99 | FX |
+| 16 | 8 | 25–31 | Chorus |
+| 17 | 9 | 41–48 | Reverb |
+| 18 | 10 | 32–40 | Delay |
+| 19 | 2 | 68–69 | Master |
+| 20 | 9 | 60–67 | Master |
+| 21 | 17 | 49–59 | Ext-in |
+| 22 | 4 | 8–11 | *(none)* |
+| 23 | 8 | 25–32 | Src |
+| 24 | 16 | 33–48 | CC |
+| 25 | 16 | 49–64 | *(none)* |
+| **26** | **10** | **1–8** | **LFO1** |
+| **27** | **10** | **9–16** | **LFO2** |
+| **28** | **10** | **17–24** | **LFO3** |
+| 29 | 22 | 0–5, 7, 12–25 | Retrig, Euclidean |
+| 30 | 1 | 0 | *(none)* |
+| — | 18 | *(none)* | *(none)* |
+
+**68 of the 100 ids in use are claimed by more than one group.** Groups 0, 1, 2
+and 3 all begin at 25. So does Chorus. So does Src. The id alone identifies
+nothing: `(group, id)` is the key, or the id is scoped by something the record
+does not carry.
+
+**Groups 4, 12 and 31-and-up are unused.** A fourth LFO block needs a new group
+number, and those are the free ones — **not 29**, which an earlier draft of this
+document suggested and which is already Retrig and Euclidean.
+
+### How the groups appear to cluster — INFERRED, not measured
+
+The groups fall into sets whose ids do not collide *within* a set. This
+hypothesis fits every row above. It has **not** been confirmed against code,
+and the next section says what would confirm it.
+
+| Cluster | Groups | Ids | Reading |
+|---|---|---|---|
+| A | 26, 27, 28, 0–3, 5–10, 13, 11, 15, 14 | 1–64, 66–99 | a synth track's parameters |
+| B | 26, 27, 28, 16, 18, 17, 21, 20, 19 | 1–69 | the FX / mixer track |
+| C | 26, 27, 28, 23, 24, 25 | 1–64 | a MIDI track |
+| D | 29, 30, 22 | 0–25 | trig parameters |
+
+Clusters A, B and C each contain the LFO groups, because there is only **one**
+set of LFO records in the table while every track type has LFOs. Cluster D
+overlaps the LFO ids completely, so trig parameters must be a separate space.
+
+*The weakest link is the claim that the DN2's FX track has LFO pages. That is
+thirty seconds on the instrument to confirm or kill, and it is worth doing
+before anything is built on cluster B.*
 
 ### Two records per LFO are second presentations of an existing parameter
 
@@ -80,13 +167,23 @@ confirmed.**
 `SLEW` exists only on the DN2. The strings `Slew` and `SLEW` do not appear
 anywhere in DN1 1.42A.
 
-## There is a second table, and it is not the one you want
+## Nothing points at this table
 
-A second LFO-bearing table sits at `0x401bb9xx`, with nine records per LFO
-block and no LFO3 at all. It is **not** the table above and not the one to
-edit. It carries the Digitone 1's parameter set — same parameters in the same
-order as DN1 1.42A's own table, including DN1-only details like the Amp page's
-`DRV` and `AENR`, and LFO blocks with no `SLEW`.
+Scanning all of MAIN OS for the 32-bit value `0x401e29d4`, for one-past-the-end,
+and for any record-aligned address inside the table from outside it: **zero
+hits.** Addresses immediately before and after the table are referenced freely
+— `0x401e29a0` from a dozen `lea` instructions, the region from `0x401e74dc`
+onward from many more — so the scan works and the absence is real.
+
+That leaves PC-relative addressing, a base register, or an anchor a fixed
+distance away. **Unresolved, and it is the next thing to find**, because
+whatever reaches the array is also whatever would have to be told it grew.
+
+## The second table, and it is not the one you want
+
+`0x401bae00`, 183 records, 19 groups, with LFO blocks for **LFO1 and LFO2 only**
+and no `SLEW`. It carries the Digitone 1's parameter set — the same parameters
+in the same order as DN1 1.42A's own table, including DN1-only pages.
 
 It is **not** the MIDI-track set: MIDI tracks have no filter, no amplitude
 envelope and no effect sends, and DNX records that *"MIDI tracks address a much
@@ -95,28 +192,41 @@ smaller parameter set"* (`DNX/docs/dn1-project-format.md`).
 Why the DN1 set is in DN2 firmware is **UNKNOWN** and is not being pursued —
 the scope here is the Digitone II. It is recorded only so that nobody mistakes
 it for the real table, which is easy to do: it has LFO blocks that look right
-until you notice `SLEW` is missing.
+until you notice there are two of them.
 
 ## What this means for a fourth LFO
 
-The good news is the shape: adding LFO4 to this table is appending a fourth
-block of ten records with a new page-label string, group 29, and the next
-controller and NRPN numbers. Nothing about the table is hard-coded to three.
+The shape is still the good news: adding LFO4 means appending a fourth block of
+ten records with a new page-label string and a new group number. Nothing about
+the table is hard-coded to three, and no count field has been found beside it.
 
-The problem is where the ids go. **LFO3 ends at id 24 and Chorus begins at
-25**, so a fourth block cannot simply continue the sequence — either it takes
-ids after the end of the whole table, or everything from Chorus onward
-renumbers. Which is possible depends on what else indexes into this id space,
-and that is the next thing to find out.
+The constraint is the id, and it is **not** "Chorus is sitting on 25".
 
-Two things not yet known, and both bear on it:
+A single LFO4 block carries one id per parameter, and those records are shared
+by every track type that has LFOs — clusters A, B and C above. So LFO4's eight
+ids have to be free in **all three at once**. Taking the clusters at face value:
 
-- **What consumes the table, and whether anything holds its length.** No count
-  field has been identified. If the array is walked by a bound stored
-  elsewhere, that bound is the other thing LFO4 must change.
+| Cluster | Highest id in use | Free from |
+|---|---|---|
+| A — synth track | 99 | 100 |
+| B — FX track | 69 | 70 |
+| C — MIDI track | 64 | 65 |
+
+The intersection is **100 and above**, so `100–107` is the first run of eight
+ids free everywhere. Id 65 is free in cluster A alone and is a red herring.
+
+Two things must be established before that is a plan rather than an arithmetic
+exercise, and they are the same question asked twice:
+
+- **What consumes the table, and is the id bounded?** Nothing points at the
+  array, so nothing is yet known about its consumer. If a parameter id indexes
+  a fixed-size array — 100 entries, say, or 128 — then `100–107` is either
+  exactly fine or exactly fatal, and which one is a fact we do not have.
 - **How these ids relate to the parameter-lock ids DNX derived from hardware.**
   DNX found lock ids following `4 * slot + lfo` for `lfo` 1–3, leaving
   `4 * slot + 0` unused (`DNX/docs/dn2-pattern-format.md`). That is an
   interleaved space; this one is blocked, LFO1 1–8 then LFO2 9–16. They are
   plainly different numbering schemes and **no correspondence between them has
-  been established** — do not assume one.
+  been established** — do not assume one. If p-lock ids are derived from these
+  ids arithmetically, non-contiguous LFO4 ids break that derivation, and this
+  stops being a table edit.
