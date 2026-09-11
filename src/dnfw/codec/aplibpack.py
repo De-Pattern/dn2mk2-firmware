@@ -12,27 +12,34 @@ match chain. That is the right answer in C and unreachable in Python: the
 Digitone II MAIN OS section is 3,085,696 bytes. This module uses greedy
 matching with a one-position lazy lookahead, decided by the same cost function.
 
-It costs nothing measurable. Against the sections Elektron ship (2026-09-07):
+It costs nothing measurable. Against the sections Elektron ship (2026-09-11,
+with the window below in force):
 
-    DN2 DSP      30,302 B raw ->    16,131 vs   16,160 stock   -0.2%
-    DN2 MAIN OS 3,085,696 B raw -> 1,093,366 vs 1,093,808      -0.0%
-    DN2 blob      833,060 B raw ->   596,466 vs   600,148      -0.6%
-    DN1 DSP      28,766 B raw ->    15,702 vs   15,764 stock   -0.4%
-    DN1 MAIN OS 2,420,912 B raw ->   923,519 vs   925,768      -0.2%
+    DN2 1.10E bootstrap    30,302 B raw ->    16,131 vs    16,160 stock   -0.2%
+    DN2 1.10E MAIN OS   3,085,696 B raw -> 1,091,713 vs 1,093,805 stock   -0.2%
+    DN2 1.10E blob        833,060 B raw ->   596,466 vs   600,147 stock   -0.6%
+    DN2 1.11  MAIN OS   3,192,192 B raw -> 1,129,103 vs 1,130,517 stock   -0.1%
+    DN2 1.11  section 8   159,948 B raw ->   102,552 vs   103,407 stock   -0.8%
 
 Every section comes out smaller than stock, so a rebuild never needs more flash
-than the image it replaces. MAIN OS packs in about 15 seconds.
+than the image it replaces. MAIN OS packs in under a minute.
+
+**No match reaches back further than `limits.PACK_MAX_OFFSET`.** Without that
+bound this packer reached three megabytes back, which Elektron's never do, and
+the images it made stalled in recovery. The bound also made it *smaller* --
+1.11 MAIN OS came out 445 bytes over stock without it -- because a long, far
+match costs more bits than it saves, and faster, because the chain walk stops
+at the window. See `codec.limits`.
 """
 
 from .aplib import FAR_THRESHOLD, MIN_MATCH, OFFSET_BIAS, REUSE_GAMMA
-
-MAX_MATCH = 2048
+from .limits import MAX_MATCH, PACK_MAX_OFFSET
 LITERAL_BITS = 9  # 1 control bit + 8 data bits
 DEFAULT_CHAIN_DEPTH = 32
 
 # Two, not three or four. The minimum match length in this format is two, so a
 # wider hash key silently discards every short match: measured on the Digitone
-# II DSP section, a 4-byte key costs 12.4% and a 3-byte key 3.2% against stock,
+# II bootstrap section, a 4-byte key costs 12.4% and a 3-byte key 3.2% against stock,
 # while a 2-byte key at depth 32 comes out 0.2% *smaller* than Elektron ship.
 _HASH_BYTES = 2
 
@@ -138,11 +145,13 @@ def _best(
     prev: list,
     last_offset: int,
     chain_depth: int,
+    max_offset: int,
 ):
     """Best (offset, length, cost) at position `i`, or (0, 0, 0) for none.
 
     Longest wins, ties broken by cost -- so among equally long matches the one
-    that reuses the last offset, or sits nearer, is preferred.
+    that reuses the last offset, or sits nearer, is preferred. No match reaches
+    back further than `max_offset`; see `codec.limits` for why.
     """
     best_offset = best_length = best_cost = 0
     best_key = None
@@ -156,13 +165,15 @@ def _best(
         if best_key is None or key < best_key:
             best_offset, best_length, best_cost, best_key = offset, length, cost, key
 
-    if 0 < last_offset <= i:
+    if 0 < last_offset <= min(i, max_offset):
         consider(last_offset, _run(data, i - last_offset, i, cap))
 
     if i + _HASH_BYTES <= len(data):
         candidate = head.get(data[i : i + _HASH_BYTES], -1)
         depth = chain_depth
         while candidate >= 0 and depth:
+            if i - candidate > max_offset:
+                break  # the chain runs nearest-first: everything after is further
             consider(i - candidate, _run(data, candidate, i, cap))
             if best_length >= cap:
                 break
@@ -172,11 +183,17 @@ def _best(
     return best_offset, best_length, best_cost
 
 
-def pack(data: bytes, chain_depth: int = DEFAULT_CHAIN_DEPTH) -> bytes:
+def pack(
+    data: bytes,
+    chain_depth: int = DEFAULT_CHAIN_DEPTH,
+    max_offset: int = PACK_MAX_OFFSET,
+) -> bytes:
     """Compress `data` into an aPLib stream (no section header).
 
     `chain_depth` trades build time for size: how many earlier positions with
-    the same 2-byte prefix are considered at each step.
+    the same 2-byte prefix are considered at each step. `max_offset` is the
+    furthest back any match may reach; the default keeps inside the window
+    Elektron's own streams use, and lowering it is for tests.
     """
     writer = _Writer()
     size = len(data)
@@ -191,14 +208,16 @@ def pack(data: bytes, chain_depth: int = DEFAULT_CHAIN_DEPTH) -> bytes:
 
     while i < size:
         cap = min(size - i, MAX_MATCH)
-        offset, length, cost = _best(data, i, cap, head, prev, last_offset, chain_depth)
+        offset, length, cost = _best(
+            data, i, cap, head, prev, last_offset, chain_depth, max_offset
+        )
 
         if length and i + 1 < size:
             # Lazy: is a literal here plus the next position match cheaper per
             # byte than taking this match now?
             next_cap = min(size - i - 1, MAX_MATCH)
             _, alt_length, alt_cost = _best(
-                data, i + 1, next_cap, head, prev, last_offset, chain_depth
+                data, i + 1, next_cap, head, prev, last_offset, chain_depth, max_offset
             )
             if alt_length and (LITERAL_BITS + alt_cost) * length < cost * (1 + alt_length):
                 length = 0

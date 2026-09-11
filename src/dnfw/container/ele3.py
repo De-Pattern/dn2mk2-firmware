@@ -27,7 +27,21 @@ ENTRY_SIZE = 16
 MAX_SECTIONS = 64
 ALIGN = 16
 
-NAMES = {1: "FPGA", 2: "DSP", 3: "MAIN OS", 4: "updater", 5: "meta", 6: "boot", 7: "blob"}
+# Labels, not ground truth: Elektron document none of these. Id 2 was "DSP"
+# until its content was read -- it is ColdFire code carrying the Early Start-up
+# Menu's own strings ("READY TO RECEIVE", "RECEIVING...", "LENGTH ERROR",
+# "CRC CHECK", "STARTUP MENU") and the HMAC key string. It is the recovery
+# receiver. Upstream elektron-firmware-tool renamed it "bootstrap" on
+# 2026-09-08 from the same evidence; the name follows theirs.
+NAMES = {
+    1: "FPGA",
+    2: "bootstrap",
+    3: "MAIN OS",
+    4: "updater",
+    5: "meta",
+    6: "boot",
+    7: "blob",
+}
 
 
 def name(section_id: int) -> str:

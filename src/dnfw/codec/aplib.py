@@ -58,26 +58,35 @@ class DepackError(ValueError):
     """The stream is not a valid aPLib stream, or ran out mid-token."""
 
 
-def depack(stream: bytes, allow_truncated: bool = False) -> bytes:
-    """Decompress one aPLib stream (no section header).
+class _Truncated(DepackError):
+    """The input ran out mid-token. Separate so `depack` can tolerate it."""
 
-    `allow_truncated` returns whatever was produced before the input ran out,
-    which is how a caller can probe whether a section is compressed at all
-    without having to trust its declared length.
+
+def tokens(stream: bytes):
+    """Yield the stream's tokens in order, without producing any output.
+
+    Each token is `(offset, value)`: `(0, byte)` for a literal, since no match
+    has offset zero, and `(offset, count)` for a match copying `count` bytes
+    from `offset` back. This is the one reading of the grammar; `depack` and
+    `codec.profile` both consume it, so they cannot disagree about a stream.
+
+    Raises DepackError for a match reaching before the start of the output, and
+    a DepackError subclass if the input runs out mid-token.
     """
     bits = _Bits(stream)
-    out = bytearray()
+    produced = 0
     last_offset = 1
 
     while True:
         if bits.exhausted:
-            return _truncated(out, allow_truncated)
+            raise _Truncated("input ran out mid-token")
 
         if bits.bit():  # literal
             if bits.pos >= len(bits.data):
-                return _truncated(out, allow_truncated)
-            out.append(bits.data[bits.pos])
+                raise _Truncated("input ran out mid-token")
+            yield 0, bits.data[bits.pos]
             bits.pos += 1
+            produced += 1
             continue
 
         gamma = bits.gamma()
@@ -89,9 +98,9 @@ def depack(stream: bytes, allow_truncated: bool = False) -> bytes:
             # because the C computes it in a uint32 and the high bits fall off.
             offset = ((gamma << 8) + bits.byte()) & 0xFFFFFFFF
             if bits.exhausted:
-                return _truncated(out, allow_truncated)
+                raise _Truncated("input ran out mid-token")
             if offset == OFFSET_BIAS:
-                break  # end of stream
+                return  # end of stream
             offset -= OFFSET_BIAS
             last_offset = offset
 
@@ -99,7 +108,7 @@ def depack(stream: bytes, allow_truncated: bool = False) -> bytes:
         short = 2 * high + low
         length = short if short else bits.gamma() + 2
         if bits.exhausted:
-            return _truncated(out, allow_truncated)
+            raise _Truncated("input ran out mid-token")
         if offset > FAR_THRESHOLD:
             length += 1
 
@@ -108,19 +117,37 @@ def depack(stream: bytes, allow_truncated: bool = False) -> bytes:
         # this negative here, where the C wraps it to a huge unsigned value and
         # catches it on the range test instead. Without this a non-aPLib
         # section reads off the end of its own output.
-        if offset <= 0 or len(out) < offset:
-            raise DepackError(f"offset {offset} outside the {len(out)} bytes emitted so far")
-        src = len(out) - offset
-        for _ in range(count):  # overlapping copy: a run can read what it just wrote
-            out.append(out[src])
-            src += 1
+        if offset <= 0 or produced < offset:
+            raise DepackError(f"offset {offset} outside the {produced} bytes emitted so far")
+        yield offset, count
+        produced += count
+
+
+def depack(stream: bytes, allow_truncated: bool = False) -> bytes:
+    """Decompress one aPLib stream (no section header).
+
+    `allow_truncated` returns whatever was produced before the input ran out,
+    which is how a caller can probe whether a section is compressed at all
+    without having to trust its declared length.
+    """
+    out = bytearray()
+    try:
+        for offset, value in tokens(stream):
+            if offset == 0:
+                out.append(value)
+            elif offset >= value:
+                start = len(out) - offset
+                out += out[start : start + value]
+            else:  # overlapping copy: a run reads what it has just written
+                src = len(out) - offset
+                for _ in range(value):
+                    out.append(out[src])
+                    src += 1
+    except _Truncated:
+        if not allow_truncated:
+            raise
+        return bytes(out)
 
     if not out and not allow_truncated:
         raise DepackError("stream decoded to nothing")
-    return bytes(out)
-
-
-def _truncated(out: bytearray, allow: bool) -> bytes:
-    if not allow:
-        raise DepackError("input ran out mid-token")
     return bytes(out)

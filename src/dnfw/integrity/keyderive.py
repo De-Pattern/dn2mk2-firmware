@@ -13,7 +13,7 @@ and a candidate is accepted only when it reproduces the image's own trailer, so
 a wrong guess cannot be mistaken for the right one.
 
 Measured on the two images we hold (2026-09-07): Digitone II 1.10E derives from
-the string "Multiplier" in its DSP section and verifies. Digitone 1.42A has a
+the string "Multiplier" in its bootstrap section and verifies. Digitone 1.42A has a
 32-zero-byte trailer -- it is unsigned, and `find` correctly returns None.
 """
 

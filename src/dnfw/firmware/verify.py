@@ -10,7 +10,10 @@ passing.
 
 from dataclasses import dataclass
 
+from ..codec import limits
+from ..codec.profile import profile
 from ..container import ele3
+from ..container.section import STORED_ALIGN
 from ..integrity import checksum, digest
 from .model import Firmware
 
@@ -35,6 +38,8 @@ def verify(firmware: Firmware) -> Report:
     """Check every integrity field `firmware` carries."""
     checks = [_packets(firmware), _content(firmware)]
     checks += [_section(section) for section in firmware.container.sections]
+    checks += [_padded(section) for section in firmware.container.sections]
+    checks += [_limits(section) for section in firmware.container.sections]
     checks.append(_trailer(firmware))
     return Report(tuple(checks))
 
@@ -67,6 +72,38 @@ def _section(section) -> Check:
         section.sum_ok,
         f"stored 0x{section.declared_sum:08x} calculated 0x{section.computed_sum:08x}",
     )
+
+
+def _padded(section) -> Check:
+    """Elektron pad every compressed section to a multiple of four bytes; see
+    `container.section`. A section that is not can still checksum correctly."""
+    label = f"section {section.id} ({ele3.name(section.id)}) padded to {STORED_ALIGN} bytes"
+    if section.unpack() is None:
+        return Check(label, True, "stored raw, not padded by Elektron either")
+    remainder = len(section.stored) % STORED_ALIGN
+    return Check(
+        label,
+        remainder == 0,
+        f"{len(section.stored):,} bytes stored"
+        + ("" if remainder == 0 else f", {remainder} past a {STORED_ALIGN}-byte boundary"),
+    )
+
+
+def _limits(section) -> Check:
+    """A stream can checksum perfectly and still ask more of the decompressor
+    than Elektron's own streams ever do. Images like that boot through the
+    normal update path and stall in recovery -- see `codec.limits`."""
+    label = f"section {section.id} ({ele3.name(section.id)}) within Elektron's limits"
+    if section.unpack() is None:
+        return Check(label, True, "stored raw, nothing to decompress")
+    p = profile(section.stream)
+    detail = (
+        f"furthest match {p.max_offset:,} of a {limits.WINDOW:,}-byte window, "
+        f"longest {p.max_length:,} of {limits.MAX_MATCH:,}"
+    )
+    if p.beyond:
+        detail += f"; {p.beyond:,} matches reach past the window, first at output {p.first_beyond:,}"
+    return Check(label, p.within_limits, detail)
 
 
 def _trailer(firmware: Firmware) -> Check:

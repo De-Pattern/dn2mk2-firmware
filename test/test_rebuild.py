@@ -1,7 +1,7 @@
 """Gate C: an image rebuilt with recompressed sections still verifies.
 
 Gate A holds compression constant; this is the other half. The fast case
-recompresses the 16 KB DSP section, which exercises the whole layout, checksum
+recompresses the 16 KB bootstrap section, which exercises the whole layout, checksum
 and signing path. The MAIN OS case does the same to 3 MB and is marked slow.
 """
 
@@ -11,7 +11,7 @@ from dnfw.firmware.build import build, replacement
 from dnfw.firmware.load import load
 from dnfw.firmware.verify import verify
 
-DSP = 2
+BOOTSTRAP = 2
 MAIN_OS = 3
 
 
@@ -24,22 +24,22 @@ def _rebuild_with(firmware, section_id, content):
 
 
 def test_recompressing_a_section_still_verifies(dn2):
-    content = dn2.container.find(DSP).unpack()
-    output, reloaded = _rebuild_with(dn2, DSP, content)
-    assert reloaded.container.find(DSP).unpack() == content
+    content = dn2.container.find(BOOTSTRAP).unpack()
+    output, reloaded = _rebuild_with(dn2, BOOTSTRAP, content)
+    assert reloaded.container.find(BOOTSTRAP).unpack() == content
     assert reloaded.key is not None, "signing must survive a rebuild"
 
 
 def test_a_changed_byte_reaches_the_rebuilt_image(dn2):
-    content = bytearray(dn2.container.find(DSP).unpack())
+    content = bytearray(dn2.container.find(BOOTSTRAP).unpack())
     content[1000] ^= 0xFF
-    _, reloaded = _rebuild_with(dn2, DSP, bytes(content))
-    assert reloaded.container.find(DSP).unpack() == bytes(content)
+    _, reloaded = _rebuild_with(dn2, BOOTSTRAP, bytes(content))
+    assert reloaded.container.find(BOOTSTRAP).unpack() == bytes(content)
 
 
 def test_unsigned_image_rebuilds_unsigned(dn1):
-    content = dn1.container.find(DSP).unpack()
-    _, reloaded = _rebuild_with(dn1, DSP, content)
+    content = dn1.container.find(BOOTSTRAP).unpack()
+    _, reloaded = _rebuild_with(dn1, BOOTSTRAP, content)
     assert reloaded.key is None
 
 

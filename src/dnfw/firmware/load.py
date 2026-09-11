@@ -43,7 +43,7 @@ def _find_key(container_bytes: bytes, declared_size: int, container: ele3.Contai
     means unsigned -- that is the Digitone 1.42A image, and scanning for a key
     that cannot exist would mean depacking every section for nothing. And
     sections are searched smallest first, because the Digitone II key material
-    lives in the 16 KB DSP section, so the 3 MB MAIN OS never has to be
+    lives in the 16 KB bootstrap section, so the 3 MB MAIN OS never has to be
     depacked to sign a build.
     """
     if declared_size < digest.DIGEST_BYTES + 4 or declared_size > len(container_bytes):
