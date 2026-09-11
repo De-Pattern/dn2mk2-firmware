@@ -50,6 +50,31 @@ the existing `< 321` bound. The ~43 bound immediates (`#321`×32, `#320`×11,
 `#311`×1) need no change at all. This is the whole benefit of repurposing over
 appending.
 
+### Alternative kept for later: grow the table by appending
+
+Repurposing is the better path for *this* change, but the append/relocate
+analysis is real and worth keeping — a larger change (more than the fifteen
+spare slots, or a different table) would need it, and these facts hold
+regardless.
+
+- **No slack after the table.** `record[id] = 0x401e29d0 + id*60` ends at id 320
+  (`0x401e750c`); the bytes immediately after are another lookup table. Ten new
+  records (ids 321–330, +600 bytes) cannot be appended in place.
+- **Relocation cost.** The table is ~19.3 KB (321 × 60). **56 sites in code hold
+  an absolute literal pointing into its base** (53 at `0x401e29a0`, plus a few
+  neighbours). Growing it means copying the table to a code cave, appending the
+  records, and repointing all 56 base literals.
+- **The bound is replicated.** The length is not stored; it is a bounds immediate
+  in every accessor — `cmpi #321` at 32 sites, `#320` at 11, `#311` once.
+  Appending past 320 means raising every one that guards a new id, exhaustively;
+  each sits beside a `lea` of the table base.
+
+The staged form of the append path was: (1) inert bounds sweep to prove the site
+list, (2) relocate the table unchanged, (3) append the records, (4) page-view,
+(5) MOD wiring. Repurposing collapses 1–3 into a single same-length patch, which
+is why it is preferred here — but if the spare slots ever run out, this is the
+route.
+
 ### 3. The per-LFO hardcoded id sites
 
 Beyond the table, "three LFOs" is baked into code as literal ids. The clearest
