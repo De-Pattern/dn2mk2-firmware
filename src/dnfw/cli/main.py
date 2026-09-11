@@ -8,9 +8,22 @@ handling and I/O, and leaves the work to the library.
 import argparse
 import sys
 
-from . import build, diff, disasm, extract, inspect, params, patch, symbols, validate_disasm
+from . import (
+    build,
+    diff,
+    disasm,
+    extract,
+    inspect,
+    params,
+    patch,
+    symbolmap,
+    symbols,
+    validate_disasm,
+)
 
-COMMANDS = (inspect, extract, build, patch, diff, symbols, params, disasm, validate_disasm)
+COMMANDS = (
+    inspect, extract, build, patch, diff, symbols, symbolmap, params, disasm, validate_disasm,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
