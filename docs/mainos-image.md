@@ -58,7 +58,8 @@ C:\Tools\jdk-21.0.12.1+1              JDK 21 (Temurin), for JAVA_HOME
 C:\Tools\ghidra_12.1.3_PUBLIC         set as GHIDRA_HOME
 ```
 
-`ghidraun-gate-f.bat` is the Windows twin of `run-gate-f.sh` — same scripts,
+`ghidra
+un-gate-f.bat` is the Windows twin of `run-gate-f.sh` — same scripts,
 same `-noanalysis` linear sweep, but through `analyzeHeadless.bat` because the
 shell launcher mishandles a Windows JDK path. `ghidranalyze.bat` runs a full
 auto-analysis pass and keeps the project, so `DecompileFunction.java` can read a
@@ -73,6 +74,14 @@ WSL. Ghidra passing on MAIN OS (below) does not automatically clear the
 bootstrap section: different bytes, and its load base is not yet pinned.
 
 ## Gate F — CLOSED 2026-09-08
+
+> **Also cleared: the bootstrap (section 2), 2026-09-11.** Same language, same
+> reference, over a 16 KB code span: 99.28% agreement, **0 divergences on code**,
+> all 9 clusters on `0x0000` padding words objdump declines. Read the bootstrap
+> at load base `0x800003fc` — see `docs/bootstrap.md`. objdump now runs on this
+> machine too (Ubuntu 24.04 under WSL2, `binutils-m68k-linux-gnu`), so Gate F is
+> no longer tied to one machine.
+
 
 **The rule: no reverse-engineering starts on a decoder that has not been
 checked against objdump.** Run it with `dnfw validate-disasm`. Agreement is
