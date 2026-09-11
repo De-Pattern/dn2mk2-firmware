@@ -8,6 +8,14 @@ and DN1's `blob` -- are stored raw, and the only reliable test is whether the
 bytes depack. So a section is modelled as its **stored** bytes, exactly as they
 sit in the container, and compression is something we discover rather than
 assume. `dnfw build` must never recompress a section it could not depack.
+
+**A compressed section is zero-padded to a multiple of four bytes.** The header
+still gives the exact stream length and the sum of the stream alone; the
+padding sits after the stream and is counted only in the section table's
+length. Every compressed section of Digitone II OS 1.10D, 1.10E and 1.11 --
+eleven of them -- follows this, with 0 to 3 bytes of padding each. Images
+built without it boot through the normal update path and stall in recovery,
+so it is written here rather than left to chance. See `docs/flashing.md`.
 """
 
 from dataclasses import dataclass
@@ -15,6 +23,7 @@ from dataclasses import dataclass
 from ..codec import aplib, aplibpack
 
 HEADER = 8
+STORED_ALIGN = 4  # compressed sections are zero-padded to this
 
 
 @dataclass(frozen=True)
@@ -41,6 +50,12 @@ class Section:
         return sum(self.stored[HEADER:end]) & 0xFFFFFFFF
 
     @property
+    def stream(self) -> bytes:
+        """The compressed stream the header describes, header excluded.
+        Meaningless on a raw section."""
+        return self.stored[HEADER : HEADER + self.declared_length]
+
+    @property
     def sum_ok(self) -> bool:
         return self.declared_sum == self.computed_sum
 
@@ -61,10 +76,11 @@ class Section:
 
 
 def compress(section_id: int, dest: int, content: bytes) -> Section:
-    """Build a compressed section from raw content, header included."""
+    """Build a compressed section from raw content: header, stream, padding."""
     stream = aplibpack.pack(content)
     header = len(stream).to_bytes(4, "big") + (sum(stream) & 0xFFFFFFFF).to_bytes(4, "big")
-    return Section(id=section_id, dest=dest, stored=header + stream)
+    padding = bytes(-(HEADER + len(stream)) % STORED_ALIGN)
+    return Section(id=section_id, dest=dest, stored=header + stream + padding)
 
 
 def store_raw(section_id: int, dest: int, content: bytes) -> Section:
