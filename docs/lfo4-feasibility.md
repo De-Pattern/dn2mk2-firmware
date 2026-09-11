@@ -95,14 +95,19 @@ ids. LFO1's is 75–82-ish, LFO2's 85–…, LFO3's 95–…. A fourth page need
 page label. Constructing an object and its descriptor at boot is the main piece
 of genuinely new code and data — a cave, or an unused existing structure.
 
-### 5. Wire the fourth `[MOD]` page
+### 5. Wire the fourth `[MOD]` page — no vacant slot exists
 
-The `[MOD]` key cycles LFO1→LFO2→LFO3. A fourth page must be reachable: the
-navigation that counts and selects MOD pages has to admit a fourth and
-instantiate the new page-view. **Whether a vacant fourth page already exists in
-that navigation is not yet established** — it is the first thing to read next,
-because if the slot is already there (Elektron having left room) this step
-shrinks a lot; if not, it is more new code.
+The `[MOD]` key cycles LFO1→LFO2→LFO3. **There is no pre-built vacant fourth
+page** — checked 2026-09-11. The page-label strings `LFO1` (`0x401f7c0d`),
+`LFO2` (`0x401f7c5d`) and `LFO3` (`0x40201cb0`) each occur once and are
+scattered, not laid out as an extensible array, and **there is no `LFO4`
+string anywhere in MAIN OS**. So the premise that Elektron left a ready fourth
+UI page to fill is not how it is: the *vacancy* is in the data format (the sound
+object reserves a fourth LFO slot; the p-lock space leaves `4*slot+0` free), not
+in the UI. A fourth page needs a new `LfoPageView` instance, a new `LFO4` label
+(no room to add a string in place, so this itself wants a cave or a spare
+region), and the MOD navigation extended to admit and select it. This is the
+new-code the feature cannot avoid.
 
 ## A staged plan
 
