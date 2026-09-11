@@ -45,11 +45,34 @@ measurements and its method.
 
 > Copyright (c) 2026 Sam Banks
 
+## midisc
+
+<https://github.com/bkkbrls-del/midisc> — Sam Banks.
+
+The ColdFire `Asm` encoder (`tools/ot3_asm.py`) and the cave helpers
+(`tools/midisc/util.py`) — every instruction encoding checked against a stock
+instruction, `.w` branch displacements resolved rather than hand-typed. Ported
+into `src/dnfw/patch/coldfire.py` and `src/dnfw/patch/cave.py`. Only the
+CPU-level encoding transfers; nothing about the Octatrack's engine or memory
+map is carried over.
+
+> Copyright (c) 2026 Sam Banks
+
+## octamax
+
+<https://github.com/mxldyn/octamax> — Maxolydian.
+
+midisc's upstream, credited in midisc's own notice. No code is ported from it
+directly; its Octatrack architecture account is used only as a hypothesis to
+test against the DN2, never as fact about it.
+
+> Copyright (c) 2025-2026 Maxolydian
+
 ---
 
 ## The MIT License
 
-All three carry the same terms:
+They all carry the same terms:
 
 > Permission is hereby granted, free of charge, to any person obtaining a copy
 > of this software and associated documentation files (the "Software"), to deal
@@ -79,3 +102,8 @@ image's own digest.
 
 **DNX**, the sibling project this one depends on for Digitone data formats,
 shares no code with it. It is referenced, not incorporated.
+
+**ems-octakit** (<https://github.com/emuyia/ems-octakit>) ships **no licence**,
+so none of its code is used. It was read only for architecture — the idea of
+assembling real `.S` with the GNU toolchain into linker-placed caves — and that
+general technique, not its expression, informs `src/dnfw/patch/assemble.py`.
