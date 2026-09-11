@@ -10,6 +10,7 @@ import sys
 
 from . import (
     build,
+    cave,
     diff,
     disasm,
     extract,
@@ -22,7 +23,7 @@ from . import (
 )
 
 COMMANDS = (
-    inspect, extract, build, patch, diff, symbols, symbolmap, params, disasm, validate_disasm,
+    inspect, extract, build, patch, diff, symbols, symbolmap, params, disasm, validate_disasm, cave,
 )
 
 

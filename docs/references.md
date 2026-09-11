@@ -85,6 +85,51 @@ instructions replayed in the cave — is the mechanism to copy when Phase 2 need
 to add code rather than change it. See `modules/cfprobe/manifest.py` and
 `modules/_template/manifest.py`.
 
+## midisc — the ColdFire assembler we port
+
+<https://github.com/bkkbrls-del/midisc>, by Sam Banks. MIT (its notice also
+credits **octamax**, below, from which parts of its analysis tooling derive).
+
+Adds MIDI scenes to the Octatrack 1.40C OS by splicing ColdFire code into
+`SAFE_CAVE` regions of the stock image. The Octatrack is a different, older
+device — its engine, its DSP and its per-track layout tell us **nothing** about
+the DN2, and none of that is assumed here. What transfers is purely
+**CPU-level**, because both boxes run the same ColdFire V4e core:
+
+| From | Into | Why it transfers |
+|---|---|---|
+| `tools/ot3_asm.py` — the `Asm` class, every encoding checked against a stock instruction, `.link()` resolving `.w` branch displacements | `patch/coldfire.py` | ColdFire ISA, not device-specific |
+| `tools/midisc/util.py` — `jmp_abs`, `jsr_abs`, `off()`, `fix_jsr`, the "cave not empty" guard | `patch/cave.py` | same |
+
+Its `docs/TECH.md` records the Octatrack's own `SAFE_CAVE` at
+`0x400D24D0…0x400D2CDC`; those addresses are **the Octatrack's, not ours** — the
+DN2's safe space is mapped independently in `docs/memory-map.md`.
+
+## octamax — midisc's upstream
+
+<https://github.com/mxldyn/octamax>, by Maxolydian. MIT. The analysis tooling
+midisc builds on. Its account of the Octatrack architecture (a double-buffered
+parameter frame the ColdFire fills and a **DSP56xxx** reads over MMIO) is a
+2011-era design and is treated here strictly as a **hypothesis to disprove**,
+not a map: the DN2 is a 2024 SHARC-based box, and every engine claim about it
+must be read from the DN2 image itself.
+
+## ems-octakit — inspiration only, not ported
+
+<https://github.com/emuyia/ems-octakit>, by emuyia. **No licence file** — so
+its code is *not* ported; it is read only for architecture.
+
+It patches the same Octatrack 1.40C but takes a more industrial route than a
+hand-rolled encoder: hand-written `.S` ColdFire assembly (`runtime/*.S`)
+assembled with the real GNU toolchain against a `link.ld` linker script that
+drops each stub into a cave, driven by a `firmware.json` hook manifest and a
+Rust patcher. The device-agnostic lesson — **prefer a real assembler over a
+hand-encoder for anything non-trivial** — is why `patch/assemble.py` shells to
+`m68k-linux-gnu-as` (present in WSL, the same suite as our Gate-F objdump), with
+the ported `patch/coldfire.py` encoder kept only as a no-toolchain fallback and
+for one-line hook branches. Its Octatrack-specific `.S` internals
+(`lfo_*.S`, `audio_*.S`) are not a model for the DN2's engine.
+
 ## DNX — the data-format authority
 
 `C:\ZZ_Code\ZZ_Personal\DNX`, same author. TypeScript; stays its own
