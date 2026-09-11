@@ -107,12 +107,17 @@ counters and per-packet checksums, which are **content-independent** — Gate A
 shows our transport is byte-for-byte stock's — so nothing there can tell our
 image from stock. Stock stalling proves the mechanism is the link.
 
-**What to do about it:** treat recovery as needing a clean MIDI path. Reseat or
-replace the DIN cable, use a known-good interface, close anything else touching
-the port, and re-send. Prove the link with **stock** first; only once stock
-completes is a modified image worth sending. Until the link is reliable, do not
-flash anything through recovery that the device cannot already boot without —
-i.e. do not take a risk that depends on recovery to undo.
+**What to do about it — and what it turned out to be.** Treat recovery as needing
+a clean MIDI path: prove the link with **stock** first, and only once stock
+completes is a modified image worth sending. On 2026-09-11 the specific cause was
+found — the sends were going through a **Focusrite Scarlett 4i4**'s MIDI, and the
+interface was going idle part-way through the twelve-minute transfer, dropping
+packets (which is why it stalled at a different percentage each time). Stock 1.11
+then flashed through recovery cleanly over a fixed link and the device booted it.
+For a long recovery transfer, prefer a dedicated class-compliant USB-MIDI cable,
+or stop the interface idling (Windows USB selective suspend off, the device's
+power-management off). Until the link is proven, do not flash anything through
+recovery that the device cannot already boot without.
 
 **The padding and window fixes still matter, for a different reason.** They are
 not about recovery *completing* — Phase 2 of the flash copies the container to
@@ -140,5 +145,6 @@ correct, it was simply aimed at the wrong stage of the story at first.
 | 2026-09-11 (reported) | Gate D — recompressed, unchanged, **normal update** | **Pass.** Boots, behaves as stock. |
 | 2026-09-11 (reported) | Gate E — the PERSONALIZE patch, **normal update** | **Pass.** `SETTINGS` shows `DNFW ALIVE!`. |
 | 2026-09-11 (reported) | Gates D and E through the **recovery** route | **Stall.** Transfer 100%, device bar ~80%, no error text. See above. |
-| 2026-09-11 | **Stock 1.10E** re-sent through the **recovery** route | **Stall too**, ~80%. Proves the stall is the DIN MIDI link, not the image — see above. |
-| | Gate D2 — padded and windowed, **recovery** route | pending a proven MIDI link |
+| 2026-09-11 | **Stock 1.10E** re-sent through the **recovery** route | **Stall too**, ~80%. First sign the stall is the link, not the image. |
+| 2026-09-11 | Recovery sends over a **Scarlett 4i4** MIDI interface | **Stall, varying %** (30/70/80). The interface was going idle mid-transfer, dropping packets. |
+| 2026-09-11 | **Stock 1.11** through recovery over a **fixed link** | **Pass.** Reached 100%, rebooted, device boots 1.11. Recovery is sound; the culprit was the interface. |
