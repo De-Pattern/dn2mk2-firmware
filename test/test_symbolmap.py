@@ -82,7 +82,7 @@ def test_every_bootstrap_guard_matches_the_image(dn2, curated):
 def test_main_os_merges_curated_with_rtti(dn2, curated):
     names = build.merge(dn2, curated, MAIN_OS)
     assert names.base == MAIN_OS_BASE
-    assert len(names.curated_ok) == 3
+    assert len(names.curated_ok) == 4
     assert not names.drift
     assert len(names.derived) > 400, "MAIN OS carries hundreds of RTTI names"
 

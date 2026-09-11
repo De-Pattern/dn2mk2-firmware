@@ -167,7 +167,18 @@ confirmed.**
 `SLEW` exists only on the DN2. The strings `Slew` and `SLEW` do not appear
 anywhere in DN1 1.42A.
 
-## Nothing points at this table
+## What reads this table — answered
+
+**`docs/parameter-table-consumer.md`.** The table is a flat array indexed by a
+**global parameter id** (1..320); `record[id] = 0x401e29d0 + id*60`; ~50
+accessor functions read it, and its length is a **bounds immediate `< 321`
+replicated across ~43 of them**, not a stored count. LFO1 is global ids 75-84,
+LFO2 85-94, LFO3 95-104. A fourth LFO appends ids 321-330 and raises every
+bound. **Note:** that consumer origin is `0x401e29d0`; the field table above
+used `0x401e29d4`, four bytes in, so its field *relationships* hold but the
+absolute offsets are shifted by 4.
+
+## Nothing points at this table by absolute literal
 
 Scanning all of MAIN OS for the 32-bit value `0x401e29d4`, for one-past-the-end,
 and for any record-aligned address inside the table from outside it: **zero
