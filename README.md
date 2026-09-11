@@ -49,6 +49,7 @@ A `.zip` as Elektron ship it is accepted anywhere a `.syx` is.
 | `dnfw patch list [--image IMG]` | show declared patches, and whether they apply |
 | `dnfw patch apply <image> -o OUT` | apply patches and rebuild |
 | `dnfw symbols <image> [--ghidra FILE]` | the C++ names GCC left in the image |
+| `dnfw symbolmap <image> [--ghidra FILE]` | curated names + RTTI for a section, and a Ghidra seeding script |
 | `dnfw disasm <image> ADDR [N]` | disassemble a span (ColdFire V4e, via objdump) |
 | `dnfw validate-disasm <image> ADDR [N]` | Gate F: check another disassembler against objdump |
 
