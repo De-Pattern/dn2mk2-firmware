@@ -31,6 +31,20 @@ What remains is real but smaller: rewrite ten ERR records as LFO4's parameters
 ten ids, wire the `[MOD]` navigation to it, and confirm the **audio engine** can
 run a fourth LFO at all. The last is the true open gate; the rest is patch-shaped.
 
+> **The open gate is closed, and it opened outward (2026-09-12).** The audio
+> engine **does** implement a fourth LFO — confirmed on hardware by
+> `scripts/build_lfo4_probe.py`, which re-pointed LFO3 at the engine's reserved
+> lane and heard it still modulate (`docs/engine-index-map.md` §11,
+> `docs/flashing.md`). The engine's code is not in this firmware file and cannot
+> be patched, so this was the project's worst-case risk: an unreachable engine
+> that might only run three. It runs four.
+>
+> **Everything left is on the control side**, and the single structural problem
+> is the runtime slot space: a fourth LFO needs eight slots and there is one
+> repairable free slot. See §11 of `docs/engine-index-map.md` for the five
+> structures that bound it — four are tractable, and the sound object's own size
+> is the one still unmeasured.
+
 ## The change set, itemised
 
 ### 1. The parameter table — repurpose, do not grow
@@ -303,8 +317,8 @@ was written before that result and should be read with it in mind.
 | **Runtime parameter indices** — eight contiguous slots | **No room.** Slots 0, 65 and 100 all resolve to engine index 0; only 65 is repairable (`docs/engine-index-map.md` §6b) |
 | **The page id** — a contiguous range test `(page - 0x1a) <= 2` | **Blocked.** `0x1d` is Retrig, `0x1e` is `None` |
 | **A fourth page-view and `[MOD]` navigation** | Not started; needs a cave |
-| **The generator** — can the engine run four? | **Unpatchable, and now directly testable.** Its code is not in this file (`docs/engine-index-map.md` §9), but its index space reserves a complete fourth lane — and `scripts/build_lfo4_probe.py` asks it |
-| **The runtime slot space** — eight slots to give it | **THE gate.** 1–2 free of 101 |
+| **The generator** — can the engine run four? | **YES — confirmed on hardware 2026-09-12.** LFO3 driven through the reserved lane still modulates (`docs/engine-index-map.md` §11). The engine implements a fourth LFO |
+| **The runtime slot space** — eight slots to give it | **THE gate, and now the only one.** One repairable free slot of 101; four of the five structures that bound it are tractable, the sound object's size is unmeasured |
 
 The two hard structural problems are now the runtime index space and the page
 id, not the parameter table — which is the opposite of where this document

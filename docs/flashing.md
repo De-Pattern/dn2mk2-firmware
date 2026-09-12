@@ -153,4 +153,5 @@ correct, it was simply aimed at the wrong stage of the story at first.
 This is the project's **first functional firmware modification** — Gate E changed
 a string, this changed what the instrument can do.
 | 2026-09-12 | **Expanded mod-destination test** (`moddest-expand_DN2_1.11.syx`) — 32 mask flips in three groups | **Pass, prediction confirmed.** All 13 Group A (per-voice) parameters appear as destinations; **none** of Group B (Chorus) or C (Master). The enumeration, not the mask, is the gate for global parameters. |
+| 2026-09-12 | **LFO4 probe** (`lfo4-probe_DN2_1.11.syx`) — LFO3 re-pointed from engine lane 3 to the reserved lane 4 (engine indices 4, 8, 12, 16, 20, 24, 28, 32) | **Pass — and it is the project's central result.** LFO3 still modulates. **The audio engine implements a fourth LFO**; the reserved lane is live, not layout. See `docs/engine-index-map.md` §11. |
 
