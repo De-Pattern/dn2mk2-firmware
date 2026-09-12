@@ -103,3 +103,60 @@ code-patching territory for the index even if the audio itself is pure data.
 **Verification.** DNX is the instrument here too — if patched firmware exposes
 new samples, a project saved from the device should show them in the sound
 objects it already decodes.
+
+---
+
+## 4. Open the FX and Master parameters to LFO modulation and p-locks
+
+**The idea (2026-09-12).** The DN2's FX settings — reverb, delay, chorus — accept
+MIDI CC from outside, but you cannot route an LFO to them or p-lock them in a
+pattern. Make them modulatable like any other parameter. Same for the other
+pages the device holds closed.
+
+**Why this one is unusually concrete.** `docs/modulation-mask.md` found the
+mechanism that decides this, and it is a **single field per parameter record**.
+A parameter appears in an LFO's destination list iff `(filter & ~mask) == 0`,
+where `mask` is the word at `record+0x2c`. Measured across all 271 records, the
+pages split cleanly:
+
+| Page | Records at `0x1e00` (modulatable) | Records at `0x0` (closed) |
+|---|---|---|
+| Delay | 9 | 1 |
+| Reverb | 8 | 1 |
+| **Chorus** | **0** | **8** |
+| **Master** | **0** | **11** |
+| Portamento | 0 | 2 |
+| Retrig | 0 | 4 |
+| Euclidean | 0 | 8 |
+
+So **Delay and Reverb are already open** — the closed ones are Chorus, Master,
+Portamento, Retrig and Euclidean. Opening Chorus would be **eight one-word
+edits**, `0x0` → `0x1e00`, with no relocation, no bound change and no new code.
+That is the cheapest experiment in this whole backlog, and it doubles as the
+cleanest possible test of the mask semantics.
+
+**What would have to be true.** The mask governs *list membership* — whether the
+parameter can be chosen as a destination. Whether the engine can then actually
+apply a modulation to an FX parameter is the separate question, and it is the
+same class of unknown as the fourth LFO's engine gate: the destination has to be
+something the modulation path knows how to write. Two ways it could fail:
+
+- the modulated value is applied through a per-track/per-voice path that FX
+  parameters (which are global, not per-track) never pass through;
+- the `0x0` is not a policy choice but a marker that no write path exists,
+  in which case a chosen destination would simply do nothing.
+
+Either failure is **visible and harmless**: the parameter appears in the `DEST`
+list and does not move. Nothing is written to a place the firmware does not
+already write.
+
+**P-locks are a second, separate question.** Whether a parameter can be
+p-locked is not obviously the same field — that needs finding before assuming
+one edit buys both. DNX's decoded pattern format
+(`DNX/docs/dn2-pattern-format.md`) is where to check what the p-lock table can
+address.
+
+**Sequence it after the tick.** The same unknown — what the write side can
+reach — gates this and the fourth LFO, so finding the modulation tick answers
+both at once. Do that first; this becomes cheap or impossible depending on what
+it says.
