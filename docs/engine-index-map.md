@@ -421,3 +421,98 @@ answer to the question the project has been circling since it started.
 
 That is now the shortest path to knowing whether this is possible at all, and it
 is shorter than it looked when the engine seemed patchable.
+
+---
+
+## 10. Correction: the DN2's DSP is a SHARC, and §9's `blob` test was the wrong one
+
+The owner: **the DN2 uses a SHARC, not a DSP56300.** The `Digisharc` namespace
+on every mirrored type says so, and §9 leaned on a stride-3 test that rules out
+the **Octatrack's** 24-bit DSP56300 word — a chip the DN2 never had. Re-tested
+against what the DN2 actually uses.
+
+### Two measurement errors, both mine
+
+**The stride comparison was measuring 16-bit structure, not word size.** Reading
+the per-byte-position entropies rather than just their spread shows a clean
+**period-2 alternation** in every region of `blob`:
+
+```
+whole      stride4 cols  7.70 6.77 7.67 6.52   | stride6 cols  7.69 6.71 7.68 6.70 7.69 6.69
+700-836K   stride4 cols  7.98 5.88 7.95 5.57   | stride6 cols  7.97 5.78 7.97 5.78 7.97 5.78
+```
+
+High, low, high, low — at *both* strides, because both are even. §9 concluded
+"32-bit word data" from stride 4 scoring higher than stride 6; that comparison
+was an artefact of how each stride aligns with a period-2 signal, and it
+**cannot distinguish 32-bit from 48-bit at all.**
+
+**`blob` is not float32.** Interpreted as float32 and counting values that are
+zero or finite with magnitude between 1e-8 and 1e8: **35.3% little-endian, 22.3%
+big-endian**. Random bytes score about **62%** on that test. So `blob` is not
+merely "not obviously float" — it is *less* float-like than noise, and the
+"57–66% float32" reading carried in `docs/data-sections.md` and
+`docs/ideas-backlog.md` §3 is wrong.
+
+The period-2 structure with the *second* byte of each pair carrying lower
+entropy is the signature of **little-endian 16-bit words whose high byte is
+constrained** — which is what 16-bit PCM looks like. That is a hypothesis, not a
+finding, but it points `docs/ideas-backlog.md` §3 back at `blob` with a better
+idea of what to look for than "float32 coefficient tables".
+
+### The test that is actually valid for a SHARC
+
+A SHARC instruction is **48 bits = 6 bytes**. Any genuine 6-byte periodicity
+must also produce 3-byte structure, because sampling a period-6 signal every 3
+bytes pairs positions (0,3), (1,4), (2,5) — and those differ in real code, where
+the opcode bits sit at the top of the word.
+
+Scanning `blob` in 32 KB windows:
+
+| | |
+|---|---|
+| windows scanned | 25 |
+| **stride-3 column-entropy spread** | **0.00 – 0.10 in every window** |
+| stride 2 / 4 / 6 | track each other closely, 0.13 – 4.62 |
+| windows whose structure is not period-2 | **0** |
+
+**No region of `blob` has 3-byte or 6-byte periodicity.** So `blob` contains no
+*raw* 48-bit SHARC instruction stream. That conclusion now rests on the right
+test for the right chip.
+
+### What this does and does not settle
+
+**§9's headline survives, and its main evidence was never in doubt:** the
+ColdFire does no audio DSP — 582,407 instructions, zero FPU, 50 MAC, against the
+DN1's 613 MACs in a hand-pipelined EMAC kernel (`docs/dn1-dsp-comparison.md`).
+Whatever runs the DN2's engine, it is not the CPU whose code we hold.
+
+**But "the engine's code is not in this firmware file" is weaker than §9 and
+PR #32 stated it.** One gap is now explicit:
+
+**~350 KB of `blob` is structureless.** Windows from `0x20000` to `0x78000`
+score 0.13–0.82 spread at *every* stride, with per-byte entropy 7.3–7.6 — near
+uniform. That is what compressed or packed content looks like, and **a
+compressed SHARC image would show exactly this and defeat every periodicity
+test above.** Ruling out a raw instruction stream does not rule out a packed
+one.
+
+So the honest state is: **no raw SHARC code is present, and a packed image
+cannot be excluded by these methods.** §9 should have said that and did not.
+
+### What would settle it
+
+Two routes, neither taken:
+
+1. **Find the boot path, not the bytes.** A SHARC boots from SPI/EEPROM, from a
+   link port, or from its host port. If the DN2's SHARC boots from its own flash,
+   nothing about it is in this file and the question is closed. If the ColdFire
+   uploads it, there is code that reads `blob` (or another region) and drives a
+   port or a DMA channel — and *that* is findable, because it must know where
+   `blob` sits in flash. `blob` has `dest 0`, so MAIN OS addresses it explicitly
+   somewhere.
+2. **Decompress the structureless region.** If it unpacks with the container's
+   own aPLib variant, or any common scheme, its contents can be tested for the
+   48-bit periodicity directly.
+
+Route 1 is cheaper and answers the question either way.
