@@ -405,3 +405,32 @@ it, because every access computes `base + id*60` at runtime. `FindDataRefs.java`
 returns zero hits here, which is a property of the reference model and not
 evidence of absence. The full objdump of the image is what found the four filter
 sites, by grepping for the mask constant.
+
+## The follow-up experiment, built 2026-09-12
+
+`scripts/build_moddest_expand.py` →
+`00_Resources/02_Builds/moddest-expand_DN2_1.11.syx`. It opens **all 32**
+parameters the stock firmware marks closed, in three groups chosen so the
+results read apart. **32 bytes change**, every one inside a `record+0x24`, all
+21 integrity checks pass.
+
+| Group | What | Prediction |
+|---|---|---|
+| **A** (13) | SYN `ATRG ARST BTRG BRST PHRT KSA KSB1 KSB2`, Amp `DEL MODE RSET`, Portamento `PTIM PORT` | **appear and modulate** — same per-voice class as the confirmed `PTIM` |
+| **B** (8) | Chorus `DPTH SPD HPF WDTH DEL REV CHR VOL` | **do not appear** — excluded by enumeration, not by the mask |
+| **C** (11) | Master `MOVD THR ATK REL MUP RAT SCS SCF MIX VOL` | **do not appear** — same, a different global object |
+
+**B and C are the point.** This document argues FX settings are excluded by the
+`ParameterSet` enumeration rather than the mask, on the evidence that Delay and
+Reverb already carry a full mask and still cannot be reached. Setting Chorus's
+and Master's masks tests that directly:
+
+- **They do not appear** → the enumeration is the gate, confirmed. The
+  FX-modulation idea is an enumeration problem, and the `SoundParameterSet`
+  slot-to-id tables at `0x42c64b3c` (outside MAIN OS) are the thing to find.
+- **They appear** → this document is wrong, the mask was the gate all along,
+  and Delay and Reverb's absence needs a different explanation entirely.
+
+A parameter appearing but not moving is a third outcome and also informative: it
+would mean the engine cannot apply modulation to a global parameter even when
+offered, which is the risk `docs/ideas-backlog.md` §4 names.
