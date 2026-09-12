@@ -9,12 +9,22 @@ cross-checked against the bytes.
 ## Verdict
 
 **Feasible, and the parameter table no longer needs relocating** — that was the
-first read, and a better path was found. The table has **15 unused "ERR" filler
-records** (ids 1-5, 7-9, 11-15, 17-18), none referenced by address, reachable
-only by id-indexing. A page-view's id list can point to any ids, so LFO4 can
-**repurpose 10 of these dead slots in place**: same-length edits to ten 60-byte
-records, no relocation, no base repointing, no bound changes. The hardest cost in
-the original plan is gone.
+first read, and a better path was found. The table has **10 unused "ERR" filler
+records** (ids 1-5, 11-14, 17-18 — plus id 0, the table's own unused slot), none
+referenced by address, reachable only by id-indexing. A page-view's id list can
+point to any ids, so LFO4 can **repurpose these dead slots in place**:
+same-length edits to ten 60-byte records, no relocation, no base repointing, no
+bound changes. The hardest cost in the original plan is gone.
+
+**Corrected 2026-09-12 — the slot list was wrong, and so was the geometry.**
+This section previously claimed fifteen dead slots at ids 1-5, **7-9**, 11-**15**,
+17-18. Ids **7, 8, 9 are `Solo`, `Mute` and `Pattern Mute`** and id **15 is
+`Active Track`** — live parameters whose *short* name happens to be `ERR`
+because they are never drawn on a parameter page. Only the records whose **long**
+name is also `Error` are dead. That leaves exactly ten usable slots for ten
+parameters, so the list is not a preference and there is no spare.
+
+The cause was an anchor off by one record — see "The Stage 1 correction" below.
 
 What remains is real but smaller: rewrite ten ERR records as LFO4's parameters
 (copied from LFO3, relabelled), add a fourth page-view whose id list names those
@@ -33,11 +43,12 @@ Track Level id10, Global Mix Mode id16). Each is a valid 60-byte record that
 just displays `ERR`, and **none is referenced by address** (only by id-index),
 so overwriting one changes nothing but what that id resolves to.
 
-LFO4 needs ten parameter records. Take ten of the fifteen ERR slots — say ids
-1,2,3,4,5,7,8,9,11,12 — and rewrite each with LFO3's field layout: the same
-handler pointers, ranges and flags, a `LFO4` page label, and fresh controller
-and NRPN numbers. Ten same-length record edits. The page-view (below) points its
-id list at those ten ids; they need not be contiguous.
+LFO4 needs ten parameter records. Take the ten dead ERR slots — ids
+**1,2,3,4,5,11,12,13,14,17** — and rewrite each with LFO3's field layout: the
+same handler pointers, ranges and flags, a `LFO4` page label, cleared controller
+and NRPN numbers, and LFO4's modulation mask (`docs/modulation-mask.md`). Ten
+same-length record edits. The page-view (below) points its id list at those ten
+ids; they need not be contiguous.
 
 This removes relocation, the 56 base repoints, and the bound sweep entirely. The
 one caveat: confirm no existing page lists these ids (none should — they are the
@@ -113,12 +124,15 @@ new-code the feature cannot avoid.
 
 Each stage is independently flashable and observable, so a failure localises.
 
-1. **Repurpose the table (same-length).** — **DONE 2026-09-11**, offline.
+1. **Repurpose the table (same-length).** — **rebuilt 2026-09-12** after the
+   correction below; the 2026-09-11 build was wrong and was never flashed.
    `scripts/build_lfo4_test.py` clones LFO3's ten records into the dead ERR slots
-   (ids 1-5,7-9,11,12), clearing MIDI CC/NRPN so nothing collides, and builds
-   `00_Resources/02_Builds/lfo4-test_DN2_1.10E.syx`. Verified: 277 bytes change,
-   all inside the ids 1-12 region; LFO3 untouched; every integrity field
-   reproduces (content checksum `0xb1cf1c89`, HMAC, padding, window). A fourth
+   (ids 1-5,11-14,17), clearing MIDI CC/NRPN so nothing collides, and builds
+   `00_Resources/02_Builds/lfo4-test_DN2_1.10E.syx`. Verified by decoding the
+   built `.syx` back and diffing the record grid: **237 bytes change**, ids
+   1-5/11-14/17 become `SPD MULT FADE DEST WAVE SLEW SPH MODE DEP MULT` labelled
+   `LFO4`, and **ids 6-10, 15, 16 and 18 are byte-identical** — the live head
+   parameters are untouched, as is LFO3. A fourth
    LFO's parameter block now *exists* in the table, **labelled "LFO4"** -- an
    `LFO4` string was written into a verified-safe slot of unreferenced padding
    (`0x4026eff6`) and the block's page-label pointers repointed to it, so the
@@ -138,6 +152,46 @@ Each stage is independently flashable and observable, so a failure localises.
 Stage 1 is within reach right now with the existing patch model. Stages 2–3 need
 a code-cave applier (`patch/cave.py`, the roadmap's Phase-2 mechanism) and the
 page-view / MOD-navigation reads below. Stage 4 is the make-or-break.
+
+## The Stage 1 correction, recorded because it nearly reached hardware
+
+The 2026-09-11 Stage 1 build was wrong, and the way it was wrong is worth
+keeping.
+
+`docs/parameter-table-consumer.md` anchors the table as
+`record[id] = 0x401e29d0 + id*60`, which is correct **for the field it was
+derived from** — the short-name pointer the page renderer reads first. That
+address is `0x38` bytes into the record. The build script took it as the record's
+*first* byte, so:
+
+- every other field it edited (`+40` controller, `+44` NRPN, `+56` page label)
+  actually belonged to **`id + 1`**;
+- every 60-byte clone **straddled two records**, carrying the tail of one and
+  the head of the next;
+- because the target ids were not contiguous, those halves did not stitch back
+  together across the gaps.
+
+The result overwrote parts of `Machine Type` (id 6), `Track Level` (id 10) and
+`Solo`/`Mute`/`Pattern Mute` (7-9) — live parameters. It was never flashed.
+
+**Why it passed its own checks.** The script guarded by reading the short name
+at the anchor and requiring `"ERR"`, which is true at the anchor under *either*
+reading, and true of Solo/Mute/Pattern Mute as well. The build then verified
+cleanly end to end — compression, content checksum, HMAC, window — because every
+one of those checks is about the *container*, and the container was perfect. A
+green integrity check says the file is well-formed, never that it is correct.
+
+**What catches it.** A wrong anchor into a dense table still yields plausible
+strings. The discriminating probe is a **page boundary**: under the correct
+layout id 84's page label is `LFO1` and id 85's is `LFO2`; under the off-by-one
+layout id 84 reads `LFO2`. `_check_geometry` in `scripts/build_lfo4_test.py` now
+probes five such positions and refuses to run if any disagrees, and the rebuilt
+firmware is diffed against stock record-by-record rather than by byte count.
+
+This is the same class of error as the `+30`/`0x30` radix mistake in
+`docs/engine-state.md`: a small fixed offset, a result that looks right, and no
+check that could tell the difference. The lesson generalises — **an anchor is not
+verified until it has been tested somewhere its neighbours differ.**
 
 ## Code-cave space — a real constraint on the UI stage
 
