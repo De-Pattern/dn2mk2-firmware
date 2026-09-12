@@ -54,6 +54,7 @@ own local image at build time and written back. Output is a .syx under
 00_Resources/02_Builds/ (gitignored).
 """
 
+import argparse
 import hashlib
 import pathlib
 import struct
@@ -83,15 +84,25 @@ N_ENGINE = 107
 LANES = 4
 LFO_PARAMS = ["SPD", "MULT", "FADE", "DEST", "WAVE", "SPH", "MODE", "DEP"]
 
-LFO3_SLOT0 = 17          # LFO3 occupies slots 17..24
-SOURCE_LANE = 3          # LFO3 is lane 3: engine = 4*param + 3
+# LFO n occupies slots (n-1)*8 + 1 .. n*8, and engine lane n: engine = 4*param + n.
+SLOT0 = {1: 1, 2: 9, 3: 17}
 TARGET_LANE = 4          # the reserved lane: engine = 4*param + 4
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-OUT = pathlib.Path("00_Resources/02_Builds/lfo4-probe_DN2_1.11.syx")
+OUT_FMT = "00_Resources/02_Builds/lfo4-probe-lfo{lfo}_DN2_1.11.syx"
+OUT_DEFAULT = pathlib.Path("00_Resources/02_Builds/lfo4-probe_DN2_1.11.syx")
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--lfo", type=int, choices=(1, 2, 3), default=3,
+                    help="which LFO to re-point at the reserved lane (default 3, "
+                         "which reproduces the build confirmed on hardware)")
+    args = ap.parse_args()
+    source_lane = args.lfo
+    slot0 = SLOT0[source_lane]
+    out = OUT_DEFAULT if source_lane == 3 else pathlib.Path(OUT_FMT.format(lfo=source_lane))
+
     firmware = load(read_image(STOCK))
     section = firmware.container.find(MAIN_OS)
     content = bytearray(section.unpack())
@@ -110,11 +121,12 @@ def main() -> int:
     _check_geometry(forward, inverse)
 
     writes = 0
-    print("re-pointing LFO3 from lane 3 to the reserved lane 4\n")
+    print(f"re-pointing LFO{source_lane} from lane {source_lane} "
+          f"to the reserved lane {TARGET_LANE}\n")
     print(f"  {'param':<6}{'slot':>6}{'was':>6}{'now':>6}")
     for param in range(len(LFO_PARAMS)):
-        slot = LFO3_SLOT0 + param
-        was = LANES * param + SOURCE_LANE
+        slot = slot0 + param
+        was = LANES * param + source_lane
         now = LANES * param + TARGET_LANE
         if forward[slot] != was:
             raise SystemExit(
@@ -136,16 +148,25 @@ def main() -> int:
 
     replacement = compress(section.id, section.dest, bytes(content))
     syx = fwbuild.build(firmware, {MAIN_OS: replacement})
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_bytes(syx)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(syx)
 
-    print(f"\nwrote {OUT}  ({len(syx):,} bytes)")
+    print(f"\nwrote {out}  ({len(syx):,} bytes)")
     print(f"  {writes} four-byte writes, {writes * 4} bytes, two tables, no code")
     print(f"  content sha256 {hashlib.sha256(syx).hexdigest()[:16]}")
-    print("\nOn the device: pick a sound, set LFO3 to a fast obvious destination")
+
+    others = [n for n in (1, 2, 3) if n != source_lane]
+    print(f"\nOn the device: set LFO{source_lane} to a fast obvious destination")
     print("(pitch or filter cutoff) with plenty of depth, and listen.")
-    print("  modulates -> the engine HAS a fourth LFO; the lane is live")
-    print("  silent    -> the engine ignores the lane; three LFOs is the truth")
+    print(f"  LFO{others[0]} and LFO{others[1]} are untouched -- use them as the control.")
+    if source_lane == 3:
+        print("  modulates -> the engine HAS a fourth LFO; the lane is live")
+        print("  silent    -> the engine ignores the lane; three LFOs is the truth")
+    else:
+        print(f"\n  Then run LFO{source_lane} and LFO3 TOGETHER, at different speeds:")
+        print("  both modulate independently -> lane 4 is a SEPARATE generator,")
+        print("     so four LFOs can run at once")
+        print("  they interfere, or one stops -> lane 4 is not independent")
     return 0
 
 

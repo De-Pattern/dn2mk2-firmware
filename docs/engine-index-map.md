@@ -779,3 +779,45 @@ choice rather than an unknown: a handful of caves at known choke points, against
 a struct change that three subsystems depend on. Neither is small. What is no
 longer in doubt is that **the engine will modulate** once the values arrive
 (§11) — the remaining work is entirely about getting eight more values to it.
+
+---
+
+## 14. The coexistence probe: can lanes 3 and 4 run at once?
+
+§11 confirmed the engine drives the reserved lane, and left one thing open:
+**the probe *moved* LFO3 rather than adding an LFO**, so lane 3 was vacated at
+the moment lane 4 was driven. That shows lane 4 works. It does not show lane 4 is
+a *separate generator* rather than, say, an alias resolving to whichever lane the
+control side stopped feeding.
+
+That distinction is load-bearing. A fourth LFO needs lane 4 to run **alongside**
+lanes 1–3, and if it cannot, no amount of control-side work produces one.
+
+**The test costs the same 24 bytes.** `scripts/build_lfo4_probe.py --lfo 2`
+re-points **LFO2** at the reserved lane and leaves LFO1 and LFO3 alone:
+
+| | slots | engine lane |
+|---|---|---|
+| LFO1 | 1–8 | 1 — untouched |
+| **LFO2** | 9–16 | **4 — the reserved lane** |
+| LFO3 | 17–24 | 3 — untouched |
+
+Three lanes occupied at once, one of them the reserved one. Then:
+
+* **LFO2 and LFO3 both modulate, independently, at different speeds** → lane 4 is
+  a separate generator and four LFOs can run simultaneously. Combined with §11
+  that closes the engine side completely.
+* **They interfere, or one stops** → lane 4 is not independent, and a fourth LFO
+  is not possible on this engine whatever the control side does.
+
+Build: `00_Resources/02_Builds/lfo4-probe-lfo2_DN2_1.11.syx`.
+
+**The script is now parameterised rather than duplicated.** `--lfo` selects which
+LFO to re-point; it defaults to **3**, and that default reproduces the
+hardware-confirmed build **byte for byte** — same content sha256
+`314693a808ef3f43`. The confirmed artifact stays reproducible from the same
+script that generates the new one.
+
+Verified for `--lfo 2`: 24 bytes differ, 8 in the forward map and 16 in the
+inverse, **none outside the two tables**; LFO1 and LFO3 unchanged; round-trip
+holds over all 100 slots; 21/21 integrity checks and the HMAC reproduced.
