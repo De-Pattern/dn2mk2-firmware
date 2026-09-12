@@ -204,6 +204,67 @@ Honest accounting, all of it still to do:
    grown.
 4. **The engine.** Untouched by any of this.
 
+## The hardware test, built and waiting
+
+`scripts/build_modmask_test.py` builds
+`00_Resources/02_Builds/modmask-test_DN2_1.11.syx` — **two 4-byte writes and
+nothing else**, flipping two closed parameters from mask `0x0` to `0x1e00`:
+
+| id | page | parameter | mask |
+|---|---|---|---|
+| 34 | Portamento | Portamento Time `PTIM` | `0x0` → `0x1e00` |
+| 61 | Amp | Delay Time `DEL` (the AMP envelope delay, **not** the FX delay) | `0x0` → `0x1e00` |
+
+Both are parameters of a synth track's own pages, so they are certainly
+enumerated by the track's `ParameterSet`. That isolates the mask as the only
+variable.
+
+Verified offline: decoded back and diffed against stock — **2 bytes differ**,
+both inside `record+0x24` of ids 34 and 61, every other byte identical, value
+formatters unchanged, and all 21 integrity checks pass including the HMAC
+trailer.
+
+**What to look for.** Open LFO1's `DEST` list and scroll it.
+
+- `PTIM` and the AMP `DEL` **appear** → the mask is the gate, this document
+  stands, and opening the FX pages reduces to the enumeration problem below.
+- They **do not appear** → the mask is necessary but not sufficient, and the
+  `ParameterSet` enumeration must be read before anything else is attempted.
+
+Either result is worth the flash, which is the point of building it.
+
+## Why the FX delay could not be the test
+
+The obvious experiment — open an FX Delay parameter to LFO1 — turns out not to
+be a mask edit at all. **The FX Delay page's parameters already carry `0x1e00`**
+(ids 113–122, 9 of 10), as do Reverb's (123–131, 7 of 9). They are excluded
+somewhere else.
+
+That somewhere is the enumeration. `FUN_4003951e` does not walk the parameter
+table; it walks 101 slots of a `ParameterSet` through vtable slot `+0x50`, and
+only then tests the mask. The four implementations (1.11):
+
+| Class | vtable | slot `+0x50` |
+|---|---|---|
+| `SoundParameterSet` | `0x401db7fc` | `0x40036720` → `FUN_400dc02a(slot, machineA, machineB)` |
+| `FxParameterSet` | `0x401db884` | `0x40036768` → `FUN_400dc0b0(slot)` |
+| `TrigParameterSet` | `0x401db90c` | `0x400369c6` |
+| `MidiParameterSet` | `0x401db994` | `0x400369e6` |
+
+`SoundParameterSet`'s mapping is machine-dependent — it reads two type bytes at
+`+0xde`/`+0xdf` before indexing — and the tables it indexes are `lea`d at
+**`0x42c64b3c`** and **`0x42c64d18`**, which are **outside the MAIN OS image**
+(`0x40000400`–`0x4030b980`). So they cannot be patched by editing section 3, and
+where they actually live is an open question — that address region also shows up
+as `_DAT_446478d0` elsewhere, so something is mapped up there that this project
+has not mapped yet.
+
+**The DN2 has no FX track**, so "the FX masks exist for an FX track's own LFOs"
+is not the explanation — checked with the device's owner, who notes that is
+Octatrack-only. Why Delay and Reverb settings carry a full modulation mask that
+nothing can currently use is **unexplained**, and is one of the more interesting
+loose ends in this document.
+
 ## What this does not establish
 
 - **Nothing about the modulation tick.** This is the destination/parameter/UI
