@@ -342,3 +342,82 @@ the generator, are the same problem seen twice: both need the engine side, and
 the engine side is either absent from this image or is the unreferenced 320 KB
 above. That is now the single highest-value unknown in the project, and §7 names
 the test that settles it.
+
+---
+
+## 9. Settled: the audio engine's code is not in this firmware file
+
+§7 reopened the question after the owner pointed out that the Octatrack ships its
+DSP code. The right move was to check rather than assume, and checking gives a
+clear answer — **the opposite one to the Octatrack's.**
+
+### The ColdFire does no audio DSP
+
+Disassembling the whole code region (`0x40000400`–`0x401d0000`) with the
+Gate-F-cleared reference objdump:
+
+| Measure | Count |
+|---|---|
+| instructions decoded | **582,407** |
+| floating-point instructions (`fmove`, `fmul`, `fadd`, …) | **0** |
+| MAC/MSAC instructions (`macl`, `msacl`, `macw`, `msacw`) | **50** |
+| `mulsl` | 916 |
+
+An audio engine — oscillators, filters, envelopes, reverb — running on this CPU
+would show thousands of MACs and, on a V4e with an FPU, heavy floating-point.
+Fifty MACs across 1.95 MB is incidental arithmetic. **The ColdFire is a control
+processor here and nothing more.**
+
+This is also the proper basis for a claim an earlier session made and then
+withdrew on weak grounds. The withdrawal was correct at the time — it rested on
+a display-update argument the owner refuted — but the conclusion happens to
+hold, for this much better reason.
+
+### No section carries a DSP instruction stream
+
+| Section | Verdict |
+|---|---|
+| 2, bootstrap (30,302 B) | ColdFire, the recovery receiver (`docs/bootstrap.md`) |
+| 3, MAIN OS (3,192,192 B) | ColdFire control code — measured above |
+| 4, updater (32,776 B) | ColdFire; opens `46fc 2700` like MAIN OS (§7) |
+| 7, `blob` (836,956 B) | **32-bit word data.** Column-entropy spread by stride, whole file and by 200 KB chunk: **stride 3 = 0.01** (DSP56300's 24-bit word) and **stride 6 = 0.99** against **stride 4 = 1.17** and stride 8 = 1.18. A 24-bit instruction stream is ruled out outright; 48-bit (SHARC) tracks stride 4's structure only because 6 and 4 share a factor. The low-entropy final byte of each 32-bit group is the little-endian float32 exponent. |
+| 8, ARM Cortex-M (159,948 B) | **New in 1.11**, and the DN2 made sound in 1.10E — so it cannot be the engine. |
+
+**So the engine's program ships on a processor with its own storage, and this
+update file never touches it.** That is a real difference from the Octatrack,
+where octabam found the DSP56300 payloads inside MAIN OS at `0x400e2324` and
+`0x400f59ef`. Same vendor, same container format, different arrangement — which
+is exactly why it needed measuring rather than assuming, in either direction.
+
+The 320 KB candidate region from §7 (`0x40238000`–`0x40287000`) is therefore
+**not** a DSP payload. It is what `docs/memory-map.md` always called it: packed
+data records. §7's candidate is withdrawn.
+
+### What this does to the project
+
+**It removes an option and sharpens the thesis.**
+
+We cannot modify the audio engine. Not "have not yet found how" — the code is
+not in the file we can write. Every cave, every table edit, every hook reaches
+the control processor only.
+
+So **a fourth LFO exists if and only if the engine already implements one**, and
+the whole project now rests on the reserved lane in §4: engine indices
+`4, 8, 12, 16, 20, 24, 28, 32`, eight entries wide, zero-filled, sitting in the
+map the control side uses to address the engine. That finding stops being an
+interesting curiosity and becomes the entire basis of the work.
+
+It is corroborated, and this is the part that makes it more than a hopeful
+reading: the **same** fourth slot is reserved in the persisted sound format and
+in the pattern p-lock ids, both measured by DNX from hardware captures, neither
+of which has anything to do with this index table. Three independent structures,
+one shape. Elektron laid out four everywhere and shipped three.
+
+**And it makes the decisive experiment cheap and safe.** Build the control side —
+records, enumeration, slots — point its mirror writes at the reserved lane, and
+listen. If the engine runs a fourth LFO, it modulates. If it does not, nothing
+moves. One build, one flash, a silent and harmless failure, and a definite
+answer to the question the project has been circling since it started.
+
+That is now the shortest path to knowing whether this is possible at all, and it
+is shorter than it looked when the engine seemed patchable.
