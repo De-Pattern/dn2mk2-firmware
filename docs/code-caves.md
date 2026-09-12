@@ -53,10 +53,53 @@ From `docs/memory-map.md`, on the DN2:
 - Live code (below the constants) is obviously not free.
 
 The largest safe runs measured on 1.11 are ~1 KB each (55 runs, ~26 KB total) —
-plenty for a hook stub and a modest payload, not for a large table. A bigger
-cave means either chaining runs or growing the section, and a section-grow needs
-the heap boundary above `0x80000000`'s data/BSS pinned so new bytes do not
-collide with it.
+plenty for a hook stub and a modest payload, not for a large table.
+
+## "Why not just append at the end and point at it?"
+
+The obvious alternative, and it deserves a real answer rather than the
+hand-wave this document used to give. **Appending does not shift anything.** The
+"every address after it moves" objection applies to *inserting* in the middle;
+bytes added after the section end leave every existing address exactly where it
+was, and the CPU does not care whether a `lea` names `0x40287000` or
+`0x40400000`. Relocation is not the obstacle.
+
+**The obstacle is that the space past the image end is already spoken for.**
+Measured on 1.11 (`docs/memory-map.md`, `docs/engine-index-map.md`):
+
+```
+MAIN OS ends      0x4030b980
+BSS spans         0x402fc000 .. 0x466b74d0     (104,576,208 bytes)
+```
+
+The section end is **inside** the BSS range, with ~104.5 MB of BSS above it. The
+clear loop at `0x400004b2` runs before `main` and zeroes all of it. So an
+appended table is written correctly by the loader, passes every integrity check,
+boots — and is erased milliseconds later, because the linker had already
+reserved that address for a BSS variable.
+
+The right way to hold this: a cave is not "blank space", it is space that is
+blank **and unclaimed**. Past the section end the bytes are blank and claimed,
+which is worse than useless — it fails silently and at runtime, where this
+project's integrity checks cannot see it.
+
+Three ways to get genuinely unclaimed space, kept here because the cave is only
+the cheapest answer for *small* payloads:
+
+1. **Raise the BSS start above the append.** The bounds are plain immediates
+   (`moveal #0x402fc000,%a0`), so it is a same-length edit. The cost is that
+   real BSS variables between the old and new start would no longer be zeroed,
+   and C++ statics assume they are. Testable, and the failure would be loud, but
+   it is a genuine fault and not a theoretical one.
+2. **A separate ELE3 section with its own `dest` above `0x466b74d0`.** The
+   container is a table of `{id, offset, comp_len, dest}` and 1.11 already ships
+   six sections. This avoids both the shifting question and the BSS clear
+   entirely. Registered as `docs/ideas-backlog.md` §6 with the two things that
+   must be checked first.
+3. **Chain cave runs** — ~26 KB total exists, just not contiguously.
+
+For a payload that fits in ~1 KB, the cave still wins on cost alone: no loader
+assumptions, no BSS surgery, no new container machinery.
 
 ## Displaced instructions must be position-independent
 
