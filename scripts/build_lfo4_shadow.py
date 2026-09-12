@@ -123,6 +123,19 @@ DEST_PITCH_ALL = 58
 DEST_PAN = 95
 DEST_VOL = 96
 
+# --standalone: every field a literal, so LFO4 depends on LFO3 for nothing.
+# Stored values are `displayed + 64` for bipolar fields (DNX), and a mirror
+# word is `stored << 8`.
+STANDALONE = {
+    "SPD":  (64 + 32) << 8,   # displayed +32 -- a clear, moderate rate
+    "MULT": 3 << 8,           # the record's default
+    "FADE": 16384,            # displayed 0 -- neutral
+    "WAVE": 0,                # first waveform
+    "SPH":  0,
+    "MODE": 0,                # free-running
+    "DEP":  (64 + 48) << 8,   # displayed +48 -- deep enough to be obvious
+}
+
 # FADE's neutral, settled by two independent sources.
 #
 # The device displays FADE as -64..63, so its neutral is the displayed 0
@@ -150,16 +163,27 @@ FADE_NEUTRAL = 16384
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 OUT = pathlib.Path("00_Resources/02_Builds/lfo4-shadow_DN2_1.11.syx")
 OUT_DEST = "00_Resources/02_Builds/lfo4-dest{d}_DN2_1.11.syx"
+OUT_SOLO = "00_Resources/02_Builds/lfo4-solo{d}_DN2_1.11.syx"
 
 
 def mirror_offset(engine_index: int) -> int:
     return MIRROR_BASE + engine_index * 2
 
 
-def build_payload(own_dest: int | None, fade: int) -> tuple[str, bytes]:
+def build_payload(own_dest: int | None, fade: int, standalone: bool) -> tuple[str, bytes]:
     """The detour body: copy lane 3 -> lane 4, then replay the epilogue."""
     src = [mirror_offset(LANES * p + SRC_LANE) for p in range(len(LFO_PARAMS))]
     dst = [mirror_offset(LANES * p + DST_LANE) for p in range(len(LFO_PARAMS))]
+
+    if standalone:
+        lines = ["| LFO4 standalone: every field a literal, nothing copied from LFO3",
+                 f"    move.w  #{STANDALONE['SPD']},%a3@({dst[0]})   | SPD -> literal"]
+        for p in range(1, len(LFO_PARAMS)):
+            name = LFO_PARAMS[p]
+            v = (own_dest << 8) if (own_dest is not None and name == "DEST") else STANDALONE[name]
+            lines.append(f"    move.w  #{v},%a3@({dst[p]})   | {name} -> {v}")
+        source = "\n".join(lines) + "\n"
+        return source, assemble(source)
 
     lines = [
         "| LFO4 shadow: copy lane 3's mirror words into lane 4",
@@ -177,6 +201,9 @@ def build_payload(own_dest: int | None, fade: int) -> tuple[str, bytes]:
             lines.append(
                 f"    move.w  #{own_dest << 8},%a3@({dst[p]})   | DEST -> engine {own_dest}"
             )
+        elif standalone and LFO_PARAMS[p] in STANDALONE:
+            v = STANDALONE[LFO_PARAMS[p]]
+            lines.append(f"    move.w  #{v},%a3@({dst[p]})   | {LFO_PARAMS[p]} -> {v} (literal)")
         elif LFO_PARAMS[p] == "FADE":
             lines.append(
                 f"    move.w  #{fade},%a3@({dst[p]})   | FADE -> {fade} (neutral)"
@@ -192,6 +219,9 @@ def build_payload(own_dest: int | None, fade: int) -> tuple[str, bytes]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--standalone", action="store_true",
+                    help="write every LFO4 field as a literal so it depends on LFO3 "
+                         "for nothing -- removes depth/mode inheritance as a variable")
     ap.add_argument("--fade", type=int, default=FADE_NEUTRAL, metavar="RAW",
                     help=f"raw FADE word for LFO4 (default {FADE_NEUTRAL}). The device "
                          "shows -64..63; 16384 is the record's default field, which "
@@ -222,7 +252,7 @@ def main() -> int:
     cave = Cave(*anchor["cave"])
     return_to = site + len(stock)
 
-    source, payload = build_payload(args.dest, args.fade)
+    source, payload = build_payload(args.dest, args.fade, args.standalone)
     print(source)
     print(f"payload {len(payload)} bytes; cave {cave.capacity} bytes at 0x{cave.address:08x}")
     if len(payload) + len(stock) + 6 > cave.capacity:
@@ -235,7 +265,8 @@ def main() -> int:
 
     replacement = compress(section.id, section.dest, edited)
     syx = fwbuild.build(firmware, {MAIN_OS: replacement})
-    out = OUT if args.dest is None else pathlib.Path(OUT_DEST.format(d=args.dest))
+    fmt = OUT_SOLO if args.standalone else OUT_DEST
+    out = OUT if args.dest is None else pathlib.Path(fmt.format(d=args.dest))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(syx)
 
@@ -252,9 +283,15 @@ def main() -> int:
         if args.dest == DEST_PAN:
             print("  Engine 95 is Amp PAN -- machine-independent, and nothing else")
             print("  in a patch pans, so any stereo movement is LFO4 and only LFO4.")
-            print("  NOTE: LFO4's DEPTH is copied from LFO3, and depth is bipolar")
-            print("  with 64 as zero. If LFO3's DEP sits at its default the copy")
-            print("  gives LFO4 no depth and nothing will move. Set LFO3 DEP high.")
+            if args.standalone:
+                print("  STANDALONE: every field is a literal -- speed, depth, wave and")
+                print("  mode included -- so LFO4 depends on LFO3 for nothing. LFO3 can")
+                print("  be left entirely at defaults. If the pan still does not move,")
+                print("  inheritance is ruled out and the DEST encoding is the suspect.")
+            else:
+                print("  NOTE: LFO4's DEPTH is copied from LFO3, and depth is bipolar")
+                print("  with 64 as zero. If LFO3's DEP sits at its default the copy")
+                print("  gives LFO4 no depth and nothing moves. Use --standalone.")
         elif args.dest == DEST_PITCH_ALL:
             print("  Engine 58 is SYN slot 50: `PITCH Pitch All` ONLY on page-0")
             print("  machines. On page-2 machines the same slot is `Op C Phase`.")
