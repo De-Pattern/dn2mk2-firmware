@@ -17,7 +17,37 @@ and the initializers for RAM** — it is not where the running firmware keeps it
 mutable state. The startup code makes this explicit: it copies a region of the
 image to external SDRAM and clears BSS there before entering `main`.
 
-So **runtime data lives at `0x80000000`, not in the image.**
+**There are two runtime data regions, not one.** An earlier version of this
+document said "runtime data lives at `0x80000000`, not in the image". That is
+true of the initialized `.data` — about 64 KB — and wrong about everything else.
+`0x4000053e` calls the copy routine and *then* the BSS clear, and the BSS clear
+covers **~100 MB immediately after the image**, in the same `0x40000000` SDRAM
+space:
+
+```
+400004ba:  moveal #0x402fc000,%a0    ; BSS start  (1.10E: 0x402e2000)
+400004c0:  movel  #0x466b74d0,%d1    ; BSS end    (1.10E: 0x464f47d0)
+400004c6:  subl   %a0,%d1 ; asrl #4,%d1
+400004d2:  moveml %d4-%d7,%a0@       ; zero 16 B at a time, d4-d7 cleared
+```
+
+| Build | BSS start | BSS end | Size |
+|---|---|---|---|
+| 1.10E | `0x402e2000` | `0x464f47d0` | 102,836,176 B |
+| 1.11 | `0x402fc000` | `0x466b74d0` | 104,576,208 B |
+
+BSS starts at exactly the address this map calls the ".data initializer block 1"
+— not a contradiction, but an ordering: the copy routine consumes that image tail
+into `0x80000000` first, and the clear routine then recycles it as the first
+bytes of BSS. A second, independent reason those trailing bytes are not free cave
+space.
+
+**Use the BSS span as a validity filter.** An absolute long decoded out of the
+image is only plausibly a data reference if it lands inside it. Scanning 1.11 for
+`lea`/`pea` of absolutes above the image end yields apparent targets at
+`0x4e541300` and `0x5a2967c1`; both fall outside BSS and are opcode bytes
+masquerading as addresses. The `0x42c6xxxx` and `0x4464xxxx` clusters fall
+inside, and `docs/parameter-set-tables.md` identifies what they hold.
 
 ## 1.11 — the build target (build 40059, MAIN OS 3,192,192 B)
 
@@ -42,7 +72,8 @@ one, and clears twice as much BSS:
 | `0x402fc000`–`0x40304000` | **.data/BSS initializer block 1** | copied to `0x80000000` — **not free space** |
 | `0x40304000`–`0x4030b980` | **.data/BSS initializer block 2** | copied to `0x80008000` — **not free space** |
 | `0x4030b980` | end of the loaded MAIN OS section | exactly where copy loop 2 stops |
-| `0x80000000`–`0x80010000` | **runtime SDRAM**: `.data`, BSS | BSS cleared to `0x80010000` — double 1.10E |
+| `0x402fc000`–`0x466b74d0` | **main BSS, ~100 MB** | cleared at `0x400004b2`; recycles the initializer tail. Holds the `ParameterSet` slot tables at `0x42c6xxxx` (`docs/parameter-set-tables.md`) |
+| `0x80000000`–`0x80010000` | **fast SRAM**: the copied `.data` + its own small BSS | cleared to `0x80010000` — double 1.10E. The DSP section loads at `0x80000400`; this is not the main heap |
 | inside the per-track object (`~+0x4f2e0`) | **engine modulation state** | measured on 1.10E; **re-anchor pending on 1.11** |
 | ELE3 dest `0x02010000` | **bootstrap** (recovery receiver) | 1.10E used `0x02000000` |
 | ELE3 section id **8** | **new in 1.11** — 103,416 → 159,948 B, dest 0 | ships with Outbox-8 support; see below |
@@ -71,7 +102,8 @@ One copy loop: `lea 0x402e2000,%a2; lea 0x80000000,%a1; copy…; clrl (BSS)`.
 | `~0x4026e000`–`0x402e2000` | padding runs | `LFO4` label written at `0x4026eff6` |
 | `0x402e2000`–`0x40300000` | .data/BSS initializer | copied to `0x80000000` |
 | `0x402f1980` | end of the loaded section | |
-| `0x80000000`–`~0x8001e000` | runtime SDRAM | BSS cleared to `0x80008000` |
+| `0x402e2000`–`0x464f47d0` | **main BSS, ~98 MB** | cleared at `0x400004b2`; sound slot table at `0x42aa6914` |
+| `0x80000000`–`~0x8001e000` | fast SRAM (`.data` + small BSS) | cleared to `0x80008000` |
 | `0x800003fc` | bootstrap runtime address | ELE3 dest `0x02000000` |
 
 Located on 1.10E: `parameter_page_renderer` `0x40016f38`,
