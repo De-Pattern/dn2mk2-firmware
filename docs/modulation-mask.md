@@ -259,11 +259,46 @@ where they actually live is an open question — that address region also shows 
 as `_DAT_446478d0` elsewhere, so something is mapped up there that this project
 has not mapped yet.
 
-**The DN2 has no FX track**, so "the FX masks exist for an FX track's own LFOs"
-is not the explanation — checked with the device's owner, who notes that is
-Octatrack-only. Why Delay and Reverb settings carry a full modulation mask that
-nothing can currently use is **unexplained**, and is one of the more interesting
-loose ends in this document.
+### Why do Delay and Reverb carry a mask nothing uses? Two answers ruled out
+
+**Not an FX track.** The DN2 has none — checked with the device's owner, who
+notes an FX track with its own LFOs is Octatrack-only.
+
+**Not MIDI.** The natural next guess, also from the owner: perhaps Delay and
+Reverb are masked because they can be modulated over MIDI. The records refute
+it. MIDI addressability lives in two *different* fields, `record+0x18` (CC) and
+`record+0x1c` (NRPN), and it does not track the mask at all:
+
+| Page | Mask | CC / NRPN assigned |
+|---|---|---|
+| Delay | `0x1e00` | yes — CC `0x15`–`0x1c`, NRPN `0x100`–`0x107` |
+| Reverb | `0x1e00` | yes — CC `0x1d`–`0x5c`, NRPN `0x108`–`0x10f` |
+| **Chorus** | **`0x0`** | **yes — CC `0x09`–`0x47`, NRPN `0x129`–`0x12f`** |
+| **Master** | **`0x0`** | **yes — all eleven, CC `0x11`, `0x6f`–`0x77`** |
+
+Chorus and Master are **fully MIDI-addressable and still masked closed**. So the
+mask is not "can be driven from outside"; CC and NRPN are, and the two are
+independent. The owner's hypothesis is disproved by their own device's table.
+
+**What is left.** Two possibilities, and the one experiment that separates them:
+
+1. **The mask governs a destination list that is not the LFO's.** The same
+   `ModDestListView` / `GroupedModDestListView` machinery serves `ModSetupView`
+   — the page that assigns the four MIDI modulation sources (pitch bend,
+   aftertouch, mod wheel, breath; `SoundModConf` holds `modTarget_t[4]`). If
+   Delay and Reverb parameters are assignable *there*, the mask is live and only
+   the LFO path excludes them.
+2. **Dead capability** — shared Elektron framework code, or a feature built and
+   not exposed.
+
+**The check, on the device:** open MOD SETUP and see whether `Delay Time` or
+`Reverb Decay` can be assigned as a destination for the mod wheel. If yes, (1);
+if no, (2). One minute with the instrument settles what would cost hours in the
+disassembler.
+
+Worth noting for either answer: the filter dispatcher at `0x400c2a90` emits
+**only three values** — `0x1e00`, `0x0e00`, `0x0600`. There is no fourth case
+anywhere, which is consistent with `0x0200` being genuinely unused.
 
 ## What this does not establish
 
