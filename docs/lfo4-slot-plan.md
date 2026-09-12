@@ -198,3 +198,69 @@ sound-slot route stays open.
 
 **This is the decision the build now waits on**, and it is worth making before
 any code is written, because the two designs share almost nothing.
+
+---
+
+## The canary result: no cave has ever been proven to run
+
+**2026-09-13.** `lfo4-canary_DN2_1.11.syx` stamps `0x7700` — coarse byte **119** —
+into LFO1's `SPD`, a slot the owner's own saved sound proves is serialised. The
+owner flashed it, loaded an init sound, raised Amp Volume, saved, and read the
+slot back with DNX.
+
+**LFO1 `SPD` reads 112 — the init default. The canary is absent.**
+
+By the criterion set before the test, that is the branch which invalidates the
+approach: *the hook never runs, or this mirror is not what gets saved.*
+
+### Why it does not run
+
+`0x4004ca80` — the function this project hooked — has **no direct callers**. Its
+address appears exactly once in the whole image, as **data**, at `0x401de138`:
+
+```
+0x401de134: 0x40199768
+0x401de138: 0x4004ca80     <-- the hooked function
+0x401de13c: 0xffffffd8     <-- -40: a `this` adjustment
+0x401de140: 0x401ddd9c
+```
+
+That is a **vtable slot**, with the negative thunk offset of a multiple-
+inheritance adjustment beside it. So the function is a *virtual* override
+reached only through a dispatch that did not happen during an ordinary edit and
+save.
+
+The identification was not baseless — the prologue `lea %sp@(-64),%sp` and
+epilogue `lea %sp@(64),%sp` pair correctly, and the `Sound::updateMirror` string
+is pushed inside its bounds. But that string is pushed as an **argument to a
+logging call**, which names a function rather than proving we are in it, and the
+mangled symbol ends `EUlvE_` — a **lambda** inside `Sound::updateMirror`, not the
+method itself. Both signals were available before any firmware was built.
+
+### What this actually establishes
+
+**No code cave has ever been shown to execute on this device.** Gate E proved a
+*data* edit reaches the screen. Every cave built since has been verified
+offline — bytes diffed, disassembly read, integrity checks green — and **none of
+that tests whether the code runs.** Four builds were flashed on the assumption
+that it did.
+
+That is the gap, and it is upstream of every LFO4 question.
+
+### The next build should prove the mechanism, nothing else
+
+Hook a function that **certainly** runs and give it an effect impossible to
+misread. `parameter_value_getter` (`0x4006408a`) is the candidate: it is called
+whenever the UI draws a parameter, this project has already anchored it, and
+adding a constant to its return makes **every parameter on screen read wrong by
+the same amount**. Harmless, instantly visible, reverted by reflashing stock.
+
+- **Values shift** → caves run; the mechanism is sound; the LFO4 failures were
+  target-selection, and `updateMirror` simply needs finding properly.
+- **Nothing changes** → caves do not run as built, and the fault is in the hook
+  mechanism, the cave region, or `patch/cave.py` — which would explain every
+  silent result so far, including the two "confirmed" probes now withdrawn.
+
+**Do not build another LFO4 variant until that question is answered.** Three of
+this project's flashes have now been spent on an assumption that was never
+tested and could have been tested first.
