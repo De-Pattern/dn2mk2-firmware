@@ -280,25 +280,50 @@ Chorus and Master are **fully MIDI-addressable and still masked closed**. So the
 mask is not "can be driven from outside"; CC and NRPN are, and the two are
 independent. The owner's hypothesis is disproved by their own device's table.
 
-**What is left.** Two possibilities, and the one experiment that separates them:
+**Not MOD SETUP either.** Checked on the device by its owner: `Delay Time` and
+`Reverb Decay` are **not** assignable as modulation-setup destinations.
 
-1. **The mask governs a destination list that is not the LFO's.** The same
-   `ModDestListView` / `GroupedModDestListView` machinery serves `ModSetupView`
-   — the page that assigns the four MIDI modulation sources (pitch bend,
-   aftertouch, mod wheel, breath; `SoundModConf` holds `modTarget_t[4]`). If
-   Delay and Reverb parameters are assignable *there*, the mask is live and only
-   the LFO path excludes them.
-2. **Dead capability** — shared Elektron framework code, or a feature built and
-   not exposed.
+So Delay and Reverb carry a full modulation mask that **no destination list in
+the instrument offers** — not the LFO's, not the MIDI modulation sources'. It is
+**latent capability**: the mask says yes, and nothing asks.
 
-**The check, on the device:** open MOD SETUP and see whether `Delay Time` or
-`Reverb Decay` can be assigned as a destination for the mod wheel. If yes, (1);
-if no, (2). One minute with the instrument settles what would cost hours in the
-disassembler.
+That confirms the model — for FX parameters the gate is the **enumeration**, not
+the mask — and it makes the enumeration the only thing worth attacking for the
+FX-modulation idea.
 
-Worth noting for either answer: the filter dispatcher at `0x400c2a90` emits
-**only three values** — `0x1e00`, `0x0e00`, `0x0600`. There is no fourth case
-anywhere, which is consistent with `0x0200` being genuinely unused.
+### The caveat this creates, and the argument that survives it
+
+Delay and Reverb being marked modulatable when nothing can reach them is
+evidence that **these masks are not authored tightly**. That cuts against this
+document's headline: if the table carries capability the UI never exposes, then
+the fourth bit being set on 189 parameters could be the same kind of slack
+rather than a deliberate reservation for a fourth LFO.
+
+The argument has to be made on the *structure* instead, and there it holds:
+
+The mask is a **thermometer-coded rank**, not a set of independent flags. Count
+the bits: ordinary parameters rank **4**, LFO1's rank **3**, LFO2's rank **2**,
+LFO3's rank **1**, closed parameters rank **0**. A modulator's filter demands a
+minimum rank — MOD1 needs 4, MOD2 needs 3, MOD3 needs 2 — which is exactly the
+"a later LFO may modulate an earlier one" rule expressed arithmetically.
+
+Now the decisive detail: **LFO3's own parameters are rank 1, not rank 0.** Rank
+0 exists and is used — Chorus, Master, Portamento, Retrig, Euclidean and every
+`SLEW` are rank 0, genuinely closed. LFO3's parameters are deliberately placed
+one step above that.
+
+The *only* thing that distinction can mean is "modulatable by something strictly
+later than LFO3". No such modulator exists in the shipped firmware. **The rank
+system has one level more than it has modulators**, and that surplus level is
+precisely the one a fourth LFO would occupy.
+
+That is a claim about the grading's internal consistency, not about how
+generously any single bit was set, so loose authoring elsewhere does not touch
+it. It remains an inference — no code selects on `0x0200`, and the filter
+dispatcher at `0x400c2a90` emits only three values, with no fourth case
+anywhere.
+
+
 
 ## What this does not establish
 
