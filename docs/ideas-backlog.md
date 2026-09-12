@@ -228,3 +228,67 @@ thing DNX can verify offline by reading the resulting pattern.
 somewhere to put the values (DNX has the p-lock layout and the free `4*slot + 0`
 band), and a UI affordance to trigger it. The first is the same blocker as
 everything else on this list.
+
+---
+
+## 6. A new ELE3 section as real address space, instead of caves
+
+**The idea (2026-09-12, raised by the owner).** Asked why new code cannot simply
+be appended at the end of MAIN OS and referred to by its address, the honest
+answer turned out to be narrower than `docs/code-caves.md` had been saying.
+Appending shifts nothing — the "every address moves" objection is about
+*inserting*, not appending, and absolute addressing does not care where the
+bytes sit. What kills it is that the space past the section end **is already
+reserved**: BSS runs `0x402fc000`–`0x466b74d0` on 1.11, the section ends at
+`0x4030b980`, and the clear loop at `0x400004b2` zeroes ~104.5 MB of it before
+`main` runs. An appended table is erased at boot.
+
+**But that argument does not apply to a different address.** The ELE3 container
+is a table of `{id, offset, comp_len, dest}`, and 1.11 already ships six
+sections at four distinct `dest` values (`0x02010000`, `0x40000400`,
+`0x80000400`, and two at `0`). Nothing about the format restricts us to the
+six that Elektron chose. A **seventh section with `dest` above the BSS end**
+would be written straight to an address the startup code never touches — real,
+unclaimed, arbitrarily large address space, with no cave chaining, no BSS
+surgery, and no shifting.
+
+That would change the ceiling on this whole project. Caves cap a payload at
+~1 KB per run, ~26 KB total, which is why the LFO4 work keeps running into
+"needs a cave" on things as small as a 430-byte table.
+
+**Both gating questions are answered, and both answers are yes** (2026-09-12,
+`docs/memory-map.md`).
+
+1. **Does SDRAM extend above `0x466b74d0`? Yes — to `0x48000000`.** The C
+   runtime's first instruction is `moveal #0x48000000,%sp` at `0x400004f2`, and
+   stacks descend, so the top of usable RAM is `0x48000000` and SDRAM is
+   **128 MB**. The window above BSS is **26,512,176 bytes (25.3 MB)**. (The
+   memory-controller setup at `0x4000043e` was the suggested route; the stack
+   init turned out to be a shorter and less ambiguous one.)
+2. **Does the heap live up there? No.** Scanning every 32-bit immediate that
+   names an address in `[BSS start, top of RAM)` returns **7,043 hits inside
+   BSS and none above it**. The highest reach `0x466b748c` — within **68 bytes**
+   of the BSS end — and then stop dead, which is what a linker-computed `_end`
+   looks like. So the heap is a static arena *inside* BSS, which is also why BSS
+   is 100 MB: globals plus the pool.
+
+**The only occupant of the window is the stack**, descending from `0x48000000`,
+and its depth is unmeasured. So **place a new section at the bottom of the
+window, not the top** — just above `0x466b74d0`, where the stack would have to
+descend 25 MB to reach it.
+
+**Then the loader question.** Whether the bootloader validates `dest` at all, or
+writes wherever the section table says. `docs/bootstrap.md` records that
+reception validates very little — "nothing reception validates can tell our
+`gate-d` image apart from stock" — which is encouraging but is about the
+*container*, not about `dest` handling specifically. Read
+`verify_and_flash_container` before trusting it.
+
+**Risk, stated plainly.** This writes to an address no stock firmware writes to,
+which is a different class of experiment from everything done so far: every
+patch to date has been same-length edits inside a region the device already
+uses. A bad `dest` could fail at flash time rather than at boot. The recovery
+path (`docs/flashing.md`) is proven, so the downside is a reflash, not a brick —
+but this should not be the first thing tried after a long gap, and it should be
+tried with a payload whose absence is harmless (a table nothing reads yet),
+never with a payload the firmware depends on to boot.
