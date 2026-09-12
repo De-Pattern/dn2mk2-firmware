@@ -138,3 +138,63 @@ The known choke points, where a hook is certainly needed:
 
 Plus whatever the storage path turns out to be, which is not yet scoped and is
 the one place where "LFO4's values do not survive a save" would be the failure.
+
+---
+
+## The 29 sites, classified by how their index is produced
+
+Static classification of every value-array access, by tracing what sets the index
+register in the 24 instructions before it. The question is which sites can ever
+see a slot ≥ 101.
+
+| Index comes from | Sites | Reach |
+|---|---|---|
+| **`param_index_in_page`** (`0x400dbcc4`, returns `record[id]+0x04`) | `0x40036536` `0x40037194` `0x40037260` `0x40037be8` `0x40038902` `0x4006414c` | **any parameter id — generic** |
+| **the changed-parameter list** (`Sound::updateMirror`) | `0x4004cb08` `0x4004cb74` | **generic** |
+| **a 0..100 fill loop** | `0x400440a2` | **generic by construction** |
+| **a bulk copy** (via `0x400dbc88`) | `0x4004c226` `0x4004c27c` | **generic** |
+| the inverse table (reverse copy, different access form) | `0x400dd25e` | **generic** |
+| small local bounds (`#4`, `#15`, `#16`, `#49`) or `is_lfo_param` | the `lea` sites and the remainder | narrow — need individual reading |
+
+**So the hook count is around eleven, not twenty-nine** — better than §13 feared,
+worse than a weekend.
+
+**And six of the eleven share one upstream function.** All the
+`param_index_in_page` sites take their index from a single accessor returning
+`record[id] + 0x04`. That is the natural place to *think* about the problem, even
+though hooking it alone does not solve it: changing what it returns just moves
+the out-of-bounds access rather than preventing it.
+
+## The simplification this suggests, and it may be the right design
+
+Every difficulty above comes from one decision: **that LFO4's values live inside
+the sound object**, which is full, boxed in, persisted, pooled ×128, and mirrored.
+
+They do not have to.
+
+LFO1–3 are *sound* parameters because they are stored in the preset. **A fourth
+LFO could instead be track-level** — its eight values held in a small array of
+our own, one set per track, never touching the sound object at all. Then:
+
+| | sound-slot design | track-level design |
+|---|---|---|
+| sound object | grows / needs 11 hooks | **untouched** |
+| slot space | needs 8 of 101 | **needs none** |
+| `ParameterSet` table | relocate + grow | **unchanged** |
+| forward/inverse maps | relocate + grow | **unchanged** |
+| hooks | ~11 | **~3** — mirror write, UI read, UI write |
+| persisted format | unchanged either way | unchanged |
+| **LFO4 saved per sound?** | yes | **no — per track** |
+
+The whole slot problem — §13, §6b, the 101-entry array, the machine-type byte —
+**disappears**, because slots were only ever the mechanism for getting values
+into the mirror, and a hook can put them there directly.
+
+**The cost is real and should be stated, not buried:** a track-level LFO4 would
+not be stored in a Sound preset, so loading a sound would not bring its LFO4
+settings with it. Whether that is an acceptable version-one is a judgement for
+the owner, not a technical question — and it is reversible later, since the
+sound-slot route stays open.
+
+**This is the decision the build now waits on**, and it is worth making before
+any code is written, because the two designs share almost nothing.
