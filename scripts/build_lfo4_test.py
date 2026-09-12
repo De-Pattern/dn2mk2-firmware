@@ -15,14 +15,19 @@ What it does and does not do, stated plainly:
   keeps the image valid and, on hardware, that the device still boots and its
   existing pages are unchanged.
 
-**Corrected 2026-09-12.** The previous version anchored a record at
-``TABLE + id*60`` where ``TABLE`` is the *short-name* pointer. That address is
-0x38 bytes into the record, so every other field it edited belonged to ``id+1``
-and every 60-byte clone straddled two records -- which would have overwritten
-the live parameters Machine Type (6), Track Level (10) and Solo/Mute/Pattern
-Mute (7-9). The build was never flashed. See docs/modulation-mask.md for the
-record layout this version uses, and the guard in ``_check_geometry`` which
-refuses to run if the layout does not resolve to known names.
+**Corrected twice on 2026-09-12; neither bad build was flashed.** First, the
+record was anchored at ``TABLE + id*60`` where ``TABLE`` is the *short-name*
+pointer -- 0x38 bytes into the record -- so every other field edited belonged
+to ``id+1`` and every clone straddled two records, overwriting parts of the
+live Machine Type (6), Track Level (10) and Solo/Mute/Pattern Mute (7-9).
+Second, the fix over-corrected to ``base - 8 + id*60``, which carried the
+previous record's value formatter into each clone.
+
+The record starts **at** the accessor base: ``record(id) = base + id*60``,
+fifteen 4-byte fields closing the 60 bytes exactly. See docs/modulation-mask.md
+for the field list, and ``_check_geometry`` below, which refuses to run unless
+the layout resolves at page boundaries *and* the three LFO blocks agree with
+each other -- the probe that caught the second error.
 
 No firmware bytes live in this repository: the record bytes are read from the
 user's own local image at build time and written back. Output is a .syx under
