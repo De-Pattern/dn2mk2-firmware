@@ -186,6 +186,73 @@ Same span, `0x40001000` + 64 KB:
 
 That last row is Gate F in one line.
 
+## objdump prints displacements in two different radixes — a real trap
+
+Gate F says objdump decodes the *instructions* correctly. It does. But its
+**printed operands are not all in the same base**, and that has already produced
+one wrong conclusion here, so it is recorded as a hazard rather than a curiosity.
+
+Measured by assembling known values with `m68k-linux-gnu-as` and disassembling
+the result:
+
+```
+lea (48,%a0,%d0.l),%a0   ->  41f0 0830  ->  objdump: lea %a0@(30,%d0:l),%a0
+lea (30,%a0,%d0.l),%a0   ->  41f0 081e  ->  objdump: lea %a0@(1e,%d0:l),%a0
+movea.l (24,%sp),%a2     ->  246f 0018  ->  objdump: moveal %sp@(24),%a2
+```
+
+So in one listing:
+
+- an **indexed-mode** displacement (mode 6, brief extension word) prints in
+  **hex with no `0x` prefix** — `0x30` shows as `30`;
+- a **`d16(An)`** displacement (mode 5) prints in **decimal** — `0x18` shows
+  as `24`.
+
+An indexed displacement that happens to look like a plausible decimal number is
+therefore silently ambiguous. This is exactly how `+0x30` (48) was first read as
+"+30" and then matched against an unrelated structure — a correlation that had
+to be retracted.
+
+**The rule:** for any displacement that matters, confirm it against the raw
+bytes or against Ghidra, which prints `0x30` unambiguously. When two tools
+disagree about a number, assemble the candidates and compare bytes — that is
+the only arbiter, and it takes seconds.
+
+## Working the image in Ghidra: the project workflow
+
+`ghidra\analyze.bat` imports and auto-analyses once, keeps the project, and
+runs post-scripts against it. Auto-analysis is the slow part (**~128 s** for the
+3.19 MB 1.11 MAIN OS, dominated by Decompiler Switch Analysis at 68 s); once the
+project exists the script reuses it with `-process -noanalysis`, so later
+queries return in seconds.
+
+```bat
+rem first run: import + analyse + query (slow)
+ghidra\analyze.bat <projdir> mainos_111 <mainos.bin> 0x40000400 ^
+  -postScript DecompileFunction.java 0x4004dfb0
+
+rem later runs: reuse the project, batch several queries (fast)
+ghidra\analyze.bat <projdir> mainos_111 <mainos.bin> 0x40000400 ^
+  -postScript DecompileFunction.java 0x4004afec ^
+  -postScript DecompileFunction.java 0x40043fdc
+```
+
+Notes that cost time to learn:
+
+- Get the raw image with `dnfw extract` (or unpack section 3 in Python); the
+  loader wants a flat binary at base `0x40000400`, processor
+  `68000:BE:32:Coldfire`.
+- **Close the Ghidra GUI first.** A project open in the GUI holds a lock and the
+  headless run fails; use a separate project directory if you need both.
+- `DecompileFunction.java` also accepts a **quoted string** instead of an
+  address, and decompiles every function referencing that literal — the way to
+  get from a message on screen to the code that prints it.
+- The decompiler emits a `Could not recover jumptable … too many branches`
+  warning on some large switch functions; the surrounding C is still sound, but
+  the indirect target is not resolved and must be read as assembly.
+- Keep the project out of the repository (it is gitignored) — it is derived from
+  Elektron's firmware and is regenerated in two minutes.
+
 ## It was built with GCC, and the C++ names are still in it
 
 This is the single most valuable property of the image. Elektron ship it with
