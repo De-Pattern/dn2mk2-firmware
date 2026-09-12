@@ -111,55 +111,92 @@ objects it already decodes.
 
 ## 4. Open the FX and Master parameters to LFO modulation and p-locks
 
-**The idea (2026-09-12).** The DN2's FX settings — reverb, delay, chorus — accept
-MIDI CC from outside, but you cannot route an LFO to them or p-lock them in a
-pattern. Make them modulatable like any other parameter. Same for the other
-pages the device holds closed.
+**The idea (2026-09-12).** The DN2's FX **settings** — the parameters that
+control reverb, delay and chorus themselves — accept MIDI CC from outside, but
+you cannot route an LFO to them or p-lock them in a pattern. Make them
+modulatable like any other parameter.
 
-**Why this one is unusually concrete.** `docs/modulation-mask.md` found the
-mechanism that decides this, and it is a **single field per parameter record**.
-A parameter appears in an LFO's destination list iff `(filter & ~mask) == 0`,
-where `mask` is the word at `record+0x2c`. Measured across all 271 records, the
-pages split cleanly:
+**Not the sends.** Clarified by the owner: the per-track Chorus/Delay/Reverb
+*sends* are already modulatable, and that is not what this is about. The
+firmware agrees — ids 67/68/69 (`FX` page, `CHR`/`DEL`/`REV` Send) all carry the
+full `0x1e00` mask.
 
-| Page | Records at `0x1e00` (modulatable) | Records at `0x0` (closed) |
+**What the mask actually says.** `docs/modulation-mask.md` found the field that
+decides destination-list membership, at `record+0x24`. Read across the FX and
+Master pages it does **not** split the way the idea assumed:
+
+| Page | ids | Mask |
 |---|---|---|
-| Delay | 9 | 1 |
-| Reverb | 8 | 1 |
-| **Chorus** | **0** | **8** |
-| **Master** | **0** | **11** |
-| Portamento | 0 | 2 |
-| Retrig | 0 | 4 |
-| Euclidean | 0 | 8 |
+| **Delay** settings | 113-122 | **`0x1e00` on 9 of 10** — Delay Time, Pingpong, Stereo Width, Feedback Gain/HPF/LPF, Reverb Send, Mix Volume, FX Routing. Only `Delay Mix Vol.` is `0x0` |
+| **Reverb** settings | 123-131 | **`0x1e00` on 7 of 9** — Pre-delay, Decay Time, FB Shelving Freq/Gain, Input HPF/LPF, Mix Volume, FX Routing. Only `Reverb Mix Vol.` is `0x0` |
+| **Chorus** settings | 105-112 | **`0x0` on all 8** |
+| **Master** (compressor) | 149-159 | **`0x0` on all 11** |
 
-So **Delay and Reverb are already open** — the closed ones are Chorus, Master,
-Portamento, Retrig and Euclidean. Opening Chorus would be **eight one-word
-edits**, `0x0` → `0x1e00`, with no relocation, no bound change and no new code.
-That is the cheapest experiment in this whole backlog, and it doubles as the
-cleanest possible test of the mask semantics.
+So **Delay and Reverb settings are already marked modulatable** — yet the owner
+reports they cannot be reached. That is the interesting part: **the mask is
+necessary but not sufficient.**
 
-**What would have to be true.** The mask governs *list membership* — whether the
-parameter can be chosen as a destination. Whether the engine can then actually
-apply a modulation to an FX parameter is the separate question, and it is the
-same class of unknown as the fourth LFO's engine gate: the destination has to be
-something the modulation path knows how to write. Two ways it could fail:
+**Where the real gate probably is.** The destination-list builder
+`FUN_4003951e` does not walk the parameter table. It walks **101 slots of a
+`ParameterSet`**, through a virtual call:
 
-- the modulated value is applied through a per-track/per-voice path that FX
-  parameters (which are global, not per-track) never pass through;
-- the `0x0` is not a policy choice but a marker that no write path exists,
-  in which case a chosen destination would simply do nothing.
+```c
+slot = (**(code **)(*param_1 + 0x50))(param_1, i);   /* i = 0 .. 0x64 */
+```
 
-Either failure is **visible and harmless**: the parameter appears in the `DEST`
-list and does not move. Nothing is written to a place the firmware does not
-already write.
+and only then tests the mask. The RTTI names four such classes —
+**`SoundParameterSet`, `FxParameterSet`, `TrigParameterSet`, `MidiParameterSet`**
+(typeinfo strings at `0x402147ef`ff). A synth track's LFO almost certainly walks
+a `SoundParameterSet`, which would never enumerate an FX setting no matter what
+its mask says.
 
-**P-locks are a second, separate question.** Whether a parameter can be
-p-locked is not obviously the same field — that needs finding before assuming
-one edit buys both. DNX's decoded pattern format
+If that is right, the work splits cleanly:
+
+- **Delay and Reverb**: the mask is already correct; the job is **enumeration** —
+  get those ids into the set the LFO's destination list walks. No record edits.
+- **Chorus and Master**: need **both** — the mask set to `0x1e00` *and* the
+  enumeration. Chorus is eight one-word record edits, Master eleven.
+
+**The open question to settle first.** Why are Delay and Reverb masked
+modulatable while Chorus and Master are not? The most likely answer is that the
+DN2 has an **FX track** with its own LFOs, and those masks exist for it — which
+would also explain why a *synth* track cannot reach them. Check the Digitone II
+manual for which pages an FX-track LFO can target; if the FX track can already
+modulate delay and reverb settings, then this idea is really only about Chorus,
+Master, and p-locks. **Read the manual before touching a byte** — this is
+exactly the case `docs/device-model.md` exists for.
+
+**Then the same engine unknown.** Even with mask and enumeration right, whether
+the modulation path can *write* a global FX parameter is the same question that
+gates the fourth LFO. Failure is visible and harmless: the parameter appears in
+the `DEST` list and does not move.
+
+**P-locks are a separate question.** Whether a parameter can be p-locked is not
+obviously this field. DNX's decoded pattern format
 (`DNX/docs/dn2-pattern-format.md`) is where to check what the p-lock table can
 address.
 
-**Sequence it after the tick.** The same unknown — what the write side can
-reach — gates this and the fourth LFO, so finding the modulation tick answers
-both at once. Do that first; this becomes cheap or impossible depending on what
-it says.
+---
+
+## 5. Bake an LFO's output into parameter locks
+
+**The idea (2026-09-12, from the owner).** Internal LFO modulation is invisible
+on screen, and deliberately so — if the display followed the LFO, arming live
+record during playback would capture that movement as p-locks and record the
+modulation on top of itself (`docs/lfo4-feasibility.md`, the retraction).
+
+But doing it *on purpose* is a feature: run an LFO, then **bake** its output
+into parameter locks across the sequence and free the LFO for something else.
+The owner's own caveat is the cost: "it would take precious sequencer space for
+other modulations/parameter locks."
+
+**Why it is interesting here.** It needs no new engine capability — it is a
+sequencer-data transform, writing values the p-lock table can already hold. That
+makes it a very different risk class from a fourth LFO, and it is the kind of
+thing DNX can verify offline by reading the resulting pattern.
+
+**What would have to be true.** We would need the LFO's output at each step
+(which needs the tick, or a good enough reimplementation of the LFO's maths),
+somewhere to put the values (DNX has the p-lock layout and the free `4*slot + 0`
+band), and a UI affordance to trigger it. The first is the same blocker as
+everything else on this list.

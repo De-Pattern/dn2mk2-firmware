@@ -101,6 +101,10 @@ the DN2, and none of that is assumed here. What transfers is purely
 | `tools/ot3_asm.py` — the `Asm` class, every encoding checked against a stock instruction, `.link()` resolving `.w` branch displacements | `patch/coldfire.py` | ColdFire ISA, not device-specific |
 | `tools/midisc/util.py` — `jmp_abs`, `jsr_abs`, `off()`, `fix_jsr`, the "cave not empty" guard | `patch/cave.py` | same |
 
+Its LFO content is a page-mode constant and nothing more — see
+`docs/octatrack-lfo-prior-art.md` for the survey of what the four Octatrack
+projects have and have not done with LFOs.
+
 Its `docs/TECH.md` records the Octatrack's own `SAFE_CAVE` at
 `0x400D24D0…0x400D2CDC`; those addresses are **the Octatrack's, not ours** — the
 DN2's safe space is mapped independently in `docs/memory-map.md`.

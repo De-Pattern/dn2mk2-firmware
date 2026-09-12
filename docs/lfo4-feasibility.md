@@ -288,35 +288,59 @@ slot of each group of eight unused** — "there is room for a fourth LFO here to
 (`DNX/docs/dn2-format.md`). So the *storage* side is settled: a fourth LFO's
 settings already have a reserved home in every sound.
 
-Two things are now established about the engine, narrowing the gate:
+### RETRACTED 2026-09-12: "the engine is on ColdFire"
 
-- **It is on ColdFire, not the SHARC.** When an LFO modulates a parameter the
-  DN2 shows that value moving on the parameter page, and the page is drawn by
-  MAIN OS — so the modulated value, and therefore the LFO computation, lives on
-  the ColdFire side that the tooling reads. The worst case (a SHARC-only engine
-  needing a different disassembler) is ruled out.
+This section used to claim the LFO computation was settled as ColdFire-side,
+on this argument: *"When an LFO modulates a parameter the DN2 shows that value
+moving on the parameter page, and the page is drawn by MAIN OS."*
+
+**The premise is false.** The device's owner, who plays it: *"Interestingly, it
+doesn't. Only modulation that actually moves visually values is external MIDI
+modulation."* Being able to see internally-modulated values move has been a
+long-standing request to Elektron.
+
+There is a plausible design reason, and it is worth writing down because it
+constrains any "show the modulation" feature we might be tempted by later: if
+the displayed value followed the LFO, then arming live record while a sequence
+plays would capture that movement as parameter locks, **recording the modulation
+on top of itself**. Baking an LFO to p-locks deliberately is a real feature idea
+(`docs/ideas-backlog.md` §5) — having it happen by accident is not.
+
+So the argument is withdrawn, and with it the conclusion. **Where the LFO is
+computed is open again**, and the surrounding evidence now leans the other way:
+
+- no smooth curve table exists in *any* section of the firmware
+  (`docs/data-sections.md`), which is what a table-driven waveform would need —
+  though triangle, saw, square and ramp need no table, and the owner's read is
+  that "all forms are computed/derived live", which would leave no table either
+  way. So this is weak evidence, not strong;
+- there is **no SHARC program anywhere in the update**, which cuts against a
+  DSP-side engine — unless the DSP runs from its own never-updated flash;
+- the one piece of Elektron prior art that implements LFO *generators*,
+  octabam's reverb, puts them on the **DSP** — on a different and much older
+  device, so a hypothesis only (`docs/octatrack-lfo-prior-art.md`).
+
 - **A hardcoded 3-LFO site is found in the engine path.** The LFO speed handler
   `0x40035f32` carries `if (uVar1 < 3)` beside its `case 0x1e` (offset 30, the
   LFO block). That is one of the per-LFO count sites this document predicted —
-  the kind of `< 3` bound a fourth LFO must raise.
+  the kind of `< 3` bound a fourth LFO must raise. This still stands; it is a
+  parameter-side site and does not depend on the retracted argument.
 
-The read path is now mapped end to end, which locates the generator by
-elimination. Drawing a parameter goes: page renderer `FUN_40016f38` → value
-getter `FUN_40064786` → resolver `FUN_400635d0`, and the resolver **reads the
-current, already-modulated value out of the track/sound engine state** — an
-object reached as `page_view[0x1a]` (the engine), with the value living far
-inside it (`+0x4f2e0`, read via a `+0x28` vtable method). So the modulated value
-is *stored* in engine state; the LFO computation that *writes* it runs on a
-separate real-time tick.
+The read path described below was also read as reaching "the current,
+already-modulated value". Since the display does **not** move under LFO
+modulation, it more likely reaches the *set* value plus external-MIDI
+modulation. Treat that chain as unverified until re-read:
 
-**That write-side tick is the generator, and it is the remaining target.** It
-advances each LFO's phase, computes its waveform, scales by depth, and writes the
-modulated value into `page_view[0x1a]`'s state. To find it: identify the class of
-`page_view[0x1a]` (the per-track sound engine) and read its update method, or
-find what writes the `+0x4f2e0` state region. Confirm there its LFO count is a
-raisable bound (`< 3` / `moveq #3`) rather than three unrolled instances — and
-`0x40035f32`'s `if (uVar1 < 3)` beside `case 0x1e` is a first such site. It is a
-ColdFire read throughout, not cross-CPU.
+> page renderer `FUN_40016f38` → value getter `FUN_40064786` → resolver
+> `FUN_400635d0`, reading engine state at `+0x4f2e0` (1.10E) / `+0x4f358`
+> (1.11) via a `+0x28` vtable method.
+
+**The write-side tick remains the target**, and the cheapest way to settle which
+CPU it runs on is now the *external MIDI* path: that modulation demonstrably
+does move the display, so it is ColdFire-side and its write into engine state
+can be traced. Whatever writes the value for external MIDI modulation is either
+the same machinery the LFO uses, or proof that the LFO uses different machinery
+— and either answer is progress.
 
 ## What is not yet known, and is next
 
