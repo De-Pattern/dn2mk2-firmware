@@ -1,5 +1,10 @@
 # The engine index space, and the fourth LFO lane that is already in it
 
+> **RETRACTED IN PART, 2026-09-12 — read §15 first.** The map described below is the
+> slot ↔ **persisted-storage-offset** map, not an engine addressing scheme, and the
+> hardware results in §§11 and 14 are withdrawn. The reserved fourth slot is real;
+> that the *engine* acts on it was never shown.
+
 `docs/lfo4-feasibility.md` closed its generator hunt with a reframing: there is
 no LFO generator class anywhere in MAIN OS, so the question stops being *"find
 the tick in this image"* and becomes *"find what MAIN OS **tells** the engine
@@ -844,3 +849,102 @@ built four LFOs and exposed three.
 
 Everything that remains is control-side, where we can write bytes, and it is one
 problem: **eight runtime slots** (§13).
+
+---
+
+## 15. RETRACTION: the "engine index map" is the storage layout
+
+**2026-09-12.** The silent results from `build_lfo4_shadow.py` forced a check that
+should have been made before §11 was written, and it overturns the two results
+this project called its central ones.
+
+### What was found
+
+`Sound::updateMirror`'s second argument — the pointer this document has called
+"the mirror the engine reads" — is typed in the mangled name itself:
+
+```
+ZN5Sound12updateMirrorEPN9Digisharc17soundStorage_v3_tEP14DataChangeInfoE
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+```
+
+**`Digisharc::soundStorage_v3_t`** is the *persisted* sound format — the one DNX
+decodes out of `.dnx` backups. Not an engine structure.
+
+And the offsets confirm it independently. This document derived
+`offset = 0x1c + 2*engine` with `engine = 4*param + lfo`. DNX measured the
+stored sound format from hardware captures and records
+`offset = 30 + 8*param + 2*lfo` with `lfo` 0-based. Those are the same formula:
+
+| param | DNX LFO1/2/3 | ours |
+|---|---|---|
+| SPD | 30, 32, 34 | 30, 32, 34 |
+| MULT | 38, 40, 42 | 38, 40, 42 |
+| DEST | 54, 56, 58 | 54, 56, 58 |
+| DEP | 86, 88, 90 | 86, 88, 90 |
+
+All 24 identical. **`ValueWithMirror<sound_struct, soundStorage_v3_t>` means
+exactly what it says: the live object and its serialised copy.** "Mirror" is the
+save image, and `updateMirror` keeps it in sync.
+
+### What that retracts
+
+**§11 — "the engine implements a fourth LFO" — is withdrawn.** The probe
+re-pointed `forward[slot]` so LFO3's eight slots mapped to indices 4, 8, 12…
+LFO3 kept modulating. That was read as the engine driving lane 4. But if those
+indices are **storage offsets**, LFO3 kept working for a trivial reason: the
+forward and inverse maps were changed together, so values were written to
+different offsets and read back from those same offsets. A consistent
+round-trip. **The test could not distinguish "the engine runs a fourth LFO" from
+"the storage round-trip is self-consistent", and the positive result is what
+both predict.**
+
+**§14 — "lanes 3 and 4 run independently, four can run at once" — is withdrawn
+for the same reason.** Putting LFO2 on lane 4 while LFO1 and LFO3 stayed put
+also only exercised the storage round-trip.
+
+**And the "two entities competing" heard from `lfo4-shadow` was not LFO4.** With
+writes landing in storage rather than the engine, that was LFO3 plus whatever
+else the patch had running — the owner's own control test showed LFO1 and LFO2
+compete the same way.
+
+### What still stands
+
+Unaffected, because none of it depends on this:
+
+- the parameter table, record layout, and the modulation mask
+  (`docs/modulation-mask.md`) — the mask flips were flashed and confirmed
+  independently;
+- the `ParameterSet` enumeration and `param_set_tables_build`
+  (`docs/parameter-set-tables.md`);
+- the memory map, BSS span and 128 MB SDRAM (`docs/memory-map.md`,
+  `docs/hardware.md`);
+- the DN1/DN2 DSP comparison (`docs/dn1-dsp-comparison.md`);
+- **the reserved fourth slot itself.** It is real. DNX measured it in the stored
+  format and in the pattern p-lock ids; this project re-derived it from the
+  ColdFire side. Three readings, one reservation. What was never shown is that
+  the *engine* acts on it.
+
+### What it costs, honestly
+
+The forward/inverse tables are the slot ↔ **storage-offset** map, not an engine
+addressing scheme, and §§4–6 should be read that way. The name "engine index"
+was this document's invention and it did the damage: once a thing is called an
+engine index, a positive result reads as an engine result.
+
+The fourth-LFO question is **reopened**. The engine's code is not in this
+firmware file (§9, `docs/hardware.md`), so it still cannot be patched — but
+whether it implements a fourth LFO is now unknown again rather than confirmed.
+
+### What would actually test it
+
+The engine is fed from somewhere other than `soundStorage_v3_t`. Find that path
+— the write side of the live `sound_struct`, or whatever crosses to the SHARC —
+and drive lane 4 there. `docs/lfo4-slot-plan.md`'s classification of the 29
+value-array sites is the right map to start from, since `sound + 0x14 + slot*2`
+**is** the live object rather than the save image.
+
+The cheap falsification available right now: on stock firmware, save a sound
+with LFO3 configured, read it back with DNX, and check the bytes land at 34, 42,
+50… If they do, the storage reading is confirmed from a third direction and the
+retraction is settled rather than merely argued.
