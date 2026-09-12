@@ -183,11 +183,51 @@ read. The zeros could equally be a lane the DSP never iterates. Nothing here
 should be reported as "the engine can run four LFOs" — what is proven is that
 **MAIN OS can address a fourth, and reserves the indices to do it.**
 
-**The bound inconsistency is unexplained.** The `ParameterSet` slot tables are
-101 entries (`docs/parameter-set-tables.md`), the sound value array is addressed
-as `0x14 + slot*2`, and the forward map is bounded at slot ≤ 99 with 100
-entries. Slot 100 is inside the first two and outside the third. Worth resolving
-before anyone counts on slot 100 as usable.
+## 6b. The bound inconsistency, resolved — and it is worse than it looked
+
+The `ParameterSet` slot tables are 101 entries (`docs/parameter-set-tables.md`),
+the sound value array is addressed `0x14 + slot*2`, and the forward map is 100
+entries bounded at slot ≤ 99. Slot 100 is inside the first two and outside the
+third. Followed through, all three of the "free" sound slots end at the same
+place:
+
+| slot | forward map | why |
+|---:|---|---|
+| 0 | → engine **0** | in the table, explicitly 0 |
+| 65 | → engine **0** | in the table, explicitly 0 — the gap |
+| 100 | → engine **0** | **out of bounds**; `slot_to_engine_index` returns 0 |
+
+So `Sound::updateMirror` would write `mirror[0x1c + 0*2]` for a parameter at any
+of them. **There are not two free sound slots. There are zero usable ones** —
+the earlier count was of table holes, not of routes to the engine, and a hole
+that maps to engine 0 is a hole that silently writes to the wrong place.
+
+**Slot 100 is the worst of the three**, because it fails *outside* the table
+rather than in it: nothing marks it, the bound simply returns 0. Anything built
+on "slot 100 is spare" would appear to work in the destination list and quietly
+corrupt engine index 0 on every value change.
+
+**But slot 65 is repairable with one 4-byte write.** It is a real, in-bounds
+entry that currently holds 0. Pointing it at a free engine index is a static
+data edit of the same kind already flashed twice. Slot 100 is not repairable
+that cheaply — it needs the bound raised *and* the table extended, and the
+inverse table starts immediately after it with no slack (§3).
+
+### A consequence for the fourth lane
+
+Engine index 0 is doing double duty: it is the "no mapping" return value **and**
+nominally `4*param + lfo` with both zero. That settles which indices a fourth
+LFO should actually use. The genuinely unreachable set measured in §4 is
+
+```
+[4, 8, 12, 16, 20, 24, 28, 32]
+```
+
+— eight values, and **0 is not among them**, because slots 0 and 65 do reach it.
+So the fourth LFO's lane is `4*param + 4`, running 4..32, not `4*param + 0`
+running 0..28. Had it been the latter, LFO4's Speed would have shared an address
+with the sink that every unmapped slot writes to, and every stray write would
+have landed on it.
 
 **Where eight slots could come from is the open question**, and it is now *the*
 question. Three shapes, none costed:
