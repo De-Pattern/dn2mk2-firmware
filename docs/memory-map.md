@@ -42,6 +42,39 @@ into `0x80000000` first, and the clear routine then recycles it as the first
 bytes of BSS. A second, independent reason those trailing bytes are not free cave
 space.
 
+**The top of SDRAM is `0x48000000`, and 25.3 MB above BSS is unclaimed.**
+Measured 2026-09-12, answering the gating question in `docs/ideas-backlog.md`
+§6. The C runtime's first instruction sets the stack pointer:
+
+```
+400004f2:  moveal #0x48000000,%sp     ; before the .data copy and BSS clear
+```
+
+Stacks descend on ColdFire, so that pins the top of usable RAM: SDRAM spans
+`0x40000000`–`0x48000000`, **128 MB**. BSS ends at `0x466b74d0`, leaving
+**26,512,176 bytes (25.3 MB)** between the two.
+
+That window is genuinely unclaimed, by three independent measurements:
+
+| Evidence | Result |
+|---|---|
+| Immediates naming an address in `[BSS start, top of RAM)` | **7,043** — BSS is densely named |
+| The highest of them | `0x466b7420`, `0x466b7456`, `0x466b748c` — **within 68 bytes of the BSS end** |
+| Immediates naming anything **above** the BSS end | **none** |
+
+The four values the scan returns above `0x466b74d0` are not addresses:
+`0x466b74d0` itself is the clear loop's own bound, `0x474e5543` is the ASCII
+`"GNUC"`, and `0x47efffff` (twice) is a float constant. Statics climb to within
+68 bytes of the BSS end and then stop dead — which is what a linker-computed
+`_end` looks like, and means **the heap is a static arena inside BSS, not a
+region above it.** That is also why BSS is 100 MB: it is globals *plus* the
+pool.
+
+So the window's only occupant is the stack, descending from `0x48000000`. Its
+depth is unmeasured. **The safe end of the window is therefore the bottom** —
+just above `0x466b74d0`, where the stack would have to descend 25 MB to reach
+it — not the top, which is where the stack already is.
+
 **Use the BSS span as a validity filter.** An absolute long decoded out of the
 image is only plausibly a data reference if it lands inside it. Scanning 1.11 for
 `lea`/`pea` of absolutes above the image end yields apparent targets at

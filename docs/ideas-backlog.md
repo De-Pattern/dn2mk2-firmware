@@ -256,19 +256,26 @@ That would change the ceiling on this whole project. Caves cap a payload at
 ~1 KB per run, ~26 KB total, which is why the LFO4 work keeps running into
 "needs a cave" on things as small as a 430-byte table.
 
-**Two things to check before this is worth any effort, in this order:**
+**Both gating questions are answered, and both answers are yes** (2026-09-12,
+`docs/memory-map.md`).
 
-1. **Does SDRAM extend above `0x466b74d0`?** That is ~103 MB into the bank. If
-   the part is 128 MB (`0x40000000`–`0x48000000`) there is ~25 MB of genuinely
-   unclaimed RAM above BSS; if the bank ends at BSS end, there is none. The
-   memory-controller setup at `0x4000043e` (`andl` against `0xfc050014`, then
-   `movew #1343,0xfc080000`) is where the bank size is configured and is the
-   place to read it. **This is the gating question** — if the answer is no, the
-   idea is dead and costs nothing more.
-2. **Does the heap live up there?** If `malloc` carves from above the BSS end,
-   the space is claimed after all and a new section would be overwritten by the
-   first allocation. Find the allocator's arena bounds — `0x40120264` is called
-   for allocations in `Sound::updateMirror`'s neighbourhood and is a way in.
+1. **Does SDRAM extend above `0x466b74d0`? Yes — to `0x48000000`.** The C
+   runtime's first instruction is `moveal #0x48000000,%sp` at `0x400004f2`, and
+   stacks descend, so the top of usable RAM is `0x48000000` and SDRAM is
+   **128 MB**. The window above BSS is **26,512,176 bytes (25.3 MB)**. (The
+   memory-controller setup at `0x4000043e` was the suggested route; the stack
+   init turned out to be a shorter and less ambiguous one.)
+2. **Does the heap live up there? No.** Scanning every 32-bit immediate that
+   names an address in `[BSS start, top of RAM)` returns **7,043 hits inside
+   BSS and none above it**. The highest reach `0x466b748c` — within **68 bytes**
+   of the BSS end — and then stop dead, which is what a linker-computed `_end`
+   looks like. So the heap is a static arena *inside* BSS, which is also why BSS
+   is 100 MB: globals plus the pool.
+
+**The only occupant of the window is the stack**, descending from `0x48000000`,
+and its depth is unmeasured. So **place a new section at the bottom of the
+window, not the top** — just above `0x466b74d0`, where the stack would have to
+descend 25 MB to reach it.
 
 **Then the loader question.** Whether the bootloader validates `dest` at all, or
 writes wherever the section table says. `docs/bootstrap.md` records that
