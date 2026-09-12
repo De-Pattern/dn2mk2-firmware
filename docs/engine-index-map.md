@@ -364,9 +364,17 @@ Gate-F-cleared reference objdump:
 | `mulsl` | 916 |
 
 An audio engine — oscillators, filters, envelopes, reverb — running on this CPU
-would show thousands of MACs and, on a V4e with an FPU, heavy floating-point.
-Fifty MACs across 1.95 MB is incidental arithmetic. **The ColdFire is a control
-processor here and nothing more.**
+would show thousands of MACs. Fifty across 1.95 MB is incidental arithmetic.
+**The ColdFire is a control processor here and nothing more.**
+
+> **The zero-FPU half of this argument is withdrawn (2026-09-12).** The board
+> carries an **MCF5441x**, not the V4e this repository assumed from octabam's
+> Octatrack (`docs/hardware.md`). If that part has no hardware FPU, a count of
+> zero FPU instructions is what *any* code on it would give, DSP or not, and it
+> proves nothing. **The MAC comparison stands and was always the stronger
+> half** — 50 here against the DN1's 613 in tight four-accumulator EMAC loops
+> (`docs/dn1-dsp-comparison.md`) — and it does not depend on the FPU question.
+> The conclusion survives on that evidence alone.
 
 This is also the proper basis for a claim an earlier session made and then
 withdrew on weak grounds. The withdrawal was correct at the time — it rested on
