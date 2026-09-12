@@ -63,6 +63,7 @@ own local image at build time. Output is a .syx under 00_Resources/02_Builds/
 (gitignored).
 """
 
+import argparse
 import hashlib
 import pathlib
 import struct
@@ -100,15 +101,25 @@ LFO_PARAMS = ["SPD", "MULT", "FADE", "DEST", "WAVE", "SPH", "MODE", "DEP"]
 # Mirror words are `value << 8`, so this is +12 in parameter units.
 SPEED_OFFSET = 0x0C00
 
+# A mirror DEST word is `engine_index << 8` -- updateMirror computes it as
+# `map(0, stored >> 8) << 8`. Engine index 3 is LFO3's own Speed, so pointing
+# LFO4 there makes it modulate LFO3's rate: audible, unambiguous, and it uses
+# only an index this project has measured rather than a guessed encoding.
+DEST_LFO3_SPEED = 3
+
+# Engine 58 is SYN slot 50 -- `PITCH Pitch All` on page-0 machines.
+DEST_PITCH_ALL = 58
+
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 OUT = pathlib.Path("00_Resources/02_Builds/lfo4-shadow_DN2_1.11.syx")
+OUT_DEST = "00_Resources/02_Builds/lfo4-dest{d}_DN2_1.11.syx"
 
 
 def mirror_offset(engine_index: int) -> int:
     return MIRROR_BASE + engine_index * 2
 
 
-def build_payload() -> tuple[str, bytes]:
+def build_payload(own_dest: int | None) -> tuple[str, bytes]:
     """The detour body: copy lane 3 -> lane 4, then replay the epilogue."""
     src = [mirror_offset(LANES * p + SRC_LANE) for p in range(len(LFO_PARAMS))]
     dst = [mirror_offset(LANES * p + DST_LANE) for p in range(len(LFO_PARAMS))]
@@ -125,7 +136,12 @@ def build_payload() -> tuple[str, bytes]:
         "    move.l  %sp@+,%d0",
     ]
     for p in range(1, len(LFO_PARAMS)):
-        lines.append(f"    move.w  %a3@({src[p]}),%a3@({dst[p]})   | {LFO_PARAMS[p]}")
+        if own_dest is not None and LFO_PARAMS[p] == "DEST":
+            lines.append(
+                f"    move.w  #{own_dest << 8},%a3@({dst[p]})   | DEST -> engine {own_dest}"
+            )
+        else:
+            lines.append(f"    move.w  %a3@({src[p]}),%a3@({dst[p]})   | {LFO_PARAMS[p]}")
     # No epilogue and no return jump here: patch/cave.py appends the displaced
     # stock and the jump back itself. Emitting them in the payload too would
     # leave a dead second copy in the cave.
@@ -134,6 +150,11 @@ def build_payload() -> tuple[str, bytes]:
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--dest", type=int, default=None, metavar="ENGINE",
+                    help="give LFO4 its own destination (an engine index) instead of "
+                         f"copying LFO3's. {DEST_LFO3_SPEED} is LFO3's Speed.")
+    args = ap.parse_args()
     if not available():
         raise SystemExit(
             "no m68k assembler found -- patch/assemble.py needs "
@@ -156,7 +177,7 @@ def main() -> int:
     cave = Cave(*anchor["cave"])
     return_to = site + len(stock)
 
-    source, payload = build_payload()
+    source, payload = build_payload(args.dest)
     print(source)
     print(f"payload {len(payload)} bytes; cave {cave.capacity} bytes at 0x{cave.address:08x}")
     if len(payload) + len(stock) + 6 > cave.capacity:
@@ -169,16 +190,28 @@ def main() -> int:
 
     replacement = compress(section.id, section.dest, edited)
     syx = fwbuild.build(firmware, {MAIN_OS: replacement})
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_bytes(syx)
+    out = OUT if args.dest is None else pathlib.Path(OUT_DEST.format(d=args.dest))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(syx)
 
-    print(f"\nwrote {OUT}  ({len(syx):,} bytes)")
+    print(f"\nwrote {out}  ({len(syx):,} bytes)")
     print(f"  content sha256 {hashlib.sha256(syx).hexdigest()[:16]}")
-    print("\nOn the device: set LFO3 to an obvious destination with depth.")
-    print("  two rates on one destination -> the cave drives lane 4, the design works")
-    print("  one rate only                -> the copy ran, the speed offset did not")
-    print("  no change                    -> the hook did not run, or lane 4 needs")
-    print("                                  more than these eight words")
+    if args.dest is None:
+        print("\nOn the device: set LFO3 to an obvious destination with depth.")
+        print("  Two LFOs on ONE destination COMPETE rather than sum -- stock DN2")
+        print("  behaviour, confirmed on hardware with untouched LFO1+LFO2. That")
+        print("  makes this variant hard to read; prefer --dest.")
+    else:
+        print(f"\nLFO4 modulates engine index {args.dest}, independent of LFO3 --")
+        print("  nothing is shared, so nothing competes.")
+        if args.dest == DEST_PITCH_ALL:
+            print("  Engine 58 is SYN slot 50: `PITCH Pitch All` ONLY on page-0")
+            print("  machines. On page-2 machines the same slot is `Op C Phase`.")
+            print("  Use a page-0 machine or the test is misleading.")
+            print("  Set LFO3 to cutoff so the two are separately audible.")
+        elif args.dest == DEST_LFO3_SPEED:
+            print("  Engine 3 is LFO3's own Speed: LFO3 wobbles your destination")
+            print("  while LFO4 speeds that wobble up and down.")
     return 0
 
 
