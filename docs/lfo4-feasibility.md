@@ -299,7 +299,8 @@ was written before that result and should be read with it in mind.
 | Destination masks — the fourth rank already on every modulatable parameter | **Done by Elektron** (`docs/modulation-mask.md`) |
 | Modulation apply — generic over the parameter index | **Confirmed on hardware** |
 | Parameter records — ten dead ERR slots to repurpose | **Built**, `scripts/build_lfo4_test.py` |
-| **Runtime parameter indices** — eight contiguous slots | **No room.** 98 of 99 used (`docs/engine-state.md`) |
+| Enumeration — getting the records into the set the LFO walks | **Solved, and it is a data edit** (`docs/parameter-set-tables.md`) |
+| **Runtime parameter indices** — eight contiguous slots | **No room.** Two free: slots 65 and 100 |
 | **The page id** — a contiguous range test `(page - 0x1a) <= 2` | **Blocked.** `0x1d` is Retrig, `0x1e` is `None` |
 | **A fourth page-view and `[MOD]` navigation** | Not started; needs a cave |
 | **The generator** — can the tick run four? | **The open gate** |
@@ -307,6 +308,22 @@ was written before that result and should be read with it in mind.
 The two hard structural problems are now the runtime index space and the page
 id, not the parameter table — which is the opposite of where this document
 started.
+
+**The enumeration came off the list on 2026-09-12.** It had looked like the
+worst of them: the destination list is built by walking a `ParameterSet` whose
+slot→id map the code reads from `0x42c64b3c`, an address outside the loaded
+image, so the table could not be read at all. It turns out to be **BSS, built at
+boot** by `param_set_tables_build` (1.11 `0x400dc4d0`) out of two fields of each
+parameter record — `+0x00` page id and `+0x04` index-in-page. Which set a
+parameter belongs to, and which slot it takes, are therefore **editable data**,
+not compiled-in tables. Full reading in `docs/parameter-set-tables.md`.
+
+That same reading sharpens the index problem rather than easing it. The sound
+slot table is 101 entries wide and the free slots are exactly **65 and 100** —
+the 25–68 gap in it is not free, those slots are served by the machine-type
+table `0x42c64d18` and the filter-type table `0x42c64cd0`. Two free slots
+against eight needed. This is now a *measured* shortfall with a named mechanism,
+where before it was a count.
 
 ## The audio engine — the original analysis
 

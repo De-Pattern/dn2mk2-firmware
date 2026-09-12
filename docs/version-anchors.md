@@ -48,6 +48,14 @@ in both; only addresses and one offset moved. The bound-raising job described in
 | thunk site | `0x4003dcb6` | `0x4003e426` | — |
 | `adda` site (setup) | `0x4003dbb4` | `0x4003e324` | — |
 | `adda` site (large fn) | `0x40040368` | `0x40040b28` | — |
+| **`param_set_tables_build`** | `0x400de902` | **`0x400dc4d0`** | byte pattern `4878 0194 4879` (`pea #0x194; pea <abs>`) — unique in both images. Moved by `0x242a`, **not** the `+0x768` of the mask neighbourhood |
+| its one call site | — | `0x400bb266` | scan for `jsr`/`bsr` to the builder; exactly one in each build |
+| **`param_set_slot_to_id`** | — | **`0x400dc02a`** | the `ParameterSet` vtable `+0x50` body; three-way dispatch on slot |
+| **`is_sound_param(id)`** | — | **`0x400dbd0c`** | same head as the other `record+0x00` readers: bound at 320, `id*60`, `lea <table>` |
+| **`is_midi_param(id)`** | — | **`0x400dbd7c`** | as above; exclusion masks `0x4c7` over `page-11` |
+| **Sound slot table (BSS)** | `0x42aa6914` | **`0x42c64b3c`** | 101 × 4 B; moved by `0x1be228` |
+| **BSS clear routine** | `0x400004b2` | `0x400004b2` | same address in both; bounds are immediates |
+| **BSS span** | `0x402e2000`–`0x464f47d0` | `0x402fc000`–`0x466b74d0` | ~100 MB. Doubles as the validity filter for decoded absolutes |
 | **Section end** | `0x402f1980` | `0x4030b980` | load base + decoded size |
 | **.data initializer** | `0x402e2000` (one block) | `0x402fc000` + `0x40304000` (two) | read from the startup copy loops |
 | **BSS cleared to** | `0x80008000` | `0x80010000` | same |

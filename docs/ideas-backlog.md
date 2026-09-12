@@ -157,14 +157,37 @@ If that is right, the work splits cleanly:
 - **Chorus and Master**: need **both** — the mask set to `0x1e00` *and* the
   enumeration. Chorus is eight one-word record edits, Master eleven.
 
-**The open question to settle first.** Why are Delay and Reverb masked
-modulatable while Chorus and Master are not? The most likely answer is that the
-DN2 has an **FX track** with its own LFOs, and those masks exist for it — which
-would also explain why a *synth* track cannot reach them. Check the Digitone II
-manual for which pages an FX-track LFO can target; if the FX track can already
-modulate delay and reverb settings, then this idea is really only about Chorus,
-Master, and p-locks. **Read the manual before touching a byte** — this is
-exactly the case `docs/device-model.md` exists for.
+**Retracted: the FX-track hypothesis.** The guess above was that the DN2 has an
+FX track with its own LFOs and those masks exist for it. The owner settled it:
+*"nope, that's Octatrak exclusive"*. There is no FX track on the DN2. The Delay
+and Reverb masks are latent capability that nothing on this device asks for.
+
+**Settled (2026-09-12): it is an enumeration problem, and the enumeration is a
+data edit.** `docs/parameter-set-tables.md` reads the boot-time builder
+`param_set_tables_build` (1.11 `0x400dc4d0`). It walks the parameter table and
+files each id into a set chosen by the record's **page id** at `record+0x00`, at
+the slot given by **`record+0x04`**:
+
+| Page id | Set |
+|---|---|
+| `11..15` and `26..28` | **sound** — the table the LFO destination list walks |
+| `16..21` | **FX/global** — Chorus 16, Reverb 17, Delay 18, Master 19–20, Ext-in 21 |
+| `22..25` and `26..28` | **MIDI** |
+| `29, 30, 0xffffffff` | not enumerated at all |
+
+So Delay and Reverb are unreachable because they are filed into the FX/global
+table while the LFO walks the sound table — and **both deciding fields are
+editable records**, not code. Moving Delay Time into the sound set is a two-field
+write to one record.
+
+**The price, which is why this is still a backlog item and not a build.** The
+page id *is* the UI page, so a moved parameter leaves the Delay page. Only sound
+slots **65 and 100** are free, so at most two FX parameters can move. And the
+apply path writes `sound + 0x14 + idx*2`, a **per-voice** location, while the
+Delay is one global instance — an enumerated global would most likely be offered
+as a destination and then not move. That last point is the experiment worth
+running, and it is cheap: two records, four fields, the same build-and-flash
+loop as the mask tests.
 
 **Then the engine unknown, now narrowed.** On 2026-09-12 a mask flip made
 Portamento Time both appear as a destination **and actually modulate**, proving
