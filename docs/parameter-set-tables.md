@@ -67,7 +67,7 @@ is a second, independent reason those trailing bytes are not free cave space.
 initialized `.data` — about 64 KB of it — and false of everything else. The bulk
 of the firmware's mutable state is the ~100 MB of BSS in the `0x40000000` SDRAM
 space, starting immediately after the image. The `0x80000000` window is a
-separate, small, fast memory (the DSP section loads at `0x80000400`), not the
+separate, small, fast memory (section 4, the *updater*, loads at `0x80000400`), not the
 main heap.
 
 **The BSS end doubles as a validity test.** An absolute address decoded out of

@@ -106,7 +106,7 @@ one, and clears twice as much BSS:
 | `0x40304000`–`0x4030b980` | **.data/BSS initializer block 2** | copied to `0x80008000` — **not free space** |
 | `0x4030b980` | end of the loaded MAIN OS section | exactly where copy loop 2 stops |
 | `0x402fc000`–`0x466b74d0` | **main BSS, ~100 MB** | cleared at `0x400004b2`; recycles the initializer tail. Holds the `ParameterSet` slot tables at `0x42c6xxxx` (`docs/parameter-set-tables.md`) |
-| `0x80000000`–`0x80010000` | **fast SRAM**: the copied `.data` + its own small BSS | cleared to `0x80010000` — double 1.10E. The DSP section loads at `0x80000400`; this is not the main heap |
+| `0x80000000`–`0x80010000` | **fast SRAM**: the copied `.data` + its own small BSS | cleared to `0x80010000` — double 1.10E. **Section 4 (the *updater*, not DSP) loads at `0x80000400`**; this is not the main heap |
 | inside the per-track object (`~+0x4f2e0`) | **engine modulation state** | measured on 1.10E; **re-anchor pending on 1.11** |
 | ELE3 dest `0x02010000` | **bootstrap** (recovery receiver) | 1.10E used `0x02000000` |
 | ELE3 section id **8** | **new in 1.11** — 103,416 → 159,948 B, dest 0 | ships with Outbox-8 support; see below |

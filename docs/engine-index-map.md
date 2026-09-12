@@ -256,3 +256,89 @@ question. Three shapes, none costed:
 Not yet re-anchored on 1.10E. Re-find by pattern — the `moveq #-9` / `moveq #20`
 pairing is distinctive — and never by applying an offset; the shifts between
 these builds are not uniform.
+
+---
+
+## 7. Retracted: "the engine's code is not in this image"
+
+§6 said the engine's code "is not in this image and has not been read". **That
+was an over-claim, prompted and corrected by the owner 2026-09-12**, and the
+correction matters because it reopens the generator hunt.
+
+**The Octatrack precedent is real.** octabam's `docs/firmware/DSP.md` documents
+the OT's DSP56300 program as **embedded inside its MAIN OS section as data**,
+uploaded at boot from `0x4000050c`: bootstrap A at `0x400e21e0` (50 words),
+payload A at `0x400e2324` (79,563 B), bootstrap B at `0x400e2276`, payload B at
+`0x400f59ef` (77,061 B) — all ColdFire virtual addresses in the same image we
+would call "MAIN OS". Same platform family, same ELE3 container. So "the DSP
+program ships inside MAIN OS" is the *normal* arrangement here, not an exotic
+one, and the DN2 should be assumed to do it until shown otherwise.
+
+### What was checked, and what it showed
+
+| Candidate | Result |
+|---|---|
+| **Section 4** (`dest 0x80000400`, 32,776 B, raw) | **Not DSP — it is the *updater*, and it is ColdFire.** Its body opens `46fc 2700` (`move #$2700,%sr`), the same instruction MAIN OS opens with. `docs/ele3-format.md` had this right all along as "updater"; `memory-map.md` and `parameter-set-tables.md` called it "the DSP section" and were **wrong**. Both corrected. |
+| **`blob`** (id 7, 836,956 B) | **Not a 48-bit instruction stream.** Per-byte-position entropy at stride 6 is flat (spread 0.36) where stride 4 shows real column structure (spread 1.58, final byte 5.59) — the signature of little-endian float32, not SHARC's 48-bit words. Consistent with the existing "mixed data, largely float32" reading. |
+| **Section 8** | Already identified as a complete ARM Cortex-M image (`docs/data-sections.md`). |
+| **A DSP upload routine in MAIN OS** | **Not found.** The three early-boot calls at `0x4000052c` / `0x40000532` / `0x40000538` are a table fill, a `movec %d0,%vbr`, and interrupt handlers. `0x8c000004`, which looked promising for sitting beside octabam's `FUN_40001b18`, is written from a **panic handler** (`rte`, `bras .`). |
+
+### The open candidate
+
+A **~320 KB region at `0x40238000`–`0x40287000`** is high-entropy (mean ≈ 7.3–7.6
+per 4 KB block), non-string, non-sparse, and **almost entirely unreferenced by
+absolute address**: of 38 code references into `0x40238000`–`0x40288000`, 34 land
+in the string pool just above `0x40287000` and only **four** point into the body.
+
+That is what an embedded payload addressed by a base-and-length pair looks like.
+It is *also* what `docs/memory-map.md` already labels "packed data records", so
+this is a candidate and **not** a finding. The four interior references are
+`0x402572d0` (from `0x400ceff6`, `0x400d050c`) and `0x402765c0` / `0x40281ec0`
+(from `0x4012f7d8`, `0x4012f892`).
+
+### The decisive next test
+
+Find the uploader by its shape rather than its address: **a tight loop that reads
+sequentially from a source pointer and writes to a *fixed* absolute address.**
+The external-bus windows the firmware actually touches are `0xec09xxxx` (270
+absolute accesses), `0xec07xxxx` (38), `0xec03xxxx` (15) and `0x8c00xxxx` (25) —
+a DSP host port would be among them. If such a loop exists and its source lies
+inside `0x40238000`–`0x40287000`, the DSP program is in this image and the
+generator becomes findable.
+
+Until then the honest position is: **the engine's code has not been located, and
+it has not been ruled out of this image either.** §6's reserved-lane finding is
+unaffected — that rests on MAIN OS's own tables, not on where the DSP code lives.
+
+## 8. Can the LFO be routed to a different mirror or table?
+
+Asked by the owner, and it splits into three parts with different answers.
+
+**The index mapping: yes, and cheaply.** The forward map at `0x401fcf20` is
+static data. Changing which engine index a slot maps to is a 4-byte write — that
+is exactly the repair §6b proposes for slot 65.
+
+**The mirror itself: no, not usefully.** The mirror base is `%a3` in
+`Sound::updateMirror`, taken from the object rather than a constant. Redirecting
+it at the FX mirror would need a cave *and* would be wrong in granularity:
+`Sound::updateMirror` runs per sound, so it would write the single global FX
+mirror once per sound per change.
+
+**Applying modulation control-side instead — hooking `FxSetup::updateMirror` to
+fold in an LFO value before mirroring — is blocked, and the owner's own device
+observation is what blocks it.** Control-side application requires the ColdFire
+to know the LFO's *instantaneous* output. It evidently does not: LFO modulation
+**does not move displayed values**, while external MIDI modulation does. If the
+ColdFire held the modulated value the display could show it, and the
+long-standing user request for exactly that would not exist. So the LFO's running
+value appears never to exist on the control side at all — it is produced and
+applied engine-side.
+
+That would also make control-side application the wrong *shape* even if it were
+possible: it would run at UI update rate, not audio rate.
+
+**So both questions converge.** Reaching an FX parameter with an LFO, and finding
+the generator, are the same problem seen twice: both need the engine side, and
+the engine side is either absent from this image or is the unreferenced 320 KB
+above. That is now the single highest-value unknown in the project, and §7 names
+the test that settles it.
