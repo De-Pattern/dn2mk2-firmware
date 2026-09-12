@@ -420,7 +420,42 @@ results read apart. **32 bytes change**, every one inside a `record+0x24`, all
 | **B** (8) | Chorus `DPTH SPD HPF WDTH DEL REV CHR VOL` | **do not appear** — excluded by enumeration, not by the mask |
 | **C** (11) | Master `MOVD THR ATK REL MUP RAT SCS SCF MIX VOL` | **do not appear** — same, a different global object |
 
-**B and C are the point.** This document argues FX settings are excluded by the
+### RESULT, 2026-09-12: all of A, none of B or C
+
+Flashed and checked on the instrument:
+
+- **Group A — all 13 appear.** Every per-voice sound parameter opened by a mask
+  flip shows up as a modulation destination.
+- **Group B (Chorus) — none appear.**
+- **Group C (Master) — none appear.**
+
+**The enumeration is confirmed as the gate for global parameters.** Setting the
+mask on Chorus and Master changed nothing, exactly as predicted, which means the
+mask is necessary but not sufficient and the `ParameterSet` never offers those
+ids in the first place. Delay and Reverb carrying a full mask and still being
+unreachable is the same fact seen from the other side.
+
+So the two halves are now cleanly separated and both are measured:
+
+| For a parameter that is... | the gate is |
+|---|---|
+| **enumerated** by the track's `ParameterSet` (per-voice sound parameters) | **the mask at `record+0x24`** — flip it and the parameter is both offered and modulated |
+| **not enumerated** (global FX, Master) | **the enumeration** — the mask is irrelevant |
+
+**What this means for the FX-modulation idea** (`docs/ideas-backlog.md` §4): it
+is an **enumeration problem**, definitively, and not a mask problem. The target
+is `SoundParameterSet`'s slot-to-id mapping — `FUN_400dc02a` on 1.11, which is
+machine-dependent (it reads type bytes at `+0xde`/`+0xdf`) and indexes tables
+the code `lea`s at **`0x42c64b3c`** and **`0x42c64d18`**. Those addresses are
+**outside the MAIN OS image**, so finding what is mapped there is the next
+concrete job — and it is also the job that would let a fourth LFO's parameters
+be enumerated.
+
+Note this does **not** yet tell us whether the engine *could* modulate a global
+parameter if one were offered. That question is still open, because nothing has
+ever been offered one.
+
+**B and C were the point.** This document argues FX settings are excluded by the
 `ParameterSet` enumeration rather than the mask, on the evidence that Delay and
 Reverb already carry a full mask and still cannot be reached. Setting Chorus's
 and Master's masks tests that directly:
