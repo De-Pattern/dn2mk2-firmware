@@ -24,7 +24,7 @@ because they are never drawn on a parameter page. Only the records whose **long*
 name is also `Error` are dead. That leaves exactly ten usable slots for ten
 parameters, so the list is not a preference and there is no spare.
 
-The cause was an anchor off by one record — see "The Stage 1 correction" below.
+The cause was an anchor off by one record — see "The Stage 1 corrections" below.
 
 What remains is real but smaller: rewrite ten ERR records as LFO4's parameters
 (copied from LFO3, relabelled), add a fourth page-view whose id list names those
@@ -35,13 +35,19 @@ run a fourth LFO at all. The last is the true open gate; the rest is patch-shape
 
 ### 1. The parameter table — repurpose, do not grow
 
-The table is a flat array, `record[id] = 0x401e29d0 + id*60`, ids 1..320. It
-ends at 320 with no slack, so it cannot be *grown*. It does not need to be. Its
-head carries **15 unused records** whose short name is `ERR` — ids 1-5, 7-9,
-11-15, 17-18 — placeholders next to the real head entries (Machine Type id6,
-Track Level id10, Global Mix Mode id16). Each is a valid 60-byte record that
-just displays `ERR`, and **none is referenced by address** (only by id-index),
-so overwriting one changes nothing but what that id resolves to.
+The table is a flat array, `record[id] = 0x401e29a0 + id*60` (1.10E), ids 1..320
+— see `docs/modulation-mask.md` for the fifteen fields of a record. It ends at
+320 with no slack, so it cannot be *grown*. It does not need to be. Its head
+carries **10 unused records** whose long name is `Error` and short name `ERR` —
+ids 1-5, 11-14, 17-18 — sitting among the real head entries (Machine Type id6,
+Solo/Mute/Pattern Mute ids 7-9, Track Level id10, Active Track id15, Global Mix
+Mode id16). Each dead one is a valid 60-byte record that just displays `ERR`,
+and **none is referenced by address** (only by id-index), so overwriting one
+changes nothing but what that id resolves to.
+
+**A short name of `ERR` is not sufficient evidence that a record is dead** —
+Solo, Mute, Pattern Mute and Active Track all carry it, because they are never
+drawn on a parameter page. Require the *long* name to be `Error` too.
 
 LFO4 needs ten parameter records. Take the ten dead ERR slots — ids
 **1,2,3,4,5,11,12,13,14,17** — and rewrite each with LFO3's field layout: the
@@ -64,12 +70,11 @@ appending.
 ### Alternative kept for later: grow the table by appending
 
 Repurposing is the better path for *this* change, but the append/relocate
-analysis is real and worth keeping — a larger change (more than the fifteen
-spare slots, or a different table) would need it, and these facts hold
-regardless.
+analysis is real and worth keeping — a larger change (more than the ten spare
+slots, or a different table) would need it, and these facts hold regardless.
 
-- **No slack after the table.** `record[id] = 0x401e29d0 + id*60` ends at id 320
-  (`0x401e750c`); the bytes immediately after are another lookup table. Ten new
+- **No slack after the table.** `record[id] = 0x401e29a0 + id*60` ends at id 320;
+  the bytes immediately after are another lookup table. Ten new
   records (ids 321–330, +600 bytes) cannot be appended in place.
 - **Relocation cost.** The table is ~19.3 KB (321 × 60). **56 sites in code hold
   an absolute literal pointing into its base** (53 at `0x401e29a0`, plus a few
@@ -132,7 +137,9 @@ Each stage is independently flashable and observable, so a failure localises.
    built `.syx` back and diffing the record grid: **237 bytes change**, ids
    1-5/11-14/17 become `SPD MULT FADE DEST WAVE SLEW SPH MODE DEP MULT` labelled
    `LFO4`, and **ids 6-10, 15, 16 and 18 are byte-identical** — the live head
-   parameters are untouched, as is LFO3. A fourth
+   parameters are untouched, as is LFO3. The block's `+0x34` handler sequence is
+   identical to LFO3's, which is the check that caught the second anchor error.
+   A fourth
    LFO's parameter block now *exists* in the table, **labelled "LFO4"** -- an
    `LFO4` string was written into a verified-safe slot of unreferenced padding
    (`0x4026eff6`) and the block's page-label pointers repointed to it, so the
@@ -153,10 +160,13 @@ Stage 1 is within reach right now with the existing patch model. Stages 2–3 ne
 a code-cave applier (`patch/cave.py`, the roadmap's Phase-2 mechanism) and the
 page-view / MOD-navigation reads below. Stage 4 is the make-or-break.
 
-## The Stage 1 correction, recorded because it nearly reached hardware
+## The Stage 1 corrections, recorded because they nearly reached hardware
 
-The 2026-09-11 Stage 1 build was wrong, and the way it was wrong is worth
-keeping.
+The 2026-09-11 Stage 1 build was wrong **twice over**, and both errors are the
+same shape: an anchor off by a fixed amount, producing output that looked right.
+Neither build was flashed.
+
+### First: the anchor was 0x38 bytes too high
 
 `docs/parameter-table-consumer.md` anchors the table as
 `record[id] = 0x401e29d0 + id*60`, which is correct **for the field it was
@@ -188,10 +198,33 @@ layout id 84 reads `LFO2`. `_check_geometry` in `scripts/build_lfo4_test.py` now
 probes five such positions and refuses to run if any disagrees, and the rebuilt
 firmware is diffed against stock record-by-record rather than by byte count.
 
+### Second: the record start was 8 bytes too low
+
+The fix above moved the anchor to `base - 8 + id*60`, reasoning that the two
+fields before the page id belonged to the record. They do not. The LFO parameter
+dispatch at `0x40035f32` (1.10E) computes its per-parameter handler as
+`base + 0x34 + id*60` and jumps through it, which fixes the record start **at**
+the base — and fifteen 4-byte fields then close the 60 bytes exactly, with the
+handler at `+0x34` and an always-empty unit string at `+0x38`.
+
+The consequence of being 8 bytes low was narrower but real: every field edit was
+still correct (they were expressed relative to the base), but each 60-byte clone
+carried **the previous record's handler pointer**. The rebuilt LFO4 block would
+have had LFO3's parameters wired to the wrong handlers.
+
+**The probe that settles it**: LFO1, LFO2 and LFO3 are the same ten parameters,
+so their handler sequences must be identical. They are, under the correct
+boundary; under the 8-low boundary LFO1's first slot picks up id 74's handler and
+LFO1 disagrees with the other two. `_check_geometry` now asserts this.
+
+### The lesson
+
 This is the same class of error as the `+30`/`0x30` radix mistake in
 `docs/engine-state.md`: a small fixed offset, a result that looks right, and no
-check that could tell the difference. The lesson generalises — **an anchor is not
-verified until it has been tested somewhere its neighbours differ.**
+check that could tell the difference. Three instances now. The lesson
+generalises — **an anchor is not verified until it has been tested somewhere its
+neighbours differ**, and the cheapest such place is a repeated structure that
+must agree with itself.
 
 ## Code-cave space — a real constraint on the UI stage
 

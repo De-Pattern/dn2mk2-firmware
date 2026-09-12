@@ -25,41 +25,50 @@ record base**, the address the accessors `lea`, with `record[id] = base + id*60`
 
 ### The full record layout
 
-A record **starts 8 bytes below the base** — `record(id) = base - 8 + id*60` —
-because the base was originally anchored on the first field the page renderer
-reads, not on the first byte. Both spellings appear below; the record-relative
-one is the safer to work from, and `scripts/build_lfo4_test.py` uses it.
+`record(id) = base + id*60` — the record starts **at** the base. Fifteen 4-byte
+fields, closing the 60 bytes exactly with nothing left over:
 
-| From record start | From `base` | Holds | Example (id 75, LFO1 `SPD`) |
-|---|---|---|---|
-| `+0x00` | `-0x08` | value-formatter function pointer | `0x400e3404` |
-| `+0x04` | `-0x04` | pointer to the empty string | — |
-| `+0x08` | `+0x00` | **page id** (`paramPageID`) | `0x1a` = LFO1 |
-| `+0x0c` | `+0x04` | parameter id within the page | `1` |
-| `+0x10` | `+0x08` | zero in every record seen | `0` |
-| `+0x14` | `+0x0c` | maximum value (`<< 8`) | `0x7ffe` |
-| `+0x18` | `+0x10` | default value (`<< 8`) | `0x7000` |
-| `+0x1c` | `+0x14` | flag — set on bipolar parameters | `1` |
-| `+0x20` | `+0x18` | MIDI controller; `0xffffffff` when unassigned | `0x66ffff` |
-| `+0x24` | `+0x1c` | NRPN; `0xffffffff` when unassigned | `0xaa` |
-| `+0x28` | `+0x20` | a dense ordinal — **every** record has one | `0x4f` |
-| **`+0x2c`** | **`+0x24`** | **the modulation mask** | `0xe00` |
-| `+0x30` | `+0x28` | long-name string pointer | `Speed` |
-| `+0x34` | `+0x2c` | page-label string pointer | `LFO1` |
-| `+0x38` | `+0x30` | short-name string pointer — what `version-anchors.md` indexes on | `SPD` |
+| Offset | Holds | Example (id 75, LFO1 `SPD`) |
+|---|---|---|
+| `+0x00` | **page id** (`paramPageID`) | `0x1a` = LFO1 |
+| `+0x04` | parameter id within the page | `1` |
+| `+0x08` | zero in every record seen | `0` |
+| `+0x0c` | maximum value (`<< 8`) | `0x7ffe` |
+| `+0x10` | default value (`<< 8`) | `0x7000` |
+| `+0x14` | flag — set on bipolar parameters | `1` |
+| `+0x18` | MIDI controller; `0xffffffff` when unassigned | `0x66ffff` |
+| `+0x1c` | NRPN; `0xffffffff` when unassigned | `0xaa` |
+| `+0x20` | a dense ordinal — **every** record has one | `0x4f` |
+| **`+0x24`** | **the modulation mask** | `0xe00` |
+| `+0x28` | long-name string pointer | `Speed` |
+| `+0x2c` | page-label string pointer | `LFO1` |
+| `+0x30` | short-name string pointer — what `version-anchors.md` indexes on | `SPD` |
+| `+0x34` | **per-parameter handler** — the LFO dispatch at `0x40035f32` (1.10E) tests it for null and `jmp`s through it | `0x400e44a4` |
+| `+0x38` | unit-suffix string — **empty in all 320 records** | `""` |
 
 Confirmed by indexing both images: ids **75–84, 85–94, 95–104** are the LFO1,
 LFO2 and LFO3 blocks, and ids **6** and **10** resolve to `Machine Type` and
 `Track Level` — the two live head entries `docs/parameter-table-consumer.md`
 already named, from a derivation that did not use them.
 
-**This layout is easy to get wrong by a fixed offset, and a wrong anchor still
-produces plausible strings**, because the table is dense and every record holds
-three string pointers. The probe that separates a right anchor from a wrong one
-is a **page boundary**: check that id 84's page label is `LFO1` and id 85's is
-`LFO2`, not just that some record says `LFO1`. `_check_geometry` in
-`scripts/build_lfo4_test.py` does exactly this and refuses to run otherwise —
-see the correction recorded in `docs/lfo4-feasibility.md`.
+### How to know an anchor is right
+
+**A wrong anchor still produces plausible strings.** The table is dense and
+every record holds four pointers, so "some record says `LFO1`" proves nothing.
+Two probes do prove something, and both are in `_check_geometry` in
+`scripts/build_lfo4_test.py`:
+
+1. **A page boundary.** Id 84 is the last LFO1 record and id 85 the first LFO2
+   one. An off-by-one-record anchor shifts exactly here, and nowhere a casual
+   look would notice.
+2. **The three LFO blocks are the same ten parameters**, so their `+0x34`
+   handler sequences must be *identical*. This is the probe that settled the
+   record boundary: with the start taken 8 bytes low, LFO1's first slot picked
+   up id 74's handler and LFO1 disagreed with LFO2 and LFO3. With the start at
+   the base, all three sequences match exactly.
+
+Two separate anchor errors were found and fixed this way on 2026-09-12; both are
+recorded in `docs/lfo4-feasibility.md`, "The Stage 1 corrections".
 
 ## What the mask contains, measured
 
