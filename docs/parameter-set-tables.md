@@ -206,10 +206,11 @@ Same CC and NRPN, different range and different formatter. The same pairing
 repeats exactly on LFO2 (86/94) and LFO3 (96/104), which is why those six ids are
 the entire id-exclusion list between the two predicates.
 
-**A device-checkable prediction falls out of this**, and it costs one minute:
-`LFO MULT` on a **synth** track should offer roughly twice as many settings as
-`LFO MULT` on a **MIDI** track. If it does not, the reading above is wrong
-somewhere.
+**Confirmed on the device, 2026-09-12.** The prediction was that `LFO MULT` on a
+**synth** track should offer roughly twice as many settings as on a **MIDI**
+track. The owner checked: *"Yes — synth has roughly double."* So the split is
+real, and `is_sound_param` / `is_midi_param` are doing what this section says
+they do.
 
 ## 5. The reader: `param_set_slot_to_id`
 
