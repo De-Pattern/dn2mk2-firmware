@@ -1,64 +1,107 @@
 # The MAIN OS memory map
 
 Where the code, its constants, and its runtime state live in the ColdFire V4e
-address space, reconstructed from the startup routine at `0x40000400` and the
-cross-references. A visual explorer of this is an Artifact (link in the project
-notes); this is the written record.
+address space, reconstructed from the startup routine and the cross-references.
+A visual explorer of this is an Artifact with a version selector (link in the
+project notes); this is the written record.
+
+**Two builds are mapped: 1.11 (the target — what the device runs) and 1.10E
+(kept for comparison).** Every address moves on a relink, so nothing is shared
+between them: each column below was measured from its own image. Never carry an
+address from one release to another — the parameter table alone moved ~90 KB.
 
 ## The image versus runtime RAM — the distinction that matters
 
 The MAIN OS section is loaded at `0x40000400` and holds **code, read-only data,
 and the initializers for RAM** — it is not where the running firmware keeps its
-mutable state. The startup code makes this explicit (disassembled at
-`0x4000045c`): it copies a region of the image to external SDRAM and clears BSS
-there before entering `main`.
-
-```
-lea 0x402e2000,%a2      ; source: the .data image, inside the section
-lea 0x80000000,%a1      ; destination: external SDRAM
-  movel %a2@+,%a1@       ; copy words until %a2 reaches 0x40300000
-clrl %a0@+              ; then zero-fill BSS, up to 0x80008000
-```
+mutable state. The startup code makes this explicit: it copies a region of the
+image to external SDRAM and clears BSS there before entering `main`.
 
 So **runtime data lives at `0x80000000`, not in the image.**
 
-## The regions
+## 1.11 — the build target (build 40059, MAIN OS 3,192,192 B)
+
+The startup routine at `0x4000045c` runs **two** copy loops, where 1.10E ran
+one, and clears twice as much BSS:
+
+```
+0x4000045c  lea 0x402fc000,%a2 ; lea 0x80000000,%a1   ; copy .data block 1
+            movel %a2@+,%a1@ ... cmpal #0x40304000    ; until 0x40304000
+            clrl %a0@+ ... cmpal #0x80008000          ; clear BSS to 0x80008000
+0x40000486  lea 0x40304000,%a2 ; lea 0x80008000,%a1   ; copy .data block 2
+            movel %a2@+,%a1@ ... cmpal #0x4030b980    ; until section end
+            clrl %a0@+ ... cmpal #0x80010000          ; clear BSS to 0x80010000
+```
 
 | Range | What | Notes |
 |---|---|---|
-| `0x40000400`–`~0x40000600` | reset vector + C runtime bring-up | sets SR, memory controller, copies `.data`, clears BSS |
-| `~0x40000600`–`~0x401bxxxx` | **program code** (~1.9 MB) | sequencer, UI, parameter framework, modulation subsystem, drivers; GCC + RTTI; Gate-F cleared |
-| `~0x401bae00`–`~0x40260000` | **read-only data**: parameter tables, vtables, RTTI, string pool | the DN2 parameter table is `0x401e29d0` |
-| `~0x4026e000`–`0x402e2000` | packed data records + **unreferenced ~1 KB padding runs** | the only genuinely free space (~75 KB total, in small runs) |
-| `0x402e2000`–`0x40300000` | **`.data` / BSS initializer** | copied to `0x80000000` at boot — **not free space** |
-| `0x402f1980` | end of the loaded MAIN OS section | |
-| `0x80000000`–`~0x8001e000` | **runtime SDRAM**: `.data`, BSS | mutable globals and objects |
-| inside the per-track object (`~+0x4f2e0`) | **engine modulation state** | the resolver reads modulated values here; the LFO generator writes them |
-| above data/BSS | **heap and stack** | why appending a cave to the section end risks a heap collision |
-| `0x800003fc` | **bootstrap** (recovery receiver), ELE3 dest `0x02000000` | see `docs/bootstrap.md` |
-| `0x80000400` | updater section (id 4) dest | |
-| `0xfc000000`–`0xfc0fffff` | **ColdFire peripherals** (MBAR): memory controller, chip selects, UART, timers | startup writes `0xfc008000`, `0xfc050014` |
-| `0xfff00000`–`0xffffffff` | upper peripheral window | heavily referenced high MMIO |
-| `0x00000000`–`~0x10000000` | **DSP / low region — unconfirmed** | the SHARC (`Digisharc`) synthesis side; the 833 KB blob may be its program or wavetables |
+| `0x40000400`–`~0x40000600` | reset vector + C runtime bring-up | writes `0xfc080000` (memory controller); two copy loops |
+| `~0x40000600`–`~0x401d0000` | **program code** (~1.95 MB) | grew ~104 KB over 1.10E, pushing everything below it later |
+| `~0x401d0000`–`~0x40287000` | **read-only data**: parameter tables, vtables, RTTI, strings | the DN2 parameter table is **`0x401f7fc4`** |
+| `~0x40287000`–`0x402fc000` | packed data records + **unreferenced padding runs** | the only free space: 41 runs ≥256 B, **~29 KB**, largest ~1 KB (`dnfw cave scan`) |
+| `0x402fc000`–`0x40304000` | **.data/BSS initializer block 1** | copied to `0x80000000` — **not free space** |
+| `0x40304000`–`0x4030b980` | **.data/BSS initializer block 2** | copied to `0x80008000` — **not free space** |
+| `0x4030b980` | end of the loaded MAIN OS section | exactly where copy loop 2 stops |
+| `0x80000000`–`0x80010000` | **runtime SDRAM**: `.data`, BSS | BSS cleared to `0x80010000` — double 1.10E |
+| inside the per-track object (`~+0x4f2e0`) | **engine modulation state** | measured on 1.10E; **re-anchor pending on 1.11** |
+| ELE3 dest `0x02010000` | **bootstrap** (recovery receiver) | 1.10E used `0x02000000` |
+| ELE3 section id **8** | **new in 1.11** — 103,416 → 159,948 B, dest 0 | ships with Outbox-8 support; see below |
+| `0xfc000000`–`0xfc0fffff` | **ColdFire peripherals** (MBAR) | startup writes `0xfc080000` |
+
+**The parameter table, verified.** `0x401f7fc4` is the origin whose record+0 is
+a short-name pointer: `record[id] = 0x401f7fc4 + id*60`, and indexing it returns
+`SPD MULT FADE DEST WAVE SLEW SPH MODE DEP MULT` at ids 75–84 (LFO1) and again
+at 95–104 (LFO3), exactly as 1.10E's `0x401e29d0` does. An earlier note recorded
+`0x401f7fc8`; that was **four bytes into this origin** — the same field-offset
+confusion `docs/parameter-table-consumer.md` records for 1.10E. Use `0x401f7fc4`.
+
+**Function-level RE is not yet re-anchored on 1.11.** The page renderer, the
+`is_lfo_param_modulatable` 3-LFO gate, the LFO-speed handler and the bootstrap
+functions were all located on 1.10E. Their 1.11 addresses are unknown and must
+be re-found, not extrapolated.
+
+## 1.10E — kept for comparison (build 40050, MAIN OS 3,085,696 B)
+
+One copy loop: `lea 0x402e2000,%a2; lea 0x80000000,%a1; copy…; clrl (BSS)`.
+
+| Range | What | Notes |
+|---|---|---|
+| `~0x40000600`–`~0x401bxxxx` | program code (~1.9 MB) | Gate-F cleared |
+| `~0x401bae00`–`~0x40260000` | read-only data | parameter table `0x401e29d0`; `LfoPageView` vtable `0x401ecf7c` |
+| `~0x4026e000`–`0x402e2000` | padding runs | `LFO4` label written at `0x4026eff6` |
+| `0x402e2000`–`0x40300000` | .data/BSS initializer | copied to `0x80000000` |
+| `0x402f1980` | end of the loaded section | |
+| `0x80000000`–`~0x8001e000` | runtime SDRAM | BSS cleared to `0x80008000` |
+| `0x800003fc` | bootstrap runtime address | ELE3 dest `0x02000000` |
+
+Located on 1.10E: `parameter_page_renderer` `0x40016f38`,
+`is_lfo_param_modulatable` `0x400de34e` (hardcodes group ∈ {26,27,28}),
+LFO-speed handler `0x40035f32`, `recovery_receive_loop` `0x80003e5a`,
+`verify_and_flash_container` `0x80003c9c`.
 
 ## What the map settles
 
-**Code caves are scarce, and the obvious space is a trap.** The 64 KB of trailing
-zeros from `0x402e1bf4` reads as free but is the **`.data`/BSS initializer** —
-overwriting it changes the program's initial RAM state. The only safe space is
-the **unreferenced padding inside the constants region** (`0x4026e…`); it holds
-strings and small tables but not a whole page-view instance. The `LFO4` label
-for the test firmware lives in one such run at `0x4026eff6`
-(`docs/lfo4-feasibility.md`). A larger cave means either finding more padding or
-growing the section, and a section-grow needs the heap boundary above pinned so
-the new bytes do not collide with it.
+**Code caves are scarce, and the obvious space is a trap.** The trailing zeros
+before the section end read as free but are the **.data/BSS initializer**,
+copied to SDRAM at boot — overwriting them changes the program's initial RAM
+state. The only safe space is the **unreferenced padding inside the constants
+region**: ~29 KB on 1.11 in runs of ~1 KB. `dnfw cave scan` finds them per
+image; `docs/code-caves.md` is the mechanism for using them.
+
+**A new container section is not a route to more code space.** 1.11 added
+section id 8 for the Outbox, which shows Elektron growing the *container* — but
+a section with `dest 0` is loaded **data**, not code at a virtual address, and
+the behavior that uses it lives in the recompiled MAIN OS. We cannot recompile
+MAIN OS, so new behavior must be spliced into section 3 with code caves. Adding
+or deleting container sections changes flash and file size, **not** the virtual
+address space a fourth LFO needs. See `docs/ideas-backlog.md` for the variant of
+this idea that *does* pay off (repurposing dead code inside section 3).
 
 **The engine's state is in SDRAM, so the generator is too.** A parameter's live,
-modulated value is read from `~+0x4f2e0` inside the per-track engine object in the
-`0x80000000` SDRAM. Nothing in the image holds it. The LFO generator writes it on
-the real-time modulation tick — the write-side code that remains the make-or-break
-for a fourth LFO. Its state being in SDRAM, not the image, is why it cannot be
-found by reading the image's data and must be traced through the tick.
+modulated value is read from `~+0x4f2e0` inside the per-track engine object in
+SDRAM. Nothing in the image holds it. The LFO generator writes it on the
+real-time modulation tick — the write-side code that remains the make-or-break
+for a fourth LFO, and the reason it cannot be found by reading the image's data.
 
 ## Method note
 
@@ -66,4 +109,6 @@ The address-reference histogram over the raw image is **noisy** — scanning eve
 2-byte offset catches ColdFire opcode bytes (`0x4e`, `0x2f`, `0x48`…) as false
 "addresses". The reliable sources are the **startup routine** (which names the
 copy and clear boundaries outright) and **targeted cross-reference counts** for a
-specific address, not a blind histogram.
+specific address, not a blind histogram. The parameter table was re-found on
+1.11 the reliable way: locate the `SPD` string, find the pointer to it, and
+subtract `id*60`.
