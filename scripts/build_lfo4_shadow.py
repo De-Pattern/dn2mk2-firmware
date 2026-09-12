@@ -110,16 +110,28 @@ DEST_LFO3_SPEED = 3
 # Engine 58 is SYN slot 50 -- `PITCH Pitch All` on page-0 machines.
 DEST_PITCH_ALL = 58
 
-# Measured neutrals, read from the parameter records (value << 8):
+# FADE's neutral, settled by two independent sources.
 #
-#   FADE  max 32512 (127), default 16384 (64), bipolar flag 0
-#   DEP   max 32766,       default 16384 (64), bipolar flag 1
+# The device displays FADE as -64..63, so its neutral is the displayed 0
+# (owner, reading the instrument). DNX decoded the stored form from hardware
+# captures and states the rule outright (`DNX/docs/dn2-format.md`):
 #
-# FADE is not flagged bipolar but its default sits mid-range, so it behaves as
-# centred -- fade-in one way, fade-out the other, 64 meaning no fade. A zero
-# there is full fade, not neutral. Pinning it rather than trusting the copy
-# means LFO4 is correct even if lane 3's mirror word was never populated,
-# which matters because LFO4 has no UI and no defaults of its own.
+#     | bipolar | value + 64 |
+#     Verified on the LFO depths: 32 stored 80, 56 stored 92.
+#
+# So displayed 0 is **stored 64**, and a mirror word is `stored << 8`:
+#
+#     neutral = 64 << 8 = 16384
+#
+# Which is exactly the parameter record's own default field for FADE, read
+# independently from the image. Two sources, one answer. A raw 0 would be
+# displayed -64 -- full fade, not neutral.
+#
+# One loose end kept rather than smoothed over: FADE's `+0x14` flag is 0 while
+# DEP's is 1, yet the owner reports both display signed. So `+0x14` is not
+# "display bipolar", and this project's label for it is wrong or incomplete.
+# That does not affect the value above, which rests on the default field and on
+# DNX, not on the flag.
 FADE_NEUTRAL = 16384
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
@@ -131,7 +143,7 @@ def mirror_offset(engine_index: int) -> int:
     return MIRROR_BASE + engine_index * 2
 
 
-def build_payload(own_dest: int | None) -> tuple[str, bytes]:
+def build_payload(own_dest: int | None, fade: int) -> tuple[str, bytes]:
     """The detour body: copy lane 3 -> lane 4, then replay the epilogue."""
     src = [mirror_offset(LANES * p + SRC_LANE) for p in range(len(LFO_PARAMS))]
     dst = [mirror_offset(LANES * p + DST_LANE) for p in range(len(LFO_PARAMS))]
@@ -154,7 +166,7 @@ def build_payload(own_dest: int | None) -> tuple[str, bytes]:
             )
         elif LFO_PARAMS[p] == "FADE":
             lines.append(
-                f"    move.w  #{FADE_NEUTRAL},%a3@({dst[p]})   | FADE -> neutral (64), not 0"
+                f"    move.w  #{fade},%a3@({dst[p]})   | FADE -> {fade} (neutral)"
             )
         else:
             lines.append(f"    move.w  %a3@({src[p]}),%a3@({dst[p]})   | {LFO_PARAMS[p]}")
@@ -167,6 +179,10 @@ def build_payload(own_dest: int | None) -> tuple[str, bytes]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--fade", type=int, default=FADE_NEUTRAL, metavar="RAW",
+                    help=f"raw FADE word for LFO4 (default {FADE_NEUTRAL}). The device "
+                         "shows -64..63; 16384 is the record's default field, which "
+                         "does not obviously reconcile -- see the note in the source.")
     ap.add_argument("--dest", type=int, default=None, metavar="ENGINE",
                     help="give LFO4 its own destination (an engine index) instead of "
                          f"copying LFO3's. {DEST_LFO3_SPEED} is LFO3's Speed.")
@@ -193,7 +209,7 @@ def main() -> int:
     cave = Cave(*anchor["cave"])
     return_to = site + len(stock)
 
-    source, payload = build_payload(args.dest)
+    source, payload = build_payload(args.dest, args.fade)
     print(source)
     print(f"payload {len(payload)} bytes; cave {cave.capacity} bytes at 0x{cave.address:08x}")
     if len(payload) + len(stock) + 6 > cave.capacity:
