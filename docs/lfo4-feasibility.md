@@ -405,3 +405,73 @@ the same machinery the LFO uses, or proof that the LFO uses different machinery
 The verdict stands and is better than the first read: the table is now a
 same-length patch, not a relocation. The remaining work is a page-view, the MOD
 wiring, and — first — proving the engine can run a fourth LFO.
+
+## Closed leads — the generator hunt, 2026-09-12
+
+Keeping these on the record because a closed path is a signal
+(`docs/PRINCIPLES.md`): each of these looked like a fourth modulator and is not,
+and knowing that stops the next session re-finding them.
+
+### `MOD4` and `modTarget_t[4]` are the MOD SETUP destination slots
+
+Two things in the shipped 1.11 image read, at first sight, like a dormant fourth
+modulator:
+
+- a **four-entry label array** at `0x402038c0` — `{MOD1, MOD2, MOD3, MOD4}` —
+  sitting immediately before `ModSetupView`'s own mangled symbol data, read at
+  `0x40107850` behind the guard `moveq #3,%d0; cmpl %d3,%d0; bcs bail`, i.e.
+  indices **0..3**;
+- the RTTI types `Value<Digisharc::modTarget_t[4]>` and
+  `ValueWithMirror<Digisharc::modTarget_t[4], Digisharc::modTargetStorage_v0_t[4]>`
+  (`0x4021e828`, `0x4021e84d`) — an array of **four** modulation targets, in a
+  type that is mirrored to the DSP.
+
+**Both are existing shipped functionality.** Device fact from the owner,
+2026-09-12: *"For each modulation input (velocity, mod wheel, etc) there are 4
+modulation destinations."* So the four are the four destination slots of one
+modulation source on the MODULATION SETUP page, `modTarget_t[4]` is that array,
+and `MOD4` is its fourth label. Nothing here is dormant and nothing here is an
+LFO. **Lead closed.**
+
+The general shape of the error is worth keeping: *a count of four in a device
+with three LFOs is not evidence of a fourth LFO.* This is
+`docs/learn-the-device-first` in practice — the count was real, the
+identification was a guess, and one sentence from the instrument settled it.
+
+### The MOD1/MOD2/MOD3 naming is a hardcoded cascade, not a table
+
+`docs/modulation-mask.md` records a filter→name mapping at `0x40106a08`. Read as
+instructions it is **three `pea` of string literals**, not an indexed table:
+
+```
+40106a22:  pea 0x4021ba7b      ; "MOD3"
+40106a34:  pea 0x4021ba71      ; "MOD1"
+40106a46:  pea 0x4021ba76      ; "MOD2"
+40106a4e:  movel %a2@(228),%d7 ; default arm
+```
+
+The three-entry run at `0x401f7748` that also holds `MOD1 MOD2 MOD3` is a
+different list — `CC, CC, MOD1, MOD2, MOD3, TRIG, META, V1, V2, V3` — and is not
+what this code reads. So **naming a fourth modulator needs a code cave**, not a
+data edit: there is no table to extend. Small, but it moves a task from the
+"data edit" column to the "cave" column.
+
+### There is no LFO generator class in MAIN OS
+
+Scanning every mangled and RTTI name in 1.11 for `Lfo`/`Modulat`/`Oscill`/`Phase`
+yields **`LfoPageView`** (the page UI), its `shared_ptr` plumbing, and
+**`ModulationCopy`** (the copy/paste/clear buffer behind `COPY MODULATIONS`).
+That is all. No LFO object, no phase accumulator type, no waveform generator.
+
+Taken with the earlier dead ends — no waveform tables anywhere, `+0x34` is a
+value formatter, `FUN_400d6360` is the SysEx dispatcher — this now points hard
+at the generator living **outside MAIN OS**, on the DSP side, with the ColdFire's
+role limited to mirroring `Digisharc::*` state to it. The `updateMirror` methods
+(`Sound`, `Kit`, `Track`, `VoiceConfig`, `FxSetup`, `Pattern` …) are that
+boundary, and they are the thing to read next: they are where the control side
+hands the engine its parameters, and whatever the engine is told about LFOs
+passes through them.
+
+**That reframes the remaining question.** It is no longer "find the tick in this
+image" — it is "find what MAIN OS *tells* the engine about LFOs, and whether the
+shape of that message has room for a fourth." That is answerable in this image.
