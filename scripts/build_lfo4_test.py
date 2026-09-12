@@ -64,7 +64,7 @@ F_MODMASK = 0x24  # modulation mask
 F_LONG = 0x28  # long-name string pointer
 F_PAGE = 0x2C  # page-label string pointer
 F_SHORT = 0x30  # short-name string pointer
-F_HANDLER = 0x34  # per-parameter handler; the LFO dispatch jumps through it
+F_HANDLER = 0x34  # value formatter; the parameter dispatch jumps through it
 F_UNIT = 0x38  # unit-suffix string; empty in all 320 records
 
 # LFO4's predicted mask values (docs/modulation-mask.md, "The fourth bit").

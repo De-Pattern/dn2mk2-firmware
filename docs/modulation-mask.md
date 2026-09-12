@@ -43,7 +43,7 @@ fields, closing the 60 bytes exactly with nothing left over:
 | `+0x28` | long-name string pointer | `Speed` |
 | `+0x2c` | page-label string pointer | `LFO1` |
 | `+0x30` | short-name string pointer — what `version-anchors.md` indexes on | `SPD` |
-| `+0x34` | **per-parameter handler** — the LFO dispatch at `0x40035f32` (1.10E) tests it for null and `jmp`s through it | `0x400e44a4` |
+| `+0x34` | **value formatter** — renders the value for display. The dispatch at `0x40035f32` (1.10E) tests it for null, `jmp`s through it, and prints `ERR` when it is null. Each one ends in the sprintf at `0x40000e82`; LFO `MULT`'s, for instance, computes `1 << v` and appends `k` above 512 | `0x400e44a4` |
 | `+0x38` | unit-suffix string — **empty in all 320 records** | `""` |
 
 Confirmed by indexing both images: ids **75–84, 85–94, 95–104** are the LFO1,
@@ -62,7 +62,7 @@ Two probes do prove something, and both are in `_check_geometry` in
    one. An off-by-one-record anchor shifts exactly here, and nowhere a casual
    look would notice.
 2. **The three LFO blocks are the same ten parameters**, so their `+0x34`
-   handler sequences must be *identical*. This is the probe that settled the
+   formatter sequences must be *identical*. This is the probe that settled the
    record boundary: with the start taken 8 bytes low, LFO1's first slot picked
    up id 74's handler and LFO1 disagreed with LFO2 and LFO3. With the start at
    the base, all three sequences match exactly.
