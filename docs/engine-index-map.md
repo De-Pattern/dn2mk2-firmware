@@ -183,11 +183,51 @@ read. The zeros could equally be a lane the DSP never iterates. Nothing here
 should be reported as "the engine can run four LFOs" — what is proven is that
 **MAIN OS can address a fourth, and reserves the indices to do it.**
 
-**The bound inconsistency is unexplained.** The `ParameterSet` slot tables are
-101 entries (`docs/parameter-set-tables.md`), the sound value array is addressed
-as `0x14 + slot*2`, and the forward map is bounded at slot ≤ 99 with 100
-entries. Slot 100 is inside the first two and outside the third. Worth resolving
-before anyone counts on slot 100 as usable.
+## 6b. The bound inconsistency, resolved — and it is worse than it looked
+
+The `ParameterSet` slot tables are 101 entries (`docs/parameter-set-tables.md`),
+the sound value array is addressed `0x14 + slot*2`, and the forward map is 100
+entries bounded at slot ≤ 99. Slot 100 is inside the first two and outside the
+third. Followed through, all three of the "free" sound slots end at the same
+place:
+
+| slot | forward map | why |
+|---:|---|---|
+| 0 | → engine **0** | in the table, explicitly 0 |
+| 65 | → engine **0** | in the table, explicitly 0 — the gap |
+| 100 | → engine **0** | **out of bounds**; `slot_to_engine_index` returns 0 |
+
+So `Sound::updateMirror` would write `mirror[0x1c + 0*2]` for a parameter at any
+of them. **There are not two free sound slots. There are zero usable ones** —
+the earlier count was of table holes, not of routes to the engine, and a hole
+that maps to engine 0 is a hole that silently writes to the wrong place.
+
+**Slot 100 is the worst of the three**, because it fails *outside* the table
+rather than in it: nothing marks it, the bound simply returns 0. Anything built
+on "slot 100 is spare" would appear to work in the destination list and quietly
+corrupt engine index 0 on every value change.
+
+**But slot 65 is repairable with one 4-byte write.** It is a real, in-bounds
+entry that currently holds 0. Pointing it at a free engine index is a static
+data edit of the same kind already flashed twice. Slot 100 is not repairable
+that cheaply — it needs the bound raised *and* the table extended, and the
+inverse table starts immediately after it with no slack (§3).
+
+### A consequence for the fourth lane
+
+Engine index 0 is doing double duty: it is the "no mapping" return value **and**
+nominally `4*param + lfo` with both zero. That settles which indices a fourth
+LFO should actually use. The genuinely unreachable set measured in §4 is
+
+```
+[4, 8, 12, 16, 20, 24, 28, 32]
+```
+
+— eight values, and **0 is not among them**, because slots 0 and 65 do reach it.
+So the fourth LFO's lane is `4*param + 4`, running 4..32, not `4*param + 0`
+running 0..28. Had it been the latter, LFO4's Speed would have shared an address
+with the sink that every unmapped slot writes to, and every stray write would
+have landed on it.
 
 **Where eight slots could come from is the open question**, and it is now *the*
 question. Three shapes, none costed:
@@ -216,3 +256,168 @@ question. Three shapes, none costed:
 Not yet re-anchored on 1.10E. Re-find by pattern — the `moveq #-9` / `moveq #20`
 pairing is distinctive — and never by applying an offset; the shifts between
 these builds are not uniform.
+
+---
+
+## 7. Retracted: "the engine's code is not in this image"
+
+§6 said the engine's code "is not in this image and has not been read". **That
+was an over-claim, prompted and corrected by the owner 2026-09-12**, and the
+correction matters because it reopens the generator hunt.
+
+**The Octatrack precedent is real.** octabam's `docs/firmware/DSP.md` documents
+the OT's DSP56300 program as **embedded inside its MAIN OS section as data**,
+uploaded at boot from `0x4000050c`: bootstrap A at `0x400e21e0` (50 words),
+payload A at `0x400e2324` (79,563 B), bootstrap B at `0x400e2276`, payload B at
+`0x400f59ef` (77,061 B) — all ColdFire virtual addresses in the same image we
+would call "MAIN OS". Same platform family, same ELE3 container. So "the DSP
+program ships inside MAIN OS" is the *normal* arrangement here, not an exotic
+one, and the DN2 should be assumed to do it until shown otherwise.
+
+### What was checked, and what it showed
+
+| Candidate | Result |
+|---|---|
+| **Section 4** (`dest 0x80000400`, 32,776 B, raw) | **Not DSP — it is the *updater*, and it is ColdFire.** Its body opens `46fc 2700` (`move #$2700,%sr`), the same instruction MAIN OS opens with. `docs/ele3-format.md` had this right all along as "updater"; `memory-map.md` and `parameter-set-tables.md` called it "the DSP section" and were **wrong**. Both corrected. |
+| **`blob`** (id 7, 836,956 B) | **Not a 48-bit instruction stream.** Per-byte-position entropy at stride 6 is flat (spread 0.36) where stride 4 shows real column structure (spread 1.58, final byte 5.59) — the signature of little-endian float32, not SHARC's 48-bit words. Consistent with the existing "mixed data, largely float32" reading. |
+| **Section 8** | Already identified as a complete ARM Cortex-M image (`docs/data-sections.md`). |
+| **A DSP upload routine in MAIN OS** | **Not found.** The three early-boot calls at `0x4000052c` / `0x40000532` / `0x40000538` are a table fill, a `movec %d0,%vbr`, and interrupt handlers. `0x8c000004`, which looked promising for sitting beside octabam's `FUN_40001b18`, is written from a **panic handler** (`rte`, `bras .`). |
+
+### The open candidate
+
+A **~320 KB region at `0x40238000`–`0x40287000`** is high-entropy (mean ≈ 7.3–7.6
+per 4 KB block), non-string, non-sparse, and **almost entirely unreferenced by
+absolute address**: of 38 code references into `0x40238000`–`0x40288000`, 34 land
+in the string pool just above `0x40287000` and only **four** point into the body.
+
+That is what an embedded payload addressed by a base-and-length pair looks like.
+It is *also* what `docs/memory-map.md` already labels "packed data records", so
+this is a candidate and **not** a finding. The four interior references are
+`0x402572d0` (from `0x400ceff6`, `0x400d050c`) and `0x402765c0` / `0x40281ec0`
+(from `0x4012f7d8`, `0x4012f892`).
+
+### The decisive next test
+
+Find the uploader by its shape rather than its address: **a tight loop that reads
+sequentially from a source pointer and writes to a *fixed* absolute address.**
+The external-bus windows the firmware actually touches are `0xec09xxxx` (270
+absolute accesses), `0xec07xxxx` (38), `0xec03xxxx` (15) and `0x8c00xxxx` (25) —
+a DSP host port would be among them. If such a loop exists and its source lies
+inside `0x40238000`–`0x40287000`, the DSP program is in this image and the
+generator becomes findable.
+
+Until then the honest position is: **the engine's code has not been located, and
+it has not been ruled out of this image either.** §6's reserved-lane finding is
+unaffected — that rests on MAIN OS's own tables, not on where the DSP code lives.
+
+## 8. Can the LFO be routed to a different mirror or table?
+
+Asked by the owner, and it splits into three parts with different answers.
+
+**The index mapping: yes, and cheaply.** The forward map at `0x401fcf20` is
+static data. Changing which engine index a slot maps to is a 4-byte write — that
+is exactly the repair §6b proposes for slot 65.
+
+**The mirror itself: no, not usefully.** The mirror base is `%a3` in
+`Sound::updateMirror`, taken from the object rather than a constant. Redirecting
+it at the FX mirror would need a cave *and* would be wrong in granularity:
+`Sound::updateMirror` runs per sound, so it would write the single global FX
+mirror once per sound per change.
+
+**Applying modulation control-side instead — hooking `FxSetup::updateMirror` to
+fold in an LFO value before mirroring — is blocked, and the owner's own device
+observation is what blocks it.** Control-side application requires the ColdFire
+to know the LFO's *instantaneous* output. It evidently does not: LFO modulation
+**does not move displayed values**, while external MIDI modulation does. If the
+ColdFire held the modulated value the display could show it, and the
+long-standing user request for exactly that would not exist. So the LFO's running
+value appears never to exist on the control side at all — it is produced and
+applied engine-side.
+
+That would also make control-side application the wrong *shape* even if it were
+possible: it would run at UI update rate, not audio rate.
+
+**So both questions converge.** Reaching an FX parameter with an LFO, and finding
+the generator, are the same problem seen twice: both need the engine side, and
+the engine side is either absent from this image or is the unreferenced 320 KB
+above. That is now the single highest-value unknown in the project, and §7 names
+the test that settles it.
+
+---
+
+## 9. Settled: the audio engine's code is not in this firmware file
+
+§7 reopened the question after the owner pointed out that the Octatrack ships its
+DSP code. The right move was to check rather than assume, and checking gives a
+clear answer — **the opposite one to the Octatrack's.**
+
+### The ColdFire does no audio DSP
+
+Disassembling the whole code region (`0x40000400`–`0x401d0000`) with the
+Gate-F-cleared reference objdump:
+
+| Measure | Count |
+|---|---|
+| instructions decoded | **582,407** |
+| floating-point instructions (`fmove`, `fmul`, `fadd`, …) | **0** |
+| MAC/MSAC instructions (`macl`, `msacl`, `macw`, `msacw`) | **50** |
+| `mulsl` | 916 |
+
+An audio engine — oscillators, filters, envelopes, reverb — running on this CPU
+would show thousands of MACs and, on a V4e with an FPU, heavy floating-point.
+Fifty MACs across 1.95 MB is incidental arithmetic. **The ColdFire is a control
+processor here and nothing more.**
+
+This is also the proper basis for a claim an earlier session made and then
+withdrew on weak grounds. The withdrawal was correct at the time — it rested on
+a display-update argument the owner refuted — but the conclusion happens to
+hold, for this much better reason.
+
+### No section carries a DSP instruction stream
+
+| Section | Verdict |
+|---|---|
+| 2, bootstrap (30,302 B) | ColdFire, the recovery receiver (`docs/bootstrap.md`) |
+| 3, MAIN OS (3,192,192 B) | ColdFire control code — measured above |
+| 4, updater (32,776 B) | ColdFire; opens `46fc 2700` like MAIN OS (§7) |
+| 7, `blob` (836,956 B) | **32-bit word data.** Column-entropy spread by stride, whole file and by 200 KB chunk: **stride 3 = 0.01** (DSP56300's 24-bit word) and **stride 6 = 0.99** against **stride 4 = 1.17** and stride 8 = 1.18. A 24-bit instruction stream is ruled out outright; 48-bit (SHARC) tracks stride 4's structure only because 6 and 4 share a factor. The low-entropy final byte of each 32-bit group is the little-endian float32 exponent. |
+| 8, ARM Cortex-M (159,948 B) | **New in 1.11**, and the DN2 made sound in 1.10E — so it cannot be the engine. |
+
+**So the engine's program ships on a processor with its own storage, and this
+update file never touches it.** That is a real difference from the Octatrack,
+where octabam found the DSP56300 payloads inside MAIN OS at `0x400e2324` and
+`0x400f59ef`. Same vendor, same container format, different arrangement — which
+is exactly why it needed measuring rather than assuming, in either direction.
+
+The 320 KB candidate region from §7 (`0x40238000`–`0x40287000`) is therefore
+**not** a DSP payload. It is what `docs/memory-map.md` always called it: packed
+data records. §7's candidate is withdrawn.
+
+### What this does to the project
+
+**It removes an option and sharpens the thesis.**
+
+We cannot modify the audio engine. Not "have not yet found how" — the code is
+not in the file we can write. Every cave, every table edit, every hook reaches
+the control processor only.
+
+So **a fourth LFO exists if and only if the engine already implements one**, and
+the whole project now rests on the reserved lane in §4: engine indices
+`4, 8, 12, 16, 20, 24, 28, 32`, eight entries wide, zero-filled, sitting in the
+map the control side uses to address the engine. That finding stops being an
+interesting curiosity and becomes the entire basis of the work.
+
+It is corroborated, and this is the part that makes it more than a hopeful
+reading: the **same** fourth slot is reserved in the persisted sound format and
+in the pattern p-lock ids, both measured by DNX from hardware captures, neither
+of which has anything to do with this index table. Three independent structures,
+one shape. Elektron laid out four everywhere and shipped three.
+
+**And it makes the decisive experiment cheap and safe.** Build the control side —
+records, enumeration, slots — point its mirror writes at the reserved lane, and
+listen. If the engine runs a fourth LFO, it modulates. If it does not, nothing
+moves. One build, one flash, a silent and harmless failure, and a definite
+answer to the question the project has been circling since it started.
+
+That is now the shortest path to knowing whether this is possible at all, and it
+is shorter than it looked when the engine seemed patchable.

@@ -180,14 +180,55 @@ table while the LFO walks the sound table — and **both deciding fields are
 editable records**, not code. Moving Delay Time into the sound set is a two-field
 write to one record.
 
-**The price, which is why this is still a backlog item and not a build.** The
-page id *is* the UI page, so a moved parameter leaves the Delay page. Only sound
-slots **65 and 100** are free, so at most two FX parameters can move. And the
-apply path writes `sound + 0x14 + idx*2`, a **per-voice** location, while the
-Delay is one global instance — an enumerated global would most likely be offered
-as a destination and then not move. That last point is the experiment worth
-running, and it is cheap: two records, four fields, the same build-and-flash
-loop as the mask tests.
+**The cheap half is finished: every parameter a mask edit can open, is open.**
+Measured 2026-09-12. Of the 173 parameters an LFO destination list can reach —
+the union of the sound, machine and filter tables, which is what
+`param_set_slot_to_id` can return — exactly **13** still carried mask `0x0`, and
+those 13 are precisely Group A of `scripts/build_moddest_expand.py`, flashed and
+confirmed working:
+
+| | |
+|---|---|
+| Portamento | `PTIM` `PORT` |
+| Amp | `DEL` `MODE` `RSET` |
+| SYN | `ATRG` `ARST` `BTRG` `BRST` `PHRT` `KSA` `KSB1` `KSB2` |
+
+**There is nothing left that a mask edit alone can open.** Any further
+destination requires moving a parameter between sets, which is a different and
+much larger job.
+
+**And that job is bigger than "two record fields", for three reasons — the third
+is the real one.**
+
+1. **The page id *is* the UI page.** A moved parameter leaves the Delay page.
+2. **There is no free sound slot.** `docs/engine-index-map.md` §6b: slots 0, 65
+   and 100 all resolve to engine index 0. Slot 65 is repairable with a 4-byte
+   forward-map write; slot 100 is a trap. So the ceiling is **one** moved
+   parameter, not two.
+3. **The FX objects are on the other side of a different mirror.** The LFO's
+   output reaches the engine through `Sound::updateMirror` into the sound
+   mirror, indexed by the sound engine space (0..106, fully accounted for by
+   sound parameters). Delay, Reverb, Chorus and Master are mirrored separately
+   by `FxSetup::updateMirror` into `fxSetupStorage_v0_t`, a different structure
+   with a different index space. Enumerating an FX parameter into the sound set
+   would give it a sound-mirror slot that the FX object never reads. It would be
+   offered, and it would not move.
+
+So **Delay and Reverb already carrying `0x1e00` is a red herring** — the mask
+costs nothing and buys nothing while the enumeration and the mirror are both
+wrong. And Chorus and Master are not "eight and eleven record edits"; they are
+the same cross-mirror problem plus a mask.
+
+**What would actually have to be true**, and none of it is established: either
+the engine's destination space covers FX parameters (unknowable from this image
+— the engine's code is not in it), or the modulation is applied control-side
+before the mirror split, in which case the place to hook is `FxSetup::updateMirror`
+rather than the parameter table.
+
+**The more promising half of this idea is the p-locks**, which were always the
+second part of it and are a different mechanism: pattern storage, decoded by DNX
+(`DNX/docs/dn2-pattern-format.md`), not the LFO destination path at all. That
+has not been costed and is where to look next if this idea is picked up.
 
 **Then the engine unknown, now narrowed.** On 2026-09-12 a mask flip made
 Portamento Time both appear as a destination **and actually modulate**, proving

@@ -109,16 +109,22 @@ def main() -> int:
         cells = "".join(f"{('-' if v == 0 else str(v)):>8}" for v in row)
         print(f"  {LFO_PARAMS[p]:<6}{cells}")
 
-    reserved = [p * LANES for p in range(N_LFO_PARAMS) if inverse[p * LANES] == 0]
-    print(f"\n  reserved lane (lfo=0), engine indices mapping to no slot: {reserved}")
-    print(f"  lane is complete: {len(reserved) == N_LFO_PARAMS}")
-
+    # Derive the lane from what no slot actually reaches, not from `inverse[i] == 0`.
+    # Engine 0 reads as unmapped in the inverse table but IS reached -- slots 0 and
+    # 65 both forward to it, and it doubles as the "no mapping" return value. So the
+    # free lane is 4*param + 4, running 4..32, not 4*param + 0 running 0..28.
     unreachable = sorted(set(range(max(forward) + 1)) - set(forward))
-    print(f"  engine indices no slot reaches: {unreachable}")
+    lane = [LANES * (p + 1) for p in range(N_LFO_PARAMS)]
+    print(f"\n  engine indices no slot reaches: {unreachable}")
+    print(f"  the free lane (4*param + 4):     {lane}")
+    print(f"  lane is complete and unreached:  {set(lane) <= set(unreachable)}")
 
     free = [s for s in range(n_slots) if forward[s] == 0 and s != 0]
-    print(f"\n  runtime slots that map nowhere: {free or '(none)'}")
-    print(f"  -> {len(free)} free slot(s) against {N_LFO_PARAMS} a fourth LFO needs")
+    print(f"\n  runtime slots that map to engine 0 (the sink): {[0] + free}")
+    print(f"  slots past the forward-map bound also return 0, silently: "
+          f"{anchor['forward_max'] + 1} and up")
+    print(f"  -> in-bounds and repairable by a 4-byte edit: {free or '(none)'}"
+          f"  ({len(free)} against {N_LFO_PARAMS} a fourth LFO needs)")
 
     if args.full:
         print("\nforward: slot -> engine")
