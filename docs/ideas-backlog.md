@@ -384,3 +384,69 @@ target SHARC, Ghidra has no ADSP-2156x processor module, and ADI's CrossCore
 toolchain is the reference. **Even if a boot image is found, reading it needs a
 tool we do not have** — worth knowing before the search succeeds rather than
 after.
+
+### Advice from another Elektron RE contributor (2026-09-12), and what it changes
+
+Passed on by the owner, from someone who reverse-engineered the **Machinedrum**:
+
+> When I was doing Machinedrum RE it helped a lot to have an established memory
+> map from Mame to identify the DSP code setup. In Machinedrum the DSP memory is
+> not reachable from the Coldfire CPU, the CPU has to upload the DSP memory word
+> by word using a port in the DSPs. Use the Elektron Firmware Tool to extract the
+> blobs.
+
+This is worth more than a tip, because it **shifts the leading hypothesis and
+exposes a flaw in the search that produced the current one.**
+
+**It establishes the Elektron house pattern, across two devices.** On the
+Machinedrum the ColdFire uploads DSP memory **word by word through a port on the
+DSP**, because the DSP's memory is not in the CPU's address space at all. That is
+exactly what octabam measured independently on the **Octatrack** — `FUN_40001b18`
+pushing 79,563- and 77,061-byte payloads through the HI08 host-port window
+(`docs/engine-index-map.md` §7). Two Elektron devices, two DSP families, the same
+arrangement.
+
+**So the prior should be that the DN2 does it too** — and therefore that a DSP
+image *is* in this firmware, rather than that it is not. Combined with the
+owner's packing warning above, the honest reading becomes: the image is probably
+present, probably packed, and has not been found because neither the packing nor
+the upload path was searched correctly.
+
+**The flaw it exposes.** `docs/engine-index-map.md` §7 reported "no upload loop
+found". That search looked for **absolute-addressed stores** — `move.x dN,(xxx).L`
+inside a short backward branch. A word-by-word upload almost certainly does **not**
+look like that: the port address would be held in an **address register**, loaded
+once before the loop, and the loop body would be `move.w (aSrc)+,(aPort)` with no
+absolute operand anywhere. **My scan could not have found it.** That is a
+measurement gap, not evidence of absence, and §7's negative result must be read
+that way.
+
+### Revised plan for when this resumes
+
+Ahead of the three steps above, because it is cheaper and now better aimed:
+
+0. **Re-run the uploader search with the right shape.** Look for a tight loop
+   containing a **post-increment read** (`(aN)+`) and a **non-incrementing write
+   through an address register**, where that register was loaded with a constant
+   in a FlexBus or peripheral window. The windows already mapped are
+   `0xec09xxxx` (270 absolute accesses), `0xec07xxxx`, `0xec03xxxx`,
+   `0x8c00xxxx` — but the port may be none of these, since a register-held
+   address would not have appeared in that census either. Search by **loop
+   shape**, then read what address the register was given.
+
+Then, on the MAME suggestion: **MAME has no Digitone driver**, so there is no map
+to lift directly. The transferable part is the method — *get the peripheral map
+from an independent source rather than inferring it* — and for the DN2 that
+source is **Analog Devices' ADSP-21569 documentation** (host port, link port and
+SPI slave boot, and their register maps) plus **NXP's MCF5441x reference manual**
+for the FlexBus chip-select configuration that decides which external window
+lands where. Reading the ColdFire's chip-select setup at boot would name every
+external window on the board, which is the same win MAME gave on the Machinedrum.
+
+On the Elektron Firmware Tool: **already in hand.** It is cloned at
+`00_Resources/01_Reference/elektron-firmware-tool/` (MIT), and `dnfw`'s container
+and aPLib code is ported from it (`docs/references.md`). We extract blobs with
+our own tooling today — but the C tool remains valuable exactly as the plan
+intended, as an **independent cross-check** from code sharing no lineage with
+our Python. Worth building and running `-i` over `blob` before trusting any
+unpacking result we produce ourselves.
