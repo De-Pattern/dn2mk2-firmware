@@ -584,3 +584,94 @@ identified:
 Four of the five are tractable and two are single immediates. **The sound
 object's size is the next thing to measure**, because it decides whether this is
 finishable.
+
+---
+
+## 12. The DSP, identified from the board: ADSP-21569 (SHARC+)
+
+**2026-09-12, from the owner's photograph of the mainboard (PCBA0109B).**
+
+| | |
+|---|---|
+| **U9** | **Analog Devices ADSP-21569** — SHARC+, `KBCZ10`, date code `2341`, Korea |
+| **U25** | **Kingston `D2516ECMDXGJD`** — DDR3 SDRAM, immediately beside the DSP |
+| Y4 | FOX 20.000 MHz crystal |
+
+This retires the chip question for good. It is a **SHARC**, as `Digisharc`
+always implied — and specifically a **2156x-generation SHARC+**, not the classic
+2126x/2136x parts and certainly not the Octatrack's DSP56300.
+
+A build path left in an assert corroborates the platform naming:
+
+```
+0x4021b74f   ../../../firmware/digisharc/cf/intro/intro_dither.c
+0x???????    ../../../lib/shared/sm/fade.c
+```
+
+**`firmware/digisharc/cf/`** — `cf` is ColdFire. So "digisharc" is Elektron's
+name for the *whole platform*, and the ColdFire firmware is one subdirectory of
+it. A sibling tree for the DSP side almost certainly exists in their build; it
+simply is not shipped here.
+
+### What the part number invalidates in §10
+
+**§10's 48-bit periodicity test was never the right disproof, and this is the
+second time this question has been tested against the wrong premise.** §9 used a
+stride-3 test valid for the DSP56300 — a chip the DN2 never had. §10 corrected
+that to stride 3/6 for a 48-bit SHARC word. But an **ADSP-2156x boot image is an
+LDR boot stream**: 32-bit words organised into blocks with 16-byte headers, not
+a raw instruction array. Instructions are packed into that 32-bit stream. So
+"no 6-byte periodicity" does not rule out a SHARC+ image either.
+
+The right test for this part is the **LDR block structure**, and `blob` fails it
+too:
+
+| Test | Result |
+|---|---|
+| 32-bit-aligned words whose top byte is `0xAD` (the ADI block-code marker) | **345 of 209,239 = 0.16%** — *below* the 0.39% expected by chance, so not enriched at all |
+| Walking a block chain from offset 0 | Two plausible headers at `0x0` and `0x10`, then **breaks** — the third header is not a block code |
+
+So `blob` is not an ADI boot stream. Three tests, three chips' worth of
+premises, and the same answer each time.
+
+### What the board suggests instead
+
+**The DDR3 sits next to the SHARC, not the ColdFire.** The DSP has its own large
+working memory. That fits `blob` (836,956 B, 16-bit-word structured, §10) being
+**data destined for the DSP's DDR3** — samples or wavetables — rather than code,
+which is also what its lack of any instruction-like periodicity says.
+
+**And the ADSP-21569 has no on-chip flash.** It must boot from SPI master (its
+own serial flash), SPI slave or link port (a host pushes the image), or UART. If
+it boots from its own flash, its program is not in this update file and never
+will be. If the ColdFire boots it, there is an upload path in MAIN OS — and none
+was found: the external windows the firmware touches (`0xec03xxxx`,
+`0xec07xxxx`, `0xec09xxxx`, `0x8c00xxxx`) are all narrow register interfaces,
+mostly byte-wide reads across a handful of addresses, which is a peripheral or
+FPGA control surface, not a boot channel.
+
+### Honest verdict, stated with the right confidence
+
+**Leading hypothesis: the SHARC boots from its own serial flash, and its program
+is not in this firmware file.** Supporting it: no boot stream in any section
+under three different chip premises, no upload path in MAIN OS, a DSP with its
+own DDR3, and a ColdFire that does no DSP at all
+(`docs/dn1-dsp-comparison.md`).
+
+**But this has been claimed too strongly twice already** — §9 said "settled" and
+was not, §10 narrowed it and was still testing the wrong packing. It is recorded
+here as the leading reading with its disproof named, not as fact.
+
+**The check that settles it is on the board, not in the bytes.** SPI master boot
+requires a serial flash wired to the DSP — typically an 8-pin SOIC/WSON part
+within a few centimetres of U9. If one is there, the question is closed and the
+DN2's engine is permanently unmodifiable. If there is no flash near the SHARC,
+the ColdFire must be booting it and the image is in this file somewhere the
+three tests above have not looked.
+
+### Does any of this matter for LFO4?
+
+**No.** §11 confirmed on hardware that the engine implements a fourth LFO. That
+result is about behaviour, not code, and holds whichever way this goes. What
+this question decides is whether engine-side modification is *ever* possible —
+a separate ambition, and not one the project currently needs.
