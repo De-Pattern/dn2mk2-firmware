@@ -36,15 +36,40 @@ The same shape appears in the bulk pass `FUN_4004dc62`, which walks **exactly
 setup: it stores a pointer, calls vtable slots `+0x3c` and `+0x10`, and builds
 six sub-objects at stride `0x98` from 16-byte source records at stride `0x10`.
 
-## What these 128 entries are: still unidentified
+## What these 128 entries are: **Presets**, named by the UI
 
-Two parallel 128-entry arrays (960 and 1163 bytes per entry) is a strong,
-specific fingerprint, but nothing yet **names** them. Candidates not
-distinguished: 128 sound/patch slots, 128 pattern steps (a DN2 pattern runs to
-128 steps), or 128 voice/note slots. Deciding this is the next concrete step,
-and the way to decide it is the callers — the thunk has **24**, and the
-cluster at `0x40016xxx` sits in the page-rendering region, so those should say
-what is being displayed.
+The callers settle it. `FUN_40016480`, one of the 24 that reach the thunk, calls
+the accessor and then formats the result:
+
+```c
+uVar3 = FUN_4003e426(*(param_1 + 0x68), (int)cVar4);   /* thunk -> accessor */
+FUN_4004b1f4(uVar3);
+FUN_400562e6(*(param_1 + 0x6c), "Preset: %d %s", cVar4 + 1, local_c);
+```
+
+The literal at `0x402127c8` is **`"Preset: %d %s"`**, and the index is passed as
+`cVar4 + 1` — 0-based internally, displayed 1-based. Its neighbours in the
+string pool are all page-view UI: `SourcePageView`, `MultiSourcePageView`,
+`Reload Page %s`, `COPY PAGE %.16s`, `PASTE PAGE %s`, `CLEAR PAGE %s`, and the
+FM operator labels `RATIO`, `RATIO OFFSET`, `KEY TRACK`.
+
+So the array is **128 Presets of 960 bytes each**, reached from a page-view
+object's member at `+0x68` (the engine/project pointer), and the clamp to
+`0..0x7f` is the preset index range.
+
+**Correction to an earlier label:** this had been carried forward as a
+"per-track object". A 128-entry preset array is project-wide, so the base is the
+**engine/project root**, not a per-track object. `docs/memory-map.md`'s
+"per-track object" wording predates this and should be read with that caveat.
+
+**Not yet proven: whether "Preset" is DNX's sound pool.** DNX measures three
+128-count entities on the DN2 — the pattern array (stride 89,088), the kit array
+(10,752) and the **sound pool (128 × 359)**. Patterns and kits are far too large
+to be 960 bytes in RAM, so the sound pool is the only plausible match by size
+(359 B serialized expanding to 960 B with runtime state). That is a reasonable
+inference, **not a measurement**: the UI calls this a Preset, DNX calls that a
+Sound, and nothing here has yet shown they are the same array. Confirming it
+means matching a known preset's field values against a decoded sound.
 
 **The modulation tick has not been found.** `FUN_4004dc62` is an
 initialise-or-apply-to-all pass, not a real-time tick; `FUN_4004dfb0` is pure
