@@ -249,10 +249,46 @@ Three things the screen confirms beyond the main result:
   that ordering table, so it lands last rather than in place. Cosmetic, but it
   is the next thing to fix if a destination should appear in its natural spot.
 
-What this does **not** settle: whether the modulation actually *moves* the
-parameter. The destination list is the control side. Confirming that an LFO
-assigned to `PTIM` audibly changes portamento time is a separate test, and it is
-the one that speaks to the engine gate.
+### And it modulates
+
+Assigned and heard on the instrument, same session: **the LFO actually modulates
+Portamento Time.** Not merely listed as a destination — applied.
+
+This is the largest single result the project has had, because of what it says
+about the engine rather than about the mask:
+
+**The modulation apply path is generic and data-driven.** A parameter that
+Elektron never wired to any modulator — no mask bit, absent from every
+destination list — became fully modulated by flipping one 32-bit field in a
+lookup table. Nothing in the engine special-cases which parameters can be
+modulated; it resolves a destination index and applies. Had the apply side been
+a hand-written switch over the parameters Elektron chose to support, a two-byte
+change could not have produced this.
+
+**What that closes.** `docs/lfo4-feasibility.md` named the audio engine as "the
+true open gate": even with a fourth LFO's parameters, UI and storage in place,
+would the engine *apply* a fourth modulator? For the *apply* half the answer is
+now yes — the destination side is generic over the parameter index space and
+takes new entries without complaint.
+
+**What it does not close, and the scope matters.** Portamento Time is a **sound
+parameter**: per-voice, already computed by the engine for every voice on every
+note. All that changed is that a modulator was allowed to write it. Two things
+remain genuinely open:
+
+1. **Global parameters are a different object.** Chorus, Master, Delay and
+   Reverb settings are not per-voice. That the engine can modulate a per-voice
+   parameter is no evidence it can modulate a global one, and that is precisely
+   the risk in the FX-modulation idea (`docs/ideas-backlog.md` §4).
+2. **The generator, not the application.** Nothing here shows the engine can
+   *run* a fourth LFO. Whether the tick advances an array of N phases or three
+   named instances is still unknown, and it is now the single remaining unknown
+   on the LFO4 path. `docs/engine-state.md` holds that hunt.
+
+**The method that produced it is worth as much as the result**: read a table
+field from two builds, derive a rule from how the code consumes it, predict a
+behaviour change, make the smallest possible edit, and check it on hardware.
+Two bytes, one flash, one screenshot, one listen.
 
 ## Why the FX delay could not be the test
 
