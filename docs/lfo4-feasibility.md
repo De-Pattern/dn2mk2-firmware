@@ -24,7 +24,7 @@ because they are never drawn on a parameter page. Only the records whose **long*
 name is also `Error` are dead. That leaves exactly ten usable slots for ten
 parameters, so the list is not a preference and there is no spare.
 
-The cause was an anchor off by one record — see "The Stage 1 correction" below.
+The cause was an anchor off by one record — see "The Stage 1 corrections" below.
 
 What remains is real but smaller: rewrite ten ERR records as LFO4's parameters
 (copied from LFO3, relabelled), add a fourth page-view whose id list names those
@@ -35,13 +35,19 @@ run a fourth LFO at all. The last is the true open gate; the rest is patch-shape
 
 ### 1. The parameter table — repurpose, do not grow
 
-The table is a flat array, `record[id] = 0x401e29d0 + id*60`, ids 1..320. It
-ends at 320 with no slack, so it cannot be *grown*. It does not need to be. Its
-head carries **15 unused records** whose short name is `ERR` — ids 1-5, 7-9,
-11-15, 17-18 — placeholders next to the real head entries (Machine Type id6,
-Track Level id10, Global Mix Mode id16). Each is a valid 60-byte record that
-just displays `ERR`, and **none is referenced by address** (only by id-index),
-so overwriting one changes nothing but what that id resolves to.
+The table is a flat array, `record[id] = 0x401e29a0 + id*60` (1.10E), ids 1..320
+— see `docs/modulation-mask.md` for the fifteen fields of a record. It ends at
+320 with no slack, so it cannot be *grown*. It does not need to be. Its head
+carries **10 unused records** whose long name is `Error` and short name `ERR` —
+ids 1-5, 11-14, 17-18 — sitting among the real head entries (Machine Type id6,
+Solo/Mute/Pattern Mute ids 7-9, Track Level id10, Active Track id15, Global Mix
+Mode id16). Each dead one is a valid 60-byte record that just displays `ERR`,
+and **none is referenced by address** (only by id-index), so overwriting one
+changes nothing but what that id resolves to.
+
+**A short name of `ERR` is not sufficient evidence that a record is dead** —
+Solo, Mute, Pattern Mute and Active Track all carry it, because they are never
+drawn on a parameter page. Require the *long* name to be `Error` too.
 
 LFO4 needs ten parameter records. Take the ten dead ERR slots — ids
 **1,2,3,4,5,11,12,13,14,17** — and rewrite each with LFO3's field layout: the
@@ -64,12 +70,11 @@ appending.
 ### Alternative kept for later: grow the table by appending
 
 Repurposing is the better path for *this* change, but the append/relocate
-analysis is real and worth keeping — a larger change (more than the fifteen
-spare slots, or a different table) would need it, and these facts hold
-regardless.
+analysis is real and worth keeping — a larger change (more than the ten spare
+slots, or a different table) would need it, and these facts hold regardless.
 
-- **No slack after the table.** `record[id] = 0x401e29d0 + id*60` ends at id 320
-  (`0x401e750c`); the bytes immediately after are another lookup table. Ten new
+- **No slack after the table.** `record[id] = 0x401e29a0 + id*60` ends at id 320;
+  the bytes immediately after are another lookup table. Ten new
   records (ids 321–330, +600 bytes) cannot be appended in place.
 - **Relocation cost.** The table is ~19.3 KB (321 × 60). **56 sites in code hold
   an absolute literal pointing into its base** (53 at `0x401e29a0`, plus a few
@@ -94,6 +99,37 @@ against **81, 91, 101** — the SPH ids of LFO1/2/3 — to apply the start-phase
 slew remap for random waveforms. A fourth LFO's SPH id must be added here, and
 anywhere else that enumerates the three (the p-lock id derivation DNX found,
 `4*slot + lfo`, is the sort of thing to re-check on hardware).
+
+### 3b. The page id is contiguity-bound — a real constraint
+
+`is_lfo_param_modulatable` (1.10E `0x400de34e`, **1.11 `0x400dbee6`**) decides
+"is this an LFO parameter" as a **range test on the page id**:
+
+```
+addil #-26,%d3        ; page - 0x1a
+moveq #2,%d0
+cmpl  %d3,%d0
+scc   %d0             ; (page - 0x1a) <= 2  ->  page in {0x1a, 0x1b, 0x1c}
+```
+
+Byte-identical in both builds. Widening it to `<= 3` admits page **`0x1d`**,
+which is **Retrig**, not a fourth LFO. And `0x1e` is taken too — it is the
+`None`/`---` destination entry (`docs/modulation-mask.md`). So the next free
+page id is `0x1f`, and a contiguous range test cannot reach it without also
+swallowing Retrig and None.
+
+Three ways out, in rising cost:
+
+1. **Renumber** so a fourth LFO is contiguous — moves Retrig and None, and
+   every site that names those ids must be found. Cheap only if such sites are
+   few, which is unverified.
+2. **Replace the range test with an explicit `page == 0x1f ||`** — more bytes
+   than the stock sequence, so it needs a cave at each site.
+3. **Reuse an existing LFO page id** for a fourth page-view, distinguishing by
+   parameter id instead — avoids the test entirely but may break anything that
+   maps page id to LFO index.
+
+This is a site the earlier drafts assumed was a simple bound raise. It is not.
 
 ### 4. A fourth page-view instance and its id list
 
@@ -132,7 +168,9 @@ Each stage is independently flashable and observable, so a failure localises.
    built `.syx` back and diffing the record grid: **237 bytes change**, ids
    1-5/11-14/17 become `SPD MULT FADE DEST WAVE SLEW SPH MODE DEP MULT` labelled
    `LFO4`, and **ids 6-10, 15, 16 and 18 are byte-identical** — the live head
-   parameters are untouched, as is LFO3. A fourth
+   parameters are untouched, as is LFO3. The block's `+0x34` handler sequence is
+   identical to LFO3's, which is the check that caught the second anchor error.
+   A fourth
    LFO's parameter block now *exists* in the table, **labelled "LFO4"** -- an
    `LFO4` string was written into a verified-safe slot of unreferenced padding
    (`0x4026eff6`) and the block's page-label pointers repointed to it, so the
@@ -153,10 +191,13 @@ Stage 1 is within reach right now with the existing patch model. Stages 2–3 ne
 a code-cave applier (`patch/cave.py`, the roadmap's Phase-2 mechanism) and the
 page-view / MOD-navigation reads below. Stage 4 is the make-or-break.
 
-## The Stage 1 correction, recorded because it nearly reached hardware
+## The Stage 1 corrections, recorded because they nearly reached hardware
 
-The 2026-09-11 Stage 1 build was wrong, and the way it was wrong is worth
-keeping.
+The 2026-09-11 Stage 1 build was wrong **twice over**, and both errors are the
+same shape: an anchor off by a fixed amount, producing output that looked right.
+Neither build was flashed.
+
+### First: the anchor was 0x38 bytes too high
 
 `docs/parameter-table-consumer.md` anchors the table as
 `record[id] = 0x401e29d0 + id*60`, which is correct **for the field it was
@@ -188,10 +229,33 @@ layout id 84 reads `LFO2`. `_check_geometry` in `scripts/build_lfo4_test.py` now
 probes five such positions and refuses to run if any disagrees, and the rebuilt
 firmware is diffed against stock record-by-record rather than by byte count.
 
+### Second: the record start was 8 bytes too low
+
+The fix above moved the anchor to `base - 8 + id*60`, reasoning that the two
+fields before the page id belonged to the record. They do not. The LFO parameter
+dispatch at `0x40035f32` (1.10E) computes its per-parameter handler as
+`base + 0x34 + id*60` and jumps through it, which fixes the record start **at**
+the base — and fifteen 4-byte fields then close the 60 bytes exactly, with the
+handler at `+0x34` and an always-empty unit string at `+0x38`.
+
+The consequence of being 8 bytes low was narrower but real: every field edit was
+still correct (they were expressed relative to the base), but each 60-byte clone
+carried **the previous record's handler pointer**. The rebuilt LFO4 block would
+have had LFO3's parameters wired to the wrong handlers.
+
+**The probe that settles it**: LFO1, LFO2 and LFO3 are the same ten parameters,
+so their handler sequences must be identical. They are, under the correct
+boundary; under the 8-low boundary LFO1's first slot picks up id 74's handler and
+LFO1 disagrees with the other two. `_check_geometry` now asserts this.
+
+### The lesson
+
 This is the same class of error as the `+30`/`0x30` radix mistake in
 `docs/engine-state.md`: a small fixed offset, a result that looks right, and no
-check that could tell the difference. The lesson generalises — **an anchor is not
-verified until it has been tested somewhere its neighbours differ.**
+check that could tell the difference. Three instances now. The lesson
+generalises — **an anchor is not verified until it has been tested somewhere its
+neighbours differ**, and the cheapest such place is a repeated structure that
+must agree with itself.
 
 ## Code-cave space — a real constraint on the UI stage
 
@@ -211,7 +275,40 @@ page-view instance is a larger ask that the memory-map read must place safely.
 `patch/cave.py` should therefore distinguish unreferenced padding (safe for
 small data) from BSS (never) and from a section-grow (needs the memory map).
 
-## The audio engine — the true open gate
+## The audio engine — half of this gate is now closed
+
+**2026-09-12, measured on hardware.** A two-byte change to one parameter
+record's modulation mask made **Portamento Time** — a parameter Elektron wired
+to no modulator at all — both appear as an LFO destination and **actually
+modulate** (`docs/modulation-mask.md`).
+
+So the engine's **apply** path is generic and data-driven: it resolves a
+destination index and applies, with no per-parameter special-casing. A fourth
+LFO's *destinations* would therefore need no engine work.
+
+What remains of this gate is narrower and sharper: **can the engine run a fourth
+LFO generator?** Whether the tick advances an array of N phases or three named
+instances is the single remaining unknown on the LFO4 path. Everything below
+was written before that result and should be read with it in mind.
+
+### The revised shape of the job
+
+| Piece | Status |
+|---|---|
+| Storage — a reserved fourth LFO slot in the sound format | **Done by Elektron** (DNX) |
+| Destination masks — the fourth rank already on every modulatable parameter | **Done by Elektron** (`docs/modulation-mask.md`) |
+| Modulation apply — generic over the parameter index | **Confirmed on hardware** |
+| Parameter records — ten dead ERR slots to repurpose | **Built**, `scripts/build_lfo4_test.py` |
+| **Runtime parameter indices** — eight contiguous slots | **No room.** 98 of 99 used (`docs/engine-state.md`) |
+| **The page id** — a contiguous range test `(page - 0x1a) <= 2` | **Blocked.** `0x1d` is Retrig, `0x1e` is `None` |
+| **A fourth page-view and `[MOD]` navigation** | Not started; needs a cave |
+| **The generator** — can the tick run four? | **The open gate** |
+
+The two hard structural problems are now the runtime index space and the page
+id, not the parameter table — which is the opposite of where this document
+started.
+
+## The audio engine — the original analysis
 
 Everything above is the **control and UI** side: making a fourth LFO's
 parameters exist, show, and be editable. Whether a fourth LFO actually
@@ -224,35 +321,59 @@ slot of each group of eight unused** — "there is room for a fourth LFO here to
 (`DNX/docs/dn2-format.md`). So the *storage* side is settled: a fourth LFO's
 settings already have a reserved home in every sound.
 
-Two things are now established about the engine, narrowing the gate:
+### RETRACTED 2026-09-12: "the engine is on ColdFire"
 
-- **It is on ColdFire, not the SHARC.** When an LFO modulates a parameter the
-  DN2 shows that value moving on the parameter page, and the page is drawn by
-  MAIN OS — so the modulated value, and therefore the LFO computation, lives on
-  the ColdFire side that the tooling reads. The worst case (a SHARC-only engine
-  needing a different disassembler) is ruled out.
+This section used to claim the LFO computation was settled as ColdFire-side,
+on this argument: *"When an LFO modulates a parameter the DN2 shows that value
+moving on the parameter page, and the page is drawn by MAIN OS."*
+
+**The premise is false.** The device's owner, who plays it: *"Interestingly, it
+doesn't. Only modulation that actually moves visually values is external MIDI
+modulation."* Being able to see internally-modulated values move has been a
+long-standing request to Elektron.
+
+There is a plausible design reason, and it is worth writing down because it
+constrains any "show the modulation" feature we might be tempted by later: if
+the displayed value followed the LFO, then arming live record while a sequence
+plays would capture that movement as parameter locks, **recording the modulation
+on top of itself**. Baking an LFO to p-locks deliberately is a real feature idea
+(`docs/ideas-backlog.md` §5) — having it happen by accident is not.
+
+So the argument is withdrawn, and with it the conclusion. **Where the LFO is
+computed is open again**, and the surrounding evidence now leans the other way:
+
+- no smooth curve table exists in *any* section of the firmware
+  (`docs/data-sections.md`), which is what a table-driven waveform would need —
+  though triangle, saw, square and ramp need no table, and the owner's read is
+  that "all forms are computed/derived live", which would leave no table either
+  way. So this is weak evidence, not strong;
+- there is **no SHARC program anywhere in the update**, which cuts against a
+  DSP-side engine — unless the DSP runs from its own never-updated flash;
+- the one piece of Elektron prior art that implements LFO *generators*,
+  octabam's reverb, puts them on the **DSP** — on a different and much older
+  device, so a hypothesis only (`docs/octatrack-lfo-prior-art.md`).
+
 - **A hardcoded 3-LFO site is found in the engine path.** The LFO speed handler
   `0x40035f32` carries `if (uVar1 < 3)` beside its `case 0x1e` (offset 30, the
   LFO block). That is one of the per-LFO count sites this document predicted —
-  the kind of `< 3` bound a fourth LFO must raise.
+  the kind of `< 3` bound a fourth LFO must raise. This still stands; it is a
+  parameter-side site and does not depend on the retracted argument.
 
-The read path is now mapped end to end, which locates the generator by
-elimination. Drawing a parameter goes: page renderer `FUN_40016f38` → value
-getter `FUN_40064786` → resolver `FUN_400635d0`, and the resolver **reads the
-current, already-modulated value out of the track/sound engine state** — an
-object reached as `page_view[0x1a]` (the engine), with the value living far
-inside it (`+0x4f2e0`, read via a `+0x28` vtable method). So the modulated value
-is *stored* in engine state; the LFO computation that *writes* it runs on a
-separate real-time tick.
+The read path described below was also read as reaching "the current,
+already-modulated value". Since the display does **not** move under LFO
+modulation, it more likely reaches the *set* value plus external-MIDI
+modulation. Treat that chain as unverified until re-read:
 
-**That write-side tick is the generator, and it is the remaining target.** It
-advances each LFO's phase, computes its waveform, scales by depth, and writes the
-modulated value into `page_view[0x1a]`'s state. To find it: identify the class of
-`page_view[0x1a]` (the per-track sound engine) and read its update method, or
-find what writes the `+0x4f2e0` state region. Confirm there its LFO count is a
-raisable bound (`< 3` / `moveq #3`) rather than three unrolled instances — and
-`0x40035f32`'s `if (uVar1 < 3)` beside `case 0x1e` is a first such site. It is a
-ColdFire read throughout, not cross-CPU.
+> page renderer `FUN_40016f38` → value getter `FUN_40064786` → resolver
+> `FUN_400635d0`, reading engine state at `+0x4f2e0` (1.10E) / `+0x4f358`
+> (1.11) via a `+0x28` vtable method.
+
+**The write-side tick remains the target**, and the cheapest way to settle which
+CPU it runs on is now the *external MIDI* path: that modulation demonstrably
+does move the display, so it is ColdFire-side and its write into engine state
+can be traced. Whatever writes the value for external MIDI modulation is either
+the same machinery the LFO uses, or proof that the LFO uses different machinery
+— and either answer is progress.
 
 ## What is not yet known, and is next
 

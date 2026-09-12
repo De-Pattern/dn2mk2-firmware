@@ -15,14 +15,19 @@ What it does and does not do, stated plainly:
   keeps the image valid and, on hardware, that the device still boots and its
   existing pages are unchanged.
 
-**Corrected 2026-09-12.** The previous version anchored a record at
-``TABLE + id*60`` where ``TABLE`` is the *short-name* pointer. That address is
-0x38 bytes into the record, so every other field it edited belonged to ``id+1``
-and every 60-byte clone straddled two records -- which would have overwritten
-the live parameters Machine Type (6), Track Level (10) and Solo/Mute/Pattern
-Mute (7-9). The build was never flashed. See docs/modulation-mask.md for the
-record layout this version uses, and the guard in ``_check_geometry`` which
-refuses to run if the layout does not resolve to known names.
+**Corrected twice on 2026-09-12; neither bad build was flashed.** First, the
+record was anchored at ``TABLE + id*60`` where ``TABLE`` is the *short-name*
+pointer -- 0x38 bytes into the record -- so every other field edited belonged
+to ``id+1`` and every clone straddled two records, overwriting parts of the
+live Machine Type (6), Track Level (10) and Solo/Mute/Pattern Mute (7-9).
+Second, the fix over-corrected to ``base - 8 + id*60``, which carried the
+previous record's value formatter into each clone.
+
+The record starts **at** the accessor base: ``record(id) = base + id*60``,
+fifteen 4-byte fields closing the 60 bytes exactly. See docs/modulation-mask.md
+for the field list, and ``_check_geometry`` below, which refuses to run unless
+the layout resolves at page boundaries *and* the three LFO blocks agree with
+each other -- the probe that caught the second error.
 
 No firmware bytes live in this repository: the record bytes are read from the
 user's own local image at build time and written back. Output is a .syx under
@@ -46,7 +51,8 @@ BASE = 0x40000400
 RECORD = 60
 
 # The accessor base -- the address the ~44 `lea` sites load (docs/version-anchors.md).
-# A record starts 8 bytes below it: record(id) = ACCESSOR_BASE - 8 + id*60.
+# A record starts exactly there: record(id) = ACCESSOR_BASE + id*60, fifteen
+# 4-byte fields that close the 60 bytes with nothing left over.
 # Keyed by decoded MAIN OS size, which is a clean discriminator and makes the
 # script refuse an image it has not been anchored against.
 ACCESSOR_BASE = {
@@ -55,14 +61,16 @@ ACCESSOR_BASE = {
 }
 
 # Field offsets from the start of a record. docs/modulation-mask.md.
-F_PAGE_ID = 0x08
-F_CC = 0x20  # MIDI controller   (0xffffffff = unassigned)
-F_NRPN = 0x24  # NRPN             (0xffffffff = unassigned)
-F_ORDINAL = 0x28  # dense ordinal -- every record has one; do NOT clear it
-F_MODMASK = 0x2C  # modulation mask
-F_LONG = 0x30  # long-name string pointer
-F_PAGE = 0x34  # page-label string pointer
-F_SHORT = 0x38  # short-name string pointer
+F_PAGE_ID = 0x00
+F_CC = 0x18  # MIDI controller   (0xffffffff = unassigned)
+F_NRPN = 0x1C  # NRPN             (0xffffffff = unassigned)
+F_ORDINAL = 0x20  # dense ordinal -- every record has one; do NOT clear it
+F_MODMASK = 0x24  # modulation mask
+F_LONG = 0x28  # long-name string pointer
+F_PAGE = 0x2C  # page-label string pointer
+F_SHORT = 0x30  # short-name string pointer
+F_HANDLER = 0x34  # value formatter; the parameter dispatch jumps through it
+F_UNIT = 0x38  # unit-suffix string; empty in all 320 records
 
 # LFO4's predicted mask values (docs/modulation-mask.md, "The fourth bit").
 # LFO4 sits at the end of the chain, so nothing may modulate its parameters;
@@ -101,7 +109,7 @@ def main() -> int:
 
     def record(param_id: int) -> int:
         """File offset of the first byte of record[param_id]."""
-        return (accessor_base - 8 - BASE) + param_id * RECORD
+        return (accessor_base - BASE) + param_id * RECORD
 
     def field(param_id: int, off: int) -> int:
         return struct.unpack_from(">I", content, record(param_id) + off)[0]
@@ -109,7 +117,7 @@ def main() -> int:
     def name(param_id: int, off: int) -> str | None:
         return _cstr(content, field(param_id, off) - BASE)
 
-    _check_geometry(name)
+    _check_geometry(name, field)
 
     # Every target must be a genuinely dead record: "Error"/"ERR" and no page.
     # Checking the short name alone is what let the previous version aim at
@@ -151,13 +159,21 @@ def main() -> int:
     return 0
 
 
-def _check_geometry(name) -> None:
-    """Refuse to run unless the record layout resolves to names we know.
+def _check_geometry(name, field) -> None:
+    """Refuse to run unless the record layout resolves the way it should.
 
-    The bug this guards against is an anchor that is off by a fixed amount:
-    a wrong base still produces plausible-looking strings, because the table is
-    dense and every record holds three string pointers. These four probes
-    straddle page boundaries, where an off-by-one-record anchor stops agreeing.
+    The bug this guards against is an anchor off by a fixed amount. A wrong
+    base still produces plausible strings, because the table is dense and every
+    record holds four pointers -- so "some record says LFO1" proves nothing.
+    Two kinds of probe do prove something:
+
+    1. **Page boundaries.** Under a correct anchor id 84 is the last LFO1
+       record and id 85 the first LFO2 one. An off-by-one-record anchor shifts
+       exactly here and nowhere a casual look would notice.
+    2. **The three LFO blocks are the same parameters.** ids 75-84, 85-94 and
+       95-104 must therefore carry identical handler sequences. This is what
+       caught the record start being 8 bytes low: it put LFO1's first slot on
+       the previous record's handler, so LFO1 disagreed with LFO2 and LFO3.
     """
     probes = [
         (6, F_LONG, "Machine Type"),
@@ -175,6 +191,19 @@ def _check_geometry(name) -> None:
                 f"anchor or the record layout is wrong -- see "
                 f"docs/modulation-mask.md before changing anything."
             )
+
+    blocks = [
+        [field(i, F_HANDLER) for i in range(start, start + 10)]
+        for start in (75, 85, 95)
+    ]
+    if not (blocks[0] == blocks[1] == blocks[2]):
+        raise SystemExit(
+            "parameter-table geometry check failed: the LFO1/LFO2/LFO3 blocks "
+            "have different handler sequences, so the record boundary is "
+            f"wrong.\n  LFO1 {[hex(x) for x in blocks[0]]}\n"
+            f"  LFO2 {[hex(x) for x in blocks[1]]}\n"
+            f"  LFO3 {[hex(x) for x in blocks[2]]}"
+        )
 
 
 def _cstr(buf: bytes, off: int) -> str | None:

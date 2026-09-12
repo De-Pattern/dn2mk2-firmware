@@ -148,3 +148,8 @@ correct, it was simply aimed at the wrong stage of the story at first.
 | 2026-09-11 | **Stock 1.10E** re-sent through the **recovery** route | **Stall too**, ~80%. First sign the stall is the link, not the image. |
 | 2026-09-11 | Recovery sends over a **Scarlett 4i4** MIDI interface | **Stall, varying %** (30/70/80). The interface was going idle mid-transfer, dropping packets. |
 | 2026-09-11 | **Stock 1.11** through recovery over a **fixed link** | **Pass.** Reached 100%, rebooted, device boots 1.11. Recovery is sound; the culprit was the interface. |
+| 2026-09-12 | **Mod-mask test** (`modmask-test_DN2_1.11.syx`) — two 4-byte writes opening Portamento Time and the AMP envelope Delay Time to modulation | **Pass, and the hypothesis confirmed.** `PORT Portamento Time` appears in MOD1's destination list **and is actually modulated**. First functional firmware modification. See `docs/modulation-mask.md`. |
+
+This is the project's **first functional firmware modification** — Gate E changed
+a string, this changed what the instrument can do.
+
