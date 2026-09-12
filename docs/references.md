@@ -184,3 +184,34 @@ disappear between releases, and where the manual and the device disagree, the
 device wins.
 
 Local copies live in the private corpus, not here.
+
+## Licence audit, 2026-09-13
+
+Re-checked all seven reference repositories after the owner listed them. **Two
+findings change what may be copied**, and both moved since this project started:
+
+| repo | licence | may we port? |
+|---|---|---|
+| `mischa85/elektron-firmware-tool` | MIT | yes — already the ancestor of `dnfw`'s container and aPLib code |
+| `sambanks/octabam` | MIT | yes |
+| `bkkbrls-del/midisc` | MIT | yes — `patch/coldfire.py` is ported from it |
+| `bryantysinger/octa-bt-pt` | MIT | yes — the patch-spec model |
+| `nordseele/octalab-notes` | MIT | yes, though it is **docs only**: no firmware, no build, no flashing procedure |
+| **`emuyia/ems-octakit`** | **MIT — added 2026-09-12** | **yes, newly.** This repo was unlicensed for the whole of this project's life; the condition recorded against it has now been met, so its `.S` stubs, `link.ld` and `firmware.json` manifest may be ported with attribution |
+| **`mxldyn/octamax`** | **NONE** | **no.** No LICENSE file and no statement in its README. Architecture-only inspiration, never copied |
+
+**The restriction moved rather than lifted.** `ems-octakit` was the one to avoid
+and is now free to use; `octamax` is now the one to avoid. Earlier notes in this
+repository describing "midisc/octamax" as MIT are **wrong about octamax**.
+
+**Re-check `ls <repo>/LICENSE` before porting from any of them.** This changed
+once during the project and can change again — and an expected licence is not a
+granted one, while a granted one can also arrive late, as it did here.
+
+### `nordseele/octalab-notes`, new to the set
+
+Docs only, MIT, and explicit that it "publishes no firmware, no build and no
+flashing procedure". It records what its author learned about OT 1.40C while
+adding creative helpers — a topographic trig generator in the style of Mutable
+Instruments' Grids. Useful as reverse-engineering knowledge and as a second
+account of the Octatrack's internals beside octabam's; nothing to port.
