@@ -318,7 +318,7 @@ was written before that result and should be read with it in mind.
 | **The page id** — a contiguous range test `(page - 0x1a) <= 2` | **Blocked.** `0x1d` is Retrig, `0x1e` is `None` |
 | **A fourth page-view and `[MOD]` navigation** | Not started; needs a cave |
 | **The generator** — can the engine run four? | **YES — confirmed on hardware 2026-09-12.** LFO3 driven through the reserved lane still modulates (`docs/engine-index-map.md` §11). The engine implements a fourth LFO |
-| **The runtime slot space** — eight slots to give it | **THE gate, and now the only one.** One repairable free slot of 101; four of the five structures that bound it are tractable, the sound object's size is unmeasured |
+| **The runtime slot space** — eight slots to give it | **THE gate, and now the only one.** Measured: the sound object's value array is exactly 101 entries and sits flush against the machine-type byte at +0xde, so it cannot grow in place (`docs/engine-index-map.md` §13). The route left is hooking the choke points to serve extra slots from separate RAM |
 
 The two hard structural problems are now the runtime index space and the page
 id, not the parameter table — which is the opposite of where this document
