@@ -303,7 +303,8 @@ was written before that result and should be read with it in mind.
 | **Runtime parameter indices** — eight contiguous slots | **No room.** Two free: slots 65 and 100 |
 | **The page id** — a contiguous range test `(page - 0x1a) <= 2` | **Blocked.** `0x1d` is Retrig, `0x1e` is `None` |
 | **A fourth page-view and `[MOD]` navigation** | Not started; needs a cave |
-| **The generator** — can the tick run four? | **The open gate** |
+| **The generator** — can the tick run four? | **Not the gate.** The engine's index space reserves a complete fourth lane (`docs/engine-index-map.md`) |
+| **The runtime slot space** — eight slots to give it | **THE gate.** 1–2 free of 101 |
 
 The two hard structural problems are now the runtime index space and the page
 id, not the parameter table — which is the opposite of where this document

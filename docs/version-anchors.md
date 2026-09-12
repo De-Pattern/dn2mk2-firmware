@@ -87,3 +87,19 @@ extrapolate them; the offsets between the two builds are not constant (code grew
    not the address — the sequences here were byte-identical across builds.
 4. **Never** a blind address histogram over the raw image: ColdFire opcode bytes
    masquerade as addresses (`docs/memory-map.md`, method note).
+
+## The control → engine boundary (added 2026-09-12)
+
+| What | 1.10E | 1.11 | How it was found |
+|---|---|---|---|
+| **`Sound::updateMirror`** | — | ends **`0x4004cc06`** | its trace string `0x4021564d` is pushed from the assert path at `0x4004cbde` |
+| **LFO DEST special-cases** | — | **`0x4004cb04`, `0x4004cb70`** | `moveq #-9,%dN` with a `moveq #20` within ±48 B — **2 of 27** `moveq #-9` sites image-wide |
+| **`slot_to_engine_index`** | — | **`0x400dccfa`** | called twice per loop iteration from the two sites above |
+| **forward map** (slot → engine) | — | **`0x401fcf20`**, 100 × 4 B | `lea` at `0x400dcd26`; bounded `value <= 99` |
+| **inverse map** (engine → slot) | — | **`0x401fd0b0`**, 112+ × 4 B | immediately after the forward table; round-trips with it |
+| kind-16 map | — | `0x401fcd50` | `lea` at `0x400dcd1e` |
+
+Full reading in `docs/engine-index-map.md`. The round-trip
+`inverse[forward[slot]] == slot`, checked over all 100 slots, is the guard that
+these are the right two tables and not plausible neighbours — use it when
+re-anchoring on another build.
