@@ -39,6 +39,8 @@ in both; only addresses and one offset moved. The bound-raising job described in
 | **Destination-list filter sites** (×4) | `0x4003908a` `0x4003936c` `0x4003958e` `0x4003978c` | **`0x400397f2` `0x40039ad4` `0x40039cf6` `0x40039ef4`** | searched `203c 0000 1e00 08` (`movel #0x1e00,%dN; btst`); a uniform `+0x768` shift between builds |
 | **Destination-list builder** | — | `0x4003951e` | the `jsr` the filter sites feed |
 | **`is_lfo_param_modulatable`** | `0x400de34e` | **`0x400dbee6`** | searched the tail `0683 ffff ffe6 7002 b083 54c0` — `addil #-26,%dN; moveq #2; cmpl; scc`, i.e. page `0x1a..0x1c`. Byte-identical logic in both builds |
+| **`parameter_value_getter`** | `0x40064786` | **`0x4006408a`** | the function containing the `+0x4f358` reference at `0x400640dc`; reads an LFO value as `sub + 0x14 + idx*2` |
+| **`param_index_in_page(id)`** | — | **`0x400dbcc4`** | returns `record[id] + 0x04`; same shape as the mask getter, different displacement |
 | its page-class siblings | — | `0x400dbdea` `0x400dbe5e` `0x400dbe8a` `0x400dbeb6` | a family reading `record[id]+0x00`: `page <= 4`, `page - 5 <= 5`, `page <= 0x1c`, and a bitmask reject over `page - 11` |
 | **Engine modulation-state offset** | `+0x4f2e0` | **`+0x4f358`** | histogram of `adda.l #imm,%aN` / `move.l #imm,%dN` immediates in `0x30000..0x70000`; every *other* offset matched exactly, isolating this one (shift of +0x78) |
 | **Engine fn — thunk target** | `0x4004d6d4` | **`0x4004dfb0`** | the `jmp` after `move.l #<offset>,%d0; addl %d0,%sp@(4)` |
@@ -61,7 +63,7 @@ extrapolate them; the offsets between the two builds are not constant (code grew
 - `parameter_page_renderer` `0x40016f38`
 - LFO-speed handler `0x40035f32` — the second 3-LFO site
 - `LfoPageView` vtable `0x401ecf7c` — the `+0xbc` cell→id method
-- `parameter_value_getter` `0x40064786`, `parameter_value_resolver` `0x400635d0`
+- `parameter_value_resolver` `0x400635d0`
 - bootstrap: `recovery_receive_loop` `0x80003e5a`,
   `verify_and_flash_container` `0x80003c9c`
 

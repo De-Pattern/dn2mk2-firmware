@@ -96,6 +96,84 @@ DNX-decoded sound — has not been done and would settle it beyond argument.
 initialise-or-apply-to-all pass, not a real-time tick; `FUN_4004dfb0` is pure
 address arithmetic. Neither advances an LFO. The write-side code remains open.
 
+## The LFO's runtime slots — found, and there is no room for a fourth
+
+Found 2026-09-12 by decompiling the 1.11 parameter value getter, `FUN_4006408a`
+(the 1.11 counterpart of 1.10E's `parameter_value_getter 0x40064786`):
+
+```c
+if (param_3 >= 0) {
+  if (FUN_400dbee6(param_id)) {                      /* is_lfo_param_modulatable */
+    if (vtable[0x68](engine + 0x4f358, slot)) {
+      obj  = FUN_4003e426(engine, slot);             /* thunk -> preset accessor */
+      idx  = FUN_400dbcc4(param_id);                 /* = record[id] + 0x04      */
+      sub  = vtable[0x28](obj);
+      return *(short *)(sub + 0x14 + idx * 2);       /* <-- the LFO's value      */
+    }
+  }
+}
+```
+
+So an LFO parameter's runtime value is a **16-bit word at `sub + 0x14 + idx*2`**,
+where `idx` is the record's **parameter-id-within-page** field (`record+0x04`,
+`docs/modulation-mask.md`). `FUN_400dbcc4` is exactly that field's getter.
+
+### The index space is packed, 1..99
+
+Reading `record+0x04` across every page that belongs to a **sound** — the SYN
+machine pages, Filter, Amp, FX, Portamento and LFO1-3:
+
+| Indices | Block |
+|---|---|
+| **1–8** | **LFO1** — `SPD MULT FADE DEST WAVE SLEW/SPH MODE DEP` |
+| **9–16** | **LFO2** |
+| **17–24** | **LFO3** |
+| 25–64 | the SYN machine parameters |
+| **65** | **free — the only gap in the whole space** |
+| 66–85 | Filter |
+| 86–88 | FX sends |
+| 89–99 | Amp, Portamento, the FX block |
+
+**98 distinct indices in use out of 1..99, with one free slot at 65** — and 65 is
+the alignment boundary between the machine block and the filter block, not a
+reserve.
+
+This is corroborated by the destination-list builder `FUN_4003951e`, which walks
+**`i = 0 .. 0x64`** — 101 slots, exactly `0..100` for an index space that runs
+`1..99`. Two independent readings of the same number.
+
+### What that means for a fourth LFO
+
+A fourth LFO needs **eight contiguous slots**. There are none. The options are:
+
+1. **Extend the space past 99** and put LFO4 at 100–107. Index 100 is already
+   inside the enumerator's bound; 101–107 are not, so the `0x65` bound has to be
+   raised wherever it is replicated — the same replicated-immediate problem as
+   the parameter table's `#321`, and not yet counted.
+2. **Displace existing parameters** to open a run of eight. Every index is a
+   position in a runtime array *and* a key the stored format has to agree with,
+   so this moves far more than it looks.
+
+### A distinction worth keeping straight
+
+DNX measured the **stored** sound format as `30 + 8*param + 2*lfo`, with the
+fourth slot of each group of eight unused — Elektron left room there. The
+**runtime** index space above has no such reservation: it is packed, and LFO3 is
+immediately followed by the machine parameters.
+
+So the two sides disagree, and both readings are right about their own side:
+**a fourth LFO already has a home in storage and does not have one in RAM.**
+That is the sharper version of the open question, and it is the second time this
+document has had to separate the stored layout from the runtime one — see the
+retraction below.
+
+**Caveat.** The `sub + 0x14 + idx*2` read is on a branch gated by
+`is_lfo_param_modulatable`; non-LFO parameters take a different path
+(`vtable[0xc4]`). So "LFO1-3 occupy indices 1-24" is **measured**, while "the
+machine parameters share the same array" is **inferred** from their sharing the
+same index field and starting exactly where the LFOs stop. Reading the
+`vtable[0xc4]` path would settle it.
+
 ## A correction, recorded because it nearly became a patch
 
 An earlier reading of this accessor took its displacement as **+30 decimal** and
