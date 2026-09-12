@@ -821,3 +821,26 @@ script that generates the new one.
 Verified for `--lfo 2`: 24 bytes differ, 8 in the forward map and 16 in the
 inverse, **none outside the two tables**; LFO1 and LFO3 unchanged; round-trip
 holds over all 100 slots; 21/21 integrity checks and the HMAC reproduced.
+
+### CONFIRMED ON HARDWARE — the engine side is closed
+
+**2026-09-12. LFO2 (lane 4) and LFO3 (lane 3) modulate independently and
+simultaneously.**
+
+So lane 4 is a **separate generator**, not an alias for a vacated lane, and it
+runs alongside the shipping LFOs rather than instead of one. Taken with §11:
+
+| Question | Answer |
+|---|---|
+| Does the engine implement a fourth LFO? | **Yes** (§11) |
+| Is it a separate generator? | **Yes** — three lanes driven at once, one of them the reserved one |
+| Can four LFOs run simultaneously? | **Yes** |
+| Is any of this modifiable by us? | It does not need to be |
+
+**There are no remaining engine-side unknowns for a fourth LFO.** The engine was
+the one thing this project could not have fixed — its code is not in the firmware
+file (§9, `docs/hardware.md`) — and it turns out not to need fixing. Elektron
+built four LFOs and exposed three.
+
+Everything that remains is control-side, where we can write bytes, and it is one
+problem: **eight runtime slots** (§13).

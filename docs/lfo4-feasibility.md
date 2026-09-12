@@ -31,7 +31,7 @@ What remains is real but smaller: rewrite ten ERR records as LFO4's parameters
 ten ids, wire the `[MOD]` navigation to it, and confirm the **audio engine** can
 run a fourth LFO at all. The last is the true open gate; the rest is patch-shaped.
 
-> **The open gate is closed, and it opened outward (2026-09-12).** The audio
+> **The engine side is finished (2026-09-12), and it opened outward.** The audio
 > engine **does** implement a fourth LFO — confirmed on hardware by
 > `scripts/build_lfo4_probe.py`, which re-pointed LFO3 at the engine's reserved
 > lane and heard it still modulate (`docs/engine-index-map.md` §11,
@@ -317,7 +317,7 @@ was written before that result and should be read with it in mind.
 | **Runtime parameter indices** — eight contiguous slots | **No room.** Slots 0, 65 and 100 all resolve to engine index 0; only 65 is repairable (`docs/engine-index-map.md` §6b) |
 | **The page id** — a contiguous range test `(page - 0x1a) <= 2` | **Blocked.** `0x1d` is Retrig, `0x1e` is `None` |
 | **A fourth page-view and `[MOD]` navigation** | Not started; needs a cave |
-| **The generator** — can the engine run four? | **YES — confirmed on hardware 2026-09-12.** LFO3 driven through the reserved lane still modulates (`docs/engine-index-map.md` §11). The engine implements a fourth LFO |
+| **The generator** — can the engine run four? | **YES, and they coexist — confirmed on hardware 2026-09-12.** LFO3 driven through the reserved lane still modulates (§11), and LFO2 on lane 4 runs independently alongside LFO3 on lane 3 (§14). No engine-side unknowns remain |
 | **The runtime slot space** — eight slots to give it | **THE gate, and now the only one.** Measured: the sound object's value array is exactly 101 entries and sits flush against the machine-type byte at +0xde, so it cannot grow in place (`docs/engine-index-map.md` §13). The route left is hooking the choke points to serve extra slots from separate RAM |
 
 The two hard structural problems are now the runtime index space and the page
