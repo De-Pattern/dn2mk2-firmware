@@ -224,14 +224,35 @@ both inside `record+0x24` of ids 34 and 61, every other byte identical, value
 formatters unchanged, and all 21 integrity checks pass including the HMAC
 trailer.
 
-**What to look for.** Open LFO1's `DEST` list and scroll it.
+### CONFIRMED on hardware, 2026-09-12
 
-- `PTIM` and the AMP `DEL` **appear** → the mask is the gate, this document
-  stands, and opening the FX pages reduces to the enumeration problem below.
-- They **do not appear** → the mask is necessary but not sufficient, and the
-  `ParameterSet` enumeration must be read before anything else is attempted.
+Flashed to the instrument. **`PORT  Portamento Time` appears in MOD1's
+destination list.** A parameter that the stock firmware offers to no modulator
+at all is now an LFO destination, from a **two-byte** change to one field.
 
-Either result is worth the flash, which is the point of building it.
+**The mask is the gate.** For a parameter the track's `ParameterSet` already
+enumerates, `record+0x24` alone decides whether an LFO can target it.
+
+Three things the screen confirms beyond the main result:
+
+- The header reads **`MOD1 DEST`** — the instrument itself calls LFO1 "MOD1",
+  exactly as the filter-to-name map at `0x40106a08` said it would. That mapping
+  was read from the bytes before anyone looked at a screen.
+- The list is **grouped by page** with the page's short label in the left
+  column (`FX` over Bit Reduction / Sample-Rate Redu / SRR Routing / Overdrive /
+  OVR Routing, then `PORT` over Portamento Time). That is
+  `GroupedModDestListView` doing its job, and it means a new destination
+  inherits its grouping from its record's page field with no extra work.
+- Portamento Time sits **after a dotted separator at the end of the list**,
+  which fits the second loop in `FUN_4003951e` — the one that walks 26 entries
+  from `DAT_4028bfc4` to build a page ordering. Portamento is evidently not in
+  that ordering table, so it lands last rather than in place. Cosmetic, but it
+  is the next thing to fix if a destination should appear in its natural spot.
+
+What this does **not** settle: whether the modulation actually *moves* the
+parameter. The destination list is the control side. Confirming that an LFO
+assigned to `PTIM` audibly changes portamento time is a separate test, and it is
+the one that speaks to the engine gate.
 
 ## Why the FX delay could not be the test
 
