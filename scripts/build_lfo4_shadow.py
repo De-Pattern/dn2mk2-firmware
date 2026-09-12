@@ -107,8 +107,21 @@ SPEED_OFFSET = 0x0C00
 # only an index this project has measured rather than a guessed encoding.
 DEST_LFO3_SPEED = 3
 
-# Engine 58 is SYN slot 50 -- `PITCH Pitch All` on page-0 machines.
+# Destinations worth naming. The distinction that matters is machine-
+# independence: engine indices 33..72 come from the MACHINE table and only
+# exist if the loaded machine has that slot, so they are a poor test target.
+# Engine 76..106 come from the sound table and exist whatever machine is
+# loaded.
+#
+#   58   SYN slot 50 -- `PITCH Pitch All`, but ONLY on page-0 machines.
+#                       On page-2 machines the same slot is `Op C Phase`.
+#   95   Amp PAN     -- machine-independent, and nothing else in a patch pans,
+#                       so any stereo movement is unambiguously LFO4.
+#   96   Amp VOL     -- machine-independent tremolo.
+#   83   Filter BASE -- machine-independent filter sweep.
 DEST_PITCH_ALL = 58
+DEST_PAN = 95
+DEST_VOL = 96
 
 # FADE's neutral, settled by two independent sources.
 #
@@ -236,7 +249,13 @@ def main() -> int:
     else:
         print(f"\nLFO4 modulates engine index {args.dest}, independent of LFO3 --")
         print("  nothing is shared, so nothing competes.")
-        if args.dest == DEST_PITCH_ALL:
+        if args.dest == DEST_PAN:
+            print("  Engine 95 is Amp PAN -- machine-independent, and nothing else")
+            print("  in a patch pans, so any stereo movement is LFO4 and only LFO4.")
+            print("  NOTE: LFO4's DEPTH is copied from LFO3, and depth is bipolar")
+            print("  with 64 as zero. If LFO3's DEP sits at its default the copy")
+            print("  gives LFO4 no depth and nothing will move. Set LFO3 DEP high.")
+        elif args.dest == DEST_PITCH_ALL:
             print("  Engine 58 is SYN slot 50: `PITCH Pitch All` ONLY on page-0")
             print("  machines. On page-2 machines the same slot is `Op C Phase`.")
             print("  Use a page-0 machine or the test is misleading.")
