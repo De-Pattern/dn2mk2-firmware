@@ -110,6 +110,18 @@ DEST_LFO3_SPEED = 3
 # Engine 58 is SYN slot 50 -- `PITCH Pitch All` on page-0 machines.
 DEST_PITCH_ALL = 58
 
+# Measured neutrals, read from the parameter records (value << 8):
+#
+#   FADE  max 32512 (127), default 16384 (64), bipolar flag 0
+#   DEP   max 32766,       default 16384 (64), bipolar flag 1
+#
+# FADE is not flagged bipolar but its default sits mid-range, so it behaves as
+# centred -- fade-in one way, fade-out the other, 64 meaning no fade. A zero
+# there is full fade, not neutral. Pinning it rather than trusting the copy
+# means LFO4 is correct even if lane 3's mirror word was never populated,
+# which matters because LFO4 has no UI and no defaults of its own.
+FADE_NEUTRAL = 16384
+
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 OUT = pathlib.Path("00_Resources/02_Builds/lfo4-shadow_DN2_1.11.syx")
 OUT_DEST = "00_Resources/02_Builds/lfo4-dest{d}_DN2_1.11.syx"
@@ -139,6 +151,10 @@ def build_payload(own_dest: int | None) -> tuple[str, bytes]:
         if own_dest is not None and LFO_PARAMS[p] == "DEST":
             lines.append(
                 f"    move.w  #{own_dest << 8},%a3@({dst[p]})   | DEST -> engine {own_dest}"
+            )
+        elif LFO_PARAMS[p] == "FADE":
+            lines.append(
+                f"    move.w  #{FADE_NEUTRAL},%a3@({dst[p]})   | FADE -> neutral (64), not 0"
             )
         else:
             lines.append(f"    move.w  %a3@({src[p]}),%a3@({dst[p]})   | {LFO_PARAMS[p]}")
