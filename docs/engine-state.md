@@ -62,14 +62,35 @@ object's member at `+0x68` (the engine/project pointer), and the clamp to
 **engine/project root**, not a per-track object. `docs/memory-map.md`'s
 "per-track object" wording predates this and should be read with that caveat.
 
-**Not yet proven: whether "Preset" is DNX's sound pool.** DNX measures three
-128-count entities on the DN2 — the pattern array (stride 89,088), the kit array
-(10,752) and the **sound pool (128 × 359)**. Patterns and kits are far too large
-to be 960 bytes in RAM, so the sound pool is the only plausible match by size
-(359 B serialized expanding to 960 B with runtime state). That is a reasonable
-inference, **not a measurement**: the UI calls this a Preset, DNX calls that a
-Sound, and nothing here has yet shown they are the same array. Confirming it
-means matching a known preset's field values against a decoded sound.
+### 128 is not a unique fingerprint — the object classes, from the firmware
+
+`128` recurs across unrelated DN2 entities, so counting alone proves nothing.
+The SysEx receive handler `FUN_4002d8b2` names the classes outright:
+
+| String | What it shows |
+|---|---|
+| `Received PATTERN %c%02d` | bank letter + 2 digits — **16 banks × 8 patterns = 128** |
+| `Received SEQ %c%02d` | same bank-letter addressing |
+| `Received PRESET %c:%03d` | letter + 3 digits (the larger preset pool) |
+| `Received PRESET %d`, `Received KIT %d` | plain index |
+| `Received MIDI PRESET`, `Received SETTINGS` | further distinct classes |
+
+So **PATTERN, SEQ, KIT, PRESET, MIDI PRESET and SETTINGS are separate object
+classes.** Patterns are 128 and bank-addressed, exactly as the hardware presents
+them — but a pattern is 89,088 bytes (DNX), not 960, so the array here is not the
+pattern array. The accessor's index is displayed as a **Preset**.
+
+### Preset is what the DN2 calls a Sound
+
+DNX measures the DN2's **sound pool at 128 × 359** and names it "Sound" after the
+SysEx dump type. The firmware calls the same thing a **Preset** — Elektron
+renamed Sound to Preset on the Digitone II. The two vocabularies describe one
+array, which is why the count (128), the role (a project-wide pool indexed
+0..127) and the size (359 B serialized → 960 B with runtime state) all agree.
+
+That makes the identification **corroborated rather than inferred**, though the
+last step — matching a known preset's field values byte-for-byte against a
+DNX-decoded sound — has not been done and would settle it beyond argument.
 
 **The modulation tick has not been found.** `FUN_4004dc62` is an
 initialise-or-apply-to-all pass, not a real-time tick; `FUN_4004dfb0` is pure
