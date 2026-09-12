@@ -14,6 +14,13 @@ indexes the same array the same way. The clearest is the page renderer
 (&PTR_DAT_401e29d0)[ (-(id < 0x141) & id) * 0xf ]   //  *15 words = *60 bytes
 ```
 
+> **Read this with `docs/modulation-mask.md` before editing records.**
+> `0x401e29d0` is the address of a record's **short-name pointer**, which sits
+> `0x38` bytes into the record — not its first byte. Every other field is at a
+> *negative* offset from this anchor. Taking it as the record start silently
+> shifts every field by one record; that produced a bad firmware build on
+> 2026-09-11 (`docs/lfo4-feasibility.md`, "The Stage 1 correction").
+
 Reading it:
 
 - **Base `0x401e29d0`**, records **60 bytes** (`* 0xf` on a 4-byte array), indexed
