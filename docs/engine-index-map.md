@@ -516,3 +516,71 @@ Two routes, neither taken:
    48-bit periodicity directly.
 
 Route 1 is cheaper and answers the question either way.
+
+---
+
+## 11. CONFIRMED ON HARDWARE: the engine implements a fourth LFO
+
+**2026-09-12.** `scripts/build_lfo4_probe.py` re-pointed LFO3 from engine lane 3
+to the reserved lane 4 — engine indices `4, 8, 12, 16, 20, 24, 28, 32` — with no
+other change: same records, same page, same UI, same slots, 24 bytes touched,
+all inside the two mapping tables.
+
+**LFO3 still modulates.**
+
+That is the positive outcome §4 predicted and PR #33 set up to test, and it is
+conclusive in the direction that matters. The engine was handed eight parameter
+values at indices no shipping firmware ever writes, and it produced modulation
+from them. **The reserved lane is live capability, not layout.**
+
+### What it settles
+
+| Question | Answer |
+|---|---|
+| Does the audio engine implement a fourth LFO? | **Yes.** |
+| Is the lane `4*param + 4` the right one? | **Yes** — all eight parameters were driven through it at once. |
+| Is a fourth LFO an engine problem? | **No. It never was, and now we know.** |
+
+The engine's code is not in this firmware file and cannot be patched
+(§9, and `docs/dn1-dsp-comparison.md` — the DN2's ColdFire does no DSP at all).
+That was the project's worst-case scenario: an unreachable engine that might
+only run three. **It runs four.** Everything that remains is on the control side,
+where we can write bytes.
+
+It also closes, positively, the loop that three independent structures opened:
+the persisted sound format reserves a fourth slot per group of eight (DNX), the
+pattern p-lock ids reserve `4*slot + 0` (DNX), and this index map reserves the
+`4*param + 4` lane. All three were measured separately, and the engine has now
+been shown to *act* on the third. Elektron built a fourth LFO and shipped three.
+
+### What it does not settle
+
+**Whether a fourth LFO can run *alongside* the three.** The probe moved LFO3; it
+did not add anything. Lane 3 was vacated at the moment lane 4 was driven, so
+this shows lane 4 works, not that lanes 3 and 4 work simultaneously. Nothing
+suggests they cannot — they are separate indices in the same block — but it is
+untested and should not be stated as fact.
+
+**Whether all eight parameters behave fully.** Modulation was heard; whether
+`WAVE`, `MULT`, `FADE`, `SPH` and `MODE` each take effect on lane 4 exactly as
+on lane 3 has not been checked parameter by parameter. A partially wired lane
+would still have produced audible modulation. This is a device check, costs
+nothing, and should be done before any build depends on a specific parameter.
+
+### What is now the whole of the job
+
+A fourth LFO needs **eight runtime slots**, and §6b measured one repairable free
+slot. That is the only structural problem left, and every piece of it is now
+identified:
+
+| Piece | Today | To reach 108 slots |
+|---|---|---|
+| forward map `0x401fcf20` | 100 entries, bound `slot <= 99` | relocate to a cave (432 B — fits a ~1 KB run) and repoint its **4** `lea` sites; raise the bound immediate |
+| inverse map `0x401fd0b0` | 107 entries | **no growth needed** — write slots 100–107 into the reserved lane's entries |
+| sound `ParameterSet` table `0x42c64b3c` | 101 entries, BSS | relocate into the 25 MB of unclaimed RAM above the BSS end (`docs/memory-map.md`) and repoint its **5** `lea` sites |
+| destination builder bound | `i != 0x65` (101) | one immediate |
+| **the sound object's value array** | addressed `0x14 + slot*2` | **unmeasured — this is the open one.** Its size is an allocation constant somewhere, and if it cannot hold 108 entries the rest does not matter |
+
+Four of the five are tractable and two are single immediates. **The sound
+object's size is the next thing to measure**, because it decides whether this is
+finishable.
