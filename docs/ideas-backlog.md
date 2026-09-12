@@ -333,3 +333,54 @@ path (`docs/flashing.md`) is proven, so the downside is a reflash, not a brick �
 but this should not be the first thing tried after a long gap, and it should be
 tried with a payload whose absence is harmless (a table nothing reads yet),
 never with a payload the firmware depends on to boot.
+
+---
+
+## 7. The DSP hunt, parked with an explicit warning
+
+**Parked 2026-09-12** at the owner's direction: finish LFO4 first, resume this
+once there is a flashable firmware.
+
+`docs/engine-index-map.md` §§9–13 and `docs/hardware.md` carry the state. The
+short version: the DSP is an **ADSP-21569 (SHARC+)** with its own DDR3; the
+ColdFire (an **MCF5441x**) does no audio DSP; no boot stream has been found in
+any ELE3 section; and there is no serial flash beside the SHARC, so the ColdFire
+probably boots it from the 16 MB Winbond NOR — a region the update file need not
+touch.
+
+**The warning, raised by the owner and worth stating loudly because every test
+so far shares this blind spot: the DSP image could be in the firmware in a
+packed form, and every test run to date would miss it.**
+
+All three searches looked for *structure* — 24-bit periodicity, 48-bit
+periodicity, ADI LDR block headers. **Compression destroys all three.** And
+`docs/engine-index-map.md` §10 already measured that **~350 KB of `blob`
+(windows `0x20000`–`0x78000`) is structureless**, with per-byte entropy 7.3–7.6
+and near-zero column spread at every stride. That is exactly what packed content
+looks like, and exactly where a packed DSP image would hide.
+
+So the accumulated "no DSP code in the file" readings are **conditional on the
+data being stored raw**, and that condition has never been tested. Say it that
+way, not as a conclusion.
+
+**When this resumes, do these in order:**
+
+1. **Try to unpack the structureless region.** The container's own aPLib variant
+   is already implemented (`src/dnfw/codec/aplib.py`) — try it at a range of
+   offsets inside `blob` first, since Elektron demonstrably has that codec to
+   hand. Then the common alternatives. Any successful unpack gets the
+   periodicity tests re-run on its *output*, which is where they should have
+   been aimed all along.
+2. **Follow the reader, not the bytes.** `blob` ships with `dest 0`, so it is
+   flash-resident and MAIN OS must address it explicitly. Find that code: it
+   reveals `blob`'s internal layout, its index, and whether anything decompresses
+   it — which answers the packing question directly rather than by statistics.
+3. **Map the 16 MB SPI NOR.** Where the ELE3 payload lands and what else occupies
+   it. If a DSP image sits outside the updated region, that closes the question
+   and also scopes what writing flash directly would involve.
+
+**Tooling gap to record now:** we have no SHARC disassembler. `objdump` does not
+target SHARC, Ghidra has no ADSP-2156x processor module, and ADI's CrossCore
+toolchain is the reference. **Even if a boot image is found, reading it needs a
+tool we do not have** — worth knowing before the search succeeds rather than
+after.

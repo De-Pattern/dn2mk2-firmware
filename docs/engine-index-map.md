@@ -683,3 +683,99 @@ three tests above have not looked.
 result is about behaviour, not code, and holds whichever way this goes. What
 this question decides is whether engine-side modification is *ever* possible —
 a separate ambition, and not one the project currently needs.
+
+---
+
+## 13. The sound object's value array is exactly 101 entries, and it is boxed in
+
+§11 named this the one unmeasured piece — the array the whole LFO4 build depends
+on. **Measured 2026-09-12, and it is the hardest constraint in the project.**
+
+### The size
+
+A loop that fills the array states its own bound:
+
+```
+4004408e:  ... compute value into %d0 ...
+400440a2:  movew %d0,%a0@(14,%d3:l:2)   ; array[d3] = value   (0x14 is hex)
+400440a6:  addql #1,%d3
+400440a8:  moveq #101,%d0
+400440aa:  cmpl %d3,%d0
+400440ac:  bnes 0x4004408e               ; d3 runs 0..100
+```
+
+**101 entries, slots 0..100**, spanning `+0x14` to `+0x14 + 101*2 - 1 = +0xDD`.
+
+That is the same 101 as the `ParameterSet` slot tables
+(`docs/parameter-set-tables.md`) and the same 101 the destination builder walks
+(`i != 0x65`). Three independent structures agreeing on 101 is not a coincidence
+to explain; it is one array size propagated.
+
+### What sits immediately above it
+
+The call site at `0x40036738` reads the machine and filter type **through the
+same `vtable[+0x28]` accessor** that `Sound::updateMirror` reads the value array
+from — so it is the same object:
+
+```
+40036734:  jsr %a0@                ; vtable[+0x28] -> the sound value object
+40036738:  mvsb %a0@(222),%d2      ; +0xde  machine type
+4003674c:  mvsb %a0@(223),%d0      ; +0xdf  filter type
+40036758:  jsr 0x400dc02a          ; param_set_slot_to_id(slot, machine, filter)
+```
+
+| offset | holds |
+|---|---|
+| `+0x14` … `+0xDD` | the value array, slots 0..100 |
+| **`+0xDE`** | **machine type** |
+| **`+0xDF`** | **filter type** |
+
+**The array is flush against them.** Slot 101 would land on `+0xDE` and
+overwrite the machine type on every parameter change.
+
+This also explains, exactly, the bound mismatch §6b recorded: the array and the
+`ParameterSet` tables hold 101 slots, the forward map holds 100 bounded at 99.
+Slot 100 has *storage* and *enumeration* but no engine mapping — it is the last
+entry that physically exists, and the engine map simply never claimed it.
+
+### What it rules out
+
+**Extending the array in place is impossible.** There is no padding to grow into.
+
+**Growing the object by shifting everything above `+0xDD` is not realistic
+either.** The same scan finds live fields at `+0xE0`, `+0xE4`, `+0xE8`, `+0xEC`,
+`+0xF0`, `+0xF4`, `+0xFC`, `+0x100`, `+0x114`, `+0x11C`, `+0x146` and well
+beyond — the array sits in the *middle* of a large structure, not at its end.
+Every one of those displacements would have to move, and the object is
+persisted, pooled and mirrored to the engine, so its layout is load-bearing in
+three directions at once.
+
+**Relocating just the array is more tractable but not cheap.** All **29** access
+sites use the *brief* extension word — `%aN@(14,%dM:l:2)`, an 8-bit
+displacement. Any new base above `+0x7F` needs the **full** extension word,
+which is longer, so none of the 29 can be patched in place; each would need a
+cave. 29 detours for one feature is a poor trade.
+
+### The route that is left
+
+**Do not grow the array — source LFO4's values from beside it.** The value array
+is read and written at a small number of choke points, not at all 29 sites
+equally:
+
+| Path | Site |
+|---|---|
+| control → engine | `Sound::updateMirror`, the two loops at `0x4004cb04` / `0x4004cb70` |
+| engine → control | the reverse copy at `0x400dd25e` |
+| UI read | `parameter_value_getter` `0x4006408a` |
+
+A hook at those points could serve slots ≥ 101 from a separate 8-entry array
+placed in the **25 MB of unclaimed RAM above the BSS end**
+(`docs/memory-map.md`), leaving the sound object untouched at its current size
+and layout. The storage path would need the same treatment for LFO4's values to
+survive a save — and that is the part that is not yet scoped.
+
+**This is now the decision the project turns on**, and it is an engineering
+choice rather than an unknown: a handful of caves at known choke points, against
+a struct change that three subsystems depend on. Neither is small. What is no
+longer in doubt is that **the engine will modulate** once the values arrive
+(§11) — the remaining work is entirely about getting eight more values to it.
