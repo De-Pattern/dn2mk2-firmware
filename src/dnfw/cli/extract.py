@@ -23,6 +23,19 @@ def configure(parser) -> None:
     )
 
 
+def _filename(label: str) -> str:
+    """Make a section's display name safe to put in a path.
+
+    `ele3.name` returns `?` for a section id we have not identified, which is
+    the right thing to *show* and an illegal filename on Windows -- extracting
+    DN2 1.11, whose section 8 is still unnamed, failed outright until this.
+    Unknown sections are common in new firmware, so this is the normal case,
+    not an edge one.
+    """
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in label)
+    return safe.strip("_") or "unnamed"
+
+
 def run(args) -> int:
     firmware = load(read_image(args.image))
     args.out.mkdir(parents=True, exist_ok=True)
@@ -33,11 +46,10 @@ def run(args) -> int:
         if wanted is not None and section.id not in wanted:
             continue
         content = section.unpack()
-        label = ele3.name(section.id).replace(" ", "_")
         # The suffix records how the section is stored, because that decides
         # how a rebuild must put it back.
         kind = "aplib" if content else "raw"
-        path = args.out / f"section_{section.id}_{label}.{kind}.bin"
+        path = args.out / f"section_{section.id}_{_filename(ele3.name(section.id))}.{kind}.bin"
         path.write_bytes(content if content else section.stored)
         print(f"  {path}  {len(content) if content else len(section.stored):,} bytes"
               f"  dest 0x{section.dest:08x}")

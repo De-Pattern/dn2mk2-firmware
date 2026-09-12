@@ -87,12 +87,15 @@ Expanding that catalogue would be a **data-side** mod rather than a code one,
 and so is a genuinely different (and possibly easier) class of change than the
 fourth LFO: no cave, no engine tick, no bound immediates.
 
-**Where to look.** The container's non-code sections are the candidates:
-`blob` (id 7, 602,076 → **836,956 B**) and the new id 8 (103,416 → 159,948 B).
-`docs/ele3-format.md` already records that these are carried through verbatim.
-The open questions are what `blob` actually holds (fonts, graphics, factory data
-and/or wavetables — never pinned down) and whether the PCM content is in there
-at all.
+**Where to look.** `blob` (id 7, 602,076 → **836,956 B**). **Section 8 is
+ruled out** — `docs/data-sections.md` identifies it as a complete ARM Cortex-M
+firmware image, not DN2 data.
+
+**Updated 2026-09-12.** `blob` is now known to be **mixed data, a large part of
+it float32** (`docs/data-sections.md`). If the FM drum machine's PCM lives here
+it is float32, not the 16-bit PCM this idea assumed, and it shares the section
+with other content — so the first job is to map `blob`'s internal layout and
+find its index, not to look for a WAV-like header.
 
 **What would have to be true.** We would need to (a) locate the PCM data,
 (b) decode its format — sample rate, bit depth, any header or index table, and
