@@ -100,6 +100,37 @@ slew remap for random waveforms. A fourth LFO's SPH id must be added here, and
 anywhere else that enumerates the three (the p-lock id derivation DNX found,
 `4*slot + lfo`, is the sort of thing to re-check on hardware).
 
+### 3b. The page id is contiguity-bound — a real constraint
+
+`is_lfo_param_modulatable` (1.10E `0x400de34e`, **1.11 `0x400dbee6`**) decides
+"is this an LFO parameter" as a **range test on the page id**:
+
+```
+addil #-26,%d3        ; page - 0x1a
+moveq #2,%d0
+cmpl  %d3,%d0
+scc   %d0             ; (page - 0x1a) <= 2  ->  page in {0x1a, 0x1b, 0x1c}
+```
+
+Byte-identical in both builds. Widening it to `<= 3` admits page **`0x1d`**,
+which is **Retrig**, not a fourth LFO. And `0x1e` is taken too — it is the
+`None`/`---` destination entry (`docs/modulation-mask.md`). So the next free
+page id is `0x1f`, and a contiguous range test cannot reach it without also
+swallowing Retrig and None.
+
+Three ways out, in rising cost:
+
+1. **Renumber** so a fourth LFO is contiguous — moves Retrig and None, and
+   every site that names those ids must be found. Cheap only if such sites are
+   few, which is unverified.
+2. **Replace the range test with an explicit `page == 0x1f ||`** — more bytes
+   than the stock sequence, so it needs a cave at each site.
+3. **Reuse an existing LFO page id** for a fourth page-view, distinguishing by
+   parameter id instead — avoids the test entirely but may break anything that
+   maps page id to LFO index.
+
+This is a site the earlier drafts assumed was a simple bound raise. It is not.
+
 ### 4. A fourth page-view instance and its id list
 
 `LfoPageView` (RTTI `0x402064a3`, typeinfo `0x401ece10`, vtable virtuals from
