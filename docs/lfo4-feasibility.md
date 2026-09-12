@@ -275,7 +275,40 @@ page-view instance is a larger ask that the memory-map read must place safely.
 `patch/cave.py` should therefore distinguish unreferenced padding (safe for
 small data) from BSS (never) and from a section-grow (needs the memory map).
 
-## The audio engine — the true open gate
+## The audio engine — half of this gate is now closed
+
+**2026-09-12, measured on hardware.** A two-byte change to one parameter
+record's modulation mask made **Portamento Time** — a parameter Elektron wired
+to no modulator at all — both appear as an LFO destination and **actually
+modulate** (`docs/modulation-mask.md`).
+
+So the engine's **apply** path is generic and data-driven: it resolves a
+destination index and applies, with no per-parameter special-casing. A fourth
+LFO's *destinations* would therefore need no engine work.
+
+What remains of this gate is narrower and sharper: **can the engine run a fourth
+LFO generator?** Whether the tick advances an array of N phases or three named
+instances is the single remaining unknown on the LFO4 path. Everything below
+was written before that result and should be read with it in mind.
+
+### The revised shape of the job
+
+| Piece | Status |
+|---|---|
+| Storage — a reserved fourth LFO slot in the sound format | **Done by Elektron** (DNX) |
+| Destination masks — the fourth rank already on every modulatable parameter | **Done by Elektron** (`docs/modulation-mask.md`) |
+| Modulation apply — generic over the parameter index | **Confirmed on hardware** |
+| Parameter records — ten dead ERR slots to repurpose | **Built**, `scripts/build_lfo4_test.py` |
+| **Runtime parameter indices** — eight contiguous slots | **No room.** 98 of 99 used (`docs/engine-state.md`) |
+| **The page id** — a contiguous range test `(page - 0x1a) <= 2` | **Blocked.** `0x1d` is Retrig, `0x1e` is `None` |
+| **A fourth page-view and `[MOD]` navigation** | Not started; needs a cave |
+| **The generator** — can the tick run four? | **The open gate** |
+
+The two hard structural problems are now the runtime index space and the page
+id, not the parameter table — which is the opposite of where this document
+started.
+
+## The audio engine — the original analysis
 
 Everything above is the **control and UI** side: making a fourth LFO's
 parameters exist, show, and be editable. Whether a fourth LFO actually

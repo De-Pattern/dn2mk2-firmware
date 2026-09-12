@@ -166,10 +166,15 @@ modulate delay and reverb settings, then this idea is really only about Chorus,
 Master, and p-locks. **Read the manual before touching a byte** — this is
 exactly the case `docs/device-model.md` exists for.
 
-**Then the same engine unknown.** Even with mask and enumeration right, whether
-the modulation path can *write* a global FX parameter is the same question that
-gates the fourth LFO. Failure is visible and harmless: the parameter appears in
-the `DEST` list and does not move.
+**Then the engine unknown, now narrowed.** On 2026-09-12 a mask flip made
+Portamento Time both appear as a destination **and actually modulate**, proving
+the apply path is generic over the parameter index
+(`docs/modulation-mask.md`). But Portamento Time is a **per-voice sound
+parameter** the engine already computes for every voice. Chorus, Master, Delay
+and Reverb settings are **global** — a different object, not per-voice — so that
+result is encouraging and is **not** evidence these will work. Failure stays
+visible and harmless: the parameter appears in the `DEST` list and does not
+move.
 
 **P-locks are a separate question.** Whether a parameter can be p-locked is not
 obviously this field. DNX's decoded pattern format
