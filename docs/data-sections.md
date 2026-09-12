@@ -61,7 +61,7 @@ it would leave an attached Outbox running whatever firmware it already has.
 binutils here has one (`objdump -i` lists only x86 and the m68k cross). Install
 `binutils-arm-none-eabi` in WSL before trying.
 
-## `blob` is mixed data, substantially float32
+## `blob` is mixed data, substantially float32 [SUPERSEDED -- see docs/engine-index-map.md section 10: measured 35% float plausibility, below random]
 
 `blob` (id 7) decompresses to 836,956 bytes. It is **not** a single array:
 
