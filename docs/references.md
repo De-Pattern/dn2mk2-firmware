@@ -147,6 +147,31 @@ where LFO4's bytes land than anything visible on screen.
 
 Its `docs/PRINCIPLES.md` governs this repository too.
 
+**Treat the whole of DNX as reference material for this project, not only the
+two format documents.** It is the same author's prior investigation of the same
+hardware, and its measurements repeatedly settle questions that are expensive to
+answer from the image alone — `docs/device-model.md` exists because DNX's
+`+Drive` listings named what a 128-entry array in the firmware actually was.
+Worth knowing is there:
+
+| In DNX | Why it matters here |
+|---|---|
+| `docs/device-storage.md` | the `+Drive` store: projects, soundbanks, kits, and the read/write protocol |
+| `docs/dn2-format.md`, `dn2-pattern-format.md`, `dn2-song-format.md` | the decoded project, pattern and song formats, with offsets |
+| `docs/sysex-format.md`, `capture-protocol.md`, `device-probing.md` | the SysEx object types and how the device answers — the same object classes the firmware's own strings name |
+| `docs/sound-mapping.md`, `SOUND-AND-KIT-PLAN.md` | which byte is which parameter |
+| `docs/dn1-project-format.md`, `dn1-tail-format.md` | the DN1 equivalents, for when this project reaches the DN1 |
+| `docs/references.md`, `PRINCIPLES.md`, `KNOWN-ISSUES.md` | its own sources, working rules and recorded traps |
+
+The Obsidian vault at
+`C:\ZZ_Code\00_Notes\AS\ZZ_Personal Projects\02_DNX\` carries the narrative
+record — *Digitone architecture - Lessons Learnt* especially, which holds the
+storage-layout diagrams and the reasoning behind them.
+
+The rule that makes this pay: **check what DNX already measured before inferring
+anything about the device from the firmware image.** See
+`docs/device-model.md`.
+
 ## Elektron manuals
 
 The authority for the user-facing side — parameter names, ranges, page layouts.
