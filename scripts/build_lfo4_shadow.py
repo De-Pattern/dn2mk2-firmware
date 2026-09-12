@@ -219,6 +219,10 @@ def build_payload(own_dest: int | None, fade: int, standalone: bool) -> tuple[st
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--canary", action="store_true",
+                    help="diagnostic: write a recognisable value into LFO1's SPD slot, "
+                         "which IS saved, instead of the reserved lane. Distinguishes "
+                         "'the hook never runs' from 'the reserved slots are ignored'.")
     ap.add_argument("--standalone", action="store_true",
                     help="write every LFO4 field as a literal so it depends on LFO3 "
                          "for nothing -- removes depth/mode inheritance as a variable")
@@ -252,7 +256,16 @@ def main() -> int:
     cave = Cave(*anchor["cave"])
     return_to = site + len(stock)
 
-    source, payload = build_payload(args.dest, args.fade, args.standalone)
+    if args.canary:
+        # LFO1 SPD is engine index 1 -> mirror offset 0x1c + 2 = 0x1e, and in the
+        # saved sound object it is the byte at +30. 0x7700 is 119 in the coarse
+        # byte: not a default, not a neutral, not a value anyone dials by hand.
+        src = ("| canary: stamp LFO1 SPD, a slot that demonstrably IS saved\n"
+               f"    move.w  #{0x7700},%a3@({mirror_offset(1)})\n")
+        payload = assemble(src)
+        source = src
+    else:
+        source, payload = build_payload(args.dest, args.fade, args.standalone)
     print(source)
     print(f"payload {len(payload)} bytes; cave {cave.capacity} bytes at 0x{cave.address:08x}")
     if len(payload) + len(stock) + 6 > cave.capacity:
@@ -266,7 +279,12 @@ def main() -> int:
     replacement = compress(section.id, section.dest, edited)
     syx = fwbuild.build(firmware, {MAIN_OS: replacement})
     fmt = OUT_SOLO if args.standalone else OUT_DEST
-    out = OUT if args.dest is None else pathlib.Path(fmt.format(d=args.dest))
+    if args.canary:
+        out = pathlib.Path("00_Resources/02_Builds/lfo4-canary_DN2_1.11.syx")
+    elif args.dest is None:
+        out = OUT
+    else:
+        out = pathlib.Path(fmt.format(d=args.dest))
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(syx)
 
