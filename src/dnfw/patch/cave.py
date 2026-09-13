@@ -373,6 +373,51 @@ def references_into(run: FreeRun, references: dict[int, tuple[int, ...]]) -> tup
     return tuple(sorted(sites))
 
 
+@dataclass(frozen=True)
+class Verdict:
+    """One free run, judged against both static checks.
+
+    `passes` means only that nothing in the image *statically* says the run is
+    live. It is not a blessing, and the distinction matters enough to keep in
+    the type: a region reached solely through a computed pointer, with no
+    constant anywhere and no sibling to give it a stride, passes both checks in
+    silence. The runtime answer needs a write hook (`docs/write-map.md`).
+    """
+
+    run: FreeRun
+    strided: bool
+    references: tuple[int, ...]
+
+    @property
+    def passes(self) -> bool:
+        return not self.strided and not self.references
+
+    def as_dict(self) -> dict:
+        return {
+            "address": self.run.address,
+            "size": self.run.size,
+            "strided": self.strided,
+            "references": list(self.references),
+            "passes": self.passes,
+        }
+
+
+def classify(image: LoadedImage, runs: list[FreeRun], lo: int, hi: int) -> list[Verdict]:
+    """Judge every run against the stride and reference checks, in one pass.
+
+    Both checks need the whole set to do their job -- a stride exists only
+    between siblings, and the reference scan reads the entire image once -- so
+    they are computed together here rather than per run by the caller.
+    """
+    flagged = {run.address for suspect in suspect_arrays(runs) for run in suspect.runs}
+    references = qualified_references(image, lo, hi)
+    return [
+        Verdict(run=run, strided=run.address in flagged,
+                references=references_into(run, references))
+        for run in runs
+    ]
+
+
 def displaced_stock(instruction_bytes: list[bytes], min_len: int = HOOK_BRANCH_LEN) -> bytes:
     """The whole-instruction stock a hook must displace to fit a `min_len` branch.
 

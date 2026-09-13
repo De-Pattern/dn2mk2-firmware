@@ -15,6 +15,7 @@ Applying a cave is not a CLI action: a detour carries a code payload, which is
 authored in Python against patch/cave.py, not passed on a command line.
 """
 
+import json
 import pathlib
 
 from ..firmware.load import load
@@ -43,6 +44,8 @@ def configure(parser) -> None:
     scan.add_argument("--min", type=int, default=32, help="smallest run to report (default: 32)")
     scan.add_argument("--start", default=hex(SAFE_START), help=f"range start (default: {SAFE_START:#x})")
     scan.add_argument("--end", default=hex(SAFE_END), help=f"range end (default: {SAFE_END:#x})")
+    scan.add_argument("--json", type=pathlib.Path, default=None,
+                      help="also write every run and its verdict here, for a write-map run")
     scan.set_defaults(run=_scan)
 
     probe = sub.add_parser("probe", help="size the stock a hook at --at must displace")
@@ -69,35 +72,41 @@ def _image(args) -> LoadedImage:
 
 def _scan(args) -> int:
     image = _image(args)
-    runs = cavelib.find_free_runs(image, int(args.start, 0), int(args.end, 0), args.min)
+    lo, hi = int(args.start, 0), int(args.end, 0)
+    runs = cavelib.find_free_runs(image, lo, hi, args.min)
     if not runs:
-        print(f"no free run of {args.min}+ bytes in "
-              f"0x{int(args.start, 0):08x}..0x{int(args.end, 0):08x}")
+        print(f"no free run of {args.min}+ bytes in 0x{lo:08x}..0x{hi:08x}")
         return 0
+    verdicts = cavelib.classify(image, runs, lo, hi)
     suspects = cavelib.suspect_arrays(runs)
-    flagged = {r.address for s in suspects for r in s.runs}
-    references = cavelib.qualified_references(image, int(args.start, 0), int(args.end, 0))
-    referenced = {r.address: cavelib.references_into(r, references) for r in runs}
 
-    total = sum(r.size for r in runs)
-    clean = [r for r in runs
-             if r.address not in flagged and not referenced[r.address]]
+    total = sum(v.run.size for v in verdicts)
+    clean = [v for v in verdicts if v.passes]
 
     print(f"{len(runs)} free run(s), {total:,} bytes total "
           "(candidates -- confirm against docs/memory-map.md):")
-    for r in sorted(runs, key=lambda r: r.size, reverse=True):
+    for v in sorted(verdicts, key=lambda v: v.run.size, reverse=True):
         marks = []
-        if r.address in flagged:
+        if v.strided:
             marks.append("fixed-stride group")
-        if referenced[r.address]:
-            sites = referenced[r.address]
-            marks.append(f"{len(sites)} code reference(s), e.g. 0x{sites[0]:08x}")
+        if v.references:
+            marks.append(f"{len(v.references)} code reference(s), e.g. 0x{v.references[0]:08x}")
         mark = "  <- " + "; ".join(marks) if marks else ""
-        print(f"  0x{r.address:08x}  {r.size:>6,} bytes{mark}")
+        print(f"  0x{v.run.address:08x}  {v.run.size:>6,} bytes{mark}")
 
-    print(f"\n{len(clean)} run(s), {sum(r.size for r in clean):,} bytes pass BOTH checks:")
-    for r in sorted(clean, key=lambda r: r.size, reverse=True)[:10]:
-        print(f"  0x{r.address:08x}  {r.size:>6,} bytes")
+    print(f"\n{len(clean)} run(s), {sum(v.run.size for v in clean):,} bytes pass BOTH checks:")
+    for v in sorted(clean, key=lambda v: v.run.size, reverse=True)[:10]:
+        print(f"  0x{v.run.address:08x}  {v.run.size:>6,} bytes")
+
+    if args.json:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(json.dumps({
+            "section": args.section,
+            "range": [lo, hi],
+            "min_size": args.min,
+            "runs": [v.as_dict() for v in verdicts],
+        }, indent=2) + "\n")
+        print(f"\nwrote {len(verdicts)} verdict(s) to {args.json}")
 
     if suspects:
         print(f"\n{len(suspects)} group(s) repeat at a fixed stride. A compiler pads to an")

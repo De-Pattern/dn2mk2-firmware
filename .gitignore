@@ -6,6 +6,9 @@
 *.syx
 *.bin
 
+# Scratch output from scans and emulator runs — regenerate it, don't commit it.
+out/
+
 # Ghidra
 ghidra/*.gpr
 ghidra/*.rep/

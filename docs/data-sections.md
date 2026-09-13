@@ -85,6 +85,14 @@ and find its index, not to look for a WAV-like header.
 Worth stating because it bears on the modulation tick, and because it is a
 narrowing rather than an answer.
 
+> **[WRONG — corrected 2026-09-13, see `docs/sharc-image.md`.]** Section 7 *is*
+> the SHARC program: an ADI boot stream built with CrossCore Embedded Studio and
+> FreeRTOS for the ADSP-215xx, carrying its port layer's own source paths and a
+> task named `Audio Task`. The paragraph below is kept because the reasoning
+> that produced it recurs: a test for a *raw* 48-bit instruction stream cannot
+> see code inside a block-structured boot container, and its negative was read
+> as an absence rather than as a limit of the test.
+
 The whole update contains: ColdFire code (MAIN OS, bootstrap, updater), ARM
 Thumb code (section 8), and data (`blob`). **There is no SHARC program anywhere
 in the update.** The `Digisharc` class names in MAIN OS are the project's own
