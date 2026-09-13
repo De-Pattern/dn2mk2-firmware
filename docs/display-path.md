@@ -277,3 +277,82 @@ already spent one upstream report on a defect that turned out to be mine.
 
 The `channels=(3,)` vs `(3, 1)` measurement above stands — it was a separate
 observation with its own evidence, and had nothing to do with the halt.
+
+---
+
+# The encoder delta, traced to where it actually stops
+
+digikit's author flags encoder deltas as buggy, and `docs/emulator.md` carries
+the warning. This is how far the delta gets on Digitone II 1.11, measured
+against `ec32de1`. It gets **much** further than "buggy" suggests, and the
+failure is in one identifiable place.
+
+## It is delivered, and the firmware decodes it correctly
+
+Hooking `queue_send` (`0x40001896` — 37 direct callers on 1.11, the same
+address digikit uses on Digitakt) reads the firmware's **own decoded record**
+for the event, which is ground truth: it is immune to render timing, modal UI
+and frame tearing, because no pixel has to move for it to exist.
+
+Sending `panelin.encoder(m, profile, 0, 5)` — ENCODER A, +5 detents — produces:
+
+```
+ret=0x4011f780  type=1  code=1  delta=+5
+raw=01000000 00000001 05000000 00000000
+```
+
+`type=1` is an encoder record, `code=1` is channel 0 + 1 = **ENCODER A**, and
+the delta byte at `+0x08` is **exactly the 5 that was sent**. The ring drains
+completely: `produced: 2, consumed: 2`.
+
+So the wire format, the DMA ring, the RX vector, the driver and the firmware's
+own decoder are all correct. **Nothing on the input side is broken.**
+
+| stage | works? | evidence |
+|---|---|---|
+| bytes into the DMA ring | yes | `produced` advances |
+| RX vector, driver drains it | yes | `consumed` catches up |
+| firmware decodes the event | **yes** | its own record, right code and delta |
+| queued to the application | yes | `queue_send` at `0x4011f780`, in `0x4011f5d0` |
+| consumed by the app | yes | `queue_receive` `0x40001928`, 622 of 625 returns to `0x4002f184`, in **`0x4002e91c`** — the main task's message loop |
+| UI reacts | **yes** | the label under encoder A switches from `TUN1` to a live value readout |
+| **the value changes** | **no** | `0.00` after 45 detents |
+
+## Timing matters, which is the owner's insight showing up in the data
+
+The Digitone scales an encoder's sensitivity by how fast it is turned. That is
+visible here, and it is why the first attempts looked like nothing happening at
+all:
+
+| input | result |
+|---|---|
+| 6 × `+10` in a burst | **nothing** — parameter row byte-identical |
+| 15 × `+1`, ~10M instructions apart | **the label switches to the value readout** |
+| 5 × `+1`, ~50M apart | nothing — too slow, the overlay never engages |
+| 30 in one message | nothing |
+
+So the firmware is applying its acceleration logic, and it takes a *plausibly
+timed turn* to engage at all. A burst is not a fast turn; it is one message.
+
+## Where it stops
+
+The UI engages — the encoder is recognised, the parameter is focused, the value
+overlay replaces the label — and then the value stays at `0.00` through 45
+detents in either direction. The `panelin` docstring says the firmware
+"accumulates deltas per encoder and clamps what it flushes to ±30", so the
+shape of the remaining bug is an **accumulate-and-flush that engages but never
+flushes**, which would look exactly like this.
+
+That is a hypothesis and is recorded as one. What is measured is the table
+above.
+
+## Why this is worth having anyway
+
+**The consumer is the parameter-edit path.** `0x4002e91c` takes the encoder
+record and is supposed to turn it into a parameter change — which is the
+**engine-feed path** this project has been hunting by other means all along.
+Finding it by following an encoder event is a better provenance than any
+pattern match: it is the code the firmware itself routes the input to.
+
+So even unfixed, this hands LFO4 the function it needs to read, with a role
+established by observation rather than by name.
