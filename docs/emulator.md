@@ -406,17 +406,14 @@ flashed images and a week, and the emulator had been sitting in this repository
 for a day. The instrument to reach for first is the one whose negative result
 means something.
 
-## The rung is a phase, and the phase moves between builds
+## The rung is a phase — and the tool already knew which one
 
 digikit's boot ladder snapshots at 60/120/200/280/400M instructions, and
-`emu.run` picks between them by state because *two firmwares do not reach the
-same place at the same count*. Its note records that on a **Digitone** only the
-400M rung is disqualified — the intro is already parked inside `sem_pend` on the
-frame semaphore there, and `unblock` cannot satisfy a wait that is already
-blocked — so 280M is chosen.
+`emu.run.usable_rung()` picks between them **by inspecting each snapshot's
+state**, because two firmwares do not reach the same place at the same count.
 
-**On 1.11 that is exactly inverted.** Rendering each rung with digikit's own
-`emu.panel` for 60M instructions:
+On 1.11, rendering each rung with digikit's own `emu.panel` for 60M
+instructions:
 
 | rung | frames flushed | distinct |
 |---|---|---|
@@ -426,14 +423,21 @@ blocked — so 280M is chosen.
 | **400M** | **173** | **109** |
 
 120M–280M never compose a frame and leave `timers_held` true: the intro never
-hands over. Only 400M draws. The upstream note was measured on **1.10E**; 1.11
-relinked and moved the phase boundary past 280M.
+hands over. Only 400M draws.
 
-Two runs were spent before this was checked, and both reported a dead machine
-as "nine silent functions" — the failure this project keeps meeting, in a new
-costume. **Render each rung and look; do not take a documented rung on trust.**
-Worth sending upstream, since `usable_rung`'s choice is stated as a Digitone
-fact and is build-specific.
+**`usable_rung()` returns 400M for this build.** It was right; the error was
+mine. Its docstring illustrates the idea with *"on Digitone only 400M is
+disqualified, and it gets 280M"* — a **1.10E** observation — and I read that
+example as a rule for Digitones, hand-picked 280M, and spent two full runs
+watching a dead machine report "nine silent functions".
+
+> **An example in a docstring is not a specification.** The check cost one line
+> (`usable_rung(prefix, default)`) and would have replaced both runs.
+
+This was nearly written up as a digikit bug and a PR sent for it. It is not a
+bug. Verifying the claim before filing it is what stopped a wrong report going
+upstream — and the same claim had already been written into this file, a commit
+message and a pull request body before the check was run.
 
 ## Two traps inside digikit that a harness must not step in
 

@@ -51,17 +51,12 @@ the draw task actually draws; nothing ever really waits. That is what makes a
 UI appear at all, and it is a deviation from the hardware, recorded here rather
 than buried. Run with `--no-unblock` to see which results depend on it.
 
-## On Digitone II 1.11 the rung to resume is 400M — measured, not assumed
+## Ask digikit which rung to resume — do not pick one by hand
 
-digikit's boot ladder has rungs at 60/120/200/280/400M, and **the rungs are
-instruction counts, not phases** — two firmwares do not reach the same place at
-the same count. digikit's `emu.run` picks by state and its note says that on a
-Digitone only 400M is disqualified, because the intro is already parked inside
-`sem_pend` on the frame semaphore there and `unblock` cannot satisfy a wait that
-is already blocked. So 280M looked like the rung to use.
-
-**On 1.11 it is the other way round, and the difference is total.** Rendering
-each rung with digikit's own `emu.panel` for 60M instructions:
+digikit's boot ladder snapshots at 60/120/200/280/400M instructions, and **the
+rungs are instruction counts, not phases** — two firmwares do not reach the same
+place at the same count. On Digitone II 1.11, measured by rendering each rung
+with digikit's own `emu.panel` for 60M instructions:
 
 | rung | frames flushed | distinct |
 |---|---|---|
@@ -71,13 +66,18 @@ each rung with digikit's own `emu.panel` for 60M instructions:
 | **400M** | **173** | **109** |
 
 120M through 280M never compose a frame and leave the timers held — the intro
-never hands over. 400M draws. The upstream note was measured on 1.10E; 1.11
-relinked and moved the phase boundary past 280M. Resume **400M**.
+never hands over. Only 400M draws.
 
-This is worth stating as a rule rather than a number: a rung is a phase, the
-phase moves between builds, and the cheap way to find it is to render each rung
-and look. Taking the documented rung on trust cost two full runs here, both of
-which reported a dead machine as nine silent functions.
+**`emu.run.usable_rung()` already returns 400M for this build**, because it
+chooses by inspecting each snapshot's state rather than by number. It was right
+and I did not call it: its docstring illustrates the idea with *"on Digitone
+only 400M is disqualified, and it gets 280M"*, which is a 1.10E observation, and
+I read that example as a rule and hand-picked 280M. Two full runs then reported
+a dead machine as nine silent functions.
+
+So the rule is not "use 400M" — that is this build's number and it will move
+again. The rule is **call `usable_rung`**, and if you must choose by hand,
+render each rung and look. An example in a docstring is not a specification.
 
 Needs digikit (`docs/emulator.md`) and its patched Unicorn, so run it under WSL
 with digikit's interpreter. No firmware bytes are read from or written to this

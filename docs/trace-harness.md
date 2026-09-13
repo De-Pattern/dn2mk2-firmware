@@ -225,6 +225,12 @@ That also retires the "large finding" the blank row appeared to offer. Nothing
 was learnt about the DN2's parameter path from that flash; what was learnt is
 that the readout was broken.
 
+**The rung had to be the right one, and picking it by hand cost two runs.**
+120M–280M never compose a frame on 1.11; only 400M does. digikit's
+`usable_rung()` already returns 400M for this build — the mistake was reading an
+example in its docstring as a rule instead of calling the function
+(`docs/emulator.md`).
+
 **`R` is boot-phase**, which the first version of this harness got wrong in its
 own control: it demanded `R` in a post-boot window and reported "control silent"
 while three probes were firing thousands of times. A control has to be asked for
