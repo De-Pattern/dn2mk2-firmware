@@ -940,3 +940,69 @@ digikit ships `tools/sharc_disasm.py`.
 two "fourth lane" claims were withdrawn** (`docs/engine-index-map.md` §§11, 14).
 Everything control-side is now mapped or costed; nothing control-side can
 produce a fourth modulator on its own.
+
+---
+
+## The panel driver latches button state — it does not need refreshing
+
+**Measured 2026-09-14, `scripts/hold_test.py`.** Raised by digikit's author in
+`m-dwyer/digikit#9`: Digitakt II's MACHINE SEL menu *"usually closes within a
+second, **with or without the patch**"*, and she was unsure whether it was a
+patching bug or emulator timing.
+
+"With or without" rules out the patch, so the question was whether the emulator
+lets a held modifier lapse. There was a reason to think so. `digikit#6` found
+the per-encoder accumulator is drained only when a **button** message arrives —
+the drainer is gated on the wire tag — and the inference drawn there was that
+real hardware **streams** button state continuously. If the firmware rode on
+that stream, a modifier held by one message and never refreshed would lapse, and
+"within a second" is the shape of a panel-link watchdog.
+
+**digikit's own wire note predicted the opposite**, which is what made it worth
+running rather than assuming:
+
+> tag 0x2 — an 8-bit STATE BITMASK for that channel's eight buttons, not a
+> press/release event. The firmware XORs it against the previous byte for the
+> channel and derives the edges itself.
+
+### The result
+
+`[FUNC]` — code 17, channel 2, bit 0, found **by name** from the firmware's own
+control table — pressed once, never re-sent, then held for **600M
+instructions** (~2.5 s of emulated CPU):
+
+```
+0x445a0983  idle=0x00 -> after 1 slice 0x01, after 59 0x01, after 60 0x01
+0x445a0df7  idle=0x00 -> after 1 slice 0x01, after 59 0x01, after 60 0x01
+```
+
+Two bytes take the FUNC mask and still hold it with nothing refreshing them.
+Idle churn across the same 8 KB window is **1 byte**, so the measurement is not
+swamped by noise.
+
+**The driver latches. The streaming hypothesis is wrong, and the menu bug is not
+the same root cause as `digikit#6`.** Whatever closes MACHINE SEL sits above the
+panel driver.
+
+### Two instruments discarded on the way, both worth recording
+
+**The screen measured nothing.** The first design watched lit-pixel counts
+across `idle → hold-once → idle → hold-streamed → idle`. Holding `[FUNC]`
+changes nothing drawable on this build: deviation **+0** against an idle spread
+of 2, identical in both modes. That is the outcome that means *the instrument
+does not respond*, and reporting either mode as "held" or "lapsed" from it would
+have been invention. The three idle windows are what made that visible.
+
+**A write trace named the wrong byte.** Tracing writes during a press pointed at
+`0x445a0df4`, which takes the mask — and reads back zero at the next sample. It
+is a transient edge byte, consumed within one slice. *A write trace shows what
+was written, not what survived*, so the persistent store had to be found by
+diffing memory snapshots instead.
+
+### What does not transfer
+
+This is **Digitone II 1.11**, not Digitakt II 1.15C. digikit's own note says the
+panel parser is byte-identical across builds with only the data addresses
+moving, so the driver-level conclusion should carry — but the UI layer is
+product-specific, and MACHINE SEL is a Digitakt screen. The negative is strong
+about the driver and says nothing about the menu's own timers.
