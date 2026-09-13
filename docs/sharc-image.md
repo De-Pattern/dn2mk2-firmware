@@ -195,3 +195,65 @@ dnfw extract <image.syx> -o <dir>          # writes section_7_blob.aplib.bin
 ```
 
 Neither check needs the emulator, the device, or a SHARC disassembler.
+
+---
+
+# Loading the image, and a landmark scan that found nothing
+
+`dnfw ldr --anchors`, added after the walk was confirmed.
+
+## The idea
+
+The SHARC image has no RTTI, so the trick that turned MAIN OS into a named C++
+program does not transfer. It has something nearly as good: **FreeRTOS is open
+source**, and `configASSERT()` bakes `__FILE__` into the binary. The image names
+its own translation units. Anything holding one of those string addresses is
+*inside that file*, whose source can be read upstream — so `tasks.c` would
+become a bounded, named region of an otherwise anonymous blob.
+
+Finding those references needs no disassembler, which is the point: nothing in
+this repository decodes SHARC.
+
+First, `bootstream.load_regions()` plays the stream back into the memory it
+describes — 9 regions, **6,423,108 bytes** once the fills are materialised.
+Offsets into the section are not addresses, so nothing can be cross-referenced
+until the blocks sit where they load.
+
+## The result: no reference to any landmark, anywhere
+
+| | |
+|---|---|
+| landmark strings found | 7 FreeRTOS paths + `Audio Task` |
+| their load addresses | `0x2826ee10`, `0x282d0738`, `0x282dd0e0`, … |
+| 32-bit words equal to one, in 6.4 MB | **0** |
+
+And this is the *strengthened* scan, run after the first one came back empty:
+
+* both word orders, little and big endian;
+* **stride 1**, not stride 2 — an immediate embedded in an instruction need not
+  sit on any alignment;
+* **word-address variants** (`addr >> 2`, `addr << 2`), because SHARC address
+  spaces are word-addressed and a pointer need not be a byte address.
+
+Zero in every combination.
+
+## What the negative means, and what it does not
+
+It does **not** mean the strings are unreferenced — they are assert arguments in
+compiled code that certainly passes them.
+
+It means **the address is never materialised as a 32-bit constant**. On SHARC+
+VISA a full address is assembled across instruction fields — a split immediate,
+or an offset against a page/base register — so no word scan of any stride or
+endianness can ever see it. **The instrument cannot detect the thing it was
+pointed at**, which is the same class of failure as the `clrl` value watch
+(`docs/emulator.md`), caught this time before the zero was written up as a
+finding.
+
+The idea is not dead; the *method* is. Finding these references needs a
+disassembler that decodes immediate construction — digikit's `sharc_disasm.py`
+is that tool. The landmark addresses above are the input to hand it, and they
+are the durable product of this section.
+
+`dnfw ldr --anchors` prints this caveat next to its own empty table rather than
+leaving it here, because a future reader will run it before reading this file.
