@@ -326,6 +326,21 @@ of the emulator — the same failure mode octabam recorded for radare2's m68k
 backend, and which `docs/mainos-image.md` already treats as a rule: **validate
 the tool before trusting its output.**
 
+### What it already caught
+
+Setting it up made an independent extraction available, and **four of our five
+sections came out byte-identical while section 4 differed by exactly eight
+bytes** — a header this project was writing out as payload. `docs/emulator.md`
+has the finding in full. Two things about it are worth carrying here:
+
+* digikit does not reimplement aPLib. It **runs the updater's own depacker under
+  Unicorn**, so the agreement is between our Python and *the device's own code
+  executed* — a stronger cross-check than the one `elektron-firmware-tool` was
+  being kept around for and never gave, for want of a C compiler.
+* The bug was a plausible untested model sitting in the repository looking
+  settled — *"a raw section is stored raw, so write it out"* — which is the
+  week's pattern in its mildest form.
+
 ### What it would have caught here
 
 The crash on 2026-09-13 (`docs/flashing.md`) was a cave placed in a live

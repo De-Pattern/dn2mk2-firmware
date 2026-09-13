@@ -59,6 +59,35 @@ class Section:
     def sum_ok(self) -> bool:
         return self.declared_sum == self.computed_sum
 
+    @property
+    def raw_payload(self) -> bytes:
+        """What a *raw* section actually loads at `dest`, header excluded.
+
+        Not every raw section carries a header, and the difference is eight
+        bytes of silent misalignment for anyone who loads the result:
+
+            id 4  updater  **header present**, declared sum 0, payload raw
+            id 5  meta     15 ASCII bytes of build stamp, no header at all
+
+        The test is the declared sum. A real header whose stream is stored
+        rather than packed has **sum 0** — there is no stream to sum — while a
+        section that is nothing but payload has arbitrary bytes there, which for
+        `meta` are ASCII and so never zero.
+
+        Deciding this from the section *id* would be a guess; this is a check.
+
+        **Measured, not reasoned.** Until 2026-09-13 `dnfw extract` wrote raw
+        sections whole, so section 4 came out 32,776 bytes against
+        `m-dwyer/digikit`'s 32,768, with `ours[8:] == theirs` exactly. digikit's
+        layout is confirmed by execution — it runs the updater's own aPLib
+        depacker at `0x80000432` from that base and reproduces every compressed
+        section byte-for-byte — so the eight bytes are a header and ours were
+        payload by mistake. See `docs/emulator.md`.
+        """
+        if len(self.stored) > HEADER and self.declared_sum == 0:
+            return self.stored[HEADER:]
+        return self.stored
+
     def unpack(self) -> bytes | None:
         """The section content, or None if these bytes are not an aPLib stream.
 

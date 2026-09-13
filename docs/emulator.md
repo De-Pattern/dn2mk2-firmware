@@ -169,3 +169,68 @@ a trace or a memory watch in an emulator:
 digikit documents DN2 **1.10E**; its author says "latest"; ours is **1.11**.
 Unresolved, and it decides whether the addresses above transfer directly or need
 re-deriving. Ask, or measure — do not assume.
+
+---
+
+# The cross-check, and the bug it found
+
+**2026-09-13, digikit `c282f0c`.** Setting the emulator up made an independent
+extraction available for the first time, and it was worth more than the setup.
+
+## Our depacker agrees with the device's own routine
+
+digikit does not reimplement aPLib. Section 4 is the **updater**, stored raw, and
+an updater must unpack the image it installs — so it carries the device's own
+depacker, at `0x80000432`. digikit **runs that routine under Unicorn** and
+decompresses every section with it.
+
+So this is not one reimplementation agreeing with another. It is our Python
+depacker agreeing with **the firmware's own code, executed**:
+
+| section | ours vs digikit |
+|---|---|
+| 2 bootstrap / DSP | **identical** |
+| 3 MAIN OS (3,085,696 B) | **identical** |
+| 5 meta | **identical** |
+| 7 blob | **identical** |
+| 4 updater | **differed — 32,776 vs 32,768** |
+
+`docs/references.md` records that `elektron-firmware-tool` should be kept
+buildable as an independent cross-check and that it never was, for want of a C
+compiler. **This is that cross-check**, from a stronger source than was planned.
+
+## The bug: eight bytes of misalignment in `dnfw extract`
+
+`ours[8:] == theirs`, exactly. We were writing a raw section's **8-byte header
+as payload**, so anyone loading `section_4_updater.raw.bin` at `0x80000400` had
+every address in it off by eight.
+
+Not every raw section carries one, which is why a blanket rule fails:
+
+```
+id 4  updater   header present, declared sum 0, payload stored raw
+id 5  meta      15 ASCII bytes of build stamp, no header at all
+```
+
+digikit's test, now ours (`Section.raw_payload`): **the declared sum.** A real
+header over a stored stream has sum `0` — there is no stream to sum — while a
+section that is only payload has arbitrary bytes there, which for `meta` are
+ASCII and so never zero. Deciding from the section **id** would be a guess; the
+sum is a check.
+
+Their layout is the one confirmed by execution: the depacker at `0x80000432` is
+a function entry from that base and reproduces every compressed section. Ours
+was not confirmed by anything — it had simply never been compared.
+
+After the fix, **all five sections are byte-identical.**
+
+### Why this one is worth reading twice
+
+It is the same failure as everything else this week, in the mildest possible
+form: a plausible model — *"a raw section is stored raw, so write it out"* —
+that nothing had ever tested, sitting in the repository looking settled. It cost
+nothing here only because the payload bytes were right.
+
+The rebuild path was never affected: `container/ele3.py` reassembles from
+`section.stored`, so round-trips and every flashed image are unchanged. This was
+an **export** bug, and the only consumer was a human reading the file.

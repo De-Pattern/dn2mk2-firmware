@@ -49,9 +49,14 @@ def run(args) -> int:
         # The suffix records how the section is stored, because that decides
         # how a rebuild must put it back.
         kind = "aplib" if content else "raw"
+        # A raw section may still carry the 8-byte header; `raw_payload` strips
+        # it only where the declared sum says it is one. Writing it out would
+        # misalign every address in the file by eight bytes -- which is exactly
+        # what this wrote until 2026-09-13 (`Section.raw_payload`).
+        payload = content if content else section.raw_payload
         path = args.out / f"section_{section.id}_{_filename(ele3.name(section.id))}.{kind}.bin"
-        path.write_bytes(content if content else section.stored)
-        print(f"  {path}  {len(content) if content else len(section.stored):,} bytes"
+        path.write_bytes(payload)
+        print(f"  {path}  {len(payload):,} bytes"
               f"  dest 0x{section.dest:08x}")
         written += 1
 
