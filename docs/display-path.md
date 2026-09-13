@@ -526,3 +526,70 @@ synthesised here.
 project is the dispatch above, which is panel-input ground truth for any future
 run, and the knowledge that **every driven experiment must interleave button
 frames** or it is measuring a machine that cannot flush.
+
+---
+
+# The engine-feed path: what the emulator can and cannot say
+
+## The coprocessor port is never touched
+
+The ColdFire reaches the SHARC through a FlexBus coprocessor port at
+`0x8C000000` (digikit's `emu/dsp.py`). Its registers are referenced in our 1.11
+image at known sites — `0x8c00000a` at `0x400cf1b6` and `0x400cf242`,
+`0x8c000002` at eighteen sites from `0x400cf1be` — so the transport is there and
+its 1.11 addresses are re-anchored (digikit's `0x400cf4a8` / `0x400cfd40` /
+`0x40146148` are Digitakt's and resolve to nothing here).
+
+**It never runs.** A write watch over the whole `0x8C000000` page, from three
+different boot rungs, reports:
+
+| rung | coprocessor port events |
+|---|---|
+| 60M | **0** |
+| 200M | **0** |
+| 400M (UI drawing) | **0** |
+
+and the enclosing transport function `0x400cf0f2` is never entered either.
+
+So **the engine-feed path cannot be observed at runtime in this emulator.** The
+instrument that solved the display path — watch the destination, record the pcs
+— does not transfer, because the destination is never written. That also matches
+digikit's own note that the priority-3 job worker wedges on its first transfer
+and none of its five queued jobs (including `KitActive::updateSingleMirror`)
+ever runs.
+
+This is worth stating as a closed door rather than left ambiguous: the engine
+feed has to be found **statically**, or by first making the DSP jobs run.
+
+## One anchor confirmed live, and it is the useful part
+
+`docs/version-anchors.md` names two "engine fn" addresses on 1.11, re-found by
+byte pattern and never observed executing. Hooking them:
+
+| address | entries | returns to |
+|---|---|---|
+| `0x4004dfb0` (thunk target) | 0 | — |
+| **`0x4004dc62`** (called with the object) | **1** | `0x4003e332` |
+
+`version-anchors.md` records the 1.11 `adda` setup site as **`0x4003e324`**, and
+a `jsr` there returns to `0x4003e332`. **The runtime return address confirms the
+statically-derived call site exactly** — an anchor found by byte pattern months
+of reasoning earlier, now watched running for the first time.
+
+## A correction to this page: `dnfw fn entry` is "nearest call target", not "function start"
+
+Earlier this page said `0x40036bac` "is called only from `0x4003951e` — the
+destination-list builder". **The second half of that is not safe.** The measured
+fact is the return address `0x400399ce`, which is solid. Attributing it to
+`0x4003951e` came from `dnfw fn entry --at`, which reports the **nearest call
+target at or below** an address — and that is not the same thing as the
+enclosing function's entry when the real entry is reached by a branch, or when a
+large function contains internal call targets.
+
+Hooking `0x4003951e`'s entry directly gives **0 entries** in the same window
+where code at `0x400399ce` ran 2,097 times. Both cannot be inside one function
+that was entered zero times, so the attribution was wrong, not the counts.
+
+The rule, which belongs next to the others here: **a call-target resolver names
+a landmark, not a scope.** Where the enclosing function matters, hook its
+candidate entry and check it actually runs.
