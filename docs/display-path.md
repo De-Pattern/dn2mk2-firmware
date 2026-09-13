@@ -678,3 +678,55 @@ claimed a fourth LFO lane existed and **both are withdrawn** — the probes that
 discriminated. Nothing here revives that. What is established is the feed's
 shape and its two strides, read from instructions, with the call site confirmed
 by a runtime return address.
+
+## Inside the 960-byte block: five uniform 152-byte sub-objects
+
+Watching slot 0's block (`0x44719f78` at runtime, captured by hooking
+`0x4004dc62` and reading its argument off the stack) over 209M instructions:
+**359 writes and 166 reads across 247 distinct offsets**, spanning `0x0` to
+`0x3bc` — so effectively the whole 960 bytes is live.
+
+Nearly every offset is 4-byte aligned. **Seven are not**, and they are the key:
+
+```
+0xd  0x39  0xbd  0x155  0x1ed  0x285  0x31d
+      +44  +132  +152   +152   +152   +152
+```
+
+`0x400f58ec` writes one of them as `moveb %d0,%a2@(13)` — so `%a2` points at a
+**sub-object** and the odd byte is its field at `+0xd`. That turns the seven
+flags into seven sub-object bases:
+
+| base | `0x0` | `0x2c` | `0xb0` | `0x148` | `0x1e0` | `0x278` | `0x310` |
+|---|---|---|---|---|---|---|---|
+| stride to next | 44 | 132 | **152** | **152** | **152** | **152** | — |
+
+The last five are a **uniform array of 152-byte (`0x98`) objects**, and they are
+written by exactly the same two program counters — `0x400f58ec` (inside
+`0x400f5186`) and `0x401b5082` — with the same `0/1` value pattern, while the
+two at `0x0` and `0x2c` are written by entirely different code. Five instances
+of one type, two of others.
+
+`0x310 + 152 = 0x3a8`, comfortably inside 960.
+
+### What this is and is not
+
+**Established:** the engine modulation state is 128 slots × 960 bytes at
+`object + 0x4F358`, skipping a 48-byte header, and each slot holds five uniform
+152-byte sub-objects sharing a flag byte at `+0xd`, plus two differently-shaped
+ones before them.
+
+**Not established, and specifically not assumed: that the five are LFOs.** The
+DN2 has three. Five could be three LFOs plus two envelopes, or five of something
+else entirely, and this project has already withdrawn two claims of a "fourth
+LFO lane" made on thinner evidence than this
+(`docs/engine-index-map.md` §§11, 14). Naming them needs a correlation between
+one of these sub-objects and a parameter whose id is known — which needs a
+working parameter edit, which is what the encoder bug currently blocks.
+
+**Why it still matters.** The question is no longer "where does the engine get
+fed" or "what is the layout of the 960 bytes". It is now: *what are the five
+152-byte sub-objects, and is their count a bound the code reads?* If a fourth
+LFO means a sixth sub-object, the block has to grow by 152 bytes and whatever
+bounds the five has to change — and that is a question with an address to look
+at rather than a space to search.
