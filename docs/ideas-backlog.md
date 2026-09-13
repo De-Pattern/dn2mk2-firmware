@@ -307,6 +307,15 @@ FX track with its own LFOs and those masks exist for it. The owner settled it:
 *"nope, that's Octatrak exclusive"*. There is no FX track on the DN2. The Delay
 and Reverb masks are latent capability that nothing on this device asks for.
 
+> **What this retraction does NOT say, flagged 2026-09-14 because it was
+> misread — by me, in a summary to the owner.** It retracts an *explanation of
+> the masks*, not a feature. "The DN2 has no FX track" is a fact about the stock
+> device, and the stock device has no fourth LFO either; that is the premise of
+> this whole repository, not an objection to it. **Adding FX tracks remains a
+> live idea and is §8.** The only thing established here is that the existing
+> `0x1e00` masks are not evidence of hidden FX-track machinery, so they cannot
+> be cited as a head start.
+
 **Settled (2026-09-12): it is an enumeration problem, and the enumeration is a
 data edit.** `docs/parameter-set-tables.md` reads the boot-time builder
 `param_set_tables_build` (1.11 `0x400dc4d0`). It walks the parameter table and
@@ -710,11 +719,78 @@ Chorus/Delay/Reverb **sends** (ids 67/68/69) already carry the full `0x1e00`
 mask. Whatever §8 does to make FX settings modulable runs through that field, so
 §4's measurements are §8's starting point and should not be re-derived.
 
-### Status
+### It splits three ways by cost, not two (2026-09-14)
 
-**Parked, behind §7 and §4.** Not blocked on a decision — blocked on being able
-to read SHARC code, which is a tooling problem with a known owner (digikit) and
-no estimate.
+The two pathways above are still right, but collapsing everything else into
+"blocked behind the SHARC" is too coarse and hid the one tier that is open
+today.
+
+| Tier | What it is | Where it runs | Status |
+|---|---|---|---|
+| **A** | p-lock / modulate the **existing global FX settings** per pattern | nothing new on the DSP — the algorithms already run | **open, and adjacent to work already done** |
+| **B** | let a track choose **which of the existing three** FX it feeds | reuses running DSP code; the change is routing | unknown whether the SHARC exposes configurable routing |
+| **C** | **N FX instances per track**, Octatrack-style | multiplies DSP instances | genuinely behind the SHARC wall |
+
+**Tier A is the one to start on, and it pays twice.** The thing standing between
+an LFO and an FX parameter is §4's mirror split: `FxSetup::updateMirror` writing
+into `fxSetupStorage_v0_t`, a separate structure with its own index space. That
+is *also* exactly what per-pattern FX control has to go through. So Tier A's
+mechanism is §4's named blocker, and understanding one resolves both.
+
+Tier A also starts from storage that already exists: FX settings are already
+pattern-scoped data, so per-step locks are an increment rather than a new
+concept. **The first step costs nothing and touches no hardware** — ask DNX's
+decoded pattern format (`DNX/docs/dn2-pattern-format.md`) whether a p-lock can
+address an FX parameter id at all. If it can, Tier A is an enumeration problem.
+If it structurally cannot, that is the real wall, found offline for free.
+
+**Tier C's cost is not just "we can't read SHARC".** The Octatrack runs 8 tracks
+× 2 FX slots; the DN2 runs **3 global** FX. Per-track means multiplying
+instances, which is a DSP *headroom* question and additionally requires the
+algorithms to be instantiable more than once — a property of code we cannot
+inspect. Two unknowns, not one.
+
+### What the Octatrack repositories do and do not give us
+
+Worth stating plainly, because "we have the Octatrack code" is easy to
+over-read:
+
+| We have | What it actually is |
+|---|---|
+| `octabam` (MIT) | ColdFire code caves — the **delivery mechanism** |
+| `midisc` (MIT) | MIDI scenes via cave splicing; we port its ColdFire assembler |
+| `TABLE_ATLAS.md`, delay architecture | community docs describing **DSP56300** tables |
+| `ems-octakit` | **unlicensed** — inspiration-only until a licence is granted |
+
+**None of them contains an FX-track implementation.** The Octatrack's assignable
+FX are stock Elektron firmware running on a **DSP56300**; ours is a **SHARC+
+ADSP-21569**. No instruction, table layout or algorithm transfers. What we have
+is the tooling that makes patching possible and the method — which is real, and
+is why §"scenes" is tractable — but it is not the feature.
+
+### The DN1 changes the answer for Tiers B and C
+
+**`docs/dn1-dsp-comparison.md`: the Digitone 1 runs its audio DSP on the
+ColdFire.** 613 multiply-accumulates against the DN2's 50, in four-accumulator
+EMAC loops at `0x40096000`–`0x4009b000`, working on the `0x80000000` fast SRAM.
+Elektron moved the engine off the main CPU between 2018 and 2024.
+
+So on the DN1 the audio engine **is in the image, on a CPU we can already
+disassemble** (Gate F cleared), and its firmware is **unsigned** — no HMAC to
+reproduce, a shorter build loop. Everything this section calls "behind the SHARC
+wall" is simply *readable* there.
+
+That makes the DN1 the natural vehicle for Tiers B and C, and it suggests a use
+that is better than either: **read the DN1's LFO generator as a template for
+recognising the DN2's.** We would learn what an Elektron modulator looks like as
+code — its phase accumulator, its waveform table shapes, its constants — and
+then search the SHARC for that signature instead of reading 105 KB blind. That
+partially routes around §7's decode problem rather than waiting on it.
+
+**The caveat, so it is not overclaimed:** the DN1 is a different product with
+fewer tracks and voices, and nothing found there transfers to the DN2 as fact.
+It transfers as a *hypothesis to test*, which is still worth a great deal when
+the alternative is an unnamed 105 KB.
 
 ## 9. A tool for a custom start-up animation
 
