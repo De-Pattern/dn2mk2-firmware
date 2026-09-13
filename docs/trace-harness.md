@@ -144,10 +144,65 @@ generators running. The trace measures the ColdFire, not the SHARC, and that
 question needs a test designed so a positive **cannot** be explained by storage
 round-tripping.
 
-## Result
+## Result: two of eleven, and the readout is now in doubt
 
-_Not yet flashed. `trace-harness_DN2_1.11.syx`, content sha256 `cfc03f1a249b7a92`,
-556 bytes changed across 11 hooks, 11 caves and the board._
+**Flashed 2026-09-13**, `trace-harness_DN2_1.11.syx`, sha `cfc03f1a249b7a92`.
+
+```
+. . . . R . . . . . E
+P G M S R F B C A D E
+```
+
+`R` (`reverse_copy`) and `E` (the view function at `0x40037942`) marked. **Nine
+stayed blank through everything**: parameter pages, encoder moves, a sound saved
+to slot 245. The instrument stayed stable throughout and the saved sound is
+well-formed (`D.dn2pst`, `FirmwareVersion 1.11`, tags intact) — so the probes
+disturb neither the machine nor what it writes.
+
+### What was ruled out
+
+**The page caching the string.** If SETTINGS took a copy when first built, every
+write after that would be lost. Tested by rebooting, mangling parameters
+*without* opening SETTINGS, then opening it once: **still only `R` and `E`.**
+
+**A bad payload.** All eleven share one payload, and it demonstrably works —
+`R` and `E` use it.
+
+**A bad splice.** Three hooks were disassembled out of the built image and each
+is a correct `jmp` into a correct cave, payload then displaced stock then jump
+home, no duplication.
+
+**A phantom caller count.** `param_index_in_page`'s 34 callers were re-verified
+by disassembling linearly from each enclosing entry: every one is a genuine
+`jsr 0x400dbcc4` on a real instruction boundary. Four of them sit in functions
+this very trace shows running.
+
+### The correction this forces
+
+> **⚠️ The claim above that the display "renders that string live from that
+> address" is withdrawn.** The boot proof showed only that a write made *before
+> the UI existed* appears. It never showed the string is re-read on every draw.
+
+So the result is ambiguous between two readings that point opposite ways:
+
+| | means |
+|---|---|
+| **A. the nine never run** | `param_index_in_page`, with 34 real callers in parameter-page code, is not on the DN2's parameter path. A large finding about where the UI lives. |
+| **B. late writes are never displayed** | `R` and `E` are boot-time only, the board is frozen early, and **every blank column is uninterpretable** — including the nine. |
+
+**A stamp cannot tell these apart**, because "ran once at boot" and "runs
+constantly" leave the same mark. That is the design flaw, and it is the same
+shape as the mistake this harness was built to stop: a test whose positive and
+negative branches are not actually distinguishable.
+
+### The fix: a counter, not a stamp
+
+`scripts/build_trace_liveness.py` — three hooks, sha `6ca8e066b714e994`. The two
+probes known to fire each **advance** a second column, `0`..`7`, every time they
+run. Digits that move mean late writes reach the screen (world A); digits that
+freeze mean only boot-time writes are displayed (world B).
+
+_Awaiting hardware._
 
 | col | mark | site | probe | asks |
 |---|---|---|---|---|

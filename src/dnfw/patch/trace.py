@@ -113,6 +113,13 @@ class Probe:
     `mark` is the character it writes into `column` when it executes. Give each
     probe a mark that recalls what it tests; the legend printed by the build is
     what you read the screen against.
+
+    `counter`, when set, names a second column this probe **advances** each time
+    it runs, cycling `0`..`7`. A stamp cannot distinguish "ran once, long ago"
+    from "runs constantly", and that distinction is the difference between "this
+    function is not called" and "writes made after boot are never displayed" --
+    which is exactly the ambiguity the first harness could not resolve. A column
+    whose digit moves while you use the instrument settles it.
     """
 
     id: str
@@ -120,6 +127,7 @@ class Probe:
     mark: str
     column: int
     note: str = ""
+    counter: int | None = None
 
     def __post_init__(self) -> None:
         if len(self.mark) != 1 or not self.mark.isprintable():
@@ -136,18 +144,39 @@ def payload(board: Board, probe: Probe) -> bytes:
         raise TraceError(
             f"{probe.id}: column {probe.column} is outside the board's {board.width}"
         )
-    source = "\n".join([
+    if probe.counter is not None and probe.counter >= board.width:
+        raise TraceError(
+            f"{probe.id}: counter column {probe.counter} is outside the board's {board.width}"
+        )
+    # %d1 is only saved when a counter needs a scratch register, so a plain stamp
+    # keeps the exact byte sequence already proven to run on the device.
+    regs = "%d0-%d1/%a0" if probe.counter is not None else "%d0/%a0"
+    frame = 12 if probe.counter is not None else 8
+    source = [
         f"| trace {probe.id}: stamp {probe.mark!r} in column {probe.column}",
-        "    lea     %sp@(-8),%sp",
-        "    movem.l %d0/%a0,%sp@",
+        f"    lea     %sp@(-{frame}),%sp",
+        f"    movem.l {regs},%sp@",
         "    move.w  %ccr,%d0",
         f"    lea     {board.address},%a0",
         f"    move.b  #{ord(probe.mark)},%a0@({probe.column})",
+    ]
+    if probe.counter is not None:
+        # Read the digit back, advance it, wrap to 0..7 and re-base on '0'. The
+        # idle '.' (46) enters the cycle at '7' and moves from there, so the
+        # column is never mistaken for a stamp.
+        source += [
+            f"    move.b  %a0@({probe.counter}),%d1",
+            "    addq.l  #1,%d1",
+            "    andi.l  #7,%d1",
+            "    addi.l  #48,%d1",
+            f"    move.b  %d1,%a0@({probe.counter})",
+        ]
+    source += [
         "    move.w  %d0,%ccr",
-        "    movem.l %sp@,%d0/%a0",
-        "    lea     %sp@(8),%sp",
-    ])
-    return assemble(source + "\n")
+        f"    movem.l %sp@,{regs}",
+        f"    lea     %sp@({frame}),%sp",
+    ]
+    return assemble("\n".join(source) + "\n")
 
 
 def check_site(image: LoadedImage, probe: Probe, stock: bytes) -> None:
