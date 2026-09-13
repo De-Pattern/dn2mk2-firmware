@@ -31,6 +31,7 @@ displaced instructions are straight-line moves and arithmetic.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 
 from ..image.coldfire import LoadedImage
@@ -247,6 +248,129 @@ def find_free_runs(image: LoadedImage, start: int, end: int, min_size: int) -> l
             runs.append(FreeRun(address=image.address_of(i), size=j - i))
         i = j
     return runs
+
+
+@dataclass(frozen=True)
+class Suspect:
+    """A group of free runs that repeat at a fixed stride — almost certainly an array."""
+
+    stride: int
+    runs: tuple[FreeRun, ...]
+
+    @property
+    def start(self) -> int:
+        return self.runs[0].address
+
+    @property
+    def end(self) -> int:
+        return self.runs[-1].address + self.runs[-1].size
+
+    def describe(self) -> str:
+        return (f"{len(self.runs)} runs of ~{self.runs[0].size} bytes at a {self.stride:#x} "
+                f"stride, 0x{self.start:08x}..0x{self.end:08x}")
+
+
+def suspect_arrays(runs: list[FreeRun], *, min_members: int = 3,
+                   tolerance: float = 0.125) -> list[Suspect]:
+    """Free runs that repeat at a fixed stride, which padding does not do.
+
+    **Why this exists.** On 2026-09-13 caves were placed at `0x40287ef6`, offered
+    by `find_free_runs` because the bytes are zero. They are not padding. Sixteen
+    runs of 1,035 zeros sit there at a `0x40c` stride, each followed by a single
+    `0xff` — an **array of 1,036-byte records, shipped zeroed and written at
+    runtime**, sixteen being this machine's track and voice count. The firmware
+    overwrote the caves while the keyboard was played and the device took an
+    address error (`docs/flashing.md`).
+
+    A compiler pads to an alignment boundary; it does not emit a dozen equal
+    gaps at a constant pitch. **Regular spacing is positive evidence that a run
+    belongs to a structure**, and it is the one signal that would have caught
+    this without running anything.
+
+    This does not prove a group is live, and an irregular run is not thereby
+    safe — the only proof of safety is watching the firmware run and seeing the
+    bytes stay untouched. It refuses the mistake we actually made.
+
+    **`tolerance` is not a fudge factor, it is the whole difference between
+    catching this and not.** An exact-stride rule flags `0x4028830e` onward and
+    **misses `0x40287ef6`** — the run the caves were actually put in — because
+    that record is twelve bytes longer than its fifteen siblings, so its gap is
+    `0x418` against their `0x40c`, 2.9% out. A record array with a slightly
+    different first entry is completely ordinary, and a guard that fails on its
+    own motivating case is not a guard. Gaps within ±12.5% count as one stride.
+    """
+    ordered = sorted(runs, key=lambda r: r.address)
+    found: list[Suspect] = []
+    i = 0
+    while i < len(ordered) - 1:
+        stride = ordered[i + 1].address - ordered[i].address
+        group = [ordered[i], ordered[i + 1]]
+        j = i + 1
+        while j < len(ordered) - 1:
+            gap = ordered[j + 1].address - ordered[j].address
+            if abs(gap - stride) > stride * tolerance:
+                break
+            group.append(ordered[j + 1])
+            # Track the running mean so a long group is not dragged off by its
+            # first gap; the members still have to agree with each other.
+            stride = (ordered[j + 1].address - ordered[i].address) // (len(group) - 1)
+            j += 1
+        if len(group) >= min_members:
+            found.append(Suspect(stride=stride, runs=tuple(group)))
+            i = j
+        else:
+            i += 1
+    return found
+
+
+# Instructions that load an absolute long address. Requiring one of these in
+# front of the constant is what separates a reference from a coincidence: a bare
+# 32-bit-window scan over a 3 MB image finds ~175 values that merely *look* like
+# addresses in a 0x74000-byte region, which is about one per free run — enough
+# to condemn everything and mean nothing.
+_LEA_ABS = {0x41F9 | (n << 9) for n in range(8)}       # lea 0x........,%aN
+_MOVEL_IMM = {0x203C | (n << 9) for n in range(8)}     # move.l #0x........,%dN
+_PEA_ABS = {0x4879}                                    # pea 0x........
+_ADDRESS_LOADS = _LEA_ABS | _MOVEL_IMM | _PEA_ABS
+
+
+def qualified_references(image: LoadedImage, lo: int, hi: int) -> dict[int, tuple[int, ...]]:
+    """Addresses in [lo, hi) that the code actually *loads*, and from where.
+
+    Complements `suspect_arrays`, and neither is sufficient alone — this is the
+    lesson of `0x40287ef6` (`docs/code-caves.md`):
+
+    * the array's **base** carries 9 qualified references, because the code
+      holds it in a register;
+    * its **other fifteen records carry none**, because they are reached by
+      `base + i * 1036`. A reference check alone would call them free.
+
+    So: references catch a base, stride catches the members, and a run needs to
+    pass both. Even then neither proves the bytes are unused at runtime — a
+    region reached by a computed pointer with no constant anywhere would pass
+    both checks. They rule out what can be ruled out statically.
+    """
+    if lo >= hi:
+        raise CaveError(f"empty range 0x{lo:08x}..0x{hi:08x}")
+    content = image.content
+    base = image.dest
+    found: dict[int, list[int]] = {}
+    for off in range(0, len(content) - 5, 2):
+        if struct.unpack_from(">H", content, off)[0] not in _ADDRESS_LOADS:
+            continue
+        value = struct.unpack_from(">I", content, off + 2)[0]
+        if lo <= value < hi:
+            found.setdefault(value, []).append(base + off)
+    return {value: tuple(sites) for value, sites in found.items()}
+
+
+def references_into(run: FreeRun, references: dict[int, tuple[int, ...]]) -> tuple[int, ...]:
+    """Every site that loads an address inside `run`."""
+    sites: list[int] = []
+    for value, at in references.items():
+        if run.address <= value < run.address + run.size:
+            sites.extend(at)
+    return tuple(sorted(sites))
 
 
 def displaced_stock(instruction_bytes: list[bytes], min_len: int = HOOK_BRANCH_LEN) -> bytes:

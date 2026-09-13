@@ -145,3 +145,108 @@ def test_displaced_stock_raises_when_too_few_bytes():
 
     with pytest.raises(CaveError, match="need 6"):
         displaced_stock([b"\x4e\x75"], min_len=6)
+
+
+# --- fixed-stride groups are arrays, not padding --------------------------
+#
+# Added 2026-09-13. Caves were placed at 0x40287ef6 because find_free_runs
+# offered it; it is one record of a 16-element array the firmware writes at
+# runtime, and the device took an address error. See docs/flashing.md.
+
+from dnfw.patch.cave import FreeRun, suspect_arrays
+
+
+def test_a_fixed_stride_group_is_flagged():
+    runs = [FreeRun(address=0x1000 + i * 0x400, size=0x3F0) for i in range(6)]
+    suspects = suspect_arrays(runs)
+    assert len(suspects) == 1
+    assert len(suspects[0].runs) == 6
+    assert suspects[0].stride == 0x400
+
+
+def test_scattered_runs_are_not_flagged():
+    runs = [FreeRun(address=a, size=64) for a in (0x1000, 0x1900, 0x4400, 0x9110)]
+    assert suspect_arrays(runs) == []
+
+
+def test_two_runs_alone_are_not_a_group():
+    # Any two addresses have a stride; it takes a third to be a pattern.
+    runs = [FreeRun(address=0x1000, size=64), FreeRun(address=0x1400, size=64)]
+    assert suspect_arrays(runs) == []
+
+
+def test_a_slightly_longer_first_record_is_still_caught():
+    """The case that actually bit us, and that an exact-stride rule misses.
+
+    0x40287ef6 is 12 bytes longer than its fifteen siblings, so its gap is
+    0x418 against their 0x40c -- 2.9% out. An exact rule flags the fifteen and
+    leaves the one caves were put in unflagged.
+    """
+    runs = [FreeRun(address=0x40287EF6, size=1047)]
+    runs += [FreeRun(address=0x4028830E + i * 0x40C, size=1035) for i in range(15)]
+    suspects = suspect_arrays(runs)
+    assert len(suspects) == 1
+    assert suspects[0].runs[0].address == 0x40287EF6, "the crashing run must be flagged"
+    assert len(suspects[0].runs) == 16
+
+
+def test_a_gap_well_outside_tolerance_breaks_the_group():
+    runs = [FreeRun(address=a, size=64) for a in (0x1000, 0x1400, 0x1800, 0x3000)]
+    suspects = suspect_arrays(runs)
+    assert len(suspects) == 1
+    assert len(suspects[0].runs) == 3
+
+
+# --- code references into a candidate run --------------------------------
+
+from dnfw.patch.cave import qualified_references, references_into
+
+
+def _image_with(code: bytes, at: int = 0x100, size: int = 0x2000):
+    content = bytearray(b"\x00" * size)
+    content[at:at + len(code)] = code
+    return LoadedImage(dest=0x40000000, content=bytes(content))
+
+
+def test_a_lea_of_an_absolute_address_is_a_reference():
+    # lea 0x40001234,%a0
+    image = _image_with(bytes.fromhex("41f940001234"))
+    refs = qualified_references(image, 0x40001000, 0x40002000)
+    assert refs == {0x40001234: (0x40000100,)}
+
+
+def test_pea_and_move_l_immediate_also_count():
+    image = _image_with(bytes.fromhex("487940001234") + bytes.fromhex("203c40001238"))
+    refs = qualified_references(image, 0x40001000, 0x40002000)
+    assert set(refs) == {0x40001234, 0x40001238}
+
+
+def test_a_bare_address_shaped_word_is_not_a_reference():
+    """The filter that matters: raw data that happens to look like an address.
+
+    An unqualified 32-bit scan over a 3 MB image finds ~175 such values in a
+    0x74000-byte window -- about one per free run, enough to condemn every run
+    and mean nothing.
+    """
+    image = _image_with(bytes.fromhex("00000000") + bytes.fromhex("40001234"))
+    assert qualified_references(image, 0x40001000, 0x40002000) == {}
+
+
+def test_references_into_selects_only_those_inside_the_run():
+    refs = {0x40001000: (0xAA,), 0x40001500: (0xBB,), 0x40002000: (0xCC,)}
+    run = FreeRun(address=0x40001000, size=0x800)
+    assert references_into(run, refs) == (0xAA, 0xBB)
+
+
+def test_the_two_checks_are_complementary():
+    """An array base is referenced; its later records are not.
+
+    0x40287ef6's base carries 9 references because the code holds it in a
+    register, while its other fifteen records carry none -- they are reached by
+    base + i*1036. A reference check alone calls those fifteen free.
+    """
+    runs = [FreeRun(address=0x1000 + i * 0x400, size=0x3F0) for i in range(6)]
+    refs = {0x1000: (0xAA,)}  # only the base is named in code
+    unreferenced = [r for r in runs if not references_into(r, refs)]
+    assert len(unreferenced) == 5, "references alone would clear five records"
+    assert len(suspect_arrays(runs)[0].runs) == 6, "stride catches all six"
