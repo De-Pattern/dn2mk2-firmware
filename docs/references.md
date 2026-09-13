@@ -386,3 +386,52 @@ own disassembly later contradicted rather than quietly fixing it.
 
 The Octatrack's DSP is a **DSP56300**, not a SHARC+, so no address, encoding or
 table layout transfers. What transfers is the architecture and the method.
+
+---
+
+## SHARC reverse-engineering leads, assessed (2026-09-14)
+
+A set of community/AI-sourced pointers was passed in explicitly as *leads, not
+confirmed fact*. Assessing them against what this repository has already
+measured is cheap, and two of them would have cost real time if taken at face
+value. Recorded in full, including the ones that are wrong, because a lead that
+was checked and rejected is worth as much as one that was adopted
+(`docs/PRINCIPLES.md`).
+
+| Lead | Verdict |
+|---|---|
+| No commercial C decompiler exists for SHARC+ | **Agrees** with `docs/sharc-disassembly.md`. Hex-Rays has no SHARC+ decompiler. |
+| Ghidra via a custom SLEIGH module is the route | **Agrees, and is what we run.** |
+| "reverse engineers frequently construct custom SHARC processor definitions" | **Overstated.** A GitHub code search for `extension:slaspec` mentioning SHARC returns **exactly one** repository — digikit's. It is the state of the art, not one of many. |
+| IDA Pro plugins for ADSP-214xx, "requires updating for 2156x" | **Unchecked, and likely the same trap as `g21k`/`sharc_asm`:** 214xx is classic SHARC with a fixed 48-bit encoding. Ours is SHARC+ **VISA**, 16/32/48-bit. A classic decoder mis-lengths and desyncs. |
+| **ADI's open-source `analogdevicesinc/adsp-ldr`** | **Genuinely useful — adopted as a cross-check.** See below. |
+| Firmware is an `.ldr` on SPI flash; carve it out with a hex editor | **Not our situation.** The boot stream is section 7 of a signed `ELE3` container delivered over MIDI SysEx (`docs/ele3-format.md`). No flash carving is involved and none should be. |
+| "L1 blocks start with `0x2c`, L2 blocks with `0x20`" | **Contradicted by measurement.** Our L1 is `0x20000000` and L2 is `0x28000000`, from 9 regions the boot stream itself describes (`docs/sharc-code-map.md`). |
+| "configure your disassembler for 32-bit/40-bit SHARC instruction alignment" | **Wrong, and expensively so.** 40 bits is SHARC's extended-precision *data* word, not an instruction length. SHARC+ VISA instructions are 16/32/48-bit. A disassembler set to a 40-bit stride would desync on the first instruction and produce confident nonsense — the exact failure `docs/mainos-image.md` records for radare2 on ColdFire. |
+| Re-pack with CrossCore `elfloader.exe`, reflash via CH341A / `flashrom` / `ccsfp.exe` | **Out of scope and against the standing rules.** We have a proven, reversible update path through the normal OS-upgrade route with a verified recovery menu (`docs/flashing.md`). Swapping it for an external SPI programmer trades a working way back for a brick risk, and touches hardware nothing has authorised. |
+| Pipeline hazards/stalls obscure static control flow | **True but not our blocker.** Pipeline behaviour affects *timing*, not instruction boundaries. What blocks us is one length ambiguity (`docs/sharc-reading.md` §5). |
+
+### `adsp-ldr` is a second opinion on our boot-stream reader
+
+`https://github.com/analogdevicesinc/adsp-ldr` is Analog Devices' own
+open-source loader-stream tool, covering the ADSP-SCxxx family including its
+SHARC cores.
+
+Its value here is not that we need it to parse anything — `dnfw ldr` already
+does — but that it is an **independent implementation of the same header
+format, written by the vendor**. That is precisely the role
+`elektron-firmware-tool` plays for the container: a second opinion from code
+sharing no lineage with ours.
+
+And it corroborates immediately. `src/dnfw/image/bootstream.py` parses a
+**16-byte header** as `<IIII` — block code with signature byte `0xAD`, target
+address, byte count, argument — with `FILL`, `IGNORE` and `FINAL` flags. That is
+ADI's documented block layout, arrived at here from the bytes and the
+contiguity test rather than from the manual. Two derivations, one from a vendor
+specification and one from counting where block targets land, agreeing on the
+structure.
+
+**What it does not do** is help us read instructions. It unpacks a boot stream;
+the blocker is decoding what the blocks contain. It also does not supply a
+re-packer we can use, because our output is an `ELE3` section with a content
+checksum and an HMAC trailer, not a standalone `.ldr`.
