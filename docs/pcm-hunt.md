@@ -23,8 +23,22 @@ parameters whose value sets are known:
 | **SYN `Drum Transient`** | **`0x7c00`** | **125** | â€” |
 | most continuous params | `0x7f00` | 128 | the usual 0..127 |
 
-So **`TRAN` selects one of 125**. That is the catalogue size, and it is the
-number any extraction or replacement tool has to match.
+So the integer range is 0..124 — **125 positions**.
+
+> **[OVERSTATED — corrected 2026-09-14, same day]** This said *"`TRAN` selects
+> one of 125. That is the catalogue size"*, which claims more than the field
+> supports. The record's value formatter settles it: id 286's is `0x400e2ef6`,
+> and it renders `'%s%d.%02d'` — **a signed decimal like `12.34`**. Enumerated
+> parameters do not look like that; LFO `Waveform` and `Noise Type` have
+> name-lookup formatters. `0x7c00` is max = **124.00 in 8.8 fixed point**, and
+> the `bipolar` flag at `+0x14` is set.
+>
+> So `TRAN` is a **continuous** control whose fraction may morph between bank
+> entries, not a 125-item menu. 125 positions remains the right number for the
+> integer part, and the same `max = count - 1` rule still reads LFO `Waveform`
+> correctly at 7. But "125 named transients" was not established, and the
+> formatter is **display-only** — it never touches the sample data, so it is not
+> the route to the catalogue.
 
 Related parameters sit beside it and are worth having in one place, because they
 say the transient is a *layer* rather than the whole drum: `Transient Level`
