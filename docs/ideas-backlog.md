@@ -705,3 +705,56 @@ mask. Whatever §8 does to make FX settings modulable runs through that field, s
 **Parked, behind §7 and §4.** Not blocked on a decision — blocked on being able
 to read SHARC code, which is a tooling problem with a known owner (digikit) and
 no estimate.
+
+## 9. A tool for a custom start-up animation
+
+**Owner's idea, 2026-09-13.** Let people replace the Elektron boot animation
+with their own — a small tool that takes frames in and produces a flashable
+image, rather than a one-off patch.
+
+This is parked like everything else here, but it is worth noting that it is
+**the most tractable idea on this page**, for three reasons that are already
+measured rather than hoped for.
+
+**The intro is a separate drawing path, and we have seen it.** `emu/panel.py`
+records that the main OS composes text and widgets straight into the
+framebuffer and never calls `Bitmap::setPixel`, while **the intro draws through
+that primitive**. So the boot animation is not entangled with the UI renderer:
+it is its own code reaching its own entry point. `docs/display-path.md` captures
+both — the intro animation and the SYN1 page — from the same run.
+
+**The boot path is where cave code is already proven to run.** The project's
+first and only confirmed code injection hooked the boot path and wrote
+`CAVE RAN!!!` over a string in RAM (`docs/code-caves.md`). Whatever a custom
+animation needs, it needs it *there*, which is the one region where execution is
+not a hypothesis.
+
+**It is visible without hardware.** `scripts/drive.py` archives the panel as a
+PNG from the emulator, so an animation can be iterated offline and only flashed
+once it looks right — instead of the flash-and-photograph loop that every
+earlier experiment paid for.
+
+### What is not known yet
+
+- **Where the frames live, and in what form.** Nothing has looked. The
+  `blob` section is the SHARC program (`docs/sharc-image.md`), so the animation
+  is somewhere in MAIN OS — as bitmap data, as drawing code, or as both.
+- **Whether it is data or procedure.** A stored frame sequence is a
+  replace-the-bytes job with a size budget. A procedurally drawn animation —
+  which the captured frames' symmetry rather suggests — means writing ColdFire
+  drawing code in a cave, a different and larger task.
+- **The size budget.** Same-length replacement is free; anything larger needs
+  §1's space or §6's section.
+
+The first question is the cheap one and answers the rest: hook `setPixel`
+during the intro, record the pixels, and see whether the sequence matches
+anything stored in the image. That is an afternoon with tools that already
+exist, and it is the honest first step rather than a design.
+
+### Why it is worth doing even though it is not LFO4
+
+It is the first idea here with **a user other than us**. Everything else on this
+page makes the instrument do more; this makes it *theirs*, which is a different
+kind of value and a much easier thing to explain to someone who does not care
+how an ELE3 container is laid out. It is also small enough to finish, which none
+of §1, §4, §6, §7 or §8 currently are.
