@@ -116,10 +116,12 @@ The standing LFO4 question — **where the LFO generators live, given MAIN OS
 contains no generator of any kind** (`docs/display-path.md`) — is now a question
 that can be *asked of instructions* rather than of strings.
 
-**What is still missing:** Ghidra itself is not installed on this machine (no
-Java; it lives on the flashing machine, `docs/HANDOVER.md`). The Python
-disassembler runs here today; the Ghidra module needs the other machine or an
-install.
+> **[WRONG — corrected below, same day]** This said *"Ghidra itself is not
+> installed on this machine (no Java; it lives on the flashing machine)"*, on
+> the strength of `docs/HANDOVER.md` and a `which java` in WSL. Both were
+> misleading: Ghidra was set up **natively on Windows** in `33d0e0d`, and a WSL
+> shell cannot see it. **Checking one shell and citing a stale handover is not
+> checking** — `C:\tools\ghidra_*` was one `ls` away. See the next section.
 
 ---
 
