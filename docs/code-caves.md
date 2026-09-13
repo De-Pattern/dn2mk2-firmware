@@ -271,3 +271,67 @@ through this function should read **0**; `AMP VOL` falls from 110 to 0.
 
 One of those says the cave mechanism is sound; the other says an anchor is wrong.
 Neither is guessable from here.
+
+---
+
+## The `0x40287ef6` array, read out of the code (2026-09-13)
+
+The crash on 2026-09-13 was diagnosed from the *shape* of the free runs —
+sixteen of them at a `0x40c` stride, therefore an array. That was an inference.
+It is now read directly out of MAIN OS, and the inference was right.
+
+**25 constants in `0x40287e00..0x4028c000` are referenced from MAIN OS**, and
+one of the sites is an initialiser:
+
+```
+4002a4d2:  movel %a2,%sp@-
+4002a4d4:  lea   0x40287f04,%a0        ; the array base
+4002a4da:  subal %a1,%a1               ; i = 0
+4002a4dc:  clrl  %a0@(0,%a1:l)         ; clear [i]
+4002a4e0:  lea   %a0@(0,%a1:l),%a2
+4002a4e4:  addql #4,%a1
+4002a4e6:  clrl  %a2@(512)             ; clear [i + 512]
+4002a4ea:  cmpal #512,%a1
+4002a4f0:  bnes  0x4002a4dc            ; 128 iterations, two longs each = 1024 B
+4002a4f2:  st    %d0
+4002a4f4:  clrl  %a0@(1024)
+4002a4f8:  clrl  %a0@(1028)            ; 1032 bytes cleared
+4002a4fc:  lea   %a0@(1036),%a0        ; <-- ADVANCE ONE RECORD: 1036 = 0x40c
+```
+
+and a nearby site in the enclosing region carries `moveq #16,%d0` beside a `lea`
+into the same range.
+
+**So the region is a 16-record array of 1,036-byte structures, base
+`0x40287f04`, and MAIN OS clears it.** The stride the guard derived from spacing
+alone (`patch/cave.py:suspect_arrays`) is the literal displacement in the
+instruction. Sixteen is this machine's track and voice count
+(`docs/device-model.md`).
+
+`0x40287f04` is **14 bytes into** the "free run" at `0x40287ef6` that
+`dnfw cave scan` offered, so every cave placed from that base sat inside record
+zero or later. **The diagnosis is confirmed.**
+
+### Why the emulator could not have told us this
+
+The 400M-instruction run watched `0x40287ef8`, `0x40288000` and `0x40288b28`,
+with a static control (`0x401f7f94` → `0xffffffff`) and two dynamic ones
+(`0x42c64b3c` → `0x13`, the boot-built `ParameterSet` table; a live TCB) all
+green, and the prio-6 main application task started at `n=315,716,921`.
+
+All three array watches read **`0x00000000`**.
+
+That is not evidence of anything, and the reason is worth keeping: **the writes
+are `clrl` — they write zeros.** A watch that reads a *value* cannot distinguish
+"cleared to zero" from "never touched". The instrument was incapable of
+detecting the very thing it was pointed at.
+
+This is the third time this week a test has been built whose two branches
+produce identical output — after the trace harness's stamps and the
+`updateMirror` hook. The rule it earns:
+
+> **A watch must be able to produce a different answer for each outcome.**
+> Watching a value proves nothing about a region that is written with zeros;
+> only a *write hook* does. `Machine.install_mmio_trace` in digikit delivers
+> write events with `pc`, address and value, and works over any range — that is
+> the mechanism a real write map needs, not `--watch`.
