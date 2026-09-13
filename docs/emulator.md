@@ -234,3 +234,77 @@ nothing here only because the payload bytes were right.
 The rebuild path was never affected: `container/ele3.py` reassembles from
 `section.stored`, so round-trips and every flashed image are unchanged. This was
 an **export** bug, and the only consumer was a human reading the file.
+
+---
+
+# Running it
+
+## Digitone II **1.11 cold-boots**
+
+`tools/addrtrace.py` has a cold-boot mode that needs no snapshot, which is what
+makes a first run possible at all. On 1.11, via `--sections-dir` pointed at our
+own extraction (`scripts/export_sections_for_digikit.py`):
+
+```
+[n=26242562] TASK_CREATE entry=0x400cebb4 prio=0  tcb=0x424388ac
+[n=26242651] TASK_CREATE entry=0x400cec98 prio=1  tcb=0x4243c900
+[n=26910410] TASK_CREATE entry=0x40000ea0 prio=9  tcb=0x4058bee4
+[n=26910480] TASK_CREATE entry=0x40002a46 prio=10 tcb=0x4058d604
+[n=64757721] TASK_CREATE entry=0x400d3d86 prio=7  tcb=0x42c45624
+```
+
+**The RTOS comes up and spawns tasks.** digikit's README says plainly that
+*"every address in this project is specific to"* Digitakt II 1.15C and that a
+different firmware *"will very likely not boot"* — so this was not a given, and
+1.11 is a build nobody had tried. It is the first time the firmware this project
+patches has run anywhere but the instrument.
+
+Two caveats that bound what the run means:
+
+* **`unresolved symbols: transport, call_sites, mainloop, main_queue`.** digikit
+  derives these by signature rather than freezing addresses per build, and the
+  signatures do not all match on 1.11.
+* **No prio-6 task appears.** On 1.10E that is the main application task
+  (`0x4002e688`). Its absence at 120M instructions means the run had probably
+  not reached the main OS, only the intro.
+
+## The first watch run was not a result, and here is why
+
+120M instructions, watching the flagged array at `0x40287ef6`:
+
+```
+0x40287ef8  0x00000000
+0x40288000  0x00000000
+0x40288b28  0x00000000
+0x4028ea02  0x00000000
+```
+
+Read naively that says the array is never written, and the 2026-09-13 crash
+diagnosis is wrong.
+
+**It says nothing of the kind, because the run carried no positive control.**
+Every watch returned zero, and "the region is untouched" and "the watch never
+read anything" produce identical output. That is precisely the flaw that made
+the trace harness's nine blank columns worthless (`docs/trace-harness.md`), and
+it would have been repeated here.
+
+### The controls to carry, and what each one separates
+
+| watch | proves, if non-zero |
+|---|---|
+| `0x401f7f94` — the parameter records, **non-zero in the image itself** | the watch mechanism reads memory at all |
+| `0x42c64b3c` — the sound `ParameterSet` slot table, **BSS, built at boot** by `param_set_tables_build` (`docs/parameter-set-tables.md`) | the boot progressed far enough to build parameter tables |
+| `0x424388ac` — a TCB the trace itself reported being created | the run reached the RTOS |
+
+A static control and a dynamic one. Without the first, zero is meaningless;
+without the second, zero only means "not yet".
+
+**And even a properly controlled zero would not refute the crash diagnosis.**
+The device faulted *while the keyboard was played*. If those records are
+per-voice, nothing writes them until a voice is allocated, and the emulator has
+no notes and no input. The run that could refute the diagnosis is one that
+reaches the main OS **and** makes sound — which is a longer run than this and
+possibly one needing the input path digikit's author flags as buggy.
+
+So the honest status is: **the diagnosis is neither confirmed nor refuted**, and
+the next run is designed to tell those two apart rather than to produce a number.
