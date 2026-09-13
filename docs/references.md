@@ -248,24 +248,47 @@ Its hardware model is our hardware, independently arrived at:
 Two independent routes to the same answer, which is the kind of corroboration
 this project has had little of.
 
-### It supports the Digitone II — with a caveat that matters
+### It supports the Digitone II
 
 ```sh
 uv run python -m emu.run Digitone_II_OS1.10E.syx
 ```
 
-**OS 1.10E, not 1.11.** Section extraction is identical to the Digitakt, and the
-decompressor has been verified byte-identical across DT2 1.15C and DN2 1.10E.
+Section extraction is identical to the Digitakt, and the decompressor has been
+verified byte-identical across DT2 1.15C and DN2 1.10E.
 
-But on the DN2 **the main application task never wakes**: it blocks on mutex
-`0x44460e40` from a lost wakeup in the emulator's timer-wheel, described as a
-general Unicorn defect affecting both firmwares. Without that task, DTIM3 is
-never armed and the display timer, UI tick and job workers never start. Usable
-checkpoint ceiling: **280M instructions**.
+> **Correction, same day.** This section first said, from `README.md` and
+> `docs/DIGITONE.md`, that on the DN2 *"the main application task never wakes"*
+> — blocked on mutex `0x44460e40` from a lost timer-wheel wakeup — and therefore
+> that **the UI renders for the Digitakt and not the Digitone**.
+>
+> **That is stale and wrong as a statement of current state.** The author's own
+> account, relayed by the owner 2026-09-13: *"basic emulator for latest Digitakt
+> 2 and Digitone 2 firmware… it works"*, and `docs/HANDOVER-2026-09-13.md`
+> records **"You can press buttons and turn encoders on both builds, and the
+> firmware responds."** Front-panel input, UART8 at 156250 baud, event decoding
+> through a `queue_send` hook, and control-name resolution from the firmware's
+> own tables are all working.
+>
+> The lesson is about *this* repository, not that one: **a project under active
+> development has a stale README, and its handover notes are the live
+> document.** Reading the tidiest file and asserting current state from it is
+> the same error this project has made against its own firmware all week.
 
-So the UI renders for the Digitakt II today and **not** for the Digitone II.
-That is a bug in something else, not a design limit, which makes it the single
-highest-value thing to watch or help fix.
+Current, from the author and the latest handover:
+
+| | state |
+|---|---|
+| DN2 boot + UI | **works** |
+| buttons and encoders | work on both builds — but the author flags **encoder turn/deltas as buggy and needing fixing** |
+| page buttons | momentary — the page reverts shortly after release |
+| DT2 `boot280M.snap` | renders a blank screen post-intro, so screen-based identification fails on that build |
+| storage (eSDHC/eMMC) | identification only; `CMD18` reads return zeros |
+| audio (SHARC+) | out of scope, separate firmware |
+
+**Which DN2 version is unresolved.** The README documents 1.10E; the author says
+"latest". Ours is 1.11. Worth asking rather than assuming — and it decides
+whether our anchors transfer directly or need re-deriving.
 
 ### DN2 1.10E addresses it names
 
@@ -285,6 +308,13 @@ which is exactly what this project keeps getting wrong by pattern-matching:
 it**, so the display path we have failed twice to identify is reachable by
 hooking one function and walking back — against a named role rather than a
 guessed one.
+
+And with encoder input working in the emulator, the question that has cost this
+project four flashes — *which functions run when you turn an encoder?* — becomes
+a trace, not a guess. The author's caveat that **encoder deltas are buggy** is
+the thing to verify before trusting such a trace: a broken delta could deliver
+the event without the value change, which would light exactly the wrong half of
+the path and look like a result.
 
 ### The landmine it saves us from
 
