@@ -182,7 +182,7 @@ RuntimeError: weakptr: 0x40188b40 holds 4878, expected 6714
 
 That is the guard working exactly as it should.
 
-# Input is modelled, and on 1.11 it halts the firmware
+# Input is modelled, it works, and the halt was my own bug
 
 `emu/panelin.py` implements the front panel properly — buttons and encoders over
 UART8, addresses resolved per build. digikit's README saying "No input" is
@@ -190,43 +190,90 @@ stale. The firmware's own control table reads out of the running image:
 **55 buttons** (`TRIG SRC FLTR AMP FX MOD PRESET SETTINGS …`) and 10 encoders,
 so `MOD` is button code 6, channel 0 bit 5 — found by name, not guessed.
 
-`scripts/drive.py` presses it. The result is the same every time, for a button
-and for an encoder alike:
+`scripts/drive.py` drives it, and **the input path works end to end**:
 
-| step | new frames | executed | stop |
-|---|---|---|---|
-| idle (no input) | 69 | 43,013,859 | limit |
-| press+release `MOD` | **0** | **0** | `unhandled vector 257 at 0x4011eb0e` |
-| `ENCODER A +10` | **0** | **0** | `unhandled vector 257 at 0x4011eb0e` |
+| step | new frames | bytes changed | executed | stop |
+|---|---|---|---|---|
+| idle (no input) | 69 | 168 | 43,013,859 | limit |
+| press+release `MOD` | 64 | **616** | 20,030,401 | limit |
+| `ENCODER A +10` | 117 | **120** | 40,060,798 | limit |
 
-Vector 257 is QEMU's `EXCP_HALT_INSN`, and the instruction before the reported
-pc is exactly what that implies:
+Both move the screen by far more than it moves on its own, which is what the
+idle control exists to establish. And the screen goes somewhere real — the
+`Loading...` banner is replaced by the project name and a live tempo:
 
+![The main screen after driving the panel](img/encoder-a--10.png)
+
+## The retraction, and it is the most useful thing on this page
+
+**This first reported `unhandled vector 257 at 0x4011eb0e` — a `halt`
+instruction — as a digikit bug, and filed it upstream. It was my own defect.**
+
+`panelin.feed()` returns the new pc, and the script threw it away:
+
+```python
+panelin.press(m, p, 0, 5)                  # returns the ISR pc -- discarded
+pc, ran, stop = longrun.spin(m, pc, ...)   # resumed at the PRE-injection pc
 ```
-0x4011eb0a  66 e2       bnes 0x4011eaee     ; loop while d3 != 48
-0x4011eb0c  4a c8       halt                <-- here
-0x4011eb0e  4c d7 3c 0c moveml %sp@,%d2-%d3/%a2-%a5
-```
 
-`0x4011eb0c` sits `0x116` into `0x4011e9f6`, whose only two callers
-(`0x4011ea8e`, `0x4011eb22`) are **inside itself** — a self-recursive routine
-that walks twelve somethings and then halts the processor. That is the shape of
-a panic or assert handler, not of a UI.
+`raise_vector` pushes an exception frame and sets the pc to the handler.
+Resuming at the pc from *before* the injection runs the firmware on with a
+stray exception frame on its stack, and it asserts. The `halt` was the firmware
+correctly detecting the corruption I had introduced.
 
-So the firmware does not ignore the input: it **receives it and panics**.
+Three things went wrong in order, and only the third was expensive:
 
-## What that means, and what it does not
+1. The docstring says `-> new PC`. I read past it.
+2. The failure looked like a firmware panic, because it *was* one — just one I
+   caused. A correct-looking assert is a persuasive wrong answer.
+3. **I wrote it up and filed it upstream before finding my own bug.** The
+   measurement was real and the interpretation was not, and the direction of
+   the error — blaming someone else's code — is the one that costs other people
+   time rather than only mine.
 
-It is *not* "input does not work in digikit" — the mechanism delivers, the ring
-and the vector are right, and the firmware plainly reacts. It is that on this
-build the reaction is a fault, which is consistent with the condition-code
-defect in the exception model that `weakptr` exists to paper over elsewhere and
-that digikit's own handover lists as unresolved.
+The rule this earns, which is the same one this project already applies to
+addresses, now pointed at ourselves: **before reporting a fault in someone
+else''s tool, eliminate your own use of it.** The issue is closed with the
+retraction (`m-dwyer/digikit#5`).
 
-**So the engine-feed path cannot be reached by driving the UI yet**, and the
-route is the static one: `0x4003951e` (the destination-list builder, and the
-live caller found above) and `0x4003e426` (the engine thunk site).
+## But the encoder does not edit a parameter, and that is the result
 
-Reported upstream rather than worked around here: it is someone else's
-unresolved bug, we have an exact repro, and guessing at a fix inside an
-exception model we have not read is how a week disappears.
+Input being *delivered* is not input being *useful*. The second half of the
+control asks whether a turn changes a **value**, and it does not.
+
+Six `ENCODER A` turns of +10 detents, with the page drawn and the header showing
+the loaded project: **the parameter row is byte-identical before and after.**
+`TUN1`'s widget does not move. The screen churns, execution changes — driving
+the run raises `param_index_in_page` from 2,798 calls to **4,106** and
+`parameter_value_getter` from 3,031 to **4,448** — but nothing is edited.
+
+This is exactly the case `docs/emulator.md` recorded the author warning about:
+*"the author flags encoder deltas as buggy, so verify the input path delivers a
+value change and not merely an event before believing any trace — a broken delta
+lights the wrong half of the path and looks like a result."*
+
+It looked like a result. The control caught it.
+
+### So the mirror probes are still unanswered
+
+With input driven, `M`, `S`, `F`, `B`, `C` and `A` — the `updateMirror` lambda,
+its enclosing function, the fill loop, both bulk copies and one pip consumer —
+**all still report zero**.
+
+That is **not** evidence that they are off the parameter-edit path. No parameter
+was edited. A probe cannot be absent from an event that never happened, and
+reading those zeros as a finding would be the same error as reading the trace
+harness's blank columns as one.
+
+**The engine-feed path is therefore still not reachable by driving the UI**, and
+it stays on the static route: `0x4003951e` (the destination-list builder, and
+the live caller found above) and `0x4003e426` (the engine thunk site).
+
+Not reported upstream: the author already flags encoder deltas as buggy, so this
+corroborates a known issue rather than finding a new one — and this page has
+already spent one upstream report on a defect that turned out to be mine.
+
+## What does not change
+
+The `channels=(3,)` vs `(3, 1)` measurement above stands — it was a separate
+observation with its own evidence, and had nothing to do with the halt.
