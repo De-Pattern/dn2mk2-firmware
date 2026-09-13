@@ -172,7 +172,26 @@ stock instruction, and `jmp` back — valid ColdFire end to end.
 
 ---
 
-## The cave region this project chose is probably wrong — octabam says so
+## RESOLVED: the cave region is fine, and caves execute
+
+> **2026-09-13, confirmed on hardware.** `cave-boot-proof_DN2_1.11.syx` planted a
+> cave at `0x4028ea02` — in the constants region — hooked it into the boot path,
+> and had it overwrite the SETTINGS menu string in RAM. The device shows
+> **`CAVE RAN!!!`** while the image still contains `PERSONALIZE`, so only the
+> cave can have written it.
+>
+> **Caves execute. The constants region is executed by the running image.** The
+> mechanism, `patch/cave.py`, the assembler, the `jmp`+return hook form and
+> `dnfw cave scan`'s default region are all sound, and the section below — which
+> concluded the opposite — is **withdrawn**. It was reasoned from an experiment
+> that hooked a function later shown not to be on the path it was being observed
+> through, so it could not have worked either way.
+>
+> octabam's warning is real for the Octatrack and does not apply here. Kept
+> below because the comparison of the two projects' cave mechanics is still
+> worth having.
+
+## Withdrawn: the cave region this project chose is probably wrong
 
 **2026-09-13.** `cave-proof_DN2_1.11.syx` hooked `parameter_value_getter`'s
 single exit and added a constant to the returned value. Flashed, it changed
