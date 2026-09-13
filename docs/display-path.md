@@ -420,3 +420,48 @@ Two things this did *not* turn out to be, both of which were checked:
   assumption and fires 60,000–480,000 times in a window with six detents — it
   scales with run length, not with input. A count is what exposed that; the
   name would not have.
+
+## The bug, located: the accumulator has no reader
+
+Watching the per-encoder accumulator at `0x445a0dc4` with a write hook while
+turning ENCODER A twelve detents:
+
+```
+writers:  0x4011fc90  ×12        <- inside the driver
+readers:  0x4011fc7e  ×12        <- inside the driver
+values:   1, 2, 3, 4, 5, 6, 7, 8, ...
+```
+
+**Two program counters touch it and both are the driver's own**
+(`0x4011fc7e` reads the running total, `0x4011fc90` writes it back). The values
+climb monotonically and are **never cleared**. Nothing in the application ever
+reads the accumulated delta.
+
+So the shape is exact: the driver accumulates, and **the consumer that should
+drain the accumulator and apply it to the parameter never runs.** That is why
+the UI focuses the parameter and shows the value overlay — it learns *which*
+encoder was touched from the `queue_send` record, which does arrive — while the
+number never moves, because the amount lives in an accumulator with no reader.
+
+### The DTIM0 candidate is weakened by its own test
+
+The previous section proposed that the timestamp read from DTIM0's dead counter
+was the cause. **Tested and it is not sufficient:** driving `0xfc07000c` with a
+synthetic advancing counter through a full turn leaves the value at `0.00`,
+exactly as before. The timestamp is still stored from a counter that never
+moves, and that is still worth fixing, but it does not explain this.
+
+The accumulator having no reader does.
+
+### And it is not about missing preset data
+
+Worth ruling out explicitly, because "storage is not served" is digikit's known
+big gap and it is the obvious thing to blame. `ENCODER LEVEL` (channel 8) drives
+a **global**, not preset data — and it behaves identically: the label `LEV`
+switches to its value readout `100`, and then forty detents downward move
+nothing. A preset parameter and a global parameter fail the same way, so the
+loaded-preset state is not the variable.
+
+That also matches the device: a loaded preset lives in RAM as its own state, and
+a DN/DT keeps its current project across a power cycle, so nothing here needs
+the `+Drive` to have been read.
