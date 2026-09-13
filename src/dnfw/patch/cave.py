@@ -31,6 +31,7 @@ displaced instructions are straight-line moves and arithmetic.
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 
 from ..image.coldfire import LoadedImage
@@ -320,6 +321,56 @@ def suspect_arrays(runs: list[FreeRun], *, min_members: int = 3,
         else:
             i += 1
     return found
+
+
+# Instructions that load an absolute long address. Requiring one of these in
+# front of the constant is what separates a reference from a coincidence: a bare
+# 32-bit-window scan over a 3 MB image finds ~175 values that merely *look* like
+# addresses in a 0x74000-byte region, which is about one per free run — enough
+# to condemn everything and mean nothing.
+_LEA_ABS = {0x41F9 | (n << 9) for n in range(8)}       # lea 0x........,%aN
+_MOVEL_IMM = {0x203C | (n << 9) for n in range(8)}     # move.l #0x........,%dN
+_PEA_ABS = {0x4879}                                    # pea 0x........
+_ADDRESS_LOADS = _LEA_ABS | _MOVEL_IMM | _PEA_ABS
+
+
+def qualified_references(image: LoadedImage, lo: int, hi: int) -> dict[int, tuple[int, ...]]:
+    """Addresses in [lo, hi) that the code actually *loads*, and from where.
+
+    Complements `suspect_arrays`, and neither is sufficient alone — this is the
+    lesson of `0x40287ef6` (`docs/code-caves.md`):
+
+    * the array's **base** carries 9 qualified references, because the code
+      holds it in a register;
+    * its **other fifteen records carry none**, because they are reached by
+      `base + i * 1036`. A reference check alone would call them free.
+
+    So: references catch a base, stride catches the members, and a run needs to
+    pass both. Even then neither proves the bytes are unused at runtime — a
+    region reached by a computed pointer with no constant anywhere would pass
+    both checks. They rule out what can be ruled out statically.
+    """
+    if lo >= hi:
+        raise CaveError(f"empty range 0x{lo:08x}..0x{hi:08x}")
+    content = image.content
+    base = image.dest
+    found: dict[int, list[int]] = {}
+    for off in range(0, len(content) - 5, 2):
+        if struct.unpack_from(">H", content, off)[0] not in _ADDRESS_LOADS:
+            continue
+        value = struct.unpack_from(">I", content, off + 2)[0]
+        if lo <= value < hi:
+            found.setdefault(value, []).append(base + off)
+    return {value: tuple(sites) for value, sites in found.items()}
+
+
+def references_into(run: FreeRun, references: dict[int, tuple[int, ...]]) -> tuple[int, ...]:
+    """Every site that loads an address inside `run`."""
+    sites: list[int] = []
+    for value, at in references.items():
+        if run.address <= value < run.address + run.size:
+            sites.extend(at)
+    return tuple(sorted(sites))
 
 
 def displaced_stock(instruction_bytes: list[bytes], min_len: int = HOOK_BRANCH_LEN) -> bytes:

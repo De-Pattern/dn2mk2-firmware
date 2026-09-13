@@ -335,3 +335,56 @@ produce identical output — after the trace harness's stamps and the
 > only a *write hook* does. `Machine.install_mmio_trace` in digikit delivers
 > write events with `pc`, address and value, and works over any range — that is
 > the mechanism a real write map needs, not `--watch`.
+
+## Two static checks, and why neither is enough alone
+
+`dnfw cave scan` now applies both, and reports the runs that pass both.
+
+**1. Fixed stride** (`suspect_arrays`). A compiler pads to an alignment
+boundary; it does not emit a dozen equal gaps at a constant pitch.
+
+**2. Code references** (`qualified_references`). An address that the code
+actually *loads* — the operand of `lea 0x........,%aN`, `pea`, or
+`move.l #0x........,%dN`.
+
+The qualification matters as much as the check. A bare 32-bit-window scan over
+3 MB finds ~175 values that merely *look* like addresses in a `0x74000`-byte
+region — about one per free run, enough to condemn everything and mean nothing.
+Requiring a real address-loading opcode in front of the constant cuts that to
+4,426 genuine references across 2,950 distinct targets.
+
+**They are complementary, and the array proves it:**
+
+| | qualified references |
+|---|---|
+| `0x40287ef6` — the **base** | **9** — the code holds it in a register |
+| the other fifteen records | **0 or 1** — reached by `base + i*1036` |
+
+A reference check alone would call fifteen of the sixteen records free. A stride
+check alone would not explain *why*. References catch a base; stride catches the
+members.
+
+### Result on 1.11
+
+```
+43 free runs, 25,017 bytes            all zero, all offered before
+13 runs,       4,207 bytes            pass BOTH checks
+```
+
+**Six times less space than the `~29 KB of padding` the backlog claimed.**
+
+The classifier's own control: **`0x4028ea02` (170 bytes) passes both**, and it
+is the one cave region with a hardware-confirmed success — the boot proof ran
+from it and the device showed `CAVE RAN!!!`. A classifier that condemned it
+would be wrong about the only case we can check.
+
+Largest survivors: `0x402cf52c`, `0x402d0664`, `0x402dfa1c`, 896 bytes each.
+
+### What passing both still does not mean
+
+Not a blessing. These bytes are zero in the image, and **a region reached only
+through a computed pointer, with no constant anywhere, passes both checks.**
+Static analysis rules out what can be ruled out statically.
+
+The runtime proof needs a **write hook**, not a value watch — see the note above
+on why a `clrl` is invisible to `--watch`.

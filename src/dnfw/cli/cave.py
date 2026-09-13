@@ -76,14 +76,28 @@ def _scan(args) -> int:
         return 0
     suspects = cavelib.suspect_arrays(runs)
     flagged = {r.address for s in suspects for r in s.runs}
+    references = cavelib.qualified_references(image, int(args.start, 0), int(args.end, 0))
+    referenced = {r.address: cavelib.references_into(r, references) for r in runs}
 
     total = sum(r.size for r in runs)
-    safe_total = sum(r.size for r in runs if r.address not in flagged)
+    clean = [r for r in runs
+             if r.address not in flagged and not referenced[r.address]]
+
     print(f"{len(runs)} free run(s), {total:,} bytes total "
           "(candidates -- confirm against docs/memory-map.md):")
     for r in sorted(runs, key=lambda r: r.size, reverse=True):
-        mark = "  <- SUSPECT: part of a fixed-stride group" if r.address in flagged else ""
+        marks = []
+        if r.address in flagged:
+            marks.append("fixed-stride group")
+        if referenced[r.address]:
+            sites = referenced[r.address]
+            marks.append(f"{len(sites)} code reference(s), e.g. 0x{sites[0]:08x}")
+        mark = "  <- " + "; ".join(marks) if marks else ""
         print(f"  0x{r.address:08x}  {r.size:>6,} bytes{mark}")
+
+    print(f"\n{len(clean)} run(s), {sum(r.size for r in clean):,} bytes pass BOTH checks:")
+    for r in sorted(clean, key=lambda r: r.size, reverse=True)[:10]:
+        print(f"  0x{r.address:08x}  {r.size:>6,} bytes")
 
     if suspects:
         print(f"\n{len(suspects)} group(s) repeat at a fixed stride. A compiler pads to an")
@@ -91,14 +105,19 @@ def _scan(args) -> int:
         print("These are almost certainly ARRAYS shipped zeroed and written at runtime:")
         for s in suspects:
             print(f"  {s.describe()}")
-        print("\n  0x40287ef6 was exactly this -- 16 records of 1,036 bytes -- and caves put")
-        print("  there were overwritten while the keyboard was played, faulting the device")
-        print("  (docs/flashing.md, 2026-09-13). Do not use a flagged run.")
-        print(f"\n  unflagged: {safe_total:,} bytes of {total:,}")
+        print("\n  0x40287ef6 was exactly this -- 16 records of 1,036 bytes, and its base")
+        print("  0x40287f04 is loaded by a clearing loop at 0x4002a4d2 that steps 1,036")
+        print("  per record. Caves put there were overwritten while the keyboard was")
+        print("  played, faulting the device (docs/flashing.md, 2026-09-13).")
 
-    print("\nA zero run is a candidate, not a blessing: these bytes are zero in the")
-    print("image, which says nothing about what the firmware writes there at runtime.")
-    print("The only proof is watching it run -- see docs/emulator.md.")
+    print("\nThe two checks are complementary and neither is enough alone: that array's")
+    print("BASE carries 9 code references while its other fifteen records carry none,")
+    print("because they are reached by base + i*1036. References catch a base; stride")
+    print("catches the members.")
+    print("\nAnd passing both is still not a blessing. These bytes are zero in the image,")
+    print("and a region reached only through a computed pointer would pass both checks.")
+    print("The only proof is watching the firmware run -- docs/emulator.md, and note that")
+    print("a value watch cannot see a write of zero.")
     return 0
 
 
