@@ -138,3 +138,129 @@ The known choke points, where a hook is certainly needed:
 
 Plus whatever the storage path turns out to be, which is not yet scoped and is
 the one place where "LFO4's values do not survive a save" would be the failure.
+
+---
+
+## The 29 sites, classified by how their index is produced
+
+Static classification of every value-array access, by tracing what sets the index
+register in the 24 instructions before it. The question is which sites can ever
+see a slot ≥ 101.
+
+| Index comes from | Sites | Reach |
+|---|---|---|
+| **`param_index_in_page`** (`0x400dbcc4`, returns `record[id]+0x04`) | `0x40036536` `0x40037194` `0x40037260` `0x40037be8` `0x40038902` `0x4006414c` | **any parameter id — generic** |
+| **the changed-parameter list** (`Sound::updateMirror`) | `0x4004cb08` `0x4004cb74` | **generic** |
+| **a 0..100 fill loop** | `0x400440a2` | **generic by construction** |
+| **a bulk copy** (via `0x400dbc88`) | `0x4004c226` `0x4004c27c` | **generic** |
+| the inverse table (reverse copy, different access form) | `0x400dd25e` | **generic** |
+| small local bounds (`#4`, `#15`, `#16`, `#49`) or `is_lfo_param` | the `lea` sites and the remainder | narrow — need individual reading |
+
+**So the hook count is around eleven, not twenty-nine** — better than §13 feared,
+worse than a weekend.
+
+**And six of the eleven share one upstream function.** All the
+`param_index_in_page` sites take their index from a single accessor returning
+`record[id] + 0x04`. That is the natural place to *think* about the problem, even
+though hooking it alone does not solve it: changing what it returns just moves
+the out-of-bounds access rather than preventing it.
+
+## The simplification this suggests, and it may be the right design
+
+Every difficulty above comes from one decision: **that LFO4's values live inside
+the sound object**, which is full, boxed in, persisted, pooled ×128, and mirrored.
+
+They do not have to.
+
+LFO1–3 are *sound* parameters because they are stored in the preset. **A fourth
+LFO could instead be track-level** — its eight values held in a small array of
+our own, one set per track, never touching the sound object at all. Then:
+
+| | sound-slot design | track-level design |
+|---|---|---|
+| sound object | grows / needs 11 hooks | **untouched** |
+| slot space | needs 8 of 101 | **needs none** |
+| `ParameterSet` table | relocate + grow | **unchanged** |
+| forward/inverse maps | relocate + grow | **unchanged** |
+| hooks | ~11 | **~3** — mirror write, UI read, UI write |
+| persisted format | unchanged either way | unchanged |
+| **LFO4 saved per sound?** | yes | **no — per track** |
+
+The whole slot problem — §13, §6b, the 101-entry array, the machine-type byte —
+**disappears**, because slots were only ever the mechanism for getting values
+into the mirror, and a hook can put them there directly.
+
+**The cost is real and should be stated, not buried:** a track-level LFO4 would
+not be stored in a Sound preset, so loading a sound would not bring its LFO4
+settings with it. Whether that is an acceptable version-one is a judgement for
+the owner, not a technical question — and it is reversible later, since the
+sound-slot route stays open.
+
+**This is the decision the build now waits on**, and it is worth making before
+any code is written, because the two designs share almost nothing.
+
+---
+
+## The canary result: no cave has ever been proven to run
+
+**2026-09-13.** `lfo4-canary_DN2_1.11.syx` stamps `0x7700` — coarse byte **119** —
+into LFO1's `SPD`, a slot the owner's own saved sound proves is serialised. The
+owner flashed it, loaded an init sound, raised Amp Volume, saved, and read the
+slot back with DNX.
+
+**LFO1 `SPD` reads 112 — the init default. The canary is absent.**
+
+By the criterion set before the test, that is the branch which invalidates the
+approach: *the hook never runs, or this mirror is not what gets saved.*
+
+### Why it does not run
+
+`0x4004ca80` — the function this project hooked — has **no direct callers**. Its
+address appears exactly once in the whole image, as **data**, at `0x401de138`:
+
+```
+0x401de134: 0x40199768
+0x401de138: 0x4004ca80     <-- the hooked function
+0x401de13c: 0xffffffd8     <-- -40: a `this` adjustment
+0x401de140: 0x401ddd9c
+```
+
+That is a **vtable slot**, with the negative thunk offset of a multiple-
+inheritance adjustment beside it. So the function is a *virtual* override
+reached only through a dispatch that did not happen during an ordinary edit and
+save.
+
+The identification was not baseless — the prologue `lea %sp@(-64),%sp` and
+epilogue `lea %sp@(64),%sp` pair correctly, and the `Sound::updateMirror` string
+is pushed inside its bounds. But that string is pushed as an **argument to a
+logging call**, which names a function rather than proving we are in it, and the
+mangled symbol ends `EUlvE_` — a **lambda** inside `Sound::updateMirror`, not the
+method itself. Both signals were available before any firmware was built.
+
+### What this actually establishes
+
+**No code cave has ever been shown to execute on this device.** Gate E proved a
+*data* edit reaches the screen. Every cave built since has been verified
+offline — bytes diffed, disassembly read, integrity checks green — and **none of
+that tests whether the code runs.** Four builds were flashed on the assumption
+that it did.
+
+That is the gap, and it is upstream of every LFO4 question.
+
+### The next build should prove the mechanism, nothing else
+
+Hook a function that **certainly** runs and give it an effect impossible to
+misread. `parameter_value_getter` (`0x4006408a`) is the candidate: it is called
+whenever the UI draws a parameter, this project has already anchored it, and
+adding a constant to its return makes **every parameter on screen read wrong by
+the same amount**. Harmless, instantly visible, reverted by reflashing stock.
+
+- **Values shift** → caves run; the mechanism is sound; the LFO4 failures were
+  target-selection, and `updateMirror` simply needs finding properly.
+- **Nothing changes** → caves do not run as built, and the fault is in the hook
+  mechanism, the cave region, or `patch/cave.py` — which would explain every
+  silent result so far, including the two "confirmed" probes now withdrawn.
+
+**Do not build another LFO4 variant until that question is answered.** Three of
+this project's flashes have now been spent on an assumption that was never
+tested and could have been tested first.

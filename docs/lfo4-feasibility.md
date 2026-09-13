@@ -31,7 +31,11 @@ What remains is real but smaller: rewrite ten ERR records as LFO4's parameters
 ten ids, wire the `[MOD]` navigation to it, and confirm the **audio engine** can
 run a fourth LFO at all. The last is the true open gate; the rest is patch-shaped.
 
-> **The engine side is finished (2026-09-12), and it opened outward.** The audio
+> **WITHDRAWN 2026-09-12 — see `docs/engine-index-map.md` §15.** What follows was
+> written when the storage-offset map was mistaken for engine addressing. The
+> engine side is **not** finished; it is unknown again.
+>
+> ~~The engine side is finished (2026-09-12), and it opened outward.~~ The audio
 > engine **does** implement a fourth LFO — confirmed on hardware by
 > `scripts/build_lfo4_probe.py`, which re-pointed LFO3 at the engine's reserved
 > lane and heard it still modulate (`docs/engine-index-map.md` §11,
