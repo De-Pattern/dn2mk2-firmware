@@ -730,3 +730,78 @@ fed" or "what is the layout of the 960 bytes". It is now: *what are the five
 LFO means a sixth sub-object, the block has to grow by 152 bytes and whatever
 bounds the five has to change — and that is a question with an address to look
 at rather than a space to search.
+
+## The count is not a bound. The five are members constructed by name.
+
+This is the question `docs/ROADMAP.md` says everything else follows from, asked
+of the engine side and answered:
+
+> Find the code that indexes the grid and look at the `3`: **a loop bound or
+> table length → a small change; objects constructed by name, with unrolled
+> parameter tables → large.**
+
+**It is the large branch.**
+
+`0x401b5054` is the 152-byte sub-object's constructor — it installs vtable
+pointers (`%a2@(-12)` is the classic multiple-inheritance offset-to-top) and
+clears the fields at `+0x0c` and `+0x0d`, the flag byte the write watch found.
+It runs **720 times**, all from one call site, inside `0x400f582a`.
+
+`0x400f582a` in turn runs **720 times from exactly five distinct return
+addresses, 144 each**:
+
+```
+0x4004c90e   144
+0x4004c916   144
+0x4004c92a   144
+0x4004c932   144
+0x4004c93a   144
+```
+
+Five call sites, not one site taken five times. And the code around them is
+unrolled by hand:
+
+```
+0x4004c89c  movel %a2,%d7 ;  addil #328,%d7     ; 0x148
+0x4004c8ba  movel %a2,%d6 ;  addil #480,%d6     ; 0x1e0
+0x4004c8de  movel %a2,%d5 ;  addil #632,%d5     ; 0x278
+0x4004c91c  movel %a2,%d4 ;  addil #784,%d4     ; 0x310
+            ...           ;  %a4                ; 0xb0
+0x4004c90c  jsr %a5@      ; one call per register
+0x4004c914  jsr %a5@
+0x4004c928  jsr %a5@
+0x4004c930  jsr %a5@
+0x4004c938  jsr %a5@
+```
+
+**Every one of those immediates is an offset the runtime write-watch found
+independently** — `0xb0`, `0x148`, `0x1e0`, `0x278`, `0x310`. One instrument
+watched memory being written and derived the offsets; the other read the
+constructor and found them as literals. Neither was adjusted to fit the other.
+
+### What that costs a sixth sub-object
+
+There is no `5` anywhere to increment. A sixth means:
+
+- a **sixth register** loaded with `base + 936`, and a **sixth `jsr`**, spliced
+  into a constructor that has no room to grow in place;
+- the containing object grows by **152 bytes**, and it exists **144 times**;
+- the engine modulation block grows past 960 bytes per slot, ×128 slots, which
+  moves `0x4004dc62`'s `#960` stride and its `#148864` loop bound;
+- every hard-coded offset after the insertion point shifts, and they are
+  immediates scattered across the constructor rather than one table.
+
+That is a cave-and-relocate job on a live object graph, not an immediate edit.
+
+### The honest caveat, unchanged
+
+**None of this says the five are LFOs.** It says there are five of one type,
+built by name. If they turn out to be three LFOs and two envelopes, the above is
+what a fourth LFO costs on the engine side; if they are something else, the cost
+belongs to whatever they are. That identification still needs a parameter whose
+id is known to be correlated with one sub-object — which needs a working
+parameter edit, which the encoder bug blocks.
+
+What has changed is that the question is now **"which five, and is the DSP side
+willing"**, with the control-side cost already measured, rather than an open
+search.
