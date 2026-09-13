@@ -125,6 +125,29 @@ address DDR (the image reserves 5.4 MB at `0x80000000`, almost all fill, which i
 where a large working set would live), but that is a guess and is recorded as
 one. The `0x1c` result does not transfer to it by assumption.
 
+## 3. Data operands use a different rule, and it is byte-counted
+
+**Added 2026-09-14.** The two mappings above are for *execution* addresses —
+what a cjump target means. They are not what a data operand means, and assuming
+they were is why the first search for string references found **zero hits in
+6.4 MB**.
+
+```
+operand bytes = LE(hi) || LE(lo)   of   (load_address - 0x28000000)
+```
+
+Word-swapped, because a 48-bit instruction is assembled MSB-word-first, so a
+32-bit operand's halves sit in memory in the opposite order to a plain
+little-endian long. **Byte-counted, not word-counted** — unlike code addresses.
+
+All 105 references to the image's eight landmark strings resolve under this rule
+and land inside the code regions; nineteen other candidate encodings produce
+nothing. The counts are semantically right (`queue.c` 45, `tasks.c` 40,
+`Audio Task` exactly 1). Evidence and method: `docs/sharc-reading.md` §2.
+
+This is what makes the L1/L2 split readable: every FreeRTOS-named function is in
+**L1**, and the application — including whatever makes sound — is in **L2**.
+
 ## What this is for
 
 A disassembler pointed at 240 KB of identified code with a working address
