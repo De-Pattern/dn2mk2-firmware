@@ -74,11 +74,31 @@ def _scan(args) -> int:
         print(f"no free run of {args.min}+ bytes in "
               f"0x{int(args.start, 0):08x}..0x{int(args.end, 0):08x}")
         return 0
+    suspects = cavelib.suspect_arrays(runs)
+    flagged = {r.address for s in suspects for r in s.runs}
+
     total = sum(r.size for r in runs)
+    safe_total = sum(r.size for r in runs if r.address not in flagged)
     print(f"{len(runs)} free run(s), {total:,} bytes total "
           "(candidates -- confirm against docs/memory-map.md):")
     for r in sorted(runs, key=lambda r: r.size, reverse=True):
-        print(f"  0x{r.address:08x}  {r.size:>6,} bytes")
+        mark = "  <- SUSPECT: part of a fixed-stride group" if r.address in flagged else ""
+        print(f"  0x{r.address:08x}  {r.size:>6,} bytes{mark}")
+
+    if suspects:
+        print(f"\n{len(suspects)} group(s) repeat at a fixed stride. A compiler pads to an")
+        print("alignment boundary; it does not emit many equal gaps at a constant pitch.")
+        print("These are almost certainly ARRAYS shipped zeroed and written at runtime:")
+        for s in suspects:
+            print(f"  {s.describe()}")
+        print("\n  0x40287ef6 was exactly this -- 16 records of 1,036 bytes -- and caves put")
+        print("  there were overwritten while the keyboard was played, faulting the device")
+        print("  (docs/flashing.md, 2026-09-13). Do not use a flagged run.")
+        print(f"\n  unflagged: {safe_total:,} bytes of {total:,}")
+
+    print("\nA zero run is a candidate, not a blessing: these bytes are zero in the")
+    print("image, which says nothing about what the firmware writes there at runtime.")
+    print("The only proof is watching it run -- see docs/emulator.md.")
     return 0
 
 

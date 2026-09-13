@@ -145,3 +145,53 @@ def test_displaced_stock_raises_when_too_few_bytes():
 
     with pytest.raises(CaveError, match="need 6"):
         displaced_stock([b"\x4e\x75"], min_len=6)
+
+
+# --- fixed-stride groups are arrays, not padding --------------------------
+#
+# Added 2026-09-13. Caves were placed at 0x40287ef6 because find_free_runs
+# offered it; it is one record of a 16-element array the firmware writes at
+# runtime, and the device took an address error. See docs/flashing.md.
+
+from dnfw.patch.cave import FreeRun, suspect_arrays
+
+
+def test_a_fixed_stride_group_is_flagged():
+    runs = [FreeRun(address=0x1000 + i * 0x400, size=0x3F0) for i in range(6)]
+    suspects = suspect_arrays(runs)
+    assert len(suspects) == 1
+    assert len(suspects[0].runs) == 6
+    assert suspects[0].stride == 0x400
+
+
+def test_scattered_runs_are_not_flagged():
+    runs = [FreeRun(address=a, size=64) for a in (0x1000, 0x1900, 0x4400, 0x9110)]
+    assert suspect_arrays(runs) == []
+
+
+def test_two_runs_alone_are_not_a_group():
+    # Any two addresses have a stride; it takes a third to be a pattern.
+    runs = [FreeRun(address=0x1000, size=64), FreeRun(address=0x1400, size=64)]
+    assert suspect_arrays(runs) == []
+
+
+def test_a_slightly_longer_first_record_is_still_caught():
+    """The case that actually bit us, and that an exact-stride rule misses.
+
+    0x40287ef6 is 12 bytes longer than its fifteen siblings, so its gap is
+    0x418 against their 0x40c -- 2.9% out. An exact rule flags the fifteen and
+    leaves the one caves were put in unflagged.
+    """
+    runs = [FreeRun(address=0x40287EF6, size=1047)]
+    runs += [FreeRun(address=0x4028830E + i * 0x40C, size=1035) for i in range(15)]
+    suspects = suspect_arrays(runs)
+    assert len(suspects) == 1
+    assert suspects[0].runs[0].address == 0x40287EF6, "the crashing run must be flagged"
+    assert len(suspects[0].runs) == 16
+
+
+def test_a_gap_well_outside_tolerance_breaks_the_group():
+    runs = [FreeRun(address=a, size=64) for a in (0x1000, 0x1400, 0x1800, 0x3000)]
+    suspects = suspect_arrays(runs)
+    assert len(suspects) == 1
+    assert len(suspects[0].runs) == 3
