@@ -169,3 +169,86 @@ splices payload → displaced → return-jump. Beyond the unit tests, the whole
 detour was assembled, applied, and disassembled back through the reference
 objdump: the hook read as `jmp cave`, and the cave as payload, the replayed
 stock instruction, and `jmp` back — valid ColdFire end to end.
+
+---
+
+## The cave region this project chose is probably wrong — octabam says so
+
+**2026-09-13.** `cave-proof_DN2_1.11.syx` hooked `parameter_value_getter`'s
+single exit and added a constant to the returned value. Flashed, it changed
+**nothing**: seven parameters across three pages all read their stock defaults,
+checked against the firmware's own record fields.
+
+The image was correct. After a full encode/decode round trip the hook decodes as
+`jmp 0x4028ea02` and the cave holds `addi.l #4096,%d0`, the replayed `moveml` and
+the jump back. **The bytes are right and the code has no effect.**
+
+### octabam hit this and named it
+
+`00_Resources/01_Reference/octabam/docs/firmware/DSP.md` §R48–R49, on a cave of
+theirs that misbehaved:
+
+> the cause is elsewhere in the hook (context, stack, or **the cave region not
+> being what the running image executes**) and the next step is a cave that does
+> nothing but replay the displaced instructions.
+
+They had already met this failure mode and written it down. **We should have read
+their mechanism before building ours** — the reuse rule in the plan exists for
+exactly this, and four flashes were spent not following it.
+
+### Where they put caves, and where we put ours
+
+| | octabam (Octatrack) | this project (DN2) |
+|---|---|---|
+| cave address | `0x400d6b00`–`0x400d7c3c`, ~4.4 KB | `0x4028ea02` |
+| region | **inside the code region** | **the read-only constants region** |
+| hook form | `jsr cave` + `nop`s, cave `rts`es back | `jmp cave`, cave jumps back |
+| assembler | `m68k-elf-as -mcpu=5407` | `m68k-linux-gnu-as -mcpu=cfv4e` |
+
+Their caves live where code lives. Ours lives in data. An MCF5441x has an MMU,
+so a non-executable mapping over the constants region would produce exactly what
+we see.
+
+**And `dnfw cave scan` bakes the mistake in**: it defaults to
+`0x4026e000..0x402e2000`, a range taken from `docs/memory-map.md`'s
+"unreferenced padding runs". That range was chosen because the bytes are *free*.
+Nothing ever checked that it is *executed*.
+
+### The DN2 has no equivalent space, and that is a real structural difference
+
+Scanning the whole of MAIN OS for zero runs ≥ 24 bytes: **585 runs, and the
+lowest-addressed sits at `0x401d06c8`** — the code/rodata boundary itself. There
+is **not one free run of 24 bytes anywhere inside the DN2's code region.**
+
+So the octabam recipe cannot simply be copied. The options, in order of appeal:
+
+1. **Establish whether the constants region is executable at all.** If it is, the
+   fault is elsewhere and cave placement is fine.
+2. **Repurpose dead code inside the code region** — `docs/ideas-backlog.md` §1's
+   "sacrifice a feature for room", which now has a second and better reason to
+   exist: not space, but *executability*.
+3. **Adopt octabam's `jsr`/`rts` hook form**, which is their proven shape and
+   costs nothing to match.
+
+### First, though: a test that needs no cave
+
+`scripts/build_inline_proof.py` replaces the value getter's own return-value load
+in place, same length:
+
+```
+4006414c:  mvsw %a0@(14,%d2:l:2),%d0    7170 2a14
+        -> moveq #127,%d0 ; nop         707f 4e71
+```
+
+Four bytes for four, the same class of edit as Gate E and the mask flips — both
+confirmed working on this device. `127 >> 8 = 0`, so every parameter drawn
+through this function should read **0**; `AMP VOL` falls from 110 to 0.
+
+- **values collapse** → the hook site is reached, and **the cave is what fails**;
+  the work is placement, per the options above.
+- **values unchanged** → the hook site is never reached, and the anchor for
+  `parameter_value_getter` in `docs/version-anchors.md` is wrong about what that
+  function does.
+
+One of those says the cave mechanism is sound; the other says an anchor is wrong.
+Neither is guessable from here.
