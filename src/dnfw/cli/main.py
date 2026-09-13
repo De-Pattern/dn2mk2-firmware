@@ -14,6 +14,7 @@ from . import (
     diff,
     disasm,
     extract,
+    fn,
     inspect,
     params,
     patch,
@@ -23,7 +24,8 @@ from . import (
 )
 
 COMMANDS = (
-    inspect, extract, build, patch, diff, symbols, symbolmap, params, disasm, validate_disasm, cave,
+    inspect, extract, build, patch, diff, symbols, symbolmap, params, disasm, validate_disasm,
+    cave, fn,
 )
 
 
