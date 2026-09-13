@@ -203,6 +203,48 @@ the author's *first* possibility, and it means any VISA decoder needs context
 (surrounding boundaries, or a third word's semantics) rather than a better
 table.
 
+### The 792 spans with no solution, investigated
+
+Those failures were the first thing to explain, because if they meant the
+boundaries were unreliable the contradictions above would be manufactured rather
+than found. **Measured 2026-09-14 with `--why`:**
+
+```
+ran into an encoding with NO length rule        14
+every assignment overshoots the boundary       778
+both, on different branches                      0
+```
+
+So it is almost entirely *overshoot*: starting at a known boundary, no
+combination of lengths lands exactly on the next one. Three candidate causes
+were tested.
+
+**Not false-positive boundaries sitting too close.** A cjump is 6 bytes, so a
+boundary fewer than 6 bytes after a cjump site would prove one of the two is not
+a real instruction start. There are **zero** such cases. The smallest gaps in
+the whole population are 2 spans of 4 bytes, 1 of 8 and 6 of 10 — all legal.
+
+**Not a mis-decoded cjump.** `decode_length_multiword(0x1804)` returns 48,
+correctly, so the walk does not start a cjump span misaligned.
+
+**Not systematic inter-function padding.** If functions were aligned, the walk
+would legitimately stop short of the next entry. Entry addresses mod 8 are
+`147 / 87 / 132 / 95` — a mild bias toward 0 and 4, nowhere near the
+concentration alignment padding would produce.
+
+**So the cause is not yet established.** What remains, in order of likelihood:
+length rules that are wrong outside the ambiguous group; inline literal pools
+between functions; and occasional bad boundaries. That is stated as an open
+question rather than resolved by preference, and it is the first thing to settle
+before the constraint solver is turned into a decoder.
+
+**What it does not threaten.** The contradictions in §6 are drawn *only* from
+spans that solved exactly, and no-solution spans contribute nothing to them. The
+residual risk is narrower and worth naming: a span could solve exactly and still
+be read wrongly, if bytes that are not instructions happened to decode to
+lengths summing to the right total. Five independent pairs make that unlikely;
+one hand-checked disassembly of any of the listed addresses would settle it.
+
 ### What would overturn this
 
 A false-positive cjump site would manufacture a contradiction by constraining a

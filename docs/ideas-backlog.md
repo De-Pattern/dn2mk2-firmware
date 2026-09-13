@@ -768,7 +768,11 @@ ADSP-21569**. No instruction, table layout or algorithm transfers. What we have
 is the tooling that makes patching possible and the method — which is real, and
 is why §"scenes" is tractable — but it is not the feature.
 
-### The DN1 changes the answer for Tiers B and C
+### The DN1 changes the answer for Tiers B and C — **parked, after the PCM work**
+
+> **Ordering set by the owner, 2026-09-14: do not develop this yet.** It is
+> recorded because it reorders the *eventual* queue, not because it is next. The
+> PCM work (§3) comes first. Nothing below has been started.
 
 **`docs/dn1-dsp-comparison.md`: the Digitone 1 runs its audio DSP on the
 ColdFire.** 613 multiply-accumulates against the DN2's 50, in four-accumulator
