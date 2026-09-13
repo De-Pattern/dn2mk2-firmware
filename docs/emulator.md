@@ -382,3 +382,88 @@ A cold boot plays no notes, turns no encoder and loads no project. The device
 faulted *while the keyboard was played*. So a candidate region with no writes has
 earned exactly one sentence — **"not written during cold boot"** — and the
 harness prints that caveat next to its own table rather than leaving it here.
+
+---
+
+# The call map: the run that settled what four flashes could not
+
+`scripts/call_map.py`, against digikit **`ec32de1`**, on Digitone II 1.11.
+
+`docs/trace-harness.md` spent a flash asking eleven functions "did you run?" and
+got back two marks, nine blanks, and **no way to tell two opposite readings
+apart** — because a stamp written once at boot and a stamp rewritten constantly
+look identical. The emulator does not have that problem: a call **count** never
+travels through the display.
+
+Resumed from the 400M rung, 209M instructions, UI alive:
+`param_index_in_page` **2,798 calls** across ten separate slices,
+`parameter_value_getter` **3,031**, pip consumer B **2,097**. The nine blank
+columns did not mean those functions never run. Full table and what stays open:
+`docs/trace-harness.md`.
+
+**It cost a script and 33 seconds.** The same question had already cost four
+flashed images and a week, and the emulator had been sitting in this repository
+for a day. The instrument to reach for first is the one whose negative result
+means something.
+
+## The rung is a phase — and the tool already knew which one
+
+digikit's boot ladder snapshots at 60/120/200/280/400M instructions, and
+`emu.run.usable_rung()` picks between them **by inspecting each snapshot's
+state**, because two firmwares do not reach the same place at the same count.
+
+On 1.11, rendering each rung with digikit's own `emu.panel` for 60M
+instructions:
+
+| rung | frames flushed | distinct |
+|---|---|---|
+| 120M | 0 | 0 |
+| 200M | 0 | 0 |
+| 280M | 0 | 0 |
+| **400M** | **173** | **109** |
+
+120M–280M never compose a frame and leave `timers_held` true: the intro never
+hands over. Only 400M draws.
+
+**`usable_rung()` returns 400M for this build.** It was right; the error was
+mine. Its docstring illustrates the idea with *"on Digitone only 400M is
+disqualified, and it gets 280M"* — a **1.10E** observation — and I read that
+example as a rule for Digitones, hand-picked 280M, and spent two full runs
+watching a dead machine report "nine silent functions".
+
+> **An example in a docstring is not a specification.** The check cost one line
+> (`usable_rung(prefix, default)`) and would have replaced both runs.
+
+This was nearly written up as a digikit bug and a PR sent for it. It is not a
+bug. Verifying the claim before filing it is what stopped a wrong report going
+upstream — and the same claim had already been written into this file, a commit
+message and a pull request body before the check was run.
+
+## Two traps inside digikit that a harness must not step in
+
+**`setPixel` is not the screen.** `longrun.build(bitmap=True, on_pixel=...)`
+intercepts `Bitmap::setPixel`, which is the **intro's** drawing primitive. The
+main OS composes text and widgets straight into a framebuffer and never calls
+it, so `setPixel` counts near zero while a complete UI renders. digikit's
+`emu/panel.py` says this cost its author a session. The real signal is
+`panel_diff`, the routine that diffs the two 1024-byte buffers and flushes the
+changed runs — entering it means a frame was composed. `call_map.py` counts
+frames there, after first being written the wrong way.
+
+**The timers are not optional.** PIT2 spawns the OS tasks and DMA timer 3 is the
+30 Hz tick whose ISR is the only thing at boot that posts to the queue the main
+application task blocks on. Without them that task makes one pass through its
+message loop and waits forever — a machine that is running and doing nothing,
+whose every zero belongs to the harness rather than the firmware.
+
+## A control has to be asked for in the phase it lives in
+
+The first version of `call_map.py` required both hardware-marked probes, `R` and
+`E`, in every run. A post-boot window then printed **"control silent"** while
+three probes were firing thousands of times, because `R` is boot-phase: from the
+280M rung it fires 697 times between 5M and 21M and never again.
+
+Demanding a boot probe in a post-boot window is demanding a negative. That is
+the same defect as a watch that cannot produce a different answer per outcome —
+this time wearing a control's clothes. The controls now carry their phase, and
+silence in the wrong window is reported as expected rather than as blindness.

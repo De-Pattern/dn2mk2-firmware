@@ -15,17 +15,32 @@ build, and what is already settled.
 | **C** | A rebuild with recompressed sections verifies, signature included | **done** |
 | **F** | The disassembler in use agrees with `objdump -m m68k:cfv4e` | **done** — Ghidra passes, Capstone fails |
 | **Recovery** | The Early Start-up Menu reflashes stock firmware | **done 2026-09-08** — the way back is proven |
-| **D** | A recompressed but unchanged image boots | next — unblocked |
-| **E** | A patch we wrote is visible on the instrument | not started — patch is written and builds |
+| **D** | A recompressed but unchanged image boots | **done 2026-09-11** — boots, behaves as stock |
+| **E** | A patch we wrote is visible on the instrument | **done 2026-09-11** — `SETTINGS` shows `DNFW ALIVE!` |
 
 A, B, C and F are `pytest`. Recovery, D and E need the instrument; the order
 and the reasoning are in `docs/flashing.md`.
+
+**Phase 1 is closed.** Both gates passed through the normal update path, and the
+recovery route — which stalled at ~80% and looked for a while like an image
+defect — was diagnosed as **the MIDI link, not the image**: stock 1.10E stalled
+the same way, and stock 1.11 flashed through recovery cleanly over a fixed link
+(`docs/flashing.md`). Two further things have been proved on the instrument
+since, and they matter more to Phase 2 than the gates do:
+
+- **Code caves execute.** A cave hooked into the boot path wrote `CAVE RAN!!!`
+  over the SETTINGS string in RAM while the image still read `PERSONALIZE`
+  (`docs/code-caves.md`). Injection works; every silent build before it was
+  target selection, not mechanism.
+- **`parameter_value_getter` is not the display path.** Forcing its return
+  changed nothing on screen (`docs/version-anchors.md`). An address confirmed by
+  an instruction pattern is not a confirmed *role*, and only the role justifies
+  a hook.
 
 ### What is left in Phase 1
 
 - Run `dnfw symbols --ghidra` against a Ghidra project to seed the 454 RTTI
   names, and start reading `11LfoPageView`.
-- The hardware sequence.
 
 The reference decoder is `m68k-linux-gnu-objdump` from Ubuntu's
 `binutils-m68k-linux-gnu`, reached through WSL. **Ghidra 12.1.3 with the
@@ -63,10 +78,27 @@ sequence.
 
 The real constraint is that one LFO4 block is shared by every track type that
 has LFOs, so its eight ids must be free in all of them at once. That points at
-`100-107`. It stays arithmetic until we know what consumes the table and
-whether the id is bounded -- and **nothing in MAIN OS holds the table's
-address**, so the consumer is still unidentified. `dnfw params --ids` reports
-the space; `docs/lfo-parameters.md` carries the evidence.
+`100-107`. `dnfw params --ids` reports the space; `docs/lfo-parameters.md`
+carries the evidence.
+
+> **[WRONG — corrected 2026-09-13]** This paragraph ended: *"It stays arithmetic
+> until we know what consumes the table and whether the id is bounded — and
+> **nothing in MAIN OS holds the table's address**, so the consumer is still
+> unidentified."*
+>
+> **The consumer is identified** — `docs/parameter-table-consumer.md`. It is a
+> family of ~50 accessors indexing `record[id] = base + id*60`, and the bound
+> *is* known: `id < 0x141` (321). The reasoning is kept because the mistake
+> recurs. "Nothing holds its address" was true of the search that was run and
+> false of the image: the accessors reach the table by `lea`, and on 1.11 there
+> are **44 `lea` sites and 53 four-byte references** to the base
+> (`docs/version-anchors.md`). A scan that found none was a scan with a bug,
+> not an image without references — the same shape as the regex that reported
+> "0 source paths in section 7" (`docs/sharc-image.md`).
+>
+> **And the answer moved the problem rather than removing it.** The table's
+> length is not a stored count: the bound is an immediate replicated across
+> **~43 sites**, all of which must agree. That is what growing the table costs.
 
 The original framing, kept because it is still the right question to ask of the
 *engine* as opposed to the table:
@@ -78,6 +110,26 @@ Find the code that indexes the `30 + 8*p + 2*lfo` grid and look at the `3`:
 
 Everything else follows from that answer, so nothing should be designed before
 it exists.
+
+### The reachability question is answered, and the display path is next
+
+**2026-09-13.** `param_index_in_page`, `parameter_value_getter` and one of the
+page-view consumers all run **constantly** during normal UI operation — 2,798,
+3,031 and 2,097 calls in a 209M-instruction window with the UI drawing
+(`scripts/call_map.py`, `docs/trace-harness.md`). The hardware trace's nine
+blank columns meant nothing about those functions; the readout was frozen.
+
+So the parameter path is where its 34 callers always said it was, and the two
+functions LFO4 must hook are still the ones to find: **the display path** and
+**the engine-feed path**. `parameter_value_getter` is confirmed *not* the
+display path — forcing its return changed nothing on screen — but it is now
+confirmed to *run*, which makes it a live lead rather than a dead one.
+
+`M` and `S` — the `updateMirror` lambda and its enclosing function — stayed
+silent, and that is **not** a finding: digikit models no input, and the mirror
+path is exactly what an encoder drives. Ask that question by hooking
+`panel_diff` and walking back, or by teaching the emulator input; do not read it
+off an undriven boot.
 
 ### Where to start reading
 
@@ -109,5 +161,15 @@ derived independently, from hardware, by a different tool.
 - The Digitone 1. Its firmware is unsigned, which makes the tooling side
   easier, but its flash and RAM are likely tighter and the feature question is
   the same one over again.
-- What `blob` holds (833 KB on the DN2). Relevant if LFO4 needs a UI asset.
+- ~~What `blob` holds (833 KB on the DN2). Relevant if LFO4 needs a UI asset.~~
+  **Answered 2026-09-13:** `blob` (section 7) is the **SHARC program**, an ADI
+  boot stream — `docs/sharc-image.md`. ~240 KB of it is code, and its execution
+  addresses are mapped for one of two spaces — `docs/sharc-code-map.md`. It is
+  not a UI asset store, so this no longer bears on LFO4; it bears on everything
+  that touches audio, which is why `docs/ideas-backlog.md` §7 is largely
+  answered and §8 (FX machines, issue #49) is now askable.
+- **Reading a SHARC instruction.** Nothing in this repository decodes SHARC+
+  VISA, and that is now the binding constraint on all DSP-side work rather than
+  a hypothetical one. digikit has a disassembler; we have the code map to aim it
+  with.
 - Whether the bootloader checks the HMAC trailer at all.

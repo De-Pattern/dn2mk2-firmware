@@ -195,14 +195,71 @@ constantly" leave the same mark. That is the design flaw, and it is the same
 shape as the mistake this harness was built to stop: a test whose positive and
 negative branches are not actually distinguishable.
 
-### The fix: a counter, not a stamp
+### ANSWERED 2026-09-13 — it is **reading B**, and no flash was needed
+
+The question was put to the emulator instead of the instrument, against digikit
+`ec32de1`, by `scripts/call_map.py`. Hooking the same eleven addresses and
+**counting entries** removes the ambiguity at its root: a count does not travel
+through the display, so "ran once at boot" and "runs constantly" are no longer
+the same observation.
+
+Resumed from the 400M boot rung of Digitone II 1.11, 209M instructions, UI
+alive (409 frames composed):
+
+| col | mark | site | calls | slices active | window |
+|---|---|---|---|---|---|
+| 0 | `P` | `param_index_in_page` | **2,798** | 10 of 20 | 119M–209M |
+| 1 | `G` | `parameter_value_getter` | **3,031** | 10 of 20 | 119M–209M |
+| 9 | `D` | pip consumer B | **2,097** | 10 of 20 | 119M–209M |
+| 10 | `E` | pip consumer C | 2,048 | 1 | 109M |
+| 2,3,5,6,7,8 | `M S F B C A` | — | 0 | — | — |
+| 4 | `R` | reverse copy | 0 here — **697** from the 280M rung, 5M–21M | | boot only |
+
+**`param_index_in_page` runs constantly**, in ten separate slices, exactly as
+its 34 direct callers always predicted. So **reading A is dead**: the nine blank
+columns on the instrument never meant those functions do not run. The board was
+frozen, late writes are not displayed, and every blank column in the hardware
+row is uninterpretable — reading B.
+
+That also retires the "large finding" the blank row appeared to offer. Nothing
+was learnt about the DN2's parameter path from that flash; what was learnt is
+that the readout was broken.
+
+**The rung had to be the right one, and picking it by hand cost two runs.**
+120M–280M never compose a frame on 1.11; only 400M does. digikit's
+`usable_rung()` already returns 400M for this build — the mistake was reading an
+example in its docstring as a rule instead of calling the function
+(`docs/emulator.md`).
+
+**`R` is boot-phase**, which the first version of this harness got wrong in its
+own control: it demanded `R` in a post-boot window and reported "control silent"
+while three probes were firing thousands of times. A control has to be asked for
+in the phase it lives in.
+
+**What stays open.** `M` and `S` — the `updateMirror` lambda and its enclosing
+function — do not fire, and neither do `F B C A`. That is *not* yet a finding:
+digikit models **no input**, so nothing reached only by turning an encoder or
+pressing a key can appear in an undriven run. Those zeros mean "not entered
+during an undriven boot", and the mirror path is precisely what an encoder
+would drive.
+
+### The fix that was built first: a counter, not a stamp
 
 `scripts/build_trace_liveness.py` — three hooks, sha `6ca8e066b714e994`. The two
 probes known to fire each **advance** a second column, `0`..`7`, every time they
 run. Digits that move mean late writes reach the screen (world A); digits that
 freeze mean only boot-time writes are displayed (world B).
 
-_Awaiting hardware._
+**Superseded before it was flashed, and it should not be.** The emulator
+answered the same question for the cost of a script and no hardware at all, and
+answered it with counts rather than one bit per column. The build is kept
+because the mechanism is sound and a future question may genuinely need the
+instrument; this was not one of them.
+
+**The lesson, and it is the cheapest one on this page:** "does this function
+run?" never needed the device. It needed an emulator that boots the image —
+which this project had for a day before thinking to point it at the question
+four flashes had failed to answer.
 
 | col | mark | site | probe | asks |
 |---|---|---|---|---|
