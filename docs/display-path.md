@@ -805,3 +805,56 @@ parameter edit, which the encoder bug blocks.
 What has changed is that the question is now **"which five, and is the DSP side
 willing"**, with the control-side cost already measured, rather than an open
 search.
+
+## What the five actually are — and the lead this closes
+
+The constructor passes a literal the type names itself with:
+
+```
+0x400f5872  pea 0x401fffb4        ; a pointer table
+0x400f5788  pea 0x4021e7fa        ; -> "SoundModConfParam"
+```
+
+and the string pool carries the family around it: `12SoundModConf`,
+`9ModConfig`, `ModSetupView`, `ModDestListView`, `GroupedModDestListView`,
+`ParameterPageView::showAndUpdateModDestList`.
+
+So the five 152-byte objects are **`SoundModConfParam` — the MODULATION SETUP
+configuration**, not LFO state.
+
+### This is a lead this project has already closed, reached from the other end
+
+`docs/lfo4-feasibility.md` closed `MOD4` / `modTarget_t[4]` months of reasoning
+ago with a device fact from the owner: *"For each modulation input (velocity,
+mod wheel, etc) there are 4 modulation destinations."* That made `MOD1..MOD4`
+the four **destination slots of one modulation source**, and not a dormant
+fourth LFO.
+
+Five `SoundModConfParam` per sound sits exactly where the modulation **inputs**
+would — the sources that each own those four destinations. Two independent
+routes, one static from an RTTI array and one dynamic from the engine feed,
+arriving at the same subsystem. The earlier one already ruled it out for LFO4.
+
+### So the correction to this page
+
+Two paragraphs above said *"a fourth LFO has to appear inside that 960-byte
+block"* and framed the open question as *"what are the five, and is their count
+a bound"*. **The first is wrong and the second is answered.** The block is
+modulation *configuration*, and a fourth LFO does not have to live in it — an
+LFO is a modulation **source generator**, and nothing here generates anything.
+
+What survives, and it is not nothing:
+
+- The **engine-feed path is mapped**: `0x4003e324` → `0x4004dc62`, 128 slots ×
+  960 bytes at `object + 0x4F358`, a 48-byte header, entry stride 1163.
+  Confirmed statically and at runtime.
+- **The five are members constructed by name at hard-coded immediates**, not a
+  bounded array — so *if* LFO4 ever needs a slot in a structure shaped like this
+  one, the cost measured above is what it costs.
+- **`SoundModConfParam` is identified by the firmware's own name**, not by
+  inference, which is the standard this project failed twice before reaching.
+
+And the standing question is unchanged and still unanswered: **where the LFO
+generators live.** Nothing found today generates a waveform, which is consistent
+with the generators being SHARC-side — `docs/sharc-code-map.md` — and with the
+DSP hunt in `docs/ideas-backlog.md` §7 still being the binding constraint.
