@@ -98,6 +98,43 @@ tables, and all three are mathematics rather than pointers:
 Arithmetic progressions and a saturation curve — tuning/phase increments and a
 transfer function, not a sample catalogue.
 
+## 4b. Two corrections to §2 and §3, both mine
+
+**The owner states as fact that the transients are samples — Elektron said so.**
+That is device knowledge this analysis did not have, and it makes a null result
+an instrument problem rather than an answer. Re-examining, the instrument was
+wrong twice.
+
+**The zero-crossing test was calibrated for the wrong kind of audio.** It
+required `zcr >= 0.05`. A single-cycle wavetable over a 256-sample window has
+`zcr ≈ 0.008`, and a low-frequency drum thump is no better. So §2's sweeping
+claim — "the SHARC image contains no audio at all" — is **wrong**:
+`docs/display-path.md` had *already* found **31 band-limited wavetables spanning
+[-1,+1]** on a `0x400` stride from `0x2825e8b0` in the very region this scan
+called silent. The correct statement is narrower: **no run of float32 in the
+SHARC image has the shape of a 125-entry transient bank.** The wavetables are
+there, and they are oscillator data.
+
+**And "bounded" is not "non-zero".** A shape rescan then reported a promising
+133,974-float run at `0x804ace88` in DDR — 1,072 samples per transient if split
+125 ways, which is exactly the right length. It is an artifact: **2,058 of its
+2,093 windows are silent.** It is a zero-filled DDR buffer with a fragment at
+the end, and it passed because `0.0` lies inside `[-1.1, 1.1]`. The run test now
+requires values to vary rather than merely fall in range.
+
+With both fixed, the largest genuine non-zero float runs in section 7 are:
+
+```
+0x282c9894   4417 floats   range 2.000   smoothness 0.0010
+0x28267428   1025 floats   range 1.343   smoothness 0.0010
+0x2826b3a8   1025 floats   range 1.999   smoothness 0.0010
+0x282c69d8   1025 floats   range 2.000   smoothness 0.0020
+```
+
+**1025 is 1024 + 1** — a power-of-two lookup table with the wraparound guard
+point — and a smoothness of 0.001 says each is a clean curve. These are
+oscillator and math LUTs, not percussion.
+
 ## 5. Where this leaves the idea
 
 **Established:** the catalogue is 125; the SHARC image holds no audio; entropy
