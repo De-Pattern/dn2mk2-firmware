@@ -356,3 +356,67 @@ pattern match: it is the code the firmware itself routes the input to.
 
 So even unfixed, this hands LFO4 the function it needs to read, with a role
 established by observation rather than by name.
+
+## Root cause candidate: the encoder timestamps itself from a timer nothing drives
+
+Found by pointing `scripts/diff_trace.py` at the problem rather than reading the
+2 KB message loop by eye.
+
+**The instrument, and the correction it needed.** Record every basic block the
+CPU enters during an idle window, a driven window and a second idle window, and
+report what ran only while turning. The first version used *sets* and reported
+the UART driver and the RTOS queue and **no application code at all**, at 6
+detents and again at 20. That was the instrument, not the firmware: the code
+handling an encoder record also runs when idle, so subtracting "blocks that also
+ran when idle" deletes exactly what is being looked for. Counting blocks instead
+of listing them fixes it — 29 blocks run **exactly once per detent**, all in the
+driver at `0x4011fc2c..0x4011fde0` and the queue at `0x40001f1a..0x40001f74`.
+
+That bounded the search to ~440 bytes, and those bytes say this:
+
+```
+0x4011fc54  movel 0xfc07000c,%d6        ; <-- DTIM0's counter (DTCN0)
+...
+0x4011fc90  movel %d3,%a3@(0,%d2:l:4)   ; accumulate the scaled delta
+0x4011fcc4  movel %d6,%a2@(4)           ; store that timestamp per encoder
+```
+
+`d6` is read from `0xfc07000c` and **only ever stored**, never compared or used
+arithmetically here. `BASES[0] = 0xFC070000` in digikit's `emu/dtim.py`, and
+offset `0x0C` is `DTCN` — so the driver stamps every encoder event with **DMA
+timer 0's free-running counter**, for something downstream to measure speed
+with. That is the device behaviour the owner described: the Digitone scales an
+encoder's sensitivity by how fast it is turned.
+
+**And that counter never moves.** Measured in the emulator:
+
+| address | what | value |
+|---|---|---|
+| `0xfc07000c` | DTIM0 `DTCN` | **0, 0, 0** — never advances |
+| `0xfc070000` | DTIM0 `DTMR` | `0x0000` — not enabled |
+| `0x466758b0` | the millisecond tick global | 1095 → 1426 over 30M instructions ✓ |
+
+digikit models DMA timer channels by request and defaults to `(3,)`; **channel
+0 is never among them**. So every encoder event is stamped `0`, every interval
+between detents computes as zero, and a delta scaled by a zero interval
+plausibly scales to nothing — which is precisely the observed behaviour: the
+parameter focuses, the value overlay appears, and the number never moves.
+
+**Stated as a candidate, not a conclusion.** What is measured is that the driver
+reads DTCN0, stores it per encoder, and that DTCN0 is stuck at zero. That the
+downstream consumer divides by or compares against it is inference, and the
+arithmetic has not been read. It is written here as the next thing to check, not
+as the answer.
+
+Two things this did *not* turn out to be, both of which were checked:
+
+- **The branch at `0x4011fc70` is not a rejection.** It looked like "too fast →
+  clear the accumulator", and instrumenting it shows the **process** path taken
+  on every detent at every spacing tried (6 of 6, at 10M, 40M and 80M apart) and
+  the clear path never. Reading a branch direction off a disassembly and
+  believing it is how this project has been wrong before; the hook settled it in
+  one run.
+- **`0x4017cea4` is not the acceleration helper.** It was hooked on that
+  assumption and fires 60,000–480,000 times in a window with six detents — it
+  scales with run length, not with input. A count is what exposed that; the
+  name would not have.
