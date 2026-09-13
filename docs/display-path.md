@@ -465,3 +465,64 @@ loaded-preset state is not the variable.
 That also matches the device: a loaded preset lives in RAM as its own state, and
 a DN/DT keeps its current project across a power cycle, so nothing here needs
 the `+Drive` to have been read.
+
+## The dispatch is on the wire tag, and an encoder-only test can never flush
+
+The accumulator's address is a **literal in the image** (`lea 0x445a0dc4,%a3`),
+so its other users can be found without running anything. Scanning MAIN OS for
+the constant gives **three** references — `0x4011fbac`, `0x4011fc0a`,
+`0x4011fc7a` — and only the last is the accumulating driver already traced. The
+other two are both inside **`0x4011f9ac`**, which does this:
+
+```
+0x4011fbb0  clrl %a1@(0,%a0:l:4)          ; clear that encoder's accumulator
+0x4011fbb6  andl %d0,0x445a0dec           ; and its bit in the pending mask
+```
+
+So `0x4011f9ac` is the **drainer**. It has one call site, `0x4011fd84`, and the
+code that gates it is a three-way dispatch:
+
+```
+0x4011fd5c  movel 0x445a0984,%d1
+0x4011fd62  asrl #4,%d1            ; the wire header's tag: (tag << 4) | channel
+0x4011fd68  beqs ...  if tag == 3  -> 0x4011fc2c   accumulate
+0x4011fd70  beqs ...  if tag == 7  -> console block
+0x4011fd78  bnes ...  if tag != 2  -> skip
+0x4011fd84  jsr 0x4011f9ac         ; tag == 2  -> DRAIN
+```
+
+**3, 7 and 2 are exactly `panelin`'s three wire tags** — encoder, console block,
+buttons. So the accumulated encoder delta is drained on a **button-state
+message**, not on an encoder message.
+
+That is a real property of the hardware rather than a quirk: the panel MCU
+streams the button bitmask continuously, so on a device a flush is always
+arriving. `panelin` sends only what a caller asks for, so **a test that sends
+only encoder messages can never flush**, and will always look like "the delta is
+accumulated and nothing happens".
+
+Confirmed both ways:
+
+| what was sent | drainer entries |
+|---|---|
+| 8 encoder deltas alone | **0** |
+| 8 encoder deltas, each followed by `buttons(0, 0x00)` | **8** |
+
+### What still does not work, and where it is left
+
+With button frames interleaved the drainer runs — and the accumulator is **still
+not cleared** (`acc = 8` after 8 detents) and the value on screen is still
+`0.00`. So there is a further condition inside `0x4011f9ac` before its clear is
+reached; the `clrl` sits on a branch, and which branch has not been read.
+
+One plausible reason, recorded as the next thing to check rather than as a
+finding: the drainer indexes by `%a0`, and a button message carries a **button
+channel**, not an encoder index — so a tag-2 message may be draining the wrong
+slot, or the real flush may come from a different tag-2 message than the one
+synthesised here.
+
+**This is digikit's bug, not LFO4's**, and it is handed over at that point
+(`m-dwyer/digikit#6`) rather than pursued further here. What it bought this
+project is the dispatch above, which is panel-input ground truth for any future
+run, and the knowledge that **every driven experiment must interleave button
+frames** or it is measuring a machine that cannot flush.
