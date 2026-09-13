@@ -242,13 +242,36 @@ Zero in every combination.
 It does **not** mean the strings are unreferenced — they are assert arguments in
 compiled code that certainly passes them.
 
-It means **the address is never materialised as a 32-bit constant**. On SHARC+
-VISA a full address is assembled across instruction fields — a split immediate,
-or an offset against a page/base register — so no word scan of any stride or
-endianness can ever see it. **The instrument cannot detect the thing it was
-pointed at**, which is the same class of failure as the `clrl` value watch
-(`docs/emulator.md`), caught this time before the zero was written up as a
-finding.
+It means **the address is never materialised as a 32-bit constant** anywhere in
+the loaded image. Why not is **unexplained**, and the rest of this section says
+so carefully, because an earlier draft did not.
+
+> **Correction, same day.** This paragraph first read: *"On SHARC+ VISA a full
+> address is assembled across instruction fields — a split immediate, or an
+> offset against a page/base register — so no word scan can ever see it."* That
+> is a **plausible hypothesis stated as a cause**, and it was written before it
+> had been tested against its obvious rival.
+
+**The rival hypothesis was that the scan used the wrong numbers.** The landmarks
+were searched for at their *load* addresses, and `docs/sharc-code-map.md`
+establishes that SHARC code addresses live in a different space
+(`load = exec × 2 + 0x28000000`). So the code would hold `0x137708`, not
+`0x2826ee10`, and the scan could not have matched whatever the code contained.
+
+That hypothesis was then tested and **ruled out**: converting every landmark to
+exec space and rescanning, stride 1, both endiannesses, still finds **zero**.
+
+```
+0x13453c  "Audio Task"       0x137708  event_groups.c    0x137728  queue.c
+0x137760  stream_buffer.c    0x1377a0  port.c            0x16839c  tasks.c
+0x168424  timers.c           0x16e870  heap_4.c
+```
+
+So: **one hypothesis eliminated, the cause still unknown.** The split-immediate
+explanation survives as the leading candidate and nothing more. It is the same
+class of failure as the `clrl` value watch (`docs/emulator.md`) — an instrument
+that cannot detect what it was pointed at — caught before the zero was written up
+as a finding, but *not* before a guess about its cause was.
 
 The idea is not dead; the *method* is. Finding these references needs a
 disassembler that decodes immediate construction — digikit's `sharc_disasm.py`
