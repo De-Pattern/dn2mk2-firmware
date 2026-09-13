@@ -141,3 +141,92 @@ dnfw fn <image> callers --at <entry>     # and the static list to check against
 
 Ask `emu.run.usable_rung()` which snapshot to resume; do not copy a rung number
 out of a docstring (`docs/emulator.md`).
+
+---
+
+# The emulated instrument, and what it is actually showing
+
+Every count on this page was taken while the firmware was drawing **a real
+parameter page**. That is not an assumption — here is the frame, captured at
+`panel_diff` entry and written out by `scripts/drive.py`:
+
+![The DN2's SYN1 page under emulation](img/syn1-page.png)
+
+`TUN1 WAV1 PD1 LEV1` over `TUN2 WAV2 PD2 LEV2`, with knob widgets, the `SYN 1`
+track badge and a level meter — the Digitone II's SYN1 page, rendered by the
+firmware into its own framebuffer. The `Loading...` banner is the modal digikit's
+`weakptr` diagnostic exists to clear; the page is drawn underneath it regardless.
+
+**Screens are archived as PNGs in `docs/img/` rather than described.** A byte
+count says a screen changed; a picture says what it changed to.
+
+## Two configuration facts, both measured, both costing a run
+
+**DMA timer channel 1 makes this build worse.** digikit's `build()` docstring
+says `channels=(3, 1)` stops a fault, so it was added. Measured on 1.11:
+
+| timer channels | richest frame | what it shows |
+|---|---|---|
+| `(3,)` | **2,183 lit** | the SYN1 parameter page above |
+| `(3, 1)` | 411 lit | the boot animation; the page is never reached |
+
+It did not stop the fault either. **Digitakt's fix is not Digitone's** — the
+same lesson as the boot rung, learnt twice from the same docstring.
+
+**`weakptr` is unavailable on 1.11.** Its patch site is build-specific and
+digikit's guard refuses:
+
+```
+RuntimeError: weakptr: 0x40188b40 holds 4878, expected 6714
+```
+
+That is the guard working exactly as it should.
+
+# Input is modelled, and on 1.11 it halts the firmware
+
+`emu/panelin.py` implements the front panel properly — buttons and encoders over
+UART8, addresses resolved per build. digikit's README saying "No input" is
+stale. The firmware's own control table reads out of the running image:
+**55 buttons** (`TRIG SRC FLTR AMP FX MOD PRESET SETTINGS …`) and 10 encoders,
+so `MOD` is button code 6, channel 0 bit 5 — found by name, not guessed.
+
+`scripts/drive.py` presses it. The result is the same every time, for a button
+and for an encoder alike:
+
+| step | new frames | executed | stop |
+|---|---|---|---|
+| idle (no input) | 69 | 43,013,859 | limit |
+| press+release `MOD` | **0** | **0** | `unhandled vector 257 at 0x4011eb0e` |
+| `ENCODER A +10` | **0** | **0** | `unhandled vector 257 at 0x4011eb0e` |
+
+Vector 257 is QEMU's `EXCP_HALT_INSN`, and the instruction before the reported
+pc is exactly what that implies:
+
+```
+0x4011eb0a  66 e2       bnes 0x4011eaee     ; loop while d3 != 48
+0x4011eb0c  4a c8       halt                <-- here
+0x4011eb0e  4c d7 3c 0c moveml %sp@,%d2-%d3/%a2-%a5
+```
+
+`0x4011eb0c` sits `0x116` into `0x4011e9f6`, whose only two callers
+(`0x4011ea8e`, `0x4011eb22`) are **inside itself** — a self-recursive routine
+that walks twelve somethings and then halts the processor. That is the shape of
+a panic or assert handler, not of a UI.
+
+So the firmware does not ignore the input: it **receives it and panics**.
+
+## What that means, and what it does not
+
+It is *not* "input does not work in digikit" — the mechanism delivers, the ring
+and the vector are right, and the firmware plainly reacts. It is that on this
+build the reaction is a fault, which is consistent with the condition-code
+defect in the exception model that `weakptr` exists to paper over elsewhere and
+that digikit's own handover lists as unresolved.
+
+**So the engine-feed path cannot be reached by driving the UI yet**, and the
+route is the static one: `0x4003951e` (the destination-list builder, and the
+live caller found above) and `0x4003e426` (the engine thunk site).
+
+Reported upstream rather than worked around here: it is someone else's
+unresolved bug, we have an exact repro, and guessing at a fix inside an
+exception model we have not read is how a week disappears.
