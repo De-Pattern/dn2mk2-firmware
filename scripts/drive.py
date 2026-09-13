@@ -186,15 +186,20 @@ def run(args) -> dict:
     mark("idle (no input)", base, idle, n0)
 
     before, n0 = idle, len(cap.frames)
-    panelin.press(m, profile, MOD_CHANNEL, MOD_BIT)
+    # Take the pc `feed` hands back. raise_vector pushes an exception frame
+    # and sets the pc to the ISR; resuming at the pc from before the
+    # injection runs the firmware with a stray frame on its stack, and it
+    # asserts. That is what produced the `halt` this script first reported
+    # as a digikit bug -- see the retraction in docs/display-path.md.
+    pc = panelin.press(m, profile, MOD_CHANNEL, MOD_BIT)
     pc, _ran, _stop = settle(longrun, m, pc, pits, args.window // 2, args.chunk)
-    panelin.release(m, profile, MOD_CHANNEL, MOD_BIT)
+    pc = panelin.release(m, profile, MOD_CHANNEL, MOD_BIT)
     pc, _ran, _stop = settle(longrun, m, pc, pits, args.window // 2, args.chunk)
     after_mod = screen()
     mark("press+release MOD", before, after_mod, n0)
 
     before, n0 = after_mod, len(cap.frames)
-    panelin.encoder(m, profile, ENCODER_A, args.delta)
+    pc = panelin.encoder(m, profile, ENCODER_A, args.delta)
     pc, _ran, _stop = settle(longrun, m, pc, pits, args.window, args.chunk)
     after_enc = screen()
     mark("ENCODER A %+d" % args.delta, before, after_enc, n0)

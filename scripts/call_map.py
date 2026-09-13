@@ -149,6 +149,7 @@ def run(args) -> dict:
     from emu import longrun, symbols, config  # noqa: E402  (needs the path above)
     from emu.dtim import Dtims, Timers  # noqa: E402
     from emu.pit import Pits, intro_running  # noqa: E402
+    from emu import panelin  # noqa: E402
 
     table = probe_table(args.at)
     counts = {mark: 0 for _, mark, _, _, _ in table}
@@ -204,10 +205,34 @@ def run(args) -> dict:
     # Slices, not one long run. A count says whether a function ran; a
     # *timeline* of counts says whether it ran once at boot or keeps running,
     # which is the half the stamp on the instrument could never report.
+    # The scripted interaction. Every probe that stayed silent through the
+    # undriven runs is on a path a user drives -- the mirror path is what an
+    # encoder moves -- so "not entered during an undriven boot" was never an
+    # answer about the firmware. This makes it one.
+    #
+    # `feed` returns the new pc and it MUST be used: raise_vector pushes an
+    # exception frame and sets the pc to the handler, so resuming at the
+    # pre-injection pc leaves a stray frame on the stack and the firmware
+    # asserts. That mistake was first reported upstream as a digikit bug
+    # (docs/display-path.md, "The retraction").
+    def drive(slice_no):
+        if not args.drive:
+            return None
+        if slice_no == 2:
+            return panelin.press(m, profile, 0, 5)      # MOD down
+        if slice_no == 3:
+            return panelin.release(m, profile, 0, 5)    # MOD up
+        if slice_no >= 5 and slice_no % 2 == 1:
+            return panelin.encoder(m, profile, 0, args.delta)   # ENCODER A
+        return None
+
     t0 = time.time()
     timeline, executed, stop = [], 0, None
-    for _ in range(args.slices):
+    for slice_no in range(args.slices):
         before = dict(counts)
+        moved = drive(slice_no)
+        if moved is not None:
+            pc = moved
         pc, ran, stop = longrun.spin(m, pc, args.slice_size, pits=pits, fast=True)
         executed += ran
         timeline.append({
@@ -237,6 +262,7 @@ def run(args) -> dict:
         "syx": args.syx,
         "digikit": str(root),
         "unblock": not args.no_unblock,
+        "driven": bool(args.drive),
         "hooks_installed": not args.no_hooks,
         "slices": len(timeline),
         "slice_size": args.slice_size,
@@ -347,6 +373,9 @@ def main(argv=None) -> int:
     parser.add_argument("--slices", type=int, default=12, help="how many slices to run")
     parser.add_argument("--at", type=lambda s: int(s, 0), action="append", default=[],
                         help="an extra address to count; repeatable")
+    parser.add_argument("--drive", action="store_true",
+                        help="press MOD and turn ENCODER A during the run")
+    parser.add_argument("--delta", type=int, default=6, help="encoder detents per turn")
     parser.add_argument("--no-unblock", action="store_true",
                         help="do not force-satisfy sem_pend: faithful, but the UI may not draw")
     parser.add_argument("--no-hooks", action="store_true",

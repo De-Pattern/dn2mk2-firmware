@@ -130,10 +130,13 @@ already named from a different direction. `parameter_value_getter` runs
 constantly while changing no pixels, so it feeds something that is not the
 screen: a live lead rather than the dead end it looked like.
 
-That leaves **the engine-feed path**, and it is blocked on the same thing every
-silent probe has been: digikit models no input, so the mirror path nothing
-drives never runs. Either teach the emulator input, or find the path statically
-from `0x4003951e` and `0x4003e426` (the engine thunk site).
+That leaves **the engine-feed path**, and it is **no longer blocked**. digikit
+models the front panel after all (`emu/panelin.py`), and `scripts/drive.py`
+drives it: a button press and an encoder delta both move the screen far beyond
+its idle churn, and the panel reaches the real main screen with project name and
+tempo (`docs/display-path.md`). The probes that stayed silent through every
+undriven run — `M`, `S`, `F`, `B`, `C`, `A`, the whole mirror path — can now be
+asked the question they were built for, because something finally drives them.
 
 `M` and `S` — the `updateMirror` lambda and its enclosing function — stayed
 silent, and that is **not** a finding: digikit models no input, and the mirror

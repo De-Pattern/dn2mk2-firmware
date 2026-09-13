@@ -483,6 +483,16 @@ never with a payload the firmware depends on to boot.
 
 ## 7. The DSP hunt, parked with an explicit warning
 
+> **[UNPARKED 2026-09-14]** This section was parked because nothing could read
+> SHARC+ VISA. That is no longer true: digikit ships both a Ghidra processor
+> module and a stdlib-only Python disassembler for our exact chip family, built
+> from ADI's *public* programming reference — **no CrossCore licence is
+> involved** — and run against our image it decodes **~81% of the L2 code region
+> confidently** (`docs/sharc-disassembly.md`). The binding constraint named here
+> and in `docs/ROADMAP.md` is lifted. What remains unbuilt is p-code semantics,
+> so the tooling **disassembles but does not decompile**.
+
+
 > **[LARGELY ANSWERED 2026-09-13 — `docs/sharc-image.md`, `docs/sharc-code-map.md`.]**
 > The hunt succeeded, and this section's premises are the interesting part of the
 > record, so they are kept rather than rewritten.

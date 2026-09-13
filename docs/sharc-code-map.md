@@ -83,7 +83,41 @@ with digikit's independent alignment analysis (motifs on even offsets, spread
 uniformly across mod 4, 6 and 8 — variable-length 16-bit-granular encoding, not
 fixed 48-bit words). Two unrelated measurements converging on the same fact.
 
-### Open: the `0xb8` space
+### ~~Open: the `0xb8` space~~ — **SOLVED 2026-09-14**
+
+```
+exec 0xb8WWWW  ->  load 0x20000000 + 2 x WWWW
+```
+
+**1,025 of 1,025 targets land inside the L1 code region**, and the fit is tight
+rather than merely possible: word offsets run `0x0020 .. 0xf3aa`, so the highest
+byte offset is `0x01e754` against a region length of `0x01e880` — the targets
+fill the region to within **0x12c bytes of its end and never overflow it**. A
+wrong scale would either spill past the region or occupy a fraction of it.
+
+**The factor of two was settled by alignment, not by fit.** Both candidate
+scales put every target inside the region, so "lands inside" could not
+discriminate — and the decode-rate could not either, because an all-zero word
+decodes as a confident `Type21a` (`docs/sharc-disassembly.md`). What does
+discriminate is that **47.2% of the `0xb8` targets are odd** (484 of 1,025). An
+odd *byte* address cannot begin an instruction on this machine — instructions
+start only at even offsets — so the targets cannot be byte addresses. They are
+16-bit **word** addresses, exactly as the `0x1c` space and ADI's own addressing
+model say.
+
+So both execution spaces are now mapped, by the same rule in different windows:
+
+| space | mapping | targets |
+|---|---|---|
+| `0x1c` | `load = exec x 2 + 0x28000000` | 591 / 591 |
+| `0xb8` | `load = (exec & 0xFFFF) x 2 + 0x20000000` | **1,025 / 1,025** |
+
+Together that is **1,616 of 1,616 cjump targets resolved** — the whole
+population, with nothing left over.
+
+The original paragraph, kept because the reasoning is the point:
+
+
 
 **1,025 of the 1,616 targets** are in the `0xb8` space and **no mapping is
 known**. `t × 2 + 0x28000000` puts them outside every loaded region. They may
