@@ -76,8 +76,26 @@ disagrees with the handover notes about what works.
 | | |
 |---|---|
 | clone date | 2026-09-13 |
-| commit | **`c282f0c`** — "Licence this GPL-2.0-or-later, because it cannot be MIT" |
+| commit | **`ec32de1`** — "Merge pull request #1 from angellinares/depacker-address-per-build" |
 | licence at that commit | GPL-2.0-or-later (`LICENSE` = GPL v2 text) |
+
+Earlier findings on this page were produced against **`c282f0c`**, one commit
+before ours landed; they are marked where it matters.
+
+### Our contribution, merged upstream
+
+`m-dwyer/digikit#1` — *"Resolve the depacker's address per build, so Digitone II
+1.11 extracts"* — merged 2026-09-13 as `ec32de1`. digikit hard-coded the
+address of the updater's aPLib depacker, a constant derived on Digitakt II
+1.15C. It holds on DN2 1.10E and fails on 1.11 with `implausible output length
+0`. The fix tries the constant and falls back to locating the routine in the
+image: 1.10E resolves to `0x80005710`, reproducing their constant exactly, and
+1.11 to `0x80005720`.
+
+**digikit now extracts 1.11 by itself**, which retires
+`scripts/export_sections_for_digikit.py` as a *requirement* — the write-map runs
+below pass no `--sections-dir` and digikit does its own extraction. The script
+stays, because `--verify-against` is still how the two extractions are compared.
 
 ## Running it on this machine
 
@@ -308,3 +326,59 @@ possibly one needing the input path digikit's author flags as buggy.
 
 So the honest status is: **the diagnosis is neither confirmed nor refuted**, and
 the next run is designed to tell those two apart rather than to produce a number.
+
+---
+
+# The write map: the run designed to tell two outcomes apart
+
+`scripts/write_map.py`, against digikit **`ec32de1`**.
+
+A value watch cannot answer the question this project keeps asking of it. The
+array is cleared with `clrl` — it is *written with zeros* — so "cleared to zero"
+and "never touched" both read `0x00000000`. `Machine.install_mmio_trace` gives
+range-scoped **write hooks** instead: a zero store is an event like any other,
+and it carries the `pc` that made it, which a value watch could never produce.
+
+Since 1.11 now extracts in digikit itself, these runs pass no `--sections-dir`.
+
+## Run 1 — the control caught the run, exactly as intended
+
+120M instructions, 16 regions (12 candidates that pass both static checks, plus
+4 known-live array records as positive controls):
+
+```
+events: 0        controls_written: 0/4        candidates_written: 0/12
+*** CONTROL BLIND ***
+```
+
+**And that is a successful run of the instrument, not a failed experiment.** The
+harness refused to print a table of zeros as a result, which is precisely what
+`docs/trace-harness.md` and the first watch run above did not do.
+
+### The control had its own blind spot, and this is how it showed
+
+A blind control still does not say *why*. "The write hooks are not firing" and
+"the run never reached the code that writes" produce the same zero. The earlier
+400M run on this page records the main application task starting at
+**n ≈ 315.7M** — so at a 120M limit the clearing loop at `0x4002a4d2` had not
+executed, and the control could not have been written no matter how well the
+hooks worked.
+
+So the clearing loop's own address is now hooked as well, and the two failures
+report differently:
+
+| loop hits | writes to controls | verdict |
+|---|---|---|
+| 0 | 0 | **RUN TOO SHORT** — raise `--limit`; says nothing about anything |
+| >0 | 0 | **CONTROL BLIND** — the hooks are not firing; ignore the table |
+| >0 | >0 | the instrument works; the candidate rows mean something |
+
+That is the same lesson for the fourth time, one level up: **it is not enough for
+the experiment to discriminate — the control has to discriminate too.**
+
+## What a clean result will and will not mean
+
+A cold boot plays no notes, turns no encoder and loads no project. The device
+faulted *while the keyboard was played*. So a candidate region with no writes has
+earned exactly one sentence — **"not written during cold boot"** — and the
+harness prints that caveat next to its own table rather than leaving it here.
