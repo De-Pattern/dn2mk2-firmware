@@ -435,3 +435,26 @@ structure.
 the blocker is decoding what the blocks contain. It also does not supply a
 re-packer we can use, because our output is an `ELE3` section with a content
 checksum and an HMAC trailer, not a standalone `.ldr`.
+
+
+## elektroid — the Elektron transfer protocol, already implemented
+
+<https://github.com/dagargo/elektroid>, by David García Goñi. **GPLv3.**
+
+A sample and MIDI device manager for Elektron gear, packaged in Debian and
+Ubuntu and on Flathub, whose supported-device list includes **Digitone I and II**
+by name.
+
+It matters here because `docs/midi-rpc.md` catalogued a large RPC surface on the
+running device — `FsRaw*`, `FsSample*`, `Data*`, `Screenshot` — and planned to
+derive its wire format by reading `MidiRpcDispatcher::handleMessageAndCreateResponse`.
+That is avoidable. elektroid speaks the protocol today, with a CLI shaped
+`connector:filesystem:command`, and `elektroid-cli info` reports which
+filesystems a given device actually exposes.
+
+For `docs/pcm-hunt.md` that single command decides between the two live
+hypotheses about where the FM drum transients live, read-only, without us
+implementing a byte of transport.
+
+**GPLv3 against this repository's AGPL-3.0-or-later is compatible for porting**,
+should any of it ever be worth porting. Running it raises no licence question.

@@ -188,3 +188,74 @@ python scripts/find_pcm.py <image> --section 3
 Carved output goes outside the repository. The transients are Elektron's
 copyrighted content: extracting them for local analysis is one thing,
 redistributing them is not something this project does.
+
+
+---
+
+## 6. The search of the image is now exhausted, and the tool for the device exists
+
+**2026-09-14, after the owner asked whether the options had actually been
+exhausted. They had not.** Two things had been skipped.
+
+### Every section, with a detector that works
+
+The corrected shape test — float runs that stay inside `[-1.1, 1.1]`, **vary**,
+and are smooth — had only ever been run on section 7. Run across **all** of
+them:
+
+| section | result |
+|---|---|
+| 2 bootstrap (30 KB) | nothing |
+| **3 MAIN OS (3.19 MB)** | 3 runs; largest 2,027 floats, smoothness 0.0005 — a curve |
+| 4 updater (32 KB) | nothing |
+| 7 all nine regions | only 1025/2048/4417-float LUTs |
+| 8 ARM accessory (160 KB) | nothing |
+
+**No section contains a 125-entry sample bank as float32 or int16.** That is now
+a thorough negative rather than an early one.
+
+### ADPCM, because "noise with clicks" is what ADPCM sounds like as PCM
+
+The owner auditioned the dense MAIN OS block and reported *"noise with some
+clicks/beeps"*. That is the exact signature of **compressed** audio played as
+raw PCM, so the block was decoded as IMA ADPCM (both nibble orders) — 322,560
+bytes becomes 645,120 samples, 13.4 s, ~107 ms per transient over 125. Sent for
+audition.
+
+### `elektroid` already speaks this protocol, and supports the DN2
+
+`docs/midi-rpc.md` planned to derive the RPC wire format by reading
+`MidiRpcDispatcher::handleMessageAndCreateResponse` (the mangled name is at
+`0x40207ec0`). That is a real piece of work — the dispatcher takes a
+`shared_ptr<MidiRpcMessage>`, so ids are virtual methods on message objects, and
+a scan for a flat `(id, handler)` dispatch table finds **none**.
+
+It does not need deriving. **`dagargo/elektroid`** — GPLv3, GNU/Linux, packaged
+in Debian/Ubuntu and on Flathub — implements Elektron's SysEx transfer protocol
+and lists **"Elektron Digitakt I and II, Elektron Digitone I and II and Digitone
+Keys"** among its supported devices. Its CLI is `connector:filesystem:command`:
+
+```
+elektroid-cli info                 # which filesystems THIS device exposes
+elektroid-cli elektron:sample:ls   # list samples
+elektroid-cli elektron:sample:dl   # download one
+elektroid-cli elektron:data:ls     # projects / sounds, with metadata
+```
+
+**`elektroid-cli info` against a connected DN2 is the whole experiment.** If the
+device reports a `sample` filesystem, the hypothesis in §5 — that the transients
+are factory content in device storage rather than in the OS update — is
+confirmed, and `sample:ls` then enumerates them. If it reports only `project`
+and `sound`, the hypothesis is dead and the transients are inside the firmware
+in a form not yet recognised.
+
+Either way it is **read-only**, uses a mature third-party tool rather than
+anything we would have to get right first time, and costs one command.
+
+**This is the "reuse before writing" rule earning its place** (`docs/PRINCIPLES.md`):
+the alternative was reverse-engineering a message dispatcher to re-derive a
+protocol somebody has already implemented and shipped.
+
+**Licence note:** elektroid is **GPLv3**. This repository is AGPL-3.0-or-later,
+so porting from it is compatible — but nothing needs porting yet. Running the
+tool is not a licence question at all.
