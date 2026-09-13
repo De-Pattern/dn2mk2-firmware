@@ -109,5 +109,15 @@ derived independently, from hardware, by a different tool.
 - The Digitone 1. Its firmware is unsigned, which makes the tooling side
   easier, but its flash and RAM are likely tighter and the feature question is
   the same one over again.
-- What `blob` holds (833 KB on the DN2). Relevant if LFO4 needs a UI asset.
+- ~~What `blob` holds (833 KB on the DN2). Relevant if LFO4 needs a UI asset.~~
+  **Answered 2026-09-13:** `blob` (section 7) is the **SHARC program**, an ADI
+  boot stream — `docs/sharc-image.md`. ~240 KB of it is code, and its execution
+  addresses are mapped for one of two spaces — `docs/sharc-code-map.md`. It is
+  not a UI asset store, so this no longer bears on LFO4; it bears on everything
+  that touches audio, which is why `docs/ideas-backlog.md` §7 is largely
+  answered and §8 (FX machines, issue #49) is now askable.
+- **Reading a SHARC instruction.** Nothing in this repository decodes SHARC+
+  VISA, and that is now the binding constraint on all DSP-side work rather than
+  a hypothetical one. digikit has a disassembler; we have the code map to aim it
+  with.
 - Whether the bootloader checks the HMAC trailer at all.

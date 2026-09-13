@@ -483,6 +483,26 @@ never with a payload the firmware depends on to boot.
 
 ## 7. The DSP hunt, parked with an explicit warning
 
+> **[LARGELY ANSWERED 2026-09-13 — `docs/sharc-image.md`, `docs/sharc-code-map.md`.]**
+> The hunt succeeded, and this section's premises are the interesting part of the
+> record, so they are kept rather than rewritten.
+>
+> | this section says | actually |
+> |---|---|
+> | *"no boot stream has been found in any ELE3 section"* | **Section 7 is an ADI boot stream.** 95 blocks, consuming all 836,956 bytes exactly, entry point `0x001c12e2`. |
+> | *"the ColdFire probably boots it from the 16 MB Winbond NOR — a region the update file need not touch"* | It ships **in the update**, in every release. |
+> | *"the DSP image could be in the firmware in a packed form, and every test would miss it"* | The warning was right that the tests were the problem and **wrong about which problem**. `blob` is aPLib-packed in the container and we already decompress it. The searches failed on the *decompressed* bytes because they looked for a **raw** instruction stream; a boot stream is headers-plus-payloads and has no global period. |
+> | *"we have no SHARC disassembler … reading it needs a tool we do not have"* | **Still true of this repository**, and it is now the binding constraint rather than a hypothetical. digikit has one (`sharc_disasm.py`, SHARC+ VISA). |
+>
+> The contributor's Machinedrum advice — *get an established memory map from
+> MAME to identify the DSP code setup* — was sound and is now moot in the
+> better direction: the boot stream **states its own memory map**, which is
+> stronger than borrowing one. See `docs/sharc-code-map.md` for which regions
+> are code and the `exec = (load − 0x28000000) / 2` mapping.
+>
+> **Still open:** whether the synthesis engine is in that image at all, and the
+> `0xb8` execution address space (1,025 of 1,616 call targets).
+
 **Parked 2026-09-12** at the owner's direction: finish LFO4 first, resume this
 once there is a flashable firmware.
 
@@ -595,3 +615,93 @@ our own tooling today — but the C tool remains valuable exactly as the plan
 intended, as an **independent cross-check** from code sharing no lineage with
 our Python. Worth building and running `-i` over `blob` before trusting any
 unpacking result we produce ourselves.
+
+---
+
+## 8. FX machines on tracks, and per-track assignable FX
+
+**The idea (2026-09-13, issue #49, raised by the owner).** The DN2 assigns a
+synthesis machine and a filter machine per track. Syntakt and Tonverk allow a
+track to be an **FX machine** instead. Two pathways are proposed:
+
+1. **Add FX machines as a track type** — potentially via a new ELE3 section
+   (the issue says "section 9 or 10") to hold them, making FX parameters
+   modulable rather than only the send value.
+2. **The Octatrack model** — replace each audio track's *fixed* reverb, delay
+   and chorus with **assignable FX slots**, moving FX configuration from
+   global-per-pattern to per-track.
+
+The issue notes this is adjacent to §4 (FX and Master parameters as LFO
+destinations), which is correct and is where the two meet.
+
+### What this depends on, and why it is different from LFO4
+
+**This is DSP work, and LFO4 is not.** That is the single most important thing
+to say about it, and it reorders the queue.
+
+A fourth LFO may turn out to be entirely ColdFire-side: a parameter-table block,
+a page view, a modulation destination mask, and reserved bytes that already
+exist in the persisted format. An **FX machine processes audio**. It runs on the
+SHARC. So §8 cannot be attempted on the strength of anything in `docs/lfo4-*`;
+it sits on top of §7, which until 2026-09-13 was parked and believed
+intractable.
+
+**What changed on 2026-09-13 makes this askable rather than idle.** The DSP's
+program ships in section 7, ~240 KB of it is identified as code, and its
+execution addresses are mapped for one of two spaces
+(`docs/sharc-code-map.md`). None of that existed when this idea would previously
+have been filed under "requires a DSP image nobody has found".
+
+**What has not changed:** we cannot read a SHARC instruction. §7's tooling-gap
+note is now the binding constraint on §8, not a footnote to it.
+
+### The two pathways are not equally expensive, and the issue's second is cheaper
+
+Worth separating before any work starts, because the issue presents them as
+alternatives of similar size and they are not.
+
+**Writing a new FX machine** means authoring SHARC audio code, in an ISA we
+cannot yet disassemble, for a processor we cannot emulate (no SHARC+ target
+exists in Unicorn, QEMU or MAME — MAME's core is classic ADSP-2106x). That is
+the expensive pathway by a wide margin.
+
+**Re-routing existing FX per track** reuses DSP code that is already in the
+image and already works. The reverb, delay and chorus algorithms exist; the
+change is which track feeds which, and where the settings live — routing, state
+and UI, much of which is ColdFire-side. It also has prior art we have already
+read (`docs/octatrack-lfo-prior-art.md`).
+
+**So the honest ordering is: pathway 2 first**, and only then pathway 1 if the
+DSP side ever becomes writable. That is not a preference, it is the difference
+between changing parameters to existing code and writing new code for a
+processor we cannot yet read.
+
+### On "a new section 9 or 10"
+
+Do not design this fresh: §1b and §6 already did the work.
+
+- **§1b** established that the updater looks sections up **by id**
+  (`find_section_by_id`, `0x80003d6e`), not by position — which is what makes a
+  new id conceivable at all.
+- **§6** is the developed form of exactly this idea: a new ELE3 section whose
+  `dest` lies **above the BSS end**, giving real unclaimed address space with no
+  cave chaining. The container already ships six sections at four distinct
+  `dest` values, and nothing in the format restricts us to those six.
+
+§8 should treat §6 as its mechanism rather than restating it. The open question
+§6 leaves — whether the *bootloader* accepts a section id it does not know, or
+refuses the image — is the gate for both, and it is one experiment.
+
+### Where the FX parameters actually are
+
+§4 already measured the relevant field: `record+0x24` decides
+destination-list membership (`docs/modulation-mask.md`), and the per-track
+Chorus/Delay/Reverb **sends** (ids 67/68/69) already carry the full `0x1e00`
+mask. Whatever §8 does to make FX settings modulable runs through that field, so
+§4's measurements are §8's starting point and should not be re-derived.
+
+### Status
+
+**Parked, behind §7 and §4.** Not blocked on a decision — blocked on being able
+to read SHARC code, which is a tooling problem with a known owner (digikit) and
+no estimate.
