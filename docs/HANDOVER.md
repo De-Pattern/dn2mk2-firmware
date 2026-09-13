@@ -25,9 +25,17 @@ parameter table and is looking for the code that reads it.
 | Disassembler validated (Gate F) | done — Ghidra 12.1.3 passes, Capstone fails |
 | Recovery path, **stock** image | done 2026-09-08 |
 | Gate D, Gate E — **normal update path** | **done** (reported 2026-09-11) |
-| Gate D, Gate E — **recovery path** | **stall at ~80%** — fix in PR #10, untested |
+| Gate D, Gate E — **recovery path** | **resolved 2026-09-11** — the ~80% stall was the MIDI link, not the image |
 | Phase 2: is the LFO count a table? | yes — `docs/lfo-parameters.md` |
-| Phase 2: what reads the table | **unknown** — nothing holds its address |
+| Phase 2: what reads the table | **known** — ~50 accessors, `base + id*60`; `docs/parameter-table-consumer.md` |
+| Phase 2: do code caves execute? | **yes, proved on hardware** — `CAVE RAN!!!`, `docs/code-caves.md` |
+| Phase 2: where the display path is | **open** — `parameter_value_getter` is *not* it |
+
+> **This file is dated 2026-09-11 and the rows below it have not been rewritten
+> since.** Two of its "next" items are done and its pull-request table is
+> stale — PRs #9, #10 and #11 all merged. Treat the sections after "Status" as
+> history until the next handover overwrites them; the live plan is
+> `docs/ROADMAP.md`.
 
 ## Open pull requests
 
