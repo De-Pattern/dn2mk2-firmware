@@ -1,0 +1,239 @@
+"""Parse an Analog Devices boot stream (`.ldr`) into its blocks.
+
+Section 7 of a Digitone II update — the one `elektron-firmware-tool` calls
+`blob` — is the SHARC program in this format, which is why a scan for a raw
+48-bit instruction stream found nothing there for months (`docs/sharc-image.md`).
+
+A boot stream is a chain of 16-byte headers, each followed by its payload:
+
+    0  block code      top byte 0xAD, the header signature
+    1  target address  where the payload is loaded
+    2  byte count      payload length
+    3  argument
+
+**The signature alone is not evidence.** `0xAD` appears 1,833 times in this
+section by chance. What identifies the format is that the chain *walks*: step
+over the payload the header's own count declares and the next header is there,
+and its target address continues the previous block's. `walk()` reports both, so
+a caller can judge a stream rather than trust a magic byte.
+
+This parses the container. It does not decode SHARC instructions, and nothing in
+this package does.
+"""
+
+from __future__ import annotations
+
+import struct
+from dataclasses import dataclass
+
+SIGNATURE = 0xAD
+HEADER = 16
+
+# Flags live in bits 8..15 of the block code. These values were derived by
+# walking -- the only assignment under which the chain consumes section 7
+# exactly, 95 blocks over all 836,956 bytes with nothing left over -- and they
+# then turn out to match ADI's documented boot-stream flags, which is the
+# corroboration rather than the source.
+FLAG_FILL = 0x01      # BFLAG_FILL:   zero the target range; no payload in the stream
+FLAG_IGNORE = 0x08    # BFLAG_IGNORE: skip the payload
+FLAG_INDIRECT = 0x10  # BFLAG_INDIRECT
+FLAG_FIRST = 0x40     # BFLAG_FIRST:  first block of a stream
+FLAG_FINAL = 0x80     # BFLAG_FINAL:  last block; `target` is the entry point
+
+FLAG_NAMES = (
+    (FLAG_FILL, "fill"),
+    (FLAG_IGNORE, "ignore"),
+    (FLAG_INDIRECT, "indirect"),
+    (FLAG_FIRST, "first"),
+    (FLAG_FINAL, "final"),
+)
+
+
+@dataclass(frozen=True)
+class Block:
+    """One boot-stream block header, and where it sat in the stream."""
+
+    offset: int
+    code: int
+    target: int
+    count: int
+    argument: int
+
+    @property
+    def flags(self) -> int:
+        return (self.code >> 8) & 0xFF
+
+    @property
+    def flag_names(self) -> tuple[str, ...]:
+        return tuple(name for bit, name in FLAG_NAMES if self.flags & bit)
+
+    @property
+    def has_payload(self) -> bool:
+        """Whether `count` bytes follow the header in the stream.
+
+        A fill block declares a target range to zero and carries nothing, so it
+        advances the load address without advancing the file -- which is exactly
+        why a walk that ignores the distinction desynchronises immediately.
+        """
+        return not (self.flags & (FLAG_FILL | FLAG_IGNORE)) and self.count > 0
+
+    @property
+    def payload_at(self) -> int:
+        return self.offset + HEADER
+
+    @property
+    def end(self) -> int:
+        """Offset of the next header, if this block is well formed."""
+        return self.offset + HEADER + (self.count if self.has_payload else 0)
+
+
+@dataclass(frozen=True)
+class Walk:
+    """The result of walking a stream: the blocks, and how well they agreed."""
+
+    blocks: tuple[Block, ...]
+    stopped_at: int
+    reason: str
+    data_len: int = 0
+
+    @property
+    def transitions(self) -> int:
+        """How many block-to-block target comparisons were possible."""
+        return max(len([b for b in self.blocks if b.count]) - 1, 0)
+
+    @property
+    def contiguous(self) -> int:
+        """How many of those had `target == previous target + previous count`.
+
+        This is the number that matters. Chance produces a signature byte; it
+        does not produce consecutive load addresses that each continue the last.
+        """
+        agreed, previous = 0, None
+        for block in self.blocks:
+            if not block.count:
+                continue
+            if previous is not None and block.target == previous:
+                agreed += 1
+            previous = block.target + block.count
+        return agreed
+
+    @property
+    def complete(self) -> bool:
+        """The walk consumed the whole stream and ended on a final block.
+
+        This is the strongest single signal there is. A wrong rule for which
+        blocks carry payload desynchronises and either runs off the end or stops
+        early; landing *exactly* on the last byte, on a block flagged final,
+        after 95 steps, does not happen by accident.
+        """
+        return bool(self.blocks) and self.data_len > 0 \
+            and self.stopped_at == self.data_len and self.final is not None
+
+    @property
+    def convincing(self) -> bool:
+        """Whether to believe this is a boot stream rather than coincidence.
+
+        Either the walk accounts for the entire section, or every target
+        continues the last. **Perfect contiguity alone is the wrong test for a
+        whole image**: a real one loads several memories -- section 7 fills L1,
+        L2 and DDR -- so it jumps between regions by design, 16 times here. It
+        was this rule, not the data, that called the true 95-block walk
+        unconvincing while blessing six-block fragments of it.
+        """
+        if len(self.blocks) < 3 or self.transitions <= 0:
+            return False
+        return self.complete or self.contiguous == self.transitions
+
+    @property
+    def payload_bytes(self) -> int:
+        return sum(b.count for b in self.blocks if b.has_payload)
+
+    @property
+    def final(self) -> Block | None:
+        """The block marked final, if the walk reached one."""
+        for block in self.blocks:
+            if block.flags & FLAG_FINAL:
+                return block
+        return None
+
+    @property
+    def entry_point(self) -> int | None:
+        """The final block's target -- where the loaded program starts."""
+        final = self.final
+        return None if final is None else final.target
+
+    def regions(self) -> list[tuple[int, int]]:
+        """Contiguous load spans, merged -- which memories the image fills."""
+        spans = sorted((b.target, b.target + b.count) for b in self.blocks if b.count)
+        merged: list[tuple[int, int]] = []
+        for lo, hi in spans:
+            if merged and lo <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+            else:
+                merged.append((lo, hi))
+        return merged
+
+    @property
+    def target_range(self) -> tuple[int, int] | None:
+        loaded = [b for b in self.blocks if b.count]
+        if not loaded:
+            return None
+        return (min(b.target for b in loaded),
+                max(b.target + b.count for b in loaded))
+
+
+def header_at(data: bytes, offset: int) -> Block | None:
+    """The block header at `offset`, or None if there is not a signed one there."""
+    if offset < 0 or offset + HEADER > len(data):
+        return None
+    code, target, count, argument = struct.unpack_from("<IIII", data, offset)
+    if (code >> 24) != SIGNATURE:
+        return None
+    return Block(offset=offset, code=code, target=target, count=count, argument=argument)
+
+
+def walk(data: bytes, start: int = 0, max_blocks: int = 100_000) -> Walk:
+    """Follow the block chain from `start` for as far as it holds."""
+    blocks: list[Block] = []
+    at = start
+    while len(blocks) < max_blocks:
+        block = header_at(data, at)
+        if block is None:
+            reason = ("end of data" if at + HEADER > len(data)
+                      else f"no 0x{SIGNATURE:02x} signature at 0x{at:06x}")
+            return Walk(tuple(blocks), at, reason, len(data))
+        # Only a block that actually carries bytes has to fit in the stream. A
+        # fill block declares a range to zero and can be far larger than the
+        # file -- section 7 ends with a 4.5 MB fill into DDR, and a blunter
+        # guard than this rejected it and truncated the walk at 88 of 95 blocks.
+        if block.has_payload and block.end > len(data):
+            return Walk(tuple(blocks), at,
+                        f"payload at 0x{at:06x} runs past the end of the section",
+                        len(data))
+        blocks.append(block)
+        at = block.end
+    return Walk(tuple(blocks), at, "block limit reached", len(data))
+
+
+def find_streams(data: bytes, min_blocks: int = 3) -> list[Walk]:
+    """Every convincing chain in `data`, outermost first, without overlaps.
+
+    A stream need not start at offset 0 -- a section can hold several, and the
+    Digitone II's section 7 does. Candidates are tried at every signed header
+    and kept only if `Walk.convincing`.
+    """
+    found: list[Walk] = []
+    claimed: list[tuple[int, int]] = []
+    candidates = [i for i in range(0, max(len(data) - HEADER, 0), 4)
+                  if data[i + 3] == SIGNATURE]
+    walks = [walk(data, at) for at in candidates]
+    walks.sort(key=lambda w: len(w.blocks), reverse=True)
+    for result in walks:
+        if len(result.blocks) < min_blocks or not result.convincing:
+            continue
+        begin = result.blocks[0].offset
+        if any(lo <= begin < hi for lo, hi in claimed):
+            continue
+        claimed.append((begin, result.stopped_at))
+        found.append(result)
+    return sorted(found, key=lambda w: w.blocks[0].offset)
