@@ -593,3 +593,88 @@ that was entered zero times, so the attribution was wrong, not the counts.
 The rule, which belongs next to the others here: **a call-target resolver names
 a landmark, not a scope.** Where the enclosing function matters, hook its
 candidate entry and check it actually runs.
+
+---
+
+# Reading the engine feed: the one pair confirmed both ways
+
+`0x4004dc62` is the only engine-side function this project has confirmed
+**statically and at runtime** — re-found by byte pattern in
+`docs/version-anchors.md`, and observed executing with a return address that
+matches the derived call site to the byte. So it is the one worth reading.
+
+## The call site assembles the engine modulation state
+
+```
+0x4003e31c  addil #18825819,%d2      ; 0x011F425B
+0x4003e322  movel %d2,%sp@-          ; arg 2
+0x4003e324  addal #324440,%a2        ; 0x4F358 -- the engine modulation-state
+0x4003e32a  movel %a2,%sp@-          ;           offset from version-anchors
+0x4003e32c  jsr 0x4004dc62
+0x4003e332  addql #8,%sp             ; two arguments
+```
+
+`0x4F358` is exactly the "engine modulation-state offset" recorded for 1.11, so
+the argument is **the object's modulation state**, and the caller reaches it by
+the offset this project derived by histogramming immediates. Immediately above,
+a loop runs `d3` from 0 to 59,104 in steps of 3,694 while advancing `%a3` by 84
+— **16 iterations**, which is the DN2's track and voice count.
+
+## What the function does: 128 blocks of 960 bytes
+
+Arguments arrive swapped relative to the push order, which is worth writing down
+because reading it the natural way gets the two backwards:
+
+```
+0x4004dc6a  moveal %sp@(24),%a2      ; a2 = the caller's d2
+0x4004dc6e  movel  %sp@(20),%d3      ; d3 = the modulation-state pointer
+```
+
+Then, after one call to `0x4019a96e` and a null check on `a2`:
+
+```
+0x4004dc82  addil #48,%d3            ; skip a 48-byte header
+0x4004dc8a  lea 0x4004afec,%a3       ; the per-entry worker, by pointer
+loop:
+0x4004dc94  pea %a2@(0,%d2:l)        ;   arg: a2 + d2
+0x4004dc98  movel %d3,%sp@-          ;   arg: the state pointer
+0x4004dc9a  jsr %a3@                 ;   0x4004afec(state, entry, 0, 0)
+0x4004dc9c  addil #960,%d3           ;   state += 960
+0x4004dca2  addil #1163,%d2          ;   entry += 1163
+0x4004dcac  cmpil #148864,%d2
+0x4004dcb2  bnes loop
+```
+
+The arithmetic is exact and says what the structure is:
+
+| quantity | value | meaning |
+|---|---|---|
+| `148864 / 1163` | **128** | iterations — the sound-object pool size |
+| `128 × 960` | 122,880 = `0x1E000` | the modulation state's span |
+| header skipped | 48 bytes | before the first entry |
+| stride, state side | **960** | bytes of engine modulation state per slot |
+| stride, object side | **1163** | bytes per source entry |
+
+**128 is the sound-object pool count** already measured from the accessor that
+clamps an index to 0..127 with a 2,388-byte stride (`docs/lfo4-slot-plan.md`).
+Two independent structures agreeing on 128 is the kind of corroboration worth
+having.
+
+## What this is for, and what is still open
+
+This is the shape of the control→engine feed: a per-slot walk that hands
+`0x4004afec` a 960-byte engine modulation block and a 1163-byte source entry,
+128 times. **A fourth LFO has to appear inside that 960-byte block**, and the
+open question is now specific enough to answer: *what is the layout of those 960
+bytes, and how many LFO-shaped sub-blocks does it hold?*
+
+That is a much smaller question than "where is the engine-feed path", which is
+where this page started.
+
+**Not yet established, and not to be assumed:** that these 960-byte blocks
+contain the LFOs at all. `docs/engine-index-map.md` §§11 and 14 previously
+claimed a fourth LFO lane existed and **both are withdrawn** — the probes that
+"confirmed" it changed the forward and inverse maps together and never
+discriminated. Nothing here revives that. What is established is the feed's
+shape and its two strides, read from instructions, with the call site confirmed
+by a runtime return address.
