@@ -7,12 +7,32 @@ This records how it is wired in, and why that way.
 ## Where it lives
 
 ```
-00_Resources/01_Reference/digikit/     a plain git clone, tracking origin/main
+C:\ZZ_Code\ZZ_Personal\digikit\        a plain git clone, tracking origin/main
 ```
 
-`00_Resources/` is gitignored **wholesale**, so nothing of digikit's enters this
-repository. That is the same place the other seven reference repositories live,
-and consistency is most of the reason.
+**A sibling of this repository and of DNX, not inside either.** Nothing of
+digikit's enters this repository at all.
+
+It was first cloned into `00_Resources/01_Reference/` beside the other seven
+references, and promoted within the hour on the owner's instruction: *"clone it
+in personal so DNX can use it too."* That is the right call, and it is worth
+saying why rather than just recording the path.
+
+The other seven are **source to read**. digikit is **a tool to run** — it has a
+virtualenv, a compiled native dependency, and a command line. A tool used by two
+projects should not live inside one of them, because the moment DNX depends on
+it, DNX depends on a path inside `dn2_firmware`'s gitignored scratch space.
+
+And DNX's claim on it is real rather than hypothetical. DNX's object model was
+derived from **hardware captures**; an emulator that runs the same firmware lets
+those decoders be checked against the code that produces the bytes. The ~90
+`MidiRpc` request/response pairs in `docs/midi-rpc.md`, parked for want of a way
+to exercise them, are the obvious first use.
+
+One caveat before DNX leans on it: **storage is not served**. digikit's eSDHC
+and eMMC models handle card identification only, and `CMD18` reads return zeros,
+so `+Drive` traffic has nothing behind it yet. The protocol path can be traced;
+the data cannot be read.
 
 ## Why a plain clone and not a submodule
 
@@ -79,6 +99,38 @@ The clone stays on the Windows side and is reached from WSL as
 One caveat worth knowing before it wastes an hour: building a native extension
 against a `/mnt/c` path is slow and occasionally trips on permissions. Put the
 **virtualenv inside WSL's own filesystem** even when the source is on `/mnt/c`.
+
+### The CRLF trap — hit immediately, and it will recur
+
+A repository cloned by Git for Windows with `core.autocrlf=true` — the default
+here, and visible in this project's own commits as *"CRLF will be replaced by LF
+the next time Git touches it"* — checks shell scripts out with **CRLF line
+endings**. Run one under WSL's bash and you get:
+
+```
+tools/install-patched-unicorn.sh: line 3: set: pipefail: invalid option name
+```
+
+`set -euo pipefail\r` — bash is rejecting `pipefail\r`, not `pipefail`. The
+message names a real bash option as invalid, which sends you looking at bash
+versions instead of at the bytes. **Every `.sh` in a Windows clone run from WSL
+has this**, and the failure wears a different mask in each script.
+
+Fix it once, per clone:
+
+```sh
+cd /c/ZZ_Code/ZZ_Personal/digikit
+git config core.autocrlf false
+git config core.eol lf
+git rm --cached -r -q .   &&  git reset --hard
+```
+
+Confirm with `head -3 tools/install-patched-unicorn.sh | cat -A` — lines must
+end `$`, never `^M$`.
+
+This is the same class of problem as everything else in this section: **the tool
+was not lying, the input was malformed, and the error message pointed
+elsewhere.**
 
 ## Stock Unicorn cannot run this firmware
 
