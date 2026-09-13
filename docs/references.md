@@ -356,3 +356,33 @@ AGPL-3.0-or-later, so porting with attribution is *possible* — but
 **running digikit as a separate tool entangles nothing**, and that is the route
 to prefer until there is a specific reason to copy code. Flag any actual port to
 the owner first: it is their public repository and their licensing decision.
+
+## Community Octatrack reverse-engineering, shared 2026-09-13
+
+Two documents from the Octatrack RE community, passed on by the owner as
+reference. **Not used by anything here** — recorded because the overlap is real
+and because re-deriving what someone else has already published is waste.
+
+| Document | What it holds |
+|---|---|
+| `TABLE_ATLAS.md` | A shape-level catalogue of every X/Y data table the Octatrack's ColdFire uploads to its DSP56300s at boot, from OS 1.40C. Addresses, word counts and decoded curve shapes; attribution deliberately out of scope. |
+| `octatrack-delay-architecture.md` | Where the Echo Freeze delay actually lives, and why earlier searches missed it. |
+
+Two things in them bear on this project, and neither is a coincidence:
+
+**The control CPU ships the DSP its tables at boot.** That is the same
+architecture we have on the DN2 — ColdFire plus a separate audio DSP, with the
+DSP's program and data arriving from the update image. Their `X:0x06c00`
+container holds a 1,024-word sin/cos wavetable next to a single-cycle ramp/saw,
+which the author reads as an **LFO/oscillator waveform bank**. If the DN2's LFO
+waveforms live SHARC-side in the same way, that is directly relevant to §7 and
+to what a fourth LFO does *not* need: a fourth generator reuses those tables
+rather than adding any.
+
+**Their method is ours, one device over.** Shape-level cataloguing with
+attribution held back until it is earned is exactly the discipline
+`docs/PRINCIPLES.md` asks for, and their atlas openly marks a segmentation its
+own disassembly later contradicted rather than quietly fixing it.
+
+The Octatrack's DSP is a **DSP56300**, not a SHARC+, so no address, encoding or
+table layout transfers. What transfers is the architecture and the method.

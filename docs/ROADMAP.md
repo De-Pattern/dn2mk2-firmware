@@ -119,11 +119,21 @@ page-view consumers all run **constantly** during normal UI operation — 2,798,
 (`scripts/call_map.py`, `docs/trace-harness.md`). The hardware trace's nine
 blank columns meant nothing about those functions; the readout was frozen.
 
-So the parameter path is where its 34 callers always said it was, and the two
-functions LFO4 must hook are still the ones to find: **the display path** and
-**the engine-feed path**. `parameter_value_getter` is confirmed *not* the
-display path — forcing its return changed nothing on screen — but it is now
-confirmed to *run*, which makes it a live lead rather than a dead one.
+So the parameter path is where its 34 callers always said it was.
+
+**The display path is now mapped** — `docs/display-path.md`. Watching the
+framebuffer rather than naming a function gives eight drawing primitives by
+measurement, and walking back from `param_index_in_page` shows that only **2 of
+its 34 static callers ever fire**, both inside `0x40036bac`, which is itself
+called only from `0x4003951e` — the destination-list builder this project had
+already named from a different direction. `parameter_value_getter` runs
+constantly while changing no pixels, so it feeds something that is not the
+screen: a live lead rather than the dead end it looked like.
+
+That leaves **the engine-feed path**, and it is blocked on the same thing every
+silent probe has been: digikit models no input, so the mirror path nothing
+drives never runs. Either teach the emulator input, or find the path statically
+from `0x4003951e` and `0x4003e426` (the engine thunk site).
 
 `M` and `S` — the `updateMirror` lambda and its enclosing function — stayed
 silent, and that is **not** a finding: digikit models no input, and the mirror

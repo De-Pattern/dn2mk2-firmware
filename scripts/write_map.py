@@ -38,6 +38,13 @@ the hooks. So the loop's own address is hooked too (`--loop`), which splits the
 two: loop hits of zero means the run was too short; loop hits with no writes
 means the write hooks are not firing.
 
+**The mechanism itself is now known to work (2026-09-13).** Neither run below
+produced a number, and until `scripts/paint_map.py` there was no way to tell
+"the hooks do not fire" from "the run never reached the writer". Watching the
+framebuffer -- a region a composed frame *must* have painted -- returned
+1,637,709 writes from 29 pcs, so `install_mmio_trace` fires. The zeros here were
+run length. See `docs/display-path.md`.
+
 **Non-interference: the digest.** digikit warns that global `UC_HOOK_CODE` and
 `UC_HOOK_BLOCK` hooks change outcomes rather than merely timing. These hooks are
 range-scoped and fire only on RAM inside the candidate runs, but "should not
