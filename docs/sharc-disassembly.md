@@ -120,3 +120,88 @@ that can be *asked of instructions* rather than of strings.
 Java; it lives on the flashing machine, `docs/HANDOVER.md`). The Python
 disassembler runs here today; the Ghidra module needs the other machine or an
 install.
+
+---
+
+# Installed and running in Ghidra, 2026-09-14
+
+Ghidra **is** set up on this machine, natively on Windows (the earlier note that
+it was only on the flashing machine was wrong — `docs/HANDOVER.md` is from
+before `33d0e0d`):
+
+```
+C:\tools\ghidra_12.1.3_PUBLIC        Ghidra 12.1.3
+C:\Tools\jdk-21.0.12.1+1             JDK 21 (Temurin)
+```
+
+Stock Ghidra 12.1.3 ships **no SHARC, Blackfin or ADSP processor** — confirmed
+by listing `Ghidra\Processors` (39 modules, none of them ADI).
+
+## Installing the module
+
+```
+copy  digikit\tools\ghidra\SHARC  ->  <ghidra>\Ghidra\Processors\SHARC
+<ghidra>\support\sleigh.bat -a <ghidra>\Ghidra\Processors\SHARC\data\languages
+```
+
+Result: **`1 languages successfully compiled`**, with
+`WARN 45 NOP constructors found` — which is the documented limitation showing
+up honestly, not a fault: only control-flow types carry p-code, so 45 of the 47
+constructors decode and print without semantics.
+
+### The trap: SLEIGH enforces the path's exact case
+
+The first compile failed with:
+
+```
+BailoutException: input file "...\sharc.slaspec" is not properly case dependent
+  Canonical path: C:\tools\ghidra_12.1.3_PUBLIC\...
+  User path:      C:\Tools\ghidra_12.1.3_PUBLIC\...
+```
+
+The directory on disk is `C:\tools` (lowercase). Windows does not care;
+**SLEIGH does**, and it fails with a case-comparison error rather than
+"file not found", which reads like a spec problem and is not one. Use the
+canonical casing. `ghidra\analyze.bat` globs `C:\Tools\ghidra_*`, which works
+for everything else but would reproduce this if used to compile a spec.
+
+## Importing our SHARC code
+
+Addressing follows the module: code addresses are 16-bit short-word units, so
+the byte base is `2 × word address`. For the L2 code region, whose load address
+`docs/sharc-code-map.md` puts at `0x283825c4`:
+
+```
+byte base = 0x283825c4 - 0x28000000 = 0x003825c4      (= 2 x 0x1c12e2, the entry)
+```
+
+```
+analyzeHeadless <proj> sharcL2 -import out\sharc_l2_code.bin \
+    -processor SHARC:LE:32:VISA -loader BinaryLoader -loader-baseAddr 0x3825c4
+```
+
+**Import and analysis succeeded**, and `ghidra/ExportDisassembly.java` — written
+for Gate F against ColdFire, reused unchanged — produced a listing:
+
+```
+003825c4  001003000014  t14a 0x3,0x1400
+003825ca  3e02          t2c
+003825cc  300000000011  t21a 0x0,0x1100
+003825d2  030000140000  t21a 0x1400,0x0
+```
+
+**796 instructions, 25 undecodable** over the first 4 KB. The 6/2/6-byte
+lengths are VISA decoding working, and they agree instruction-for-instruction
+with `tools/sharc_disasm.py`'s independent walk of the same bytes.
+
+## A false positive to know about before reading any listing
+
+Many early lines decode as `t21a 0x0,0x0` from **all-zero bytes**. An all-zero
+48-bit word satisfies Type21a's mask, so **zero padding disassembles as valid
+code** and does so "confidently" in both tools.
+
+That matters because the region's first bytes are largely zero: a listing taken
+at the entry point is mostly padding wearing an instruction's clothes. Use the
+cjump density in `docs/sharc-code-map.md` to aim at real code rather than
+trusting that decoding succeeded — *a decoder that never fails on zeros cannot
+tell you it has left the code.*
