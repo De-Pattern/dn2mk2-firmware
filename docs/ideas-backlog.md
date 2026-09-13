@@ -41,10 +41,155 @@ and only sacrifice a feature if the measurement says we must. This becomes much
 more likely on the **DN1**, whose image is smaller and whose padding is
 scarcer — which is where this strategy earns its keep.
 
+> ### ⚠️ "~29 KB of padding in ~1 KB runs" is wrong. Corrected 2026-09-13.
+>
+> Those runs are **not padding**. Sixteen of them sit at a regular 0x40C stride
+> from `0x40287ef6`, each 1,035 zero bytes followed by one `0xff` — a
+> **16-element array of 1,036-byte records**, shipped zeroed and **written at
+> runtime**. Sixteen is this machine's track and voice count.
+>
+> `dnfw cave scan` offered them because the bytes are zero, exactly as
+> `docs/memory-map.md` warns it will: *a zero run is a candidate, not a
+> blessing.* Caves were placed there anyway, the firmware overwrote them while
+> the keyboard was played, and the device took an **address error with
+> PC `0x40000042`** — a jump into what had been code and was now data
+> (`docs/flashing.md`).
+>
+> So the free-space budget for hooks is **unmeasured**, not 29 KB, and a regular
+> stride is positive evidence *against* a run being padding. The boot proof's
+> cave at `0x4028ea02` is outside this array and has run without incident.
+
 **Related, and also unresolved:** growing section 3 itself. Freed flash could in
 principle let MAIN OS extend past its end (`0x4030b980` on 1.11), but that needs
 the device's flash layout confirmed and the boundary above the loaded image
 pinned, so new bytes cannot collide with anything. See `docs/memory-map.md`.
+
+### 1a. The better half of the idea: **add** a section, do not delete one
+
+*Raised by the owner 2026-09-13, from the Outbox observation above.*
+
+This entry asked *"if Elektron can add a section, could we delete one?"* and
+answered no. It never asked the other question, and that one is much better:
+
+> **If Elektron can add a section, can we?**
+
+Section 8 is the existence proof, and it is a strong one. In a single release
+Elektron added a **new section id**, carrying a payload the ColdFire never
+executes, at a `dest` of its own choosing, and the device accepts it. Nothing
+about that mechanism is Outbox-specific.
+
+**Why this is the right shape for LFO4.** Every cave problem this project has
+had comes from *squatting*: finding bytes that look unused inside a section
+built for something else, and being wrong about them — the `0x40287ef6` array
+above being the expensive case. A section of our own has none of that. We choose
+the `dest`, we know the length, and nothing else in the image claims it. No zero-
+run hunting, no stride heuristics, no guessing whether a gap is real.
+
+It also composes with the 25 MB above the BSS end (`docs/lfo4-slot-plan.md`):
+that region is unclaimed but full of power-on garbage, so anything living there
+must be initialised by our own code. A section with a `dest` **is** the
+initialiser — the loader writes it before the OS runs, which is precisely the
+service the extension array needs.
+
+**What must be true, in order of how likely it is to kill the idea:**
+
+1. **The updater accepts an unknown section id** rather than rejecting the
+   image or faulting. This is the gate. Section 8 shows *Elektron's* new ids are
+   accepted by the 1.11 updater — it does not show an id nobody has shipped is.
+2. **The loader honours an arbitrary `dest`**, and writes it where we ask.
+3. **Integrity survives.** The content checksum and the HMAC-SHA256 trailer are
+   both ours to recompute (`docs/ele3-format.md`), so this is expected to be
+   routine — but it is expected, not shown. **The "Multiplier" key material is
+   not to be touched**, and adding a section does not require touching it.
+4. **The `dest` does not collide** with anything the loader or BSS clear uses.
+
+**Why it is testable now, which it was not last week.** Point 1 used to be
+flash-and-find-out on the owner's hardware. **Section 4 is the updater**, and
+`m-dwyer/digikit` runs section 4's code under emulation already — that is how it
+depacks (`docs/emulator.md`). So the updater's section dispatch can be read
+statically out of 32 KB of ColdFire, and exercised, without touching the device.
+
+**Do this before building anything.** It is cheap, it is offline, and it decides
+between "a section of our own" and "keep hunting for safe caves" — which is the
+difference between a solved placement problem and the one that has bitten us
+twice.
+
+### 1b. Answered the same day: the updater looks sections up **by id**
+
+Read out of the 1.11 updater (section 4, 32 KB, `0x80000400`), statically —
+no device, no emulator run needed in the end.
+
+`'ELE3'` occurs exactly once in the image, as an immediate:
+
+```
+80003cf8:  read 32 bytes of the container header
+80003d1a:  movel #'ELE3',%d0
+80003d20:  cmpl  0x8000b3d4,%d0        ; magic
+80003d28:  moveq #52,%d0
+80003d2a:  cmpl  0x8000b3d8,%d0        ; and a second field == 52
+```
+
+and the lookup at `0x80003d6e` is:
+
+```
+d3 = 0x80020                    ; the section table, container offset 0x20
+loop: read 16 bytes at d3       ; one entry, matching docs/ele3-format.md
+      d3 += 16
+      if (wanted_id == entry[0]) goto found      ; 0x80003dbe
+      if (++d2 < *0x8000b3f0) goto loop          ; bounded by the section count
+      return 0                                    ; NOT FOUND
+found: copy the entry out, return 1               ; 0x80003dce
+```
+
+**A `find_section_by_id`, not a dispatcher.** Two consequences, and they pull
+against each other:
+
+* **Good: an unknown section id is harmless.** The loop only ever *searches*.
+  An id nothing asks for is never found, never examined, and produces no error
+  and no fault. Gate 1 above is passed — adding a section will not break the
+  update.
+* **Bad: it is therefore inert.** Nothing installs a section the updater does
+  not look up by name. Our bytes would ride along in the file, be covered by the
+  content checksum and the HMAC, and then be **ignored**.
+
+**The corroboration is in our own notes.** `docs/os-versions.md` records that in
+1.11 the **updater changed for the first time in three releases**, 14,231 bytes
+differing — and 1.11 is exactly the release that added section 8. That is what
+this code predicts: *the updater must be taught each new id*. A fact recorded
+weeks ago as a curiosity turns out to be the mechanism.
+
+**So 1a is elegant and blocked**, by the same property that makes it safe. Using
+it would mean patching the updater — the one section this project and
+`m-dwyer/digikit` both refuse to touch, because a broken updater takes the
+recovery path with it.
+
+### 1c. What survives: grow section 3
+
+The need was never "a new id". It was **bytes at an address we choose, installed
+by something that already works.** Section 3 is already looked up, already
+installed, already loaded at `0x40000400`, and its length comes from the section
+table.
+
+So the viable form of this idea is the one already parked under *"Related, and
+also unresolved"* above: **extend MAIN OS past its end** (`0x4030b980` on 1.11)
+rather than add a section beside it. Same benefit — a region that is ours, at a
+known address, with no zero-run guessing and no stride heuristics — and it needs
+no updater change at all.
+
+What must still be established, and is now the actual blocker:
+
+1. **What the updater does with a found section** — whether it honours the
+   table's length and dest generically, or carries per-id expectations. Read the
+   code at `0x80003dce`'s callers next.
+2. **What lies above `0x4030b980`** in the loaded image, and where the `.data`
+   copy and BSS clear land — `docs/memory-map.md` puts BSS at `0x402fc000` and
+   the initializer at `0x402e2000..0x40300000`, which need reconciling with an
+   image that ends at `0x4030b980`.
+3. **Flash room**, which is where deleting section 8 finally becomes relevant —
+   not for address space, but to pay for a longer section 3.
+
+Note the shape of that last point: the owner's original instinct was right, just
+one step removed. Section 8's space does not house our code — it **funds** it.
 
 ---
 

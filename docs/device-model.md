@@ -6,6 +6,23 @@ came from exactly that. This is the object model, taken from DNX's measured
 `+Drive` listings and cross-checked against strings in the firmware itself, so
 that a count or an index in the code can be matched to a real thing.
 
+## The counts the instrument itself has
+
+Stated by the device's owner, 2026-09-13, after this analysis asserted the wrong
+figure from memory:
+
+| Thing | Count |
+|---|---|
+| **Voices** | **16** |
+| Tracks | 16 |
+
+Worth recording because loop bounds are how this project recognises structures,
+and a wrong count turns a real bound into a false identification. A run of 16 at
+boot is unremarkable on this machine; a run of 8 would want explaining. (The
+Digitone **I** is the 8-voice machine — that is where the wrong number came
+from, and it is exactly the kind of cross-model carry-over
+this document exists to prevent.)
+
 ## The store, as the device presents it
 
 Measured by DNX from live `+Drive` directory listings (`DNX/docs/device-storage.md`):

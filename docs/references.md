@@ -199,6 +199,7 @@ findings change what may be copied**, and both moved since this project started:
 | `nordseele/octalab-notes` | MIT | yes, though it is **docs only**: no firmware, no build, no flashing procedure |
 | **`emuyia/ems-octakit`** | **MIT — added 2026-09-12** | **yes, newly.** This repo was unlicensed for the whole of this project's life; the condition recorded against it has now been met, so its `.S` stubs, `link.ld` and `firmware.json` manifest may be ported with attribution |
 | **`mxldyn/octamax`** | **NONE** | **no.** No LICENSE file and no statement in its README. Architecture-only inspiration, never copied |
+| **`m-dwyer/digikit`** | **GPL-2.0-or-later** | **yes, with care** — see below. Taken forward as GPLv3 it combines with this repo's AGPL-3.0-or-later; **using it as a tool entangles nothing at all**, which is the route to prefer |
 
 **The restriction moved rather than lifted.** `ems-octakit` was the one to avoid
 and is now free to use; `octamax` is now the one to avoid. Earlier notes in this
@@ -215,3 +216,143 @@ flashing procedure". It records what its author learned about OT 1.40C while
 adding creative helpers — a topographic trig generator in the style of Mutable
 Instruments' Grids. Useful as reverse-engineering knowledge and as a second
 account of the Octatrack's internals beside octabam's; nothing to port.
+
+---
+
+## `m-dwyer/digikit` — an emulator for our exact CPU, and the closest prior art yet
+
+<https://github.com/m-dwyer/digikit>, GPL-2.0-or-later. Added 2026-09-13 by the
+owner. **Still in development**, and its handover notes are dated the same week
+as ours — this is a live parallel effort, not an archive.
+
+It is the project the owner asked about on 2026-09-11 — *"would an emulator
+solve our growing stack questions?"* — built by someone else and already
+further along than anything here.
+
+### What it is
+
+A Python 3.12 emulator for the **Digitakt II's control processor**, on Unicorn,
+that boots the main OS, spawns the RTOS tasks, reaches the message loop and
+**renders the UI to the 128×64 panel** — pattern and project names, tempo,
+encoder parameters — live or exported as PNG. ~10M instructions/second against a
+modelled 4.68 MHz, so 20–25 fps with tempo holding.
+
+Its hardware model is our hardware, independently arrived at:
+
+| | digikit | this project (`docs/hardware.md`) |
+|---|---|---|
+| control CPU | Freescale **MCF54415**, big-endian | **MCF5441SCMJ250**, from the owner's board photos |
+| audio DSP | **ADSP-21569 SHARC+**, separate firmware, out of scope | ADSP-21569 SHARC+ (U9) |
+| MAIN OS load base | `0x40000400` | `0x40000400` |
+
+Two independent routes to the same answer, which is the kind of corroboration
+this project has had little of.
+
+### It supports the Digitone II
+
+```sh
+uv run python -m emu.run Digitone_II_OS1.10E.syx
+```
+
+Section extraction is identical to the Digitakt, and the decompressor has been
+verified byte-identical across DT2 1.15C and DN2 1.10E.
+
+> **Correction, same day.** This section first said, from `README.md` and
+> `docs/DIGITONE.md`, that on the DN2 *"the main application task never wakes"*
+> — blocked on mutex `0x44460e40` from a lost timer-wheel wakeup — and therefore
+> that **the UI renders for the Digitakt and not the Digitone**.
+>
+> **That is stale and wrong as a statement of current state.** The author's own
+> account, relayed by the owner 2026-09-13: *"basic emulator for latest Digitakt
+> 2 and Digitone 2 firmware… it works"*, and `docs/HANDOVER-2026-09-13.md`
+> records **"You can press buttons and turn encoders on both builds, and the
+> firmware responds."** Front-panel input, UART8 at 156250 baud, event decoding
+> through a `queue_send` hook, and control-name resolution from the firmware's
+> own tables are all working.
+>
+> The lesson is about *this* repository, not that one: **a project under active
+> development has a stale README, and its handover notes are the live
+> document.** Reading the tidiest file and asserting current state from it is
+> the same error this project has made against its own firmware all week.
+
+Current, from the author and the latest handover:
+
+| | state |
+|---|---|
+| DN2 boot + UI | **works** |
+| buttons and encoders | work on both builds — but the author flags **encoder turn/deltas as buggy and needing fixing** |
+| page buttons | momentary — the page reverts shortly after release |
+| DT2 `boot280M.snap` | renders a blank screen post-intro, so screen-based identification fails on that build |
+| storage (eSDHC/eMMC) | identification only; `CMD18` reads return zeros |
+| audio (SHARC+) | out of scope, separate firmware |
+
+**Which DN2 version is unresolved.** The README documents 1.10E; the author says
+"latest". Ours is 1.11. Worth asking rather than assuming — and it decides
+whether our anchors transfer directly or need re-deriving.
+
+### DN2 1.10E addresses it names
+
+Ours are anchored to 1.11 and would need re-deriving, but these name *roles*,
+which is exactly what this project keeps getting wrong by pattern-matching:
+
+| role | DN2 1.10E |
+|---|---|
+| `set_pixel` / `get_pixel` | `0x40105964` / `0x40105a30` |
+| main application task entry (prio 6) | `0x4002e688` |
+| `flash_read` | `0x40126b46` |
+| `current_tcb` | `0x46487fdc` |
+| `intro_pit3_isr` | `0x400d4fb8` |
+| soft-float block | `0x401685fc–0x40169f5c` |
+
+`set_pixel` is the one to note. **Everything drawn on that screen passes through
+it**, so the display path we have failed twice to identify is reachable by
+hooking one function and walking back — against a named role rather than a
+guessed one.
+
+And with encoder input working in the emulator, the question that has cost this
+project four flashes — *which functions run when you turn an encoder?* — becomes
+a trace, not a guess. The author's caveat that **encoder deltas are buggy** is
+the thing to verify before trusting such a trace: a broken delta could deliver
+the event without the value change, which would light exactly the wrong half of
+the path and look like a result.
+
+### The landmine it saves us from
+
+**Stock Unicorn cannot run this firmware.** digikit ships
+`tools/install-patched-unicorn.sh` for a "destructive SR read" defect that
+corrupts the condition flags. Anyone standing up a ColdFire emulator from
+scratch would hit silently wrong flag behaviour and debug the firmware instead
+of the emulator — the same failure mode octabam recorded for radare2's m68k
+backend, and which `docs/mainos-image.md` already treats as a rule: **validate
+the tool before trusting its output.**
+
+### What it already caught
+
+Setting it up made an independent extraction available, and **four of our five
+sections came out byte-identical while section 4 differed by exactly eight
+bytes** — a header this project was writing out as payload. `docs/emulator.md`
+has the finding in full. Two things about it are worth carrying here:
+
+* digikit does not reimplement aPLib. It **runs the updater's own depacker under
+  Unicorn**, so the agreement is between our Python and *the device's own code
+  executed* — a stronger cross-check than the one `elektron-firmware-tool` was
+  being kept around for and never gave, for want of a C compiler.
+* The bug was a plausible untested model sitting in the repository looking
+  settled — *"a raw section is stored raw, so write it out"* — which is the
+  week's pattern in its mildest form.
+
+### What it would have caught here
+
+The crash on 2026-09-13 (`docs/flashing.md`) was a cave placed in a live
+16-record array that the firmware overwrites at runtime. **An emulator watching
+writes to that range would have shown it in seconds, without a flash and without
+an exception on the owner's instrument.** Every cave placement question this
+project has guessed at is a memory-watch away in a tool that already exists.
+
+### Licence, and the route to prefer
+
+GPL-2.0-or-later. Taken forward as GPLv3 it is compatible with this repository's
+AGPL-3.0-or-later, so porting with attribution is *possible* — but
+**running digikit as a separate tool entangles nothing**, and that is the route
+to prefer until there is a specific reason to copy code. Flag any actual port to
+the owner first: it is their public repository and their licensing decision.

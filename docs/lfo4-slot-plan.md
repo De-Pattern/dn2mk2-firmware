@@ -1,9 +1,24 @@
 # Where LFO4's eight slots come from
 
-The engine side is finished (`docs/engine-index-map.md` §§11, 14): the DN2's
-SHARC implements a fourth LFO, lane 4 is a separate generator, and four run
-simultaneously. Everything left is control-side, and it is one problem — **eight
-runtime slots**.
+> **⚠️ This document opened by asserting that the engine side was finished. It
+> is not, and that sentence was wrong (corrected 2026-09-13).**
+>
+> It read: *"the DN2's SHARC implements a fourth LFO, lane 4 is a separate
+> generator, and four run simultaneously"*, citing `docs/engine-index-map.md`
+> §§11 and 14. **Both of those sections are withdrawn.** The two probes that
+> "confirmed" a fourth generator each changed the forward *and* inverse maps
+> together, so a consistent storage round-trip predicts the same positive result
+> with **only three generators running** — the tests never discriminated. The
+> offsets they were built on are the **DNX storage layout**, not engine
+> addressing (§15).
+>
+> So whether a fourth LFO generator exists is **unknown**, and everything below
+> is contingent on it. The plan is kept in full because the control-side
+> analysis stands on its own and is still what LFO4 needs; only the premise that
+> the engine is ready has been removed.
+
+Everything below is control-side, and it is one problem — **eight runtime
+slots**.
 
 `docs/engine-index-map.md` §13 measured the constraint and sketched a hook-based
 answer. That sketch was pessimistic, and this document replaces it. The question
@@ -264,3 +279,34 @@ the same amount**. Harmless, instantly visible, reverted by reflashing stock.
 **Do not build another LFO4 variant until that question is answered.** Three of
 this project's flashes have now been spent on an assumption that was never
 tested and could have been tested first.
+
+### ANSWERED 2026-09-13: caves execute, and the target was always the fault
+
+The question was put to the device twice more and both answers are in
+`docs/flashing.md`.
+
+`build_flash_control.py` carried the known-good Gate E edit alongside the
+experiment. `DNFW ALIVE!` appeared in SETTINGS and `AMP VOL` still read 110 — so
+**flashing works**, our images run, and the branch above was the wrong pair. The
+cave test had hooked a function that is never reached for the thing being
+observed: **invalid, not negative.**
+
+`build_cave_boot_proof.py` then hooked the boot path — where nothing has to be
+assumed, because the device boots — and had the cave write `CAVE RAN!!!` over
+the SETTINGS string in RAM while the image still contained `PERSONALIZE`. **The
+device showed `CAVE RAN!!!`.** Only the cave can have written it.
+
+So: **caves execute, from the constants region, exactly as built.** The
+suspicion that `0x4028ea02` is not executed is withdrawn (`docs/code-caves.md`).
+Every silent build was target selection.
+
+**What replaces "do not build another LFO4 variant".** The prohibition stands,
+but for a new reason: not because the mechanism is unproven, but because the two
+functions LFO4 must hook — the display path and the engine-feed path — are still
+unnamed, and `parameter_value_getter` is now known **not** to be the first.
+Guessing again costs a flash and returns one bit.
+
+`docs/trace-harness.md` is the answer to that: eleven probes in one image, each
+marking its own column of the SETTINGS string when its function runs. It settles
+`G` (does the getter run at all?), `M` (is the vtable reading right?) and the
+nine other candidates in a single flash, using the mechanism just proven.
