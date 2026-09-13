@@ -215,6 +215,42 @@ def walk(data: bytes, start: int = 0, max_blocks: int = 100_000) -> Walk:
     return Walk(tuple(blocks), at, "block limit reached", len(data))
 
 
+def load_regions(data: bytes, start: int = 0) -> list[tuple[int, bytes]]:
+    """Play the stream back into the memory it describes: [(address, bytes)].
+
+    This is what makes the image *readable*. Offsets into the section are not
+    addresses -- the payloads are scattered across L1, L2 and DDR -- so nothing
+    can be cross-referenced until the blocks are laid out where they load. Fill
+    blocks contribute zeros, which is what the loader writes.
+
+    Adjacent and overlapping spans are merged, so a later block overwrites an
+    earlier one exactly as it would on the device.
+    """
+    result = walk(data, start)
+    pieces: list[tuple[int, bytes]] = []
+    for block in result.blocks:
+        if block.has_payload:
+            pieces.append((block.target, data[block.payload_at:block.payload_at + block.count]))
+        elif block.flags & FLAG_FILL and block.count:
+            pieces.append((block.target, bytes(block.count)))
+    if not pieces:
+        return []
+
+    pieces.sort(key=lambda p: p[0])
+    merged: list[tuple[int, bytearray]] = []
+    for address, payload in pieces:
+        if merged and address <= merged[-1][0] + len(merged[-1][1]):
+            base, buffer = merged[-1]
+            offset = address - base
+            need = offset + len(payload)
+            if need > len(buffer):
+                buffer.extend(bytes(need - len(buffer)))
+            buffer[offset:offset + len(payload)] = payload
+        else:
+            merged.append((address, bytearray(payload)))
+    return [(address, bytes(buffer)) for address, buffer in merged]
+
+
 def find_streams(data: bytes, min_blocks: int = 3) -> list[Walk]:
     """Every convincing chain in `data`, outermost first, without overlaps.
 
