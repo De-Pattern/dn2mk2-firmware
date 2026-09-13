@@ -181,8 +181,26 @@ derived independently, from hardware, by a different tool.
   not a UI asset store, so this no longer bears on LFO4; it bears on everything
   that touches audio, which is why `docs/ideas-backlog.md` §7 is largely
   answered and §8 (FX machines, issue #49) is now askable.
-- **Reading a SHARC instruction.** Nothing in this repository decodes SHARC+
-  VISA, and that is now the binding constraint on all DSP-side work rather than
-  a hypothetical one. digikit has a disassembler; we have the code map to aim it
-  with.
+- ~~**Reading a SHARC instruction.** Nothing in this repository decodes SHARC+
+  VISA, and that is now the binding constraint on all DSP-side work.~~
+  **Superseded 2026-09-14 — `docs/sharc-reading.md`.** A decoder exists,
+  is installed in Ghidra, and both regions now sit in one program with every
+  call resolving. The binding constraint moved rather than lifted:
+
+  - The SHARC image has **no symbols** — eight real strings, seven of them
+    FreeRTOS paths. It cannot be named by reading it.
+  - **461 functions** come out of the call sites alone, and the eight strings
+    put all 65 nameable ones in **L1**. So FreeRTOS is L1 and the application —
+    including whatever makes sound — is **L2, 105 KB**. That halves the hunt.
+  - But only **18.4%** of known instruction boundaries decode (Ghidra following
+    flow; a linear walk manages 3.9%). Our own earlier "~81% confident" figure
+    is retracted — it counted zero-padding false positives as successes.
+  - **95% of the failures are one length ambiguity**, `GROUP_5A_5B_MOVE`, and
+    §6 shows from 322 code-forced decisions that it cannot be closed by a better
+    reading of the manual: the same `(word0, word1)` is 32-bit in one place and
+    48-bit in another.
+
+  So the next DSP-side move is not a better tool hunt — it is a decoder that
+  chooses lengths consistent with known boundaries. Raised upstream as
+  `m-dwyer/digikit#8`.
 - Whether the bootloader checks the HMAC trailer at all.

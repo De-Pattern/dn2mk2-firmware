@@ -264,6 +264,20 @@ inline, choosing lengths that keep the walk consistent with known boundaries
 rather than committing greedily. That is a real piece of work and it belongs
 upstream in digikit, where the tables live.
 
+## 9. Upstream
+
+Both findings went back to `m-dwyer/digikit`, since the tables and the
+disassembler are theirs:
+
+| | |
+|---|---|
+| **PR #7** | `sharc_disasm: don't format word1 when it was never read`. `disassemble()` raises `TypeError` instead of yielding an `unknown` record when word0 matches a multi-word group and word1 could not be read — it formats `None` with `{word1:#06x}` in the branch where the value was never assigned. Reachable from documented use: any caller walking per-function buffers ends a buffer mid-instruction routinely. Verified stock-crashes / patched-yields before sending. |
+| **Issue #8** | The `GROUP_5A_5B_MOVE` evidence in §6, with all five contradicting addresses, the method, and what would overturn it. Offered to contribute the constraint-carrying decoder rather than assuming they want it. |
+
+The issue also carries the two mapping facts they can use directly: the
+`0xb8 << 17` placement that makes both regions resolve in one Ghidra program
+(§7), and the byte-counted word-swapped rule for data operands (§2).
+
 ## Reproducing
 
 ```
