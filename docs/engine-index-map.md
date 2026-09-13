@@ -532,7 +532,21 @@ Route 1 is cheaper and answers the question either way.
 
 ---
 
-## 11. CONFIRMED ON HARDWARE: the engine implements a fourth LFO
+## 11. ~~CONFIRMED ON HARDWARE: the engine implements a fourth LFO~~ — **WITHDRAWN, see §15**
+
+> **[WITHDRAWN 2026-09-12 by §15 — banner added 2026-09-14.]** This heading says
+> CONFIRMED and it is not. The probe re-pointed the forward *and* inverse maps
+> together, so values were written to new offsets and read back from those same
+> offsets — a self-consistent **storage** round-trip, which is what the
+> `soundStorage_v3_t` name in `Sound::updateMirror` says these tables actually
+> are. The experiment could not tell "the engine runs a fourth LFO" from "the
+> round-trip is consistent", and both predict the result observed.
+>
+> The banner is here because the section below was read as current on
+> **2026-09-14** and reported to the owner as settled fact, by someone who had
+> §15 in the same file. A retraction that lives 180 lines below a heading
+> reading "CONFIRMED ON HARDWARE" is not doing its job. The section is kept in
+> full because the reasoning and the method are still worth having.
 
 **2026-09-12.** `scripts/build_lfo4_probe.py` re-pointed LFO3 from engine lane 3
 to the reserved lane 4 — engine indices `4, 8, 12, 16, 20, 24, 28, 32` — with no
@@ -592,7 +606,7 @@ identified:
 | inverse map `0x401fd0b0` | 107 entries | **no growth needed** — write slots 100–107 into the reserved lane's entries |
 | sound `ParameterSet` table `0x42c64b3c` | 101 entries, BSS | relocate into the 25 MB of unclaimed RAM above the BSS end (`docs/memory-map.md`) and repoint its **5** `lea` sites |
 | destination builder bound | `i != 0x65` (101) | one immediate |
-| **the sound object's value array** | addressed `0x14 + slot*2` | **unmeasured — this is the open one.** Its size is an allocation constant somewhere, and if it cannot hold 108 entries the rest does not matter |
+| **the sound object's value array** | addressed `0x14 + slot*2` | ~~**unmeasured — this is the open one.**~~ **Measured the same day — §13.** Exactly **101 entries**, `+0x14`..`+0xDD`, flush against machine type at `+0xDE` and filter type at `+0xDF`. It cannot be grown in place, and the array sits mid-structure so the object cannot be grown either. |
 
 Four of the five are tractable and two are single immediates. **The sound
 object's size is the next thing to measure**, because it decides whether this is
@@ -787,7 +801,12 @@ longer in doubt is that **the engine will modulate** once the values arrive
 
 ---
 
-## 14. The coexistence probe: can lanes 3 and 4 run at once?
+## 14. ~~The coexistence probe: can lanes 3 and 4 run at once?~~ — **WITHDRAWN, see §15**
+
+> **[WITHDRAWN 2026-09-12 by §15 — banner added 2026-09-14.]** Same fault as
+> §11: putting LFO2 on "lane 4" while LFO1 and LFO3 stayed put exercised the
+> storage round-trip, not the engine. Its "CONFIRMED ON HARDWARE" subheading
+> below is withdrawn with it.
 
 §11 confirmed the engine drives the reserved lane, and left one thing open:
 **the probe *moved* LFO3 rather than adding an LFO**, so lane 3 was vacated at
