@@ -92,8 +92,30 @@ Across the whole L2 code region, restarting after each stop:
 | length_only | 271 |
 | unknown | 480 |
 
-**~81% confidently decoded.** That is a working disassembler on our firmware,
-not a prototype.
+> **[WRONG — corrected 2026-09-14]** This said *"**~81% confidently decoded.**
+> That is a working disassembler on our firmware, not a prototype."* Both
+> sentences are wrong, and the table above is kept only because the mistake is
+> worth being able to see.
+>
+> The counts come from restarting the walk after each stop. **Every restart
+> re-anchors at an arbitrary even offset**, and — as the section below this one
+> already warned — an all-zero 48-bit word satisfies Type21a's mask. So the
+> restart strategy manufactures its own confidence: it counts as successes the
+> exact cases the next section says are false positives. The two halves of this
+> file contradicted each other and I did not notice, because the number was
+> flattering.
+>
+> Worse, "confident" here has **no outcome that means wrong**. Scored instead
+> against boundaries the decoder never saw — the 1,606 validated cjump sites —
+> a linear walk covers **6.9%** of the code and lands on **3.9%** of those
+> boundaries. Ghidra, following flow from seeded entries rather than walking,
+> reaches 32.7% and 18.4%. The measurement, the method comparison and the single
+> instruction group responsible for 95% of the failures are in
+> **`docs/sharc-reading.md`**.
+>
+> The lesson is the one this project keeps relearning in new costume: *a watch
+> must be able to produce a different answer for each outcome.* A decode rate
+> computed from the decoder's own self-report is not a watch.
 
 ### It independently confirms our address mapping
 
