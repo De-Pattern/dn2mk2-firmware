@@ -9,6 +9,8 @@ name: pages
 
 on:
   push:
+    # Deploys only from main, so the published page always matches what was
+    # merged. Use the manual trigger to preview a branch before then.
     branches: [main]
     paths:
       - 'site/**'
@@ -31,8 +33,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # checkout@v5 runs on Node 24. v4 is a Node 20 action, which the runners
+      # now warn is deprecated.
+      - uses: actions/checkout@v5
       - uses: actions/configure-pages@v5
+        with:
+          # Turn Pages on if it is off, instead of failing with
+          # "Get Pages site failed ... Not Found". Without this the workflow
+          # depends on someone having clicked through repository settings
+          # first, which is a step a fork has no way to know about.
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

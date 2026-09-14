@@ -1,0 +1,6 @@
+{
+  "name": "dn2-firmware-tools-site",
+  "private": true,
+  "type": "module",
+  "description": "site/js is ES modules. This file exists so Node runs them the same way the browser does -- the tests in test/js/ import these exact files, not a copy."
+}
