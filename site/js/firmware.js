@@ -20,6 +20,9 @@ import * as contentChecksum from "./integrity/checksum.js";
 import * as digest from "./integrity/digest.js";
 import * as keyderive from "./integrity/keyderive.js";
 import * as transport from "./syx/transport.js";
+import { profile } from "./profile.js";
+import { MAX_MATCH, WINDOW } from "./limits.js";
+import { STORED_ALIGN } from "./container/section.js";
 
 const PREAMBLE = 8;  // [u32 container size][u32 content checksum]
 
@@ -116,10 +119,16 @@ export async function verify(firmware) {
 
   for (const section of firmware.container.sections) {
     const label = `section ${section.id} (${ele3.name(section.id)})`;
-    if (section.unpack() === null) {
+    const content = section.unpack();
+    if (content === null) {
       checks.push({ name: `${label} byte-sum`, ok: true, detail: "stored raw" });
+      checks.push({ name: `${label} padded`, ok: true,
+                    detail: "stored raw, not padded by Elektron either" });
+      checks.push({ name: `${label} within Elektron's limits`, ok: true,
+                    detail: "stored raw, nothing to decompress" });
       continue;
     }
+
     let sum = 0;
     const end = Math.min(8 + section.declaredLength, section.stored.length);
     for (let i = 8; i < end; i++) sum = (sum + section.stored[i]) >>> 0;
@@ -127,6 +136,31 @@ export async function verify(firmware) {
       name: `${label} byte-sum`,
       ok: sum === u32(section.stored, 4),
       detail: `${section.declaredLength.toLocaleString()} bytes`,
+    });
+
+    // Elektron pad every compressed section to four bytes. A section that is
+    // not padded can still checksum correctly, and images built without it
+    // stall in recovery.
+    const remainder = section.stored.length % STORED_ALIGN;
+    checks.push({
+      name: `${label} padded to ${STORED_ALIGN} bytes`,
+      ok: remainder === 0,
+      detail: `${section.stored.length.toLocaleString()} bytes stored`
+            + (remainder ? `, ${remainder} past a ${STORED_ALIGN}-byte boundary` : ""),
+    });
+
+    // And a stream can checksum perfectly while asking more of the depacker
+    // than any Elektron stream does. That is the failure this project has
+    // actually hit, so it is checked rather than assumed.
+    const p = profile(section.stream);
+    let detail = `furthest match ${p.maxOffset.toLocaleString()} of a `
+               + `${WINDOW.toLocaleString()}-byte window, longest `
+               + `${p.maxLength.toLocaleString()} of ${MAX_MATCH.toLocaleString()}`;
+    if (p.beyond) detail += `; ${p.beyond.toLocaleString()} matches reach past it`;
+    checks.push({
+      name: `${label} within Elektron's limits`,
+      ok: p.withinLimits,
+      detail,
     });
   }
 
