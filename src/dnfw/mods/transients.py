@@ -15,20 +15,19 @@ below are measurements, not choices:
 | entry | 4,800 samples | envelope autocorrelation, with 2x and 3x harmonics also ranking |
 | phase | 2,496 samples into the region | attack-at-start vs decay-at-end scores 14.27 against 1.46 for the next candidate |
 
-**What is NOT established, and the tool says so when it runs:**
+**Confirmed on hardware, 2026-09-14.** An image with marker samples at five
+known slots was flashed to a Digitone II and every marker played back from
+`TRAN` — so these bytes are the FM drum transients, and the count is 34.
+`docs/pcm-hunt.md` §16.
 
-- **That these are the FM drum transients specifically.** They are PCM, in the
-  audio DSP's image, transient-shaped and transient-length, and the owner
-  confirms they sound like a bank of transients. Nothing has traced `TRAN`
-  (parameter id 286) to these bytes.
-- **The count.** The region divides into **34** entries at the measured period,
-  while `TRAN` spanning 0..124 with 4-step interpolation implies **32**. That
-  disagreement is open (`docs/pcm-hunt.md` §14).
+**What stays conditional:** none of this is documented by Elektron, so another
+OS release could move the bank. `_payload_offset` resolves the address through
+the boot stream every time it runs and refuses an image whose layout it does not
+recognise, rather than trusting the constants above.
 
-Because of the second point this mod replaces **whole entries in place** and
-touches nothing else — no lengths change, no index is rewritten, and anything
-outside the entries it writes is left exactly as it was. If the count is wrong,
-the worst case is that some entries are not the ones `TRAN` reaches.
+This mod replaces **whole entries in place** and touches nothing else — no
+lengths change, no index is rewritten, and every byte outside the entries it
+writes is left exactly as it was.
 
 ## How a replacement is prepared
 
@@ -129,6 +128,42 @@ def read_wav(path: pathlib.Path) -> list[int]:
     return [max(-32768, min(32767, x)) for x in v]
 
 
+def prepare(path: pathlib.Path, lead_ms: int = 3) -> list[int]:
+    """Condition any sample into one slot: mono, 48 kHz, onset-aligned, 100 ms.
+
+    A transient slot is 100 ms and a user's file is whatever it is, so something
+    has to choose *which* 100 ms. Starting at sample 0 is wrong for most
+    recordings: files routinely carry a few milliseconds of silence, and that
+    silence would eat the attack, which is the one part of a transient that
+    matters.
+
+    So the onset is found -- the first point reaching a fraction of the peak --
+    and the slot starts `lead_ms` before it, keeping the attack's leading edge
+    rather than clipping into it. A short fade at the end prevents the hard cut
+    from adding a click of its own, which would be a transient this tool
+    invented.
+
+    This is deliberately NOT transient/tonal separation. Pulling the percussive
+    layer out of a pitched sample is a real DSP problem, and
+    `mikkovihonen/transientsplit` (MIT) already solves it in the browser -- run
+    a sample through that first if you want the transient *component*, then
+    through this to fit it to the slot.
+    """
+    v = read_wav(path)                      # mono, 48 kHz, already slot-length
+    peak = max((abs(x) for x in v), default=0)
+    if peak == 0:
+        return v
+    threshold = peak // 8
+    onset = next((i for i, x in enumerate(v) if abs(x) >= threshold), 0)
+    lead = lead_ms * RATE // 1000
+    start = max(0, onset - lead)
+    out = v[start:] + [0] * start
+    fade = RATE // 500                      # 2 ms, far shorter than any decay
+    for i in range(min(fade, len(out))):
+        out[-1 - i] = int(out[-1 - i] * i / fade)
+    return out
+
+
 def extract(firmware) -> list[bytes]:
     """-> the factory entries, each ENTRY_BYTES of raw 16-bit LE PCM."""
     section = firmware.container.find(SECTION)
@@ -138,8 +173,15 @@ def extract(firmware) -> list[bytes]:
             for k in range(COUNT)]
 
 
-def apply(firmware, sources: list[pathlib.Path]) -> Result:
-    """Replace entries in order with `sources`; a short list leaves the rest."""
+def apply(firmware, sources: list[pathlib.Path], condition: bool = False) -> Result:
+    """Replace entries in order with `sources`; a short list leaves the rest.
+
+    `condition=True` runs each input through `prepare()` -- onset alignment and
+    an end fade. It is OFF by default on purpose: conditioning changes samples,
+    and with it off, extracting the factory bank and writing it straight back
+    produces a byte-identical image. That round-trip is the strongest check this
+    mod has, and a default that silently altered samples would destroy it.
+    """
     if not sources:
         raise ModError("no input samples given")
     if len(sources) > COUNT:
@@ -156,10 +198,12 @@ def apply(firmware, sources: list[pathlib.Path]) -> Result:
     for k, path in enumerate(sources):
         with wave.open(str(path), "rb") as w:
             n_in, rate_in = w.getnframes(), w.getframerate()
-        samples = read_wav(path)
+        samples = prepare(path) if condition else read_wav(path)
         at = start + k * ENTRY_BYTES
         data[at:at + ENTRY_BYTES] = struct.pack(f"<{ENTRY_SAMPLES}h", *samples)
         note = f"{k:02d} <- {path.name}"
+        if condition:
+            note += " (onset-aligned)"
         if rate_in != RATE:
             note += f" (resampled {rate_in} -> {RATE})"
         if n_in * RATE // max(rate_in, 1) > ENTRY_SAMPLES:

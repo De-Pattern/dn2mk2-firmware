@@ -458,3 +458,34 @@ implementing a byte of transport.
 
 **GPLv3 against this repository's AGPL-3.0-or-later is compatible for porting**,
 should any of it ever be worth porting. Running it raises no licence question.
+
+## transientsplit — separating a transient from a pitched sample
+
+<https://github.com/mikkovihonen/transientsplit>, by Mikko Vihonen. **MIT**
+(stated in the README; there is no `LICENSE` file, so GitHub's API reports the
+repository as unlicensed — the owner's call was to treat the README's statement
+as the grant).
+
+A browser tool that splits a mono sample into **transient, tonal and residual**
+components, using the Sound Design Toolkit's `SDTDemix` compiled to WebAssembly
+plus a TypeScript HPSS implementation in a Web Worker. Everything runs locally;
+no audio is uploaded.
+
+It matters to `docs/mods.md`'s transient mod because the mod solves a different
+problem from the one users actually have. A slot is 100 ms of percussive attack;
+a user's sample is whatever it is. Two separable jobs:
+
+| job | who does it |
+|---|---|
+| **fit** — mono, 48 kHz, 100 ms, starting at the attack | `dnfw mods apply --prepare` |
+| **separate** — pull the percussive layer out of a pitched sample | transientsplit |
+
+**Linked, not bundled**, and deliberately. The separation half is real DSP:
+SDT is a *separate* project with its own licence and is not vendored into
+transientsplit either — its README says clone it yourself. Porting the HPSS
+would mean an FFT and therefore numpy, against a package that currently declares
+**zero dependencies**. A worse copy of a working tool is not worth that.
+
+The MIT grant means porting stays available with attribution if the case ever
+becomes strong; it is recorded here so that decision starts from the licence
+rather than rediscovering it.

@@ -171,7 +171,32 @@
 dnfw mods extract firmware.syx --mod transients -o factory/
 
 # swap in your own — sorted order, 00.wav first
-dnfw mods apply firmware.syx --mod transients --from my_hits/ -o modded.syx</pre>
+dnfw mods apply firmware.syx --mod transients --from my_hits/ -o modded.syx
+
+# --prepare onset-aligns each input to the slot and fades its end
+dnfw mods apply firmware.syx --mod transients --from my_hits/ -o modded.syx --prepare</pre>
+
+  <h4 style="margin:1.6rem 0 .5rem;font-size:.95rem">Getting a transient out of an ordinary sample</h4>
+  <p style="margin-top:0">
+    A slot is 100&nbsp;ms of percussive attack, and most samples are neither. Two
+    different problems, worth keeping apart:
+  </p>
+  <ul>
+    <li><strong>Fitting</strong> — mono, 48&nbsp;kHz, 100&nbsp;ms, starting at the attack
+      rather than at whatever silence the file begins with. That is what
+      <code>--prepare</code> does.</li>
+    <li><strong>Separating</strong> — pulling the percussive layer out of a sample that is
+      also pitched. That is real signal processing, and
+      <a href="https://github.com/mikkovihonen/transientsplit">transientsplit</a>
+      (MIT, by Mikko Vihonen) already does it: it splits a sample into transient,
+      tonal and residual parts <a href="https://mikkovihonen.github.io/transientsplit/">in
+      your browser</a>, with nothing uploaded anywhere.</li>
+  </ul>
+  <p>
+    So the route for an arbitrary sample is: run it through transientsplit, keep the
+    transient stem, then hand that to <code>--prepare</code>. We link rather than bundle —
+    it is someone else's tool, it works, and duplicating it would only make a worse copy.
+  </p>
 
   <div class="note">
     <p><strong>Confirmed on a Digitone&nbsp;II.</strong> An image with marker samples at
