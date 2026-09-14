@@ -17,13 +17,13 @@
  *   fetch from; the page is static files.
  */
 
-import { build, load, verify } from "../firmware.js";
+import {
+  $, buildAndOffer, openFirmware as openFirmwareShell, status, wireDrop,
+} from "./shell.js";
 import { decode, fit } from "../audio.js";
 import {
   COUNT, ENTRY_SAMPLES, RATE, apply, extract, toEntry, toFloat,
 } from "../mods/transients.js";
-
-const $ = (id) => document.getElementById(id);
 
 /** Page state. One object so `reset` is one assignment and cannot half-clear. */
 let state = null;
@@ -63,92 +63,19 @@ function audioContext() {
 
 // ---------------------------------------------------------------- step 1
 
-function wireDrop(element, onFile) {
-  const stop = (event) => { event.preventDefault(); event.stopPropagation(); };
-  element.addEventListener("dragover", (event) => {
-    stop(event);
-    element.classList.add("over");
-  });
-  element.addEventListener("dragleave", (event) => {
-    stop(event);
-    element.classList.remove("over");
-  });
-  element.addEventListener("drop", (event) => {
-    stop(event);
-    element.classList.remove("over");
-    const file = event.dataTransfer?.files?.[0];
-    if (file) onFile(file);
-  });
-}
-
 async function openFirmware(file) {
-  status("Reading…", true);
-  try {
-    const raw = new Uint8Array(await file.arrayBuffer());
-    const firmware = await load(raw);
-    const checks = await verify(firmware);
-
-    state = fresh();
-    state.firmware = firmware;
-    state.filename = file.name;
-    state.factory = extract(firmware).map(toFloat);
-
-    $("facts").innerHTML = "";
-    addFact("File", file.name);
-    addFact("Version", firmware.container.version || "—");
-    addFact("Build", firmware.container.build || "—");
-    addFact("Packets", firmware.packets.toLocaleString());
-    addFact("Signed", firmware.signed
-      ? `yes — key derived from “${firmware.key.derivationString}”`
-      : "no");
-    showChecks($("verdict"), checks);
-
-    $("loaded").classList.remove("hidden");
-
-    if (!checks.every((c) => c.ok)) {
-      status("This file does not verify as it stands. Nothing further is offered.");
-      return;
-    }
-    if (!firmware.signed) {
-      status("This image is unsigned, so it is not a Digitone II OS file.");
-      return;
-    }
-
-    drawSlots();
-    $("step2").classList.remove("hidden");
-    $("step3").classList.remove("hidden");
-    $("bar").classList.remove("hidden");
-    status(`Loaded. ${COUNT} slots ready.`);
-  } catch (error) {
-    $("loaded").classList.remove("hidden");
-    $("facts").innerHTML = "";
-    showChecks($("verdict"), [{ name: "could not read this file", ok: false,
-                                detail: String(error.message ?? error) }]);
-    status("");
-  }
-}
-
-function addFact(term, value) {
-  const dt = document.createElement("dt");
-  dt.textContent = term;
-  const dd = document.createElement("dd");
-  dd.textContent = value;
-  $("facts").append(dt, dd);
-}
-
-function showChecks(into, checks) {
-  into.innerHTML = "";
-  for (const check of checks) {
-    const row = document.createElement("div");
-    row.className = check.ok ? "pass" : "fail";
-    const mark = document.createElement("span");
-    mark.className = "mark";
-    mark.textContent = check.ok ? "OK" : "X";
-    const text = document.createElement("span");
-    text.textContent = check.detail ? `${check.name} — ${check.detail}` : check.name;
-    row.append(mark, text);
-    into.append(row);
-  }
+  state = fresh();
+  state.filename = file.name;
+  return openFirmwareShell(file, {
+    onReady: (firmware) => {
+      state.firmware = firmware;
+      state.factory = extract(firmware).map(toFloat);
+      drawSlots();
+      for (const id of ["step2", "step3", "bar"]) $(id).classList.remove("hidden");
+      status(`Loaded. ${COUNT} slots ready.`);
+    },
+    extraFacts: (fw) => [["Packets", fw.packets.toLocaleString()]],
+  });
 }
 
 // ---------------------------------------------------------------- step 2
@@ -486,64 +413,18 @@ async function buildImage() {
     status("Nothing replaced yet — drop audio on a slot first.");
     return;
   }
-
-  $("buildBtn").disabled = true;
-  status(`Rebuilding with ${count} replaced slot${count === 1 ? "" : "s"}…`, true);
-  // One frame, so the status actually paints before the main thread is taken
-  // for a couple of seconds by a megabyte of packing and an HMAC.
-  await new Promise((resolve) => requestAnimationFrame(resolve));
-
-  try {
-    const entries = new Map();
-    for (const [slot, entry] of state.replacements) {
-      entries.set(slot, toEntry(entry.fitted.samples));
-    }
-    const applied = apply(state.firmware, entries);
-    const bytes = await build(state.firmware, new Map([[7, applied.section]]));
-
-    // Re-read what we are about to hand over, from its own bytes, and check it
-    // the same way the original was checked. Verifying the object we just built
-    // in memory would be verifying our own intentions.
-    const reloaded = await load(bytes);
-    const checks = await verify(reloaded);
-    showChecks($("buildVerdict"), checks);
-
-    if (!checks.every((c) => c.ok)) {
-      status("The rebuilt image does not verify. It is not offered for download.");
-      $("buildBtn").disabled = false;
-      return;
-    }
-
-    offer(bytes, state.filename.replace(/\.syx$/i, "") + "_transients.syx");
-    status(`Built and verified — ${bytes.length.toLocaleString()} bytes.`);
-  } catch (error) {
-    showChecks($("buildVerdict"), [{ name: "build failed", ok: false,
-                                     detail: String(error.message ?? error) }]);
-    status("");
+  const entries = new Map();
+  for (const [slot, entry] of state.replacements) {
+    entries.set(slot, toEntry(entry.fitted.samples));
   }
-  $("buildBtn").disabled = false;
-}
-
-function offer(bytes, filename) {
-  const old = $("buildVerdict").querySelector("a.filebtn");
-  if (old) old.remove();
-  const link = document.createElement("a");
-  link.className = "filebtn";
-  link.href = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
-  link.download = filename;
-  link.textContent = `Download ${filename}`;
-  link.style.marginTop = ".8rem";
-  $("buildVerdict").append(link);
-  link.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const applied = apply(state.firmware, entries);
+  await buildAndOffer(state.firmware, new Map([[7, applied.section]]), {
+    filename: state.filename, suffix: "transients",
+    note: `${count} slot${count === 1 ? "" : "s"} replaced`,
+  });
 }
 
 // ---------------------------------------------------------------- wiring
-
-function status(text, busy = false) {
-  const element = $("status");
-  element.textContent = text;
-  element.classList.toggle("busy", busy);
-}
 
 function updateStatus() {
   const count = state.replacements.size;
