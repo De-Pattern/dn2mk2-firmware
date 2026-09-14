@@ -400,10 +400,28 @@ anywhere.
 ## Method note
 
 The table was found by scanning the image for 60-byte-strided records with three
-valid string pointers, not by following code — Ghidra builds no references into
-it, because every access computes `base + id*60` at runtime. `FindDataRefs.java`
-returns zero hits here, which is a property of the reference model and not
-evidence of absence. The full objdump of the image is what found the four filter
+valid string pointers, not by following code.
+
+> **[CORRECTED 2026-09-14]** This said: *"Ghidra builds no references into it,
+> because every access computes `base + id*60` at runtime. `FindDataRefs.java`
+> returns zero hits here, which is a property of the reference model and not
+> evidence of absence."*
+>
+> The zero was real and the explanation was wrong. **`FindDataRefs.java` was
+> broken** — it walked the reference iterator by *from* address starting at the
+> table, so every reference originating in the code region below was never
+> visited, and its `break` fired almost immediately. It returned zero for
+> everything, including ranges with hundreds of references.
+>
+> Fixed (`docs/pcm-hunt.md` §12), it finds **10 references** to this table, the
+> largest group being `FUN_400dc4d0` — which `docs/parameter-set-tables.md`
+> independently names **`param_set_tables_build`**, the boot-time builder that
+> walks this very table.
+>
+> The general claim still holds: runtime-computed `base + id*60` accesses are
+> invisible to any reference model, which is why the table was found by scanning
+> bytes. But that is a reason to expect *few* references, not zero, and it was
+> used here to explain away a tool failure. The full objdump of the image is what found the four filter
 sites, by grepping for the mask constant.
 
 ## The follow-up experiment, built 2026-09-12
