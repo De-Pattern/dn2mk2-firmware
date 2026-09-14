@@ -86,20 +86,50 @@ LANDMARKS = {
 }
 
 
-def exec_to_load(target: int):
-    """Execution address -> load address, or None if in neither space.
+# Both program spaces are linear maps from a VISA address (counted in 16-bit
+# halfwords) to a byte load address:
+#
+#     0x28000000 region:  load = 2 * visa + 0x28000000
+#     0x20000000 region:  load = 2 * visa + 0x1E900000
+#
+# **Corrected 2026-09-14.** This used to match on the target's top byte -- 0x1C
+# for one space, 0xB8 for the other -- and mask the second to 16 bits. That is
+# only right while each space fits inside a single 64K VISA page, and neither
+# does: the 0x20000000 region spans VISA pages 0xB8..0xBC and the 0x28000000
+# region spans 0x12..0x1C. Every target outside the one page each branch knew
+# about returned None and was counted "unresolved", so the call graph was
+# missing edges it had no way to report as missing.
+#
+# The linear forms come from an independent SHARC+ write-up (docs/references.md)
+# and agree with our own rules everywhere the old ones applied -- the entry
+# point 0x001C12E2 -> 0x283825C4 among them.
+SPACES = (
+    (0x28000000, 0x28000000),   # (bias added after doubling, region base)
+    (0x1E900000, 0x20000000),
+)
 
-    Both spaces count 16-bit words, which is VISA's instruction granularity;
-    the `0xb8` factor of two was settled by 47.2% of its targets being odd
-    (docs/sharc-code-map.md), since an odd byte address cannot begin an
-    instruction.
+
+def exec_to_load(target: int, loaded=None):
+    """Execution (VISA) address -> byte load address, or None.
+
+    Both spaces count 16-bit halfwords, which is VISA's instruction
+    granularity, so every map doubles. Which space a target belongs to is
+    decided by **which candidate lands inside a region the image actually
+    loads**, not by its top byte: the image is the oracle, so a target that
+    resolves in neither space is genuinely unresolvable rather than merely
+    outside a hardcoded page.
+
+    `loaded` is a list of (lo, hi) load spans. Without it the old top-byte
+    behaviour is unavailable and both candidates are returned as ambiguous --
+    callers are expected to pass the spans.
     """
-    space = target >> 16
-    if space == 0x1C:
-        return target * 2 + L2_BASE
-    if space == 0xB8:
-        return (target & 0xFFFF) * 2 + L1_BASE
-    return None
+    candidates = [2 * target + bias for bias, _ in SPACES]
+    if loaded is None:
+        return candidates
+    hits = [a for a in candidates if any(lo <= a < hi for lo, hi in loaded)]
+    if len(hits) == 1:
+        return hits[0]
+    return None            # none resolve, or -- never yet seen -- both do
 
 
 def operand_bytes(addr: int) -> bytes:
@@ -129,12 +159,16 @@ def call_sites(base: int, blob: bytes):
 def build(regions):
     code = code_regions(regions)
     spans = [(b, b + len(x)) for b, x in code]
+    # Every span the image loads, not only the code ones: a target must land in
+    # real loaded memory to be resolvable, and data regions are real memory. The
+    # narrower "is it code" test happens afterwards, as `stray`.
+    loaded = [(b, b + len(x)) for b, x in regions]
 
     edges = []          # (site, target_load)
     unresolved = 0
     for base, blob in code:
         for site, target in call_sites(base, blob):
-            load_addr = exec_to_load(target)
+            load_addr = exec_to_load(target, loaded)
             if load_addr is None:
                 unresolved += 1
                 continue
