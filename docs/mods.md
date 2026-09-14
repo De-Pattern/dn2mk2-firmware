@@ -108,7 +108,11 @@ public pages. The site is a small front door that points back here for detail.
 
 ---
 
-## Next: the browser tool (planned, not started)
+## The browser tool
+
+**Status: the codec is built and proven; nothing else is.** `site/js/aplib.js`
+exists and passes all four checks below. The container, transport, integrity and
+UI layers are still only the plan under them.
 
 **The requirement, from the owner: zero CLI, zero cloning.** A user opens a web
 page, picks their own firmware file and their own samples, adjusts each one,
@@ -118,15 +122,15 @@ what `transientsplit` does and the right posture for someone's firmware.
 
 ### What the browser has to do
 
-| step | difficulty |
-|---|---|
-| SysEx transport decode/encode (8-in-7) | easy |
-| ELE3 container parse and rebuild | moderate |
-| aPLib **depack** of section 7 | moderate — port of `codec/aplib.py` |
-| aPLib **pack** of section 7 | **the blocker** |
-| content checksum + HMAC-SHA256 | easy, `SubtleCrypto` |
-| WAV decode, trim, preview | easy, Web Audio |
-| transient/tonal separation | **not ours** — link to `transientsplit` |
+| step | difficulty | state |
+|---|---|---|
+| SysEx transport decode/encode (8-in-7) | easy | not started |
+| ELE3 container parse and rebuild | moderate | not started |
+| aPLib **depack** of section 7 | moderate — port of `codec/aplib.py` | **done** |
+| aPLib **pack** of section 7 | was **the blocker** | **done**, store-only |
+| content checksum + HMAC-SHA256 | easy, `SubtleCrypto` | not started |
+| WAV decode, trim, preview | easy, Web Audio | not started |
+| transient/tonal separation | **not ours** — link to `transientsplit` | n/a |
 
 ### The decision on packing: store-only
 
@@ -135,8 +139,13 @@ stored bytes untouched — sections 2, 3 and 8 never need repacking at all. That
 reduces the problem to one section, and makes a literal-only encoder viable:
 
 ```
-section 7:  602,076 stored  ->  836,956 unpacked  ->  ~940 KB store-only
+section 7:  602,076 stored  ->  836,956 unpacked  ->  941,583 store-only
 ```
+
+Measured, and exactly 9/8 of the input plus the terminator, because every byte
+costs one control bit and itself. The `.syx` grows from 2,389,280 to 2,819,488
+bytes — 430,208 more, larger than the 339,507 the section gained because the
+SysEx transport carries seven bits per byte.
 
 The image grows by roughly 340 KB. `docs/ideas-backlog.md` §1 cares about space
 *inside* section 3's address range, which this does not touch, so the cost is
@@ -154,20 +163,35 @@ aPLib variant"), which is weak corroboration that the device tolerates it —
 weak because their note also says the rebuilt image is about 3x original size,
 and nothing says it was flashed.
 
-### How it gets verified, which is the part that matters
+### How it was verified, which is the part that matters
 
 A second implementation of a format that writes firmware people flash is a real
-correctness risk, so it does not get trusted because it looks right:
+correctness risk, so it does not get trusted because it looks right. These four
+checks were written down **before any of the code existed**, and all four now
+run in `test/test_js_codec.py` against real firmware — `scripts/js_codec_check.mjs`
+is the JS half.
 
-1. **Self-check in the browser** — pack, then depack with the JS depacker, and
-   compare against the input. A stream that does not round-trip never reaches a
-   download button.
-2. **Cross-check against Python** — pack in JS, depack with `codec/aplib.py`,
-   compare. Two implementations sharing no lineage, which is the same standard
-   `elektron-firmware-tool` is held to for the container.
-3. **The factory round-trip** — extract the bank and write it straight back
-   through the browser path. The Python tool produces a byte-identical section 7
-   doing this; the JS must reproduce the *unpacked* section byte-identically,
-   though not the compressed bytes, since store-only encodes differently.
+| # | check | result |
+|---|---|---|
+| 1 | **Depack agreement** — JS depack of every compressed section == Python's | **pass**, byte for byte, all sections of DN2 1.10E |
+| 2 | **Self round-trip** — JS depack of JS `packStore` output == input | **pass** |
+| 3 | **Cross-check** — JS `packStore` output depacked by `codec/aplib.py` | **pass**, 836,956 bytes identical |
+| 4 | **Whole-image rebuild** — section 7 store-only, container reassembled | **pass, 21/21 integrity checks** |
 
-Point 3 is the strongest available check and should exist before the UI does.
+Check 3 is the one that matters: two implementations sharing no lineage, read in
+both directions, and neither consulted while the other ran. Check 4 is not a
+codec check at all — it asks whether the *container* still adds up when a
+section changes length, which is the assumption the whole store-only decision
+rests on, and it had never been tested. It does, and the trailer and content
+checksum re-sign correctly over the larger image.
+
+A fifth property falls out for free and is asserted anyway: a store-only stream
+contains **no matches**, so it cannot violate either bound in `codec.limits` —
+there is nothing to violate them with. Those limits are why images of ours once
+stalled in recovery (`docs/flashing.md`), so the safest possible stream on that
+axis is the one this emits.
+
+**What none of this proves: that the device accepts it.** Every check above is
+offline. A larger section 7 has never been flashed, and the recovery bootloader
+may have a partition size or a layout expectation that nothing here models. That
+is the next hardware test, and it is a real risk — not a formality.
