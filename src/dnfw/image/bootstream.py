@@ -273,3 +273,101 @@ def find_streams(data: bytes, min_blocks: int = 3) -> list[Walk]:
         claimed.append((begin, result.stopped_at))
         found.append(result)
     return sorted(found, key=lambda w: w.blocks[0].offset)
+
+
+class SpanError(ValueError):
+    """A load-address range is not wholly backed by payload in this stream."""
+
+
+def spans(data: bytes, address: int, length: int) -> list[tuple[int | None, int]]:
+    """Map a load-address range to the file pieces that hold it.
+
+    -> [(file_offset, piece_length), ...] in load order, covering exactly
+    `length` bytes from `address`. A piece whose offset is **None** is a *fill*
+    block: the loader writes zeros there and **the file contains no bytes for
+    it at all**, so it can be read but never written.
+
+    **This exists because a load-address range is not a file range.** The boot
+    stream interleaves 16-byte headers with payload, so a region contiguous in
+    the DSP's memory can be several disjoint pieces in the file, and anything
+    that reads or writes it linearly will cross a header.
+
+    Measured, not hypothetical. The FM drum transient bank at `0x8045c380`
+    spans two payload blocks with a **36-byte fill block and two headers**
+    between them, 47,440 bytes in. Until 2026-09-14 `mods.transients` read and
+    wrote straight through that:
+
+    - 85.5% of the bank it reported was shifted by 34 samples and carried the
+      header bytes as audio -- the visible spike in entry 4;
+    - a caller replacing every entry would have **overwritten two block
+      headers**, leaving a boot stream the DSP cannot load.
+
+    See `docs/pcm-hunt.md`.
+
+    Raises SpanError if any byte is not covered by a block at all. That is the
+    important half: a gap means the caller's model of the image is wrong, and
+    guessing an offset there corrupts a region nobody was looking at.
+    """
+    pieces: list[tuple[int | None, int]] = []
+    blocks = sorted((b for b in walk(data).blocks if b.count),
+                    key=lambda b: b.target)
+    at, remaining = address, length
+    progressed = True
+    while remaining > 0 and progressed:
+        progressed = False
+        for block in blocks:
+            if not (block.target <= at < block.target + block.count):
+                continue
+            take = min(remaining, block.target + block.count - at)
+            pieces.append(
+                (block.payload_at + (at - block.target) if block.has_payload
+                 else None, take))
+            at += take
+            remaining -= take
+            progressed = True
+            break
+    if remaining > 0:
+        raise SpanError(
+            f"0x{at:08x} is not inside any boot-stream block "
+            f"({remaining:,} of {length:,} bytes unmapped); this image's "
+            f"layout is not the one this was measured against")
+    return pieces
+
+
+def read_span(data: bytes, address: int, length: int) -> bytes:
+    """The bytes loaded at `address`, gathered across blocks.
+
+    Fill blocks contribute zeros, which is what the loader writes.
+    """
+    out = bytearray()
+    for at, n in spans(data, address, length):
+        out += bytes(n) if at is None else data[at:at + n]
+    return bytes(out)
+
+
+def writable(data: bytes, address: int, length: int) -> list[tuple[int, int]]:
+    """`spans`, but refusing any fill block.
+
+    A separate function rather than a flag, because the failure is worth a
+    different sentence: reading a fill region is fine and gives zeros, while
+    writing one is impossible -- there is nowhere to put the bytes -- and a
+    caller that cannot be told so would silently drop them.
+    """
+    pieces = spans(data, address, length)
+    at = address
+    for offset, n in pieces:
+        if offset is None:
+            raise SpanError(
+                f"0x{at:08x}..0x{at + n:08x} ({n} bytes) is a fill block: the "
+                f"loader writes zeros there and the file holds no bytes for "
+                f"it, so it cannot be written")
+        at += n
+    return [(offset, n) for offset, n in pieces]
+
+
+def write_span(data: bytearray, address: int, payload: bytes) -> None:
+    """Write `payload` to `address`, scattered back across blocks, in place."""
+    cursor = 0
+    for at, n in writable(bytes(data), address, len(payload)):
+        data[at:at + n] = payload[cursor:cursor + n]
+        cursor += n

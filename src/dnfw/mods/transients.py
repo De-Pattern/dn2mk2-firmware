@@ -21,7 +21,7 @@ known slots was flashed to a Digitone II and every marker played back from
 `docs/pcm-hunt.md` §16.
 
 **What stays conditional:** none of this is documented by Elektron, so another
-OS release could move the bank. `_payload_offset` resolves the address through
+OS release could move the bank. `_bank_spans` resolves the address through
 the boot stream every time it runs and refuses an image whose layout it does not
 recognise, rather than trusting the constants above.
 
@@ -68,33 +68,31 @@ BANK_ADDR = REGION_START + PHASE_SAMPLES * BYTES_PER_SAMPLE
 COUNT = (REGION_END - BANK_ADDR) // ENTRY_BYTES
 
 
-def _payload_offset(section_bytes: bytes, address: int) -> int:
-    """Load address -> offset inside section 7's unpacked payload.
+def _bank_spans(section_bytes: bytes):
+    """The bank's file pieces, in load order. See `bootstream.spans`.
 
-    The boot stream scatters its payloads across L1, L2 and DDR, so an offset
-    into the section is not an address (`dnfw.image.bootstream`). Writing to
-    the wrong one would corrupt an unrelated region, so the block that actually
-    covers the address is found rather than assumed.
+    **A load-address range is not a file range**, and this bank proves it: it
+    spans two payload blocks with a 36-byte fill block and two 16-byte headers
+    between them, 47,440 bytes in. Reading or writing it linearly crosses those
+    headers -- which is exactly what this module did until 2026-09-14.
     """
-    walk = bootstream.walk(section_bytes)
-    for block in walk.blocks:
-        if not block.has_payload:
-            continue
-        if block.target <= address < block.target + block.count:
-            return block.payload_at + (address - block.target)
-    raise ModError(
-        f"0x{address:08x} is not inside any boot-stream block carrying data; "
-        f"this image's layout is not the one this mod was measured against")
+    return bootstream.spans(section_bytes, BANK_ADDR, COUNT * ENTRY_BYTES)
 
 
 def extents(firmware) -> list[Extent]:
+    """Which bytes this mod writes -- **several ranges, not one.**
+
+    The bank is contiguous in the DSP's memory and scattered in the file, so a
+    single extent would under-declare it and the compatibility check would miss
+    a real overlap. The fill piece contributes no extent because there are no
+    file bytes to claim.
+    """
     section = firmware.container.find(SECTION)
     if section is None:
         raise ModError(f"image has no section {SECTION}")
     data = section.unpack() or section.raw_payload
-    start = _payload_offset(data, BANK_ADDR)
-    return [Extent(SECTION, start, COUNT * ENTRY_BYTES,
-                   f"{COUNT} transient entries of {ENTRY_SAMPLES} samples")]
+    return [Extent(SECTION, at, n, f"transient bank, {n:,} bytes")
+            for at, n in _bank_spans(data) if at is not None]
 
 
 def read_wav(path: pathlib.Path, whole: bool = False) -> list[int]:
@@ -228,12 +226,19 @@ def read_options(directory: pathlib.Path) -> dict:
 
 
 def extract(firmware) -> list[bytes]:
-    """-> the factory entries, each ENTRY_BYTES of raw 16-bit LE PCM."""
+    """-> the factory entries, each ENTRY_BYTES of raw 16-bit LE PCM.
+
+    Read through `bootstream.read_span`, which gathers the bank across the
+    blocks that hold it. Reading the file linearly from the first block -- what
+    this did until 2026-09-14 -- returned two 16-byte block headers and a
+    36-byte fill gap as audio, and shifted everything after them by 34 samples:
+    85.5% of the bank was wrong, and the header bytes showed up as a full-scale
+    spike near the end of entry 4.
+    """
     section = firmware.container.find(SECTION)
     data = section.unpack() or section.raw_payload
-    start = _payload_offset(data, BANK_ADDR)
-    return [data[start + k * ENTRY_BYTES: start + (k + 1) * ENTRY_BYTES]
-            for k in range(COUNT)]
+    bank = bootstream.read_span(data, BANK_ADDR, COUNT * ENTRY_BYTES)
+    return [bank[k * ENTRY_BYTES:(k + 1) * ENTRY_BYTES] for k in range(COUNT)]
 
 
 def apply(firmware, sources: list[pathlib.Path], condition: bool = False,
@@ -256,7 +261,12 @@ def apply(firmware, sources: list[pathlib.Path], condition: bool = False,
     if section is None:
         raise ModError(f"image has no section {SECTION}")
     data = bytearray(section.unpack() or section.raw_payload)
-    start = _payload_offset(bytes(data), BANK_ADDR)
+
+    # Build the whole bank in load order first, then scatter it back across the
+    # blocks that hold it. Writing entry by entry at a computed file offset is
+    # what put header bytes in the audio and would have written audio over two
+    # block headers -- see `_bank_spans`.
+    bank = bytearray(bootstream.read_span(data, BANK_ADDR, COUNT * ENTRY_BYTES))
 
     notes = []
     for k, path in enumerate(sources):
@@ -269,8 +279,8 @@ def apply(firmware, sources: list[pathlib.Path], condition: bool = False,
                               start_ms=opts.get("start_ms"))
         else:
             samples = read_wav(path)
-        at = start + k * ENTRY_BYTES
-        data[at:at + ENTRY_BYTES] = struct.pack(f"<{ENTRY_SAMPLES}h", *samples)
+        at = k * ENTRY_BYTES
+        bank[at:at + ENTRY_BYTES] = struct.pack(f"<{ENTRY_SAMPLES}h", *samples)
         note = f"{k:02d} <- {path.name}"
         if condition:
             if "start_ms" in opts:
@@ -287,7 +297,23 @@ def apply(firmware, sources: list[pathlib.Path], condition: bool = False,
     if len(sources) < COUNT:
         notes.append(f"entries {len(sources)}..{COUNT - 1} left as factory")
 
+    # Scatter the bank back. Fill pieces have no file bytes, so whatever the
+    # user put there cannot be stored; that is reported rather than dropped in
+    # silence -- it is 36 bytes near the end of entry 4 and the loader will
+    # write zeros over it regardless.
+    cursor = 0
+    for at, n in _bank_spans(bytes(data)):
+        if at is None:
+            lost = bank[cursor:cursor + n]
+            if any(lost):
+                notes.append(
+                    f"{n} bytes at bank offset {cursor:,} (entry "
+                    f"{cursor // ENTRY_BYTES}) fall in a boot-stream fill "
+                    f"block and CANNOT be written; the loader zeroes them")
+        else:
+            data[at:at + n] = bank[cursor:cursor + n]
+        cursor += n
+
     return Result(payloads={SECTION: bytes(data)},
-                  extents=[Extent(SECTION, start, COUNT * ENTRY_BYTES,
-                                  "transient bank")],
+                  extents=extents(firmware),
                   notes=notes)

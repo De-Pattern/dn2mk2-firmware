@@ -27,7 +27,7 @@
  * writes is left exactly as it was.
  */
 
-import { offsetOf } from "../bootstream.js";
+import { readSpan, spans } from "../bootstream.js";
 import { replacement } from "../firmware.js";
 
 export const ID = "transients";
@@ -51,9 +51,16 @@ const BANK_ADDR = REGION_START + PHASE_SAMPLES * BYTES_PER_SAMPLE;
 // count rather than assuming the port was faithful.
 export const COUNT = Math.floor((REGION_END - BANK_ADDR) / ENTRY_BYTES);   // 34
 
-/** Where the bank starts inside section 7's unpacked payload. */
-function bankOffset(content) {
-  return offsetOf(content, BANK_ADDR);
+/**
+ * The bank's file pieces, in load order. See `bootstream.spans`.
+ *
+ * **Not one range.** The bank is contiguous in the DSP's memory and scattered
+ * in the file: two payload blocks with a 36-byte fill block and two 16-byte
+ * headers between them, 47,440 bytes in. Reading or writing it linearly
+ * crosses those headers, which is what this module did until 2026-09-14.
+ */
+function bankSpans(content) {
+  return spans(content, BANK_ADDR, COUNT * ENTRY_BYTES);
 }
 
 /** The factory entries, each `ENTRY_BYTES` of raw 16-bit LE PCM. */
@@ -61,9 +68,9 @@ export function extract(firmware) {
   const section = firmware.container.find(SECTION);
   if (section === null) throw new Error(`image has no section ${SECTION}`);
   const content = section.unpack() ?? section.rawPayload;
-  const start = bankOffset(content);
+  const bank = readSpan(content, BANK_ADDR, COUNT * ENTRY_BYTES);
   return Array.from({ length: COUNT }, (_, k) =>
-    content.subarray(start + k * ENTRY_BYTES, start + (k + 1) * ENTRY_BYTES));
+    bank.subarray(k * ENTRY_BYTES, (k + 1) * ENTRY_BYTES));
 }
 
 /** One entry's samples as Float32 in [-1, 1), for preview and drawing. */
@@ -106,12 +113,14 @@ export function toEntry(samples) {
 export function extents(firmware) {
   const section = firmware.container.find(SECTION);
   const content = section.unpack() ?? section.rawPayload;
-  return [{
-    section: SECTION,
-    start: bankOffset(content),
-    length: COUNT * ENTRY_BYTES,
-    what: `${COUNT} transient entries of ${ENTRY_SAMPLES} samples`,
-  }];
+  return bankSpans(content)
+    .filter((piece) => piece.at !== null)
+    .map((piece) => ({
+      section: SECTION,
+      start: piece.at,
+      length: piece.length,
+      what: `transient bank, ${piece.length.toLocaleString()} bytes`,
+    }));
 }
 
 /**
@@ -129,7 +138,12 @@ export function apply(firmware, entries) {
   if (section === null) throw new Error(`image has no section ${SECTION}`);
   const original = section.unpack() ?? section.rawPayload;
   const content = original.slice();       // a copy: the loaded image stays clean
-  const start = bankOffset(content);
+
+  // Build the whole bank in load order, then scatter it back across the blocks
+  // that hold it. Writing entry by entry at a computed file offset is what put
+  // header bytes in the audio, and would have written audio over two block
+  // headers -- leaving a boot stream the DSP cannot load.
+  const bank = readSpan(content, BANK_ADDR, COUNT * ENTRY_BYTES);
 
   const notes = [];
   for (const [slot, entry] of entries) {
@@ -140,14 +154,31 @@ export function apply(firmware, entries) {
       throw new Error(
         `slot ${slot}: ${entry.length} bytes, expected exactly ${ENTRY_BYTES}`);
     }
-    content.set(entry, start + slot * ENTRY_BYTES);
+    bank.set(entry, slot * ENTRY_BYTES);
     notes.push(`${String(slot).padStart(2, "0")} replaced`);
+  }
+
+  let cursor = 0;
+  for (const { at, length } of bankSpans(content)) {
+    if (at === null) {
+      // A fill block has no file bytes, so whatever the user put here cannot
+      // be stored. Reported rather than dropped in silence: it is 36 bytes
+      // near the end of entry 4, and the loader zeroes them regardless.
+      if (bank.subarray(cursor, cursor + length).some((b) => b !== 0)) {
+        notes.push(
+          `${length} bytes at bank offset ${cursor.toLocaleString()} (entry `
+          + `${Math.floor(cursor / ENTRY_BYTES)}) fall in a boot-stream fill `
+          + "block and CANNOT be written; the loader zeroes them");
+      }
+    } else {
+      content.set(bank.subarray(cursor, cursor + length), at);
+    }
+    cursor += length;
   }
 
   return {
     section: replacement(firmware, SECTION, content),
     notes,
-    extents: [{ section: SECTION, start, length: COUNT * ENTRY_BYTES,
-                what: "transient bank" }],
+    extents: extents(firmware),
   };
 }

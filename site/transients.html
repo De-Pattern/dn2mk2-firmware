@@ -70,6 +70,11 @@
     font-size: .78rem; color: var(--ink-soft); flex: 1 1 auto;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .slot-fit {
+    font-family: var(--mono); font-size: .68rem; color: var(--ink-soft);
+    letter-spacing: .02em;
+  }
+  .slot-fit.cut { color: var(--warn); }
   .slot canvas {
     width: 100%; height: 46px; display: block; border-radius: 4px;
     background: var(--bg); cursor: pointer;
@@ -135,10 +140,28 @@
 <section class="step hidden" id="step2">
   <div class="step-head"><span class="step-num">2</span><h2>The bank</h2></div>
   <p>
-    34 slots, 100&nbsp;ms each. Click a waveform to hear it. Drop audio on a slot
-    to replace it — any format your browser can play, at any rate; it is mixed to
-    mono and resampled for you.
+    34 slots. Click a waveform to hear it. Drop audio on a slot to replace it —
+    any format your browser can play, at any rate; it is mixed to mono and
+    resampled for you.
   </p>
+
+  <div class="note">
+    <p><strong>Every slot is exactly 100&nbsp;ms, and your sample is cut to
+    fit.</strong> 4,800 samples at 48&nbsp;kHz, the same for all 34 — there is no
+    length field to change. Anything longer is <em>truncated</em>; anything
+    shorter is <em>padded with silence at the end</em>. A slot that had to cut your file says so,
+    with the original length, and the <code>start</code> control moves which
+    100&nbsp;ms is kept. The slot's waveform shows your whole file with the
+    imported window shaded, so you can see exactly what is kept and what is
+    dropped &mdash; and, for a short sample, how much of the slot is silence.</p>
+    <p>Elektron's own transients do not all fit either: <strong>20 of the 34 are
+    still ringing when their slot ends</strong>, and that ring is what you hear at
+    the beginning of the next one. So the factory bank behaves like a continuous
+    3.4-second recording cut into 100&nbsp;ms pieces rather than 34 self-contained
+    hits — and replacing a slot quietly changes the opening of the slot after it,
+    because the borrowed tail goes away. A sample that decays inside 100&nbsp;ms
+    will behave more predictably than the factory content does.</p>
+  </div>
 
   <div class="note" id="tranNote">
     <p><strong>Which slot is which <code>TRAN</code> value is not known yet.</strong>
