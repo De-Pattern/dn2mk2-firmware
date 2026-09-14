@@ -930,3 +930,75 @@ that offers an arp page and does nothing is visible and harmless, in the way
 `docs/ideas-backlog.md` §4 describes for an unreachable modulation destination.
 
 **Not started.** Filed while the PCM thread was blocked on port access.
+
+---
+
+## 11. A real compatibility check between mods
+
+**Filed 2026-09-14, at the owner's direction, to be picked up when two mods
+share a section or a processor.**
+
+### What exists, and exactly what it promises
+
+`src/dnfw/mods/__init__.py` compares **byte ranges**. Every mod declares its
+extents before writing, and `check_compatible` compares every pair — every pair,
+not each against the last, because "A is fine with B" and "B is fine with C"
+says nothing about A and C. Overlap is refused with the offending range named.
+
+That is the whole guarantee, and it is deliberately the weakest useful one: it
+is enforced because it is the part that can be checked.
+
+### Why byte-range overlap is not compatibility
+
+**Two mods writing disjoint bytes can still fight.** Nothing in the current
+check would notice any of these:
+
+| shape | example |
+|---|---|
+| both change the same *feature* through different bytes | one opens a parameter as a modulation destination, another repurposes the same parameter's storage |
+| one relies on a value the other rewrites | a cave reading a table another mod reorders |
+| both consume the same finite resource | two caves in the same constants region, or two claims on the same free lane |
+| one changes a count the other indexes against | growing the transient bank while another mod hardcodes 34 |
+| order matters | two mods writing the same section where the second reads the first's bytes — `cli/mods.py::_staged` handles the plumbing, but nothing checks whether the order is *right* |
+
+### What makes this filable rather than urgent
+
+**The two mods that exist cannot collide.** `moddest` writes 13 bytes of
+ColdFire data in section 3; `transients` writes the FM drum bank in section 7,
+which is SHARC data. Different sections, different processors, neither touching
+code. Verified on 1.11: no overlapping extents, 21/21 integrity, sections 2, 4,
+5 and 8 byte-identical, and both changes present and confined.
+
+So the check currently returns the right answer, and it would return the right
+answer if it did nothing at all. **The first mod pair that shares a section or a
+processor is when this stops being free**, and that is the trigger to pick this
+up.
+
+### What a real check would need
+
+Not a bigger overlap test. The candidates, roughly in order of cost:
+
+1. **Declared resources, not just bytes.** A mod says what it *claims* — this
+   parameter id, this cave region, this lane, this table — and claims are
+   compared as well as extents. Cheap, and catches the "same feature, different
+   bytes" case that overlap cannot.
+2. **Declared reads.** A mod says what it depends on being unchanged. A later
+   mod writing into another's declared reads is a conflict, and this also gives
+   ordering an answer instead of a convention.
+3. **Differential verification.** Apply A, apply B, apply both; check that the
+   combined image's diff against stock is exactly the union of the two
+   individual diffs. That is mechanical, needs no declarations, and would have
+   caught nothing so far — which is the point of having it before it is needed.
+
+(3) is the one that costs almost nothing to build and asks the image rather than
+the author, so it is probably first. (1) and (2) need every mod to describe
+itself honestly, which is the same weakness `extents()` already has: **a mod
+that under-declares breaks the only guarantee the system offers**, and no amount
+of checking upstream fixes an author who did not say what they touch.
+
+### What not to do
+
+Do not let this become a claim that combined mods are *safe*. Nothing here
+substitutes for flashing the combination. The two current mods have each been
+confirmed on hardware separately and **the combination has never been flashed**
+— which is a small risk given the disjointness, and is still a first run.
