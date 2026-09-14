@@ -1,0 +1,40 @@
+# Publish site/ to GitHub Pages.
+#
+# site/ rather than docs/ on purpose: docs/ is this project's research record --
+# ~40 markdown files of measurements, corrections and retractions written for
+# whoever picks the work up. Pages would turn every one of them into a public
+# page, which is not what they are for. The site is a separate, small thing that
+# points at the repository for the detail.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -142,6 +142,12 @@ single error is at `0x2839400e`, where `0x9fc4` is taken as a 4-byte `16b` when
 the alignment that lands on the validated cjump needs 2. Every printed line
 looked fine. None after that one was.
 
+> **[SUPERSEDED 2026-09-14 - see section 10.]** The table above is measured
+> against digikit `ec32de1`, the revision this repository pinned. **digikit
+> PR #9 changed the tables and the linear-walk figure is now 44.9%**, not
+> 3.9%. The comparison *between methods* still holds, since one decoder
+> produced both rows, but the absolute numbers are stale.
+
 ## 5. What stops it: one rule, named by its own author
 
 Of 396 walk failures, **378 are the same group** — `GROUP_5A_5B_MOVE`:
@@ -202,6 +208,48 @@ gray cell the crop lost — it is not in those words at all. That is evidence fo
 the author's *first* possibility, and it means any VISA decoder needs context
 (surrounding boundaries, or a third word's semantics) rather than a better
 table.
+
+### The 792 spans with no solution, investigated
+
+Those failures were the first thing to explain, because if they meant the
+boundaries were unreliable the contradictions above would be manufactured rather
+than found. **Measured 2026-09-14 with `--why`:**
+
+```
+ran into an encoding with NO length rule        14
+every assignment overshoots the boundary       778
+both, on different branches                      0
+```
+
+So it is almost entirely *overshoot*: starting at a known boundary, no
+combination of lengths lands exactly on the next one. Three candidate causes
+were tested.
+
+**Not false-positive boundaries sitting too close.** A cjump is 6 bytes, so a
+boundary fewer than 6 bytes after a cjump site would prove one of the two is not
+a real instruction start. There are **zero** such cases. The smallest gaps in
+the whole population are 2 spans of 4 bytes, 1 of 8 and 6 of 10 — all legal.
+
+**Not a mis-decoded cjump.** `decode_length_multiword(0x1804)` returns 48,
+correctly, so the walk does not start a cjump span misaligned.
+
+**Not systematic inter-function padding.** If functions were aligned, the walk
+would legitimately stop short of the next entry. Entry addresses mod 8 are
+`147 / 87 / 132 / 95` — a mild bias toward 0 and 4, nowhere near the
+concentration alignment padding would produce.
+
+**So the cause is not yet established.** What remains, in order of likelihood:
+length rules that are wrong outside the ambiguous group; inline literal pools
+between functions; and occasional bad boundaries. That is stated as an open
+question rather than resolved by preference, and it is the first thing to settle
+before the constraint solver is turned into a decoder.
+
+**What it does not threaten.** The contradictions in §6 are drawn *only* from
+spans that solved exactly, and no-solution spans contribute nothing to them. The
+residual risk is narrower and worth naming: a span could solve exactly and still
+be read wrongly, if bytes that are not instructions happened to decode to
+lengths summing to the right total. Five independent pairs make that unlikely;
+one hand-checked disassembly of any of the listed addresses would settle it.
 
 ### What would overturn this
 
@@ -292,3 +340,84 @@ python scripts/sharc_decode.py <image> --ghidra out/sharc/ghidra-listing.txt
 ```
 
 No firmware bytes are written into this repository; `out/` is gitignored.
+
+---
+
+# 10. Re-measured against digikit PR #9 (2026-09-14)
+
+digikit merged **PR #9** - "SHARC analysis, firmware rebuild, and an eighth
+machine in the emulator", 39 commits. Two parts land directly on this file, and
+one obsoletes its headline numbers.
+
+## The gap in section 5 is closed upstream
+
+Section 5 said 95% of walk failures were `GROUP_5A_5B_MOVE`, and section 6
+argued from code that no rule over `(word0, word1)` could exist. **digikit
+resolved it in "revision 4" by re-reading the source figure at 400 DPI**, and it
+is real work rather than a guess: `Type5b_move` grays its own bits 6:0 (source
+bits 22:16) to zero, where `Type5a_move` carries a real `compute[22:16]`. The
+test is `(word1 & 0x407f) == 0` for the 32-bit form, with bit 14 included as
+confirmation rather than as a discriminator.
+
+## The net effect on this image is large
+
+Same oracle as section 4 - a linear walk from the 461 known entries, scored on
+whether an instruction starts exactly at each validated cjump site:
+
+| tables | boundaries hit | walks that stopped |
+|---|---:|---:|
+| `ec32de1` (what section 4 measured) | 62/1589 - **3.9%** | 224 |
+| `main` after PR #9 | 714/1589 - **44.9%** | **19** |
+
+**11.5x more boundaries, and stops fall from 224 to 19.** Section 4's "6.9% of
+bytes readable" framing is obsolete, and so is any claim that the SHARC is
+effectively unreadable.
+
+## But the discriminator scores below a constant, on this image
+
+Using PR #9's tables throughout and overriding **only** the 5a/5b decision:
+
+| decision for that group | boundaries hit |
+|---|---:|
+| rev4 rule, `(w1 & 0x407f) == 0` | 714/1589 - 44.9% |
+| **control: always 32-bit** | **824/1589 - 51.9%** |
+| control: always 48-bit | 729/1589 - 45.9% |
+
+A correct rule should beat both constants. This one sits between them, 110
+boundaries below "always 32-bit".
+
+**The controls are the whole point.** Without them, 44.9% reads as success - and
+this repository has made exactly that mistake before, in the "81% confidently
+decoded" that section 4 retracts for having no outcome that means *wrong*.
+
+It agrees with section 6's constraint evidence rather than contradicting it: the
+rule matches only **90 of 322** code-forced decisions (28%), and the five
+contradicting `(word0, word1)` pairs survive under it. `w0=0x724f w1=0x003f`
+gives `w1 & 0x407f = 0x3f`, so the rule calls it 48-bit - while the code forces
+32-bit at `0x2000c236` and 48-bit at `0x2000c26c`, 54 bytes apart in one
+function.
+
+**Carried honestly:** section 6's 778 unexplained overshoots still qualify the
+forced-decision numbers. The boundary-hit table does not depend on the span
+solver at all, only on the cjump oracle, and is the stronger evidence. And this
+is a **Digitone II** image - if rev4 beats the constants on Digitakt II and
+loses here, that is more interesting than a misread figure.
+
+Posted to `m-dwyer/digikit#8`, leading with the improvement.
+
+## What PR #9 also gives us
+
+Recorded because it changes what is possible here:
+
+- **`tools/machinepatch.py` adds an eighth machine type** to Digitakt II - five
+  coordinated patches (list, dispatch, group, display-name table, and the sort
+  `std::map` ranks, without which `map::at(7)` throws and boot ends in
+  `std::terminate`). A working precedent for adding a **track type** on this
+  platform, which `docs/ideas-backlog.md` section 8 pathway 1 assumed was
+  expensive. Emulator-only; selecting the machine is untested.
+- **`dt2/aplib.py`, `dt2/build.py`, `dt2/authcode.py`** - an independent
+  implementation of the container write side and the HMAC trailer. A second
+  opinion on our Gates A-C, from code sharing no lineage with ours.
+- **`tools/sharc_import.py`** imports the SHARC at its load addresses, where
+  `scripts/export_sharc_regions.py` places both regions in one flat space via
+  the SLEIGH relocation. Worth diffing the two approaches.

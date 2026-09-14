@@ -1,5 +1,9 @@
 # The device's MIDI RPC surface — reading the hardware instead of the file
 
+> **~~PARKED 2026-09-12. Recorded, not pursued.~~ — UNPARKED 2026-09-14,
+> the protocol now works on hardware; see the end of this file.** The original
+> note follows because its reasoning was right at the time.
+>
 > **PARKED 2026-09-12.** Recorded, not pursued. The DSP hunt needs a tooling
 > answer first — we have no SHARC disassembler and no handle on the packing
 > (`docs/ideas-backlog.md` §7) — so finding the image would not yet let us read
@@ -92,3 +96,115 @@ Recovery remains proven for the OS (`docs/flashing.md`), but **a wiped +Drive is
 not recoverable** from anything this project holds — take a DNX backup before
 the first RPC session regardless, since even a read API can be sent a malformed
 message.
+
+---
+
+# The protocol works, on hardware — 2026-09-14
+
+**Unparked.** The note at the top of this file said the RPC surface was
+"recorded, not pursued". It has now been reached on a connected Digitone II
+running freshly-reflashed 1.11, read-only.
+
+## The framing, taken from elektroid rather than derived
+
+`docs/references.md` records why: `dagargo/elektroid` (GPLv3) already implements
+Elektron's transfer protocol and supports this device by name, so the wire
+format was **read out of `src/connectors/elektron.c`**, not reverse-engineered
+from the firmware. The plan in §"next steps" — read
+`MidiRpcDispatcher::handleMessageAndCreateResponse` to recover opcodes — was
+unnecessary, and would have been days of work for something already published.
+
+```
+raw   = F0 00 20 3C 10 00 <encode87(body)> F7
+body  = <seq:2 big-endian> 00 00 <opcode> [payload]
+reply opcode = request opcode | 0x80
+```
+
+`encode87` is MSB-first 8-in-7: for each group of seven source bytes, emit one
+byte holding their seven top bits, then the seven bytes with bit 7 cleared.
+
+## What the device answered
+
+Sending `ping` (opcode `0x01`) as
+`f0 00 20 3c 10 00 00 00 00 00 00 01 f7`:
+
+```
+f0 00 20 3c 10 00 04 00 05 00 00 01 2b 16 00 01 02 03 04 06 07 09 00
+50 52 51 53 54 55 56 00 57 58 59 5a 5b 5c 5d 00 5e 44 69 67 69 74 6f
+00 6e 65 20 49 49 00 f7
+```
+
+Decoded: opcode `0x81`, body
+
+```
+2b 16 | 01 02 03 04 06 07 09 50 52 51 53 54 55 56 57 58 59 5a 5b 5c 5d 5e | "Digitone II"
+```
+
+- `0x2b` = 43 — matching the Digitone II id in elektroid's device table, which
+  is an independent confirmation that the framing is right rather than merely
+  producing plausible bytes.
+- The middle run is the device's **own list of supported opcodes**, 22 of them.
+
+**It contains the whole data-object family** — `0x53 DATA_LIST`,
+`0x54/0x55/0x56` read open/partial/close — **and none of the `FsSample`
+(`0x10`+) or `FsRaw` (`0x14`+) families.** The device says, in its own words,
+what elektroid's table said: this instrument has a data store and no sample
+filesystem. `docs/pcm-hunt.md` §8 is confirmed from the hardware.
+
+### Cross-checked against DNX, and one id correction
+
+The DNX session, working the same device from the other side, reports its
+`capabilities.ts` records **the same 22 codes for 1.10E build 0050**. So 1.11
+advertises an unchanged set, from two tools sharing no code.
+
+**And a correction worth more than the capture:** `0x2b` is the **file-API**
+product id. The **dump protocol calls the same instrument `0x15`**. Two id
+spaces; never compare an id across them.
+
+## A trap that is not the device: a second application on the port
+
+From DNX, recorded before it costs us a wrong conclusion:
+
+- 2026-09-06, with Overbridge holding the port, two unrelated replies — a
+  directory listing and a file chunk — both came back **cut at exactly 885
+  bytes**.
+- A preset bank listed as **35 of 256** while Elektron Transfer was open.
+
+So **any reply that decodes to 885 bytes, or that lacks a terminating `F7`,
+means "suspect a second application on the port" before anything is concluded
+about the firmware.** Windows `winmm` gives one process exclusive use of a MIDI
+port, so two sessions cannot both hold it — but a *different* application
+(Transfer, Overbridge) can corrupt what a holder sees.
+
+## Three bugs of ours, all silent, all caught by controls
+
+None of these announced itself; each produced a confident wrong answer.
+
+| Bug | What it looked like |
+|---|---|
+| `MIM_LONGDATA` set to `0x3C5` — that is **`MIM_ERROR`**; the correct value is `0x3C4` | Short messages arrived normally, so the input looked healthy while **every SysEx reply was silently discarded**. Two "the device did not answer" results were recorded before this was found. |
+| `midiInAddBuffer` called **from inside the MIDI callback**, which Windows forbids | Harmless for exactly as long as `MIM_LONGDATA` never fired. The first run after fixing the constant **hung**. |
+| `MIDIHDR.lpData` declared `c_char_p` | ctypes auto-converts a `c_char_p` *field* to NUL-terminated `bytes` on access, so the first genuine reply decoded as **54 bytes of noise**. Must be `c_void_p`. |
+
+The sequence is the lesson. The device was asked twice and appeared silent both
+times; the receive path had been "proved" by watching the owner's pad produce
+`90 3c 64`, which exercises `MIM_DATA` and says **nothing** about the entirely
+separate buffer path SysEx uses. *A control that does not exercise the path
+under test is not a control.*
+
+## The Universal Device Inquiry is genuinely unanswered
+
+`F0 7E 7F 06 01 F7` drew nothing, twice, and that now stands as a finding rather
+than an artefact: the same tool, in the same run, gets a clean reply to
+Elektron's own `0x01`. The DN2 does not implement the MIDI standard identity
+request.
+
+## Where this goes next
+
+`0x53 DATA_LIST` is read-only, advertised by the device, and targets the one
+filesystem it has. That is the probe that would say whether the FM drum
+transients are data objects on the instrument — `docs/pcm-hunt.md` §8.
+
+**Not yet sent.** The DNX session needs the port for +Drive listings and a
+project read, and has priority; this session is standing off until it reports
+finished. `scripts/midi_probe.py` holds the tooling.

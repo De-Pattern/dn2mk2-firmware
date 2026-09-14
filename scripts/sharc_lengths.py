@@ -105,11 +105,19 @@ def length_at(blob: bytes, off: int):
     return None, False
 
 
-def solve(blob: bytes, start: int, stop: int):
+def solve(blob: bytes, start: int, stop: int, why=None):
     """Every length assignment walking start -> stop exactly.
 
     -> (solutions, exploded) where a solution is a list of (offset, length)
     for the ambiguous instructions only.
+
+    `why`, when given, is a Counter that records why dead ends died. A span
+    with no solution is not self-explanatory: it can mean an encoding with no
+    length rule at all (a gap that is NOT the 5a/5b one), or that every
+    assignment overshoots the far boundary -- which would instead suggest the
+    boundary itself is wrong, or that something between them is data rather
+    than code. Those have opposite implications for whether the solver can be
+    trusted, so they are counted separately rather than lumped as "failed".
     """
     solutions = []
     budget = [MAX_PATHS]
@@ -122,6 +130,8 @@ def solve(blob: bytes, start: int, stop: int):
             solutions.append(list(chosen))
             return
         if off > stop:
+            if why is not None:
+                why["overshot"] += 1
             return
         n, amb = length_at(blob, off)
         if amb:
@@ -131,6 +141,12 @@ def solve(blob: bytes, start: int, stop: int):
                 chosen.pop()
             return
         if n is None:
+            if why is not None:
+                w0 = struct.unpack_from("<H", blob, off)[0] \
+                    if off + 2 <= len(blob) else None
+                group = SD._which_group(w0) if w0 is not None else None
+                why["no_length_rule"] += 1
+                why[f"  word0=0x{w0:04x} group={group}"] += 1
             return
         walk(off + n, chosen)
 
@@ -150,6 +166,7 @@ def gather(regions):
 
     forced = []          # (word0, word1, length)
     stats = collections.Counter()
+    reasons = collections.Counter()
     for base, blob in code:
         region_end = base + len(blob)
         known = sorted({a for a in entries if base <= a < region_end}
@@ -158,12 +175,24 @@ def gather(regions):
             if b - a > 400:              # long spans explode; skip honestly
                 stats["span_too_long"] += 1
                 continue
-            sols, blew = solve(blob, a - base, b - base)
+            why = collections.Counter()
+            sols, blew = solve(blob, a - base, b - base, why)
             if blew:
                 stats["exploded"] += 1
                 continue
             if not sols:
                 stats["no_solution"] += 1
+                # Classify the span by the dead end it ran into, so the 792
+                # failures are explained rather than merely counted.
+                if why["no_length_rule"] and not why["overshot"]:
+                    stats["why_no_rule_only"] += 1
+                elif why["overshot"] and not why["no_length_rule"]:
+                    stats["why_overshot_only"] += 1
+                elif why["no_length_rule"]:
+                    stats["why_both"] += 1
+                else:
+                    stats["why_nothing"] += 1
+                reasons.update({k: v for k, v in why.items() if k.startswith("  ")})
                 continue
             if len(sols) == 1:
                 stats["unique"] += 1
@@ -188,14 +217,28 @@ def gather(regions):
                 # looks, because all of them could be wrong together.
                 forced.append((w0, w1, n, len(sols) == 1, base + off))
                 stats[f"forced_{n}"] += 1
-    return forced, stats
+    return forced, stats, reasons
 
 
-def report(forced, stats) -> None:
+def report(forced, stats, reasons=None) -> None:
     print("spans between known boundaries")
     for k in ("unique", "multiple", "no_solution", "exploded",
               "span_too_long"):
         print(f"  {k:<16}{stats.get(k, 0):>7}")
+
+    ns = stats.get("no_solution", 0)
+    if ns:
+        print(f"\nwhy those {ns} spans have no solution")
+        print(f"  ran into an encoding with NO length rule   "
+              f"{stats.get('why_no_rule_only', 0):>6}")
+        print(f"  every assignment overshoots the boundary   "
+              f"{stats.get('why_overshot_only', 0):>6}")
+        print(f"  both happen on different branches         "
+              f"{stats.get('why_both', 0):>6}")
+        if reasons:
+            print("\n  the encodings with no length rule at all:")
+            for k, v in reasons.most_common(10):
+                print(f"  {k}  x{v}")
 
     n4 = stats.get("forced_4", 0)
     n6 = stats.get("forced_6", 0)
@@ -284,8 +327,8 @@ def main(argv=None) -> int:
     if section is None:
         raise SystemExit(f"image has no section id={args.section}")
     regions = bootstream.load_regions(section.unpack() or section.raw_payload)
-    forced, stats = gather(regions)
-    report(forced, stats)
+    forced, stats, reasons = gather(regions)
+    report(forced, stats, reasons)
     return 0
 
 

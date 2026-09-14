@@ -87,3 +87,45 @@ so the pipeline itself carries over.
 - **`--strings` is a filter, not a parser.** It keeps strings that contain a
   word and drops most code, but the odd code fragment (`DHKU *`) gets through
   and reads as one.
+
+---
+
+## What 1.11 added, from the storage type names (2026-09-14)
+
+MAIN OS carries its storage struct names in mangled symbols, so diffing them
+between images says what the release changed to *persisted* state. 1.10E has 63
+such names, 1.11 has 67.
+
+| | |
+|---|---|
+| **new** | `bobConfigStorage_v0_t`, `midiSetupStorage_v3_t`, `projectSettingsStorage_v8_t`, `projectStorage_v14_t`, `soundPoolStorage_v3_t` |
+| **gone** | `soundPoolStorage_v2_t` — so that one is a version bump, not an addition |
+
+`projectStorage_v14_t` is confirmed on the instrument from the other direction:
+the DNX session reports every occupied project slot re-written by 1.11 to
+container format `0059` (build 40059), decoding to 12,890,116 bytes against
+1.10E's `0050` and 12,889,604. Two tools, two methods, one answer.
+
+### The new one is the breakout box, and it is not audio content
+
+`bobConfigStorage_v0_t` is `v0` — genuinely new rather than a bump — in
+namespace **`BOB`**:
+
+```
+0x401ff7f5  ZN19BreakOutBoxSettings12updateMirrorEPN3BOB21bobConfigStorage_v0_tE
+0x4021e736  Value<BOB::bobConfigStorage_v0_t>
+0x4021e75d  ValueWithMirror<BOB::bobConfigStorage_v0_t>
+```
+
+The same `ValueWithMirror<live, storage>` shape as `Sound` /
+`soundStorage_v3_t`. Its cluster: `BreakOutBoxSettings` (`0x4021e78f`),
+`BreakOutBoxSettingsCvConfigCopy` (`0x4021e713`), `BreakOutBoxEditMenuView`
+(`0x4021ed2c`), `BreakOutBoxRoutingMenuView` (`0x4021ef1a`),
+`BreakOutBoxCVOutputConfigMenuView` (`0x4021f068`). Beside them at `0x4021e857`
+sits `ValueWithMirror<modTarget_t[4], modTargetStorage_v0_t[4]>` — four
+modulation targets, which reads as one assignable target per CV output, though
+that is positional evidence. It is **not** new in 1.11.
+
+**The owner confirms: 1.11's "Outbox" is the breakout box, and has nothing to do
+with the FM drum transients.** Recorded so the next person who greps `Outbox`
+while hunting audio content stops here rather than following it.

@@ -307,6 +307,15 @@ FX track with its own LFOs and those masks exist for it. The owner settled it:
 *"nope, that's Octatrak exclusive"*. There is no FX track on the DN2. The Delay
 and Reverb masks are latent capability that nothing on this device asks for.
 
+> **What this retraction does NOT say, flagged 2026-09-14 because it was
+> misread — by me, in a summary to the owner.** It retracts an *explanation of
+> the masks*, not a feature. "The DN2 has no FX track" is a fact about the stock
+> device, and the stock device has no fourth LFO either; that is the premise of
+> this whole repository, not an objection to it. **Adding FX tracks remains a
+> live idea and is §8.** The only thing established here is that the existing
+> `0x1e00` masks are not evidence of hidden FX-track machinery, so they cannot
+> be cited as a head start.
+
 **Settled (2026-09-12): it is an enumeration problem, and the enumeration is a
 data edit.** `docs/parameter-set-tables.md` reads the boot-time builder
 `param_set_tables_build` (1.11 `0x400dc4d0`). It walks the parameter table and
@@ -710,11 +719,82 @@ Chorus/Delay/Reverb **sends** (ids 67/68/69) already carry the full `0x1e00`
 mask. Whatever §8 does to make FX settings modulable runs through that field, so
 §4's measurements are §8's starting point and should not be re-derived.
 
-### Status
+### It splits three ways by cost, not two (2026-09-14)
 
-**Parked, behind §7 and §4.** Not blocked on a decision — blocked on being able
-to read SHARC code, which is a tooling problem with a known owner (digikit) and
-no estimate.
+The two pathways above are still right, but collapsing everything else into
+"blocked behind the SHARC" is too coarse and hid the one tier that is open
+today.
+
+| Tier | What it is | Where it runs | Status |
+|---|---|---|---|
+| **A** | p-lock / modulate the **existing global FX settings** per pattern | nothing new on the DSP — the algorithms already run | **open, and adjacent to work already done** |
+| **B** | let a track choose **which of the existing three** FX it feeds | reuses running DSP code; the change is routing | unknown whether the SHARC exposes configurable routing |
+| **C** | **N FX instances per track**, Octatrack-style | multiplies DSP instances | genuinely behind the SHARC wall |
+
+**Tier A is the one to start on, and it pays twice.** The thing standing between
+an LFO and an FX parameter is §4's mirror split: `FxSetup::updateMirror` writing
+into `fxSetupStorage_v0_t`, a separate structure with its own index space. That
+is *also* exactly what per-pattern FX control has to go through. So Tier A's
+mechanism is §4's named blocker, and understanding one resolves both.
+
+Tier A also starts from storage that already exists: FX settings are already
+pattern-scoped data, so per-step locks are an increment rather than a new
+concept. **The first step costs nothing and touches no hardware** — ask DNX's
+decoded pattern format (`DNX/docs/dn2-pattern-format.md`) whether a p-lock can
+address an FX parameter id at all. If it can, Tier A is an enumeration problem.
+If it structurally cannot, that is the real wall, found offline for free.
+
+**Tier C's cost is not just "we can't read SHARC".** The Octatrack runs 8 tracks
+× 2 FX slots; the DN2 runs **3 global** FX. Per-track means multiplying
+instances, which is a DSP *headroom* question and additionally requires the
+algorithms to be instantiable more than once — a property of code we cannot
+inspect. Two unknowns, not one.
+
+### What the Octatrack repositories do and do not give us
+
+Worth stating plainly, because "we have the Octatrack code" is easy to
+over-read:
+
+| We have | What it actually is |
+|---|---|
+| `octabam` (MIT) | ColdFire code caves — the **delivery mechanism** |
+| `midisc` (MIT) | MIDI scenes via cave splicing; we port its ColdFire assembler |
+| `TABLE_ATLAS.md`, delay architecture | community docs describing **DSP56300** tables |
+| `ems-octakit` | **unlicensed** — inspiration-only until a licence is granted |
+
+**None of them contains an FX-track implementation.** The Octatrack's assignable
+FX are stock Elektron firmware running on a **DSP56300**; ours is a **SHARC+
+ADSP-21569**. No instruction, table layout or algorithm transfers. What we have
+is the tooling that makes patching possible and the method — which is real, and
+is why §"scenes" is tractable — but it is not the feature.
+
+### The DN1 changes the answer for Tiers B and C — **parked, after the PCM work**
+
+> **Ordering set by the owner, 2026-09-14: do not develop this yet.** It is
+> recorded because it reorders the *eventual* queue, not because it is next. The
+> PCM work (§3) comes first. Nothing below has been started.
+
+**`docs/dn1-dsp-comparison.md`: the Digitone 1 runs its audio DSP on the
+ColdFire.** 613 multiply-accumulates against the DN2's 50, in four-accumulator
+EMAC loops at `0x40096000`–`0x4009b000`, working on the `0x80000000` fast SRAM.
+Elektron moved the engine off the main CPU between 2018 and 2024.
+
+So on the DN1 the audio engine **is in the image, on a CPU we can already
+disassemble** (Gate F cleared), and its firmware is **unsigned** — no HMAC to
+reproduce, a shorter build loop. Everything this section calls "behind the SHARC
+wall" is simply *readable* there.
+
+That makes the DN1 the natural vehicle for Tiers B and C, and it suggests a use
+that is better than either: **read the DN1's LFO generator as a template for
+recognising the DN2's.** We would learn what an Elektron modulator looks like as
+code — its phase accumulator, its waveform table shapes, its constants — and
+then search the SHARC for that signature instead of reading 105 KB blind. That
+partially routes around §7's decode problem rather than waiting on it.
+
+**The caveat, so it is not overclaimed:** the DN1 is a different product with
+fewer tracks and voices, and nothing found there transfers to the DN2 as fact.
+It transfers as a *hypothesis to test*, which is still worth a great deal when
+the alternative is an unnamed 105 KB.
 
 ## 9. A tool for a custom start-up animation
 
@@ -768,3 +848,68 @@ page makes the instrument do more; this makes it *theirs*, which is a different
 kind of value and a much easier thing to explain to someone who does not care
 how an ELE3 container is laid out. It is also small enough to finish, which none
 of §1, §4, §6, §7 or §8 currently are.
+
+---
+
+## 10. The arpeggiator on MIDI tracks
+
+**Raised by the owner 2026-09-14.** The DN2's arpeggiator is available on synth
+tracks and not on MIDI tracks. Make it available on both.
+
+**This is the most tractable idea in this file, and the reason is architectural
+rather than optimistic.** An arpeggiator generates note events. It is sequencer
+logic on the **ColdFire**, which is the processor whose code ships in the image,
+which Gate F cleared a disassembler for, and which `docs/code-caves.md` has
+already executed our own code on. Nothing here touches the SHARC. Compare §8,
+where FX machines sit behind an instruction decoder we can only read at ~45%.
+
+### What the image already says
+
+| Anchor | Where |
+|---|---|
+| `ArpSetupMenuView` | `0x40212998` |
+| `ArpPatternCopy` | `0x4021566c` |
+| `MidiParameterSet` | `0x40214836` |
+| `MidiParameterPageView` | `0x40216c4b` |
+| `MidiPreset` | `0x40214637` |
+| `MidiPresetEnableMaskChangedInfo` | `0x402145aa` |
+
+Two observations worth having before any work starts:
+
+**The arp is not in the parameter table.** A dump of all 320 records matches
+nothing on `arp`. So arp settings are not parameter-table records with a page
+label, and none of `docs/lfo-parameters.md`, `docs/modulation-mask.md` or
+`docs/parameter-set-tables.md` applies to it directly. It is configured through
+a **menu view** — `ArpSetupMenuView` — which is a different mechanism and has
+not been studied in this project at all.
+
+**`MidiPresetEnableMaskChangedInfo` is the interesting name.** An *enable mask*
+on MIDI presets is exactly the shape a per-track-type feature gate would take,
+and `docs/modulation-mask.md` already established that this firmware gates
+capability with mask fields elsewhere. Whether the arp is gated by that mask, by
+a track-type test in the menu's own code, or by the sequencer refusing to run it
+for a MIDI track, is unknown and is the first thing to find.
+
+### The first question, and it is cheap
+
+**Is the restriction a UI gate or an engine gate?**
+
+- If the arp runs for any track and the *menu* simply is not offered on MIDI
+  tracks, this is small — the same class of change as `docs/modulation-mask.md`'s
+  mask flips, which were flashed and confirmed working.
+- If the sequencer's note generation checks the track type before running the
+  arp, it is larger but still entirely ColdFire-side and patchable.
+
+Find where `ArpSetupMenuView` is constructed and what decides whether it is
+reachable. `ghidra/FindDataRefs.java` and `dnfw fn callers` are the tools, and
+Ghidra is cleared for this CPU.
+
+### What makes it verifiable
+
+The same loop as everything else here: DNX reads the device's stored state, so
+whether a MIDI track has acquired arp settings is checkable from a saved project
+rather than from the screen. **And the failure mode is benign** — a MIDI track
+that offers an arp page and does nothing is visible and harmless, in the way
+`docs/ideas-backlog.md` §4 describes for an unreachable modulation destination.
+
+**Not started.** Filed while the PCM thread was blocked on port access.
