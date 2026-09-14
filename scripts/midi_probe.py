@@ -49,15 +49,100 @@ READ_ONLY = {
     ),
 }
 
+
+# ---------------------------------------------------------------------------
+# Elektron SysEx, as implemented by dagargo/elektroid (GPLv3) and read from its
+# src/connectors/elektron.c rather than guessed. Reuse before writing --
+# docs/references.md.
+#
+#   raw   = F0 00 20 3C 10 00 <encode87(body)> F7
+#   body  = <seq:2 BE> 00 00 <opcode> [payload]
+#   reply carries the request opcode | 0x80
+#
+# ONLY read-only opcodes appear below. The write side of this protocol --
+# 0x11/0x12/0x20/0x21 (create/delete/rename), 0x40-0x45 (file writers),
+# 0x5a-0x5d (data move/copy/clear/swap) and 0x50 (OS upgrade) -- is
+# deliberately absent, because DataClear and the FsRaw writers can destroy a
+# +Drive and nothing this project holds can restore one.
+# ---------------------------------------------------------------------------
+ELEKTRON_HEADER = bytes([0xF0, 0x00, 0x20, 0x3C, 0x10, 0x00])
+
+ELEKTRON_READ_ONLY = {
+    "ping":             (0x01, b"", "liveness only"),
+    "software_version": (0x02, b"", "reports the running OS version"),
+    "device_uid":       (0x03, b"", "reports the device UID"),
+    "storage_info":     (0x05, b"", "reports storage sizes and free space"),
+}
+
+
+def encode87(src: bytes) -> bytes:
+    """Elektron's 8-in-7 packing: one MSB byte then seven cleared bytes."""
+    out = bytearray()
+    for j in range(0, len(src), 7):
+        group = src[j:j + 7]
+        accum = 0
+        for k in range(7):
+            accum <<= 1
+            if k < len(group) and group[k] & 0x80:
+                accum |= 1
+        out.append(accum)
+        out.extend(b & 0x7F for b in group)
+    return bytes(out)
+
+
+def decode87(src: bytes) -> bytes:
+    """Inverse of encode87."""
+    out = bytearray()
+    i = 0
+    while i < len(src):
+        accum = src[i]
+        chunk = src[i + 1:i + 8]
+        for k, b in enumerate(chunk):
+            out.append(b | (0x80 if accum & (1 << (6 - k)) else 0))
+        i += 8
+    return bytes(out)
+
+
+def elektron_message(name: str, seq: int = 0) -> bytes:
+    if name not in ELEKTRON_READ_ONLY:
+        raise SystemExit(f"{name!r} is not in the read-only allowlist")
+    opcode, payload, _ = ELEKTRON_READ_ONLY[name]
+    body = bytes([(seq >> 8) & 0x7F, seq & 0xFF, 0, 0, opcode]) + payload
+    return ELEKTRON_HEADER + encode87(body) + bytes([0xF7])
+
+
+def elektron_reply(raw: bytes):
+    """-> (opcode, body) for an Elektron SysEx reply, or None."""
+    if len(raw) < 12 or raw[:6] != ELEKTRON_HEADER:
+        return None
+    body = decode87(raw[6:-1] if raw[-1] == 0xF7 else raw[6:])
+    if len(body) < 5:
+        return None
+    return body[4], body[5:]
+
+
 CALLBACK_FUNCTION = 0x00030000
+# The mmsystem callback messages, in order. Getting LONGDATA wrong is silent:
+# short messages keep arriving, so the input looks healthy while every SysEx
+# reply is thrown away. This file had 0x3C5 -- which is MIM_ERROR -- and two
+# "the device did not answer" results were recorded before that was found.
+MIM_OPEN = 0x3C1
+MIM_CLOSE = 0x3C2
 MIM_DATA = 0x3C3
-MIM_LONGDATA = 0x3C5
+MIM_LONGDATA = 0x3C4
+MIM_ERROR = 0x3C5
+MIM_LONGERROR = 0x3C6
 MHDR_DONE = 0x00000001
 
 
 class MIDIHDR(ctypes.Structure):
+    # lpData is c_void_p, NOT c_char_p. ctypes auto-converts a c_char_p FIELD
+    # to a NUL-terminated Python bytes on attribute access, so reading it back
+    # yields the buffer truncated at its first zero -- and passing that to
+    # string_at then reads from a nonsense address. The first decode of a real
+    # reply came back as 54 bytes of noise because of exactly this.
     _fields_ = [
-        ("lpData", ctypes.c_char_p),
+        ("lpData", ctypes.c_void_p),
         ("dwBufferLength", wt.DWORD),
         ("dwBytesRecorded", wt.DWORD),
         ("dwUser", ctypes.c_void_p),
@@ -100,98 +185,110 @@ PROC = ctypes.WINFUNCTYPE(None, wt.HANDLE, wt.UINT, ctypes.c_void_p,
                           ctypes.c_void_p, ctypes.c_void_p)
 
 
-def exchange(out_idx, in_idx, payload, wait=2.0, bufsize=65536):
-    """Send `payload`, collect SysEx replies for `wait` seconds."""
-    received = []
+class InPort:
+    """A MIDI input with several pre-posted SysEx buffers.
 
-    hin = wt.HANDLE()
-    buf = ctypes.create_string_buffer(bufsize)
-    hdr = MIDIHDR()
-    hdr.lpData = ctypes.cast(buf, ctypes.c_char_p)
-    hdr.dwBufferLength = bufsize
+    Windows forbids calling any multimedia function from inside a MIDI
+    callback; doing so deadlocks. The first version of this file called
+    `midiInAddBuffer` from `on_msg`, which was harmless only for as long as
+    MIM_LONGDATA never fired -- once the constant was corrected the very next
+    run hung. So buffers are posted up front and the callback does nothing but
+    copy bytes out.
+    """
 
-    def on_msg(h, msg, inst, p1, p2):
-        if msg == MIM_LONGDATA:
-            mh = ctypes.cast(p1, ctypes.POINTER(MIDIHDR)).contents
-            if mh.dwBytesRecorded:
-                received.append(bytes(buf[:mh.dwBytesRecorded]))
-            winmm.midiInAddBuffer(hin, ctypes.byref(hdr), ctypes.sizeof(hdr))
+    def __init__(self, in_idx, nbuf=8, bufsize=65536):
+        self.msgs = []
+        self.shorts = []
+        self.h = wt.HANDLE()
+        self._bufs = [ctypes.create_string_buffer(bufsize) for _ in range(nbuf)]
+        self._hdrs = []
 
-    cb = PROC(on_msg)
-    rc = winmm.midiInOpen(ctypes.byref(hin), in_idx, cb, None,
-                          CALLBACK_FUNCTION)
-    if rc:
-        raise SystemExit(f"midiInOpen failed: {rc}")
-    winmm.midiInPrepareHeader(hin, ctypes.byref(hdr), ctypes.sizeof(hdr))
-    winmm.midiInAddBuffer(hin, ctypes.byref(hdr), ctypes.sizeof(hdr))
-    winmm.midiInStart(hin)
+        def on_msg(h, msg, inst, p1, p2):
+            if msg == MIM_DATA:
+                v = ctypes.cast(p1, ctypes.c_void_p).value or 0
+                self.shorts.append(f"{v & 0xFF:02x} {(v >> 8) & 0xFF:02x} "
+                                   f"{(v >> 16) & 0xFF:02x}")
+            elif msg == MIM_LONGDATA:
+                mh = ctypes.cast(p1, ctypes.POINTER(MIDIHDR)).contents
+                if mh.dwBytesRecorded:
+                    raw = ctypes.string_at(mh.lpData, mh.dwBytesRecorded)
+                    self.msgs.append(raw)
+                # deliberately NOT re-adding the buffer here -- see docstring
 
+        self._cb = PROC(on_msg)
+        rc = winmm.midiInOpen(ctypes.byref(self.h), in_idx, self._cb, None,
+                              CALLBACK_FUNCTION)
+        if rc:
+            raise SystemExit(f"midiInOpen failed: {rc}")
+        for b in self._bufs:
+            hdr = MIDIHDR()
+            hdr.lpData = ctypes.cast(b, ctypes.c_void_p)
+            hdr.dwBufferLength = len(b)
+            r1 = winmm.midiInPrepareHeader(self.h, ctypes.byref(hdr),
+                                           ctypes.sizeof(hdr))
+            r2 = winmm.midiInAddBuffer(self.h, ctypes.byref(hdr),
+                                       ctypes.sizeof(hdr))
+            if r1 or r2:
+                raise SystemExit(f"buffer setup failed: prepare={r1} add={r2}")
+            self._hdrs.append(hdr)
+        rc = winmm.midiInStart(self.h)
+        if rc:
+            raise SystemExit(f"midiInStart failed: {rc}")
+
+    def close(self):
+        winmm.midiInStop(self.h)
+        winmm.midiInReset(self.h)
+        for hdr in self._hdrs:
+            winmm.midiInUnprepareHeader(self.h, ctypes.byref(hdr),
+                                        ctypes.sizeof(hdr))
+        winmm.midiInClose(self.h)
+
+
+def send_sysex(out_idx, payload):
     hout = wt.HANDLE()
     rc = winmm.midiOutOpen(ctypes.byref(hout), out_idx, None, None, 0)
     if rc:
         raise SystemExit(f"midiOutOpen failed: {rc}")
-
     sbuf = ctypes.create_string_buffer(payload, len(payload))
     shdr = MIDIHDR()
-    shdr.lpData = ctypes.cast(sbuf, ctypes.c_char_p)
+    shdr.lpData = ctypes.cast(sbuf, ctypes.c_void_p)
     shdr.dwBufferLength = len(payload)
     shdr.dwBytesRecorded = len(payload)
-    winmm.midiOutPrepareHeader(hout, ctypes.byref(shdr), ctypes.sizeof(shdr))
-    winmm.midiOutLongMsg(hout, ctypes.byref(shdr), ctypes.sizeof(shdr))
-
-    t0 = time.time()
-    while time.time() - t0 < wait:
-        time.sleep(0.05)
-
+    r1 = winmm.midiOutPrepareHeader(hout, ctypes.byref(shdr), ctypes.sizeof(shdr))
+    r2 = winmm.midiOutLongMsg(hout, ctypes.byref(shdr), ctypes.sizeof(shdr))
+    print(f"  winmm out codes: open=0, prepare={r1}, longmsg={r2}")
+    if r1 or r2:
+        print("  *** non-zero: the message did NOT leave this machine ***")
+    time.sleep(0.2)
     winmm.midiOutUnprepareHeader(hout, ctypes.byref(shdr), ctypes.sizeof(shdr))
     winmm.midiOutClose(hout)
-    winmm.midiInStop(hin)
-    winmm.midiInReset(hin)
-    winmm.midiInUnprepareHeader(hin, ctypes.byref(hdr), ctypes.sizeof(hdr))
-    winmm.midiInClose(hin)
-    return received
+
+
+def exchange(out_idx, in_idx, payload, wait=2.0, bufsize=65536):
+    """Send `payload`, collect SysEx replies for `wait` seconds."""
+    port = InPort(in_idx, bufsize=bufsize)
+    try:
+        send_sysex(out_idx, payload)
+        t0 = time.time()
+        while time.time() - t0 < wait:
+            time.sleep(0.05)
+        return list(port.msgs)
+    finally:
+        port.close()
 
 
 def listen(in_idx, seconds, bufsize=65536):
-    """Receive only. Captures short messages AND SysEx.
-
-    The point is the control: if the device never answers an inquiry we must
-    be able to tell "it declined" from "we cannot hear it". A turned encoder
-    produces short messages, so this separates the two.
-    """
-    got = []
-    hin = wt.HANDLE()
-    buf = ctypes.create_string_buffer(bufsize)
-    hdr = MIDIHDR()
-    hdr.lpData = ctypes.cast(buf, ctypes.c_char_p)
-    hdr.dwBufferLength = bufsize
-
-    def on_msg(h, msg, inst, p1, p2):
-        if msg == MIM_DATA:
-            v = ctypes.cast(p1, ctypes.c_void_p).value or 0
-            got.append(("short", f"{v & 0xFF:02x} {(v >> 8) & 0xFF:02x} "
-                                 f"{(v >> 16) & 0xFF:02x}"))
-        elif msg == MIM_LONGDATA:
-            mh = ctypes.cast(p1, ctypes.POINTER(MIDIHDR)).contents
-            if mh.dwBytesRecorded:
-                got.append(("sysex", bytes(buf[:mh.dwBytesRecorded]).hex(" ")))
-            winmm.midiInAddBuffer(hin, ctypes.byref(hdr), ctypes.sizeof(hdr))
-
-    cb = PROC(on_msg)
-    rc = winmm.midiInOpen(ctypes.byref(hin), in_idx, cb, None, CALLBACK_FUNCTION)
-    if rc:
-        raise SystemExit(f"midiInOpen failed: {rc}")
-    winmm.midiInPrepareHeader(hin, ctypes.byref(hdr), ctypes.sizeof(hdr))
-    winmm.midiInAddBuffer(hin, ctypes.byref(hdr), ctypes.sizeof(hdr))
-    winmm.midiInStart(hin)
-    t0 = time.time()
-    while time.time() - t0 < seconds:
-        time.sleep(0.05)
-    winmm.midiInStop(hin)
-    winmm.midiInReset(hin)
-    winmm.midiInUnprepareHeader(hin, ctypes.byref(hdr), ctypes.sizeof(hdr))
-    winmm.midiInClose(hin)
-    return got
+    """Receive only -- separates 'the device declined' from 'we cannot hear'."""
+    port = InPort(in_idx, bufsize=bufsize)
+    try:
+        print("  input chain open (all winmm codes 0)")
+        t0 = time.time()
+        while time.time() - t0 < seconds:
+            time.sleep(0.05)
+        return ([("short", x) for x in port.shorts]
+                + [("sysex", m.hex(" ")) for m in port.msgs])
+    finally:
+        port.close()
 
 
 def main(argv=None) -> int:
@@ -201,6 +298,8 @@ def main(argv=None) -> int:
     p.add_argument("--out", type=int, help="output port index")
     p.add_argument("--in", dest="inp", type=int, help="input port index")
     p.add_argument("--send", choices=sorted(READ_ONLY))
+    p.add_argument("--elektron", choices=sorted(ELEKTRON_READ_ONLY),
+                   help="send a READ-ONLY Elektron SysEx request")
     p.add_argument("--wait", type=float, default=2.0)
     p.add_argument("--listen", type=float, metavar="SECONDS",
                    help="receive only -- proves the input path works before "
@@ -222,6 +321,31 @@ def main(argv=None) -> int:
             print(f"\n{len(got)} message(s) received -- the input path works:")
             for kind, data in got[:20]:
                 print(f"  {kind:<5} {data}")
+        return 0
+    if args.elektron:
+        if args.out is None or args.inp is None:
+            raise SystemExit("--out and --in are required with --elektron")
+        opcode, _pl, why = ELEKTRON_READ_ONLY[args.elektron]
+        msg = elektron_message(args.elektron)
+        print(f"out [{args.out}] {outs[args.out]}   in [{args.inp}] {ins[args.inp]}")
+        print(f"\nsending elektron {args.elektron} (opcode 0x{opcode:02x}): "
+              f"{msg.hex(' ')}")
+        print(f"  ({why}; read-only allowlist)\n")
+        got = exchange(args.out, args.inp, msg, args.wait)
+        if not got:
+            print("no reply within the window.")
+            return 0
+        for r in got:
+            print(f"reply {len(r)} bytes: {r.hex(' ')}")
+            parsed = elektron_reply(r)
+            if parsed:
+                op, body = parsed
+                print(f"  opcode 0x{op:02x} (request | 0x80 = "
+                      f"0x{opcode | 0x80:02x})")
+                print(f"  body   {body.hex(' ')}")
+                txt = bytes(c for c in body if 32 <= c < 127)
+                if len(txt) >= 3:
+                    print(f"  text   {txt.decode('ascii', 'replace')!r}")
         return 0
     if args.list or not args.send:
         print("MIDI IN:")
