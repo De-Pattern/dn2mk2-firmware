@@ -57,16 +57,29 @@ byte-identical section 7.** That is a strong check rather than a pleasant one:
 a wrong offset, entry size, count, endianness or sample width would each corrupt
 bytes, and none does. Rebuilds pass 21 of 21 integrity checks.
 
-### What does not
+### CONFIRMED ON HARDWARE — 2026-09-14
 
-**It has never been flashed.** No modified image has been put on a Digitone II
-and heard. Until then this is a well-tested file transformation and an untested
-firmware change, and the tool says so when it runs.
+An image carrying marker samples at five known slots
+(`scripts/make_marker_transients.py`) was flashed to a Digitone II, and **every
+marker played back from `TRAN`.**
 
-**The bank has not been traced from `TRAN`.** Parameter id 286 has not been
-followed to these bytes. They are PCM, in the audio DSP's image,
-transient-shaped and transient-length, and the owner confirms they sound like a
-bank of transients — strong, not proof.
+That closes both questions this section previously listed as open:
+
+| was open | now |
+|---|---|
+| never flashed — a file transformation, not a proven firmware change | **flashed and heard** |
+| not traced from `TRAN` (id 286) to these bytes | **`TRAN` plays them** — an empirical trace, which is the stronger kind |
+
+It validates the whole chain in one step: locate a bank by statistics, map its
+load address to a file offset through the boot stream, replace entries, rebuild,
+re-sign, flash, hear. No part of that sequence was previously known to work end
+to end.
+
+**What stays conditional:** the bank's location, format, entry length and count
+are *measured*, not documented by Elektron, so another OS release could move
+them. The mod resolves the address through the boot stream at apply time and
+refuses an image whose layout it does not recognise, rather than trusting a
+constant.
 
 ### The count, resolved
 

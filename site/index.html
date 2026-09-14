@@ -151,7 +151,7 @@
   <div class="mod-head">
     <h3>FM drum transients</h3>
     <span class="mod-id">transients</span>
-    <span class="tag untested">Not yet flashed</span>
+    <span class="tag ready">Confirmed on hardware</span>
   </div>
   <p>
     Replace the factory FM&nbsp;DRUM transient bank with your own samples — 34 slots,
@@ -174,14 +174,15 @@ dnfw mods extract firmware.syx --mod transients -o factory/
 dnfw mods apply firmware.syx --mod transients --from my_hits/ -o modded.syx</pre>
 
   <div class="note">
-    <p><strong>What is proven and what is not.</strong> The bank's location, format,
-    entry length and count are measured, and the byte-identical round-trip confirms them.
-    What has <em>not</em> been done is flashing a modified image to a Digitone&nbsp;II and
-    hearing new transients come out. Until someone does that, this is a well-tested
-    file transformation and an untested firmware change.</p>
-    <p>It also has not been traced from the <code>TRAN</code> parameter to these exact
-    bytes. They are PCM, in the audio DSP's image, transient-shaped and transient-length,
-    and they sound like a bank of transients — that is strong, and it is not proof.</p>
+    <p><strong>Confirmed on a Digitone&nbsp;II.</strong> An image with marker samples at
+    five known slots was flashed, and every marker played back from the <code>TRAN</code>
+    parameter. That settles both open questions at once: these bytes <em>are</em> the FM
+    drum transients, and the whole chain — locate, extract, replace, re-sign, flash —
+    works end to end.</p>
+    <p>Still worth knowing: the bank's location, format, entry length and count are
+    <em>measured</em>, not documented by Elektron, so a future OS release could move them.
+    The mod resolves the address through the boot stream when it runs and refuses an image
+    whose layout it does not recognise, rather than trusting a stored constant.</p>
   </div>
 </article>
 

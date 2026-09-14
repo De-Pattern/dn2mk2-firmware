@@ -1644,3 +1644,58 @@ is empty or full, which is why occupancy has to come from the listing's flag
 bytes and never from the size. That is the same trap in a different costume as
 this document's detector failures: a value that looks like a measurement of the
 content when it is really a property of the container.
+
+---
+
+## 16. CONFIRMED ON HARDWARE: the bank is the FM drum transients
+
+**2026-09-14.** An image with marker samples at five known slots — a low buzz, a
+mid beep, a high beep, flat noise and silence — was built by
+`scripts/make_marker_transients.py`, flashed to a Digitone II, and **every
+marker played back from `TRAN`.**
+
+| question | answer |
+|---|---|
+| are these bytes the FM drum transients? | **yes** |
+| does locate → extract → replace → rebuild → sign → flash work? | **yes, end to end** |
+
+This is the project's first user-facing firmware mod, and the first time that
+whole sequence has been shown to work.
+
+### The one thing that actually mattered
+
+The bank sat in 837 KB of SHARC image with compressed neighbours either side, no
+symbol, no index table and no string naming it. Three detectors failed before
+one worked, and the difference was not cleverness:
+
+- zero-crossing rate **rejected the wavetables it should have found**;
+- byte-plane asymmetry and step autocorrelation both **rewarded pointer
+  tables**, because near-constant high bytes and numerically-close neighbours
+  look exactly like structured audio;
+- what fixed it was **eight WAV files** — `TRANSIENT 01-08.wav` from the Syntakt
+  OS 1.41 Twinshot pack — against which the thresholds proved three to ten times
+  too loose.
+
+*A detector needs a positive sample of the thing it detects, not a theory about
+it.* Every failure in this document reduces to not having one.
+
+### The ledger of wrong turns
+
+Kept because the ratio is the point — one location, found after all of this:
+
+| claim | fate |
+|---|---|
+| "125 transients", from the range field | overstated — `TRAN` is a continuous control, not a 125-item menu |
+| the dense MAIN OS block is the bank | it is the factory **project**, LZ-compressed |
+| ...and its strings are preset names | **pattern** names, corrected by the owner |
+| the DDR span is pitch/detune ratio tables | it is the bank — only its ends were sampled, as float32, never the middle as int16 |
+| the transients are in device storage | the DN2 exposes no sample filesystem at all |
+| 32 entries, from `TRAN` 0..124 and 4-step interpolation | **34**, confirmed by ear on entries 32 and 33 |
+| `FindDataRefs.java` returning zero meant no references | the tool was broken and had never worked |
+| a DN2 project slot allocates 4,194,304 bytes | **16,777,216** — the 4 MiB figure was a Digitone 1 measurement |
+
+### Still unknown
+
+**How `TRAN`'s 125 positions map onto 34 entries.** The marker flash was
+designed to answer this too: five markers at known slots, so the positions at
+which they appear give the mapping. That reading has not been taken yet.
