@@ -110,9 +110,11 @@ public pages. The site is a small front door that points back here for detail.
 
 ## The browser tool
 
-**Status: the codec is built and proven; nothing else is.** `site/js/aplib.js`
-exists and passes all four checks below. The container, transport, integrity and
-UI layers are still only the plan under them.
+**Status: the whole pipeline is built and proven; the mod and the UI are not.**
+`site/js/` loads a real `.syx`, derives its signing key, depacks and repacks
+section 7, reassembles the container, re-signs it and verifies the result — and
+the image it produces is **byte-identical to the one the Python tool builds**.
+What is missing is the transients mod itself, WAV handling, and any interface.
 
 **The requirement, from the owner: zero CLI, zero cloning.** A user opens a web
 page, picks their own firmware file and their own samples, adjusts each one,
@@ -124,13 +126,20 @@ what `transientsplit` does and the right posture for someone's firmware.
 
 | step | difficulty | state |
 |---|---|---|
-| SysEx transport decode/encode (8-in-7) | easy | not started |
-| ELE3 container parse and rebuild | moderate | not started |
+| SysEx transport decode/encode (8-in-7) | easy | **done** — `syx/` |
+| ELE3 container parse and rebuild | moderate | **done** — `container/` |
 | aPLib **depack** of section 7 | moderate — port of `codec/aplib.py` | **done** |
 | aPLib **pack** of section 7 | was **the blocker** | **done**, store-only |
-| content checksum + HMAC-SHA256 | easy, `SubtleCrypto` | not started |
+| content checksum + HMAC-SHA256 | easy, `SubtleCrypto` | **done** — `integrity/` |
+| the transients mod itself | moderate — bank offset through the boot stream | not started |
 | WAV decode, trim, preview | easy, Web Audio | not started |
+| the UI | — | not started |
 | transient/tonal separation | **not ours** — link to `transientsplit` | n/a |
+
+`site/js/` mirrors `src/dnfw/`'s module layout deliberately — `syx/`,
+`container/`, `integrity/`, and one `firmware.js` for the order they go in. Two
+implementations that drift are a liability; two that sit side by side with the
+same names make the drift visible.
 
 ### The decision on packing: store-only
 
@@ -190,6 +199,32 @@ contains **no matches**, so it cannot violate either bound in `codec.limits` —
 there is nothing to violate them with. Those limits are why images of ours once
 stalled in recovery (`docs/flashing.md`), so the safest possible stream on that
 axis is the one this emits.
+
+### The stack above the codec, and its two harder checks
+
+`test/test_js_firmware.py`, over the whole pipeline:
+
+| check | result |
+|---|---|
+| **Round-trip** — load a real image, build it straight back, nothing replaced | **byte-identical** |
+| Signing key recovered from the image's own material | **pass**, derived from `"Multiplier"` |
+| Every integrity field on the original | **9/9** |
+| Store-only rebuild reloads, re-verifies, section content unchanged | **9/9** |
+| **JS-built image vs Python-built image, same input** | **byte-identical**, 2,819,488 bytes |
+
+The round-trip is `docs/ROADMAP.md`'s **Gate A in JavaScript**: one comparison
+exercises SysEx framing, 8-in-7, per-packet checksums, marker counters, the
+container layout, the content checksum and the HMAC trailer at once, and any one
+of them being wrong shows up as a differing byte.
+
+The last row is the one that would catch a shared *assumption* rather than a
+coding slip — the failure mode where both implementations are wrong in the same
+direction, which no amount of self-checking can find.
+
+**The key never leaves the browser, and is never stored.** It is derived from
+the user's own firmware file in their own tab, the way `integrity/keyderive.py`
+does it, and a candidate is only accepted when it reproduces that image's own
+trailer — so a wrong guess cannot pass as the right one.
 
 **What none of this proves: that the device accepts it.** Every check above is
 offline. A larger section 7 has never been flashed, and the recovery bootloader
