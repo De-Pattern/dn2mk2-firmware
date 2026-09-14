@@ -737,6 +737,23 @@ into `fxSetupStorage_v0_t`, a separate structure with its own index space. That
 is *also* exactly what per-pattern FX control has to go through. So Tier A's
 mechanism is §4's named blocker, and understanding one resolves both.
 
+> **[2026-09-14 — the index space is described, and the gate is located.]**
+> `docs/fx-parameter-space.md`. Seven chorus parameters with SHARC-side indices
+> from an outside write-up line up against our parameter table with a constant
+> `+1`, seven for seven, which exposed a single **contiguous id run 1..67**
+> across LFO1/2/3, Chorus, Delay, Reverb, Ext-in and Master — the objects that
+> are not per-voice.
+>
+> The FX enumeration is a **101-entry pointer table at `0x42c649a8`**, read by
+> `FxParameterSet`'s eight-instruction `FUN_400dc0b0`. That address is in no
+> section, which is where `docs/modulation-mask.md` stopped — but it is **built
+> at runtime** by `FUN_400dc4d0`, which is ordinary ColdFire code in section 3.
+>
+> So Tier A is no longer blocked on unpatchable data. It is a code change in a
+> located function, using a mechanism already proven on hardware. **Still
+> unknown:** what fills that table, and whether being enumerated is sufficient
+> for modulation to be *applied* rather than merely offered.
+
 Tier A also starts from storage that already exists: FX settings are already
 pattern-scoped data, so per-step locks are an increment rather than a new
 concept. **The first step costs nothing and touches no hardware** — ask DNX's
