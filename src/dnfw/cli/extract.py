@@ -21,6 +21,13 @@ def configure(parser) -> None:
         metavar="ID",
         help="extract only this section id; repeatable (default: all)",
     )
+    parser.add_argument(
+        "--stored",
+        action="store_true",
+        help="also write each section exactly as the container holds it "
+             "(8-byte header, compressed stream, padding), for comparing a "
+             "rebuild or testing a second codec against these bytes",
+    )
 
 
 def _filename(label: str) -> str:
@@ -54,10 +61,15 @@ def run(args) -> int:
         # misalign every address in the file by eight bytes -- which is exactly
         # what this wrote until 2026-09-13 (`Section.raw_payload`).
         payload = content if content else section.raw_payload
-        path = args.out / f"section_{section.id}_{_filename(ele3.name(section.id))}.{kind}.bin"
+        stem = f"section_{section.id}_{_filename(ele3.name(section.id))}"
+        path = args.out / f"{stem}.{kind}.bin"
         path.write_bytes(payload)
         print(f"  {path}  {len(payload):,} bytes"
               f"  dest 0x{section.dest:08x}")
+        if args.stored:
+            as_held = args.out / f"{stem}.stored.bin"
+            as_held.write_bytes(section.stored)
+            print(f"  {as_held}  {len(section.stored):,} bytes  as held")
         written += 1
 
     if wanted is not None and written != len(wanted):
