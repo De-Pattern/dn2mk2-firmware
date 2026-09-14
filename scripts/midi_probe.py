@@ -2,6 +2,13 @@
 
 ## Safety, which is the whole design of this file
 
+**The worst known outcome on this protocol, first:** `0x54` (open reader) sent
+with an **unterminated body** -- a raw u32 id with no NUL -- **froze a Digitone 1
+three times**, recoverable only by a power cycle, which takes the unsaved active
+project with it. Reported by the DNX session from its own record. Every
+NUL-terminated body has been answered normally. Nothing in this file sends
+`0x54` at all, and if it ever does, the terminator is not optional.
+
 `docs/service-commands.md` lists commands that write persistent state --
 `#WRITE_SERIAL`, `#WRITE_TESTED`, `#MMC_RECONFIGURE`, `#FULL_UPGRADE` -- and
 `docs/midi-rpc.md` lists RPCs that can destroy a +Drive: `FsRawWriteFile*`,
@@ -67,10 +74,13 @@ READ_ONLY = {
 # ---------------------------------------------------------------------------
 ELEKTRON_HEADER = bytes([0xF0, 0x00, 0x20, 0x3C, 0x10, 0x00])
 
+# 0x03 and 0x04 were here as "device_uid" on elektroid's naming. The DNX
+# session reports both are UNIDENTIFIED -- Transfer merely polls with them --
+# so they are removed. A name in someone else's source is not evidence about
+# what a command does to a device.
 ELEKTRON_READ_ONLY = {
     "ping":             (0x01, b"", "liveness only"),
     "software_version": (0x02, b"", "reports the running OS version"),
-    "device_uid":       (0x03, b"", "reports the device UID"),
     "storage_info":     (0x05, b"", "reports storage sizes and free space"),
 }
 

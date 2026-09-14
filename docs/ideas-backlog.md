@@ -848,3 +848,68 @@ page makes the instrument do more; this makes it *theirs*, which is a different
 kind of value and a much easier thing to explain to someone who does not care
 how an ELE3 container is laid out. It is also small enough to finish, which none
 of §1, §4, §6, §7 or §8 currently are.
+
+---
+
+## 10. The arpeggiator on MIDI tracks
+
+**Raised by the owner 2026-09-14.** The DN2's arpeggiator is available on synth
+tracks and not on MIDI tracks. Make it available on both.
+
+**This is the most tractable idea in this file, and the reason is architectural
+rather than optimistic.** An arpeggiator generates note events. It is sequencer
+logic on the **ColdFire**, which is the processor whose code ships in the image,
+which Gate F cleared a disassembler for, and which `docs/code-caves.md` has
+already executed our own code on. Nothing here touches the SHARC. Compare §8,
+where FX machines sit behind an instruction decoder we can only read at ~45%.
+
+### What the image already says
+
+| Anchor | Where |
+|---|---|
+| `ArpSetupMenuView` | `0x40212998` |
+| `ArpPatternCopy` | `0x4021566c` |
+| `MidiParameterSet` | `0x40214836` |
+| `MidiParameterPageView` | `0x40216c4b` |
+| `MidiPreset` | `0x40214637` |
+| `MidiPresetEnableMaskChangedInfo` | `0x402145aa` |
+
+Two observations worth having before any work starts:
+
+**The arp is not in the parameter table.** A dump of all 320 records matches
+nothing on `arp`. So arp settings are not parameter-table records with a page
+label, and none of `docs/lfo-parameters.md`, `docs/modulation-mask.md` or
+`docs/parameter-set-tables.md` applies to it directly. It is configured through
+a **menu view** — `ArpSetupMenuView` — which is a different mechanism and has
+not been studied in this project at all.
+
+**`MidiPresetEnableMaskChangedInfo` is the interesting name.** An *enable mask*
+on MIDI presets is exactly the shape a per-track-type feature gate would take,
+and `docs/modulation-mask.md` already established that this firmware gates
+capability with mask fields elsewhere. Whether the arp is gated by that mask, by
+a track-type test in the menu's own code, or by the sequencer refusing to run it
+for a MIDI track, is unknown and is the first thing to find.
+
+### The first question, and it is cheap
+
+**Is the restriction a UI gate or an engine gate?**
+
+- If the arp runs for any track and the *menu* simply is not offered on MIDI
+  tracks, this is small — the same class of change as `docs/modulation-mask.md`'s
+  mask flips, which were flashed and confirmed working.
+- If the sequencer's note generation checks the track type before running the
+  arp, it is larger but still entirely ColdFire-side and patchable.
+
+Find where `ArpSetupMenuView` is constructed and what decides whether it is
+reachable. `ghidra/FindDataRefs.java` and `dnfw fn callers` are the tools, and
+Ghidra is cleared for this CPU.
+
+### What makes it verifiable
+
+The same loop as everything else here: DNX reads the device's stored state, so
+whether a MIDI track has acquired arp settings is checkable from a saved project
+rather than from the screen. **And the failure mode is benign** — a MIDI track
+that offers an arp page and does nothing is visible and harmless, in the way
+`docs/ideas-backlog.md` §4 describes for an unreachable modulation destination.
+
+**Not started.** Filed while the PCM thread was blocked on port access.
