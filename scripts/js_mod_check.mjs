@@ -124,6 +124,23 @@ checks.push({
   ok: explicit.start === Math.round((200 * RATE) / 1000),
 });
 
+// start = 0 means the file's own beginning, not "unset". JS makes this easy to
+// get wrong: 0 is falsy, so a truthiness test anywhere on this path would fall
+// back to onset detection and silently skip the user's leading silence --
+// exactly the thing they chose 0 to keep.
+const fromZero = fit(silenceThenClick, { startMs: 0 });
+checks.push({
+  check: "startMs 0 takes the sample from its very start",
+  ok: fromZero.start === 0,
+  detail: `start ${fromZero.start}, onset would have given ${fromZero.onset}`,
+});
+checks.push({
+  check: "startMs 0 keeps the first 100 ms verbatim",
+  // The last 2 ms are faded, so compare only up to the fade.
+  ok: Array.from({ length: ENTRY_SAMPLES - 120 }, (_, i) => i)
+    .every((i) => fromZero.samples[i] === silenceThenClick[i]),
+});
+
 const loud = new Float32Array(ENTRY_SAMPLES).fill(1);
 const faded = fit(loud, { startMs: 0 });
 checks.push({

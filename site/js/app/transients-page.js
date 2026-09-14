@@ -19,7 +19,9 @@
 
 import { build, load, verify } from "../firmware.js";
 import { decode, fit } from "../audio.js";
-import { COUNT, RATE, apply, extract, toEntry, toFloat } from "../mods/transients.js";
+import {
+  COUNT, ENTRY_SAMPLES, RATE, apply, extract, toEntry, toFloat,
+} from "../mods/transients.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -148,7 +150,14 @@ function slotCard(slot) {
   const name = document.createElement("span");
   name.className = "slot-name";
   name.textContent = "factory";
-  top.append(n, name);
+  // Whether this slot had to cut the user's file, and from what. The slot is
+  // always 100 ms and there is no length field to change, so truncation is not
+  // an edge case -- most samples people reach for are longer than 100 ms. A
+  // tool that silently kept the first tenth of a second would be lying by
+  // omission, and `fit` already returns the flag.
+  const fit = document.createElement("span");
+  fit.className = "slot-fit";
+  top.append(n, name, fit);
 
   const canvas = document.createElement("canvas");
   canvas.width = 460;
@@ -215,6 +224,10 @@ async function loadSample(slot, file) {
     refreshSlot(slot);
     play(entry.fitted.samples);
     updateStatus();
+    if (entry.fitted.truncated) {
+      status(`${file.name} is ${(source.length / RATE).toFixed(2)}s — `
+             + `cut to the ${(ENTRY_SAMPLES / RATE * 1000).toFixed(0)}ms a slot holds.`);
+    }
   } catch (error) {
     status(`${file.name}: ${error.message ?? error}`);
   }
@@ -225,6 +238,24 @@ function refreshSlot(slot) {
   const entry = state.replacements.get(slot);
   element.classList.toggle("filled", Boolean(entry));
   element.querySelector(".slot-name").textContent = entry ? entry.name : "factory";
+
+  const fit = element.querySelector(".slot-fit");
+  if (!entry) {
+    fit.textContent = "";
+    fit.classList.remove("cut");
+  } else {
+    const whole = entry.source.length / RATE;
+    const kept = ENTRY_SAMPLES / RATE;
+    fit.classList.toggle("cut", entry.fitted.truncated);
+    fit.textContent = entry.fitted.truncated
+      ? `cut ${whole.toFixed(2)}s → ${(kept * 1000).toFixed(0)}ms`
+      : `${(whole * 1000).toFixed(0)}ms, padded to ${(kept * 1000).toFixed(0)}ms`;
+    fit.title = entry.fitted.truncated
+      ? `Your file is ${whole.toFixed(2)} s. A slot holds ${(kept * 1000).toFixed(0)} ms, `
+        + `so only the window starting at ${(entry.fitted.start / RATE * 1000).toFixed(0)} ms is kept. `
+        + "Move it with the start control."
+      : `Your file is shorter than a slot; the rest is silence.`;
+  }
   element.querySelector(".slot-actions button").disabled = !entry;
 
   const tune = element.querySelector(".tune");
@@ -309,11 +340,20 @@ function drawTuning(slot, host, entry) {
 }
 
 /**
- * Draw one slot: the factory entry in outline, the replacement filled over it.
+ * Draw one slot.
  *
- * Both are drawn when a slot is replaced, so the comparison is visible rather
- * than remembered -- the factory hit is the thing the user is deciding to give
- * up, and it disappearing the moment they drop a file hides exactly that.
+ * **With no replacement:** the factory entry, filling the canvas.
+ *
+ * **With a replacement:** the user's *whole* file, with the 100 ms that will
+ * actually be imported shaded and drawn in the accent; everything outside the
+ * shaded band is greyed, because it is being thrown away.
+ *
+ * Drawing only the fitted 100 ms — which is what this did first — hides the
+ * decision the tool just made on the user's behalf. A slot is a fixed 4,800
+ * samples and most files people reach for are longer, so the interesting
+ * question is never "what does the slot contain" but "which part of my sample
+ * did it take". Shading it answers that, and the `start` control visibly slides
+ * the band.
  */
 function paint(slot) {
   const canvas = card(slot)?.querySelector("canvas");
@@ -324,6 +364,7 @@ function paint(slot) {
   const style = getComputedStyle(document.documentElement);
   const ink = style.getPropertyValue("--ink-soft").trim() || "#888";
   const accent = style.getPropertyValue("--accent").trim() || "#b4530a";
+  const band = style.getPropertyValue("--accent-dim").trim() || "#f0e3d6";
 
   ctx.clearRect(0, 0, width, height);
   ctx.strokeStyle = ink;
@@ -335,21 +376,61 @@ function paint(slot) {
   ctx.globalAlpha = 1;
 
   const entry = state.replacements.get(slot);
-  trace(ctx, state.factory[slot], width, height, entry ? ink : accent, entry ? 0.3 : 1);
-  if (entry) trace(ctx, entry.fitted.samples, width, height, accent, 1);
+  if (!entry) {
+    trace(ctx, state.factory[slot], width, height, accent, 1, 0, width);
+    return;
+  }
+
+  // The canvas spans whichever is longer: the user's file, or the window the
+  // slot takes. A file *shorter* than 100 ms is padded with silence at the end,
+  // and spanning only the file would hide that padding entirely -- the user
+  // would see a full-width waveform and have no idea most of the slot is empty.
+  const span = Math.max(entry.source.length, entry.fitted.start + ENTRY_SAMPLES);
+  const from = (entry.fitted.start / span) * width;
+  const to = ((entry.fitted.start + ENTRY_SAMPLES) / span) * width;
+  const sourceEnd = (entry.source.length / span) * width;
+
+  // The band first, so the waveform sits on top of it rather than under.
+  ctx.fillStyle = band;
+  ctx.fillRect(from, 0, Math.max(to - from, 2), height);
+  ctx.strokeStyle = accent;
+  ctx.globalAlpha = 0.6;
+  ctx.beginPath();
+  ctx.moveTo(from + 0.5, 0);
+  ctx.lineTo(from + 0.5, height);
+  ctx.moveTo(to - 0.5, 0);
+  ctx.lineTo(to - 0.5, height);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // Discarded either side in grey, the kept window in the accent. The source is
+  // drawn against its own span, so it stops where the file stops and any
+  // padding inside the band reads as the flat line it will actually be.
+  trace(ctx, entry.source, sourceEnd, height, ink, 0.4, 0, from);
+  trace(ctx, entry.source, sourceEnd, height, ink, 0.4, to, sourceEnd);
+  trace(ctx, entry.source, sourceEnd, height, accent, 1, from, Math.min(to, sourceEnd));
 }
 
-function trace(ctx, samples, width, height, colour, alpha) {
+/**
+ * Draw `samples` across the full canvas, painting only columns in [x0, x1).
+ *
+ * The clip range is a column range rather than a sample range on purpose: the
+ * kept window and the discarded parts must share one horizontal scale, or the
+ * shaded band would not line up with the waveform under it.
+ */
+function trace(ctx, samples, width, height, colour, alpha, x0, x1) {
   if (!samples?.length) return;
   const mid = height / 2;
   const step = samples.length / width;
   ctx.globalAlpha = alpha;
   ctx.fillStyle = colour;
-  for (let x = 0; x < width; x++) {
+  const lo = Math.max(0, Math.floor(x0));
+  const hi = Math.min(width, Math.ceil(x1));
+  for (let x = lo; x < hi; x++) {
     let high = 0;
     let low = 0;
     const from = Math.floor(x * step);
-    const to = Math.min(samples.length, Math.floor((x + 1) * step));
+    const to = Math.min(samples.length, Math.max(from + 1, Math.floor((x + 1) * step)));
     for (let i = from; i < to; i++) {
       if (samples[i] > high) high = samples[i];
       if (samples[i] < low) low = samples[i];
