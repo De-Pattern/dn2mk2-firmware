@@ -161,3 +161,18 @@ a string, this changed what the instrument can do.
 | 2026-09-12 | **LFO4 shadow** (`lfo4-shadow_DN2_1.11.syx`) — first code-cave build; a detour at `Sound::updateMirror`'s epilogue copies lane 3's eight mirror words into lane 4 with the speed offset | **Pass — our own code drives the engine's fourth LFO.** Two entities audible on LFO3's destination. They **compete rather than sum**, which is **stock DN2 behaviour**: untouched LFO1+LFO2 aimed at one destination behave identically. So LFO4 is indistinguishable from a native LFO. |
 | 2026-09-12 | **Coexistence probe** (`lfo4-probe-lfo2_DN2_1.11.syx`) — LFO2 re-pointed to the reserved lane, LFO1 and LFO3 left on lanes 1 and 3 | **Pass. The engine side is now closed.** LFO2 (lane 4) and LFO3 (lane 3) modulate **independently and simultaneously**. Lane 4 is a separate generator, not an alias — **four LFOs can run at once**. See `docs/engine-index-map.md` §14. |
 
+| 2026-09-14 | **Transient markers** (`scripts/make_marker_transients.py`, base **1.11**) — five of the 34 FM drum transient entries in section 7 replaced with synthetic markers: entry 0 a 220 Hz square, 8 an 880 Hz tone, 16 a 3520 Hz tone, 25 flat noise, 33 silence | **Pass. Every marker played back from `TRAN`.** First change to the **SHARC** image rather than the ColdFire one, and the project's first user-facing mod. See `docs/pcm-hunt.md` §16. |
+
+**This row was missing until 2026-09-14.** Every other hardware result was
+logged here the day it happened; this one was written up in `docs/pcm-hunt.md`
+and `docs/mods.md` and never reached the log, so for a day this file said the
+last thing flashed was the cave boot proof. It surfaced when the `DNX` session
+asked which image was on the instrument and the answer had to come from a
+script's default argument instead of from here.
+
+**What is on the DN2 right now is not recorded anywhere**, and cannot be — this
+log records what was *sent*, not what is *resident*, and nothing writes a row
+when the owner reflashes stock. Treat the last row as the last known flash, not
+as the current state. The instrument answers the question directly: sweep `TRAN`
+on an FM drum track, and a 3520 Hz beep or a silent slot means a marker build is
+still on.
