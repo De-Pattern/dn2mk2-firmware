@@ -17,13 +17,15 @@ from ..firmware.build import replacement
 from ..firmware.load import load
 from ..firmware.verify import verify
 from ..mods import ModError, check_compatible
+from ..mods import moddest as moddest_mod
 from ..mods import transients as transients_mod
 from .files import read_image
 
 NAME = "mods"
 HELP = "list, extract and apply firmware mods"
 
-REGISTRY = {transients_mod.ID: transients_mod}
+REGISTRY = {transients_mod.ID: transients_mod,
+            moddest_mod.ID: moddest_mod}
 
 
 def configure(parser) -> None:
@@ -38,9 +40,15 @@ def configure(parser) -> None:
 
     ap = sub.add_parser("apply", help="apply a mod and rebuild the image")
     ap.add_argument("image", type=pathlib.Path)
-    ap.add_argument("--mod", required=True, choices=sorted(REGISTRY))
-    ap.add_argument("--from", dest="source", type=pathlib.Path, required=True,
-                    help="directory of .wav files, used in sorted order")
+    # Repeatable, because applying two mods together is the thing the extent
+    # system exists for -- and until there were two mods, the compatibility
+    # check was a test that could not fail.
+    ap.add_argument("--mod", required=True, action="append",
+                    choices=sorted(REGISTRY),
+                    help="repeat to apply several mods to one image")
+    ap.add_argument("--from", dest="source", type=pathlib.Path,
+                    help="directory of .wav files, used in sorted order "
+                         "(only mods that take samples need this)")
     ap.add_argument("-o", "--out", type=pathlib.Path, required=True)
     ap.add_argument("--lead-ms", type=float, default=3.0,
                     help="default milliseconds kept before the detected onset "
@@ -49,6 +57,83 @@ def configure(parser) -> None:
                     help="onset-align each input to the slot and fade its end; "
                          "off by default so a factory round-trip stays "
                          "byte-identical")
+
+
+def _staged(firmware, payloads: dict[int, bytes]):
+    """`firmware` with any already-applied payloads standing in for sections.
+
+    Mods read the section they are about to change, so a second mod touching
+    the same section must see the first one's bytes rather than the original's.
+    Both current mods touch different sections, so this is not yet exercised --
+    which is exactly why it is written now rather than after it bites.
+    """
+    if not payloads:
+        return firmware
+    from ..container.section import Section
+
+    swapped = []
+    for section in firmware.container.sections:
+        if section.id in payloads:
+            swapped.append(_Restaged(section, payloads[section.id]))
+        else:
+            swapped.append(section)
+    return _Firmware(firmware, tuple(swapped))
+
+
+class _Restaged:
+    """A section whose unpacked content is overridden, not recompressed."""
+
+    def __init__(self, original, content: bytes):
+        self._o, self._c = original, content
+        self.id, self.dest, self.stored = original.id, original.dest, original.stored
+
+    def unpack(self):
+        return self._c
+
+    @property
+    def raw_payload(self):
+        return self._c
+
+
+class _Firmware:
+    """`firmware` with a different section tuple, for staging only."""
+
+    def __init__(self, original, sections):
+        self._o = original
+        self.container = _Container(original.container, sections)
+
+    def __getattr__(self, name):
+        return getattr(self._o, name)
+
+
+class _Container:
+    def __init__(self, original, sections):
+        self._o, self.sections = original, sections
+
+    def find(self, section_id):
+        return next((s for s in self.sections if s.id == section_id), None)
+
+    def __getattr__(self, name):
+        return getattr(self._o, name)
+
+
+def _apply_transients(mod, firmware, args):
+    if args.source is None:
+        raise ModError("--from is required for the transients mod")
+    sources = sorted(p for p in args.source.iterdir()
+                     if p.suffix.lower() == ".wav")
+    if not sources:
+        raise ModError(f"no .wav files in {args.source}")
+    print(f"\n{len(sources)} input sample(s), in sorted order:")
+    options = mod.read_options(args.source) if args.prepare else {}
+    unknown = set(options) - {p.name for p in sources}
+    if unknown:
+        raise ModError("prepare.csv names files that are not in "
+                       f"{args.source}: {', '.join(sorted(unknown))}")
+    if options:
+        print(f"  prepare.csv: per-sample settings for {len(options)} file(s)")
+    return mod.apply(firmware, sources, condition=args.prepare,
+                     lead_ms=args.lead_ms, options=options)
 
 
 def _list() -> int:
@@ -85,48 +170,52 @@ def _extract(args) -> int:
 
 
 def _apply(args) -> int:
-    mod = REGISTRY[args.mod]
     firmware = load(read_image(args.image))
+    chosen = [REGISTRY[m] for m in dict.fromkeys(args.mod)]
 
-    found = [e for e in mod.extents(firmware)]
-    print("this mod writes:")
-    for e in found:
-        print(f"  {e}")
-    conflicts = check_compatible([(args.mod, found)])
+    named = []
+    for mod in chosen:
+        found = list(mod.extents(firmware))
+        print(f"{mod.ID} writes:")
+        for e in found:
+            print(f"  {e}")
+        named.append((mod.ID, found))
+
+    conflicts = check_compatible(named)
     if conflicts:
         for c in conflicts:
             print(f"  CONFLICT: {c}")
         return 1
+    if len(named) > 1:
+        print(f"\n{len(named)} mods, no overlapping bytes -- "
+              f"they can be combined.\n")
 
-    sources = sorted(p for p in args.source.iterdir()
-                     if p.suffix.lower() == ".wav")
-    if not sources:
-        raise ModError(f"no .wav files in {args.source}")
-    print(f"\n{len(sources)} input sample(s), in sorted order:")
-
-    options = mod.read_options(args.source) if args.prepare else {}
-    unknown = set(options) - {p.name for p in sources}
-    if unknown:
-        raise ModError("prepare.csv names files that are not in "
-                       f"{args.source}: {', '.join(sorted(unknown))}")
-    if options:
-        print(f"  prepare.csv: per-sample settings for {len(options)} file(s)")
-    result = mod.apply(firmware, sources, condition=args.prepare,
-                       lead_ms=args.lead_ms, options=options)
-    for note in result.notes:
-        print(f"  {note}")
+    # Each mod is applied to the payload the previous one produced, so a later
+    # mod sees the earlier one's bytes. Disjoint extents make the order
+    # irrelevant to the result; it is not relied on.
+    payloads: dict[int, bytes] = {}
+    for mod in chosen:
+        staged = _staged(firmware, payloads)
+        if mod.ID == "transients":
+            result = _apply_transients(mod, staged, args)
+        else:
+            result = mod.apply(staged)
+        for note in result.notes:
+            print(f"  {note}")
+        payloads.update(result.payloads)
 
     reps = {sid: replacement(firmware, sid, payload)
-            for sid, payload in result.payloads.items()}
+            for sid, payload in payloads.items()}
     out = rebuild(firmware, reps)
     report = verify(load(out))
     bad = [c for c in report.checks if not c.ok]
-    print(f"\nintegrity: {len(report.checks) - len(bad)}/{len(report.checks)} "
-          f"checks pass")
+    print(f"\nintegrity: {len(report.checks) - len(bad)}/"
+          f"{len(report.checks)} checks pass")
     if bad:
         for c in bad:
             print(f"  FAILED: {c.name}")
-        print("\nNot written. A rebuild that does not verify never leaves here.")
+        print("\nNot written. A rebuild that does not verify never "
+              "leaves here.")
         return 1
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

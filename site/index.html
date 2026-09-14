@@ -126,6 +126,44 @@ rim.wav,   0.5,</pre>
   </div>
 </article>
 
+<article class="mod">
+  <div class="mod-head">
+    <h3>More modulation destinations</h3>
+    <span class="mod-id">moddest</span>
+    <span class="tag ready">Confirmed on hardware</span>
+  </div>
+  <p>
+    Thirteen per-voice parameters ship closed to modulation. This opens them, so
+    an LFO can reach SYN trig and envelope-reset, key tracking, the amp envelope
+    delay and mode, and portamento.
+  </p>
+
+  <p style="margin-top:1.2rem">
+    <a class="cta" href="destinations.html">Open the Destinations tool &#8594;</a>
+  </p>
+  <p class="cta-note">
+    Runs entirely in your browser &mdash; no install, no command line, nothing uploaded.
+  </p>
+
+  <dl class="facts">
+    <dt>Opens</dt><dd>SYN <code>ATRG ARST BTRG BRST PHRT KSA KSB1 KSB2</code>, Amp <code>DEL MODE RSET</code>, Portamento <code>PTIM PORT</code></dd>
+    <dt>Changes</dt><dd><strong>13 bytes</strong> &mdash; one per parameter, in section 3 (the control CPU)</dd>
+    <dt>Touches</dt><dd>No code, no lengths, no key material, no audio</dd>
+    <dt>Tested</dt><dd>Flashed 2026-09-12: all thirteen appear as LFO destinations <em>and modulate</em></dd>
+    <dt>Combines</dt><dd>Yes &mdash; with the transient mod, which only writes section 7</dd>
+  </dl>
+
+<pre># both mods on one image, in one command
+dnfw mods apply firmware.syx --mod moddest --mod transients --from my_hits/ -o modded.syx</pre>
+
+  <div class="note">
+    <p><strong>Nineteen more parameters ship closed and stay closed.</strong> Chorus
+    and Master were in the same hardware test and <em>none of them appeared</em>.
+    For those the gate is a separate enumeration, not this mask, so flipping it
+    changes nothing. This mod ships only what was measured to work.</p>
+  </div>
+</article>
+
 <h2>How mods stay compatible</h2>
 
 <p>
