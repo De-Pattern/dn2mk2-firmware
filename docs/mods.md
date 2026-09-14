@@ -48,6 +48,13 @@ checkable, and the limit is written down rather than glossed.
 Every pair is compared, not each against the last: "A is fine with B" and "B is
 fine with C" says nothing about A and C.
 
+**A real check is filed as `docs/ideas-backlog.md` §11**, to be built when two
+mods first share a section or a processor. Until then the two that exist cannot
+collide — `moddest` writes ColdFire data in section 3, `transients` writes SHARC
+data in section 7 — so the overlap test returns the right answer and would
+return the right answer if it did nothing at all. That is worth knowing about a
+check before trusting it.
+
 ## Mod 1: `transients`
 
 Replaces the FM drum transient bank (`docs/pcm-hunt.md` §14).
