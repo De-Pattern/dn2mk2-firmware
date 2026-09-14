@@ -1562,3 +1562,56 @@ as its harmonic.
 the head and semitone-spaced ratios at the tail, and concluded "pitch/detune
 ratio tables, not audio". That was sampling the ends of a **mixed** region and
 never testing the middle as int16. The region holds both.
+
+### The bank's extent, period and phase — all measured
+
+The first span was clipped at both ends by the detector's own threshold: there
+is audio at `0x8045a818` (peak 32,661) before it and well past `0x804a5018`
+after. Classifying the whole DDR payload in 2 KB windows shows the real
+structure, and it is bounded by content of a *different kind* rather than by a
+threshold:
+
+```
+0x80459000  zero
+0x8045a800  float    <- a float32 table
+0x8045b000  AUDIO ...................................  the bank
+0x804ac000  float    <- another float32 table
+0x804ad000  zero
+```
+
+**The bank is `0x8045b000`-`0x804ac000` = 331,776 bytes = 165,888 samples.**
+The AUDIO/other alternation inside it is the detector going marginal on denser
+passages, not a real boundary — the float tables either side are the boundary.
+
+**Period.** Autocorrelating a 64-sample RMS envelope over the full bank puts
+**4,800 samples** top, with **9,600** and **14,400** — exactly 2x and 3x — also
+ranking. Harmonics like that do not appear by chance. 4,800 samples is an
+awkward 108.8 ms at 44.1 kHz and **exactly 100.0 ms at 48 kHz**.
+
+**Phase.** Chosen by measurement, not assumption: for each candidate phase,
+score the energy just after each boundary (an attack) against the energy just
+before the next one (a decayed tail). Phase 2,496 scores **14.27**; the next
+family of phases scores **1.46**. A tenfold preference means the cuts land on
+real hits.
+
+### The count does not resolve, and that is the open question
+
+165,888 / 4,800 = **34.56**. Cutting at the measured phase yields **34 entries**
+with a remainder.
+
+That does not agree with the control side. `TRAN` spans integer positions
+0..124, and the owner confirms the firmware **interpolates between entries** —
+which, at 4 steps per gap, implies `4 x (N-1) = 124`, so **N = 32**.
+
+Three readings of the same bank, none yet reconciled:
+
+| source | count |
+|---|---|
+| envelope period over the measured extent | 34.56 |
+| phase-aligned cut | 34 |
+| `TRAN` range + 4-step interpolation | 32 |
+
+Possibilities, none tested: the extent includes ~2 entries of something that is
+not a transient; the interpolation step is not 4; or the entry length is not
+constant across the bank. **What is solid is the location, the format (16-bit
+mono, 48 kHz) and the ~100 ms period. The count is not.**
