@@ -42,6 +42,9 @@ def configure(parser) -> None:
     ap.add_argument("--from", dest="source", type=pathlib.Path, required=True,
                     help="directory of .wav files, used in sorted order")
     ap.add_argument("-o", "--out", type=pathlib.Path, required=True)
+    ap.add_argument("--lead-ms", type=float, default=3.0,
+                    help="default milliseconds kept before the detected onset "
+                         "(per-sample overrides go in prepare.csv)")
     ap.add_argument("--prepare", action="store_true",
                     help="onset-align each input to the slot and fade its end; "
                          "off by default so a factory round-trip stays "
@@ -101,7 +104,15 @@ def _apply(args) -> int:
         raise ModError(f"no .wav files in {args.source}")
     print(f"\n{len(sources)} input sample(s), in sorted order:")
 
-    result = mod.apply(firmware, sources, condition=args.prepare)
+    options = mod.read_options(args.source) if args.prepare else {}
+    unknown = set(options) - {p.name for p in sources}
+    if unknown:
+        raise ModError("prepare.csv names files that are not in "
+                       f"{args.source}: {', '.join(sorted(unknown))}")
+    if options:
+        print(f"  prepare.csv: per-sample settings for {len(options)} file(s)")
+    result = mod.apply(firmware, sources, condition=args.prepare,
+                       lead_ms=args.lead_ms, options=options)
     for note in result.notes:
         print(f"  {note}")
 

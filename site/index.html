@@ -1,4 +1,7 @@
 <title>Digitone II Mods</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <meta name="description" content="Open tools for customising Elektron Digitone II firmware.">
 <style>
   :root {
@@ -11,8 +14,8 @@
     --accent-dim:#f0e3d6;
     --ok:        #1f6f43;
     --warn:      #8a6100;
-    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-    --sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -196,6 +199,29 @@ dnfw mods apply firmware.syx --mod transients --from my_hits/ -o modded.syx --pr
     So the route for an arbitrary sample is: run it through transientsplit, keep the
     transient stem, then hand that to <code>--prepare</code>. We link rather than bundle —
     it is someone else's tool, it works, and duplicating it would only make a worse copy.
+  </p>
+
+  <h4 style="margin:1.6rem 0 .5rem;font-size:.95rem">Tuning it per sample</h4>
+  <p style="margin-top:0">
+    <code>--prepare</code> finds the attack and keeps a few milliseconds before it. One
+    number cannot be right for every sound — a sharp click wants almost none, a soft or
+    swelling attack wants more or the front gets cut off — so it is adjustable, and
+    adjustable <em>per file</em> rather than per bank.
+  </p>
+  <p>Drop a <code>prepare.csv</code> next to your samples:</p>
+<pre># file, lead_ms, start_ms
+kick.wav,    6,
+snare.wav,    , 120
+rim.wav,   0.5,</pre>
+  <p>
+    <code>lead_ms</code> adjusts the automatic guess. <code>start_ms</code> replaces it —
+    the window begins exactly there, for when the part you want is not the first attack:
+    the second hit of a flam, a tail on its own, a sample whose useful moment is 300&nbsp;ms in.
+    Files you do not list use <code>--lead-ms</code>, which defaults to 3.
+  </p>
+  <p>
+    A filename in the CSV that is not in the folder is an error, not a shrug — a typo that
+    silently does nothing would be worse than being told.
   </p>
 
   <div class="note">
