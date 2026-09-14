@@ -1,0 +1,282 @@
+<title>Digitone II Mods</title>
+<meta name="description" content="Open tools for customising Elektron Digitone II firmware.">
+<style>
+  :root {
+    --bg:        #f6f5f2;
+    --panel:     #ffffff;
+    --ink:       #16181c;
+    --ink-soft:  #565b66;
+    --rule:      #e2e0da;
+    --accent:    #b4530a;
+    --accent-dim:#f0e3d6;
+    --ok:        #1f6f43;
+    --warn:      #8a6100;
+    --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    --sans: "Inter", ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#0c0d0f; --panel:#141619; --ink:#e8e6e1; --ink-soft:#9aa0ab;
+      --rule:#25282d; --accent:#ff9d3c; --accent-dim:#2a1d10;
+      --ok:#5fce93; --warn:#e0b44c;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#0c0d0f; --panel:#141619; --ink:#e8e6e1; --ink-soft:#9aa0ab;
+    --rule:#25282d; --accent:#ff9d3c; --accent-dim:#2a1d10;
+    --ok:#5fce93; --warn:#e0b44c;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font-family: var(--sans); line-height: 1.6;
+    padding-block: 0 5rem; padding-left: 20px; padding-right: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 62rem; margin: 0 auto; }
+  a { color: var(--accent); }
+
+  header.top {
+    border-bottom: 1px solid var(--rule);
+    padding-block: 3.5rem 2.5rem; margin-bottom: 3rem;
+  }
+  .eyebrow {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 1rem;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5.5vw, 3.4rem); line-height: 1.05;
+    margin: 0 0 1rem; letter-spacing: -.025em; text-wrap: balance;
+    font-weight: 660;
+  }
+  .lede { font-size: 1.12rem; color: var(--ink-soft); max-width: 42rem; margin: 0; }
+
+  h2 {
+    font-size: 1.35rem; letter-spacing: -.015em; margin: 3.5rem 0 1.2rem;
+    padding-bottom: .5rem; border-bottom: 1px solid var(--rule);
+  }
+  h3 { font-size: 1.02rem; margin: 2rem 0 .6rem; }
+  p  { max-width: 42rem; }
+
+  .mod {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 10px; padding: 1.6rem 1.7rem; margin-bottom: 1.2rem;
+  }
+  .mod-head { display: flex; flex-wrap: wrap; gap: .75rem; align-items: baseline; }
+  .mod-head h3 { margin: 0; font-size: 1.18rem; }
+  .mod-id {
+    font-family: var(--mono); font-size: .8rem; color: var(--ink-soft);
+  }
+  .tag {
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .09em;
+    text-transform: uppercase; padding: .2rem .55rem; border-radius: 4px;
+    border: 1px solid currentColor; white-space: nowrap;
+  }
+  .tag.ready   { color: var(--ok); }
+  .tag.untested{ color: var(--warn); }
+  .tag.research{ color: var(--ink-soft); }
+  .mod p { margin: .9rem 0 0; }
+
+  dl.facts {
+    display: grid; grid-template-columns: max-content 1fr;
+    gap: .35rem 1.4rem; margin: 1.1rem 0 0;
+    font-size: .92rem;
+  }
+  dl.facts dt {
+    font-family: var(--mono); font-size: .78rem; color: var(--ink-soft);
+    text-transform: uppercase; letter-spacing: .07em; padding-top: .18rem;
+  }
+  dl.facts dd { margin: 0; }
+
+  pre {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 8px; padding: 1rem 1.1rem; overflow-x: auto;
+    font-family: var(--mono); font-size: .84rem; line-height: 1.65;
+  }
+  code { font-family: var(--mono); font-size: .9em; }
+  p code, li code, dd code {
+    background: var(--accent-dim); padding: .1rem .35rem; border-radius: 4px;
+  }
+
+  .note {
+    border-left: 3px solid var(--accent); background: var(--panel);
+    padding: 1rem 1.2rem; margin: 1.5rem 0; border-radius: 0 8px 8px 0;
+  }
+  .note strong { color: var(--accent); }
+  .note p { margin: 0; }
+  .note p + p { margin-top: .7rem; }
+
+  table { border-collapse: collapse; width: 100%; font-size: .92rem; margin-top: 1rem; }
+  th, td { text-align: left; padding: .5rem .8rem .5rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-family: var(--mono); font-size: .74rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-soft); font-weight: 500; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  .scroll { overflow-x: auto; }
+  footer {
+    margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
+    color: var(--ink-soft); font-size: .88rem;
+  }
+  @media (max-width: 560px) {
+    dl.facts { grid-template-columns: 1fr; gap: .1rem; }
+    dl.facts dd { margin-bottom: .7rem; }
+  }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow">Open firmware tools</p>
+  <h1>Digitone II Mods</h1>
+  <p class="lede">
+    Tools for changing what your Digitone II can do — built by reading the
+    firmware, measuring it, and writing down what turned out to be wrong.
+    Everything here rebuilds and re-verifies an image before it will hand it to you.
+  </p>
+</header>
+
+<div class="note">
+  <p><strong>Read this before you flash anything.</strong> These tools produce
+  firmware images. They do not send anything to an instrument, and they never will —
+  putting an image on your device is a step you take deliberately, with your own eyes open.</p>
+  <p><strong>Prove your way back first.</strong> The Early Start-up Menu can reflash
+  stock firmware over MIDI. Do that once, with an unmodified image, <em>before</em> you
+  flash a modified one. If that route does not work on your device, nothing here is safe to use.
+  Back up your +Drive first as well.</p>
+</div>
+
+<h2>Available now</h2>
+
+<article class="mod">
+  <div class="mod-head">
+    <h3>FM drum transients</h3>
+    <span class="mod-id">transients</span>
+    <span class="tag untested">Not yet flashed</span>
+  </div>
+  <p>
+    Replace the factory FM&nbsp;DRUM transient bank with your own samples — 34 slots,
+    each a short percussive hit. Drop in WAV files and the tool builds the combined
+    bank and a signed firmware image for you.
+  </p>
+
+  <dl class="facts">
+    <dt>Slots</dt><dd>34</dd>
+    <dt>Each</dt><dd>4,800 samples — exactly 100.0&nbsp;ms at 48&nbsp;kHz, 16-bit mono</dd>
+    <dt>Input</dt><dd>Any 16-bit WAV. Other rates are resampled, stereo is mixed down, longer files are truncated to 100&nbsp;ms and shorter ones padded.</dd>
+    <dt>Touches</dt><dd>Section 7 (the audio DSP image) only — no code, no lengths, no key material</dd>
+    <dt>Tested</dt><dd>Extracting the factory bank and writing it straight back produces a <strong>byte-identical</strong> image, and rebuilds pass 21&nbsp;of&nbsp;21 integrity checks</dd>
+  </dl>
+
+<pre># hear what is in there now
+dnfw mods extract firmware.syx --mod transients -o factory/
+
+# swap in your own — sorted order, 00.wav first
+dnfw mods apply firmware.syx --mod transients --from my_hits/ -o modded.syx</pre>
+
+  <div class="note">
+    <p><strong>What is proven and what is not.</strong> The bank's location, format,
+    entry length and count are measured, and the byte-identical round-trip confirms them.
+    What has <em>not</em> been done is flashing a modified image to a Digitone&nbsp;II and
+    hearing new transients come out. Until someone does that, this is a well-tested
+    file transformation and an untested firmware change.</p>
+    <p>It also has not been traced from the <code>TRAN</code> parameter to these exact
+    bytes. They are PCM, in the audio DSP's image, transient-shaped and transient-length,
+    and they sound like a bank of transients — that is strong, and it is not proof.</p>
+  </div>
+</article>
+
+<h2>How mods stay compatible</h2>
+
+<p>
+  The aim is that you can pick several mods and apply them together. That only
+  works if each one can say, in advance, exactly which bytes it writes.
+</p>
+<p>
+  So every mod declares its <strong>extents</strong> — section, offset, length — before
+  it changes anything, and applying a set checks every pair for overlap. Two mods that
+  write disjoint bytes can be combined; two that collide are refused with the exact
+  overlapping range named.
+</p>
+
+<div class="note">
+  <p><strong>This is the weakest useful guarantee, deliberately.</strong> Disjoint bytes
+  do not mean two mods make sense together — they could write different regions and still
+  fight over the same feature. Byte-range overlap is the part that can actually be checked,
+  so it is the part that is enforced, and the limit is stated rather than glossed over.</p>
+</div>
+
+<p>Two rules every mod follows:</p>
+<ul>
+  <li><strong>No section changes length.</strong> Resizing moves every address after it, and nothing here can fix up the code that refers to them.</li>
+  <li><strong>Integrity is not a mod's business.</strong> Mods produce section contents; the build path recomputes the byte-sum, the content checksum and the HMAC signature, then re-verifies the result. An image that fails verification is never written.</li>
+</ul>
+
+<h2>Researched, not yet built</h2>
+
+<p>
+  Work that has been measured far enough to know roughly what it costs. Status here means
+  what is <em>known</em>, not what is promised.
+</p>
+
+<div class="scroll">
+<table>
+  <thead>
+    <tr><th>Idea</th><th>Where it stands</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>More LFO destinations</strong></td>
+      <td><span class="tag ready">Shipped once</span> 13 new modulation destinations were opened and confirmed working on hardware. Every destination a mask edit alone can open is now open.</td>
+    </tr>
+    <tr>
+      <td><strong>A fourth LFO</strong></td>
+      <td><span class="tag research">Open</span> The control side is fully mapped and costed. Whether the audio engine implements a fourth LFO is <em>unknown</em> — two earlier "confirmed" results were withdrawn when the test turned out to prove something weaker.</td>
+    </tr>
+    <tr>
+      <td><strong>Arpeggiator on MIDI tracks</strong></td>
+      <td><span class="tag research">Next</span> Entirely control-side — an arpeggiator generates note events, so nothing in it touches the audio DSP. The open question is whether the restriction is a menu gate or a sequencer gate, which decides the size.</td>
+    </tr>
+    <tr>
+      <td><strong>FX settings per pattern</strong></td>
+      <td><span class="tag research">Costed</span> Parameter locks are bound to a track by construction, so a pattern-wide FX lock needs storage the format does not have yet. Possible, but it means extending storage rather than flipping a flag.</td>
+    </tr>
+    <tr>
+      <td><strong>Custom start-up animation</strong></td>
+      <td><span class="tag research">Idea</span> Parked.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h2>How the transients were found</h2>
+
+<p>
+  Worth telling because it is the most useful thing in the project. Several detectors
+  were written to find sample data in the firmware, and every one of them failed —
+  one rejected the wavetables it should have found, two others happily reported
+  pointer tables as audio.
+</p>
+<p>
+  The fix was not a cleverer test. Elektron's Syntakt download ships eight files named
+  <code>TRANSIENT&nbsp;01–08.wav</code>. Measuring the detector against <em>those</em>
+  showed its thresholds were three to ten times too loose — every false positive had been
+  sitting comfortably above them. With thresholds taken from real transients, firmware
+  code scored zero and the bank appeared in one contiguous run.
+</p>
+<p>
+  A detector needs a sample of the thing it detects, not a theory about it.
+</p>
+
+<footer>
+  <p>
+    Source, measurements and the full record of what was got wrong along the way:
+    <a href="https://github.com/angellinares/dn2_firmware_explore">github.com/angellinares/dn2_firmware_explore</a>
+  </p>
+  <p>
+    Not affiliated with or endorsed by Elektron. Digitone, Syntakt and Digitakt are their
+    trademarks. No firmware is redistributed here — you supply your own image, lawfully
+    obtained. Sample content extracted from firmware stays on your machine.
+  </p>
+</footer>
+
+</div>
