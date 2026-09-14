@@ -89,6 +89,36 @@ load address to a file offset through the boot stream, replace entries, rebuild,
 re-sign, flash, hear. No part of that sequence was previously known to work end
 to end.
 
+### What the flashed image actually differs by
+
+Measured 2026-09-14 by rebuilding the marker image and diffing it against stock
+1.11, on unpacked content:
+
+| id | name | unpacked | result |
+|---|---|---|---|
+| 5 | meta | 15 | identical |
+| 2 | bootstrap | 30,302 | identical |
+| 3 | MAIN OS | 3,192,192 | **identical** |
+| 4 | updater | 32,768 | identical |
+| 7 | blob (SHARC) | 836,956 | 47,529 bytes differ, offsets 497,108..823,506 |
+| 8 | ? | 159,948 | identical |
+
+The bank runs from section-7 offset 497,108 to 823,508, so the diff stops two
+bytes inside its end: **the mod wrote nothing outside the bank.** 47,529 bytes
+is right for five replaced entries of 34 — 5 × 9,600 = 48,000 less the bytes
+that coincide, mostly zeros.
+
+This was measured to answer a question from the `DNX` session, which read all
+16 patterns of bank A as **storage version 4** over the dump protocol while
++Drive project files from the same OS decode as version 3, and could not tell
+whether that was 1.11 or our build. It is not ours: every storage-format
+decision lives in MAIN OS, and MAIN OS is byte-identical. One hypothesis
+eliminated by measurement rather than by argument.
+
+Worth keeping for its own sake too: it is the evidence that **a mod's declared
+extents match what it actually writes.** `extents()` is the whole basis of mod
+compatibility, and until this it was a promise the code made about itself.
+
 **What stays conditional:** the bank's location, format, entry length and count
 are *measured*, not documented by Elektron, so another OS release could move
 them. The mod resolves the address through the boot stream at apply time and
