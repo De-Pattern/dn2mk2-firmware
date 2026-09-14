@@ -96,6 +96,21 @@ function slotCard(slot) {
   const n = document.createElement("span");
   n.className = "slot-n";
   n.textContent = String(slot).padStart(2, "0");
+  // The TRAN value that plays this slot, measured on hardware -- see
+  // docs/tran-mapping.md. Slots 0 and 1 land below TRAN 0, so the knob cannot
+  // reach them at all; saying so on the card is cheaper than letting someone
+  // spend a sample on a slot they will never hear.
+  const tran = document.createElement("span");
+  tran.className = "slot-tran";
+  const value = 4 * slot - 8;
+  if (value < 0) {
+    tran.classList.add("unreachable");
+    tran.textContent = "no TRAN";
+    tran.title = "TRAN starts at 0, which is slot 2. This slot cannot be selected.";
+  } else {
+    tran.textContent = `TRAN ${value}`;
+    tran.title = `Set TRAN to ${value} to hear this slot`;
+  }
   const name = document.createElement("span");
   name.className = "slot-name";
   name.textContent = "factory";
@@ -106,7 +121,7 @@ function slotCard(slot) {
   // omission, and `fit` already returns the flag.
   const fit = document.createElement("span");
   fit.className = "slot-fit";
-  top.append(n, name, fit);
+  top.append(n, tran, name, fit);
 
   const canvas = document.createElement("canvas");
   canvas.width = 460;

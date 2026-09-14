@@ -68,6 +68,15 @@
     font-size: .8rem; color: var(--ink-soft); flex: none;
   }
   .slot.filled .slot-n { color: var(--accent); }
+  .slot-tran {
+    font-family: var(--mono); font-variant-numeric: tabular-nums;
+    font-size: .64rem; letter-spacing: .03em; flex: none;
+    padding: .1rem .3rem; border-radius: 3px;
+    border: 1px solid var(--rule); color: var(--ink-soft);
+  }
+  .slot-tran.unreachable {
+    border-color: var(--warn); color: var(--warn);
+  }
   .slot-name {
     font-size: .78rem; color: var(--ink-soft); flex: 1 1 auto;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -166,11 +175,16 @@
   </div>
 
   <div class="note" id="tranNote">
-    <p><strong>Which slot is which <code>TRAN</code> value is not known yet.</strong>
-    The <code>TRAN</code> knob sweeps 0&nbsp;to&nbsp;124 across these 34 entries and the
-    mapping has not been measured. Replace a slot, flash, and sweep to find it —
-    and if you work it out, please
-    <a href="https://github.com/angellinares/dn2_firmware_explore/issues">say so</a>.</p>
+    <p><strong>Each slot sits at <code>TRAN</code> = 4 × slot − 8</strong>, measured
+    on hardware. Slot&nbsp;20 is at <code>TRAN</code>&nbsp;72, slot&nbsp;33 at
+    <code>TRAN</code>&nbsp;124. Every slot below shows its value.</p>
+    <p><strong>Slots 0 and 1 cannot be selected at all.</strong> <code>TRAN</code>
+    starts at 0, which is already slot&nbsp;2, so the first two entries are in the
+    bank but out of the knob's reach — worth knowing before you spend a sample on
+    one. <em>32 of the 34 are reachable.</em></p>
+    <p>The engine also <strong>interpolates between neighbours</strong> over that
+    four-unit stride, so values between two slots blend them rather than snapping.
+    <a href="https://github.com/angellinares/dn2_firmware_explore/blob/main/docs/tran-mapping.md">How this was measured</a>.</p>
   </div>
 
   <div class="slots" id="slots"></div>

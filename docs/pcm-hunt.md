@@ -1620,6 +1620,13 @@ not a transient; the interpolation step is not 4; or the entry length is not
 constant across the bank. **What is solid is the location, the format (16-bit
 mono, 48 kHz) and the ~100 ms period. The count is not.**
 
+> **[RESOLVED 2026-09-14 on hardware — see `docs/tran-mapping.md`.]** The two
+> readings were measuring different things and both were right. The bank holds
+> **34** entries; `TRAN` reaches **32** of them, at `TRAN = 4 x slot - 8`, and
+> the interpolation step is 4 as assumed here. Slots 0 and 1 are not selectable.
+> The row below that calls 32 "wrong" is the one to distrust: it was right about
+> the reachable count and wrong only in taking that for the extent.
+
 ---
 
 ## 15. Object sizes on a Digitone II, corrected
@@ -1690,11 +1697,16 @@ Kept because the ratio is the point — one location, found after all of this:
 | ...and its strings are preset names | **pattern** names, corrected by the owner |
 | the DDR span is pitch/detune ratio tables | it is the bank — only its ends were sampled, as float32, never the middle as int16 |
 | the transients are in device storage | the DN2 exposes no sample filesystem at all |
-| 32 entries, from `TRAN` 0..124 and 4-step interpolation | **34**, confirmed by ear on entries 32 and 33 |
+| 32 entries, from `TRAN` 0..124 and 4-step interpolation | **34** by extent — but see below: 32 was the right *reachable* count, filed here as an error for a day |
 | `FindDataRefs.java` returning zero meant no references | the tool was broken and had never worked |
 | a DN2 project slot allocates 4,194,304 bytes | **16,777,216** — the 4 MiB figure was a Digitone 1 measurement |
 
 ### Still unknown
+
+> **[ANSWERED 2026-09-14 — `docs/tran-mapping.md`.]** `TRAN = 4 x slot - 8`,
+> reaching slots 2..33. The marker design described below is what *failed*: it
+> assumes each entry is heard at one position, and the entries blend. Tones in
+> the even slots and silence in the odd ones answered it instead.
 
 **How `TRAN`'s 125 positions map onto 34 entries.** The marker flash was
 designed to answer this too: five markers at known slots, so the positions at
