@@ -14,7 +14,7 @@ container layout, the content checksum and the HMAC trailer at once, and any
 one of them being wrong shows up as a differing byte. It is `docs/ROADMAP.md`'s
 Gate A, in JavaScript.
 
-**The agreement.** Build a store-only image in JS, build the same image in
+**The agreement.** Build a repacked image in JS, build the same image in
 Python, and compare. Two toolchains sharing no lineage producing the same
 bytes is a stronger statement than either one verifying itself, and it is the
 check that would catch a shared *assumption* rather than a coding slip -- the
@@ -89,10 +89,9 @@ def test_key_is_derived_not_assumed(js_report):
 def test_agrees_with_python(js_report, dn2, tmp_path):
     """The JS-built image and the Python-built image are the same bytes.
 
-    Both are given the same store-only stream, so what is being compared is the
-    container layout, the section table rewrite, the trailer placement, the
-    content checksum and the whole transport -- independently implemented on
-    both sides.
+    Both are given the same stream, so what is being compared is the container
+    layout, the section table rewrite, the trailer placement, the content
+    checksum and the whole transport -- independently implemented on both sides.
     """
     from dnfw.container.section import HEADER, STORED_ALIGN, Section
     from dnfw.firmware.build import build

@@ -18,7 +18,7 @@
  *
  *   3. **verify** -- every integrity field the file carries checks out.
  *
- *   4. **store-only rebuild** -- one section repacked by the browser packer,
+ *   4. **repacked rebuild** -- one section repacked by the browser packer,
  *      the image reassembled, reloaded and re-verified, and the section's
  *      content compared. This is the exact shape of image the tool produces.
  *
@@ -80,7 +80,7 @@ checks.push({
   failed: original.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail}`),
 });
 
-// 4. A store-only rebuild of one section, reloaded and re-verified.
+// 4. A repacked rebuild of one section, reloaded and re-verified.
 const target = firmware.container.find(sectionId);
 if (target === null || target.unpack() === null) {
   checks.push({ check: `section ${sectionId} is compressed`, ok: false });
@@ -96,13 +96,13 @@ if (target === null || target.unpack() === null) {
   const back = reloaded.container.find(sectionId).unpack();
 
   checks.push({
-    check: `section ${sectionId} (${name(sectionId)}) survives a store-only rebuild`,
+    check: `section ${sectionId} (${name(sectionId)}) survives a repack`,
     ok: back !== null && firstDifference(back, content) === -1,
     detail: `${content.length.toLocaleString()} bytes`,
   });
   const after = await verify(reloaded);
   checks.push({
-    check: "store-only rebuild verifies",
+    check: "repacked rebuild verifies",
     ok: after.every((c) => c.ok),
     detail: `${after.filter((c) => c.ok).length}/${after.length}`,
     failed: after.filter((c) => !c.ok).map((c) => `${c.name}: ${c.detail}`),

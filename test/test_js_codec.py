@@ -78,9 +78,72 @@ def test_js_depack_matches_python(node, dn2, tmp_path):
         assert all(c["ok"] for c in report["checks"]), report
         assert report["unpacked_bytes"] == len(section.unpack())
         # Store-only costs one control bit per byte and nothing else. Asserting
-        # the ratio catches a packer that silently started emitting matches --
-        # which would be a *better* packer and an untested one.
-        assert report["growth_ratio"] == pytest.approx(1.125, abs=0.001)
+        # the ratio catches a fallback that silently started emitting matches --
+        # which would be a *better* packer and not the known-simple one.
+        assert report["store_only_ratio"] == pytest.approx(1.125, abs=0.001)
+
+
+def test_js_packer_emits_the_same_bytes_as_python(node, dn2, tmp_path):
+    """The sharpest check in this file: **identical streams, not merely valid ones.**
+
+    A packer has enormous freedom — any parse that round-trips is correct — so
+    "it round-trips" leaves most of the implementation untested. Requiring the
+    same bytes as `codec/aplibpack.py` pins the cost model, the tie-breaking
+    between equally long matches, the lazy-lookahead arithmetic, the offset
+    window, the chain depth *and* the exact point in the loop where the hash
+    chain is updated. A single one of those differing shows up here.
+
+    It is only a fair demand because the JS is a deliberate port of that parse
+    rather than an independent packer. Where the two implementations are meant
+    to be independent — the depacker, the container, the transport — the test
+    is agreement on *content*, not on bytes.
+    """
+    from dnfw.codec import aplibpack
+
+    for section in _compressed(dn2):
+        content = section.unpack()
+        stored = tmp_path / f"s{section.id}.stored.bin"
+        expect = tmp_path / f"s{section.id}.unpacked.bin"
+        packed = tmp_path / f"s{section.id}.jspack.bin"
+        stored.write_bytes(section.stored)
+        expect.write_bytes(content)
+
+        done = subprocess.run(
+            [node, str(HARNESS), "--stored", str(stored), "--expect", str(expect),
+             "--packed-out", str(packed)],
+            capture_output=True, text=True, cwd=ROOT)
+        assert done.returncode == 0, f"{done.stdout}\n{done.stderr}"
+
+        assert packed.read_bytes() == aplibpack.pack(content), (
+            f"section {section.id}: the JS packer diverged from the Python one")
+
+
+def test_packed_sections_are_no_larger_than_elektrons(node, dn2, tmp_path):
+    """Every section must come out at or under the size Elektron ship.
+
+    This is the property the port was done *for*. The store-only packer it
+    replaces made section 7 grow by 339,507 bytes, which would have put a
+    larger image in front of a recovery bootloader than anything that has ever
+    been flashed — a hardware risk taken to avoid a day of porting.
+
+    Asserted per section rather than in total, because a total can hide one
+    section ballooning while another shrinks.
+    """
+    for section in _compressed(dn2):
+        stored = tmp_path / f"s{section.id}.stored.bin"
+        expect = tmp_path / f"s{section.id}.unpacked.bin"
+        stored.write_bytes(section.stored)
+        expect.write_bytes(section.unpack())
+
+        done = subprocess.run(
+            [node, str(HARNESS), "--stored", str(stored), "--expect", str(expect)],
+            capture_output=True, text=True, cwd=ROOT)
+        assert done.returncode == 0, f"{done.stdout}\n{done.stderr}"
+
+        report = json.loads(done.stdout)
+        assert report["vs_stock"] <= 0, (
+            f"section {section.id} packs {report['vs_stock']:+,} bytes "
+            f"against Elektron's own stream")
 
 
 def test_python_depacks_the_js_packer(node, dn2, tmp_path):
@@ -157,14 +220,25 @@ def test_store_only_section_rebuilds_and_verifies(node, dn2, dn2_raw, tmp_path):
     assert report.ok, [c for c in report.checks if not c.ok]
 
 
-def test_store_only_is_inside_elektrons_limits(node, dn2, tmp_path):
-    """A store-only stream contains no matches at all, so it cannot violate
-    either bound in `codec.limits` -- there is nothing to violate them with.
+def test_both_packers_stay_inside_elektrons_limits(node, dn2, tmp_path):
+    """Neither stream may ask more of the decompressor than Elektron's own do.
 
-    Worth asserting rather than reasoning about: those limits are why images of
-    ours once stalled in recovery, and "it has no matches" is a claim about the
-    packer that a future packer could quietly stop honouring.
+    This is not a size question. A stream can checksum perfectly and still
+    reach further back or copy longer than any stream the device has ever been
+    given, and images of ours that did exactly that **stalled in the Early
+    Start-up Menu's recovery flash** (`codec.limits`, `docs/flashing.md`). It
+    is the failure this project has actually hit, so it is checked rather than
+    reasoned about.
+
+    The two packers satisfy it for different reasons, and both are asserted:
+
+    - `pack` bounds its search — every offset under `PACK_MAX_OFFSET`, every
+      match at or under `MAX_MATCH`.
+    - `packStore` emits no matches at all, so there is nothing to violate them
+      with. That is its whole appeal as a fallback, and it is a claim a future
+      change could quietly break.
     """
+    from dnfw.codec import limits
     from dnfw.codec.profile import profile
 
     section = max(_compressed(dn2), key=lambda s: len(s.unpack()))
@@ -172,13 +246,21 @@ def test_store_only_is_inside_elektrons_limits(node, dn2, tmp_path):
     stored = tmp_path / "stored.bin"
     expect = tmp_path / "unpacked.bin"
     packed = tmp_path / "js_packed.bin"
+    store_only = tmp_path / "js_store.bin"
     stored.write_bytes(section.stored)
     expect.write_bytes(content)
     subprocess.run(
         [node, str(HARNESS), "--stored", str(stored), "--expect", str(expect),
-         "--packed-out", str(packed)],
+         "--packed-out", str(packed), "--store-out", str(store_only)],
         capture_output=True, text=True, cwd=ROOT, check=True)
 
-    p = profile(packed.read_bytes())
-    assert p.matches == 0, "the browser packer emitted a match; it is store-only"
-    assert p.literals == len(content)
+    real = profile(packed.read_bytes())
+    assert real.matches > 0, "the real packer emitted no matches at all"
+    assert real.max_offset <= limits.PACK_MAX_OFFSET, real
+    assert real.max_length <= limits.MAX_MATCH, real
+    assert real.beyond == 0, real
+    assert real.within_limits, real
+
+    plain = profile(store_only.read_bytes())
+    assert plain.matches == 0, "the fallback emitted a match; it is store-only"
+    assert plain.literals == len(content)

@@ -1,42 +1,24 @@
 /**
- * aPLib-variant codec for the browser: depack, and a store-only pack.
+ * aPLib-variant depacker: LZ77 with interlaced Elias-gamma codes.
  *
- * A second implementation of the format `src/dnfw/codec/aplib.py` reads, so
- * the page can rebuild firmware with nothing uploaded anywhere. The depacker
- * is a direct port and must agree with the Python token for token; the packer
- * deliberately is not a port.
+ * Port of `src/dnfw/codec/aplib.py`, itself from `ap_depack` in
+ * mischa85/elektron-firmware-tool (`decompress.c`), MIT, with thanks. It must
+ * agree with the Python token for token, and `test/test_js_codec.py` asserts
+ * exactly that over every compressed section of a real image.
  *
- * ## Why the packer emits only literals
- *
- * `codec/aplibpack.py` is a real packer -- greedy with lazy lookahead over a
- * hashed match chain, cost-decided, and every section it produces comes out
- * smaller than the ones Elektron ship. Porting it is a day of work and a
- * second place for a subtle parse bug to live, in code whose output people
- * flash.
- *
- * Only **section 7** is modified by the transients mod, so sections 2, 3 and 8
- * keep their original stored bytes and are never repacked at all. That reduces
- * the problem to one section, and a literal-only stream is the easiest kind of
- * aPLib stream to be sure of: it exercises one token type and the terminator,
- * with no offsets, no match lengths and no reuse state.
- *
- *     section 7:  602,076 stored  ->  836,956 unpacked  ->  941,575 store-only
- *
- * The image grows by roughly 340 KB. `docs/ideas-backlog.md` §1 is about space
- * *inside* section 3's address range, which this does not touch, so the cost is
- * file size and flash, not addressable room.
- *
- * The size is exactly 9/8 of the input plus the terminator, because every byte
- * costs one control bit and itself. If that ever matters, port the real packer;
- * `aplibpack.py` is the reference and this module's `depack` is the check.
- *
- * Ported from `ap_depack` in mischa85/elektron-firmware-tool (`decompress.c`),
- * MIT, with thanks, by way of `src/dnfw/codec/aplib.py`.
+ * Packing lives in `aplibpack.js`, mirroring the same split in `src/dnfw/`.
+ * The deviation the Python notes applies here too: the C codec is handed the
+ * section's 8-byte `[length][sum]` header and skips it. That header is a
+ * property of an ELE3 *section*, not of the compression, so it belongs to
+ * `container/section.js` and this module sees only the compressed stream.
  */
+
+import { Growable } from "./bytes.js";
 
 export const OFFSET_BIAS = 767;     // raw offset field; this value ends the stream
 export const REUSE_GAMMA = 2;       // gamma selecting "reuse the last offset"
 export const FAR_THRESHOLD = 3328;  // beyond this: +1 length bonus
+export const MIN_MATCH = 2;
 
 export class DepackError extends Error {}
 
@@ -145,32 +127,6 @@ export function* tokens(stream) {
   }
 }
 
-/** A Uint8Array that grows by doubling, so no size has to be guessed up front. */
-class Growable {
-  constructor(capacity = 1 << 16) {
-    this.buf = new Uint8Array(capacity);
-    this.length = 0;
-  }
-
-  room(n) {
-    if (this.length + n <= this.buf.length) return;
-    let capacity = this.buf.length * 2;
-    while (capacity < this.length + n) capacity *= 2;
-    const grown = new Uint8Array(capacity);
-    grown.set(this.buf.subarray(0, this.length));
-    this.buf = grown;
-  }
-
-  push(value) {
-    this.room(1);
-    this.buf[this.length++] = value;
-  }
-
-  bytes() {
-    return this.buf.slice(0, this.length);
-  }
-}
-
 /**
  * Decompress one aPLib stream (no section header) -> Uint8Array.
  *
@@ -201,64 +157,4 @@ export function depack(stream, { allowTruncated = false } = {}) {
     throw new DepackError("stream decoded to nothing");
   }
   return out.bytes();
-}
-
-/**
- * Interlaced bit/byte output. Control bits accumulate into a tag byte reserved
- * in the stream the moment its first bit is written, so bits and inline bytes
- * stay in the order the depacker expects.
- */
-class Writer {
-  constructor(capacity) {
-    this.out = new Growable(capacity);
-    this.tagPos = -1;
-    this.tagBits = 0;
-  }
-
-  bit(value) {
-    if (this.tagBits === 0) {
-      this.tagPos = this.out.length;
-      this.out.push(0);
-      this.tagBits = 8;
-    }
-    if (value) this.out.buf[this.tagPos] |= 1 << (this.tagBits - 1);
-    this.tagBits -= 1;
-  }
-
-  gamma(value) {
-    // bit_length - 1, without assuming the value fits a 32-bit shift: the
-    // terminator's gamma is 0x1000002.
-    let width = 0;
-    for (let v = value; v > 1; v = Math.floor(v / 2)) width += 1;
-    for (let i = width - 1; i >= 0; i--) {
-      this.bit(Math.floor(value / 2 ** i) % 2);
-      this.bit(i === 0 ? 1 : 0);
-    }
-  }
-
-  literal(value) {
-    this.bit(1);
-    this.out.push(value);
-  }
-
-  /** End of stream: a match whose raw offset field decodes to the bias. */
-  end() {
-    this.bit(0);
-    this.gamma(0x1000002);
-    this.out.push(0xff);
-  }
-}
-
-/**
- * Compress `data` into an aPLib stream (no section header) -> Uint8Array.
- *
- * Literals only -- see the module docstring for why that is the right trade
- * here and what to do if it stops being one. The result is a valid stream, not
- * a small one: expect 9/8 of the input.
- */
-export function packStore(data) {
-  const writer = new Writer(Math.ceil(data.length * 1.13) + 64);
-  for (let i = 0; i < data.length; i++) writer.literal(data[i]);
-  writer.end();
-  return writer.out.bytes();
 }

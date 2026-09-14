@@ -18,7 +18,8 @@
  */
 
 import { u32 } from "../bytes.js";
-import { depack, packStore, DepackError } from "../aplib.js";
+import { DepackError, depack } from "../aplib.js";
+import { pack } from "../aplibpack.js";
 
 export const HEADER = 8;
 export const STORED_ALIGN = 4;
@@ -80,7 +81,7 @@ export class Section {
 
 /** Build a compressed section from raw content: header, stream, padding. */
 export function compress(id, dest, content) {
-  const stream = packStore(content);
+  const stream = pack(content);
   let sum = 0;
   for (let i = 0; i < stream.length; i++) sum = (sum + stream[i]) >>> 0;
   const padding = (-(HEADER + stream.length) % STORED_ALIGN + STORED_ALIGN) % STORED_ALIGN;

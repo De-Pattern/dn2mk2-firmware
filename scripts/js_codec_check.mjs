@@ -23,7 +23,8 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { depack, packStore } from "../site/js/aplib.js";
+import { depack } from "../site/js/aplib.js";
+import { pack, packStore } from "../site/js/aplibpack.js";
 
 const SECTION_HEADER = 8;  // [u32 stream length BE][u32 stream byte-sum BE]
 
@@ -70,20 +71,42 @@ const checks = [];
 const unpacked = depack(stream);
 checks.push(compare("depack matches python", unpacked, expected));
 
-// 2. The packer's output survives our own depacker.
-const packed = packStore(expected);
-checks.push(compare("packStore round-trips", depack(packed), expected));
+// 2. The store-only packer's output survives our own depacker.
+const stored_only = packStore(expected);
+checks.push(compare("packStore round-trips", depack(stored_only), expected));
+
+// 3. The real packer: same, and timed, because it is the one that ships and a
+//    browser tab is where it has to run.
+const began = Date.now();
+const packed = pack(expected);
+const pack_ms = Date.now() - began;
+checks.push(compare("pack round-trips", depack(packed), expected));
+
+// 4. And it must not exceed what Elektron's own stream for this section costs
+//    by more than a small margin -- the whole reason for porting it.
+checks.push({
+  check: "pack stays near Elektron's own size",
+  ok: packed.length <= declaredLength * 1.15,
+  got: packed.length,
+  want: declaredLength,
+});
 
 if (arg("packed-out")) writeFileSync(arg("packed-out"), packed);
+if (arg("store-out")) writeFileSync(arg("store-out"), stored_only);
 
 const report = {
   stored_bytes: stored.length,
   declared_stream_bytes: declaredLength,
   unpacked_bytes: expected.length,
   packed_bytes: packed.length,
-  // The store-only cost, stated rather than left to be worked out from the two
-  // numbers above: every byte becomes one control bit plus itself.
-  growth_ratio: Number((packed.length / expected.length).toFixed(4)),
+  store_only_bytes: stored_only.length,
+  pack_ms,
+  // Against Elektron's own stream for this section, which is the number that
+  // decides whether an image is bigger than anything the device has seen.
+  vs_stock: packed.length - declaredLength,
+  // The store-only cost, stated rather than worked out: every byte becomes one
+  // control bit plus itself.
+  store_only_ratio: Number((stored_only.length / expected.length).toFixed(4)),
   checks,
 };
 console.log(JSON.stringify(report, null, 2));

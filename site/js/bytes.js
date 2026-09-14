@@ -57,6 +57,39 @@ export function indexOf(haystack, needle, from = 0) {
   return -1;
 }
 
+/**
+ * A Uint8Array that grows by doubling, so no output size has to be guessed.
+ *
+ * Shared by the depacker and the packer, which is why it lives here: they both
+ * produce a stream whose length is not known until it is finished, and two
+ * copies of a growth policy is two places to get an off-by-one wrong.
+ */
+export class Growable {
+  constructor(capacity = 1 << 16) {
+    this.buf = new Uint8Array(capacity);
+    this.length = 0;
+  }
+
+  /** Ensure room for `n` more bytes, so a caller can write `buf` directly. */
+  room(n) {
+    if (this.length + n <= this.buf.length) return;
+    let capacity = this.buf.length * 2;
+    while (capacity < this.length + n) capacity *= 2;
+    const grown = new Uint8Array(capacity);
+    grown.set(this.buf.subarray(0, this.length));
+    this.buf = grown;
+  }
+
+  push(value) {
+    this.room(1);
+    this.buf[this.length++] = value;
+  }
+
+  bytes() {
+    return this.buf.slice(0, this.length);
+  }
+}
+
 /** ASCII bytes for a string literal, for magics and anchors. */
 export function ascii(text) {
   const out = new Uint8Array(text.length);

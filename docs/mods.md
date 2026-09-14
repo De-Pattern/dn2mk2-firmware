@@ -20,14 +20,16 @@ Two rules, both enforced rather than remembered:
 
   **Sharpened 2026-09-14.** This used to read "no section changes length",
   which is wrong in a way that only became visible once a section's *stored*
-  length did change: the browser tool repacks section 7 store-only and it grows
-  by 339,507 bytes, with no ill effect. The two lengths are different things.
-  The stored length is the compressed bytes in the container, and the section
-  table records where each section sits, so changing it moves nothing an
-  address ever points at — `ele3.assemble` rewrites the offsets. The unpacked
-  length is what lands at `dest`, and that is the one the code's addresses are
-  relative to. The old wording forbade both and would have ruled out the
-  store-only route on a misunderstanding.
+  length actually changed. The two lengths are different things. The **stored**
+  length is the compressed bytes in the container, and the section table records
+  where each section sits, so changing it moves nothing an address ever points
+  at — `ele3.assemble` rewrites the offsets, and a rebuild re-signs over the
+  result. The **unpacked** length is what lands at `dest`, and that is the one
+  the code's addresses are relative to. The old wording forbade both.
+
+  This matters beyond pedantry: every replacement of a compressed section
+  changes its stored length a little, because compression depends on content.
+  Reading the rule as forbidding that would rule out the whole mods system.
 - **Integrity is not the mod's business.** A mod produces section payloads;
   `dnfw build` recomputes the section byte-sum, the content checksum and the
   HMAC-SHA256 trailer, and re-verifies before anything is written.
@@ -122,11 +124,16 @@ public pages. The site is a small front door that points back here for detail.
 
 ## The browser tool
 
-**Status: the whole pipeline is built and proven; the mod and the UI are not.**
-`site/js/` loads a real `.syx`, derives its signing key, depacks and repacks
-section 7, reassembles the container, re-signs it and verifies the result — and
-the image it produces is **byte-identical to the one the Python tool builds**.
-What is missing is the transients mod itself, WAV handling, and any interface.
+**Status: built, and live at `site/transients.html`.** The page loads a real
+`.syx`, derives its signing key, depacks and repacks section 7, replaces any of
+the 34 transients with the user's own audio, reassembles the container,
+re-signs, re-verifies, and offers the result for download — and the image it
+produces is **byte-identical to the one the Python tool builds**, and 4,608
+bytes **smaller** than stock 1.11.
+
+What remains untested is the page's *layout* — the logic behind it is checked
+against real firmware in `test/test_js_{codec,firmware,mod}.py`, but nobody has
+looked at it in a browser yet.
 
 **The requirement, from the owner: zero CLI, zero cloning.** A user opens a web
 page, picks their own firmware file and their own samples, adjusts each one,
@@ -141,76 +148,128 @@ what `transientsplit` does and the right posture for someone's firmware.
 | SysEx transport decode/encode (8-in-7) | easy | **done** — `syx/` |
 | ELE3 container parse and rebuild | moderate | **done** — `container/` |
 | aPLib **depack** of section 7 | moderate — port of `codec/aplib.py` | **done** |
-| aPLib **pack** of section 7 | was **the blocker** | **done**, store-only |
+| aPLib **pack** of section 7 | was **the blocker** | **done** — full parse port, plus a store-only fallback |
 | content checksum + HMAC-SHA256 | easy, `SubtleCrypto` | **done** — `integrity/` |
-| the transients mod itself | moderate — bank offset through the boot stream | not started |
-| WAV decode, trim, preview | easy, Web Audio | not started |
-| the UI | — | not started |
+| the transients mod itself | moderate — bank offset through the boot stream | **done** — `mods/transients.js`, `bootstream.js` |
+| audio decode, fit, preview | easy, Web Audio | **done** — `audio.js` |
+| the UI | — | **done** — `transients.html`, not yet seen in a browser |
 | transient/tonal separation | **not ours** — link to `transientsplit` | n/a |
 
 `site/js/` mirrors `src/dnfw/`'s module layout deliberately — `syx/`,
-`container/`, `integrity/`, and one `firmware.js` for the order they go in. Two
+`container/`, `integrity/`, `mods/`, `aplib.js` and `aplibpack.js` split the
+same way the Python is, and one `firmware.js` for the order they go in. Two
 implementations that drift are a liability; two that sit side by side with the
 same names make the drift visible.
 
-### The decision on packing: store-only
+### The decision on packing: store-only first, then the real packer
 
-Only **section 7** is modified, so every other section keeps its original
-stored bytes untouched — sections 2, 3 and 8 never need repacking at all. That
-reduces the problem to one section, and makes a literal-only encoder viable:
+**[SUPERSEDED 2026-09-14 — store-only shipped, then was replaced. Kept because
+the reasoning that led to it was sound and the failure was in what it left
+unmeasured.]**
+
+The original decision was a literal-only encoder. Only section 7 is modified,
+so sections 2, 3 and 8 keep their original stored bytes and never need
+repacking; that reduces the problem to one section, and a store-only stream is
+the easiest kind of aPLib stream to be sure of — one token type and the
+terminator, no offsets, no lengths, no reuse state. Porting the real packer was
+called "the blocker" and routed around.
+
+It worked, and it cost this:
 
 ```
 section 7:  602,076 stored  ->  836,956 unpacked  ->  941,583 store-only
+.syx:     2,389,280  ->  2,819,488   (+430,208)
 ```
 
-Measured, and exactly 9/8 of the input plus the terminator, because every byte
-costs one control bit and itself. The `.syx` grows from 2,389,280 to 2,819,488
-bytes — 430,208 more, larger than the 339,507 the section gained because the
-SysEx transport carries seven bits per byte.
+**What was wrong with it was not the size. It was that the size was never
+compared against anything.** 340 KB was written down as a cost and filed as
+acceptable, next to a note that the device had never been given a larger
+section 7. Those two facts belonged together and were not put together.
 
-The image grows by roughly 340 KB. `docs/ideas-backlog.md` §1 cares about space
-*inside* section 3's address range, which this does not touch, so the cost is
-file size and flash, not addressable room.
+The owner put them together: the transient entries are fixed-size slots
+replaced in place, so why does anything grow? It doesn't. The **unpacked**
+section is 836,956 bytes whatever you put in it. Only the compressed size
+moves, and only because compression finds redundancy and how much is there
+depends on the audio. Measured on 1.11 section 7:
 
-**Rejected for now:** porting the cost-optimal DP packer from `codec/aplibpack.py`.
-`docs/ROADMAP.md` is right that a greedy packer is the wrong choice when the
-goal is byte-exact reproduction of Elektron's own output — but that is not the
-goal here. The goal is a stream the device's depacker accepts, and a store-only
-stream is the easiest kind to be sure of. The cost-optimal port stays available
-if size ever matters.
+| content | stored | `.syx` | vs stock |
+|---|---|---|---|
+| stock | 602,076 | 2,389,280 | — |
+| **markers — the image flashed 2026-09-14** | 564,196 | 2,341,280 | **−48,000** |
+| 34 realistic decaying drum hits | 576,364 | 2,356,640 | **−32,640** |
+| 34 slots of white noise (worst case) | 653,852 | 2,454,816 | +65,536 |
+| store-only | 941,583 | 2,819,488 | **+430,208** |
 
-digikit took the same route (`dt2/aplib.py`, "store-only packer for the device's
-aPLib variant"), which is weak corroboration that the device tolerates it —
-weak because their note also says the rebuilt image is about 3x original size,
-and nothing says it was flashed.
+So the real packer stays within ±64 KB and is *smaller* for anything musical —
+and **the image confirmed on hardware was 48,000 bytes smaller than stock.** It
+never tested a larger image because it never was one. Store-only bought a day
+of work and paid for it with an untested hardware condition on the one path a
+user would actually take.
+
+**`site/js/aplibpack.js` is now a full port** of `codec/aplibpack.py`'s parse —
+greedy with one-position lazy lookahead over a 2-byte hash chain, decided by
+`compress.c`'s cost model, bounded by `codec.limits`. Measured on DN2 1.11:
+
+| section | raw | JS packed | Elektron | vs stock | JS time | Python time |
+|---|---|---|---|---|---|---|
+| 2 bootstrap | 30,302 | 16,138 | 16,166 | −28 | 9 ms | 0.2 s |
+| 3 MAIN OS | 3,192,192 | 1,129,103 | 1,130,517 | −1,414 | 629 ms | 25.9 s |
+| 7 blob | 836,956 | 598,410 | 602,067 | −3,657 | 177 ms | 8.8 s |
+| 8 | 159,948 | 102,552 | 103,407 | −855 | 27 ms | 1.2 s |
+
+Every section comes out smaller than Elektron's own, and a full browser rebuild
+of 1.11 is **2,384,672 bytes — 4,608 smaller than stock.** The size risk is
+gone rather than documented.
+
+**`packStore` is kept** as the fallback whose correctness can be argued in a
+sentence, and as the control `pack` is measured against. It is not dead code:
+`test_js_codec.py` asserts it still emits no matches, because that is what
+makes it the simple thing.
+
+The lesson is not "store-only was a bad idea". It was a reasonable first move.
+The failure was writing down a number that differed from every image the device
+had ever accepted, and not asking what that difference cost.
 
 ### How it was verified, which is the part that matters
 
 A second implementation of a format that writes firmware people flash is a real
-correctness risk, so it does not get trusted because it looks right. These four
-checks were written down **before any of the code existed**, and all four now
-run in `test/test_js_codec.py` against real firmware — `scripts/js_codec_check.mjs`
-is the JS half.
+correctness risk, so it does not get trusted because it looks right. These
+checks were written down **before any of the code existed**, and all now run in
+`test/test_js_codec.py` against real firmware — `scripts/js_codec_check.mjs` is
+the JS half.
 
 | # | check | result |
 |---|---|---|
-| 1 | **Depack agreement** — JS depack of every compressed section == Python's | **pass**, byte for byte, all sections of DN2 1.10E |
-| 2 | **Self round-trip** — JS depack of JS `packStore` output == input | **pass** |
-| 3 | **Cross-check** — JS `packStore` output depacked by `codec/aplib.py` | **pass**, 836,956 bytes identical |
-| 4 | **Whole-image rebuild** — section 7 store-only, container reassembled | **pass, 21/21 integrity checks** |
+| 1 | **Depack agreement** — JS depack of every compressed section == Python's | **pass**, byte for byte |
+| 2 | **Self round-trip** — JS depack of JS `pack` and `packStore` output == input | **pass** |
+| 3 | **Cross-check** — JS output depacked by `codec/aplib.py` | **pass**, 836,956 bytes identical |
+| 4 | **Whole-image rebuild** — section 7 repacked, container reassembled | **pass, 21/21 integrity checks** |
+| 5 | **Packer agreement** — JS `pack` output == Python `pack` output | **pass**, byte-identical on all four compressed sections |
+| 6 | **Size** — every section at or under Elektron's own stored length | **pass**, all four smaller |
+| 7 | **Limits** — no offset past `PACK_MAX_OFFSET`, no match over `MAX_MATCH` | **pass** |
 
-Check 3 is the one that matters: two implementations sharing no lineage, read in
-both directions, and neither consulted while the other ran. Check 4 is not a
-codec check at all — it asks whether the *container* still adds up when a
-section changes length, which is the assumption the whole store-only decision
-rests on, and it had never been tested. It does, and the trailer and content
-checksum re-sign correctly over the larger image.
+**Check 5 is the sharpest thing in this file.** A packer has enormous freedom —
+any parse that round-trips is correct — so "it round-trips" leaves most of the
+implementation untested. Demanding the *same bytes* as `codec/aplibpack.py`
+pins the cost model, the tie-breaking between equally long matches, the
+lazy-lookahead arithmetic, the offset window, the chain depth, and the exact
+point in the loop where the hash chain is updated. Any one of those differing
+shows up immediately.
 
-A fifth property falls out for free and is asserted anyway: a store-only stream
-contains **no matches**, so it cannot violate either bound in `codec.limits` —
-there is nothing to violate them with. Those limits are why images of ours once
-stalled in recovery (`docs/flashing.md`), so the safest possible stream on that
-axis is the one this emits.
+That is only a fair demand because the JS packer is a deliberate port of that
+parse. Where the two implementations are meant to be *independent* — the
+depacker, the container, the transport — the standard is agreement on content,
+not on bytes, and checks 1, 3 and 4 are written that way.
+
+Check 4 is not a codec check at all: it asks whether the container still adds
+up when a section changes stored length. It does, and the trailer and content
+checksum re-sign correctly over the result.
+
+Check 7 is the one that matters for the device rather than for correctness. A
+stream can checksum perfectly and still reach further back or copy longer than
+anything Elektron ship, and images of ours that did exactly that **stalled in
+the Early Start-up Menu's recovery flash**. It is the failure this project has
+actually hit, so it is asserted rather than reasoned about.
 
 ### The stack above the codec, and its two harder checks
 
@@ -221,8 +280,9 @@ axis is the one this emits.
 | **Round-trip** — load a real image, build it straight back, nothing replaced | **byte-identical** |
 | Signing key recovered from the image's own material | **pass**, derived from `"Multiplier"` |
 | Every integrity field on the original | **9/9** |
-| Store-only rebuild reloads, re-verifies, section content unchanged | **9/9** |
-| **JS-built image vs Python-built image, same input** | **byte-identical**, 2,819,488 bytes |
+| Repacked rebuild reloads, re-verifies, section content unchanged | **9/9** |
+| **JS-built image vs Python-built image, same input** | **byte-identical** |
+| Full browser rebuild of 1.11 | **2,384,672 bytes — 4,608 smaller than stock** |
 
 The round-trip is `docs/ROADMAP.md`'s **Gate A in JavaScript**: one comparison
 exercises SysEx framing, 8-in-7, per-packet checksums, marker counters, the
@@ -238,7 +298,17 @@ the user's own firmware file in their own tab, the way `integrity/keyderive.py`
 does it, and a candidate is only accepted when it reproduces that image's own
 trailer — so a wrong guess cannot pass as the right one.
 
-**What none of this proves: that the device accepts it.** Every check above is
-offline. A larger section 7 has never been flashed, and the recovery bootloader
-may have a partition size or a layout expectation that nothing here models. That
-is the next hardware test, and it is a real risk — not a formality.
+**What none of this proves: that the device accepts an image this toolchain
+built.** Every check above is offline.
+
+The size question that was open here is **closed**: the browser now emits an
+image 4,608 bytes smaller than stock, and every section packs smaller than
+Elektron's own, so nothing about these images is larger than what the device
+already accepts. The store-only route would have put a 340 KB-larger image in
+front of a recovery bootloader, and that risk is gone rather than documented.
+
+What is still untested is narrower and honest: **no image built by the
+JavaScript path has been flashed.** The Python path has been, repeatedly, and
+the two produce byte-identical output on every input tried — which is strong,
+but it is an inference, not a flash. The first hardware run of a
+browser-produced image should be treated as a first run.
