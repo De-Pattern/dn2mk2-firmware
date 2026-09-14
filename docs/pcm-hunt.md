@@ -1419,3 +1419,67 @@ consumer of a known table is a tool whose zero means something.
 know is there has told you about itself, not about the image.* This project has
 now made that mistake with a regex over section 7, with a `lea` scan over the
 parameter table, with a linear SHARC walk, and here.
+
+---
+
+## 13. The codec is not identified, and the hunt is parked here
+
+**2026-09-14.** Two attempts to get inside the compressed block, both negative.
+
+**The emulator route (the owner's idea, and the right one).** The firmware must
+decompress what it uses, so a bank invisible in the compressed image should be
+plain in RAM. `scripts/ram_audio_scan.py` boots and scans. **Its own control
+voids it:**
+
+| region | hit rate |
+|---|---:|
+| **MAIN OS image — control, known not audio** | **4.9%** |
+| main BSS, high | 2.0% |
+| main BSS, low 16 MB | 0.2% |
+
+The control scores highest. The detector fires on firmware code more than on any
+candidate, so it measures structure, not sound.
+
+The mechanism is shared by both surviving tests and is worth recording: a
+**pointer table passes both**. High bytes nearly constant (`0x40`-`0x46`) gives
+one low-entropy byte plane against a varying one — a large plane delta; and
+consecutive pointers are numerically close, which reads as autocorrelation. The
+best candidate, `0x446ce000`, is **53% ColdFire addresses**. A pointer rejector
+was added and the control still wins.
+
+*Three detectors have now failed for three different reasons — zero-crossing
+rate rejected the wavetables, plane-asymmetry and autocorrelation reward pointer
+tables. Detecting audio by its statistics is not working in this image, and the
+next attempt should watch code rather than bytes.*
+
+**The codec route.** `ghidra/FindDataRefs.java` (fixed, §12) gives six functions
+referencing the block. `FUN_401827c4` pushes `0x40240000` six times and
+decompiles to 5,810 bytes with eight parameters, heavy byte-pointer and bit
+work, and a hash table sized `1 << (n & 0x3f)` — the shape of a compression
+codec, though the hash chain is a *compressor* trait and the direction is not
+established.
+
+DNX reports stored project files from the device "decode with DNX's LZ4 path",
+so LZ4 was the obvious guess. **It is not LZ4**, at least not unframed: a
+minimal LZ4 block decoder tried at every byte offset through the first 512
+produces nothing over 20 KB. The firmware-embedded blob and the device's stored
+files may simply use different codecs.
+
+## What is actually known about the transients, after all of it
+
+- They are **samples** — Elektron have said so (owner).
+- `TRAN` (id 286) spans integer positions 0..124, and its value formatter prints
+  a signed decimal, so it is a continuous control over ~125 positions rather
+  than a 125-item menu.
+- They are **not** in any section as raw float32 or int16 PCM.
+- They are **not** in the factory project block, which is that block's actual
+  identity and excludes it twice over.
+- The DN2 exposes **no sample filesystem** — confirmed both by elektroid's
+  device table and by the instrument's own supported-opcode list.
+- DNX has never seen anything transient-shaped in the device's data store, and
+  the word appears nowhere in its code or docs.
+
+Everything beyond that has been the elimination of our own instruments. **Parked
+here** rather than pursued further: the remaining leads all require either
+identifying an unknown codec or driving an encoder the emulator cannot drive
+(`scripts/encoder_drain.py`).
