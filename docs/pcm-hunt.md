@@ -1483,3 +1483,82 @@ Everything beyond that has been the elimination of our own instruments. **Parked
 here** rather than pursued further: the remaining leads all require either
 identifying an unknown codec or driving an encoder the emulator cannot drive
 (`scripts/encoder_drain.py`).
+
+---
+
+## 14. FOUND — and the Syntakt pack is why
+
+**2026-09-14.** The owner suggested looking at Syntakt, whose recent OS ships
+user-loadable transients, on the chance Elektron uses one transient system
+across both machines. It did not confirm that. It did something better.
+
+### The ground truth nobody had
+
+`Syntakt-OS-1.41.zip` carries a **Twinshot Sound Pack** of plain WAV files, and
+eight of them are named **`TRANSIENT 01`-`08.wav`**: 16-bit mono, 44.1 kHz,
+5,292 frames = exactly 120 ms. Elektron's own transients, as files.
+
+Measuring this project's detector against them gives the numbers that had been
+*invented* every previous time:
+
+| | real transients | the pointer tables that fooled us | old threshold |
+|---|---|---|---|
+| plane-delta | **0.99 - 3.67** | 0.45 - 0.77 | 0.35 |
+| step-correlation | **0.978 - 0.995** | 0.36 - 0.92 | 0.35 |
+
+**The thresholds were three to ten times too loose.** Every false positive in
+§13 sat comfortably above them, and real audio clusters far higher and far
+tighter. Three detectors failed across this document for three different
+reasons, and all three shared one cause: *no positive sample of the thing being
+detected.*
+
+### Re-scanning with measured thresholds
+
+| region | hits |
+|---|---:|
+| **section 3, MAIN OS code — control** | **0** |
+| sections 2, 4, 8 | 0 |
+| SHARC code and rodata regions | 0 |
+| **section 7, DDR `0x80000018`** | **19, contiguous** |
+| section 7, L1 data | 3 |
+
+The control is finally clean. The hits form one span,
+**`0x8045b818`-`0x804a5018`, 301,056 bytes**, 45 of 57 steps adjacent.
+
+Raw bytes read as audio with no interpretation: `59 01 4d 01 45 01 36 01 22 01`
+is 345, 333, 325, 310, 290 — a smooth decay.
+
+**The owner confirmed by ear:** the span is many transients concatenated, and an
+8 KB slice of it is a single transient.
+
+### The entry length is 100.0 ms
+
+The transients are packed with no silence between them, so silence-based
+segmentation yields one blob. The envelope is periodic instead: autocorrelating
+a 64-sample RMS envelope gives a dominant lag of **~4,800 samples**, with 9,600
+as its harmonic.
+
+4,800 samples at 44.1 kHz is an awkward 108.8 ms. **At 48 kHz it is exactly
+100.0 ms** — a design number. So the bank is 48 kHz, and the span holds
+**31 entries**.
+
+### What is not established
+
+- **31 entries, not 125.** `TRAN` spans integer positions 0..124. 31 x 4 = 124
+  is arithmetically striking, and `TRAN`'s value formatter prints a *signed
+  decimal* rather than an index (§5), which fits interpolation between entries —
+  but nothing here demonstrates that mapping, and it is recorded as a
+  coincidence to test, not a finding.
+- **The span may be clipped.** 150,528 / 4,800 = 31.36, not integral, so the
+  boundaries are approximate and the bank may extend past what the detector
+  scored.
+- **Whether these are the FM drum transients specifically**, as opposed to some
+  other short-sample set the SHARC carries, is unproven. They are PCM, they are
+  in the audio DSP's image, and they are transient-shaped and transient-length.
+
+### The correction this supersedes
+
+§7 examined this same region, read it as **float32**, found a run of `1.0f` at
+the head and semitone-spaced ratios at the tail, and concluded "pitch/detune
+ratio tables, not audio". That was sampling the ends of a **mixed** region and
+never testing the middle as int16. The region holds both.
