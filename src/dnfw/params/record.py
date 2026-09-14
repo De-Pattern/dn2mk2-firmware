@@ -24,8 +24,8 @@ GROUP = 2
 PARAMETER_ID = 3
 RANGE = 5
 DEFAULT = 6
-CONTROLLER = 9
-NRPN = 10
+LOGICAL_ID = 9        # was CONTROLLER; see `logical_id`
+PHYSICAL_ID = 10      # was NRPN; see `physical_id`
 # The three name pointers are the last three words, whatever the record size.
 NAMES_FROM_END = 3
 
@@ -64,20 +64,56 @@ class Record:
         return self.words[DEFAULT]
 
     @property
-    def controller(self) -> int | None:
-        """MIDI controller number, or None when the parameter has none.
+    def logical_id(self) -> int | None:
+        """The parameter's **logical id**, not a MIDI controller number.
 
-        `SLEW` is the interesting case: it shares `SPH`'s parameter id but
-        carries no controller, which is what you would expect when only one of
-        a pair of presentations is externally addressable.
+        **[CORRECTED 2026-09-14 — was `controller`, documented as "MIDI
+        controller number".]** It cannot be one: **122 of the 285 records that
+        carry this field hold a value above 127**, and MIDI controller numbers
+        stop at 127. That was checkable from our own table on the day it was
+        written and never checked.
+
+        The name comes from an independent account of the ColdFire→SHARC
+        parameter transport (`docs/sharc-crosscheck.md`), which reads the same
+        field as a logical id: Chorus Depth carries `0x129`, and our table shows
+        297 = `0x129` in exactly that record.
+
+        `SLEW` remains the interesting case — it shares `SPH`'s parameter id but
+        carries no value here, which is what you would expect when only one of a
+        pair of presentations is externally addressable.
         """
-        value = self.words[CONTROLLER]
+        value = self.words[LOGICAL_ID]
+        return None if value == UNSET else value
+
+    @property
+    def controller(self) -> int | None:
+        """Deprecated alias for `logical_id`, kept so older scripts still run."""
+        return self.logical_id
+
+    @property
+    def physical_id(self) -> int | None:
+        """The parameter's **physical control id**.
+
+        **[RENAMED 2026-09-14 — was `nrpn`.]** Weaker evidence than the
+        `logical_id` correction above: nothing in our own data disproves "NRPN",
+        and the values are all in NRPN's range. The rename follows the same
+        outside account, which traces this field through the ColdFire→SPORT→SHARC
+        path and reads it as a physical control id — Chorus Depth `0x6E`, which
+        is the 110 our table shows.
+
+        Their account also explains the gap at `0x74`: an anonymous, disabled
+        record sits between Reverb Send and Chorus Mix, and our table does show
+        two records sharing parameter id 31, one of them carrying `0x74`.
+
+        *Evidence level: reported, not verified here.*
+        """
+        value = self.words[PHYSICAL_ID]
         return None if value == UNSET else value
 
     @property
     def nrpn(self) -> int | None:
-        value = self.words[NRPN]
-        return None if value == UNSET else value
+        """Deprecated alias for `physical_id`, kept so older scripts still run."""
+        return self.physical_id
 
     @property
     def addressable(self) -> bool:
