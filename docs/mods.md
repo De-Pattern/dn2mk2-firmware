@@ -105,3 +105,69 @@ under-declares breaks the only compatibility guarantee the system offers.
 It lives in `site/` rather than `docs/` on purpose: `docs/` is the research
 record, and Pages would turn ~40 files of measurements and retractions into
 public pages. The site is a small front door that points back here for detail.
+
+---
+
+## Next: the browser tool (planned, not started)
+
+**The requirement, from the owner: zero CLI, zero cloning.** A user opens a web
+page, picks their own firmware file and their own samples, adjusts each one,
+hears the result, and downloads a firmware image. Everything client-side —
+GitHub Pages is static, and nothing should be uploaded anywhere, which is also
+what `transientsplit` does and the right posture for someone's firmware.
+
+### What the browser has to do
+
+| step | difficulty |
+|---|---|
+| SysEx transport decode/encode (8-in-7) | easy |
+| ELE3 container parse and rebuild | moderate |
+| aPLib **depack** of section 7 | moderate — port of `codec/aplib.py` |
+| aPLib **pack** of section 7 | **the blocker** |
+| content checksum + HMAC-SHA256 | easy, `SubtleCrypto` |
+| WAV decode, trim, preview | easy, Web Audio |
+| transient/tonal separation | **not ours** — link to `transientsplit` |
+
+### The decision on packing: store-only
+
+Only **section 7** is modified, so every other section keeps its original
+stored bytes untouched — sections 2, 3 and 8 never need repacking at all. That
+reduces the problem to one section, and makes a literal-only encoder viable:
+
+```
+section 7:  602,076 stored  ->  836,956 unpacked  ->  ~940 KB store-only
+```
+
+The image grows by roughly 340 KB. `docs/ideas-backlog.md` §1 cares about space
+*inside* section 3's address range, which this does not touch, so the cost is
+file size and flash, not addressable room.
+
+**Rejected for now:** porting the cost-optimal DP packer from `codec/aplibpack.py`.
+`docs/ROADMAP.md` is right that a greedy packer is the wrong choice when the
+goal is byte-exact reproduction of Elektron's own output — but that is not the
+goal here. The goal is a stream the device's depacker accepts, and a store-only
+stream is the easiest kind to be sure of. The cost-optimal port stays available
+if size ever matters.
+
+digikit took the same route (`dt2/aplib.py`, "store-only packer for the device's
+aPLib variant"), which is weak corroboration that the device tolerates it —
+weak because their note also says the rebuilt image is about 3x original size,
+and nothing says it was flashed.
+
+### How it gets verified, which is the part that matters
+
+A second implementation of a format that writes firmware people flash is a real
+correctness risk, so it does not get trusted because it looks right:
+
+1. **Self-check in the browser** — pack, then depack with the JS depacker, and
+   compare against the input. A stream that does not round-trip never reaches a
+   download button.
+2. **Cross-check against Python** — pack in JS, depack with `codec/aplib.py`,
+   compare. Two implementations sharing no lineage, which is the same standard
+   `elektron-firmware-tool` is held to for the container.
+3. **The factory round-trip** — extract the bank and write it straight back
+   through the browser path. The Python tool produces a byte-identical section 7
+   doing this; the JS must reproduce the *unpacked* section byte-identically,
+   though not the compressed bytes, since store-only encodes differently.
+
+Point 3 is the strongest available check and should exist before the UI does.
