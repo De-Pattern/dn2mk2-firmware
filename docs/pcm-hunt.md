@@ -1324,7 +1324,11 @@ fit a 125-entry transient bank at ~2.5 KB each. It is not that. It is the
 > analysis did not have. The distinction is not cosmetic: an Elektron *project*
 > contains patterns, sounds, kits and settings as one object, which is a
 > different thing from a sound bank and has a different size, owner and
-> lifecycle. DNX's record gives a DN2 project slot as **4,194,304 bytes**
+> lifecycle. DNX's record gives a DN2 project slot as **16,777,216 bytes**
+> (16 MiB — corrected 2026-09-14; the 4,194,304 figure first quoted here was a
+> **Digitone 1** measurement, and DNX caught it by re-listing `/projects` on a
+> DN2. The correction is self-checking: a DN2 project image is 12.9 MB and
+> cannot sit in 4 MiB at all)
 > allocated and, in raw form, a **12.9 MB** expanded image — so 322 KB
 > compressed is the right order for one mostly-empty project, and quite wrong
 > for a bank of individual sounds.
@@ -1615,3 +1619,28 @@ Possibilities, none tested: the extent includes ~2 entries of something that is
 not a transient; the interpolation step is not 4; or the entry length is not
 constant across the bank. **What is solid is the location, the format (16-bit
 mono, 48 kHz) and the ~100 ms period. The count is not.**
+
+---
+
+## 15. Object sizes on a Digitone II, corrected
+
+**2026-09-14, from the DNX session, measured by listing the device rather than
+recalled from notes.** One of these was wrong where it was first quoted in §11.
+
+| object | bytes, empty or occupied |
+|---|---|
+| project slot | **16,777,216** (16 MiB) |
+| sound (`/soundbanks/A`, `/H`) | **364** — a 359-byte sound plus a 5-byte stored prefix |
+| kit (`/kits/A`) | **10,752** |
+
+The project figure replaces **4,194,304**, which was a **Digitone 1**
+measurement. The correction carries its own check: a DN2 project image is
+12,890,116 bytes on 1.11, so it cannot sit in 4 MiB — the wrong number was
+inconsistent with a figure we already had, and neither of us noticed until it
+was re-measured.
+
+**These sizes are allocation, not occupancy.** They are identical whether a slot
+is empty or full, which is why occupancy has to come from the listing's flag
+bytes and never from the size. That is the same trap in a different costume as
+this document's detector failures: a value that looks like a measurement of the
+content when it is really a property of the container.
