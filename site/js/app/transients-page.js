@@ -37,7 +37,29 @@ function fresh() {
   };
 }
 
-const audio = new (window.AudioContext || window.webkitAudioContext)();
+/**
+ * Created on first play, not at load.
+ *
+ * Constructing an AudioContext eagerly means a browser that refuses one — no
+ * output device, a hardened profile, a headless render — throws while this
+ * module is still evaluating, and the whole page renders nothing. Audition is
+ * a convenience; building firmware is the job, and the job should not depend
+ * on the convenience being available.
+ */
+let audio = null;
+
+function audioContext() {
+  if (audio === null) {
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    if (!Ctor) return null;
+    try {
+      audio = new Ctor();
+    } catch {
+      return null;
+    }
+  }
+  return audio;
+}
 
 // ---------------------------------------------------------------- step 1
 
@@ -444,6 +466,8 @@ function trace(ctx, samples, width, height, colour, alpha, x0, x1) {
 
 function play(samples) {
   if (!samples?.length) return;
+  const audio = audioContext();
+  if (!audio) return;
   if (audio.state === "suspended") audio.resume();
   const buffer = audio.createBuffer(1, samples.length, RATE);
   buffer.copyToChannel(samples instanceof Float32Array ? samples
