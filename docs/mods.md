@@ -13,9 +13,21 @@ kilobytes and carries its own notion of what the user supplies.
 
 Two rules, both enforced rather than remembered:
 
-- **No section changes length.** Every address after a resized section moves and
-  nothing here fixes up the code that refers to them. A mod needing more room is
-  a code-cave or new-section problem (`docs/ideas-backlog.md` §1a, §6).
+- **No section's *unpacked content* changes length.** Every address after a
+  resized payload moves and nothing here fixes up the code that refers to them.
+  A mod needing more room is a code-cave or new-section problem
+  (`docs/ideas-backlog.md` §1a, §6).
+
+  **Sharpened 2026-09-14.** This used to read "no section changes length",
+  which is wrong in a way that only became visible once a section's *stored*
+  length did change: the browser tool repacks section 7 store-only and it grows
+  by 339,507 bytes, with no ill effect. The two lengths are different things.
+  The stored length is the compressed bytes in the container, and the section
+  table records where each section sits, so changing it moves nothing an
+  address ever points at — `ele3.assemble` rewrites the offsets. The unpacked
+  length is what lands at `dest`, and that is the one the code's addresses are
+  relative to. The old wording forbade both and would have ruled out the
+  store-only route on a misunderstanding.
 - **Integrity is not the mod's business.** A mod produces section payloads;
   `dnfw build` recomputes the section byte-sum, the content checksum and the
   HMAC-SHA256 trailer, and re-verifies before anything is written.

@@ -1,0 +1,148 @@
+/* Shared visual language for every page under site/.
+ *
+ * Extracted from index.html when the transients tool became a second page:
+ * two copies of a token set drift, and a tool that does not look like the
+ * project it belongs to reads as someone else's.
+ *
+ * Three theme states, not two. An explicit choice stamps data-theme on the
+ * root; the default "system" setting stamps nothing, so only
+ * prefers-color-scheme separates light from dark there. Every colour is
+ * declared on bare :root first and only redefined in the two blocks below.
+ */
+
+:root {
+  --bg:        #f6f5f2;
+  --panel:     #ffffff;
+  --ink:       #16181c;
+  --ink-soft:  #565b66;
+  --rule:      #e2e0da;
+  --accent:    #b4530a;
+  --accent-dim:#f0e3d6;
+  --ok:        #1f6f43;
+  --warn:      #8a6100;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: "IBM Plex Sans", ui-sans-serif, system-ui, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#0c0d0f; --panel:#141619; --ink:#e8e6e1; --ink-soft:#9aa0ab;
+    --rule:#25282d; --accent:#ff9d3c; --accent-dim:#2a1d10;
+    --ok:#5fce93; --warn:#e0b44c;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:#0c0d0f; --panel:#141619; --ink:#e8e6e1; --ink-soft:#9aa0ab;
+  --rule:#25282d; --accent:#ff9d3c; --accent-dim:#2a1d10;
+  --ok:#5fce93; --warn:#e0b44c;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--sans); line-height: 1.6;
+  padding-block: 0 5rem; padding-left: 20px; padding-right: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 62rem; margin: 0 auto; }
+a { color: var(--accent); }
+
+header.top {
+  border-bottom: 1px solid var(--rule);
+  padding-block: 3.5rem 2.5rem; margin-bottom: 3rem;
+}
+.eyebrow {
+  font-family: var(--mono); font-size: .72rem; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--accent); margin: 0 0 1rem;
+}
+h1 {
+  font-size: clamp(2.1rem, 5.5vw, 3.4rem); line-height: 1.05;
+  margin: 0 0 1rem; letter-spacing: -.025em; text-wrap: balance;
+  font-weight: 660;
+}
+.lede { font-size: 1.12rem; color: var(--ink-soft); max-width: 42rem; margin: 0; }
+
+h2 {
+  font-size: 1.35rem; letter-spacing: -.015em; margin: 3.5rem 0 1.2rem;
+  padding-bottom: .5rem; border-bottom: 1px solid var(--rule);
+}
+h3 { font-size: 1.02rem; margin: 2rem 0 .6rem; }
+p  { max-width: 42rem; }
+
+.mod {
+  background: var(--panel); border: 1px solid var(--rule);
+  border-radius: 10px; padding: 1.6rem 1.7rem; margin-bottom: 1.2rem;
+}
+.mod-head { display: flex; flex-wrap: wrap; gap: .75rem; align-items: baseline; }
+.mod-head h3 { margin: 0; font-size: 1.18rem; }
+.mod-id {
+  font-family: var(--mono); font-size: .8rem; color: var(--ink-soft);
+}
+.tag {
+  font-family: var(--mono); font-size: .68rem; letter-spacing: .09em;
+  text-transform: uppercase; padding: .2rem .55rem; border-radius: 4px;
+  border: 1px solid currentColor; white-space: nowrap;
+}
+.tag.ready   { color: var(--ok); }
+.tag.untested{ color: var(--warn); }
+.tag.research{ color: var(--ink-soft); }
+.mod p { margin: .9rem 0 0; }
+
+dl.facts {
+  display: grid; grid-template-columns: max-content 1fr;
+  gap: .35rem 1.4rem; margin: 1.1rem 0 0;
+  font-size: .92rem;
+}
+dl.facts dt {
+  font-family: var(--mono); font-size: .78rem; color: var(--ink-soft);
+  text-transform: uppercase; letter-spacing: .07em; padding-top: .18rem;
+}
+dl.facts dd { margin: 0; }
+
+pre {
+  background: var(--panel); border: 1px solid var(--rule);
+  border-radius: 8px; padding: 1rem 1.1rem; overflow-x: auto;
+  font-family: var(--mono); font-size: .84rem; line-height: 1.65;
+}
+code { font-family: var(--mono); font-size: .9em; }
+p code, li code, dd code {
+  background: var(--accent-dim); padding: .1rem .35rem; border-radius: 4px;
+}
+
+.note {
+  border-left: 3px solid var(--accent); background: var(--panel);
+  padding: 1rem 1.2rem; margin: 1.5rem 0; border-radius: 0 8px 8px 0;
+}
+.note strong { color: var(--accent); }
+.note p { margin: 0; }
+.note p + p { margin-top: .7rem; }
+
+table { border-collapse: collapse; width: 100%; font-size: .92rem; margin-top: 1rem; }
+th, td { text-align: left; padding: .5rem .8rem .5rem 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-family: var(--mono); font-size: .74rem; text-transform: uppercase; letter-spacing: .07em; color: var(--ink-soft); font-weight: 500; }
+td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.scroll { overflow-x: auto; }
+footer {
+  margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
+  color: var(--ink-soft); font-size: .88rem;
+}
+@media (max-width: 560px) {
+  dl.facts { grid-template-columns: 1fr; gap: .1rem; }
+  dl.facts dd { margin-bottom: .7rem; }
+}
+
+/* Call to action: the one link on a page that is a button. Defined here rather
+ * than inline so both pages get the same one, and so the dark-theme text
+ * colour can be stated -- the accent is a light amber on dark grounds, where
+ * white text on it is unreadable. */
+.cta {
+  display: inline-block; text-decoration: none; font-weight: 600;
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  border-radius: 6px; padding: .55rem 1.2rem; font-size: .95rem;
+}
+.cta:hover { filter: brightness(1.08); }
+:root[data-theme="dark"] .cta { color: #16181c; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .cta { color: #16181c; }
+}
+.cta-note { margin-top: .7rem; font-size: .9rem; color: var(--ink-soft); }
