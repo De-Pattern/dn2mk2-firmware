@@ -42,7 +42,36 @@ CAPTION = re.compile(r"Table\s+(\d+-\d+):\s*(.+)")
 # reads as "the tables are not there" rather than "the regex is wrong".
 DASH = "-‐‑‒–—―−"
 HEADER = re.compile(rf"opcode\s*\(bits\s*(\d+)\s*[{DASH}]\s*(\d+)\)", re.I)
-BITS = re.compile(r"^[01]+$")
+# An opcode cell is a MASKED PATTERN, not a value, and the three families write
+# it differently:
+#
+#   ALUOP     00011000     plain bits
+#   MULOP     0000 F00x    space-grouped, letters for variable bits (F, x, y, r)
+#   SHIFTOP   11 0 0 __ __ space-grouped, underscores for variable bits
+#
+# So the rule is: 0 and 1 are fixed, every other character is one wildcard bit,
+# and spaces are grouping. Reading these as values -- requiring ^[01]+$ --
+# accepts ALUOP and silently discards every MULOP and SHIFTOP row, which reads
+# as "those tables are not in the document".
+BITS = re.compile(r"^[01A-Za-z_]+$")
+
+
+def as_pattern(cell: str):
+    """-> (width, mask, value) for an opcode cell, or None if it is not one."""
+    text = cell.replace(" ", "").replace(" ", "")
+    if not text or not BITS.match(text):
+        return None
+    if not any(c in "01" for c in text):
+        return None                      # all wildcards names nothing
+    mask = value = 0
+    for char in text:
+        mask <<= 1
+        value <<= 1
+        if char in "01":
+            mask |= 1
+            if char == "1":
+                value |= 1
+    return len(text), mask, value
 
 FAMILIES = {
     "ALUOP": re.compile(r"\bALUOP\b", re.I),
@@ -133,18 +162,23 @@ def harvest(path, lo=CHAPTER[0], hi=CHAPTER[1]):
 
             for row in rows[header_index + 1:]:
                 cells = [(c or "").strip() for c in row]
-                if not cells or not BITS.match(cells[0]):
+                if not cells:
                     continue
-                code = cells[0]
-                syntax = cells[1] if len(cells) > 1 else ""
-                meaning = cells[2] if len(cells) > 2 else ""
-                target = family
-                if target is None:
+                pattern = as_pattern(cells[0])
+                if pattern is None or family is None:
                     continue
-                found[target].setdefault(
-                    code,
-                    {"bits": list(span), "syntax": syntax, "instruction": meaning,
-                     "page": number},
+                width, mask, value = pattern
+                found[family].setdefault(
+                    cells[0].strip(),
+                    {
+                        "bits": list(span),
+                        "width": width,
+                        "mask": mask,
+                        "value": value,
+                        "syntax": cells[1] if len(cells) > 1 else "",
+                        "instruction": cells[2] if len(cells) > 2 else "",
+                        "page": number,
+                    },
                 )
     return found
 
@@ -172,12 +206,26 @@ def main(argv=None) -> int:
                 print(f"    {code}  {entry['instruction'][:60]}")
 
     print(f"\n{total} compute encodings in total")
+    # Patterns carry wildcards, so what matters is how much of the value space
+    # they admit between them -- not how many rows there are.
     for name, codes in found.items():
-        widths = {len(c) for c in codes}
-        for width in widths:
-            of_width = [c for c in codes if len(c) == width]
-            print(f"  {name} {width}-bit: {len(of_width)} of {2 ** width} "
-                  f"values legal ({100 * len(of_width) / 2 ** width:.1f}%)")
+        by_width = {}
+        for entry in codes.values():
+            by_width.setdefault(entry["width"], []).append(entry)
+        for width, entries in sorted(by_width.items()):
+            space = 1 << width
+            admitted = set()
+            for entry in entries:
+                free = [b for b in range(width) if not (entry["mask"] >> b) & 1]
+                for combination in range(1 << len(free)):
+                    candidate = entry["value"]
+                    for index, bit in enumerate(free):
+                        if (combination >> index) & 1:
+                            candidate |= 1 << bit
+                    admitted.add(candidate)
+            print(f"  {name} {width}-bit: {len(entries)} patterns admitting "
+                  f"{len(admitted)} of {space} values "
+                  f"({100 * len(admitted) / space:.1f}%)")
 
     if args.out:
         args.out.write_text(json.dumps(found, indent=2), encoding="utf-8")

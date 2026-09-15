@@ -5,6 +5,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 1,
       "syntax": "RREG Register Class = RREG Register Class + RREG Register\nClass",
       "instruction": "RN = RX + RY;",
       "page": 425
@@ -14,6 +17,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 2,
       "syntax": "RREG Register Class = RREG Register Class - RREG Register\nClass",
       "instruction": "RN = RX \u2013 RY;",
       "page": 425
@@ -23,6 +29,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 5,
       "syntax": "RREG Register Class = RREG Register Class + RREG Register\nClass + ci",
       "instruction": "RN = RX + RY + ci;",
       "page": 425
@@ -32,6 +41,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 6,
       "syntax": "RREG Register Class = RREG Register Class - RREG Register\nClass + ci - 1",
       "instruction": "RN = RX \u2013 RY + ci \u2013 1;",
       "page": 425
@@ -41,6 +53,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 9,
       "syntax": "RREG Register Class = (RREG Register Class + RREG Register\nClass) / 2",
       "instruction": "RN = (RX + RY) / 2;",
       "page": 425
@@ -50,6 +65,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 10,
       "syntax": "comp(RREG Register Class, RREG Register Class)",
       "instruction": "comp (RX, RY);",
       "page": 425
@@ -59,6 +77,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 11,
       "syntax": "compu(RREG Register Class, RREG Register Class)",
       "instruction": "compu (RX, RY);",
       "page": 425
@@ -68,6 +89,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 33,
       "syntax": "RREG Register Class = pass RREG Register Class",
       "instruction": "RN = pass RX;",
       "page": 426
@@ -77,6 +101,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 34,
       "syntax": "RREG Register Class = - RREG Register Class",
       "instruction": "RN = \u2013RX;",
       "page": 426
@@ -86,6 +113,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 37,
       "syntax": "RREG Register Class = RREG Register Class + ci",
       "instruction": "RN = RX + ci;",
       "page": 426
@@ -95,6 +125,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 38,
       "syntax": "RREG Register Class = RREG Register Class + ci \u2212 1",
       "instruction": "RN = RX + ci \u2013 1;",
       "page": 426
@@ -104,6 +137,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 41,
       "syntax": "RREG Register Class = RREG Register Class + 1",
       "instruction": "RN = RX + 1;",
       "page": 426
@@ -113,6 +149,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 42,
       "syntax": "RREG Register Class = RREG Register Class \u2212 1",
       "instruction": "RN = RX \u2013 1;",
       "page": 426
@@ -122,6 +161,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 48,
       "syntax": "RREG Register Class = abs RREG Register Class",
       "instruction": "RN = abs RX;",
       "page": 426
@@ -131,6 +173,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 64,
       "syntax": "RREG Register Class = RREG Register Class and RREG Register\nClass",
       "instruction": "RN = RX and RY;",
       "page": 426
@@ -140,6 +185,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 65,
       "syntax": "RREG Register Class = RREG Register Class or RREG Register\nClass",
       "instruction": "RN = RX or RY;",
       "page": 426
@@ -149,6 +197,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 66,
       "syntax": "RREG Register Class = RREG Register Class xor RREG Register\nClass",
       "instruction": "RN = RX xor RY;",
       "page": 426
@@ -158,6 +209,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 67,
       "syntax": "RREG Register Class = not RREG Register Class",
       "instruction": "RN = not RX;",
       "page": 426
@@ -167,6 +221,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 97,
       "syntax": "RREG Register Class = min(RREG Register Class, RREG Register\nClass)",
       "instruction": "RN = min (RX, RY);",
       "page": 426
@@ -176,6 +233,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 98,
       "syntax": "RREG Register Class = max(RREG Register Class, RREG Register\nClass)",
       "instruction": "RN = max (RX, RY);",
       "page": 426
@@ -185,6 +245,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 99,
       "syntax": "RREG Register Class = clip RREG Register Class by RREG Regis-\nter Class",
       "instruction": "RN = clip RX by RY;",
       "page": 426
@@ -194,6 +257,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 129,
       "syntax": "FREG Register Class = FREG Register Class + FREG Register Class",
       "instruction": "FN = FX + FY;",
       "page": 426
@@ -203,6 +269,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 130,
       "syntax": "FREG Register Class = FREG Register Class - FREG Register Class",
       "instruction": "FN = FX \u2013 FY;",
       "page": 426
@@ -212,6 +281,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 137,
       "syntax": "FREG Register Class = (FREG Register Class + FREG Register\nClass) / 2",
       "instruction": "FN = (FX + FY) / 2;",
       "page": 426
@@ -221,6 +293,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 138,
       "syntax": "comp(FREG Register Class, FREG Register Class)",
       "instruction": "comp (FX, FY);",
       "page": 426
@@ -230,6 +305,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 145,
       "syntax": "FREG Register Class = abs (FREG Register Class + FREG Register\nClass)",
       "instruction": "FN = abs (FX + FY);",
       "page": 426
@@ -239,6 +317,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 146,
       "syntax": "FREG Register Class = abs (FREG Register Class \u2212 FREG Register\nClass)",
       "instruction": "FN = abs (FX \u2013 FY);",
       "page": 426
@@ -248,6 +329,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 161,
       "syntax": "FREG Register Class = pass FREG Register Class",
       "instruction": "FN = pass FX;",
       "page": 426
@@ -257,6 +341,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 162,
       "syntax": "FREG Register Class = - FREG Register Class",
       "instruction": "FN = \u2013FX;",
       "page": 426
@@ -266,6 +353,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 165,
       "syntax": "FREG Register Class = rnd FREG Register Class",
       "instruction": "FN = rnd FX;",
       "page": 426
@@ -275,6 +365,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 173,
       "syntax": "RREG Register Class = mant FREG Register Class",
       "instruction": "RN = mant FX;",
       "page": 426
@@ -284,6 +377,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 176,
       "syntax": "FREG Register Class = abs FREG Register Class",
       "instruction": "FN = abs FX;",
       "page": 426
@@ -293,6 +389,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 189,
       "syntax": "FREG Register Class = scalb FREG Register Class by RREG Regis-\nter Class",
       "instruction": "FN = scalb FX by RY;",
       "page": 427
@@ -302,6 +401,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 193,
       "syntax": "RREG Register Class = logb FREG Register Class",
       "instruction": "RN = logb FX;",
       "page": 427
@@ -311,6 +413,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 196,
       "syntax": "FREG Register Class = recips FREG Register Class",
       "instruction": "FN = recips FX;",
       "page": 427
@@ -320,6 +425,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 197,
       "syntax": "FREG Register Class = rsqrts FREG Register Class",
       "instruction": "FN = rsqrts FX;",
       "page": 427
@@ -329,6 +437,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 201,
       "syntax": "RREG Register Class = fix FREG Register Class",
       "instruction": "RN = fix FX;",
       "page": 427
@@ -338,6 +449,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 202,
       "syntax": "FREG Register Class = float RREG Register Class",
       "instruction": "FN = float RX;",
       "page": 427
@@ -347,6 +461,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 205,
       "syntax": "RREG Register Class = trunc FREG Register Class",
       "instruction": "RN = trunc FX;",
       "page": 427
@@ -356,6 +473,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 217,
       "syntax": "RREG Register Class = fix FREG Register Class by RREG Register\nClass",
       "instruction": "RN = fix FX by RY;",
       "page": 427
@@ -365,6 +485,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 218,
       "syntax": "FREG Register Class = float RREG Register Class by RREG Regis-\nter Class",
       "instruction": "FN = float RX by RY;",
       "page": 427
@@ -374,6 +497,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 221,
       "syntax": "RREG Register Class = trunc FREG Register Class by RREG Regis-\nter Class",
       "instruction": "RN = trunc FX by RY;",
       "page": 427
@@ -383,6 +509,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 224,
       "syntax": "FREG Register Class = FREG Register Class copysign FREG Regis-\nter Class",
       "instruction": "FN = FX copysign FY;",
       "page": 427
@@ -392,6 +521,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 225,
       "syntax": "FREG Register Class = min(FREG Register Class, FREG Register\nClass)",
       "instruction": "FN = min (FX, FY);",
       "page": 427
@@ -401,6 +533,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 226,
       "syntax": "FREG Register Class = max(FREG Register Class, FREG Register\nClass)",
       "instruction": "FN = max (FX, FY);",
       "page": 427
@@ -410,6 +545,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 227,
       "syntax": "FREG Register Class = clip FREG Register Class by FREG Register\nClass",
       "instruction": "FN = clip FX by FY;",
       "page": 427
@@ -419,6 +557,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 17,
       "syntax": "DBLREG Register Type = DBLREG Register Type +\nDBLREG Register Type",
       "instruction": "FM:N = FX:Y + FZ:W;",
       "page": 427
@@ -428,6 +569,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 18,
       "syntax": "DBLREG Register Type = DBLREG Register Type - DBLREG\nRegister Type",
       "instruction": "FM:N = FX:Y - FZ:W;",
       "page": 427
@@ -437,6 +581,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 19,
       "syntax": "comp(DBLREG Register Type, DBLREG Register Type)",
       "instruction": "comp (FX:Y, FZ:W);",
       "page": 427
@@ -446,6 +593,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 20,
       "syntax": "DBLREG Register Type = - DBLREG Register Type",
       "instruction": "FM:N = - FX:Y;",
       "page": 427
@@ -455,6 +605,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 21,
       "syntax": "DBLREG Register Type = abs DBLREG Register Type",
       "instruction": "FM:N = abs FX:Y;",
       "page": 427
@@ -464,6 +617,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 22,
       "syntax": "DBLREG Register Type = pass DBLREG Register Type",
       "instruction": "FM:N = pass FX:Y;",
       "page": 427
@@ -473,6 +629,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 23,
       "syntax": "RREG Register Class = fix DBLREG Register Type",
       "instruction": "",
       "page": 427
@@ -482,6 +641,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 24,
       "syntax": "RREG Register Class = fix DBLREG Register Type by RREG\nRegister Class",
       "instruction": "RN = fix FX:Y by RY;",
       "page": 428
@@ -491,6 +653,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 25,
       "syntax": "RREG Register Class = trunc DBLREG Register Type",
       "instruction": "RN = trunc FX:Y;",
       "page": 428
@@ -500,6 +665,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 26,
       "syntax": "RREG Register Class = trunc DBLREG Register Type by\nRREG Register Class",
       "instruction": "RN = trunc FX:Y by RY;",
       "page": 428
@@ -509,6 +677,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 27,
       "syntax": "DBLREG Register Type = float RREG Register Class",
       "instruction": "FM:N = float RX;",
       "page": 428
@@ -518,6 +689,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 28,
       "syntax": "DBLREG Register Type = float RREG Register Class by\nRREG Register Class",
       "instruction": "FM:N = float RX by RY;",
       "page": 428
@@ -527,6 +701,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 29,
       "syntax": "DBLREG Register Type = cvt FREG Register Class",
       "instruction": "FM:N = cvt FX;",
       "page": 428
@@ -536,6 +713,9 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 30,
       "syntax": "FREG Register Class = cvt DBLREG Register Type",
       "instruction": "FN = cvt FX:Y;",
       "page": 428
@@ -545,12 +725,316 @@
         19,
         12
       ],
+      "width": 8,
+      "mask": 255,
+      "value": 31,
       "syntax": "DBLREG Register Type = scalb DBLREG Register Type by\nRREG Register Class",
       "instruction": "FM:N = scalb FX:Y by RY;",
       "page": 428
     }
   },
-  "MULOP": {},
+  "MULOP": {
+    "0000 F00x": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 246,
+      "value": 0,
+      "syntax": "RREG Register Class = sat mrf MOD2",
+      "instruction": "(RN | mrf | mrb) = sat (mrf | mrb) MOD2;",
+      "page": 428
+    },
+    "0000 F01x": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 246,
+      "value": 2,
+      "syntax": "RREG Register Class = sat mrb MOD2",
+      "instruction": "(RN | mrf | mrb) = sat (mrf | mrb) MOD2;",
+      "page": 428
+    },
+    "0000 F10x": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 246,
+      "value": 4,
+      "syntax": "mrf = sat mrf MOD2",
+      "instruction": "(RN | mrf | mrb) = sat (mrf | mrb) MOD2;",
+      "page": 428
+    },
+    "0000 F11x": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 246,
+      "value": 6,
+      "syntax": "mrb = sat mrb MOD2",
+      "instruction": "(RN | mrf | mrb) = sat (mrf | mrb) MOD2;",
+      "page": 428
+    },
+    "0001 0100": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 20,
+      "syntax": "mrf = 0",
+      "instruction": "(mrf | mrb) = 0;",
+      "page": 428
+    },
+    "0001 0110": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 22,
+      "syntax": "mrb = 0",
+      "instruction": "(mrf | mrb) = 0;",
+      "page": 428
+    },
+    "0001 100x": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 254,
+      "value": 24,
+      "syntax": "RREG Register Class = rnd mrf MOD3",
+      "instruction": "(RN | mrf | mrb) = rnd (mrf | mrb) MOD3;",
+      "page": 428
+    },
+    "0001 101x": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 254,
+      "value": 26,
+      "syntax": "RREG Register Class = rnd mrb MOD3",
+      "instruction": "(RN | mrf | mrb) = rnd (mrf | mrb) MOD3;",
+      "page": 429
+    },
+    "0001 110x": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 254,
+      "value": 28,
+      "syntax": "mrf = rnd mrf MOD3",
+      "instruction": "(RN | mrf | mrb) = rnd (mrf | mrb) MOD3;",
+      "page": 429
+    },
+    "0001 111x": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 254,
+      "value": 30,
+      "syntax": "mrb = rnd mrb MOD3",
+      "instruction": "(RN | mrf | mrb) = rnd (mrf | mrb) MOD3;",
+      "page": 429
+    },
+    "01yx f00r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 64,
+      "syntax": "RREG Register Class = RREG Register Class * RREG Register\nClass MOD1",
+      "instruction": "(RN | mrf | mrb) = RX * RY MOD1;",
+      "page": 429
+    },
+    "01yx F10r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 68,
+      "syntax": "mrf = RREG Register Class * RREG Register Class MOD1",
+      "instruction": "(RN | mrf | mrb) = RX * RY MOD1;",
+      "page": 429
+    },
+    "01yx F11r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 70,
+      "syntax": "mrb = RREG Register Class * RREG Register Class MOD1",
+      "instruction": "(RN | mrf | mrb) = RX * RY MOD1;",
+      "page": 429
+    },
+    "10yx F00r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 128,
+      "syntax": "RREG Register Class = mrf + RREG Register Class * RREG\nRegister Class MOD1",
+      "instruction": "RN = (mrf | mrb) + RX * RY MOD1;",
+      "page": 429
+    },
+    "10yx F01r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 130,
+      "syntax": "RREG Register Class = mrb + RREG Register Class * RREG\nRegister Class MOD1",
+      "instruction": "RN = (mrf | mrb) + RX * RY MOD1;",
+      "page": 429
+    },
+    "10yx F10r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 132,
+      "syntax": "mrf = mrf + RREG Register Class * RREG Register Class\nMOD1",
+      "instruction": "(mrf | mrb) = MRF + RX * RY MOD1;",
+      "page": 429
+    },
+    "10yx F11r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 134,
+      "syntax": "mrb = mrb + RREG Register Class * RREG Register Class\nMOD1",
+      "instruction": "(mrf | mrb) = MRF + RX * RY MOD1;",
+      "page": 429
+    },
+    "11yx F00r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 192,
+      "syntax": "RREG Register Class = mrf - RREG Register Class * RREG\nRegister Class MOD1",
+      "instruction": "RN = (mrf | mrb) \u2013 RX * RY MOD1;",
+      "page": 429
+    },
+    "11yx F01r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 194,
+      "syntax": "RREG Register Class = mrb - RREG Register Class * RREG\nRegister Class MOD1",
+      "instruction": "RN = (mrf | mrb) \u2013 RX * RY MOD1;",
+      "page": 429
+    },
+    "11yx F10r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 196,
+      "syntax": "mrf = mrf - RREG Register Class * RREG Register Class\nMOD1",
+      "instruction": "(mrf | mrb) = (mrf | mrb) \u2013 RX * RY\nMOD1;",
+      "page": 429
+    },
+    "11yx F11r": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 198,
+      "value": 198,
+      "syntax": "mrb = mrb - RREG Register Class * RREG Register Class\nMOD1",
+      "instruction": "(mrf | mrb) = (mrf | mrb) \u2013 RX * RY\nMOD1;",
+      "page": 429
+    },
+    "0011 0000": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 48,
+      "syntax": "FN = FX * FY",
+      "instruction": "FLP Mult\n_",
+      "page": 429
+    },
+    "0011 0001": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 49,
+      "syntax": "DBLREG Register Type = DBLREG Register Type *\nDBLREG Register Type",
+      "instruction": "FM:N = FX:Y * FZ:W;",
+      "page": 429
+    },
+    "0011 0010": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 50,
+      "syntax": "DBLREG Register Type = DBLREG Register Type * FREG\nRegister Class",
+      "instruction": "FM:N = FX:Y * FY;",
+      "page": 429
+    },
+    "0011 0011": {
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 51,
+      "syntax": "DBLREG Register Type = FREG Register Class * FREG Regis-\nter Class",
+      "instruction": "FM:N = FX * FY;",
+      "page": 429
+    }
+  },
   "SHIFTOP": {},
   "DUALADDSUB": {
     "0111": {
@@ -558,6 +1042,9 @@
         19,
         16
       ],
+      "width": 4,
+      "mask": 15,
+      "value": 7,
       "syntax": "RREG Register Class = RREG Register Class + RREG Register\nClass , RREG Register Class = RREG Register Class \u2212 RREG\nRegister Class",
       "instruction": "Ra = Rx + Ry , Rs = Rx \u2013 Ry",
       "page": 433
@@ -567,6 +1054,9 @@
         19,
         16
       ],
+      "width": 4,
+      "mask": 15,
+      "value": 15,
       "syntax": "FREG Register Class = FXAREG Register Class + FYAREG\nRegister Class , FREG Register Class = FXAREG Register Class\n\u2013 FYAREG Register Class",
       "instruction": "Fa = Fx + Fy , Fs = Fx \u2013 Fy",
       "page": 433

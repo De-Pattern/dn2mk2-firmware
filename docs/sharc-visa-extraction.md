@@ -123,23 +123,15 @@ This is a coverage figure that means something, and it is the one to track. It
 emptier table scores higher. A gap names the form and the bits that remain
 unexplained.
 
-The residue is 269 bits across 17 forms, and it splits in a way that matters:
+The 265 unnamed bits fall across 23 rows. Seven rows are wholly unbracketed —
+in `Type4d`, `Type20a`, `Type21a`, `Type22a`, `Type25a_rframe`, `Type25c_rframe`
+and `Type26a` — and the rest are rows where only some bits carry a leader, as
+in `Type20a`, whose bits 31..27 each have one while 26..16 have none.
 
-| | forms | bits |
-|---|---|---|
-| figures carrying **no field labels at all** | 4 | 110 |
-| figures partially labelled | 13 | 159 |
-
-```
-no labels at all : Type21a p413 (38)   Type26a p421 (32)
-                   Type25a_rframe p419 (24)   Type25c_rframe p420 (16)
-```
-
-**For those four, 100% is not reachable from the figures** — the PRM simply does
-not name those bits there, and the names would have to come from the syntax
-tables instead. The partially-labelled thirteen are the ones still worth
-chasing; `Type3d` and `Type4d` each lose exactly 16 bits, one whole row, which
-smells like an extractor gap rather than a document one.
+> **[SUPERSEDED — this section previously said 91 of those bits were "ours to
+> recover".]** That came from the 92.00% version of the ceiling and was an
+> artefact of counting per row. There are none: the extractor reaches the
+> ceiling exactly.
 
 Widths: **16-bit ×6, 32-bit ×14, 48-bit ×34.** VISA is genuinely variable, and
 treating every figure as 48-bit — slicing "the top 8 bits" at 47..40 — is
@@ -148,15 +140,6 @@ meaningless for a third of them.
 The self-check is what makes the zeros above worth anything: bit labels are read
 from the page rather than assumed, so a mis-mapped row shows as a sequence that
 is not a clean descending run. Run over the entire 798-page document it flags
-exactly one spurious figure, on page 42, outside the instruction chapters.
-
-Widths: **16-bit ×6, 32-bit ×14, 48-bit ×34.** VISA is genuinely variable, and
-treating every figure as 48-bit — slicing "the top 8 bits" at 47..40 — is
-meaningless for a third of them.
-
-The self-check is what makes that "0" worth anything: bit labels are read from
-the page rather than assumed, so a mis-mapped row shows as a sequence that is
-not a clean descending run. Run over the entire 798-page document it flags
 exactly one spurious figure, on page 42, outside the instruction chapters.
 
 ## 3. Three structural findings a decoder needs
@@ -281,6 +264,30 @@ extracted to their ceiling (§2). It is everything else in the chapter: register
 classes, the compute encodings, and the sub-opcode tables that constrain the
 fields the figures leave open. A pattern with three fixed bits is not an
 instruction, and no amount of geometry makes it one.
+
+### The patterns carry no positional information, and that is measurable
+
+If the table could locate instructions, sampling at the right stride and phase
+would match far more often than sampling at the wrong one. It does not:
+
+| region | stride 2 | stride 4 | stride 6 | stride 8 |
+|---|---|---|---|---|
+| `0x283825c4` | 54.1% | 55.4% | **54.1%** | 54.4% |
+| `0x20000000` | 50.1% | 53.3% | **53.7%** | 53.7% |
+
+And at a 6-byte stride, across the three possible phases: **54.1%, 54.0%,
+54.5%**. A real instruction stream has a preferred phase. This one shows none,
+which means the 48-bit patterns match arbitrary windows at about the same rate
+wherever they land — the table says nothing about *where* an instruction starts.
+
+**Two constraints were tried and neither fixed it.** The compute-field check
+(ALUOP and MULOP, §5) leaves the median run at 1 and lowers the mean, and no
+word ordering sustains a run. So the missing constraint is not the compute
+field either.
+
+There is real signal — mean run 3.48 on code against 0.90 on noise, and branch
+targets landing in range 31× more often than chance — it is simply nowhere near
+enough to decode. The figures are a skeleton, and the flesh is in the tables.
 
 ## 5. What is not done
 
