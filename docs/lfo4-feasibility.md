@@ -756,3 +756,74 @@ page-id route is proven end to end and LFO4's page is free.
 that already exist. Whether a fourth LFO needs its own `ParameterSet` table, or
 can share as LFO1–3 do, is **not** established and is the question after this
 one — `docs/parameter-set-tables.md`.
+
+---
+
+## v2, and the diagnosis: the moved records fell through to the *sound* parameter set
+
+**v2 failed, and it failed identically to v1.** The one-byte routing fix at
+`0x400dc71e` — which does put page `0x1f` into `0x42c64940` exactly as `0x1d`
+was — **changed nothing observable**. Same wrong values, same dead edits.
+
+That null result is the most useful thing the second flash produced: **getting a
+record into the `ParameterSet` table is not the binding that decides where its
+value lives.**
+
+### What the values actually are
+
+The owner also found, on v2, that p-locking `PROB` produces **modulation
+unrelated to probability** — and noted it was probably present on v1 too and
+simply not looked for. It was. Both builds behave the same.
+
+Read `record+0x04` (parameter-id-within-page) for each moved record and look it
+up in the **sound** index space (`docs/engine-state.md`: 1–8 LFO1, 9–16 LFO2,
+17–24 LFO3):
+
+| TRIG param | `record+0x04` | Sound slot at that index | Its default | Observed |
+|---|---|---|---|---|
+| `NOTE` | 0 | *(no slot — index space starts at 1)* | — | **C0** (zero) |
+| `VEL` | 1 | **LFO1 `SPD`** | **112** | **112** |
+| `LEN` | 2 | LFO1 `MULT` | 1 | 0.188 |
+| `PROB` | 12 | **LFO2 `DEST`** | 0 | **0%**, and p-locking it **moves LFO2's destination** |
+| `VFAD` | 14 | LFO2 `SPH` | 0 | −64 (its minimum) |
+| `RATE` | 16 | LFO2 `DEP` | 64 | blank — 64 is far outside `RATE`'s 0–16 range |
+
+**`VEL` reading 112 is the proof.** 112 is LFO1 `SPD`'s default, an arbitrary
+number that no other explanation predicts. And `PROB` landing on LFO2 `DEST`
+predicts exactly the symptom the owner found by ear: a p-lock that modulates
+something, unrelated to probability, because it is **re-aiming LFO2**.
+
+So the moved records are reading and writing **the sound value array at index
+`record+0x04`** — they have fallen through to the sound parameter set.
+
+### What that means
+
+The page id is consumed by a **runtime classifier** — something that decides
+which parameter set a record belongs to when its value is read or written — and
+that classifier is **not** `param_set_tables_build`. An unknown page id falls
+back to the sound set rather than failing, which is why the parameters draw,
+read plausible-looking values, and quietly write into LFO slots.
+
+Three flashes' worth of conclusion, stated plainly:
+
+1. **The page-id cost model in "§3b revisited" is wrong.** It counted six range
+   tests plus a routing constant. There is at least one more consumer, it is
+   authoritative over the others, and it has not been found. **Do not trust the
+   "seven one-byte edits" figure.**
+2. **`param_set_tables_build` is a red herring for this problem.** It is worth
+   knowing — it is how enumeration works — but patching it bought nothing.
+3. The runtime classifier is the thing to find, and it is findable: it must
+   consult the page id and choose between the six `ParameterSet` accessors at
+   `0x400dc02a`, `0x400dc0b0`, `0x400dc0ca` and `0x400dc0e4`. Those four are
+   reached through vtables, so **whoever picks between them is the target**.
+
+### A warning that matters more than the analysis
+
+**A build carrying this probe writes into LFO `DEST`, `WAVE`, `SPH` and `DEP` of
+whatever sound is loaded** whenever a TRIG or Retrig parameter is touched or
+p-locked. That is not dangerous to the instrument, but it **silently edits
+sounds**, and a sound saved while such a build is running carries the damage.
+
+**Reflash stock before doing any real work**, and treat any sound saved during
+these two probes as suspect. `docs/flashing.md` records that this log says what
+was *sent*, never what is *resident*.
