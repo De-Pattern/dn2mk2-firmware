@@ -139,6 +139,49 @@ def bit_rows(words):
     return rows
 
 
+def field_bounds(page, y, depth=60.0):
+    """-> sorted x of the FIELD boundaries under a bit-number row.
+
+    The manual draws two heights of vertical rule: short ones (~16pt) between
+    the bit numbers, and tall ones (~50pt) separating the named fields in the
+    row beneath. The tall ones are what matter, because a digit run is
+    **centred in its field**, not placed per cell -- `001` is one centred label
+    spanning bits 47..45, which is why every attempt to position individual
+    characters failed. Read the field, then hand its digits to its cells in
+    order.
+    """
+    out = []
+    for drawing in page.get_drawings():
+        rect = drawing["rect"]
+        if rect.width <= 2 and 30 <= rect.height <= 80 and y < rect.y0 <= y + depth:
+            out.append(rect.x0)
+    return sorted(out)
+
+
+def digits_by_field(page, words, y, columns, skip=8.0, depth=60.0):
+    """-> {bit: '0'|'1'} by assigning each centred digit run to its field."""
+    bounds = field_bounds(page, y)
+    if not bounds:
+        return {}
+    ordered = sorted(columns.items(), key=lambda kv: kv[1], reverse=True)  # high bit first
+    out = {}
+    for x0, y0, x1, _y1, text, *_ in words:
+        if not (y + skip <= y0 <= y + depth) or not BITS_ONLY.match(text):
+            continue
+        centre = (x0 + x1) / 2
+        # The field this label sits in, from the tall rules around it.
+        lower = max([b for b in bounds if b <= centre], default=None)
+        upper = min([b for b in bounds if b > centre], default=None)
+        if lower is None or upper is None:
+            continue
+        cells = [bit for bit, bit_x in ordered if lower < bit_x < upper]
+        if len(cells) != len(text):
+            continue                    # not a clean field-wide run; skip it
+        for bit, char in zip(cells, text):
+            out.setdefault(bit, char)
+    return out
+
+
 def digits_under(words, y, columns, skip=8.0, depth=30.0):
     """-> {bit: '0'|'1'} for printed opcode digits below a bit-number row.
 
@@ -221,7 +264,10 @@ def harvest(path, lo=CHAPTER[0], hi=CHAPTER[1]):
                 continue
             entry = types.setdefault(name, {})
             for y, columns in mine:
-                for bit, char in digits_under(words, y, columns).items():
+                found = digits_by_field(page, words, y, columns)
+                if not found:
+                    found = digits_under(words, y, columns)
+                for bit, char in found.items():
                     entry.setdefault(bit, char)
     return types
 
