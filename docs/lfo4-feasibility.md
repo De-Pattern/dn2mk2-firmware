@@ -494,3 +494,118 @@ passes through them.
 **That reframes the remaining question.** It is no longer "find the tick in this
 image" — it is "find what MAIN OS *tells* the engine about LFOs, and whether the
 shape of that message has room for a fourth." That is answerable in this image.
+
+---
+
+## §3b revisited, 2026-09-15: the page-id blocker is priced, and renumbering looks like the route
+
+§3b above called the contiguous range test *"a site the earlier drafts assumed
+was a simple bound raise. It is not."* That stands. But it left the three ways
+out unpriced, and said of the renumbering option: *"Cheap only if such sites are
+few, **which is unverified**."*
+
+**It is now priced.** Renumbering is six single-byte code edits and 23 data
+longwords — but the part that makes it safe is still unverified, and the section
+below is careful to say which half is which.
+
+### The range test is replicated six times, not once
+
+Scanning for `addil #-26,%dN` — the `page − 0x1a` form §3b quotes — finds eight
+sites. **Six** are the same test; two are not, and only reading them says so:
+
+| Site | Shape | Bound |
+|---|---|---|
+| `0x400dbf34` | `moveq #2` / `cmpl` / `scc` | 2 — `is_lfo_param_modulatable`, the one §3b documented |
+| `0x400dc6ba` | `cmpl %d1,%d6`, `%d6` set by `moveq #2` at `0x400dc6b8` | 2 |
+| `0x4012a83c` | `cmpl %d0,%d1`, `%d1` set by `moveq #2` at `0x4012a83a` | 2 |
+| `0x4012abca` | `moveq #2,%d2` / `cmpl` | 2 |
+| `0x4012af7e` | `cmpl %d0,%d6` | 2 |
+| `0x4012af9c` | `moveq #2,%d6` / `cmpl` | 2 |
+| `0x4017a998` | `moveq #20` / `cmpl` — a **21-page** range | **not this test** |
+| `0x401cf3f6` | `%fp − 26`, beside `%fp − 34` and `%fp − 30` | **not this test — a stack local** |
+
+Several take the bound from a register rather than a literal, but in every case
+checked the register is loaded by a `moveq #2` in the preceding instruction. **The
+bound is a literal 2 in six places.**
+
+`0x401cf3f6` looked like a seventh until it was read: it computes `%fp − 26`
+between `%fp − 34` and `%fp − 30`, three stack-frame locals. It is not a page
+test, and it is the first sign of how noisy this instrument is.
+
+A sibling test sits immediately above one of them, at `0x400dc69a`:
+`(page − 0x16) ≤ 3`, pages `0x16`–`0x19`, dispatching to a different
+`ParameterSet` table at `0x42c647ac`. So page groups are handled as contiguous
+ranges throughout — which is the whole reason contiguity matters.
+
+### Nothing found names Retrig or None — but the scan found nothing reliably
+
+The obstacle to renumbering was that moving Retrig (`0x1d`) and None (`0x1e`)
+means finding every site that names them. Scanning every compare-and-subtract
+immediate form, and then **reading each hit** rather than counting it:
+
+| Page id | Raw hits | Survived reading |
+|---|---|---|
+| `0x1a` LFO1 | 10 | **8** — 6 range tests plus `cmpil #26` at `0x401783b0` and `0x40178402` |
+| `0x1d` **Retrig** | 1 | **0** — `0x400b8594` is `%a1 − %d7` pointer arithmetic |
+| `0x1e` **None** | 2 | **0** — `0x400d338a` is a loop bound; `0x401cf3f0` is the stack local above |
+
+**Every hit for Retrig and None was a false positive.** Four hits, four
+unrelated pieces of arithmetic. The scan's precision on this question is zero,
+and that is the number to keep in mind when reading what follows.
+
+And on the data side, indexing `record+0x00` across all 320 parameter records:
+
+| Page | Records |
+|---|---|
+| `0x1a` / `0x1b` / `0x1c` | **10 each** — LFO1, LFO2, LFO3 |
+| `0x1d` Retrig | **22** |
+| `0x1e` None | **1** |
+
+### So the two options, priced
+
+**Option 2 — an explicit `page == 0x1f ||` at each test.** The stock sequence is
+6 + 2 + 2 + 2 bytes; an added disjunct does not fit, so each site needs a detour.
+That is **seven caves**, not one. Workable, and seven times the surface for a
+silent failure.
+
+**Option 1 — renumber so LFO4 is contiguous.** Give LFO4 page `0x1d`, move Retrig
+to `0x1f` and None to `0x20`. Then:
+
+| Change | Count | Kind |
+|---|---|---|
+| range-test bound `moveq #2` → `moveq #3` | 6 | **one byte each**, in place |
+| Retrig records' page id `0x1d` → `0x1f` | 22 | data, in the shipped parameter table |
+| None record's page id `0x1e` → `0x20` | 1 | data |
+| LFO4's own 10 records at page `0x1d` | 10 | data — **already built**, `scripts/build_lfo4_test.py` |
+
+**Six single-byte code edits and 23 data longwords, with no cave at all** — *if*
+nothing else names Retrig's or None's page id. That is a different project from
+six caves, and on present evidence it is the route to take. But see the gaps
+below before believing the number: the evidence that nothing names them is a
+scan whose every positive hit, on inspection, was something else.
+
+### What this does not establish
+
+Two honest gaps, and the first is the one that could sink it:
+
+1. **Only compare-and-subtract *immediate* forms were scanned, and that
+   instrument is demonstrably bad at this question.** It returned four hits for
+   Retrig and None and **all four were unrelated arithmetic** — `addil #-29` is
+   as likely to be a structure offset as a page id. It also sees only one
+   spelling: a `moveq #29,%dN` followed by a register compare would be missed
+   entirely, and there are 63 `moveq #29` sites, almost all ordinary constants.
+   So **"nothing names Retrig" is what this scan failed to find, not something
+   it established.** `docs/PRINCIPLES.md` §19, in its sharpest form yet: this
+   negative is worth very little, and the plan above rests on it.
+2. **Page ids may appear in tables as data outside the parameter records** — a
+   page-order array for `[MOD]` navigation, for instance, is exactly the sort of
+   thing that would exist and would not be caught by either scan above.
+
+**The next move is to stop scanning and ask the device.** Renumbering is a pure
+data edit for 23 longwords plus six single-byte code edits, all of which the
+existing pipeline can already produce and verify offline. Flashing a build that
+moves Retrig to `0x1f` and **nothing else** answers both gaps in one
+observation: if Retrig still works and still draws its 22 parameters, nothing
+else named its page id. That is one flash against an unbounded static search,
+and `docs/flashing.md` records that this project has twice spent flashes on
+assumptions it could have tested first.
