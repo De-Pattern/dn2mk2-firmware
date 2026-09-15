@@ -342,12 +342,38 @@ digikit's numbers for the same driver on **Digitakt II 1.15C/1.16** are
 | test-mode handler | `tx 0xa80`, `rx 0` | `tx 0x802`, `rx 0` |
 
 **The receive length is identical across the two instruments; the transmit
-length is not.** So what the ColdFire *sends* is device-specific — consistent
-with per-track machine state, of which the two devices have different amounts —
-while what the SHARC *returns* is a fixed 2,748-byte block common to both.
+length is not.**
+
+> **[REFRAMED 2026-09-16 — `lalzart/digitakt-ii-firmware-research-public`.]**
+> A third independent account explains the pattern rather than contradicting
+> it, and its reading is the better one. The transfer is **full-duplex with a
+> single padded frame size**: the frame is `0xabc` = **2,748 bytes** in both
+> directions, and the *payload* inside it is device-specific — `0x802` = 2,050
+> on the DT2, `0xa80` = 2,688 on the DN2. So `0xabc` is not "the receive
+> length"; it is the frame, and it is the same on both because the link is
+> configured once.
+>
+> They close the size independently from the hardware side: DSPI2 CTAR0, SPI
+> mode 1, **16-bit MSB-first**, active-low PCS0, one continuous `0x55e`-word
+> window — and `0x55e` = 1,374 words = 2,748 bytes. They also give digikit's
+> eDMA channels a direction (**29 transmits** via `DSPI2_SOUT`, **28 receives**
+> via `DSPI2_SIN`) and identify the publication as a level-5 interrupt
+> software-forced from a level-6 eDMA-completion path.
+>
+> And they independently find **sixteen per-track unit records** of `0x60` = 96
+> bytes on the DT2, against the **146** bytes per track measured here on the
+> DN2 — a larger per-track record for the FM machines, and a confirmation from
+> outside that the per-track block structure read below is real.
+>
+> See `docs/lalzart-dt2-crosscheck.md`. A follow-up note is owed to digikit
+> PR #12, where this was phrased the weaker way.
+
+What the ColdFire *sends* is therefore device-specific — consistent with
+per-track machine state, of which the two devices have different amounts —
+while the frame that carries it is common.
 
 That is worth having for the chimera: a DN2 running DT2 machines would have to
-produce a DT2-shaped transmit frame, but the return path needs no change.
+produce a DT2-shaped payload, but the link itself needs no change.
 
 And the buffers are not scratch. `0x80005000`–`0x80006000` holds **at least 125
 accesses across 43 addresses**, largely longword, and the functions touching

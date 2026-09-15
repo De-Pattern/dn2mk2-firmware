@@ -27,7 +27,7 @@ Rules that keep it honest:
 | **Transient Swapper** | **SHIPPED** | — | `docs/pcm-hunt.md`, `docs/tran-mapping.md`, PR #64 |
 | **TRAN mapping** | **SOLVED** | — | `TRAN = 4 × slot − 8`; 32 of 34 reachable; `docs/tran-mapping.md` |
 | **LFO4** | **UNBLOCKED** | **No engine blocker left.** The DSP plays no part — modulation is generated and applied on the ColdFire, and LFO parameters are never sent. What remains is ColdFire work: a modulator slot, the page id, and the page-view | `docs/engine-state.md`, `docs/lfo4-slot-plan.md`, `docs/modulation-mask.md` |
-| **Chimera (DT2 machines + samples)** | **SCOPED** | ColdFire half tractable; SHARC half **blocked on reading SHARC code, no longer on reaching it** — we ship its program and know how it is loaded | `docs/chimera-feasibility.md`, `docs/sharc-image.md` |
+| **Chimera (DT2 machines + samples)** | **SCOPED** | ColdFire half tractable. SHARC half: we ship its program, know how it is loaded, and a third party has mapped the **six machine selector roles** and a full sample-resource lifecycle | `docs/chimera-feasibility.md`, `docs/sharc-image.md`, `docs/lalzart-dt2-crosscheck.md` |
 | **Sample transfer / RPC** | **IN PROGRESS** | what dispatches an opcode | `docs/midi-rpc-dispatch.md` |
 
 ### LFO4 — the pieces, and which are real
@@ -76,6 +76,8 @@ Rules that keep it honest:
 | SHARC+ figure extraction | 54/54 figures, 96.69% bit accounting = the ceiling | `docs/sharc-visa-extraction.md` |
 | Classic PGR cross-check | All `a`-forms agree; Type 2b conflict confirmed | `docs/sharc-crosscheck-classic-pgr.md` |
 | Runtime mirror format shared DN2/DT2 | `Digisharc::` versions identical bar `voiceConfig` | `docs/chimera-feasibility.md` |
+| **The DSP frame's physical contract** | Full-duplex DSPI2, **2,748-byte** padded frame (`0x55e` 16-bit words), CTAR0, SPI mode 1, MSB-first, PCS0; eDMA **29 TX / 28 RX**; level-5 IRQ forced from a level-6 eDMA completion. Payload is device-specific: 2,688 DN2 / 2,050 DT2 | `docs/lalzart-dt2-crosscheck.md`, `docs/sharc-image.md` |
+| **`0x80000` is nonvolatile — three independent readings** | Ours, digikit's boot trace, and lalzart's staged-ELE3-slot description all agree | `docs/ideas-backlog.md` §6 |
 
 ### Open
 
@@ -85,7 +87,8 @@ Rules that keep it honest:
 | **What crosses to the SHARC at runtime?** | **Answered, by digikit** — a periodic **DSPI2** frame over **eDMA 28/29**, `(tx_len, tx_buf, rx_len, rx_buf)`, driven from an interrupt. She has the frame's 16-pass per-track loop; we contributed the cross-device counts | `docs/sharc-image.md` |
 | **What are the other three modulator sources?** | `0x400db22c` applies **six** per track, each with its own 16-word value table and a four-entry destination list. The UI offers three LFOs. If one of the six is free, LFO4 has a home with no structural change | Read what writes the six descriptor lists at `%a2@(3476 + 16k)` — that is where a DEST and DEPTH from the UI land. **Do not assume three are spare** |
 | **Does the DSP frame carry an engine/machine id?** | **Open, and digikit's too** — she traced the frame's 16-pass per-track loop over three SRAM tables and found **no engine id in it**, so "stock engine, own parameters" for a new machine is still open | Her `[O]` item; the DN2/DT2 `tx_len` difference (2,688 vs 2,050) is a new constraint on it |
-| **The SHARC Audio Task's structure** | Entry pointer unresolved (digikit, decode desync) | Blocked on decompilation, not disassembly |
+| ~~The SHARC Audio Task's structure~~ | **ANSWERED by a third party** — `lalzart/digitakt-ii-firmware-research-public` has the chain (FreeRTOS → Audio Task → notification wait → recurring root → main processor → per-unit/lane → common → output) and a **six-entry machine selector table**, in the same SHARC short-word space digikit uses | `docs/lalzart-dt2-crosscheck.md`. Moves to Closed once we have checked it against our own section 7 |
+| **Is there a minimum-version gate on the DN2?** | lalzart records MAIN validating checksum, **minimum-version** *and* the cryptographic trailer before erase/program. We have the first and third; **the second is recorded nowhere here** | Cheap and actionable — find it in the DN2 updater. Matters for flashing a downgraded or modified image |
 | **The last 72 bits of SHARC figures** | Not named in Rev 1.5's figures | **Deliberately not chased** — helps nothing; see below |
 
 ### Retracted — kept because a closed path is still a signal
