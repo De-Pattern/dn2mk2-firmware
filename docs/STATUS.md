@@ -26,7 +26,7 @@ Rules that keep it honest:
 | **Extra LFO destinations** | **SHIPPED** | — | `docs/modulation-mask.md`, browser tool, PR #61 |
 | **Transient Swapper** | **SHIPPED** | — | `docs/pcm-hunt.md`, `docs/tran-mapping.md`, PR #64 |
 | **TRAN mapping** | **SOLVED** | — | `TRAN = 4 × slot − 8`; 32 of 34 reachable; `docs/tran-mapping.md` |
-| **LFO4** | **UNBLOCKED** | **No DSP blocker.** Modulation is generated and applied on the ColdFire; LFO parameters are never sent. **New 2026-09-15:** LFO4 need not be a fourth LFO at all — it can be a **seventh modulation source**, and the apply side then costs nothing new. One engine unknown remains: where LFO1–3 are ticked | `docs/engine-state.md`, `docs/modulation-matrix.md`, `docs/lfo4-slot-plan.md` |
+| **LFO4** | **UNBLOCKED** | **No DSP blocker.** Modulation is generated and applied on the ColdFire; LFO parameters are never sent. **The goal is a real fourth LFO** (owner, 2026-09-15) — a fourth `[MOD]` page, saved with the sound. A **seventh modulation source** is a documented fallback only, and costs per-preset storage. One engine unknown remains: **where LFO1–3 are ticked** | `docs/engine-state.md`, `docs/modulation-matrix.md`, `docs/lfo4-slot-plan.md` |
 | **Chimera (DT2 machines + samples)** | **SCOPED** | ColdFire half tractable. SHARC half: we ship its program, know how it is loaded, and a third party has mapped the **six machine selector roles** and a full sample-resource lifecycle | `docs/chimera-feasibility.md`, `docs/sharc-image.md`, `docs/lalzart-dt2-crosscheck.md` |
 | **Sample transfer / RPC** | **IN PROGRESS** | what dispatches an opcode | `docs/midi-rpc-dispatch.md` |
 

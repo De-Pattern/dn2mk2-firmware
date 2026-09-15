@@ -192,17 +192,26 @@ reaches each. That is the same move that pinned row 1, and it has not been done.
 
 The hopeful branch — *one of the six is spare, take it over* — **is closed.**
 
-Three things survive it, and two of them are better than the question that died.
+Three things survive it.
 
-**1. LFO4 does not have to be a fourth LFO.** It can be a **seventh modulation
-source**: a value the ColdFire computes per track per frame, dropped into a
-16-word table, with a four-entry descriptor list the existing kernel already
-knows how to apply. The apply side then costs *nothing new* — no hook into the
-29 value-array sites, no parameter-set table growth, no slot problem. This is
-the "track-level design" of `docs/lfo4-slot-plan.md` arriving by a different
-road, and the engine turns out to have been built for it.
+**1. There is a fallback route, and it is only a fallback.** LFO4 could be built
+as a **seventh modulation source**: a value the ColdFire computes per track per
+frame, dropped into a 16-word table, with a four-entry descriptor list the
+existing kernel already knows how to apply. The apply side would cost *nothing
+new* — no hook into the 29 value-array sites, no parameter-set table growth, no
+slot problem.
 
-What it still needs: a generator, a place for the descriptor list, and UI.
+> **The owner's decision, 2026-09-15: the goal is a real fourth LFO** — one that
+> behaves like LFO1–3, appears as a fourth page under `[MOD]`, and is saved with
+> the sound. *"Any other path is ok if we cannot solve properly how to add it as
+> a fourth LFO."*
+>
+> So the seventh-source design is **held in reserve**, to be taken only if the
+> real thing proves unreachable. It is written down here so it is not
+> rediscovered, not because it is the plan. Note what it would cost: a seventh
+> source is track-level, so **LFO4 would not be stored in a preset** — the same
+> price `docs/lfo4-slot-plan.md` names for its track-level design, and the
+> reason that design was never chosen either.
 
 **2. The generator is now the only engine-side unknown** — and the search space
 for it is much smaller than it was this morning. See below.
