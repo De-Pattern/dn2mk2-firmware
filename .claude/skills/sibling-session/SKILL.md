@@ -16,6 +16,69 @@ Two repositories split one problem, and each has a live Claude session:
 *stored*. Most interesting questions need both, and neither session can answer
 the other's half by guessing at it.
 
+## What each side can answer
+
+**The point of this file.** Neither session can ask a good question without
+knowing what the other actually has. Keep these two lists current — when you
+learn something durable, add a line.
+
+### `dn2_firmware` can answer (ask it these)
+
+- **The firmware image**: ELE3 container, section table, every integrity field
+  (checksums, and the HMAC-SHA256 trailer, which it can reproduce). What a given
+  build changed, byte for byte, against stock.
+- **The parameter table** — 321 records of 60 bytes on 1.11 at `0x401f7f94`, and
+  for any parameter: its **page id**, its **parameter-id-within-page**
+  (`record+0x04`), maximum, **default**, bipolar flag, MIDI CC, NRPN, the
+  **modulation mask**, its long/short/page-label names and its display
+  formatter. *"What does the firmware think `RATE`'s default is?"* is a question
+  for this side.
+- **Which parameters are modulatable, and by which LFO** — the mask is
+  `0x1e00`/`0x0e00`/`0x0600` per modulator, and the fourth rank `0x0200` is
+  already set on all 189 modulatable parameters.
+- **The runtime index space**: 1–8 LFO1, 9–16 LFO2, 17–24 LFO3, 25–64 machine,
+  66–85 filter, 86–99 amp/FX — and the per-track value array at
+  `track_base + 34 + 2·index`.
+- **The modulation matrix**: six MIDI performance modulators (Velocity, Mod
+  Wheel, Pitch Bend, Breath, Aftertouch, Key Tracking), four destination+depth
+  descriptors each, `depth:s16 << 16 | dest:s16`.
+- **The ColdFire↔SHARC link**: what crosses per audio frame, and what does not.
+- **Memory map**: BSS extent, free SDRAM, where code caves fit.
+- **Building and flashing**: a modified image that verifies end-to-end, and the
+  proven recovery path.
+
+**It cannot tell you** what is *resident* on the instrument (only what was last
+*sent*), nor anything about the stored file formats.
+
+### DNX can answer (ask it these)
+
+> *Drafted by `dn2_firmware` from what it has seen; **DNX should correct and
+> extend its own half** — this list is only as good as DNX makes it.*
+
+- **The stored formats**: project, pattern (89,088 B), kit (10,752 B), track
+  record (1,187 B), sound/preset pool, and their storage versions.
+- **Per-trig data**: the trigger slot (note, velocity, length) and the per-trig
+  arrays — condition `+0x100`, fill `+0x180`, **probability `+0x200`**, sound
+  lock `+0x400`.
+- **The p-lock pool**: which parameters are lockable, which are **not**, and the
+  lock-id numbering — `id = 4·slot + lfo`, with `4·slot + 0` the unused fourth
+  rank.
+- **Reading data off the instrument**: SysEx capture and decode, pairing MIDI
+  ports **by name**, and a hardware test harness.
+- **What the instrument actually stored** after an experiment — the only way to
+  check a firmware claim against reality.
+
+**It cannot tell you** what the firmware *does* with that data, or what a build
+changed.
+
+### The shape of most real questions
+
+One side has a model, the other has the ground truth. `dn2_firmware` predicts
+from the image; DNX reads the bytes back. The 2026-09-15 page-renumber probe is
+the template: firmware side predicted that eight moved parameters would write
+the sound value array at `record+0x04`; DNX read the pattern and returned eight
+unmapped lock ids; all eight matched, none left over.
+
 ## How
 
 `ListAgents` to confirm the peer is up, then `SendMessage` with its name as
