@@ -133,9 +133,11 @@ Rules that keep it honest:
 
 ## Open pull requests
 
-**None open on our repo.** #64–#71 all merged; work continues on
-`analysis/lfo4-engine-path`. External: `m-dwyer/digikit` **#12** open (the DN2
-cross-check of her DSPI2 frame) and **#11** open (SHARC+ VISA cross-check).
+**#72 open** — `analysis/lfo4-engine-path`, eight commits: the DSP plays no
+part in LFO4, all six modulator sources are named, and the LFO tick's search
+space is narrowed to one question. #64–#71 all merged. External:
+`m-dwyer/digikit` **#12** open (the DN2 cross-check of her DSPI2 frame) and
+**#11** open (SHARC+ VISA cross-check).
 
 > **A branch does not close when its PR does.** #70 merged on 2026-09-15 and
 > carried only its **first** commit; fourteen more were then pushed to the same
