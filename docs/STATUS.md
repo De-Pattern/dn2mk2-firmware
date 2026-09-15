@@ -127,8 +127,17 @@ Rules that keep it honest:
 
 ## Open pull requests
 
-See the repo. #64, #65, #66, #67, #68, #69 merged; `docs/digikit-handover` (#70)
-open. External: `m-dwyer/digikit` #11 (cross-check, with two corrections posted).
+**#71 open** — `docs/digikit-handover` → `main`, 15 commits, 23 files.
+#64–#70 merged. External: `m-dwyer/digikit` #11 (cross-check, two corrections
+posted).
+
+> **A branch does not close when its PR does.** #70 merged on 2026-09-15 and
+> carried only its **first** commit; fourteen more were then pushed to the same
+> branch over two days with no open PR against them, and would have sat there
+> unnoticed. This is the fifth time work has been stranded this way in this
+> repository. **Check `git log <remote>/main..HEAD` before assuming a branch is
+> in flight**, and check the PR's state rather than a note saying it is open —
+> this file said "#70 open" while #70 was merged and closed.
 
 ---
 
