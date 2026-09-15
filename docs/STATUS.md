@@ -121,6 +121,7 @@ Rules that keep it honest:
 |---|---|---|---|
 | **Field offsets for `Digisharc::patternStorage_v3_t` vs `_v4_t`** | DNX session, 2026-09-15 | Real work, not a check | Would move DNX from *reading* v4 records to *editing* them. The diff is per-track settings, offsets **1156–1184** within each 1,187-byte track |
 | Type 2a / Type 25a field-extent gaps | ours | small | 72 bits over 8 rows; **deliberately parked** — helps no downstream work and would mix sources into a clean metric |
+| **Send digikit the ColdFire↔SHARC link findings** | owner's standing ask | written, not sent | `docs/for-digikit-coldfire-sharc-link.md` is complete and self-contained. **Awaiting the owner's go-ahead** — it is a PR to a third party's repo, so it is not sent unprompted. Corrects two of our own earlier claims that she may already hold |
 
 ---
 
