@@ -85,16 +85,71 @@ about before it is trusted:
   vtable-to-typeinfo link is not where it was looked for, so the test measures
   nothing — it does **not** show the classes are equally live.
 
+## The Digitakt II answers the question the dispatcher hunt could not
+
+Five static approaches failed to find what routes an opcode — the switch-table
+scan, the RTTI reference count, the MIDI status-byte tables, the opcode-as-
+immediate scan over the query builder, and following the dispatcher's vtable.
+The sixth worked, and it is the obvious one: **the DT2 already does sample
+transfer**, so diffing the two builds asks the question directly.
+
+Finding it needed no new technique — the DN2's list was located through the
+`"Digitone II"` string its builder pushes, and the DT2's through `"Digitakt II"`
+at `0x40240edb`. The code is the same shape:
+
+```
+48 79 40 21 e5 90   pea 0x4021e590      ; END
+43 e9 00 2c         lea %a1@(44),%a1    ; 0x2c = 44 opcodes
+48 79 40 21 e5 64   pea 0x4021e564      ; BEGIN
+4e 94               jsr %a4@
+48 79 40 24 0e db   pea 0x40240edb      ; "Digitakt II"
+```
+
+**Same call site, same instruction sequence, same static-array shape. Only the
+contents and the count differ.**
+
+| | opcodes | list |
+|---|---|---|
+| DN2 | **22** | `01 02 03 04 06 07 09 50 52 51 53 54 55 56 57 58 59 5a 5b 5c 5d 5e` |
+| DT2 | **44** | `01 02 03 05 04 06 07 09 50 52 51 10 13 11 12 20 21 22 23 28 30 31 32 36 40 41 42 46 …` |
+
+Three things fall straight out:
+
+- **`10 13 11 12` is the `FsSample` family**, present on the DT2 and absent on
+  the DN2 — in the same transposed-pair style as `50 52 51`.
+- **`05` is in the DT2's list.** That is the opcode probed on hardware that drew
+  silence, so `storage_info` is real and its absence from the DN2 is deliberate
+  rather than an artefact of the probe.
+- The DT2 carries whole families the DN2 lacks: `20 21 22 23`, `28`,
+  `30 31 32 36`, `40 41 42 46`.
+
+### What that changes
+
+It does not prove the array gates dispatch. But **if dispatch were independent
+of it, the DT2 would not need a different one** — so the array is at least
+tracking what each build answers, and possibly deciding it.
+
+That replaces "find the DN2's rejection path" with a decisive experiment:
+
+> Extend the DN2's list with `10 13 11 12`, count `22 → 26`, and ask the device.
+
+- It answers `FsSampleReadDir` → dispatch was gated on this array, and the
+  chimera's RPC half is essentially done.
+- It advertises them and still goes silent → the handlers are genuinely not
+  registered, and that is a clean negative worth having.
+
+Either outcome settles it, which is more than another week of static analysis
+was going to do.
+
 ## Where this stands
 
-**Found:** the advertised list, its single call site, the patch shape for
-extending it, and the dispatcher's class structure.
+**Found:** both builds' advertised lists, their single call sites, the patch
+shape, and the dispatcher's class structure.
 
-**Not found:** what actually routes an opcode to a handler, and therefore what
-rejected `0x05`. Next step is to disassemble
-`handleMessageAndCreateResponse` — a large function, since a caller `0xe2e`
-bytes past `0x40125cbe` is still attributed to it — and find the comparison
-chain or registry lookup inside it.
+**Not found:** the routing itself. Recorded as unresolved rather than guessed
+at, because **nothing here yet says the FsSample handlers exist** — the classes
+ship on the DN2; whether any code constructs them is exactly what the
+experiment above would settle.
 
-Until that is found, **nothing here says the FsSample handlers exist**. The
-classes ship; whether any code constructs them is exactly the open question.
+**Requires hardware.** The experiment needs a modified image flashed, so it
+waits on the owner. Nothing up to building the image touches the device.
