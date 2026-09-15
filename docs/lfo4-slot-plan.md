@@ -310,3 +310,75 @@ Guessing again costs a flash and returns one bit.
 marking its own column of the SETTINGS string when its function runs. It settles
 `G` (does the getter run at all?), `M` (is the vtable reading right?) and the
 nine other candidates in a single flash, using the mechanism just proven.
+
+---
+
+## The forward and inverse maps, dumped -- and the reserved rank is a real hole
+
+**2026-09-15.** This document listed the forward map (`0x401fcf20`) and inverse
+map (`0x401fd0b0`) as things LFO4 must extend, sized the work, and never read
+them. They are now dumped, and they explain two things measured elsewhere.
+
+**Forward, `0x401fcf20`, longwords: runtime sound index -> p-lock id.**
+
+| idx | id | | idx | id | | idx | id |
+|---|---|---|---|---|---|---|---|
+| 0 | 0 | | 9 | 2 | | 17 | 3 |
+| 1 | 1 | | 10 | 6 | | 18 | 7 |
+| 2 | 5 | | 11 | 10 | | 19 | 11 |
+| 3 | 9 | | 12 | 14 | | 20 | 15 |
+| 4 | 13 | | 13 | 18 | | 21 | 19 |
+| 5 | 17 | | 14 | 22 | | 22 | 23 |
+| 6 | 21 | | 15 | 26 | | 23 | 27 |
+| 7 | 25 | | 16 | 30 | | 24 | 31 |
+| 8 | 29 | | 17 | 3 | | 25 | 33 |
+
+Indices 1-8 are LFO1, 9-16 LFO2, 17-24 LFO3 -- exactly the block boundaries
+`docs/engine-state.md` derived independently from `record+0x04` -- and the ids
+are `4*slot + lfo`, exactly as DNX reads them out of stored patterns. **All
+eight ids DNX decoded from pattern A1 match this table entry for entry**:
+`1->1, 2->5, 12->14, 13->18, 14->22, 15->26, 16->30`, and `0->0`.
+
+So **`NOTE` landing on lock id 0 was not an arithmetic coincidence** -- the
+firmware's own table says index 0 maps to id 0.
+
+**Inverse, `0x401fd0b0`, longwords: p-lock id -> runtime sound index.**
+
+```
+id    0   1   2   3    4   5   6   7    8   9  10  11   12  13  14  15
+idx   0   1   9  17    0   2  10  18    0   3  11  19    0   4  12  20
+      ^                ^                ^                ^
+```
+
+**Every id in the `4*slot + 0` rank -- 0, 4, 8, 12, 16, 20, 24, 28 -- maps to
+index 0.** All eight. The reserved fourth-LFO column is not an accident of
+numbering that happens to be unused: it is **a structured hole, eight entries
+wide, already present in the shipped table**, every entry pointing at the one
+index that carries no parameter.
+
+### It also explains DNX's "id 32 never observed"
+
+DNX reports that ids **32**, 63-65 and 86 have never appeared on any page or
+machine. The forward map says why for 32: index 24, LFO3's last slot, maps to
+**31**, and index 25, the first machine parameter, maps to **33**. **Id 32 is
+skipped.** Nothing maps to it, so nothing can ever store it. Two projects
+reaching one fact from opposite ends -- DNX from stored patterns, this one from
+the firmware's own table.
+
+### What this does to LFO4's cost
+
+This document estimated *"inverse map | stays | write 8 entries -- already 107
+wide"*. **Confirmed, and it is exactly eight**: repoint inverse entries 0, 4, 8,
+12, 16, 20, 24 and 28 from `0` to LFO4's eight runtime indices, plus the
+matching eight forward entries.
+
+Both are **data edits in the shipped image** -- no cave, no relocation, no
+allocation -- and they are now located, dumped, and verified against an
+independent decode of real stored data.
+
+**Still not established:** whether anything *applies* a lock whose id is in the
+reserved rank. Pattern A1 carries one, stock loads it without complaint, and the
+owner sees nothing -- equally consistent with "applied to index 0, which carries
+no parameter" and "ignored". The inverse map makes the first the more likely: a
+reserved-rank lock resolves to the null index and is applied harmlessly to
+nothing.

@@ -52,24 +52,38 @@ learn something durable, add a line.
 
 ### DNX can answer (ask it these)
 
-> *Drafted by `dn2_firmware` from what it has seen; **DNX should correct and
-> extend its own half** — this list is only as good as DNX makes it.*
+- **The stored formats, both instruments.** Digitone II: project image
+  12,889,647 B (12,890,116 on 1.11), pattern 89,088 B holding 16 x 1,187 B track
+  records, kit 10,752 B, sound object 359 B. Digitone 1: project image
+  2,781,700 B, sound object 302 B. Storage versions per record, and which ones
+  DNX reads and which it writes.
+- **Per-trig data**: the trigger slot (note, velocity, length, micro-timing) and
+  the track record's per-trig arrays: condition `+0x100`, fill `+0x180`,
+  **probability `+0x200` (percent, stored literally)**, sound lock `+0x400`.
+  `+0x280`, `+0x300` and `+0x380` are unidentified.
+- **The p-lock pool**: 80 records of 258 B, header `track<<8 | id`. Which
+  controls are lockable and which have no record (NOTE, VEL, LEN, PROB, COND,
+  FILL, RTRG, VFAD, TRIG 2 LEN, RATE, LFO.T, FLT.T on stock). The id map: LFO
+  pages `id = 4*slot + lfo` (ids 1-31), FLTR 2 / AMP / FX 77-106, machine pages
+  33-76 and 78-81 **machine-relative**. Never observed on stock: 32, 63-65, 86,
+  and the `4*slot + 0` rank.
+- **The +Drive**, through the storage API (`0x53`-`0x5a`): listing, reading, and
+  writing projects, presets and kits in stored or raw form, with a copy taken
+  before any overwrite and a read-back after; whole-drive `.dnx` backups.
+- **The dump protocol**: requesting pattern+kit, kit, sound or project settings
+  from the *loaded* project. A dump returns the **working copy in memory**; the
+  +Drive returns what was **saved**. On DN2 1.11 a dump sends pattern records as
+  version 4, which DNX reads with the version-3 layout. That is inferred, not
+  proven.
+- **Reading data off either instrument**: the probe and the manager capture and
+  decode, pairing MIDI ports by name; hardware test harnesses for rearranging
+  patterns and tracks.
+- **What the instrument actually stored** after an experiment, which is the only
+  way to check a firmware claim against reality.
 
-- **The stored formats**: project, pattern (89,088 B), kit (10,752 B), track
-  record (1,187 B), sound/preset pool, and their storage versions.
-- **Per-trig data**: the trigger slot (note, velocity, length) and the per-trig
-  arrays — condition `+0x100`, fill `+0x180`, **probability `+0x200`**, sound
-  lock `+0x400`.
-- **The p-lock pool**: which parameters are lockable, which are **not**, and the
-  lock-id numbering — `id = 4·slot + lfo`, with `4·slot + 0` the unused fourth
-  rank.
-- **Reading data off the instrument**: SysEx capture and decode, pairing MIDI
-  ports **by name**, and a hardware test harness.
-- **What the instrument actually stored** after an experiment — the only way to
-  check a firmware claim against reality.
-
-**It cannot tell you** what the firmware *does* with that data, or what a build
-changed.
+**It cannot tell you** what the firmware *does* with that data, what a build
+changed, or which image is resident. The firmware string reads the same on stock
+and on a modified build.
 
 ### The shape of most real questions
 
