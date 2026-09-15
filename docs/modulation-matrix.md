@@ -537,3 +537,28 @@ Right, and a better anchor than reading functions: the DN2's LFO `SPD` is
 **tempo-synced**, so the phase increment must be built from the project BPM.
 Whatever reads the tempo and multiplies it by something per track is either the
 tick or feeds it.
+
+### Two more closed, and the clock located
+
+**`0x4002a0bc` is the arpeggiator step, not an LFO.** Called from the trig
+handler with the track, it keeps per-track state at `0x4059c8a8 + 40·track`,
+walks note bitmaps at `0x40598728` in modes 1-3 (up, down, up-down via
+`3 - index`), advances an octave counter at `+28` that wraps at the sound's
+`+353`, gates each step through a 16-bit mask at the sound's `+356`, adds a
+per-step offset from `+358`, and returns a note number. The `#2880` the trig
+handler stores into `0x4058e918[track]` beside it is a per-track note-on
+initial value, not a tempo read.
+
+**The frame time step is written in one place.** `0x402a0dec` -- the elapsed
+time the event-timer pool and the housekeeping countdowns advance by -- has
+**exactly one writer**, `0x4013707c`, inside a clock module around
+`0x4013706a`-`0x401373b0` that also maintains a flag word at `0x402a0df0` and
+values at `0x402a0df4`, `0x402a0df8` and `0x402a0dfc`. Nine functions read the
+step: the frame ISR `0x40025e36`, the timer pool `0x400db524`/`0x400db72a`,
+housekeeping `0x400dae1a`, the writer itself, and four not yet read --
+`0x400257fa`, `0x400d7f06`, `0x40129130` and `0x401383ac`.
+
+Following the owner's lead: a free-running LFO must add elapsed time to its
+phase and a tempo-synced one needs a tempo-scaled step, so the tick either
+reads `0x402a0dec` or reads something computed from it and the BPM in that
+clock module.
