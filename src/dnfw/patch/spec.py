@@ -43,7 +43,7 @@ class Patch:
     group: str
     description: str
     device: int  # SysEx product id: 0x0d Digitone, 0x15 Digitone II
-    build: str  # container build/model string, e.g. "40050"
+    build: str  # container build/model string, e.g. "0050"
     version: str  # container version string, e.g. "1.10E"
     section: int  # ELE3 section id, e.g. 3 for MAIN OS
     expect: bytes  # the bytes being replaced, checked before writing

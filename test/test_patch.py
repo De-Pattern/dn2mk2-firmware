@@ -18,7 +18,7 @@ def _patch(**overrides) -> Patch:
         group="test",
         description="test",
         device=0x15,
-        build="40050",
+        build="0050",
         version="1.10E",
         section=3,
         expect=b"AAAA",

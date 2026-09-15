@@ -8,7 +8,7 @@ bootstrap (`docs/os-versions.md`).
 
 from dnfw.symbolmap.record import BOOTSTRAP_BASE, Symbol
 
-_COMMON = dict(build="40050", version="1.10E", section=2, base=BOOTSTRAP_BASE, kind="function")
+_COMMON = dict(build="0050", version="1.10E", section=2, base=BOOTSTRAP_BASE, kind="function")
 
 SYMBOLS = [
     Symbol(

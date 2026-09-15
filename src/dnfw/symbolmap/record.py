@@ -46,7 +46,7 @@ class Symbol:
     id: str
     name: str
     kind: str  # one of KINDS
-    build: str  # container build/model string, e.g. "40050"
+    build: str  # container build/model string, e.g. "0050"
     version: str  # container version string, e.g. "1.10E"
     section: int  # ELE3 section id: 2 bootstrap, 3 MAIN OS
     base: int  # run base of the section

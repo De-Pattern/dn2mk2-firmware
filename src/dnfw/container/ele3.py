@@ -4,10 +4,26 @@ Field offsets ported from `format.h` in mischa85/elektron-firmware-tool, MIT.
 All fields are big-endian.
 
     0x00  magic "ELE3"
-    0x07  build/model string
+    0x04  u32 product code       <- the device gate; see `product`
+    0x08  build string
     0x13  version string
     0x1C  u32 section count
     0x20  section table, 16 bytes per entry: id, offset, stored length, dest
+
+**[CORRECTED 2026-09-15 -- the build string started at 0x07, not 0x08.]** The
+byte at 0x07 is the low byte of the u32 product code, and reading it as text
+put an extra character on the front of every build string this project has
+ever printed. On a Digitone II the product code is 52, which is ASCII '4', so
+`0059` printed as `40059` and looked like a perfectly ordinary build number.
+
+It took a second device to expose it: the Digitakt II's product code is 43,
+which is '+', and its build printed as `+0079`. Confirmed from the instrument
+the same day -- `dnfw`'s own MIDI RPC `software_version` asks a connected
+Digitone II, and it answers `0059`.
+
+**A single-device sample made a wrong parse look right**, which is the same
+shape as the detector failures in `docs/pcm-hunt.md`. Nothing checked this for
+eight days because nothing could.
 
 Sections are laid out on 16-byte boundaries, in ascending offset order, after
 the header and table. Everything past the last section belongs to the trailer,
@@ -19,7 +35,8 @@ from dataclasses import dataclass
 from .section import Section
 
 MAGIC = b"ELE3"
-BUILD_OFFSET = 0x07
+PRODUCT_OFFSET = 0x04
+BUILD_OFFSET = 0x08
 VERSION_OFFSET = 0x13
 COUNT_OFFSET = 0x1C
 TABLE_OFFSET = 0x20
@@ -62,6 +79,30 @@ class Container:
     sections: tuple[Section, ...]
     offsets: tuple[int, ...]  # original container offset of each section
     declared_size: int
+
+    @property
+    def product(self) -> int:
+        """The product code the device checks before it will flash this image.
+
+        Measured 2026-09-15 by diffing a Digitone II against a Digitakt II: the
+        updater sections are 32,768 bytes and differ in **exactly one byte**,
+        the immediate of a `moveq` at `0x80003d28`.
+
+            movel #1162626355,%d0     ; 0x454C4533 = "ELE3"
+            cmpl 0x8000b3d4,%d0       ; magic must match
+            bnes ...                  ; -> reject
+            moveq #52,%d0             ; DN2.  DT2 has: moveq #43
+            cmpl 0x8000b3d8,%d0       ; THIS field must match
+            bnes ...                  ; -> reject
+
+        The bootstrap carries the identical check at `0x02015028`. Known codes:
+        **52 Digitone II, 43 Digitakt II.**
+
+        Not to be confused with the transport's device id (`syx/transport.py`:
+        0x15 Digitone II, 0x14 Digitakt II) or the file-API id the instrument
+        reports over RPC (0x2b). Three id spaces; never compare across them.
+        """
+        return int.from_bytes(self.head[PRODUCT_OFFSET : PRODUCT_OFFSET + 4], "big")
 
     @property
     def build(self) -> str:

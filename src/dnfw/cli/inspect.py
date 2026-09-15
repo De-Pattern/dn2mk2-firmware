@@ -10,6 +10,15 @@ from .files import read_image
 NAME = "inspect"
 HELP = "report an image's transport, container, sections and integrity fields"
 
+# The product code the updater and the bootstrap both check before flashing.
+# Only two are measured; anything else prints bare rather than guessing.
+PRODUCTS = {52: "Digitone II", 43: "Digitakt II"}
+
+
+def _product_note(code: int) -> str:
+    known = PRODUCTS.get(code)
+    return f"  ({known})" if known else ""
+
 
 def configure(parser) -> None:
     parser.add_argument("image", type=pathlib.Path, help=".syx file, or a .zip containing one")
@@ -21,6 +30,7 @@ def run(args) -> int:
 
     print(f"{args.image}")
     print(f"  device            0x{firmware.envelope.device:02x}")
+    print(f"  product code      {container.product}{_product_note(container.product)}")
     print(f"  build / version   {container.build} / {container.version}")
     print(f"  container         {container.declared_size:,} bytes")
     print(f"  data packets      {firmware.packets:,}")
