@@ -340,3 +340,43 @@ Not in the audio frame. The DN2's LFOs are tempo-syncable, which points at the
    at `0x40210bea`) and `SPH` mean the trig handler must reset LFO phase. The
    trig handler is already located, at `0x40026b40`. **This is probably the
    shortest route** — it is a known function that must touch LFO state.
+
+### Found on the way: MOD1–3 are three `std::function` objects in BSS
+
+Chasing the tick through the `MOD1`/`MOD2`/`MOD3` filter constants
+(`docs/modulation-mask.md`) did not find it, but it did find how the three
+modulators are *registered*, which a real fourth LFO has to join.
+
+Three near-identical thunks exist, each supplying its own filter and tail-jumping
+to one shared implementation:
+
+```
+0x400c2a90   movel #0x1e00,%sp@(12) ; braw 0x400c2894     MOD1
+0x400c2aae   movel #0x0e00,%sp@(12) ; braw 0x400c2894     MOD2
+0x400c2acc   movel #0x0600,%sp@(12) ; braw 0x400c2894     MOD3
+```
+
+Each thunk's address is written into BSS at boot, around
+`0x42431d48`–`0x42431d84`, alongside one of three sibling functions at
+`0x400c0238`, `0x400c028a` and `0x400c02dc` — 82 bytes apart, and each a GCC
+`std::function` **manager** (`op 0` destroy, `1` clone, `2` allocate, `3`
+destroy-and-deallocate, with a typeinfo pointer at `0x401f2530`).
+
+So **`MOD1`, `MOD2` and `MOD3` are three `std::function` objects**, each a bound
+call to `0x400c2894` carrying its own filter. They are *not* an array of three
+LFOs and there is no count-of-three to increment — but they *are* a uniform
+registration, built by one initialiser, which is the next best thing.
+
+**What a fourth would cost, on this evidence alone:** an invoker thunk of about
+twenty bytes (`movel #0x0200,%sp@(12)` / `braw 0x400c2894`), the same manager
+shape, and a slot in the BSS run. `0x0200` is the filter
+`docs/modulation-mask.md` already showed is the only one left and admits exactly
+what a fourth LFO needs. **None of this is the generator** — it is the
+destination-menu identity — but it is the first piece of a real fourth LFO whose
+cost has been counted rather than estimated.
+
+**A false positive worth recording.** A scan for a three-entry table of the
+filter constants reported a hit at `0x401f2b4d`. It is not one: the address is
+odd, and the surrounding longwords read `0, 6, 14, 30, 38, 46, 62, 78, 94, 110`
+— an unrelated offset table whose bytes happen to contain the pattern. Checking
+alignment before believing a table cost one command.
