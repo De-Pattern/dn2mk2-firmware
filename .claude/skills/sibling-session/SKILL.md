@@ -120,11 +120,18 @@ retractions (`engine-index-map.md` §§11, 15) that exist precisely because a
 measurement was interpreted after the fact.
 
 **Attribute, and do not adopt.** A claim from the sibling is *the sibling's
-claim* until this side verifies it. The same day, DNX said `PROB` is not
-p-lockable; this session rewrote its own documentation within minutes to agree,
-and the owner challenged it — *"not sure where did you assert or got that
-information"*. The read showed both parties right about different levels. Mark a
-peer's claim as theirs, with its source, and say what would settle it.
+claim* until this side verifies it. The same day, DNX said `PROB` has **no
+lock-pool record on stock firmware** — it lives in the track record's per-trig
+array at `+0x200`, and `NOT_LOCKABLE` is DNX's *code name* for exactly that,
+which invites the misreading. This session read it as *"`PROB` is not
+p-lockable"*, rewrote its own documentation within minutes to agree, and the
+owner challenged it: *"not sure where did you assert or got that information"*.
+
+Note what the follow-up read did and did not settle. It was taken on a **probe
+build**, so it says nothing about stock storage; what it showed is that *on that
+build* `PROB` edits were stored as lock-pool records under LFO-rank ids. Mark a
+peer's claim as theirs, with its source, and be precise about which firmware any
+confirming evidence came from.
 
 **State the device's state.** If the instrument is running a modified image, say
 so, unprompted, every time. Anything odd the other session then sees in the data
@@ -147,6 +154,12 @@ MIDI OUT  [1] Elektron Digitone      [2] Elektron Digitone II
 So "port 1" means the DN2 for input and the **DN1** for output. A malformed
 command has frozen a DN1 three times, recoverable only by a power cycle that
 takes the unsaved active project with it. **Pair ports by name, never by index.**
+
+**Name the port in the request, and check the device card or the file signature
+before trusting a read.** DNX's probe takes the first port pair it finds when
+none is chosen: on 2026-09-15 it silently read the DN2 the moment it was plugged
+in, and a DN1 test run briefly logged two 407-byte reads as DN1 data until the
+file signature caught it.
 
 Only one session should hold the MIDI port at a time — say when you take it and
 when you release it. Neither session touches the instrument without the owner's

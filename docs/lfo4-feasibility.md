@@ -989,11 +989,15 @@ would settle it"*. It was the right caveat and it has now cashed out against me.
 
 ### The `PROB` dispute, resolved — both sides were right
 
-The owner said `PROB` is p-lockable; DNX's `NOT_LOCKABLE` list said it is not.
-The read shows **both were describing something true**:
+The owner said `PROB` is p-lockable; DNX reported it has **no lock-pool
+record**, `NOT_LOCKABLE` being its code's name for that. DNX has since asked
+that the distinction be kept sharp, and it is right twice over — the claim was
+never "not p-lockable", and **this A1 read cannot confirm the stock half of it,
+because it was taken on a probe build.** With that said, the three statements
+below are each true of their own subject:
 
-- **On stock**, probability has no lock-pool id and lives at `+0x200` — DNX's
-  list is correct about the storage mechanism.
+- **On stock**, probability has no lock-pool id and lives at `+0x200`. Source:
+  DNX's **2026-07-26 hardware capture on stock**, *not* this read.
 - **At the instrument**, the owner sets it per trig, which is what a player
   means by a lock — the owner is correct about the behaviour.
 - **On the probe build**, it produces a genuine lock record — under **LFO2
