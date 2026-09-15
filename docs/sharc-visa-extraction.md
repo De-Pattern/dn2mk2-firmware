@@ -463,3 +463,70 @@ because the PGR's *"caused width collisions"* with the 48-bit branch family.
 So the honest read of our week's conclusion is narrower than we wrote it: the
 SC58x PRM alone is insufficient, and the classic PGR is the document that
 closes the gap. That is the next thing to obtain if this line is ever resumed.
+
+## 9. [CORRECTION] The PRM *does* publish register encodings — chapter 27
+
+**2026-09-15, same day, and this is the largest error in this document.**
+
+§4 and §6 above concluded that "the PRM publishes no bit encodings" for
+register classes, that cardinality was all that could be recovered, and that
+the register classes therefore constrain nothing. **All three are wrong.**
+
+**Chapter 27, "Register (reg) Opcodes", from page 536**, gives every class its
+own `Code | Syntax` table:
+
+```
+B1REG Register Class
+Code   Syntax
+100    b12
+101    b13
+```
+
+That is exactly the mnemonic-to-bits mapping said not to exist.
+`scripts/prm_register_opcodes.py` extracts **31 classes, 577 codes**, and
+several of them genuinely reject:
+
+| class | codes | field | admitted | rejects |
+|---|---|---|---|---|
+| `UREGXDAG1` | 95 | 7-bit | 74.2% | 33 |
+| `UREGXDAG2` | 79 | 7-bit | 61.7% | 49 |
+| `UREGXDAG2DBL` | 48 | 7-bit | 37.5% | 80 |
+| `UREGXDAG1DBL` | 28 | 7-bit | 21.9% | **100** |
+| `UREGDBL` | 26 | 7-bit | 20.3% | **102** |
+| `RFREG` | 8 | 4-bit | 50.0% | 8 |
+| `SREG` | 14 | 4-bit | 87.5% | 2 |
+
+The 7-bit `ureg` fields are the wide ones that appear across many forms, and
+they are nothing like fully populated. Chapter 26 from page 531 does the same
+for immediate and constant types.
+
+### How the error happened, because the shape of it is the lesson
+
+The search was **pages 308-425** — the instruction figures — plus Table 2-1 at
+pages 53-55. Table 2-1 lists class membership by name and carries no codes, so
+the conclusion "the PRM has no encodings" was drawn from *the absence of codes
+in the table that happened to be found*, and generalised to a 798-page
+document without asking whether another chapter carried them.
+
+It was not a measurement. It was an absence mistaken for one, and it is the
+same shape as every detector failure in `docs/pcm-hunt.md`: a confident
+negative from an instrument pointed at the wrong place.
+
+**The digikit author's page index found it.** Her `docs/sharc/SOURCES.md` maps
+the whole manual — "p531 Immediate and constant opcodes — encodings", "p536
+Register (reg) opcodes — encodings" — and states plainly that "field value
+tables (`BH`, `BHSE`, `ACONV`, `ALUOP`, register class codes) are ordinary text
+in the manual". She had this the whole time.
+
+> The claim was also **published to her** in
+> <https://github.com/m-dwyer/digikit/pull/11> and has been corrected there.
+
+### Two more things from her SOURCES.md that our extractor does not handle
+
+- **Yellow fill `(0.95, 0.80, 0.19)` marks unused bits** in the figures. We
+  look only for the grey `0.8235`, so yellow cells fall into our "unnamed"
+  bucket. Some of the 265 bits in §2 are not unnamed at all — they are marked
+  unused, and we cannot tell the two apart.
+- **"Printed digits in gray cells are not always right"** — several figures
+  keep a template's default digits or copy another figure. Our extractor trusts
+  them. This is precisely what a second source catches and one cannot.
