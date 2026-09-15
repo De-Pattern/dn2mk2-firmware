@@ -26,7 +26,7 @@ Rules that keep it honest:
 | **Extra LFO destinations** | **SHIPPED** | — | `docs/modulation-mask.md`, browser tool, PR #61 |
 | **Transient Swapper** | **SHIPPED** | — | `docs/pcm-hunt.md`, `docs/tran-mapping.md`, PR #64 |
 | **TRAN mapping** | **SOLVED** | — | `TRAN = 4 × slot − 8`; 32 of 34 reachable; `docs/tran-mapping.md` |
-| **LFO4** | **UNBLOCKED** | **No engine blocker left.** The DSP plays no part — modulation is generated and applied on the ColdFire, and LFO parameters are never sent. What remains is ColdFire work: a modulator slot, the page id, and the page-view | `docs/engine-state.md`, `docs/lfo4-slot-plan.md`, `docs/modulation-mask.md` |
+| **LFO4** | **UNBLOCKED** | **No DSP blocker.** Modulation is generated and applied on the ColdFire; LFO parameters are never sent. **New 2026-09-15:** LFO4 need not be a fourth LFO at all — it can be a **seventh modulation source**, and the apply side then costs nothing new. One engine unknown remains: where LFO1–3 are ticked | `docs/engine-state.md`, `docs/modulation-matrix.md`, `docs/lfo4-slot-plan.md` |
 | **Chimera (DT2 machines + samples)** | **SCOPED** | ColdFire half tractable. SHARC half: we ship its program, know how it is loaded, and a third party has mapped the **six machine selector roles** and a full sample-resource lifecycle | `docs/chimera-feasibility.md`, `docs/sharc-image.md`, `docs/lalzart-dt2-crosscheck.md` |
 | **Sample transfer / RPC** | **IN PROGRESS** | what dispatches an opcode | `docs/midi-rpc-dispatch.md` |
 
@@ -85,7 +85,8 @@ Rules that keep it honest:
 |---|---|---|
 | **What dispatches an RPC opcode** | Five static approaches failed; DT2 diff reframed it | Extend DN2's list with `10 13 11 12`, count 22→26, ask the device |
 | **What crosses to the SHARC at runtime?** | **Answered, by digikit** — a periodic **DSPI2** frame over **eDMA 28/29**, `(tx_len, tx_buf, rx_len, rx_buf)`, driven from an interrupt. She has the frame's 16-pass per-track loop; we contributed the cross-device counts | `docs/sharc-image.md` |
-| **What are the other three modulator sources?** | `0x400db22c` applies **six** per track, each with its own 16-word value table and a four-entry destination list. The UI offers three LFOs. If one of the six is free, LFO4 has a home with no structural change | Read what writes the six descriptor lists at `%a2@(3476 + 16k)` — that is where a DEST and DEPTH from the UI land. **Do not assume three are spare** |
+| ~~What are the other three modulator sources?~~ | **ANSWERED 2026-09-15 — none is free.** All six are the MIDI performance modulators: **Velocity, Mod Wheel, Pitch Bend, Breath, Aftertouch, Key Tracking**, four dest+depth each | `docs/modulation-matrix.md`. Moves to Closed |
+| **Where are LFO1–3 advanced and applied?** | **The only engine-side unknown left on the LFO4 path.** It is *not* the six-source matrix — that is MIDI performance modulation. Either the LFOs run a separate per-frame path, or they reach the parameter array another way | Find the tick. It is cheap, it decides whether LFO4 is "change a 3 to a 4" or "write a generator", and it may already contain a p-lockable depth (backlog §12 item 4) |
 | **Does the DSP frame carry an engine/machine id?** | **Open, and digikit's too** — she traced the frame's 16-pass per-track loop over three SRAM tables and found **no engine id in it**, so "stock engine, own parameters" for a new machine is still open | Her `[O]` item; the DN2/DT2 `tx_len` difference (2,688 vs 2,050) is a new constraint on it |
 | ~~The SHARC Audio Task's structure~~ | **ANSWERED by a third party** — `lalzart/digitakt-ii-firmware-research-public` has the chain (FreeRTOS → Audio Task → notification wait → recurring root → main processor → per-unit/lane → common → output) and a **six-entry machine selector table**, in the same SHARC short-word space digikit uses | `docs/lalzart-dt2-crosscheck.md`. Moves to Closed once we have checked it against our own section 7 |
 | **Is there a minimum-version gate on the DN2?** | lalzart records MAIN validating checksum, **minimum-version** *and* the cryptographic trailer before erase/program. We have the first and third; **the second is recorded nowhere here** | Cheap and actionable — find it in the DN2 updater. Matters for flashing a downgraded or modified image |
@@ -114,6 +115,7 @@ Rules that keep it honest:
 | Idea | Value | Blocker |
 |---|---|---|
 | **A new ELE3 section as address space** | Would raise the ceiling for the whole project: 25.3 MB vs ~26 KB of caves | **Unblocked 2026-09-16.** A cave of tens of bytes calls the generic lookup and the SPI NOR read. `0x80000` is a **flash offset**, not RAM — digikit's boot trace shows the container read from flash on demand, so nothing has to stay resident |
+| **P-lock the performance modulators** | 48 new automatable values per track, on modulation hardware the engine already runs every frame. Owner's ask, 2026-09-15 | **Scoped, not started.** Their depths and destinations are not in the 1..99 index space, so no p-lock can name one today. Route (b) — index the 24 *depths* into the bitmap's spare range 100–127 — is the one that fits. Gated on finding the LFO tick | `docs/ideas-backlog.md` §12 |
 | Envelope modulator | — | `docs/envelope-modulator-feasibility.md` |
 | Mod compatibility check between two mods | Backlog §11 | Wants a mod that shares a section/processor |
 

@@ -316,6 +316,30 @@ the envelopes are all candidates, and "the UI shows three" is not a census of
 what the engine runs. Read what writes the six descriptor lists; that is where
 a DEST and a DEPTH from the UI must land.
 
+### ANSWERED 2026-09-15 — the caution was right; none of the six is free
+
+**`docs/modulation-matrix.md` identifies all six.** They are the MIDI
+performance modulators — **Velocity, Mod Wheel, Pitch Bend, Breath Controller,
+Aftertouch, Key Tracking** — each with the four destination + depth pairs the
+instrument shows on its own setup page. Three independent signals agree: a
+contiguous run of five names in the string pool immediately before
+`Sound::updateMirror`, a registration sequence at `0x4004c712` attaching those
+five names to five of six objects, and six `*SetupView` RTTI classes. Velocity
+is pinned separately by the note-time write to `0x8000dd40` at `0x40026ac0`.
+
+So the cheap route died — and two better facts came out of its death:
+
+- **LFO4 can be a *seventh source* rather than a fourth LFO**, in which case the
+  apply side costs nothing new: the kernel already applies any value through any
+  four destinations.
+- **The per-track modulated-parameter bitmap is 128 bits for a 1..99 index
+  space**, so indices **100–127 are already representable** — independent
+  corroboration of `docs/lfo4-slot-plan.md`'s "extend past 99", from a structure
+  that plan never examined.
+
+**What is now the only engine-side unknown on the LFO4 path: where LFO1–3 are
+advanced and applied.** It is *not* this matrix. Everything else above stands.
+
 ## A correction, recorded because it nearly became a patch
 
 An earlier reading of this accessor took its displacement as **+30 decimal** and
