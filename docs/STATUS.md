@@ -26,7 +26,7 @@ Rules that keep it honest:
 | **Extra LFO destinations** | **SHIPPED** | — | `docs/modulation-mask.md`, browser tool, PR #61 |
 | **Transient Swapper** | **SHIPPED** | — | `docs/pcm-hunt.md`, `docs/tran-mapping.md`, PR #64 |
 | **TRAN mapping** | **SOLVED** | — | `TRAN = 4 × slot − 8`; 32 of 34 reachable; `docs/tran-mapping.md` |
-| **LFO4** | **BLOCKED** | **one blocker, not two: the generator is unknown.** Slot space is designed away — see below | `docs/lfo4-feasibility.md`, `docs/lfo4-slot-plan.md`, `docs/engine-index-map.md` §15 |
+| **LFO4** | **UNBLOCKED** | **No engine blocker left.** The DSP plays no part — modulation is generated and applied on the ColdFire, and LFO parameters are never sent. What remains is ColdFire work: a modulator slot, the page id, and the page-view | `docs/engine-state.md`, `docs/lfo4-slot-plan.md`, `docs/modulation-mask.md` |
 | **Chimera (DT2 machines + samples)** | **SCOPED** | ColdFire half tractable; SHARC half **blocked on reading SHARC code, no longer on reaching it** — we ship its program and know how it is loaded | `docs/chimera-feasibility.md`, `docs/sharc-image.md` |
 | **Sample transfer / RPC** | **IN PROGRESS** | what dispatches an opcode | `docs/midi-rpc-dispatch.md` |
 
@@ -41,8 +41,9 @@ Rules that keep it honest:
 | Enumeration (getting records into the set the LFO walks) | **Solved, a data edit** — `docs/parameter-set-tables.md` |
 | Page id — range test `(page - 0x1a) <= 2` | **Blocked** — `0x1d` Retrig, `0x1e` None |
 | Fourth page-view + `[MOD]` navigation | **Not started** |
+| **Modulation apply and generation** | **ColdFire, both.** `0x400db1dc` is the MAC-unit kernel; `0x400db22c` drives it for 6 sources × 4 destinations × 16 tracks, inside the DSP-frame ISR |
 | Runtime slot space — 8 contiguous slots | **DESIGNED, not built.** ~~BLOCKED~~ — the array genuinely cannot grow in place (101 entries, flush against the machine-type byte at `+0xde`, and it is a field in each of 128 × 2,388-byte sound objects, not a table). But `docs/lfo4-slot-plan.md` gives **two** designs that remove the requirement: a 2,048-byte extension array in the 25 MB for slots 101–108 (~11 hooks), or a **track-level** LFO4 that needs no slots at all (~3 hooks, at the cost of LFO4 not being saved per sound). Neither is built or verified |
-| **Does the engine run a 4th LFO generator?** | **UNKNOWN.** ~~Confirmed 2026-09-12~~ — both probes changed forward *and* inverse maps together, so a storage round-trip predicts the same positive with three generators. `docs/engine-index-map.md` §15 |
+| **Does the engine run a 4th LFO generator?** | **DISSOLVED 2026-09-16 — the question was wrong.** The DSP never sees an LFO. Modulation is generated *and* applied on the ColdFire (`0x400db1dc`, MAC unit) into a per-track array, and the DSP frame carries only indices **25–99** — LFO1–3's parameters are 1–24 and are never sent. Confirmed by two independently-derived block boundaries (25 = machine start, 66 = filter start). **A 4th LFO needs no DSP support at all.** `docs/engine-state.md` |
 
 ---
 
@@ -82,7 +83,7 @@ Rules that keep it honest:
 |---|---|---|
 | **What dispatches an RPC opcode** | Five static approaches failed; DT2 diff reframed it | Extend DN2's list with `10 13 11 12`, count 22→26, ask the device |
 | **What crosses to the SHARC at runtime?** | **Answered, by digikit** — a periodic **DSPI2** frame over **eDMA 28/29**, `(tx_len, tx_buf, rx_len, rx_buf)`, driven from an interrupt. She has the frame's 16-pass per-track loop; we contributed the cross-device counts | `docs/sharc-image.md` |
-| **Does the engine run a 4th LFO?** | Unknown, but **reframed and much closer**. The DSP frame is now readable (handler `0x40025e36`, builder `0x400274ba`, 16 passes, per-track source stride 202 → frame stride 146). If the frame carries LFO *parameters* the DSP generates; if already-*modulated values*, the ColdFire does and **a 4th LFO needs no DSP support at all**. Arithmetic hint only: the first block is 41 words and runtime indices 25–65 is exactly 41, starting right after LFO3 ends at 24 | **Find what writes the per-track source at `a5+84`** (`%a2`, stride 202, in `0x40025e36`). If it is the value array from `idx = 25`, the blocker is gone. `docs/engine-state.md` |
+| **What are the other three modulator sources?** | `0x400db22c` applies **six** per track, each with its own 16-word value table and a four-entry destination list. The UI offers three LFOs. If one of the six is free, LFO4 has a home with no structural change | Read what writes the six descriptor lists at `%a2@(3476 + 16k)` — that is where a DEST and DEPTH from the UI land. **Do not assume three are spare** |
 | **Does the DSP frame carry an engine/machine id?** | **Open, and digikit's too** — she traced the frame's 16-pass per-track loop over three SRAM tables and found **no engine id in it**, so "stock engine, own parameters" for a new machine is still open | Her `[O]` item; the DN2/DT2 `tx_len` difference (2,688 vs 2,050) is a new constraint on it |
 | **The SHARC Audio Task's structure** | Entry pointer unresolved (digikit, decode desync) | Blocked on decompilation, not disassembly |
 | **The last 72 bits of SHARC figures** | Not named in Rev 1.5's figures | **Deliberately not chased** — helps nothing; see below |
