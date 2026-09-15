@@ -244,6 +244,44 @@ form to carry a valid compute field moves the separation the right way:
 It suppresses false matches harder than real ones, which is what a real
 constraint does. It is still not branch alignment.
 
+## 4b. The figures alone do not decode SHARC code, and the gap is measurable
+
+A recursive-descent walk was seeded from the boot stream's own entry point
+(`scripts/sharc_seeded_walk.py`). The address mapping checks out exactly:
+
+```
+boot-stream entry  exec 0x001c12e2  ->  load 0x283825c4
+```
+
+which is the base of a code region, so the entry sits at **offset 0** of it.
+`docs/sharc-code-map.md`'s `load = exec * 2 + 0x28000000` predicted that, and
+the agreement is a check on the rule rather than an assumption of it.
+
+**The walk decodes one instruction and dead-ends.** So does a run-length sweep,
+from every offset and under every word order:
+
+| word order | best runs | median | mean |
+|---|---|---|---|
+| **high-first / LE** | 86, 85, 84, … | **1** | 3.5 |
+| high-first / BE | 52, 51, 50, … | 1 | 2.7 |
+| low-first / LE | 46, 45, 44, … | 1 | 2.0 |
+| low-first / BE | 51, 50, 49, … | 1 | 2.4 |
+
+Those descending "best runs" are **one** long run counted from successive
+offsets inside it, not many independent ones. High-first/LE is marginally
+ahead, consistent with the assumed layout, but nothing is decisive because
+nothing sustains.
+
+**Median run of 1 means two consecutive instructions are essentially never
+decoded correctly.** digikit's handover reports a median run of **632** on real
+firmware after her Type5b fix, against 45 for a random-bytes control.
+
+That is the honest size of the gap, and **it is not the figures** — those are
+extracted to their ceiling (§2). It is everything else in the chapter: register
+classes, the compute encodings, and the sub-opcode tables that constrain the
+fields the figures leave open. A pattern with three fixed bits is not an
+instruction, and no amount of geometry makes it one.
+
 ## 5. What is not done
 
 **Branch alignment**, which is the metric that would be comparable to hers. The
