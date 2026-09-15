@@ -18,8 +18,8 @@ FIRMWARE = ROOT / "00_Resources" / "00_Firmware"
 # Filename, and the facts each image should report. Written down rather than
 # derived so a change in the tooling that silently alters them fails a test.
 IMAGES = {
-    "dn1": ("Digitone_and_Digitone_Keys_OS1.42A_dist.zip", 0x0D, "60097", "1.42A", False),
-    "dn2": ("Digitone_II_OS1.10E_dist.zip", 0x15, "40050", "1.10E", True),
+    "dn1": ("Digitone_and_Digitone_Keys_OS1.42A_dist.zip", 0x0D, "0097", "1.42A", False),
+    "dn2": ("Digitone_II_OS1.10E_dist.zip", 0x15, "0050", "1.10E", True),
 }
 
 

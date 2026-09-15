@@ -24,7 +24,7 @@ ONES = "f" * 64
 
 
 def make(**over) -> Symbol:
-    args = dict(id="x", name="n", kind="function", build="40050", version="1.10E",
+    args = dict(id="x", name="n", kind="function", build="0050", version="1.10E",
                 section=MAIN_OS, base=MAIN_OS_BASE, address=0x40001000, guard=ZERO)
     args.update(over)
     return Symbol(**args)

@@ -8,7 +8,7 @@ table and the service-protocol code. Addresses are 1.10E, build 40050.
 
 from dnfw.symbolmap.record import MAIN_OS_BASE, Symbol
 
-_COMMON = dict(build="40050", version="1.10E", section=3, base=MAIN_OS_BASE)
+_COMMON = dict(build="0050", version="1.10E", section=3, base=MAIN_OS_BASE)
 
 SYMBOLS = [
     Symbol(

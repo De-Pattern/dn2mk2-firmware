@@ -75,11 +75,64 @@ for k, word in enumerate(words):   # big-endian, k from 0
 
 ```
 0x00  "ELE3"
-0x07  build/model string      DN2 "40050"   DN1 "60097"
-0x13  version string          DN2 "1.10E"   DN1 "1.42A"
+0x04  u32 product code        DN2 52   DT2 43   DN1 54
+0x08  build string            DN2 "0059"    DT2 "0079"    DN1 "0104"
+0x13  version string          DN2 "1.11"    DT2 "1.16"    DN1 "1.43"
 0x1C  u32 section count
 0x20  section table, 16 B per entry: id, offset, stored length, dest
 ```
+
+> **[CORRECTED 2026-09-15 — this table said the build string starts at `0x07`.]**
+> It starts at `0x08`. The byte at `0x07` is the **low byte of the u32 product
+> code**, and reading it as text put an extra character on the front of every
+> build string this project ever printed: DN2's product code is 52, which is
+> ASCII `'4'`, so `0059` printed as `40059` and looked like an ordinary build
+> number for eight days.
+>
+> **It took a second device to expose it.** The Digitakt II's product code is
+> 43 — ASCII `'+'` — so its build printed as `+0079`, and a `+` in a build
+> number is not something you can read past. Confirmed the same day from the
+> instrument: `dnfw`'s MIDI RPC `software_version` asks a connected Digitone II
+> and it answers **`0059`**.
+>
+> A single-device sample made a wrong parse look right, which is the same shape
+> as the detector failures in `docs/pcm-hunt.md`. Nothing checked it because
+> until DT2 arrived, nothing *could*.
+>
+> Every pinned build string moved with it — `patches/`, `symbols/`, the patch
+> and symbol-map record schemas, and the test fixtures.
+
+## 3a. The product code is the device gate
+
+`0x04` is what the instrument checks before it will flash an image. Measured by
+diffing the two devices: their **updater sections are both 32,768 bytes and
+differ in exactly one byte** — the immediate of a `moveq`.
+
+```
+0x80003d1a  movel #1162626355,%d0     ; 0x454C4533 = "ELE3"
+0x80003d20  cmpl 0x8000b3d4,%d0       ; magic must match
+0x80003d26  bnes 0x80003d3c           ; -> reject
+0x80003d28  moveq #52,%d0             ; DN2.  DT2 has: moveq #43
+0x80003d2a  cmpl 0x8000b3d8,%d0       ; product code must match
+0x80003d30  bnes 0x80003d3c           ; -> reject
+0x80003d32  moveb #1,%d0              ; accept
+```
+
+The **bootstrap carries the identical check** at `0x02015028`, differing in the
+same single immediate. So the device-identity gate is one instruction in each
+of two sections, and nothing else.
+
+**Three id spaces, never to be compared across:**
+
+| space | DN2 | DT2 | DN1 | where |
+|---|---|---|---|---|
+| SysEx transport device id | `0x15` | `0x14` | `0x0d` | `syx/transport.py` |
+| container product code | **52** | **43** | **54** | here, `0x04` |
+| file-API id the device reports over RPC | `0x2b` | — | — | `docs/midi-rpc.md` |
+
+All three product codes are measured, DN1's from OS 1.43 (build `0104`). The
+1.42A figures this document carried before the correction — `"60097"` — decompose
+exactly as predicted: `'6'` is 54, and the build was `0097`.
 
 Sections are laid out on 16-byte boundaries in ascending offset order, after
 the header and table. Section ids: 1 FPGA, 2 bootstrap, 3 MAIN OS, 4 updater,
