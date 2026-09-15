@@ -860,7 +860,20 @@ The DNX session was asked to read pattern A1 back off the device. Before any
 read, its knowledge of the **stored** format already sharpens the question, and
 corrects a loose phrase used throughout this section.
 
-**`PROB` is not a p-lockable parameter on stock firmware.** It has no id in the
+> **⚠️ DISPUTED BY THE OWNER, 2026-09-15, and unresolved as this is written.**
+> The owner's words: *"prob is plocable"*, and *"not sure where did you assert
+> or got that information about not been able to p-lock it"*. Fair challenge —
+> **this claim is not ours and was not verified here.** It came from the DNX
+> session, and this document accepted it and rewrote its own wording within
+> minutes of receiving it. That was too fast. The owner plays the instrument;
+> DNX has read the stored bytes; the two may simply be describing different
+> levels — settable per trig from the front panel, stored outside the lock pool
+> — but that reconciliation is a guess and is **not** established. The pattern
+> read now under way should settle it. Until then, treat the paragraph below as
+> **DNX's claim about storage**, not as a fact about what the instrument lets
+> you do.
+
+**DNX's claim: `PROB` is not a p-lockable parameter on stock firmware.** It has no id in the
 lock pool at all. DNX's hardware capture of 2026-07-26 locked 61 controls, one
 per step, and `PROB` — like `NOTE`, `VEL`, `LEN`, `COND`, `FILL`, `RTRG`,
 `VFAD`, Retrig `LEN` and `RATE` — produced **no lock record**. Probability is a
@@ -869,9 +882,12 @@ per-trig byte in the **track record**: `+0x200` from the start of each
 (DNX `docs/dn2-pattern-format.md` §2 / §2.3 and `NOT_LOCKABLE` in
 `src/project/plockparams.ts`.)
 
-So "p-locking `PROB`" above should be read as *"holding a trig and turning
-`PROB`"*. That is what the owner did, and on stock it writes that `+0x200` byte.
-It is not a p-lock, and the distinction matters for what follows.
+On that reading, "p-locking `PROB`" above would mean *"holding a trig and
+turning `PROB`"*, writing the `+0x200` byte rather than making a lock record.
+**That rewording is on hold pending the dispute above** — the original wording
+described what the owner actually did at the instrument, and if `PROB` does
+carry a lock-pool id then it was right all along and DNX's `NOT_LOCKABLE` list
+is what needs the correction.
 
 DNX also supplies the lock-pool numbering, which is **not** the sound value
 array index this document has been using: lock ids are `4·slot + lfo`, so LFO2's
