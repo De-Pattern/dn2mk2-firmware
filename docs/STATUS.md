@@ -82,7 +82,7 @@ Rules that keep it honest:
 |---|---|---|
 | **What dispatches an RPC opcode** | Five static approaches failed; DT2 diff reframed it | Extend DN2's list with `10 13 11 12`, count 22→26, ask the device |
 | **What crosses to the SHARC at runtime?** | **Answered, by digikit** — a periodic **DSPI2** frame over **eDMA 28/29**, `(tx_len, tx_buf, rx_len, rx_buf)`, driven from an interrupt. She has the frame's 16-pass per-track loop; we contributed the cross-device counts | `docs/sharc-image.md` |
-| **Does the engine run a 4th LFO?** | Unknown; both probes non-discriminating. **But the engine's code is now reachable** — section 7 is its program and we know how it is loaded | Two routes now: a cave probe that avoids the storage round-trip, or read the boot stream directly (needs a SHARC disassembler — digikit's) |
+| **Does the engine run a 4th LFO?** | Unknown, but **reframed and much closer**. The DSP frame is now readable (handler `0x40025e36`, builder `0x400274ba`, 16 passes, per-track source stride 202 → frame stride 146). If the frame carries LFO *parameters* the DSP generates; if already-*modulated values*, the ColdFire does and **a 4th LFO needs no DSP support at all**. Arithmetic hint only: the first block is 41 words and runtime indices 25–65 is exactly 41, starting right after LFO3 ends at 24 | **Find what writes the per-track source at `a5+84`** (`%a2`, stride 202, in `0x40025e36`). If it is the value array from `idx = 25`, the blocker is gone. `docs/engine-state.md` |
 | **Does the DSP frame carry an engine/machine id?** | **Open, and digikit's too** — she traced the frame's 16-pass per-track loop over three SRAM tables and found **no engine id in it**, so "stock engine, own parameters" for a new machine is still open | Her `[O]` item; the DN2/DT2 `tx_len` difference (2,688 vs 2,050) is a new constraint on it |
 | **The SHARC Audio Task's structure** | Entry pointer unresolved (digikit, decode desync) | Blocked on decompilation, not disassembly |
 | **The last 72 bits of SHARC figures** | Not named in Rev 1.5's figures | **Deliberately not chased** — helps nothing; see below |
@@ -121,15 +121,15 @@ Rules that keep it honest:
 |---|---|---|---|
 | **Field offsets for `Digisharc::patternStorage_v3_t` vs `_v4_t`** | DNX session, 2026-09-15 | Real work, not a check | Would move DNX from *reading* v4 records to *editing* them. The diff is per-track settings, offsets **1156–1184** within each 1,187-byte track |
 | Type 2a / Type 25a field-extent gaps | ours | small | 72 bits over 8 rows; **deliberately parked** — helps no downstream work and would mix sources into a clean metric |
-| **Send digikit the ColdFire↔SHARC link findings** | owner's standing ask | written, not sent | `docs/for-digikit-coldfire-sharc-link.md` is complete and self-contained. **Awaiting the owner's go-ahead** — it is a PR to a third party's repo, so it is not sent unprompted. Corrects two of our own earlier claims that she may already hold |
+| ~~Send digikit the ColdFire↔SHARC link findings~~ | owner's standing ask | **DONE** | Sent as `m-dwyer/digikit` **#12**. Rewritten first: she was already ahead on the link, so the PR carries only what is additive — the DN2/DT2 frame-length comparison, address correspondences, and both of our corrections |
 
 ---
 
 ## Open pull requests
 
-**#71 open** — `docs/digikit-handover` → `main`, 15 commits, 23 files.
-#64–#70 merged. External: `m-dwyer/digikit` #11 (cross-check, two corrections
-posted).
+**None open on our repo.** #64–#71 all merged; work continues on
+`analysis/lfo4-engine-path`. External: `m-dwyer/digikit` **#12** open (the DN2
+cross-check of her DSPI2 frame) and **#11** open (SHARC+ VISA cross-check).
 
 > **A branch does not close when its PR does.** #70 merged on 2026-09-15 and
 > carried only its **first** commit; fourteen more were then pushed to the same

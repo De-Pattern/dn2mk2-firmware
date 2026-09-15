@@ -174,6 +174,88 @@ machine parameters share the same array" is **inferred** from their sharing the
 same index field and starting exactly where the LFOs stop. Reading the
 `vtable[0xc4]` path would settle it.
 
+## A new angle on the generator: read the frame the DSP is actually sent
+
+**2026-09-16.** The generator question — *does the tick advance an array of N
+phases, or three named instances?* — has been attacked from the ColdFire's side
+and stalled. There is now a third place to look, because we know what the
+ColdFire **sends the DSP** (`docs/sharc-image.md`).
+
+The reasoning is simple and does not depend on finding any generator:
+
+- If the frame carries LFO **parameters** (speed, wave, depth), the DSP is
+  generating the modulation, and a fourth LFO needs the DSP to support one.
+- If the frame carries already-**modulated values**, the ColdFire is
+  generating, the DSP never hears the word "LFO", and **a fourth LFO is a
+  ColdFire-only problem** — which would dissolve the last blocker outright.
+
+### What the frame is, measured
+
+The DN2's handler is at **`0x40025e36`** — `linkw %fp,#-236`, saves `%d0-%a5`,
+then reads `0xfc045640`, **eDMA channel 50's SADDR**. That is
+instruction-for-instruction what digikit describes for the DT2 handler at
+`0x4002d652`, so the two are the same routine and her account carries over.
+
+The frame builder is at `0x400274ba`, and it runs **16 passes** (`d2` 0→32 in
+steps of 2). Per pass:
+
+| | |
+|---|---|
+| source stride | **202 bytes** per track (`lea %a5@(202),%a5`) |
+| frame stride | **146 bytes** per track (`lea %a4@(146),%a4`) |
+| block copies, all through `0x40134490` | `(a4+218 ← a5+84, 82)`, `(a4+300 ← a5+166, 28)`, `(a4+328 ← a5+194, 26)`, `(a4+354 ← a5+224, 10)` |
+
+`82 + 28 + 26 + 10 = 146` exactly, so the four blocks tile each track's slot
+with no gap. Interleaved with them are per-track **word arrays** written
+through `a3`, which advances only 2 per pass — `a3@(0)`, `a3@(50)`, `a3@(82)`,
+`a3@(114)`, `a3@(146)`, `a3@(178)` and `a3@(2648)`. So the frame has two
+regions: field-major word arrays indexed by track, and track-major 146-byte
+blocks.
+
+Three per-track tables feed it, and they are the DN2 counterparts of the ones
+digikit names on the DT2:
+
+| DN2 1.11 | stride | DT2 (digikit) |
+|---|---|---|
+| `0x8000dd60` | 4, read `asr.l #8` | `0x800047fc + 4*i` |
+| `0x8000dd40` | 2 | — |
+| `0x80003af0` | 153 (`addil #153,%d3`) | `0x80003340 + i*0x9a` (154) |
+
+`0x8000dd40` is the base of a **bank of 16-entry word tables at stride `0x20`**
+running to at least `0x8000de60`, written by `0x400db22c` — which sits in the
+parameter machinery, beside `param_index_in_page` at `0x400dbcc4`.
+
+### The hypothesis, and it is arithmetic only so far
+
+The first and largest block is **82 bytes = 41 words**. The runtime index space
+(above) puts **LFO1–3 at indices 1–24** and the machine block at **25–65** —
+which is **exactly 41 indices**.
+
+So the frame's first block may be indices 25–65: the parameters that start
+**immediately after LFO3 ends**. If that is what it is, **LFO parameters are
+not sent to the DSP at all**, and the generator is on the ColdFire.
+
+**This is a coincidence of two counts and nothing more.** It is exactly the
+shape of reasoning that produced §11 and §15 — a number that matched, read as a
+structure. The later blocks do not line up as cleanly (28 bytes = 14 words
+against 20 filter indices), which is itself a reason for caution rather than a
+detail to wave through.
+
+### What would settle it
+
+**Find what writes the per-track source at `a5+84`.** The source base is `%a2`
+in `0x40025e36`, at stride 202. If those 82 bytes are copied from the value
+array at `sub + 0x14 + idx*2` starting at `idx = 25`, the hypothesis is
+confirmed and the LFO4 blocker is gone. If they come from somewhere else, the
+count was a coincidence and this costs nothing but the check.
+
+A second, independent test: **a waveform table in MAIN OS**. The FM oscillators
+are on the DSP, so a sine-shaped table on the ColdFire would most likely be an
+LFO's. Note the asymmetry before running it — finding one is strong evidence,
+**not** finding one proves nothing at all, since triangle, saw, square and
+random need no table and a sine can be computed. A first attempt at this scan
+was abandoned as too slow to be worth it against that payoff.
+
 ## A correction, recorded because it nearly became a patch
 
 An earlier reading of this accessor took its displacement as **+30 decimal** and
