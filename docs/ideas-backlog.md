@@ -479,6 +479,30 @@ reception validates very little — "nothing reception validates can tell our
 *container*, not about `dest` handling specifically. Read
 `verify_and_flash_container` before trusting it.
 
+**Progress 2026-09-15 — and an unexpected negative.** The cost of teaching the
+updater a new id turns on *how* it asks for sections: N call sites each passing
+an immediate (N code edits) or one table of ids it iterates (one data edit).
+Neither, so far.
+
+`find_section_by_id` at `0x80003d6e` is confirmed by disassembly — it loads
+`#524320` (`0x80020`, the section table at flash `0x80000` plus the container's
+`0x20` table offset), walks 16-byte entries, and memcpys each through
+`0x800048aa`. That is the function the branch note described.
+
+**But scanning the whole 32,768-byte updater finds zero calls to it.** The
+scanner is not the problem: it decodes `jsr abs.l`, `bsr.{s,w,l}` and
+`jsr (d16,pc)`, and it was checked against a known call — the routine's own
+`jsr %pc@(0x80003cf8)` at `0x80003d82`, bytes `4e ba ff 74`, resolves exactly.
+There is also no reference to `0x80003d6e` as a 32-bit immediate anywhere in
+the section.
+
+So the lookup is **not invoked from inside the updater**. Either it is called
+across sections — by MAIN OS, which is what actually decompresses and places
+sections on the next boot — or `0x80003d6e` is an interior label rather than the
+entry the callers use. **Until that is settled, the cost of teaching the updater
+a new id is unknown**, and the estimate of "one edit buys 25 MB" is not yet
+supported.
+
 **Risk, stated plainly.** This writes to an address no stock firmware writes to,
 which is a different class of experiment from everything done so far: every
 patch to date has been same-length edits inside a region the device already
