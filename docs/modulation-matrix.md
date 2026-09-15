@@ -447,3 +447,45 @@ So it is **not the answer, and it is the first structure found in the right
 module by an instrument that can see the whole module.** The remaining unread
 functions are `0x400dae1c`, `0x400db798`, `0x400db7d8`, `0x400db800`, and the
 expiry callback `0x400db4ac`.
+
+### The rest of the module, read — and there is no oscillator in it
+
+**2026-09-15, continued after a reboot.** The five functions left unread above
+are now read. **None is an LFO.** With them the module is complete, and this
+time the claim rests on Ghidra's resolved call graph under the `ColdfireEMAC`
+language, not on a `jsr (xxx).L` scan.
+
+| Entry | What it does |
+|---|---|
+| `0x400db4ac` | **expiry callback** for the 16-slot pool: if `+20` holds a handle, release it through `0x40138a0c` and clear it; clear the countdown at `+4` |
+| `0x400db4ce` | **post a type-6 event for a track**: allocate via `0x401389d6`, set `obj[0]=6`, `obj[16]=track`, `obj[24]=pool[track]+0`, and schedule it at `time + 90000` through `0x40138b5c` |
+| `0x400db798` | "is this descriptor still current": if bit 18 of `desc+56` is set, compare `pool[desc+16]+0` against `desc+24` while that slot's countdown runs |
+| `0x400db7d8` | if a track's countdown has gone **negative**, fire the expiry callback |
+| `0x400db800` | `pool[track]+24 = value` for track 0..15, **with interrupts masked** (`move #0x2700,%sr`) |
+| `0x400dae1c` | three global housekeeping countdowns at `0x80005354`, `0x80005358` (step `2 × elapsed`) and `0x8000535c` (step 1), each firing a handler at zero |
+| `0x400dae98` | load one track's **101 base values** into `0x8000dea4 + 808·track` as `value << 16` — the bulk-set path, consistent with the `101·track + 17` indexing above |
+
+So the 16-slot pool at `0x42c645e8` is a **per-track event timer**: bounded to
+tracks 0–15, holding a handle that is released on expiry, and scheduling
+type-6 events 90,000 ticks out. That reads as **note gate or retrig timing**,
+not modulation. It is in this module because it shares the trig-handler
+descriptor (`+16` track, `+24`, `+56` flags) — not because it modulates.
+
+### What this now establishes about the tick
+
+**The LFO oscillator is not in the modulation module and is not called from it.**
+The module is: the six-source apply, the p-lock apply, the base-value store, the
+modulated-parameter bitmap, and a per-track event timer. Nothing in it wraps a
+phase.
+
+That narrows the search, honestly this time. The frame ISR `FUN_40025e36` has
+73 resolved callees; the module accounts for sixteen of them, and the SPI send,
+memset and block copy for three more. The remaining unread callees sit in
+`0x40029bca`–`0x4002a6a2` and `0x4002b06e`–`0x4002b1b6`, next to the ISR — or
+the tick does not run in the audio frame at all and lives on the sequencer
+clock, which the DN2's tempo-synced LFOs would make unsurprising.
+
+**The next search should be for the oscillator's signature, not by reading
+functions one at a time:** a phase that **wraps** rather than clamps, fed by
+`SPD` and `MULT` — which sit at `track_base + 36` and `+38` for LFO1, and
+`+16·lfo` further for LFO2 and LFO3.
