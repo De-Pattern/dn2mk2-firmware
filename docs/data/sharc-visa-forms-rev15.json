@@ -18,6 +18,63 @@
         "46": 0,
         "45": 1
       },
+      "fields": [
+        {
+          "high": 44,
+          "low": 44,
+          "name": "pmd"
+        },
+        {
+          "high": 43,
+          "low": 41,
+          "name": "dmi[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "dmm[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 37,
+          "name": "pmi[2:2]"
+        },
+        {
+          "high": 36,
+          "low": 33,
+          "name": "dmdreg[3:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "dmdreg[3:0]"
+        },
+        {
+          "high": 31,
+          "low": 30,
+          "name": "pmi[1:0]"
+        },
+        {
+          "high": 29,
+          "low": 27,
+          "name": "pmm[2:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "pmdreg[3:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -51,6 +108,68 @@
         "17": 1,
         "16": 1
       },
+      "fields": [
+        {
+          "high": 44,
+          "low": 44,
+          "name": "pmd"
+        },
+        {
+          "high": 43,
+          "low": 41,
+          "name": "dmi[2:0]"
+        },
+        {
+          "high": 42,
+          "low": 42,
+          "name": "dmi[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "dmm[2:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "dmi[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 37,
+          "name": "dmdreg[3:0]"
+        },
+        {
+          "high": 36,
+          "low": 33,
+          "name": "dmdreg[3:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "dmdreg[3:0]"
+        },
+        {
+          "high": 31,
+          "low": 30,
+          "name": "pmi[1:0]"
+        },
+        {
+          "high": 29,
+          "low": 27,
+          "name": "pmm[2:0]"
+        },
+        {
+          "high": 28,
+          "low": 28,
+          "name": "pmi[1:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "pmdreg[3:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -90,6 +209,23 @@
         "24": 0,
         "23": 0
       },
+      "fields": [
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -122,6 +258,18 @@
         "40": 0,
         "39": 0
       },
+      "fields": [
+        {
+          "high": 38,
+          "low": 32,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 31,
+          "low": 16,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -145,6 +293,13 @@
         "45": 0,
         "44": 0
       },
+      "fields": [
+        {
+          "high": 43,
+          "low": 32,
+          "name": "compute[11:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -163,6 +318,63 @@
         "46": 0,
         "45": 1
       },
+      "fields": [
+        {
+          "high": 44,
+          "low": 44,
+          "name": "pmd"
+        },
+        {
+          "high": 43,
+          "low": 41,
+          "name": "dmi[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "dmm[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 37,
+          "name": "pmi[2:2]"
+        },
+        {
+          "high": 36,
+          "low": 33,
+          "name": "dmdreg[3:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "dmdreg[3:0]"
+        },
+        {
+          "high": 31,
+          "low": 30,
+          "name": "pmi[1:0]"
+        },
+        {
+          "high": 29,
+          "low": 27,
+          "name": "pmm[2:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "pmdreg[3:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -194,6 +406,58 @@
         "19": 1,
         "18": 1
       },
+      "fields": [
+        {
+          "high": 44,
+          "low": 44,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 43,
+          "low": 41,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 31,
+          "low": 31,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 30,
+          "low": 30,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 29,
+          "low": 23,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 17,
+          "low": 17,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 16,
+          "low": 16,
+          "name": "ureg[6:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -218,6 +482,28 @@
         "44": 1,
         "36": 1
       },
+      "fields": [
+        {
+          "high": 43,
+          "low": 41,
+          "name": "dmi[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "dmm[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 37,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 35,
+          "low": 32,
+          "name": "dreg[3:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -240,6 +526,63 @@
         "20": 1,
         "19": 0
       },
+      "fields": [
+        {
+          "high": 44,
+          "low": 44,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 43,
+          "low": 41,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 31,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 30,
+          "low": 30,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 29,
+          "low": 23,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 18,
+          "low": 18,
+          "name": "ex"
+        },
+        {
+          "high": 17,
+          "low": 17,
+          "name": "ex"
+        },
+        {
+          "high": 16,
+          "low": 16,
+          "name": "ex"
+        }
+      ],
       "rows": [
         [
           47,
@@ -267,6 +610,58 @@
         "45": 1,
         "44": 0
       },
+      "fields": [
+        {
+          "high": 43,
+          "low": 41,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 40,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 38,
+          "low": 38,
+          "name": "data[5:5]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 27,
+          "name": "data[4:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -298,6 +693,63 @@
         "20": 1,
         "19": 1
       },
+      "fields": [
+        {
+          "high": 43,
+          "low": 41,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 40,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 38,
+          "low": 38,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 27,
+          "name": "data[4:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "dreg[6:0]"
+        },
+        {
+          "high": 18,
+          "low": 18,
+          "name": "dreg[6:0]"
+        },
+        {
+          "high": 17,
+          "low": 17,
+          "name": "dreg[6:0]"
+        },
+        {
+          "high": 16,
+          "low": 16,
+          "name": "dreg[6:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -325,6 +777,63 @@
         "20": 1,
         "19": 0
       },
+      "fields": [
+        {
+          "high": 43,
+          "low": 41,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 40,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 38,
+          "low": 38,
+          "name": "data[5:5]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 27,
+          "name": "data[4:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 18,
+          "low": 18,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 17,
+          "low": 17,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 16,
+          "low": 16,
+          "name": "dreg[3:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -354,6 +863,43 @@
         "43": 0,
         "30": 0
       },
+      "fields": [
+        {
+          "high": 42,
+          "low": 38,
+          "name": "srcureghigh[4:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 31,
+          "name": "dstureg[6:0]"
+        },
+        {
+          "high": 29,
+          "low": 23,
+          "name": "dstureg[6:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -389,6 +935,33 @@
         "28": 0,
         "27": 0
       },
+      "fields": [
+        {
+          "high": 41,
+          "low": 38,
+          "name": "cdreg[3:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -425,6 +998,33 @@
         "17": 0,
         "16": 0
       },
+      "fields": [
+        {
+          "high": 42,
+          "low": 38,
+          "name": "srcureghigh[4:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 31,
+          "name": null
+        },
+        {
+          "high": 29,
+          "low": 23,
+          "name": "dstureg[6:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -463,6 +1063,23 @@
         "17": 1,
         "16": 1
       },
+      "fields": [
+        {
+          "high": 41,
+          "low": 38,
+          "name": "cdreg[3:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "dreg[3:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -486,6 +1103,53 @@
         "45": 0,
         "44": 0
       },
+      "fields": [
+        {
+          "high": 43,
+          "low": 41,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 31,
+          "name": "dataex[3:0]"
+        },
+        {
+          "high": 30,
+          "low": 27,
+          "name": "dataex[3:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "shiftimm[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "shiftimm[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -525,6 +1189,28 @@
         "24": 0,
         "23": 0
       },
+      "fields": [
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 30,
+          "low": 27,
+          "name": "dataex[3:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "shiftimm[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "shiftimm[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -559,6 +1245,53 @@
         "29": 0,
         "23": 1
       },
+      "fields": [
+        {
+          "high": 38,
+          "low": 38,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 30,
+          "name": "is[1:0]"
+        },
+        {
+          "high": 28,
+          "low": 28,
+          "name": "is[1:0]"
+        },
+        {
+          "high": 27,
+          "low": 27,
+          "name": "is[1:0]"
+        },
+        {
+          "high": 26,
+          "low": 24,
+          "name": "idis[2:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -599,6 +1332,38 @@
         "17": 1,
         "16": 1
       },
+      "fields": [
+        {
+          "high": 38,
+          "low": 38,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 30,
+          "name": "is[1:0]"
+        },
+        {
+          "high": 29,
+          "low": 27,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 26,
+          "low": 24,
+          "name": "idis[2:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -629,6 +1394,53 @@
         "29": 0,
         "23": 1
       },
+      "fields": [
+        {
+          "high": 38,
+          "low": 38,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 30,
+          "name": "is[1:0]"
+        },
+        {
+          "high": 28,
+          "low": 28,
+          "name": "is[1:0]"
+        },
+        {
+          "high": 27,
+          "low": 27,
+          "name": "is[1:0]"
+        },
+        {
+          "high": 26,
+          "low": 24,
+          "name": "idis[2:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -666,6 +1478,48 @@
         "27": 0,
         "25": 0
       },
+      "fields": [
+        {
+          "high": 40,
+          "low": 40,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 38,
+          "low": 38,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 26,
+          "low": 26,
+          "name": "ci"
+        },
+        {
+          "high": 24,
+          "low": 24,
+          "name": "ci"
+        },
+        {
+          "high": 23,
+          "low": 16,
+          "name": "ci"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "Type8a"
+        }
+      ],
       "rows": [
         [
           47,
@@ -697,6 +1551,68 @@
         "41": 0,
         "23": 0
       },
+      "fields": [
+        {
+          "high": 40,
+          "low": 40,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "rel"
+        },
+        {
+          "high": 38,
+          "low": 38,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 30,
+          "name": "pmi[1:0]"
+        },
+        {
+          "high": 29,
+          "low": 27,
+          "name": "pmm[2:0]"
+        },
+        {
+          "high": 26,
+          "low": 26,
+          "name": "pmm[2:0]"
+        },
+        {
+          "high": 25,
+          "low": 25,
+          "name": "ci"
+        },
+        {
+          "high": 24,
+          "low": 24,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -736,6 +1652,53 @@
         "1": 0,
         "0": 0
       },
+      "fields": [
+        {
+          "high": 24,
+          "low": 24,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 23,
+          "low": 23,
+          "name": "rel"
+        },
+        {
+          "high": 22,
+          "low": 22,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 21,
+          "low": 17,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 16,
+          "low": 16,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 15,
+          "low": 14,
+          "name": "pmi[1:0]"
+        },
+        {
+          "high": 13,
+          "low": 11,
+          "name": "pmm[2:0]"
+        },
+        {
+          "high": 10,
+          "low": 10,
+          "name": "ci"
+        },
+        {
+          "high": 8,
+          "low": 8,
+          "name": "pmm[2:0]"
+        }
+      ],
       "rows": [
         [
           31,
@@ -757,6 +1720,63 @@
         "47": 1,
         "46": 1
       },
+      "fields": [
+        {
+          "high": 45,
+          "low": 45,
+          "name": "dmm[2:0]"
+        },
+        {
+          "high": 44,
+          "low": 44,
+          "name": "rel"
+        },
+        {
+          "high": 43,
+          "low": 41,
+          "name": "dmi[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "dmm[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 31,
+          "low": 30,
+          "name": "pmi[1:0]"
+        },
+        {
+          "high": 29,
+          "low": 27,
+          "name": "pmm[2:0]"
+        },
+        {
+          "high": 26,
+          "low": 23,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -787,6 +1807,38 @@
         "42": 0,
         "41": 1
       },
+      "fields": [
+        {
+          "high": 40,
+          "low": 40,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 37,
+          "low": 33,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 26,
+          "low": 26,
+          "name": "lr"
+        },
+        {
+          "high": 25,
+          "low": 25,
+          "name": "lr"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "compute[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "compute[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -818,6 +1870,28 @@
         "9": 0,
         "7": 1
       },
+      "fields": [
+        {
+          "high": 8,
+          "low": 8,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 6,
+          "low": 6,
+          "name": "lr"
+        },
+        {
+          "high": 5,
+          "low": 1,
+          "name": "cond[4:0]"
+        },
+        {
+          "high": 0,
+          "low": 0,
+          "name": "cond[4:0]"
+        }
+      ],
       "rows": [
         [
           15,
@@ -841,6 +1915,28 @@
         "41": 0,
         "40": 0
       },
+      "fields": [
+        {
+          "high": 39,
+          "low": 32,
+          "name": "data[15:8]"
+        },
+        {
+          "high": 31,
+          "low": 24,
+          "name": "data[7:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "reladdr[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "reladdr[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -881,6 +1977,23 @@
         "25": 0,
         "24": 0
       },
+      "fields": [
+        {
+          "high": 38,
+          "low": 32,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "reladdr[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "reladdr[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -922,6 +2035,23 @@
         "25": 0,
         "24": 0
       },
+      "fields": [
+        {
+          "high": 37,
+          "low": 33,
+          "name": "term[4:0]"
+        },
+        {
+          "high": 22,
+          "low": 16,
+          "name": "reladdr[22:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "reladdr[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -951,6 +2081,38 @@
         "43": 0,
         "42": 0
       },
+      "fields": [
+        {
+          "high": 41,
+          "low": 41,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 40,
+          "low": 40,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 38,
+          "low": 32,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 31,
+          "low": 16,
+          "name": null
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "Type14a"
+        }
+      ],
       "rows": [
         [
           47,
@@ -981,6 +2143,48 @@
         "42": 0,
         "41": 1
       },
+      "fields": [
+        {
+          "high": 40,
+          "low": 40,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "ex"
+        },
+        {
+          "high": 38,
+          "low": 38,
+          "name": "ex"
+        },
+        {
+          "high": 37,
+          "low": 37,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 36,
+          "low": 36,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 35,
+          "low": 32,
+          "name": "dreg[3:0]"
+        },
+        {
+          "high": 31,
+          "low": 16,
+          "name": null
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "Type14d"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1007,6 +2211,43 @@
         "46": 0,
         "45": 1
       },
+      "fields": [
+        {
+          "high": 44,
+          "low": 44,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 43,
+          "low": 41,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 40,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 38,
+          "low": 32,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 31,
+          "low": 16,
+          "name": null
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "Type15a"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1042,6 +2283,38 @@
         "15": 0,
         "14": 0
       },
+      "fields": [
+        {
+          "high": 27,
+          "low": 25,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 24,
+          "low": 24,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 23,
+          "low": 23,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 21,
+          "low": 21,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 13,
+          "low": 7,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 6,
+          "low": 0,
+          "name": "data[6:0]"
+        }
+      ],
       "rows": [
         [
           31,
@@ -1068,6 +2341,43 @@
         "35": 0,
         "34": 0
       },
+      "fields": [
+        {
+          "high": 43,
+          "low": 41,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 37,
+          "name": "sl"
+        },
+        {
+          "high": 33,
+          "low": 33,
+          "name": "by"
+        },
+        {
+          "high": 32,
+          "low": 32,
+          "name": "sl"
+        },
+        {
+          "high": 31,
+          "low": 16,
+          "name": "data[31:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "data[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1100,6 +2410,28 @@
         "33": 0,
         "32": 0
       },
+      "fields": [
+        {
+          "high": 43,
+          "low": 41,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 40,
+          "low": 38,
+          "name": "m[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 37,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 16,
+          "low": 16,
+          "name": "data[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1128,6 +2460,23 @@
         "40": 1,
         "39": 0
       },
+      "fields": [
+        {
+          "high": 38,
+          "low": 32,
+          "name": "i[2:0]"
+        },
+        {
+          "high": 31,
+          "low": 16,
+          "name": "data[31:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "data[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1160,6 +2509,18 @@
         "24": 0,
         "23": 0
       },
+      "fields": [
+        {
+          "high": 22,
+          "low": 16,
+          "name": "ureg[6:0]"
+        },
+        {
+          "high": 0,
+          "low": 0,
+          "name": "data[15:0]"
+        }
+      ],
       "rows": [
         [
           31,
@@ -1188,6 +2549,28 @@
         "40": 0,
         "36": 0
       },
+      "fields": [
+        {
+          "high": 39,
+          "low": 37,
+          "name": "bop[2:0]"
+        },
+        {
+          "high": 35,
+          "low": 32,
+          "name": "sreg[3:0]"
+        },
+        {
+          "high": 31,
+          "low": 16,
+          "name": "data[31:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "data[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1217,6 +2600,43 @@
         "43": 0,
         "42": 1
       },
+      "fields": [
+        {
+          "high": 41,
+          "low": 40,
+          "name": "sc[1:0]"
+        },
+        {
+          "high": 39,
+          "low": 39,
+          "name": "sc[1:0]"
+        },
+        {
+          "high": 38,
+          "low": 38,
+          "name": "sc[1:0]"
+        },
+        {
+          "high": 37,
+          "low": 35,
+          "name": "idis[2:0]"
+        },
+        {
+          "high": 34,
+          "low": 32,
+          "name": "is[2:0]"
+        },
+        {
+          "high": 31,
+          "low": 16,
+          "name": "data[31:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "data[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1249,6 +2669,33 @@
         "40": 0,
         "39": 0
       },
+      "fields": [
+        {
+          "high": 38,
+          "low": 38,
+          "name": "idis[2:0]"
+        },
+        {
+          "high": 37,
+          "low": 35,
+          "name": "idis[2:0]"
+        },
+        {
+          "high": 34,
+          "low": 32,
+          "name": "is[2:0]"
+        },
+        {
+          "high": 31,
+          "low": 16,
+          "name": "data[31:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "data[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1281,6 +2728,68 @@
         "40": 1,
         "32": 0
       },
+      "fields": [
+        {
+          "high": 39,
+          "low": 39,
+          "name": "spo"
+        },
+        {
+          "high": 38,
+          "low": 38,
+          "name": "lpu"
+        },
+        {
+          "high": 37,
+          "low": 37,
+          "name": "lpo"
+        },
+        {
+          "high": 36,
+          "low": 36,
+          "name": "ppu"
+        },
+        {
+          "high": 35,
+          "low": 35,
+          "name": "ppo"
+        },
+        {
+          "high": 34,
+          "low": 34,
+          "name": "fc"
+        },
+        {
+          "high": 33,
+          "low": 33,
+          "name": "ppo"
+        },
+        {
+          "high": 31,
+          "low": 31,
+          "name": "lldwb"
+        },
+        {
+          "high": 30,
+          "low": 30,
+          "name": "llii"
+        },
+        {
+          "high": 29,
+          "low": 29,
+          "name": "llii"
+        },
+        {
+          "high": 28,
+          "low": 28,
+          "name": "llpi"
+        },
+        {
+          "high": 27,
+          "low": 27,
+          "name": "lldwb"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1314,6 +2823,7 @@
         "39": 0,
         "38": 0
       },
+      "fields": [],
       "rows": [
         [
           47,
@@ -1353,6 +2863,7 @@
         "1": 0,
         "0": 1
       },
+      "fields": [],
       "rows": [
         [
           15,
@@ -1377,6 +2888,13 @@
         "40": 0,
         "39": 1
       },
+      "fields": [
+        {
+          "high": 38,
+          "low": 38,
+          "name": "emu"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1415,6 +2933,13 @@
         "1": 0,
         "0": 1
       },
+      "fields": [
+        {
+          "high": 6,
+          "low": 6,
+          "name": null
+        }
+      ],
       "rows": [
         [
           15,
@@ -1454,6 +2979,18 @@
         "25": 0,
         "24": 0
       },
+      "fields": [
+        {
+          "high": 23,
+          "low": 16,
+          "name": null
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "Type25a_direct"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1501,6 +3038,18 @@
         "25": 0,
         "24": 0
       },
+      "fields": [
+        {
+          "high": 23,
+          "low": 16,
+          "name": "reladdr[23:16]"
+        },
+        {
+          "high": 15,
+          "low": 0,
+          "name": "reladdr[15:0]"
+        }
+      ],
       "rows": [
         [
           47,
@@ -1548,6 +3097,7 @@
         "25": 0,
         "24": 0
       },
+      "fields": [],
       "rows": [
         [
           47,
@@ -1587,6 +3137,7 @@
         "33": 0,
         "32": 0
       },
+      "fields": [],
       "rows": [
         [
           47,
@@ -1622,6 +3173,7 @@
         "33": 0,
         "32": 0
       },
+      "fields": [],
       "rows": [
         [
           47,
@@ -1644,6 +3196,43 @@
       "page": 423,
       "width": 32,
       "fixed": {},
+      "fields": [
+        {
+          "high": 22,
+          "low": 22,
+          "name": "cu[1:0]"
+        },
+        {
+          "high": 21,
+          "low": 20,
+          "name": "cu[1:0]"
+        },
+        {
+          "high": 19,
+          "low": 16,
+          "name": "cu[1:0]"
+        },
+        {
+          "high": 15,
+          "low": 12,
+          "name": "rn[3:0]"
+        },
+        {
+          "high": 11,
+          "low": 8,
+          "name": "rn[3:0]"
+        },
+        {
+          "high": 7,
+          "low": 4,
+          "name": "rx[3:0]"
+        },
+        {
+          "high": 3,
+          "low": 0,
+          "name": "ry[3:0]"
+        }
+      ],
       "rows": [
         [
           31,
@@ -1662,6 +3251,23 @@
       "page": 424,
       "width": 16,
       "fixed": {},
+      "fields": [
+        {
+          "high": 11,
+          "low": 8,
+          "name": "ShortCompute"
+        },
+        {
+          "high": 7,
+          "low": 4,
+          "name": "rn[3:0]"
+        },
+        {
+          "high": 3,
+          "low": 0,
+          "name": "rx[3:0]"
+        }
+      ],
       "rows": [
         [
           15,
@@ -1678,6 +3284,33 @@
       "fixed": {
         "22": 0
       },
+      "fields": [
+        {
+          "high": 26,
+          "low": 23,
+          "name": "dataex[3:0]"
+        },
+        {
+          "high": 21,
+          "low": 16,
+          "name": "shiftop[5:0]"
+        },
+        {
+          "high": 15,
+          "low": 8,
+          "name": "data[7:0]"
+        },
+        {
+          "high": 7,
+          "low": 4,
+          "name": "rn[3:0]"
+        },
+        {
+          "high": 3,
+          "low": 0,
+          "name": "rx[3:0]"
+        }
+      ],
       "rows": [
         [
           31,

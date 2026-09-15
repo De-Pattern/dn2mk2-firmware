@@ -130,6 +130,91 @@ def declared_modes(document, lo, hi):
     return modes
 
 
+# Field names come in two shapes. Most declare their width -- `cond[4:0]` --
+# but some figures name individual bits with a bare mnemonic instead
+# (`lldi`, `lpu`, `spu` on Type20a), and requiring the bracketed form drops
+# every one of those, leaving the figure looking mostly unlabelled.
+FIELD_LABEL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\[\d+:\d+\])?$")
+
+# Prose and furniture that sit near a figure and would otherwise be matched as
+# a field name. Checked case-insensitively.
+NOT_A_FIELD = {
+    "figure", "table", "instruction", "opcode", "syntax", "summary", "type",
+    "addr", "operation", "option", "modifier", "abstract", "description",
+    "example", "visa", "isa", "yes", "no", "the", "following", "provides",
+    "and", "for", "with", "this", "that", "bit", "bits", "field", "fields",
+    "computation", "continued", "mode", "note", "see", "where", "when",
+}
+
+
+def is_field_name(text: str) -> bool:
+    if not FIELD_LABEL.match(text) or len(text) < 2 or len(text) > 24:
+        return False
+    stem = text.split("[")[0]
+    return stem.lower() not in NOT_A_FIELD and not stem.isdigit()
+
+
+def field_extents(page, strokes, frame, y, hi_bit, count):
+    """-> [(high bit, low bit, name)] for one bit row, from the brackets.
+
+    Under each row the PRM draws a bracket spanning a field's cells and a
+    leader line out to the field's name. The bracket's endpoints sit on cell
+    CENTRES, so a cell index is exactly `(x - (frame.x0 + 4.5)) / 9`.
+
+    A one-bit field is drawn differently -- an L-shaped leader starting at a
+    single cell centre and turning away -- so only its near end lands on a
+    centre. Requiring both ends to be integral silently drops every one of
+    them, and with them the check that a figure's bits are fully accounted for.
+    """
+    origin = frame.x0 + CELL_WIDTH / 2
+    bottom = y + CELL_WIDTH
+    # Only labels in the band below this row can belong to its brackets;
+    # without the band, prose elsewhere on the page competes for the match.
+    labels = [w for w in page.get_text("words")
+              if is_field_name(w[4]) and bottom - 4 <= w[1] <= bottom + 48]
+
+    brackets = []
+    for drawing in strokes:
+        rect = drawing["rect"]
+        if not (bottom - 1 <= rect.y0 <= bottom + 8) or rect.width <= 0:
+            continue
+        k0 = (rect.x0 - origin) / CELL_WIDTH
+        k1 = (rect.x1 - origin) / CELL_WIDTH
+        on0 = abs(k0 - round(k0)) <= 0.12 and 0 <= round(k0) < count
+        on1 = abs(k1 - round(k1)) <= 0.12 and 0 <= round(k1) < count
+        if on0 and on1:
+            first, last = int(round(k0)), int(round(k1))   # a span bracket
+        elif on0 or on1:
+            # An L-leader touching one cell. Which end sits on the grid depends
+            # on which side the label is: a leader running LEFT to its name has
+            # its cell end at x1, not x0. Testing only x0 loses every one of
+            # those, which is most of the single-bit fields in some figures.
+            first = last = int(round(k0 if on0 else k1))
+        else:
+            continue
+        if not (0 <= first <= last < count):
+            continue
+        brackets.append((first, last, rect))
+
+    out = []
+    for first, last, rect in sorted(brackets):
+        best, best_score = None, 1e9
+        for drawing in strokes:
+            leader = drawing["rect"]
+            if leader is rect or leader.y1 < rect.y0:
+                continue
+            for x in (leader.x0, leader.x1):
+                if rect.x0 - 1 <= x <= rect.x1 + 1:
+                    far_x = leader.x1 if x == leader.x0 else leader.x0
+                    for word in labels:
+                        score = (min(abs(word[0] - far_x), abs(word[2] - far_x))
+                                 + abs(word[1] - leader.y1))
+                        if score < best_score:
+                            best, best_score = word[4], score
+        out.append((hi_bit - first, hi_bit - last, best))
+    return out
+
+
 def read_row(y, row, words):
     frame = row["frame"]
     count = int(round(frame.width / CELL_WIDTH))
@@ -167,6 +252,8 @@ def extract(path, lo=FIGURE_PAGES[0], hi=FIGURE_PAGES[1]):
             continue
         words = page.get_text("words")
         page_captions = captions(page)
+        strokes = [d for d in page.get_drawings()
+                   if d.get("type") == "s" and d["rect"].width > 0]
         current = None
         for y in sorted(rows):
             row = rows[y]
@@ -190,6 +277,7 @@ def extract(path, lo=FIGURE_PAGES[0], hi=FIGURE_PAGES[1]):
                     "page": number,
                     "width": 0,
                     "fixed": {},
+                    "fields": [],
                     "rows": [],
                 }
                 order.append(key)
@@ -199,6 +287,10 @@ def extract(path, lo=FIGURE_PAGES[0], hi=FIGURE_PAGES[1]):
             entry["width"] += len(bits)
             entry["rows"].append([max(bits), min(bits)])
             entry["fixed"].update({str(b): v for b, v in fixed.items()})
+            for high, low, name in field_extents(
+                page, strokes, row["frame"], y, max(bits), len(bits)
+            ):
+                entry["fields"].append({"high": high, "low": low, "name": name})
 
     return [forms[k] for k in order]
 
@@ -257,6 +349,28 @@ def main(argv=None) -> int:
     print("  modes:  " + ", ".join(f"{m}: {c}" for m, c in sorted(
         modes.items(), key=lambda kv: str(kv[0]))))
     print(f"  rows failing the descending-bit check: {len(bad)}")
+
+    # Bit-level accounting: every bit of every form should be either a fixed
+    # opcode bit or part of a named field. This is a coverage figure that means
+    # something, unlike a match rate -- it cannot be improved by loosening
+    # anything, and a gap names the figure and the bits that are unexplained.
+    accounted = total_bits = 0
+    incomplete = []
+    for entry in entries:
+        covered = {int(b) for b in entry["fixed"]}
+        for field in entry["fields"]:
+            covered.update(range(field["low"], field["high"] + 1))
+        accounted += len(covered)
+        total_bits += entry["width"]
+        if len(covered) != entry["width"]:
+            incomplete.append((entry["name"], entry["width"] - len(covered)))
+    share = 100.0 * accounted / total_bits if total_bits else 0.0
+    print(f"  bits accounted for (fixed or named field): "
+          f"{accounted:,}/{total_bits:,} = {share:.2f}%")
+    if incomplete:
+        print(f"  forms with unexplained bits: {len(incomplete)}")
+        for name, missing in sorted(incomplete, key=lambda p: -p[1])[:10]:
+            print(f"    {name:<26} {missing:>3} bits unaccounted")
 
     if args.subsume:
         pairs = subsumptions(entries)

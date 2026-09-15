@@ -63,7 +63,11 @@ fixed  .  #  .  .  .  .  .  .  .  #  #  #  #  #  #  #    8 cells
 > **positions**, and the shaded-means-fixed reading, are ours — and the other 52
 > figures were extracted without opening `sharc_visa_tables.py`.
 
-## 2. Coverage of the extraction: 100%
+## 2. Coverage
+
+Two different things are worth counting, and only one of them is at 100%.
+
+### Figure coverage: 100%
 
 | | |
 |---|---|
@@ -72,6 +76,43 @@ fixed  .  #  .  .  .  .  .  .  .  #  #  #  #  #  #  #    8 cells
 | rows failing the descending-bit self-check | **0 of 137** |
 | declared instruction families | **44** |
 | families with no figure | **0** |
+
+### Bit-level accounting: 87.64%
+
+Every bit of every form should be either a fixed opcode bit or part of a named
+field. **1,907 of 2,176 bits are accounted for.**
+
+This is a coverage figure that means something, and it is the one to track. It
+**cannot be improved by loosening anything** — unlike a match rate, where an
+emptier table scores higher. A gap names the form and the bits that remain
+unexplained.
+
+The residue is 269 bits across 17 forms, and it splits in a way that matters:
+
+| | forms | bits |
+|---|---|---|
+| figures carrying **no field labels at all** | 4 | 110 |
+| figures partially labelled | 13 | 159 |
+
+```
+no labels at all : Type21a p413 (38)   Type26a p421 (32)
+                   Type25a_rframe p419 (24)   Type25c_rframe p420 (16)
+```
+
+**For those four, 100% is not reachable from the figures** — the PRM simply does
+not name those bits there, and the names would have to come from the syntax
+tables instead. The partially-labelled thirteen are the ones still worth
+chasing; `Type3d` and `Type4d` each lose exactly 16 bits, one whole row, which
+smells like an extractor gap rather than a document one.
+
+Widths: **16-bit ×6, 32-bit ×14, 48-bit ×34.** VISA is genuinely variable, and
+treating every figure as 48-bit — slicing "the top 8 bits" at 47..40 — is
+meaningless for a third of them.
+
+The self-check is what makes the zeros above worth anything: bit labels are read
+from the page rather than assumed, so a mis-mapped row shows as a sequence that
+is not a clean descending run. Run over the entire 798-page document it flags
+exactly one spurious figure, on page 42, outside the instruction chapters.
 
 Widths: **16-bit ×6, 32-bit ×14, 48-bit ×34.** VISA is genuinely variable, and
 treating every figure as 48-bit — slicing "the top 8 bits" at 47..40 — is
@@ -169,16 +210,39 @@ constraint does. It is still not branch alignment.
 
 ## 5. What is not done
 
-**Field extents.** The figures' brackets bind cell ranges to names
-(`srcureghigh[4:0]`, `cond[4:0]`). We extract the fixed-bit masks but not the
-field positions, and **branch alignment cannot be computed without them** —
-there is no displacement field to follow. This is the next step and it is the
-gate on producing a number comparable to hers.
+**Branch alignment**, which is the metric that would be comparable to hers. The
+field extents it needs are now extracted (§2), so the remaining work is
+following each branch form's displacement field and checking the target lands
+inside the code region on an instruction boundary. That is the next step.
 
-A shortcut was tested and does not hold on its own: each label declares its own
-width, so the widths might tile the unshaded cells exactly. They do for 12 of
-46 figures. The rest disagree, partly because several pages carry two figures
-and the test summed them together, partly for reasons not yet chased.
+**The last 12.36% of bit accounting.** Four forms cannot be completed from the
+figures at all; the other thirteen are open.
+
+**MULOP and SHIFTOP.** ALUOP extracts cleanly; the other two tables are not
+being found by the table finder yet. `scripts/prm_compute_tables.py` reports
+what it has rather than implying completeness.
+
+### How the field extents were recovered, since it is reusable
+
+Under each bit row the PRM draws a bracket spanning a field's cells and a leader
+line out to the field's name. **The bracket's endpoints sit on cell centres**, so
+a cell index is exactly `(x - (frame.x0 + 4.5)) / 9`. Matching bracket to name
+means following the leader whose near end lies within the bracket's span and
+taking the nearest label to its far end — width alone will not do it, because
+`srcureghigh[4:0]` and `cond[4:0]` are both five bits.
+
+Two shapes had to be handled, and each was worth several points of coverage:
+
+- **A one-bit field is an L-leader**, not a bracket, so only one end sits on the
+  grid — and **which** end depends on which side its label is. Testing only
+  `x0` loses every leader that runs leftward to its name.
+- **Some figures name individual bits with a bare mnemonic** (`lldi`, `lpu`,
+  `spu` on Type20a) rather than the `name[hi:lo]` form. Requiring the bracketed
+  form leaves those figures looking unlabelled.
+
+A shortcut was tested and rejected: each label declares its own width, so the
+widths might tile the unshaded cells. They do for only 12 of 46 figures, so
+geometry was needed after all.
 
 **MULOP and SHIFTOP.** ALUOP extracts cleanly; the other two tables are not
 being found by the table finder yet. `scripts/prm_compute_tables.py` reports
