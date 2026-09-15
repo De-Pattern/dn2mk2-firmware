@@ -96,20 +96,36 @@ with the 48-bit branch family. **Our independent raster read of the classic
 gives `000000011` — her documented alternative, digit for digit.** Three
 readings, one conclusion: the conflict is real and her resolution stands.
 
-### 2. Type 2a — ours looks wrong, not the document
+### 2. Type 2a — a generational re-encoding, and our read is right
 
-Classic gives **8** fixed bits (47..45 `000`, 44..40 `00001`). Our Rev 1.5
-extraction claims **20**, spanning 47..38 *and* 32..23. That shape — two
-disjoint runs — is what figure-merging looks like, and p312 carries more than
-one figure. **Suspected fault in our caption grouping, not in either manual.**
-Not yet fixed.
+Classic gives **8** fixed bits (47..45 `000`, 44..40 `00001`); our Rev 1.5
+extraction claims **20**, spanning 47..38 *and* 32..23.
 
-### 3. Type 25a RFRAME — ours is short
+> **[CORRECTED — this was first written up as "suspected fault in our caption
+> grouping".]** It is not. Rendering p312 shows the figure exactly as extracted:
+> grey at 47..38 and 32 in the first row, 31..23 in the second, the third row
+> entirely unshaded. **Rev 1.5 genuinely puts Type 2a at `0010000000`** — nested
+> inside Type 1a's `001` space, which is one of the subsumption pairs already
+> recorded — while the classic has it at `000 00001`, disjoint from Type 1a.
+> The encoding was reorganised between cores. Nothing to fix.
 
-The classic shows **all 48 bits fixed** (`0001 1001` then zeros throughout);
-we extract **24**. `prm_label_ceiling.py` already flags p419 as carrying a row
-with no brackets, so the low 16 bits are probably present-but-unread on our
-side. Also ours, also unfixed.
+### 3. Type 25a RFRAME — also not a fault
+
+The classic shows **all 48 bits fixed**; we extract **24**.
+
+> **[CORRECTED.]** Our 24 grey bits are right. The classic's RFRAME is a
+> fully-specified 48-bit instruction and Rev 1.5's is a different encoding.
+>
+> Rendering it did find something, though, and in colour: **bits 3..0 are
+> yellow, not white.** That is the third cell colour — `(0.95, 0.80, 0.19)`,
+> *unused or outside the field being shown* — which our reader had never looked
+> for, counting every such cell as an unnamed free bit. Handling it took bit
+> accounting from **87.82% to 96.69%** and cut forms with unexplained bits from
+> 17 to 6.
+>
+> So the earlier "87.82%, which is 100% of what the figures contain" was 100%
+> of what our reader could *see*. A ceiling measured by an instrument blind to
+> one of three cell colours is not a property of the document.
 
 ## A generation difference, not an error
 
@@ -123,8 +139,13 @@ conflicts. Recorded because it would be easy to report as a finding.
 
 Twenty-five pages, thirteen composite renders, read directly. It found **one
 confirmed inter-document conflict** (independently corroborating digikit's),
-**two faults in our own extraction**, and **zero errors in Rev 1.5's figures**
-among the `a`-forms.
+**zero errors in Rev 1.5's figures** among the `a`-forms, and — by way of two
+divergences that turned out to be generational rather than faults — **the
+yellow "unused" cell colour our extractor had never looked for**, worth nearly
+nine points of bit accounting.
+
+Both apparent faults were in the comparison, not in either document. Chasing
+them anyway is what surfaced the colour.
 
 That last result is worth stating plainly: on everything comparable, Rev 1.5's
 opcode figures are correct.

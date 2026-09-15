@@ -47,12 +47,21 @@ except ImportError:  # pragma: no cover
 CELL_WIDTH = 9.0
 SHADE = 0.8235
 SHADE_TOLERANCE = 0.05
+# A third cell colour, and missing it understates how much of each figure is
+# explained. Grey marks a FIXED opcode bit; **yellow marks an UNUSED bit** --
+# one outside the field being shown, or reserved. A white cell is a field bit.
+# Counting yellow as white makes reserved bits look unlabelled, which is how
+# Type25a_rframe's bits 3..0 came out as "unnamed" when the figure says
+# plainly that they are unused.
+UNUSED = (0.95, 0.80, 0.19)
+UNUSED_TOLERANCE = 0.12
 MIN_TICKS = 4
 FIGURE_PAGES = (308, 425)     # the instruction-set chapters in Rev 1.5
 
 
 def cell_rows(page):
-    found = collections.defaultdict(lambda: {"frame": None, "fills": [], "ticks": 0})
+    found = collections.defaultdict(
+        lambda: {"frame": None, "fills": [], "unused": [], "ticks": 0})
     for drawing in page.get_drawings():
         rect, kind, fill = drawing["rect"], drawing.get("type"), drawing.get("fill")
         slot = found[round(rect.y0, 1)]
@@ -61,14 +70,28 @@ def cell_rows(page):
         elif kind == "s" and rect.width >= 2 * CELL_WIDTH and 8 <= rect.height <= 10:
             if slot["frame"] is None or rect.width > slot["frame"].width:
                 slot["frame"] = rect
-        elif kind == "f" and fill and all(
-            abs(c - SHADE) < SHADE_TOLERANCE for c in fill[:3]
-        ):
-            slot["fills"].append(rect)
+        elif kind == "f" and fill:
+            if all(abs(c - SHADE) < SHADE_TOLERANCE for c in fill[:3]):
+                slot["fills"].append(rect)
+            elif all(abs(c - u) < UNUSED_TOLERANCE for c, u in zip(fill[:3], UNUSED)):
+                slot["unused"].append(rect)
     return {
         y: slot for y, slot in found.items()
         if slot["frame"] is not None and slot["ticks"] >= MIN_TICKS
     }
+
+
+def cells_of(rects, frame, count):
+    """-> set of cell indices covered by these filled rectangles.
+
+    A run is ONE rectangle spanning several cells, so width gives the count.
+    """
+    covered = set()
+    for rect in rects:
+        first = int(round((rect.x0 - frame.x0) / CELL_WIDTH))
+        span = max(1, int(round(rect.width / CELL_WIDTH)))
+        covered.update(k for k in range(first, first + span) if 0 <= k < count)
+    return covered
 
 
 def word_at(words, centre_x, y_low, y_high):
@@ -223,13 +246,10 @@ def field_extents(page, strokes, frame, y, hi_bit, count):
 def read_row(y, row, words):
     frame = row["frame"]
     count = int(round(frame.width / CELL_WIDTH))
-    shaded = set()
-    for fill in row["fills"]:
-        first = int(round((fill.x0 - frame.x0) / CELL_WIDTH))
-        # A shaded RUN is one rectangle over several cells -- width, not
-        # rectangle count, gives the answer. This is the trap.
-        span = max(1, int(round(fill.width / CELL_WIDTH)))
-        shaded.update(k for k in range(first, first + span) if 0 <= k < count)
+    # A shaded RUN is one rectangle over several cells -- width, not rectangle
+    # count, gives the answer. This is the trap.
+    shaded = cells_of(row["fills"], frame, count)
+    unused = cells_of(row.get("unused", ()), frame, count)
 
     bits, fixed = [], {}
     for k in range(count):
@@ -241,7 +261,9 @@ def read_row(y, row, words):
             bits.append(bit)
             if k in shaded and value in ("0", "1"):
                 fixed[bit] = int(value)
-    return bits, fixed
+    # Bits the figure marks as unused are explained, not unlabelled.
+    marked_unused = sorted({bits[k] for k in unused if k < len(bits)}, reverse=True)
+    return bits, fixed, marked_unused
 
 
 def extract(path, lo=FIGURE_PAGES[0], hi=FIGURE_PAGES[1]):
@@ -262,7 +284,7 @@ def extract(path, lo=FIGURE_PAGES[0], hi=FIGURE_PAGES[1]):
         current = None
         for y in sorted(rows):
             row = rows[y]
-            bits, fixed = read_row(y, row, words)
+            bits, fixed, marked_unused = read_row(y, row, words)
             if not bits:
                 continue
             # Rows belong to the figure whose caption sits below them, so two
@@ -282,6 +304,7 @@ def extract(path, lo=FIGURE_PAGES[0], hi=FIGURE_PAGES[1]):
                     "page": number,
                     "width": 0,
                     "fixed": {},
+                    "unused": [],
                     "fields": [],
                     "rows": [],
                 }
@@ -292,6 +315,8 @@ def extract(path, lo=FIGURE_PAGES[0], hi=FIGURE_PAGES[1]):
             entry["width"] += len(bits)
             entry["rows"].append([max(bits), min(bits)])
             entry["fixed"].update({str(b): v for b, v in fixed.items()})
+            entry["unused"].extend(b for b in marked_unused
+                                   if b not in entry["unused"])
             for high, low, name in field_extents(
                 page, strokes, row["frame"], y, max(bits), len(bits)
             ):
@@ -363,6 +388,7 @@ def main(argv=None) -> int:
     incomplete = []
     for entry in entries:
         covered = {int(b) for b in entry["fixed"]}
+        covered.update(entry.get("unused", ()))
         for field in entry["fields"]:
             covered.update(range(field["low"], field["high"] + 1))
         accounted += len(covered)
