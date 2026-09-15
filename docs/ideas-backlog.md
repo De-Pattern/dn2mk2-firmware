@@ -566,8 +566,17 @@ Reproduce the whole table with the tool the repository already had:
 ```
 dnfw fn <image> --section 4 callers --at 0x80003d6e   ->  0
 dnfw fn <image> --section 2 callers --at 0x02015066   ->  0
-dnfw fn <image> --section 3 callers --at 0x4013459a   ->  2
+dnfw fn <image> --section 3 callers --at 0x4013459a   ->  2   <- positive control
 ```
+
+**The third line is the positive control, and it is there on purpose**
+(Principle 19). It is the same instrument, run the same way, against the same
+routine compiled into a different section — and it finds both call sites. So
+the two zeros are a property of the bootstrap and the updater, not of the
+scan. The scope is stated too: direct calls only, in all five ColdFire
+encodings; a target reached through a vtable or a function pointer would be
+invisible, which is why the byte-level scan above matters — it shows the
+address is never taken as a 32-bit immediate either.
 
 **A process note, because it cost most of a session.** That command existed the
 whole time. It was not used because `dnfw fn` and `dnfw disasm` both refused a

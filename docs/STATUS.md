@@ -26,8 +26,8 @@ Rules that keep it honest:
 | **Extra LFO destinations** | **SHIPPED** | — | `docs/modulation-mask.md`, browser tool, PR #61 |
 | **Transient Swapper** | **SHIPPED** | — | `docs/pcm-hunt.md`, `docs/tran-mapping.md`, PR #64 |
 | **TRAN mapping** | **SOLVED** | — | `TRAN = 4 × slot − 8`; 32 of 34 reachable; `docs/tran-mapping.md` |
-| **LFO4** | **BLOCKED** | runtime slot space, **and the generator is unknown** | `docs/lfo4-feasibility.md`, `docs/lfo4-slot-plan.md`, `docs/engine-index-map.md` §15 |
-| **Chimera (DT2 machines + samples)** | **SCOPED** | ColdFire half tractable; SHARC half blocked | `docs/chimera-feasibility.md` |
+| **LFO4** | **BLOCKED** | **one blocker, not two: the generator is unknown.** Slot space is designed away — see below | `docs/lfo4-feasibility.md`, `docs/lfo4-slot-plan.md`, `docs/engine-index-map.md` §15 |
+| **Chimera (DT2 machines + samples)** | **SCOPED** | ColdFire half tractable; SHARC half **blocked on reading SHARC code, no longer on reaching it** — we ship its program and know how it is loaded | `docs/chimera-feasibility.md`, `docs/sharc-image.md` |
 | **Sample transfer / RPC** | **IN PROGRESS** | what dispatches an opcode | `docs/midi-rpc-dispatch.md` |
 
 ### LFO4 — the pieces, and which are real
@@ -41,7 +41,7 @@ Rules that keep it honest:
 | Enumeration (getting records into the set the LFO walks) | **Solved, a data edit** — `docs/parameter-set-tables.md` |
 | Page id — range test `(page - 0x1a) <= 2` | **Blocked** — `0x1d` Retrig, `0x1e` None |
 | Fourth page-view + `[MOD]` navigation | **Not started** |
-| Runtime slot space — 8 contiguous slots | **BLOCKED.** Value array is exactly 101 entries, flush against the machine-type byte at `+0xde` |
+| Runtime slot space — 8 contiguous slots | **DESIGNED, not built.** ~~BLOCKED~~ — the array genuinely cannot grow in place (101 entries, flush against the machine-type byte at `+0xde`, and it is a field in each of 128 × 2,388-byte sound objects, not a table). But `docs/lfo4-slot-plan.md` gives **two** designs that remove the requirement: a 2,048-byte extension array in the 25 MB for slots 101–108 (~11 hooks), or a **track-level** LFO4 that needs no slots at all (~3 hooks, at the cost of LFO4 not being saved per sound). Neither is built or verified |
 | **Does the engine run a 4th LFO generator?** | **UNKNOWN.** ~~Confirmed 2026-09-12~~ — both probes changed forward *and* inverse maps together, so a storage round-trip predicts the same positive with three generators. `docs/engine-index-map.md` §15 |
 
 ---
@@ -58,6 +58,10 @@ Rules that keep it honest:
 | Recovery path | Proven on hardware; needs physical MIDI DIN, not USB | `docs/flashing.md` |
 | Code caves execute | `CAVE RAN!!!` on hardware | `docs/code-caves.md`, `docs/flashing.md` |
 | SHARC program ships in the update | Section 7, ADI boot stream, FreeRTOS/CCES | `docs/sharc-image.md` |
+| **How the SHARC is booted** | **The ColdFire pushes it over SPI** — `0x400cf34c` reads section 7, then byte-at-a-time through a DSPI at `0xec038000` (`PUSHR` `+0x34`, `SR` `+0x2c`). SPI *slave* boot, every power-up | `docs/sharc-image.md` |
+| **Is the DN2's engine modifiable?** | **Yes in principle** — ~~"permanently unmodifiable"~~ retracted. The DSP has no program until we give it one | `docs/engine-index-map.md` §9 `[SUPERSEDED]` |
+| `0xec09xxxx` is an FPGA register file | ≥279 accesses, 57 addresses, byte-wide; **not** a data path — far too few to carry audio | `docs/sharc-image.md`, `scripts/mmio_window_map.py` |
+| `0xec038000` is a DSPI block | Six registers at the six standard offsets (`MCR`, `CTAR0/1`, `SR`, `RSER`, `PUSHR`), internally consistent with the `PUSHR` words used | `docs/sharc-image.md` |
 | Transient bank location | DDR `0x8045c380`, 34 × 4,800 samples | `docs/pcm-hunt.md` |
 | MIDI RPC wire format | From `dagargo/elektroid`; ping answers | `docs/midi-rpc.md` |
 | DN2 advertises 22 opcodes, no FsSample | Static array at `0x40207f30`, one reference | `docs/midi-rpc-dispatch.md` |
@@ -78,7 +82,8 @@ Rules that keep it honest:
 |---|---|---|
 | **What dispatches an RPC opcode** | Five static approaches failed; DT2 diff reframed it | Extend DN2's list with `10 13 11 12`, count 22→26, ask the device |
 | **Is the package resident at `0x80000` at runtime?** | Both coprocessor-image reads hard-code `entry.offset + 0x80000`, and the SHARC/Cortex-M must be loaded every power-up — strongly implied, **not measured**. Static reachability cannot answer it (15/6,974 entries reachable from startup; the program dispatches through vtables) | A trace cave at `0x400cf34c`, fired at power-up with no update in progress. **Gates the whole new-section route** |
-| **Does the engine run a 4th LFO?** | Unknown; both probes non-discriminating | A cave probe that does not touch the storage round-trip |
+| **Does the engine run a 4th LFO?** | Unknown; both probes non-discriminating. **But the engine's code is now reachable** — section 7 is its program and we know how it is loaded | Two routes now: a cave probe that avoids the storage round-trip, or read the boot stream directly (needs a SHARC disassembler — digikit's) |
+| **What crosses to the SHARC at runtime?** | **A candidate found 2026-09-16: `0x400cf7be`** — chunked, double-buffered SPI streaming on the same port as boot, spinning on `TFFF` rather than `TCF`, 2,800-byte chunks. The right *shape* for a throughput path; **what it carries is unknown**. Ruled out: the `0xec09xxxx` register file (too small) | Read its two callers, `0x40025e9e` and `0x400d0fec`. This is the §15 test for a 4th LFO generator |
 | **The SHARC Audio Task's structure** | Entry pointer unresolved (digikit, decode desync) | Blocked on decompilation, not disassembly |
 | **The last 72 bits of SHARC figures** | Not named in Rev 1.5's figures | **Deliberately not chased** — helps nothing; see below |
 
@@ -95,6 +100,8 @@ Rules that keep it honest:
 | "Type 2a is a fault in our extraction" | **Wrong** — a generational re-encoding |
 | "A section with `dest` above BSS would be written straight there" | **Wrong** — nothing reads `dest`; backlog §6 |
 | Bootstrap addresses quoted at base `0x800003fc` | **Wrong base** — it is `0x02010000`; add `0x7dff03fc`-worth of scepticism to any bootstrap address predating 2026-09-15 |
+| "The SHARC boots from its own serial flash; the engine is permanently unmodifiable" | **Wrong** — the ColdFire pushes section 7 over SPI at `0x400cf34c`. `engine-index-map.md` §9 `[SUPERSEDED]` |
+| "No upload path in MAIN OS" | **Wrong** — a negative from searching the `0xec09xxxx` window; the channel is the DSPI at `0xec038000` next door |
 
 ---
 

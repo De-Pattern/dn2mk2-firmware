@@ -109,6 +109,44 @@ assistant read the lower row, took position in a table for recency, and told the
 owner that LFO4's engine side was closed when it was unknown. Documentation
 drift is not untidiness; it produces confidently wrong answers.
 
+## 19. A negative is only as good as the instrument that produced it
+
+Every expensive wrong answer this project has produced has been a **negative**,
+and every one of them came from an instrument that could not have found the
+thing it was looking for. Not one was a bad inference from good data.
+
+| The negative | What the instrument actually could not see |
+|---|---|
+| "There is no SHARC program in the update" | It searched for a raw 48-bit instruction stream. Section 7 is an ADI **boot stream**. |
+| "No upload path in MAIN OS", hence the engine is unmodifiable | It searched the `0xec09xxxx` window. The channel is the **DSPI next door** at `0xec038000`. |
+| "No reference to any SHARC landmark anywhere" | Landmarks were searched at load addresses; SHARC code addresses live in a **different space**. |
+| "The PRM publishes no register encodings" | It read pages 308–425 of a **798-page** manual, then generalised. |
+| "87.82% is 100% of what the figures contain" | It was blind to the **yellow** *unused* cell colour. |
+| "220 accesses across 50 addresses" (2026-09-16) | The opcode mask matched only the **`d0` spelling** of each `move`, and missed the SHARC's boot data port. |
+
+The shape is always the same: a search runs, finds nothing, and the *nothing*
+is reported as a property of the firmware rather than a property of the search.
+A negative reads as clean and final in a way a positive never does, which is
+exactly why it gets less scrutiny than it needs.
+
+So, before writing down that something is not there:
+
+- **Validate the instrument on a known positive first.** If the scan cannot find
+  a thing you already know is present, its zero means nothing. This is the whole
+  check, and it is usually one line.
+- **Say what the search covered**, in the same sentence as the result — which
+  addresses, which pages, which encodings, which spellings. A negative without
+  its scope is not a finding.
+- **Prefer "not found by X" to "not present."** They are different claims and
+  only one of them is supported.
+- **Name the disproof.** `engine-index-map.md` §9 did this well and it is why
+  the error was eventually caught: it said which observation would overturn it.
+  Ranking its own branches wrongly cost months; naming the disproof saved it.
+
+Positives get a matching caution from §15's retraction — a test that cannot
+*distinguish* between two explanations has not confirmed either. Between the
+two, this project's failures cluster heavily on the negative side.
+
 ## Applying these to a change
 
 - Can each file you touched be described without an "and"?
@@ -119,3 +157,5 @@ drift is not untidiness; it produces confidently wrong answers.
 - Would the change let something unverified be written to disk?
 - **Does `docs/STATUS.md` still describe reality after this change?**
 - **Did this answer, park, or retract anything? Then a row moves.**
+- **Did you write down a negative? Then say what the search covered, and show
+  the instrument finding a known positive.**

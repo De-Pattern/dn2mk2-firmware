@@ -679,6 +679,35 @@ FPGA control surface, not a boot channel.
 
 ### Honest verdict, stated with the right confidence
 
+> **[SUPERSEDED — 2026-09-16]** Everything from here to the end of this section
+> is **wrong**, and wrongly confident in the most expensive direction: it
+> concluded the DN2's engine is permanently unmodifiable. Two measurements
+> overturn it.
+>
+> 1. **Section 7 *is* the SHARC program** — an ADI boot stream, built with CCES
+>    and FreeRTOS for the ADSP-215xx, with seven unstripped source paths in it
+>    (`docs/sharc-image.md`, 2026-09-13). The test that "found nothing" looked
+>    for a raw 48-bit instruction stream, which a boot stream is not.
+> 2. **The upload path exists and is at `0x400cf34c`** (2026-09-16). It reads
+>    section 7 by id, then pushes it **byte at a time over a DSPI controller**
+>    at `0xec038000` — `PUSHR` at `+0x34` with `CONT`/`CTAS`/`PCS0` set, `SR` at
+>    `+0x2c` spun on `TCF` and cleared write-1. That is **SPI slave boot: the
+>    host pushes the image**, which is one of the three options this section
+>    itself lists below. The SHARC has no program until the ColdFire gives it
+>    one, every power-up.
+>
+> The specific claim "no upload path in MAIN OS" was a **negative from a search
+> that looked in the wrong window**: this section reasoned that a boot channel
+> would be among the `0xec09xxxx` accesses, found only narrow byte-wide
+> registers there, and stopped. The `0xec09xxxx` reading was correct — it is an
+> FPGA register file — but the boot channel was never there to find. It is the
+> DSPI next door, and `0xec094018` is only the flow-control line beside it.
+>
+> Kept in full rather than deleted, because the *disproof it named for itself*
+> is what eventually resolved it, and because this is the second time this
+> document has stated a negative too strongly (see §15). The lesson is in
+> `docs/PRINCIPLES.md`.
+
 **Leading hypothesis: the SHARC boots from its own serial flash, and its program
 is not in this firmware file.** Supporting it: no boot stream in any section
 under three different chip premises, no upload path in MAIN OS, a DSP with its
@@ -695,6 +724,14 @@ within a few centimetres of U9. If one is there, the question is closed and the
 DN2's engine is permanently unmodifiable. If there is no flash near the SHARC,
 the ColdFire must be booting it and the image is in this file somewhere the
 three tests above have not looked.
+
+> **[ANSWERED — 2026-09-16]** The second branch, and it was settled in the bytes
+> after all: **the ColdFire boots it**, and the image is section 7. No board
+> inspection was needed — the uploader at `0x400cf34c` names its own hardware.
+> Worth noting that this paragraph's instinct was sound: it framed a real
+> disproof and said which observation would decide it. What it got wrong was
+> ranking the branches, on the strength of a negative search it had not
+> established was capable of finding what it was looking for.
 
 ### Does any of this matter for LFO4?
 
