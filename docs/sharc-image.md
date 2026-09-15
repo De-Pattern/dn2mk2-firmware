@@ -282,14 +282,55 @@ LFO generator is to "find whatever crosses to the SHARC and drive lane 4
 there". The FPGA register file is ruled out above as too small. This is the
 first thing found that is the right shape to carry continuous data to the DSP.
 
-**Stated as a lead, not a finding.** What it carries is *not* established. It
-could be audio samples, parameter blocks, or something else entirely, and 2,800
-bytes has not been reconciled with any known block size. The two call sites are
-unread. `0x42440958` is a length in a global, and `pea 0x80001a20` at
-`0x400cf7ea` passes what looks like an SRAM staging address to `0x40134490` —
-both unexplained. **Read the two callers before building anything on this**;
-the failure mode to avoid is the one §11 and §15 already demonstrate, where a
-structure that looked like engine addressing was storage.
+#### Its two callers are interrupt handlers
+
+Both open by saving the MAC unit — `macsr`, `acc0`–`acc3`, `accext01/23`, `mask`
+— and close by restoring it. That is an **ISR prologue**: ordinary C code has no
+reason to preserve the multiply-accumulate registers. So this transfer is
+**periodic**, driven by an interrupt, not by a user action.
+
+The argument list reads as a two-buffer scatter send, `(len1, buf1, len2, buf2)`:
+
+```
+0x40025e8a  pea 0x800053a4     ; buf2  -- SRAM
+0x40025e90  pea 0xabc          ; len2  = 2,748
+0x40025e94  pea 0x80005e60     ; buf1  -- SRAM
+0x40025e9a  pea 0xa80          ; len1  = 2,688
+0x40025e9e  jsr 0x400cf7be
+
+0x400d0fd8  clrl %sp@-         ; buf2  = 0   -- the second pair is optional
+0x400d0fda  clrl %sp@-         ; len2  = 0
+0x400d0fdc  pea 0x4244098c     ; buf1  -- BSS this time, not SRAM
+0x400d0fe2  pea 0xa80          ; len1  = 2,688
+0x400d0fe6  movew #2,0x4244098c  ; a 16-bit header written in before sending
+0x400d0fec  jsr 0x400cf7be
+```
+
+`0xa80` = 2,688 appears in both, against the function's own `#2800` chunk
+bound — so 2,688 is a payload and 2,800 is the buffer stride it fits inside.
+
+And the buffers are not scratch. `0x80005000`–`0x80006000` holds **at least 125
+accesses across 43 addresses**, largely longword, and the functions touching
+them are the same `0x40025xxx` cluster the first caller belongs to
+(`0x400258da`, `0x40025b6e`, `0x40025baa`, `0x40025e0a`). There is a whole
+subsystem here that maintains structured SRAM buffers and streams them to the
+DSP on an interrupt.
+
+**Stated as a lead, not a finding.** What it carries is *not* established. A
+periodic ~2.7 KB push to the DSP is the right shape for per-frame control data
+*and* for audio *and* for a codec/FPGA refresh, and nothing here separates
+those yet. `0x42440958` is a length in a global 52 bytes below `0x4244098c`, so
+there is a small descriptor structure around `0x42440950` worth reading.
+`pea 0x80001a20` at `0x400cf7ea` passes an SRAM address to `0x40134490`,
+unexplained.
+
+**The test that would settle it**, and the one to run next: find what *writes*
+`0x80005e60` and `0x4244098c`. If sound parameters reach them — from
+`Sound::updateMirror`'s live side, or from the value array at `sound + 0x14 +
+slot*2` — this is the path §15 asked for, and lane 4 can be driven here. If
+they are filled from an audio ring instead, it is not, and the search
+continues. The failure mode to avoid is the one §11 and §15 already demonstrate:
+a structure that looked like engine addressing turning out to be storage.
 
 ## The `0xec09xxxx` window is an FPGA register file, not a data path
 
