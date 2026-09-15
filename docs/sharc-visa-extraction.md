@@ -77,28 +77,46 @@ Two different things are worth counting, and only one of them is at 100%.
 | declared instruction families | **44** |
 | families with no figure | **0** |
 
-### Bit-level accounting: 87.82%, against a ceiling of 92.00%
+### Bit-level accounting: 87.82% — which is 100.0% of what the figures contain
 
 Every bit of every form should be either a fixed opcode bit or part of a named
 field. **1,911 of 2,176 bits are accounted for.**
 
-**100% is not achievable from the figures, and the shortfall is measurable
-rather than assumed.** A field is named by a bracket drawn beneath its bit row;
-`scripts/prm_label_ceiling.py` finds **12 rows — 174 bits — with no brackets at
-all**, across `Type4d`, `Type20a`, `Type21a`, `Type22a`, `Type25a_rframe`,
-`Type25c_rframe` and `Type26a`. The PRM does not name those bits in the
-figures; their names, where they exist, are in the syntax tables.
+**That is the ceiling, not a shortfall.** A field is named by a bracket drawn
+beneath its bit row, so the most any figure-only method can recover is the
+fixed bits plus the bracketed ones. `scripts/prm_label_ceiling.py` counts them
+independently of the extractor:
 
-So the ceiling on figure-only extraction is **92.00%**, and 87.82% of 2,176 is
-**95.5% of everything the figures can give**. The remaining 91 bits are ours to
-recover.
+```
+bits across all figure rows            2,176
+  fixed (shaded) bits                    546
+  free bits under a bracket            1,365
+  free bits with NO bracket              265
+                                       -----
+CEILING on figure-only accounting     87.82%
+```
 
-> That ceiling was itself wrong once. The first measurement said 94.85%,
-> because the **next bit row's own frame** sits inside the previous row's
-> bracket band and is the same shape as a long bracket — so rows with no
-> brackets were counted as labelled. Excluding row frames drops it to 92.00%.
+`546 + 1,365 = 1,911`, exactly what the extractor produces. **Every bit the PRM
+names in its figures has been recovered.** The remaining **265 bits (12.18%)
+are not named in the figures at all** — their names, where they exist, are in
+the syntax tables, which is a different extraction.
+
+> **The ceiling took three attempts, and each error inflated it.**
+>
+> **94.85%** — the *next* bit row's own frame sits inside the previous row's
+> bracket band and is the same shape as a long bracket, so rows with no
+> brackets counted as labelled. p413 has four rows and no brackets whatever;
+> that version flagged one.
+>
+> **92.00%** — counting per *row* rather than per *bit*. A row is routinely
+> part-bracketed: Type20a's bits 31..27 each carry a leader while 26..16 carry
+> nothing, and crediting the whole row hid eleven unnamed bits.
+>
+> **87.82%** — per bit, row frames excluded.
+>
 > A measurement of what is *possible* is as easy to get wrong as the thing it
-> bounds.
+> bounds, and both errors ran the same way: making the document look more
+> complete than it is, and our extraction look worse.
 
 This is a coverage figure that means something, and it is the one to track. It
 **cannot be improved by loosening anything** — unlike a match rate, where an

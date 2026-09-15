@@ -88,22 +88,37 @@ def main(argv=None) -> int:
             # every row as labelled and overstates the ceiling. Exclude any
             # stroke that is itself a row frame.
             frames = {round(other["frame"].y0, 1) for other in rows.values()}
-            has_bracket = any(
-                bottom - 1 <= d["rect"].y0 <= bottom + BRACKET_BAND
-                and round(d["rect"].y0, 1) not in frames
-                and frame.x0 - 12 <= d["rect"].x1
-                and d["rect"].x0 <= frame.x1 + 12
-                for d in strokes
-            )
+            origin = frame.x0 + CELL_WIDTH / 2
+
+            # Per BIT, not per row. A row is routinely part-bracketed --
+            # Type20a's bits 31..27 each carry a leader while 26..16 carry
+            # nothing -- so asking whether a row has "any" bracket credits
+            # eleven unnamed bits as named and overstates the ceiling again.
+            bracketed = set()
+            for drawing in strokes:
+                rect = drawing["rect"]
+                if not (bottom - 1 <= rect.y0 <= bottom + BRACKET_BAND):
+                    continue
+                if round(rect.y0, 1) in frames:
+                    continue
+                k0 = (rect.x0 - origin) / CELL_WIDTH
+                k1 = (rect.x1 - origin) / CELL_WIDTH
+                on0 = abs(k0 - round(k0)) <= 0.12 and 0 <= round(k0) < count
+                on1 = abs(k1 - round(k1)) <= 0.12 and 0 <= round(k1) < count
+                if on0 and on1:
+                    bracketed.update(range(int(round(k0)), int(round(k1)) + 1))
+                elif on0 or on1:
+                    bracketed.add(int(round(k0 if on0 else k1)))
+
             total += count
             fixed_bits += len(shaded)
-            free = count - len(shaded)
-            if has_bracket:
-                labelled_rows_bits += free
-            else:
-                unlabelled_rows_bits += free
-                if free:
-                    unlabelled_rows.append((number, y, free))
+            free_cells = [k for k in range(count) if k not in shaded]
+            named = sum(1 for k in free_cells if k in bracketed)
+            unnamed = len(free_cells) - named
+            labelled_rows_bits += named
+            unlabelled_rows_bits += unnamed
+            if unnamed:
+                unlabelled_rows.append((number, y, unnamed))
 
     ceiling = 100.0 * (fixed_bits + labelled_rows_bits) / total
     print(f"bits across all figure rows            : {total:,}")
