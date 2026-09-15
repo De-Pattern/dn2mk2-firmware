@@ -496,12 +496,39 @@ scanner is not the problem: it decodes `jsr abs.l`, `bsr.{s,w,l}` and
 There is also no reference to `0x80003d6e` as a 32-bit immediate anywhere in
 the section.
 
-So the lookup is **not invoked from inside the updater**. Either it is called
-across sections — by MAIN OS, which is what actually decompresses and places
-sections on the next boot — or `0x80003d6e` is an interior label rather than the
-entry the callers use. **Until that is settled, the cost of teaching the updater
-a new id is unknown**, and the estimate of "one edit buys 25 MB" is not yet
-supported.
+So the lookup is **not invoked from inside the updater**. It is MAIN OS that
+asks.
+
+**MAIN OS carries its own copy of the whole container parser.** `movel
+#'ELE3',d0` appears once in its code, at `0x40134546`, followed by the same
+magic compare and the same `moveq #52` product gate at `0x40134554` — a **third**
+copy of that check, alongside the bootstrap's at `0x02015028` and the updater's
+at `0x80003d28`. Its `find_section_by_id` is at `0x4013459a`, with a prologue
+byte-identical to the updater's.
+
+**And it asks for exactly two sections, each as a literal immediate:**
+
+```
+0x400cf59a  jsr 0x4013459a    pea #7     <- the SHARC boot stream
+0x400f2934  jsr 0x4013459a    pea #8     <- the ARM Cortex-M image
+```
+
+**There is no table.** N call sites, N immediates, so teaching MAIN OS a new id
+is a **code edit at a new call site** — which needs somewhere to put the code,
+which is the problem the section was meant to solve.
+
+**And worse for the original plan: neither of those sections is *placed*.** Both
+carry `dest 0`; MAIN OS reads them and hands them to other processors. So there
+is no generic "load a section to its `dest`" path in MAIN OS at all — the
+sections that do get placed at an address (2 at `0x02010000`, 3 at `0x40000400`,
+4 at `0x80000400`) are loaded **before MAIN OS runs**, by the bootstrap or a
+boot ROM reading flash.
+
+**So the next question moves down a layer:** does the early loader walk the
+section table generically, honouring each entry's `dest`, or does it too ask for
+a fixed set of ids? If it is generic, a new section with a `dest` above the BSS
+end needs *no code edit anywhere* — it would simply be placed. That is the
+version of this idea worth having, and it is not yet checked.
 
 **Risk, stated plainly.** This writes to an address no stock firmware writes to,
 which is a different class of experiment from everything done so far: every

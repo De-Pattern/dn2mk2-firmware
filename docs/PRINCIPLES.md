@@ -80,6 +80,35 @@ subcommand does argument handling and I/O; the work lives in the library module
 it calls. **A capability with no subcommand is not finished** — it cannot be
 used by hand, which means it cannot be checked by hand.
 
+## 18. The canvas is updated with the work, not after it
+
+`docs/STATUS.md` is the project canvas: every feature, every research item
+open / closed / retracted, the idea list and the request queue, each linked to
+the document that holds the evidence. The Obsidian baton
+(`00_Notes/AS/ZZ_Personal Projects/03_dn2_firmware/Next_Session.md`) points at
+it and carries the short version.
+
+**A finding that is not in the canvas does not exist**, and a canvas that has
+drifted is worse than none — it is a confident wrong answer to "where are we?".
+So updating it is part of the change, in the same commit, not a tidy-up
+afterwards. Specifically:
+
+- A result **closes** a research item only with a named measurement and a
+  document. Move the row, do not just add prose somewhere.
+- A retraction **stays visible**, struck, with a pointer to what replaced it.
+  Never delete a superseded conclusion; a closed path is still a signal.
+- Anything a peer or the owner asks for goes in the **queue** the moment it is
+  asked, even when it will not be done — parked work that is not written down
+  is lost work.
+- Never record the same result in two places that can disagree. One of them
+  wins; say which.
+
+This principle exists because of a specific failure. On 2026-09-15
+`docs/flashing.md` carried one build twice with opposite verdicts, and the
+assistant read the lower row, took position in a table for recency, and told the
+owner that LFO4's engine side was closed when it was unknown. Documentation
+drift is not untidiness; it produces confidently wrong answers.
+
 ## Applying these to a change
 
 - Can each file you touched be described without an "and"?
@@ -88,3 +117,5 @@ used by hand, which means it cannot be checked by hand.
 - Did you add a capability without a subcommand?
 - Did you run `dnfw` on a real image, not only the tests?
 - Would the change let something unverified be written to disk?
+- **Does `docs/STATUS.md` still describe reality after this change?**
+- **Did this answer, park, or retract anything? Then a row moves.**
