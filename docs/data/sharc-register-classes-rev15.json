@@ -1,0 +1,453 @@
+{
+  "RREG": {
+    "type": "Data Registers (Dreg)",
+    "members": [
+      "r0",
+      "r1",
+      "r2",
+      "r3",
+      "r4",
+      "r5",
+      "r6",
+      "r7",
+      "r8",
+      "r9",
+      "r10",
+      "r11",
+      "r12",
+      "r13",
+      "r14",
+      "r15"
+    ],
+    "pages": [
+      53
+    ]
+  },
+  "FREG": {
+    "type": "",
+    "members": [
+      "f0",
+      "f1",
+      "f2",
+      "f3",
+      "f4",
+      "f5",
+      "f6",
+      "f7",
+      "f8",
+      "f9",
+      "f10",
+      "f11",
+      "f12",
+      "f13",
+      "f14",
+      "f15"
+    ],
+    "pages": [
+      53
+    ]
+  },
+  "RFREG": {
+    "type": "",
+    "members": [
+      "r0",
+      "r1",
+      "r2",
+      "r3",
+      "r4",
+      "r5",
+      "r6",
+      "r7",
+      "r8",
+      "r9",
+      "r10",
+      "r11",
+      "r12",
+      "r13",
+      "r14",
+      "r15",
+      "f0",
+      "f1",
+      "f2",
+      "f3",
+      "f4",
+      "f5",
+      "f6",
+      "f7",
+      "f8",
+      "f9",
+      "f10",
+      "f11",
+      "f12",
+      "f13",
+      "f14",
+      "f15"
+    ],
+    "pages": [
+      53
+    ]
+  },
+  "RFREGDBL": {
+    "type": "",
+    "members": [
+      "r1",
+      "r3",
+      "r5",
+      "r7",
+      "r9",
+      "r11",
+      "r13",
+      "r15",
+      "f1",
+      "f3",
+      "f5",
+      "f7",
+      "f9",
+      "f11",
+      "f13",
+      "f15"
+    ],
+    "pages": [
+      53
+    ]
+  },
+  "SREG": {
+    "type": "Complementary Data Registers (CDreg)",
+    "members": [
+      "s0",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s5",
+      "s6",
+      "s7",
+      "s8",
+      "s9",
+      "s10",
+      "s11",
+      "s12",
+      "s13",
+      "s14",
+      "s15",
+      "sf0",
+      "sf1",
+      "sf2",
+      "sf3",
+      "sf4",
+      "sf5",
+      "sf6",
+      "sf7",
+      "sf8",
+      "sf9",
+      "sf10",
+      "sf11",
+      "sf12",
+      "sf13",
+      "sf14",
+      "sf15"
+    ],
+    "pages": [
+      53
+    ]
+  },
+  "CDREG": {
+    "type": "Complementary Data Registers (CDreg)",
+    "members": [
+      "s0",
+      "s1",
+      "s2",
+      "s3",
+      "s4",
+      "s5",
+      "s6",
+      "s7",
+      "s8",
+      "s9",
+      "s10",
+      "s11",
+      "s12",
+      "s13",
+      "s14",
+      "s15",
+      "sf0",
+      "sf1",
+      "sf2",
+      "sf3",
+      "sf4",
+      "sf5",
+      "sf6",
+      "sf7",
+      "sf8",
+      "sf9",
+      "sf10",
+      "sf11",
+      "sf12",
+      "sf13",
+      "sf14",
+      "sf15"
+    ],
+    "pages": [
+      53
+    ]
+  },
+  "MRXFBREG": {
+    "type": "Multiply Result Registers (MR). All Mul- tiply register are NOT part of sys register, they have separate instuctions.",
+    "members": [
+      "mrf",
+      "mr0f",
+      "mr1f",
+      "mr2f",
+      "mrb",
+      "mr0b",
+      "mr1b",
+      "mr2b"
+    ],
+    "pages": [
+      53
+    ]
+  },
+  "MSXFBREG": {
+    "type": "Multiply Result Registers (MS). All Mul- tiply register are NOT part of sys register, they have separate instuctions.",
+    "members": [
+      "msf",
+      "ms0f",
+      "ms1f",
+      "ms2f",
+      "msb",
+      "ms0b",
+      "ms1b",
+      "ms2b"
+    ],
+    "pages": [
+      53
+    ]
+  },
+  "SYSREG": {
+    "type": "System Registers (Sysreg)",
+    "members": [
+      "astat",
+      "astatx",
+      "astaty",
+      "flags",
+      "imask",
+      "imaskp",
+      "irptl",
+      "mmask",
+      "mode1",
+      "mode1stk",
+      "mode2",
+      "stky",
+      "stkyx",
+      "stkyy",
+      "ustat1",
+      "ustat2",
+      "ustat3",
+      "ustat4"
+    ],
+    "pages": [
+      53
+    ]
+  },
+  "I1REG": {
+    "type": "Index Registers (Ia)",
+    "members": [
+      "i0",
+      "i1",
+      "i2",
+      "i3",
+      "i4",
+      "i5",
+      "i6",
+      "i7"
+    ],
+    "pages": [
+      54
+    ]
+  },
+  "M1REG": {
+    "type": "Modifier Registers (Mb)",
+    "members": [
+      "m0",
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+      "m5",
+      "m6",
+      "m7"
+    ],
+    "pages": [
+      54
+    ]
+  },
+  "B1REG": {
+    "type": "Base Registers (Ba)",
+    "members": [
+      "b0",
+      "b1",
+      "b2",
+      "b3",
+      "b4",
+      "b5",
+      "b6",
+      "b7"
+    ],
+    "pages": [
+      54
+    ]
+  },
+  "I2REG": {
+    "type": "Index Registers (Ic)",
+    "members": [
+      "i8",
+      "i9",
+      "i10",
+      "i11",
+      "i12",
+      "i13",
+      "i14",
+      "i15"
+    ],
+    "pages": [
+      54
+    ]
+  },
+  "M2REG": {
+    "type": "Modifier Registers (Md)",
+    "members": [
+      "m8",
+      "m9",
+      "m10",
+      "m11",
+      "m12",
+      "m13",
+      "m14",
+      "m15"
+    ],
+    "pages": [
+      54
+    ]
+  },
+  "B2REG": {
+    "type": "Base Registers (Bc)",
+    "members": [
+      "b8",
+      "b9",
+      "b10",
+      "b11",
+      "b12",
+      "b13",
+      "b14",
+      "b15"
+    ],
+    "pages": [
+      54
+    ]
+  },
+  "UREG": {
+    "type": "Universal Register (Ureg) Note that Ureg includes the registers listed in the Registers column plus all of the registers in the register classes: RFEG, SREG, I1REG, I2REG, M1REG, M2REG, B1REG, B2REG, and SYS- REG.",
+    "members": [
+      "l0",
+      "l1",
+      "l2",
+      "l3",
+      "l4",
+      "l5",
+      "l6",
+      "l7",
+      "l8",
+      "l9",
+      "l10",
+      "l11",
+      "l12",
+      "l13",
+      "l14",
+      "l15",
+      "px",
+      "px1",
+      "px2",
+      "pc",
+      "pcstk",
+      "pcstkp",
+      "faddr",
+      "daddr",
+      "laddr",
+      "curlcntr",
+      "lcntr",
+      "tperiod",
+      "tcount",
+      "emuclk",
+      "emuclk2"
+    ],
+    "pages": [
+      54
+    ]
+  },
+  "UREGDBL": {
+    "type": "Universal Register (Ureg) (additional register classes)",
+    "members": [
+      "f1",
+      "f3",
+      "f5",
+      "f7",
+      "f9",
+      "f11",
+      "f13",
+      "f15",
+      "sf1",
+      "sf3",
+      "sf5",
+      "sf7",
+      "sf9",
+      "sf11",
+      "sf13",
+      "sf15"
+    ],
+    "pages": [
+      55
+    ]
+  },
+  "UREGXDAG": {
+    "type": "",
+    "members": [
+      "This",
+      "is",
+      "a",
+      "of",
+      "See",
+      "Function"
+    ],
+    "pages": [
+      55
+    ]
+  },
+  "UREGXDAG1DBL": {
+    "type": "",
+    "members": [
+      "This",
+      "is",
+      "a",
+      "of",
+      "See",
+      "Function"
+    ],
+    "pages": [
+      55
+    ]
+  },
+  "UREGXDAG2DBL": {
+    "type": "",
+    "members": [
+      "This",
+      "is",
+      "a",
+      "of",
+      "See",
+      "Function"
+    ],
+    "pages": [
+      55
+    ]
+  }
+}

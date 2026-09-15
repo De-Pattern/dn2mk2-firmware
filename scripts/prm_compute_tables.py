@@ -41,7 +41,12 @@ CAPTION = re.compile(r"Table\s+(\d+-\d+):\s*(.+)")
 # the en dash it looks like -- matching only those finds nothing at all, which
 # reads as "the tables are not there" rather than "the regex is wrong".
 DASH = "-‐‑‒–—―−"
-HEADER = re.compile(rf"opcode\s*\(bits\s*(\d+)\s*[{DASH}]\s*(\d+)\)", re.I)
+# A column header naming a bit range. The field is not always called "opcode":
+# Table 18-9 carries TWO encodings side by side, headed "shiftimm (bits 21-16)"
+# and "shiftop (bits 19-12)". Matching the literal word "opcode" finds neither,
+# which reads as the SHIFTOP tables being absent from the document.
+HEADER = re.compile(rf"([A-Za-z][A-Za-z0-9_]*)\s*\(bits\s*(\d+)\s*[{DASH}]\s*(\d+)\)",
+                    re.I)
 # An opcode cell is a MASKED PATTERN, not a value, and the three families write
 # it differently:
 #
@@ -147,39 +152,56 @@ def harvest(path, lo=CHAPTER[0], hi=CHAPTER[1]):
             rows = table.extract()
             if len(rows) < 2:
                 continue
-            # Find the header row that declares the opcode bit range.
-            span = None
+
+            # EVERY column that declares a bit range, not just the first.
+            # Table 18-9 puts shiftimm (21-16) and shiftop (19-12) side by side
+            # in one table, so reading column 0 alone loses half the encoding
+            # and mislabels the other half.
+            columns = {}
             header_index = None
             for index, row in enumerate(rows[:3]):
-                joined = " ".join(c or "" for c in row)
-                match = HEADER.search(joined)
-                if match:
-                    span = (int(match.group(1)), int(match.group(2)))
+                for column, cell in enumerate(row):
+                    match = HEADER.search(cell or "")
+                    if match:
+                        columns[column] = (
+                            match.group(1).lower(),
+                            (int(match.group(2)), int(match.group(3))),
+                        )
+                if columns:
                     header_index = index
                     break
-            if span is None:
+            if not columns or family is None:
                 continue
 
             for row in rows[header_index + 1:]:
                 cells = [(c or "").strip() for c in row]
-                if not cells:
-                    continue
-                pattern = as_pattern(cells[0])
-                if pattern is None or family is None:
-                    continue
-                width, mask, value = pattern
-                found[family].setdefault(
-                    cells[0].strip(),
-                    {
-                        "bits": list(span),
-                        "width": width,
-                        "mask": mask,
-                        "value": value,
-                        "syntax": cells[1] if len(cells) > 1 else "",
-                        "instruction": cells[2] if len(cells) > 2 else "",
-                        "page": number,
-                    },
-                )
+                for column, (field, span) in columns.items():
+                    if column >= len(cells):
+                        continue
+                    pattern = as_pattern(cells[column])
+                    if pattern is None:
+                        continue
+                    width, mask, value = pattern
+                    # Two encodings in one table are two families, not one.
+                    target = family
+                    if field in ("shiftimm", "shiftop"):
+                        target = field.upper()
+                        found.setdefault(target, {})
+                    # The syntax sits in the column right of its own opcode.
+                    syntax = cells[column + 1] if column + 1 < len(cells) else ""
+                    found[target].setdefault(
+                        cells[column],
+                        {
+                            "field": field,
+                            "bits": list(span),
+                            "width": width,
+                            "mask": mask,
+                            "value": value,
+                            "syntax": syntax,
+                            "instruction": cells[-1] if len(cells) > 2 else "",
+                            "page": number,
+                        },
+                    )
     return found
 
 

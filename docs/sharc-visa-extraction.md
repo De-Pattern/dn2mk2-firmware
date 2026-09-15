@@ -296,12 +296,8 @@ field extents it needs are now extracted (§2), so the remaining work is
 following each branch form's displacement field and checking the target lands
 inside the code region on an instruction boundary. That is the next step.
 
-**The last 12.36% of bit accounting.** Four forms cannot be completed from the
-figures at all; the other thirteen are open.
-
-**MULOP and SHIFTOP.** ALUOP extracts cleanly; the other two tables are not
-being found by the table finder yet. `scripts/prm_compute_tables.py` reports
-what it has rather than implying completeness.
+**The last 12.18% of bit accounting.** Not recoverable from the figures — see
+§2; the names are in the syntax tables.
 
 ### How the field extents were recovered, since it is reusable
 
@@ -325,11 +321,61 @@ A shortcut was tested and rejected: each label declares its own width, so the
 widths might tile the unshaded cells. They do for only 12 of 46 figures, so
 geometry was needed after all.
 
-**MULOP and SHIFTOP.** ALUOP extracts cleanly; the other two tables are not
-being found by the table finder yet. `scripts/prm_compute_tables.py` reports
-what it has rather than implying completeness.
+## 6. The compute and register tables, and what they turned out to be worth
 
-## 6. Reproducing
+### All five compute families extract
+
+| family | field | patterns | values admitted |
+|---|---|---|---|
+| ALUOP | bits 19–12 | 61 | 61 / 256 — **23.8%** |
+| MULOP | bits 19–12 | 25 | 206 / 256 — 80.5% |
+| **SHIFTOP** | bits 19–12 | 25 | **25 / 256 — 9.8%** |
+| **SHIFTIMM** | bits 21–16 | 18 | **18 / 64 — 28.1%** |
+| DUALADDSUB | bits 19–16 | 2 | 2 / 16 — 12.5% |
+
+SHIFTOP and SHIFTIMM needed two fixes. **Table 18-9 carries two encodings side
+by side** — headed `shiftimm (bits 21-16)` and `shiftop (bits 19-12)` — so a
+header pattern matching the literal word `opcode` finds neither, and a reader
+that takes column 0 only loses half the table and mislabels the rest. Every
+column declaring a bit range is now read, and two encodings in one table are
+recorded as two families.
+
+### The register classes are not a constraint, which was the surprise
+
+`scripts/prm_register_classes.py` extracts Table 2-1 (pages 53–55): **20
+classes with their membership**. Two findings, and the second closes a line of
+attack rather than opening one.
+
+**The PRM publishes no bit encodings.** Table 2-1 gives membership by *name* —
+`RREG = r0 - r15` — and nothing in the document maps a register name to the
+code that selects it. Those codes belong to the assembler, so cardinality is
+all that is recoverable.
+
+**And cardinality rejects nothing. 15 of the 20 classes exactly fill their
+field width:**
+
+```
+B1REG B2REG CDREG FREG I1REG I2REG M1REG M2REG
+MRXFBREG MSXFBREG RFREG RFREGDBL RREG SREG UREGDBL
+```
+
+`RREG` is 16 registers in a 4-bit field, `RFREG` 32 in 5 bits, `I1REG` 8 in 3.
+A class that fills its field cannot reject a value, so it constrains nothing —
+which is exactly what a well-designed ISA looks like from the inside.
+
+`UREG` is worse than its count suggests: the PRM says it *"includes almost all
+processor core registers"*, and that the data and system registers are
+subgroups of it, so the 7-bit `ureg` fields are close to fully populated. Only
+`SYSREG` (18 of 32) and the `UREGXDAG` variants (6 of 8) reject anything, and
+they appear in few forms.
+
+**So the largest untouched constraint turns out not to be one.** With the
+compute-field result — which also failed to lengthen the decode run — that is
+two of the three obvious candidates eliminated by measurement rather than
+argument. What remains unexamined is the *syntax* tables, which is where the
+265 unnamed bits' meanings live.
+
+## 7. Reproducing
 
 ```sh
 python scripts/prm_opcode_figures.py <prm.pdf> --pages 300-440 --check
