@@ -665,3 +665,94 @@ observation: if Retrig still works and still draws its 22 parameters, nothing
 else named its page id. That is one flash against an unbounded static search,
 and `docs/flashing.md` records that this project has twice spent flashes on
 assumptions it could have tested first.
+
+---
+
+## What the flash answered, 2026-09-15: the page id routes a parameter to its store
+
+**The probe failed, and it failed usefully.** `page-renumber-test_DN2_1.11` was
+flashed. The device boots and the moved pages still **draw** — but every moved
+parameter reads **zero** instead of its record default, and **no edit reaches
+the sequencer**.
+
+| Parameter | Record default (`+0x10 >> 8`) | Read on the device |
+|---|---|---|
+| `NOTE` | 60 | **C0** — the bottom of the range |
+| `PROB` | 100 | **0%** |
+| `LFO.T` / `FLT.T` | 1 (on) | **off** |
+| `VFAD` | 64 (the bipolar centre) | **−64** — its minimum |
+| `RATE` | 12 | **blank** — below the first enum entry |
+
+Not the defaults. **Zero**, rendered through each parameter's own formatter. And
+`PTIM` (40) and `PORT` (off) — records that were *not* moved — read normally, so
+the damage is exactly the 22 moved records and nothing else.
+
+### Why: the routing cascade ends in an exact-match chain
+
+`param_set_tables_build` assigns every parameter record to a `ParameterSet`
+table **by its page id**, through a cascade of contiguous range tests:
+
+| Pages | Table |
+|---|---|
+| `0x00`–`0x04` | `0x42c64d18` |
+| `0x05`–`0x0a` | `0x42c64cd0` |
+| `0x0b`–`0x0f` | `0x42c64b3c` (conditional) |
+| `0x10`–`0x15` | `0x42c649a8` |
+| `0x16`–`0x19` | `0x42c647ac` |
+| `0x1a`–`0x1c` | the LFO pages — conditional, into `0x42c64b3c` / `0x42c647ac` |
+
+and then, at `0x400dc71e`, **it stops being a cascade and becomes an exact
+match**:
+
+```
+0x400dc71e  moveq #29,%d1        ; page == 0x1d ?
+0x400dc720  cmpl %d0,%d1
+0x400dc722  bnes 0x400dc74a      ;   no -> try 30
+0x400dc724  lea 0x42c64940,%a1   ;   YES: the TRIG group's table
+   ...
+0x400dc74a  moveq #30,%d6        ; page == 0x1e ?
+0x400dc74c  cmpl %d0,%d6
+0x400dc74e  bnew 0x400dc7ea      ;   no -> FALL OUT, no table at all
+```
+
+Page `0x1f` matches neither 29 nor 30, so the 22 records **fell out of the
+builder and were never given a slot in any `ParameterSet`**. They keep their
+name, range and formatter, because those live in the record — so they draw. They
+have no backing store, so they read zero and writes go nowhere. That is
+precisely what the device showed, field for field.
+
+### So the negative is refuted, exactly as suspected
+
+§3b revisited said the renumbering plan rested on *"nothing else names Retrig's
+page id"*, that the scan producing that negative had **zero precision**, and
+that the honest move was to ask the device rather than scan harder. The device
+said **no**: `0x400dc71e` names the page id as a bare `moveq #29`, in a form no
+scan for "page-id compares" would ever have singled out from 63 others.
+
+This is `docs/PRINCIPLES.md` §19 paying for itself. The plan was published with
+its weakest link labelled, the experiment was aimed at that link, and one flash
+settled it.
+
+### And renumbering is not dead — it is one byte short
+
+The exact-match constant is the fix. `moveq #29` at `0x400dc71e` is **one byte**
+(`72 1d`, file offset `0x0dc31e`). Changing it to `moveq #31` routes page `0x1f`
+into `0x42c64940` exactly as `0x1d` was routed.
+
+So the full cost of a real fourth LFO's page-id problem, revised:
+
+| Change | Count | Kind |
+|---|---|---|
+| TRIG group's records `0x1d` → `0x1f` | 22 | data |
+| **routing constant `moveq #29` → `moveq #31`** | **1** | **code, one byte — new** |
+| LFO range-test bound `moveq #2` → `moveq #3` (six sites) | 6 | code, one byte each |
+| LFO4's own ten records at page `0x1d` | 10 | data, already built |
+
+Still no cave. **The next probe is this build plus that one byte**, and it is
+decisive: if the TRIG, Retrig and Euclidean parameters come back to life, the
+page-id route is proven end to end and LFO4's page is free.
+
+**What it does not yet cover.** The LFO branch routes conditionally into tables
+that already exist. Whether a fourth LFO needs its own `ParameterSet` table, or
+can share as LFO1–3 do, is **not** established and is the question after this
+one — `docs/parameter-set-tables.md`.

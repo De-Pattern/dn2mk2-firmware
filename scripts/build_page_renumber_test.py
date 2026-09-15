@@ -1,4 +1,4 @@
-"""Build a test firmware that moves one page group's id, and nothing else.
+"""Build a test firmware that moves one page group's id, and re-routes it.
 
 **The experiment.** `docs/lfo4-feasibility.md` §3b revisited prices a real fourth
 LFO's page-id problem: the range test `(page - 0x1a) <= 2` is replicated **six**
@@ -11,11 +11,24 @@ unrelated arithmetic (a pointer subtraction, a loop bound, two stack locals).
 `docs/PRINCIPLES.md` §19 says a negative is only as good as the instrument that
 produced it, and this instrument's precision on this question measured zero.
 
-So this build asks the device instead. It moves **page `0x1d` to page `0x1f`**
-and changes nothing else -- no code, no bound, no LFO. If the parameters on that
-page still work afterwards, nothing else named the id, and the renumbering route
-is open. If they break, the route is closed and we learn it for the price of one
-flash rather than after building a fourth LFO on top of it.
+So v1 of this build asked the device instead: it moved **page `0x1d` to page
+`0x1f`** and changed nothing else -- no code, no bound, no LFO.
+
+**It failed, and the failure named the mechanism.** Flashed 2026-09-15: the
+device boots and the moved pages still draw, but every moved parameter reads
+**zero** instead of its record default and no edit reaches the sequencer.
+`param_set_tables_build` assigns each record to a `ParameterSet` table by page
+id, and its cascade of range tests ends in an **exact match** at `0x400dc71e`:
+`moveq #29` for page `0x1d`, `moveq #30` for `0x1e`, and anything else falls out
+of the builder with no table at all. The 22 records kept their name, range and
+formatter -- which live in the record, so they draw -- and lost their backing
+store.
+
+**v2, this build, adds the one byte that fixes it**: `moveq #29` -> `moveq #31`
+at `0x400dc71e`, which routes page `0x1f` into `0x42c64940` exactly as `0x1d`
+was routed. If the moved parameters come back to life, the renumbering route is
+proven end to end and LFO4's page id is free. See `docs/lfo4-feasibility.md`,
+"What the flash answered".
 
 ## What page 0x1d actually is -- a correction made before this was built
 
@@ -54,18 +67,22 @@ In order, because the first failure makes the rest moot:
 4. **Retrig works.** `RTRG VFAD LEN RATE` present and functional.
 5. **Euclidean works.** `PL1 PL2 EUC` present and functional.
 
-**All five pass** -> nothing else names the page id; renumbering is the route,
-and the next build is the six `moveq #2` -> `moveq #3` edits plus LFO4's records.
+v1 failed 2 through 5 -- the pages drew but read zero and did nothing.
 
-**Any of 2-5 fails** -> something maps page id to page, by a route the static
-scans did not see. Renumbering is dead and option 2 (six caves) is the route.
-That is a real answer either way, which is the point.
+**All five pass on v2** -> the page-id route is proven end to end, LFO4's page
+is free, and the next build is the six `moveq #2` -> `moveq #3` edits plus
+LFO4's ten records.
+
+**Still broken** -> the routing arm is not the only thing that names the page
+id, and there is a second consumer to find. Option 2 (six caves) becomes the
+route. Either answer is worth the flash.
 
 ## Safety
 
-Twenty-two 4-byte writes into the parameter table. **Same length, no
-relocation, no code change**, nothing that alters how the image loads.
-Fully reversible by reflashing stock, over the recovery path
+Twenty-two 4-byte writes into the parameter table, and **one byte of code** --
+an immediate in `param_set_tables_build`, asserted against its stock value
+before it is written. **Same length, no relocation**, nothing that alters how
+the image loads. Fully reversible by reflashing stock, over the recovery path
 `docs/flashing.md` records as proven on this instrument.
 
 **Back up the +Drive first.** Page ids are believed to be a runtime grouping and
@@ -104,6 +121,12 @@ F_HANDLER = 0x34
 FROM_PAGE = 0x1D      # TRIG + Retrig + Euclidean -- see the module docstring
 TO_PAGE = 0x1F        # the first id above the highest in use
 
+# param_set_tables_build's exact-match arm for the TRIG group. Moving the page
+# without moving this is what v1 got wrong, and the device said so.
+ROUTE_VA = 0x400DC71E
+ROUTE_STOCK = bytes((0x72, FROM_PAGE))   # moveq #29,%d1
+ROUTE_NEW = bytes((0x72, TO_PAGE))       # moveq #31,%d1
+
 EXPECTED_MOVED = 22
 
 # The three labels page 0x1d spans, and how many records carry each. Asserted
@@ -112,7 +135,7 @@ EXPECTED_MOVED = 22
 EXPECTED_LABELS = {None: 10, "Retrig": 4, "Euclidean": 8}
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-OUT = pathlib.Path("00_Resources/02_Builds/page-renumber-test_DN2_1.11.syx")
+OUT = pathlib.Path("00_Resources/02_Builds/page-renumber-test2_DN2_1.11.syx")
 
 
 def main() -> int:
@@ -151,6 +174,8 @@ def main() -> int:
             f"-- refusing to write"
         )
 
+    _reroute(content)
+
     for i in movers:
         struct.pack_into(">I", content, start + i * RECORD + F_PAGE_ID, TO_PAGE)
         print(f"  id {i:3d}  {name(i, F_SHORT) or '?':<6s} "
@@ -164,11 +189,32 @@ def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_bytes(syx)
     print(f"\nwrote {OUT}  ({len(syx):,} bytes)")
-    print(f"  {len(movers)} records moved, {len(movers) * 4} bytes changed, "
-          f"no code edited")
+    print(f"  {len(movers)} records moved ({len(movers) * 4} bytes) "
+          f"+ 1 routing byte at 0x{ROUTE_VA:08x}")
     print(f"  sha256 {hashlib.sha256(syx).hexdigest()}")
     print("\nVerify before flashing:  dnfw inspect", OUT)
     return 0
+
+
+def _reroute(content: bytearray) -> None:
+    """Point param_set_tables_build's exact-match arm at the new page id.
+
+    v1 of this build omitted this, and the device showed exactly what the
+    omission costs: records that draw but have no backing store, because the
+    cascade at 0x400dc71e matches page ids 29 and 30 exactly and drops
+    everything else. One byte.
+    """
+    at = ROUTE_VA - BASE
+    got = bytes(content[at:at + 2])
+    if got != ROUTE_STOCK:
+        raise SystemExit(
+            f"routing arm at 0x{ROUTE_VA:08x} is {got.hex()}, expected "
+            f"{ROUTE_STOCK.hex()} (moveq #{FROM_PAGE},%d1) -- this is not the "
+            f"image this build was measured against, refusing to write"
+        )
+    content[at:at + 2] = ROUTE_NEW
+    print(f"  routing  0x{ROUTE_VA:08x}  moveq #{FROM_PAGE},%d1 -> "
+          f"moveq #{TO_PAGE},%d1   [{got.hex()} -> {ROUTE_NEW.hex()}]")
 
 
 def _check_target_free(field, count: int) -> None:
