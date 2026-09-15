@@ -398,3 +398,68 @@ copies"*, and it came from a third-party mirror.
 **Tables extracted from different revisions are not comparable**, and a
 disagreement between them is not evidence that either is wrong. Checking this
 before transcribing is what stopped 25 figures going into an ambiguous diff.
+
+## 8. Cross-check against digikit's `machine-engine-link` branch
+
+**2026-09-15, same day.** The author pointed us at a branch well ahead of what
+`main` showed. It corrects us twice, confirms us once, and names the thing we
+are missing.
+
+### Two of our findings are overtaken
+
+**The revision warning is stale.** Her `docs/sharc/SOURCES.md` has her on
+**Rev 1.5, 798 pages** — the same document we used. The 771-page/chapter-12
+figure came from `docs/refs/sharc-plus-isa.md` on `main`, and she has moved
+since. Accurate when written, not now, and withdrawn in the PR.
+
+**Our subsumption list is largely redundant against her ordering rule:**
+
+> among forms whose `(mask & frame) == value`, pick the one with the longest
+> leading run of fixed bits from bit 47 down (longest-leading-prefix wins),
+> tie-break by total fixed bits.
+
+That resolves the whole class automatically — `Type1a` at 3 fixed bits can
+never beat `Type2a` at 20 under it. We described a hazard she had designed out.
+
+Worth keeping the distinction, though: **ours are containments** (one pattern's
+fixed bits a subset of another's, agreeing on the overlap); **hers — 7b/7d,
+21a/22c, 22a/22c — are crossings**, where neither contains the other.
+Longest-prefix handles containment; crossings need the intersection
+constructors she describes. Two different phenomena, and only the second is
+genuinely hard.
+
+### One of ours is independently confirmed
+
+**She has no register encodings either.** `SPEC-FINDINGS.md`: *"No table maps
+mnemonic names (R0, F0, etc.) to their underlying bit patterns"*, across both
+the SC58x PRM and the classic PGR. Two readings, two projects, same conclusion
+— so §6's "the PRM alone is not sufficient" survives contact.
+
+And **condition codes she does not address at all**, so our Table 4-20 result
+(24 mnemonics, 5-bit field, no encodings) is new information rather than a
+restatement.
+
+### What her numbers are, and what they point at
+
+| | DT2 | DN2 |
+|---|---|---|
+| instructions decoded | 22,399 | 22,149 |
+| unknown rate | **1.13%** | **1.30%** |
+| branch-target alignment | **99.70%** (327/328) | — |
+| compute-field coverage | ~85% | — |
+
+Against our median decode run of **1** and no preferred stride or phase, that is
+a different order of result, and the difference is not the figures — we extract
+those to their ceiling.
+
+**It is the second source.** She uses the **SHARC Processor Programming
+Reference, ADSP-2136x/2137x/214xx, Rev 2.4, 694 pages** alongside the SC58x PRM
+— the classic manual her earlier notes recorded as unavailable from the mirror.
+Her Type 2b correction shows what that buys: the PRM gives
+`0xc00000000000` and the PGR an alternative, and the PRM's value was kept
+because the PGR's *"caused width collisions"* with the 48-bit branch family.
+**A single source cannot produce that check at all.**
+
+So the honest read of our week's conclusion is narrower than we wrote it: the
+SC58x PRM alone is insufficient, and the classic PGR is the document that
+closes the gap. That is the next thing to obtain if this line is ever resumed.
