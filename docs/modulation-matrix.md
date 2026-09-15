@@ -489,3 +489,51 @@ clock, which the DN2's tempo-synced LFOs would make unsurprising.
 functions one at a time:** a phase that **wraps** rather than clamps, fed by
 `SPD` and `MULT` — which sit at `track_base + 36` and `+38` for LFO1, and
 `+16·lfo` further for LFO2 and LFO3.
+
+### Leads closed on the way to the tick, 2026-09-15 (evening)
+
+Recorded so a later session does not re-walk them. Each is a negative from a
+named instrument -- a whole-image objdump text export of MAIN OS 1.11 up to
+`0x401f0000`, 640,982 instructions, searched rather than read by hand.
+
+**The only PRNG constant in the image is glibc's.** `0x40150670` is `rand()`:
+`seed = seed * 1103515245 + 12345`, return bits 16-30. Its family sits beside it
+-- `0x4015069e` combines two draws into 32 bits, `0x401506ba` is `srand`,
+`0x401506c6` burns 100,000 draws. `0x40150694`, a signed `rand() >> 8` that
+would suit an `RND` wave, **has no direct callers**.
+
+**`rand()`'s twelve callers are not an LFO.** `0x400c26b4`, `0x400c271e` and
+`0x400c0aa6` scale `rand() % 32767` into a parameter's `[min, max]` and round to
+`& ~0xff` -- the **parameter randomiser**. `0x400d3314` draws two distinct
+indices from a table at `0x4028c1c0`. So an `RND` LFO, if it is on the ColdFire,
+uses a different noise source -- or is reached indirectly, which a text search
+cannot see.
+
+**`0x400c2894`, the implementation all three MOD thunks jump to, is UI.** It
+builds the destination list through `0x4003951e` and searches it for the
+current `DEST`. Consistent with the MOD1-3 `std::function`s being the `[MOD]`
+page's destination menu, as recorded above.
+
+**The two clusters of indexed parameter writes are storage helpers.**
+`0x4013c972` and `0x4013c9a0` write a value as a word or a long by a type code
+(2 = long, 3 = word); the larger functions at `0x4013d16e`, `0x4013e7c2`,
+`0x401464f6` and `0x401498aa` hold the rest of that cluster and were not read.
+
+**Seven waveform-sized switches exist** (bound 6, then a pc-indexed jump), at
+`0x4001210a`, `0x40017c12`, `0x4007032c`, `0x400708de`, `0x400ffe58`,
+`0x40113974`, `0x40120ba0`, `0x40129df8`, `0x4016fd74`. None is yet tied to
+`WAVE`.
+
+**Frame-ISR callees not yet read, triaged by what they do.** The arithmetic ones
+are `0x4002a6a2` (1,330 B: adds into memory, variable shift, multiply),
+`0x4002a0bc` (746 B), `0x40029cd4` (722 B), `0x40003d00` and `0x40003118` --
+all working on BSS at `0x4058xxxx`/`0x4059xxxx`.
+
+### The owner's lead: follow the tempo
+
+> *"the tick should be somehow linked to the tempo parameter"*
+
+Right, and a better anchor than reading functions: the DN2's LFO `SPD` is
+**tempo-synced**, so the phase increment must be built from the project BPM.
+Whatever reads the tempo and multiplies it by something per track is either the
+tick or feeds it.
