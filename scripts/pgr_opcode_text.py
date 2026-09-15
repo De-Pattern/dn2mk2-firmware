@@ -1,11 +1,30 @@
 """Read the classic SHARC PGR's opcode tables, for cross-checking Rev 1.5.
 
 **INCOMPLETE -- this does not work yet, and its output must not be used.** The
-document is identified and its layout understood (both below), but the
-positional reader still picks up page furniture: types 1a, 8a, 13a and 14a all
-come out with the identical bit set `11,10,1,0`, which is a page number read as
-opcode bits. A cross-check whose second source is misread is worse than no
-cross-check, so no numbers from this are reported anywhere until it is right.
+document is identified and its layout understood (both below), and two real
+bugs are fixed, but the digits are still not landing on the right bits. A
+cross-check whose second source is misread is worse than no cross-check, so no
+numbers from this are reported anywhere until it is right.
+
+Fixed so far, both worth keeping:
+
+- **The figure was reading its own axis.** The bit-number row is keyed on a
+  rounded y while its own words sit a fraction lower, so a window starting at
+  `y` admitted the row itself -- and `11`, `10`, `1` and `0` are all valid bit
+  strings. That is exactly why types 1a, 8a, 13a and 14a first came out with
+  the identical set `11,10,1,0`.
+- **One heading was owning every row below it.** A page carries several types,
+  each with its own grid; a heading owns only the rows before the next
+  heading.
+
+Still wrong: **Type 1a extracts one fixed bit where the page plainly prints
+`001` across bits 47..45.** The digit run extracts as a single compact word
+about one cell wide, so neither splitting its box evenly nor using the
+per-character boxes from `rawdict` places the three digits in three columns.
+Whatever positions those digits, it is not in the text layer where it has been
+looked for. The next thing to try is the stroked grid itself -- deriving cell
+boundaries from the vertical rules and assigning digits to the cell they fall
+inside -- rather than matching against bit-number centres.
 
 **A second source is the only thing that catches a wrong figure.** The digikit
 author's notes record that in the SHARC+ manual "printed digits in gray cells
@@ -62,6 +81,46 @@ def words_on(page):
     return page.get_text("words")
 
 
+def character_index(page):
+    """-> {(rounded y, text): [(char, centre x)]} from character-level boxes.
+
+    `get_text("words")` gives one box per word, and in this manual a run of
+    opcode digits is one word whose box is roughly a single cell wide even
+    when the digits are drawn across several cells. Only the per-character
+    boxes say where each digit actually sits.
+    """
+    index = {}
+    for block in page.get_text("rawdict")["blocks"]:
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                chars = span.get("chars") or []
+                if not chars:
+                    continue
+                text = "".join(c["c"] for c in chars).strip()
+                if not text:
+                    continue
+                key = (round(chars[0]["bbox"][1], 1), text)
+                index.setdefault(key, [
+                    (c["c"], (c["bbox"][0] + c["bbox"][2]) / 2) for c in chars
+                ])
+    return index
+
+
+CHAR_INDEX: dict = {}
+
+
+def char_centres(text, x0, x1):
+    """-> [(char, centre x)] preferring real character boxes over a split box."""
+    for (_y, key), chars in CHAR_INDEX.items():
+        if key == text:
+            placed = [(c, x) for c, x in chars if not c.isspace()]
+            if len(placed) == len(text) and x0 - 2 <= placed[0][1] <= x1 + 2:
+                return placed
+    span = max(len(text), 1)
+    width = (x1 - x0) / span
+    return [(c, x0 + width * (i + 0.5)) for i, c in enumerate(text)]
+
+
 def bit_rows(words):
     """-> [(y, {bit number: centre x})] for each run of descending bit numbers."""
     by_line = collections.defaultdict(list)
@@ -80,24 +139,38 @@ def bit_rows(words):
     return rows
 
 
-def digits_under(words, y, columns, depth=26.0):
+def digits_under(words, y, columns, skip=8.0, depth=30.0):
     """-> {bit: '0'|'1'} for printed opcode digits below a bit-number row.
 
     A run like `001` is one text item spanning three cells, so its characters
     are distributed across the cells its box covers rather than assigned whole.
+
+    `skip` matters more than it looks. The bit-number row is keyed on a rounded
+    y, while its own words sit a fraction lower, so a window starting at `y`
+    admits the row itself -- and the labels `11`, `10`, `1` and `0` are all
+    valid bit strings. That is precisely how types 1a, 8a, 13a and 14a came out
+    with the identical set 11,10,1,0: the figure was reading its own axis.
     """
     pitch = None
     ordered = sorted(columns.items(), key=lambda kv: kv[1])
     if len(ordered) >= 2:
         pitch = abs(ordered[1][1] - ordered[0][1])
     out = {}
+    left = min(columns.values())
+    right = max(columns.values())
     for x0, y0, x1, _y1, text, *_ in words:
-        if not (y < y0 <= y + depth) or not BITS_ONLY.match(text):
+        if not (y + skip <= y0 <= y + depth) or not BITS_ONLY.match(text):
             continue
-        span = max(len(text), 1)
-        width = (x1 - x0) / span
-        for index, char in enumerate(text):
-            centre = x0 + width * (index + 0.5)
+        # Page furniture sits outside the grid; the grid is what the bit
+        # numbers span.
+        if x1 < left - 10 or x0 > right + 10:
+            continue
+        # Each character has to be placed by its OWN position. A run like
+        # `001` extracts as one compact word whose box is about a single cell
+        # wide, so dividing the box evenly puts all three characters in the
+        # same column and the first one wins -- which is why Type1a came out
+        # with one fixed bit instead of three.
+        for char, centre in char_centres(text, x0, x1):
             best, best_d = None, 1e9
             for bit, bit_x in columns.items():
                 d = abs(bit_x - centre)
@@ -116,6 +189,8 @@ def harvest(path, lo=CHAPTER[0], hi=CHAPTER[1]):
     for number in range(lo, hi + 1):
         page = document[number - 1]
         words = words_on(page)
+        CHAR_INDEX.clear()
+        CHAR_INDEX.update(character_index(page))
         headings = []
         for x0, y0, x1, _y1, text, *_ in words:
             match = TYPE_HEADING.match(text)
@@ -131,18 +206,22 @@ def harvest(path, lo=CHAPTER[0], hi=CHAPTER[1]):
             continue
         headings.sort()
 
-        for y, columns in bit_rows(words):
-            digits = digits_under(words, y, columns)
-            if not digits:
+        rows = bit_rows(words)
+        if not rows:
+            continue
+        # One heading owns the rows between it and the NEXT heading, not every
+        # row below it. A page carries several types, each with its own grid,
+        # and giving every heading every row merges unrelated figures --
+        # which is what made Type1a come out with bits from Type3a's grid.
+        bounds = [hy for hy, _n in headings] + [float("inf")]
+        for index, (hy, name) in enumerate(headings):
+            upper = bounds[index + 1]
+            mine = [(y, cols) for y, cols in rows if hy < y < upper]
+            if not mine:
                 continue
-            # The types named most recently above this row share the figure.
-            owners = [name for hy, name in headings if hy < y]
-            if not owners:
-                continue
-            # A page lists its types together, then draws one grid per group.
-            for name in owners:
-                entry = types.setdefault(name, {})
-                for bit, char in digits.items():
+            entry = types.setdefault(name, {})
+            for y, columns in mine:
+                for bit, char in digits_under(words, y, columns).items():
                     entry.setdefault(bit, char)
     return types
 
