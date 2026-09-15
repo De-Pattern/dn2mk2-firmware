@@ -1,0 +1,787 @@
+﻿===== page 308   [compute, cdreg = DM(Ia+k, 0) , cdreg = PM(Ic+k, 0) ;] =====
+  row y=451.5  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45   (3 cells)
+  row y=510.0  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=568.5  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 310   [SIMD Mode] =====
+  row y=525.9  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45   (3 cells)
+  row y=588.9  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  1  1  1  1  1  1
+    fixed  .  .  .  .  .  .  .  .  .  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 22, 21, 20, 19, 18, 17, 16   (7 cells)
+
+===== page 312   [SIMD Mode] =====
+  row y=491.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  #  .  .  .  .  .  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 32   (11 cells)
+  row y=541.3  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 26, 25, 24, 23   (9 cells)
+  row y=590.8  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 314   [Type2b Instruction Opcode] =====
+  row y=131.6  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39   (9 cells)
+  row y=181.1  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 315   [COND compute ;] =====
+  row y=161.6  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44   (4 cells)
+
+===== page 318   [Type3a Instruction Opcode] =====
+  row y=126.7  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45   (3 cells)
+  row y=185.2  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=243.7  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 321   [IF PEx COND ureg = DM(Mb, Ia) (LW);] =====
+  row y=383.1  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45   (3 cells)
+  row y=446.1  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  1  1  1  1  0  0
+    fixed  .  .  .  .  .  .  .  .  .  #  #  #  #  #  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 22, 21, 20, 19, 18   (5 cells)
+
+===== page 324   [For the universal register, the X element uses the specified] =====
+  row y=510.0  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  1  0  0  1  0  0  0  0  0  0  0  1  0  0  0  0
+    fixed  #  #  #  #  .  .  .  .  .  .  .  #  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 36   (5 cells)
+
+===== page 326   [Example] =====
+  row y=566.2  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45   (3 cells)
+  row y=624.7  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  1  1  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  #  #  #  #  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 22, 21, 20, 19   (4 cells)
+  row y=692.2  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 331   [IF PEy COND compute, cdreg = PM(Ic+k, 0) ;] =====
+  row y=522.0  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44   (4 cells)
+  row y=589.5  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=648.0  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 334   [IF PEx COND dreg = PM(<data6>, Ic) ;] =====
+  row y=348.1  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44   (4 cells)
+  row y=415.6  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  1  1  1  1  0  0
+    fixed  .  .  .  .  .  .  .  .  .  #  #  #  #  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 22, 21, 20, 19   (4 cells)
+
+===== page 337   [the 2-bytes addressed by I0+2, sign extends the 16-bit littl] =====
+  row y=246.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44   (4 cells)
+  row y=314.3  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  1  1  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  #  #  #  #  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 22, 21, 20, 19   (4 cells)
+  row y=377.3  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 340   [Type5a_move Instruction Opcode] =====
+  row y=121.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  1  1  1  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43   (5 cells)
+  row y=184.8  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  #  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 30   (1 cells)
+  row y=243.3  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 341   [Description] =====
+  row y=562.4  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  1  1  1  1  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  .  .  .  .  .  .  .  .  .  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 32   (7 cells)
+  row y=615.9  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27   (5 cells)
+  row y=670.4  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 343   [Example] =====
+  row y=322.3  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  1  1  1  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43   (5 cells)
+  row y=385.3  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  #  .  .  .  .  .  .  .  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 30, 22, 21, 20, 19, 18, 17, 16   (8 cells)
+
+===== page 345   [Type5b (swap) Instruction Opcode] =====
+  row y=121.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  1  1  1  1  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  .  .  .  .  .  .  .  .  .  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 32   (7 cells)
+  row y=175.8  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  1  1  1  1  1  1
+    fixed  #  #  #  #  #  .  .  .  .  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 22, 21, 20, 19, 18, 17, 16   (12 cells)
+
+===== page 347   [When the processors are in SIMD mode, the condition is evalu] =====
+  row y=333.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44   (4 cells)
+  row y=396.8  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=455.3  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 349   [Type6a (nomem) Instruction Opcode] =====
+  row y=121.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  #  .  .  .  .  .  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 32   (11 cells)
+  row y=171.3  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  .  .  .  .  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 26, 25, 24, 23   (5 cells)
+  row y=225.3  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 351   [I3 = MODIFY(I3,M5); /* Semantically same as MODIFY(I3,M5) */] =====
+  row y=151.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  0  1  0  0  1  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39   (9 cells)
+  row y=210.3  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0
+    fixed  .  .  #  .  .  .  .  .  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 29, 23   (2 cells)
+  row y=277.8  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 353   [Type7b Instruction Opcode] =====
+  row y=121.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39   (9 cells)
+  row y=175.8  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  1  1  1  1  1  1
+    fixed  .  .  .  .  .  .  .  .  #  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 23, 22, 21, 20, 19, 18, 17, 16   (8 cells)
+
+===== page 355   [Type7d Instruction Opcode] =====
+  row y=121.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  0  1  0  0  1  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39   (9 cells)
+  row y=175.8  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0
+    fixed  .  .  #  .  .  .  .  .  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 29, 23   (2 cells)
+  row y=243.3  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 359   [Example] =====
+  row y=319.9  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  0  1  1  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 32   (8 cells)
+  row y=373.9  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  .  #  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 25   (6 cells)
+  row y=432.4  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 363   [Type9a Instruction Syntax] =====
+  row y=126.3  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41   (7 cells)
+  row y=193.8  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 23   (1 cells)
+  row y=265.8  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 367   [Type9b Instruction Syntax] =====
+  row y=126.3  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 26, 25   (7 cells)
+  row y=193.8  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  #  .  #  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 9, 7, 6, 5, 4, 3, 2, 1, 0   (9 cells)
+
+===== page 371   [Type10a Instruction Syntax] =====
+  row y=126.7  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46   (2 cells)
+  row y=185.2  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=243.7  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 374   [The RTS executes based on the logical ANDing of the PEx and ] =====
+  row y=219.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  1  0  1  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41   (7 cells)
+  row y=269.1  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=332.1  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 377   [Example] =====
+  row y=402.7  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  1  1  0  0  0  0  0  0  1  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  .  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 15, 14, 13, 12, 11, 10, 9, 7   (8 cells)
+
+===== page 379   [Type12a_imm Instruction Syntax] =====
+  row y=126.7  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  1  1  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40   (8 cells)
+  row y=176.0  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=239.0  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 380   [The end address can be either a label for an absolute 24-bit] =====
+  row y=298.9  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  1  1  0  1  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39   (9 cells)
+  row y=348.2  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 26, 25, 24   (8 cells)
+  row y=402.2  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 381   [Description] =====
+  row y=535.0  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  1  1  1  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39, 38   (10 cells)
+  row y=584.2  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 26, 25, 24   (8 cells)
+  row y=638.2  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 387   [Because of the register selections in this example, these tw] =====
+  row y=189.3  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42   (6 cells)
+  row y=247.6  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=297.1  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 388   [w] =====
+  row y=529.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  1  0  1  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41   (7 cells)
+  row y=602.3  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=651.8  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 393   [Type15a Instruction Opcode] =====
+  row y=126.5  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  1  0  1  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45   (3 cells)
+  row y=198.5  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=248.0  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 395   [DM(<data7>, Ia) = ureg0/1 (LW);] =====
+  row y=589.6  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  0  0  1  0  0  0  0  0  0  0  0  1  0  0  0
+    fixed  #  #  #  #  .  .  .  .  .  #  .  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 22, 20, 19, 18, 17, 16   (10 cells)
+  row y=652.6  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 15, 14   (2 cells)
+
+===== page 397   [PM(Ic+k, 0) = <data32> ;] =====
+  row y=390.5  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  1  0  0  1  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  .  .  .  .  .  .  .  #  #  #  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 36, 35, 34   (7 cells)
+  row y=458.0  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=507.5  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 399   [Type16b Instruction Opcode] =====
+  row y=126.5  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  1  0  0  1  0  0  0  0  0  0  0  0  0  1  0  0
+    fixed  #  #  #  #  .  .  .  .  .  .  .  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 36, 35, 34, 33, 32   (9 cells)
+  row y=180.8  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 400   [SIMD Explicit Operation (PEx Operation Stated in the Instruc] =====
+  row y=416.1  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  1  1  1  1  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39   (9 cells)
+  row y=461.1  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=510.6  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 401   [Syntax] =====
+  row y=581.0  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  1  0  0  1  0  0  0  0  0  0  0  0  0  1  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 26, 25, 24, 23   (9 cells)
+  row y=630.8  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 405   [Type18a Instruction Syntax] =====
+  row y=126.3  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  0  1  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  .  .  .  #  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 36   (9 cells)
+  row y=171.3  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=220.8  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 406   [sc] =====
+  row y=513.5  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  0  1  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42   (6 cells)
+  row y=574.5  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=624.0  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 408   [Example] =====
+  row y=249.7  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  0  1  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39   (9 cells)
+  row y=303.7  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=353.2  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 410   [Type20a Instruction Opcode] =====
+  row y=124.2  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  0  1  1  1  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 32   (9 cells)
+  row y=191.7  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=259.2  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 413   [Type21a Instruction Opcode] =====
+  row y=124.2  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39, 38   (10 cells)
+  row y=164.7  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=205.2  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=688.6  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1
+    fixed  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0   (16 cells)
+
+===== page 414   [Type 22a ISA/VISA (idle/emuidle)] =====
+  row y=607.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39   (9 cells)
+  row y=648.3  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=688.8  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 415   [Type 22c VISA (idle/emuidle)] =====
+  row y=608.4  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  1
+    fixed  #  #  #  #  #  #  #  #  #  .  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 15, 14, 13, 12, 11, 10, 9, 8, 7, 5, 4, 3, 2, 1, 0   (15 cells)
+
+===== page 417   [Type25a_direct Instruction Opcode] =====
+  row y=126.7  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  1  0  0  0  0  0  0  0  0  1  0  0
+    fixed  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32   (16 cells)
+  row y=164.6  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 26, 25, 24   (8 cells)
+  row y=218.6  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 418   [Type25a_pcrel Instruction Opcode] =====
+  row y=126.7  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  1  0  0  0  0  1  0  0  0  1  0  0
+    fixed  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32   (16 cells)
+  row y=164.6  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 26, 25, 24   (8 cells)
+  row y=218.6  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 419   [Example] =====
+  row y=221.5  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  1  0  1  0  0  0  0  0  0  1  0  0
+    fixed  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32   (16 cells)
+  row y=259.5  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 31, 30, 29, 28, 27, 26, 25, 24   (8 cells)
+  row y=300.0  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 420   [Example] =====
+  row y=456.8  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  1  1  0  1  0  0  0  0  0  0  1  0  0
+    fixed  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32   (16 cells)
+  row y=487.5  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 421   [Syntax] =====
+  row y=365.9  16 cells
+    bit   47 46 45 44 43 42 41 40 39 38 37 36 35 34 33 32
+    value  0  0  0  0  0  0  0  0  0  1  0  0  0  0  0  0
+    fixed  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #  #      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32   (16 cells)
+  row y=401.9  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=437.9  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 423   [Table 18-2: Short Compute Instruction Coding SINGLEFN (type ] =====
+  row y=517.1  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+  row y=580.1  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 424   [ShortCompute] =====
+  row y=126.1  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  1  1  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+===== page 425   [opcode (bits] =====
+  row y=269.0  16 cells
+    bit   31 30 29 28 27 26 25 24 23 22 21 20 19 18 17 16
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  #  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: 22   (1 cells)
+  row y=323.0  16 cells
+    bit   15 14 13 12 11 10  9  8  7  6  5  4  3  2  1  0
+    value  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0  0
+    fixed  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .  .      ('#' = shaded, i.e. not a field bit)
+    shaded bits: (none)   (0 cells)
+
+136 cell rows read, 0 failed the descending-bit check
