@@ -666,9 +666,35 @@ This is the concrete form of the owner's point that it is sometimes better to
 make our own section than to hunt for crumbs. The cave does not disappear — but
 it shrinks to a launcher, and stops being the thing that caps payload size.
 
-**What is still assumed.** That `+0x80000` is hard-coded in code that runs at
-every power-up, which requires the package to be resident and readable at
-`0x80000` at normal runtime.
+> **[ANSWERED 2026-09-16 — and the mechanism is not what is assumed below.]**
+> `m-dwyer/digikit`'s emulator settles it, from the other side. `0x80000` is
+> **not a memory address at all**: it is an **offset into SPI NOR flash**, and
+> the container is read through a flash read routine, `read(offset, len, dest)`
+> — on DT2 at `0x401296fe`, identified by `0x84020003 -> DSPI0_PUSHR` whose low
+> byte `0x03` is the NOR READ command. Her boot trace shows exactly the reads
+> this section needed to know about:
+>
+> ```
+> off=0x080000 len=32       -> the ELE3 header
+> off=0x080020 len=16  x5   -> the section-table entries
+> off=0x19be60 len=184844   -> section 7, the SHARC blob
+> ```
+>
+> **So the gate is passed, by a better route than the one guessed at.** The
+> container is readable at runtime, section 7 *is* read at boot, and it does
+> not depend on anything staying resident in RAM — it is in flash, and the
+> lookup reads it on demand. A new section is readable the same way.
+>
+> Two consequences for the plan above. The four-call API is really a five-call
+> one: `find_section_by_id` → `section_data_address` → **flash read** →
+> `malloc` → copy. And the `+0x80000` is a flash base, so it is stable across
+> power cycles rather than a staging buffer that might be reclaimed.
+>
+> Note she sees **five** section-table entries on DT2 where DN2 1.11 has six.
+
+**What was assumed before that, kept for the record.** That `+0x80000` is
+hard-coded in code that runs at every power-up, which requires the package to be
+resident and readable at `0x80000` at normal runtime.
 
 The argument for it is from hardware necessity, and it is a good one: the SHARC
 and the Cortex-M are separate chips with volatile program memory, so they must
@@ -1221,3 +1247,85 @@ Do not let this become a claim that combined mods are *safe*. Nothing here
 substitutes for flashing the combination. The two current mods have each been
 confirmed on hardware separately and **the combination has never been flashed**
 — which is a small risk given the disjointness, and is still a first run.
+
+---
+
+## 12. P-locking the performance modulators
+
+**Asked for by the owner, 2026-09-15**, off the back of
+`docs/modulation-matrix.md`: *"explore how to p-lock these modulator values on
+any targeted track."*
+
+The prize is real. The DN2 gives each of **Velocity, Mod Wheel, Pitch Bend,
+Breath Controller, Aftertouch and Key Tracking** four destination + depth pairs
+per track, and they are **static for the whole pattern**. Making them
+p-lockable would mean a trig that says *"on this step, velocity drives filter
+cutoff at +40"* and the next step says something else — 48 new automatable
+values per track, using modulation hardware the instrument already runs every
+audio frame.
+
+### Why it does not work today, precisely
+
+Two mechanisms that never meet.
+
+**The p-lock path is keyed on a parameter index in 1..99.** `0x400db092`
+(`docs/modulation-matrix.md`, "The parameter-set path") takes a list of
+`(u16 index, u16 value)` pairs and, per entry, marks the index in a per-track
+128-bit bitmap at `0x4664b26c + 16·track`, writes the value into the track's
+word array, and writes `value << 16` into `0x8000de60`. Everything it touches is
+addressed by that index.
+
+**The modulators' destinations and depths are not in that space.** They live in
+the per-track descriptor records at `B + 3476 + 153·track`, four longwords per
+source, each `depth:s16 << 16 | dest:s16`. Nothing indexes them from 1..99, and
+the DSP frame does not carry them either — the frame carries indices 25–99, the
+already-modulated *results* (`docs/engine-state.md`).
+
+So a p-lock cannot reach a modulator depth because there is no index that names
+one.
+
+### The three routes, and which looks right
+
+**(a) Give the descriptor fields parameter indices of their own.** 48 values per
+track is far more than the space has: the index space is packed 1..99 with a
+single gap at 65, and the bitmap tops out at 127. **Twenty-eight free indices
+against forty-eight wanted — this does not fit.** Recorded so it is not
+re-proposed.
+
+**(b) Index only the depths, and only for one source at a time.** Four depths
+per source is 4 indices, or 24 for all six. **24 ≤ 27**, so it fits the bitmap's
+spare range 100–127 exactly, with three to spare. The destinations stay static
+and only the amounts move — which is the musically useful half anyway, and is
+how Elektron's own LFO DEP is p-lockable while LFO DEST is a parameter too.
+This is the version that fits the hardware rather than fighting it.
+
+**(c) Hook the frame ISR and rewrite the descriptor list per step.** No index
+space needed at all: a cave in `0x400db22c`'s caller reads the current step's
+lock data and writes the four longwords before the kernel runs. Cheapest in
+structure, worst in honesty — the values would not be in the sequencer's data
+model, so they would not be edited, copied, or saved by any existing UI, and
+would need a parallel store of our own.
+
+**(b) is the one to scope.** It reuses the bitmap's spare capacity, keeps the
+sequencer's data model intact, and the write side is one hook: after
+`0x400db092` has applied the step's locks, translate indices 100–123 into the
+six descriptor lists' depth halves.
+
+### What must be checked before any of this is built
+
+1. **The 128-bit bitmap's spare range is genuinely spare.** Indices 100–127 are
+   *representable*. Nothing yet shows nothing else uses them.
+2. **What the 153-byte descriptor record's other 57 bytes are.** Find its
+   constructor and read its size — the same warning that sits at the end of
+   `docs/modulation-matrix.md`.
+3. **Whether the stored pattern format has room for the extra lock indices.**
+   DNX is the authority here and has not been asked. `docs/dn2-pattern-format.md`
+   in that repository gives p-lock ids as `4*slot + lfo`; whether ids above the
+   current maximum survive a save is unknown and is the same class of question
+   the canary answered for sounds.
+4. **Where LFO1–3 are applied.** Still unfound, and it may turn out that the LFO
+   depth p-lock already does exactly this job by a route we have not read — in
+   which case copy it rather than invent it.
+
+Item 4 gates the others: it is cheap, and it could make this whole entry
+unnecessary by showing the mechanism already exists.

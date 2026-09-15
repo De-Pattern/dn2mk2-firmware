@@ -282,6 +282,29 @@ LFO generator is to "find whatever crosses to the SHARC and drive lane 4
 there". The FPGA register file is ruled out above as too small. This is the
 first thing found that is the right shape to carry continuous data to the DSP.
 
+> **[CORRECTED 2026-09-16, from `m-dwyer/digikit` `machine-engine-link`.]**
+> digikit had already found this path and is well ahead on it, and her account
+> corrects two things below that were read wrong here. Recorded rather than
+> quietly edited, because both are the same kind of error.
+>
+> 1. **It is send *and receive*, not a two-buffer send.** The signature is
+>    `(tx_len, tx_buf, rx_len, rx_buf)`. The SHARC sends **2,748 bytes back**
+>    every frame. Calling the second pair a second output buffer was a guess
+>    from the shape of the argument list, never checked.
+> 2. **The transfer is eDMA, not PIO.** DSPI2's driver uses **eDMA channels 28
+>    and 29**; TCD 29's DADDR is set to `PUSHR`, and `SERQ` is written `0x1c`.
+>    The `movel #0xec038034,%d0` read below as "a register-held port address
+>    for an indirect write loop" is the eDMA *destination being programmed*.
+>    CTAR0 is `0xFA010000` — 16-bit frames — and each PUSHR entry is
+>    `0x8001xxxx`.
+> 3. She names the instance: **DSPI2**. The loose end below about which
+>    silicon this is resolves the same way — her verified MCF5441x notes put
+>    on-chip peripherals at `0xFC0x_xxxx`, so `0xEC038000` is reached over
+>    FlexBus.
+>
+> The **boot** path below is unaffected: that one really is byte-at-a-time PIO
+> spinning on `TCF`, and it is a different routine from the runtime driver.
+
 #### Its two callers are interrupt handlers
 
 Both open by saving the MAC unit — `macsr`, `acc0`–`acc3`, `accext01/23`, `mask`
@@ -289,25 +312,68 @@ Both open by saving the MAC unit — `macsr`, `acc0`–`acc3`, `accext01/23`, `m
 reason to preserve the multiply-accumulate registers. So this transfer is
 **periodic**, driven by an interrupt, not by a user action.
 
-The argument list reads as a two-buffer scatter send, `(len1, buf1, len2, buf2)`:
+The argument list is `(tx_len, tx_buf, rx_len, rx_buf)`:
 
 ```
-0x40025e8a  pea 0x800053a4     ; buf2  -- SRAM
-0x40025e90  pea 0xabc          ; len2  = 2,748
-0x40025e94  pea 0x80005e60     ; buf1  -- SRAM
-0x40025e9a  pea 0xa80          ; len1  = 2,688
+0x40025e8a  pea 0x800053a4     ; rx_buf -- SRAM
+0x40025e90  pea 0xabc          ; rx_len = 2,748
+0x40025e94  pea 0x80005e60     ; tx_buf -- SRAM
+0x40025e9a  pea 0xa80          ; tx_len = 2,688
 0x40025e9e  jsr 0x400cf7be
 
-0x400d0fd8  clrl %sp@-         ; buf2  = 0   -- the second pair is optional
-0x400d0fda  clrl %sp@-         ; len2  = 0
-0x400d0fdc  pea 0x4244098c     ; buf1  -- BSS this time, not SRAM
-0x400d0fe2  pea 0xa80          ; len1  = 2,688
-0x400d0fe6  movew #2,0x4244098c  ; a 16-bit header written in before sending
+0x400d0fd8  clrl %sp@-         ; rx_buf = 0  -- this handler receives nothing
+0x400d0fda  clrl %sp@-         ; rx_len = 0
+0x400d0fdc  pea 0x4244098c     ; tx_buf -- BSS this time, not SRAM
+0x400d0fe2  pea 0xa80          ; tx_len = 2,688
+0x400d0fe6  movew #2,0x4244098c  ; the frame header word, written in first
 0x400d0fec  jsr 0x400cf7be
 ```
 
-`0xa80` = 2,688 appears in both, against the function's own `#2800` chunk
-bound — so 2,688 is a payload and 2,800 is the buffer stride it fits inside.
+### The cross-device comparison, which is new
+
+digikit's numbers for the same driver on **Digitakt II 1.15C/1.16** are
+`FUN_400cf9c4(0x802, 0x80005348, 0xabc, 0x8000488c)`. Against ours on
+**Digitone II 1.11**:
+
+| | DN2 1.11 | DT2 1.15C/1.16 |
+|---|---|---|
+| `tx_len` | `0xa80` = **2,688** | `0x802` = **2,050** |
+| `rx_len` | `0xabc` = **2,748** | `0xabc` = **2,748** |
+| test-mode handler | `tx 0xa80`, `rx 0` | `tx 0x802`, `rx 0` |
+
+**The receive length is identical across the two instruments; the transmit
+length is not.**
+
+> **[REFRAMED 2026-09-16 — `lalzart/digitakt-ii-firmware-research-public`.]**
+> A third independent account explains the pattern rather than contradicting
+> it, and its reading is the better one. The transfer is **full-duplex with a
+> single padded frame size**: the frame is `0xabc` = **2,748 bytes** in both
+> directions, and the *payload* inside it is device-specific — `0x802` = 2,050
+> on the DT2, `0xa80` = 2,688 on the DN2. So `0xabc` is not "the receive
+> length"; it is the frame, and it is the same on both because the link is
+> configured once.
+>
+> They close the size independently from the hardware side: DSPI2 CTAR0, SPI
+> mode 1, **16-bit MSB-first**, active-low PCS0, one continuous `0x55e`-word
+> window — and `0x55e` = 1,374 words = 2,748 bytes. They also give digikit's
+> eDMA channels a direction (**29 transmits** via `DSPI2_SOUT`, **28 receives**
+> via `DSPI2_SIN`) and identify the publication as a level-5 interrupt
+> software-forced from a level-6 eDMA-completion path.
+>
+> And they independently find **sixteen per-track unit records** of `0x60` = 96
+> bytes on the DT2, against the **146** bytes per track measured here on the
+> DN2 — a larger per-track record for the FM machines, and a confirmation from
+> outside that the per-track block structure read below is real.
+>
+> See `docs/lalzart-dt2-crosscheck.md`. A follow-up note is owed to digikit
+> PR #12, where this was phrased the weaker way.
+
+What the ColdFire *sends* is therefore device-specific — consistent with
+per-track machine state, of which the two devices have different amounts —
+while the frame that carries it is common.
+
+That is worth having for the chimera: a DN2 running DT2 machines would have to
+produce a DT2-shaped payload, but the link itself needs no change.
 
 And the buffers are not scratch. `0x80005000`–`0x80006000` holds **at least 125
 accesses across 43 addresses**, largely longword, and the functions touching
