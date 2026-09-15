@@ -380,3 +380,185 @@ filter constants reported a hit at `0x401f2b4d`. It is not one: the address is
 odd, and the surrounding longwords read `0, 6, 14, 30, 38, 46, 62, 78, 94, 110`
 — an unrelated offset table whose bytes happen to contain the pattern. Checking
 alignment before believing a table cost one command.
+
+### RETRACTED: "the parameter-value module is read end to end"
+
+**2026-09-15, after installing digikit's `ColdfireEMAC` Ghidra language.** The
+section above claimed the modulation module `0x400daed2`-`0x400db32e` was read
+end to end, ten entry points tabulated, and that the frame ISR's call list was
+enumerated. **Both were wrong, and wrong the same way.**
+
+**The ISR is not where this document said it was.** `dnfw fn entry` attributed
+`0x40026b40` to `0x40025e0a` -- and printed its own caveat that the attribution
+is a guess for functions not reached by a direct call. It was a guess, and a bad
+one: `0x40025e0a` is a **44-byte** function. The real handler is
+**`FUN_40025e36`, 7,582 bytes**, which is what `docs/engine-state.md` said in
+the first place.
+
+**Its call list is 73 functions, not 15.** The earlier enumeration scanned for
+`jsr (xxx).L` only, so it missed every `bsr` and every indirect call -- and the
+modulation kernel itself is reached as `lea %pc@(...),%a3` / `jsr %a3@`, which
+the same document points out. A scan that cannot see the call form it had
+already documented is not an enumeration.
+
+**Seven functions in the module were never read**: `0x400dae1c`, `0x400db524`,
+`0x400db640`, `0x400db72a`, `0x400db798`, `0x400db7d8`, `0x400db800`. Six of
+them sit **above** `0x400db32e`, where reading stopped because the incomplete
+call list gave no reason to look further.
+
+This is `docs/PRINCIPLES.md` §19 for the third time today, and the sharpest
+instance yet: **an instrument that cannot see a call form invents a module
+boundary, and everything downstream inherits it.**
+
+### What is in the unread part: a 16-slot ramp-and-timer pool
+
+`0x400db72a` walks an array from `0x42c645e8` to `0x42c647a8` -- **448 bytes,
+stride 28, sixteen elements** -- and per element:
+
+```
++4   remaining time      countdown
++8   accumulator         += (global_elapsed * rate) >> 2, CLAMPED at 0x7fffffff
++12  rate
+```
+
+```
+0x400db746  movel 0x402a0dec,%d1    ; elapsed time this tick, a global
+0x400db750  mulsl %a0@,%d1          ; x rate at +12
+0x400db754  asrl #2,%d1
+0x400db756  addl %d1,%a2@(8)        ; accumulate
+0x400db75e  cmpil #2147483647,%d1   ; and SATURATE
+...
+0x400db776  cmpl %d0,%d1            ; elapsed vs remaining
+0x400db77c  movel %d0,%a2@(4)       ;   still running: decrement
+0x400db788  jsr %a3@                ;   expired: call 0x400db4ac(element)
+0x400db78c  lea %a2@(28),%a2
+```
+
+`0x400db524` and `0x400db640` index the same array by `descriptor@(16)`, using
+`(x << 5) - (x << 2)` = **x × 28**, confirming the stride independently.
+
+**This is not the LFO tick.** An LFO phase *wraps*; this **clamps** at
+`0x7fffffff` and fires a callback when a countdown expires. That is a ramp with
+a deadline -- a fade, a slew, a portamento or a scheduled event -- not an
+oscillator. Sixteen slots also fits one-per-track rather than the forty-eight a
+per-track LFO1-3 would need.
+
+So it is **not the answer, and it is the first structure found in the right
+module by an instrument that can see the whole module.** The remaining unread
+functions are `0x400dae1c`, `0x400db798`, `0x400db7d8`, `0x400db800`, and the
+expiry callback `0x400db4ac`.
+
+### The rest of the module, read — and there is no oscillator in it
+
+**2026-09-15, continued after a reboot.** The five functions left unread above
+are now read. **None is an LFO.** With them the module is complete, and this
+time the claim rests on Ghidra's resolved call graph under the `ColdfireEMAC`
+language, not on a `jsr (xxx).L` scan.
+
+| Entry | What it does |
+|---|---|
+| `0x400db4ac` | **expiry callback** for the 16-slot pool: if `+20` holds a handle, release it through `0x40138a0c` and clear it; clear the countdown at `+4` |
+| `0x400db4ce` | **post a type-6 event for a track**: allocate via `0x401389d6`, set `obj[0]=6`, `obj[16]=track`, `obj[24]=pool[track]+0`, and schedule it at `time + 90000` through `0x40138b5c` |
+| `0x400db798` | "is this descriptor still current": if bit 18 of `desc+56` is set, compare `pool[desc+16]+0` against `desc+24` while that slot's countdown runs |
+| `0x400db7d8` | if a track's countdown has gone **negative**, fire the expiry callback |
+| `0x400db800` | `pool[track]+24 = value` for track 0..15, **with interrupts masked** (`move #0x2700,%sr`) |
+| `0x400dae1c` | three global housekeeping countdowns at `0x80005354`, `0x80005358` (step `2 × elapsed`) and `0x8000535c` (step 1), each firing a handler at zero |
+| `0x400dae98` | load one track's **101 base values** into `0x8000dea4 + 808·track` as `value << 16` — the bulk-set path, consistent with the `101·track + 17` indexing above |
+
+So the 16-slot pool at `0x42c645e8` is a **per-track event timer**: bounded to
+tracks 0–15, holding a handle that is released on expiry, and scheduling
+type-6 events 90,000 ticks out. That reads as **note gate or retrig timing**,
+not modulation. It is in this module because it shares the trig-handler
+descriptor (`+16` track, `+24`, `+56` flags) — not because it modulates.
+
+### What this now establishes about the tick
+
+**The LFO oscillator is not in the modulation module and is not called from it.**
+The module is: the six-source apply, the p-lock apply, the base-value store, the
+modulated-parameter bitmap, and a per-track event timer. Nothing in it wraps a
+phase.
+
+That narrows the search, honestly this time. The frame ISR `FUN_40025e36` has
+73 resolved callees; the module accounts for sixteen of them, and the SPI send,
+memset and block copy for three more. The remaining unread callees sit in
+`0x40029bca`–`0x4002a6a2` and `0x4002b06e`–`0x4002b1b6`, next to the ISR — or
+the tick does not run in the audio frame at all and lives on the sequencer
+clock, which the DN2's tempo-synced LFOs would make unsurprising.
+
+**The next search should be for the oscillator's signature, not by reading
+functions one at a time:** a phase that **wraps** rather than clamps, fed by
+`SPD` and `MULT` — which sit at `track_base + 36` and `+38` for LFO1, and
+`+16·lfo` further for LFO2 and LFO3.
+
+### Leads closed on the way to the tick, 2026-09-15 (evening)
+
+Recorded so a later session does not re-walk them. Each is a negative from a
+named instrument -- a whole-image objdump text export of MAIN OS 1.11 up to
+`0x401f0000`, 640,982 instructions, searched rather than read by hand.
+
+**The only PRNG constant in the image is glibc's.** `0x40150670` is `rand()`:
+`seed = seed * 1103515245 + 12345`, return bits 16-30. Its family sits beside it
+-- `0x4015069e` combines two draws into 32 bits, `0x401506ba` is `srand`,
+`0x401506c6` burns 100,000 draws. `0x40150694`, a signed `rand() >> 8` that
+would suit an `RND` wave, **has no direct callers**.
+
+**`rand()`'s twelve callers are not an LFO.** `0x400c26b4`, `0x400c271e` and
+`0x400c0aa6` scale `rand() % 32767` into a parameter's `[min, max]` and round to
+`& ~0xff` -- the **parameter randomiser**. `0x400d3314` draws two distinct
+indices from a table at `0x4028c1c0`. So an `RND` LFO, if it is on the ColdFire,
+uses a different noise source -- or is reached indirectly, which a text search
+cannot see.
+
+**`0x400c2894`, the implementation all three MOD thunks jump to, is UI.** It
+builds the destination list through `0x4003951e` and searches it for the
+current `DEST`. Consistent with the MOD1-3 `std::function`s being the `[MOD]`
+page's destination menu, as recorded above.
+
+**The two clusters of indexed parameter writes are storage helpers.**
+`0x4013c972` and `0x4013c9a0` write a value as a word or a long by a type code
+(2 = long, 3 = word); the larger functions at `0x4013d16e`, `0x4013e7c2`,
+`0x401464f6` and `0x401498aa` hold the rest of that cluster and were not read.
+
+**Seven waveform-sized switches exist** (bound 6, then a pc-indexed jump), at
+`0x4001210a`, `0x40017c12`, `0x4007032c`, `0x400708de`, `0x400ffe58`,
+`0x40113974`, `0x40120ba0`, `0x40129df8`, `0x4016fd74`. None is yet tied to
+`WAVE`.
+
+**Frame-ISR callees not yet read, triaged by what they do.** The arithmetic ones
+are `0x4002a6a2` (1,330 B: adds into memory, variable shift, multiply),
+`0x4002a0bc` (746 B), `0x40029cd4` (722 B), `0x40003d00` and `0x40003118` --
+all working on BSS at `0x4058xxxx`/`0x4059xxxx`.
+
+### The owner's lead: follow the tempo
+
+> *"the tick should be somehow linked to the tempo parameter"*
+
+Right, and a better anchor than reading functions: the DN2's LFO `SPD` is
+**tempo-synced**, so the phase increment must be built from the project BPM.
+Whatever reads the tempo and multiplies it by something per track is either the
+tick or feeds it.
+
+### Two more closed, and the clock located
+
+**`0x4002a0bc` is the arpeggiator step, not an LFO.** Called from the trig
+handler with the track, it keeps per-track state at `0x4059c8a8 + 40·track`,
+walks note bitmaps at `0x40598728` in modes 1-3 (up, down, up-down via
+`3 - index`), advances an octave counter at `+28` that wraps at the sound's
+`+353`, gates each step through a 16-bit mask at the sound's `+356`, adds a
+per-step offset from `+358`, and returns a note number. The `#2880` the trig
+handler stores into `0x4058e918[track]` beside it is a per-track note-on
+initial value, not a tempo read.
+
+**The frame time step is written in one place.** `0x402a0dec` -- the elapsed
+time the event-timer pool and the housekeeping countdowns advance by -- has
+**exactly one writer**, `0x4013707c`, inside a clock module around
+`0x4013706a`-`0x401373b0` that also maintains a flag word at `0x402a0df0` and
+values at `0x402a0df4`, `0x402a0df8` and `0x402a0dfc`. Nine functions read the
+step: the frame ISR `0x40025e36`, the timer pool `0x400db524`/`0x400db72a`,
+housekeeping `0x400dae1a`, the writer itself, and four not yet read --
+`0x400257fa`, `0x400d7f06`, `0x40129130` and `0x401383ac`.
+
+Following the owner's lead: a free-running LFO must add elapsed time to its
+phase and a tempo-synced one needs a tempo-scaled step, so the tick either
+reads `0x402a0dec` or reads something computed from it and the BPM in that
+clock module.

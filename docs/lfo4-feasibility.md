@@ -989,11 +989,15 @@ would settle it"*. It was the right caveat and it has now cashed out against me.
 
 ### The `PROB` dispute, resolved — both sides were right
 
-The owner said `PROB` is p-lockable; DNX's `NOT_LOCKABLE` list said it is not.
-The read shows **both were describing something true**:
+The owner said `PROB` is p-lockable; DNX reported it has **no lock-pool
+record**, `NOT_LOCKABLE` being its code's name for that. DNX has since asked
+that the distinction be kept sharp, and it is right twice over — the claim was
+never "not p-lockable", and **this A1 read cannot confirm the stock half of it,
+because it was taken on a probe build.** With that said, the three statements
+below are each true of their own subject:
 
-- **On stock**, probability has no lock-pool id and lives at `+0x200` — DNX's
-  list is correct about the storage mechanism.
+- **On stock**, probability has no lock-pool id and lives at `+0x200`. Source:
+  DNX's **2026-07-26 hardware capture on stock**, *not* this read.
 - **At the instrument**, the owner sets it per trig, which is what a player
   means by a lock — the owner is correct about the behaviour.
 - **On the probe build**, it produces a genuine lock record — under **LFO2
@@ -1014,3 +1018,60 @@ use**, and the pattern format accepted it and stored it. That is not a plan and
 proves nothing about whether LFO4 would *work* — but it is the first time
 anything has been written into that reserve and read back out, and it says the
 storage side does not reject it.
+
+### Confirmed on STOCK firmware by eye, seven of eight — and the eighth is the tell
+
+**2026-09-15, after the owner reflashed stock.** With the probe build gone and
+factory 1.11 resident, the owner opened A1 and reported which parameters are
+being modulated on that trig:
+
+> *"LFO 1 SPD, MULT and LFO2 MODE, DEST and DEP"* … *"sorry LFO2 also got
+> modulated WAVE and SPH"*
+
+Against the eight lock records DNX read:
+
+| lock id | what it is | visible on stock? |
+|---|---|---|
+| 1 | LFO1 `SPD` | **yes** |
+| 5 | LFO1 `MULT` | **yes** |
+| 14 | LFO2 `DEST` | **yes** |
+| 18 | LFO2 `WAVE` | **yes** |
+| 22 | LFO2 `SPH` | **yes** |
+| 26 | LFO2 `MODE` | **yes** |
+| 30 | LFO2 `DEP` | **yes** |
+| **0** | **`4·0 + 0` — the reserved fourth-LFO rank** | **no — and there is no UI that could show it** |
+
+**Seven of eight, exactly, with no extras.** This is the strongest form the
+confirmation could take: it is on **stock** firmware, by a human looking at the
+instrument, with no tooling in the path, and it agrees parameter-for-parameter
+with a decode of a dump taken from a *different* firmware.
+
+And **the one the owner cannot see is the one that should be invisible.** Lock
+id 0 occupies the `4·slot + 0` rank that DNX documents as never used — the
+column a fourth LFO would live in. There is no fourth LFO page, so there is no
+control to draw it against.
+
+### What that establishes, and what it does not
+
+**Established:** the pattern format **stores** a lock in the reserved
+fourth-LFO rank, and **stock firmware loads that pattern without complaint** —
+no refusal, no corruption, no visible upset, and the other seven locks work
+normally alongside it. The reserve is not merely unused space in a document; it
+survives a real round trip through a real instrument.
+
+**Not established, and the distinction matters:** whether stock firmware *does*
+anything with lock id 0. It is stored and loaded; whether the engine applies it
+to any parameter is unknown, and the owner seeing no eighth modulation is
+consistent with both "it is applied to a parameter that does not exist" and "it
+is silently ignored". Reading `0x400db092`'s bound against index 0 would say.
+
+This arrived by accident — as damage from a failed probe — which is worth
+stating plainly rather than dressing up as a designed experiment. But it is the
+first end-to-end evidence that the fourth rank is live storage, and it cost
+nothing beyond a mistake already made.
+
+### Housekeeping the owner still needs
+
+Those eight locks are **real stored data on A1 track 1 trig 5** and stock
+firmware is honouring seven of them. They will not clear themselves — clear the
+locks on that trig, or restore the pattern.
