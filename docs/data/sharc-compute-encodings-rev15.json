@@ -1,6 +1,7 @@
 {
   "ALUOP": {
     "00000001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -13,6 +14,7 @@
       "page": 425
     },
     "00000010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -25,6 +27,7 @@
       "page": 425
     },
     "00000101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -37,6 +40,7 @@
       "page": 425
     },
     "00000110": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -49,6 +53,7 @@
       "page": 425
     },
     "00001001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -61,6 +66,7 @@
       "page": 425
     },
     "00001010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -73,6 +79,7 @@
       "page": 425
     },
     "00001011": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -85,6 +92,7 @@
       "page": 425
     },
     "00100001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -97,6 +105,7 @@
       "page": 426
     },
     "00100010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -109,6 +118,7 @@
       "page": 426
     },
     "00100101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -121,6 +131,7 @@
       "page": 426
     },
     "00100110": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -133,6 +144,7 @@
       "page": 426
     },
     "00101001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -145,6 +157,7 @@
       "page": 426
     },
     "00101010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -157,6 +170,7 @@
       "page": 426
     },
     "00110000": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -169,6 +183,7 @@
       "page": 426
     },
     "01000000": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -181,6 +196,7 @@
       "page": 426
     },
     "01000001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -193,6 +209,7 @@
       "page": 426
     },
     "01000010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -205,6 +222,7 @@
       "page": 426
     },
     "01000011": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -217,6 +235,7 @@
       "page": 426
     },
     "01100001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -229,6 +248,7 @@
       "page": 426
     },
     "01100010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -241,6 +261,7 @@
       "page": 426
     },
     "01100011": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -253,6 +274,7 @@
       "page": 426
     },
     "10000001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -265,6 +287,7 @@
       "page": 426
     },
     "10000010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -277,6 +300,7 @@
       "page": 426
     },
     "10001001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -289,6 +313,7 @@
       "page": 426
     },
     "10001010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -301,6 +326,7 @@
       "page": 426
     },
     "10010001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -313,6 +339,7 @@
       "page": 426
     },
     "10010010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -325,6 +352,7 @@
       "page": 426
     },
     "10100001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -337,6 +365,7 @@
       "page": 426
     },
     "10100010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -349,6 +378,7 @@
       "page": 426
     },
     "10100101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -361,6 +391,7 @@
       "page": 426
     },
     "10101101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -373,6 +404,7 @@
       "page": 426
     },
     "10110000": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -385,6 +417,7 @@
       "page": 426
     },
     "10111101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -397,6 +430,7 @@
       "page": 427
     },
     "11000001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -409,6 +443,7 @@
       "page": 427
     },
     "11000100": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -421,6 +456,7 @@
       "page": 427
     },
     "11000101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -433,6 +469,7 @@
       "page": 427
     },
     "11001001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -445,6 +482,7 @@
       "page": 427
     },
     "11001010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -457,6 +495,7 @@
       "page": 427
     },
     "11001101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -469,6 +508,7 @@
       "page": 427
     },
     "11011001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -481,6 +521,7 @@
       "page": 427
     },
     "11011010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -493,6 +534,7 @@
       "page": 427
     },
     "11011101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -505,6 +547,7 @@
       "page": 427
     },
     "11100000": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -517,6 +560,7 @@
       "page": 427
     },
     "11100001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -529,6 +573,7 @@
       "page": 427
     },
     "11100010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -541,6 +586,7 @@
       "page": 427
     },
     "11100011": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -553,6 +599,7 @@
       "page": 427
     },
     "00010001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -565,6 +612,7 @@
       "page": 427
     },
     "00010010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -577,6 +625,7 @@
       "page": 427
     },
     "00010011": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -589,6 +638,7 @@
       "page": 427
     },
     "00010100": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -601,6 +651,7 @@
       "page": 427
     },
     "00010101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -613,6 +664,7 @@
       "page": 427
     },
     "00010110": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -625,6 +677,7 @@
       "page": 427
     },
     "00010111": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -637,6 +690,7 @@
       "page": 427
     },
     "00011000": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -649,6 +703,7 @@
       "page": 428
     },
     "00011001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -661,6 +716,7 @@
       "page": 428
     },
     "00011010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -673,6 +729,7 @@
       "page": 428
     },
     "00011011": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -685,6 +742,7 @@
       "page": 428
     },
     "00011100": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -697,6 +755,7 @@
       "page": 428
     },
     "00011101": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -709,6 +768,7 @@
       "page": 428
     },
     "00011110": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -721,6 +781,7 @@
       "page": 428
     },
     "00011111": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -735,6 +796,7 @@
   },
   "MULOP": {
     "0000 F00x": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -747,6 +809,7 @@
       "page": 428
     },
     "0000 F01x": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -759,6 +822,7 @@
       "page": 428
     },
     "0000 F10x": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -771,6 +835,7 @@
       "page": 428
     },
     "0000 F11x": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -783,6 +848,7 @@
       "page": 428
     },
     "0001 0100": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -795,6 +861,7 @@
       "page": 428
     },
     "0001 0110": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -807,6 +874,7 @@
       "page": 428
     },
     "0001 100x": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -819,6 +887,7 @@
       "page": 428
     },
     "0001 101x": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -831,6 +900,7 @@
       "page": 429
     },
     "0001 110x": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -843,6 +913,7 @@
       "page": 429
     },
     "0001 111x": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -855,6 +926,7 @@
       "page": 429
     },
     "01yx f00r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -867,6 +939,7 @@
       "page": 429
     },
     "01yx F10r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -879,6 +952,7 @@
       "page": 429
     },
     "01yx F11r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -891,6 +965,7 @@
       "page": 429
     },
     "10yx F00r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -903,6 +978,7 @@
       "page": 429
     },
     "10yx F01r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -915,6 +991,7 @@
       "page": 429
     },
     "10yx F10r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -927,6 +1004,7 @@
       "page": 429
     },
     "10yx F11r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -939,6 +1017,7 @@
       "page": 429
     },
     "11yx F00r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -951,6 +1030,7 @@
       "page": 429
     },
     "11yx F01r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -963,6 +1043,7 @@
       "page": 429
     },
     "11yx F10r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -975,6 +1056,7 @@
       "page": 429
     },
     "11yx F11r": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -987,6 +1069,7 @@
       "page": 429
     },
     "0011 0000": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -999,6 +1082,7 @@
       "page": 429
     },
     "0011 0001": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -1011,6 +1095,7 @@
       "page": 429
     },
     "0011 0010": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -1023,6 +1108,7 @@
       "page": 429
     },
     "0011 0011": {
+      "field": "opcode",
       "bits": [
         19,
         12
@@ -1035,9 +1121,336 @@
       "page": 429
     }
   },
-  "SHIFTOP": {},
+  "SHIFTOP": {
+    "00000000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 0,
+      "syntax": "RREG Register Class = lshift\nRREG Register Class by RREG\nRegister Class",
+      "instruction": "RN = lshift RX by (RY | DATA8);\nDATA8",
+      "page": 431
+    },
+    "00000100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 4,
+      "syntax": "RREG Register Class = ashift\nRREG Register Class by RREG\nRegister Class",
+      "instruction": "FXP ASHIFT BY DATA8\n_ _",
+      "page": 431
+    },
+    "00001000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 8,
+      "syntax": "RREG Register Class = rot RREG\nRegister Class by RREG Register\nClass",
+      "instruction": "RN = rot RX by (RY | DATA);",
+      "page": 431
+    },
+    "00100000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 32,
+      "syntax": "RREG Register Class = RREG\nRegister Class or lshift RREG Reg-\nister Class by RREG Register Class",
+      "instruction": "FXP OR LSHIFT BY\n_ _ _",
+      "page": 431
+    },
+    "00100100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 36,
+      "syntax": "RREG Register Class = RREG\nRegister Class or ashift RREG Reg-\nister Class by RREG Register Class",
+      "instruction": "RN = RN or ashift RX by (RY |\nDATA8);",
+      "page": 431
+    },
+    "01000000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 64,
+      "syntax": "RREG Register Class = fext RREG\nRegister Class by RREG Register\nClass",
+      "instruction": "RN = fext RX by (RY |\nBIT6:LEN6);",
+      "page": 431
+    },
+    "01000100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 68,
+      "syntax": "RREG Register Class = fdep RREG\nRegister Class by RREG Register\nClass",
+      "instruction": "RN = fdep RX by (RY |\nBIT6:LEN6);BIT6:LEN6",
+      "page": 431
+    },
+    "01001000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 72,
+      "syntax": "RREG Register Class = fext RREG\nRegister Class by RREG Register\nClass (se)",
+      "instruction": "RN = fext RX by (RY |\nBIT6:LEN6) (se);BIT6:LEN6",
+      "page": 432
+    },
+    "01001100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 76,
+      "syntax": "RREG Register Class = fdep RREG\nRegister Class by RREG Register\nClass (se)",
+      "instruction": "FXP BITEXT bitlen12 NU\n_ _ _\nBIT6:LEN6",
+      "page": 432
+    },
+    "01010000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 80,
+      "syntax": "RREG Register Class = bitext\nRREG Register Class",
+      "instruction": "FXP BITEXT bitlen12 NU\n_ _ _",
+      "page": 432
+    },
+    "01011000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 88,
+      "syntax": "RREG Register Class = bitext\nRREG Register Class (nu)",
+      "instruction": "RN = bitext (RX | BITLEN12)\n(nu);",
+      "page": 432
+    },
+    "01100100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 100,
+      "syntax": "RREG Register Class = RREG\nRegister Class or fdep RREG Reg-\nister Class by RREG Register Class",
+      "instruction": "RN = RN or fdep RX by (RY |\nBIT6:LEN6);",
+      "page": 432
+    },
+    "01101100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 108,
+      "syntax": "RREG Register Class = RREG\nRegister Class or fdep RREG Reg-\nister Class by RREG Register Class\n(se)",
+      "instruction": "RN = RN or fdep RX by (RY |\nBIT6:LEN6) (se);",
+      "page": 432
+    },
+    "01110000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 112,
+      "syntax": "RREG Register Class = bffwrp",
+      "instruction": "FXP BFFWRP\n_",
+      "page": 432
+    },
+    "01111100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 124,
+      "syntax": "bffwrp = RREG Register Class",
+      "instruction": "bffwrp = (RN | DATA7);",
+      "page": 432
+    },
+    "11000000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 192,
+      "syntax": "RREG Register Class = bset RREG\nRegister Class by RREG Register\nClass",
+      "instruction": "RN = bset RX by (RY | DATA8);",
+      "page": 432
+    },
+    "11000100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 196,
+      "syntax": "RREG Register Class = bclr RREG\nRegister Class by RREG Register\nClass",
+      "instruction": "RN = bclr RX by (RY | DATA8);",
+      "page": 432
+    },
+    "11001000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 200,
+      "syntax": "RREG Register Class = btgl RREG\nRegister Class by RREG Register\nClass",
+      "instruction": "RN = btgl RX by (RY | DATA8);",
+      "page": 432
+    },
+    "11001100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 204,
+      "syntax": "btst RREG Register Class by\nRREG Register Class",
+      "instruction": "btst RX by (RY | DATA8);",
+      "page": 432
+    },
+    "10000000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 128,
+      "syntax": "RREG Register Class = exp RREG\nRegister Class",
+      "instruction": "RN = exp RX;",
+      "page": 432
+    },
+    "10000100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 132,
+      "syntax": "bffwrp = DATA7",
+      "instruction": "RN = exp RX; (ex)",
+      "page": 432
+    },
+    "10001000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 136,
+      "syntax": "RREG Register Class = leftz RREG\nRegister Class",
+      "instruction": "RN = leftz RX;",
+      "page": 432
+    },
+    "10001100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 140,
+      "syntax": "RREG Register Class = lefto\nRREG Register Class",
+      "instruction": "RN = lefto RX;",
+      "page": 432
+    },
+    "10010000": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 144,
+      "syntax": "RREG Register Class = fpack\nFREG Register Class",
+      "instruction": "RN = fpack FX;",
+      "page": 433
+    },
+    "10010100": {
+      "field": "shiftop",
+      "bits": [
+        19,
+        12
+      ],
+      "width": 8,
+      "mask": 255,
+      "value": 148,
+      "syntax": "FREG Register Class = funpack\nRREG Register Class",
+      "instruction": "FN = funpack RX;",
+      "page": 433
+    }
+  },
   "DUALADDSUB": {
     "0111": {
+      "field": "opcode",
       "bits": [
         19,
         16
@@ -1050,6 +1463,7 @@
       "page": 433
     },
     "1111": {
+      "field": "opcode",
       "bits": [
         19,
         16
@@ -1060,6 +1474,242 @@
       "syntax": "FREG Register Class = FXAREG Register Class + FYAREG\nRegister Class , FREG Register Class = FXAREG Register Class\n\u2013 FYAREG Register Class",
       "instruction": "Fa = Fx + Fy , Fs = Fx \u2013 Fy",
       "page": 433
+    }
+  },
+  "SHIFTIMM": {
+    "000000": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 0,
+      "syntax": "RFREG Register Class = lshift\nRREG Register Class by DATA8",
+      "instruction": "RN = lshift RX by (RY | DATA8);\nDATA8",
+      "page": 431
+    },
+    "000001": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 1,
+      "syntax": "RREG Register Class = ashift\nRREG Register Class by DATA8",
+      "instruction": "FXP ASHIFT BY DATA8\n_ _",
+      "page": 431
+    },
+    "000010": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 2,
+      "syntax": "RREG Register Class = rot RREG\nRegister Class by DATA8",
+      "instruction": "RN = rot RX by (RY | DATA);",
+      "page": 431
+    },
+    "001000": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 8,
+      "syntax": "RREG Register Class = RREG\nRegister Class or lshift RREG Reg-\nister Class by DATA8",
+      "instruction": "FXP OR LSHIFT BY\n_ _ _",
+      "page": 431
+    },
+    "001001": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 9,
+      "syntax": "RREG Register Class = RREG\nRegister Class or ashift RREG Reg-\nister Class by DATA8",
+      "instruction": "RN = RN or ashift RX by (RY |\nDATA8);",
+      "page": 431
+    },
+    "010000": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 16,
+      "syntax": "RREG Register Class = fext RREG\nRegister Class by BIT6:LEN6",
+      "instruction": "RN = fext RX by (RY |\nBIT6:LEN6);",
+      "page": 431
+    },
+    "010001": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 17,
+      "syntax": "RREG Register Class = fdep RREG\nRegister Class by BIT6:LEN6",
+      "instruction": "RN = fdep RX by (RY |\nBIT6:LEN6);BIT6:LEN6",
+      "page": 431
+    },
+    "010010": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 18,
+      "syntax": "RREG Register Class = fext RREG\nRegister Class by BIT6:LEN6 (se)",
+      "instruction": "RN = fext RX by (RY |\nBIT6:LEN6) (se);BIT6:LEN6",
+      "page": 432
+    },
+    "010011": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 19,
+      "syntax": "RREG Register Class = fdep RREG\nRegister Class by BIT6:LEN6 (se)",
+      "instruction": "FXP BITEXT bitlen12 NU\n_ _ _\nBIT6:LEN6",
+      "page": 432
+    },
+    "010100": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 20,
+      "syntax": "RREG Register Class = bitext BI-\nTLEN12 (nu)",
+      "instruction": "FXP BITEXT bitlen12 NU\n_ _ _",
+      "page": 432
+    },
+    "011001": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 25,
+      "syntax": "RREG Register Class = bitext BI-\nTLEN12 (nu)",
+      "instruction": "RN = bitext (RX | BITLEN12)\n(nu);",
+      "page": 432
+    },
+    "011011": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 27,
+      "syntax": "RREG Register Class = RREG\nRegister Class or fdep RREG Reg-\nister Class by BIT6:LEN6",
+      "instruction": "RN = RN or fdep RX by (RY |\nBIT6:LEN6);",
+      "page": 432
+    },
+    "011101": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 29,
+      "syntax": "RREG Register Class = RREG\nRegister Class or fdep RREG Reg-\nister Class by BIT6:LEN6 (se)",
+      "instruction": "RN = RN or fdep RX by (RY |\nBIT6:LEN6) (se);",
+      "page": 432
+    },
+    "011111": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 31,
+      "syntax": "bffwrp = DATA7",
+      "instruction": "bffwrp = (RN | DATA7);",
+      "page": 432
+    },
+    "110000": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 48,
+      "syntax": "RREG Register Class = bset RREG\nRegister Class by BITLEN12",
+      "instruction": "RN = bset RX by (RY | DATA8);",
+      "page": 432
+    },
+    "110001": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 49,
+      "syntax": "RREG Register Class = bclr RREG\nRegister Class by DATA7",
+      "instruction": "RN = bclr RX by (RY | DATA8);",
+      "page": 432
+    },
+    "110010": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 50,
+      "syntax": "RREG Register Class = btgl RREG\nRegister Class by RREG Register\nClass",
+      "instruction": "RN = btgl RX by (RY | DATA8);",
+      "page": 432
+    },
+    "110011": {
+      "field": "shiftimm",
+      "bits": [
+        21,
+        16
+      ],
+      "width": 6,
+      "mask": 63,
+      "value": 51,
+      "syntax": "btst RREG Register Class by\nRREG Register Class",
+      "instruction": "btst RX by (RY | DATA8);",
+      "page": 432
     }
   }
 }
