@@ -309,3 +309,80 @@ MANAGE PROJECTS.ProjectMenuView.MIDI CONFIG.SYSEX DUMP.AUDIO ROUTING.PERSONALIZE
 
 `PERSONALIZE` at `0x40200b2e` is the Gate E patch target — unique in the image,
 NUL-terminated, cosmetic, and two button presses from the front panel.
+
+---
+
+## Stock Ghidra stops dead at `movclr`, and we did not know
+
+**2026-09-15, from `m-dwyer/digikit` PR #13.** Gate F cleared Ghidra against
+objdump over a span and this project has trusted it since. That was right as far
+as it went, and it missed something a span comparison cannot catch.
+
+**Stock Ghidra 12.1.3's `68000:BE:32:Coldfire` has no constructor for
+`movclr.l ACCy,Rx`.** The words `a1c0 a3c1 a5c2 a7c3` decode as bad
+instructions, and **Ghidra's flow analysis stops there** rather than erroring.
+
+Those words are not rare in this image. They are in **interrupt handler
+prologues**, and `movclrl %acc0,%dN` appears throughout the modulation kernel at
+`0x400db1dc` and its driver `0x400db22c` -- the EMAC code this project spent
+2026-09-15 reading. So **every Ghidra decompilation of the frame ISR and the
+modulation module has been silently truncated**, with nothing on screen to say
+so.
+
+That is very likely why the LFO tick was never found by decompiling: the
+analysis was stopping before it got there, and a hand disassembly of the same
+region is exactly what did make progress.
+
+### What digikit fixed
+
+`68000:BE:32:ColdfireEMAC` -- stock 12.1.3 plus:
+
+- `movclr.l ACCy,Rx`, added;
+- `move.l ACCy,ACCx`, which copied from the destination into the source;
+- **MAC and MSAC with load selecting the wrong accumulator** (CFPRM p.6-4: bit 7
+  is the inverse of the lsb for the load forms);
+- operand order on `move.l Ry,ACCx` / `ACCext01` / `ACCext23`.
+
+Not modelled: `movclr`'s saturation and rounding (a pcodeop, `emacSaturate`) and
+its clearing of `ACCext` and `MACSR[PAVx]`.
+
+The MSAC-with-load fix matters directly here. `0x400db1f6` is
+`msacw %d1l,%d2u,%a1@+,%d2,%acc0` -- a MSAC **with load** -- and it is the
+instruction that applies every modulator to every destination. Stock Ghidra was
+naming the wrong accumulator for it.
+
+### Installing it on Windows
+
+`ghidra/install-coldfire-emac.bat` is the Windows half of digikit's
+`install-coldfire-emac.sh`, which assumes Homebrew paths and a symlink. It
+compiles the `.sla` with `sleigh.bat`, writes `extension.properties` for the
+installed version, and **copies** the module into
+`%APPDATA%\ghidra\ghidra_<ver>_<rel>\Extensions`.
+
+**The module is digikit's and is not vendored here** -- the script reads it from
+a digikit checkout. Both projects are on Ghidra **12.1.3**, which is what makes
+the module load without rebuilding.
+
+`ghidra/analyze.bat` already honours a `PROCESSOR` environment variable:
+
+```
+set PROCESSOR=68000:BE:32:ColdfireEMAC
+ghidranalyze.bat <projdir> mainos_111_emac <mainos.bin> 0x40000400
+```
+
+**Re-import rather than switching an existing program's language.** Changing it
+on a program that is already disassembled does not re-disassemble what the old
+language got wrong.
+
+### What this obliges us to re-check
+
+Any conclusion in this repository that came from a **Ghidra decompilation** of
+the frame ISR (`0x40025e0a`) or the modulation module
+(`0x400daed2`-`0x400db32e`) was produced by an analysis that may have stopped
+early. Conclusions from **objdump** or from hand-reading bytes are unaffected --
+and most of 2026-09-15's modulation work was hand-read for exactly the reason
+that Ghidra was unhelpful there, which now has an explanation.
+
+This is `docs/PRINCIPLES.md` §19 again, in its most expensive form: the negative
+"decompiling the ISR does not show an LFO tick" was only ever as good as a
+disassembler that was silently giving up.
