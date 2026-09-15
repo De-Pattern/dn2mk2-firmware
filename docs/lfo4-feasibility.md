@@ -601,7 +601,63 @@ Two honest gaps, and the first is the one that could sink it:
    page-order array for `[MOD]` navigation, for instance, is exactly the sort of
    thing that would exist and would not be caught by either scan above.
 
-**The next move is to stop scanning and ask the device.** Renumbering is a pure
+### Two corrections made while building the experiment
+
+**Page `0x1d` is not Retrig.** §3b says so, and the record count of 22 appeared
+to confirm it. It is the whole **sequencer/trig group**, spanning three labels:
+ten unlabelled TRIG parameters (`NOTE VEL LEN uTM COND AMP.T FLT.T LFO.T PROB
+FILL`), four `Retrig` (`RTRG VFAD LEN RATE`) and eight `Euclidean` (`PL1 PL2 EUC
+RO1 RO2 TRO OP LEN`). The count matching is exactly what made the wrong label
+easy to keep. It changes the experiment's blast radius from one small menu to
+the TRIG page and its p-lock parameters, and the observation list has to cover
+all three.
+
+**The parameter table is 321 records, not 320**, and a first reconnaissance that
+assumed 400 reported page `0x1f` already in use. It was reading past the end of
+the table. Bounded by the located count, the page ids in use are `0x00`..`0x1e`
+with gaps at **`0x04`** and **`0x0c`**, so `0x1f` is free and is the next id
+above the highest in use. The two gaps are noted because they are free page ids,
+but they are not contiguous with `0x1a`–`0x1c` and so do not help a range test.
+
+### The build exists: `page-renumber-test_DN2_1.11`
+
+`scripts/build_page_renumber_test.py` moves page `0x1d` to `0x1f` **and changes
+nothing else**. Verified offline:
+
+- `dnfw inspect` — every transport checksum, every stream sum, the content
+  checksum and the HMAC-SHA256 trailer reproduce;
+- a section-by-section diff against stock — **22 bytes differ, all in section 3,
+  every one of them `0x1d` → `0x1f`, every one at offset `+0x00` of a 60-byte
+  record.** Sections 2, 4, 5, 7 and 8 are byte-identical and no length moved.
+
+The script refuses to write unless the table locates by signature, the LFO1/2/3
+formatter blocks agree, LFO1/2/3 are still on pages `0x1a`/`0x1b`/`0x1c`, page
+`0x1d` holds exactly the 22 records in exactly the three labelled groups above,
+and the destination id is unused and above the highest in use.
+
+**What to look for, in order** — the first failure makes the rest moot:
+
+1. it boots;
+2. the TRIG page draws `NOTE VEL LEN uTM` with normal values;
+3. a trig p-lock takes and displays;
+4. `Retrig` works;
+5. `Euclidean` works.
+
+All five pass → nothing else names the page id, and the next build is the six
+`moveq #2` → `moveq #3` edits plus LFO4's ten records. Any of 2–5 fails →
+something maps page id to page by a route the scans did not see, renumbering is
+dead, and option 2's six caves is the route. Either answer is worth the flash.
+
+**Not flashed.** Nothing reaches the instrument without the owner's go-ahead and
+a named transport, and `docs/flashing.md` records that the recovery path needs a
+physical MIDI DIN. **Back up the +Drive first** — page ids are believed to be a
+runtime grouping rather than part of the stored format, but that belief is
+untested, and a wiped +Drive is not recoverable from anything this project
+holds.
+
+---
+
+**The reasoning that produced this build.** Renumbering is a pure
 data edit for 23 longwords plus six single-byte code edits, all of which the
 existing pipeline can already produce and verify offline. Flashing a build that
 moves Retrig to `0x1f` and **nothing else** answers both gaps in one
