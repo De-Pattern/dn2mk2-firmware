@@ -442,10 +442,16 @@ reserved**: BSS runs `0x402fc000`–`0x466b74d0` on 1.11, the section ends at
 is a table of `{id, offset, comp_len, dest}`, and 1.11 already ships six
 sections at four distinct `dest` values (`0x02010000`, `0x40000400`,
 `0x80000400`, and two at `0`). Nothing about the format restricts us to the
-six that Elektron chose. A **seventh section with `dest` above the BSS end**
-would be written straight to an address the startup code never touches — real,
+six that Elektron chose. A ~~**seventh section with `dest` above the BSS end**
+would be written straight to an address the startup code never touches~~ — real,
 unclaimed, arbitrarily large address space, with no cave chaining, no BSS
 surgery, and no shifting.
+
+> **[WRONG — corrected 2026-09-15]** The struck clause assumed that something
+> reads `dest` and places the section there. **Nothing does** — see *The `dest`
+> field is never read by anything* below. The idea survives, by a different and
+> cheaper route, but not this one. The rest of the sentence — unclaimed space,
+> no chaining, no shifting — still holds.
 
 That would change the ceiling on this whole project. Caves cap a payload at
 ~1 KB per run, ~26 KB total, which is why the LFO4 work keeps running into
@@ -479,10 +485,223 @@ reception validates very little — "nothing reception validates can tell our
 *container*, not about `dest` handling specifically. Read
 `verify_and_flash_container` before trusting it.
 
+**Progress 2026-09-15 — and an unexpected negative.** The cost of teaching the
+updater a new id turns on *how* it asks for sections: N call sites each passing
+an immediate (N code edits) or one table of ids it iterates (one data edit).
+Neither, so far.
+
+`find_section_by_id` at `0x80003d6e` is confirmed by disassembly — it loads
+`#524320` (`0x80020`, the section table at flash `0x80000` plus the container's
+`0x20` table offset), walks 16-byte entries, and memcpys each through
+`0x800048aa`. That is the function the branch note described.
+
+**But scanning the whole 32,768-byte updater finds zero calls to it.** The
+scanner is not the problem: it decodes `jsr abs.l`, `bsr.{s,w,l}` and
+`jsr (d16,pc)`, and it was checked against a known call — the routine's own
+`jsr %pc@(0x80003cf8)` at `0x80003d82`, bytes `4e ba ff 74`, resolves exactly.
+There is also no reference to `0x80003d6e` as a 32-bit immediate anywhere in
+the section.
+
+So the lookup is **not invoked from inside the updater**. It is MAIN OS that
+asks.
+
+**MAIN OS carries its own copy of the whole container parser.** `movel
+#'ELE3',d0` appears once in its code, at `0x40134546`, followed by the same
+magic compare and the same `moveq #52` product gate at `0x40134554` — a **third**
+copy of that check, alongside the bootstrap's at `0x02015028` and the updater's
+at `0x80003d28`. Its `find_section_by_id` is at `0x4013459a`, with a prologue
+byte-identical to the updater's.
+
+**And it asks for exactly two sections, each as a literal immediate:**
+
+```
+0x400cf59a  jsr 0x4013459a    pea #7     <- the SHARC boot stream
+0x400f2934  jsr 0x4013459a    pea #8     <- the ARM Cortex-M image
+```
+
+**There is no table.** N call sites, N immediates, so teaching MAIN OS a new id
+is a **code edit at a new call site** — which needs somewhere to put the code,
+which is the problem the section was meant to solve.
+
+**And worse for the original plan: neither of those sections is *placed*.** Both
+carry `dest 0`; MAIN OS reads them and hands them to other processors. So there
+is no generic "load a section to its `dest`" path in MAIN OS at all — the
+sections that do get placed at an address (2 at `0x02010000`, 3 at `0x40000400`,
+4 at `0x80000400`) are loaded **before MAIN OS runs**, by the bootstrap or a
+boot ROM reading flash.
+
+**So the next question moves down a layer:** does the early loader walk the
+section table generically, honouring each entry's `dest`, or does it too ask for
+a fixed set of ids? If it is generic, a new section with a `dest` above the BSS
+end needs *no code edit anywhere* — it would simply be placed.
+
+### The `dest` field is never read by anything (2026-09-15)
+
+Answered, and the answer is no. **No code in the shipped package reads
+`entry.dest`.** Not the bootstrap, not the updater, not MAIN OS.
+
+**First, a base error of mine, because it invalidates addresses quoted
+earlier in this session.** The bootstrap was being disassembled at base
+`0x800003fc`. Its `dest` is `0x02010000`, and that is the correct base —
+confirmed because at `0x02015028` it lands exactly on the `moveq #52` product
+gate this document already records, which only decodes there at the right base.
+The *bytes* examined were right and the immediates quoted from them are
+base-independent, but every bootstrap **address** quoted before this note is
+off by `0x7dff03fc` and should be ignored.
+
+**The table walk is one shared source module, compiled into all three.**
+
+| Section | `find_section_by_id` | Header block in BSS | Called from inside? |
+|---|---|---|---|
+| 2 bootstrap | `0x02015066` | `0x80007e2c` | **no — 0 references** |
+| 4 updater | `0x80003d6e` | `0x8000b3d0` | **no — 0 references** |
+| 3 MAIN OS | `0x4013459a` | — | **yes, twice** (ids 7, 8) |
+
+The bootstrap's and the updater's are instruction-for-instruction the same
+routine at two addresses. Both are **dead code** — linked in from the shared
+parser module and never invoked.
+
+Reproduce the whole table with the tool the repository already had:
+
+```
+dnfw fn <image> --section 4 callers --at 0x80003d6e   ->  0
+dnfw fn <image> --section 2 callers --at 0x02015066   ->  0
+dnfw fn <image> --section 3 callers --at 0x4013459a   ->  2   <- positive control
+```
+
+**The third line is the positive control, and it is there on purpose**
+(Principle 19). It is the same instrument, run the same way, against the same
+routine compiled into a different section — and it finds both call sites. So
+the two zeros are a property of the bootstrap and the updater, not of the
+scan. The scope is stated too: direct calls only, in all five ColdFire
+encodings; a target reached through a vtable or a function pointer would be
+invisible, which is why the byte-level scan above matters — it shows the
+address is never taken as a 32-bit immediate either.
+
+**A process note, because it cost most of a session.** That command existed the
+whole time. It was not used because `dnfw fn` and `dnfw disasm` both refused a
+raw section — "stored raw, not code" — which is false of the updater, so the
+work was redone with throwaway scripts that covered **fewer** call forms
+(missing `bsr.b`) and took the bootstrap's base from a guess rather than from
+`section.dest`, which is how `0x800003fc` got in. Both guards are now removed
+and the loader is shared (`cli/files.load_section`). Principle 17 says a
+capability with no subcommand is not finished; the corollary this earned is
+that **a subcommand that refuses a legitimate input is worse than none**, since
+it sends you off to rebuild it badly.
+
+That zero is load-bearing, so it was established twice, by methods that fail
+differently. A full linear disassembly of the bootstrap (10,180 instructions)
+finds no instruction anywhere whose rendered text names `0x02015066`. And
+decode-independently, a raw byte scan finds the section **count** (`0x80007e4c`)
+read exactly once and the table base (`0x80020`) present exactly once — both
+inside the walk itself. Nothing else in the image reads how many sections there
+are, which no generic placement loop could avoid doing.
+
+**The three `dest` values that *do* appear in the bootstrap are all other
+uses**, which is what sent the earlier scan down a blind alley:
+
+```
+pea 0x40000400 / pea 0x40400000 / jsr ...   a start/end pair, bracketed by
+                                            movec %d0,%cacr and movec %d0,%acr0
+                                            -- a cache flush over the MAIN OS
+                                            region, not a load
+moveal 0x40000400,%a0 / jsr %a0@            reads the longword AT 0x40000400 and
+                                            calls it -- the entry *vector*
+movel #0x80000400,%d0 / movec %d0,%rambar1  the internal-SRAM base register,
+                                            which is why the updater is linked
+                                            at 0x80000400: it runs from SRAM
+                                            while flash is being erased
+```
+
+So `dest` is documentation — the address each section is *linked* for. Whatever
+puts sections there is outside the update package: the mask ROM, or a resident
+bootloader that is not itself shipped in the `.syx`.
+
+### Which makes the idea cheaper, not deader
+
+MAIN OS's two callers ignore `dest` — and what they do instead is exactly the
+thing a new section needs. Both look their section up by id, take `offset` and
+`length` from the returned entry, resolve the source through a helper, allocate
+their own buffer, and copy. None of that is specific to ids 7 and 8.
+
+That is a complete, generic, already-reachable runtime API for reading **any**
+section:
+
+| Address | What it is | Direct callers |
+|---|---|---|
+| `0x4013459a` | `find_section_by_id(u32 id, Entry out[16]) -> bool` | 2 — `0x400cf59a`, `0x400f2934` |
+| `0x4013458a` | `section_data_address(Entry *) -> entry.offset + 0x80000` | 1 — the id-8 path; the id-7 path inlines the `addil #524288` |
+| `0x401350ce` | `block_copy(src, len, dst)` | 3 — the two section readers and `0x4013453c` inside the parser itself |
+| `0x4011ffe8` | `malloc(size)` | 18 |
+
+The caller counts are part of the finding, not decoration. `0x401350ce` was
+briefly written up here as "memcpy"; three callers says it is not the general
+allocator-adjacent `memcpy` at all but **the container module's own block
+copy**, used by the two section readers and by the parser to lift the 32-byte
+header into BSS. The module is self-contained — lookup, address resolution and
+copy are all its own. `0x4011ffe8`'s 18 callers is what a real `malloc` looks
+like by comparison.
+
+Read off the section-8 caller, where the shape is clearest:
+
+```
+0x400f2930  pea 0x8                  id
+0x400f2934  jsr 0x4013459a           find_section_by_id(8, entry)
+0x400f2946  movel %sp@(71),%d2       entry+8 = stored length
+0x400f294e  jsr 0x4011ffe8           malloc(length)
+0x400f295e  jsr 0x4013458a           section_data_address(entry)
+0x400f2972  jsr 0x401350ce           memcpy(src, length, buffer)
+```
+
+confirming the entry layout independently: `+0 id`, `+4 offset`, `+8 stored
+length`, `+12 dest`.
+
+**So a new section needs no container parser and no `dest` handling.** It needs
+a cave that pushes an id and makes four calls that are already in the image —
+tens of bytes, well inside what one cave holds. The *payload* is then
+arbitrarily large, because the 25.3 MB above BSS is a destination we choose at
+memcpy time rather than one the loader has to be taught.
+
+This is the concrete form of the owner's point that it is sometimes better to
+make our own section than to hunt for crumbs. The cave does not disappear — but
+it shrinks to a launcher, and stops being the thing that caps payload size.
+
+**What is still assumed.** That `+0x80000` is hard-coded in code that runs at
+every power-up, which requires the package to be resident and readable at
+`0x80000` at normal runtime.
+
+The argument for it is from hardware necessity, and it is a good one: the SHARC
+and the Cortex-M are separate chips with volatile program memory, so they must
+be loaded **on every power-up**; sections 7 and 8 are their boot images
+(`docs/sharc-image.md`); and these two call sites are the only code in the
+image that reads them. The instrument cannot make a sound otherwise. The
+section-7 path corroborates it in passing — a 1 MB buffer, a `moveb #3` block
+header, then a polling loop on `0xec094018` — which is a coprocessor boot
+upload, not an update routine.
+
+**A static confirmation was attempted and the method cannot answer it.**
+Direct-call reachability from the C runtime's startup node (`0x400004b2`)
+reaches **15 of 6,974** function entries. The program is not a call tree from
+`main`; it is dispatched through vtables and RTOS task registration, neither of
+which names a target in an instruction (`image/functions.py` says so, and this
+is what that warning looks like at scale). So *not reachable* here means
+nothing at all, and no amount of refining the roots will change that. Recorded
+so the next pass does not spend an hour rediscovering it.
+
+What would actually settle it is the trace harness on the device
+(`patch/trace.py`) — a cave at `0x400cf34c` that fires once at power-up with no
+update in progress. **That is worth doing before anything is built on the
+`0x80000` residency**, and it is cheap: it answers the question that gates the
+whole idea, and it is the kind of probe whose absence of a result is still
+informative.
+
 **Risk, stated plainly.** This writes to an address no stock firmware writes to,
 which is a different class of experiment from everything done so far: every
 patch to date has been same-length edits inside a region the device already
-uses. A bad `dest` could fail at flash time rather than at boot. The recovery
+uses. ~~A bad `dest` could fail at flash time rather than at boot.~~ (`dest` is
+read by nothing, so it cannot fail — the failure moves to a bad `memcpy`
+destination at runtime, which is worse, because it lands after boot and after
+the recovery menu is out of reach.) The recovery
 path (`docs/flashing.md`) is proven, so the downside is a reflash, not a brick —
 but this should not be the first thing tried after a long gap, and it should be
 tried with a payload whose absence is harmless (a table nothing reads yet),

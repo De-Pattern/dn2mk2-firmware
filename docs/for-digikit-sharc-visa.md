@@ -1,5 +1,11 @@
 # Notes for the digikit SHARC+ VISA work — 2026-09-15
 
+> **[PARTLY SUPERSEDED, same day.]** The author pointed us at her
+> `machine-engine-link` branch, which is well ahead of what `main` showed.
+> §1 and §3 below are overtaken; §4 is independently confirmed by her; the rest
+> stands. See `docs/sharc-visa-extraction.md` §8 for what her branch settles,
+> and what it points at that we do not have.
+
 Written to hand over, so it leads with the things that could change what you do
 next rather than with what we did. We worked the same PRM independently for a
 day, on the owner's suggestion, because your largest bug so far was a misread

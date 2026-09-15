@@ -31,6 +31,11 @@ except ImportError:  # pragma: no cover
 CELL_WIDTH = 9.0
 SHADE = 0.8235
 SHADE_TOLERANCE = 0.05
+# Yellow marks an UNUSED bit -- reserved, or outside the field being shown.
+# It is explained by the figure just as a grey fixed bit is, so counting it as
+# an unnamed free bit understates the ceiling.
+UNUSED = (0.95, 0.80, 0.19)
+UNUSED_TOLERANCE = 0.12
 MIN_TICKS = 4
 PAGES = (308, 425)
 BRACKET_BAND = 40.0     # points below a row within which its brackets sit
@@ -46,10 +51,11 @@ def cell_rows(page):
         elif kind == "s" and rect.width >= 2 * CELL_WIDTH and 8 <= rect.height <= 10:
             if slot["frame"] is None or rect.width > slot["frame"].width:
                 slot["frame"] = rect
-        elif kind == "f" and fill and all(
-            abs(c - SHADE) < SHADE_TOLERANCE for c in fill[:3]
-        ):
-            slot["fills"].append(rect)
+        elif kind == "f" and fill:
+            if all(abs(c - SHADE) < SHADE_TOLERANCE for c in fill[:3]):
+                slot["fills"].append(rect)
+            elif all(abs(c - u) < UNUSED_TOLERANCE for c, u in zip(fill[:3], UNUSED)):
+                slot.setdefault("unused", []).append(rect)
     return {
         y: slot for y, slot in found.items()
         if slot["frame"] is not None and slot["ticks"] >= MIN_TICKS
@@ -109,6 +115,11 @@ def main(argv=None) -> int:
                     bracketed.update(range(int(round(k0)), int(round(k1)) + 1))
                 elif on0 or on1:
                     bracketed.add(int(round(k0 if on0 else k1)))
+
+            for rect in row.get("unused", ()):
+                first = int(round((rect.x0 - frame.x0) / CELL_WIDTH))
+                span = max(1, int(round(rect.width / CELL_WIDTH)))
+                shaded.update(k for k in range(first, first + span) if 0 <= k < count)
 
             total += count
             fixed_bits += len(shaded)

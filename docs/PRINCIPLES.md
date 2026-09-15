@@ -80,6 +80,73 @@ subcommand does argument handling and I/O; the work lives in the library module
 it calls. **A capability with no subcommand is not finished** — it cannot be
 used by hand, which means it cannot be checked by hand.
 
+## 18. The canvas is updated with the work, not after it
+
+`docs/STATUS.md` is the project canvas: every feature, every research item
+open / closed / retracted, the idea list and the request queue, each linked to
+the document that holds the evidence. The Obsidian baton
+(`00_Notes/AS/ZZ_Personal Projects/03_dn2_firmware/Next_Session.md`) points at
+it and carries the short version.
+
+**A finding that is not in the canvas does not exist**, and a canvas that has
+drifted is worse than none — it is a confident wrong answer to "where are we?".
+So updating it is part of the change, in the same commit, not a tidy-up
+afterwards. Specifically:
+
+- A result **closes** a research item only with a named measurement and a
+  document. Move the row, do not just add prose somewhere.
+- A retraction **stays visible**, struck, with a pointer to what replaced it.
+  Never delete a superseded conclusion; a closed path is still a signal.
+- Anything a peer or the owner asks for goes in the **queue** the moment it is
+  asked, even when it will not be done — parked work that is not written down
+  is lost work.
+- Never record the same result in two places that can disagree. One of them
+  wins; say which.
+
+This principle exists because of a specific failure. On 2026-09-15
+`docs/flashing.md` carried one build twice with opposite verdicts, and the
+assistant read the lower row, took position in a table for recency, and told the
+owner that LFO4's engine side was closed when it was unknown. Documentation
+drift is not untidiness; it produces confidently wrong answers.
+
+## 19. A negative is only as good as the instrument that produced it
+
+Every expensive wrong answer this project has produced has been a **negative**,
+and every one of them came from an instrument that could not have found the
+thing it was looking for. Not one was a bad inference from good data.
+
+| The negative | What the instrument actually could not see |
+|---|---|
+| "There is no SHARC program in the update" | It searched for a raw 48-bit instruction stream. Section 7 is an ADI **boot stream**. |
+| "No upload path in MAIN OS", hence the engine is unmodifiable | It searched the `0xec09xxxx` window. The channel is the **DSPI next door** at `0xec038000`. |
+| "No reference to any SHARC landmark anywhere" | Landmarks were searched at load addresses; SHARC code addresses live in a **different space**. |
+| "The PRM publishes no register encodings" | It read pages 308–425 of a **798-page** manual, then generalised. |
+| "87.82% is 100% of what the figures contain" | It was blind to the **yellow** *unused* cell colour. |
+| "220 accesses across 50 addresses" (2026-09-16) | The opcode mask matched only the **`d0` spelling** of each `move`, and missed the SHARC's boot data port. |
+
+The shape is always the same: a search runs, finds nothing, and the *nothing*
+is reported as a property of the firmware rather than a property of the search.
+A negative reads as clean and final in a way a positive never does, which is
+exactly why it gets less scrutiny than it needs.
+
+So, before writing down that something is not there:
+
+- **Validate the instrument on a known positive first.** If the scan cannot find
+  a thing you already know is present, its zero means nothing. This is the whole
+  check, and it is usually one line.
+- **Say what the search covered**, in the same sentence as the result — which
+  addresses, which pages, which encodings, which spellings. A negative without
+  its scope is not a finding.
+- **Prefer "not found by X" to "not present."** They are different claims and
+  only one of them is supported.
+- **Name the disproof.** `engine-index-map.md` §9 did this well and it is why
+  the error was eventually caught: it said which observation would overturn it.
+  Ranking its own branches wrongly cost months; naming the disproof saved it.
+
+Positives get a matching caution from §15's retraction — a test that cannot
+*distinguish* between two explanations has not confirmed either. Between the
+two, this project's failures cluster heavily on the negative side.
+
 ## Applying these to a change
 
 - Can each file you touched be described without an "and"?
@@ -88,3 +155,7 @@ used by hand, which means it cannot be checked by hand.
 - Did you add a capability without a subcommand?
 - Did you run `dnfw` on a real image, not only the tests?
 - Would the change let something unverified be written to disk?
+- **Does `docs/STATUS.md` still describe reality after this change?**
+- **Did this answer, park, or retract anything? Then a row moves.**
+- **Did you write down a negative? Then say what the search covered, and show
+  the instrument finding a known positive.**

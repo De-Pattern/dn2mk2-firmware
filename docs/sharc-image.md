@@ -159,6 +159,230 @@ payload block at its declared target address and see what it is.
 **Not attempted.** Reading SHARC instructions. That is a second architecture, a
 second toolchain, and nothing in this repository decodes it.
 
+## The uploader, found (2026-09-16) — the ColdFire pushes the image over SPI
+
+This section existed because section 7 *is* the SHARC program. The remaining
+gap was **how it gets there**, and `docs/engine-index-map.md` §9 had made that
+gap load-bearing: it concluded that no upload path existed in MAIN OS, that the
+SHARC therefore boots from its own serial flash, and that *"the DN2's engine is
+permanently unmodifiable"*. That verdict is now **superseded** — see the
+correction filed in that section.
+
+The path is at `0x400cf34c`, and it is one of only two callers of the container
+lookup (`docs/ideas-backlog.md` §6). It reads section 7 by id, mallocs a 1 MB
+buffer, copies the stored bytes in, writes a `0x03` block header, and then
+pushes the image **one byte at a time over a DSPI controller**:
+
+```
+0x400cf602  movel %a0,%d0           ; a0 walks the buffer, d3 is its start
+0x400cf604  subl %d3,%d0
+0x400cf606  cmpl %d0,%d2            ; d2 = length, so this is "bytes remaining"
+0x400cf608  bles 0x400cf63c         ; done
+
+0x400cf60a  moveb 0xec094018,%d0    ; flow control from the FPGA
+0x400cf610  moveq #16,%d1
+0x400cf612  andl %d1,%d0            ; bit 4
+0x400cf616  bnes 0x400cf60a         ; spin while asserted
+
+0x400cf618  mvzb %a0@+,%d1          ; the next byte of the boot stream
+0x400cf61a  oril #0x90010000,%d1
+0x400cf620  movel %d1,0xec038034    ; push it
+0x400cf626  movel 0xec03802c,%d0
+0x400cf62c  bges 0x400cf626         ; spin until the sign bit sets
+0x400cf62e  movel #0x80000000,%d0
+0x400cf634  movel %d0,0xec03802c    ; write-1-clear, and round again
+
+0x400cf63c  movel #0x18000000,%d1   ; and a final frame to close the queue
+0x400cf644  movel %d1,0xec038034
+```
+
+**The register map identifies the hardware, and it is not ambiguous.** The
+whole `0xec03xxxx` window is 15 accesses across exactly six addresses, and the
+six are the six offsets a minimal ColdFire **DSPI** driver uses, in their
+standard positions:
+
+| Offset | DSPI register | Accesses |
+|---|---|---|
+| `+0x00` | `MCR` — module configuration | 5 |
+| `+0x0c` | `CTAR0` — clock/transfer attributes 0 | 1 write |
+| `+0x10` | `CTAR1` — clock/transfer attributes 1 | 1 write |
+| `+0x2c` | `SR` — status | 5 |
+| `+0x30` | `RSER` — interrupt/DMA request enable | 1 write |
+| `+0x34` | `PUSHR` — transmit FIFO push | 2 writes |
+
+Six for six, at the right offsets, is not a coincidence that a general register
+block produces. And it is **internally consistent**: `CTAR1` is written, and the
+`PUSHR` words below select attributes register 1. The two magic words are
+`PUSHR` fields exactly:
+
+| Bits | Field | `0x90010000` | `0x18000000` |
+|---|---|---|---|
+| 31 | `CONT` — hold chip select | 1, keep CS asserted between bytes | 0, release |
+| 30–28 | `CTAS` — which attributes register | 1 | 1 |
+| 27 | `EOQ` — end of queue | 0 | **1** |
+| 23–16 | `PCS` — chip select | `0x01`, PCS0 | none |
+| 15–0 | `TXDATA` | the stream byte | — |
+
+and `0xec03802c` behaves as `SR` should: the loop spins on bit 31 (`TCF`,
+transfer complete) and then clears it by writing a one back, which is
+write-1-to-clear semantics and not something a general register does by
+accident.
+
+**What this settles.** §9 listed the ADSP-21569's boot options as "SPI master
+(its own serial flash), SPI slave or link port (a host pushes the image), or
+UART", and said the question turned on which. It is **SPI slave boot: the host
+pushes the image.** The SHARC has no program until the ColdFire gives it one,
+every power-up, out of section 7 of the update file. Its program is therefore
+in this repository's reach, and is patchable by the same pipeline as the rest.
+
+**What this does not settle.** Still exactly what the section above says: this
+removes the reason to believe the DSP's code was unavailable; it does not show
+that the synthesis engine or any LFO generator lives in that image rather than
+on the ColdFire. It also does not say a *modified* boot stream will be accepted
+— the stream carries ADI block headers and checksums of its own, which nothing
+here has yet parsed.
+
+**One loose end, deliberately not guessed at.** `0xec038000` sits in the
+FlexBus window, not in the MCF5441x's own peripheral space at `0xfc0xxxxx`
+(which this same function uses, at `0xfc0451f0`). So it is either an external
+SPI controller that presents a DSPI-compatible register interface, or a second
+mapping of an on-chip one. The register *layout and semantics* are measured and
+certain; the silicon behind them is not, and nothing here depends on which it
+is.
+
+### The other caller is a bulk stream, and it is the best lead yet for §15
+
+`0xec038000` and `0xec03802c` are each touched by one function besides the
+uploader: **`0x400cf7be`**. It is not boot code. It is a chunked,
+double-buffered streaming transfer over the same SPI port, and it is called
+from two sites (`0x40025e9e`, `0x400d0fec`) where the uploader has only one.
+
+What is measured:
+
+```
+0x400cf7d6  tstl 0x42440958         ; a length global, written by 0x400cf68c
+0x400cf7fc  movel 0xec03802c,%d0
+0x400cf802  btst #28,%d0            ; SR bit 28 = TFFF, transmit FIFO fill
+0x400cf806  beqw ...                ; give up if the FIFO is not ready
+0x400cf80a  cmpal #2800,%a2         ; 2,800-byte chunks
+0x400cf814  pea %a3@(2800)          ; and a second pointer 2,800 further on
+0x400cf818  pea %a2@(-2800)         ;   -- double buffering
+0x400cf838  movel #0xec038034,%d0   ; PUSHR into a register, for an indirect
+                                    ;   write loop rather than the byte-at-a-
+                                    ;   time store the boot path uses
+```
+
+The difference from the boot path is the whole point. Boot spins on `TCF`
+(transfer *complete*) once per byte — correct, slow, and fine for a one-off.
+This one tests `TFFF` (FIFO *has room*) and pushes through a register-held
+port address, which is how you keep a FIFO fed. **That is a throughput path.**
+
+**Why this matters.** `docs/engine-index-map.md` §15 says the test for a fourth
+LFO generator is to "find whatever crosses to the SHARC and drive lane 4
+there". The FPGA register file is ruled out above as too small. This is the
+first thing found that is the right shape to carry continuous data to the DSP.
+
+#### Its two callers are interrupt handlers
+
+Both open by saving the MAC unit — `macsr`, `acc0`–`acc3`, `accext01/23`, `mask`
+— and close by restoring it. That is an **ISR prologue**: ordinary C code has no
+reason to preserve the multiply-accumulate registers. So this transfer is
+**periodic**, driven by an interrupt, not by a user action.
+
+The argument list reads as a two-buffer scatter send, `(len1, buf1, len2, buf2)`:
+
+```
+0x40025e8a  pea 0x800053a4     ; buf2  -- SRAM
+0x40025e90  pea 0xabc          ; len2  = 2,748
+0x40025e94  pea 0x80005e60     ; buf1  -- SRAM
+0x40025e9a  pea 0xa80          ; len1  = 2,688
+0x40025e9e  jsr 0x400cf7be
+
+0x400d0fd8  clrl %sp@-         ; buf2  = 0   -- the second pair is optional
+0x400d0fda  clrl %sp@-         ; len2  = 0
+0x400d0fdc  pea 0x4244098c     ; buf1  -- BSS this time, not SRAM
+0x400d0fe2  pea 0xa80          ; len1  = 2,688
+0x400d0fe6  movew #2,0x4244098c  ; a 16-bit header written in before sending
+0x400d0fec  jsr 0x400cf7be
+```
+
+`0xa80` = 2,688 appears in both, against the function's own `#2800` chunk
+bound — so 2,688 is a payload and 2,800 is the buffer stride it fits inside.
+
+And the buffers are not scratch. `0x80005000`–`0x80006000` holds **at least 125
+accesses across 43 addresses**, largely longword, and the functions touching
+them are the same `0x40025xxx` cluster the first caller belongs to
+(`0x400258da`, `0x40025b6e`, `0x40025baa`, `0x40025e0a`). There is a whole
+subsystem here that maintains structured SRAM buffers and streams them to the
+DSP on an interrupt.
+
+**Stated as a lead, not a finding.** What it carries is *not* established. A
+periodic ~2.7 KB push to the DSP is the right shape for per-frame control data
+*and* for audio *and* for a codec/FPGA refresh, and nothing here separates
+those yet. `0x42440958` is a length in a global 52 bytes below `0x4244098c`, so
+there is a small descriptor structure around `0x42440950` worth reading.
+`pea 0x80001a20` at `0x400cf7ea` passes an SRAM address to `0x40134490`,
+unexplained.
+
+**The test that would settle it**, and the one to run next: find what *writes*
+`0x80005e60` and `0x4244098c`. If sound parameters reach them — from
+`Sound::updateMirror`'s live side, or from the value array at `sound + 0x14 +
+slot*2` — this is the path §15 asked for, and lane 4 can be driven here. If
+they are filled from an audio ring instead, it is not, and the search
+continues. The failure mode to avoid is the one §11 and §15 already demonstrate:
+a structure that looked like engine addressing turning out to be storage.
+
+## The `0xec09xxxx` window is an FPGA register file, not a data path
+
+`docs/engine-index-map.md` §9 counted 270 accesses to `0xec09xxxx` and called
+it "a peripheral or FPGA control surface, not a boot channel". **That reading
+was right**, and the uploader above is why it was still the wrong conclusion:
+the boot channel is the DSPI at `0xec038000`; `0xec094018` is only the
+flow-control line beside it.
+
+Mapped properly, the window is **at least 279 accesses across 57 distinct
+addresses**, of which 257 are byte-wide, 13 word-wide and 9 are `lea`. They
+span `0xec094000`–`0xec094070`:
+
+| Address | Accesses | Shape |
+|---|---|---|
+| `0xec09404e` | 25 | 12 read / 12 write / 1 `lea`, **7 functions** — the busiest |
+| `0xec094018` | 21 | 8 functions, incl. the uploader's flow control |
+| `0xec094024` | 18 | **write-only**, 7 functions |
+| `0xec09404b` | 15 | 6 functions |
+| `0xec094019` | 13 | 4 functions |
+| `0xec094034` | 8 | **the only exclusively word-wide register**, and only in `0x400cf34c` |
+| `0xec09406x` | 1–4 each | all in `0x400cec70` — one subsystem's own block |
+
+A byte-wide register file, with several write-only registers and one subsystem
+per address range, is a control surface. 279 accesses is far too few to be
+carrying audio. **Sound parameters do not cross to the SHARC through here as
+PIO** — which matters, because `docs/engine-index-map.md` §15 says the test for
+a fourth LFO generator is to "find whatever crosses to the SHARC and drive lane
+4 there". This narrows where to look: not this window, and not the DSPI, which
+is used once at boot. The remaining candidates are a DMA channel the FPGA
+exposes, or a shared memory region.
+
+```
+python scripts/mmio_window_map.py <image.syx> 0xec090000 0xec0a0000
+python scripts/mmio_window_map.py <image.syx> 0xec030000 0xec040000
+```
+
+**Read those counts as lower bounds.** The script matches the `move`, `movea`,
+`clr` and `tst` forms whose absolute address sits immediately after the opcode
+word; it does not match `andi`/`ori`/`bset`/`btst` against an absolute address,
+because those carry their immediate first and matching them would misread
+operands as addresses.
+
+> A first version of this map said **220 across 50** and showed the `0xec03xxxx`
+> window as three registers. Both were undercounts, from matching only the `d0`
+> spelling of each `move` — the register number is part of the opcode. The
+> access it missed was `movel %d1,0xec038034`, the SHARC's boot data port: the
+> single most important access in either window. Corrected before publication,
+> and recorded because **an undercount reads exactly like a clean negative** —
+> which is the same failure that produced the superseded verdict this section
+> exists to correct.
+
 ## Naming
 
 The file stays `section_7_blob.*`. `blob` is `elektron-firmware-tool`'s guess and

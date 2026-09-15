@@ -147,6 +147,34 @@ silence is n=1, and a live alternative is that the opcode dispatches fine but
 expects a payload and was sent empty. The negative worth defending is the
 symbol one below; the RPC probe corroborates it rather than proving it.
 
+### The runtime mirror format is shared between the two instruments
+
+**2026-09-15**, from the RTTI in both images. There are two version namespaces,
+and they are unrelated counters:
+
+```
+Digitone::patternStorage_v1_t .. _v11_t     the PERSISTED chain, one type per historical format
+Digisharc::patternStorage_v1_t .. _v4_t     the RUNTIME / mirror structures
+```
+
+The persisted versions diverge — DN2 is at `patternStorage_v11`,
+`kitStorage_v11`, `soundStorage_v6`; DT2 at `v10`, `v10`, `v3`. **The
+`Digisharc::` runtime versions are identical across both**: pattern v4, kit v4,
+sound v3, soundPool v3, midiSetup v3, projectSettings v2, project v5, track v2,
+song v0, fxSetup v0 — with one exception, that **DT2 has no
+`voiceConfigStorage` at all**, consistent with the DN2 being the polyphonic one.
+
+So the structures the engine actually reads are the same shape on both
+instruments even where the saved formats have drifted apart. That is another
+point in favour of the ColdFire half being tractable: code moved between the
+two is operating on the same runtime objects.
+
+Corroborated from the other side by the DNX session the same day: stored
+`+Drive` project files carry pattern version 2 or 3 and kit version 3 — never
+10 or 11 — so records serialise with the `Digisharc::` number and the
+`Digitone::` chain is the loader's migration path. Falsifier, so far unmet: a
+pattern header above 4, on the wire or on disk.
+
 ### The layer split
 
 | layer | DN2 | DT2 |
