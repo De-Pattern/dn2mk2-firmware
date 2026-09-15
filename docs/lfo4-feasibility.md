@@ -817,13 +817,39 @@ Three flashes' worth of conclusion, stated plainly:
    `0x400dc02a`, `0x400dc0b0`, `0x400dc0ca` and `0x400dc0e4`. Those four are
    reached through vtables, so **whoever picks between them is the target**.
 
-### A warning that matters more than the analysis
+### The damage is runtime-only — an earlier warning here was overstated
 
-**A build carrying this probe writes into LFO `DEST`, `WAVE`, `SPH` and `DEP` of
-whatever sound is loaded** whenever a TRIG or Retrig parameter is touched or
-p-locked. That is not dangerous to the instrument, but it **silently edits
-sounds**, and a sound saved while such a build is running carries the damage.
+This section first said the probe **silently edits sounds** and that any sound
+saved under it should be treated as suspect. **That was over-cautious, and the
+owner's next observation corrects it.**
 
-**Reflash stock before doing any real work**, and treat any sound saved during
-these two probes as suspect. `docs/flashing.md` records that this log says what
-was *sent*, never what is *resident*.
+> *"As soon as I move any parameter the modulation goes away."*
+
+That is the signature of a write that lands in the **runtime value array and
+nowhere else**. The p-lock path (`0x400db092`, `docs/modulation-matrix.md`)
+writes the per-track array and marks the parameter in the per-track bitmap;
+`0x400daf44` walks that bitmap and **restores each marked parameter from its
+base value in `0x8000de60`**, clearing the bit. Any subsequent parameter write
+rewrites the array from the sound object. So LFO2's `DEST` is re-aimed *in the
+mirror*, not in the preset, and the next touch of anything puts it back.
+
+**So the sound object is not modified and a saved sound does not carry the
+damage** — on this evidence. The honest residue: nothing here has been checked
+by reading a saved sound back with DNX, which is the instrument that would
+settle it, and that check has not been done. Reflashing stock before real work
+is still the right habit; treating existing sounds as damaged is not warranted.
+
+### Two different symptoms, two different parameters
+
+Worth stating because they are easy to conflate, and the owner flagged it:
+**`VEL` is the one that *reads* 112; `PROB` is the one that *modulates*.** They
+are separate predictions of the same model, not two accounts of one event.
+
+- `VEL` has `record+0x04` = **1**, which is LFO1 `SPD` — a parameter with a
+  non-zero default, so it *displays* that default: 112.
+- `PROB` has `record+0x04` = **12**, which is LFO2 `DEST` — a parameter that
+  *aims a modulator*, so writing it **changes what LFO2 modulates**.
+
+A model that only explained one of these would be a coincidence. Explaining a
+read and a behaviour, with different indices landing on different LFO fields, is
+what makes it a diagnosis.
