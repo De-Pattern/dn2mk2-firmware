@@ -77,10 +77,28 @@ Two different things are worth counting, and only one of them is at 100%.
 | declared instruction families | **44** |
 | families with no figure | **0** |
 
-### Bit-level accounting: 87.64%
+### Bit-level accounting: 87.82%, against a ceiling of 92.00%
 
 Every bit of every form should be either a fixed opcode bit or part of a named
-field. **1,907 of 2,176 bits are accounted for.**
+field. **1,911 of 2,176 bits are accounted for.**
+
+**100% is not achievable from the figures, and the shortfall is measurable
+rather than assumed.** A field is named by a bracket drawn beneath its bit row;
+`scripts/prm_label_ceiling.py` finds **12 rows — 174 bits — with no brackets at
+all**, across `Type4d`, `Type20a`, `Type21a`, `Type22a`, `Type25a_rframe`,
+`Type25c_rframe` and `Type26a`. The PRM does not name those bits in the
+figures; their names, where they exist, are in the syntax tables.
+
+So the ceiling on figure-only extraction is **92.00%**, and 87.82% of 2,176 is
+**95.5% of everything the figures can give**. The remaining 91 bits are ours to
+recover.
+
+> That ceiling was itself wrong once. The first measurement said 94.85%,
+> because the **next bit row's own frame** sits inside the previous row's
+> bracket band and is the same shape as a long bracket — so rows with no
+> brackets were counted as labelled. Excluding row frames drops it to 92.00%.
+> A measurement of what is *possible* is as easy to get wrong as the thing it
+> bounds.
 
 This is a coverage figure that means something, and it is the one to track. It
 **cannot be improved by loosening anything** — unlike a match rate, where an

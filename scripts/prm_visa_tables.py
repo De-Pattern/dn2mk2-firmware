@@ -176,7 +176,12 @@ def field_extents(page, strokes, frame, y, hi_bit, count):
     brackets = []
     for drawing in strokes:
         rect = drawing["rect"]
-        if not (bottom - 1 <= rect.y0 <= bottom + 8) or rect.width <= 0:
+        # Brackets are not all drawn at the same depth. A figure with several
+        # fields stacks their brackets to keep the leaders from crossing, so
+        # they sit anywhere from just under the row to about forty points
+        # below it. A tight band silently finds only the first stack and
+        # leaves the rest of the row unaccounted.
+        if not (bottom - 1 <= rect.y0 <= bottom + 40) or rect.width <= 0:
             continue
         k0 = (rect.x0 - origin) / CELL_WIDTH
         k1 = (rect.x1 - origin) / CELL_WIDTH
