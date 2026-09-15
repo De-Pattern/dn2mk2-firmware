@@ -144,9 +144,21 @@ structure sits in the engine's SDRAM state and its last byte is near
 `0x80005234` — just below `0x80005308`, the sixteen-entry array the `%d4` index
 is read from.
 
-**Six lists occupy 96 of the 153 bytes.** `3476 + 6·16 = 3572`, and track 1's
-record begins at `3476 + 153 = 3629`. That leaves **57 bytes per track that this
-function never touches** — room for three more descriptor lists.
+**Six lists occupy 96 of the 153 bytes**, `3476` to `3572`.
+
+The record does **not** begin at 3476, though. The frame builder at `0x400274ba`
+reads three bytes per track from the same 153-stride array at **3468, 3469 and
+3470** — just below the descriptor lists — and puts them in the DSP frame:
+
+| frame slot | source |
+|---|---|
+| `%a3@(82)` | record `+3470`, byte, sign-extended |
+| `%a3@(146)` | record `+3468` |
+| `%a3@(178)` | record `+3469` |
+
+So the record's *known* extent runs at least `3468..3572` — **104 of 153
+bytes**, leaving **no more than 49 unaccounted for**, not 57. The three bytes
+are unidentified; they are per-track, byte-wide, and go straight to the DSP.
 
 > **This is slack, not free space.** `0x400db22c` not reading bytes 96–152 of the
 > record proves only that *this* function does not. Nothing here shows the
@@ -169,8 +181,8 @@ Stated plainly, because the temptation to over-read this is real:
 | Rows 2–5 = Mod Wheel, Pitch Bend, Breath, Aftertouch **in that order** | **Ordered, not measured.** The registration sequence and the table order agree, and nothing contradicts them, but no single row of 2–5 has been pinned the way row 1 has |
 | Row 6 = Key Tracking | **Ordered** — last registered, and it is the one source read as a longword per track, which suits a continuous per-track quantity |
 | The descriptor format is `depth:s16 << 16 \| dest:s16` | **Measured** — from the kernel |
-| 57 bytes of the 153-byte record are unread by `0x400db22c` | **Measured** |
-| Those 57 bytes are available | **Not established** |
+| At most 49 bytes of the 153-byte record are unaccounted for | **Measured** — and the first draft of this document said 57, before the frame builder was read and found using `+3468..+3470`. The number only ever moves down |
+| Those bytes are available | **Not established** |
 
 To pin rows 2–5 individually: find the MIDI CC handler that writes `0x8000de40`
 / `0x8000de20` / `0x8000de00` / `0x8000dde0` and read which controller number
@@ -192,11 +204,8 @@ road, and the engine turns out to have been built for it.
 
 What it still needs: a generator, a place for the descriptor list, and UI.
 
-**2. The generator is now the only engine-side unknown.** Where LFO1–3 are
-advanced and applied is **still not found** — it is not in this matrix, and the
-matrix is the only per-frame modulation apply we have read. Either the LFOs run
-through a separate path, or they reach the parameter array by another route
-entirely. That is the next question, and it is smaller than the one it replaces.
+**2. The generator is now the only engine-side unknown** — and the search space
+for it is much smaller than it was this morning. See below.
 
 **3. The per-track modulated-parameter bitmap has 27 spare bits.**
 `0x400db052` clears **four longwords** at `0x4664b26c + 16·track` — 128 bits —
@@ -240,3 +249,85 @@ saturate arithmetic is operating in.
 modulators' destinations and depths are *not* in that space — they live in the
 per-track descriptor records at `+3476`. See `docs/ideas-backlog.md`, "P-locking
 the performance modulators", for what follows from that.
+
+---
+
+## Where the LFO tick is not
+
+Searching for it is what produced most of this document, so the ground already
+covered is worth recording — a later session should not re-walk it.
+`docs/PRINCIPLES.md` §19 applies throughout: these are negatives, and each is
+only as good as the instrument that produced it.
+
+### The parameter-value module, `0x400daed2`–`0x400db32e`, is fully read
+
+It is one coherent module and **none of it is an LFO**:
+
+| Entry | What it does |
+|---|---|
+| `0x400daed2` | bulk-set: write *n* words into `0x8000de60` as `value << 16` |
+| `0x400daf16` | set one parameter's base value |
+| `0x400daf44` | walk the per-track 128-bit bitmap; for each set bit, **clear it** and restore that parameter |
+| `0x400dafdc` | the same walk over a second bitmap at `0x4664b36c` |
+| `0x400db052` | clear one track's bitmap |
+| `0x400db072` | set one parameter: value into the array, `value << 16` into `0x8000de60` |
+| `0x400db092` | **apply a p-lock list** — `(u16 index, u16 value)` pairs |
+| `0x400db12a` | resolve the per-track record base from `0x80003af0` |
+| `0x400db1dc` | the MAC kernel |
+| `0x400db22c` | the six-source apply |
+
+Every reference to `0x8000de60` (7 sites) and to the bitmap at `0x4664b26c` (3
+sites) is inside it. **The module's whole surface is accounted for.**
+
+### Its callers are the trig handler, not a tick
+
+`0x400db052`, `0x400db072`, `0x400daf44` and `0x400db092` have **exactly one
+direct caller each**, and all four sit in one function around `0x40026b40` —
+the note/trig handler. It reads a trig descriptor and passes its lock list at
+`+0x54` to `0x400db092`. So that path is **parameter locks**, confirmed, and
+it runs per trig rather than per frame.
+
+### The per-frame ISR's whole call list has been enumerated
+
+`0x40025e0a` — the DSP-frame ISR — calls fifteen distinct addresses. Six of them
+(`0x4002b1f4`, `0x4002b22e`, `0x4002b246`, `0x4002b256`, `0x4002b270`,
+`0x4002b282`) are **trivial per-track table getters**, four instructions each.
+The rest are the parameter store, the frame builder, and the SPI send. **No LFO
+generator is called from the frame ISR.**
+
+### The DSP frame's contents are now fully named
+
+`docs/engine-state.md` listed seven word-arrays written through `%a3` without
+saying what they carried. They are:
+
+| frame slot | source |
+|---|---|
+| `%a3@(0)` | `0x8000dd60[track]`, longword, `asr #8` |
+| `%a3@(50)` | `0x8000dd40[track]` — **Velocity**, the same table source 1 reads |
+| `%a3@(82)` | record `+3470` |
+| `%a3@(114)` | `%a2@(2·track)` |
+| `%a3@(146)` | record `+3468` |
+| `%a3@(178)` | record `+3469` |
+| `%a3@(2648)` | a longword from a fourth per-track table, truncated to a word |
+
+plus the four block copies of indices 25–99. **Nothing in the frame is an LFO
+parameter or an LFO output**, which is a second, independent confirmation of
+`docs/engine-state.md`'s central result, arrived at by enumerating the frame
+rather than by converting block offsets to indices.
+
+### So where to look next
+
+Not in the audio frame. The DN2's LFOs are tempo-syncable, which points at the
+**sequencer clock**, not the audio ISR. Three concrete moves, cheapest first:
+
+1. **Follow `SPD`'s formatter backwards.** `docs/modulation-mask.md` has the
+   parameter records and their `+0x34` formatters; LFO `MULT`'s computes
+   `1 << v`. At runtime the phase increment must be `SPD × (1 << MULT)`. Find a
+   variable shift by a value sourced from the LFO block.
+2. **Find the phase accumulators.** Sixteen tracks × three LFOs = 48 of
+   something, and the state must persist between ticks, so it is in SDRAM near
+   the other engine state, not in BSS.
+3. **Start at note-on instead.** `MODE` (`FRE`/`TRG`/`HLD`/`ONE`/`HLF`, strings
+   at `0x40210bea`) and `SPH` mean the trig handler must reset LFO phase. The
+   trig handler is already located, at `0x40026b40`. **This is probably the
+   shortest route** — it is a known function that must touch LFO state.
