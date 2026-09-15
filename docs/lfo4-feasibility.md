@@ -899,3 +899,14 @@ this is that read.
 One condition on all three, from DNX: the trig must be **saved into the
 pattern** for any of it to show, though a dump of the loaded project sends its
 working copy, so unsaved edits normally appear.
+
+**A fourth thing to watch for, predicted before the read.** DNX notes that lock
+id **32** is the one id it has *never* observed on any page or machine
+(`src/project/plockparams.ts`) — and `PROB`'s parameter-table id is also **32**.
+If the lock-pool id is the parameter-table id, then 32 being unused is exactly
+what `PROB` never entering the lock pool would produce. Two independent facts
+agreeing. **So a lock record carrying raw id 32 would also be significant**, and
+would say the probe build pushed `PROB` into the lock pool under its own id.
+
+Recorded here *before* the data arrives, so it counts as a prediction rather
+than a reading fitted after the fact.
