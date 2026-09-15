@@ -218,6 +218,21 @@ bytes or against Ghidra, which prints `0x30` unambiguously. When two tools
 disagree about a number, assemble the candidates and compare bytes — that is
 the only arbiter, and it takes seconds.
 
+**It bit again on 2026-09-16**, and the second time it was caught only because
+the result was absurd. Reading the OS-upgrade parser, `48 72 08 20` prints as
+`pea %a2@(20,%d0:l)`; taken as decimal 20 it put the received firmware's payload
+at `state + 20`, which made the validator's arguments come out as the container's
+*product code* and *section count* where the called function plainly wanted a
+*buffer* and a *length*. The displacement is `0x20` = **32**, the payload is at
+`state + 32`, and every argument then resolves. The tell was not the listing —
+it was that the callee did `digest(buf, len - 32)` and compared 32 bytes at
+`buf + len - 32`, which only one reading can satisfy. See `docs/version-gate.md`
+§5.
+
+**So the sharper rule:** when a structure offset derived from an indexed
+displacement produces fields that do not match how the *callee* uses them,
+suspect the radix before suspecting the structure.
+
 ## Working the image in Ghidra: the project workflow
 
 `ghidra\analyze.bat` imports and auto-analyses once, keeps the project, and
