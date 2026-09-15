@@ -19,10 +19,9 @@ the trace harness (`patch/trace.py`).
 
 import pathlib
 
-from ..firmware.load import load
 from ..image import functions
 from ..image.coldfire import LoadedImage
-from .files import read_image
+from .files import load_section
 
 NAME = "fn"
 HELP = "count direct callers of an address, or find the function containing it"
@@ -50,14 +49,7 @@ def run(args) -> int:
 
 
 def _image(args) -> LoadedImage:
-    firmware = load(read_image(args.image))
-    section = firmware.container.find(args.section)
-    if section is None:
-        raise ValueError(f"image has no section id={args.section}")
-    content = section.unpack()
-    if content is None:
-        raise ValueError(f"section id={args.section} is stored raw, not code")
-    return LoadedImage(dest=section.dest, content=content)
+    return load_section(args.image, args.section)
 
 
 def _callers(args) -> int:

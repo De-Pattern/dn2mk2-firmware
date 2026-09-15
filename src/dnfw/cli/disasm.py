@@ -9,9 +9,7 @@ it cannot read ColdFire instructions and does not say so itself -- see
 import pathlib
 
 from ..image import capstone_m68k, objdump
-from ..image.coldfire import LoadedImage
-from ..firmware.load import load
-from .files import read_image
+from .files import load_section
 
 NAME = "disasm"
 HELP = "disassemble a span of a section (ColdFire V4e)"
@@ -52,12 +50,5 @@ def run(args) -> int:
 
 def read_span(image_path: pathlib.Path, section_id: int, address: int, length: int):
     """The bytes of one span, and its address. Shared with `validate-disasm`."""
-    firmware = load(read_image(image_path))
-    section = firmware.container.find(section_id)
-    if section is None:
-        raise ValueError(f"image has no section id={section_id}")
-    content = section.unpack()
-    if content is None:
-        raise ValueError(f"section id={section_id} is stored raw, not code")
-    image = LoadedImage(dest=section.dest, content=content)
+    image = load_section(image_path, section_id)
     return image.read(address, length), address

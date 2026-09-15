@@ -1,6 +1,6 @@
 # Project status — the one place to look first
 
-**Living document. Last reviewed 2026-09-15.**
+**Living document. Last reviewed 2026-09-16.**
 
 This exists because on 2026-09-15 the assistant told the owner that LFO4's
 engine side was **closed** when it is **unknown** — by reading a row lower in
@@ -65,6 +65,9 @@ Rules that keep it honest:
 | Who asks for sections by id | **MAIN OS, twice** — `pea #7` at `0x400cf59a`, `pea #8` at `0x400f2934`, both into its own `find_section_by_id` at `0x4013459a`. Literal immediates, **no table** | `docs/ideas-backlog.md` §6 |
 | Container parser exists in three places | Bootstrap `0x02015028`, updater `0x80003d28`, **and MAIN OS `0x40134554`** — each with its own `moveq #52` product gate | `docs/ele3-format.md` §3a |
 | Heap location | A static arena *inside* BSS; nothing above `0x466b748c` | `docs/ideas-backlog.md` §6 |
+| **Does anything honour a section's `dest`?** | **No — nothing reads it.** The table walk is dead code in the bootstrap (`0x02015066`) and the updater (`0x80003d6e`); live only in MAIN OS, which ignores `dest` and supplies its own buffer | `docs/ideas-backlog.md` §6 |
+| **Reading an arbitrary section at runtime** | A generic 4-call API already in MAIN OS: `find_section_by_id` `0x4013459a`, `section_data_address` `0x4013458a`, `block_copy` `0x401350ce`, `malloc` `0x4011ffe8` | `docs/ideas-backlog.md` §6 |
+| Section entry layout | `+0 id`, `+4 offset`, `+8 stored length`, `+12 dest` — confirmed from the section-8 caller | `docs/ideas-backlog.md` §6 |
 | SHARC+ figure extraction | 54/54 figures, 96.69% bit accounting = the ceiling | `docs/sharc-visa-extraction.md` |
 | Classic PGR cross-check | All `a`-forms agree; Type 2b conflict confirmed | `docs/sharc-crosscheck-classic-pgr.md` |
 | Runtime mirror format shared DN2/DT2 | `Digisharc::` versions identical bar `voiceConfig` | `docs/chimera-feasibility.md` |
@@ -74,7 +77,7 @@ Rules that keep it honest:
 | Item | State | Next move |
 |---|---|---|
 | **What dispatches an RPC opcode** | Five static approaches failed; DT2 diff reframed it | Extend DN2's list with `10 13 11 12`, count 22→26, ask the device |
-| **Generic "load a section to its `dest`"** | **Not in MAIN OS.** It asks only for 7 and 8, and both have `dest 0` — they are handed to other processors, not placed at an address | Look in the bootstrap / boot ROM, which loads sections 2/3/4 before MAIN OS runs |
+| **Is the package resident at `0x80000` at runtime?** | Both coprocessor-image reads hard-code `entry.offset + 0x80000`, and the SHARC/Cortex-M must be loaded every power-up — strongly implied, **not measured**. Static reachability cannot answer it (15/6,974 entries reachable from startup; the program dispatches through vtables) | A trace cave at `0x400cf34c`, fired at power-up with no update in progress. **Gates the whole new-section route** |
 | **Does the engine run a 4th LFO?** | Unknown; both probes non-discriminating | A cave probe that does not touch the storage round-trip |
 | **The SHARC Audio Task's structure** | Entry pointer unresolved (digikit, decode desync) | Blocked on decompilation, not disassembly |
 | **The last 72 bits of SHARC figures** | Not named in Rev 1.5's figures | **Deliberately not chased** — helps nothing; see below |
@@ -90,6 +93,8 @@ Rules that keep it honest:
 | "87.82% is 100% of what the figures contain" | **Wrong** — blind to the yellow *unused* cell colour |
 | "The PRM alone is insufficient" | Unsupported — withdrawn on digikit PR #11 |
 | "Type 2a is a fault in our extraction" | **Wrong** — a generational re-encoding |
+| "A section with `dest` above BSS would be written straight there" | **Wrong** — nothing reads `dest`; backlog §6 |
+| Bootstrap addresses quoted at base `0x800003fc` | **Wrong base** — it is `0x02010000`; add `0x7dff03fc`-worth of scepticism to any bootstrap address predating 2026-09-15 |
 
 ---
 
@@ -97,7 +102,7 @@ Rules that keep it honest:
 
 | Idea | Value | Blocker |
 |---|---|---|
-| **A new ELE3 section as address space** | Would raise the ceiling for the whole project: 25.3 MB vs ~26 KB of caves | Nothing installs a section the updater does not look up by id |
+| **A new ELE3 section as address space** | Would raise the ceiling for the whole project: 25.3 MB vs ~26 KB of caves | **Downgraded 2026-09-15.** Not "nothing installs it" — a cave of tens of bytes calls the generic API above and copies the payload anywhere. Gated on the `0x80000` residency check |
 | Envelope modulator | — | `docs/envelope-modulator-feasibility.md` |
 | Mod compatibility check between two mods | Backlog §11 | Wants a mod that shares a section/processor |
 
