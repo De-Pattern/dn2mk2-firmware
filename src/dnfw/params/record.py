@@ -24,8 +24,8 @@ GROUP = 2
 PARAMETER_ID = 3
 RANGE = 5
 DEFAULT = 6
-LOGICAL_ID = 9        # was CONTROLLER; see `logical_id`
-PHYSICAL_ID = 10      # was NRPN; see `physical_id`
+NRPN = 9              # the 14-bit NRPN number; see `nrpn`
+UNKNOWN_ID = 10       # not the CC, not the NRPN; see `physical_id`
 # The three name pointers are the last three words, whatever the record size.
 NAMES_FROM_END = 3
 
@@ -64,56 +64,66 @@ class Record:
         return self.words[DEFAULT]
 
     @property
-    def logical_id(self) -> int | None:
-        """The parameter's **logical id**, not a MIDI controller number.
+    def nrpn(self) -> int | None:
+        """The parameter's **14-bit NRPN number**, `MSB * 128 + LSB`.
 
-        **[CORRECTED 2026-09-14 — was `controller`, documented as "MIDI
-        controller number".]** It cannot be one: **122 of the 285 records that
-        carry this field hold a value above 127**, and MIDI controller numbers
-        stop at 127. That was checkable from our own table on the day it was
-        written and never checked.
+        **[SETTLED 2026-09-14 against Elektron's own manual.]** Appendix C of the
+        Digitone II manual lists CC and NRPN for every addressable parameter.
+        Parsing 45 of its rows and looking each `MSB * 128 + LSB` up in this
+        column matches **45 of 45**, with the names agreeing too — `Mute`,
+        `Trig Note`, `Frequency`, `Base`, `Width`, `Overdrive`.
 
-        The name comes from an independent account of the ColdFire→SHARC
-        parameter transport (`docs/sharc-crosscheck.md`), which reads the same
-        field as a logical id: Chorus Depth carries `0x129`, and our table shows
-        297 = `0x129` in exactly that record.
+        The history is worth keeping, because the field was named wrongly twice:
 
-        `SLEW` remains the interesting case — it shares `SPH`'s parameter id but
-        carries no value here, which is what you would expect when only one of a
-        pair of presentations is externally addressable.
+        | when | name | why it was wrong |
+        |---|---|---|
+        | originally | `controller`, "MIDI controller number" | **122 of 285 records hold a value above 127**, and CC numbers stop at 127 |
+        | this morning | `logical_id` | renamed on an outside author's say-so, which was a description rather than an identification |
+        | now | **`nrpn`** | 45/45 against the vendor's published table |
+
+        The irony is that the record *next* to this one was called `nrpn` from
+        the start. The original author had the right name on the wrong word.
+
+        **The CC is not in this record at all.** Every one of the fifteen words
+        was tested against the manual's CC column and none matches, so CC
+        assignment lives in a table this project has not found.
         """
-        value = self.words[LOGICAL_ID]
+        value = self.words[NRPN]
         return None if value == UNSET else value
+
+    @property
+    def logical_id(self) -> int | None:
+        """Deprecated alias for `nrpn`, kept so today's scripts still run."""
+        return self.nrpn
 
     @property
     def controller(self) -> int | None:
-        """Deprecated alias for `logical_id`, kept so older scripts still run."""
-        return self.logical_id
+        """Deprecated alias. **Not a MIDI controller number** -- see `nrpn`."""
+        return self.nrpn
 
     @property
     def physical_id(self) -> int | None:
-        """The parameter's **physical control id**.
+        """An identifier this project has **not** been able to name.
 
-        **[RENAMED 2026-09-14 — was `nrpn`.]** Weaker evidence than the
-        `logical_id` correction above: nothing in our own data disproves "NRPN",
-        and the values are all in NRPN's range. The rename follows the same
-        outside account, which traces this field through the ColdFire→SPORT→SHARC
-        path and reads it as a physical control id — Chorus Depth `0x6E`, which
-        is the 110 our table shows.
+        Its history is three wrong guesses deep and the honest state is "unknown":
 
-        Their account also explains the gap at `0x74`: an anonymous, disabled
-        record sits between Reverb Send and Chorus Mix, and our table does show
-        two records sharing parameter id 31, one of them carrying `0x74`.
+        | when | called | status |
+        |---|---|---|
+        | originally | `nrpn` | **wrong** — the NRPN is the word before this one, 45/45 against the manual |
+        | this morning | `physical_id`, "physical control id" | an outside author's description, adopted without evidence |
+        | now | `physical_id`, unidentified | **it is not the CC** |
 
-        *Evidence level: reported, not verified here.*
+        The CC test was decisive and cheap. Elektron's Appendix C gives a CC for
+        every addressable parameter; all fifteen words of the record were
+        compared against it across 45 rows and **none matched any of them**.
+        Chorus Depth is CC 16 and holds 110 here; Mute is CC 94 and holds 8.
+
+        So CC assignment lives in a table this project has not found, and this
+        field is something else. It is left named after the guess that has not
+        yet been disproved, which is the weakest reason a name can have.
         """
-        value = self.words[PHYSICAL_ID]
+        value = self.words[UNKNOWN_ID]
         return None if value == UNSET else value
-
-    @property
-    def nrpn(self) -> int | None:
-        """Deprecated alias for `physical_id`, kept so older scripts still run."""
-        return self.physical_id
 
     @property
     def addressable(self) -> bool:
