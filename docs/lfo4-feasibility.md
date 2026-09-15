@@ -853,3 +853,49 @@ are separate predictions of the same model, not two accounts of one event.
 A model that only explained one of these would be a coincidence. Explaining a
 read and a behaviour, with different indices landing on different LFO fields, is
 what makes it a diagnosis.
+
+### What DNX contributes, and a correction to the wording above
+
+The DNX session was asked to read pattern A1 back off the device. Before any
+read, its knowledge of the **stored** format already sharpens the question, and
+corrects a loose phrase used throughout this section.
+
+**`PROB` is not a p-lockable parameter on stock firmware.** It has no id in the
+lock pool at all. DNX's hardware capture of 2026-07-26 locked 61 controls, one
+per step, and `PROB` — like `NOTE`, `VEL`, `LEN`, `COND`, `FILL`, `RTRG`,
+`VFAD`, Retrig `LEN` and `RATE` — produced **no lock record**. Probability is a
+per-trig byte in the **track record**: `+0x200` from the start of each
+1,187-byte track, 128 × u8, the percentage stored literally, `0xFF` for none.
+(DNX `docs/dn2-pattern-format.md` §2 / §2.3 and `NOT_LOCKABLE` in
+`src/project/plockparams.ts`.)
+
+So "p-locking `PROB`" above should be read as *"holding a trig and turning
+`PROB`"*. That is what the owner did, and on stock it writes that `+0x200` byte.
+It is not a p-lock, and the distinction matters for what follows.
+
+DNX also supplies the lock-pool numbering, which is **not** the sound value
+array index this document has been using: lock ids are `4·slot + lfo`, so LFO2's
+are `SPD 2, MULT 6, FADE 10, DEST 14, WAVE 18, SPH 22, MODE 26, DEP 30`. LFO2
+`DEST` is lock id **14**; the same parameter's index in the runtime sound array
+is **12**. Two numbering schemes for one parameter — worth stating explicitly,
+because confusing them is exactly the class of error that produced the §11 and
+§15 retractions.
+
+### The three outcomes, and what each would mean
+
+DNX will report track 1's `+0x200` bytes at trigs 1 and 5, plus every lock
+record on track 1 with its steps and values.
+
+| | Reading | Conclusion |
+|---|---|---|
+| **1** | `+0x200` holds the percentages the owner set, no new lock record | The `PROB` edit reached the stored format normally. Saved patterns are fine for `PROB`, and the fault is narrower than thought |
+| **2** | `+0x200` still `0xFF`, and a lock record appears with an **LFO2 id (14 = `DEST`)** | The misrouted edit **reached stored pattern data**. Patterns saved under either probe build carry stray locks, and this document's "runtime-only" conclusion is **wrong** |
+| **3** | `+0x200` still `0xFF`, no lock record | The edit never reached stored data. The runtime-mirror reading stands |
+
+**Outcome 2 would retract the "the damage is runtime-only" section above.** That
+section already carries the residue that nothing had been read back with DNX;
+this is that read.
+
+One condition on all three, from DNX: the trig must be **saved into the
+pattern** for any of it to show, though a dump of the loaded project sends its
+working copy, so unsaved edits normally appear.
