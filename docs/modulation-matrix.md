@@ -380,3 +380,70 @@ filter constants reported a hit at `0x401f2b4d`. It is not one: the address is
 odd, and the surrounding longwords read `0, 6, 14, 30, 38, 46, 62, 78, 94, 110`
 — an unrelated offset table whose bytes happen to contain the pattern. Checking
 alignment before believing a table cost one command.
+
+### RETRACTED: "the parameter-value module is read end to end"
+
+**2026-09-15, after installing digikit's `ColdfireEMAC` Ghidra language.** The
+section above claimed the modulation module `0x400daed2`-`0x400db32e` was read
+end to end, ten entry points tabulated, and that the frame ISR's call list was
+enumerated. **Both were wrong, and wrong the same way.**
+
+**The ISR is not where this document said it was.** `dnfw fn entry` attributed
+`0x40026b40` to `0x40025e0a` -- and printed its own caveat that the attribution
+is a guess for functions not reached by a direct call. It was a guess, and a bad
+one: `0x40025e0a` is a **44-byte** function. The real handler is
+**`FUN_40025e36`, 7,582 bytes**, which is what `docs/engine-state.md` said in
+the first place.
+
+**Its call list is 73 functions, not 15.** The earlier enumeration scanned for
+`jsr (xxx).L` only, so it missed every `bsr` and every indirect call -- and the
+modulation kernel itself is reached as `lea %pc@(...),%a3` / `jsr %a3@`, which
+the same document points out. A scan that cannot see the call form it had
+already documented is not an enumeration.
+
+**Seven functions in the module were never read**: `0x400dae1c`, `0x400db524`,
+`0x400db640`, `0x400db72a`, `0x400db798`, `0x400db7d8`, `0x400db800`. Six of
+them sit **above** `0x400db32e`, where reading stopped because the incomplete
+call list gave no reason to look further.
+
+This is `docs/PRINCIPLES.md` §19 for the third time today, and the sharpest
+instance yet: **an instrument that cannot see a call form invents a module
+boundary, and everything downstream inherits it.**
+
+### What is in the unread part: a 16-slot ramp-and-timer pool
+
+`0x400db72a` walks an array from `0x42c645e8` to `0x42c647a8` -- **448 bytes,
+stride 28, sixteen elements** -- and per element:
+
+```
++4   remaining time      countdown
++8   accumulator         += (global_elapsed * rate) >> 2, CLAMPED at 0x7fffffff
++12  rate
+```
+
+```
+0x400db746  movel 0x402a0dec,%d1    ; elapsed time this tick, a global
+0x400db750  mulsl %a0@,%d1          ; x rate at +12
+0x400db754  asrl #2,%d1
+0x400db756  addl %d1,%a2@(8)        ; accumulate
+0x400db75e  cmpil #2147483647,%d1   ; and SATURATE
+...
+0x400db776  cmpl %d0,%d1            ; elapsed vs remaining
+0x400db77c  movel %d0,%a2@(4)       ;   still running: decrement
+0x400db788  jsr %a3@                ;   expired: call 0x400db4ac(element)
+0x400db78c  lea %a2@(28),%a2
+```
+
+`0x400db524` and `0x400db640` index the same array by `descriptor@(16)`, using
+`(x << 5) - (x << 2)` = **x × 28**, confirming the stride independently.
+
+**This is not the LFO tick.** An LFO phase *wraps*; this **clamps** at
+`0x7fffffff` and fires a callback when a countdown expires. That is a ramp with
+a deadline -- a fade, a slew, a portamento or a scheduled event -- not an
+oscillator. Sixteen slots also fits one-per-track rather than the forty-eight a
+per-track LFO1-3 would need.
+
+So it is **not the answer, and it is the first structure found in the right
+module by an instrument that can see the whole module.** The remaining unread
+functions are `0x400dae1c`, `0x400db798`, `0x400db7d8`, `0x400db800`, and the
+expiry callback `0x400db4ac`.
