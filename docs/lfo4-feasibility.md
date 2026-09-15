@@ -926,3 +926,91 @@ would say the probe build pushed `PROB` into the lock pool under its own id.
 
 Recorded here *before* the data arrives, so it counts as a prediction rather
 than a reading fitted after the fact.
+
+---
+
+## The A1 read settles it: the damage REACHES STORED PATTERN DATA
+
+**2026-09-15.** DNX captured Pattern+Kit 0 from the DN2 while
+`page-renumber-test2` was resident — 114,118 bytes, checksums good, no writes,
+saved as `DigitoneII_PatternKit_A1_page-renumber-test2_2157.syx`. Outcome **2**
+of the three written down in advance.
+
+### The reading
+
+- **`+0x200` is `0xFF` on all 128 trigs of track 1.** No probability is stored
+  anywhere on the track. The normal path is dead, as the device's behaviour
+  suggested.
+- **Eight lock records exist**, all on track 1, all on **trig 5** (trig 1 has
+  none), with raw ids `0, 1, 5, 14, 18, 22, 26, 30`.
+
+### Every one of the eight is predicted by the model, and nothing is left over
+
+The model: a moved TRIG record writes the **sound** value array at index
+`record+0x04`, and that is then stored under the sound lock id
+`4·slot + lfo` (DNX's numbering, where LFO1–3 occupy sound indices 1–24).
+
+| TRIG param | `record+0x04` | → lock id | in the dump | value |
+|---|---|---|---|---|
+| `NOTE` | 0 | **0** | yes | `0x2f00` |
+| `VEL` | 1 | **1** | yes | `0x6e00` |
+| `LEN` | 2 | **5** | yes | `0x5400` |
+| `PROB` | 12 | **14** | yes | `0x3a00` |
+| `RTRG` | 13 | **18** | yes | `0x0100` |
+| `VFAD` | 14 | **22** | yes | `0x4a00` |
+| Retrig `LEN` | 15 | **26** | yes | `0x3000` |
+| `RATE` | 16 | **30** | yes | `0x0e00` |
+
+**Eight observed, eight explained, none unexplained.** And the eight are exactly
+the parameters on the first two TRIG pages — the ones the owner was turning.
+
+`PROB` → lock id 14 is LFO2 `DEST`, value `0x3a00` = coarse **58**. LFO2's
+destination is being re-pointed to parameter 58 every time trig 5 plays. That is
+the "weird modulation unrelated to probability", named and numbered.
+
+### Retractions this forces
+
+**1. "The damage is runtime-only" is WRONG and is withdrawn.** That section
+argued from the owner's observation that the modulation clears when any
+parameter is moved, and concluded the write never left the mirror. The clearing
+is real but means something else: the lock is **stored on trig 5**, re-applied
+each time the sequencer reaches it, and overwritten in the mirror whenever a
+parameter is written from the sound object. Transient in the mirror, permanent
+in the pattern.
+
+**2. "Saved patterns are probably fine" was wrong**, and it was told to the
+owner. **Any pattern edited under either probe build can carry stray LFO locks.**
+A1 track 1 trig 5 carries eight right now. They are removable — clear the locks
+on that trig, or restore the pattern — but they will not remove themselves.
+
+The earlier section had kept the honest residue that *"nothing here has been
+checked by reading a saved sound back with DNX, which is the instrument that
+would settle it"*. It was the right caveat and it has now cashed out against me.
+
+### The `PROB` dispute, resolved — both sides were right
+
+The owner said `PROB` is p-lockable; DNX's `NOT_LOCKABLE` list said it is not.
+The read shows **both were describing something true**:
+
+- **On stock**, probability has no lock-pool id and lives at `+0x200` — DNX's
+  list is correct about the storage mechanism.
+- **At the instrument**, the owner sets it per trig, which is what a player
+  means by a lock — the owner is correct about the behaviour.
+- **On the probe build**, it produces a genuine lock record — under **LFO2
+  `DEST`'s** id, not its own.
+
+Raw id **32** did **not** appear, so DNX's prediction held: `PROB` never enters
+the lock pool under its own id, even here.
+
+### A detail that matters to this project specifically
+
+**Lock id `0` appeared.** Under `id = 4·slot + lfo`, id 0 is `4·0 + 0` — one of
+the eight ids DNX documents as **never used**, the reserved fourth-LFO column
+(`docs/dn2-pattern-format.md`; `4·slot + 0` is the free rank). `NOTE`, whose
+`record+0x04` is 0, wrote into it.
+
+So a stray write has landed in **the exact reserved slot a real LFO4 would
+use**, and the pattern format accepted it and stored it. That is not a plan and
+proves nothing about whether LFO4 would *work* — but it is the first time
+anything has been written into that reserve and read back out, and it says the
+storage side does not reject it.
