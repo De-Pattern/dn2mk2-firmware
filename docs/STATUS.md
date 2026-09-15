@@ -81,9 +81,9 @@ Rules that keep it honest:
 | Item | State | Next move |
 |---|---|---|
 | **What dispatches an RPC opcode** | Five static approaches failed; DT2 diff reframed it | Extend DN2's list with `10 13 11 12`, count 22→26, ask the device |
-| **Is the package resident at `0x80000` at runtime?** | Both coprocessor-image reads hard-code `entry.offset + 0x80000`, and the SHARC/Cortex-M must be loaded every power-up — strongly implied, **not measured**. Static reachability cannot answer it (15/6,974 entries reachable from startup; the program dispatches through vtables) | A trace cave at `0x400cf34c`, fired at power-up with no update in progress. **Gates the whole new-section route** |
+| **What crosses to the SHARC at runtime?** | **Answered, by digikit** — a periodic **DSPI2** frame over **eDMA 28/29**, `(tx_len, tx_buf, rx_len, rx_buf)`, driven from an interrupt. She has the frame's 16-pass per-track loop; we contributed the cross-device counts | `docs/sharc-image.md` |
 | **Does the engine run a 4th LFO?** | Unknown; both probes non-discriminating. **But the engine's code is now reachable** — section 7 is its program and we know how it is loaded | Two routes now: a cave probe that avoids the storage round-trip, or read the boot stream directly (needs a SHARC disassembler — digikit's) |
-| **What crosses to the SHARC at runtime?** | **A candidate found 2026-09-16: `0x400cf7be`** — SPI streaming on the boot port, spinning on `TFFF` not `TCF`, called from **two interrupt handlers** with `(len, buf, len, buf)`, 2,688-byte payloads out of a structured SRAM region at `0x80005xxx` maintained by a `0x40025xxx` subsystem. Periodic, right shape; **what it carries is still unknown**. Ruled out: the `0xec09xxxx` register file (too small) | **Find what writes `0x80005e60` and `0x4244098c`.** Sound parameters ⇒ this is the §15 path and lane 4 can be driven here; an audio ring ⇒ keep looking |
+| **Does the DSP frame carry an engine/machine id?** | **Open, and digikit's too** — she traced the frame's 16-pass per-track loop over three SRAM tables and found **no engine id in it**, so "stock engine, own parameters" for a new machine is still open | Her `[O]` item; the DN2/DT2 `tx_len` difference (2,688 vs 2,050) is a new constraint on it |
 | **The SHARC Audio Task's structure** | Entry pointer unresolved (digikit, decode desync) | Blocked on decompilation, not disassembly |
 | **The last 72 bits of SHARC figures** | Not named in Rev 1.5's figures | **Deliberately not chased** — helps nothing; see below |
 
@@ -109,7 +109,7 @@ Rules that keep it honest:
 
 | Idea | Value | Blocker |
 |---|---|---|
-| **A new ELE3 section as address space** | Would raise the ceiling for the whole project: 25.3 MB vs ~26 KB of caves | **Downgraded 2026-09-15.** Not "nothing installs it" — a cave of tens of bytes calls the generic API above and copies the payload anywhere. Gated on the `0x80000` residency check |
+| **A new ELE3 section as address space** | Would raise the ceiling for the whole project: 25.3 MB vs ~26 KB of caves | **Unblocked 2026-09-16.** A cave of tens of bytes calls the generic lookup and the SPI NOR read. `0x80000` is a **flash offset**, not RAM — digikit's boot trace shows the container read from flash on demand, so nothing has to stay resident |
 | Envelope modulator | — | `docs/envelope-modulator-feasibility.md` |
 | Mod compatibility check between two mods | Backlog §11 | Wants a mod that shares a section/processor |
 

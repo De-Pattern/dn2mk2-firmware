@@ -666,9 +666,35 @@ This is the concrete form of the owner's point that it is sometimes better to
 make our own section than to hunt for crumbs. The cave does not disappear — but
 it shrinks to a launcher, and stops being the thing that caps payload size.
 
-**What is still assumed.** That `+0x80000` is hard-coded in code that runs at
-every power-up, which requires the package to be resident and readable at
-`0x80000` at normal runtime.
+> **[ANSWERED 2026-09-16 — and the mechanism is not what is assumed below.]**
+> `m-dwyer/digikit`'s emulator settles it, from the other side. `0x80000` is
+> **not a memory address at all**: it is an **offset into SPI NOR flash**, and
+> the container is read through a flash read routine, `read(offset, len, dest)`
+> — on DT2 at `0x401296fe`, identified by `0x84020003 -> DSPI0_PUSHR` whose low
+> byte `0x03` is the NOR READ command. Her boot trace shows exactly the reads
+> this section needed to know about:
+>
+> ```
+> off=0x080000 len=32       -> the ELE3 header
+> off=0x080020 len=16  x5   -> the section-table entries
+> off=0x19be60 len=184844   -> section 7, the SHARC blob
+> ```
+>
+> **So the gate is passed, by a better route than the one guessed at.** The
+> container is readable at runtime, section 7 *is* read at boot, and it does
+> not depend on anything staying resident in RAM — it is in flash, and the
+> lookup reads it on demand. A new section is readable the same way.
+>
+> Two consequences for the plan above. The four-call API is really a five-call
+> one: `find_section_by_id` → `section_data_address` → **flash read** →
+> `malloc` → copy. And the `+0x80000` is a flash base, so it is stable across
+> power cycles rather than a staging buffer that might be reclaimed.
+>
+> Note she sees **five** section-table entries on DT2 where DN2 1.11 has six.
+
+**What was assumed before that, kept for the record.** That `+0x80000` is
+hard-coded in code that runs at every power-up, which requires the package to be
+resident and readable at `0x80000` at normal runtime.
 
 The argument for it is from hardware necessity, and it is a good one: the SHARC
 and the Cortex-M are separate chips with volatile program memory, so they must
