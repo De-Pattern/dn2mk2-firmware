@@ -46,33 +46,62 @@ default guard — two tests, then an unconditional fall-through into the
 sound-side addressing at `0x400312fe`. That is the whole of why both probe
 builds misbehaved, and it is read, not inferred.
 
+### CORRECTION, same day: the LFO pages belong to `SoundParameterSet`
+
+The table above lists each class's *first* predicate. `SoundParameterSet`'s
+vtable body `0x40036bfa` calls **two**: `0x400dbe8a` (`page <= 4`) and then
+`0x400dbee6`, a composite that is the real ownership test — and it is the one
+that claims the LFO pages:
+
+```
+0x400dbf02  lea 0x401f7f94,%a0        ; the parameter table
+0x400dbf0c  movel %a0@(0,%d0:l),%d3   ; %d3 = the record's PAGE ID
+0x400dbf10  jsr 0x400dbe8a            ; page <= 4 ?
+0x400dbf1c  jsr 0x400dbeb6            ; page 0x05-0x0a ?
+0x400dbf2a  addil #-11,%d0            ; page in 11..15 -> excluded
+0x400dbf34  addil #-26,%d3            ; <-- THE LFO TEST
+0x400dbf3a  moveq #2,%d0
+0x400dbf3c  cmpl %d3,%d0
+0x400dbf3e  scc %d0                   ; (page - 26) <= 2  ->  0x1a, 0x1b, 0x1c
+```
+
+It has **four direct callers** — `0x40036c3a` (Sound's own vtable body),
+`0x4004486e`, `0x400640ce` (beside the known choke point
+`parameter_value_getter` `0x4006408a`) and `0x400653b6`.
+
+**This is the sixth of the six range tests** the feasibility doc counted, and it
+is the one that matters: LFOs are sound parameters, stored in the preset, so
+`SoundParameterSet` owning pages `0x1a`–`0x1c` is the design working as
+intended — not `MidiParameterSet`, whose `0x16`–`0x1c` range is the MIDI track's
+own page span.
+
 ### The edit
 
 LFO4 does **not** need a renumbered page. Keep LFO1–3 at `0x1a`–`0x1c` and give
 LFO4 the next free id; `0x1f` is free and already used by the probe builds.
 
-`MidiParameterSet`'s predicate `0x400dbfbc` owns `0x16`–`0x1c`, the range that
-contains the LFO pages. Widening it contiguously to `0x1f` would swallow `0x1d`
-(Retrig) and `0x1e` (None). **`TrigParameterSet` shows the shipped alternative**
-— an exact-match disjunct:
+**The target is `0x400dbf34`, not `0x400dbfbc`.** ~~Widen `MidiParameterSet`'s
+predicate.~~ **[WRONG — corrected the same day, above.]** The contiguous test
+`(page - 26) <= 2` cannot reach `0x1f` without swallowing `0x1d` (Retrig) and
+`0x1e` (None), so it becomes an **exact-match disjunct** — exactly the shape
+`TrigParameterSet` already ships:
 
 ```
 0x400dbfa0  moveq #29,%d1          ; page == 0x1d ?
-0x400dbfa2  movel %a0@(0,%d0:l),%d0
 0x400dbfa6  cmpl %d0,%d1
 0x400dbfa8  beqs <yes>
 0x400dbfaa  moveb #22,%d1          ; else page == 0x16 ?
 ```
 
 So the form is proven to compile and run in Elektron's own code, on this exact
-predicate family. **The LFO4 edit is the same shape applied to `0x400dbfbc`**:
-keep `(page - 22) <= 6`, add `|| page == 0x1f`. `0x400dbfbc` is 34 bytes and has
-one direct caller outside its own vtable body, so this is a **cave**, not an
-in-place edit — there is no slack for the extra compare.
+predicate family. **The LFO4 edit is `(page - 26) <= 2 || page == 0x1f`**, in a
+**cave** — `0x400dbee6` has no slack for the extra compare.
 
 **Open:** whether the other predicate cascades (`0x40064e90`/`0x40064f14`, and
-the seven-call `0x40067xxx` cluster) need the same treatment. Each has to be
-read; they are not assumed to share the shape of `0x40041a72`.
+the seven-call `0x40067xxx` cluster) need the same treatment, and whether the
+other five range tests must move in step with this one. Each has to be read.
+
+---
 
 ---
 
