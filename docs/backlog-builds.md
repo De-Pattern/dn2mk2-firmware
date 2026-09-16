@@ -19,12 +19,12 @@ not been flashed has not been tested.
 
 | § | idea | build | on hardware |
 |---|---|---|---|
-| 1 | Reclaim space / grow section 3 | **not started** — and the cheap version is now known not to work | — |
+| 1 | Reclaim space / grow section 3 | **DELIVERED** — `payload-section_DN2_1.11.syx`: section 3 grows by a payload that a boot hook copies above BSS before the clear. **Cold boot under the emulator shows the copy land and survive**; `MOD` at boot is the visible test | awaiting a flash |
 | 2 | An emulator as a test harness | **not a firmware** — it is the harness the others are tested in, and it works | n/a |
-| 3 | Expand the PCM catalogue | **not started** | — |
+| 3 | Expand the PCM catalogue | **not started — the cheap route is ruled out.** The two unreachable transients (slots 0 and 1) need `TRAN` −8 and −4; raising the maximum reaches up, not down, and dropping the −8 offset would move every existing sound onto a different transient. Growing the bank itself needs shipped bytes (§1's build) *and* the engine's slot bound, which is DSP-side (§7) | — |
 | 4 | FX and Master open to LFO modulation | **SHIPPED** | **passed**, PR #61 |
 | 5 | Bake an LFO's output into parameter locks | **not started** | — |
-| 6 | A new ELE3 section as real address space | **not started** | — |
+| 6 | A new ELE3 section as real address space | **covered by §1's build for now** — shipped bytes reach run time by growing section 3, which needs no new section id and no loader change. A separate section is only worth it if §1 fails on hardware | — |
 | 7 | The DSP hunt | **parked**, with an explicit warning | — |
 | 8 | New LFO waveforms | **DELIVERED** — `lfo-waveshapes_DN2_1.11.syx` (`STP`, `PLS`, `NOI`) | awaiting a flash |
 | 9 | A custom start-up animation | **DELIVERED** — `intro-tunnel_DN2_1.11.syx`: the intro is a 1/r polar tunnel, and two bytes re-scale it. **Seen running under the emulator**: 9,086 of 16,384 table entries change as predicted | awaiting a flash |
