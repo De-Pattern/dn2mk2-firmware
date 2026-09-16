@@ -1274,10 +1274,62 @@ The firmware side then gave the whole block. The v3 sound converter
 | 333 | 7 | 0 | signed | `+353` (byte) |
 | 334 | *(negative test)* | **14** | signed | `+354` (byte) |
 | 335 | 15 | **15** | unsigned | `+355` (byte) |
-| 336–337 | — | — | **word** | `+356` |
+| 336–337 | — | — | **word** | `+356` — **per-step enable mask** |
+| 338–353 | none | none | raw 16-byte copy | `+358` — **per-step semitone offsets** |
 
-Then `0x400dd5aa` copies **16 bytes from stored 338** — the name — so the block
-boundary is 338 exactly and the arp region is **324..337**.
+### The last two fields are a pair, and neither is what this project first said
+
+**`336..337` is a 16-bit per-step enable mask.** Not a sentinel — the consumer at
+`0x4004bd90` does `1 << step`, `or` to set and `andnot` to clear, into one word:
+
+```
+0x4004bd94  lsll  %d2,%d1          ; d1 = 1 << step
+0x4004bd98  movew %a0@(356),%d2
+0x4004bd9c  orl   %d2,%d1          ; SET
+0x4004bdb2  notl  %d1              ; or, on the other arm,
+0x4004bdb4  andl  %d2,%d1          ; CLEAR
+0x4004bdb6  movew %d1,%a0@(356)
+```
+
+**`338..353` is a 16-byte per-step semitone-offset map** — one byte per step,
+copied raw with **no bound and no signedness check**, unlike the twelve scalars.
+The firmware trusts what is stored, so the range is enforced by the UI on the
+way in, not on the way out.
+
+Together they answer "off versus on at zero semitones": both store `0x00` in the
+map, and **the bit in the mask is what separates them**.
+
+So the arp region is **324..353**, and the name is at **12..27** (`0x400dd226`,
+`pea %a3@(12)` with `pea 0x10`).
+
+### Two things this project got wrong here, both the same mistake
+
+1. ~~`0x400dd5aa` copies 16 bytes from stored 338 — the name — so the block ends
+   at 338.~~ **Wrong.** It is the per-step offset map. The boundary claim came
+   from assuming a 16-byte copy near the end of an object must be a name.
+2. ~~`0xFFFF` at 336..337 is this firmware's "unassigned" sentinel, as in the
+   parameter records' CC and NRPN fields.~~ **Wrong.** It is **all sixteen bits
+   set — every step enabled**, the sensible default for an arp.
+
+Both were reasoning from a **resemblance** instead of from a **consumer**, which
+is `docs/FEATURE-PLAYBOOK.md` §2.3 in a new costume. DNX caught both from the
+stored bytes before the code was read.
+
+### And version 0 cannot hold any of it
+
+DNX measured the object terminator `BACEF00C` at **315** in a version-0 object
+(content length 319) and at **355** in a version-3 one (359). **A version-0
+object ends before offset 331.** The image agrees from the other side: a scan
+for any read of `+0x14B` through any address register returns **exactly one
+site**, `0x400dd532`, inside the version-3 converter. Nothing else in the image
+reads it.
+
+So the arp block is **defined only by object version 3**, and a zero at 331 in a
+version-0 object is padding past the terminator — never `MODE`, never `OFF`.
+
+**Consequence for DNX:** their copy path writes version-0 objects onto a device
+that saves version 3, so a DNX-copied preset carries **no arp state at all**. It
+reads back byte-identical and plays, which is exactly why nobody noticed.
 
 ### The substitution value is the default, and it cross-checks the capture
 
