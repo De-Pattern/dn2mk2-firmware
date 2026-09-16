@@ -49,6 +49,9 @@ def main() -> int:
                     "changed MAIN OS bytes into memory after the snapshot is restored")
     ap.add_argument("--dump", action="append", default=[], metavar="BITMAP=FILE",
                     help="after the run, write this Bitmap as a PGM (repeatable)")
+    ap.add_argument("--raw", action="append", default=[], metavar="PTR:WORDS=FILE",
+                    help="after the run, follow the pointer at PTR and write WORDS "
+                    "longwords from it as raw bytes (repeatable)")
     ap.add_argument("--film", metavar="BITMAP=PREFIX",
                     help="after every slice, write this Bitmap as PREFIX_<M>M.pgm -- a "
                     "filmstrip of the animation, one frame per slice")
@@ -113,8 +116,13 @@ def main() -> int:
         pc, done, stop = spin(m, pc, step)
         now["n"] += done
         if args.film:
+            # From the pixels setPixel was given, not from memory: the copy
+            # routine clears the panel at the start of every frame, so a raw
+            # read can land just after the clear and show nothing. The last
+            # value written to each pixel is the last frame actually drawn.
             addr, prefix = args.film.split("=", 1)
-            dump_bitmap(m, int(addr, 0), f"{prefix}_{now['n'] // 1_000_000:04d}M.pgm")
+            write_frame(bitmaps.get(int(addr, 0), {}),
+                        f"{prefix}_{now['n'] // 100_000:05d}.pgm")
         px = sum(c["set"] for c in callers.values())
         print(f"  {now['n']/1e6:7.0f}M  pixels {px:>10,}  callers {len(callers):>3}  "
               f"pends satisfied {ev.get('satisfied', 0):>5}  "
@@ -149,6 +157,13 @@ def main() -> int:
     for spec in args.dump:
         addr, dest = spec.split("=", 1)
         dump_bitmap(m, int(addr, 0), dest)
+    for spec in args.raw:
+        where, dest = spec.split("=", 1)
+        ptr, words = (int(v, 0) for v in where.split(":"))
+        target = int.from_bytes(bytes(m.uc.mem_read(ptr, 4)), "big")
+        with open(dest, "wb") as f:
+            f.write(bytes(m.uc.mem_read(target, 4 * words)))
+        print(f"raw {words} longwords from *{ptr:#x} = {target:#x} -> {dest}")
 
     path = os.path.join(os.environ.get("TRACE_OUT_ROOT", ""), args.out) \
         if not os.path.isabs(args.out) else args.out
@@ -156,6 +171,17 @@ def main() -> int:
         json.dump(out, f)
     print(f"\nwrote {path}")
     return 0
+
+
+def write_frame(pixels: dict, dest: str, w: int = 128, h: int = 64) -> None:
+    """Write the last value setPixel stored at each (x, y) as a PGM."""
+    pix = bytearray(w * h)
+    for (x, y), v in pixels.items():
+        if v and 0 <= x < w and 0 <= y < h:
+            pix[y * w + x] = 235
+    with open(dest, "wb") as f:
+        f.write(b"P5\n%d %d\n255\n" % (w, h))
+        f.write(pix)
 
 
 def dump_bitmap(m, bmp: int, dest: str) -> None:

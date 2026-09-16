@@ -1397,10 +1397,25 @@ float's exponent, tiling the logo four times as densely around the wall. The
 coordinate masks are untouched, so no value can read off the bitmap, and the
 final resolve is untouched. 21 integrity checks pass, HMAC reproduced.
 
-**Not yet seen running.** The table is built once, and at the 400M snapshot it is
-already about 57% written, so patching there would show a half-stock tunnel. A
-380M snapshot from before the generator runs is being built to film stock
-against modified.
+**Seen running under the emulator, and measured, not eyeballed.** Both runs were
+resumed from a 380M snapshot, the tunnel build's two bytes written over one, 60M
+instructions each, a frame every 4M taken from the pixels `setPixel` was handed,
+and the finished table dumped from `*0x42c45698` at the end:
+
+- **9,086 of 16,384 table entries differ**, and they differ as predicted: near the
+  centre stock `(77, 51)` became `(52, 12)` — `77×4 & 127 = 52`, `51×4 & 63 = 12`
+  — and `(56, 59)` became `(93, 47)`, the same relationship within truncation,
+  because the build computes `floor(v×512)`, not `4×floor(v×128)`.
+- **9 of 15 frames differ.** The six that match are before the fly-through.
+
+![stock vs tunnel](img/intro-tunnel-compare.png)
+
+**One artifact of the method, stated so it is not mistaken for the effect.** The
+upper rows of every tunnel frame match stock, because the generator had already
+written those table rows before 380M — its build starts earlier than the 400M probe
+suggested. On the instrument the whole table is computed with the new constants,
+so the whole screen is the dense field in the lower half. A snapshot before the
+generator runs would show that too; 380M was not early enough.
 
 **Where this goes next**, all in the same function and all cheap to try: the
 random jitter (`% 12`), the `1/r` (swap it for `r` and the tunnel becomes a

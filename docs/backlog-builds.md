@@ -27,7 +27,7 @@ not been flashed has not been tested.
 | 6 | A new ELE3 section as real address space | **not started** | — |
 | 7 | The DSP hunt | **parked**, with an explicit warning | — |
 | 8 | New LFO waveforms | **DELIVERED** — `lfo-waveshapes_DN2_1.11.syx` (`STP`, `PLS`, `NOI`) | awaiting a flash |
-| 9 | A custom start-up animation | **DELIVERED** — `intro-tunnel_DN2_1.11.syx`: the intro is a 1/r polar tunnel, and two bytes re-scale it. Emulator filmstrip pending | awaiting a flash |
+| 9 | A custom start-up animation | **DELIVERED** — `intro-tunnel_DN2_1.11.syx`: the intro is a 1/r polar tunnel, and two bytes re-scale it. **Seen running under the emulator**: 9,086 of 16,384 table entries change as predicted | awaiting a flash |
 | 10 | The arpeggiator on MIDI tracks | **DELIVERED** — `arp-on-midi_DN2_1.11.syx`, one byte | awaiting a flash |
 | 11 | A real compatibility check between mods | **not a firmware** — it is a check over builds | n/a |
 | 12 | P-locking the performance modulators | **not started** — route (b) scoped | — |
