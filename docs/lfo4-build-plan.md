@@ -826,6 +826,52 @@ parameter records, then LFO4's ten records on page `0x1d` would populate
 descriptor 37 **automatically**, and the cave only has to create the descriptor
 rather than write nine ids into it. If they are filled per-view from static
 lists, the cave writes them. The two designs differ by more than the bytes.
+## 5g. v4 PASSED — navigation is solved; one renderer left — 2026-09-16
+
+`scripts/build_lfo4_nav_test.py`, flashed the same day. **All five observations
+passed**, including the positive control: editing the fourth page moves LFO3.
+
+**So the navigation half of LFO4 is done**, and it cost far less than §5b
+projected — no table relocation, no cave code, no 38th descriptor:
+
+| VA | change |
+|---|---|
+| `0x402cf52c` | 16 bytes: the id vector `{4, 5, 6, 6}` |
+| `0x40061564` | vector pointer → `0x402cf52c` |
+| `0x40061558` | `moveq #3` → `moveq #4` |
+| `0x4010dbc6` | `moveq #2` → `moveq #3` |
+
+That is the *duplicate-page* form. A page with **its own** parameters still needs
+the 38th descriptor and the table relocation §5f prices — v4 proves the view
+will host a fourth page and drive it, not that LFO4 has one.
+
+### The one defect: the waveform graph is blank on page four
+
+Owner's report, and it is precise. The wave display is fetched through
+
+```
+0x4010d980  movel %a2@(144),%d0            ; the LFO index
+0x4010d984  moveal %sp@(18,%d0:l:4),%a0    ; <-- a 3-element array
+...
+0x4010d9a2  movel %sp@(30,%d0:l:4),%d3     ; <-- and a second one
+```
+
+**Two stack arrays indexed by the LFO index**, three entries each. Index 3 reads
+past them, so the graph draws nothing and nothing else breaks.
+
+This is worth stating as a method result, not just a bug: it is **one of the ten
+`+0x90` sites §5e listed as unread**, and no bound-scan would have found it,
+because *there is no bound* — just an array that happens to be three long. The
+device found it in one flash. That is the argument for cheap probe builds over
+exhaustive static reading, and it belongs in `docs/FEATURE-PLAYBOOK.md`.
+
+**Next, and not yet done:** find where those two arrays are built. The enclosing
+function begins at `0x4010d90a` (`lea %sp@(-32),%sp`); `dnfw fn entry` attributes
+`0x4010d980` to `0x4010d404`, but it warns that attribution is a guess for a
+vtable-reached method, and a prologue at `0x4010d90a` says it is wrong here.
+Whether the arrays are locals filled by a loop, or arguments the caller builds,
+decides whether the fix is an immediate or a cave.
+
 ## 6. The build, in order
 
 1. Relocate + zero the three tick state arrays (25 MB region).

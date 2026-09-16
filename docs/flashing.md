@@ -197,3 +197,16 @@ no scan for a switch on a page id can find it. The two bytes v2 lacked were foun
 by scanning for comparisons against 29 **anchored on the 49 sites that load the
 parameter table** rather than on the constant itself — three hits, all real,
 against hundreds of noise hits the naive scan returns.
+
+| 2026-09-16 | **LFO4 navigation test v4** (`lfo4-nav-test4_DN2_1.11.syx`, base **1.11**) — the `LfoPageView` id vector relocated to `0x402cf52c` as `{4,5,6,6}`, its length `moveq #3`→`#4` at `0x40061558`, the pointer at `0x40061564`, and the LFO-index clamp `moveq #2`→`#3` at `0x4010dbc6`. **16 data bytes, one pointer, two immediates** | **PASS on all five observations, with one cosmetic defect.** Owner: *"each LFO does what it needs to do and LFO page 4 clones the values of Page 3."* It boots; `[MOD]` cycles **four** pages; page four shows LFO3's nine columns; **editing page four moves LFO3** — the positive control; LFO1–3 unaffected. **Defect: the LFO waveform graph is blank on page four.** So `[MOD]` navigation is solved — the view will serve a fourth page and its value path works — and the remaining gap is the waveform renderer, localised below. |
+
+**The blank graph, and why it is a good failure.** The wave display is fetched
+through `sp@(disp, lfo_index:l:4)` at `0x4010d984` and `0x4010d9a2` — a
+**three-element array indexed by the LFO index**. With index 3 it reads past the
+array, so the graph draws nothing. Nothing else on the page depends on it, which
+is why every other observation passed.
+
+It is also the cheapest possible confirmation that `docs/lfo4-build-plan.md`
+§5e was right to list the ten `+0x90` sites as unread: this is one of them, and
+it is the kind of consumer no bound-scan would have found, because there is no
+bound — just an array that happens to be three long.
