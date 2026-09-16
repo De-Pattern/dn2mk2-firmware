@@ -414,7 +414,7 @@ Ruled out, so they are not re-checked: `0x4017a998` and `0x401cf3f6` carry
 `addil #-26` but no page bound — unrelated arithmetic, matching the feasibility
 doc's warning that four of its eight hits were exactly that.
 
-### Therefore: LFO4 on page `0x1d`, Retrig moved to `0x1f`
+### Therefore: LFO4 on page `0x1d`, the TRIG group moved to `0x1f`
 
 Keeping the LFO pages **contiguous** turns almost the whole list into one-byte
 edits:
@@ -424,6 +424,7 @@ edits:
 | five `(page-26) <= 2` bounds | `moveq #2` | `moveq #3` | 1 each |
 | `0x400dbe7c` | `moveq #28` | `moveq #29` | 1 |
 | `TrigParameterSet` `0x400dbfa0` | `moveq #29` | `moveq #31` | 1 |
+| page-`0x1d` special case `0x4003774e` | `moveq #29` | `moveq #31` | 1 |
 | `param_set_tables_build` `0x400dc71e` | `moveq #29` | `moveq #31` | 1 |
 | per-LFO getter/setter | — | fourth case, `page == 29` | cave ×2 |
 | `LfoPageView` `0x4010db18` | — | fourth `Start Phase` id | cave |
@@ -434,7 +435,10 @@ so LFO4's byte is already there — offset `+3`.
 
 ### Why this is not the probe that failed
 
-Probe v1 and v2 moved Retrig `0x1d` → `0x1f` and the page drew but read wrong.
+Probe v1 and v2 moved the TRIG group `0x1d` → `0x1f` and the pages drew but
+read wrong. (**`0x1d` is not just Retrig** — it is 22 records across three
+labels: ten unlabelled TRIG parameters, four `Retrig`, eight `Euclidean`. The
+earlier "move Retrig" phrasing in this document was loose and is corrected here.)
 **That is this same move, minus the classifier.** They renumbered the records
 and the routing constant and changed nothing else, so Retrig's parameters became
 unclaimed by every predicate above and fell through to the sound set — exactly
@@ -443,6 +447,47 @@ the `VEL` = 112 / `PROB` re-aiming LFO2 symptom.
 The move is sound. It was the missing half that was fatal. **Stated as a
 hypothesis, not a result:** it has not been flashed, and the failure mode if a
 site is still missing is the one already seen, not a brick.
+
+## 5c. v3 is built and verifies — the falsifier for §5b
+
+`scripts/build_page_classifier_test.py`, built 2026-09-16.
+
+**It tests one claim and nothing else:** that every consumer of page id `0x1d`
+is now known. No LFO4 records, no bounds, no tick, no slots.
+
+A scan for comparisons against 29 **anchored on the 49 sites that load the
+parameter table** at `0x401f7f94` — rather than for the bare constant, which is
+what returned four unrelated hits and made the earlier cost model wrong — finds
+exactly three:
+
+| VA | what it is | in v2? |
+|---|---|---|
+| `0x400dc71e` | `param_set_tables_build` exact-match arm | yes |
+| `0x400dbfa0` | **`TrigParameterSet` ownership predicate** | **no** |
+| `0x4003774e` | page-`0x1d` special case for parameter ids 310/311 | **no** |
+
+So v2 moved the records and the *builder* and left the *classifier* behind.
+That is the whole explanation of the symptom the owner reported.
+
+**Built and verified:** 22 records (88 bytes) + 3 code bytes, every integrity
+field reproduced including the HMAC-SHA256 trailer — which `docs/version-gate.md`
+§2 establishes MAIN OS actually checks at flash time, so that is not a formality.
+
+```
+page-classifier-test3_DN2_1.11.syx
+sha256 eac9fe60972122f106a397b3e5fe577ff7da94adf00fecedbcbe9fdce89f6c33
+```
+
+**Not flashed.** Needs the owner's go-ahead and a named transport.
+
+Six observations, in order, the first failure making the rest moot: it boots;
+`[TRIG]` draws real defaults rather than `C0` / `0.188` / `PROB 0%`; trig
+parameters p-lock; Retrig works; Euclidean works; **and nothing on the TRIG page
+moves an LFO** — that last one is the v2 symptom and the one that matters.
+
+All six pass → §5b is proven, `0x1d` is free, and the next build is LFO4's
+records plus the five `moveq #2` → `moveq #3` bounds. Still broken → a fourth
+consumer exists, and whether the *symptom* changed says how much narrower it is.
 
 ## 6. The build, in order
 
