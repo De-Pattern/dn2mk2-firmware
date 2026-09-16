@@ -695,6 +695,62 @@ draws but the aliasing does not happen, the UI chain is not actually connected.
 Pointing the records at slots 101–108 *without* the extension array would read
 and write past the 101-entry value array into the machine-type byte at `+0xDE`.
 **Do not build that.**
+## 5f. The view-id → page mapping, solved — 2026-09-16
+
+§5e listed this as the thing gating v4. It is solved, by decompiling four
+functions instead of reading bytes.
+
+### The chain, end to end
+
+```c
+// ParameterPageView::getColumnParameter -- 0x40063f24
+if (column < 9) {
+    desc = FUN_400c2474( *(int*)( *(int*)(this + 0x7c) + *(int*)(this + 0x90) * 4 ) );
+    return *(int*)(desc + 8 + column * 4);
+}
+return 0;
+```
+
+| step | what |
+|---|---|
+| `this + 0x7c` | the **`std::vector<int>` of view ids**, copied in by the base ctor `0x40065bbc` (`param_1[0x1f]`) |
+| `this + 0x90` | the **LFO index**, 0–2 |
+| `vector[lfo]` | the **view id** — `4`, `5`, `6` for LFO1/2/3 |
+| `FUN_400c2474(id)` | **`0x42432C00 + id * 44`**, bounded `id <= 36` |
+| `desc + 8 + column*4` | the **parameter id** for that column |
+
+The arithmetic closes exactly: `8 + 9 columns × 4 = 44`. Two pointer fields at
+`+0`/`+4`, then nine parameter ids. **37 descriptors × 44 = 1,628 bytes.**
+
+And the bound is not arbitrary: `moveq #36` at `0x400c2474`, and the highest
+view id in the pool at `0x401e0000` is **`0x24` = 36**. They match.
+
+### There is no free view id — checked, not assumed
+
+§5b listed `0x0f`, `0x19`, `0x1a` and `0x1c` as "free" because no *LfoPageView*
+list contains them. **That was the wrong test.** The table initialiser around
+`0x400c9640` writes the `+0` and `+4` string fields of **all 37 descriptors**,
+`0x0f` included. Every id is a real, named page belonging to some view.
+
+So LFO4 needs a **38th descriptor at view id 37**, which means:
+
+| # | site | change |
+|---|---|---|
+| 1 | `0x400c2474` | `moveq #36` → `moveq #37` — 1 byte |
+| 2 | the table | 38 × 44 = 1,672 bytes — **needs 44 bytes of slack after `0x4243325C`, or relocation** |
+| 3 | a cave | write descriptor 37's two strings and nine parameter ids at boot |
+| 4 | `0x40061562` | point the id vector at a relocated `{4,5,6,37}` |
+| 5 | `0x40061558` | `moveq #3` → `moveq #4` |
+| 6 | `0x4010dbc6` | `moveq #2` → `moveq #3` (the LFO-index clamp, §5e) |
+
+**Open, and cheap to settle:** whether 44 bytes are free after the table at
+`0x4243325C`, which decides between (2) as a bound bump and (2) as a relocation
+of 1,672 bytes into the 25 MB region.
+
+**Also open:** what writes the nine parameter-id fields at `+8`…`+40`. The `pea`
+scan finds only `+0` and `+4`, so the ids arrive by another instruction form —
+possibly from `param_set_tables_build`, which would tie layer 2 to layer 7 and
+is worth knowing before the cave is written.
 ## 6. The build, in order
 
 1. Relocate + zero the three tick state arrays (25 MB region).
