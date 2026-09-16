@@ -1091,8 +1091,14 @@ instructions.
 [315750760] fb_front 0x44622fc4 size 4 value 0x0 pc 0x40114e7c
 ```
 
-So `0x40114e7c` is the **panel clear** — a longword loop over the buffer — and
-both buffers read all-zero at the end of the run. Nothing drew.
+**[SHARPENED the same day]** `0x40114e7c` is not a dedicated panel clear. It is
+`0xe8` bytes into **`0x40114d94`, a rectangle-fill primitive with 34 direct
+callers**, and the PC that appeared is one arm of its inner loop — the arm that
+writes zeros. The routine walks longwords with a row stride taken from
+`%a2@(12)`, so `%a2` is a `Bitmap` and **`Bitmap+12` is its stride**. Calling it
+"the panel clear" was reading one PC as if it were a function.
+
+Both buffers read all-zero at the end of the run. Nothing drew.
 
 **That is not a bug, and `emu/frame.py` already says why:** every task but the
 idle task blocks in `sem_pend` on a device event that never happens under
@@ -1113,3 +1119,24 @@ not have.
 - `0x40114e7c` is now a named routine. It is also the cheapest possible probe
   for "did the panel get cleared", which is a different question from "did
   anything draw".
+
+
+## Finding the Digitone's `setPixel` — still open, with the route
+
+`emu/frame.py`'s `SET_PIXEL = 0x40104eb4` is a **Digitakt II 1.15C** address. Run
+against DN2 1.11 it hooks nothing, which is why a capture from the 60M snapshot
+reported `setPixel calls: 0` alongside `pends satisfied: 0` — two independent
+failures that look like one.
+
+DN2 1.11 has no `setPixel` string: it is a non-virtual method, so nothing in the
+RTTI names it. What the image does carry is mangled **fragments** of functions
+taking a `Bitmap` — `6BitmapiibE` at `0x401f1b6f` is `(Bitmap&, int, int, bool)`,
+which is the signature — so the symbol survives inside longer template manglings
+even though the method itself is anonymous.
+
+**The route, and it is the owner's shortcut:** trace it on **Digitakt II 1.15C**,
+which is the image digikit supports best and the one `frame.py`'s address already
+matches, then carry the structure across. What transfers is the *shape* — which
+Bitmap object the intro draws into, in what order, and where the version string
+sits — not the addresses. `0x40114d94` and its 34 callers are the Digitone-side
+foothold to re-anchor onto.
