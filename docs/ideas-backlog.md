@@ -1472,3 +1472,75 @@ the opposite of blending in.
 
 **Queued, not started.** The order the owner set on 2026-09-16 is LFO4 first,
 then the boot screen, and this entry is the boot screen's user-facing half.
+
+### 13.1 The flip-flap encoding — what the stamp should actually draw
+
+**Owner's proposal, 2026-09-16**, with a picture: Sara Ball's *Croc-gu-phant*,
+the children's flip-flap book where each horizontal band of the page turns
+independently, so a crocodile head sits on a leopard torso on elephant legs.
+*"Each combination of features could be identifiable by a different combination
+of elements... the element we use doesn't need to be an animal — maybe musical
+instruments."*
+
+**Why this is structurally right and not only charming.** A flip-flap book is a
+**positional encoding**: each band is a digit, each flap is that digit's value,
+and the whole creature is a number written in base *N*. That is precisely what an
+identifier is. The picture does not illustrate the mod set — it **is** the mod
+set, rendered in a base a person can read across a room.
+
+It also solves the thing a version string cannot. `MOD 1.11+a3f2` tells you two
+machines differ; it does not tell you *how*, and nobody memorises a hex digest.
+A creature with a horn's bell where the other has a drum shell is a difference
+you see before you have finished reading.
+
+#### The one real design decision: which number it renders
+
+| | **(a) semantic** — one band per mod | **(b) hash** — bands derived from a digest |
+|---|---|---|
+| reads as | "the head is LFO4" | "mine differs from yours" |
+| capacity | bounded by band count | unbounded |
+| needs | a registry assigning bands | nothing |
+| failure | an unregistered mod is invisible | two mod sets can collide |
+
+**(a), with one band value reserved for "unregistered mod".** The owner's stated
+purpose is *"make it clear to the users backing these mods"* — a readable
+creature does that and a hash does not. The reserved value means an unknown mod
+still changes the picture, so (a) degrades into (b)'s weaker guarantee rather
+than lying. A digest can still be drawn as a small separate mark if a
+byte-exact check is ever wanted; it is not the creature's job.
+
+#### The budget, which is the surprise
+
+At 128×64 mono (`emu/panel.py`) a three-band creature at 36×48 is 36×16 per
+band, **72 bytes at 1 bpp**. Four options across three bands is twelve parts —
+**864 bytes**, for 64 distinct creatures. Four bands of four is 256 creatures
+for ~1.1 KB.
+
+That fits inside the ~29 KB of padding in §1 **without touching §1 or §6 at
+all**, which makes this the rare entry on this page with no space problem. The
+cost is drawing code and layout, not bytes.
+
+The constraint that actually bites is **legibility at 36×16 monochrome**. Strong
+silhouettes only — a horn's flared bell, a keyboard's black-key comb, a drum
+shell's lugs, a string bridge. Anything needing interior detail will not survive.
+
+#### Where the number comes from
+
+Not hardcoded in the cave. `src/dnfw/mods/__init__.py` already makes every mod
+declare its byte extents before writing, which is the beginning of a manifest;
+the build pipeline should **emit the manifest into the image**, and the cave
+should render what it reads. Then a rebuilt image cannot draw a creature that
+disagrees with what it contains — the property §13 asks for, made concrete.
+
+This is the same manifest §11 needs for compatibility checking. **One structure,
+two consumers**: §11 refuses overlapping mods at build time, §13.1 draws the
+survivors at boot. Neither is a reason to build the other, but building either
+one badly makes the other harder, so they should be designed together.
+
+#### The property worth protecting above all others
+
+**Stock draws no creature.** An unmodified image boots exactly as Elektron
+shipped it. The creature's *presence* is the signal, before any band is read —
+which satisfies §13's closing constraint by construction: it cannot be mistaken
+for a stock version string, because stock has nothing there to mistake it for.
+
