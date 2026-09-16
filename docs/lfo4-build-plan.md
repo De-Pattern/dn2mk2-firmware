@@ -1184,6 +1184,66 @@ smallest form.
 is the table above. So the squared `×` view is selected by yet another
 mechanism, and it remains open. It is now the last piece of §5i.
 
+### 5i-d. And the blank graph: a three-way branch on the LFO index — 2026-09-16
+
+Reading on past the bitmask predicate in the same method (`LfoPageView` vtable
+slot 4, `0x4010e0b4`) reaches the graphic block, and it explains the **other**
+defect — v4's blank waveform graph — which §5g left open.
+
+After the column loops:
+
+```
+4010e1d6  movel %a2@(144),%d0     ; view + 0x90 = the LFO index
+4010e1da  bnes  0x4010e228        ; not 0 -> try 1
+4010e1e6  pea 0x4f ... jsr %a3@   ; 79   via 0x4006538e
+4010e1f6  pea 0x51 ...            ; 81
+4010e202  pea 0x52 ...            ; 82
+4010e212  pea 0x4b ...            ; 75
+4010e21e  pea 0x53 ...            ; 83
+4010e228  moveq #1,%d1 / cmpl / bnes 0x4010e278
+   ... 0x59 0x5b 0x5c 0x55 0x5d   ; 89 91 92 85 93
+4010e278  moveq #2,%d1 / cmpl / bnes 0x4010e2f0
+   ... 0x63 0x65 0x66 ...         ; 99 101 102 ...
+```
+
+**Five ids per LFO, hardcoded, one branch per index:**
+
+| index | SPD | WAVE | SPH | MODE | DEP |
+|---|---|---|---|---|---|
+| 0 | 75 | 79 | 81 | 82 | 83 |
+| 1 | 85 | 89 | 91 | 92 | 93 |
+| 2 | 95 | 99 | 101 | 102 | 103 |
+
+**There is no branch for index 3.** `moveq #2; cmpl; bnes` falls straight past the
+end, so a fourth LFO draws none of these five graphics at all.
+
+#### This resolves both reported defects, and they are different bugs
+
+The two symptoms the owner reported across v4 and v5 have **separate causes**,
+which is why they behaved differently:
+
+| build | page index | ids on the page | symptom | cause |
+|---|---|---|---|---|
+| **v4** | 3 | LFO3's (95–104) | widgets fine, **graph blank** | bitmask passes on LFO3 ids; **this block has no index-3 branch** |
+| **v5** | 3 | LFO4's (1–17) | **all plain**, graph blank | bitmask fails on the new ids **and** no index-3 branch |
+
+§5g recorded v4's blank graph as "the one defect" and §5i recorded v5's plain
+widgets as another. **They are two independent sites**, and both must be fixed:
+
+1. **`0x4010e148`** — the membership mask `0x501405`, base 79. Teach it ids
+   **5** (LFO4 `WAVE`) and **12** (LFO4 `SPH`).
+2. **`0x4010e1d6`ff** — the index branch chain. Add an index-3 arm calling
+   `0x4006538e` with LFO4's **1, 5, 12, 13, 14** (SPD, WAVE, SPH, MODE, DEP).
+
+Both are caves rather than immediates: the mask cannot reach ids 74 below its
+base, and the branch chain has no spare arm.
+
+#### What is still open
+
+`MULT`, `FADE` and `DEST` are **not** in either list — this block draws only five
+of the eight LFO parameters. So `FADE`'s squared `×` view is selected by neither
+mechanism found so far, and remains the last unlocated piece of §5i.
+
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
