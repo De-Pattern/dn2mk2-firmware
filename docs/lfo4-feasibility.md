@@ -1369,6 +1369,36 @@ options inserted into a menu that had eighteen. It matches field 332's bound of
 So a v1 object's 332 is **not** directly comparable with a v2 or v3 one. DNX has
 2,048 v1 records in their corpus; this table translates them.
 
+### The prediction made from this was backwards — and the table survived
+
+This project predicted that DNX's histogram would show **holes at 1, 3, 7, 11,
+15 in the v1 portion**. DNX ran it on 53,248 records. The holes are in the **v2**
+portion:
+
+| | n | range | on 1, 3, 7, 11, 15 |
+|---|---|---|---|
+| v1, all | 2,048 | 0..17 | `1:1  3:1  7:2  11:3` |
+| v2, all | 51,200 | 0..22 | **none** |
+| v1, arp engaged | 33 | 1..17 | `1:1  3:1  7:2  11:2` |
+| v2, arp engaged | 300 | 9..19 | **none** |
+
+**Obvious in hindsight, and worth writing down because it was not obvious
+beforehand.** A v1 object stores a **v1 index**, and all eighteen are reachable,
+so 1, 3, 7 and 11 appear there as ordinary values. A v2 object stores a **v2
+value**, and 1, 3, 7, 11, 15 are exactly the five the map never produces. The
+holes belong to the *target* encoding, not the source. I predicted them on the
+wrong side.
+
+The insertion reading itself **survives intact**, and now has endpoints from both
+sides: v1 max 17 against eighteen values, v2 max 22 against a bound of 22.
+
+**DNX's own caveat is worth preserving:** 300 v2 records with the arp
+deliberately engaged, across seven distinct speeds, and not one on a new value.
+That is what you would see if every v2 record were *promoted from v1* rather than
+authored at v2 — or if the owner simply never chose a triplet. One person's
+projects cannot separate those, and DNX declined to pretend otherwise. A project
+authored on v2-era firmware by somebody else would settle it.
+
 **Consequence for DNX:** their copy path writes version-0 objects onto a device
 that saves version 3, so a DNX-copied preset carries **no arp state at all**. It
 reads back byte-identical and plays, which is exactly why nobody noticed.
