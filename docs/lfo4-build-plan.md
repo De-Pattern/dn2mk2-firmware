@@ -378,7 +378,63 @@ Neighbouring registrations in the same function use counts 1, 2, 3 and 15 with
 their own descriptors, so the third argument is a **count of pages behind one
 key**, and `3` for the LFO view is the three LFO pages.
 
-**The edit is one byte:** `moveq #3,%d1` → `moveq #4,%d1` at `0x40061558`.
+### The edit is NOT one byte — corrected before it was believed
+
+~~`moveq #3,%d1` → `moveq #4,%d1` at `0x40061558`.~~ **[WRONG — corrected the
+same day.]** The second argument is not an opaque descriptor: it is a **pointer
+into a packed pool of view ids**, and the count is how many to read. The
+decompiler's `0x48` is `0x401e0048` truncated to its low byte.
+
+The pool at `0x401e0000` is **128 bytes, 32 longwords, and every one is
+claimed** by one of fifteen registrations:
+
+| offset | count | view ids | |
+|---|---|---|---|
+| `0x00` | 2 | `0x23 0x24` | **LfoPageView, second registration** |
+| `0x08` | 1 | `0x22` | |
+| `0x0c` | 2 | `0x20 0x21` | |
+| `0x14` | 2 | `0x1e 0x1f` | |
+| `0x1c` | 1 | `0x1d` | |
+| `0x20` | 1 | `0x1b` | |
+| `0x24` | 5 | `0x14`–`0x18` | |
+| `0x38` | 3 | `0x11 0x12 0x13` | |
+| `0x44` | 1 | `0x03` | |
+| **`0x48`** | **3** | **`0x04 0x05 0x06`** | **LfoPageView, first registration** |
+| `0x54` | 1 | `0x10` | |
+| `0x58` | 1 | `0x0e` | |
+| `0x5c` | 2 | `0x0c 0x0d` | |
+| `0x64` | 5 | `0x07`–`0x0b` | |
+| `0x78` | 2 | `0x01 0x02` | |
+
+**Gaps in coverage: none.** So bumping the LFO count from 3 to 4 would read
+`0x401e0054` = `0x10`, which belongs to the `(0x54, 1)` registration. LFO4
+would silently take another view's id and the failure would look like a UI bug,
+not a data-layout bug.
+
+**The real edit** is to relocate the list:
+
+| # | site | change |
+|---|---|---|
+| 1 | a cave or the 25 MB region | 16 bytes: `04 05 06 <new>` |
+| 2 | `0x40061562` `movel #0x401e0048,%d0` | point at the new list — **4-byte immediate** |
+| 3 | `0x40061558` `moveq #3,%d1` | `moveq #4,%d1` — 1 byte |
+
+View ids free below `0x30`: **`0x0f`, `0x19`, `0x1a`, `0x1c`**, and everything
+from `0x25` up. `0x25` is the safest — above the highest in use, same reasoning
+as page `0x1f` in §5b.
+
+### And the second registration is explained
+
+`LfoPageView` is registered twice because it serves **two groups**: ids
+`{0x04, 0x05, 0x06}` and ids `{0x23, 0x24}`. Three and two. The natural reading
+is sound tracks (three LFOs) and MIDI tracks (two), and it is consistent with
+every other view in the pool having exactly one registration.
+
+**Still inference, not proof** — nothing read says "MIDI". But the shape is now
+evidenced rather than guessed from two loose numbers, and the decision it forces
+is explicit: **if LFO4 should appear on MIDI tracks too, the `(0x00, 2)` list
+needs the same relocation treatment.** That is the owner's call, not a
+technical one.
 
 **Open, and it must be settled before the build:** why there are *two*
 registrations, with counts 3 and 2, both pointing at the same view class with
@@ -577,8 +633,8 @@ digikit tool that does the job, or say why it does not fit.
 8. Serialization: two hooks at `0x400dd276` / `0x400dd718`, plus clearing `ext`
    alongside the 202-byte memset at `0x400dd24a`.
 9. Page view: cave on `0x4010dafc` adding LFO4's `Start Phase` id.
-10. `[MOD]` navigation: `moveq #3,%d1` → `moveq #4,%d1` at `0x40061558`. Settle
-    the second registration (count 2, `0x40061868`) first.
+10. `[MOD]` navigation: relocate the view-id list `{4,5,6}` to `{4,5,6,0x25}`,
+    repoint the immediate at `0x40061562`, and bump `moveq #3` at `0x40061558`.
 
 **All ten steps are specified to the byte or to a named cave.**
 
@@ -592,7 +648,7 @@ digikit tool that does the job, or say why it does not fit.
 | 2 | tick edit | **designed** — both loops decoded, four edits named, state relocation forced and sized |
 | 1 | slot space | **designed** — route chosen, bound found to be a `moveq`, extension array unchanged from the slot plan, 11 hooks listed |
 | 3 | serialization | **designed** — both halves read; the stored block at `+28` is indexed by p-lock id, 107 wide, and the maps are the only translation. No format version bump. Three hooks named. Serialize-side loop bound unchecked |
-| 4 | page view | **designed** — one shared `LfoPageView`, no fourth class; its LFO knowledge is three `Start Phase` ids in one function. **`[MOD]` navigation FOUND**: an explicit page count, `moveq #3,%d1` at `0x40061558`, one byte. A second registration with count 2 is not yet explained |
+| 4 | page view | **designed** — one shared `LfoPageView`, no fourth class; its LFO knowledge is three `Start Phase` ids in one function. **`[MOD]` navigation FOUND**: a pointer + count into a packed view-id pool at `0x401e0000`. The pool has **no gaps**, so the count cannot be bumped — the list relocates. The second registration is the MIDI-track group |
 
 **Nothing here has been built, and nothing has been flashed.** All five are
 specified to the point where code can be written against them. `[MOD]`
