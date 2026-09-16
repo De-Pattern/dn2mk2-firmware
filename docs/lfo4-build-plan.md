@@ -913,6 +913,75 @@ instead of another round of pattern-matching.
 observation passed, and v5 — the 38th descriptor and LFO4's own records — does
 not depend on it.
 
+## 5h. v5 built: LFO4 as its own page — 2026-09-16
+
+`scripts/build_lfo4_page_test.py`. Gives LFO4 its **own records and its own page
+descriptor**, where v4 pointed the fourth page at LFO3's.
+
+**Deliberately not included:** independent values. LFO4's records keep LFO3's
+`+0x04` slot indices, so editing page four still moves LFO3. That is §3's
+extension-array work and it is v6.
+
+| part | status |
+|---|---|
+| TRIG group `0x1d`→`0x1f`, three classifier bytes | proven, v3 |
+| id vector, length, LFO-index clamp | proven, v4 |
+| LFO4's ten records on page `0x1d` | new |
+| six page-range bounds widened | new |
+| a 38th descriptor via a cave | new |
+
+The three new parts are **not separable** — records without a descriptor draw
+nothing, a descriptor without records has nothing to name, and neither is
+reachable unless the range tests claim `0x1d`. One question, three parts.
+
+### The descriptor cave, and why it beats relocating the table
+
+§5f priced a 38th descriptor as a relocation of 1,672 bytes. A **cave on the
+26-byte accessor** is far smaller, and it assembled and applied clean:
+
+```
+0x402d0664  movel %sp@(4),%d0
+0x402d0668  cmpil #37,%d0
+0x402d066e  bnes 0x402d0688
+0x402d0670  lea 0x42432d08,%a0        ; descriptor 6 (LFO3)
+0x402d0676  lea 0x402d0800,%a1        ; ours
+0x402d067c  movel %a0@,%a1@           ; its two string pointers, at runtime
+0x402d067e  movel %a0@(4),%a1@(4)
+0x402d0684  movel %a1,%d0
+0x402d0686  rts
+0x402d0688  moveq #36,%d1             ; replayed stock
+0x402d068a  movel %a2@(4),%d0
+0x402d068e  jmp 0x400c247a            ; back into the accessor
+```
+
+The two string pointers are copied **at runtime** because they are heap objects
+the boot initialiser assigns (`0x401ce6d6`); they are not in the image. The nine
+parameter ids are static and ours: `[1, 2, 3, 4, 5, 12, 13, 14, 10]`, mirroring
+LFO3's `[95, 96, 97, 98, 99, 101, 102, 103, 10]` — same shape, same skipped
+`SLEW`, same shared `Track Level` in column 8.
+
+### A guard earned its keep
+
+`scripts/build_lfo4_test.py` names `0x4026EFF6` as *"16 zero bytes of
+unreferenced padding"* for the `LFO4` page-label string. **That is true on 1.10E
+and false on 1.11**, where it reads `4b fc 7e 00 45`. v5's zero-check refused,
+and the label moved into the run already verified free at `0x402cf52c`.
+
+Anything else anchored on that address for 1.11 is suspect. **`build_lfo4_test.py`
+itself still carries it**, and its default image is 1.10E, so it is not wrong
+today — but it would be if re-pointed at 1.11.
+
+```
+lfo4-page-test5_DN2_1.11.syx
+sha256 1d9c2989138e1c9e517c15af5ea21c04a762e36e9556b52408a5a71398d99f6d
+```
+
+21/21 integrity checks, HMAC reproduced. **Not flashed.**
+
+Observation list in the module docstring. The discriminating one: if page four
+shows **LFO3's** parameter names, the cave did not run; if it shows LFO4's, it
+did.
+
 ## 6. The build, in order
 
 1. Relocate + zero the three tick state arrays (25 MB region).
