@@ -1048,6 +1048,39 @@ LFO4).
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
+## 5j. v5 confirmed, and two corrections — 2026-09-16
+
+**The page header is a group counter, not a label.** All four MOD pages read
+`MOD 1/4`, `MOD 2/4`, `MOD 3/4`, `MOD 4/4`. The `LFO1`/`LFO2`/`LFO3` string in
+each record's `+0x2C` field is **not** the page header — it is used somewhere
+else (p-lock lists, most likely). Asking the owner to "look for LFO4 on the
+page" was never going to work, and the assumption should have been checked
+before it was put in front of them.
+
+It also confirms navigation is fully coherent: the counter says **4**, driven by
+the id vector's length.
+
+**The cave ran, and the widget regression proves it.** No further check is
+needed:
+
+- In **v4** page four used LFO3's descriptor, so it drew LFO3's actual records —
+  and the specialised widgets **worked**.
+- In **v5** the only change to that page is which descriptor it receives. The
+  widgets went **plain**.
+
+If the cave had not run, page four would be byte-for-byte the v4 page, widgets
+included. It changed, so the descriptor changed, so the page is reading LFO4's
+own records.
+
+**v5 passes the question it was built to ask.**
+
+| piece | state |
+|---|---|
+| a fourth `[MOD]` page, reachable | **done** (v4) |
+| backed by LFO4's own parameter records | **done** (v5) |
+| specialised widgets | missing — id-keyed, LFO4's ids are outside every LFO range (§5i) |
+| independent values | **not started** — v6, and the real remaining work |
+
 ## 6. The build, in order
 
 1. Relocate + zero the three tick state arrays (25 MB region).
