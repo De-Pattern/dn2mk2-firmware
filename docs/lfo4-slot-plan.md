@@ -634,3 +634,68 @@ different things depending on the instruction that owns them, so any scan over
 raw words needs the opcode decoded, not pattern-matched. The value-array scan
 earlier in this file survived only because it checked the preceding opcode's EA
 field — and even that found a shape rather than an identity.
+
+---
+
+## [WRONG — corrected 2026-09-16, same day] The pool measurement was void: nothing was ever edited
+
+**The correction above, "[CORRECTION] The 128-object pool is stored Sounds, not
+the live track state", drew a conclusion from a broken experiment.** The owner's
+device model in it is theirs and stands. **The inference I attached to it does
+not.**
+
+### What was actually wrong
+
+The argument was: turn LFO1 `SPD`, watch the screen show `16.62`, observe that
+no byte of the 128 sound objects changed, conclude the live values live
+elsewhere.
+
+**The parameter never changed.** Two screenshots, one after 4 encoder clicks and
+one after 16, show **the same `16.62` and the same knob position**. A single
+event with delta **100** does not move it either. The label-to-value switch on
+the display happens when an encoder is *touched*, not when a value changes — so
+it proved the event arrived at the UI, and nothing more.
+
+So every "X did not change" result from that session is **void**: the pool, the
+26 MB above BSS, the 38 swept pages. Nothing changed anywhere because nothing
+was edited. The correct reading of all of it is **"no parameter write occurred"**,
+not "the parameter is not here".
+
+### The evidence that was already present and explained away
+
+- **`Sound::updateMirror` recorded zero hits in every run.** A parameter change
+  must pass through it. This was attributed to "stored-Sound code that only runs
+  on load or save" — an explanation invented to preserve the premise.
+- **Every memory experiment found only UI plumbing** — event ring, per-encoder
+  counters, RTOS queue, framebuffer, title buffer. That is the exact signature of
+  input that is queued and displayed but never applied.
+
+Each null was read as "not found yet" instead of "the thing being looked for did
+not happen." That is the same error as this morning's terminal-loop false
+positive, and `docs/FEATURE-PLAYBOOK.md` §2.1's note — *validate the tool's
+verdict, not just its decoding* — was written today, after that one.
+
+### And DNX's evidence points the other way
+
+`DNX/docs/dn2-format.md`, from hardware captures: *"A sound object holds the
+track's live values, so turning a knob moves a byte directly."* With the LFO grid
+inside that object at **`30 + 8*parameter + 2*lfo`**.
+
+So a sound object **is** live track state on this instrument, and whether the
+128-object pool in RAM contains the per-track live objects is **open again**, not
+settled negative.
+
+### The harness limitation to record
+
+**Synthetic encoder input does not move parameters under the emulator.** The
+event is well formed — `panelsweep` validated all nine encoders, and
+`encode_encoder` emits `tag|channel, delta` which the UI visibly receives — but
+no delta is ever applied, at ±1 or ±100.
+
+Worth noting for digikit: `tools/guirun.py`'s `--input` cannot turn an encoder at
+all, because `inbox.append((kind, code, 0))` hardcodes the delta to **0**. So it
+is possible no encoder turn has ever been applied under this emulator, and the
+path is simply untested rather than broken.
+
+**Until an edit can be made to land, memory-diffing for "where the value goes" is
+not an available technique.**
