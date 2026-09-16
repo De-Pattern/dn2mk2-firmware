@@ -1168,6 +1168,11 @@ kind of value and a much easier thing to explain to someone who does not care
 how an ELE3 container is laid out. It is also small enough to finish, which none
 of §1, §4, §6, §7 or §8 currently are.
 
+**See also §13**, which is the small half of this: not replacing the animation
+but adding a mod stamp beside the logo it already draws. §13 answers the first
+question of this entry as a side effect, because a `setPixel` trace during the
+intro says whether the frames are stored or procedural.
+
 ---
 
 ## 10. The arpeggiator on MIDI tracks
@@ -1386,3 +1391,84 @@ six descriptor lists' depth halves.
 
 Item 4 gates the others: it is cheap, and it could make this whole entry
 unnecessary by showing the mechanism already exists.
+
+---
+
+## 13. A mod stamp on the intro screen
+
+**Asked for by the owner, 2026-09-16**, in two steps on the same day. First:
+*"is there any way that we can start marking the fw somehow to know what the
+machine is holding at each time?"* — then, when it was clear the machine can
+answer that question: *"I want to make it clear also to the users backing these
+mods"*, and finally the shape it should take — **mod the intro screen, adding a
+custom graphic next to the Elektron logo, together with the version.**
+
+That last sentence is the entry. The two earlier ones are why it matters: an
+instrument running a modified image currently looks exactly like one running
+stock, and the person who has to know the difference is not us — it is whoever
+flashed it.
+
+### Why this is a different job from §9, and easier
+
+§9 is *replace the boot animation*, a size-budgeted asset problem that starts
+with "we have never looked at where the frames live". This is *add a mark to the
+screen that already draws*, and the difference matters:
+
+- **It composes rather than replaces.** The Elektron logo stays. A stamp beside
+  it needs its own pixels and its own position, not a frame sequence that fits a
+  budget.
+- **It has a known drawing primitive.** `docs/display-path.md` and `emu/panel.py`
+  record that the intro draws through `Bitmap::setPixel`, which the main OS's
+  own UI never calls. A hook there is a hook on a path with one caller family.
+- **It is where our cave already runs.** `docs/code-caves.md`'s only confirmed
+  injection is on the boot path. Whatever this needs, it needs it in the one
+  region where execution is proven rather than assumed.
+- **It is visible without a flash.** `scripts/drive.py` writes the panel out as
+  a PNG, and as of 2026-09-16 the emulator runs DN2 1.11 past the intro into
+  `INITIALIZING +DRIVE...` — so the stamp can be iterated offline and flashed
+  once it looks right.
+
+### The version half is not the same problem as the graphic half
+
+Worth separating, because one is nearly free and the other is not.
+
+**The version text.** The boot screen's bottom-right version and bottom-left
+letter are **composed at runtime**, not drawn from a stored string — so this is
+not a same-length string overwrite. Note the trap already paid for once:
+`'Digitone II'` at `0x4021a2d2` is the **service-serial identity**, reached by
+`#SERIAL`-class commands (`docs/service-commands.md`), *not* the boot screen.
+Changing it changes what the service report says and nothing a booting user
+sees. Find the composer, not a string.
+
+**Where the mod identity should come from.** The ELE3 container already carries
+a build stamp — section id 5 is 15 raw ASCII bytes with no header
+(`docs/emulator.md`), and the header itself holds a build string at `+0x08` and
+a version at `+0x13` (`docs/ele3-format.md`). **The honest design reads the mod
+identity out of the image rather than hard-coding it in the cave**, so a rebuilt
+image cannot disagree with what it prints. That also makes the stamp mean
+something for §11: two mods in one image should produce one stamp that names
+both, which is a manifest question before it is a drawing question.
+
+**The graphic.** Unknown size, unknown format, and it competes for space with
+everything in §1 and §6. A 16×16 monochrome mark is 32 bytes and fits anywhere;
+anything larger needs the budget measured first.
+
+### The first question, and it is cheap
+
+**What draws the bottom-right version string, and does it leave room beside the
+logo?** Hook `setPixel` during the intro under the emulator, record every call
+with its coordinates, and the answer is a picture: which regions are drawn by
+what, in what order, and where the free space is. That is the same
+watch-don't-scan move that §2.1b of `docs/FEATURE-PLAYBOOK.md` records as the
+thing that works, and it answers the layout question and the composer question
+in one run.
+
+### What must not happen
+
+The stamp is for the owner and for whoever is running a modified image. It must
+not imply Elektron authorship or endorsement, and it must not pretend to be a
+stock version string — the point is to make the difference **visible**, which is
+the opposite of blending in.
+
+**Queued, not started.** The order the owner set on 2026-09-16 is LFO4 first,
+then the boot screen, and this entry is the boot screen's user-facing half.
