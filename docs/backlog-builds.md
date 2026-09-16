@@ -77,7 +77,7 @@ digikit supports best, so trace it there first and carry the structure across.~~
 anything that must *ship* data needs either a grown section 3 or a new section.
 
 **Narrowed 2026-09-17 by reading the boot clear.** BSS starts at `0x402fc000`,
-which is **63,488 bytes below the loaded image's own end** — the `.data`
+which is **63,872 bytes below the loaded image's own end** (first written as 63,488 — an arithmetic slip, corrected) — the `.data`
 initialiser tail is consumed and then wiped. So simply appending to section 3
 buys nothing, and raising the clear's start immediate would leave real globals
 uninitialised. **The build that would settle all three:** append past the

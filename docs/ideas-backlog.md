@@ -211,9 +211,14 @@ and immediately before it, the `.data` initialiser loop:
 0x400004a6  cmpa.l #0x80010000,%a0        | then clears SDRAM 0x80000000..
 ```
 
-MAIN OS loads at `0x40000400` and is 3,192,192 bytes, so it ends at
-`0x4030b800`, and the initialiser runs to `0x4030b980`. **The BSS clear starts at
-`0x402fc000` — 63,488 bytes *below* the image's own end.** That is what
+~~MAIN OS loads at `0x40000400` and is 3,192,192 bytes, so it ends at
+`0x4030b800`, and the initialiser runs to `0x4030b980`. The BSS clear starts at
+`0x402fc000` — 63,488 bytes below the image's own end.~~
+
+**[CORRECTED 2026-09-17, same day]** `0x40000400 + 3,192,192` is **`0x4030b980`**,
+not `0x4030b800` — an arithmetic slip. So MAIN OS ends **exactly** where the
+second initialiser stops reading, and the BSS clear starts **63,872 bytes** below
+the image's end. The conclusion is unchanged; the numbers were wrong. That is what
 `docs/memory-map.md` means by "recycles the initializer tail": the last ~62 KB of
 the loaded image is the `.data` initialiser, consumed once and then handed to BSS
 and wiped.
