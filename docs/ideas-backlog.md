@@ -1564,6 +1564,49 @@ imply Elektron authorship. Removing their mark is the strongest possible form of
 not claiming it — the boot screen stops carrying a manufacturer's brand rather
 than carrying one over modified code.
 
+#### The owner's concept art — 2026-09-16
+
+![The mod logo concept: a creature assembled from instrument parts](img/mod-logo-concept.png)
+
+Registered as **the reference for this entry**. It is 1024x512, 1-bit in
+appearance, and reads left to right as: a **trumpet** bell and valve cluster at
+the front, a small **synth/robot head** above, a **drum or cymbal** as the rear
+body, and a **guitar neck** for a tail, standing on four thin legs.
+
+**It answers the geometry question below by demonstration rather than argument.**
+The bands run **horizontally** -- trumpet, torso, drum, tail -- and the figure is
+**exactly 2:1**, which is a wordmark's proportion, not a stacked creature's. The
+reasoning in the next section was written before this arrived and the drawing
+independently arrives at the same layout.
+
+It also fixes the visual language: **pure 1-bit, no dither, outline-led**, which
+is what the panel is (`emu/panel.py`: 128x64 mono). So the medium is already
+right; nothing has to be adapted from a greyscale or colour original.
+
+**It is concept art, not the asset, and the difference is the whole practical
+problem.** At 1024x512 the outlines are one pixel wide. Mapped into the panel
+they would be:
+
+| target box | scale | what happens to a 1px outline |
+|---|---|---|
+| 128x64 (full screen) | 1/8 | sub-pixel -- the figure must be redrawn, not scaled |
+| 96x48 | 1/10.7 | worse |
+| 64x32 | 1/16 | far worse |
+
+**Downscaling this file will produce mush at every one of those sizes.** The
+figure has to be **redrawn pixel by pixel at the target box**, using the concept
+for its silhouette vocabulary and part order, not its line work. That is a
+drawing job measured in hours, and it is the honest cost of this entry -- the
+`setPixel` trace only says how many pixels there are to draw into.
+
+**What the redraw has to preserve**, in priority order:
+
+1. the **part order** left to right, because that is the encoding;
+2. each part being **recognisable as a different instrument** at the target size,
+   which is the constraint that will force parts to be dropped or simplified;
+3. the four legs and the head, which are what make it read as a creature rather
+   than a pile of objects.
+
 #### The geometry problem this creates, which is real
 
 **The Elektron logo is a wordmark: wide and short. A flip-flap creature is tall.**
