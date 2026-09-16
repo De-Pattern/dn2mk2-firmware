@@ -1368,6 +1368,45 @@ PNG from the emulator, so an animation can be iterated offline and only flashed
 once it looks right — instead of the flash-and-photograph loop that every
 earlier experiment paid for.
 
+### BUILT 2026-09-17: the intro is a tunnel, and re-scaling it is a new animation
+
+**What the start-up animation is**, read in Ghidra from `FUN_400d3606` — which
+decompiled cleanly, unlike the menu dispatcher. For every panel pixel, centred
+and normalised to about -1..1 with a centre jittered by `rand() % 12` once per
+build (`0x40150670` is plain C `rand()`):
+
+    r = sqrt(u*u + v*v)        theta = atan2(v, u)
+    source = ( cos(theta) / r * 128  & 127,   sin(theta) / r * 64  & 63 )
+
+A **1/r polar tunnel with the logo as its wall texture**. A write-watch
+(`scripts/probe_intro_motion.py`) split the animation into its two phases: the
+table is built once — its writers are `0x400d376c` and `0x400d3796`, its hash
+freezes when done — and then a scroll value climbs about 8 per 2M instructions
+(written at `0x400d3a2a`), flying through the tunnel. A final pass resolves to the
+plain logo, which is why the stamp in §13 settles cleanly.
+
+**So a custom animation is data, not code.** The texture's scale is two float
+immediates:
+
+    0x400d374e  move.l #128.0,-(sp)
+    0x400d377e  move.l #64.0,(sp)
+
+`scripts/build_intro_tunnel.py --x-scale 512 --y-scale 256` ->
+`00_Resources/02_Builds/intro-tunnel_DN2_1.11.syx`: **two bytes**, one in each
+float's exponent, tiling the logo four times as densely around the wall. The
+coordinate masks are untouched, so no value can read off the bitmap, and the
+final resolve is untouched. 21 integrity checks pass, HMAC reproduced.
+
+**Not yet seen running.** The table is built once, and at the 400M snapshot it is
+already about 57% written, so patching there would show a half-stock tunnel. A
+380M snapshot from before the generator runs is being built to film stock
+against modified.
+
+**Where this goes next**, all in the same function and all cheap to try: the
+random jitter (`% 12`), the `1/r` (swap it for `r` and the tunnel becomes a
+zoom-out), `cos`/`sin` swapped (a quarter-turn), or a different texture — which
+is the source bitmap §13 already writes into.
+
 ### What is not known yet
 
 - **Where the frames live, and in what form.** Nothing has looked. The
