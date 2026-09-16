@@ -1329,6 +1329,67 @@ that the *stated* reasoning did not exclude it; it took a separate fact from
 second invisible one, and "v4 used LFO3's descriptor" was doing exactly that
 until the descriptor's size was checked.
 
+### 5i-g. The FADE encoding hypothesis: narrowed, not settled — 2026-09-16
+
+**DNX's proposal**, from measuring 53,248 sound records: the squared view goes to
+parameters that are **bipolar but not fine-resolution**, and `FADE` is the only
+one on the LFO page with that combination. If widgets key on value encoding
+rather than id, there is no predicate naming 77/87/97 to find — which is what
+four failed scans look like.
+
+#### The parameter record carries exactly that, and it is a new field
+
+Reading the record against known ids (values are **x256 fixed point**):
+
+| id | | `+0x0c` max | `+0x10` default | **`+0x14` fine** |
+|---|---|---|---|---|
+| 95 | SPD | 127.99 | 112 | **1** |
+| 96 | MULT | 23 | 3 | 0 |
+| 97 | **FADE** | 127 | **64** | **0** |
+| 99 | WAVE | 6 | 0 | 0 |
+| 103 | DEP | 127.99 | **64** | **1** |
+
+**`+0x14` is the fine-resolution flag**, not previously named in this repository.
+These reproduce DNX's corpus measurements exactly — SPD rests at 112 and carries
+fine; FADE rests at 64 and does not; DEP rests at 64 and does. **Two methods on
+one object that could have disagreed**, which is corroboration in the sense
+`docs/lfo4-slot-plan.md` now defines.
+
+Selecting on `default == 64 && fine == 0` across the table gives **29
+parameters**, of which exactly three are the LFO pages' `FADE`.
+
+#### The test, and why it is not decisive
+
+`PAN` (id 71, Amp page, bipolar non-fine) draws a **bowtie with a centred `×`** —
+emphatically not a plain rotary. Within the LFO page the complement also holds:
+`DEP` is bipolar **and fine** and draws a round knob; `SPD` is unipolar and fine
+and draws a round knob.
+
+So **fine-resolution parameters get knobs**, and this bipolar non-fine one does
+not. Directionally consistent.
+
+**But it is a different glyph.** `FADE` draws a rectangle with `×` and a dotted
+baseline; `PAN` draws a bowtie. So the test shows "bipolar non-fine gets *a*
+specialised bipolar widget", not "gets *the* squared view".
+
+#### And v5 falsifies the strong form outright
+
+LFO4's `FADE` is a **clone** of LFO3's, so it carries `default == 64` and
+`fine == 0` identically. **It drew plain anyway.** If the encoding alone selected
+the widget, cloning would have preserved it.
+
+**Therefore the encoding is at most necessary, not sufficient** — something else
+gates it, and that gate is what still has to be found. The hypothesis is not
+dead: it explains why no predicate names 77/87/97, and it may well be the
+*first* half of a two-part test whose second half is an id or page check.
+
+#### One observation worth keeping for §13.1 and the widget work
+
+The Amp page draws `ATK`/`DEC`/`SUS`/`REL` as a **single envelope curve spanning
+four columns**, exactly as the LFO page draws `WAVE`/`SPH` as one sine across
+two. So multi-column composite widgets are a general mechanism here, not an LFO
+peculiarity.
+
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
