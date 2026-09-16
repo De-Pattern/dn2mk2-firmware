@@ -216,21 +216,36 @@ only `PATTERN` and `PRESETS` as receive targets.
 **Transfer (§6.8).** File-level copying of **projects, presets and samples** off
 the +Drive. It moves the same objects, as files.
 
-**What has no route out, by chapter:**
+**[CORRECTED the same day, by the owner]** An earlier version of this section
+listed MIDI CONFIG, AUDIO ROUTING, PERSONALIZE and SYSTEM as a table of things
+with "no route out". **That table was an assumption, not a reading**, and the
+owner corrected it: *"There are also a lot of routing and settings that do live
+in a project."*
 
-| chapter | menu | exported? |
-|---|---|---|
-| 13.4 | MIDI CONFIG — sync, port config, channels | **no** |
-| 13.6 | AUDIO ROUTING — to main, to send FX, USB in/out, fader | **no** |
-| 13.7 | PERSONALIZE — LED intensity, backlight, subpage memory, key modes | **no** |
-| 13.8 | SYSTEM | **no** |
+The manual backs the correction and does not resolve it. §4 says *"A project
+contains 128 patterns. The project also stores general settings and states"* —
+and never enumerates which. §13.5.1 says `PROJECT` sends *"settings, patterns,
+presets in the pool"*. So an unknown share of chapter 13 **is** carried by a
+project SysEx dump, and the set with genuinely no backup route is **narrower
+than the chapter list and its membership is not established**.
 
-So the owner's statement — *"general settings live in the machine"* — is what the
-manual documents, and §4's finding is confirmed from the vendor's own side
-rather than only from the firmware: **there is no supported way to back up the
-Digitone II's machine settings.** A device that is reset, serviced or replaced
-loses them, and the only recovery is re-entering them by hand.
+What survives from the reading, and it is still the point:
 
-That is the gap a mod could close, and it is worth a backlog entry in its own
-right — the settings store is a machine-level blob, so a SysEx dump/restore for
-it would be additive and would not touch any persisted project format.
+- The **only** two SysEx send targets are `PROJECT` and `PATTERN`; the receive
+  side documents only `PATTERN` and `PRESETS`. Transfer moves projects, presets
+  and samples as files. There is **no "settings" object** in any of those routes.
+- Therefore anything genuinely machine-level — whatever that set turns out to be
+  — has no backup route, because no route carries a settings object at all. The
+  owner's *"general settings live in the machine"* still stands for that residue.
+
+**The experiment that settles membership, and it is cheap.** Dump a project over
+SysEx, change one chapter-13 setting on the instrument, dump the same project
+again, and diff. A setting that moves the bytes is project-scoped and already
+backed up; one that does not is machine-level and is the real gap. Running that
+once per menu page produces the membership list the manual withholds. **This is
+DNX's instrument, not this repository's** — it is a data capture, and
+`docs/PRINCIPLES.md`'s rule sends it there.
+
+Until that runs, this section claims only the negative it measured: **no backup
+route carries a settings object,** and which settings ride along inside a project
+is open.
