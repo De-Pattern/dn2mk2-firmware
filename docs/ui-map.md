@@ -195,3 +195,42 @@ Consequences worth carrying forward:
 
 `docs/ui-map.md` §6's "not explored" list stands, but `SETTINGS` moves out of
 "not yet walked" and into "not walkable under the current emulator".
+
+## 8. The manual, on backing up settings — and it confirms the negative
+
+Checked 2026-09-17 against the **Digitone II User Manual, OS 1.10D** (the owner's
+own copy; not vendored here). Two routes exist and neither carries the machine's
+own settings.
+
+**SysEx dump (§13.5).** Two things can be sent, and the manual names their
+contents exactly:
+
+- `PROJECT` — *"will send the active project (settings, patterns, presets in the
+  pool)"*
+- `PATTERN` — the selected pattern
+
+The word "settings" there is the **project's** settings — chapter 13.1's PROJECT
+menu — not the machine's. The receive side is narrower still: §13.5.2 documents
+only `PATTERN` and `PRESETS` as receive targets.
+
+**Transfer (§6.8).** File-level copying of **projects, presets and samples** off
+the +Drive. It moves the same objects, as files.
+
+**What has no route out, by chapter:**
+
+| chapter | menu | exported? |
+|---|---|---|
+| 13.4 | MIDI CONFIG — sync, port config, channels | **no** |
+| 13.6 | AUDIO ROUTING — to main, to send FX, USB in/out, fader | **no** |
+| 13.7 | PERSONALIZE — LED intensity, backlight, subpage memory, key modes | **no** |
+| 13.8 | SYSTEM | **no** |
+
+So the owner's statement — *"general settings live in the machine"* — is what the
+manual documents, and §4's finding is confirmed from the vendor's own side
+rather than only from the firmware: **there is no supported way to back up the
+Digitone II's machine settings.** A device that is reset, serviced or replaced
+loses them, and the only recovery is re-entering them by hand.
+
+That is the gap a mod could close, and it is worth a backlog entry in its own
+right — the settings store is a machine-level blob, so a SysEx dump/restore for
+it would be additive and would not touch any persisted project format.
