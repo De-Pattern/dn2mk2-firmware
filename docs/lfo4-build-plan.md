@@ -865,12 +865,53 @@ because *there is no bound* — just an array that happens to be three long. The
 device found it in one flash. That is the argument for cheap probe builds over
 exhaustive static reading, and it belongs in `docs/FEATURE-PLAYBOOK.md`.
 
-**Next, and not yet done:** find where those two arrays are built. The enclosing
-function begins at `0x4010d90a` (`lea %sp@(-32),%sp`); `dnfw fn entry` attributes
-`0x4010d980` to `0x4010d404`, but it warns that attribution is a guess for a
-vtable-reached method, and a prologue at `0x4010d90a` says it is wrong here.
-Whether the arrays are locals filled by a loop, or arguments the caller builds,
-decides whether the fix is an immediate or a cave.
+### The hunt so far: four hypotheses, all eliminated
+
+Recorded because a closed path is a signal, and because the next person should
+not re-run these.
+
+**1. ~~`sp@(18,%d0:l:4)` is a three-element array of per-LFO pointers.~~ Wrong.**
+Reading the prologue properly — `lea %sp@(-32),%sp` then `moveml` of six
+registers — puts the saved registers at `sp@0..23`, **eight bytes of locals at
+`sp@24..31`**, the return address at `sp@32`. So `sp@(0x18)` is `sp@24`, and the
+two values written there are `17` and `119` (`0x4010d962`, `0x4010d97c`). Those
+are **coordinates**, and `%a0` is used as a scratch integer (`pea %a0@(6)` →
+23), not dereferenced. It is a two-way Y selection, not an LFO array.
+
+**2. ~~An untouched `moveq #2` bound in the view.~~ Not found.** The range
+`0x4010d400`–`0x4010e500` holds seven `moveq #2` sites. `0x4010dbc6` is the one
+v4 already patched; `0x4010d876` pairs with a `moveq #3` but is a mode switch on
+a vtable pointer; `0x4010ddc2`/`0x4010ddc6` set `%d4` to 0–3 from a comparison
+against **63**, a zone classifier. None is an LFO-index bound.
+
+**3. ~~The graph is drawn from the runtime LFO tick state.~~ Wrong.** It would
+have been a satisfying answer — LFO4 has no tick state, so nothing to draw — but
+the three state bases `0x4463fc18`, `0x4463ed18` and `0x4463f498` are referenced
+**only** from the tick itself (`0x40137342`–`0x4013780e`). The view never reads
+them.
+
+**4. ~~A separate waveform/graph class the view owns three of.~~ No such class.**
+`rttiscan.py` over the whole image finds no `Wave`, `Graph`, `Curve`, `Shape` or
+`Plot` type other than `SampleWaveformsFactory`, which is for sample display.
+The graph is drawn inline by `LfoPageView`.
+
+### What is established, and the next instrument
+
+The LFO index lives at `this+0x90` and the view's ten uses of it are all
+**reads** — `movel`/`moveal`/`pea` of `%a2@(144)`. **Nothing in the view's code
+range writes it**, so the page-change handler that sets it is elsewhere, and
+whatever bounds *that* is the likeliest owner of the blank graph.
+
+**The next move is a write watch on `this+0x90` under the emulator**, which is
+the same technique that settled the descriptor-id question in one run
+(§"ANSWERED 2026-09-16 by a write watch"). `LfoPageView` is a 432-byte
+allocation (`pea 0x1b0` at `0x4019fac0`) built at a single site, so its address
+is recoverable at runtime; watching `+0x90` reports the writer's PC directly
+instead of another round of pattern-matching.
+
+**This does not block LFO4.** The graph is cosmetic, every functional
+observation passed, and v5 — the 38th descriptor and LFO4's own records — does
+not depend on it.
 
 ## 6. The build, in order
 
