@@ -567,3 +567,37 @@ and it benefits digikit as much as us.
 questions on our build and has done. It cannot yet answer *UI* questions,
 because the UI hook points are unresolved — and that is a signature-porting job,
 not a limitation of the emulator.
+
+### Driving the UI: what works now, and the three ports still needed
+
+Attempted 2026-09-16, because the owner asked for screenshots of any page being
+worked on. **No screenshot yet.** What was established:
+
+**Working on DN2 1.11:**
+
+- **`tools/panelsweep.py` — the whole panel is mapped.** 192 s, all 56
+  `(channel, bit)` groups in channels 0–6 report `code = channel*8 + bit + 1`,
+  and the nine encoders `code = channel + 1` — identical to 1.10E. One anomaly,
+  code `0x00` shared by `(6,2)` and `(6,3)`, matching the non-linear channel 6
+  the device file already documents.
+- **The device file.** `tools/guirun.py` refused the firmware with *"No device
+  file matches"* until `devices/digitone-ii.toml` gained a 1.11 entry. That
+  refusal is correct behaviour — it would otherwise run this image under another
+  product's panel. Added and sent to digikit as branch `devices/dn2-1.11`.
+
+**Still to port from Digitakt II 1.15C, and each is the same shape as the
+`mainloop` byte:**
+
+| what | symptom on 1.11 |
+|---|---|
+| six UI symbols — `ui_key_dispatch`, `view_activate`, `view_close`, `view_offer`, `view_request_pop`, `view_sweep` | reported unresolved at startup; no UI tracing |
+| the `--weakptr` patch | `RuntimeError: weakptr: 0x40188b40 holds 4878, expected 6714` — a hardcoded address and value |
+| whatever else the terminal loop needs | without `--weakptr`, a resumed run reaches `TERMINAL LOOP` at ~63 M with `tasks=0` |
+
+**So the position is:** the emulator answers **memory** questions on our build
+today, and has — `bootwatch` settled the descriptor-id writer, and `bootcheck`
+reports `MAIN_OS_RUNNING`. It cannot yet **drive the panel and draw a page**,
+and that is three small ports away, not a limitation of the tool.
+
+Worth doing: it is the difference between guessing at widget selection and
+watching it.
