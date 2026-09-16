@@ -49,6 +49,9 @@ def main() -> int:
                     "changed MAIN OS bytes into memory after the snapshot is restored")
     ap.add_argument("--dump", action="append", default=[], metavar="BITMAP=FILE",
                     help="after the run, write this Bitmap as a PGM (repeatable)")
+    ap.add_argument("--film", metavar="BITMAP=PREFIX",
+                    help="after every slice, write this Bitmap as PREFIX_<M>M.pgm -- a "
+                    "filmstrip of the animation, one frame per slice")
     args = ap.parse_args()
 
     digikit = os.environ.get("DIGIKIT")
@@ -109,6 +112,9 @@ def main() -> int:
         step = min(args.slice, args.instrs - now["n"])
         pc, done, stop = spin(m, pc, step)
         now["n"] += done
+        if args.film:
+            addr, prefix = args.film.split("=", 1)
+            dump_bitmap(m, int(addr, 0), f"{prefix}_{now['n'] // 1_000_000:04d}M.pgm")
         px = sum(c["set"] for c in callers.values())
         print(f"  {now['n']/1e6:7.0f}M  pixels {px:>10,}  callers {len(callers):>3}  "
               f"pends satisfied {ev.get('satisfied', 0):>5}  "
