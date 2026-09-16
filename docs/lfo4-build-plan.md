@@ -6,8 +6,8 @@ instruction to crack five named pieces. It supersedes nothing; it collects what
 `lfo4-feasibility.md`, `lfo4-slot-plan.md` and `modulation-matrix.md` establish
 and adds what was read today.
 
-**Read the honesty note in §7 before pricing anything from this.** Four of the
-five pieces are designed to the instruction; the fifth is not finished.
+**Read the honesty note in §7 before pricing anything from this.** All five
+pieces are designed; one sub-part, `[MOD]` navigation, is not located.
 
 ## 0. The design decision, made
 
@@ -302,33 +302,67 @@ function `0x400dd1ea` is the **v3** track converter (`%a3@(4) == 3`); `0x400ddc5
 is the v4 container gate (magic `0xBACEF00C` at `+10411`), 16 tracks, stored
 stride 359, live stride 1,163.
 
-## 5. The page view — **one good finding, not a design**
+## 5. The page view — **designed**; `[MOD]` navigation is not
 
 `LfoPageView` is real and RTTI names it: typeinfo `0x402054a8`, primary vtable
 `0x40205614`, constructor `0x4010e322`, called from exactly one site
 (`0x4019fb0c`) which builds **one** instance behind a reference-counted handle.
 
-**There is one `LfoPageView`, not three.** So a fourth LFO page needs **no new
-view class** — the existing view already serves all three LFO pages and must
-take the LFO index from context.
+**There is one `LfoPageView`, not three.** A fourth LFO page needs **no new view
+class**. The single view serves all three pages, and columns resolve through the
+vtable at `+0xBC`, `getColumnParameter`.
 
-**What is missing:** where that index comes from. Two `cmpil #26` sites
-(`0x401783b0`, `0x40178402`) were the obvious candidates and were **checked and
-ruled out** today — they follow `lsrl #8` and are character-range tests in a
-drawing routine, nothing to do with pages.
+### The one site that hardcodes the LFOs
 
-**The lead to follow next.** A byte table at `0x401d35e8` reads
+`LfoPageView`'s `+0xBC` is `0x4010dafc`. It calls the base implementation and
+then special-cases exactly three parameter ids:
 
 ```
-16 17 18 19 1a 1b 1c 1d | 00 01 .. 14 | 1e 1f 20 21 ..
+0x4010db0e  jsr 0x40063f24         ; base: column -> parameter id
+0x4010db18  moveq #81,%d0          ; == 81 ?
+0x4010db1e  moveq #91,%d1          ; == 91 ?
+0x4010db24  moveb #101,%d0         ; == 101 ?
+0x4010db2a  bnew 0x4010dbda        ;   none -> ordinary column
 ```
 
-— a **page permutation**, pages `0x16`–`0x1d` first, then `0x00`–`0x14`, then
-`0x1e` onward. It is a page *order*, not a page *set*, and **`0x1f` is already
-in it**. Whoever indexes this table is very likely the `[MOD]` navigation order.
-It has not been traced to a consumer, so this is a lead, not a finding.
+Read out of the parameter table at `0x401f7f94`, those three are:
 
----
+| id | page | `+0x04` | names |
+|---|---|---|---|
+| 81 | `0x1a` | 6 | `Start Phase` / `LFO1` / `SPH` |
+| 91 | `0x1b` | 14 | `Start Phase` / `LFO2` / `SPH` |
+| 101 | `0x1c` | 22 | `Start Phase` / `LFO3` / `SPH` |
+
+**`Start Phase`, one per LFO, ten apart.** A scan of the whole image for the
+81/91/101 triple returns **exactly one site** — this one. So the page view's
+whole LFO-specific knowledge is three constants in one function.
+
+### The edit, and the trap in it
+
+Add a fourth comparison for LFO4's own `SPH` record. **It is not 111.** Ten
+apart would suggest it, and id 111 is `Chorus Mix Vol.` on page `0x10` —
+checked, not assumed. LFO4's parameter records are repurposed from the ten dead
+`ERR` slots (`scripts/build_lfo4_test.py`), so the fourth constant is **whatever
+id LFO4's `Start Phase` record actually takes**, and it has to be read off the
+built table rather than predicted.
+
+`0x4010dafc` has no slack for a fourth compare, so this is a **cave**.
+
+### What is still missing: `[MOD]` navigation
+
+How the key advances the current page among `0x1a` → `0x1b` → `0x1c` is **not
+located**, and it is the last unread piece of the whole build.
+
+Three leads closed today, recorded so they are not re-run:
+
+- `0x401783b0` / `0x40178402` (`cmpil #26`) — **ruled out.** They follow
+  `lsrl #8` and are character-range tests in a drawing routine.
+- The byte table at `0x401d35e8` — `16 17 18 19 1a 1b 1c 1d | 00 .. 14 | 1e 1f
+  20 ..` — looked like a page order and **is not navigation**. Its one consumer,
+  `0x4000b884`, copies 64 bytes and uses it as a **format-migration remap** of a
+  page id held at object `+320`, bounded by `moveq #63`.
+- Every longword run of `1a 1b 1c` in the image (13 sites) — **all generic
+  sequential index tables**, `17 18 19 1a 1b 1c 1d 1e 1f`, not page groups.
 
 ## 6. The build, in order
 
@@ -343,9 +377,10 @@ It has not been traced to a consumer, so this is a lead, not a finding.
 7. Parameter records for LFO4's eight parameters (already built).
 8. Serialization: two hooks at `0x400dd276` / `0x400dd718`, plus clearing `ext`
    alongside the 202-byte memset at `0x400dd24a`.
-9. Page view + `[MOD]` navigation — **after §5 is read**.
+9. Page view: cave on `0x4010dafc` adding LFO4's `Start Phase` id.
+10. `[MOD]` navigation — **the one piece still unread**.
 
-Steps 1–8 are specified to the byte or to a named cave. **9 is not.**
+Steps 1–9 are specified to the byte or to a named cave. **10 is not.**
 
 ---
 
@@ -357,9 +392,9 @@ Steps 1–8 are specified to the byte or to a named cave. **9 is not.**
 | 2 | tick edit | **designed** — both loops decoded, four edits named, state relocation forced and sized |
 | 1 | slot space | **designed** — route chosen, bound found to be a `moveq`, extension array unchanged from the slot plan, 11 hooks listed |
 | 3 | serialization | **designed** — both halves read; the stored block at `+28` is indexed by p-lock id, 107 wide, and the maps are the only translation. No format version bump. Three hooks named. Serialize-side loop bound unchecked |
-| 4 | page view | **one finding** — a single shared `LfoPageView`, so no fourth class is needed; the page→LFO mapping and `[MOD]` navigation are unlocated |
+| 4 | page view | **designed** — one shared `LfoPageView`, so no fourth class. Its entire LFO knowledge is three `Start Phase` ids (81/91/101) in one function, `0x4010dafc`; add a fourth in a cave. **`[MOD]` navigation is still unlocated** — three leads closed, none of them it |
 
-**Nothing here has been built, and nothing has been flashed.** Four of the five
-are specified to the point where code can be written against them. The fifth is
-not, and saying otherwise would repeat the mistake that cost three flashes: a
-cost model published ahead of the reading that supports it.
+**Nothing here has been built, and nothing has been flashed.** All five are
+specified to the point where code can be written against them. `[MOD]`
+navigation is not, and saying otherwise would repeat the mistake that cost three
+flashes: a cost model published ahead of the reading that supports it.
