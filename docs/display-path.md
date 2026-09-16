@@ -1123,13 +1123,29 @@ not have.
 
 ## Finding the Digitone's `setPixel` — still open, with the route
 
-`emu/frame.py`'s `SET_PIXEL = 0x40104eb4` is a **Digitakt II 1.15C** address. Run
+~~`emu/frame.py`'s `SET_PIXEL = 0x40104eb4` is a **Digitakt II 1.15C** address. Run
 against DN2 1.11 it hooks nothing, which is why a capture from the 60M snapshot
 reported `setPixel calls: 0` alongside `pends satisfied: 0` — two independent
-failures that look like one.
+failures that look like one.~~
+
+**[WRONG — corrected 2026-09-17, same day]** That constant is dead code.
+`longrun.build(bitmap=True)` hooks `profile.set_pixel`, and the profile comes from
+`symbols.resolve()` over the image actually loaded — a 64-byte signature that
+picks the right one of a near-identical pair `0x66` bytes apart:
+
+| image | `setPixel` | its twin |
+|---|---|---|
+| Digitone II 1.11 | **`0x40113b90`** | `0x40113bf6` |
+| Digitakt II 1.15C | `0x40104eb4` | `0x40104f1a` |
+
+So the hook *was* on the Digitone's routine, and `setPixel calls: 0` is a true
+reading: **the draw task never ran**, because `pends satisfied: 0` — the unblock
+policy did not release it from the 60M rung. One failure, not two. The error was
+reading a module constant and not the call that uses it — the same mistake as
+reading `usable_rung()`'s docstring instead of calling it.
 
 DN2 1.11 has no `setPixel` string: it is a non-virtual method, so nothing in the
-RTTI names it. What the image does carry is mangled **fragments** of functions
+RTTI names it — which is why digikit finds it by signature instead, above. What the image does carry is mangled **fragments** of functions
 taking a `Bitmap` — `6BitmapiibE` at `0x401f1b6f` is `(Bitmap&, int, int, bool)`,
 which is the signature — so the symbol survives inside longer template manglings
 even though the method itself is anonymous.
