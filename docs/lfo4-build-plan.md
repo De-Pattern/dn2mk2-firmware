@@ -348,21 +348,33 @@ built table rather than predicted.
 
 `0x4010dafc` has no slack for a fourth compare, so this is a **cave**.
 
-### What is still missing: `[MOD]` navigation
+### `[MOD]` navigation — no handler found, and there is a reason for that
 
-How the key advances the current page among `0x1a` → `0x1b` → `0x1c` is **not
-located**, and it is the last unread piece of the whole build.
+The key handler that advances `0x1a` → `0x1b` → `0x1c` was **not located**. But
+the search that failed to find it is itself informative, so it is recorded
+rather than left as a blank.
 
-Three leads closed today, recorded so they are not re-run:
+**There is no page-group table in the image.** Three shapes were searched for a
+list of group-start pages (`0x10`, `0x16`, `0x1a`, `0x1d`) — as bytes, as words
+and as longwords, with slack between them — and all three returned **zero**
+hits. Every longword run of `1a 1b 1c` (13 of them) is a generic sequential
+index table. The byte table at `0x401d35e8` is a format-migration remap.
 
-- `0x401783b0` / `0x40178402` (`cmpil #26`) — **ruled out.** They follow
-  `lsrl #8` and are character-range tests in a drawing routine.
-- The byte table at `0x401d35e8` — `16 17 18 19 1a 1b 1c 1d | 00 .. 14 | 1e 1f
-  20 ..` — looked like a page order and **is not navigation**. Its one consumer,
-  `0x4000b884`, copies 64 bytes and uses it as a **format-migration remap** of a
-  page id held at object `+320`, bounded by `moveq #63`.
-- Every longword run of `1a 1b 1c` in the image (13 sites) — **all generic
-  sequential index tables**, `17 18 19 1a 1b 1c 1d 1e 1f`, not page groups.
+**Group membership is expressed as range predicates, not as data.** The
+predicate family in `0x400dbdea`–`0x400dbfcc` is exactly a set of page groups:
+`<= 4`, `0x05`–`0x0a`, `0x10`–`0x15`, `0x16`–`0x1c`, `0x1d`/`0x16`, and the LFO
+range `0x1a`–`0x1c`. There is nowhere else for a group to be defined.
+
+**So the working hypothesis is that `[MOD]` navigation costs nothing extra**
+under the `0x1d` design of §5b: if the group is the range test, widening the
+range widens the group. **This is a hypothesis, not a finding.** It has one
+clean falsifier — flash the §5b edits and press `[MOD]` four times — and if it
+is wrong the symptom is a page that cannot be reached, not a broken instrument.
+
+One more thing worth knowing before that build: `0x4012a836`, the out-of-line
+`is_lfo_page`, has **zero callers and zero data references**. It is a compiler
+artifact; every real use is inlined (`0x4012af7e`, `0x4012af9c`). Editing it
+changes nothing, and a cave there would never run — `dnfw fn` says so plainly.
 
 ## 5b. The page number: `0x1f` is the expensive choice, `0x1d` is the cheap one
 
@@ -446,9 +458,11 @@ site is still missing is the one already seen, not a brick.
 8. Serialization: two hooks at `0x400dd276` / `0x400dd718`, plus clearing `ext`
    alongside the 202-byte memset at `0x400dd24a`.
 9. Page view: cave on `0x4010dafc` adding LFO4's `Start Phase` id.
-10. `[MOD]` navigation — **the one piece still unread**.
+10. `[MOD]` navigation — **expected to come free with §5b**; verify by pressing
+    `[MOD]` four times on the first build that boots.
 
-Steps 1–9 are specified to the byte or to a named cave. **10 is not.**
+Steps 1–9 are specified to the byte or to a named cave. Step 10 is a prediction
+with a one-press test.
 
 ---
 
@@ -460,7 +474,7 @@ Steps 1–9 are specified to the byte or to a named cave. **10 is not.**
 | 2 | tick edit | **designed** — both loops decoded, four edits named, state relocation forced and sized |
 | 1 | slot space | **designed** — route chosen, bound found to be a `moveq`, extension array unchanged from the slot plan, 11 hooks listed |
 | 3 | serialization | **designed** — both halves read; the stored block at `+28` is indexed by p-lock id, 107 wide, and the maps are the only translation. No format version bump. Three hooks named. Serialize-side loop bound unchecked |
-| 4 | page view | **designed** — one shared `LfoPageView`, so no fourth class. Its entire LFO knowledge is three `Start Phase` ids (81/91/101) in one function, `0x4010dafc`; add a fourth in a cave. **`[MOD]` navigation is still unlocated** — three leads closed, none of them it |
+| 4 | page view | **designed** — one shared `LfoPageView`, no fourth class; its entire LFO knowledge is three `Start Phase` ids in one function. **`[MOD]` navigation: no handler found, but no page-group table exists either** — groups are range predicates, so §5b's contiguous design probably carries navigation with it. Hypothesis, with a one-press falsifier |
 
 **Nothing here has been built, and nothing has been flashed.** All five are
 specified to the point where code can be written against them. `[MOD]`
