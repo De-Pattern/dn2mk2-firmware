@@ -1196,3 +1196,55 @@ That is the form LFO4 needs, and it is already proven to compile and run here.
    cascades (`0x40064e90`/`0x40064f14`, and the `0x40067xxx` cluster) have the
    same shape is not checked.
 3. Whether slot `+0x50` (the accessor) needs the same treatment.
+
+## The complete page map, and the arpeggiator is not in it — 2026-09-16
+
+Dumped from the 321-record table at `0x401f7f94`, every page with its label and
+short names. Written down because two questions turned on it the same day and
+both were being answered by guesswork.
+
+| page | label | n | parameters |
+|---|---|---|---|
+| `0x00`–`0x03` | `SYN` | 38/25/30/8 | the four machine pages |
+| `0x05`–`0x0a` | `Filter` | 3/2/3/3/3/3 | per filter type |
+| `0x0b` | `Amp` | 11 | `DEL ATK HOLD DEC SUS REL BAL PAN VOL MODE RSET` |
+| `0x0d` | `Filter` | 11 | the filter envelope |
+| `0x0e` | `Portamento` | 2 | `PTIM PORT` |
+| `0x0f` | `FX` | 8 | `CHR DEL REV BR SRR SR.RT OVER OD.RT` |
+| `0x10`–`0x12` | `Chorus`/`Reverb`/`Delay` | 8/9/10 | |
+| `0x13`–`0x14` | `Master` | 2/9 | |
+| `0x15` | `Ext-in` | 17 | |
+| `0x16` | *(none)* | 4 | `NOTE NOT2 NOT3 NOT4` |
+| `0x17` | `Src` | 8 | `CHAN BANK PROG PB AT MW BC SBNK` |
+| `0x18` | `CC` | 16 | `VAL1`–`VAL16` |
+| `0x19` | *(none)* | 16 | `SEL1`–`SEL16` |
+| `0x1a`/`0x1b`/`0x1c` | `LFO1`/`LFO2`/`LFO3` | 10 each | `SPD MULT FADE DEST WAVE SLEW SPH MODE DEP MULT` |
+| `0x1d` | *(none)* / `Retrig` / `Euclidean` | 10/4/8 | the TRIG group |
+| `0x1e` | *(none)* | 1 | `---` |
+| `0xffffffff` | *(none)* | 19 | the dead `ERR` slots |
+
+### There is no arpeggiator page, and no arpeggiator record
+
+**Pages `0x00`–`0x1e` are fully accounted for above and none of them is the
+arpeggiator.** A scan of all 321 records for a name containing `Arp` returns
+**nothing**.
+
+That answers the owner's standing request to *"enable p-locking for the
+arpeggiator settings"* at the level of what the job actually is. Arp state is
+**not a parameter** on this instrument: it has no record, so no parameter id, no
+`+0x04` slot index, no entry in the forward map `0x401fcf20`, and therefore no
+p-lock id. It is not that arp locks are disabled — **there is nothing to lock**.
+
+So p-lockable arp is not a flag to flip. It is the full eight-layer job in
+`docs/FEATURE-PLAYBOOK.md` §1, starting at layer 1 with records that do not yet
+exist, and it needs the arp state's real home found first. DNX's arp capture
+(two presets differing only in `MODE`) is the right next measurement precisely
+because it will show **where** that state lives.
+
+### And it bounds the v3 probe's blast radius
+
+DNX asked, before their capture, whether a preset saved under the v3 build could
+place a value at a different stored offset than stock. The page map settles half
+of it: **no arp record is on page `0x1d`**, so nothing v3 renumbers is an arp
+control. The other half is conditional and is answered in
+`docs/lfo4-build-plan.md` §5c.
