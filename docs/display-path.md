@@ -1078,3 +1078,38 @@ was glyph rows, a 32-bit value that was a task control block, a byte that
 incremented per click and was a counter. **A plausible reading is not a
 measurement**, and the cheapest defence is an experiment whose wrong answer
 looks different from its right one.
+
+## The panel clear, and why a cold boot shows nothing — 2026-09-17
+
+`tools/bootwatch.py` was run from reset over DN2 1.11 with a write watch on both
+panel buffers, `0x44622bc8` and `0x44622fc8`, 1,024 bytes each, to 420M
+instructions.
+
+**768 writes, every one of them a zero, every one from the same PC.**
+
+```
+[315750760] fb_front 0x44622fc4 size 4 value 0x0 pc 0x40114e7c
+```
+
+So `0x40114e7c` is the **panel clear** — a longword loop over the buffer — and
+both buffers read all-zero at the end of the run. Nothing drew.
+
+**That is not a bug, and `emu/frame.py` already says why:** every task but the
+idle task blocks in `sem_pend` on a device event that never happens under
+emulation, so the draw task never runs. `frame.py` generalises `dspboot`'s
+single forced semaphore to "any pend whose count is <= 0", and only then does
+`Bitmap::setPixel` execute. That path takes a **snapshot**, which DN2 1.11 did
+not have.
+
+**Consequences worth carrying:**
+
+- A cold-boot write watch cannot answer the boot-draw question. It needs the
+  unblock path, which needs a snapshot ladder — being built now.
+- The same missing snapshot is why a patched DN2 build could not be booted under
+  `guirun.py` earlier today: it resumes, it does not cold-boot. And a snapshot
+  carries its own copy of MAIN OS, which is what `--weakptr` exists to patch
+  around — so a snapshot built from stock cannot test a modified image without
+  care.
+- `0x40114e7c` is now a named routine. It is also the cheapest possible probe
+  for "did the panel get cleared", which is a different question from "did
+  anything draw".
