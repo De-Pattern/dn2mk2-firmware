@@ -645,3 +645,48 @@ DIAGNOSTIC, not a fix"* that papers over condition-code corruption.
 **Worth sending back:** the address should be a signature. digikit already has
 the `Sig` machinery, the shape is distinctive, and every other build will hit
 this same wall.
+
+### Port 3: there was no terminal loop — 2026-09-16
+
+**The Digitone II boots fine under the emulator. It always did.** Every run
+ending at ~63M with `TERMINAL LOOP reached`, `tasks=0`, still in the intro, was a
+**false positive that aborted the run**.
+
+`tools/guirun.py` hooks a hardcoded Digitakt II address:
+
+```python
+at(0x4012d2fa, terminal_hit)      # sets state['terminal']
+...
+if state['terminal']:  ...  break  # which ends the run
+```
+
+On DN2 1.11 that address is **ordinary code** — `move.l %d2,-(%sp)` inside a
+routine that runs during normal boot. So the detector fired on a healthy run and
+the run was abandoned, reported in a form that reads exactly like a firmware
+that cannot boot.
+
+**The fix verifies the instruction, not the address.** A terminal spin is a
+`bra.b` to itself, so checking for `60 fe` there is checking for the thing
+itself. DT2 1.15C is unaffected; anything else prints one line and runs on.
+
+With it, the same snapshot runs **600M instructions to the end of its budget**:
+
+```
+end: instrs=600M terminal=False tasks=5 dtim3=804 mainloop=0 jobs=1
+```
+
+and `--png-at` captures **`INITIALIZING +DRIVE...`** with the +Drive logo — past
+the intro, into the real boot sequence.
+
+### And `--weakptr` was never involved
+
+Port 1 made the weakptr sites portable, which was a real fix for digikit. It was
+**not** the fix for this. All four `weak_ptr::lock` instantiations were hooked
+and every one recorded **zero hits** across the whole run — the main task never
+enters that path on this build.
+
+Worth recording as a method note: three sessions were spent treating a
+**measurement artefact** as a firmware fault, because the tool reported it in the
+vocabulary of a firmware fault. `docs/FEATURE-PLAYBOOK.md` §2.1's rule is
+"validate the tool before trusting its output" — this is the same rule one level
+up: **validate the tool's *verdict*, not just its decoding.**
