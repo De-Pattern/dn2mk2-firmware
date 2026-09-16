@@ -577,3 +577,60 @@ that consumer writes the parameter. Hook `param_index_in_page` (`0x400dbcc4`) or
 `param_set_slot_to_id` (`0x400dc02a`) and record the **return address** during an
 edit window versus a quiet window; the caller that appears only while turning is
 the edit path, and it can be read directly.
+
+### A per-track copier at `0x400e11d0` — the first structure with the right shape
+
+**Found 2026-09-16 by taking the Octatrack's technique rather than its
+addresses.** The owner's steer: the Octatrack is a different platform
+generation, but **project and non-volatile state management** may share
+conventions.
+
+`nordseele/octalab-notes` (MIT, docs-only) records that on the Octatrack the
+per-track state lives in a **part**, `part = bank + part*0x18b2 + 0x8ed80`, with
+per-track blocks at fixed strides inside it — `part + 0x8ee9a + track*24` for
+the page-1 parameter block, `part + 0x8f072 + track*30 + n` for LFO `n`'s
+destination. And crucially, the unit **auto-saves the loaded project from RAM
+continuously**, so the RAM image is the authoritative live state.
+
+That is the same architecture the owner describes for the DN2, and it says what
+to look for: **one large project structure with per-track blocks at a fixed
+stride**, not a scattered value.
+
+#### What the function does
+
+```
+0x400e11e4  loop: stride 319 (%d2) and 359 (%d4), bound 5104   -> 5104/319 = 16
+0x400e122c  loop: stride 268,                     bound 4288   -> 4288/268 = 16
+              src %a3 + 5324 + track*268  ->  dst %a2 + 5964 + track*268
+0x400e120e  a 0xa0-byte block, %a3 + 5164 -> %a2 + 5804
+0x400e1250  four 16-bit fields, %a3 + 0x258c.. -> %a2 + 0x280c..
+0x400e1268  a 0x51-entry call, %a3 + 0x2594 -> %a2 + 0x2814
+```
+
+**Two 16-element per-track arrays**, strides **319** and **268**, copied between
+two structures held in `%a2` and `%a3`. That is the shape a project (de)serializer
+has, and it names the per-track geometry directly — which is what LFO4's live
+values must join.
+
+**Not yet confirmed** as the live project image: `%a2`/`%a3` are arguments, and
+nothing here shows which is RAM and which is the stored form, nor whether the
+268-byte block holds parameters. Reading its callers, or hooking it and dumping
+both pointers, settles all three at once.
+
+#### Why the static scans that preceded it failed
+
+Two scans were run for the **clamp** the Octatrack notes describe — the
+validator that bounds every field and thereby maps the structure. Neither
+worked, for the same reason:
+
+- a raw search for `0x000c` matched `lea %sp@(12),%sp`;
+- a search for the brief extension word ending `0x0c` matched
+  `movew %a3@(0x258c),%a2@(0x280c)`, where `280c` is a **d16 displacement**, not
+  an extension word.
+
+**A 16-bit word cannot be told apart from an extension word by its value.** This
+is `docs/mainos-image.md`'s radix warning in a sharper form: the same bytes mean
+different things depending on the instruction that owns them, so any scan over
+raw words needs the opcode decoded, not pattern-matched. The value-array scan
+earlier in this file survived only because it checked the preceding opcode's EA
+field — and even that found a shape rather than an identity.
