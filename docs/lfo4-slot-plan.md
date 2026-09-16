@@ -768,3 +768,61 @@ The sharper form, since "read the docs" plainly is not enough on its own:
 **before searching for a structure, grep this repository for the thing you are
 about to look for.** One `grep -rn 0x8000` across `docs/` would have ended the
 search before it started.
+
+
+---
+
+## [SETTLED 2026-09-16] The free lock lane is padding, not a reserved fourth LFO
+
+**The claim, and where it came from.** DNX described `4*slot + 0` — lock ids 0,
+4, 8, 12, 16, 20, 24, 28, never used by the three LFOs — as "where a fourth
+LFO's parameters were designed to go". This document's own §"The forward and
+inverse maps, dumped" calls the same hole "a real hole", and
+`DNX/docs/dn2-format.md` independently records the sound object's fourth slot of
+each group of eight as unused. **I then wrote that two independent layers both
+reserving a fourth lane was strong corroboration.**
+
+**DNX withdrew it before I acted on it, and was right to.** Alignment predicts
+both observations exactly as well as reservation does: the lock table strides 4
+for 3 LFOs, the sound object strides 8 bytes for 3 two-byte slots — both are the
+next power of two above three. **Two layers rounding three up to four is one
+habit applied twice, not two witnesses.** Their `plockparams.ts` records the
+lane's purpose as UNKNOWN, which is what should have been quoted.
+
+### The test, and it needed no hardware
+
+Read the maps as **u32** (they are not byte-wide — an earlier read here got that
+wrong and produced nonsense):
+
+```
+forward[slot] -> lock id     slots  1..8  -> 1, 5, 9, 13, 17, 21, 25, 29   (4k+1)
+                             slots  9..16 -> 2, 6, 10, 14, 18, 22, 26, 30  (4k+2)
+inverse[lock id] -> slot     lane 1 -> slots 1..8
+                             lane 2 -> slots 9..16
+                             lane 3 -> slots 17..24
+                             lane 0 -> slot 0, every single entry
+```
+
+**Every lane-0 lock id maps to slot 0**, which is the no-lock sentinel
+(`forward[0] = 0`, and slots 65, 100 and 104 — the known gaps — also forward to
+0). Nothing in this firmware addresses that lane.
+
+### What it costs v6
+
+**The lane is free but empty.** It is still the tidiest place to put LFO4's
+slots, because it is contiguous and regular where the cloned `ERR` ids are
+scattered. But **nothing is waiting there**: v6 must write the forward entries,
+the inverse entries, and every consumer itself. There is no half-built path to
+finish.
+
+Priced against the wrong answer, v6 would have looked cheaper than it is.
+
+### And the reason this matters beyond the lane
+
+Two agents compounded an over-claim: DNX asserted intent, this repository
+amplified it into corroboration by adding a second instance of the same habit,
+and neither step was measured. It was caught because DNX withdrew their own
+claim unprompted and named a test that settled it in one read.
+
+**The rule: when a second source appears to confirm a structural inference, check
+whether it is independent evidence or the same convention observed twice.**
