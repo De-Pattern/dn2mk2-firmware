@@ -91,8 +91,8 @@ it settles a question open since the project plan:
 last 32 bytes, keyed from the `"Multiplier"` material.** The plan listed
 "whether the bootloader checks the trailer or only the checksums" as an open
 question; for the *running-OS* upgrade path it is now answered — it checks.
-(The Early Start-up Menu runs the updater, section 4. That is a separate path
-and this says nothing about it.)
+(The Early Start-up Menu runs the **bootstrap, section 2** — not section 4, and
+not this code. That is a separate path; see §6b.)
 
 ## 3. The gate, read on the siblings
 
@@ -263,6 +263,62 @@ the length, `%a2@(8)` is the container, and `%a2@(16)` is the build string.
   the key material `docs/ele3-format.md` §5 says not to patch. Patching it
   would break the very check that lets a rebuild install.
 
+## 6b. The recovery path — partly read, and one claim withdrawn
+
+**[CORRECTED 2026-09-16, same day.]** This document first said the *updater*
+(section 4) is the Early Start-up Menu's code and that reading it closed the
+recovery question. **Section 4 is not the ESM.** The ESM is owned by the
+**bootstrap, section 2** — it holds `STARTUP MENU`, `4 ... OS UPGRADE`,
+`READY TO RECEIVE`, `RECEIVING...`, `BOOTSTRAP UPGRADE`, `UPGRADE FAILED`,
+`LENGTH ERROR` and `UPGRADE ABORTED`. Section 4 holds none of those. So the
+recovery question is **not** closed.
+
+### What section 4 actually is, and what it does establish
+
+A 32 KB service monitor: `#HELLO`, `#STATUS`, `#WRITE`, `START`, `VERSION 1`,
+`PLATFORM`, `PCBA0109%c%d`, `FLASH`, `CLEARING %x`, plus diagnostics
+(`WRONG DEVICE TYPE %02x %04x`, `DRAM INITIALIZATION TIMEOUT`,
+`DATA CORRUPTION AT ADDRESS %08x`). See `docs/service-commands.md`; the standing
+rule against sending `#WRITE`, `#WRITE_SERIAL` and `#MMC_RECONFIGURE` applies.
+
+It carries no version, build, downgrade or "incompatible" string anywhere in the
+section, and no SHA constants and no `"Multiplier"`. Its one container check is
+at `0x80003cf8`:
+
+```
+0x80003d0a  movel #0x00080000,%sp@-   ; nonvolatile offset 0x80000
+0x80003d10  jsr 0x800048aa            ; read 32 bytes from there
+0x80003d1a  movel #'ELE3',%d0
+0x80003d20  cmpl 0x8000b3d4,%d0       ; magic
+0x80003d28  moveq #52,%d0
+0x80003d2a  cmpl 0x8000b3d8,%d0       ; product code == 52 (DN2)
+0x80003d32  moveb #1,%d0              ; valid
+```
+
+**Magic and product code, and nothing else.** This confirms from our own image
+something we had only on lalzart's word: **the staged ELE3 slot begins at
+nonvolatile offset `0x80000`**.
+
+### Why the bootstrap has not been read
+
+Section 2 is **position-independent**: no absolute reference to any of its own
+strings exists at `0x02010000`, `0x80000400` or any other candidate base. Its
+blob also carries a header — `00 00 76 56` (length 30,294) then `0x80010000`,
+`0x80000de8`, `0x02010000`, `0`, `0x10380000` — so the payload's load base is
+not simply the section `dest`. **The base is not established, so the code has
+not been read.** Grep will not settle this one.
+
+Two things bound the worry in the meantime:
+
+- The bootstrap's error vocabulary has **no version or downgrade string**. Weak
+  evidence: digikit showed the DT2 bootstrap's gate is a *silent skip*, not a
+  message.
+- digikit's DT2 bootstrap gate guards **`BOOTSTRAP UPGRADE`** — whether the
+  bootstrap rewrites *itself* — not whether an OS image is accepted. Even if the
+  DN2 has the same thing, it would decline to replace the bootstrap, not refuse
+  the flash. That is the distinction that matters for recovery, and it is
+  **assumed, not verified, for the DN2.**
+
 ## 7. Still open
 
 1. Who calls the UI mapper `0x40109598`, and with what. It is reached
@@ -272,9 +328,10 @@ the length, `%a2@(8)` is the container, and `%a2@(16)` is the build string.
 2. Codes **2** and **5** are unreachable from `0x400dbc4c` too. Something else
    must produce `Missing data!` and the power-adapter refusal, or they are
    dead on this build as well. Worth one pass, cheap.
-3. The updater (section 4, 32 KB, raw) is a **separate** path used by the Early
-   Start-up Menu and has not been read at all. If a gate exists for recovery
-   flashing, that is where it would be.
+3. **The bootstrap (section 2) — the Early Start-up Menu's actual code.** Find
+   its load base first; §6b says why grep cannot. Then answer the one question
+   that matters for recovery: does its OS-flash path check anything beyond
+   length, or is `LENGTH ERROR` the whole of it?
 4. DN1's variant flag — bit 19 of `0x402292f0` — is assumed to be Digitone vs
    Digitone Keys and was not verified.
 
