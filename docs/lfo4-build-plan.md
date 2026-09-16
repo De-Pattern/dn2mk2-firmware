@@ -1470,6 +1470,60 @@ cheap and available. Here it was already on disk.
 **The rule: when a capture supports a hypothesis, look at the rest of that same
 capture before writing it up.**
 
+### 5i-j. [OWNER, and it closes the whole line] Glyphs are designed, not derived
+
+**From the owner, 2026-09-16:** *"Glyphs are not tied to the parameter bipolar
+character or any other character, they are designed elements to improve UX. For
+instance, the bowtie: when you move the knob it gets the side you move it
+towards filled and the centre vertical line moves with it. And has nothing to do
+with how fade is visualised."*
+
+**So a widget is assigned to a parameter, not computed from it.** The bowtie is
+an animated pan indicator with its own behaviour; `FADE`'s box-and-dotted-line
+draws a fade envelope about a centre; they are different designs for different
+controls and share nothing but a passing resemblance in a 1-bpp screenshot.
+
+#### What this retires
+
+Everything in §5i-g and §5i-h that tried to *derive* the widget from the record
+is closed, not merely falsified by `ENV`. There was never a property to
+correlate: three parameters sharing an encoding and drawing three different
+glyphs is the **expected** result of design, not an anomaly needing a second
+gate. §5i-g's "necessary but not sufficient" and §5i-h's "tighter fit" were both
+looking for a rule that does not exist.
+
+**And it explains the two mechanisms that were found.** Both are explicit id
+sets, which is exactly what assignment looks like in code:
+
+- the `1 << (id - 79) & 0x501405` mask, naming `WAVE` and `SPH` for three LFOs;
+- the three index arms, each naming five ids outright.
+
+Neither derives anything. Each is a **list of which parameters get which
+drawing**.
+
+#### What it means for LFO4, and it is the practical half
+
+**There is no shortcut.** Every specialised widget LFO4 wants must be assigned to
+LFO4's ids explicitly, one site at a time. A clone inherits nothing, because the
+assignment lives outside the record — which is exactly what v5 demonstrated and
+what §5i concluded before this detour began.
+
+The remaining target is unchanged and now better motivated: the **20-byte
+per-column descriptor** at `view+0x94 + 20 + col*20`, whose byte `+0` looks like
+a kind selector. Something writes that byte per column; the constructors found
+so far only zero the block. **That writer is the assignment table**, and finding
+it should hand over every widget binding at once rather than one predicate at a
+time.
+
+#### Method note
+
+`docs/FEATURE-PLAYBOOK.md` §2.3 says a measurement that contradicts what the
+owner knows about their instrument should make you suspect the reader. This is
+the neighbouring case: **a hypothesis that contradicts how the instrument was
+designed cannot be rescued by better measurement.** Hours went into correlating
+a property against a choice that was made by a designer, and the owner closed it
+in three sentences.
+
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
