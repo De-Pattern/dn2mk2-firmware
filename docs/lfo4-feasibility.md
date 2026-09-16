@@ -1443,6 +1443,52 @@ in 248..291. A nested version-tagged sub-record, not an extended run. The
 converter reading 244..251 as eight independent single bytes fits that and does
 not distinguish it — the bytes did.
 
+### PINNED on hardware, and the block is 331..353 not 324..353
+
+DNX had the owner save one step per control into `H/136`–`H/144`. Every save
+moved **exactly one byte**:
+
+| stored | control | default | after one step |
+|---|---|---|---|
+| 331 | **MODE** | 0 (OFF) | 1..4 |
+| 332 | **SPD** | 13 | 14 |
+| 333 | **RNG** | 0 | 1 |
+| 334 | **N.LEN** | 14 | 15 |
+| 335 | **LEN** | 15 | 14 |
+| 336–337 | per-step enable mask | `ffff` | `fffe` |
+| 338–353 | per-step semitone offsets | zeros | `07`, `f9` |
+
+**So field 332 is arp SPD**, and the v1→v2 remap table at `0x401fcad0` is the
+**arp speed list** — eighteen values gaining five interleaved ones, which for a
+rate list is what adding triplet or dotted divisions looks like. Default 13 in
+v2 is the same speed as 9 in v1.
+
+Two more, both confirming readings taken from the code:
+
+- **Bit 0 is step 1, LSB first.** Switching step 1 off gives `fffe`. The mask bit
+  and the map byte index the same step independently.
+- **Two's complement, directly:** `+7` stores `07`, `−7` stores `f9`.
+
+### CORRECTION: 324..330 are not arp
+
+~~The arp region is 324..353.~~ **Wrong.** All seven of `324`–`330` sat
+**unchanged through all nine saves**, including 326, which holds 100 by default
+and does vary across DNX's corpus. They are not on the arp page.
+
+**The arp block is `331..353`** — five bounded scalars, the enable mask, and the
+semitone map.
+
+So the twelve-scalar run this document read out of the converter **spans a
+boundary**: the converter walks `324..335` as one stretch of similar code, and
+the first seven bytes of it belong to something else. Reading a contiguous run
+of similar instructions as one logical block was the error — the converter's
+shape is not the object's structure.
+
+**`324..330` are unidentified.** Their bounds and defaults are known (3/0, 2/0,
+100/100, 2/0, 1/0, 1/1, 1/0) and their live destinations are longwords at 326,
+330, 335, 339, 343, 347 plus a byte at 334 — all beyond the value array, so they
+are non-parameter sound fields like the arp block, not slot-indexed parameters.
+
 ### The one field with no load-time validation, and what is *not* known about it
 
 Flagged by DNX, 2026-09-16, as firmware-side and worth recording against 1.11.
