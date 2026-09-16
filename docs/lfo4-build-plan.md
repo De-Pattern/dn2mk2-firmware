@@ -1244,6 +1244,56 @@ base, and the branch chain has no spare arm.
 of the eight LFO parameters. So `FADE`'s squared `×` view is selected by neither
 mechanism found so far, and remains the last unlocated piece of §5i.
 
+### 5i-e. The per-column draw path, end to end — 2026-09-16
+
+`LfoPageView` vtable slot 4 (`0x4010e0b4`), read in full. Per column:
+
+```
+4010e0d0  lea 0x4006538e,%a5       ; the graphic helper the index arms call
+4010e0d6  lea 0x40113558,%fp       ; flag helper A
+4010e0f0  moveal %a0@(188),%a0     ; vtable +0xBC = slot 47 = 0x4010dafc
+4010e0f4  jsr %a0@                 ; getColumnParameter(this, column)
+4010e0f8  movel %d0,%d7            ; %d7 = the parameter id
+   ...    1 << (id - 79) & 0x501405          -> the WAVE/SPH flag  [5i-c]
+4010e164  jsr %fp@                 ; flag helper A (0x40113558)
+4010e176  jsr 0x40113346           ; flag helper B
+4010e1a0  jsr %a4@                 ; a1@(180) = vtable +0xB4 = slot 45 = 0x4006448a
+                                   ; the per-column draw, 11 stack arguments
+```
+
+So the widget decision is **not one test**. The id comes from slot 47, a handful
+of flags are computed beside it, and slot 45 draws from the flags rather than
+from the id — which is why disassembling slot 45 finds **no id comparisons at
+all**.
+
+#### The remaining lead for `FADE`
+
+`0x40113346` is a **table lookup, not a predicate**:
+
+```
+40113348  moveq #9,%d2      ; bound: 9 columns
+40113352  cmpl  %d1,%d2
+40113358  lsll  #4,%d2      ; x 16
+40113364  addil #232,%d0    ; base + 232 + column*16
+```
+
+A **16-byte per-column record at +232**, bound at 9 columns — and an LFO page has
+exactly nine columns. `0x40113558` calls it four times.
+
+**If the remaining widget kinds are fields in that record, they are data, not
+code** — which would explain why `FADE` (77/87/97) survives every code scan,
+including the idiom scan that found the `WAVE`/`SPH` mask. Reading that record's
+layout is the next step, and it is a read rather than a hunt.
+
+#### Method note: the scans were never going to work
+
+Four scans failed on §5i — the original triple scan, a mixed-encoding rerun, a
+per-id table hunt, and an immediate scan of slot 45. The two things that worked
+were **running the firmware to see which method executes**, and then **reading
+that method top to bottom**. Both mechanisms found so far sat within forty bytes
+of each other in one function, and neither mentions the ids it acts on: one
+encodes them as bit positions, the other as branch arms on an index.
+
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
