@@ -130,6 +130,16 @@ def main():
     ap.add_argument("--png", action="append", default=[],
                     help="WHEN:PATH screen capture, the control that says "
                          "whether an input reached the UI at all")
+    ap.add_argument("--argsat", action="append", default=[],
+                    help="ADDR[=NAME] record the address registers at "
+                         "each hit, so a copier can be asked what it is "
+                         "actually copying between")
+    ap.add_argument("--send",
+                    help="file of raw bytes to place in the UART8 receive "
+                         "queue, e.g. a SysEx dump")
+    ap.add_argument("--find", action="append", default=[],
+                    help="WHEN:LO:LEN:HEX search mapped memory for a byte "
+                         "pattern -- a known plaintext needs no stimulus")
     ap.add_argument("--pagemap", action="append", default=[],
                     help="WHEN:LO:LEN page-hash sweep. Hashes every 4K "
                          "page instead of copying it, so a whole 100 MB "
@@ -172,9 +182,14 @@ def main():
     print("MAIN OS %s, %d bytes" % (config.main_image(), len(main_img)))
     print("%d candidate sites\n" % len(sites))
 
-    m, ev, st, pc, inq, at = build(args.snapshot, syx=args.syx, unblock=True,
-                                   softfloat=True, bitmap=True,
-                                   weakptr=True, slc=True)
+    feed = b""
+    if args.send:
+        feed = pathlib.Path(args.send).read_bytes()
+        print("feeding %d bytes into the UART receive queue" % len(feed))
+    m, ev, st, pc, inq, at = build(args.snapshot, syx=args.syx, send=feed,
+                                   unblock=True, softfloat=True,
+                                   bitmap=True, weakptr=True, slc=True)
+
     intro = intro_running(m, profile.intro_pit3_isr)
     pits = Timers(Pits(m, hold=intro), Dtims(m, channels=(3,), hold=intro))
     if intro and profile.intro_done is not None:
@@ -219,7 +234,15 @@ def main():
             def cb(uc, x, size, data):
                 ctl[a] += 1
                 if len(ctl_regs[a]) < 64:
-                    ctl_regs[a][uc.reg_read(dreg[0])] += 1
+                    # d0..d3 plus the first stack argument: a per-column
+                    # accessor takes the parameter id in one of them.
+                    sp = uc.reg_read(areg[7])
+                    try:
+                        arg = int.from_bytes(uc.mem_read(sp + 4, 4), "big")
+                    except Exception:           # noqa: BLE001
+                        arg = -1
+                    ctl_regs[a][tuple(uc.reg_read(r) for r in dreg[:4])
+                                 + (arg,)] += 1
             return cb
         at(addr, cmake(addr))
 
@@ -252,6 +275,14 @@ def main():
         m.uc.hook_add(UC_HOOK_MEM_WRITE, wcb, begin=lo, end=hi)
         print("write watch 0x%08x..0x%08x" % (lo, hi))
 
+    pending_finds = []
+    for spec in args.find:
+        w_s, lo_s, ln_s, hx = spec.split(":")
+        w = int(float(w_s[:-1]) * 1e6) if w_s.endswith("M") else int(w_s, 0)
+        pending_finds.append((w, int(lo_s, 0), int(ln_s, 0),
+                              bytes.fromhex(hx)))
+    pending_finds.sort()
+
     pending_pngs = []
     for spec in args.png:
         w_s, _, path = spec.partition(":")
@@ -276,6 +307,21 @@ def main():
         pending_dumps.append((w, int(lo_s, 0), int(ln_s, 0)))
     pending_dumps.sort()
 
+    argsites = {}
+    for spec in args.argsat:
+        a_s, _, nm = spec.partition("=")
+        addr = int(a_s, 0)
+        argsites[addr] = nm or ("0x%08x" % addr)
+    argrec = collections.defaultdict(list)
+
+    def amake(a):
+        def cb(uc, x, size, data):
+            if len(argrec[a]) < 32:
+                argrec[a].append(tuple(uc.reg_read(r) for r in areg))
+        return cb
+    for a in argsites:
+        at(a, amake(a))
+
     held = device = None
     if args.input:
         # devices/ is resolved relative to the digikit checkout, so identify
@@ -299,6 +345,23 @@ def main():
     while done < args.limit:
         pc_, executed, stop = spin(m, pc_, args.step, pits=pits)
         done += executed
+        while pending_finds and pending_finds[0][0] <= done:
+            _w, lo, ln, pat = pending_finds.pop(0)
+            found, step = [], 0x10000
+            for off in range(0, ln, step):
+                try:
+                    chunk = bytes(m.uc.mem_read(
+                        lo + off, min(step + len(pat), ln - off)))
+                except Exception:           # noqa: BLE001
+                    continue
+                j = chunk.find(pat)
+                while j >= 0:
+                    found.append(lo + off + j)
+                    j = chunk.find(pat, j + 1)
+            print("  find %dM %s : %d hit(s)"
+                  % (done // 1_000_000, pat.hex(), len(found)))
+            for a_ in found[:20]:
+                print("      0x%08x" % a_)
         while pending_maps and pending_maps[0][0] <= done:
             _w, lo, ln = pending_maps.pop(0)
             book = {}
@@ -360,6 +423,13 @@ def main():
             print("stopped: %s at %dM" % (stop, done // 1_000_000))
             break
     print("ran %dM instructions\n" % (done // 1_000_000))
+    if args.send:
+        # The decisive diagnostic: if the queue is untouched the guest
+        # never read a byte, and nothing downstream means anything.
+        print("uart receive queue: %d of %d bytes left unread"
+              % (len(inq), len(feed)))
+        print("uart transmitted: %d bytes" % len(ev["uart_out"]))
+
 
     rows = []
     for va, an, dm, which in sites:
@@ -389,7 +459,19 @@ def main():
     if ctl_names:
         print("\ncontrols (positive controls -- a zero here invalidates the run):")
         for a, nm in sorted(ctl_names.items()):
-            print("  %-28s 0x%08x  hits=%d" % (nm, a, ctl[a]))
+            print("  %-20s 0x%08x  hits=%d  distinct-args=%d"
+                  % (nm, a, ctl[a], len(ctl_regs[a])))
+            for regs, n in ctl_regs[a].most_common(6):
+                print("      d0=%-6d d1=%-6d d2=%-6d d3=%-6d arg1=%-10d x%d"
+                      % (regs[0], regs[1], regs[2], regs[3], regs[4], n))
+
+    for a, nm in sorted(argsites.items()):
+        rows_ = argrec[a]
+        print("")
+        print("%s 0x%08x: %d hit(s) recorded" % (nm, a, len(rows_)))
+        for n, regs in enumerate(rows_[:6]):
+            print("   hit %d: %s" % (n, " ".join(
+                "a%d=0x%08x" % (i, v) for i, v in enumerate(regs))))
 
     if objs:
         top = objs.most_common(8)

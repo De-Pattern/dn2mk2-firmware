@@ -919,6 +919,62 @@ freeze**; if the page hangs, power-cycle and reflash stock by the route in
 graph is not, which is the same UI/engine split LFO4 hit at
 `docs/lfo4-build-plan.md` §5i. Whoever traces the widget renderer closes both.
 
+### SUPERSEDED 2026-09-17 by three shapes whose shape is a parameter
+
+`scripts/build_lfo_waveshapes.py` -> `00_Resources/02_Builds/lfo-waveshapes_DN2_1.11.syx`.
+21 integrity checks pass, HMAC reproduced, 400 of 896 cave bytes used. The name
+list reads back **TRI SIN SQR SAW EXP RMP RND STP PLS NOI**.
+
+![STP, PLS and NOI](img/lfo-waveshapes.png)
+
+**The owner's idea, and it is the better design:** *"That LFO would be great to
+control the quantisation levels instead of the phase."* The fixed eight-level
+`STP` above was fixed only because a generator receives nothing but the phase.
+
+| waveform | `SPH` means | range |
+|---|---|---|
+| `STP` | quantisation levels | 2, 4, 8, 16, 32, 64, 128, 256 |
+| `PLS` | pulse width | 0.4% to 99.6% duty |
+| `NOI` | nothing -- noise has no shape to dial | -- |
+
+**`SPH` is the right parameter to take.** It exists, it is per-LFO and per-sound,
+it is already saved, and on these three shapes it has nothing to do -- a
+staircase that starts a step early is the same staircase. So its stock meaning is
+**suppressed** for waveforms 7 and up (a third hook, at `0x4013788e`), and the
+knob means one thing. No new slot, no new record, nothing extra in any file.
+
+**How a leaf generator gets a second argument.** Generators take the phase in
+`%sp@(4)` and return a level in `%d0`; `%d1` is dead at both call sites -- every
+stock generator writes it before reading it, and evaluator B saves its own `%d1`
+to the frame one instruction earlier -- so two `jmp` hooks load `SPH`'s coarse
+byte into `%d1` on the way past. `jmp` rather than `jsr`, so the stack the
+generator reads is untouched.
+
+**Where the shapes come from.** The owner suggested reading other instruments'
+manuals. The ASM Hydrasynth offers Sine, Triangle, Saw up, Saw down, Square,
+**Pulse 27%**, **Pulse 13%**, S&H, Noise and Random plus a 64-step user wave --
+so rather than copy two fixed pulse widths, `PLS` makes the width continuous and
+covers both. ASM's newer **Leviasynth** then names the same set from the other
+direction: *"sine, triangle, multi-directional saw, square, noise, random, step,
+and percentage-variable pulse"*. **Step** and **percentage-variable pulse** are
+two of the three here, named the same way on a 2026 instrument, and **noise** is
+the one the Digitone II lacks outright -- `RND` holds one value for a whole
+cycle, `NOI` is a fresh value every tick.
+
+`NOI` is a xorshift32 over a seed word in the cave, which is RAM once the image
+is unpacked -- the same region the hardware-confirmed boot cave wrote to. It is
+re-seeded from the image on every power-up, so it is deterministic per boot and
+needs no state anywhere else.
+
+**Still to read, and unchanged from above:** the `[MOD]` page's waveform graph
+renderer. Three unknown waveforms now instead of one.
+
+**Also worth a future entry, from the Leviasynth's list:** its LFOs have a
+**semitone-lock**, which is `STP` with its level count matched to the pitch
+parameter's scaling so the steps land on semitones. That is the same generator
+with a different quantiser, and it needs `DEST` -- which the generator does not
+receive. A fourth hook would carry it the same way `%d1` carries `SPH`.
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
