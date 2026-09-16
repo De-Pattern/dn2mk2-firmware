@@ -27,11 +27,11 @@ not been flashed has not been tested.
 | 6 | A new ELE3 section as real address space | **not started** | — |
 | 7 | The DSP hunt | **parked**, with an explicit warning | — |
 | 8 | New LFO waveforms | **DELIVERED** — `lfo-waveshapes_DN2_1.11.syx` (`STP`, `PLS`, `NOI`) | awaiting a flash |
-| 9 | A custom start-up animation | **not started** — same gate as §13 | — |
+| 9 | A custom start-up animation | **not started — gate cleared.** The motion is an offset table plus a scroll value; a new table is a new animation | — |
 | 10 | The arpeggiator on MIDI tracks | **DELIVERED** — `arp-on-midi_DN2_1.11.syx`, one byte | awaiting a flash |
 | 11 | A real compatibility check between mods | **not a firmware** — it is a check over builds | n/a |
 | 12 | P-locking the performance modulators | **not started** — route (b) scoped | — |
-| 13 | A mod stamp on the intro screen | **not started** — same gate as §9 | — |
+| 13 | A mod stamp on the intro screen | **DELIVERED** — `intro-stamp_DN2_1.11.syx`, `MOD` beside the logo. **Seen running under the emulator** | awaiting a flash |
 | 14 | A shape bench for the LFO waveforms | **DELIVERED** — the tool, plus its firmware half: `lfo-wavetable_DN2_1.11.syx` takes the bench's own JSON export | awaiting a flash |
 | — | **LFO4** (the project's named goal) | **DELIVERED** — `lfo4-tick6a_DN2_1.11.syx` | awaiting a flash |
 | — | Transient Swapper | **SHIPPED** | **passed**, PR #64 |
@@ -57,14 +57,19 @@ the order does not matter and a failure in one says nothing about the others.
 Grouped by the gate, because the gates are shared and clearing one clears
 several entries.
 
-**The boot draw path — blocks §9 and §13.** Neither the start-up animation's
+**~~The boot draw path — blocks §9 and §13.~~ CLEARED 2026-09-17.** The intro
+is one copy loop displacing a static source bitmap through an animated offset
+table (`docs/display-path.md`). §13 is built on it. §9 is now a data problem: a
+new offset table or a new source image. Recorded below as it stood before.
+
+~~Neither the start-up animation's
 frames nor the version string's composer has been located. Both are trace
 questions, not scan questions: hook `Bitmap::setPixel` through the intro under
 the emulator and the answer is a picture of which region is drawn by what.
 `docs/display-path.md` already records that the intro draws through `setPixel`
 while the running UI never calls it, so the hook has one caller family.
 **The owner's shortcut applies here:** the Digitakt II 1.15C image is the one
-digikit supports best, so trace it there first and carry the structure across.
+digikit supports best, so trace it there first and carry the structure across.~~
 
 **Address space — blocks §1, §3 and §6, and caps §14.** A wavetable waveform is
 4,096 bytes; the PCM catalogue is far more; the largest verified-free cave run is

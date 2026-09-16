@@ -1799,6 +1799,49 @@ the opposite of blending in.
 
 **Queued, not started.** The order the owner set on 2026-09-16 is LFO4 first,
 then the boot screen, and this entry is the boot screen's user-facing half.
+### BUILT AND SEEN RUNNING 2026-09-17: `MOD` beside the logo
+
+`scripts/build_intro_stamp.py --x 85 --y 29` ->
+`00_Resources/02_Builds/intro-stamp_DN2_1.11.syx`. 21 integrity checks pass, HMAC
+reproduced, and it changes exactly two ranges: an 8-byte hook and a 184-byte cave.
+
+**The first build of the campaign verified under the emulator before hardware.**
+The stock Digitone 400M snapshot was restored, the build's two ranges written over
+it (`scripts/build_diff.py`, `trace_intro_draw.py --patch`), and the intro run for
+20M instructions. The source bitmap came back with **401 lit pixels — the logo's
+367 plus the stamp's 34, all 34 inside the stamp's box** — and the panel buffer at
+the end of the run shows the logo's last fragments settling with `MOD` beside it:
+
+![panel](img/intro-stamp-panel.png)
+
+**How it works.** The intro is a displacement map over a static source bitmap
+(`docs/display-path.md`). The stamp is ORed into that source every frame from a
+hook at the copy routine's entry, `0x400d3886`, so the firmware's own effect
+scatters it and reassembles it with the logo. It arrives the way the logo
+arrives, visibly separate from it, in a 3×5 face the firmware does not use.
+
+**On the Digitone the source is the shared Elektron glyph** — identical to the
+Digitakt's, 367 pixels, x 48–79, y 20–43 — so the stamp sits beside a mark every
+Elektron product boots with, not beside a Digitone-specific logo.
+
+**Two errors, both caught before the instrument saw them:**
+
+- `dnfw fn entry` named `0x400d3876` as the routine's entry. That is a separate
+  four-instruction function ending in `rts`; the copy routine starts at
+  `0x400d3886`. Checked by disassembly — the second time today that tool has
+  reported the wrong function.
+- The first build's stub was sized with a placeholder address of 0, which the
+  assembler encoded in the short form, so the table was placed two bytes into the
+  stub and overwrote the low word of the return jump: `jmp 0x400d388e` became
+  `jmp 0x400d0000`, a crash at boot. **Disassembling the build caught it.** The
+  builder now sizes with a real 32-bit placeholder and refuses to write if the
+  two passes differ in length.
+
+**What is not in it yet:** the version half. The font carries digits, `V` and
+`.`, so `--text "MOD V1.0"` works today; what does not exist is the right source
+for the version — §13's "read the mod identity out of the image rather than
+hard-coding it" is still the honest design.
+
 ### 13.1 A flip-flap logo
 
 **Owner's proposal, 2026-09-16**, with a picture: Sara Ball's *Croc-gu-phant*,
