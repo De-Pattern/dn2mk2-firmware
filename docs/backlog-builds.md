@@ -19,7 +19,7 @@ not been flashed has not been tested.
 
 | § | idea | build | on hardware |
 |---|---|---|---|
-| 1 | Reclaim space / grow section 3 | **not started** | — |
+| 1 | Reclaim space / grow section 3 | **not started** — and the cheap version is now known not to work | — |
 | 2 | An emulator as a test harness | **not a firmware** — it is the harness the others are tested in, and it works | n/a |
 | 3 | Expand the PCM catalogue | **not started** | — |
 | 4 | FX and Master open to LFO modulation | **SHIPPED** | **passed**, PR #61 |
@@ -65,8 +65,15 @@ digikit supports best, so trace it there first and carry the structure across.
 **Address space — blocks §1, §3 and §6, and caps §14.** A wavetable waveform is
 4,096 bytes; the PCM catalogue is far more; the largest verified-free cave run is
 896 bytes. The 25.3 MB above BSS is usable at runtime but is not in the image, so
-anything that must *ship* data needs either a grown section 3 or a new section —
-which is §1 and §6, and neither has been attempted.
+anything that must *ship* data needs either a grown section 3 or a new section.
+
+**Narrowed 2026-09-17 by reading the boot clear.** BSS starts at `0x402fc000`,
+which is **63,488 bytes below the loaded image's own end** — the `.data`
+initialiser tail is consumed and then wiped. So simply appending to section 3
+buys nothing, and raising the clear's start immediate would leave real globals
+uninitialised. **The build that would settle all three:** append past the
+initialiser tail and copy it out in a cave *ahead of* `0x400004b2`, into the
+25.3 MB the clear never reaches. One experiment, three entries.
 
 **Nothing at all — §5 and §12 are simply not started.** §12 already has its route
 chosen (b: index only the depths, 24 indices into the bitmap's spare 100–127) and

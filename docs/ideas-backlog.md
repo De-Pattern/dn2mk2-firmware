@@ -193,6 +193,48 @@ one step removed. Section 8's space does not house our code — it **funds** it.
 
 ---
 
+### [READ 2026-09-17] The BSS clear's bounds, and what they cost this idea
+
+Both ends of the boot clear, read at `0x400004b2`:
+
+```
+0x400004ba  movea.l #0x402fc000,%a0      | BSS start
+0x400004c0  move.l  #0x466b74d0,%d1      | BSS end
+```
+
+and immediately before it, the `.data` initialiser loop:
+
+```
+0x40000492  move.l %a2@+,%a1@
+0x40000498  cmpa.l #0x4030b980,%a2        | until the image's tail
+0x400004a4  clr.l  %a0@+
+0x400004a6  cmpa.l #0x80010000,%a0        | then clears SDRAM 0x80000000..
+```
+
+MAIN OS loads at `0x40000400` and is 3,192,192 bytes, so it ends at
+`0x4030b800`, and the initialiser runs to `0x4030b980`. **The BSS clear starts at
+`0x402fc000` — 63,488 bytes *below* the image's own end.** That is what
+`docs/memory-map.md` means by "recycles the initializer tail": the last ~62 KB of
+the loaded image is the `.data` initialiser, consumed once and then handed to BSS
+and wiped.
+
+**So appending bytes to section 3 does not buy shippable space.** Anything past
+`0x402fc000` is cleared before the OS runs, and everything below it is the
+program. Growing the section is not the cheap move this entry assumed.
+
+**What would work, and it is a different build:** append the payload past the
+initialiser tail, then **copy it out before the clear runs** — a cave on the boot
+path ahead of `0x400004b2`, moving it into the unclaimed 25.3 MB above
+`0x466b74d0`, which the clear never touches. That is the shape of the experiment
+worth running, and it would settle §1, §6 and the wavetable half of §14 together,
+because all three want the same thing: bytes that ship in the image and survive
+to run time.
+
+**What will not work, recorded so it is not proposed:** raising the clear's start
+immediate at `0x400004ba`. The region it would spare is *reused* as BSS after the
+initialiser is consumed, so sparing it leaves real globals uninitialised. The
+immediate is one 6-byte edit and it is the wrong one.
+
 ## 2. An emulator as a test harness
 
 **The idea.** <https://github.com/joelanders/gearmulator-md-mm> — a fork of
