@@ -1115,6 +1115,75 @@ Digitone II 1.11 as of today, so hook these slots during an LFO page draw and
 see which is called per column and what it returns. That is §5i's own
 prescription, and two further scans since have not beaten it.
 
+### 5i-c. FOUND: the WAVE/SPH widget predicate is a bitmask — 2026-09-16
+
+**Located by tracing, exactly as §5i prescribed**, after three scans failed. It
+sits inside `LfoPageView`'s **vtable slot 4**, `0x4010e0b4`, which the emulator
+shows firing **92 times** while the LFO page is on screen:
+
+```
+4010e12c  moveq #22,%d1
+4010e132  movel %d7,%d0          ; %d7 = the parameter id
+4010e134  addil #-79,%d0         ; id - 79
+4010e13e  cmpl  %d0,%d1
+4010e140  bcss  0x4010e154       ; unsigned: out of range -> false
+4010e142  moveb #1,%d1
+4010e146  lsll  %d0,%d1          ; 1 << (id - 79)
+4010e148  andil #0x501405,%d1    ; the membership mask
+4010e14e  sne   %d1
+```
+
+`0x501405` has bits **0, 2, 10, 12, 20, 22**. Plus 79, that is:
+
+| id | 79 | 81 | 89 | 91 | 99 | 101 |
+|---|---|---|---|---|---|---|
+| | LFO1 `WAVE` | LFO1 `SPH` | LFO2 `WAVE` | LFO2 `SPH` | LFO3 `WAVE` | LFO3 `SPH` |
+
+**`WAVE` and `SPH` for all three LFOs, and nothing else.** That matches the panel
+exactly: the sine curve in braces spans the `WAVE` and `SPH` columns as a single
+widget (`docs/img/emu-lfo-page-stock-111.png`).
+
+#### Why every scan missed it, and the rule that follows
+
+**There is no comparison against 79, 89 or 99 anywhere in this code.** The ids
+are encoded as **bit positions in a mask**. §5i's `(n, n+10, n+20)` scan, and the
+two re-runs after it — one allowing GCC's mixed `moveq`/`moveb` encodings —
+could never have found this, because the constants being searched for **do not
+appear in the instruction stream at all**.
+
+A membership test of the form `1 << (x - base) & mask` erases its own operands.
+Scanning the whole image for that *idiom* instead finds **exactly four** sites,
+of which this is the only LFO one:
+
+| site | base | mask | ids |
+|---|---|---|---|
+| `0x400dbd3e` | 17 | `0x0001f3` | 17,18,21,22,23,24,25 |
+| `0x400dbdae` | 11 | `0x0004c7` | 11,12,13,17,18,21 |
+| `0x400dbe1c` | 11 | `0x007805` | 11,13,22,23,24,25 |
+| **`0x4010e142`** | **79** | **`0x501405`** | **79,81,89,91,99,101** |
+
+**The rule: when looking for a set membership test, scan for the idiom, not for
+the members.** Four hits against three failed scans.
+
+#### What LFO4 needs
+
+LFO4's `WAVE` is id **5** and its `SPH` is id **12** (cloned from LFO3's 99 and
+101 into the dead `ERR` slots). Both are far **below** the base of 79, so
+`id - 79` underflows and the unsigned `cmpl` rejects them — which is precisely
+the plain-rotary fallback the owner reported.
+
+The mask cannot be widened to reach them: bits are relative to 79 and 5 is 74
+below it. So this predicate must be **taught the two ids explicitly**, which is
+the exact-match disjunct shape §5i predicted. A cave on the range check at
+`0x4010e134`, adding `|| id == 5 || id == 12` before the existing test, is the
+smallest form.
+
+#### Still unfound: `FADE`
+
+`FADE` is 77/87/97, and **no bitmask predicate covers them** — the only LFO one
+is the table above. So the squared `×` view is selected by yet another
+mechanism, and it remains open. It is now the last piece of §5i.
+
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
