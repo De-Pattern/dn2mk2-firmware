@@ -632,6 +632,69 @@ to be read next**, and it is a named address rather than a guess.
 **Standing rule for this project from here:** before writing any scan, name the
 digikit tool that does the job, or say why it does not fit.
 
+## 5e. What v4 still needs, found after v3 passed — 2026-09-16
+
+v3 passing freed page `0x1d`. Reading the page view for the *next* build turned
+up two things §5 and §5b did not have, both found with Ghidra's decompiler
+rather than by eye.
+
+### The view-id list is a `std::vector<int>`, not a registration table
+
+`FUN_4019e6fc(vec, src, count)` allocates `count*4` bytes and `memcpy`s `count`
+longwords. It is **`std::vector<int>`'s from-array constructor**. So `{4,5,6}` is
+a list the view is *handed*, and `LfoPageView` is constructed with it plus a
+pointer to the integer `6`:
+
+```
+local_24 = 6;
+FUN_4019e6fc(vec, 0x401e0048, 3);      // vector<int>{4, 5, 6}
+FUN_4019fb2a(vec, &local_24);          // make_shared<LfoPageView>(vec, &6)
+```
+
+§5b's **edit is unchanged** — the pool is still packed, the list still has to
+move to grow. What was wrong was calling it a registration: nothing registers,
+the view simply receives a longer vector.
+
+**Still unknown, and it gates v4:** what maps a view id (`4`, `5`, `6`) to a
+parameter page id (`0x1a`, `0x1b`, `0x1c`). They are not numerically related.
+Adding a fourth id without knowing what page it resolves to is a guess, and this
+project has paid for that twice. The integer `6` is passed to **both** LFO
+registrations — the sound one with three ids and the MIDI one with two — so it
+is not the LFO count.
+
+### The view clamps its LFO index to 0–2
+
+`LfoPageView` holds the current LFO index at **`+0x90`**, and
+`getColumnParameter` clamps it:
+
+```
+0x4010dbbc  movel %a2@(144),%d0     ; the LFO index
+0x4010dbc0  bges 0x4010dbc6
+0x4010dbc2  clrl %d0                ;   < 0 -> 0
+0x4010dbc6  moveq #2,%d1            ; <-- THE CLAMP
+0x4010dbc8  cmpl %d0,%d1
+```
+
+**`moveq #2` → `moveq #3` at `0x4010dbc6`** is a required edit that no earlier
+section had. And `+0x90` is read at **ten sites** in the view's code
+(`0x4010d980`, `0x4010d99e`, `0x4010d9d0`, `0x4010d9f2`, `0x4010db4e`,
+`0x4010db70`, `0x4010db84`, `0x4010dbbc`, `0x4010e1d6`, `0x4010e304`) — each has
+to be read for its own bound before v4 is built, because a second clamp left at
+2 produces a page that draws but shows LFO3's columns.
+
+### The shape v4 should take
+
+**One question: does a fourth MOD page appear and can it be reached?**
+
+Deliberately *not* included: slot space, the tick, serialization. LFO4's ten
+records keep LFO3's `+0x04` slot indices, so the new page **aliases LFO3** —
+turning LFO4's `SPD` moves LFO3's `SPD`. That is safe (every slot is real, no
+out-of-bounds write) and it is an unambiguous positive control: if the page
+draws but the aliasing does not happen, the UI chain is not actually connected.
+
+Pointing the records at slots 101–108 *without* the extension array would read
+and write past the 101-entry value array into the machine-type byte at `+0xDE`.
+**Do not build that.**
 ## 6. The build, in order
 
 1. Relocate + zero the three tick state arrays (25 MB region).
