@@ -1432,6 +1432,44 @@ than "bipolar", and it is the form worth testing further.
 fine 0` and drew plain, so a second gate remains — §5i-g's conclusion is
 unchanged.
 
+### 5i-i. [WRONG - corrected within the hour] The encoding does not select the widget
+
+§5i-g and §5i-h recorded "centred default and non-fine" as a tight fit for the
+`×`-family widgets. **It is falsified**, by a screenshot that had already been
+captured before either was written.
+
+The filter page's `ENV` has a record byte-identical to `FADE`'s and `PAN`'s:
+
+| id | | max | default | fine | widget drawn |
+|---|---|---|---|---|---|
+| 97 | `FADE` | 127 | 64 | 0 | `×` in a box, dotted baseline |
+| 71 | `PAN` | 127 | 64 | 0 | `×` in a bowtie |
+| **49** | **`ENV`** | **127** | **64** | **0** | **a round bipolar knob** |
+
+`GAIN` (42), `DEC` (46) and `REL` (48) share the same encoding again. **Three
+identical encodings, three different widgets.** So the encoding cannot be what
+selects one, and DNX's hypothesis is dead as stated rather than merely
+insufficient — §5i-g's "necessary but not sufficient" was too generous.
+
+**What survives:** the `fine` flag at `+0x14` is real and newly named, and the
+observation that every *fine* parameter checked draws a plain knob still stands.
+It is the converse that fails: non-fine does not imply a special widget.
+
+#### The process failure, which is the part worth keeping
+
+The falsifying frame was captured in the **same run** as the `PAN` frame that
+appeared to support the hypothesis. It sat unexamined while two sections were
+written on the strength of the supporting half. **The supporting evidence was
+read and the rest of the same capture was not.**
+
+That is a sharper version of a habit that has cost this session repeatedly: the
+stride-8 that was glyph rows, the `0x4059D1C0` that was a TCB, the counter that
+kept counting when the knob turned back. Each time the disconfirming check was
+cheap and available. Here it was already on disk.
+
+**The rule: when a capture supports a hypothesis, look at the rest of that same
+capture before writing it up.**
+
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
