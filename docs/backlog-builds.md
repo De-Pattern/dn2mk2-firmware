@@ -19,7 +19,7 @@ not been flashed has not been tested.
 
 | § | idea | build | on hardware |
 |---|---|---|---|
-| 1 | Reclaim space / grow section 3 | **DELIVERED** — `payload-section_DN2_1.11.syx`: section 3 grows by a payload that a boot hook copies above BSS before the clear. **Cold boot under the emulator shows the copy land and survive**; `MOD` at boot is the visible test | awaiting a flash |
+| 1 | Reclaim space / grow section 3 | **DELIVERED** — `payload-section_DN2_1.11.syx`: section 3 grows by a payload that a boot hook copies above BSS before the clear. **Seen running end to end under the emulator**: cold boot copies the payload, the stamp reads it, `MOD` appears. The flash tests Elektron's bootloader, which the emulator cannot | awaiting a flash |
 | 2 | An emulator as a test harness | **not a firmware** — it is the harness the others are tested in, and it works | n/a |
 | 3 | Expand the PCM catalogue | **not started — the cheap route is ruled out.** The two unreachable transients (slots 0 and 1) need `TRAN` −8 and −4; raising the maximum reaches up, not down, and dropping the −8 offset would move every existing sound onto a different transient. Growing the bank itself needs shipped bytes (§1's build) *and* the engine's slot bound, which is DSP-side (§7) | — |
 | 4 | FX and Master open to LFO modulation | **SHIPPED** | **passed**, PR #61 |

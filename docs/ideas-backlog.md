@@ -240,6 +240,40 @@ immediate at `0x400004ba`. The region it would spare is *reused* as BSS after th
 initialiser is consumed, so sparing it leaves real globals uninitialised. The
 immediate is one 6-byte edit and it is the wrong one.
 
+### BUILT AND SEEN RUNNING END TO END 2026-09-17: shipped bytes reach run time
+
+`scripts/build_payload_section.py` -> `00_Resources/02_Builds/payload-section_DN2_1.11.syx`.
+21 integrity checks pass, HMAC reproduced; MAIN OS grows from 3,192,192 to
+3,192,340 bytes.
+
+**The mechanism.** A 148-byte payload — magic `DNFW`, a length, and the intro
+stamp's pixel table — is appended at `0x4030b980`, the first byte past everything
+the `.data` initialiser reads. The two startup calls at `0x4000053e` (initialiser,
+then BSS clear) become one `jsr boot`: `boot` runs the initialiser as stock does,
+copies the payload to `0x46710000` above BSS end, then runs the clear. The intro
+stamp reads its table from there behind a magic check, so **`MOD` at boot is the
+visible proof** and a missing payload simply boots stock-looking.
+
+**Verified under the emulator, from reset, with no patching over a stock snapshot**
+— the boot hook runs before any snapshot could exist, so this had to be a cold boot:
+
+- a write watch on `0x46710000` saw the copy at **instruction 98,426**, from
+  `0x402dfa34`, writing `DNFW`, length `0x8c` and the first table entry — and
+  nothing else wrote there through 3M instructions;
+- the grown image then booted cleanly to a 400M snapshot of its own, and its
+  intro's source bitmap came back with the logo's 367 pixels plus the stamp's 34,
+  and the panel shows `MOD` beside the logo:
+
+![panel](img/payload-section-panel.png)
+
+**What it proves and what it does not.** It proves that this loader path carries
+a larger section 3 into memory and that the tail survives when copied out before
+the clear. It does not prove the **instrument's bootloader** accepts a larger
+section — digikit's loader is not Elektron's — nor any size beyond 148 bytes.
+That is what the flash answers. If it passes, every data-shaped entry is unblocked
+at once: eight wavetable bands for §14, a bigger or different intro texture for
+§9, and the shipped half of §3.
+
 ## 2. An emulator as a test harness
 
 **The idea.** <https://github.com/joelanders/gearmulator-md-mm> — a fork of
