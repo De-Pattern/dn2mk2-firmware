@@ -699,3 +699,72 @@ path is simply untested rather than broken.
 
 **Until an edit can be made to land, memory-diffing for "where the value goes" is
 not an available technique.**
+
+---
+
+## The live lane was already in our own docs — 2026-09-16
+
+**Shared by the owner from the Octatrack researchers**, and it reframes the
+whole search. On Octatrack OS 1.40C there are **three copies** of an LFO
+parameter, and a knob turn writes all three in one call (the CC writer
+`0x40054cd8` and the panel knob path `0x40055008`):
+
+| copy | memory | Octatrack address |
+|---|---|---|
+| stored, unsaved Part | SDRAM | `bank + part*6322 + 0x8ee9a + track*24` |
+| shadows | — | `0x100a4ef8`, `0x100a4fe8`, `0x100a50a8` |
+| **live lane the engine reads per frame** | **SRAM** | **`0x80000810 + track*72`** |
+
+*Their confidence note is worth copying too: page-1 addresses measured on the
+booted machine, page-2 and live-lane offsets measured under their ColdFire
+emulator port with a stamped project, and the LFO designer's custom waveform
+table explicitly **not located** — which is the same gap `docs/ideas-backlog.md`
+§8 has for new DN2 waveforms.*
+
+### The DN2's equivalent is `0x8000de60`, and this repository already had it
+
+`docs/modulation-matrix.md` §248, written before tonight:
+
+> `0x8000de60 + 4·(101·track + 17 + idx)` … **holds each parameter's value as a
+> 32-bit fixed-point base**
+
+and `docs/engine-state.md` opens by saying the engine state is *"SDRAM at
+`0x80000000`, not in the image, and that a fourth LFO ultimately needs"* it.
+Seven code sites reference `0x8000de60`, including `0x400db072` — *set one
+parameter: value into the array, `value << 16` into `0x8000de60`*.
+
+**So the live per-track parameter lane was documented here already.** Six memory
+experiments tonight swept `0x402fc000`–`0x48000000` and never touched it,
+because "the BSS span" was taken to mean "all of RAM".
+
+### The address space is bigger than the sweeps assumed
+
+Probed in the 400M snapshot:
+
+| region | mapped | note |
+|---|---|---|
+| `0x80000000` | **256/256 pages** | the live lane; **never swept** |
+| `0x4e600000` | **256/256 pages** | the MIDI receive ring; **never swept** |
+| `0x48000000` | 0/256 | where the sweeps assumed RAM ended |
+| `0x10000000`, `0x60000000` | 0/256 | Octatrack shadow base has no DN2 analogue here |
+
+### It is empty at rest, which is consistent rather than contradictory
+
+`0x80000000..0x80400000` holds **142 non-zero bytes**, all in the first 64 KB,
+and `BASE + 4*(101*track + 17)` reads zero for every track. Nothing has
+populated the lane: the sequencer is not running and no sound has been loaded.
+So the lane cannot be found by watching it at idle — it needs the machine to be
+**doing** something, which is what makes the owner's load-a-known-Sound test the
+right instrument rather than a convenience.
+
+### [METHOD] Three times in one session
+
+`docs/FEATURE-PLAYBOOK.md` §2.0 says read this repository's own docs before
+starting. Tonight that rule was broken three times: `usable_rung()`'s docstring
+and then the function itself; `emu/longrun.py`'s `build()` flags; and now
+`modulation-matrix.md`'s own address for the thing being hunted all evening.
+
+The sharper form, since "read the docs" plainly is not enough on its own:
+**before searching for a structure, grep this repository for the thing you are
+about to look for.** One `grep -rn 0x8000` across `docs/` would have ended the
+search before it started.
