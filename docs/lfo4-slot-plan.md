@@ -382,3 +382,478 @@ owner sees nothing -- equally consistent with "applied to index 0, which carries
 no parameter" and "ignored". The inverse map makes the first the more likely: a
 reserved-rank lock resolves to the null index and is applied harmlessly to
 nothing.
+
+---
+
+## [CORRECTION 2026-09-16] "29 sites" was never a well-defined set
+
+Re-deriving the list before building v6's hooks, because §"The 29 sites" is the
+thing step 4 of the build order is sized against.
+
+**The method.** The sites are recognisable by their addressing mode, not by a
+constant: `%aN@(0x14,%dM:l:2)` is a brief-format extension word, so the word is
+`(M << 12) | 0x0A14` for index register `dM`. Scanning for those eight words,
+then keeping only the ones that are **word-aligned** and whose **preceding
+opcode actually names mode 110** in one of its EA fields, gives a clean list.
+
+**It reproduces every documented site.** All eleven addresses this file and
+`docs/lfo4-build-plan.md` §3 name — `0x40036536`, `0x40037194`, `0x40037260`,
+`0x40037be8`, `0x40038902`, `0x4006414c`, `0x4004cb08`, `0x4004cb74`,
+`0x400440a2`, `0x4004c226`, `0x4004c27c` — come back, 11 of 11. So the scan
+finds the same thing the original reading found.
+
+**But it finds 33 in the code range, not 29**, and 37 across the whole section.
+
+### Why the discrepancy is the point, not a bug to fix
+
+**The pattern identifies an *offset*, not *the value array*.** Any structure
+anywhere in this firmware that holds a 16-bit array at `+0x14` and indexes it
+with a scaled long register produces exactly these bytes. Nothing in the
+encoding says `%aN` points at a sound object.
+
+So neither 29 nor 33 is *the* number of value-array accesses. Both are counts of
+a **shape**. The original 29 was presumably the shape count minus some judgement
+about which bases were sound objects; that judgement is not recorded, which is
+why the two numbers cannot be reconciled from the documents alone.
+
+This is `docs/FEATURE-PLAYBOOK.md` §2.2 one level deeper. "Anchor on structure,
+not on a constant" is right and it is what makes this scan reproduce the known
+sites. But an addressing mode is still a **shape**, not an **identity** — and
+the question v6 has to answer ("can this site ever see a slot ≥ 101") is about
+identity: *is this base a sound object, and where does this index come from?*
+
+### What this changes
+
+**Nothing static can close it.** Whether `%a2` holds a sound object at a given
+site is a fact about execution, and three separate attempts to settle
+value-array reachability by reading have now produced three different answers
+(144 regex hits, 29 sites, 33 sites).
+
+**The instrument is the emulator, and it is now available.** A code hook at each
+of the 33 candidates, reporting the base register and the index at every hit,
+answers both halves at once: a base outside the sound-object pool
+(`base + 0x4414 + i*2388`, 128 objects) disqualifies the site outright, and the
+observed index range bounds what it can reach. `tools/addrtrace.py` reports hit
+counts and registers by running, which is exactly this.
+
+**The 33 candidates** (opcode address, index register):
+
+```
+0x40030ef0 d1   0x40030f34 d2   0x40030f88 d2   0x40032754 d1
+0x40032774 d3   0x400328d4 d1   0x400328f4 d2   0x40036536 d2 *
+0x40037194 d2 * 0x40037260 d2 * 0x40037be8 d2 * 0x40038902 d2 *
+0x4003a146 d0   0x4003d864 d0   0x4003f5a2 d0   0x4003f5be d2
+0x4003f700 d0   0x4003f736 d0   0x400440a2 d3 * 0x4004b16a d0
+0x4004c226 d2 * 0x4004c27c d2 * 0x4004c2e4 d3   0x4004c38a d2
+0x4004c42c d3   0x4004c4e6 d2   0x4004cb08 d2 * 0x4004cb74 d2 *
+0x4006414c d2 * 0x4012ae74 d6   0x40140b38 d7   0x401423b2 d7
+0x40142826 d7
+```
+
+`*` = named in the existing documents. The four `lea` sites are `0x40032754`,
+`0x40032774`, `0x400328d4`, `0x400328f4` (opcode `41f0`); this file's §"29
+sites" says **five** `lea`, which is one more discrepancy of the same kind and
+for the same reason.
+
+**Do not re-price step 4 on 33 either.** It is a candidate list to instrument,
+not a hook count. The hook count is whatever survives the run.
+
+---
+
+## [CORRECTION 2026-09-16] The 128-object pool is stored Sounds, not the live track state
+
+**From the owner, and it invalidates what this document has been sizing.** The
+measurement that provoked it: under the emulator, `[MOD]` was pressed, LFO1's
+`SPD` was turned four times, and the screen changed — `SPD` showed its value
+`16.62` — while **not one byte of all 128 sound objects changed**. The stimulus
+control passed (the screen proves the edit landed), so the null result is real.
+
+### The owner's model of where track state lives
+
+| layer | where | tied to a Sound? |
+|---|---|---|
+| **current project track data** | the running project's working memory, 16 tracks | **no — it stands alone** |
+| project save | +Drive, when the user chooses | no |
+| a stored **Sound** | +Drive, created by **burning** a track's config | that *is* what burning means |
+| the **128-slot pool** | the project | **optional** assignment of a stored Sound |
+
+In the owner's words: *"You can start a project anew in the DN and twist knobs,
+and that config stays in the tracks in that project."* No Sound is involved in
+that loop at any point, and the track data *"doesn't need to be tied to any
+sound in the pool or +Drive at all."*
+
+### What that means for this document
+
+**`sound + 0x14 + slot*2` is the STORED layout.** The 128 × 2,388-byte objects
+are the project's **Sound pool** — optional storage — not the structure the UI
+edits. Everything in this file that sizes the job against those objects is
+describing the persistence side of the feature, which is real work but is **not
+where a live LFO4 value lives**.
+
+So LFO4 needs to exist in **two** places, and only one of them is scoped here:
+
+1. **Per-track project data** — 16 instances, live, what the encoder writes and
+   what the engine reads. **Unlocated as of this correction**, and the thing to
+   find next.
+2. **The stored Sound format** — the 128-object layout this document already
+   describes, which matters at burn and at project save.
+
+**This also explains the 33 silent sites.** `docs/lfo4-slot-plan.md`'s
+"[CORRECTION] 29 sites was never a well-defined set" found that none of the
+shape-scan candidates ever executed. If they are stored-Sound code, they would
+only run on load, burn or save — none of which a boot-and-twist-knobs run
+performs. Their silence is consistent with being real value-array code that this
+experiment never provoked, rather than with being dead.
+
+### The method note, because it is the same one twice
+
+The pool null result was the correct answer to a **wrongly framed question**.
+Nothing static would have revealed the framing error: the layout, the stride and
+the accessor are all exactly as this document describes them, and all confirmed
+at runtime (128 objects, 2,388 stride, `base + 0x4414 + i*2388`). What was wrong
+was believing that structure is what a knob writes.
+
+`docs/FEATURE-PLAYBOOK.md` §2.3 says a measurement that contradicts what the
+owner knows about their own instrument should make you suspect the reader. Here
+the measurement was right and the *model* was wrong — and the owner corrected it
+from years of use, which is the same rule pointing the same way: **ground the
+model in how the device is actually operated, before sizing work against a
+structure.**
+
+### What the edit path looks like so far — 2026-09-16
+
+Found by differencing memory across matched intervals under the emulator
+(`scripts/trace_value_array_sites.py`). **None of it is the parameter store**,
+which is still unlocated; it is recorded so the next attempt does not re-find it.
+
+| address | what it is | how it was shown |
+|---|---|---|
+| `0x445a0988 + 0x10*n` | **input event ring**, 16 bytes per record; `+0x7` a tag, **`+0x8` a signed delta** | turning up wrote `0x01/0x02`, turning down wrote **`0xff`/`0xfe`** |
+| `0x445a0dc4 + 4*n` | **per-encoder event counters**, u32 | ENC1 moved `…dc7`, ENC2 moved `…dcb`; both **rose when turning down**, so counters, not values |
+| `0x44670638` | RTOS queue field taking **`0x4059d1c0`**, the prio-6 task's TCB | the written value is literally the TCB from the run's own task list |
+| `0x44622bc8` / `0x44622fc8` | **fb_front / fb_back**, 1 KB each | read from the `fb_front` pointer at `0x402a0b88` |
+| `0x447e1000` | title-bar text buffer | it received the ASCII `LIGHTHOUSE` |
+| `0x405c5000`, `0x405c6000` | **stack** | their contents are addresses inside themselves |
+
+#### Three false leads, and why each looked convincing
+
+**Stride 8 in the framebuffer.** A diff showed ~68 bytes on an 8-byte stride,
+matching DNX's `30 + 8*parameter + 2*lfo` LFO grid exactly. It was **glyph row
+spacing in a 1-bpp framebuffer**. Caught by reading the `fb_front` pointer
+rather than by noticing the pattern was wrong.
+
+**A 32-bit "value" of `0x4059D1C0`.** Plausible as a parameter until the number
+was recognised as a TCB printed in the same run's startup log. **A pointer, not
+data.**
+
+**A byte incrementing ~1 per click from zero.** The best candidate of the day
+until it was turned **backwards** and kept counting up.
+
+#### The controls that actually worked
+
+- **Matched intervals.** Two equal windows, one quiet, one with input; diff each
+  and subtract. Without it, LFO state and display redraw swamp everything.
+- **Page hashing.** Hashing 4 KB pages across the whole ~100 MB BSS costs a few
+  hundred KB and needs no guess about where to look.
+- **Reversing the stimulus.** A value goes back; a counter does not. This is the
+  single cheapest discriminator found today.
+- **Differential stimulus.** Turn encoder 1, then encoder 2. Storage must differ
+  per parameter; stack, display and event queues respond to both alike.
+
+#### Owner's constraints on interpreting knob data
+
+- Encoders are **acceleration-sensitive**, so the delta per click varies with
+  turn speed — do not expect a parameter to move by the click count, or to
+  return exactly to baseline after equal turns in both directions.
+- Acceleration applies to parameters **with a decimal part**; enums and integer
+  parameters step plainly. `SPD` displays `16.62`, so it is in the first group
+  and is likely a scaled or fixed-point **16-bit** value rather than a raw byte.
+
+#### The next technique, because memory scanning has run its course
+
+Six memory experiments have each found a different piece of UI plumbing. The
+remaining route is **from the code side**: the event ring has a consumer, and
+that consumer writes the parameter. Hook `param_index_in_page` (`0x400dbcc4`) or
+`param_set_slot_to_id` (`0x400dc02a`) and record the **return address** during an
+edit window versus a quiet window; the caller that appears only while turning is
+the edit path, and it can be read directly.
+
+### A per-track copier at `0x400e11d0` — the first structure with the right shape
+
+**Found 2026-09-16 by taking the Octatrack's technique rather than its
+addresses.** The owner's steer: the Octatrack is a different platform
+generation, but **project and non-volatile state management** may share
+conventions.
+
+`nordseele/octalab-notes` (MIT, docs-only) records that on the Octatrack the
+per-track state lives in a **part**, `part = bank + part*0x18b2 + 0x8ed80`, with
+per-track blocks at fixed strides inside it — `part + 0x8ee9a + track*24` for
+the page-1 parameter block, `part + 0x8f072 + track*30 + n` for LFO `n`'s
+destination. And crucially, the unit **auto-saves the loaded project from RAM
+continuously**, so the RAM image is the authoritative live state.
+
+That is the same architecture the owner describes for the DN2, and it says what
+to look for: **one large project structure with per-track blocks at a fixed
+stride**, not a scattered value.
+
+#### What the function does
+
+```
+0x400e11e4  loop: stride 319 (%d2) and 359 (%d4), bound 5104   -> 5104/319 = 16
+0x400e122c  loop: stride 268,                     bound 4288   -> 4288/268 = 16
+              src %a3 + 5324 + track*268  ->  dst %a2 + 5964 + track*268
+0x400e120e  a 0xa0-byte block, %a3 + 5164 -> %a2 + 5804
+0x400e1250  four 16-bit fields, %a3 + 0x258c.. -> %a2 + 0x280c..
+0x400e1268  a 0x51-entry call, %a3 + 0x2594 -> %a2 + 0x2814
+```
+
+**Two 16-element per-track arrays**, strides **319** and **268**, copied between
+two structures held in `%a2` and `%a3`. That is the shape a project (de)serializer
+has, and it names the per-track geometry directly — which is what LFO4's live
+values must join.
+
+**Not yet confirmed** as the live project image: `%a2`/`%a3` are arguments, and
+nothing here shows which is RAM and which is the stored form, nor whether the
+268-byte block holds parameters. Reading its callers, or hooking it and dumping
+both pointers, settles all three at once.
+
+#### Why the static scans that preceded it failed
+
+Two scans were run for the **clamp** the Octatrack notes describe — the
+validator that bounds every field and thereby maps the structure. Neither
+worked, for the same reason:
+
+- a raw search for `0x000c` matched `lea %sp@(12),%sp`;
+- a search for the brief extension word ending `0x0c` matched
+  `movew %a3@(0x258c),%a2@(0x280c)`, where `280c` is a **d16 displacement**, not
+  an extension word.
+
+**A 16-bit word cannot be told apart from an extension word by its value.** This
+is `docs/mainos-image.md`'s radix warning in a sharper form: the same bytes mean
+different things depending on the instruction that owns them, so any scan over
+raw words needs the opcode decoded, not pattern-matched. The value-array scan
+earlier in this file survived only because it checked the preceding opcode's EA
+field — and even that found a shape rather than an identity.
+
+---
+
+## [WRONG — corrected 2026-09-16, same day] The pool measurement was void: nothing was ever edited
+
+**The correction above, "[CORRECTION] The 128-object pool is stored Sounds, not
+the live track state", drew a conclusion from a broken experiment.** The owner's
+device model in it is theirs and stands. **The inference I attached to it does
+not.**
+
+### What was actually wrong
+
+The argument was: turn LFO1 `SPD`, watch the screen show `16.62`, observe that
+no byte of the 128 sound objects changed, conclude the live values live
+elsewhere.
+
+**The parameter never changed.** Two screenshots, one after 4 encoder clicks and
+one after 16, show **the same `16.62` and the same knob position**. A single
+event with delta **100** does not move it either. The label-to-value switch on
+the display happens when an encoder is *touched*, not when a value changes — so
+it proved the event arrived at the UI, and nothing more.
+
+So every "X did not change" result from that session is **void**: the pool, the
+26 MB above BSS, the 38 swept pages. Nothing changed anywhere because nothing
+was edited. The correct reading of all of it is **"no parameter write occurred"**,
+not "the parameter is not here".
+
+### The evidence that was already present and explained away
+
+- **`Sound::updateMirror` recorded zero hits in every run.** A parameter change
+  must pass through it. This was attributed to "stored-Sound code that only runs
+  on load or save" — an explanation invented to preserve the premise.
+- **Every memory experiment found only UI plumbing** — event ring, per-encoder
+  counters, RTOS queue, framebuffer, title buffer. That is the exact signature of
+  input that is queued and displayed but never applied.
+
+Each null was read as "not found yet" instead of "the thing being looked for did
+not happen." That is the same error as this morning's terminal-loop false
+positive, and `docs/FEATURE-PLAYBOOK.md` §2.1's note — *validate the tool's
+verdict, not just its decoding* — was written today, after that one.
+
+### And DNX's evidence points the other way
+
+`DNX/docs/dn2-format.md`, from hardware captures: *"A sound object holds the
+track's live values, so turning a knob moves a byte directly."* With the LFO grid
+inside that object at **`30 + 8*parameter + 2*lfo`**.
+
+So a sound object **is** live track state on this instrument, and whether the
+128-object pool in RAM contains the per-track live objects is **open again**, not
+settled negative.
+
+### The harness limitation to record
+
+**Synthetic encoder input does not move parameters under the emulator.** The
+event is well formed — `panelsweep` validated all nine encoders, and
+`encode_encoder` emits `tag|channel, delta` which the UI visibly receives — but
+no delta is ever applied, at ±1 or ±100.
+
+Worth noting for digikit: `tools/guirun.py`'s `--input` cannot turn an encoder at
+all, because `inbox.append((kind, code, 0))` hardcodes the delta to **0**. So it
+is possible no encoder turn has ever been applied under this emulator, and the
+path is simply untested rather than broken.
+
+**Until an edit can be made to land, memory-diffing for "where the value goes" is
+not an available technique.**
+
+---
+
+## The live lane was already in our own docs — 2026-09-16
+
+**Shared by the owner from the Octatrack researchers**, and it reframes the
+whole search. On Octatrack OS 1.40C there are **three copies** of an LFO
+parameter, and a knob turn writes all three in one call (the CC writer
+`0x40054cd8` and the panel knob path `0x40055008`):
+
+| copy | memory | Octatrack address |
+|---|---|---|
+| stored, unsaved Part | SDRAM | `bank + part*6322 + 0x8ee9a + track*24` |
+| shadows | — | `0x100a4ef8`, `0x100a4fe8`, `0x100a50a8` |
+| **live lane the engine reads per frame** | **SRAM** | **`0x80000810 + track*72`** |
+
+*Their confidence note is worth copying too: page-1 addresses measured on the
+booted machine, page-2 and live-lane offsets measured under their ColdFire
+emulator port with a stamped project, and the LFO designer's custom waveform
+table explicitly **not located** — which is the same gap `docs/ideas-backlog.md`
+§8 has for new DN2 waveforms.*
+
+### The DN2's equivalent is `0x8000de60`, and this repository already had it
+
+`docs/modulation-matrix.md` §248, written before tonight:
+
+> `0x8000de60 + 4·(101·track + 17 + idx)` … **holds each parameter's value as a
+> 32-bit fixed-point base**
+
+and `docs/engine-state.md` opens by saying the engine state is *"SDRAM at
+`0x80000000`, not in the image, and that a fourth LFO ultimately needs"* it.
+Seven code sites reference `0x8000de60`, including `0x400db072` — *set one
+parameter: value into the array, `value << 16` into `0x8000de60`*.
+
+**So the live per-track parameter lane was documented here already.** Six memory
+experiments tonight swept `0x402fc000`–`0x48000000` and never touched it,
+because "the BSS span" was taken to mean "all of RAM".
+
+### The address space is bigger than the sweeps assumed
+
+Probed in the 400M snapshot:
+
+| region | mapped | note |
+|---|---|---|
+| `0x80000000` | **256/256 pages** | the live lane; **never swept** |
+| `0x4e600000` | **256/256 pages** | the MIDI receive ring; **never swept** |
+| `0x48000000` | 0/256 | where the sweeps assumed RAM ended |
+| `0x10000000`, `0x60000000` | 0/256 | Octatrack shadow base has no DN2 analogue here |
+
+### It is empty at rest, which is consistent rather than contradictory
+
+`0x80000000..0x80400000` holds **142 non-zero bytes**, all in the first 64 KB,
+and `BASE + 4*(101*track + 17)` reads zero for every track. Nothing has
+populated the lane: the sequencer is not running and no sound has been loaded.
+So the lane cannot be found by watching it at idle — it needs the machine to be
+**doing** something, which is what makes the owner's load-a-known-Sound test the
+right instrument rather than a convenience.
+
+### [METHOD] Three times in one session
+
+`docs/FEATURE-PLAYBOOK.md` §2.0 says read this repository's own docs before
+starting. Tonight that rule was broken three times: `usable_rung()`'s docstring
+and then the function itself; `emu/longrun.py`'s `build()` flags; and now
+`modulation-matrix.md`'s own address for the thing being hunted all evening.
+
+The sharper form, since "read the docs" plainly is not enough on its own:
+**before searching for a structure, grep this repository for the thing you are
+about to look for.** One `grep -rn 0x8000` across `docs/` would have ended the
+search before it started.
+
+
+---
+
+## [SETTLED 2026-09-16] The free lock lane is padding, not a reserved fourth LFO
+
+**The claim, and where it came from.** DNX described `4*slot + 0` — lock ids 0,
+4, 8, 12, 16, 20, 24, 28, never used by the three LFOs — as "where a fourth
+LFO's parameters were designed to go". This document's own §"The forward and
+inverse maps, dumped" calls the same hole "a real hole", and
+`DNX/docs/dn2-format.md` independently records the sound object's fourth slot of
+each group of eight as unused. **I then wrote that two independent layers both
+reserving a fourth lane was strong corroboration.**
+
+**DNX withdrew it before I acted on it, and was right to.** Alignment predicts
+both observations exactly as well as reservation does: the lock table strides 4
+for 3 LFOs, the sound object strides 8 bytes for 3 two-byte slots — both are the
+next power of two above three. **Two layers rounding three up to four is one
+habit applied twice, not two witnesses.** Their `plockparams.ts` records the
+lane's purpose as UNKNOWN, which is what should have been quoted.
+
+### The test, and it needed no hardware
+
+Read the maps as **u32** (they are not byte-wide — an earlier read here got that
+wrong and produced nonsense):
+
+```
+forward[slot] -> lock id     slots  1..8  -> 1, 5, 9, 13, 17, 21, 25, 29   (4k+1)
+                             slots  9..16 -> 2, 6, 10, 14, 18, 22, 26, 30  (4k+2)
+inverse[lock id] -> slot     lane 1 -> slots 1..8
+                             lane 2 -> slots 9..16
+                             lane 3 -> slots 17..24
+                             lane 0 -> slot 0, every single entry
+```
+
+**Every lane-0 lock id maps to slot 0**, which is the no-lock sentinel
+(`forward[0] = 0`, and slots 65, 100 and 104 — the known gaps — also forward to
+0). Nothing in this firmware addresses that lane.
+
+### What it costs v6
+
+**The lane is free but empty.** It is still the tidiest place to put LFO4's
+slots, because it is contiguous and regular where the cloned `ERR` ids are
+scattered. But **nothing is waiting there**: v6 must write the forward entries,
+the inverse entries, and every consumer itself. There is no half-built path to
+finish.
+
+Priced against the wrong answer, v6 would have looked cheaper than it is.
+
+### And the reason this matters beyond the lane
+
+Two agents compounded an over-claim: DNX asserted intent, this repository
+amplified it into corroboration by adding a second instance of the same habit,
+and neither step was measured. It was caught because DNX withdrew their own
+claim unprompted and named a test that settled it in one read.
+
+**The rule: when a second source appears to confirm a structural inference, check
+whether it is independent evidence or the same convention observed twice.**
+
+### The sharper form of the rule, from DNX
+
+The same maps produced a case of **genuine** corroboration in the same read, and
+the contrast is the whole lesson. DNX derived the lock layout as
+`id = 4*slot + lfo` from **24 ids observed on hardware**; the forward map gives
+slots 1..8 -> `4k+1` and 9..16 -> `4k+2` from **the firmware's own translation
+table**. Same rule, two routes, no shared assumption.
+
+| | the lane | the lock layout |
+|---|---|---|
+| source A | lock table strides 4 for 3 LFOs | 24 ids observed on a device |
+| source B | sound object strides 8 B for 3 slots | the firmware's forward map |
+| relationship | **the same convention seen twice** | **different methods on one object** |
+| verdict | not corroboration | corroboration |
+
+**Two observations corroborate only when they could have disagreed.** Rounding
+three up to four in two layers could not have come out any other way; a hardware
+capture and a translation table could easily have disagreed, and did not.
+
+### [METHOD] Check a table's width before reading a single entry
+
+The lane test was nearly botched by reading these maps as **bytes**. They are
+u32, and the byte-wise read produced a table that looked like data and read like
+meaning — `0 0 0 1 0 0 0 5 0 0 0 9` is perfectly plausible as sparse byte data
+until it is noticed as big-endian longs.
+
+**Convincing nonsense is the dangerous failure, not obvious nonsense.** The tell
+is cheap and should come first on any new table: if entries look like small
+values separated by runs of zeros, try the next width up before interpreting
+anything.

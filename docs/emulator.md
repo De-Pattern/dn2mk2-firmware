@@ -467,3 +467,385 @@ Demanding a boot probe in a post-boot window is demanding a negative. That is
 the same defect as a watch that cannot produce a different answer per outcome —
 this time wearing a control's clothes. The controls now carry their phase, and
 silence in the wrong window is reported as expected rather than as blindness.
+
+## The patched Unicorn is built and verified — 2026-09-16
+
+**Read this section's predecessors first.** "Running it on this machine" and
+"Digitone II **1.11 cold-boots**" above already recorded the WSL decision, the
+venv-placement caveat, the CRLF trap and the fact that 1.11 boots. On
+2026-09-16 the assistant re-derived all four from scratch before reading them.
+That is the same mistake the owner had just corrected one layer up — *"don't
+reinvent the wheel"* — and it applies to **this repository's own documentation**,
+not only to the reference repos. It is recorded in
+`docs/FEATURE-PLAYBOOK.md` §2.0.
+
+What is genuinely new, and was not here before:
+
+**The patched library exists and passes digikit's own check.** Built under WSL
+Ubuntu 24.04 (cmake 3.28.3, gcc 13.3, Python 3.12.3), venv in WSL's own
+filesystem at `~/dn2-emu-venv` exactly as the caveat above says:
+
+```sh
+python3 -m venv ~/dn2-emu-venv
+~/dn2-emu-venv/bin/python -m pip install unicorn==2.1.4 capstone==5.0.7
+cd /mnt/c/ZZ_Code/ZZ_Personal/digikit
+PYTHON=~/dn2-emu-venv/bin/python bash tools/install-patched-unicorn.sh
+```
+
+Tag `2.1.4` resolved to `8028ec436f2d9376525352dd38ed9ed6b9f6be10`, the commit
+digikit pins, and both patches applied at their pinned SHA-256. `emu.unicorn_compat`
+then reported `"compatible": true` with **all four cases passing**, including
+`emac_mac_with_load` — the EMAC fix that matters for the modulation kernel at
+`0x400db1dc`.
+
+**Their extractor agrees with ours, byte for byte.** `python -m emu.extract` on
+DN2 1.11 produced six sections whose lengths match `dnfw extract` exactly —
+MAIN OS 3,192,192, bootstrap 30,302, updater 32,768, blob 836,956, section 8
+159,948, meta 15. Two implementations sharing no lineage agreeing on a depacker
+is worth more than either one's tests.
+
+(One naming difference to expect: digikit labels section 2 `section_2_DSP.bin`.
+On the DN2 that section is the **bootstrap**, `dest 0x02010000`. The label is
+theirs and is wrong for this device; the `dest` is right and nothing reads the
+label.)
+
+**`emu.run --check` passes on 1.11**, resolving firmware, sections and the
+snapshot path, with their standing warning that only Digitakt II 1.15C is
+tested.
+
+### What is running, and what it is for
+
+A snapshot ladder cold boot at 60M / 150M / 280M / 400M instructions, because
+`tools/bootcheck.py` and the `--resume` half of `tools/addrtrace.py` both need
+a snapshot, and only a resume reaches the display module.
+
+The target is the question §"What it is for" lists and `docs/lfo4-build-plan.md`
+§3 cannot answer statically: **which value-array sites can ever see a slot
+≥ 101.** That is reachability, and reachability is what static scanning has got
+wrong three times here.
+
+**Carry the positive controls** listed above under "The first watch run was not
+a result" — `0x401f7f94` static, `0x42c64b3c` built at boot, a live TCB. A zero
+without them means nothing.
+
+## What actually stops the emulator answering UI questions — 2026-09-16
+
+The owner asked, fairly: *"can you not check these questions in the emulator? Is
+there anything stopping that?"* The answer is **nothing fundamental, and one
+concrete prerequisite**.
+
+**What already works on Digitone II 1.11 here:**
+
+| | |
+|---|---|
+| boot to `MAIN_OS_RUNNING` | yes, from `boot400M.snap` |
+| `tools/bootwatch.py` write watches | yes — it settled the descriptor-id writer |
+| `tools/addrtrace.py` code hooks | yes |
+| `tools/panelsweep.py` — map panel button codes | running; it reads the firmware's own `queue_send` record, and its record layout was *"verified across dozens of samples on Digitone"* |
+| `tools/guirun.py` — **headless** panel input + screenshots | the right tool: `--input 150M:press:17`, `--png-at 170M:out/x.png` |
+
+**The prerequisite.** Starting a run on 1.11 prints:
+
+```
+unresolved OPTIONAL symbols: ['call_sites', 'ctx_switch_load',
+  'display_frame_post', 'display_sem', 'transport', 'ui_key_dispatch',
+  'ui_tick_counter', 'ui_tick_inc', 'view_activate', 'view_close',
+  'view_closed_mark', 'view_offer', 'view_request_pop', 'view_sweep']
+```
+
+**Six of those are exactly the UI ones** a widget-selection question needs —
+`ui_key_dispatch`, `view_activate`, `view_close`, `view_offer`,
+`view_request_pop`, `view_sweep`. They are derived by byte signature from
+Digitakt II 1.15C and do not match this build.
+
+That is the **same class of problem as `mainloop`**, which was one byte (a
+`moveq #40` against `moveq #41`) and is now fixed and sent as digikit PR #16.
+Thirteen more of the same kind is real work, but it is tractable, mechanical,
+and it benefits digikit as much as us.
+
+**So the honest statement is:** the emulator can already answer *memory*
+questions on our build and has done. It cannot yet answer *UI* questions,
+because the UI hook points are unresolved — and that is a signature-porting job,
+not a limitation of the emulator.
+
+### Driving the UI: what works now, and the three ports still needed
+
+Attempted 2026-09-16, because the owner asked for screenshots of any page being
+worked on. **No screenshot yet.** What was established:
+
+**Working on DN2 1.11:**
+
+- **`tools/panelsweep.py` — the whole panel is mapped.** 192 s, all 56
+  `(channel, bit)` groups in channels 0–6 report `code = channel*8 + bit + 1`,
+  and the nine encoders `code = channel + 1` — identical to 1.10E. One anomaly,
+  code `0x00` shared by `(6,2)` and `(6,3)`, matching the non-linear channel 6
+  the device file already documents.
+- **The device file.** `tools/guirun.py` refused the firmware with *"No device
+  file matches"* until `devices/digitone-ii.toml` gained a 1.11 entry. That
+  refusal is correct behaviour — it would otherwise run this image under another
+  product's panel. Added and sent to digikit as branch `devices/dn2-1.11`.
+
+**Still to port from Digitakt II 1.15C, and each is the same shape as the
+`mainloop` byte:**
+
+| what | symptom on 1.11 |
+|---|---|
+| six UI symbols — `ui_key_dispatch`, `view_activate`, `view_close`, `view_offer`, `view_request_pop`, `view_sweep` | reported unresolved at startup; no UI tracing |
+| the `--weakptr` patch | `RuntimeError: weakptr: 0x40188b40 holds 4878, expected 6714` — a hardcoded address and value |
+| whatever else the terminal loop needs | without `--weakptr`, a resumed run reaches `TERMINAL LOOP` at ~63 M with `tasks=0` |
+
+**So the position is:** the emulator answers **memory** questions on our build
+today, and has — `bootwatch` settled the descriptor-id writer, and `bootcheck`
+reports `MAIN_OS_RUNNING`. It cannot yet **drive the panel and draw a page**,
+and that is three small ports away, not a limitation of the tool.
+
+Worth doing: it is the difference between guessing at widget selection and
+watching it.
+
+### Port 1 of 3: `--weakptr` on DN2 1.11 — located
+
+`emu/longrun.py` neutralises two branches in `weak_ptr::lock` that send the main
+task into a terminal loop. Its site is a **hardcoded address**, not a signature:
+
+```
+RuntimeError: weakptr: 0x40188b40 holds 4878, expected 6714
+```
+
+On DN2 1.11 that address is unrelated code (`pea 0x800`). The DT2 shape is
+`beq.b +0x14` followed **16 bytes later** by `bne.b +0x0a`, so searching for that
+shape rather than that address finds it. Five hits, four of them byte-identical:
+
+```
+0x401a06f2  beqs  0x401a0708          ; control block null?
+0x401a06f4  movel %a0@(4),%d0         ; use count
+0x401a06f8  movel %d0,%d1
+0x401a06fa  addql #1,%d1
+0x401a06fc  movel %d1,%a0@(4)         ; store incremented
+0x401a0700  tstl %d0
+0x401a0702  bnes  0x401a070e          ; old count nonzero -> keep it
+0x401a0704  clrl  %a0@(4)             ; else undo
+```
+
+That is `_M_add_ref_lock` exactly — load, increment, store, test the *old* value.
+The four identical copies are template instantiations:
+
+| address | |
+|---|---|
+| `0x401a06f2` | identical |
+| `0x401a0d2a` | identical |
+| `0x401ab2b4` | identical |
+| `0x401ab348` | identical |
+| `0x4006a71e` | same branch shape, different body — **not** this function |
+
+**Which of the four the main task reaches is not yet known**, and guessing is
+unnecessary: hook all four under the emulator and see which fires at the hang.
+Patching all four is also defensible — digikit is explicit that this is *"a
+DIAGNOSTIC, not a fix"* that papers over condition-code corruption.
+
+**Worth sending back:** the address should be a signature. digikit already has
+the `Sig` machinery, the shape is distinctive, and every other build will hit
+this same wall.
+
+### Port 3: there was no terminal loop — 2026-09-16
+
+**The Digitone II boots fine under the emulator. It always did.** Every run
+ending at ~63M with `TERMINAL LOOP reached`, `tasks=0`, still in the intro, was a
+**false positive that aborted the run**.
+
+`tools/guirun.py` hooks a hardcoded Digitakt II address:
+
+```python
+at(0x4012d2fa, terminal_hit)      # sets state['terminal']
+...
+if state['terminal']:  ...  break  # which ends the run
+```
+
+On DN2 1.11 that address is **ordinary code** — `move.l %d2,-(%sp)` inside a
+routine that runs during normal boot. So the detector fired on a healthy run and
+the run was abandoned, reported in a form that reads exactly like a firmware
+that cannot boot.
+
+**The fix verifies the instruction, not the address.** A terminal spin is a
+`bra.b` to itself, so checking for `60 fe` there is checking for the thing
+itself. DT2 1.15C is unaffected; anything else prints one line and runs on.
+
+With it, the same snapshot runs **600M instructions to the end of its budget**:
+
+```
+end: instrs=600M terminal=False tasks=5 dtim3=804 mainloop=0 jobs=1
+```
+
+and `--png-at` captures **`INITIALIZING +DRIVE...`** with the +Drive logo — past
+the intro, into the real boot sequence.
+
+### And `--weakptr` was never involved
+
+Port 1 made the weakptr sites portable, which was a real fix for digikit. It was
+**not** the fix for this. All four `weak_ptr::lock` instantiations were hooked
+and every one recorded **zero hits** across the whole run — the main task never
+enters that path on this build.
+
+Worth recording as a method note: three sessions were spent treating a
+**measurement artefact** as a firmware fault, because the tool reported it in the
+vocabulary of a firmware fault. `docs/FEATURE-PLAYBOOK.md` §2.1's rule is
+"validate the tool before trusting its output" — this is the same rule one level
+up: **validate the tool's *verdict*, not just its decoding.**
+
+### Port 4: the UI symbols resolve by relocation — 2026-09-16
+
+**And a correction to what this section said they were for.** The table above
+lists the six view symbols under *"it cannot yet drive the panel and draw a
+page, and that is three small ports away"*. **That was wrong.** The six are
+consumed only by `emu/uitrace.py`, which is a **tracer**. `guirun.py --input`
+replays through `emu/panelin.py` and the panel model, and never touches any of
+them. Driving the UI and capturing a PNG was never gated on these symbols; only
+`--trace-ui` was.
+
+The correction matters because it changes what the ports were buying: not the
+ability to see a page, but the ability to read the UI's own account of why it
+drew one.
+
+#### How they were found
+
+`emu/symbols.py` pins them as `Fixed()` addresses read off Digitakt II 1.15C.
+Searching our image for each one's eight verify bytes:
+
+| symbol | hits on DN2 1.11 |
+|---|---|
+| `view_offer` | **1** — `0x4011db20` |
+| `view_activate` | **1** — `0x4011ca46` |
+| `view_closed_mark` | **1** — `0x4011c876` |
+| `view_close` | 9 |
+| `view_request_pop` | 9 |
+| `view_sweep` | 4 |
+| `ui_key_dispatch` | 0 |
+
+The three that resolve alone **independently agree on one delta, `+0xedbc`** —
+the view manager relinked as a single block. That delta then predicts the other
+three, and **all three verify at the predicted address**, which disambiguates
+9, 9 and 4 candidates down to one each:
+
+| symbol | DN2 1.11 |
+|---|---|
+| `view_close` | `0x4011c85e` |
+| `view_request_pop` | `0x4011d2e8` |
+| `view_sweep` | `0x4011da00` |
+
+`ui_tick_inc` needed one more step: its verify bytes carry a BSS counter operand
+that relocates, so the literal search cannot match. Masked to its two opcodes it
+has three sites, and the block delta picks `0x4011f5e4` — whose operand
+`0x466758b0` lands inside the 1.11 BSS span, as it must.
+
+**Three anchors agreeing before anything is inferred, and every inferred address
+checked against its own bytes afterwards.** That is what makes the block
+assumption a measurement rather than a hope.
+
+#### It fixes digikit's own current target too
+
+Sent as PR #21 with a `Reloc` resolver (literal → unique search → sibling
+offset, always verified). Measured with `tools/export-profile.py`:
+
+| image | before | after |
+|---|---|---|
+| Digitone II 1.11 | 58/72 | **66/72** |
+| **Digitakt II 1.16** | 60/72 | **68/72** |
+
+The second row is the interesting one. `uitrace` disables itself when **any**
+one of its `HOOKS` is missing, so all seven stale addresses take the whole
+tracer down — and 1.16 is digikit's *current* image, where `--trace-ui` is
+therefore dead on `main` today. A fix aimed at our build repaired theirs.
+
+#### What is still unresolved
+
+`ui_key_dispatch`, on both images. It sits **outside** the view manager's block,
+in a region with its own delta, and its recorded bytes are `jsr <abs>` plus
+`move.l %d2,-(%sp)` — masking the relocating operand leaves two opcodes that
+match **1,401 sites** on DN2 1.11. It needs a longer capture from 1.15C than the
+eight bytes digikit records, which we cannot take without that image.
+
+Since the tracer is all-or-nothing, `--trace-ui` stays off until that one lands.
+**Driving and screenshots do not wait on it.**
+
+### The emulator draws the real UI — 2026-09-16
+
+**Both pages captured headlessly, no hardware.**
+
+![The SYN1 page, stock 1.11, under the emulator](img/emu-syn1-page-stock-111.png)
+
+![The LFO page reached with [MOD], stock 1.11](img/emu-lfo-page-stock-111.png)
+
+```
+end: instrs=240M terminal=False tasks=5 dtim3=259 mainloop=272 jobs=1
+```
+
+Forced pend-unblocks fell from **3,109,215 to 2,572** between the broken and
+working configurations — that ratio is the signal to watch, not the verdict line.
+
+#### The fault was a stale section cache, and it was there from the first run
+
+`emu/config.py`'s `main_image()` resolves the MAIN OS by **globbing
+`sections/*MAIN_OS*.bin`**, and `--syx` does not repoint it. That directory held
+a **1.10E** extraction from an earlier session:
+
+| | sha256 | bytes |
+|---|---|---|
+| `sections/section_3_MAIN_OS.bin` (what ran) | `d6b54227…` | 3,085,696 — **1.10E** |
+| `.ladder.json`'s `main_sha256` (what the snapshots need) | `57b06a79…` | — |
+| our 1.11 extraction | `57b06a79…` ✓ | 3,192,192 |
+
+So **1.10E code was executing against 1.11 snapshots.** Every downstream
+symptom followed from that one mismatch:
+
+- `HALTED: unhandled vector 257` on the 280M rung;
+- `weakptr: 0x4018c33a holds a2ca, expected 6714` — 1.10E's weak-pointer
+  addresses against 1.11 memory;
+- `tasks=0`, no latched frame, the panel black;
+- 13.4M and 3.1M forced unblocks in successive runs.
+
+**Fix:** extract per version and point `DT2_SECTIONS` at it.
+
+```
+python -m emu.extract <1.11.syx> -o /root/dn2-sections-111/
+DT2_SECTIONS=/root/dn2-sections-111 python tools/guirun.py <snap> --weakptr --slc
+```
+
+#### The three settings that matter, and where each is written down
+
+| setting | why | where it is recorded |
+|---|---|---|
+| `DT2_SECTIONS` per firmware version | otherwise another version's code runs | `emu/config.py` `main_image()` |
+| `--weakptr --slc` | clears `unhandled vector 257`; without them the run dies or wedges | `emu/longrun.py` `build()` docstring |
+| the **400M** rung | 280M wedges the intro in `sem_pend` | `emu/run.py` `usable_rung()` — **call it, do not read it** |
+
+#### [METHOD] Call the function, do not hand-apply its docstring
+
+`usable_rung()`'s prose says *"on Digitone only 400M is disqualified, and it
+gets 280M."* **Called against 1.11 with correct sections, it returns 400M.** The
+comment was written from a different measurement; the code is right and its own
+description is stale.
+
+Reading the doc beat guessing. **Running the function beat reading its doc** —
+and that function exists precisely because the answer is state-dependent rather
+than a fixed number, which is the clue that it should have been called.
+
+This extends `docs/FEATURE-PLAYBOOK.md` §2.0: read our own docs first, then the
+reference repo's — **and where the reference repo ships a function that computes
+the answer, call it.**
+
+#### What it gives LFO4 immediately
+
+The stock LFO page renders every specialised widget: a bipolar pointer knob for
+`SPD`, a boxed `2` for `MULT`, the **squared `×` view** for `FADE`, `SYN BASE`
+for `DEST`, and the **sine curve in braces** spanning `WAVE`/`SPH`.
+
+§5i's open question — why LFO4's page drew plain round knobs instead — now has a
+**working reference to diff against** rather than a static guess about how
+widget selection is keyed.
+
+#### Still unresolved
+
+`ui_key_dispatch`, so `--trace-ui` stays off. `display_frame_post` is located on
+1.11 at `0x4013190e` (`pea 0x4461e6e8; or.l %d1,%d0`, 182 bytes below
+`display_start`, discriminated from two other sites because they post `frame_sem`
+or sit in unrelated early code) — but resolving it changed **nothing**: the run
+was bit-identical, same 3,109,215 unblocks. It is not consulted on this path.

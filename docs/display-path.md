@@ -1006,3 +1006,75 @@ panel parser is byte-identical across builds with only the data addresses
 moving, so the driver-level conclusion should carry — but the UI layer is
 product-specific, and MACHINE SEL is a Digitakt screen. The negative is strong
 about the driver and says nothing about the menu's own timers.
+
+---
+
+## The Octatrack's drawing primitives, and what transfers — 2026-09-16
+
+**Shared by the owner from the Octatrack researchers** (OS 1.40C MKII, their
+`PANEL_DRAW.md`). Cited in our own words; their addresses are theirs and none of
+them apply here. What is worth having is the **model**, plus one confirmed
+difference and one cautionary tale.
+
+### The confirmed difference: they have grey, we do not
+
+| | Octatrack 1.40C | **Digitone II 1.11** |
+|---|---|---|
+| surface | 128 × 64, **2 bits per pixel**, four levels | 128 × 64, **1 bpp** |
+| buffers | descriptor at `0x400bf10a`, pointers at `+12`/`+16` | pointers `fb_front` `0x402a0b88`, `fb_back` `0x402a0b8c` |
+| measured | — | `0x44622bc8`..`0x44622fc8` = **exactly 1024 bytes** = 128·64/8 |
+
+Their panel carries a descriptor record — width, height, bpp, two buffer
+pointers. **Ours does not, or not in that shape**: scanning for a record opening
+`128, 64` returns 68 hits and not one has a plausible bpp with a pointer behind
+it. digikit resolves our buffers as two bare pointers instead.
+
+**So do not carry their surface layout across.** What does carry is that both
+machines double-buffer and that every drawer writes one buffer.
+
+### The model worth looking for here
+
+- **A rectangle op whose `mode` argument branches on sign** — theirs is
+  `fill(ctx, x1, y1, x2, y2, mode)`: `< 0` EOR (invert), `> 0` OR (set),
+  `= 0` clear.
+- **Shading by checkerboard mask**, `0xaaaaaaaa` and its opposite phase
+  `0x55555555` — a 50% dither over a rectangle. **This is the only way to get
+  grey on a 1-bpp panel, so it is more relevant to the DN2 than to the machine
+  it was found on**, which has real levels available.
+- **Text cannot be dimmed.** Their blitter ORs one bit per pixel into one
+  buffer and takes no intensity. If the DN2's is the same shape, a grey label is
+  a dithered rectangle over drawn text, not a text attribute.
+- **Fonts as 20-byte metric records** — default advance, `(yOffset << 16) |
+  height`, and three table pointers (per-glyph widths, per-glyph offsets with
+  negative meaning absent, glyph bitmaps). No colour anywhere.
+- **Cursor geometry tables are `(centre, half-width)`, not `(left, width)`** —
+  the call computes `x1 = x - w - 1` and `x2 = x + w + 1`, symmetric about `x`.
+
+### Why this matters to two of our open items
+
+**`docs/ideas-backlog.md` §13.1, the intro-screen mod logo.** This is the
+drawing vocabulary that entry needs: a rect op with invert/set/clear, and dither
+for shading. It also sharpens the redraw constraint already recorded there — at
+1 bpp with no grey, the concept art's line work has to become solid pixels or
+dithered fills, nothing in between.
+
+**`docs/lfo4-build-plan.md` §5i, widget selection.** Their cursor idiom is
+*"look the cell's geometry up in a per-type table indexed by column"*. That is
+the same shape as the thing §5i cannot find: what picks a specialised widget per
+parameter. A per-type table indexed by id or column is worth looking for
+directly, rather than tracing the draw call.
+
+### [METHOD] Their negative finding is the better lesson
+
+Their note flags an argument that every call passes as `-1` and that looks
+exactly like a shade — and it is a **maximum character count**, compared against
+a character counter inside the blitter. They confirmed it negatively **on
+hardware, at the cost of a flash**.
+
+*"It is the most shade-looking argument in the firmware and it is not one."*
+
+That is the same failure this session paid for repeatedly: a stride of 8 that
+was glyph rows, a 32-bit value that was a task control block, a byte that
+incremented per click and was a counter. **A plausible reading is not a
+measurement**, and the cheapest defence is an experiment whose wrong answer
+looks different from its right one.

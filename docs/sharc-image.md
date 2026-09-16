@@ -95,7 +95,7 @@ the section is consumed exactly — and only then checked against ADI's publishe
 boot-stream flags, which it matches: `FILL 0x01`, `IGNORE 0x08`, `INDIRECT 0x10`,
 `FIRST 0x40`, `FINAL 0x80`. Derivation first, corroboration second.
 
-The load addresses are SHARC memory, not ColdFire: L1 at `0x20000000`, L2 at
+The load addresses are SHARC memory, not ColdFire: L2 at `0x20000000`, L1 at
 `0x28240000` and `0x28380000`, and 5.4 MB of DDR at `0x80000000` (almost all of
 it a zero fill, which is why the section is under a megabyte).
 

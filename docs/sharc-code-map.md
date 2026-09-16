@@ -19,15 +19,27 @@ counting them is a code detector.
 
 | region | bytes | cjump | what |
 |---|---|---|---|
-| `0x20000000..0x2001e880` | 125,056 | **1002** | **code** (L1) |
+| `0x20000000..0x2001e880` | 125,056 | **1002** | **code** (L2) |
 | `0x2001e888..0x2008823c` | 432,564 | 0 | data |
 | `0x28240000..0x28240300` | 768 | 0 | |
 | `0x282403f0..0x2826f000` | 191,504 | 0 | rodata — `event_groups.c`, `queue.c`, `stream_buffer.c`, `port.c`, `Audio Task` |
 | `0x282c0000..0x282dd52c` | 120,108 | 0 | rodata — `tasks.c`, `timers.c`, `heap_4.c` |
 | `0x28380000..0x283825c0` | 9,664 | 10 | |
-| `0x283825c4..0x2839bffc` | 105,016 | **604** | **code** (L2) |
+| `0x283825c4..0x2839bffc` | 105,016 | **604** | **code** (L1) |
 | `0x80000000..0x80000014` | 20 | 0 | |
 | `0x80000018..0x8052fbe0` | 5,438,408 | 0 | DDR, almost all zero fill |
+
+**[WRONG — corrected 2026-09-16] The L1 and L2 labels in the table above were
+the wrong way round**, and are corrected above. `0x28xxxxxx` is **L1** — four
+independent blocks, each reachable through its own word-size aliases, which is
+the property `load = exec * 2 + 0x28000000` depends on. `0x20000000` is **L2** —
+one unified instance, L2CTL0, sharing the space with the boot ROM. Cross-checked
+against the ADI manuals: SHARC+ Core Programming Reference Rev 1.5 ch. 7 for L1,
+ADSP-2156x Hardware Reference Rev 1.0 ch. 8 for L2.
+
+Found upstream: m-dwyer/digikit `786dc04` corrected the same inversion in its own
+`docs/SHARC-ADDRESS-MAP.md`, which had inherited it from our PR #3. **No address,
+count or conclusion changes** — only the two names.
 
 **1,616 cjumps, and they are not spread evenly** — they concentrate in two
 regions and are absent from seven. A decoder firing on noise would not do that.

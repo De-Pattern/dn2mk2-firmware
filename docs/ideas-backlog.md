@@ -735,6 +735,190 @@ never with a payload the firmware depends on to boot.
 
 ---
 
+## 8. New LFO waveforms
+
+**Owner's request, 2026-09-16**, queued while LFO4 was in build.
+
+**Why it looks cheap**, and cheaper than LFO4 by a long way: the waveform set is
+a **pointer table that is already read indirectly**. `docs/modulation-matrix.md`
+has it — `0x4020b340`, seven entries:
+
+| index | address | wave |
+|---|---|---|
+| 0 | `0x4013725e` | TRI |
+| 1 | `0x40137274` | SIN (parabolic approximation) |
+| 2 | `0x40137240` | SQR |
+| 3 | `0x40137252` | SAW |
+| 4 | `0x401372ce` | EXP |
+| 5 | `0x401372be` | RMP |
+| 6 | `null` | RND, handled inline by the tick |
+
+The generators are tiny — `0x40137240` to `0x401372ce` is **142 bytes for six
+waveforms**, about 24 bytes each. A new one is a small function in a cave, not a
+rewrite.
+
+**Against `docs/FEATURE-PLAYBOOK.md` §1's eight layers, most are free:**
+
+| layer | for a new waveform |
+|---|---|
+| 1 Parameter records | **none** — `WAVE` already exists; only its `max` at record `+0x0c` changes |
+| 2 Enumeration | **none** |
+| 3 Classifier | **none** — same page, same set |
+| 4 Slot space | **none** — same slot |
+| 5 Engine | **the work** — grow the table, write the generator |
+| 6 Serialization | **none** — the value is already stored |
+| 7 Page view | **none**, unless the name list needs an entry |
+| 8 Navigation | **none** |
+
+So it is layer 5 and one immediate, where LFO4 is all eight. **This is the right
+second test of the playbook**, alongside the MIDI-track LFO3 in §5 of that file —
+one feature that is nearly all engine, one that is nearly all plumbing.
+
+**What has to be read before it is priced**, and none of it is done:
+
+1. Where the `WAVE` parameter's **maximum** is enforced. Record `+0x0c` is the
+   obvious place, but the tick may clamp independently, and the formatter at
+   `+0x34` maps value → name.
+2. Whether the **name strings** come from a parallel table that also needs an
+   entry, or from the formatter.
+3. The **calling convention** of a generator: `0x4013725e` and its neighbours
+   take a phase and return a level; the exact registers and scaling have not
+   been written down.
+4. Whether the table is read anywhere other than the tick — the **UI graph**
+   almost certainly reads it too, and that is unresolved (`docs/lfo4-build-plan.md`
+   §5g).
+
+**Do not start this until LFO4 ships.** It shares the tick and the LFO page with
+LFO4, and two unshipped modifications to the same code is how the 2026-09-12
+probes ended up indistinguishable from each other.
+
+### FOUND 2026-09-17: the waveform table, and it is a seven-entry function pointer array
+
+This entry opened by saying the LFO designer's custom waveform table was *"not
+located"* — the same gap the Octatrack researchers record for their own device.
+It is located now, and it fell out of reading the two LFO evaluators for LFO4
+(`docs/lfo4-build-plan.md` §5k) rather than from any search aimed at it.
+
+**`0x4020b340` is an array of waveform generator function pointers**, seven
+entries of four bytes:
+
+| index | entry |
+|---|---|
+| 0 | `0x4013725e` |
+| 1 | `0x40137274` |
+| 2 | `0x40137240` |
+| 3 | `0x40137252` |
+| 4 | `0x401372ce` |
+| 5 | `0x401372be` |
+| 6 | `0x00000000` |
+
+Called indirectly: `movea.l %a0@(0,%d3:l:4),%a0` then `jsr %a0@`, with `%d3` the
+`WAVE` slot's coarse byte. Six small routines in a 142-byte run, and a **NULL
+seventh** — which matches `WAVE`'s record maximum of **6** (so seven values,
+0..6) and says the last waveform is not a function at all. `0x401372e0`, sitting
+just past the six and *not* in the table, calls `0x401343e0` and biases the
+result by `-524288` — the shape of a random source, which is what a seventh
+waveform with no generator would need.
+
+Two companion tables carry a per-waveform **start value**, chosen by the sign of
+the phase accumulator:
+
+| table | contents |
+|---|---|
+| `0x4020b308` | seven longwords, all zero |
+| `0x4020b324` | seven longwords, zero except index **4** = `0x7fffffff` |
+
+**Each of the three tables has exactly two `lea` sites, one per evaluator:**
+
+| table | evaluator B `0x401373dc` | evaluator A `0x40137726` |
+|---|---|---|
+| functions `0x4020b340` | `0x401375ee` | `0x401379fa` |
+| start `0x4020b308` | `0x40137514` | `0x40137916` |
+| start `0x4020b324` | `0x40137508` | `0x4013790c` |
+
+**Six longwords is the whole relocation cost.** There is no slack after
+`0x4020b340` — `0x4020b35c` begins a curve table — so an eighth waveform means
+copying 28 bytes into a cave as 32, repointing two `lea`s, and the same for
+either start table that the new shape needs. Then `WAVE`'s maximum goes 6 → 7 in
+the LFO records, and the generator itself is a cave routine.
+
+**What is still unread, and it is the UI half, not the engine half:**
+
+- the **name** the `WAVE` parameter shows — a string list somewhere, and the
+  eighth needs an entry;
+- the **waveform graph** the `[MOD]` page draws per column, which
+  `docs/lfo4-build-plan.md` §5i-d found is selected by a three-way index branch —
+  an eighth shape needs a glyph or it draws nothing;
+- whether the NULL seventh entry is guarded by a test before the `jsr`, or
+  reached by a branch that never indexes the table. **This must be read before
+  anything is written**, because if index 6 is special-cased by value then index
+  7 will fall into the same arm.
+
+**This makes §8 a small job on the engine side and an open one on the UI side**,
+which is the same split LFO4 hit at §5i. Priced honestly: the sound a new
+waveform makes is cheap; making the instrument *show* it is not.
+
+### BUILT 2026-09-17: `STP`, an eighth waveform
+
+`scripts/build_lfo_wave8.py` → `00_Resources/02_Builds/lfo-wave8_DN2_1.11.syx`.
+All 21 integrity checks pass and the HMAC trailer is reproduced.
+
+![STP against the SAW it quantises](img/stp-waveform.png)
+
+**`STP` is the ramp quantised to eight levels** — the one shape the stock seven
+do not contain, and audibly unlike every one of them: a pitch destination steps
+instead of gliding, a filter destination climbs a fixed ladder. Available on
+every LFO of every track, and it is an ordinary value of the existing `WAVE`
+slot, so a preset saved with it stores nothing new.
+
+The whole feature is **nine pointer edits, three record maxima and an 18-byte
+routine**:
+
+```
+step8:
+    move.l  %sp@(4),%d0
+    eori.l  #0x7fffffff,%d0     | the stock SAW generator, entire
+    andi.l  #0xe0000000,%d0     | keep three bits: eight levels
+    rts
+```
+
+**The fourth instruction is the one that matters.** Masking alone takes the
+**floor** of each eighth, so the levels land on +0.75, +0.50, +0.25, 0, −0.25,
+−0.50, −0.75, −1.00 of full scale: evenly spaced, but with a mean of **−1/8 full
+scale** — an LFO carrying a DC offset, which would pull its destination down by
+an eighth of the depth for as long as it ran. `addi.l #0x10000000,%d0` adds half
+a step and lands them on ±0.875, ±0.625, ±0.375, ±0.125 — still eight levels,
+still one step apart, now symmetric about zero like every stock waveform. The
+wrap at the top is exact, so no clamp is needed.
+
+**It was caught by plotting the generator's own arithmetic, not the intent**, and
+the build was rebuilt before the picture above was finished. A staircase is the
+kind of shape that looks obviously right in the head and is off by half a step on
+the page. `[METHOD] Draw what the code computes, not what it was meant to.`
+
+All five seven-entry tables are copied into a cave as eight and their nine
+`lea`/`pea` sites repointed; `WAVE`'s maximum goes 6 → 7 in the three LFO
+records. The name list reads back `TRI SIN SQR SAW EXP RMP RND STP`.
+
+**The question that decided whether this was possible, answered before anything
+was written:** index 6 (`RND`) has a **NULL** generator, so an eighth index had
+to be shown not to fall into whatever handles it. `0x401379e8` compares the
+waveform against 6 **by value** and branches away before the indexed `jsr`, so
+the NULL is never called and index 7 reaches the call exactly as 0–5 do. Had
+that been a bound rather than an equality, the table copy would have been
+pointless.
+
+**The one unread risk, and what to do about it.** The `[MOD]` page draws a small
+waveform graph for the `WAVE` column through a virtual call at `0x4010e1a0`
+(`%a1@(180)`) whose renderer was not traced. It may draw nothing for an unknown
+waveform, or index a glyph table by value. **Select `STP` while watching for a
+freeze**; if the page hangs, power-cycle and reflash stock by the route in
+`docs/flashing.md`. The audio does not depend on the page being open.
+
+**Still open, and cheap now that the tables are found:** naming is solved but the
+graph is not, which is the same UI/engine split LFO4 hit at
+`docs/lfo4-build-plan.md` §5i. Whoever traces the widget renderer closes both.
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
@@ -1111,6 +1295,11 @@ kind of value and a much easier thing to explain to someone who does not care
 how an ELE3 container is laid out. It is also small enough to finish, which none
 of §1, §4, §6, §7 or §8 currently are.
 
+**See also §13**, which is the small half of this: not replacing the animation
+but adding a mod stamp beside the logo it already draws. §13 answers the first
+question of this entry as a side effect, because a `setPixel` trace during the
+intro says whether the frames are stored or procedural.
+
 ---
 
 ## 10. The arpeggiator on MIDI tracks
@@ -1329,3 +1518,242 @@ six descriptor lists' depth halves.
 
 Item 4 gates the others: it is cheap, and it could make this whole entry
 unnecessary by showing the mechanism already exists.
+
+---
+
+## 13. A mod stamp on the intro screen
+
+**Asked for by the owner, 2026-09-16**, in two steps on the same day. First:
+*"is there any way that we can start marking the fw somehow to know what the
+machine is holding at each time?"* — then, when it was clear the machine can
+answer that question: *"I want to make it clear also to the users backing these
+mods"*, and finally the shape it should take — **mod the intro screen, adding a
+custom graphic next to the Elektron logo, together with the version.**
+
+That last sentence is the entry. The two earlier ones are why it matters: an
+instrument running a modified image currently looks exactly like one running
+stock, and the person who has to know the difference is not us — it is whoever
+flashed it.
+
+### Why this is a different job from §9, and easier
+
+§9 is *replace the boot animation*, a size-budgeted asset problem that starts
+with "we have never looked at where the frames live". This is *add a mark to the
+screen that already draws*, and the difference matters:
+
+- **It composes rather than replaces.** The Elektron logo stays. A stamp beside
+  it needs its own pixels and its own position, not a frame sequence that fits a
+  budget.
+- **It has a known drawing primitive.** `docs/display-path.md` and `emu/panel.py`
+  record that the intro draws through `Bitmap::setPixel`, which the main OS's
+  own UI never calls. A hook there is a hook on a path with one caller family.
+- **It is where our cave already runs.** `docs/code-caves.md`'s only confirmed
+  injection is on the boot path. Whatever this needs, it needs it in the one
+  region where execution is proven rather than assumed.
+- **It is visible without a flash.** `scripts/drive.py` writes the panel out as
+  a PNG, and as of 2026-09-16 the emulator runs DN2 1.11 past the intro into
+  `INITIALIZING +DRIVE...` — so the stamp can be iterated offline and flashed
+  once it looks right.
+
+### The version half is not the same problem as the graphic half
+
+Worth separating, because one is nearly free and the other is not.
+
+**The version text.** The boot screen's bottom-right version and bottom-left
+letter are **composed at runtime**, not drawn from a stored string — so this is
+not a same-length string overwrite. Note the trap already paid for once:
+`'Digitone II'` at `0x4021a2d2` is the **service-serial identity**, reached by
+`#SERIAL`-class commands (`docs/service-commands.md`), *not* the boot screen.
+Changing it changes what the service report says and nothing a booting user
+sees. Find the composer, not a string.
+
+**Where the mod identity should come from.** The ELE3 container already carries
+a build stamp — section id 5 is 15 raw ASCII bytes with no header
+(`docs/emulator.md`), and the header itself holds a build string at `+0x08` and
+a version at `+0x13` (`docs/ele3-format.md`). **The honest design reads the mod
+identity out of the image rather than hard-coding it in the cave**, so a rebuilt
+image cannot disagree with what it prints. That also makes the stamp mean
+something for §11: two mods in one image should produce one stamp that names
+both, which is a manifest question before it is a drawing question.
+
+**The graphic.** Unknown size, unknown format, and it competes for space with
+everything in §1 and §6. A 16×16 monochrome mark is 32 bytes and fits anywhere;
+anything larger needs the budget measured first.
+
+### The first question, and it is cheap
+
+**What draws the bottom-right version string, and does it leave room beside the
+logo?** Hook `setPixel` during the intro under the emulator, record every call
+with its coordinates, and the answer is a picture: which regions are drawn by
+what, in what order, and where the free space is. That is the same
+watch-don't-scan move that §2.1b of `docs/FEATURE-PLAYBOOK.md` records as the
+thing that works, and it answers the layout question and the composer question
+in one run.
+
+### What must not happen
+
+The stamp is for the owner and for whoever is running a modified image. It must
+not imply Elektron authorship or endorsement, and it must not pretend to be a
+stock version string — the point is to make the difference **visible**, which is
+the opposite of blending in.
+
+**Queued, not started.** The order the owner set on 2026-09-16 is LFO4 first,
+then the boot screen, and this entry is the boot screen's user-facing half.
+### 13.1 A flip-flap logo
+
+**Owner's proposal, 2026-09-16**, with a picture: Sara Ball's *Croc-gu-phant*,
+the children's flip-flap book where each horizontal band of the page turns
+independently, so a crocodile head sits on a leopard torso on elephant legs.
+Suggested elements were musical instruments rather than animals.
+
+**[CORRECTED the same day, and the correction is the important part.]** This was
+first written up as *the identifier* — bands as digits, the figure as a number
+you read off the screen. The owner's clarification: **no.** *"We keep the
+hash/versioning — this is just a fun way of making the logo at booting something
+that follows the concept of the mod."*
+
+So the division of labour is:
+
+| | carries | must be |
+|---|---|---|
+| **version + hash** (§13) | the identity | exact, readable, authoritative |
+| **the figure** (this entry) | the character of the build | recognisable, not decodable |
+
+Recorded because the over-engineered version is the one that will be
+re-proposed. A figure that has to be *decoded* needs a band registry, a reserved
+value for unregistered mods, and a rule for what happens when there are more
+mods than bands — all of it real work, all of it in service of a job the hash
+already does better. **Nobody has to read the creature. The hash is right there.**
+
+#### What this buys instead, and why it is still worth doing
+
+The logo is the one place on the boot screen where a person's eye already goes,
+and a composite logo says *this machine is not stock* in the instant before
+anyone reads a version string. That is §13's whole purpose, delivered by
+recognition rather than by literacy.
+
+And it says it **in the shape of the thing itself**: a modular instrument,
+running modular firmware, announcing itself with a figure assembled from parts.
+The joke is load-bearing.
+
+#### What it changes about the build
+
+All of it in the direction of less work than §13.1 originally implied.
+
+- **It is the logo, not the animation.** §9 is a frame sequence. This is **one
+  static drawing at one moment** — no timing, no budget for motion.
+- **The figure need not be derived from a manifest.** Deriving the bands from
+  the same hash §13 already computes is enough, and is one line. The §11
+  manifest tie-in was a consequence of wanting the figure decodable; it goes
+  with that requirement.
+- **Collisions do not matter.** Two different mod sets drawing the same creature
+  is a non-event, because the hash beside it differs. This removes the only hard
+  constraint the original version had.
+
+#### The budget, which is not a problem
+
+At 128×64 mono (`emu/panel.py`) a three-band figure at 36×48 is 36×16 a band,
+**72 bytes at 1 bpp**. Twelve parts is **864 bytes**. That fits the ~29 KB of
+existing padding and needs neither §1's reclaimed space nor §6's section — the
+rare entry on this page with no space problem.
+
+What binds is **legibility at 36×16 monochrome**. Strong silhouettes only: a
+horn's flared bell, a keyboard's black-key comb, a drum shell's lugs, a string
+bridge. Interior detail will not survive, and the parts have to read as
+*belonging to different instruments* at that size or the joke does not land.
+
+#### The property worth protecting
+
+**Stock draws the stock logo.** An unmodified image boots exactly as Elektron
+shipped it, and the composite appears only when something has been changed. The
+figure's *presence* is the signal; its composition is the flavour.
+
+#### It replaces the logo — owner, 2026-09-16
+
+Not beside it, not built from it. **The composite figure stands where the
+Elektron logo stands.** Three things follow.
+
+**The footprint is inherited, not negotiated.** The figure gets the logo's box,
+whatever that turns out to be. No hunt for free space, no layout code deciding
+where things sit — the `setPixel` trace §13 already calls for measures the box,
+and the box is the spec.
+
+**It may be a data swap rather than a cave.** If the logo is stored bitmap data
+drawn by a generic blitter, replacing it is a same-footprint byte replacement —
+the cheapest class of change in this project, and the same class as Gate E's
+string patch, which is flashed and proven. If it is drawn procedurally, it is a
+cave on the boot path, which `docs/code-caves.md` has also proven. **Either way
+the mechanism exists**; the trace says which one, and that is the whole first
+question.
+
+**It settles §13's authorship constraint outright.** §13 says the stamp must not
+imply Elektron authorship. Removing their mark is the strongest possible form of
+not claiming it — the boot screen stops carrying a manufacturer's brand rather
+than carrying one over modified code.
+
+#### The owner's concept art — 2026-09-16
+
+![The mod logo concept: a creature assembled from instrument parts](img/mod-logo-concept.png)
+
+Registered as **the reference for this entry**. It is 1024x512, 1-bit in
+appearance, and reads left to right as: a **trumpet** bell and valve cluster at
+the front, a small **synth/robot head** above, a **drum or cymbal** as the rear
+body, and a **guitar neck** for a tail, standing on four thin legs.
+
+**It answers the geometry question below by demonstration rather than argument.**
+The bands run **horizontally** -- trumpet, torso, drum, tail -- and the figure is
+**exactly 2:1**, which is a wordmark's proportion, not a stacked creature's. The
+reasoning in the next section was written before this arrived and the drawing
+independently arrives at the same layout.
+
+It also fixes the visual language: **pure 1-bit, no dither, outline-led**, which
+is what the panel is (`emu/panel.py`: 128x64 mono). So the medium is already
+right; nothing has to be adapted from a greyscale or colour original.
+
+**It is concept art, not the asset, and the difference is the whole practical
+problem.** At 1024x512 the outlines are one pixel wide. Mapped into the panel
+they would be:
+
+| target box | scale | what happens to a 1px outline |
+|---|---|---|
+| 128x64 (full screen) | 1/8 | sub-pixel -- the figure must be redrawn, not scaled |
+| 96x48 | 1/10.7 | worse |
+| 64x32 | 1/16 | far worse |
+
+**Downscaling this file will produce mush at every one of those sizes.** The
+figure has to be **redrawn pixel by pixel at the target box**, using the concept
+for its silhouette vocabulary and part order, not its line work. That is a
+drawing job measured in hours, and it is the honest cost of this entry -- the
+`setPixel` trace only says how many pixels there are to draw into.
+
+**What the redraw has to preserve**, in priority order:
+
+1. the **part order** left to right, because that is the encoding;
+2. each part being **recognisable as a different instrument** at the target size,
+   which is the constraint that will force parts to be dropped or simplified;
+3. the four legs and the head, which are what make it read as a creature rather
+   than a pile of objects.
+
+#### The geometry problem this creates, which is real
+
+**The Elektron logo is a wordmark: wide and short. A flip-flap creature is tall.**
+Those do not compose. A three-band figure stacked vertically into a wordmark's
+box gives each band a few pixels of height and nothing reads.
+
+**The fix is to turn the bands ninety degrees**, and it suits the subject better
+than the original did. Instruments are *already* segmented along their length:
+
+| instrument | left | middle | right |
+|---|---|---|---|
+| horn | mouthpiece | tubing | flared bell |
+| guitar | headstock | neck | body |
+| flute | headjoint | body | foot |
+| drum kit | hi-hat | shell | cymbal |
+
+Bands running **left to right** fill a wordmark's footprint naturally, and a
+mouthpiece on a guitar neck ending in a flared bell is exactly the Croc-gu-phant
+joke in the register the owner asked for. Vertical stacking was an artefact of
+the book, not of the idea.
+
+Budget is unchanged in total and only redistributed: three bands across a wide
+short box rather than a narrow tall one.

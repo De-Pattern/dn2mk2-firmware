@@ -816,6 +816,7 @@ Three flashes' worth of conclusion, stated plainly:
    consult the page id and choose between the six `ParameterSet` accessors at
    `0x400dc02a`, `0x400dc0b0`, `0x400dc0ca` and `0x400dc0e4`. Those four are
    reached through vtables, so **whoever picks between them is the target**.
+   **FOUND 2026-09-16 — see "The runtime classifier, found" below.**
 
 ### The damage is runtime-only — an earlier warning here was overstated
 
@@ -1075,3 +1076,478 @@ nothing beyond a mistake already made.
 Those eight locks are **real stored data on A1 track 1 trig 5** and stock
 firmware is honouring seven of them. They will not clear themselves — clear the
 locks on that trig, or restore the pattern.
+
+## The runtime classifier, found — 2026-09-16
+
+The blocker `STATUS.md` has carried since the third probe flash. It is a
+**virtual predicate**, not a switch, which is why scanning for a page-id
+cascade never found it.
+
+### The four parameter sets are real C++ classes, and RTTI names them
+
+| class | typeinfo | vtable |
+|---|---|---|
+| `SoundParameterSet` | `0x401db6d8` | `0x401db7fc` |
+| `FxParameterSet` | `0x401db6e4` | `0x401db884` |
+| `TrigParameterSet` | `0x401db6f0` | `0x401db90c` |
+| `MidiParameterSet` | `0x401db6fc` | `0x401db994` |
+
+All four derive from a common base (`0x401db6cc`). `Track` (`0x401deb80`,
+constructed at `0x400515d0`) embeds a `TrigParameterSet` at `+52`.
+
+### Slot `+0x54` is the classifier
+
+Every one of the four vtables carries, at **offset `0x54`**, a predicate that
+takes a **parameter id**, indexes the parameter table at `0x401f7f94`
+(`60 × id`), reads the **page id at `+0x00`**, and answers a page test. The
+shape is identical in all of them:
+
+```
+0x400dbe8a  movel %sp@(4),%d0          ; parameter id
+0x400dbe8e  cmpil #321,%d0             ; bounds against the 321-record table
+0x400dbe94  scs %d1
+0x400dbe96  lea 0x401f7f94,%a0         ; the parameter table
+0x400dbe9e  andl %d1,%d0               ; clamp to 0 if out of range
+0x400dbea0  ... %d0 = 60 * id          ; (id<<6) - (id<<2)
+0x400dbea8  moveq #4,%d1
+0x400dbeaa  cmpl %a0@(0,%d0:l),%d1     ; vs the record's PAGE ID
+0x400dbeae  scc %d0                    ; page <= 4
+```
+
+| set | predicate | pages it claims |
+|---|---|---|
+| `SoundParameterSet` | `0x400dbe8a` (via `0x40036bfa`) | `page <= 4` |
+| `FxParameterSet` | `0x400dbf4e` | `0x10`–`0x15` |
+| `TrigParameterSet` | `0x400dbf82` | `0x1d` **or** `0x16` |
+| `MidiParameterSet` | `0x400dbfbc` | `0x16`–`0x1c` |
+
+A fifth of the same shape sits at `0x400dbeb6` — pages `0x05`–`0x0a` — and is
+**not yet attributed to a class**.
+
+~~The predicate slot is called from **24 sites** across the image (the accessor
+slot `+0x50` from 58).~~ **[WRONG — corrected 2026-09-16, same day.]** That
+count came from scanning for *any* virtual call through offset `0x54`, on any
+class. Vtable offsets are per-class, and most of those 24 belong to unrelated
+types — `0x40031eaa` passes three arguments through slot `0x54`, where the
+`ParameterSet` predicate takes one. **The number meant nothing.** The real
+callers are counted below, by direct call to the concrete predicates.
+
+### Who actually asks
+
+Direct calls to the concrete predicates, which is the honest count:
+
+| predicate | direct callers |
+|---|---|
+| `0x400dbe8a` Sound | `0x40036c04` (the vtable body), `0x40064e90` |
+| `0x400dbeb6` unattributed | `0x40064f14` |
+| `0x400dbf4e` Fx | `0x40036778`, `0x40041a96`, `0x4004484e`, `0x40067656`, `0x4006768a`, `0x40067dd4`, `0x40067f32` |
+| `0x400dbf82` Trig | `0x400369d6`, `0x40041a74` |
+| `0x400dbfbc` Midi | `0x400369f6` |
+
+### Why the probe failed — read, not inferred
+
+**Page `0x1f` is claimed by no predicate**, and the cascade at `0x40041a72` has
+**no default guard**:
+
+```
+0x40041a74  jsr 0x400dbf82      ; Trig?  page == 0x1d || 0x16
+0x40041a7c  tstl %d0
+0x40041a7e  beqs 0x40041a94     ;   no
+0x40041a90  braw 0x4003f0b6     ;   YES -> the Trig path
+0x40041a96  jsr 0x400dbf4e      ; Fx?    page 0x10-0x15
+0x40041aac  tstl %d0
+0x40041aae  beqs 0x40041abe     ;   no
+0x40041ab8  jmp 0x40030aec      ;   YES -> the Fx path
+0x40041ac6  jmp 0x400312fe      ;   FALL THROUGH, unconditional
+```
+
+Two tests, then an unconditional jump. An unclaimed page is not rejected, not
+logged and not defaulted — it simply takes the last branch. `0x400312fe`
+computes byte offsets into the track structure (`+15856`, `+16964`, …), which
+is the sound-side addressing.
+
+That is the observed symptom exactly: `VEL` reading 112 (LFO1 `SPD`'s default)
+and `PROB` re-aiming LFO2. **This was inferred from the symptom when first
+written here; it is now read from the code.**
+
+This also explains why patching `param_set_tables_build` bought nothing. That
+function builds the BSS enumeration tables at boot; **this** decides ownership
+at every read and write, and it never consults them.
+
+### What it costs, and the honest caveat
+
+These are **one-byte constants of the same kind as the six range tests** —
+`moveq #4`, `moveq #5`, `moveq #6`, `moveq #29`. Widening one to cover `0x1f`
+is a one-byte edit; the difficulty is that `0x1d` (Retrig) and `0x1e` (None)
+sit between `0x1c` and `0x1f`, so a *contiguous* widening of the `0x16`–`0x1c`
+range swallows both. `TrigParameterSet`'s predicate shows the alternative in
+the shipped code: **an exact-match disjunct** (`page == 0x1d || page == 0x16`).
+That is the form LFO4 needs, and it is already proven to compile and run here.
+
+**Not yet established, and do not price the job until it is:**
+
+1. The exact semantics of slot `+0x54`. "Owns this parameter" fits every
+   observation, but `SoundParameterSet` claiming only pages `0`–`4` is
+   surprising for the set with the most pages, and the unattributed
+   `0x400dbeb6` may mean ownership is expressed in more than one place.
+2. ~~Whether any of the 24 predicate call sites takes a different branch for an
+   unclaimed page.~~ **CLOSED — read at `0x40041a72`: two tests, then an
+   unconditional fall-through with no default guard.** Whether the other
+   cascades (`0x40064e90`/`0x40064f14`, and the `0x40067xxx` cluster) have the
+   same shape is not checked.
+3. Whether slot `+0x50` (the accessor) needs the same treatment.
+
+## The complete page map, and the arpeggiator is not in it — 2026-09-16
+
+Dumped from the 321-record table at `0x401f7f94`, every page with its label and
+short names. Written down because two questions turned on it the same day and
+both were being answered by guesswork.
+
+| page | label | n | parameters |
+|---|---|---|---|
+| `0x00`–`0x03` | `SYN` | 38/25/30/8 | the four machine pages |
+| `0x05`–`0x0a` | `Filter` | 3/2/3/3/3/3 | per filter type |
+| `0x0b` | `Amp` | 11 | `DEL ATK HOLD DEC SUS REL BAL PAN VOL MODE RSET` |
+| `0x0d` | `Filter` | 11 | the filter envelope |
+| `0x0e` | `Portamento` | 2 | `PTIM PORT` |
+| `0x0f` | `FX` | 8 | `CHR DEL REV BR SRR SR.RT OVER OD.RT` |
+| `0x10`–`0x12` | `Chorus`/`Reverb`/`Delay` | 8/9/10 | |
+| `0x13`–`0x14` | `Master` | 2/9 | |
+| `0x15` | `Ext-in` | 17 | |
+| `0x16` | *(none)* | 4 | `NOTE NOT2 NOT3 NOT4` |
+| `0x17` | `Src` | 8 | `CHAN BANK PROG PB AT MW BC SBNK` |
+| `0x18` | `CC` | 16 | `VAL1`–`VAL16` |
+| `0x19` | *(none)* | 16 | `SEL1`–`SEL16` |
+| `0x1a`/`0x1b`/`0x1c` | `LFO1`/`LFO2`/`LFO3` | 10 each | `SPD MULT FADE DEST WAVE SLEW SPH MODE DEP MULT` |
+| `0x1d` | *(none)* / `Retrig` / `Euclidean` | 10/4/8 | the TRIG group |
+| `0x1e` | *(none)* | 1 | `---` |
+| `0xffffffff` | *(none)* | 19 | the dead `ERR` slots |
+
+### There is no arpeggiator page, and no arpeggiator record
+
+**Pages `0x00`–`0x1e` are fully accounted for above and none of them is the
+arpeggiator.** A scan of all 321 records for a name containing `Arp` returns
+**nothing**.
+
+That answers the owner's standing request to *"enable p-locking for the
+arpeggiator settings"* at the level of what the job actually is. Arp state is
+**not a parameter** on this instrument: it has no record, so no parameter id, no
+`+0x04` slot index, no entry in the forward map `0x401fcf20`, and therefore no
+p-lock id. It is not that arp locks are disabled — **there is nothing to lock**.
+
+So p-lockable arp is not a flag to flip. It is the full eight-layer job in
+`docs/FEATURE-PLAYBOOK.md` §1, starting at layer 1 with records that do not yet
+exist, and it needs the arp state's real home found first. DNX's arp capture
+(two presets differing only in `MODE`) is the right next measurement precisely
+because it will show **where** that state lives.
+
+### And it bounds the v3 probe's blast radius
+
+DNX asked, before their capture, whether a preset saved under the v3 build could
+place a value at a different stored offset than stock. The page map settles half
+of it: **no arp record is on page `0x1d`**, so nothing v3 renumbers is an arp
+control. The other half is conditional and is answered in
+`docs/lfo4-build-plan.md` §5c.
+
+## The arpeggiator block, located — 2026-09-16
+
+Follows from "there is no arpeggiator parameter at all" above. Arp state is not
+in the parameter table, so DNX captured it from the instrument instead: five
+presets saved on **stock 1.11**, differing only in arp `MODE`. It sits at
+**stored offset 331** of the 359-byte sound object, outside the `+28` p-lock
+block — exactly where a thing with no p-lock id has to be.
+
+The firmware side then gave the whole block. The v3 sound converter
+`0x400dd49a`–`0x400dd5a6` walks fourteen bytes:
+
+| stored | bound | if out of range | read as | live |
+|---|---|---|---|---|
+| 324 | 3 | 0 | signed | `+326` (long) |
+| 325 | 2 | 0 | signed | `+330` (long) |
+| 326 | 100 | **100** | unsigned | `+334` (byte) |
+| 327 | 2 | 0 | signed | `+335` (long) |
+| 328 | 1 | 0 | signed | `+339` (long) |
+| 329 | 1 | **1** | signed | `+343` (long) |
+| 330 | 1 | 0 | signed | `+347` (long) |
+| **331** | **4** | 0 | signed | `+351` (byte) — **`MODE`** |
+| 332 | 22 | **13** | unsigned | `+352` (byte) |
+| 333 | 7 | 0 | signed | `+353` (byte) |
+| 334 | *(negative test)* | **14** | signed | `+354` (byte) |
+| 335 | 15 | **15** | unsigned | `+355` (byte) |
+| 336–337 | — | — | **word** | `+356` — **per-step enable mask** |
+| 338–353 | none | none | raw 16-byte copy | `+358` — **per-step semitone offsets** |
+
+### The last two fields are a pair, and neither is what this project first said
+
+**`336..337` is a 16-bit per-step enable mask.** Not a sentinel — the consumer at
+`0x4004bd90` does `1 << step`, `or` to set and `andnot` to clear, into one word:
+
+```
+0x4004bd94  lsll  %d2,%d1          ; d1 = 1 << step
+0x4004bd98  movew %a0@(356),%d2
+0x4004bd9c  orl   %d2,%d1          ; SET
+0x4004bdb2  notl  %d1              ; or, on the other arm,
+0x4004bdb4  andl  %d2,%d1          ; CLEAR
+0x4004bdb6  movew %d1,%a0@(356)
+```
+
+**`338..353` is a 16-byte per-step semitone-offset map** — one byte per step,
+copied raw with **no bound and no signedness check**, unlike the twelve scalars.
+The firmware trusts what is stored, so the range is enforced by the UI on the
+way in, not on the way out.
+
+Together they answer "off versus on at zero semitones": both store `0x00` in the
+map, and **the bit in the mask is what separates them**.
+
+So the arp region is **324..353**, and the name is at **12..27** (`0x400dd226`,
+`pea %a3@(12)` with `pea 0x10`).
+
+### Two things this project got wrong here, both the same mistake
+
+1. ~~`0x400dd5aa` copies 16 bytes from stored 338 — the name — so the block ends
+   at 338.~~ **Wrong.** It is the per-step offset map. The boundary claim came
+   from assuming a 16-byte copy near the end of an object must be a name.
+2. ~~`0xFFFF` at 336..337 is this firmware's "unassigned" sentinel, as in the
+   parameter records' CC and NRPN fields.~~ **Wrong.** It is **all sixteen bits
+   set — every step enabled**, the sensible default for an arp.
+
+Both were reasoning from a **resemblance** instead of from a **consumer**, which
+is `docs/FEATURE-PLAYBOOK.md` §2.3 in a new costume. DNX caught both from the
+stored bytes before the code was read.
+
+### And version 0 cannot hold any of it
+
+DNX measured the object terminator `BACEF00C` at **315** in a version-0 object
+(content length 319) and at **355** in a version-3 one (359). **A version-0
+object ends before offset 331.** The image agrees from the other side: a scan
+for any read of `+0x14B` through any address register returns **exactly one
+site**, `0x400dd532`, inside the version-3 converter. Nothing else in the image
+reads it.
+
+~~So the arp block is **defined only by object version 3**.~~ **[TOO STRONG —
+corrected 2026-09-16 by DNX's corpus.]** A zero at 331 in *that* version-0 object
+is padding past the terminator, and that part stands. The generalisation does
+not.
+
+DNX scanned **26 projects, 3,328 patterns, 53,248 kit sound records**: all full
+length, terminator at 355, arp block at the agreed offsets — and their header
+version reads **2** in 51,200 and **1** in 2,048. **Not one reads 3.** So a
+header-v2 object carries the block.
+
+Both readings are true, and the upgrade chain is where they meet. The v1 arm at
+`0x400e04fc` is decisive:
+
+```
+0x400e04fe  cmpl %a3@(4),%d0        ; version == 1 ?
+0x400e0504  pea 0x167               ; 359 -- the WHOLE object
+0x400e0512  jsr 0x40134490          ; bulk memcpy
+0x400e0528  mvsb %a3@(332),%d0      ; then remap field 332
+0x400e0532  moveb %a0@,%a2@(332)
+0x400e053c  movel #2,%a2@(4)        ; and stamp version 2
+```
+
+A v1 object is **already full length** — it is copied wholesale. By the time the
+v3 converter reads offset 331, the object has been promoted. So "only the v3
+converter reads 324/331/336" and "v1 and v2 objects carry the block" are
+compatible, and **the predictor of presence is the object's length, not its
+header version**. 319 bytes has no room; 359 does.
+
+### Field 332's encoding changed between v1 and v2
+
+Bonus from the same arm, and actionable for anyone reading old objects. The
+remap is a table at **`0x401fcad0`**, 72 bytes, 18 longwords, indexed by the
+stored byte:
+
+| v1 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **v2** | 0 | 2 | 4 | 5 | 6 | 8 | 9 | 10 | 12 | 13 | 14 | 16 | 17 | 18 | 19 | 20 | 21 | 22 |
+
+**Eighteen v1 values into a 0..22 v2 range**, skipping 1, 3, 7, 11, 15 — five new
+options inserted into a menu that had eighteen. It matches field 332's bound of
+22 exactly, and its default of 13 is v1's 9.
+
+So a v1 object's 332 is **not** directly comparable with a v2 or v3 one. DNX has
+2,048 v1 records in their corpus; this table translates them.
+
+### The prediction made from this was backwards — and the table survived
+
+This project predicted that DNX's histogram would show **holes at 1, 3, 7, 11,
+15 in the v1 portion**. DNX ran it on 53,248 records. The holes are in the **v2**
+portion:
+
+| | n | range | on 1, 3, 7, 11, 15 |
+|---|---|---|---|
+| v1, all | 2,048 | 0..17 | `1:1  3:1  7:2  11:3` |
+| v2, all | 51,200 | 0..22 | **none** |
+| v1, arp engaged | 33 | 1..17 | `1:1  3:1  7:2  11:2` |
+| v2, arp engaged | 300 | 9..19 | **none** |
+
+**Obvious in hindsight, and worth writing down because it was not obvious
+beforehand.** A v1 object stores a **v1 index**, and all eighteen are reachable,
+so 1, 3, 7 and 11 appear there as ordinary values. A v2 object stores a **v2
+value**, and 1, 3, 7, 11, 15 are exactly the five the map never produces. The
+holes belong to the *target* encoding, not the source. I predicted them on the
+wrong side.
+
+The insertion reading itself **survives intact**, and now has endpoints from both
+sides: v1 max 17 against eighteen values, v2 max 22 against a bound of 22.
+
+**DNX's own caveat is worth preserving:** 300 v2 records with the arp
+deliberately engaged, across seven distinct speeds, and not one on a new value.
+That is what you would see if every v2 record were *promoted from v1* rather than
+authored at v2 — or if the owner simply never chose a triplet. One person's
+projects cannot separate those, and DNX declined to pretend otherwise. A project
+authored on v2-era firmware by somebody else would settle it.
+
+**Consequence for DNX:** their copy path writes version-0 objects onto a device
+that saves version 3, so a DNX-copied preset carries **no arp state at all**. It
+reads back byte-identical and plays, which is exactly why nobody noticed.
+
+**Confirmed by exhaustion.** A scan of the whole image for any read of each
+arp-block offset through any address register returns **one site each**, and all
+three are in the same function:
+
+| stored offset | sites | where |
+|---|---|---|
+| 324 (block start) | 1 | `0x400dd49c` |
+| 331 (`MODE`) | 1 | `0x400dd532` |
+| 336 (the mask) | 1 | `0x400dd5a0` |
+
+All inside the version-3 converter `0x400dd1ea`. The upgrade chain does carry
+version-0 gates (`tstl %aN@(4)` at `0x400e074a`, `0x400e1014`, `0x400e119a`,
+`0x400e1322`) and **not one of them touches 324..353**.
+
+### The live/stored delta is not constant — do not translate with `+20`
+
+Worth its own note because it is an easy and wrong shortcut. The stored side is
+all bytes; the live side is a **mixed struct** — seven longwords, then bytes — so
+the converter expands as it goes:
+
+| stored | live | delta |
+|---|---|---|
+| 324 | 326 (long) | +2 |
+| 325 | 330 (long) | +5 |
+| 326 | 334 (**byte**) | +8 |
+| 327 | 335 (long) | +8 |
+| 328 | 339 (long) | +11 |
+| 329 | 343 (long) | +14 |
+| 330 | 347 (long) | +17 |
+| **331**–335 | 351–355 (bytes) | **+20** |
+| 336 | 356 (word) | +20 |
+| 338 | 358 (16 bytes) | +20 |
+
+`+20` holds from 331 onward and **is wrong below it**, by up to eighteen bytes.
+The arithmetic closes exactly — `326+4=330`, `330+4=334`, `334+1=335`, …,
+`347+4=351` — which is a good check that the table is right.
+
+### The substitution value is the default, and it cross-checks the capture
+
+The converter does not clamp to the bound. When a value exceeds it, it
+substitutes a **specific** value — 100, 1, 13, 14, 15 — and those are the
+parameters' defaults, readable without turning a single knob.
+
+DNX's capture measured non-zero at **326=100, 332=13, 334=14, 335=15** — all four
+at exactly their substitution values, i.e. four knobs sitting untouched at
+default. Two independent readings agreeing, from opposite ends.
+
+**`MODE`'s bound is 4**, which independently corroborates five values (OFF, TRUE,
+UP, DOWN, CYCL) and makes `0` a legal value of the field. It does **not** prove
+`0` is labelled OFF; DNX is taking one more save rather than writing that down
+as measured.
+
+### What this means for p-lockable arp
+
+The owner's standing request is now scoped. Arp has **no parameter record, no
+slot index, no forward-map entry and no p-lock id** — it lives in its own
+fourteen-byte region of the stored sound. Making it p-lockable is the full
+eight-layer job in `docs/FEATURE-PLAYBOOK.md` §1 starting at layer 1, with the
+one saving grace that **the values already persist**: they are stored, they have
+known bounds and known defaults, and the converter that reads them is located.
+
+### A correction worth keeping
+
+This project first read the version-3 addition as *"four bytes appended at 248"*.
+DNX read the bytes and it is **244**, tagged: `00 01 03 00` prepended in front of
+the existing `00 01 02 00`, with `v0[n] === v3[n+4]` for 44 of 44 offsets checked
+in 248..291. A nested version-tagged sub-record, not an extended run. The
+converter reading 244..251 as eight independent single bytes fits that and does
+not distinguish it — the bytes did.
+
+### PINNED on hardware, and the block is 331..353 not 324..353
+
+DNX had the owner save one step per control into `H/136`–`H/144`. Every save
+moved **exactly one byte**:
+
+| stored | control | default | after one step |
+|---|---|---|---|
+| 331 | **MODE** | 0 (OFF) | 1..4 |
+| 332 | **SPD** | 13 | 14 |
+| 333 | **RNG** | 0 | 1 |
+| 334 | **N.LEN** | 14 | 15 |
+| 335 | **LEN** | 15 | 14 |
+| 336–337 | per-step enable mask | `ffff` | `fffe` |
+| 338–353 | per-step semitone offsets | zeros | `07`, `f9` |
+
+**So field 332 is arp SPD**, and the v1→v2 remap table at `0x401fcad0` is the
+**arp speed list** — eighteen values gaining five interleaved ones, which for a
+rate list is what adding triplet or dotted divisions looks like. Default 13 in
+v2 is the same speed as 9 in v1.
+
+Two more, both confirming readings taken from the code:
+
+- **Bit 0 is step 1, LSB first.** Switching step 1 off gives `fffe`. The mask bit
+  and the map byte index the same step independently.
+- **Two's complement, directly:** `+7` stores `07`, `−7` stores `f9`.
+
+### CORRECTION: 324..330 are not arp
+
+~~The arp region is 324..353.~~ **Wrong.** All seven of `324`–`330` sat
+**unchanged through all nine saves**, including 326, which holds 100 by default
+and does vary across DNX's corpus. They are not on the arp page.
+
+**The arp block is `331..353`** — five bounded scalars, the enable mask, and the
+semitone map.
+
+So the twelve-scalar run this document read out of the converter **spans a
+boundary**: the converter walks `324..335` as one stretch of similar code, and
+the first seven bytes of it belong to something else. Reading a contiguous run
+of similar instructions as one logical block was the error — the converter's
+shape is not the object's structure.
+
+**`324..330` are unidentified.** Their bounds and defaults are known (3/0, 2/0,
+100/100, 2/0, 1/0, 1/1, 1/0) and their live destinations are longwords at 326,
+330, 335, 339, 343, 347 plus a byte at 334 — all beyond the value array, so they
+are non-parameter sound fields like the arp block, not slot-indexed parameters.
+
+### The one field with no load-time validation, and what is *not* known about it
+
+Flagged by DNX, 2026-09-16, as firmware-side and worth recording against 1.11.
+
+Of the whole arp block, **only the sixteen-byte semitone map at stored 338..353
+is copied without inspection**:
+
+```
+0x400dd5aa  pea 0x10 ; pea %a3@(338) ; pea %a2@(358) ; jsr 0x40134490
+```
+
+The twelve scalars each get a bound and a substitute; the mask is a plain word;
+the map gets a raw `memcpy`. So a stored byte outside whatever range the UI
+enforces reaches the live object untouched.
+
+**What is not known, and the severity depends entirely on it: the consumer is
+unlocated.** Scans for `lea %aN@(358)`, for indexed byte reads against a
+pre-adjusted base, and for `d16` reads of `+358` all return **nothing**. The
+arp engine reaches the map through a computed pointer that no fixed-displacement
+scan can see. (An earlier apparent hit on `+0x166` was `movew %sp@(358)` —
+stack-relative and unrelated.)
+
+So the honest statement is: **one field is unvalidated at load, and what an
+out-of-range value costs is unmeasured** — it could be a silly note, or it could
+be an index into something. Writing it down as a hazard is right; writing it
+down as a *vulnerability* would be a guess.
+
+**The instrument that would settle it** is a watch on the live map under the
+emulator once the UI ports land (`docs/emulator.md`) — set a byte out of range,
+drive the arp, and see what reads it. Not reachable today.
+
+No path to it from outside the UI is known, and DNX will not write the field.

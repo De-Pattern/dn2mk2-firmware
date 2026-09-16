@@ -188,3 +188,39 @@ still on.
 | 2026-09-15 | **Page renumber probe** (`page-renumber-test_DN2_1.11.syx`, base **1.11**) — the 22 parameter records on page `0x1d` (ten unlabelled TRIG, four `Retrig`, eight `Euclidean`) moved to page `0x1f`. **22 bytes, all `0x1d`→`0x1f`, no code edited** | **Fail, and a clean, informative one.** It boots and the pages still *draw*, but every moved parameter reads **zero** rather than its record default, and **no edit reaches the sequencer** — recorded trigs are unaffected by anything on the TRIG pages. `NOTE` shows C0, `PROB` 0%, `LFO.T`/`FLT.T` off, `VFAD` −64 (its minimum), `RATE` blank; `RATE` displays a value once set but still does nothing. Untouched parameters on other pages (`PTIM` 40, `PORT` off) read their normal defaults, so the damage is exactly the 22 moved records. **The negative the renumbering plan rested on is refuted: the page id *is* named elsewhere** — see `docs/lfo4-feasibility.md`, "What the flash answered". |
 
 | 2026-09-15 | **Page renumber probe v2** (`page-renumber-test2_DN2_1.11.syx`, base **1.11**) — v1's 22 records plus **one code byte**: `moveq #29` → `moveq #31` at `0x400dc71e`, `param_set_tables_build`'s exact-match routing arm | **Fail, and indistinguishable from v1.** Same wrong values, same dead edits. The routing byte changed nothing observable, which is itself the finding: **populating the `ParameterSet` table is not the binding that matters.** The owner also noticed what v1 had hidden — p-locking `PROB` produces **modulation unrelated to probability**. The owner adds that **any parameter move clears it**, which places the write in the runtime mirror only — `0x400daf44` restores marked parameters from their base values. `VEL` *reads* 112 (LFO1 `SPD`'s default); `PROB` *modulates* (LFO2 `DEST`). The moved records are reading and writing the **sound** value array at index `record+0x04`. |
+
+| 2026-09-16 | **Page classifier probe v3** (`page-classifier-test3_DN2_1.11.syx`, base **1.11**) — v1's 22 records plus **three** code bytes, all `moveq #29` → `moveq #31`: `0x400dc71e` (`param_set_tables_build` routing, v2 had this), **`0x400dbfa0` (`TrigParameterSet`'s ownership predicate, vtable slot `+0x54`)** and **`0x4003774e`** (a page-`0x1d` special case guarding parameter ids 310/311) | **PASS — all six observations.** Owner, flashed same day: *"all works as expected in the new firmware"*. It boots; `[TRIG]` draws real defaults; trig parameters p-lock; `Retrig` works; `Euclidean` works; **and nothing on the TRIG page moves an LFO** — the v2 symptom is gone. **The page-renumbering route is proven end to end and page `0x1d` is free for LFO4.** What v1 and v2 were missing was the *classifier*, not the builder. See `docs/lfo4-build-plan.md` §5b–§5c. |
+
+**Why v3 worked where v2 did not, in one line:** parameter ownership is decided
+by a **virtual predicate at vtable slot `+0x54`**, not by the boot-time table, and
+no scan for a switch on a page id can find it. The two bytes v2 lacked were found
+by scanning for comparisons against 29 **anchored on the 49 sites that load the
+parameter table** rather than on the constant itself — three hits, all real,
+against hundreds of noise hits the naive scan returns.
+
+| 2026-09-16 | **LFO4 navigation test v4** (`lfo4-nav-test4_DN2_1.11.syx`, base **1.11**) — the `LfoPageView` id vector relocated to `0x402cf52c` as `{4,5,6,6}`, its length `moveq #3`→`#4` at `0x40061558`, the pointer at `0x40061564`, and the LFO-index clamp `moveq #2`→`#3` at `0x4010dbc6`. **16 data bytes, one pointer, two immediates** | **PASS on all five observations, with one cosmetic defect.** Owner: *"each LFO does what it needs to do and LFO page 4 clones the values of Page 3."* It boots; `[MOD]` cycles **four** pages; page four shows LFO3's nine columns; **editing page four moves LFO3** — the positive control; LFO1–3 unaffected. **Defect: the LFO waveform graph is blank on page four.** So `[MOD]` navigation is solved — the view will serve a fourth page and its value path works — and the remaining gap is the waveform renderer, localised below. |
+
+**The blank graph, and why it is a good failure.** The wave display is fetched
+through `sp@(disp, lfo_index:l:4)` at `0x4010d984` and `0x4010d9a2` — a
+**three-element array indexed by the LFO index**. With index 3 it reads past the
+array, so the graph draws nothing. Nothing else on the page depends on it, which
+is why every other observation passed.
+
+It is also the cheapest possible confirmation that `docs/lfo4-build-plan.md`
+§5e was right to list the ten `+0x90` sites as unread: this is one of them, and
+it is the kind of consumer no bound-scan would have found, because there is no
+bound — just an array that happens to be three long.
+
+| 2026-09-16 | **Stock 1.11 reflashed by the owner** | Between the v5 flash and DNX's arp capture, the owner returned the instrument to **unmodified 1.11** so the capture would be stock evidence. **The DN2 is on stock as of this row.** |
+
+**This row exists because the gap above bit twice in one day.** This log records
+what was *sent*, never what is *resident*, and nothing writes a row when the
+owner reflashes stock. On 2026-09-16 that produced two wrong statements: DNX
+told the owner the instrument was wearing the TRIG-page probe build when it was
+on v5, and this project then told DNX it was on v5 when the owner had already
+returned it to stock. Neither was caught by reading; both were caught by the
+owner.
+
+**So: write a row when stock goes back on, not only when a build goes out.** A
+log that only records departures cannot answer "what is on it now", which is the
+question anyone actually asks.
