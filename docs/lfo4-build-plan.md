@@ -982,6 +982,72 @@ Observation list in the module docstring. The discriminating one: if page four
 shows **LFO3's** parameter names, the cave did not run; if it shows LFO4's, it
 did.
 
+## 5i. v5 on hardware: the page is real, the widgets are not — 2026-09-16
+
+Owner: *"LFO4 shows now all round potentiometer controllers (like normal value
+controllers) so no graph for the wave, no graph in squared view for fade, etc."*
+
+So the page exists and draws LFO4's own columns — the descriptor cave ran — but
+**every control falls back to the default rotary widget**. In v4, where page four
+borrowed LFO3's descriptor and therefore LFO3's parameter ids, the specialised
+widgets worked and only the wave graph was blank. The difference between the two
+builds is the parameter ids.
+
+**Therefore widget selection is keyed on parameter id.**
+
+### And the ids cannot be moved to fix it
+
+This is the constraint, and it is structural. LFO4's records live at the dead
+`ERR` ids **1–5, 11–14, 17** — scattered and low. The LFO block is **75–104**,
+and the table immediately after it is **not free**:
+
+| ids | what |
+|---|---|
+| 75–84 | LFO1 |
+| 85–94 | LFO2 |
+| 95–104 | LFO3 |
+| 105–112 | **Chorus** |
+| 113–122 | **Delay** |
+| 123+ | **Reverb** |
+
+There is no free id adjacent to the LFO block, so LFO4's parameters can never
+sit inside a contiguous "is an LFO parameter" range however they are allocated.
+Growing the 321-record table does not help either — new ids land at 321+, still
+outside every range.
+
+**So any predicate that identifies an LFO parameter by id must be taught LFO4's
+ids explicitly.** That is the shape `TrigParameterSet` already ships (an
+exact-match disjunct) and the shape §5's `Start Phase` triple already needs.
+
+### What is found so far, and what is not
+
+Code sites naming an LFO id triple, from a structural scan for `(n, n+10, n+20)`
+within 110 bytes:
+
+| parameter | ids | sites |
+|---|---|---|
+| `MULT` | 76/86/96 | `0x400dbdbc` |
+| `DEST` | 78/88/98 | `0x400397da`, `0x40039a9a`, `0x40039cbc`, `0x40039ebc`, `0x40066d27`, `0x40066d5c` |
+| `SPH` | 81/91/101 | `0x4010db18` |
+| `MULT` (2nd) | 84/94/104 | `0x400dbd4c` |
+
+**No `WAVE` triple (79/89/99) exists**, and no general 75–104 range test was
+found. So the wave graph and the `FADE` square view are selected some other way,
+and that way is **not yet located**. Guessing at it is what this section refuses
+to do.
+
+### The instrument for it
+
+The widget choice is a decision made per column at draw time, which makes it a
+**trace question, not a scan question** — the same class as the descriptor-id
+writer that a `bootwatch` run settled in one go after an hour of failed
+greps. Drive the emulator to the LFO page, hook the draw path, and compare the
+widget decision for parameter 99 (`WAVE`, LFO3) against parameter 5 (`WAVE`,
+LFO4).
+
+**None of this blocks v6.** Independent values (§3's extension array) is a
+separate axis and the more important one: v5's page is real, it just looks plain.
+
 ## 6. The build, in order
 
 1. Relocate + zero the three tick state arrays (25 MB region).
