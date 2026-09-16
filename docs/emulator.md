@@ -467,3 +467,63 @@ Demanding a boot probe in a post-boot window is demanding a negative. That is
 the same defect as a watch that cannot produce a different answer per outcome —
 this time wearing a control's clothes. The controls now carry their phase, and
 silence in the wrong window is reported as expected rather than as blindness.
+
+## The patched Unicorn is built and verified — 2026-09-16
+
+**Read this section's predecessors first.** "Running it on this machine" and
+"Digitone II **1.11 cold-boots**" above already recorded the WSL decision, the
+venv-placement caveat, the CRLF trap and the fact that 1.11 boots. On
+2026-09-16 the assistant re-derived all four from scratch before reading them.
+That is the same mistake the owner had just corrected one layer up — *"don't
+reinvent the wheel"* — and it applies to **this repository's own documentation**,
+not only to the reference repos. It is recorded in
+`docs/FEATURE-PLAYBOOK.md` §2.0.
+
+What is genuinely new, and was not here before:
+
+**The patched library exists and passes digikit's own check.** Built under WSL
+Ubuntu 24.04 (cmake 3.28.3, gcc 13.3, Python 3.12.3), venv in WSL's own
+filesystem at `~/dn2-emu-venv` exactly as the caveat above says:
+
+```sh
+python3 -m venv ~/dn2-emu-venv
+~/dn2-emu-venv/bin/python -m pip install unicorn==2.1.4 capstone==5.0.7
+cd /mnt/c/ZZ_Code/ZZ_Personal/digikit
+PYTHON=~/dn2-emu-venv/bin/python bash tools/install-patched-unicorn.sh
+```
+
+Tag `2.1.4` resolved to `8028ec436f2d9376525352dd38ed9ed6b9f6be10`, the commit
+digikit pins, and both patches applied at their pinned SHA-256. `emu.unicorn_compat`
+then reported `"compatible": true` with **all four cases passing**, including
+`emac_mac_with_load` — the EMAC fix that matters for the modulation kernel at
+`0x400db1dc`.
+
+**Their extractor agrees with ours, byte for byte.** `python -m emu.extract` on
+DN2 1.11 produced six sections whose lengths match `dnfw extract` exactly —
+MAIN OS 3,192,192, bootstrap 30,302, updater 32,768, blob 836,956, section 8
+159,948, meta 15. Two implementations sharing no lineage agreeing on a depacker
+is worth more than either one's tests.
+
+(One naming difference to expect: digikit labels section 2 `section_2_DSP.bin`.
+On the DN2 that section is the **bootstrap**, `dest 0x02010000`. The label is
+theirs and is wrong for this device; the `dest` is right and nothing reads the
+label.)
+
+**`emu.run --check` passes on 1.11**, resolving firmware, sections and the
+snapshot path, with their standing warning that only Digitakt II 1.15C is
+tested.
+
+### What is running, and what it is for
+
+A snapshot ladder cold boot at 60M / 150M / 280M / 400M instructions, because
+`tools/bootcheck.py` and the `--resume` half of `tools/addrtrace.py` both need
+a snapshot, and only a resume reaches the display module.
+
+The target is the question §"What it is for" lists and `docs/lfo4-build-plan.md`
+§3 cannot answer statically: **which value-array sites can ever see a slot
+≥ 101.** That is reachability, and reachability is what static scanning has got
+wrong three times here.
+
+**Carry the positive controls** listed above under "The first watch run was not
+a result" — `0x401f7f94` static, `0x42c64b3c` built at boot, a live TCB. A zero
+without them means nothing.

@@ -44,6 +44,20 @@ switch on a page id.
 Each of these cost real time in September 2026. They are listed by what they
 cost, not by how interesting they are.
 
+### 2.0 Read this repository's own docs before starting anything
+
+The rule in §2.1 is usually stated about the reference repos. **It applies
+first to our own `docs/`.**
+
+On 2026-09-16 the assistant worked out from scratch that the emulator belongs in
+WSL, that the venv must live in WSL's own filesystem rather than on `/mnt/c`,
+and that a patched Unicorn is needed — all three already written in
+`docs/emulator.md`, along with the CRLF trap that would have cost an hour and
+the fact that **Digitone II 1.11 already cold-boots**.
+
+`docs/STATUS.md` is the index for *state*; the linked documents are the index
+for *evidence*. Read the one that covers the area before touching it.
+
 ### 2.1 Use the reference repos' tooling. Do not write scans.
 
 **Owner's standing rule, 2026-09-16:** *"Always use the tooling at hand in other
