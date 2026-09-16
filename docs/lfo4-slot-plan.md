@@ -826,3 +826,34 @@ claim unprompted and named a test that settled it in one read.
 
 **The rule: when a second source appears to confirm a structural inference, check
 whether it is independent evidence or the same convention observed twice.**
+
+### The sharper form of the rule, from DNX
+
+The same maps produced a case of **genuine** corroboration in the same read, and
+the contrast is the whole lesson. DNX derived the lock layout as
+`id = 4*slot + lfo` from **24 ids observed on hardware**; the forward map gives
+slots 1..8 -> `4k+1` and 9..16 -> `4k+2` from **the firmware's own translation
+table**. Same rule, two routes, no shared assumption.
+
+| | the lane | the lock layout |
+|---|---|---|
+| source A | lock table strides 4 for 3 LFOs | 24 ids observed on a device |
+| source B | sound object strides 8 B for 3 slots | the firmware's forward map |
+| relationship | **the same convention seen twice** | **different methods on one object** |
+| verdict | not corroboration | corroboration |
+
+**Two observations corroborate only when they could have disagreed.** Rounding
+three up to four in two layers could not have come out any other way; a hardware
+capture and a translation table could easily have disagreed, and did not.
+
+### [METHOD] Check a table's width before reading a single entry
+
+The lane test was nearly botched by reading these maps as **bytes**. They are
+u32, and the byte-wise read produced a table that looked like data and read like
+meaning — `0 0 0 1 0 0 0 5 0 0 0 9` is perfectly plausible as sparse byte data
+until it is noticed as big-endian longs.
+
+**Convincing nonsense is the dangerous failure, not obvious nonsense.** The tell
+is cheap and should come first on any new table: if entries look like small
+values separated by runs of zeros, try the next width up before interpreting
+anything.
