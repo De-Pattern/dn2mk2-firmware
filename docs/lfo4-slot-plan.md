@@ -382,3 +382,78 @@ owner sees nothing -- equally consistent with "applied to index 0, which carries
 no parameter" and "ignored". The inverse map makes the first the more likely: a
 reserved-rank lock resolves to the null index and is applied harmlessly to
 nothing.
+
+---
+
+## [CORRECTION 2026-09-16] "29 sites" was never a well-defined set
+
+Re-deriving the list before building v6's hooks, because §"The 29 sites" is the
+thing step 4 of the build order is sized against.
+
+**The method.** The sites are recognisable by their addressing mode, not by a
+constant: `%aN@(0x14,%dM:l:2)` is a brief-format extension word, so the word is
+`(M << 12) | 0x0A14` for index register `dM`. Scanning for those eight words,
+then keeping only the ones that are **word-aligned** and whose **preceding
+opcode actually names mode 110** in one of its EA fields, gives a clean list.
+
+**It reproduces every documented site.** All eleven addresses this file and
+`docs/lfo4-build-plan.md` §3 name — `0x40036536`, `0x40037194`, `0x40037260`,
+`0x40037be8`, `0x40038902`, `0x4006414c`, `0x4004cb08`, `0x4004cb74`,
+`0x400440a2`, `0x4004c226`, `0x4004c27c` — come back, 11 of 11. So the scan
+finds the same thing the original reading found.
+
+**But it finds 33 in the code range, not 29**, and 37 across the whole section.
+
+### Why the discrepancy is the point, not a bug to fix
+
+**The pattern identifies an *offset*, not *the value array*.** Any structure
+anywhere in this firmware that holds a 16-bit array at `+0x14` and indexes it
+with a scaled long register produces exactly these bytes. Nothing in the
+encoding says `%aN` points at a sound object.
+
+So neither 29 nor 33 is *the* number of value-array accesses. Both are counts of
+a **shape**. The original 29 was presumably the shape count minus some judgement
+about which bases were sound objects; that judgement is not recorded, which is
+why the two numbers cannot be reconciled from the documents alone.
+
+This is `docs/FEATURE-PLAYBOOK.md` §2.2 one level deeper. "Anchor on structure,
+not on a constant" is right and it is what makes this scan reproduce the known
+sites. But an addressing mode is still a **shape**, not an **identity** — and
+the question v6 has to answer ("can this site ever see a slot ≥ 101") is about
+identity: *is this base a sound object, and where does this index come from?*
+
+### What this changes
+
+**Nothing static can close it.** Whether `%a2` holds a sound object at a given
+site is a fact about execution, and three separate attempts to settle
+value-array reachability by reading have now produced three different answers
+(144 regex hits, 29 sites, 33 sites).
+
+**The instrument is the emulator, and it is now available.** A code hook at each
+of the 33 candidates, reporting the base register and the index at every hit,
+answers both halves at once: a base outside the sound-object pool
+(`base + 0x4414 + i*2388`, 128 objects) disqualifies the site outright, and the
+observed index range bounds what it can reach. `tools/addrtrace.py` reports hit
+counts and registers by running, which is exactly this.
+
+**The 33 candidates** (opcode address, index register):
+
+```
+0x40030ef0 d1   0x40030f34 d2   0x40030f88 d2   0x40032754 d1
+0x40032774 d3   0x400328d4 d1   0x400328f4 d2   0x40036536 d2 *
+0x40037194 d2 * 0x40037260 d2 * 0x40037be8 d2 * 0x40038902 d2 *
+0x4003a146 d0   0x4003d864 d0   0x4003f5a2 d0   0x4003f5be d2
+0x4003f700 d0   0x4003f736 d0   0x400440a2 d3 * 0x4004b16a d0
+0x4004c226 d2 * 0x4004c27c d2 * 0x4004c2e4 d3   0x4004c38a d2
+0x4004c42c d3   0x4004c4e6 d2   0x4004cb08 d2 * 0x4004cb74 d2 *
+0x4006414c d2 * 0x4012ae74 d6   0x40140b38 d7   0x401423b2 d7
+0x40142826 d7
+```
+
+`*` = named in the existing documents. The four `lea` sites are `0x40032754`,
+`0x40032774`, `0x400328d4`, `0x400328f4` (opcode `41f0`); this file's §"29
+sites" says **five** `lea`, which is one more discrepancy of the same kind and
+for the same reason.
+
+**Do not re-price step 4 on 33 either.** It is a candidate list to instrument,
+not a hook count. The hook count is whatever survives the run.
