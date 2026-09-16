@@ -75,9 +75,17 @@ uninitialised. **The build that would settle all three:** append past the
 initialiser tail and copy it out in a cave *ahead of* `0x400004b2`, into the
 25.3 MB the clear never reaches. One experiment, three entries.
 
-**Nothing at all — §5 and §12 are simply not started.** §12 already has its route
-chosen (b: index only the depths, 24 indices into the bitmap's spare 100–127) and
-its one hook named. §5 needs a parallel store and is the least specified.
+**The per-track mirror's width — blocks §12, and LFO4's v6 needs the same fix.**
+§12's gating question ("where are LFO1–3 applied?") was answered today, and the
+answer reprices it: an LFO's `DEP` is p-lockable only because it is an ordinary
+mirror slot, so route (b) means making the performance modulators' depths mirror
+slots too. But **the mirror is exactly 101 u16 slots and index 100 is its last
+cell** — the bitmap's spare 100–127 has no storage behind it. Relocating and
+growing the mirror from 202 to 250 bytes per track is the shared prerequisite,
+and it is the same work LFO4's v6 needs. Whichever is built first pays for it.
+
+**Nothing at all — §5 is simply not started**, and needs a parallel store. It is
+the least specified entry in the backlog.
 
 ## Rules this campaign keeps
 

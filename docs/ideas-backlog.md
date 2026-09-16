@@ -1677,6 +1677,48 @@ six descriptor lists' depth halves.
 Item 4 gates the others: it is cheap, and it could make this whole entry
 unnecessary by showing the mechanism already exists.
 
+### [2026-09-17] Item 4 is answered, and it reprices route (b) rather than cancelling it
+
+Item 4 above — *"Where LFO1–3 are applied. Still unfound"* — was the gate on the
+other three, and it is now read. Both evaluators, `0x40137726` and `0x401373dc`,
+**generate and apply in the same loop** (`docs/lfo4-build-plan.md` §5k):
+
+```
+mvs.b %a4@(74),%d2          ; DEST, coarse
+moveq #100,%d1
+cmp.l %d7,%d1
+bcs   <skip>                ; DEST > 100 -> nothing
+lea   %a0@(0,%d7:l:2),%fp   ; %a0 = the per-track mirror
+...
+movew %d0,%fp@              ; clamped 0..32512
+```
+
+**The entry hoped this would make it unnecessary. It does not, and the reason is
+worth having.** An LFO's `DEP` is p-lockable because it is an *ordinary mirror
+slot* — slot `8*lfo + 8`, nothing special about it. So "copy the mechanism" means
+"make the performance modulators' depths mirror slots", which is route (b)
+exactly. The mechanism does already exist; it just is not reachable without the
+storage.
+
+**And the storage is the problem item 1 did not see.** Item 1 says indices
+100–127 are *representable* in the 128-bit per-track bitmap. True — but that
+bitmap is not where values live. **The per-track mirror is exactly 101 u16 slots,
+202 bytes, and sixteen of them sit contiguously.** Index 100 is its last cell;
+101–123 have no cell at all. The accessor agrees from the other side: `moveq
+#100` at `0x400dc02c` rejects any slot above 100.
+
+So route (b) needs the mirror relocated and grown from 202 to 250 bytes per
+track — **which is the same piece of work LFO4's v6 needs**, and neither entry
+priced it as shared. Whichever is built first pays for it; the second gets it
+nearly free.
+
+Items 2 and 3 are untouched by this and still stand. Item 3 in particular is
+DNX's and still unasked: whether p-lock ids above the current maximum survive a
+save is the same class of question the sound canary answered, and it is cheap for
+them to run.
+
+**Item 4 is closed.** `[SUPERSEDED]` above where it says "still unfound".
+
 ---
 
 ## 13. A mod stamp on the intro screen
