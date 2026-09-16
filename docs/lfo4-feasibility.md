@@ -1324,8 +1324,50 @@ for any read of `+0x14B` through any address register returns **exactly one
 site**, `0x400dd532`, inside the version-3 converter. Nothing else in the image
 reads it.
 
-So the arp block is **defined only by object version 3**, and a zero at 331 in a
-version-0 object is padding past the terminator — never `MODE`, never `OFF`.
+~~So the arp block is **defined only by object version 3**.~~ **[TOO STRONG —
+corrected 2026-09-16 by DNX's corpus.]** A zero at 331 in *that* version-0 object
+is padding past the terminator, and that part stands. The generalisation does
+not.
+
+DNX scanned **26 projects, 3,328 patterns, 53,248 kit sound records**: all full
+length, terminator at 355, arp block at the agreed offsets — and their header
+version reads **2** in 51,200 and **1** in 2,048. **Not one reads 3.** So a
+header-v2 object carries the block.
+
+Both readings are true, and the upgrade chain is where they meet. The v1 arm at
+`0x400e04fc` is decisive:
+
+```
+0x400e04fe  cmpl %a3@(4),%d0        ; version == 1 ?
+0x400e0504  pea 0x167               ; 359 -- the WHOLE object
+0x400e0512  jsr 0x40134490          ; bulk memcpy
+0x400e0528  mvsb %a3@(332),%d0      ; then remap field 332
+0x400e0532  moveb %a0@,%a2@(332)
+0x400e053c  movel #2,%a2@(4)        ; and stamp version 2
+```
+
+A v1 object is **already full length** — it is copied wholesale. By the time the
+v3 converter reads offset 331, the object has been promoted. So "only the v3
+converter reads 324/331/336" and "v1 and v2 objects carry the block" are
+compatible, and **the predictor of presence is the object's length, not its
+header version**. 319 bytes has no room; 359 does.
+
+### Field 332's encoding changed between v1 and v2
+
+Bonus from the same arm, and actionable for anyone reading old objects. The
+remap is a table at **`0x401fcad0`**, 72 bytes, 18 longwords, indexed by the
+stored byte:
+
+| v1 | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **v2** | 0 | 2 | 4 | 5 | 6 | 8 | 9 | 10 | 12 | 13 | 14 | 16 | 17 | 18 | 19 | 20 | 21 | 22 |
+
+**Eighteen v1 values into a 0..22 v2 range**, skipping 1, 3, 7, 11, 15 — five new
+options inserted into a menu that had eighteen. It matches field 332's bound of
+22 exactly, and its default of 13 is v1's 9.
+
+So a v1 object's 332 is **not** directly comparable with a v2 or v3 one. DNX has
+2,048 v1 records in their corpus; this table translates them.
 
 **Consequence for DNX:** their copy path writes version-0 objects onto a device
 that saves version 3, so a DNX-copied preset carries **no arp state at all**. It
