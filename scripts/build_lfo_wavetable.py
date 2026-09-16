@@ -100,15 +100,21 @@ def example_table() -> list[int]:
     pipeline is exercised end to end by `python scripts/build_lfo_wavetable.py`
     with no arguments.
     """
+    # Each shoulder is a half-cosine spanning the whole range, -1 -> +1 and
+    # +1 -> -1, so the shape is continuous everywhere including the wrap.  The
+    # first version used quarter-waves that only reached 0, which left two
+    # half-scale jumps -- at 65% of the cycle and at the wrap -- and would have
+    # clicked on any filter or pitch destination.  Caught by reading the built
+    # table, not the formula.
     out = []
     for i in range(256):
         p = i / 256.0
         if p < 0.15:
-            v = math.sin(p / 0.15 * math.pi / 2)
+            v = -math.cos(p / 0.15 * math.pi)            # -1 -> +1
         elif p < 0.5:
             v = 1.0
         elif p < 0.65:
-            v = math.cos((p - 0.5) / 0.15 * math.pi / 2)
+            v = math.cos((p - 0.5) / 0.15 * math.pi)     # +1 -> -1
         else:
             v = -1.0
         out.append(max(-32767, min(32767, int(round(v * 32767)))))
