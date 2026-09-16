@@ -690,3 +690,78 @@ Worth recording as a method note: three sessions were spent treating a
 vocabulary of a firmware fault. `docs/FEATURE-PLAYBOOK.md` §2.1's rule is
 "validate the tool before trusting its output" — this is the same rule one level
 up: **validate the tool's *verdict*, not just its decoding.**
+
+### Port 4: the UI symbols resolve by relocation — 2026-09-16
+
+**And a correction to what this section said they were for.** The table above
+lists the six view symbols under *"it cannot yet drive the panel and draw a
+page, and that is three small ports away"*. **That was wrong.** The six are
+consumed only by `emu/uitrace.py`, which is a **tracer**. `guirun.py --input`
+replays through `emu/panelin.py` and the panel model, and never touches any of
+them. Driving the UI and capturing a PNG was never gated on these symbols; only
+`--trace-ui` was.
+
+The correction matters because it changes what the ports were buying: not the
+ability to see a page, but the ability to read the UI's own account of why it
+drew one.
+
+#### How they were found
+
+`emu/symbols.py` pins them as `Fixed()` addresses read off Digitakt II 1.15C.
+Searching our image for each one's eight verify bytes:
+
+| symbol | hits on DN2 1.11 |
+|---|---|
+| `view_offer` | **1** — `0x4011db20` |
+| `view_activate` | **1** — `0x4011ca46` |
+| `view_closed_mark` | **1** — `0x4011c876` |
+| `view_close` | 9 |
+| `view_request_pop` | 9 |
+| `view_sweep` | 4 |
+| `ui_key_dispatch` | 0 |
+
+The three that resolve alone **independently agree on one delta, `+0xedbc`** —
+the view manager relinked as a single block. That delta then predicts the other
+three, and **all three verify at the predicted address**, which disambiguates
+9, 9 and 4 candidates down to one each:
+
+| symbol | DN2 1.11 |
+|---|---|
+| `view_close` | `0x4011c85e` |
+| `view_request_pop` | `0x4011d2e8` |
+| `view_sweep` | `0x4011da00` |
+
+`ui_tick_inc` needed one more step: its verify bytes carry a BSS counter operand
+that relocates, so the literal search cannot match. Masked to its two opcodes it
+has three sites, and the block delta picks `0x4011f5e4` — whose operand
+`0x466758b0` lands inside the 1.11 BSS span, as it must.
+
+**Three anchors agreeing before anything is inferred, and every inferred address
+checked against its own bytes afterwards.** That is what makes the block
+assumption a measurement rather than a hope.
+
+#### It fixes digikit's own current target too
+
+Sent as PR #21 with a `Reloc` resolver (literal → unique search → sibling
+offset, always verified). Measured with `tools/export-profile.py`:
+
+| image | before | after |
+|---|---|---|
+| Digitone II 1.11 | 58/72 | **66/72** |
+| **Digitakt II 1.16** | 60/72 | **68/72** |
+
+The second row is the interesting one. `uitrace` disables itself when **any**
+one of its `HOOKS` is missing, so all seven stale addresses take the whole
+tracer down — and 1.16 is digikit's *current* image, where `--trace-ui` is
+therefore dead on `main` today. A fix aimed at our build repaired theirs.
+
+#### What is still unresolved
+
+`ui_key_dispatch`, on both images. It sits **outside** the view manager's block,
+in a region with its own delta, and its recorded bytes are `jsr <abs>` plus
+`move.l %d2,-(%sp)` — masking the relocating operand leaves two opcodes that
+match **1,401 sites** on DN2 1.11. It needs a longer capture from 1.15C than the
+eight bytes digikit records, which we cannot take without that image.
+
+Since the tracer is all-or-nothing, `--trace-ui` stays off until that one lands.
+**Driving and screenshots do not wait on it.**
