@@ -1331,6 +1331,43 @@ version-0 object is padding past the terminator — never `MODE`, never `OFF`.
 that saves version 3, so a DNX-copied preset carries **no arp state at all**. It
 reads back byte-identical and plays, which is exactly why nobody noticed.
 
+**Confirmed by exhaustion.** A scan of the whole image for any read of each
+arp-block offset through any address register returns **one site each**, and all
+three are in the same function:
+
+| stored offset | sites | where |
+|---|---|---|
+| 324 (block start) | 1 | `0x400dd49c` |
+| 331 (`MODE`) | 1 | `0x400dd532` |
+| 336 (the mask) | 1 | `0x400dd5a0` |
+
+All inside the version-3 converter `0x400dd1ea`. The upgrade chain does carry
+version-0 gates (`tstl %aN@(4)` at `0x400e074a`, `0x400e1014`, `0x400e119a`,
+`0x400e1322`) and **not one of them touches 324..353**.
+
+### The live/stored delta is not constant — do not translate with `+20`
+
+Worth its own note because it is an easy and wrong shortcut. The stored side is
+all bytes; the live side is a **mixed struct** — seven longwords, then bytes — so
+the converter expands as it goes:
+
+| stored | live | delta |
+|---|---|---|
+| 324 | 326 (long) | +2 |
+| 325 | 330 (long) | +5 |
+| 326 | 334 (**byte**) | +8 |
+| 327 | 335 (long) | +8 |
+| 328 | 339 (long) | +11 |
+| 329 | 343 (long) | +14 |
+| 330 | 347 (long) | +17 |
+| **331**–335 | 351–355 (bytes) | **+20** |
+| 336 | 356 (word) | +20 |
+| 338 | 358 (16 bytes) | +20 |
+
+`+20` holds from 331 onward and **is wrong below it**, by up to eighteen bytes.
+The arithmetic closes exactly — `326+4=330`, `330+4=334`, `334+1=335`, …,
+`347+4=351` — which is a good check that the table is right.
+
 ### The substitution value is the default, and it cross-checks the capture
 
 The converter does not clamp to the bound. When a value exceeds it, it
