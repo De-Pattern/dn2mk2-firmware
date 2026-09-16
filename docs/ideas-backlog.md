@@ -1935,6 +1935,45 @@ Elektron product boots with, not beside a Digitone-specific logo.
 for the version — §13's "read the mod identity out of the image rather than
 hard-coding it" is still the honest design.
 
+### 13.2 The bang: the logo in a comic burst that flashes, then explodes into the tunnel
+
+**Asked for by the owner, 2026-09-17**, in three steps: wrap the Elektron logo in
+a "BANG"-style burst in place of the word; make it part of the intro's
+animation; and *"the bang can flash reversing black and white backgrounds until
+it explodes and shows the tunnel"*.
+
+Two builds, both seen running under the emulator:
+
+- **`intro-burst_DN2_1.11.syx`** (`scripts/build_intro_burst.py`) — the static
+  version: a solid white 14-spike burst with the logo knocked out in black,
+  written into the intro's source bitmap every frame. A knockout clears bits, so
+  each column word needs a mask and a value — 2,140 bytes, more than any free cave
+  — and the table ships as an appended payload. Filmed from 380M it holds still
+  for frames ~12–73, is scattered by the tunnel from ~87, and textures the whole
+  fly-through with spiralling fragments of itself:
+  ![burst film](img/intro-burst-film.png)
+- **`intro-bang_DN2_1.11.syx`** (`scripts/build_intro_bang.py`) — the flashing
+  version. The payload carries **two whole 128 × 64 images**, the burst and its
+  exact inverse (which is the owner's reference: white page, black burst, white
+  logo), and every frame the stamp copies one over the source bitmap. The choice
+  is keyed on **the intro's own frame counter**, measured as the copy routine's
+  first argument, counting up by exactly one per frame: alternate every 16 frames,
+  every 8 from frame 48, then hold the normal image from frame 72 so the tunnel's
+  scatter is the explosion.
+
+![sequence](img/intro-bang-sequence.png)
+
+Animated, same snapshot, same timing: [stock](img/intro-stock.gif) ·
+[bang](img/intro-bang.gif).
+
+**Photosensitivity.** Whole-screen flashing between 3 and 30 Hz is the range that
+matters. The defaults alternate at about 1.9 Hz and then 3.75 Hz if the intro
+runs near 30 fps, and `--slow`/`--fast` lower it further.
+
+**Not yet on hardware.** `intro-stamp`, `intro-burst`, `intro-bang` and
+`payload-section` all hook the same startup call and intro routine, so they are
+alternatives: flash one.
+
 ### 13.1 A flip-flap logo
 
 **Owner's proposal, 2026-09-16**, with a picture: Sara Ball's *Croc-gu-phant*,

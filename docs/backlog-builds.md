@@ -31,7 +31,7 @@ not been flashed has not been tested.
 | 10 | The arpeggiator on MIDI tracks | **DELIVERED** — `arp-on-midi_DN2_1.11.syx`, one byte | awaiting a flash |
 | 11 | A real compatibility check between mods | **not a firmware** — it is a check over builds | n/a |
 | 12 | P-locking the performance modulators | **not started** — route (b) scoped | — |
-| 13 | A mod stamp on the intro screen | **DELIVERED** — `intro-stamp_DN2_1.11.syx`, `MOD` beside the logo. **Seen running under the emulator** | awaiting a flash |
+| 13 | A mod stamp on the intro screen | **DELIVERED** — `intro-stamp` (`MOD` beside the logo), then the owner's redesign: `intro-burst` (logo knocked out of a comic burst) and `intro-bang` (the burst flashes inverted, then explodes into the tunnel). **All seen running under the emulator.** Alternatives: flash one | awaiting a flash |
 | 14 | A shape bench for the LFO waveforms | **DELIVERED** — the tool, plus its firmware half: `lfo-wavetable_DN2_1.11.syx` takes the bench's own JSON export | awaiting a flash |
 | 15 | A wavetable synth machine (the owner's actual meaning of "wavetable") | **not started** — audio is DSP-side, so it inherits §7's cost. First build: port digikit's Digitakt machine-slot Milestone A to the Digitone | — |
 | — | **LFO4** (the project's named goal) | **DELIVERED** — `lfo4-tick6a_DN2_1.11.syx` | awaiting a flash |

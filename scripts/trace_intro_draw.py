@@ -109,8 +109,19 @@ def main() -> int:
         # snapshot.
         with open(args.patch) as f:
             ranges = json.load(f)["ranges"]
+        from unicorn import UcError, UC_PROT_ALL
         for r in ranges:
-            m.uc.mem_write(int(r["va"], 16), bytes.fromhex(r["hex"]))
+            va, data = int(r["va"], 16), bytes.fromhex(r["hex"])
+            try:
+                m.uc.mem_write(va, data)
+            except UcError:
+                # A snapshot restores only the pages that were in use. A payload
+                # placed above BSS lands on a page a stock boot never touched,
+                # which the build's own boot copy would have mapped.
+                lo, hi = va & ~0xFFF, (va + len(data) + 0xFFF) & ~0xFFF
+                m.uc.mem_map(lo, hi - lo, UC_PROT_ALL)
+                m.uc.mem_write(va, data)
+                print(f"mapped {lo:#x}..{hi:#x} for the payload")
         print(f"applied {len(ranges)} patch ranges from {args.patch}")
     arg_log: list[tuple[int, int, int, int]] = []
     if args.args_at is not None:
