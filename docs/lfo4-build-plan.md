@@ -364,6 +364,74 @@ Three leads closed today, recorded so they are not re-run:
 - Every longword run of `1a 1b 1c` in the image (13 sites) — **all generic
   sequential index tables**, `17 18 19 1a 1b 1c 1d 1e 1f`, not page groups.
 
+## 5b. The page number: `0x1f` is the expensive choice, `0x1d` is the cheap one
+
+**This is the most consequential thing read today, and it reverses §1's edit.**
+
+Hunting `[MOD]` navigation turned up the rest of the page-predicate family, and
+with it the fact that **`0x1a`–`0x1c` is assumed contiguous in more places than
+the six range tests already counted**. A seventh kind of site bounds at the
+*last* LFO page:
+
+```
+0x400dbe5e  ... parameter id
+0x400dbe7c  moveq #28,%d1               ; 0x1c
+0x400dbe7e  cmpl %a0@(0,%d0:l),%d1      ; vs the record's page
+0x400dbe82  scc %d0                     ; page <= 28
+```
+
+A page numbered `0x1f` fails that test, fails every `(page - 26) <= 2`, and
+fails the per-LFO getter/setter's three-way `26 / 27 / 28` dispatch. **Each one
+then needs an exact-match disjunct in a cave.**
+
+### The located sites
+
+| site | form | what it is |
+|---|---|---|
+| `0x400dbf34` / bound `moveq #2` at `0x400dbf3a` | `(page-26) <= 2` | `SoundParameterSet` ownership |
+| `0x400dc6ba` / bound `moveq #2` at `0x400dc6b8` | `(page-26) <= 2` | `param_set_tables_build` routing |
+| `0x4012a83c` / bound `moveq #2` at `0x4012a83a` | `(page-26) <= 2` | `is_lfo_page` helper |
+| `0x4012af7e` / bound at `0x4012af7c` | `(page-26) <= 2` | inlined consumer |
+| `0x4012af9c` / bound at `0x4012afa6` | `(page-26) <= 2` | inlined consumer |
+| `0x400dbe7c` | `page <= 28` | bounds at the **last** LFO page |
+| `0x4012a85c` / `0x4012a870` / `0x4012a884` | `== 27 / 26 / 28` | per-LFO byte setter into `0x466765b8` |
+| `0x4012a8a8` … | `== 27 / 26 / 28` | the matching getter |
+| `0x4010db18` | `== 81 / 91 / 101` | `LfoPageView` — `Start Phase` ids |
+
+Ruled out, so they are not re-checked: `0x4017a998` and `0x401cf3f6` carry
+`addil #-26` but no page bound — unrelated arithmetic, matching the feasibility
+doc's warning that four of its eight hits were exactly that.
+
+### Therefore: LFO4 on page `0x1d`, Retrig moved to `0x1f`
+
+Keeping the LFO pages **contiguous** turns almost the whole list into one-byte
+edits:
+
+| edit | from | to | bytes |
+|---|---|---|---|
+| five `(page-26) <= 2` bounds | `moveq #2` | `moveq #3` | 1 each |
+| `0x400dbe7c` | `moveq #28` | `moveq #29` | 1 |
+| `TrigParameterSet` `0x400dbfa0` | `moveq #29` | `moveq #31` | 1 |
+| `param_set_tables_build` `0x400dc71e` | `moveq #29` | `moveq #31` | 1 |
+| per-LFO getter/setter | — | fourth case, `page == 29` | cave ×2 |
+| `LfoPageView` `0x4010db18` | — | fourth `Start Phase` id | cave |
+
+Eight one-byte edits and three caves, against **nine** caves for the `0x1f`
+route. The per-track entry at `0x466765b8` is **4 bytes wide with only 3 used**,
+so LFO4's byte is already there — offset `+3`.
+
+### Why this is not the probe that failed
+
+Probe v1 and v2 moved Retrig `0x1d` → `0x1f` and the page drew but read wrong.
+**That is this same move, minus the classifier.** They renumbered the records
+and the routing constant and changed nothing else, so Retrig's parameters became
+unclaimed by every predicate above and fell through to the sound set — exactly
+the `VEL` = 112 / `PROB` re-aiming LFO2 symptom.
+
+The move is sound. It was the missing half that was fatal. **Stated as a
+hypothesis, not a result:** it has not been flashed, and the failure mode if a
+site is still missing is the one already seen, not a brick.
+
 ## 6. The build, in order
 
 1. Relocate + zero the three tick state arrays (25 MB region).
