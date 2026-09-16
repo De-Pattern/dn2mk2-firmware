@@ -1156,3 +1156,71 @@ matches, then carry the structure across. What transfers is the *shape* — whic
 Bitmap object the intro draws into, in what order, and where the version string
 sits — not the addresses. `0x40114d94` and its 34 callers are the Digitone-side
 foothold to re-anchor onto.
+
+## The intro is a displacement map over a static logo — 2026-09-17
+
+Traced on **Digitakt II 1.15C** first, on the owner's advice, then found
+byte-for-byte on the Digitone. Unblock from an early rung does not work: a
+resume from 60M satisfied 4.1 million pends and drew nothing. What works is
+`gui.py`'s recipe — a plain boot to a 400M snapshot where the intro is already
+running, then resume with the draw task unblocked and `dsp=True`.
+
+`scripts/trace_intro_draw.py` attributes every `setPixel` to its caller (via
+digikit's `emu.hle.LAST_PIXEL_CALLER`, branch `emu/setpixel-caller`). Over 40M
+instructions from 400M:
+
+```
+caller        pixels      lit   bbox            bitmap
+  0x400d3d98  1,076,631   42,784   (0,0)-(127,63)   0x4313b298
+```
+
+**One caller, the whole panel, about 131 full frames.** The 20M count matches the
+616,823 recorded in `emu/gui.py`'s own notes to within 15, so the tracer measures
+the same drawing. Nothing draws the logo through `setPixel` — that is a copy.
+
+The copy loop (Digitakt `0x400d3d48`) is the effect:
+
+```
+d0 = table[(i+1) & 0x3fff] + scroll ;  y = d0 & 63
+d1 = table[ i    & 0x3ffe] + scroll ;  x = d1 & 127
+v  = getPixel(source, x, y)
+setPixel(panel, col, row, v ? -1 : 0)
+i += 2
+```
+
+Each panel pixel samples a **static source bitmap** at a coordinate taken from an
+**offset table** (two entries per pixel, a 16,384-entry ring) plus a **scroll**
+value. Animating the scroll animates the whole effect.
+
+| | Digitakt II 1.15C | Digitone II 1.11 |
+|---|---|---|
+| copy loop (address-free match) | `0x400d3d6c` | `0x400d3b3c` |
+| source bitmap | `0x43135268` | `0x42c4567c` |
+| offset table pointer | `*0x43135284` | `*0x42c45698` |
+| scroll | `*0x43135264` | `*0x42c45678` |
+| panel bitmap | `0x4313b298` | — |
+
+The three fields sit together — scroll at `+0`, the source `Bitmap` embedded at
+`+4`, the table pointer at `+0x20` — so they are one intro object.
+
+**The source, read straight out of the 400M snapshot** with
+`scripts/dump_bitmap.py`: 128 × 64, stride 2, 367 lit — the Digitakt's slanted-box
+glyph, undisplaced. And one warped frame from the panel, fragments radiating from
+the centre:
+
+![source](img/intro-dt2-source.png)
+![warped](img/intro-dt2-warped.png)
+
+### What this means for the two backlog entries
+
+- **§13, a mod stamp:** add pixels to the **source** bitmap and they are warped
+  and animated with the logo for free — or set them on the panel after the copy
+  for a stamp that holds still. Either is a small cave; neither needs the logo's
+  decoder.
+- **§9, a custom animation:** the motion is data — the offset table and the scroll
+  ramp. A different table is a different animation, and a different source image
+  is a different logo, without touching the loop.
+
+**Still unread:** who fills the source bitmap and builds the table, and whether
+the Digitone's source is the Digitone glyph. The Digitone 400M rung is being
+built to answer the second.
