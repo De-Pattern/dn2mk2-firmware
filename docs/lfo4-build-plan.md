@@ -1390,6 +1390,48 @@ four columns**, exactly as the LFO page draws `WAVE`/`SPH` as one sine across
 two. So multi-column composite widgets are a general mechanism here, not an LFO
 peculiarity.
 
+### 5i-h. The manual sharpens the criterion, and warns against one conflation
+
+`dn_sysex/00_References` carries the DN2 user manuals, already extracted to
+markdown, and they settle what these parameters *are* even though they cannot
+say what selects a widget.
+
+**On `FADE`:** *"Fade In/Out makes it possible to fade in/fade out the LFO
+modulation. The knob is bipolar. Positive values give a fade-out, negative
+values give a fade in. 0 gives no fade in/fade out. (-64-63)"* So the squared
+`×` with a dotted baseline is depicting a **fade envelope about a centre**,
+which is exactly what the glyph looks like once you know.
+
+#### The conflation to avoid: "bipolar" in the manual is not "default 64"
+
+**`SPD` is described as bipolar too** — *"The knob is bipolar. The LFO cycle can
+be played backward by using negative values."* But its record reads **default
+112, fine 1**, and it draws a plain knob.
+
+So the manual's "bipolar" is a **statement about the control's meaning**, not
+about its stored encoding. Several parameters are bipolar in that sense without
+resting at 64. **Do not use the manual's wording as a proxy for the record's
+default**, and do not read DNX's corpus measurement as being about the same
+property — theirs is `rests at 64`, measured, which is the useful one.
+
+#### The criterion, restated on what was actually measured
+
+| | `+0x10` default | `+0x14` fine | widget |
+|---|---|---|---|
+| `FADE` | **64** | 0 | `×` in a box, dotted baseline |
+| `PAN` | **64** | 0 | `×` in a bowtie |
+| `MULT` | 3 | 0 | boxed number |
+| `SPD` | 112 | **1** | plain knob |
+| `DEP` | 64 | **1** | plain knob |
+
+**Centred default *and* non-fine** picks out exactly the `×`-family widgets, and
+each of the other three rows fails it on a different axis. That is a tighter fit
+than "bipolar", and it is the form worth testing further.
+
+**It still does not explain v5.** LFO4's `FADE` clone carries `default 64,
+fine 0` and drew plain, so a second gate remains — §5i-g's conclusion is
+unchanged.
+
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
