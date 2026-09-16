@@ -19,6 +19,11 @@ Rules that keep it honest:
 
 ---
 
+> **`docs/FEATURE-PLAYBOOK.md`** — the streamlined process for adding a
+> feature, requested by the owner 2026-09-16. **Accumulating; finalised once
+> LFO4 is verified on hardware.** Read §1 (the eight layers) before pricing
+> any new feature, and §2 (the stoppers) before writing any scan.
+
 ## Features
 
 | Feature | State | Gate | Evidence |
