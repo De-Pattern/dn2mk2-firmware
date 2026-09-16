@@ -792,6 +792,72 @@ one feature that is nearly all engine, one that is nearly all plumbing.
 LFO4, and two unshipped modifications to the same code is how the 2026-09-12
 probes ended up indistinguishable from each other.
 
+### FOUND 2026-09-17: the waveform table, and it is a seven-entry function pointer array
+
+This entry opened by saying the LFO designer's custom waveform table was *"not
+located"* — the same gap the Octatrack researchers record for their own device.
+It is located now, and it fell out of reading the two LFO evaluators for LFO4
+(`docs/lfo4-build-plan.md` §5k) rather than from any search aimed at it.
+
+**`0x4020b340` is an array of waveform generator function pointers**, seven
+entries of four bytes:
+
+| index | entry |
+|---|---|
+| 0 | `0x4013725e` |
+| 1 | `0x40137274` |
+| 2 | `0x40137240` |
+| 3 | `0x40137252` |
+| 4 | `0x401372ce` |
+| 5 | `0x401372be` |
+| 6 | `0x00000000` |
+
+Called indirectly: `movea.l %a0@(0,%d3:l:4),%a0` then `jsr %a0@`, with `%d3` the
+`WAVE` slot's coarse byte. Six small routines in a 142-byte run, and a **NULL
+seventh** — which matches `WAVE`'s record maximum of **6** (so seven values,
+0..6) and says the last waveform is not a function at all. `0x401372e0`, sitting
+just past the six and *not* in the table, calls `0x401343e0` and biases the
+result by `-524288` — the shape of a random source, which is what a seventh
+waveform with no generator would need.
+
+Two companion tables carry a per-waveform **start value**, chosen by the sign of
+the phase accumulator:
+
+| table | contents |
+|---|---|
+| `0x4020b308` | seven longwords, all zero |
+| `0x4020b324` | seven longwords, zero except index **4** = `0x7fffffff` |
+
+**Each of the three tables has exactly two `lea` sites, one per evaluator:**
+
+| table | evaluator B `0x401373dc` | evaluator A `0x40137726` |
+|---|---|---|
+| functions `0x4020b340` | `0x401375ee` | `0x401379fa` |
+| start `0x4020b308` | `0x40137514` | `0x40137916` |
+| start `0x4020b324` | `0x40137508` | `0x4013790c` |
+
+**Six longwords is the whole relocation cost.** There is no slack after
+`0x4020b340` — `0x4020b35c` begins a curve table — so an eighth waveform means
+copying 28 bytes into a cave as 32, repointing two `lea`s, and the same for
+either start table that the new shape needs. Then `WAVE`'s maximum goes 6 → 7 in
+the LFO records, and the generator itself is a cave routine.
+
+**What is still unread, and it is the UI half, not the engine half:**
+
+- the **name** the `WAVE` parameter shows — a string list somewhere, and the
+  eighth needs an entry;
+- the **waveform graph** the `[MOD]` page draws per column, which
+  `docs/lfo4-build-plan.md` §5i-d found is selected by a three-way index branch —
+  an eighth shape needs a glyph or it draws nothing;
+- whether the NULL seventh entry is guarded by a test before the `jsr`, or
+  reached by a branch that never indexes the table. **This must be read before
+  anything is written**, because if index 6 is special-cased by value then index
+  7 will fall into the same arm.
+
+**This makes §8 a small job on the engine side and an open one on the UI side**,
+which is the same split LFO4 hit at §5i. Priced honestly: the sound a new
+waveform makes is cheap; making the instrument *show* it is not.
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
