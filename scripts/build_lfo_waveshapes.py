@@ -17,7 +17,10 @@ carry. Its stock meaning is suppressed for them, so the knob means one thing.
 |---|---|---|
 | `STP` | **quantisation levels** | 2, 4, 8, 16, 32, 64, 128, 256 |
 | `PLS` | **pulse width** | 0.4% to 99.6% duty |
-| `NOI` | nothing -- noise has no shape to dial | -- |
+| `NOI` | **noise colour** | white, pink, brown, violet |
+
+and `NOI`'s *rate* stays where it belongs: `SPD` and `MULT`, because it is a
+sample-and-hold clocked by the phase rather than a free-running generator.
 
 ## The shapes, and where they come from
 
@@ -56,8 +59,9 @@ Both hooks are `jmp`, not `jsr`, so the stack the generator reads is untouched.
 | `0x4013760c` | evaluator B's frame save + `jsr %a1@` | the same, from `%a4@(44)`, then calls and returns |
 | `0x4013788e` | the `SPH` read that sets the start phase | zeroes it when `WAVE >= 7` |
 
-`NOI` needs no argument at all, but it is covered by the third hook anyway: a
-start phase means nothing to noise either.
+`NOI` uses the same argument for its colour, which was the owner's second
+suggestion: *"For the phs control in noise we could use that job to change the
+noise type (white/pink...)"*. Four bands of 32, filters built from shifts alone.
 
 The third is what makes `SPH` mean one thing instead of two. Without it, dialling
 the step count would also shift where a trigged LFO starts.
@@ -146,6 +150,7 @@ def source(fn_table: int, state: int) -> str:
     `%d2` and `%d3` are saved: the stock generators never touch them, so the
     evaluators are entitled to keep values there across the call.
     """
+    p0, p1, br, vi, last, out = (state + 4 * k for k in range(1, 7))
     return f"""
     .text
 
@@ -193,26 +198,109 @@ pulse:
 2:  move.l  %sp@+,%d2
     rts
 
-| ---- NOI: a fresh value every tick --------------------------------------
-| `RND` holds one value for a whole cycle; this is noise.  A xorshift32 over a
-| seed word that lives in the cave -- which is RAM once the image is unpacked,
-| the same region the hardware-confirmed boot cave wrote to.  Reseeded on every
-| power-up, so it is deterministic per boot and needs no state anywhere else.
+| ---- NOI: noise, clocked by the phase, coloured by SPH ------------------
+| Generators are called **every frame**, not every LFO tick, so a generator that
+| simply returned a fresh random number would run at the frame rate and ignore
+| SPD and MULT entirely.  So this one is a sample-and-hold driven by the phase:
+| the top eight bits are a step index, 256 steps per cycle, and a new value is
+| drawn only when that index changes.  The rate is then SPD x MULT x 256, which
+| is what the owner expects those two knobs to do -- and holding between steps is
+| also what keeps the pink and brown filters running at a fixed rate per step
+| instead of converging whenever the LFO is slow.
+|
+| SPH picks the colour, four bands of 32:
+|
+|   SPH   0-31   white    the raw xorshift
+|   SPH  32-63   pink     two one-poles plus a quarter of the white
+|   SPH  64-95   brown    a leaky random walk, gained back up
+|   SPH  96-127  violet   the difference of successive whites
+|
+| Every filter is shifts only: no multiply, no MAC, no MACSR state to disturb.
 noise:
     move.l  %d2,%sp@-
-    move.l  {state:#010x},%d0
+    move.l  %d3,%sp@-
+    move.l  %sp@(12),%d0            | the phase, two pushes deep
+    lsr.l   #8,%d0
+    lsr.l   #8,%d0
+    lsr.l   #8,%d0                  | step index, 256 per cycle
+    move.l  {last:#010x},%d2
+    cmp.l   %d2,%d0
+    beq     9f                      | same step: hold
+    move.l  %d0,{last:#010x}
+
+    move.l  {state:#010x},%d0       | xorshift32, the white source
     moveq   #13,%d2
-    move.l  %d0,%d1
-    lsl.l   %d2,%d1
-    eor.l   %d1,%d0
+    move.l  %d0,%d3
+    lsl.l   %d2,%d3
+    eor.l   %d3,%d0
     moveq   #17,%d2
-    move.l  %d0,%d1
-    lsr.l   %d2,%d1
-    eor.l   %d1,%d0
-    move.l  %d0,%d1
-    lsl.l   #5,%d1
-    eor.l   %d1,%d0
+    move.l  %d0,%d3
+    lsr.l   %d2,%d3
+    eor.l   %d3,%d0
+    move.l  %d0,%d3
+    lsl.l   #5,%d3
+    eor.l   %d3,%d0
     move.l  %d0,{state:#010x}
+
+    andi.l  #0x7f,%d1
+    lsr.l   #5,%d1                  | colour: 0..3
+    subq.l  #1,%d1
+    bmi     8f                      | white: %d0 is already the answer
+    beq     1f
+    subq.l  #1,%d1
+    beq     2f
+    bra     3f
+
+1:  | pink -- a fast pole, a slow pole, and some of the white on top
+    move.l  {p0:#010x},%d2
+    move.l  %d0,%d3
+    sub.l   %d2,%d3
+    asr.l   #2,%d3
+    add.l   %d3,%d2
+    move.l  %d2,{p0:#010x}
+    move.l  {p1:#010x},%d3
+    move.l  %d0,%d1
+    sub.l   %d3,%d1
+    asr.l   #5,%d1
+    add.l   %d1,%d3
+    move.l  %d3,{p1:#010x}
+    asr.l   #2,%d0
+    asr.l   #1,%d2
+    add.l   %d2,%d0
+    add.l   %d3,%d0
+    bra     8f
+
+2:  | brown -- a leaky random walk, scaled back to a useful amplitude
+    move.l  {br:#010x},%d2
+    move.l  %d2,%d3
+    asr.l   #4,%d3
+    sub.l   %d3,%d2                 | leak
+    move.l  %d0,%d3
+    asr.l   #4,%d3
+    add.l   %d3,%d2                 | integrate
+    move.l  %d2,{br:#010x}
+    add.l   %d2,%d2
+    add.l   %d2,%d2
+    move.l  %d2,%d0                 | x4
+    bra     8f
+
+3:  | violet -- the first difference of white
+    move.l  {vi:#010x},%d2
+    move.l  %d0,{vi:#010x}
+    sub.l   %d2,%d0
+    asr.l   #1,%d0
+
+8:  | the filtered colours can overshoot, and an LFO that wrapped would click
+    cmpi.l  #0x60000000,%d0
+    ble     7f
+    move.l  #0x60000000,%d0
+    bra     6f
+7:  cmpi.l  #-0x60000000,%d0
+    bge     6f
+    move.l  #-0x60000000,%d0
+6:  move.l  %d0,{out:#010x}
+9:  move.l  {out:#010x},%d0
+    move.l  %sp@+,%d3
     move.l  %sp@+,%d2
     rts
 
@@ -262,7 +350,7 @@ def main() -> int:
         name_vas.append(cursor)
         cursor += len(text)
     cursor = (cursor + 3) & ~3
-    state_va, cursor = cursor, cursor + 4      # NOI's xorshift seed
+    state_va, cursor = cursor, cursor + 4 * 7  # NOI: seed, filters, S&H
     names_va, cursor = cursor, cursor + 4 * ENTRIES
     table_vas = {}
     for old in STOCK_TABLES:
@@ -282,8 +370,8 @@ def main() -> int:
                                 offsets["noise"]]
 
     print(f"part 2 -- the {ENTRIES}-entry copies")
-    write(content, state_va, be32(NOISE_SEED))
-    print(f"  NOI seed {NOISE_SEED:#010x} at {state_va:#010x}")
+    write(content, state_va, be32(NOISE_SEED) + bytes(24))
+    print(f"  NOI seed {NOISE_SEED:#010x} at {state_va:#010x}, six state words after it")
     for text, va in zip(NEW_NAMES, name_vas):
         write(content, va, text)
     old_names = read_longs(content, STOCK_NAMES, STOCK_ENTRIES)
