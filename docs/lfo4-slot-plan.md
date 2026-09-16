@@ -917,3 +917,37 @@ than to correctness.
 `0x400dd276` and `0x400dd718` either copy a record wholesale or validate its id
 against a table, and which one decides whether §12's new ids survive a round
 trip. That is a different question from whether the format can hold them.
+
+### [READ 2026-09-17] `0x400dd276` is the **sound** deserializer, and it is positional
+
+Promised to DNX as the answer to "does the save path preserve an id it does not
+emit". It is not that site, and saying so is the answer:
+
+```
+0x400dd24a  pea  #202                  | memset(obj+0x14, 0, 202) -- the mirror
+0x400dd24e  clr.l %sp@-
+0x400dd250  pea  %a2@(20)
+0x400dd254  jsr  0x401344d8
+0x400dd25e  lea  0x401fd0b0,%a1        | the inverse map
+0x400dd26c  move.l %a1@+,%d1           | map[i]
+0x400dd26e  addi.l #10,%d1
+0x400dd274  addq.l #2,%d0
+0x400dd276  move.w %a4@,%a2@(0,%d1:l:2) | valuearray[map[i]] = stored[i]
+0x400dd27a  cmpi.l #214,%d0            | 107 iterations
+```
+
+**The stored sound block holds 107 u16 entries at `+0x1c`, read by position, not
+by id.** There is no id byte anywhere in this loop: entry *i* goes wherever
+`0x401fd0b0[i]` says, and an entry whose map value is 0 lands in slot 0 — the
+no-destination sink. That is the folding this document mis-read twice, now seen
+from the writer's side.
+
+It also settles the 107 against the 101: **the stored block is wider than the
+mirror.** Seven of the 107 stored entries have no mirror cell, which is exactly
+DNX's two-id-spaces point arriving from the firmware side.
+
+**So the question DNX asked is still open and I named the wrong site.** Their
+record is `(u8 id, u8 track, u16[128])` in a *pattern*; this is a *sound*. The
+pattern-lock writer is a different routine and has not been found. Recorded
+rather than quietly dropped, because a promise to check something is worth as
+much as the check.
