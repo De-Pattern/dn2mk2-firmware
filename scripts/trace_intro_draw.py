@@ -34,6 +34,7 @@ import argparse
 import collections
 import json
 import os
+import struct
 import sys
 import time
 
@@ -52,6 +53,9 @@ def main() -> int:
     ap.add_argument("--raw", action="append", default=[], metavar="PTR:WORDS=FILE",
                     help="after the run, follow the pointer at PTR and write WORDS "
                     "longwords from it as raw bytes (repeatable)")
+    ap.add_argument("--args-at", type=lambda s: int(s, 0), metavar="ADDR",
+                    help="log the first three stack arguments each time ADDR executes "
+                    "-- for the intro copy routine, its frame counter")
     ap.add_argument("--film", metavar="BITMAP=PREFIX",
                     help="after every slice, write this Bitmap as PREFIX_<M>M.pgm -- a "
                     "filmstrip of the animation, one frame per slice")
@@ -108,6 +112,17 @@ def main() -> int:
         for r in ranges:
             m.uc.mem_write(int(r["va"], 16), bytes.fromhex(r["hex"]))
         print(f"applied {len(ranges)} patch ranges from {args.patch}")
+    arg_log: list[tuple[int, int, int, int]] = []
+    if args.args_at is not None:
+        from unicorn import UC_HOOK_CODE
+        from unicorn.m68k_const import UC_M68K_REG_A7
+
+        def on_entry(uc, address, size, user):
+            sp = uc.reg_read(UC_M68K_REG_A7)
+            a0, a1, a2 = struct.unpack(">III", bytes(uc.mem_read(sp + 4, 12)))
+            arg_log.append((now["n"], a0, a1, a2))
+
+        m.uc.hook_add(UC_HOOK_CODE, on_entry, begin=args.args_at, end=args.args_at)
     print(f"built from {args.snapshot}; running {args.instrs:,} instructions")
 
     t0, stop = time.time(), None
@@ -137,8 +152,17 @@ def main() -> int:
         print(f"  {ret:#010x}  {c['set']:>9,}  {c['lit']:>7,}   "
               f"({c['x0']:>3},{c['y0']:>3})-({c['x1']:>3},{c['y1']:>3})   {bm}")
 
+    if arg_log:
+        print(f"\n{len(arg_log)} calls at {args.args_at:#010x}; arg0 by slice:")
+        by_slice: dict[int, list[int]] = collections.defaultdict(list)
+        for n_, a0, a1, a2 in arg_log:
+            by_slice[n_].append(a0)
+        for n_, vals in sorted(by_slice.items()):
+            print(f"  {n_/1e6:6.1f}M  {len(vals):>3} calls  arg0 {min(vals)}..{max(vals)}")
+
     out = {
         "snapshot": args.snapshot,
+        "args": [list(t) for t in arg_log],
         "instructions": now["n"],
         "stop": str(stop),
         "pends_satisfied": ev.get("satisfied", 0),

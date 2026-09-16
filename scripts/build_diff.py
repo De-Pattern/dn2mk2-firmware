@@ -30,6 +30,7 @@ from dnfw.firmware.load import load
 MAIN_OS = 3
 BASE = 0x40000400
 GAP = 16      # merge changes closer than this into one range
+RUNTIME_VA = 0x46710000   # where build_payload_section.py's boot hook copies a payload
 
 
 def main() -> int:
@@ -38,9 +39,15 @@ def main() -> int:
     stock, built, out = (pathlib.Path(a) for a in sys.argv[1:])
     a = load(read_image(stock)).container.find(MAIN_OS).unpack()
     b = load(read_image(built)).container.find(MAIN_OS).unpack()
-    if len(a) != len(b):
-        raise SystemExit(f"MAIN OS size differs ({len(a)} vs {len(b)}); ranges would be meaningless")
+    if len(b) < len(a):
+        raise SystemExit(f"built MAIN OS is shorter ({len(b)} vs {len(a)}); not supported")
 
+    # A build that grows MAIN OS (scripts/build_payload_section.py) appends a
+    # payload its boot hook copies to RUNTIME_VA before the BSS clear. A snapshot
+    # is taken long after that copy, so the tail is written where the copy would
+    # have put it -- the copy itself is proven separately, by a cold boot.
+    tail = b[len(a):]
+    b = b[:len(a)]
     ranges, i, n = [], 0, len(a)
     while i < n:
         if a[i] == b[i]:
@@ -51,6 +58,9 @@ def main() -> int:
             j += 1
         ranges.append({"va": f"{BASE + i:#010x}", "hex": b[i:j].hex()})
         i = j
+    if tail:
+        ranges.append({"va": f"{RUNTIME_VA:#010x}", "hex": tail.hex(),
+                       "note": "appended payload, placed where the boot copy puts it"})
 
     pathlib.Path(out).write_text(json.dumps({"stock": str(stock), "built": str(built),
                                              "ranges": ranges}, indent=1))

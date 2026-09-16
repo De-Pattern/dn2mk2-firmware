@@ -2163,3 +2163,54 @@ settle before this is built**, and it is the same space question as §1 and §6.
 - reading a `.syx` directly. The page needs a de-packed section because aPLib
   depacking in the browser has not been written. `scripts/js_codec_check.mjs`
   already has the codec in JavaScript, so this is porting, not research.
+
+---
+
+## 15. A wavetable synth machine
+
+**Asked for by the owner, 2026-09-17**, and it corrects a misreading recorded in
+§14: *"about the LFO wavetable, I think it was misunderstood, is not a wavetable
+for the LFO but a new synth machine to handle wave tables"*. `lfo-wavetable`
+(a table-driven **LFO** shape) stays built and is being tested as it is; this
+entry is the different and much larger thing that was actually meant: **a SYN
+machine whose oscillator plays wavetables**, alongside the Digitone II's
+existing machines.
+
+### Why this is a different class of work from everything built so far
+
+Every build in `docs/backlog-builds.md` changes the **ColdFire**: the UI, the
+sequencer, the LFO evaluators, the boot screen. **Audio is synthesised on the
+SHARC+ DSP.** A new oscillator is DSP code, and the DSP hunt is §7 — parked, with
+a warning. So this entry inherits §7's cost, whatever else it needs.
+
+### What already exists to build on
+
+- **The ColdFire half has a precedent, on the Digitakt.** digikit's
+  `tools/machinepatch.py` is *"Milestone A of adding an eighth machine"*: it
+  relocates the UI's source machine list (`0x401e1958` on DT2 1.15C, seven u32s)
+  into a cave so an eighth entry can exist, and proves the firmware reads the
+  relocated copy. Its Milestone B installs an eighth machine *descriptor* behind
+  a trampoline on the ColdFire machine dispatch `FUN_400caf48`. That is the menu
+  and the descriptor — the part a user sees — and it is Digitakt-side; the
+  Digitone equivalents are unread.
+- **`docs/chimera-feasibility.md`** covers running one device's machines on the
+  other, including how the SHARC program is shipped and loaded, and a third
+  party's map of the six machine-selector roles.
+- **Wavetables are data, and shipped data now works under the emulator.**
+  `payload-section` (§1) proves bytes appended to MAIN OS reach run time. A
+  wavetable set is exactly that shape of payload — though whether the *DSP* can
+  read ColdFire memory, or needs the tables pushed to it, is unknown.
+
+### The first questions, cheapest first
+
+1. **Can a Digitone machine slot be added at all on the ColdFire?** Port
+   Milestone A to DN2 1.11: find the machine list and the dispatch, relocate the
+   list, and see an eighth row in the menu. No sound, and no DSP — it only proves
+   the slot exists.
+2. **What does selecting a machine send to the DSP?** The frame carries indices
+   25–99 (`docs/engine-state.md`); the machine type is one of them. Whether the
+   DSP accepts a type it does not know, and what it does with it, decides whether
+   this is a DSP *patch* or a DSP *rewrite*.
+3. **Where would the tables live for the DSP to read?** Answered by (2).
+
+Only (1) is ColdFire work, and it is the natural first build.
