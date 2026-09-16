@@ -1541,8 +1541,49 @@ bridge. Interior detail will not survive, and the parts have to read as
 shipped it, and the composite appears only when something has been changed. The
 figure's *presence* is the signal; its composition is the flavour.
 
-#### Open question for whoever picks this up
+#### It replaces the logo — owner, 2026-09-16
 
-Where the Elektron logo sits in those 128×64 pixels, and whether the figure
-replaces it, sits beside it, or is built *from* it. §13's first question — a
-`setPixel` trace during the intro — answers this at the same time, for free.
+Not beside it, not built from it. **The composite figure stands where the
+Elektron logo stands.** Three things follow.
+
+**The footprint is inherited, not negotiated.** The figure gets the logo's box,
+whatever that turns out to be. No hunt for free space, no layout code deciding
+where things sit — the `setPixel` trace §13 already calls for measures the box,
+and the box is the spec.
+
+**It may be a data swap rather than a cave.** If the logo is stored bitmap data
+drawn by a generic blitter, replacing it is a same-footprint byte replacement —
+the cheapest class of change in this project, and the same class as Gate E's
+string patch, which is flashed and proven. If it is drawn procedurally, it is a
+cave on the boot path, which `docs/code-caves.md` has also proven. **Either way
+the mechanism exists**; the trace says which one, and that is the whole first
+question.
+
+**It settles §13's authorship constraint outright.** §13 says the stamp must not
+imply Elektron authorship. Removing their mark is the strongest possible form of
+not claiming it — the boot screen stops carrying a manufacturer's brand rather
+than carrying one over modified code.
+
+#### The geometry problem this creates, which is real
+
+**The Elektron logo is a wordmark: wide and short. A flip-flap creature is tall.**
+Those do not compose. A three-band figure stacked vertically into a wordmark's
+box gives each band a few pixels of height and nothing reads.
+
+**The fix is to turn the bands ninety degrees**, and it suits the subject better
+than the original did. Instruments are *already* segmented along their length:
+
+| instrument | left | middle | right |
+|---|---|---|---|
+| horn | mouthpiece | tubing | flared bell |
+| guitar | headstock | neck | body |
+| flute | headjoint | body | foot |
+| drum kit | hi-hat | shell | cymbal |
+
+Bands running **left to right** fill a wordmark's footprint naturally, and a
+mouthpiece on a guitar neck ending in a flared bell is exactly the Croc-gu-phant
+joke in the register the owner asked for. Vertical stacking was an artefact of
+the book, not of the idea.
+
+Budget is unchanged in total and only redistributed: three bands across a wide
+short box rather than a narrow tall one.
