@@ -7,7 +7,7 @@ instruction to crack five named pieces. It supersedes nothing; it collects what
 and adds what was read today.
 
 **Read the honesty note in §7 before pricing anything from this.** All five
-pieces are designed; one sub-part, `[MOD]` navigation, is not located.
+pieces are designed, `[MOD]` navigation included. Nothing is built or flashed.
 
 ## 0. The design decision, made
 
@@ -348,33 +348,48 @@ built table rather than predicted.
 
 `0x4010dafc` has no slack for a fourth compare, so this is a **cave**.
 
-### `[MOD]` navigation — no handler found, and there is a reason for that
+### `[MOD]` navigation — **FOUND**, and it is a page count
 
-The key handler that advances `0x1a` → `0x1b` → `0x1c` was **not located**. But
-the search that failed to find it is itself informative, so it is recorded
-rather than left as a blank.
+**[SUPERSEDES the "no handler found" entry that stood here for part of
+2026-09-16.]** That entry concluded, from three closed leads and the absence of
+any page-group table, that navigation was probably carried by the range test.
+**It is not.** There is an explicit page count, and it was found the moment the
+search used digikit's `rttiscan.py` instead of hand-written regex (§5d).
 
-**There is no page-group table in the image.** Three shapes were searched for a
-list of group-start pages (`0x10`, `0x16`, `0x1a`, `0x1d`) — as bytes, as words
-and as longwords, with slack between them — and all three returned **zero**
-hits. Every longword run of `1a 1b 1c` (13 of them) is a generic sequential
-index table. The byte table at `0x401d35e8` is a format-migration remap.
+The UI construction function `0x40060e72` registers each page view with a call
+of the shape `register(ctx, descriptor, PAGE_COUNT, ...)` immediately before
+`make_shared`-ing the view. For `LfoPageView` it does it **twice**:
 
-**Group membership is expressed as range predicates, not as data.** The
-predicate family in `0x400dbdea`–`0x400dbfcc` is exactly a set of page groups:
-`<= 4`, `0x05`–`0x0a`, `0x10`–`0x15`, `0x16`–`0x1c`, `0x1d`/`0x16`, and the LFO
-range `0x1a`–`0x1c`. There is nowhere else for a group to be defined.
+```
+0x40061558  moveq #3,%d1          ; <-- PAGE COUNT = 3
+0x4006155a  moveq #6,%d0          ; LfoPageView's own argument
+0x40061562  movel #0x401e0048,%d0 ; descriptor
+0x4006156c  jsr %a5@              ; register(...)
+0x4006157a  jsr 0x4019fb2a        ; make_shared<LfoPageView>(6)
 
-**So the working hypothesis is that `[MOD]` navigation costs nothing extra**
-under the `0x1d` design of §5b: if the group is the range test, widening the
-range widens the group. **This is a hypothesis, not a finding.** It has one
-clean falsifier — flash the §5b edits and press `[MOD]` four times — and if it
-is wrong the symptom is a page that cannot be reached, not a broken instrument.
+0x40061868  moveq #2,%d1          ; <-- a SECOND registration, count = 2
+0x4006186a  moveq #6,%d0
+0x40061872  movel #0x401e0000,%d0 ; a different descriptor
+0x4006187c  jsr %a5@
+0x4006188a  jsr 0x4019fb2a        ; the same view again
+```
 
-One more thing worth knowing before that build: `0x4012a836`, the out-of-line
-`is_lfo_page`, has **zero callers and zero data references**. It is a compiler
-artifact; every real use is inlined (`0x4012af7e`, `0x4012af9c`). Editing it
-changes nothing, and a cave there would never run — `dnfw fn` says so plainly.
+Neighbouring registrations in the same function use counts 1, 2, 3 and 15 with
+their own descriptors, so the third argument is a **count of pages behind one
+key**, and `3` for the LFO view is the three LFO pages.
+
+**The edit is one byte:** `moveq #3,%d1` → `moveq #4,%d1` at `0x40061558`.
+
+**Open, and it must be settled before the build:** why there are *two*
+registrations, with counts 3 and 2, both pointing at the same view class with
+the same argument. The likely reading is a sound-track group and a MIDI-track
+group — MIDI tracks having fewer LFO pages — but that is a guess from the
+numbers, and the descriptors `0x401e0048` / `0x401e0000` have not been read.
+If LFO4 should appear on MIDI tracks too, the second count moves as well.
+
+This is a hypothesis with a one-press falsifier, unchanged from before — but it
+is now a hypothesis about a **named one-byte constant** rather than about
+whether a mechanism exists at all.
 
 ## 5b. The page number: `0x1f` is the expensive choice, `0x1d` is the cheap one
 
@@ -562,11 +577,10 @@ digikit tool that does the job, or say why it does not fit.
 8. Serialization: two hooks at `0x400dd276` / `0x400dd718`, plus clearing `ext`
    alongside the 202-byte memset at `0x400dd24a`.
 9. Page view: cave on `0x4010dafc` adding LFO4's `Start Phase` id.
-10. `[MOD]` navigation — **expected to come free with §5b**; verify by pressing
-    `[MOD]` four times on the first build that boots.
+10. `[MOD]` navigation: `moveq #3,%d1` → `moveq #4,%d1` at `0x40061558`. Settle
+    the second registration (count 2, `0x40061868`) first.
 
-Steps 1–9 are specified to the byte or to a named cave. Step 10 is a prediction
-with a one-press test.
+**All ten steps are specified to the byte or to a named cave.**
 
 ---
 
@@ -578,7 +592,7 @@ with a one-press test.
 | 2 | tick edit | **designed** — both loops decoded, four edits named, state relocation forced and sized |
 | 1 | slot space | **designed** — route chosen, bound found to be a `moveq`, extension array unchanged from the slot plan, 11 hooks listed |
 | 3 | serialization | **designed** — both halves read; the stored block at `+28` is indexed by p-lock id, 107 wide, and the maps are the only translation. No format version bump. Three hooks named. Serialize-side loop bound unchecked |
-| 4 | page view | **designed** — one shared `LfoPageView`, no fourth class; its entire LFO knowledge is three `Start Phase` ids in one function. **`[MOD]` navigation: no handler found, but no page-group table exists either** — groups are range predicates, so §5b's contiguous design probably carries navigation with it. Hypothesis, with a one-press falsifier |
+| 4 | page view | **designed** — one shared `LfoPageView`, no fourth class; its LFO knowledge is three `Start Phase` ids in one function. **`[MOD]` navigation FOUND**: an explicit page count, `moveq #3,%d1` at `0x40061558`, one byte. A second registration with count 2 is not yet explained |
 
 **Nothing here has been built, and nothing has been flashed.** All five are
 specified to the point where code can be written against them. `[MOD]`
