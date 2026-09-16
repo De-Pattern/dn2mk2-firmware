@@ -6,8 +6,8 @@ instruction to crack five named pieces. It supersedes nothing; it collects what
 `lfo4-feasibility.md`, `lfo4-slot-plan.md` and `modulation-matrix.md` establish
 and adds what was read today.
 
-**Read the honesty note in §7 before pricing anything from this.** Three of the
-five pieces are designed to the instruction; two are not finished.
+**Read the honesty note in §7 before pricing anything from this.** Four of the
+five pieces are designed to the instruction; the fifth is not finished.
 
 ## 0. The design decision, made
 
@@ -207,41 +207,71 @@ returning `record[id]+0x04`). The known choke points:
 
 ---
 
-## 4. Serialization — **located and sized, not designed**
+## 4. Serialization — **designed**, and it is nearly free
 
-Two functions, both 16-track loops over per-track records.
+**Cracked 2026-09-16.** The pair is symmetric and both halves walk the maps we
+already dumped. This is the piece the slot plan called *"not yet scoped and the
+one place where 'LFO4's values do not survive a save' would be the failure"*.
 
-`0x400ddc52` gates on a version and a magic before doing anything:
-
-```
-0x400ddc70  cmpl %a2@(4),%d0        ; version == 4
-0x400ddc78  movel #0xBACEF00C,%d1
-0x400ddc7e  cmpl %a2@(10411),%d1    ; magic at +10411
-```
-
-then copies 16 words from `%a2@(0x1c)` to `%a3@(0x0e)` (clamped at 32512), then
-loops 16 tracks:
+### Deserialize — stored → live, at `0x400dd24a`
 
 ```
-0x400ddd0c  addil #1163,%d3         ; destination stride
-0x400ddd12  addil #359,%d4          ; source stride
-0x400ddd1a  cmpl %d2,%d0            ; %d0 = 16
+0x400dd24a  pea 0xca                    ; 202
+0x400dd24e  clrl %sp@-
+0x400dd250  pea %a2@(20)                ; live sound + 0x14 = THE VALUE ARRAY
+0x400dd254  jsr 0x401344d8              ; memset(values, 0, 202)
+0x400dd25e  lea 0x401fd0b0,%a1          ; THE INVERSE MAP
+0x400dd268  lea %a3@(1c,%d0:l),%a4      ; src = stored + 28 + i   (disp8, HEX)
+0x400dd26c  movel %a1@+,%d1             ; slot = inverse_map[i]
+0x400dd26e  addil #10,%d1
+0x400dd276  movew %a4@,%a2@(0,%d1:l:2)  ; live[20 + slot*2] = stored word
+0x400dd27a  cmpil #214,%d0              ; 214/2 = 107 iterations
 ```
 
-**Per track: 359 bytes in the stored form, 1,163 in the live form.**
+### Serialize — live → stored, at `0x400dd6f0`
 
-**Why this piece is not finished.** DNX's format work says the stored sound
-already reserves the fourth-LFO slots — offsets 36, 44, 52, 60, 68, 76, 84, 92
-in the `30 + 8*parameter + 2*lfo` grid — so **the persisted format needs no
-version bump**. What has *not* been done is tracing which of the two functions
-above writes that grid, and where in the 359-byte record it sits. Until that is
-read, the hook is not designed, and "LFO4's values do not survive a save" is
-exactly the failure mode the slot plan warned about.
+```
+0x400dd6f2  pea %a2@(28)                ; stored + 28
+0x400dd6f6  jsr 0x401344d8              ; memset
+0x400dd700  lea 0x401fcf20,%a1          ; THE FORWARD MAP
+0x400dd70a  lea %a3@(14,%d1:l),%a4      ; src = live + 0x14   (disp8, HEX)
+0x400dd70e  movel %a1@+,%d0             ; id = forward_map[i]
+0x400dd710  addil #14,%d0
+0x400dd718  movew %a4@,%a2@(0,%d0:l:2)  ; stored[28 + id*2] = live word
+```
 
-**Next, concretely:** read `0x400dd1ea` and `0x400e7e66` — the two per-track
-callees of the loop above — and locate the sound-object copy inside them.
+### What this means for LFO4
 
----
+**The stored block at `+28` is indexed by p-lock id, 107 wide, and the only
+translation in either direction is the map.** The reserved fourth-LFO rank ids
+— 0, 4, 8, 12, 16, 20, 24, 28 — are already inside that 107, and DNX has
+already observed the format storing and reading back a lock in that rank.
+
+So **the persisted format needs no version bump and no new field.** The moment
+the forward and inverse maps carry LFO4's eight entries — which `lfo4-slot-plan.md`
+already prices as 8 + 8 data edits — the values flow both ways on their own.
+
+Two hooks are still needed, and only because LFO4's slots are 101–108 and the
+live array stops at 100:
+
+| # | site | what the hook does |
+|---|---|---|
+| 1 | `0x400dd276` | slot ≥ 101 → write `ext[obj][slot-101]` instead of `live+20+slot*2` |
+| 2 | `0x400dd718` | slot ≥ 101 → read from `ext` instead of `live+0x14` |
+| 3 | `0x400dd24a` | the 202-byte memset must also clear the extension array |
+
+**Unchecked:** the serialize loop's iteration bound. The deserialize side is
+`cmpil #214` = 107; the serialize side was not read to its `cmp`. If they differ,
+that matters.
+
+### The other five records in the same function
+
+Noted so they are not re-derived: `0x400dd390`–`0x400dd468` convert **five**
+records from 12 stored bytes to 16 live bytes (dst `%a2+246/262/278/294/310`,
+src `%a3+264/276/288/300/312`) through `0x400dd12e`. Not LFO data. The enclosing
+function `0x400dd1ea` is the **v3** track converter (`%a3@(4) == 3`); `0x400ddc52`
+is the v4 container gate (magic `0xBACEF00C` at `+10411`), 16 tracks, stored
+stride 359, live stride 1,163.
 
 ## 5. The page view — **one good finding, not a design**
 
@@ -256,8 +286,18 @@ take the LFO index from context.
 **What is missing:** where that index comes from. Two `cmpil #26` sites
 (`0x401783b0`, `0x40178402`) were the obvious candidates and were **checked and
 ruled out** today — they follow `lsrl #8` and are character-range tests in a
-drawing routine, nothing to do with pages. The page→LFO mapping is still
-unlocated, and `[MOD]` key navigation has not been looked at at all.
+drawing routine, nothing to do with pages.
+
+**The lead to follow next.** A byte table at `0x401d35e8` reads
+
+```
+16 17 18 19 1a 1b 1c 1d | 00 01 .. 14 | 1e 1f 20 21 ..
+```
+
+— a **page permutation**, pages `0x16`–`0x1d` first, then `0x00`–`0x14`, then
+`0x1e` onward. It is a page *order*, not a page *set*, and **`0x1f` is already
+in it**. Whoever indexes this table is very likely the `[MOD]` navigation order.
+It has not been traced to a consumer, so this is a lead, not a finding.
 
 ---
 
@@ -272,10 +312,11 @@ unlocated, and `[MOD]` key navigation has not been looked at at all.
 5. Classifier: cave on `0x400dbfbc` adding `|| page == 0x1f`.
 6. Forward map → 108 entries (cave, 432 B); inverse map 8 entries in place.
 7. Parameter records for LFO4's eight parameters (already built).
-8. Serialization hook — **after §4 is read**.
+8. Serialization: two hooks at `0x400dd276` / `0x400dd718`, plus clearing `ext`
+   alongside the 202-byte memset at `0x400dd24a`.
 9. Page view + `[MOD]` navigation — **after §5 is read**.
 
-Steps 1–7 are specified to the byte or to a named cave. **8 and 9 are not.**
+Steps 1–8 are specified to the byte or to a named cave. **9 is not.**
 
 ---
 
@@ -286,10 +327,10 @@ Steps 1–7 are specified to the byte or to a named cave. **8 and 9 are not.**
 | 5 | classifier | **designed** — mechanism read, edit specified, cave form proven in shipped code. Other cascades unread |
 | 2 | tick edit | **designed** — both loops decoded, four edits named, state relocation forced and sized |
 | 1 | slot space | **designed** — route chosen, bound found to be a `moveq`, extension array unchanged from the slot plan, 11 hooks listed |
-| 3 | serialization | **located, not designed** — the two loops and their strides are read; which one writes the sound grid is not |
+| 3 | serialization | **designed** — both halves read; the stored block at `+28` is indexed by p-lock id, 107 wide, and the maps are the only translation. No format version bump. Three hooks named. Serialize-side loop bound unchecked |
 | 4 | page view | **one finding** — a single shared `LfoPageView`, so no fourth class is needed; the page→LFO mapping and `[MOD]` navigation are unlocated |
 
-**Nothing here has been built, and nothing has been flashed.** Three of the five
-are specified to the point where code can be written against them. Two are not,
-and saying otherwise would repeat the mistake that cost three flashes: a cost
-model published ahead of the reading that supports it.
+**Nothing here has been built, and nothing has been flashed.** Four of the five
+are specified to the point where code can be written against them. The fifth is
+not, and saying otherwise would repeat the mistake that cost three flashes: a
+cost model published ahead of the reading that supports it.
