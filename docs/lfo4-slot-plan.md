@@ -457,3 +457,65 @@ for the same reason.
 
 **Do not re-price step 4 on 33 either.** It is a candidate list to instrument,
 not a hook count. The hook count is whatever survives the run.
+
+---
+
+## [CORRECTION 2026-09-16] The 128-object pool is stored Sounds, not the live track state
+
+**From the owner, and it invalidates what this document has been sizing.** The
+measurement that provoked it: under the emulator, `[MOD]` was pressed, LFO1's
+`SPD` was turned four times, and the screen changed — `SPD` showed its value
+`16.62` — while **not one byte of all 128 sound objects changed**. The stimulus
+control passed (the screen proves the edit landed), so the null result is real.
+
+### The owner's model of where track state lives
+
+| layer | where | tied to a Sound? |
+|---|---|---|
+| **current project track data** | the running project's working memory, 16 tracks | **no — it stands alone** |
+| project save | +Drive, when the user chooses | no |
+| a stored **Sound** | +Drive, created by **burning** a track's config | that *is* what burning means |
+| the **128-slot pool** | the project | **optional** assignment of a stored Sound |
+
+In the owner's words: *"You can start a project anew in the DN and twist knobs,
+and that config stays in the tracks in that project."* No Sound is involved in
+that loop at any point, and the track data *"doesn't need to be tied to any
+sound in the pool or +Drive at all."*
+
+### What that means for this document
+
+**`sound + 0x14 + slot*2` is the STORED layout.** The 128 × 2,388-byte objects
+are the project's **Sound pool** — optional storage — not the structure the UI
+edits. Everything in this file that sizes the job against those objects is
+describing the persistence side of the feature, which is real work but is **not
+where a live LFO4 value lives**.
+
+So LFO4 needs to exist in **two** places, and only one of them is scoped here:
+
+1. **Per-track project data** — 16 instances, live, what the encoder writes and
+   what the engine reads. **Unlocated as of this correction**, and the thing to
+   find next.
+2. **The stored Sound format** — the 128-object layout this document already
+   describes, which matters at burn and at project save.
+
+**This also explains the 33 silent sites.** `docs/lfo4-slot-plan.md`'s
+"[CORRECTION] 29 sites was never a well-defined set" found that none of the
+shape-scan candidates ever executed. If they are stored-Sound code, they would
+only run on load, burn or save — none of which a boot-and-twist-knobs run
+performs. Their silence is consistent with being real value-array code that this
+experiment never provoked, rather than with being dead.
+
+### The method note, because it is the same one twice
+
+The pool null result was the correct answer to a **wrongly framed question**.
+Nothing static would have revealed the framing error: the layout, the stride and
+the accessor are all exactly as this document describes them, and all confirmed
+at runtime (128 objects, 2,388 stride, `base + 0x4414 + i*2388`). What was wrong
+was believing that structure is what a knob writes.
+
+`docs/FEATURE-PLAYBOOK.md` §2.3 says a measurement that contradicts what the
+owner knows about their own instrument should make you suspect the reader. Here
+the measurement was right and the *model* was wrong — and the owner corrected it
+from years of use, which is the same rule pointing the same way: **ground the
+model in how the device is actually operated, before sizing work against a
+structure.**
