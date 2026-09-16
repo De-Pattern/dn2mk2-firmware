@@ -33,6 +33,7 @@ Rules that keep it honest:
 | **TRAN mapping** | **SOLVED** | — | `TRAN = 4 × slot − 8`; 32 of 34 reachable; `docs/tran-mapping.md` |
 | **LFO4** | **UNBLOCKED** | **No DSP blocker.** Modulation is generated and applied on the ColdFire; LFO parameters are never sent. **The goal is a real fourth LFO** (owner, 2026-09-15) — a fourth `[MOD]` page, saved with the sound. A **seventh modulation source** is a documented fallback only, and costs per-preset storage. One engine unknown remains: **where LFO1–3 are ticked** | `docs/engine-state.md`, `docs/modulation-matrix.md`, `docs/lfo4-slot-plan.md` |
 | **Chimera (DT2 machines + samples)** | **SCOPED** | ColdFire half tractable. SHARC half: we ship its program, know how it is loaded, and a third party has mapped the **six machine selector roles** and a full sample-resource lifecycle | `docs/chimera-feasibility.md`, `docs/sharc-image.md`, `docs/lalzart-dt2-crosscheck.md` |
+| **An eighth LFO waveform (`STP`)** | **BUILT, AWAITING HARDWARE.** `lfo-wave8_DN2_1.11.syx`. Five seven-entry tables copied out as eight, nine pointer edits, `WAVE` max 6 -> 7, an 18-byte generator. The waveform table -- `docs/ideas-backlog.md` §8's long-standing "not located" -- is `0x4020b340`, found while reading the LFO evaluators. Risk: the `[MOD]` page's waveform graph renderer is untraced | `docs/ideas-backlog.md` §8 |
 | **Sample transfer / RPC** | **IN PROGRESS** | what dispatches an opcode | `docs/midi-rpc-dispatch.md` |
 
 ### LFO4 — the pieces, and which are real

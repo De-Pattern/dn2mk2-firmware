@@ -858,6 +858,51 @@ the LFO records, and the generator itself is a cave routine.
 which is the same split LFO4 hit at §5i. Priced honestly: the sound a new
 waveform makes is cheap; making the instrument *show* it is not.
 
+### BUILT 2026-09-17: `STP`, an eighth waveform
+
+`scripts/build_lfo_wave8.py` → `00_Resources/02_Builds/lfo-wave8_DN2_1.11.syx`.
+All 21 integrity checks pass and the HMAC trailer is reproduced.
+
+**`STP` is the ramp quantised to eight levels** — the one shape the stock seven
+do not contain, and audibly unlike every one of them: a pitch destination steps
+instead of gliding, a filter destination climbs a fixed ladder. Available on
+every LFO of every track, and it is an ordinary value of the existing `WAVE`
+slot, so a preset saved with it stores nothing new.
+
+The whole feature is **nine pointer edits, three record maxima and an 18-byte
+routine**:
+
+```
+step8:
+    move.l  %sp@(4),%d0
+    eori.l  #0x7fffffff,%d0     | the stock SAW generator, entire
+    andi.l  #0xe0000000,%d0     | keep three bits: eight levels
+    rts
+```
+
+All five seven-entry tables are copied into a cave as eight and their nine
+`lea`/`pea` sites repointed; `WAVE`'s maximum goes 6 → 7 in the three LFO
+records. The name list reads back `TRI SIN SQR SAW EXP RMP RND STP`.
+
+**The question that decided whether this was possible, answered before anything
+was written:** index 6 (`RND`) has a **NULL** generator, so an eighth index had
+to be shown not to fall into whatever handles it. `0x401379e8` compares the
+waveform against 6 **by value** and branches away before the indexed `jsr`, so
+the NULL is never called and index 7 reaches the call exactly as 0–5 do. Had
+that been a bound rather than an equality, the table copy would have been
+pointless.
+
+**The one unread risk, and what to do about it.** The `[MOD]` page draws a small
+waveform graph for the `WAVE` column through a virtual call at `0x4010e1a0`
+(`%a1@(180)`) whose renderer was not traced. It may draw nothing for an unknown
+waveform, or index a glyph table by value. **Select `STP` while watching for a
+freeze**; if the page hangs, power-cycle and reflash stock by the route in
+`docs/flashing.md`. The audio does not depend on the page being open.
+
+**Still open, and cheap now that the tables are found:** naming is solved but the
+graph is not, which is the same UI/engine split LFO4 hit at
+`docs/lfo4-build-plan.md` §5i. Whoever traces the widget renderer closes both.
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
