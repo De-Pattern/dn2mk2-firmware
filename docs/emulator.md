@@ -601,3 +601,47 @@ and that is three small ports away, not a limitation of the tool.
 
 Worth doing: it is the difference between guessing at widget selection and
 watching it.
+
+### Port 1 of 3: `--weakptr` on DN2 1.11 — located
+
+`emu/longrun.py` neutralises two branches in `weak_ptr::lock` that send the main
+task into a terminal loop. Its site is a **hardcoded address**, not a signature:
+
+```
+RuntimeError: weakptr: 0x40188b40 holds 4878, expected 6714
+```
+
+On DN2 1.11 that address is unrelated code (`pea 0x800`). The DT2 shape is
+`beq.b +0x14` followed **16 bytes later** by `bne.b +0x0a`, so searching for that
+shape rather than that address finds it. Five hits, four of them byte-identical:
+
+```
+0x401a06f2  beqs  0x401a0708          ; control block null?
+0x401a06f4  movel %a0@(4),%d0         ; use count
+0x401a06f8  movel %d0,%d1
+0x401a06fa  addql #1,%d1
+0x401a06fc  movel %d1,%a0@(4)         ; store incremented
+0x401a0700  tstl %d0
+0x401a0702  bnes  0x401a070e          ; old count nonzero -> keep it
+0x401a0704  clrl  %a0@(4)             ; else undo
+```
+
+That is `_M_add_ref_lock` exactly — load, increment, store, test the *old* value.
+The four identical copies are template instantiations:
+
+| address | |
+|---|---|
+| `0x401a06f2` | identical |
+| `0x401a0d2a` | identical |
+| `0x401ab2b4` | identical |
+| `0x401ab348` | identical |
+| `0x4006a71e` | same branch shape, different body — **not** this function |
+
+**Which of the four the main task reaches is not yet known**, and guessing is
+unnecessary: hook all four under the emulator and see which fires at the hang.
+Patching all four is also defensible — digikit is explicit that this is *"a
+DIAGNOSTIC, not a fix"* that papers over condition-code corruption.
+
+**Worth sending back:** the address should be a signature. digikit already has
+the `Sig` machinery, the shape is distinctive, and every other build will hit
+this same wall.
