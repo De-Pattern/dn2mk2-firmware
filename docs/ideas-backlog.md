@@ -735,6 +735,63 @@ never with a payload the firmware depends on to boot.
 
 ---
 
+## 8. New LFO waveforms
+
+**Owner's request, 2026-09-16**, queued while LFO4 was in build.
+
+**Why it looks cheap**, and cheaper than LFO4 by a long way: the waveform set is
+a **pointer table that is already read indirectly**. `docs/modulation-matrix.md`
+has it — `0x4020b340`, seven entries:
+
+| index | address | wave |
+|---|---|---|
+| 0 | `0x4013725e` | TRI |
+| 1 | `0x40137274` | SIN (parabolic approximation) |
+| 2 | `0x40137240` | SQR |
+| 3 | `0x40137252` | SAW |
+| 4 | `0x401372ce` | EXP |
+| 5 | `0x401372be` | RMP |
+| 6 | `null` | RND, handled inline by the tick |
+
+The generators are tiny — `0x40137240` to `0x401372ce` is **142 bytes for six
+waveforms**, about 24 bytes each. A new one is a small function in a cave, not a
+rewrite.
+
+**Against `docs/FEATURE-PLAYBOOK.md` §1's eight layers, most are free:**
+
+| layer | for a new waveform |
+|---|---|
+| 1 Parameter records | **none** — `WAVE` already exists; only its `max` at record `+0x0c` changes |
+| 2 Enumeration | **none** |
+| 3 Classifier | **none** — same page, same set |
+| 4 Slot space | **none** — same slot |
+| 5 Engine | **the work** — grow the table, write the generator |
+| 6 Serialization | **none** — the value is already stored |
+| 7 Page view | **none**, unless the name list needs an entry |
+| 8 Navigation | **none** |
+
+So it is layer 5 and one immediate, where LFO4 is all eight. **This is the right
+second test of the playbook**, alongside the MIDI-track LFO3 in §5 of that file —
+one feature that is nearly all engine, one that is nearly all plumbing.
+
+**What has to be read before it is priced**, and none of it is done:
+
+1. Where the `WAVE` parameter's **maximum** is enforced. Record `+0x0c` is the
+   obvious place, but the tick may clamp independently, and the formatter at
+   `+0x34` maps value → name.
+2. Whether the **name strings** come from a parallel table that also needs an
+   entry, or from the formatter.
+3. The **calling convention** of a generator: `0x4013725e` and its neighbours
+   take a phase and return a level; the exact registers and scaling have not
+   been written down.
+4. Whether the table is read anywhere other than the tick — the **UI graph**
+   almost certainly reads it too, and that is unresolved (`docs/lfo4-build-plan.md`
+   §5g).
+
+**Do not start this until LFO4 ships.** It shares the tick and the LFO page with
+LFO4, and two unshipped modifications to the same code is how the 2026-09-12
+probes ended up indistinguishable from each other.
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
