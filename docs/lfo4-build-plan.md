@@ -1595,3 +1595,162 @@ own records.
 specified to the point where code can be written against them. `[MOD]`
 navigation is not, and saying otherwise would repeat the mistake that cost three
 flashes: a cost model published ahead of the reading that supports it.
+
+---
+
+## 5k. The runtime layout, read end to end — 2026-09-17
+
+Both LFO evaluators were disassembled in full today. They settle what
+`docs/lfo4-slot-plan.md` circled for a week, and they make v6 a different and
+much smaller job than §3 priced.
+
+### The mirror, and that an LFO's parameters are just slots of it
+
+The engine keeps a **per-track parameter mirror: 101 u16 slots, 202 bytes,
+sixteen of them contiguous.** Evaluator A (`0x40137726`) walks it at stride 202
+through `%sp@(52)`; evaluator B (`0x401373dc`) computes `%a0 + 202*track`
+directly — `move.b #-54,%d1` after a `moveq #1` (the byte is `0xCA`, 202), then
+`muls.l %d0,%d1`.
+
+**An LFO's eight parameters are slots `8*lfo + 1 .. 8*lfo + 8` of that mirror.**
+Not a separate structure, not a decoded copy: the same slot numbers
+`scripts/dump_param_sets.py` prints.
+
+| LFO | slots | evaluator A `%a4@` | evaluator B `%a4@` |
+|---|---|---|---|
+| LFO1 | 1–8 | 36–51 | 2–17 |
+| LFO2 | 9–16 | 52–67 | 18–33 |
+| LFO3 | 17–24 | 68–83 | 34–49 |
+
+The two differ only by A's `lea %a4@(-34),%a4`, which biases `%a4` so the same
+`@(68)` displacement lands on the top LFO.
+
+The field order is `SPD MULT FADE DEST WAVE SPH MODE DEP` — the sound
+`ParameterSet` order, and the same eight in the same order as DNX's stored
+`30 + 8*param + 2*lfo` grid. **Two independent readings, two layers, one shape.**
+
+### How a slot is read, and what "fine" actually means
+
+Every slot is a u16 holding `display << 8`. The evaluators read
+
+- `MULT`, `DEST`, `WAVE`, `MODE` with `mvs.b` — the **high byte**, the coarse
+  value;
+- `SPD`, `FADE`, `SPH`, `DEP` as full words.
+
+That is **not** the same set as the `+0x14` fine-resolution flag, which is set
+for **`SPD` and `DEP` only** — read out of the records today, and matching DNX's
+corpus exactly (SPD 2,293 and DEP 3,416 non-zero fine bytes out of 159,744;
+`FADE` 18, `MULT` 54, everything else under 10).
+
+**Both are right and they are different properties.** `+0x14` is an *editor*
+property: whether the UI will ever let a low byte be non-zero, and therefore
+whether a stored object ever carries one. The word read is a *runtime* choice
+about how many bits the arithmetic consumes. `FADE` and `SPH` are read as words
+whose low byte is structurally always zero, which costs nothing and means
+nothing. Recorded because the two lists look like a contradiction and are not.
+
+### `DEST` is a slot index, and `DEP` is centred on `0x4000`
+
+```
+mvs.b %a4@(74),%d2        ; DEST, coarse
+moveq #100,%d1
+mvs.w %d2,%d7
+cmp.l %d7,%d1
+bcs   <skip>              ; DEST > 100 -> no destination
+lea   %a0@(0,%d7:l:2),%fp ; %a0 = the mirror -> &mirror[DEST]
+mvs.w %a4@(82),%d1        ; DEP
+addi.l #-16384,%d1
+add.l %d1,%d1             ; (DEP - 0x4000) * 2
+mac.l %d1,%d0,%acc0
+mvs.w %fp@,%d1            ; the destination's base value
+add.l %d1,%d0             ; clamped to 0 .. 32512, written back as a word
+```
+
+So **`DEST` is a slot index into the same mirror, bounded 0..100**, `DEST = 0`
+is the no-destination sink — which is exactly why slot 0 is one of only two
+holes in the sound table — and **zero depth is `0x4000`, not `0`**. A record
+zeroed to `00 00` is full *negative* depth, not "off". DNX confirms the centre
+independently: DEP's coarse byte rests at 64 in 98.1% of 159,744 readings.
+
+### Why LFO4's values cannot be slots 25–32
+
+They are the next sixteen bytes of the mirror and they are **machine
+parameters**. `dump_param_sets.py` says the sound table's only free slots are
+**0 and 100** — 25–68 are free *in the flat table* but the accessor routes them
+to the machine and filter tables, so the mirror cells are in use. There is no
+eight-slot hole, which is what §3's extension array was always for.
+
+### What still has to move: the three state arrays
+
+`0x4463ed18`, `0x4463f498`, `0x4463fc18`, 1,920 bytes each (16 × 3 × 40), wall
+to wall. Four LFOs need 2,560. Every site that names, sizes, strides or
+initialises one was enumerated with `scripts/find_constant.py` and there are
+only eight, plus two initialisers, two base accessors and one flag sweep.
+
+**The stride arithmetic is a gift.** Both evaluators compute `track * 120` as
+`(track << 7) - (track << 3)`. `track * 160` is `(track << 7) + (track << 5)` —
+the same two instructions, one shift-count nibble and one opcode bit each.
+
+## 5l. v6a is built: a fourth LFO with hard-coded parameters
+
+`scripts/build_lfo4_tick.py` → `00_Resources/02_Builds/lfo4-tick6a_DN2_1.11.syx`.
+Every integrity field verifies and the HMAC trailer is reproduced.
+
+**It asks one question and deliberately nothing else:** told to run four LFOs
+instead of three, does the fourth generate and apply modulation? LFO4's eight
+parameters are sixteen bytes **in the image** — fixed, global, not editable, not
+saved, not read from any preset. That removes storage, slots, serialization and
+the UI from the experiment and leaves only the engine, which is the part that
+has been reasoned about for a week and measured never.
+
+| field | value | why |
+|---|---|---|
+| `SPD` | `0x7000` | LFO1's own default |
+| `MULT` | `0x0100` | ×1, LFO1's default |
+| `FADE` | `0x4000` | centred: no fade |
+| `DEST` | `76 << 8` | **Filter BASE** — audible on any preset, every track |
+| `WAVE` | `0x0100` | LFO1's default |
+| `SPH` | `0` | |
+| `MODE` | `0` | free-running, so it sweeps with no notes played |
+| `DEP` | `0x7ffe` | `(0x7ffe − 0x4000) × 2`, near-full positive |
+
+26 in-place edits, all asserted against their stock bytes, and seven stubs in
+the verified-free run at `0x402dfa1c`:
+
+| stub | replaces | does |
+|---|---|---|
+| `a4_top` | A's `lea %a4@(-34)` + `lea %a3@(116)` | points `%a4` at our block for the first iteration |
+| `a4_bottom` | A's `lea %a4@(-16)` + the loop compare | on leaving iteration four, restores `%a4` to the mirror; re-issues the compare so the branch still works |
+| `outer` | A's per-track advance | 160 does not fit a `moveq`, so the whole block moved |
+| `flags` | the per-LFO flag sweep | a fourth store did not fit in place |
+| `zero_backup` | init A's prologue | the relocated arrays sit above the BSS clear's bound, so nothing zeroes them |
+| `b_top` / `b_bottom` | the same two jobs in evaluator B | |
+
+**The frame-offset trap, recorded because it nearly shipped.** Five of the seven
+stubs are entered by `jsr`, so the return address is on the stack and every
+`%sp@(N)` inside them is the stock displacement **+4**. One stub replayed two
+stock stores verbatim and would have written the frame four bytes low.
+
+**A second error, caught by disassembling the build rather than trusting the
+reasoning.** The first `%a4` bias was computed as "LFO index *i* sits at
+`%a4 + 36 + 16i`, so the fourth is `+84`". That is true of the *stock initial*
+`%a4`, but the loop body always reads `@(68)` and decrements at the **end**, so
+the first iteration reads `+68` whatever the counter started at. Both stubs were
+16 bytes off, and the build's own disassembly showed it in one line.
+
+**[METHOD] Disassemble the build, not the plan.** Both errors were invisible in
+the reasoning and obvious in the output. One `dnfw disasm` of the produced `.syx`
+at the cave address is now part of building a cave, not an optional check.
+
+### How to read the hardware result
+
+| observation | means |
+|---|---|
+| boots, slow filter sweep on all 16 tracks | **a fourth LFO generates and applies** — the engine is not the obstacle, and the rest of LFO4 is plumbing |
+| boots, nothing sweeps | the fourth iteration runs but produces nothing; read the state init |
+| does not boot | the relocation is wrong; the state arrays are the first suspect |
+| LFO1–3 misbehave | a stride edit was missed — every 120 and 1,920 in both evaluators |
+
+The control is that the sweep must persist with LFO1–3 all set to no
+destination. **Not a shipping build**: LFO4 is fixed, global and invisible, and
+nothing it does is saved.
