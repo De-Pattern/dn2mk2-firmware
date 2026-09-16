@@ -1294,6 +1294,41 @@ that method top to bottom**. Both mechanisms found so far sat within forty bytes
 of each other in one function, and neither mentions the ids it acts on: one
 encodes them as bit positions, the other as branch arms on an index.
 
+### 5i-f. The v4/v5 confound, raised and closed — 2026-09-16
+
+Writing the problem up for a second opinion surfaced a possible flaw in the
+inference everything above rests on, so it is recorded with its resolution
+rather than left implicit.
+
+**The worry.** §5i concludes "widget selection is keyed on parameter id" from
+the v4/v5 difference: v4 borrowed LFO3's descriptor and drew correct widgets,
+v5 used LFO4's own ids and drew plain ones. But v4 borrowed the **whole**
+descriptor, so column layout was identical too. If widget choice were keyed on
+**column position** rather than id, the same evidence would fit — and the
+20-byte per-column records at `view+0x94` really are indexed by column, which
+makes that alternative concrete rather than hypothetical.
+
+**The resolution, from this file's own §5f.** The descriptor is **44 bytes:
+`+0`, `+4`, then nine parameter ids** — `37 × 44 = 1,628 bytes`, fully
+accounted for. There is no spare field in it, so it cannot carry a widget kind.
+
+And v5's cave copies exactly that header:
+
+```
+move.l (%a0),(%a1)
+move.l 4(%a0),4(%a1)
+```
+
+eight bytes, then the build writes LFO4's ids into the nine column slots. **So
+v5 preserved the header byte-for-byte and changed only the ids.** The two builds
+differ in the ids and nothing else, and the inference stands.
+
+**Worth keeping as a method note anyway.** The confound was real in the sense
+that the *stated* reasoning did not exclude it; it took a separate fact from
+§5f to close. An experiment that changes one visible thing can still change a
+second invisible one, and "v4 used LFO3's descriptor" was doing exactly that
+until the descriptor's size was checked.
+
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
