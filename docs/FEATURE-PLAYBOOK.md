@@ -177,6 +177,26 @@ never by index.
   Unicorn needs digikit's two m68k patches built from source, and their
   installer is POSIX-shaped.
 
+## 5. The first thing to test this playbook on
+
+**A third LFO for MIDI tracks.** The owner asked for it on 2026-09-16 as a
+**separate feature** from LFO4, and it is the ideal validation: the same eight
+layers of §1, different addresses, and the answer for every layer is already
+known for its sibling.
+
+What is already in hand for it, from the LFO4 work:
+
+- MIDI tracks ship **2** LFOs (owner, confirmed against the factory firmware).
+- The view-id pool registration for the MIDI group is **`(0x401e0000, 2)`**,
+  ids `0x23 0x24`, at `0x40061868` — counts and pool packing in
+  `docs/lfo4-build-plan.md` §5.
+- `MidiParameterSet`'s ownership predicate is `0x400dbfbc`, pages `0x16`–`0x1c`.
+- The same single `LfoPageView` serves both groups, so no new view class.
+
+**If this playbook is any good, that build is much shorter than LFO4's.** If it
+is not, the gap says which layer the playbook under-describes — which is the
+only honest way to test a document like this.
+
 **This file gets its final form when LFO4 works on hardware.** Until then it is
 a record of what has cost time, which is useful on its own and honest about the
 rest.

@@ -430,11 +430,24 @@ as page `0x1f` in §5b.
 is sound tracks (three LFOs) and MIDI tracks (two), and it is consistent with
 every other view in the pool having exactly one registration.
 
-**Still inference, not proof** — nothing read says "MIDI". But the shape is now
-evidenced rather than guessed from two loose numbers, and the decision it forces
-is explicit: **if LFO4 should appear on MIDI tracks too, the `(0x00, 2)` list
-needs the same relocation treatment.** That is the owner's call, not a
-technical one.
+**CONFIRMED by the owner, 2026-09-16:** *"MIDI tracks only support 2 LFOs in the
+factory fw."* So `(0x00, 2)` is the MIDI-track group and `(0x48, 3)` is the
+sound-track group, and the two counts are simply the two LFO counts the
+instrument ships. The reading is no longer an inference from the pool.
+
+### Decision: sound tracks only
+
+**Owner's call, same day:** LFO4 goes on **sound tracks only**. A third MIDI-track
+LFO is wanted, but as a **separate feature**, not folded into this one.
+
+So `(0x00, 2)` is **not touched** by LFO4. Only the sound-track list `(0x48, 3)`
+relocates and grows.
+
+That separation is worth more than the bytes it saves: a MIDI LFO3 is the same
+eight layers as LFO4 with different addresses, which makes it the **first real
+test of `docs/FEATURE-PLAYBOOK.md`** — written from LFO4, applied to something
+else. If the playbook is any good, that build should be much shorter than this
+one.
 
 **Open, and it must be settled before the build:** why there are *two*
 registrations, with counts 3 and 2, both pointing at the same view class with
