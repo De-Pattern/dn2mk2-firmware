@@ -519,3 +519,61 @@ the measurement was right and the *model* was wrong — and the owner corrected 
 from years of use, which is the same rule pointing the same way: **ground the
 model in how the device is actually operated, before sizing work against a
 structure.**
+
+### What the edit path looks like so far — 2026-09-16
+
+Found by differencing memory across matched intervals under the emulator
+(`scripts/trace_value_array_sites.py`). **None of it is the parameter store**,
+which is still unlocated; it is recorded so the next attempt does not re-find it.
+
+| address | what it is | how it was shown |
+|---|---|---|
+| `0x445a0988 + 0x10*n` | **input event ring**, 16 bytes per record; `+0x7` a tag, **`+0x8` a signed delta** | turning up wrote `0x01/0x02`, turning down wrote **`0xff`/`0xfe`** |
+| `0x445a0dc4 + 4*n` | **per-encoder event counters**, u32 | ENC1 moved `…dc7`, ENC2 moved `…dcb`; both **rose when turning down**, so counters, not values |
+| `0x44670638` | RTOS queue field taking **`0x4059d1c0`**, the prio-6 task's TCB | the written value is literally the TCB from the run's own task list |
+| `0x44622bc8` / `0x44622fc8` | **fb_front / fb_back**, 1 KB each | read from the `fb_front` pointer at `0x402a0b88` |
+| `0x447e1000` | title-bar text buffer | it received the ASCII `LIGHTHOUSE` |
+| `0x405c5000`, `0x405c6000` | **stack** | their contents are addresses inside themselves |
+
+#### Three false leads, and why each looked convincing
+
+**Stride 8 in the framebuffer.** A diff showed ~68 bytes on an 8-byte stride,
+matching DNX's `30 + 8*parameter + 2*lfo` LFO grid exactly. It was **glyph row
+spacing in a 1-bpp framebuffer**. Caught by reading the `fb_front` pointer
+rather than by noticing the pattern was wrong.
+
+**A 32-bit "value" of `0x4059D1C0`.** Plausible as a parameter until the number
+was recognised as a TCB printed in the same run's startup log. **A pointer, not
+data.**
+
+**A byte incrementing ~1 per click from zero.** The best candidate of the day
+until it was turned **backwards** and kept counting up.
+
+#### The controls that actually worked
+
+- **Matched intervals.** Two equal windows, one quiet, one with input; diff each
+  and subtract. Without it, LFO state and display redraw swamp everything.
+- **Page hashing.** Hashing 4 KB pages across the whole ~100 MB BSS costs a few
+  hundred KB and needs no guess about where to look.
+- **Reversing the stimulus.** A value goes back; a counter does not. This is the
+  single cheapest discriminator found today.
+- **Differential stimulus.** Turn encoder 1, then encoder 2. Storage must differ
+  per parameter; stack, display and event queues respond to both alike.
+
+#### Owner's constraints on interpreting knob data
+
+- Encoders are **acceleration-sensitive**, so the delta per click varies with
+  turn speed — do not expect a parameter to move by the click count, or to
+  return exactly to baseline after equal turns in both directions.
+- Acceleration applies to parameters **with a decimal part**; enums and integer
+  parameters step plainly. `SPD` displays `16.62`, so it is in the first group
+  and is likely a scaled or fixed-point **16-bit** value rather than a raw byte.
+
+#### The next technique, because memory scanning has run its course
+
+Six memory experiments have each found a different piece of UI plumbing. The
+remaining route is **from the code side**: the event ring has a consumer, and
+that consumer writes the parameter. Hook `param_index_in_page` (`0x400dbcc4`) or
+`param_set_slot_to_id` (`0x400dc02a`) and record the **return address** during an
+edit window versus a quiet window; the caller that appears only while turning is
+the edit path, and it can be read directly.
