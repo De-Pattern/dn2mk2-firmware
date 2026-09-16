@@ -193,6 +193,48 @@ one step removed. Section 8's space does not house our code — it **funds** it.
 
 ---
 
+### [READ 2026-09-17] The BSS clear's bounds, and what they cost this idea
+
+Both ends of the boot clear, read at `0x400004b2`:
+
+```
+0x400004ba  movea.l #0x402fc000,%a0      | BSS start
+0x400004c0  move.l  #0x466b74d0,%d1      | BSS end
+```
+
+and immediately before it, the `.data` initialiser loop:
+
+```
+0x40000492  move.l %a2@+,%a1@
+0x40000498  cmpa.l #0x4030b980,%a2        | until the image's tail
+0x400004a4  clr.l  %a0@+
+0x400004a6  cmpa.l #0x80010000,%a0        | then clears SDRAM 0x80000000..
+```
+
+MAIN OS loads at `0x40000400` and is 3,192,192 bytes, so it ends at
+`0x4030b800`, and the initialiser runs to `0x4030b980`. **The BSS clear starts at
+`0x402fc000` — 63,488 bytes *below* the image's own end.** That is what
+`docs/memory-map.md` means by "recycles the initializer tail": the last ~62 KB of
+the loaded image is the `.data` initialiser, consumed once and then handed to BSS
+and wiped.
+
+**So appending bytes to section 3 does not buy shippable space.** Anything past
+`0x402fc000` is cleared before the OS runs, and everything below it is the
+program. Growing the section is not the cheap move this entry assumed.
+
+**What would work, and it is a different build:** append the payload past the
+initialiser tail, then **copy it out before the clear runs** — a cave on the boot
+path ahead of `0x400004b2`, moving it into the unclaimed 25.3 MB above
+`0x466b74d0`, which the clear never touches. That is the shape of the experiment
+worth running, and it would settle §1, §6 and the wavetable half of §14 together,
+because all three want the same thing: bytes that ship in the image and survive
+to run time.
+
+**What will not work, recorded so it is not proposed:** raising the clear's start
+immediate at `0x400004ba`. The region it would spare is *reused* as BSS after the
+initialiser is consumed, so sparing it leaves real globals uninitialised. The
+immediate is one 6-byte edit and it is the wrong one.
+
 ## 2. An emulator as a test harness
 
 **The idea.** <https://github.com/joelanders/gearmulator-md-mm> — a fork of
@@ -919,6 +961,62 @@ freeze**; if the page hangs, power-cycle and reflash stock by the route in
 graph is not, which is the same UI/engine split LFO4 hit at
 `docs/lfo4-build-plan.md` §5i. Whoever traces the widget renderer closes both.
 
+### SUPERSEDED 2026-09-17 by three shapes whose shape is a parameter
+
+`scripts/build_lfo_waveshapes.py` -> `00_Resources/02_Builds/lfo-waveshapes_DN2_1.11.syx`.
+21 integrity checks pass, HMAC reproduced, 400 of 896 cave bytes used. The name
+list reads back **TRI SIN SQR SAW EXP RMP RND STP PLS NOI**.
+
+![STP, PLS and NOI](img/lfo-waveshapes.png)
+
+**The owner's idea, and it is the better design:** *"That LFO would be great to
+control the quantisation levels instead of the phase."* The fixed eight-level
+`STP` above was fixed only because a generator receives nothing but the phase.
+
+| waveform | `SPH` means | range |
+|---|---|---|
+| `STP` | quantisation levels | 2, 4, 8, 16, 32, 64, 128, 256 |
+| `PLS` | pulse width | 0.4% to 99.6% duty |
+| `NOI` | nothing -- noise has no shape to dial | -- |
+
+**`SPH` is the right parameter to take.** It exists, it is per-LFO and per-sound,
+it is already saved, and on these three shapes it has nothing to do -- a
+staircase that starts a step early is the same staircase. So its stock meaning is
+**suppressed** for waveforms 7 and up (a third hook, at `0x4013788e`), and the
+knob means one thing. No new slot, no new record, nothing extra in any file.
+
+**How a leaf generator gets a second argument.** Generators take the phase in
+`%sp@(4)` and return a level in `%d0`; `%d1` is dead at both call sites -- every
+stock generator writes it before reading it, and evaluator B saves its own `%d1`
+to the frame one instruction earlier -- so two `jmp` hooks load `SPH`'s coarse
+byte into `%d1` on the way past. `jmp` rather than `jsr`, so the stack the
+generator reads is untouched.
+
+**Where the shapes come from.** The owner suggested reading other instruments'
+manuals. The ASM Hydrasynth offers Sine, Triangle, Saw up, Saw down, Square,
+**Pulse 27%**, **Pulse 13%**, S&H, Noise and Random plus a 64-step user wave --
+so rather than copy two fixed pulse widths, `PLS` makes the width continuous and
+covers both. ASM's newer **Leviasynth** then names the same set from the other
+direction: *"sine, triangle, multi-directional saw, square, noise, random, step,
+and percentage-variable pulse"*. **Step** and **percentage-variable pulse** are
+two of the three here, named the same way on a 2026 instrument, and **noise** is
+the one the Digitone II lacks outright -- `RND` holds one value for a whole
+cycle, `NOI` is a fresh value every tick.
+
+`NOI` is a xorshift32 over a seed word in the cave, which is RAM once the image
+is unpacked -- the same region the hardware-confirmed boot cave wrote to. It is
+re-seeded from the image on every power-up, so it is deterministic per boot and
+needs no state anywhere else.
+
+**Still to read, and unchanged from above:** the `[MOD]` page's waveform graph
+renderer. Three unknown waveforms now instead of one.
+
+**Also worth a future entry, from the Leviasynth's list:** its LFOs have a
+**semitone-lock**, which is `STP` with its level count matched to the pitch
+parameter's scaling so the steps land on semitones. That is the same generator
+with a different quantiser, and it needs `DEST` -- which the generator does not
+receive. A fourth hook would carry it the same way `%d1` carries `SPH`.
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
@@ -1355,6 +1453,66 @@ Find where `ArpSetupMenuView` is constructed and what decides whether it is
 reachable. `ghidra/FindDataRefs.java` and `dnfw fn callers` are the tools, and
 Ghidra is cleared for this CPU.
 
+### BUILT 2026-09-17: one byte, and it asks the question this entry opens with
+
+`scripts/build_arp_on_midi.py` -> `00_Resources/02_Builds/arp-on-midi_DN2_1.11.syx`.
+21 integrity checks pass, HMAC reproduced.
+
+**The manual confirms the restriction is real and documented.** Section 9.7:
+*"The arpeggiator is not available for the MIDI tracks."* Section 8.1: *"A track
+that contains any other SYN machine than the MIDI machine is considered an audio
+track."*
+
+**The chain to `ArpSetupMenuView` has exactly one link at every step**, which is
+what made this cheap:
+
+```
+0x401d4c70   vtable                (typeinfo 0x401d4c08 -> "ArpSetupMenuView")
+0x400191a6   constructor           1 caller
+0x4019f600   make_shared factory   1 caller, allocates 0x24c bytes
+0x4005fa3c   the only call site    inside a 6,516-byte menu dispatcher
+```
+
+and the branch:
+
+```
+0x4005f9c8  jsr   0x401160ac      | (track->flags@0x10 >> 1) & 1
+0x4005f9da  beq.s 0x4005fa3c      | 0 -> build the setup view
+0x4005f9dc  ...                    | else -> an "Arpeggiator ON/OFF" item
+```
+
+The other arm chooses between `"Arpeggiator ON"` and `"Arpeggiator OFF"` at
+`0x40215d3f`, which is how we know it is the plain toggle and not a second setup
+view. `0x401160ac` has **132 callers**, so it is a fundamental track property and
+is left alone: the edit is the branch, `beq.s` -> `bra.s`, **one byte**.
+
+**What the instrument will say:**
+
+| on a MIDI track | verdict |
+|---|---|
+| menu opens, settings stick, **notes arpeggiate** | a pure UI gate -- the feature is done, in one byte |
+| menu opens, settings stick, no arpeggiation | UI gate **and** engine gate; the note generator has its own check |
+| menu opens, values wrong or dead | the view is bound to per-preset storage a MIDI track lacks |
+| **audio tracks change at all** | the branch is not what this claims -- revert |
+
+The last row is the control: audio tracks already took this branch, so they must
+be unaffected.
+
+### [METHOD] Ghidra settled the structure and was wrong about the detail
+
+The enclosing dispatcher `FUN_4005ed12` decompiles with *"Type propagation
+algorithm not settling"*: every call loses its arguments and `pea` sequences come
+back as writes to imaginary stack slots. Ghidra found the function bounds that
+`dnfw fn entry` had guessed wrong -- 6,516 bytes, not the 350-byte neighbour --
+and that was worth the 140-second analysis. But its C for this routine is not
+evidence, and the raw disassembly is. **Both readings were needed and neither
+alone was enough**, which is the argument for having the project set up rather
+than reaching for one tool.
+
+The project now exists at `out/ghidra/dn2_111` (gitignored) and re-queries in
+seconds with `-process -noanalysis`, so the next backlog entry does not pay the
+import again.
+
 ### What makes it verifiable
 
 The same loop as everything else here: DNX reads the device's stored state, so
@@ -1518,6 +1676,48 @@ six descriptor lists' depth halves.
 
 Item 4 gates the others: it is cheap, and it could make this whole entry
 unnecessary by showing the mechanism already exists.
+
+### [2026-09-17] Item 4 is answered, and it reprices route (b) rather than cancelling it
+
+Item 4 above — *"Where LFO1–3 are applied. Still unfound"* — was the gate on the
+other three, and it is now read. Both evaluators, `0x40137726` and `0x401373dc`,
+**generate and apply in the same loop** (`docs/lfo4-build-plan.md` §5k):
+
+```
+mvs.b %a4@(74),%d2          ; DEST, coarse
+moveq #100,%d1
+cmp.l %d7,%d1
+bcs   <skip>                ; DEST > 100 -> nothing
+lea   %a0@(0,%d7:l:2),%fp   ; %a0 = the per-track mirror
+...
+movew %d0,%fp@              ; clamped 0..32512
+```
+
+**The entry hoped this would make it unnecessary. It does not, and the reason is
+worth having.** An LFO's `DEP` is p-lockable because it is an *ordinary mirror
+slot* — slot `8*lfo + 8`, nothing special about it. So "copy the mechanism" means
+"make the performance modulators' depths mirror slots", which is route (b)
+exactly. The mechanism does already exist; it just is not reachable without the
+storage.
+
+**And the storage is the problem item 1 did not see.** Item 1 says indices
+100–127 are *representable* in the 128-bit per-track bitmap. True — but that
+bitmap is not where values live. **The per-track mirror is exactly 101 u16 slots,
+202 bytes, and sixteen of them sit contiguously.** Index 100 is its last cell;
+101–123 have no cell at all. The accessor agrees from the other side: `moveq
+#100` at `0x400dc02c` rejects any slot above 100.
+
+So route (b) needs the mirror relocated and grown from 202 to 250 bytes per
+track — **which is the same piece of work LFO4's v6 needs**, and neither entry
+priced it as shared. Whichever is built first pays for it; the second gets it
+nearly free.
+
+Items 2 and 3 are untouched by this and still stand. Item 3 in particular is
+DNX's and still unasked: whether p-lock ids above the current maximum survive a
+save is the same class of question the sound canary answered, and it is cheap for
+them to run.
+
+**Item 4 is closed.** `[SUPERSEDED]` above where it says "still unfound".
 
 ---
 
@@ -1757,3 +1957,73 @@ the book, not of the idea.
 
 Budget is unchanged in total and only redistributed: three bands across a wide
 short box rather than a narrow tall one.
+
+## 14. A shape bench: see the LFO shapes, and design new ones
+
+**Asked for by the owner, 2026-09-17:** *"the web should offer a preview of the
+forms in the firmware provided and allow you to add or change shapes. New shapes
+can be added by templates offered or by providing a formula for them. Phs is the
+wildcard where any shape customisation parameter lands. The tool should show
+visually the shapes."*
+
+**DELIVERED as an artifact:** https://claude.ai/artifact/VWYjJZE3z1FQaEEHe7wTwC
+
+It follows the precedent of the browser tool that shipped with the extra LFO
+destinations (PR #61): a single page, no build step, nothing to install.
+
+### What it does
+
+- **Draws every slot on the instrument's own panel** — a real 128 x 64 one-bit
+  buffer, blitted and pixel-doubled, because that is the geometry
+  `docs/display-path.md` measured. No anti-aliasing, for the same reason the
+  panel cannot anti-alias.
+- **Ten slots**, colour-coded by provenance: ships with 1.11, added by the mod,
+  or yours. Each carries a thumbnail that re-renders as `SPH` moves.
+- **`SPH` as the wildcard**, with the page saying what it means for the selected
+  shape — levels for `STP`, duty for `PLS`, colour for `NOI`, and "no effect on
+  this shape's outline" for the seven that use it as a start phase.
+- **A sweep strip**: the same shape at eight `SPH` values, which is the fastest
+  way to see whether a customisation parameter is doing anything useful.
+- **Templates and a formula field.** Eight templates — staircase, pulse,
+  trapezoid, exponential decay, sine power, two poles, chaos, and the
+  Leviasynth's **semitone lock**. The formula is `p` (phase) and `s` (`SPH`),
+  returning -1..1.
+- **Reads a firmware.** Load a de-packed MAIN OS and it reports the generator
+  table's address, whether it is still where Elektron put it, `WAVE`'s maximum,
+  and slot by slot whether each entry is the stock generator, a replacement, the
+  NULL that `RND` uses, or something added.
+
+### The export, and why it is the part that matters
+
+A formula cannot become four ColdFire instructions in general. So the bench
+exports the thing that *can* carry any shape: **eight tables of 256 signed
+words, one per `SPH` band, and a twelve-instruction generator that indexes
+them.**
+
+```
+    andi.l  #0x7f,%d1
+    lsr.l   #4,%d1              | SPH -> band 0..7
+    lsl.l   #9,%d1              | x 512 bytes
+    move.l  %sp@(8),%d0
+    lsr.l   #24,%d0             | phase -> 0..255
+    add.l   %d0,%d0
+    add.l   %d1,%d0
+    lea     tab,%a0
+    mvs.w   %a0@(0,%d0:l),%d0
+    lsl.l   #16,%d0             | 16-bit table -> 32-bit level
+```
+
+4,096 bytes of table per waveform. The cave at `0x402cf52c` holds 896, so a
+wavetable shape needs either the unclaimed 25 MB above BSS (filled at boot from
+a table in the image) or one of the larger free runs — **the first thing to
+settle before this is built**, and it is the same space question as §1 and §6.
+
+### What is not built yet
+
+- the builder side: `scripts/build_lfo_waveshapes.py` accepting the bench's JSON
+  and emitting a wavetable slot;
+- the `[MOD]` page's waveform **graph** for any shape the firmware did not ship
+  with — still the one unread renderer, and now three shapes deep;
+- reading a `.syx` directly. The page needs a de-packed section because aPLib
+  depacking in the browser has not been written. `scripts/js_codec_check.mjs`
+  already has the codec in JavaScript, so this is porting, not research.

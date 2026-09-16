@@ -19,6 +19,12 @@ Rules that keep it honest:
 
 ---
 
+> **`docs/backlog-builds.md`** — the campaign tracker for the owner's
+> 2026-09-17 goal, *"deliver at least one firmware per idea in the backlog"*.
+> Read it for which entries have a build, which are awaiting a flash, and which
+> gate blocks the rest. This file stays authoritative for the **features**;
+> that one is authoritative for the **campaign**.
+
 > **`docs/FEATURE-PLAYBOOK.md`** — the streamlined process for adding a
 > feature, requested by the owner 2026-09-16. **Accumulating; finalised once
 > LFO4 is verified on hardware.** Read §1 (the eight layers) before pricing
@@ -34,6 +40,9 @@ Rules that keep it honest:
 | **LFO4** | **UNBLOCKED** | **No DSP blocker.** Modulation is generated and applied on the ColdFire; LFO parameters are never sent. **The goal is a real fourth LFO** (owner, 2026-09-15) — a fourth `[MOD]` page, saved with the sound. A **seventh modulation source** is a documented fallback only, and costs per-preset storage. One engine unknown remains: **where LFO1–3 are ticked** | `docs/engine-state.md`, `docs/modulation-matrix.md`, `docs/lfo4-slot-plan.md` |
 | **Chimera (DT2 machines + samples)** | **SCOPED** | ColdFire half tractable. SHARC half: we ship its program, know how it is loaded, and a third party has mapped the **six machine selector roles** and a full sample-resource lifecycle | `docs/chimera-feasibility.md`, `docs/sharc-image.md`, `docs/lalzart-dt2-crosscheck.md` |
 | **An eighth LFO waveform (`STP`)** | **BUILT, AWAITING HARDWARE.** `lfo-wave8_DN2_1.11.syx`. Five seven-entry tables copied out as eight, nine pointer edits, `WAVE` max 6 -> 7, an 18-byte generator. The waveform table -- `docs/ideas-backlog.md` §8's long-standing "not located" -- is `0x4020b340`, found while reading the LFO evaluators. Risk: the `[MOD]` page's waveform graph renderer is untraced | `docs/ideas-backlog.md` §8 |
+| **New LFO waveforms** | **DELIVERED 2026-09-17** — `lfo-waveshapes_DN2_1.11.syx`: `STP` (quantisation levels), `PLS` (pulse width), `NOI` (noise colour), each taking its shape from `SPH`, whose stock meaning is suppressed for waveforms 7 and up. Supersedes the fixed-eight-level `lfo-wave8` | `docs/ideas-backlog.md` §8 |
+| **Arpeggiator on MIDI tracks** | **DELIVERED 2026-09-17** — `arp-on-midi_DN2_1.11.syx`, **one byte**. Asks the instrument whether the documented restriction is a UI gate or an engine gate; audio tracks are the control | `docs/ideas-backlog.md` §10 |
+| **The LFO shape bench** | **DELIVERED as a tool** — https://claude.ai/artifact/VWYjJZE3z1FQaEEHe7wTwC. Previews every slot on a simulated 128×64 one-bit panel, designs shapes from templates or a formula, reads a de-packed MAIN OS, and exports a wavetable. The firmware half is not built | `docs/ideas-backlog.md` §14 |
 | **Sample transfer / RPC** | **IN PROGRESS** | what dispatches an opcode | `docs/midi-rpc-dispatch.md` |
 
 ### LFO4 — the pieces, and which are real
