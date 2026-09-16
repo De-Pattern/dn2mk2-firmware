@@ -30,6 +30,45 @@ cannot drift from the image. **55 buttons, 10 encoder positions.**
 
 ## 2. View classes observed
 
+**Ten so far**, each named by the tracer as it consumed a key:
+
+| view | reached by |
+|---|---|
+| `MainScreenView@0x4476a3f0` | the parameter sections, `ARP`, `STACK`, `SONG` first press |
+| `LfoPageView@0x447bf800` | `MOD` |
+| `PatternSelectView@0x447bc200` | `PTN` |
+| `QuickLedIntensityView@0x447e1a80` | `SETTINGS` **held** |
+| `NoteEditorMenuView@0x447e2400` | `KEYBOARD`, `STACK` |
+| `SongModePopup@0x447e1c00` | `SONG` held |
+| `KeyboardView@0x447bc600` | `TRIG 1`–`16` — the step keys play notes |
+| `HelpBubbleView`, `PatternGridView`, `TempoLedView` | in the offer chain, not yet seen to consume |
+
+### Keys consumed by nobody, and why that is structural
+
+`PRESET` (7), `LEVEL` (49) and `VOICE` (50) were **offered to every view and
+consumed by none**, `PRESET` even when held and even with `FUNC`. `FUNC`
+combinations with `PRESET`, `SETTINGS` and `TRK` reached `MainScreenView` or
+nobody.
+
+**That is not a dead key — it is the view stack.** A key does something only if a
+view currently on the stack claims it, so "does this key work" is a property of
+**what mode the machine is in**, not of the key. It is why a tap and a hold
+differ, and why some keys need a mode entered first.
+
+**Consequence for coverage: a single pass from the main screen cannot map this
+UI.** Each key has to be exercised in each mode that might claim it. The map
+below is one pass from one state.
+
+### The ARP page, captured
+
+`ARP` (51) draws **`ARPEGGIATOR > TRACK 1`** — `MODE OFF`, `SPEED 1/16`,
+`RANGE 1`, `N.LEN 1/32`, a 16-step grid, `STEP 01 OFFSET 0`, `ARP LENGTH 16`.
+That is manual §9.7's parameter list exactly (MODE, SPEED, RANGE, N.LEN, LEN,
+OFS), and it is the first time this project has seen the page the firmware draws
+for the arp block `docs/ideas-backlog.md` §10 wants to extend to MIDI tracks.
+
+## 2b. Original list
+
 Named by the tracer as each consumed a key:
 
 `MainScreenView` · `LfoPageView` · `PatternSelectView` · `QuickLedIntensityView`
