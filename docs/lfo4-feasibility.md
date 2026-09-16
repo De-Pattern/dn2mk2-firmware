@@ -1124,16 +1124,51 @@ shape is identical in all of them:
 A fifth of the same shape sits at `0x400dbeb6` — pages `0x05`–`0x0a` — and is
 **not yet attributed to a class**.
 
-The predicate slot is called from **24 sites** across the image (the accessor
-slot `+0x50` from 58). It is not a corner of the code; it is how the firmware
-asks "whose parameter is this?" everywhere.
+~~The predicate slot is called from **24 sites** across the image (the accessor
+slot `+0x50` from 58).~~ **[WRONG — corrected 2026-09-16, same day.]** That
+count came from scanning for *any* virtual call through offset `0x54`, on any
+class. Vtable offsets are per-class, and most of those 24 belong to unrelated
+types — `0x40031eaa` passes three arguments through slot `0x54`, where the
+`ParameterSet` predicate takes one. **The number meant nothing.** The real
+callers are counted below, by direct call to the concrete predicates.
 
-### Why the probe failed, in one line
+### Who actually asks
 
-**Page `0x1f` is claimed by no predicate.** Nothing in the set matches it, so
-the query falls through to the base-class default, which indexes the **sound
-value array** by the record's `+0x04` field — producing exactly the observed
-symptom: `VEL` reading 112 (LFO1 `SPD`'s default) and `PROB` re-aiming LFO2.
+Direct calls to the concrete predicates, which is the honest count:
+
+| predicate | direct callers |
+|---|---|
+| `0x400dbe8a` Sound | `0x40036c04` (the vtable body), `0x40064e90` |
+| `0x400dbeb6` unattributed | `0x40064f14` |
+| `0x400dbf4e` Fx | `0x40036778`, `0x40041a96`, `0x4004484e`, `0x40067656`, `0x4006768a`, `0x40067dd4`, `0x40067f32` |
+| `0x400dbf82` Trig | `0x400369d6`, `0x40041a74` |
+| `0x400dbfbc` Midi | `0x400369f6` |
+
+### Why the probe failed — read, not inferred
+
+**Page `0x1f` is claimed by no predicate**, and the cascade at `0x40041a72` has
+**no default guard**:
+
+```
+0x40041a74  jsr 0x400dbf82      ; Trig?  page == 0x1d || 0x16
+0x40041a7c  tstl %d0
+0x40041a7e  beqs 0x40041a94     ;   no
+0x40041a90  braw 0x4003f0b6     ;   YES -> the Trig path
+0x40041a96  jsr 0x400dbf4e      ; Fx?    page 0x10-0x15
+0x40041aac  tstl %d0
+0x40041aae  beqs 0x40041abe     ;   no
+0x40041ab8  jmp 0x40030aec      ;   YES -> the Fx path
+0x40041ac6  jmp 0x400312fe      ;   FALL THROUGH, unconditional
+```
+
+Two tests, then an unconditional jump. An unclaimed page is not rejected, not
+logged and not defaulted — it simply takes the last branch. `0x400312fe`
+computes byte offsets into the track structure (`+15856`, `+16964`, …), which
+is the sound-side addressing.
+
+That is the observed symptom exactly: `VEL` reading 112 (LFO1 `SPD`'s default)
+and `PROB` re-aiming LFO2. **This was inferred from the symptom when first
+written here; it is now read from the code.**
 
 This also explains why patching `param_set_tables_build` bought nothing. That
 function builds the BSS enumeration tables at boot; **this** decides ownership
@@ -1155,6 +1190,9 @@ That is the form LFO4 needs, and it is already proven to compile and run here.
    observation, but `SoundParameterSet` claiming only pages `0`–`4` is
    surprising for the set with the most pages, and the unattributed
    `0x400dbeb6` may mean ownership is expressed in more than one place.
-2. Whether any of the **24 predicate call sites** takes a different branch for
-   an unclaimed page — the fall-through was inferred from the symptom, not read.
+2. ~~Whether any of the 24 predicate call sites takes a different branch for an
+   unclaimed page.~~ **CLOSED — read at `0x40041a72`: two tests, then an
+   unconditional fall-through with no default guard.** Whether the other
+   cascades (`0x40064e90`/`0x40064f14`, and the `0x40067xxx` cluster) have the
+   same shape is not checked.
 3. Whether slot `+0x50` (the accessor) needs the same treatment.
