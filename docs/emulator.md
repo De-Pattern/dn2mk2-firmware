@@ -765,3 +765,87 @@ eight bytes digikit records, which we cannot take without that image.
 
 Since the tracer is all-or-nothing, `--trace-ui` stays off until that one lands.
 **Driving and screenshots do not wait on it.**
+
+### The emulator draws the real UI — 2026-09-16
+
+**Both pages captured headlessly, no hardware.**
+
+![The SYN1 page, stock 1.11, under the emulator](img/emu-syn1-page-stock-111.png)
+
+![The LFO page reached with [MOD], stock 1.11](img/emu-lfo-page-stock-111.png)
+
+```
+end: instrs=240M terminal=False tasks=5 dtim3=259 mainloop=272 jobs=1
+```
+
+Forced pend-unblocks fell from **3,109,215 to 2,572** between the broken and
+working configurations — that ratio is the signal to watch, not the verdict line.
+
+#### The fault was a stale section cache, and it was there from the first run
+
+`emu/config.py`'s `main_image()` resolves the MAIN OS by **globbing
+`sections/*MAIN_OS*.bin`**, and `--syx` does not repoint it. That directory held
+a **1.10E** extraction from an earlier session:
+
+| | sha256 | bytes |
+|---|---|---|
+| `sections/section_3_MAIN_OS.bin` (what ran) | `d6b54227…` | 3,085,696 — **1.10E** |
+| `.ladder.json`'s `main_sha256` (what the snapshots need) | `57b06a79…` | — |
+| our 1.11 extraction | `57b06a79…` ✓ | 3,192,192 |
+
+So **1.10E code was executing against 1.11 snapshots.** Every downstream
+symptom followed from that one mismatch:
+
+- `HALTED: unhandled vector 257` on the 280M rung;
+- `weakptr: 0x4018c33a holds a2ca, expected 6714` — 1.10E's weak-pointer
+  addresses against 1.11 memory;
+- `tasks=0`, no latched frame, the panel black;
+- 13.4M and 3.1M forced unblocks in successive runs.
+
+**Fix:** extract per version and point `DT2_SECTIONS` at it.
+
+```
+python -m emu.extract <1.11.syx> -o /root/dn2-sections-111/
+DT2_SECTIONS=/root/dn2-sections-111 python tools/guirun.py <snap> --weakptr --slc
+```
+
+#### The three settings that matter, and where each is written down
+
+| setting | why | where it is recorded |
+|---|---|---|
+| `DT2_SECTIONS` per firmware version | otherwise another version's code runs | `emu/config.py` `main_image()` |
+| `--weakptr --slc` | clears `unhandled vector 257`; without them the run dies or wedges | `emu/longrun.py` `build()` docstring |
+| the **400M** rung | 280M wedges the intro in `sem_pend` | `emu/run.py` `usable_rung()` — **call it, do not read it** |
+
+#### [METHOD] Call the function, do not hand-apply its docstring
+
+`usable_rung()`'s prose says *"on Digitone only 400M is disqualified, and it
+gets 280M."* **Called against 1.11 with correct sections, it returns 400M.** The
+comment was written from a different measurement; the code is right and its own
+description is stale.
+
+Reading the doc beat guessing. **Running the function beat reading its doc** —
+and that function exists precisely because the answer is state-dependent rather
+than a fixed number, which is the clue that it should have been called.
+
+This extends `docs/FEATURE-PLAYBOOK.md` §2.0: read our own docs first, then the
+reference repo's — **and where the reference repo ships a function that computes
+the answer, call it.**
+
+#### What it gives LFO4 immediately
+
+The stock LFO page renders every specialised widget: a bipolar pointer knob for
+`SPD`, a boxed `2` for `MULT`, the **squared `×` view** for `FADE`, `SYN BASE`
+for `DEST`, and the **sine curve in braces** spanning `WAVE`/`SPH`.
+
+§5i's open question — why LFO4's page drew plain round knobs instead — now has a
+**working reference to diff against** rather than a static guess about how
+widget selection is keyed.
+
+#### Still unresolved
+
+`ui_key_dispatch`, so `--trace-ui` stays off. `display_frame_post` is located on
+1.11 at `0x4013190e` (`pea 0x4461e6e8; or.l %d1,%d0`, 182 bytes below
+`display_start`, discriminated from two other sites because they post `frame_sem`
+or sit in unrelated early code) — but resolving it changed **nothing**: the run
+was bit-identical, same 3,109,215 unblocks. It is not consulted on this path.
