@@ -1045,6 +1045,76 @@ greps. Drive the emulator to the LFO page, hook the draw path, and compare the
 widget decision for parameter 99 (`WAVE`, LFO3) against parameter 5 (`WAVE`,
 LFO4).
 
+### 5i-b. The disjunct is confirmed, and why the WAVE scan missed it — 2026-09-16
+
+**A logical constraint first, which narrows this more than any scan.** `v5`
+clones the **whole 60-byte record** from LFO3 and overrides only page id, CC,
+NRPN, page label and modmask. So if the widget were chosen from *any* record
+field — including the formatter at `+0x34` — cloning would have preserved it.
+The widgets went plain anyway. **Therefore the decision cannot come from the
+record; it is keyed on the parameter id**, exactly as §5i concluded from the
+v4/v5 difference.
+
+**The predicate's shape is now read, not inferred.** Inside `LfoPageView`'s
+vtable slot 23 (`0x40066c76`), at `0x40066d5c`:
+
+```
+40066d5c  moveq #78,%d0     ; LFO1 DEST
+40066d5e  cmpl  %d3,%d0     ; %d3 = the parameter id
+40066d60  beqs  ...
+40066d62  moveb #88,%d0     ; LFO2 DEST
+40066d66  cmpl  %d3,%d0
+40066d68  beqs  ...
+40066d6a  moveb #98,%d0     ; LFO3 DEST
+40066d6e  cmpl  %d3,%d0
+```
+
+An **exact-match disjunct**, which is the shape §5i predicted LFO4 would have to
+be taught explicitly.
+
+#### Why §5i found no WAVE triple, and it is not because there is none
+
+**GCC emits the first comparison as `moveq #n,%dX` and the rest as
+`moveb #n,%dX`** (`0x103c 00nn`). A scan for three uniform immediates cannot see
+that. Re-running §5i's `(n, n+10, n+20)` search while allowing both encodings:
+
+| parameter | ids | code sites |
+|---|---|---|
+| `MULT` | 76/86/96 | `0x400dbdbc` |
+| `DEST` | 78/88/98 | `0x400397da` `0x40039a9a` `0x40039cbc` `0x40039ebc` **`0x40066d5c`** |
+| ? | 80/90/100 | — data only |
+| `SPH` | 81/91/101 | `0x4010db18` |
+| `MODE` | 82/92/102 | — data only |
+| ? | 84/94/104 | `0x400dbd4c` |
+
+**`WAVE` (79/89/99) and `FADE` (77/87/97) still have no code triple**, now
+tested against both encodings. So §5i's conclusion survives a better scan: those
+two widgets are selected some other way, and that way is still unlocated.
+
+#### What slot 23 actually is, so it is not mistaken for the answer
+
+`0x40066c76` opens with a **16-iteration loop** (`moveq #16,%d0; cmpl %d2,%d0;
+bnes`), `%d2` the track index, with the `DEST` disjunct inside it. That is
+**per-track destination resolution** — `DEST`'s value names another parameter —
+not widget selection. It is where the disjunct shape was read, not the thing
+being hunted.
+
+#### The vtable, for whoever picks this up
+
+`LfoPageView` vtable `0x40205614`. Slots 20–27 are a cluster in `0x4006xxxx`
+that look like the per-column accessors:
+
+```
+20 0x40066df0   21 0x4006408a (parameter_value_getter)   22 0x40063fd6
+23 0x40066c76 (per-track DEST)   24 0x40064224   25 0x4006415c
+26 0x400642a6   27 0x400641c2
+```
+
+**The instrument is unchanged and is now available**: `--trace-ui` runs on
+Digitone II 1.11 as of today, so hook these slots during an LFO page draw and
+see which is called per column and what it returns. That is §5i's own
+prescription, and two further scans since have not beaten it.
+
 **None of this blocks v6.** Independent values (§3's extension array) is a
 separate axis and the more important one: v5's page is real, it just looks plain.
 
