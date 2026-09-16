@@ -30,7 +30,7 @@ hit the same eight, with different addresses.
 | 5 | **Engine** | whatever generates or consumes the value per frame | LFO tick `0x40137726` |
 | 6 | **Serialization** | live ⇄ stored, through the forward/inverse maps | `0x400dd24a` / `0x400dd6f0`, maps `0x401fcf20` / `0x401fd0b0` |
 | 7 | **Page view** | the class that draws the page and maps columns to records | `LfoPageView`, vtable `0x40205614`, columns at `+0xBC` |
-| 8 | **Navigation** | how a key reaches the page — an explicit **page count** | `register(ctx, descriptor, COUNT, …)`, `moveq #3,%d1` at `0x40061558` |
+| 8 | **Navigation** | how a key reaches the page — `register(ctx, *ids, count)` over a **packed pool of view ids** | pool `0x401e0000` (32 longwords, **no gaps**); LFO's slice `(0x48, 3)` at `0x40061558`. The count cannot be bumped — the list relocates |
 
 **Use this as a checklist before estimating anything.** LFO4 was priced three
 times and wrong twice, both times because a layer had not been looked at yet —
@@ -120,7 +120,19 @@ this firmware are C++ virtual calls through vtable slots, so:
 
 `rttiscan.py`'s vtable + load-site output is how you find these directly.
 
-### 2.5 objdump prints displacements in two radixes
+### 2.5 A decompiler argument can be a truncated pointer
+
+Ghidra printed the navigation call as `register(ctx, 0x48, 3, ...)`, which
+reads as two small constants. `0x48` was `0x401e0048` **truncated to its low
+byte** — a pointer into a packed table, not a key code. Taking it at face
+value produced "the edit is one byte", and the pool turned out to have no
+free slot to bump into.
+
+**Rule: check any small integer argument against the disassembly before
+building on it.** The instruction was `movel #0x401e0048,%d0`, and one look
+would have settled it.
+
+### 2.6 objdump prints displacements in two radixes
 
 `docs/mainos-image.md` has the full measurement. Indexed-mode (brief extension)
 displacements print in **hex with no prefix**; `d16(An)` displacements print in
@@ -130,14 +142,14 @@ displacements print in **hex with no prefix**; `d16(An)` displacements print in
 an indexed displacement produces fields that do not match how the *callee* uses
 them, suspect the radix before suspecting the structure.
 
-### 2.6 Stock Ghidra silently truncates this ISA
+### 2.7 Stock Ghidra silently truncates this ISA
 
 `68000:BE:32:Coldfire` has no constructor for `movclr`, so flow analysis stops
 dead with no error. Use digikit's `68000:BE:32:ColdfireEMAC`
 (`ghidra/install-coldfire-emac.bat`) and **re-import** — changing the language
 on an analysed program does not re-disassemble what the old one got wrong.
 
-### 2.7 Device data comes from DNX, never from hand-rolled MIDI
+### 2.8 Device data comes from DNX, never from hand-rolled MIDI
 
 `scripts/sysex_capture.py` was written and deleted the same day. Two bugs, a
 truncated dump, and the owner asking *"why don't you use DNX?"* twice. Ask the
