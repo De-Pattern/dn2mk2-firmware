@@ -111,6 +111,25 @@ sites that load the parameter table** returns **three**, and all three are real.
 That difference is the whole difference between v2 failing and v3 being worth
 flashing.
 
+### 2.3 A number that surprises the owner is a bug in the reader
+
+**From DNX, 2026-09-16, and it generalises.** DNX reported that a Digitone 1
+pattern peaked at **18 voices on an 8-voice machine**. The owner disbelieved it.
+The owner was right: `voicesPerStep` counted a voice for every overlapping note
+on a track, *including a retrigger of the same pitch*, which a synth voice does
+not stack. One track played note 60 thirteen times under a 64-step gate on a
+62-step track and supplied 14 of the peak by itself. Counting a same-pitch
+repeat once took the figure from 20 to 6.
+
+**The rule: when a measurement contradicts what the owner knows about their own
+instrument or their own music, suspect the instrument that produced the number
+before suspecting the device.** They have years of use; the reader has hours of
+code.
+
+This project's own version of the same mistake: `VEL` reading 112 was called a
+firmware bug until it turned out 112 is LFO1 `SPD`'s default and the reader had
+fallen through to the wrong parameter set.
+
 ### 2.3 A string in a table is not a code path
 
 Twice in one day. `Unsupported downgrade` sits at index 5 of the upgrade error
