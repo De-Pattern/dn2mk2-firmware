@@ -1411,6 +1411,66 @@ Find where `ArpSetupMenuView` is constructed and what decides whether it is
 reachable. `ghidra/FindDataRefs.java` and `dnfw fn callers` are the tools, and
 Ghidra is cleared for this CPU.
 
+### BUILT 2026-09-17: one byte, and it asks the question this entry opens with
+
+`scripts/build_arp_on_midi.py` -> `00_Resources/02_Builds/arp-on-midi_DN2_1.11.syx`.
+21 integrity checks pass, HMAC reproduced.
+
+**The manual confirms the restriction is real and documented.** Section 9.7:
+*"The arpeggiator is not available for the MIDI tracks."* Section 8.1: *"A track
+that contains any other SYN machine than the MIDI machine is considered an audio
+track."*
+
+**The chain to `ArpSetupMenuView` has exactly one link at every step**, which is
+what made this cheap:
+
+```
+0x401d4c70   vtable                (typeinfo 0x401d4c08 -> "ArpSetupMenuView")
+0x400191a6   constructor           1 caller
+0x4019f600   make_shared factory   1 caller, allocates 0x24c bytes
+0x4005fa3c   the only call site    inside a 6,516-byte menu dispatcher
+```
+
+and the branch:
+
+```
+0x4005f9c8  jsr   0x401160ac      | (track->flags@0x10 >> 1) & 1
+0x4005f9da  beq.s 0x4005fa3c      | 0 -> build the setup view
+0x4005f9dc  ...                    | else -> an "Arpeggiator ON/OFF" item
+```
+
+The other arm chooses between `"Arpeggiator ON"` and `"Arpeggiator OFF"` at
+`0x40215d3f`, which is how we know it is the plain toggle and not a second setup
+view. `0x401160ac` has **132 callers**, so it is a fundamental track property and
+is left alone: the edit is the branch, `beq.s` -> `bra.s`, **one byte**.
+
+**What the instrument will say:**
+
+| on a MIDI track | verdict |
+|---|---|
+| menu opens, settings stick, **notes arpeggiate** | a pure UI gate -- the feature is done, in one byte |
+| menu opens, settings stick, no arpeggiation | UI gate **and** engine gate; the note generator has its own check |
+| menu opens, values wrong or dead | the view is bound to per-preset storage a MIDI track lacks |
+| **audio tracks change at all** | the branch is not what this claims -- revert |
+
+The last row is the control: audio tracks already took this branch, so they must
+be unaffected.
+
+### [METHOD] Ghidra settled the structure and was wrong about the detail
+
+The enclosing dispatcher `FUN_4005ed12` decompiles with *"Type propagation
+algorithm not settling"*: every call loses its arguments and `pea` sequences come
+back as writes to imaginary stack slots. Ghidra found the function bounds that
+`dnfw fn entry` had guessed wrong -- 6,516 bytes, not the 350-byte neighbour --
+and that was worth the 140-second analysis. But its C for this routine is not
+evidence, and the raw disassembly is. **Both readings were needed and neither
+alone was enough**, which is the argument for having the project set up rather
+than reaching for one tool.
+
+The project now exists at `out/ghidra/dn2_111` (gitignored) and re-queries in
+seconds with `-process -noanalysis`, so the next backlog entry does not pay the
+import again.
+
 ### What makes it verifiable
 
 The same loop as everything else here: DNX reads the device's stored state, so
@@ -1813,3 +1873,73 @@ the book, not of the idea.
 
 Budget is unchanged in total and only redistributed: three bands across a wide
 short box rather than a narrow tall one.
+
+## 14. A shape bench: see the LFO shapes, and design new ones
+
+**Asked for by the owner, 2026-09-17:** *"the web should offer a preview of the
+forms in the firmware provided and allow you to add or change shapes. New shapes
+can be added by templates offered or by providing a formula for them. Phs is the
+wildcard where any shape customisation parameter lands. The tool should show
+visually the shapes."*
+
+**DELIVERED as an artifact:** https://claude.ai/artifact/VWYjJZE3z1FQaEEHe7wTwC
+
+It follows the precedent of the browser tool that shipped with the extra LFO
+destinations (PR #61): a single page, no build step, nothing to install.
+
+### What it does
+
+- **Draws every slot on the instrument's own panel** — a real 128 x 64 one-bit
+  buffer, blitted and pixel-doubled, because that is the geometry
+  `docs/display-path.md` measured. No anti-aliasing, for the same reason the
+  panel cannot anti-alias.
+- **Ten slots**, colour-coded by provenance: ships with 1.11, added by the mod,
+  or yours. Each carries a thumbnail that re-renders as `SPH` moves.
+- **`SPH` as the wildcard**, with the page saying what it means for the selected
+  shape — levels for `STP`, duty for `PLS`, colour for `NOI`, and "no effect on
+  this shape's outline" for the seven that use it as a start phase.
+- **A sweep strip**: the same shape at eight `SPH` values, which is the fastest
+  way to see whether a customisation parameter is doing anything useful.
+- **Templates and a formula field.** Eight templates — staircase, pulse,
+  trapezoid, exponential decay, sine power, two poles, chaos, and the
+  Leviasynth's **semitone lock**. The formula is `p` (phase) and `s` (`SPH`),
+  returning -1..1.
+- **Reads a firmware.** Load a de-packed MAIN OS and it reports the generator
+  table's address, whether it is still where Elektron put it, `WAVE`'s maximum,
+  and slot by slot whether each entry is the stock generator, a replacement, the
+  NULL that `RND` uses, or something added.
+
+### The export, and why it is the part that matters
+
+A formula cannot become four ColdFire instructions in general. So the bench
+exports the thing that *can* carry any shape: **eight tables of 256 signed
+words, one per `SPH` band, and a twelve-instruction generator that indexes
+them.**
+
+```
+    andi.l  #0x7f,%d1
+    lsr.l   #4,%d1              | SPH -> band 0..7
+    lsl.l   #9,%d1              | x 512 bytes
+    move.l  %sp@(8),%d0
+    lsr.l   #24,%d0             | phase -> 0..255
+    add.l   %d0,%d0
+    add.l   %d1,%d0
+    lea     tab,%a0
+    mvs.w   %a0@(0,%d0:l),%d0
+    lsl.l   #16,%d0             | 16-bit table -> 32-bit level
+```
+
+4,096 bytes of table per waveform. The cave at `0x402cf52c` holds 896, so a
+wavetable shape needs either the unclaimed 25 MB above BSS (filled at boot from
+a table in the image) or one of the larger free runs — **the first thing to
+settle before this is built**, and it is the same space question as §1 and §6.
+
+### What is not built yet
+
+- the builder side: `scripts/build_lfo_waveshapes.py` accepting the bench's JSON
+  and emitting a wavetable slot;
+- the `[MOD]` page's waveform **graph** for any shape the firmware did not ship
+  with — still the one unread renderer, and now three shapes deep;
+- reading a `.syx` directly. The page needs a de-packed section because aPLib
+  depacking in the browser has not been written. `scripts/js_codec_check.mjs`
+  already has the codec in JavaScript, so this is porting, not research.

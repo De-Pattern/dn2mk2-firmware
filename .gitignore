@@ -32,3 +32,4 @@ desktop.ini
 
 # Claude Code session tooling -- local only, not part of the project
 .claude/
+out/
