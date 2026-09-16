@@ -210,3 +210,17 @@ It is also the cheapest possible confirmation that `docs/lfo4-build-plan.md`
 §5e was right to list the ten `+0x90` sites as unread: this is one of them, and
 it is the kind of consumer no bound-scan would have found, because there is no
 bound — just an array that happens to be three long.
+
+| 2026-09-16 | **Stock 1.11 reflashed by the owner** | Between the v5 flash and DNX's arp capture, the owner returned the instrument to **unmodified 1.11** so the capture would be stock evidence. **The DN2 is on stock as of this row.** |
+
+**This row exists because the gap above bit twice in one day.** This log records
+what was *sent*, never what is *resident*, and nothing writes a row when the
+owner reflashes stock. On 2026-09-16 that produced two wrong statements: DNX
+told the owner the instrument was wearing the TRIG-page probe build when it was
+on v5, and this project then told DNX it was on v5 when the owner had already
+returned it to stock. Neither was caught by reading; both were caught by the
+owner.
+
+**So: write a row when stock goes back on, not only when a build goes out.** A
+log that only records departures cannot answer "what is on it now", which is the
+question anyone actually asks.
