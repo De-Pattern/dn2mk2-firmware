@@ -11,21 +11,40 @@ ours and `m-dwyer/digikit`. It is the most valuable kind: it worked the
 formal, hash-bound controls — and it reaches into the SHARC further than either
 of the other two.
 
-## Licence: read, cite, do not copy
+## Licence: CC0 1.0 since 2026-09-15 — the restriction is lifted
 
-`NOTICE.md`: *"The research text is original work. No open-source license is
-granted unless a file explicitly says otherwise."*
+**Updated 2026-09-16.** This section previously read *"read, cite, do not
+copy"*, on the strength of a `NOTICE.md` that granted no licence. **That is no
+longer true.**
 
-So this is on the same footing as `ems-octakit` (`docs/references.md`): **we may
-read it and we may cite what it establishes, in our own words, with
-attribution. We may not copy its text into this repository, and no file of
-theirs may be vendored.** Addresses and measurements are facts and can be
-recorded as such; their prose cannot. Nothing here is a derived work of their
-writing.
+Commit `b2f93c1`, **"License research under CC0 1.0"** (2026-09-15), added a
+`LICENSE` file and revised `NOTICE.md`, which now reads:
 
-Where this document states one of their findings, it is a summary written from
-scratch for our own purposes, and the pointer is to their repository so anyone
-who needs the detail reads it there.
+> *"To the extent the contributors own the necessary rights, the original
+> contents of this repository are dedicated to the public domain under CC0 1.0
+> Universal."*
+
+**So we may now quote it directly, copy its text, and vendor its files.** The
+earlier constraint — cite only in our own words, never copy, never vendor, same
+footing as `ems-octakit` — is **withdrawn**.
+
+Two things that do *not* change:
+
+- **The carve-out.** CC0 covers only what the contributors can grant rights in.
+  Their own `NOTICE.md` is explicit that it does not grant rights in Elektron
+  firmware, vendor code, third-party works, patents, product names or
+  trademarks. Their prose is free; Elektron's bytes are not, and this
+  repository's no-firmware rule is untouched.
+- **We keep attributing them anyway.** CC0 does not require it, but this project
+  names whose reading a claim came from so that a merged claim can be re-checked
+  later. Attribution here is a working practice, not a licence obligation.
+
+**`ems-octakit` is unaffected** and remains unlicensed and inspiration-only.
+Do not generalise this change to it (`docs/references.md`).
+
+Everything already written in this document was composed from scratch under the
+old constraint. It stays as it is — it is accurate — but future work may quote
+them directly where a quotation is clearer than a paraphrase.
 
 ## What it settles that we had open
 
@@ -141,7 +160,8 @@ documentation treats loosely.
    difference, and it is cheap.
 2. **Point digikit at it.** Her `machine-engine-link` branch is mapping the DSP
    program in Ghidra right now and lists the Audio Task's structure as open;
-   this is the same address space and goes further. Sending her the pointer is
-   right; copying their text is not.
+   this is the same address space and goes further. **Under CC0 we may now send
+   her their text directly**, not only the pointer — though the pointer remains
+   the better courtesy.
 3. **Do not treat the SHARC image as having slack** until their gap analysis is
    contradicted rather than ignored.
