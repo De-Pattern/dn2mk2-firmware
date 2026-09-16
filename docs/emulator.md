@@ -527,3 +527,43 @@ wrong three times here.
 **Carry the positive controls** listed above under "The first watch run was not
 a result" — `0x401f7f94` static, `0x42c64b3c` built at boot, a live TCB. A zero
 without them means nothing.
+
+## What actually stops the emulator answering UI questions — 2026-09-16
+
+The owner asked, fairly: *"can you not check these questions in the emulator? Is
+there anything stopping that?"* The answer is **nothing fundamental, and one
+concrete prerequisite**.
+
+**What already works on Digitone II 1.11 here:**
+
+| | |
+|---|---|
+| boot to `MAIN_OS_RUNNING` | yes, from `boot400M.snap` |
+| `tools/bootwatch.py` write watches | yes — it settled the descriptor-id writer |
+| `tools/addrtrace.py` code hooks | yes |
+| `tools/panelsweep.py` — map panel button codes | running; it reads the firmware's own `queue_send` record, and its record layout was *"verified across dozens of samples on Digitone"* |
+| `tools/guirun.py` — **headless** panel input + screenshots | the right tool: `--input 150M:press:17`, `--png-at 170M:out/x.png` |
+
+**The prerequisite.** Starting a run on 1.11 prints:
+
+```
+unresolved OPTIONAL symbols: ['call_sites', 'ctx_switch_load',
+  'display_frame_post', 'display_sem', 'transport', 'ui_key_dispatch',
+  'ui_tick_counter', 'ui_tick_inc', 'view_activate', 'view_close',
+  'view_closed_mark', 'view_offer', 'view_request_pop', 'view_sweep']
+```
+
+**Six of those are exactly the UI ones** a widget-selection question needs —
+`ui_key_dispatch`, `view_activate`, `view_close`, `view_offer`,
+`view_request_pop`, `view_sweep`. They are derived by byte signature from
+Digitakt II 1.15C and do not match this build.
+
+That is the **same class of problem as `mainloop`**, which was one byte (a
+`moveq #40` against `moveq #41`) and is now fixed and sent as digikit PR #16.
+Thirteen more of the same kind is real work, but it is tractable, mechanical,
+and it benefits digikit as much as us.
+
+**So the honest statement is:** the emulator can already answer *memory*
+questions on our build and has done. It cannot yet answer *UI* questions,
+because the UI hook points are unresolved — and that is a signature-porting job,
+not a limitation of the emulator.
