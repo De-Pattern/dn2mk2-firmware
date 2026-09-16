@@ -775,7 +775,48 @@ Per descriptor it writes the two string pointers and then zeroes the rest:
 **Nine `clrl`s — exactly the nine column slots.** So the parameter ids are *not*
 static data: they start at zero and are filled at runtime.
 
-**Still open, and it is the last thing gating v4's cave:** *what* fills them.
+### ANSWERED 2026-09-16 by a write watch: the same initialiser fills them
+
+Found with digikit's `tools/bootwatch.py` under the emulator, which reports the
+writing PC directly. Watching `0x42432cb0:36` (descriptor 4 = LFO1) through a
+cold boot:
+
+```
+[26632974] 0x42432cb8  value 0x4b  pc 0x400c985e
+[26632976] 0x42432cbc  value 0x4c  pc 0x400c9868
+[26632979] 0x42432cc0  value 0x4d  pc 0x400c9874
+[26632981] 0x42432cc4  value 0x4e  pc 0x400c987e
+[26632984] 0x42432cc8  value 0x4f  pc 0x400c988e
+[26632986] 0x42432ccc  value 0x51  pc 0x400c9898
+[26632989] 0x42432cd0  value 0x52  pc 0x400c98a8
+```
+
+`0x4b`…`0x52` are **75, 76, 77, 78, 79, 81, 82** — LFO1's parameter ids, from
+the record table. (LFO1's block is ids 75–84 and the descriptor holds nine of the
+ten; **80, `SLEW`, is skipped** — nine columns, ten parameters.)
+
+And the writes are in the **same initialiser**, immediately after the `clrl`s:
+
+```
+0x400c985a  moveq #75,%d0
+0x400c985c  moveq #76,%d1
+0x400c985e  movel %d0,0x42432cb8        ; column 0
+0x400c9864  moveb #77,%d0
+0x400c9868  movel %d1,0x42432cbc        ; column 1
+   ...
+```
+
+**So the ids are static after all**, written one column at a time. My earlier
+scan missed them because it looked for `movel #imm,abs.l` (`23fc`) and the
+compiler emitted `movel %dN,abs.l` (`23c0`/`23c1`) with the value loaded into a
+register first.
+
+**What this settles for v4:** the cave must write descriptor 37's nine ids
+itself — LFO4's records on page `0x1d` will *not* populate it automatically.
+Nine `movel`s plus two string pointers, in the same shape the initialiser
+already uses, hooked after `0x400c98a8`.
+
+~~Still open, and it is the last thing gating v4's cave: *what* fills them.~~
 The accessor `0x400c2474` has **17 callers**; the ones sampled
 (`0x4005c5b4`, and the `getColumnParameter` family) all **read** `desc + 8 + n*4`
 rather than write it. No `movel #imm,abs.l` targets the table either.

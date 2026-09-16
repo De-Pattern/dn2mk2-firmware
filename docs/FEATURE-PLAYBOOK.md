@@ -100,6 +100,25 @@ ghidra\analyze.bat 00_Resources\03_Ghidra\emac mainos_111_emac ^
 
 Reading 900 bytes of assembly by eye, when that exists, is a choice.
 
+### 2.1b A store through a register is invisible to an immediate scan
+
+Looking for what fills a table, it is natural to search for
+`movel #imm,abs.l` (`23fc`). GCC frequently emits `moveq #imm,%dN` then
+`movel %dN,abs.l` (`23c0`) instead, which that search cannot see. On 2026-09-16
+this produced a confident "no `movel #imm,abs.l` writes into the table" and an
+hour of hunting for a runtime populator that does not exist — the values were
+static, written forty bytes further down the same function.
+
+**A write watch under the emulator answered it in one run**, because it reports
+the PC that wrote, not the instruction form you guessed:
+
+```
+tools/bootwatch.py --limit 400000000 --watch 0x42432cb0:36=LFO1desc
+```
+
+**Rule: when the question is "what writes this", watch the address. Do not
+pattern-match the store.**
+
 ### 2.2 Anchor a scan on structure, never on a constant
 
 When the question is *"what else names X?"*, scanning for X's encoding finds
