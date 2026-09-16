@@ -57,6 +57,40 @@ all, so deleting it frees **flash and update size only** — no ColdFire address
 space, which is the thing a fourth LFO actually needs. It also means deleting
 it would leave an attached Outbox running whatever firmware it already has.
 
+### [CONFIRMED 2026-09-16] Section 8 is the same image on a different product
+
+The Outbox attribution was recorded as *"an inference from timing, not something
+read out of the bytes… do not write it down as fact until something names it."*
+It still is not named, but it is no longer a guess about which device it belongs
+to.
+
+**Digitakt mk1 OS 1.53** (product code 44, unsigned, MAIN OS 2,475,584 B) carries
+a section 8 that is **byte-for-byte identical** to Digitone II 1.11's:
+
+```
+DT1 1.53 section 8 : 159,948 bytes  sha256 6943b2f27773f40f1e7857ea6fa7a121…
+DN2 1.11 section 8 : 159,948 bytes  sha256 6943b2f27773f40f1e7857ea6fa7a121…
+                                    IDENTICAL
+```
+
+**The same ARM Cortex-M firmware ships inside the update for two different
+instruments** — a first-generation Digitakt and a Digitone II, different CPUs,
+different feature sets, different MAIN OS entirely. Device-specific code could
+not be identical across those. A **shared accessory's** firmware is exactly what
+would be.
+
+So section 8 is confirmed to be **neither product's own code**, and to be a
+common payload both updaters carry. That is the shape of the Outbox and nothing
+else on either machine, though the image still carries no identifying string and
+the name remains an inference.
+
+**It also settles the space question harder.** `docs/ideas-backlog.md` §1 asks
+whether deleting section 8 buys room for a fourth LFO. It does not — already
+established, because its `dest` is `0x00000000` and it claims no ColdFire address
+space. Now there is a second reason: **deleting it from a DN2 image would strand
+a shared accessory** whose firmware arrives by this route on every Elektron
+product that supports it, not merely on this one.
+
 **To read it** you need an ARM disassembler; neither the WSL nor the native
 binutils here has one (`objdump -i` lists only x86 and the m68k cross). Install
 `binutils-arm-none-eabi` in WSL before trying.
