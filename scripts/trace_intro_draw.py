@@ -45,6 +45,10 @@ def main() -> int:
     ap.add_argument("out")
     ap.add_argument("--slice", type=int, default=20_000_000,
                     help="instructions per progress line (default 20M)")
+    ap.add_argument("--patch", help="a scripts/build_diff.py JSON: write a build's "
+                    "changed MAIN OS bytes into memory after the snapshot is restored")
+    ap.add_argument("--dump", action="append", default=[], metavar="BITMAP=FILE",
+                    help="after the run, write this Bitmap as a PGM (repeatable)")
     args = ap.parse_args()
 
     digikit = os.environ.get("DIGIKIT")
@@ -89,6 +93,15 @@ def main() -> int:
     #                   resume spun 4.1 million satisfied pends without a pixel.
     m, ev, st, pc, inq, at = build(args.snapshot, unblock=True, softfloat=True,
                                    bitmap=True, dsp=True, on_pixel=on_pixel)
+    if args.patch:
+        # The snapshot restored its own copy of MAIN OS, so the build is applied
+        # on top of it here -- the only way to run a patched image from a stock
+        # snapshot.
+        with open(args.patch) as f:
+            ranges = json.load(f)["ranges"]
+        for r in ranges:
+            m.uc.mem_write(int(r["va"], 16), bytes.fromhex(r["hex"]))
+        print(f"applied {len(ranges)} patch ranges from {args.patch}")
     print(f"built from {args.snapshot}; running {args.instrs:,} instructions")
 
     t0, stop = time.time(), None
@@ -127,12 +140,33 @@ def main() -> int:
             for b, px in bitmaps.items()
         },
     }
+    for spec in args.dump:
+        addr, dest = spec.split("=", 1)
+        dump_bitmap(m, int(addr, 0), dest)
+
     path = os.path.join(os.environ.get("TRACE_OUT_ROOT", ""), args.out) \
         if not os.path.isabs(args.out) else args.out
     with open(path, "w") as f:
         json.dump(out, f)
     print(f"\nwrote {path}")
     return 0
+
+
+def dump_bitmap(m, bmp: int, dest: str) -> None:
+    """Write a firmware Bitmap as a PGM; the layout is documented in dump_bitmap.py."""
+    import struct
+    w, h, stride, data = struct.unpack(">4I", bytes(m.uc.mem_read(bmp + 4, 16)))
+    raw = bytes(m.uc.mem_read(data, (w * stride + (h >> 5) + 1) * 4))
+    pix = bytearray(w * h)
+    for y in range(h):
+        for x in range(w):
+            word = struct.unpack_from(">I", raw, 4 * (x * stride + (y >> 5)))[0]
+            if word & (0x80000000 >> (y & 31)):
+                pix[y * w + x] = 235
+    with open(dest, "wb") as f:
+        f.write(b"P5\n%d %d\n255\n" % (w, h))
+        f.write(pix)
+    print(f"dumped Bitmap {bmp:#x} ({w}x{h}) -> {dest}")
 
 
 if __name__ == "__main__":
