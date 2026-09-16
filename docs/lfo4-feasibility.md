@@ -816,6 +816,7 @@ Three flashes' worth of conclusion, stated plainly:
    consult the page id and choose between the six `ParameterSet` accessors at
    `0x400dc02a`, `0x400dc0b0`, `0x400dc0ca` and `0x400dc0e4`. Those four are
    reached through vtables, so **whoever picks between them is the target**.
+   **FOUND 2026-09-16 — see "The runtime classifier, found" below.**
 
 ### The damage is runtime-only — an earlier warning here was overstated
 
@@ -1075,3 +1076,85 @@ nothing beyond a mistake already made.
 Those eight locks are **real stored data on A1 track 1 trig 5** and stock
 firmware is honouring seven of them. They will not clear themselves — clear the
 locks on that trig, or restore the pattern.
+
+## The runtime classifier, found — 2026-09-16
+
+The blocker `STATUS.md` has carried since the third probe flash. It is a
+**virtual predicate**, not a switch, which is why scanning for a page-id
+cascade never found it.
+
+### The four parameter sets are real C++ classes, and RTTI names them
+
+| class | typeinfo | vtable |
+|---|---|---|
+| `SoundParameterSet` | `0x401db6d8` | `0x401db7fc` |
+| `FxParameterSet` | `0x401db6e4` | `0x401db884` |
+| `TrigParameterSet` | `0x401db6f0` | `0x401db90c` |
+| `MidiParameterSet` | `0x401db6fc` | `0x401db994` |
+
+All four derive from a common base (`0x401db6cc`). `Track` (`0x401deb80`,
+constructed at `0x400515d0`) embeds a `TrigParameterSet` at `+52`.
+
+### Slot `+0x54` is the classifier
+
+Every one of the four vtables carries, at **offset `0x54`**, a predicate that
+takes a **parameter id**, indexes the parameter table at `0x401f7f94`
+(`60 × id`), reads the **page id at `+0x00`**, and answers a page test. The
+shape is identical in all of them:
+
+```
+0x400dbe8a  movel %sp@(4),%d0          ; parameter id
+0x400dbe8e  cmpil #321,%d0             ; bounds against the 321-record table
+0x400dbe94  scs %d1
+0x400dbe96  lea 0x401f7f94,%a0         ; the parameter table
+0x400dbe9e  andl %d1,%d0               ; clamp to 0 if out of range
+0x400dbea0  ... %d0 = 60 * id          ; (id<<6) - (id<<2)
+0x400dbea8  moveq #4,%d1
+0x400dbeaa  cmpl %a0@(0,%d0:l),%d1     ; vs the record's PAGE ID
+0x400dbeae  scc %d0                    ; page <= 4
+```
+
+| set | predicate | pages it claims |
+|---|---|---|
+| `SoundParameterSet` | `0x400dbe8a` (via `0x40036bfa`) | `page <= 4` |
+| `FxParameterSet` | `0x400dbf4e` | `0x10`–`0x15` |
+| `TrigParameterSet` | `0x400dbf82` | `0x1d` **or** `0x16` |
+| `MidiParameterSet` | `0x400dbfbc` | `0x16`–`0x1c` |
+
+A fifth of the same shape sits at `0x400dbeb6` — pages `0x05`–`0x0a` — and is
+**not yet attributed to a class**.
+
+The predicate slot is called from **24 sites** across the image (the accessor
+slot `+0x50` from 58). It is not a corner of the code; it is how the firmware
+asks "whose parameter is this?" everywhere.
+
+### Why the probe failed, in one line
+
+**Page `0x1f` is claimed by no predicate.** Nothing in the set matches it, so
+the query falls through to the base-class default, which indexes the **sound
+value array** by the record's `+0x04` field — producing exactly the observed
+symptom: `VEL` reading 112 (LFO1 `SPD`'s default) and `PROB` re-aiming LFO2.
+
+This also explains why patching `param_set_tables_build` bought nothing. That
+function builds the BSS enumeration tables at boot; **this** decides ownership
+at every read and write, and it never consults them.
+
+### What it costs, and the honest caveat
+
+These are **one-byte constants of the same kind as the six range tests** —
+`moveq #4`, `moveq #5`, `moveq #6`, `moveq #29`. Widening one to cover `0x1f`
+is a one-byte edit; the difficulty is that `0x1d` (Retrig) and `0x1e` (None)
+sit between `0x1c` and `0x1f`, so a *contiguous* widening of the `0x16`–`0x1c`
+range swallows both. `TrigParameterSet`'s predicate shows the alternative in
+the shipped code: **an exact-match disjunct** (`page == 0x1d || page == 0x16`).
+That is the form LFO4 needs, and it is already proven to compile and run here.
+
+**Not yet established, and do not price the job until it is:**
+
+1. The exact semantics of slot `+0x54`. "Owns this parameter" fits every
+   observation, but `SoundParameterSet` claiming only pages `0`–`4` is
+   surprising for the set with the most pages, and the unattributed
+   `0x400dbeb6` may mean ownership is expressed in more than one place.
+2. Whether any of the **24 predicate call sites** takes a different branch for
+   an unclaimed page — the fall-through was inferred from the symptom, not read.
+3. Whether slot `+0x50` (the accessor) needs the same treatment.
