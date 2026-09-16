@@ -49,7 +49,20 @@ Every generator is a leaf taking a 32-bit phase in `%sp@(4)` and returning a
     move.l  %sp@(4),%d0
     eori.l  #0x7fffffff,%d0     | the SAW ramp
     andi.l  #0xe0000000,%d0     | keep three bits: eight levels
+    addi.l  #0x10000000,%d0     | half a step, to centre them on zero
     rts
+
+## Why the fourth instruction is not optional
+
+Masking alone takes the **floor** of each eighth, so the levels come out at
++0.75, +0.50, +0.25, 0, -0.25, -0.50, -0.75, -1.00 of full scale. Evenly spaced,
+but their mean is **-1/8 full scale**, not zero -- an LFO with a DC offset, which
+would pull its destination down by an eighth of the depth for as long as it runs.
+Adding half a step lands them on +-0.875, +-0.625, +-0.375, +-0.125: still eight
+levels, still one step apart, now symmetric about zero like every stock
+waveform. The wrap at the top is exact, so no clamp is needed.
+
+Caught by plotting the generator's own arithmetic rather than the intent.
 
 ## The risk to watch on the instrument, stated plainly
 
@@ -113,6 +126,7 @@ step8:
     move.l  %sp@(4),%d0
     eori.l  #0x7fffffff,%d0
     andi.l  #0xe0000000,%d0
+    addi.l  #0x10000000,%d0
     rts
 """
 

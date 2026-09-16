@@ -863,6 +863,8 @@ waveform makes is cheap; making the instrument *show* it is not.
 `scripts/build_lfo_wave8.py` → `00_Resources/02_Builds/lfo-wave8_DN2_1.11.syx`.
 All 21 integrity checks pass and the HMAC trailer is reproduced.
 
+![STP against the SAW it quantises](img/stp-waveform.png)
+
 **`STP` is the ramp quantised to eight levels** — the one shape the stock seven
 do not contain, and audibly unlike every one of them: a pitch destination steps
 instead of gliding, a filter destination climbs a fixed ladder. Available on
@@ -879,6 +881,20 @@ step8:
     andi.l  #0xe0000000,%d0     | keep three bits: eight levels
     rts
 ```
+
+**The fourth instruction is the one that matters.** Masking alone takes the
+**floor** of each eighth, so the levels land on +0.75, +0.50, +0.25, 0, −0.25,
+−0.50, −0.75, −1.00 of full scale: evenly spaced, but with a mean of **−1/8 full
+scale** — an LFO carrying a DC offset, which would pull its destination down by
+an eighth of the depth for as long as it ran. `addi.l #0x10000000,%d0` adds half
+a step and lands them on ±0.875, ±0.625, ±0.375, ±0.125 — still eight levels,
+still one step apart, now symmetric about zero like every stock waveform. The
+wrap at the top is exact, so no clamp is needed.
+
+**It was caught by plotting the generator's own arithmetic, not the intent**, and
+the build was rebuilt before the picture above was finished. A staircase is the
+kind of shape that looks obviously right in the head and is off by half a step on
+the page. `[METHOD] Draw what the code computes, not what it was meant to.`
 
 All five seven-entry tables are copied into a cave as eight and their nine
 `lea`/`pea` sites repointed; `WAVE`'s maximum goes 6 → 7 in the three LFO
