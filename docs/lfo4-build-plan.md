@@ -489,6 +489,65 @@ All six pass → §5b is proven, `0x1d` is free, and the next build is LFO4's
 records plus the five `moveq #2` → `moveq #3` bounds. Still broken → a fourth
 consumer exists, and whether the *symptom* changed says how much narrower it is.
 
+## 5d. Use digikit's tools, not hand-rolled scans — 2026-09-16
+
+**Owner's instruction, and it landed on a live example:** *"Always use the
+tooling at hand in other reference repos, don't build your own tooling if it is
+not needed"* / *"Don't reinvent the wheel unless it is not invented."*
+
+It was said while this document's author was running a hand-written regex scan
+for value-array accesses that returned **144 hits, most of them false**. That is
+the third time in this project that a hand-rolled scan produced a wrong answer
+(`docs/PRINCIPLES.md` §19).
+
+**`m-dwyer/digikit` already ships the tools.** MIT, and `capstone` is already
+installed here, so every *static* one runs today:
+
+| tool | job |
+|---|---|
+| `tools/rttiscan.py` | typeinfo, vtables, vtable load sites, `Class::method` strings |
+| `tools/refscan.py` | exhaustive absolute-reference scan into an address range |
+| `tools/vtcheck.py` | vtable validation |
+| `tools/decompile.py` | decompilation |
+| `tools/addrtrace.py` | **hit counts and registers at first hit, by running** |
+| `emu/` | boots the firmware under Unicorn, with screen and front panel |
+
+Only the emulator is blocked: it needs **unicorn 2.1.4 plus two of digikit's own
+m68k patches** (code-hook CCR sync, EMAC MAC-with-load), built from source. Their
+installer is bash + `shasum` + `.venv/bin/python`, so Windows needs the same kind
+of port `ghidra/install-coldfire-emac.bat` already does for their Ghidra module.
+
+### What it found in five seconds
+
+`rttiscan.py` on our own DN2 1.11 MAIN OS: **1,047 typeinfo objects, 1,911
+vtables, 4,845 vtable load sites, 47 `Class::method` strings.** That is the
+class map §1 and §5 of this document derived by hand, one class at a time.
+
+And it answered the `[MOD]` thread that hand-scanning had failed on all
+session. **There are ten page views, each built by its own `make_shared`
+factory, all in one span:**
+
+| site | view |
+|---|---|
+| `0x4019f8ec` | `MasterPageView` |
+| `0x4019f96c` | `FxPageView` |
+| `0x4019f9ec` | `ParametersSeqNoteView` |
+| `0x4019fa6c` | `AmpPageView` |
+| **`0x4019fae4`** | **`LfoPageView`** |
+| `0x4019fba6` | `FilterPageView` |
+| `0x4019fc1e` | `MultiSourcePageView` |
+| `0x4019fc96` | `MidiParameterPageView` |
+| `0x4019fd58` | `ParameterPageView` |
+| `0x4019fdd2` | `ParametersSeqNoteView` |
+
+`LfoPageView`'s allocation is **432 bytes** (`pea 0x1b0` at `0x4019fac0`), and
+its owner is `0x40061550`–`0x4006188a`, which constructs it with a small integer
+argument (`6`) passed by address. **That owner is where `[MOD]` navigation has
+to be read next**, and it is a named address rather than a guess.
+
+**Standing rule for this project from here:** before writing any scan, name the
+digikit tool that does the job, or say why it does not fit.
+
 ## 6. The build, in order
 
 1. Relocate + zero the three tick state arrays (25 MB region).
