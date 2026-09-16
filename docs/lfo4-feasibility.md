@@ -1248,3 +1248,66 @@ place a value at a different stored offset than stock. The page map settles half
 of it: **no arp record is on page `0x1d`**, so nothing v3 renumbers is an arp
 control. The other half is conditional and is answered in
 `docs/lfo4-build-plan.md` §5c.
+
+## The arpeggiator block, located — 2026-09-16
+
+Follows from "there is no arpeggiator parameter at all" above. Arp state is not
+in the parameter table, so DNX captured it from the instrument instead: five
+presets saved on **stock 1.11**, differing only in arp `MODE`. It sits at
+**stored offset 331** of the 359-byte sound object, outside the `+28` p-lock
+block — exactly where a thing with no p-lock id has to be.
+
+The firmware side then gave the whole block. The v3 sound converter
+`0x400dd49a`–`0x400dd5a6` walks fourteen bytes:
+
+| stored | bound | if out of range | read as | live |
+|---|---|---|---|---|
+| 324 | 3 | 0 | signed | `+326` (long) |
+| 325 | 2 | 0 | signed | `+330` (long) |
+| 326 | 100 | **100** | unsigned | `+334` (byte) |
+| 327 | 2 | 0 | signed | `+335` (long) |
+| 328 | 1 | 0 | signed | `+339` (long) |
+| 329 | 1 | **1** | signed | `+343` (long) |
+| 330 | 1 | 0 | signed | `+347` (long) |
+| **331** | **4** | 0 | signed | `+351` (byte) — **`MODE`** |
+| 332 | 22 | **13** | unsigned | `+352` (byte) |
+| 333 | 7 | 0 | signed | `+353` (byte) |
+| 334 | *(negative test)* | **14** | signed | `+354` (byte) |
+| 335 | 15 | **15** | unsigned | `+355` (byte) |
+| 336–337 | — | — | **word** | `+356` |
+
+Then `0x400dd5aa` copies **16 bytes from stored 338** — the name — so the block
+boundary is 338 exactly and the arp region is **324..337**.
+
+### The substitution value is the default, and it cross-checks the capture
+
+The converter does not clamp to the bound. When a value exceeds it, it
+substitutes a **specific** value — 100, 1, 13, 14, 15 — and those are the
+parameters' defaults, readable without turning a single knob.
+
+DNX's capture measured non-zero at **326=100, 332=13, 334=14, 335=15** — all four
+at exactly their substitution values, i.e. four knobs sitting untouched at
+default. Two independent readings agreeing, from opposite ends.
+
+**`MODE`'s bound is 4**, which independently corroborates five values (OFF, TRUE,
+UP, DOWN, CYCL) and makes `0` a legal value of the field. It does **not** prove
+`0` is labelled OFF; DNX is taking one more save rather than writing that down
+as measured.
+
+### What this means for p-lockable arp
+
+The owner's standing request is now scoped. Arp has **no parameter record, no
+slot index, no forward-map entry and no p-lock id** — it lives in its own
+fourteen-byte region of the stored sound. Making it p-lockable is the full
+eight-layer job in `docs/FEATURE-PLAYBOOK.md` §1 starting at layer 1, with the
+one saving grace that **the values already persist**: they are stored, they have
+known bounds and known defaults, and the converter that reads them is located.
+
+### A correction worth keeping
+
+This project first read the version-3 addition as *"four bytes appended at 248"*.
+DNX read the bytes and it is **244**, tagged: `00 01 03 00` prepended in front of
+the existing `00 01 02 00`, with `v0[n] === v3[n+4]` for 44 of 44 offsets checked
+in 248..291. A nested version-tagged sub-record, not an extended run. The
+converter reading 244..251 as eight independent single bytes fits that and does
+not distinguish it — the bytes did.
