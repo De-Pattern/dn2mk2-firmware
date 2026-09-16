@@ -157,3 +157,41 @@ push-encoders, and every `FUNC` combination.
 
 **The manual is the map; the emulator is the camera.** Walking the tree blind
 with arrow keys rediscovers what §13 and Appendix C already document.
+
+## 7. Why the SETTINGS tree cannot be walked here: the +Drive is not modelled
+
+Dated 2026-09-17. Five frames after a single tap of key 8 (`SETTINGS`) —
+`--input 130M:press:8 --input 133M:release:8`, captured at +3M, +9M, +17M, +29M
+and +47M instruction counts — are **byte-identical**, and all five show the same
+screen:
+
+```
+        [ Elektron +Drive glyph ]
+FACTORY PROJECT >> +DRIVE...
+```
+
+That is the +Drive transfer-progress screen, and it never clears. It is not a
+menu that opened and closed, and it is not a missed keypress: `MainScreenView`
+consumed the key (the tracer said so), the machine went somewhere, and where it
+went was a storage operation that cannot finish.
+
+**The owner settles the reading:** on the instrument `SETTINGS` opens
+immediately. So this is not a UI question at all — the emulator has no eMMC
+behind the +Drive, so any path that touches project storage parks on this screen
+forever, and the settings menu sits behind such a path.
+
+Consequences worth carrying forward:
+
+- **The SETTINGS tree is not reachable under emulation** until the eMMC
+  (Kingston EMMC32G-TX29) is modelled. Walking it with `DOWN`/`YES`/`NO` is not
+  a matter of finding the right key sequence. Marked closed, not blocked on
+  effort.
+- **This screen is a probe.** Any future capture that lands on
+  `FACTORY PROJECT >> +DRIVE...` means the firmware reached storage — which is a
+  useful positive signal about what a key does, even though the screen after it
+  never arrives.
+- It is a **separate** gap from the unmodelled MIDI RX eDMA channel 34 and from
+  the encoder edits that never land; nothing here explains those.
+
+`docs/ui-map.md` §6's "not explored" list stands, but `SETTINGS` moves out of
+"not yet walked" and into "not walkable under the current emulator".
