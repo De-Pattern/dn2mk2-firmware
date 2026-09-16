@@ -5,8 +5,10 @@ stamp on the intro screen) -- which both need the same fact: which routine draws
 the logo, which draws the version text, and where on the 128 x 64 panel each
 lands. That is a trace question, not a scan question.
 
-Runs under digikit's emulator as a library, from a snapshot, with the draw task
-unblocked and `Bitmap::setPixel` served by digikit's HLE. Every pixel is
+Runs under digikit's emulator as a library, from a snapshot **taken while the
+intro is already running** (400M on Digitakt II 1.15C), with the draw task
+unblocked, the DSP model on, and `Bitmap::setPixel` served by digikit's HLE --
+the same settings as `emu/gui.py`, for the reasons noted at the `build()` call. Every pixel is
 attributed to the return address of its `setPixel` call, via
 `emu.hle.LAST_PIXEL_CALLER` (digikit branch `emu/setpixel-caller`). Nothing is
 kept per frame -- only per caller -- so a 400M-instruction run stays small.
@@ -14,7 +16,7 @@ kept per frame -- only per caller -- so a 400M-instruction run stays small.
     DIGIKIT=/mnt/c/ZZ_Code/ZZ_Personal/digikit \\
     DT2_SECTIONS=/root/dt2-sections-115c \\
     /root/dn2-emu-venv/bin/python scripts/trace_intro_draw.py \\
-        snapshots/dt2_115c60M.snap 360000000 out/intro-dt2.json
+        snapshots/dt2_115c_ext400M.snap 40000000 out/intro-dt2.json
 
 Output, per caller: pixels set, pixels lit, the bounding box on its bitmap, the
 bitmap, and the instruction count of its first and last pixel (to the nearest
@@ -79,8 +81,14 @@ def main() -> int:
         c["last"] = now["n"]
         bitmaps[bmp][(x, y)] = val
 
+    # The settings emu/gui.py uses to watch the intro, and each is load-bearing:
+    #   dsp=True     -- without the DSP model the boot job worker wedges in its
+    #                   ready-bit spin and the intro never gets its frames;
+    #   a snapshot where the intro is ALREADY running -- unblocking from an early
+    #                   rung releases waits the boot still needs, and a 60M
+    #                   resume spun 4.1 million satisfied pends without a pixel.
     m, ev, st, pc, inq, at = build(args.snapshot, unblock=True, softfloat=True,
-                                   bitmap=True, on_pixel=on_pixel)
+                                   bitmap=True, dsp=True, on_pixel=on_pixel)
     print(f"built from {args.snapshot}; running {args.instrs:,} instructions")
 
     t0, stop = time.time(), None
