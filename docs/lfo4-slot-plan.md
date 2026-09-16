@@ -857,3 +857,63 @@ until it is noticed as big-endian longs.
 is cheap and should come first on any new table: if entries look like small
 values separated by runs of zeros, try the next width up before interpreting
 anything.
+
+### [WRONG — corrected 2026-09-17 by DNX] "The free lock lanes are gaps"
+
+This document has repeatedly described lock ids **65, 100 and 104** as gaps that
+"fold to slot 0" in the inverse map, and reasoned from that folding as if it said
+something about whether those ids were usable. **It does not, and two of the
+three are ordinary parameters with live lock records in the owner's own
+projects.** DNX's corpus, read back by their decoder:
+
+```
+id 100  TRIG 2 PTIM   x22        id 104  FX OVER       x100
+id 101  FX BR         x14        id 105  FLTR 2 BW.RT  x6
+id 102  FX SRR        x15        id 106  FX OD.RT      x7
+id 103  FX SR.RT      x6
+```
+
+**There are two id spaces and this repository had collapsed them into one.**
+
+| space | range | bounded by | what it addresses |
+|---|---|---|---|
+| **p-lock id** | 0..106 at least | the forward map's **107 entries** | a lock record's `id` byte in the pattern file |
+| **mirror slot** | 0..100 | `moveq #100` at `0x400dc02c` | a cell in the 202-byte per-track mirror; what an LFO `DEST` indexes |
+
+A parameter can be p-lockable **without** being a modulation destination. `FX
+OVER`, `FX BR` and `FX SRR` are FX-level rather than per-track synth parameters:
+the sequencer writes them per step, nothing modulates them, so they have a lock
+id and **no mirror slot**. Folding to slot 0 in the inverse map means *"not
+reachable as a modulation destination"* — not *"not a valid lock id"*.
+
+The 107-entry forward map is sized for the **p-lock** space (`0..106` exactly),
+which is why reading it as evidence about the mirror produced a wrong picture
+twice.
+
+**What this changes:**
+
+- **§12's persisted side is free.** A lock record is `(u8 id, u8 track,
+  u16[128] values)`, 258 bytes, 80 per pattern — the id is a byte in a record
+  header, not an index into a fixed array, so there is no ceiling to overflow.
+  Ids above 99 are not hypothetical; the instrument writes them today.
+- **The real constraint is the mirror**, exactly as the entry above now says: the
+  24 indices §12 needs are *mirror* slots, and 101 is where it stops.
+- **`DEST = 0` is a measured value, not an absence** — 97.6% of 159,744
+  readings, with the field's range measured at 0..104.
+
+### [METHOD] Check whether the instrument has already run your experiment
+
+This was framed as needing a canary: write a lock with a high id, save, read it
+back. DNX answered it from **159,744 readings already in the corpus** — the
+device had run that experiment thousands of times. The canary would have cost
+bench time to learn something already on disk.
+
+**Before proposing an experiment, check whether the data already exists.** It is
+the same rule as *learn the device first*, applied to the owner's time rather
+than to correctness.
+
+**Still open, and it is a read rather than an experiment:** whether the firmware's
+*save path* preserves an id it does not itself emit. The two serialize hooks
+`0x400dd276` and `0x400dd718` either copy a record wholesale or validate its id
+against a table, and which one decides whether §12's new ids survive a round
+trip. That is a different question from whether the format can hold them.

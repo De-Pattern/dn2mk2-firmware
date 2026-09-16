@@ -32,17 +32,21 @@ not been flashed has not been tested.
 | 11 | A real compatibility check between mods | **not a firmware** — it is a check over builds | n/a |
 | 12 | P-locking the performance modulators | **not started** — route (b) scoped | — |
 | 13 | A mod stamp on the intro screen | **not started** — same gate as §9 | — |
-| 14 | A shape bench for the LFO waveforms | **DELIVERED as a tool**; the firmware half (wavetable slots) not started | n/a |
+| 14 | A shape bench for the LFO waveforms | **DELIVERED** — the tool, plus its firmware half: `lfo-wavetable_DN2_1.11.syx` takes the bench's own JSON export | awaiting a flash |
 | — | **LFO4** (the project's named goal) | **DELIVERED** — `lfo4-tick6a_DN2_1.11.syx` | awaiting a flash |
 | — | Transient Swapper | **SHIPPED** | **passed**, PR #64 |
 
-## Three builds are waiting on the owner, and they are independent
+## Four builds are waiting on the owner, and they are independent
 
 Each was written to be flashed on its own and answers a different question, so
 the order does not matter and a failure in one says nothing about the others.
 
 1. **`lfo4-tick6a`** — does a fourth LFO generate and apply? Listen for a slow
    filter sweep on all sixteen tracks that no visible LFO explains.
+0. **`lfo-wavetable`** — a waveform whose shape is 256 signed words in the image
+   rather than arithmetic, with `SPH` as the read stride. Ships a trapezoid;
+   `python scripts/build_lfo_wavetable.py shape.json` rebuilds it from anything
+   the bench exports.
 2. **`lfo-waveshapes`** — three new waveforms. Watch the `[MOD]` page when
    selecting them: its waveform-graph renderer is the one thing not read.
 3. **`arp-on-midi`** — does the ARPEGGIATOR menu open on a MIDI track, and do
