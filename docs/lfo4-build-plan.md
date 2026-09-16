@@ -743,14 +743,48 @@ So LFO4 needs a **38th descriptor at view id 37**, which means:
 | 5 | `0x40061558` | `moveq #3` → `moveq #4` |
 | 6 | `0x4010dbc6` | `moveq #2` → `moveq #3` (the LFO-index clamp, §5e) |
 
-**Open, and cheap to settle:** whether 44 bytes are free after the table at
-`0x4243325C`, which decides between (2) as a bound bump and (2) as a relocation
-of 1,672 bytes into the 25 MB region.
+### Settled: the table cannot grow in place
 
-**Also open:** what writes the nine parameter-id fields at `+8`…`+40`. The `pea`
-scan finds only `+0` and `+4`, so the ids arrive by another instruction form —
-possibly from `param_set_tables_build`, which would tie layer 2 to layer 7 and
-is worth knowing before the cave is written.
+The byte immediately after it is the base of **another** table:
+
+```
+0x400c2428  movel %d0,%d1
+0x400c242a  lsll #6,%d1                 ; id * 64
+0x400c242e  lea %a1@(0,%d0:l:4),%a0     ;   + id * 4   = id * 68
+0x400c2434  addil #0x4243325c,%d0       ; a second descriptor table, stride 68
+```
+
+`0x4243325C` is `0x42432C00 + 37*44` exactly — the two tables abut with **no
+slack**, and the 512 bytes after are densely referenced. **So the 1,672-byte
+table relocates into the 25 MB region**, with every `addil #0x42432c00`
+repointed. There is one such site (`0x400c2486`).
+
+### Settled: the initialiser *clears* the nine id fields
+
+Per descriptor it writes the two string pointers and then zeroes the rest:
+
+```
+0x400c9684  pea 0x4021b584              ; a name string
+0x400c968a  pea 0x42432c2c
+0x400c9690  clrl 0x42432c08             ; +8
+0x400c9696  clrl 0x42432c0c             ; +12
+   ...                                  ;  through
+0x400c96c0  clrl 0x42432c28             ; +40
+```
+
+**Nine `clrl`s — exactly the nine column slots.** So the parameter ids are *not*
+static data: they start at zero and are filled at runtime.
+
+**Still open, and it is the last thing gating v4's cave:** *what* fills them.
+The accessor `0x400c2474` has **17 callers**; the ones sampled
+(`0x4005c5b4`, and the `getColumnParameter` family) all **read** `desc + 8 + n*4`
+rather than write it. No `movel #imm,abs.l` targets the table either.
+
+Why it matters rather than being a detail: if the ids are filled by walking the
+parameter records, then LFO4's ten records on page `0x1d` would populate
+descriptor 37 **automatically**, and the cave only has to create the descriptor
+rather than write nine ids into it. If they are filled per-view from static
+lists, the cave writes them. The two designs differ by more than the bytes.
 ## 6. The build, in order
 
 1. Relocate + zero the three tick state arrays (25 MB region).
