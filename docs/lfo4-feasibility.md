@@ -1400,3 +1400,36 @@ the existing `00 01 02 00`, with `v0[n] === v3[n+4]` for 44 of 44 offsets checke
 in 248..291. A nested version-tagged sub-record, not an extended run. The
 converter reading 244..251 as eight independent single bytes fits that and does
 not distinguish it — the bytes did.
+
+### The one field with no load-time validation, and what is *not* known about it
+
+Flagged by DNX, 2026-09-16, as firmware-side and worth recording against 1.11.
+
+Of the whole arp block, **only the sixteen-byte semitone map at stored 338..353
+is copied without inspection**:
+
+```
+0x400dd5aa  pea 0x10 ; pea %a3@(338) ; pea %a2@(358) ; jsr 0x40134490
+```
+
+The twelve scalars each get a bound and a substitute; the mask is a plain word;
+the map gets a raw `memcpy`. So a stored byte outside whatever range the UI
+enforces reaches the live object untouched.
+
+**What is not known, and the severity depends entirely on it: the consumer is
+unlocated.** Scans for `lea %aN@(358)`, for indexed byte reads against a
+pre-adjusted base, and for `d16` reads of `+358` all return **nothing**. The
+arp engine reaches the map through a computed pointer that no fixed-displacement
+scan can see. (An earlier apparent hit on `+0x166` was `movew %sp@(358)` —
+stack-relative and unrelated.)
+
+So the honest statement is: **one field is unvalidated at load, and what an
+out-of-range value costs is unmeasured** — it could be a silly note, or it could
+be an index into something. Writing it down as a hazard is right; writing it
+down as a *vulnerability* would be a guess.
+
+**The instrument that would settle it** is a watch on the live map under the
+emulator once the UI ports land (`docs/emulator.md`) — set a byte out of range,
+drive the arp, and see what reads it. Not reachable today.
+
+No path to it from outside the UI is known, and DNX will not write the field.
