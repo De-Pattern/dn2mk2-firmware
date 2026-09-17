@@ -177,3 +177,33 @@ copy and clear boundaries outright) and **targeted cross-reference counts** for 
 specific address, not a blind histogram. The parameter table was re-found on
 1.11 the reliable way: locate the `SPD` string, find the pointer to it, and
 subtract `id*60`.
+
+## Where each mod lives — measured 2026-09-17
+
+`scripts/memory_map.py` diffs every current build against stock 1.11 and
+attributes each changed run to a cave, an in-place edit, the appended area, or
+(from the build scripts' constants) RAM above BSS. Output
+`out/memory-map/map.json`; published as a visual map for the owner.
+
+| | |
+|---|---|
+| zero runs ≥32 B in `0x4026e000`–`0x402e2000` | 217 runs, 33,125 B |
+| **clean** runs (pass the stride and reference checks) | **70 runs, 7,065 B**; only three are large: `0x402cf52c`, `0x402d0664`, `0x402dfa1c`, 896 B each |
+| RAM above BSS (`0x466b74d0`–`0x48000000`) | 25.3 MB, mods use 23 KB |
+
+| mod | caves | in-place edits | appended | RAM |
+|---|---|---|---|---|
+| `lfo4-tick6a` | 210 B at `0x402dfa1c` | 137 B, 33 sites | — | 12,288 B at `0x46700000` |
+| `lfo-waveshapes8` | 668 B `0x402cf52c` + 746 B `0x402d0664` | 83 B, 26 sites | — | 8,192 B NOI state + 336 B glyph tiles |
+| `lfo-wavetable4` | 676 B + 560 B, same two caves | 80 B, 25 sites | — | glyph tile |
+| `arp-on-midi2` | — | 4 B, 1 site | — | — |
+| `bootscreen-bang` | 200 B at `0x402dfa1c` | 15 B, 2 sites | 2,092 B | 2,056 B at `0x46710000` |
+| `intro-tunnel` | — | 2 B, 2 sites | — | — |
+| `intro-stamp` | 184 B at `0x402dfa1c` | 8 B, 1 site | — | — |
+
+**Conflicts today:** the two LFO waveform builds share both caves and every hook;
+`lfo4-tick6a`, `bootscreen-bang` and `intro-stamp` share `0x402dfa1c`. **Clean
+caves are the scarce resource; the appended area (proven by `intro-bang`) and
+RAM above BSS are not.** The mix-and-match registry (backlog §11) must allocate
+caves and RAM, not just check hooks.
+
