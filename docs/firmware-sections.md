@@ -77,8 +77,26 @@ appears in id 3 and **in no other section** (ASCII or UTF-16):
 | `#REBOOT_INTO_MAINTENANCE_MODE` | `0x4021acc6` | a service command, beside `#MMCDUMP`, `#REBOOT`, `#PLAY_PATTERN`, `#STOP_PATTERN`, `#START_UI_TEST` (`docs/service-commands.md`) |
 | `MAINTENANCE` | `0x4022969a` | a word in an unrelated dictionary list (`LIGHTWEIGHT`, `LIQUIDATION`, `MALAPROPISM`, …) — name generation, not the mode |
 
-So maintenance mode is **a mode of the main OS**, entered by a reboot command,
-not a separate section. What it does once entered has **not been traced**. The
+So maintenance mode is **a mode of the main OS**, not a separate section. What
+it does once entered has **not been traced**.
+
+**How it is entered, read 2026-09-17:**
+
+- MAIN OS tests **bit 5 (`0x20`) of a boot-flags word** (`0x400cec62` reads
+  `0x40287520`), and shows `MAINTENANCE MODE` when it is set (`0x4002f026`).
+  MAIN OS never sets that bit. Its entry code (`0x400004ec`) copies the word
+  from its stack, so **the bootstrap passes it in**.
+- The bootstrap sets it on either of two routes: **a marker a maintenance
+  reboot leaves in RAM**, or **a power-on key combination**. A second
+  combination sets a different flag. **The combinations are deliberately not
+  published**; they are kept in the owner's private notes, outside this
+  repository.
+- The bootstrap's KEY TEST name table numbers the controls 1..54 exactly as
+  MAIN OS does (`docs/ui-map.md`): an independent confirmation of that map.
+
+These are readings of code, not tried on the instrument. What maintenance mode
+does is still unread, and the rule above stands: read, never trigger its write
+commands. The
 service commands around it include writes this project never sends
 (`#WRITE_SERIAL`, `#WRITE`, `#MMC_RECONFIGURE`); read, never trigger.
 
