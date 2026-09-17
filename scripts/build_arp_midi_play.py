@@ -103,6 +103,8 @@ MIDI_SEND = 0x4012B8B0      # MIDI road, live
 VOICE_TRIGGER = 0x400DB524  # the ISR's per-note voice trigger
 MIDI_RECORD = 0x4012A408    # MIDI record pool, interrupts masked while taken
 MIDI_LOCKS_FREE = 0x4012A3B4  # returns a MIDI lock list to 0x4460fcbc
+TRIG_LENGTHS = 0x401D88D8   # duration per trig length index, 0..127 (0x4012a9a8, 0x40026a7e)
+ARP_LENGTHS = 0x40287B08    # duration per arp N.LEN index, 0..127, -1 = INF (0x40026a74)
 
 LABELS = ("seq_gate", "live_send", "voice_hook")
 
@@ -143,7 +145,7 @@ DIAG_MARK = """    move.l  56(%a2),%d1
 DIAG_LEAVE = f"""    jmp     {VOICE_TRIGGER:#x}              | and voice it: the hook fired if T16 sounds"""
 
 
-def cave_source(diag: bool = False) -> str:
+def cave_source(nlen_lut: bytes, diag: bool = False) -> str:
     return f"""
 | Sequencer fork. In: %a0 kit, %d2 track. Out: Z set -> synth producer,
 | Z clear -> MIDI producer. Replaces `mvs.w 23770(%a0),%dN; btst %d2,%dN`;
@@ -248,7 +250,11 @@ voice_hook:
     move.l  56(%a2),%d1
     btst    #19,%d1                     | the arp is running this note
     beq.s   14f
-    move.b  {ARP_NLEN}(%a1),%d3         | N.LEN
+    move.b  {ARP_NLEN}(%a1),%d3         | N.LEN, an index into the arp's own table,
+    moveq   #127,%d1                    | not the trig one: convert it
+    and.l   %d1,%d3
+    lea     nlen_lut(%pc),%a1
+    move.b  0(%a1,%d3.l),%d3
 14: tst.b   %d3
     bpl.s   6f
     move.b  {SOUND_LENGTH}(%a0),%d3     | negative = the sound's (0x40026680)
@@ -266,6 +272,10 @@ voice_hook:
     movem.l (%sp),%d2-%d3/%a2-%a3
     lea     16(%sp),%sp
 {{LEAVE}}
+
+| N.LEN -> the trig length index nearest in duration (build-time, from the image).
+nlen_lut:
+    .byte   {', '.join(str(b) for b in nlen_lut)}
 """.replace("{FILTER}", DIAG_FILTER if diag else FILTER)      .replace("{MARK}", DIAG_MARK if diag else "")      .replace("{LEAVE}", DIAG_LEAVE if diag else LEAVE)
 
 
@@ -314,12 +324,14 @@ CONTEXT = (
     (0x4012A3B4, bytes.fromhex("206f0004"), "the MIDI lock-list free"),
     (0x4002672C, bytes.fromhex("2268002c"), "ISR: a note's default-giving sound is record +44"),
     (0x40026680, bytes.fromhex("2069002c"), "ISR: negative length -> sound +0x481 through +44"),
+    (0x40026A72, bytes.fromhex("41f940287b04"), "ISR: an arp note's N.LEN indexes ARP_LENGTHS"),
+    (0x40026A7C, bytes.fromhex("41f9401d88d4"), "ISR: any other note's length indexes TRIG_LENGTHS"),
 )
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 DIAG = "--diag" in sys.argv[1:]
 OUT = pathlib.Path("00_Resources/02_Builds/"
-                   + ("arp-midi-diag" if DIAG else "arp-midi-play3") + "_DN2_1.11.syx")
+                   + ("arp-midi-diag" if DIAG else "arp-midi-play4") + "_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
@@ -333,6 +345,18 @@ def assemble_stubs(source: str, base: int) -> tuple[bytes, dict[str, int]]:
     width = 4 * len(LABELS)
     addrs = struct.unpack(">%dI" % len(LABELS), blob[-width:])
     return blob[:-width], dict(zip(LABELS, addrs))
+
+
+def nlen_lut(content: bytes) -> bytes:
+    """For each N.LEN, the trig length index whose duration is nearest (ties go
+    shorter, so a note ends before the next step). The MIDI task times a note
+    only through the trig table; INF becomes 126, the longest finite length."""
+    def table(va: int) -> list[int]:
+        return list(struct.unpack(">128i", content[va - BASE:va - BASE + 512]))
+    trig, arp = table(TRIG_LENGTHS)[:127], table(ARP_LENGTHS)
+    return bytes(126 if want < 0 else
+                 min(range(127), key=lambda i: (abs(trig[i] - want), trig[i]))
+                 for want in arp)
 
 
 def check(content: bytes, va: int, want: bytes, why: str) -> None:
@@ -366,7 +390,7 @@ def main() -> int:
     print("part 2 -- the cave")
     if any(content[CAVE - BASE:CAVE - BASE + CAVE_CAP]):
         raise SystemExit(f"cave at {CAVE:#010x} is not free")
-    payload, at = assemble_stubs(cave_source(DIAG), CAVE)
+    payload, at = assemble_stubs(cave_source(nlen_lut(content), DIAG), CAVE)
     if len(payload) > CAVE_CAP:
         raise SystemExit(f"cave overflows: {len(payload)} > {CAVE_CAP}")
     content[CAVE - BASE:CAVE - BASE + len(payload)] = payload
