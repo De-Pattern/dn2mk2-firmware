@@ -2773,7 +2773,7 @@ bytes differ, and the arp follows.
 ### What real p-locks would still need
 
 1. **Engine (moderate, ColdFire only).** Lock ids for the arp parameters in the
-   free range 100..127 (the five main controls fit easily). At trig start, copy
+   free range 107..127 (the five main controls fit easily). At trig start, copy
    the track's sound into a per-track shadow, apply the locked arp values, and
    set the note's sound pointer to the shadow. The arp code is untouched.
 2. **Storage (unknown).** Whether lock ids above the current maximum survive a
@@ -2784,5 +2784,22 @@ bytes differ, and the arp follows.
    menu, not a parameter page, so that recording path does not reach them.
    Until the UI exists, locks could only be written into patterns by DNX.
 
-**Next:** ask DNX about (2). If ids 100..127 persist, build (1) and let DNX write
+### Lock ids 100..127, answered 2026-09-17
+
+- **100..106 are live** (DNX, 26 projects, 3,328 patterns, 175 records): 100
+  TRIG 2 PTIM, 101 FX BR, 102 SRR, 103 SR.RT, 104 OVER, 105 FLTR 2 BW.RT,
+  106 FX OD.RT, each written by p-locking that parameter. The highest id the
+  instrument has ever saved is 106. **Free: 107..127, 21 ids.**
+- **File:** a lock record is `(u8 id, u8 track, u16[128] values)`, 258 bytes,
+  80 per pattern; the id is a plain byte, so the file can hold 107..127.
+- **Firmware load:** the id→slot lookup `0x400dccc0` indexes the 107-entry
+  table only when id <= 106 and **returns slot 0 otherwise** (track 16 uses
+  a 46-entry table bounded at 45). So there's no out-of-bounds read, but every
+  id of 107 or above becomes a lock on mirror slot 0, and they collide there.
+- **So arp p-locks need their own handling of 107..127** before that bound, not
+  just new ids. DNX's save/reload test would also show whether save re-derives
+  ids from slots, which would lose a 107. Held until the owner OKs a pattern
+  whose playback puts a lock on slot 0.
+
+**Next:** decide the handling of 107..127 in firmware, then DNX's round-trip. If ids 100..127 persist, build (1) and let DNX write
 test locks; (3) only after the sound works.
