@@ -139,13 +139,11 @@ HOOKS = (
     (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
 LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase",
-          "fmt_sph1", "fmt_sph2", "fmt_sph3") + ui.LABELS
+          "fmt_v92") + ui.LABELS
 
-# The three `Start Phase` records' formatter pointers (record name pointer + 12),
-# each holding the shared number formatter until fmt_sph takes it over.
-SPH_FORMATTERS = ((0x401F92C4, "fmt_sph1"), (0x401F951C, "fmt_sph2"),
-                  (0x401F9774, "fmt_sph3"))
-STOCK_NUMBER_FMT = 0x400E2ECC
+# The sound ParameterSet's vtable slot 92 (format a record's value), v6's hook.
+SOUND_SET_V92 = 0x401DB858
+STOCK_V92 = 0x40036692
 NEVER_FMT = b"%d.--\x00"
 
 # Any non-zero word will do -- xorshift32's only requirement.  It is re-seeded
@@ -159,8 +157,8 @@ NOISE_RAM = 0x46740000
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 # v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
-# v5: NOI loop length on SPH, shown as colour.loop.
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes5_DN2_1.11.syx")
+# v6: SPH colour.loop display asks the ParameterSet for WAVE (v5 used globals).
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes6_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
@@ -329,43 +327,38 @@ noise:
     rts
 
 | ---- SPH's value text: `colour.loop` when this LFO's WAVE is NOIS --------
-| Replaces the formatter pointer of the three `Start Phase` records only; every
-| other record keeps the shared number formatter 0x400e2ecc. The record knows its
-| LFO, so each gets a two-instruction entry. The track is the UI's active track
-| (a byte at 0x42431a6c, found by selecting track 3 under the emulator and diffing
-| RAM), and WAVE is read from the engine's per-track mirror at 0x44616448, stride
-| 202, slot 8*lfo+5 -- the same mirror evaluator B is passed.
-fmt_sph1:
-    moveq   #0,%d1
-    bra.s   70f
-fmt_sph2:
-    moveq   #1,%d1
-    bra.s   70f
-fmt_sph3:
-    moveq   #2,%d1
-70: lsl.l   #4,%d1
-    addi.l  #10,%d1                 | 2 * (8 * lfo + 5)
-    movea.l %d1,%a0                 | only scratch registers from here: %d0 %d1 %a0 %a1
-    moveq   #0,%d0
-    move.b  0x42431a6c,%d0          | active track
-    cmpi.l  #15,%d0
-    bhi.s   79f
-    adda.l  %d0,%a0                 | 202 = 128 + 64 + 8 + 1 + 1, shifts only
-    adda.l  %d0,%a0
-    move.l  %d0,%d1
-    lsl.l   #3,%d1
-    adda.l  %d1,%a0
-    lsl.l   #3,%d1
-    adda.l  %d1,%a0
-    add.l   %d1,%d1
-    adda.l  %d1,%a0
-    movea.l #0x44616448,%a1
-    adda.l  %a0,%a1                 | &mirror[track][WAVE]
-    moveq   #0,%d0
-    move.b  %a1@,%d0
+| v5 put this in the `Start Phase` records' formatter, which is handed only
+| (value, dest), and found WAVE through two globals read under the emulator: the
+| active-track byte 0x42431a6c and the engine mirror. On the instrument SPH still
+| showed a plain number -- the track byte is inside a heap-allocated struct, so its
+| address is not fixed across projects. [SUPERSEDED]
+|
+| v6 wraps the sound ParameterSet's format method instead (vtable 0x401db7fc,
+| slot 92, stock 0x40036692), which is called as (this, record, value, dest). For
+| the three SPH records it asks the object itself for WAVE -- `this->vfunc40(this,
+| record - 2)` -- exactly as the firmware's own sibling method 0x4003660c does when
+| it checks SPH against WAVE == RND. No globals. Records: WAVE 79/89/99, SPH
+| 81/91/101 (table 0x401f7f94, 60 bytes a record).
+fmt_v92:
+    move.l  %sp@(8),%d0             | record
+    cmpi.l  #81,%d0
+    beq.s   71f
+    cmpi.l  #91,%d0
+    beq.s   71f
+    cmpi.l  #101,%d0
+    bne.s   79f
+71: movea.l %sp@(4),%a0             | this
+    movea.l %a0@,%a1
+    subq.l  #2,%d0                  | the same LFO's WAVE record
+    move.l  %d0,%sp@-
+    move.l  %a0,%sp@-
+    movea.l %a1@(40),%a1            | get(this, record)
+    jsr     %a1@
+    addq.l  #8,%sp
+    lsr.l   #8,%d0
     cmpi.l  #{noise_index},%d0
     bne.s   79f
-    move.l  %sp@(4),%d0
+    move.l  %sp@(12),%d0
     asr.l   #8,%d0                  | SPH 0..127
     move.l  %d0,%d1
     andi.l  #31,%d1                 | loop field
@@ -377,17 +370,17 @@ fmt_sph3:
     move.l  %d1,%sp@-
     move.l  %d0,%sp@-
     pea     0x40210bce              | "%d.%02d", the firmware's own
-    move.l  %sp@(20),%sp@-          | dest, past three pushes
+    move.l  %sp@(28),%sp@-          | dest: arg 4, past three pushes
     jsr     0x40000e82
     lea     %sp@(16),%sp
     rts
 78: move.l  %d0,%sp@-               | never repeats: `colour.--`
     pea     {never_fmt:#010x}
-    move.l  %sp@(16),%sp@-
+    move.l  %sp@(24),%sp@-
     jsr     0x40000e82
     lea     %sp@(12),%sp
     rts
-79: jmp     0x400e2ecc              | any other wave: the stock number
+79: jmp     0x40036692              | every other record, or another wave: stock
 
 | hash: %d0 = value, %d2 = octave -> %d0, clobbers %d3. A murmur-style mix.
 90: move.l  %d2,%d3
@@ -544,9 +537,8 @@ def main() -> int:
              "LFO Waveform max")
 
     print("part 5c -- SPH shows colour.loop on NOIS")
-    for va, label in SPH_FORMATTERS:
-        poke(content, va, be32(STOCK_NUMBER_FMT), be32(offsets[label]),
-             f"Start Phase formatter -> {label}")
+    poke(content, SOUND_SET_V92, be32(STOCK_V92), be32(offsets["fmt_v92"]),
+         "sound ParameterSet vtable slot 92 -> fmt_v92")
 
     print(f"part 5b -- the evaluators' WAVE clamps, 6 -> {ENTRIES - 1}")
     for va, stock, new, why in ui.clamp_edits(ENTRIES - 1):

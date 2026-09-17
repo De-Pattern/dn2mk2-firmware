@@ -1158,6 +1158,39 @@ and `64`, `12` for other waves. 21 integrity checks. **Not run on the LFO
 page under the emulator** — guirun cannot yet overlay a patched MAIN OS on a
 stock snapshot, and the evaluators do not tick there.
 
+### v5 on hardware: sound right, display not — and v6 BUILT 2026-09-17
+
+**v5 PARTIAL.** SPH still read as a plain number. The loop logic runs (the owner
+hears SPH change the noise), the display did not engage. **The active-track byte
+v5 relied on is not a fixed global** [WRONG in v5 — corrected]: `0x42431a6c` is
+field `+8` of a struct whose address comes from `ProjectSettings`+16 (heap), so
+the emulator's address does not carry to the instrument.
+
+**v6 asks the object instead.** The LFO page formats every value through the sound
+ParameterSet's vtable slot 92 (`0x40036692`, table `0x401db7fc`, slot at
+`0x401db858`), called as `(this, record, value, dest)`. The firmware's own
+sibling method `0x4003660c` already does `this->vfunc40(this, record − 2)` to
+read an LFO's WAVE when formatting SPH (it tests for RND, `0x600`). v6's wrapper
+does the same for records 81/91/101: WAVE 79/89/99, and prints `colour.loop` if it
+is NOIS; everything else jumps to the stock method. No globals, no mirror.
+
+**Verified:**
+- **Emulator, whole LFO page, v6 overlaid on a stock snapshot** (new
+  `guirun --patch-ranges`): the page renders normally and the wrapper is called
+  387 times, with no fault.
+- **Unicorn, fake ParameterSet** (`scripts/check_lfo_sph_format.py`): `1.01`,
+  `1.04`, `2.14`, `4.--`, `3.--` for NOIS; SINE and PULS and non-SPH records reach
+  stock; callee-saved registers intact.
+
+**[METHOD] Unicorn caches translated code.** Rewriting a test stub in place kept
+returning the first value: WAVE 1 "printed" `3.01`. The harness, not the
+firmware, was wrong. One address per stub fixed it. Suspect the harness first
+when a result contradicts a disassembly that reads correctly.
+
+**[METHOD] The emulator's encoders show a value but do not change it** on the LFO
+page, and a guessed value-array offset poked MULT and FADE instead of WAVE.
+Record → slot goes through `0x400dbcc4`; read it before poking again.
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
