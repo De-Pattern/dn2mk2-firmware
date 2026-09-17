@@ -2801,5 +2801,27 @@ bytes differ, and the arp follows.
   ids from slots, which would lose a 107. Held until the owner OKs a pattern
   whose playback puts a lock on slot 0.
 
-**Next:** decide the handling of 107..127 in firmware, then DNX's round-trip. If ids 100..127 persist, build (1) and let DNX write
+### The round-trip, on hardware 2026-09-17: a stock save frees the record
+
+DNX wrote one lock record into a scratch copy of `TEST_MIDI_ARP` (+Drive slot
+22, pattern A1, no other locks): id 110, track 1, step 1 = `0x1234`, other steps
+`FFFF`. The owner loaded, saved and reloaded it with playback stopped.
+
+```
+as written:  6e 00 12 34 ff ff ...
+after save:  ff ff 12 34 ff ff ...
+```
+
+**Only the two header bytes changed, to `FF FF`, which marks the record
+unused.** The values were left stale, as in every empty record of a 1.11 file.
+No stray lock appeared, and nothing else changed except three image-header
+bytes (a save counter or check value). So load maps id 110 to slot 0, and save
+does not write a record for slot 0. The test cannot separate "save re-derives
+ids from slots" from "save drops slot 0", because both give this result.
+
+**For arp p-locks:** ids 107..127 need firmware handling on **both** load and
+save. Or the arp values must live somewhere a stock save already carries. The
+next reading is the save path: how lock records are written from the per-slot
+table at kit +20640, and whether a side table for extra ids can be written back
+through it. If ids 100..127 persist, build (1) and let DNX write
 test locks; (3) only after the sound works.
