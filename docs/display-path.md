@@ -527,6 +527,13 @@ project is the dispatch above, which is panel-input ground truth for any future
 run, and the knowledge that **every driven experiment must interleave button
 frames** or it is measuring a machine that cannot flush.
 
+**Re-measured 2026-09-17** (`scripts/encoder_drain.py`, 1.11, 400M snapshot),
+prompted by an outside remark that Octatrack encoders are relative: they are
+here too, and delivery is not the problem. Five +1 deltas accumulate to exactly
+5 and set the pending bit; a no-edge button frame, a press and a release each
+leave it at 5; five more reach 10. So **no tag-2 frame drains it**, with or
+without an edge — the branch inside `0x4011f9ac` stays the open question.
+
 ---
 
 # The engine-feed path: what the emulator can and cannot say
