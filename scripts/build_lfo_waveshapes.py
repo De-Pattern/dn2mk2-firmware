@@ -140,10 +140,15 @@ LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase") + ui.LABELS
 # from the image on every power-up, so NOI is deterministic per boot.
 NOISE_SEED = 0x2545F491
 
+# NOI v4: 1,024 x 8 bytes of per-LFO state in the unclaimed SDRAM above BSS end
+# 0x466b74d0. Other tenants of that region: lfo4-tick6a at 0x46700000..0x46703000,
+# the boot-screen area at 0x46710000.
+NOISE_RAM = 0x46740000
+
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 # v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
-# v3: NOI rebuilt stateless, so SPD and MULT set its rate.
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes3_DN2_1.11.syx")
+# v4: NOI keeps a cycle count per LFO, so the pattern no longer repeats each cycle.
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes4_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
@@ -151,6 +156,7 @@ def be32(v: int) -> bytes:
 
 
 def source(fn_table: int, state: int, short_names: int, long_names: int) -> str:
+    noise_ram = NOISE_RAM
     """The three generators and the three hook stubs.
 
     `%d2` and `%d3` are saved: the stock generators never touch them, so the
@@ -205,32 +211,47 @@ pulse:
     rts
 
 | ---- NOI: noise, clocked by the phase, coloured by SPH ------------------
-| **v3, stateless.** v2 kept one sample-and-hold "last step" word for the whole
-| instrument, but this generator serves every LFO of every track: 48 callers
-| interleaving on one word, so the held value was replaced on nearly every call
-| and the output was frame-rate noise. The owner heard exactly that: *"SPD and
-| MULT doesn't affect the noise at all."*
+| History, because each version failed differently on the instrument:
+| v2 held its sample in ONE global word shared by all 48 LFOs -> frame-rate noise,
+|    deaf to SPD and MULT.
+| v3 was stateless, a hash of the step within the cycle -> SPD and MULT worked,
+|    but every cycle replayed the same 64 values (owner: "it looked like the
+|    noise pattern repeated").
+| v4: each LFO instance owns 8 bytes of RAM -- its last step and a cycle count --
+|    found by a key the call hooks put in %d1's upper bits. The hash input is
+|    (cycles << 6) | step, so the sequence runs on across cycles and only the
+|    step index clocks it: SPD and MULT still set the rate, and a held value
+|    still holds for the whole step. A wrap backwards (negative SPD) counts down.
+|    The RAM is uninitialised: garbage there only picks a different start.
 |
-| So nothing is stored. The value is a **hash of the step index**, and the step
-| index is the top six bits of the phase: 64 steps per LFO cycle, so SPD x MULT
-| sets the noise rate directly, and each LFO gets its own sequence because each
-| has its own phase.
-|
-| SPH picks the colour, four bands of 32, all built from octaves of the same hash
-| (Voss-McCartney), so none needs filter state either:
-|
-|   SPH   0-31   white    h(step)
-|   SPH  32-63   pink     six octaves h(step >> k), equal weight
+|   SPH   0-31   white    h(n)
+|   SPH  32-63   pink     six octaves h(n >> k), equal weight
 |   SPH  64-95   brown    the same octaves, each slower one twice as loud
-|   SPH  96-127  violet   h(step) - h(step - 1)
-|
-| Every sum is bounded below full scale by construction, so there is no clamp.
+|   SPH  96-127  violet   h(n) - h(n - 1)
 noise:
-    lea     %sp@(-16),%sp
-    moveml  %d2-%d5,%sp@
-    move.l  %sp@(20),%d4            | the phase, below four saved registers
+    lea     %sp@(-20),%sp
+    moveml  %d2-%d5/%a2,%sp@
+    move.l  %sp@(24),%d4            | the phase, below five saved registers
     moveq   #26,%d2
-    lsr.l   %d2,%d4                 | step index 0..63
+    lsr.l   %d2,%d4                 | step 0..63
+    move.l  %d1,%d0
+    lsr.l   #8,%d0                  | the instance key, 0..1023
+    lsl.l   #3,%d0
+    lea     {noise_ram:#010x},%a2
+    adda.l  %d0,%a2                 | this LFO's 8 bytes
+    move.l  %a2@(4),%d3             | cycles
+    move.l  %d4,%d0
+    sub.l   %a2@,%d0                | step - last
+    cmpi.l  #-32,%d0
+    bge.s   1f
+    addq.l  #1,%d3                  | wrapped forwards
+1:  cmpi.l  #32,%d0
+    ble.s   2f
+    subq.l  #1,%d3                  | wrapped backwards
+2:  move.l  %d4,%a2@
+    move.l  %d3,%a2@(4)
+    lsl.l   #6,%d3
+    or.l    %d3,%d4                 | n = cycles << 6 | step
     andi.l  #0x7f,%d1
     lsr.l   #5,%d1
     move.l  %d1,%d5                 | colour 0..3
@@ -266,15 +287,14 @@ noise:
     move.l  %d0,%d1
     move.l  %d4,%d0
     subq.l  #1,%d0
-    andi.l  #63,%d0
     clr.l   %d2
     bsr     90f
     sub.l   %d0,%d1
     move.l  %d1,%d0
     asr.l   #1,%d0
 
-99: moveml  %sp@,%d2-%d5
-    lea     %sp@(16),%sp
+99: moveml  %sp@,%d2-%d5/%a2
+    lea     %sp@(20),%sp
     rts
 
 | hash: %d0 = value, %d2 = octave -> %d0, clobbers %d3. A murmur-style mix.
@@ -282,7 +302,7 @@ noise:
     lsl.l   #8,%d3
     lsl.l   #4,%d3
     add.l   %d3,%d0                 | a different stream per octave
-    addq.l  #1,%d0                  | so step 0 does not hash to 0
+    addq.l  #1,%d0                  | so n = 0 does not hash to 0
     move.l  #0x9e3779b1,%d3
     mulsl   %d3,%d0
     move.l  %d0,%d3
@@ -300,16 +320,35 @@ noise:
 | ---- evaluator A: reach the table, and carry SPH in %d1 -----------------
 a_call:
     lea     {fn_table:#010x},%a0
+    lea     %a4@(78),%a1            | &SPH: one address per track and LFO
+    bsr     80f
     mvs.b   %a4@(78),%d1            | SPH, slot 8*lfo+6
+    andi.l  #0x7f,%d1
+    or.l    %d0,%d1                 | the instance key above SPH's seven bits
     jmp     0x40137a00
 
 | ---- evaluator B: the same, then make the call and come back ------------
 | Entered by jmp, so the stack is exactly what the generator expects.
 b_call:
     move.l  %d1,%sp@(48)            | the displaced frame save
+    move.l  %a1,%sp@-               | %a1 is the generator: keep it
+    lea     %a4@(44),%a1            | &SPH -- the same address A computes
+    bsr     80f
+    move.l  %sp@+,%a1
     mvs.b   %a4@(44),%d1            | SPH, this evaluator's displacement
+    andi.l  #0x7f,%d1
+    or.l    %d0,%d1
     jsr     %a1@
     jmp     0x40137612
+
+| key: %a1 = &SPH -> %d0 = ((addr >> 1) & 1023) << 8. %d0 is free at both sites.
+| Slots are 202 bytes a track and 16 an LFO, so 101*dt + 8*dl never reaches
+| +-1024 for 16 tracks and 3 LFOs: 48 instances, 48 distinct keys.
+80: move.l  %a1,%d0
+    lsr.l   #1,%d0
+    andi.l  #1023,%d0
+    lsl.l   #8,%d0
+    rts
 
 | ---- SPH stops being a start phase for the two new shapes ---------------
 no_phase:
