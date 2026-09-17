@@ -34,6 +34,7 @@ not been flashed has not been tested.
 | 13 | A mod stamp on the intro screen | **DELIVERED** — `intro-stamp` (`MOD` beside the logo), then the owner's redesign: `intro-burst` (logo knocked out of a comic burst) and `intro-bang` (the burst flashes inverted, then explodes into the tunnel). **All seen running under the emulator.** Alternatives: flash one | **`intro-bang` PASSED on hardware 2026-09-17** |
 | 14 | A shape bench for the LFO waveforms | **DELIVERED** — the tool, plus its firmware half: ~~`lfo-wavetable_DN2_1.11.syx`~~ (same two defects, never flashed) → **`lfo-wavetable2_DN2_1.11.syx`** takes the bench's own JSON export | **v2 PASSED on hardware 2026-09-17** |
 | 15 | A wavetable synth machine (the owner's actual meaning of "wavetable") | **not started** — audio is DSP-side, so it inherits §7's cost. First build: port digikit's Digitakt machine-slot Milestone A to the Digitone | — |
+| 16 | A glitch-ASCII intro instead of the tunnel | **not started** — queued by the owner 2026-09-17. First build: bypass the tunnel, draw the mark as ASCII cells; then the glitch ramp | — |
 | — | **LFO4** (the project's named goal) | **DELIVERED** — `lfo4-tick6a_DN2_1.11.syx` | **PASSED on hardware 2026-09-17** — owner: *"works"*. Next: parameters from storage and the UI (v4 page view) instead of the image |
 | — | Transient Swapper | **SHIPPED** | **passed**, PR #64 |
 
