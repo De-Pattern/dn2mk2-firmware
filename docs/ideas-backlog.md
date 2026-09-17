@@ -1712,6 +1712,35 @@ project.
 - **Open:** whether the sequencer arpeggiates a MIDI track's notes. DNX asked to
   monitor channel 1 on the USB MIDI output.
 
+### The MIDI output does not arpeggiate, and the code says why (2026-09-17)
+
+**Measured by DNX** on USB MIDI out, pattern running: every onset is note 60,
+velocity 100, 4,000 ms apart. The trig as written, nothing from the arp.
+
+**Read afterwards — the arp is on the synth path only.** The sequencer copies the
+kit's synth/MIDI mask to `0x8000537c` (`0x40025b3c`, `0x40025b9a`), read by two
+accessors: `0x40027c18` (audio track) and `0x40027c36` (MIDI track). Their
+callers at `0x401218ec`/`0x40121906` split each note event:
+
+```
+0x401218ec  jsr 0x40027c18   | audio track?
+            beq  -> MIDI test
+            jsr 0x40137d3c   | yes: the synth voice path
+0x40121906  jsr 0x40027c36   | MIDI track?
+            jsr 0x4012b8b0   | yes: the MIDI note sender
+```
+
+The arpeggiator step `0x4002a0bc` has two callers, `0x400266e0` and `0x4002686e`,
+both inside the frame-ISR trig handler that drives synth voices. Nothing on the
+MIDI sender's side calls it. So a MIDI track has arp *settings* after v2, and the
+engine has no path from them to MIDI notes.
+
+**What the feature now costs:** new code, not a gate flip — run the arp step for
+a MIDI track and hand its note to `0x4012b8b0` instead of a voice. Plus the knob
+routing on the menu. Both ColdFire-side. Parked until DNX's project read says
+whether the copied arp bytes persist on a MIDI track (they must, or there is
+nothing for new code to read).
+
 ## 11. A real compatibility check between mods
 
 **Filed 2026-09-14, at the owner's direction, to be picked up when two mods
