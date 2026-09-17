@@ -543,8 +543,10 @@ the control code up in `0x401f39dc[channel*32 + bit]`. Only when the code is
 `clrl` at `0x4011fbb0`: press clears that encoder's counter and pending bit;
 release (`0x4011fc08`) timestamps the push if the counter is ≤ 9. So
 `0x445a0dc4` counts **detents turned while or since the encoder was pushed** —
-press-and-turn and click-versus-turn detection — not the delta that edits a
-parameter. That explains `scripts/encoder_drain.py` exactly: its button frames
+not the delta that edits a parameter. The owner describes what that serves on
+the instrument: **push and turn moves a value in a coarser, rounder step**
+(say whole units instead of 0.01, set per control). Which code applies that
+step is unread. That explains `scripts/encoder_drain.py` exactly: its button frames
 were channel 0 bit 5, not an encoder push, so nothing could clear.
 
 Consequence: the stuck value is **not** an undrained accumulator. The delta's
