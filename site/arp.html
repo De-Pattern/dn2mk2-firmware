@@ -1,0 +1,180 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MIDI Arpeggiator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="Play the Digitone II arpeggiator on MIDI tracks, out over MIDI, built entirely in your browser.">
+<link rel="stylesheet" href="css/base.css">
+<style>
+  .step { margin: 2.5rem 0; }
+  .step-head { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .4rem; }
+  .step-num {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .1em;
+    color: var(--accent); border: 1px solid currentColor;
+    border-radius: 3px; padding: .1rem .4rem; flex: none;
+  }
+  .step h2 { margin: 0; border: 0; padding: 0; font-size: 1.2rem; }
+  .step > p { margin-top: .3rem; color: var(--ink-soft); }
+
+  .drop {
+    border: 2px dashed var(--rule); border-radius: 10px;
+    padding: 2rem 1.5rem; text-align: center; background: var(--panel);
+    transition: border-color .15s, background .15s;
+  }
+  .drop.over { border-color: var(--accent); background: var(--accent-dim); }
+  .drop p { margin: 0 auto; max-width: none; }
+  .drop .hint { color: var(--ink-soft); font-size: .88rem; margin-top: .5rem; }
+
+  button, .filebtn {
+    font: inherit; font-size: .9rem; cursor: pointer;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 6px;
+    padding: .4rem .9rem; display: inline-block;
+  }
+  button:hover, .filebtn:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+    font-weight: 600; padding: .6rem 1.4rem;
+  }
+  :root[data-theme="dark"] button.primary,
+  :root:not([data-theme="light"]) button.primary { color: #16181c; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .verdict { display: grid; gap: .3rem; margin-top: 1rem; font-size: .9rem; }
+  .verdict div { display: flex; gap: .6rem; align-items: baseline; }
+  .verdict .mark { font-family: var(--mono); flex: none; width: 1.2rem; }
+  .pass .mark { color: var(--ok); }
+  .fail .mark, .fail { color: #c33; }
+
+  .scroll { overflow-x: auto; }
+  table.measured { border-collapse: collapse; font-size: .88rem; margin-top: .8rem; }
+  table.measured th, table.measured td {
+    text-align: left; padding: .3rem .9rem .3rem 0; border-bottom: 1px solid var(--rule);
+  }
+  table.measured td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  .bar {
+    position: sticky; bottom: 0; background: var(--bg);
+    border-top: 1px solid var(--rule); padding: 1rem 0;
+    display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+  .bar .status { color: var(--ink-soft); font-size: .88rem; flex: 1 1 14rem; }
+  .hidden { display: none; }
+  .busy { color: var(--accent); }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow"><a href="index.html">Digitone II Mods</a> / midi arpeggiator</p>
+  <h1>MIDI Arpeggiator</h1>
+  <p class="lede">
+    Use the Digitone&nbsp;II arpeggiator on MIDI tracks. The ARPEGGIATOR menu opens,
+    and the arp plays your external gear over MIDI. Pick your firmware, download a
+    signed image.
+  </p>
+</header>
+
+<div class="note">
+  <p><strong>Everything happens in this tab.</strong> Your firmware file is never
+  uploaded — this page has no server to upload it to. It is static files on
+  GitHub Pages; you can read every line in the
+  <a href="https://github.com/angellinares/dn2_firmware_explore/tree/main/site/js">repository</a>.</p>
+  <p><strong>Prove your way back before you flash anything.</strong> The Early Start-up
+  Menu reflashes stock firmware over MIDI. Do that once, with an unmodified image,
+  <em>before</em> you flash a modified one — and back up your +Drive, which no tool
+  here can recover.</p>
+</div>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">1</span><h2>Your firmware</h2></div>
+  <p>A Digitone&nbsp;II OS 1.11 <code>.syx</code> from Elektron &mdash; or an image
+  another page here has already built, to combine mods (see below).</p>
+
+  <div class="drop" id="drop">
+    <p><label class="filebtn" for="syx">Choose a .syx file</label>
+      <input type="file" id="syx" accept=".syx,.SYX" hidden></p>
+    <p class="hint">or drag it here</p>
+  </div>
+
+  <div id="loaded" class="hidden">
+    <dl class="facts" id="facts"></dl>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</section>
+
+<section class="step hidden" id="step2">
+  <div class="step-head"><span class="step-num">2</span><h2>What changes</h2></div>
+  <dl class="facts">
+    <dt>Menu</dt><dd>[FUNC]+[ARP] opens the ARPEGGIATOR menu on a MIDI track, and its knobs stay on it</dd>
+    <dt>Playback</dt><dd>With the arp on, the track's trigs and held keys arpeggiate and go out on the track's MIDI channel</dd>
+    <dt>Follows</dt><dd>MODE, SPD, RNG, N.LEN, LEN, the step mask and note offsets &mdash; the settings a synth track uses</dd>
+    <dt>Arp off</dt><dd>The MIDI track behaves as stock; synth tracks are untouched</dd>
+    <dt>Writes</dt><dd id="writes">&mdash;</dd>
+  </dl>
+
+  <div class="note">
+    <p><strong>Confirmed on a Digitone&nbsp;II, 2026-09-17</strong>, captured from its
+    MIDI output at 120&nbsp;BPM with SPD 1/16. Offsets and velocity came through,
+    steps arrived every 125&nbsp;ms, and no note stuck across 5,248 note messages.
+    Note lengths follow N.LEN:</p>
+    <div class="scroll">
+    <table class="measured">
+      <thead><tr><th>N.LEN</th><th>expected</th><th>measured (median)</th></tr></thead>
+      <tbody>
+        <tr><td>1/32</td><td>62.5 ms</td><td>62.0 ms</td></tr>
+        <tr><td>1/16</td><td>125 ms</td><td>125.0 ms</td></tr>
+        <tr><td>1/8</td><td>250 ms</td><td>250.0 or 265.1 ms &mdash; two settings both read 1/8</td></tr>
+        <tr><td>1/4</td><td>500 ms</td><td>500 ms</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+</section>
+
+<section class="step hidden" id="step3">
+  <div class="step-head"><span class="step-num">3</span><h2>Build it</h2></div>
+  <p>
+    The image is rebuilt, re-signed with the key derived from your own file, and
+    every integrity field is checked again. Nothing downloads unless all of them pass.
+  </p>
+  <div class="verdict" id="buildVerdict"></div>
+</section>
+
+<div class="bar hidden" id="bar">
+  <button class="primary" id="buildBtn">Build firmware</button>
+  <button id="resetBtn">Start over</button>
+  <span class="status" id="status"></span>
+</div>
+
+<h2>Combining with other mods</h2>
+<p>
+  Each page applies one mod. To combine them, build here, then load the downloaded
+  file into the next page &mdash; in any order. This mod writes a few edits and one
+  block of new code inside section&nbsp;3, changes no length and appends nothing.
+</p>
+<ul>
+  <li><strong><a href="lfo.html">LFO Waves</a></strong> &mdash; combines. No shared bytes, and neither changes the other's code.</li>
+  <li><strong><a href="destinations.html">Modulation Destinations</a></strong> &mdash; combines.</li>
+  <li><strong><a href="transients.html">Transient Swapper</a></strong> &mdash; combines; it only writes the DSP image.</li>
+</ul>
+<div class="note">
+  <p><strong>What "combines" means here.</strong> The bytes each mod writes are checked
+  not to overlap, and chaining all three section&nbsp;3 mods rebuilds and verifies, with
+  the same result in the browser as on the command line. The arpeggiator on its own was
+  tested on hardware; a combined image has not been flashed yet.</p>
+</div>
+
+<footer>
+  <p>
+    Part of <a href="https://github.com/angellinares/dn2_firmware_explore">dn2_firmware_explore</a>,
+    AGPL-3.0-or-later. Not affiliated with or endorsed by Elektron.
+  </p>
+</footer>
+
+</div>
+
+<script type="module" src="js/app/arp-page.js"></script>
