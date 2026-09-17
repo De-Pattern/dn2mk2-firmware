@@ -253,32 +253,40 @@ pulse:
 |   pink     six octaves h(n >> k), equal weight
 |   brown    the same octaves, each slower one twice as loud
 |   violet   h(n) - h(n - 1)
-| ---- TRP: a trapezoid whose edge slope is SPH ---------------------------
+| ---- TRP: a trapezoid whose edge width is SPH ---------------------------
 | Owner, 2026-09-17: the trapezoid moves from the wavetable build into these
-| shapes, with SPH as the slope ("edge slope", label SLOP). A triangle over the
-| cycle -- rising through the first half, falling through the second -- is scaled
-| by a gain of 1 + (127 - SPH) / 4 and clipped: SPH 127 is the plain triangle,
-| SPH 0 a gain of 32, which is a square with 1/64-cycle edges.
+| shapes, with SPH as the slope (label SLOP). A triangle over the cycle -- rising
+| through the first half, falling through the second -- is scaled and clipped.
+|
+| [SUPERSEDED] lfo-waves v1 scaled by 1 + (127 - SPH) / 4. On the instrument the
+| glyph barely changed from SLOP 0 to 94: that law keeps each edge under two of
+| the tile's 28 pixels for most of the knob, and the sound bunches up the same way.
+| Now the gain is 127 / SPH, so **each edge is SPH/127 of a half-cycle wide**:
+| linear in the knob. SPH 0 is a square, 64 has half-width edges, 127 is the
+| plain triangle.
 trap:
     move.l  %d2,%sp@-
     move.l  %sp@(8),%d0             | the phase
     bpl.s   1f
     not.l   %d0                     | fold the second half down: 0..2^31-1
 1:  subi.l  #0x40000000,%d0         | centred, +-2^30
-    asr.l   #7,%d0                  | +-2^23, room for the gain
+    asr.l   #7,%d0                  | +-2^23
     andi.l  #0x7f,%d1
-    moveq   #127,%d2
-    sub.l   %d1,%d2
-    lsr.l   #2,%d2
-    addq.l  #1,%d2                  | gain 1..32
-    muls.l  %d2,%d0
-    cmpi.l  #0x007fffff,%d0
-    ble.s   2f
+    bne.s   4f
+    tst.l   %d0                     | SPH 0: a square
+    bmi.s   2f
     move.l  #0x007fffff,%d0
     bra.s   3f
-2:  cmpi.l  #-0x00800000,%d0
+4:  moveq   #127,%d2
+    muls.l  %d2,%d0                 | fits: 2^23 * 127 < 2^31
+    divs.l  %d1,%d0                 | gain 127 / SPH
+    cmpi.l  #0x007fffff,%d0
+    ble.s   5f
+    move.l  #0x007fffff,%d0
+    bra.s   3f
+5:  cmpi.l  #-0x00800000,%d0
     bge.s   3f
-    move.l  #-0x00800000,%d0
+2:  move.l  #-0x00800000,%d0
 3:  asl.l   #8,%d0                  | full scale
     move.l  %sp@+,%d2
     rts

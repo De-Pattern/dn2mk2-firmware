@@ -72,7 +72,8 @@ ENTRIES = STOCK_ENTRIES + len(WAVES)
 LABELS = ("step", "pulse", "noise", "trap", "a_call", "b_call", "no_phase", "fmt_v92") \
     + ui.LABELS + ("wt1", "wt2", "wt3") + glyph.LABELS
 
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waves_DN2_1.11.syx")
+# v2: TRAP edge width linear in SLOP (v1 passed on hardware; its glyph barely moved 0-94).
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waves2_DN2_1.11.syx")
 
 
 def boot_source() -> str:

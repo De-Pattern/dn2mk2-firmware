@@ -2573,6 +2573,23 @@ back to SPH; the NOIS frame caught a loading overlay.
 **Not proven until flashed:** a cold boot running the copy on the instrument
 with this blob — the same mechanism intro-bang passed with.
 
+### lfo-waves PASSED on hardware; v2 BUILT — TRAP's edge linear in SLOP
+
+`lfo-waves` on the instrument: *"It boots. And works. all 3 points."* — the first
+code run from the appended area. One observation: TRAP's glyph barely changed
+from SLOP 0 to 94. Measured, not the screen: the gain law `1 + (127 − SLOP)/4`
+gives edges of 0.4, 0.6, 0.9, 1.6 px of the 28-px tile at SLOP 0/32/64/94, and
+14 px only at 127 — the sound bunches the same way. Options offered: linear edge
+width (chosen), a percentage readout, exaggerating only the glyph (rejected: it
+would stop matching the sound), zooming the glyph.
+
+**`lfo-waves2`:** gain `127 / SLOP` (one `divs.l`), SLOP 0 a square — each edge is
+SLOP/127 of a half-cycle: 0, 3.5, 7.1, 10.4, 14 px at 0/32/64/94/127. Unicorn:
+760 calls against the new reference, 0 mismatches; boot stub and blob intact.
+Emulator film at SLOP 0, 32, 64, (94 hidden by the loading overlay), 127:
+
+![TRAP linear](img/lfo-trap-linear-emulator.png)
+
 ## 15. A wavetable synth machine
 
 **Asked for by the owner, 2026-09-17**, and it corrects a misreading recorded in

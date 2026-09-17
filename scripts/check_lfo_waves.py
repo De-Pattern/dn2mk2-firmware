@@ -42,9 +42,18 @@ for (name, _, make), e in zip(wt.TABLES, ('wt1', 'wt2', 'wt3')):
         for p in [rng.getrandbits(32) for _ in range(40)]:
             n += 1; bad += call(int(off[e], 16), p, sph) != wt.reference(fr, p, sph)
 def trapref(p, sph):
+    """Edge width linear in SPH: gain 127 / SPH (truncating, as divs.l), SPH 0 square."""
     t = p if p < 0x80000000 else (~p) & 0xFFFFFFFF
-    return max(-0x800000, min(0x7fffff, ((t - 0x40000000) >> 7) * (1 + (127 - sph) // 4))) << 8
-for sph in (0, 64, 127):
+    v = (t - 0x40000000) >> 7
+    sph &= 0x7F
+    if sph == 0:
+        v = 0x7FFFFF if v >= 0 else -0x800000
+    else:
+        n = v * 127
+        q = abs(n) // sph
+        v = max(-0x800000, min(0x7FFFFF, q if n >= 0 else -q))
+    return v << 8
+for sph in (0, 1, 32, 64, 94, 126, 127):
     for p in [rng.getrandbits(32) for _ in range(40)]:
         n += 1; bad += call(int(off['trap'], 16), p, sph) != trapref(p, sph)
 steps = [call(int(off['step'], 16), s << 24, 48) for s in range(256)]
