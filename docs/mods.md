@@ -375,3 +375,37 @@ JavaScript path has been flashed.** The Python path has been, repeatedly, and
 the two produce byte-identical output on every input tried — which is strong,
 but it is an inference, not a flash. The first hardware run of a
 browser-produced image should be treated as a first run.
+
+## Mod 4: `lfowaves` — seven LFO waveforms, swappable wavetables
+
+`src/dnfw/mods/lfowaves.py`, `site/js/mods/lfowaves.js`, page `site/lfo.html`.
+STEP PULS NOIS TRAP WTB1 WTB2 WTB3 after RAND, each with its own glyph and a
+renamed SPH (STPS WDTH TYPE SLOP POS). Passed on hardware 2026-09-17 as
+`lfo-waves` / `lfo-waves2`.
+
+- **Pre-assembled.** `scripts/gen_lfo_waves_code.py` runs
+  `build_lfo_waves.compose` and writes `lfowaves_code.json` / `lfowaves-code.js`:
+  33 guarded edits (stock bytes checked before writing), a 2,684-byte blob with
+  every stock-derived range blanked (six `fills` read from the user's own image),
+  and the three table offsets. No reassembly is needed to change a table: the
+  generators and the glyph renderer read the tables at run time.
+- **Wavetable input** (`src/dnfw/wavetable.py`, `site/js/wavetable.js`, same
+  algorithm): a WAV wavetable — Serum/Vital style, frame size from a `clm `
+  chunk, else 2048, else one cycle; PCM 8/16/24/32 or float 32/64; first channel —
+  or a JSON `{"frames": [[...]]}`. Reduced to 7 frames (linear along the table),
+  32 points each (box average), scaled so the loudest point is 127.
+- **CLI:** `dnfw mods apply firmware.syx --mod lfowaves --wavetable 2=table.wav -o out.syx`.
+- **Parity:** `node scripts/js_lfowaves_check.mjs` — WAV → identical 224 bytes,
+  MAIN OS identical to the Python mod, rebuilt image 21/21; a float-32 stereo
+  single-cycle WAV also reduces identically. The Python mod equals
+  `build_lfo_waves.compose` with the same tables.
+- **Page, driven headless in Chrome** (the harness drops the stock `.syx` and a
+  WAV, clicks Build): seven waves listed, the WAV lands in WTB2, a junk file
+  explains itself, build verifies 21/21 and offers the download.
+
+![LFO Waves page](img/site-lfo-page.png)
+
+**Conflicts:** claims the startup hook and grows MAIN OS through the appended
+area, as the boot-screen mod does — `check_compatible` reports it; they are
+alternatives until a shared area registry exists.
+
