@@ -208,3 +208,30 @@ transients are data objects on the instrument — `docs/pcm-hunt.md` §8.
 **Not yet sent.** The DNX session needs the port for +Drive listings and a
 project read, and has priority; this session is standing off until it reports
 finished. `scripts/midi_probe.py` holds the tooling.
+
+---
+
+## Screenshot: opcode 0x04, and a live mirror (external report, 2026-09-17)
+
+An external contributor, who has built tools for Digitone/Digitakt maintenance
+mode, a GFX browser/editor and a boot-logo customisation on a Digitakt, reports:
+**the screen is a MIDI RPC service, "4 if I recall", which returns the frame
+buffer; it needs decoding, and requesting it repeatedly gives a live mirror.**
+
+It fits what the image says: **`04` is in the DN2's advertised opcode list**
+(`01 02 03 04 06 07 09 50 …`, `docs/midi-rpc-dispatch.md`), and `Screenshot` is
+among the `MidiRpc*` classes above. Not yet exercised here.
+
+**How to decode it, if it is the panel buffer** (the only 128 x 64 frame the
+firmware keeps, read and proven under the emulator — digikit `emu/panel.py`):
+1,024 bytes, `byte = page + 8 * column` (page 0..7, column 0..127), and bit `n`
+of that byte is row `8 * (7 - page) + n`, least significant bit first — an
+SSD1306-style page layout with the **page order inverted** (page 0 is the bottom
+eight rows). The check that settles orientation: knobs come out round and text
+reads normally. The RPC reply may wrap or compress the buffer; that part is
+unread.
+
+**Why it matters here:** hardware screenshots of what our builds draw — boot
+screens, LFO glyphs, labels — without the owner photographing the panel.
+Device I/O belongs to DNX (`ask DNX for device data`); the request went there.
+
