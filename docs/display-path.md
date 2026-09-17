@@ -1123,13 +1123,29 @@ not have.
 
 ## Finding the Digitone's `setPixel` — still open, with the route
 
-`emu/frame.py`'s `SET_PIXEL = 0x40104eb4` is a **Digitakt II 1.15C** address. Run
+~~`emu/frame.py`'s `SET_PIXEL = 0x40104eb4` is a **Digitakt II 1.15C** address. Run
 against DN2 1.11 it hooks nothing, which is why a capture from the 60M snapshot
 reported `setPixel calls: 0` alongside `pends satisfied: 0` — two independent
-failures that look like one.
+failures that look like one.~~
+
+**[WRONG — corrected 2026-09-17, same day]** That constant is dead code.
+`longrun.build(bitmap=True)` hooks `profile.set_pixel`, and the profile comes from
+`symbols.resolve()` over the image actually loaded — a 64-byte signature that
+picks the right one of a near-identical pair `0x66` bytes apart:
+
+| image | `setPixel` | its twin |
+|---|---|---|
+| Digitone II 1.11 | **`0x40113b90`** | `0x40113bf6` |
+| Digitakt II 1.15C | `0x40104eb4` | `0x40104f1a` |
+
+So the hook *was* on the Digitone's routine, and `setPixel calls: 0` is a true
+reading: **the draw task never ran**, because `pends satisfied: 0` — the unblock
+policy did not release it from the 60M rung. One failure, not two. The error was
+reading a module constant and not the call that uses it — the same mistake as
+reading `usable_rung()`'s docstring instead of calling it.
 
 DN2 1.11 has no `setPixel` string: it is a non-virtual method, so nothing in the
-RTTI names it. What the image does carry is mangled **fragments** of functions
+RTTI names it — which is why digikit finds it by signature instead, above. What the image does carry is mangled **fragments** of functions
 taking a `Bitmap` — `6BitmapiibE` at `0x401f1b6f` is `(Bitmap&, int, int, bool)`,
 which is the signature — so the symbol survives inside longer template manglings
 even though the method itself is anonymous.
@@ -1140,3 +1156,104 @@ matches, then carry the structure across. What transfers is the *shape* — whic
 Bitmap object the intro draws into, in what order, and where the version string
 sits — not the addresses. `0x40114d94` and its 34 callers are the Digitone-side
 foothold to re-anchor onto.
+
+## The intro is a displacement map over a static logo — 2026-09-17
+
+Traced on **Digitakt II 1.15C** first, on the owner's advice, then found
+byte-for-byte on the Digitone. Unblock from an early rung does not work: a
+resume from 60M satisfied 4.1 million pends and drew nothing. What works is
+`gui.py`'s recipe — a plain boot to a 400M snapshot where the intro is already
+running, then resume with the draw task unblocked and `dsp=True`.
+
+`scripts/trace_intro_draw.py` attributes every `setPixel` to its caller (via
+digikit's `emu.hle.LAST_PIXEL_CALLER`, branch `emu/setpixel-caller`). Over 40M
+instructions from 400M:
+
+```
+caller        pixels      lit   bbox            bitmap
+  0x400d3d98  1,076,631   42,784   (0,0)-(127,63)   0x4313b298
+```
+
+**One caller, the whole panel, about 131 full frames.** The 20M count matches the
+616,823 recorded in `emu/gui.py`'s own notes to within 15, so the tracer measures
+the same drawing. Nothing draws the logo through `setPixel` — that is a copy.
+
+The copy loop (Digitakt `0x400d3d48`) is the effect:
+
+```
+d0 = table[(i+1) & 0x3fff] + scroll ;  y = d0 & 63
+d1 = table[ i    & 0x3ffe] + scroll ;  x = d1 & 127
+v  = getPixel(source, x, y)
+setPixel(panel, col, row, v ? -1 : 0)
+i += 2
+```
+
+Each panel pixel samples a **static source bitmap** at a coordinate taken from an
+**offset table** (two entries per pixel, a 16,384-entry ring) plus a **scroll**
+value. Animating the scroll animates the whole effect.
+
+| | Digitakt II 1.15C | Digitone II 1.11 |
+|---|---|---|
+| copy loop (address-free match) | `0x400d3d6c` | `0x400d3b3c` |
+| source bitmap | `0x43135268` | `0x42c4567c` |
+| offset table pointer | `*0x43135284` | `*0x42c45698` |
+| scroll | `*0x43135264` | `*0x42c45678` |
+| panel bitmap | `0x4313b298` | — |
+
+The three fields sit together — scroll at `+0`, the source `Bitmap` embedded at
+`+4`, the table pointer at `+0x20` — so they are one intro object.
+
+**The source, read straight out of the 400M snapshot** with
+`scripts/dump_bitmap.py`: 128 × 64, stride 2, 367 lit — the Digitakt's slanted-box
+glyph, undisplaced. And one warped frame from the panel, fragments radiating from
+the centre:
+
+![source](img/intro-dt2-source.png)
+![warped](img/intro-dt2-warped.png)
+
+### What this means for the two backlog entries
+
+- **§13, a mod stamp:** add pixels to the **source** bitmap and they are warped
+  and animated with the logo for free — or set them on the panel after the copy
+  for a stamp that holds still. Either is a small cave; neither needs the logo's
+  decoder.
+- **§9, a custom animation:** the motion is data — the offset table and the scroll
+  ramp. A different table is a different animation, and a different source image
+  is a different logo, without touching the loop.
+
+**Still unread:** who fills the source bitmap and builds the table, and whether
+the Digitone's source is the Digitone glyph. The Digitone 400M rung is being
+built to answer the second.
+
+
+## The static screen before the intro — located on hardware, not yet in code — 2026-09-17
+
+The owner photographed it on the instrument: the Elektron logo centred, a **`B`**
+bottom-left and **`1.11`** bottom-right, shown **before** the animation — with
+`intro-bang` flashed, this screen still appears stock and the bang follows it.
+
+Under the emulator, `guirun.py --png-at` reads the **real panel memory** rather
+than the pixels `setPixel` was given, and from the 380M snapshot at +10M it shows
+the plain logo — correctly oriented, as in the photo — with **no `B` and no
+`1.11`**:
+
+![panel at 380M+10M](img/intro-panel-plain-logo.png)
+
+Two corrections this forces on earlier readings:
+
+- **The source-bitmap dumps are stored flipped.** `scripts/dump_bitmap.py` renders
+  the bitmap in storage order; the copy routine maps it the right way up. The mark
+  a mod writes must account for this — `intro-bang` was built from the stored
+  orientation and passed, so the mapping is consistent, but a user-supplied image
+  on the site must be flipped the same way before it is stored.
+- **The films record only `setPixel` pixels.** Anything a blit draws on the panel
+  never appears in them. The text screen is not in these films for that reason
+  *and* because it happens before 380M.
+
+**So the version screen precedes the intro task this work has been hooking.** The
+bottom-left letter and version are composed at runtime (`docs/ideas-backlog.md`
+§13 has said so since 2026-09-16). Unifying the boot mod — the owner's request,
+so the stamp carries from that first screen into the animation — needs that
+screen's drawing code found first. The route: `guirun --png-at` from the 60M
+snapshot across 250M–380M to see when the text appears, then a write watch on the
+panel memory in that window.

@@ -59,6 +59,9 @@ from dnfw.firmware import build as fwbuild
 from dnfw.firmware.load import load
 from dnfw.patch.assemble import assemble, available
 
+import lfo_wave_glyph as glyph
+import lfo_wave_ui as ui
+
 MAIN_OS = 3
 BASE = 0x40000400
 
@@ -73,7 +76,6 @@ STOCK_ENTRIES = 7
 ENTRIES = STOCK_ENTRIES + 1
 
 REPOINTS = {
-    0x401D3574: ((0x40007688, b"\x48\x79"),),
     0x4020B2EC: ((0x401374DE, b"\x41\xf9"), (0x401378E2, b"\x41\xf9")),
     0x4020B308: ((0x40137514, b"\x43\xf9"), (0x40137916, b"\x43\xf9")),
     0x4020B324: ((0x40137508, b"\x41\xf9"), (0x4013790C, b"\x43\xf9")),
@@ -83,14 +85,17 @@ HOOKS = (
     (0x401379FA, b"\x41\xf9\x40\x20\xb3\x40", "a_call"),
     (0x4013760C, b"\x2f\x41\x00\x30\x4e\x91", "b_call"),
     (0x4013788E, b"\x75\x6c\x00\x4e\x9e\x80", "no_phase"),
+    (ui.SHORT_FMT, ui.FMT_ENTRY_STOCK, "fmt_short"),
+    (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
-LABELS = ("wtb", "a_call", "b_call", "no_phase")
+LABELS = ("wtb", "a_call", "b_call", "no_phase") + ui.LABELS + glyph.LABELS
 
 WAVE_MAX_FIELDS = (0x401F9224, 0x401F947C, 0x401F96D4)
 STOCK_WAVE_MAX = 6
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-wavetable_DN2_1.11.syx")
+# v4: glyph rendered from the table, no SPH slide, SPH renamed RPTS (`lfo_wave_glyph`).
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-wavetable4_DN2_1.11.syx")
 
 
 def example_table() -> list[int]:
@@ -100,22 +105,29 @@ def example_table() -> list[int]:
     pipeline is exercised end to end by `python scripts/build_lfo_wavetable.py`
     with no arguments.
     """
+    # Each shoulder is a half-cosine spanning the whole range, -1 -> +1 and
+    # +1 -> -1, so the shape is continuous everywhere including the wrap.  The
+    # first version used quarter-waves that only reached 0, which left two
+    # half-scale jumps -- at 65% of the cycle and at the wrap -- and would have
+    # clicked on any filter or pitch destination.  Caught by reading the built
+    # table, not the formula.
     out = []
     for i in range(256):
         p = i / 256.0
         if p < 0.15:
-            v = math.sin(p / 0.15 * math.pi / 2)
+            v = -math.cos(p / 0.15 * math.pi)            # -1 -> +1
         elif p < 0.5:
             v = 1.0
         elif p < 0.65:
-            v = math.cos((p - 0.5) / 0.15 * math.pi / 2)
+            v = math.cos((p - 0.5) / 0.15 * math.pi)     # +1 -> -1
         else:
             v = -1.0
         out.append(max(-32767, min(32767, int(round(v * 32767)))))
     return out
 
 
-def source(fn_table: int, wave_table: int) -> str:
+def source(fn_table: int, wave_table: int, short_names: int, long_names: int,
+           glyph_sets: int, label_table: int) -> str:
     return f"""
     .text
 
@@ -164,7 +176,7 @@ no_phase:
 1:  mvs.w   %a4@(78),%d2
 2:  sub.l   %d0,%d7
     jmp     0x40137894
-"""
+""" + ui.formatter_source(ENTRIES - 1, short_names, long_names) + glyph.source(glyph_sets, fn_table, 1, label_table)
 
 
 def main() -> int:
@@ -213,15 +225,25 @@ def main() -> int:
     print(f"  {len(blob)} bytes, peak {max(abs(v) for v in table)} of 32767")
 
     # Layout in the code cave: the name, then the five tables, then the stubs.
+    # The [MOD] glyph set and SPH label go after the 512-byte table in the data
+    # cave. The tile itself is rendered from the table at draw time, so a custom
+    # shape gets its own picture.
+    glyph_va = CAVE_DATA + len(blob)
+    glyph_bytes, glyph_sets, label_table = glyph.blob(glyph_va, ["RPTS"])
+    if len(blob) + len(glyph_bytes) > CAVE_DATA_CAP:
+        raise SystemExit("data cave overflows with the glyph")
+    write(content, glyph_va, glyph_bytes)
+
     name_va, cursor = CAVE_CODE, CAVE_CODE + 4
     names_va, cursor = cursor, cursor + 4 * ENTRIES
+    long_names_va, cursor = cursor, cursor + 4 * ENTRIES
     table_vas = {}
     for old in STOCK_TABLES:
         table_vas[old], cursor = cursor, cursor + 4 * ENTRIES
     stub_va = cursor
 
     print("part 2 -- the generator and the hook stubs")
-    payload, offsets = assemble_stubs(source(table_vas[0x4020B340], CAVE_DATA), stub_va)
+    payload, offsets = assemble_stubs(source(table_vas[0x4020B340], CAVE_DATA, names_va, long_names_va, glyph_sets, label_table), stub_va)
     used = (stub_va - CAVE_CODE) + len(payload)
     if used > CAVE_CODE_CAP:
         raise SystemExit(f"code cave overflows: {used} > {CAVE_CODE_CAP}")
@@ -235,6 +257,8 @@ def main() -> int:
     write(content, names_va, b"".join(be32(v) for v in old_names + [name_va]))
     print(f"  names {STOCK_NAMES:#010x} -> {names_va:#010x}  "
           + " ".join(cstr(content, v) or "?" for v in old_names + [name_va]))
+    write(content, long_names_va, b"".join(
+        be32(v) for v in read_longs(content, ui.LONG_NAMES, STOCK_ENTRIES) + [name_va]))
     extras = {0x4020B2EC: 0, 0x4020B308: 0, 0x4020B324: 0, 0x4020B340: offsets["wtb"]}
     for old in STOCK_TABLES:
         entries = read_longs(content, old, STOCK_ENTRIES) + [extras[old]]
@@ -243,13 +267,21 @@ def main() -> int:
               + ", ".join(f"{v:#x}" for v in entries))
 
     print("part 4 -- repoint and hook")
-    resolved = {STOCK_NAMES: names_va, **table_vas}
+    resolved = dict(table_vas)
     for old, sites in REPOINTS.items():
         for va, prefix in sites:
             poke(content, va, prefix + be32(old), prefix + be32(resolved[old]),
                  f"{old:#010x} -> {resolved[old]:#010x}")
     for va, stock, label in HOOKS:
         poke(content, va, stock, b"\x4e\xf9" + be32(offsets[label]), f"jmp -> {label}")
+
+    print("part 4c -- the [MOD] page glyph")
+    for va, stock, new, why in glyph.clamp_edits(ENTRIES - 1) + glyph.hooks(offsets):
+        poke(content, va, stock, new, why)
+
+    print(f"part 4b -- the evaluators' WAVE clamps, 6 -> {ENTRIES - 1}")
+    for va, stock, new, why in ui.clamp_edits(ENTRIES - 1):
+        poke(content, va, stock, new, why)
 
     print(f"part 5 -- WAVE's maximum, {STOCK_WAVE_MAX} -> {ENTRIES - 1}")
     for va in WAVE_MAX_FIELDS:

@@ -211,9 +211,14 @@ and immediately before it, the `.data` initialiser loop:
 0x400004a6  cmpa.l #0x80010000,%a0        | then clears SDRAM 0x80000000..
 ```
 
-MAIN OS loads at `0x40000400` and is 3,192,192 bytes, so it ends at
-`0x4030b800`, and the initialiser runs to `0x4030b980`. **The BSS clear starts at
-`0x402fc000` — 63,488 bytes *below* the image's own end.** That is what
+~~MAIN OS loads at `0x40000400` and is 3,192,192 bytes, so it ends at
+`0x4030b800`, and the initialiser runs to `0x4030b980`. The BSS clear starts at
+`0x402fc000` — 63,488 bytes below the image's own end.~~
+
+**[CORRECTED 2026-09-17, same day]** `0x40000400 + 3,192,192` is **`0x4030b980`**,
+not `0x4030b800` — an arithmetic slip. So MAIN OS ends **exactly** where the
+second initialiser stops reading, and the BSS clear starts **63,872 bytes** below
+the image's end. The conclusion is unchanged; the numbers were wrong. That is what
 `docs/memory-map.md` means by "recycles the initializer tail": the last ~62 KB of
 the loaded image is the `.data` initialiser, consumed once and then handed to BSS
 and wiped.
@@ -234,6 +239,40 @@ to run time.
 immediate at `0x400004ba`. The region it would spare is *reused* as BSS after the
 initialiser is consumed, so sparing it leaves real globals uninitialised. The
 immediate is one 6-byte edit and it is the wrong one.
+
+### BUILT AND SEEN RUNNING END TO END 2026-09-17: shipped bytes reach run time
+
+`scripts/build_payload_section.py` -> `00_Resources/02_Builds/payload-section_DN2_1.11.syx`.
+21 integrity checks pass, HMAC reproduced; MAIN OS grows from 3,192,192 to
+3,192,340 bytes.
+
+**The mechanism.** A 148-byte payload — magic `DNFW`, a length, and the intro
+stamp's pixel table — is appended at `0x4030b980`, the first byte past everything
+the `.data` initialiser reads. The two startup calls at `0x4000053e` (initialiser,
+then BSS clear) become one `jsr boot`: `boot` runs the initialiser as stock does,
+copies the payload to `0x46710000` above BSS end, then runs the clear. The intro
+stamp reads its table from there behind a magic check, so **`MOD` at boot is the
+visible proof** and a missing payload simply boots stock-looking.
+
+**Verified under the emulator, from reset, with no patching over a stock snapshot**
+— the boot hook runs before any snapshot could exist, so this had to be a cold boot:
+
+- a write watch on `0x46710000` saw the copy at **instruction 98,426**, from
+  `0x402dfa34`, writing `DNFW`, length `0x8c` and the first table entry — and
+  nothing else wrote there through 3M instructions;
+- the grown image then booted cleanly to a 400M snapshot of its own, and its
+  intro's source bitmap came back with the logo's 367 pixels plus the stamp's 34,
+  and the panel shows `MOD` beside the logo:
+
+![panel](img/payload-section-panel.png)
+
+**What it proves and what it does not.** It proves that this loader path carries
+a larger section 3 into memory and that the tail survives when copied out before
+the clear. It does not prove the **instrument's bootloader** accepts a larger
+section — digikit's loader is not Elektron's — nor any size beyond 148 bytes.
+That is what the flash answers. If it passes, every data-shaped entry is unblocked
+at once: eight wavetable bands for §14, a bigger or different intro texture for
+§9, and the shipped half of §3.
 
 ## 2. An emulator as a test harness
 
@@ -965,7 +1004,7 @@ graph is not, which is the same UI/engine split LFO4 hit at
 
 `scripts/build_lfo_waveshapes.py` -> `00_Resources/02_Builds/lfo-waveshapes_DN2_1.11.syx`.
 21 integrity checks pass, HMAC reproduced, 400 of 896 cave bytes used. The name
-list reads back **TRI SIN SQR SAW EXP RMP RND STP PLS NOI**.
+list reads back **TRI SIN SQR SAW EXP RMP RND STP PLS NOI** ~~— and that list is what the page shows~~ **[WRONG — corrected below: the page uses a second name table and its own bound, and the evaluators clamp WAVE to 6. Failed on hardware.]**
 
 ![STP, PLS and NOI](img/lfo-waveshapes.png)
 
@@ -1016,6 +1055,219 @@ renderer. Three unknown waveforms now instead of one.
 parameter's scaling so the steps land on semitones. That is the same generator
 with a different quantiser, and it needs `DEST` -- which the generator does not
 receive. A fourth hook would carry it the same way `%d1` carries `SPH`.
+
+### FAILED on hardware 2026-09-17: every new index ran as RND and read `ERR`
+
+Owner: *"There is 3 new options at the end of the shape list but is listed as
+ERR. It seems to sound similar to a random wave … Definitely I cannot hear the
+noise as the last one … the wave glyph just show the random wave."* Three extra
+clicks past `RND` were counted by the wrap-around, so the `WAVE` maximum edit
+worked. Everything downstream of it did not, for two reasons read afterwards:
+
+1. **Both evaluators clamp WAVE to 6 before dispatch** — `moveq #6` twice at
+   `0x40137880`/`0x40137886` (A) and `0x401374a8`/`0x401374ae` (B). Index 6, `RND`,
+   is the one waveform dispatched by value, so 7, 8 and 9 all became `RND`. The
+   generators were never called. That is exactly what the owner heard.
+2. **The value text has its own bound and its own table.** The `Waveform`
+   records' formatter is `0x400e34ac` (record `+0x28`); it tests `> 6 → "ERR"` and
+   indexes a 7-pointer table at `0x401fd5c0` (`TRI SINE SQR SAW EXPO RAMP RAND`)
+   copied onto its frame. The `pea 0x401d3574` this build repointed belongs to a
+   short-name twin at `0x4000766c` with the same `> 6` test, so even that one could
+   not show the new names.
+
+**What the first build checked and what it should have:** it asserted every
+table reference to the waveform tables and found them all. Neither failure is a
+table reference — one is a literal `6` in the evaluator, the other a literal `6`
+in a formatter reached through a record pointer. **A bound lives in code as an
+immediate as often as in data as a count**, and the `WAVE` maximum field was one
+of three copies of the same fact.
+
+### v2 BUILT 2026-09-17: `lfo-waveshapes2` and `lfo-wavetable2`
+
+`scripts/lfo_wave_ui.py`, shared by both builds: the four clamp immediates
+raised to the new maximum, and both formatters replaced at entry by one
+frameless stub with the stock contract (`sprintf(dest, "%s", name[i])`, `ERR`
+past the bound) over 10-entry tables — long names `STEP PULS NOIS`, short
+`STP PLS NOI`. Disassembled after assembly; 21 integrity checks each.
+`lfo-wavetable` v1 had the same two defects and was never flashed; v2 replaces it.
+
+**Not fixed:** the `[MOD]` page's waveform glyph will still draw `RND` for the
+new shapes; its renderer is not read. **Not run under the emulator** — the
+formatter runs only on a UI page the emulator does not drive.
+
+### v2 PASSED on hardware 2026-09-17 — and NOI's rate was broken by shared state
+
+Owner: *"All waves behave as they should!!!!!"* then *"SPD and MULT doesn't affect
+the noise at all."* The design said they would. The code disagreed: the
+sample-and-hold stored its "last step" and held value in **single global words**,
+but one generator serves every LFO on every track. Forty-eight callers
+interleaving on one word replace the held value on nearly every call, so NOI
+was frame-rate noise at any speed.
+
+**Lesson:** a generator table entry is a shared function, not an instance.
+Anything it stores is shared by every LFO. State must be per caller or absent.
+
+### v3 BUILT 2026-09-17: `lfo-waveshapes3`, NOI stateless
+
+The value is a **hash of the step index** (top six bits of the phase, 64 steps
+per cycle), so SPD × MULT sets the rate and each LFO's own phase gives it its own
+sequence. Colours are octave sums of the same hash (Voss–McCartney): pink equal
+weights over six octaves, brown doubling per slower octave, violet the first
+difference. Bounded by construction, no clamp. **Executed under Unicorn**
+(`scripts/check_lfo_noise.py`): holds within every step, registers and stack
+preserved, lag-1 correlation white −0.02, pink +0.52, brown +0.90. 21 integrity
+checks.
+
+### v3 PASSED on hardware; v4 superseded; v5 BUILT 2026-09-17 — loop length on SPH
+
+v3 on the instrument: NOI follows SPD and MULT. The owner then noticed it
+repeats every cycle and decided that is a feature: *"good for music creation …
+easy to insert in grooves, but is better to be able to control it"* — shown
+*"like some controls work … 1.xx where xx is the loop length and 1 is the type
+of noise."* v4 (never repeats) is therefore **superseded, not flashed**.
+
+**v5, `lfo-waveshapes5_DN2_1.11.syx`:**
+
+- **SPH is two fields on NOIS.** Colour `SPH >> 5` (1 white, 2 pink, 3 brown,
+  4 violet); loop `SPH & 31`: 0..30 repeat every loop+1 cycles, 31 never repeats.
+- **Per-LFO cycle counter.** The call hooks put an instance key in `%d1`'s upper
+  bits: `((&SPH >> 1) & 1023) << 8`, where `&SPH` is the address of that LFO's
+  SPH slot in the engine mirror — the same address from both evaluators, 48
+  distinct keys for 16 tracks × 3 LFOs. Each key owns 8 bytes at `0x46740000`
+  (last step, cycle), wrapping at the loop length, backwards too.
+- **SPH reads `colour.loop` only when that LFO's WAVE is NOIS.** The three
+  `Start Phase` records' formatter pointers (`0x401f92c4`, `0x401f951c`,
+  `0x401f9774`, all the shared number formatter `0x400e2ecc`) point at a stub that
+  reads the **active track** (byte `0x42431a6c`) and **WAVE from the engine
+  mirror** (`0x44616448 + 202·track + 2·(8·lfo+5)`), then prints with the
+  firmware's own `"%d.%02d"` (`0x40210bce`), or `"%d.--"` for never; any other
+  wave falls through to the stock number.
+- **How the two globals were found, under the emulator:** evaluator B's only
+  caller passes the mirror as a literal (`pea 0x44616448` at `0x4012b0a4`); the
+  active track came from saving RAM on track 1, selecting track 3 with
+  [TRK]+[TRIG 3] (`guirun --input`), and diffing — `0x42431a6c` went 0→2, and it
+  is field `+8` of the struct `0x40046bfe` reads through `ProjectSettings`.
+  LFO1's WAVE read from the mirror as SINE, matching the page.
+- **Data moved to the second verified cave** (`0x402d0664`); code 684/896.
+
+**Executed under Unicorn** (`scripts/check_lfo_noise.py`), real bytes, real
+`sprintf`: loops of 1, 2, 4 and 31 cycles repeat exactly; field 31 gives 70
+distinct cycles out of 70; a backwards loop of 4 repeats; callee-saved registers
+intact; the formatter prints `1.01`, `1.04`, `2.14`, `4.--`, `3.--` for NOIS
+and `64`, `12` for other waves. 21 integrity checks. **Not run on the LFO
+page under the emulator** — guirun cannot yet overlay a patched MAIN OS on a
+stock snapshot, and the evaluators do not tick there.
+
+### v5 on hardware: sound right, display not — and v6 BUILT 2026-09-17
+
+**v5 PARTIAL.** SPH still read as a plain number. The loop logic runs (the owner
+hears SPH change the noise), the display did not engage. **The active-track byte
+v5 relied on is not a fixed global** [WRONG in v5 — corrected]: `0x42431a6c` is
+field `+8` of a struct whose address comes from `ProjectSettings`+16 (heap), so
+the emulator's address does not carry to the instrument.
+
+**v6 asks the object instead.** The LFO page formats every value through the sound
+ParameterSet's vtable slot 92 (`0x40036692`, table `0x401db7fc`, slot at
+`0x401db858`), called as `(this, record, value, dest)`. The firmware's own
+sibling method `0x4003660c` already does `this->vfunc40(this, record − 2)` to
+read an LFO's WAVE when formatting SPH (it tests for RND, `0x600`). v6's wrapper
+does the same for records 81/91/101: WAVE 79/89/99, and prints `colour.loop` if it
+is NOIS; everything else jumps to the stock method. No globals, no mirror.
+
+**Verified:**
+- **Emulator, whole LFO page, v6 overlaid on a stock snapshot** (new
+  `guirun --patch-ranges`): the page renders normally and the wrapper is called
+  387 times, with no fault.
+- **Unicorn, fake ParameterSet** (`scripts/check_lfo_sph_format.py`): `1.01`,
+  `1.04`, `2.14`, `4.--`, `3.--` for NOIS; SINE and PULS and non-SPH records reach
+  stock; callee-saved registers intact.
+
+**[METHOD] Unicorn caches translated code.** Rewriting a test stub in place kept
+returning the first value: WAVE 1 "printed" `3.01`. The harness, not the
+firmware, was wrong. One address per stub fixed it. Suspect the harness first
+when a result contradicts a disassembly that reads correctly.
+
+**[METHOD] The emulator's encoders show a value but do not change it** on the LFO
+page, and a guessed value-array offset poked MULT and FADE instead of WAVE.
+Record → slot goes through `0x400dbcc4`; read it before poking again.
+
+### v6 PASSED on hardware; v7 BUILT 2026-09-17 — the [MOD] page glyph
+
+Owner on v6: *"it works!"*. The remaining gap was the waveform glyph: every new
+waveform drew RND's. `scripts/lfo_wave_glyph.py`, shared with the wavetable
+build, adds it — mechanism read under the emulator and documented in that
+module: `WAVE` goes to the composite widget `0x4010dc82`, which clamps it to 6 a
+third time, indexes a 7-byte flag table, and picks a glyph set (a
+`std::vector<Bitmap>` of four 28×15 tiles) at `0x44507b68 + 12·WAVE`. v7 raises
+the clamp, hooks the flag read and the set pointer, and gives each new waveform a
+**static one-tile set** in the data cave.
+
+**Filmed under the emulator** with v7 overlaid on a stock snapshot and WAVE poked
+into the track's value array (`guirun --patch-ranges`, `--poke`; the array's
+WAVE word is `values + 30`, found by reading `0x400dbcc4`'s record→slot table
+and the live array, after one wrong guess landed on MULT/FADE):
+
+![glyphs](img/lfo-glyphs-emulator.png)
+
+SINE (stock), RND (stock, label SLEW), STEP, PULS, NOIS, then TRP from
+`lfo-wavetable3` and EXPO (stock).
+
+**[WRONG — corrected] first v7 film drew STEP falling.** Bitmaps are stored
+flipped vertically relative to the panel, as the intro's source bitmap is.
+
+**Owner's follow-up, not in v7:** make the STEP and PULS glyphs follow SPH (step
+count, pulse width), and rename SPH on the new waves. Both have a firmware
+precedent: RND already renames SPH to SLEW through the sound set's vtable slot 88
+(`0x4003660c`), and the widget already computes an SPH-dependent phase shift
+(which v7 still applies to the new waves; v8 should zero it).
+
+### v8 BUILT 2026-09-17 — glyphs drawn by the waveform, SPH renamed
+
+`lfo-waveshapes8` and `lfo-wavetable4`, both through `scripts/lfo_wave_glyph.py`:
+
+- **The glyph is rendered by the generator.** The glyph hook calls the waveform's
+  own generator 28 times across one cycle, with the current SPH, and draws the
+  curve into a RAM tile (`0x46750000`) the static Bitmap points at. PULS shows its
+  width, STEP its step count, TRP its repeats. **A shape built on the website
+  gets its glyph for free**: no picture data, nothing to derive or ship.
+- **No SPH phase slide** on new waveforms (the hook zeroes it, as stock does for
+  RND).
+- **SPH renamed** — the owner approved `STPS`, `WDTH`, `TYPE`, `RPTS` — at
+  `getShortName(this, record)` (`0x400372da`), which asks the object for WAVE.
+  [WRONG — corrected] Two earlier attempts wrapped vtable slot 88 of both
+  ParameterSet classes, where RND's `Slew` also lives; hooks on both showed 0
+  hits while the page drew. Stock RND's `SLEW` is a separate record (80) sharing
+  SPH's slot, not a renamed label.
+- The glyph and label code outgrew the waveshapes code cave and assembles into
+  the data cave after the data (746/896).
+
+**Filmed under the emulator** (v8 overlaid, WAVE and SPH poked into the value
+array at `+30`/`+32`): STEP at SPH 0 and 48 (STPS), PULS at 16 and 96 (WDTH),
+NOIS (TYPE), SINE back to SPH, TRP at SPH 0 and 64 (RPTS). One frame caught the
+project-loading overlay.
+
+![v8 glyphs](img/lfo-glyphs-v8-emulator.png)
+
+### v8 PASSED; v9 and v10 BUILT 2026-09-17 — NOIS glyph stability, MIDI tracks
+
+- **v8 on hardware:** glyphs *"work great"*. Two defects reported.
+- **NOIS glyph changed on unrelated button presses.** The renderer calls NOI with
+  reserved key 1023; each render sweeps a whole cycle, so the next render saw a
+  wrap, counted a cycle and drew the next cycle's noise. v9 clears that key's 8
+  bytes before each render.
+- **MIDI tracks: SPH plain number, label stock.** The MIDI LFO page is drawn by
+  `MidiParameterPageView` through `MidiParameterSet` (vtable `0x401db994`, typeinfo
+  `16MidiParameterSet`), with the **same records** (WAVE 79, SPH 81) and the same
+  format method in slot 92 — which v6–v9 wrapped only in `SoundParameterSet`. v10
+  wraps both. Verified under the emulator on a MIDI track (the UI's mask test
+  `0x40031274` patched to report MIDI; page header `LFO (1/2)`, `MID 1`): the
+  wrapper is called 144 times and takes the `colour.loop` branch with NOIS poked
+  into the MIDI values (`0x42110a5c`). The **label** hook already works there
+  (`TYPE` drawn), so the label defect on the instrument is not reproduced yet —
+  asked the owner where it showed.
+- The five ParameterSet classes sharing the format method: `ParameterSet`,
+  `SoundParameterSet`, `FxParameterSet`, `TrigParameterSet`, `MidiParameterSet`
+  (vtables `0x401db774`, `…7fc`, `…884`, `…90c`, `…994`).
 
 ## 7. The DSP hunt, parked with an explicit warning
 
@@ -1368,6 +1620,60 @@ PNG from the emulator, so an animation can be iterated offline and only flashed
 once it looks right — instead of the flash-and-photograph loop that every
 earlier experiment paid for.
 
+### BUILT 2026-09-17: the intro is a tunnel, and re-scaling it is a new animation
+
+**What the start-up animation is**, read in Ghidra from `FUN_400d3606` — which
+decompiled cleanly, unlike the menu dispatcher. For every panel pixel, centred
+and normalised to about -1..1 with a centre jittered by `rand() % 12` once per
+build (`0x40150670` is plain C `rand()`):
+
+    r = sqrt(u*u + v*v)        theta = atan2(v, u)
+    source = ( cos(theta) / r * 128  & 127,   sin(theta) / r * 64  & 63 )
+
+A **1/r polar tunnel with the logo as its wall texture**. A write-watch
+(`scripts/probe_intro_motion.py`) split the animation into its two phases: the
+table is built once — its writers are `0x400d376c` and `0x400d3796`, its hash
+freezes when done — and then a scroll value climbs about 8 per 2M instructions
+(written at `0x400d3a2a`), flying through the tunnel. A final pass resolves to the
+plain logo, which is why the stamp in §13 settles cleanly.
+
+**So a custom animation is data, not code.** The texture's scale is two float
+immediates:
+
+    0x400d374e  move.l #128.0,-(sp)
+    0x400d377e  move.l #64.0,(sp)
+
+`scripts/build_intro_tunnel.py --x-scale 512 --y-scale 256` ->
+`00_Resources/02_Builds/intro-tunnel_DN2_1.11.syx`: **two bytes**, one in each
+float's exponent, tiling the logo four times as densely around the wall. The
+coordinate masks are untouched, so no value can read off the bitmap, and the
+final resolve is untouched. 21 integrity checks pass, HMAC reproduced.
+
+**Seen running under the emulator, and measured, not eyeballed.** Both runs were
+resumed from a 380M snapshot, the tunnel build's two bytes written over one, 60M
+instructions each, a frame every 4M taken from the pixels `setPixel` was handed,
+and the finished table dumped from `*0x42c45698` at the end:
+
+- **9,086 of 16,384 table entries differ**, and they differ as predicted: near the
+  centre stock `(77, 51)` became `(52, 12)` — `77×4 & 127 = 52`, `51×4 & 63 = 12`
+  — and `(56, 59)` became `(93, 47)`, the same relationship within truncation,
+  because the build computes `floor(v×512)`, not `4×floor(v×128)`.
+- **9 of 15 frames differ.** The six that match are before the fly-through.
+
+![stock vs tunnel](img/intro-tunnel-compare.png)
+
+**One artifact of the method, stated so it is not mistaken for the effect.** The
+upper rows of every tunnel frame match stock, because the generator had already
+written those table rows before 380M — its build starts earlier than the 400M probe
+suggested. On the instrument the whole table is computed with the new constants,
+so the whole screen is the dense field in the lower half. A snapshot before the
+generator runs would show that too; 380M was not early enough.
+
+**Where this goes next**, all in the same function and all cheap to try: the
+random jitter (`% 12`), the `1/r` (swap it for `r` and the tunnel becomes a
+zoom-out), `cos`/`sin` swapped (a quarter-turn), or a different texture — which
+is the source bitmap §13 already writes into.
+
 ### What is not known yet
 
 - **Where the frames live, and in what form.** Nothing has looked. The
@@ -1483,7 +1789,7 @@ and the branch:
 
 The other arm chooses between `"Arpeggiator ON"` and `"Arpeggiator OFF"` at
 `0x40215d3f`, which is how we know it is the plain toggle and not a second setup
-view. `0x401160ac` has **132 callers**, so it is a fundamental track property and
+view. `0x401160ac` has **132 callers**, so it is a fundamental ~~track property~~ **[WRONG — corrected below: it is the key event's FUNC-held bit]** and
 is left alone: the edit is the branch, `beq.s` -> `bra.s`, **one byte**.
 
 **What the instrument will say:**
@@ -1524,6 +1830,99 @@ that offers an arp page and does nothing is visible and harmless, in the way
 **Not started.** Filed while the PCM thread was blocked on port access.
 
 ---
+
+### FAILED on hardware 2026-09-17, and why: v1 edited the FUNC branch, not the MIDI gate
+
+Owner: *"arpegiator menu doesn't open on the midi track with the firmware"*.
+Re-reading the ARP key's case in `0x4005ed12` shows three tests, not one:
+
+```
+0x4005f996  jsr   0x401160bc   | key event: pressed (bit 0) and not bit 3
+0x4005f9a0  beq.w 0x4005ef52   | -> leave
+0x4005f9b6  jsr   0x40031274   | (u16 @ kit-runtime +0x5cda >> track) & 1
+0x4005f9c2  bne.w 0x4005ef52   | MIDI track -> leave            <-- the real gate
+0x4005f9c8  jsr   0x401160ac   | key event bit 1 = [FUNC] held
+0x4005f9da  beq.s 0x4005fa3c   | no FUNC -> ArpSetupMenuView   <-- what v1 edited
+```
+
+- **`%d2` is the key event, not a track.** It is the dispatcher's second
+  argument; `0x40116018` on it returns the key code the jump table switches on.
+  So `0x401160ac`'s bit 1 is the **FUNC modifier**, which is also why it has 132
+  callers. The manual, p. 86: *"[FUNC] + [ARP] to toggle the current track's
+  arpeggiator on/off"* — the arm with the ON/OFF popup.
+- **`+0x5cda` is the synth/MIDI mask.** The kit loader copies it from kit offset
+  10,260 (`0x400dddac`) and the saver writes it back (`0x400ddf16`); DNX verified
+  that offset as the per-track synth/MIDI mask from hardware captures, with no
+  reference to this code. Two independent routes to the same field.
+- **So v1 never reached a MIDI track, and it did change audio tracks:** [FUNC] +
+  [ARP] opens the setup view instead of toggling. v1's control row ("audio
+  tracks unchanged") was wrong and would only show with FUNC held.
+
+**The lesson is the one `lfo4` already taught:** name a register from what the
+caller passes, not from the callee's shape. A one-line bit accessor is the same
+code whether its object is a track or a key event.
+
+### v2 BUILT 2026-09-17: `arp-on-midi2_DN2_1.11.syx`
+
+`scripts/build_arp_on_midi2.py`. The FUNC branch is left stock; the MIDI test's
+`bne.w` becomes `nop; nop`, so a MIDI track reaches the same FUNC split an audio
+track does. 21 integrity checks, HMAC reproduced. Same verdict table as v1, plus:
+**[FUNC] + [ARP] on an audio track must still toggle** (v1 broke it). If the menu
+opens but nothing arpeggiates, the next gates are the engine's bit tests of the
+same mask, already seen at `0x400d9ee0`, `0x400d9062`, `0x400f7f14` and
+`0x40121f82`. The view writes sound-object arp bytes 324..353 of a MIDI track's
+preset — not known to be used otherwise, not proven — so test on a scratch
+project.
+
+### v2 on hardware 2026-09-17: the menu opens; its knobs go somewhere else
+
+- **Menu opens on a MIDI track.** The mask test at `0x4005f9c2` was the UI gate.
+- **Knobs don't edit it:** turning one returns to the TRIG page and edits the
+  matching trig parameter. So encoder events on a MIDI track are routed by the
+  same mask before the menu view sees them — a second gate, in the knob path.
+- **Copying an arp from a synth track onto the MIDI track makes the parameters
+  show on the menu** — the owner's workaround. The MIDI preset carries the arp
+  region and the view reads it.
+- **Open:** whether the sequencer arpeggiates a MIDI track's notes. DNX asked to
+  monitor channel 1 on the USB MIDI output.
+
+### The MIDI output does not arpeggiate, and the code says why (2026-09-17)
+
+**Measured by DNX** on USB MIDI out, pattern running: every onset is note 60,
+velocity 100, 4,000 ms apart. The trig as written, nothing from the arp.
+
+**Read afterwards — the arp is on the synth path only.** The sequencer copies the
+kit's synth/MIDI mask to `0x8000537c` (`0x40025b3c`, `0x40025b9a`), read by two
+accessors: `0x40027c18` (audio track) and `0x40027c36` (MIDI track). Their
+callers at `0x401218ec`/`0x40121906` split each note event:
+
+```
+0x401218ec  jsr 0x40027c18   | audio track?
+            beq  -> MIDI test
+            jsr 0x40137d3c   | yes: the synth voice path
+0x40121906  jsr 0x40027c36   | MIDI track?
+            jsr 0x4012b8b0   | yes: the MIDI note sender
+```
+
+The arpeggiator step `0x4002a0bc` has two callers, `0x400266e0` and `0x4002686e`,
+both inside the frame-ISR trig handler that drives synth voices. Nothing on the
+MIDI sender's side calls it. So a MIDI track has arp *settings* after v2, and the
+engine has no path from them to MIDI notes.
+
+**What the feature now costs:** new code, not a gate flip — run the arp step for
+a MIDI track and hand its note to `0x4012b8b0` instead of a voice. Plus the knob
+routing on the menu. Both ColdFire-side. ~~Parked until DNX's project read says whether the copied arp bytes persist.~~
+
+**They persist (DNX, `TEST_MIDI_ARP`, 2026-09-17).** A MIDI track's kit entry has
+two objects: the 359-byte sound slot ~~, parked while the track is MIDI~~ **[corrected by DNX: its machine byte reads MIDI (4), so it is the MIDI track's own sound object, not a parked synth sound]**, and a 268-byte
+MIDI record at kit `+5964`. The copied arp sits **byte for byte in the sound slot**
+(324–353 equal to the synth source); the MIDI record gained nothing. Its byte 257
+is set only on the MIDI-mode track, probably a mode flag (DNX's inference, not
+measured). Stock firmware already stores arp bytes there: four MIDI-track slots in
+the factory PRESETS project carry them. **So the data a MIDI arp needs is saved
+today**, and the build is engine code only: on the MIDI branch at `0x40121906`,
+step the arp from the track's sound slot and hand the note to `0x4012b8b0`. The
+MIDI record needs no change.
 
 ## 11. A real compatibility check between mods
 
@@ -1799,6 +2198,88 @@ the opposite of blending in.
 
 **Queued, not started.** The order the owner set on 2026-09-16 is LFO4 first,
 then the boot screen, and this entry is the boot screen's user-facing half.
+### BUILT AND SEEN RUNNING 2026-09-17: `MOD` beside the logo
+
+`scripts/build_intro_stamp.py --x 85 --y 29` ->
+`00_Resources/02_Builds/intro-stamp_DN2_1.11.syx`. 21 integrity checks pass, HMAC
+reproduced, and it changes exactly two ranges: an 8-byte hook and a 184-byte cave.
+
+**The first build of the campaign verified under the emulator before hardware.**
+The stock Digitone 400M snapshot was restored, the build's two ranges written over
+it (`scripts/build_diff.py`, `trace_intro_draw.py --patch`), and the intro run for
+20M instructions. The source bitmap came back with **401 lit pixels — the logo's
+367 plus the stamp's 34, all 34 inside the stamp's box** — and the panel buffer at
+the end of the run shows the logo's last fragments settling with `MOD` beside it:
+
+![panel](img/intro-stamp-panel.png)
+
+**How it works.** The intro is a displacement map over a static source bitmap
+(`docs/display-path.md`). The stamp is ORed into that source every frame from a
+hook at the copy routine's entry, `0x400d3886`, so the firmware's own effect
+scatters it and reassembles it with the logo. It arrives the way the logo
+arrives, visibly separate from it, in a 3×5 face the firmware does not use.
+
+**On the Digitone the source is the shared Elektron glyph** — identical to the
+Digitakt's, 367 pixels, x 48–79, y 20–43 — so the stamp sits beside a mark every
+Elektron product boots with, not beside a Digitone-specific logo.
+
+**Two errors, both caught before the instrument saw them:**
+
+- `dnfw fn entry` named `0x400d3876` as the routine's entry. That is a separate
+  four-instruction function ending in `rts`; the copy routine starts at
+  `0x400d3886`. Checked by disassembly — the second time today that tool has
+  reported the wrong function.
+- The first build's stub was sized with a placeholder address of 0, which the
+  assembler encoded in the short form, so the table was placed two bytes into the
+  stub and overwrote the low word of the return jump: `jmp 0x400d388e` became
+  `jmp 0x400d0000`, a crash at boot. **Disassembling the build caught it.** The
+  builder now sizes with a real 32-bit placeholder and refuses to write if the
+  two passes differ in length.
+
+**What is not in it yet:** the version half. The font carries digits, `V` and
+`.`, so `--text "MOD V1.0"` works today; what does not exist is the right source
+for the version — §13's "read the mod identity out of the image rather than
+hard-coding it" is still the honest design.
+
+### 13.2 The bang: the logo in a comic burst that flashes, then explodes into the tunnel
+
+**Asked for by the owner, 2026-09-17**, in three steps: wrap the Elektron logo in
+a "BANG"-style burst in place of the word; make it part of the intro's
+animation; and *"the bang can flash reversing black and white backgrounds until
+it explodes and shows the tunnel"*.
+
+Two builds, both seen running under the emulator:
+
+- **`intro-burst_DN2_1.11.syx`** (`scripts/build_intro_burst.py`) — the static
+  version: a solid white 14-spike burst with the logo knocked out in black,
+  written into the intro's source bitmap every frame. A knockout clears bits, so
+  each column word needs a mask and a value — 2,140 bytes, more than any free cave
+  — and the table ships as an appended payload. Filmed from 380M it holds still
+  for frames ~12–73, is scattered by the tunnel from ~87, and textures the whole
+  fly-through with spiralling fragments of itself:
+  ![burst film](img/intro-burst-film.png)
+- **`intro-bang_DN2_1.11.syx`** (`scripts/build_intro_bang.py`) — the flashing
+  version. The payload carries **two whole 128 × 64 images**, the burst and its
+  exact inverse (which is the owner's reference: white page, black burst, white
+  logo), and every frame the stamp copies one over the source bitmap. The choice
+  is keyed on **the intro's own frame counter**, measured as the copy routine's
+  first argument, counting up by exactly one per frame: alternate every 16 frames,
+  every 8 from frame 48, then hold the normal image from frame 72 so the tunnel's
+  scatter is the explosion.
+
+![sequence](img/intro-bang-sequence.png)
+
+Animated, same snapshot, same timing: [stock](img/intro-stock.gif) ·
+[bang](img/intro-bang.gif).
+
+**Photosensitivity.** Whole-screen flashing between 3 and 30 Hz is the range that
+matters. The defaults alternate at about 1.9 Hz and then 3.75 Hz if the intro
+runs near 30 fps, and `--slow`/`--fast` lower it further.
+
+**Not yet on hardware.** `intro-stamp`, `intro-burst`, `intro-bang` and
+`payload-section` all hook the same startup call and intro routine, so they are
+alternatives: flash one.
+
 ### 13.1 A flip-flap logo
 
 **Owner's proposal, 2026-09-16**, with a picture: Sara Ball's *Croc-gu-phant*,
@@ -2027,3 +2508,171 @@ settle before this is built**, and it is the same space question as §1 and §6.
 - reading a `.syx` directly. The page needs a de-packed section because aPLib
   depacking in the browser has not been written. `scripts/js_codec_check.mjs`
   already has the codec in JavaScript, so this is porting, not research.
+
+---
+
+### Three wavetables and TRAP, BUILT 2026-09-17
+
+Owner on `lfo-wavetable4`: works, glyph too — *"but a wavetable option should be
+richer in the transition between waves ... some mythical and loved wavetable to
+sweep across more than just the trapezoid changing frequency"*, and *"we should
+add the trapezoid as a wave shape"*. Chosen: **several tables**, and TRAP with
+**edge slope** on SPH.
+
+- **`lfo-wavetables_DN2_1.11.syx`** (`scripts/build_lfo_wavetables.py`,
+  tables in `scripts/wavetables.py`): WTB1 basic shapes (sine → triangle → saw →
+  square → narrowing pulses), WTB2 harmonic sweep (1 → 15 harmonics, PPG-style,
+  additive), WTB3 vowels (A E I O U I E, two formant bumps on harmonics). **All
+  generated from our own maths**, no ROM data. SPH = position, label `POS`. Each
+  table is 7 frames × 32 signed bytes; the generator interpolates bilinearly
+  (phase and position). Code cave 892/896, data 816/896 — this build is full.
+  **Verified in Unicorn** against the Python reference (`wavetables.reference`):
+  2,145 calls, all equal, registers intact. Supersedes `lfo-wavetable4`.
+- **`lfo-waveshapes11_DN2_1.11.syx`**: TRAP added as waveform 10 — a clipped
+  triangle with gain `1 + (127 − SPH)/4`, SPH 0 near-square, 127 triangle; label
+  `SLOP`. Checked in Unicorn against its formula (516 calls, 0 mismatches).
+- **Filmed under the emulator** (WAVE and SPH poked): TRAP at SPH 0 and 64
+  (the 127 frame caught a loading overlay), WTB1 at POS 0/64/127, WTB2 at 48/127,
+  WTB3 at 0/64.
+
+![TRAP and wavetables](img/lfo-trap-wavetables-emulator.png)
+
+**Still exclusive:** the two builds use the same two caves; combining them needs
+the appended-data route (`docs/memory-map.md`).
+
+### Everything combined, BUILT 2026-09-17: `lfo-waves` — the appended blob
+
+Owner: *"make a firmware with everything combined"*, and *"would [it] save any
+space putting all this in a separate section and calling the section from the
+small caves?"* Yes, and this build is that design (a new ELE3 section would not
+load itself — §6 — so the proven appended area is the section):
+
+- **One cave, 46 bytes:** the boot copy stub on the startup calls (`0x4000053e`):
+  `.data` init, copy the appended blob (`LFOW` magic, length) to `0x46780000`,
+  BSS clear.
+- **Everything else in a 2,672-byte blob appended to MAIN OS** and assembled at
+  its runtime address: STEP PULS NOIS TRAP generators, WTB1–3 generator and
+  tables, call hooks, formatters, SPH wrapper, glyph renderer and labels, names,
+  relocated waveform tables, glyph sets. Image edits point into RAM.
+- **Waves 7–13:** STEP PULS NOIS TRAP WTB1 WTB2 WTB3; SPH labels STPS WDTH TYPE
+  SLOP POS POS POS. MAIN OS +2,672 B (intro-bang, passed, was +2,092).
+- `scripts/build_lfo_waves.py` reuses the waveshapes source, `wavetables.
+  generator_source` (moved there; `lfo-wavetables` rebuilt byte-identical) and the
+  glyph module. `build_diff.py` takes an optional runtime address.
+
+**Verified:** Unicorn (`scripts/check_lfo_waves.py`) — the boot stub calls init
+then clear and copies the blob byte for byte; from RAM, WTB1–3 and TRAP match
+their references (600 calls, 0 mismatches), STEP gives 16 levels, PULS 50% duty,
+NOIS 64 distinct steps. Emulator, blob overlaid at `0x46780000` (guirun
+`--patch-ranges` now maps 1 MB pages, the fault sink's granularity, after a 4 KB
+map collided with it): STEP/STPS, PULS/WDTH, TRAP/SLOP, WTB1–3/POS drawn, SINE
+back to SPH; the NOIS frame caught a loading overlay.
+
+![combined](img/lfo-waves-combined-emulator.png)
+
+**Not proven until flashed:** a cold boot running the copy on the instrument
+with this blob — the same mechanism intro-bang passed with.
+
+### lfo-waves PASSED on hardware; v2 BUILT — TRAP's edge linear in SLOP
+
+`lfo-waves` on the instrument: *"It boots. And works. all 3 points."* — the first
+code run from the appended area. One observation: TRAP's glyph barely changed
+from SLOP 0 to 94. Measured, not the screen: the gain law `1 + (127 − SLOP)/4`
+gives edges of 0.4, 0.6, 0.9, 1.6 px of the 28-px tile at SLOP 0/32/64/94, and
+14 px only at 127 — the sound bunches the same way. Options offered: linear edge
+width (chosen), a percentage readout, exaggerating only the glyph (rejected: it
+would stop matching the sound), zooming the glyph.
+
+**`lfo-waves2`:** gain `127 / SLOP` (one `divs.l`), SLOP 0 a square — each edge is
+SLOP/127 of a half-cycle: 0, 3.5, 7.1, 10.4, 14 px at 0/32/64/94/127. Unicorn:
+760 calls against the new reference, 0 mismatches; boot stub and blob intact.
+Emulator film at SLOP 0, 32, 64, (94 hidden by the loading overlay), 127:
+
+![TRAP linear](img/lfo-trap-linear-emulator.png)
+
+## 15. A wavetable synth machine
+
+**Asked for by the owner, 2026-09-17**, and it corrects a misreading recorded in
+§14: *"about the LFO wavetable, I think it was misunderstood, is not a wavetable
+for the LFO but a new synth machine to handle wave tables"*. `lfo-wavetable`
+(a table-driven **LFO** shape) stays built and is being tested as it is; this
+entry is the different and much larger thing that was actually meant: **a SYN
+machine whose oscillator plays wavetables**, alongside the Digitone II's
+existing machines.
+
+### Why this is a different class of work from everything built so far
+
+Every build in `docs/backlog-builds.md` changes the **ColdFire**: the UI, the
+sequencer, the LFO evaluators, the boot screen. **Audio is synthesised on the
+SHARC+ DSP.** A new oscillator is DSP code, and the DSP hunt is §7 — parked, with
+a warning. So this entry inherits §7's cost, whatever else it needs.
+
+### What already exists to build on
+
+- **The ColdFire half has a precedent, on the Digitakt.** digikit's
+  `tools/machinepatch.py` is *"Milestone A of adding an eighth machine"*: it
+  relocates the UI's source machine list (`0x401e1958` on DT2 1.15C, seven u32s)
+  into a cave so an eighth entry can exist, and proves the firmware reads the
+  relocated copy. Its Milestone B installs an eighth machine *descriptor* behind
+  a trampoline on the ColdFire machine dispatch `FUN_400caf48`. That is the menu
+  and the descriptor — the part a user sees — and it is Digitakt-side; the
+  Digitone equivalents are unread.
+- **`docs/chimera-feasibility.md`** covers running one device's machines on the
+  other, including how the SHARC program is shipped and loaded, and a third
+  party's map of the six machine-selector roles.
+- **Wavetables are data, and shipped data now works under the emulator.**
+  `payload-section` (§1) proves bytes appended to MAIN OS reach run time. A
+  wavetable set is exactly that shape of payload — though whether the *DSP* can
+  read ColdFire memory, or needs the tables pushed to it, is unknown.
+
+### The first questions, cheapest first
+
+1. **Can a Digitone machine slot be added at all on the ColdFire?** Port
+   Milestone A to DN2 1.11: find the machine list and the dispatch, relocate the
+   list, and see an eighth row in the menu. No sound, and no DSP — it only proves
+   the slot exists.
+2. **What does selecting a machine send to the DSP?** The frame carries indices
+   25–99 (`docs/engine-state.md`); the machine type is one of them. Whether the
+   DSP accepts a type it does not know, and what it does with it, decides whether
+   this is a DSP *patch* or a DSP *rewrite*.
+3. **Where would the tables live for the DSP to read?** Answered by (2).
+
+Only (1) is ColdFire work, and it is the natural first build.
+
+## 16. A glitch-ASCII intro instead of the tunnel
+
+**Raised by the owner 2026-09-17**, after `intro-burst` on the instrument: *"add
+to the queue to test removing the tunnel and making the logo decomposed into a
+glitchy ascii art screen."*
+
+**What it is:** skip the polar tunnel, and instead decompose the mark (the
+boot-screen image, original art only, see [[no-elektron-ip-in-mods]]) into a
+grid of characters that glitch: cells swap to denser or sparser glyphs, rows
+tear sideways, and the picture dissolves into a screen of ASCII noise before the
+closing sweep.
+
+**What we already have that makes it cheap:**
+
+- The intro copy routine `0x400d3886` is already hooked (`intro-bang`,
+  `bootscreen`), with the **frame counter** as its first argument, so per-frame
+  choreography is solved.
+- The tunnel is only a **displacement table** (`*0x42c45698`, generated by
+  `FUN_400d3606`). Removing it = an identity table, or skip the displaced copy and
+  write the panel bitmap `0x42c4b6ac` directly from the stub.
+- A font is in the firmware (the version text), and `build_intro_stamp.py` has a
+  3×5 font of our own; ASCII cells of 4×6 or 6×8 on 128×64 give a 32×10 or 21×8
+  grid.
+
+**How it would work:** per frame, for each cell, pick a glyph by the cell's lit
+coverage in the source image (the ASCII-art ramp ` .:-=+*#%@`), then perturb with
+a frame-keyed hash: swap glyphs, shift a row by a few pixels, invert a band. The
+glitch amount ramps with the frame counter until the image is unreadable noise.
+
+**First build:** static ASCII rendering of the image (no tunnel, no glitch), to
+prove the tunnel can be bypassed and the panel written per frame. Then the
+glitch ramp. Both are boot-screen mod options, so they belong in
+`src/dnfw/mods/bootscreen.py` as a mode, not a new one-off script.
+
+**A variation, not a replacement** (owner: *"as a new variation"*): the tunnel intro stays available; ASCII-glitch is another choice beside it in the boot-screen mod and on the site.
+
+**Not built.**

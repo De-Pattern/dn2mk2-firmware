@@ -1,0 +1,188 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LFO Waves</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="Seven new Digitone II LFO waveforms with swappable wavetables, built in your browser.">
+<link rel="stylesheet" href="css/base.css">
+<style>
+  .step { margin: 2.5rem 0; }
+  .step-head { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .4rem; }
+  .step-num {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .1em;
+    color: var(--accent); border: 1px solid currentColor;
+    border-radius: 3px; padding: .1rem .4rem; flex: none;
+  }
+  .step h2 { margin: 0; border: 0; padding: 0; font-size: 1.2rem; }
+  .step > p { margin-top: .3rem; color: var(--ink-soft); }
+
+  .drop {
+    border: 2px dashed var(--rule); border-radius: 10px;
+    padding: 2rem 1.5rem; text-align: center; background: var(--panel);
+    transition: border-color .15s, background .15s;
+  }
+  .drop.over { border-color: var(--accent); background: var(--accent-dim); }
+  .drop p { margin: 0 auto; max-width: none; }
+  .drop .hint { color: var(--ink-soft); font-size: .88rem; margin-top: .5rem; }
+
+  button, .filebtn {
+    font: inherit; font-size: .9rem; cursor: pointer;
+    background: var(--panel); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 6px;
+    padding: .4rem .9rem; display: inline-block;
+  }
+  button:hover, .filebtn:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+    font-weight: 600; padding: .6rem 1.4rem;
+  }
+  :root[data-theme="dark"] button.primary,
+  :root:not([data-theme="light"]) button.primary { color: #16181c; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .verdict { display: grid; gap: .3rem; margin-top: 1rem; font-size: .9rem; }
+  .verdict div { display: flex; gap: .6rem; align-items: baseline; }
+  .verdict .mark { font-family: var(--mono); flex: none; width: 1.2rem; }
+  .pass .mark { color: var(--ok); }
+  .fail .mark, .fail { color: #c33; }
+
+  .params {
+    display: grid; gap: .5rem; margin-top: 1.2rem;
+    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  }
+  .param {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 8px; padding: .6rem .75rem; font-size: .88rem;
+  }
+  .param.on { border-color: var(--accent); }
+  .param .pg {
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--ink-soft); display: block;
+  }
+  .param .nm { font-weight: 500; }
+  .param .sh {
+    font-family: var(--mono); font-size: .74rem; color: var(--accent);
+    float: right;
+  }
+
+  .bar {
+    position: sticky; bottom: 0; background: var(--bg);
+    border-top: 1px solid var(--rule); padding: 1rem 0;
+    display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+    margin-top: 2rem;
+  }
+  .bar .status { color: var(--ink-soft); font-size: .88rem; flex: 1 1 14rem; }
+  .hidden { display: none; }
+  .busy { color: var(--accent); }
+</style>
+<style>
+  .waves { display: grid; gap: .5rem; margin-top: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); }
+  .wave { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px;
+    padding: .5rem .7rem; font-size: .86rem; }
+  .wave b { font-family: var(--mono); font-weight: 500; }
+  .wave span { float: right; font-family: var(--mono); font-size: .74rem; color: var(--accent); }
+  .wave small { display: block; color: var(--ink-soft); font-size: .76rem; margin-top: .15rem; }
+
+  .tables { display: grid; gap: 1rem; margin-top: 1.2rem;
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr)); }
+  .table { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px;
+    padding: .8rem; display: grid; gap: .55rem; }
+  .table.custom { border-color: var(--accent); }
+  .table h3 { margin: 0; font-size: 1rem; display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; }
+  .table h3 .src { font-family: var(--mono); font-size: .72rem; color: var(--ink-soft); font-weight: 400;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+  .table canvas { width: 100%; height: auto; display: block; background: var(--bg);
+    border: 1px solid var(--rule); border-radius: 6px; }
+  .table .pos { display: flex; align-items: center; gap: .6rem; font-family: var(--mono); font-size: .78rem; }
+  .table .pos input { flex: 1; accent-color: var(--accent); }
+  .table .pos output { width: 2.2rem; text-align: right; }
+  .table .row { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .table .err { color: #c33; font-size: .82rem; min-height: 1em; }
+  .formats { font-size: .9rem; margin-top: 1rem; }
+  .formats code { font-size: .82rem; }
+</style>
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow"><a href="index.html">Digitone II Mods</a> / LFO waves</p>
+  <h1>LFO Waves</h1>
+  <p class="lede">
+    Seven new LFO waveforms for the Digitone&nbsp;II, with three wavetables you can
+    keep or replace with your own. Pick your firmware, choose your tables,
+    download a signed image.
+  </p>
+</header>
+
+<div class="note">
+  <p><strong>Everything happens in this tab.</strong> Your firmware and wavetable files
+  are never uploaded — this page is static files on GitHub Pages, and you can read
+  every line in the
+  <a href="https://github.com/angellinares/dn2_firmware_explore/tree/main/site/js">repository</a>.</p>
+  <p><strong>Prove your way back before you flash anything.</strong> The Early Start-up
+  Menu reflashes stock firmware over MIDI. Do that once, with an unmodified image,
+  <em>before</em> you flash a modified one — and back up your +Drive.</p>
+</div>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">1</span><h2>Your firmware</h2></div>
+  <p>An unmodified Digitone&nbsp;II OS&nbsp;1.11 <code>.syx</code> from Elektron.</p>
+  <div class="drop" id="drop">
+    <p><label class="filebtn" for="syx">Choose a .syx file</label>
+      <input type="file" id="syx" accept=".syx,.SYX" hidden></p>
+    <p class="hint">or drag it here</p>
+  </div>
+  <div id="loaded" class="hidden">
+    <dl class="facts" id="facts"></dl>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</section>
+
+<section class="step hidden" id="step2">
+  <div class="step-head"><span class="step-num">2</span><h2>The waves</h2></div>
+  <p>After <code>RAND</code> on every LFO of every track, audio and MIDI. Each draws its
+  own shape on the LFO page, and the <code>SPH</code> knob is renamed for what it does.</p>
+  <div class="waves" id="waves"></div>
+</section>
+
+<section class="step hidden" id="step3">
+  <div class="step-head"><span class="step-num">3</span><h2>Your wavetables</h2></div>
+  <p><code>POS</code> sweeps through a table: 7 frames, blended smoothly. Keep ours,
+  or replace any of them with your own.</p>
+  <div class="note formats"><p><strong>Accepted:</strong> a <strong>WAV wavetable</strong> as Serum,
+  Vital and most wavetable editors export it (frame size read from the file, else
+  2048 samples; a single-cycle WAV works too), or a <strong>JSON table</strong>
+  <code>{"frames": [[…], …]}</code> with values from −1 to 1. Any number of frames
+  and any frame length: the table is reduced to 7 frames of 32 points, with levels
+  kept relative to its loudest point.</p></div>
+  <div class="tables" id="tables"></div>
+</section>
+
+<section class="step hidden" id="step4">
+  <div class="step-head"><span class="step-num">4</span><h2>Build it</h2></div>
+  <p>The image is rebuilt, re-signed with the key derived from your own file, and
+  every integrity field is checked again. Nothing downloads unless all of them pass.</p>
+  <div class="verdict" id="buildVerdict"></div>
+</section>
+
+<div class="bar hidden" id="bar">
+  <button class="primary" id="buildBtn">Build firmware</button>
+  <button id="resetBtn">Start over</button>
+  <span class="status" id="status"></span>
+</div>
+
+<footer>
+  <p>
+    Part of <a href="https://github.com/angellinares/dn2_firmware_explore">dn2_firmware_explore</a>,
+    AGPL-3.0-or-later. Not affiliated with or endorsed by Elektron.
+    Tested on a Digitone&nbsp;II, 2026-09-17. This mod adds data after the end of the
+    control-CPU image and uses the start-up hook, so it does <strong>not</strong> combine
+    with the boot-screen mod yet.
+  </p>
+</footer>
+
+</div>
+
+<script type="module" src="js/app/lfo-page.js"></script>

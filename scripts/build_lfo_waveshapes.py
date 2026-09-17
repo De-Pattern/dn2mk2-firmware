@@ -87,32 +87,39 @@ from dnfw.firmware import build as fwbuild
 from dnfw.firmware.load import load
 from dnfw.patch.assemble import assemble, available
 
+import lfo_wave_glyph as glyph
+import lfo_wave_ui as ui
+
 MAIN_OS = 3
 BASE = 0x40000400
 
 # One of the three 896-byte runs that pass both of `dnfw cave scan`'s checks.
 CAVE = 0x402CF52C
 CAVE_CAP = 896
+# v5 outgrew one run: the data (names, state, tables) moves to the second verified
+# 896-byte run, the one lfo-wavetable uses for its table, and the code keeps the first.
+DATA_CAVE = 0x402D0664
+DATA_CAVE_CAP = 896
 
 STOCK_NAMES = 0x401D3574            # TRI SIN SQR SAW EXP RMP RND
 STOCK_TABLES = (0x4020B2EC, 0x4020B308, 0x4020B324, 0x4020B340)
 STOCK_ENTRIES = 7
-NEW_NAMES = (b"STP\x00", b"PLS\x00", b"NOI\x00")
+NEW_NAMES = (b"STP\x00", b"PLS\x00", b"NOI\x00", b"TRP\x00")
+NEW_LONG_NAMES = (b"STEP\x00", b"PULS\x00", b"NOIS\x00", b"TRAP\x00")
 ENTRIES = STOCK_ENTRIES + len(NEW_NAMES)
 
 # What each of the four value tables gets for the three new indices.  The hold
 # value and both start values are zero, as `SAW`'s are; the generator pointers
 # are filled in once the stubs are assembled.
 TABLE_EXTRAS = {
-    0x4020B2EC: [0, 0, 0],          # per-waveform hold value
-    0x4020B308: [0, 0, 0],          # start value, positive phase
-    0x4020B324: [0, 0, 0],          # start value, negative phase
-    0x4020B340: [None, None, None],  # the generator function pointers
+    0x4020B2EC: [0, 0, 0, 0],          # per-waveform hold value
+    0x4020B308: [0, 0, 0, 0],          # start value, positive phase
+    0x4020B324: [0, 0, 0, 0],          # start value, negative phase
+    0x4020B340: [None, None, None, None],  # the generator function pointers
 }
 
 # Plain repoints: every `lea`/`pea` that names a table and is not itself hooked.
 REPOINTS = {
-    0x401D3574: ((0x40007688, b"\x48\x79"),),
     0x4020B2EC: ((0x401374DE, b"\x41\xf9"), (0x401378E2, b"\x41\xf9")),
     0x4020B308: ((0x40137514, b"\x43\xf9"), (0x40137916, b"\x43\xf9")),
     0x4020B324: ((0x40137508, b"\x41\xf9"), (0x4013790C, b"\x43\xf9")),
@@ -129,22 +136,45 @@ HOOKS = (
     (0x401379FA, b"\x41\xf9\x40\x20\xb3\x40", "a_call"),
     (0x4013760C, b"\x2f\x41\x00\x30\x4e\x91", "b_call"),
     (0x4013788E, b"\x75\x6c\x00\x4e\x9e\x80", "no_phase"),
+    (ui.SHORT_FMT, ui.FMT_ENTRY_STOCK, "fmt_short"),
+    (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
-LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase")
+LABELS = ("step", "pulse", "noise", "trap", "a_call", "b_call", "no_phase",
+          "fmt_v92") + ui.LABELS
+SPH_LABELS = ["STPS", "WDTH", "TYPE", "SLOP"]   # owner-approved
+
+# The sound ParameterSet's vtable slot 92 (format a record's value), v6's hook.
+SOUND_SET_V92 = 0x401DB858
+# MIDI tracks' LFO page formats through MidiParameterSet (vtable 0x401db994), whose
+# slot 92 holds the same stock method. v6-v9 wrapped only the sound set's, so on a
+# MIDI track SPH stayed a plain number (owner, 2026-09-17). v10 wraps both.
+MIDI_SET_V92 = 0x401DB9F0
+STOCK_V92 = 0x40036692
+NEVER_FMT = b"%d.--\x00"
 
 # Any non-zero word will do -- xorshift32's only requirement.  It is re-seeded
 # from the image on every power-up, so NOI is deterministic per boot.
 NOISE_SEED = 0x2545F491
 
+# NOI v4: 1,024 x 8 bytes of per-LFO state in the unclaimed SDRAM above BSS end
+# 0x466b74d0. Other tenants of that region: lfo4-tick6a at 0x46700000..0x46703000,
+# the boot-screen area at 0x46710000.
+NOISE_RAM = 0x46740000
+
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes_DN2_1.11.syx")
+# v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
+# v11: v10 plus TRAP (SPH = edge slope, label SLOP), moved here from the wavetable build.
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes11_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
     return struct.pack(">I", v & 0xFFFFFFFF)
 
 
-def source(fn_table: int, state: int) -> str:
+def source(fn_table: int, state: int, short_names: int, long_names: int,
+           never_fmt: int, glyph_sets: int, label_table: int) -> str:
+    noise_ram = NOISE_RAM
+    noise_index = STOCK_ENTRIES + 2
     """The three generators and the three hook stubs.
 
     `%d2` and `%d3` are saved: the stock generators never touch them, so the
@@ -199,124 +229,255 @@ pulse:
     rts
 
 | ---- NOI: noise, clocked by the phase, coloured by SPH ------------------
-| Generators are called **every frame**, not every LFO tick, so a generator that
-| simply returned a fresh random number would run at the frame rate and ignore
-| SPD and MULT entirely.  So this one is a sample-and-hold driven by the phase:
-| the top eight bits are a step index, 256 steps per cycle, and a new value is
-| drawn only when that index changes.  The rate is then SPD x MULT x 256, which
-| is what the owner expects those two knobs to do -- and holding between steps is
-| also what keeps the pink and brown filters running at a fixed rate per step
-| instead of converging whenever the LFO is slow.
+| History, because each version failed differently on the instrument:
+| v2 held its sample in ONE global word shared by all 48 LFOs -> frame-rate noise,
+|    deaf to SPD and MULT.
+| v3 was stateless, a hash of the step within the cycle -> SPD and MULT worked,
+|    but every cycle replayed the same 64 values (owner: "it looked like the
+|    noise pattern repeated").
+| v4 never repeated -- but the owner found v3's per-cycle repetition *"good for
+|    music creation ... easy to insert in grooves, but is better to be able to
+|    control it."*
+| v5: each LFO instance owns 8 bytes of RAM -- its last step and a cycle count --
+|    found by a key the call hooks put in %d1's upper bits. The count wraps at the
+|    loop length, and the hash input is (cycle << 6) | step, so the pattern
+|    repeats every L cycles. SPD and MULT still set the rate; a held value still
+|    holds for the whole step; a backwards wrap (negative SPD) counts down.
+|    The RAM is uninitialised: garbage there only picks a different start.
 |
-| SPH picks the colour, four bands of 32:
+| SPH is two numbers, shown on the page as `colour.loop` (see fmt_sph):
+|   colour = SPH >> 5          1 white, 2 pink, 3 brown, 4 violet
+|   loop   = SPH & 31          0..30 -> repeats every loop+1 cycles, 31 -> never
 |
-|   SPH   0-31   white    the raw xorshift
-|   SPH  32-63   pink     two one-poles plus a quarter of the white
-|   SPH  64-95   brown    a leaky random walk, gained back up
-|   SPH  96-127  violet   the difference of successive whites
+|   white    h(n)
+|   pink     six octaves h(n >> k), equal weight
+|   brown    the same octaves, each slower one twice as loud
+|   violet   h(n) - h(n - 1)
+| ---- TRP: a trapezoid whose edge width is SPH ---------------------------
+| Owner, 2026-09-17: the trapezoid moves from the wavetable build into these
+| shapes, with SPH as the slope (label SLOP). A triangle over the cycle -- rising
+| through the first half, falling through the second -- is scaled and clipped.
 |
-| Every filter is shifts only: no multiply, no MAC, no MACSR state to disturb.
-noise:
+| [SUPERSEDED] lfo-waves v1 scaled by 1 + (127 - SPH) / 4. On the instrument the
+| glyph barely changed from SLOP 0 to 94: that law keeps each edge under two of
+| the tile's 28 pixels for most of the knob, and the sound bunches up the same way.
+| Now the gain is 127 / SPH, so **each edge is SPH/127 of a half-cycle wide**:
+| linear in the knob. SPH 0 is a square, 64 has half-width edges, 127 is the
+| plain triangle.
+trap:
     move.l  %d2,%sp@-
-    move.l  %d3,%sp@-
-    move.l  %sp@(12),%d0            | the phase, two pushes deep
-    lsr.l   #8,%d0
-    lsr.l   #8,%d0
-    lsr.l   #8,%d0                  | step index, 256 per cycle
-    move.l  {last:#010x},%d2
-    cmp.l   %d2,%d0
-    beq     9f                      | same step: hold
-    move.l  %d0,{last:#010x}
-
-    move.l  {state:#010x},%d0       | xorshift32, the white source
-    moveq   #13,%d2
-    move.l  %d0,%d3
-    lsl.l   %d2,%d3
-    eor.l   %d3,%d0
-    moveq   #17,%d2
-    move.l  %d0,%d3
-    lsr.l   %d2,%d3
-    eor.l   %d3,%d0
-    move.l  %d0,%d3
-    lsl.l   #5,%d3
-    eor.l   %d3,%d0
-    move.l  %d0,{state:#010x}
-
+    move.l  %sp@(8),%d0             | the phase
+    bpl.s   1f
+    not.l   %d0                     | fold the second half down: 0..2^31-1
+1:  subi.l  #0x40000000,%d0         | centred, +-2^30
+    asr.l   #7,%d0                  | +-2^23
     andi.l  #0x7f,%d1
-    lsr.l   #5,%d1                  | colour: 0..3
-    subq.l  #1,%d1
-    bmi     8f                      | white: %d0 is already the answer
-    beq     1f
-    subq.l  #1,%d1
-    beq     2f
-    bra     3f
+    bne.s   4f
+    tst.l   %d0                     | SPH 0: a square
+    bmi.s   2f
+    move.l  #0x007fffff,%d0
+    bra.s   3f
+4:  moveq   #127,%d2
+    muls.l  %d2,%d0                 | fits: 2^23 * 127 < 2^31
+    divs.l  %d1,%d0                 | gain 127 / SPH
+    cmpi.l  #0x007fffff,%d0
+    ble.s   5f
+    move.l  #0x007fffff,%d0
+    bra.s   3f
+5:  cmpi.l  #-0x00800000,%d0
+    bge.s   3f
+2:  move.l  #-0x00800000,%d0
+3:  asl.l   #8,%d0                  | full scale
+    move.l  %sp@+,%d2
+    rts
 
-1:  | pink -- a fast pole, a slow pole, and some of the white on top
-    move.l  {p0:#010x},%d2
-    move.l  %d0,%d3
+noise:
+    lea     %sp@(-20),%sp
+    moveml  %d2-%d5/%a2,%sp@
+    move.l  %sp@(24),%d4            | the phase, below five saved registers
+    moveq   #26,%d2
+    lsr.l   %d2,%d4                 | step 0..63
+    move.l  %d1,%d0
+    lsr.l   #8,%d0                  | the instance key, 0..1023
+    lsl.l   #3,%d0
+    lea     {noise_ram:#010x},%a2
+    adda.l  %d0,%a2                 | this LFO's 8 bytes
+    move.l  %d1,%d5
+    andi.l  #31,%d5                 | loop field: 31 = never repeat
+    move.l  %a2@(4),%d3             | cycle
+    move.l  %d4,%d0
+    sub.l   %a2@,%d0                | step - last
+    cmpi.l  #-32,%d0
+    bge.s   1f
+    addq.l  #1,%d3                  | wrapped forwards
+1:  cmpi.l  #32,%d0
+    ble.s   2f
+    subq.l  #1,%d3                  | wrapped backwards
+2:  cmpi.l  #31,%d5
+    beq.s   4f                      | never: let the count run
+    cmp.l   %d5,%d3
+    bls.s   4f                      | unsigned: 0..loop is in range
+    clr.l   %d3                     | past the end (or below zero): wrap to 0
+    tst.l   %d0
+    ble.s   4f
+    move.l  %d5,%d3                 | a backwards wrap lands on the last cycle
+4:  move.l  %d4,%a2@
+    move.l  %d3,%a2@(4)
+    lsl.l   #6,%d3
+    or.l    %d3,%d4                 | n = cycle << 6 | step
+    andi.l  #0x7f,%d1
+    lsr.l   #5,%d1
+    move.l  %d1,%d5                 | colour 0..3
+    beq.s   10f
+    cmpi.l  #3,%d5
+    beq.s   30f
+    clr.l   %d1                     | pink or brown: the octave sum
+    clr.l   %d2                     | k
+11: move.l  %d4,%d0
+    lsr.l   %d2,%d0
+    bsr     90f
+    moveq   #3,%d3                  | pink: equal weight
+    cmpi.l  #1,%d5
+    beq.s   12f
+    moveq   #6,%d3                  | brown: weight 2^-(6-k)
     sub.l   %d2,%d3
-    asr.l   #2,%d3
-    add.l   %d3,%d2
-    move.l  %d2,{p0:#010x}
-    move.l  {p1:#010x},%d3
+12: asr.l   %d3,%d0
+    add.l   %d0,%d1
+    addq.l  #1,%d2
+    cmpi.l  #6,%d2
+    blt.s   11b
+    move.l  %d1,%d0
+    bra.s   99f
+
+10: move.l  %d4,%d0                 | white
+    clr.l   %d2
+    bsr     90f
+    bra.s   99f
+
+30: move.l  %d4,%d0                 | violet
+    clr.l   %d2
+    bsr     90f
     move.l  %d0,%d1
-    sub.l   %d3,%d1
-    asr.l   #5,%d1
-    add.l   %d1,%d3
-    move.l  %d3,{p1:#010x}
-    asr.l   #2,%d0
-    asr.l   #1,%d2
-    add.l   %d2,%d0
-    add.l   %d3,%d0
-    bra     8f
-
-2:  | brown -- a leaky random walk, scaled back to a useful amplitude
-    move.l  {br:#010x},%d2
-    move.l  %d2,%d3
-    asr.l   #4,%d3
-    sub.l   %d3,%d2                 | leak
-    move.l  %d0,%d3
-    asr.l   #4,%d3
-    add.l   %d3,%d2                 | integrate
-    move.l  %d2,{br:#010x}
-    add.l   %d2,%d2
-    add.l   %d2,%d2
-    move.l  %d2,%d0                 | x4
-    bra     8f
-
-3:  | violet -- the first difference of white
-    move.l  {vi:#010x},%d2
-    move.l  %d0,{vi:#010x}
-    sub.l   %d2,%d0
+    move.l  %d4,%d0
+    subq.l  #1,%d0
+    clr.l   %d2
+    bsr     90f
+    sub.l   %d0,%d1
+    move.l  %d1,%d0
     asr.l   #1,%d0
 
-8:  | the filtered colours can overshoot, and an LFO that wrapped would click
-    cmpi.l  #0x60000000,%d0
-    ble     7f
-    move.l  #0x60000000,%d0
-    bra     6f
-7:  cmpi.l  #-0x60000000,%d0
-    bge     6f
-    move.l  #-0x60000000,%d0
-6:  move.l  %d0,{out:#010x}
-9:  move.l  {out:#010x},%d0
-    move.l  %sp@+,%d3
-    move.l  %sp@+,%d2
+99: moveml  %sp@,%d2-%d5/%a2
+    lea     %sp@(20),%sp
+    rts
+
+| ---- SPH's value text: `colour.loop` when this LFO's WAVE is NOIS --------
+| v5 put this in the `Start Phase` records' formatter, which is handed only
+| (value, dest), and found WAVE through two globals read under the emulator: the
+| active-track byte 0x42431a6c and the engine mirror. On the instrument SPH still
+| showed a plain number -- the track byte is inside a heap-allocated struct, so its
+| address is not fixed across projects. [SUPERSEDED]
+|
+| v6 wraps the sound ParameterSet's format method instead (vtable 0x401db7fc,
+| slot 92, stock 0x40036692), which is called as (this, record, value, dest). For
+| the three SPH records it asks the object itself for WAVE -- `this->vfunc40(this,
+| record - 2)` -- exactly as the firmware's own sibling method 0x4003660c does when
+| it checks SPH against WAVE == RND. No globals. Records: WAVE 79/89/99, SPH
+| 81/91/101 (table 0x401f7f94, 60 bytes a record).
+fmt_v92:
+    move.l  %sp@(8),%d0             | record
+    cmpi.l  #81,%d0
+    beq.s   71f
+    cmpi.l  #91,%d0
+    beq.s   71f
+    cmpi.l  #101,%d0
+    bne.s   79f
+71: movea.l %sp@(4),%a0             | this
+    movea.l %a0@,%a1
+    subq.l  #2,%d0                  | the same LFO's WAVE record
+    move.l  %d0,%sp@-
+    move.l  %a0,%sp@-
+    movea.l %a1@(40),%a1            | get(this, record)
+    jsr     %a1@
+    addq.l  #8,%sp
+    lsr.l   #8,%d0
+    cmpi.l  #{noise_index},%d0
+    bne.s   79f
+    move.l  %sp@(12),%d0
+    asr.l   #8,%d0                  | SPH 0..127
+    move.l  %d0,%d1
+    andi.l  #31,%d1                 | loop field
+    lsr.l   #5,%d0
+    addq.l  #1,%d0                  | colour 1..4
+    cmpi.l  #31,%d1
+    beq.s   78f
+    addq.l  #1,%d1                  | loop length in cycles, 1..31
+    move.l  %d1,%sp@-
+    move.l  %d0,%sp@-
+    pea     0x40210bce              | "%d.%02d", the firmware's own
+    move.l  %sp@(28),%sp@-          | dest: arg 4, past three pushes
+    jsr     0x40000e82
+    lea     %sp@(16),%sp
+    rts
+78: move.l  %d0,%sp@-               | never repeats: `colour.--`
+    pea     {never_fmt:#010x}
+    move.l  %sp@(24),%sp@-
+    jsr     0x40000e82
+    lea     %sp@(12),%sp
+    rts
+79: jmp     0x40036692              | every other record, or another wave: stock
+
+| hash: %d0 = value, %d2 = octave -> %d0, clobbers %d3. A murmur-style mix.
+90: move.l  %d2,%d3
+    lsl.l   #8,%d3
+    lsl.l   #4,%d3
+    add.l   %d3,%d0                 | a different stream per octave
+    addq.l  #1,%d0                  | so n = 0 does not hash to 0
+    move.l  #0x9e3779b1,%d3
+    mulsl   %d3,%d0
+    move.l  %d0,%d3
+    lsr.l   #8,%d3
+    lsr.l   #7,%d3
+    eor.l   %d3,%d0
+    move.l  #0x85ebca77,%d3
+    mulsl   %d3,%d0
+    move.l  %d0,%d3
+    lsr.l   #8,%d3
+    lsr.l   #5,%d3
+    eor.l   %d3,%d0
     rts
 
 | ---- evaluator A: reach the table, and carry SPH in %d1 -----------------
 a_call:
     lea     {fn_table:#010x},%a0
+    lea     %a4@(78),%a1            | &SPH: one address per track and LFO
+    bsr     80f
     mvs.b   %a4@(78),%d1            | SPH, slot 8*lfo+6
+    andi.l  #0x7f,%d1
+    or.l    %d0,%d1                 | the instance key above SPH's seven bits
     jmp     0x40137a00
 
 | ---- evaluator B: the same, then make the call and come back ------------
 | Entered by jmp, so the stack is exactly what the generator expects.
 b_call:
     move.l  %d1,%sp@(48)            | the displaced frame save
+    move.l  %a1,%sp@-               | %a1 is the generator: keep it
+    lea     %a4@(44),%a1            | &SPH -- the same address A computes
+    bsr     80f
+    move.l  %sp@+,%a1
     mvs.b   %a4@(44),%d1            | SPH, this evaluator's displacement
+    andi.l  #0x7f,%d1
+    or.l    %d0,%d1
     jsr     %a1@
     jmp     0x40137612
+
+| key: %a1 = &SPH -> %d0 = ((addr >> 1) & 1023) << 8. %d0 is free at both sites.
+| Slots are 202 bytes a track and 16 an LFO, so 101*dt + 8*dl never reaches
+| +-1024 for 16 tracks and 3 LFOs: 48 instances, 48 distinct keys.
+80: move.l  %a1,%d0
+    lsr.l   #1,%d0
+    andi.l  #1023,%d0
+    lsl.l   #8,%d0
+    rts
 
 | ---- SPH stops being a start phase for the two new shapes ---------------
 no_phase:
@@ -328,7 +489,7 @@ no_phase:
 1:  mvs.w   %a4@(78),%d2
 2:  sub.l   %d0,%d7                 | the displaced instruction
     jmp     0x40137894
-"""
+""" + ui.formatter_source(ENTRIES - 1, short_names, long_names) 
 
 
 def main() -> int:
@@ -343,31 +504,58 @@ def main() -> int:
     content = bytearray(section.unpack())
 
     require_zero(content, CAVE, CAVE_CAP, "cave region")
+    require_zero(content, DATA_CAVE, DATA_CAVE_CAP, "data cave region")
 
     # --- layout: names, then the five tables, then the code --------------
-    name_vas, cursor = [], CAVE
+    name_vas, cursor = [], DATA_CAVE
     for text in NEW_NAMES:
         name_vas.append(cursor)
         cursor += len(text)
     cursor = (cursor + 3) & ~3
     state_va, cursor = cursor, cursor + 4 * 7  # NOI: seed, filters, S&H
+    long_name_vas = []
+    for text in NEW_LONG_NAMES:
+        long_name_vas.append(cursor)
+        cursor += len(text)
+    never_va = cursor
+    cursor += len(NEVER_FMT)
+    cursor = (cursor + 3) & ~3
     names_va, cursor = cursor, cursor + 4 * ENTRIES
+    long_names_va, cursor = cursor, cursor + 4 * ENTRIES
     table_vas = {}
     for old in STOCK_TABLES:
         table_vas[old], cursor = cursor, cursor + 4 * ENTRIES
-    stub_va = cursor
+    glyph_va, cursor = cursor, cursor + glyph.size(SPH_LABELS)
+    glyph_bytes, glyph_sets, label_table = glyph.blob(glyph_va, SPH_LABELS)
+    if cursor - DATA_CAVE > DATA_CAVE_CAP:
+        raise SystemExit(f"data cave overflows: {cursor - DATA_CAVE} > {DATA_CAVE_CAP}")
+    stub_va = CAVE
 
     print("part 1 -- the generators and the hook stubs")
     payload, offsets = assemble_stubs(
-        source(table_vas[0x4020B340], state_va), stub_va)
+        source(table_vas[0x4020B340], state_va, names_va, long_names_va, never_va, glyph_sets, label_table), stub_va)
     used = (stub_va - CAVE) + len(payload)
     if used > CAVE_CAP:
         raise SystemExit(f"cave overflows: {used} > {CAVE_CAP}")
     write(content, stub_va, payload)
-    for label in LABELS:
+    # v8's glyph and label code outgrew the code cave: it assembles on its own,
+    # into the data cave after the data.
+    glyph_code_va = (cursor + 3) & ~3
+    glyph_code, glyph_offsets = assemble_stubs(
+        glyph.source(glyph_sets, table_vas[0x4020B340], len(SPH_LABELS), label_table,
+                     state_reset=NOISE_RAM + 8 * glyph.NOISE_GLYPH_KEY),
+        glyph_code_va, glyph.LABELS)
+    data_used = glyph_code_va + len(glyph_code) - DATA_CAVE
+    if data_used > DATA_CAVE_CAP:
+        raise SystemExit(f"data cave overflows: {data_used} > {DATA_CAVE_CAP}")
+    write(content, glyph_code_va, glyph_code)
+    offsets.update(glyph_offsets)
+    print(f"  glyph code {len(glyph_code)} bytes at {glyph_code_va:#010x}; "
+          f"data cave {data_used}/{DATA_CAVE_CAP}")
+    for label in LABELS + glyph.LABELS:
         print(f"  {label:<9} {offsets[label]:#010x}")
     TABLE_EXTRAS[0x4020B340] = [offsets["step"], offsets["pulse"],
-                                offsets["noise"]]
+                                offsets["noise"], offsets["trap"]]
 
     print(f"part 2 -- the {ENTRIES}-entry copies")
     write(content, state_va, be32(NOISE_SEED) + bytes(24))
@@ -378,6 +566,15 @@ def main() -> int:
     write(content, names_va, b"".join(be32(v) for v in old_names + name_vas))
     print(f"  names {STOCK_NAMES:#010x} -> {names_va:#010x}  "
           + " ".join(cstr(content, v) or "?" for v in old_names + name_vas))
+    for text, va in zip(NEW_LONG_NAMES, long_name_vas):
+        write(content, va, text)
+    write(content, never_va, NEVER_FMT)
+    write(content, glyph_va, glyph_bytes)
+    print(f"  glyph sets and SPH labels {', '.join(SPH_LABELS)}: {len(glyph_bytes)} bytes at {glyph_va:#010x}")
+    old_long = read_longs(content, ui.LONG_NAMES, STOCK_ENTRIES)
+    write(content, long_names_va, b"".join(be32(v) for v in old_long + long_name_vas))
+    print(f"  long names {ui.LONG_NAMES:#010x} -> {long_names_va:#010x}  "
+          + " ".join(cstr(content, v) or "?" for v in old_long + long_name_vas))
     for old in STOCK_TABLES:
         entries = read_longs(content, old, STOCK_ENTRIES) + TABLE_EXTRAS[old]
         write(content, table_vas[old], b"".join(be32(v) for v in entries))
@@ -385,13 +582,13 @@ def main() -> int:
               + ", ".join(f"{v:#x}" for v in entries))
 
     print("part 3 -- repoint every plain site")
-    resolved = {STOCK_NAMES: names_va, **table_vas}
+    resolved = dict(table_vas)
     for old, sites in REPOINTS.items():
         for va, prefix in sites:
             poke(content, va, prefix + be32(old), prefix + be32(resolved[old]),
                  f"{old:#010x} -> {resolved[old]:#010x}")
 
-    print("part 4 -- the three hooks")
+    print("part 4 -- the hooks: three in the evaluators, two value formatters")
     for va, stock, label in HOOKS:
         poke(content, va, stock, b"\x4e\xf9" + be32(offsets[label]),
              f"jmp -> {label}")
@@ -400,6 +597,20 @@ def main() -> int:
     for va in WAVE_MAX_FIELDS:
         poke(content, va, be32(STOCK_WAVE_MAX << 8), be32((ENTRIES - 1) << 8),
              "LFO Waveform max")
+
+    print("part 5c -- SPH shows colour.loop on NOIS")
+    poke(content, SOUND_SET_V92, be32(STOCK_V92), be32(offsets["fmt_v92"]),
+         "sound ParameterSet vtable slot 92 -> fmt_v92")
+    poke(content, MIDI_SET_V92, be32(STOCK_V92), be32(offsets["fmt_v92"]),
+         "MIDI ParameterSet vtable slot 92 -> fmt_v92")
+
+    print("part 5d -- the [MOD] page glyph")
+    for va, stock, new, why in glyph.clamp_edits(ENTRIES - 1) + glyph.hooks(offsets):
+        poke(content, va, stock, new, why)
+
+    print(f"part 5b -- the evaluators' WAVE clamps, 6 -> {ENTRIES - 1}")
+    for va, stock, new, why in ui.clamp_edits(ENTRIES - 1):
+        poke(content, va, stock, new, why)
 
     print("part 6 -- repack")
     OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -410,18 +621,19 @@ def main() -> int:
     return 0
 
 
-def assemble_stubs(text: str, base: int) -> tuple[bytes, dict[str, int]]:
+def assemble_stubs(text: str, base: int, labels=None) -> tuple[bytes, dict[str, int]]:
     """Assemble once, and read each label's address off a trailing table.
 
     The assembler returns raw bytes with no symbol table, so the source carries
     a `.long <label>` per stub that is read back and then cut away.  One
     assembly, so the addresses cannot drift from the bytes they describe.
     """
-    table = "\n".join(f"    .long {name}" for name in LABELS)
+    labels = labels or LABELS
+    table = "\n".join(f"    .long {name}" for name in labels)
     blob = assemble(text + "\n    .align 2\n" + table + "\n", base=base)
-    width = 4 * len(LABELS)
-    addrs = struct.unpack(f">{len(LABELS)}I", blob[-width:])
-    return blob[:-width], dict(zip(LABELS, addrs))
+    width = 4 * len(labels)
+    addrs = struct.unpack(f">{len(labels)}I", blob[-width:])
+    return blob[:-width], dict(zip(labels, addrs))
 
 
 def read_longs(content: bytearray, va: int, n: int) -> list[int]:

@@ -30,6 +30,16 @@ Two rules, both enforced rather than remembered:
   This matters beyond pedantry: every replacement of a compressed section
   changes its stored length a little, because compression depends on content.
   Reading the rule as forbidding that would rule out the whole mods system.
+
+  **Sharpened again 2026-09-17, on hardware.** The unpacked length of MAIN OS
+  *may* grow — **only by appending past its last byte**, into one shared area.
+  Nothing addresses that space, so nothing moves; the boot hook that copies it
+  above BSS is the only reader. `intro-bang_DN2_1.11.syx` did exactly that and
+  booted on the instrument. The area is a directory of named chunks
+  (`scripts/gen_bootscreen_code.py`), so several data-carrying mods can share one
+  copy hook instead of each appending their own; merging chunks from two mods is
+  the next piece of the compatibility system, and until it exists a mod that
+  appends refuses an image that already has an area.
 - **Integrity is not the mod's business.** A mod produces section payloads;
   `dnfw build` recomputes the section byte-sum, the content checksum and the
   HMAC-SHA256 trailer, and re-verifies before anything is written.
@@ -141,6 +151,22 @@ entries, while `TRAN` spanning 0..124 with 4-step interpolation implies 32.
 both good transients. So the interpolation model's step count or mapping is
 wrong, not the measurement — and the mapping from `TRAN`'s 125 positions onto 34
 entries is still unknown.
+
+## Mod 3: `bootscreen`
+
+The start-up animation: a user-supplied 128×64 mark written into the intro's
+source bitmap every frame, static or flashing, and the tunnel's texture scale.
+All choices are data in a `BOOT` chunk of the appended area; the 200 bytes of
+code are assembled once into `src/dnfw/mods/bootscreen_code.json` and shared with
+the site. `src/dnfw/mods/bootscreen.py` carries the evidence.
+
+    dnfw mods apply <image> --mod bootscreen --boot-image mark.pgm --boot-invert         --boot-slow 4 --boot-fast 3 --boot-rush 48 --boot-stop 72 --tunnel 128 64 -o out.syx
+
+Built through this command, it behaves identically to the hand-built
+`intro-bang` that passed on hardware: filmed under the emulator from the same
+snapshot, every frame whose intro frame number matches is byte-identical — the
+only differences are slices that land on a different frame, because the
+directory lookup spends a few more instructions per frame.
 
 ## Adding a mod
 
@@ -349,3 +375,37 @@ JavaScript path has been flashed.** The Python path has been, repeatedly, and
 the two produce byte-identical output on every input tried — which is strong,
 but it is an inference, not a flash. The first hardware run of a
 browser-produced image should be treated as a first run.
+
+## Mod 4: `lfowaves` — seven LFO waveforms, swappable wavetables
+
+`src/dnfw/mods/lfowaves.py`, `site/js/mods/lfowaves.js`, page `site/lfo.html`.
+STEP PULS NOIS TRAP WTB1 WTB2 WTB3 after RAND, each with its own glyph and a
+renamed SPH (STPS WDTH TYPE SLOP POS). Passed on hardware 2026-09-17 as
+`lfo-waves` / `lfo-waves2`.
+
+- **Pre-assembled.** `scripts/gen_lfo_waves_code.py` runs
+  `build_lfo_waves.compose` and writes `lfowaves_code.json` / `lfowaves-code.js`:
+  33 guarded edits (stock bytes checked before writing), a 2,684-byte blob with
+  every stock-derived range blanked (six `fills` read from the user's own image),
+  and the three table offsets. No reassembly is needed to change a table: the
+  generators and the glyph renderer read the tables at run time.
+- **Wavetable input** (`src/dnfw/wavetable.py`, `site/js/wavetable.js`, same
+  algorithm): a WAV wavetable — Serum/Vital style, frame size from a `clm `
+  chunk, else 2048, else one cycle; PCM 8/16/24/32 or float 32/64; first channel —
+  or a JSON `{"frames": [[...]]}`. Reduced to 7 frames (linear along the table),
+  32 points each (box average), scaled so the loudest point is 127.
+- **CLI:** `dnfw mods apply firmware.syx --mod lfowaves --wavetable 2=table.wav -o out.syx`.
+- **Parity:** `node scripts/js_lfowaves_check.mjs` — WAV → identical 224 bytes,
+  MAIN OS identical to the Python mod, rebuilt image 21/21; a float-32 stereo
+  single-cycle WAV also reduces identically. The Python mod equals
+  `build_lfo_waves.compose` with the same tables.
+- **Page, driven headless in Chrome** (the harness drops the stock `.syx` and a
+  WAV, clicks Build): seven waves listed, the WAV lands in WTB2, a junk file
+  explains itself, build verifies 21/21 and offers the download.
+
+![LFO Waves page](img/site-lfo-page.png)
+
+**Conflicts:** claims the startup hook and grows MAIN OS through the appended
+area, as the boot-screen mod does — `check_compatible` reports it; they are
+alternatives until a shared area registry exists.
+

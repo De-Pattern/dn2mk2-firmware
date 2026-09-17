@@ -164,6 +164,39 @@ dnfw mods apply firmware.syx --mod moddest --mod transients --from my_hits/ -o m
   </div>
 </article>
 
+<article class="mod">
+  <div class="mod-head">
+    <h3>LFO waves</h3>
+    <span class="mod-id">lfowaves</span>
+    <span class="tag ready">Confirmed on hardware</span>
+  </div>
+  <p>
+    Seven new LFO waveforms after <code>RAND</code>: a stepped staircase, a pulse with
+    variable width, coloured noise with a loop length, a trapezoid with adjustable edges,
+    and three wavetables. Each draws its own shape on the LFO page, and the knob that was
+    <code>SPH</code> is renamed for what it does. <strong>Swap any of the three wavetables
+    for your own</strong> WAV wavetable.
+  </p>
+
+  <p style="margin-top:1.2rem">
+    <a class="cta" href="lfo.html">Open the LFO Waves tool &#8594;</a>
+  </p>
+  <p class="cta-note">
+    Runs entirely in your browser &mdash; no install, no command line, nothing uploaded.
+  </p>
+
+  <dl class="facts">
+    <dt>Adds</dt><dd><code>STEP</code> (STPS), <code>PULS</code> (WDTH), <code>NOIS</code> (TYPE), <code>TRAP</code> (SLOP), <code>WTB1 WTB2 WTB3</code> (POS)</dd>
+    <dt>Wavetables</dt><dd>Ours: basic shapes, harmonic sweep, vowels &mdash; or yours: a WAV wavetable (Serum/Vital style) or a JSON table, reduced to 7 frames of 32 points</dd>
+    <dt>Changes</dt><dd>33 small edits in section 3 and 2.7&nbsp;KB of data after its end, copied to RAM at start-up</dd>
+    <dt>Tested</dt><dd>Flashed 2026-09-17: boots; all seven waves work on audio and MIDI tracks, with their shapes and labels</dd>
+    <dt>Combines</dt><dd>With the transient and destination mods; <strong>not</strong> with the boot screen yet (both use the start-up hook)</dd>
+  </dl>
+
+<pre># ours, or replace wavetable 2 with your own
+dnfw mods apply firmware.syx --mod lfowaves --wavetable 2=my_table.wav -o modded.syx</pre>
+</article>
+
 <h2>How mods stay compatible</h2>
 
 <p>
