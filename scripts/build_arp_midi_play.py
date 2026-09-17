@@ -32,8 +32,14 @@ track's sound slot holds these bytes and keeps them.
 2. **A MIDI track with the arp on takes the synth road** at all three forks, so
    its notes reach the ISR's arp. Arp off, or a synth track: stock.
 3. **At the voice trigger, a MIDI track's note becomes a MIDI record** instead
-   of a voice. Its note and velocity are the arp's step; its length is N.LEN
-   while the arp runs, else the note's own. It is appended to the batch the ISR
+   of a voice. Its note is the arp's step (offsets already applied by
+   `0x4002a0bc`); velocity and length resolve through the sound at `+44` when
+   negative, as the ISR and the MIDI task both do. While the arp runs the length
+   is N.LEN, converted from the arp's length table (`0x40287b08`) to the trig
+   table the MIDI task reads (`0x401d88d8`) by a lookup built from the image.
+   Every record reaching the trigger is a note: `+56` bit 1 is not a gate, only
+   whether the track keeps a held copy (`0x400db4ac`); a record already voiced
+   (bit 20) is skipped. It is appended to the batch the ISR
    already hands the MIDI task once per frame (head `-180(%fp)`, tail `%a5`,
    posted at `0x40026f60`), so nothing new crosses a context boundary. The MIDI
    task then sends it on the track's channel and schedules its note-off from
@@ -54,6 +60,10 @@ is sent as 126, the longest finite one.
    Its `beq.s` becomes `bra.s`: the view stays open on any track.
 
 ## What to listen and look for
+
+Hardware, 2026-09-17 (DNX captures): `arp-midi-play4` passes -- offsets,
+velocity, SPD, N.LEN 1/32..1/4 within a millisecond, no stuck notes. The builds
+before it and what each taught are in `docs/ideas-backlog.md` section 10.
 
 | on a MIDI track, arp ON | means |
 |---|---|
