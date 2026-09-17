@@ -84,80 +84,10 @@ OUT = pathlib.Path("00_Resources/02_Builds/lfo-wavetables_DN2_1.11.syx")
 
 def source(fn_table: int, tables: list[int], short_names: int, long_names: int,
            glyph_sets: int, label_table: int) -> str:
-    last = (wt.FRAMES - 1) * 1024
     return f"""
     .text
 
-| ---- WTB1..3: bilinear through 7 frames x 32 samples, SPH = position -----
-wt1:
-    lea     {tables[0]:#010x},%a0
-    bra.s   10f
-wt2:
-    lea     {tables[1]:#010x},%a0
-    bra.s   10f
-wt3:
-    lea     {tables[2]:#010x},%a0
-10: lea     %sp@(-24),%sp
-    moveml  %d2-%d7,%sp@
-    move.l  %sp@(28),%d7            | the phase
-    andi.l  #0x7f,%d1
-    move.l  %d1,%d6
-    lsl.l   #6,%d6                  | *64
-    move.l  %d1,%d0
-    lsl.l   #4,%d0                  | *16
-    sub.l   %d0,%d6                 | *48
-    add.l   %d1,%d6                 | *49: position, 10-bit frames
-    cmpi.l  #{last},%d6
-    ble.s   11f
-    move.l  #{last},%d6
-11: move.l  %d6,%d5
-    moveq   #10,%d0
-    lsr.l   %d0,%d5                 | frame
-    andi.l  #1023,%d6               | between frames
-    cmpi.l  #{wt.FRAMES - 1},%d5
-    bne.s   12f
-    moveq   #{wt.FRAMES - 2},%d5
-    move.l  #1024,%d6
-12: move.l  %d7,%d4
-    moveq   #27,%d0
-    lsr.l   %d0,%d4                 | sample 0..31
-    moveq   #17,%d0
-    lsr.l   %d0,%d7
-    andi.l  #1023,%d7               | between samples
-    move.l  %d4,%d3
-    addq.l  #1,%d3
-    andi.l  #31,%d3                 | the next sample, wrapping
-    move.l  %d5,%d2
-    lsl.l   #5,%d2                  | row offset
-    bsr     20f                     | row(f) -> %d0
-    movea.l %d0,%a1
-    addi.l  #{wt.SAMPLES},%d2
-    bsr     20f                     | row(f+1) -> %d0
-    move.l  %a1,%d1
-    sub.l   %d1,%d0
-    muls.l  %d6,%d0                 | (row(f+1) - row(f)) * ff
-    asl.l   #8,%d1
-    asl.l   #2,%d1                  | row(f) * 1024
-    add.l   %d1,%d0
-    asl.l   #4,%d0
-    moveml  %sp@,%d2-%d7
-    lea     %sp@(24),%sp
-    rts
-
-| row: %a0 table, %d2 row offset, %d4/%d3 samples, %d7 sf -> %d0. Clobbers %d1.
-20: move.l  %d2,%d0
-    add.l   %d4,%d0
-    mvs.b   %a0@(0,%d0:l),%d0       | a
-    move.l  %d2,%d1
-    add.l   %d3,%d1
-    mvs.b   %a0@(0,%d1:l),%d1       | b
-    sub.l   %d0,%d1
-    muls.l  %d7,%d1
-    asl.l   #8,%d0
-    asl.l   #2,%d0
-    add.l   %d1,%d0
-    rts
-
+""" + wt.generator_source(tables) + f"""
 | ---- the two call sites carry SPH in %d1 -------------------------------------
 a_call:
     lea     {fn_table:#010x},%a0

@@ -34,9 +34,12 @@ RUNTIME_VA = 0x46710000   # where build_payload_section.py's boot hook copies a 
 
 
 def main() -> int:
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (4, 5):
         raise SystemExit(__doc__)
-    stock, built, out = (pathlib.Path(a) for a in sys.argv[1:])
+    stock, built, out = (pathlib.Path(a) for a in sys.argv[1:4])
+    # An optional fourth argument names where the build's boot hook copies its
+    # appended data, for builds that do not use the boot-screen area's address.
+    runtime_va = int(sys.argv[4], 0) if len(sys.argv) == 5 else RUNTIME_VA
     a = load(read_image(stock)).container.find(MAIN_OS).unpack()
     b = load(read_image(built)).container.find(MAIN_OS).unpack()
     if len(b) < len(a):
@@ -59,7 +62,7 @@ def main() -> int:
         ranges.append({"va": f"{BASE + i:#010x}", "hex": b[i:j].hex()})
         i = j
     if tail:
-        ranges.append({"va": f"{RUNTIME_VA:#010x}", "hex": tail.hex(),
+        ranges.append({"va": f"{runtime_va:#010x}", "hex": tail.hex(),
                        "note": "appended payload, placed where the boot copy puts it"})
 
     pathlib.Path(out).write_text(json.dumps({"stock": str(stock), "built": str(built),

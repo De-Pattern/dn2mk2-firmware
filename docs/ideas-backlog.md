@@ -2540,6 +2540,39 @@ add the trapezoid as a wave shape"*. Chosen: **several tables**, and TRAP with
 **Still exclusive:** the two builds use the same two caves; combining them needs
 the appended-data route (`docs/memory-map.md`).
 
+### Everything combined, BUILT 2026-09-17: `lfo-waves` — the appended blob
+
+Owner: *"make a firmware with everything combined"*, and *"would [it] save any
+space putting all this in a separate section and calling the section from the
+small caves?"* Yes, and this build is that design (a new ELE3 section would not
+load itself — §6 — so the proven appended area is the section):
+
+- **One cave, 46 bytes:** the boot copy stub on the startup calls (`0x4000053e`):
+  `.data` init, copy the appended blob (`LFOW` magic, length) to `0x46780000`,
+  BSS clear.
+- **Everything else in a 2,672-byte blob appended to MAIN OS** and assembled at
+  its runtime address: STEP PULS NOIS TRAP generators, WTB1–3 generator and
+  tables, call hooks, formatters, SPH wrapper, glyph renderer and labels, names,
+  relocated waveform tables, glyph sets. Image edits point into RAM.
+- **Waves 7–13:** STEP PULS NOIS TRAP WTB1 WTB2 WTB3; SPH labels STPS WDTH TYPE
+  SLOP POS POS POS. MAIN OS +2,672 B (intro-bang, passed, was +2,092).
+- `scripts/build_lfo_waves.py` reuses the waveshapes source, `wavetables.
+  generator_source` (moved there; `lfo-wavetables` rebuilt byte-identical) and the
+  glyph module. `build_diff.py` takes an optional runtime address.
+
+**Verified:** Unicorn (`scripts/check_lfo_waves.py`) — the boot stub calls init
+then clear and copies the blob byte for byte; from RAM, WTB1–3 and TRAP match
+their references (600 calls, 0 mismatches), STEP gives 16 levels, PULS 50% duty,
+NOIS 64 distinct steps. Emulator, blob overlaid at `0x46780000` (guirun
+`--patch-ranges` now maps 1 MB pages, the fault sink's granularity, after a 4 KB
+map collided with it): STEP/STPS, PULS/WDTH, TRAP/SLOP, WTB1–3/POS drawn, SINE
+back to SPH; the NOIS frame caught a loading overlay.
+
+![combined](img/lfo-waves-combined-emulator.png)
+
+**Not proven until flashed:** a cold boot running the copy on the instrument
+with this blob — the same mechanism intro-bang passed with.
+
 ## 15. A wavetable synth machine
 
 **Asked for by the owner, 2026-09-17**, and it corrects a misreading recorded in
