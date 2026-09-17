@@ -2511,6 +2511,35 @@ settle before this is built**, and it is the same space question as §1 and §6.
 
 ---
 
+### Three wavetables and TRAP, BUILT 2026-09-17
+
+Owner on `lfo-wavetable4`: works, glyph too — *"but a wavetable option should be
+richer in the transition between waves ... some mythical and loved wavetable to
+sweep across more than just the trapezoid changing frequency"*, and *"we should
+add the trapezoid as a wave shape"*. Chosen: **several tables**, and TRAP with
+**edge slope** on SPH.
+
+- **`lfo-wavetables_DN2_1.11.syx`** (`scripts/build_lfo_wavetables.py`,
+  tables in `scripts/wavetables.py`): WTB1 basic shapes (sine → triangle → saw →
+  square → narrowing pulses), WTB2 harmonic sweep (1 → 15 harmonics, PPG-style,
+  additive), WTB3 vowels (A E I O U I E, two formant bumps on harmonics). **All
+  generated from our own maths**, no ROM data. SPH = position, label `POS`. Each
+  table is 7 frames × 32 signed bytes; the generator interpolates bilinearly
+  (phase and position). Code cave 892/896, data 816/896 — this build is full.
+  **Verified in Unicorn** against the Python reference (`wavetables.reference`):
+  2,145 calls, all equal, registers intact. Supersedes `lfo-wavetable4`.
+- **`lfo-waveshapes11_DN2_1.11.syx`**: TRAP added as waveform 10 — a clipped
+  triangle with gain `1 + (127 − SPH)/4`, SPH 0 near-square, 127 triangle; label
+  `SLOP`. Checked in Unicorn against its formula (516 calls, 0 mismatches).
+- **Filmed under the emulator** (WAVE and SPH poked): TRAP at SPH 0 and 64
+  (the 127 frame caught a loading overlay), WTB1 at POS 0/64/127, WTB2 at 48/127,
+  WTB3 at 0/64.
+
+![TRAP and wavetables](img/lfo-trap-wavetables-emulator.png)
+
+**Still exclusive:** the two builds use the same two caves; combining them needs
+the appended-data route (`docs/memory-map.md`).
+
 ## 15. A wavetable synth machine
 
 **Asked for by the owner, 2026-09-17**, and it corrects a misreading recorded in

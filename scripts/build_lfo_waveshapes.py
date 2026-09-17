@@ -104,18 +104,18 @@ DATA_CAVE_CAP = 896
 STOCK_NAMES = 0x401D3574            # TRI SIN SQR SAW EXP RMP RND
 STOCK_TABLES = (0x4020B2EC, 0x4020B308, 0x4020B324, 0x4020B340)
 STOCK_ENTRIES = 7
-NEW_NAMES = (b"STP\x00", b"PLS\x00", b"NOI\x00")
-NEW_LONG_NAMES = (b"STEP\x00", b"PULS\x00", b"NOIS\x00")
+NEW_NAMES = (b"STP\x00", b"PLS\x00", b"NOI\x00", b"TRP\x00")
+NEW_LONG_NAMES = (b"STEP\x00", b"PULS\x00", b"NOIS\x00", b"TRAP\x00")
 ENTRIES = STOCK_ENTRIES + len(NEW_NAMES)
 
 # What each of the four value tables gets for the three new indices.  The hold
 # value and both start values are zero, as `SAW`'s are; the generator pointers
 # are filled in once the stubs are assembled.
 TABLE_EXTRAS = {
-    0x4020B2EC: [0, 0, 0],          # per-waveform hold value
-    0x4020B308: [0, 0, 0],          # start value, positive phase
-    0x4020B324: [0, 0, 0],          # start value, negative phase
-    0x4020B340: [None, None, None],  # the generator function pointers
+    0x4020B2EC: [0, 0, 0, 0],          # per-waveform hold value
+    0x4020B308: [0, 0, 0, 0],          # start value, positive phase
+    0x4020B324: [0, 0, 0, 0],          # start value, negative phase
+    0x4020B340: [None, None, None, None],  # the generator function pointers
 }
 
 # Plain repoints: every `lea`/`pea` that names a table and is not itself hooked.
@@ -139,9 +139,9 @@ HOOKS = (
     (ui.SHORT_FMT, ui.FMT_ENTRY_STOCK, "fmt_short"),
     (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
-LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase",
+LABELS = ("step", "pulse", "noise", "trap", "a_call", "b_call", "no_phase",
           "fmt_v92") + ui.LABELS
-SPH_LABELS = ["STPS", "WDTH", "TYPE"]   # owner-approved: STPS, WDTH, TYPE
+SPH_LABELS = ["STPS", "WDTH", "TYPE", "SLOP"]   # owner-approved
 
 # The sound ParameterSet's vtable slot 92 (format a record's value), v6's hook.
 SOUND_SET_V92 = 0x401DB858
@@ -163,8 +163,8 @@ NOISE_RAM = 0x46740000
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 # v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
-# v10: v9 with SPH colour.loop on MIDI tracks too.
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes10_DN2_1.11.syx")
+# v11: v10 plus TRAP (SPH = edge slope, label SLOP), moved here from the wavetable build.
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes11_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
@@ -253,6 +253,36 @@ pulse:
 |   pink     six octaves h(n >> k), equal weight
 |   brown    the same octaves, each slower one twice as loud
 |   violet   h(n) - h(n - 1)
+| ---- TRP: a trapezoid whose edge slope is SPH ---------------------------
+| Owner, 2026-09-17: the trapezoid moves from the wavetable build into these
+| shapes, with SPH as the slope ("edge slope", label SLOP). A triangle over the
+| cycle -- rising through the first half, falling through the second -- is scaled
+| by a gain of 1 + (127 - SPH) / 4 and clipped: SPH 127 is the plain triangle,
+| SPH 0 a gain of 32, which is a square with 1/64-cycle edges.
+trap:
+    move.l  %d2,%sp@-
+    move.l  %sp@(8),%d0             | the phase
+    bpl.s   1f
+    not.l   %d0                     | fold the second half down: 0..2^31-1
+1:  subi.l  #0x40000000,%d0         | centred, +-2^30
+    asr.l   #7,%d0                  | +-2^23, room for the gain
+    andi.l  #0x7f,%d1
+    moveq   #127,%d2
+    sub.l   %d1,%d2
+    lsr.l   #2,%d2
+    addq.l  #1,%d2                  | gain 1..32
+    muls.l  %d2,%d0
+    cmpi.l  #0x007fffff,%d0
+    ble.s   2f
+    move.l  #0x007fffff,%d0
+    bra.s   3f
+2:  cmpi.l  #-0x00800000,%d0
+    bge.s   3f
+    move.l  #-0x00800000,%d0
+3:  asl.l   #8,%d0                  | full scale
+    move.l  %sp@+,%d2
+    rts
+
 noise:
     lea     %sp@(-20),%sp
     moveml  %d2-%d5/%a2,%sp@
@@ -517,7 +547,7 @@ def main() -> int:
     for label in LABELS + glyph.LABELS:
         print(f"  {label:<9} {offsets[label]:#010x}")
     TABLE_EXTRAS[0x4020B340] = [offsets["step"], offsets["pulse"],
-                                offsets["noise"]]
+                                offsets["noise"], offsets["trap"]]
 
     print(f"part 2 -- the {ENTRIES}-entry copies")
     write(content, state_va, be32(NOISE_SEED) + bytes(24))
