@@ -1762,7 +1762,7 @@ yes: the evaluators run a fourth LFO over the relocated, grown state and apply i
 Recorded in `docs/flashing.md`.
 
 **Confirmed on follow-up by the owner:** LFO1–3 unaffected, and the sweep on
-all tracks. **Still pending:** DNX's read of a saved sound (lane 4 of bytes 36–93
+all tracks. **DNX's read also passes** (lane 4 all `00 00`, no trace of LFO4's values; LFO3 `DEP 7ffe` matches only by coincidence — its other fields differ). ~~Still pending:~~ DNX's read of a saved sound (lane 4 of bytes 36–93
 must stay `00 00`). The owner saved `LFO4_TICK.dn2pst` for it; DNX has the request.
 
 **What this unblocks:** the remaining LFO4 pieces are now storage and UI, not
