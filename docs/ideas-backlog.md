@@ -1576,7 +1576,7 @@ and the branch:
 
 The other arm chooses between `"Arpeggiator ON"` and `"Arpeggiator OFF"` at
 `0x40215d3f`, which is how we know it is the plain toggle and not a second setup
-view. `0x401160ac` has **132 callers**, so it is a fundamental track property and
+view. `0x401160ac` has **132 callers**, so it is a fundamental ~~track property~~ **[WRONG — corrected below: it is the key event's FUNC-held bit]** and
 is left alone: the edit is the branch, `beq.s` -> `bra.s`, **one byte**.
 
 **What the instrument will say:**
@@ -1617,6 +1617,49 @@ that offers an arp page and does nothing is visible and harmless, in the way
 **Not started.** Filed while the PCM thread was blocked on port access.
 
 ---
+
+### FAILED on hardware 2026-09-17, and why: v1 edited the FUNC branch, not the MIDI gate
+
+Owner: *"arpegiator menu doesn't open on the midi track with the firmware"*.
+Re-reading the ARP key's case in `0x4005ed12` shows three tests, not one:
+
+```
+0x4005f996  jsr   0x401160bc   | key event: pressed (bit 0) and not bit 3
+0x4005f9a0  beq.w 0x4005ef52   | -> leave
+0x4005f9b6  jsr   0x40031274   | (u16 @ kit-runtime +0x5cda >> track) & 1
+0x4005f9c2  bne.w 0x4005ef52   | MIDI track -> leave            <-- the real gate
+0x4005f9c8  jsr   0x401160ac   | key event bit 1 = [FUNC] held
+0x4005f9da  beq.s 0x4005fa3c   | no FUNC -> ArpSetupMenuView   <-- what v1 edited
+```
+
+- **`%d2` is the key event, not a track.** It is the dispatcher's second
+  argument; `0x40116018` on it returns the key code the jump table switches on.
+  So `0x401160ac`'s bit 1 is the **FUNC modifier**, which is also why it has 132
+  callers. The manual, p. 86: *"[FUNC] + [ARP] to toggle the current track's
+  arpeggiator on/off"* — the arm with the ON/OFF popup.
+- **`+0x5cda` is the synth/MIDI mask.** The kit loader copies it from kit offset
+  10,260 (`0x400dddac`) and the saver writes it back (`0x400ddf16`); DNX verified
+  that offset as the per-track synth/MIDI mask from hardware captures, with no
+  reference to this code. Two independent routes to the same field.
+- **So v1 never reached a MIDI track, and it did change audio tracks:** [FUNC] +
+  [ARP] opens the setup view instead of toggling. v1's control row ("audio
+  tracks unchanged") was wrong and would only show with FUNC held.
+
+**The lesson is the one `lfo4` already taught:** name a register from what the
+caller passes, not from the callee's shape. A one-line bit accessor is the same
+code whether its object is a track or a key event.
+
+### v2 BUILT 2026-09-17: `arp-on-midi2_DN2_1.11.syx`
+
+`scripts/build_arp_on_midi2.py`. The FUNC branch is left stock; the MIDI test's
+`bne.w` becomes `nop; nop`, so a MIDI track reaches the same FUNC split an audio
+track does. 21 integrity checks, HMAC reproduced. Same verdict table as v1, plus:
+**[FUNC] + [ARP] on an audio track must still toggle** (v1 broke it). If the menu
+opens but nothing arpeggiates, the next gates are the engine's bit tests of the
+same mask, already seen at `0x400d9ee0`, `0x400d9062`, `0x400f7f14` and
+`0x40121f82`. The view writes sound-object arp bytes 324..353 of a MIDI track's
+preset — not known to be used otherwise, not proven — so test on a scratch
+project.
 
 ## 11. A real compatibility check between mods
 

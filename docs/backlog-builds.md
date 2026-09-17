@@ -28,7 +28,7 @@ not been flashed has not been tested.
 | 7 | The DSP hunt | **parked**, with an explicit warning | — |
 | 8 | New LFO waveforms | **DELIVERED** — `lfo-waveshapes_DN2_1.11.syx` (`STP`, `PLS`, `NOI`) | awaiting a flash |
 | 9 | A custom start-up animation | **DELIVERED** — `intro-tunnel_DN2_1.11.syx`: the intro is a 1/r polar tunnel, and two bytes re-scale it. **Seen running under the emulator**: 9,086 of 16,384 table entries change as predicted | awaiting a flash |
-| 10 | The arpeggiator on MIDI tracks | **DELIVERED** — `arp-on-midi_DN2_1.11.syx`, one byte | awaiting a flash |
+| 10 | The arpeggiator on MIDI tracks | **DELIVERED** — ~~`arp-on-midi_DN2_1.11.syx`, one byte~~ **FAILED on hardware 2026-09-17** (edited the FUNC branch; the MIDI gate sits before it). **v2 `arp-on-midi2_DN2_1.11.syx`**: the real gate, two NOPs | v1 failed; v2 awaiting a flash |
 | 11 | A real compatibility check between mods | **not a firmware** — it is a check over builds | n/a |
 | 12 | P-locking the performance modulators | **not started** — route (b) scoped | — |
 | 13 | A mod stamp on the intro screen | **DELIVERED** — `intro-stamp` (`MOD` beside the logo), then the owner's redesign: `intro-burst` (logo knocked out of a comic burst) and `intro-bang` (the burst flashes inverted, then explodes into the tunnel). **All seen running under the emulator.** Alternatives: flash one | **`intro-bang` PASSED on hardware 2026-09-17** |
