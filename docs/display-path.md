@@ -1224,3 +1224,36 @@ the centre:
 **Still unread:** who fills the source bitmap and builds the table, and whether
 the Digitone's source is the Digitone glyph. The Digitone 400M rung is being
 built to answer the second.
+
+
+## The static screen before the intro — located on hardware, not yet in code — 2026-09-17
+
+The owner photographed it on the instrument: the Elektron logo centred, a **`B`**
+bottom-left and **`1.11`** bottom-right, shown **before** the animation — with
+`intro-bang` flashed, this screen still appears stock and the bang follows it.
+
+Under the emulator, `guirun.py --png-at` reads the **real panel memory** rather
+than the pixels `setPixel` was given, and from the 380M snapshot at +10M it shows
+the plain logo — correctly oriented, as in the photo — with **no `B` and no
+`1.11`**:
+
+![panel at 380M+10M](img/intro-panel-plain-logo.png)
+
+Two corrections this forces on earlier readings:
+
+- **The source-bitmap dumps are stored flipped.** `scripts/dump_bitmap.py` renders
+  the bitmap in storage order; the copy routine maps it the right way up. The mark
+  a mod writes must account for this — `intro-bang` was built from the stored
+  orientation and passed, so the mapping is consistent, but a user-supplied image
+  on the site must be flipped the same way before it is stored.
+- **The films record only `setPixel` pixels.** Anything a blit draws on the panel
+  never appears in them. The text screen is not in these films for that reason
+  *and* because it happens before 380M.
+
+**So the version screen precedes the intro task this work has been hooking.** The
+bottom-left letter and version are composed at runtime (`docs/ideas-backlog.md`
+§13 has said so since 2026-09-16). Unifying the boot mod — the owner's request,
+so the stamp carries from that first screen into the animation — needs that
+screen's drawing code found first. The route: `guirun --png-at` from the 60M
+snapshot across 250M–380M to see when the text appears, then a write watch on the
+panel memory in that window.
