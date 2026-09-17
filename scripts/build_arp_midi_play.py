@@ -117,7 +117,8 @@ LEAVE = """9:  moveq   #0,%d0
     rts"""
 
 # --diag: every MIDI-track record that reaches the hook goes out, and is voiced
-# as well. A filtered one is replaced by a marker note on the same channel:
+# as well, at velocity 100 and length 6. A filtered one is replaced by a marker
+# note on the same channel:
 # C1 (24) gate off, D1 (26) legato bit 18, E1 (28) already-voiced bit 20.
 DIAG_FILTER = "\n"
 DIAG_MARK = """    move.l  56(%a2),%d1
@@ -131,11 +132,11 @@ DIAG_MARK = """    move.l  56(%a2),%d1
     btst    #20,%d1
     beq.s   16f
 15: move.b  %d0,38(%a3)
-    moveq   #100,%d0
+16: moveq   #100,%d0                    | every note: fixed velocity and length,
+                                        | so neither can be what silences it
     move.b  %d0,39(%a3)
     moveq   #6,%d0
     move.b  %d0,40(%a3)
-16:
 """
 DIAG_LEAVE = f"""    jmp     {VOICE_TRIGGER:#x}              | and voice it: the hook fired if T16 sounds"""
 
