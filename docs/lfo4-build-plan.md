@@ -1761,9 +1761,9 @@ Owner: *"`lfo4-tick6a_DN2_1.11.syx` -> works."* The engine question is answered
 yes: the evaluators run a fourth LFO over the relocated, grown state and apply it.
 Recorded in `docs/flashing.md`.
 
-**Not covered by a one-word report, so not claimed:** LFO1–3 unaffected, all
-sixteen tracks sweeping, and DNX's read of a saved sound (lane 4 of bytes 36–93
-must stay `00 00`). Those are cheap to ask for and are the next confirmations.
+**Confirmed on follow-up by the owner:** LFO1–3 unaffected, and the sweep on
+all tracks. **Still pending:** DNX's read of a saved sound (lane 4 of bytes 36–93
+must stay `00 00`). The owner saved `LFO4_TICK.dn2pst` for it; DNX has the request.
 
 **What this unblocks:** the remaining LFO4 pieces are now storage and UI, not
 engine — feed the fourth slot from the per-track mirror (which needs mirror
