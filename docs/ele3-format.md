@@ -137,7 +137,7 @@ exactly as predicted: `'6'` is 54, and the build was `0097`.
 Sections are laid out on 16-byte boundaries in ascending offset order, after
 the header and table. Section ids: 1 FPGA, 2 bootstrap, 3 MAIN OS, 4 updater,
 5 meta, 6 boot, 7 blob — labels, not ground truth; Elektron document none of
-them. OS 1.11 adds an id 8, compressed, about 160 KB, not yet looked at.
+them. OS 1.11 adds an id 8, compressed, about 160 KB, ~~not yet looked at~~ (ARM Cortex-M firmware). **All sections, their names' origin and what each holds: `docs/firmware-sections.md`.**
 
 **Id 2 is the bootstrap, not DSP code.** It was labelled "DSP" from
 `format.h` until its content was read (2026-09-11): it is ColdFire code with its
@@ -170,8 +170,8 @@ compressed and DN1's is not. There is no flag; the only test is whether the
 bytes depack. This is why `firmware.build.replacement` reads the answer off the
 original section (`docs/PRINCIPLES.md` §14).
 
-What `blob` holds is **UNKNOWN** — 833 KB on the DN2, plausibly fonts, graphics
-or factory data. It has not been looked at.
+~~What `blob` holds is **UNKNOWN** — 833 KB on the DN2, plausibly fonts, graphics
+or factory data. It has not been looked at.~~ **[SUPERSEDED]** It is the SHARC DSP program (`docs/sharc-image.md`).
 
 ## 4. Sections — `src/dnfw/container/section.py`
 
