@@ -36,10 +36,16 @@ FX, `0x10` chorus, `0x13`/`0x14` master, `0x16` MIDI notes, `0x17` MIDI SRC,
    FDBK. ENV 76, DEL 77, ATK..REL 78..81, RSET 85, KEY.T 82, BASE 83, WDTH 84,
    BW.RT 105 are single records on the shared page `0x0d`. So 74 is per-variant
    in the table but has the same meaning everywhere.
-3. **Retrig storage offsets — not established from the image in this pass.** The
-   table does show RTRG/VFAD/LEN/RATE as trig-page records (slots 13..16).
-4. **Sound-lock validation — not established in this pass.** Needs the playback
-   path read.
+3. **Retrig storage offsets — not established from the image.** The table shows
+   RTRG/VFAD/LEN/RATE as trig-page records (slots 13..16). A search for code
+   addressing the track record at `+0x280/+0x300/+0x380` found nothing
+   identifiable (computed strides). DNX's capture remains the evidence; its
+   `0x0381 -> 0x8383` flag change differs in bits 15 and 1, so the enable bit
+   needs one more capture with only RTRG changed.
+4. **Sound-lock validation — not established from the image.** No identifiable
+   `+0x400` reader, and the sequencer does not run under the emulator. Proposed
+   instead: a hardware A/B — one cross-machine lock (as in `004 SKETCHPAD`) and a
+   same-machine control lock in one pattern, played and captured.
 5. **FM TONE 58..65 exist** — page `0x00` slots 50..57: Pitch All, Pitch A and B2,
    Ratio All, AB Level, AB Attack, AB Decay, AB End, AB Delay; bipolar, default
    `0x4000`, bipolar formatter `0x400e30f0`. Unlike every other FM TONE record
