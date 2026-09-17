@@ -18,6 +18,7 @@ from ..firmware.load import load
 from ..firmware.verify import verify
 from ..mods import ModError, check_compatible
 from ..mods import bootscreen as bootscreen_mod
+from ..mods import lfowaves as lfowaves_mod
 from ..mods import moddest as moddest_mod
 from ..mods import transients as transients_mod
 from .files import read_image
@@ -27,7 +28,8 @@ HELP = "list, extract and apply firmware mods"
 
 REGISTRY = {transients_mod.ID: transients_mod,
             moddest_mod.ID: moddest_mod,
-            bootscreen_mod.ID: bootscreen_mod}
+            bootscreen_mod.ID: bootscreen_mod,
+            lfowaves_mod.ID: lfowaves_mod}
 
 
 def configure(parser) -> None:
@@ -68,6 +70,10 @@ def configure(parser) -> None:
     boot.add_argument("--tunnel", type=float, nargs=2, metavar=("X", "Y"),
                       default=list(bootscreen_mod.STOCK_TUNNEL),
                       help="the intro tunnel's texture scale (stock 128 64)")
+    lfo = ap.add_argument_group("lfowaves")
+    lfo.add_argument("--wavetable", action="append", default=[], metavar="N=FILE",
+                     help="replace wavetable N (1-3) with a .wav wavetable or .json table; "
+                          "repeatable, the others stay ours")
     ap.add_argument("--prepare", action="store_true",
                     help="onset-align each input to the slot and fade its end; "
                          "off by default so a factory round-trip stays "
@@ -172,6 +178,21 @@ def _apply_bootscreen(mod, firmware, args):
                      rush=args.boot_rush, stop=args.boot_stop, tunnel=tuple(args.tunnel))
 
 
+def _apply_lfowaves(mod, firmware, args):
+    from .. import wavetable
+    tables = [None, None, None]
+    for spec in args.wavetable:
+        slot, _, path = spec.partition("=")
+        if slot not in ("1", "2", "3") or not path:
+            raise ModError(f"--wavetable {spec!r}: expected N=FILE with N 1-3")
+        path = pathlib.Path(path)
+        try:
+            tables[int(slot) - 1] = wavetable.to_bytes(wavetable.load(path.read_bytes(), path.name))
+        except wavetable.WavetableError as exc:
+            raise ModError(f"{path}: {exc}") from None
+    return mod.apply(firmware, tables)
+
+
 def _list() -> int:
     print(f"{len(REGISTRY)} mod(s)\n")
     for mid, mod in sorted(REGISTRY.items()):
@@ -236,6 +257,8 @@ def _apply(args) -> int:
             result = _apply_transients(mod, staged, args)
         elif mod.ID == "bootscreen":
             result = _apply_bootscreen(mod, staged, args)
+        elif mod.ID == "lfowaves":
+            result = _apply_lfowaves(mod, staged, args)
         else:
             result = mod.apply(staged)
         for note in result.notes:

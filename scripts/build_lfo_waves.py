@@ -96,16 +96,20 @@ boot:
 """
 
 
-def main() -> int:
-    if not available():
-        raise SystemExit("no m68k assembler found (m68k-linux-gnu-as, WSL is fine)")
+def compose(stock: bytes, frames: list | None = None, log=print) -> dict:
+    """Stock MAIN OS -> the built MAIN OS, plus what the site generator needs.
 
-    firmware = load(read_image(pathlib.Path(shapes.STOCK)))
-    section = firmware.container.find(MAIN_OS)
-    stock = section.unpack()
+    `frames`: three tables of 7 x 32 signed values, or None for ours. Returns
+    `content` (the new MAIN OS), `blob_va` (the runtime address the appended
+    blob starts at), `tables` (each table's runtime address) and `fills` -- the
+    blob ranges copied from the stock image (the first seven entries of every
+    relocated table), which the browser reads from the user's own file.
+    """
     if BASE + len(stock) != AREA_VA:
         raise SystemExit("MAIN OS is not stock 1.11's length")
     content = bytearray(stock)
+    frames = frames or [make() for _, _, make in wt.TABLES]
+    fills = []
 
     # ---- the blob's data, laid out from RUNTIME_VA + 8 (after magic and length)
     data = bytearray()
@@ -121,7 +125,7 @@ def main() -> int:
     short_vas = [put(s + b"\x00") for s, _, _, _ in WAVES]
     long_vas = [put(l + b"\x00") for _, l, _, _ in WAVES]
     never_va = put(shapes.NEVER_FMT)
-    table_vas = [put(wt.table_bytes(make())) for _, _, make in wt.TABLES]
+    table_vas = [put(wt.table_bytes(f)) for f in frames]
     glyph_va = put(b"", 4)
     glyph_bytes, glyph_sets, label_table = glyph.blob(glyph_va, [w[3] for w in WAVES])
     put(glyph_bytes)
@@ -146,23 +150,26 @@ def main() -> int:
         off = va - RUNTIME_VA - 8
         data[off:off + 4 * len(values)] = b"".join(struct.pack(">I", v) for v in values)
 
+    fills.append((names_va, ui.SHORT_NAMES, STOCK_ENTRIES))
     fill(names_va, shapes.read_longs(content, ui.SHORT_NAMES, STOCK_ENTRIES) + short_vas)
+    fills.append((long_names_va, ui.LONG_NAMES, STOCK_ENTRIES))
     fill(long_names_va, shapes.read_longs(content, ui.LONG_NAMES, STOCK_ENTRIES) + long_vas)
     for old in shapes.STOCK_TABLES:
+        fills.append((fn_vas[old], old, STOCK_ENTRIES))
         extra = [offsets[w[2]] for w in WAVES] if old == 0x4020B340 else [0] * len(WAVES)
         fill(fn_vas[old], shapes.read_longs(content, old, STOCK_ENTRIES) + extra)
 
     blob = MAGIC + struct.pack(">I", 8 + len(data)) + bytes(data)
-    print(f"blob: {len(blob):,} bytes, appended at {AREA_VA:#010x}, runs at {RUNTIME_VA:#010x}")
-    print(f"  code {len(code)} B at {code_va:#010x}; tables {', '.join(f'{v:#010x}' for v in table_vas)}")
+    log(f"blob: {len(blob):,} bytes, appended at {AREA_VA:#010x}, runs at {RUNTIME_VA:#010x}")
+    log(f"  code {len(code)} B at {code_va:#010x}; tables {', '.join(f'{v:#010x}' for v in table_vas)}")
     for label in LABELS:
-        print(f"  {label:<10} {offsets[label]:#010x}")
+        log(f"  {label:<10} {offsets[label]:#010x}")
 
     # ---- the one thing in a cave: the boot copy stub
     shapes.require_zero(content, BOOT_CAVE, BOOT_CAVE_CAP, "boot cave")
     boot = assemble(boot_source(), base=BOOT_CAVE)
     shapes.write(content, BOOT_CAVE, boot)
-    print(f"boot stub {len(boot)} B at {BOOT_CAVE:#010x}")
+    log(f"boot stub {len(boot)} B at {BOOT_CAVE:#010x}")
 
     # ---- the edits in the image, all pointing into RAM
     be = lambda v: struct.pack(">I", v)
@@ -185,12 +192,24 @@ def main() -> int:
     content += blob
     while len(content) % 4:
         content.append(0)
+    return {"content": content, "blob_len": len(blob), "tables": table_vas, "fills": fills,
+            "boot_len": len(boot)}
+
+
+def main() -> int:
+    if not available():
+        raise SystemExit("no m68k assembler found (m68k-linux-gnu-as, WSL is fine)")
+    firmware = load(read_image(pathlib.Path(shapes.STOCK)))
+    section = firmware.container.find(MAIN_OS)
+    stock = section.unpack()
+    built = compose(stock)
+    content, boot = built["content"], built["boot_len"]
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     replacement = compress(section.id, section.dest, bytes(content))
     OUT.write_bytes(fwbuild.build(firmware, {MAIN_OS: replacement}))
     print(f"wrote {OUT} ({OUT.stat().st_size} bytes); MAIN OS {len(content):,} B "
-          f"(+{len(content) - len(stock):,}); cave {len(boot)}/{BOOT_CAVE_CAP}")
+          f"(+{len(content) - len(stock):,}); cave {boot}/{BOOT_CAVE_CAP}")
     return 0
 
 
