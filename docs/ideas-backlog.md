@@ -1095,6 +1095,29 @@ past the bound) over 10-entry tables — long names `STEP PULS NOIS`, short
 new shapes; its renderer is not read. **Not run under the emulator** — the
 formatter runs only on a UI page the emulator does not drive.
 
+### v2 PASSED on hardware 2026-09-17 — and NOI's rate was broken by shared state
+
+Owner: *"All waves behave as they should!!!!!"* then *"SPD and MULT doesn't affect
+the noise at all."* The design said they would. The code disagreed: the
+sample-and-hold stored its "last step" and held value in **single global words**,
+but one generator serves every LFO on every track. Forty-eight callers
+interleaving on one word replace the held value on nearly every call, so NOI
+was frame-rate noise at any speed.
+
+**Lesson:** a generator table entry is a shared function, not an instance.
+Anything it stores is shared by every LFO. State must be per caller or absent.
+
+### v3 BUILT 2026-09-17: `lfo-waveshapes3`, NOI stateless
+
+The value is a **hash of the step index** (top six bits of the phase, 64 steps
+per cycle), so SPD × MULT sets the rate and each LFO's own phase gives it its own
+sequence. Colours are octave sums of the same hash (Voss–McCartney): pink equal
+weights over six octaves, brown doubling per slower octave, violet the first
+difference. Bounded by construction, no clamp. **Executed under Unicorn**
+(`scripts/check_lfo_noise.py`): holds within every step, registers and stack
+preserved, lag-1 correlation white −0.02, pink +0.52, brown +0.90. 21 integrity
+checks.
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read

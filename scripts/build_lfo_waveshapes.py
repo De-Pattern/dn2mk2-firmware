@@ -142,7 +142,8 @@ NOISE_SEED = 0x2545F491
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 # v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes2_DN2_1.11.syx")
+# v3: NOI rebuilt stateless, so SPD and MULT set its rate.
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes3_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
@@ -204,109 +205,96 @@ pulse:
     rts
 
 | ---- NOI: noise, clocked by the phase, coloured by SPH ------------------
-| Generators are called **every frame**, not every LFO tick, so a generator that
-| simply returned a fresh random number would run at the frame rate and ignore
-| SPD and MULT entirely.  So this one is a sample-and-hold driven by the phase:
-| the top eight bits are a step index, 256 steps per cycle, and a new value is
-| drawn only when that index changes.  The rate is then SPD x MULT x 256, which
-| is what the owner expects those two knobs to do -- and holding between steps is
-| also what keeps the pink and brown filters running at a fixed rate per step
-| instead of converging whenever the LFO is slow.
+| **v3, stateless.** v2 kept one sample-and-hold "last step" word for the whole
+| instrument, but this generator serves every LFO of every track: 48 callers
+| interleaving on one word, so the held value was replaced on nearly every call
+| and the output was frame-rate noise. The owner heard exactly that: *"SPD and
+| MULT doesn't affect the noise at all."*
 |
-| SPH picks the colour, four bands of 32:
+| So nothing is stored. The value is a **hash of the step index**, and the step
+| index is the top six bits of the phase: 64 steps per LFO cycle, so SPD x MULT
+| sets the noise rate directly, and each LFO gets its own sequence because each
+| has its own phase.
 |
-|   SPH   0-31   white    the raw xorshift
-|   SPH  32-63   pink     two one-poles plus a quarter of the white
-|   SPH  64-95   brown    a leaky random walk, gained back up
-|   SPH  96-127  violet   the difference of successive whites
+| SPH picks the colour, four bands of 32, all built from octaves of the same hash
+| (Voss-McCartney), so none needs filter state either:
 |
-| Every filter is shifts only: no multiply, no MAC, no MACSR state to disturb.
+|   SPH   0-31   white    h(step)
+|   SPH  32-63   pink     six octaves h(step >> k), equal weight
+|   SPH  64-95   brown    the same octaves, each slower one twice as loud
+|   SPH  96-127  violet   h(step) - h(step - 1)
+|
+| Every sum is bounded below full scale by construction, so there is no clamp.
 noise:
-    move.l  %d2,%sp@-
-    move.l  %d3,%sp@-
-    move.l  %sp@(12),%d0            | the phase, two pushes deep
-    lsr.l   #8,%d0
-    lsr.l   #8,%d0
-    lsr.l   #8,%d0                  | step index, 256 per cycle
-    move.l  {last:#010x},%d2
-    cmp.l   %d2,%d0
-    beq     9f                      | same step: hold
-    move.l  %d0,{last:#010x}
-
-    move.l  {state:#010x},%d0       | xorshift32, the white source
-    moveq   #13,%d2
-    move.l  %d0,%d3
-    lsl.l   %d2,%d3
-    eor.l   %d3,%d0
-    moveq   #17,%d2
-    move.l  %d0,%d3
-    lsr.l   %d2,%d3
-    eor.l   %d3,%d0
-    move.l  %d0,%d3
-    lsl.l   #5,%d3
-    eor.l   %d3,%d0
-    move.l  %d0,{state:#010x}
-
+    lea     %sp@(-16),%sp
+    moveml  %d2-%d5,%sp@
+    move.l  %sp@(20),%d4            | the phase, below four saved registers
+    moveq   #26,%d2
+    lsr.l   %d2,%d4                 | step index 0..63
     andi.l  #0x7f,%d1
-    lsr.l   #5,%d1                  | colour: 0..3
-    subq.l  #1,%d1
-    bmi     8f                      | white: %d0 is already the answer
-    beq     1f
-    subq.l  #1,%d1
-    beq     2f
-    bra     3f
-
-1:  | pink -- a fast pole, a slow pole, and some of the white on top
-    move.l  {p0:#010x},%d2
-    move.l  %d0,%d3
+    lsr.l   #5,%d1
+    move.l  %d1,%d5                 | colour 0..3
+    beq.s   10f
+    cmpi.l  #3,%d5
+    beq.s   30f
+    clr.l   %d1                     | pink or brown: the octave sum
+    clr.l   %d2                     | k
+11: move.l  %d4,%d0
+    lsr.l   %d2,%d0
+    bsr     90f
+    moveq   #3,%d3                  | pink: equal weight
+    cmpi.l  #1,%d5
+    beq.s   12f
+    moveq   #6,%d3                  | brown: weight 2^-(6-k)
     sub.l   %d2,%d3
-    asr.l   #2,%d3
-    add.l   %d3,%d2
-    move.l  %d2,{p0:#010x}
-    move.l  {p1:#010x},%d3
+12: asr.l   %d3,%d0
+    add.l   %d0,%d1
+    addq.l  #1,%d2
+    cmpi.l  #6,%d2
+    blt.s   11b
+    move.l  %d1,%d0
+    bra.s   99f
+
+10: move.l  %d4,%d0                 | white
+    clr.l   %d2
+    bsr     90f
+    bra.s   99f
+
+30: move.l  %d4,%d0                 | violet
+    clr.l   %d2
+    bsr     90f
     move.l  %d0,%d1
-    sub.l   %d3,%d1
-    asr.l   #5,%d1
-    add.l   %d1,%d3
-    move.l  %d3,{p1:#010x}
-    asr.l   #2,%d0
-    asr.l   #1,%d2
-    add.l   %d2,%d0
-    add.l   %d3,%d0
-    bra     8f
-
-2:  | brown -- a leaky random walk, scaled back to a useful amplitude
-    move.l  {br:#010x},%d2
-    move.l  %d2,%d3
-    asr.l   #4,%d3
-    sub.l   %d3,%d2                 | leak
-    move.l  %d0,%d3
-    asr.l   #4,%d3
-    add.l   %d3,%d2                 | integrate
-    move.l  %d2,{br:#010x}
-    add.l   %d2,%d2
-    add.l   %d2,%d2
-    move.l  %d2,%d0                 | x4
-    bra     8f
-
-3:  | violet -- the first difference of white
-    move.l  {vi:#010x},%d2
-    move.l  %d0,{vi:#010x}
-    sub.l   %d2,%d0
+    move.l  %d4,%d0
+    subq.l  #1,%d0
+    andi.l  #63,%d0
+    clr.l   %d2
+    bsr     90f
+    sub.l   %d0,%d1
+    move.l  %d1,%d0
     asr.l   #1,%d0
 
-8:  | the filtered colours can overshoot, and an LFO that wrapped would click
-    cmpi.l  #0x60000000,%d0
-    ble     7f
-    move.l  #0x60000000,%d0
-    bra     6f
-7:  cmpi.l  #-0x60000000,%d0
-    bge     6f
-    move.l  #-0x60000000,%d0
-6:  move.l  %d0,{out:#010x}
-9:  move.l  {out:#010x},%d0
-    move.l  %sp@+,%d3
-    move.l  %sp@+,%d2
+99: moveml  %sp@,%d2-%d5
+    lea     %sp@(16),%sp
+    rts
+
+| hash: %d0 = value, %d2 = octave -> %d0, clobbers %d3. A murmur-style mix.
+90: move.l  %d2,%d3
+    lsl.l   #8,%d3
+    lsl.l   #4,%d3
+    add.l   %d3,%d0                 | a different stream per octave
+    addq.l  #1,%d0                  | so step 0 does not hash to 0
+    move.l  #0x9e3779b1,%d3
+    mulsl   %d3,%d0
+    move.l  %d0,%d3
+    lsr.l   #8,%d3
+    lsr.l   #7,%d3
+    eor.l   %d3,%d0
+    move.l  #0x85ebca77,%d3
+    mulsl   %d3,%d0
+    move.l  %d0,%d3
+    lsr.l   #8,%d3
+    lsr.l   #5,%d3
+    eor.l   %d3,%d0
     rts
 
 | ---- evaluator A: reach the table, and carry SPH in %d1 -----------------
