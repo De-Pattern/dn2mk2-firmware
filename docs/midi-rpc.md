@@ -235,3 +235,22 @@ unread.
 screens, LFO glyphs, labels — without the owner photographing the panel.
 Device I/O belongs to DNX (`ask DNX for device data`); the request went there.
 
+### The handler, read 2026-09-17
+
+At `0x4012618c` the dispatcher `dynamic_cast`s to `MidiRpcScreenshotRequest`
+(typeinfo `0x40207fe4`) and reads **no field** of the request — only its
+non-null pointer. So the request is **just the opcode** (envelope aside; the
+generic parse step is not read). It then:
+
+1. starts a response with `u32 1`, `u16 128`, `u16 64` — format, width, height;
+2. allocates **1,024 bytes**;
+3. posts a job (`0x4002e014`, lambdas `0x401250d0` / `0x40125114`) that locks
+   (`0x4002e322`), takes a panel framebuffer pointer (`0x40131df8`:
+   `move.l 0x402a0b8c,%d0`; the pair is `0x402a0b88`/`0x402a0b8c` on 1.11),
+   copies 1,024 bytes, sets a done flag and posts semaphore `0x445fa6b0`;
+4. waits on that semaphore and builds the response (`0x401bd23c`).
+
+So the reply carries the raw 128 x 64 panel buffer, decoded as above. Nothing is
+written. The one hang mode is the semaphore: a stalled display task makes the
+request wait. The exact order of fields in the SysEx reply is not read.
+
