@@ -17,6 +17,7 @@ from ..firmware.build import replacement
 from ..firmware.load import load
 from ..firmware.verify import verify
 from ..mods import ModError, check_compatible
+from ..mods import bootscreen as bootscreen_mod
 from ..mods import moddest as moddest_mod
 from ..mods import transients as transients_mod
 from .files import read_image
@@ -25,7 +26,8 @@ NAME = "mods"
 HELP = "list, extract and apply firmware mods"
 
 REGISTRY = {transients_mod.ID: transients_mod,
-            moddest_mod.ID: moddest_mod}
+            moddest_mod.ID: moddest_mod,
+            bootscreen_mod.ID: bootscreen_mod}
 
 
 def configure(parser) -> None:
@@ -53,6 +55,19 @@ def configure(parser) -> None:
     ap.add_argument("--lead-ms", type=float, default=3.0,
                     help="default milliseconds kept before the detected onset "
                          "(per-sample overrides go in prepare.csv)")
+    boot = ap.add_argument_group("bootscreen")
+    boot.add_argument("--boot-image", type=pathlib.Path, action="append", default=[],
+                      help="a 128x64 binary PGM (P5); give one for a static mark or two "
+                           "for flashing")
+    boot.add_argument("--boot-invert", action="store_true",
+                      help="use the inverse of the single --boot-image as the second image")
+    boot.add_argument("--boot-slow", type=int, default=4)
+    boot.add_argument("--boot-fast", type=int, default=3)
+    boot.add_argument("--boot-rush", type=int, default=48)
+    boot.add_argument("--boot-stop", type=int, default=72)
+    boot.add_argument("--tunnel", type=float, nargs=2, metavar=("X", "Y"),
+                      default=list(bootscreen_mod.STOCK_TUNNEL),
+                      help="the intro tunnel's texture scale (stock 128 64)")
     ap.add_argument("--prepare", action="store_true",
                     help="onset-align each input to the slot and fade its end; "
                          "off by default so a factory round-trip stays "
@@ -136,6 +151,27 @@ def _apply_transients(mod, firmware, args):
                      lead_ms=args.lead_ms, options=options)
 
 
+def _read_pgm(path: pathlib.Path) -> set[tuple[int, int]]:
+    """Lit pixels of a 128x64 binary PGM (P5), thresholded at half."""
+    parts = path.read_bytes().split(maxsplit=4)
+    if len(parts) < 5 or parts[0] != b"P5" or int(parts[1]) != 128 or int(parts[2]) != 64:
+        raise ModError(f"{path}: expected a 128x64 binary PGM (P5)")
+    pix = parts[4]
+    return {(x, y) for y in range(64) for x in range(128) if pix[y * 128 + x] > 127}
+
+
+def _apply_bootscreen(mod, firmware, args):
+    if not args.boot_image:
+        raise ModError("--boot-image is required for the bootscreen mod")
+    images = [mod.image_from_pixels(_read_pgm(p)) for p in args.boot_image]
+    if args.boot_invert:
+        if len(images) != 1:
+            raise ModError("--boot-invert takes exactly one --boot-image")
+        images.append(mod.invert(images[0]))
+    return mod.apply(firmware, images, slow=args.boot_slow, fast=args.boot_fast,
+                     rush=args.boot_rush, stop=args.boot_stop, tunnel=tuple(args.tunnel))
+
+
 def _list() -> int:
     print(f"{len(REGISTRY)} mod(s)\n")
     for mid, mod in sorted(REGISTRY.items()):
@@ -198,6 +234,8 @@ def _apply(args) -> int:
         staged = _staged(firmware, payloads)
         if mod.ID == "transients":
             result = _apply_transients(mod, staged, args)
+        elif mod.ID == "bootscreen":
+            result = _apply_bootscreen(mod, staged, args)
         else:
             result = mod.apply(staged)
         for note in result.notes:

@@ -30,6 +30,16 @@ Two rules, both enforced rather than remembered:
   This matters beyond pedantry: every replacement of a compressed section
   changes its stored length a little, because compression depends on content.
   Reading the rule as forbidding that would rule out the whole mods system.
+
+  **Sharpened again 2026-09-17, on hardware.** The unpacked length of MAIN OS
+  *may* grow — **only by appending past its last byte**, into one shared area.
+  Nothing addresses that space, so nothing moves; the boot hook that copies it
+  above BSS is the only reader. `intro-bang_DN2_1.11.syx` did exactly that and
+  booted on the instrument. The area is a directory of named chunks
+  (`scripts/gen_bootscreen_code.py`), so several data-carrying mods can share one
+  copy hook instead of each appending their own; merging chunks from two mods is
+  the next piece of the compatibility system, and until it exists a mod that
+  appends refuses an image that already has an area.
 - **Integrity is not the mod's business.** A mod produces section payloads;
   `dnfw build` recomputes the section byte-sum, the content checksum and the
   HMAC-SHA256 trailer, and re-verifies before anything is written.
@@ -141,6 +151,22 @@ entries, while `TRAN` spanning 0..124 with 4-step interpolation implies 32.
 both good transients. So the interpolation model's step count or mapping is
 wrong, not the measurement — and the mapping from `TRAN`'s 125 positions onto 34
 entries is still unknown.
+
+## Mod 3: `bootscreen`
+
+The start-up animation: a user-supplied 128×64 mark written into the intro's
+source bitmap every frame, static or flashing, and the tunnel's texture scale.
+All choices are data in a `BOOT` chunk of the appended area; the 200 bytes of
+code are assembled once into `src/dnfw/mods/bootscreen_code.json` and shared with
+the site. `src/dnfw/mods/bootscreen.py` carries the evidence.
+
+    dnfw mods apply <image> --mod bootscreen --boot-image mark.pgm --boot-invert         --boot-slow 4 --boot-fast 3 --boot-rush 48 --boot-stop 72 --tunnel 128 64 -o out.syx
+
+Built through this command, it behaves identically to the hand-built
+`intro-bang` that passed on hardware: filmed under the emulator from the same
+snapshot, every frame whose intro frame number matches is byte-identical — the
+only differences are slices that land on a different frame, because the
+directory lookup spends a few more instructions per frame.
 
 ## Adding a mod
 

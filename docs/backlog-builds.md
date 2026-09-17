@@ -19,7 +19,7 @@ not been flashed has not been tested.
 
 | § | idea | build | on hardware |
 |---|---|---|---|
-| 1 | Reclaim space / grow section 3 | **DELIVERED** — `payload-section_DN2_1.11.syx`: section 3 grows by a payload that a boot hook copies above BSS before the clear. **Seen running end to end under the emulator**: cold boot copies the payload, the stamp reads it, `MOD` appears. The flash tests Elektron's bootloader, which the emulator cannot | awaiting a flash |
+| 1 | Reclaim space / grow section 3 | **DELIVERED** — `payload-section_DN2_1.11.syx`: section 3 grows by a payload that a boot hook copies above BSS before the clear. **Seen running end to end under the emulator**: cold boot copies the payload, the stamp reads it, `MOD` appears. The flash tests Elektron's bootloader, which the emulator cannot | **PASSED by proxy 2026-09-17** — `intro-bang` uses the same appended-data route and booted on the instrument |
 | 2 | An emulator as a test harness | **not a firmware** — it is the harness the others are tested in, and it works | n/a |
 | 3 | Expand the PCM catalogue | **not started — the cheap route is ruled out.** The two unreachable transients (slots 0 and 1) need `TRAN` −8 and −4; raising the maximum reaches up, not down, and dropping the −8 offset would move every existing sound onto a different transient. Growing the bank itself needs shipped bytes (§1's build) *and* the engine's slot bound, which is DSP-side (§7) | — |
 | 4 | FX and Master open to LFO modulation | **SHIPPED** | **passed**, PR #61 |
@@ -31,7 +31,7 @@ not been flashed has not been tested.
 | 10 | The arpeggiator on MIDI tracks | **DELIVERED** — `arp-on-midi_DN2_1.11.syx`, one byte | awaiting a flash |
 | 11 | A real compatibility check between mods | **not a firmware** — it is a check over builds | n/a |
 | 12 | P-locking the performance modulators | **not started** — route (b) scoped | — |
-| 13 | A mod stamp on the intro screen | **DELIVERED** — `intro-stamp` (`MOD` beside the logo), then the owner's redesign: `intro-burst` (logo knocked out of a comic burst) and `intro-bang` (the burst flashes inverted, then explodes into the tunnel). **All seen running under the emulator.** Alternatives: flash one | awaiting a flash |
+| 13 | A mod stamp on the intro screen | **DELIVERED** — `intro-stamp` (`MOD` beside the logo), then the owner's redesign: `intro-burst` (logo knocked out of a comic burst) and `intro-bang` (the burst flashes inverted, then explodes into the tunnel). **All seen running under the emulator.** Alternatives: flash one | **`intro-bang` PASSED on hardware 2026-09-17** |
 | 14 | A shape bench for the LFO waveforms | **DELIVERED** — the tool, plus its firmware half: `lfo-wavetable_DN2_1.11.syx` takes the bench's own JSON export | awaiting a flash |
 | 15 | A wavetable synth machine (the owner's actual meaning of "wavetable") | **not started** — audio is DSP-side, so it inherits §7's cost. First build: port digikit's Digitakt machine-slot Milestone A to the Digitone | — |
 | — | **LFO4** (the project's named goal) | **DELIVERED** — `lfo4-tick6a_DN2_1.11.syx` | awaiting a flash |

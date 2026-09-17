@@ -212,6 +212,7 @@ it is the kind of consumer no bound-scan would have found, because there is no
 bound — just an array that happens to be three long.
 
 | 2026-09-16 | **Stock 1.11 reflashed by the owner** | Between the v5 flash and DNX's arp capture, the owner returned the instrument to **unmodified 1.11** so the capture would be stock evidence. **The DN2 is on stock as of this row.** |
+| 2026-09-17 | **The bang intro** (`intro-bang_DN2_1.11.syx`, base **1.11**) — MAIN OS **grown by 2,056 bytes** appended past its last byte; the startup calls at `0x4000053e` hooked to copy that data above BSS before the clear; the intro copy routine at `0x400d3886` hooked to write one of two full 128×64 images over the intro's source bitmap each frame, chosen by the intro's frame counter | **PASS.** Owner: *"the device boots up perfectly and shows the animation"*. **This is the first hardware proof that Elektron's bootloader accepts a MAIN OS section larger than stock, and that appended bytes reach run time** — the route §1 and §6 of `docs/ideas-backlog.md` were blocked on, and the one every data-carrying mod now uses. Observed on hardware and not seen under emulation: **the stock static logo with the firmware versions is shown first**, and the animation follows. That first screen is drawn by something the emulator snapshots start after, and is not yet located. |
 
 **This row exists because the gap above bit twice in one day.** This log records
 what was *sent*, never what is *resident*, and nothing writes a row when the
