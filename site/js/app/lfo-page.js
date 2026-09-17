@@ -84,6 +84,12 @@ function drawTable(canvas, slot) {
   g.stroke();
 }
 
+/** A file that could not be used: say which file, why, and that the slot kept its table. */
+function refuse(err, file, slot, e) {
+  const why = e instanceof WavetableError ? e.message : (e.message ?? String(e));
+  err.textContent = `Couldn't use ${file}: ${why}. ${slot} keeps its current table.`;
+}
+
 function drawTables() {
   const host = $("tables");
   host.innerHTML = "";
@@ -127,7 +133,7 @@ function drawTables() {
         slot.custom = f.name;
         drawTables();
       } catch (e) {
-        err.textContent = e instanceof WavetableError ? e.message : `could not read ${f.name}: ${e.message ?? e}`;
+        refuse(err, f.name, t.name, e);
       }
     });
     reset.addEventListener("click", () => {
@@ -141,7 +147,7 @@ function drawTables() {
         slot.custom = f.name;
         drawTables();
       } catch (e) {
-        err.textContent = e instanceof WavetableError ? e.message : `could not read ${f.name}`;
+        refuse(err, f.name, t.name, e);
       }
     });
     host.append(card);
