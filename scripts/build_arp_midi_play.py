@@ -116,7 +116,7 @@ MIDI_LOCKS_FREE = 0x4012A3B4  # returns a MIDI lock list to 0x4460fcbc
 TRIG_LENGTHS = 0x401D88D8   # duration per trig length index, 0..127 (0x4012a9a8, 0x40026a7e)
 ARP_LENGTHS = 0x40287B08    # duration per arp N.LEN index, 0..127, -1 = INF (0x40026a74)
 
-LABELS = ("seq_gate", "live_send", "voice_hook")
+LABELS = ("seq_gate", "live_send", "voice_hook", "nlen_lut")
 
 
 # Bit 1 of +56 is not a gate: clear, the stock trigger only frees the track's
@@ -376,52 +376,63 @@ def check(content: bytes, va: int, want: bytes, why: str) -> None:
                          f"-- not the image this patch was written against ({why})")
 
 
-def poke(content: bytearray, va: int, stock: bytes, new: bytes, why: str) -> None:
+def poke(content: bytearray, va: int, stock: bytes, new: bytes, why: str, log=print) -> None:
     check(content, va, stock, why)
     content[va - BASE:va - BASE + len(new)] = new
-    print(f"  {va:#010x}  {stock.hex():<14} -> {new.hex():<14}  {why}")
+    log(f"  {va:#010x}  {stock.hex():<14} -> {new.hex():<14}  {why}")
+
+
+def compose(stock: bytes, diag: bool = False, log=print) -> dict:
+    """Apply the whole build to a stock MAIN OS. -> {content, cave, lut}.
+
+    `cave` is (va, length) of the assembled code and `lut` is (va, 128), the
+    N.LEN lookup inside it, which is derived from this image's own tables.
+    `scripts/gen_midiarp_code.py` uses both to write the mod's data."""
+    if not available():
+        raise SystemExit("no m68k assembler found (m68k-linux-gnu-as; WSL is fine)")
+    content = bytearray(stock)
+
+    log("part 1 -- the code this relies on, asserted")
+    for va, want, why in CONTEXT:
+        check(content, va, want, why)
+        log(f"  {va:#010x}  {want.hex():<14}  {why}")
+
+    log("part 2 -- the cave")
+    if any(content[CAVE - BASE:CAVE - BASE + CAVE_CAP]):
+        raise SystemExit(f"cave at {CAVE:#010x} is not free")
+    payload, at = assemble_stubs(cave_source(nlen_lut(content), diag), CAVE)
+    if len(payload) > CAVE_CAP:
+        raise SystemExit(f"cave overflows: {len(payload)} > {CAVE_CAP}")
+    content[CAVE - BASE:CAVE - BASE + len(payload)] = payload
+    log(f"  {len(payload)} bytes at {CAVE:#010x}: "
+        + ", ".join(f"{k} {v:#010x}" for k, v in at.items()))
+
+    log("part 3 -- the menu gate")
+    for va, stock_bytes, new, why in EDITS:
+        poke(content, va, stock_bytes, new, why, log)
+
+    log("part 4 -- the hooks")
+    for va, stock_bytes, kind, label in HOOKS:
+        new = (bytes.fromhex("4eb9") if kind == "jsr" else bytes.fromhex("4ef9")) + be32(at[label])
+        if len(new) > len(stock_bytes) or (len(stock_bytes) - len(new)) % 2:
+            raise SystemExit(f"hook at {va:#010x} does not fit {len(stock_bytes)} bytes")
+        new += bytes.fromhex("4e71") * ((len(stock_bytes) - len(new)) // 2)
+        poke(content, va, stock_bytes, new, f"{kind} -> {label}", log)
+
+    return {"content": bytes(content), "cave": (CAVE, len(payload)),
+            "lut": (at["nlen_lut"], 128)}
 
 
 def main() -> int:
-    if not available():
-        raise SystemExit("no m68k assembler found (m68k-linux-gnu-as; WSL is fine)")
-
     firmware = load(read_image(STOCK))
     section = firmware.container.find(MAIN_OS)
     if section is None:
         raise SystemExit("image has no MAIN OS section")
-    content = bytearray(section.unpack())
-
-    print("part 1 -- the code this relies on, asserted")
-    for va, want, why in CONTEXT:
-        check(content, va, want, why)
-        print(f"  {va:#010x}  {want.hex():<14}  {why}")
-
-    print("part 2 -- the cave")
-    if any(content[CAVE - BASE:CAVE - BASE + CAVE_CAP]):
-        raise SystemExit(f"cave at {CAVE:#010x} is not free")
-    payload, at = assemble_stubs(cave_source(nlen_lut(content), DIAG), CAVE)
-    if len(payload) > CAVE_CAP:
-        raise SystemExit(f"cave overflows: {len(payload)} > {CAVE_CAP}")
-    content[CAVE - BASE:CAVE - BASE + len(payload)] = payload
-    print(f"  {len(payload)} bytes at {CAVE:#010x}: "
-          + ", ".join(f"{k} {v:#010x}" for k, v in at.items()))
-
-    print("part 3 -- the menu gate")
-    for va, stock, new, why in EDITS:
-        poke(content, va, stock, new, why)
-
-    print("part 4 -- the hooks")
-    for va, stock, kind, label in HOOKS:
-        new = (b"\x4e\xb9" if kind == "jsr" else b"\x4e\xf9") + be32(at[label])
-        if len(new) > len(stock) or (len(stock) - len(new)) % 2:
-            raise SystemExit(f"hook at {va:#010x} does not fit {len(stock)} bytes")
-        new += b"\x4e\x71" * ((len(stock) - len(new)) // 2)
-        poke(content, va, stock, new, f"{kind} -> {label}")
+    content = compose(section.unpack(), DIAG)["content"]
 
     print("part 5 -- repack")
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    replacement = compress(section.id, section.dest, bytes(content))
+    replacement = compress(section.id, section.dest, content)
     OUT.write_bytes(fwbuild.build(firmware, {MAIN_OS: replacement}))
     print(f"  wrote {OUT} ({OUT.stat().st_size} bytes)")
     return 0
