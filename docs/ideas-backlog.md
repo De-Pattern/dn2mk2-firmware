@@ -1924,6 +1924,125 @@ today**, and the build is engine code only: on the MIDI branch at `0x40121906`,
 step the arp from the track's sound slot and hand the note to `0x4012b8b0`. The
 MIDI record needs no change.
 
+### v3 BUILT 2026-09-17: `arp-midi-play_DN2_1.11.syx` — the playback build
+
+`scripts/build_arp_midi_play.py`. Reading the engine end to end (Ghidra now
+decompiles the ISR's arp routines; `ghidra/DecompileFunction.java` makes a
+function where analysis left none) corrected the plan above: stepping the arp
+"on the MIDI branch" is not enough, because **the arp is not a function you can
+call per note**. It is state in the frame ISR: a held-note set per track
+(`0x40029cd4` adds notes, bitmaps at `0x40598728`, lists at `0x40598828`), a
+step clock driven by type-9 records, and the step `0x4002a0bc`. Notes reach it
+only as engine records. So a MIDI track's notes are sent **down the synth road**
+while its arp is on, and turned back into MIDI where the road ends.
+
+**The three forks** where a note picks a road by the kit's MIDI mask:
+
+| source | synth | MIDI | patched at |
+|---|---|---|---|
+| sequencer trig | `0x400d8654` engine record | `0x400d8b5a` MIDI record | `0x400d905e`, `0x400d9edc` (the second fork also schedules the arp's type-9 clock on the synth side) |
+| key down | `0x40137d3c` | `0x4012b8b0` | `0x40121d84` |
+| key up | `0x40137d3c` | `0x4012b8b0` | `0x40121914` |
+
+The test is the track's arp **MODE**, sound `+0x15f` (sound = kit + 52 +
+1163×track, `0x40025bda`). Zero is off: [FUNC]+[ARP] parks MODE at `+0x176` and
+writes 0 (`0x4004bea4`).
+
+**Where the road ends:** `0x400db524`, the ISR's voice trigger, called at
+`0x400268f8` for every note, arpeggiated or not. On a MIDI track the hook
+builds a **MIDI record** (the MIDI task's format, read from `0x4012a9a8`: track
++8, kind +12, flag `0x80` = play at +16, inline note entry at +36 with note
++38, velocity +39, length +40, time +48, source +52) and appends it to the batch
+the ISR already posts to the MIDI task (head `-180(%fp)`, tail `%a5`, sent at
+`0x40026f60`). The MIDI task sends it on the track's channel and schedules the
+note-off from the length. Length is **N.LEN** (`+0x162`) while the arp runs
+(record flag `0x80000`), else the note's own; INF is sent as 126 so every note
+ends.
+
+One trap handled: a key-down note can carry a lock list from the MIDI pool
+(`0x40121d06`, when `0x4029f524` selects one). The engine frees record locks
+into its own pool, so the hook returns the list to the MIDI pool first.
+
+**Emulator, 2026-09-17** (patched ranges over the stock 400M snapshot, track 1
+poked to MIDI): arp MODE UP → key down and key up both go to the voice starter;
+MODE 0 → both go to the MIDI sender, as stock. No faults. The sequencer's fork
+calls the gate during the pattern-prepare pass (64 calls, all synth, as the
+mask then said). **What the emulator cannot show:** the frame ISR does not run
+there (no DSP link), so the arp stepping and the MIDI records are unverified
+until a flash.
+
+| on hardware, MIDI track, arp ON | means |
+|---|---|
+| MIDI out arpeggiates at SPD, over RNG, N.LEN long | done |
+| the trig plays as written | a fork was missed |
+| nothing on MIDI out | the voice-trigger hook never saw the track |
+| sound on the audio outputs from the MIDI track | the engine voiced it elsewhere |
+| stuck notes | a length or note-off path is missing |
+
+Arp OFF on a MIDI track, and every synth track, must be exactly stock.
+
+**The knobs, in the same build.** `ArpSetupMenuView`'s constructor (`0x400191a6`)
+connects `0x400187b4` to the model's change signal; the callback reads the
+active track and, if it is MIDI, closes the view through the owner's vtable
+`+40`. A knob edit is a change, so on v2 the first detent closed the menu and
+the rest of the turn landed on the TRIG page underneath. `0x400187f6`
+`beq.s` -> `bra.s` keeps the view open on any track. Under the emulator the menu
+opens on a track poked to MIDI and reads **MODE UP** — the value poked at sound
+`+0x15f`, which also confirms the offset the engine hooks test. The emulator
+cannot turn an encoder (`docs/display-path.md`), so the knob fix is a hardware
+question too: `| a knob returns to TRIG | another path closes the view |`.
+
+
+### Hardware, 2026-09-17: three flashes to a working MIDI arp
+
+Captured by DNX (receive-only), heard by the owner.
+
+| build | result | what it taught |
+|---|---|---|
+| `arp-midi-play` (v3) | **no note on any MIDI track**, only clock and transport; T16's trig LED ran in arp rhythm | the hook's records reached the MIDI task and broke it. They left `+44` (sound) null, and the MIDI task reads a trig's default velocity (`+0x480`) and length (`+0x481`) through it when the byte is negative (`0x4012a9a8`; the ISR does the same through its `+44`, `0x4002672c`, `0x40026680`) |
+| `arp-midi-play2` | plain MIDI tracks back (366 C4, 500 ms apart, no stuck notes); **the arp track still silent** | `+44` fixed and both defaults resolved in the hook; something else still dropped the arp notes |
+| `arp-midi-diag` | **466 notes, all the C1 marker**, velocity 100, 62 ms, at the step rate; no internal audio from T16 | every arp record reaching the hook had `+56` bit 1 **clear**, and the hook's filter treated bit 1 as a gate. Bit 1 is not a gate: clear, the stock trigger only frees the track's held copy (`0x400db4ac`); set, it keeps one. Every record reaching `0x400db524` is a note |
+| **`arp-midi-play3`** | **the arp plays over MIDI; the owner hears the step offsets** | filter reduced to bit 20, which the ISR sets once it has voiced a record (`0x40026948`) |
+
+The arp step `0x4002a0bc` returns held note + 12×octave + offset[step]
+(sound `+0x166 + step`), with the step mask at `+0x164` and LEN at `+0x163`, so
+the offsets need nothing from the hook: they are in `+38` already.
+
+`scripts/build_arp_midi_play.py --diag` rebuilds the diagnostic: every MIDI-track
+record reaching the hook is sent (a filtered one as a marker note, C1/D1/E1 for
+bits 1/18/20), at fixed velocity and length, and still passed to the stock
+trigger.
+
+**play3 capture (DNX):** offsets applied (`48+7, 48-5, 48+0, 48+12` from a
+pattern trig; `60+12, 60+7, 60-5, 60+0` from a held key), the trig's velocity
+(102), 1/16 steps at 125 ms at 120 BPM, no duplicates, no stuck notes, arp OFF
+exactly stock. **Lengths were wrong**: N.LEN 1/32 lasted 125 ms and 1/8 lasted
+1000 ms. Rates in that run are not evidence -- the owner was changing settings.
+
+**Why:** the ISR times an arp note through its own table `0x40287b08[N.LEN]`
+(`0x40026a72`), and every other note through `0x401d88d8[len]` (`0x40026a7c`),
+which is also the only table the MIDI task has. Same units, twice the
+resolution: arp `84375*(n+3)`, trig `168750*(n+2)` below 30. The hook passed the
+N.LEN byte through as a trig index.
+
+**`arp-midi-play4`** carries a 128-byte lookup, built from both tables in the
+image, mapping each N.LEN to the trig index nearest in duration (ties shorter;
+INF -> 126). **Hardware, tempo 120, SPD 1/16 (DNX):**
+
+| N.LEN | expected | on->off min / median / max |
+|---|---|---|
+| 1/32 | 62.5 | 61.1 / 62.0 / 63.0 |
+| 1/16 | 125 | 123.9 / 125.0 / 126.1 |
+| 1/8 | 250 | 264.0 / 265.1 / 266.1 (byte 62); 248.9 / 250.0 / 251.0 in another window (byte 61) |
+| 1/4 | 500 | 499 / 500 / 501 |
+
+"1/8" is shown for two adjacent bytes, 61 (250 ms) and 62 (265.6 ms), both as
+the table predicts. No stuck notes over 5,248 note messages; onsets held at
+125 ms through every change. **The MIDI arpeggiator works.**
+
+Not re-checked on play4: synth tracks and arp OFF (both stock on play3, and
+play4 changes only the MIDI record's length byte).
+
 ## 11. A real compatibility check between mods
 
 **Filed 2026-09-14, at the owner's direction, to be picked up when two mods
@@ -2676,3 +2795,84 @@ glitch ramp. Both are boot-screen mod options, so they belong in
 **A variation, not a replacement** (owner: *"as a new variation"*): the tunnel intro stays available; ASCII-glitch is another choice beside it in the boot-screen mod and on the site.
 
 **Not built.**
+
+## 18. P-locking the arpeggiator's parameters
+
+**Raised by the owner 2026-09-17**, after the arp engine was read for §10.
+
+### Why they are not p-lockable today
+
+A p-lock names a **lock id** that maps to a slot of the 101-slot per-track
+parameter mirror (`docs/lock-id-table.md`). The arp's settings are not in that
+space: MODE, SPD, RNG, N.LEN, LEN, the step mask and the 16 offsets are bytes of
+the track's **sound** from `+0x15f`, with no parameter-table record and no lock
+id. The frame ISR reads them straight from a sound pointer, on every step.
+
+### The per-note sound pointer, and the owner's answer
+
+The ISR takes each note's sound from its record (`+64`, else `+60`) and falls
+back to the kit's sound only when the record carries none (`0x40026708`); the
+arp restarts when that pointer changes (`0x40029cd4`). That predicted that
+**sound locks already vary the arp per trig**.
+
+**Confirmed on hardware, stock firmware, 2026-09-17.** Owner: *"yes different
+sound presets plocked containing different ARP settings trigger different
+arps."* So per-trig arp variation exists today through sound locks, and the
+engine half of real arp p-locks is proven: point a note at a sound whose arp
+bytes differ, and the arp follows.
+
+### What real p-locks would still need
+
+1. **Engine (moderate, ColdFire only).** Lock ids for the arp parameters in the
+   free range 107..127 (the five main controls fit easily). At trig start, copy
+   the track's sound into a per-track shadow, apply the locked arp values, and
+   set the note's sound pointer to the shadow. The arp code is untouched.
+2. **Storage (unknown).** Whether lock ids above the current maximum survive a
+   project save and load. The same open question as §12's modulator depths;
+   **DNX's to answer**.
+3. **UI (the real cost).** A p-lock is recorded by holding a trig and turning a
+   knob on a parameter page. The arp settings live in `ArpSetupMenuView`, a
+   menu, not a parameter page, so that recording path does not reach them.
+   Until the UI exists, locks could only be written into patterns by DNX.
+
+### Lock ids 100..127, answered 2026-09-17
+
+- **100..106 are live** (DNX, 26 projects, 3,328 patterns, 175 records): 100
+  TRIG 2 PTIM, 101 FX BR, 102 SRR, 103 SR.RT, 104 OVER, 105 FLTR 2 BW.RT,
+  106 FX OD.RT, each written by p-locking that parameter. The highest id the
+  instrument has ever saved is 106. **Free: 107..127, 21 ids.**
+- **File:** a lock record is `(u8 id, u8 track, u16[128] values)`, 258 bytes,
+  80 per pattern; the id is a plain byte, so the file can hold 107..127.
+- **Firmware load:** the id→slot lookup `0x400dccc0` indexes the 107-entry
+  table only when id <= 106 and **returns slot 0 otherwise** (track 16 uses
+  a 46-entry table bounded at 45). So there's no out-of-bounds read, but every
+  id of 107 or above becomes a lock on mirror slot 0, and they collide there.
+- **So arp p-locks need their own handling of 107..127** before that bound, not
+  just new ids. DNX's save/reload test would also show whether save re-derives
+  ids from slots, which would lose a 107. Held until the owner OKs a pattern
+  whose playback puts a lock on slot 0.
+
+### The round-trip, on hardware 2026-09-17: a stock save frees the record
+
+DNX wrote one lock record into a scratch copy of `TEST_MIDI_ARP` (+Drive slot
+22, pattern A1, no other locks): id 110, track 1, step 1 = `0x1234`, other steps
+`FFFF`. The owner loaded, saved and reloaded it with playback stopped.
+
+```
+as written:  6e 00 12 34 ff ff ...
+after save:  ff ff 12 34 ff ff ...
+```
+
+**Only the two header bytes changed, to `FF FF`, which marks the record
+unused.** The values were left stale, as in every empty record of a 1.11 file.
+No stray lock appeared, and nothing else changed except three image-header
+bytes (a save counter or check value). So load maps id 110 to slot 0, and save
+does not write a record for slot 0. The test cannot separate "save re-derives
+ids from slots" from "save drops slot 0", because both give this result.
+
+**For arp p-locks:** ids 107..127 need firmware handling on **both** load and
+save. Or the arp values must live somewhere a stock save already carries. The
+next reading is the save path: how lock records are written from the per-slot
+table at kit +20640, and whether a side table for extra ids can be written back
+through it. If ids 100..127 persist, build (1) and let DNX write
+test locks; (3) only after the sound works.
