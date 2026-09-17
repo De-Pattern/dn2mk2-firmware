@@ -107,7 +107,40 @@ MIDI_LOCKS_FREE = 0x4012A3B4  # returns a MIDI lock list to 0x4460fcbc
 LABELS = ("seq_gate", "live_send", "voice_hook")
 
 
-def cave_source() -> str:
+FILTER = """  move.l  56(%a0),%d1
+    btst    #1,%d1                      | a note on
+    beq     9f
+    and.l   #0x140000,%d1               | the stock routine voices neither
+    bne     9f
+"""
+LEAVE = """9:  moveq   #0,%d0
+    rts"""
+
+# --diag: every MIDI-track record that reaches the hook goes out, and is voiced
+# as well. A filtered one is replaced by a marker note on the same channel:
+# C1 (24) gate off, D1 (26) legato bit 18, E1 (28) already-voiced bit 20.
+DIAG_FILTER = "\n"
+DIAG_MARK = """    move.l  56(%a2),%d1
+    moveq   #24,%d0
+    btst    #1,%d1
+    beq.s   15f
+    moveq   #26,%d0
+    btst    #18,%d1
+    bne.s   15f
+    moveq   #28,%d0
+    btst    #20,%d1
+    beq.s   16f
+15: move.b  %d0,38(%a3)
+    moveq   #100,%d0
+    move.b  %d0,39(%a3)
+    moveq   #6,%d0
+    move.b  %d0,40(%a3)
+16:
+"""
+DIAG_LEAVE = f"""    jmp     {VOICE_TRIGGER:#x}              | and voice it: the hook fired if T16 sounds"""
+
+
+def cave_source(diag: bool = False) -> str:
     return f"""
 | Sequencer fork. In: %a0 kit, %d2 track. Out: Z set -> synth producer,
 | Z clear -> MIDI producer. Replaces `mvs.w 23770(%a0),%dN; btst %d2,%dN`;
@@ -165,12 +198,7 @@ voice_hook:
     btst    %d0,%d1
     bne.s   4f
 3:  jmp     {VOICE_TRIGGER:#x}
-4:  move.l  56(%a0),%d1
-    btst    #1,%d1                      | a note on
-    beq     9f
-    and.l   #0x140000,%d1               | the stock routine voices neither
-    bne     9f
-    lea     -16(%sp),%sp
+4:{{FILTER}}    lea     -16(%sp),%sp
     movem.l %d2-%d3/%a2-%a3,(%sp)
     move.l  %a0,%a2
     jsr     {MIDI_RECORD:#x}
@@ -226,7 +254,7 @@ voice_hook:
     bcc.s   7f
     move.l  %d1,%d3                     | INF would never be switched off
 7:  move.b  %d3,40(%a3)
-    tst.l   -180(%fp)
+{{MARK}}    tst.l   -180(%fp)
     bne.s   8f
     move.l  %a3,-180(%fp)
     bra.s   10f
@@ -234,9 +262,8 @@ voice_hook:
 10: move.l  %a3,%a5
     movem.l (%sp),%d2-%d3/%a2-%a3
     lea     16(%sp),%sp
-9:  moveq   #0,%d0
-    rts
-"""
+{{LEAVE}}
+""".replace("{FILTER}", DIAG_FILTER if diag else FILTER)      .replace("{MARK}", DIAG_MARK if diag else "")      .replace("{LEAVE}", DIAG_LEAVE if diag else LEAVE)
 
 
 # (va, stock bytes, kind, label) -- each stock sequence is replaced by a call
@@ -287,7 +314,9 @@ CONTEXT = (
 )
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-OUT = pathlib.Path("00_Resources/02_Builds/arp-midi-play2_DN2_1.11.syx")
+DIAG = "--diag" in sys.argv[1:]
+OUT = pathlib.Path("00_Resources/02_Builds/"
+                   + ("arp-midi-diag" if DIAG else "arp-midi-play2") + "_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
@@ -334,7 +363,7 @@ def main() -> int:
     print("part 2 -- the cave")
     if any(content[CAVE - BASE:CAVE - BASE + CAVE_CAP]):
         raise SystemExit(f"cave at {CAVE:#010x} is not free")
-    payload, at = assemble_stubs(cave_source(), CAVE)
+    payload, at = assemble_stubs(cave_source(DIAG), CAVE)
     if len(payload) > CAVE_CAP:
         raise SystemExit(f"cave overflows: {len(payload)} > {CAVE_CAP}")
     content[CAVE - BASE:CAVE - BASE + len(payload)] = payload
