@@ -107,10 +107,12 @@ MIDI_LOCKS_FREE = 0x4012A3B4  # returns a MIDI lock list to 0x4460fcbc
 LABELS = ("seq_gate", "live_send", "voice_hook")
 
 
+# Bit 1 of +56 is not a gate: clear, the stock trigger only frees the track's
+# held copy (0x400db4ac); every record reaching it is a note (diag capture,
+# 466 of 466 arp steps had it clear). Bit 20 is set on a record once the ISR
+# has voiced it (0x40026948), so a record seen again is not sent twice.
 FILTER = """  move.l  56(%a0),%d1
-    btst    #1,%d1                      | a note on
-    beq     9f
-    and.l   #0x140000,%d1               | the stock routine voices neither
+    btst    #20,%d1
     bne     9f
 """
 LEAVE = """9:  moveq   #0,%d0
@@ -317,7 +319,7 @@ CONTEXT = (
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 DIAG = "--diag" in sys.argv[1:]
 OUT = pathlib.Path("00_Resources/02_Builds/"
-                   + ("arp-midi-diag" if DIAG else "arp-midi-play2") + "_DN2_1.11.syx")
+                   + ("arp-midi-diag" if DIAG else "arp-midi-play3") + "_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
