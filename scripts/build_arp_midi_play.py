@@ -46,10 +46,12 @@ goes back to the MIDI pool first and the note plays without it.
 A MIDI note needs a finite length to be switched off, so an INF length (127)
 is sent as 126, the longest finite one.
 
-## Not in this build
-
-The menu's knobs still jump to the TRIG page on a MIDI track (a separate gate in
-the encoder path). Set the arp by copying it from a synth track, as on v2.
+4. **The menu's knobs stay on the menu.** `ArpSetupMenuView`'s constructor
+   (`0x400191a6`) connects `0x400187b4` to the model's change signal. It reads
+   the active track and, if MIDI, calls the owner's vtable `+40` and closes the
+   view. A knob edit is a change, so on v2 the first detent closed the menu and
+   the rest of the turn landed on the TRIG page beneath -- the owner's report.
+   Its `beq.s` becomes `bra.s`: the view stays open on any track.
 
 ## What to listen and look for
 
@@ -60,6 +62,7 @@ the encoder path). Set the arp by copying it from a synth track, as on v2.
 | nothing on MIDI out | the voice-trigger hook never fired for the track |
 | audio from the MIDI track's own output | the engine voiced the record before the hook |
 | stuck MIDI notes | a length arrived as INF, or a note-off path is missing |
+| turning a menu knob returns to TRIG | another path closes the view; `0x400187b4` was not the only one |
 
 Arp OFF on the MIDI track, and every synth track: must be exactly stock.
 """
@@ -232,10 +235,12 @@ HOOKS = (
     (0x400268F8, bytes.fromhex("4eb9400db524"), "jsr", "voice_hook"), # ISR voice trigger
 )
 
-# The menu gate from arp-on-midi2.
+# The menu gate from arp-on-midi2, and the view's own MIDI test.
 EDITS = (
     (0x4005F9C2, bytes.fromhex("6600f58e"), bytes.fromhex("4e714e71"),
      "bne.w -> nop nop: the ARPEGGIATOR menu opens on MIDI tracks"),
+    (0x400187F6, bytes.fromhex("670e"), bytes.fromhex("600e"),
+     "beq.s -> bra.s: the open menu no longer closes itself on a MIDI track"),
 )
 
 # Read, not written: the code the hooks rely on.
@@ -258,6 +263,10 @@ CONTEXT = (
     (0x40025BE8, bytes.fromhex("068000000034"), "sound = kit + 52 + 1163*track"),
     (0x40121D06, bytes.fromhex("4eb94012a394"), "key down: MIDI lock list taken"),
     (0x40121D22, bytes.fromhex("2d40fff4"), "key down: ...and placed at event +52 (fp-12)"),
+    (0x400192C2, bytes.fromhex("203c400187b4"), "ArpSetupMenuView ctor registers the callback"),
+    (0x400192FA, bytes.fromhex("49f9400f630a"), "...connected to the model's change signal"),
+    (0x400187EA, bytes.fromhex("4eb940031274"), "callback: is the active track MIDI"),
+    (0x400187FE, bytes.fromhex("20690028"), "callback: yes -> owner vtable +40, close"),
     (0x4012A3B4, bytes.fromhex("206f0004"), "the MIDI lock-list free"),
 )
 

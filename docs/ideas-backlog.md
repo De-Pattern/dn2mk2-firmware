@@ -1979,9 +1979,18 @@ until a flash.
 | sound on the audio outputs from the MIDI track | the engine voiced it elsewhere |
 | stuck notes | a length or note-off path is missing |
 
-Arp OFF on a MIDI track, and every synth track, must be exactly stock. The
-knobs on the menu still jump to TRIG (not in this build); copy an arp from a
-synth track to set it.
+Arp OFF on a MIDI track, and every synth track, must be exactly stock.
+
+**The knobs, in the same build.** `ArpSetupMenuView`'s constructor (`0x400191a6`)
+connects `0x400187b4` to the model's change signal; the callback reads the
+active track and, if it is MIDI, closes the view through the owner's vtable
+`+40`. A knob edit is a change, so on v2 the first detent closed the menu and
+the rest of the turn landed on the TRIG page underneath. `0x400187f6`
+`beq.s` -> `bra.s` keeps the view open on any track. Under the emulator the menu
+opens on a track poked to MIDI and reads **MODE UP** — the value poked at sound
+`+0x15f`, which also confirms the offset the engine hooks test. The emulator
+cannot turn an encoder (`docs/display-path.md`), so the knob fix is a hardware
+question too: `| a knob returns to TRIG | another path closes the view |`.
 
 ## 11. A real compatibility check between mods
 
