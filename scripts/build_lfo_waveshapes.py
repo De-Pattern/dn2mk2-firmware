@@ -87,6 +87,7 @@ from dnfw.firmware import build as fwbuild
 from dnfw.firmware.load import load
 from dnfw.patch.assemble import assemble, available
 
+import lfo_wave_glyph as glyph
 import lfo_wave_ui as ui
 
 MAIN_OS = 3
@@ -139,7 +140,8 @@ HOOKS = (
     (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
 LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase",
-          "fmt_v92") + ui.LABELS
+          "fmt_v92") + ui.LABELS + glyph.LABELS
+GLYPHS = ["STEP", "PULS", "NOIS"]
 
 # The sound ParameterSet's vtable slot 92 (format a record's value), v6's hook.
 SOUND_SET_V92 = 0x401DB858
@@ -157,8 +159,8 @@ NOISE_RAM = 0x46740000
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 # v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
-# v6: SPH colour.loop display asks the ParameterSet for WAVE (v5 used globals).
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes6_DN2_1.11.syx")
+# v7: v6 plus the [MOD] page glyph for STEP, PULS and NOIS.
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes7_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
@@ -166,7 +168,7 @@ def be32(v: int) -> bytes:
 
 
 def source(fn_table: int, state: int, short_names: int, long_names: int,
-           never_fmt: int) -> str:
+           never_fmt: int, glyph_sets: int) -> str:
     noise_ram = NOISE_RAM
     noise_index = STOCK_ENTRIES + 2
     """The three generators and the three hook stubs.
@@ -445,7 +447,7 @@ no_phase:
 1:  mvs.w   %a4@(78),%d2
 2:  sub.l   %d0,%d7                 | the displaced instruction
     jmp     0x40137894
-""" + ui.formatter_source(ENTRIES - 1, short_names, long_names)
+""" + ui.formatter_source(ENTRIES - 1, short_names, long_names) + glyph.source(glyph_sets)
 
 
 def main() -> int:
@@ -481,13 +483,15 @@ def main() -> int:
     table_vas = {}
     for old in STOCK_TABLES:
         table_vas[old], cursor = cursor, cursor + 4 * ENTRIES
+    glyph_va, cursor = cursor, cursor + glyph.size(len(GLYPHS))
+    glyph_bytes, glyph_sets = glyph.blob(glyph_va, GLYPHS)
     if cursor - DATA_CAVE > DATA_CAVE_CAP:
         raise SystemExit(f"data cave overflows: {cursor - DATA_CAVE} > {DATA_CAVE_CAP}")
     stub_va = CAVE
 
     print("part 1 -- the generators and the hook stubs")
     payload, offsets = assemble_stubs(
-        source(table_vas[0x4020B340], state_va, names_va, long_names_va, never_va), stub_va)
+        source(table_vas[0x4020B340], state_va, names_va, long_names_va, never_va, glyph_sets), stub_va)
     used = (stub_va - CAVE) + len(payload)
     if used > CAVE_CAP:
         raise SystemExit(f"cave overflows: {used} > {CAVE_CAP}")
@@ -509,6 +513,8 @@ def main() -> int:
     for text, va in zip(NEW_LONG_NAMES, long_name_vas):
         write(content, va, text)
     write(content, never_va, NEVER_FMT)
+    write(content, glyph_va, glyph_bytes)
+    print(f"  glyphs {', '.join(GLYPHS)}: {len(glyph_bytes)} bytes at {glyph_va:#010x}")
     old_long = read_longs(content, ui.LONG_NAMES, STOCK_ENTRIES)
     write(content, long_names_va, b"".join(be32(v) for v in old_long + long_name_vas))
     print(f"  long names {ui.LONG_NAMES:#010x} -> {long_names_va:#010x}  "
@@ -539,6 +545,10 @@ def main() -> int:
     print("part 5c -- SPH shows colour.loop on NOIS")
     poke(content, SOUND_SET_V92, be32(STOCK_V92), be32(offsets["fmt_v92"]),
          "sound ParameterSet vtable slot 92 -> fmt_v92")
+
+    print("part 5d -- the [MOD] page glyph")
+    for va, stock, new, why in glyph.clamp_edits(ENTRIES - 1) + glyph.hooks(offsets):
+        poke(content, va, stock, new, why)
 
     print(f"part 5b -- the evaluators' WAVE clamps, 6 -> {ENTRIES - 1}")
     for va, stock, new, why in ui.clamp_edits(ENTRIES - 1):

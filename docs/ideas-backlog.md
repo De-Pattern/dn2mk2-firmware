@@ -1191,6 +1191,36 @@ when a result contradicts a disassembly that reads correctly.
 page, and a guessed value-array offset poked MULT and FADE instead of WAVE.
 Record → slot goes through `0x400dbcc4`; read it before poking again.
 
+### v6 PASSED on hardware; v7 BUILT 2026-09-17 — the [MOD] page glyph
+
+Owner on v6: *"it works!"*. The remaining gap was the waveform glyph: every new
+waveform drew RND's. `scripts/lfo_wave_glyph.py`, shared with the wavetable
+build, adds it — mechanism read under the emulator and documented in that
+module: `WAVE` goes to the composite widget `0x4010dc82`, which clamps it to 6 a
+third time, indexes a 7-byte flag table, and picks a glyph set (a
+`std::vector<Bitmap>` of four 28×15 tiles) at `0x44507b68 + 12·WAVE`. v7 raises
+the clamp, hooks the flag read and the set pointer, and gives each new waveform a
+**static one-tile set** in the data cave.
+
+**Filmed under the emulator** with v7 overlaid on a stock snapshot and WAVE poked
+into the track's value array (`guirun --patch-ranges`, `--poke`; the array's
+WAVE word is `values + 30`, found by reading `0x400dbcc4`'s record→slot table
+and the live array, after one wrong guess landed on MULT/FADE):
+
+![glyphs](img/lfo-glyphs-emulator.png)
+
+SINE (stock), RND (stock, label SLEW), STEP, PULS, NOIS, then TRP from
+`lfo-wavetable3` and EXPO (stock).
+
+**[WRONG — corrected] first v7 film drew STEP falling.** Bitmaps are stored
+flipped vertically relative to the panel, as the intro's source bitmap is.
+
+**Owner's follow-up, not in v7:** make the STEP and PULS glyphs follow SPH (step
+count, pulse width), and rename SPH on the new waves. Both have a firmware
+precedent: RND already renames SPH to SLEW through the sound set's vtable slot 88
+(`0x4003660c`), and the widget already computes an SPH-dependent phase shift
+(which v7 still applies to the new waves; v8 should zero it).
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
