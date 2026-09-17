@@ -7,6 +7,21 @@ The end goal is to fill the vacant fourth page under the Digitone II's `[MOD]`
 key with a fourth LFO behaving exactly like LFO1–3. Getting there needs a build
 loop first, and that is what exists today.
 
+## Try the mods in your browser
+
+**[angellinares.github.io/dn2_firmware_explore](https://angellinares.github.io/dn2_firmware_explore/)**
+runs entirely in the browser: pick your own OS file, choose a mod, download a
+signed image. Nothing is uploaded.
+
+- **[LFO Waves](https://angellinares.github.io/dn2_firmware_explore/lfo.html)** —
+  seven new LFO waveforms (STEP, PULS, NOIS, TRAP and three wavetables), each
+  drawing its own shape on the LFO page. Swap any wavetable for your own WAV
+  wavetable (Serum/Vital style) or JSON table. Tested on a Digitone II.
+- **[Modulation Destinations](https://angellinares.github.io/dn2_firmware_explore/destinations.html)** —
+  open thirteen more parameters to LFO modulation.
+- **[Transient Swapper](https://angellinares.github.io/dn2_firmware_explore/transients.html)** —
+  replace the FM drum machine's transient samples.
+
 **This repository holds code and documentation only.** It contains no Elektron
 firmware, original or modified, and never will. Bring your own OS file — the
 one Elektron publish for your instrument.
