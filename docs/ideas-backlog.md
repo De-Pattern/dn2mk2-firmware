@@ -1740,7 +1740,7 @@ a MIDI track and hand its note to `0x4012b8b0` instead of a voice. Plus the knob
 routing on the menu. Both ColdFire-side. ~~Parked until DNX's project read says whether the copied arp bytes persist.~~
 
 **They persist (DNX, `TEST_MIDI_ARP`, 2026-09-17).** A MIDI track's kit entry has
-two objects: the 359-byte sound slot, parked while the track is MIDI, and a 268-byte
+two objects: the 359-byte sound slot ~~, parked while the track is MIDI~~ **[corrected by DNX: its machine byte reads MIDI (4), so it is the MIDI track's own sound object, not a parked synth sound]**, and a 268-byte
 MIDI record at kit `+5964`. The copied arp sits **byte for byte in the sound slot**
 (324–353 equal to the synth source); the MIDI record gained nothing. Its byte 257
 is set only on the MIDI-mode track, probably a mode flag (DNX's inference, not
