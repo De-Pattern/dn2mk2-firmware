@@ -2744,3 +2744,45 @@ glitch ramp. Both are boot-screen mod options, so they belong in
 **A variation, not a replacement** (owner: *"as a new variation"*): the tunnel intro stays available; ASCII-glitch is another choice beside it in the boot-screen mod and on the site.
 
 **Not built.**
+
+## 18. P-locking the arpeggiator's parameters
+
+**Raised by the owner 2026-09-17**, after the arp engine was read for §10.
+
+### Why they are not p-lockable today
+
+A p-lock names a **lock id** that maps to a slot of the 101-slot per-track
+parameter mirror (`docs/lock-id-table.md`). The arp's settings are not in that
+space: MODE, SPD, RNG, N.LEN, LEN, the step mask and the 16 offsets are bytes of
+the track's **sound** from `+0x15f`, with no parameter-table record and no lock
+id. The frame ISR reads them straight from a sound pointer, on every step.
+
+### The per-note sound pointer, and the owner's answer
+
+The ISR takes each note's sound from its record (`+64`, else `+60`) and falls
+back to the kit's sound only when the record carries none (`0x40026708`); the
+arp restarts when that pointer changes (`0x40029cd4`). That predicted that
+**sound locks already vary the arp per trig**.
+
+**Confirmed on hardware, stock firmware, 2026-09-17.** Owner: *"yes different
+sound presets plocked containing different ARP settings trigger different
+arps."* So per-trig arp variation exists today through sound locks, and the
+engine half of real arp p-locks is proven: point a note at a sound whose arp
+bytes differ, and the arp follows.
+
+### What real p-locks would still need
+
+1. **Engine (moderate, ColdFire only).** Lock ids for the arp parameters in the
+   free range 100..127 (the five main controls fit easily). At trig start, copy
+   the track's sound into a per-track shadow, apply the locked arp values, and
+   set the note's sound pointer to the shadow. The arp code is untouched.
+2. **Storage (unknown).** Whether lock ids above the current maximum survive a
+   project save and load. The same open question as §12's modulator depths;
+   **DNX's to answer**.
+3. **UI (the real cost).** A p-lock is recorded by holding a trig and turning a
+   knob on a parameter page. The arp settings live in `ArpSetupMenuView`, a
+   menu, not a parameter page, so that recording path does not reach them.
+   Until the UI exists, locks could only be written into patterns by DNX.
+
+**Next:** ask DNX about (2). If ids 100..127 persist, build (1) and let DNX write
+test locks; (3) only after the sound works.
