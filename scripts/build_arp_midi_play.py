@@ -95,6 +95,8 @@ SOUND_BASE = 52             # kit + 52 + 1163*track: the track's sound
 SOUND_STRIDE = 1163
 ARP_MODE = 0x15F
 ARP_NLEN = 0x162
+SOUND_VELOCITY = 0x480      # a trig's velocity when its own byte is negative (0x4012a9a8)
+SOUND_LENGTH = 0x481        # ...and its length (0x40026680, 0x4012a9a8)
 
 VOICE_START = 0x40137D3C    # synth road, live
 MIDI_SEND = 0x4012B8B0      # MIDI road, live
@@ -183,21 +185,14 @@ voice_hook:
     moveq   #-1,%d0
     move.l  %d0,24(%a3)                 | the note is the inline entry at +36
     clr.l   32(%a3)
-    clr.l   44(%a3)
     move.l  24(%sp),48(%a3)             | time, the base of its note-off
     moveq   #2,%d0
     move.l  %d0,52(%a3)                 | live-played: the engine already gated mutes
     clr.b   36(%a3)
     clr.b   37(%a3)
     move.b  38(%a2),38(%a3)             | note: the arp's step
-    move.b  39(%a2),39(%a3)             | velocity
     clr.b   41(%a3)
-    moveq   #0,%d3
-    move.b  40(%a2),%d3                 | the note's own length
-    move.l  56(%a2),%d1
-    btst    #19,%d1                     | the arp is running this note
-    beq.s   6f
-    move.l  64(%a2),%d0                 | its sound, as the ISR finds it (0x40026708)
+    move.l  64(%a2),%d0                 | the sound it plays with, as the ISR finds it (0x40026708)
     bne.s   5f
     move.l  60(%a2),%d0
     bne.s   5f
@@ -206,7 +201,26 @@ voice_hook:
     add.l   {KIT:#x},%d0
     add.l   #{SOUND_BASE},%d0
 5:  move.l  %d0,%a1
+    move.l  44(%a2),%d0                 | the sound its defaults come from (0x4002672c)
+    bne.s   12f
+    move.l  %a1,%d0
+12: move.l  %d0,44(%a3)                 | the MIDI task reads defaults through +44 too:
+    move.l  %d0,%a0                     | never leave it null
+    move.b  39(%a2),%d1                 | velocity; negative = the sound's
+    bpl.s   13f
+    move.b  {SOUND_VELOCITY}(%a0),%d1
+    bpl.s   13f
+    moveq   #100,%d1
+13: move.b  %d1,39(%a3)
+    moveq   #0,%d3
+    move.b  40(%a2),%d3                 | the note's own length
+    move.l  56(%a2),%d1
+    btst    #19,%d1                     | the arp is running this note
+    beq.s   14f
     move.b  {ARP_NLEN}(%a1),%d3         | N.LEN
+14: tst.b   %d3
+    bpl.s   6f
+    move.b  {SOUND_LENGTH}(%a0),%d3     | negative = the sound's (0x40026680)
 6:  moveq   #126,%d1
     cmp.l   %d3,%d1
     bcc.s   7f
@@ -268,10 +282,12 @@ CONTEXT = (
     (0x400187EA, bytes.fromhex("4eb940031274"), "callback: is the active track MIDI"),
     (0x400187FE, bytes.fromhex("20690028"), "callback: yes -> owner vtable +40, close"),
     (0x4012A3B4, bytes.fromhex("206f0004"), "the MIDI lock-list free"),
+    (0x4002672C, bytes.fromhex("2268002c"), "ISR: a note's default-giving sound is record +44"),
+    (0x40026680, bytes.fromhex("2069002c"), "ISR: negative length -> sound +0x481 through +44"),
 )
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-OUT = pathlib.Path("00_Resources/02_Builds/arp-midi-play_DN2_1.11.syx")
+OUT = pathlib.Path("00_Resources/02_Builds/arp-midi-play2_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
