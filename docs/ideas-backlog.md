@@ -1737,9 +1737,18 @@ engine has no path from them to MIDI notes.
 
 **What the feature now costs:** new code, not a gate flip — run the arp step for
 a MIDI track and hand its note to `0x4012b8b0` instead of a voice. Plus the knob
-routing on the menu. Both ColdFire-side. Parked until DNX's project read says
-whether the copied arp bytes persist on a MIDI track (they must, or there is
-nothing for new code to read).
+routing on the menu. Both ColdFire-side. ~~Parked until DNX's project read says whether the copied arp bytes persist.~~
+
+**They persist (DNX, `TEST_MIDI_ARP`, 2026-09-17).** A MIDI track's kit entry has
+two objects: the 359-byte sound slot, parked while the track is MIDI, and a 268-byte
+MIDI record at kit `+5964`. The copied arp sits **byte for byte in the sound slot**
+(324–353 equal to the synth source); the MIDI record gained nothing. Its byte 257
+is set only on the MIDI-mode track, probably a mode flag (DNX's inference, not
+measured). Stock firmware already stores arp bytes there: four MIDI-track slots in
+the factory PRESETS project carry them. **So the data a MIDI arp needs is saved
+today**, and the build is engine code only: on the MIDI branch at `0x40121906`,
+step the arp from the track's sound slot and hand the note to `0x4012b8b0`. The
+MIDI record needs no change.
 
 ## 11. A real compatibility check between mods
 
