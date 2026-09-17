@@ -2013,8 +2013,35 @@ record reaching the hook is sent (a filtered one as a marker note, C1/D1/E1 for
 bits 1/18/20), at fixed velocity and length, and still passed to the stock
 trigger.
 
-Still to measure on play3: arp OFF is stock, a held key arpeggiates, no
-duplicate or stuck notes, synth tracks unaffected, N.LEN changes the gate.
+**play3 capture (DNX):** offsets applied (`48+7, 48-5, 48+0, 48+12` from a
+pattern trig; `60+12, 60+7, 60-5, 60+0` from a held key), the trig's velocity
+(102), 1/16 steps at 125 ms at 120 BPM, no duplicates, no stuck notes, arp OFF
+exactly stock. **Lengths were wrong**: N.LEN 1/32 lasted 125 ms and 1/8 lasted
+1000 ms. Rates in that run are not evidence -- the owner was changing settings.
+
+**Why:** the ISR times an arp note through its own table `0x40287b08[N.LEN]`
+(`0x40026a72`), and every other note through `0x401d88d8[len]` (`0x40026a7c`),
+which is also the only table the MIDI task has. Same units, twice the
+resolution: arp `84375*(n+3)`, trig `168750*(n+2)` below 30. The hook passed the
+N.LEN byte through as a trig index.
+
+**`arp-midi-play4`** carries a 128-byte lookup, built from both tables in the
+image, mapping each N.LEN to the trig index nearest in duration (ties shorter;
+INF -> 126). **Hardware, tempo 120, SPD 1/16 (DNX):**
+
+| N.LEN | expected | on->off min / median / max |
+|---|---|---|
+| 1/32 | 62.5 | 61.1 / 62.0 / 63.0 |
+| 1/16 | 125 | 123.9 / 125.0 / 126.1 |
+| 1/8 | 250 | 264.0 / 265.1 / 266.1 (byte 62); 248.9 / 250.0 / 251.0 in another window (byte 61) |
+| 1/4 | 500 | 499 / 500 / 501 |
+
+"1/8" is shown for two adjacent bytes, 61 (250 ms) and 62 (265.6 ms), both as
+the table predicts. No stuck notes over 5,248 note messages; onsets held at
+125 ms through every change. **The MIDI arpeggiator works.**
+
+Not re-checked on play4: synth tracks and arp OFF (both stock on play3, and
+play4 changes only the MIDI record's length byte).
 
 ## 11. A real compatibility check between mods
 
