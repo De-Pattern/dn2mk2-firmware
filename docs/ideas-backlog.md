@@ -2443,4 +2443,6 @@ prove the tunnel can be bypassed and the panel written per frame. Then the
 glitch ramp. Both are boot-screen mod options, so they belong in
 `src/dnfw/mods/bootscreen.py` as a mode, not a new one-off script.
 
+**A variation, not a replacement** (owner: *"as a new variation"*): the tunnel intro stays available; ASCII-glitch is another choice beside it in the boot-screen mod and on the site.
+
 **Not built.**
