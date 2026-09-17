@@ -1700,6 +1700,18 @@ same mask, already seen at `0x400d9ee0`, `0x400d9062`, `0x400f7f14` and
 preset — not known to be used otherwise, not proven — so test on a scratch
 project.
 
+### v2 on hardware 2026-09-17: the menu opens; its knobs go somewhere else
+
+- **Menu opens on a MIDI track.** The mask test at `0x4005f9c2` was the UI gate.
+- **Knobs don't edit it:** turning one returns to the TRIG page and edits the
+  matching trig parameter. So encoder events on a MIDI track are routed by the
+  same mask before the menu view sees them — a second gate, in the knob path.
+- **Copying an arp from a synth track onto the MIDI track makes the parameters
+  show on the menu** — the owner's workaround. The MIDI preset carries the arp
+  region and the view reads it.
+- **Open:** whether the sequencer arpeggiates a MIDI track's notes. DNX asked to
+  monitor channel 1 on the USB MIDI output.
+
 ## 11. A real compatibility check between mods
 
 **Filed 2026-09-14, at the owner's direction, to be picked up when two mods
