@@ -1754,3 +1754,18 @@ at the cave address is now part of building a cave, not an optional check.
 The control is that the sweep must persist with LFO1–3 all set to no
 destination. **Not a shipping build**: LFO4 is fixed, global and invisible, and
 nothing it does is saved.
+
+### 5l result — passed on hardware, 2026-09-17
+
+Owner: *"`lfo4-tick6a_DN2_1.11.syx` -> works."* The engine question is answered
+yes: the evaluators run a fourth LFO over the relocated, grown state and apply it.
+Recorded in `docs/flashing.md`.
+
+**Not covered by a one-word report, so not claimed:** LFO1–3 unaffected, all
+sixteen tracks sweeping, and DNX's read of a saved sound (lane 4 of bytes 36–93
+must stay `00 00`). Those are cheap to ask for and are the next confirmations.
+
+**What this unblocks:** the remaining LFO4 pieces are now storage and UI, not
+engine — feed the fourth slot from the per-track mirror (which needs mirror
+growth past slot 100, backlog §12) and join v6a to the v4 page view, whose one
+known defect is the three-element waveform-graph array at `0x4010d984`.
