@@ -1118,6 +1118,46 @@ difference. Bounded by construction, no clamp. **Executed under Unicorn**
 preserved, lag-1 correlation white −0.02, pink +0.52, brown +0.90. 21 integrity
 checks.
 
+### v3 PASSED on hardware; v4 superseded; v5 BUILT 2026-09-17 — loop length on SPH
+
+v3 on the instrument: NOI follows SPD and MULT. The owner then noticed it
+repeats every cycle and decided that is a feature: *"good for music creation …
+easy to insert in grooves, but is better to be able to control it"* — shown
+*"like some controls work … 1.xx where xx is the loop length and 1 is the type
+of noise."* v4 (never repeats) is therefore **superseded, not flashed**.
+
+**v5, `lfo-waveshapes5_DN2_1.11.syx`:**
+
+- **SPH is two fields on NOIS.** Colour `SPH >> 5` (1 white, 2 pink, 3 brown,
+  4 violet); loop `SPH & 31`: 0..30 repeat every loop+1 cycles, 31 never repeats.
+- **Per-LFO cycle counter.** The call hooks put an instance key in `%d1`'s upper
+  bits: `((&SPH >> 1) & 1023) << 8`, where `&SPH` is the address of that LFO's
+  SPH slot in the engine mirror — the same address from both evaluators, 48
+  distinct keys for 16 tracks × 3 LFOs. Each key owns 8 bytes at `0x46740000`
+  (last step, cycle), wrapping at the loop length, backwards too.
+- **SPH reads `colour.loop` only when that LFO's WAVE is NOIS.** The three
+  `Start Phase` records' formatter pointers (`0x401f92c4`, `0x401f951c`,
+  `0x401f9774`, all the shared number formatter `0x400e2ecc`) point at a stub that
+  reads the **active track** (byte `0x42431a6c`) and **WAVE from the engine
+  mirror** (`0x44616448 + 202·track + 2·(8·lfo+5)`), then prints with the
+  firmware's own `"%d.%02d"` (`0x40210bce`), or `"%d.--"` for never; any other
+  wave falls through to the stock number.
+- **How the two globals were found, under the emulator:** evaluator B's only
+  caller passes the mirror as a literal (`pea 0x44616448` at `0x4012b0a4`); the
+  active track came from saving RAM on track 1, selecting track 3 with
+  [TRK]+[TRIG 3] (`guirun --input`), and diffing — `0x42431a6c` went 0→2, and it
+  is field `+8` of the struct `0x40046bfe` reads through `ProjectSettings`.
+  LFO1's WAVE read from the mirror as SINE, matching the page.
+- **Data moved to the second verified cave** (`0x402d0664`); code 684/896.
+
+**Executed under Unicorn** (`scripts/check_lfo_noise.py`), real bytes, real
+`sprintf`: loops of 1, 2, 4 and 31 cycles repeat exactly; field 31 gives 70
+distinct cycles out of 70; a backwards loop of 4 repeats; callee-saved registers
+intact; the formatter prints `1.01`, `1.04`, `2.14`, `4.--`, `3.--` for NOIS
+and `64`, `12` for other waves. 21 integrity checks. **Not run on the LFO
+page under the emulator** — guirun cannot yet overlay a patched MAIN OS on a
+stock snapshot, and the evaluators do not tick there.
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read

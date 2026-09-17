@@ -95,6 +95,10 @@ BASE = 0x40000400
 # One of the three 896-byte runs that pass both of `dnfw cave scan`'s checks.
 CAVE = 0x402CF52C
 CAVE_CAP = 896
+# v5 outgrew one run: the data (names, state, tables) moves to the second verified
+# 896-byte run, the one lfo-wavetable uses for its table, and the code keeps the first.
+DATA_CAVE = 0x402D0664
+DATA_CAVE_CAP = 896
 
 STOCK_NAMES = 0x401D3574            # TRI SIN SQR SAW EXP RMP RND
 STOCK_TABLES = (0x4020B2EC, 0x4020B308, 0x4020B324, 0x4020B340)
@@ -134,7 +138,15 @@ HOOKS = (
     (ui.SHORT_FMT, ui.FMT_ENTRY_STOCK, "fmt_short"),
     (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
-LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase") + ui.LABELS
+LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase",
+          "fmt_sph1", "fmt_sph2", "fmt_sph3") + ui.LABELS
+
+# The three `Start Phase` records' formatter pointers (record name pointer + 12),
+# each holding the shared number formatter until fmt_sph takes it over.
+SPH_FORMATTERS = ((0x401F92C4, "fmt_sph1"), (0x401F951C, "fmt_sph2"),
+                  (0x401F9774, "fmt_sph3"))
+STOCK_NUMBER_FMT = 0x400E2ECC
+NEVER_FMT = b"%d.--\x00"
 
 # Any non-zero word will do -- xorshift32's only requirement.  It is re-seeded
 # from the image on every power-up, so NOI is deterministic per boot.
@@ -147,16 +159,18 @@ NOISE_RAM = 0x46740000
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 # v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
-# v4: NOI keeps a cycle count per LFO, so the pattern no longer repeats each cycle.
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes4_DN2_1.11.syx")
+# v5: NOI loop length on SPH, shown as colour.loop.
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes5_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
     return struct.pack(">I", v & 0xFFFFFFFF)
 
 
-def source(fn_table: int, state: int, short_names: int, long_names: int) -> str:
+def source(fn_table: int, state: int, short_names: int, long_names: int,
+           never_fmt: int) -> str:
     noise_ram = NOISE_RAM
+    noise_index = STOCK_ENTRIES + 2
     """The three generators and the three hook stubs.
 
     `%d2` and `%d3` are saved: the stock generators never touch them, so the
@@ -217,17 +231,24 @@ pulse:
 | v3 was stateless, a hash of the step within the cycle -> SPD and MULT worked,
 |    but every cycle replayed the same 64 values (owner: "it looked like the
 |    noise pattern repeated").
-| v4: each LFO instance owns 8 bytes of RAM -- its last step and a cycle count --
-|    found by a key the call hooks put in %d1's upper bits. The hash input is
-|    (cycles << 6) | step, so the sequence runs on across cycles and only the
-|    step index clocks it: SPD and MULT still set the rate, and a held value
-|    still holds for the whole step. A wrap backwards (negative SPD) counts down.
+| v4 never repeated -- but the owner found v3's per-cycle repetition *"good for
+|    music creation ... easy to insert in grooves, but is better to be able to
+|    control it."*
+| v5: each LFO instance owns 8 bytes of RAM -- its last step and a cycle count --
+|    found by a key the call hooks put in %d1's upper bits. The count wraps at the
+|    loop length, and the hash input is (cycle << 6) | step, so the pattern
+|    repeats every L cycles. SPD and MULT still set the rate; a held value still
+|    holds for the whole step; a backwards wrap (negative SPD) counts down.
 |    The RAM is uninitialised: garbage there only picks a different start.
 |
-|   SPH   0-31   white    h(n)
-|   SPH  32-63   pink     six octaves h(n >> k), equal weight
-|   SPH  64-95   brown    the same octaves, each slower one twice as loud
-|   SPH  96-127  violet   h(n) - h(n - 1)
+| SPH is two numbers, shown on the page as `colour.loop` (see fmt_sph):
+|   colour = SPH >> 5          1 white, 2 pink, 3 brown, 4 violet
+|   loop   = SPH & 31          0..30 -> repeats every loop+1 cycles, 31 -> never
+|
+|   white    h(n)
+|   pink     six octaves h(n >> k), equal weight
+|   brown    the same octaves, each slower one twice as loud
+|   violet   h(n) - h(n - 1)
 noise:
     lea     %sp@(-20),%sp
     moveml  %d2-%d5/%a2,%sp@
@@ -239,7 +260,9 @@ noise:
     lsl.l   #3,%d0
     lea     {noise_ram:#010x},%a2
     adda.l  %d0,%a2                 | this LFO's 8 bytes
-    move.l  %a2@(4),%d3             | cycles
+    move.l  %d1,%d5
+    andi.l  #31,%d5                 | loop field: 31 = never repeat
+    move.l  %a2@(4),%d3             | cycle
     move.l  %d4,%d0
     sub.l   %a2@,%d0                | step - last
     cmpi.l  #-32,%d0
@@ -248,10 +271,18 @@ noise:
 1:  cmpi.l  #32,%d0
     ble.s   2f
     subq.l  #1,%d3                  | wrapped backwards
-2:  move.l  %d4,%a2@
+2:  cmpi.l  #31,%d5
+    beq.s   4f                      | never: let the count run
+    cmp.l   %d5,%d3
+    bls.s   4f                      | unsigned: 0..loop is in range
+    clr.l   %d3                     | past the end (or below zero): wrap to 0
+    tst.l   %d0
+    ble.s   4f
+    move.l  %d5,%d3                 | a backwards wrap lands on the last cycle
+4:  move.l  %d4,%a2@
     move.l  %d3,%a2@(4)
     lsl.l   #6,%d3
-    or.l    %d3,%d4                 | n = cycles << 6 | step
+    or.l    %d3,%d4                 | n = cycle << 6 | step
     andi.l  #0x7f,%d1
     lsr.l   #5,%d1
     move.l  %d1,%d5                 | colour 0..3
@@ -296,6 +327,67 @@ noise:
 99: moveml  %sp@,%d2-%d5/%a2
     lea     %sp@(20),%sp
     rts
+
+| ---- SPH's value text: `colour.loop` when this LFO's WAVE is NOIS --------
+| Replaces the formatter pointer of the three `Start Phase` records only; every
+| other record keeps the shared number formatter 0x400e2ecc. The record knows its
+| LFO, so each gets a two-instruction entry. The track is the UI's active track
+| (a byte at 0x42431a6c, found by selecting track 3 under the emulator and diffing
+| RAM), and WAVE is read from the engine's per-track mirror at 0x44616448, stride
+| 202, slot 8*lfo+5 -- the same mirror evaluator B is passed.
+fmt_sph1:
+    moveq   #0,%d1
+    bra.s   70f
+fmt_sph2:
+    moveq   #1,%d1
+    bra.s   70f
+fmt_sph3:
+    moveq   #2,%d1
+70: lsl.l   #4,%d1
+    addi.l  #10,%d1                 | 2 * (8 * lfo + 5)
+    movea.l %d1,%a0                 | only scratch registers from here: %d0 %d1 %a0 %a1
+    moveq   #0,%d0
+    move.b  0x42431a6c,%d0          | active track
+    cmpi.l  #15,%d0
+    bhi.s   79f
+    adda.l  %d0,%a0                 | 202 = 128 + 64 + 8 + 1 + 1, shifts only
+    adda.l  %d0,%a0
+    move.l  %d0,%d1
+    lsl.l   #3,%d1
+    adda.l  %d1,%a0
+    lsl.l   #3,%d1
+    adda.l  %d1,%a0
+    add.l   %d1,%d1
+    adda.l  %d1,%a0
+    movea.l #0x44616448,%a1
+    adda.l  %a0,%a1                 | &mirror[track][WAVE]
+    moveq   #0,%d0
+    move.b  %a1@,%d0
+    cmpi.l  #{noise_index},%d0
+    bne.s   79f
+    move.l  %sp@(4),%d0
+    asr.l   #8,%d0                  | SPH 0..127
+    move.l  %d0,%d1
+    andi.l  #31,%d1                 | loop field
+    lsr.l   #5,%d0
+    addq.l  #1,%d0                  | colour 1..4
+    cmpi.l  #31,%d1
+    beq.s   78f
+    addq.l  #1,%d1                  | loop length in cycles, 1..31
+    move.l  %d1,%sp@-
+    move.l  %d0,%sp@-
+    pea     0x40210bce              | "%d.%02d", the firmware's own
+    move.l  %sp@(20),%sp@-          | dest, past three pushes
+    jsr     0x40000e82
+    lea     %sp@(16),%sp
+    rts
+78: move.l  %d0,%sp@-               | never repeats: `colour.--`
+    pea     {never_fmt:#010x}
+    move.l  %sp@(16),%sp@-
+    jsr     0x40000e82
+    lea     %sp@(12),%sp
+    rts
+79: jmp     0x400e2ecc              | any other wave: the stock number
 
 | hash: %d0 = value, %d2 = octave -> %d0, clobbers %d3. A murmur-style mix.
 90: move.l  %d2,%d3
@@ -375,9 +467,10 @@ def main() -> int:
     content = bytearray(section.unpack())
 
     require_zero(content, CAVE, CAVE_CAP, "cave region")
+    require_zero(content, DATA_CAVE, DATA_CAVE_CAP, "data cave region")
 
     # --- layout: names, then the five tables, then the code --------------
-    name_vas, cursor = [], CAVE
+    name_vas, cursor = [], DATA_CAVE
     for text in NEW_NAMES:
         name_vas.append(cursor)
         cursor += len(text)
@@ -387,17 +480,21 @@ def main() -> int:
     for text in NEW_LONG_NAMES:
         long_name_vas.append(cursor)
         cursor += len(text)
+    never_va = cursor
+    cursor += len(NEVER_FMT)
     cursor = (cursor + 3) & ~3
     names_va, cursor = cursor, cursor + 4 * ENTRIES
     long_names_va, cursor = cursor, cursor + 4 * ENTRIES
     table_vas = {}
     for old in STOCK_TABLES:
         table_vas[old], cursor = cursor, cursor + 4 * ENTRIES
-    stub_va = cursor
+    if cursor - DATA_CAVE > DATA_CAVE_CAP:
+        raise SystemExit(f"data cave overflows: {cursor - DATA_CAVE} > {DATA_CAVE_CAP}")
+    stub_va = CAVE
 
     print("part 1 -- the generators and the hook stubs")
     payload, offsets = assemble_stubs(
-        source(table_vas[0x4020B340], state_va, names_va, long_names_va), stub_va)
+        source(table_vas[0x4020B340], state_va, names_va, long_names_va, never_va), stub_va)
     used = (stub_va - CAVE) + len(payload)
     if used > CAVE_CAP:
         raise SystemExit(f"cave overflows: {used} > {CAVE_CAP}")
@@ -418,6 +515,7 @@ def main() -> int:
           + " ".join(cstr(content, v) or "?" for v in old_names + name_vas))
     for text, va in zip(NEW_LONG_NAMES, long_name_vas):
         write(content, va, text)
+    write(content, never_va, NEVER_FMT)
     old_long = read_longs(content, ui.LONG_NAMES, STOCK_ENTRIES)
     write(content, long_names_va, b"".join(be32(v) for v in old_long + long_name_vas))
     print(f"  long names {ui.LONG_NAMES:#010x} -> {long_names_va:#010x}  "
@@ -444,6 +542,11 @@ def main() -> int:
     for va in WAVE_MAX_FIELDS:
         poke(content, va, be32(STOCK_WAVE_MAX << 8), be32((ENTRIES - 1) << 8),
              "LFO Waveform max")
+
+    print("part 5c -- SPH shows colour.loop on NOIS")
+    for va, label in SPH_FORMATTERS:
+        poke(content, va, be32(STOCK_NUMBER_FMT), be32(offsets[label]),
+             f"Start Phase formatter -> {label}")
 
     print(f"part 5b -- the evaluators' WAVE clamps, 6 -> {ENTRIES - 1}")
     for va, stock, new, why in ui.clamp_edits(ENTRIES - 1):
