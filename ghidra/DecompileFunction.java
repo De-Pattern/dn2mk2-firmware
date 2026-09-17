@@ -2,6 +2,9 @@
  * given string, and print the C. For reading a routine after Gate F has
  * cleared the disassembler -- never before.
  *
+ * Several targets may be given. An address with no function around it is
+ * taken as a function entry and the function is made there.
+ *
  * Two ways to name the target, because an address is not always known yet:
  *   -postScript DecompileFunction.java 0x80012a1c
  *   -postScript DecompileFunction.java "RECEIVING..."     (string it references)
@@ -33,22 +36,24 @@ public class DecompileFunction extends GhidraScript {
     public void run() throws Exception {
         String[] args = getScriptArgs();
         if (args.length < 1) {
-            println("usage: DecompileFunction <address> | \"<string it references>\"");
+            println("usage: DecompileFunction (<address> | \"<string it references>\")...");
             return;
         }
 
         Set<Function> targets = new LinkedHashSet<>();
-        String arg = args[0];
-        boolean looksLikeAddress = arg.startsWith("0x") || arg.matches("[0-9a-fA-F]{6,}");
-
-        if (looksLikeAddress) {
-            Address a = toAddr(Long.decode(arg.startsWith("0x") ? arg : "0x" + arg));
-            Function f = getFunctionContaining(a);
-            if (f != null) targets.add(f);
-            else println("; no function contains " + a);
-        } else {
-            for (Function f : functionsReferencing(arg)) targets.add(f);
-            if (targets.isEmpty()) println("; no function references the string " + arg);
+        for (String arg : args) {
+            boolean looksLikeAddress = arg.startsWith("0x") || arg.matches("[0-9a-fA-F]{6,}");
+            if (looksLikeAddress) {
+                Address a = toAddr(Long.decode(arg.startsWith("0x") ? arg : "0x" + arg));
+                Function f = getFunctionContaining(a);
+                if (f == null) f = defineAt(a);
+                if (f != null) targets.add(f);
+                else println("; no function contains " + a + ", and none could be made there");
+            } else {
+                Set<Function> found = functionsReferencing(arg);
+                targets.addAll(found);
+                if (found.isEmpty()) println("; no function references the string " + arg);
+            }
         }
 
         DecompInterface decomp = new DecompInterface();
@@ -68,6 +73,16 @@ public class DecompileFunction extends GhidraScript {
         } finally {
             decomp.dispose();
         }
+    }
+
+    /* Analysis sometimes leaves a routine undefined -- an interrupt handler
+     * reached only through a vector written at run time has no caller to find.
+     * Given its entry address, disassemble from there and make the function. */
+    private Function defineAt(Address a) throws Exception {
+        disassemble(a);
+        Function f = createFunction(a, null);
+        if (f != null) println("; made a function at " + a);
+        return f;
     }
 
     /* Every function holding a reference to the address of a NUL-terminated

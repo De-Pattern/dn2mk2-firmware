@@ -1924,6 +1924,65 @@ today**, and the build is engine code only: on the MIDI branch at `0x40121906`,
 step the arp from the track's sound slot and hand the note to `0x4012b8b0`. The
 MIDI record needs no change.
 
+### v3 BUILT 2026-09-17: `arp-midi-play_DN2_1.11.syx` — the playback build
+
+`scripts/build_arp_midi_play.py`. Reading the engine end to end (Ghidra now
+decompiles the ISR's arp routines; `ghidra/DecompileFunction.java` makes a
+function where analysis left none) corrected the plan above: stepping the arp
+"on the MIDI branch" is not enough, because **the arp is not a function you can
+call per note**. It is state in the frame ISR: a held-note set per track
+(`0x40029cd4` adds notes, bitmaps at `0x40598728`, lists at `0x40598828`), a
+step clock driven by type-9 records, and the step `0x4002a0bc`. Notes reach it
+only as engine records. So a MIDI track's notes are sent **down the synth road**
+while its arp is on, and turned back into MIDI where the road ends.
+
+**The three forks** where a note picks a road by the kit's MIDI mask:
+
+| source | synth | MIDI | patched at |
+|---|---|---|---|
+| sequencer trig | `0x400d8654` engine record | `0x400d8b5a` MIDI record | `0x400d905e`, `0x400d9edc` (the second fork also schedules the arp's type-9 clock on the synth side) |
+| key down | `0x40137d3c` | `0x4012b8b0` | `0x40121d84` |
+| key up | `0x40137d3c` | `0x4012b8b0` | `0x40121914` |
+
+The test is the track's arp **MODE**, sound `+0x15f` (sound = kit + 52 +
+1163×track, `0x40025bda`). Zero is off: [FUNC]+[ARP] parks MODE at `+0x176` and
+writes 0 (`0x4004bea4`).
+
+**Where the road ends:** `0x400db524`, the ISR's voice trigger, called at
+`0x400268f8` for every note, arpeggiated or not. On a MIDI track the hook
+builds a **MIDI record** (the MIDI task's format, read from `0x4012a9a8`: track
++8, kind +12, flag `0x80` = play at +16, inline note entry at +36 with note
++38, velocity +39, length +40, time +48, source +52) and appends it to the batch
+the ISR already posts to the MIDI task (head `-180(%fp)`, tail `%a5`, sent at
+`0x40026f60`). The MIDI task sends it on the track's channel and schedules the
+note-off from the length. Length is **N.LEN** (`+0x162`) while the arp runs
+(record flag `0x80000`), else the note's own; INF is sent as 126 so every note
+ends.
+
+One trap handled: a key-down note can carry a lock list from the MIDI pool
+(`0x40121d06`, when `0x4029f524` selects one). The engine frees record locks
+into its own pool, so the hook returns the list to the MIDI pool first.
+
+**Emulator, 2026-09-17** (patched ranges over the stock 400M snapshot, track 1
+poked to MIDI): arp MODE UP → key down and key up both go to the voice starter;
+MODE 0 → both go to the MIDI sender, as stock. No faults. The sequencer's fork
+calls the gate during the pattern-prepare pass (64 calls, all synth, as the
+mask then said). **What the emulator cannot show:** the frame ISR does not run
+there (no DSP link), so the arp stepping and the MIDI records are unverified
+until a flash.
+
+| on hardware, MIDI track, arp ON | means |
+|---|---|
+| MIDI out arpeggiates at SPD, over RNG, N.LEN long | done |
+| the trig plays as written | a fork was missed |
+| nothing on MIDI out | the voice-trigger hook never saw the track |
+| sound on the audio outputs from the MIDI track | the engine voiced it elsewhere |
+| stuck notes | a length or note-off path is missing |
+
+Arp OFF on a MIDI track, and every synth track, must be exactly stock. The
+knobs on the menu still jump to TRIG (not in this build); copy an arp from a
+synth track to set it.
+
 ## 11. A real compatibility check between mods
 
 **Filed 2026-09-14, at the owner's direction, to be picked up when two mods
