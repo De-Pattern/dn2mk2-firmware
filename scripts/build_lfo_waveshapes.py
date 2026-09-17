@@ -145,6 +145,10 @@ SPH_LABELS = ["STPS", "WDTH", "TYPE"]   # owner-approved: STPS, WDTH, TYPE
 
 # The sound ParameterSet's vtable slot 92 (format a record's value), v6's hook.
 SOUND_SET_V92 = 0x401DB858
+# MIDI tracks' LFO page formats through MidiParameterSet (vtable 0x401db994), whose
+# slot 92 holds the same stock method. v6-v9 wrapped only the sound set's, so on a
+# MIDI track SPH stayed a plain number (owner, 2026-09-17). v10 wraps both.
+MIDI_SET_V92 = 0x401DB9F0
 STOCK_V92 = 0x40036692
 NEVER_FMT = b"%d.--\x00"
 
@@ -159,8 +163,8 @@ NOISE_RAM = 0x46740000
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 # v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
-# v8: glyphs rendered from the generators, no SPH slide, SPH renamed STPS/WDTH/TYPE.
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes8_DN2_1.11.syx")
+# v10: v9 with SPH colour.loop on MIDI tracks too.
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes10_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
@@ -500,7 +504,8 @@ def main() -> int:
     # into the data cave after the data.
     glyph_code_va = (cursor + 3) & ~3
     glyph_code, glyph_offsets = assemble_stubs(
-        glyph.source(glyph_sets, table_vas[0x4020B340], len(SPH_LABELS), label_table),
+        glyph.source(glyph_sets, table_vas[0x4020B340], len(SPH_LABELS), label_table,
+                     state_reset=NOISE_RAM + 8 * glyph.NOISE_GLYPH_KEY),
         glyph_code_va, glyph.LABELS)
     data_used = glyph_code_va + len(glyph_code) - DATA_CAVE
     if data_used > DATA_CAVE_CAP:
@@ -558,6 +563,8 @@ def main() -> int:
     print("part 5c -- SPH shows colour.loop on NOIS")
     poke(content, SOUND_SET_V92, be32(STOCK_V92), be32(offsets["fmt_v92"]),
          "sound ParameterSet vtable slot 92 -> fmt_v92")
+    poke(content, MIDI_SET_V92, be32(STOCK_V92), be32(offsets["fmt_v92"]),
+         "MIDI ParameterSet vtable slot 92 -> fmt_v92")
 
     print("part 5d -- the [MOD] page glyph")
     for va, stock, new, why in glyph.clamp_edits(ENTRIES - 1) + glyph.hooks(offsets):

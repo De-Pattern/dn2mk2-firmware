@@ -112,7 +112,20 @@ def clamp_edits(max_index: int) -> list[tuple[int, bytes, bytes, str]]:
             for va, op in CLAMPS]
 
 
-def source(sets_va: int, fn_table: int, count: int, label_table: int) -> str:
+def source(sets_va: int, fn_table: int, count: int, label_table: int,
+           state_reset: int | None = None) -> str:
+    """`state_reset`: the 8-byte state of NOISE_GLYPH_KEY, cleared before each render.
+
+    [WRONG in v8 — corrected] v8 left it running: each render sweeps a whole cycle,
+    so the next render saw a wrap, counted a cycle, and drew the next cycle's noise
+    -- the owner saw the NOIS glyph change on unrelated button presses.
+    """
+    reset = ""
+    if state_reset is not None:
+        reset = "".join([
+            f"    clr.l   {state_reset:#010x}              | a fresh cycle for every render\n",
+            f"    clr.l   {state_reset + 4:#010x}\n",
+        ])
     return f"""
 | ---- [MOD] glyph: render the new waveform's tile from its own generator ----
 | Reached by jsr at 0x4010dd58 with %d5 = WAVE (clamped), %d2 = SPH 0..127.
@@ -137,7 +150,7 @@ glyph_flag:
     movea.l %a3@(0,%d5:l:4),%a3     | its generator
     moveq   #0,%d4                  | x
     moveq   #-1,%d6                 | previous y: none yet
-11: move.l  %d4,%d0
+{reset}11: move.l  %d4,%d0
     move.l  #0x09249249,%d1         | 2^32 / 28
     mulsl   %d1,%d0                 | phase
     move.l  %d0,%sp@-

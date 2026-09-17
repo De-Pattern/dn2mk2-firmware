@@ -1248,6 +1248,27 @@ project-loading overlay.
 
 ![v8 glyphs](img/lfo-glyphs-v8-emulator.png)
 
+### v8 PASSED; v9 and v10 BUILT 2026-09-17 — NOIS glyph stability, MIDI tracks
+
+- **v8 on hardware:** glyphs *"work great"*. Two defects reported.
+- **NOIS glyph changed on unrelated button presses.** The renderer calls NOI with
+  reserved key 1023; each render sweeps a whole cycle, so the next render saw a
+  wrap, counted a cycle and drew the next cycle's noise. v9 clears that key's 8
+  bytes before each render.
+- **MIDI tracks: SPH plain number, label stock.** The MIDI LFO page is drawn by
+  `MidiParameterPageView` through `MidiParameterSet` (vtable `0x401db994`, typeinfo
+  `16MidiParameterSet`), with the **same records** (WAVE 79, SPH 81) and the same
+  format method in slot 92 — which v6–v9 wrapped only in `SoundParameterSet`. v10
+  wraps both. Verified under the emulator on a MIDI track (the UI's mask test
+  `0x40031274` patched to report MIDI; page header `LFO (1/2)`, `MID 1`): the
+  wrapper is called 144 times and takes the `colour.loop` branch with NOIS poked
+  into the MIDI values (`0x42110a5c`). The **label** hook already works there
+  (`TYPE` drawn), so the label defect on the instrument is not reproduced yet —
+  asked the owner where it showed.
+- The five ParameterSet classes sharing the format method: `ParameterSet`,
+  `SoundParameterSet`, `FxParameterSet`, `TrigParameterSet`, `MidiParameterSet`
+  (vtables `0x401db774`, `…7fc`, `…884`, `…90c`, `…994`).
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
