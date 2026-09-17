@@ -59,6 +59,8 @@ from dnfw.firmware import build as fwbuild
 from dnfw.firmware.load import load
 from dnfw.patch.assemble import assemble, available
 
+import lfo_wave_ui as ui
+
 MAIN_OS = 3
 BASE = 0x40000400
 
@@ -73,7 +75,6 @@ STOCK_ENTRIES = 7
 ENTRIES = STOCK_ENTRIES + 1
 
 REPOINTS = {
-    0x401D3574: ((0x40007688, b"\x48\x79"),),
     0x4020B2EC: ((0x401374DE, b"\x41\xf9"), (0x401378E2, b"\x41\xf9")),
     0x4020B308: ((0x40137514, b"\x43\xf9"), (0x40137916, b"\x43\xf9")),
     0x4020B324: ((0x40137508, b"\x41\xf9"), (0x4013790C, b"\x43\xf9")),
@@ -83,14 +84,17 @@ HOOKS = (
     (0x401379FA, b"\x41\xf9\x40\x20\xb3\x40", "a_call"),
     (0x4013760C, b"\x2f\x41\x00\x30\x4e\x91", "b_call"),
     (0x4013788E, b"\x75\x6c\x00\x4e\x9e\x80", "no_phase"),
+    (ui.SHORT_FMT, ui.FMT_ENTRY_STOCK, "fmt_short"),
+    (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
-LABELS = ("wtb", "a_call", "b_call", "no_phase")
+LABELS = ("wtb", "a_call", "b_call", "no_phase") + ui.LABELS
 
 WAVE_MAX_FIELDS = (0x401F9224, 0x401F947C, 0x401F96D4)
 STOCK_WAVE_MAX = 6
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-wavetable_DN2_1.11.syx")
+# v2: v1 would run the new index as RND and name it ERR, as lfo-waveshapes did (`lfo_wave_ui`).
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-wavetable2_DN2_1.11.syx")
 
 
 def example_table() -> list[int]:
@@ -121,7 +125,7 @@ def example_table() -> list[int]:
     return out
 
 
-def source(fn_table: int, wave_table: int) -> str:
+def source(fn_table: int, wave_table: int, short_names: int, long_names: int) -> str:
     return f"""
     .text
 
@@ -170,7 +174,7 @@ no_phase:
 1:  mvs.w   %a4@(78),%d2
 2:  sub.l   %d0,%d7
     jmp     0x40137894
-"""
+""" + ui.formatter_source(ENTRIES - 1, short_names, long_names)
 
 
 def main() -> int:
@@ -221,13 +225,14 @@ def main() -> int:
     # Layout in the code cave: the name, then the five tables, then the stubs.
     name_va, cursor = CAVE_CODE, CAVE_CODE + 4
     names_va, cursor = cursor, cursor + 4 * ENTRIES
+    long_names_va, cursor = cursor, cursor + 4 * ENTRIES
     table_vas = {}
     for old in STOCK_TABLES:
         table_vas[old], cursor = cursor, cursor + 4 * ENTRIES
     stub_va = cursor
 
     print("part 2 -- the generator and the hook stubs")
-    payload, offsets = assemble_stubs(source(table_vas[0x4020B340], CAVE_DATA), stub_va)
+    payload, offsets = assemble_stubs(source(table_vas[0x4020B340], CAVE_DATA, names_va, long_names_va), stub_va)
     used = (stub_va - CAVE_CODE) + len(payload)
     if used > CAVE_CODE_CAP:
         raise SystemExit(f"code cave overflows: {used} > {CAVE_CODE_CAP}")
@@ -241,6 +246,8 @@ def main() -> int:
     write(content, names_va, b"".join(be32(v) for v in old_names + [name_va]))
     print(f"  names {STOCK_NAMES:#010x} -> {names_va:#010x}  "
           + " ".join(cstr(content, v) or "?" for v in old_names + [name_va]))
+    write(content, long_names_va, b"".join(
+        be32(v) for v in read_longs(content, ui.LONG_NAMES, STOCK_ENTRIES) + [name_va]))
     extras = {0x4020B2EC: 0, 0x4020B308: 0, 0x4020B324: 0, 0x4020B340: offsets["wtb"]}
     for old in STOCK_TABLES:
         entries = read_longs(content, old, STOCK_ENTRIES) + [extras[old]]
@@ -249,13 +256,17 @@ def main() -> int:
               + ", ".join(f"{v:#x}" for v in entries))
 
     print("part 4 -- repoint and hook")
-    resolved = {STOCK_NAMES: names_va, **table_vas}
+    resolved = dict(table_vas)
     for old, sites in REPOINTS.items():
         for va, prefix in sites:
             poke(content, va, prefix + be32(old), prefix + be32(resolved[old]),
                  f"{old:#010x} -> {resolved[old]:#010x}")
     for va, stock, label in HOOKS:
         poke(content, va, stock, b"\x4e\xf9" + be32(offsets[label]), f"jmp -> {label}")
+
+    print(f"part 4b -- the evaluators' WAVE clamps, 6 -> {ENTRIES - 1}")
+    for va, stock, new, why in ui.clamp_edits(ENTRIES - 1):
+        poke(content, va, stock, new, why)
 
     print(f"part 5 -- WAVE's maximum, {STOCK_WAVE_MAX} -> {ENTRIES - 1}")
     for va in WAVE_MAX_FIELDS:

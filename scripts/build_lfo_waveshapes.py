@@ -87,6 +87,8 @@ from dnfw.firmware import build as fwbuild
 from dnfw.firmware.load import load
 from dnfw.patch.assemble import assemble, available
 
+import lfo_wave_ui as ui
+
 MAIN_OS = 3
 BASE = 0x40000400
 
@@ -98,6 +100,7 @@ STOCK_NAMES = 0x401D3574            # TRI SIN SQR SAW EXP RMP RND
 STOCK_TABLES = (0x4020B2EC, 0x4020B308, 0x4020B324, 0x4020B340)
 STOCK_ENTRIES = 7
 NEW_NAMES = (b"STP\x00", b"PLS\x00", b"NOI\x00")
+NEW_LONG_NAMES = (b"STEP\x00", b"PULS\x00", b"NOIS\x00")
 ENTRIES = STOCK_ENTRIES + len(NEW_NAMES)
 
 # What each of the four value tables gets for the three new indices.  The hold
@@ -112,7 +115,6 @@ TABLE_EXTRAS = {
 
 # Plain repoints: every `lea`/`pea` that names a table and is not itself hooked.
 REPOINTS = {
-    0x401D3574: ((0x40007688, b"\x48\x79"),),
     0x4020B2EC: ((0x401374DE, b"\x41\xf9"), (0x401378E2, b"\x41\xf9")),
     0x4020B308: ((0x40137514, b"\x43\xf9"), (0x40137916, b"\x43\xf9")),
     0x4020B324: ((0x40137508, b"\x41\xf9"), (0x4013790C, b"\x43\xf9")),
@@ -129,22 +131,25 @@ HOOKS = (
     (0x401379FA, b"\x41\xf9\x40\x20\xb3\x40", "a_call"),
     (0x4013760C, b"\x2f\x41\x00\x30\x4e\x91", "b_call"),
     (0x4013788E, b"\x75\x6c\x00\x4e\x9e\x80", "no_phase"),
+    (ui.SHORT_FMT, ui.FMT_ENTRY_STOCK, "fmt_short"),
+    (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
-LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase")
+LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase") + ui.LABELS
 
 # Any non-zero word will do -- xorshift32's only requirement.  It is re-seeded
 # from the image on every power-up, so NOI is deterministic per boot.
 NOISE_SEED = 0x2545F491
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes_DN2_1.11.syx")
+# v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes2_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
     return struct.pack(">I", v & 0xFFFFFFFF)
 
 
-def source(fn_table: int, state: int) -> str:
+def source(fn_table: int, state: int, short_names: int, long_names: int) -> str:
     """The three generators and the three hook stubs.
 
     `%d2` and `%d3` are saved: the stock generators never touch them, so the
@@ -328,7 +333,7 @@ no_phase:
 1:  mvs.w   %a4@(78),%d2
 2:  sub.l   %d0,%d7                 | the displaced instruction
     jmp     0x40137894
-"""
+""" + ui.formatter_source(ENTRIES - 1, short_names, long_names)
 
 
 def main() -> int:
@@ -351,7 +356,13 @@ def main() -> int:
         cursor += len(text)
     cursor = (cursor + 3) & ~3
     state_va, cursor = cursor, cursor + 4 * 7  # NOI: seed, filters, S&H
+    long_name_vas = []
+    for text in NEW_LONG_NAMES:
+        long_name_vas.append(cursor)
+        cursor += len(text)
+    cursor = (cursor + 3) & ~3
     names_va, cursor = cursor, cursor + 4 * ENTRIES
+    long_names_va, cursor = cursor, cursor + 4 * ENTRIES
     table_vas = {}
     for old in STOCK_TABLES:
         table_vas[old], cursor = cursor, cursor + 4 * ENTRIES
@@ -359,7 +370,7 @@ def main() -> int:
 
     print("part 1 -- the generators and the hook stubs")
     payload, offsets = assemble_stubs(
-        source(table_vas[0x4020B340], state_va), stub_va)
+        source(table_vas[0x4020B340], state_va, names_va, long_names_va), stub_va)
     used = (stub_va - CAVE) + len(payload)
     if used > CAVE_CAP:
         raise SystemExit(f"cave overflows: {used} > {CAVE_CAP}")
@@ -378,6 +389,12 @@ def main() -> int:
     write(content, names_va, b"".join(be32(v) for v in old_names + name_vas))
     print(f"  names {STOCK_NAMES:#010x} -> {names_va:#010x}  "
           + " ".join(cstr(content, v) or "?" for v in old_names + name_vas))
+    for text, va in zip(NEW_LONG_NAMES, long_name_vas):
+        write(content, va, text)
+    old_long = read_longs(content, ui.LONG_NAMES, STOCK_ENTRIES)
+    write(content, long_names_va, b"".join(be32(v) for v in old_long + long_name_vas))
+    print(f"  long names {ui.LONG_NAMES:#010x} -> {long_names_va:#010x}  "
+          + " ".join(cstr(content, v) or "?" for v in old_long + long_name_vas))
     for old in STOCK_TABLES:
         entries = read_longs(content, old, STOCK_ENTRIES) + TABLE_EXTRAS[old]
         write(content, table_vas[old], b"".join(be32(v) for v in entries))
@@ -385,13 +402,13 @@ def main() -> int:
               + ", ".join(f"{v:#x}" for v in entries))
 
     print("part 3 -- repoint every plain site")
-    resolved = {STOCK_NAMES: names_va, **table_vas}
+    resolved = dict(table_vas)
     for old, sites in REPOINTS.items():
         for va, prefix in sites:
             poke(content, va, prefix + be32(old), prefix + be32(resolved[old]),
                  f"{old:#010x} -> {resolved[old]:#010x}")
 
-    print("part 4 -- the three hooks")
+    print("part 4 -- the hooks: three in the evaluators, two value formatters")
     for va, stock, label in HOOKS:
         poke(content, va, stock, b"\x4e\xf9" + be32(offsets[label]),
              f"jmp -> {label}")
@@ -400,6 +417,10 @@ def main() -> int:
     for va in WAVE_MAX_FIELDS:
         poke(content, va, be32(STOCK_WAVE_MAX << 8), be32((ENTRIES - 1) << 8),
              "LFO Waveform max")
+
+    print(f"part 5b -- the evaluators' WAVE clamps, 6 -> {ENTRIES - 1}")
+    for va, stock, new, why in ui.clamp_edits(ENTRIES - 1):
+        poke(content, va, stock, new, why)
 
     print("part 6 -- repack")
     OUT.parent.mkdir(parents=True, exist_ok=True)

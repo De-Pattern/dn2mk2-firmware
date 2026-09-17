@@ -26,13 +26,13 @@ not been flashed has not been tested.
 | 5 | Bake an LFO's output into parameter locks | **not started** | — |
 | 6 | A new ELE3 section as real address space | **covered by §1's build for now** — shipped bytes reach run time by growing section 3, which needs no new section id and no loader change. A separate section is only worth it if §1 fails on hardware | — |
 | 7 | The DSP hunt | **parked**, with an explicit warning | — |
-| 8 | New LFO waveforms | **DELIVERED** — `lfo-waveshapes_DN2_1.11.syx` (`STP`, `PLS`, `NOI`) | awaiting a flash |
+| 8 | New LFO waveforms | **DELIVERED** — ~~`lfo-waveshapes_DN2_1.11.syx`~~ **FAILED on hardware 2026-09-17** (ran as RND, named ERR: WAVE clamped to 6 in both evaluators, formatter bound 6). **v2 `lfo-waveshapes2_DN2_1.11.syx`** | v1 failed; v2 awaiting a flash |
 | 9 | A custom start-up animation | **DELIVERED** — `intro-tunnel_DN2_1.11.syx`: the intro is a 1/r polar tunnel, and two bytes re-scale it. **Seen running under the emulator**: 9,086 of 16,384 table entries change as predicted | awaiting a flash |
 | 10 | The arpeggiator on MIDI tracks | **DELIVERED** — ~~`arp-on-midi_DN2_1.11.syx`, one byte~~ **FAILED on hardware 2026-09-17** (edited the FUNC branch; the MIDI gate sits before it). **v2 `arp-on-midi2_DN2_1.11.syx`**: the real gate, two NOPs | v1 failed; v2 awaiting a flash |
 | 11 | A real compatibility check between mods | **not a firmware** — it is a check over builds | n/a |
 | 12 | P-locking the performance modulators | **not started** — route (b) scoped | — |
 | 13 | A mod stamp on the intro screen | **DELIVERED** — `intro-stamp` (`MOD` beside the logo), then the owner's redesign: `intro-burst` (logo knocked out of a comic burst) and `intro-bang` (the burst flashes inverted, then explodes into the tunnel). **All seen running under the emulator.** Alternatives: flash one | **`intro-bang` PASSED on hardware 2026-09-17** |
-| 14 | A shape bench for the LFO waveforms | **DELIVERED** — the tool, plus its firmware half: `lfo-wavetable_DN2_1.11.syx` takes the bench's own JSON export | awaiting a flash |
+| 14 | A shape bench for the LFO waveforms | **DELIVERED** — the tool, plus its firmware half: ~~`lfo-wavetable_DN2_1.11.syx`~~ (same two defects, never flashed) → **`lfo-wavetable2_DN2_1.11.syx`** takes the bench's own JSON export | v2 awaiting a flash |
 | 15 | A wavetable synth machine (the owner's actual meaning of "wavetable") | **not started** — audio is DSP-side, so it inherits §7's cost. First build: port digikit's Digitakt machine-slot Milestone A to the Digitone | — |
 | — | **LFO4** (the project's named goal) | **DELIVERED** — `lfo4-tick6a_DN2_1.11.syx` | **PASSED on hardware 2026-09-17** — owner: *"works"*. Next: parameters from storage and the UI (v4 page view) instead of the image |
 | — | Transient Swapper | **SHIPPED** | **passed**, PR #64 |

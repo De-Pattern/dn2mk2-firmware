@@ -1004,7 +1004,7 @@ graph is not, which is the same UI/engine split LFO4 hit at
 
 `scripts/build_lfo_waveshapes.py` -> `00_Resources/02_Builds/lfo-waveshapes_DN2_1.11.syx`.
 21 integrity checks pass, HMAC reproduced, 400 of 896 cave bytes used. The name
-list reads back **TRI SIN SQR SAW EXP RMP RND STP PLS NOI**.
+list reads back **TRI SIN SQR SAW EXP RMP RND STP PLS NOI** ~~— and that list is what the page shows~~ **[WRONG — corrected below: the page uses a second name table and its own bound, and the evaluators clamp WAVE to 6. Failed on hardware.]**
 
 ![STP, PLS and NOI](img/lfo-waveshapes.png)
 
@@ -1055,6 +1055,45 @@ renderer. Three unknown waveforms now instead of one.
 parameter's scaling so the steps land on semitones. That is the same generator
 with a different quantiser, and it needs `DEST` -- which the generator does not
 receive. A fourth hook would carry it the same way `%d1` carries `SPH`.
+
+### FAILED on hardware 2026-09-17: every new index ran as RND and read `ERR`
+
+Owner: *"There is 3 new options at the end of the shape list but is listed as
+ERR. It seems to sound similar to a random wave … Definitely I cannot hear the
+noise as the last one … the wave glyph just show the random wave."* Three extra
+clicks past `RND` were counted by the wrap-around, so the `WAVE` maximum edit
+worked. Everything downstream of it did not, for two reasons read afterwards:
+
+1. **Both evaluators clamp WAVE to 6 before dispatch** — `moveq #6` twice at
+   `0x40137880`/`0x40137886` (A) and `0x401374a8`/`0x401374ae` (B). Index 6, `RND`,
+   is the one waveform dispatched by value, so 7, 8 and 9 all became `RND`. The
+   generators were never called. That is exactly what the owner heard.
+2. **The value text has its own bound and its own table.** The `Waveform`
+   records' formatter is `0x400e34ac` (record `+0x28`); it tests `> 6 → "ERR"` and
+   indexes a 7-pointer table at `0x401fd5c0` (`TRI SINE SQR SAW EXPO RAMP RAND`)
+   copied onto its frame. The `pea 0x401d3574` this build repointed belongs to a
+   short-name twin at `0x4000766c` with the same `> 6` test, so even that one could
+   not show the new names.
+
+**What the first build checked and what it should have:** it asserted every
+table reference to the waveform tables and found them all. Neither failure is a
+table reference — one is a literal `6` in the evaluator, the other a literal `6`
+in a formatter reached through a record pointer. **A bound lives in code as an
+immediate as often as in data as a count**, and the `WAVE` maximum field was one
+of three copies of the same fact.
+
+### v2 BUILT 2026-09-17: `lfo-waveshapes2` and `lfo-wavetable2`
+
+`scripts/lfo_wave_ui.py`, shared by both builds: the four clamp immediates
+raised to the new maximum, and both formatters replaced at entry by one
+frameless stub with the stock contract (`sprintf(dest, "%s", name[i])`, `ERR`
+past the bound) over 10-entry tables — long names `STEP PULS NOIS`, short
+`STP PLS NOI`. Disassembled after assembly; 21 integrity checks each.
+`lfo-wavetable` v1 had the same two defects and was never flashed; v2 replaces it.
+
+**Not fixed:** the `[MOD]` page's waveform glyph will still draw `RND` for the
+new shapes; its renderer is not read. **Not run under the emulator** — the
+formatter runs only on a UI page the emulator does not drive.
 
 ## 7. The DSP hunt, parked with an explicit warning
 
