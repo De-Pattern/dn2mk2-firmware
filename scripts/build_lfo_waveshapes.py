@@ -140,8 +140,8 @@ HOOKS = (
     (ui.LONG_FMT, ui.FMT_ENTRY_STOCK, "fmt_long"),
 )
 LABELS = ("step", "pulse", "noise", "a_call", "b_call", "no_phase",
-          "fmt_v92") + ui.LABELS + glyph.LABELS
-GLYPHS = ["STEP", "PULS", "NOIS"]
+          "fmt_v92") + ui.LABELS
+SPH_LABELS = ["STPS", "WDTH", "TYPE"]   # owner-approved: STPS, WDTH, TYPE
 
 # The sound ParameterSet's vtable slot 92 (format a record's value), v6's hook.
 SOUND_SET_V92 = 0x401DB858
@@ -159,8 +159,8 @@ NOISE_RAM = 0x46740000
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 # v2: the first build ran every new index as RND and named it ERR (`lfo_wave_ui`).
-# v7: v6 plus the [MOD] page glyph for STEP, PULS and NOIS.
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes7_DN2_1.11.syx")
+# v8: glyphs rendered from the generators, no SPH slide, SPH renamed STPS/WDTH/TYPE.
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-waveshapes8_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
@@ -168,7 +168,7 @@ def be32(v: int) -> bytes:
 
 
 def source(fn_table: int, state: int, short_names: int, long_names: int,
-           never_fmt: int, glyph_sets: int) -> str:
+           never_fmt: int, glyph_sets: int, label_table: int) -> str:
     noise_ram = NOISE_RAM
     noise_index = STOCK_ENTRIES + 2
     """The three generators and the three hook stubs.
@@ -447,7 +447,7 @@ no_phase:
 1:  mvs.w   %a4@(78),%d2
 2:  sub.l   %d0,%d7                 | the displaced instruction
     jmp     0x40137894
-""" + ui.formatter_source(ENTRIES - 1, short_names, long_names) + glyph.source(glyph_sets)
+""" + ui.formatter_source(ENTRIES - 1, short_names, long_names) 
 
 
 def main() -> int:
@@ -483,20 +483,33 @@ def main() -> int:
     table_vas = {}
     for old in STOCK_TABLES:
         table_vas[old], cursor = cursor, cursor + 4 * ENTRIES
-    glyph_va, cursor = cursor, cursor + glyph.size(len(GLYPHS))
-    glyph_bytes, glyph_sets = glyph.blob(glyph_va, GLYPHS)
+    glyph_va, cursor = cursor, cursor + glyph.size(SPH_LABELS)
+    glyph_bytes, glyph_sets, label_table = glyph.blob(glyph_va, SPH_LABELS)
     if cursor - DATA_CAVE > DATA_CAVE_CAP:
         raise SystemExit(f"data cave overflows: {cursor - DATA_CAVE} > {DATA_CAVE_CAP}")
     stub_va = CAVE
 
     print("part 1 -- the generators and the hook stubs")
     payload, offsets = assemble_stubs(
-        source(table_vas[0x4020B340], state_va, names_va, long_names_va, never_va, glyph_sets), stub_va)
+        source(table_vas[0x4020B340], state_va, names_va, long_names_va, never_va, glyph_sets, label_table), stub_va)
     used = (stub_va - CAVE) + len(payload)
     if used > CAVE_CAP:
         raise SystemExit(f"cave overflows: {used} > {CAVE_CAP}")
     write(content, stub_va, payload)
-    for label in LABELS:
+    # v8's glyph and label code outgrew the code cave: it assembles on its own,
+    # into the data cave after the data.
+    glyph_code_va = (cursor + 3) & ~3
+    glyph_code, glyph_offsets = assemble_stubs(
+        glyph.source(glyph_sets, table_vas[0x4020B340], len(SPH_LABELS), label_table),
+        glyph_code_va, glyph.LABELS)
+    data_used = glyph_code_va + len(glyph_code) - DATA_CAVE
+    if data_used > DATA_CAVE_CAP:
+        raise SystemExit(f"data cave overflows: {data_used} > {DATA_CAVE_CAP}")
+    write(content, glyph_code_va, glyph_code)
+    offsets.update(glyph_offsets)
+    print(f"  glyph code {len(glyph_code)} bytes at {glyph_code_va:#010x}; "
+          f"data cave {data_used}/{DATA_CAVE_CAP}")
+    for label in LABELS + glyph.LABELS:
         print(f"  {label:<9} {offsets[label]:#010x}")
     TABLE_EXTRAS[0x4020B340] = [offsets["step"], offsets["pulse"],
                                 offsets["noise"]]
@@ -514,7 +527,7 @@ def main() -> int:
         write(content, va, text)
     write(content, never_va, NEVER_FMT)
     write(content, glyph_va, glyph_bytes)
-    print(f"  glyphs {', '.join(GLYPHS)}: {len(glyph_bytes)} bytes at {glyph_va:#010x}")
+    print(f"  glyph sets and SPH labels {', '.join(SPH_LABELS)}: {len(glyph_bytes)} bytes at {glyph_va:#010x}")
     old_long = read_longs(content, ui.LONG_NAMES, STOCK_ENTRIES)
     write(content, long_names_va, b"".join(be32(v) for v in old_long + long_name_vas))
     print(f"  long names {ui.LONG_NAMES:#010x} -> {long_names_va:#010x}  "
@@ -563,18 +576,19 @@ def main() -> int:
     return 0
 
 
-def assemble_stubs(text: str, base: int) -> tuple[bytes, dict[str, int]]:
+def assemble_stubs(text: str, base: int, labels=None) -> tuple[bytes, dict[str, int]]:
     """Assemble once, and read each label's address off a trailing table.
 
     The assembler returns raw bytes with no symbol table, so the source carries
     a `.long <label>` per stub that is read back and then cut away.  One
     assembly, so the addresses cannot drift from the bytes they describe.
     """
-    table = "\n".join(f"    .long {name}" for name in LABELS)
+    labels = labels or LABELS
+    table = "\n".join(f"    .long {name}" for name in labels)
     blob = assemble(text + "\n    .align 2\n" + table + "\n", base=base)
-    width = 4 * len(LABELS)
-    addrs = struct.unpack(f">{len(LABELS)}I", blob[-width:])
-    return blob[:-width], dict(zip(LABELS, addrs))
+    width = 4 * len(labels)
+    addrs = struct.unpack(f">{len(labels)}I", blob[-width:])
+    return blob[:-width], dict(zip(labels, addrs))
 
 
 def read_longs(content: bytearray, va: int, n: int) -> list[int]:

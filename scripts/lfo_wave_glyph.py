@@ -1,4 +1,4 @@
-"""The [MOD] page's waveform glyph for new LFO waveforms.
+"""The [MOD] page's waveform glyph and SPH label for new LFO waveforms.
 
 Shared by `build_lfo_waveshapes.py` and `build_lfo_wavetable.py`. On the
 instrument every new waveform drew RND's glyph (owner, 2026-09-17: *"the wave
@@ -13,6 +13,7 @@ argument was 79 (`guirun --stack-when`). Inside it:
 
 ```
 0x4010dc8e  moveq #6,%d6 ... 0x4010dcb0 moveq #6,%d5   | WAVE clamped to 6
+0x4010dd2a  %d2 = SPH, or 0 for RND                    | the tile's phase shift
 0x4010dd42  memcpy(fp-7, 0x4020544c, 7)                | a flag per waveform
 0x4010dd58  move.b %fp@(-7,%d5:l),%d1                  | ...indexed by WAVE
 0x4010deba  %d6 = 12 * WAVE + 0x44507b68               | the glyph set
@@ -25,20 +26,30 @@ from seven static vectors on first draw. Each stock set holds **four** 28 x 15
 tiles (normal, time-reversed, flipped, both), chosen by the signs of SPD and DEP.
 A `Bitmap` is 28 bytes: vtable `0x4020650c`, width, height, stride, pixel data,
 **mask** (every stock glyph points at a 15-row all-ones mask), and a spare word.
-The pixel data of every stock glyph lives in the firmware image.
+Bitmaps are stored **flipped vertically** relative to the panel.
 
-## What this adds
+## v7 (lfo-waveshapes7, lfo-wavetable3): a fixed picture per waveform [SUPERSEDED]
 
-- the two clamp immediates raised to the new maximum;
-- a hook for the flag byte: stock waveforms read the stock table, new ones get 0
-  (the flag is set only for EXP and RMP);
-- a hook for the set pointer: stock waveforms keep `0x44507b68 + 12*WAVE`, new
-  ones get a **static** set in the image;
-- per new waveform, one static set, one Bitmap, 112 bytes of pixels. **One tile,
-  not four**: `0x40115b5e` clamps the variant to the set's last element, so a
-  one-element set always draws its tile. The cost is that a new waveform's glyph
-  does not mirror for negative SPD or DEP. Four tiles would not fit the clean
-  caves (about 570 bytes per waveform against 152).
+One static tile each. The owner then asked for the picture to follow SPH -- pulse
+width, step count -- and for SPH to be renamed on the new waveforms.
+
+## v8: the picture is drawn by the waveform itself
+
+- **The glyph is rendered from the generator.** On every draw, the flag hook
+  calls the waveform's own generator 28 times -- phase `x * 2^32 / 28`, SPH in
+  `%d1` exactly as the evaluators pass it -- and writes the curve into a RAM tile
+  the static Bitmap points at. So PULS shows its width, STEP its steps, TRP its
+  repeats, and **any shape the website builds gets a correct glyph with no picture
+  data at all**. NOI is called with a reserved instance key (1023, used by none of
+  the 64 real LFO slots), so drawing never disturbs a playing LFO's loop state.
+- **No SPH phase slide for new waveforms** -- SPH is not a phase on them, so the
+  hook zeroes `%d2`, as the stock code does for RND.
+- **SPH is renamed** at `getShortName(this, record)` (`0x400372da`): for the SPH
+  records 81/91/101 it asks the object for WAVE (records 79/89/99) and returns the
+  new waveform's label. (Stock RND gets `SLEW` differently -- a separate record,
+  80, sharing SPH's slot.)
+- **One tile, not four:** `0x40115b5e` clamps the variant to the set's last
+  element. A new waveform's glyph does not mirror for negative SPD or DEP.
 """
 
 from __future__ import annotations
@@ -49,76 +60,51 @@ W, H = 28, 15
 BITMAP_VTABLE = 0x4020650C
 FULL_MASK = 0x402B8D90          # a stock 28 x 15 all-ones mask (TRI's)
 STOCK_SETS = 0x44507B68
-STOCK_FLAGS = 7                 # entries in the stock flag table
+FIRST_NEW = 7                   # the first index past the stock waveforms
+NOISE_GLYPH_KEY = 1023          # an instance key no real LFO slot hashes to
+
+# RAM for the rendered tiles: unclaimed SDRAM above BSS end 0x466b74d0. Other
+# tenants: lfo4-tick6a 0x46700000.., boot screen 0x46710000, NOI state 0x46740000.
+TILE_RAM = 0x46750000
 
 CLAMPS = ((0x4010DC8E, 0x7C), (0x4010DCB0, 0x7A))    # moveq #6,%d6 / moveq #6,%d5
 FLAG_SITE = 0x4010DD58
 FLAG_STOCK = bytes.fromhex("123658f941ec0033")       # move.b fp@(-7,d5); lea a4@(51),a0
 SET_SITE = 0x4010DED0
 SET_STOCK = bytes.fromhex("068644507b68")            # addi.l #0x44507b68,%d6
+# SPH's label is the record's short name, read through getShortName(this, record)
+# at 0x400372da -- the page's knob labels (0x40016adc) and the value header
+# (0x40064622) both call it. [WRONG — corrected] v8's first two builds wrapped
+# vtable slot 88 of both ParameterSet classes instead, because RND's `Slew` lives
+# there too; the emulator showed neither slot is called by the page (0 hits).
+SHORT_NAME = 0x400372DA
+SHORT_NAME_STOCK = bytes.fromhex("202f00080c8000000141")    # move.l sp@(8),d0; cmpi.l #321,d0
+SHORT_NAME_RESUME = 0x400372E4
 
-LABELS = ("glyph_flag", "glyph_set")
-
-
-# ---- the pictures ---------------------------------------------------------------
-# Each design is a list of 28 y values (0 top, 14 bottom), one per column. Adjacent
-# columns are joined by a vertical run, the way the stock glyphs draw their edges.
-
-def _levels(*runs: tuple[int, int]) -> list[int]:
-    out: list[int] = []
-    for width, y in runs:
-        out += [y] * width
-    assert len(out) == W, len(out)
-    return out
+LABELS = ("glyph_flag", "glyph_set", "short_name")
 
 
-DESIGNS = {
-    # y is screen rows, 0 at the top. A four-step staircase, rising
-    "STEP": _levels((7, 14), (7, 10), (7, 5), (7, 0)),
-    # a narrow pulse: low for three quarters, high for one
-    "PULS": _levels((21, 14), (7, 0)),
-    # jagged noise: a fixed pseudo-random walk, two columns a step
-    "NOIS": [v for v in (7, 3, 11, 5, 13, 1, 9, 6, 12, 2, 8, 14, 4, 10) for _ in (0, 1)],
-    # a soft trapezoid: rise, hold high, fall, hold low
-    "TRP": [14, 11, 7, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            3, 7, 11, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14],
-}
+def blob(base: int, labels: list[str]) -> tuple[bytes, int, int]:
+    """Static sets, Bitmaps and label strings. -> (bytes, sets VA, label table VA).
 
-
-def pixels(ys: list[int]) -> bytes:
-    """28 column longwords, as the panel shows them.
-
-    Bitmaps are stored **flipped vertically** relative to the panel -- the same
-    finding as the intro's source bitmap (`docs/display-path.md`). The first v7
-    film drew STEP falling instead of rising; row y on screen is stored at row
-    14 - y, i.e. bit 31 - (14 - y).
+    sets[i] = {begin, end, capacity} over one Bitmap, whose pixels are the RAM
+    tile the flag hook renders.
     """
-    cols = [0] * W
-    for x, y in enumerate(ys):
-        lo, hi = sorted((y, ys[x - 1] if x else y))
-        for yy in range(lo, hi + 1):
-            cols[x] |= 1 << (31 - (H - 1 - yy))
-    return b"".join(struct.pack(">I", c) for c in cols)
-
-
-def blob(base: int, names: list[str]) -> tuple[bytes, int]:
-    """Sets, Bitmaps and pixels for `names`, laid out from `base`. -> (bytes, sets VA).
-
-    sets[i] = {begin, end, capacity} over one Bitmap each.
-    """
-    n = len(names)
-    sets_va, objs_va, data_va = base, base + 12 * n, base + 12 * n + 28 * n
-    sets, objs, data = b"", b"", b""
-    for i, name in enumerate(names):
-        obj, px = objs_va + 28 * i, data_va + 112 * i
+    n = len(labels)
+    sets_va, objs_va, table_va = base, base + 12 * n, base + 40 * n
+    strings_va = table_va + 4 * n
+    sets = objs = table = strings = b""
+    for i, label in enumerate(labels):
+        obj = objs_va + 28 * i
         sets += struct.pack(">III", obj, obj + 28, obj + 28)
-        objs += struct.pack(">IIIIIII", BITMAP_VTABLE, W, H, 1, px, FULL_MASK, 0)
-        data += pixels(DESIGNS[name])
-    return sets + objs + data, sets_va
+        objs += struct.pack(">IIIIIII", BITMAP_VTABLE, W, H, 1, TILE_RAM + 112 * i, FULL_MASK, 0)
+        table += struct.pack(">I", strings_va + len(strings))
+        strings += label.encode("ascii") + b"\x00"
+    return sets + objs + table + strings, sets_va, table_va
 
 
-def size(n: int) -> int:
-    return (12 + 28 + 112) * n
+def size(labels: list[str]) -> int:
+    return 44 * len(labels) + sum(len(s) + 1 for s in labels)
 
 
 def clamp_edits(max_index: int) -> list[tuple[int, bytes, bytes, str]]:
@@ -126,27 +112,118 @@ def clamp_edits(max_index: int) -> list[tuple[int, bytes, bytes, str]]:
             for va, op in CLAMPS]
 
 
-def source(sets_va: int) -> str:
-    """The two hooks. Each is reached by `jsr`, so it returns with `rts`."""
+def source(sets_va: int, fn_table: int, count: int, label_table: int) -> str:
     return f"""
-| ---- [MOD] glyph: the per-waveform flag, zero past the stock table --------
+| ---- [MOD] glyph: render the new waveform's tile from its own generator ----
+| Reached by jsr at 0x4010dd58 with %d5 = WAVE (clamped), %d2 = SPH 0..127.
 glyph_flag:
-    cmpi.l  #{STOCK_FLAGS},%d5
-    bcc.s   1f
-    move.b  %fp@(-7,%d5:l),%d1      | the displaced read, stock waveforms
-    bra.s   2f
-1:  moveq   #0,%d1
-2:  lea     %a4@(51),%a0            | the displaced instruction
+    cmpi.l  #{FIRST_NEW},%d5
+    bcc.s   10f
+    move.b  %fp@(-7,%d5:l),%d1      | stock waveforms: the displaced read
+    lea     %a4@(51),%a0            | the displaced instruction
+    rts
+10: lea     %sp@(-28),%sp
+    moveml  %d3-%d7/%a2-%a3,%sp@
+    move.l  %d2,%d7                 | SPH
+    move.l  %d5,%d0
+    subq.l  #{FIRST_NEW},%d0
+    move.l  %d0,%d1
+    lsl.l   #7,%d0
+    lsl.l   #4,%d1
+    sub.l   %d1,%d0                 | 112 * new index
+    movea.l #{TILE_RAM:#010x},%a2
+    adda.l  %d0,%a2                 | this waveform's tile
+    movea.l #{fn_table:#010x},%a3
+    movea.l %a3@(0,%d5:l:4),%a3     | its generator
+    moveq   #0,%d4                  | x
+    moveq   #-1,%d6                 | previous y: none yet
+11: move.l  %d4,%d0
+    move.l  #0x09249249,%d1         | 2^32 / 28
+    mulsl   %d1,%d0                 | phase
+    move.l  %d0,%sp@-
+    move.l  #{NOISE_GLYPH_KEY << 8},%d1
+    or.l    %d7,%d1                 | key above SPH, as the call hooks pass it
+    jsr     %a3@
+    addq.l  #4,%sp
+    eori.l  #0x80000000,%d0         | 0 at the bottom, 2^32 - 1 at the top
+    moveq   #16,%d1
+    lsr.l   %d1,%d0
+    move.l  %d0,%d1
+    lsl.l   #4,%d0
+    sub.l   %d1,%d0                 | * 15
+    moveq   #16,%d1
+    lsr.l   %d1,%d0                 | 0..14 from the bottom
+    moveq   #14,%d1
+    sub.l   %d0,%d1                 | y, 0 at the top
+    tst.l   %d6
+    bpl.s   12f
+    move.l  %d1,%d6                 | first column joins itself
+12: move.l  %d1,%d2                 | lo
+    move.l  %d6,%d3                 | hi
+    cmp.l   %d3,%d2
+    ble.s   13f
+    move.l  %d2,%d3                 | ColdFire has no exg
+    move.l  %d6,%d2
+13: moveq   #0,%d0                  | the column
+14: moveq   #17,%d5
+    add.l   %d2,%d5                 | stored flipped: bit 31 - (14 - y)
+    moveq   #1,%d6
+    lsl.l   %d5,%d6
+    or.l    %d6,%d0
+    addq.l  #1,%d2
+    cmp.l   %d3,%d2
+    ble.s   14b
+    move.l  %d0,%a2@+
+    move.l  %d1,%d6                 | previous y
+    addq.l  #1,%d4
+    moveq   #{W},%d0
+    cmp.l   %d0,%d4
+    blt     11b
+    moveml  %sp@,%d3-%d7/%a2-%a3
+    lea     %sp@(28),%sp
+    moveq   #0,%d2                  | SPH is not a phase here: no slide
+    moveq   #0,%d1                  | flag 0
+    lea     %a4@(51),%a0
     rts
 
 | ---- [MOD] glyph: the set, static for new waveforms -------------------------
 | %d6 = 12 * WAVE on entry, as the stock code computed it.
 glyph_set:
-    cmpi.l  #{STOCK_FLAGS},%d5
+    cmpi.l  #{FIRST_NEW},%d5
     bcc.s   1f
     addi.l  #{STOCK_SETS:#010x},%d6
     rts
-1:  addi.l  #{(sets_va - 12 * STOCK_FLAGS) & 0xFFFFFFFF:#010x},%d6
+1:  addi.l  #{(sets_va - 12 * FIRST_NEW) & 0xFFFFFFFF:#010x},%d6
+    rts
+
+| ---- SPH's label on the new waveforms: the record's short name ------------
+| getShortName(this, record) -> const char*. Entered by jmp at 0x400372da.
+short_name:
+    move.l  %sp@(8),%d0
+    cmpi.l  #81,%d0
+    beq.s   20f
+    cmpi.l  #91,%d0
+    beq.s   20f
+    cmpi.l  #101,%d0
+    beq.s   20f
+29: move.l  %sp@(8),%d0             | the displaced instructions
+    cmpi.l  #321,%d0
+    jmp     {SHORT_NAME_RESUME:#010x}
+20: movea.l %sp@(4),%a0             | this
+    subq.l  #2,%d0                  | the same LFO's WAVE record
+    move.l  %d0,%sp@-
+    move.l  %a0,%sp@-
+    movea.l %a0@,%a1
+    movea.l %a1@(40),%a1
+    jsr     %a1@
+    addq.l  #8,%sp
+    lsr.l   #8,%d0
+    subq.l  #{FIRST_NEW},%d0
+    bmi.s   29b
+    cmpi.l  #{count - 1},%d0
+    bhi.s   29b
+    lea     {label_table:#010x},%a1
+    move.l  %a1@(0,%d0:l:4),%d0     | the label
     rts
 """
 
@@ -157,4 +234,6 @@ def hooks(offsets: dict[str, int]) -> list[tuple[int, bytes, bytes, str]]:
         (FLAG_SITE, FLAG_STOCK, b"\x4e\xb9" + be(offsets["glyph_flag"]) + b"\x4e\x71",
          "jsr -> glyph_flag"),
         (SET_SITE, SET_STOCK, b"\x4e\xb9" + be(offsets["glyph_set"]), "jsr -> glyph_set"),
+        (SHORT_NAME, SHORT_NAME_STOCK,
+         bytes.fromhex("4ef9") + be(offsets["short_name"]) + bytes.fromhex("4e714e71"), "jmp -> short_name"),
     ]

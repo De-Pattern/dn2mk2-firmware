@@ -94,8 +94,8 @@ WAVE_MAX_FIELDS = (0x401F9224, 0x401F947C, 0x401F96D4)
 STOCK_WAVE_MAX = 6
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-# v3: v2 plus the [MOD] page glyph (`lfo_wave_glyph`).
-OUT = pathlib.Path("00_Resources/02_Builds/lfo-wavetable3_DN2_1.11.syx")
+# v4: glyph rendered from the table, no SPH slide, SPH renamed RPTS (`lfo_wave_glyph`).
+OUT = pathlib.Path("00_Resources/02_Builds/lfo-wavetable4_DN2_1.11.syx")
 
 
 def example_table() -> list[int]:
@@ -127,7 +127,7 @@ def example_table() -> list[int]:
 
 
 def source(fn_table: int, wave_table: int, short_names: int, long_names: int,
-           glyph_sets: int) -> str:
+           glyph_sets: int, label_table: int) -> str:
     return f"""
     .text
 
@@ -176,7 +176,7 @@ no_phase:
 1:  mvs.w   %a4@(78),%d2
 2:  sub.l   %d0,%d7
     jmp     0x40137894
-""" + ui.formatter_source(ENTRIES - 1, short_names, long_names) + glyph.source(glyph_sets)
+""" + ui.formatter_source(ENTRIES - 1, short_names, long_names) + glyph.source(glyph_sets, fn_table, 1, label_table)
 
 
 def main() -> int:
@@ -225,10 +225,11 @@ def main() -> int:
     print(f"  {len(blob)} bytes, peak {max(abs(v) for v in table)} of 32767")
 
     # Layout in the code cave: the name, then the five tables, then the stubs.
-    # The [MOD] glyph goes after the 512-byte table in the data cave. Its tile is
-    # the built-in trapezoid's; a custom shape keeps that picture (not derived).
+    # The [MOD] glyph set and SPH label go after the 512-byte table in the data
+    # cave. The tile itself is rendered from the table at draw time, so a custom
+    # shape gets its own picture.
     glyph_va = CAVE_DATA + len(blob)
-    glyph_bytes, glyph_sets = glyph.blob(glyph_va, ["TRP"])
+    glyph_bytes, glyph_sets, label_table = glyph.blob(glyph_va, ["RPTS"])
     if len(blob) + len(glyph_bytes) > CAVE_DATA_CAP:
         raise SystemExit("data cave overflows with the glyph")
     write(content, glyph_va, glyph_bytes)
@@ -242,7 +243,7 @@ def main() -> int:
     stub_va = cursor
 
     print("part 2 -- the generator and the hook stubs")
-    payload, offsets = assemble_stubs(source(table_vas[0x4020B340], CAVE_DATA, names_va, long_names_va, glyph_sets), stub_va)
+    payload, offsets = assemble_stubs(source(table_vas[0x4020B340], CAVE_DATA, names_va, long_names_va, glyph_sets, label_table), stub_va)
     used = (stub_va - CAVE_CODE) + len(payload)
     if used > CAVE_CODE_CAP:
         raise SystemExit(f"code cave overflows: {used} > {CAVE_CODE_CAP}")

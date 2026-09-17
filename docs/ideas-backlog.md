@@ -1221,6 +1221,33 @@ precedent: RND already renames SPH to SLEW through the sound set's vtable slot 8
 (`0x4003660c`), and the widget already computes an SPH-dependent phase shift
 (which v7 still applies to the new waves; v8 should zero it).
 
+### v8 BUILT 2026-09-17 — glyphs drawn by the waveform, SPH renamed
+
+`lfo-waveshapes8` and `lfo-wavetable4`, both through `scripts/lfo_wave_glyph.py`:
+
+- **The glyph is rendered by the generator.** The glyph hook calls the waveform's
+  own generator 28 times across one cycle, with the current SPH, and draws the
+  curve into a RAM tile (`0x46750000`) the static Bitmap points at. PULS shows its
+  width, STEP its step count, TRP its repeats. **A shape built on the website
+  gets its glyph for free**: no picture data, nothing to derive or ship.
+- **No SPH phase slide** on new waveforms (the hook zeroes it, as stock does for
+  RND).
+- **SPH renamed** — the owner approved `STPS`, `WDTH`, `TYPE`, `RPTS` — at
+  `getShortName(this, record)` (`0x400372da`), which asks the object for WAVE.
+  [WRONG — corrected] Two earlier attempts wrapped vtable slot 88 of both
+  ParameterSet classes, where RND's `Slew` also lives; hooks on both showed 0
+  hits while the page drew. Stock RND's `SLEW` is a separate record (80) sharing
+  SPH's slot, not a renamed label.
+- The glyph and label code outgrew the waveshapes code cave and assembles into
+  the data cave after the data (746/896).
+
+**Filmed under the emulator** (v8 overlaid, WAVE and SPH poked into the value
+array at `+30`/`+32`): STEP at SPH 0 and 48 (STPS), PULS at 16 and 96 (WDTH),
+NOIS (TYPE), SINE back to SPH, TRP at SPH 0 and 64 (RPTS). One frame caught the
+project-loading overlay.
+
+![v8 glyphs](img/lfo-glyphs-v8-emulator.png)
+
 ## 7. The DSP hunt, parked with an explicit warning
 
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
