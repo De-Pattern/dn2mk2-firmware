@@ -534,6 +534,25 @@ here too, and delivery is not the problem. Five +1 deltas accumulate to exactly
 leave it at 5; five more reach 10. So **no tag-2 frame drains it**, with or
 without an edge — the branch inside `0x4011f9ac` stays the open question.
 
+**Read the same day, and it retires the "drain" reading.** `0x4011f9ac` is not an
+encoder drainer; it is the **button-byte handler** for one channel of the panel
+MCU's UART stream (an Octatrack contributor's remark — inputs come from a
+companion MCU over UART — is exactly this path). For each changed bit it looks
+the control code up in `0x401f39dc[channel*32 + bit]`. Only when the code is
+**41–48, ENCODER A–H pushed as buttons** (`docs/ui-map.md`), does it reach the
+`clrl` at `0x4011fbb0`: press clears that encoder's counter and pending bit;
+release (`0x4011fc08`) timestamps the push if the counter is ≤ 9. So
+`0x445a0dc4` counts **detents turned while or since the encoder was pushed** —
+press-and-turn and click-versus-turn detection — not the delta that edits a
+parameter. That explains `scripts/encoder_drain.py` exactly: its button frames
+were channel 0 bit 5, not an encoder push, so nothing could clear.
+
+Consequence: the stuck value is **not** an undrained accumulator. The delta's
+own record reaches the main loop with the right code and size (table above), so
+the fault lies downstream of `0x4002e91c`, in how the page applies a delta —
+the earlier "sensitivity scales with turn speed" row points at a timing input
+the emulator supplies differently.
+
 ---
 
 # The engine-feed path: what the emulator can and cannot say
