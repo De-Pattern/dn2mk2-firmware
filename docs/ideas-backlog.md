@@ -1992,6 +1992,30 @@ opens on a track poked to MIDI and reads **MODE UP** — the value poked at soun
 cannot turn an encoder (`docs/display-path.md`), so the knob fix is a hardware
 question too: `| a knob returns to TRIG | another path closes the view |`.
 
+
+### Hardware, 2026-09-17: three flashes to a working MIDI arp
+
+Captured by DNX (receive-only), heard by the owner.
+
+| build | result | what it taught |
+|---|---|---|
+| `arp-midi-play` (v3) | **no note on any MIDI track**, only clock and transport; T16's trig LED ran in arp rhythm | the hook's records reached the MIDI task and broke it. They left `+44` (sound) null, and the MIDI task reads a trig's default velocity (`+0x480`) and length (`+0x481`) through it when the byte is negative (`0x4012a9a8`; the ISR does the same through its `+44`, `0x4002672c`, `0x40026680`) |
+| `arp-midi-play2` | plain MIDI tracks back (366 C4, 500 ms apart, no stuck notes); **the arp track still silent** | `+44` fixed and both defaults resolved in the hook; something else still dropped the arp notes |
+| `arp-midi-diag` | **466 notes, all the C1 marker**, velocity 100, 62 ms, at the step rate; no internal audio from T16 | every arp record reaching the hook had `+56` bit 1 **clear**, and the hook's filter treated bit 1 as a gate. Bit 1 is not a gate: clear, the stock trigger only frees the track's held copy (`0x400db4ac`); set, it keeps one. Every record reaching `0x400db524` is a note |
+| **`arp-midi-play3`** | **the arp plays over MIDI; the owner hears the step offsets** | filter reduced to bit 20, which the ISR sets once it has voiced a record (`0x40026948`) |
+
+The arp step `0x4002a0bc` returns held note + 12×octave + offset[step]
+(sound `+0x166 + step`), with the step mask at `+0x164` and LEN at `+0x163`, so
+the offsets need nothing from the hook: they are in `+38` already.
+
+`scripts/build_arp_midi_play.py --diag` rebuilds the diagnostic: every MIDI-track
+record reaching the hook is sent (a filtered one as a marker note, C1/D1/E1 for
+bits 1/18/20), at fixed velocity and length, and still passed to the stock
+trigger.
+
+Still to measure on play3: arp OFF is stock, a held key arpeggiates, no
+duplicate or stuck notes, synth tracks unaffected, N.LEN changes the gate.
+
 ## 11. A real compatibility check between mods
 
 **Filed 2026-09-14, at the owner's direction, to be picked up when two mods
