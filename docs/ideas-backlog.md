@@ -2928,3 +2928,39 @@ next reading is the save path: how lock records are written from the per-slot
 table at kit +20640, and whether a side table for extra ids can be written back
 through it. If ids 100..127 persist, build (1) and let DNX write
 test locks; (3) only after the sound works.
+
+### First build, 2026-09-18: MODE and RNG through the two free slots
+
+**Only two mirror slots are free.** Every slot 0..99 means something on some
+page except **65**; **100** is past the save table. So the first build locks two
+settings, MODE and RNG, and the rest waits on extending the mirror past 101.
+
+| lock id | slot | setting | sound byte |
+|---|---|---|---|
+| 107 | 65 | MODE | `+0x15f` |
+| 108 | 100 | RNG | `+0x161` |
+
+- **Load and save.** The id -> slot lookup `0x400dccc0` (table `0x401fd0b0`,
+  ids <= 106) and the slot -> id lookup `0x400dccfa` (table `0x401fcf20`, slots
+  <= 99; slot 65 there is 0 = no lock) are each entered through a hook that answers
+  these two and otherwise replays the stock entry. The lock record header is
+  converted by `0x400dd12e` (load) and `0x400dd160` (save). The save lookup is hot:
+  52,992 calls in one emulator boot.
+- **Playback.** The frame ISR applies a note's lock list (`record+84`: count
+  `+8`, 8-byte entries from `+20`, `u16 slot, u16 value`) through `0x400db092`
+  (called at `0x40026c34`), which also forwards the value to the DSP mirror
+  `0x8000de60`. The arp reads MODE/RNG from the sound its note set is given
+  (`0x40029cd4`, called at `0x40026762`, sound at `sp+32`). A hook there gives a
+  locked note a per-track shadow of its sound (`0x467c0000`, 16 x 1,164 B) with
+  the locked byte.
+- **MODE values** (menu table `0x401d4b1c`): OFF 0, TRUE 1, UP 2, DOWN 3, CYCL 4,
+  SHUF 5, RAND 6, CHRD 7 -- matching the step's dispatch (`0x4002a114`).
+- **Limits.** MODE can change per trig only while the arp is on (the sequencer
+  decides the arp clock from the sound's own MODE); a lock to OFF silences the
+  step. No UI yet: DNX writes the locks for testing.
+
+`scripts/build_arp_plocks.py` -> `arp-plocks_DN2_1.11.syx`, 248 B in caves
+`0x40295698` and `0x40295a30`. **Emulator:** boots to the UI, no faults.
+**Hardware: waiting for DNX** to write a test pattern (synth track, arp UP RNG 1;
+step 5 MODE 3, step 9 RNG 3, step 13 both, step 1 control) and to read it back
+after a save.
