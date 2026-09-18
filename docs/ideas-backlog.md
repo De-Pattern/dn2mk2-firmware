@@ -2991,3 +2991,36 @@ owner's hunch that plain rotation is mis-mapped in the emulator is borne out.
 **Hardware: waiting for DNX** to write a test pattern (synth track, arp UP RNG 1;
 step 5 MODE 3, step 9 RNG 3, step 13 both, step 1 control) and to read it back
 after a save.
+
+### Status, 2026-09-19: working on hardware
+
+`scripts/build_arp_plocks.py` (its docstring is the design). Owner-tested on the
+device: MODE, SPEED, RANGE and N.LEN locked per trig, shown inverted while the
+trig is held, kept through save / pattern change / reload, copied with trigs
+between pages, and applied by **trigless lock trigs** (FUNC + trig). `--all`
+adds LEN, the sixteen step offsets and the step mutes (recorded and shown in the
+emulator; LEN and offsets heard on the device, mutes untested since the fix).
+
+- **Storage:** an arp lock is a record of its own, RAM header `(k, track | 0x20)`,
+  stored `(107 + k, track)`, value in the low byte. Stock loops that match a
+  record by track pass over it; `trk_cmp` lets the recount see it (the blink).
+- **Playback:** the lock-list builder (`0x400d85e8`, now run for every note)
+  leaves the step's arp locks past the list's stock entries (the pool allocates
+  202); the note set gets a per-track shadow sound, in its argument and in d2 (the
+  caller files d2 in `0x4058e8d8`, where the ISR reads SPEED and N.LEN).
+- **Trigless:** the lock apply (`0x400db092`) has two callers, one a per-track
+  loop through a register; its entry is hooked, and a list the note hook did not
+  just see moves the running arp (`0x405984a8 + track*40 + 32`) onto the shadow.
+  A lock trig's step has bit 0 set too (`7801` vs a note's `0381`), so "no note"
+  is told by the note set not having run.
+- **Bugs met on the way, each a hardware report:** a getter returning `move.b`
+  over pointer bits (every lock 0 = OFF); the pattern save converting slot -> id
+  inline (locks stored as id 0); `moveq #-127` widening the id bound while the
+  next `move.b #15` kept its upper bytes (free records loaded as live: no lock of
+  any kind could be recorded); N.LEN/SPEED read through a table the argument swap
+  missed; the sound byte table off by one around the step mask.
+
+**Open:** removing a trig leaves its arp locks; whole page / track copy
+unverified; the mutes and the "global mute silences every arp trig" report to
+retest; the emulator cannot select a pattern (the load path is hardware-only);
+the core cave `0x402dfa1c` is the boot screen's too.
