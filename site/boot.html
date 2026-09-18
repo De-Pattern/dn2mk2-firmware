@@ -19,6 +19,13 @@
   }
   .screen .cap { font-family: var(--mono); font-size: .74rem; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; }
   .timeline { font-family: var(--mono); font-size: .82rem; color: var(--ink-soft); margin-top: .8rem; }
+  .help-text { color: var(--ink-soft); max-width: 42rem; }
+  .control input[type="text"] {
+    font: inherit; font-family: var(--mono); font-size: .9rem; background: var(--panel); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 6px; padding: .35rem .5rem; width: 100%; white-space: pre;
+  }
+  .err { color: #c33; font-family: var(--mono); font-size: .82rem; min-height: 1.2em; }
+  #glyphList { word-break: break-all; }
 </style>
 
 <div class="wrap">
@@ -27,9 +34,10 @@
   <p class="eyebrow"><a href="index.html">Digitone II Mods</a> / boot screen</p>
   <h1>Boot Screen</h1>
   <p class="lede">
-    Your own mark in the Digitone&nbsp;II start-up animation, held still or flashing,
-    scattered by the intro's tunnel like the logo is. Pick your firmware and a
-    picture, download a signed image.
+    Your own mark in the Digitone&nbsp;II start-up animation: scattered by the intro's
+    tunnel, held still or flashing, broken into glitching ASCII, or spinning in like a
+    1960s TV transition. Pick your firmware
+    and a picture, download a signed image.
   </p>
 </header>
 
@@ -70,15 +78,17 @@
 
   <div class="screens">
     <div class="screen"><canvas id="frameA" width="128" height="64"></canvas><span class="cap" id="capA">The mark</span></div>
-    <div class="screen" id="screenB"><canvas id="frameB" width="128" height="64"></canvas><span class="cap">Alternates with</span></div>
+    <div class="screen" id="screenB"><canvas id="frameB" width="128" height="64"></canvas><span class="cap" id="capB">Alternates with</span></div>
   </div>
 </section>
 
 <section class="step">
-  <div class="step-head"><span class="step-num">2</span><h2>Still or flashing</h2></div>
+  <div class="step-head"><span class="step-num">2</span><h2>Animation</h2></div>
   <div class="choice" role="radiogroup" aria-label="Animation">
-    <label><input type="radio" name="mode" id="modeStatic" value="static"><span>Still</span></label>
-    <label><input type="radio" name="mode" id="modeFlash" value="flash" checked><span>Flashing</span></label>
+    <label><input type="radio" name="mode" id="modeStatic" value="static"><span>Tunnel, still mark</span></label>
+    <label><input type="radio" name="mode" id="modeFlash" value="flash" checked><span>Tunnel, flashing mark</span></label>
+    <label><input type="radio" name="mode" id="modeAscii" value="ascii"><span>ASCII glitch</span></label>
+    <label><input type="radio" name="mode" id="modeSpin" value="spin"><span>Spin (1966)</span></label>
   </div>
   <div class="controls" id="timing">
     <div class="control">
@@ -102,10 +112,87 @@
       <span class="help">Stops flashing here</span>
     </div>
   </div>
+  <div id="asciiControls" class="hidden">
+    <p class="help-text">Instead of the tunnel, the mark breaks into characters: noise that tears and
+    slips like lost video sync, cells locking into the picture one by one, then a residual glitch
+    that keeps flickering until the Digitone is ready. After the <a href="https://noiseandmatter.github.io/DNX/">DNX</a> start-up screen.</p>
+    <div class="controls">
+      <div class="control">
+        <label for="ramp">Picture characters</label>
+        <input type="text" id="ramp" value=" .:+#" spellcheck="false">
+        <span class="help">Dark to bright; a cell's coverage picks one</span>
+      </div>
+      <div class="control">
+        <label for="glitchChars">Glitch characters</label>
+        <input type="text" id="glitchChars" value="01/:=+&lt;&gt;[]{}#%*?_|-\" spellcheck="false">
+        <span class="help">What the noise is made of</span>
+      </div>
+      <div class="control">
+        <label for="glitch">Glitch <span id="glitchVal"></span></label>
+        <input type="range" id="glitch" min="0" max="2" step="0.05" value="1">
+        <span class="help">Tearing and scramble while it resolves</span>
+      </div>
+      <div class="control">
+        <label for="idle">Residual glitch <span id="idleVal"></span></label>
+        <input type="range" id="idle" min="0" max="1" step="0.05" value="0.3">
+        <span class="help">Once the picture has resolved</span>
+      </div>
+      <div class="control">
+        <label for="resolve">Resolve over</label>
+        <input type="number" id="resolve" min="1" max="175" value="96">
+        <span class="help">Frames; the intro runs about 175</span>
+      </div>
+      <div class="control">
+        <label for="seed">Seed</label>
+        <input type="number" id="seed" min="0" max="99999" value="26">
+        <span class="help">A different pattern of noise</span>
+      </div>
+    </div>
+    <p class="help">The font is 3&nbsp;&times;&nbsp;5 pixels, so only these can be used: <code id="glyphList"></code></p>
+    <p class="err" id="asciiErr"></p>
+  </div>
+  <div id="spinControls" class="hidden">
+    <p class="help-text">Instead of the tunnel, the mark spins and zooms towards you, back and forth, over a
+    swirl of smeared stars, like a 1960s television transition, then settles while the swirl keeps turning.
+    A mark that does not fill the screen leaves more of the swirl in view.</p>
+    <div class="controls">
+      <div class="control">
+        <label for="turns">Turns <span id="turnsVal"></span></label>
+        <input type="range" id="turns" min="0" max="12" step="0.5" value="3">
+        <span class="help">How far the mark spins before it settles</span>
+      </div>
+      <div class="control">
+        <label for="zoom">Back and forth <span id="zoomVal"></span></label>
+        <input type="range" id="zoom" min="0" max="2" step="0.05" value="1">
+        <span class="help">How much its size swings on the way in</span>
+      </div>
+      <div class="control">
+        <label for="smear">Smear <span id="smearVal"></span></label>
+        <input type="range" id="smear" min="0" max="3" step="0.05" value="1">
+        <span class="help">Length of the stars' trails</span>
+      </div>
+      <div class="control">
+        <label for="stars">Stars</label>
+        <input type="number" id="stars" min="0" max="400" value="90">
+        <span class="help">Points in the swirl</span>
+      </div>
+      <div class="control">
+        <label for="spinResolve">Settle after</label>
+        <input type="number" id="spinResolve" min="2" max="175" value="120">
+        <span class="help">Frames; the intro runs about 175</span>
+      </div>
+      <div class="control">
+        <label for="spinSeed">Seed</label>
+        <input type="number" id="spinSeed" min="0" max="99999" value="26">
+        <span class="help">A different field of stars</span>
+      </div>
+    </div>
+    <p class="err" id="spinErr"></p>
+  </div>
   <p class="timeline" id="timeline"></p>
 </section>
 
-<section class="step">
+<section class="step" id="tunnelStep">
   <div class="step-head"><span class="step-num">3</span><h2>Tunnel density</h2></div>
   <p>The intro draws the mark through a tunnel. A denser tunnel tiles it more times.</p>
   <div class="controls">

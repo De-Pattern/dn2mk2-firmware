@@ -72,6 +72,31 @@ def configure(parser) -> None:
     boot.add_argument("--tunnel", type=float, nargs=2, metavar=("X", "Y"),
                       default=list(bootscreen_mod.STOCK_TUNNEL),
                       help="the intro tunnel's texture scale (stock 128 64)")
+    boot.add_argument("--boot-animation", choices=["tunnel", "ascii", "spin"], default="tunnel",
+                      help="tunnel: the mark through the stock tunnel; ascii: the mark "
+                           "decomposed into glitching characters (DNX's loader); spin: the "
+                           "mark spinning and zooming over a smeared star swirl (1966)")
+    from .. import asciiglitch
+    boot.add_argument("--ascii-chars", default=asciiglitch.RAMP,
+                      help="the picture's characters, dark to bright")
+    boot.add_argument("--glitch-chars", default=asciiglitch.GLITCH,
+                      help="the characters the noise is made of")
+    boot.add_argument("--ascii-resolve", type=int, default=96,
+                      help="frames from noise to the picture (the intro runs about 175)")
+    boot.add_argument("--ascii-idle-frames", type=int, default=16,
+                      help="frames of residual glitch, looped once resolved")
+    boot.add_argument("--ascii-glitch", type=float, default=1.0,
+                      help="tearing and scramble, 0..2 (1 is DNX's)")
+    boot.add_argument("--ascii-idle", type=float, default=0.3,
+                      help="residual glitch once resolved, 0..1")
+    boot.add_argument("--ascii-seed", type=int, default=26,
+                      help="the pattern of noise (ascii) or of stars (spin)")
+    boot.add_argument("--spin-resolve", type=int, default=120, help="frames until the mark settles")
+    boot.add_argument("--spin-loop", type=int, default=48, help="frames per turn of the swirl once settled")
+    boot.add_argument("--spin-stars", type=int, default=90)
+    boot.add_argument("--spin-smear", type=float, default=1.0, help="trail length, 0..3")
+    boot.add_argument("--spin-turns", type=float, default=3.0, help="turns of the mark, 0..12")
+    boot.add_argument("--spin-zoom", type=float, default=1.0, help="back-and-forth size swing, 0..2")
     lfo = ap.add_argument_group("lfowaves")
     lfo.add_argument("--wavetable", action="append", default=[], metavar="N=FILE",
                      help="replace wavetable N (1-3) with a .wav wavetable or .json table; "
@@ -171,6 +196,24 @@ def _read_pgm(path: pathlib.Path) -> set[tuple[int, int]]:
 def _apply_bootscreen(mod, firmware, args):
     if not args.boot_image:
         raise ModError("--boot-image is required for the bootscreen mod")
+    if args.boot_animation == "ascii":
+        if len(args.boot_image) != 1:
+            raise ModError("--boot-animation ascii takes exactly one --boot-image")
+        pix = _read_pgm(args.boot_image[0])
+        ascii = mod.ascii_frames(lambda x, y: (x, y) in pix, ramp=args.ascii_chars,
+                                 glitch_chars=args.glitch_chars, resolve=args.ascii_resolve,
+                                 idle_frames=args.ascii_idle_frames, seed=args.ascii_seed,
+                                 glitch=args.ascii_glitch, idle=args.ascii_idle)
+        return mod.apply(firmware, [], ascii=ascii)
+    if args.boot_animation == "spin":
+        if len(args.boot_image) != 1:
+            raise ModError("--boot-animation spin takes exactly one --boot-image")
+        pix = _read_pgm(args.boot_image[0])
+        anim = mod.spin_frames(lambda x, y: (x, y) in pix, resolve=args.spin_resolve,
+                               idle_frames=args.spin_loop, stars=args.spin_stars,
+                               smear=args.spin_smear, spin=args.spin_turns,
+                               zoom=args.spin_zoom, seed=args.ascii_seed)
+        return mod.apply(firmware, [], ascii=anim)
     images = [mod.image_from_pixels(_read_pgm(p)) for p in args.boot_image]
     if args.boot_invert:
         if len(images) != 1:
