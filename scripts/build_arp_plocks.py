@@ -42,7 +42,9 @@ byte) and passes the shadow instead. No lock: the call is stock.
   whether the arp clock runs is decided in the sequencer from the sound's own
   MODE. A lock to MODE 0 (off) makes the step silent -- the arp step returns no
   note.
-- No UI yet: locks are written into a pattern by DNX for testing (ids 107/108).
+- Recording: in grid recording, hold a trig and turn MODE or RANGE in the
+  ARPEGGIATOR menu. The menu itself still shows the sound's value, not the lock
+  (it has no parameter records to highlight); the trig blinks like any locked trig.
 - The applied value also reaches the DSP's parameter mirror at slots 65/100 for
   that track (`0x8000de60`), which no parameter uses; the hardware test watches
   for any side effect.

@@ -2959,6 +2959,33 @@ settings, MODE and RNG, and the rest waits on extending the mirror past 101.
   decides the arp clock from the sound's own MODE); a lock to OFF silences the
   step. No UI yet: DNX writes the locks for testing.
 
+**Recording, 2026-09-18.** First hardware try: nothing locked, because the menu
+still wrote the sound (owner: settings global, no inverted value, trig not
+blinking). The recorder was found by recording a real p-lock **under the
+emulator**: grid record, hold TRIG 1, **push and turn** encoder A (plain turns do
+not apply there -- the owner's pointer, from our own digikit FINDINGS). Watching
+the writes gave:
+
+- `0x4003ceee(model, track, step, slot, value)` -- the recorder: slot <= 100,
+  per-track index byte at `table+20640+track*101+slot` (`FF` = none, else claims
+  the first free of 80 records), record `{slot, track, u16[step]}` at
+  `table+idx*258`, then `0x4003ce3c` places the trig. Reached through
+  `0x4004f8fe(ctx, step, slot, value)`, `ctx = 0x4003efde(0x4018a97a())` (model
+  `+44`, track `+60`).
+- Held trigs: object at global `0x446478c8`, "any held" byte `+616`, held-step
+  set `+600` (`0x4019c40c` tests a bit); parameter pages walk it with
+  `0x40056926`.
+- The arp menu edits MODE through `setMode` (`0x4004bea4`, called `0x40018eee`,
+  clamps to 4) and RNG through `setRng` (`0x4004c0da`, called `0x40018fbe`,
+  clamps to 7).
+
+The hook on those two calls records `(existing lock or sound value) + delta` on
+every held step. **Emulator:** it fires on every turn and the firmware writes a
+slot-65 record for track 1 step 1 -- with value 0, because the emulator's menu
+encoder delta (`0x4011336e`) is 0 for plain, pushed and FUNC turns alike; the
+owner's hunch that plain rotation is mis-mapped in the emulator is borne out.
+**Known gap:** the menu shows the sound's value, not the lock.
+
 `scripts/build_arp_plocks.py` -> `arp-plocks_DN2_1.11.syx`, 248 B in caves
 `0x40295698` and `0x40295a30`. **Emulator:** boots to the UI, no faults.
 **Hardware: waiting for DNX** to write a test pattern (synth track, arp UP RNG 1;
