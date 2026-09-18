@@ -94,6 +94,14 @@ OFF_FLAG = 1                            # a descriptor's k takes the arp step ar
 ID_TO_SLOT = 0x400DCCC0                 # (table, id) -> slot
 NOTE_SET = 0x40029CD4
 NOTE_SET_CALL = 0x40026762
+APPLY = 0x400DB092                      # the ISR's lock-list apply (track, list, mirror)
+APPLY_CALL = 0x40026C34                 # ... its one call, for trig and trigless records
+REC_ARP = 0xC0000                       # note record +56: arp tick records
+LAST_NOTE = 0x467C4900                  # RAM past the shadows: the record note_hook last saw
+# A trigless lock trig's step also has bit 0 set (DNX, A06: note 0381, lock trig 7801),
+# so "no note" is told by the note set not having run for the record.
+ARP_STATE, ARP_STATE_STRIDE, ARP_STATE_SOUND = 0x405984A8, 40, 32  # per-track arp state
+TRACK_SOUNDS = 0x4058E8D8               # per-track sound the ISR reads SPEED / N.LEN from
 BUILD = 0x400D85E8                      # lock-list builder (track, list, table, ?, step)
 BUILD_GATE = 0x400D89B0                 # `beq` past it when the step has no stock lock
 RECOUNT = 0x4003CE3C                    # (model, track, step): lock count, the blink
@@ -234,6 +242,7 @@ note_hook:
     move.l  %fp@(-36),%a0               | the ISR's note record
     move.l  %a0@(84),%d0                | its lock list
     beq.s   9f
+    move.l  %a0,{LAST_NOTE:#010x}       | trigless_hook: this record played a note
     lea     %sp@(-12),%sp
     moveml  %d4/%a2-%a3,%sp@            | track +16, sound +44
     movea.l %d0,%a3
@@ -674,6 +683,72 @@ ui_mask:
     lea     %sp@(32),%sp
     jmp     {SET_MASK:#010x}
 
+| The ISR's lock-list apply (track, list, mirror), then, for a trigless lock trig
+| (no trig bit, not an arp tick) carrying arp locks: the track's running arp moves
+| onto the shadow with them -- the arp state's sound (+32) and the per-track table
+| the ISR reads SPEED / N.LEN from. The next trig's note set puts both back.
+trigless_hook:
+    move.l  %sp@(12),%sp@-
+    move.l  %sp@(12),%sp@-
+    move.l  %sp@(12),%sp@-
+    jsr     {APPLY:#010x}
+    lea     %sp@(12),%sp
+    lea     %sp@(-16),%sp
+    moveml  %d2-%d4/%a2,%sp@            | track +20, list +24
+    movea.l %fp@(-36),%a0               | the ISR's note record
+    move.l  {LAST_NOTE:#010x},%d0
+    clr.l   {LAST_NOTE:#010x}
+    cmp.l   %a0,%d0
+    beq     9f                          | it played a note: note_hook did the work
+    move.l  %a0@(56),%d0
+    andi.l  #{REC_ARP},%d0
+    bne     9f                          | an arp tick
+    movea.l %sp@(24),%a1
+    move.l  %a1@({EXT_MASK}),%d4
+    beq     9f
+    move.l  %sp@(20),%d2
+    move.l  %d2,%d0
+    muls.w  #{ARP_STATE_STRIDE},%d0
+    addi.l  #{ARP_STATE:#010x},%d0
+    movea.l %d0,%a0                     | the track's arp state
+    move.l  %a0@({ARP_STATE_SOUND}),%d0
+    beq     9f                          | no arp running
+    move.l  %d2,%d1
+    muls.w  #{SHADOW_STRIDE},%d1
+    addi.l  #{SHADOW:#010x},%d1
+    movea.l %d1,%a2                     | the shadow
+    cmp.l   %d0,%d1
+    beq.s   2f                          | already on it: edit in place
+    move.l  %a0,%sp@-
+    movea.l %d0,%a0
+    movea.l %a2,%a1
+    move.l  #{SOUND_STRIDE},%d3
+1:  move.b  %a0@+,%a1@+
+    subq.l  #1,%d3
+    bne.s   1b
+    movea.l %sp@+,%a0
+2:  movea.l %sp@(24),%a1
+    lea     %a1@({EXT_VALUES}),%a1
+    moveq   #0,%d1
+3:  btst    %d1,%d4
+    beq.s   4f
+    move.l  %d1,%d0
+    jsr     @sound_off@
+    move.b  %a1@(0,%d1:l),%d3
+    move.b  %d3,%a2@(0,%d0:l)
+4:  addq.l  #1,%d1
+    moveq   #{EXT_COUNT},%d0
+    cmp.l   %d0,%d1
+    blt.s   3b
+    move.l  %a2,%a0@({ARP_STATE_SOUND})
+    lea     {TRACK_SOUNDS:#010x},%a1
+    move.l  %d2,%d0
+    lsl.l   #2,%d0
+    move.l  %a2,%a1@(0,%d0:l)
+9:  moveml  %sp@,%d2-%d4/%a2
+    lea     %sp@(16),%sp
+    rts
+
 | The stock recount for step d2 of a2's track: the lock count, the blink.
 recount:
     move.l  %d2,%sp@-
@@ -692,7 +767,7 @@ FULL = "--all" in sys.argv
 if not FULL:
     EDITS = tuple(e for e in EDITS if e[3] in FIRST)
     DRAWS = tuple(d for d in DRAWS if d[3] in ("disp_mode", "disp_rng", "disp_spd", "disp_nlen"))
-UI_LABELS = tuple(e[2] for e in EDITS) + ("ui_mask",)
+UI_LABELS = tuple(e[2] for e in EDITS) + ("ui_mask", "trigless_hook")
 
 CAVES = ((CAVE_LOOK, lambda: LOOK, LOOK_LABELS),
          (CAVE_CORE, lambda: CORE, CORE_LABELS),
@@ -706,6 +781,7 @@ HOOKS = [
     (RECOUNT_MATCH, bytes.fromhex("71330801b680"), "jsr", "trk_cmp"),
     (BUILD, bytes.fromhex("4fefffe87065"), "jmp", "build_hook"),
     (NOTE_SET_CALL, bytes.fromhex("4eb940029cd4"), "jsr", "note_hook"),
+    (APPLY_CALL, bytes.fromhex("4eb9400db092"), "jsr", "trigless_hook"),
 ] + ([(MASK_EDIT, bytes.fromhex("4eb94004bd52"), "jsr", "ui_mask")] if FULL else [])
 HOOKS += [(va, bytes.fromhex("4eb9") + struct.pack(">I", setter), "jsr", label)
           for va, setter, label, _, _ in EDITS]
