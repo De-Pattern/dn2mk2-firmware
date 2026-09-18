@@ -228,6 +228,51 @@ dnfw mods apply firmware.syx --mod lfowaves --wavetable 2=my_table.wav -o modded
 dnfw mods apply firmware.syx --mod lfowaves --mod moddest --mod midiarp -o modded.syx</pre>
 </article>
 
+<article class="mod">
+  <div class="mod-head">
+    <h3>Boot screen</h3>
+    <span class="mod-id">bootscreen</span>
+    <span class="tag ready">Confirmed on hardware</span>
+  </div>
+  <p>
+    Your own mark in the start-up animation, scattered by the intro's tunnel the way the
+    logo is: held still, or flashing against its inverse and speeding up before it settles.
+    Bring any picture; it is fitted to the 128&nbsp;&times;&nbsp;64 screen in your browser.
+  </p>
+
+  <p style="margin-top:1.2rem">
+    <a class="cta" href="boot.html">Open the Boot Screen tool &#8594;</a>
+  </p>
+  <p class="cta-note">
+    Runs entirely in your browser &mdash; no install, no command line, nothing uploaded.
+  </p>
+
+  <dl class="facts">
+    <dt>You choose</dt><dd>The mark (ours, or any picture, with a threshold), still or flashing with its timing, and the tunnel's density</dd>
+    <dt>Changes</dt><dd>Two hooks and 200 bytes of code in section 3, and about 2&nbsp;KB of data after its end, copied up at start-up</dd>
+    <dt>Tested</dt><dd>Flashed 2026-09-17: a flashing mark built through this mod booted and played; the page and the command line produce the same bytes</dd>
+    <dt>Combines</dt><dd>With Destinations, the MIDI arpeggiator and Transients; <strong>not</strong> with LFO Waves yet (both use the start-up hook)</dd>
+  </dl>
+
+<pre>dnfw mods apply firmware.syx --mod bootscreen --boot-image mark.pgm --boot-invert -o modded.syx</pre>
+</article>
+
+<article class="mod">
+  <div class="mod-head">
+    <h3>LFO shape bench</h3>
+    <span class="mod-id">bench</span>
+    <span class="tag research">A design tool, not a mod</span>
+  </div>
+  <p>
+    Every LFO shape, stock and LFO Waves, drawn on the instrument's own one-bit screen and
+    swept across the knob that shapes it. Write a formula, see it exactly as the firmware
+    will play it, and download it as a wavetable for LFO Waves.
+  </p>
+  <p style="margin-top:1.2rem">
+    <a class="cta" href="bench.html">Open the LFO Shape Bench &#8594;</a>
+  </p>
+</article>
+
 <h2>How mods stay compatible</h2>
 
 <p>
@@ -288,10 +333,6 @@ dnfw mods apply firmware.syx --mod lfowaves --mod moddest --mod midiarp -o modde
     <tr>
       <td><strong>FX settings per pattern</strong></td>
       <td><span class="tag research">Costed</span> Parameter locks are bound to a track by construction, so a pattern-wide FX lock needs storage the format does not have yet. Possible, but it means extending storage rather than flipping a flag.</td>
-    </tr>
-    <tr>
-      <td><strong>Custom start-up animation</strong></td>
-      <td><span class="tag research">Idea</span> Parked.</td>
     </tr>
   </tbody>
 </table>
