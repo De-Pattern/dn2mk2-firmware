@@ -3040,3 +3040,26 @@ the core cave `0x402dfa1c` is the boot screen's too.
   emulator (spin intro, UI, no faults).
 - Emulator limits met: a second trig placement and copy/paste could not be
   driven, so the clear and paste paths wait for the device.
+
+### Status, 2026-09-19 (verification pass): every edit path driven in the emulator
+
+After PR #85 the owner asked for every skipped test to be run before the device
+is used again. Driven through the UI under the emulator, each against a control
+(stock or the hook removed):
+
+- **Remove + place** clears arp locks (control: they survive without the hook).
+- **Track paste** and **its undo**, **page paste** and **its undo**, **trig
+  copy/paste**, **shift** (FUNC + RIGHT) and **page autocopy** on lengthening
+  (SETTINGS > PERSONALIZE > PAGE AUTOCOPY, flag `0x405cd8a3`) carry arp locks;
+  stock TUN1 locks still paste. Found and fixed on the way: `paste_core` loaded
+  a1 before saving it (the page paste's loop base), so a page paste stopped at
+  the first stock record; the fourth paste routine (track undo) and trig
+  copy/paste (its own slot/value clipboard) had no hook at all.
+- `scripts/emu_arp_plocks.py` calls the builder, note set, trigless, paste,
+  clear, pattern load and save routines directly on synthetic data (39 checks);
+  run on a build without the load's track-bound fix it fails exactly as the
+  owner's device did.
+- What the emulator cannot do, tried and recorded: play the sequencer (PLAY,
+  with and without `--ssi0-request-hz`) and reach the pattern load by PTN + trig.
+- Tools: digikit `guirun --regs-at` (registers at an address) and fault pages
+  listed; the key codes PLAY 20, STOP 21, PAGE 22, PTN 23, TRK 16.
