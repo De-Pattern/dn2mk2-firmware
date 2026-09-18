@@ -49,11 +49,31 @@ and run the stock recount so the trig blinks; UP/DOWN on an arp step locks the
 mask. The draw's getters go to `disp_*`: the first held step's lock if it has
 one, shown inverted for the four top values. No trig held: all stock.
 
+## Clear, copy, paste
+
+- Placing a trig clears its step's locks (`0x40054676` -> `0x4003d14e`), as do
+  the pastes before they write; `clear_hook` clears the step's arp locks there
+  too, so a trig removed and placed again starts clean.
+- Copying steps inside a pattern matches records by track (`0x40050cce`,
+  `0x40051158`): the tag is cleared there, so arp values move with their steps.
+- The two page pastes read the clipboard's records (`0x40052634`,
+  `0x40053246`); an arp record of the copied track is written into the
+  destination page through `ext_put` and then skipped by the stock loop.
+
+## Caves, and the other mods
+
+`0x40295698` (lookups), `0x40295a30` (pastes), `0x402cf560` (menu, past LFO
+Waves' stub), and `0x402dfb8c` (core, past the boot screen's 366 B). The default
+build is `dnfw mods` `arpplocks` (`scripts/gen_arpplocks_code.py`) and combines
+byte-disjoint with bootscreen, lfowaves, midiarp and moddest. `--all` puts the
+mute code into the boot screen's own bytes (`0x402dfa1c`): not combinable.
+
 ## Limits
 
-- Removing a trig leaves its arp locks; copy/paste of whole pages or tracks
-  may not carry them (copying trigs does, owner 2026-09-19).
-- The cave at `0x402dfa1c` is the boot screen's too.
+- The clear and paste paths are verified by call path and code; the emulator
+  cannot drive a second trig placement or a paste, so they wait for the device.
+- Copying a whole track to another track, if it has its own routine, is not
+  covered.
 """
 
 from __future__ import annotations

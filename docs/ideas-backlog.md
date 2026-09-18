@@ -3024,3 +3024,19 @@ emulator; LEN and offsets heard on the device, mutes untested since the fix).
 unverified; the mutes and the "global mute silences every arp trig" report to
 retest; the emulator cannot select a pattern (the load path is hardware-only);
 the core cave `0x402dfa1c` is the boot screen's too.
+
+### Status, 2026-09-19 (later): clear, copy, paste; a mod that combines
+
+- **Clear:** placing a trig clears its step's locks (`0x40054676` calls the
+  step-lock clear `0x4003d14e`; removing a trig does not clear anything), so
+  the arp locks are cleared at the same entry. The pastes clear the same way.
+- **Copy inside a pattern** (`0x40050cce`, `0x40051158`) matches records by
+  track with the tag cleared. **Page pastes** (`0x40052634`, `0x40053246`)
+  write an arp record of the clipboard's track into the destination through
+  `ext_put` (clipboard records at +1705, the page's values at fp-20 / d6).
+- **Boot screen:** the core cave moved past its 366 B (`0x402dfb8c`); the mod
+  `arpplocks` (`dnfw mods`) combines with bootscreen, lfowaves, midiarp and
+  moddest with no shared byte; bootscreen + arpplocks booted under the
+  emulator (spin intro, UI, no faults).
+- Emulator limits met: a second trig placement and copy/paste could not be
+  driven, so the clear and paste paths wait for the device.
