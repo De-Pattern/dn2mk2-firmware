@@ -1,0 +1,83 @@
+/* What every tool page shares on top of base.css: the numbered steps, the
+ * file drop, buttons, verify lists and the sticky build bar.
+ *
+ * Extracted when the boot-screen page would have been the fourth inline copy
+ * of the same block (destinations, arp, boot, bench). Older pages still carry
+ * their own copy; new pages link this.
+ */
+
+.step { margin: 2.5rem 0; }
+.step-head { display: flex; align-items: baseline; gap: .75rem; margin-bottom: .4rem; }
+.step-num {
+  font-family: var(--mono); font-size: .72rem; letter-spacing: .1em;
+  color: var(--accent); border: 1px solid currentColor;
+  border-radius: 3px; padding: .1rem .4rem; flex: none;
+}
+.step h2 { margin: 0; border: 0; padding: 0; font-size: 1.2rem; }
+.step > p { margin-top: .3rem; color: var(--ink-soft); }
+
+.drop {
+  border: 2px dashed var(--rule); border-radius: 10px;
+  padding: 2rem 1.5rem; text-align: center; background: var(--panel);
+  transition: border-color .15s, background .15s;
+}
+.drop.over { border-color: var(--accent); background: var(--accent-dim); }
+.drop p { margin: 0 auto; max-width: none; }
+.drop .hint { color: var(--ink-soft); font-size: .88rem; margin-top: .5rem; }
+
+button, .filebtn {
+  font: inherit; font-size: .9rem; cursor: pointer;
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 6px;
+  padding: .4rem .9rem; display: inline-block;
+}
+button:hover, .filebtn:hover { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+  font-weight: 600; padding: .6rem 1.4rem;
+}
+:root[data-theme="dark"] button.primary,
+:root:not([data-theme="light"]) button.primary { color: #16181c; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.verdict { display: grid; gap: .3rem; margin-top: 1rem; font-size: .9rem; }
+.verdict div { display: flex; gap: .6rem; align-items: baseline; }
+.verdict .mark { font-family: var(--mono); flex: none; width: 1.2rem; }
+.pass .mark { color: var(--ok); }
+.fail .mark, .fail { color: #c33; }
+
+.bar {
+  position: sticky; bottom: 0; background: var(--bg);
+  border-top: 1px solid var(--rule); padding: 1rem 0;
+  display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+  margin-top: 2rem;
+}
+.bar .status { color: var(--ink-soft); font-size: .88rem; flex: 1 1 14rem; }
+.hidden { display: none; }
+.busy { color: var(--accent); }
+
+/* Form rows: a label above its control, laid out in a wrapping grid. */
+.controls {
+  display: grid; gap: 1rem 1.5rem; margin-top: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+}
+.control { display: grid; gap: .3rem; font-size: .9rem; }
+.control label { font-weight: 500; }
+.control .help { color: var(--ink-soft); font-size: .8rem; }
+.control input[type="number"], .control select {
+  font: inherit; font-family: var(--mono); font-size: .88rem;
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--rule); border-radius: 6px; padding: .35rem .5rem;
+  width: 100%;
+}
+.control input[type="range"] { width: 100%; accent-color: var(--accent); }
+.choice { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; }
+.choice label {
+  border: 1px solid var(--rule); border-radius: 6px; padding: .35rem .8rem;
+  cursor: pointer; font-size: .9rem; background: var(--panel);
+}
+.choice input { position: absolute; opacity: 0; pointer-events: none; }
+.choice input:checked + span { color: var(--accent); font-weight: 600; }
+.choice label:has(input:checked) { border-color: var(--accent); }
+.choice label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }

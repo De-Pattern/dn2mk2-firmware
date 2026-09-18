@@ -1,0 +1,178 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boot Screen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="Put your own mark in the Digitone II start-up animation, still or flashing, built entirely in your browser.">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/tool.css">
+<style>
+  /* The OLED is white on black whatever the page theme: this depicts the
+     instrument's screen, not a page surface. */
+  .screens { display: flex; gap: 1.2rem; flex-wrap: wrap; margin-top: 1.2rem; }
+  .screen { display: grid; gap: .4rem; }
+  .screen canvas {
+    width: 384px; max-width: 100%; aspect-ratio: 2 / 1; height: auto;
+    image-rendering: pixelated; background: #000;
+    border: 6px solid #1b1c1f; border-radius: 6px;
+  }
+  .screen .cap { font-family: var(--mono); font-size: .74rem; color: var(--ink-soft); letter-spacing: .06em; text-transform: uppercase; }
+  .timeline { font-family: var(--mono); font-size: .82rem; color: var(--ink-soft); margin-top: .8rem; }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow"><a href="index.html">Digitone II Mods</a> / boot screen</p>
+  <h1>Boot Screen</h1>
+  <p class="lede">
+    Your own mark in the Digitone&nbsp;II start-up animation, held still or flashing,
+    scattered by the intro's tunnel like the logo is. Pick your firmware and a
+    picture, download a signed image.
+  </p>
+</header>
+
+<div class="note">
+  <p><strong>Everything happens in this tab.</strong> Your firmware and your picture are
+  never uploaded — this page has no server to upload them to. It is static files on
+  GitHub Pages; you can read every line in the
+  <a href="https://github.com/angellinares/dn2_firmware_explore/tree/main/site/js">repository</a>.</p>
+  <p><strong>Prove your way back before you flash anything.</strong> The Early Start-up
+  Menu reflashes stock firmware over MIDI. Do that once, with an unmodified image,
+  <em>before</em> you flash a modified one — and back up your +Drive, which no tool
+  here can recover.</p>
+</div>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">1</span><h2>Your mark</h2></div>
+  <p>The screen is 128&nbsp;×&nbsp;64 pixels, one bit each. Any picture is fitted to it and
+  cut to black and white at the threshold you choose. The chimera is ours, drawn for this
+  project.</p>
+
+  <div class="choice" role="radiogroup" aria-label="Mark">
+    <label><input type="radio" name="source" id="srcPreset" value="preset" checked><span>Chimera (ours)</span></label>
+    <label><input type="radio" name="source" id="srcFile" value="file"><span>Your picture…</span></label>
+  </div>
+  <input type="file" id="picture" accept="image/*,.pgm" hidden>
+
+  <div class="controls">
+    <div class="control">
+      <label for="threshold">Threshold <span id="thresholdVal"></span></label>
+      <input type="range" id="threshold" min="1" max="254" value="128">
+      <span class="help">Brighter than this lights a pixel</span>
+    </div>
+    <div class="control">
+      <label for="invertMark">Invert</label>
+      <select id="invertMark"><option value="no">No</option><option value="yes">Yes — swap lit and dark</option></select>
+    </div>
+  </div>
+
+  <div class="screens">
+    <div class="screen"><canvas id="frameA" width="128" height="64"></canvas><span class="cap" id="capA">The mark</span></div>
+    <div class="screen" id="screenB"><canvas id="frameB" width="128" height="64"></canvas><span class="cap">Alternates with</span></div>
+  </div>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">2</span><h2>Still or flashing</h2></div>
+  <div class="choice" role="radiogroup" aria-label="Animation">
+    <label><input type="radio" name="mode" id="modeStatic" value="static"><span>Still</span></label>
+    <label><input type="radio" name="mode" id="modeFlash" value="flash" checked><span>Flashing</span></label>
+  </div>
+  <div class="controls" id="timing">
+    <div class="control">
+      <label for="slow">Flash every</label>
+      <select id="slow"></select>
+      <span class="help">Frames per swap at first</span>
+    </div>
+    <div class="control">
+      <label for="fast">Then every</label>
+      <select id="fast"></select>
+      <span class="help">Frames per swap once it speeds up</span>
+    </div>
+    <div class="control">
+      <label for="rush">Speed up at frame</label>
+      <input type="number" id="rush" min="0" max="1000" value="48">
+      <span class="help">Intro frame number</span>
+    </div>
+    <div class="control">
+      <label for="stop">Hold the mark from frame</label>
+      <input type="number" id="stop" min="0" max="1000" value="72">
+      <span class="help">Stops flashing here</span>
+    </div>
+  </div>
+  <p class="timeline" id="timeline"></p>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">3</span><h2>Tunnel density</h2></div>
+  <p>The intro draws the mark through a tunnel. A denser tunnel tiles it more times.</p>
+  <div class="controls">
+    <div class="control">
+      <label for="tunnel">Density</label>
+      <select id="tunnel">
+        <option value="0.5">× 0.5 — sparser</option>
+        <option value="0.75">× 0.75</option>
+        <option value="1" selected>× 1 — stock (128 × 64)</option>
+        <option value="1.5">× 1.5</option>
+        <option value="2">× 2 — denser</option>
+        <option value="3">× 3</option>
+      </select>
+    </div>
+  </div>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">4</span><h2>Your firmware</h2></div>
+  <p>A Digitone&nbsp;II OS 1.11 <code>.syx</code> from Elektron, or one the Modulation
+  Destinations or MIDI Arpeggiator page built. Not one built by LFO Waves: both mods use
+  the same start-up hook.</p>
+
+  <div class="drop" id="drop">
+    <p><label class="filebtn" for="syx">Choose a .syx file</label>
+      <input type="file" id="syx" accept=".syx,.SYX" hidden></p>
+    <p class="hint">or drag it here</p>
+  </div>
+
+  <div id="loaded" class="hidden">
+    <dl class="facts" id="facts"></dl>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</section>
+
+<section class="step hidden" id="step3">
+  <div class="step-head"><span class="step-num">5</span><h2>Build it</h2></div>
+  <p>
+    The image is rebuilt, re-signed with the key derived from your own file, and
+    every integrity field is checked again. Nothing downloads unless all of them pass.
+  </p>
+  <div class="verdict" id="buildVerdict"></div>
+</section>
+
+<div class="bar hidden" id="bar">
+  <button class="primary" id="buildBtn">Build firmware</button>
+  <button id="resetBtn">Start over</button>
+  <span class="status" id="status"></span>
+</div>
+
+<div class="note">
+  <p><strong>Confirmed on a Digitone&nbsp;II, 2026-09-17.</strong> A flashing mark built by
+  this mod booted and played on the instrument. The page and the command line produce the
+  same bytes.</p>
+  <p><strong>Combines</strong> with Modulation Destinations, the MIDI Arpeggiator and the
+  Transient Swapper. <strong>Not</strong> with LFO Waves yet: both copy data up through the
+  same start-up hook, and this page refuses an image that already carries it.</p>
+</div>
+
+<footer>
+  <p>
+    Part of <a href="https://github.com/angellinares/dn2_firmware_explore">dn2_firmware_explore</a>,
+    AGPL-3.0-or-later. Not affiliated with or endorsed by Elektron.
+    Use your own art: the Elektron logo is theirs, and this page will not supply it.
+  </p>
+</footer>
+
+</div>
+
+<script type="module" src="js/app/boot-page.js"></script>

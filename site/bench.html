@@ -1,0 +1,133 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LFO Shape Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="See every Digitone II LFO shape on the instrument's own 128x64 screen, and design a wavetable for LFO Waves.">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/tool.css">
+<style>
+  /* The panel is the instrument's OLED: white on black in either theme. */
+  .panel { image-rendering: pixelated; background: #000; display: block; border-radius: 2px; }
+
+  .bench { display: grid; grid-template-columns: 15.5rem minmax(0, 1fr); gap: 1.8rem; margin-top: 1rem; }
+  @media (max-width: 860px) { .bench { grid-template-columns: 1fr; } }
+
+  .label {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--ink-soft); margin: 0 0 .6rem;
+  }
+  .slots { display: grid; gap: 2px; }
+  .slot {
+    display: grid; grid-template-columns: 1.4rem 3.2rem 1fr; align-items: center; gap: .5rem;
+    background: none; border: 1px solid transparent; border-radius: 6px;
+    padding: .3rem .45rem; cursor: pointer; text-align: left; color: inherit; font: inherit; width: 100%;
+  }
+  .slot:hover { background: var(--panel); border-color: var(--rule); }
+  .slot[aria-pressed="true"] { background: var(--panel); border-color: var(--accent); }
+  .slot .ix { font-family: var(--mono); font-size: .72rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .slot .nm { font-family: var(--mono); font-size: .84rem; font-weight: 500; letter-spacing: .04em; }
+  .slot[data-kind="stock"] .nm { color: var(--ink-soft); }
+  .slot[data-kind="added"] .nm { color: var(--accent); }
+  .slot[data-kind="yours"] .nm { color: var(--ok); }
+  .slot canvas { justify-self: end; width: 100%; max-width: 128px; height: 26px; }
+  .key { font-size: .8rem; color: var(--ink-soft); margin-top: .8rem; }
+  .key b { font-family: var(--mono); font-weight: 500; }
+
+  .pane { min-width: 0; }
+  .pane-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1rem; margin-bottom: .8rem; }
+  .pane-head h2 { margin: 0; border: 0; padding: 0; font-family: var(--mono); font-size: 1.4rem; letter-spacing: .05em; }
+  .pane-head .what { color: var(--ink-soft); font-size: .92rem; }
+  .scope { background: #000; padding: .7rem; border-radius: 6px; display: inline-block; max-width: 100%; }
+  .scope canvas { width: 512px; max-width: 100%; height: auto; aspect-ratio: 2 / 1; }
+
+  .sph-row { display: flex; align-items: center; gap: .9rem; margin: 1rem 0 .3rem; flex-wrap: wrap; }
+  .sph-row label { font-family: var(--mono); font-size: .8rem; letter-spacing: .06em; color: var(--ink-soft); min-width: 3.2rem; }
+  .sph-row input[type="range"] { flex: 1 1 14rem; accent-color: var(--accent); }
+  .sph-val { font-family: var(--mono); font-weight: 500; font-variant-numeric: tabular-nums; min-width: 3ch; text-align: right; }
+  .sph-means { font-family: var(--mono); font-size: .82rem; color: var(--accent); }
+
+  .sweep { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .6rem; }
+  .sweep figure { margin: 0; }
+  .sweep canvas { width: 88px; height: 24px; }
+  .sweep figcaption { font-family: var(--mono); font-size: .66rem; color: var(--ink-soft); text-align: center; font-variant-numeric: tabular-nums; }
+
+  .def { margin-top: 1.6rem; border-top: 1px solid var(--rule); padding-top: 1.1rem; }
+  .tpl { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .7rem; }
+  .tpl button { font-family: var(--mono); font-size: .76rem; padding: .25rem .6rem; }
+  textarea {
+    width: 100%; background: var(--panel); color: var(--ink);
+    border: 1px solid var(--rule); border-radius: 6px;
+    font-family: var(--mono); font-size: .84rem; padding: .6rem .7rem; resize: vertical;
+  }
+  .err { color: #c33; font-family: var(--mono); font-size: .8rem; min-height: 1.2em; margin-top: .3rem; }
+  .actions { display: flex; gap: .7rem; flex-wrap: wrap; align-items: center; margin-top: .8rem; }
+  .actions .hint { color: var(--ink-soft); font-size: .84rem; }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow"><a href="index.html">Digitone II Mods</a> / lfo shape bench</p>
+  <h1>LFO Shape Bench</h1>
+  <p class="lede">
+    Every shape a Digitone&nbsp;II LFO can make with <a href="lfo.html">LFO Waves</a>, drawn
+    on the instrument's own 128&nbsp;×&nbsp;64 one-bit screen, across the whole range of the
+    knob that shapes it. Then design your own wavetable and take it to LFO Waves.
+  </p>
+</header>
+
+<div class="bench">
+  <div>
+    <p class="label">Waveforms</p>
+    <div class="slots" id="slots"></div>
+    <p class="key">
+      <b style="color:var(--ink-soft)">■</b> stock &nbsp;
+      <b style="color:var(--accent)">■</b> LFO Waves &nbsp;
+      <b style="color:var(--ok)">■</b> yours
+    </p>
+  </div>
+
+  <div class="pane">
+    <div class="pane-head">
+      <h2 id="shapeName">STEP</h2>
+      <span class="what" id="shapeWhat"></span>
+    </div>
+
+    <div class="scope"><canvas id="scope" width="128" height="64" class="panel"></canvas></div>
+
+    <div class="sph-row">
+      <label for="sph" id="sphLabel">STPS</label>
+      <input type="range" id="sph" min="0" max="127" value="48">
+      <span class="sph-val" id="sphVal">48</span>
+      <span class="sph-means" id="sphMeans"></span>
+    </div>
+
+    <p class="label" style="margin-top:1.2rem" id="sweepLabel">Swept across its range</p>
+    <div class="sweep" id="sweep"></div>
+
+    <div class="def" id="def"></div>
+  </div>
+</div>
+
+<div class="note" style="margin-top:3rem">
+  <p><strong>What is exact.</strong> STEP, PULS, TRAP and the three wavetables are drawn from the
+  same arithmetic their firmware generators were checked against in an emulator, and a wavetable
+  of yours is drawn through the same reduction and read LFO Waves builds into the firmware &mdash;
+  what you see is what the instrument plays. NOIS is the right colour and loop length but not the
+  firmware's exact sequence. The stock shapes marked <em>approximate</em> are the right family;
+  their exact curvature has not been read out of the generator.</p>
+</div>
+
+<footer>
+  <p>
+    Part of <a href="https://github.com/angellinares/dn2_firmware_explore">dn2_firmware_explore</a>,
+    AGPL-3.0-or-later. Not affiliated with or endorsed by Elektron.
+    Nothing here touches firmware: take the table to <a href="lfo.html">LFO Waves</a> to build one.
+  </p>
+</footer>
+
+</div>
+
+<script type="module" src="js/app/bench-page.js"></script>
