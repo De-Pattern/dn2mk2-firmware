@@ -71,6 +71,7 @@ from dnfw.firmware import build as fwbuild
 from dnfw.firmware.load import load
 from dnfw.patch.assemble import assemble, available
 
+FULL = "--all" in sys.argv             # LEN, offsets and mutes too; see FIRST below
 MAIN_OS = 3
 BASE = 0x40000400
 SHADOW = 0x467C0000                     # 16 x SHADOW_STRIDE, above BSS
@@ -101,6 +102,7 @@ LAST_NOTE = 0x467C4900                  # RAM past the shadows: the lock list no
 # so "no note" is told by the note set not having run for the record.
 ARP_STATE, ARP_STATE_STRIDE, ARP_STATE_SOUND = 0x405984A8, 40, 32  # per-track arp state
 TRACK_SOUNDS = 0x4058E8D8               # per-track sound the ISR reads SPEED / N.LEN from
+CLEAR = 0x4003D14E                      # clear a step's locks (model, track, step)
 BUILD = 0x400D85E8                      # lock-list builder (track, list, table, ?, step)
 BUILD_GATE = 0x400D89B0                 # `beq` past it when the step has no stock lock
 RECOUNT = 0x4003CE3C                    # (model, track, step): lock count, the blink
@@ -163,8 +165,10 @@ OFFSETS = ", ".join(str(byte - SOUND_BASE) for _, byte, _, _ in PARAMS)
 # The caves, assembled in this order. A later cave calls an earlier one's
 # routines as `@name@`, replaced by its address before assembling.
 CAVE_LOOK = (0x40295698, 203)          # dnfw cave scan: clean, no code reference
-CAVE_CORE = (0x402DFA1C, 896)          # clean; the boot screen's too: not combinable yet
+CAVE_CORE = (0x402DFB8C, 528)          # clean run 0x402dfa1c past the boot screen's 366 B
 CAVE_UI = (0x402CF560, 844)            # LFO Waves' run past its stub (ends 0x402cf55a)
+CAVE_MASK = (0x402DFA1C, 366)          # --all only: the boot screen's code (not combinable)
+CAVE_EDIT = (0x40295A30, 200)          # dnfw cave scan: clean, no code reference
 
 LOOK = f"""
 | Pattern load, lock id -> slot, (table, id). An arp lock: 0x80 | k, which
@@ -231,8 +235,22 @@ trk_cmp:
     bclr    #5,%d0
     cmp.l   %d0,%d3
     rts
+
+| Copying steps inside a pattern (0x40050cce, 0x40051158) matches records by
+| track: the tag cleared, so arp locks travel with their steps.
+copy_cmp1:
+    mvs.b   %a3@(1,%d1:l),%d0
+    bclr    #5,%d0
+    cmp.l   %a2@({CTX_TRACK}),%d0
+    rts
+copy_cmp2:
+    mvs.b   %a5@(1,%a0:l),%d0
+    bclr    #5,%d0
+    cmp.l   %a2@({CTX_TRACK}),%d0
+    rts
+
 """
-LOOK_LABELS = ("load_hook", "idx_hook", "save_rec", "trk_cmp")
+LOOK_LABELS = ("load_hook", "idx_hook", "save_rec", "trk_cmp", "copy_cmp1", "copy_cmp2")
 
 CORE = f"""
 | The note set, (track, ..., sound at +32, ...): a note with arp locks plays a
@@ -242,39 +260,49 @@ note_hook:
     move.l  %a0@(84),%d0                | its lock list
     beq.s   9f
     move.l  %d0,{LAST_NOTE:#010x}       | trigless_hook: this list played a note
-    lea     %sp@(-12),%sp
-    moveml  %d4/%a2-%a3,%sp@            | track +16, sound +44
-    movea.l %d0,%a3
-    move.l  %a3@({EXT_MASK}),%d4
-    beq.s   8f
-    move.l  %sp@(16),%d0
+    movea.l %d0,%a1
+    tst.l   %a1@({EXT_MASK})
+    beq.s   9f
+    movea.l %sp@(32),%a0
+    move.l  %sp@(4),%d0
+    bsr     shadow_apply
+    move.l  %d0,%sp@(32)
+9:  move.l  %sp@(32),%d2                | the caller files d2 in 0x4058e8d8 (SPD, N.LEN)
+    jmp     {NOTE_SET:#010x}
+
+| Track d0's shadow of sound a0 (a0 may be the shadow: edited in place) with the
+| arp locks of list a1 written in -> d0. Keeps d2-d7 / a2-a6.
+shadow_apply:
+    lea     %sp@(-16),%sp
+    moveml  %d2-%d3/%a2-%a3,%sp@
+    movea.l %a1,%a3
     muls.w  #{SHADOW_STRIDE},%d0
     addi.l  #{SHADOW:#010x},%d0
-    movea.l %d0,%a2                     | the shadow
-    movea.l %sp@(44),%a0
+    movea.l %d0,%a2
+    cmpa.l  %a0,%a2
+    beq.s   2f
     movea.l %a2,%a1
     move.l  #{SOUND_STRIDE},%d1
 1:  move.b  %a0@+,%a1@+
     subq.l  #1,%d1
     bne.s   1b
+2:  move.l  %a3@({EXT_MASK}),%d2
     lea     %a3@({EXT_VALUES}),%a1
     moveq   #0,%d1
-2:  btst    %d1,%d4
-    beq.s   3f
+3:  btst    %d1,%d2
+    beq.s   4f
     move.l  %d1,%d0
     bsr     sound_off
-    movea.l %a2,%a0
-    adda.l  %d0,%a0
-    move.b  %a1@(0,%d1:l),%a0@
-3:  addq.l  #1,%d1
+    move.b  %a1@(0,%d1:l),%d3
+    move.b  %d3,%a2@(0,%d0:l)
+4:  addq.l  #1,%d1
     moveq   #{EXT_COUNT},%d0
     cmp.l   %d0,%d1
-    blt.s   2b
-    move.l  %a2,%sp@(44)
-8:  moveml  %sp@,%d4/%a2-%a3
-    lea     %sp@(12),%sp
-9:  move.l  %sp@(32),%d2                | the caller files d2 in 0x4058e8d8 (SPD, N.LEN)
-    jmp     {NOTE_SET:#010x}
+    blt.s   3b
+    move.l  %a2,%d0
+    moveml  %sp@,%d2-%d3/%a2-%a3
+    lea     %sp@(16),%sp
+    rts
 
 | The lock-list builder, then this step's arp locks into the list's spare half.
 build_hook:
@@ -333,56 +361,6 @@ sound_off:
 offsets:
     .byte   {OFFSETS}
     .align  2
-
-| A trig held? d0 1 with a3 the held object, a2 the track context, d3 the
-| pattern length; else 0. Z follows d0.
-held_ctx:
-    move.l  {HELD:#010x},%d0
-    beq.s   9f
-    movea.l %d0,%a3
-    tst.b   %a3@({HELD_ANY})
-    beq.s   9f
-    jsr     {APP:#010x}
-    move.l  %d0,%sp@-
-    jsr     {TRACK_CTX:#010x}
-    addq.l  #4,%sp
-    movea.l %d0,%a2
-    move.l  %a2,%sp@-
-    jsr     {PATTERN_LEN:#010x}
-    addq.l  #4,%sp
-    move.l  %d0,%d3
-    moveq   #1,%d0
-    rts
-9:  moveq   #0,%d0
-    rts
-
-| The first held step at or after d2 -> d2; Z set when none (d2 = d3).
-next_held:
-1:  cmp.l   %d3,%d2
-    bge.s   9f
-    move.l  %d2,%sp@-
-    pea     %a3@({HELD_BITS})
-    jsr     {BIT_TEST:#010x}
-    addq.l  #8,%sp
-    tst.b   %d0
-    bne.s   8f
-    addq.l  #1,%d2
-    bra.s   1b
-8:  moveq   #1,%d0
-    rts
-9:  moveq   #0,%d0
-    rts
-
-| a2's pattern lock table -> a0.
-ctx_table:
-    movea.l %a2@({CTX_MODEL}),%a0
-    move.l  %a0,%sp@-
-    movea.l %a0@,%a1
-    movea.l %a1@(40),%a1
-    jsr     %a1@
-    addq.l  #4,%sp
-    movea.l %d0,%a0
-    rts
 
 | Model a0 -> its sound (vt[40]) in a1 and d0, 0 if none; Z follows.
 model_sound:
@@ -447,28 +425,56 @@ ext_put:
 9:  move.l  %sp@+,%d3
     rts
 
-| Table a0, low byte's header d7, step d2, the sound's mask d5 -> the mask the
-| step plays (each byte the lock's if locked) in d0.
-mask_at:
-    move.l  %d3,%sp@-
-    move.l  %d7,%d1
-    bsr     ext_get
+"""
+UI_HELPERS = f"""
+| A trig held? d0 1 with a3 the held object, a2 the track context, d3 the
+| pattern length; else 0. Z follows d0.
+held_ctx:
+    move.l  {HELD:#010x},%d0
+    beq.s   9f
+    movea.l %d0,%a3
+    tst.b   %a3@({HELD_ANY})
+    beq.s   9f
+    jsr     {APP:#010x}
+    move.l  %d0,%sp@-
+    jsr     {TRACK_CTX:#010x}
+    addq.l  #4,%sp
+    movea.l %d0,%a2
+    move.l  %a2,%sp@-
+    jsr     {PATTERN_LEN:#010x}
+    addq.l  #4,%sp
     move.l  %d0,%d3
-    move.l  %d7,%d1
-    addi.l  #0x100,%d1
-    bsr     ext_get
-    tst.l   %d0
-    bpl.s   1f
-    move.l  %d5,%d0
-    lsr.l   #8,%d0
-1:  lsl.l   #8,%d0
-    tst.l   %d3
-    bpl.s   2f
-    move.l  %d5,%d3
-    andi.l  #0xff,%d3
-2:  andi.l  #0xffff,%d0
-    or.l    %d3,%d0
-    move.l  %sp@+,%d3
+    moveq   #1,%d0
+    rts
+9:  moveq   #0,%d0
+    rts
+
+| The first held step at or after d2 -> d2; Z set when none (d2 = d3).
+next_held:
+1:  cmp.l   %d3,%d2
+    bge.s   9f
+    move.l  %d2,%sp@-
+    pea     %a3@({HELD_BITS})
+    jsr     {BIT_TEST:#010x}
+    addq.l  #8,%sp
+    tst.b   %d0
+    bne.s   8f
+    addq.l  #1,%d2
+    bra.s   1b
+8:  moveq   #1,%d0
+    rts
+9:  moveq   #0,%d0
+    rts
+
+| a2's pattern lock table -> a0.
+ctx_table:
+    movea.l %a2@({CTX_MODEL}),%a0
+    move.l  %a0,%sp@-
+    movea.l %a0@,%a1
+    movea.l %a1@(40),%a1
+    jsr     %a1@
+    addq.l  #4,%sp
+    movea.l %d0,%a0
     rts
 
 | The draw's getters: the first held step's lock if it has one, else the
@@ -501,10 +507,10 @@ disp_ext:                               | +0 desc, +4 ret, +8 model, +12 arp ste
 1:  moveq   #0,%d4
     moveq   #{FLAGS_PLAIN},%d5
     movea.l %sp@(40),%a0
-    bsr     model_sound
+    jsr     @model_sound@
     beq.s   80f
     move.l  %d6,%d0
-    bsr     sound_off
+    jsr     @sound_off@
     move.b  %a1@(0,%d0:l),%d4
     extb.l  %d4                         | the sound's value
     bsr     held_ctx
@@ -517,7 +523,7 @@ disp_ext:                               | +0 desc, +4 ret, +8 model, +12 arp ste
     ori.l   #{EXT_TAG},%d1
     lsl.l   #8,%d6
     or.l    %d6,%d1
-    bsr     ext_get
+    jsr     @ext_get@
     tst.l   %d0
     bmi.s   80f
     extb.l  %d0
@@ -529,6 +535,32 @@ disp_ext:                               | +0 desc, +4 ret, +8 model, +12 arp ste
     lea     %sp@(36),%sp
     rts
 
+"""
+MASK_CORE = f"""
+| Table a0, low byte's header d7, step d2, the sound's mask d5 -> the mask the
+| step plays (each byte the lock's if locked) in d0.
+mask_at:
+    move.l  %d3,%sp@-
+    move.l  %d7,%d1
+    jsr     @ext_get@
+    move.l  %d0,%d3
+    move.l  %d7,%d1
+    addi.l  #0x100,%d1
+    jsr     @ext_get@
+    tst.l   %d0
+    bpl.s   1f
+    move.l  %d5,%d0
+    lsr.l   #8,%d0
+1:  lsl.l   #8,%d0
+    tst.l   %d3
+    bpl.s   2f
+    move.l  %d5,%d3
+    andi.l  #0xff,%d3
+2:  andi.l  #0xffff,%d0
+    or.l    %d3,%d0
+    move.l  %sp@+,%d3
+    rts
+
 | The graph's step-on getter (model, arp step) -> 0 / 1, from the held step's
 | mask lock if it has one.
 disp_mask:
@@ -536,15 +568,15 @@ disp_mask:
     moveml  %d2-%d7/%a2-%a3,%sp@        | model +36, arp step +40
     moveq   #0,%d5
     movea.l %sp@(36),%a0
-    bsr     model_sound
+    jsr     @model_sound@
     beq.s   1f
     mvz.w   %a1@(356),%d5
-1:  bsr     held_ctx
+1:  jsr     @held_ctx@
     beq.s   80f
     moveq   #0,%d2
-    bsr     next_held
+    jsr     @next_held@
     beq.s   80f
-    bsr     ctx_table
+    jsr     @ctx_table@
     move.l  %a2@({CTX_TRACK}),%d7
     ori.l   #{EXT_TAG | (K_MASK << 8)},%d7
     bsr     mask_at
@@ -557,10 +589,8 @@ disp_mask:
     lea     %sp@(32),%sp
     rts
 """
-CORE_LABELS = ("note_hook", "build_hook", "sound_off", "held_ctx", "next_held",
-               "ctx_table", "model_sound", "ext_get", "ext_put", "mask_at",
-               "disp_mode", "disp_rng", "disp_spd", "disp_nlen", "disp_len",
-               "disp_off", "disp_mask")
+CORE_LABELS = ("note_hook", "build_hook", "sound_off",
+               "model_sound", "ext_get", "ext_put", "shadow_apply")
 
 
 def ui_source() -> str:
@@ -579,7 +609,7 @@ def ui_source() -> str:
 ui_ext:                                 | +0 desc, +4 setter, +8 ret, +12 model, +16 +20
     lea     %sp@(-32),%sp
     moveml  %d2-%d7/%a2-%a3,%sp@        | desc +32, setter +36, model +44, args +48 +52
-    jsr     @held_ctx@
+    jsr     held_ctx
     beq     90f
     moveq   #0,%d4
     move.b  %sp@(33),%d4                | k
@@ -601,9 +631,9 @@ ui_ext:                                 | +0 desc, +4 setter, +8 ret, +12 model,
     lsl.l   #8,%d4
     or.l    %d4,%d7                     | the record header word
     moveq   #0,%d2
-2:  jsr     @next_held@
+2:  jsr     next_held
     beq.s   80f
-    jsr     @ctx_table@
+    jsr     ctx_table
     move.l  %d7,%d1
     jsr     @ext_get@
     tst.l   %d0
@@ -636,52 +666,6 @@ ui_ext:                                 | +0 desc, +4 setter, +8 ret, +12 model,
     lea     %sp@(8),%sp
     jmp     %a0@
 
-| UP / DOWN on an arp step, replacing `jsr setStepOn(model, step, on)`: with a
-| trig held, the step's bit set or cleared in each held step's mask lock.
-ui_mask:
-    lea     %sp@(-32),%sp
-    moveml  %d2-%d7/%a2-%a3,%sp@        | model +36, arp step +40, on +47
-    jsr     @held_ctx@
-    beq     90f
-    movea.l %sp@(36),%a0
-    jsr     @model_sound@
-    beq     90f
-    mvz.w   %a1@(356),%d5               | the sound's mask
-    moveq   #1,%d6
-    move.l  %sp@(40),%d0
-    lsl.l   %d0,%d6                     | the step's bit
-    move.l  %a2@({CTX_TRACK}),%d7
-    ori.l   #{EXT_TAG | (K_MASK << 8)},%d7
-    moveq   #0,%d2
-1:  jsr     @next_held@
-    beq.s   80f
-    jsr     @ctx_table@
-    jsr     @mask_at@
-    tst.b   %sp@(47)
-    beq.s   2f
-    or.l    %d6,%d0
-    bra.s   3f
-2:  move.l  %d6,%d1
-    not.l   %d1
-    and.l   %d1,%d0
-3:  move.l  %d0,%d4
-    move.l  %d7,%d1
-    jsr     @ext_put@
-    move.l  %d4,%d0
-    lsr.l   #8,%d0
-    move.l  %d7,%d1
-    addi.l  #0x100,%d1
-    jsr     @ext_put@
-    bsr     recount
-    addq.l  #1,%d2
-    bra.s   1b
-80: moveml  %sp@,%d2-%d7/%a2-%a3
-    lea     %sp@(32),%sp
-    rts
-90: moveml  %sp@,%d2-%d7/%a2-%a3
-    lea     %sp@(32),%sp
-    jmp     {SET_MASK:#010x}
-
 | The ISR's lock-list apply (track, list, mirror) -- entered here from both its
 | callers (0x40026c34, and the per-track loop at 0x4002664e) -- then, for a lock trig
 | (no trig bit, not an arp tick) carrying arp locks: the track's running arp moves
@@ -706,41 +690,17 @@ trigless_hook:
     move.l  %d2,%d0
     muls.w  #{ARP_STATE_STRIDE},%d0
     addi.l  #{ARP_STATE:#010x},%d0
-    movea.l %d0,%a0                     | the track's arp state
-    move.l  %a0@({ARP_STATE_SOUND}),%d0
-    beq     9f                          | no arp running
-    move.l  %d2,%d1
-    muls.w  #{SHADOW_STRIDE},%d1
-    addi.l  #{SHADOW:#010x},%d1
-    movea.l %d1,%a2                     | the shadow
-    cmp.l   %d0,%d1
-    beq.s   2f                          | already on it: edit in place
-    move.l  %a0,%sp@-
+    movea.l %d0,%a2                     | the track's arp state
+    move.l  %a2@({ARP_STATE_SOUND}),%d0
+    beq.s   9f                          | no arp running
     movea.l %d0,%a0
-    movea.l %a2,%a1
-    move.l  #{SOUND_STRIDE},%d3
-1:  move.b  %a0@+,%a1@+
-    subq.l  #1,%d3
-    bne.s   1b
-    movea.l %sp@+,%a0
-2:  movea.l %sp@(24),%a1
-    lea     %a1@({EXT_VALUES}),%a1
-    moveq   #0,%d1
-3:  btst    %d1,%d4
-    beq.s   4f
-    move.l  %d1,%d0
-    jsr     @sound_off@
-    move.b  %a1@(0,%d1:l),%d3
-    move.b  %d3,%a2@(0,%d0:l)
-4:  addq.l  #1,%d1
-    moveq   #{EXT_COUNT},%d0
-    cmp.l   %d0,%d1
-    blt.s   3b
-    move.l  %a2,%a0@({ARP_STATE_SOUND})
-    lea     {TRACK_SOUNDS:#010x},%a1
+    movea.l %sp@(24),%a1
     move.l  %d2,%d0
-    lsl.l   #2,%d0
-    move.l  %a2,%a1@(0,%d0:l)
+    jsr     @shadow_apply@
+    move.l  %d0,%a2@({ARP_STATE_SOUND})
+    lea     {TRACK_SOUNDS:#010x},%a1
+    lsl.l   #2,%d2
+    move.l  %d0,%a1@(0,%d2:l)
 9:  moveml  %sp@,%d2-%d4/%a2
     lea     %sp@(16),%sp
     rts
@@ -763,15 +723,168 @@ recount:
 # The first release locks the four top values only; --all adds the rest. The
 # storage, playback and load / save paths are the same either way.
 FIRST = {K_MODE, K_RNG, K_SPD, K_NLEN}
-FULL = "--all" in sys.argv
 if not FULL:
     EDITS = tuple(e for e in EDITS if e[3] in FIRST)
     DRAWS = tuple(d for d in DRAWS if d[3] in ("disp_mode", "disp_rng", "disp_spd", "disp_nlen"))
-UI_LABELS = tuple(e[2] for e in EDITS) + ("ui_mask", "trigless_hook")
+UI_MASK = f"""
+| UP / DOWN on an arp step, replacing `jsr setStepOn(model, step, on)`: with a
+| trig held, the step's bit set or cleared in each held step's mask lock.
+ui_mask:
+    lea     %sp@(-32),%sp
+    moveml  %d2-%d7/%a2-%a3,%sp@        | model +36, arp step +40, on +47
+    jsr     @held_ctx@
+    beq     90f
+    movea.l %sp@(36),%a0
+    jsr     @model_sound@
+    beq     90f
+    mvz.w   %a1@(356),%d5               | the sound's mask
+    moveq   #1,%d6
+    move.l  %sp@(40),%d0
+    lsl.l   %d0,%d6                     | the step's bit
+    move.l  %a2@({CTX_TRACK}),%d7
+    ori.l   #{EXT_TAG | (K_MASK << 8)},%d7
+    moveq   #0,%d2
+1:  jsr     @next_held@
+    beq.s   80f
+    jsr     @ctx_table@
+    bsr     mask_at
+    tst.b   %sp@(47)
+    beq.s   2f
+    or.l    %d6,%d0
+    bra.s   3f
+2:  move.l  %d6,%d1
+    not.l   %d1
+    and.l   %d1,%d0
+3:  move.l  %d0,%d4
+    move.l  %d7,%d1
+    jsr     @ext_put@
+    move.l  %d4,%d0
+    lsr.l   #8,%d0
+    move.l  %d7,%d1
+    addi.l  #0x100,%d1
+    jsr     @ext_put@
+    jsr     @recount@
+    addq.l  #1,%d2
+    bra.s   1b
+80: moveml  %sp@,%d2-%d7/%a2-%a3
+    lea     %sp@(32),%sp
+    rts
+90: moveml  %sp@,%d2-%d7/%a2-%a3
+    lea     %sp@(32),%sp
+    jmp     {SET_MASK:#010x}
+
+"""
+UI_LABELS = tuple(e[2] for e in EDITS) + ("trigless_hook",)
+
+CLEAR_SRC = f"""
+| Clearing a step's locks (0x4003d14e (model, track, step), reached by removing a
+| trig, clearing, and every paste before it writes): the step's arp locks too,
+| a record freed (ff ff) once every step is empty. Then the stock routine.
+clear_hook:                             | +4 model, +8 track, +12 step
+    lea     %sp@(-16),%sp
+    moveml  %d2-%d4/%a2,%sp@            | model +20, track +24, step +28
+    movea.l %sp@(20),%a0
+    jsr     @model_sound@               | vt[40]: the pattern's lock table here
+    beq.s   9f
+    movea.l %d0,%a2
+    move.l  %sp@(24),%d2
+    ori.l   #{EXT_TAG},%d2
+    move.l  %sp@(28),%d3
+    add.l   %d3,%d3
+    moveq   #80,%d4
+1:  move.b  %a2@(1),%d0
+    cmp.b   %d2,%d0
+    bne.s   4f
+    moveq   #-1,%d0
+    move.w  %d0,%a2@(2,%d3:l)
+    moveq   #0,%d0                      | empty now?
+2:  mvs.w   %a2@(2,%d0:l),%d1
+    addq.l  #1,%d1
+    bne.s   5f
+    addq.l  #2,%d0
+    cmpi.l  #256,%d0
+    bne.s   2b
+    moveq   #-1,%d0
+    move.w  %d0,%a2@                    | freed
+4:
+5:  lea     %a2@(258),%a2
+    subq.l  #1,%d4
+    bne.s   1b
+9:  moveml  %sp@,%d2-%d4/%a2
+    lea     %sp@(16),%sp
+    lea     %sp@(-40),%sp               | the stock entry, replayed
+    moveml  %d2-%d7/%a2-%a5,%sp@
+    jmp     {CLEAR + 8:#010x}
+
+"""
+
+EDIT = f"""
+| The two page pastes' record loops (0x40052634, 0x40053246), at the clipboard
+| record's track byte: an arp record of the copied track has its sixteen values
+| written into the destination page through ext_put, then fails the stock
+| compare (whose index lookup would take k for a stock slot).
+paste_a:
+    mvs.b   %a1@(1,%d0:l),%d1
+    movea.l %fp@(-20),%a0               | the copied page's values
+    bsr.s   paste_ext
+    move.l  %d1,%d7
+    move.l  #96668,%d1
+    rts
+paste_b:
+    mvs.b   %a1@(1,%d0:l),%d1
+    movea.l %d6,%a0
+    bsr.s   paste_ext
+    move.l  %d1,%d5
+    move.l  #96668,%d1
+    rts
+paste_ext:                              | d1 track byte, a1 + d0 the record, a0 values,
+    btst    #5,%d1                      | a3 the table, d3 the page, a2 the context
+    beq.s   9f
+    lea     %sp@(-24),%sp
+    moveml  %d0/%d2-%d4/%a1/%a4,%sp@
+    movea.l %fp@(-16),%a4
+    adda.l  #96668,%a4
+    move.l  %d1,%d2
+    andi.l  #0x1f,%d2
+    cmp.l   %a4@,%d2
+    bne.s   8f                          | another track's
+    moveq   #0,%d4
+    move.b  %a1@(0,%d0:l),%d4           | k
+    moveq   #{EXT_COUNT},%d2
+    cmp.l   %d2,%d4
+    bcc.s   8f
+    lsl.l   #8,%d4
+    move.l  %a2@({CTX_TRACK}),%d1
+    ori.l   #{EXT_TAG},%d1
+    or.l    %d4,%d1                     | the destination header
+    lea     %a0@(0,%d0:l),%a4           | the record's copied values
+    movea.l %a3,%a0
+    moveq   #0,%d4
+1:  mvz.w   %a4@(2,%d4:l),%d0
+    cmpi.l  #0xffff,%d0
+    beq.s   2f
+    move.l  %d4,%d2
+    lsr.l   #1,%d2
+    add.l   %d3,%d2
+    jsr     @ext_put@
+2:  addq.l  #2,%d4
+    moveq   #32,%d2
+    cmp.l   %d2,%d4
+    bne.s   1b
+8:  moveml  %sp@,%d0/%d2-%d4/%a1/%a4
+    lea     %sp@(24),%sp
+    moveq   #-2,%d1                     | fails the compare
+9:  rts
+"""
+EDIT_LABELS = ("paste_a", "paste_b")
 
 CAVES = ((CAVE_LOOK, lambda: LOOK, LOOK_LABELS),
          (CAVE_CORE, lambda: CORE, CORE_LABELS),
-         (CAVE_UI, ui_source, UI_LABELS))
+         (CAVE_UI, lambda: ui_source() + UI_HELPERS + CLEAR_SRC,
+          UI_LABELS + ("clear_hook", "disp_mode", "disp_rng", "disp_spd",
+                       "disp_nlen", "disp_len", "disp_off", "held_ctx", "next_held", "ctx_table", "recount")),
+         (CAVE_EDIT, lambda: EDIT, EDIT_LABELS)) + (
+        ((CAVE_MASK, lambda: UI_MASK + MASK_CORE, ("ui_mask", "disp_mask")),) if FULL else ())
 
 # (va, stock bytes, how, label) -- replaced by jmp / jsr / lea to the label.
 HOOKS = [
@@ -782,6 +895,11 @@ HOOKS = [
     (BUILD, bytes.fromhex("4fefffe87065"), "jmp", "build_hook"),
     (NOTE_SET_CALL, bytes.fromhex("4eb940029cd4"), "jsr", "note_hook"),
     (APPLY, bytes.fromhex("4fefffd4202f0030"), "jmp", "trigless_hook"),
+    (CLEAR, bytes.fromhex("4fefffd848d73cfc"), "jmp", "clear_hook"),
+    (0x40050CCE, bytes.fromhex("71331801b0aa003c"), "jsr", "copy_cmp1"),
+    (0x40051158, bytes.fromhex("71358801b0aa003c"), "jsr", "copy_cmp2"),
+    (0x40052634, bytes.fromhex("7f310801223c0001799c"), "jsr", "paste_a"),
+    (0x40053246, bytes.fromhex("7b310801223c0001799c"), "jsr", "paste_b"),
 ] + ([(MASK_EDIT, bytes.fromhex("4eb94004bd52"), "jsr", "ui_mask")] if FULL else [])
 HOOKS += [(va, bytes.fromhex("4eb9") + struct.pack(">I", setter), "jsr", label)
           for va, setter, label, _, _ in EDITS]
