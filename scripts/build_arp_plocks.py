@@ -267,8 +267,10 @@ ui_lock:                                | +0 slot<<8|max, +4 setter, +8 getter, 
     movea.l %sp@(44),%a0
     jsr     %a0@                        | the sound's current value
     addq.l  #4,%sp
+    extb.l  %d0                         | the getter returns a byte over a pointer's bits
     move.l  %d0,%d7
     move.l  %sp@(52),%d6
+    extb.l  %d6                         | the menu's new value, a byte
     sub.l   %d0,%d6                     | the knob's delta
     jsr     {APP:#010x}
     move.l  %d0,%sp@-
