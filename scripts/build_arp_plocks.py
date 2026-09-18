@@ -64,7 +64,8 @@ from dnfw.patch.assemble import assemble, available
 
 MAIN_OS = 3
 BASE = 0x40000400
-CAVES = ((0x40295698, 203), (0x40295A30, 200))   # dnfw cave scan: clean, no code reference
+CAVES = ((0x40295698, 203), (0x40295A30, 200),   # dnfw cave scan: clean, no code reference
+         (0x402CF600, 684))                        # LFO Waves' cave past its 46-byte stub: disjoint
 SHADOW = 0x467C0000                     # 16 x SOUND_STRIDE, above BSS
 SOUND_STRIDE = 1163
 SHADOW_STRIDE = 1164                    # word-aligned per track
@@ -77,10 +78,26 @@ SLOT_TO_ID = 0x400DCCFA                 # (table, slot) -> id
 NOTE_SET = 0x40029CD4
 NOTE_SET_CALL = 0x40026762
 
-LABELS = (("load_hook", "save_hook"), ("note_hook",))
+# Recording, read 2026-09-18 by recording a real p-lock under the emulator (hold
+# a trig in grid recording, push encoder A and turn it) and watching the writes.
+SET_LOCK = 0x4004F8FE          # (ctx, step, slot, value) -> 0x4003ceee recorder
+APP = 0x4018A97A               # the app singleton
+TRACK_CTX = 0x4003EFDE         # (app) -> the active track's context
+PATTERN_LEN = 0x4004F896       # (ctx) -> steps
+CTX_MODEL, CTX_TRACK = 44, 60  # the context's pattern model and track
+HELD = 0x446478C8              # the held-trig object (0x447683f0 on the snapshot)
+HELD_BITS, HELD_ANY = 600, 616 # its 128-bit held-step set, and "any held"
+BIT_TEST = 0x4019C40C          # (bits, step) -> bool
+GET_MODE, SET_MODE = 0x4004BE74, 0x4004BEA4
+GET_RNG, SET_RNG = 0x4004C0AA, 0x4004C0DA
+MAX_MODE, MAX_RNG = 4, 7       # the stock setters' clamps
+MENU_MODE_CALL = 0x40018EEE    # ArpSetupMenuView: jsr setMode
+MENU_RNG_CALL = 0x40018FBE     # ... jsr setRng
+
+LABELS = (("load_hook", "save_hook"), ("note_hook",), ("ui_mode", "ui_rng"))
 
 
-def cave_sources() -> tuple[str, str]:
+def cave_sources() -> tuple[str, str, str]:
     lookups = f"""
 | Lock id -> slot. Args (table, id); table 16 is track 16's own, left stock.
 load_hook:
@@ -174,7 +191,104 @@ note_hook:
     lea     %sp@(16),%sp
 9:  jmp     {NOTE_SET:#010x}
 """
-    return lookups, note
+    ui = f"""
+| The ARPEGGIATOR menu's MODE / RNG edit, replacing `jsr setter(model, value)`.
+| With a trig held in grid recording, lock (existing lock or sound value) + the
+| knob's delta on every held step, through the firmware's own recorder, so the
+| lock highlights and the trig blinks exactly as on a parameter page. Otherwise
+| the stock setter.
+ui_mode:
+    pea     {GET_MODE:#010x}
+    pea     {SET_MODE:#010x}
+    move.l  #{(SLOT_MODE << 8) | MAX_MODE},%sp@-
+    bra.s   ui_lock
+ui_rng:
+    pea     {GET_RNG:#010x}
+    pea     {SET_RNG:#010x}
+    move.l  #{(SLOT_RNG << 8) | MAX_RNG},%sp@-
+ui_lock:                                | +0 slot<<8|max, +4 setter, +8 getter, +12 ret, +16 model, +20 value
+    move.l  {HELD:#010x},%d0
+    beq     90f
+    movea.l %d0,%a0
+    tst.b   %a0@({HELD_ANY})
+    beq     90f
+    lea     %sp@(-32),%sp
+    moveml  %d2-%d7/%a2-%a3,%sp@        | +32 packed, +36 setter, +40 getter, +48 model, +52 value
+    movea.l %d0,%a3
+    move.l  %sp@(48),%sp@-
+    movea.l %sp@(44),%a0
+    jsr     %a0@                        | the sound's current value
+    addq.l  #4,%sp
+    move.l  %d0,%d7
+    move.l  %sp@(52),%d6
+    sub.l   %d0,%d6                     | the knob's delta
+    jsr     {APP:#010x}
+    move.l  %d0,%sp@-
+    jsr     {TRACK_CTX:#010x}
+    addq.l  #4,%sp
+    movea.l %d0,%a2                     | the active track's context
+    move.l  %a2,%sp@-
+    jsr     {PATTERN_LEN:#010x}
+    addq.l  #4,%sp
+    move.l  %d0,%d5
+    moveq   #0,%d2                      | step
+1:  cmp.l   %d5,%d2
+    bge     80f
+    move.l  %d2,%sp@-
+    pea     %a3@({HELD_BITS})
+    jsr     {BIT_TEST:#010x}
+    addq.l  #8,%sp
+    tst.b   %d0
+    beq.s   7f
+    movea.l %a2@({CTX_MODEL}),%a0
+    move.l  %a0,%sp@-
+    movea.l %a0@,%a1
+    movea.l %a1@(40),%a1
+    jsr     %a1@                        | the pattern's lock table
+    addq.l  #4,%sp
+    movea.l %d0,%a0
+    move.l  %sp@(32),%d4
+    lsr.l   #8,%d4                      | slot
+    move.l  %a2@({CTX_TRACK}),%d1
+    moveq   #101,%d0
+    muls.l  %d0,%d1
+    add.l   %d4,%d1
+    movea.l %a0,%a1
+    adda.l  #20640,%a1
+    mvs.b   %a1@(0,%d1:l),%d1           | the track's record for the slot
+    bmi.s   4f
+    move.l  #258,%d3
+    muls.l  %d1,%d3
+    add.l   %d2,%d3
+    add.l   %d2,%d3
+    mvz.w   %a0@(2,%d3:l),%d3           | this step's value
+    cmpi.l  #0xffff,%d3
+    bne.s   5f
+4:  move.l  %d7,%d3                     | no lock yet: start from the sound
+5:  add.l   %d6,%d3
+    bpl.s   6f
+    moveq   #0,%d3
+6:  moveq   #0,%d0
+    move.b  %sp@(35),%d0                | max
+    cmp.l   %d0,%d3
+    ble.s   3f
+    move.l  %d0,%d3
+3:  move.l  %d3,%sp@-
+    move.l  %d4,%sp@-
+    move.l  %d2,%sp@-
+    move.l  %a2,%sp@-
+    jsr     {SET_LOCK:#010x}
+    lea     %sp@(16),%sp
+7:  addq.l  #1,%d2
+    bra     1b
+80: moveml  %sp@,%d2-%d7/%a2-%a3
+    lea     %sp@(44),%sp                | our 32, and packed / setter / getter
+    rts
+90: movea.l %sp@(4),%a0
+    lea     %sp@(12),%sp
+    jmp     %a0@
+"""
+    return lookups, note, ui
 
 
 # (va, stock bytes, label) -- replaced by a jmp (entry) or jsr (call) to the label.
@@ -182,6 +296,8 @@ HOOKS = (
     (ID_TO_SLOT, bytes.fromhex("2f027410222f0008"), "jmp", "load_hook"),
     (SLOT_TO_ID, bytes.fromhex("2f027410222f0008"), "jmp", "save_hook"),
     (NOTE_SET_CALL, bytes.fromhex("4eb940029cd4"), "jsr", "note_hook"),
+    (MENU_MODE_CALL, bytes.fromhex("4eb94004bea4"), "jsr", "ui_mode"),
+    (MENU_RNG_CALL, bytes.fromhex("4eb94004c0da"), "jsr", "ui_rng"),
 )
 
 # Read, not written: what the hooks rely on.
@@ -197,6 +313,15 @@ CONTEXT = (
     (0x40026762 + 6, bytes.fromhex("4fef0028"), "the call pops 40 bytes"),
     (0x4002A114, bytes.fromhex("1029015f"), "the arp step reads MODE from its sound"),
     (0x4002A164, bytes.fromhex("79290161"), "...and RNG"),
+    (0x4004F930, bytes.fromhex("4eb94003ceee"), "the lock wrapper calls the recorder"),
+    (0x4003CF50, bytes.fromhex("752850a0"), "recorder: the track x slot record index at +20640"),
+    (0x4003CFD6, bytes.fromhex("33862a02"), "recorder: the step's u16 at record +2"),
+    (0x40055BBE, bytes.fromhex("10280268"), "held object: any trig held at +616"),
+    (0x4005693C, bytes.fromhex("486b0258"), "held object: the held-step set at +600"),
+    (0x40018EE0, bytes.fromhex("4eb94004be74"), "arp menu: MODE getter before the setter"),
+    (0x40018FA4, bytes.fromhex("4eb94004c0aa"), "arp menu: RNG getter before the setter"),
+    (0x4004BEFA, bytes.fromhex("7404"), "setMode clamps to 4"),
+    (0x4004C10E, bytes.fromhex("7407"), "setRng clamps to 7"),
 )
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
