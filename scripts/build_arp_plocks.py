@@ -836,7 +836,9 @@ note_hook:
     move.l  %a2,%sp@(52)                | the note set arpeggiates the shadow
 8:  moveml  %sp@,%d2-%d4/%a2-%a3
     lea     %sp@(20),%sp
-9:  jmp     {NOTE_SET:#010x}
+9:  move.l  %sp@(32),%d2                | the caller keeps the sound in d2 and, after the note
+    jmp     {NOTE_SET:#010x}         | set (which saves d2), stores it in the per-track
+                                        | table 0x4058e8d8 the ISR reads SPD / N.LEN from
 
 """
     return lookups, small, ui, ext
