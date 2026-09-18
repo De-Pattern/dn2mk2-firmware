@@ -97,10 +97,15 @@ BIT_TEST = 0x4019C40C          # (bits, step) -> bool
 GET_MODE, SET_MODE = 0x4004BE74, 0x4004BEA4
 GET_RNG, SET_RNG = 0x4004C0AA, 0x4004C0DA
 MAX_MODE, MAX_RNG = 4, 7       # the stock setters' clamps
+MENU_MODE_DRAW = 0x400188DE    # ArpSetupMenuView draw: jsr getMode, then prints it
+MENU_RNG_DRAW = 0x40018972     # ... jsr getRng
+MODE_FLAGS = 0x400188F0        # ... `pea 2`, the text flags for MODE's value
+RNG_FLAGS = 0x40018986         # ... and for RNG's
+FLAGS_PLAIN, FLAGS_LOCKED = 2, 10  # text draw 0x4011545c: 2 centred, 8 inverts the box
 MENU_MODE_CALL = 0x40018EEE    # ArpSetupMenuView: jsr setMode
 MENU_RNG_CALL = 0x40018FBE     # ... jsr setRng
 
-LABELS = (("load_hook", "save_hook", "save_rec", "save_one"), ("note_hook",), ("ui_mode", "ui_rng"))
+LABELS = (("load_hook", "save_hook", "save_rec", "save_one"), ("note_hook",), ("ui_mode", "ui_rng", "disp_mode", "disp_rng"))
 
 
 def cave_sources() -> tuple[str, str, str]:
@@ -337,6 +342,82 @@ ui_lock:                                | +0 slot<<8|max, +4 setter, +8 getter, 
 90: movea.l %sp@(4),%a0
     lea     %sp@(12),%sp
     jmp     %a0@
+
+| The ARPEGGIATOR menu's draw, replacing `jsr getter(model)` before it prints the
+| value. With a trig held, the first held step's lock if it has one, drawn
+| inverted like any locked value; otherwise the sound's. Out: d0 the value, d1
+| the text flags the draw now pushes (2 centred, +8 the inverted box).
+disp_mode:
+    pea     {GET_MODE:#010x}
+    move.l  #{SLOT_MODE << 8},%sp@-
+    bra.s   disp
+disp_rng:
+    pea     {GET_RNG:#010x}
+    move.l  #{SLOT_RNG << 8},%sp@-
+disp:                                   | +0 slot<<8, +4 getter, +8 ret, +12 model
+    lea     %sp@(-24),%sp
+    moveml  %d2-%d5/%a2-%a3,%sp@        | +24 slot<<8, +28 getter, +36 model
+    move.l  %sp@(36),%sp@-
+    movea.l %sp@(32),%a0
+    jsr     %a0@
+    addq.l  #4,%sp
+    extb.l  %d0
+    move.l  %d0,%d4                     | the sound's value
+    moveq   #{FLAGS_PLAIN},%d5
+    move.l  {HELD:#010x},%d0
+    beq     80f
+    movea.l %d0,%a3
+    tst.b   %a3@({HELD_ANY})
+    beq     80f
+    jsr     {APP:#010x}
+    move.l  %d0,%sp@-
+    jsr     {TRACK_CTX:#010x}
+    addq.l  #4,%sp
+    movea.l %d0,%a2
+    move.l  %a2,%sp@-
+    jsr     {PATTERN_LEN:#010x}
+    addq.l  #4,%sp
+    move.l  %d0,%d3
+    moveq   #0,%d2
+1:  cmp.l   %d3,%d2
+    bge     80f
+    move.l  %d2,%sp@-
+    pea     %a3@({HELD_BITS})
+    jsr     {BIT_TEST:#010x}
+    addq.l  #8,%sp
+    tst.b   %d0
+    bne.s   2f
+    addq.l  #1,%d2
+    bra.s   1b
+2:  movea.l %a2@({CTX_MODEL}),%a0       | the first held step decides
+    move.l  %a0,%sp@-
+    movea.l %a0@,%a1
+    movea.l %a1@(40),%a1
+    jsr     %a1@
+    addq.l  #4,%sp
+    movea.l %d0,%a0                     | the lock table
+    move.l  %a2@({CTX_TRACK}),%d0
+    muls.w  #101,%d0
+    move.l  %sp@(24),%d1
+    lsr.l   #8,%d1
+    add.l   %d1,%d0
+    movea.l %a0,%a1
+    adda.l  #20640,%a1
+    mvs.b   %a1@(0,%d0:l),%d0
+    bmi.s   80f
+    muls.w  #258,%d0
+    add.l   %d2,%d0
+    add.l   %d2,%d0
+    mvz.w   %a0@(2,%d0:l),%d0
+    cmpi.l  #0xffff,%d0
+    beq.s   80f
+    move.l  %d0,%d4
+    moveq   #{FLAGS_LOCKED},%d5
+80: move.l  %d4,%d0
+    move.l  %d5,%d1
+    moveml  %sp@,%d2-%d5/%a2-%a3
+    lea     %sp@(32),%sp
+    rts
 """
     return lookups, note, ui
 
@@ -348,6 +429,8 @@ HOOKS = (
     (NOTE_SET_CALL, bytes.fromhex("4eb940029cd4"), "jsr", "note_hook"),
     (MENU_MODE_CALL, bytes.fromhex("4eb94004bea4"), "jsr", "ui_mode"),
     (MENU_RNG_CALL, bytes.fromhex("4eb94004c0da"), "jsr", "ui_rng"),
+    (MENU_MODE_DRAW, bytes.fromhex("4eb94004be74"), "jsr", "disp_mode"),
+    (MENU_RNG_DRAW, bytes.fromhex("4eb94004c0aa"), "jsr", "disp_rng"),
     (SAVE_REC, bytes.fromhex("7810 b883 6606 2234 1c00 6004 2233 1c00 1081".replace(" ", "")), "jsr", "save_rec"),
     # the first 6 bytes are the table load, dropped; the next 8 are kept ahead of the call
     (SAVE_ONE, bytes.fromhex("47f9401fcf20 2443 45f22a00 d1ca 10b39c03".replace(" ", "")), "jsr", "save_one",
@@ -358,6 +441,10 @@ HOOKS = (
 PATCHES = (
     (LOAD_MAX, bytes.fromhex("786a"), bytes.fromhex(f"78{ID_RNG:02x}"),
      "pattern load: let ids up to 108 through to the lookup"),
+    (MODE_FLAGS, bytes.fromhex("48780002"), bytes.fromhex("2f014e71"),
+     "arp menu: MODE's text flags from disp_mode's d1"),
+    (RNG_FLAGS, bytes.fromhex("48780002"), bytes.fromhex("2f014e71"),
+     "arp menu: RNG's text flags from disp_rng's d1"),
 )
 
 # Read, not written: what the hooks rely on.
