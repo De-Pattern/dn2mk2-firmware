@@ -297,25 +297,6 @@ dnfw mods apply firmware.syx --mod lfowaves --mod moddest --mod midiarp -o modde
 </table>
 </div>
 
-<h2>How the transients were found</h2>
-
-<p>
-  Worth telling because it is the most useful thing in the project. Several detectors
-  were written to find sample data in the firmware, and every one of them failed —
-  one rejected the wavetables it should have found, two others happily reported
-  pointer tables as audio.
-</p>
-<p>
-  The fix was not a cleverer test. Elektron's Syntakt download ships eight files named
-  <code>TRANSIENT&nbsp;01–08.wav</code>. Measuring the detector against <em>those</em>
-  showed its thresholds were three to ten times too loose — every false positive had been
-  sitting comfortably above them. With thresholds taken from real transients, firmware
-  code scored zero and the bank appeared in one contiguous run.
-</p>
-<p>
-  A detector needs a sample of the thing it detects, not a theory about it.
-</p>
-
 <footer>
   <p>
     Source, measurements and the full record of what was got wrong along the way:
