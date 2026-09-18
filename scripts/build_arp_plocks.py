@@ -96,8 +96,7 @@ NOTE_SET = 0x40029CD4
 NOTE_SET_CALL = 0x40026762
 APPLY = 0x400DB092                      # the ISR's lock-list apply (track, list, mirror)
 APPLY_CALL = 0x40026C34                 # ... its one call, for trig and trigless records
-REC_ARP = 0xC0000                       # note record +56: arp tick records
-LAST_NOTE = 0x467C4900                  # RAM past the shadows: the record note_hook last saw
+LAST_NOTE = 0x467C4900                  # RAM past the shadows: the lock list note_hook last saw
 # A trigless lock trig's step also has bit 0 set (DNX, A06: note 0381, lock trig 7801),
 # so "no note" is told by the note set not having run for the record.
 ARP_STATE, ARP_STATE_STRIDE, ARP_STATE_SOUND = 0x405984A8, 40, 32  # per-track arp state
@@ -242,7 +241,7 @@ note_hook:
     move.l  %fp@(-36),%a0               | the ISR's note record
     move.l  %a0@(84),%d0                | its lock list
     beq.s   9f
-    move.l  %a0,{LAST_NOTE:#010x}       | trigless_hook: this record played a note
+    move.l  %d0,{LAST_NOTE:#010x}       | trigless_hook: this list played a note
     lea     %sp@(-12),%sp
     moveml  %d4/%a2-%a3,%sp@            | track +16, sound +44
     movea.l %d0,%a3
@@ -683,7 +682,8 @@ ui_mask:
     lea     %sp@(32),%sp
     jmp     {SET_MASK:#010x}
 
-| The ISR's lock-list apply (track, list, mirror), then, for a trigless lock trig
+| The ISR's lock-list apply (track, list, mirror) -- entered here from both its
+| callers (0x40026c34, and the per-track loop at 0x4002664e) -- then, for a lock trig
 | (no trig bit, not an arp tick) carrying arp locks: the track's running arp moves
 | onto the shadow with them -- the arp state's sound (+32) and the per-track table
 | the ISR reads SPEED / N.LEN from. The next trig's note set puts both back.
@@ -691,18 +691,14 @@ trigless_hook:
     move.l  %sp@(12),%sp@-
     move.l  %sp@(12),%sp@-
     move.l  %sp@(12),%sp@-
-    jsr     {APPLY:#010x}
+    jsr     apply_stock
     lea     %sp@(12),%sp
     lea     %sp@(-16),%sp
     moveml  %d2-%d4/%a2,%sp@            | track +20, list +24
-    movea.l %fp@(-36),%a0               | the ISR's note record
     move.l  {LAST_NOTE:#010x},%d0
     clr.l   {LAST_NOTE:#010x}
-    cmp.l   %a0,%d0
-    beq     9f                          | it played a note: note_hook did the work
-    move.l  %a0@(56),%d0
-    andi.l  #{REC_ARP},%d0
-    bne     9f                          | an arp tick
+    cmp.l   %sp@(24),%d0
+    beq     9f                          | its note played: note_hook did the work
     movea.l %sp@(24),%a1
     move.l  %a1@({EXT_MASK}),%d4
     beq     9f
@@ -748,6 +744,10 @@ trigless_hook:
 9:  moveml  %sp@,%d2-%d4/%a2
     lea     %sp@(16),%sp
     rts
+apply_stock:
+    lea     %sp@(-44),%sp
+    move.l  %sp@(48),%d0
+    jmp     {APPLY + 8:#010x}
 
 | The stock recount for step d2 of a2's track: the lock count, the blink.
 recount:
@@ -781,7 +781,7 @@ HOOKS = [
     (RECOUNT_MATCH, bytes.fromhex("71330801b680"), "jsr", "trk_cmp"),
     (BUILD, bytes.fromhex("4fefffe87065"), "jmp", "build_hook"),
     (NOTE_SET_CALL, bytes.fromhex("4eb940029cd4"), "jsr", "note_hook"),
-    (APPLY_CALL, bytes.fromhex("4eb9400db092"), "jsr", "trigless_hook"),
+    (APPLY, bytes.fromhex("4fefffd4202f0030"), "jmp", "trigless_hook"),
 ] + ([(MASK_EDIT, bytes.fromhex("4eb94004bd52"), "jsr", "ui_mask")] if FULL else [])
 HOOKS += [(va, bytes.fromhex("4eb9") + struct.pack(">I", setter), "jsr", label)
           for va, setter, label, _, _ in EDITS]
