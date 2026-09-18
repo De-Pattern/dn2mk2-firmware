@@ -2838,8 +2838,12 @@ correctly rounded arithmetic. Filmed with `scripts/film_bootscreen.py`:
 [ascii gif](img/intro-ascii.gif) · [spin gif](img/intro-spin.gif) ·
 [stock gif](img/intro-stock-film.gif)
 
-**Not yet on hardware.** `bootscreen-ascii_DN2_1.11.syx` and
-`bootscreen-spin_DN2_1.11.syx`. Questions for the flash: is the picture upright
+**PASSED on hardware 2026-09-18**, both `bootscreen-ascii_DN2_1.11.syx` and
+`bootscreen-spin_DN2_1.11.syx`. Owner: *"boot is ok, no issues, indeed more fluent than
+the GIF"*, *"eveything was correct"* -- upright, so the blit's vertical flip is real
+firmware behaviour, and the larger appended area does not slow boot. The GIF is
+choppier because it keeps one still per ~4 intro frames. Recorded before the flash,
+kept for the record: Questions for the flash: is the picture upright
 (the emulator says the blit flips); does the intro run near 30 fps, so that the
 reveal takes about as long as DNX's 5.6 s; does the boot wait for the copy of a
 115-170 KB appended area.
