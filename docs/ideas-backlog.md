@@ -2928,3 +2928,115 @@ next reading is the save path: how lock records are written from the per-slot
 table at kit +20640, and whether a side table for extra ids can be written back
 through it. If ids 100..127 persist, build (1) and let DNX write
 test locks; (3) only after the sound works.
+
+### First build, 2026-09-18: MODE and RNG through the two free slots
+
+**Only two mirror slots are free.** Every slot 0..99 means something on some
+page except **65**; **100** is past the save table. So the first build locks two
+settings, MODE and RNG, and the rest waits on extending the mirror past 101.
+
+| lock id | slot | setting | sound byte |
+|---|---|---|---|
+| 107 | 65 | MODE | `+0x15f` |
+| 108 | 100 | RNG | `+0x161` |
+
+- **Load and save.** The id -> slot lookup `0x400dccc0` (table `0x401fd0b0`,
+  ids <= 106) and the slot -> id lookup `0x400dccfa` (table `0x401fcf20`, slots
+  <= 99; slot 65 there is 0 = no lock) are each entered through a hook that answers
+  these two and otherwise replays the stock entry. The lock record header is
+  converted by `0x400dd12e` (load) and `0x400dd160` (save). The save lookup is hot:
+  52,992 calls in one emulator boot.
+- **Playback.** The frame ISR applies a note's lock list (`record+84`: count
+  `+8`, 8-byte entries from `+20`, `u16 slot, u16 value`) through `0x400db092`
+  (called at `0x40026c34`), which also forwards the value to the DSP mirror
+  `0x8000de60`. The arp reads MODE/RNG from the sound its note set is given
+  (`0x40029cd4`, called at `0x40026762`, sound at `sp+32`). A hook there gives a
+  locked note a per-track shadow of its sound (`0x467c0000`, 16 x 1,164 B) with
+  the locked byte.
+- **MODE values** (menu table `0x401d4b1c`): OFF 0, TRUE 1, UP 2, DOWN 3, CYCL 4,
+  SHUF 5, RAND 6, CHRD 7 -- matching the step's dispatch (`0x4002a114`).
+- **Limits.** MODE can change per trig only while the arp is on (the sequencer
+  decides the arp clock from the sound's own MODE); a lock to OFF silences the
+  step. No UI yet: DNX writes the locks for testing.
+
+**Recording, 2026-09-18.** First hardware try: nothing locked, because the menu
+still wrote the sound (owner: settings global, no inverted value, trig not
+blinking). The recorder was found by recording a real p-lock **under the
+emulator**: grid record, hold TRIG 1, **push and turn** encoder A (plain turns do
+not apply there -- the owner's pointer, from our own digikit FINDINGS). Watching
+the writes gave:
+
+- `0x4003ceee(model, track, step, slot, value)` -- the recorder: slot <= 100,
+  per-track index byte at `table+20640+track*101+slot` (`FF` = none, else claims
+  the first free of 80 records), record `{slot, track, u16[step]}` at
+  `table+idx*258`, then `0x4003ce3c` places the trig. Reached through
+  `0x4004f8fe(ctx, step, slot, value)`, `ctx = 0x4003efde(0x4018a97a())` (model
+  `+44`, track `+60`).
+- Held trigs: object at global `0x446478c8`, "any held" byte `+616`, held-step
+  set `+600` (`0x4019c40c` tests a bit); parameter pages walk it with
+  `0x40056926`.
+- The arp menu edits MODE through `setMode` (`0x4004bea4`, called `0x40018eee`,
+  clamps to 4) and RNG through `setRng` (`0x4004c0da`, called `0x40018fbe`,
+  clamps to 7).
+
+The hook on those two calls records `(existing lock or sound value) + delta` on
+every held step. **Emulator:** it fires on every turn and the firmware writes a
+slot-65 record for track 1 step 1 -- with value 0, because the emulator's menu
+encoder delta (`0x4011336e`) is 0 for plain, pushed and FUNC turns alike; the
+owner's hunch that plain rotation is mis-mapped in the emulator is borne out.
+**Known gap:** the menu shows the sound's value, not the lock.
+
+`scripts/build_arp_plocks.py` -> `arp-plocks_DN2_1.11.syx`, 248 B in caves
+`0x40295698` and `0x40295a30`. **Emulator:** boots to the UI, no faults.
+**Hardware: waiting for DNX** to write a test pattern (synth track, arp UP RNG 1;
+step 5 MODE 3, step 9 RNG 3, step 13 both, step 1 control) and to read it back
+after a save.
+
+### Status, 2026-09-19: working on hardware
+
+`scripts/build_arp_plocks.py` (its docstring is the design). Owner-tested on the
+device: MODE, SPEED, RANGE and N.LEN locked per trig, shown inverted while the
+trig is held, kept through save / pattern change / reload, copied with trigs
+between pages, and applied by **trigless lock trigs** (FUNC + trig). `--all`
+adds LEN, the sixteen step offsets and the step mutes (recorded and shown in the
+emulator; LEN and offsets heard on the device, mutes untested since the fix).
+
+- **Storage:** an arp lock is a record of its own, RAM header `(k, track | 0x20)`,
+  stored `(107 + k, track)`, value in the low byte. Stock loops that match a
+  record by track pass over it; `trk_cmp` lets the recount see it (the blink).
+- **Playback:** the lock-list builder (`0x400d85e8`, now run for every note)
+  leaves the step's arp locks past the list's stock entries (the pool allocates
+  202); the note set gets a per-track shadow sound, in its argument and in d2 (the
+  caller files d2 in `0x4058e8d8`, where the ISR reads SPEED and N.LEN).
+- **Trigless:** the lock apply (`0x400db092`) has two callers, one a per-track
+  loop through a register; its entry is hooked, and a list the note hook did not
+  just see moves the running arp (`0x405984a8 + track*40 + 32`) onto the shadow.
+  A lock trig's step has bit 0 set too (`7801` vs a note's `0381`), so "no note"
+  is told by the note set not having run.
+- **Bugs met on the way, each a hardware report:** a getter returning `move.b`
+  over pointer bits (every lock 0 = OFF); the pattern save converting slot -> id
+  inline (locks stored as id 0); `moveq #-127` widening the id bound while the
+  next `move.b #15` kept its upper bytes (free records loaded as live: no lock of
+  any kind could be recorded); N.LEN/SPEED read through a table the argument swap
+  missed; the sound byte table off by one around the step mask.
+
+**Open:** removing a trig leaves its arp locks; whole page / track copy
+unverified; the mutes and the "global mute silences every arp trig" report to
+retest; the emulator cannot select a pattern (the load path is hardware-only);
+the core cave `0x402dfa1c` is the boot screen's too.
+
+### Status, 2026-09-19 (later): clear, copy, paste; a mod that combines
+
+- **Clear:** placing a trig clears its step's locks (`0x40054676` calls the
+  step-lock clear `0x4003d14e`; removing a trig does not clear anything), so
+  the arp locks are cleared at the same entry. The pastes clear the same way.
+- **Copy inside a pattern** (`0x40050cce`, `0x40051158`) matches records by
+  track with the tag cleared. **Page pastes** (`0x40052634`, `0x40053246`)
+  write an arp record of the clipboard's track into the destination through
+  `ext_put` (clipboard records at +1705, the page's values at fp-20 / d6).
+- **Boot screen:** the core cave moved past its 366 B (`0x402dfb8c`); the mod
+  `arpplocks` (`dnfw mods`) combines with bootscreen, lfowaves, midiarp and
+  moddest with no shared byte; bootscreen + arpplocks booted under the
+  emulator (spin intro, UI, no faults).
+- Emulator limits met: a second trig placement and copy/paste could not be
+  driven, so the clear and paste paths wait for the device.
