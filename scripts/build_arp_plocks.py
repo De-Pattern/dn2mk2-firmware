@@ -49,31 +49,41 @@ and run the stock recount so the trig blinks; UP/DOWN on an arp step locks the
 mask. The draw's getters go to `disp_*`: the first held step's lock if it has
 one, shown inverted for the four top values. No trig held: all stock.
 
-## Clear, copy, paste
+## Clear, copy, paste, undo
+
+Every path below was driven through the UI under the emulator (hold / push +
+turn / key combinations, `--panel-dwell 2` so a tap is a tap) and checked on
+the screen, each against a control; `scripts/emu_arp_plocks.py` calls the
+playback, load and save routines directly:
 
 - Placing a trig clears its step's locks (`0x40054676` -> `0x4003d14e`), as do
   the pastes before they write; `clear_hook` clears the step's arp locks there
   too, so a trig removed and placed again starts clean.
-- Copying steps inside a pattern matches records by track (`0x40050cce`,
-  `0x40051158`): the tag is cleared there, so arp values move with their steps.
-- The two page pastes read the clipboard's records (`0x40052634`,
-  `0x40053246`); an arp record of the copied track is written into the
-  destination page through `ext_put` and then skipped by the stock loop.
+- Shift (FUNC + LEFT / RIGHT, `0x40051158`) and page autocopy on lengthening
+  (`0x40050cce`) match records by track: the tag is cleared there.
+- The pastes read the clipboard's records: page (`0x40053246`), track
+  (`0x4005389c`), and their UNDO PASTE paths (`0x40052634`, `0x40052948`); an arp
+  record of the copied track goes into the destination through `paste_core`.
+- Trig copy / paste keeps a clipboard of slot / value pairs only: `copy_hook`
+  (`0x40053f48`) saves each copied trig's arp locks by entry number in RAM
+  (`0x467c4920`), `paste_hook` (`0x40055440`) writes them onto the destination.
 
 ## Caves, and the other mods
 
-`0x40295698` (lookups), `0x40295a30` (pastes), `0x402cf560` (menu, past LFO
-Waves' stub), and `0x402dfb8c` (core, past the boot screen's 366 B). The default
-build is `dnfw mods` `arpplocks` (`scripts/gen_arpplocks_code.py`) and combines
+`0x40295698` (lookups), `0x40295a30` (paste core), `0x402d0874` (page pastes,
+past midiarp's code), `0x4028ea04` / `0x4028d194` (trig copy / paste: clean by
+the cave scan, and watched for runtime writes under the emulator: none),
+`0x402cf560` (menu, past LFO Waves' stub), `0x402dfb8c` (core, past the boot
+screen's 366 B). The default build is `dnfw mods` `arpplocks` and combines
 byte-disjoint with bootscreen, lfowaves, midiarp and moddest. `--all` puts the
 mute code into the boot screen's own bytes (`0x402dfa1c`): not combinable.
 
 ## Limits
 
-- The clear and paste paths are verified by call path and code; the emulator
-  cannot drive a second trig placement or a paste, so they wait for the device.
-- Copying a whole track to another track, if it has its own routine, is not
-  covered.
+- The sequencer does not play under the emulator, so what the arp does with a
+  lock is checked through the routines' outputs, not by ear.
+- A pattern switch there does not reach the pattern load; the load and save are
+  checked by calling them directly.
 """
 
 from __future__ import annotations
@@ -188,6 +198,10 @@ CAVE_LOOK = (0x40295698, 203)          # dnfw cave scan: clean, no code referenc
 CAVE_CORE = (0x402DFB8C, 528)          # clean run 0x402dfa1c past the boot screen's 366 B
 CAVE_UI = (0x402CF560, 844)            # LFO Waves' run past its stub (ends 0x402cf55a)
 CAVE_MASK = (0x402DFA1C, 366)          # --all only: the boot screen's code (not combinable)
+CAVE_PASTE = (0x402D0874, 112)         # clean run 0x402d0664 past midiarp's 526 B
+CAVE_TCOPY = (0x4028EA02 + 2, 168)     # dnfw cave scan: clean (both checks); runtime-watched
+CAVE_TPASTE = (0x4028D192 + 2, 136)    # likewise
+TRIG_CLIP, TRIG_CLIP_MAX, TRIG_CLIP_STRIDE = 0x467C4920, 64, 28  # RAM: copied trigs' arp locks
 CAVE_EDIT = (0x40295A30, 200)          # dnfw cave scan: clean, no code reference
 
 LOOK = f"""
@@ -838,72 +852,224 @@ clear_hook:                             | +4 model, +8 track, +12 step
 
 """
 
+PASTE_CORE = f"""
+| The pastes' record loops, at the clipboard record's track byte: an arp record
+| of the copied track is written into the destination through ext_put, then fails
+| the stock compare (whose index lookup would take k for a stock slot).
+| paste_core(header, values, table, first step, count, destination track) -> d0:
+| the record's track byte, or -2 when it was copied. Keeps d1-d7 / a0-a6.
+paste_core:
+    lea     %sp@(-28),%sp
+    moveml  %d1-%d4/%a0-%a1/%a4,%sp@    | args from +32; a1 is the pastes' records base
+    movea.l %sp@(32),%a1
+    mvs.b   %a1@(1),%d0
+    btst    #5,%d0
+    beq     8f
+    movea.l %fp@(-16),%a4               | the clipboard
+    adda.l  #96668,%a4                  | its track
+    andi.l  #0x1f,%d0
+    cmp.l   %a4@,%d0
+    bne     8f
+    moveq   #0,%d4
+    move.b  %a1@,%d4                    | k
+    moveq   #{EXT_COUNT},%d0
+    cmp.l   %d0,%d4
+    bcc     8f
+    lsl.l   #8,%d4
+    move.l  %sp@(52),%d1
+    ori.l   #{EXT_TAG},%d1
+    or.l    %d4,%d1                     | the destination header
+    movea.l %sp@(36),%a4                | the values
+    movea.l %sp@(40),%a0                | the table
+    moveq   #0,%d4
+1:  cmp.l   %sp@(48),%d4
+    bge.s   7f
+    move.l  %d4,%d0
+    add.l   %d0,%d0
+    mvz.w   %a4@(2,%d0:l),%d0
+    cmpi.l  #0xffff,%d0
+    beq.s   2f
+    move.l  %sp@(44),%d2
+    add.l   %d4,%d2
+    jsr     @ext_put@
+2:  addq.l  #1,%d4
+    bra.s   1b
+7:  moveq   #-2,%d0
+    bra.s   6f
+8:  movea.l %sp@(32),%a1
+    mvs.b   %a1@(1),%d0
+6:  moveml  %sp@,%d1-%d4/%a0-%a1/%a4
+    lea     %sp@(28),%sp
+    rts
+
+| Track pastes 0x4005389c / 0x40052948: a3 + a0 the record and its 128 values,
+| d2 the table; the result in d5 / d4.
+paste_d:
+    bsr.s   track_paste
+    move.l  %d0,%d4
+    bra.s   1f
+paste_c:
+    bsr.s   track_paste
+    move.l  %d0,%d5
+1:  move.l  %sp@+,%d0
+    move.l  #96668,%d1
+    rts
+track_paste:                            | -> d0 the result, the caller's d0 on the stack
+    move.l  %sp@,%d1
+    move.l  %d0,%sp@                    | the stock loop uses d0 (the slot) after
+    move.l  %d1,%sp@-
+    move.l  %a2@({CTX_TRACK}),%sp@-
+    move.l  #128,%sp@-
+    clr.l   %sp@-
+    move.l  %d2,%sp@-
+    pea     %a3@(0,%a0:l)
+    pea     %a3@(0,%a0:l)
+    bsr     paste_core
+    lea     %sp@(24),%sp
+    rts
+"""
 EDIT = f"""
-| The two page pastes' record loops (0x40052634, 0x40053246), at the clipboard
-| record's track byte: an arp record of the copied track has its sixteen values
-| written into the destination page through ext_put, then fails the stock
-| compare (whose index lookup would take k for a stock slot).
+| Page pastes 0x40052634 / 0x40053246: a1 + d0 the record, the page's values at
+| fp-20 + d0 / d6 + d0, a3 the table, d3 the page's first step.
 paste_a:
-    mvs.b   %a1@(1,%d0:l),%d1
-    movea.l %fp@(-20),%a0               | the copied page's values
-    bsr.s   paste_ext
+    move.l  %fp@(-20),%d1
+    bsr.s   page_paste
     move.l  %d1,%d7
     move.l  #96668,%d1
     rts
 paste_b:
-    mvs.b   %a1@(1,%d0:l),%d1
-    movea.l %d6,%a0
-    bsr.s   paste_ext
+    move.l  %d6,%d1
+    bsr.s   page_paste
     move.l  %d1,%d5
     move.l  #96668,%d1
     rts
-paste_ext:                              | d1 track byte, a1 + d0 the record, a0 values,
-    btst    #5,%d1                      | a3 the table, d3 the page, a2 the context
-    beq.s   9f
-    lea     %sp@(-24),%sp
-    moveml  %d0/%d2-%d4/%a1/%a4,%sp@
-    movea.l %fp@(-16),%a4
-    adda.l  #96668,%a4
-    move.l  %d1,%d2
-    andi.l  #0x1f,%d2
-    cmp.l   %a4@,%d2
-    bne.s   8f                          | another track's
-    moveq   #0,%d4
-    move.b  %a1@(0,%d0:l),%d4           | k
-    moveq   #{EXT_COUNT},%d2
-    cmp.l   %d2,%d4
-    bcc.s   8f
-    lsl.l   #8,%d4
-    move.l  %a2@({CTX_TRACK}),%d1
-    ori.l   #{EXT_TAG},%d1
-    or.l    %d4,%d1                     | the destination header
-    lea     %a0@(0,%d0:l),%a4           | the record's copied values
-    movea.l %a3,%a0
-    moveq   #0,%d4
-1:  mvz.w   %a4@(2,%d4:l),%d0
-    cmpi.l  #0xffff,%d0
-    beq.s   2f
-    move.l  %d4,%d2
-    lsr.l   #1,%d2
-    add.l   %d3,%d2
-    jsr     @ext_put@
-2:  addq.l  #2,%d4
-    moveq   #32,%d2
-    cmp.l   %d2,%d4
-    bne.s   1b
-8:  moveml  %sp@,%d0/%d2-%d4/%a1/%a4
+page_paste:                             | d1 the values base -> d1 the result
+    move.l  %d0,%sp@-
+    move.l  %a2@({CTX_TRACK}),%sp@-
+    pea     16
+    move.l  %d3,%sp@-
+    move.l  %a3,%sp@-
+    add.l   %d0,%d1
+    move.l  %d1,%sp@-
+    pea     %a1@(0,%d0:l)
+    jsr     @paste_core@
     lea     %sp@(24),%sp
-    moveq   #-2,%d1                     | fails the compare
-9:  rts
+    move.l  %d0,%d1
+    move.l  %sp@+,%d0
+    rts
 """
 EDIT_LABELS = ("paste_a", "paste_b")
+
+TRIG_COPY = f"""
+| Trig copy (0x40053f48, after the source step's stock locks are gathered and
+| before its clipboard entry is appended): the step's arp locks saved by entry
+| number, {TRIG_CLIP_MAX} at most, at {TRIG_CLIP:#010x} ({TRIG_CLIP_STRIDE} B each: a mask, a
+| byte per k). Replaces `move.l a2@,-(sp); move.l a3@(60),-(sp)`.
+copy_hook:
+    lea     %sp@(-28),%sp
+    moveml  %d0-%d4/%a1/%a4,%sp@
+    movea.l %fp@(-92),%a0               | the clipboard's entry vector
+    move.l  %a0@(8),%d0
+    sub.l   %a0@(4),%d0
+    moveq   #72,%d1
+    divu.l  %d1,%d0                     | this entry's number
+    moveq   #{TRIG_CLIP_MAX},%d1
+    cmp.l   %d1,%d0
+    bcc.s   9f
+    muls.w  #{TRIG_CLIP_STRIDE},%d0
+    addi.l  #{TRIG_CLIP:#010x},%d0
+    movea.l %d0,%a4
+    clr.l   %a4@
+    movea.l %a3@({CTX_MODEL}),%a0       | a3 the context: its lock table
+    move.l  %a0,%sp@-
+    movea.l %a0@,%a1
+    movea.l %a1@(40),%a1
+    jsr     %a1@
+    addq.l  #4,%sp
+    movea.l %d0,%a0
+    move.l  %a2@,%d2                    | the step
+    moveq   #0,%d3
+1:  move.l  %d3,%d1
+    lsl.l   #8,%d1
+    or.l    %a3@({CTX_TRACK}),%d1
+    ori.l   #{EXT_TAG},%d1
+    jsr     @ext_get@
+    tst.l   %d0
+    bmi.s   2f
+    move.b  %d0,%a4@(4,%d3:l)
+    move.l  %a4@,%d0
+    bset    %d3,%d0
+    move.l  %d0,%a4@
+2:  addq.l  #1,%d3
+    moveq   #{EXT_COUNT},%d0
+    cmp.l   %d0,%d3
+    blt.s   1b
+9:  moveml  %sp@,%d0-%d4/%a1/%a4
+    lea     %sp@(28),%sp
+    movea.l %sp@+,%a0                   | the stock pushes, under the return
+    move.l  %a2@,%sp@-
+    move.l  %a3@({CTX_TRACK}),%sp@-
+    jmp     %a0@
+"""
+TRIG_PASTE = f"""
+| Trig paste (0x40055440, after the destination step is cleared): entry a3's saved
+| arp locks onto its step, then the recount. Replaces `mvz.b a3@(4),%d0;
+| lea 0x40054690,%a4`.
+paste_hook:
+    lea     %sp@(-28),%sp
+    moveml  %d0-%d4/%a0/%a4,%sp@
+    movea.l %fp@(-92),%a0
+    move.l  %a3,%d0
+    sub.l   %a0@(4),%d0
+    moveq   #72,%d1
+    divu.l  %d1,%d0
+    moveq   #{TRIG_CLIP_MAX},%d1
+    cmp.l   %d1,%d0
+    bcc.s   9f
+    muls.w  #{TRIG_CLIP_STRIDE},%d0
+    addi.l  #{TRIG_CLIP:#010x},%d0
+    movea.l %d0,%a4
+    move.l  %a4@,%d4                    | the mask
+    beq.s   9f
+    movea.l %a2@({CTX_MODEL}),%a0       | a2 the context
+    move.l  %a0,%sp@-
+    movea.l %a0@,%a1
+    movea.l %a1@(40),%a1
+    jsr     %a1@
+    addq.l  #4,%sp
+    movea.l %d0,%a0
+    move.l  %a3@,%d2                    | the destination step
+    moveq   #0,%d3
+1:  btst    %d3,%d4
+    beq.s   2f
+    move.l  %d3,%d1
+    lsl.l   #8,%d1
+    or.l    %a2@({CTX_TRACK}),%d1
+    ori.l   #{EXT_TAG},%d1
+    moveq   #0,%d0
+    move.b  %a4@(4,%d3:l),%d0
+    jsr     @ext_put@
+2:  addq.l  #1,%d3
+    moveq   #{EXT_COUNT},%d0
+    cmp.l   %d0,%d3
+    blt.s   1b
+    jsr     @recount@                   | step d2 of context a2
+9:  moveml  %sp@,%d0-%d4/%a0/%a4
+    lea     %sp@(28),%sp
+    mvz.b   %a3@(4),%d0
+    lea     0x40054690,%a4
+    rts
+"""
 
 CAVES = ((CAVE_LOOK, lambda: LOOK, LOOK_LABELS),
          (CAVE_CORE, lambda: CORE, CORE_LABELS),
          (CAVE_UI, lambda: ui_source() + UI_HELPERS + CLEAR_SRC,
           UI_LABELS + ("clear_hook", "disp_mode", "disp_rng", "disp_spd",
                        "disp_nlen", "disp_len", "disp_off", "held_ctx", "next_held", "ctx_table", "recount")),
-         (CAVE_EDIT, lambda: EDIT, EDIT_LABELS)) + (
+         (CAVE_EDIT, lambda: PASTE_CORE, ("paste_core", "paste_c", "paste_d")),
+         (CAVE_PASTE, lambda: EDIT, EDIT_LABELS),
+         (CAVE_TCOPY, lambda: TRIG_COPY, ("copy_hook",)),
+         (CAVE_TPASTE, lambda: TRIG_PASTE, ("paste_hook",))) + (
         ((CAVE_MASK, lambda: UI_MASK + MASK_CORE, ("ui_mask", "disp_mask")),) if FULL else ())
 
 # (va, stock bytes, how, label) -- replaced by jmp / jsr / lea to the label.
@@ -920,6 +1086,10 @@ HOOKS = [
     (0x40051158, bytes.fromhex("71358801b0aa003c"), "jsr", "copy_cmp2"),
     (0x40052634, bytes.fromhex("7f310801223c0001799c"), "jsr", "paste_a"),
     (0x40053246, bytes.fromhex("7b310801223c0001799c"), "jsr", "paste_b"),
+    (0x4005389C, bytes.fromhex("7b338801223c0001799c"), "jsr", "paste_c"),
+    (0x40052948, bytes.fromhex("79338801223c0001799c"), "jsr", "paste_d"),
+    (0x40053F48, bytes.fromhex("2f122f2b003c"), "jsr", "copy_hook"),
+    (0x40055440, bytes.fromhex("71ab000449faf24a"), "jsr", "paste_hook"),
 ] + ([(MASK_EDIT, bytes.fromhex("4eb94004bd52"), "jsr", "ui_mask")] if FULL else [])
 HOOKS += [(va, bytes.fromhex("4eb9") + struct.pack(">I", setter), "jsr", label)
           for va, setter, label, _, _ in EDITS]
