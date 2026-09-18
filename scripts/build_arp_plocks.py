@@ -77,6 +77,10 @@ ID_MODE, ID_RNG = 107, 108
 
 ID_TO_SLOT = 0x400DCCC0                 # (table, id) -> slot
 SLOT_TO_ID = 0x400DCCFA                 # (table, slot) -> id
+SLOT_TABLE = 0x401FCF20                 # slot -> id, slots 0..99
+SAVE_REC = 0x400DE75E                   # pattern save: the inline slot -> id, 18 bytes
+SAVE_ONE = 0x400DE8B2                   # one-record save: the same, 18 bytes
+LOAD_MAX = 0x400DE594                   # pattern load: `moveq #106` bounds the id
 NOTE_SET = 0x40029CD4
 NOTE_SET_CALL = 0x40026762
 
@@ -96,7 +100,7 @@ MAX_MODE, MAX_RNG = 4, 7       # the stock setters' clamps
 MENU_MODE_CALL = 0x40018EEE    # ArpSetupMenuView: jsr setMode
 MENU_RNG_CALL = 0x40018FBE     # ... jsr setRng
 
-LABELS = (("load_hook", "save_hook"), ("note_hook",), ("ui_mode", "ui_rng"))
+LABELS = (("load_hook", "save_hook", "save_rec", "save_one"), ("note_hook",), ("ui_mode", "ui_rng"))
 
 
 def cave_sources() -> tuple[str, str, str]:
@@ -140,6 +144,48 @@ save_hook:
     moveq   #16,%d2
     move.l  %sp@(8),%d1
     jmp     {SLOT_TO_ID + 8:#010x}
+
+| The pattern save's own slot -> id, inline in its record loop (0x400de718), which
+| never calls the lookup above. In: d1 slot, d3 track, a0 the stored record, a3 /
+| a4 the stock tables. Out: the id byte written, as the replaced bytes did.
+save_rec:
+    moveq   #16,%d4
+    cmp.l   %d3,%d4
+    bne.s   1f
+    move.l  %a4@(0,%d1:l:4),%d1
+    bra.s   3f
+1:  moveq   #{SLOT_MODE},%d4
+    cmp.l   %d4,%d1
+    bne.s   2f
+    moveq   #{ID_MODE},%d1
+    bra.s   3f
+2:  moveq   #{SLOT_RNG},%d4
+    cmp.l   %d4,%d1
+    bne.s   4f
+    moveq   #{ID_RNG},%d1
+    bra.s   3f
+4:  move.l  %a3@(0,%d1:l:4),%d1
+3:  move.b  %d1,%a0@
+    rts
+
+| The same inline in the one-record save (0x400de86e). In: a1 slot, a0 the stored
+| record; d2 / d3 / a3 are dead there.
+save_one:
+    move.l  %a1,%d2
+    moveq   #{SLOT_MODE},%d3
+    cmp.l   %d3,%d2
+    bne.s   1f
+    moveq   #{ID_MODE},%d2
+    bra.s   3f
+1:  moveq   #{SLOT_RNG},%d3
+    cmp.l   %d3,%d2
+    bne.s   2f
+    moveq   #{ID_RNG},%d2
+    bra.s   3f
+2:  lea     {SLOT_TABLE:#010x},%a3
+    move.b  %a3@(3,%a1:l:4),%d2
+3:  move.b  %d2,%a0@
+    rts
 """
     note = f"""
 | The arp's note set, (track, ..., sound at +32, ...). A note carrying a lock on
@@ -300,6 +346,16 @@ HOOKS = (
     (NOTE_SET_CALL, bytes.fromhex("4eb940029cd4"), "jsr", "note_hook"),
     (MENU_MODE_CALL, bytes.fromhex("4eb94004bea4"), "jsr", "ui_mode"),
     (MENU_RNG_CALL, bytes.fromhex("4eb94004c0da"), "jsr", "ui_rng"),
+    (SAVE_REC, bytes.fromhex("7810 b883 6606 2234 1c00 6004 2233 1c00 1081".replace(" ", "")), "jsr", "save_rec"),
+    # the first 6 bytes are the table load, dropped; the next 8 are kept ahead of the call
+    (SAVE_ONE, bytes.fromhex("47f9401fcf20 2443 45f22a00 d1ca 10b39c03".replace(" ", "")), "jsr", "save_one",
+     bytes.fromhex("244345f22a00d1ca")),
+)
+
+# Plain byte patches: (va, stock, new, why).
+PATCHES = (
+    (LOAD_MAX, bytes.fromhex("786a"), bytes.fromhex(f"78{ID_RNG:02x}"),
+     "pattern load: let ids up to 108 through to the lookup"),
 )
 
 # Read, not written: what the hooks rely on.
@@ -365,12 +421,19 @@ def compose(stock: bytes, log=print) -> dict:
         log(f"  {len(payload)} bytes at {cave:#010x}: " + ", ".join(f"{k} {at[k]:#010x}" for k in labels))
 
     log("part 3 -- the hooks")
-    for va, stock_bytes, kind, label in HOOKS:
+    for va, stock_bytes, kind, label, *keep in HOOKS:
         check(content, va, stock_bytes, f"{kind} -> {label}")
-        new = (bytes.fromhex("4ef9") if kind == "jmp" else bytes.fromhex("4eb9")) + be32(at[label])
+        new = keep[0] if keep else b""
+        new += (bytes.fromhex("4ef9") if kind == "jmp" else bytes.fromhex("4eb9")) + be32(at[label])
         new += bytes.fromhex("4e71") * ((len(stock_bytes) - len(new)) // 2)
         content[va - BASE:va - BASE + len(new)] = new
         log(f"  {va:#010x}  {stock_bytes.hex():<16} -> {new.hex():<16}  {kind} {label}")
+
+    log("part 4 -- byte patches")
+    for va, stock_bytes, new, why in PATCHES:
+        check(content, va, stock_bytes, why)
+        content[va - BASE:va - BASE + len(new)] = new
+        log(f"  {va:#010x}  {stock_bytes.hex()} -> {new.hex()}  {why}")
     return {"content": bytes(content), "caves": caves}
 
 
@@ -378,7 +441,7 @@ def main() -> int:
     firmware = load(read_image(STOCK))
     section = firmware.container.find(MAIN_OS)
     content = compose(section.unpack())["content"]
-    print("part 4 -- repack")
+    print("part 5 -- repack")
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_bytes(fwbuild.build(firmware, {MAIN_OS: compress(section.id, section.dest, content)}))
     print(f"  wrote {OUT} ({OUT.stat().st_size} bytes)")
