@@ -54,7 +54,7 @@ button.primary {
   margin-top: 2rem;
 }
 .bar .status { color: var(--ink-soft); font-size: .88rem; flex: 1 1 14rem; }
-.hidden { display: none; }
+.hidden { display: none !important; }   /* beats .controls and any later display rule */
 .busy { color: var(--accent); }
 
 /* Form rows: a label above its control, laid out in a wrapping grid. */
