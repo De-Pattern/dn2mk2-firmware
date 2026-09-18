@@ -6,9 +6,11 @@
 
 import { $, buildAndOffer, openFirmware, status, wireDrop } from "./shell.js";
 import { replacement } from "../firmware.js";
-import { H, STOCK_TUNNEL, W, apply, imageFromPixels, invert, pixelOf } from "../mods/bootscreen.js";
+import { H, STOCK_TUNNEL, W, apply, asciiFrames, imageFromPixels, invert, pixelOf, spinFrames } from "../mods/bootscreen.js";
+import { GLYPHS } from "../asciiglitch.js";
 
-const state = { firmware: null, filename: "firmware.syx", luma: null, mark: null };
+const state = { firmware: null, filename: "firmware.syx", luma: null, mark: null, ascii: null, lit: null };
+const INTRO_FRAMES = 175;   // measured on 1.11: the intro routine's second argument
 
 /** A binary PGM (P5) -> 8-bit luminance at its own size. */
 function parsePgm(bytes) {
@@ -62,12 +64,13 @@ async function loadPicture(file) {
   return fitToScreen((ctx, x, y, w, h) => ctx.drawImage(bitmap, x, y, w, h), bitmap.width, bitmap.height);
 }
 
-function drawFrame(canvas, image) {
+/** `upright`: an animation frame is stored upside down for the blit (bootscreen.js). */
+function drawFrame(canvas, image, upright = false) {
   const ctx = canvas.getContext("2d");
   const out = ctx.createImageData(W, H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
-      const v = pixelOf(image, x, y) ? 255 : 0;
+      const v = pixelOf(image, x, upright ? H - 1 - y : y) ? 255 : 0;
       out.data.set([v, v, v, 255], 4 * (y * W + x));
     }
   }
@@ -75,22 +78,45 @@ function drawFrame(canvas, image) {
 }
 
 const flashing = () => $("modeFlash").checked;
+const ascii = () => $("modeAscii").checked;
+const spin = () => $("modeSpin").checked;
+/** Either animation drawn ahead of time: frames, played by the same firmware code. */
+const animated = () => ascii() || spin();
 
 function options() {
   const m = Number($("tunnel").value);
-  return {
+  const opts = {
     slow: Number($("slow").value), fast: Number($("fast").value),
     rush: Number($("rush").value), stop: Number($("stop").value),
     tunnel: [STOCK_TUNNEL[0] * m, STOCK_TUNNEL[1] * m],
   };
+  if (animated()) opts.ascii = state.ascii;
+  return opts;
 }
 
 function images() {
+  if (animated()) return [];
   return flashing() ? [state.mark, invert(state.mark)] : [state.mark];
+}
+
+function asciiOptions() {
+  return {
+    ramp: $("ramp").value, glitchChars: $("glitchChars").value,
+    resolve: Number($("resolve").value), idleFrames: 16, seed: Number($("seed").value),
+    glitch: Number($("glitch").value), idle: Number($("idle").value),
+  };
 }
 
 /** One sentence per option, so the numbers read as what the intro will do. */
 function describe() {
+  if (animated()) {
+    $("buildBtn").disabled = !state.firmware || !state.ascii;
+    if (!state.ascii) return "Fix the options above to build.";
+    const [frames, loop] = state.ascii;
+    return (ascii() ? `Resolves over ${loop} frames, then loops ${frames.length - loop} frames of residual glitch`
+                    : `Settles after ${loop} frames, then the swirl turns once every ${frames.length - loop} frames`)
+         + ` for the rest of the intro. Adds ${frames.length} KB of frames.`;
+  }
   const { slow, fast, rush, stop } = options();
   const valid = Number.isInteger(rush) && Number.isInteger(stop) && rush >= 0 && rush <= stop;
   $("buildBtn").disabled = !valid || !state.firmware;
@@ -100,16 +126,63 @@ function describe() {
        + `and holds the mark from frame ${stop}.`;
 }
 
+function rebuildSpin() {
+  for (const id of ["turns", "zoom", "smear"]) $(`${id}Val`).textContent = `(${Number($(id).value).toFixed(2)})`;
+  try {
+    state.ascii = spinFrames(state.lit, {
+      resolve: Number($("spinResolve").value), idleFrames: 48, stars: Number($("stars").value),
+      smear: Number($("smear").value), spin: Number($("turns").value), zoom: Number($("zoom").value),
+      seed: Number($("spinSeed").value),
+    });
+    $("spinErr").textContent = "";
+  } catch (error) {
+    state.ascii = null;
+    $("spinErr").textContent = String(error.message ?? error);
+  }
+}
+
+function rebuildAscii() {
+  $("glitchVal").textContent = `(${Number($("glitch").value).toFixed(2)})`;
+  $("idleVal").textContent = `(${Number($("idle").value).toFixed(2)})`;
+  try {
+    state.ascii = asciiFrames(state.lit, asciiOptions());
+    $("asciiErr").textContent = "";
+  } catch (error) {
+    state.ascii = null;
+    $("asciiErr").textContent = String(error.message ?? error);
+  }
+}
+
+/** Play the frames as the intro will: 0..last, then loop, restarting after the intro. */
+let tick = 0;
+function play() {
+  if (animated() && state.ascii) {
+    const [frames, loop] = state.ascii;
+    const f = tick % INTRO_FRAMES;
+    const k = f < frames.length ? f : loop + ((f - frames.length) % (frames.length - loop || 1));
+    drawFrame($("frameB"), frames[Math.min(k, frames.length - 1)], true);
+    tick += 1;
+  }
+  setTimeout(() => requestAnimationFrame(play), 1000 / 30);
+}
+
 function render() {
   if (!state.luma) return;
   const threshold = Number($("threshold").value);
   const flip = $("invertMark").value === "yes";
   $("thresholdVal").textContent = `(${threshold})`;
-  state.mark = imageFromPixels((x, y) => (state.luma[y * W + x] >= threshold) !== flip);
+  state.lit = (x, y) => (state.luma[y * W + x] >= threshold) !== flip;
+  state.mark = imageFromPixels(state.lit);
   drawFrame($("frameA"), state.mark);
-  drawFrame($("frameB"), invert(state.mark));
-  $("screenB").classList.toggle("hidden", !flashing());
+  if (ascii()) rebuildAscii();
+  else if (spin()) rebuildSpin();
+  else drawFrame($("frameB"), invert(state.mark));
+  $("screenB").classList.toggle("hidden", !flashing() && !animated());
+  $("capB").textContent = animated() ? "As it plays (about 30 frames a second)" : "Alternates with";
   $("timing").classList.toggle("hidden", !flashing());
+  $("asciiControls").classList.toggle("hidden", !ascii());
+  $("spinControls").classList.toggle("hidden", !spin());
+  $("tunnelStep").classList.toggle("hidden", animated());
   $("timeline").textContent = describe();
 }
 
@@ -134,7 +207,7 @@ async function buildImage() {
   await buildAndOffer(
     state.firmware,
     new Map([[3, replacement(state.firmware, 3, content)]]),
-    { filename: state.filename, suffix: "bootscreen", note: notes[0] });
+    { filename: state.filename, suffix: ascii() ? "bootscreen-ascii" : spin() ? "bootscreen-spin" : "bootscreen", note: notes[0] });
 }
 
 function open(file) {
@@ -166,7 +239,9 @@ $("picture").addEventListener("change", async (e) => {
     status(`Could not read ${file.name}: ${error.message ?? error}`);
   }
 });
-for (const id of ["threshold", "invertMark", "slow", "fast", "rush", "stop", "tunnel", "modeStatic", "modeFlash"]) {
+for (const id of ["threshold", "invertMark", "slow", "fast", "rush", "stop", "tunnel", "modeStatic", "modeFlash",
+                  "modeAscii", "ramp", "glitchChars", "glitch", "idle", "resolve", "seed",
+                  "modeSpin", "turns", "zoom", "smear", "stars", "spinResolve", "spinSeed"]) {
   $(id).addEventListener("input", render);
 }
 wireDrop($("drop"), open);
@@ -176,4 +251,6 @@ $("syx").addEventListener("change", (e) => {
 $("buildBtn").addEventListener("click", buildImage);
 $("resetBtn").addEventListener("click", () => location.reload());
 
+$("glyphList").textContent = GLYPHS;
 usePreset();
+play();

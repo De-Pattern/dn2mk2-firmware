@@ -100,6 +100,52 @@ def boot_chunk(images: list[bytes], slow: int, fast: int, rush: int, stop: int) 
     return struct.pack(">5I", len(images), slow, fast, rush, stop) + b"".join(images)
 
 
+def anim_chunk(frames: list[bytes], loop_start: int) -> bytes:
+    """The ANIM chunk -- any animation drawn ahead of time: u32 frames, u32 loop start, then each frame as a whole
+    1,024-byte source bitmap. Past the last frame the intro loops from
+    `loop_start`, so the settled picture keeps its residual glitch."""
+    if not frames:
+        raise ModError("an ASCII animation needs at least one frame")
+    for img in frames:
+        if len(img) != IMAGE_BYTES:
+            raise ModError(f"a frame is {len(img)} bytes, not {IMAGE_BYTES}")
+    if not 0 <= loop_start < len(frames):
+        raise ModError(f"loop start {loop_start} is not a frame of {len(frames)}")
+    return struct.pack(">2I", len(frames), loop_start) + b"".join(frames)
+
+
+def ascii_frames(lit, **options) -> tuple[list[bytes], int]:
+    """The mark as a glitching ASCII animation: (frames as images, loop start).
+    `options` are `dnfw.asciiglitch.frames`'s."""
+    from .. import asciiglitch
+    try:
+        grids = asciiglitch.frames(lit, **options)
+    except asciiglitch.GlitchError as exc:
+        raise ModError(str(exc)) from None
+    images = _images(grids, asciiglitch.W)
+    resolve = options.get("resolve", 40)
+    return images, min(resolve, len(images) - 1)
+
+
+def _images(grids, W: int) -> list[bytes]:
+    """Frames -> images for the ANIM chunk, stored upside down: the plain blit
+    that shows them (`0x401157fc`) turns the source over vertically, where the
+    tunnel's sampler does not. Measured under the emulator, which runs the
+    firmware's own blit, 2026-09-18."""
+    return [image_from_pixels({(i % W, H - 1 - i // W) for i, v in enumerate(g) if v}) for g in grids]
+
+
+def spin_frames(lit, **options) -> tuple[list[bytes], int]:
+    """The mark as a 1966-style spinning transition: (frames as images, loop start).
+    `options` are `dnfw.batspin.frames`'s."""
+    from .. import batspin
+    try:
+        grids = batspin.frames(lit, **options)
+    except batspin.SpinError as exc:
+        raise ModError(str(exc)) from None
+    return _images(grids, batspin.W), options.get("resolve", 120)
+
+
 def area(chunks: list[tuple[bytes, bytes]]) -> bytes:
     """The shared appended area: 'DNFW', total length, a directory, the chunks."""
     head = 12 + 12 * len(chunks)
@@ -131,7 +177,8 @@ def extents(firmware, area_length: int = 0) -> list[Extent]:
 
 def apply(firmware, images: list[bytes], slow: int = 4, fast: int = 3,
           rush: int = 48, stop: int = 72,
-          tunnel: tuple[float, float] = STOCK_TUNNEL) -> Result:
+          tunnel: tuple[float, float] = STOCK_TUNNEL,
+          ascii: tuple[list[bytes], int] | None = None) -> Result:
     section = firmware.container.find(SECTION)
     if section is None:
         raise ModError("image has no MAIN OS section")
@@ -156,7 +203,14 @@ def apply(firmware, images: list[bytes], slow: int = 4, fast: int = 3,
         if have[2:] != struct.pack(">f", stock_scale):
             raise ModError(f"tunnel scale at 0x{va:08x} is not stock ({have.hex()})")
 
-    blob = area([(SPEC["boot_chunk"].encode(), boot_chunk(images, slow, fast, rush, stop))])
+    chunks = []
+    if ascii is not None:
+        chunks.append((SPEC["anim_chunk"].encode(), anim_chunk(*ascii)))
+    if images:
+        chunks.append((SPEC["boot_chunk"].encode(), boot_chunk(images, slow, fast, rush, stop)))
+    if not chunks:
+        raise ModError("give a mark (images) or an ASCII animation")
+    blob = area(chunks)
 
     content[cave:cave + len(code)] = code
     jsr = b"\x4e\xb9" + struct.pack(">I", SPEC["boot"]) + b"\x4e\x71"
@@ -169,8 +223,9 @@ def apply(firmware, images: list[bytes], slow: int = 4, fast: int = 3,
         content[va - BASE + 2:va - BASE + 6] = struct.pack(">f", scale)
     content += blob + bytes(-len(blob) % 4)
 
-    notes = [f"{len(images)} image(s), " + ("static" if len(images) == 1 else
-             f"flashing every 2^{slow} then 2^{fast} frames from {rush}, held from {stop}"),
+    notes = [(f"animation: {len(ascii[0])} frames, looping from {ascii[1]}" if ascii is not None else
+              f"{len(images)} image(s), " + ("static" if len(images) == 1 else
+              f"flashing every 2^{slow} then 2^{fast} frames from {rush}, held from {stop}")),
              f"appended data area {len(blob):,} B; MAIN OS {len(content):,} B",
              f"tunnel scale {tunnel[0]:g} x {tunnel[1]:g}" + (" (stock)" if tuple(tunnel) == STOCK_TUNNEL else "")]
     return Result({SECTION: bytes(content)}, extents(firmware, len(blob)), notes)

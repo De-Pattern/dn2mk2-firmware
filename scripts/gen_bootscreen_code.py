@@ -36,6 +36,23 @@ hook, the area is a directory of chunks:
 One image means a static mark; two means the flashing build-up. Every frame, the
 stamp copies the chosen image over the intro's source bitmap, before the copy
 routine displaces it through the tunnel.
+
+## The ANIM chunk -- an animation drawn ahead of time
+
+    +0   u32 frames
+    +4   u32 loop start   -- past the last frame, play from here again
+    +8   frames x 1024 bytes, each a whole 128 x 64 bitmap in the source's layout
+
+Used by the ASCII glitch (`dnfw.asciiglitch`) and the 1966 spin (`dnfw.batspin`),
+and by anything else that can be drawn at build time. When present it wins over
+BOOT: the stamp runs the stock intro routine whole (so the source bitmap exists
+and the frame counter advances exactly as stock), then copies frame `n` into the
+source and blits it plainly over the panel -- the intro's own copy for frames
+0-4, `0x40114d94` then `0x401157fc`. The tunnel's output is simply overwritten.
+The routine is called through `0x4028c154` and nothing reads its result.
+
+On 1.11 the intro routine's second argument is the intro's length: 175 frames
+under the emulator from `boot400M`.
 """
 
 from __future__ import annotations
@@ -65,6 +82,10 @@ CAVE = 0x402DFA1C
 CAVE_CAP = 896
 MAGIC = b"DNFW"
 BOOT = b"BOOT"
+ANIM = b"ANIM"
+SOURCE_OBJ = 0x42C4567C                      # the intro's source Bitmap
+CLEAR_BITMAP = 0x40114D94                    # (bitmap, 0, 1): what the intro calls first
+BLIT = 0x401157FC                            # (dst, src, 0, 0, 0): its plain copy, frames 0-4
 WORDS = 256
 
 SOURCE = f"""
@@ -84,18 +105,20 @@ boot:
 2:  jsr     {CLEAR_VA:#010x}
     rts
 
-| ---- stamp: copy the chosen BOOT image over the intro's source bitmap ----
+| ---- stamp: an ANIM chunk plays frames; else a BOOT image goes over the source ----
 stamp:
     move.l  {RUNTIME_VA:#010x},%d0
     cmpi.l  #{int.from_bytes(MAGIC, 'big'):#010x},%d0
     bne     9f                          | no appended area: stock intro
-    move.l  %d2,%sp@-
-    move.l  %d3,%sp@-
+    lea     %sp@(-12),%sp
+    moveml  %d2-%d4,%sp@                | the intro's args now at 16, 20, 24
     lea     {RUNTIME_VA + 8:#010x},%a1
     move.l  %a1@+,%d1                   | chunk count
 1:  subq.l  #1,%d1
-    bmi     8f                          | no BOOT chunk: stock intro
+    bmi     8f                          | neither chunk: stock intro
     move.l  %a1@,%d0
+    cmpi.l  #{int.from_bytes(ANIM, 'big'):#010x},%d0
+    beq     20f
     cmpi.l  #{int.from_bytes(BOOT, 'big'):#010x},%d0
     beq.s   2f
     lea     %a1@(12),%a1
@@ -107,7 +130,7 @@ stamp:
     beq.s   8f                          | bitmap not built yet
     movea.l %d0,%a0
     move.l  %a1@,%d2                    | image count
-    move.l  %sp@(12),%d0                | the intro's frame counter, two pushes deep
+    move.l  %sp@(16),%d0                | the intro's frame counter
     cmpi.l  #2,%d2
     bcs.s   5f                          | one image: static
     cmp.l   %a1@(16),%d0
@@ -126,11 +149,60 @@ stamp:
 7:  move.l  %a1@+,%a0@+
     subq.l  #1,%d1
     bne.s   7b
-8:  move.l  %sp@+,%d3
-    move.l  %sp@+,%d2
+8:  moveml  %sp@,%d2-%d4
+    lea     %sp@(12),%sp
 9:  lea     %sp@(-60),%sp
     moveml  %d2-%d7/%a2-%fp,%sp@
     jmp     {RESUME_VA:#010x}
+
+| ANIM: run the stock routine whole (it builds the source bitmap and draws the
+| tunnel), then put this frame in the source and blit it plainly over the panel,
+| as stock does for its first five frames. Past the last frame, loop from
+| `loop start`.
+20: move.l  %a1@(4),%d4
+    addi.l  #{RUNTIME_VA:#010x},%d4     | the chunk, kept across the call
+    move.l  %sp@(24),%sp@-              | panel
+    move.l  %sp@(24),%sp@-              | second argument
+    move.l  %sp@(24),%sp@-              | frame counter
+    bsr     9b                          | the stock intro routine
+    lea     %sp@(12),%sp
+    move.l  {SOURCE_DATA_PTR:#010x},%d0
+    beq     30f                         | bitmap not built: leave stock's frame
+    movea.l %d0,%a0
+    movea.l %d4,%a1
+    move.l  %sp@(16),%d0                | frame counter
+    move.l  %a1@,%d1                    | frames
+    cmp.l   %d1,%d0
+    bcs.s   21f
+    move.l  %a1@(4),%d3                 | loop start
+    move.l  %d1,%d2
+    sub.l   %d3,%d2                     | loop length, at least 1
+    sub.l   %d3,%d0
+    remul   %d2,%d1:%d0                 | d1 = d0 mod d2
+    add.l   %d3,%d1
+    move.l  %d1,%d0
+21: moveq   #10,%d1
+    lsl.l   %d1,%d0                     | x 1024
+    lea     %a1@(8,%d0:l),%a1
+    move.l  #{WORDS},%d1
+22: move.l  %a1@+,%a0@+
+    subq.l  #1,%d1
+    bne.s   22b
+    pea     1
+    clr.l   %sp@-
+    move.l  %sp@(32),%sp@-              | panel
+    jsr     {CLEAR_BITMAP:#010x}
+    lea     %sp@(12),%sp
+    clr.l   %sp@-
+    clr.l   %sp@-
+    clr.l   %sp@-
+    pea     {SOURCE_OBJ:#010x}
+    move.l  %sp@(40),%sp@-              | panel
+    jsr     {BLIT:#010x}
+    lea     %sp@(20),%sp
+30: moveml  %sp@,%d2-%d4
+    lea     %sp@(12),%sp
+    rts
 """
 
 LABELS = ("boot", "stamp")
@@ -150,7 +222,7 @@ def generate() -> dict:
         "calls_va": CALLS_VA, "calls_stock": CALLS_STOCK,
         "intro_va": INTRO_VA, "intro_stock": INTRO_STOCK,
         "area_va": AREA_VA, "runtime_va": RUNTIME_VA,
-        "magic": MAGIC.decode(), "boot_chunk": BOOT.decode(), "words": WORDS,
+        "magic": MAGIC.decode(), "boot_chunk": BOOT.decode(), "anim_chunk": ANIM.decode(), "words": WORDS,
         "tunnel_x_va": 0x400D374E, "tunnel_y_va": 0x400D377E,
     }
 

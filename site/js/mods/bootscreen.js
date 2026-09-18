@@ -20,6 +20,8 @@
  */
 
 import { CODE } from "./bootscreen-code.js";
+import { W as GW, frames as glitchFrames, GlitchError } from "../asciiglitch.js";
+import { frames as spinGrids, SpinError } from "../batspin.js";
 
 export const ID = "bootscreen";
 export const NAME = "Boot screen";
@@ -86,6 +88,46 @@ export function bootChunk(images, { slow, fast, rush, stop }) {
   return cat(be32(images.length), be32(slow), be32(fast), be32(rush), be32(stop), ...images);
 }
 
+/**
+ * The ANIM chunk -- any animation drawn ahead of time: u32 frames, u32 loop start, then each frame as a whole
+ * 1,024-byte source bitmap. Past the last frame the intro loops from `loopStart`.
+ */
+export function animChunk(frames, loopStart) {
+  if (!frames.length) throw new ModError("an ASCII animation needs at least one frame");
+  for (const img of frames) {
+    if (img.length !== IMAGE_BYTES) throw new ModError(`a frame is ${img.length} bytes, not ${IMAGE_BYTES}`);
+  }
+  if (!(loopStart >= 0 && loopStart < frames.length)) {
+    throw new ModError(`loop start ${loopStart} is not a frame of ${frames.length}`);
+  }
+  return cat(be32(frames.length), be32(loopStart), ...frames);
+}
+
+/**
+ * The mark as a glitching ASCII animation -> [frames as images, loop start].
+ * Frames are stored upside down: the plain blit that shows them turns the
+ * source over (see `bootscreen.py`'s `_images`).
+ */
+export function asciiFrames(lit, options = {}) {
+  let grids;
+  try { grids = glitchFrames(lit, options); } catch (e) {
+    if (e instanceof GlitchError) throw new ModError(e.message);
+    throw e;
+  }
+  const images = grids.map((g) => imageFromPixels((x, y) => g[(H - 1 - y) * GW + x] === 1));
+  return [images, Math.min(options.resolve ?? 40, images.length - 1)];
+}
+
+/** The mark as a 1966-style spinning transition -> [frames as images, loop start]. */
+export function spinFrames(lit, options = {}) {
+  let grids;
+  try { grids = spinGrids(lit, options); } catch (e) {
+    if (e instanceof SpinError) throw new ModError(e.message);
+    throw e;
+  }
+  return [grids.map((g) => imageFromPixels((x, y) => g[(H - 1 - y) * GW + x] === 1)), options.resolve ?? 120];
+}
+
 /** The shared appended area: 'DNFW', total length, a directory, the chunks. */
 export function area(chunks) {
   const head = 12 + 12 * chunks.length;
@@ -123,7 +165,7 @@ export function extents(areaLength = 0) {
  * at every site it writes.
  */
 export function apply(firmware, images, {
-  slow = 4, fast = 3, rush = 48, stop = 72, tunnel = STOCK_TUNNEL,
+  slow = 4, fast = 3, rush = 48, stop = 72, tunnel = STOCK_TUNNEL, ascii = null,
 } = {}) {
   const section = firmware.container.find(SECTION);
   if (section === null) throw new ModError("image has no MAIN OS section");
@@ -149,7 +191,11 @@ export function apply(firmware, images, {
     }
   }
 
-  const blob = area([[CODE.boot_chunk, bootChunk(images, { slow, fast, rush, stop })]]);
+  const chunks = [];
+  if (ascii) chunks.push([CODE.anim_chunk, animChunk(...ascii)]);
+  if (images && images.length) chunks.push([CODE.boot_chunk, bootChunk(images, { slow, fast, rush, stop })]);
+  if (!chunks.length) throw new ModError("give a mark (images) or an ASCII animation");
+  const blob = area(chunks);
   const pad = new Uint8Array((4 - (blob.length % 4)) % 4);
   const content = cat(original, blob, pad);
 
@@ -162,7 +208,8 @@ export function apply(firmware, images, {
   }
 
   const notes = [
-    `${images.length} image(s), ` + (images.length === 1 ? "static"
+    ascii ? `animation: ${ascii[0].length} frames, looping from ${ascii[1]}`
+      : `${images.length} image(s), ` + (images.length === 1 ? "static"
       : `flashing every 2^${slow} then 2^${fast} frames from ${rush}, held from ${stop}`),
     `appended data area ${blob.length.toLocaleString()} B; MAIN OS ${content.length.toLocaleString()} B`,
   ];

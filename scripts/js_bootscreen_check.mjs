@@ -4,13 +4,13 @@
  *   PYTHONPATH=src python scripts/py_bootscreen_ref.py STOCK.zip OUT_DIR
  *   node scripts/js_bootscreen_check.mjs --syx STOCK.syx --pgm site/art/chimera.pgm --ref OUT_DIR
  *
- * `OUT_DIR` holds MAIN OS from `dnfw.mods.bootscreen.apply` for the two cases
- * below. Checks: the same section 3 for a static mark with the stock tunnel,
- * and for a flashing pair with a re-scaled tunnel; and each rebuilt image verifies.
+ * `OUT_DIR` holds MAIN OS from `dnfw.mods.bootscreen.apply` for the cases
+ * below -- static, flashing with a re-scaled tunnel, ASCII glitch, spin. Checks:
+ * the same section 3 for each, and each rebuilt image verifies.
  */
 import { readFileSync } from "node:fs";
 import { build, load, replacement, verify } from "../site/js/firmware.js";
-import { apply, imageFromPixels, invert } from "../site/js/mods/bootscreen.js";
+import { apply, asciiFrames, imageFromPixels, invert, spinFrames } from "../site/js/mods/bootscreen.js";
 
 const arg = (n) => { const i = process.argv.indexOf(`--${n}`); return i >= 0 ? process.argv[i + 1] : null; };
 const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
@@ -31,10 +31,13 @@ function readPgm(bytes) {
 }
 
 const firmware = await load(new Uint8Array(readFileSync(arg("syx"))));
-const mark = imageFromPixels(readPgm(new Uint8Array(readFileSync(arg("pgm")))));
+const lit = readPgm(new Uint8Array(readFileSync(arg("pgm"))));
+const mark = imageFromPixels(lit);
 const cases = [
   ["static, stock tunnel", [mark], {}],
   ["flashing, tunnel 96 x 48", [mark, invert(mark)], { slow: 4, fast: 3, rush: 48, stop: 72, tunnel: [96, 48] }],
+  ["ASCII glitch, 32 frames", [], { ascii: asciiFrames(lit, { resolve: 24, idleFrames: 8, seed: 7 }) }],
+  ["spin, 26 frames", [], { ascii: spinFrames(lit, { resolve: 20, idleFrames: 6, seed: 5 }) }],
 ];
 
 const checks = [];

@@ -2796,6 +2796,54 @@ glitch ramp. Both are boot-screen mod options, so they belong in
 
 **Not built.**
 
+### BUILT 2026-09-18: two animations drawn ahead of time, and the intro plays them
+
+The owner asked for DNX's start-up screen (`DNX/web/src/landing/dnxloader.ts`,
+[live](https://noiseandmatter.github.io/DNX/)) on the Digitone, with the glitch and the
+character list the user's to change, and then for a 1966-style spinning transition.
+Both are **frames rendered at build time** and played by one firmware path.
+
+**The firmware path, an `ANIM` chunk** (`scripts/gen_bootscreen_code.py`): `u32
+frames, u32 loop start`, then 1,024-byte bitmaps. When present the stamp runs the
+stock intro routine whole, copies frame `n` into the source bitmap and blits it
+plainly over the panel -- the intro's own copy for its first five frames
+(`0x40114d94` clear, `0x401157fc` blit). The tunnel's output is simply
+overwritten, so the Elektron logo never shows. Past the last frame it loops.
+
+**Measured under the emulator** (`boot400M`, 1.11): the intro routine's arguments
+are the frame counter, **the intro's length, 175 frames**, and the panel
+`0x42c4b6ac`; it is called through `0x4028c154` and its result is unused.
+**The plain blit turns the source upside down** where the tunnel's sampler does
+not -- the first film showed the picture flipped. digikit runs the firmware's own
+blit (it only replaces `setPixel`/`getPixel`), so this is the firmware, and
+ANIM frames are stored bottom-up.
+
+- **ASCII glitch** (`dnfw.asciiglitch`, `site/js/asciiglitch.js`): DNX's loader
+  in one bit -- 32 x 10 cells of our own 3 x 5 font (`font3x5.json`, 69
+  glyphs), scramble that locks cell by cell into the mark, row tearing, sync
+  slices, residual glitch looped. Alpha becomes the chance a glyph is drawn.
+  The user picks both character lists, glitch, residual glitch, frames, seed.
+- **Spin (1966)** (`dnfw.batspin`, `site/js/batspin.js`): the mark spins and
+  zooms back and forth to rest over a star field smeared into arcs by its own
+  angular speed; the loop is one whole turn, so it is seamless.
+
+Both are byte-identical between Python and the browser
+(`scripts/js_asciiglitch_check.mjs`, `js_batspin_check.mjs`,
+`js_bootscreen_check.mjs`), which is why `pow` and `sin` are replaced with
+correctly rounded arithmetic. Filmed with `scripts/film_bootscreen.py`:
+
+![ascii](img/intro-ascii-sequence.png)
+![spin](img/intro-spin-sequence.png)
+
+[ascii gif](img/intro-ascii.gif) · [spin gif](img/intro-spin.gif) ·
+[stock gif](img/intro-stock-film.gif)
+
+**Not yet on hardware.** `bootscreen-ascii_DN2_1.11.syx` and
+`bootscreen-spin_DN2_1.11.syx`. Questions for the flash: is the picture upright
+(the emulator says the blit flips); does the intro run near 30 fps, so that the
+reveal takes about as long as DNX's 5.6 s; does the boot wait for the copy of a
+115-170 KB appended area.
+
 ## 18. P-locking the arpeggiator's parameters
 
 **Raised by the owner 2026-09-17**, after the arp engine was read for §10.
