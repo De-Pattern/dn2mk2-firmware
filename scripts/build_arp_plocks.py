@@ -1,6 +1,7 @@
 """P-locks for the arpeggiator: every ARPEGGIATOR setting, per trig.
 
-    python scripts/build_arp_plocks.py
+    python scripts/build_arp_plocks.py          # MODE, SPEED, RANGE, N.LEN
+    python scripts/build_arp_plocks.py --all    # + LEN, the step offsets, the mutes
 
 Writes `00_Resources/02_Builds/arp-plocks_DN2_1.11.syx`. `docs/ideas-backlog.md`
 section 18 has the history; the design, as of 2026-09-19:
@@ -99,6 +100,7 @@ RECOUNT = 0x4003CE3C                    # (model, track, step): lock count, the 
 RECOUNT_MATCH = 0x4003CE9E              # its `mvs.b rec+1, d0; cmp.l d0, d3`
 SAVE_REC = 0x400DE75E                   # pattern save: inline slot -> id, 18 bytes
 LOAD_MAX = 0x400DE594                   # pattern load: `moveq #106` bounds the id
+LOAD_TRACK_MAX = 0x400DE59E             # pattern load: `move.b #15,%d4`, the track bound
 LOAD_INDEX = 0x400DE5E6                 # pattern load: the index byte, 16 bytes
 
 # Recording, read 2026-09-18 by recording a real p-lock under the emulator.
@@ -683,6 +685,13 @@ recount:
 """
 
 
+# The first release locks the four top values only; --all adds the rest. The
+# storage, playback and load / save paths are the same either way.
+FIRST = {K_MODE, K_RNG, K_SPD, K_NLEN}
+FULL = "--all" in sys.argv
+if not FULL:
+    EDITS = tuple(e for e in EDITS if e[3] in FIRST)
+    DRAWS = tuple(d for d in DRAWS if d[3] in ("disp_mode", "disp_rng", "disp_spd", "disp_nlen"))
 UI_LABELS = tuple(e[2] for e in EDITS) + ("ui_mask",)
 
 CAVES = ((CAVE_LOOK, lambda: LOOK, LOOK_LABELS),
@@ -697,8 +706,7 @@ HOOKS = [
     (RECOUNT_MATCH, bytes.fromhex("71330801b680"), "jsr", "trk_cmp"),
     (BUILD, bytes.fromhex("4fefffe87065"), "jmp", "build_hook"),
     (NOTE_SET_CALL, bytes.fromhex("4eb940029cd4"), "jsr", "note_hook"),
-    (MASK_EDIT, bytes.fromhex("4eb94004bd52"), "jsr", "ui_mask"),
-]
+] + ([(MASK_EDIT, bytes.fromhex("4eb94004bd52"), "jsr", "ui_mask")] if FULL else [])
 HOOKS += [(va, bytes.fromhex("4eb9") + struct.pack(">I", setter), "jsr", label)
           for va, setter, label, _, _ in EDITS]
 HOOKS += [(va, bytes.fromhex({"jsr": "4eb9", "lea_a4": "49f9", "lea_a3": "47f9"}[how])
@@ -709,6 +717,9 @@ OPCODE = {"jmp": "4ef9", "jsr": "4eb9", "lea_a4": "49f9", "lea_a3": "47f9"}
 PATCHES = [
     (LOAD_MAX, bytes.fromhex("786a"), bytes.fromhex("7881"),
      "pattern load: every id reaches the lookup (moveq #-127; free records fail the track check)"),
+    (LOAD_TRACK_MAX, bytes.fromhex("183c000f"), bytes.fromhex("780f4e71"),
+     "pattern load: the track bound as moveq #15 -- move.b #15 kept moveq #-127's upper bytes "
+     "and let free records (ff ff) through"),
     (BUILD_GATE, bytes.fromhex("6730"), bytes.fromhex("4e71"),
      "note records: build the lock list for every note, for the arp block"),
 ]
@@ -725,7 +736,6 @@ CONTEXT = (
     (0x4002A108, bytes.fromhex("71e90164"), "...the step mask"),
     (0x40026A6E, bytes.fromhex("73280162"), "the ISR reads an arp note's N.LEN per track"),
     (0x4002553E, bytes.fromhex("487800ca"), "lock lists hold 202 entries"),
-    (0x400DE59E, bytes.fromhex("183c000f"), "pattern load: tracks <= 15 only"),
     (0x40055BBE, bytes.fromhex("10280268"), "held object: any trig held at +616"),
     (0x4005693C, bytes.fromhex("486b0258"), "held object: the held-step set at +600"),
     (0x40019734, bytes.fromhex("700d"), "arp menu keys: 11 UP (step on), 14 DOWN (off)"),
@@ -733,7 +743,8 @@ CONTEXT = (
 )
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-OUT = pathlib.Path("00_Resources/02_Builds/arp-plocks_DN2_1.11.syx")
+OUT = pathlib.Path("00_Resources/02_Builds/arp-plocks-all_DN2_1.11.syx" if FULL
+                   else "00_Resources/02_Builds/arp-plocks_DN2_1.11.syx")
 
 
 def be32(v: int) -> bytes:
