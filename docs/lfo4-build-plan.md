@@ -1855,3 +1855,32 @@ clean-up.
 | 7 | widgets (wave graph, glyphs); a `dnfw mods` package | -- |
 
 The device verifies at steps 3 and 5 only; every other check runs here first.
+
+### Step 0 result — passed under the emulator, 2026-09-19
+
+The chain works end to end from a cold boot (`scripts/emu_c_hello.py`, from
+reset, beside a stock control):
+
+| piece | where |
+|---|---|
+| C compiler | `m68k-linux-gnu-gcc` 13.3 in WSL, `-mcpu=5475` (ColdFire V4e); `dnfw.patch.cbuild` compiles, links at a fixed address, returns bytes, BSS size and symbols |
+| area format | `dnfw.patch.area`: the boot screen's `DNFW` directory unchanged, plus a `CODE` chunk (`load`, `length`, `bss`, `init`, image) |
+| loader | `csrc/runtime/loader.S`, 132 B in the clean cave `0x4028da6e` (138 B, no registered mod uses it), called from the startup calls at `0x4000053e`; data chunks go where the boot screen always put them, `CODE` chunks to their own address |
+| test code | `csrc/hello/`, 124 B + 32 B BSS at `0x46800000`, hooked on `memcpy`'s entry |
+
+Measured: the loader runs at instruction 1,359, before the caches are enabled;
+its init call ran the C init, which filled a marker through the **firmware's own
+`memset`**; `memcpy` is first called at 26.3 M, long after, and all 665 calls in
+60 M went through the C routine with their real arguments; the stock control
+made the same 665 calls. So a hook on `memcpy` (step 1) never jumps into RAM that
+is not loaded yet.
+
+Why the loader is assembly: the same logic in C compiled to 220 B (316 B in the
+first draft); the largest free clean cave is 138 B. The C toolchain is proven by
+the code it loads. The loader saves no registers — after the startup calls the
+reset code only calls `main` (`0x40000568`).
+
+**Not yet done, and belongs to item 6 (mod registry):** the boot screen and LFO
+Waves still install their own startup stubs at the same site. The loader is a
+superset of the boot screen's copy, so the boot screen can move onto it without
+changing its runtime layout.
