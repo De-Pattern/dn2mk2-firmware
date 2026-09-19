@@ -294,3 +294,116 @@ it back.
 image tool. DNX already has device I/O and a written-down discipline for
 probing safely (`DNX/docs/device-probing.md`), which is where this belongs if
 it is pursued.
+
+## 1.11: the whole path, read end to end — 2026-09-19
+
+Everything above was 1.10E. This is 1.11 (the build target), read in the code
+from the USB endpoint to the reply. **Static reading; the emulator confirmation
+is the next step** (below). Nothing has been sent to an instrument.
+
+### What maintenance mode starts
+
+At `0x400cf086` the OS tests bit `0x20` of the boot-flags word `0x40287520`
+(set by the bootstrap for the power-on combination or the reboot marker; the
+keys are in `dn_sysex`, not here). With the bit set it:
+
+1. registers the byte receiver `0x4011f364` as the USB serial callback
+   (`0x400053ac`, stored at `0x403053b8`);
+2. calls `0x400cea6e`, which creates the command queue `0x4038ae9c`
+   (0x400 entries) and the **service task**: entry `0x400cd48e`, priority 2,
+   16 KB stack at `0x40385e9c`. A normal cold boot never creates this task
+   (none of the emulator's `TASK_CREATE` logs has that entry);
+3. selects **USB mode 4** through `0x40006c52(4)` instead of 2, 5 or 6.
+
+Nothing else on that branch differs, and the UI setup only adds the
+`MAINTENANCE MODE` label (`0x4002f02a`, drawn by `0x40117d08` when
+`0x400cec62` reports the bit). **So maintenance mode is the normal OS -- engine,
+UI, sequencer -- plus a USB serial port and a task that listens on it.**
+
+### The transport is USB CDC-ACM, bulk OUT endpoint 2
+
+`0x40006c52(mode)` picks entry `mode` of a 40-byte table at `0x402875b0`:
+
+| mode | device descriptor | configuration | used by |
+|---|---|---|---|
+| 1, 2 | `0x402fb298` | `0x402fb233` / `0x402fb1ce`, 0x65 B | normal boot (2) |
+| **3, 4** | **`0x402fb1bc`: VID `0x1935`, PID `0xFFFF`** | `0x402fb171` / `0x402fb126`, **0x4B = 75 B** | **maintenance (4)**; 3 is the full-speed twin |
+| 5 | `0x402fb50b` | `0x402fb3c3`, 0x148 B | normal boot |
+| 6 | `0x402fb3b1` | `0x402fb2aa`, 0x107 B | normal boot |
+
+75 bytes is exactly a CDC-ACM configuration (IAD + two interfaces + three
+endpoints, as listed above for 1.10E). The receive side is
+`0x4000510c`: a transfer queued on **endpoint 2**, max packet **512** at high
+speed and **64** at full speed, completing into `0x400052fe(len, data)`, which
+calls the registered callback. That is the CDC-Data `EP 0x02 OUT`. Closed:
+**USB serial port → `0x4011f364` → queue `0x4038ae9c` → service task.** The
+earlier "not proven" above is superseded.
+
+### The line protocol (`0x4011f364`, per received byte)
+
+| state | byte | action |
+|---|---|---|
+| idle | `#` | start a text line (the `#` is kept) |
+| idle | `!` | binary frame: next 4 bytes are a **big-endian length** |
+| idle | `$` | needs `$$$$`, then a 4-byte big-endian length |
+| line | `\n` | terminate, post the line to the queue |
+| line | `\r` | ignored |
+| binary | … | copied into the binary buffer (`0x40305e40`, max 0x80008 B), posted as `'!'` or `'$'` + u32 length + data |
+
+Lines are cut at ~0x3FF / 0x47F bytes in a 0x480-byte ring (`0x445a0480`).
+The task takes the first word with `sscanf(line, "%s", cmd)` and compares it
+command by command (`0x4017e8a8` is the comparator). Replies go out through
+`0x400054b4` (text, CRLF-terminated) and `0x400cd204` (binary: `$$$$`, u32
+length, data).
+
+### The four commands asked about
+
+**`#STATUS`** — no arguments. Prints sections, each opened by a line `#`:
+`START`/`OK`/`VERSION 1`, then `OS`/`OK`/the 16-character version string,
+then `PLATFORM`/`OK`/`PCBA0109<letter><n>` (letter `'A' + (board byte & 31)`),
+then `PRODUCT`/`OK`/`52;5;15;Digitone II`, then `FLASH`/`OK` and flash checks.
+Read-only.
+
+**`#READ <name>` / `#WRITE <name> <value>`** — **not memory access.**
+`sscanf(line, "%s %s")`, the name looked up (`0x400cd190`) in one of two
+11-entry tables (`0x401f2c94` / `0x401f2d44`, chosen by `0x4028c148`), each
+entry `{name, set, get, select}`. The names are **`SYNC_1`..`SYNC_7`,
+`UART9_TXD`, `UART9_RXD`, `UART8_TXD`, `UART8_RXD`**: a factory pin test.
+`#READ` replies with the pin's level (`%d`), `#WRITE` drives it, an unknown
+name gives `ADDRESS ERROR`. So `#READ` cannot read RAM. (`#MRAM_DUMP` and
+`#MMCDUMP` are the dump commands; not read yet.)
+
+**`#PLAY_PATTERN` / `#STOP_PATTERN`** — no arguments. `#PLAY_PATTERN` replies
+`FAIL` unless `0x400d046c()` is ready, then starts the sequencer with
+`0x400d93f0({0x4121898c, 0x4210c08c}, 1)` and `0x400d7f06(0)` and replies `OK`.
+`0x4210c08c` is the live kit base (`docs/engine-index-map.md`). `0x400d93f0` is
+the sequencer start 13 normal UI paths call; stop is `0x400d9666(0, 0)` +
+`0x400d97ce`, shared with 6–9 normal paths. **So it plays whatever pattern and
+kit are loaded, through the normal engine.**
+
+**`#DUMP_AUDIO <n>`** — `sscanf("%s %d")`; `n` is clamped to 0..4 and selects
+one of five capture buffers of 0x80000 32-bit samples (2 MB each) from the
+pointer at `0x4664b1fc` (set to `0x42441614` at init, `0x400d11d4`). The reply
+is a binary frame: `$$$$`, u32 length (samples × 4), the samples. It pairs with
+`#RECORD_START <buf> <a> [len]` (`%s %d %d %d`, `0x400d0db4`) and
+`#RECORD_STOP <n>` (`0x400d0e64`). The rest of the audio group:
+`#RECEIVE_AUDIO <n>` (loads a buffer from a `$$$$` frame; replies
+`READY FOR SAMPLE DATA`), `#PLAY_START <buf> <off> <ch> [len]`,
+`#PLAY_STEREO` (two at once, interrupts off), `#PLAY_STOP <n>`; lengths cap at
+0x8000. **Open:** which signal `#RECORD_START` records -- the codec inputs, or
+the instrument's own output -- is not read yet. It decides whether capture can
+catch audio breaking up under load.
+
+### What this changes for measuring load
+
+- `#PLAY_PATTERN` is the stress ladder's "play": same engine, scripted.
+- `#READ` is **not** a way to read our own counters; a meter needs its own
+  channel (a C command added to the same dispatcher is the obvious one: the
+  queue and reply function are known).
+- `#DUMP_AUDIO` is useful only if recording taps the output; to be read.
+
+### Next, under the emulator
+
+Boot 1.11 with bit `0x20` forced at `0x400cf086`; check the service task is
+created and mode 4 selected; then call `0x4011f364` directly with `#HELLO\n`,
+`#STATUS\n`, `#READ SYNC_1\n` and capture every `0x400054b4` reply.
