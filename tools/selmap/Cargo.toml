@@ -1,0 +1,12 @@
+[package]
+name = "selmap"
+version = "0.1.0"
+edition = "2021"
+description = "Per-offset SHARC+ VISA length and text from selache's decoder, for scripts/sharc_selache_compare.py"
+license = "AGPL-3.0-or-later"
+publish = false
+
+# selache is GPL-3.0 and is never vendored here: point this at your own checkout
+# (default: a sibling of this repository). See docs/sharc-selache.md.
+[dependencies]
+selinstr = { path = "../../../selache/selinstr" }
