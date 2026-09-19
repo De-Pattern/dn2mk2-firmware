@@ -200,6 +200,7 @@ findings change what may be copied**, and both moved since this project started:
 | **`emuyia/ems-octakit`** | **MIT — added 2026-09-12** | **yes, newly.** This repo was unlicensed for the whole of this project's life; the condition recorded against it has now been met, so its `.S` stubs, `link.ld` and `firmware.json` manifest may be ported with attribution |
 | **`mxldyn/octamax`** | **NONE** | **no.** No LICENSE file and no statement in its README. Architecture-only inspiration, never copied |
 | **`m-dwyer/digikit`** | **GPL-2.0-or-later** | **yes, with care** — see below. Taken forward as GPLv3 it combines with this repo's AGPL-3.0-or-later; **using it as a tool entangles nothing at all**, which is the route to prefer |
+| `js216/selache` (added 2026-09-19) | GPL-3.0; `libsel` MIT | may link (GPL-3.0 combines with our AGPL-3.0) but **not vendored**: `tools/selmap` is our own harness over a local checkout. Never into digikit, which is GPL-2.0 |
 
 **The restriction moved rather than lifted.** `ems-octakit` was the one to avoid
 and is now free to use; `octamax` is now the one to avoid. Earlier notes in this
@@ -489,3 +490,18 @@ would mean an FFT and therefore numpy, against a package that currently declares
 The MIT grant means porting stays available with attribution if the case ever
 becomes strong; it is recorded here so that decision starts from the licence
 rather than rediscovering it.
+
+---
+
+## `js216/selache` — an open-source SHARC+ toolchain
+
+<https://github.com/js216/selache>, by Jakob Kastelic. GPL-3.0 (its C library
+MIT). Added 2026-09-19 by the owner. It includes an assembler, a C99 compiler,
+an LDF linker, an ELF → LDR boot-stream writer, and `selinstr`, a VISA
+encoder/decoder.
+
+Scored against our DSP image in `docs/sharc-selache.md`. Its instruction lengths
+land 99.0% of the spans between known instruction starts, and a late-start
+control lands 94.9%. It produced two decode-table fixes, now upstream as
+`m-dwyer/digikit#31`. Its disassembly reassembles byte-identically for only
+83.9% of encodings, so patches are written as source. Built in WSL; not vendored.
