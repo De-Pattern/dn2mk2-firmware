@@ -1592,6 +1592,15 @@ fewer tracks and voices, and nothing found there transfers to the DN2 as fact.
 It transfers as a *hypothesis to test*, which is still worth a great deal when
 the alternative is an unnamed 105 KB.
 
+**2026-09-19: an assembler and a second decoder for the SHARC.**
+`js216/selache` (`docs/sharc-selache.md`) lands 99.0% of the spans between known
+instruction starts on our DSP image. Its assembler and linker give this section
+an authoring path that did not exist: patch source, placed by an LDF, verified by
+two decoders, written with `bootstream.write_span`. Still missing are a free-memory
+map of the DSP and its hook points. The scoring also corrected digikit's Type 2b
+width (`m-dwyer/digikit#31`), which raises the aligned decode of our image from
+84.3% to 96.8% of spans.
+
 ## 9. A tool for a custom start-up animation
 
 **Owner's idea, 2026-09-13.** Let people replace the Elektron boot animation
