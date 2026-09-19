@@ -1769,3 +1769,89 @@ must stay `00 00`). The owner saved `LFO4_TICK.dn2pst` for it; DNX has the reque
 engine — feed the fourth slot from the per-track mirror (which needs mirror
 growth past slot 100, backlog §12) and join v6a to the v4 page view, whose one
 known defect is the three-element waveform-graph array at `0x4010d984`.
+
+
+---
+
+## 8. The plan from 2026-09-19: per-track LFO4 on an extension table, in C
+
+v6a answered the engine question. What is left is where LFO4's eight values live
+per track, and wiring. This section records how that was decided, because two
+tempting routes were ruled out and the reasons are the point.
+
+### Where the values cannot go
+
+- **The value array** (live sound `+20`, 101 u16 slots). Its only free slots are
+  0 (the LFOs' "no destination" sink) and 100, and 65 now that the arp p-locks
+  moved to their own records: three, not eight.
+- **Spare bytes inside the live sound** (1,163 B). The save routine persists
+  nothing past offset 373, and bytes 374..1151 were zero on all 16 tracks of the
+  snapshot, but they are not free: `374` holds the arp's previous MODE
+  (`0x4004bee0`), `430` / `512` and `1152`..`1162` are read through the sound's
+  virtual accessor, and no static scan can attribute every displacement in the
+  image to a structure. "Probably unused" was not good enough (owner: *110 %
+  sure*), so this route was dropped.
+- **Growing the sound or the value array.** What Elektron would do with the
+  source: recompile a bigger struct and bump the storage version. Without the
+  source it means ~100 uses of the 1,163 stride, ~64 of the 23,921 kit size,
+  up to 74 of 202, plus multiplications the compiler hid in shifts, and every
+  field displacement past the insertion point. One miss corrupts kits. Ruled out.
+- **Decompiling and recompiling the OS.** Decompiler output is not buildable, the
+  build itself (compiler, flags, link map, BSS) would have to be recreated, and
+  field offsets are bare immediates no tool can attribute. Ruled out; but the
+  *new* code can be written in C (below).
+
+### Where they go: an extension table keyed by the sound's address
+
+**Why it can be proven.** Its correctness depends only on catching every way a
+live sound moves, and that set was enumerated:
+
+| a live sound moves by | sites | carried by |
+|---|---|---|
+| whole-sound copy / clear | 32 `memcpy` / `memset` calls, literal 1,163 | the `memcpy` / `memset` hooks |
+| whole-kit and pattern copies | ~9 `memcpy` / `memset` calls | the same hooks, by address range |
+| save / load (stored <-> live) | `0x400dd6aa`, `0x400dd1ea` and the loops beside them | hooks on ids 0, 4, .. 28 |
+| indexing (sound *t* of a kit) | 23 multiplies of 1,163 | nothing to carry |
+| models and views holding a sound | `0x4004afec` stores a pointer | nothing to carry |
+
+All 23 register loads of 1,163 are multiplies; the only loops bounded by 16
+sounds are the save loop, a pointer-table build, and `0x4004afec`'s model
+binding; the value-array (101 / 202) loops in real code are the lock-list
+builders, save / load and engine-side arrays. **No routine copies a live sound
+field by field.** `memcpy` / `memset` ran 2,347 / 15 times in 60 M instructions
+of UI activity, so the hooks return at once below 1,163 bytes.
+
+**The stored side is proven by the corpus** (DNX, 2026-09-19): across 195,256
+sound objects (3,979 distinct) the lane of ids 0, 4, .. 28 -- stored bytes
+**28, 36, .. 84** (`+28 + 2*id`; an earlier note here said 36 .. 92, off by one
+pair) -- is `00 00` in every one, and those ids occur in no real lock record of
+10,935 patterns. The stock inverse map folds them onto the no-lock sentinel, so
+a stock 1.11 load ignores them. **Open:** whether a stock load + re-save keeps or
+zeroes those bytes (one scratch-slot round trip would say).
+
+### The C toolchain, and where the code lives
+
+The new logic (the table, the `memcpy` / `memset` carry, save / load mapping,
+the engine read, the page) is written in **C for ColdFire**, compiled and linked
+at a fixed address, calling firmware routines by address; only the stubs at the
+patch sites stay assembly. It is carried in the **appended area as a `CODE`
+chunk**, beside the boot screen's `BOOT` / `ANIM` chunks under the `DNFW`
+directory, and copied into free RAM above BSS by the startup hook the boot
+screen already proved on hardware. A new ELE3 section (backlog §6) would be
+cleaner but is unproven (updater, flash space, emulator); it stays a later
+clean-up.
+
+### The steps
+
+| # | step | test |
+|---|---|---|
+| 0 | C toolchain: compile, link, package as a `CODE` chunk, startup copy (generalising the boot screen's) | a trivial C routine called from a hook, under the emulator |
+| 1 | extension table + `memcpy` / `memset` carry | direct-call harness: whole-sound, kit, pattern copies, clears, overlaps, table full; cost per call |
+| 2 | save / load through ids 0, 4, .. 28 | harness round trip; stock-compatibility of the stored bytes |
+| 3 | engine: v6a's fixed block becomes each track's own | harness on the evaluator's inputs; **device: two tracks, different LFO4** |
+| 4 | the fourth `[MOD]` page edits the table | emulator push + turn; survives copy / paste and a pattern switch |
+| 5 | every edit path of the arp work, driven with controls | copy / paste of trig, page, track; undo; kit change; preset load; burn; machine change; parameter-page copy; **device: a full session** |
+| 6 | LFO4 p-locks, through the arp's own-record mechanism | as the arp |
+| 7 | widgets (wave graph, glyphs); a `dnfw mods` package | -- |
+
+The device verifies at steps 3 and 5 only; every other check runs here first.
