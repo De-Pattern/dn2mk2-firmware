@@ -14,6 +14,7 @@
  * and checks that this file assembles back to exactly those bytes.
  */
 #include "dn2_111.h"
+#include "slots.h"
 
     .text
 
@@ -87,3 +88,53 @@ lfo4_save_displaced:
     mvs.b   %a2@(54),%d0
     move.l  %a0@(0,%d0:l:4),%d0
     jmp     DN2_SAVE_SITE + 8
+
+/* The third kind of site: a bound, not an entry, and nothing is replayed.
+ *
+ * `DN2_SET_BOUND` is the parameter setter's `slot > 100 -> skip` test, six
+ * bytes for three instructions, and this stub takes over the decision. It has
+ * two exits and controls both, so unlike the four stubs above it is entered
+ * with `jmp` and leaves with `jmp` -- there is no return address to fix up and
+ * no displaced pair to replay.
+ *
+ *   slot <= 100   the firmware's own slots, on to its own write
+ *   101..108      LFO4's: fetch the live sound the way the write path is about
+ *                 to, and record the value in the extension table
+ *   > 108         nothing, which is exactly what stock does
+ *
+ * The compare is signed, as the `blt.s` it replaces was. d0 held 100 at the
+ * site and is dead either way: the write path overwrites it with the virtual
+ * call's result, and the skip path is the function's epilogue.
+ *
+ * The sound comes from the firmware's *own* virtual call -- a2@(16), its
+ * vtable slot 40 -- rather than from this project's track map, because that
+ * call is what the very next instructions do and its answer is the sound the
+ * write would have landed in. d2, d3 and a2 survive it: the firmware relies on
+ * exactly that across the same call.
+ */
+
+    .globl  lfo4_set_stub
+lfo4_set_stub:
+    cmp.l   #100,%d2
+    ble.s   lfo4_set_stock
+    cmp.l   #LFO4_LAST,%d2
+    bgt.s   lfo4_set_none
+    lea     -16(%sp),%sp
+    movem.l %d0-%d1/%a0-%a1,(%sp)
+    movea.l %a2@(16),%a0            | the object that owns the sound
+    movea.l %a0@,%a1                | its vtable
+    move.l  %a0,-(%sp)              | this
+    movea.l %a1@(40),%a0
+    jsr     %a0@                    | -> d0 = the live sound
+    addq.l  #4,%sp
+    move.l  %d3,-(%sp)              | value
+    move.l  %d2,-(%sp)              | slot
+    move.l  %d0,-(%sp)              | sound
+    jsr     lfo4_on_set
+    lea     12(%sp),%sp
+    movem.l (%sp),%d0-%d1/%a0-%a1
+    lea     16(%sp),%sp
+lfo4_set_none:
+    jmp     DN2_SET_SKIP
+lfo4_set_stock:
+    jmp     DN2_SET_WRITE
