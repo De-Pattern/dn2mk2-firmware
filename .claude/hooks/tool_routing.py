@@ -99,7 +99,17 @@ This prompt is about a build. Before any `.syx` is offered for flashing:
    a pass to anything watching only for a crash), and **booted**.
    A snapshot harness does NOT count: `ui1200M` has already booted, so it never
    runs the loader, the init, or the first call into new code from reset. That
-   is precisely how `lfo4-bridge` reached the instrument and faulted.
+   is precisely how `lfo4-bridge` reached the instrument and faulted -- and it
+   faulted on a **scale factor of 8**, which GCC emits under `-mcpu=5475`, gas
+   assembles, and Unicorn's generic m68k core runs. Only the ColdFire refuses.
+   The build now rejects that encoding itself (`scripts/check_coldfire.py`).
+
+   The gate also reports which of the build's routines **never ran**. A boot
+   executes the loader, the init and the memcpy/memset stubs and nothing else:
+   the audio engine does not run, and no kit loads, so the tick and the
+   save/load converters are untouched. `scripts/emu_boot_engine.py` covers all
+   three in one boot -- reset, then evaluator A, then a stored sound through
+   LOAD and SAVE. A build touching those paths is not cleared by a boot alone.
 
 2. **Make any demonstration unmissable.** A hard-coded proof -- a modulation, a
    sweep, a blink -- must be obvious within a bar. `lfo4-tick7` used the slowest
