@@ -2593,3 +2593,66 @@ each time: **a control that fails when the checker is broken** -- a key nothing
 set that must read back absent, a routine list that must be non-empty, a
 coverage line that must appear. A green result whose instrument was never
 tested is not evidence.
+
+#### Settled: a page entry IS a parameter index, and the accessor shape — 2026-09-21
+
+The correction above said the mechanism was unread. It is read now, by
+watching the machine instead of scanning it: `scripts/emu_param_reader.py`
+arms a read watch over the parameter table and opens the LFO MOD page.
+**15,407 reads.** Three of the instructions that made them fetch exactly
+
+```
+records [74, 75, 76, 77, 78, 80, 81, 82]
+```
+
+and LFO1's page record holds entries **75, 76, 77, 78, 79, 81, 82, 83** — the
+same set plus one, gap and all: entry 79 maps to record 78, and record 79, the
+unused `SLEW`, is never touched. So **entry = index + 1**, observed rather than
+inferred from names.
+
+The accessor at `0x400dbeb6` shows why no literal base was ever found:
+
+```
+movel %sp@(4),%d0          ; the entry
+cmpil #321,%d0             ; the bound -- 320 records
+scs %d1 ; mvsb %d1,%d1 ; andl %d1,%d0    ; out of range -> entry 0
+lea 0x401f7f94,%a0         ; base, PRE-BIASED
+movel %d0,%d1 ; lsll #2,%d1 ; lsll #6,%d0 ; subl %d1,%d0   ; d0 = entry * 60
+movel %a0@(0,%d0:l),%d0    ; read
+```
+
+`0x401f7f94` is `table - 60 + 8`: the `-60` folds in the `+1`, and the `+8`
+is the field this accessor wants. **Every accessor carries its own biased
+base, so the table's true address `0x401f7fc8` is never stored anywhere** —
+which is exactly why three static searches found nothing, and the searches
+were right.
+
+`0x401f7f8c + 60 * 1 = 0x401f7fc8` — the arithmetic confirms `entry = index +
+1` without appealing to the names at all.
+
+#### What extending the table would actually cost
+
+The constants are now enumerable, which was the whole point of the question:
+
+| constant | value | sites |
+|---|---|---|
+| biased base, field `+8` | `0x401f7f94` | 53 |
+| biased base, field `+16` | `0x401f7f9c` | 1 |
+| biased base, field `+40` | `0x401f7fb4` | 2 |
+| `cmpil #321,%d0` | the record count | 24 |
+
+**23 of the 24 bounds sit within 24 bytes of a biased base**, so they belong to
+these accessors. The one that does not is `0x400c241c` and has not been read —
+it may be an unrelated use of 321, and it must be looked at before any of this
+is changed.
+
+So LFO4's ten records mean: relocate the 19,200-byte table into the appended
+area with ten records appended, then rewrite **56 base literals and 24
+bounds**. Mechanical, bounded, and checkable — every one is a four-byte literal
+or a six-byte immediate, and `dnfw` can assert each site is stock before
+patching it, exactly as the existing sites do.
+
+It is not small, and it is no longer unknown. The open items are that one
+unpaired bound, and whether anything reaches a record other than through these
+accessors — the `+0` field of every record is a code pointer, and where those
+are called from has not been read.
