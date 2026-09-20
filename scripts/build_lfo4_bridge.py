@@ -80,14 +80,20 @@ def cave_source(table_va: int, refresh: int) -> str:
     return source
 
 
-def main() -> int:
+def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=()) -> int:
+    """Build it. `extra` are further site patches, each `f(content, code)`.
+
+    The arguments exist so a build that is *this one plus a site* -- step 4's
+    setter divert is the first -- composes instead of copying two hundred lines
+    that would then drift apart.
+    """
     firmware = load(read_image(STOCK))
     section = firmware.container.find(MAIN_OS)
     stock = section.unpack()
 
     table_va = v6a.CAVE
-    code = cbuild.build([SRC / "lfo4" / name for name in SOURCES], base=CODE_VA,
-                        include=[SRC / "include"], entries=ENTRIES,
+    code = cbuild.build([SRC / "lfo4" / name for name in sources], base=CODE_VA,
+                        include=[SRC / "include"], entries=entries,
                         defines={"LFO4_ROWS": f"{table_va:#x}u", "LFO4_KIT": f"{KIT:#x}u"})
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
     content = loader.install(stock, [(area.CODE, chunk)])
@@ -122,18 +128,21 @@ def main() -> int:
         new += b"\x4e\x71" * ((len(was) - len(new)) // 2)
         v6a.poke(content, va, was, new, f"{kind} -> {label}")
 
+    for patch in extra:
+        patch(content, code)
+
     print("part 4 -- write")
-    OUT.mkdir(parents=True, exist_ok=True)
-    (OUT / "section_3_MAIN_OS.bin").write_bytes(bytes(content))
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "section_3_MAIN_OS.bin").write_bytes(bytes(content))
     wanted = ("lfo4_", "ext_")
     symbols = {k: v for k, v in code.symbols.items() if k.startswith(wanted)}
     symbols["lfo4_rows"] = table_va
     symbols["dnfw_boot"] = loader.build()["dnfw_boot"]
-    (OUT / "symbols.json").write_text(
+    (out / "symbols.json").write_text(
         json.dumps({k: f"0x{v:08x}" for k, v in sorted(symbols.items())}, indent=1) + "\n", newline="\n")
-    SYX.parent.mkdir(parents=True, exist_ok=True)
-    SYX.write_bytes(fwbuild.build(firmware, {MAIN_OS: compress(section.id, section.dest, bytes(content))}))
-    print(f"  {SYX.name}, MAIN OS {len(content):,} B (+{len(content) - len(stock)})")
+    syx.parent.mkdir(parents=True, exist_ok=True)
+    syx.write_bytes(fwbuild.build(firmware, {MAIN_OS: compress(section.id, section.dest, bytes(content))}))
+    print(f"  {syx.name}, MAIN OS {len(content):,} B (+{len(content) - len(stock)})")
     return 0
 
 

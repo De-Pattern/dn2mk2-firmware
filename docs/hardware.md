@@ -112,3 +112,87 @@ different project with a different risk profile and no recovery path proven.
 - The DN1's CPU part, for a clean comparison with `docs/dn1-dsp-comparison.md` —
   its MAC count is the load-bearing number there and it should be known to be an
   EMAC-equipped part of comparable generation.
+
+---
+
+# The rest of the family, as reported by a third party — 2026-09-20
+
+Relayed to this project by the owner from an outside account of the boards.
+**None of it was measured here**, and it is written in our own words with the
+part numbers kept, because part numbers are the checkable part. Treat every row
+as a claim until a photograph or a datasheet settles it — the same standard
+§"The parts" above met and this section does not.
+
+| box | CPUs | FPGA |
+|---|---|---|
+| Digitone (2017) | **two** ColdFire `MCF54415CMJ250` | Xilinx Spartan `XC3S50A`, said to bridge the two |
+| Digitakt (2017) | one ColdFire `MCF54415CMJ250` | — |
+| Digitakt II | one ColdFire `MCF54415CMJ250` + **SHARC `ADSP-21569`** | — |
+| Syntakt | **two** ColdFire `MCF54415CMJ250` | `XC3S50A` in the Digitone's position, plus an `XC3S200A` taken to drive the analogue side |
+
+With `MCF54415CMJ250` given as 250 MHz with 64 KB of SRAM, and the
+`ADSP-21569` as 800 MHz–1 GHz with 640 KB of L1 and 1 MB of L2.
+
+The account adds that Digitakt II's new DSP capability comes from the SHARC,
+and that the original Digitakt's single ColdFire is where its backward
+compatibility comes from.
+
+## What our own measurements say about it
+
+Two of the claims are ones this repository can speak to, and both hold up:
+
+- **The DN2 arrangement matches what is claimed for Digitakt II.** §"The parts"
+  read `MCF5441SCMJ250` and `ADSP-21569` (U9) off the owner's photographs of
+  PCBA0109B — one ColdFire and a SHARC, exactly the pairing described.
+- **A Digitone with no SHARC has to do its audio somewhere, and we measured
+  where.** `docs/dn1-dsp-comparison.md` counted **613 MAC/MSAC in DN1 1.43's
+  code region against 50 in DN2 1.11's**, on near-identical `mulsl` counts.
+  DN1's audio DSP runs on ColdFire. A second ColdFire carrying that load is a
+  coherent explanation of a 12× difference that had none.
+
+So the claim and our measurement corroborate each other from opposite ends:
+the part list says DN1 has two ColdFires and no DSP chip, and the instruction
+census says DN1's ColdFire side does twelve times the multiply-accumulate work.
+
+It also answers, provisionally, the last open item above — *"the DN1's CPU
+part, for a clean comparison"* — with `MCF54415`, an EMAC-equipped part of the
+same generation as the DN2's. Provisionally, because it is a claim.
+
+## The question it opens, and how to settle it
+
+**If the DN1 has two ColdFires, where does the second one's program live?**
+DN1 1.43's section table (`dn1-dsp-comparison.md`) has no second code section
+at a second load address: MAIN OS at `0x40000400`, the updater at
+`0x80000400`, an ARM Cortex-M accessory image, a raw `blob`, and **section 6 —
+1,492 bytes, raw, DN1-only, still unidentified**.
+
+Two readings, and they are separable with instruments we have:
+
+1. **One image, two cores.** Both CPUs boot the same MAIN OS and branch on a
+   core or strap identity. Then there is a read of a hardware ID near reset
+   and a divergence after it — `dnfw fn callers` and the bootstrap section are
+   where to look, and `docs/bootstrap.md` already covers that ground.
+2. **The second core's code is data to the first.** It is loaded from the
+   `blob`, or from flash that never appears in the update file at all — which
+   §"What the board says about the DSP boot question" already found to be the
+   DN2's situation for the SHARC.
+
+Section 6 is tempting as the FPGA's configuration, and **the size argues
+against it**: an `XC3S50A` bitstream is on the order of 50 KB, not 1.5 KB. So
+section 6 is more likely a small table than a bitstream, and the Spartan is
+probably configured from its own flash — recorded here so the next reader does
+not spend the same guess twice.
+
+## The speculation, marked as such
+
+The same account suggests that because the Syntakt shares the Digitone's
+two-ColdFire architecture, features from Syntakt's 1.30 update — Euclidean
+sequencing, page looping, random name generation, saving a p-lock into a
+preset, LFO slew — are ones a Digitone could plausibly receive.
+
+That is speculation about Elektron's roadmap, not a reading of any binary, and
+nothing here depends on it. It is kept because it names **features that already
+run on this architecture**, which makes each one a prior-art question this
+project can actually ask: if Syntakt does LFO slew on a ColdFire, its firmware
+is evidence about what the LFO block can be made to do — the same use
+`docs/octatrack-lfo-prior-art.md` makes of the Octatrack.

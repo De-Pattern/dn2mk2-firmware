@@ -2248,3 +2248,270 @@ reset between runs.
 
 **What is still missing to call this a feature:** nothing on the instrument
 writes to the table. That is step 4, the `[MOD]` page.
+
+### Step 4: the setter, found by asking the machine — 2026-09-20
+
+The page needs two addresses: where the UI **reads** a parameter value, and
+where a turn **writes** it. The getter was known (`0x4006408a`). The static hunt
+for the setter went through several plausible candidates without deciding, so
+the question went to the emulator instead: drive the panel and watch the live
+sound's value array.
+
+`scripts/emu_param_setter.py` — `panelin` input the way `scripts/drive.py` does
+it, with a `UC_HOOK_MEM_WRITE` over track 1's array at `0x4210c0d4`:
+
+```
+  idle control: 0 write(s) with no input
+  MOD page 1, push-and-turn +10 x2: 1 write(s)      ... and 1 on each of 2, 3, 4
+  writers, hottest first:
+    0x40037be8  4
+  first writes:
+    0x40037be8  slot 1   <- 0x78a1 (2 B)
+    0x40037be8  slot 1   <- 0x7ffe (2 B)   ... clamped at the top thereafter
+```
+
+**One writer, four writes, one per page visit, against an idle control of
+zero.** The setter is `0x40037be8`, `0x2a6` into `0x40037942`:
+
+```
+0x40037bd0  moveq #100,%d0
+0x40037bd2  cmpl %d2,%d0
+0x40037bd4  blts 0x40037c48             ; slot > 100 -> no write at all
+0x40037bd6  moveal %a2@(16),%a0         ; the object that owns the sound
+0x40037bde  moveal %a1@(40),%a0         ; its vtable slot 40
+0x40037be2  jsr %a0@                    ; -> d0 = the live sound
+0x40037be8  movew %d3,%a0@(14,%d2:l:2)  ; values[slot] = value
+```
+
+So the write is `values[d2] = d3` with **`d2` the slot and `d3` the value**, and
+the sound arrives from a virtual call rather than a constant — which is what
+makes it the right hook: it is already the per-track sound.
+
+### Why that bound is the opening
+
+`slot > 100` skips the write **entirely**. So if LFO4's ten records carry slots
+**101–108**, stock firmware does nothing at all with them — no stray write, no
+corrupted neighbour — and the branch at `0x40037bd4` is a free, well-defined
+place to divert into `ext_set(sound, slot - 101, value)`. The same bound guards
+the accessor at `0x400dc02c` (§3's `moveq #100`), so the read side has the same
+shape.
+
+That is §3's original slots-101–108 design, arrived at from the other end: the
+table it needed already exists, and the two bounds that make it safe are now
+located rather than assumed.
+
+### Two things the probe had to be told
+
+1. **Push and turn.** The first run turned the encoder without holding its push
+   and reported **0 writes** — a clean-looking null that meant nothing. Encoder
+   A's push is control code 41, and `code_for` is `channel * 8 + bit + 1`, so it
+   is channel 5 bit 0. This is now in the routing hook so it arrives before the
+   next probe is written rather than after it fails.
+2. **The page never changed, and the reason is the dwell — not the key.** All
+   four visits wrote **slot 1**, LFO1's `SPD`, so the repeated `[MOD]` press
+   never moved off the first LFO page.
+
+   ~~Paging is `[PAGE]`.~~ **Wrong, corrected by the owner the same day:** on
+   the instrument the `[MOD]` pages cycle by *pressing `[MOD]` again*, or with
+   the **up / down arrows**. `[PAGE]` opens the page settings, which is a
+   different thing entirely.
+
+   What actually happened is in this project's own notes: the runner paces
+   input about 9 M instructions apart, past the firmware's ~7.5 M hold
+   threshold, so **every "press" in that probe was a hold**, and a held `[MOD]`
+   does not cycle. `--panel-dwell 2` is what makes a tap a tap. The step 4 test
+   must tap `[MOD]`, or use up / down, and it must **check the slot it wrote**:
+   four writes to slot 1 look exactly like success until you read which slot
+   they hit.
+
+   **Why it kept happening after that was understood — 2026-09-20.** The
+   diagnosis above was right and the fix did not take, because
+   `emulib.panel.settle` passed `CHUNK` as its spin budget instead of the
+   window it was asked for. Every window under 10 M ran a full 10 M, so `tap`
+   asked for 2 M and held for 10 M, and the `--dwell` argument that was
+   supposed to fix it was read by nothing. A sweep over that argument came back
+   identical at 500 K and 2 M — not because the pages were insensitive to it,
+   but because both runs were the same 10 M. `docs/emulator.md` §"And it was
+   neither the keys nor the dwell" has the walk before and after, and the pages
+   turn out to be `MOD (n/3)`, one per press, clamping at the ends.
+
+### Step 4a result — ids 101–108 reach the table, 2026-09-20
+
+`00_Resources/02_Builds/lfo4-slots_DN2_1.11.syx` is the bridge plus one site:
+`lfo4_set_stub` in place of the setter's own `slot > 100` bound at
+`0x40037bd0`. Verified under the emulator by `scripts/emu_lfo4_slots.py`.
+
+**There is no page yet, so the panel cannot ask for id 101.** Building a call
+to the setter by hand would have tested a signature this project inferred
+rather than the path the firmware takes, so instead the turn is real and only
+the id is not: a code hook at the bound rewrites `d2` as the firmware arrives
+there, with the object in `a2`, the virtual call that yields the live sound,
+and the value in `d3` all exactly as a genuine encoder turn left them.
+
+```
+  the bound saw 1 turn(s): slot 1 <- 0x78a1
+  lfo4_sets 1, ignored 0, sound 0x4210c0c0, slot 101, value 0x78a1
+  table: live 1, inserts 1, generation 2, full 0, overflow 0
+  the table's entry for 0x4210c0c0, param 0: 0x78a1
+  ok  a key nothing set is absent            (it read back None)
+  ok  no slot of the live sound moved        (slots [])
+```
+
+`generation 2` is the tell: one bump from the insert, one from the set.
+`0x4210c0c0` is `KIT + 52`, track 0's live sound — **the firmware's own
+pointer**, not one the harness computed. And nothing in the live value array
+moved, which is the half that matters for safety: above 100 stock firmware
+writes nothing, and neither do we.
+
+#### The reader was wrong twice before it was right, and both are traps
+
+The first two runs reported the table as empty. Both times the divert was fine
+and `machine.call(ext_get, ...)` was not:
+
+1. **The return is sixteen bits.** `ext_get` returns `u16`, and the high half
+   of `d0` is left dirty — outside the panel run the same call gives
+   `0x46801234` for a stored `0x1234`. `lfo4_harness.get` masks with
+   `& 0xFFFF`; this harness did not.
+2. **Once the timers are armed, the call does not reliably complete.** `Panel`
+   claims the snapshot's DMA timers, so an interrupt can vector away from a
+   called routine; `emu_start` then stops on its instruction count instead of
+   at the return address and hands back whatever `d0` holds. It came back
+   **0** — a plausible number, and the worst possible answer for a probe
+   asking whether a value arrived.
+
+The harness now reads `ext_key` / `ext_val` out of memory, which is our own
+table with a known layout, and carries a control that a never-set key reads
+back absent. **Scope:** only the panel-driving harnesses claim timers, and of
+those only this one called into firmware code — steps 1–3 and the bridge use
+`call(ext_get)` with no `Panel`, so their results stand.
+
+The general form of both, and it is the same lesson as `emulib.panel.settle`:
+a harness that reads a result through firmware it did not write needs a control
+that fails when the reader is broken. "The value is not there" and "this
+function no longer returns values" are the same output.
+
+### What step 4b still needs
+
+- The **read side**: the accessor at `0x400dc02c` carries the same `moveq #100`
+  bound, so the page can display an LFO4 value only once that is diverted too.
+- The **page**: a fourth `MOD` page, which the screens now say is rendered as
+  `MOD (n/3)` — so the count is drawn from something, and that something has to
+  become 4.
+
+### Step 4b, mapped: what a fourth MOD page is made of — 2026-09-20
+
+Nothing here is built yet. This is the read of the page machinery that step 4b
+needs, and it came out better than the plan assumed: **no count is written
+down anywhere.** Three measurements, each with the instrument named.
+
+#### 1. The header is derived from a range, not a constant
+
+The renderer is `0x40063f56`, and at `0x40063f84`:
+
+```
+movel %a2@(128),%d0 ; subl %a2@(124),%d0    ; end - begin
+moveq #7,%d1 ; cmpl %d0,%d1 ; bges ...      ; 8 bytes or fewer -> draw no "(n/m)"
+asrl #2,%d0                                 ; (end - begin) / 4 -> the total
+moveal %a2@(144),%a2 ; addql #1,%a2         ; the current index, made 1-based
+```
+
+So `MOD (3/3)` is `(end - begin) / 4` over a vector of four-byte entries. A
+mode with one page prints only its name. **Nothing has to be taught that there
+are four pages; a fourth entry is the whole change.**
+
+#### 2. The entries are page ids, and the vector has no room
+
+`scripts/emu_mod_pagelist.py` hooks that instruction during a live render and
+reads the object it was called with, rather than guessing which object it is:
+
+```
+object 0x447bf800: begin 0x447bf510 end 0x447bf51c -> 3 page(s), current 1
+    [0] 4    [1] 5    [2] 6
+the 16 bytes after the end: 0x1bf10689 0x447bf560 0x447be5e0 0x447bf894
+```
+
+**The MOD pages are ids 4, 5 and 6** — small integers, not pointers. What
+follows the end is an allocator word and live pointers, so the array is exactly
+its contents and a fourth entry cannot be appended in place: the array has to
+be rehoused, which for us means pointing `+124`/`+128` at our own four-entry
+array. That is cheap, and safe as long as nothing ever reallocates or frees it.
+
+#### 3. A page id is a record, and a record is a list of parameters
+
+`0x400c2474` turns an id into one:
+
+```
+moveq #36,%d1 ; cmpl %d0,%d1 ; bcc keep ; moveq #-1,%d0   ; id > 36 -> the fallback
+moveq #44,%d1 ; mulsl %d1,%d0 ; addil #0x42432C00,%d0     ; record = base + 44 * id
+```
+
+`scripts/emu_page_records.py` reads them out of the snapshot — **no
+instructions executed**, since `ui1200M` has long since built the table:
+
+```
+id 4 (LFO1): 0x4464fe3c 0x4464fe5c   75 76 77 78 79 81 82 83   10
+id 5 (LFO2): 0x4464fe7c 0x4464fe6c   85 86 87 88 89 91 92 93   10
+id 6 (LFO3): 0x4464fe9c 0x4464febc   95 96 97 98 99 101 102 103  10
+```
+
+Two pointers, **eight parameter references**, and a span of 10. The references
+are **indices into the instrument's parameter table plus one** — `dnfw params
+--page LFO3` names them and the order settles it:
+
+| entry | record | parameter |
+|---|---|---|
+| 95, 96, 97, 98 | 94, 95, 96, 97 | SPD, MULT, FADE, DEST |
+| 99, *100 skipped* | 98, *99* | WAVE, *SLEW — present in the table, not on the page* |
+| 101, 102, 103 | 100, 101, 102 | SPH, MODE, DEP |
+
+`SPD MULT FADE DEST WAVE SPH MODE DEP` — the sound `ParameterSet` order §5k
+already established from the evaluators. **Two layers, one shape, again.**
+
+Each LFO owns ten consecutive records and the groups are ten apart, so the
+table itself says what a fourth would look like: group 26 = LFO1 = records
+74–83 = value slots 1–8, group 27 = LFO2 = 84–93 = slots 9–16, group 28 = LFO3
+= 94–103 = slots 17–24. **LFO4 = ten records carrying value slots 101–108** —
+the ones step 4a already made writable.
+
+#### What 4b has to build, and the one thing that is genuinely hard
+
+1. **Ten parameter records.** The table is at `0x401f7fc8`, 320 records of 60
+   bytes, **inside the firmware image** — so it cannot simply grow. Either ten
+   spare records exist somewhere in it, or the table is relocated into the
+   appended area and the code that reads it is repointed. *Not yet read: how
+   many places hold `0x401f7fc8` or a bound of 320.*
+2. **One page record.** `0x42432C00 + 44 * id` in RAM, ids 0–36, and **id 37's
+   space is already occupied** — the probe read code pointers there
+   (`0x400bdc1a`, `0x400c0822`). So the same choice applies: find an unused id
+   at or below 36, or relocate the record table and raise the `moveq #36`.
+3. **A fourth entry in the MOD vector**, per §2 above — the easy part.
+
+The hard part is (1), and it is hard for a reason worth stating plainly: both
+tables are sized by constants compiled into code that reads them, so growing
+either means finding every reader. That is a `dnfw fn callers` and
+`find_constant.py` job, and it is the next thing to do — **before** any of this
+is built, because if the parameter table cannot be extended safely the page has
+to be drawn another way.
+
+### tick7 passed on hardware — 2026-09-20
+
+`lfo4-tick7_DN2_1.11.syx` **passes on the instrument**: the per-track fourth
+LFO runs, each track reading its own row. Step 3 is now proved on the device,
+not only under the emulator.
+
+**With one lesson attached, and it is about the test, not the firmware.** The
+demo rows used `MULT 0x0100` — multiplier index 1, the slowest available —
+with `SPD 0x7000`, so the owner had to listen through roughly **fourteen bars**
+to hear one bar of movement:
+
+> "I almost wrote that it didn't work."
+
+That is the whole problem in one sentence. A demo whose effect is
+indistinguishable from a failure **cannot tell the two apart**, and it spends
+the tester's attention to find that out — on hardware, where every run costs a
+flash and a listen. The build was correct and very nearly recorded as broken.
+
+`scripts/build_lfo4_tick7.py` now uses `MULT 0x0800`, and the rule is in
+`docs/FEATURE-PLAYBOOK.md` §3: **a hard-coded demonstration must be obvious
+within a bar.** Keep the two rows different from each other — the per-track
+claim is what is being shown — but make both unmistakable.

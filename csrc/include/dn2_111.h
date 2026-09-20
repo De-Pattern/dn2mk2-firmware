@@ -31,6 +31,16 @@ typedef unsigned char u8;
 #define DN2_LOAD_SITE  0x400DD282      /* mvs.b 28(a2),d0 ; moveq #6,d2 -- 6 bytes */
 #define DN2_SAVE_SITE  0x400DD724      /* mvs.b 54(a2),d0 ; move.l (a0,d0.l*4),d0 -- 8 */
 
+/* The parameter setter, and the bound that makes room for LFO4's slots.
+ * 0x40037bd0 is `moveq #100,d0 ; cmp.l d2,d0 ; blt.s skip` -- six bytes, the
+ * width of a `jmp <abs.l>` exactly -- guarding `values[d2] = d3` at
+ * 0x40037be8. Above 100 stock firmware writes nothing at all, which is what
+ * makes it a safe divert (`docs/lfo4-build-plan.md` §"Why that bound is the
+ * opening"). */
+#define DN2_SET_BOUND  0x40037BD0      /* the six bytes replaced */
+#define DN2_SET_WRITE  0x40037BD6      /* on to the firmware's own write */
+#define DN2_SET_SKIP   0x40037C48      /* the epilogue the bound branches to */
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8

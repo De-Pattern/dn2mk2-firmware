@@ -53,12 +53,17 @@ the conclusion unverified.
 |---|---|
 | ColdFire firmware, static | `dnfw disasm / fn callers / fn entry / symbols / symbolmap / params / cave`, `scripts/sram_field_map.py` (field widths + read/write per address), `scripts/find_constant.py`, `scripts/call_map.py`, `ghidra/` |
 | what the firmware actually DOES at run time | digikit's emulator: `scripts/emu_*.py`, `scripts/lfo4_harness.py` (snapshot + direct call), `UC_HOOK_MEM_WRITE` to watch a field move, cold-boot parity against a stock control. `docs/emulator.md` |
+| **driving the panel** | **hold the encoder push and turn** -- a plain turn does nothing in a menu. Push codes 41..48 (A..H) = channel 5, bits 0..7; `code_for` is `channel * 8 + bit + 1`. `--panel-dwell 2` makes a tap a tap (the default pacing turns every tap into a hold). What does NOT run: the sequencer and the pattern load -- call those routines directly. Always run a control beside a positive result |
 | SHARC / DSP side | selache in WSL: `/root/selmap-target/release/selmap`, `/root/selache-target/release/{selas,seld,seldump,selsyms}`; regions in `out/sharc/*.bin`; `scripts/sharc_*.py`; `docs/sharc-*.md` |
 | project / preset / pattern data on a device | ask the DNX session -- never hand-roll SysEx capture here |
 | live hardware state | `scripts/service_console.py` (maintenance mode, read-only allow list); `docs/service-commands.md` |
 | has someone already read this? | `digikit-up/docs/FINDINGS.md`, `docs/for-digikit-*.md`, `docs/STATUS.md`, the lalzart notes (cite in our own words), Synthdawg (consult, never quote) |
 
 The same table with its reasoning: `docs/instruments.md`.
+
+A null from the emulator is only evidence once the input is known to arrive:
+`scripts/drive.py` exists to tell "input never reached the firmware" from
+"navigation works but deltas do not" from "the path works".
 
 Two ways this project has been fooled by a static read, both on 2026-09-20:
 `movea.l` does not prove a pointer -- it is also how GCC parks a value it wants
