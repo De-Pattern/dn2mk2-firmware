@@ -2706,3 +2706,39 @@ random waveform has no slew control and whose multiplier list is wrong in
 whichever mode selects the short range -- on a page that otherwise looked
 finished. The kind of gap that reads as a firmware bug rather than a missing
 record.
+
+#### The DEST list grows with the LFO, and LFO4 inherits that — 2026-09-21
+
+From the owner, and it is the one thing about the LFO pages that is not
+uniform: **the destination list grows as you advance through the MOD pages.**
+LFO2 can modulate LFO1's parameters; LFO3 can modulate LFO1's and LFO2's.
+The rest of the parameters are the same on every page.
+
+That is a deliberate acyclic design -- **LFO N may target LFO 1..N-1 and no
+further** -- and it is why the feature works at all: a fourth LFO cannot create
+a modulation cycle by being added at the end.
+
+It fits what this repository already measured from the engine side. §5k:
+`DEST` is a **mirror slot index**, bounded at 100 in the evaluator
+(`mvs.b %a4@(74),%d2 ; moveq #100,%d1 ; cmp.l %d7,%d1`), and the LFO block
+occupies slots **1-24** -- LFO1 `1-8`, LFO2 `9-16`, LFO3 `17-24`. So "LFO2 can
+modulate LFO1" is `DEST` taking a value in `1..8`, and the name the page shows
+for it is simply that slot's own parameter name, which is why destinations read
+`SYN BASE`, `SYN PD2` and so on rather than coming from a separate list.
+
+**What LFO4 needs:** its `DEST` list must offer slots **1-24**, all three
+earlier LFOs. And the existing three must **not** gain LFO4's slots 101-108,
+or the acyclic property breaks -- LFO1 could then target LFO4, which targets
+LFO1.
+
+**The open question, and it decides how much work this is.** Is the per-LFO
+bound *computed from the LFO index*, or written down three times? If computed,
+LFO4's list may follow for free once the page exists. If enumerated, there is a
+fourth enumeration to add, and the three existing ones must be left alone.
+Neither is read yet.
+
+It is answerable the way the last two were: open LFO2's MOD page, turn `DEST`,
+and watch what bounds the value -- the code that clamps it is the code that
+knows the rule. Worth doing **before** the ten records are built, because if
+the bound is enumerated per LFO then it is another site list like the 56 bases,
+and that belongs in the same patch rather than a later one.
