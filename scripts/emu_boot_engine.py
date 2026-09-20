@@ -43,6 +43,12 @@ from unicorn.m68k_const import (UC_M68K_REG_A2, UC_M68K_REG_A6,   # noqa: E402
 from emu_lfo4_tick import (EVAL_A, MIRROR_AT, MIRROR_BYTES, RATE, REST,   # noqa: E402
                            SET_FRAC, STATE, STATE_LEN, TRACKS)
 
+LOAD, SAVE = 0x400DD1EA, 0x400DD6A6     # (live, stored) and (stored, live, flag)
+SOUND_BYTES, STORED, VALUES_AT = 1163, 359, 28
+LFO4_IDS = [4, 8, 12, 16, 20, 24, 28, 32]          # the reserved p-lock ranks
+MARKS = [0x2A01, 0x2A02, 0x2A03, 0x2A04, 0x2A05, 0x2A06, 0x2A07, 0x2A08]
+EXT_SLOTS, EXT_PARAMS = 256, 8
+
 ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
 SYX = f"{ROOT}/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
 REPORTER = 0x4011EA6A
@@ -85,6 +91,33 @@ class After:
         self.uc.reg_write(UC_M68K_REG_A6, 0)
         self.uc.emu_start(fn, self.ret, count=20_000_000)
         return self.uc.reg_read(UC_M68K_REG_D0)
+
+
+def table_read(after, sym, key, param):
+    """-> `ext_val[key][param]` out of memory, or None.
+
+    Not `call(ext_get, ...)`: a call into firmware-resident code can be
+    interrupted, and then `emu_start` stops on its instruction count and hands
+    back whatever d0 holds -- which came back as 0 once and read exactly like
+    "the value never arrived" (`docs/lfo4-build-plan.md` §"Step 4a result").
+    """
+    for i in range(EXT_SLOTS):
+        if after.long(sym["ext_key"] + 4 * i) == key:
+            return int.from_bytes(bytes(after.uc.mem_read(
+                sym["ext_val"] + 2 * (i * EXT_PARAMS + param), 2)), "big")
+    return None
+
+
+def stored_sound(after, marks):
+    """A stored track the converter will accept: magic, version, name, values."""
+    at = after.alloc(STORED + 16)
+    after.write(at, bytes([0xbe, 0xef, 0xba, 0xce]) + (3).to_bytes(4, 'big'))
+    after.write(at + 12, b"LFO4 TEST" + bytes(1))
+    for i in range(107):                       # a distinct value per id, so a
+        after.write(at + VALUES_AT + 2 * i, bytes([0x40, i]))   # stray word shows
+    for k, v in enumerate(marks):
+        after.write(at + VALUES_AT + 2 * LFO4_IDS[k], v.to_bytes(2, "big"))
+    return at
 
 
 def main() -> int:
@@ -159,7 +192,47 @@ def main() -> int:
         print("\n  the engine ran and never called our code: this proves nothing.\n"
               "  Check that the build's stubs are actually in the path entered here.")
         return 1
-    print("\n  booted by the real loader, and the engine path ran clean.")
+    print("  the engine path ran clean under a real loader boot.")
+
+    # The save/load path, in the same boot. It is the one piece the gate
+    # cannot see from a boot alone: no kit loads at reset, so the two
+    # converter stubs never run, and until now they had only ever been
+    # exercised from `ui1200M` -- a machine our loader never booted.
+    fails = []
+    src = stored_sound(after, MARKS)
+    live = after.alloc(SOUND_BYTES)
+    loads_before = after.long(sym["lfo4_loads"])
+    after.call(LOAD, live, src)
+    got = [table_read(after, sym, live, k) for k in range(EXT_PARAMS)]
+    print("")
+    print(f"  load: the table holds {[hex(v) if v is not None else None for v in got]}")
+    if got != MARKS:
+        fails.append("the load did not put the eight marks in the table")
+    if after.long(sym["lfo4_loads"]) - loads_before != 1:
+        fails.append("the load was not counted once")
+
+    back = after.alloc(STORED + 16)
+    saves_before = after.long(sym["lfo4_saves"])
+    after.call(SAVE, back, live, 0)
+    ids = [int.from_bytes(bytes(after.uc.mem_read(back + VALUES_AT + 2 * i, 2)), 'big')
+           for i in LFO4_IDS]
+    print(f"  save: the stored ids hold {[hex(v) for v in ids]}")
+    if ids != MARKS:
+        fails.append("the save did not write the eight back to their ids")
+    if after.long(sym["lfo4_saves"]) - saves_before != 1:
+        fails.append("the save was not counted once")
+
+    if fault:
+        print("")
+        print(f"  ** the firmware drew EXCEPTION during save/load: {fault} **")
+        return 1
+    if fails:
+        print("")
+        for f in fails:
+            print("  FAIL  " + f)
+        return 1
+    print("")
+    print("  boot from reset, the engine, and save/load: all three in one machine.")
     return 0
 
 
