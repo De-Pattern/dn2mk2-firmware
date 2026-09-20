@@ -41,14 +41,18 @@ SRC = ROOT / "csrc"
 OUT = ROOT / "out/lfo4-ext"
 SYX = ROOT / "00_Resources/02_Builds/lfo4-ext_DN2_1.11.syx"
 
-# The two sites: entry, the C stub, and the symbol at the replayed instructions.
-SITES = [("memcpy", 0x40134490, "lfo4_memcpy_stub", "lfo4_memcpy_displaced"),
-         ("memset", 0x401344D8, "lfo4_memset_stub", "lfo4_memset_displaced")]
-DISPLACED = 8                     # bytes: jmp <abs.l> is 6, then a nop
+# Each site: what it is, where, the C stub, the symbol at the replayed
+# instructions, and how many bytes the jump displaces. A `jmp <abs.l>` is six,
+# so a six-byte site is exact and a longer one is padded with `nop`s.
+SITES = [("memcpy", 0x40134490, "lfo4_memcpy_stub", "lfo4_memcpy_displaced", 8),
+         ("memset", 0x401344D8, "lfo4_memset_stub", "lfo4_memset_displaced", 8),
+         ("sound load", 0x400DD282, "lfo4_load_stub", "lfo4_load_displaced", 6),
+         ("sound save", 0x400DD724, "lfo4_save_stub", "lfo4_save_displaced", 8)]
 
 
 def compile_code() -> cbuild.Linked:
-    sources = [SRC / "lfo4" / name for name in ("init.c", "ext.c", "carry.c", "hooks.S")]
+    sources = [SRC / "lfo4" / name
+               for name in ("init.c", "ext.c", "carry.c", "store.c", "hooks.S")]
     # `ext_get` / `ext_set` / `ext_drop` are reached by nothing in the image yet
     # -- step 2's save and load, step 4's page, and the harness are their
     # callers -- so they are named here or `--gc-sections` drops them.
@@ -57,15 +61,25 @@ def compile_code() -> cbuild.Linked:
                                  *(s[2] for s in SITES)])
 
 
-def patch(content: bytearray, code: cbuild.Linked) -> None:
-    """Replace each site's first eight bytes, having checked what is there."""
-    for name, va, stub, replay in SITES:
+def patch(content: bytearray, code: cbuild.Linked) -> list[dict]:
+    """Replace each site's first bytes, having checked what is there.
+
+    Returns what was written where, which `out/lfo4-ext/sites.json` carries to
+    the emulator harnesses: they patch what this patched, by construction,
+    rather than a second list that can drift from this one.
+    """
+    written = []
+    for name, va, stub, replay, n in SITES:
         at = va - BASE
-        stock = bytes(content[at:at + DISPLACED])
-        mine = code.image[code[replay] - CODE_VA:code[replay] - CODE_VA + DISPLACED]
+        stock = bytes(content[at:at + n])
+        mine = code.image[code[replay] - CODE_VA:code[replay] - CODE_VA + n]
         if mine != stock:
             raise SystemExit(f"{name}: the stub replays {mine.hex()}, the image holds {stock.hex()}")
-        content[at:at + DISPLACED] = b"\x4e\xf9" + struct.pack(">I", code[stub]) + b"\x4e\x71"
+        jump = b"\x4e\xf9" + struct.pack(">I", code[stub])
+        content[at:at + n] = jump + b"\x4e\x71" * ((n - len(jump)) // 2)
+        written.append({"what": name, "va": f"0x{va:08x}", "bytes": bytes(content[at:at + n]).hex(),
+                        "stock": stock.hex()})
+    return written
 
 
 def main() -> int:
@@ -76,10 +90,11 @@ def main() -> int:
     code = compile_code()
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
     content = loader.install(stock, [(area.CODE, chunk)])
-    patch(content, code)
+    written = patch(content, code)
 
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "section_3_MAIN_OS.bin").write_bytes(content)
+    (OUT / "sites.json").write_text(json.dumps(written, indent=1) + "\n", newline="\n")
     wanted = ("lfo4_", "ext_")
     symbols = {k: v for k, v in code.symbols.items() if k.startswith(wanted)}
     symbols["dnfw_boot"] = loader.build()["dnfw_boot"]

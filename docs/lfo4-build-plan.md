@@ -289,9 +289,11 @@ live array stops at 100:
 | 2 | `0x400dd718` | slot ≥ 101 → read from `ext` instead of `live+0x14` |
 | 3 | `0x400dd24a` | the 202-byte memset must also clear the extension array |
 
-**Unchecked:** the serialize loop's iteration bound. The deserialize side is
-`cmpil #214` = 107; the serialize side was not read to its `cmp`. If they differ,
-that matters.
+~~**Unchecked:** the serialize loop's iteration bound.~~ **Read 2026-09-20 —
+they differ.** Deserialize is `cmpil #214` = **107 ids**; serialize is
+`cmpil #200` = **100 live slots**, so slot 100 is never stored at all. The
+forward map is 100 longwords for that reason, and the inverse map starts
+immediately after it. See the step 2 result.
 
 ### The other five records in the same function
 
@@ -1980,3 +1982,102 @@ confirmation.
   `lfo4_reentered`, checked by the boot run and to be checked again in step 5's
   driven session. If it ever moves off zero the answer is to mask interrupts
   around the carry, and we will then know the microseconds are worth spending.
+
+### Step 2 result — a sound keeps its LFO4, 2026-09-20
+
+`csrc/lfo4/store.c` and two more stubs in `csrc/lfo4/hooks.S`; the same build,
+`lfo4-ext_DN2_1.11.syx`, now 1,884 B of code and four patched sites.
+
+**Neither map is edited, and §4's slot renumbering is dropped.** §4 designed
+LFO4 into live slots 101–108 and widened both loops to reach them. Reading the
+two maps out of the image killed that: `0x401fcf20` is **100 longwords** and
+`0x401fd0b0` starts immediately after it, so neither table can grow in place.
+The loops are left exactly as they are, and the eight ids are handled **once,
+after each loop**, from the sound's own address — the key step 1 already
+carries. Two hooks, both at sites where the live sound and the stored sound are
+still in `a2`/`a3`:
+
+| direction | site | displaced | what the C does |
+|---|---|---|---|
+| stored → live | `0x400dd282` | `mvs.b 28(a2),d0 ; moveq #6,d2` | read the eight ids, `ext_set` them, or drop the entry if all are zero |
+| live → stored | `0x400dd724` | `mvs.b 54(a2),d0 ; move.l (a0,d0*4),d0` | write `ext_get` into the eight ids |
+
+Unlike the `memcpy` / `memset` stubs these sit inside code that never expected a
+call, so both save `d0`/`d1`/`a0`/`a1` around it — all four are live across the
+site. ColdFire's `MOVEM` has no predecrement mode, hence the `lea` either side.
+
+### Which eight ids — measured, and not the ones §4 named
+
+Driving the real serializer with a marker in **all 101 live slots** and reading
+the stored block back:
+
+- **the ids the save loop never writes: 4, 8, 12, 16, 20, 24, 28 and 32.**
+  Eight, exactly what LFO4 needs;
+- **id 0 is written twice** — from live slot 0, and again from live slot 65,
+  which the map also folds onto it. Id 0 is the sentinel both directions fold
+  onto, so it is **not ours to take**: a stock save of one of our sounds would
+  drop slot 65's value on top of LFO4's first parameter. The rank starts one
+  parameter later and ends at 32 instead;
+- the serialize loop covers **live slots 0–99** — slot 100 is never stored, which
+  answers §4's "unchecked: the serialize loop's iteration bound" (100
+  iterations against deserialize's 107);
+- **live slots 4, 12 and 20 do not carry their own value** into storage. They are
+  LFO1–3's `DEST`, and the three fix-ups after each loop translate them through
+  the map — `DEST` is a *slot index* at runtime and a *p-lock id* in storage.
+  §5k read `DEST` as a slot index; this is the other half of that, and it is
+  what LFO4's own `DEST` will have to do in step 4.
+
+### §8's open question, answered by measurement
+
+> *whether a stock load + re-save keeps or zeroes those bytes (one scratch-slot
+> round trip would say)*
+
+**It zeroes them.** Asked of stock 1.11 on the same snapshot before any of our
+code was installed: a stored sound carrying all eight ids loads without
+complaint, every one of the eight is folded onto live slot 0 (the last one wins),
+and a stock re-save leaves **all eight at zero**. So the reserved ids survive
+being *stored* by anything; they do not survive a stock firmware touching the
+sound. LFO4's values are ours to keep only while our build is on the instrument
+— which is the honest answer, and it means a sound round-tripped through stock
+firmware comes back with LFO4 silently cleared rather than corrupted.
+
+### What the harness measured — `scripts/emu_lfo4_store.py`
+
+The firmware's own `0x400dd1ea` and `0x400dd6a6` called with laid-out
+arguments. All ten checks pass:
+
+| asked | answer |
+|---|---|
+| our load puts the eight into the table | yes, and counted as carrying |
+| the live sound our load produced | **byte for byte** the one stock produced |
+| our save writes the eight back | yes |
+| everything else in the stored sound | **0 bytes differ** from stock's |
+| save, lose the table, load again | the eight values come back |
+| a stock sound (the eight ids zero) | loads to **no entry at all**, not an entry of zeros |
+| saving that sound | leaves the eight ids zero, exactly as stock leaves them |
+
+**Cost:** save 2,037 → 2,588 instructions (+551), load 4,819 → 5,514 (+695),
+per sound. A pattern change loads sixteen, so ~11,000 instructions — beside the
+77,000 the sixteen loads already cost.
+
+### And from reset, again
+
+`scripts/emu_lfo4_boot.py` with all four sites watched: the loader and init run
+once, all **665** `memcpy` and **27** `memset` calls go through their stubs, the
+counts match the stock control exactly, and nothing was refused, overflowed or
+reentered. The two converter sites are **never reached from reset** -- a boot
+loads no kit and switches no pattern -- which the script now says in as many
+words rather than letting a `None == None` comparison print as a pass.
+
+### Still open after step 2
+
+- **Other load paths.** `0x400dd1ea` has one direct caller and is the **v3 track
+  converter**; the map scan found only six references to the two tables in the
+  whole image, and the other four are the p-lock path (step 6) and the two
+  id↔slot translators. A preset loaded from the +Drive by some other route would
+  not be hooked, and the harness cannot see a path it does not know about.
+- **Id 32 in the corpus.** DNX verified the rank `4*param+0` is `00 00` across
+  195,256 sound objects; the note in §8 says the lane checked was bytes 28–84
+  (ids 0–28) after correcting an earlier "36–92" (ids 4–32). Since the id set is
+  now **4–32**, that earlier range is the one that matters and it is worth one
+  confirmation from DNX rather than a re-reading of a note.

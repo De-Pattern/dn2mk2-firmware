@@ -1,8 +1,8 @@
-"""LFO4 step 1: what can be checked without an emulator.
+"""LFO4 steps 1 and 2: what can be checked without an emulator.
 
-The table's behaviour is the emulator harness's subject (`scripts/emu_lfo4_ext.py`),
-because it is only true in the presence of the firmware's own `memcpy` and
-`memset`. What belongs here is the build: that the code still compiles for the
+The table's behaviour is the emulator harnesses' subject
+(`scripts/emu_lfo4_ext.py`, `scripts/emu_lfo4_store.py`), because it is only
+true in the presence of the firmware's own routines. What belongs here is the build: that the code still compiles for the
 target, that every symbol something outside it reaches survives
 `--gc-sections`, and that each stub replays **exactly** the bytes its jump
 displaces -- an assembler that re-encoded one of those two instructions would
@@ -17,11 +17,14 @@ from dnfw.patch import cbuild
 
 SRC = pathlib.Path(__file__).resolve().parent.parent / "csrc"
 CODE_VA = 0x46800000
-ENTRIES = ["lfo4_init", "ext_get", "ext_set", "ext_drop", "lfo4_memcpy_stub", "lfo4_memset_stub"]
+ENTRIES = ["lfo4_init", "ext_get", "ext_set", "ext_drop",
+           "lfo4_memcpy_stub", "lfo4_memset_stub", "lfo4_load_stub", "lfo4_save_stub"]
 
 # Stock 1.11, read out of the image: the two instructions each jump displaces.
 STOCK = {"lfo4_memcpy_displaced": bytes.fromhex("226f0004206f0008"),   # moveal 4(sp),a1 ; moveal 8(sp),a0
-         "lfo4_memset_displaced": bytes.fromhex("206f000871af000b")}   # moveal 8(sp),a0 ; mvzb 11(sp),d0
+         "lfo4_memset_displaced": bytes.fromhex("206f000871af000b"),   # moveal 8(sp),a0 ; mvzb 11(sp),d0
+         "lfo4_load_displaced": bytes.fromhex("712a001c7406"),         # mvsb 28(a2),d0 ; moveq #6,d2
+         "lfo4_save_displaced": bytes.fromhex("712a003620300c00")}     # mvsb 54(a2),d0 ; movel (a0,d0*4),d0
 SLOTS, PARAMS = 256, 8
 
 
@@ -29,7 +32,8 @@ SLOTS, PARAMS = 256, 8
 def linked():
     if not cbuild.available():
         pytest.skip("no m68k GCC")
-    sources = [SRC / "lfo4" / name for name in ("init.c", "ext.c", "carry.c", "hooks.S")]
+    sources = [SRC / "lfo4" / name
+               for name in ("init.c", "ext.c", "carry.c", "store.c", "hooks.S")]
     return cbuild.build(sources, base=CODE_VA, include=[SRC / "include"], entries=ENTRIES)
 
 

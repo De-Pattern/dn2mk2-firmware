@@ -456,6 +456,26 @@ application task blocks on. Without them that task makes one pass through its
 message loop and waits forever — a machine that is running and doing nothing,
 whose every zero belongs to the harness rather than the firmware.
 
+## A patch written after the code has run is a suggestion — 2026-09-20
+
+A harness that restores a snapshot, calls a routine, *then* installs a patch
+into that routine is patching a function Unicorn has already translated, and
+**the stale translated block keeps running**. Unicorn watches for self-modifying
+code written by the *emulated* program; a host-side `mem_write` through the API
+is not that.
+
+It does not fail loudly. `scripts/emu_lfo4_store.py` read the patched bytes back
+correctly, a `UC_HOOK_CODE` on the patched address fired, the hooked routine's
+own counter stayed at **zero**, and the live sound it produced was byte for byte
+the stock one -- which is exactly what a hook that never ran produces. The same
+run's *other* hook worked, so "the patching works" was true and useless.
+
+**The fix is one line after the last patch:** `uc.ctl_flush_tb()` (older
+bindings: `ctl_remove_cache(start, end)`), which `scripts/lfo4_harness.py` now
+does inside `install()`. **The habit is to install before running anything**, and
+to flush anyway. A harness that measures stock behaviour first -- which is worth
+doing -- has no choice but to patch late, so it must flush.
+
 ## A control has to be asked for in the phase it lives in
 
 The first version of `call_map.py` required both hardware-marked probes, `R` and
