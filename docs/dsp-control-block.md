@@ -113,18 +113,47 @@ is a struct, and the widths separate it into three kinds of field:
 | `0x80005394`-`0x800053a0` | long | the busy end: `0x80005398` alone has **22 reads and 5 writes** |
 | `0x800053a4`, `0x800053ba`, `0x800053c0` | -- | only ever taken as addresses (`pea`/`lea`): buffers, not fields |
 
-**`0x80005398` is a pointer, not a value.** It is loaded with `movea.l` into an
-address register (`0x40025ee0`) and, at `0x400268b4`, read and offset by
-**90,000** bytes before use. So the block carries a pointer to a structure of at
-least ~88 KB, alongside the arrays at `0x80005220` and `0x80005260` that the
-same code walks. What that structure is has not been identified here, and
-90,000 is recorded as the number the code uses, not as evidence for any
-particular object.
+### `0x80005398`, and why it is not labelled yet
+
+Its 27 sites were read. The two halves disagree, and the disagreement is the
+finding.
+
+**Consumed as an address.** At `0x40025ee0` it is loaded with `movea.l` and then
+indexed -- `lea %a0@(0,%d0:l:2),%a0` -- and the result stored as a working
+pointer. At `0x400268b4` it is read, **90,000** added, and pushed as an argument
+to `0x40138b5c`; the *other* branch of that same `if` builds the same argument
+from `[%a1+4]`, a genuine pointer out of a structure, plus the same 90,000. Two
+branches producing one argument, one of them unambiguously a pointer.
+
+**Produced as an accumulator.** Its five writes are all in the transport
+cluster, and the one at `0x400d98a8` is plain:
+
+```
+0x400d98a2  lea 0x42c4e900,%a0
+0x400d98a8  movel %a0@,0x80005398        ; the block gets the current value
+0x400d98ae  movel 0x42c4e900,%d0
+0x400d98b4  addil #900000,%d0            ; and the source advances by 900,000
+0x400d98ba  movel %d0,0x42c4e900
+```
+
+`0x42c4e900` is one of four longwords (`+0`, `+4`, `+8`, `+0xc`) that the
+`0x400d7xxx`-`0x400dAxxx` transport code works over -- 51 sites between them --
+and several of those sites *add* it to something rather than dereference it.
+
+**Both readings fit their own half and not the other.** A slab cursor handing
+out 900,000-byte blocks explains the pointer use and the advance; a time or
+sample accumulator explains the additions and the transport-side owner, but not
+`lea %a0@(0,%d0:l:2),%a0`. Naming it either way now would be identifying a
+structure from a count, which this project does not do
+(`docs/PRINCIPLES.md`). **What is certain: the block carries a 32-bit quantity
+the DSP side needs, the sequencer produces it, and at least two consumers treat
+it as a base address.**
 
 ## Not read
 
-- **What `0x80005398` points at**, and the fields at `0x80005348`, `0x80005394`,
-  `0x8000539c` and `0x800053a0` that surround it.
+- **What `0x80005398` really is**, per above, and the fields at `0x80005348`,
+  `0x80005394`, `0x8000539c` and `0x800053a0` that surround it. The way in is
+  `0x42c4e900`'s four longwords and where they are initialised.
 - **Which slots**, in practice: the applier writes small constants, but nothing
   here enumerates the frame's sixteen slots or says which carry per-track
   audio — if any do.
