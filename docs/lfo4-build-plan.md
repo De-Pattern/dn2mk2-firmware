@@ -2492,3 +2492,26 @@ either means finding every reader. That is a `dnfw fn callers` and
 `find_constant.py` job, and it is the next thing to do — **before** any of this
 is built, because if the parameter table cannot be extended safely the page has
 to be drawn another way.
+
+### tick7 passed on hardware — 2026-09-20
+
+`lfo4-tick7_DN2_1.11.syx` **passes on the instrument**: the per-track fourth
+LFO runs, each track reading its own row. Step 3 is now proved on the device,
+not only under the emulator.
+
+**With one lesson attached, and it is about the test, not the firmware.** The
+demo rows used `MULT 0x0100` — multiplier index 1, the slowest available —
+with `SPD 0x7000`, so the owner had to listen through roughly **fourteen bars**
+to hear one bar of movement:
+
+> "I almost wrote that it didn't work."
+
+That is the whole problem in one sentence. A demo whose effect is
+indistinguishable from a failure **cannot tell the two apart**, and it spends
+the tester's attention to find that out — on hardware, where every run costs a
+flash and a listen. The build was correct and very nearly recorded as broken.
+
+`scripts/build_lfo4_tick7.py` now uses `MULT 0x0800`, and the rule is in
+`docs/FEATURE-PLAYBOOK.md` §3: **a hard-coded demonstration must be obvious
+within a bar.** Keep the two rows different from each other — the per-track
+claim is what is being shown — but make both unmistakable.

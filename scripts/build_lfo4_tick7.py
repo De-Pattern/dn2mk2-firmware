@@ -50,9 +50,20 @@ TRACKS = 16
 ROW = 16                                   # eight u16 slots, mirror order
 
 # One row per track: SPD MULT FADE DEST WAVE SPH MODE DEP.
-INERT = (0x7000, 0x0100, 0x4000, 0, 0x0100, 0x0000, 0x0000, 0x7FFE)
-FAST = (0x7000, 0x0100, 0x4000, 76 << 8, 0x0100, 0x0000, 0x0000, 0x7FFE)
-SLOW = (0x2000, 0x0100, 0x4000, 76 << 8, 0x0100, 0x0000, 0x0000, 0x7FFE)
+#
+# **A demo has to be obvious in a bar.** The build that passed on hardware on
+# 2026-09-20 used `MULT 0x0100` -- multiplier index 1, the slowest there is --
+# with `SPD 0x7000`, and the owner had to listen through about **fourteen bars**
+# to hear one bar of movement: "I almost wrote that it didn't work."
+#
+# That is a defect in the *instrument*, not in the firmware: a demo whose effect
+# is indistinguishable from a failure cannot tell the two apart, and the tester
+# pays for it. So a hard-coded modulation now runs fast enough to be heard
+# within a bar, and the two rows still differ audibly from each other so the
+# per-track claim is still what is being shown.
+INERT = (0x7000, 0x0800, 0x4000, 0, 0x0100, 0x0000, 0x0000, 0x7FFE)
+FAST = (0x7000, 0x0800, 0x4000, 76 << 8, 0x0100, 0x0000, 0x0000, 0x7FFE)
+SLOW = (0x2000, 0x0800, 0x4000, 76 << 8, 0x0100, 0x0000, 0x0000, 0x7FFE)
 ROWS = [FAST, SLOW] + [INERT] * (TRACKS - 2)
 
 OUT = pathlib.Path("00_Resources/02_Builds/lfo4-tick7_DN2_1.11.syx")

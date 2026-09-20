@@ -231,6 +231,26 @@ never by index.
 
 ---
 
+### A demonstration must be obvious within a bar
+
+When a build hard-codes a value to prove a mechanism works — a modulation, a
+sweep, a blink — **choose the setting that is impossible to miss, not the one
+that is technically correct.**
+
+`lfo4-tick7` proved a per-track fourth LFO on hardware with multiplier index 1,
+the slowest there is. It worked. The owner had to listen through about fourteen
+bars to hear one bar of movement and nearly reported it as a failure.
+
+The cost is asymmetric and that is the point: an over-obvious demo costs
+nothing, and an under-obvious one spends a flash, a listen and the tester's
+confidence, then risks a correct build being recorded as broken. On hardware
+those are expensive, and a wrong "failed" is worse than a slow "passed" —
+it sends the next session looking for a bug that is not there.
+
+Applies to anything a person has to perceive to verify: make the modulation
+fast, the sweep wide, the contrast high. Subtlety is for the feature, never for
+its proof.
+
 ## 4. What is NOT yet proven, and must not be written up as fact
 
 - Everything in §1 layers 3–8 is **read but not flashed**. The v3 build is the
