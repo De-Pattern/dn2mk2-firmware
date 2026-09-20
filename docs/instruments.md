@@ -1,0 +1,77 @@
+# Which instrument answers which question
+
+**Written 2026-09-20, after a failure worth naming.** One 32-bit field
+(`0x80005398`) was read three times from the instruction stream in a single
+afternoon and labelled three different ways — a pointer, the base of a
+900,000-byte region, a timestamp — while the emulator that could have watched it
+move and the SHARC toolchain that could have checked the other end of the link
+both sat unused. Two of the three labels were wrong.
+
+The owner's question was the right one: *"why are we guessing when we have
+tools?"*
+
+## The table
+
+| the question is about | reach for |
+|---|---|
+| **ColdFire firmware, statically** | `dnfw disasm`, `dnfw fn callers` / `fn entry`, `dnfw symbols` / `symbolmap`, `dnfw params`, `dnfw cave`; `scripts/sram_field_map.py` (per-address width and read/write); `scripts/find_constant.py`; `scripts/call_map.py`; `ghidra/` |
+| **what the firmware actually does at run time** | digikit's emulator — `scripts/emu_*.py`, `scripts/lfo4_harness.py` for snapshot + direct call, `UC_HOOK_MEM_WRITE` to watch a field move, and a cold boot beside a **stock control**. `docs/emulator.md` |
+| **the SHARC / DSP side** | selache in WSL: `/root/selmap-target/release/selmap` for a linear walk, `/root/selache-target/release/{selas,seld,seldump,selsyms}`; the regions in `out/sharc/*.bin`; `scripts/sharc_*.py`; `docs/sharc-*.md` |
+| **project, preset or pattern data on a device** | ask the DNX session. Never hand-roll SysEx capture here |
+| **live hardware state** | `scripts/service_console.py` — maintenance mode, read-only allow list. `docs/service-commands.md` |
+| **has someone already read this?** | `digikit-up/docs/FINDINGS.md`, our own `docs/for-digikit-*.md` and `docs/STATUS.md`, the lalzart notes (cite in our own words), the Synthdawg guide (consult, never quote) |
+
+## The rule
+
+**Before extended inference, name the instrument that would settle it.** If one
+exists, use it. If none does, say so and mark the conclusion unverified rather
+than letting a plausible reading harden into a label.
+
+A static read is evidence about *encoding*. It is rarely evidence about
+*meaning*, and this project has now been fooled twice in one day:
+
+- **`movea.l` does not prove a pointer.** It is also how GCC parks a 32-bit
+  value it wants to index with `lea`.
+- **An unsigned range test does not prove memory.** A window check on a wrapping
+  counter has exactly the same shape.
+
+What settled that field in the end was neither: it was the *callee*, a list
+insert ordered by `subl` + `bpl` — a **signed** difference, which is how
+quantities that wrap are compared and not how addresses are.
+
+## And the first thing it produced was a negative
+
+`scripts/emu_timebase.py` was written to settle the unit of that 900,000 span by
+watching the marks move: hook **writes** to the transport's four longwords and
+the two block fields, and count three references with known meaning beside them
+— the audio ISR, the transport stop, the due-time queue insert.
+
+60 M instructions from reset, stock MAIN OS. The result:
+
+```
+  reference points: none fired
+  6 write(s) to the watched words
+    n=     33,457  block 5394  <- 0  from 0x4000046e   (the .data initialiser)
+    n= 10,930,880  cursor +0   <- 0  from 0x400004d2   (the BSS clear)
+```
+
+**Not one of the four reference points ran**, and the only writes are the
+startup code zeroing the words. The emulator does not reach this path from a
+cold boot — which matches `docs/emulator.md`: the sequencer does not play there,
+because the audio-frame chain needs the DSP side that is not modelled.
+
+So the instrument answered, and its answer was *"I cannot reach that"*. That
+bounds the question rather than leaving it open: the unit of the span will be
+settled by digikit's SSI0 pacing work when it matures, or on the instrument —
+not by more reading. **A tool that reports it cannot see something is still a
+result, and a better one than a third inference.**
+
+## The hook
+
+`.claude/hooks/tool_routing.py`, wired to `UserPromptSubmit` in
+`.claude/settings.json`, injects this table when a prompt asks for something to
+be found out (what/why/which/find/confirm/verify/infer …) and stays silent
+otherwise. It is a prompt, not a gate: it cannot force a tool to be used, only
+put the list in front of the assistant before it starts reasoning.
+
+It needs nothing but Python — this machine has no `jq`.

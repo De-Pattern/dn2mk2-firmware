@@ -113,18 +113,56 @@ is a struct, and the widths separate it into three kinds of field:
 | `0x80005394`-`0x800053a0` | long | the busy end: `0x80005398` alone has **22 reads and 5 writes** |
 | `0x800053a4`, `0x800053ba`, `0x800053c0` | -- | only ever taken as addresses (`pea`/`lea`): buffers, not fields |
 
-**`0x80005398` is a pointer, not a value.** It is loaded with `movea.l` into an
-address register (`0x40025ee0`) and, at `0x400268b4`, read and offset by
-**90,000** bytes before use. So the block carries a pointer to a structure of at
-least ~88 KB, alongside the arrays at `0x80005220` and `0x80005260` that the
-same code walks. What that structure is has not been identified here, and
-90,000 is recorded as the number the code uses, not as evidence for any
-particular object.
+### `0x80005394` and `0x80005398`: two marks on a monotonic line, 900,000 apart
+
+All 27 sites of `0x80005398` were read, and this field took **three readings
+before the evidence settled**. The wrong turns are kept because each was a
+reasonable inference from what was in hand, and what killed it is the useful
+part.
+
+1. *"A pointer."* From `movea.l` into an address register at `0x40025ee0` and an
+   offset of 90,000 at `0x400268b4`. Too thin: `movea.l` is also how GCC parks
+   any 32-bit value it wants to index with `lea`.
+2. *"A 900,000-byte region, base in `0x80005394`."* From the unsigned range test
+   at `0x40027b32` — `0 <= d0 - base < 900000`. Wrong, because a window check on
+   a wrapping counter has exactly that shape.
+3. **What the evidence supports: timestamps.**
+
+The deciding read is the routine the value is passed to. `0x40138b5c` inserts
+into a linked list **ordered by that value**:
+
+```
+0x40138ba6  movel %d3,%d0
+0x40138ba8  subl %a2@(4),%d0     ; d0 = key - node.key
+0x40138bac  bpls <insert here>   ; SIGNED difference
+0x40138be0  cmpl %a2@(4),%d3     ; same key? bucket it
+0x40138be6  moveal %a2@(12),%a0  ;   items chained through their own +104
+```
+
+**A signed difference is how you order quantities that wrap**; addresses are
+compared unsigned. The list is maintained with interrupts masked to IPL 7, keyed
+at node `+4`, with equal keys bucketed — a due-time queue. A second routine,
+`0x40138ca0`, swaps the whole head out atomically and walks every item: a flush,
+not a dispatch.
+
+So the two fields are **marks on a monotonic line**: the transport advances both
+by **900,000** at `0x400d98b4`-`0x400d98c0`, hands one to the DSP block, and
+schedules work at **`mark + 90,000`** — a tenth of the span. The writes that
+compute `base + delta` do so under IPL 7 (`movew #9984,%sr`), as a value shared
+with an interrupt handler must be.
+
+**The unit is not identified.** Nothing read here compares either mark against a
+hardware timer or a sample counter, which is what would fix it. 900,000 appears
+at **12 sites** across the transport and engine and 90,000 at four, one of them
+inside the modulation kernel (`0x400db4e8`), so whatever the unit is, those
+subsystems share it.
 
 ## Not read
 
-- **What `0x80005398` points at**, and the fields at `0x80005348`, `0x80005394`,
-  `0x8000539c` and `0x800053a0` that surround it.
+- **The unit of the 900,000 span**, per above. The way in is the clock the due-time
+  queue is compared against, which is not in the routines read here.
+- The fields at `0x80005348`, `0x8000539c` and `0x800053a0`, and where
+  `0x42c4e900`'s four longwords are initialised.
 - **Which slots**, in practice: the applier writes small constants, but nothing
   here enumerates the frame's sixteen slots or says which carry per-track
   audio — if any do.

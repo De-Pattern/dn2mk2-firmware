@@ -2081,3 +2081,70 @@ words rather than letting a `None == None` comparison print as a pass.
   (ids 0–28) after correcting an earlier "36–92" (ids 4–32). Since the id set is
   now **4–32**, that earlier range is the one that matters and it is worth one
   confirmation from DNX rather than a re-reading of a note.
+
+### Step 3 result — each track has its own LFO4, 2026-09-20
+
+`scripts/build_lfo4_tick7.py` → `00_Resources/02_Builds/lfo4-tick7_DN2_1.11.syx`.
+v6a's single 16-byte parameter block becomes a **sixteen-row table** in the same
+cave, and both evaluators index their own track's row.
+
+**The index was already there, in both.** This is why the engine change is two
+lines rather than a design:
+
+| evaluator | where the track index lives at the hook |
+|---|---|
+| A `0x40137726` | `%a5` — zeroed at `0x40137758`, stepped once per track, used as a shift count at `0x40137770`–`0x4013777e` |
+| B `0x401373dc` | `%d0` — its own argument (`movel %sp@(68),%d0`), read at `0x4013740c` and `0x40137410` and never written before the hook |
+
+So each stub adds `track << 4` to the table base. Everything else is v6a's,
+**imported rather than copied**: the state relocation, the loop counts, the
+stride arithmetic, the flag sweep and five of the seven stubs. The two lines
+that change are matched by their rendered text with a count-of-one assertion, so
+if v6a's source moves this build stops instead of patching the wrong stub.
+
+### What the harness measured — `scripts/emu_lfo4_tick.py`
+
+The build's 412 changed bytes are written into a restored snapshot and the real
+evaluator is entered — its generator, its MAC-unit apply, its state walk. After
+40 frames, with every mirror slot starting centred at `0x4000`:
+
+```
+  track 1  slot 76  -> 0x7f00      its own row: fast
+  track 2  slot 76  -> 0x447f      its own row: slow, a different value
+  track 3+ slot 0                  DEST = 0, the no-destination sink
+  exactly 16 words written in all, one per track
+```
+
+All five checks pass. The assertion is on the **whole** write pattern — sixteen
+words, one per track, at the slot each track's row names — which is stronger
+than sampling three of them.
+
+### Three things that cost an hour, and are worth keeping
+
+1. **It panicked, and the panic has a name.** The evaluator burned its whole
+   20 M instruction budget. A PC histogram found it parked at `0x40138d92`, a
+   `bras` to itself with 38 direct callers: the halt.
+2. **A control cleared the build before any of it was debugged.** Stock firmware,
+   same snapshot, same arguments, panicked **identically** — so the fault was
+   the call, not the patch.
+3. **The firmware names its own failure.** Hooking the reporter at `0x4017cec8`
+   and reading its stack gives the assert verbatim:
+   `GET_MACSR_MODE() == MACF_FRAC`, `../../../lib/shared/sm/fade.c` line 16,
+   function `getFadeStep`. **Evaluator A expects its caller to have put the EMAC
+   in fractional mode** — the audio-frame function does, a bare snapshot has
+   not, and evaluator B sets it itself at `0x401373f0`. The harness now does it
+   the way the firmware does, by running `movel #32,%macsr`.
+
+### Two facts about calling evaluator A, for whoever needs them next
+
+- **Its seven arguments**, read off the firmware's own call at `0x400272a4`:
+  the parameter object, `[0x402a0dec]` (a scale, `0x25f8` in the snapshot), two
+  per-track enable masks, two out-pointers, and a flag whose low byte asks for a
+  state backup first.
+- **The first argument is not the mirror.** The prologue does
+  `lea %a0@(34),%a0`, so the sixteen 202-byte rows start **34 bytes in**. Found
+  by diffing the whole buffer after a run, not by reading harder.
+
+**Still owed: the instrument.** The plan's step 3 asks for two tracks with
+different LFO4 on the device, and the build for it verifies every integrity
+field. Nothing here replaces that.

@@ -32,4 +32,9 @@ desktop.ini
 
 # Claude Code session tooling -- local only, not part of the project
 .claude/
+# ...except the tooling hook, which is part of how this project works
+!.claude/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 out/
