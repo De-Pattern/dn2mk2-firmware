@@ -2857,6 +2857,140 @@ kept for the record: Questions for the flash: is the picture upright
 reveal takes about as long as DNX's 5.6 s; does the boot wait for the copy of a
 115-170 KB appended area.
 
+## 17. A performance mixer driven by MIDI controllers
+
+**Raised by the owner 2026-09-17:** *"build a performance mixer via midi
+controllers and the different outputs and routings of the tracks in the DN1 and
+DN2"* — prompted by Overbridge and the Outbox splitting out each track, the send
+FX and the master.
+
+### Where the splitting and routing actually live (read, not assumed)
+
+The owner's premise was that the per-track split and its processing are in
+section 8. The bytes say otherwise, in a way that helps:
+
+- **Section 8 is the Outbox 8's own firmware** — named by its USB strings
+  (`docs/firmware-sections.md`): USB PD, USB host/device tasks, flash and
+  calibration messages, version 1.00E. It is the accessory's program, byte-identical
+  inside Digitakt mk1 1.53. It carries **no** audio, routing, Overbridge or mixer
+  strings (it has very few strings at all). Whether its code does signal
+  processing is unread.
+- **The routing is configured in MAIN OS (section 3)**, as a "break out box":
+  `BreakOutBoxSettings` (with `updateMirror` and a `Serialize`), its storage
+  `BOB::bobConfigStorage_v0_t` behind `ValueWithMirror`, and three menu views —
+  `BreakOutBoxRoutingMenuView`, `BreakOutBoxEditMenuView` (with clear/paste) and
+  `BreakOutBoxCVOutputConfigMenuView` (**the Outbox has configurable CV outputs**).
+  `OVERBRIDGE` and `OVERBRIDGE SYNC` are MAIN OS strings too.
+- **The audio itself is rendered on the SHARC (section 7)** — per-track mixing,
+  sends and master. So a per-track split is DSP work that MAIN OS configures and
+  the Outbox or Overbridge carries out of the box. The DSP-side mechanism is unread.
+
+### What is already MIDI-controllable per track
+
+The parameter records' `+0x18` high byte is the MIDI CC (Elektron's published
+CC map agrees):
+
+| record | CC |
+|---|---|
+| Solo | 93 |
+| Mute | 94 |
+| Track Level | 95 |
+| Pattern Mute | 110 |
+| Chorus / Delay / Reverb send | 29 / 30 / 31 |
+
+Each on the track's own MIDI channel. So a controller can already mix levels,
+mutes and sends; what it cannot do is **routing** (which output a track goes to,
+Outbox/Overbridge assignment), the **master and FX returns**, or one controller
+page mapped across all tracks on one channel.
+
+### First steps
+
+1. Read `bobConfigStorage_v0_t` and the routing menu: what a route is, how many
+   outputs, per track or per bus, and whether a routing change can be applied live.
+2. Map which mixer parameters have no CC (master, FX returns, routing) and whether
+   the CC dispatcher can be given new entries — the `+0x18` field suggests a
+   table-driven path, like the modulation-mask route that already worked.
+3. The DN1 side, from `Digitone_and_Digitone_Keys_OS1.43` (no Outbox classes
+   expected; Overbridge per-track outputs exist there).
+4. Decide the product: firmware-side CC mappings, or a host-side mixer
+   (Overbridge/Outbox outputs driven by a controller) — the latter needs no
+   firmware change for anything already CC-mapped.
+
+### Cueing — the feature a Digitone has never had (owner, 2026-09-17)
+
+*"the important one never given to a DN has been to be able to have a channel/s
+for cueing ... so you can prelisten before sending the audio live through the
+master out."* And: *"the firmware for the outbox give us the possibility of
+creating our own version to be able to handle that DJ mixer functionality."*
+
+**What the DN2 already has that a cue can be built from** (manual 1.10D §13.6,
+and the strings of `AudioRoutingMenuView` / `RoutingMenuView` in MAIN OS):
+
+| setting | what it does | why it matters for cue |
+|---|---|---|
+| `AUDIO ROUTING TO MAIN` | per track (16), per FX return (3) and inputs: send to MAIN OUT or not, one trig key each | taking a track **off the master** is already a live per-track bit |
+| `AUDIO ROUTING TO FX` | per track: send to the FX or not | |
+| `USB OUT` | `MAIN`, or **one or two tracks** as L/R (`L:T%d R:T%d`), `EXT`, `OFF` | a track can already leave the box **without** going to main |
+| `PRE/POST FADER` | USB track audio before or after track level | pre-fader cue is exactly what DJ cue is |
+| `INT TO MAIN` | internal audio to **MAIN OUT and HEADPHONES** or not | the headphones follow the main bus |
+| Outbox 8 routing | `OUTBOX 8 ROUTING CONFIG`, per output audio or CV (`PRESS RIGHT TO ADD AUDIO OUTPUT`, `OUTPUT %d-8 WILL BE CV OUTS`) | eight extra physical outputs to put a cue pair on |
+
+**The catch:** the manual says `INT TO MAIN` feeds *"MAIN OUT and HEADPHONES OUT"*
+and the main volume sets both — the headphone jack appears to be the **main bus**,
+not a separate one. So **cue on the DN2's own headphones** would need a second
+DSP bus and a separately driven headphone output; whether the hardware can do that
+(separate DAC channels) is unknown and may be impossible.
+
+**Three routes, cheapest first:**
+
+1. **Cue on a USB pair or an Outbox pair — MAIN OS only.** A "cue" action (a key
+   combo or a MIDI CC) that, for the selected track(s), clears its `TO MAIN` bit
+   and routes it pre-fader to the cue output; a second action commits it back to
+   main. Every primitive exists and is already changed live from menus; this is
+   wiring them to a performance control. Listening happens on the computer
+   (USB) or on the Outbox's outputs.
+2. **A cue bus on the DN2's headphones** — needs the DSP (section 7) to render a
+   second mix and the hardware to output it separately. Blocked on reading the
+   SHARC mixer and the codec's channel count.
+3. **Custom Outbox 8 firmware** (the owner's suggestion) — section 8 is the
+   Outbox's complete ARM program, shipped and flashed by the DN2 update, so a
+   modified one could in principle add mixing and cue logic inside the box. It is
+   the largest route: the DN2<->Outbox USB protocol and audio path are unread, the
+   ARM code is unread (no ARM toolchain here yet), and a bad image risks the
+   accessory, whose recovery path is unknown. Worth it only after route 1 shows
+   what the DN2 already sends it.
+
+**Decision, 2026-09-17:** route 1 first — *but not started yet* (owner: "not
+starting now"). Long-term aim recorded: learn how the Outbox decodes the DN2's
+audio, then a DIY portable interface speaking the same protocol, with a custom
+firmware that only does main output and headphone cue.
+
+**Not built.**
+
+### 2026-09-20: what the Outbox 8 work since has added
+
+Two findings from elsewhere land on this section, both from the firmware rather
+than from the premise:
+
+- **Section 8 is the Outbox 8's own firmware**, named by its USB strings
+  (`docs/firmware-sections.md`), and the updater carries it. So the DN2 ships
+  the peripheral's image and the routing that drives it lives in MAIN OS, which
+  is the split this section assumed and can now cite.
+- **The Digitone 1 stores an Outbox 8 CV configuration in the project**:
+  `BOB::bobConfigStorage_v0_t`, 304 bytes, **eight 22-byte records, one per CV
+  output**, added to the tail settings object at OS 1.43 and named by the
+  firmware's own `BreakOutBoxEditMenuView` (`docs/dn1-project-migration.md`).
+  Its editor items -- `CV ZERO LEVEL`, `CV MAX LEVEL`, `INVERT POLARITY`,
+  `SEND MIDI`, `SUSTAIN`, `SOSTENUTO`, `EXPRESSION LEARN`, `REVERSE DIRECTION`,
+  `PORT A`/`PORT B` -- are exactly the per-output controls a performance mixer
+  would want to reach, and they are already persisted and already edited by a
+  view in the image.
+
+Neither changes the verdict below, and this stays **not started**. What they
+change is the starting point: the per-output model exists, is stored, and has a
+UI, so a mixer would extend something rather than invent it. The DN2 side has
+not been checked for the same structure.
+
 ## 18. P-locking the arpeggiator's parameters
 
 **Raised by the owner 2026-09-17**, after the arp engine was read for §10.
