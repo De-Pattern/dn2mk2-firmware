@@ -222,6 +222,66 @@ process, which from the outside looks more careful than ours has been.
 
 ---
 
+## 6. The audio is not on that SPI port — it is SSI0 and eDMA 48/50 — 2026-09-20
+
+Added after the original note. It bears on §3's open question, and one part of
+it lands squarely on something your emulator work is waiting for.
+
+**Two windows, and they are the ColdFire/SHARC audio crossing.**
+
+| window | eDMA channel | direction |
+|---|---|---|
+| `0x4E6E0100` / `0x4E6E0900` | 50, TX | ColdFire -> SHARC |
+| `0x4E6DF100` / `0x4E6DF900` | 48, RX | SHARC -> ColdFire |
+
+Each is double-buffered, the halves `0x800` apart, and the half in flight is
+found by reading **channel 50's `SADDR` at `0xFC045640`** and comparing it with
+`0x4E6E0900` (MCF5441x eDMA: TCDs from `0xFC045000`, `0x20` stride). The frame
+is **64 bytes**, stepped to `0x800` per half — 32 frames — and the service
+engine's loops use **three longwords** of each frame. Sixteen slots with three
+in use: a TDM frame, not a stereo codec stream.
+
+**The `0x007FFFFF` marker: what it is for.** Your `EMULATOR-SHARC-BOUNDARY`
+phase 2 notes the vector-170 handler *"waiting for an external `0x007fffff`
+sync marker before it installs the pending normal channel-50 callback"*. The
+service-mode alignment routine at **`0x400d5470`** (DN2 1.11) shows the same
+constant doing a job:
+
+```
+0x400d547a  moveb #50,0xfc04401c          ; kick
+0x400d5480  movel 0xfc045640,%d0          ; channel 50 SADDR
+0x400d5486  cmpil #0x4e6e0900,%d0 ; scs %d1
+0x400d54a2  addil #0x4e6df100,%d1         ; -> the RX half now safe to read
+0x400d54aa  moveal #0x7fffff,%a1
+0x400d54b0  lsll #6,%d2                   ; frame index * 64
+0x400d54b4  cmpal %a0@(0,%d2:l),%a1       ; is this frame's slot 0 full scale?
+0x400d54b8  beqs <found>                  ; ... over 32 frames
+```
+
+On a hit it takes the scatter-gather pointers of **both** channels
+(`0xFC045618` = ch48 + 0x18, `0xFC045658` = ch50 + 0x18) and writes **62** into
+the linked descriptor's `CITER` and `BITER` (`+0x14`, `+0x1C`) instead of
+**64**, on each. That slips the stream by two frames. Miss it on all 32 and it
+gives up through `0x400d5590`; the retry budget is `0x42c4baf0` and the miss
+count `0x42c4baec`.
+
+So the marker is a **frame-alignment probe, corrected by a two-frame DMA slip**
+— which also says the RX side is expected to echo something the ColdFire can
+provoke, and that the handler you are stuck at is waiting on exactly that.
+
+**And a partial answer to §3's discriminator.** We asked there what writes
+`0x80005e60` and `0x4244098c`, and said sound parameters would make the SPI
+stream the control path while an audio ring would not. The audio has now turned
+up somewhere else entirely — SSI0, not that DSPI — and the audio-frame function
+`0x40025e0a` touches **both**: at `0x400277b4` it computes
+`0x4E6DF100 + (x << 11)`, the RX half, and passes it to `0x40138460` together
+with **`0x800053c0`**, which is `0x1C` inside the `0x800053a4` buffer of §3's
+scatter send. One function, both regions. That is evidence *for* the SPI stream
+being control rather than audio, though it does not name what the control is.
+
+**Unread, and we are not guessing:** which three of the sixteen slots the loops
+use, and whether they are a mix or three of a per-track set.
+
 ## Reproducing
 
 ```
