@@ -24,9 +24,6 @@
  */
 #include "ext.h"
 
-#ifndef LFO4_ROWS
-#error "LFO4_ROWS must be defined: the address of the engine's parameter table"
-#endif
 #ifndef LFO4_KIT
 #error "LFO4_KIT must be defined: the live container the sequencer is given"
 #endif
@@ -35,6 +32,20 @@
 #define ROW_BYTES    (2u * EXT_PARAMS)
 #define SOUND_AT     52u                  /* the gate's `addil #52,%d3` */
 #define SOUND_STRIDE 1163u                /* and its `addil #1163,%d3` */
+
+/* The rows the engine reads, and **they live here, in our own BSS.**
+ *
+ * They used to sit in the code cave inside MAIN OS, at an address passed in as
+ * `LFO4_ROWS`. That was wrong on its own terms: a cave is a gap in somebody
+ * else's *code*, and these are mutable state written every tick. Step 3 got
+ * away with it because its table was written once at build time and only ever
+ * read; the bridge writes to it at run time, which is a different thing to ask
+ * of a code region.
+ *
+ * Owning them here also deletes a build-time constant: the stubs get the
+ * address from `lfo4_refresh`'s return value, so nothing has to agree about a
+ * number in two places. */
+u16 lfo4_rows[TRACKS][EXT_PARAMS];
 
 u32 lfo4_refreshes, lfo4_copies_in;
 static u32 seen_sound[TRACKS];
@@ -48,13 +59,13 @@ u32 lfo4_sound_of(u32 track)
 /* -> the address of this track's row, current as of now. */
 u32 lfo4_refresh(u32 track)
 {
-    u32 row = (u32)LFO4_ROWS + track * ROW_BYTES;
+    u32 row = (u32)lfo4_rows + track * ROW_BYTES;
     u32 sound, generation;
     u16 *values;
     u32 k;
 
     if (track >= TRACKS)
-        return (u32)LFO4_ROWS;            /* never index past the table */
+        return (u32)lfo4_rows;            /* never index past the table */
     lfo4_refreshes++;
     sound = lfo4_sound_of(track);
     generation = ext_generation;

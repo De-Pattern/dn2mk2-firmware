@@ -51,7 +51,10 @@ SRC = ROOT / "csrc"
 OUT = ROOT / "out/lfo4-bridge"
 SYX = ROOT / "00_Resources/02_Builds/lfo4-bridge_DN2_1.11.syx"
 
-SOURCES = ("init.c", "ext.c", "carry.c", "store.c", "bridge.c", "hooks.S")
+# `setter.c` is here because `hooks.S` is shared and its `lfo4_set_stub`
+# refers to it. This build does not patch that site, so `--gc-sections`
+# drops both -- but the link needs the symbol to exist.
+SOURCES = ("init.c", "ext.c", "carry.c", "store.c", "bridge.c", "setter.c", "hooks.S")
 ENTRIES = ["lfo4_init", "ext_get", "ext_set", "ext_drop", "lfo4_refresh", "lfo4_sound_of",
            *(s[2] for s in SITES)]
 
@@ -91,10 +94,13 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=()) -> int:
     section = firmware.container.find(MAIN_OS)
     stock = section.unpack()
 
-    table_va = v6a.CAVE
+    # The rows are a C array now, so the address comes *out* of the build
+    # instead of being told to it -- and the cave goes back to holding nothing
+    # but stubs, which is all a gap in someone else's code should ever hold.
     code = cbuild.build([SRC / "lfo4" / name for name in sources], base=CODE_VA,
-                        include=[SRC / "include"], entries=entries,
-                        defines={"LFO4_ROWS": f"{table_va:#x}u", "LFO4_KIT": f"{KIT:#x}u"})
+                        include=[SRC / "include"], entries=entries + ["lfo4_rows"],
+                        defines={"LFO4_KIT": f"{KIT:#x}u"})
+    table_va = code["lfo4_rows"]
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
     content = loader.install(stock, [(area.CODE, chunk)])
     print(f"part 1 -- C: {len(code.image)} B at {CODE_VA:#010x}, {code.bss:,} B of state; "
@@ -110,16 +116,14 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=()) -> int:
         print(f"  {va:#010x}  {name}")
 
     print("part 3 -- the engine, from step 3")
-    table = tick7.table_bytes()
-    stub_va = table_va + len(table)
+    stub_va = v6a.CAVE
     v6a.require_zero(content, v6a.CAVE, v6a.CAVE_CAP, "cave region")
-    content[table_va - BASE:table_va - BASE + len(table)] = table
     payload, offsets = v6a.assemble_stubs(cave_source(table_va, code["lfo4_refresh"]), stub_va)
-    if len(table) + len(payload) > v6a.CAVE_CAP:
-        raise SystemExit(f"cave overflows: {len(table) + len(payload)} > {v6a.CAVE_CAP}")
+    if len(payload) > v6a.CAVE_CAP:
+        raise SystemExit(f"cave overflows: {len(payload)} > {v6a.CAVE_CAP}")
     content[stub_va - BASE:stub_va - BASE + len(payload)] = payload
-    print(f"  table {len(table)} B, stubs {len(payload)} B, "
-          f"{v6a.CAVE_CAP - len(table) - len(payload)} B of cave left")
+    print(f"  rows {table_va:#010x} (in our BSS), stubs {len(payload)} B, "
+          f"{v6a.CAVE_CAP - len(payload)} B of cave left")
     for va, was, new, why in v6a.edits(table_va):
         v6a.poke(content, va, was, new, why)
     for va, was, kind, label in v6a.hooks(table_va, offsets):
