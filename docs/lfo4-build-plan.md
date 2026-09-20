@@ -2515,3 +2515,36 @@ flash and a listen. The build was correct and very nearly recorded as broken.
 `docs/FEATURE-PLAYBOOK.md` §3: **a hard-coded demonstration must be obvious
 within a bar.** Keep the two rows different from each other — the per-track
 claim is what is being shown — but make both unmistakable.
+
+#### Correction: how a page entry reaches a parameter record is NOT established
+
+§"Step 4b, mapped" says the page record's eight entries are "indices into the
+instrument's parameter table plus one", on the strength of the names lining up
+in `SPD MULT FADE DEST WAVE SPH MODE DEP` order. **That alignment is real and
+the mechanism behind it is not read.** Three measurements since:
+
+- **No literal reference to the table exists.** The parameter table sits at
+  `0x401f7fc8` (320 records of 60 bytes). Neither that address, nor the table's
+  end, nor any record boundary from -2 to +39, appears as a four-byte value
+  anywhere in the image.
+- **There is no RAM copy.** Searching the snapshot for the exact 60 bytes of
+  LFO3's `SPD` record across the record-table region, the UI object region and
+  the page-record strings finds **zero** copies. The records are read in place,
+  from the image.
+- **So nothing yet found turns entry 95 into record 94.** A scan for the
+  `base + stride * index` idiom finds 36 tables, none of them this one.
+
+The record layout *is* confirmed, from its own bytes: `+0` a code pointer,
+`+4` a name pointer, `+8` the group (`0x1c` = 28 for LFO3), `+12` the value
+slot id (`0x11` = 17, LFO3's `SPD`), `+20` the range (`0x7ffe`) -- matching
+`dnfw params` field for field.
+
+**Why this matters for 4b:** the plan's third task was "find every reader of
+the parameter table's bound". If the table is never addressed by a literal
+base, that task is not a constant hunt at all, and the route for adding ten
+records is unknown rather than merely hard. **Read how a page entry resolves
+to a record before designing anything that adds one** -- the emulator can
+answer it directly by watching who reads `0x401f95d0` while the LFO3 page
+draws, which is the next probe rather than another static scan.
+
+Recorded because the earlier section reads as settled and is not.
