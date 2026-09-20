@@ -54,7 +54,7 @@ from dnfw.firmware.load import load            # noqa: E402
 from dnfw.image import bootstream              # noqa: E402
 
 sys.path.append(str(pathlib.Path.home() / "digikit" / "tools"))
-for candidate in (r"C:\ZZ_Code\ZZ_Personal\digikit\tools",
+for candidate in (r"D:_Code\Z_Personal\digikit\tools",
                   str(pathlib.Path.home() / "digikit" / "tools")):
     if pathlib.Path(candidate).is_dir():
         sys.path.insert(0, candidate)

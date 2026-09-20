@@ -33,7 +33,7 @@ hit** only, and the whole question is about the range of values across a run.
 
 Usage (from a WSL shell with the patched Unicorn venv, see docs/emulator.md):
 
-    DIGIKIT=/mnt/c/ZZ_Code/ZZ_Personal/digikit \\
+    DIGIKIT=/mnt/d/01_Code/Z_Personal/digikit \\
     DT2_SECTIONS=/root/dn2-sections-111 \\
     python scripts/trace_value_array_sites.py \\
         --snapshot ~/dn2-snapshots/Digitone_II_OS1.11/boot400M.snap \\

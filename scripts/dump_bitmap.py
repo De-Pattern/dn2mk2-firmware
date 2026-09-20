@@ -5,7 +5,7 @@ through an animated offset table and copies the result to the panel
 (`docs/display-path.md`). To see the undisplaced image -- what a mod stamp would
 be added to -- read the source `Bitmap` directly.
 
-    DIGIKIT=/mnt/c/ZZ_Code/ZZ_Personal/digikit DT2_SECTIONS=/root/dt2-sections-115c \\
+    DIGIKIT=/mnt/d/01_Code/Z_Personal/digikit DT2_SECTIONS=/root/dt2-sections-115c \\
     /root/dn2-emu-venv/bin/python scripts/dump_bitmap.py \\
         snapshots/dt2_115c_ext400M.snap 0x43135268 out/source.png
 
