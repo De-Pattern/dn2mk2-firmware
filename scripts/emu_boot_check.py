@@ -122,8 +122,18 @@ def main() -> int:
         return 2
 
     started = time.time()
-    entries = sorted((k, v) for k, v in sym.items()
-                     if k.startswith(("lfo4_", "dnfw_")) and not k.endswith("_displaced"))
+    # The build writes `symbols.json` beside its section, so the routines to
+    # watch come from the build itself rather than a list kept in step by hand.
+    entries = []
+    beside = os.path.join(os.path.dirname(args.image), "symbols.json")
+    if os.path.exists(beside):
+        sym = {k: int(v, 16) for k, v in json.load(open(beside)).items()}
+        entries = sorted((k, v) for k, v in sym.items()
+                         if k.startswith(("lfo4_", "dnfw_")) and not k.endswith("_displaced")
+                         and not k.startswith("lfo4_size"))
+    else:
+        print("  no symbols.json beside the image: coverage cannot be reported, "
+              "and a boot alone does not clear a build.")
     ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries)
     print(f"  {os.path.basename(os.path.dirname(args.image))}: {frames} frame(s) in "
           f"{ran:,} instruction(s), {round(time.time() - started, 1)}s\n")
