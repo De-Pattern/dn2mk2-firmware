@@ -71,9 +71,13 @@ SET_FRAC = bytes.fromhex("a93c000000204e75")      # movel #32,%macsr ; rts
 
 
 def differences(stock: bytes, built: bytes):
-    """-> [(virtual address, bytes)] for every run the build changed."""
-    if len(stock) != len(built):
-        raise SystemExit(f"section lengths differ: {len(stock):,} vs {len(built):,}")
+    """-> [(virtual address, bytes)] for every run the build changed.
+
+    A build that appends the `DNFW` area is longer than stock; the tail is
+    simply another run, since nothing in stock occupies it.
+    """
+    if len(built) < len(stock):
+        raise SystemExit(f"built section is shorter than stock: {len(built):,} < {len(stock):,}")
     runs, start = [], None
     for i in range(len(stock) + 1):
         same = i == len(stock) or stock[i] == built[i]
@@ -82,6 +86,8 @@ def differences(stock: bytes, built: bytes):
         elif same and start is not None:
             runs.append((BASE + start, built[start:i]))
             start = None
+    if len(built) > len(stock):
+        runs.append((BASE + len(stock), built[len(stock):]))
     return runs
 
 

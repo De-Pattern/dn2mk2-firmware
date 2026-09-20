@@ -20,7 +20,7 @@ u32 ext_key[EXT_SLOTS];
 u16 ext_val[EXT_SLOTS][EXT_PARAMS];
 u16 ext_default[EXT_PARAMS];
 
-u32 ext_live, ext_lo, ext_hi;
+u32 ext_live, ext_lo, ext_hi, ext_generation;
 u32 ext_inserts, ext_drops, ext_full, ext_overflow;
 
 static u32 home(u32 key)
@@ -59,6 +59,7 @@ static void remove_at(u32 i)
     ext_key[i] = 0;
     ext_live--;
     ext_drops++;
+    ext_generation++;
     for (;;) {
         j = (j + 1) & MASK;
         if (!ext_key[j])
@@ -109,6 +110,7 @@ u16 *ext_add(u32 key)
     values(i, ext_default);
     ext_live++;
     ext_inserts++;
+    ext_generation++;
     if (key < ext_lo)
         ext_lo = key;
     if (key > ext_hi)
@@ -179,6 +181,7 @@ void ext_copy(u32 dst, u32 src)
         return;
     for (p = 0; p < EXT_PARAMS; p++)
         to[p] = carried[p];
+    ext_generation++;
 }
 
 void ext_carry(u32 dst, u32 src, u32 n)
@@ -204,6 +207,7 @@ void ext_carry(u32 dst, u32 src, u32 n)
         for (p = 0; p < EXT_PARAMS; p++)
             to[p] = carried[i][p];
     }
+    ext_generation++;
 }
 
 void ext_clear(u32 at, u32 n)
@@ -235,6 +239,8 @@ void ext_set(u32 key, u32 param, u16 value)
     if (param >= EXT_PARAMS)
         return;
     v = ext_add(key);
-    if (v)
+    if (v) {
         v[param] = value;
+        ext_generation++;
+    }
 }

@@ -21,6 +21,9 @@ import re
 import sys
 
 # Verbs and shapes that mean "go and find out", not "do this thing I described".
+# `is it` / `does it` were here and matched "How is it going?"; a bare pronoun
+# question is not an investigation, and a false positive costs context on every
+# turn it fires.
 TRIGGERS = re.compile(
     r"\b("
     r"what (is|are|does|do|was|were|happens)|why (is|are|does|do|did)|how (does|do|is|are|did)"
@@ -30,8 +33,16 @@ TRIGGERS = re.compile(
     r"|confirm|verify|corroborate|settle|prove|disprove|check (if|whether|what|that)"
     r"|investigate|analys[ei]|analyz[ei]|understand|explain|read the|look (at|into)"
     r"|disassemb|trace|map out|reverse"
-    r"|is it|does it|can we tell|any idea|hypothes"
+    r"|can we tell|any idea|hypothes"
     r")\b", re.IGNORECASE)
+
+# Conversational forms the triggers above catch by accident: "How is it
+# going?" matched `how is`. A pleasantry is not an investigation, and a false
+# positive costs context on the turn it fires. Anchored to the whole prompt, so
+# a real question that merely opens this way still fires.
+CHATTER = re.compile(r"^\W*(how('s| is| are| did)?( it| things| we| that)?"
+                     r"( going| go| doing)?|what('s| is) next|any news|all good"
+                     r"|status)[\s?!.]*$", re.IGNORECASE)
 
 ROUTING = """<tool-routing>
 This prompt asks for something to be found out. Before any extended inference,
@@ -61,7 +72,8 @@ def main() -> int:
         payload = json.load(sys.stdin)
     except Exception:
         return 0                      # never block a prompt over a parse error
-    if not TRIGGERS.search(payload.get("prompt") or ""):
+    prompt = payload.get("prompt") or ""
+    if CHATTER.match(prompt) or not TRIGGERS.search(prompt):
         return 0
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
                                              "additionalContext": ROUTING}}))
