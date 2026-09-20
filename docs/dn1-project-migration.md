@@ -106,3 +106,36 @@ after its real payload, exactly as DNX measured on the DN1. A reader should
 find the trailer rather than trust the declared length; both candidate offsets
 fall inside the fixed-length transfer, so one code path serves both versions on
 either instrument.
+
+## What the 512 bytes are: the Outbox 8 CV configuration
+
+The element-wise region at `0x299A00` is the **tail settings** object, and
+`0x4000cbc4` is its converter: it accepts version **7** only, copies `0x3000`
+bytes, initialises a new field at settings + **11,766** (`0x2DF6`) and stamps
+version **8**.
+
+- `0x40015b44` zero-fills **304** bytes (`0x130`), then loops **8 times with a
+  22-byte stride**, writing a small header and per-item bytes; it also fills 8
+  pairs of longs at `+0x28`/`+0x2c` through the ratio helper `0x40136ff8`.
+- `0x40015cb2` zeroes those 64 bytes (8 x 8) by itself.
+- The object is copied elsewhere as `0x130` bytes (`0x40015cd2`), so 304 of the
+  512 are used.
+
+The firmware names it: RTTI `BreakOutBoxSettingsCvConfigCopy` and
+`BOB::bobConfigStorage_v0_t`, the view `BreakOutBoxEditMenuView`, and strings
+`OUTBOX 8 CONNECTED`, `OUTBOX 8 STEREO OUT %d/%d`, `CV OUT %d`,
+`COPY / PASTE / CLEAR CV CONFIG`. The editor's items are `CV ZERO LEVEL`,
+`CV MAX LEVEL`, `INVERT POLARITY`, `SEND MIDI`, `SUSTAIN`, `SOSTENUTO`,
+`EXPRESSION LEARN`, `REVERSE DIRECTION`, `PORT A`, `PORT B`, formatted `%d.%03d`.
+
+**So the eight records are the eight CV outputs, not eight tracks.** The DNX
+session measured the saved defaults on the instrument (one 22-byte record per
+output, then 8 x `3FFF`): `0x1388` = 5000 and `0x3E8` = 1000 read as 5.000 and
+1.000 in that three-decimal format, and `0x3C`/`0x48` are notes 60 and 72.
+`0x4663` is unaccounted for. The type is already `_v0_t`, so expect it to grow
+again.
+
+Measurements on the instrument are the DNX session's
+(`dn_sysex/99_HardwareTest/dn1-143-2026-09-20/FINDINGS.md`); they confirmed the
+converter byte for byte on a project saved by a 1.43 instrument, and that the
+17 objects are song records.
