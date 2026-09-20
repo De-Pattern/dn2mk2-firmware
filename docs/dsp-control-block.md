@@ -92,11 +92,39 @@ through this block.
 - **For anyone reading the DSPI stream:** its payload is this block, so a
   capture of the stream is a capture of these fields.
 
+## The block's shape, counted rather than guessed
+
+`scripts/sram_field_map.py` walks the section for absolute-addressing
+instructions naming an address in a range and reports, per address, the width,
+the direction and the sites. It decodes the MOVE family properly -- a move's
+destination is stored reg-then-mode, the reverse of its source -- so it tells a
+read from a write, and it prints anything it cannot name as `?` with the opcode
+word rather than dropping it.
+
+    python scripts/sram_field_map.py <image> 0x80005340 0x800053e0
+
+Over `0x80005340`-`0x800053e0` on 1.11: **30 addresses, 133 sites.** The shape
+is a struct, and the widths separate it into three kinds of field:
+
+| range | width | what the counts say |
+|---|---|---|
+| `0x80005360`-`0x8000536b` | **byte** | twelve one-byte fields, each written from one or two sites and read from one or two. The slot indices and enables above live here |
+| `0x8000536c`-`0x80005380` | long / word | six fields written from the kit-side and settings setters |
+| `0x80005394`-`0x800053a0` | long | the busy end: `0x80005398` alone has **22 reads and 5 writes** |
+| `0x800053a4`, `0x800053ba`, `0x800053c0` | -- | only ever taken as addresses (`pea`/`lea`): buffers, not fields |
+
+**`0x80005398` is a pointer, not a value.** It is loaded with `movea.l` into an
+address register (`0x40025ee0`) and, at `0x400268b4`, read and offset by
+**90,000** bytes before use. So the block carries a pointer to a structure of at
+least ~88 KB, alongside the arrays at `0x80005220` and `0x80005260` that the
+same code walks. What that structure is has not been identified here, and
+90,000 is recorded as the number the code uses, not as evidence for any
+particular object.
+
 ## Not read
 
-- The rest of the block. `0x80005348`, `0x80005394`, `0x80005398` (27 sites),
-  `0x8000539c`, `0x800053a0` (11 sites) and `0x800053c0` are all live and
-  unexamined.
+- **What `0x80005398` points at**, and the fields at `0x80005348`, `0x80005394`,
+  `0x8000539c` and `0x800053a0` that surround it.
 - **Which slots**, in practice: the applier writes small constants, but nothing
   here enumerates the frame's sixteen slots or says which carry per-track
   audio — if any do.
@@ -110,4 +138,6 @@ dnfw disasm <image.syx> 0x40025f60 120      # the slot arithmetic
 dnfw disasm <image.syx> 0x40025982 130      # the applier
 dnfw disasm <image.syx> 0x40025a5c 80       # where its arguments come from
 dnfw disasm <image.syx> 0x40025b76 60       # the kit-side setter
+
+python scripts/sram_field_map.py <image.syx> 0x80005340 0x800053e0
 ```
