@@ -407,3 +407,77 @@ catch audio breaking up under load.
 Boot 1.11 with bit `0x20` forced at `0x400cf086`; check the service task is
 created and mode 4 selected; then call `0x4011f364` directly with `#HELLO\n`,
 `#STATUS\n`, `#READ SYNC_1\n` and capture every `0x400054b4` reply.
+
+## Under the emulator — 2026-09-20
+
+Two harnesses, because the two questions need different setups.
+
+### What maintenance mode starts (`scripts/emu_service_mode.py`)
+
+A cold boot from reset with bit `0x20` forced into `0x40287520` just before the
+OS tests it (in the emulator a memory write; on the instrument the bootstrap's
+job). Measured:
+
+| | |
+|---|---|
+| boot flags before the write | `0x4` -- the bit is **not** set on a normal boot |
+| USB mode selected | **4** -- the CDC-ACM `PID 0xFFFF` device, against 2/5/6 on a stock boot |
+| service task | **created** at 315.7M instructions, entry `0x400cd48e`, priority 2 |
+| the task's own body | first ran at 472.3M |
+
+So the static reading holds: maintenance mode is the normal OS plus a USB
+serial port and a task listening on it.
+
+**What this harness cannot do, and why.** The service task is priority 2, and
+the emulator's semaphore patch means higher-priority tasks never sleep, so it
+runs once and starves. It never reaches its queue receive, and no command can
+be delivered this way -- checked to 900M instructions (23 min), where the run
+ends at the same place as at 500M.
+
+### What it answers (`scripts/emu_service_commands.py`)
+
+So the dispatcher is called directly, as `scripts/emu_arp_plocks.py` calls the
+p-lock routines: restore a snapshot, build the command queue in spare RAM with
+the line already posted, enter `0x400cd48e` on a synthetic stack. Everything
+from there is the firmware's own code -- the comparison chain, the handlers,
+the reply function. Ten read-only commands, and it refuses anything that
+writes, plays or reboots.
+
+```
+#HELLO           -> HOW DO YOU DO?
+#STATUS          -> # START / OK / VERSION 1
+                    # OS / OK / "0059        1.11"
+                    # PLATFORM / OK / PCBA0109A1
+                    # PRODUCT / OK / 52;5;15;Digitone II
+                    # FLASH / FAIL / WRONG DEVICE TYPE 00 0000
+                    # DRAM / OK      # DSP / OK
+                    # SUPERCAP / FAIL / SUPERCAP NEVER AT DISCHARGED STATE
+                    # UI / FAILED / WRONG UI CARD
+                    # MMC / FAIL / WRONG DEVICE TYPE
+                    # CODEC / FAIL / NO AUDIO INTERRUPT
+#READ SYNC_1     -> 0
+#READ_SERIAL     -> NO SERIAL NUMBER
+#READ_TESTED     -> 4294967295
+#TEST_STATUS     -> WRONG UI CARD / UI TEST NOT PASSED / UI TEST NOT COMPLETED /
+                    AUDIO TEST NOT PASSED / FACTORY RESET NOT ARMED FOR NEXT BOOT /
+                    MRAM STATE NOT WRITTEN / MMC NOT RECONFIGURED / NOT FACTORY TESTED
+#MMC_GET_HEALTH  -> PRE_EOL_INFO 0x00 / DEVICE_LIFE_TIME_EST_TYPE_A 0x00 / ..._B 0x00
+#MMC_GET_RECONFIGURED -> FALSE
+```
+
+`#HELLO` answering `HOW DO YOU DO?` closes the loop the 1.10E reading opened.
+
+**Read the failures correctly.** FLASH, MMC, CODEC, UI and SUPERCAP fail
+because the emulator models none of them; they say nothing about an
+instrument. The fields that do not depend on hardware are the interesting ones,
+and `%.16s` resolving to `0059        1.11` is **the ELE3 build string plus the
+version** (`docs/ele3-format.md`), which independently confirms that the
+four-digit number a project declares as its format version is the build number
+of the firmware that wrote it.
+
+`#STATUS` carries no serial number, so nothing identifying is in that transcript.
+
+### What is still unexercised
+
+The USB endpoint and the byte receiver's framing: both harnesses start after
+them. Their behaviour is read in the code above and not measured.
