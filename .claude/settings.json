@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/tool_routing.py\"",
+            "timeout": 10,
+            "statusMessage": "Routing to the right instrument"
+          }
+        ]
+      }
+    ]
+  }
+}
