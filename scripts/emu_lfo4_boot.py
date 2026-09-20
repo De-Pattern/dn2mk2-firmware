@@ -91,9 +91,16 @@ def main() -> int:
     check("no entry was refused and no batch overflowed",
           u32("ext_full") == 0 and u32("ext_overflow") == 0,
           f"full {u32('ext_full')}, overflow {u32('ext_overflow')}")
+    check("no call reached the table while another was inside it",
+          u32("lfo4_reentered") == 0, f"{u32('lfo4_reentered')} reentered")
     print(f"  the boot's own copies: {u32('lfo4_copies')} of a sound or more "
           f"({u32('lfo4_sound_copies')} exactly a sound, {u32('lfo4_range_copies')} larger), "
           f"{u32('lfo4_clears')} clears; {u32('ext_live')} entries live")
+    sizes = struct.unpack(">24I", bytes(m.uc.mem_read(sym["lfo4_sizes"], 96)))
+    seen = [(sizes[i], sizes[i + 1]) for i in range(0, 24, 2) if sizes[i]]
+    print("  block sizes it moved: " + (", ".join(f"{n:,} B x{c}" for n, c in seen) or "none")
+          + (f" (+{u32('lfo4_sizes_dropped')} more distinct sizes not recorded)"
+             if u32("lfo4_sizes_dropped") else ""))
     print(f"\n{len(failures)} failure(s): {failures}" if failures else "\nall checks pass")
     return 1 if failures else 0
 
