@@ -2323,3 +2323,14 @@ located rather than assumed.
    must tap `[MOD]`, or use up / down, and it must **check the slot it wrote**:
    four writes to slot 1 look exactly like success until you read which slot
    they hit.
+
+   **Why it kept happening after that was understood — 2026-09-20.** The
+   diagnosis above was right and the fix did not take, because
+   `emulib.panel.settle` passed `CHUNK` as its spin budget instead of the
+   window it was asked for. Every window under 10 M ran a full 10 M, so `tap`
+   asked for 2 M and held for 10 M, and the `--dwell` argument that was
+   supposed to fix it was read by nothing. A sweep over that argument came back
+   identical at 500 K and 2 M — not because the pages were insensitive to it,
+   but because both runs were the same 10 M. `docs/emulator.md` §"And it was
+   neither the keys nor the dwell" has the walk before and after, and the pages
+   turn out to be `MOD (n/3)`, one per press, clamping at the ends.
