@@ -2148,3 +2148,47 @@ than sampling three of them.
 **Still owed: the instrument.** The plan's step 3 asks for two tracks with
 different LFO4 on the device, and the build for it verifies every integrity
 field. Nothing here replaces that.
+
+### The track → live sound map, read and verified — 2026-09-20
+
+The bridge's one missing fact. `0x400ddc52`, the v4 container gate, ends in the
+sixteen-track loop:
+
+```
+0x400ddcda  movel %a3,%d3          ; a3 = the live container, argument 1
+0x400ddcdc  movel %a2,%d4          ; a2 = the stored container, argument 2
+0x400ddcde  addil #52,%d3          ; the live sounds start at +52
+0x400ddce4  addil #60,%d4          ; the stored tracks at +60
+...
+0x400ddcfa  jsr %a4@               ; a4 = 0x400dd1ea, the deserializer of step 2
+0x400ddd0c  addil #1163,%d3        ; live  += 1163
+0x400ddd12  addil #359,%d4         ; stored += 359
+0x400ddd18  moveq #16,%d0          ; sixteen tracks
+```
+
+So **`sound(track) = live container + 52 + track * 1163`**, and the live
+container on 1.11 is `0x4210c08c` — the address `#PLAY_PATTERN` hands the
+sequencer (`docs/service-commands.md`), a literal in the image rather than a
+pointer that moves.
+
+**Checked against a snapshot rather than left as arithmetic.** Reading those
+addresses gives named sounds, in track order:
+
+| track | address | name |
+|---|---|---|
+| 1 | `0x4210c0c0` | `FRAGILE BEINGS` |
+| 2 | `0x4210c54b` | `DULCI SPACE` |
+| 3 | `0x4210c9d6` | `LAST BREAKFAST` |
+| 4 | `0x4210ce61` | `WEAVING CIRCLE` |
+
+Two things fell out of the same read. The container's first longword is
+`'KIT '`, so it is the kit header and the sounds are **not** at `+0` -- which is
+what the earlier probe of `0x4210c08c` showed and could not explain. And the
+loop just above the pointer setup (`0x400ddcbc`-`0x400ddcd8`) writes sixteen
+words at container `+20`, each clamped to `32512`; in the snapshot they read
+`0x6400` for fifteen tracks and `0x5900` for one, which is **the per-track
+level**, 100 and 89 coarse.
+
+`0x4058e8d8` -- the arp work's `TRACK_SOUNDS` -- is **not** this map: all
+sixteen of its longwords are zero in the same snapshot, so that harness laid it
+out synthetically.
