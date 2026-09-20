@@ -198,6 +198,7 @@ attributes each changed run to a cave, an in-place edit, the appended area, or
 | `lfo-wavetable4` | 676 B + 560 B, same two caves | 80 B, 25 sites | — | glyph tile |
 | `arp-on-midi2` | — | 4 B, 1 site | — | — |
 | `bootscreen-bang` | 200 B at `0x402dfa1c` | 15 B, 2 sites | 2,092 B | 2,056 B at `0x46710000` |
+| `c-hello` (LFO4 step 0) | loader 132 B at `0x4028da70` (cave `0x4028da6e`, 138 B) | 16 B, 2 sites (startup calls, `memcpy` entry) | 164 B `CODE` chunk | 156 B at `0x46800000` -- **LFO4's code region** |
 | `intro-tunnel` | — | 2 B, 2 sites | — | — |
 | `intro-stamp` | 184 B at `0x402dfa1c` | 8 B, 1 site | — | — |
 
