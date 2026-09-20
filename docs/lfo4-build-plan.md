@@ -2334,3 +2334,66 @@ located rather than assumed.
    but because both runs were the same 10 M. `docs/emulator.md` §"And it was
    neither the keys nor the dwell" has the walk before and after, and the pages
    turn out to be `MOD (n/3)`, one per press, clamping at the ends.
+
+### Step 4a result — ids 101–108 reach the table, 2026-09-20
+
+`00_Resources/02_Builds/lfo4-slots_DN2_1.11.syx` is the bridge plus one site:
+`lfo4_set_stub` in place of the setter's own `slot > 100` bound at
+`0x40037bd0`. Verified under the emulator by `scripts/emu_lfo4_slots.py`.
+
+**There is no page yet, so the panel cannot ask for id 101.** Building a call
+to the setter by hand would have tested a signature this project inferred
+rather than the path the firmware takes, so instead the turn is real and only
+the id is not: a code hook at the bound rewrites `d2` as the firmware arrives
+there, with the object in `a2`, the virtual call that yields the live sound,
+and the value in `d3` all exactly as a genuine encoder turn left them.
+
+```
+  the bound saw 1 turn(s): slot 1 <- 0x78a1
+  lfo4_sets 1, ignored 0, sound 0x4210c0c0, slot 101, value 0x78a1
+  table: live 1, inserts 1, generation 2, full 0, overflow 0
+  the table's entry for 0x4210c0c0, param 0: 0x78a1
+  ok  a key nothing set is absent            (it read back None)
+  ok  no slot of the live sound moved        (slots [])
+```
+
+`generation 2` is the tell: one bump from the insert, one from the set.
+`0x4210c0c0` is `KIT + 52`, track 0's live sound — **the firmware's own
+pointer**, not one the harness computed. And nothing in the live value array
+moved, which is the half that matters for safety: above 100 stock firmware
+writes nothing, and neither do we.
+
+#### The reader was wrong twice before it was right, and both are traps
+
+The first two runs reported the table as empty. Both times the divert was fine
+and `machine.call(ext_get, ...)` was not:
+
+1. **The return is sixteen bits.** `ext_get` returns `u16`, and the high half
+   of `d0` is left dirty — outside the panel run the same call gives
+   `0x46801234` for a stored `0x1234`. `lfo4_harness.get` masks with
+   `& 0xFFFF`; this harness did not.
+2. **Once the timers are armed, the call does not reliably complete.** `Panel`
+   claims the snapshot's DMA timers, so an interrupt can vector away from a
+   called routine; `emu_start` then stops on its instruction count instead of
+   at the return address and hands back whatever `d0` holds. It came back
+   **0** — a plausible number, and the worst possible answer for a probe
+   asking whether a value arrived.
+
+The harness now reads `ext_key` / `ext_val` out of memory, which is our own
+table with a known layout, and carries a control that a never-set key reads
+back absent. **Scope:** only the panel-driving harnesses claim timers, and of
+those only this one called into firmware code — steps 1–3 and the bridge use
+`call(ext_get)` with no `Panel`, so their results stand.
+
+The general form of both, and it is the same lesson as `emulib.panel.settle`:
+a harness that reads a result through firmware it did not write needs a control
+that fails when the reader is broken. "The value is not there" and "this
+function no longer returns values" are the same output.
+
+### What step 4b still needs
+
+- The **read side**: the accessor at `0x400dc02c` carries the same `moveq #100`
+  bound, so the page can display an LFO4 value only once that is diverted too.
+- The **page**: a fourth `MOD` page, which the screens now say is rendered as
+  `MOD (n/3)` — so the count is drawn from something, and that something has to
+  become 4.
