@@ -869,3 +869,39 @@ widget selection is keyed.
 `display_start`, discriminated from two other sites because they post `frame_sem`
 or sit in unrelated early code) — but resolving it changed **nothing**: the run
 was bit-identical, same 3,109,215 unblocks. It is not consulted on this path.
+
+---
+
+# The key codes are the firmware's own — 2026-09-20
+
+`emu_param_setter.py` walked the `[MOD]` pages and landed on **LFO1, then
+LFO3** — two pages of travel for one press of `DOWN`. Two readings of the panel
+were open, and only one of them could be settled by reading rather than by
+guessing: whether the harness was pressing the keys it thought it was.
+
+`scripts/emu_panel_map.py` settles it by asking the image. digikit's
+`panelin.control_names` resolves the firmware's own button and encoder name
+tables, so the machine names each code instead of us asserting one from a note
+written in another session:
+
+| key | the firmware's code | `emulib.panel` | `code_for(channel, bit)` |
+|---|---|---|---|
+| `MOD` | 6 | `(0, 5)` | 6 |
+| `UP` | 11 | `(1, 2)` | 11 |
+| `DOWN` | 14 | `(1, 5)` | 14 |
+
+55 buttons and 10 encoders resolve in all, `ENCODER A`..`H` plus
+`ENCODER LEVEL` and an `UNDEFINED` at code 0. Every code the project uses is
+correct, so a misaddressed press is **not** why the pages travel two at a time.
+
+That leaves the press itself, and `scripts/emu_page_timing.py` measures the
+**step** rather than one landing: it taps `DOWN` repeatedly and reports which
+value slot the following push-and-turn moves. `1, 9, 17` is one page per press;
+`1, 17, 17` is two per press and then the end of the list, which would mean the
+dwell spans more than one key scan and the later pages only *look* stuck.
+
+The method is the point, and it is the same one as §"A patch written after the
+code has run is a suggestion": a count says something moved, a slot says which
+parameter, and the screen says which page was open. Any two of them disagreeing
+is the interesting case — and a mapping carried from a note is exactly the kind
+of premise to check before building a theory on top of it.
