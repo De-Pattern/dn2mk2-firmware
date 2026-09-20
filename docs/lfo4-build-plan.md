@@ -2731,14 +2731,34 @@ earlier LFOs. And the existing three must **not** gain LFO4's slots 101-108,
 or the acyclic property breaks -- LFO1 could then target LFO4, which targets
 LFO1.
 
-**The open question, and it decides how much work this is.** Is the per-LFO
-bound *computed from the LFO index*, or written down three times? If computed,
-LFO4's list may follow for free once the page exists. If enumerated, there is a
-fourth enumeration to add, and the three existing ones must be left alone.
-Neither is read yet.
+**Half of this was already read, and the owner was right to say so.**
+`docs/engine-index-map.md` covers the *conversion* side and this section had
+better not duplicate it: because a `DEST` **value** is itself a slot number, it
+needs the same stored/live translation as the index, and the converter
+special-cases exactly the three `DEST` slots with
 
-It is answerable the way the last two were: open LFO2's MOD page, turn `DEST`,
-and watch what bounds the value -- the code that clamps it is the code that
-knows the rule. Worth doing **before** the ten records are built, because if
-the bound is enumerated per LFO then it is another site list like the 56 bases,
-and that belongs in the same patch rather than a later one.
+```
+(slot & ~8) == 4 || slot == 20        ; slots {4, 12, 20} = LFO1/2/3 DEST
+```
+
+in **two** places, `0x4004cb04` and `0x4004cb70` -- found by scanning all 27
+`moveq #-9` sites and keeping those with a `moveq #20` within 48 bytes. That
+file also already records the fix and how cheap it is: **`~8` becomes `~24`**
+and the test covers `{4, 12, 20, 28}`, all four LFOs, making the `== 20` arm
+dead. `moveq #-9` is `0x70F7`, `moveq #-25` is `0x70E7` -- **two bytes at two
+sites**.
+
+So the fourth LFO's `DEST` **value** is a solved, priced problem.
+
+**What is still open is the other half: the list the UI offers.** The converter
+translates whatever value is there; it does not decide which values the page
+lets you pick. Whether that per-LFO bound is computed from the LFO index or
+written down three times is not read, and it decides whether LFO4's list
+follows for free or is a fourth enumeration to add -- while leaving the
+existing three alone, or LFO1 could target LFO4 and the acyclic property
+breaks.
+
+Answerable the way the last two were: open LFO2's MOD page, turn `DEST` to its
+limit, and watch what clamps it. Worth doing **before** the ten records are
+built, because if it is enumerated per LFO it is another site list like the 56
+bases, and belongs in the same patch.
