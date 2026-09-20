@@ -56,13 +56,50 @@ That places the two windows on the path the audio actually takes through the
 instrument, which is why capture is worth having at all: it is not a test
 signal, it is the stream.
 
+## The link is SSI0, and the far end is the SHARC
+
+`0xFC045640` is not a bare register: the CPU is an **MCF5441x**, whose eDMA
+transfer-control descriptors start at `0xFC045000` with a `0x20` stride, so
+`0x640` is **channel 50's `SADDR`** — the source address of a transfer whose
+destination is the SSI0 transmit FIFO. That is why the play loop writes to
+`0x4E6E0100` and the ISR reads that register to learn which half is in flight.
+`0xFC045618` and `0xFC045658` are the scatter-gather pointers of channels
+**48** and **50**, the receive and transmit pair.
+
+digikit's emulator work names the same pair: SSI0-paced eDMA48/50 is where it
+puts the **ColdFire ↔ SHARC boundary**. So the two windows are the audio
+crossing between the two processors:
+
+| window | eDMA | direction |
+|---|---|---|
+| `0x4E6E0100` / `0x4E6E0900` | channel 50, TX | ColdFire → **SHARC** |
+| `0x4E6DF100` / `0x4E6DF900` | channel 48, RX | **SHARC** → ColdFire |
+
+**So `#RECORD_START` captures what the DSP sends back.** That is the answer the
+owner's question needed: the console cannot read DSP memory, but it can record
+the DSP's own output, sample-accurate, into a 2 MB buffer and hand it over with
+`#DUMP_AUDIO`.
+
+### The `0x007FFFFF` marker, found twice
+
+The alignment routine at `0x400d5470` reads the channel-50 `SADDR`, picks the
+receive half from it, and then **searches the 32 frames of that half for a first
+longword equal to `0x7FFFFF`** — full-scale positive in 24 bits, left-justified
+in a 32-bit slot. On a hit it patches the **`CITER` and `BITER`** fields at
+`+0x14` and `+0x1C` of the linked descriptors of *both* channels from 64 to 62,
+which slips the frame by two and re-aligns the link.
+
+digikit hit the same constant from the other side, on a Digitakt II 1.16: their
+vector-170 handler "is waiting for an external `0x007fffff` sync marker before
+it installs the pending normal channel-50 callback". **Two firmwares, two
+instruments, two independent readings, one mechanism** — and this side says what
+the marker is *for*: frame alignment, corrected by a two-frame DMA slip.
+
 ## What is still open
 
-- **Which end of the link is which.** The windows carry the stream the ColdFire
-  receives and the stream it sends; whether the received one is the DSP's
-  rendered output or the codec's inputs is not yet read. The peripheral block
-  around `0xFC045600`–`0xFC045658` is touched from `0x400d5482`–`0x400d57ca`,
-  which configures it; naming that peripheral and its direction answers it.
+- **What the three channels are.** The loops use three longwords of a 64-byte
+  frame; which three slots of sixteen, and whether they are a stereo mix plus
+  one more or three of a larger per-track set, is not read.
 - **What `0x800053c0` is** in the engine's call at `0x400277ac` — a DSP-side
   address or a descriptor.
 - **Nothing here has been exercised on a device.** `#RECORD_START`, `#PLAY_*`
