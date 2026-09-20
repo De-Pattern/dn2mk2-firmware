@@ -2548,3 +2548,48 @@ answer it directly by watching who reads `0x401f95d0` while the LFO3 page
 draws, which is the next probe rather than another static scan.
 
 Recorded because the earlier section reads as settled and is not.
+
+### The gap that let the bridge reach hardware, and closing it — 2026-09-21
+
+`lfo4-bridge` passed every check it had and then faulted on the instrument.
+The checks were not wrong; they were **incomplete in a way none of them could
+report**. A boot from reset runs the loader, the init and the `memcpy` /
+`memset` stubs and nothing else: the audio engine does not run, and no kit
+loads, so the tick and both converter stubs are untouched. Every harness that
+did exercise those restored `ui1200M` -- a machine our loader never booted.
+
+So there were two halves and no run held both. `scripts/emu_boot_engine.py`
+now does, on `lfo4-slots`:
+
+```
+  booting lfo4-slots from reset, 400,000,000 instructions
+  ran 400,000,000; reached {'dnfw_boot': 1, 'lfo4_init': 1}
+
+  entering evaluator A, 8 frame(s)
+  lfo4_refresh ran 128 time(s) during 8 frame(s)
+
+  load: the table holds ['0x2a01' ... '0x2a08']
+  save: the stored ids hold ['0x2a01' ... '0x2a08']
+```
+
+128 is 8 frames x 16 tracks. The eight marks go into the table through
+`0x400dd1ea` and come back out of the stored ids through `0x400dd6a6`, with
+every other stored value distinct (`0x40 | i` per id) so a word in the wrong
+place reads as a wrong mark rather than a plausible one. The table is read out
+of memory, not through `call(ext_get, ...)`: an interrupted call returns 0,
+which is indistinguishable from a value that never arrived (§"Step 4a result").
+
+**The general form, and it is the part worth keeping.** Three separate things
+went wrong tonight and all three had the same shape -- a check that reports
+success about work it did not do:
+
+1. the snapshot harnesses cleared code they never ran from a real boot;
+2. the boot gate printed "Safe to flash" with its coverage section silently
+   deleted by an unrelated edit;
+3. `machine.call(ext_get, ...)` returned 0 for a value that was present.
+
+None of them failed. Each returned a plausible pass. The defence is the same
+each time: **a control that fails when the checker is broken** -- a key nothing
+set that must read back absent, a routine list that must be non-empty, a
+coverage line that must appear. A green result whose instrument was never
+tested is not evidence.
