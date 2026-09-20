@@ -32,6 +32,9 @@ extern u16 ext_default[EXT_PARAMS];          /* a sound with no entry reads this
 
 /* What happened, for the harness and for a later load meter. */
 extern u32 ext_live, ext_lo, ext_hi;
+/* Bumped by every mutator, so a reader can tell "nothing has changed since"
+ * with one compare instead of a lookup (`csrc/lfo4/bridge.c`). */
+extern u32 ext_generation;
 extern u32 ext_inserts, ext_drops, ext_full, ext_overflow;
 
 void ext_init(void);

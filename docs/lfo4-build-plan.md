@@ -2192,3 +2192,59 @@ level**, 100 and 89 coarse.
 `0x4058e8d8` -- the arp work's `TRACK_SOUNDS` -- is **not** this map: all
 sixteen of its longwords are zero in the same snapshot, so that harness laid it
 out synthetically.
+
+### The bridge: one firmware, and a value in the table reaches the engine — 2026-09-20
+
+`scripts/build_lfo4_bridge.py` → `00_Resources/02_Builds/lfo4-bridge_DN2_1.11.syx`.
+The first build where steps 0–3 are the same image: the startup loader and the
+`CODE` chunk, the extension table with its `memcpy` / `memset` carry, save and
+load through the reserved ids, a fourth LFO in both evaluators, and now
+`csrc/lfo4/bridge.c` joining the last two.
+
+**The tick pulls; nothing pushes.** The push design — hook `Sound::updateMirror`
+— died on reading it: `0x4004cb08` is a *per-parameter* update
+(`mvsw %a0@(14,%d2:l:2),%d1`), one slot at a time, and LFO4's parameters are not
+slots of a sound, so there is nothing there to hook. Instead `a4_top` and
+`b_top`, which already run once per track with the index in hand, call
+`lfo4_refresh(track)`; it returns that track's row address, having copied the
+eight values from the table only if the track's sound changed or
+`ext_generation` moved. Every mutator bumps that counter, so **every** edit path
+is covered, named or not — the same argument that made step 1's carry
+range-based rather than a list of sizes.
+
+Both stubs preserve `d0`/`d1`/`a0`/`a1` across the call: they sit inside
+evaluator code that never expected one. `%a5` survives on the compiler's own
+convention.
+
+### What the harness measured — `scripts/emu_lfo4_bridge.py`
+
+Eight values put in the table for **one** track's sound, then the real evaluator
+run. The sound address comes from the build's own `lfo4_sound_of`, so the
+harness and the firmware share one arithmetic rather than two copies of it.
+
+```
+  track 2's live sound, from the firmware's own map: 0x4210c54b
+  track 2  slot 76  -> 0x7f00        the only word written
+  16 copies in 640 refreshes         the cache holds
+  after editing SPD: 0x7f00 -> 0x41ef
+```
+
+All six checks pass:
+
+| asked | answer |
+|---|---|
+| does a table entry reach the engine? | that track modulates its own destination |
+| does anything else move? | **no** — the other fifteen rows are zeros, and a row of zeros is a silent LFO, not even a write to the sink |
+| does the cache hold? | 16 copies across 640 refreshes |
+| does an edit propagate with nothing told? | yes — `ext_set` bumps the generation, the next frame notices |
+| what does the edit cost? | one copy per track, not one per frame |
+
+**Two things the harness itself got wrong**, kept because they will recur: a
+snapshot has already run past the startup loader, so a harness must do the
+loader's job verbatim — copy the chunk to its run address, zero the BSS, call
+the init; and the first depth value saturated at the clamp `0x7f00`, which made
+two different rates look identical until the depth came down and the phase was
+reset between runs.
+
+**What is still missing to call this a feature:** nothing on the instrument
+writes to the table. That is step 4, the `[MOD]` page.
