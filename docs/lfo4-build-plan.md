@@ -2060,6 +2060,15 @@ arguments. All ten checks pass:
 per sound. A pattern change loads sixteen, so ~11,000 instructions — beside the
 77,000 the sixteen loads already cost.
 
+### And from reset, again
+
+`scripts/emu_lfo4_boot.py` with all four sites watched: the loader and init run
+once, all **665** `memcpy` and **27** `memset` calls go through their stubs, the
+counts match the stock control exactly, and nothing was refused, overflowed or
+reentered. The two converter sites are **never reached from reset** -- a boot
+loads no kit and switches no pattern -- which the script now says in as many
+words rather than letting a `None == None` comparison print as a pass.
+
 ### Still open after step 2
 
 - **Other load paths.** `0x400dd1ea` has one direct caller and is the **v3 track

@@ -88,9 +88,16 @@ def main() -> int:
           f"stub {c.get('memcpy stub')}, memcpy {c.get('memcpy')}")
     check("every memset went through the stub", c.get("memset stub") == c.get("memset"),
           f"stub {c.get('memset stub')}, memset {c.get('memset')}")
-    check("every sound load and save went through its stub",
-          (c.get("load stub"), c.get("save stub")) == (c.get("sound load"), c.get("sound save")),
-          f"load {c.get('load stub')}/{c.get('sound load')}, save {c.get('save stub')}/{c.get('sound save')}")
+    reached = c.get("sound load", 0) + c.get("sound save", 0)
+    if reached:
+        check("every sound load and save went through its stub",
+              (c.get("load stub"), c.get("save stub")) == (c.get("sound load"), c.get("sound save")),
+              f"load {c.get('load stub')}/{c.get('sound load')}, save {c.get('save stub')}/{c.get('sound save')}")
+    else:
+        # Not a pass: a boot loads no kit and switches no pattern, so neither site
+        # runs. Saying so beats a check that compares None with None and calls it
+        # green -- scripts/emu_lfo4_store.py is where those two are exercised.
+        print("  --    the sound load and save sites: never reached from reset, as expected")
     check("the boot made the same calls as the control",
           (c0.get("memcpy"), c0.get("memset"), c0.get("sound load"), c0.get("sound save"))
           == (c.get("memcpy"), c.get("memset"), c.get("sound load"), c.get("sound save")),

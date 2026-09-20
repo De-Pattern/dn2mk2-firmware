@@ -481,3 +481,104 @@ of the firmware that wrote it.
 
 The USB endpoint and the byte receiver's framing: both harnesses start after
 them. Their behaviour is read in the code above and not measured.
+
+---
+
+## On hardware at last — a Digitone 1, 2026-09-20
+
+The first time any of this left the emulator. A **Digitone 1 running OS 1.43**
+was put into maintenance mode and asked the read-only commands through
+`scripts/service_console.py`. `#HELLO` answered `HOW DO YOU DO?`, exactly as the
+emulator run predicted.
+
+### Getting in: the combo is per-device, and the numbering nearly fooled us
+
+The DN2's power-on combination does not apply to a DN1 — different panel,
+different key table. The DN1 1.43 bootstrap was read the same way
+(`dn_sysex/00_References`, where the combinations themselves live; they are not
+published here): its checker at `0x800013e8` requires the held-key **count** to
+equal the list length exactly, then every listed key to be held, and on success
+sets the same **flag bit `0x20`** the DN2 uses. The reboot-marker path beside it
+— GPIO `0xec090001` bit 5 plus the magic `0xb0b0dada` at `0x48000000` — is
+byte-for-byte the DN2's.
+
+**The key-name tables are indexed differently on the two instruments**, and
+reading the DN1's list through the DN2's convention produced five plausible,
+wrong key names. The DN2's table opens with a placeholder `'UNDEFINED'` at index
+0, so a code indexes it directly; the DN1's table has no placeholder, so
+`names[code - 1]` is the mapping. The calibration that settles it, rather than
+taste: the same bootstrap tests **one** key to enter the **STARTUP MENU**, and
+both manuals document that menu as `[FUNC]` at power-on. The DN2 tests code 17,
+which is `FUNC` only under its own convention; the DN1 tests code 1, which is
+`FUNCTION` only under the other. Use a documented public behaviour as the
+ruler before reading any combination out of either image.
+
+### Why Windows would not talk to it — the instrument's descriptors are wrong
+
+In maintenance mode the instrument enumerates as **VID `0x1935` / PID `0xFFFF`**
+(a PID that exists only in this mode; normal operation uses `0x001d`, `0x0015`,
+`0x0b35`, … on DN1 and `0x0134`, `0x0b34`, … on DN2). Its configuration is a
+textbook CDC-ACM:
+
+| | |
+|---|---|
+| interface 0 | class `02/02/01` — CDC control, ACM |
+| interface 1 | class `0a/00/00` — CDC data |
+| endpoints | interrupt IN `0x83`, **bulk OUT `0x02`, bulk IN `0x82`** |
+
+but the **interface association descriptor declares the function as class
+`02/01/01`** — subclass 01, Direct Line Control Model, where the interface
+itself says 02, Abstract Control Model. Windows builds its driver match from the
+IAD, asks for a driver that does not exist, and reports *"no compatible
+drivers"* (code 28). Forcing the in-box USB Serial driver on produces a COM port
+whose every write times out, because the data interface is never set up.
+
+**Both instruments carry it** — DN1 1.43 at `0x4028d1f2`, DN2 1.11 at
+`0x402fb126`. Linux binds `cdc_acm` by interface class and is unaffected; on
+Windows the way through is WinUSB (Zadig) plus the two bulk endpoints directly,
+which is what `scripts/service_console.py`'s `usb` transport does.
+
+### What the DN1 answered
+
+| command | reply |
+|---|---|
+| `#HELLO` | `HOW DO YOU DO?` |
+| `#STATUS` | sections `START` / `OS` / `PLATFORM` / `FLASH` / `DRAM` / `DSP` / `SUPERCAP` / `MMC` / `CODEC`, each `OK` |
+| | OS `0104   1.43 (260908 14:49:38)` — the build number matches the container's |
+| | PLATFORM `CPU2101D2` (the DN2 reports a `PCBA0109…` board code instead) |
+| | FLASH `01 2018 00` + four 32-bit sums; MMC `11 004G60 01 …` — a 4 GB eMMC; CODEC `87998 - 8191` |
+| `#READ_TESTED`, `#READ_UI_TESTED`, `#READ_UI_TEST_COMPLETED` | `1`, `1`, `1` |
+| `#MMC_GET_RECONFIGURED` | `TRUE` |
+| `#TEST_STATUS` | `FAIL`: *unit in factory test mode; wrong UI card; factory reset not armed; MRAM state not written (2)* |
+
+`#READ_SERIAL` answers with the unit's serial number. It is not recorded here:
+this repository is public and that number identifies one person's instrument.
+
+**`#STATUS` has a DSP section**, and it is thinner than it looks: the handler at
+`0x4008c59c` prints the name and calls `0x4008d52e`, which is two instructions —
+`movel 0x4137b720,%d0 ; rts`. The DN1 keeps a DSP state word at **`0x4137b720`**;
+2 prints `OK`, 1 prints `FAIL`, anything above 2 prints `WAIT`, 0 prints nothing.
+On this unit it read `OK`. So the console reports whether the DSP booted, and
+nothing else about it.
+
+### What did not answer, and what stopped answering
+
+Six DN1-only commands returned nothing at all: `#READ_ADC`, `#READ_ADC_REF`,
+`#READ_JACK_STATUS`, `#READ_AUDIO_TESTED`, `#READ_WHEEL_CALIBRATED`,
+`#DUMP_UI_CALIBRATION`. For the last one the code says why it *can* be silent:
+`0x4008bdcc` calls `0x400e8ac0` and, on zero, takes a branch that prints
+nothing — and this unit reports `WRONG UI CARD`. The others are unread; several
+may only be answered after `#ENTER_TEST_MODE`, which changes state and is
+deliberately not on the client's allow list.
+
+**Then the console stopped answering entirely**, `#HELLO` included, and neither
+draining the IN endpoint nor a USB-level device reset recovered it; a power
+cycle did. The suspect is the **host**, not a command: the first session of
+eight commands answered every one, and the failure began with the first command
+of the *second* session, after the interface had been released and re-claimed.
+`UsbLink` now clears both pipes and drains on connect. The experiment that would
+settle it costs two runs: `#HELLO`, close, reopen, `#HELLO`.
+
+**Nothing sent in this session writes anything** — the client refuses any
+command whose handler this project has not read, `#MRAM_DUMP` and `#MMCDUMP`
+included, and there is no flag to override it.
