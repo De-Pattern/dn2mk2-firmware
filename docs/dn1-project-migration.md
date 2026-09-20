@@ -70,3 +70,39 @@ The four-digit number a project declares as its format version matches the
 1.11 is `0059` (`docs/ele3-format.md`). So that field looks like the build
 number rather than an independent format counter. Two points is not a rule;
 recorded as a lead for DNX to confirm against 1.42A, which we do not have here.
+
+## The layout the converter's loops imply (old-file offsets)
+
+| range | shape | moved? |
+|---|---|---|
+| `0x200` .. `0x240200` | 128 blocks of 18,432 B | no |
+| `0x240200` .. `0x290200` | 128 blocks of 2,560 B | no |
+| `0x290200` .. `0x299A00` | one block of 38,912 B | no |
+| `0x299A00` .. `0x29C800` | 11,776 B, copied **element-wise** through `0x4000cbc4` | no, but rewritten per item |
+| `0x29C800` .. `0x2A7200` | 1 + 16 objects of 2,560 B (43,520 B) | **+512** |
+| `0x2A7200` | the old trailer | -> `0x2A7400` |
+
+`0x2A7200` is exactly the old trailer offset, which is the check that the loops
+were read correctly. The 512-byte hole opens at new `0x29C800`, immediately
+before that 17-object tail. The element-wise region is the one to watch for a
+*content* change at an unchanged offset.
+
+## The DN2 does the same thing
+
+Digitone II 1.11 (`out/main111.bin`) has the same ladder -- rungs validating
+against the old payload size **12,889,604** (`0x400e27a2`, `0x400e284a`,
+`0x400e28ea`, `0x400e298a`) and a final rung against **12,890,116**
+(`0x400e2a2a`); constructors at `0x401b01ce`.. and `0x401b5a10`.
+
+It also transfers a stored slot with a **fixed** length: `0x4012dae0` checks
+slot < 128, resolves the slot (`0x4012d7c2`) and passes the hardcoded
+12,890,116 to `0x4012d0b4` (at `0x4012db28`), which adds 122,928 to its first
+argument and then moves the bytes in chunks of at most 65,536 through
+`0x4012c59a`, advancing the LBA by chunk / 512. **Read versus write inside
+`0x4012c59a` was not separated here**; the fixed length holds either way.
+
+So a project written before 1.11 and read on 1.11 carries 512 bytes of slack
+after its real payload, exactly as DNX measured on the DN1. A reader should
+find the trailer rather than trust the declared length; both candidate offsets
+fall inside the fixed-length transfer, so one code path serves both versions on
+either instrument.
