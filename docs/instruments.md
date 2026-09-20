@@ -16,10 +16,20 @@ tools?"*
 |---|---|
 | **ColdFire firmware, statically** | `dnfw disasm`, `dnfw fn callers` / `fn entry`, `dnfw symbols` / `symbolmap`, `dnfw params`, `dnfw cave`; `scripts/sram_field_map.py` (per-address width and read/write); `scripts/find_constant.py`; `scripts/call_map.py`; `ghidra/` |
 | **what the firmware actually does at run time** | digikit's emulator — `scripts/emu_*.py`, `scripts/lfo4_harness.py` for snapshot + direct call, `UC_HOOK_MEM_WRITE` to watch a field move, and a cold boot beside a **stock control**. `docs/emulator.md` |
+| **driving the panel in the emulator** | **hold the encoder push and turn** — a plain turn does nothing in a menu. Push codes 41–48 (A–H) are channel 5, bits 0–7 (`code_for` is `channel * 8 + bit + 1`); `--panel-dwell 2` makes a tap a tap, since the default pacing turns every tap into a hold. The sequencer and the pattern load do **not** run — call those routines directly, as `scripts/emu_arp_plocks.py` does |
 | **the SHARC / DSP side** | selache in WSL: `/root/selmap-target/release/selmap` for a linear walk, `/root/selache-target/release/{selas,seld,seldump,selsyms}`; the regions in `out/sharc/*.bin`; `scripts/sharc_*.py`; `docs/sharc-*.md` |
 | **project, preset or pattern data on a device** | ask the DNX session. Never hand-roll SysEx capture here |
 | **live hardware state** | `scripts/service_console.py` — maintenance mode, read-only allow list. `docs/service-commands.md` |
 | **has someone already read this?** | `digikit-up/docs/FINDINGS.md`, our own `docs/for-digikit-*.md` and `docs/STATUS.md`, the lalzart notes (cite in our own words), the Synthdawg guide (consult, never quote) |
+
+## A null needs the input proved first
+
+"Nothing wrote" is only evidence once the input is known to have arrived.
+`scripts/drive.py` exists for exactly that: it separates *input never reached
+the firmware* from *navigation works but deltas do not* from *the path works end
+to end*. The first probe written for the parameter setter reported zero writes
+after an encoder turn — and the turn had not been held, so the null said nothing
+at all.
 
 ## The rule
 

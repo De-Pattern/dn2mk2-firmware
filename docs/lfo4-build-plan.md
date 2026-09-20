@@ -2248,3 +2248,67 @@ reset between runs.
 
 **What is still missing to call this a feature:** nothing on the instrument
 writes to the table. That is step 4, the `[MOD]` page.
+
+### Step 4: the setter, found by asking the machine — 2026-09-20
+
+The page needs two addresses: where the UI **reads** a parameter value, and
+where a turn **writes** it. The getter was known (`0x4006408a`). The static hunt
+for the setter went through several plausible candidates without deciding, so
+the question went to the emulator instead: drive the panel and watch the live
+sound's value array.
+
+`scripts/emu_param_setter.py` — `panelin` input the way `scripts/drive.py` does
+it, with a `UC_HOOK_MEM_WRITE` over track 1's array at `0x4210c0d4`:
+
+```
+  idle control: 0 write(s) with no input
+  MOD page 1, push-and-turn +10 x2: 1 write(s)      ... and 1 on each of 2, 3, 4
+  writers, hottest first:
+    0x40037be8  4
+  first writes:
+    0x40037be8  slot 1   <- 0x78a1 (2 B)
+    0x40037be8  slot 1   <- 0x7ffe (2 B)   ... clamped at the top thereafter
+```
+
+**One writer, four writes, one per page visit, against an idle control of
+zero.** The setter is `0x40037be8`, `0x2a6` into `0x40037942`:
+
+```
+0x40037bd0  moveq #100,%d0
+0x40037bd2  cmpl %d2,%d0
+0x40037bd4  blts 0x40037c48             ; slot > 100 -> no write at all
+0x40037bd6  moveal %a2@(16),%a0         ; the object that owns the sound
+0x40037bde  moveal %a1@(40),%a0         ; its vtable slot 40
+0x40037be2  jsr %a0@                    ; -> d0 = the live sound
+0x40037be8  movew %d3,%a0@(14,%d2:l:2)  ; values[slot] = value
+```
+
+So the write is `values[d2] = d3` with **`d2` the slot and `d3` the value**, and
+the sound arrives from a virtual call rather than a constant — which is what
+makes it the right hook: it is already the per-track sound.
+
+### Why that bound is the opening
+
+`slot > 100` skips the write **entirely**. So if LFO4's ten records carry slots
+**101–108**, stock firmware does nothing at all with them — no stray write, no
+corrupted neighbour — and the branch at `0x40037bd4` is a free, well-defined
+place to divert into `ext_set(sound, slot - 101, value)`. The same bound guards
+the accessor at `0x400dc02c` (§3's `moveq #100`), so the read side has the same
+shape.
+
+That is §3's original slots-101–108 design, arrived at from the other end: the
+table it needed already exists, and the two bounds that make it safe are now
+located rather than assumed.
+
+### Two things the probe had to be told
+
+1. **Push and turn.** The first run turned the encoder without holding its push
+   and reported **0 writes** — a clean-looking null that meant nothing. Encoder
+   A's push is control code 41, and `code_for` is `channel * 8 + bit + 1`, so it
+   is channel 5 bit 0. This is now in the routing hook so it arrives before the
+   next probe is written rather than after it fails.
+2. **`[MOD]` does not cycle the pages.** All four visits wrote **slot 1** —
+   LFO1's `SPD` — so the repeated `[MOD]` press never moved off the first LFO
+   page. Paging is `[PAGE]` (code 22), per this project's own notes. The step 4
+   test on a build carrying v5's page must use it, or it will edit LFO1 four
+   times and report success.
