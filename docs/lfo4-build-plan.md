@@ -2397,3 +2397,98 @@ function no longer returns values" are the same output.
 - The **page**: a fourth `MOD` page, which the screens now say is rendered as
   `MOD (n/3)` — so the count is drawn from something, and that something has to
   become 4.
+
+### Step 4b, mapped: what a fourth MOD page is made of — 2026-09-20
+
+Nothing here is built yet. This is the read of the page machinery that step 4b
+needs, and it came out better than the plan assumed: **no count is written
+down anywhere.** Three measurements, each with the instrument named.
+
+#### 1. The header is derived from a range, not a constant
+
+The renderer is `0x40063f56`, and at `0x40063f84`:
+
+```
+movel %a2@(128),%d0 ; subl %a2@(124),%d0    ; end - begin
+moveq #7,%d1 ; cmpl %d0,%d1 ; bges ...      ; 8 bytes or fewer -> draw no "(n/m)"
+asrl #2,%d0                                 ; (end - begin) / 4 -> the total
+moveal %a2@(144),%a2 ; addql #1,%a2         ; the current index, made 1-based
+```
+
+So `MOD (3/3)` is `(end - begin) / 4` over a vector of four-byte entries. A
+mode with one page prints only its name. **Nothing has to be taught that there
+are four pages; a fourth entry is the whole change.**
+
+#### 2. The entries are page ids, and the vector has no room
+
+`scripts/emu_mod_pagelist.py` hooks that instruction during a live render and
+reads the object it was called with, rather than guessing which object it is:
+
+```
+object 0x447bf800: begin 0x447bf510 end 0x447bf51c -> 3 page(s), current 1
+    [0] 4    [1] 5    [2] 6
+the 16 bytes after the end: 0x1bf10689 0x447bf560 0x447be5e0 0x447bf894
+```
+
+**The MOD pages are ids 4, 5 and 6** — small integers, not pointers. What
+follows the end is an allocator word and live pointers, so the array is exactly
+its contents and a fourth entry cannot be appended in place: the array has to
+be rehoused, which for us means pointing `+124`/`+128` at our own four-entry
+array. That is cheap, and safe as long as nothing ever reallocates or frees it.
+
+#### 3. A page id is a record, and a record is a list of parameters
+
+`0x400c2474` turns an id into one:
+
+```
+moveq #36,%d1 ; cmpl %d0,%d1 ; bcc keep ; moveq #-1,%d0   ; id > 36 -> the fallback
+moveq #44,%d1 ; mulsl %d1,%d0 ; addil #0x42432C00,%d0     ; record = base + 44 * id
+```
+
+`scripts/emu_page_records.py` reads them out of the snapshot — **no
+instructions executed**, since `ui1200M` has long since built the table:
+
+```
+id 4 (LFO1): 0x4464fe3c 0x4464fe5c   75 76 77 78 79 81 82 83   10
+id 5 (LFO2): 0x4464fe7c 0x4464fe6c   85 86 87 88 89 91 92 93   10
+id 6 (LFO3): 0x4464fe9c 0x4464febc   95 96 97 98 99 101 102 103  10
+```
+
+Two pointers, **eight parameter references**, and a span of 10. The references
+are **indices into the instrument's parameter table plus one** — `dnfw params
+--page LFO3` names them and the order settles it:
+
+| entry | record | parameter |
+|---|---|---|
+| 95, 96, 97, 98 | 94, 95, 96, 97 | SPD, MULT, FADE, DEST |
+| 99, *100 skipped* | 98, *99* | WAVE, *SLEW — present in the table, not on the page* |
+| 101, 102, 103 | 100, 101, 102 | SPH, MODE, DEP |
+
+`SPD MULT FADE DEST WAVE SPH MODE DEP` — the sound `ParameterSet` order §5k
+already established from the evaluators. **Two layers, one shape, again.**
+
+Each LFO owns ten consecutive records and the groups are ten apart, so the
+table itself says what a fourth would look like: group 26 = LFO1 = records
+74–83 = value slots 1–8, group 27 = LFO2 = 84–93 = slots 9–16, group 28 = LFO3
+= 94–103 = slots 17–24. **LFO4 = ten records carrying value slots 101–108** —
+the ones step 4a already made writable.
+
+#### What 4b has to build, and the one thing that is genuinely hard
+
+1. **Ten parameter records.** The table is at `0x401f7fc8`, 320 records of 60
+   bytes, **inside the firmware image** — so it cannot simply grow. Either ten
+   spare records exist somewhere in it, or the table is relocated into the
+   appended area and the code that reads it is repointed. *Not yet read: how
+   many places hold `0x401f7fc8` or a bound of 320.*
+2. **One page record.** `0x42432C00 + 44 * id` in RAM, ids 0–36, and **id 37's
+   space is already occupied** — the probe read code pointers there
+   (`0x400bdc1a`, `0x400c0822`). So the same choice applies: find an unused id
+   at or below 36, or relocate the record table and raise the `moveq #36`.
+3. **A fourth entry in the MOD vector**, per §2 above — the easy part.
+
+The hard part is (1), and it is hard for a reason worth stating plainly: both
+tables are sized by constants compiled into code that reads them, so growing
+either means finding every reader. That is a `dnfw fn callers` and
+`find_constant.py` job, and it is the next thing to do — **before** any of this
+is built, because if the parameter table cannot be extended safely the page has
+to be drawn another way.
