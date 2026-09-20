@@ -151,8 +151,29 @@ def main() -> int:
         print(f"  NO UI: it never faulted and never composed a frame, while stock composed "
               f"{base['frames']} by here.\n  That is a hang, not a pass.\n\n  DO NOT FLASH.")
         return 1
-    print(f"  booted and drew its UI ({frames} frames against the control's "
-          f"{base['frames']}).\n\n  Safe to flash as far as booting goes.")
+    # Booting is necessary and nowhere near sufficient. `lfo4-bridge` booted
+    # here for 400 M instructions without ever calling `lfo4_refresh` -- the
+    # audio engine does not run -- and then faulted on the instrument the
+    # moment it did. A gate that says passed about code it never executed is
+    # the exact failure it exists to prevent, so coverage is part of the
+    # verdict rather than a footnote under it.
+    ran_names = sorted(n for n, c in reached.items() if c)
+    idle = sorted(n for n, c in reached.items() if not c)
+    print(f"  booted and drew its UI ({frames} frame(s), control {base['frames']}).")
+    listed = ", ".join(f"{n} x{reached[n]}" for n in ran_names) or "none"
+    print(f"  of this build's {len(reached)} routine(s), {len(ran_names)} ran: {listed}")
+    if idle:
+        print("")
+        print("  NOT EXERCISED: " + ", ".join(idle))
+        print("  Booting says these did not break the boot. It says NOTHING about")
+        print("  whether they work, because they never ran. Anything the sequencer")
+        print("  or the audio engine reaches needs its own harness -- the emulator")
+        print("  runs neither. scripts/emu_boot_engine.py covers the engine path.")
+        print("")
+        print("  Boots, but NOT cleared for flashing on its own.")
+        return 1
+    print("")
+    print("  Safe to flash as far as booting goes.")
     return 0
 
 
