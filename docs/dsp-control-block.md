@@ -113,10 +113,10 @@ is a struct, and the widths separate it into three kinds of field:
 | `0x80005394`-`0x800053a0` | long | the busy end: `0x80005398` alone has **22 reads and 5 writes** |
 | `0x800053a4`, `0x800053ba`, `0x800053c0` | -- | only ever taken as addresses (`pea`/`lea`): buffers, not fields |
 
-### `0x80005398`, and why it is not labelled yet
+### `0x80005394` and `0x80005398`: a region, and a pointer into it
 
-Its 27 sites were read. The two halves disagree, and the disagreement is the
-finding.
+All 27 sites of `0x80005398` were read. The two halves looked like they
+disagreed, and the field beside it settles them.
 
 **Consumed as an address.** At `0x40025ee0` it is loaded with `movea.l` and then
 indexed -- `lea %a0@(0,%d0:l:2),%a0` -- and the result stored as a working
@@ -140,20 +140,38 @@ cluster, and the one at `0x400d98a8` is plain:
 `0x400d7xxx`-`0x400dAxxx` transport code works over -- 51 sites between them --
 and several of those sites *add* it to something rather than dereference it.
 
-**Both readings fit their own half and not the other.** A slab cursor handing
-out 900,000-byte blocks explains the pointer use and the advance; a time or
-sample accumulator explains the additions and the transport-side owner, but not
-`lea %a0@(0,%d0:l:2),%a0`. Naming it either way now would be identifying a
-structure from a count, which this project does not do
-(`docs/PRINCIPLES.md`). **What is certain: the block carries a 32-bit quantity
-the DSP side needs, the sequencer produces it, and at least two consumers treat
-it as a base address.**
+**Resolved by a bounds check** (`0x40027b32`), which names the size:
+
+```
+0x40027b32  cmpil #899999,%d0          ; d0 below the region?
+0x40027b38  blss <reject>
+0x40027b3a  moveal 0x80005394,%a0      ; the neighbouring field: a BASE
+0x40027b42  subal %a0,%a1              ; a1 = d0 - base
+0x40027b44  cmpal #900000,%a1
+0x40027b4a  bhis <reject>              ; unsigned: reject unless 0 <= d0 - base < 900,000
+```
+
+So **`0x80005394` is the base of a 900,000-byte region and `0x80005398` is a
+pointer into it**, validated against exactly that window. The two halves stop
+disagreeing: the "accumulator" writes are pointer arithmetic inside the scheme —
+`0x400d98b4` steps to the next 900,000-byte block, and the two writes that
+compute `base + delta` do so with **interrupts masked to IPL 7**
+(`movew #9984,%sr` at `0x400d81ca`), which is what a write pointer shared with
+an interrupt handler needs. The fixed **90,000** — a tenth of the region — is
+used as an offset at four sites, one of them inside the modulation kernel
+(`0x400db4e8`).
+
+**Still not named:** what the region holds. 900,000 bytes is 225,000 longwords,
+and the frame the audio path uses is three longwords wide, but nothing read here
+connects the two, and the arithmetic that would settle it has not been found.
+The constant appears at **12 sites** across the transport and engine, so
+whatever it is, those subsystems share it.
 
 ## Not read
 
-- **What `0x80005398` really is**, per above, and the fields at `0x80005348`,
-  `0x80005394`, `0x8000539c` and `0x800053a0` that surround it. The way in is
-  `0x42c4e900`'s four longwords and where they are initialised.
+- **What the 900,000-byte region holds**, per above.
+- The fields at `0x80005348`, `0x8000539c` and `0x800053a0`, and where
+  `0x42c4e900`'s four longwords are initialised.
 - **Which slots**, in practice: the applier writes small constants, but nothing
   here enumerates the frame's sixteen slots or says which carry per-track
   audio — if any do.
