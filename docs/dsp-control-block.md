@@ -113,63 +113,54 @@ is a struct, and the widths separate it into three kinds of field:
 | `0x80005394`-`0x800053a0` | long | the busy end: `0x80005398` alone has **22 reads and 5 writes** |
 | `0x800053a4`, `0x800053ba`, `0x800053c0` | -- | only ever taken as addresses (`pea`/`lea`): buffers, not fields |
 
-### `0x80005394` and `0x80005398`: a region, and a pointer into it
+### `0x80005394` and `0x80005398`: two marks on a monotonic line, 900,000 apart
 
-All 27 sites of `0x80005398` were read. The two halves looked like they
-disagreed, and the field beside it settles them.
+All 27 sites of `0x80005398` were read, and this field took **three readings
+before the evidence settled**. The wrong turns are kept because each was a
+reasonable inference from what was in hand, and what killed it is the useful
+part.
 
-**Consumed as an address.** At `0x40025ee0` it is loaded with `movea.l` and then
-indexed -- `lea %a0@(0,%d0:l:2),%a0` -- and the result stored as a working
-pointer. At `0x400268b4` it is read, **90,000** added, and pushed as an argument
-to `0x40138b5c`; the *other* branch of that same `if` builds the same argument
-from `[%a1+4]`, a genuine pointer out of a structure, plus the same 90,000. Two
-branches producing one argument, one of them unambiguously a pointer.
+1. *"A pointer."* From `movea.l` into an address register at `0x40025ee0` and an
+   offset of 90,000 at `0x400268b4`. Too thin: `movea.l` is also how GCC parks
+   any 32-bit value it wants to index with `lea`.
+2. *"A 900,000-byte region, base in `0x80005394`."* From the unsigned range test
+   at `0x40027b32` — `0 <= d0 - base < 900000`. Wrong, because a window check on
+   a wrapping counter has exactly that shape.
+3. **What the evidence supports: timestamps.**
 
-**Produced as an accumulator.** Its five writes are all in the transport
-cluster, and the one at `0x400d98a8` is plain:
-
-```
-0x400d98a2  lea 0x42c4e900,%a0
-0x400d98a8  movel %a0@,0x80005398        ; the block gets the current value
-0x400d98ae  movel 0x42c4e900,%d0
-0x400d98b4  addil #900000,%d0            ; and the source advances by 900,000
-0x400d98ba  movel %d0,0x42c4e900
-```
-
-`0x42c4e900` is one of four longwords (`+0`, `+4`, `+8`, `+0xc`) that the
-`0x400d7xxx`-`0x400dAxxx` transport code works over -- 51 sites between them --
-and several of those sites *add* it to something rather than dereference it.
-
-**Resolved by a bounds check** (`0x40027b32`), which names the size:
+The deciding read is the routine the value is passed to. `0x40138b5c` inserts
+into a linked list **ordered by that value**:
 
 ```
-0x40027b32  cmpil #899999,%d0          ; d0 below the region?
-0x40027b38  blss <reject>
-0x40027b3a  moveal 0x80005394,%a0      ; the neighbouring field: a BASE
-0x40027b42  subal %a0,%a1              ; a1 = d0 - base
-0x40027b44  cmpal #900000,%a1
-0x40027b4a  bhis <reject>              ; unsigned: reject unless 0 <= d0 - base < 900,000
+0x40138ba6  movel %d3,%d0
+0x40138ba8  subl %a2@(4),%d0     ; d0 = key - node.key
+0x40138bac  bpls <insert here>   ; SIGNED difference
+0x40138be0  cmpl %a2@(4),%d3     ; same key? bucket it
+0x40138be6  moveal %a2@(12),%a0  ;   items chained through their own +104
 ```
 
-So **`0x80005394` is the base of a 900,000-byte region and `0x80005398` is a
-pointer into it**, validated against exactly that window. The two halves stop
-disagreeing: the "accumulator" writes are pointer arithmetic inside the scheme —
-`0x400d98b4` steps to the next 900,000-byte block, and the two writes that
-compute `base + delta` do so with **interrupts masked to IPL 7**
-(`movew #9984,%sr` at `0x400d81ca`), which is what a write pointer shared with
-an interrupt handler needs. The fixed **90,000** — a tenth of the region — is
-used as an offset at four sites, one of them inside the modulation kernel
-(`0x400db4e8`).
+**A signed difference is how you order quantities that wrap**; addresses are
+compared unsigned. The list is maintained with interrupts masked to IPL 7, keyed
+at node `+4`, with equal keys bucketed — a due-time queue. A second routine,
+`0x40138ca0`, swaps the whole head out atomically and walks every item: a flush,
+not a dispatch.
 
-**Still not named:** what the region holds. 900,000 bytes is 225,000 longwords,
-and the frame the audio path uses is three longwords wide, but nothing read here
-connects the two, and the arithmetic that would settle it has not been found.
-The constant appears at **12 sites** across the transport and engine, so
-whatever it is, those subsystems share it.
+So the two fields are **marks on a monotonic line**: the transport advances both
+by **900,000** at `0x400d98b4`-`0x400d98c0`, hands one to the DSP block, and
+schedules work at **`mark + 90,000`** — a tenth of the span. The writes that
+compute `base + delta` do so under IPL 7 (`movew #9984,%sr`), as a value shared
+with an interrupt handler must be.
+
+**The unit is not identified.** Nothing read here compares either mark against a
+hardware timer or a sample counter, which is what would fix it. 900,000 appears
+at **12 sites** across the transport and engine and 90,000 at four, one of them
+inside the modulation kernel (`0x400db4e8`), so whatever the unit is, those
+subsystems share it.
 
 ## Not read
 
-- **What the 900,000-byte region holds**, per above.
+- **The unit of the 900,000 span**, per above. The way in is the clock the due-time
+  queue is compared against, which is not in the routines read here.
 - The fields at `0x80005348`, `0x8000539c` and `0x800053a0`, and where
   `0x42c4e900`'s four longwords are initialised.
 - **Which slots**, in practice: the applier writes small constants, but nothing
