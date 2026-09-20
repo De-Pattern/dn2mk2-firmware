@@ -102,9 +102,12 @@ def run(args) -> int:
     idle = sum(writes.values())
     print(f"  idle control: {idle} write(s) with no input")
 
-    # [MOD] cycles its pages, so each one is visited and turned on: the first
-    # page is not necessarily one that edits a sound value, and on a build with
-    # LFO4 the fourth press is the page this whole step exists for.
+    # [MOD] cycles its pages when TAPPED -- or use up/down; [PAGE] opens the
+    # page settings, which is a different thing. The dwell matters: the default
+    # pacing is past the firmware's hold threshold, so a "press" here is a hold
+    # and a held [MOD] does not cycle. A first version of this probe held it and
+    # wrote LFO1's slot 1 four times, which looks exactly like four successful
+    # page edits until the slot is read. Hence: report the slot, every time.
     seen = idle
     for page in range(1, 5):
         pc = panelin.press(m, profile, MOD_CHANNEL, MOD_BIT)

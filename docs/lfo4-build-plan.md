@@ -2307,8 +2307,19 @@ located rather than assumed.
    A's push is control code 41, and `code_for` is `channel * 8 + bit + 1`, so it
    is channel 5 bit 0. This is now in the routing hook so it arrives before the
    next probe is written rather than after it fails.
-2. **`[MOD]` does not cycle the pages.** All four visits wrote **slot 1** —
-   LFO1's `SPD` — so the repeated `[MOD]` press never moved off the first LFO
-   page. Paging is `[PAGE]` (code 22), per this project's own notes. The step 4
-   test on a build carrying v5's page must use it, or it will edit LFO1 four
-   times and report success.
+2. **The page never changed, and the reason is the dwell — not the key.** All
+   four visits wrote **slot 1**, LFO1's `SPD`, so the repeated `[MOD]` press
+   never moved off the first LFO page.
+
+   ~~Paging is `[PAGE]`.~~ **Wrong, corrected by the owner the same day:** on
+   the instrument the `[MOD]` pages cycle by *pressing `[MOD]` again*, or with
+   the **up / down arrows**. `[PAGE]` opens the page settings, which is a
+   different thing entirely.
+
+   What actually happened is in this project's own notes: the runner paces
+   input about 9 M instructions apart, past the firmware's ~7.5 M hold
+   threshold, so **every "press" in that probe was a hold**, and a held `[MOD]`
+   does not cycle. `--panel-dwell 2` is what makes a tap a tap. The step 4 test
+   must tap `[MOD]`, or use up / down, and it must **check the slot it wrote**:
+   four writes to slot 1 look exactly like success until you read which slot
+   they hit.
