@@ -75,18 +75,22 @@ def sites():
             for s in json.load(open(f"{BUILD}/sites.json"))]
 
 
-class Harness:
-    def __init__(self, snapshot, image, symbols):
+class Machine:
+    """A restored snapshot, with memory and a way to enter a routine.
+
+    Everything here is true of any build: writing memory that may not be
+    mapped yet, reading it back, laying out arguments the way a `jsr` does,
+    and counting the instructions one call costs. What a particular build
+    *installs* is its subclass's business.
+    """
+
+    def __init__(self, snapshot):
         self.m, *_ = build(snapshot, syx=SYX, unblock=True, softfloat=True, bitmap=True,
                            dsp=True, weakptr=True, slc=True, deferred_components=("timers",))
         self.uc = self.m.uc
-        self.sym = symbols
-        self.image = image
         self.ret = STACK + 0x800
         self.at = SCRATCH
         self.count = 0
-        self.load, length, self.bss_len, self.init, self.code = code_chunk(image)
-        self.bss = self.load + length
 
     # --- memory -----------------------------------------------------------
     def write(self, va, data):
@@ -103,14 +107,25 @@ class Harness:
     def read(self, va, n):
         return bytes(self.uc.mem_read(va, n))
 
-    def u32(self, name):
-        return struct.unpack(">I", self.read(self.sym[name], 4))[0]
+    def word(self, va):
+        return struct.unpack(">H", self.read(va, 2))[0]
+
+    def long(self, va):
+        return struct.unpack(">I", self.read(va, 4))[0]
 
     def alloc(self, n):
         va = (self.at + 15) & ~15
         self.at = va + n
         self.write(va, bytes(n))
         return va
+
+    def flush(self):
+        """Unicorn keeps translated blocks; a patch written into code it has
+        already run does not take effect without this (`docs/emulator.md`)."""
+        try:
+            self.uc.ctl_flush_tb()
+        except AttributeError:
+            self.uc.ctl_remove_cache(0x40000000, 0x40400000)
 
     # --- calling ----------------------------------------------------------
     def call(self, fn, *args):
@@ -135,6 +150,21 @@ class Harness:
     def _tick(self, uc, address, size, user):
         self.count += 1
 
+
+class Harness(Machine):
+    """`Machine`, plus the LFO4 `CODE` chunk build: its code, its init and the
+    sites `scripts/build_lfo4_ext.py` patched."""
+
+    def __init__(self, snapshot, image, symbols):
+        super().__init__(snapshot)
+        self.sym = symbols
+        self.image = image
+        self.load, length, self.bss_len, self.init, self.code = code_chunk(image)
+        self.bss = self.load + length
+
+    def u32(self, name):
+        return self.long(self.sym[name])
+
     # --- the build, as the loader and the patch would leave it -------------
     def install(self):
         """The loader's copy and init, then every site the build patched."""
@@ -151,10 +181,7 @@ class Harness:
         # all. Measured 2026-09-20 -- the load hook counted zero calls while a
         # code hook on the same address counted one. Flush, or the patch is a
         # suggestion.
-        try:
-            self.uc.ctl_flush_tb()
-        except AttributeError:                    # older bindings
-            self.uc.ctl_remove_cache(0x40000000, 0x40400000)
+        self.flush()
 
     def reset(self):
         """Back to a just-booted table, without re-restoring the snapshot."""
