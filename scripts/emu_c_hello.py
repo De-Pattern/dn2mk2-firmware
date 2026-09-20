@@ -28,12 +28,12 @@ import os
 import struct
 import sys
 
-sys.path.insert(0, "/mnt/c/ZZ_Code/ZZ_Personal/digikit-up")
+sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/digikit-up")
 
 from emu import dspboot  # noqa: E402
 from unicorn import UC_HOOK_CODE  # noqa: E402
 
-ROOT = "/mnt/c/ZZ_Code/ZZ_Personal/dn2_firmware"
+ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
 SYX = f"{ROOT}/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
 BUILD = f"{ROOT}/out/c-hello"
 MEMCPY, CALLS_VA = 0x40134490, 0x4000053E
