@@ -240,3 +240,33 @@ owner.
 **So: write a row when stock goes back on, not only when a build goes out.** A
 log that only records departures cannot answer "what is on it now", which is the
 question anyone actually asks.
+
+---
+
+## Standing hazard, on the previous workstation: do not flash while the host is crashing
+
+**Recorded 2026-09-16 on the machine this project used until 2026-09-20; kept
+because the rule outlives the hardware.** That machine bugchecked `0x9F`
+DRIVER_POWER_STATE_FAILURE repeatably -- twice in about 100 minutes on
+2026-09-15 -- and the event log named the **NVIDIA display driver**: a burst of
+~42 `nvlddmkm` Event ID 14 errors in the minutes before each crash, preceded by
+a single Event ID 153. The GPU was an RTX 4050 Laptop on a driver from
+2025-03-08, in a hybrid pair with Intel graphics, so the discrete GPU powered
+down and up dynamically -- exactly the transition `0x9F` subtype 3 reports a
+driver failing to complete.
+
+An earlier reading of the same crashes blamed the audio and Wi-Fi drivers from
+nothing but "these commonly cause `0x9F`". The log named a different driver
+outright, and that guess was retracted (`docs/PRINCIPLES.md` §19).
+
+**Why it belongs in the flashing log, and why it still does.** A DN2 flash runs
+for minutes over physical MIDI DIN. A host crash part-way through an OS write is
+an avoidable risk to the instrument, and the recovery path -- though proven --
+needs the Early Start-up Menu and another complete flash. **Do not start a flash
+on a host that is crashing.**
+
+**This does not transfer to the current machine**, which is different hardware
+(an older workstation GPU, a different driver). Nothing says it crashes, and
+nothing says it does not: the check is the same one, run again -- no bugchecks
+and no display-driver error bursts under load before a flash, not an assumption
+either way.
