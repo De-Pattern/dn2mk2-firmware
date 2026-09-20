@@ -1004,3 +1004,45 @@ The cheap falsification available right now: on stock firmware, save a sound
 with LFO3 configured, read it back with DNX, and check the bytes land at 34, 42,
 50… If they do, the storage reading is confirmed from a third direction and the
 retraction is settled rather than merely argued.
+
+---
+
+## The mirror ranges, corroborated from the SHARC side — 2026-09-21
+
+From digikit's unmerged `machine-ideas-menu` branch (their reading, not ours,
+and not yet merged there). Two of its results bear on this file.
+
+**The parameter transport is closed.** The ColdFire frame is mapped into SHARC
+DM at `0x2558dc` with byte-identical offsets: `FUN_1c24e9` computes its
+per-track pointer as `track * 0x60 + 0x2559b6`, and `0x2559b6 - 0x2558dc =
+0xda`, the frame offset where the per-track parameter block starts. So the
+engine does receive the parameter pages.
+
+**And the mirror ranges map onto four block copies**, once a 17-word (`0x22`)
+row header is accounted for -- an earlier reading of theirs missed it and
+concluded SRC parameters never travel, which they have now corrected:
+
+| mirror slots | page | frame offset |
+|---|---|---|
+| 25–34 | SRC | `+0xda` |
+| 35–48 | filter | `+0xfa` |
+| 49–61 | amp and sends | `+0x116` |
+| 64–68 | FX | `+0x130` |
+
+**What that says about LFO4, and it is reassuring.** Slots **1–24 are the three
+LFOs** (§5k of `docs/lfo4-build-plan.md`, read from both evaluators), and
+**1–24 appear in none of those four copies**. The LFO block does not travel to
+the DSP at all — consistent with what this repository measured from the other
+end: the LFOs are evaluated on the ColdFire and their output lands in the
+mirror slots the copies then carry.
+
+So a fourth LFO needs **no DSP-side change whatever**. It writes mirror slots
+like the other three, and whatever the copies carry is already downstream of
+it. That was assumed here; it is now supported by a reading of the receiving
+side.
+
+Treat both as third-party and unmerged. The branch's own last commit
+invalidates a class of its earlier claims — `sharcflow.py` never decoded
+Type 8a with `b=1`, an ordinary PC-relative CALL, so "no static caller" claims
+in their findings are unsafe — which is a good reason to take the rest as
+provisional too.
