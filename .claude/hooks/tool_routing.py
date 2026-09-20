@@ -20,6 +20,11 @@ import json
 import re
 import sys
 
+# Between two injected blocks, when a prompt is both an investigation and a
+# build. A named constant because writing it inline is how this line got
+# broken once already.
+SEPARATOR = chr(10) * 2
+
 # Verbs and shapes that mean "go and find out", not "do this thing I described".
 # `is it` / `does it` were here and matched "How is it going?"; a bare pronoun
 # question is not an investigation, and a false positive costs context on every
@@ -57,6 +62,7 @@ the conclusion unverified.
 | SHARC / DSP side | selache in WSL: `/root/selmap-target/release/selmap`, `/root/selache-target/release/{selas,seld,seldump,selsyms}`; regions in `out/sharc/*.bin`; `scripts/sharc_*.py`; `docs/sharc-*.md` |
 | project / preset / pattern data on a device | ask the DNX session -- never hand-roll SysEx capture here |
 | live hardware state | `scripts/service_console.py` (maintenance mode, read-only allow list); `docs/service-commands.md` |
+| **a build that will be flashed** | `scripts/emu_boot_check.py <build>/section_3_MAIN_OS.bin` -- boots it **from reset** against a cached stock control. A snapshot harness is not a boot test: `ui1200M` has already booted, so it never runs the loader, the init, or the first call into new code |
 | has someone already read this? | `digikit-up/docs/FINDINGS.md`, `docs/for-digikit-*.md`, `docs/STATUS.md`, the lalzart notes (cite in our own words), Synthdawg (consult, never quote) |
 
 The same table with its reasoning: `docs/instruments.md`.
@@ -72,16 +78,63 @@ window check on a wrapping counter has the same shape.
 </tool-routing>"""
 
 
+# Building and flashing is not an investigation, so the table above never fires
+# for it -- and that is exactly the prompt where the boot gate matters. Added
+# 2026-09-20, after `lfo4-bridge` passed every snapshot harness it had and then
+# drew the instrument's EXCEPTION screen at boot.
+SHIPPING_TRIGGERS = re.compile(
+    r"\b(build|rebuild|compile|flash|burn|ship|upgrade|\.syx|syx|image|"
+    r"firmware|install|deploy|test it on|on the (device|instrument|hardware)|"
+    r"hardware test)\b", re.IGNORECASE)
+
+SHIPPING = """<shipping-gate>
+This prompt is about a build. Before any `.syx` is offered for flashing:
+
+1. **Boot it from reset in the emulator.**
+   `scripts/emu_boot_check.py out/<build>/section_3_MAIN_OS.bin`
+   Three outcomes, and they are not the same: **fault** (the firmware's own
+   reporter at `0x4011ea6a` ran -- it formats `V%02x M%x P%08x`, so vector,
+   mode and faulting PC come from the machine, not from a photo of the screen),
+   **no UI** (never faulted, never composed a frame -- a hang, which looks like
+   a pass to anything watching only for a crash), and **booted**.
+   A snapshot harness does NOT count: `ui1200M` has already booted, so it never
+   runs the loader, the init, or the first call into new code from reset. That
+   is precisely how `lfo4-bridge` reached the instrument and faulted.
+
+2. **Make any demonstration unmissable.** A hard-coded proof -- a modulation, a
+   sweep, a blink -- must be obvious within a bar. `lfo4-tick7` used the slowest
+   multiplier there is and took ~14 bars to hear: *"I almost wrote that it
+   didn't work."* A demo indistinguishable from a failure cannot tell the two
+   apart, and the tester pays for it in flashes.
+
+3. **Put it where builds live**: `00_Resources/02_Builds/name_DN2_version.syx`.
+
+4. **Say what a pass looks like** before it is flashed, in the same terms the
+   owner will use: which track, which knob, what should be heard or seen, and
+   what a failure would look like instead. `00_Notes/.../Firmware test plan.md`
+   is where that goes.
+
+Flashing costs a ten-minute MIDI transfer and a recovery if it fails. The gate
+costs wall-clock on a machine that is otherwise idle.
+</shipping-gate>"""
+
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
     except Exception:
         return 0                      # never block a prompt over a parse error
     prompt = payload.get("prompt") or ""
-    if CHATTER.match(prompt) or not TRIGGERS.search(prompt):
+    if CHATTER.match(prompt):
+        return 0
+    blocks = []
+    if TRIGGERS.search(prompt):
+        blocks.append(ROUTING)
+    if SHIPPING_TRIGGERS.search(prompt):
+        blocks.append(SHIPPING)
+    if not blocks:
         return 0
     print(json.dumps({"hookSpecificOutput": {"hookEventName": "UserPromptSubmit",
-                                             "additionalContext": ROUTING}}))
+                                             "additionalContext": SEPARATOR.join(blocks)}}))
     return 0
 
 
