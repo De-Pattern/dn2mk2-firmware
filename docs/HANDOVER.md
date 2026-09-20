@@ -199,15 +199,15 @@ go-ahead and a named transport.**
 
 | | |
 |---|---|
-| Repo | `C:\ZZ_Code\zz_personal\dn2_firmware`, remote `dn2_firmware_explore` |
+| Repo | `D:_Code\Z_Personal\dn2_firmware`, remote `dn2_firmware_explore` |
 | Ghidra | `C:\tools\ghidra_12.1.3_PUBLIC` — **lowercase `tools`**; SLEIGH fails with a case error otherwise |
 | JDK | `C:\Tools\jdk-21.0.12.1+1` |
 | SHARC language | `SHARC:LE:32:VISA`, module copied from digikit into `Ghidra\Processors\SHARC` |
 | ColdFire language | `68000:BE:32:Coldfire` — Gate F cleared; Capstone/radare2 **fail** |
-| digikit | `C:\ZZ_Code\ZZ_Personal\digikit`, pinned `ec32de1`; needs patched Unicorn, run under WSL with `/root/digikit-venv/bin/python` |
+| digikit | `D:_Code\Z_Personal\digikit`, pinned `ec32de1`; needs patched Unicorn, run under WSL with `/root/digikit-venv/bin/python` |
 | Emulator env | `DT2_SYX`, `DT2_SECTIONS=/root/t111`, `DT2_SNAPSHOTS=/root/snaps-dn2-1.11` |
 | Boot snapshot | **use `emu.run.usable_rung()`** — on 1.11 only the 400M rung reaches a drawing UI. Do not copy a number from a docstring. |
-| DNX | `C:\ZZ_Code\ZZ_Personal\DNX` — the verification instrument; no `.dnx` backups present |
+| DNX | `D:_Code\Z_Personal\DNX` — the verification instrument; no `.dnx` backups present |
 
 ## Recurring doctrine, earned the hard way
 

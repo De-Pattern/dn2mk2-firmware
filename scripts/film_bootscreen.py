@@ -35,7 +35,7 @@ from dnfw.firmware.load import load
 from dnfw.mods import bootscreen
 
 STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
-SYX = "/mnt/c/ZZ_Code/ZZ_Personal/dn2_firmware/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
+SYX = "/mnt/d/01_Code/Z_Personal/dn2_firmware/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
 SNAP = "~/dn2-snapshots/Digitone_II_OS1.11/boot400M.snap"
 WORK = ROOT / "out/film"
 START, STEP, SHOTS = 3, 1, 38            # millions of instructions from the snapshot; the first capture lands after 3M
@@ -67,7 +67,7 @@ def film(name: str, patch: pathlib.Path | None) -> list[pathlib.Path]:
     shots[0].parent.mkdir(parents=True, exist_ok=True)
     pngs = " ".join(f"--png-at {START + STEP * (k + 1)}M:{wsl_path(p)}" for k, p in enumerate(shots))
     extra = f"--patch-ranges {wsl_path(patch)}" if patch else ""
-    script = (f"cd /mnt/c/ZZ_Code/ZZ_Personal/digikit && export DT2_SECTIONS=/root/dn2-sections-111 && "
+    script = (f"cd /mnt/d/01_Code/Z_Personal/digikit && export DT2_SECTIONS=/root/dn2-sections-111 && "
               f"timeout 1800 /root/dn2-emu-venv/bin/python tools/guirun.py {SNAP} --weakptr --slc "
               f"--syx {SYX} {extra} {pngs} --limit {(START + STEP * SHOTS + 6) * 1_000_000}")
     run = subprocess.run(["wsl", "bash", "-lc", script], capture_output=True, text=True)

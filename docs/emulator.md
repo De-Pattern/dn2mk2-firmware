@@ -7,7 +7,7 @@ This records how it is wired in, and why that way.
 ## Where it lives
 
 ```
-C:\ZZ_Code\ZZ_Personal\digikit\        a plain git clone, tracking origin/main
+D:_Code\Z_Personal\digikit\        a plain git clone, tracking origin/main
 ```
 
 **A sibling of this repository and of DNX, not inside either.** Nothing of
@@ -112,7 +112,7 @@ shell script. This machine:
 So **WSL is the natural home**, which is also where this project already reaches
 for `m68k-linux-gnu-as` and `objdump` (`patch/assemble.py`, `image/objdump.py`).
 The clone stays on the Windows side and is reached from WSL as
-`/mnt/c/ZZ_Code/zz_personal/dn2_firmware/00_Resources/01_Reference/digikit`.
+`/mnt/d/01_Code/Z_Personal/dn2_firmware/00_Resources/01_Reference/digikit`.
 
 One caveat worth knowing before it wastes an hour: building a native extension
 against a `/mnt/c` path is slow and occasionally trips on permissions. Put the
@@ -137,7 +137,7 @@ has this**, and the failure wears a different mask in each script.
 Fix it once, per clone:
 
 ```sh
-cd /c/ZZ_Code/ZZ_Personal/digikit
+cd /d/01_Code/Z_Personal/digikit
 git config core.autocrlf false
 git config core.eol lf
 git rm --cached -r -q .   &&  git reset --hard
@@ -488,7 +488,7 @@ filesystem at `~/dn2-emu-venv` exactly as the caveat above says:
 ```sh
 python3 -m venv ~/dn2-emu-venv
 ~/dn2-emu-venv/bin/python -m pip install unicorn==2.1.4 capstone==5.0.7
-cd /mnt/c/ZZ_Code/ZZ_Personal/digikit
+cd /mnt/d/01_Code/Z_Personal/digikit
 PYTHON=~/dn2-emu-venv/bin/python bash tools/install-patched-unicorn.sh
 ```
 

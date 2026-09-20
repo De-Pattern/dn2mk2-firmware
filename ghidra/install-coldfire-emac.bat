@@ -37,7 +37,7 @@ if "%GHIDRA_HOME%"=="" (
 )
 
 set "DIGIKIT=%~1"
-if "%DIGIKIT%"=="" set "DIGIKIT=C:\ZZ_Code\ZZ_Personal\digikit"
+if "%DIGIKIT%"=="" set "DIGIKIT=D:_Code\Z_Personal\digikit"
 set "MOD=%DIGIKIT%\tools\ghidra\ColdfireEMAC"
 
 if not exist "%MOD%\data\languages\coldfire_emac.slaspec" (
