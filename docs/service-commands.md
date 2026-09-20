@@ -390,9 +390,12 @@ is a binary frame: `$$$$`, u32 length (samples × 4), the samples. It pairs with
 `#RECEIVE_AUDIO <n>` (loads a buffer from a `$$$$` frame; replies
 `READY FOR SAMPLE DATA`), `#PLAY_START <buf> <off> <ch> [len]`,
 `#PLAY_STEREO` (two at once, interrupts off), `#PLAY_STOP <n>`; lengths cap at
-0x8000. **Open:** which signal `#RECORD_START` records -- the codec inputs, or
-the instrument's own output -- is not read yet. It decides whether capture can
-catch audio breaking up under load.
+0x8000. ~~**Open:** which signal `#RECORD_START` records...~~ **Read 2026-09-20,
+and the question was slightly wrong** -- the argument clamped to 0..2 is a
+**channel within a 64-byte TDM frame**, not a choice of source. Capture takes
+the stream arriving at `0x4E6DF100`, which is the same window the instrument's
+own audio engine reads. `docs/audio-dma.md`. Which end of that link is the DSP
+and which the codec is the part still open.
 
 ### What this changes for measuring load
 
