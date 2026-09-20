@@ -243,3 +243,48 @@ python scripts/midi_probe.py --out 1 --in 0 --elektron ping
 **A single-device sample made a wrong parse look right**, which is the fourth
 instance of that shape in this project and the reason a second device was worth
 more than another week of reading one.
+
+---
+
+## 6. There are no hidden machines on the DN2 — 2026-09-20
+
+A question worth closing before anyone builds on it: digikit's #33 refers to
+"the ColdFire's 0..6 machine range", which would mean two type values beyond
+the five the DN2 offers. **On DN2 1.11 it does not: there are exactly five.**
+
+The machine descriptors are 44-byte records at `0x42432B24`, reached by the
+accessor at `0x400c248e`:
+
+```
+moveq #4,%d1 ; cmpl %d0,%d1 ; bcs fallback    ; id > 4 -> the fallback record
+moveb #44,%d1 ; mulsl %d1,%d0 ; addil #0x42432B24
+```
+
+Read out of the snapshot with nothing executed:
+
+| id | name | in the UI? |
+|---|---|---|
+| 0 | `FM TONE` | yes |
+| 1 | `WAVETONE` | yes |
+| 2 | `FM DRUM` | yes |
+| 3 | `SWARMER` | yes |
+| 4 | `MIDI` | yes |
+
+Which is exactly the row → type mapping measured through the menu on the
+instrument (`docs/FINDINGS.md` in digikit PR #29), and DNX reads type 4 as
+MIDI in saved kits independently. **Every value the accessor admits is offered
+by the UI. Nothing is hidden behind the selector.**
+
+**And the two records past the bound are not machines.** `0x42432B24 + 5 * 44
+= 0x42432C00`, which is the base of the **page**-record table
+(`docs/lfo4-build-plan.md` §"Step 4b, mapped"), so ids 5 and 6 read back as
+`NONE` and `TRIG / "Trig Parameters"` — the first two *pages*, not two spare
+machines. Two adjacent tables, and reading past the end of one lands in the
+other, which is exactly the shape that invents a discovery if the bound is
+ignored.
+
+So `0..6` is a Digitakt II 1.16 figure and does not transfer. **Extra machines
+on the DN2 remain a question about the SHARC**, where #33 found the machine
+word received and cached with *no dispatch table and no range check*, and the
+synthesis engine still unlocated. Nothing on the ColdFire side is standing in
+the way, because there is nothing there to unlock.
