@@ -2656,3 +2656,53 @@ It is not small, and it is no longer unknown. The open items are that one
 unpaired bound, and whether anything reaches a record other than through these
 accessors — the `+0` field of every record is a code pointer, and where those
 are called from has not been read.
+
+#### Correction: the two "spare" records per group are alternates — 2026-09-21
+
+§"Step 4b, mapped" describes the gaps in a page record's entries as *"the two
+unused records in each group of ten"*, and reads record 79 as an unused
+`SLEW`. **Both are wrong, corrected by the owner:** `SLEW` is shown when the
+waveform is **RND**. The record is not unused; it is the alternate for that
+slot, and it is touched whenever a random LFO is on screen.
+
+`dnfw params --page LFO1` shows the shape once you look for it. A group of ten
+is **eight value slots plus two alternates**, and the alternates are
+recognisable because they *share an id* with a primary:
+
+| record | id | name | range | CC |
+|---|---|---|---|---|
+| 74 | 1 | SPD | 7ffe | 170 |
+| **75** | **2** | MULT | **1700** | 171 |
+| 76 | 3 | FADE | 7f00 | 172 |
+| 77 | 4 | DEST | 7f00 | 173 |
+| 78 | 5 | WAVE | 0600 | 174 |
+| **79** | **6** | **SLEW** | 7f00 | **--** |
+| **80** | **6** | SPH | 7f00 | 175 |
+| 81 | 7 | MODE | 0400 | 176 |
+| 82 | 8 | DEP | 7ffe | 177 |
+| **83** | **2** | MULT | **0b00** | 171 |
+
+Two ids appear twice: id 6 as `SLEW` or `SPH`, and id 2 as `MULT` with a
+23-value range or an 11-value one. **`SLEW` has no CC of its own** because the
+CC belongs to the slot, not the record, and slot 6's is `SPH`'s -- which is
+corroboration that the two really are one value seen two ways rather than two
+parameters.
+
+So the page record's eight entries name the **default** variant, and the
+renderer substitutes the alternate from state -- `WAVE = RND` selects `SLEW`
+over `SPH`. Which code performs that substitution is not read.
+
+**What it changes for LFO4.** Ten records was already the number, but the
+reason was wrong, and so would the contents have been. LFO4 needs:
+
+- eight primaries on slots **101-108**: SPD, MULT, FADE, DEST, WAVE, SPH,
+  MODE, DEP -- the `ParameterSet` order §5k established and `csrc/lfo4/ext.h`
+  already uses;
+- a **`SLEW` alternate sharing slot 106** with `SPH`, with no CC;
+- a **second `MULT` on slot 102** carrying the `0x0b00` range.
+
+Building eight records and leaving two blank would have produced an LFO whose
+random waveform has no slew control and whose multiplier list is wrong in
+whichever mode selects the short range -- on a page that otherwise looked
+finished. The kind of gap that reads as a firmware bug rather than a missing
+record.
