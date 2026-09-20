@@ -208,3 +208,49 @@ transients are data objects on the instrument — `docs/pcm-hunt.md` §8.
 **Not yet sent.** The DNX session needs the port for +Drive listings and a
 project read, and has priority; this session is standing off until it reports
 finished. `scripts/midi_probe.py` holds the tooling.
+
+---
+
+## Screenshot: opcode 0x04, and a live mirror (external report, 2026-09-17)
+
+An external contributor, who has built tools for Digitone/Digitakt maintenance
+mode, a GFX browser/editor and a boot-logo customisation on a Digitakt, reports:
+**the screen is a MIDI RPC service, "4 if I recall", which returns the frame
+buffer; it needs decoding, and requesting it repeatedly gives a live mirror.**
+
+It fits what the image says: **`04` is in the DN2's advertised opcode list**
+(`01 02 03 04 06 07 09 50 …`, `docs/midi-rpc-dispatch.md`), and `Screenshot` is
+among the `MidiRpc*` classes above. Not yet exercised here.
+
+**How to decode it, if it is the panel buffer** (the only 128 x 64 frame the
+firmware keeps, read and proven under the emulator — digikit `emu/panel.py`):
+1,024 bytes, `byte = page + 8 * column` (page 0..7, column 0..127), and bit `n`
+of that byte is row `8 * (7 - page) + n`, least significant bit first — an
+SSD1306-style page layout with the **page order inverted** (page 0 is the bottom
+eight rows). The check that settles orientation: knobs come out round and text
+reads normally. The RPC reply may wrap or compress the buffer; that part is
+unread.
+
+**Why it matters here:** hardware screenshots of what our builds draw — boot
+screens, LFO glyphs, labels — without the owner photographing the panel.
+Device I/O belongs to DNX (`ask DNX for device data`); the request went there.
+
+### The handler, read 2026-09-17
+
+At `0x4012618c` the dispatcher `dynamic_cast`s to `MidiRpcScreenshotRequest`
+(typeinfo `0x40207fe4`) and reads **no field** of the request — only its
+non-null pointer. So the request is **just the opcode** (envelope aside; the
+generic parse step is not read). It then:
+
+1. starts a response with `u32 1`, `u16 128`, `u16 64` — format, width, height;
+2. allocates **1,024 bytes**;
+3. posts a job (`0x4002e014`, lambdas `0x401250d0` / `0x40125114`) that locks
+   (`0x4002e322`), takes a panel framebuffer pointer (`0x40131df8`:
+   `move.l 0x402a0b8c,%d0`; the pair is `0x402a0b88`/`0x402a0b8c` on 1.11),
+   copies 1,024 bytes, sets a done flag and posts semaphore `0x445fa6b0`;
+4. waits on that semaphore and builds the response (`0x401bd23c`).
+
+So the reply carries the raw 128 x 64 panel buffer, decoded as above. Nothing is
+written. The one hang mode is the semaphore: a stalled display task makes the
+request wait. The exact order of fields in the SysEx reply is not read.
+
