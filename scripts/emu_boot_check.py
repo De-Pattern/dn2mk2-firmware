@@ -54,9 +54,14 @@ def stock_path():
     return os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin")
 
 
-def run(image_path, limit, frame_at):
-    """Boot from reset. -> (instructions, frames, the fault or None)."""
+def run(image_path, limit, frame_at, entries=()):
+    """Boot from reset. -> (instructions, frames, the fault or None, reached).
+
+    `entries` are the build's own routines. Whether they ran is as much a part
+    of the result as whether it crashed: see `coverage` below.
+    """
     holder, state = {}, {"frames": 0, "fault": None}
+    reached = {name: 0 for name, _ in entries}
 
     def pre_start(m):
         st = holder["st"]
@@ -75,10 +80,14 @@ def run(image_path, limit, frame_at):
 
         m.uc.hook_add(UC_HOOK_CODE, at_frame, begin=frame_at, end=frame_at)
         m.uc.hook_add(UC_HOOK_CODE, at_reporter, begin=REPORTER, end=REPORTER)
+        for name, addr in entries:
+            def hit(uc, address, size, user, name=name):
+                reached[name] += 1
+            m.uc.hook_add(UC_HOOK_CODE, hit, begin=addr, end=addr)
 
     m, st, stop = dspboot.run(str(SYX), open(image_path, "rb").read(), limit=limit,
                               machine_out=holder, pre_start=pre_start)
-    return st["n"], state["frames"], state["fault"]
+    return st["n"], state["frames"], state["fault"], reached
 
 
 def control(limit, frame_at, refresh=False):
@@ -86,7 +95,7 @@ def control(limit, frame_at, refresh=False):
     if CACHE.exists() and not refresh:
         return json.loads(CACHE.read_text())
     started = time.time()
-    ran, frames, fault = run(stock_path(), limit, frame_at)
+    ran, frames, fault, _ = run(stock_path(), limit, frame_at)
     row = {"ran": ran, "frames": frames, "fault": fault, "limit": limit,
            "seconds": round(time.time() - started, 1)}
     CACHE.parent.mkdir(parents=True, exist_ok=True)
@@ -113,7 +122,9 @@ def main() -> int:
         return 2
 
     started = time.time()
-    ran, frames, fault = run(args.image, args.limit, frame_at)
+    entries = sorted((k, v) for k, v in sym.items()
+                     if k.startswith(("lfo4_", "dnfw_")) and not k.endswith("_displaced"))
+    ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries)
     print(f"  {os.path.basename(os.path.dirname(args.image))}: {frames} frame(s) in "
           f"{ran:,} instruction(s), {round(time.time() - started, 1)}s\n")
 

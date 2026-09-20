@@ -53,13 +53,20 @@ def main() -> int:
     lo, hi = CODE_VA, CODE_VA + args.span - 1
 
     holder, foreign, mine = {}, [], [0]
+    # The loader is ours too, and it is the *first* thing to write here: it
+    # copies the chunk and zeroes the BSS. A first version counted only PCs
+    # inside the chunk as ours and so reported the loader as a foreign writer
+    # -- a false positive that reads exactly like the hypothesis being
+    # confirmed, which is the worst way for a probe to be wrong.
+    loader_lo = sym.get("dnfw_boot", 0)
+    loader_hi = loader_lo + 0x200
 
     def pre_start(m):
         st = holder["st"]
 
         def wrote(uc, access, address, size, value, user):
             pc = uc.reg_read(UC_M68K_REG_PC)
-            if CODE_VA <= pc < CODE_VA + args.span:     # our own code writing its own state
+            if (CODE_VA <= pc < CODE_VA + args.span) or (loader_lo <= pc < loader_hi):
                 mine[0] += 1
                 return
             foreign.append((st["n"], pc, address, size, value))
@@ -71,7 +78,7 @@ def main() -> int:
                               limit=args.limit, machine_out=holder, pre_start=pre_start)
 
     print(f"  ran {st['n']:,} instruction(s), stop {stop!r}")
-    print(f"  writes from inside our own region: {mine[0]:,}")
+    print(f"  writes from our own code and loader: {mine[0]:,}")
     print(f"  writes from anywhere else: {len(foreign):,}\n")
     if not foreign:
         print("  nothing outside our code ever wrote to it. The chunk survives the boot,\n"
