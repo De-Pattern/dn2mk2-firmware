@@ -33,6 +33,15 @@ CPU = "5475"                          # ColdFire V4e, the DN2's core
 GCC_NAMES = ("m68k-linux-gnu-gcc", "m68k-elf-gcc", "m68k-none-elf-gcc")
 NM_NAMES = ("m68k-linux-gnu-nm", "m68k-elf-nm", "m68k-none-elf-nm")
 OBJCOPY_NAMES = ("m68k-linux-gnu-objcopy", "m68k-elf-objcopy", "m68k-none-elf-objcopy")
+OBJDUMP_NAMES = ("m68k-linux-gnu-objdump", "m68k-elf-objdump", "m68k-none-elf-objdump")
+
+# A scaled index of 8 is a 68020 addressing mode that the ColdFire V4e does
+# not implement -- and nothing in this toolchain objects to it: GCC emits it
+# for any 8-byte-strided array indexed by a variable, gas assembles it, and
+# the emulator's generic m68k core runs it. Only the instrument refuses,
+# with an address error (`lfo4-bridge`, 2026-09-20: V03 M0 P468004FC). So
+# every build is disassembled and checked here, where it cannot be skipped.
+SCALE8 = re.compile(r":[lw]:8\)")
 
 CFLAGS = (
     f"-mcpu={CPU}", "-Os", "-std=gnu11", "-ffreestanding", "-fno-builtin", "-nostdlib",
@@ -66,6 +75,7 @@ class CToolchain:
     nm: tuple[str, ...]
     objcopy: tuple[str, ...]
     via_wsl: bool
+    objdump: tuple[str, ...] = ()
 
     def path_for(self, path: Path) -> str:
         return Toolchain((), (), (), self.via_wsl).path_for(path)
@@ -93,9 +103,13 @@ class Linked:
 
 
 def find_toolchain() -> CToolchain | None:
+    # objdump is wanted, not required: it drives the ColdFire check, and a
+    # missing checker must not stop a build that would otherwise work.
     native = [_find_native(n) for n in (GCC_NAMES, NM_NAMES, OBJCOPY_NAMES)]
     if all(native):
-        return CToolchain((native[0],), (native[1],), (native[2],), via_wsl=False)
+        dump = _find_native(OBJDUMP_NAMES)
+        return CToolchain((native[0],), (native[1],), (native[2],), via_wsl=False,
+                          objdump=(dump,) if dump else ())
     wsl = shutil.which("wsl")
     if wsl is None:
         return None
@@ -110,8 +124,31 @@ def find_toolchain() -> CToolchain | None:
 
     picked = [in_wsl(n) for n in (GCC_NAMES, NM_NAMES, OBJCOPY_NAMES)]
     if all(picked):
-        return CToolchain(*((wsl, "-e", p) for p in picked), via_wsl=True)
+        dump = in_wsl(OBJDUMP_NAMES)
+        return CToolchain(*((wsl, "-e", p) for p in picked), via_wsl=True,
+                          objdump=(wsl, "-e", dump) if dump else ())
     return None
+
+
+def _refuse_unrunnable(tool: CToolchain, elf: Path) -> None:
+    """Raise if the link contains an instruction the ColdFire cannot execute.
+
+    The check reads the disassembly, not the bytes, so it sees what the CPU
+    would decode rather than a pattern that happens to sit inside data.
+    """
+    if not tool.objdump:
+        return
+    r = tool.run(tool.objdump, ["-d", "-m", "m68k:cfv4e", tool.path_for(elf)])
+    if r.returncode:
+        return                     # a check that cannot run must not fail a build
+    bad = [ln.strip() for ln in r.stdout.splitlines() if SCALE8.search(ln)]
+    if bad:
+        raise AssemblyError(
+            "this build contains %d instruction(s) the ColdFire V4e cannot "
+            "execute -- a scaled index of 8, which is a 68020 mode:\n    %s\n"
+            "Split the 8-byte-strided array into parallel arrays, or index it "
+            "through an explicit pointer (csrc/lfo4/carry.c has the worked case)."
+            % (len(bad), ("\n    ").join(bad[:8])))
 
 
 def require_toolchain() -> CToolchain:
@@ -166,6 +203,8 @@ def build(sources: list[Path], *, base: int, entries: list[str] = (),
         r = tool.run(tool.objcopy, ["-O", "binary", "-R", ".bss", tool.path_for(elf), tool.path_for(binout)])
         if r.returncode:
             raise AssemblyError(_clean(r.stderr) or "objcopy failed")
+
+        _refuse_unrunnable(tool, elf)
 
         r = tool.run(tool.nm, ["--defined-only", tool.path_for(elf)])
         if r.returncode:
