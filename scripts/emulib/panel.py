@@ -7,6 +7,14 @@ instructions a hold, and the natural pacing of a harness is longer than that.
 So `tap` releases inside `TAP`, and `hold` is the one that lingers. A held
 `[MOD]` does not cycle the pages.
 
+**And a dwell is only a dwell if something reads it.** `settle` used to spin a
+full `CHUNK` whatever it was asked for, so every tap ran 10 M and was a hold
+after all -- while the code said `TAP = 2_000_000` and a `--dwell` argument
+sat there being passed and ignored. It cost a sweep that reported the same
+result at 500 K and at 2 M and a plan note blaming the instrument, so: a
+constant that names a duration is a claim, and the first probe to lean on one
+should check that changing it changes something.
+
 **A plain turn does nothing in a menu.** Values move when the encoder's push is
 held *while* it turns, which is what `push_and_turn` does. A probe that turned
 without holding reported zero writes -- a clean-looking null that meant nothing.
@@ -53,15 +61,26 @@ class Panel:
 
     # --- time ---------------------------------------------------------------
     def settle(self, instructions=SETTLE):
-        """Run, in chunks. A window that executes nothing ends it: `spin`
-        returns normally having run zero when a vector has no handler, and a
-        caller that only watches the screen reads that as "the input did
-        nothing"."""
+        """Run for `instructions`, in chunks. -> what it actually ran.
+
+        The budget is `min(CHUNK, what is left)`, and the `min` is the whole
+        point: an earlier version passed `CHUNK` every time, so **every window
+        shorter than a chunk ran a full chunk**. `tap` asked for 2 M and got
+        10 M, past the hold threshold -- so every tap this harness ever made
+        was a hold, and `--dwell` changed nothing because nothing read it. The
+        page probes that came out identical at 500 K and at 2 M were measuring
+        the same 10 M twice.
+
+        A window that executes nothing ends it: `spin` returns normally having
+        run zero when a vector has no handler, and a caller that only watches
+        the screen reads that as "the input did nothing".
+        """
         from emu import longrun
 
         done = 0
         while done < instructions:
-            self.m.pc, ran, _stop = longrun.spin(self.m.m, self.m.pc, CHUNK,
+            budget = min(CHUNK, instructions - done)
+            self.m.pc, ran, _stop = longrun.spin(self.m.m, self.m.pc, budget,
                                                  pits=self.timers, fast=True)
             done += ran
             if ran == 0:

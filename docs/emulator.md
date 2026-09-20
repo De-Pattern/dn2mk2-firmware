@@ -905,3 +905,57 @@ code has run is a suggestion": a count says something moved, a slot says which
 parameter, and the screen says which page was open. Any two of them disagreeing
 is the interesting case — and a mapping carried from a note is exactly the kind
 of premise to check before building a theory on top of it.
+
+## And it was neither the keys nor the dwell — it was our own `settle`
+
+The step above cleared the mapping and left "the press is registered twice".
+Both readings were wrong, and the screens are what said so: the header carries
+**`MOD (n/3)`**, so the instrument names the open page and no one has to infer
+it from the slot a turn wrote.
+
+Three runs, none of which turn an encoder at all
+(`scripts/emu_mod_pages.py`):
+
+| keys | pages visited |
+|---|---|
+| `down, down, down, up, up` | 1, 2, 2, 2, 3 |
+| `mod, mod, mod, mod` | 1, 1, 1, 1 |
+| `down, up, down, up` | 1, 2, 3, 2, 3 |
+
+**A key worked once; a different key always worked.** That is the signature of
+a release that never registered: the wire carries a whole-channel *state mask*
+and the firmware XORs it against what it last saw, so a repeat of the same
+press byte is correctly no edge at all, while any other bit differs and lands.
+
+The release was sent every time. What swallowed it was `emulib.panel.settle`:
+
+```python
+while done < instructions:
+    self.m.pc, ran, _stop = longrun.spin(self.m.m, self.m.pc, CHUNK, ...)
+```
+
+The budget is `CHUNK`, not what the caller asked for — so **every window
+shorter than a chunk ran a full 10 M**, and `tap`, which asks for 2 M, held the
+key for 10 M. Past the hold threshold, every tap was a hold. It also explains
+the sweep that looked like a clean negative: 500 K and 2 M "dwells" both ran
+the same 10 M, so of course they agreed.
+
+With `budget = min(CHUNK, instructions - done)`, the same walk gives
+
+```
+  0:   [MOD] -> page 1     3:    down -> page 3   (clamped)
+  1:    down -> page 2     4:      up -> page 2
+  2:    down -> page 3     5:      up -> page 1
+```
+
+One page per press, clamping at the last page, UP stepping back: ordinary
+behaviour that was never in doubt on the instrument.
+
+**What to take from it.** A constant that names a duration is a claim, and
+`TAP = 2_000_000` was a claim nothing checked — a `--dwell` argument was
+threaded through two scripts and read by nothing. The first probe to lean on a
+parameter should confirm that changing it changes *something*; a sweep that
+reports the same answer at every setting has usually measured the setting being
+ignored, not the thing being independent of it. And this is the second time on
+this question that the honest instrument was the screen: `MOD (3/3)` settled in
+one glance what two rounds of reasoning about slot numbers got wrong.
