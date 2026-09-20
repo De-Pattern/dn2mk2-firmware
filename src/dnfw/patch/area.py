@@ -19,11 +19,13 @@ instead carries linked code for an address of its own:
     +0   u32 load address        -- where the image runs; longword-aligned
     +4   u32 image length
     +8   u32 bss length          -- zeroed after the image
-    +12  u32 init entry, or 0    -- called once, after the firmware's BSS clear
+    +12  u32 init entry, or 0    -- called once by the loader, which is *before*
+                                   the firmware's BSS clear: an init may touch
+                                   only its own memory
     +16  the image
 
 One subject: building and reading that layout. Who copies it is the loader's
-business (`csrc/runtime/loader.c`).
+business (`csrc/runtime/loader.S`).
 """
 
 from __future__ import annotations

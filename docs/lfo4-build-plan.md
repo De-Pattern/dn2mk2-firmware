@@ -1884,3 +1884,99 @@ reset code only calls `main` (`0x40000568`).
 Waves still install their own startup stubs at the same site. The loader is a
 superset of the boot screen's copy, so the boot screen can move onto it without
 changing its runtime layout.
+
+### Step 1 result — the table is carried, 2026-09-20
+
+`scripts/build_lfo4_ext.py` → `00_Resources/02_Builds/lfo4-ext_DN2_1.11.syx`;
+1,548 B of code and 6,184 B of table and state at `0x46800000`, 24 patched bytes
+at three sites (the startup calls, and `memcpy` and `memset` at their entries).
+
+| piece | where |
+|---|---|
+| the table | `csrc/lfo4/ext.c` — 256 entries × (u32 key + 8 × u16), open addressing, **no tombstones**: a deletion shifts its cluster back, so a free slot always ends a probe and the range walks never cross a grave |
+| the size policy | `csrc/lfo4/carry.c` — under 1,163 bytes, return; exactly 1,163, one object; more, every object inside the range |
+| the two stubs | `csrc/lfo4/hooks.S`, each replaying the two instructions its jump displaced |
+| what runs once | `csrc/lfo4/init.c`, called by the startup loader before the firmware's BSS clear |
+
+**The carry is by range, not by size.** §8 enumerated 32 whole-sound copies and
+~9 kit and pattern copies; this build never compares against that list. A copy
+of 1,163 bytes or more carries whatever the table is tracking inside the range
+it covers, so a container the enumeration missed carries its sounds anyway, and
+the enumeration only has to be right about which **routines** move a sound. It
+is bought with a two-compare range test against the tracked bounds, which is
+what keeps a frame-buffer copy free.
+
+### What the harness measured — `scripts/emu_lfo4_ext.py`
+
+A snapshot restored, the code written where the loader puts it, its init called,
+both entries patched exactly as the build patches them — then the firmware's
+**own** `memcpy` and `memset` called with laid-out arguments. All 22 checks
+pass, first run:
+
+| asked | answer |
+|---|---|
+| whole-sound copy, both directions, over a tracked destination | carries the eight values; the source keeps its own |
+| copy from an untracked sound | the destination's entry is dropped, not left stale |
+| copies of 1,162 bytes and 64 bytes | carry nothing |
+| a whole kit, 16 sounds at stride 1,163 | 16/16 land at their own offsets; nothing lands between them |
+| the same kit copied **overlapping**, one sound along | 16/16 |
+| a block of 96,661 bytes — a size this build knows nothing about | the three sounds inside it are carried |
+| `memset` of a sound, and of a kit | the entries go, and the slots read `ext_default` again |
+| the table filled to 256 | the 257th is refused and counted; nothing is written over |
+| half of a full table dropped | every survivor still found, every dropped key reads the default |
+
+**Cost, instructions per call** (the emulator counts them):
+
+| call | stock | hooked |
+|---|---|---|
+| a 64-byte copy — the path every call under 1,163 bytes takes | 43 | 60 (**+17**) |
+| one whole sound | 466 | 759 |
+| a whole kit, 16 sounds carried | — | 14,643 |
+
++17 on every `memcpy` is the price of the feature on the hot path. `memcpy`
+was measured at 2,347 calls per 60 M instructions of UI activity (§8) and 665
+per 60 M from reset, so that is between 11,000 and 40,000 instructions per 60
+million: **under a thousandth of the processor.** A large
+copy nowhere near a tracked sound costs **8** instructions more than with an
+empty table — the range test, doing its job.
+
+### And from reset — `scripts/emu_lfo4_boot.py`
+
+The harness cannot see the failure this build could have on its own: a stub in
+front of two routines the whole firmware uses. So stock and patched were booted
+from reset, 60 M instructions each, and compared. All seven checks pass.
+
+| asked | answer |
+|---|---|
+| does the control ever reach our code? | no |
+| loader, and the init with it | once each |
+| every `memcpy` / `memset` through the stub | 665 / 665 and 27 / 27 |
+| the same calls as the stock control | 665 and 27, both |
+| entries refused, batches overflowed, calls reentered | 0, 0, 0 |
+
+**And the finding that matters for how step 1 is tested: in 60 M instructions
+from reset the firmware made no copy of 1,163 bytes or more at all.** All 665
+`memcpy` calls took the fast path; the carry never ran; `ext_live` ended at 0.
+A boot does not load a kit or switch a pattern, which is where whole sounds
+move. So the boot proves the hooks are harmless and the fast path is what a
+boot pays, and it proves **nothing** about the carry — the direct-call harness
+is the test of that, and step 5's driven session on the device is its
+confirmation.
+
+### What step 1 does not answer
+
+- **Save and load** (step 2). A sound that is written from the stored side does
+  not go through `memcpy`; the two hooks on ids 0, 4, .. 28 are that step.
+- **Whether `memcpy` and `memset` are the only movers.** The plan read that no
+  routine copies a live sound field by field, and the harness cannot see a mover
+  it does not know about. What would expose one is step 5's driven session: an
+  entry that vanishes after an edit path nothing here hooks.
+- **What a slot with no entry should read.** `ext_default` is eight zeros today,
+  which for `DEP` is full *negative* depth (§5k). Step 3 sets it to what a fresh
+  sound should sound like, which is where that belongs.
+- **Whether an interrupt ever copies a sound while a copy is in flight.** Both
+  hooked routines are called from interrupt context, and the table work is
+  neither atomic nor reentrant. Rather than assume, the slow path counts it:
+  `lfo4_reentered`, checked by the boot run and to be checked again in step 5's
+  driven session. If it ever moves off zero the answer is to mask interrupts
+  around the carry, and we will then know the microseconds are worth spending.
