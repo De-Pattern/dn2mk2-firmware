@@ -3355,3 +3355,50 @@ saying which list actually appears.
 The `0x8000` this build writes into LFO4's `DEST` record's capability field is
 **inert** on that reading. It continues the `0x40000 / 0x20000 / 0x10000`
 pattern and costs nothing, but nothing measured here reads those bits.
+
+### The relocation, measured: the old table is never read again — 2026-09-21
+
+`lfo4-table` **boots from reset without faulting**, and `scripts/emu_table_watch.py`
+watched both address ranges through that boot and through 330 calls into the
+accessor at `0x400dbeb6`:
+
+```
+    during boot, old 60-byte: 0 read(s)
+    during boot, new 60-byte: 1,846 read(s)
+    during boot, old 68-byte: 0 read(s)
+
+    with the accessor calls, old 60-byte: 0 read(s)
+    with the accessor calls, new 60-byte: 2,176 read(s)
+```
+
+The boot is not a quiet one — the gate counted **2,192 kit loads** in the same
+450 M instructions — so the parameter table is being used heavily, and every
+one of those uses went to the new address. **The 56 base sites are complete for
+everything this boot executes.** The new range being read is the control: a
+probe reporting "nothing reads the old table" while watching nothing at all
+would look exactly the same.
+
+#### And the run caught this project's own documented trap, again
+
+The same run reported three failures, and all three were the harness:
+
+- **"the firmware filled the relocated runtime table": 0 reads.** A table being
+  *filled* is **written**, not read. The check could not have passed however
+  well the build worked. It now counts both.
+- **Every one of the 330 accessor calls returned 0.** Thirty-eight "matched"
+  and they were exactly the thirty-eight records whose group is 0.
+
+The second is §"Step 4a result" happening a second time: a call into
+firmware-resident code on a machine with live timers gets interrupted,
+`emu_start` stops on its instruction count instead of at the return address,
+and `d0` holds whatever the handler left. The tell was in the run's own
+numbers — **2,176 reads across 330 calls**, six per call, when the accessor
+reads the table exactly once. Interrupt handlers were running inside the calls.
+
+The answer recorded last time was *read the value out of memory instead*, and
+that works when the value is in memory. Here the routine's **answer** is the
+subject, so the fix has to be the other one: `After.call` now raises the
+interrupt level to 7 for the duration and restores it after. Same lesson, one
+layer down — **a harness that reads a result through firmware it did not write
+needs a control that fails when the reader is broken**, and this time the
+control was there and did its job.

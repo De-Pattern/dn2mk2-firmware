@@ -38,7 +38,7 @@ from emu import dspboot                                       # noqa: E402
 from unicorn import UC_HOOK_CODE, UC_PROT_ALL, UcError        # noqa: E402
 from unicorn.m68k_const import (UC_M68K_REG_A2, UC_M68K_REG_A6,   # noqa: E402
                                 UC_M68K_REG_A7, UC_M68K_REG_D0,
-                                UC_M68K_REG_PC)
+                                UC_M68K_REG_PC, UC_M68K_REG_SR)
 
 from emu_lfo4_tick import (EVAL_A, MIRROR_AT, MIRROR_BYTES, RATE, REST,   # noqa: E402
                            SET_FRAC, STATE, STATE_LEN, TRACKS)
@@ -83,14 +83,36 @@ class After:
     def long(self, va):
         return struct.unpack(">I", bytes(self.uc.mem_read(va, 4)))[0]
 
-    def call(self, fn, *args):
+    def call(self, fn, *args, masked=True):
+        """Call a routine in the booted machine. -> d0.
+
+        `masked` raises the interrupt level to 7 for the duration, and it is
+        the default because **a call that gets interrupted returns a plausible
+        lie**. A booted machine has live timers; an interrupt vectors away,
+        `emu_start` stops on its instruction count instead of at the return
+        address, and d0 holds whatever the handler left -- which came back as
+        **0**, for 330 calls in a row, in `emu_table_watch.py`'s first run. The
+        project had already recorded this exact failure once
+        (`docs/lfo4-build-plan.md` §"Step 4a result") and the answer there was
+        to read memory instead. That works when the value is in memory; when
+        what is being tested *is* the routine's answer, the fix is to stop the
+        interrupt instead. Pass `masked=False` for a call that needs the
+        scheduler to run underneath it.
+        """
         frame = struct.pack(">I", self.ret) + b"".join(
             struct.pack(">I", a & 0xFFFFFFFF) for a in args)
         self.write(STACK, frame)
         self.uc.reg_write(UC_M68K_REG_A7, STACK)
         self.uc.reg_write(UC_M68K_REG_A6, 0)
-        self.uc.emu_start(fn, self.ret, count=20_000_000)
-        return self.uc.reg_read(UC_M68K_REG_D0)
+        sr = self.uc.reg_read(UC_M68K_REG_SR)
+        if masked:
+            self.uc.reg_write(UC_M68K_REG_SR, (sr & ~0x0700) | 0x2700)
+        try:
+            self.uc.emu_start(fn, self.ret, count=20_000_000)
+            return self.uc.reg_read(UC_M68K_REG_D0)
+        finally:
+            if masked:
+                self.uc.reg_write(UC_M68K_REG_SR, sr)
 
 
 def table_read(after, sym, key, param):

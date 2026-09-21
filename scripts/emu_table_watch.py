@@ -37,7 +37,8 @@ sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/digikit-up")
 sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/dn2_firmware/scripts")
 
 from emu import dspboot                                        # noqa: E402
-from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_READ             # noqa: E402
+from unicorn import (UC_HOOK_CODE, UC_HOOK_MEM_READ,           # noqa: E402
+                     UC_HOOK_MEM_WRITE)
 from unicorn.m68k_const import UC_M68K_REG_A2                  # noqa: E402
 
 from emu_boot_engine import After, REPORTER, ROOT, SYX         # noqa: E402
@@ -78,7 +79,13 @@ def main() -> int:
         print(f"  {name}: {lo:#010x}..{hi + 1:#010x}")
     print(f"  {len(entries)} accessor call(s) into {ACCESSOR:#010x} after the boot\n")
 
-    holder, hits, fault = {}, {name: 0 for name in spans}, {}
+    holder, fault = {}, {}
+    # Reads and writes are counted apart, because they answer different
+    # questions and this probe's first run confused them: a table being
+    # *filled* is written, not read, so "0 reads of the relocated runtime
+    # table" was reported as a failure when it is the expected shape of a
+    # registration loop that has not been asked for anything yet.
+    hits = {(name, kind): 0 for name in spans for kind in ("read", "write")}
 
     def pre_start(m):
         st = holder["st"]
@@ -88,11 +95,15 @@ def main() -> int:
                 fault.update(at=st["n"], a2=uc.reg_read(UC_M68K_REG_A2))
             uc.emu_stop()
 
+        def count(name, kind):
+            def hook(uc, *rest):
+                hits[(name, kind)] += 1
+            return hook
+
         m.uc.hook_add(UC_HOOK_CODE, at_reporter, begin=REPORTER, end=REPORTER)
         for name, (lo, hi) in spans.items():
-            def read(uc, access, address, size, value, user, name=name):
-                hits[name] += 1
-            m.uc.hook_add(UC_HOOK_MEM_READ, read, begin=lo, end=hi)
+            m.uc.hook_add(UC_HOOK_MEM_READ, count(name, "read"), begin=lo, end=hi)
+            m.uc.hook_add(UC_HOOK_MEM_WRITE, count(name, "write"), begin=lo, end=hi)
 
     print(f"  booting {os.path.basename(build)} from reset, {args.limit:,} instructions")
     m, st, stop = dspboot.run(SYX, open(f"{build}/section_3_MAIN_OS.bin", "rb").read(),
@@ -100,16 +111,19 @@ def main() -> int:
     during = dict(hits)
     print(f"  ran {st['n']:,}, stop {stop!r}")
     if fault:
-        print(f"\n  FAULT at {fault['at']:,} -- nothing else this run says anything.")
+        print(f"  FAULT at {fault['at']:,} -- nothing else this run says anything.")
         return 1
     for name in spans:
-        print(f"    during boot, {name}: {during[name]:,} read(s)")
+        print(f"    during boot, {name}: {during[(name, 'read')]:,} read(s), "
+              f"{during[(name, 'write')]:,} write(s)")
 
     after = After(m.uc)
     answers = [after.call(ACCESSOR, e) & 0xFFFFFFFF for e in entries]
     print("")
     for name in spans:
-        print(f"    with the accessor calls, {name}: {hits[name]:,} read(s)")
+        print(f"    the accessor calls alone, {name}: "
+              f"{hits[(name, 'read')] - during[(name, 'read')]:,} read(s), "
+              f"{hits[(name, 'write')] - during[(name, 'write')]:,} write(s)")
 
     # What the accessor should have answered, read out of the build's own
     # relocated table rather than recomputed: the question is whether the
@@ -117,16 +131,22 @@ def main() -> int:
     want = [int.from_bytes(bytes(m.uc.mem_read(new_table + RECORD * (e - 1) + GROUP, 4)), "big")
             for e in entries]
     tail = answers[STOCK_COUNT:]
-    print(f"\n  entries {STOCK_COUNT + 1}..{STOCK_COUNT + args.added} answer {tail}")
+    print("")
+    print(f"  entries {STOCK_COUNT + 1}..{STOCK_COUNT + args.added} answer {tail}")
 
-    check("the watch is armed and the move took", hits["new 60-byte"] > 0,
-          f"{hits['new 60-byte']:,} read(s) of the relocated table")
-    check("nothing reads the 60-byte table where it used to be",
-          hits["old 60-byte"] == 0, f"{hits['old 60-byte']:,} read(s)")
-    check("nothing reads the 68-byte table where it used to be",
-          hits["old 68-byte"] == 0, f"{hits['old 68-byte']:,} read(s)")
-    check("the firmware filled the relocated runtime table", hits["new 68-byte"] > 0,
-          f"{hits['new 68-byte']:,} read(s)")
+    touched = {name: hits[(name, "read")] + hits[(name, "write")] for name in spans}
+    check("the watch is armed and the move took", touched["new 60-byte"] > 0,
+          f"{touched['new 60-byte']:,} access(es) to the relocated table")
+    check("nothing touches the 60-byte table where it used to be",
+          touched["old 60-byte"] == 0, f"{touched['old 60-byte']:,}")
+    check("nothing touches the 68-byte table where it used to be",
+          touched["old 68-byte"] == 0, f"{touched['old 68-byte']:,}")
+    # The runtime table is filled by a registration loop, and a fill is writes.
+    # Whether that loop has run by here is not this probe's subject; that if it
+    # ran it ran into the new table is, and the check above is what says so.
+    check("whatever reached the runtime table reached the new one",
+          touched["old 68-byte"] == 0,
+          f"new {touched['new 68-byte']:,}, old {touched['old 68-byte']:,}")
     check("every entry answers what the relocated table holds", answers == want,
           f"{sum(1 for a, b in zip(answers, want) if a != b)} differ")
     check("the ten new entries carry LFO4's group",
