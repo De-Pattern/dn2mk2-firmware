@@ -2790,3 +2790,20 @@ value travels -- the value is a slot number either way.
 page, walks it, keeps every frame, and dismisses it with `NO` before paging.
 An `LFO1` category on LFO2's list and not on LFO1's own is the rule made
 visible. Three identical lists would mean the rule is not in this UI at all.
+
+### The rebuilt bridge boots on hardware — 2026-09-21
+
+`lfo4-bridge_DN2_1.11.syx` **starts normally on the instrument.** The build
+that drew `EXCEPTION V03 M0 P468004FC` now boots, so the scale-8 diagnosis and
+its fix are confirmed on silicon rather than only against a disassembler and a
+vendor-binary frequency argument.
+
+That makes the chain complete for the fault: the instrument's own screen named
+the vector and the address, the address named an instruction GCC had written
+for us, the instruction named an addressing mode the ColdFire does not
+implement, and removing it made the same build boot.
+
+**Booting is not the whole pass**, and the rest is still open on this build:
+LFO1-3 behaving as stock, a sound saving and reloading unchanged, and DNX
+reading lane 4 as all `00 00`. Those are what would catch a carry or a
+converter fault, which a boot cannot.
