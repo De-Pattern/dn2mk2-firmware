@@ -14,11 +14,11 @@ this needs: `lfo4_pages` is called with the **real** MOD mode object and reads
 the **real** LFO3 page record, so the record it assembles is checked against
 the one the instrument made rather than against a fabrication.
 
-**What this does not establish.** It does not draw LFO4's page. Getting there
-means paging with `[MOD]` and then resolving entries 321-330 through both
-relocated tables, and the second of those is a 68-byte table the *snapshot*
-filled at its old address -- see `repair` below. The page appearing correctly
-is a hardware result, and this is the half that can be had before one.
+**What this does not establish.** It does not draw LFO4's page, and it says
+nothing about the values on it -- which are not wired yet in any case, since a
+record's value comes from the sound at `+0x14 + slot*2` and slot 101 is past
+the end of that array. The page appearing correctly is a hardware result, and
+this is the half that can be had before one.
 """
 
 from __future__ import annotations
@@ -39,29 +39,7 @@ LFO3_PAGE, LFO4_PAGE = 6, 37
 ACCESSOR = 0x400C2474
 MODE_OBJECT = 0x447BF800          # scripts/emu_mod_pagelist.py read it from a live render
 VEC_BEGIN, VEC_END = 124, 128
-RUNTIME_OLD, RUNTIME_STRIDE, RUNTIME_ENTRIES = 0x4243325C, 68, 321
 ENTRY0 = 321                      # csrc/include/dn2_111.h
-
-
-def repair(machine, new_base):
-    """Copy the runtime table the snapshot filled to where the build moved it.
-
-    Not a fudge, and worth being precise about which: on a real boot the
-    firmware's own registration loop fills this table **through the base
-    literals the build rewrote**, so it fills the new one. A snapshot has
-    already run that loop, at the old address, and cannot be asked to run it
-    again -- so the harness does what the boot would have done.
-
-    It is still only the 321 entries stock has. Entries 321-330 stay empty
-    here; a real boot's loop, whose bound this build also raised, fills them.
-    """
-    blob = machine.read(RUNTIME_OLD, RUNTIME_STRIDE * RUNTIME_ENTRIES)
-    if not any(blob):
-        raise SystemExit("the snapshot's runtime table is empty -- nothing to copy, "
-                         "and a copy of nothing would look exactly like a pass")
-    machine.write(new_base, blob)
-    return sum(1 for i in range(RUNTIME_ENTRIES)
-               if any(blob[RUNTIME_STRIDE * i:RUNTIME_STRIDE * (i + 1)]))
 
 
 def words(blob):
@@ -84,8 +62,7 @@ def main() -> int:
     machine.flush()
     print(f"  installed {len(runs)} run(s), {sum(len(b) for _, b in runs):,} B, "
           f"{len(code_chunks(image))} CODE chunk(s)")
-    filled = repair(machine, sym["lfo4_prm68"])
-    print(f"  runtime table: {filled} stock entries copied to {sym['lfo4_prm68']:#010x}\n")
+    print("")
 
     lfo3 = words(machine.read(PAGE_TABLE + PAGE_STRIDE * LFO3_PAGE, PAGE_STRIDE))
     before = words(machine.read(args.object + VEC_BEGIN, 8))
