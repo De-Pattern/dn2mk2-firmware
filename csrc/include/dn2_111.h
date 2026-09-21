@@ -144,6 +144,25 @@ typedef unsigned char u8;
 #define DN2_PARAM_DEFAULT 24           /* the record's default value */
 #define LFO3_RECORD0      94           /* LFO3's group of ten starts here */
 
+/* Where the live sound container actually is, which is **not** a constant.
+ *
+ * The firmware's own routine for it, `0x40025bda(track)`:
+ *
+ *     movel %sp@(4),%d0 ; movel #1163,%d1 ; mulsl %d1,%d0
+ *     addil #52,%d0
+ *     addl 0x800052a0,%d0        <- the base, read from a global
+ *
+ * `csrc/lfo4/bridge.c` used to compute the same thing from `LFO4_KIT`, a
+ * constant measured once out of `ui1200M` -- and the snapshot agreed with it
+ * only because that is where it was measured. On the instrument the container
+ * moves, and then every turn lands in the table under the firmware's key while
+ * every tick looks one up under ours: the page works, sounds save, and nothing
+ * modulates.
+ */
+#define DN2_LIVE_CONTAINER 0x800052A0   /* holds the container's address */
+#define DN2_SOUND_AT       52           /* the gate's own `addil #52` */
+#define DN2_SOUND_STRIDE   1163         /* and its `movel #1163` */
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8

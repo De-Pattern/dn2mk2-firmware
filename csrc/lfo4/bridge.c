@@ -17,21 +17,15 @@
  * named or not, the same argument that made step 1's carry range-based rather
  * than a list of sizes.
  *
- * `sound(track) = LFO4_KIT + 52 + track * 1163`, read out of the v4 container
- * gate at `0x400ddc52` and checked against a snapshot: those addresses hold
- * FRAGILE BEINGS, DULCI SPACE, LAST BREAKFAST and WEAVING CIRCLE, in track
- * order (`docs/lfo4-build-plan.md`).
+ * `sound(track) = *(0x800052a0) + 52 + track * 1163`, which is the firmware's
+ * own arithmetic at `0x40025bda` including where it gets the base. An earlier
+ * version of this file held that base as a build-time constant and it was the
+ * reason a fully working page modulated nothing.
  */
 #include "ext.h"
 
-#ifndef LFO4_KIT
-#error "LFO4_KIT must be defined: the live container the sequencer is given"
-#endif
-
 #define TRACKS       16
 #define ROW_BYTES    (2u * EXT_PARAMS)
-#define SOUND_AT     52u                  /* the gate's `addil #52,%d3` */
-#define SOUND_STRIDE 1163u                /* and its `addil #1163,%d3` */
 
 /* The rows the engine reads, and **they live here, in our own BSS.**
  *
@@ -51,9 +45,23 @@ u32 lfo4_refreshes, lfo4_copies_in;
 static u32 seen_sound[TRACKS];
 static u32 seen_generation[TRACKS];
 
+/* -> where the firmware keeps this track's live sound, or 0 before there is
+ * one.
+ *
+ * **The base is read, not assumed.** It used to be `LFO4_KIT`, a constant
+ * measured once out of a snapshot, and the snapshot agreed with it because
+ * that is where it was measured. The firmware's own routine
+ * (`0x40025bda`) reads a global instead, and so does this: the container moves
+ * when a project loads, and a stale base means `ext_find` misses every key the
+ * setter writes -- the page works, sounds save, and nothing modulates.
+ *
+ * A zero base means no container yet. Returning 0 is safe: `ext_find(0)` has
+ * always answered "no entry", and the row is then the defaults. */
 u32 lfo4_sound_of(u32 track)
 {
-    return (u32)LFO4_KIT + SOUND_AT + track * SOUND_STRIDE;
+    u32 base = *(volatile u32 *)DN2_LIVE_CONTAINER;
+
+    return base ? base + DN2_SOUND_AT + track * DN2_SOUND_STRIDE : 0;
 }
 
 /* -> the address of this track's row, current as of now. */
