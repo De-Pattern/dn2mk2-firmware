@@ -2991,3 +2991,58 @@ One call site on both LFO2 and LFO3, pushing seven and then fourteen, is a loop
 over preceding LFOs. Different sites per page are three enumerations. Neither
 of the first two probes could have told those apart, because both were watching
 the wrong end of the call.
+
+#### The destination list is built by one loop over every slot — 2026-09-21
+
+`scripts/emu_dest_pushers.py` identifies the producer by call site rather than
+by which instruction wrote the numbers, which is what the two false leads got
+wrong:
+
+| page | call site | pushes with an LFO-group value |
+|---|---|---|
+| LFO1 | -- | **0** |
+| LFO2 | `0x400395b4` | 77, values `75 76 77 79 81 82 83` |
+| LFO3 | **the same `0x400395b4`** | 140, those **plus** `85 86 87 89 91 92 93` |
+
+**One call site, seven then fourteen.** Not three enumerations.
+
+The loop around it, at `0x4003958a`:
+
+```
+moveal %a5@,%a0 ; movel %d2,%sp@- ; moveal %a0@(80),%a0 ; jsr %a0@
+beqs  skip                       ; the page's own lookup returned nothing
+jsr   0x400dc30e                 ; the entry's flags, record field +32
+notl  %d0 ; andl %sp@(56),%d0    ; mask, from the caller's frame
+bnes  skip                       ; a required bit is missing
+jsr   0x40193f1e                 ; push_back
+addql #1,%d2 ; moveq #101,%d1 ; cmpl %d2,%d1 ; bnes
+```
+
+**It walks slots 0..100 on every page** -- the same 100 the evaluator's `DEST`
+bound uses. So the per-page difference is *not* a loop bound. Two filters
+stand between a slot and the list:
+
+1. **`obj->vtable[80](slot)`**, the page object's own lookup, which returns the
+   entry for that slot **or zero**. This is where the per-page rule has to
+   live: LFO2's page must answer for slots 1-8 and not for 9-24.
+2. **a mask** on the caller's frame, ANDed against `~flags`, so an entry is
+   included only when it carries every bit the mask requires.
+
+**Record field `+32` is that flags word** (`0x401f7f94 + 60*entry + 24`, which
+is record + 32). Measured across LFO1's group it reads `0x00NNffff`, and the
+`NN` is **per slot, not per record**: `SLEW` and `SPH` share `0x6bffff`, and
+both `MULT` records share `0x67ffff` -- the two alternates pairing with their
+primaries exactly as they do everywhere else. The low 16 bits are all set on
+every record read so far, so nothing has yet been seen to fail the mask.
+
+**What is settled, and what is not.** The list is produced by one loop for
+every page, so there is no per-LFO enumeration to extend -- that question is
+closed. What decides which slots a page answers for is the vtable-80 lookup,
+and **that has not been read**. The plausible reading is that a fourth LFO
+page, being another instance of the same page class, computes it from its own
+index and inherits the rule; that is a hypothesis for when the page object
+exists, not a finding.
+
+**For the build it changes little:** LFO4's list must hold 76 entries, and the
+mechanism that fills it is shared code that already handles "every earlier LFO"
+generically. Nothing here is a site list.
