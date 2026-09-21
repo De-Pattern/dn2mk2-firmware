@@ -45,18 +45,34 @@ def differences(stock: bytes, built: bytes):
     return runs
 
 
-def code_chunk(image: bytes):
-    """-> (load, image length, bss, init, bytes) of the appended `CODE` chunk.
+def code_chunks(image: bytes):
+    """-> [(load, image length, bss, init, bytes)] for every appended `CODE` chunk.
 
     This is what the startup loader reads. A harness that restores a snapshot
-    has already run past the loader, so it must do this itself.
+    has already run past the loader, so it must do this itself -- and it must
+    do it for **all** of them: step 4b appends a second chunk holding the
+    relocated parameter table, and a harness that installed only the first
+    would leave every parameter lookup pointing at 19 KB of nothing.
     """
     a = AREA_VA - BASE
     count = struct.unpack_from(">I", image, a + 8)[0]
-    off = next(struct.unpack_from(">I", image, a + 16 + 12 * i)[0]
-               for i in range(count) if image[a + 12 + 12 * i:a + 16 + 12 * i] == b"CODE")
-    load, length, bss, init = struct.unpack_from(">4I", image, a + off)
-    return load, length, bss, init, image[a + off + 16:a + off + 16 + length]
+    out = []
+    for i in range(count):
+        if image[a + 12 + 12 * i:a + 16 + 12 * i] != b"CODE":
+            continue
+        off = struct.unpack_from(">I", image, a + 16 + 12 * i)[0]
+        load, length, bss, init = struct.unpack_from(">4I", image, a + off)
+        out.append((load, length, bss, init, image[a + off + 16:a + off + 16 + length]))
+    return out
+
+
+def code_chunk(image: bytes):
+    """-> the first `CODE` chunk: the one carrying this project's compiled C.
+
+    Every harness written before step 4b wants exactly that one and says so.
+    Anything that has to install the whole area wants `code_chunks`.
+    """
+    return code_chunks(image)[0]
 
 
 def sites(directory: str | pathlib.Path):

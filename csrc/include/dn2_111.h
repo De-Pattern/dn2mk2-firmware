@@ -41,6 +41,29 @@ typedef unsigned char u8;
 #define DN2_SET_WRITE  0x40037BD6      /* on to the firmware's own write */
 #define DN2_SET_SKIP   0x40037C48      /* the epilogue the bound branches to */
 
+/* Step 4b, the page. Two sites, both in UI code that runs every frame.
+ *
+ * `DN2_PAGE_RECORD` is `id -> 0x42432c00 + 44 * id`, and it rejects anything
+ * above 36 -- so a fourth MOD page's record cannot come from that table and
+ * has to be answered before the arithmetic. The six bytes replaced are two
+ * whole instructions the stub replays (`moveq #36,%d1 ; movel %sp@(4),%d0`).
+ *
+ * `DN2_MODE_HEADER` is the mode-header renderer, which reads the page vector
+ * at the mode object's `+124` and the current index at `+144`. The stub is
+ * entered after `%a2` would have been loaded and replays that load and the
+ * one after it. */
+#define DN2_PAGE_RECORD  0x400C2474    /* the six bytes replaced */
+#define DN2_PAGE_AFTER   0x400C247A    /* cmpl %d0,%d1, where the stock code resumes */
+#define DN2_MODE_HEADER  0x40063F5C    /* moveal %sp@(16),%a2 ; moveal %a0,%a3 */
+#define DN2_MODE_AFTER   0x40063F62
+
+/* The page id a fourth MOD page takes: one past the table's last, which only
+ * the stub above ever answers for. */
+#define LFO4_PAGE        37
+/* The first of the ten parameter records appended to the relocated table --
+ * an entry, so index + 1 (`dnfw.patch.paramtable`). */
+#define LFO4_ENTRY0      321
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8

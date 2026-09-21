@@ -19,5 +19,5 @@ It imports digikit only inside the functions that need it, so `image` and
 `report` can be used on Windows where digikit's emulator cannot run.
 """
 
-from .image import code_chunk, differences, load_build, sites            # noqa: F401
+from .image import code_chunk, code_chunks, differences, load_build, sites            # noqa: F401
 from .report import check, failures, report                              # noqa: F401
