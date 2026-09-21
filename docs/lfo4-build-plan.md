@@ -2917,3 +2917,40 @@ page, and it is now specified rather than explored:
 Open before building: whether the per-page `DEST` block is computed from the
 LFO index or enumerated three times; the unpaired bound at `0x400c241c`; and
 whether anything reaches a parameter record other than through those accessors.
+
+#### The DEST list is a built vector, and it grows by exactly seven — 2026-09-21
+
+`scripts/emu_dest_vector.py` captures the vector the renderer walks
+(`0x40106556`, begin in `%a5` and end at `%fp@(-108)`):
+
+| page | vector | entries | over LFO1 |
+|---|---|---|---|
+| LFO1 | `0x447e25f0..0x447e26cc` | **55** | -- |
+| LFO2 | `0x447fabf0..0x447face8` | **62** | +7 |
+| LFO3 | `0x447fabf0..0x447fad04` | **69** | +14 |
+
+**LFO3 carries MOD1 *and* MOD2**, which the screens could not show and this
+does: its tail runs `77, 79, 81, 82, 83` -- the end of LFO1's block -- then
+`85, 86, 87, 89, 91, 92, 93`, LFO2's. The open item from the previous section
+is closed.
+
+**And the seven are exactly which seven.** LFO2's tail is `75, 76, 77, 79, 81,
+82, 83`; as entries those are records 74, 75, 76, 78, 80, 81, 82 --
+`SPD MULT FADE WAVE SPH MODE DEP`. Three of the group of ten are left out:
+
+- entry **78** = record 77 = **`DEST`**, a destination choosing a destination;
+- entry **80** = record 79 = **`SLEW`**, and entry **84** = record 83 = the
+  second **`MULT`** -- the two **alternates**.
+
+So the rule is `10 - DEST - 2 alternates = 7`, and the alternates being absent
+is a second confirmation that they are alternates rather than parameters: a
+value you cannot address is not a destination.
+
+**The list is built, not stored.** LFO2 and LFO3 rendered from the *same*
+buffer at `0x447fabf0` while LFO1 used another, so the storage is reused and
+the contents are produced when the browser opens. Three static per-page lists
+would sit at three addresses and persist. That is evidence, not proof, and it
+points the remaining question at a filter rather than at three enumerations.
+
+**What LFO4's list must be: 76 entries** -- 55 plus 21, seven each for MOD1,
+MOD2 and MOD3 -- while LFO1-3 stay at 55, 62 and 69 with no MOD4 anywhere.
