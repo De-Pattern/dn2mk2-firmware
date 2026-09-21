@@ -4083,4 +4083,12 @@ having to enforce it.
 The counts for LFO1, LFO2 and LFO3 are the measurement that matters most here:
 the cascade is shared by all four pages, so a wrong fourth branch would have
 changed what the other three are offered, and a probe that only counted gate
-hits would not have seen it.
+hits would not have seen it. So the same probe was run against `lfo4-value`,
+the build the fault was measured on, and the two put side by side:
+
+| build | LFO1 | LFO2 | LFO3 | LFO4 |
+|---|---|---|---|---|
+| `lfo4-value` | 55 | 62 | 69 | **no mask chosen, no list built** |
+| `lfo4-ui` | 55 | 62 | 69 | **76** |
+
+A before and an after, rather than an after and an assumption.
