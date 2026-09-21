@@ -2879,3 +2879,41 @@ entries follow from the page existing -- or **enumerated three times**, in
 which case there is a fourth enumeration to write and three existing ones to
 leave alone. The browser's contents do not answer it; the code that builds the
 list does.
+
+### Step 4a passes on hardware — 2026-09-21
+
+`lfo4-slots_DN2_1.11.syx`: several parameters modified, sounds loaded, a
+project saved and reloaded. All good.
+
+That clears the **setter divert** on silicon. It replaces the firmware's own
+`slot > 100` bound at `0x40037bd0`, which sits on the path of *every* value
+edit on *every* page, so a build that got it wrong would not fail in a corner --
+it would fail on the first knob turned. Breadth was the right test and it
+passed.
+
+#### Where LFO4 now stands
+
+| piece | emulator | hardware |
+|---|---|---|
+| the extension table, carried through `memcpy` / `memset` | yes | **yes** |
+| a sound keeps its LFO4 through save and load | yes | **yes** (no corruption; values untested, nothing can set one) |
+| each track has its own LFO4 in both evaluators | yes | **yes** (`tick7`) |
+| the bridge: the tick pulls each track's row | yes | **yes** |
+| 4a: ids 101-108 reach the table from the real setter | yes | **yes** |
+| 4b: the page | -- | -- |
+
+**Everything below the page is proven on the instrument.** What is left is the
+page, and it is now specified rather than explored:
+
+- ten parameter records -- eight primaries on slots 101-108, a `SLEW` alternate
+  sharing slot 106, a second `MULT` on slot 102;
+- the table relocated with those ten appended, and **56 biased bases and 24
+  bounds** rewritten;
+- a page record, and a fourth entry in the MOD vector;
+- a `DEST` list offering `MOD1` + `MOD2` + `MOD3`, 21 entries, while LFO1-3
+  gain no `MOD4`;
+- the `DEST` **value** translation, already priced at two bytes in two places.
+
+Open before building: whether the per-page `DEST` block is computed from the
+LFO index or enumerated three times; the unpaired bound at `0x400c241c`; and
+whether anything reaches a parameter record other than through those accessors.
