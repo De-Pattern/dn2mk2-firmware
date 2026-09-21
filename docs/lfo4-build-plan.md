@@ -2762,3 +2762,31 @@ Answerable the way the last two were: open LFO2's MOD page, turn `DEST` to its
 limit, and watch what clamps it. Worth doing **before** the ten records are
 built, because if it is enumerated per LFO it is another site list like the 56
 bases, and belongs in the same patch.
+
+#### DEST is chosen in a modal browser, and the ceiling was the wrong measurement
+
+`scripts/emu_dest_range.py` turned `DEST` on each LFO page and read where the
+value stopped. LFO1 answered **99** -- one below the evaluator's bound of 100 --
+and pages 2 and 3 wrote nothing at all. The screen explained both:
+
+**Push-and-turn on `DEST` opens a modal destination browser.** A category
+column (`FX` in the captured frame), a scrolling list of destination names
+(`Delay Send`, `Reverb Send`, `Bit Reduction`, `Sample-Rate Redu`, `SRR
+Routing`, `Overdrive`, `OVR Routing`), and a **`Confirm? Yes/No`** prompt. The
+header reads `MOD1 DEST`, which also confirms the page being measured was
+LFO1's.
+
+So the later `DOWN` taps were scrolling **inside the picker**, not paging --
+the machine never left the modal, and two pages reporting "nothing written"
+looked exactly like a broken encoder. A modal that swallows the page keys is
+worth knowing about before the next probe drives this page.
+
+**And the ceiling does not answer the question.** LFO1 can already reach 99, so
+the list is not bounded at the top by which LFO you are on. Whatever makes
+LFO2's list longer than LFO1's is *which entries it contains*, not how far the
+value travels -- the value is a slot number either way.
+
+`scripts/emu_dest_list.py` reads the list instead: it opens the browser on each
+page, walks it, keeps every frame, and dismisses it with `NO` before paging.
+An `LFO1` category on LFO2's list and not on LFO1's own is the rule made
+visible. Three identical lists would mean the rule is not in this UI at all.

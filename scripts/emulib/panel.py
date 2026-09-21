@@ -35,6 +35,8 @@ CHUNK = 10_000_000
 # (channel, bit); `code_for` is channel * 8 + bit + 1, so code = these + 1.
 MOD = (0, 5)
 UP, DOWN = (1, 2), (1, 5)
+YES, NO = (1, 1), (1, 3)            # codes 10 and 12, from the firmware's own table
+LEFT, RIGHT = (1, 4), (1, 6)
 ENCODER_PUSH = [(5, b) for b in range(8)]      # A..H, codes 41..48
 
 
