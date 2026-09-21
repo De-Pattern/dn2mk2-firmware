@@ -42,8 +42,9 @@ BASE = 0x40000400
 OUT = ROOT / "out/lfo4-value"
 SYX = ROOT / "00_Resources/02_Builds/lfo4-value_DN2_1.11.syx"
 
-SOURCES = page.SOURCES + ("getter.c",)
-ENTRIES = page.ENTRIES + ["lfo4_on_get", "lfo4_get_stub"]
+SOURCES = page.SOURCES + ("getter.c", "widget.c", "valuehooks.S")
+ENTRIES = page.ENTRIES + ["lfo4_on_get", "lfo4_get_stub",
+                          "lfo4_companion", "lfo4_comp_stub"]
 
 # Stock 1.11, checked rather than trusted. Like step 4a's, this replaces
 # instructions it does not replay, so a changed image must not be patched.
@@ -62,8 +63,36 @@ def divert(content, code):
     print(f"  {BOUND:#010x}  slot > 100 -> lfo4_get_stub {code['lfo4_get_stub']:#010x}")
 
 
+# The companion table's accessor: ten bytes, two whole instructions, and the
+# stub replays both. Without this the page draws eight empty dials -- it asks
+# for entries 321 to 329, the right ones, and the accessor's bound clamps every
+# answer to the fallback row (`scripts/emu_lfo4_widget.py`).
+COMPANION = 0x400C2418
+COMPANION_STOCK = bytes.fromhex("202f00040c8000000141")   # movel 4(sp),d0 ; cmpil #321,d0
+
+
+def companion(content, code):
+    """Give LFO4's entries a companion row, so its page draws real widgets."""
+    at = COMPANION - BASE
+    here = bytes(content[at:at + len(COMPANION_STOCK)])
+    if here != COMPANION_STOCK:
+        raise SystemExit(f"the companion accessor at {COMPANION:#010x} is {here.hex()}, "
+                         f"not {COMPANION_STOCK.hex()}")
+    start = code["lfo4_comp_displaced"] - bridge.CODE_VA
+    mine = code.image[start:start + len(COMPANION_STOCK)]
+    if mine != COMPANION_STOCK:
+        raise SystemExit(f"the stub replays {mine.hex()}, the site holds {here.hex()}")
+    jump = b"\x4e\xf9" + struct.pack(">I", code["lfo4_comp_stub"])
+    content[at:at + len(COMPANION_STOCK)] = (
+        jump + b"\x4e\x71" * ((len(COMPANION_STOCK) - len(jump)) // 2))
+    print("part 8 -- the companion rows")
+    print(f"  {COMPANION:#010x}  entries 321..330 -> lfo4_comp_stub "
+          f"{code['lfo4_comp_stub']:#010x}")
+
+
 if __name__ == "__main__":
     table.describe(bridge.load(bridge.read_image(bridge.STOCK)).container.find(3).unpack())
     raise SystemExit(bridge.main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX,
-                                 extra=[slots.divert, table.relocate, page.hooks, divert],
+                                 extra=[slots.divert, table.relocate, page.hooks, divert,
+                                        companion],
                                  chunks=table.chunks))

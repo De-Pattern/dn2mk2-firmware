@@ -49,6 +49,15 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
+# Stock 1.11's last byte. Every site this module rewrites is in the firmware's
+# own code, and a build's `content` is longer than that: the appended area,
+# with this project's compiled C in it, follows. Scanning past this point finds
+# **our own** constants -- `lfo4_comp_stub` compares against `LFO4_ENTRY0`,
+# which is 321, and assembles to the very `cmpil #321` this module hunts for.
+# Two of those turned a 53-site list into a 55-site one, and without the count
+# assertion the build would have "raised the bound" inside its own stub.
+STOCK_END = 0x4030B980
+
 TABLE, RECORD, COUNT = 0x401F7FC8, 60, 320
 BIASES = (8, 16, 40)                       # the field each accessor wants
 EXPECTED_BASES = {8: 53, 16: 1, 40: 2}     # measured on stock 1.11, 56 in all
@@ -113,6 +122,11 @@ class Site:
         return 4
 
 
+def _stock(content: bytes, base: int) -> bytes:
+    """`content` cut to the firmware's own image, without the appended area."""
+    return content[:max(0, min(len(content), STOCK_END - base))]
+
+
 def _even_occurrences(content: bytes, base: int, value: int) -> list[int]:
     """Every instruction-aligned place the four bytes of `value` appear."""
     want, out, i = struct.pack(">I", value), [], 0
@@ -127,6 +141,7 @@ def _even_occurrences(content: bytes, base: int, value: int) -> list[int]:
 
 def base_sites(content: bytes, base: int) -> list[Site]:
     """The 56 pre-biased bases of the 60-byte table."""
+    content = _stock(content, base)
     out = []
     for bias in BIASES:
         literal = TABLE - RECORD + bias
@@ -160,6 +175,7 @@ def runtime_literals(content: bytes, base: int) -> list[int]:
     did exactly that put 10,591 writes into the old address range and zero
     reads (`scripts/emu_table_watch.py`, 2026-09-21).
     """
+    content = _stock(content, base)
     out = []
     for i in range(0, len(content) - 4, 2):
         value = struct.unpack_from(">I", content, i)[0]
@@ -185,6 +201,7 @@ def bound_sites(content: bytes, base: int) -> list[Site]:
     `NOT_THIS_TIME` is the other kind of exclusion: a site that is this bound
     and must still be left where it is. Read its entry before changing it.
     """
+    content = _stock(content, base)
     out = []
     for value in (320, 321):
         for reg in range(8):

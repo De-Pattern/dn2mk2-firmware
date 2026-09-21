@@ -80,6 +80,29 @@ typedef unsigned char u8;
 #define DN2_GET_ZERO   0x4003719A      /* clr.l %d0, then the epilogue */
 #define DN2_GET_RETURN 0x4003719C      /* the epilogue, with the answer in d0 */
 
+/* Step 4d: the companion table, and why LFO4's page drew plain dials.
+ *
+ * `0x400c2418` is `entry -> 0x4243325c + 68 * entry`, bounded at 321 and
+ * clamping anything above to entry 0. Drawing LFO4's page asks it for entries
+ * 321-329 -- the right ones, the page's own eight -- and every one of the 96
+ * lookups answered `0x4243325c`, the fallback (`scripts/emu_lfo4_widget.py`).
+ * So each parameter got the fallback's widget: a dial with no value, no `512`
+ * in a box, no waveform glyph, where LFO3's page has all three.
+ *
+ * The table cannot move -- its initialiser is unrolled and writes 902 absolute
+ * addresses -- so the accessor is diverted for LFO4's entries instead, to ten
+ * rows this build owns. Ten bytes are replaced and both instructions replayed.
+ */
+#define DN2_COMPANION        0x4243325C   /* the table itself, 321 x 68 */
+#define DN2_COMPANION_STRIDE 68
+#define DN2_COMPANION_BOUND  0x400C2418   /* the ten bytes replaced */
+#define DN2_COMPANION_AFTER  0x400C2422   /* scs %d1, where the stock code resumes */
+
+/* LFO3's ten entries, the ones LFO4's are copied from. Entry = index + 1, and
+ * LFO3's records are indices 94..103. */
+#define LFO3_ENTRY0      95
+#define LFO4_ENTRYN      (LFO4_ENTRY0 + 10)
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8

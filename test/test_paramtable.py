@@ -145,3 +145,17 @@ def test_the_three_slot_tables_are_101_entries_and_adjacent(stock):
         assert pea in stock, f"{base_va:#010x} is not zeroed with {size} bytes"
     assert 0x42C64B3C + 0x194 == 0x42C64CD0
     assert 0x42C649A8 + 0x194 == 0x42C64B3C
+
+
+def test_the_scans_stop_at_the_firmware_s_own_image(stock):
+    """A build's content is longer than stock: the appended area follows.
+
+    `lfo4_comp_stub` compares against `LFO4_ENTRY0`, which is 321, and
+    assembles to the very `cmpil #321` this module hunts for. Two of those in
+    the appended area turned a 53-site list into a 55-site one. Scanning past
+    the firmware's last byte finds this project's own constants.
+    """
+    tail = bytes(stock) + b"\x00" * 64 + b"\x0c\x80\x00\x00\x01\x41" * 2
+    assert len(paramtable.bound_sites(tail, BASE)) == paramtable.EXPECTED_BOUNDS
+    assert len(paramtable.base_sites(tail, BASE)) == sum(paramtable.EXPECTED_BASES.values())
+    assert paramtable.STOCK_END == BASE + len(stock)

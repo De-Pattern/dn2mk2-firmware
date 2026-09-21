@@ -3693,3 +3693,91 @@ the converters as well.
 `After.call` this evening. That change touches every harness built on
 `emu_boot_engine`, and this run is one of them behaving exactly as it did
 before.
+
+### Step 4d: the page drew empty dials, and the companion table is why — 2026-09-21
+
+The first picture of the fourth page settled a great deal at once, and raised
+one thing nothing else had.
+
+`scripts/emu_lfo4_screens.py` installs the build into `ui1200M` and taps
+`[MOD]` five times. **This is valid now and was not this morning:** a snapshot
+has already built every runtime table from the *stock* parameter table, and
+while `lfo4-table` also relocated the 68-byte companion the two disagreed --
+the snapshot had filled one address and the build read another. The companion
+does not move any more, and the 60-byte copy is byte-identical for all 320
+stock records, so everything the snapshot computed still holds.
+
+```
+  before any tap: pages [4, 5, 6], swapped 0
+  [MOD] x1: pages [4, 5, 6, 37], showing index 0
+  [MOD] x4: pages [4, 5, 6, 37], showing index 3
+  [MOD] x5: pages [4, 5, 6, 37], showing index 0
+```
+
+**The header reads `MOD (4/4)`**, the labels are `SPD MULT FADE DEST` over
+`WAVE SPH MODE DEP`, and `[MOD]` cycles past the fourth page back to the first.
+Nothing had to be taught that there are four pages.
+
+#### And every widget was empty
+
+Beside LFO3's page -- `512` in a box for `MULT`, `SYN PD2` for `DEST`, a square
+glyph for `WAVE` -- LFO4's eight were identical blank circles. Not wrong
+values: **no widget at all**, the fallback's.
+
+`scripts/emu_lfo4_widget.py` hooks the companion-table accessor while each page
+draws:
+
+```
+  [MOD] x3: entries [10, 95, 96, 97, 98, 99, 101, 102, 103]
+  [MOD] x4: entries [10, 321, 322, 323, 324, 325, 327, 328, 329]
+            96 of them answered 0x4243325c -- entry 0, the fallback
+```
+
+**The page asked the right questions.** Entries 321-329, its own eight plus the
+shared entry 10, in the same shape LFO3 asks for 95-103. The accessor's bound
+is 321 and clamps everything above it to entry 0, so each parameter was handed
+the fallback row and drew the fallback's widget.
+
+#### Ten rows, and the same divert shape a third time
+
+The table cannot move -- 902 absolute literals, no base -- so the accessor is
+diverted for LFO4's ten entries and answers from rows this build owns, copied
+whole from LFO3's at first use. Copied, because the fields are pointers to
+objects the UI built at startup and this code has never had to learn their
+layout; at first use rather than at init, because at init the firmware has not
+filled them yet.
+
+With it, the fourth page draws `BPM 1` in a box for `MULT`, a triangle glyph
+for `WAVE`, a curve for `MODE`, `---` for an unassigned `DEST`, and dials with
+their `- +` marks for `SPD`, `SPH` and `DEP`. The same widget kinds LFO3 has,
+showing LFO4's own values.
+
+#### The count assertion earned its keep
+
+Adding this broke the build with `expected 53 bound sites, found 55` -- and
+those two extra sites were **in our own code**. `lfo4_comp_stub` compares
+against `LFO4_ENTRY0`, which is 321, and assembles to exactly the `cmpil #321`
+the site scan hunts for. A build's content is longer than stock: the appended
+area, with this project's compiled C in it, follows.
+
+Without the assertion the build would have "raised the bound" inside its own
+stub, turning `LFO4_ENTRY0` into 331 and making the companion divert decline
+every entry it exists for -- silently, back to empty dials. The scans stop at
+`STOCK_END` now, and a test holds them there.
+
+#### And the same *structural* mistake, three times in one evening
+
+`hooks.S` is one assembly source; `--gc-sections` works on sections; so every
+stub in a file is kept whenever any stub in it is an entry, and then every
+symbol those stubs call must link -- in **every** build that compiles the file.
+
+- this morning: step 4a's `lfo4_set_stub` had broken three tests since it was
+  written, because the test's source list lacked `setter.c`;
+- tonight: `lfo4_get_stub` in `hooks.S` broke `lfo4-table` and `lfo4-page`;
+- an hour later: `lfo4_comp_stub` in `pagehooks.S` broke them again.
+
+The rule, and it is now written at the top of `valuehooks.S`: **a stub belongs
+in a file that only the builds patching its site compile.** `hooks.S` is the
+sites every LFO4 build has, `pagehooks.S` is the page's two, `valuehooks.S` is
+`lfo4-value`'s two. The test fixture compiles the whole directory, so it cannot
+be the thing that notices.
