@@ -3091,3 +3091,32 @@ That closes all three questions this section opened. What extending the
 parameter set costs is now a list: two tables to grow, 62 bases and 24 bounds
 to rewrite, each a four- or six-byte literal that the build can assert is stock
 before touching -- exactly as the four existing hook sites already do.
+
+#### The slot lookup is not the differentiator — 2026-09-21
+
+The hypothesis the build would have rested on was that a page's
+`vtable[80](slot)` decides which slots it answers for, so a fourth LFO page
+would inherit the rule from its own index. **Tested before building, and it is
+wrong.**
+
+```
+  LFO1: 1111 lookup(s), slots 0..100, target 0x40036720, object 0x446ce950
+  LFO2: 1111 lookup(s), slots 0..100, target 0x40036720, object 0x446ce950
+  LFO3: 1010 lookup(s), slots 0..100, target 0x40036720, object 0x446ce950
+```
+
+All three call the **same function** -- which alone would have supported the
+hypothesis -- **and pass the same object**. That is the part that kills it: a
+lookup given identical inputs cannot return different answers per page, so it
+is not where "LFO2 may target LFO1 and not LFO3" lives.
+
+**The probe printed the wrong conclusion**, because its verdict was written for
+"same target = shared rule" and did not consider that an identical object
+makes the call page-independent. The data was right and the sentence under it
+was not. Reading the numbers rather than the summary is the only reason it was
+caught -- the same failure the sort-swap and `push_back` leads had.
+
+That leaves exactly one per-page input in the loop: the **mask** at
+`%sp@(56)`, ANDed against `~flags`. `scripts/emu_dest_mask.py` reads it.
+Three masks differing by one bit per LFO is a rule a fourth page extends.
+Three unrelated constants are three constants, and LFO4 needs a fourth.
