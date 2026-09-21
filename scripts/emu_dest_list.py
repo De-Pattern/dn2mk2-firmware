@@ -25,7 +25,6 @@ and look like a broken encoder.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import sys
 
 sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/dn2_firmware/scripts")
@@ -55,18 +54,17 @@ def main() -> int:
             panel.tap(DOWN)                       # now safe: the modal is dismissed
         print(f"  --- LFO{page} ---")
         print(f"    page:    {panel.screen(f'lfo{page}-0-page')}")
+        # Scroll to the TOP of the list, not down it. The LFO slots are 1-24,
+        # the low end of the slot space, and LFO1 already reaches 99 at the
+        # ceiling -- so if LFO2's list carries extra entries they sit at the
+        # bottom. Comparing the three pages at the same scroll step compares
+        # nothing, because each starts from its own current DEST value.
         panel.push_and_turn(DEST_ENCODER, 1, times=1)
-        seen = {}
-        for step in range(args.scroll):
-            shot = panel.screen(f"lfo{page}-{step + 1}-list")
-            if panel.capture and panel.capture.frames:
-                digest = hashlib.sha256(bytes(panel.capture.frames[-1])).hexdigest()[:8]
-                mark = "" if digest not in seen else f"  (same as step {seen[digest]})"
-                seen.setdefault(digest, step + 1)
-            else:
-                mark = "  (no frame)"
-            print(f"    list {step + 1}: {shot}{mark}")
-            panel.tap(DOWN)
+        print(f"    opened:  {panel.screen(f'lfo{page}-1-opened')}")
+        panel.push_and_turn(DEST_ENCODER, -30, times=args.scroll)
+        print(f"    top:     {panel.screen(f'lfo{page}-2-top')}")
+        panel.push_and_turn(DEST_ENCODER, 30, times=1)
+        print(f"    top + 1: {panel.screen(f'lfo{page}-3-topplus')}")
         panel.tap(NO)                             # leave the browser, do not commit
         print(f"    after NO: {panel.screen(f'lfo{page}-9-closed')}")
 
