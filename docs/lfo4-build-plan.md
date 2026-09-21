@@ -3575,3 +3575,89 @@ guess and it is only a guess. It does not affect this build, because every
 write goes through the same bases every read does and lands in the copy. But
 "the parameter table is read-only" is not true of this firmware, and anything
 built on that assumption later should know.
+
+### Step 4c: the read side is one site, and it was found by running — 2026-09-21
+
+The plan priced the read side at "three slot tables relocated plus a bound".
+**That was the wrong route entirely.** The page does not reach a value through
+the slot tables; it goes entry -> slot -> the sound's own array, and the guard
+in front of that is the setter's guard in mirror.
+
+#### 119 candidates, two of which execute
+
+A sound's values live at `+0x14`, two bytes per slot, so every read of one
+carries the addressing mode `(20, An, Xn.l*2)`. Scanning the image for that
+extension word finds **119** instructions. Which is the page's cannot be read
+off the list -- most are coincidence, and the rest belong to MIDI, the mirror
+fill, and save.
+
+`scripts/emu_value_reads.py` hooks all 119 and opens the MOD pages:
+
+```
+  after [MOD] x1:  0x40037194  x169     0x40030f34  x13
+  after [MOD] x2:  0x40037194  x39      0x40030f34  x3
+  after [MOD] x3:  0x40037194  x26      0x40030f34  x2
+  2 of 119 ever fired
+```
+
+**Two.** And `0x40030f34` clamps its index to `0..15` eight instructions
+earlier (`moveq #15,%d0 ; cmpl %d2,%d0 ; bge`), so no LFO slot can reach it.
+One site.
+
+#### And it is step 4a's own six bytes
+
+```
+0x4003717c  moveq #100,%d0
+0x4003717e  cmpl  %d2,%d0
+0x40037180  blts  0x4003719a        ; slot > 100 -> return 0
+...
+0x40037194  mvsw  %a0@(20,%d2:l:2),%d0
+```
+
+| step | site | stock bytes | above 100 |
+|---|---|---|---|
+| 4a, the write | `0x40037bd0` | `7064 b082 6d72` | writes nothing |
+| **4c, the read** | `0x4003717c` | `7064 b082 6d18` | returns zero |
+
+The same three instructions, the same six bytes, the same "stock does nothing
+here" that made the write safe to divert. `lfo4_get_stub` is `lfo4_set_stub` in
+a mirror, down to taking the live sound from the firmware's **own** virtual
+call -- `a2@(16)`, vtable slot 40 -- which is what the instructions it jumps
+over were about to do.
+
+#### The round trip, measured
+
+`scripts/emu_lfo4_value.py` puts `0x2a5c` in the table for every track's sound,
+opens the MOD page, and rewrites the slot at the bound the way step 4a's
+harness rewrote it at the setter:
+
+```
+  control page: 0 diverted read(s), 0 declined
+  rewritten page: the bound saw 26 read(s) for slots [17, 18, 19, 20, 21, 22, 23, 24]
+  lfo4_gets 26, sound 0x4210c0c0, slot 101, value 0x2a5c
+  the function returned [10844] at its epilogue
+  all checks pass
+```
+
+Slots **17 to 24** are LFO3's eight, so the twenty-six reads are a real MOD
+page drawing its real parameters. The control -- the same page with nothing
+rewritten -- diverted **zero**, so slots the firmware owns still answer from
+the sound. And `10844` is `0x2a5c`: the value went into the table through
+`ext_set` and came back out of `d0` at the firmware's own epilogue.
+
+**Nothing in that harness calls into the firmware for a result.** The value is
+read out of `d0` at a hooked instruction, because a call on a machine whose
+timers are running returns whatever an interrupt handler left there.
+
+#### What it changes
+
+`lfo4-value` is the first build where a fourth LFO is whole: a knob on the
+fourth MOD page writes to the table (4a), the page reads back what it wrote
+(4c), the engine modulates from it (step 3), and a save carries it (step 2).
+
+It probably also fixes **turning**, not just display. A UI that computes
+`new = old + delta` was reading `old` from the sound's `+0xDE` -- the machine
+type -- so a turn on LFO4's page would have jumped somewhere arbitrary. With
+the read diverted, `old` is the value the knob last set. That is a prediction,
+not a measurement: the harness rewrites a slot on a page that is really LFO3's,
+so it exercises the read path and not the turn path.

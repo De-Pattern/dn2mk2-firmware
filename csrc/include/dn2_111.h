@@ -64,6 +64,22 @@ typedef unsigned char u8;
  * an entry, so index + 1 (`dnfw.patch.paramtable`). */
 #define LFO4_ENTRY0      321
 
+/* Step 4c, the read side, and it is the setter's own shape.
+ *
+ * `0x4003717c` is `moveq #100,%d0 ; cmpl %d2,%d0 ; blts <zero>` -- six bytes,
+ * the width of a `jmp <abs.l>`, guarding `mvs.w %a0@(20,%d2:l:2),%d0` at
+ * `0x40037194`. Above 100 the firmware returns 0 and touches nothing, exactly
+ * as its write path writes nothing, so the divert cannot corrupt a value the
+ * firmware owns.
+ *
+ * Found by running: of the 119 instructions in the image that address the
+ * value array's shape, **two** execute while a MOD page draws, and the other
+ * clamps its index to 0..15 (`scripts/emu_value_reads.py`). */
+#define DN2_GET_BOUND  0x4003717C      /* the six bytes replaced */
+#define DN2_GET_READ   0x40037182      /* on to the firmware's own read */
+#define DN2_GET_ZERO   0x4003719A      /* clr.l %d0, then the epilogue */
+#define DN2_GET_RETURN 0x4003719C      /* the epilogue, with the answer in d0 */
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8
