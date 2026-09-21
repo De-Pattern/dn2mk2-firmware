@@ -3661,3 +3661,30 @@ type -- so a turn on LFO4's page would have jumped somewhere arbitrary. With
 the read diverted, `old` is the value the knob last set. That is a prediction,
 not a measurement: the harness rewrites a slot on a page that is really LFO3's,
 so it exercises the read path and not the turn path.
+
+### The gates, all four builds — 2026-09-21
+
+| build | boots from reset | the engine and save/load | its own subject |
+|---|---|---|---|
+| `lfo4-table` | **yes**, 1 frame, no fault | — (a subset of the next row) | the relocation: `emu_table_watch.py`, all checks pass |
+| `lfo4-page` | **yes**, 1 frame, no fault | **yes** | the page: `emu_lfo4_page.py`, 12 checks pass |
+| `lfo4-value` | pending | pending | the read: `emu_lfo4_value.py`, 7 checks pass |
+
+`emu_boot_engine.py` on `lfo4-page` — reset, then evaluator A, then a stored
+sound through both converters, in one machine:
+
+```
+  lfo4_refresh ran 128 time(s) during 8 frame(s)
+  load: the table holds ['0x2a01' ... '0x2a08']
+  save: the stored ids hold ['0x2a01' ... '0x2a08']
+  boot from reset, the engine, and save/load: all three in one machine.
+```
+
+128 is 8 frames x 16 tracks. `lfo4-page` is `lfo4-table` plus two UI hooks that
+a boot never reaches, so this covers the relocation's effect on the engine and
+the converters as well.
+
+**It is also the regression test for the interrupt masking** added to
+`After.call` this evening. That change touches every harness built on
+`emu_boot_engine`, and this run is one of them behaving exactly as it did
+before.
