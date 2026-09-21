@@ -135,6 +135,15 @@ typedef unsigned char u8;
 #define LFO4_E_SPD   (LFO4_ENTRY0 + 0)
 #define LFO4_E_DEP   (LFO4_ENTRY0 + 8)
 
+/* The parameter table as it sits in the image, for reading a record's own
+ * default at init. `lfo4-table` relocates this table, but the image's copy is
+ * still there and still correct -- and it is the one guaranteed to be loaded
+ * when `lfo4_init` runs, which the relocated chunk is not. */
+#define DN2_PARAM_TABLE   0x401F7FC8
+#define DN2_PARAM_STRIDE  60
+#define DN2_PARAM_DEFAULT 24           /* the record's default value */
+#define LFO3_RECORD0      94           /* LFO3's group of ten starts here */
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8
