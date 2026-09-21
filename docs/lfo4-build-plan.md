@@ -3655,12 +3655,17 @@ timers are running returns whatever an interrupt handler left there.
 fourth MOD page writes to the table (4a), the page reads back what it wrote
 (4c), the engine modulates from it (step 3), and a save carries it (step 2).
 
-It probably also fixes **turning**, not just display. A UI that computes
-`new = old + delta` was reading `old` from the sound's `+0xDE` -- the machine
-type -- so a turn on LFO4's page would have jumped somewhere arbitrary. With
-the read diverted, `old` is the value the knob last set. That is a prediction,
-not a measurement: the harness rewrites a slot on a page that is really LFO3's,
-so it exercises the read path and not the turn path.
+It also fixes **turning**, not just display, and that is measured rather than
+argued: a `push_and_turn` on the MOD page reaches the same read bound **133
+times**, for slots 17 to 24. A UI that computes `new = old + delta` fetches
+`old` through this site. Without the divert, `old` on LFO4's page would have
+been the sound's `+0xDE` -- the machine type -- and a turn would have jumped
+somewhere arbitrary. With it, `old` is the value the knob last set.
+
+The control in that run is worth keeping too: the same page drawn with nothing
+rewritten reached the bound **39 times and diverted none of them**, which is a
+stronger statement than "zero diverted" on its own. The bound was reached; the
+divert declined every slot the firmware owns.
 
 ### The gates, all four builds — 2026-09-21
 

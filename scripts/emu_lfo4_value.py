@@ -55,6 +55,7 @@ def main() -> int:
     p.add_argument("--snapshot", default=SNAP)
     p.add_argument("--warmup", type=int, default=60_000_000)
     p.add_argument("--slot", type=int, default=SLOT)
+    p.add_argument("--delta", type=int, default=10)
     args = p.parse_args()
 
     from unicorn import UC_HOOK_CODE
@@ -80,13 +81,15 @@ def main() -> int:
     print(f"  {MARK:#06x} written to all {TRACKS} tracks' sounds, "
           f"live {machine.long(sym['ext_live'])}\n")
 
+    # `seen` records every read the bound sees, always; `armed` decides
+    # whether the id is rewritten. Keeping those two apart is what lets the
+    # same hook serve the control phase, the diverted phase and the turn.
     armed, seen, answers = [False], [], []
 
     def at_bound(uc, address, size, user):
-        if not armed[0]:
-            return
         seen.append(uc.reg_read(UC_M68K_REG_D2))
-        uc.reg_write(UC_M68K_REG_D2, args.slot)
+        if armed[0]:
+            uc.reg_write(UC_M68K_REG_D2, args.slot)
 
     def at_return(uc, address, size, user):
         if armed[0]:
@@ -104,30 +107,35 @@ def main() -> int:
     # is a slot the firmware owns, so the divert must decline all of them.
     ignored_before = machine.long(sym["lfo4_gets_ignored"])
     gets_before = machine.long(sym["lfo4_gets"])
+    control_from = len(seen)
     panel.tap(MOD)
     control_gets = machine.long(sym["lfo4_gets"]) - gets_before
     control_ignored = machine.long(sym["lfo4_gets_ignored"]) - ignored_before
+    control_reads = len(seen) - control_from
 
+    rewritten_from = len(seen)
     armed[0] = True
     panel.tap(MOD)
     armed[0] = False
+    rewritten = seen[rewritten_from:]
 
     gets = machine.long(sym["lfo4_gets"]) - gets_before
     sound = machine.long(sym["lfo4_get_sound"])
     slot = machine.long(sym["lfo4_get_slot"])
     value = machine.long(sym["lfo4_get_value"])
-    print(f"\n  control page: {control_gets} diverted read(s), "
-          f"{control_ignored} declined")
-    print(f"  rewritten page: the bound saw {len(seen)} read(s) for slots "
-          f"{sorted(set(seen))[:8]}")
+    print("")
+    print(f"  control page: {control_reads} read(s) at the bound, "
+          f"{control_gets} diverted, {control_ignored} declined")
+    print(f"  rewritten page: the bound saw {len(rewritten)} read(s) for slots "
+          f"{sorted(set(rewritten))[:8]}")
     print(f"  lfo4_gets {gets}, sound {sound:#010x}, slot {slot}, value {value:#06x}")
     print(f"  the function returned {sorted(set(answers))[:8]} at its epilogue")
 
-    check("the page reads values at all", seen, "the bound was never reached")
+    check("the page reads values at all", rewritten, "the bound was never reached")
     check("the control page diverted nothing", control_gets == 0,
           f"{control_gets} diverted while nothing was rewritten")
-    check("every rewritten read was diverted", gets == len(seen),
-          f"{gets} diverted, {len(seen)} rewritten")
+    check("every rewritten read was diverted", gets == len(rewritten),
+          f"{gets} diverted, {len(rewritten)} rewritten")
     check("it read the id we asked for", slot == args.slot, f"slot {slot}")
     check("the sound is the firmware's own, inside the kit",
           KIT <= sound < KIT + SOUND_AT + TRACKS * SOUND_STRIDE, f"{sound:#010x}")
@@ -135,6 +143,24 @@ def main() -> int:
     check("and that is what the function returned",
           answers and set(answers) == {MARK},
           f"{sorted(set(answers))[:8]} against {MARK:#06x}")
+
+    # Does *turning* a knob go through this read too? The build note predicted
+    # it does -- a UI that computes `new = old + delta` has to fetch `old` from
+    # somewhere, and if that somewhere is this site then the divert fixes
+    # turning and not only display. Nothing is rewritten here: the question is
+    # whether the instruction executes at all while a value moves.
+    turned_from = len(seen)
+    panel.push_and_turn(0, args.delta)
+    turned = seen[turned_from:]
+    during_turn = len(turned)
+    print("")
+    print(f"  a turn on this page reached the read bound {during_turn} time(s), "
+          f"for slots {sorted(set(turned))[:8]}")
+    # `check` prints its detail on a pass as well as a failure, so the detail
+    # is the measurement, not an explanation of what failure would mean.
+    check("turning a knob reads through the same site", during_turn > 0,
+          f"{during_turn} read(s) during the turn; zero would mean the turn "
+          "path fetches its old value somewhere else, needing its own divert")
     return report()
 
 
