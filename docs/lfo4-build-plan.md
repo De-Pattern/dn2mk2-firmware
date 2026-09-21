@@ -3120,3 +3120,67 @@ That leaves exactly one per-page input in the loop: the **mask** at
 `%sp@(56)`, ANDed against `~flags`. `scripts/emu_dest_mask.py` reads it.
 Three masks differing by one bit per LFO is a rule a fourth page extends.
 Three unrelated constants are three constants, and LFO4 needs a fourth.
+
+### The firmware already reserves a fourth LFO in its destination flags — 2026-09-21
+
+The per-page filter is a **mask against a capability field in each parameter
+record**, and the record side of it already has a fourth LFO in it.
+
+**The masks**, read at `0x400395a4` while each browser opens:
+
+| page | mask | bits |
+|---|---|---|
+| LFO1 | `0x00001e00` | 12, 11, 10, 9 |
+| LFO2 | `0x00000e00` | 11, 10, 9 |
+| LFO3 | `0x00000600` | 10, 9 |
+| **a fourth would be** | **`0x00000200`** | **9** |
+
+An entry is kept when `~flags & mask == 0` -- it must carry **every** bit the
+page demands -- so each page drops the top bit and admits strictly more.
+
+**The flags are record field `+44`**, not `+32` as recorded earlier in this
+file. The accessor is `movel %a0@(24,%d0:l),%d0` and **objdump prints indexed
+displacements in hex with no prefix** (`docs/version-anchors.md`), so that is
+`0x24` = 36, and `8 + 36` = **44**. The `+32` reading passed every sanity check
+it was given -- the alternates paired with their primaries there too -- which
+is exactly why it survived. It was wrong.
+
+**Every distinct value of field +44, across all 320 records:**
+
+| value | records | targetable by |
+|---|---|---|
+| `0x00001e00` | 190 | LFO1, LFO2, LFO3, **a 4th** |
+| `0x00000000` | 103 | nobody |
+| `0x00000e00` | 8 | LFO2, LFO3, **a 4th** -- LFO1's own block |
+| `0x00000600` | 8 | LFO3, **a 4th** -- LFO2's block |
+| **`0x00000200`** | **8** | **a 4th only** -- LFO3's block |
+| `0x00040000` / `0x00020000` / `0x00010000` | 1 each | nobody -- the three `DEST` records |
+
+**LFO3's eight records are marked targetable by an LFO that does not exist**,
+and **nothing in the shipping firmware ever passes `0x0200`**. The staircase is
+complete for four LFOs and only three consume it.
+
+This is the same shape DNX found in the stored format -- the fourth slot of
+each group of eight reserved and unused, and p-lock rank `4*param + 0` never
+written (§"Why the LFO4 goal is plausible"). **Three layers now: the stored
+format, the p-lock ranks, and the destination capability bits.** Elektron left
+room in all three.
+
+#### What it means for the build
+
+**LFO4's destination list needs no data change at all.** A page passing
+`0x0200` admits 190 ordinary records plus LFO1's, LFO2's and LFO3's eight
+apiece; the loop is over slots and the lookup returns one entry per slot, so
+the two alternates in each group collapse and each block contributes seven --
+**190 + 21 + the rest of the ordinary list = the 76 entries measured**, arrived
+at from the flags rather than by counting screens.
+
+And the acyclic property is **enforced by the data, not by us**: LFO4's own
+records will carry `0x0000` or a fifth-LFO bit, so no existing page can target
+them whatever we do.
+
+The `DEST` records carry one bit each -- `0x40000`, `0x20000`, `0x10000` for
+LFO1, LFO2, LFO3 -- descending the same way. A fourth would be `0x8000`, which
+is consistent but **unverified**: nothing reads those bits in anything measured
+here, and the converter special-case at `0x4004cb04` keys on the slot number
+instead.
