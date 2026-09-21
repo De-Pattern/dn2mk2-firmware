@@ -438,16 +438,16 @@ re-packer we can use, because our output is an `ELE3` section with a content
 checksum and an HMAC trailer, not a standalone `.ldr`.
 
 
-## elektroid — the Elektron transfer protocol, already implemented
+## elektroid â€” the Elektron transfer protocol, already implemented
 
-<https://github.com/dagargo/elektroid>, by David García Goñi. **GPLv3.**
+<https://github.com/dagargo/elektroid>, by David GarcÃ­a GoÃ±i. **GPLv3.**
 
 A sample and MIDI device manager for Elektron gear, packaged in Debian and
 Ubuntu and on Flathub, whose supported-device list includes **Digitone I and II**
 by name.
 
 It matters here because `docs/midi-rpc.md` catalogued a large RPC surface on the
-running device — `FsRaw*`, `FsSample*`, `Data*`, `Screenshot` — and planned to
+running device â€” `FsRaw*`, `FsSample*`, `Data*`, `Screenshot` â€” and planned to
 derive its wire format by reading `MidiRpcDispatcher::handleMessageAndCreateResponse`.
 That is avoidable. elektroid speaks the protocol today, with a CLI shaped
 `connector:filesystem:command`, and `elektroid-cli info` reports which
