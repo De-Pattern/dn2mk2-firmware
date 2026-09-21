@@ -2954,3 +2954,40 @@ points the remaining question at a filter rather than at three enumerations.
 
 **What LFO4's list must be: 76 entries** -- 55 plus 21, seven each for MOD1,
 MOD2 and MOD3 -- while LFO1-3 stay at 55, 62 and 69 with no MOD4 anywhere.
+
+#### Two instructions that looked like the builder and were not — 2026-09-21
+
+A write watch over the vector's region named `0x400392fc` as the hottest writer
+of entry values on LFO2 and LFO3 and not on LFO1, which reads exactly like the
+filter: one instruction, seven values on one page and fourteen on the next.
+
+**It is the swap inside a sort partition.**
+
+```
+400392f8:  movel %a4@,%d0
+400392fa:  movel %a5@,%a4@+
+400392fc:  movel %d0,%a5@          ; swap, comparator via jsr %a0@
+```
+
+It writes entry values because it is **sorting** them. Its absence from LFO1's
+top ten is a ranking artefact of `most_common(10)`, not evidence of anything.
+The conclusion "one PC emits the destinations, therefore computed" was one
+sentence from being written down, and reading the instruction is what stopped
+it.
+
+The second candidate, `0x40193f38`, writes the list in order and is
+**`std::vector::push_back`** -- `end == capacity`, store, `++end`, tail-call to
+the grow path. Generic too.
+
+**The lesson is specific to this image:** it is C++ with `std::vector` and
+`std::sort`, so *every* instruction that touches an entry value is a container
+primitive shared by the whole program. A hot PC writing the right numbers
+proves nothing about who produced them. The producer has to be identified by
+its **call site**, which is what `scripts/emu_dest_pushers.py` reads: hook
+`push_back` at entry, where `%sp@(0)` is still the return address, and keep the
+returns whose pushed value is a parameter index in 74-103.
+
+One call site on both LFO2 and LFO3, pushing seven and then fourteen, is a loop
+over preceding LFOs. Different sites per page are three enumerations. Neither
+of the first two probes could have told those apart, because both were watching
+the wrong end of the call.
