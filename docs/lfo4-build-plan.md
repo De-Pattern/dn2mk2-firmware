@@ -2807,3 +2807,31 @@ implement, and removing it made the same build boot.
 LFO1-3 behaving as stock, a sound saving and reloading unchanged, and DNX
 reading lane 4 as all `00 00`. Those are what would catch a carry or a
 converter fault, which a boot cannot.
+
+### The bridge passes on hardware — 2026-09-21
+
+Beyond booting: a sound **saved to B249 and loaded into a different track**
+comes back correct, and **all three LFOs behave as expected**.
+
+That clears the three pieces a boot could not reach, on silicon:
+
+- the **carry** through `memcpy` / `memset` -- a sound copied between tracks is
+  exactly the range operation `csrc/lfo4/carry.c` exists for;
+- both **converter hooks**, `0x400dd282` and `0x400dd724`, which run on every
+  save and every load and had only ever been exercised from a snapshot and,
+  since yesterday, from a real loader boot in the emulator;
+- the **per-track engine**, since LFO1-3 are untouched while our stubs run in
+  both evaluators every tick.
+
+**And loading into a *different* track is the stronger half of that test.** The
+extension table is keyed by the live sound's address, so a different track is a
+different key: the path exercised is save-under-one-key then load-under-another,
+which is the case `ext_copy` and `ext_carry` exist to handle.
+
+**What it does not prove.** The table is empty on this build, so the save wrote
+**zeros** into the eight reserved ids and the load read zeros back. It proves
+the hooks do not corrupt a sound -- the risk that mattered, and the one that
+would have shown as a sound loading wrong. It does not prove an LFO4 *value*
+survives a save, because nothing can set one until the page exists. That check
+belongs to step 4b, and `scripts/emu_boot_engine.py` already makes it under the
+emulator with eight marked values.
