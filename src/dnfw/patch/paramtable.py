@@ -37,6 +37,11 @@ missed *bound* clamps a new entry to the fallback record. Both are visibly
 wrong on the new page and harmless everywhere else -- this patch cannot turn a
 stock parameter into a wrong one, because the copy is byte-identical for every
 record that already existed.
+
+**A bound raised where it should not be is the dangerous direction**, and it is
+not symmetric with the above: `NOT_THIS_TIME` holds the two that must stay, and
+one of them writes past the end of somebody else's table if it moves. Read
+those entries before adding to the list or removing from it.
 """
 
 from __future__ import annotations
