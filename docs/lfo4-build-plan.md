@@ -3184,3 +3184,174 @@ LFO1, LFO2, LFO3 -- descending the same way. A fourth would be `0x8000`, which
 is consistent but **unverified**: nothing reads those bits in anything measured
 here, and the converter special-case at `0x4004cb04` keys on the slot number
 instead.
+
+### Step 4b, built: the table moves, and the page is two stubs — 2026-09-21
+
+Everything above was the read. This is what got built, and the three things the
+read had wrong.
+
+#### Correction: the bound has two spellings, and there are 55 of it
+
+§"What extending the table would actually cost" counts **24** `cmpil #321`
+sites. That was a scan of `%d0` only. Across all eight data registers there are
+**38**, and the bound has a second spelling — `cmpil #320` with `bhi`, which
+rejects the same entries `scs` against 321 keeps — with **20** more.
+
+Of those 58, three are not this bound at all: they step `d2` by 20 up to 320,
+sixteen iterations of something else (`0x40031fee`, `0x40032422`, `0x400325e2`).
+The other 55 are, and six of them needed disassembling rather than pattern
+matching to say so:
+
+| site | why it counts |
+|---|---|
+| `0x40036af4`, `0x40036bbc` | check an argument, then call `0x400dbff0`, an accessor |
+| `0x400379ec` | the same check at a function's entry on its argument |
+| `0x4003950a` | `d2 += 1` to 321: a **loop over every entry** |
+| `0x4004b17a`, `0x400dc7f0` | `d2 += 1` and `lea 60(aN),aN`: loops walking the records |
+
+The two loops with `lea 60(aN),aN` are the strongest confirmation the census is
+of the right thing: the stride is in the instruction.
+
+#### Correction: there is no block of ten spare records
+
+Before relocating anything, the cheaper route was worth pricing — ten records
+the table already has and nothing uses. Reading every page record's eight
+entries (ids 0..36) says **163 of the 320 are named by a page** and 157 are
+not, which sounds like plenty and is not: the unnamed ones are alternates,
+records reached by group and id rather than by page, and the 18 at the front
+that carry `group == -1`. None of it is a run of ten that nothing reads, and
+"unreferenced by a page record" is not "unused".
+
+So the table is relocated, which the next section prices honestly.
+
+#### The record's fields, read by diffing the three LFO groups
+
+Positions 0..9 of LFO1's group against LFO2's and LFO3's, word by word. What
+varies is what a fourth would have to change; what does not is what it copies.
+
+| off | field | LFO1 → LFO2 → LFO3 |
+|---|---|---|
+| `+0` | handler | same within a position |
+| `+4` | `0x40218572` | the same word in all 320 records |
+| `+8` | **group** | 26, 27, 28 |
+| `+12` | **value slot** | 1-8, 9-16, 17-24 |
+| `+20` | range | same |
+| `+24` | default | same, twice not |
+| `+32` | unknown | `0x0066ffff`.., `0x006fffff`.., **`-1` on LFO3** |
+| `+36` | **NRPN** | 170.., 178.., 186.. — `-1` on `SLEW` |
+| `+40` | unidentified, **unique** | 79-88, 89-98, 99-108 |
+| `+44` | destination flags | `0x0e00`, `0x0600`, `0x0200` |
+| `+48` | long name | `Speed`, `Multiplier`, … — shared |
+| `+52` | **page label** | `LFO1`, `LFO2`, `LFO3` |
+| `+56` | short name | `SPD`, `MULT`, … — shared |
+
+`+40` is **unique across all 320 records** — 320 distinct values, no
+duplicates, no `-1` — so it is a key, and a copy would collide. Its meaning is
+still unknown (`dnfw.params.record.physical_id` keeps the history of three
+wrong names for it), so LFO4's ten take values from **gaps inside the range the
+table already uses**: in range whatever it indexes, claimed by no record.
+
+`+36` is the NRPN, settled 45/45 against Elektron's Appendix C. LFO4's ten are
+`-1`: **no NRPN, no MIDI address**, the convention `SLEW` already uses in all
+three stock groups. Ten free numbers could be assigned later; doing it now
+would be inventing a MIDI map to go with a page that does not exist yet.
+
+`+8` is copied from LFO3 rather than given a new number. A new group is a new
+index into whatever reads that field, and nothing here has read it; LFO3's is
+known good, and `(group, id)` still names each record uniquely because the ids
+are 101-108.
+
+#### What the relocation costs, and what a mistake in it does
+
+| | sites |
+|---|---|
+| 60-byte table, three pre-biased bases | 56 |
+| 68-byte runtime table, five field offsets | 6 |
+| the entry space bound, both spellings | 55 |
+| | **117** |
+
+`src/dnfw/patch/paramtable.py` derives all three lists from the image and
+asserts the counts, rather than holding addresses; `test/test_paramtable.py`
+checks that relocating touches **only** those bytes.
+
+**A missed site degrades, it does not corrupt**, and that is worth stating
+because it is what makes the change safe to ship before it is fully proven. The
+copy is byte-identical for all 320 stock records, so a base that was not found
+keeps reading the old table and keeps being right; it reads garbage only for
+the ten new entries. A bound that was not found clamps a new entry to the
+fallback record. Neither can make a stock parameter wrong. The failure that
+*could* be serious is the opposite one — rewriting a literal that was never
+this table — and every one of the 117 is asserted to hold its stock value
+before it is touched.
+
+That safety is also what makes a missed site invisible, so
+`scripts/emu_table_watch.py` watches the old ranges for **reads** while the
+firmware runs, with the stock image through the same path as the control: if
+the control reads the old table and the build never does, the list is complete.
+
+#### The page is two stubs, because both structures are built at run time
+
+Neither the page-record table (`0x42432c00`, ids 0..36) nor the mode's page
+vector exists in the image, so neither can be written at build time.
+
+- **`0x400c2474`** is `id -> 0x42432c00 + 44 * id`, rejecting anything above 36.
+  `lfo4_page_stub` answers for LFO4's id and lets every other one through to
+  the arithmetic it replays.
+- **`0x40063f5c`**, inside the mode-header renderer, is where `%a2` becomes the
+  mode object. `lfo4_mode_stub` replays that load and calls `lfo4_pages`, which
+  recognises the MOD mode by its vector holding exactly `4 5 6` and, once,
+  gives it a fourth entry.
+
+The record is assembled from LFO3's the first time a MOD header is drawn,
+because its interesting fields are **pointers to string objects the UI built at
+startup** — `+0` is an object holding `LFO3`, `+4` one holding `MOD`, and the
+renderer passes `record + 4` to the text routine. Copying LFO3's 32-byte name
+object and changing one character gets a correct `LFO4` without this code ever
+having to learn that layout; `+4` is reused as it stands, since every page in
+the mode shares it.
+
+**What this does that it cannot prove.** The vector's `begin` is replaced with
+an array this build owns, so a destructor that freed it would be freeing memory
+the firmware's allocator never handed out. UI mode objects are built once and
+kept, but that is an observation rather than a guarantee, and switching modes
+hard is how it gets checked.
+
+#### The DEST mask is a virtual function, and LFO4 will inherit LFO3's
+
+The three per-page masks are not constants at the browser's call site. They are
+**three thunks**, at `0x400c2a90`, `0x400c2aae` and `0x400c2acc`, each of which
+writes one value into the argument frame and tail-branches to the same routine
+at `0x400c2894`:
+
+```
+movel %sp@(8),%d0 ; movel %d0,%sp@(4)
+movel %sp@(12),%d0 ; movel %d0,%sp@(8)
+movel #7680,%d0                      ; 0x1e00, and 0x0e00 and 0x0600 below
+movel %d0,%sp@(12)
+braw 0x400c2894
+```
+
+Each is installed by a registrar at `0x400c3f80` into field `+12` of a 16-byte
+descriptor, in a table of them at `0x42431d48`, `0x42431d58`, `0x42431d68`,
+`0x42431d78` — one per parameter kind, four of which are visible in that
+registration sequence and only three of which carry an LFO mask.
+
+**So the mask belongs to a descriptor, and the question is which descriptor a
+record gets.** It is not the record's `+0` handler: all three `DEST` records
+share `0x400e30f0`. The field that differs between them and is not a name is
+`+8`, the group — 26, 27, 28.
+
+That makes a **prediction, written down before the build is flashed**: LFO4's
+records carry LFO3's group, so LFO4's `DEST` list will be LFO3's — `MOD1` and
+`MOD2`, not `MOD1 MOD2 MOD3`. LFO4 would be able to modulate LFO1 and LFO2 but
+not LFO3. The graph stays acyclic either way, and nothing about it is unsafe;
+it is one category short of the intended list.
+
+It also names the fix, if the prediction holds: a **fourth descriptor** with a
+mask thunk of our own writing `0x0200`, and a group for LFO4 that selects it.
+That is a separable change and it is not made blind — it waits on the screen
+saying which list actually appears.
+
+The `0x8000` this build writes into LFO4's `DEST` record's capability field is
+**inert** on that reading. It continues the `0x40000 / 0x20000 / 0x10000`
+pattern and costs nothing, but nothing measured here reads those bits.
