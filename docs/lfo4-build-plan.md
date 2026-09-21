@@ -3533,3 +3533,45 @@ So the 292 entries that "differed" from the group were the probe's expectation
 being wrong, not the firmware's answer. The probe now calls `0x400dc11a`, which
 returns record `+40` — the field that is **unique across all 320 records**, so
 a wrong answer names the record it came from.
+
+### `lfo4-table`, measured clean — 2026-09-21
+
+`scripts/emu_table_watch.py` on the corrected build, one boot from reset and
+330 calls into `0x400dc11a`:
+
+```
+  during boot, old 60-byte:            0 read(s),      0 write(s)
+  during boot, new 60-byte:        1,766 read(s),  4,950 write(s)
+  during boot, the 68-byte companion:  0 read(s), 10,602 write(s)
+
+  the accessor calls alone, new 60-byte: 330 read(s)
+
+  entries 321..330 answer [19, 21, 38, 78, 109, 118, 129, 139, 157, 159]
+  param_set_tables_build filed 82 slot(s), highest 24
+  all checks pass
+```
+
+Four things, and they are the four that were in doubt:
+
+- **The old table is never touched**, through a boot that the gate counted
+  2,192 kit loads in. The 56 base sites are complete for everything that runs.
+- **Every one of the 330 entries answers exactly what the relocated table
+  holds**, zero differing — the firmware's own arithmetic, not the probe's.
+- **Entries 321 to 330 answer with LFO4's ten ids**, the gap values the build
+  picked out of the range no record uses. The firmware reaches records that did
+  not exist an hour ago.
+- **The highest slot filed is 24**, so nothing was written past the three
+  101-entry tables. The bound left alone is the reason, and this is the number
+  that says so.
+
+The companion table being written 10,602 times *where it lives* is now the
+pass, not the failure: it does not move, and a build that moved it would read
+an empty one.
+
+**One thing worth noting rather than explaining away:** 4,950 **writes** into
+the parameter table during boot. The records are read-only data in the image,
+so something patches them at run time — per-machine ranges are the obvious
+guess and it is only a guess. It does not affect this build, because every
+write goes through the same bases every read does and lands in the copy. But
+"the parameter table is read-only" is not true of this firmware, and anything
+built on that assumption later should know.
