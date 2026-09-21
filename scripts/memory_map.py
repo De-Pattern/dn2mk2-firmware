@@ -37,7 +37,11 @@ OUT = ROOT / "out/memory-map/map.json"
 
 # The mods as they stand: the best build per feature, plus the intro variants.
 MODS = [
-    ("lfo4-tick6a", "Fourth LFO (engine)", "passed"),
+    ("lfo4-tick6a", "Fourth LFO (engine)", "passed, superseded by the ladder below"),
+    ("lfo4-bridge", "Fourth LFO: the tick pulls each track's row", "passed"),
+    ("lfo4-slots", "and parameter ids 101-108 reach the table", "passed"),
+    ("lfo4-table", "and the parameter table moves so it can hold ten more", "to test"),
+    ("lfo4-page", "and a fourth MOD page shows them", "to test"),
     ("lfo-waveshapes8", "LFO waves STEP/PULS/NOIS + glyphs + labels", "to test (v6 passed)"),
     ("lfo-wavetable4", "Table-driven LFO wave TRP + glyph + label", "to test (v2 passed)"),
     ("arp-on-midi2", "Arpeggiator menu on MIDI tracks", "partial"),
@@ -102,6 +106,13 @@ RAM_TENANTS = [
      "NOIS per-LFO loop state: 1,024 keys x 8 bytes", "scripts/build_lfo_waveshapes.py"),
     (0x46750000, 0x46750000 + 3 * 112, "lfo-waveshapes8 / lfo-wavetable4",
      "rendered glyph tiles, 112 bytes per new waveform", "scripts/lfo_wave_glyph.py"),
+    (0x46800000, 0x46800000 + 0x71C4 + 0x2000, "lfo4-table / lfo4-page",
+     "the compiled C, then its BSS: the extension table, the per-track rows and "
+     "the relocated 68-byte runtime parameter table (331 x 68)",
+     "scripts/build_lfo4_ext.py, csrc/lfo4/prm68.c"),
+    (0x46900000, 0x46900000 + 60 * 330 + 8, "lfo4-table / lfo4-page",
+     "the relocated parameter table: 320 stock records, LFO4's ten, and the "
+     "page label they point at", "scripts/build_lfo4_table.py"),
 ]
 
 
