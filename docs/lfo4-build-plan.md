@@ -3046,3 +3046,48 @@ exists, not a finding.
 **For the build it changes little:** LFO4's list must hold 76 entries, and the
 mechanism that fills it is shared code that already handles "every earlier LFO"
 generically. Nothing here is a site list.
+
+#### The unpaired bound is a second table, and the `+0` pointers are handlers
+
+**`0x400c241c` (the one `cmpil #321` that sits near no biased base).** It is
+not an unrelated 321. It indexes a **second table over the same entry space**:
+
+```
+cmpil #321,%d0                   ; the same bound
+lsll  #6,%d1                     ; entry * 64
+lea   %a1@(0,%d0:l:4),%a0        ; + entry * 4  ->  entry * 68
+addil #0x4243325c,%d0            ; a RAM base
+```
+
+**321 entries of 68 bytes at `0x4243325c`**, 21,828 bytes, sitting in RAM
+beside the page-record table at `0x42432c00` and the machine table at
+`0x42432b24`. A runtime companion to the image's 60-byte records, indexed by
+the same entry number -- which is why it shares the `321`.
+
+It is **far cheaper than the first table**: the base appears at only **6 sites**
+across five field offsets (`+0` x2, `+4`, `+20`, `+44`, `+60`), against 56 for
+the parameter table. And the 24 `cmpil #321` sites already cover both, since
+the bound is the entry space rather than either table.
+
+**The `+0` code pointers (the last open route).** Every one of the 320 records
+has `+0` in code -- and there are only **51 distinct values** across 320
+records. That is a shared handler per parameter *kind*, called **with** a
+record the caller already holds, not a way of finding one. It opens no
+addressing route.
+
+#### So the addressing routes are enumerated
+
+| route | sites |
+|---|---|
+| 60-byte parameter table, three biased bases | **56** |
+| 68-byte runtime table, five biased bases | **6** |
+| `cmpil #321`, shared by both | **24** |
+
+No record boundary appears as a literal anywhere, the `+0` pointers are
+handlers, and every accessor recomputes its address from a biased base rather
+than caching a pointer -- so **patching the bases redirects every lookup**.
+
+That closes all three questions this section opened. What extending the
+parameter set costs is now a list: two tables to grow, 62 bases and 24 bounds
+to rewrite, each a four- or six-byte literal that the build can assert is stock
+before touching -- exactly as the four existing hook sites already do.
