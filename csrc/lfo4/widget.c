@@ -32,13 +32,26 @@
  */
 #include "slots.h"
 
-#define ROWS    (LFO4_ENTRYN - LFO4_ENTRY0)
-#define BYTES   (ROWS * DN2_COMPANION_STRIDE)
+/* LFO3's row for the same position, **not a copy of it**.
+ *
+ * The first version of this copied the ten rows into BSS at first use. It very
+ * nearly worked -- given LFO3's values, LFO4's page drew the same `512`, the
+ * same `SYN PD2`, the same square waveform -- and `SPH` still came out a plain
+ * dial where LFO3 has the phase braces. Whatever the row refers to is not
+ * reached by owning the row's bytes.
+ *
+ * The owner's reading, and the screen agrees with it: the glyph is not re-coded
+ * per LFO, it is **reused between them**. So LFO4 reuses it too, by being
+ * handed LFO3's row itself rather than a duplicate of its contents. That also
+ * removes 680 bytes of BSS and the question of when to copy.
+ *
+ * Position, not entry: LFO4's page names entries 321-325 and 327-329, and the
+ * row for each is LFO3's at the same offset into its group of ten.
+ */
+u32 lfo4_companion_hits, lfo4_companion_declined;
 
-u8 lfo4_companion_rows[BYTES];
-u32 lfo4_companion_built, lfo4_companion_hits, lfo4_companion_declined;
-
-/* -> the row for `entry`, or 0 for an entry the firmware owns.
+/* -> LFO3's companion row for the same position, or 0 for an entry the
+ * firmware owns.
  *
  * Zero is the signal to let the stock accessor have it, so the divert is
  * decided here and not in the assembly: an entry this build does not own is a
@@ -46,19 +59,10 @@ u32 lfo4_companion_built, lfo4_companion_hits, lfo4_companion_declined;
  */
 u32 lfo4_companion(u32 entry)
 {
-    const u8 *lfo3;
-    u32 k;
-
     if (entry < LFO4_ENTRY0 || entry >= LFO4_ENTRYN) {
         lfo4_companion_declined++;
         return 0;
     }
-    if (!lfo4_companion_built) {
-        lfo3 = (const u8 *)(DN2_COMPANION + DN2_COMPANION_STRIDE * LFO3_ENTRY0);
-        for (k = 0; k < BYTES; k++)
-            lfo4_companion_rows[k] = lfo3[k];
-        lfo4_companion_built = 1;
-    }
     lfo4_companion_hits++;
-    return (u32)lfo4_companion_rows + DN2_COMPANION_STRIDE * (entry - LFO4_ENTRY0);
+    return DN2_COMPANION + DN2_COMPANION_STRIDE * (LFO3_ENTRY0 + entry - LFO4_ENTRY0);
 }

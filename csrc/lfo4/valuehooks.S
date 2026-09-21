@@ -86,3 +86,59 @@ lfo4_comp_displaced:
     move.l  %sp@(4),%d0
     cmpi.l  #321,%d0
     jmp     DN2_COMPANION_AFTER
+
+/* The fourth waveform-preview block, transcribed from the firmware's third.
+ *
+ * `0x4010e27e` is LFO3's, and LFO1's and LFO2's sit just above it: the same
+ * instructions five times over with their own entry numbers as literals. The
+ * dispatch hands LFO4 index 3 already and has no block for it, so this is that
+ * block, with five constants changed and `jmp` where the firmware's falls
+ * through.
+ *
+ * The build asserts, byte for byte, that what the assembler produces here is
+ * the firmware's own block with exactly those five immediates substituted --
+ * so this is a transcription that cannot drift into a paraphrase.
+ *
+ * Entered by a jump over the fallback's first eight bytes, with `%d0` still
+ * the index and `%a2` still the page. Anything that is not LFO4 replays those
+ * eight bytes and carries on.
+ */
+    .globl  lfo4_wave_stub
+lfo4_wave_stub:
+    cmp.l   #DN2_WAVE_INDEX,%d0
+    beq.s   lfo4_wave_four
+    .globl  lfo4_wave_displaced
+lfo4_wave_displaced:
+    move.l  %a2,-(%sp)
+    jsr     DN2_WAVE_CALL
+    jmp     DN2_WAVE_AFTER
+
+    .globl  lfo4_wave_four
+lfo4_wave_four:
+    move.l  %sp,%d3
+    addi.l  #67,%d3
+    move.l  %d3,-(%sp)
+    pea     LFO4_E_WAVE
+    move.l  %a2,-(%sp)
+    lea     DN2_WIDGET_GET,%a3
+    jsr     %a3@
+    move.l  %d3,-(%sp)
+    pea     LFO4_E_SPH
+    move.l  %a2,-(%sp)
+    move.l  %d0,%d4
+    jsr     %a3@
+    move.l  %d3,-(%sp)
+    pea     LFO4_E_MODE
+    move.l  %a2,-(%sp)
+    move.l  %d0,%d5
+    jsr     %a3@
+    lea     %sp@(32),%sp
+    move.l  %d3,%sp@
+    pea     LFO4_E_SPD
+    move.l  %a2,-(%sp)
+    move.l  %d0,%d6
+    jsr     %a3@
+    move.l  %d3,-(%sp)
+    pea     LFO4_E_DEP
+    move.l  %d0,%d7
+    jmp     DN2_WAVE_TAIL

@@ -103,6 +103,38 @@ typedef unsigned char u8;
 #define LFO3_ENTRY0      95
 #define LFO4_ENTRYN      (LFO4_ENTRY0 + 10)
 
+/* Step 4e: the waveform preview, which is re-coded per LFO.
+ *
+ * `0x4010e1f4` onward is three near-identical blocks selected by an LFO index
+ * in `%d0` -- 0, 1, 2 -- each calling `0x4006538e` five times with its own
+ * LFO's **entry numbers written as literals**:
+ *
+ *     index 0:  79, 81, 82, 75, 83      WAVE, SPH, MODE, SPD, DEP
+ *     index 1:  89, 91, 92, 85, 93
+ *     index 2:  99, 101, 102, 95, 103
+ *
+ * Anything else falls to `0x4010e2f0` and draws no preview -- which is why
+ * LFO4's `SPH` came out a plain dial where LFO1-3 have the phase braces around
+ * the waveform. **The dispatch already computes 3 for LFO4**
+ * (`scripts/emu_lfo4_wave.py`); there is simply no block for it.
+ *
+ * So a fourth block is added, transcribing the firmware's own with five
+ * constants changed, and the fallback's first eight bytes become a jump to it.
+ */
+#define DN2_WAVE_FALLBACK 0x4010E2F0   /* the eight bytes replaced */
+#define DN2_WAVE_CALL     0x4006597A   /* what the fallback does, replayed */
+#define DN2_WAVE_AFTER    0x4010E2F8
+#define DN2_WAVE_TAIL     0x4010E2C6   /* the common tail all three blocks reach */
+#define DN2_WIDGET_GET    0x4006538E   /* (page, entry, buffer) -> the drawn value */
+#define DN2_WAVE_INDEX    3            /* what the dispatch hands LFO4 */
+
+/* LFO4's five, in the order the blocks call for them. */
+#define LFO4_E_WAVE  (LFO4_ENTRY0 + 4)
+#define LFO4_E_SPH   (LFO4_ENTRY0 + 6)
+#define LFO4_E_MODE  (LFO4_ENTRY0 + 7)
+#define LFO4_E_SPD   (LFO4_ENTRY0 + 0)
+#define LFO4_E_DEP   (LFO4_ENTRY0 + 8)
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8

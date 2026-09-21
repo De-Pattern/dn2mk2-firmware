@@ -3781,3 +3781,86 @@ in a file that only the builds patching its site compile.** `hooks.S` is the
 sites every LFO4 build has, `pagehooks.S` is the page's two, `valuehooks.S` is
 `lfo4-value`'s two. The test fixture compiles the whole directory, so it cannot
 be the thing that notices.
+
+### Step 4e: the waveform preview is re-coded per LFO — 2026-09-21
+
+With step 4d the fourth page drew real widgets, and the owner, looking at it
+beside LFO3's, said it was still not right. It was not: **`SPH` drew a plain
+dial where LFO1-3 draw the start-phase braces around the waveform.**
+
+Two wrong guesses first, both cheap and both worth recording:
+
+- **The companion row was copied; maybe it should be referenced.** The owner's
+  reading was that the glyph is reused between the LFOs rather than owned by
+  each. Changing `lfo4_companion` from a copy of LFO3's rows to LFO3's rows
+  themselves changed **nothing on screen**. The change is kept -- it is simpler,
+  and it removes 680 bytes of BSS and the question of when to copy -- but it
+  was not the fault.
+- **Maybe the values differ.** Giving LFO4 exactly LFO3's eight values made
+  seven widgets match exactly: the same `512`, the same `SYN PD2`, the same
+  square waveform. `SPH` was still a plain dial. So it was never a value.
+
+#### What it was, found by diffing what the two renders execute
+
+`UC_HOOK_BLOCK` over one `[MOD]` tap each, and the difference of the two sets:
+
+```
+  page 3 blocks 2437, page 4 blocks 2225
+  reached while drawing LFO3 and never while drawing LFO4: 12
+    0x4010e00a  0x4010e010  0x4010e27e  0x4010e296
+    0x4010e2a2  0x4010e2ae  0x4010e2be  ...
+  and the reverse: 0x4010e2f0 among them
+```
+
+`0x4010e1f4` onward is **three near-identical blocks, one per LFO**, chosen by
+an index in `%d0`, each calling `0x4006538e` five times with its own LFO's
+entry numbers **written as literals**:
+
+| index | block | WAVE, SPH, MODE, SPD, DEP |
+|---|---|---|
+| 0 | `0x4010e1f4` | 79, 81, 82, 75, 83 |
+| 1 | `0x4010e22e` | 89, 91, 92, 85, 93 |
+| 2 | `0x4010e27e` | 99, 101, 102, 95, 103 |
+| 3 | — falls to `0x4010e2f0` | none |
+
+**The owner's word for it was the right one: it is re-coded, not reused.** The
+glyph drawing is shared; the five entry numbers that feed it are typed out
+three times.
+
+`scripts/emu_lfo4_wave.py` then asked the only question that decides the fix:
+
+```
+  [MOD] x3: the dispatch saw index [2]
+  [MOD] x4: the dispatch saw index [3], fell through with [3]
+```
+
+**The dispatch already computes 3 for LFO4.** There is simply no block for it.
+
+#### A fourth block, asserted to be the third
+
+`lfo4_wave_four` in `csrc/lfo4/valuehooks.S` is LFO3's block transcribed, and
+the build proves it rather than asking to be believed: it takes the firmware's
+own 72 bytes at `0x4010e27e`, substitutes the five `pea` immediates
+(99→325, 101→327, 102→328, 95→321, 103→329), and **refuses to build unless the
+assembler produced exactly that**. A transcription that had drifted into a
+paraphrase would still assemble and would draw something subtly wrong.
+
+The fallback's first eight bytes become a jump to a stub that takes index 3 and
+replays them for everything else.
+
+#### The result, measured rather than admired
+
+Given LFO3's own eight values, LFO4's page and LFO3's page are compared frame
+to frame -- 1,024 bytes of a 128x64 panel:
+
+```
+  1,011 identical, 13 differ
+  at byte offsets [343, 351, 359, 367, 1001, 1002, 1003, 1009, 1010, 1011, 1017, 1018, 1019]
+```
+
+Rendered, those thirteen bytes are **the digit in `MOD (3/4)` versus `(4/4)`,
+and the page-position dots down the right edge.** Everything else -- all eight
+widgets, the waveform preview, the phase braces -- is the same picture.
+
+That is the strongest statement available short of the instrument: *with the
+same values, the fourth LFO's page is the third LFO's page.*

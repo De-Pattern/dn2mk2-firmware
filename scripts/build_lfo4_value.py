@@ -44,7 +44,8 @@ SYX = ROOT / "00_Resources/02_Builds/lfo4-value_DN2_1.11.syx"
 
 SOURCES = page.SOURCES + ("getter.c", "widget.c", "valuehooks.S")
 ENTRIES = page.ENTRIES + ["lfo4_on_get", "lfo4_get_stub",
-                          "lfo4_companion", "lfo4_comp_stub"]
+                          "lfo4_companion", "lfo4_comp_stub",
+                          "lfo4_wave_stub", "lfo4_wave_four"]
 
 # Stock 1.11, checked rather than trusted. Like step 4a's, this replaces
 # instructions it does not replay, so a changed image must not be patched.
@@ -90,9 +91,57 @@ def companion(content, code):
           f"{code['lfo4_comp_stub']:#010x}")
 
 
+# The waveform preview is re-coded per LFO: three blocks at `0x4010e1f4`,
+# `0x4010e22e` and `0x4010e27e`, each calling `0x4006538e` five times with its
+# own entry numbers as literals, chosen by an index the dispatch already
+# computes as 3 for LFO4. There is no block for 3, so the page drew no preview
+# and `SPH` came out a plain dial.
+WAVE_FALLBACK = 0x4010E2F0
+WAVE_STOCK = bytes.fromhex("2f0a4eb94006597a")          # movel a2,-(sp) ; jsr 0x4006597a
+LFO3_BLOCK = (0x4010E27E, 0x4010E2C6)                   # the block this one transcribes
+# (LFO3's literal, LFO4's) in the order the block calls for them.
+SUBSTITUTIONS = ((99, 325), (101, 327), (102, 328), (95, 321), (103, 329))
+
+
+def waveform(content, code):
+    """Add the fourth block, and assert it is the third with five constants changed."""
+    at = WAVE_FALLBACK - BASE
+    here = bytes(content[at:at + len(WAVE_STOCK)])
+    if here != WAVE_STOCK:
+        raise SystemExit(f"the preview fallback at {WAVE_FALLBACK:#010x} is {here.hex()}, "
+                         f"not {WAVE_STOCK.hex()}")
+
+    # What the firmware's own block is, and what ours must be: the same bytes
+    # with five 16-bit immediates substituted. Checked rather than trusted,
+    # because a transcription that has drifted into a paraphrase would still
+    # assemble and would draw something subtly wrong.
+    lo, hi = LFO3_BLOCK
+    theirs = bytes(content[lo - BASE:hi - BASE])
+    wanted = bytearray(theirs)
+    for was, now in SUBSTITUTIONS:
+        pea = bytes.fromhex("4878") + struct.pack(">H", was)
+        if wanted.count(pea) != 1:
+            raise SystemExit(f"LFO3's block holds {wanted.count(pea)} `pea {was}`, expected one")
+        wanted[wanted.index(pea) + 2:wanted.index(pea) + 4] = struct.pack(">H", now)
+    start = code["lfo4_wave_four"] - bridge.CODE_VA
+    mine = code.image[start:start + len(theirs)]
+    if mine != bytes(wanted):
+        raise SystemExit("the fourth preview block is not the third with five constants "
+                         "changed. firmware " + bytes(wanted).hex()
+                         + ", ours " + mine.hex())
+
+    jump = bytes.fromhex("4ef9") + struct.pack(">I", code["lfo4_wave_stub"])
+    nop = bytes.fromhex("4e71")
+    content[at:at + len(WAVE_STOCK)] = jump + nop * ((len(WAVE_STOCK) - len(jump)) // 2)
+    print("part 9 -- the waveform preview")
+    print(f"  {WAVE_FALLBACK:#010x}  index {3} -> lfo4_wave_stub {code['lfo4_wave_stub']:#010x}")
+    print(f"  the block is LFO3's {len(theirs)} bytes with "
+          + ", ".join(f"{a}->{b}" for a, b in SUBSTITUTIONS))
+
+
 if __name__ == "__main__":
     table.describe(bridge.load(bridge.read_image(bridge.STOCK)).container.find(3).unpack())
     raise SystemExit(bridge.main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX,
                                  extra=[slots.divert, table.relocate, page.hooks, divert,
-                                        companion],
+                                        companion, waveform],
                                  chunks=table.chunks))
