@@ -83,12 +83,17 @@ def cave_source(table_va: int, refresh: int) -> str:
     return source
 
 
-def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=()) -> int:
+def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=None) -> int:
     """Build it. `extra` are further site patches, each `f(content, code)`.
 
     The arguments exist so a build that is *this one plus a site* -- step 4's
     setter divert is the first -- composes instead of copying two hundred lines
     that would then drift apart.
+
+    `chunks`, if given, is `f(stock) -> [(id, data)]`: further area chunks to
+    append beside the C. Step 4b's relocated parameter table is one, and it is
+    built from the stock image rather than compiled, which is why the hook
+    takes the image and runs before the loader is installed.
     """
     firmware = load(read_image(STOCK))
     section = firmware.container.find(MAIN_OS)
@@ -102,7 +107,7 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=()) -> int:
                         defines={"LFO4_KIT": f"{KIT:#x}u"})
     table_va = code["lfo4_rows"]
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
-    content = loader.install(stock, [(area.CODE, chunk)])
+    content = loader.install(stock, [(area.CODE, chunk), *(chunks(stock) if chunks else ())])
     print(f"part 1 -- C: {len(code.image)} B at {CODE_VA:#010x}, {code.bss:,} B of state; "
           f"rows at {table_va:#010x}, kit {KIT:#010x}")
 
@@ -144,6 +149,14 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=()) -> int:
     symbols["dnfw_boot"] = loader.build()["dnfw_boot"]
     (out / "symbols.json").write_text(
         json.dumps({k: f"0x{v:08x}" for k, v in sorted(symbols.items())}, indent=1) + "\n", newline="\n")
+    # Which of those are code. The boot gate reports what never ran, and a
+    # counter in that list is noise: `lfo4-table`'s first gate named 24
+    # symbols as unexercised routines and 15 of them were variables, which
+    # buries the ones that matter.
+    routines = {k: v for k, v in code.routines().items() if k.startswith(wanted)}
+    routines["dnfw_boot"] = symbols["dnfw_boot"]
+    (out / "routines.json").write_text(
+        json.dumps({k: f"0x{v:08x}" for k, v in sorted(routines.items())}, indent=1) + "\n", newline="\n")
     syx.parent.mkdir(parents=True, exist_ok=True)
     syx.write_bytes(fwbuild.build(firmware, {MAIN_OS: compress(section.id, section.dest, bytes(content))}))
     print(f"  {syx.name}, MAIN OS {len(content):,} B (+{len(content) - len(stock)})")
