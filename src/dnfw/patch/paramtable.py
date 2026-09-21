@@ -24,7 +24,11 @@ an address list, then asserts the count it expects to find.
 
 A second table shadows the first at run time: **321 entries of 68 bytes** at
 `0x4243325c`, indexed by the same entry number, which is why it shares the
-`321`. It is far cheaper -- six sites -- and it moves the same way.
+`321`. It **does not move**, and `runtime_literals` is why: its initialiser is
+**unrolled**, and writes every entry's field addresses as absolute literals --
+902 of them, covering entries 0 to 320 with no gaps. There is no base to
+repoint. Its bound stays where it is too, so an entry past 320 clamps to entry
+0 there exactly as it always did.
 
 **What a missed site does, because that decides how much this may be trusted.**
 A missed *base* keeps reading the old table, which is still there and still
@@ -44,8 +48,8 @@ TABLE, RECORD, COUNT = 0x401F7FC8, 60, 320
 BIASES = (8, 16, 40)                       # the field each accessor wants
 EXPECTED_BASES = {8: 53, 16: 1, 40: 2}     # measured on stock 1.11, 56 in all
 
-RUNTIME, RUNTIME_STRIDE = 0x4243325C, 68   # the companion table, in RAM
-EXPECTED_RUNTIME = 6                       # five field offsets, six sites
+RUNTIME, RUNTIME_STRIDE, RUNTIME_ENTRIES = 0x4243325C, 68, 321
+EXPECTED_RUNTIME = 902                     # the unrolled initialiser's literals
 
 # `cmpil #320` and `cmpil #321` both spell the same bound -- `bhi` against 320
 # rejects, `scs` against 321 keeps -- so both forms are rewritten. Three sites
@@ -74,9 +78,16 @@ NOT_THE_BOUND = (0x40031FEE, 0x40032422, 0x400325E2)
 # side -- `0x400dc02a` bounds slots at 100 in its own right, so it answers 0 for
 # 101 either way. Growing those three tables to 109 entries is five literals
 # each plus a size immediate, and it belongs with the rest of the read side.
+#
+# And `0x400c241c` guards the 68-byte companion table, which `runtime_literals`
+# shows cannot move: entry 321 there would be 68 bytes past a table that ends
+# where the RTOS's task blocks begin. Left at 321 it clamps to entry 0, the
+# fallback, exactly as an out-of-range entry always did.
 NOT_THIS_TIME = {0x400DC7F0: "param_set_tables_build files by value slot into "
-                             "101-entry tables; see docs/lfo4-build-plan.md"}
-EXPECTED_BOUNDS = 54
+                             "101-entry tables; see docs/lfo4-build-plan.md",
+                 0x400C241C: "the 68-byte companion table has no base to move; "
+                             "past its end are the RTOS task blocks"}
+EXPECTED_BOUNDS = 53
 
 
 class TableError(ValueError):
@@ -122,14 +133,37 @@ def base_sites(content: bytes, base: int) -> list[Site]:
     return out
 
 
-def runtime_sites(content: bytes, base: int) -> list[Site]:
-    """The six bases of the 68-byte companion table, at five field offsets."""
+def runtime_literals(content: bytes, base: int) -> list[int]:
+    """Every absolute address of a 68-byte entry's field, in the image.
+
+    **This is the evidence that the companion table cannot be relocated.** It
+    looked like six sites at five field offsets -- which is what a search for
+    *entry 0's* fields finds, and what an earlier reading of this recorded. It
+    is not: the table's initialiser is **unrolled**, one block per entry, and
+    each block writes its own entry's addresses outright:
+
+        pea   <entry + 4>
+        pea   <entry + 20>
+        clr.l <entry + 0>
+        clr.l <entry + 44>
+        clr.l <entry + 60>
+
+    902 such literals, covering entries 0 to 320 with **no gaps**. There is no
+    base to repoint, so patching the six that mention entry 0 moves the
+    *accessor* and leaves the *initialiser* writing where the table used to be:
+    the build then reads an empty table forever. Measured, after a build that
+    did exactly that put 10,591 writes into the old address range and zero
+    reads (`scripts/emu_table_watch.py`, 2026-09-21).
+    """
     out = []
-    for field in (0, 4, 20, 44, 60):
-        for va in _even_occurrences(content, base, RUNTIME + field):
-            out.append(Site(va, RUNTIME + field, 0, f"runtime base, field +{field}"))
-    if len(out) != EXPECTED_RUNTIME:
-        raise TableError(f"expected {EXPECTED_RUNTIME} runtime-table base sites, found {len(out)}")
+    for i in range(0, len(content) - 4, 2):
+        value = struct.unpack_from(">I", content, i)[0]
+        if not RUNTIME <= value < RUNTIME + RUNTIME_STRIDE * RUNTIME_ENTRIES:
+            continue
+        if (value - RUNTIME) % RUNTIME_STRIDE not in (0, 4, 20, 44, 60):
+            continue
+        if struct.unpack_from(">H", content, i - 2)[0] in (0x4879, 0x42B9):   # pea, clr.l
+            out.append(base + i)
     return out
 
 
@@ -179,17 +213,15 @@ def poke(content: bytearray, base: int, site: Site) -> None:
     struct.pack_into(">I", content, at, site.now)
 
 
-def relocate(content: bytearray, base: int, *, table_va: int, runtime_va: int,
-             added: int) -> list[Site]:
-    """Repoint both tables and widen the entry space by `added` records.
+def relocate(content: bytearray, base: int, *, table_va: int, added: int) -> list[Site]:
+    """Repoint the 60-byte table and widen the entry space by `added` records.
+
+    The 68-byte companion stays where it is; `runtime_literals` is why.
 
     -> every site it wrote, so the build can print and the caller can count.
     """
     delta = table_va - TABLE
     sites = [Site(s.va, s.was, s.was + delta, s.what) for s in base_sites(content, base)]
-    delta_runtime = runtime_va - RUNTIME
-    sites += [Site(s.va, s.was, s.was + delta_runtime, s.what)
-              for s in runtime_sites(content, base)]
     sites += [Site(s.va, s.was, s.was + added, s.what) for s in bound_sites(content, base)]
     for site in sites:
         poke(content, base, site)

@@ -3064,10 +3064,15 @@ beside the page-record table at `0x42432c00` and the machine table at
 `0x42432b24`. A runtime companion to the image's 60-byte records, indexed by
 the same entry number -- which is why it shares the `321`.
 
-It is **far cheaper than the first table**: the base appears at only **6 sites**
-across five field offsets (`+0` x2, `+4`, `+20`, `+44`, `+60`), against 56 for
-the parameter table. And the 24 `cmpil #321` sites already cover both, since
-the bound is the entry space rather than either table.
+It looked **far cheaper than the first table**: the base appears at only **6
+sites** across five field offsets (`+0` x2, `+4`, `+20`, `+44`, `+60`), against
+56 for the parameter table.
+
+> **That reading is wrong, and the section below "The companion table has no
+> base" has the measurement.** Those six sites are *entry 0's* fields. The
+> table's initialiser is unrolled and writes **every** entry's addresses as
+> absolute literals -- 902 of them, entries 0 to 320 with no gaps. There is no
+> base, and the table does not move.
 
 **The `+0` code pointers (the last open route).** Every one of the 320 records
 has `+0` in code -- and there are only **51 distinct values** across 320
@@ -3462,3 +3467,69 @@ the screen shows next to that knob is not what the knob set.
 
 That is worth saying plainly before anyone flashes it: **the page is the
 milestone, the values are the next one.**
+
+### The companion table has no base, and the probe that proved it — 2026-09-21
+
+`lfo4-table`'s first two builds relocated the 68-byte companion table by
+patching six literals. `scripts/emu_table_watch.py`, watching both address
+ranges through a boot:
+
+```
+    during boot, old 68-byte: 0 read(s), 10,591 write(s)
+    during boot, new 68-byte: 0 read(s),  5,638 write(s)
+```
+
+**Written in two places, read in neither.** The six patched literals moved the
+*accessor*; something else was still writing to the old address, ten thousand
+times.
+
+Scanning the image for **every** four-byte value inside the old table's span
+says what: **902 literals**, in blocks of five per entry —
+
+```
+pea   <entry + 4>
+pea   <entry + 20>
+clr.l <entry + 0>
+clr.l <entry + 44>
+clr.l <entry + 60>
+```
+
+— covering entries **0 to 320 with no gaps**. The initialiser is **unrolled**.
+The six sites found earlier are simply entry 0's, which is what a search for
+one base finds when there is no base to find.
+
+**So the companion table does not move**, and its bound at `0x400c241c` stays
+at 321 with it: past its end are the RTOS task control blocks (`0x424388ac`,
+from the boot's own `TASK_CREATE` log), and an entry of 321 there would write
+into one. Left alone it clamps to entry 0, the fallback, exactly as an
+out-of-range entry always did. **53 bounds, not 55.**
+
+`csrc/lfo4/prm68.c` is deleted; there was never anything for it to be.
+
+#### What this says about reading a structure from its accessors
+
+Both mistakes this evening are the same mistake. The bound looked like 24 sites
+because the scan only looked at `%d0`. The companion table looked like six
+sites because the search only asked about entry 0. **In each case the method
+answered a narrower question than the one being asked, and answered it
+correctly**, which is why neither looked wrong.
+
+What caught both was the same thing too: a probe that watches the *old*
+addresses and requires silence. The first build read the old parameter table
+zero times and that was the pass; the same run wrote to the old companion table
+10,591 times and that was the failure. Neither number could have been guessed
+from the image.
+
+#### And the accessor the probe was calling returns a predicate
+
+`0x400dbeb6` reads record `+8` and then returns `5 <= group <= 10` as 0 or 1:
+
+```
+movel %a0@(0,%d0:l),%d0 ; subql #5,%d0 ; moveq #5,%d1
+cmpl %d0,%d1 ; scc %d0 ; mvsb %d0,%d0 ; negl %d0
+```
+
+So the 292 entries that "differed" from the group were the probe's expectation
+being wrong, not the firmware's answer. The probe now calls `0x400dc11a`, which
+returns record `+40` — the field that is **unique across all 320 records**, so
+a wrong answer names the record it came from.

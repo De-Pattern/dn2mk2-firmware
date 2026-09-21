@@ -30,20 +30,32 @@ def stock():
 
 def test_the_site_counts_are_what_was_measured(stock):
     assert len(paramtable.base_sites(stock, BASE)) == sum(paramtable.EXPECTED_BASES.values())
-    assert len(paramtable.runtime_sites(stock, BASE)) == paramtable.EXPECTED_RUNTIME
     assert len(paramtable.bound_sites(stock, BASE)) == paramtable.EXPECTED_BOUNDS
 
 
+def test_the_companion_table_has_no_base_to_move(stock):
+    """Its initialiser is unrolled: every entry's address is its own literal.
+
+    Six literals mention entry 0, which is what a search for one base finds and
+    what this project recorded for a day. There are 902, covering every entry
+    from 0 to 320 with no gaps -- so patching the six moves the accessor and
+    leaves the initialiser writing where the table used to be.
+    """
+    found = paramtable.runtime_literals(stock, BASE)
+    assert len(found) == paramtable.EXPECTED_RUNTIME
+    covered = {(struct.unpack_from(">I", stock, va - BASE)[0] - paramtable.RUNTIME)
+               // paramtable.RUNTIME_STRIDE for va in found}
+    assert covered == set(range(paramtable.RUNTIME_ENTRIES))
+
+
 def test_every_site_holds_what_it_is_asserted_to_hold(stock):
-    for site in (paramtable.base_sites(stock, BASE) + paramtable.runtime_sites(stock, BASE)
-                 + paramtable.bound_sites(stock, BASE)):
+    for site in paramtable.base_sites(stock, BASE) + paramtable.bound_sites(stock, BASE):
         assert struct.unpack_from(">I", stock, site.va - BASE)[0] == site.was
 
 
 def test_relocating_changes_only_those_sites(stock):
     buf = bytearray(stock)
-    sites = paramtable.relocate(buf, BASE, table_va=0x46900000,
-                                runtime_va=0x46A00000, added=10)
+    sites = paramtable.relocate(buf, BASE, table_va=0x46900000, added=10)
     changed = {i for i in range(len(stock)) if stock[i] != buf[i]}
     covered = {site.va - BASE + k for site in sites for k in range(site.width)}
     assert changed <= covered
@@ -51,8 +63,7 @@ def test_relocating_changes_only_those_sites(stock):
 
 def test_the_bound_grows_by_exactly_the_records_added(stock):
     buf = bytearray(stock)
-    for site in paramtable.relocate(buf, BASE, table_va=0x46900000,
-                                    runtime_va=0x46A00000, added=10):
+    for site in paramtable.relocate(buf, BASE, table_va=0x46900000, added=10):
         if site.what.startswith("bound"):
             assert site.now - site.was == 10
 
@@ -117,7 +128,8 @@ def test_the_slot_filing_loop_keeps_its_bound(stock):
     end of three of them, and the byte after the first is the filter table the
     same routine zeroes two calls earlier. It boots and it draws.
     """
-    va = next(iter(paramtable.NOT_THIS_TIME))
+    va = 0x400DC7F0
+    assert va in paramtable.NOT_THIS_TIME
     at = va - BASE
     assert stock[at:at + 6] == b"\x0c\x82\x00\x00\x01\x41"          # cmpil #321,%d2
     assert stock[at - 4:at] == b"\x45\xea\x00\x3c"                  # lea %a2@(60),%a2

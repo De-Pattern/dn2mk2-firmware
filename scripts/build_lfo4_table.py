@@ -45,8 +45,8 @@ ADDED = lfo4records.GROUP_SIZE
 OUT = ROOT / "out/lfo4-table"
 SYX = ROOT / "00_Resources/02_Builds/lfo4-table_DN2_1.11.syx"
 
-SOURCES = bridge.SOURCES + ("prm68.c",)
-ENTRIES = slots.ENTRIES + ["lfo4_prm68"]
+SOURCES = bridge.SOURCES
+ENTRIES = slots.ENTRIES
 
 # The table's own chunk carries one string after the records: the page label
 # the ten new ones point at. It is four characters and the image has no `LFO4`
@@ -69,21 +69,21 @@ def chunks(stock: bytes):
 
 
 def relocate(content, code):
-    """Repoint both tables and widen the entry space, then say what it did."""
-    runtime_va = code["lfo4_prm68"]
-    sites = paramtable.relocate(content, BASE, table_va=TABLE_VA,
-                                runtime_va=runtime_va, added=ADDED)
+    """Repoint the table and widen the entry space, then say what it did."""
+    del code
+    sites = paramtable.relocate(content, BASE, table_va=TABLE_VA, added=ADDED)
     kinds = {}
     for site in sites:
         kinds[site.what.split(",")[0]] = kinds.get(site.what.split(",")[0], 0) + 1
-    print(f"part 5 -- the parameter table\n"
-          f"  60-byte records {paramtable.TABLE:#010x} -> {TABLE_VA:#010x}, "
-          f"{paramtable.COUNT} + {ADDED} records\n"
-          f"  68-byte runtime {paramtable.RUNTIME:#010x} -> {runtime_va:#010x}, "
-          f"{paramtable.COUNT + ADDED + 1} entries\n"
-          f"  entry space {paramtable.COUNT + 1} -> {paramtable.COUNT + ADDED + 1}")
+    print("part 5 -- the parameter table")
+    print(f"  60-byte records {paramtable.TABLE:#010x} -> {TABLE_VA:#010x}, "
+          f"{paramtable.COUNT} + {ADDED} records")
+    print(f"  entry space {paramtable.COUNT + 1} -> {paramtable.COUNT + ADDED + 1}, "
+          "except at the two sites it must not be")
     for kind, n in sorted(kinds.items()):
         print(f"    {n:>3}  {kind}")
+    for va, why in sorted(paramtable.NOT_THIS_TIME.items()):
+        print(f"    {va:#010x} left at {paramtable.COUNT + 1}: {why}")
 
 
 def describe(stock: bytes) -> None:
