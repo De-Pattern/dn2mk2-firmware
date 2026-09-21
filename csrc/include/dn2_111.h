@@ -80,6 +80,89 @@ typedef unsigned char u8;
 #define DN2_GET_ZERO   0x4003719A      /* clr.l %d0, then the epilogue */
 #define DN2_GET_RETURN 0x4003719C      /* the epilogue, with the answer in d0 */
 
+/* Step 4d: the companion table, and why LFO4's page drew plain dials.
+ *
+ * `0x400c2418` is `entry -> 0x4243325c + 68 * entry`, bounded at 321 and
+ * clamping anything above to entry 0. Drawing LFO4's page asks it for entries
+ * 321-329 -- the right ones, the page's own eight -- and every one of the 96
+ * lookups answered `0x4243325c`, the fallback (`scripts/emu_lfo4_widget.py`).
+ * So each parameter got the fallback's widget: a dial with no value, no `512`
+ * in a box, no waveform glyph, where LFO3's page has all three.
+ *
+ * The table cannot move -- its initialiser is unrolled and writes 902 absolute
+ * addresses -- so the accessor is diverted for LFO4's entries instead, to ten
+ * rows this build owns. Ten bytes are replaced and both instructions replayed.
+ */
+#define DN2_COMPANION        0x4243325C   /* the table itself, 321 x 68 */
+#define DN2_COMPANION_STRIDE 68
+#define DN2_COMPANION_BOUND  0x400C2418   /* the ten bytes replaced */
+#define DN2_COMPANION_AFTER  0x400C2422   /* scs %d1, where the stock code resumes */
+
+/* LFO3's ten entries, the ones LFO4's are copied from. Entry = index + 1, and
+ * LFO3's records are indices 94..103. */
+#define LFO3_ENTRY0      95
+#define LFO4_ENTRYN      (LFO4_ENTRY0 + 10)
+
+/* Step 4e: the waveform preview, which is re-coded per LFO.
+ *
+ * `0x4010e1f4` onward is three near-identical blocks selected by an LFO index
+ * in `%d0` -- 0, 1, 2 -- each calling `0x4006538e` five times with its own
+ * LFO's **entry numbers written as literals**:
+ *
+ *     index 0:  79, 81, 82, 75, 83      WAVE, SPH, MODE, SPD, DEP
+ *     index 1:  89, 91, 92, 85, 93
+ *     index 2:  99, 101, 102, 95, 103
+ *
+ * Anything else falls to `0x4010e2f0` and draws no preview -- which is why
+ * LFO4's `SPH` came out a plain dial where LFO1-3 have the phase braces around
+ * the waveform. **The dispatch already computes 3 for LFO4**
+ * (`scripts/emu_lfo4_wave.py`); there is simply no block for it.
+ *
+ * So a fourth block is added, transcribing the firmware's own with five
+ * constants changed, and the fallback's first eight bytes become a jump to it.
+ */
+#define DN2_WAVE_FALLBACK 0x4010E2F0   /* the eight bytes replaced */
+#define DN2_WAVE_CALL     0x4006597A   /* what the fallback does, replayed */
+#define DN2_WAVE_AFTER    0x4010E2F8
+#define DN2_WAVE_TAIL     0x4010E2C6   /* the common tail all three blocks reach */
+#define DN2_WIDGET_GET    0x4006538E   /* (page, entry, buffer) -> the drawn value */
+#define DN2_WAVE_INDEX    3            /* what the dispatch hands LFO4 */
+
+/* LFO4's five, in the order the blocks call for them. */
+#define LFO4_E_WAVE  (LFO4_ENTRY0 + 4)
+#define LFO4_E_SPH   (LFO4_ENTRY0 + 6)
+#define LFO4_E_MODE  (LFO4_ENTRY0 + 7)
+#define LFO4_E_SPD   (LFO4_ENTRY0 + 0)
+#define LFO4_E_DEP   (LFO4_ENTRY0 + 8)
+
+/* The parameter table as it sits in the image, for reading a record's own
+ * default at init. `lfo4-table` relocates this table, but the image's copy is
+ * still there and still correct -- and it is the one guaranteed to be loaded
+ * when `lfo4_init` runs, which the relocated chunk is not. */
+#define DN2_PARAM_TABLE   0x401F7FC8
+#define DN2_PARAM_STRIDE  60
+#define DN2_PARAM_DEFAULT 24           /* the record's default value */
+#define LFO3_RECORD0      94           /* LFO3's group of ten starts here */
+
+/* Where the live sound container actually is, which is **not** a constant.
+ *
+ * The firmware's own routine for it, `0x40025bda(track)`:
+ *
+ *     movel %sp@(4),%d0 ; movel #1163,%d1 ; mulsl %d1,%d0
+ *     addil #52,%d0
+ *     addl 0x800052a0,%d0        <- the base, read from a global
+ *
+ * `csrc/lfo4/bridge.c` used to compute the same thing from `LFO4_KIT`, a
+ * constant measured once out of `ui1200M` -- and the snapshot agreed with it
+ * only because that is where it was measured. On the instrument the container
+ * moves, and then every turn lands in the table under the firmware's key while
+ * every tick looks one up under ours: the page works, sounds save, and nothing
+ * modulates.
+ */
+#define DN2_LIVE_CONTAINER 0x800052A0   /* holds the container's address */
+#define DN2_SOUND_AT       52           /* the gate's own `addil #52` */
+#define DN2_SOUND_STRIDE   1163         /* and its `movel #1163` */
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8

@@ -12,6 +12,14 @@ Nothing is laid out by hand except the table entry. The sound address comes from
 the build's own `lfo4_sound_of`, so the harness and the firmware agree on the
 track -> sound map by construction rather than by two copies of the arithmetic.
 
+**And that is this harness's blind spot, found on the instrument.** Agreeing by
+construction is agreeing about nothing: the panel writes into the table under
+the sound the *firmware* hands the setter, and if the bridge's map differs the
+page works and the engine hears silence -- which is what happened, because the
+bridge's map came from a constant measured out of a snapshot.
+`scripts/emu_lfo4_chain.py` is this test with the address taken from the
+firmware's own routine instead, and it is the one to run.
+
 Then the same question again after an edit: `ext_set` bumps `ext_generation`,
 so the next frame must pick the new value up without anything being told.
 """

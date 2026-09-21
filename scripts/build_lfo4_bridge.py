@@ -46,7 +46,6 @@ from dnfw.patch import area, cbuild, loader                # noqa: E402
 
 STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
 MAIN_OS, BASE = 3, 0x40000400
-KIT = 0x4210C08C                  # the live container (docs/lfo4-build-plan.md)
 SRC = ROOT / "csrc"
 OUT = ROOT / "out/lfo4-bridge"
 SYX = ROOT / "00_Resources/02_Builds/lfo4-bridge_DN2_1.11.syx"
@@ -83,7 +82,8 @@ def cave_source(table_va: int, refresh: int) -> str:
     return source
 
 
-def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=None) -> int:
+def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=None,
+         defines=None) -> int:
     """Build it. `extra` are further site patches, each `f(content, code)`.
 
     The arguments exist so a build that is *this one plus a site* -- step 4's
@@ -104,12 +104,13 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     # but stubs, which is all a gap in someone else's code should ever hold.
     code = cbuild.build([SRC / "lfo4" / name for name in sources], base=CODE_VA,
                         include=[SRC / "include"], entries=entries + ["lfo4_rows"],
-                        defines={"LFO4_KIT": f"{KIT:#x}u"})
+                        defines=defines)
     table_va = code["lfo4_rows"]
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
     content = loader.install(stock, [(area.CODE, chunk), *(chunks(stock) if chunks else ())])
     print(f"part 1 -- C: {len(code.image)} B at {CODE_VA:#010x}, {code.bss:,} B of state; "
-          f"rows at {table_va:#010x}, kit {KIT:#010x}")
+          f"rows at {table_va:#010x}; the live container is read from "
+          f"0x800052a0, not built in")
 
     print("part 2 -- the four C hook sites")
     for name, va, stub, replay, n in SITES:

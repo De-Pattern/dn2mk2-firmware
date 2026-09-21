@@ -3693,3 +3693,264 @@ the converters as well.
 `After.call` this evening. That change touches every harness built on
 `emu_boot_engine`, and this run is one of them behaving exactly as it did
 before.
+
+### Step 4d: the page drew empty dials, and the companion table is why — 2026-09-21
+
+The first picture of the fourth page settled a great deal at once, and raised
+one thing nothing else had.
+
+`scripts/emu_lfo4_screens.py` installs the build into `ui1200M` and taps
+`[MOD]` five times. **This is valid now and was not this morning:** a snapshot
+has already built every runtime table from the *stock* parameter table, and
+while `lfo4-table` also relocated the 68-byte companion the two disagreed --
+the snapshot had filled one address and the build read another. The companion
+does not move any more, and the 60-byte copy is byte-identical for all 320
+stock records, so everything the snapshot computed still holds.
+
+```
+  before any tap: pages [4, 5, 6], swapped 0
+  [MOD] x1: pages [4, 5, 6, 37], showing index 0
+  [MOD] x4: pages [4, 5, 6, 37], showing index 3
+  [MOD] x5: pages [4, 5, 6, 37], showing index 0
+```
+
+**The header reads `MOD (4/4)`**, the labels are `SPD MULT FADE DEST` over
+`WAVE SPH MODE DEP`, and `[MOD]` cycles past the fourth page back to the first.
+Nothing had to be taught that there are four pages.
+
+#### And every widget was empty
+
+Beside LFO3's page -- `512` in a box for `MULT`, `SYN PD2` for `DEST`, a square
+glyph for `WAVE` -- LFO4's eight were identical blank circles. Not wrong
+values: **no widget at all**, the fallback's.
+
+`scripts/emu_lfo4_widget.py` hooks the companion-table accessor while each page
+draws:
+
+```
+  [MOD] x3: entries [10, 95, 96, 97, 98, 99, 101, 102, 103]
+  [MOD] x4: entries [10, 321, 322, 323, 324, 325, 327, 328, 329]
+            96 of them answered 0x4243325c -- entry 0, the fallback
+```
+
+**The page asked the right questions.** Entries 321-329, its own eight plus the
+shared entry 10, in the same shape LFO3 asks for 95-103. The accessor's bound
+is 321 and clamps everything above it to entry 0, so each parameter was handed
+the fallback row and drew the fallback's widget.
+
+#### Ten rows, and the same divert shape a third time
+
+The table cannot move -- 902 absolute literals, no base -- so the accessor is
+diverted for LFO4's ten entries and answers from rows this build owns, copied
+whole from LFO3's at first use. Copied, because the fields are pointers to
+objects the UI built at startup and this code has never had to learn their
+layout; at first use rather than at init, because at init the firmware has not
+filled them yet.
+
+With it, the fourth page draws `BPM 1` in a box for `MULT`, a triangle glyph
+for `WAVE`, a curve for `MODE`, `---` for an unassigned `DEST`, and dials with
+their `- +` marks for `SPD`, `SPH` and `DEP`. The same widget kinds LFO3 has,
+showing LFO4's own values.
+
+#### The count assertion earned its keep
+
+Adding this broke the build with `expected 53 bound sites, found 55` -- and
+those two extra sites were **in our own code**. `lfo4_comp_stub` compares
+against `LFO4_ENTRY0`, which is 321, and assembles to exactly the `cmpil #321`
+the site scan hunts for. A build's content is longer than stock: the appended
+area, with this project's compiled C in it, follows.
+
+Without the assertion the build would have "raised the bound" inside its own
+stub, turning `LFO4_ENTRY0` into 331 and making the companion divert decline
+every entry it exists for -- silently, back to empty dials. The scans stop at
+`STOCK_END` now, and a test holds them there.
+
+#### And the same *structural* mistake, three times in one evening
+
+`hooks.S` is one assembly source; `--gc-sections` works on sections; so every
+stub in a file is kept whenever any stub in it is an entry, and then every
+symbol those stubs call must link -- in **every** build that compiles the file.
+
+- this morning: step 4a's `lfo4_set_stub` had broken three tests since it was
+  written, because the test's source list lacked `setter.c`;
+- tonight: `lfo4_get_stub` in `hooks.S` broke `lfo4-table` and `lfo4-page`;
+- an hour later: `lfo4_comp_stub` in `pagehooks.S` broke them again.
+
+The rule, and it is now written at the top of `valuehooks.S`: **a stub belongs
+in a file that only the builds patching its site compile.** `hooks.S` is the
+sites every LFO4 build has, `pagehooks.S` is the page's two, `valuehooks.S` is
+`lfo4-value`'s two. The test fixture compiles the whole directory, so it cannot
+be the thing that notices.
+
+### Step 4e: the waveform preview is re-coded per LFO — 2026-09-21
+
+With step 4d the fourth page drew real widgets, and the owner, looking at it
+beside LFO3's, said it was still not right. It was not: **`SPH` drew a plain
+dial where LFO1-3 draw the start-phase braces around the waveform.**
+
+Two wrong guesses first, both cheap and both worth recording:
+
+- **The companion row was copied; maybe it should be referenced.** The owner's
+  reading was that the glyph is reused between the LFOs rather than owned by
+  each. Changing `lfo4_companion` from a copy of LFO3's rows to LFO3's rows
+  themselves changed **nothing on screen**. The change is kept -- it is simpler,
+  and it removes 680 bytes of BSS and the question of when to copy -- but it
+  was not the fault.
+- **Maybe the values differ.** Giving LFO4 exactly LFO3's eight values made
+  seven widgets match exactly: the same `512`, the same `SYN PD2`, the same
+  square waveform. `SPH` was still a plain dial. So it was never a value.
+
+#### What it was, found by diffing what the two renders execute
+
+`UC_HOOK_BLOCK` over one `[MOD]` tap each, and the difference of the two sets:
+
+```
+  page 3 blocks 2437, page 4 blocks 2225
+  reached while drawing LFO3 and never while drawing LFO4: 12
+    0x4010e00a  0x4010e010  0x4010e27e  0x4010e296
+    0x4010e2a2  0x4010e2ae  0x4010e2be  ...
+  and the reverse: 0x4010e2f0 among them
+```
+
+`0x4010e1f4` onward is **three near-identical blocks, one per LFO**, chosen by
+an index in `%d0`, each calling `0x4006538e` five times with its own LFO's
+entry numbers **written as literals**:
+
+| index | block | WAVE, SPH, MODE, SPD, DEP |
+|---|---|---|
+| 0 | `0x4010e1f4` | 79, 81, 82, 75, 83 |
+| 1 | `0x4010e22e` | 89, 91, 92, 85, 93 |
+| 2 | `0x4010e27e` | 99, 101, 102, 95, 103 |
+| 3 | — falls to `0x4010e2f0` | none |
+
+**The owner's word for it was the right one: it is re-coded, not reused.** The
+glyph drawing is shared; the five entry numbers that feed it are typed out
+three times.
+
+`scripts/emu_lfo4_wave.py` then asked the only question that decides the fix:
+
+```
+  [MOD] x3: the dispatch saw index [2]
+  [MOD] x4: the dispatch saw index [3], fell through with [3]
+```
+
+**The dispatch already computes 3 for LFO4.** There is simply no block for it.
+
+#### A fourth block, asserted to be the third
+
+`lfo4_wave_four` in `csrc/lfo4/valuehooks.S` is LFO3's block transcribed, and
+the build proves it rather than asking to be believed: it takes the firmware's
+own 72 bytes at `0x4010e27e`, substitutes the five `pea` immediates
+(99→325, 101→327, 102→328, 95→321, 103→329), and **refuses to build unless the
+assembler produced exactly that**. A transcription that had drifted into a
+paraphrase would still assemble and would draw something subtly wrong.
+
+The fallback's first eight bytes become a jump to a stub that takes index 3 and
+replays them for everything else.
+
+#### The result, measured rather than admired
+
+Given LFO3's own eight values, LFO4's page and LFO3's page are compared frame
+to frame -- 1,024 bytes of a 128x64 panel:
+
+```
+  1,011 identical, 13 differ
+  at byte offsets [343, 351, 359, 367, 1001, 1002, 1003, 1009, 1010, 1011, 1017, 1018, 1019]
+```
+
+Rendered, those thirteen bytes are **the digit in `MOD (3/4)` versus `(4/4)`,
+and the page-position dots down the right edge.** Everything else -- all eight
+widgets, the waveform preview, the phase braces -- is the same picture.
+
+That is the strongest statement available short of the instrument: *with the
+same values, the fourth LFO's page is the third LFO's page.*
+
+### What the instrument said, and what each report turned out to be — 2026-09-21 evening
+
+`lfo4-value` was flashed. Five reports, and they sort into three kinds.
+
+#### Fixed: the defaults
+
+> "the FADE default in LFO4 is not 0 but -64" ... "also DEPTH is -128"
+
+Both are bipolar with a record default of `0x4000`, which displays as 0, so a
+stored **zero** lands at the bottom of the range. The arithmetic matches the
+report exactly, and two more were wrong the same way and less visibly: `SPD` at
+0 instead of 112, `MULT` at the lowest multiplier instead of the third.
+
+The design already handled this -- `ext_add` seeds from `ext_default`,
+`ext_get` falls back to it, and `lfo4_on_load` drops the entry for a sound
+carrying nothing *so that* it reads the defaults. **The array all three rely on
+was never filled.** It held the zeros BSS gives.
+
+`lfo4_init` fills it from **LFO3's own records** rather than from numbers typed
+into a file: LFO4's ten are copies of LFO3's, so it cannot disagree with them.
+
+#### Fixed, but not proved to be the cause: the live container
+
+> "LFO4 doesn't modulate anything ... no matter the DEP or destination"
+
+The extension table is keyed by the live sound's address, and the two ends
+learned it differently: the setter from the firmware's own virtual call, the
+bridge by computing `LFO4_KIT + 52 + track * 1163` from a constant measured
+once out of `ui1200M`. The firmware's own routine reads the base from a global:
+
+```
+0x40025bda  movel %sp@(4),%d0 ; movel #1163,%d1 ; mulsl %d1,%d0
+            addil #52,%d0
+            addl 0x800052a0,%d0        <- the base
+```
+
+`bridge.c` does the same now and `LFO4_KIT` is gone from the build entirely.
+`scripts/emu_lfo4_container.py` moves that global and checks `lfo4_sound_of`
+follows it.
+
+**It is not proved to be the silence.** In the snapshot *and* in a from-reset
+boot the pointer equals the constant -- `scripts/emu_lfo4_sound.py` hooked 2,192
+real sound loads and all sixteen of the bridge's addresses were among them. The
+constant is wrong in principle and happened to be right here.
+
+**The harness that should have caught it said so in its own docstring.**
+`emu_lfo4_bridge.py`: *"the sound address comes from the build's own
+`lfo4_sound_of`, so the harness and the firmware agree on the track -> sound map
+by construction"*. Agreeing by construction is agreeing about nothing.
+`scripts/emu_lfo4_chain.py` is that test with the address taken from the
+firmware's routine instead, so the two derivations can disagree; seven checks
+pass, including that they do not.
+
+`lfo4-forcerow` settles the rest in one flash: `lfo4_refresh` discards the
+lookup's answer and hands every track `tick7`'s row, the one combination
+already proved audible on the instrument. Sweeps -> the lookup is at fault.
+Silent -> the engine path broke when the bridge replaced `tick7`'s fixed table
+with a call, which has **never** produced an audible sweep on the instrument:
+the bridge's own hardware test ran with an empty table, and passing meant
+silence.
+
+#### Located, not fixed: the UI written three times over
+
+> "random wave have phase instead of slew in LFO4"
+
+`0x4010da30` decides the substitution. It reads the page index from the mode
+object's `+144`, clamps it to **0..2** in two places, and indexes a three-entry
+table at `0x40205454` holding exactly **`{80, 90, 100}`** -- the three `SLEW`
+entry numbers. Page 4 never enters that routine at all, so it gives up earlier
+than the clamp, at a gate not yet found.
+
+> "browsing destinations doesn't open the destination UI ... 49 reads err, 65
+> is also err ... 100 to 127 are also errors" and "the destinations are not in
+> order ... it starts with MOD1"
+
+The `err` ids and the ordering are **symptoms of the browser not opening**: with
+no browser the value is dialled raw, straight past the slots that have no
+parameter and past the mirror's 101. Hooking what looked like the browser's
+machinery -- the list builder, the shared entry, the three mask thunks -- fired
+zero times on *both* pages, so it opens by a route not yet found. The model was
+wrong, not the measurement.
+
+**The pattern, and it is the headline for what remains.** The waveform preview
+was three code blocks with literal entry numbers. The `SLEW` substitution is a
+three-entry table with the index clamped to 2. The `DEST` browser's mask is
+three thunks in three descriptors. **The firmware's LFO UI is written three
+times over**, and a fourth page is not one change but a long tail of per-LFO
+hard-coding -- each found the same way, by diffing what two renders execute,
+and each extended the same way.
