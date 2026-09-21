@@ -32,8 +32,14 @@ SLOTS, PARAMS = 256, 8
 def linked():
     if not cbuild.available():
         pytest.skip("no m68k GCC")
+    # `setter.c` is here for the same reason the builds carry it: `hooks.S` is
+    # one assembly source and `--gc-sections` works on sections, so its
+    # `lfo4_set_stub` is kept whenever any other stub in the file is an entry
+    # -- and that stub calls `lfo4_on_set`. Step 4a added it and this list was
+    # not updated, so these three tests had been erroring since, which is a
+    # reminder that a suite is only run when something runs it.
     sources = [SRC / "lfo4" / name
-               for name in ("init.c", "ext.c", "carry.c", "store.c", "hooks.S")]
+               for name in ("init.c", "ext.c", "carry.c", "store.c", "setter.c", "hooks.S")]
     return cbuild.build(sources, base=CODE_VA, include=[SRC / "include"], entries=ENTRIES)
 
 
