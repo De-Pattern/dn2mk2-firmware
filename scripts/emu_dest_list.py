@@ -63,8 +63,14 @@ def main() -> int:
         print(f"    opened:  {panel.screen(f'lfo{page}-1-opened')}")
         panel.push_and_turn(DEST_ENCODER, -30, times=args.scroll)
         print(f"    top:     {panel.screen(f'lfo{page}-2-top')}")
-        panel.push_and_turn(DEST_ENCODER, 30, times=1)
-        print(f"    top + 1: {panel.screen(f'lfo{page}-3-topplus')}")
+        # The browser is ordered by CATEGORY, not by slot number -- LFO1's top
+        # is META/None then SYN, and LFO2's is the same. So the LFO entries are
+        # in a category of their own further down, and the end of the list is
+        # where to look. Both earlier guesses about where they sat were wrong.
+        panel.push_and_turn(DEST_ENCODER, 30, times=args.scroll * 2)
+        print(f"    end:     {panel.screen(f'lfo{page}-4-end')}")
+        panel.push_and_turn(DEST_ENCODER, -30, times=1)
+        print(f"    end - 1: {panel.screen(f'lfo{page}-5-endless')}")
         panel.tap(NO)                             # leave the browser, do not commit
         print(f"    after NO: {panel.screen(f'lfo{page}-9-closed')}")
 
