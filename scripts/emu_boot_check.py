@@ -122,15 +122,25 @@ def main() -> int:
         return 2
 
     started = time.time()
-    # The build writes `symbols.json` beside its section, so the routines to
-    # watch come from the build itself rather than a list kept in step by hand.
+    # The build writes its routines beside its section, so the list comes from
+    # the build itself rather than one kept in step by hand. `routines.json`
+    # is `nm`'s code symbols only; `symbols.json` is everything, and filtering
+    # it by name is the older, worse answer -- it reported counters as
+    # routines that never ran, which is true of a counter and says nothing.
     entries = []
-    beside = os.path.join(os.path.dirname(args.image), "symbols.json")
+    folder = os.path.dirname(args.image)
+    beside = os.path.join(folder, "routines.json")
+    fallback = os.path.join(folder, "symbols.json")
     if os.path.exists(beside):
         sym = {k: int(v, 16) for k, v in json.load(open(beside)).items()}
+        entries = sorted((k, v) for k, v in sym.items() if not k.endswith("_displaced"))
+    elif os.path.exists(fallback):
+        sym = {k: int(v, 16) for k, v in json.load(open(fallback)).items()}
         entries = sorted((k, v) for k, v in sym.items()
                          if k.startswith(("lfo4_", "dnfw_")) and not k.endswith("_displaced")
                          and not k.startswith("lfo4_size"))
+        print("  no routines.json: falling back to filtering symbols.json by name, "
+              "which lists data as routines.")
     else:
         print("  no symbols.json beside the image: coverage cannot be reported, "
               "and a boot alone does not clear a build.")

@@ -24,7 +24,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .assemble import AssemblerMissing, AssemblyError, Toolchain, _clean, _find_native
@@ -87,12 +87,24 @@ class CToolchain:
 
 @dataclass(frozen=True)
 class Linked:
-    """What a build produced: `image` loads at `base`, then `bss` zero bytes."""
+    """What a build produced: `image` loads at `base`, then `bss` zero bytes.
+
+    `kinds` is `nm`'s own letter per symbol -- `t`/`T` for code, `b`/`d`/`r`
+    for data. It exists because the boot gate reports which of a build's
+    routines never ran, and a counter listed beside them as "NOT EXERCISED" is
+    noise in the one place this project cannot afford any: `lfo4-table`'s gate
+    named 24 symbols, and 15 of them were variables.
+    """
 
     base: int
     image: bytes
     bss: int
     symbols: dict[str, int]
+    kinds: dict[str, str] = field(default_factory=dict)
+
+    def routines(self) -> dict[str, int]:
+        """-> only the symbols that are code, and so can be said to have run."""
+        return {n: a for n, a in self.symbols.items() if self.kinds.get(n, "").lower() == "t"}
 
     def __getitem__(self, name: str) -> int:
         return self.symbols[name]
@@ -209,11 +221,12 @@ def build(sources: list[Path], *, base: int, entries: list[str] = (),
         r = tool.run(tool.nm, ["--defined-only", tool.path_for(elf)])
         if r.returncode:
             raise AssemblyError(_clean(r.stderr) or "nm failed")
-        symbols = {}
+        symbols, kinds = {}, {}
         for line in r.stdout.splitlines():
-            m = re.match(r"([0-9a-fA-F]+) \w (\S+)$", line.strip())
+            m = re.match(r"([0-9a-fA-F]+) (\w) (\S+)$", line.strip())
             if m:
-                symbols[m.group(2)] = int(m.group(1), 16)
+                symbols[m.group(3)] = int(m.group(1), 16)
+                kinds[m.group(3)] = m.group(2)
 
         image = binout.read_bytes() if binout.exists() else b""
         want = symbols["__image_end"] - base
@@ -223,4 +236,5 @@ def build(sources: list[Path], *, base: int, entries: list[str] = (),
         missing = [e for e in entries if e not in symbols]
         if missing:
             raise AssemblyError(f"entries not defined: {', '.join(missing)}")
-        return Linked(base, image, symbols["__bss_end"] - symbols["__bss_start"], symbols)
+        return Linked(base, image, symbols["__bss_end"] - symbols["__bss_start"],
+                      symbols, kinds)
