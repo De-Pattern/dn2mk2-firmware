@@ -106,10 +106,9 @@ RAM_TENANTS = [
      "NOIS per-LFO loop state: 1,024 keys x 8 bytes", "scripts/build_lfo_waveshapes.py"),
     (0x46750000, 0x46750000 + 3 * 112, "lfo-waveshapes8 / lfo-wavetable4",
      "rendered glyph tiles, 112 bytes per new waveform", "scripts/lfo_wave_glyph.py"),
-    (0x46800000, 0x46800000 + 0x71C4 + 0x2000, "lfo4-table / lfo4-page",
-     "the compiled C, then its BSS: the extension table, the per-track rows and "
-     "the relocated 68-byte runtime parameter table (331 x 68)",
-     "scripts/build_lfo4_ext.py, csrc/lfo4/prm68.c"),
+    (0x46800000, 0x46800000 + 0x2800, "lfo4-table / lfo4-page",
+     "the compiled C, then its BSS: the extension table and the per-track rows",
+     "scripts/build_lfo4_ext.py"),
     (0x46900000, 0x46900000 + 60 * 330 + 8, "lfo4-table / lfo4-page",
      "the relocated parameter table: 320 stock records, LFO4's ten, and the "
      "page label they point at", "scripts/build_lfo4_table.py"),
