@@ -25,7 +25,10 @@ from emulib.machine import SNAP, Machine
 from emulib.panel import MOD, Panel
 from unicorn import UC_HOOK_CODE
 
-BUILD = "/mnt/d/01_Code/Z_Personal/dn2_firmware/out/lfo4-value"
+# Which build to look at. `lfo4-value` is where the fault was measured;
+# `DT2_BUILD=out/lfo4-ui` is where the fix is checked with the same probe.
+BUILD = os.path.join("/mnt/d/01_Code/Z_Personal/dn2_firmware",
+                     os.environ.get("DT2_BUILD", "out/lfo4-value"))
 
 # `moveq #78` ... `#88` ... `#98`, the three `DEST` entries as literals.
 GATES = (0x400397DA, 0x40039A9A, 0x40039CBC, 0x40039EBC, 0x400643C0, 0x40066D5C)

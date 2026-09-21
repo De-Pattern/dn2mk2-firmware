@@ -26,7 +26,10 @@ from emulib.panel import MOD, Panel
 from unicorn import UC_HOOK_CODE
 from unicorn.m68k_const import UC_M68K_REG_A2, UC_M68K_REG_D0, UC_M68K_REG_D2
 
-BUILD = "/mnt/d/01_Code/Z_Personal/dn2_firmware/out/lfo4-value"
+# Which build to look at. `lfo4-value` is where the fault was measured;
+# `DT2_BUILD=out/lfo4-ui` is where the fix is checked with the same probe.
+BUILD = os.path.join("/mnt/d/01_Code/Z_Personal/dn2_firmware",
+                     os.environ.get("DT2_BUILD", "out/lfo4-value"))
 
 GATE = 0x4010DB18          # moveq #81,%d0 -- %d2 holds the entry being drawn
 TAKEN = 0x4010DB2E         # the entry was one of the three
