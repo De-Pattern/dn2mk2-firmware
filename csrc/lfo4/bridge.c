@@ -86,5 +86,40 @@ u32 lfo4_refresh(u32 track)
     values = ext_find(sound);
     for (k = 0; k < EXT_PARAMS; k++)
         ((u16 *)row)[k] = values ? values[k] : ext_default[k];
+#ifdef LFO4_FORCE_ROW
+    /* **A bisect switch, off in every shipped build.**
+     *
+     * The instrument reports a fourth page that works and modulates nothing.
+     * Two halves could be at fault and the emulator cannot separate them: the
+     * lookup above (does the table hold what the panel wrote, under the key
+     * the tick asks for?) or everything below it (do the evaluator stubs
+     * actually turn a row into sound?).
+     *
+     * With this defined the lookup's answer is discarded and every track gets
+     * `tick7`'s row -- the one combination already proved audible on the
+     * instrument. If that sweeps, the engine path is fine and the lookup is
+     * the fault; if it does not, the engine path broke when the bridge
+     * replaced tick7's fixed table with a call.
+     *
+     * It is deliberately *after* the lookup, so the lookup still runs and its
+     * counters still move: a build that crashed in `ext_find` would not be
+     * silently exonerated by skipping it.
+     */
+    {
+        static const u16 forced[EXT_PARAMS] = {
+            0x7000,     /* SPD  -- fast */
+            0x0800,     /* MULT -- middle, not the slowest: tick7's lesson */
+            0x4000,     /* FADE -- neutral */
+            76 << 8,    /* DEST -- the slot tick7 swept audibly on hardware */
+            0x0100,     /* WAVE -- a continuous shape */
+            0x0000,     /* SPH */
+            0x0000,     /* MODE */
+            0x7FFE,     /* DEP  -- maximum */
+        };
+
+        for (k = 0; k < EXT_PARAMS; k++)
+            ((u16 *)row)[k] = forced[k];
+    }
+#endif
     return row;
 }

@@ -82,7 +82,8 @@ def cave_source(table_va: int, refresh: int) -> str:
     return source
 
 
-def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=None) -> int:
+def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=None,
+         defines=None) -> int:
     """Build it. `extra` are further site patches, each `f(content, code)`.
 
     The arguments exist so a build that is *this one plus a site* -- step 4's
@@ -102,7 +103,8 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     # instead of being told to it -- and the cave goes back to holding nothing
     # but stubs, which is all a gap in someone else's code should ever hold.
     code = cbuild.build([SRC / "lfo4" / name for name in sources], base=CODE_VA,
-                        include=[SRC / "include"], entries=entries + ["lfo4_rows"])
+                        include=[SRC / "include"], entries=entries + ["lfo4_rows"],
+                        defines=defines)
     table_va = code["lfo4_rows"]
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
     content = loader.install(stock, [(area.CODE, chunk), *(chunks(stock) if chunks else ())])
