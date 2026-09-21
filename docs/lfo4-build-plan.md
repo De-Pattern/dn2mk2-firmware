@@ -4045,3 +4045,42 @@ never the flags. It was that nothing ever asks LFO4 for them.
 objdump prints *indexed* displacements in hex with no prefix, so that `24` is
 36, and `8 + 36` is 44. The correction is recorded above and it is worth
 re-reading before trusting any indexed offset in this file.
+
+#### Both fixes, measured on the built image — 2026-09-22
+
+The same two probes, pointed at `out/lfo4-ui` (`DT2_BUILD=out/lfo4-ui`). The
+question each answers is not "does LFO4 work now" but "does LFO4 do what LFO3
+does, and does LFO3 still do it".
+
+**`SLEW`**, with the waveform selected as `RND` on each page:
+
+| page | gate asked | accepted | table gave |
+|---|---|---|---|
+| LFO3 | 124 | 11 | 100 |
+| LFO4, before | 124 | **0** | -- |
+| LFO4, after | 127 | **11** | **326** |
+
+`clamp->2` fired zero times, so index 3 passed the ceiling and the four-entry
+table answered with LFO4's own `SLEW` entry rather than LFO3's. LFO1, LFO2 and
+LFO3 accepted 13, 3 and 2 exactly as before.
+
+**`DEST`**, opening the browser on each page:
+
+| page | mask | destinations offered |
+|---|---|---|
+| LFO1 | `0x1e00` | 55 |
+| LFO2 | `0x0e00` | 62 |
+| LFO3 | `0x0600` | 69 |
+| **LFO4** | **`0x0200`** | **76** |
+
+**55, 62, 69, 76.** The list grows by exactly seven per LFO, which is the rule
+recorded in this file the day before the fourth page could be asked -- each
+group of ten contributes seven because the loop is over value slots and the two
+alternates collapse onto their primaries. LFO4 is offered LFO1's, LFO2's and
+LFO3's blocks and not its own, so the graph stays acyclic without anything
+having to enforce it.
+
+The counts for LFO1, LFO2 and LFO3 are the measurement that matters most here:
+the cascade is shared by all four pages, so a wrong fourth branch would have
+changed what the other three are offered, and a probe that only counted gate
+hits would not have seen it.
