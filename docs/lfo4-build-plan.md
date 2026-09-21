@@ -3864,3 +3864,93 @@ widgets, the waveform preview, the phase braces -- is the same picture.
 
 That is the strongest statement available short of the instrument: *with the
 same values, the fourth LFO's page is the third LFO's page.*
+
+### What the instrument said, and what each report turned out to be — 2026-09-21 evening
+
+`lfo4-value` was flashed. Five reports, and they sort into three kinds.
+
+#### Fixed: the defaults
+
+> "the FADE default in LFO4 is not 0 but -64" ... "also DEPTH is -128"
+
+Both are bipolar with a record default of `0x4000`, which displays as 0, so a
+stored **zero** lands at the bottom of the range. The arithmetic matches the
+report exactly, and two more were wrong the same way and less visibly: `SPD` at
+0 instead of 112, `MULT` at the lowest multiplier instead of the third.
+
+The design already handled this -- `ext_add` seeds from `ext_default`,
+`ext_get` falls back to it, and `lfo4_on_load` drops the entry for a sound
+carrying nothing *so that* it reads the defaults. **The array all three rely on
+was never filled.** It held the zeros BSS gives.
+
+`lfo4_init` fills it from **LFO3's own records** rather than from numbers typed
+into a file: LFO4's ten are copies of LFO3's, so it cannot disagree with them.
+
+#### Fixed, but not proved to be the cause: the live container
+
+> "LFO4 doesn't modulate anything ... no matter the DEP or destination"
+
+The extension table is keyed by the live sound's address, and the two ends
+learned it differently: the setter from the firmware's own virtual call, the
+bridge by computing `LFO4_KIT + 52 + track * 1163` from a constant measured
+once out of `ui1200M`. The firmware's own routine reads the base from a global:
+
+```
+0x40025bda  movel %sp@(4),%d0 ; movel #1163,%d1 ; mulsl %d1,%d0
+            addil #52,%d0
+            addl 0x800052a0,%d0        <- the base
+```
+
+`bridge.c` does the same now and `LFO4_KIT` is gone from the build entirely.
+`scripts/emu_lfo4_container.py` moves that global and checks `lfo4_sound_of`
+follows it.
+
+**It is not proved to be the silence.** In the snapshot *and* in a from-reset
+boot the pointer equals the constant -- `scripts/emu_lfo4_sound.py` hooked 2,192
+real sound loads and all sixteen of the bridge's addresses were among them. The
+constant is wrong in principle and happened to be right here.
+
+**The harness that should have caught it said so in its own docstring.**
+`emu_lfo4_bridge.py`: *"the sound address comes from the build's own
+`lfo4_sound_of`, so the harness and the firmware agree on the track -> sound map
+by construction"*. Agreeing by construction is agreeing about nothing.
+`scripts/emu_lfo4_chain.py` is that test with the address taken from the
+firmware's routine instead, so the two derivations can disagree; seven checks
+pass, including that they do not.
+
+`lfo4-forcerow` settles the rest in one flash: `lfo4_refresh` discards the
+lookup's answer and hands every track `tick7`'s row, the one combination
+already proved audible on the instrument. Sweeps -> the lookup is at fault.
+Silent -> the engine path broke when the bridge replaced `tick7`'s fixed table
+with a call, which has **never** produced an audible sweep on the instrument:
+the bridge's own hardware test ran with an empty table, and passing meant
+silence.
+
+#### Located, not fixed: the UI written three times over
+
+> "random wave have phase instead of slew in LFO4"
+
+`0x4010da30` decides the substitution. It reads the page index from the mode
+object's `+144`, clamps it to **0..2** in two places, and indexes a three-entry
+table at `0x40205454` holding exactly **`{80, 90, 100}`** -- the three `SLEW`
+entry numbers. Page 4 never enters that routine at all, so it gives up earlier
+than the clamp, at a gate not yet found.
+
+> "browsing destinations doesn't open the destination UI ... 49 reads err, 65
+> is also err ... 100 to 127 are also errors" and "the destinations are not in
+> order ... it starts with MOD1"
+
+The `err` ids and the ordering are **symptoms of the browser not opening**: with
+no browser the value is dialled raw, straight past the slots that have no
+parameter and past the mirror's 101. Hooking what looked like the browser's
+machinery -- the list builder, the shared entry, the three mask thunks -- fired
+zero times on *both* pages, so it opens by a route not yet found. The model was
+wrong, not the measurement.
+
+**The pattern, and it is the headline for what remains.** The waveform preview
+was three code blocks with literal entry numbers. The `SLEW` substitution is a
+three-entry table with the index clamped to 2. The `DEST` browser's mask is
+three thunks in three descriptors. **The firmware's LFO UI is written three
+times over**, and a fourth page is not one change but a long tail of per-LFO
+hard-coding -- each found the same way, by diffing what two renders execute,
+and each extended the same way.
