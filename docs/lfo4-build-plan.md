@@ -2835,3 +2835,47 @@ would have shown as a sound loading wrong. It does not prove an LFO4 *value*
 survives a save, because nothing can set one until the page exists. That check
 belongs to step 4b, and `scripts/emu_boot_engine.py` already makes it under the
 emulator with eight marked values.
+
+#### The DEST list, read: LFO N offers LFO 1..N-1 minus DEST — 2026-09-21
+
+`scripts/emu_dest_list.py` opens the destination browser on each MOD page and
+walks it to the end. The rule the owner described is visible there, and it is
+one entry narrower than expected:
+
+| page | the end of its destination list |
+|---|---|
+| **LFO1** | `FX` -- `Delay Send`, `Reverb Send`, `Bit Reduction`, `Sample-Rate Redu`, `SRR Routing`, `Overdrive`, `OVR Routing`. **No MOD category at all.** |
+| **LFO2** | `MOD1` -- `Speed`, `Multiplier`, `Fade In/Out`, `Waveform`, `Start Phase`, `Trig Mode`, `Depth` |
+| **LFO3** | `MOD2` -- the same seven |
+
+**Seven, not eight: `Destination` is excluded.** LFO2 may modulate LFO1's
+speed, shape and depth, but not LFO1's own destination -- which would be a
+destination choosing a destination. So the per-LFO block is
+`SPD MULT FADE WAVE SPH MODE DEP`, the eight parameters minus `DEST`.
+
+The browser is ordered by **category**, not by slot: every page opens on
+`META -> None` then `SYN -> Osc1 Tune`, identical across all three, and the MOD
+categories are at the far end. Two earlier guesses put the difference at the
+top and then at the bottom *by slot number*, and both were wrong for the same
+reason -- the list is not in slot order at all.
+
+**Directly observed:** LFO1 has no MOD category; LFO2 ends with `MOD1`; LFO3
+ends with `MOD2`. **Not directly observed:** `MOD1` also appearing on LFO3's
+list, which the owner states and which LFO2's `MOD1` makes near-certain -- the
+frame between `FX` and `MOD2` was skipped because a -30 turn from the end
+wrapped to `None`. Worth one cheap confirmation before the list is built, not
+before it is designed.
+
+#### What LFO4's list has to be
+
+- **LFO4 offers `MOD1` + `MOD2` + `MOD3`** -- 21 entries, seven per LFO.
+- **LFO1-3 must not gain a `MOD4` category.** That is what keeps the graph
+  acyclic: LFO N targets only 1..N-1, so a fourth LFO added at the end cannot
+  be targeted by anything and cannot close a loop.
+
+The open question is unchanged and is now the *only* one left on `DEST`: is
+that per-page block **computed from the LFO index** -- in which case LFO4's 21
+entries follow from the page existing -- or **enumerated three times**, in
+which case there is a fourth enumeration to write and three existing ones to
+leave alone. The browser's contents do not answer it; the code that builds the
+list does.
