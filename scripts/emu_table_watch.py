@@ -39,7 +39,7 @@ sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/dn2_firmware/scripts")
 from emu import dspboot                                        # noqa: E402
 from unicorn import (UC_HOOK_CODE, UC_HOOK_MEM_READ,           # noqa: E402
                      UC_HOOK_MEM_WRITE)
-from unicorn.m68k_const import UC_M68K_REG_A2                  # noqa: E402
+from unicorn.m68k_const import UC_M68K_REG_A2, UC_M68K_REG_D7  # noqa: E402
 
 from emu_boot_engine import After, REPORTER, ROOT, SYX         # noqa: E402
 from emulib.image import code_chunks, load_build               # noqa: E402
@@ -49,6 +49,17 @@ TABLE, RECORD, STOCK_COUNT = 0x401F7FC8, 60, 320
 RUNTIME, RUNTIME_STRIDE = 0x4243325C, 68
 ACCESSOR = 0x400DBEB6                  # entry -> record[entry - 1] + 8, the group
 GROUP = 8
+
+# `param_set_tables_build` files each record's entry number into a table
+# indexed by the record's **value slot**, at three sites, one per group of
+# parameters. Each of those tables is 404 bytes -- 101 longwords, slots 0..100
+# -- and the byte after the first is the filter table the same routine zeroed
+# two calls earlier. So the slot in `%d7` at these three instructions is a
+# bound this build must not exceed, and it is watched rather than argued about:
+# raising the wrong bound made all three file slots 101-108, which boots, draws
+# and corrupts.
+FILING = (0x400DC6D6, 0x400DC6F2, 0x400DC716)
+SLOT_LIMIT = 100
 
 
 def ranges(image, sym, added):
@@ -79,7 +90,7 @@ def main() -> int:
         print(f"  {name}: {lo:#010x}..{hi + 1:#010x}")
     print(f"  {len(entries)} accessor call(s) into {ACCESSOR:#010x} after the boot\n")
 
-    holder, fault = {}, {}
+    holder, fault, filed = {}, {}, []
     # Reads and writes are counted apart, because they answer different
     # questions and this probe's first run confused them: a table being
     # *filled* is written, not read, so "0 reads of the relocated runtime
@@ -100,7 +111,12 @@ def main() -> int:
                 hits[(name, kind)] += 1
             return hook
 
+        def at_filing(uc, address, size, user):
+            filed.append(uc.reg_read(UC_M68K_REG_D7))
+
         m.uc.hook_add(UC_HOOK_CODE, at_reporter, begin=REPORTER, end=REPORTER)
+        for site in FILING:
+            m.uc.hook_add(UC_HOOK_CODE, at_filing, begin=site, end=site)
         for name, (lo, hi) in spans.items():
             m.uc.hook_add(UC_HOOK_MEM_READ, count(name, "read"), begin=lo, end=hi)
             m.uc.hook_add(UC_HOOK_MEM_WRITE, count(name, "write"), begin=lo, end=hi)
@@ -147,6 +163,11 @@ def main() -> int:
     check("whatever reached the runtime table reached the new one",
           touched["old 68-byte"] == 0,
           f"new {touched['new 68-byte']:,}, old {touched['old 68-byte']:,}")
+    over = [v for v in filed if v > SLOT_LIMIT]
+    print(f"  param_set_tables_build filed {len(filed):,} slot(s), highest "
+          f"{max(filed) if filed else '-'}")
+    check("nothing was filed past the slot tables' 101 entries", not over,
+          f"{len(over)} write(s) past the end: {sorted(set(over))}")
     check("every entry answers what the relocated table holds", answers == want,
           f"{sum(1 for a, b in zip(answers, want) if a != b)} differ")
     check("the ten new entries carry LFO4's group",

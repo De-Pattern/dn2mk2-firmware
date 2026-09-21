@@ -53,7 +53,30 @@ EXPECTED_RUNTIME = 6                       # five field offsets, six sites
 # sixteen iterations of something else entirely (0x40031fd8 and its two twins).
 # They are named here so that the count still checks.
 NOT_THE_BOUND = (0x40031FEE, 0x40032422, 0x400325E2)
-EXPECTED_BOUNDS = 55
+
+# And one site that **is** this bound and must be left alone anyway.
+#
+# `param_set_tables_build` (0x400dc4d0) walks every record and files its entry
+# number into tables indexed by the record's **value slot**, one of them per
+# parameter group: `0x42c64b3c`, `0x42c647ac` and `0x42c649a8`, each of which
+# the same routine zeroes with `pea 0x194` -- 404 bytes, **101 longwords**, one
+# per slot 0..100. LFO4's records carry slots 101-108, which is 32 bytes past
+# the end of each, and the byte after `0x42c64b3c`'s 404th is `0x42c64cd0`, the
+# filter table this routine zeroes two calls earlier.
+#
+# So raising this one bound registers ten records into three tables that have
+# no room for them and silently overwrites the table next door. It boots, it
+# draws, and it would have gone to the instrument: the class of fault a gate
+# watching for crashes cannot see.
+#
+# Left at 321, the loop walks the relocated table's first 320 records and does
+# exactly what stock does. LFO4's slots stay unregistered, which is the read
+# side -- `0x400dc02a` bounds slots at 100 in its own right, so it answers 0 for
+# 101 either way. Growing those three tables to 109 entries is five literals
+# each plus a size immediate, and it belongs with the rest of the read side.
+NOT_THIS_TIME = {0x400DC7F0: "param_set_tables_build files by value slot into "
+                             "101-entry tables; see docs/lfo4-build-plan.md"}
+EXPECTED_BOUNDS = 54
 
 
 class TableError(ValueError):
@@ -119,6 +142,9 @@ def bound_sites(content: bytes, base: int) -> list[Site]:
     named in `docs/lfo4-build-plan.md`; three are this bound reached through a
     call, three are loops over the table with the stride in an address
     register, and the three in `NOT_THE_BOUND` are not this bound at all.
+
+    `NOT_THIS_TIME` is the other kind of exclusion: a site that is this bound
+    and must still be left where it is. Read its entry before changing it.
     """
     out = []
     for value in (320, 321):
@@ -130,7 +156,7 @@ def bound_sites(content: bytes, base: int) -> list[Site]:
                 if i < 0:
                     break
                 va = base + i
-                if i % 2 == 0 and va not in NOT_THE_BOUND:
+                if i % 2 == 0 and va not in NOT_THE_BOUND and va not in NOT_THIS_TIME:
                     out.append(Site(va + 2, value, 0, f"bound, cmpil #{value},%d{reg}"))
                 i += 1
     if len(out) != EXPECTED_BOUNDS:

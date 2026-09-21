@@ -3402,3 +3402,63 @@ interrupt level to 7 for the duration and restores it after. Same lesson, one
 layer down — **a harness that reads a result through firmware it did not write
 needs a control that fails when the reader is broken**, and this time the
 control was there and did its job.
+
+### The bound that must not be raised — 2026-09-21
+
+Found before flashing, and it is the kind of fault the boot gate cannot see.
+
+`param_set_tables_build` (`0x400dc4d0`) walks every parameter record and files
+its **entry number** into tables indexed by the record's **value slot**. There
+are three of them, one per band of parameter groups, and the routine zeroes
+each itself on the way in:
+
+```
+pea 0x194 ; pea 0x42c64b3c ; jsr memset      404 bytes = 101 longwords
+pea 0x194 ; pea 0x42c649a8 ; jsr memset
+pea 0x194 ; pea 0x42c647ac ; jsr memset
+pea 0x48  ; pea 0x42c64cd0 ; jsr memset      the filter table, 72 bytes
+```
+
+and the LFO branch — groups 26, 27, 28, selected by `addil #-26,%d1 ; moveq
+#2,%d6 ; cmpl %d1,%d6` — files with
+
+```
+0x400dc6d6  movel %d2,%a1@(0,%d7:l:4)     ; flat[slot] = entry
+```
+
+where `%d7` is the record's `+12`, the value slot. **101 longwords is slots
+0..100.** LFO4's records carry slots 101-108, so raising this loop's bound
+files eight entries **32 bytes past the end of all three tables** — and
+`0x42c64b3c + 404` is `0x42c64cd0`, the filter table the same routine zeroed
+two calls earlier.
+
+It boots. It draws. Nothing faults. The instrument would have come back with
+filter parameters behaving oddly and no way to connect that to a fourth LFO.
+
+**So that one bound stays at 321** (`dnfw.patch.paramtable.NOT_THIS_TIME`), and
+the loop walks the relocated table's first 320 records doing exactly what stock
+does. 54 bounds, not 55. The cost is that LFO4's slots are never filed, which
+costs nothing yet: `0x400dc02a` bounds slots at 100 in its own right and
+answers 0 for 101 either way. That is **the read side**, and it is now a
+defined piece of work rather than a loose end:
+
+- `moveq #100` at `0x400dc02c` -> `moveq #108`, one byte;
+- the three slot tables relocated at 109 entries — **five literals each**, plus
+  their `pea 0x194` size immediates;
+- then this bound can be raised with the rest.
+
+`scripts/emu_table_watch.py` now hooks all three filing instructions and reads
+`%d7` at each, so the next build that gets this wrong is told the highest slot
+it filed instead of being congratulated on booting.
+
+#### What this means for `lfo4-page` as it stands
+
+The fourth page draws with LFO4's names. Its **values are not wired**: a
+record's value comes from the sound at `+0x14 + slot*2`, and slot 101 is
+`+0xDE`, which is the machine type — not a value of LFO4's at all. Reading it
+is harmless and the 4a divert still stops the firmware writing there, so a knob
+turn lands in the extension table exactly as it did in `lfo4-slots`. But what
+the screen shows next to that knob is not what the knob set.
+
+That is worth saying plainly before anyone flashes it: **the page is the
+milestone, the values are the next one.**

@@ -108,3 +108,28 @@ def test_only_lfo4s_dest_record_claims_a_capability_bit(stock):
              for k in range(lfo4records.GROUP_SIZE)]
     assert flags[lfo4records.DEST_POSITION] == lfo4records.DEST_FLAGS
     assert all(f == 0 for k, f in enumerate(flags) if k != lfo4records.DEST_POSITION)
+
+
+def test_the_slot_filing_loop_keeps_its_bound(stock):
+    """`param_set_tables_build` files by value slot into 101-entry tables.
+
+    Raising its bound registers LFO4's slots 101-108 thirty-two bytes past the
+    end of three of them, and the byte after the first is the filter table the
+    same routine zeroes two calls earlier. It boots and it draws.
+    """
+    va = next(iter(paramtable.NOT_THIS_TIME))
+    at = va - BASE
+    assert stock[at:at + 6] == b"\x0c\x82\x00\x00\x01\x41"          # cmpil #321,%d2
+    assert stock[at - 4:at] == b"\x45\xea\x00\x3c"                  # lea %a2@(60),%a2
+    assert all(site.va - 2 != va for site in paramtable.bound_sites(stock, BASE))
+
+
+def test_the_three_slot_tables_are_101_entries_and_adjacent(stock):
+    """404 bytes each, and the filter table begins at the end of the first."""
+    zeroed = {0x42C64B3C: 0x194, 0x42C647AC: 0x194, 0x42C649A8: 0x194,
+              0x42C64CD0: 0x48}
+    for base_va, size in zeroed.items():
+        pea = b"\x48\x78" + struct.pack(">H", size) + b"\x48\x79" + struct.pack(">I", base_va)
+        assert pea in stock, f"{base_va:#010x} is not zeroed with {size} bytes"
+    assert 0x42C64B3C + 0x194 == 0x42C64CD0
+    assert 0x42C649A8 + 0x194 == 0x42C64B3C
