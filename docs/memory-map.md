@@ -204,6 +204,7 @@ attributes each changed run to a cave, an in-place edit, the appended area, or
 | `lfo4-slots` (step 4a) | the same 376 B | 180 B, 39 sites | 2,304 B | at `0x46800000` |
 | `lfo4-table` (step 4b, part 1) | the same 376 B | **457 B, 148 sites** — 109 of them the relocated table's 56 bases and 53 bounds | 22,140 B in **two** `CODE` chunks | 26,464 B: 6,656 B at `0x46800000` (the C, the extension table, the per-track rows) and 19,808 B at `0x46900000` (the 330 parameter records and the `LFO4` label) |
 | `lfo4-page` (step 4b, part 2) | the same 376 B | 469 B, 150 sites | 22,484 B | the same, plus the page record and its name in BSS |
+| `lfo4-value` (step 4c) | the same 376 B | 475 B, 151 sites | 22,628 B | the same again — the read divert is six bytes and a stub |
 | `intro-tunnel` | — | 2 B, 2 sites | — | — |
 | `intro-stamp` | 184 B at `0x402dfa1c` | 8 B, 1 site | — | — |
 

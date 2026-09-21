@@ -41,7 +41,8 @@ MODS = [
     ("lfo4-bridge", "Fourth LFO: the tick pulls each track's row", "passed"),
     ("lfo4-slots", "and parameter ids 101-108 reach the table", "passed"),
     ("lfo4-table", "and the parameter table moves so it can hold ten more", "to test"),
-    ("lfo4-page", "and a fourth MOD page shows them", "to test"),
+    ("lfo4-page", "and a fourth MOD page shows them", "bisect point"),
+    ("lfo4-value", "and the page reads the value the knob set", "to test"),
     ("lfo-waveshapes8", "LFO waves STEP/PULS/NOIS + glyphs + labels", "to test (v6 passed)"),
     ("lfo-wavetable4", "Table-driven LFO wave TRP + glyph + label", "to test (v2 passed)"),
     ("arp-on-midi2", "Arpeggiator menu on MIDI tracks", "partial"),
@@ -106,10 +107,10 @@ RAM_TENANTS = [
      "NOIS per-LFO loop state: 1,024 keys x 8 bytes", "scripts/build_lfo_waveshapes.py"),
     (0x46750000, 0x46750000 + 3 * 112, "lfo-waveshapes8 / lfo-wavetable4",
      "rendered glyph tiles, 112 bytes per new waveform", "scripts/lfo_wave_glyph.py"),
-    (0x46800000, 0x46800000 + 0x2800, "lfo4-table / lfo4-page",
+    (0x46800000, 0x46800000 + 0x2800, "lfo4-table / lfo4-page / lfo4-value",
      "the compiled C, then its BSS: the extension table and the per-track rows",
      "scripts/build_lfo4_ext.py"),
-    (0x46900000, 0x46900000 + 60 * 330 + 8, "lfo4-table / lfo4-page",
+    (0x46900000, 0x46900000 + 60 * 330 + 8, "lfo4-table / lfo4-page / lfo4-value",
      "the relocated parameter table: 320 stock records, LFO4's ten, and the "
      "page label they point at", "scripts/build_lfo4_table.py"),
 ]
