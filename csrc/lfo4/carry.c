@@ -26,20 +26,40 @@ u32 lfo4_copies, lfo4_sound_copies, lfo4_range_copies, lfo4_clears, lfo4_reenter
  * next steps do: it is the only place a real boot says which containers hold a
  * sound, and it costs nothing on the fast path. */
 #define SIZES 12
-u32 lfo4_sizes[SIZES][2], lfo4_sizes_dropped;
+
+/* **Two arrays, not an array of pairs, and the reason is the silicon.**
+ *
+ * This was `u32 lfo4_sizes[SIZES][2]`, whose rows are eight bytes apart, so
+ * GCC indexed it with `(0,%a1,%d0.l*8)` -- a **scale factor of 8**, which the
+ * ColdFire V4e does not implement. GCC emits it anyway under `-mcpu=5475` and
+ * gas assembles it without complaint, so nothing in the toolchain objects and
+ * the emulator's generic m68k core runs it happily.
+ *
+ * The instrument does not. `lfo4-bridge` died at boot with **`V03 M0
+ * P468004FC`** -- vector 3, an address error, at exactly the first scale-8
+ * instruction the code reaches: the empty-slot store on the very first call.
+ * Elektron's own compiler never emits one either: stock 1.11 uses scale 2 in
+ * 524 places and scale 4 in 1,368, and scale 8 in none.
+ *
+ * Parallel arrays are four bytes apart, so the same loop indexes with scale 4.
+ * `scripts/check_coldfire.py` now fails any build that contains a scale-8
+ * encoding, because this is a whole class of bug and not one mistake. */
+u32 lfo4_size_bytes[SIZES];       /* the block size */
+u32 lfo4_size_count[SIZES];       /* how many times it was seen */
+u32 lfo4_sizes_dropped;
 
 static void log_size(u32 n)
 {
     u32 i;
 
     for (i = 0; i < SIZES; i++) {
-        if (lfo4_sizes[i][0] == n) {
-            lfo4_sizes[i][1]++;
+        if (lfo4_size_bytes[i] == n) {
+            lfo4_size_count[i]++;
             return;
         }
-        if (!lfo4_sizes[i][0]) {
-            lfo4_sizes[i][0] = n;
-            lfo4_sizes[i][1] = 1;
+        if (!lfo4_size_bytes[i]) {
+            lfo4_size_bytes[i] = n;
+            lfo4_size_count[i] = 1;
             return;
         }
     }

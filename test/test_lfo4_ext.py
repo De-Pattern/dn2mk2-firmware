@@ -26,15 +26,30 @@ STOCK = {"lfo4_memcpy_displaced": bytes.fromhex("226f0004206f0008"),   # moveal 
          "lfo4_load_displaced": bytes.fromhex("712a001c7406"),         # mvsb 28(a2),d0 ; moveq #6,d2
          "lfo4_save_displaced": bytes.fromhex("712a003620300c00")}     # mvsb 54(a2),d0 ; movel (a0,d0*4),d0
 SLOTS, PARAMS = 256, 8
+KIT = 0x4210C08C            # the live container, as the builds define it
 
 
 @pytest.fixture(scope="module")
 def linked():
     if not cbuild.available():
         pytest.skip("no m68k GCC")
-    sources = [SRC / "lfo4" / name
-               for name in ("init.c", "ext.c", "carry.c", "store.c", "hooks.S")]
-    return cbuild.build(sources, base=CODE_VA, include=[SRC / "include"], entries=ENTRIES)
+    # **Everything in `csrc/lfo4`, derived rather than listed.** `hooks.S` is
+    # one assembly source and `--gc-sections` works on sections, so every stub
+    # in it is kept whenever any other stub there is an entry -- which means
+    # the whole file's references have to resolve, whatever this test happens
+    # to be about. A hand-kept list broke twice for exactly that reason: step
+    # 4a added `lfo4_set_stub` and its `lfo4_on_set`, and step 4c added
+    # `lfo4_get_stub` and its `lfo4_on_get`, and neither time was the list
+    # updated. A list that has to be maintained in step with a file it does
+    # not sit next to is a list that will drift.
+    sources = sorted(p for p in (SRC / "lfo4").iterdir() if p.suffix in (".c", ".S"))
+    assert sources, "csrc/lfo4 has no sources"
+    # `bridge.c` refuses to compile without the live container's address, and
+    # rightly: a default would be a wrong address nobody noticed. The value is
+    # the one the builds pass (`scripts/build_lfo4_bridge.py`), so this link is
+    # the link they make; nothing here depends on the address being right.
+    return cbuild.build(sources, base=CODE_VA, include=[SRC / "include"],
+                        entries=ENTRIES, defines={"LFO4_KIT": f"{KIT:#x}u"})
 
 
 def test_every_reached_symbol_survives(linked):

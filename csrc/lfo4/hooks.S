@@ -138,3 +138,44 @@ lfo4_set_none:
     jmp     DN2_SET_SKIP
 lfo4_set_stock:
     jmp     DN2_SET_WRITE
+
+/* The read side, and it is `lfo4_set_stub` in a mirror.
+ *
+ * `DN2_GET_BOUND` is `moveq #100,%d0 ; cmpl %d2,%d0 ; blts <zero>`, six bytes
+ * for three instructions, guarding the page's own `mvs.w %a0@(20,%d2:l:2)`.
+ * Like the setter's bound it has two exits and this stub controls both, so it
+ * is entered with `jmp` and leaves with `jmp`: nothing is replayed.
+ *
+ *   slot <= 100   the firmware's own read, untouched
+ *   101..108      LFO4's: fetch the live sound the way the next instructions
+ *                 are about to, and answer from the extension table
+ *   > 108         zero, which is what stock does
+ *
+ * d0 held 100 at the site and is dead either way -- both paths overwrite it.
+ * The sound comes from the firmware's *own* virtual call, `a2@(16)` and its
+ * vtable slot 40, which is what the instructions at DN2_GET_READ do: the same
+ * pointer, not one this code went looking for. d2 and a2 survive it, which the
+ * firmware relies on across the identical call six instructions later.
+ */
+
+    .globl  lfo4_get_stub
+lfo4_get_stub:
+    cmp.l   #100,%d2
+    ble.s   lfo4_get_stock
+    cmp.l   #LFO4_LAST,%d2
+    bgt.s   lfo4_get_none
+    movea.l %a2@(16),%a0            | the object that owns the sound
+    movea.l %a0@,%a1                | its vtable
+    move.l  %a0,-(%sp)              | this
+    movea.l %a1@(40),%a0
+    jsr     %a0@                    | -> d0 = the live sound
+    addq.l  #4,%sp
+    move.l  %d2,-(%sp)              | slot
+    move.l  %d0,-(%sp)              | sound
+    jsr     lfo4_on_get             | -> d0 = the value, sign extended
+    addq.l  #8,%sp
+    jmp     DN2_GET_RETURN
+lfo4_get_none:
+    jmp     DN2_GET_ZERO
+lfo4_get_stock:
+    jmp     DN2_GET_READ

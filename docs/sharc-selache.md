@@ -170,3 +170,42 @@ only.
   for the ambiguous families. That is the same bit test as digikit's 4b.
 - It does not know this firmware: no symbols, no names, nothing about Elektron's
   DSP program. It only helps to read and write the instructions.
+
+---
+
+## digikit's decoder overtakes selache on DN2 1.11 — 2026-09-20
+
+Measured with `scripts/sharc_selache_compare.py` on our own image
+(`Digitone_II_OS1.11_dist.zip`, 1,606 cjump sites, 461 entries, 230,072 B of
+code), against three versions of digikit's table: upstream before PR #33,
+this project's #31 branch, and upstream after #33.
+
+| table | spans exact, of 2030 | stopped | overshoot | function-entry walks |
+|---|---|---|---|---|
+| before #33 (`a5643ba`) | 1712 (84.3%) | 318 | 0 | 949 / 1589 (59.7%) |
+| our #31 branch | 1966 (96.8%) | 64 | 0 | 1399 / 1589 (88.0%) |
+| **after #33** | **2022 (99.6%)** | **8** | **0** | **1581 / 1589 (99.5%)** |
+| selache (unchanged) | 2009 (99.0%) | 0 | **21** | 1570 / 1589 (98.8%) |
+
+**The in-repo decoder is now ahead of selache on this image** — more exact
+spans and, more tellingly, **zero overshoots against selache's 21**. An
+overshoot is the outcome that means *wrong*, which a percentage alone hides.
+That is a first, and it is upstream's win, not ours.
+
+It also closed our own PR #31. That branch argued `Type2b` should be the PGR's
+`000000011`; #33's `Type2a_short` correction reaches further on the same
+measurement (2022 against 1966 spans, 8 stops against 64), so the change would
+have been a regression. Closed on the numbers.
+
+### What it does *not* say, and the number to get next
+
+`docs/ROADMAP.md` records that **only 18.4% of known instruction boundaries
+decode** under Ghidra. **That is a different metric** and this run does not
+move it: this measures the Python decoder walking between known starts;
+that measures what Ghidra's SLEIGH produces after an import. The two share a
+table and nothing else.
+
+Getting the comparable figure means regenerating SLEIGH from the corrected
+table (`tools/sharcspec/ghidra/gen_sleigh.py`, which #33 also touched) and
+re-importing. **Until that is run, no claim should be made about L2 becoming
+readable** — the decoder result makes it *likely* and is not evidence of it.

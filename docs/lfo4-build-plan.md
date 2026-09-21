@@ -2515,3 +2515,1181 @@ flash and a listen. The build was correct and very nearly recorded as broken.
 `docs/FEATURE-PLAYBOOK.md` §3: **a hard-coded demonstration must be obvious
 within a bar.** Keep the two rows different from each other — the per-track
 claim is what is being shown — but make both unmistakable.
+
+#### Correction: how a page entry reaches a parameter record is NOT established
+
+§"Step 4b, mapped" says the page record's eight entries are "indices into the
+instrument's parameter table plus one", on the strength of the names lining up
+in `SPD MULT FADE DEST WAVE SPH MODE DEP` order. **That alignment is real and
+the mechanism behind it is not read.** Three measurements since:
+
+- **No literal reference to the table exists.** The parameter table sits at
+  `0x401f7fc8` (320 records of 60 bytes). Neither that address, nor the table's
+  end, nor any record boundary from -2 to +39, appears as a four-byte value
+  anywhere in the image.
+- **There is no RAM copy.** Searching the snapshot for the exact 60 bytes of
+  LFO3's `SPD` record across the record-table region, the UI object region and
+  the page-record strings finds **zero** copies. The records are read in place,
+  from the image.
+- **So nothing yet found turns entry 95 into record 94.** A scan for the
+  `base + stride * index` idiom finds 36 tables, none of them this one.
+
+The record layout *is* confirmed, from its own bytes: `+0` a code pointer,
+`+4` a name pointer, `+8` the group (`0x1c` = 28 for LFO3), `+12` the value
+slot id (`0x11` = 17, LFO3's `SPD`), `+20` the range (`0x7ffe`) -- matching
+`dnfw params` field for field.
+
+**Why this matters for 4b:** the plan's third task was "find every reader of
+the parameter table's bound". If the table is never addressed by a literal
+base, that task is not a constant hunt at all, and the route for adding ten
+records is unknown rather than merely hard. **Read how a page entry resolves
+to a record before designing anything that adds one** -- the emulator can
+answer it directly by watching who reads `0x401f95d0` while the LFO3 page
+draws, which is the next probe rather than another static scan.
+
+Recorded because the earlier section reads as settled and is not.
+
+### The gap that let the bridge reach hardware, and closing it — 2026-09-21
+
+`lfo4-bridge` passed every check it had and then faulted on the instrument.
+The checks were not wrong; they were **incomplete in a way none of them could
+report**. A boot from reset runs the loader, the init and the `memcpy` /
+`memset` stubs and nothing else: the audio engine does not run, and no kit
+loads, so the tick and both converter stubs are untouched. Every harness that
+did exercise those restored `ui1200M` -- a machine our loader never booted.
+
+So there were two halves and no run held both. `scripts/emu_boot_engine.py`
+now does, on `lfo4-slots`:
+
+```
+  booting lfo4-slots from reset, 400,000,000 instructions
+  ran 400,000,000; reached {'dnfw_boot': 1, 'lfo4_init': 1}
+
+  entering evaluator A, 8 frame(s)
+  lfo4_refresh ran 128 time(s) during 8 frame(s)
+
+  load: the table holds ['0x2a01' ... '0x2a08']
+  save: the stored ids hold ['0x2a01' ... '0x2a08']
+```
+
+128 is 8 frames x 16 tracks. The eight marks go into the table through
+`0x400dd1ea` and come back out of the stored ids through `0x400dd6a6`, with
+every other stored value distinct (`0x40 | i` per id) so a word in the wrong
+place reads as a wrong mark rather than a plausible one. The table is read out
+of memory, not through `call(ext_get, ...)`: an interrupted call returns 0,
+which is indistinguishable from a value that never arrived (§"Step 4a result").
+
+**The general form, and it is the part worth keeping.** Three separate things
+went wrong tonight and all three had the same shape -- a check that reports
+success about work it did not do:
+
+1. the snapshot harnesses cleared code they never ran from a real boot;
+2. the boot gate printed "Safe to flash" with its coverage section silently
+   deleted by an unrelated edit;
+3. `machine.call(ext_get, ...)` returned 0 for a value that was present.
+
+None of them failed. Each returned a plausible pass. The defence is the same
+each time: **a control that fails when the checker is broken** -- a key nothing
+set that must read back absent, a routine list that must be non-empty, a
+coverage line that must appear. A green result whose instrument was never
+tested is not evidence.
+
+#### Settled: a page entry IS a parameter index, and the accessor shape — 2026-09-21
+
+The correction above said the mechanism was unread. It is read now, by
+watching the machine instead of scanning it: `scripts/emu_param_reader.py`
+arms a read watch over the parameter table and opens the LFO MOD page.
+**15,407 reads.** Three of the instructions that made them fetch exactly
+
+```
+records [74, 75, 76, 77, 78, 80, 81, 82]
+```
+
+and LFO1's page record holds entries **75, 76, 77, 78, 79, 81, 82, 83** — the
+same set plus one, gap and all: entry 79 maps to record 78, and record 79, the
+unused `SLEW`, is never touched. So **entry = index + 1**, observed rather than
+inferred from names.
+
+The accessor at `0x400dbeb6` shows why no literal base was ever found:
+
+```
+movel %sp@(4),%d0          ; the entry
+cmpil #321,%d0             ; the bound -- 320 records
+scs %d1 ; mvsb %d1,%d1 ; andl %d1,%d0    ; out of range -> entry 0
+lea 0x401f7f94,%a0         ; base, PRE-BIASED
+movel %d0,%d1 ; lsll #2,%d1 ; lsll #6,%d0 ; subl %d1,%d0   ; d0 = entry * 60
+movel %a0@(0,%d0:l),%d0    ; read
+```
+
+`0x401f7f94` is `table - 60 + 8`: the `-60` folds in the `+1`, and the `+8`
+is the field this accessor wants. **Every accessor carries its own biased
+base, so the table's true address `0x401f7fc8` is never stored anywhere** —
+which is exactly why three static searches found nothing, and the searches
+were right.
+
+`0x401f7f8c + 60 * 1 = 0x401f7fc8` — the arithmetic confirms `entry = index +
+1` without appealing to the names at all.
+
+#### What extending the table would actually cost
+
+The constants are now enumerable, which was the whole point of the question:
+
+| constant | value | sites |
+|---|---|---|
+| biased base, field `+8` | `0x401f7f94` | 53 |
+| biased base, field `+16` | `0x401f7f9c` | 1 |
+| biased base, field `+40` | `0x401f7fb4` | 2 |
+| `cmpil #321,%d0` | the record count | 24 |
+
+**23 of the 24 bounds sit within 24 bytes of a biased base**, so they belong to
+these accessors. The one that does not is `0x400c241c` and has not been read —
+it may be an unrelated use of 321, and it must be looked at before any of this
+is changed.
+
+So LFO4's ten records mean: relocate the 19,200-byte table into the appended
+area with ten records appended, then rewrite **56 base literals and 24
+bounds**. Mechanical, bounded, and checkable — every one is a four-byte literal
+or a six-byte immediate, and `dnfw` can assert each site is stock before
+patching it, exactly as the existing sites do.
+
+It is not small, and it is no longer unknown. The open items are that one
+unpaired bound, and whether anything reaches a record other than through these
+accessors — the `+0` field of every record is a code pointer, and where those
+are called from has not been read.
+
+#### Correction: the two "spare" records per group are alternates — 2026-09-21
+
+§"Step 4b, mapped" describes the gaps in a page record's entries as *"the two
+unused records in each group of ten"*, and reads record 79 as an unused
+`SLEW`. **Both are wrong, corrected by the owner:** `SLEW` is shown when the
+waveform is **RND**. The record is not unused; it is the alternate for that
+slot, and it is touched whenever a random LFO is on screen.
+
+`dnfw params --page LFO1` shows the shape once you look for it. A group of ten
+is **eight value slots plus two alternates**, and the alternates are
+recognisable because they *share an id* with a primary:
+
+| record | id | name | range | CC |
+|---|---|---|---|---|
+| 74 | 1 | SPD | 7ffe | 170 |
+| **75** | **2** | MULT | **1700** | 171 |
+| 76 | 3 | FADE | 7f00 | 172 |
+| 77 | 4 | DEST | 7f00 | 173 |
+| 78 | 5 | WAVE | 0600 | 174 |
+| **79** | **6** | **SLEW** | 7f00 | **--** |
+| **80** | **6** | SPH | 7f00 | 175 |
+| 81 | 7 | MODE | 0400 | 176 |
+| 82 | 8 | DEP | 7ffe | 177 |
+| **83** | **2** | MULT | **0b00** | 171 |
+
+Two ids appear twice: id 6 as `SLEW` or `SPH`, and id 2 as `MULT` with a
+23-value range or an 11-value one. **`SLEW` has no CC of its own** because the
+CC belongs to the slot, not the record, and slot 6's is `SPH`'s -- which is
+corroboration that the two really are one value seen two ways rather than two
+parameters.
+
+So the page record's eight entries name the **default** variant, and the
+renderer substitutes the alternate from state -- `WAVE = RND` selects `SLEW`
+over `SPH`. Which code performs that substitution is not read.
+
+**What it changes for LFO4.** Ten records was already the number, but the
+reason was wrong, and so would the contents have been. LFO4 needs:
+
+- eight primaries on slots **101-108**: SPD, MULT, FADE, DEST, WAVE, SPH,
+  MODE, DEP -- the `ParameterSet` order §5k established and `csrc/lfo4/ext.h`
+  already uses;
+- a **`SLEW` alternate sharing slot 106** with `SPH`, with no CC;
+- a **second `MULT` on slot 102** carrying the `0x0b00` range.
+
+Building eight records and leaving two blank would have produced an LFO whose
+random waveform has no slew control and whose multiplier list is wrong in
+whichever mode selects the short range -- on a page that otherwise looked
+finished. The kind of gap that reads as a firmware bug rather than a missing
+record.
+
+#### The DEST list grows with the LFO, and LFO4 inherits that — 2026-09-21
+
+From the owner, and it is the one thing about the LFO pages that is not
+uniform: **the destination list grows as you advance through the MOD pages.**
+LFO2 can modulate LFO1's parameters; LFO3 can modulate LFO1's and LFO2's.
+The rest of the parameters are the same on every page.
+
+That is a deliberate acyclic design -- **LFO N may target LFO 1..N-1 and no
+further** -- and it is why the feature works at all: a fourth LFO cannot create
+a modulation cycle by being added at the end.
+
+It fits what this repository already measured from the engine side. §5k:
+`DEST` is a **mirror slot index**, bounded at 100 in the evaluator
+(`mvs.b %a4@(74),%d2 ; moveq #100,%d1 ; cmp.l %d7,%d1`), and the LFO block
+occupies slots **1-24** -- LFO1 `1-8`, LFO2 `9-16`, LFO3 `17-24`. So "LFO2 can
+modulate LFO1" is `DEST` taking a value in `1..8`, and the name the page shows
+for it is simply that slot's own parameter name, which is why destinations read
+`SYN BASE`, `SYN PD2` and so on rather than coming from a separate list.
+
+**What LFO4 needs:** its `DEST` list must offer slots **1-24**, all three
+earlier LFOs. And the existing three must **not** gain LFO4's slots 101-108,
+or the acyclic property breaks -- LFO1 could then target LFO4, which targets
+LFO1.
+
+**Half of this was already read, and the owner was right to say so.**
+`docs/engine-index-map.md` covers the *conversion* side and this section had
+better not duplicate it: because a `DEST` **value** is itself a slot number, it
+needs the same stored/live translation as the index, and the converter
+special-cases exactly the three `DEST` slots with
+
+```
+(slot & ~8) == 4 || slot == 20        ; slots {4, 12, 20} = LFO1/2/3 DEST
+```
+
+in **two** places, `0x4004cb04` and `0x4004cb70` -- found by scanning all 27
+`moveq #-9` sites and keeping those with a `moveq #20` within 48 bytes. That
+file also already records the fix and how cheap it is: **`~8` becomes `~24`**
+and the test covers `{4, 12, 20, 28}`, all four LFOs, making the `== 20` arm
+dead. `moveq #-9` is `0x70F7`, `moveq #-25` is `0x70E7` -- **two bytes at two
+sites**.
+
+So the fourth LFO's `DEST` **value** is a solved, priced problem.
+
+**What is still open is the other half: the list the UI offers.** The converter
+translates whatever value is there; it does not decide which values the page
+lets you pick. Whether that per-LFO bound is computed from the LFO index or
+written down three times is not read, and it decides whether LFO4's list
+follows for free or is a fourth enumeration to add -- while leaving the
+existing three alone, or LFO1 could target LFO4 and the acyclic property
+breaks.
+
+Answerable the way the last two were: open LFO2's MOD page, turn `DEST` to its
+limit, and watch what clamps it. Worth doing **before** the ten records are
+built, because if it is enumerated per LFO it is another site list like the 56
+bases, and belongs in the same patch.
+
+#### DEST is chosen in a modal browser, and the ceiling was the wrong measurement
+
+`scripts/emu_dest_range.py` turned `DEST` on each LFO page and read where the
+value stopped. LFO1 answered **99** -- one below the evaluator's bound of 100 --
+and pages 2 and 3 wrote nothing at all. The screen explained both:
+
+**Push-and-turn on `DEST` opens a modal destination browser.** A category
+column (`FX` in the captured frame), a scrolling list of destination names
+(`Delay Send`, `Reverb Send`, `Bit Reduction`, `Sample-Rate Redu`, `SRR
+Routing`, `Overdrive`, `OVR Routing`), and a **`Confirm? Yes/No`** prompt. The
+header reads `MOD1 DEST`, which also confirms the page being measured was
+LFO1's.
+
+So the later `DOWN` taps were scrolling **inside the picker**, not paging --
+the machine never left the modal, and two pages reporting "nothing written"
+looked exactly like a broken encoder. A modal that swallows the page keys is
+worth knowing about before the next probe drives this page.
+
+**And the ceiling does not answer the question.** LFO1 can already reach 99, so
+the list is not bounded at the top by which LFO you are on. Whatever makes
+LFO2's list longer than LFO1's is *which entries it contains*, not how far the
+value travels -- the value is a slot number either way.
+
+`scripts/emu_dest_list.py` reads the list instead: it opens the browser on each
+page, walks it, keeps every frame, and dismisses it with `NO` before paging.
+An `LFO1` category on LFO2's list and not on LFO1's own is the rule made
+visible. Three identical lists would mean the rule is not in this UI at all.
+
+### The rebuilt bridge boots on hardware — 2026-09-21
+
+`lfo4-bridge_DN2_1.11.syx` **starts normally on the instrument.** The build
+that drew `EXCEPTION V03 M0 P468004FC` now boots, so the scale-8 diagnosis and
+its fix are confirmed on silicon rather than only against a disassembler and a
+vendor-binary frequency argument.
+
+That makes the chain complete for the fault: the instrument's own screen named
+the vector and the address, the address named an instruction GCC had written
+for us, the instruction named an addressing mode the ColdFire does not
+implement, and removing it made the same build boot.
+
+**Booting is not the whole pass**, and the rest is still open on this build:
+LFO1-3 behaving as stock, a sound saving and reloading unchanged, and DNX
+reading lane 4 as all `00 00`. Those are what would catch a carry or a
+converter fault, which a boot cannot.
+
+### The bridge passes on hardware — 2026-09-21
+
+Beyond booting: a sound **saved to B249 and loaded into a different track**
+comes back correct, and **all three LFOs behave as expected**.
+
+That clears the three pieces a boot could not reach, on silicon:
+
+- the **carry** through `memcpy` / `memset` -- a sound copied between tracks is
+  exactly the range operation `csrc/lfo4/carry.c` exists for;
+- both **converter hooks**, `0x400dd282` and `0x400dd724`, which run on every
+  save and every load and had only ever been exercised from a snapshot and,
+  since yesterday, from a real loader boot in the emulator;
+- the **per-track engine**, since LFO1-3 are untouched while our stubs run in
+  both evaluators every tick.
+
+**And loading into a *different* track is the stronger half of that test.** The
+extension table is keyed by the live sound's address, so a different track is a
+different key: the path exercised is save-under-one-key then load-under-another,
+which is the case `ext_copy` and `ext_carry` exist to handle.
+
+**What it does not prove.** The table is empty on this build, so the save wrote
+**zeros** into the eight reserved ids and the load read zeros back. It proves
+the hooks do not corrupt a sound -- the risk that mattered, and the one that
+would have shown as a sound loading wrong. It does not prove an LFO4 *value*
+survives a save, because nothing can set one until the page exists. That check
+belongs to step 4b, and `scripts/emu_boot_engine.py` already makes it under the
+emulator with eight marked values.
+
+#### The DEST list, read: LFO N offers LFO 1..N-1 minus DEST — 2026-09-21
+
+`scripts/emu_dest_list.py` opens the destination browser on each MOD page and
+walks it to the end. The rule the owner described is visible there, and it is
+one entry narrower than expected:
+
+| page | the end of its destination list |
+|---|---|
+| **LFO1** | `FX` -- `Delay Send`, `Reverb Send`, `Bit Reduction`, `Sample-Rate Redu`, `SRR Routing`, `Overdrive`, `OVR Routing`. **No MOD category at all.** |
+| **LFO2** | `MOD1` -- `Speed`, `Multiplier`, `Fade In/Out`, `Waveform`, `Start Phase`, `Trig Mode`, `Depth` |
+| **LFO3** | `MOD2` -- the same seven |
+
+**Seven, not eight: `Destination` is excluded.** LFO2 may modulate LFO1's
+speed, shape and depth, but not LFO1's own destination -- which would be a
+destination choosing a destination. So the per-LFO block is
+`SPD MULT FADE WAVE SPH MODE DEP`, the eight parameters minus `DEST`.
+
+The browser is ordered by **category**, not by slot: every page opens on
+`META -> None` then `SYN -> Osc1 Tune`, identical across all three, and the MOD
+categories are at the far end. Two earlier guesses put the difference at the
+top and then at the bottom *by slot number*, and both were wrong for the same
+reason -- the list is not in slot order at all.
+
+**Directly observed:** LFO1 has no MOD category; LFO2 ends with `MOD1`; LFO3
+ends with `MOD2`. **Not directly observed:** `MOD1` also appearing on LFO3's
+list, which the owner states and which LFO2's `MOD1` makes near-certain -- the
+frame between `FX` and `MOD2` was skipped because a -30 turn from the end
+wrapped to `None`. Worth one cheap confirmation before the list is built, not
+before it is designed.
+
+#### What LFO4's list has to be
+
+- **LFO4 offers `MOD1` + `MOD2` + `MOD3`** -- 21 entries, seven per LFO.
+- **LFO1-3 must not gain a `MOD4` category.** That is what keeps the graph
+  acyclic: LFO N targets only 1..N-1, so a fourth LFO added at the end cannot
+  be targeted by anything and cannot close a loop.
+
+The open question is unchanged and is now the *only* one left on `DEST`: is
+that per-page block **computed from the LFO index** -- in which case LFO4's 21
+entries follow from the page existing -- or **enumerated three times**, in
+which case there is a fourth enumeration to write and three existing ones to
+leave alone. The browser's contents do not answer it; the code that builds the
+list does.
+
+### Step 4a passes on hardware — 2026-09-21
+
+`lfo4-slots_DN2_1.11.syx`: several parameters modified, sounds loaded, a
+project saved and reloaded. All good.
+
+That clears the **setter divert** on silicon. It replaces the firmware's own
+`slot > 100` bound at `0x40037bd0`, which sits on the path of *every* value
+edit on *every* page, so a build that got it wrong would not fail in a corner --
+it would fail on the first knob turned. Breadth was the right test and it
+passed.
+
+#### Where LFO4 now stands
+
+| piece | emulator | hardware |
+|---|---|---|
+| the extension table, carried through `memcpy` / `memset` | yes | **yes** |
+| a sound keeps its LFO4 through save and load | yes | **yes** (no corruption; values untested, nothing can set one) |
+| each track has its own LFO4 in both evaluators | yes | **yes** (`tick7`) |
+| the bridge: the tick pulls each track's row | yes | **yes** |
+| 4a: ids 101-108 reach the table from the real setter | yes | **yes** |
+| 4b: the page | -- | -- |
+
+**Everything below the page is proven on the instrument.** What is left is the
+page, and it is now specified rather than explored:
+
+- ten parameter records -- eight primaries on slots 101-108, a `SLEW` alternate
+  sharing slot 106, a second `MULT` on slot 102;
+- the table relocated with those ten appended, and **56 biased bases and 24
+  bounds** rewritten;
+- a page record, and a fourth entry in the MOD vector;
+- a `DEST` list offering `MOD1` + `MOD2` + `MOD3`, 21 entries, while LFO1-3
+  gain no `MOD4`;
+- the `DEST` **value** translation, already priced at two bytes in two places.
+
+Open before building: whether the per-page `DEST` block is computed from the
+LFO index or enumerated three times; the unpaired bound at `0x400c241c`; and
+whether anything reaches a parameter record other than through those accessors.
+
+#### The DEST list is a built vector, and it grows by exactly seven — 2026-09-21
+
+`scripts/emu_dest_vector.py` captures the vector the renderer walks
+(`0x40106556`, begin in `%a5` and end at `%fp@(-108)`):
+
+| page | vector | entries | over LFO1 |
+|---|---|---|---|
+| LFO1 | `0x447e25f0..0x447e26cc` | **55** | -- |
+| LFO2 | `0x447fabf0..0x447face8` | **62** | +7 |
+| LFO3 | `0x447fabf0..0x447fad04` | **69** | +14 |
+
+**LFO3 carries MOD1 *and* MOD2**, which the screens could not show and this
+does: its tail runs `77, 79, 81, 82, 83` -- the end of LFO1's block -- then
+`85, 86, 87, 89, 91, 92, 93`, LFO2's. The open item from the previous section
+is closed.
+
+**And the seven are exactly which seven.** LFO2's tail is `75, 76, 77, 79, 81,
+82, 83`; as entries those are records 74, 75, 76, 78, 80, 81, 82 --
+`SPD MULT FADE WAVE SPH MODE DEP`. Three of the group of ten are left out:
+
+- entry **78** = record 77 = **`DEST`**, a destination choosing a destination;
+- entry **80** = record 79 = **`SLEW`**, and entry **84** = record 83 = the
+  second **`MULT`** -- the two **alternates**.
+
+So the rule is `10 - DEST - 2 alternates = 7`, and the alternates being absent
+is a second confirmation that they are alternates rather than parameters: a
+value you cannot address is not a destination.
+
+**The list is built, not stored.** LFO2 and LFO3 rendered from the *same*
+buffer at `0x447fabf0` while LFO1 used another, so the storage is reused and
+the contents are produced when the browser opens. Three static per-page lists
+would sit at three addresses and persist. That is evidence, not proof, and it
+points the remaining question at a filter rather than at three enumerations.
+
+**What LFO4's list must be: 76 entries** -- 55 plus 21, seven each for MOD1,
+MOD2 and MOD3 -- while LFO1-3 stay at 55, 62 and 69 with no MOD4 anywhere.
+
+#### Two instructions that looked like the builder and were not — 2026-09-21
+
+A write watch over the vector's region named `0x400392fc` as the hottest writer
+of entry values on LFO2 and LFO3 and not on LFO1, which reads exactly like the
+filter: one instruction, seven values on one page and fourteen on the next.
+
+**It is the swap inside a sort partition.**
+
+```
+400392f8:  movel %a4@,%d0
+400392fa:  movel %a5@,%a4@+
+400392fc:  movel %d0,%a5@          ; swap, comparator via jsr %a0@
+```
+
+It writes entry values because it is **sorting** them. Its absence from LFO1's
+top ten is a ranking artefact of `most_common(10)`, not evidence of anything.
+The conclusion "one PC emits the destinations, therefore computed" was one
+sentence from being written down, and reading the instruction is what stopped
+it.
+
+The second candidate, `0x40193f38`, writes the list in order and is
+**`std::vector::push_back`** -- `end == capacity`, store, `++end`, tail-call to
+the grow path. Generic too.
+
+**The lesson is specific to this image:** it is C++ with `std::vector` and
+`std::sort`, so *every* instruction that touches an entry value is a container
+primitive shared by the whole program. A hot PC writing the right numbers
+proves nothing about who produced them. The producer has to be identified by
+its **call site**, which is what `scripts/emu_dest_pushers.py` reads: hook
+`push_back` at entry, where `%sp@(0)` is still the return address, and keep the
+returns whose pushed value is a parameter index in 74-103.
+
+One call site on both LFO2 and LFO3, pushing seven and then fourteen, is a loop
+over preceding LFOs. Different sites per page are three enumerations. Neither
+of the first two probes could have told those apart, because both were watching
+the wrong end of the call.
+
+#### The destination list is built by one loop over every slot — 2026-09-21
+
+`scripts/emu_dest_pushers.py` identifies the producer by call site rather than
+by which instruction wrote the numbers, which is what the two false leads got
+wrong:
+
+| page | call site | pushes with an LFO-group value |
+|---|---|---|
+| LFO1 | -- | **0** |
+| LFO2 | `0x400395b4` | 77, values `75 76 77 79 81 82 83` |
+| LFO3 | **the same `0x400395b4`** | 140, those **plus** `85 86 87 89 91 92 93` |
+
+**One call site, seven then fourteen.** Not three enumerations.
+
+The loop around it, at `0x4003958a`:
+
+```
+moveal %a5@,%a0 ; movel %d2,%sp@- ; moveal %a0@(80),%a0 ; jsr %a0@
+beqs  skip                       ; the page's own lookup returned nothing
+jsr   0x400dc30e                 ; the entry's flags, record field +32
+notl  %d0 ; andl %sp@(56),%d0    ; mask, from the caller's frame
+bnes  skip                       ; a required bit is missing
+jsr   0x40193f1e                 ; push_back
+addql #1,%d2 ; moveq #101,%d1 ; cmpl %d2,%d1 ; bnes
+```
+
+**It walks slots 0..100 on every page** -- the same 100 the evaluator's `DEST`
+bound uses. So the per-page difference is *not* a loop bound. Two filters
+stand between a slot and the list:
+
+1. **`obj->vtable[80](slot)`**, the page object's own lookup, which returns the
+   entry for that slot **or zero**. This is where the per-page rule has to
+   live: LFO2's page must answer for slots 1-8 and not for 9-24.
+2. **a mask** on the caller's frame, ANDed against `~flags`, so an entry is
+   included only when it carries every bit the mask requires.
+
+**Record field `+32` is that flags word** (`0x401f7f94 + 60*entry + 24`, which
+is record + 32). Measured across LFO1's group it reads `0x00NNffff`, and the
+`NN` is **per slot, not per record**: `SLEW` and `SPH` share `0x6bffff`, and
+both `MULT` records share `0x67ffff` -- the two alternates pairing with their
+primaries exactly as they do everywhere else. The low 16 bits are all set on
+every record read so far, so nothing has yet been seen to fail the mask.
+
+**What is settled, and what is not.** The list is produced by one loop for
+every page, so there is no per-LFO enumeration to extend -- that question is
+closed. What decides which slots a page answers for is the vtable-80 lookup,
+and **that has not been read**. The plausible reading is that a fourth LFO
+page, being another instance of the same page class, computes it from its own
+index and inherits the rule; that is a hypothesis for when the page object
+exists, not a finding.
+
+**For the build it changes little:** LFO4's list must hold 76 entries, and the
+mechanism that fills it is shared code that already handles "every earlier LFO"
+generically. Nothing here is a site list.
+
+#### The unpaired bound is a second table, and the `+0` pointers are handlers
+
+**`0x400c241c` (the one `cmpil #321` that sits near no biased base).** It is
+not an unrelated 321. It indexes a **second table over the same entry space**:
+
+```
+cmpil #321,%d0                   ; the same bound
+lsll  #6,%d1                     ; entry * 64
+lea   %a1@(0,%d0:l:4),%a0        ; + entry * 4  ->  entry * 68
+addil #0x4243325c,%d0            ; a RAM base
+```
+
+**321 entries of 68 bytes at `0x4243325c`**, 21,828 bytes, sitting in RAM
+beside the page-record table at `0x42432c00` and the machine table at
+`0x42432b24`. A runtime companion to the image's 60-byte records, indexed by
+the same entry number -- which is why it shares the `321`.
+
+It looked **far cheaper than the first table**: the base appears at only **6
+sites** across five field offsets (`+0` x2, `+4`, `+20`, `+44`, `+60`), against
+56 for the parameter table.
+
+> **That reading is wrong, and the section below "The companion table has no
+> base" has the measurement.** Those six sites are *entry 0's* fields. The
+> table's initialiser is unrolled and writes **every** entry's addresses as
+> absolute literals -- 902 of them, entries 0 to 320 with no gaps. There is no
+> base, and the table does not move.
+
+**The `+0` code pointers (the last open route).** Every one of the 320 records
+has `+0` in code -- and there are only **51 distinct values** across 320
+records. That is a shared handler per parameter *kind*, called **with** a
+record the caller already holds, not a way of finding one. It opens no
+addressing route.
+
+#### So the addressing routes are enumerated
+
+| route | sites |
+|---|---|
+| 60-byte parameter table, three biased bases | **56** |
+| 68-byte runtime table, five biased bases | **6** |
+| `cmpil #321`, shared by both | **24** |
+
+No record boundary appears as a literal anywhere, the `+0` pointers are
+handlers, and every accessor recomputes its address from a biased base rather
+than caching a pointer -- so **patching the bases redirects every lookup**.
+
+That closes all three questions this section opened. What extending the
+parameter set costs is now a list: two tables to grow, 62 bases and 24 bounds
+to rewrite, each a four- or six-byte literal that the build can assert is stock
+before touching -- exactly as the four existing hook sites already do.
+
+#### The slot lookup is not the differentiator — 2026-09-21
+
+The hypothesis the build would have rested on was that a page's
+`vtable[80](slot)` decides which slots it answers for, so a fourth LFO page
+would inherit the rule from its own index. **Tested before building, and it is
+wrong.**
+
+```
+  LFO1: 1111 lookup(s), slots 0..100, target 0x40036720, object 0x446ce950
+  LFO2: 1111 lookup(s), slots 0..100, target 0x40036720, object 0x446ce950
+  LFO3: 1010 lookup(s), slots 0..100, target 0x40036720, object 0x446ce950
+```
+
+All three call the **same function** -- which alone would have supported the
+hypothesis -- **and pass the same object**. That is the part that kills it: a
+lookup given identical inputs cannot return different answers per page, so it
+is not where "LFO2 may target LFO1 and not LFO3" lives.
+
+**The probe printed the wrong conclusion**, because its verdict was written for
+"same target = shared rule" and did not consider that an identical object
+makes the call page-independent. The data was right and the sentence under it
+was not. Reading the numbers rather than the summary is the only reason it was
+caught -- the same failure the sort-swap and `push_back` leads had.
+
+That leaves exactly one per-page input in the loop: the **mask** at
+`%sp@(56)`, ANDed against `~flags`. `scripts/emu_dest_mask.py` reads it.
+Three masks differing by one bit per LFO is a rule a fourth page extends.
+Three unrelated constants are three constants, and LFO4 needs a fourth.
+
+### The firmware already reserves a fourth LFO in its destination flags — 2026-09-21
+
+The per-page filter is a **mask against a capability field in each parameter
+record**, and the record side of it already has a fourth LFO in it.
+
+**The masks**, read at `0x400395a4` while each browser opens:
+
+| page | mask | bits |
+|---|---|---|
+| LFO1 | `0x00001e00` | 12, 11, 10, 9 |
+| LFO2 | `0x00000e00` | 11, 10, 9 |
+| LFO3 | `0x00000600` | 10, 9 |
+| **a fourth would be** | **`0x00000200`** | **9** |
+
+An entry is kept when `~flags & mask == 0` -- it must carry **every** bit the
+page demands -- so each page drops the top bit and admits strictly more.
+
+**The flags are record field `+44`**, not `+32` as recorded earlier in this
+file. The accessor is `movel %a0@(24,%d0:l),%d0` and **objdump prints indexed
+displacements in hex with no prefix** (`docs/version-anchors.md`), so that is
+`0x24` = 36, and `8 + 36` = **44**. The `+32` reading passed every sanity check
+it was given -- the alternates paired with their primaries there too -- which
+is exactly why it survived. It was wrong.
+
+**Every distinct value of field +44, across all 320 records:**
+
+| value | records | targetable by |
+|---|---|---|
+| `0x00001e00` | 190 | LFO1, LFO2, LFO3, **a 4th** |
+| `0x00000000` | 103 | nobody |
+| `0x00000e00` | 8 | LFO2, LFO3, **a 4th** -- LFO1's own block |
+| `0x00000600` | 8 | LFO3, **a 4th** -- LFO2's block |
+| **`0x00000200`** | **8** | **a 4th only** -- LFO3's block |
+| `0x00040000` / `0x00020000` / `0x00010000` | 1 each | nobody -- the three `DEST` records |
+
+**LFO3's eight records are marked targetable by an LFO that does not exist**,
+and **nothing in the shipping firmware ever passes `0x0200`**. The staircase is
+complete for four LFOs and only three consume it.
+
+This is the same shape DNX found in the stored format -- the fourth slot of
+each group of eight reserved and unused, and p-lock rank `4*param + 0` never
+written (§"Why the LFO4 goal is plausible"). **Three layers now: the stored
+format, the p-lock ranks, and the destination capability bits.** Elektron left
+room in all three.
+
+#### What it means for the build
+
+**LFO4's destination list needs no data change at all.** A page passing
+`0x0200` admits 190 ordinary records plus LFO1's, LFO2's and LFO3's eight
+apiece; the loop is over slots and the lookup returns one entry per slot, so
+the two alternates in each group collapse and each block contributes seven --
+**190 + 21 + the rest of the ordinary list = the 76 entries measured**, arrived
+at from the flags rather than by counting screens.
+
+And the acyclic property is **enforced by the data, not by us**: LFO4's own
+records will carry `0x0000` or a fifth-LFO bit, so no existing page can target
+them whatever we do.
+
+The `DEST` records carry one bit each -- `0x40000`, `0x20000`, `0x10000` for
+LFO1, LFO2, LFO3 -- descending the same way. A fourth would be `0x8000`, which
+is consistent but **unverified**: nothing reads those bits in anything measured
+here, and the converter special-case at `0x4004cb04` keys on the slot number
+instead.
+
+### Step 4b, built: the table moves, and the page is two stubs — 2026-09-21
+
+Everything above was the read. This is what got built, and the three things the
+read had wrong.
+
+#### Correction: the bound has two spellings, and there are 55 of it
+
+§"What extending the table would actually cost" counts **24** `cmpil #321`
+sites. That was a scan of `%d0` only. Across all eight data registers there are
+**38**, and the bound has a second spelling — `cmpil #320` with `bhi`, which
+rejects the same entries `scs` against 321 keeps — with **20** more.
+
+Of those 58, three are not this bound at all: they step `d2` by 20 up to 320,
+sixteen iterations of something else (`0x40031fee`, `0x40032422`, `0x400325e2`).
+The other 55 are, and six of them needed disassembling rather than pattern
+matching to say so:
+
+| site | why it counts |
+|---|---|
+| `0x40036af4`, `0x40036bbc` | check an argument, then call `0x400dbff0`, an accessor |
+| `0x400379ec` | the same check at a function's entry on its argument |
+| `0x4003950a` | `d2 += 1` to 321: a **loop over every entry** |
+| `0x4004b17a`, `0x400dc7f0` | `d2 += 1` and `lea 60(aN),aN`: loops walking the records |
+
+The two loops with `lea 60(aN),aN` are the strongest confirmation the census is
+of the right thing: the stride is in the instruction.
+
+#### Correction: there is no block of ten spare records
+
+Before relocating anything, the cheaper route was worth pricing — ten records
+the table already has and nothing uses. Reading every page record's eight
+entries (ids 0..36) says **163 of the 320 are named by a page** and 157 are
+not, which sounds like plenty and is not: the unnamed ones are alternates,
+records reached by group and id rather than by page, and the 18 at the front
+that carry `group == -1`. None of it is a run of ten that nothing reads, and
+"unreferenced by a page record" is not "unused".
+
+So the table is relocated, which the next section prices honestly.
+
+#### The record's fields, read by diffing the three LFO groups
+
+Positions 0..9 of LFO1's group against LFO2's and LFO3's, word by word. What
+varies is what a fourth would have to change; what does not is what it copies.
+
+| off | field | LFO1 → LFO2 → LFO3 |
+|---|---|---|
+| `+0` | handler | same within a position |
+| `+4` | `0x40218572` | the same word in all 320 records |
+| `+8` | **group** | 26, 27, 28 |
+| `+12` | **value slot** | 1-8, 9-16, 17-24 |
+| `+20` | range | same |
+| `+24` | default | same, twice not |
+| `+32` | unknown | `0x0066ffff`.., `0x006fffff`.., **`-1` on LFO3** |
+| `+36` | **NRPN** | 170.., 178.., 186.. — `-1` on `SLEW` |
+| `+40` | unidentified, **unique** | 79-88, 89-98, 99-108 |
+| `+44` | destination flags | `0x0e00`, `0x0600`, `0x0200` |
+| `+48` | long name | `Speed`, `Multiplier`, … — shared |
+| `+52` | **page label** | `LFO1`, `LFO2`, `LFO3` |
+| `+56` | short name | `SPD`, `MULT`, … — shared |
+
+`+40` is **unique across all 320 records** — 320 distinct values, no
+duplicates, no `-1` — so it is a key, and a copy would collide. Its meaning is
+still unknown (`dnfw.params.record.physical_id` keeps the history of three
+wrong names for it), so LFO4's ten take values from **gaps inside the range the
+table already uses**: in range whatever it indexes, claimed by no record.
+
+`+36` is the NRPN, settled 45/45 against Elektron's Appendix C. LFO4's ten are
+`-1`: **no NRPN, no MIDI address**, the convention `SLEW` already uses in all
+three stock groups. Ten free numbers could be assigned later; doing it now
+would be inventing a MIDI map to go with a page that does not exist yet.
+
+`+8` is copied from LFO3 rather than given a new number. A new group is a new
+index into whatever reads that field, and nothing here has read it; LFO3's is
+known good, and `(group, id)` still names each record uniquely because the ids
+are 101-108.
+
+#### What the relocation costs, and what a mistake in it does
+
+| | sites |
+|---|---|
+| 60-byte table, three pre-biased bases | 56 |
+| 68-byte runtime table, five field offsets | 6 |
+| the entry space bound, both spellings | 55 |
+| | **117** |
+
+`src/dnfw/patch/paramtable.py` derives all three lists from the image and
+asserts the counts, rather than holding addresses; `test/test_paramtable.py`
+checks that relocating touches **only** those bytes.
+
+**A missed site degrades, it does not corrupt**, and that is worth stating
+because it is what makes the change safe to ship before it is fully proven. The
+copy is byte-identical for all 320 stock records, so a base that was not found
+keeps reading the old table and keeps being right; it reads garbage only for
+the ten new entries. A bound that was not found clamps a new entry to the
+fallback record. Neither can make a stock parameter wrong. The failure that
+*could* be serious is the opposite one — rewriting a literal that was never
+this table — and every one of the 117 is asserted to hold its stock value
+before it is touched.
+
+That safety is also what makes a missed site invisible, so
+`scripts/emu_table_watch.py` watches the old ranges for **reads** while the
+firmware runs, with the stock image through the same path as the control: if
+the control reads the old table and the build never does, the list is complete.
+
+#### The page is two stubs, because both structures are built at run time
+
+Neither the page-record table (`0x42432c00`, ids 0..36) nor the mode's page
+vector exists in the image, so neither can be written at build time.
+
+- **`0x400c2474`** is `id -> 0x42432c00 + 44 * id`, rejecting anything above 36.
+  `lfo4_page_stub` answers for LFO4's id and lets every other one through to
+  the arithmetic it replays.
+- **`0x40063f5c`**, inside the mode-header renderer, is where `%a2` becomes the
+  mode object. `lfo4_mode_stub` replays that load and calls `lfo4_pages`, which
+  recognises the MOD mode by its vector holding exactly `4 5 6` and, once,
+  gives it a fourth entry.
+
+The record is assembled from LFO3's the first time a MOD header is drawn,
+because its interesting fields are **pointers to string objects the UI built at
+startup** — `+0` is an object holding `LFO3`, `+4` one holding `MOD`, and the
+renderer passes `record + 4` to the text routine. Copying LFO3's 32-byte name
+object and changing one character gets a correct `LFO4` without this code ever
+having to learn that layout; `+4` is reused as it stands, since every page in
+the mode shares it.
+
+**What this does that it cannot prove.** The vector's `begin` is replaced with
+an array this build owns, so a destructor that freed it would be freeing memory
+the firmware's allocator never handed out. UI mode objects are built once and
+kept, but that is an observation rather than a guarantee, and switching modes
+hard is how it gets checked.
+
+#### The DEST mask is a virtual function, and LFO4 will inherit LFO3's
+
+The three per-page masks are not constants at the browser's call site. They are
+**three thunks**, at `0x400c2a90`, `0x400c2aae` and `0x400c2acc`, each of which
+writes one value into the argument frame and tail-branches to the same routine
+at `0x400c2894`:
+
+```
+movel %sp@(8),%d0 ; movel %d0,%sp@(4)
+movel %sp@(12),%d0 ; movel %d0,%sp@(8)
+movel #7680,%d0                      ; 0x1e00, and 0x0e00 and 0x0600 below
+movel %d0,%sp@(12)
+braw 0x400c2894
+```
+
+Each is installed by a registrar at `0x400c3f80` into field `+12` of a 16-byte
+descriptor, in a table of them at `0x42431d48`, `0x42431d58`, `0x42431d68`,
+`0x42431d78` — one per parameter kind, four of which are visible in that
+registration sequence and only three of which carry an LFO mask.
+
+**So the mask belongs to a descriptor, and the question is which descriptor a
+record gets.** It is not the record's `+0` handler: all three `DEST` records
+share `0x400e30f0`. The field that differs between them and is not a name is
+`+8`, the group — 26, 27, 28.
+
+That makes a **prediction, written down before the build is flashed**: LFO4's
+records carry LFO3's group, so LFO4's `DEST` list will be LFO3's — `MOD1` and
+`MOD2`, not `MOD1 MOD2 MOD3`. LFO4 would be able to modulate LFO1 and LFO2 but
+not LFO3. The graph stays acyclic either way, and nothing about it is unsafe;
+it is one category short of the intended list.
+
+It also names the fix, if the prediction holds: a **fourth descriptor** with a
+mask thunk of our own writing `0x0200`, and a group for LFO4 that selects it.
+That is a separable change and it is not made blind — it waits on the screen
+saying which list actually appears.
+
+The `0x8000` this build writes into LFO4's `DEST` record's capability field is
+**inert** on that reading. It continues the `0x40000 / 0x20000 / 0x10000`
+pattern and costs nothing, but nothing measured here reads those bits.
+
+### The relocation, measured: the old table is never read again — 2026-09-21
+
+`lfo4-table` **boots from reset without faulting**, and `scripts/emu_table_watch.py`
+watched both address ranges through that boot and through 330 calls into the
+accessor at `0x400dbeb6`:
+
+```
+    during boot, old 60-byte: 0 read(s)
+    during boot, new 60-byte: 1,846 read(s)
+    during boot, old 68-byte: 0 read(s)
+
+    with the accessor calls, old 60-byte: 0 read(s)
+    with the accessor calls, new 60-byte: 2,176 read(s)
+```
+
+The boot is not a quiet one — the gate counted **2,192 kit loads** in the same
+450 M instructions — so the parameter table is being used heavily, and every
+one of those uses went to the new address. **The 56 base sites are complete for
+everything this boot executes.** The new range being read is the control: a
+probe reporting "nothing reads the old table" while watching nothing at all
+would look exactly the same.
+
+#### And the run caught this project's own documented trap, again
+
+The same run reported three failures, and all three were the harness:
+
+- **"the firmware filled the relocated runtime table": 0 reads.** A table being
+  *filled* is **written**, not read. The check could not have passed however
+  well the build worked. It now counts both.
+- **Every one of the 330 accessor calls returned 0.** Thirty-eight "matched"
+  and they were exactly the thirty-eight records whose group is 0.
+
+The second is §"Step 4a result" happening a second time: a call into
+firmware-resident code on a machine with live timers gets interrupted,
+`emu_start` stops on its instruction count instead of at the return address,
+and `d0` holds whatever the handler left. The tell was in the run's own
+numbers — **2,176 reads across 330 calls**, six per call, when the accessor
+reads the table exactly once. Interrupt handlers were running inside the calls.
+
+The answer recorded last time was *read the value out of memory instead*, and
+that works when the value is in memory. Here the routine's **answer** is the
+subject, so the fix has to be the other one: `After.call` now raises the
+interrupt level to 7 for the duration and restores it after. Same lesson, one
+layer down — **a harness that reads a result through firmware it did not write
+needs a control that fails when the reader is broken**, and this time the
+control was there and did its job.
+
+### The bound that must not be raised — 2026-09-21
+
+Found before flashing, and it is the kind of fault the boot gate cannot see.
+
+`param_set_tables_build` (`0x400dc4d0`) walks every parameter record and files
+its **entry number** into tables indexed by the record's **value slot**. There
+are three of them, one per band of parameter groups, and the routine zeroes
+each itself on the way in:
+
+```
+pea 0x194 ; pea 0x42c64b3c ; jsr memset      404 bytes = 101 longwords
+pea 0x194 ; pea 0x42c649a8 ; jsr memset
+pea 0x194 ; pea 0x42c647ac ; jsr memset
+pea 0x48  ; pea 0x42c64cd0 ; jsr memset      the filter table, 72 bytes
+```
+
+and the LFO branch — groups 26, 27, 28, selected by `addil #-26,%d1 ; moveq
+#2,%d6 ; cmpl %d1,%d6` — files with
+
+```
+0x400dc6d6  movel %d2,%a1@(0,%d7:l:4)     ; flat[slot] = entry
+```
+
+where `%d7` is the record's `+12`, the value slot. **101 longwords is slots
+0..100.** LFO4's records carry slots 101-108, so raising this loop's bound
+files eight entries **32 bytes past the end of all three tables** — and
+`0x42c64b3c + 404` is `0x42c64cd0`, the filter table the same routine zeroed
+two calls earlier.
+
+It boots. It draws. Nothing faults. The instrument would have come back with
+filter parameters behaving oddly and no way to connect that to a fourth LFO.
+
+**So that one bound stays at 321** (`dnfw.patch.paramtable.NOT_THIS_TIME`), and
+the loop walks the relocated table's first 320 records doing exactly what stock
+does. 54 bounds, not 55. The cost is that LFO4's slots are never filed, which
+costs nothing yet: `0x400dc02a` bounds slots at 100 in its own right and
+answers 0 for 101 either way. That is **the read side**, and it is now a
+defined piece of work rather than a loose end:
+
+- `moveq #100` at `0x400dc02c` -> `moveq #108`, one byte;
+- the three slot tables relocated at 109 entries — **five literals each**, plus
+  their `pea 0x194` size immediates;
+- then this bound can be raised with the rest.
+
+`scripts/emu_table_watch.py` now hooks all three filing instructions and reads
+`%d7` at each, so the next build that gets this wrong is told the highest slot
+it filed instead of being congratulated on booting.
+
+#### What this means for `lfo4-page` as it stands
+
+The fourth page draws with LFO4's names. Its **values are not wired**: a
+record's value comes from the sound at `+0x14 + slot*2`, and slot 101 is
+`+0xDE`, which is the machine type — not a value of LFO4's at all. Reading it
+is harmless and the 4a divert still stops the firmware writing there, so a knob
+turn lands in the extension table exactly as it did in `lfo4-slots`. But what
+the screen shows next to that knob is not what the knob set.
+
+That is worth saying plainly before anyone flashes it: **the page is the
+milestone, the values are the next one.**
+
+### The companion table has no base, and the probe that proved it — 2026-09-21
+
+`lfo4-table`'s first two builds relocated the 68-byte companion table by
+patching six literals. `scripts/emu_table_watch.py`, watching both address
+ranges through a boot:
+
+```
+    during boot, old 68-byte: 0 read(s), 10,591 write(s)
+    during boot, new 68-byte: 0 read(s),  5,638 write(s)
+```
+
+**Written in two places, read in neither.** The six patched literals moved the
+*accessor*; something else was still writing to the old address, ten thousand
+times.
+
+Scanning the image for **every** four-byte value inside the old table's span
+says what: **902 literals**, in blocks of five per entry —
+
+```
+pea   <entry + 4>
+pea   <entry + 20>
+clr.l <entry + 0>
+clr.l <entry + 44>
+clr.l <entry + 60>
+```
+
+— covering entries **0 to 320 with no gaps**. The initialiser is **unrolled**.
+The six sites found earlier are simply entry 0's, which is what a search for
+one base finds when there is no base to find.
+
+**So the companion table does not move**, and its bound at `0x400c241c` stays
+at 321 with it: past its end are the RTOS task control blocks (`0x424388ac`,
+from the boot's own `TASK_CREATE` log), and an entry of 321 there would write
+into one. Left alone it clamps to entry 0, the fallback, exactly as an
+out-of-range entry always did. **53 bounds, not 55.**
+
+`csrc/lfo4/prm68.c` is deleted; there was never anything for it to be.
+
+#### What this says about reading a structure from its accessors
+
+Both mistakes this evening are the same mistake. The bound looked like 24 sites
+because the scan only looked at `%d0`. The companion table looked like six
+sites because the search only asked about entry 0. **In each case the method
+answered a narrower question than the one being asked, and answered it
+correctly**, which is why neither looked wrong.
+
+What caught both was the same thing too: a probe that watches the *old*
+addresses and requires silence. The first build read the old parameter table
+zero times and that was the pass; the same run wrote to the old companion table
+10,591 times and that was the failure. Neither number could have been guessed
+from the image.
+
+#### And the accessor the probe was calling returns a predicate
+
+`0x400dbeb6` reads record `+8` and then returns `5 <= group <= 10` as 0 or 1:
+
+```
+movel %a0@(0,%d0:l),%d0 ; subql #5,%d0 ; moveq #5,%d1
+cmpl %d0,%d1 ; scc %d0 ; mvsb %d0,%d0 ; negl %d0
+```
+
+So the 292 entries that "differed" from the group were the probe's expectation
+being wrong, not the firmware's answer. The probe now calls `0x400dc11a`, which
+returns record `+40` — the field that is **unique across all 320 records**, so
+a wrong answer names the record it came from.
+
+### `lfo4-table`, measured clean — 2026-09-21
+
+`scripts/emu_table_watch.py` on the corrected build, one boot from reset and
+330 calls into `0x400dc11a`:
+
+```
+  during boot, old 60-byte:            0 read(s),      0 write(s)
+  during boot, new 60-byte:        1,766 read(s),  4,950 write(s)
+  during boot, the 68-byte companion:  0 read(s), 10,602 write(s)
+
+  the accessor calls alone, new 60-byte: 330 read(s)
+
+  entries 321..330 answer [19, 21, 38, 78, 109, 118, 129, 139, 157, 159]
+  param_set_tables_build filed 82 slot(s), highest 24
+  all checks pass
+```
+
+Four things, and they are the four that were in doubt:
+
+- **The old table is never touched**, through a boot that the gate counted
+  2,192 kit loads in. The 56 base sites are complete for everything that runs.
+- **Every one of the 330 entries answers exactly what the relocated table
+  holds**, zero differing — the firmware's own arithmetic, not the probe's.
+- **Entries 321 to 330 answer with LFO4's ten ids**, the gap values the build
+  picked out of the range no record uses. The firmware reaches records that did
+  not exist an hour ago.
+- **The highest slot filed is 24**, so nothing was written past the three
+  101-entry tables. The bound left alone is the reason, and this is the number
+  that says so.
+
+The companion table being written 10,602 times *where it lives* is now the
+pass, not the failure: it does not move, and a build that moved it would read
+an empty one.
+
+**One thing worth noting rather than explaining away:** 4,950 **writes** into
+the parameter table during boot. The records are read-only data in the image,
+so something patches them at run time — per-machine ranges are the obvious
+guess and it is only a guess. It does not affect this build, because every
+write goes through the same bases every read does and lands in the copy. But
+"the parameter table is read-only" is not true of this firmware, and anything
+built on that assumption later should know.
+
+### Step 4c: the read side is one site, and it was found by running — 2026-09-21
+
+The plan priced the read side at "three slot tables relocated plus a bound".
+**That was the wrong route entirely.** The page does not reach a value through
+the slot tables; it goes entry -> slot -> the sound's own array, and the guard
+in front of that is the setter's guard in mirror.
+
+#### 119 candidates, two of which execute
+
+A sound's values live at `+0x14`, two bytes per slot, so every read of one
+carries the addressing mode `(20, An, Xn.l*2)`. Scanning the image for that
+extension word finds **119** instructions. Which is the page's cannot be read
+off the list -- most are coincidence, and the rest belong to MIDI, the mirror
+fill, and save.
+
+`scripts/emu_value_reads.py` hooks all 119 and opens the MOD pages:
+
+```
+  after [MOD] x1:  0x40037194  x169     0x40030f34  x13
+  after [MOD] x2:  0x40037194  x39      0x40030f34  x3
+  after [MOD] x3:  0x40037194  x26      0x40030f34  x2
+  2 of 119 ever fired
+```
+
+**Two.** And `0x40030f34` clamps its index to `0..15` eight instructions
+earlier (`moveq #15,%d0 ; cmpl %d2,%d0 ; bge`), so no LFO slot can reach it.
+One site.
+
+#### And it is step 4a's own six bytes
+
+```
+0x4003717c  moveq #100,%d0
+0x4003717e  cmpl  %d2,%d0
+0x40037180  blts  0x4003719a        ; slot > 100 -> return 0
+...
+0x40037194  mvsw  %a0@(20,%d2:l:2),%d0
+```
+
+| step | site | stock bytes | above 100 |
+|---|---|---|---|
+| 4a, the write | `0x40037bd0` | `7064 b082 6d72` | writes nothing |
+| **4c, the read** | `0x4003717c` | `7064 b082 6d18` | returns zero |
+
+The same three instructions, the same six bytes, the same "stock does nothing
+here" that made the write safe to divert. `lfo4_get_stub` is `lfo4_set_stub` in
+a mirror, down to taking the live sound from the firmware's **own** virtual
+call -- `a2@(16)`, vtable slot 40 -- which is what the instructions it jumps
+over were about to do.
+
+#### The round trip, measured
+
+`scripts/emu_lfo4_value.py` puts `0x2a5c` in the table for every track's sound,
+opens the MOD page, and rewrites the slot at the bound the way step 4a's
+harness rewrote it at the setter:
+
+```
+  control page: 0 diverted read(s), 0 declined
+  rewritten page: the bound saw 26 read(s) for slots [17, 18, 19, 20, 21, 22, 23, 24]
+  lfo4_gets 26, sound 0x4210c0c0, slot 101, value 0x2a5c
+  the function returned [10844] at its epilogue
+  all checks pass
+```
+
+Slots **17 to 24** are LFO3's eight, so the twenty-six reads are a real MOD
+page drawing its real parameters. The control -- the same page with nothing
+rewritten -- diverted **zero**, so slots the firmware owns still answer from
+the sound. And `10844` is `0x2a5c`: the value went into the table through
+`ext_set` and came back out of `d0` at the firmware's own epilogue.
+
+**Nothing in that harness calls into the firmware for a result.** The value is
+read out of `d0` at a hooked instruction, because a call on a machine whose
+timers are running returns whatever an interrupt handler left there.
+
+#### What it changes
+
+`lfo4-value` is the first build where a fourth LFO is whole: a knob on the
+fourth MOD page writes to the table (4a), the page reads back what it wrote
+(4c), the engine modulates from it (step 3), and a save carries it (step 2).
+
+It also fixes **turning**, not just display, and that is measured rather than
+argued: a `push_and_turn` on the MOD page reaches the same read bound **133
+times**, for slots 17 to 24. A UI that computes `new = old + delta` fetches
+`old` through this site. Without the divert, `old` on LFO4's page would have
+been the sound's `+0xDE` -- the machine type -- and a turn would have jumped
+somewhere arbitrary. With it, `old` is the value the knob last set.
+
+The control in that run is worth keeping too: the same page drawn with nothing
+rewritten reached the bound **39 times and diverted none of them**, which is a
+stronger statement than "zero diverted" on its own. The bound was reached; the
+divert declined every slot the firmware owns.
+
+### The gates, all four builds — 2026-09-21
+
+| build | boots from reset | the engine and save/load | its own subject |
+|---|---|---|---|
+| `lfo4-table` | **yes**, 1 frame, no fault | — (a subset of the next row) | the relocation: `emu_table_watch.py`, all checks pass |
+| `lfo4-page` | **yes**, 1 frame, no fault | **yes** | the page: `emu_lfo4_page.py`, 12 checks pass |
+| `lfo4-value` | pending | pending | the read: `emu_lfo4_value.py`, 7 checks pass |
+
+`emu_boot_engine.py` on `lfo4-page` — reset, then evaluator A, then a stored
+sound through both converters, in one machine:
+
+```
+  lfo4_refresh ran 128 time(s) during 8 frame(s)
+  load: the table holds ['0x2a01' ... '0x2a08']
+  save: the stored ids hold ['0x2a01' ... '0x2a08']
+  boot from reset, the engine, and save/load: all three in one machine.
+```
+
+128 is 8 frames x 16 tracks. `lfo4-page` is `lfo4-table` plus two UI hooks that
+a boot never reaches, so this covers the relocation's effect on the engine and
+the converters as well.
+
+**It is also the regression test for the interrupt masking** added to
+`After.call` this evening. That change touches every harness built on
+`emu_boot_engine`, and this run is one of them behaving exactly as it did
+before.

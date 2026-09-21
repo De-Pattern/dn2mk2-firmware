@@ -24,7 +24,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .assemble import AssemblerMissing, AssemblyError, Toolchain, _clean, _find_native
@@ -33,6 +33,15 @@ CPU = "5475"                          # ColdFire V4e, the DN2's core
 GCC_NAMES = ("m68k-linux-gnu-gcc", "m68k-elf-gcc", "m68k-none-elf-gcc")
 NM_NAMES = ("m68k-linux-gnu-nm", "m68k-elf-nm", "m68k-none-elf-nm")
 OBJCOPY_NAMES = ("m68k-linux-gnu-objcopy", "m68k-elf-objcopy", "m68k-none-elf-objcopy")
+OBJDUMP_NAMES = ("m68k-linux-gnu-objdump", "m68k-elf-objdump", "m68k-none-elf-objdump")
+
+# A scaled index of 8 is a 68020 addressing mode that the ColdFire V4e does
+# not implement -- and nothing in this toolchain objects to it: GCC emits it
+# for any 8-byte-strided array indexed by a variable, gas assembles it, and
+# the emulator's generic m68k core runs it. Only the instrument refuses,
+# with an address error (`lfo4-bridge`, 2026-09-20: V03 M0 P468004FC). So
+# every build is disassembled and checked here, where it cannot be skipped.
+SCALE8 = re.compile(r":[lw]:8\)")
 
 CFLAGS = (
     f"-mcpu={CPU}", "-Os", "-std=gnu11", "-ffreestanding", "-fno-builtin", "-nostdlib",
@@ -66,6 +75,7 @@ class CToolchain:
     nm: tuple[str, ...]
     objcopy: tuple[str, ...]
     via_wsl: bool
+    objdump: tuple[str, ...] = ()
 
     def path_for(self, path: Path) -> str:
         return Toolchain((), (), (), self.via_wsl).path_for(path)
@@ -77,12 +87,24 @@ class CToolchain:
 
 @dataclass(frozen=True)
 class Linked:
-    """What a build produced: `image` loads at `base`, then `bss` zero bytes."""
+    """What a build produced: `image` loads at `base`, then `bss` zero bytes.
+
+    `kinds` is `nm`'s own letter per symbol -- `t`/`T` for code, `b`/`d`/`r`
+    for data. It exists because the boot gate reports which of a build's
+    routines never ran, and a counter listed beside them as "NOT EXERCISED" is
+    noise in the one place this project cannot afford any: `lfo4-table`'s gate
+    named 24 symbols, and 15 of them were variables.
+    """
 
     base: int
     image: bytes
     bss: int
     symbols: dict[str, int]
+    kinds: dict[str, str] = field(default_factory=dict)
+
+    def routines(self) -> dict[str, int]:
+        """-> only the symbols that are code, and so can be said to have run."""
+        return {n: a for n, a in self.symbols.items() if self.kinds.get(n, "").lower() == "t"}
 
     def __getitem__(self, name: str) -> int:
         return self.symbols[name]
@@ -93,9 +115,13 @@ class Linked:
 
 
 def find_toolchain() -> CToolchain | None:
+    # objdump is wanted, not required: it drives the ColdFire check, and a
+    # missing checker must not stop a build that would otherwise work.
     native = [_find_native(n) for n in (GCC_NAMES, NM_NAMES, OBJCOPY_NAMES)]
     if all(native):
-        return CToolchain((native[0],), (native[1],), (native[2],), via_wsl=False)
+        dump = _find_native(OBJDUMP_NAMES)
+        return CToolchain((native[0],), (native[1],), (native[2],), via_wsl=False,
+                          objdump=(dump,) if dump else ())
     wsl = shutil.which("wsl")
     if wsl is None:
         return None
@@ -110,8 +136,31 @@ def find_toolchain() -> CToolchain | None:
 
     picked = [in_wsl(n) for n in (GCC_NAMES, NM_NAMES, OBJCOPY_NAMES)]
     if all(picked):
-        return CToolchain(*((wsl, "-e", p) for p in picked), via_wsl=True)
+        dump = in_wsl(OBJDUMP_NAMES)
+        return CToolchain(*((wsl, "-e", p) for p in picked), via_wsl=True,
+                          objdump=(wsl, "-e", dump) if dump else ())
     return None
+
+
+def _refuse_unrunnable(tool: CToolchain, elf: Path) -> None:
+    """Raise if the link contains an instruction the ColdFire cannot execute.
+
+    The check reads the disassembly, not the bytes, so it sees what the CPU
+    would decode rather than a pattern that happens to sit inside data.
+    """
+    if not tool.objdump:
+        return
+    r = tool.run(tool.objdump, ["-d", "-m", "m68k:cfv4e", tool.path_for(elf)])
+    if r.returncode:
+        return                     # a check that cannot run must not fail a build
+    bad = [ln.strip() for ln in r.stdout.splitlines() if SCALE8.search(ln)]
+    if bad:
+        raise AssemblyError(
+            "this build contains %d instruction(s) the ColdFire V4e cannot "
+            "execute -- a scaled index of 8, which is a 68020 mode:\n    %s\n"
+            "Split the 8-byte-strided array into parallel arrays, or index it "
+            "through an explicit pointer (csrc/lfo4/carry.c has the worked case)."
+            % (len(bad), ("\n    ").join(bad[:8])))
 
 
 def require_toolchain() -> CToolchain:
@@ -167,14 +216,17 @@ def build(sources: list[Path], *, base: int, entries: list[str] = (),
         if r.returncode:
             raise AssemblyError(_clean(r.stderr) or "objcopy failed")
 
+        _refuse_unrunnable(tool, elf)
+
         r = tool.run(tool.nm, ["--defined-only", tool.path_for(elf)])
         if r.returncode:
             raise AssemblyError(_clean(r.stderr) or "nm failed")
-        symbols = {}
+        symbols, kinds = {}, {}
         for line in r.stdout.splitlines():
-            m = re.match(r"([0-9a-fA-F]+) \w (\S+)$", line.strip())
+            m = re.match(r"([0-9a-fA-F]+) (\w) (\S+)$", line.strip())
             if m:
-                symbols[m.group(2)] = int(m.group(1), 16)
+                symbols[m.group(3)] = int(m.group(1), 16)
+                kinds[m.group(3)] = m.group(2)
 
         image = binout.read_bytes() if binout.exists() else b""
         want = symbols["__image_end"] - base
@@ -184,4 +236,5 @@ def build(sources: list[Path], *, base: int, entries: list[str] = (),
         missing = [e for e in entries if e not in symbols]
         if missing:
             raise AssemblyError(f"entries not defined: {', '.join(missing)}")
-        return Linked(base, image, symbols["__bss_end"] - symbols["__bss_start"], symbols)
+        return Linked(base, image, symbols["__bss_end"] - symbols["__bss_start"],
+                      symbols, kinds)

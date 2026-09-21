@@ -114,8 +114,11 @@ def main() -> int:
     print(f"  the boot's own copies: {u32('lfo4_copies')} of a sound or more "
           f"({u32('lfo4_sound_copies')} exactly a sound, {u32('lfo4_range_copies')} larger), "
           f"{u32('lfo4_clears')} clears; {u32('ext_live')} entries live")
-    sizes = struct.unpack(">24I", bytes(m.uc.mem_read(sym["lfo4_sizes"], 96)))
-    seen = [(sizes[i], sizes[i + 1]) for i in range(0, 24, 2) if sizes[i]]
+    # Two parallel arrays since 2026-09-20: a [12][2] of u32 made GCC index with
+    # a scale factor of 8, which the ColdFire does not implement (csrc/lfo4/carry.c).
+    n = struct.unpack(">12I", bytes(m.uc.mem_read(sym["lfo4_size_bytes"], 48)))
+    c = struct.unpack(">12I", bytes(m.uc.mem_read(sym["lfo4_size_count"], 48)))
+    seen = [(n[i], c[i]) for i in range(12) if n[i]]
     print("  block sizes it moved: " + (", ".join(f"{n:,} B x{c}" for n, c in seen) or "none")
           + (f" (+{u32('lfo4_sizes_dropped')} more distinct sizes not recorded)"
              if u32("lfo4_sizes_dropped") else ""))

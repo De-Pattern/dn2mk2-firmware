@@ -33,8 +33,10 @@ These are the owner's, and they do not lapse:
 - **Accumulate knowledge.** Never delete a superseded conclusion — mark it
   `[SUPERSEDED]` / `[WRONG — corrected <date>]`, point to the replacement, and
   keep the reasoning. `docs/PRINCIPLES.md`.
-- **Keep claude.ai session URLs out of PR descriptions.** Commits yes, PR bodies
-  no.
+- **No attribution lines anywhere** -- no `Claude-Session:` trailer, no session
+  URL, in commit messages *or* PR bodies. This line used to read "commits yes,
+  PR bodies no"; the owner's rule is now neither, and the harness will keep
+  asking.
 - PRs are opened through the GitHub API using the `GITHUB__PERSONAL_CLAUDE`
   env var — **no `gh` CLI**. Write PR bodies to a scratchpad `.md` file; never
   bash heredocs with backticks.

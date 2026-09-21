@@ -39,7 +39,7 @@ BASE = 0x40000400
 OUT = ROOT / "out/lfo4-slots"
 SYX = ROOT / "00_Resources/02_Builds/lfo4-slots_DN2_1.11.syx"
 
-SOURCES = bridge.SOURCES[:-1] + ("setter.c", "hooks.S")
+SOURCES = bridge.SOURCES          # the bridge already compiles setter.c; this build patches its site
 ENTRIES = bridge.ENTRIES + ["lfo4_on_set", "lfo4_set_stub"]
 
 # The bound, as stock 1.11 holds it. Checked rather than trusted: this is the

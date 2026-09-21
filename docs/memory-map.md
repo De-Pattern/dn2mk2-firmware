@@ -189,7 +189,7 @@ attributes each changed run to a cave, an in-place edit, the appended area, or
 |---|---|
 | zero runs ≥32 B in `0x4026e000`–`0x402e2000` | 217 runs, 33,125 B |
 | **clean** runs (pass the stride and reference checks) | **70 runs, 7,065 B**; only three are large: `0x402cf52c`, `0x402d0664`, `0x402dfa1c`, 896 B each |
-| RAM above BSS (`0x466b74d0`–`0x48000000`) | 25.3 MB, mods use 23 KB |
+| RAM above BSS (`0x466b74d0`–`0x48000000`) | 25.3 MB, mods use 49 KB — 26 KB of it step 4b's relocated parameter table |
 
 | mod | caves | in-place edits | appended | RAM |
 |---|---|---|---|---|
@@ -200,6 +200,11 @@ attributes each changed run to a cave, an in-place edit, the appended area, or
 | `bootscreen-bang` | 200 B at `0x402dfa1c` | 15 B, 2 sites | 2,092 B | 2,056 B at `0x46710000` |
 | `c-hello` (LFO4 step 0) | loader 132 B at `0x4028da70` (cave `0x4028da6e`, 138 B) | 16 B, 2 sites (startup calls, `memcpy` entry) | 164 B `CODE` chunk | 156 B at `0x46800000` -- **LFO4's code region** |
 | `lfo4-ext` (LFO4 step 1) | the same loader, 132 B at `0x4028da70` | 24 B, 3 sites (startup calls, `memcpy` and `memset` entries) | 1,564 B `CODE` chunk | 7,732 B at `0x46800000` — 1,548 B of code, then the 5,120-byte table and its counters |
+| `lfo4-bridge` (step 3) | 376 B: the loader plus 246 B of engine stubs at `0x402dfa1c` | 174 B, 38 sites | 2,304 B `CODE` chunk | at `0x46800000` |
+| `lfo4-slots` (step 4a) | the same 376 B | 180 B, 39 sites | 2,304 B | at `0x46800000` |
+| `lfo4-table` (step 4b, part 1) | the same 376 B | **457 B, 148 sites** — 109 of them the relocated table's 56 bases and 53 bounds | 22,140 B in **two** `CODE` chunks | 26,464 B: 6,656 B at `0x46800000` (the C, the extension table, the per-track rows) and 19,808 B at `0x46900000` (the 330 parameter records and the `LFO4` label) |
+| `lfo4-page` (step 4b, part 2) | the same 376 B | 469 B, 150 sites | 22,484 B | the same, plus the page record and its name in BSS |
+| `lfo4-value` (step 4c) | the same 376 B | 475 B, 151 sites | 22,628 B | the same again — the read divert is six bytes and a stub |
 | `intro-tunnel` | — | 2 B, 2 sites | — | — |
 | `intro-stamp` | 184 B at `0x402dfa1c` | 8 B, 1 site | — | — |
 

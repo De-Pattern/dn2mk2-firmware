@@ -51,7 +51,10 @@ SRC = ROOT / "csrc"
 OUT = ROOT / "out/lfo4-bridge"
 SYX = ROOT / "00_Resources/02_Builds/lfo4-bridge_DN2_1.11.syx"
 
-SOURCES = ("init.c", "ext.c", "carry.c", "store.c", "bridge.c", "hooks.S")
+# `setter.c` is here because `hooks.S` is shared and its `lfo4_set_stub`
+# refers to it. This build does not patch that site, so `--gc-sections`
+# drops both -- but the link needs the symbol to exist.
+SOURCES = ("init.c", "ext.c", "carry.c", "store.c", "bridge.c", "setter.c", "hooks.S")
 ENTRIES = ["lfo4_init", "ext_get", "ext_set", "ext_drop", "lfo4_refresh", "lfo4_sound_of",
            *(s[2] for s in SITES)]
 
@@ -80,23 +83,31 @@ def cave_source(table_va: int, refresh: int) -> str:
     return source
 
 
-def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=()) -> int:
+def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=None) -> int:
     """Build it. `extra` are further site patches, each `f(content, code)`.
 
     The arguments exist so a build that is *this one plus a site* -- step 4's
     setter divert is the first -- composes instead of copying two hundred lines
     that would then drift apart.
+
+    `chunks`, if given, is `f(stock) -> [(id, data)]`: further area chunks to
+    append beside the C. Step 4b's relocated parameter table is one, and it is
+    built from the stock image rather than compiled, which is why the hook
+    takes the image and runs before the loader is installed.
     """
     firmware = load(read_image(STOCK))
     section = firmware.container.find(MAIN_OS)
     stock = section.unpack()
 
-    table_va = v6a.CAVE
+    # The rows are a C array now, so the address comes *out* of the build
+    # instead of being told to it -- and the cave goes back to holding nothing
+    # but stubs, which is all a gap in someone else's code should ever hold.
     code = cbuild.build([SRC / "lfo4" / name for name in sources], base=CODE_VA,
-                        include=[SRC / "include"], entries=entries,
-                        defines={"LFO4_ROWS": f"{table_va:#x}u", "LFO4_KIT": f"{KIT:#x}u"})
+                        include=[SRC / "include"], entries=entries + ["lfo4_rows"],
+                        defines={"LFO4_KIT": f"{KIT:#x}u"})
+    table_va = code["lfo4_rows"]
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
-    content = loader.install(stock, [(area.CODE, chunk)])
+    content = loader.install(stock, [(area.CODE, chunk), *(chunks(stock) if chunks else ())])
     print(f"part 1 -- C: {len(code.image)} B at {CODE_VA:#010x}, {code.bss:,} B of state; "
           f"rows at {table_va:#010x}, kit {KIT:#010x}")
 
@@ -110,16 +121,14 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=()) -> int:
         print(f"  {va:#010x}  {name}")
 
     print("part 3 -- the engine, from step 3")
-    table = tick7.table_bytes()
-    stub_va = table_va + len(table)
+    stub_va = v6a.CAVE
     v6a.require_zero(content, v6a.CAVE, v6a.CAVE_CAP, "cave region")
-    content[table_va - BASE:table_va - BASE + len(table)] = table
     payload, offsets = v6a.assemble_stubs(cave_source(table_va, code["lfo4_refresh"]), stub_va)
-    if len(table) + len(payload) > v6a.CAVE_CAP:
-        raise SystemExit(f"cave overflows: {len(table) + len(payload)} > {v6a.CAVE_CAP}")
+    if len(payload) > v6a.CAVE_CAP:
+        raise SystemExit(f"cave overflows: {len(payload)} > {v6a.CAVE_CAP}")
     content[stub_va - BASE:stub_va - BASE + len(payload)] = payload
-    print(f"  table {len(table)} B, stubs {len(payload)} B, "
-          f"{v6a.CAVE_CAP - len(table) - len(payload)} B of cave left")
+    print(f"  rows {table_va:#010x} (in our BSS), stubs {len(payload)} B, "
+          f"{v6a.CAVE_CAP - len(payload)} B of cave left")
     for va, was, new, why in v6a.edits(table_va):
         v6a.poke(content, va, was, new, why)
     for va, was, kind, label in v6a.hooks(table_va, offsets):
@@ -140,6 +149,14 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=()) -> int:
     symbols["dnfw_boot"] = loader.build()["dnfw_boot"]
     (out / "symbols.json").write_text(
         json.dumps({k: f"0x{v:08x}" for k, v in sorted(symbols.items())}, indent=1) + "\n", newline="\n")
+    # Which of those are code. The boot gate reports what never ran, and a
+    # counter in that list is noise: `lfo4-table`'s first gate named 24
+    # symbols as unexercised routines and 15 of them were variables, which
+    # buries the ones that matter.
+    routines = {k: v for k, v in code.routines().items() if k.startswith(wanted)}
+    routines["dnfw_boot"] = symbols["dnfw_boot"]
+    (out / "routines.json").write_text(
+        json.dumps({k: f"0x{v:08x}" for k, v in sorted(routines.items())}, indent=1) + "\n", newline="\n")
     syx.parent.mkdir(parents=True, exist_ok=True)
     syx.write_bytes(fwbuild.build(firmware, {MAIN_OS: compress(section.id, section.dest, bytes(content))}))
     print(f"  {syx.name}, MAIN OS {len(content):,} B (+{len(content) - len(stock)})")
