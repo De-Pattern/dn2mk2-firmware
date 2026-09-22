@@ -26,8 +26,19 @@
  * `docs/FEATURE-PLAYBOOK.md` §3 -- a demonstration has to be unmissable --
  * applied to a measurement.
  *
- *   SPD   the last lookup the **tick** made:  right = found a row,
- *         left = found nothing and took the defaults, centre = never looked.
+ *   SPD   **the destination in the row the engine is holding**, which reads
+ *         straight off the glass as the slot number (`DEST` is stored as
+ *         `slot << 8` and this column divides by 256). `0.00` means the
+ *         engine is aiming at nothing, which is silence however right
+ *         everything else is.
+ *
+ *         It used to be a needle for the tick's last lookup, and that was
+ *         **too weak to keep**: the tick refreshes sixteen tracks, so a hit on
+ *         any one of them pinned it right while the track being played missed.
+ *         From the instrument, 2026-09-22: it read hard right, `FADE` read
+ *         hard right, `DEP` held the full dialled depth -- and nothing
+ *         modulated. Two of those three are about the track in hand; the
+ *         needle was not, so it could not narrow anything. `DEST` is.
  *   FADE  whether the **panel's** key is one the tick can ask for:
  *         right = the sound the knob wrote under is one of the sixteen the
  *         engine reads, left = it is not, and that alone is the whole fault.
@@ -54,7 +65,6 @@
 
 extern u16 lfo4_rows[TRACKS][EXT_PARAMS];
 extern u32 lfo4_set_sound;         /* setter.c: the key the panel last wrote */
-extern int lfo4_last_lookup;       /* bridge.c: +1 hit, -1 miss, 0 none yet */
 
 u32 lfo4_sound_of(u32 track);
 
@@ -86,9 +96,8 @@ int lfo4_meter(u32 param, int *answered)
     *answered = 1;
     switch (param) {
     case 0:                                   /* SPD */
-        if (lfo4_last_lookup > 0)
-            return METER_MAX;
-        return lfo4_last_lookup < 0 ? -METER_MAX : 0;
+        track = panel_track();
+        return (int)(short)lfo4_rows[track < 0 ? 0 : track][3];
     case 2:                                   /* FADE */
         return panel_track() >= 0 ? METER_MAX : -METER_MAX;
     case 7:                                   /* DEP */

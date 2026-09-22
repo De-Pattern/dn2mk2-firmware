@@ -26,11 +26,20 @@ the panel writes under and the key the tick asks under is.
 **What the three columns say**, and every one of them is a needle at a stop or
 at centre, never a number to be interpreted (`csrc/lfo4/meter.c` explains why):
 
-| column | full right | full left | centre |
-|---|---|---|---|
-| `SPD` | the tick's last lookup **found** a row | it found nothing and took the defaults | it has never looked |
-| `FADE` | the sound the knob wrote under **is** one of the sixteen the tick asks about | it is **not** -- and that alone is the entire fault | -- |
-| `DEP` | not a needle: the depth **the engine is holding right now** | | |
+| column | what it shows |
+|---|---|
+| `SPD` | **the destination in the row the engine is holding**, read straight off as the slot number. `0.00` = the engine is aiming at nothing |
+| `DEP` | the depth in that same row |
+| `FADE` | a needle: full right = the sound the knob wrote under **is** one of the sixteen the tick asks about, full left = it is not |
+
+**v1 is superseded and why matters.** `SPD` was a needle for the tick's last
+lookup, and on the instrument it read hard right while `FADE` read hard right
+and `DEP` held the full dialled depth -- and nothing modulated. Two of those
+three are about the track in hand; the needle was not, because the tick
+refreshes sixteen tracks and a hit on any of them pinned it. So `SPD` now
+carries the one number none of the three reported: **what the engine is aimed
+at.** `DEST`'s record default is `0`, no destination, which is silence however
+right everything else is.
 
 `MULT`, `DEST`, `WAVE`, `SPH` and `MODE` are untouched, so a destination can
 still be chosen and the LFO still runs while the three are read.
@@ -42,15 +51,16 @@ exactly what `lfo4-browser` would.
 **How to read a session.** Set `DEST` and turn `DEP` to its stop, then play the
 track and watch:
 
-  * `FADE` **left** -- found it. The panel is editing a sound the engine never
-    asks about, and the next build keys by something both sides agree on.
-  * `FADE` right, `SPD` flicking left as you trig -- the keys agree but the
-    table loses the row at tick time, and the search moves inside `ext_find`.
-  * `FADE` right, `SPD` right, `DEP` holding your value, and still no
-    modulation -- then tick7's result and this one disagree, and the engine
-    path is back on the table after all.
-  * `DEP` **falling back to 0 on its own** -- that is the bug happening, live,
-    and whatever you were doing at that moment is what causes it.
+  * `SPD` reads **0.00** -- the row carries no destination, and the fault is in
+    how `DEST` gets from the browser into the table. That is the cheapest
+    remaining failure and it would explain silence completely.
+  * `SPD` reads the slot you chose and `DEP` holds your depth, and still no
+    modulation -- then the engine has everything it needs and does nothing with
+    it, which contradicts `tick7` and puts the evaluator stubs back on the
+    table.
+  * `SPD` reads a **different** slot from the one you chose -- the conversion
+    between a browser entry and a stored value is off, and the two `lsl.l #8`
+    sites are where to look.
 """
 
 from __future__ import annotations
@@ -73,8 +83,8 @@ import build_lfo4_ui as ui                                 # noqa: E402
 import build_lfo4_ui2 as ui2                               # noqa: E402
 import build_lfo4_value as value                           # noqa: E402
 
-OUT = ROOT / "out/lfo4-meter"
-SYX = ROOT / "00_Resources/02_Builds/lfo4-meter_DN2_1.11.syx"
+OUT = ROOT / "out/lfo4-meter2"
+SYX = ROOT / "00_Resources/02_Builds/lfo4-meter2_DN2_1.11.syx"
 
 # `lfo4-forcerow` was rebuilt over a filename that already meant something
 # else, the owner flashed what he thought was the gated build, and an evening
