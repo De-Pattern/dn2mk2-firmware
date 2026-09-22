@@ -563,10 +563,24 @@ of listening will read a pass as a failure.
 | gate | result |
 |---|---|
 | `check_coldfire.py --against` stock | **pass** — 1,539 hits shared with stock (its data), **0** new |
-| `emu_boot_check.py`, from reset | queued — the emulator is one serial resource and another session holds it |
-| `emu_boot_engine.py --build out/fxblock16` | queued behind the above |
+| `emu_boot_check.py`, from reset | **pass** — booted and drew its UI, 1 frame in 450 M instructions, against a stock control of 1; no fault, eight tasks created, the priority-6 application task among them |
+| `emu_boot_engine.py --build out/fxblock16` | **does not apply, and was replaced** — see below |
+| `scripts/emu_fxblock16.py` | *(the replacement; result recorded when it lands)* |
 | `dnfw inspect` | **pass** — 21/21 integrity checks, HMAC-SHA256 trailer reproduced |
 
-The emulator cannot settle the question itself — it does not model the DSP —
-and it is not being asked to. It is a pre-flight check that the image boots
-from reset and that the engine path still runs.
+**`emu_boot_engine.py` cannot be run against this build, and pretending
+otherwise would be the §19 mistake again.** It opens
+`out/<build>/symbols.json` and counts `lfo4_refresh`, so it only has meaning
+for a build that carries a compiled chunk; `fxblock16` carries a 62-byte cave
+and no chunk, and the script fails on the missing file before it boots
+anything. `scripts/emu_fxblock16.py` asks the same question in the form this
+build can answer: boot from reset, then run the payload 4,096 times and watch
+`0x800075ec`. A value that only ever reads zero is a failure there, not an
+ambiguity.
+
+The emulator cannot settle the real question either — it does not model the
+DSP, and it does not run the audio engine, so the hooked ISR never fires during
+a boot. That is a known property of this harness, recorded in
+`emu_boot_engine.py`'s own docstring about `lfo4_refresh`, and it is why the
+cave gate calls the payload directly. Everything short of the wire can be
+checked here; the wire is the flash.

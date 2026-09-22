@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pathlib
 import struct
 import sys
 
@@ -150,7 +151,20 @@ def main() -> int:
     args = p.parse_args()
 
     build = os.path.join(ROOT, args.build)
-    sym = {k: int(v, 16) for k, v in json.load(open(f"{build}/symbols.json")).items()}
+    # **A build with no symbols still needs its engine run.** This harness grew
+    # around LFO4 and read `symbols.json` unconditionally, so a plain code-cave
+    # build -- which exports nothing and therefore writes no such file -- could
+    # not be engine-gated at all: it died on FileNotFoundError before booting.
+    # That is a hole in the shipping gate rather than a property of the build,
+    # because a cave hooked into the frame path touches the engine exactly as
+    # much as LFO4 does. Without symbols the LFO4-specific coverage is skipped
+    # and everything that does not depend on them still runs.
+    symbols = pathlib.Path(f"{build}/symbols.json")
+    sym = ({k: int(v, 16) for k, v in json.loads(symbols.read_text()).items()}
+           if symbols.exists() else {})
+    if not sym:
+        print(f"  no symbols.json in {args.build}: running the engine anyway, "
+              f"with no per-routine coverage to report")
     watch = {n: sym[n] for n in ("dnfw_boot", "lfo4_init", "lfo4_refresh") if n in sym}
 
     holder, counts, fault = {}, {}, {}
@@ -221,6 +235,16 @@ def main() -> int:
     # converter stubs never run, and until now they had only ever been
     # exercised from `ui1200M` -- a machine our loader never booted.
     fails = []
+    if not sym:
+        # Nothing to convert and no counters to read. The engine half above has
+        # already run, which is the part a cave build needs; saying so beats
+        # dying on a KeyError and beats pretending the build was fully gated.
+        print("")
+        print("  save/load: skipped -- this build exports no LFO4 symbols, so")
+        print("  there are no converters to exercise. The boot and the engine")
+        print("  above did run; the save/load path is untested here.")
+        return 0
+
     src = stored_sound(after, MARKS)
     live = after.alloc(SOUND_BYTES)
     loads_before = after.long(sym["lfo4_loads"])
