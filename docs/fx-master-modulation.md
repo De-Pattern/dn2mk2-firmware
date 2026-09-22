@@ -1172,3 +1172,186 @@ stack**, because every evaluator reads the cell and adds before the clamp. This
 build exposes one LFO on one track so it cannot be seen yet. It will be the
 first surprise the moment the browser can offer these codes, and it belongs in
 the UI, not the engine.
+
+## 15. `fxbrowser`, built 2026-09-23 — the browser half, and three corrections to §11
+
+`scripts/build_fxbrowser.py` → `00_Resources/02_Builds/fxbrowser_DN2_1.11.syx`,
+section at `out/fxbrowser/section_3_MAIN_OS.bin`. It **carries `fxdest`'s two
+edits as well**, because the browser is useless without the engine and the
+engine is unreachable without the browser, so the owner needs one image and not
+two.
+
+§11's specification held in all three parts. Reading the sites a second time
+changed the *shape* of two of them and closed the unknown §11 named.
+
+### The unknown is closed, and the answer is a positive one
+
+§11, §14 and `STATUS.md` all carried the same flag: *does the 26-entry ordering
+map at `0x4028bfc4` have a key for groups 16–18, and what does the sort do with
+an entry whose group it has no key for?* — "the kind of gap that hangs rather
+than mis-names".
+
+**The table is a list of group ids in display order, and the FX groups are in
+it:**
+
+```
+30, 12, 5, 6, 7, 8, 9, 10, 13, 11, 15, 16, 17, 18, 19, 20, 21, 29, 14, 22..28
+    rank:                             11  12  13
+```
+
+Chorus (16), Reverb (17) and Delay (18) are at **ranks 11, 12 and 13**, after
+group 15 and before group 19. The loop at `0x4003963c` builds `map[group] =
+rank` once, behind the `0x405c6dd0` guard; the comparator at `0x4003907e` reads
+`0x400dbce8(entry)` for the group, looks it up through `0x40193cf8` and sorts by
+`(rank, entry)`. `0x40193cf8` is `operator[]`, which **default-inserts 0** for a
+missing key — so even a group with no rank sorts to the front rather than
+faulting. The hang cannot happen, and it does not arise anyway.
+
+**The consequence for the UI, and it is worth saying to the owner:** the 24 FX
+destinations appear **partway through** the list, not appended at the end —
+after the synth/filter/amp pages and before the later ones, grouped Chorus,
+then Reverb, then Delay. Nothing in this build chose that; the firmware already
+ranked those pages.
+
+### Correction 1 — the `+0x50` virtual is reached through one shared helper
+
+§11 said "extend `SoundParameterSet`'s `+0x50`". The vtable slot is a wrapper:
+it reads two machine bytes through `+0x28` calls and ends `jsr 0x400dc02a` at
+`0x40036758`, passing `(slot, machineA, machineB)`. `FxParameterSet`'s is a
+two-instruction thunk at `0x40036768` into `0x400dc0b0`.
+
+So the edit goes on **`0x400dc02a`**, and one hook fixes all four callers of the
+virtual at once — the enumeration loop, the group step's current-slot lookup and
+the browser's two. The other sets are untouched and their own bounds (100, 100,
+25) already reject anything above 100.
+
+### Correction 2 — item 4 is three `jsr` targets, not three caves
+
+All three sites are literally `4e b9 40 0d bc c4`. Rewriting the four-byte
+address to a helper of our own **displaces nothing, needs no hook, and leaves
+`0x400dbcc4` itself untouched for its other 31 callers** — which is exactly the
+constraint §11 stated and a cleaner way to meet it than three detours.
+
+### Correction 3 — `+44` needed measuring, and it more than halved the work
+
+§6 item 5 offered "leave `+44` alone, or set `0x1e00` on Chorus's eight". What
+the field actually carries:
+
+- the three `DEST` records produce **different** `want` masks through the
+  cascade at `0x400397f2` — LFO1 (entry 78, group 26) `0x1e00`, LFO2 (88,
+  group 27) `0x0e00`, LFO3 (98, group 28) `0x0600` — and the list path at
+  `0x40107ab0` passes `0x200`;
+- the test keeps an entry when `want ⊆ +44`, so a record carrying `0x1e00`
+  passes **all four** masks;
+- **every Delay and Reverb record the FX slot table selects carries `0x1e00`
+  already.** Seventeen of the twenty-four destinations need no record edit at
+  all — including Delay Feedback Gain, the one the instrument has already been
+  heard to modulate;
+- **every Chorus record carries `0`**, blocked under every mask.
+
+So the record edits are Chorus's eight — plus entries **120** and **129**, the
+two `Mix Volume` duplicates that are blocked. Slots 31, 39 and 47 each have two
+records and only one survives into the boot-time table; setting both members of
+each pair makes the build correct whichever wins, rather than resting on a
+derivation. That derivation was then measured anyway — see the gates.
+
+Setting the low bits cannot disturb the three `andil #0x70000` "is this a `DEST`
+record" tests (bits 16–18), and the identical edit was flashed on 2026-09-12
+with no ill effect. It did nothing then because the enumeration was the real
+gate, which is what this build changes.
+
+### The edits
+
+| # | at | stock | becomes |
+|---|---|---|---|
+| 1 | `0x40137a8e` | `72 64` | `72 7f` — `fxdest`: evaluator A's bound, 100 → 127 |
+| 2 | `0x40137a9e` | `73 6c 00 52 4d f0 7a 00` | `jmp 0x4028ea3e` — `fxdest`: block 16 for codes 101..127 |
+| 3 | `0x400dc02a` | `2f 02 72 64 20 6f 00 08` | `jmp 0x4028ea58` — slots 101..124 answer from `0x42c649a8` |
+| 4 | `0x400395b8` | `72 65` | `72 7d` — the enumeration walks 0..124 |
+| 5 | `0x4003985e` | `4e b9 40 0d bc c4` | `jsr 0x4028ea02` — the randomiser |
+| 6 | `0x400c2a36` | `4e b9 40 0d bc c4` | `jsr 0x4028ea02` — the group step |
+| 7 | `0x40107b0e` | `4e b9 40 0d bc c4` | `jsr 0x4028ea02` — the browser's confirm path |
+| 8 | entries 105–112, 120, 129 | `+44` = `0` | `+44` = `0x1e00` |
+
+**144 bytes**, 128 of them the three cave blobs, in the 170-byte cave at
+`0x4028ea02` that has a hardware-confirmed success.
+
+The helper and the `+0x50` hook are exact inverses, which is what the confirm
+path at `0x40107b0e` needs — it converts entry → code and feeds the code
+straight back into `+0x50`:
+
+```
+4028ea02  movel %sp@(4),%d0 ; cmpil #321,%d0 ; bcss 1f ; clrl %d0   | as 0x400dbcc4 folds it
+4028ea10  1: %d0 = 60*entry ; lea 0x401f7f94,%a0 ; lea %a0@(0,%d0:l),%a0
+4028ea22  movel %a0@(4),%d0        | +12 : the slot
+4028ea26  movel %a0@,%d1           | +8  : the group
+4028ea28  subil #16,%d1 ; cmpil #2,%d1 ; bhis 2f
+4028ea36  addil #76,%d0            | -> the code, 101..124
+4028ea3c  2: rts
+
+4028ea58  movel %sp@(4),%d0 ; moveq #100,%d1 ; cmpl %d0,%d1 ; bccs 1f
+4028ea62  moveq #124,%d1 ; cmpl %d0,%d1 ; bcss 1f
+4028ea68  lea 0x42c64878,%a0       | 0x42c649a8 - 4*76
+4028ea6e  movel %a0@(0,%d0:l:4),%d0 ; rts
+4028ea74  1: <the displaced stock> ; jmp 0x400dc032
+```
+
+`fxdest`'s hard-coded demonstration is **removed**. It existed only because
+nothing could choose a code; leaving it in would silently steal track 1's LFO1
+the moment the owner set its `DEST` to none.
+
+### Gates
+
+| gate | result |
+|---|---|
+| `check_coldfire.py out/fxbrowser/…` | **pass** — **1,539** hits vs `out/lfo4-browser`'s **1,540**; `--against` that baseline: 1,539 shared (its data), **0 new** |
+| `scripts/emu_fxbrowser.py` | **pass**, exit 0 |
+| `emu_boot_check.py out/fxbrowser/…` from reset | **pass** — *"booted and drew its UI (1 frame(s), control 1)"*, exit 0, 450 M instructions. Not a fault and not a hang |
+| `emu_boot_engine.py --build out/fxbrowser` | **does not apply.** It opens `out/<build>/symbols.json` and counts `lfo4_refresh`; this build carries no compiled chunk. `emu_fxbrowser.py` is the probe that asks what this build can answer |
+| `dnfw inspect` | **pass** — 21/21 integrity checks, HMAC-SHA256 trailer reproduced |
+
+`emu_fxbrowser.py` restores a booted snapshot through `scripts/emulib/machine.py`
+— reusing the project's own harness rather than writing another — and **calls**
+four things on the stock image and then on the build:
+
+| asked | answer |
+|---|---|
+| what does the boot-time FX slot table hold for slots 25..48? | entries 105–110, **112**, 113–119, **121**, 122–128, **130**, 131 — the duplicate-slot resolution the build derived, now **measured**: 112 over 111, 121 over 120, 130 over 129 |
+| does stock resolve a plain sound slot? (the known positive) | **yes, 97 of slots 0..100** — so a zero anywhere below means something |
+| do slots 0..100 still answer exactly as stock answers them? | **yes, all 101, unchanged** |
+| does `0x400dbcc4` itself still answer as stock does, for all 330 entries? | **yes** — its other 31 callers see nothing |
+| does stock resolve codes 101..124? | **no, none of them** — the control that makes this a statement about the patch |
+| do codes 101..124 resolve to the FX set's own entries? | **yes, all 24** |
+| does anything above 124 resolve? | **no** — 125, 126, 127, 128, 130 all return 0 |
+| does the helper add 76 exactly for groups 16/17/18? | **yes, for 27 of 330 entries** — Chorus's 8, Delay's 10, Reverb's 9 — and for nothing else |
+| does the round trip close? | **yes** — `helper(slot_to_entry(code)) == code` for every code 101..124 |
+
+### What could not be gated here, said plainly
+
+**The emulator runs no destination browser.** There is no panel, no page view
+and no encoder, so *the list itself* — whether the 24 entries are drawn, under
+what names, in what order, and whether turning the encoder selects one and
+leaves it again — is the instrument's question and nothing here can answer it.
+Every component the browser is assembled from has been run; the assembly has
+not.
+
+That is why the test plan separates "no new names in the list" from "names
+appear but nothing moves": they point at opposite halves of the round trip, and
+the owner's report distinguishes them at no cost.
+
+### What stays out, deliberately
+
+**Master (slots 60..69).** It needs codes 136..145, and `mvs.b` at `0x40137a8a`
+makes any byte above 127 negative, which the unsigned bound then rejects.
+Widening that read to `mvz.b` is a third build, and it must also re-check every
+other reader of that byte.
+
+### The consequence that becomes visible with this build
+
+**Sixteen tracks' LFOs — and all three LFOs on one track — can aim at the same
+global FX cell, and they stack**, because every evaluator reads the cell and
+adds to it before the clamp. `fxdest` exposed a single LFO, so it could not be
+seen. From this build on it can: two LFOs on Delay Feedback Gain sum and pin at
+`0x7f00`. It is not a defect and it is not fixable in the engine — it is what
+the FX parameters being global means — so it is written into the owner's test
+plan as something to expect rather than to report.

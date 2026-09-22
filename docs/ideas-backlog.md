@@ -27,7 +27,7 @@ Where they disagree, they win and this table is wrong.
 | 1 | Reclaiming space | **built, not flashed** | `payload-section_DN2_1.11.syx`; ran end to end under the emulator 2026-09-17 | the flash — whether the instrument's bootloader accepts a larger section 3. It gates §14's bands, §9's textures, §3's shipped half |
 | 2 | Emulator as a test harness | **superseded** | digikit's emulator, used daily | nothing; the gearmulator fork below was never taken up. Reasoning kept |
 | 3 | PCM catalogue | **delivered** | `transients` mod, `site/transients.html` (#55, #56, #57); solved on hardware #64 | `TRAN = 4*slot - 8`, 32 of 34 reachable. Adding samples rather than remapping waits on §1's flash |
-| 4 | FX and Master modulation | **the engine half PASSED ON HARDWARE 2026-09-23** — an LFO modulates Delay Feedback Gain and responds to `DEP` and `SPD` | `moddest` mod, `site/destinations.html` (#60, #61) — 13 more destinations; **`fxdest_DN2_1.11.syx`** — `DEST` codes 101..127 write `mirror[16][code-76]` | the destination browser (item 3 + item 4, a matched pair over three sites), Master's codes above 127 (`mvs.b` -> `mvz.b`), and whether they can be p-locked (a separate question, for DNX's pattern format) |
+| 4 | FX and Master modulation | **the engine half PASSED ON HARDWARE 2026-09-23**; the browser half is **built and gated, not flashed** | `moddest` mod, `site/destinations.html` (#60, #61) — 13 more destinations; **`fxdest_DN2_1.11.syx`** — `DEST` codes 101..127 write `mirror[16][code-76]`; **`fxbrowser_DN2_1.11.syx`** — the 24 Chorus/Delay/Reverb parameters are selectable from the `DEST` list, and it carries `fxdest` so it replaces it | Master's codes above 127 (`mvs.b` -> `mvz.b`), and whether they can be p-locked (a separate question, for DNX's pattern format) |
 | 5 | Bake LFO output into p-locks | **open** | — | everything; but its stated blocker is gone — LFO4 ships a working tick |
 | 6 | New ELE3 section | **open** | — | a first flash with a payload whose absence is harmless. Cheaper than this entry assumed: `dest` is never read (2026-09-15) |
 | 7 | DSP hunt | **open, unparked** | digikit's SHARC+ Ghidra module and Python disassembler; `selache` (#87) | p-code semantics and anything built on them |
@@ -444,6 +444,34 @@ than the destination path. **Owner's first priority, 2026-09-22.**
 > owner's go-ahead.** `docs/fx-master-modulation.md` §12; §13 keeps the two
 > harness runs that measured nothing, because one of them nearly read as a
 > verdict on the build.
+>
+> **The browser half is built, 2026-09-23 — `fxbrowser_DN2_1.11.syx`.** It
+> carries `fxdest`'s two edits and adds four more kinds: one hook on
+> `0x400dc02a` — the helper behind `SoundParameterSet`'s `+0x50`, which fixes
+> all four callers of that virtual at once — answers slots 101..124 from
+> `FxParameterSet`'s own table at `0x42c649a8`; the enumeration bound at
+> `0x400395b8` goes 101 -> 125; the three `jsr 0x400dbcc4` sites are repointed
+> at a cave helper that adds 76 for groups 16-18, leaving `0x400dbcc4` itself
+> untouched for its other 31 callers; and ten records' `+44` is opened.
+> **144 bytes.**
+>
+> **§11's flagged unknown is closed, benignly.** The 26-entry ordering table at
+> `0x4028bfc4` is a list of group ids in display order and it already contains
+> 16, 17 and 18 at ranks 11-13 — so the FX destinations sort between group 15
+> and group 19, appearing partway through the list rather than at its end, and
+> the hang that was feared cannot arise. Two other corrections to §11:
+> the `+0x50` edit belongs on the shared helper `0x400dc02a`, not on the vtable
+> wrapper, and item 4 is three **`jsr` targets**, not three caves.
+>
+> **`+44` needed measuring and it more than halved the work:** Delay and Reverb
+> already carry `0x1e00` on every record the FX table selects, which is a
+> superset of all four `want` masks in play, so seventeen of the twenty-four
+> destinations need no record edit at all. Only Chorus is closed.
+>
+> **Not flashed.** Four gates pass, but the browser itself cannot be gated —
+> the emulator has no panel, page view or encoder — so the list, the names and
+> the encoder are the instrument's question.
+> `docs/fx-master-modulation.md` §15.
 >
 > **Item 3 was read and it changes the plan.** The destination list at
 > `0x4003951e` holds *entry numbers*, not slots, and its only source is the
