@@ -94,8 +94,18 @@ bytes, full-duplex, and the **payload** inside it is device-specific — `0x802`
 = 2,050 on the DT2, against the `0xa80` = 2,688 we measured on the DN2.
 
 That explains the pattern we reported rather than contradicting it, and it is
-the more useful statement. Corrected in `docs/sharc-image.md`; a follow-up note
-is owed to digikit PR #12, where we phrased it the weaker way.
+the more useful statement. Corrected in `docs/sharc-image.md`.
+
+**The follow-up this paragraph said was owed to digikit PR #12 is already
+settled, upstream, and not by us** — checked 2026-09-22 against
+`origin/main`. `docs/FINDINGS.md` carries the corrected reading in full: one
+variable written once at boot returns `0xabc`, both eDMA descriptors take their
+word count from it, the first argument is the payload word count (`0x802` on
+DT2, `0xa80` on DN2) and the rest of the frame is tag-only, and the frame
+offsets are unaffected because payload words map one to one onto frame data
+words. It is attributed to us and cross-checked there against `FUN_400cd2bc` on
+1.16. So there is nothing left to send, and this note exists to stop the debt
+being paid twice.
 
 They add the direction of digikit's eDMA channels — **29 transmits** through
 `DSPI2_SOUT`, **28 receives** through `DSPI2_SIN` — and the physical contract:

@@ -71,7 +71,12 @@ for page in ("LFO1", "LFO2", "LFO3", "LFO4"):
 # machinery LFO4 is being left out of. One only LFO3 reaches could as easily be
 # that page's own state.
 missing = (seen["LFO1"] & seen["LFO2"] & seen["LFO3"]) - seen["LFO4"]
-print(f"\n  {len(missing)} block(s) all three reach and LFO4 never does")
+# **Our own code does not count.** The first block LFO3 reached and LFO4 did
+# not was `lfo4_page_stub`'s stock branch -- page 6 has a record and page 37
+# gets ours, so the two *must* diverge there, and it says nothing about the
+# browser. A divergence inside this project's own stubs is the patch working.
+missing = {b for b in missing if b < STOCK_END}
+print(f"\n  {len(missing)} firmware block(s) all three reach and LFO4 never does")
 
 # **The set says what is missing; the order says where it is lost.** Walk LFO3's
 # trace to the first block LFO4 never reaches, and print what ran immediately
