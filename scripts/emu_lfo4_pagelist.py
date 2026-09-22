@@ -34,6 +34,7 @@ and stored three would look identical at the call.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 
@@ -49,7 +50,11 @@ from unicorn.m68k_const import UC_M68K_REG_A7                  # noqa: E402
 CALL = 0x4006156C               # jsr %a5@ -- the vector constructor
 STOCK_LIST = 0x401E0048         # the firmware's three ids
 STOCK_END = 0x4030B980          # past this is the appended area: ours
-LIMIT = 450_000_000
+# 450 M is what the boot gate uses and it is **not enough**: at that point the
+# machine has drawn one frame and the MOD mode's page vector does not exist
+# yet, so the constructor has not run. The mode object is built lazily, and how
+# late is itself the finding -- `DT2_LIMIT` raises it.
+LIMIT = int(os.environ.get("DT2_LIMIT", 450_000_000))
 DEFAULT = "out/lfo4-ui2/section_3_MAIN_OS.bin"
 
 
@@ -83,7 +88,13 @@ def main(argv=None) -> int:
         print(f"    vector {vector:#010x}  list {lst:#010x} ({where})  count {count}")
 
     if not calls:
-        print("  it never ran: the boot did not get as far as building the MOD pages")
+        # **Not a pass.** An earlier version returned `report()` here, which
+        # printed "all checks pass" having checked nothing at all -- the exact
+        # false green `docs/PRINCIPLES.md` is about. A run that never reached
+        # the thing it exists to measure has failed to measure it.
+        check("the constructor ran at all", False,
+              f"never, in {LIMIT:,} instruction(s) -- the MOD mode's pages are "
+              f"built later than this boot gets, or somewhere else entirely")
         return report()
 
     vector, lst, count = calls[-1]
