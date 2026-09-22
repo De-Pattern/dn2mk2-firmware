@@ -446,3 +446,127 @@ document's own conclusion.
   `0x40137726` and `0x401373dc` are ColdFire code, and `lfo4-tick6a` passed on
   hardware. Its conclusion about `FxSetup::updateMirror` survives; its reason
   does not.
+
+## 8. The experiment, built — `fxblock16`, 2026-09-22
+
+`scripts/build_fxblock16.py` → `00_Resources/02_Builds/fxblock16_DN2_1.11.syx`,
+section also at `out/fxblock16/section_3_MAIN_OS.bin`. It is §6's last item and
+nothing else: one cave, one store, no `DEST` change, no mask edit, no
+enumeration, no UI, no LFO4.
+
+### The addresses in this document were checked, and they held
+
+Every one, read back out of `Digitone_II_OS1.11_dist.zip` section 3 with
+`dnfw disasm` and asserted again by the build script before it writes anything:
+
+| claim | at | bytes | verdict |
+|---|---|---|---|
+| `jsr 0x400db22c`, the six-source apply | `0x40027196` | `4e b9 40 0d b2 2c` | **holds** |
+| `jsr 0x400db12a`, the mirror smoother | `0x4002717e` | `4e b9 40 0d b1 2a` | **holds** |
+| `B = 0x800068e4` | `0x400db14a` | `45 f9 80 00 68 e4` — `lea 0x800068e4,%a2` | **holds** |
+| the frame builder reads block 16 | `0x400275ba` | `48 6a 0d 02` — `pea %a2@(3330)` | **holds** |
+
+The hook itself goes at **`0x4002719c`**, the instruction *after* the `jsr`,
+which is what "a cave entered right after `jsr 0x400db22c`" has to mean for a
+6-byte detour. `dnfw cave probe --at 0x4002719c` displaces two straight-line
+instructions, `50 8f 42 ae ff 58` (`addql #8,%sp ; clrl %fp@(-168)`), with no
+PC-relative opcode among them.
+
+### A fifth reading, from the write side, and it is the strongest yet
+
+Looking for anything that might overwrite the store before the frame is built
+found the opposite: **stock code writes block 16 itself, in this same ISR, for
+an audible reason.** At `0x400273f4`, gated on `0x4058e550` being non-zero:
+
+```
+4002744c:  movew 0x4058e874,%d0
+40027452:  mulsw #127,%d0
+40027460:  asrl  #7,%d0              ; x 127/128 -- a per-frame fade
+40027468:  movew %d0,%a2@(3360)      ; slot 47  Reverb Mix Vol.
+4002746c:  movew %d1,%a2@(3350)      ; slot 42  Reverb Decay Time   <- 0
+40027470:  movew %d1,%a2@(3336)      ; slot 35  Delay Feedback Gain <- 0
+40027474:  movew %d1,%a2@(3344)      ; slot 39  Delay Mix Vol.      <- 0
+```
+
+Four displacements, four slots, and they are exactly the four values you would
+write to make the FX tails stop: fade the reverb's output, kill the reverb's
+decay, kill the delay's feedback, kill the delay's output. The block-16 formula
+reproduces all four with no residue, from a routine that had nothing to do with
+how it was derived. §4c's four readings all watch block 16 being *built* or
+*copied*; **this is the first that shows the firmware reaching into it to change
+what the instrument sounds like.**
+
+It is still ColdFire-side, so it does not close the question — but it does pick
+the target. The build sweeps **slot 35, Delay Feedback Gain**,
+`B + 34 + 202·16 + 2·35 = 0x800075ec`, because that is a cell the instrument
+already writes when it wants something audible to change.
+
+The same search is the reason the hook site is safe: those four writes and the
+six `pea`s of the frame builder are the **only** block-16 accesses anywhere
+between `0x40025e36` and `0x40027c00`, and the four are behind a mute gate that
+is off while the instrument is making sound.
+
+### The rate, counted rather than guessed
+
+The hook sits in the vector-191 handler `FUN_40025e36` — installed at
+`0x40025576` (`movel #0x40025e36,%d0 ; movel %d0,0x400002fc`, with `5` into
+`ICR1_63` at `0xfc04c07f`), and raised by a software force from the SSI0-paced
+eDMA-50 completion, which is the cadence digikit reads from the other side.
+That major loop is 64 minors of 32 bytes over a 64-byte TDM frame, so the
+handler runs **once per 32 audio frames — 1,500 Hz at 48 kHz.**
+
+Three constants in the image agree, and the build script asserts all three:
+
+- `0x402876f8` = **1500**, the number of ISRs the DSP send is held off for at
+  boot (`0x40025e82`) — a one-second warm-up;
+- `0x402a0dec` = **14,400**, the time units added per ISR (`0x40025f1c`);
+- `0x40137530` = **21,600,000**, the LFO phase wrap — and 1,500 × 14,400 is
+  exactly that.
+
+So the payload advances one step every 8 calls over 256 steps: a full
+`0x0000` → `0x7f00` → `0x0000` triangle in **2,048 calls = 1.37 s**, which is
+one and a half sweeps per bar at 120 BPM. `tick7` is why that number is not
+larger.
+
+### What the build is, in full
+
+62 bytes of payload in the cave at `0x4028ea02` — the one cave region with a
+hardware-confirmed success (`docs/code-caves.md`) — plus the six displaced
+bytes and the jump back; a 6-byte hook; and four bytes of counter in RAM above
+BSS at `0x46704000`. 64 bytes of the section differ from stock, all of them
+inside the hook and the cave.
+
+```
+lea %sp@(-8),%sp ; movem.l %d0-%d1,%sp@
+d0 = ++*(u32*)0x46704000
+d0 >>= 3 ; d1 = d0 & 0x80 ; d0 &= 0x7f ; if (d1) d0 ^= 0x7f
+*(u16*)0x800075ec = d0 << 8
+movem.l %sp@,%d0-%d1 ; lea %sp@(8),%sp
+```
+
+`%d0` and `%d1` both look dead at the hook and are saved anyway.
+
+### Reading it
+
+| what is heard | what it means |
+|---|---|
+| the delay feedback surges and collapses, about every 1.4 s | **block 16 is the live FX mirror.** §4's remainder is route A, and it is plumbing |
+| nothing moves | **something else publishes the FX settings and wins.** Find it before costing anything in §6 |
+| it moves, then snaps back | **block 16 is right and a later writer in the same frame overwrites.** Move the cave down towards `0x400275a6` |
+
+**The Delay page on screen does not move in any of the three.** The UI reads the
+control side; only block 16 is touched. A tester who watches the screen instead
+of listening will read a pass as a failure.
+
+### Gates
+
+| gate | result |
+|---|---|
+| `check_coldfire.py --against` stock | **pass** — 1,539 hits shared with stock (its data), **0** new |
+| `emu_boot_check.py`, from reset | queued — the emulator is one serial resource and another session holds it |
+| `emu_boot_engine.py --build out/fxblock16` | queued behind the above |
+| `dnfw inspect` | **pass** — 21/21 integrity checks, HMAC-SHA256 trailer reproduced |
+
+The emulator cannot settle the question itself — it does not model the DSP —
+and it is not being asked to. It is a pre-flight check that the image boots
+from reset and that the engine path still runs.
