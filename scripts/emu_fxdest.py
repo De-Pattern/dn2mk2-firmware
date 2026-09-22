@@ -19,12 +19,17 @@ the tick would have held: `%a4` the per-LFO mirror pointer, `%sp@(52)` the
 track's mirror base, `%a5` the track counter, `%sp@(48)` the inner counter
 (2 = LFO3, 1 = LFO2, 0 = LFO1), `%d0` the LFO's value.
 
-Both candidate cells — the track's and block 16's — are pre-loaded with a
-sentinel before every case, and the depth is set to full positive with a large
-LFO value so a cell that *is* written clamps to `0x7f00` and a cell that is not
-still reads the sentinel, whichever end of the `0..0x7f00` clamp the MAC lands
-on. A watch has to be able to produce a different answer for each outcome; this
-one can.
+**The whole mirror is the watch, not five predicted cells.** All 3,468 bytes
+are filled with a sentinel before every case and scanned after it, so a store
+that lands somewhere unexpected is *seen* rather than read as silence — those
+are different faults and a watch that only looks where the answer is expected
+cannot tell them apart. The registers come back too: `%d7` is the `DEST` the
+evaluator actually got, `%a0` the base it chose, `%fp` the cell it computed.
+
+And the control is checked on a **known positive first**: stock must write the
+sink for a plain sound destination. If it does not, every "wrote nothing" is a
+property of the harness and the run concludes nothing (`docs/PRINCIPLES.md`
+§19).
 
 **The stock section is run as a control, case for case.** Without it, "code 111
 wrote block 16" could be a property of the harness rather than of the patch.
@@ -50,7 +55,8 @@ from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A2,   # noqa: E402
                                 UC_M68K_REG_A3, UC_M68K_REG_A4,
                                 UC_M68K_REG_A5, UC_M68K_REG_A6,
                                 UC_M68K_REG_A7, UC_M68K_REG_D0,
-                                UC_M68K_REG_D7, UC_M68K_REG_PC,
+                                UC_M68K_REG_D2, UC_M68K_REG_D7,
+                                UC_M68K_REG_PC,
                                 UC_M68K_REG_SR)
 
 ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
@@ -66,6 +72,7 @@ CAVE = 0x4028EA02
 MIRROR = 0x800068E4              # B, confirmed on hardware (fx-master-modulation §9)
 FX_SLOT0 = MIRROR + 34 + 202 * 16          # 0x800075a6
 TRACK_BASE = MIRROR + 34                   # block 0, slot 0
+FX_BASE = FX_SLOT0 - 2 * 76                # what the cave loads into %a0
 
 SCRATCH = 0x46A40000             # %a2 / %a3 / %a4, well above BSS
 STACK = 0x46A00000
@@ -73,7 +80,8 @@ SENTINEL = 0x1234
 FULL = 0x7F00
 DEP_MAX = 0x7F00                 # bipolar depth at its positive stop
 LFO_VALUE = 0x40000000           # large and positive, so a written cell clamps
-LIMIT = 400_000_000
+LIMIT = 120_000_000   # enough to place the image and map memory;
+                      # emu_boot_check.py is the boot gate and runs 450 M
 
 # name, DEST byte, track (%a5), inner counter, the cell route A should write
 CASES = (
@@ -90,13 +98,20 @@ CASES = (
     ("a negative DEST byte",             0xFF, 6, 1, None),
 )
 
-CELLS = {
-    "track": lambda dest: TRACK_BASE + 2 * dest,
-    "fx25": lambda dest: FX_SLOT0 + 2 * 25,
-    "fx35": lambda dest: FX_SLOT0 + 2 * 35,
-    "fx48": lambda dest: FX_SLOT0 + 2 * 48,
-    "fx51": lambda dest: FX_SLOT0 + 2 * 51,
-}
+# The whole seventeen-block mirror is filled with the sentinel before every
+# case and scanned afterwards, rather than five predicted cells being watched.
+# A watch that only looks where the answer is expected cannot tell "it wrote
+# somewhere else" from "it wrote nothing", and those are different faults.
+MIRROR_SPAN = 34 + 202 * 17        # 3,468 bytes -- the smoother's own count
+
+
+def expected_cell(dest: int) -> int | None:
+    """Where route A says this DEST must land, or None for "nothing at all"."""
+    if dest >= 0x80:               # mvs.b makes it negative; the bound rejects it
+        return None
+    if dest <= 100:
+        return TRACK_BASE + 2 * dest
+    return FX_BASE + 2 * dest
 
 
 def ensure(uc, address: int, size: int = 4) -> None:
@@ -144,18 +159,23 @@ def prepare(uc) -> None:
         ensure(uc, address, size)
 
 
-def run_case(uc, dest: int, track: int, inner: int) -> tuple[int, dict]:
-    """Call the evaluator's destination write once; return the pc and the cells."""
-    watched = {name: fn(dest) for name, fn in CELLS.items()}
-    watched["track"] = TRACK_BASE + 2 * (dest & 0x7F)
-    for address in set(watched.values()):
-        uc.mem_write(address, struct.pack(">H", SENTINEL))
+def run_case(uc, dest: int, track: int, inner: int) -> dict:
+    """Call the evaluator's destination write once and report what it did.
+
+    The whole mirror is filled with the sentinel first and scanned after, so a
+    store that lands somewhere unexpected is *seen* rather than read as silence.
+    The registers are read back too: `%d7` is the DEST the evaluator actually
+    got, `%a0` the base it chose and `%fp` the cell it computed, which between
+    them say which step failed when one does.
+    """
+    uc.mem_write(MIRROR, struct.pack(">H", SENTINEL) * (MIRROR_SPAN // 2))
 
     # %a4 is the per-LFO mirror pointer: DEST at +74, DEP at +82.
     a4 = SCRATCH
-    uc.mem_write(a4 + 64, b"\x00" * 32)
+    uc.mem_write(a4 + 64, bytes(32))
     uc.mem_write(a4 + 74, bytes([dest & 0xFF]))
     uc.mem_write(a4 + 82, struct.pack(">H", DEP_MAX))
+    echo = uc.mem_read(a4 + 74, 1)[0]
 
     uc.reg_write(UC_M68K_REG_A7, STACK)
     uc.mem_write(STACK + 48, struct.pack(">I", inner))
@@ -168,12 +188,34 @@ def run_case(uc, dest: int, track: int, inner: int) -> tuple[int, dict]:
     uc.reg_write(UC_M68K_REG_A6, 0)
     uc.reg_write(UC_M68K_REG_D0, LFO_VALUE)
     uc.reg_write(UC_M68K_REG_D7, 0)
+    uc.reg_write(UC_M68K_REG_D2, 0)
+
+    # Read the setup back before running it. A register or a byte that did not
+    # take is the one fault this harness cannot distinguish from a build that
+    # writes nothing, so it is checked rather than assumed.
+    setup = {
+        "a4": uc.reg_read(UC_M68K_REG_A4),
+        "a5": uc.reg_read(UC_M68K_REG_A5),
+        "sp": uc.reg_read(UC_M68K_REG_A7),
+        "inner": struct.unpack(">I", bytes(uc.mem_read(STACK + 48, 4)))[0],
+        "base": struct.unpack(">I", bytes(uc.mem_read(STACK + 52, 4)))[0],
+    }
 
     uc.emu_start(ENTRY, EXIT, count=64)
-    pc = uc.reg_read(UC_M68K_REG_PC)
-    read = {name: struct.unpack(">H", bytes(uc.mem_read(address, 2)))[0]
-            for name, address in watched.items()}
-    return pc, read
+
+    after = bytes(uc.mem_read(MIRROR, MIRROR_SPAN))
+    wrote = [(MIRROR + i, struct.unpack_from(">H", after, i)[0])
+             for i in range(0, MIRROR_SPAN - 1, 2)
+             if struct.unpack_from(">H", after, i)[0] != SENTINEL]
+    return {
+        "pc": uc.reg_read(UC_M68K_REG_PC),
+        "echo": echo,
+        "d7": uc.reg_read(UC_M68K_REG_D7),
+        "a0": uc.reg_read(UC_M68K_REG_A0),
+        "fp": uc.reg_read(UC_M68K_REG_A6),
+        "wrote": wrote,
+        "setup": setup,
+    }
 
 
 def sweep(uc, label: str) -> dict:
@@ -182,11 +224,12 @@ def sweep(uc, label: str) -> dict:
     out = {}
     try:
         for name, dest, track, inner, _ in CASES:
-            pc, read = run_case(uc, dest, track, inner)
-            written = sorted(k for k, v in read.items() if v != SENTINEL)
-            out[name] = (pc, tuple(written), read)
-            marks = ", ".join(f"{k}={read[k]:#06x}" for k in written) or "nothing"
-            print(f"    {label:<8} {name:<34} pc {pc:#010x}  wrote {marks}")
+            r = run_case(uc, dest, track, inner)
+            out[name] = r
+            where = ", ".join(f"{a:#010x}={v:#06x}" for a, v in r["wrote"]) or "nothing"
+            print(f"    {label:<8} {name:<34} byte {r['echo']:#04x} "
+                  f"d7 {r['d7'] & 0xFFFFFFFF:#010x} a0 {r['a0']:#010x} "
+                  f"fp {r['fp']:#010x} -> {where}")
     finally:
         uc.reg_write(UC_M68K_REG_SR, sr)
     return out
@@ -213,34 +256,68 @@ def main() -> int:
 
     print()
     fails = []
-    for name, dest, track, inner, expect in CASES:
-        pc, written, read = got[name]
-        if pc != EXIT:
-            fails.append(f"{name}: the evaluator stopped at {pc:#010x}, not {EXIT:#010x}")
-            continue
-        want = () if expect is None else (expect,)
-        if written != want:
-            fails.append(f"{name}: wrote {written or ('nothing',)}, expected "
-                         f"{want or ('nothing',)}")
-            continue
-        if expect is not None and read[expect] not in (0, FULL):
-            fails.append(f"{name}: {expect} holds {read[expect]:#06x}, which is "
-                         f"neither clamp endpoint -- the write is not the evaluator's")
-        # The control: stock must agree below 101 and write nothing above it.
-        spc, swritten, _ = stock[name]
-        if dest <= 100 and dest != 0:
-            if swritten != written:
-                fails.append(f"{name}: stock wrote {swritten}, the build wrote {written}")
-        elif dest > 100 and dest < 0x80:
-            if swritten:
-                fails.append(f"{name}: stock wrote {swritten} for a code above 100, "
-                             f"so the harness is not measuring the patch")
 
-    demo = got["THE DEMO: no dest, track 1 LFO1"]
-    other = got["no destination, track 2 LFO1"]
-    if demo[1] == other[1]:
+    # The instrument is validated on a known positive before any negative in it
+    # is believed (docs/PRINCIPLES.md section 19). Stock MUST write the sink for
+    # a plain sound destination; if it does not, nothing else here means
+    # anything and the harness is what is broken.
+    probe = stock["a sound destination, slot 5"]
+    if not probe["wrote"]:
+        print("  ** the control wrote nothing for sound slot 5 **")
+        print(f"     byte {probe['echo']:#04x}  d7 {probe['d7'] & 0xFFFFFFFF:#010x}  "
+              f"a0 {probe['a0']:#010x}  fp {probe['fp']:#010x}  pc {probe['pc']:#010x}")
+        print("     The harness cannot see a write it is certain stock makes, so")
+        print("     every 'wrote nothing' above is a property of the harness, not")
+        print("     of the build. Nothing is concluded.")
+        return 2
+
+    for name, dest, track, inner, _ in CASES:
+        r, sr_ = got[name], stock[name]
+        want = expected_cell(dest)
+        if dest == 0 and name.startswith("THE DEMO"):
+            want = FX_BASE + 2 * 111
+        if r["pc"] != EXIT:
+            fails.append(f"{name}: the evaluator stopped at {r['pc']:#010x}, "
+                         f"not {EXIT:#010x}")
+            continue
+        if r["echo"] != (dest & 0xFF):
+            fails.append(f"{name}: the DEST byte read back as {r['echo']:#04x}, "
+                         f"not {dest & 0xFF:#04x} -- the harness did not set it")
+            continue
+        bad = {k: v for k, v in r["setup"].items()
+               if v != {"a4": SCRATCH, "a5": track, "sp": STACK,
+                        "inner": inner, "base": TRACK_BASE}[k]}
+        if bad:
+            fails.append(f"{name}: the setup did not take -- "
+                         + ", ".join(f"{k}={v:#x}" for k, v in bad.items()))
+            continue
+        addresses = [a for a, _ in r["wrote"]]
+        if want is None:
+            if addresses:
+                fails.append(f"{name}: wrote {addresses}, expected nothing")
+            continue
+        if addresses != [want]:
+            fails.append(f"{name}: wrote {[hex(a) for a in addresses] or 'nothing'}, "
+                         f"expected [{want:#010x}]  (d7 {r['d7'] & 0xFFFFFFFF:#010x} "
+                         f"a0 {r['a0']:#010x} fp {r['fp']:#010x})")
+            continue
+        if r["wrote"][0][1] not in (0, FULL):
+            fails.append(f"{name}: {want:#010x} holds {r['wrote'][0][1]:#06x}, which "
+                         f"is neither clamp endpoint -- the write is not the evaluator's")
+        # The control: stock agrees below 101 and writes nothing above it.
+        stock_addresses = [a for a, _ in sr_["wrote"]]
+        if 0 < dest <= 100 and stock_addresses != addresses:
+            fails.append(f"{name}: stock wrote {[hex(a) for a in stock_addresses]}, "
+                         f"the build wrote {[hex(a) for a in addresses]}")
+        if 100 < dest < 0x80 and stock_addresses:
+            fails.append(f"{name}: stock wrote {[hex(a) for a in stock_addresses]} for a "
+                         f"code above 100, so this is not measuring the patch")
+
+    demo = [a for a, _ in got["THE DEMO: no dest, track 1 LFO1"]["wrote"]]
+    other = [a for a, _ in got["no destination, track 2 LFO1"]["wrote"]]
+    if demo == other:
         fails.append("the demonstration does not distinguish track 1 from track 2")
-    if stock["THE DEMO: no dest, track 1 LFO1"][1] != ("track",):
+    if [a for a, _ in stock["THE DEMO: no dest, track 1 LFO1"]["wrote"]] != [TRACK_BASE]:
         fails.append("stock does not write the sink for DEST 0 -- the control is wrong")
 
     if fails:
