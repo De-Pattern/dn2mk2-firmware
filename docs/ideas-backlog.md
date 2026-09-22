@@ -27,7 +27,7 @@ Where they disagree, they win and this table is wrong.
 | 1 | Reclaiming space | **built, not flashed** | `payload-section_DN2_1.11.syx`; ran end to end under the emulator 2026-09-17 | the flash — whether the instrument's bootloader accepts a larger section 3. It gates §14's bands, §9's textures, §3's shipped half |
 | 2 | Emulator as a test harness | **superseded** | digikit's emulator, used daily | nothing; the gearmulator fork below was never taken up. Reasoning kept |
 | 3 | PCM catalogue | **delivered** | `transients` mod, `site/transients.html` (#55, #56, #57); solved on hardware #64 | `TRAN = 4*slot - 8`, 32 of 34 reachable. Adding samples rather than remapping waits on §1's flash |
-| 4 | FX and Master modulation | **partly delivered** | `moddest` mod, `site/destinations.html` (#60, #61) — 13 more destinations | the FX/Master parameters themselves, and whether they can be p-locked (a separate question, for DNX's pattern format) |
+| 4 | FX and Master modulation | **partly delivered; the blocker is gone (2026-09-22)** | `moddest` mod, `site/destinations.html` (#60, #61) — 13 more destinations | the FX/Master parameters themselves, and whether they can be p-locked (a separate question, for DNX's pattern format) |
 | 5 | Bake LFO output into p-locks | **open** | — | everything; but its stated blocker is gone — LFO4 ships a working tick |
 | 6 | New ELE3 section | **open** | — | a first flash with a payload whose absence is harmless. Cheaper than this entry assumed: `dest` is never read (2026-09-15) |
 | 7 | DSP hunt | **open, unparked** | digikit's SHARC+ Ghidra module and Python disassembler; `selache` (#87) | p-code semantics and anything built on them |
@@ -417,6 +417,14 @@ than the destination path. **Owner's first priority, 2026-09-22.**
 > That document has the nine consumers of `+44`, a route costed at four or five
 > caves, the p-lock position (kit data, not lock-table data), and the cheapest
 > next experiment: one counter and one `movew` into block 16 from the audio ISR.
+>
+> **That experiment was run on 2026-09-22 and it passed.** `fxblock16` swept Delay
+> Feedback Gain and the instrument's delay audibly surged and collapsed, so the DSP
+> reads block 16, nothing else publishes the FX settings over it, and nothing
+> overwrites it later in the frame. **This item is no longer blocked.** The route to
+> take is A — a new `DEST` code range applied where the frame builder writes block
+> 16, so the modulation is part of the rebuild rather than a race against it.
+> `docs/fx-master-modulation.md` §9.
 > It also corrects reason 3 below and four claims in other files.
 
 **The idea (2026-09-12).** The DN2's FX **settings** — the parameters that
