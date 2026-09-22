@@ -584,3 +584,63 @@ a boot. That is a known property of this harness, recorded in
 `emu_boot_engine.py`'s own docstring about `lfo4_refresh`, and it is why the
 cave gate calls the payload directly. Everything short of the wire can be
 checked here; the wire is the flash.
+
+## 9. It sweeps — the DSP reads block 16, 2026-09-22
+
+`fxblock16_DN2_1.11.syx` was flashed and the owner's report is the pass row of
+§8 verbatim:
+
+> "What you hear: It sweeps"
+
+**So the sound chip does act on the block at `0x800068e4`.** A write from the
+ColdFire into slot 35 — Delay Feedback Gain, `B + 3336` — reaches the audio
+path and is audible, and nothing later in the 0.67 ms cycle takes it back.
+
+### What that settles, precisely
+
+Five readings of the firmware agreed on where the FX and Master parameters sit
+and **none of them proved anybody downstream read it** (§0's standing caveat, and
+the whole reason §6's plan could not be costed). That gap is now closed by the
+instrument rather than by another reading:
+
+| was open | now |
+|---|---|
+| is block 16 the **live** FX mirror, or a copy nobody consumes? | live — a store into it changes what comes out of the speakers |
+| does something **else** publish the FX settings and win? | no; there is no competing sender for this cell |
+| does a later writer in the same frame overwrite ours? | no — the sweep sustains, it does not snap back |
+
+The third row matters as much as the first: §8 listed "it moves, then snaps
+back" as a distinct outcome needing the cave moved down towards `0x400275a6`.
+It did not happen, so the hook site at `0x4002719c` stands.
+
+**It also confirms §4c's formula end to end.** `mirror[block][slot] = B + 34 +
+202*block + 2*slot` was derived from six `pea` displacements in the frame
+builder and cross-checked against the mute-gate writes at `0x40027468`. A cell
+computed from it, written by hand, produced exactly the parameter the formula
+names. The arithmetic is not a plausible fit any more; it is confirmed by
+construction.
+
+### What it does not settle
+
+The store went in from the **audio interrupt**, at a point in the frame where
+the block is already built. It says the DSP reads the block; it does **not** say
+that a value written from the *control* side — where an LFO's output would
+arrive — survives the rebuild that happens every frame. §4c's whole finding is
+that the frame builder **recomputes** block 16 from the FX setup objects, so a
+control-side write is the thing that could still be overwritten, and route A
+places our contribution inside that rebuild for exactly that reason.
+
+That is a design question route A already answers, not a new unknown. But it is
+the difference between "the lane is live" and "the feature works", and the two
+should not be run together — §8's own lesson about reading a result for more
+than it says.
+
+### What happens next
+
+§6's costed plan is unblocked and **route A is the one this result argues for**:
+a new `DEST` code range, applied where the frame builder writes block 16, so the
+modulation is part of the rebuild rather than a race against it. Roughly four or
+five small patches, all of the same kind as LFO4's.
+
+`docs/ideas-backlog.md` §4 moves from *blocked, pending one experiment* to
+*ready*, which is where the owner ranked it first.
