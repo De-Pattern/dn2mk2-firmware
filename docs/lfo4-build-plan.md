@@ -4599,3 +4599,60 @@ the per-LFO flags, the state backup, the per-track strides.
 `docs/instruments.md` says to reach what the sequencer will not run for us.
 Finding it is the work: what runs when a trig fires that could decide whether
 the fourth LFO's contribution survives, when the first three always do.
+
+#### The LFO state arrays are touched from nowhere else — 2026-09-23
+
+Before looking for a note-on routine that resets LFO phase, it was worth asking
+whether one can exist. Every 32-bit reference in the stock image to the three
+state array bases, and every value landing *inside* one of their 1,920-byte
+spans, was listed and checked against the built image:
+
+| reference | at | in the build |
+|---|---|---|
+| `STOCK_LIVE` | `0x40137342`, `0x40137742`, `0x40137760`, `0x401377f4` | patched |
+| `STOCK_LIVE+37` | `0x401372fe` | patched |
+| `STOCK_SECOND` | `0x40137396`, `0x40137428` | patched |
+| `STOCK_SECOND+37/+38/+80` | `0x40137352`, `0x401373ba`, `0x40137420` | patched |
+| `STOCK_BACKUP` | `0x40137748`, `0x4013780e` | patched |
+
+Three further hits read "still stock" and none is real: `0x401373c0` is the
+flag sweep's end bound, which is **dead code** behind the `jmp` that replaces
+the routine at `0x401373b8`; and `0x40236fbe`, `0x4024c07e`, `0x4026b36e` are
+2-byte-aligned windows in data that happen to fall inside a 1,920-wide range.
+
+**So every reference is inside `0x40137342..0x4013780e` — the two evaluators
+and their initialisers, and nothing else in three megabytes.** The firmware has
+no other code that can reach an LFO's phase. A note-on cannot be resetting LFO
+state directly, because there is nowhere for it to do so from.
+
+That leaves one route by which anything outside the evaluators can affect an
+LFO: **the per-record enable byte at `+38`**, the one the flag sweep sets.
+
+#### Who calls the flag sweep
+
+`0x401373b8` has **one** direct caller: `0x4012b6f4`, inside the function at
+`0x4012a89a` — and the boot log names `0x4012a9a8` as the entry of a
+**priority-8 task** created at `0x4012b892`. The call sits behind a dispatch:
+
+```
+4012b6ec  moveq #5,%d1
+4012b6ee  cmpl  %d0,%d1
+4012b6f0  bnew  0x4012b50c
+4012b6f4  jsr   0x401373b8        ; the flag sweep
+4012b6fa  clrl  %d2
+```
+
+So the sweep runs when that task receives **command 5**, and it is the only way
+the enable byte is ever set. The next questions, in order, and all of them
+static:
+
+1. what is command 5, and what sends it;
+2. where the evaluator **reads** `+38`, and whether it clears it — an enable
+   that is consumed once would be per-note by construction;
+3. whether our `flags` stub sets the fourth record's byte at the moment stock
+   sets the first three, or a frame later.
+
+`csrc/lfo4/`'s stub writes `+0/+40/+80/+120` and strides 160 where stock wrote
+`+0/+40/+80` and strode 120, which is arithmetically right. Being right about
+*where* is not the same as being right about *when*, and (2) is where that
+distinction would show.
