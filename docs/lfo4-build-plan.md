@@ -4271,3 +4271,63 @@ A per-track array is sixteen rows of eight `u16` -- 256 bytes, no hashing, no
 eviction, and no way for it to be full. It is not the shipping design, because
 p-locks and sound-per-track would need the address back. It is a probe that
 answers the only question left.
+
+### [CORRECTED again — 2026-09-22 night] `lfo4-keepall` works, and the load drop is the bug
+
+The section immediately above misread the owner's report. "keep all is better,
+it modulates similar to other fw where modulation triggering was erratic" was
+taken as *still* erratic; it means it now behaves like the other firmwares,
+where previously triggering had been erratic. Confirmed a message later: **"it
+modulates as expected."**
+
+So the removal branch does not close -- it is the answer. The three builds,
+read correctly:
+
+| build | removal paths | on the instrument |
+|---|---|---|
+| `lfo4-browser` | all on | erratic, about one trig in fifteen |
+| `lfo4-keeprow` | copy, carry, clear off; **load still drops** | worse |
+| `lfo4-keepall` | all four off | **works as expected** |
+
+`keeprow` and `keepall` differ in exactly one thing, so that one thing is the
+bug:
+
+```c
+void lfo4_on_load(void *live, const void *stored) {
+    ...
+    if (!any) {
+        ext_drop((u32)live);   /* <- this */
+```
+
+`lfo4_on_load` drops the live entry whenever the stored sound it is loading
+carries no LFO4 values -- which is **every stock sound**, and every sound saved
+before this build existed. A load therefore wipes an edit the panel has just
+made, and a boot runs that path 2,192 times.
+
+It also explains the owner's other report of the same evening: **LFO4's
+settings do not survive a power cycle.** They are removed on the way back in,
+not lost on the way out.
+
+`keeprow` being worse than either end now has a reading too: it is the only
+build where copies and carries have stopped reclaiming *while* loads still
+remove the user's fresh entry -- the worst of both, which is what was heard.
+
+#### Why `keepall` is still not the fix
+
+Nothing removes a row in it, so a sound that genuinely has no LFO4 keeps
+whatever the last sound at that address had. Settings bleed between sounds and
+patterns; the owner was told to expect it.
+
+The real fix has to tell two cases apart that `!any` currently conflates:
+
+1. **a stored sound with no LFO4 values, being loaded over a live sound the
+   user has just edited** -- the edit must survive, because that is what every
+   other parameter on the instrument does;
+2. **a stored sound with no LFO4 values, loaded over a live sound carrying a
+   previous sound's LFO4** -- the entry must go, or values bleed.
+
+The live sound's own identity is what separates them, and `docs/lfo4-build-
+plan.md` §8 already has the material: the stored block has the reserved rank
+`4 * slot + 0` free. A sound saved by this build always writes those eight ids,
+so "stored has no LFO4" and "stored was never saved by us" are distinguishable
+if the save marks itself. That is the next piece of work, and it is small.
