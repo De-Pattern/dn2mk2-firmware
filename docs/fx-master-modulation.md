@@ -948,10 +948,37 @@ better demonstration than a hard-coded ramp, because the owner can steer it.
 | gate | result |
 |---|---|
 | `check_coldfire.py out/fxdest/section_3_MAIN_OS.bin` | **pass** — **1,539** hits against `out/lfo4-browser`'s **1,540**. `--against` that baseline: 1,539 shared (its data), **0 new**. Below the ceiling because this build carries no compiled chunk |
-| `emu_boot_check.py out/fxdest/section_3_MAIN_OS.bin`, from reset | see the log `out/emu-logs/gate_fxdest.log` |
+| `emu_boot_check.py out/fxdest/section_3_MAIN_OS.bin`, from reset | **pass** — *"booted and drew its UI (1 frame(s), control 1)"*, exit 0, 450 M instructions. Not a fault and not a hang |
 | `emu_boot_engine.py --build out/fxdest` | **does not apply, and was replaced.** It opens `out/<build>/symbols.json` and counts `lfo4_refresh`; this build has no chunk and no symbols, so it fails on the missing file before booting anything. Recording that as "n/a" would be `docs/PRINCIPLES.md` §19 again, so `scripts/emu_fxdest.py` asks the same question in the form this build can answer |
-| `scripts/emu_fxdest.py` — the replacement | see the same log |
+| `scripts/emu_fxdest.py` | **pass on the third run**, exit 0, `out/emu-logs/gate_fxdest3.log`. The first two runs are in §13 because how they failed is the useful part |
 | `dnfw inspect` | **pass** — 21/21 integrity checks and the HMAC-SHA256 trailer reproduced |
+
+The passing run, eleven cases against a case-for-case stock control:
+
+| case | `fxdest`: `%a0` / store | stock: `%a0` / store |
+|---|---|---|
+| sound slot 5 | `0x80006906` / `0x80006910` | `0x80006906` / `0x80006910` |
+| sound slot 100 | `0x80006906` / `0x800069ce` | `0x80006906` / `0x800069ce` |
+| `DEST` 0, track 2 LFO1 | `0x80006906` / `0x80006906` | same |
+| `DEST` 0, track 1 LFO2 | `0x80006906` / `0x80006906` | same |
+| `DEST` 0, track 1 LFO3 | `0x80006906` / `0x80006906` | same |
+| **the demonstration**, `DEST` 0, track 1 LFO1 | `%d7` becomes **`0x6f`**, `0x8000750e` / **`0x800075ec`** | `%d7` stays 0, `0x80006906` / `0x80006906` |
+| code 101, Chorus Depth | `0x8000750e` / `0x800075d8` | **nothing; `%a0` and `%fp` untouched** |
+| code 111, Delay Feedback Gain | `0x8000750e` / **`0x800075ec`** | **nothing** |
+| code 124, Reverb FX Routing | `0x8000750e` / `0x80007606` | **nothing** |
+| code 127, the top of the range | `0x8000750e` / `0x8000760c` | **nothing** |
+| a negative `DEST` byte | nothing; `%a0` and `%fp` untouched | nothing |
+
+`0x800075ec` is the cell `fxblock16` swept on the instrument in §9, reached here
+from a `DEST` code instead of a hard-coded address. Every other address is
+`0x800075a6 + 2*(code - 76)` with no residue, and stock's `%a0` staying at zero
+above code 100 is the control saying the patch is what changed — not the
+harness.
+
+**The value is not asserted and that is deliberate.** Each store carries
+`0x1234`, the sentinel, because this emulator's EMAC contributes nothing to the
+accumulate and the evaluator writes the cell's own value back. The address is
+the whole of what route A changes; the depth is a question for the instrument.
 
 `emu_fxdest.py` boots the patched image from reset and then **calls evaluator
 A's destination write by hand**, `0x40137a8a` → `0x40137ad2`, with the registers
@@ -986,3 +1013,98 @@ this build asks.
   bound then rejects. Widening that read to `mvz.b` is a separate step; Chorus,
   Delay and Reverb — slots 25..48, codes 101..124 — are the whole of what
   101..127 buys.
+
+## 13. The two harness runs that measured nothing, and why they are kept
+
+`scripts/emu_fxdest.py` passed on its third run. The first two are recorded
+because they are a clean instance of `docs/PRINCIPLES.md` §19 — *a negative is
+only as good as the instrument that produced it* — and because the second one
+very nearly read as a verdict on the build.
+
+### Run 1 — "wrote nothing", eleven times, and for stock too
+
+The harness filled five predicted cells with a sentinel, ran the evaluator, and
+compared. Every case read "wrote nothing", **including the stock control's
+plain sound destination**, which stock certainly writes. The zero was a
+property of the harness. Nothing about `fxdest` was measured.
+
+It was caught only because the case list carried positive controls — sound
+slots 5 and 100, which have nothing to do with route A and exist purely so the
+instrument can be seen finding something it must find. Without them, eleven
+rows of "wrote nothing" against a build that changes where a write lands would
+have read as "the patch does not write", and that is the wrong answer with the
+right shape.
+
+### Run 2 — the registers, and a refusal to conclude
+
+Three changes: read the setup back before using it, watch the **whole**
+3,468-byte mirror rather than five predicted cells, and return `%d7`, `%a0` and
+`%fp` with each result. And a gate: if stock does not write the sink for sound
+slot 5, print why and exit **2** without reaching a verdict on anything.
+
+It exited 2, as designed — and its register readings are the measurement the
+build actually needed:
+
+```
+fxdest  sound slot 5      byte 0x05  d7 0x00000005  a0 0x80006906  fp 0x80006910
+fxdest  THE DEMO          byte 0x00  d7 0x0000006f  a0 0x8000750e  fp 0x800075ec
+fxdest  code 124          byte 0x7c  d7 0x0000007c  a0 0x8000750e  fp 0x80007606
+fxdest  a negative byte   byte 0xff  d7 0xffffffff  a0 0x00000000  fp 0x00000000
+stock   code 111          byte 0x6f  d7 0x0000006f  a0 0x00000000  fp 0x00000000
+```
+
+Every address route A claims, from the machine, with stock as the control —
+and the harness still declined to call it a pass, because it could not see the
+store. That refusal is the part worth keeping.
+
+### What was actually wrong: a read-modify-write that contributes nothing
+
+The evaluator's store is `movew %d0,%fp@` at the end of
+
+```
+mvs.w %fp@,%d1      ; read the cell
+addl  %d1,%d0       ; add this LFO's contribution
+   ... clamp ...
+movew %d0,%fp@      ; write it back
+```
+
+and the contribution reaches `%d0` through `macl`/`movclrl`, the EMAC. Under
+this emulator that term is zero, so the evaluator **wrote the sentinel back
+over itself**. A watch that compares memory before and after cannot see a store
+of the value already there, and cannot see it for stock either — which is
+exactly why the control failed its own positive both times.
+
+Run 3 replaced the comparison with `UC_HOOK_MEM_WRITE`. Every store appeared at
+once, each carrying `0x1234`: the diagnosis confirmed rather than worked
+around.
+
+### A reading that looked decisive and was not
+
+Every row of runs 1 and 2 ends `pc 0x40137ad2`, which is also the target of the
+evaluator's skip branch (`bcss 0x40137ad2` at `0x40137a98`). That invites the
+conclusion that the evaluator took the "no destination" exit and never reached
+the store.
+
+**It does not follow.** `0x40137ad2` is the `until` argument the harness passes
+to `emu_start`; the store at `0x40137ad0` is the instruction immediately before
+it, so a case that runs the store stops there too. Reaching it is compatible
+with both paths and distinguishes neither. What *does* distinguish them is
+`%a0` and `%fp` — the skip leaves both untouched, which exactly one case shows
+(the negative byte), and the write hook then found a store in each of the other
+ten.
+
+The general form, and it is the same one §19 lists six times: **a value that
+every outcome produces is not a measurement.** `pc` was one; so was a memory
+comparison against a read-modify-write that writes what it read.
+
+### What the case list should carry next time
+
+- **Positive controls that the patch has nothing to do with.** Sound slots 5
+  and 100 are the only reason runs 1 and 2 were not believed.
+- **A negative control inside the same run.** Stock's `%a0` staying at zero
+  above code 100 is what makes "the build writes block 16" a statement about
+  the build.
+- **A watch that cannot be satisfied by inaction.** Hook the write; do not
+  compare the memory.
+- **A refusal path.** An instrument that fails its own positive should exit
+  differently from one that fails the subject, or the log reads as a verdict.

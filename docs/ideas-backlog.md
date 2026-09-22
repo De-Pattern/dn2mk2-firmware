@@ -434,10 +434,16 @@ than the destination path. **Owner's first priority, 2026-09-22.**
 > `mirror[16][c - 76]` — FX slots 25..48, Chorus/Delay/Reverb. The depth
 > multiply, the accumulate, the `0..0x7f00` clamp and the store are all stock.
 > Evaluator B needs no patch, re-verified: it keeps its own `moveq #100` and a
-> second bound at `0x401376c2` that stops it at `DEST` 8. Gates passed:
-> `check_coldfire` 1,539 against the 1,540 baseline with **0 new**, and `dnfw
-> inspect` 21/21 with the HMAC trailer. **It has not been flashed and needs the
-> owner's go-ahead.** `docs/fx-master-modulation.md` §12.
+> second bound at `0x401376c2` that stops it at `DEST` 8. **All four gates
+> pass**: `check_coldfire` 1,539 against the 1,540 baseline with **0 new**;
+> `dnfw inspect` 21/21 with the HMAC trailer; `emu_boot_check` booted from
+> reset and drew its UI; and `emu_fxdest` puts every code on the cell route A
+> names — 101 on `0x800075d8`, 111 on `0x800075ec`, the cell the instrument
+> swept, 124 on `0x80007606` — with a stock control that leaves `%a0` at zero
+> above code 100 and writes nothing. **It has not been flashed and needs the
+> owner's go-ahead.** `docs/fx-master-modulation.md` §12; §13 keeps the two
+> harness runs that measured nothing, because one of them nearly read as a
+> verdict on the build.
 >
 > **Item 3 was read and it changes the plan.** The destination list at
 > `0x4003951e` holds *entry numbers*, not slots, and its only source is the
