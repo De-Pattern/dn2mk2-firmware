@@ -22,8 +22,9 @@ track's mirror base, `%a5` the track counter, `%sp@(48)` the inner counter
 Both candidate cells — the track's and block 16's — are pre-loaded with a
 sentinel before every case, and the depth is set to full positive with a large
 LFO value so a cell that *is* written clamps to `0x7f00` and a cell that is not
-still reads the sentinel. A watch has to be able to produce a different answer
-for each outcome; this one can.
+still reads the sentinel, whichever end of the `0..0x7f00` clamp the MAC lands
+on. A watch has to be able to produce a different answer for each outcome; this
+one can.
 
 **The stock section is run as a control, case for case.** Without it, "code 111
 wrote block 16" could be a property of the harness rather than of the patch.
@@ -222,9 +223,9 @@ def main() -> int:
             fails.append(f"{name}: wrote {written or ('nothing',)}, expected "
                          f"{want or ('nothing',)}")
             continue
-        if expect is not None and read[expect] != FULL:
-            fails.append(f"{name}: {expect} holds {read[expect]:#06x}, not the "
-                         f"clamp {FULL:#06x} -- the write is not the evaluator's")
+        if expect is not None and read[expect] not in (0, FULL):
+            fails.append(f"{name}: {expect} holds {read[expect]:#06x}, which is "
+                         f"neither clamp endpoint -- the write is not the evaluator's")
         # The control: stock must agree below 101 and write nothing above it.
         spc, swritten, _ = stock[name]
         if dest <= 100 and dest != 0:
