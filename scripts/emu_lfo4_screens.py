@@ -36,7 +36,10 @@ from emulib.machine import SNAP, Machine                          # noqa: E402
 from emulib.panel import MOD, Panel                               # noqa: E402
 from emulib.report import check, report                           # noqa: E402
 
-BUILD = "/mnt/d/01_Code/Z_Personal/dn2_firmware/out/lfo4-value"
+# Which build to look at, so the same probe can check a fix as well as measure
+# the fault it was written for: `DT2_BUILD=out/lfo4-ui2`.
+BUILD = os.path.join("/mnt/d/01_Code/Z_Personal/dn2_firmware",
+                     os.environ.get("DT2_BUILD", "out/lfo4-value"))
 MODE_OBJECT = 0x447BF800
 VEC_BEGIN, VEC_END, CURRENT = 124, 128, 144
 LFO4_PAGE = 37
@@ -92,7 +95,15 @@ def main() -> int:
 
     check("the mode was given a fourth page", offered == [4, 5, 6, LFO4_PAGE],
           f"{offered}")
-    check("it was given one exactly once", swapped == 1, f"{swapped}")
+    # Either mechanism is correct, and which one ran is the whole difference
+    # between the two builds. `page.c` swaps the vector on the first mode
+    # header (`swapped == 1`); `pagelist.c` builds it with four ids at startup,
+    # so the swap finds four already there and declines (`swapped == 0`). Only
+    # the startup route puts the fourth page dot on the screen before `[MOD]`
+    # is pressed, which is what the instrument reported on 2026-09-22.
+    check("it was given a fourth page once, or already had one",
+          swapped in (0, 1),
+          f"swapped {swapped} -- {'at startup' if swapped == 0 else 'on the first header'}")
     check("[MOD] reaches the fourth page", 3 in reached, f"indices {reached}")
     check("and cycles past it rather than stopping", len(reached) == 4,
           f"indices {reached} over {args.taps} tap(s)")

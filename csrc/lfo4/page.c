@@ -20,9 +20,14 @@
  * this code has never had to learn their layout. It copies LFO3's name object
  * and changes one character.
  *
- * Both happen the first time a mode header is drawn with `4 5 6` in it, which
- * is the first moment the structures exist and is always before a page change:
- * entering MOD mode draws its header before any press can advance the index.
+ * The swap happens the first time a mode header is drawn with `4 5 6` in it.
+ * **That is one frame too late** when a project opens on the MOD page: three
+ * page dots are drawn until `[MOD]` is pressed once, reported from the
+ * instrument on 2026-09-22 and visible in the boot gate, which listed
+ * `lfo4_pages` as never exercised in a boot to a drawn frame. `pagelist.c`
+ * builds the vector with four ids at startup instead; this stays as the route
+ * for any build that does not patch that site, and declines once the vector
+ * already holds four.
  *
  * **The one thing this does that it cannot prove.** The vector's `begin` is
  * replaced with an array this build owns, so a destructor that frees it would
@@ -60,11 +65,26 @@ static u32 *page(u32 id)
     return (u32 *)(PAGE_TABLE + PAGE_STRIDE * id);
 }
 
-/* -> the record for a page id the firmware has none for, or 0 before it is
- * built. The accessor stub asks; this is the only reader that may be early. */
+static void build(void);
+
+/* -> the record for a page id the firmware has none for, or 0 if the UI has
+ * not built its own table yet. The accessor stub asks; this is the only
+ * reader that may be early, and it answers 0 by falling the id through to the
+ * fallback record, which is what an unknown id always returned.
+ *
+ * **It builds on demand rather than waiting to be told.** It used to be told,
+ * by `lfo4_pages`, which runs off the mode-header renderer -- so when the page
+ * list is instead made four at startup (`pagelist.c`) nothing calls that, and
+ * the record has to be built the first time someone asks for it.
+ */
 u32 lfo4_page_for(void)
 {
-    return lfo4_page_record[0] ? (u32)lfo4_page_record : 0;
+    if (!lfo4_page_record[0]) {
+        if (!page(LFO3_PAGE)[0])
+            return 0;                 /* the UI's page table is not filled yet */
+        build();
+    }
+    return (u32)lfo4_page_record;
 }
 
 static void build(void)

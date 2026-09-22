@@ -95,6 +95,7 @@ for tap in range(4):
 # Now the half a plain page walk cannot reach: the substitution only happens
 # when the waveform *is* `RND`, so the clamp and the table stay untouched until
 # something selects it. Three more taps returns to LFO3's page.
+frames = {}
 for phase, taps in (("LFO3", 3), ("LFO4", 1)):
     for _ in range(taps):
         panel.tap(MOD)
@@ -102,3 +103,18 @@ for phase, taps in (("LFO3", 3), ("LFO4", 1)):
     panel.push_and_turn(WAVE_ENCODER, +1, times=TO_RND)
     report(f"{phase} WAVE -> RND")
     print(f"    screen: {panel.screen(f'{phase.lower()}-rnd')}")
+    frames[phase] = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
+
+# **The counts are not the outcome.** `lfo4-ui` made this gate accept LFO4 and
+# hand back entry 326, and the instrument still drew `SPH`: two other routines
+# decide separately whether the waveform *is* `RND`. So compare the pictures.
+# LFO3's page with `RND` and LFO4's should differ only where every pair of MOD
+# pages differs -- the header digit and the page-position dots.
+a, b = frames.get("LFO3", b""), frames.get("LFO4", b"")
+if a and b and len(a) == len(b):
+    differ = sum(1 for x, y in zip(a, b) if x != y)
+    print(f"\n  the two RND pages differ in {differ} of {len(a)} frame byte(s)")
+    print("  (the header digit and the page dots alone were 13 bytes when the "
+          "waveform preview was checked the same way)")
+else:
+    print(f"\n  no comparable frames: {len(a)} and {len(b)} byte(s)")

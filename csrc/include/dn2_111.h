@@ -192,6 +192,31 @@ typedef unsigned char u8;
 #define DN2_DEST_MASK4      0x0200       /* what a fourth LFO may target */
 #define DN2_DEST_FLAG_BIT   15           /* lfo4records.DEST_FLAGS = 0x8000 */
 
+/* "Is this LFO's waveform `RND`?", asked twice and hard-coded both times.
+ *
+ * Extending `0x4010db00` was not enough: the instrument still drew `SPH` on
+ * LFO4's `RND`. There is a second kind of site, and `scan_lfo_triples.py`
+ * found two of them by the **`WAVE`** entries rather than the `SPH` ones --
+ * `pea 79`, `pea 89`, `pea 99` pushed as arguments.
+ *
+ * Each takes the `SPH` entry a column is about to draw, picks **that LFO's
+ * `WAVE` entry**, fetches its value and compares it against `0x600`, which is
+ * `RND`. LFO4's `SPH` is 327 and neither knows it, so neither ever concludes
+ * `RND` and the column keeps its own name.
+ *
+ * The two are byte-identical in shape, so each is patched at its **last**
+ * compare -- the three are woven through the function and only those eight
+ * bytes hold both exits.
+ */
+#define DN2_RND_A_GATE     0x4003662C   /* moveb #81,%d1 ; cmpl %d2 ; bne */
+#define DN2_RND_A_LFO1     0x40036634   /* moveal %a2@,%a0 ; pea 79 */
+#define DN2_RND_A_AFTER    0x4003664A   /* where all three converge */
+#define DN2_RND_A_DECLINE  0x4003667A   /* not an `SPH` entry at all */
+#define DN2_RND_B_GATE     0x40036A76
+#define DN2_RND_B_LFO1     0x40036A7E
+#define DN2_RND_B_AFTER    0x40036A94
+#define DN2_RND_B_DECLINE  0x40036AC4
+
 /* The parameter table as it sits in the image, for reading a record's own
  * default at init. `lfo4-table` relocates this table, but the image's copy is
  * still there and still correct -- and it is the one guaranteed to be loaded
