@@ -4778,3 +4778,41 @@ on every test, and it is the kind of gap that makes a finished feature feel
 unfinished. Added to the punch list beside the two already standing — LFO4's
 settings not surviving a power cycle (`lfo4_on_load`'s drop), and the `RND`
 column's third site.
+
+### LFO3 and LFO4 are byte-identical in the evaluator — 2026-09-23
+
+`scripts/emu_lfo4_vs_lfo3.py`. Both LFOs configured identically except for the
+destination — LFO3 through the mirror at slots 17..24 where the firmware puts
+its parameters, LFO4 through `ext_set` where ours live — same track, same
+frame, 240 frames:
+
+```
+  LFO3 (firmware's own parameters): [16389, 16395, 16400, 16406, 16411, ...]
+      240 distinct, 239 change(s) over 240, span 0x4005..0x452f
+  LFO4 (ours, through ext_set)     : [16389, 16395, 16400, 16406, 16411, ...]
+      240 distinct, 239 change(s) over 240, span 0x4005..0x452f
+  ratio 1.00, same character
+```
+
+**Not similar — identical.** Same values in the same order, same span, same
+count of changes. Given identical parameters and a zeroed phase that is the
+correct answer, and it is the first time LFO4's behaviour has been measured
+*against something*.
+
+**This existed to correct a flaw in the earlier evidence.** `emu_lfo4_sweep.py`
+drove LFO4 alone: its mirror is refilled with the resting `0x4000` every frame,
+which leaves LFO1-3 with a `DEST` byte of `0x40` and a depth of exactly centre,
+so they contribute nothing and there was nothing for LFO4's trajectory to be
+wrong against. A trajectory with no control is the same mistake as a hardware
+negative with no control, which this project made three times in one evening on
+2026-09-22. It is now made zero times in software.
+
+**So the evaluator is exonerated with a control, not by assertion.** The row is
+right, nothing removes it, and the code that turns it into modulation treats it
+exactly as it treats LFO3's. Every difference that could be measured frame by
+frame has been measured and there is none.
+
+What remains is the thing no harness in `scripts/` has ever run: **note-on.**
+The instrument's report has named it from the first sentence — binary per note,
+decided at note-on, sustained while the trig is held, more frequent the faster
+it is re-pressed — and it is now the only place left for the difference to be.
