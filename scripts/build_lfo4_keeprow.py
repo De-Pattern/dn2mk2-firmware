@@ -45,6 +45,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / "src"))
 
 import build_lfo4_bridge as bridge                         # noqa: E402
+import build_lfo4_browser as browser                       # noqa: E402
 import build_lfo4_page as page                             # noqa: E402
 import build_lfo4_pagelist as pagelist                     # noqa: E402
 import build_lfo4_slots as slots                           # noqa: E402
@@ -62,6 +63,7 @@ if __name__ == "__main__":
                                  out=OUT, syx=SYX,
                                  extra=[slots.divert, table.relocate, page.hooks,
                                         value.divert, value.companion, value.waveform,
-                                        ui.slew, ui.dest, pagelist.pagelist, ui2.rnd],
+                                        ui.slew, ui.dest, pagelist.pagelist, ui2.rnd,
+                                        browser.browser],
                                  chunks=table.chunks,
                                  defines={"LFO4_KEEP_ROWS": 1}))
