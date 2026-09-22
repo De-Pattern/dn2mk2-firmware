@@ -26,19 +26,17 @@
  * `docs/FEATURE-PLAYBOOK.md` §3 -- a demonstration has to be unmissable --
  * applied to a measurement.
  *
- *   SPD   **the destination in the row the engine is holding**, which reads
- *         straight off the glass as the slot number (`DEST` is stored as
- *         `slot << 8` and this column divides by 256). `0.00` means the
- *         engine is aiming at nothing, which is silence however right
- *         everything else is.
+ *   SPD   **the mirror cell LFO4 is aiming at, read live.** Not the setting --
+ *         the place the modulation lands. If LFO4's contribution reaches the
+ *         engine, this number moves on its own, continuously, whether or not a
+ *         note is playing.
  *
- *         It used to be a needle for the tick's last lookup, and that was
- *         **too weak to keep**: the tick refreshes sixteen tracks, so a hit on
- *         any one of them pinned it right while the track being played missed.
- *         From the instrument, 2026-09-22: it read hard right, `FADE` read
- *         hard right, `DEP` held the full dialled depth -- and nothing
- *         modulated. Two of those three are about the track in hand; the
- *         needle was not, so it could not narrow anything. `DEST` is.
+ *         It has been the tick's last-lookup needle and then the row's `DEST`,
+ *         and both of those questions are now answered -- the keys agree and
+ *         the row carries the right destination at the right depth. What is
+ *         not answered is whether the **contribution arrives in the mirror**,
+ *         and only the instrument can say, because in the emulator it does.
+ *
  *   FADE  **nothing -- it is the parameter again**, and taking it back is a
  *         correction, not a simplification.
  *
@@ -56,9 +54,17 @@
  *         **Rule taken from it:** divert a column only while its answer is
  *         still unknown, and never one whose value has to be right for the
  *         test to mean anything.
- *   DEP   not a needle: the depth **the engine is holding right now**, read
- *         out of `lfo4_rows`. Turn DEP to its stop and watch this follow --
- *         or fall back to 0 on its own, which is the bug happening.
+ *   DEP   **the mirror cell LFO3 is aiming at**, the same way, and it is the
+ *         control -- the thing three flashes on 2026-09-22 were missing. On
+ *         the instrument LFO3 sweeps every time and LFO4 about one trig in
+ *         fifteen, while in the emulator the two are **byte-identical**
+ *         through the same evaluator over 240 frames
+ *         (`scripts/emu_lfo4_vs_lfo3.py`). Which of these two numbers moves
+ *         decides where the fault is, and neither reading means anything
+ *         without the other.
+ *
+ *         **Set the two LFOs to different destinations**, or they stack into
+ *         one cell and both columns show the same thing.
  *
  * The other five columns are untouched, so the page still works and a
  * destination can still be chosen while the three are read.
@@ -99,20 +105,57 @@ static int panel_track(void)
     return -1;
 }
 
+/* The per-track parameter mirror, and the arithmetic is the firmware's own:
+ * `mirror[block][slot] = 0x800068e4 + 34 + 202*block + 2*slot`, derived from six
+ * `pea` displacements in the frame builder and confirmed by construction when a
+ * hand-computed cell in block 16 turned out to be the parameter the formula
+ * named (`docs/fx-master-modulation.md` §9). */
+#define MIRROR_BASE  0x800068E4u
+#define MIRROR_AT    34u
+#define MIRROR_STRIDE 202u
+
+#define LFO3_DEST_SLOT 20                 /* 8*2 + 4; the record table agrees */
+
+/* -> the destination slot LFO4 is aiming at, out of the row the engine holds. */
+static u32 lfo4_dest_of(void)
+{
+    int track = panel_track();
+
+    return (u32)(lfo4_rows[track < 0 ? 0 : track][3] >> 8) & 0x7Fu;
+}
+
+/* -> the destination slot LFO3 is aiming at, out of the mirror, where the
+ * firmware keeps its own LFOs' parameters. */
+static u32 lfo3_dest_of(void)
+{
+    int track = panel_track();
+    u32 at = MIRROR_BASE + MIRROR_AT
+             + MIRROR_STRIDE * (u32)(track < 0 ? 0 : track) + 2u * LFO3_DEST_SLOT;
+
+    return (u32)(*(volatile u16 *)at >> 8) & 0x7Fu;
+}
+
+/* -> what that track's mirror currently holds at `slot` -- the cell an LFO
+ * writes its contribution into, read live. */
+static int cell(u32 slot)
+{
+    int track = panel_track();
+    u32 at = MIRROR_BASE + MIRROR_AT
+             + MIRROR_STRIDE * (u32)(track < 0 ? 0 : track) + 2u * slot;
+
+    return (int)(short)*(volatile u16 *)at;
+}
+
 /* -> what column `param` should display, with `*answered` set when this file
  * has an opinion at all. Columns it does not answer for keep their value. */
 int lfo4_meter(u32 param, int *answered)
 {
-    int track;
-
     *answered = 1;
     switch (param) {
     case 0:                                   /* SPD */
-        track = panel_track();
-        return (int)(short)lfo4_rows[track < 0 ? 0 : track][3];
+        return cell(lfo4_dest_of());
     case 7:                                   /* DEP */
-        track = panel_track();
-        return (int)(short)lfo4_rows[track < 0 ? 0 : track][7];
+        return cell(lfo3_dest_of());
     default:
         *answered = 0;
         return 0;
