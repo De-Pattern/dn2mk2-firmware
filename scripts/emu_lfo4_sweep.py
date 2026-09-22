@@ -101,7 +101,18 @@ def main() -> int:
     print(f"  the live sound for track {TRACK + 1} is {sound:#010x}; "
           f"watching slot {DEST_SLOT} every frame\n")
 
-    def trajectory(values, label):
+    def trajectory(values, label, backup=0):
+        """`backup` is the evaluator's seventh argument: its low byte asks for
+        a state backup before the walk.
+
+        **Nothing has ever run this path with it set.** `emu_lfo4_tick.py`,
+        `emu_lfo4_chain.py` and the first version of this all pass 0. The build
+        widens the per-track state stride from `0x78` to `0xa0` to make room
+        for a fourth LFO's phase, and if the backup and restore still move the
+        old stride then LFO4's phase is restored from stale bytes every frame
+        -- frozen except when something else kicks it, which is what the
+        instrument reports.
+        """
         for slot, value in enumerate(values):
             m.call(sym["ext_set"], sound, slot, value)
         for state in STATE:
@@ -119,7 +130,7 @@ def main() -> int:
             # the same shape and does not show it only because it reads the
             # endpoint once.
             m.write(buf, rest)
-            m.call(EVAL_A, buf, rate, 0xFFFF, 0xFFFF, out1, out2, 0)
+            m.call(EVAL_A, buf, rate, 0xFFFF, 0xFFFF, out1, out2, backup)
             seen.append(struct.unpack(">H", m.read(buf + at, 2))[0])
         steps = sum(1 for a, b in zip(seen, seen[1:]) if a != b)
         print(f"  {label}: {seen[:16]}")
@@ -127,7 +138,13 @@ def main() -> int:
               f"{steps} change(s), span {min(seen):#06x}..{max(seen):#06x}")
         return seen, steps
 
-    results = [(label, *trajectory(row, label)) for label, row in ROWS]
+    # The row that is known to be audible, run both ways. Everything else is
+    # held constant, so a difference between these two is the backup and
+    # nothing else.
+    audible = ROWS[0][1]
+    results = [("no state backup", *trajectory(audible, "no state backup", backup=0)),
+               ("asking for a state backup", *trajectory(audible, "asking for a state backup",
+                                                         backup=1))]
 
     print()
     # The question is not "does it move" but "does it come back": an LFO turns
