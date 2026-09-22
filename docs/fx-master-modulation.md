@@ -648,3 +648,97 @@ five small patches, all of the same kind as LFO4's.
 
 `docs/ideas-backlog.md` §4 moves from *blocked, pending one experiment* to
 *ready*, which is where the owner ranked it first.
+
+## 10. Route A's sites, read before building — 2026-09-22
+
+§6 costed route A at "four to five caves, eight data bytes, and one count to do
+first". The count was done and route A is **cheaper than it was costed**, in two
+places, and the reason it is cheaper is the reason the line said to count.
+
+### The evaluator write is a read-modify-write, and retargeting it is one `lea`
+
+Evaluator A, `0x40137a8a` onward, is the whole mechanism in twenty bytes:
+
+```
+40137a8a  mvsb  %a4@(74),%d2          ; DEST, a byte out of the LFO's block
+40137a8e  moveq #100,%d1
+40137a90  mvsw  %d2,%d7
+40137a92  movel %d7,%a2@(104)
+40137a96  cmpl  %d7,%d1
+40137a98  bcss  0x40137ad2            ; DEST > 100 -> write nothing at all
+40137a9a  moveal %sp@(52),%a0         ; <- the track's mirror base
+40137a9e  mvsw  %a4@(82),%d1          ; DEP
+40137aa2  lea   %a0@(0,%d7:l:2),%fp   ; <- &mirror[track][DEST]
+   ... macl DEP by the LFO value ...
+40137ab8  mvsw  %fp@,%d1              ; read the cell
+40137aba  addl  %d1,%d0               ; add
+   ... clamp to 0 .. 0x7f00 ...
+40137ad0  movew %d0,%fp@              ; write it back
+```
+
+**The cell address is `%a0 + 2·DEST` and `%a0` is loaded from one place.** So
+pointing a code at block 16 does not need a new store, a new clamp or a second
+path — it needs `%a0` to be a different base for one range of codes:
+
+> `0x800068e4 + 34 + 202·16 − 152` = **`0x8000750e`**, because the existing
+> `lea` already adds `2·DEST` and the FX slot is `DEST − 76`.
+
+One cave, eight displaced bytes at `0x40137a96`, resuming at `0x40137a9e`:
+replay the compare, send codes 1..100 to `movea.l %sp@(52),%a0`, codes 101..127
+to `lea 0x8000750e,%a0`, and anything above 127 to the stock skip at
+`0x40137ad2`. Everything after it — the depth multiply, the accumulate, the
+clamp, the store — is stock code doing exactly what it already does.
+
+The clamp is worth naming: the cell is clamped to `0..0x7f00` on every write,
+and `0x7f00` is the same full scale stock uses when it writes block 16 itself
+(`movew #32512` at `0x40027434`). So an FX cell driven this way cannot be
+pushed out of range by an LFO.
+
+### Evaluator B cannot see these codes, so it is not a second cave
+
+`0x40137698` is the same shape — `mvsb %a4@(40),%d1 ; moveq #100,%d6 ; cmpl
+%d3,%d6 ; bcss` — but B carries a **second, tighter bound** twenty-six bytes
+later that A has no equivalent of:
+
+```
+401376a8  moveal %d3,%a0
+401376aa  subql  #1,%a0                ; a0 = DEST - 1
+401376c2  moveq  #7,%d2
+401376c4  cmpl   %a0,%d2
+401376c6  bcss   0x401376ee            ; DEST - 1 > 7 -> write nothing
+```
+
+So **evaluator B writes only for `DEST` 1..8** and codes 101..127 can never
+reach it. Route A item 1 is therefore **one cave, not two**.
+
+*Measured, not explained.* Why B is bounded to eight destinations when A takes a
+hundred is not established here, and it should not be assumed to be a mistake or
+a spare capacity — `docs/PRINCIPLES.md` on not identifying a structure from a
+bare count applies. It is recorded because it changes the cost, and the
+explanation can wait until something depends on it.
+
+### Item 4 is two sites out of thirty-four
+
+`jsr 0x400dbcc4` — the entry → value conversion — has **34 call sites** in the
+image. §6 flagged "count them before believing this line", and the count is why:
+only **two** are the `jsr` + `lsl.l #8` pair that item 4 is about.
+
+| site | the shift |
+|---|---|
+| `0x4003985e` | `lsl.l #8,%d3` at `0x40039868` |
+| `0x400c2a36` | `lsl.l #8,%d0` at `0x400c2a3e` |
+
+The other thirty-two call the same routine for something else and must not be
+touched. Item 4 is two caves.
+
+### Revised cost
+
+| item | costed in §6 | measured |
+|---|---|---|
+| 1–2 evaluator bound and block-16 base | 2 caves | **1 cave**, 8 displaced bytes |
+| 3 destination list enumeration | 1 cave | not yet read — `0x4003951e` |
+| 4 entry → value conversion | "1 per site", 34 sites | **2 caves** |
+| 5 `+44` flags | 8 bytes | unchanged |
+
+Item 3 is now the only unread piece, and it is the one that decides whether an
+FX destination can be *chosen* rather than only *driven*.
