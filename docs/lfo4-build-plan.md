@@ -4146,3 +4146,76 @@ itself worth knowing, because the boot gate's 450 M budget draws a frame and
 is nowhere near a finished UI. **The probe's finding stands and its
 implication was wrong**: "not reached in 1.2 G" meant the harness stops early,
 not that the code is dead.
+
+## The table is full, and that is the whole bug — 2026-09-22 night
+
+**`lfo4-keeprow` made it worse, and that is the finding.** With the drops in
+`ext_copy`, `ext_carry` and `ext_clear` switched off, the instrument reports
+modulation became *sparser*: two successes, "with a lot of wiggling", against
+roughly one trig in fifteen before.
+
+The mechanism is four lines of `ext_add`:
+
+```c
+if (ext_live == EXT_SLOTS) {       /* EXT_SLOTS is 256 */
+    ext_full++;
+    return 0;                      /* and ext_set then does nothing at all */
+}
+```
+
+**A full table drops the panel's write on the floor.** No error, no fallback,
+no display change -- the knob turn simply does not land, so the sound has no
+entry, so `lfo4_refresh` fills the row from `ext_default`, whose `DEP` is
+neutral, so the note is silent.
+
+### It explains every observation, including the one read backwards
+
+| observation | under this reading |
+|---|---|
+| binary per note | the entry exists or it does not |
+| perfect when it works | the value that did land is correct |
+| **sparser with the drops off** | the drops were the only thing *reclaiming* slots |
+| faster trigging works better | more trigs -> more sound copies -> more drops -> more free slots for the next write |
+
+That last row was read backwards all evening: "more trigs helps" was taken as
+trigs **delivering** the row. They are making **room** for it.
+
+`ext_full` has been counting this since step 1 and nothing has ever read it.
+The emulator never saw it because a snapshot session creates a handful of
+sounds, not the churn of a real instrument playing patterns.
+
+### What the fix is not
+
+It is not "stop dropping". `lfo4-keeprow` is what that looks like, and it is
+worse. Nor is it simply a bigger table: 256 slots keyed by a live sound's
+address is a guess about churn, and the next guess would be another one.
+
+What the design has to face is that **a side table keyed by address cannot be
+told when an address stops mattering**. Elektron's own parameters do not have
+this problem because they live inside the sound's 1,163 bytes and are freed
+with it. Options, cheapest first, and none yet measured:
+
+1. **Read `ext_full` on hardware** before anything else. If it is non-zero the
+   diagnosis is confirmed outright; there is no instrument for this yet.
+2. Evict the least recently used entry instead of failing the insert, so a
+   write always lands and only the oldest sound loses its LFO4.
+3. Key by something bounded -- track and buffer index rather than address --
+   which bounds the table by construction.
+4. Find eight bytes inside the sound after all, which removes the table.
+
+## Two more from the instrument, 2026-09-22 night
+
+**LFO4's configuration does not survive a power cycle**, while every other
+page's does. That is a separate, genuine gap: values reach a stored sound
+through `lfo4_on_save`, but whatever the instrument does at power-off does not
+route through that hook. It is a missing feature rather than a symptom of the
+lookup bug, and it needs its own reading of the power-off path.
+
+**The `RND` label has a third site.** With `RND` selected, the legend at the
+top of the page shows `SLEW` correctly, but the column label under the waveform
+reverts to `SPH` when the knob is not being touched. `lfo4-ui2` patched the two
+routines that decide whether the waveform *is* `RND`
+(`0x4003662c`, `0x40036a76`); this is a third path, for the idle rather than
+the active state. Same family as everything else in this file: the UI is
+written three times over, and each copy has to be found by diffing what two
+renders execute.
