@@ -39,15 +39,23 @@ SKIP = ("TASK_CREATE",)
 
 
 def running():
-    """-> [(elapsed seconds, command)] for every emulator process in WSL."""
+    """-> [(elapsed, command, state)] for the emulator and everything queued.
+
+    **The queue matters as much as the job.** Everything here waits its turn on
+    a `while pgrep ... sleep` loop, so at any moment one Python process is using
+    the machine and several shell scripts are asleep waiting for it. Showing
+    only the running one answers "is it busy" and not "how much is left", which
+    is the question actually being asked.
+    """
     try:
         out = subprocess.run(
-            ["wsl", "bash", "-c", "ps -eo etimes,args | grep -E 'emu_|scripts/' "
-                                  "| grep -v grep"],
+            ["wsl", "bash", "-c",
+             "ps -eo etimes,args | grep -E 'dn2-emu-venv|run_[a-z0-9_]*\\.sh' "
+             "| grep -v grep"],
             capture_output=True, text=True, timeout=30,
             env={**os.environ, "MSYS_NO_PATHCONV": "1"}).stdout
     except Exception as error:                                  # noqa: BLE001
-        return [(0, f"(could not ask WSL: {error})")]
+        return [(0, f"(could not ask WSL: {error})", "?")]
     rows = []
     for line in out.splitlines():
         line = line.strip()
@@ -55,9 +63,13 @@ def running():
             continue
         seconds, _, command = line.partition(" ")
         try:
-            rows.append((int(seconds), command.strip()))
+            elapsed = int(seconds)
         except ValueError:
             continue
+        # A venv python is the machine in use; a runner script is either the
+        # parent of that python or a sibling asleep on its wait loop.
+        state = "RUNNING" if "dn2-emu-venv" in command else "queued "
+        rows.append((elapsed, command.strip(), state))
     return sorted(rows, reverse=True)
 
 
@@ -105,9 +117,12 @@ def main(argv=None) -> int:
 
         live = running()
         if live:
-            for seconds, command in live:
+            for seconds, command, state in live:
                 short = command.split("/")[-1][:60]
-                print(f"  RUNNING  {clock(seconds)}  {short}")
+                print(f"  {state}  {clock(seconds)}  {short}")
+            waiting = sum(1 for _e, _c, s in live if s.strip() == "queued")
+            if waiting:
+                print(f"           {waiting} job(s) waiting their turn on one machine")
         else:
             print("  RUNNING  nothing -- the machine is free")
 
