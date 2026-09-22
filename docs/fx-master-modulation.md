@@ -592,6 +592,10 @@ checked here; the wire is the flash.
 
 > "What you hear: It sweeps"
 
+and, asked whether it sustained or moved once and settled:
+
+> "it keep sweeping :) all good. Go ahead with it"
+
 **So the sound chip does act on the block at `0x800068e4`.** A write from the
 ColdFire into slot 35 — Delay Feedback Gain, `B + 3336` — reaches the audio
 path and is audible, and nothing later in the 0.67 ms cycle takes it back.
