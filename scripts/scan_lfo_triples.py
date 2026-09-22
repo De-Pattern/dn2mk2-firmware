@@ -35,6 +35,10 @@ FORMS = (
     (0xF100, 0x7000, "moveq", 0),
     (0xF1FF, 0x103C, "moveb #imm,dN", 2),
     (0xF1FF, 0x303C, "movew #imm,dN", 2),
+    # `moveaw #imm,aN`. Missed until 2026-09-22, and it cost a whole mask
+    # cascade: `0x40067326` writes `0x600` this way, and the scan that was
+    # meant to find every per-LFO literal walked straight past it.
+    (0xF1FF, 0x307C, "moveaw #imm,aN", 2),
     (0xF1FF, 0x203C, "movel #imm,dN", 4),
     (0xFFFF, 0x4878, "pea imm", 2),
     (0xFFC0, 0x0C00, "cmpib #imm", 2),

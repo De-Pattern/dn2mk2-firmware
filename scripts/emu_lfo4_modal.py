@@ -126,3 +126,26 @@ else:
         print(f"\n  LFO4 reached {pivot:#010x} too, and went here instead:")
         for b in order["LFO4"][at:at + 6]:
             print(f"    {b:#010x}")
+
+# **The biggest cluster is the browser; the earliest parting is the decision.**
+# Walking back from the browser lands in the middle of a call chain -- the
+# routine that opens it, the routine that calls that -- and each step is
+# another disassembly. What is wanted is the *topmost* place the two pages stop
+# agreeing, so list the first few in trace order: each is a block both ran,
+# followed by one only LFO3 ran. The earliest of those is where to read.
+PARTINGS = 8
+print(f"\n  the first {PARTINGS} parting(s), in the order LFO3 ran them --")
+print("  `from` is a block both pages ran, `to` is where only LFO3 went:")
+shown, previous = 0, None
+for b in order["LFO3"]:
+    if shown >= PARTINGS:
+        break
+    if b in missing and previous is not None and previous in seen["LFO4"]:
+        went = None
+        if previous in seen["LFO4"]:
+            at = order["LFO4"].index(previous)
+            went = order["LFO4"][at + 1] if at + 1 < len(order["LFO4"]) else None
+        print(f"    from {previous:#010x}  LFO3 -> {b:#010x}"
+              + (f"   LFO4 -> {went:#010x}" if went else ""))
+        shown += 1
+    previous = b
