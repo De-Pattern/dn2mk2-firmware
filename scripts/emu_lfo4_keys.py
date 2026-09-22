@@ -129,6 +129,13 @@ for _ in range(FRAMES):
     m.call(EVAL_A, buf, rate, 0xFFFF, 0xFFFF, out1, out2, 0)
 
 engine = looked_up[mark:]
+# **Zero lookups is two different findings and they must not be confused.**
+# Either the tick asked under a key nothing matched, or the tick never ran --
+# and a call into firmware code on a booted machine can be interrupted and
+# return without reaching anything (`docs/lfo4-build-plan.md`, twice). So the
+# build's own counters are read: they say which of the two happened.
+print(f"  lfo4_refresh entered {m.long(sym['lfo4_refreshes']):,} time(s), "
+      f"copied a row in {m.long(sym['lfo4_copies_in']):,} of them")
 print(f"  the tick asked ext_find {len(engine)} time(s), "
       f"keys {sorted({hex(k) for k in engine})[:8]}")
 panel_keys, engine_keys = set(written), set(engine)
