@@ -1416,6 +1416,20 @@ Three things fell out of the same run and are worth keeping:
 `entry = index + 1`. The first run of the harness printed its marker on the row
 above for exactly that reason and the constant has been corrected.
 
+### ~~Stock had nothing after that point~~ — RETRACTED, see §17
+
+> ~~Stock's LFO1 list ends precisely at `OVR Routing`. 55 entries, last one
+> entry 305, group 15, slot 99 — the highest occupied sound slot. So the part
+> the owner can reach *is* exactly the stock list, and what he cannot reach is
+> exactly what this build added.~~
+
+**Wrong, and the log this was written from contains the disproof.** That is
+LFO1's own mask `0x1e00`; the browser passes `0x200`, whose stock list is **76**
+entries and runs 21 past `OVR Routing` into the Mod destinations, ending at
+MOD3 Depth — which is exactly what the owner reports seeing on stock. So the
+build broke reachable stock entries too, and changed the end-of-list behaviour
+from "stop" to "wrap". **§17** has the correction and why the mistake happened.
+
 ### What the wrap actually points at
 
 The navigation at `0x401079c8` walks the vector element by element
@@ -1493,3 +1507,173 @@ is measured here — only the list contents are. The walk, the search, the redra
 and the store are read from the disassembly and from one report from the
 instrument, and the two candidate explanations for "jumps to the top" have not
 been told apart. §19 again: this is a narrowing, not a conclusion.
+
+## 17. §16's answer was taken from a mask the browser does not use — RETRACTED
+
+**§16 asked "did we break it or expose it?" and answered "neither, quite".
+That is wrong, and the disproof was already in the log it was written from.**
+
+§16 reasoned from **LFO1's own mask `0x1e00`**, whose stock list is 55 entries
+ending at `OVR Routing`, and concluded that stock "simply had nothing after that
+point, so the reachable part is exactly the whole stock list". But the browser
+does not use that mask. The list path's `want` at `0x40107ab0` is **`0x200`**,
+which §15 and §16 both state — and the `0x200` dumps say something else
+entirely:
+
+| | stock, `want 0x200` |
+|---|---|
+| length | **76** |
+| `OVR Routing` | #55 |
+| after it | groups 26, 27, 28 — the Mod destinations, 21 entries |
+| last | entry 103, group 28, `Depth` — **MOD3 Depth** |
+
+The owner, asked whether stock also stops there:
+
+> "No, after OVR Routing starts the Mod destinations in the stock settings and
+> when you get to the bottom of the list at MOD X - DEPTH the scroll stops, it
+> doesn't jump to the first element in the list...never."
+
+**His description and the `0x200` list agree entry for entry, and neither agrees
+with the `0x1e00` list.** So the browser shows the `0x200` list, and:
+
+- **we did break it.** Stock reached 21 entries past `OVR Routing`; the build
+  reaches none of them. The Mod destinations became unreachable too, not only
+  the FX ones.
+- **the end-of-list behaviour changed**, from "stop" to "wrap to the top" —
+  which stock never does.
+
+Both are consequences of the same failure, and it *strengthens* §16's mechanism
+rather than weakening it: in the build's `0x200` list the FX entries are
+inserted at **#56**, immediately after `OVR Routing`, so the cursor dies on the
+first of them and therefore never reaches the 21 stock entries that now sit
+behind them. One fault, both symptoms.
+
+### Why the wrong reading happened, because it is reusable
+
+**A question about the browser was answered from a mask the browser does not
+use.** The run produced three lists on purpose — `0x200`, `0x1e00`, `0x0600` —
+precisely because which one the browser uses was not established, and then the
+conclusion was drawn from the wrong one without saying which. The harness even
+printed `"stock runs 22 entries PAST OVR Routing"`, computed from the `0x200`
+list, two lines above the sentence that contradicts it.
+
+That is the same shape as measuring without a control: **three candidate answers
+were collected and one was used as though it were the only one.** The fix in
+practice is to name the variable in the sentence — "stock's list *for the mask
+the browser passes*" — because a claim that does not carry its conditions cannot
+be checked against a report from the instrument.
+
+(The count is 21, not the 22 the harness printed: the harness counted from
+`OVR Routing`'s index inclusive. Corrected here.)
+
+## 18. The root cause: §10 counted the conversion sites with too narrow a window
+
+`fxbrowser` patched **two** `entry -> slot << 8` sites plus one non-shifting
+normaliser, on §10's count of "the `jsr 0x400dbcc4` + `lsl.l #8` pairs". That
+count came from looking for the shift **adjacent** to the call.
+
+`scripts/scan_dest_values.py` looks 64 bytes forward instead. There are **six**:
+
+| site | shift | distance | in `fxbrowser`? |
+|---|---|---|---|
+| `0x4003985e` | `lsl.l #8,%d3` at `0x40039868` | 10 B | patched |
+| **`0x40039a72`** | `lsl.l #8,%d2` at `0x40039a84` | **18 B** | **missed** |
+| **`0x40039c94`** | `lsl.l #8,%d2` at `0x40039ca6` | **18 B** | **missed** |
+| **`0x40039e92`** | `lsl.l #8,%d2` at `0x40039ea4` | **18 B** | **missed** |
+| **`0x40063df2`** | `lsl.l #8,%d0` at `0x40063e06` | **20 B** | **missed** |
+| `0x400c2a36` | `lsl.l #8,%d0` at `0x400c2a3e` | 8 B | patched |
+
+The four missed ones share one shape — `jsr`, `movel %d0,%d2`, **a call to
+`0x401880cc`**, then the shift — so an adjacent-pair scan walks past all four
+for the same reason. The count against the window settles immediately and does
+not move again:
+
+```
+   8 bytes: 2      48 bytes: 6
+  12 bytes: 2      64 bytes: 6
+  16 bytes: 6      96 bytes: 6
+  24 bytes: 6     128 bytes: 6
+```
+
+**Two instructions of separation was the whole difference between a working
+build and a half-working one.**
+
+### The criterion, which replaces the count
+
+> **A site that shifts `0x400dbcc4`'s result left by 8 is producing a `DEST`
+> *value*, and a value must carry the route A code. A site that does not shift
+> is using `record+12` as an *index* — into a page, a table, a slot space — and
+> must keep the raw number.**
+
+Six shift, twenty-eight do not. That is decidable by scanning rather than by
+judgement, and the scan is committed so the next person need not trust this
+page. It is the positive-side twin of `docs/PRINCIPLES.md` §19: not a negative
+from an instrument that could not have found the thing, but **a count from a
+scan whose window was too narrow, reported as the number of sites rather than
+the number of sites of one spelling.**
+
+### And the missed site is exactly the one the symptom names
+
+`0x40039a72` sits inside `0x40039904`, which `rttiscan.py` identifies as
+`ParameterSet`'s vtable **`+0x24`** — one of only **two** slots in all 1,911
+vtables whose `+0x20`/`+0x24` pair reaches `0x400dbcc4`, the other being
+`FxParameterSet`'s. It is unmistakably on the `DEST` path:
+
+```
+40039920  jsr 0x400dc30e          | the record's +44
+40039924  btst #18,%d0            | which DEST class is this?
+4003992a  asrl #8,%d3             | the current value -> a code
+4003992c  moveal %a2@,%a0
+40039932  moveal %a0@(80),%a0     | +0x50: code -> entry
+40039938  pea 0x1e00              | ... and the `want` for this class
+```
+
+It recovers a code by shifting **right** by 8 and resolves it through `+0x50` —
+the exact inverse of the conversion this work added — and it was still handing
+back `record+12` with no `+76`. So stepping onto Chorus `Depth` stored **25**
+where **101** was meant; the redraw read 25 back, `+0x50` resolved it to a sound
+entry that is not in the list, the search failed, and the cursor reset to the
+first element.
+
+**That is "the list goes to the very top again", and it is why nothing past the
+insertion point is reachable.**
+
+`rttiscan.py` is what found it, in five seconds, after a good deal of reading by
+eye had not — `docs/FEATURE-PLAYBOOK.md` §2.1 and §2.4, again.
+
+## 19. `fxbrowser2`, built 2026-09-23
+
+`scripts/build_fxbrowser2.py` → `00_Resources/02_Builds/fxbrowser2_DN2_1.11.syx`.
+It is `fxbrowser` plus **four four-byte `jsr` target rewrites** onto the same
+cave helper — `0x40039a72`, `0x40039c94`, `0x40039e92`, `0x40063df2`. Nothing is
+added to the cave, nothing new is displaced, and `0x400dbcc4` itself is still
+untouched for the 28 callers that use it as an index. **156 bytes**, against
+`fxbrowser`'s 144.
+
+It is built by importing `build_fxbrowser` and extending its `convert` tuple, so
+the two builds cannot drift apart: every assertion, guard and record edit is
+literally the same code.
+
+### Gates
+
+| gate | result |
+|---|---|
+| `check_coldfire.py out/fxbrowser2/…` | **pass** — 1,539 hits vs the 1,540 baseline; `--against`: 1,539 shared, **0 new** |
+| `dnfw inspect` | **pass** — 21/21 integrity checks, HMAC-SHA256 trailer reproduced |
+| `emu_fxbrowser.py` (round trip) | see `out/emu-logs/gate_fxbrowser2.log` |
+| `emu_destlist.py` (the list must be **unchanged**) | the same log — the four new edits are conversions, not enumeration, so a changed list would itself be the finding |
+| `emu_boot_check.py` from reset | the same log |
+
+### What still cannot be gated here, and it is the same thing
+
+**The browser does not run in this emulator.** Whether the cursor now steps onto
+Chorus `Depth` and stays there, and whether the Mod destinations are reachable
+again, is the instrument's question. What is gated is that the conversion is
+uniform across all six value-producing sites and that nothing below code 101
+moved.
+
+**This is the second flash on one question.** If it still wraps, the next thing
+to establish is which of the six sites the browser's confirm path actually
+reaches — by watching `0x400dbcc4`'s callers under the emulator with a real
+panel event, which this harness cannot yet produce — rather than by patching
+more sites.

@@ -44,7 +44,8 @@ from emulib.image import differences                          # noqa: E402
 from emulib.machine import Machine                            # noqa: E402
 
 ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
-BUILT = f"{ROOT}/out/fxbrowser/section_3_MAIN_OS.bin"
+BUILD = os.environ.get("DT2_BUILD", "out/fxbrowser")
+BUILT = f"{ROOT}/{BUILD}/section_3_MAIN_OS.bin"
 
 SLOT_TO_ENTRY = 0x400DC02A     # the sound set's vtable +0x50, hooked by this build
 ENTRY_TO_SLOT = 0x400DBCC4     # entry -> record+12, deliberately left alone
@@ -77,6 +78,7 @@ def main() -> int:
     stock_image = open(stock_path, "rb").read()
     built_image = open(BUILT, "rb").read()
     runs = differences(stock_image, built_image)
+    print(f"  under test: {BUILD}")
     print(f"  the build differs from stock in {len(runs)} run(s), "
           f"{sum(len(r[1]) for r in runs)} bytes\n")
 

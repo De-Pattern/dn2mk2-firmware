@@ -479,10 +479,18 @@ than the destination path. **Owner's first priority, 2026-09-22.**
 > the value is produced inside `%a2@(32)`, a virtual reached through a
 > function pointer at `this+404` that is not yet resolved. The suspect is one
 > of the 31 `jsr 0x400dbcc4` sites deliberately left untouched — which would
-> store 25 instead of 101 and make the redraw's search fail. **No fix is
-> shipped for it**: the site is not located, and the next instrument is
-> digikit's `rttiscan.py` on that class rather than more reading.
-> `docs/fx-master-modulation.md` §15, §16.
+> store 25 instead of 101 and make the redraw's search fail.
+>
+> **Found, and fixed in `fxbrowser2_DN2_1.11.syx` (built and gated, not
+> flashed).** `rttiscan.py` named it in seconds where reading by eye had not:
+> `0x40039904` is `ParameterSet`'s vtable `+0x24`, and the root cause is a
+> **counting error in §10** — it scanned for an *adjacent* `lsl.l #8` and
+> found two `entry -> slot << 8` sites; the window has to be 16 bytes to find
+> all **six**, because four of them put a call between the conversion and the
+> shift. `scripts/scan_dest_values.py` is that scan, and the rule it encodes
+> is: **a site that shifts is producing a value and needs the code; a site
+> that does not is using an index and must keep the raw number.**
+> `docs/fx-master-modulation.md` §15, §16, §17, §18, §19.
 >
 > **Item 3 was read and it changes the plan.** The destination list at
 > `0x4003951e` holds *entry numbers*, not slots, and its only source is the

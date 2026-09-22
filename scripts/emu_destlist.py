@@ -52,7 +52,8 @@ from emulib.image import differences                          # noqa: E402
 from emulib.machine import Machine                            # noqa: E402
 
 ROOT = "/mnt/d/01_Code/Z_Personal/dn2_firmware"
-BUILT = f"{ROOT}/out/fxbrowser/section_3_MAIN_OS.bin"
+BUILD = os.environ.get("DT2_BUILD", "out/fxbrowser")
+BUILT = f"{ROOT}/{BUILD}/section_3_MAIN_OS.bin"
 
 BUILD_LIST = 0x4003951E
 RECORDS = 0x401F7FC8
@@ -151,6 +152,7 @@ def dump(m, label: str, entries: list[int]) -> None:
 def main() -> int:
     stock_path = os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin")
     runs = differences(open(stock_path, "rb").read(), open(BUILT, "rb").read())
+    print(f"  under test: {BUILD}")
     print(f"  the build differs from stock in {len(runs)} run(s)\n")
 
     results = {}
