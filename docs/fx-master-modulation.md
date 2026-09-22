@@ -1,0 +1,448 @@
+# Can an LFO reach an FX or Master parameter?
+
+**Read 2026-09-22, statically, on `Digitone_II_OS1.11.syx` section 3.** The
+answer is yes in principle and no today, and the reason is neither the
+modulation mask nor the `ParameterSet` enumeration. It is that **`DEST` names a
+slot inside one 202-byte block of a seventeen-block mirror, and the FX and
+Master values live in block sixteen** — the one block no LFO's base pointer ever
+points at.
+
+This file covers backlog §4's remainder: the FX and Master parameters
+themselves, and the p-lock half. It does not repeat `docs/modulation-mask.md`,
+`docs/parameter-set-tables.md` or `docs/fx-parameter-space.md`; it corrects
+several claims in them and says so in the last section.
+
+## 0. What was measured, and what is inferred
+
+Everything in §§1–5 is disassembly or table bytes from the shipped 1.11 image —
+binary fact. §6 (the plan) is engineering judgement. Nothing here has been on
+the instrument, nothing has been built, and the emulator was not run: it is a
+serial resource and another session was using it.
+
+**The frame the DSP is sent was not observed moving.** The identification of
+mirror block 16 as the FX and Master block rests on four independent readings of
+ColdFire code that all produce the same arithmetic. That is strong, and it is
+not a runtime observation. §6 names the cheapest experiment that would make it
+one.
+
+## 1. The records
+
+The 320-record table is at `0x401f7fc8`, 60 bytes a record, **entry = index + 1**;
+accessors reach it through the pre-biased base `0x401f7f94`, which is
+`table − 60 + 8`. Field offsets below are from the record start as
+`src/dnfw/params/record.py` frames it. `docs/modulation-mask.md` frames records
+8 bytes lower, so every offset there is 8 less than the same field here: its
+`+0x24` mask is this file's `+44`.
+
+`+44` across all 320 records, measured:
+
+| `+44` | records |
+|---|---|
+| `0x1e00` | 190 |
+| `0x0e00` / `0x0600` / `0x0200` | 8 each |
+| `0x40000` / `0x20000` / `0x10000` | 1 each |
+| `0` | 103 |
+
+The FX and Master pages, in full. `slot` is `+12`, the `ParameterSet` slot and
+the field that decides everything below. `range` is `+20`, `NRPN` is `+36`:
+
+| entry | page | group | slot | name | short | range | NRPN | `+44` |
+|---|---|---|---|---|---|---|---|---|
+| 105 | Chorus | 16 | 25 | Depth | `DPTH` | `0x7f00` | `0x129` | **0** |
+| 106 | Chorus | 16 | 26 | Speed | `SPD` | `0x7f00` | `0x12a` | **0** |
+| 107 | Chorus | 16 | 27 | High-pass | `HPF` | `0x7f00` | `0x12b` | **0** |
+| 108 | Chorus | 16 | 28 | Width | `WDTH` | `0x7f00` | `0x12c` | **0** |
+| 109 | Chorus | 16 | 29 | Delay Send | `DEL` | `0x7f00` | `0x12d` | **0** |
+| 110 | Chorus | 16 | 30 | Reverb Send | `REV` | `0x7f00` | `0x12e` | **0** |
+| 111 | Chorus | 16 | 31 | Chorus Mix Vol. | `CHR` | `0x7f00` | — | **0** |
+| 112 | Chorus | 16 | 31 | Mix Volume | `VOL` | `0x7f00` | `0x12f` | **0** |
+| 113 | Delay | 18 | 32 | Delay Time | `TIME` | `0x7f00` | `0x100` | `0x1e00` |
+| 114 | Delay | 18 | 33 | Pingpong | `X` | `0x100` | `0x101` | `0x1e00` |
+| 115 | Delay | 18 | 34 | Stereo Width | `WID` | `0x7f00` | `0x102` | `0x1e00` |
+| 116 | Delay | 18 | 35 | Feedback Gain | `FDBK` | `0x7f00` | `0x103` | `0x1e00` |
+| 117 | Delay | 18 | 36 | Feedback HPF | `HPF` | `0x7f00` | `0x104` | `0x1e00` |
+| 118 | Delay | 18 | 37 | Feedback LPF | `LPF` | `0x7f00` | `0x105` | `0x1e00` |
+| 119 | Delay | 18 | 38 | Reverb Send | `REV` | `0x7f00` | `0x106` | `0x1e00` |
+| 120 | Delay | 18 | 39 | Delay Mix Vol. | `DEL` | `0x7f00` | — | **0** |
+| 121 | Delay | 18 | 39 | Mix Volume | `VOL` | `0x7f00` | `0x107` | `0x1e00` |
+| 122 | Delay | 18 | 40 | Delay FX Routing | `DEL` | `0x100` | — | `0x1e00` |
+| 123 | Reverb | 17 | 41 | Pre-delay | `PRE` | `0x7f00` | `0x108` | `0x1e00` |
+| 124 | Reverb | 17 | 42 | Decay Time | `DEC` | `0x7f00` | `0x109` | `0x1e00` |
+| 125 | Reverb | 17 | 43 | FB Shelving Freq | `FREQ` | `0x7f00` | `0x10a` | `0x1e00` |
+| 126 | Reverb | 17 | 44 | FB Shelving Gain | `GAIN` | `0x7f00` | `0x10b` | `0x1e00` |
+| 127 | Reverb | 17 | 45 | Input HPF | `HPF` | `0x7f00` | `0x10c` | `0x1e00` |
+| 128 | Reverb | 17 | 46 | Input LPF | `LPF` | `0x7f00` | `0x10d` | `0x1e00` |
+| 129 | Reverb | 17 | 47 | Reverb Mix Vol. | `REV` | `0x7f00` | — | **0** |
+| 130 | Reverb | 17 | 47 | Mix Volume | `VOL` | `0x7f00` | `0x10f` | `0x1e00` |
+| 131 | Reverb | 17 | 48 | Reverb FX Routing | `REV` | `0x100` | — | `0x1e00` |
+| 132 | Ext-in | 21 | 49 | Input Level | `IN` | `0x7f00` | — | **0** |
+| 133–147 | Ext-in | 21 | 49–58 | fifteen level / pan / send records | | | `0x11e`–`0x127` | `0x1e00` |
+| 148 | Ext-in | 21 | 59 | Dual Mono | `DUAL` | `0x100` | `0x128` | **0** |
+| 149 | Master | **19** | 68 | Master Overdrive | `MOVD` | `0x7f00` | `0x132` | **0** |
+| 150 | Master | 20 | 60 | Threshold | `THR` | `0x7f00` | `0x110` | **0** |
+| 151 | Master | 20 | 61 | Attack Time | `ATK` | `0x7f00` | `0x111` | **0** |
+| 152 | Master | 20 | 62 | Release Time | `REL` | `0x7f00` | `0x112` | **0** |
+| 153 | Master | 20 | 63 | Makeup Gain | `MUP` | `0x7f00` | `0x113` | **0** |
+| 154 | Master | 20 | 64 | Ratio | `RAT` | `0x700` | `0x114` | **0** |
+| 155 | Master | 20 | 65 | Sidechain Src | `SCS` | `0x1200` | `0x115` | **0** |
+| 156 | Master | 20 | 65 | Sidechain Src | `SCS` | `0x1300` | `0x115` | **0** |
+| 157 | Master | 20 | 66 | Sidechain Filter | `SCF` | `0x7f00` | `0x116` | **0** |
+| 158 | Master | 20 | 67 | Dry/Wet Mix | `MIX` | `0x7f00` | `0x117` | **0** |
+| 159 | Master | **19** | 69 | Pattern Volume | `VOL` | `0x7f00` | `0x118` | **0** |
+
+Fifty-five records over **forty-five distinct slots, 25–69, contiguous with no
+gap**. Duplicate slots are UI variants of one value (`CHR`/`VOL`, `Delay Mix
+Vol.`/`Mix Volume`, the two `SCS` records with different maxima).
+
+Two things to carry forward:
+
+- **The `Master` page spans two groups.** Group 20 is the compressor, slots
+  60–67; group 19 holds Master Overdrive at slot 68 and Pattern Volume at 69.
+- **No record in the whole table carries a `+12` above 99.** Measured across all
+  320. Slots 100–127 are unclaimed by any parameter, which matters in §6.
+
+## 2. Every consumer of `+44`
+
+Found by resolving the base register of every use of the parameter-record base
+`0x401f7f94`, in both the indexed and the pointer spelling, over the whole
+objdump of section 3 (`out/main111.dis`, 1,079,455 lines). That base appears as
+`lea 0x401f7f94,%aN` fifty times and as `addal #0x401f7f94,%aN` twice; there is
+no other base into this table, and `0x401f7fb4` in `addil` form at `0x400dc12e`
+reaches field `+40`, not `+44`.
+
+**The scope of that search, said plainly:** it finds any read whose address is
+computed from that one constant. It would *not* find a consumer that received a
+record pointer as a function argument from somewhere else. The getter in the
+list below is exactly such a hand-off, and its callers are counted separately.
+
+Nine sites read `+44`. Nothing writes it.
+
+| site | how | what it does |
+|---|---|---|
+| `0x400397c8` | `movel %a0@(36),%d3`, `%a0` from `addal` | filter cascade A: `btst #18/17/16` → `0x1e00` / `0x0e00` / `0x0600`, else 0 |
+| `0x40039ad0` | `movel %a2@(24,%d0:l),%d1` | filter cascade B, byte-identical to A |
+| `0x40039cf2` | same | filter cascade C |
+| `0x40039ef0` | same | filter cascade D |
+| **`0x400672fa`** | same | **filter cascade E** — the same three `btst`s, but it writes the result with `moveaw #0x600,%a1` / `moveaw #0x1e00,%a1`, so a scan for `movew #imm` walks past it |
+| `0x40067502` | same | `andil #0x70000` at `0x40067506` — "is this entry a `DEST` record?" |
+| `0x400676e0` | same | `andil #0x70000` at `0x400676e4` — same test |
+| `0x400679e2` | same | `andil #0x70000` at `0x400679e6` — same test, gates opening the destination browser |
+| `0x400dc32c` | same | `FUN_400dc30e(entry) -> mask`, a two-line getter, then `rts` |
+
+`FUN_400dc30e` has **zero direct callers**; it is taken by address at
+`0x40039570`, `0x40039910`, `0x40039b32` and `0x40039d54` — the four call sites
+of the list builder `0x4003951e`, which invokes it through `%a2`/`%a3`.
+
+So the field has exactly two jobs: **choose a modulator's filter** (five sites)
+and **identify the three `DEST` records** (three sites), with one getter feeding
+the list builder's subset test. There is no third consumer; in particular no
+storage path, no MIDI path and no display path reads it.
+
+## 3. `+44` is not the gate for these records, and that is already settled
+
+**Do not re-run the experiment this invites.** The obvious move — give the 103
+closed records `0x1e00` — was built, flashed and answered on **2026-09-12**.
+`scripts/build_moddest_expand.py` opened all 32 closed parameters in three
+groups; group A (13 per-voice parameters) appeared and modulated, **group B
+(Chorus, 8) and group C (Master, 11) did not appear at all**. That is why
+`src/dnfw/mods/moddest.py` ships only the 13. `docs/modulation-mask.md`,
+"RESULT, 2026-09-12".
+
+Delay and Reverb are the same fact from the other side: seventeen of their
+nineteen records already carry a full `0x1e00`, and no destination list in the
+instrument offers them.
+
+So for FX and Master, `+44` is **necessary and not sufficient**, measured on
+hardware, and the remaining work is entirely elsewhere.
+
+## 4. What the gates actually are — three of them, in order
+
+### 4a. Enumeration
+
+`0x4003951e` walks slots `0..100` of a `ParameterSet` through vtable slot
+`+0x50`, and only then tests the mask. `FxParameterSet`'s implementation
+(`0x400dc0b0`) indexes a 101-entry pointer table at `0x42c649a8`;
+`SoundParameterSet`'s (`0x400dc02a`) indexes `0x42c64b3c` and is
+machine-dependent. Both tables are BSS, built at boot by
+`param_set_tables_build` (`0x400dc4d0`) from the record's page id at `+8` and
+filed **at the index in `+12` verbatim** (`docs/parameter-set-tables.md` §3).
+
+An LFO on a synth track walks the sound set. FX records go to the FX set because
+their page ids are 16–21. That is the gate `docs/modulation-mask.md` identified,
+and it is real.
+
+### 4b. The `DEST` value is a slot number, and the two slot spaces collide
+
+This is the part that had not been read. When a destination is picked from the
+list, the selected **entry** is converted before it is stored:
+
+```
+4003985a:  movel %a0@(0,%d3:l:4),%sp@-   ; destinations[selected] -- a table entry
+4003985e:  jsr   0x400dbcc4              ; -> record+12, the ParameterSet slot
+40039866:  movel %d0,%d3
+40039868:  lsll  #8,%d3                  ; the stored value is slot << 8
+```
+
+and the evaluators read it back coarse:
+
+```
+mvs.b %a4@(74),%d2        ; DEST, high byte = the slot
+moveq #100,%d1
+cmp.l %d7,%d1 / bcs skip  ; DEST > 100 -> nothing
+lea   %a0@(0,%d7:l:2),%fp ; %a0 = the track's mirror block -> &block[DEST]
+```
+
+So `DEST` carries **no identity at all** — only a number, resolved against
+whichever block `%a0` points at. Chorus Depth's slot is 25; slot 25 of a sound
+block is the first machine parameter. If an FX record were enumerated into the
+sound set today it would be offered under its own name, and the LFO would
+modulate **the machine parameter that happens to occupy that slot**. Silent
+aliasing, not silence.
+
+That corrects backlog §4's third reason, which predicted "it would be offered,
+and it would not move". It would move; it would move the wrong thing.
+
+### 4c. The mirror — and this is the finding
+
+The per-track mirror is **not sixteen blocks. It is seventeen, and the
+seventeenth holds the FX and Master values at the same slot numbers the records
+carry.**
+
+The base is a constant: `0x400db12a` ends `movel #0x800068e4,%d0 ; rts`, and the
+audio-frame ISR calls it at `0x4002717e` and keeps the result in `%a2` for the
+whole frame — `%a2` is not written again between `0x40027194` and `0x400275a6`,
+checked. Call it `B = 0x800068e4`. Four independent readings of the layout:
+
+1. **The smoother.** `0x400db12a` runs a one-pole filter — coefficients `0x03d7`
+   and `0x7c29`, which sum to `0x8000` — from a control-side target array at
+   `0x80003af0`, through 32-bit state at `0x8000de60`, into `B`. Its loop
+   counter is `movel #1734,%d3` decremented by 2, writing one longword (two u16)
+   per pass: **1,734 u16 values, 3,468 bytes**. And `34 + 17 × 202 = 3,468`
+   exactly.
+2. **The p-lock applier.** `0x400db092` computes its word index as
+   `movel #202,%d2 ; mulsl track,%d2 ; addil #34,%d2 ; lsrl #1,%d2`, which is
+   `101·track + 17` — the word index of block `track` in a 17-word header plus
+   101-word blocks. It then writes `value << 16` into the smoother **state** at
+   `0x8000de60 + 4·(101·track + 17 + index)`, so a lock jumps the filter rather
+   than gliding to it.
+3. **The `DEST` copy.** `0x400db1a4` copies three values per track from
+   `0x80003af0 + 202·t + {42, 58, 74}` to `B + 202·t + {42, 58, 74}`, stepping
+   202 until `0x800075ae` — sixteen tracks. Those offsets are slots 4, 12 and
+   20: LFO1, LFO2 and LFO3's `DEST`, the three values that must not be smoothed.
+4. **The frame builder.** `0x400274ba` walks the sixteen track blocks at stride
+   202 from `B`, taking `%a5@(84)` for slot 25 — `34 + 2·25`. Then, **after** the
+   sixteen passes, it copies five more blocks straight out of `B`:
+
+| source | bytes | words | slots | page, from the record table |
+|---|---|---|---|---|
+| `%a2@(3316)` | 14 | 7 | 25–31 | **Chorus**, slots 25–31 |
+| `%a2@(3330)` | 18 | 9 | 32–40 | **Delay**, slots 32–40 |
+| `%a2@(3348)` | 16 | 8 | 41–48 | **Reverb**, slots 41–48 |
+| `%a2@(3364)` | 22 | 11 | 49–59 | **Ext-in**, slots 49–59 |
+| `%a2@(3386)` | 16 | 8 | 60–67 | **Master** compressor, slots 60–67 |
+| `%a2@(3402)` | 4 | 2 | 68–69 | Master Overdrive, Pattern Volume |
+
+`34 + 202·16 = 3266`, and `3266 + 2·slot` reproduces every one of those six
+offsets: `3266 + 50 = 3316`, `3266 + 64 = 3330`, `3266 + 82 = 3348`,
+`3266 + 98 = 3364`, `3266 + 120 = 3386`, `3266 + 136 = 3402`. **Five page
+boundaries and five lengths, all derived from `+12` months ago and never used
+for this, land on the block-16 formula with no residue.** They also land
+contiguously in the frame, at `0x8000685a` through `0x800068b3` — 90 bytes for
+45 values.
+
+So:
+
+```
+mirror[block][slot] = 0x800068e4 + 34 + 202*block + 2*slot
+    block 0..15  = the sixteen tracks
+    block 16     = the global FX and Master values, slots 25..69
+```
+
+The whole of it, block 16 included, is regenerated from the control side every
+audio frame; then the six MIDI performance modulators are applied
+(`0x400db22c`, called at `0x40027196`); then the LFOs (`0x40137726`, called at
+`0x400272d4`); then the frame is built (`0x400274ba`) and sent (`0x400cf7be`).
+**A value written into block 16 at that point reaches the DSP in the same frame,
+and is refreshed next frame rather than accumulating.**
+
+### What this answers, and what it does not
+
+**It answers §4's central question.** The FX and Master parameters are *not* "on
+the other side of a different mirror". `FxSetup::updateMirror` (`0x4002ffca`)
+writes `Digisharc::fxSetupStorage_v0_t` — the **save image**, exactly as
+`Sound::updateMirror` writes `soundStorage_v3_t`, which
+`docs/engine-index-map.md` §15 already retracted once for this very confusion.
+The runtime path is block 16, and it is reachable by the same kind of write the
+LFO already performs.
+
+**It does not answer whether the DSP honours it.** Everything above is the
+ColdFire's side of the wire. If some other path also publishes the FX settings
+and wins, a write into block 16 would be overwritten. Nothing found suggests one
+— block 16 is the only source the frame builder reads for these values — but
+"not found by a search of the ColdFire image" is not "not present". §6 names the
+experiment that would convert this into a measurement.
+
+## 5. P-locks — a different mechanism, and it does not reach here either
+
+From DNX's decoded format (`DNX/docs/dn2-pattern-format.md` §4, §4a, §4b, §6a),
+which is measurement against hardware captures and is described here in our own
+words:
+
+- The lock table is **80 records of 258 bytes** at pattern `0x10A34`, each
+  `{u8 parameter id, u8 track, 128 × (coarse, fine)}`. Every record is keyed by
+  a **track 0..15** and by an id in a space that runs **1..106**, and ids 33..81
+  are *machine-relative* — the same id names a different parameter on a
+  different machine.
+- That id space is neither the mirror slot space nor the FX set slot space. The
+  per-track FX sends are lock ids 92/93/94 and mirror slots 88/86/87; nothing
+  lines up.
+- **The FX and Master settings are not in the lock table at all.** They are
+  **kit** data: single bytes at a stride of two from `kit+5810` (Chorus),
+  `kit+5824` (Delay), `kit+5842` (Reverb), `kit+5858` (Input) and `kit+5882`
+  (Compressor) — one block per kit, one kit per pattern. Twelve further controls
+  were locked on the device during that capture and produced no lock record at
+  all.
+
+So p-locking an FX parameter needs **three new things**, not one:
+
+1. **An id.** The id byte is a `u8` and the named space stops at 106, so 107..255
+   are representable. Whether ids above the current maximum survive a save is
+   unknown and is **a question for DNX**, unasked — it is item 3 of backlog §12
+   and the same class of question the sound canary answered. Do not hand-roll a
+   SysEx capture here.
+2. **A track that is not a track.** Every record carries one, and a global FX
+   parameter has none. Block 16 suggests the sentinel: `track = 16`.
+3. **Almost nothing on the apply side, if 2 holds.** `0x400db092` already
+   computes `101·track + 17`, so a record with `track = 16` lands on block 16
+   with no arithmetic change whatever. What would need growing is the 128-bit
+   per-track bitmap at `0x4664b26c + 16·track` (a seventeenth row, 16 bytes) and
+   the second per-track array the same routine writes at `101·track + index`.
+
+**That is a better position than §4 assumed** — the applier's arithmetic is
+already general over seventeen blocks — and it is still gated on a storage
+question this repository cannot answer alone.
+
+## 6. The costed plan
+
+Three routes. They share the block-16 write and differ in how a destination is
+named.
+
+### Route A — a new `DEST` code range (recommended)
+
+Reserve `DEST` codes **101..127** for block 16, meaning FX slot `DEST − 76` (so
+101 → slot 25, 124 → slot 48). What makes this cheap:
+
+- **101..127 are free.** No record carries a `+12` above 99, so no existing
+  destination can ever produce a code in that range. Measured over all 320.
+- **The `DEST` record already permits it.** `+20` is `0x7f00` on all three `DEST`
+  records — a coarse maximum of 127.
+- **Twenty-seven codes**, which is enough for Chorus + Delay + Reverb: slots
+  25..48, twenty-four of them, the musically interesting set. Master (60..69)
+  needs eleven more and therefore needs the evaluator's read widened from
+  `mvs.b` to `mvz.b`, because a signed byte read makes any code above 127
+  negative and the existing unsigned `bcs` bound then rejects it. That is a
+  second, separate step, not a blocker on the first.
+
+Work items, each with its site:
+
+| # | change | where | size |
+|---|---|---|---|
+| 1 | raise the `moveq #100` bound and branch to a block-16 path when `DEST > 100` | both evaluators, at the `mvs.b %a4@(74)` bound | 2 caves |
+| 2 | in that path, `lea 0x800075a6` (that is `B + 3266`) and index `2·(DEST − 76)` | the same two caves | included above |
+| 3 | append the FX entries to the destination list | `0x4003951e`, after the 101-slot loop, walking `0x42c649a8` for slots 25..48 | 1 cave |
+| 4 | make the entry → value conversion add 76 for an FX record | the `jsr 0x400dbcc4 ; lsll #8` pairs on the selection paths | 1 cave per site; **count them before believing this line** |
+| 5 | leave `+44` alone, or set `0x1e00` on Chorus's eight so the subset test passes | eight record words | 8 bytes |
+
+Nothing in route A grows a BSS table, moves an object, or touches storage —
+`DEST` is already a `u16` mirror slot and a code of 101..127 fits it.
+
+**The risk to state up front is that sixteen tracks' LFOs can all target the same
+global cell**, and they will stack, because each evaluator reads the cell and
+adds to it. That is a consequence of the parameters being global, and it needs
+saying in the UI rather than fixing in the engine.
+
+Rough size: **four to five caves, eight data bytes, and one count to do first**
+(item 4). Comparable to `lfo4-tick6a`, which was 26 edits and seven stubs.
+
+### Route B — enumerate FX records into the sound set
+
+Change `param_set_tables_build` (`0x400dc4d0`) so page ids 16–21 also file into
+the sound table at `+12 + 76`. It is one function and it is in the image. But the
+sound slot table is 101 entries allocated with an explicit byte length, the
+destination builder's bound is `i != 0x65`, and `0x400dc02a`'s is `moveq #100` —
+three bounds to raise, plus the allocation. Strictly more work than route A for
+the same result, and it puts FX parameters into a set whose accessor is
+machine-dependent. **Recorded and not recommended.**
+
+### Route C — apply control-side in `FxSetup::updateMirror`
+
+Backlog §4 named this as the alternative. It is wrong in granularity and in
+rate: `updateMirror` writes the *save image*, runs at edit rate, and would need
+the LFO's instantaneous value, which the control side does not hold.
+**Closed.** `docs/engine-index-map.md` §8 reached the same conclusion by a
+different and now-superseded argument.
+
+### The cheapest next experiment, and it is one store
+
+**Write a ramp into block 16 from inside the audio ISR, and listen.**
+
+A cave entered right after `jsr 0x400db22c` at `0x40027196`, holding a counter
+and a single `movew` into `B + 3330` (Delay Time, slot 32) or `B + 3316` (Chorus
+Depth, slot 25). Five or six instructions. It asks exactly one question — *does
+the DSP act on block 16?* — with no `DEST` change, no enumeration, no mask edit
+and no UI.
+
+| result | means |
+|---|---|
+| the parameter sweeps | block 16 is the live FX mirror; §4's remainder is route A, and it is plumbing |
+| the parameter does not move | something else publishes the FX settings and wins; find it before costing anything |
+| it moves and then snaps back | block 16 is right but a later writer in the same frame overwrites; move the cave |
+
+Make it unmissable inside a bar — full-range on delay feedback or reverb decay,
+not a subtle drift. The `tick7` build took fourteen bars and was nearly reported
+as broken.
+
+**The emulator cannot settle this** and should not be spent on it: it does not
+model the DSP, so the most it can show is that the bytes in the frame buffer
+change. That is worth having as a pre-flight check on a build, and it is not the
+answer.
+
+## 7. Corrections to other documents in this repository
+
+Recorded here rather than rewritten there, because none of them invalidates the
+document's own conclusion.
+
+- **`docs/modulation-mask.md`, "How the destination list is built"** says four
+  byte-identical filter sites. There are **five**; the fifth is at
+  `0x400672fa`/`0x40067304` and spells its result `moveaw #imm,%aN`. Commit
+  `d48012e` (2026-09-22) taught `scripts/scan_lfo_triples.py` that form for the
+  same reason; the table in that document has not caught up.
+- **`docs/modulation-mask.md`'s histogram** is quoted over "all 271 named
+  records" and gives 55 closed. Over all 320 records the count is **103**, and
+  the two are the same fact — the difference is the 48 unnamed records, which
+  are also closed. Both numbers appear in this repository and neither says its
+  denominator in the same breath.
+- **`docs/ideas-backlog.md` §4's page table** says Reverb is `0x1e00` on **7 of
+  9**. Measured: **8 of 9** — only `Reverb Mix Vol.` (entry 129) is closed. The
+  prose list in the same row names all eight correctly; the count is the slip.
+- **`docs/fx-parameter-space.md` §2** gives the contiguous FX id run as
+  **1..67**. It is **1..69**: group 19 holds Master Overdrive at slot 68 and
+  Pattern Volume at slot 69, and the frame builder copies both.
+- **`docs/fx-parameter-space.md` §8, "the tension at the top"** reasons that
+  Master's indices do not fit a 59-halfword receive window, and suggests Master
+  travels in a different packet. From this end the ColdFire builds **all 45
+  values, slots 25..69, contiguously** into the frame at `0x8000685a`. The two
+  readings are of opposite ends of the same wire and one of them is wrong; this
+  is the first hard number from our side.
+- **`docs/ideas-backlog.md` §4, reason 3** ("the FX objects are on the other side
+  of a different mirror … it would be offered, and it would not move") is **half
+  right, and the half that is wrong is worse than it says**. The storage split is
+  real and is the *save* image; the runtime values are in the same array, block
+  16. An FX record enumerated into the sound set would be offered and *would*
+  move — the wrong parameter, by slot aliasing.
+- **`docs/engine-index-map.md` §8** ("the LFO's running value appears never to
+  exist on the control side at all — it is produced and applied engine-side") is
+  **superseded** by the 2026-09-16 and 2026-09-17 readings: the evaluators at
+  `0x40137726` and `0x401373dc` are ColdFire code, and `lfo4-tick6a` passed on
+  hardware. Its conclusion about `FxSetup::updateMirror` survives; its reason
+  does not.

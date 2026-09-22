@@ -407,6 +407,18 @@ parameters themselves, and whether they can be p-locked — which this entry's o
 last lines already say is a separate question, for DNX's pattern format rather
 than the destination path. **Owner's first priority, 2026-09-22.**
 
+> **Costed 2026-09-22 — `docs/fx-master-modulation.md`.** The remainder is
+> neither a mask edit nor an enumeration edit. `DEST` stores `record+12`, a slot
+> number with no identity, and the per-track mirror turns out to be
+> **seventeen** 101-slot blocks, not sixteen: block 16 holds the FX and Master
+> values at slots 25–69, and the frame builder's five page copies land on
+> `34 + 202·16 + 2·slot` exactly. So the values are reachable — by a write the
+> LFO evaluator cannot currently address, because its base is the track's block.
+> That document has the nine consumers of `+44`, a route costed at four or five
+> caves, the p-lock position (kit data, not lock-table data), and the cheapest
+> next experiment: one counter and one `movew` into block 16 from the audio ISR.
+> It also corrects reason 3 below and four claims in other files.
+
 **The idea (2026-09-12).** The DN2's FX **settings** — the parameters that
 control reverb, delay and chorus themselves — accept MIDI CC from outside, but
 you cannot route an LFO to them or p-lock them in a pattern. Make them
