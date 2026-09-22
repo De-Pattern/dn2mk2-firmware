@@ -4656,3 +4656,55 @@ static:
 `+0/+40/+80` and strode 120, which is arithmetically right. Being right about
 *where* is not the same as being right about *when*, and (2) is where that
 distinction would show.
+
+### The removal branch, closed properly this time — 2026-09-23
+
+`lfo4-meterkeep` was flashed: `lfo4-meter3` plus `LFO4_KEEP_ROWS` **and**
+`LFO4_KEEP_ALL`, so no copy, no clear and no load can drop a row. The owner ran
+it with the stage visible and, for the first time on this question, **with a
+control**:
+
+> "Still now and then" — and, asked directly whether the control worked,
+> **"Yeah LFO 3 swept normally."**
+
+**So removal is not the cause.** That is what was written down on 2026-09-22
+after `browser`, `keeprow` and `keepall`, and it was written down on evidence
+that could not carry it — three negatives taken with no control, an inert
+destination possible, the clamp uncontrolled and fade uncontrolled. The
+conclusion survives; the reasoning behind it is now sound, which is a different
+thing and the only reason to have spent the flash.
+
+**Every earlier reading stays in this file, marked.** A closed path is still a
+signal, and the shape of closing one badly is worth more than a tidy page.
+
+#### What is measured, and why it does not add up to silence
+
+| | measured how |
+|---|---|
+| the row the engine holds is **correct and continuously present** | `lfo4-meter2`/`meter3` on the glass: `SPD` = the row's `DEST` (four exact matches against the record table), `DEP` = the row's depth |
+| **nothing removes it** | `lfo4-meterkeep`, all four drop paths off, with LFO3 as the control |
+| the evaluator turns that row into a clean oscillation | `emu_lfo4_sweep.py` on track 5 into slot 67: 119 changes over 120 frames, turns round, 1 frame of 120 at the ceiling |
+| the panel's key and the engine's key agree | the `FADE` needle, before it was handed back |
+| LFO1-3 do the identical thing through the identical code | LFO3 sweeps, every time, on the same track and destination |
+
+And still: **binary per note, decided at note-on, sustained while the trig is
+held, more frequent the faster it is re-pressed.**
+
+#### The one path no probe has ever run
+
+Every harness in `scripts/` drives **evaluator A directly**. None allocates a
+voice; none performs a note-on. `emu_lfo4_trig.py` pressed a trig key and
+produced no sound copy at all — a null that said the harness never reached the
+path, not that the path was innocent.
+
+Closed by measurement, in the order they fell: the key; the row's contents; the
+destination; the track index; the mirror clamp; fade; the per-LFO enable flag
+sweep; the state backup and restore strides; the per-track pointer advances;
+and now removal. **What is left is note-on, and it is where the instrument's
+report has pointed from the first sentence.**
+
+Next: find the note-on routine and call it directly, the way
+`docs/instruments.md` says to reach what the sequencer will not run for us, and
+watch `mirror[track][67]` across a note-on rather than across frames. The
+question to answer is whether a voice samples the mirror at a moment when
+LFO4's contribution is present — and if so, why LFO1-3's always is.
