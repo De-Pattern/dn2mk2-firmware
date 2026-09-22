@@ -27,7 +27,7 @@ Where they disagree, they win and this table is wrong.
 | 1 | Reclaiming space | **built, not flashed** | `payload-section_DN2_1.11.syx`; ran end to end under the emulator 2026-09-17 | the flash — whether the instrument's bootloader accepts a larger section 3. It gates §14's bands, §9's textures, §3's shipped half |
 | 2 | Emulator as a test harness | **superseded** | digikit's emulator, used daily | nothing; the gearmulator fork below was never taken up. Reasoning kept |
 | 3 | PCM catalogue | **delivered** | `transients` mod, `site/transients.html` (#55, #56, #57); solved on hardware #64 | `TRAN = 4*slot - 8`, 32 of 34 reachable. Adding samples rather than remapping waits on §1's flash |
-| 4 | FX and Master modulation | **partly delivered; the blocker is gone (2026-09-22)** | `moddest` mod, `site/destinations.html` (#60, #61) — 13 more destinations | the FX/Master parameters themselves, and whether they can be p-locked (a separate question, for DNX's pattern format) |
+| 4 | FX and Master modulation | **the engine half is built and gated (2026-09-22); not flashed** | `moddest` mod, `site/destinations.html` (#60, #61) — 13 more destinations; **`fxdest_DN2_1.11.syx`** — `DEST` codes 101..127 write `mirror[16][code-76]` | the destination browser (item 3 + item 4, a matched pair over three sites), Master's codes above 127 (`mvs.b` -> `mvz.b`), and whether they can be p-locked (a separate question, for DNX's pattern format) |
 | 5 | Bake LFO output into p-locks | **open** | — | everything; but its stated blocker is gone — LFO4 ships a working tick |
 | 6 | New ELE3 section | **open** | — | a first flash with a payload whose absence is harmless. Cheaper than this entry assumed: `dest` is never read (2026-09-15) |
 | 7 | DSP hunt | **open, unparked** | digikit's SHARC+ Ghidra module and Python disassembler; `selache` (#87) | p-code semantics and anything built on them |
@@ -426,6 +426,29 @@ than the destination path. **Owner's first priority, 2026-09-22.**
 > 16, so the modulation is part of the rebuild rather than a race against it.
 > `docs/fx-master-modulation.md` §9.
 > It also corrects reason 3 below and four claims in other files.
+>
+> **Route A's engine half is built, 2026-09-22 — `fxdest_DN2_1.11.syx`.** Two
+> edits: one byte raises evaluator A's destination bound (`moveq #100` ->
+> `moveq #127` at `0x40137a8e`) and one cave at `0x40137a9e` swaps the mirror
+> base to `0x8000750e` for codes 101..127, so `DEST` code *c* writes
+> `mirror[16][c - 76]` — FX slots 25..48, Chorus/Delay/Reverb. The depth
+> multiply, the accumulate, the `0..0x7f00` clamp and the store are all stock.
+> Evaluator B needs no patch, re-verified: it keeps its own `moveq #100` and a
+> second bound at `0x401376c2` that stops it at `DEST` 8. Gates passed:
+> `check_coldfire` 1,539 against the 1,540 baseline with **0 new**, and `dnfw
+> inspect` 21/21 with the HMAC trailer. **It has not been flashed and needs the
+> owner's go-ahead.** `docs/fx-master-modulation.md` §12.
+>
+> **Item 3 was read and it changes the plan.** The destination list at
+> `0x4003951e` holds *entry numbers*, not slots, and its only source is the
+> `ParameterSet`'s `slot -> entry` virtual at vtable `+0x50`; the 26-entry map
+> it builds afterwards is ordering, not enumeration. So an FX destination cannot
+> be appended to the list — it has to be answered by `+0x50`, and the *reverse*
+> direction must agree, which is **three** sites and not the two §10 counted:
+> `0x4003985e`, `0x400c2a36` and `0x40107b0e` (the browser's confirm path, which
+> carries no `lsl.l #8` and is why the count was short). None of it can be gated
+> in the emulator, which runs no destination browser, so it is a second build
+> and a second flash. `docs/fx-master-modulation.md` §11.
 
 **The idea (2026-09-12).** The DN2's FX **settings** — the parameters that
 control reverb, delay and chorus themselves — accept MIDI CC from outside, but

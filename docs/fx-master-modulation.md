@@ -742,3 +742,247 @@ touched. Item 4 is two caves.
 
 Item 3 is now the only unread piece, and it is the one that decides whether an
 FX destination can be *chosen* rather than only *driven*.
+
+## 11. Item 3, the destination list enumeration, read — and it changes the plan
+
+§10 left item 3 as "the only unread piece, and the one that decides whether an
+FX destination can be *chosen* rather than only *driven*". It was read on
+2026-09-22. **It is not one cave after the loop.** The list is only half of a
+round trip, and the other half is a shared leaf with thirty-four callers.
+
+### What `0x4003951e` actually is
+
+One function, **ten call sites** (`0x4003981c`, `0x4003996a`, `0x40039a16`,
+`0x40039b8c`, `0x40039c38`, `0x40039dae`, `0x40039e36`, `0x400c28ee`,
+`0x40106502`, `0x40107abc`), of shape
+
+```
+build(std::vector<int>* out /* %a0 */, ParameterSet* set /* sp@(4) */,
+      u32 want /* sp@(8) */)
+```
+
+and the loop is nineteen instructions:
+
+```
+4003958a:  moveal %a5@,%a0            ; %a5 = the set
+4003958c:  movel  %d2,%sp@-           ; the slot, 0..100
+40039590:  moveal %a0@(80),%a0        ; vtable +0x50: slot -> entry
+40039594:  jsr    %a0@
+40039596:  movel  %d0,%sp@(48)
+4003959c:  beqs   0x400395b6          ; slot unoccupied -> next
+4003959e:  jsr    %a2@                ; %a2 = 0x400dc30e, the `+44` getter
+400395a2:  notl   %d0
+400395a4:  andl   %sp@(56),%d0        ; keep only if `want` is a subset of `+44`
+400395aa:  bnes   0x400395b6
+400395ac:  pea    %sp@(40)            ; &entry
+400395b0:  movel  %a3@,%sp@-          ; the vector
+400395b2:  jsr    %a4@                ; 0x40193f1e -- push_back
+400395b6:  addql  #1,%d2
+400395b8:  moveq  #101,%d1
+400395ba:  cmpl   %d2,%d1
+400395bc:  bnes   0x4003958a
+```
+
+So **the list holds entry numbers, not slots**, the membership test is
+`(~mask & want) == 0`, and the *only* thing that decides which parameters are
+walked is the set's own `slot -> entry` virtual at **vtable +0x50**. The
+browser passes `want = 0x200` (`0x40107ab0`), the loosest filter — bit 9, which
+`0x1e00`, `0x0e00`, `0x0600` and `0x0200` all carry. The randomiser
+(`0x40039756`) passes the narrow cascade instead.
+
+After the loop the function builds a 26-entry `std::map` from the table at
+`0x4028bfc4` and sorts the vector through `0x400391a6`. That is ordering, not
+enumeration: **no second source of entries exists.** So "where would FX entries
+be appended" has an answer, and it is not "after the loop" — it is *inside* it,
+through the set's own virtual, or nowhere.
+
+### The consequence: it is a round trip, and both directions must agree
+
+Three more sites matter, and together they say why one cave is not enough:
+
+| direction | where | what it does |
+|---|---|---|
+| slot → entry | `0x400c28e0`, `0x40107aae` | the set's vtable `+0x50`, on the stored `DEST >> 8` |
+| entry → slot | `0x4003985e` (`lsl.l #8` at `0x40039868`) | the randomiser stores `slot << 8` |
+| entry → slot | `0x400c2a36` (`lsl.l #8` at `0x400c2a3e`) | the group-step stores `slot << 8` |
+| entry → slot | **`0x40107b0e`** | the browser converts, then feeds the slot straight **back** into `+0x50` |
+
+`0x40107b0e` is the correction to §10. That site has **no `lsl.l #8`**, which is
+why counting the shift found two sites and not three — it converts
+entry → slot and immediately asks the set for the entry again, to normalise the
+duplicate records (`CHR`/`VOL`, the two `SCS`). A build that teaches only the
+shifted pair to add 76 leaves the browser's own confirm path mapping code 111
+back to sound slot 35.
+
+`0x400dbcc4` — entry → `record+12` — is a five-instruction leaf with **34
+callers**, of which these three are on `DEST` paths and thirty-one are not. Its
+sibling `0x400dbce8` returns `record+8`, the **group**, which is what the
+group-step at `0x400c2894` compares to decide where the next page of
+destinations starts. Both were identified against `params/record.py`'s word
+indices (`GROUP = 2` at byte 8, `PARAMETER_ID = 3` at byte 12), not guessed.
+
+### So item 3 is a matched pair, not a cave
+
+To make an FX destination *choosable* the two directions have to agree:
+
+1. **slot → entry**: `SoundParameterSet`'s `+0x50` must answer codes 101..124
+   with the FX records' entry numbers, which means reading `FxParameterSet`'s
+   own slot table `0x42c649a8` at `code − 76` — `0x400dc0b0` is that read, four
+   instructions, and it is already in the image. And `0x4003951e`'s `moveq #101`
+   bound must rise to 125 so the loop reaches them.
+2. **entry → slot**: the three `DEST` sites above must add 76 when the record's
+   group is 16, 17 or 18, without disturbing the other thirty-one callers of
+   `0x400dbcc4`.
+
+Neither is large. What makes it a second build rather than this one is that
+**none of it can be gated here**: the emulator runs no destination browser, so
+the only instrument that can tell a working round trip from a half-working one
+is the instrument. Shipping it with the engine change would put two questions on
+one flash, which is what §3 of `docs/FEATURE-PLAYBOOK.md` exists to prevent.
+
+**Not read, and named so it is not assumed:** whether the 26-entry ordering map
+at `0x4028bfc4` has a key for groups 16..18, and what the sort at `0x400391a6`
+does with an entry whose group it has no key for. That is the first thing to
+read when item 3 is built, and it is the kind of omission that produces a hang
+rather than a wrong name.
+
+### Revised cost, again
+
+| item | §10 said | now |
+|---|---|---|
+| 1–2 evaluator bound and block-16 base | 1 cave, 8 displaced bytes | **1 byte + 1 cave** — §12, built |
+| 3 destination list enumeration | 1 cave, unread | **a `+0x50` extension and one bound byte**, and it is half of a pair |
+| 4 entry → value conversion | 2 caves | **3 sites** — `0x40107b0e` carries no `lsl.l #8` |
+| 5 `+44` flags | 8 bytes | unchanged; Chorus's eight only |
+
+## 12. `fxdest`, built 2026-09-22 — route A's engine half
+
+`scripts/build_fxdest.py` → `00_Resources/02_Builds/fxdest_DN2_1.11.syx`,
+section also at `out/fxdest/section_3_MAIN_OS.bin`. Two edits, 47 bytes
+changed, no chunk, no loader, no UI.
+
+### The edits
+
+| # | at | stock | becomes | why |
+|---|---|---|---|---|
+| 1 | `0x40137a8e` | `72 64` — `moveq #100,%d1` | `72 7f` — `moveq #127,%d1` | evaluator A's destination bound. `DEST` is read with `mvs.b`, so 127 is the ceiling that read can carry, and a negative byte still fails the unsigned compare exactly as in stock |
+| 2 | `0x40137a9e` | `73 6c 00 52 4d f0 7a 00` — `mvs.w %a4@(82),%d1 ; lea %a0@(0,%d7:l:2),%fp` | `jmp 0x4028ea02` + `nop` | the cave |
+
+§10 suggested hooking at `0x40137a96` and replaying the compare. Hooking two
+instructions later is strictly better: **the displaced pair is straight-line**,
+with no `bcc` among it, so `patch/cave.py`'s PC-relative guard passes on its own
+terms rather than being waived, and the payload has only to overwrite `%a0`
+before the replayed `lea` uses it. The cost is edit 1, one byte.
+
+The cave, as `dnfw disasm` reads it back out of the built `.syx`:
+
+```
+4028ea02  4a 87              tstl  %d7
+4028ea04  66 0c              bnes  0x4028ea12
+4028ea06  22 0d              movel %a5,%d1          ; the track counter
+4028ea08  66 08              bnes  0x4028ea12
+4028ea0a  4a af 00 30        tstl  %sp@(48)         ; the inner counter, 2..0
+4028ea0e  66 02              bnes  0x4028ea12
+4028ea10  7e 6f              moveq #111,%d7         ; the demonstration
+4028ea12  72 64              moveq #100,%d1
+4028ea14  b2 87              cmpl  %d7,%d1
+4028ea16  64 06              bccs  0x4028ea1e       ; DEST <= 100 -> stock base
+4028ea18  41 f9 80 00 75 0e  lea   0x8000750e,%a0   ; block 16
+4028ea1e  73 6c 00 52        mvsw  %a4@(82),%d1     ; the displaced stock
+4028ea22  4d f0 7a 00        lea   %a0@(0,%d7:l:2),%fp
+4028ea26  4e f9 40 13 7a a6  jmp   0x40137aa6
+```
+
+`0x8000750e` is `B + 34 + 202·16 − 2·76`: the stock `lea` already adds
+`2·DEST`, and the FX slot is `DEST − 76`. `%d1` is scratch for two instructions
+and the replayed `mvs.w` reloads it, so nothing live is clobbered; on the skip
+path it leaves 127 where stock left 100, and `%d1` is dead there — written
+before it is read at both `0x401377a4` and `0x40137afc`. Everything after the
+jump back — the depth multiply, the accumulate, the `0..0x7f00` clamp, the
+store — is stock.
+
+### What was asserted before anything was written
+
+Sixteen control addresses, each one `dnfw disasm` away by hand, and all sixteen
+held: evaluator A's `mvs.b` and bound test, the `%sp@(52)` load, the
+`addil #-16384` that makes `DEP` bipolar, the clamp and the store; the three
+loop instructions the demonstration reads (`lea %a4@(-34),%a4`,
+`movel %d1,%sp@(48)`, `lea %a4@(-16),%a4`) and the sixteen-track bound; the
+mirror base `lea 0x800068e4,%a2`; the frame builder's `pea %a2@(3330)`; and
+**evaluator B's two bounds, re-verified rather than trusted** —
+`moveq #100,%d6` at `0x4013769c` and `moveq #7,%d2 ; cmpl %a0,%d2 ; bcs` at
+`0x401376c2`. B keeps its own hundred, so codes 101..127 never reach it; and it
+writes through `%sp@(56)`, the `0x4463fc18` array, not the mirror at all.
+**Item 1 is one cave, not two, confirmed.**
+
+Two further guards the build runs itself: nothing in the whole disassembly
+branches into `0x40137a9e..0x40137aa5`, and **no longword anywhere in the
+3,192,192-byte section holds one of those addresses** — which catches a jump
+table that a branch grep would not see.
+
+### The demonstration, and why it is hard-coded
+
+Nothing on the instrument can produce a code of 101..127 until item 3 is built,
+so the build carries one, in the manner of `lfo4-tick7` and `fxblock16`:
+
+> on **track 1** only, on **LFO1** only, and only while its `DEST` reads
+> **none**, the code becomes **111** — block-16 slot 35, **Delay Feedback
+> Gain**, the exact cell the instrument was heard to sweep in §9.
+
+The condition is `%d7 == 0 && %a5 == 0 && %sp@(48) == 0`: registers the
+evaluator already holds, so it needs no absolute address and cannot drift with
+the mirror base. `%a5` is the outer track counter (`addql #1,%a5` at
+`0x40137b0a`, bounded by `moveq #16` at `0x40137b18`); `%sp@(48)` is the inner
+counter, set to 2 at `0x401377a0` and decremented per LFO while `%a4` walks back
+16 bytes at a time, so **2 = LFO3, 1 = LFO2, 0 = LFO1** — which is why
+`%a4@(74)` reads mirror offsets 74, 58 and 42, the `DEST` cells of slots 20, 12
+and 4.
+
+`DEST = none` is the power-on default and `DEP` defaults to centre, so nothing
+moves until the owner turns `DEP` up. That is the whole test, with `SPD`,
+`MULT`, `WAVE` and `DEP` all live rather than a fixed triangle — a strictly
+better demonstration than a hard-coded ramp, because the owner can steer it.
+
+### Gates
+
+| gate | result |
+|---|---|
+| `check_coldfire.py out/fxdest/section_3_MAIN_OS.bin` | **pass** — **1,539** hits against `out/lfo4-browser`'s **1,540**. `--against` that baseline: 1,539 shared (its data), **0 new**. Below the ceiling because this build carries no compiled chunk |
+| `emu_boot_check.py out/fxdest/section_3_MAIN_OS.bin`, from reset | see the log `out/emu-logs/gate_fxdest.log` |
+| `emu_boot_engine.py --build out/fxdest` | **does not apply, and was replaced.** It opens `out/<build>/symbols.json` and counts `lfo4_refresh`; this build has no chunk and no symbols, so it fails on the missing file before booting anything. Recording that as "n/a" would be `docs/PRINCIPLES.md` §19 again, so `scripts/emu_fxdest.py` asks the same question in the form this build can answer |
+| `scripts/emu_fxdest.py` — the replacement | see the same log |
+| `dnfw inspect` | **pass** — 21/21 integrity checks and the HMAC-SHA256 trailer reproduced |
+
+`emu_fxdest.py` boots the patched image from reset and then **calls evaluator
+A's destination write by hand**, `0x40137a8a` → `0x40137ad2`, with the registers
+the tick would have held, over eleven cases: sound slots 5 and 100, `DEST = 0`
+on three track/LFO combinations either side of the demonstration's, codes 101,
+111, 124 and 127, and a negative byte. Both candidate cells are pre-loaded with
+a sentinel and the depth is set to its positive stop with a large LFO value, so
+a cell that *is* written clamps to `0x7f00` and one that is not still reads the
+sentinel. **The stock section is run as a control, case for case** — it has to
+agree below 101 and write nothing at all above it, or the harness is measuring
+itself rather than the patch.
+
+### What it cannot settle, said before the flash
+
+The emulator does not model the DSP and does not run the audio engine, so the
+tick never fires during a boot and no sound is produced. §9 answered the DSP
+question on the instrument; what is untested until this is flashed is whether a
+value written into block 16 **by the LFO tick** — which runs inside the frame
+rebuild, not after it — survives to the frame builder. That is the difference §9
+named between "the lane is live" and "the feature works", and it is exactly what
+this build asks.
+
+### The two things that are consequences, not defects
+
+- **Sixteen tracks' LFOs can all target the same global FX cell and they will
+  stack**, because every evaluator reads the cell and adds to it before the
+  clamp. That is what the FX parameters being global means. This build exposes
+  one LFO so it cannot be seen yet; it will be the first surprise the moment the
+  browser can offer these codes, and it belongs in the UI rather than the engine.
+- **Master (slots 60..69) is out of reach of this range.** It needs codes
+  136..145, and `mvs.b` makes any byte above 127 negative, which the unsigned
+  bound then rejects. Widening that read to `mvz.b` is a separate step; Chorus,
+  Delay and Reverb — slots 25..48, codes 101..124 — are the whole of what
+  101..127 buys.
