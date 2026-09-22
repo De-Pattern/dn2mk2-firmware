@@ -4554,3 +4554,48 @@ and they are clean:
   table;
 - neither sweeps — the destination was inert and every negative result today
   was measuring silence that had nothing to do with LFO4.
+
+### The emulator sweeps where the instrument does not — 2026-09-23
+
+`scripts/emu_lfo4_sweep.py`, pointed at **the instrument's own configuration**
+— track 5, slot 67 `Filter Frequency`, `DEP` at maximum — driving evaluator A
+directly for 120 frames:
+
+```
+  the live sound for track 5 is 0x4210d2ec; watching slot 67 every frame
+  no state backup:            119 change(s), turns round, 1 of 120 frame(s) at its maximum 0x5ffe
+  asking for a state backup:  119 change(s), turns round, 1 of 120 frame(s) at its maximum 0x5ffe
+  span 0x4051..0x5ffe, 120 distinct values over 120 frames
+```
+
+**A clean oscillation, and four readings fall out of it:**
+
+| | |
+|---|---|
+| it moves every frame and **turns round** | not a ramp into the clamp; the phase advances on its own, unprompted |
+| **1** frame of 120 at the maximum | not saturation — the earlier worry about `DEP` at full depth does not apply on this destination |
+| the two trajectories are **byte-identical** | the state backup and restore are not involved. That hypothesis is closed, and it was the one `emu_lfo4_sweep.py` was written to test |
+| track **5**, slot **67** | not the track, and not the destination |
+
+**So every part of the chain works when the evaluator is driven directly**, on
+exactly the configuration that is silent on the instrument.
+
+#### What the emulator has never run, and it is the whole remaining space
+
+This harness calls evaluator A 120 times in a row itself. It does not run the
+sequencer, it does not allocate a voice, and **it never performs a note-on**.
+Neither has any other probe: `emu_lfo4_trig.py` pressed a trig key and produced
+no sound copy at all, which said the harness never reached the path rather than
+that the path was innocent.
+
+And the instrument's report has been about note-on from the first sentence:
+binary per note, decided at note-on, sustained while the trig is held, more
+frequent the faster the trig is re-pressed. Every hypothesis that did not
+involve note-on has now been closed — removal (to be re-asked with a control),
+the key, the row's contents, the destination, the track, the clamp, the fade,
+the per-LFO flags, the state backup, the per-track strides.
+
+**The next instrument is the note-on routine, called directly**, the way
+`docs/instruments.md` says to reach what the sequencer will not run for us.
+Finding it is the work: what runs when a trig fires that could decide whether
+the fourth LFO's contribution survives, when the first three always do.

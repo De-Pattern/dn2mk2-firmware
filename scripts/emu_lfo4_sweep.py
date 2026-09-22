@@ -155,6 +155,12 @@ def main() -> int:
     results = [("no state backup", *trajectory(audible, "no state backup", backup=0)),
                ("asking for a state backup", *trajectory(audible, "asking for a state backup",
                                                          backup=1))]
+    # **The rest of `ROWS` used to be defined and never run**, which is a
+    # harness that looks like it tested four configurations and tested one.
+    # Found on 2026-09-23 after adding the instrument's own row to the table
+    # and reading a log that did not contain it.
+    for label, values in ROWS[1:]:
+        results.append((label, *trajectory(values, label, backup=0)))
 
     print()
     # The question is not "does it move" but "does it come back": an LFO turns
