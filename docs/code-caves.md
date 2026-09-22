@@ -388,3 +388,33 @@ Static analysis rules out what can be ruled out statically.
 
 The runtime proof needs a **write hook**, not a value watch — see the note above
 on why a `clrl` is invisible to `--watch`.
+
+## The reset clear, and why our loader is immune — 2026-09-22
+
+digikit's PR #37 (merged) reports that on Digitakt II 1.16 **the reset path
+zeroes from `0x40312000` upward** (`FUN_400004b2`), so its `cave_b` loses
+flashed bytes. Its new `tools/cavefind.py` reports usable cave space per image,
+including **2,136 bytes on DN2 1.11**.
+
+Checked against this project's own placement, because the hazard is real and
+the answer is not luck:
+
+| what | where | verdict |
+|---|---|---|
+| the stub cave | `0x402dfa1c` | **inside the image** (`0x40000400`..`0x40311380`), 200 KB below the clear |
+| this project's compiled C | `0x46800000` | far **above** the clear, and would be wiped — if it were flashed there |
+
+It is not flashed there. The C lives in the appended area **inside section 3**
+and `dnfw_boot` copies it up at startup, which runs *after* the reset clear. So
+the loader that looked like extra machinery is exactly what makes the placement
+safe, and the rule to carry forward is:
+
+**Flashed bytes above `0x40312000` do not survive a reset. Bytes a loader
+copies after the clear do.** A future cave placed by address rather than by
+loader must be below that line, and 3,200 bytes is all the room there is
+between the end of MAIN OS and the clear's start.
+
+This corroborates rather than extends digikit's finding: same conclusion, a
+different device, and arrived at from the opposite direction — they found the
+clear and lost bytes to it, we designed around the BSS bounds in
+`docs/ideas-backlog.md` §1 on 2026-09-17 and never met it.
