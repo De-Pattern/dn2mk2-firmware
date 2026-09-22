@@ -4708,3 +4708,73 @@ Next: find the note-on routine and call it directly, the way
 watch `mirror[track][67]` across a note-on rather than across frames. The
 question to answer is whether a voice samples the mirror at a moment when
 LFO4's contribution is present — and if so, why LFO1-3's always is.
+
+### Page copy/paste does not carry LFO4 — an unbuilt feature, 2026-09-23
+
+From the instrument:
+
+> "I could not use the device Copy/Paste function to paste LFO4 to LFO3 and
+> save some setup time" — "it just did nothing at pasting (it would say that it
+> was copying LFO4 though)"
+
+**The copy is recognised and the paste is empty**, which is the signature of a
+path that reaches LFO4's *page* but not LFO4's *values*.
+
+#### Why, and it is not a bug in anything that was built
+
+LFO4's eight values are **not in the sound.** §8's whole design is that a live
+sound has no free slots and cannot grow, so they live in `ext_val`, a side
+table keyed by the live sound's address. Everything that has to carry them has
+had to be taught, one path at a time and each one named in this file:
+
+| path | taught by |
+|---|---|
+| a knob turn | `csrc/lfo4/setter.c` |
+| a page read | `csrc/lfo4/getter.c` |
+| save and load | `csrc/lfo4/store.c` |
+| whole-sound copy, clear, and block moves | `csrc/lfo4/carry.c` |
+| the tick | `csrc/lfo4/bridge.c` |
+
+**A parameter-page copy is none of those.** It copies one page's slots within
+or between sounds, and the classes are there in the RTTI — `ParamPageCopy`
+(`0x40214f62`, typeinfo at `0x401dcdbc`), `PageCopy` (`0x4021584b`,
+`0x401de750`), `ModulationCopy` (`0x4021e80c`, `0x401ffc24`). Nothing in
+`csrc/lfo4/` hooks any of them, so the copy buffer gets whatever the stock
+accessor returns for slots 101..108 — and every stock accessor is bounded at
+100. It copies nothing and pastes nothing. The page name comes from the page
+record, which is ours and correct, which is exactly why the message says
+"LFO4".
+
+#### The owner's hypothesis, and why it is a real confound but not the cause
+
+> "It is maybe because some of the elements are not configured in a standard
+> way, like SPD"
+
+**Right to raise, and it matters for any copy test run on a meter build.**
+`lfo4-meter`, `meter2`, `meter3` and `meterkeep` all divert `SPD`'s and `DEP`'s
+*display* through `lfo4_on_get` — and `lfo4_on_get` is the diverted read at
+`0x4003717c`. If a copy path reads values through that same accessor, a copy
+taken on a meter build would capture the **needle**, not the setting. So a
+copy/paste test on any meter build is contaminated regardless.
+
+It is not the cause, though, because the fault would then be a *wrong* paste,
+not an empty one. An empty paste says the values never entered the buffer.
+
+**How to tell them apart if it ever matters:** repeat the test on
+`lfo4-browser`, which diverts no display. Prediction, stated before the test:
+**still empty**, because the feature does not exist. If it pastes correctly on
+`browser`, this entry is wrong and the meter builds broke something.
+
+#### What building it would cost
+
+Symmetrical with `store.c`, and probably the same shape: find where the page
+copy gathers a page's values and where the paste writes them, check whether
+either carries the familiar six-byte `moveq #100` bound, and divert it the way
+the setter and getter already are. Two hooks and two small functions if the
+bound is there; more if the page copy walks a slot list instead.
+
+**Not urgent, and worth knowing it is missing**: it costs the owner setup time
+on every test, and it is the kind of gap that makes a finished feature feel
+unfinished. Added to the punch list beside the two already standing — LFO4's
+settings not surviving a power cycle (`lfo4_on_load`'s drop), and the `RND`
+column's third site.
