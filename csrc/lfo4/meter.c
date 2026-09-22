@@ -38,6 +38,12 @@
  * The other five columns are untouched, so the page still works and a
  * destination can still be chosen while the three are read.
  *
+ * **One knock-on, and it is cosmetic.** The waveform preview block added in
+ * step 4e asks the page for `SPD` (entry 321) to animate at, and that read
+ * comes through the same accessor, so the preview moves at the needle's rate
+ * rather than the LFO's. Nothing downstream of the engine sees it: the tick
+ * reads `lfo4_rows`, which carries the dialled value.
+ *
  * One subject: turning run-time state into a displayable value. It does not
  * know what a slot id is (that is `getter.c`'s) and it never writes.
  */
