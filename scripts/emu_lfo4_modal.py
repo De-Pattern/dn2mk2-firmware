@@ -83,16 +83,38 @@ print(f"\n  {len(missing)} firmware block(s) all three reach and LFO4 never does
 # before it: the decision is in those, and the block just before is the one that
 # branched the other way.
 BEFORE = 12
-first = next((i for i, b in enumerate(order["LFO3"]) if b in missing), None)
+# **The first missing block is not the browser.** Twice it has been a block
+# sitting immediately after one of this project's own patch sites -- page 6 has
+# a firmware record and page 37 gets ours, so `0x400c2474`'s two exits diverge
+# by construction and say nothing about the window. The browser is not one
+# block, it is a *region*: hundreds of missing blocks close together. So find
+# the largest such cluster and ask where LFO3 first enters that.
+GAP = 0x400
+clusters, run = [], []
+for b in sorted(missing):
+    if run and b - run[-1] > GAP:
+        clusters.append(run)
+        run = []
+    run.append(b)
+if run:
+    clusters.append(run)
+clusters.sort(key=len, reverse=True)
+print("  the largest clusters of missing blocks, which is where the browser is:")
+for c in clusters[:4]:
+    print(f"    {c[0]:#010x}..{c[-1]:#010x}  {len(c)} block(s)")
+target = set(clusters[0]) if clusters else missing
+
+first = next((i for i, b in enumerate(order["LFO3"]) if b in target), None)
 if first is None:
     print("  LFO3 never entered one either -- the browser did not open for it")
 else:
-    print(f"\n  LFO3 diverges at entry {first:,} of {len(order['LFO3']):,}: "
-          f"{order['LFO3'][first]:#010x}")
+    print(f"\n  LFO3 enters that cluster at entry {first:,} of "
+          f"{len(order['LFO3']):,}: {order['LFO3'][first]:#010x}")
     print(f"  the {BEFORE} blocks it ran immediately before, newest last "
-          f"(the last shared one branched):")
+          f"(the last one LFO4 also ran is where they part):")
     for b in order["LFO3"][max(0, first - BEFORE):first + 1]:
-        mark = "  <- LFO4 never gets here" if b in missing else ""
+        mark = "  <- LFO4 never gets here" if b in target else (
+            "" if b in seen["LFO4"] else "  (LFO4 misses this too)")
         where = "firmware" if b < STOCK_END else "ours"
         print(f"    {b:#010x}  ({where}){mark}")
 
