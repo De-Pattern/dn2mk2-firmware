@@ -1355,3 +1355,141 @@ seen. From this build on it can: two LFOs on Delay Feedback Gain sum and pin at
 `0x7f00`. It is not a defect and it is not fixable in the engine — it is what
 the FX parameters being global means — so it is written into the owner's test
 plan as something to expect rather than to report.
+
+## 16. `fxbrowser` on the instrument: the list grew, the encoder wraps — 2026-09-23
+
+Flashed. The owner's report:
+
+> "when browsing the destination list, once I get to OVR Routing, if I turn one
+> more click the list goes to the very top again. I can see by the scroll mark
+> on the right that there was still more list after OVR Routing but I can never
+> reach under it."
+
+That is §15's test-plan row *"names appear but nothing moves"*, in a sharper
+form: the **scroll indicator knows the list is longer** and the encoder does
+not.
+
+### First: the enumeration is correct, and that is measured, not assumed
+
+`scripts/emu_destlist.py` calls the list builder `0x4003951e` directly — through
+a four-instruction trampoline, because it takes its output pointer in `%a0` and
+`Machine.call` can only set stack arguments — with a live `ParameterSet` reached
+by replaying the browser's own prologue from `0x400c28a2`. Stock and build, on
+the same snapshot, for all three `want` masks in play:
+
+| `want` | whose | stock | `fxbrowser` | added | lost |
+|---|---|---|---|---|---|
+| `0x0200` | the list path, `0x40107ab0` | 76 | **100** | +24 | 0 |
+| `0x1e00` | LFO1 (entry 78) | 55 | **79** | +24 | 0 |
+| `0x0600` | LFO3 (entry 98) | 69 | **93** | +24 | 0 |
+
+and the seam is exactly where §15 predicted:
+
+```
+# 53  entry 303  group 15  slot  97  'SRR Routing'
+# 54  entry 304  group 15  slot  98  'Overdrive'
+# 55  entry 305  group 15  slot  99  'OVR Routing'     <- the owner wraps after this
+# 56  entry 105  group 16  slot  25  'Depth'           <- Chorus, rank 11
+# 57  entry 106  group 16  slot  26  'Speed'
+```
+
+**So the list grew, by exactly 24, in the right place, losing nothing.** Item 3
+works. The fault is downstream of it.
+
+Three things fell out of the same run and are worth keeping:
+
+- **The three `DEST` records get three different lists.** LFO1's `want` of
+  `0x1e00` yields 55 stock entries, LFO3's `0x0600` yields 69, and the list
+  path's `0x200` yields 76 — the extra ones being groups 26, 27, 28, the LFO
+  pages' own parameters. An LFO cannot be offered *itself*: LFO3's list carries
+  groups 26 and 27 and not 28.
+- **Stock's LFO1 list ends precisely at `OVR Routing`.** 55 entries, last one
+  entry 305, group 15, slot 99 — the highest occupied sound slot. So the part
+  the owner can reach *is* exactly the stock list, and what he cannot reach is
+  exactly what this build added.
+- **Groups 0–4 have no rank.** The ordering table lists 26 groups and group 1
+  (25 entries in every list) is not among them, so `operator[]` default-inserts
+  rank 0 for it and it sorts beside group 30. Harmless, stock behaviour, and it
+  confirms the comparator's missing-key path is the benign one §15 read.
+
+`OVR Routing` is **entry 305**, not 304: the record **index** is 304 and
+`entry = index + 1`. The first run of the harness printed its marker on the row
+above for exactly that reason and the constant has been corrected.
+
+### What the wrap actually points at
+
+The navigation at `0x401079c8` walks the vector element by element
+(`0x40107c38`: `lea %a3@(4),%a1 ; cmpl %a1,%d1 ; beqs`) against a `%d1` it
+loads fresh from the vector's `end` at `0x40107ad0`. With 79 elements it should
+reach element 56. It does not, and the display lands at the **top** rather than
+stopping at the bottom — which is the shape of a *failed search*, not of a short
+walk: when the current entry cannot be found in the list, control reaches
+`0x40107b0c` with `%a1` still at or near `begin`, and the first element is what
+gets converted and shown.
+
+So the chain that breaks is **after** the step, not during it:
+
+1. the encoder steps to element 56, entry 105;
+2. something stores a `DEST` value for it;
+3. the page redraws, reads `DEST` back, resolves it through `+0x50`
+   (`0x40107aae`) and searches the list for the resulting entry;
+4. the search fails, so the view snaps to the first element.
+
+Step 4 is what the owner sees. Step 2 is the suspect, and **it is the fourth
+conversion path §12's report named as the one that could not be ruled out
+statically.**
+
+`0x40107b0e` — the site this build repointed — is a *normaliser*, not the store:
+it converts entry → code and feeds the code **straight back into `+0x50`** at
+`0x40107b1a` to collapse duplicate records, then passes the resulting **entry**
+to `%a2@(32)`. The value that ends up in `DEST` is produced inside that virtual,
+whose implementation is reached through a function pointer at `this+404`
+(`0x4010727a`) and has not been resolved.
+
+**The hypothesis, stated so it can be killed:** that setter converts the entry
+to a number by one of the **31 `jsr 0x400dbcc4` sites this build deliberately
+did not touch**, so picking Chorus Depth stores **25** rather than **101**. Slot
+25 is a real sound slot belonging to a group that is not in LFO1's list at all,
+so the redraw's search fails and the view jumps to the top — and the LFO would
+be silently modulating whatever sound parameter occupies slot 25, which is
+precisely the aliasing §4b warned about.
+
+### Why no fix is shipped for it
+
+The site has not been located, and `docs/PRINCIPLES.md` §19's sibling applies to
+positives as much as to negatives: a patch aimed at an unlocated site is a
+guess, and it would spend a flash to find that out. The two candidate fixes are
+both worse than knowing:
+
+- **patching `0x400dbcc4` itself** would catch the unknown setter, and would
+  also change the answer for its other 30 callers — including, possibly, the
+  Chorus/Delay/Reverb pages' own code, which needs the raw slot 25..48. That
+  blast radius cannot be measured here;
+- **hunting the setter by reading** is the chase `docs/FEATURE-PLAYBOOK.md` §2.4
+  exists to warn about: it is a virtual reached through a stored function
+  pointer, and the instrument for that is digikit's `tools/rttiscan.py` on the
+  `0x40107224` family, not more disassembly by eye.
+
+### The observation that splits it, and it costs no flash
+
+**The owner already has the build on the instrument.** Two things he can look at
+with it, which distinguish the hypothesis from its alternatives:
+
+1. **After the wrap, what does the LFO page show as `DEST`?** If it names a
+   *sound* parameter, the raw slot was stored and the hypothesis holds. If it
+   shows nothing or the first entry in the list, the store failed differently.
+2. **After the wrap, is some sound parameter being modulated?** Turn `DEP` up
+   and listen with the delay send down. Movement in the *voice* — filter,
+   pitch, a machine parameter — is the aliasing, and it names the stored number
+   directly: slot 25 is the first machine parameter.
+
+Either answer names the number that was stored, which names the conversion, and
+a located site is a two-instruction fix rather than a guess.
+
+### What this section does not claim
+
+The emulator runs no destination browser, so none of the above about the *view*
+is measured here — only the list contents are. The walk, the search, the redraw
+and the store are read from the disassembly and from one report from the
+instrument, and the two candidate explanations for "jumps to the top" have not
+been told apart. §19 again: this is a narrowing, not a conclusion.

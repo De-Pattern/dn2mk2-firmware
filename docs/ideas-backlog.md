@@ -468,10 +468,21 @@ than the destination path. **Owner's first priority, 2026-09-22.**
 > superset of all four `want` masks in play, so seventeen of the twenty-four
 > destinations need no record edit at all. Only Chorus is closed.
 >
-> **Not flashed.** Four gates pass, but the browser itself cannot be gated —
-> the emulator has no panel, page view or encoder — so the list, the names and
-> the encoder are the instrument's question.
-> `docs/fx-master-modulation.md` §15.
+> **Flashed 2026-09-23. It half-works, and the half that fails is the one the
+> emulator could not gate.** The 24 entries are in the list — measured, not
+> inferred: `emu_destlist.py` calls the builder directly and gets +24/-0 for
+> all three `want` masks, with the FX entries immediately after `OVR Routing`.
+> But the encoder cannot step onto them: one click past `OVR Routing` returns
+> the owner to the top of the list, while the scroll mark shows more below.
+> The fault is in what the browser **stores** when one is picked, not in the
+> list: `0x40107b0e` turns out to be a normaliser rather than the store, and
+> the value is produced inside `%a2@(32)`, a virtual reached through a
+> function pointer at `this+404` that is not yet resolved. The suspect is one
+> of the 31 `jsr 0x400dbcc4` sites deliberately left untouched — which would
+> store 25 instead of 101 and make the redraw's search fail. **No fix is
+> shipped for it**: the site is not located, and the next instrument is
+> digikit's `rttiscan.py` on that class rather than more reading.
+> `docs/fx-master-modulation.md` §15, §16.
 >
 > **Item 3 was read and it changes the plan.** The destination list at
 > `0x4003951e` holds *entry numbers*, not slots, and its only source is the
