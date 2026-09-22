@@ -4869,3 +4869,55 @@ moving cell **with** sound says the modulation works and the intermittency is
 about something other than delivery — in which case the "one in fifteen" is
 about *which* notes hear a cell that is always moving, and the question becomes
 what a trig does to the voice's parameter fetch.
+
+#### The contradiction, stated exactly — 2026-09-23
+
+The same-destination test was run with the control asked for and confirmed:
+
+> "so they move. And the LFO4 effect is present as always by chance every ~15
+> trig pushes. ... at MULT = 32 both dials move synchronously all the way
+> clockwise and then when they reach certain point they sweep back
+> counterclockwise to a symmetric position and then they repeat"
+
+and, asked directly whether LFO3's depth was at centre: **"yes"**.
+
+Both columns read the same cell in this test, which is why they moved together —
+that part is construction, not a finding. The finding is what was in the cell:
+
+| | |
+|---|---|
+| LFO3's depth was at **centre**, so it contributed nothing | the control |
+| the cell swept a **full triangle**, clockwise and back to a symmetric point, repeating | so **LFO4 alone** was writing it, which the earlier `MULT` manipulation already established |
+| **the filter did not move**, except the usual one trig in fifteen | |
+
+**A cell that traces a triangle is a parameter being modulated.** If the voice
+read that cell, the cutoff would sweep continuously and audibly. It does not.
+
+**So the memory the page reads and the memory the voice reads are not the same
+thing, or not always.** That is the first asymmetry in this entire
+investigation that LFO1-3 and LFO4 do not share, and it cannot be reconciled
+with "LFO4 writes the mirror correctly" — both are measured, and both stand.
+
+Two readings survive it, and they are distinguishable:
+
+1. **There is more than one buffer.** The page reads `0x800068e4 + 34 + 202*track`
+   directly; the evaluator writes through `%a0`, loaded from `%sp@(52)` — an
+   argument its caller supplies. Nothing has ever checked that those are the
+   same address on the instrument. The emulator cannot say, because the harness
+   *passes* that argument itself.
+2. **The voice reads it only under a condition** that LFO1-3 always satisfy and
+   LFO4 satisfies about one note in fifteen.
+
+**The test that separates them costs nothing and is a manipulation, not an
+observation.** Put LFO3 on the same destination with its depth **up**, so its
+sweep is plainly audible, then raise and lower LFO4's depth:
+
+- if the audible sweep **changes** — deeper, or a different shape — then LFO4's
+  contribution is in the cell the voice reads, and reading (2) is the live one;
+- if the audible sweep is **untouched** by LFO4's depth while `SPD` shows the
+  cell moving, the two buffers are different memory, and reading (1) is it.
+
+Reading (1) would also explain the whole history at a stroke: the panel, the
+table, the key, the row and the evaluator are all correct — as measured — and
+the contribution is simply being written somewhere the sound does not come
+from.
