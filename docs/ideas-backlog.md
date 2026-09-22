@@ -5,11 +5,64 @@ a signal, and several of these become the obvious move once the fourth LFO is
 done or once we start on the DN1. Each entry says what it is, what it would buy,
 and what would have to be true for it to work.
 
-Nothing here is scheduled. The active work is `docs/lfo4-feasibility.md`.
+~~Nothing here is scheduled. The active work is `docs/lfo4-feasibility.md`.~~
+**Superseded 2026-09-22.** Kept because it is true of when it was written. Much
+of this file has since shipped; the table below says which parts, and each
+heading carries its own state line.
+
+## Where each entry actually stands
+
+**Added 2026-09-22, because the headings above lied by omission.** Read as ideas
+and skimmed by `##` heading, this file says everything here is open. Seven of its
+nineteen entries are delivered and two more are partly delivered — six mods in
+`src/dnfw/mods/` and six pages in `site/` came out of this file — and a reader who
+skimmed the headings reported the whole file as unstarted. The state is therefore
+stated here, and again under every heading. This table is authoritative for
+*state within this file*; `docs/STATUS.md` remains
+authoritative for project state, and `docs/backlog-builds.md` for the campaign.
+Where they disagree, they win and this table is wrong.
+
+| # | Entry | State | Where it landed | What remains |
+|---|---|---|---|---|
+| 1 | Reclaiming space | **built, not flashed** | `payload-section_DN2_1.11.syx`; ran end to end under the emulator 2026-09-17 | the flash — whether the instrument's bootloader accepts a larger section 3. It gates §14's bands, §9's textures, §3's shipped half |
+| 2 | Emulator as a test harness | **superseded** | digikit's emulator, used daily | nothing; the gearmulator fork below was never taken up. Reasoning kept |
+| 3 | PCM catalogue | **delivered** | `transients` mod, `site/transients.html` (#55, #56, #57); solved on hardware #64 | `TRAN = 4*slot - 8`, 32 of 34 reachable. Adding samples rather than remapping waits on §1's flash |
+| 4 | FX and Master modulation | **partly delivered** | `moddest` mod, `site/destinations.html` (#60, #61) — 13 more destinations | the FX/Master parameters themselves, and whether they can be p-locked (a separate question, for DNX's pattern format) |
+| 5 | Bake LFO output into p-locks | **open** | — | everything; but its stated blocker is gone — LFO4 ships a working tick |
+| 6 | New ELE3 section | **open** | — | a first flash with a payload whose absence is harmless. Cheaper than this entry assumed: `dest` is never read (2026-09-15) |
+| 7 | DSP hunt | **open, unparked** | digikit's SHARC+ Ghidra module and Python disassembler; `selache` (#87) | p-code semantics and anything built on them |
+| 8 | New LFO waveforms | **delivered** | `lfowaves` mod, `site/lfo.html` (#76, #77, #78, #79): seven waveforms, three swappable wavetables, WAV import, formulas via the bench | — |
+| 8 | FX machines on tracks | **open** | — | everything. (Yes, two entries are numbered 8 — see below) |
+| 9 | Custom start-up animation | **delivered** | `bootscreen` mod, `site/boot.html` (#82, #83); hardware #84 | a larger or different texture waits on §1's flash |
+| 10 | Arp on MIDI tracks | **delivered** | `midiarp` mod, `site/arp.html` (#77, #80 on hardware, #81) | — |
+| 11 | Compatibility check between mods | **open** | — | more urgent than when filed: six mods now exist, and the combination has never been flashed |
+| 12 | P-lock performance modulators | **open** | — | route (b), repriced by §4's answer and sharing LFO4's mirror relocation; item 4 closed `[SUPERSEDED]` |
+| 13 | Mod stamp on the intro | **partly delivered** | purpose met by `bootscreen` / `site/boot.html` | the Croc-gu-phant wordmark art, still at concept and geometry stage |
+| 14 | Shape bench | **delivered** | `site/bench.html` (#77, #82) and the published artifact | the firmware half — shipped wavetable bands — waits on §1's flash |
+| 15 | Wavetable synth machine | **not started** | — | all three named questions; only the first is ColdFire work |
+| 16 | Glitch-ASCII intro | **delivered** | part of `bootscreen` / `site/boot.html` (#82, #83); hardware #84 | — |
+| 17 | Performance mixer | **not started** | — | everything. The Outbox 8 reading below is a starting point it did not have when filed |
+| 18 | P-lock arpeggiator parameters | **delivered** | `arpplocks` mod (#85, #86): MODE, SPEED, RANGE, N.LEN per trig, every edit path verified | `--all`'s LEN, the sixteen step offsets and the step mutes (mutes untested since the fix) |
+
+**The numbering is wrong and is left wrong on purpose.** There are two `## 8.`
+headings — "New LFO waveforms" and "FX machines on tracks" — and `## 7.` sits
+*between* them rather than before either. Other documents cite these numbers, so
+renumbering would break those citations; the duplication is recorded here instead
+so it is visible rather than a trap. When citing, use the title as well as the
+number.
+
+**Owner's order of interest for what is left, 2026-09-22:** §4 first, then §12
+and §18's remainder, then §11, then §6.
 
 ---
 
 ## 1. Reclaiming space by removing a feature
+
+**State — built, not flashed:** `payload-section_DN2_1.11.syx`, seen running end
+to end under the emulator 2026-09-17 and **never flashed**. The flash is what
+asks whether the *instrument's* bootloader accepts a larger section 3; if it
+passes, §14's wavetable bands, §9's textures and the shipped half of §3 are
+unblocked together.
 
 **The idea.** 1.11 added a whole container section (id 8, ~160 KB) for the
 Outbox. If Elektron can add a section, could we delete one we do not use — the
@@ -276,6 +329,11 @@ at once: eight wavetable bands for §14, a bigger or different intro texture for
 
 ## 2. An emulator as a test harness
 
+**State — superseded:** the gearmulator fork proposed below was never taken up.
+digikit's emulator is the project's harness and does this daily — every build
+since LFO4 was driven through it. The reasoning is kept because it is why a
+harness was wanted, and it still names what an emulator must do.
+
 **The idea.** <https://github.com/joelanders/gearmulator-md-mm> — a fork of
 TUS's Gearmulator adding **Machinedrum and Monomachine** emulations. It boots
 the real firmware and its panel menu even offers *Send SysEx File*, following
@@ -308,6 +366,12 @@ it — dramatically cheaper to try.
 
 ## 3. Expanding the PCM catalogue for the FM drum machine
 
+**State — delivered:** the `transients` mod and `site/transients.html` (#55,
+#56, #57); the index was solved on hardware in #64 — `TRAN = 4*slot - 8`, 32 of
+34 slots reachable. The prose below predates that and is kept as filed. The
+shipped half — adding samples rather than remapping to existing ones — waits on
+§1's flash.
+
 **The idea.** The DN2's FM drum machine uses PCM content alongside its synthesis.
 Expanding that catalogue would be a **data-side** mod rather than a code one,
 and so is a genuinely different (and possibly easier) class of change than the
@@ -336,6 +400,12 @@ objects it already decodes.
 ---
 
 ## 4. Open the FX and Master parameters to LFO modulation and p-locks
+
+**State — partly delivered:** the `moddest` mod and `site/destinations.html`
+opened 13 more modulation destinations (#60, #61). Open: the FX and Master
+parameters themselves, and whether they can be p-locked — which this entry's own
+last lines already say is a separate question, for DNX's pattern format rather
+than the destination path. **Owner's first priority, 2026-09-22.**
 
 **The idea (2026-09-12).** The DN2's FX **settings** — the parameters that
 control reverb, delay and chorus themselves — accept MIDI CC from outside, but
@@ -484,6 +554,12 @@ address.
 
 ## 5. Bake an LFO's output into parameter locks
 
+**State — open, and newly unblocked:** nothing has been built. The blocker
+stated below — "needs the tick, or a good enough reimplementation of the LFO's
+maths" — is gone: LFO4 ships a working tick, passed on hardware 2026-09-17. The
+sentence "the same blocker as everything else on this list" is superseded, kept
+because it records why this sat still.
+
 **The idea (2026-09-12, from the owner).** Internal LFO modulation is invisible
 on screen, and deliberately so — if the display followed the LFO, arming live
 record during playback would capture that movement as p-locks and record the
@@ -508,6 +584,11 @@ everything else on this list.
 ---
 
 ## 6. A new ELE3 section as real address space, instead of caves
+
+**State — open, and cheaper than this entry assumed:** `dest` is never read
+(measured 2026-09-15), so the section does not have to claim address space to be
+carried. What it needs is a first flash with a payload whose absence is harmless
+— the same flash §1 is waiting on. **Owner's fourth priority, 2026-09-22.**
 
 **The idea (2026-09-12, raised by the owner).** Asked why new code cannot simply
 be appended at the end of MAIN OS and referred to by its address, the honest
@@ -817,6 +898,12 @@ never with a payload the firmware depends on to boot.
 ---
 
 ## 8. New LFO waveforms
+
+**State — delivered:** the `lfowaves` mod and `site/lfo.html` (#76, #77, #78,
+#79) — seven waveforms, three swappable wavetables, **WAV wavetable import**
+(Serum, Vital) and custom formulas via the Shape Bench with JSON export.
+*Numbering: this is the first of two `## 8.` headings in this file; the second
+is "FX machines on tracks". See the note under the status table.*
 
 **Owner's request, 2026-09-16**, queued while LFO4 was in build.
 
@@ -1271,6 +1358,11 @@ project-loading overlay.
 
 ## 7. The DSP hunt, parked with an explicit warning
 
+**State — unparked 2026-09-14:** digikit's SHARC+ Ghidra processor module and
+its Python disassembler, plus our own `selache` (#87). The park below stands as
+the record of why it was parked. *Numbering: this `## 7.` sits after the first
+`## 8.`; see the note under the status table.*
+
 > **[UNPARKED 2026-09-14]** This section was parked because nothing could read
 > SHARC+ VISA. That is no longer true: digikit ships both a Ghidra processor
 > module and a stdlib-only Python disassembler for our exact chip family, built
@@ -1417,6 +1509,10 @@ unpacking result we produce ourselves.
 ---
 
 ## 8. FX machines on tracks, and per-track assignable FX
+
+**State — open:** nothing built, nothing priced beyond what is written here.
+*Numbering: this is the second `## 8.` in this file; the first is "New LFO
+waveforms". See the note under the status table.*
 
 **The idea (2026-09-13, issue #49, raised by the owner).** The DN2 assigns a
 synthesis machine and a filter machine per track. Syntakt and Tonverk allow a
@@ -1603,6 +1699,10 @@ width (`m-dwyer/digikit#31`), which raises the aligned decode of our image from
 
 ## 9. A tool for a custom start-up animation
 
+**State — delivered:** the `bootscreen` mod and `site/boot.html` (#82, #83);
+passed on hardware in #84. A larger or different intro texture still waits on
+§1's flash.
+
 **Owner's idea, 2026-09-13.** Let people replace the Elektron boot animation
 with their own — a small tool that takes frames in and produces a flashable
 image, rather than a one-off patch.
@@ -1716,6 +1816,9 @@ intro says whether the frames are stored or procedural.
 ---
 
 ## 10. The arpeggiator on MIDI tracks
+
+**State — delivered:** the `midiarp` mod and `site/arp.html` (#77, #80 — which
+passed on hardware — and #81).
 
 **Raised by the owner 2026-09-14.** The DN2's arpeggiator is available on synth
 tracks and not on MIDI tracks. Make it available on both.
@@ -2054,6 +2157,12 @@ play4 changes only the MIDI record's length byte).
 
 ## 11. A real compatibility check between mods
 
+**State — open, and more urgent than when filed:** this was filed "to be picked
+up when two mods share a section or a processor", and `src/dnfw/mods/` now holds
+**six** — `arpplocks`, `bootscreen`, `lfowaves`, `midiarp`, `moddest`,
+`transients`. This entry's own last lines still hold: **the combination has
+never been flashed**. **Owner's third priority, 2026-09-22.**
+
 **Filed 2026-09-14, at the owner's direction, to be picked up when two mods
 share a section or a processor.**
 
@@ -2125,6 +2234,11 @@ confirmed on hardware separately and **the combination has never been flashed**
 ---
 
 ## 12. P-locking the performance modulators
+
+**State — open:** route (b) is repriced by §4's answer and shares the mirror
+relocation with LFO4's v6; item 4 is closed and marked `[SUPERSEDED]` in place.
+Items 2 and 3 stand, and item 3 is still unasked of DNX. **Owner's second
+priority, 2026-09-22, alongside §18's remainder.**
 
 **Asked for by the owner, 2026-09-15**, off the back of
 `docs/modulation-matrix.md`: *"explore how to p-lock these modulator values on
@@ -2249,6 +2363,12 @@ them to run.
 ---
 
 ## 13. A mod stamp on the intro screen
+
+**State — partly delivered:** the purpose is met by the boot-screen work
+(`bootscreen`, `site/boot.html`, #82, #83, hardware #84) — a composite logo says
+"not stock" before anyone reads a version string. What is not done is the
+Croc-gu-phant wordmark itself, which is still at concept and geometry stage
+below.
 
 **Asked for by the owner, 2026-09-16**, in two steps on the same day. First:
 *"is there any way that we can start marking the fw somehow to know what the
@@ -2569,6 +2689,10 @@ short box rather than a narrow tall one.
 
 ## 14. A shape bench: see the LFO shapes, and design new ones
 
+**State — delivered:** `site/bench.html` (#77, #82), plus the published artifact
+this entry links. The firmware half — eight wavetable bands shipped in the image
+— waits on §1's flash.
+
 **Asked for by the owner, 2026-09-17:** *"the web should offer a preview of the
 forms in the firmware provided and allow you to add or change shapes. New shapes
 can be added by templates offered or by providing a formula for them. Phs is the
@@ -2720,6 +2844,9 @@ Emulator film at SLOP 0, 32, 64, (94 hidden by the loading overlay), 127:
 
 ## 15. A wavetable synth machine
 
+**State — not started.** Three questions are named below and only the first is
+ColdFire work; the other two are SHARC-side.
+
 **Asked for by the owner, 2026-09-17**, and it corrects a misreading recorded in
 §14: *"about the LFO wavetable, I think it was misunderstood, is not a wavetable
 for the LFO but a new synth machine to handle wave tables"*. `lfo-wavetable`
@@ -2768,6 +2895,9 @@ a warning. So this entry inherits §7's cost, whatever else it needs.
 Only (1) is ColdFire work, and it is the natural first build.
 
 ## 16. A glitch-ASCII intro instead of the tunnel
+
+**State — delivered:** part of the `bootscreen` mod and `site/boot.html` (#82,
+#83); `bootscreen-ascii_DN2_1.11.syx` passed on hardware in #84.
 
 **Raised by the owner 2026-09-17**, after `intro-burst` on the instrument: *"add
 to the queue to test removing the tunnel and making the logo decomposed into a
@@ -2858,6 +2988,10 @@ reveal takes about as long as DNX's 5.6 s; does the boot wait for the copy of a
 115-170 KB appended area.
 
 ## 17. A performance mixer driven by MIDI controllers
+
+**State — not started** — the entry says so itself, and the owner's "not now" of
+2026-09-17 stands. The Outbox 8 and routing reading below is the starting point
+it did not have when it was filed.
 
 **Raised by the owner 2026-09-17:** *"build a performance mixer via midi
 controllers and the different outputs and routings of the tracks in the DN1 and
@@ -2992,6 +3126,12 @@ UI, so a mixer would extend something rather than invent it. The DN2 side has
 not been checked for the same structure.
 
 ## 18. P-locking the arpeggiator's parameters
+
+**State — delivered:** the `arpplocks` mod (#85, #86) — MODE, SPEED, RANGE and
+N.LEN locked per trig, with every edit path driven and verified. The remainder
+is `--all`'s LEN, the sixteen step offsets and the step mutes, of which the
+mutes are untested since the fix. **Owner's second priority, 2026-09-22,
+alongside §12.**
 
 **Raised by the owner 2026-09-17**, after the arp engine was read for §10.
 
