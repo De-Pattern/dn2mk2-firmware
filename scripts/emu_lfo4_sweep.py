@@ -49,8 +49,8 @@ STATE_LEN = 2560
 REST = 0x4000
 RATE = 0x402A0DEC
 SET_FRAC = bytes.fromhex("a93c000000204e75")      # movel #32,%macsr ; rts
-DEST_SLOT = 76                                    # what tick7 swept audibly
-TRACK = 0
+DEST_SLOT = int(os.environ.get("DT2_DEST_SLOT", 76))   # 76 is what tick7 swept audibly
+TRACK = int(os.environ.get("DT2_TRACK", 0))            # 0-based; track 5 is 4
 LIVE_CONTAINER, SOUND_AT, SOUND_STRIDE = 0x800052A0, 52, 1163
 
 # **`DEP` at maximum is not a good test and that is the first finding.** The
@@ -70,6 +70,16 @@ ROWS = (
      (0x7000, 0x1700, 0x4000, DEST_SLOT << 8, 0x0100, 0, 0, 0x2000)),
     ("quarter depth, the fastest multiplier",
      (0x7F00, 0x1700, 0x4000, DEST_SLOT << 8, 0x0100, 0, 0, 0x2000)),
+    # **The instrument's own configuration, 2026-09-22.** `lfo4-meter2` read
+    # the row back off the glass on track 5: the exact destination slot chosen,
+    # `DEP` at `0x7ffe`, and every value nobody set left at `lfo4_init`'s seed
+    # from LFO3's records -- `SPD` 0x7000, `MULT` 0x0300, `FADE` 0x4000,
+    # `WAVE` 0. Nothing modulated. This row is that row, so the emulator is
+    # asked the same question the instrument was.
+    ("the instrument's own row: defaults, DEP at maximum",
+     (0x7000, 0x0300, 0x4000, DEST_SLOT << 8, 0x0000, 0, 0, 0x7FFE)),
+    ("the same row at a quarter depth",
+     (0x7000, 0x0300, 0x4000, DEST_SLOT << 8, 0x0000, 0, 0, 0x2000)),
 )
 
 
