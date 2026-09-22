@@ -4497,3 +4497,60 @@ blocks each enters, and walk *forward* from the first parting. It is the method
 that found the destination-browser gate after reading the image backwards from
 the browser had cost four disassemblies and reached a function that could only
 be guessed at. Queued behind the `lfo4-meter` gate — one machine.
+
+### `lfo4-meter2` on the instrument: the row is right — 2026-09-22
+
+The owner flashed `lfo4-meter2` and read the three columns on **track 5**,
+nothing else playing:
+
+| column | reading | means |
+|---|---|---|
+| `FADE` | 63 — and **LFO3's `FADE` at its stop also reads 63**, so 63 is confirmed as the needle's full travel | the sound the knob wrote under is one of the sixteen the tick asks about: **the keys agree** |
+| `DEP` | taken to **127.98** and it holds, no snap-back | the engine's row for that track carries `0x7ffe`, full depth |
+| `SPD` | **−64** with `DEST` at `None`; **−38** at `Ratio C`; **−32** at `Mix`; **−40** at `Mod3 Depth` | the row's `DEST`, and every one of the four is exact |
+
+**The scale was confirmed against the record table rather than assumed**, which
+is what makes this a measurement: `SPD` displays `slot − 64`, and
+
+| shown | implied slot | record at that slot |
+|---|---|---|
+| −64 | 0 | no destination |
+| −38 | 26 | `SYN Ratio C` (index 200) |
+| −32 | 32 | `SYN Mix` (index 206) |
+| −40 | 24 | `LFO3 Depth` (index 102) |
+
+Four readings, four exact matches, including one — `Mod3 Depth` → LFO3's own
+`Depth` — that nothing in the build could have produced by accident.
+
+**So the row the engine holds is complete and correct**: the right key, the
+exact destination slot chosen on the panel, and full depth. The remaining
+inputs are the ones nobody set, and they were measured too: `lfo4_init` seeds
+`ext_default` from LFO3's own records through `POSITION = {0,1,2,3,4,6,7,8}`,
+giving `SPD` 0x7000 (112), `MULT` 0x0300, `FADE` 0x4000 (no fade), `WAVE` 0
+(triangle), `MODE` 0. That is a working LFO, not a stalled one.
+
+#### What has not been controlled, and it should have been first
+
+**No control was run beside the negative.** All three destinations tried are
+ones whose silence is explicable without any fault in LFO4:
+
+- `Ratio C` is machine-dependent — slot 26 is `Ratio C` only in group 0, and
+  the same slot is `Osc1 Waveform`, `Sweep Time` and `Swarm Detune` in groups
+  1, 2 and 3 (§4b's colliding slot spaces, seen from the other end);
+- `Mod3 Depth` is LFO3's own depth, which does nothing audible unless LFO3 is
+  itself set up and aimed somewhere;
+- and the evaluator **clamps the cell to `0..0x7f00`**, so a destination
+  already sitting at an end of its range absorbs a modulation pushing it
+  further that way. `Filter Frequency`'s record default is `0x7f00` — fully
+  open — which is exactly that trap.
+
+So the next step is not another build. It is `Filter Frequency` (**slot 67**,
+so `SPD` must read **+3.00**), the destination parameter set mid-range, and
+**LFO3 configured identically on the same track as the control**. Two outcomes
+and they are clean:
+
+- LFO3 sweeps and LFO4 does not — the engine has a correct row and does nothing
+  with it, which contradicts `tick7` and puts the evaluator stubs back on the
+  table;
+- neither sweeps — the destination was inert and every negative result today
+  was measuring silence that had nothing to do with LFO4.
