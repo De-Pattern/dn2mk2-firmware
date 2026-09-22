@@ -4394,3 +4394,72 @@ takes the address out of the question.
 Sixteen rows of eight `u16`: 256 bytes, no hashing, nothing that can be full,
 nothing to reclaim. Not a shipping design -- p-locks and sound-per-track need
 the address back -- but it answers the only question left standing.
+
+### Measure before bisecting again — `lfo4-meter`, 2026-09-22
+
+The track-index build above is still the right *fix-shaped* experiment, and it
+is not the right *next* one. Two things changed the order.
+
+#### tick7 already excludes the engine path, and it cost no flash
+
+`lfo4-tick7` passed on hardware on 2026-09-20 (§"tick7 passed on hardware"):
+the fourth LFO ran, **reliably**, each track reading its own row. It drove the
+identical two evaluator indices this build drives — `%a5` in evaluator A,
+`%d0` in evaluator B — through the identical stubs. The single difference
+between it and every build since is that tick7's sixteen rows were a **static
+table compiled into the image** and every build after it replaced them with
+`lfo4_refresh(track)`, which is a **lookup**.
+
+So the branch "the stubs stopped turning a row into sound" is closed by a
+result that was already written down, and with it the reading that the index
+handed to the stubs might be a *voice* number rather than a track number —
+1-in-16 voices would produce almost exactly the observed one-trig-in-fifteen,
+which is why it was worth checking, and tick7 refutes it outright. Kept here
+because a closed path is still a signal: if a later result ever contradicts
+tick7's, this is the first thing to re-open.
+
+What remains is the join: the key `lfo4_on_set` writes under, and the key
+`lfo4_refresh` asks under.
+
+#### Why a meter and not a fourth bisect
+
+`browser`, `keeprow` and `keepall` each answered one bit and cost one flash
+apiece. The numbers that would answer the whole question exist only on the
+instrument — the emulator runs neither the sequencer nor a pattern load, so it
+cannot be asked what key the panel wrote under while a pattern played — and
+there is no way to read a counter in BSS from the front panel.
+
+But LFO4's page is ours end to end: `csrc/lfo4/getter.c` decides what each of
+its eight columns displays. `scripts/build_lfo4_meter.py` builds `lfo4-browser`
+with three of them displaying the measurement instead of the value.
+
+| column | full right | full left | centre |
+|---|---|---|---|
+| `SPD` | the tick's last lookup **found** a row | it found nothing, and took the defaults | it has never looked |
+| `FADE` | the sound the knob wrote under **is** one of the sixteen the tick asks about | it is **not** — and that alone is the whole fault | — |
+| `DEP` | not a needle: the depth **the engine is holding right now**, out of `lfo4_rows` | | |
+
+Every reading is a needle at a stop or at centre and never a number to be
+interpreted, because nothing in `csrc/lfo4/meter.c` knows how a widget formats
+8.8 fixed point into the figure on the glass — and because §3 of the playbook
+applies to a measurement as much as to a demonstration. `MULT`, `DEST`,
+`WAVE`, `SPH` and `MODE` are untouched, so a destination can still be chosen
+and the LFO still runs while the three are read.
+
+**Only the display is diverted.** The knob still writes the table through
+`lfo4_on_set` and the save path still reads it through `ext_get`, so a metered
+build stores exactly what `lfo4-browser` stores. It is an instrument, not a
+candidate fix, and it is not meant to sound like anything.
+
+#### What each outcome sends next
+
+- `FADE` **left** — found it. The panel edits a sound the engine never asks
+  about, and the track-index build above becomes the fix rather than a probe.
+- `FADE` right, `SPD` flicking left while trigging — the keys agree and the
+  table loses the row at tick time; the search moves inside `ext_find` and to
+  what runs between the panel's write and the tick's read.
+- `FADE` right, `SPD` right, `DEP` holding the dialled value, and still no
+  modulation — then this result and tick7's disagree, and the engine path is
+  back on the table after all.
+- `DEP` **falling back to 0 on its own** — the bug happening, live, and
+  whatever the instrument was doing at that moment is what causes it.
