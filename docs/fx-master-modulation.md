@@ -565,7 +565,7 @@ of listening will read a pass as a failure.
 | `check_coldfire.py --against` stock | **pass** — 1,539 hits shared with stock (its data), **0** new |
 | `emu_boot_check.py`, from reset | **pass** — booted and drew its UI, 1 frame in 450 M instructions, against a stock control of 1; no fault, eight tasks created, the priority-6 application task among them |
 | `emu_boot_engine.py --build out/fxblock16` | **does not apply, and was replaced** — see below |
-| `scripts/emu_fxblock16.py` | *(the replacement; result recorded when it lands)* |
+| `scripts/emu_fxblock16.py` — the replacement | **pass** — booted from reset, then ran the payload 4,096 times: `0x800075ec` walked `0x0000`..`0x7f00`, 128 distinct values, repeating exactly with period 2,048, and the counter at `0x46704000` counted every call. The cave was entered **0** times during the boot itself, which is the expected answer here and not a defect |
 | `dnfw inspect` | **pass** — 21/21 integrity checks, HMAC-SHA256 trailer reproduced |
 
 **`emu_boot_engine.py` cannot be run against this build, and pretending
