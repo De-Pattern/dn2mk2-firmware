@@ -4219,3 +4219,55 @@ routines that decide whether the waveform *is* `RND`
 the active state. Same family as everything else in this file: the UI is
 written three times over, and each copy has to be found by diffing what two
 renders execute.
+
+### [WRONG — corrected 2026-09-22 night] The table-full reading above
+
+**`lfo4-keepall` refutes it.** The section above predicted, in writing and in
+advance, that a build with *every* removal path off would be worse still,
+because nothing would reclaim a slot. The instrument reports the opposite: it
+"modulates similar to other fw where modulation triggering was erratic" --
+back to the baseline, not worse.
+
+If exhaustion were the cause, the build that never frees a slot would be the
+worst of the three. It is not. **The reading is wrong and stays here because
+the reasoning was sound and the prediction was testable**, which is the only
+reason it was cheap to kill.
+
+What the three builds actually say:
+
+| build | removal paths | on the instrument |
+|---|---|---|
+| `lfo4-browser` | all on | erratic, about one trig in fifteen |
+| `lfo4-keeprow` | copy, carry, clear off; **load still drops** | **worse** -- two successes with a lot of wiggling |
+| `lfo4-keepall` | all four off | back to the erratic baseline |
+
+**Nothing removing a row does not fix it.** So the row is not being destroyed
+between the panel writing it and the engine asking for it: it never arrives
+under the key the engine asks for at note-on. That is the second of the two
+outcomes `build_lfo4_keepall.py` named, and it closes the whole removal branch
+that this session spent the evening on.
+
+`lfo4-keeprow` being worse than both ends is unexplained and is a side road: it
+is the only build where copies stop reclaiming *while* loads still remove the
+user's fresh entry. Recorded, not chased.
+
+#### What that leaves, and the experiment that decides it
+
+The panel writes under the sound address the firmware's own setter hands it.
+The engine reads under `*(0x800052a0) + 52 + track * 1163`. In the emulator
+those are the same number -- measured, twice -- but the emulator plays no notes
+and allocates no voices, and the instrument does both.
+
+**The cheapest test is to stop keying by address at all.** A build where
+`lfo4_on_set` files by *track index* and `lfo4_refresh` reads by the same index
+removes the address from the question entirely:
+
+- **modulation becomes reliable** -> the address is the fault, and the fix is
+  to agree on one identity for a sound rather than two derivations of it;
+- **still erratic** -> the fault is upstream of the key, in whether the write
+  happens at all.
+
+A per-track array is sixteen rows of eight `u16` -- 256 bytes, no hashing, no
+eviction, and no way for it to be full. It is not the shipping design, because
+p-locks and sound-per-track would need the address back. It is a probe that
+answers the only question left.
