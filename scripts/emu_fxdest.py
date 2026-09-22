@@ -19,12 +19,18 @@ the tick would have held: `%a4` the per-LFO mirror pointer, `%sp@(52)` the
 track's mirror base, `%a5` the track counter, `%sp@(48)` the inner counter
 (2 = LFO3, 1 = LFO2, 0 = LFO1), `%d0` the LFO's value.
 
-**The whole mirror is the watch, not five predicted cells.** All 3,468 bytes
-are filled with a sentinel before every case and scanned after it, so a store
-that lands somewhere unexpected is *seen* rather than read as silence — those
-are different faults and a watch that only looks where the answer is expected
-cannot tell them apart. The registers come back too: `%d7` is the `DEST` the
-evaluator actually got, `%a0` the base it chose, `%fp` the cell it computed.
+**The store is watched by hooking the write**, not by comparing the mirror
+before and after. The evaluator's store is a read-modify-write and this
+emulator's EMAC contributes nothing to the accumulate, so it writes the cell's
+own value straight back — invisible to any comparison, which is how run one
+reported "wrote nothing" for eleven cases *and* for the stock control. Every
+write anywhere is recorded and the ones inside the 3,468-byte mirror are the
+result, so a store that lands somewhere unexpected is seen rather than read as
+silence. The registers come back too: `%d7` is the `DEST` the evaluator
+actually got, `%a0` the base it chose, `%fp` the cell it computed.
+
+**The address is what is asserted, and the value is not.** The address is the
+whole of what route A changes; the depth is the instrument's question.
 
 And the control is checked on a **known positive first**: stock must write the
 sink for a plain sound destination. If it does not, every "wrote nothing" is a
@@ -50,7 +56,8 @@ import sys
 sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/digikit-up")
 
 from emu import dspboot                                       # noqa: E402
-from unicorn import UC_HOOK_CODE, UC_PROT_ALL, UcError        # noqa: E402
+from unicorn import (UC_HOOK_CODE, UC_HOOK_MEM_WRITE,          # noqa: E402
+                     UC_PROT_ALL, UcError)
 from unicorn.m68k_const import (UC_M68K_REG_A0, UC_M68K_REG_A2,   # noqa: E402
                                 UC_M68K_REG_A3, UC_M68K_REG_A4,
                                 UC_M68K_REG_A5, UC_M68K_REG_A6,
@@ -201,12 +208,23 @@ def run_case(uc, dest: int, track: int, inner: int) -> dict:
         "base": struct.unpack(">I", bytes(uc.mem_read(STACK + 52, 4)))[0],
     }
 
-    uc.emu_start(ENTRY, EXIT, count=64)
+    # The store is watched by hooking the write, not by comparing values
+    # afterwards. Run one of this harness compared values and reported "wrote
+    # nothing" for every case including stock's -- because the evaluator's
+    # store is a read-modify-write and the EMAC contributes nothing under this
+    # emulator, so it wrote the sentinel back over itself. A watch that cannot
+    # see a store of the value already there cannot see the store at all.
+    seen = []
+    handle = uc.hook_add(UC_HOOK_MEM_WRITE,
+                         lambda u, t, address, size, value, d:
+                             seen.append((address, size, value)))
+    try:
+        uc.emu_start(ENTRY, EXIT, count=64)
+    finally:
+        uc.hook_del(handle)
 
-    after = bytes(uc.mem_read(MIRROR, MIRROR_SPAN))
-    wrote = [(MIRROR + i, struct.unpack_from(">H", after, i)[0])
-             for i in range(0, MIRROR_SPAN - 1, 2)
-             if struct.unpack_from(">H", after, i)[0] != SENTINEL]
+    wrote = [(a, v & 0xFFFF) for a, size, v in seen
+             if MIRROR <= a < MIRROR + MIRROR_SPAN]
     return {
         "pc": uc.reg_read(UC_M68K_REG_PC),
         "echo": echo,
@@ -214,6 +232,7 @@ def run_case(uc, dest: int, track: int, inner: int) -> dict:
         "a0": uc.reg_read(UC_M68K_REG_A0),
         "fp": uc.reg_read(UC_M68K_REG_A6),
         "wrote": wrote,
+        "writes": seen,
         "setup": setup,
     }
 
@@ -301,9 +320,11 @@ def main() -> int:
                          f"expected [{want:#010x}]  (d7 {r['d7'] & 0xFFFFFFFF:#010x} "
                          f"a0 {r['a0']:#010x} fp {r['fp']:#010x})")
             continue
-        if r["wrote"][0][1] not in (0, FULL):
-            fails.append(f"{name}: {want:#010x} holds {r['wrote'][0][1]:#06x}, which "
-                         f"is neither clamp endpoint -- the write is not the evaluator's")
+        # The *value* is not asserted. The emulator's EMAC contributes nothing
+        # to the accumulate, so the evaluator stores the cell's own value back
+        # unchanged; only the address is meaningful here, and the address is
+        # the whole of what route A changes. The depth is the instrument's
+        # question, and section 9 is where that kind of question is answered.
         # The control: stock agrees below 101 and writes nothing above it.
         stock_addresses = [a for a, _ in sr_["wrote"]]
         if 0 < dest <= 100 and stock_addresses != addresses:
