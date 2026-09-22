@@ -4092,3 +4092,57 @@ the build the fault was measured on, and the two put side by side:
 | `lfo4-ui` | 55 | 62 | 69 | **76** |
 
 A before and an after, rather than an after and an assumption.
+
+### The browser's gate, and what hardware settled that the emulator could not — 2026-09-22 late
+
+`lfo4-browser` is on the instrument and the owner reports the page working: the
+destination window opens, `RND` shows `SLEW`, and the fourth page dot is there
+from boot. Three things follow, and one of them is a correction.
+
+**The browser was never the list machinery.** It is one test, asked three
+times, at `0x40067506`, `0x400676e4` and `0x400679e6`:
+
+```
+andil #0x70000,%d0     ; bits 18, 17, 16 -- is this parameter a DEST?
+beqw  <skip>           ; no: never open the window
+```
+
+`lfo4records.DEST_FLAGS` is bit 15 -- the value the staircase `0x40000 /
+0x20000 / 0x10000` continues to -- so the AND yields zero. Widening the test to
+`0x78000` admits LFO4 and provably nothing else: no record in the stock table
+carries `0x8000` in `+44`, which `build_lfo4_browser.py` asserts against the
+image before it patches.
+
+In the emulator the change takes LFO4 from **776 firmware blocks it never
+reached down to 45**, and the destination counts stay 55 / 62 / 69 / 76.
+
+**Walking forward beat walking back.** Following the browser *up* its call
+chain gave `0x401a074a`, then `0x40067370`, then a function `dnfw fn entry`
+would only guess at -- four disassemblies, each answering a question nobody
+asked. Listing the first place the two traces *part* gave the decision in one
+look. Third time on this feature that diffing two renders beat reading harder.
+
+**One gate was already fixed without being noticed.** Directly above the mask:
+
+```
+cmpil #320,%d3
+bhiw  <skip>
+```
+
+LFO4's `DEST` entry is 324. The table relocation had already raised that bound
+to 330, so it had been passing all along -- but it sits four instructions above
+the real gate, and had it not been raised it would have been the obvious
+culprit and the wrong one.
+
+#### `pagelist.c` is confirmed by the instrument, not by us
+
+`scripts/emu_lfo4_pagelist.py` reported the page-vector constructor never
+running in **1.2 billion instructions** from reset, and this file recorded the
+patch as unverified and possibly inert on that basis. The instrument says
+otherwise: the fourth dot is there before `[MOD]` is pressed.
+
+So the site does run -- later in a boot than this emulator reaches, which is
+itself worth knowing, because the boot gate's 450 M budget draws a frame and
+is nowhere near a finished UI. **The probe's finding stands and its
+implication was wrong**: "not reached in 1.2 G" meant the harness stops early,
+not that the code is dead.
