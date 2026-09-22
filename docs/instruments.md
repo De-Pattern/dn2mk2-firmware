@@ -20,7 +20,29 @@ tools?"*
 | **the SHARC / DSP side** | selache in WSL: `/root/selmap-target/release/selmap` for a linear walk, `/root/selache-target/release/{selas,seld,seldump,selsyms}`; the regions in `out/sharc/*.bin`; `scripts/sharc_*.py`; `docs/sharc-*.md` |
 | **project, preset or pattern data on a device** | ask the DNX session. Never hand-roll SysEx capture here |
 | **live hardware state** | `scripts/service_console.py` — maintenance mode, read-only allow list. `docs/service-commands.md` |
-| **has someone already read this?** | `digikit-up/docs/FINDINGS.md`, our own `docs/for-digikit-*.md` and `docs/STATUS.md`, the lalzart notes (cite in our own words), the Synthdawg guide (consult, never quote) |
+| **has someone already read this?** | `digikit-up/docs/FINDINGS.md` — **or `docs/findings/01..09` once `machine-ideas-menu` merges** (see below); our own `docs/for-digikit-*.md` and `docs/STATUS.md`, the lalzart notes (cite in our own words), the Synthdawg guide (consult, never quote) |
+
+### digikit's findings are being split, and the file we point at will go
+
+`machine-ideas-menu` (42 commits, unmerged as of 2026-09-22) takes 5,904 lines
+out of `docs/FINDINGS.md` and splits them. Ours is not the only project
+pointing at that one path, so the mapping is worth keeping here rather than
+rediscovering:
+
+| file | what moved into it |
+|---|---|
+| `01-container-and-patching.md` | the ELE3 container, checksums, the recovery path |
+| `02-machines-and-parameters.md` | machine types, the parameter descriptor tables |
+| `03-ui-and-panel.md` | the panel, the control table, `MACHINE SEL` |
+| `04-coldfire-dsp-link.md` | `FUN_400cf9c4`, the 2,748-byte frame, the payload sizes |
+| `05-sharc-isa-and-decoding.md` | the SHARC+ language and decode table |
+| `06-sharc-engine-and-startup.md` | the DSP engine, its boot and its ring writers |
+| `07-emulator.md` | the emulator: harness quirks, `unblock`, timers |
+| `08-hardware-and-ghidra.md` | boards, and getting the image into Ghidra |
+| `09-runtime-state.md` | state forwarding, the writer chains |
+
+The one most often wanted from here is **`04-coldfire-dsp-link.md`**: it holds
+the frame this project measured from the ColdFire side.
 
 ## A null needs the input proved first
 

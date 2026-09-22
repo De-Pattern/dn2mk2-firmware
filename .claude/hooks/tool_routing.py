@@ -63,7 +63,7 @@ the conclusion unverified.
 | project / preset / pattern data on a device | ask the DNX session -- never hand-roll SysEx capture here |
 | live hardware state | `scripts/service_console.py` (maintenance mode, read-only allow list); `docs/service-commands.md` |
 | **a build that will be flashed** | `scripts/emu_boot_check.py <build>/section_3_MAIN_OS.bin` -- boots it **from reset** against a cached stock control. A snapshot harness is not a boot test: `ui1200M` has already booted, so it never runs the loader, the init, or the first call into new code |
-| has someone already read this? | `digikit-up/docs/FINDINGS.md`, `docs/for-digikit-*.md`, `docs/STATUS.md`, the lalzart notes (cite in our own words), Synthdawg (consult, never quote) |
+| has someone already read this? | `digikit-up/docs/FINDINGS.md`, or `docs/findings/01..09` once it is split -- `04-coldfire-dsp-link.md` is the one usually wanted (`docs/instruments.md` has the map); `docs/for-digikit-*.md`, `docs/STATUS.md`, the lalzart notes (cite in our own words), Synthdawg (consult, never quote) |
 
 The same table with its reasoning: `docs/instruments.md`.
 
