@@ -134,6 +134,88 @@ typedef unsigned char u8;
 #define LFO4_E_MODE  (LFO4_ENTRY0 + 7)
 #define LFO4_E_SPD   (LFO4_ENTRY0 + 0)
 #define LFO4_E_DEP   (LFO4_ENTRY0 + 8)
+#define LFO4_E_SLEW  (LFO4_ENTRY0 + 5)
+
+/* The `SLEW` substitution, and the gate LFO4 never got past.
+ *
+ * `0x4010db00` is handed the entry a column is about to draw and returns
+ * either that entry or the `SLEW` that replaces it when the waveform is `RND`.
+ * Its first act is a three-way compare against **81, 91 and 101** -- LFO1's,
+ * LFO2's and LFO3's `SPH` entries, written as literals -- and anything else
+ * leaves by `DN2_SLEW_DECLINE` with the entry unchanged.
+ *
+ * `scripts/emu_lfo4_slew.py` measured it with the waveform actually set to
+ * `RND`: LFO3's page and LFO4's ask the gate the identical 124 times, LFO3
+ * accepts 11 of them and reads entry 100 out of the table, LFO4 accepts none.
+ *
+ * Past the gate there are two more per-LFO facts. The index is clamped to
+ * **2**, so page 3 would read LFO3's row; and the three entries are a table of
+ * three longwords at `DN2_SLEW_ENTRIES`, immediately followed by a mangled
+ * RTTI string, so it cannot grow where it stands.
+ */
+#define DN2_SLEW_GATE     0x4010DB18   /* the 22 bytes the stub replaces */
+#define DN2_SLEW_ACCEPT   0x4010DB2E   /* the entry is an `SPH`: carry on */
+#define DN2_SLEW_DECLINE  0x4010DBDA   /* it is not: hand the entry back */
+#define DN2_SLEW_CLAMP    0x4010DBC6   /* moveq #2,%d1 -- the ceiling tested */
+#define DN2_SLEW_CLAMPED  0x4010DBCC   /* moveq #2,%d0 -- what a bigger index becomes */
+#define DN2_SLEW_TABLE    0x4010DBCE   /* lea 0x40205454,%a0 */
+#define DN2_SLEW_ENTRIES  0x40205454   /* {80, 90, 100}, with a string behind it */
+#define DN2_SLEW_COUNT    4            /* ours, one per MOD page */
+
+/* The `DEST` browser, and the one site of six that actually opens it.
+ *
+ * `scan_lfo_triples.py` finds six places comparing a parameter entry against
+ * **78, 88, 98** -- the `DEST` entries -- and five mask cascades testing bits
+ * 18, 17 and 16 of a record's `+44`. Eleven patches, if all of them matter.
+ *
+ * `scripts/emu_lfo4_dest.py` opened the browser on each of the four MOD pages
+ * and counted: **one** gate fires, once per page, and one cascade behind it.
+ * The other ten never ran on any page. LFO1, LFO2 and LFO3 reach the gate and
+ * then the cascade; LFO4 reaches the gate and stops there.
+ *
+ * The gate is interleaved with the function's prologue -- the first compare
+ * sits at `0x40039a9a`, before the arguments are even loaded -- so only its
+ * **last** compare is replaced, which is enough: 78 and 88 still match ahead
+ * of it, and 98 is re-tested inside the stub.
+ *
+ * The cascade needs a fourth branch because the staircase `0x1e00 / 0x0e00 /
+ * 0x0600` continues to **`0x0200`**, the mask that admits every record LFO3
+ * may target plus LFO3's own eight. `lfo4records.DEST_FLAGS` is bit 15, which
+ * is the bit this fourth branch tests.
+ */
+#define LFO4_E_DEST         (LFO4_ENTRY0 + 3)
+#define DN2_DEST_GATE       0x40039ABA   /* moveb #98,%d1 ; cmpl %d0,%d1 ; bne */
+#define DN2_DEST_ACCEPT     0x40039AC2   /* it is a `DEST`: choose the mask */
+#define DN2_DEST_DECLINE    0x40039B0E   /* it is not, and `%d1` is dead there */
+#define DN2_DEST_MASK       0x40039AD4   /* the 34-byte cascade */
+#define DN2_DEST_MASK_AFTER 0x40039AF6   /* where all four branches converge */
+#define DN2_DEST_MASK4      0x0200       /* what a fourth LFO may target */
+#define DN2_DEST_FLAG_BIT   15           /* lfo4records.DEST_FLAGS = 0x8000 */
+
+/* "Is this LFO's waveform `RND`?", asked twice and hard-coded both times.
+ *
+ * Extending `0x4010db00` was not enough: the instrument still drew `SPH` on
+ * LFO4's `RND`. There is a second kind of site, and `scan_lfo_triples.py`
+ * found two of them by the **`WAVE`** entries rather than the `SPH` ones --
+ * `pea 79`, `pea 89`, `pea 99` pushed as arguments.
+ *
+ * Each takes the `SPH` entry a column is about to draw, picks **that LFO's
+ * `WAVE` entry**, fetches its value and compares it against `0x600`, which is
+ * `RND`. LFO4's `SPH` is 327 and neither knows it, so neither ever concludes
+ * `RND` and the column keeps its own name.
+ *
+ * The two are byte-identical in shape, so each is patched at its **last**
+ * compare -- the three are woven through the function and only those eight
+ * bytes hold both exits.
+ */
+#define DN2_RND_A_GATE     0x4003662C   /* moveb #81,%d1 ; cmpl %d2 ; bne */
+#define DN2_RND_A_LFO1     0x40036634   /* moveal %a2@,%a0 ; pea 79 */
+#define DN2_RND_A_AFTER    0x4003664A   /* where all three converge */
+#define DN2_RND_A_DECLINE  0x4003667A   /* not an `SPH` entry at all */
+#define DN2_RND_B_GATE     0x40036A76
+#define DN2_RND_B_LFO1     0x40036A7E
+#define DN2_RND_B_AFTER    0x40036A94
+#define DN2_RND_B_DECLINE  0x40036AC4
 
 /* The parameter table as it sits in the image, for reading a record's own
  * default at init. `lfo4-table` relocates this table, but the image's copy is

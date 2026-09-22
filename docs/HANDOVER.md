@@ -1,4 +1,4 @@
-# Handover — 2026-09-14
+# Handover — 2026-09-22
 
 Where the project stands, what is in flight, and what to do next, for whoever
 picks it up. Everything here points into the rest of `docs/`; this file is the
@@ -11,10 +11,14 @@ appending.**
 patch a section, and rebuilds a signed image the instrument accepts. **Phase 1
 is closed** — a recompressed image (Gate D) and a visibly patched one (Gate E,
 `SETTINGS > PERSONALIZE` → `DNFW ALIVE!`) both boot on a Digitone II, and the
-recovery route is proven. **Phase 2 — a fourth LFO — is blocked on the DSP, and
-the engine question is open, not closed.** The control side is fully mapped and
-costed; the generator is SHARC-side and we can decode only ~18% of SHARC
-instruction boundaries. A parallel thread (extracting the FM drum transients)
+recovery route is proven. **Phase 2 — a fourth LFO — is built and on the
+instrument**, and the last open question is whether it is audible. The engine
+question that blocked it is answered: the ColdFire evaluators compute LFO
+values and a fourth one runs in both of them, proven on hardware by
+`lfo4-tick7`. A fourth `[MOD]` page now exists with LFO4's own records, values,
+widgets and waveform preview, and the two places the UI still recognised only
+three LFOs have been extended. What has not yet been heard on the instrument is
+LFO4 modulating anything. A parallel thread (extracting the FM drum transients)
 is an elimination so far.
 
 ## Standing constraints — read before doing anything
@@ -55,7 +59,11 @@ These are the owner's, and they do not lapse:
 | Phase 2: is the LFO count a table? | yes — `docs/lfo-parameters.md` |
 | Phase 2: what reads the table | ~50 accessors, `base + id*60` — `docs/parameter-table-consumer.md` |
 | Phase 2: the display path | mapped by measurement — `docs/display-path.md` |
-| Phase 2: **does the engine implement a 4th LFO?** | **UNKNOWN — the two "confirmed" results are withdrawn** |
+| Phase 2: **does the engine implement a 4th LFO?** | **yes** — `lfo4-tick7` swept per track on hardware, 2026-09-20. (The two earlier "confirmed" results stay withdrawn; they proved a storage round-trip, and this is a different test) |
+| Phase 2: the parameter table grows | done — 56 bases, 53 bounds, `src/dnfw/patch/paramtable.py` |
+| Phase 2: a fourth `[MOD]` page | done — values, widgets and waveform preview, `docs/lfo4-build-plan.md` |
+| Phase 2: `RND` shows `SLEW`, and `DEST` opens | done 2026-09-22 — two gates naming three entries each |
+| Phase 2: **LFO4 audibly modulates** | **not yet on hardware** — `lfo4-ui` is the build that answers it |
 | SHARC: which bytes are code, and their addresses | solved, both spaces — `docs/sharc-code-map.md` |
 | SHARC: can we read instructions? | **only ~18%** — `docs/sharc-reading.md` |
 | FM drum transients: located? | **no** — `docs/pcm-hunt.md` |

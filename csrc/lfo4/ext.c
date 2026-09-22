@@ -16,6 +16,41 @@
 #define MASK (EXT_SLOTS - 1u)
 #define KNUTH 2654435761u              /* 2^32 / phi; one mulu.l on ColdFire */
 
+/* **A bisect switch, off in every shipped build**, in the manner of
+ * `bridge.c`'s `LFO4_FORCE_ROW`.
+ *
+ * From the instrument, 2026-09-22: LFO4 modulates about one press in fifteen,
+ * it rings for as long as the trigger is held, and the next press has none.
+ * The reading that fits it is that a copy or a clear of the live sound removes
+ * the row -- `ext_copy` drops the destination when the source has no entry of
+ * its own, and `ext_carry` and `ext_clear` drop everything in their range.
+ * Which is correct as *mirroring*: a copy really does overwrite the
+ * destination's parameters. The asymmetry is that the firmware's own
+ * parameters live inside the 1,163 bytes and travel with the copy, while ours
+ * live in a side table keyed by address, so the same event erases them.
+ *
+ * **The emulator cannot settle this.** It runs neither the sequencer nor the
+ * pattern load, and a trig key pressed there produced no sound copy at all
+ * (`scripts/emu_lfo4_trig.py`) -- a null that says the harness never reached
+ * the path, not that the path is innocent.
+ *
+ * So the question goes to the instrument as one flash. With this defined
+ * nothing removes a row except an explicit `ext_drop` from the load path:
+ * values persist across copies and clears whether or not they should. If
+ * modulation then survives from one trig to the next, the drop path is the
+ * cause and the fix belongs there. If it is still one press in fifteen, it is
+ * not, and a whole branch closes.
+ *
+ * It is deliberately **not** a candidate fix. Keeping a row whose sound was
+ * genuinely overwritten leaves a stale value behind, which is a different bug
+ * with the same shape as the one being hunted.
+ */
+#ifdef LFO4_KEEP_ROWS
+#define LFO4_DROP(key)   ((void)(key))
+#else
+#define LFO4_DROP(key)   ext_drop(key)
+#endif
+
 u32 ext_key[EXT_SLOTS];
 u16 ext_val[EXT_SLOTS][EXT_PARAMS];
 u16 ext_default[EXT_PARAMS];
@@ -171,7 +206,7 @@ void ext_copy(u32 dst, u32 src)
     u32 p;
 
     if (!from) {
-        ext_drop(dst);                 /* the source has no entry: neither has the copy */
+        LFO4_DROP(dst);                /* the source has no entry: neither has the copy */
         return;
     }
     for (p = 0; p < EXT_PARAMS; p++)
@@ -198,7 +233,7 @@ void ext_carry(u32 dst, u32 src, u32 n)
         taken = collect(src, n, moved, carried);
     gone = touches(dst, n) ? collect(dst, n, dead, 0) : 0;
     for (i = 0; i < gone; i++)
-        ext_drop(dead[i]);
+        LFO4_DROP(dead[i]);
     for (i = 0; i < taken; i++) {
         u16 *to = ext_add(dst + (moved[i] - src));
 
@@ -219,7 +254,7 @@ void ext_clear(u32 at, u32 n)
         return;
     gone = collect(at, n, dead, 0);
     for (i = 0; i < gone; i++)
-        ext_drop(dead[i]);
+        LFO4_DROP(dead[i]);
 }
 
 u16 ext_get(u32 key, u32 param)

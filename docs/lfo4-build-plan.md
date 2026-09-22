@@ -3954,3 +3954,141 @@ three thunks in three descriptors. **The firmware's LFO UI is written three
 times over**, and a fourth page is not one change but a long tail of per-LFO
 hard-coding -- each found the same way, by diffing what two renders execute,
 and each extended the same way.
+
+### Both gates found, and they are the same gate — 2026-09-22
+
+The section above is superseded in one respect and confirmed in another, and
+both halves turned out to be **one shape written six times**: a parameter's
+entry number compared against three literals, ten apart, with everything else
+behind the `bne`.
+
+`scripts/scan_lfo_triples.py` is that shape made searchable. It walks every
+small immediate in `MAIN OS`, classified by the opcode carrying it, and reports
+each window holding `v`, `v+10` and `v+20` -- because an LFO's ten records sit
+ten apart, so its three copies do too. 55,272 immediates, seven windows for
+`78/88/98`, and six of them are code.
+
+#### `RND` shows `SPH`: the gate is at `0x4010db18`
+
+`0x4010db00` is the substitution. Its **first** act, before the page index,
+before the clamp, before the three-entry table:
+
+```
+4010db18  moveq #81,%d0  ; cmpl %d2,%d0 ; beq  0x4010db2e
+4010db1e  moveq #91,%d1  ; cmpl %d2,%d1 ; beq  0x4010db2e
+4010db24  moveb #101,%d0 ; cmpl %d2,%d0 ; bne  0x4010dbda   <- return the entry unchanged
+```
+
+81, 91 and 101 are the `SPH` entries of LFO1, LFO2 and LFO3. LFO4's is **327**.
+
+`scripts/emu_lfo4_slew.py` measures it, and measures the half a page walk
+cannot reach -- the substitution only happens once the waveform *is* `RND`, so
+it selects `RND` with the encoder and then looks:
+
+| page | index | gate asked | accepted | table gave |
+|---|---|---|---|---|
+| LFO1 | 0 | 117 | 13 | -- |
+| LFO2 | 1 | 27 | 3 | -- |
+| LFO3 | 2 | 18 | 2 | -- |
+| LFO4 | 3 | 18 | **0** | -- |
+| LFO3, `WAVE = RND` | 2 | 124 | 11 | **100** |
+| LFO4, `WAVE = RND` | 3 | 124 | **0** | -- |
+
+The last two rows are the finding: **the identical workload**, 124 asks on each
+page, and one literal comparison decides whether `SLEW` appears. The page index
+is 0, 1, 2, 3 exactly as the fourth page was built to report, and with `RND`
+selected LFO3 reaches the table and reads entry 100 out of it.
+
+`clamp->1` and `clamp->2` never fired on any page, including LFO3's at index 2:
+`cmpl` against 2 passes it through. So index 3 **would** clamp, and the fix is
+three things, not one -- the gate at `0x4010db18` must accept 327, the `lea
+0x40205454` must point at a four-entry table (the stock three are followed
+immediately by a mangled RTTI string, so it cannot grow in place), and the
+`moveq #2` pair at `0x4010dbc6`/`0x4010dbcc` must become `#3`.
+
+The other clamp, at `0x4010db74`, maps any index above 0 to **1** and would
+hand LFO3's page LFO2's `SLEW`. It never ran in any measurement here, on any
+page. It is left alone: changing code no probe has entered is how the filing
+loop at `0x400dc7f0` nearly went to the instrument.
+
+#### The `DEST` browser: not one route, six literals
+
+> "browsing destinations doesn't open the destination UI ... 49 reads err"
+
+**The model in the section above was wrong and the measurement was right.** The
+list builder, the shared entry and the three mask thunks fired zero times on
+*both* pages because the browser never gets that far. Six sites gate on the
+`DEST` entries **78, 88, 98** first:
+
+| site | shape |
+|---|---|
+| `0x400397da` | `%d2`, then the mask cascade at `0x400397f2` |
+| `0x40039a9a` | `%d0`, reads `+44` from the table itself, cascade at `0x40039ad4` |
+| `0x40039cbc` | cascade at `0x40039cf6` |
+| `0x40039ebc` | cascade at `0x40039ef4` |
+| `0x400643c0` | `%d2`, the three compares spread across the function |
+| `0x40066d5c` | `%d3`, compact |
+
+`0x400397da`'s body is the destination **randomiser**: it picks the mask, calls
+`0x4003951e` to build the list, takes `0x40150670` modulo the list length and
+looks the winner up. The same list builder the browser uses, reached from a
+different door.
+
+**The capability side needs no data change**, and this is the one place the
+earlier reading holds up unaltered: `lfo4records.DEST_FLAGS = 0x8000` is bit
+15, the cascade tests bits 18, 17 and 16, and the fourth mask the staircase
+names is `0x0200` -- already recorded above, still right. What was missing was
+never the flags. It was that nothing ever asks LFO4 for them.
+
+**Watch the displacement.** Re-deriving the `+44` reading from
+`movel %a2@(24,%d0:l),%d1` reproduced the old `+32` error inside an hour:
+objdump prints *indexed* displacements in hex with no prefix, so that `24` is
+36, and `8 + 36` is 44. The correction is recorded above and it is worth
+re-reading before trusting any indexed offset in this file.
+
+#### Both fixes, measured on the built image — 2026-09-22
+
+The same two probes, pointed at `out/lfo4-ui` (`DT2_BUILD=out/lfo4-ui`). The
+question each answers is not "does LFO4 work now" but "does LFO4 do what LFO3
+does, and does LFO3 still do it".
+
+**`SLEW`**, with the waveform selected as `RND` on each page:
+
+| page | gate asked | accepted | table gave |
+|---|---|---|---|
+| LFO3 | 124 | 11 | 100 |
+| LFO4, before | 124 | **0** | -- |
+| LFO4, after | 127 | **11** | **326** |
+
+`clamp->2` fired zero times, so index 3 passed the ceiling and the four-entry
+table answered with LFO4's own `SLEW` entry rather than LFO3's. LFO1, LFO2 and
+LFO3 accepted 13, 3 and 2 exactly as before.
+
+**`DEST`**, opening the browser on each page:
+
+| page | mask | destinations offered |
+|---|---|---|
+| LFO1 | `0x1e00` | 55 |
+| LFO2 | `0x0e00` | 62 |
+| LFO3 | `0x0600` | 69 |
+| **LFO4** | **`0x0200`** | **76** |
+
+**55, 62, 69, 76.** The list grows by exactly seven per LFO, which is the rule
+recorded in this file the day before the fourth page could be asked -- each
+group of ten contributes seven because the loop is over value slots and the two
+alternates collapse onto their primaries. LFO4 is offered LFO1's, LFO2's and
+LFO3's blocks and not its own, so the graph stays acyclic without anything
+having to enforce it.
+
+The counts for LFO1, LFO2 and LFO3 are the measurement that matters most here:
+the cascade is shared by all four pages, so a wrong fourth branch would have
+changed what the other three are offered, and a probe that only counted gate
+hits would not have seen it. So the same probe was run against `lfo4-value`,
+the build the fault was measured on, and the two put side by side:
+
+| build | LFO1 | LFO2 | LFO3 | LFO4 |
+|---|---|---|---|---|
+| `lfo4-value` | 55 | 62 | 69 | **no mask chosen, no list built** |
+| `lfo4-ui` | 55 | 62 | 69 | **76** |
+
+A before and an after, rather than an after and an assumption.
