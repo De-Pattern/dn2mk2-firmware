@@ -4331,3 +4331,66 @@ plan.md` §8 already has the material: the stored block has the reserved rank
 `4 * slot + 0` free. A sound saved by this build always writes those eight ids,
 so "stored has no LFO4" and "stored was never saved by us" are distinguishable
 if the save marks itself. That is the next piece of work, and it is small.
+
+### [SETTLED by the owner — 2026-09-22 night] The removal branch is closed
+
+The entry above is **wrong** and the one before it was right. Stated by the
+owner directly, against a table this file had already published:
+
+> "this is wrong. The modulation exerted is correct when it happens but it
+> happens erratically"
+
+So, finally and from the instrument rather than from inference:
+
+| build | removal paths | on the instrument |
+|---|---|---|
+| `lfo4-browser` | all on | erratic; correct when it happens |
+| `lfo4-keeprow` | copy, carry, clear off; load still drops | **worse** |
+| `lfo4-keepall` | all four off | erratic; correct when it happens |
+
+**Turning off every route by which a row can be removed does not fix it.**
+`keepall` is no better than `browser`. The row is therefore not being destroyed
+between the panel writing it and the engine asking for it -- it never arrives
+under the key the engine asks for at note-on. That is the second outcome
+`build_lfo4_keepall.py` named in advance, and it closes the removal branch this
+session spent its evening inside.
+
+Two things survive from the wrong entries, because they were measured rather
+than reasoned:
+
+- **`lfo4-keeprow` is worse than either end.** It is the only build where
+  copies and carries stop reclaiming while loads still remove a fresh entry.
+  Unexplained, recorded, not chased.
+- **`lfo4_on_load` does drop a live entry whenever the stored sound carries no
+  LFO4 values**, which is every stock sound. That is true, and it is very
+  likely why LFO4's settings do not survive a power cycle -- a separate report
+  the same evening. It is simply not the cause of the erratic triggering,
+  because switching it off changed nothing.
+
+#### Three wrong readings in one hour, and what they have in common
+
+Exhaustion, then closure, then the load drop, then closure again. Every one
+came from **inferring a conclusion out of a short report instead of restating
+the report and checking it**. The owner corrected all three, twice by quoting
+this file's own table back at it.
+
+The working rule that follows: when the instrument says something, write the
+sentence down verbatim first, restate what it implies in one line, and get that
+confirmed **before** any of it reaches a document. A test result is evidence;
+what it means is a claim, and the two were run together here three times.
+
+#### The experiment that is actually next
+
+Unchanged from the first correction: **stop keying by address.** A build where
+`lfo4_on_set` files by track index and `lfo4_refresh` reads by the same index
+takes the address out of the question.
+
+- reliable -> the address is the fault: the panel and the engine are naming the
+  same sound two different ways, and only the instrument's voice allocation can
+  tell them apart, which is why every emulator measurement agreed;
+- still erratic -> the fault is upstream of the key, in whether the panel's
+  write happens at all.
+
+Sixteen rows of eight `u16`: 256 bytes, no hashing, nothing that can be full,
+nothing to reclaim. Not a shipping design -- p-locks and sound-per-track need
+the address back -- but it answers the only question left standing.
