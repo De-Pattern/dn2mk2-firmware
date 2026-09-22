@@ -4463,3 +4463,37 @@ candidate fix, and it is not meant to sound like anything.
   back on the table after all.
 - `DEP` **falling back to 0 on its own** — the bug happening, live, and
   whatever the instrument was doing at that moment is what causes it.
+
+### The third `RND` site is not a literal triple — a null, 2026-09-22
+
+From the instrument, in the owner's words: *"in all fw, random shp behaves and
+at the top the legend with the value displays slew, but when not touching the
+knob the UI shows SPH under the waveform."*
+
+So two renderers disagree. The one that draws the big value at the top has the
+substitution — it names entry **326**, whose record is LFO3's `SLEW` copied —
+and the one that draws the column name under the waveform does not: it names
+entry **327**, `SPH`. Two sites were already found and patched this way
+(`DN2_RND_A_GATE`, `DN2_RND_B_GATE`); this is a third.
+
+`scan_lfo_triples.py` was run over stock 1.11 for all three literal families
+the first two were found by, and **every window it reports is one already
+patched**:
+
+| family | windows | where |
+|---|---|---|
+| 79 / 89 / 99 — the `WAVE` entries | 2 | `0x40036636`, `0x40036a80` — both patched |
+| 81 / 91 / 101 — the `SPH` entries | 1 | `0x4010db18` — the SLEW gate, patched |
+| 80 / 90 / 100 — the `SLEW` entries | 1 | `0x4029a5c2`, and it is **data**: a table of 0, 10, 20 … 120 disassembling as `moveq` |
+
+**So the third site does not name its LFO with a literal at all.** It reaches
+the column's name some other way — through the parameter record it already
+holds, or through a per-page index — which is why three passes of a scanner
+built for literals cannot see it and a fourth would not either.
+
+That makes the next step a **differential trace**, not another scan: draw
+LFO3's page and LFO4's page with `WAVE` set to `RND` and idle, record the basic
+blocks each enters, and walk *forward* from the first parting. It is the method
+that found the destination-browser gate after reading the image backwards from
+the browser had cost four disassemblies and reached a function that could only
+be guessed at. Queued behind the `lfo4-meter` gate — one machine.
