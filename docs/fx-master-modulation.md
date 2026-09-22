@@ -1108,3 +1108,67 @@ comparison against a read-modify-write that writes what it read.
   compare the memory.
 - **A refusal path.** An instrument that fails its own positive should exit
   differently from one that fails the subject, or the log reads as a verdict.
+
+## 14. Route A works on the instrument — 2026-09-23
+
+`fxdest_DN2_1.11.syx` was flashed and the owner's report, against §12's stated
+pass criterion:
+
+> "The delay should surge and collapse — and respond to DEP and SPD, which is
+> the evidence a hard-coded ramp couldn't give" -> **"yes it responds like
+> this, it works."**
+
+**So an LFO can modulate an FX parameter.** A `DEST` code above 100 retargets
+the evaluator's read-modify-write from the track's own mirror block to block
+16, and the value that arrives at Delay Feedback Gain is an LFO's output —
+audible, and **steerable by `DEP` and `SPD`**.
+
+### Why the steering is the part that matters
+
+`fxblock16` (§9) already proved the DSP reads block 16, but it wrote a
+hard-coded triangle from the audio ISR. Anything that merely *moved* the cell
+would have sounded the same. The demonstration was built so that the only way
+to get a response to the depth and rate knobs is for the value to have come
+**through the LFO evaluator**: the depth multiply, the accumulate against the
+cell's current contents, and the clamp are all stock code that the patch does
+not touch. A ramp cannot be steered; this is.
+
+### What is now established, end to end
+
+| step | how |
+|---|---|
+| the FX/Master parameters live in mirror block 16 at `B + 34 + 202*16` | five independent reads of ColdFire code (§4c), and the formula confirmed by construction (§9) |
+| the DSP acts on that block | `fxblock16` on hardware, sustained (§9) |
+| a `DEST` code can reach it | one cave, one `lea 0x8000750e`, verified address-by-address against a stock control (§12) |
+| **what arrives is an LFO, not a ramp** | **`fxdest` on hardware, responding to `DEP` and `SPD` (this section)** |
+
+Two edits and 47 bytes. `docs/ideas-backlog.md` §4's engine half is **done**.
+
+### What is left, and it is one build
+
+The engine accepts codes 101..127; **nothing can yet choose one.** §11 read the
+destination browser and specified the matched pair:
+
+- extend `SoundParameterSet`'s `+0x50` (slot -> entry) to answer for codes
+  101..124 off `FxParameterSet`'s table at `0x42c649a8`;
+- raise the enumeration bound `moveq #101` -> `125` at `0x400395b8`;
+- teach the **three** entry<->slot conversion sites the `+76`, including
+  `0x40107b0e`, the browser's confirm path, which carries no `lsl.l #8` and is
+  why a scan for the shift found only two.
+
+**It cannot be gated in this emulator** — no destination browser runs there —
+so it is the instrument's question, and it is deliberately a separate flash
+from this one.
+
+One piece is named as unread rather than assumed: whether the 26-entry ordering
+map at `0x4028bfc4` has a key for groups 16-18, and what the sort does with an
+entry whose group it has no key for. That is the kind of gap that hangs rather
+than mis-names, and it is the first thing to read.
+
+### The consequence to design for, now that it is real
+
+**Sixteen tracks' LFOs can all aim at the same global FX cell, and they will
+stack**, because every evaluator reads the cell and adds before the clamp. This
+build exposes one LFO on one track so it cannot be seen yet. It will be the
+first surprise the moment the browser can offer these codes, and it belongs in
+the UI, not the engine.
