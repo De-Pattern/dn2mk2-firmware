@@ -4816,3 +4816,56 @@ What remains is the thing no harness in `scripts/` has ever run: **note-on.**
 The instrument's report has named it from the first sentence — binary per note,
 decided at note-on, sustained while the trig is held, more frequent the faster
 it is re-pressed — and it is now the only place left for the difference to be.
+
+### LFO4 reaches the mirror, proved by manipulation — 2026-09-23
+
+`lfo4-cell` puts two live mirror cells on LFO4's page: `SPD` shows the cell
+LFO4 aims at, `DEP` the cell LFO3 aims at, read straight out of
+`0x800068e4 + 34 + 202*track + 2*slot`. From the instrument:
+
+> "DEP and SPD are moving and I can affect how SPD moves (the interval between
+> jumps) by changing MULT. Interestingly the higher MULT is I start seeing not
+> only jumps but also smooth sweeps in certain cases."
+
+**Both cells move, and LFO4's own `MULT` changes the rate of LFO4's cell.**
+That is causation established by manipulation, not a correlation: the only
+thing `MULT` touches is LFO4's own oscillator, so whatever is writing that cell
+*is* LFO4.
+
+The smooth sweeps at high `MULT` are the expected artefact of sampling a fast
+oscillator at the ~30 fps the page redraws — aliasing, which only appears if the
+cell is genuinely oscillating fast. It corroborates rather than complicates.
+
+**So the whole control path is now proved end to end on the instrument:** the
+panel writes the table, the table is keyed so the tick finds it, the tick fills
+the row, the evaluator turns the row into a contribution, and **the
+contribution lands in the mirror cell the destination names**. Every one of
+those was a candidate at some point in this file and every one is now closed by
+measurement, most of them with a control beside them.
+
+#### And the fault survives all of it
+
+The instrument still reports one trig in fifteen, while LFO3 — writing the same
+kind of contribution into the same mirror, from the same evaluator, in the same
+frame — sweeps every time.
+
+That is a harder statement than anything earlier in this file, because the two
+now differ in **nothing that has been measured**. What is left is between the
+mirror cell and the sound: whether a voice reads that cell at all for LFO4's
+destination, and why it always does for LFO3's.
+
+**The first thing to check is the cheapest and it needs no build.** Both LFOs
+have been aimed at *different* destinations so the two columns could be read
+apart. That also means the two have never been compared **on the same
+destination**, where the only difference left is which LFO produced the
+contribution:
+
+- put LFO3 and LFO4 both on `Filter Frequency`;
+- turn LFO3's depth to centre so only LFO4 contributes;
+- listen, and watch `SPD`.
+
+A moving cell with no sound says the voice does not read what LFO4 wrote. A
+moving cell **with** sound says the modulation works and the intermittency is
+about something other than delivery — in which case the "one in fifteen" is
+about *which* notes hear a cell that is always moving, and the question becomes
+what a trig does to the voice's parameter fetch.
