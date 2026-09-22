@@ -30,7 +30,17 @@ at centre, never a number to be interpreted (`csrc/lfo4/meter.c` explains why):
 |---|---|
 | `SPD` | **the destination in the row the engine is holding**, read straight off as the slot number. `0.00` = the engine is aiming at nothing |
 | `DEP` | the depth in that same row |
-| `FADE` | a needle: full right = the sound the knob wrote under **is** one of the sixteen the tick asks about, full left = it is not |
+| `FADE` | **its own value again** -- see below |
+
+**`FADE` is handed back, and that is the correction this build exists for.**
+It was a needle for "is the panel's key one the tick asks for", it answered
+*yes* on the instrument, and it should have been given back then. Leaving it
+diverted was a trap: the display was a fixed number but the knob still wrote a
+real value nobody could see, and the owner reasonably read the needle's 63 as
+LFO4's fade. Fade matters -- at 63 an LFO is *"almost just a blip"* on a trig,
+at 0 it sweeps normally -- so it has to be visible for any of this to be
+tested. **Divert a column only while its answer is unknown, and never one whose
+value must be right for the test to mean anything.**
 
 **v1 is superseded and why matters.** `SPD` was a needle for the tick's last
 lookup, and on the instrument it read hard right while `FADE` read hard right
@@ -83,8 +93,8 @@ import build_lfo4_ui as ui                                 # noqa: E402
 import build_lfo4_ui2 as ui2                               # noqa: E402
 import build_lfo4_value as value                           # noqa: E402
 
-OUT = ROOT / "out/lfo4-meter2"
-SYX = ROOT / "00_Resources/02_Builds/lfo4-meter2_DN2_1.11.syx"
+OUT = ROOT / "out/lfo4-meter3"
+SYX = ROOT / "00_Resources/02_Builds/lfo4-meter3_DN2_1.11.syx"
 
 # `lfo4-forcerow` was rebuilt over a filename that already meant something
 # else, the owner flashed what he thought was the gated build, and an evening

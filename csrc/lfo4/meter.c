@@ -39,9 +39,23 @@
  *         hard right, `DEP` held the full dialled depth -- and nothing
  *         modulated. Two of those three are about the track in hand; the
  *         needle was not, so it could not narrow anything. `DEST` is.
- *   FADE  whether the **panel's** key is one the tick can ask for:
- *         right = the sound the knob wrote under is one of the sixteen the
- *         engine reads, left = it is not, and that alone is the whole fault.
+ *   FADE  **nothing -- it is the parameter again**, and taking it back is a
+ *         correction, not a simplification.
+ *
+ *         It was a needle for "is the panel's key one the tick asks for", it
+ *         answered *yes* on the instrument on 2026-09-22, and it should have
+ *         been given back the moment it had. It was not, and a diverted
+ *         display on a parameter the owner can still **turn** is a trap: the
+ *         knob writes a real value into the table that nobody can see. The
+ *         owner then read the needle's full-scale 63 as LFO4's fade and set
+ *         LFO3's fade to match -- and reported that LFO3 at fade 63 is
+ *         *"almost just a blip"*, while at 0 it sweeps normally. That is a
+ *         true and useful fact about fade, discovered against a number this
+ *         file invented.
+ *
+ *         **Rule taken from it:** divert a column only while its answer is
+ *         still unknown, and never one whose value has to be right for the
+ *         test to mean anything.
  *   DEP   not a needle: the depth **the engine is holding right now**, read
  *         out of `lfo4_rows`. Turn DEP to its stop and watch this follow --
  *         or fall back to 0 on its own, which is the bug happening.
@@ -61,8 +75,6 @@
 #include "slots.h"
 
 #define TRACKS     16
-#define METER_MAX  0x7f00          /* inside every one of LFO4's ranges */
-
 extern u16 lfo4_rows[TRACKS][EXT_PARAMS];
 extern u32 lfo4_set_sound;         /* setter.c: the key the panel last wrote */
 
@@ -98,8 +110,6 @@ int lfo4_meter(u32 param, int *answered)
     case 0:                                   /* SPD */
         track = panel_track();
         return (int)(short)lfo4_rows[track < 0 ? 0 : track][3];
-    case 2:                                   /* FADE */
-        return panel_track() >= 0 ? METER_MAX : -METER_MAX;
     case 7:                                   /* DEP */
         track = panel_track();
         return (int)(short)lfo4_rows[track < 0 ? 0 : track][7];
