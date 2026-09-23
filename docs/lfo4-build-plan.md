@@ -4968,3 +4968,61 @@ depth. If the audible sweep changes, both contributions are in the cell the
 voice reads and the question becomes why one of them is usually inaudible; if
 it does not change while `SPD` still shows movement, they are different memory
 after all and the search resumes with that established rather than guessed.
+
+## The 1-in-15 is a key that misses, not a cell that is wrong — 2026-09-23
+
+Everything from the panel to the mirror cell is measured and correct, the
+evaluator treats LFO4 and LFO3 byte-identically over 240 frames, and yet the
+instrument modulates on roughly **one trig in fifteen**. That number is the
+evidence nothing has used: **a wrong cell would never work.** One in fifteen is
+a lookup that usually misses.
+
+`lfo4_refresh` in `csrc/lfo4/bridge.c`:
+
+```c
+values = ext_find(lfo4_sound_of(track));
+for (k...) row[k] = values ? values[k] : ext_default[k];
+```
+
+**A miss is not a no-op. It loads the defaults, and the default `DEST` is
+None** — so a note whose row missed modulates nothing, and a note whose row hit
+modulates. That is binary-per-note exactly as reported.
+
+And the two sides derive the key differently, which is the whole question:
+
+| | how the key is built |
+|---|---|
+| the **UI** (`hooks.S`, `valuehooks.S`) | `%a2@(16)` then `vtable[40]()` — the firmware's own virtual call |
+| the **tick** (`bridge.c`) | `*0x800052a0 + 52 + 1163*track` — the firmware's arithmetic at `0x40025bda` |
+
+The getter and setter use the **identical** derivation, which is why the page
+displays what was typed. That is self-consistency, not agreement with the tick,
+and it is why the page looking right has never been evidence.
+
+### `emu_lfo4_key.py` — written, run, and its conclusion withdrawn
+
+The first probe compared `*0x800052a0 + 52 + 1163*track` against
+`lfo4_sound_of(track)` and reported **8/8 tracks agree**, concluding "the key
+theory dies here". **That conclusion is withdrawn: the probe compared the tick's
+formula with the tick's own formula.** `lfo4_sound_of` *is* that expression, so
+agreement was guaranteed before the machine was started. It is kept because the
+mistake is instructive and because one part of it is real:
+
+> `control  store under lfo4_sound_of(0) -> hits 0->1, misses 0->0, last_lookup 1  HIT`
+
+**The lookup machinery works.** A row stored under the tick's key is found under
+the tick's key. So if there is a miss on the instrument it is the key that
+differs, not `ext_find`.
+
+This is the same failure as the `movea.l` trap and the container-header offset:
+*a comparison needs two independent derivations, and "both sides call the same
+function" is not two.*
+
+### `emu_lfo4_uikey.py` — the probe that can answer it
+
+Drives the panel to the LFO4 page so `lfo4_on_get` runs through the real path,
+then reads the key the firmware's own virtual call produced (`lfo4_get_sound`)
+and compares it with `lfo4_sound_of(track)`. Prediction and control are written
+into the script before the run, and the control is `lfo4_gets != 0` — because a
+zero key with a getter that never ran is a null about navigation, not about
+keys.
