@@ -42,6 +42,14 @@
 u16 lfo4_rows[TRACKS][EXT_PARAMS];
 
 u32 lfo4_refreshes, lfo4_copies_in;
+
+/* Did the last lookup the tick actually performed find a row? `+1` yes, `-1`
+ * no, `0` not once yet. It is deliberately the last *lookup* and not the last
+ * call: the cached path returns without asking the table, so this stays what
+ * the row now in use was built from, which is the question. `csrc/lfo4/meter.c`
+ * puts it on the page. */
+u32 lfo4_hits, lfo4_misses;
+int lfo4_last_lookup;
 static u32 seen_sound[TRACKS];
 static u32 seen_generation[TRACKS];
 
@@ -84,6 +92,13 @@ u32 lfo4_refresh(u32 track)
     seen_generation[track] = generation;
     lfo4_copies_in++;
     values = ext_find(sound);
+    if (values) {
+        lfo4_hits++;
+        lfo4_last_lookup = 1;
+    } else {
+        lfo4_misses++;
+        lfo4_last_lookup = -1;
+    }
     for (k = 0; k < EXT_PARAMS; k++)
         ((u16 *)row)[k] = values ? values[k] : ext_default[k];
 #ifdef LFO4_FORCE_ROW

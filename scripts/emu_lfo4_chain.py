@@ -93,10 +93,21 @@ def main() -> int:
     def frames(values):
         for slot, value in enumerate(values):
             m.call(sym["ext_set"], sound, slot, value)
-        m.write(buf, rest)
         for base in STATE:                 # from phase zero, so only the rate differs
             m.write(base, bytes(STATE_LEN))
         for _ in range(args.frames):
+            # **The mirror is reset before every frame, not once before all of
+            # them.** The evaluator writes modulation *into* the mirror and the
+            # firmware rebuilds it from the parameter base each audio frame. An
+            # earlier version wrote the resting value once and then ran forty
+            # frames into it, which measures an accumulator: the value climbs
+            # to the clamp whatever the depth, and every row looks alike at the
+            # end. It survived here only because this harness reads the
+            # endpoint once and asks whether the slot moved at all.
+            # `scripts/emu_lfo4_sweep.py` reads the trajectory, where the same
+            # flaw produced four rows pinned at `0x7f00` and very nearly a
+            # report that the LFO does not oscillate.
+            m.write(buf, rest)
             m.call(EVAL_A, buf, rate, 0xFFFF, 0xFFFF, out1, out2, 0)
         after = m.read(buf, span)
         written = {}

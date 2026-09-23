@@ -49,6 +49,31 @@ SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.1
 CACHE = ROOT / "out/boot-check/control.json"
 REPORTER = 0x4011EA6A
 
+# **The control is only a control while the emulator it was measured on stays
+# put.** This caches what a stock boot does, because stock does not change --
+# but digikit does, and a change there can move the boot without moving the
+# image. Its `machine-ideas-menu` branch replaces `unblock`'s single
+# `display_sem` skip with a `never_fake` list of seven semaphores, which is
+# exactly the kind of change that alters how far a from-reset boot gets.
+#
+# Comparing a build against a control measured under a different emulator is
+# comparing two things at once. So the cache carries a fingerprint of the
+# emulator's own sources, and refreshes itself when they move.
+EMU = pathlib.Path("/mnt/d/01_Code/Z_Personal/digikit-up/emu")
+
+
+def emulator_fingerprint():
+    """-> a digest of digikit's `emu/` sources, or None if they are not here."""
+    import hashlib
+
+    if not EMU.is_dir():
+        return None
+    digest = hashlib.sha256()
+    for path in sorted(EMU.glob("*.py")):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:16]
+
 
 def stock_path():
     return os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin")
@@ -91,13 +116,24 @@ def run(image_path, limit, frame_at, entries=()):
 
 
 def control(limit, frame_at, refresh=False):
-    """-> what a stock boot does here, cached: stock does not change."""
+    """-> what a stock boot does here, cached: stock does not change.
+
+    The emulator does, though, so a cache measured under a different `emu/`
+    is re-measured rather than trusted -- and says so, because a control that
+    silently re-ran is a twenty-minute surprise and a control that silently
+    did not is a wrong answer.
+    """
+    now = emulator_fingerprint()
     if CACHE.exists() and not refresh:
-        return json.loads(CACHE.read_text())
+        row = json.loads(CACHE.read_text())
+        if row.get("emulator") == now:
+            return row
+        print(f"  the emulator changed since this control was measured "
+              f"({row.get('emulator')} -> {now}); re-measuring it")
     started = time.time()
     ran, frames, fault, _ = run(stock_path(), limit, frame_at)
     row = {"ran": ran, "frames": frames, "fault": fault, "limit": limit,
-           "seconds": round(time.time() - started, 1)}
+           "seconds": round(time.time() - started, 1), "emulator": now}
     CACHE.parent.mkdir(parents=True, exist_ok=True)
     CACHE.write_text(json.dumps(row, indent=1) + "\n")
     return row

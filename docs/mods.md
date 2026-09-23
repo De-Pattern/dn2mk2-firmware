@@ -409,3 +409,63 @@ renamed SPH (STPS WDTH TYPE SLOP POS). Passed on hardware 2026-09-17 as
 area, as the boot-screen mod does — `check_compatible` reports it; they are
 alternatives until a shared area registry exists.
 
+
+---
+
+## Mod 6: `fxmod` — an LFO on the Chorus, Delay and Reverb
+
+**Status: shipped, confirmed on hardware 2026-09-23, live at `site/fx.html`.**
+
+Stock firmware offers an LFO a hundred destinations and every one is inside the
+voice. The machine's global effects are not among them, and *three separate
+things* keep them out: the `DEST` list never enumerates them, the evaluator's
+bound stops at 100, and the code that turns a list entry into a stored `DEST`
+value has no way to spell one. Opening any one of the three on its own changes
+nothing visible, which is why this mod is bigger than `moddest` and why
+`moddest`'s page says the effects "stay closed" — that page was right about the
+mask and wrong to imply the gate could not be opened another way. Both pages now
+say so.
+
+`docs/fx-master-modulation.md` is the evidence: §12 the engine half, §15 and
+§18 the browser half and the counting error that cost a second flash, §23 the
+group-name fix.
+
+- **What changes:** 23 places in section 3, 179 bytes, nothing appended and no
+  length changed — two bounds, two hooks into a 128-byte code cave, seven `jsr`
+  targets, ten records' `+44`, and one name pointer.
+- **Generator** (`scripts/gen_fxmod_code.py`): runs
+  `build_fxbrowser.compose` — with `build_fxbrowser2`'s four extra conversion
+  sites and `build_fxbrowser3`'s longword — and writes `fxmod_code.json` /
+  `fxmod-code.js`: every changed run with the stock bytes it expects, plus **26
+  guards**, sites the mod reads and reasons from but never writes. The cave is
+  one edit whose stock guard is the whole free run, so an image with something
+  already there is refused.
+- **The strong check:** `dnfw mods apply … --mod fxmod` produces a `.syx` whose
+  sha256 is **identical** to `fxbrowser3_DN2_1.11.syx`, the gated build whose
+  predecessor was flashed. `test_fxmod_mod.py` asserts that byte equality, so
+  this mod is not a re-derivation of the build for users — it *is* the build.
+- **CLI:** `dnfw mods apply firmware.syx --mod fxmod -o modded.syx`.
+- **Parity:** `node scripts/js_fxmod_check.mjs` — MAIN OS identical to the
+  Python mod, rebuilt image 21/21, and the group-name longword reads `CHR`
+  afterwards where it read `ERR` before with Reverb's and Delay's untouched.
+  Run by `test_js_fxmod.py`, which fails if the harness produces no checks at
+  all rather than reading an empty run as a pass.
+- **Page, driven in Chrome** (the stock `.syx` uploaded, Build clicked): the 24
+  destinations render in three labelled groups — Chorus 7, Delay 9, Reverb 8 —
+  the load verifies 21/21, the rebuild verifies 21/21 and offers
+  `Digitone_II_OS1.11_fxmod.syx` at 2,387,616 bytes, with no console errors.
+
+**Conflicts:** none known. It writes inside section 3 only, appends nothing and
+claims no startup hook, so `check_compatible` clears it against `moddest`,
+`lfowaves`, `midiarp` and `transients`. As always that is a byte-overlap
+statement and not a musical one, and no combined image has been flashed.
+
+**What it deliberately leaves out.** Master. Its slots need destination codes
+136..145 and the firmware widens a `DEST` byte with `mvs.b`, which makes
+anything above 127 negative. That is a different edit and it is not in here.
+
+**What a user should know before flashing.** These are the machine's *one*
+Chorus, Delay and Reverb. Sixteen tracks' LFOs can all aim at the same cell and
+they add up, because every evaluator reads the cell and adds to it before the
+clamp. That is what "global" means, not a fault — but it is surprising the first
+time, so both the page and the index card say it.

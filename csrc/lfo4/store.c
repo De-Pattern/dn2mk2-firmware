@@ -59,8 +59,24 @@ void lfo4_on_load(void *live, const void *stored)
         /* Nothing stored -- a stock sound, or one saved before this build.
          * Drop the entry rather than fill it with zeros: no entry reads
          * `ext_default`, which is what a sound without an LFO4 should read,
-         * and it keeps the table for the sounds that do have one. */
+         * and it keeps the table for the sounds that do have one.
+         *
+         * **This is the fourth place a row is removed, and the one
+         * `LFO4_KEEP_ROWS` does not cover.** It is also the busiest: a single
+         * boot runs `lfo4_on_load` 2,192 times. If sounds reload while a
+         * pattern plays, an LFO4 edit that has not been saved is wiped by the
+         * next load of that sound -- and trigging faster means more chances to
+         * land between one load and the next, which is the shape the
+         * instrument reports.
+         *
+         * `LFO4_KEEP_ALL` is the bisect that covers it. It is separate from
+         * `LFO4_KEEP_ROWS` on purpose: `lfo4-keeprow` was built and gated with
+         * only the copy and clear paths off, and its meaning must not change
+         * under it. A build defining both removes every route by which a row
+         * can disappear. */
+#ifndef LFO4_KEEP_ALL
         ext_drop((u32)live);
+#endif
         return;
     }
     lfo4_loads_carrying++;

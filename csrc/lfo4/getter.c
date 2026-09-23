@@ -26,6 +26,10 @@
  */
 #include "slots.h"
 
+#ifdef LFO4_METER
+int lfo4_meter(u32 param, int *answered);
+#endif
+
 /* What happened, for the harness. As with the setter, a count alone cannot
  * tell a read of the right slot from a read of slot 1. */
 u32 lfo4_gets, lfo4_gets_ignored;
@@ -47,6 +51,25 @@ u32 lfo4_on_get(u32 sound, u32 slot)
         return 0;
     }
     lfo4_gets++;
+#ifdef LFO4_METER
+    /* Three of the eight columns display a measurement instead of their value
+     * (`csrc/lfo4/meter.c`). Only the *display* is diverted: the setter still
+     * writes the knob's value into the table and the save path still reads it
+     * from there, so a metered build stores exactly what an unmetered one
+     * would. The five columns the meter declines to answer for fall through
+     * to the read below. */
+    {
+        int answered;
+        int shown = lfo4_meter(slot - LFO4_SLOT0, &answered);
+
+        if (answered) {
+            lfo4_get_sound = sound;
+            lfo4_get_slot = slot;
+            lfo4_get_value = (u32)shown;
+            return (u32)shown;
+        }
+    }
+#endif
     value = (short)ext_get(sound, slot - LFO4_SLOT0);
     lfo4_get_sound = sound;
     lfo4_get_slot = slot;

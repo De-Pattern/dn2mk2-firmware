@@ -4092,3 +4092,879 @@ the build the fault was measured on, and the two put side by side:
 | `lfo4-ui` | 55 | 62 | 69 | **76** |
 
 A before and an after, rather than an after and an assumption.
+
+### The browser's gate, and what hardware settled that the emulator could not — 2026-09-22 late
+
+`lfo4-browser` is on the instrument and the owner reports the page working: the
+destination window opens, `RND` shows `SLEW`, and the fourth page dot is there
+from boot. Three things follow, and one of them is a correction.
+
+**The browser was never the list machinery.** It is one test, asked three
+times, at `0x40067506`, `0x400676e4` and `0x400679e6`:
+
+```
+andil #0x70000,%d0     ; bits 18, 17, 16 -- is this parameter a DEST?
+beqw  <skip>           ; no: never open the window
+```
+
+`lfo4records.DEST_FLAGS` is bit 15 -- the value the staircase `0x40000 /
+0x20000 / 0x10000` continues to -- so the AND yields zero. Widening the test to
+`0x78000` admits LFO4 and provably nothing else: no record in the stock table
+carries `0x8000` in `+44`, which `build_lfo4_browser.py` asserts against the
+image before it patches.
+
+In the emulator the change takes LFO4 from **776 firmware blocks it never
+reached down to 45**, and the destination counts stay 55 / 62 / 69 / 76.
+
+**Walking forward beat walking back.** Following the browser *up* its call
+chain gave `0x401a074a`, then `0x40067370`, then a function `dnfw fn entry`
+would only guess at -- four disassemblies, each answering a question nobody
+asked. Listing the first place the two traces *part* gave the decision in one
+look. Third time on this feature that diffing two renders beat reading harder.
+
+**One gate was already fixed without being noticed.** Directly above the mask:
+
+```
+cmpil #320,%d3
+bhiw  <skip>
+```
+
+LFO4's `DEST` entry is 324. The table relocation had already raised that bound
+to 330, so it had been passing all along -- but it sits four instructions above
+the real gate, and had it not been raised it would have been the obvious
+culprit and the wrong one.
+
+#### `pagelist.c` is confirmed by the instrument, not by us
+
+`scripts/emu_lfo4_pagelist.py` reported the page-vector constructor never
+running in **1.2 billion instructions** from reset, and this file recorded the
+patch as unverified and possibly inert on that basis. The instrument says
+otherwise: the fourth dot is there before `[MOD]` is pressed.
+
+So the site does run -- later in a boot than this emulator reaches, which is
+itself worth knowing, because the boot gate's 450 M budget draws a frame and
+is nowhere near a finished UI. **The probe's finding stands and its
+implication was wrong**: "not reached in 1.2 G" meant the harness stops early,
+not that the code is dead.
+
+## The table is full, and that is the whole bug — 2026-09-22 night
+
+**`lfo4-keeprow` made it worse, and that is the finding.** With the drops in
+`ext_copy`, `ext_carry` and `ext_clear` switched off, the instrument reports
+modulation became *sparser*: two successes, "with a lot of wiggling", against
+roughly one trig in fifteen before.
+
+The mechanism is four lines of `ext_add`:
+
+```c
+if (ext_live == EXT_SLOTS) {       /* EXT_SLOTS is 256 */
+    ext_full++;
+    return 0;                      /* and ext_set then does nothing at all */
+}
+```
+
+**A full table drops the panel's write on the floor.** No error, no fallback,
+no display change -- the knob turn simply does not land, so the sound has no
+entry, so `lfo4_refresh` fills the row from `ext_default`, whose `DEP` is
+neutral, so the note is silent.
+
+### It explains every observation, including the one read backwards
+
+| observation | under this reading |
+|---|---|
+| binary per note | the entry exists or it does not |
+| perfect when it works | the value that did land is correct |
+| **sparser with the drops off** | the drops were the only thing *reclaiming* slots |
+| faster trigging works better | more trigs -> more sound copies -> more drops -> more free slots for the next write |
+
+That last row was read backwards all evening: "more trigs helps" was taken as
+trigs **delivering** the row. They are making **room** for it.
+
+`ext_full` has been counting this since step 1 and nothing has ever read it.
+The emulator never saw it because a snapshot session creates a handful of
+sounds, not the churn of a real instrument playing patterns.
+
+### What the fix is not
+
+It is not "stop dropping". `lfo4-keeprow` is what that looks like, and it is
+worse. Nor is it simply a bigger table: 256 slots keyed by a live sound's
+address is a guess about churn, and the next guess would be another one.
+
+What the design has to face is that **a side table keyed by address cannot be
+told when an address stops mattering**. Elektron's own parameters do not have
+this problem because they live inside the sound's 1,163 bytes and are freed
+with it. Options, cheapest first, and none yet measured:
+
+1. **Read `ext_full` on hardware** before anything else. If it is non-zero the
+   diagnosis is confirmed outright; there is no instrument for this yet.
+2. Evict the least recently used entry instead of failing the insert, so a
+   write always lands and only the oldest sound loses its LFO4.
+3. Key by something bounded -- track and buffer index rather than address --
+   which bounds the table by construction.
+4. Find eight bytes inside the sound after all, which removes the table.
+
+## Two more from the instrument, 2026-09-22 night
+
+**LFO4's configuration does not survive a power cycle**, while every other
+page's does. That is a separate, genuine gap: values reach a stored sound
+through `lfo4_on_save`, but whatever the instrument does at power-off does not
+route through that hook. It is a missing feature rather than a symptom of the
+lookup bug, and it needs its own reading of the power-off path.
+
+**The `RND` label has a third site.** With `RND` selected, the legend at the
+top of the page shows `SLEW` correctly, but the column label under the waveform
+reverts to `SPH` when the knob is not being touched. `lfo4-ui2` patched the two
+routines that decide whether the waveform *is* `RND`
+(`0x4003662c`, `0x40036a76`); this is a third path, for the idle rather than
+the active state. Same family as everything else in this file: the UI is
+written three times over, and each copy has to be found by diffing what two
+renders execute.
+
+### [WRONG — corrected 2026-09-22 night] The table-full reading above
+
+**`lfo4-keepall` refutes it.** The section above predicted, in writing and in
+advance, that a build with *every* removal path off would be worse still,
+because nothing would reclaim a slot. The instrument reports the opposite: it
+"modulates similar to other fw where modulation triggering was erratic" --
+back to the baseline, not worse.
+
+If exhaustion were the cause, the build that never frees a slot would be the
+worst of the three. It is not. **The reading is wrong and stays here because
+the reasoning was sound and the prediction was testable**, which is the only
+reason it was cheap to kill.
+
+What the three builds actually say:
+
+| build | removal paths | on the instrument |
+|---|---|---|
+| `lfo4-browser` | all on | erratic, about one trig in fifteen |
+| `lfo4-keeprow` | copy, carry, clear off; **load still drops** | **worse** -- two successes with a lot of wiggling |
+| `lfo4-keepall` | all four off | back to the erratic baseline |
+
+**Nothing removing a row does not fix it.** So the row is not being destroyed
+between the panel writing it and the engine asking for it: it never arrives
+under the key the engine asks for at note-on. That is the second of the two
+outcomes `build_lfo4_keepall.py` named, and it closes the whole removal branch
+that this session spent the evening on.
+
+`lfo4-keeprow` being worse than both ends is unexplained and is a side road: it
+is the only build where copies stop reclaiming *while* loads still remove the
+user's fresh entry. Recorded, not chased.
+
+#### What that leaves, and the experiment that decides it
+
+The panel writes under the sound address the firmware's own setter hands it.
+The engine reads under `*(0x800052a0) + 52 + track * 1163`. In the emulator
+those are the same number -- measured, twice -- but the emulator plays no notes
+and allocates no voices, and the instrument does both.
+
+**The cheapest test is to stop keying by address at all.** A build where
+`lfo4_on_set` files by *track index* and `lfo4_refresh` reads by the same index
+removes the address from the question entirely:
+
+- **modulation becomes reliable** -> the address is the fault, and the fix is
+  to agree on one identity for a sound rather than two derivations of it;
+- **still erratic** -> the fault is upstream of the key, in whether the write
+  happens at all.
+
+A per-track array is sixteen rows of eight `u16` -- 256 bytes, no hashing, no
+eviction, and no way for it to be full. It is not the shipping design, because
+p-locks and sound-per-track would need the address back. It is a probe that
+answers the only question left.
+
+### [CORRECTED again — 2026-09-22 night] `lfo4-keepall` works, and the load drop is the bug
+
+The section immediately above misread the owner's report. "keep all is better,
+it modulates similar to other fw where modulation triggering was erratic" was
+taken as *still* erratic; it means it now behaves like the other firmwares,
+where previously triggering had been erratic. Confirmed a message later: **"it
+modulates as expected."**
+
+So the removal branch does not close -- it is the answer. The three builds,
+read correctly:
+
+| build | removal paths | on the instrument |
+|---|---|---|
+| `lfo4-browser` | all on | erratic, about one trig in fifteen |
+| `lfo4-keeprow` | copy, carry, clear off; **load still drops** | worse |
+| `lfo4-keepall` | all four off | **works as expected** |
+
+`keeprow` and `keepall` differ in exactly one thing, so that one thing is the
+bug:
+
+```c
+void lfo4_on_load(void *live, const void *stored) {
+    ...
+    if (!any) {
+        ext_drop((u32)live);   /* <- this */
+```
+
+`lfo4_on_load` drops the live entry whenever the stored sound it is loading
+carries no LFO4 values -- which is **every stock sound**, and every sound saved
+before this build existed. A load therefore wipes an edit the panel has just
+made, and a boot runs that path 2,192 times.
+
+It also explains the owner's other report of the same evening: **LFO4's
+settings do not survive a power cycle.** They are removed on the way back in,
+not lost on the way out.
+
+`keeprow` being worse than either end now has a reading too: it is the only
+build where copies and carries have stopped reclaiming *while* loads still
+remove the user's fresh entry -- the worst of both, which is what was heard.
+
+#### Why `keepall` is still not the fix
+
+Nothing removes a row in it, so a sound that genuinely has no LFO4 keeps
+whatever the last sound at that address had. Settings bleed between sounds and
+patterns; the owner was told to expect it.
+
+The real fix has to tell two cases apart that `!any` currently conflates:
+
+1. **a stored sound with no LFO4 values, being loaded over a live sound the
+   user has just edited** -- the edit must survive, because that is what every
+   other parameter on the instrument does;
+2. **a stored sound with no LFO4 values, loaded over a live sound carrying a
+   previous sound's LFO4** -- the entry must go, or values bleed.
+
+The live sound's own identity is what separates them, and `docs/lfo4-build-
+plan.md` §8 already has the material: the stored block has the reserved rank
+`4 * slot + 0` free. A sound saved by this build always writes those eight ids,
+so "stored has no LFO4" and "stored was never saved by us" are distinguishable
+if the save marks itself. That is the next piece of work, and it is small.
+
+### [SETTLED by the owner — 2026-09-22 night] The removal branch is closed
+
+The entry above is **wrong** and the one before it was right. Stated by the
+owner directly, against a table this file had already published:
+
+> "this is wrong. The modulation exerted is correct when it happens but it
+> happens erratically"
+
+So, finally and from the instrument rather than from inference:
+
+| build | removal paths | on the instrument |
+|---|---|---|
+| `lfo4-browser` | all on | erratic; correct when it happens |
+| `lfo4-keeprow` | copy, carry, clear off; load still drops | **worse** |
+| `lfo4-keepall` | all four off | erratic; correct when it happens |
+
+**Turning off every route by which a row can be removed does not fix it.**
+`keepall` is no better than `browser`. The row is therefore not being destroyed
+between the panel writing it and the engine asking for it -- it never arrives
+under the key the engine asks for at note-on. That is the second outcome
+`build_lfo4_keepall.py` named in advance, and it closes the removal branch this
+session spent its evening inside.
+
+Two things survive from the wrong entries, because they were measured rather
+than reasoned:
+
+- **`lfo4-keeprow` is worse than either end.** It is the only build where
+  copies and carries stop reclaiming while loads still remove a fresh entry.
+  Unexplained, recorded, not chased.
+- **`lfo4_on_load` does drop a live entry whenever the stored sound carries no
+  LFO4 values**, which is every stock sound. That is true, and it is very
+  likely why LFO4's settings do not survive a power cycle -- a separate report
+  the same evening. It is simply not the cause of the erratic triggering,
+  because switching it off changed nothing.
+
+#### Three wrong readings in one hour, and what they have in common
+
+Exhaustion, then closure, then the load drop, then closure again. Every one
+came from **inferring a conclusion out of a short report instead of restating
+the report and checking it**. The owner corrected all three, twice by quoting
+this file's own table back at it.
+
+The working rule that follows: when the instrument says something, write the
+sentence down verbatim first, restate what it implies in one line, and get that
+confirmed **before** any of it reaches a document. A test result is evidence;
+what it means is a claim, and the two were run together here three times.
+
+#### The experiment that is actually next
+
+Unchanged from the first correction: **stop keying by address.** A build where
+`lfo4_on_set` files by track index and `lfo4_refresh` reads by the same index
+takes the address out of the question.
+
+- reliable -> the address is the fault: the panel and the engine are naming the
+  same sound two different ways, and only the instrument's voice allocation can
+  tell them apart, which is why every emulator measurement agreed;
+- still erratic -> the fault is upstream of the key, in whether the panel's
+  write happens at all.
+
+Sixteen rows of eight `u16`: 256 bytes, no hashing, nothing that can be full,
+nothing to reclaim. Not a shipping design -- p-locks and sound-per-track need
+the address back -- but it answers the only question left standing.
+
+### Measure before bisecting again — `lfo4-meter`, 2026-09-22
+
+The track-index build above is still the right *fix-shaped* experiment, and it
+is not the right *next* one. Two things changed the order.
+
+#### tick7 already excludes the engine path, and it cost no flash
+
+`lfo4-tick7` passed on hardware on 2026-09-20 (§"tick7 passed on hardware"):
+the fourth LFO ran, **reliably**, each track reading its own row. It drove the
+identical two evaluator indices this build drives — `%a5` in evaluator A,
+`%d0` in evaluator B — through the identical stubs. The single difference
+between it and every build since is that tick7's sixteen rows were a **static
+table compiled into the image** and every build after it replaced them with
+`lfo4_refresh(track)`, which is a **lookup**.
+
+So the branch "the stubs stopped turning a row into sound" is closed by a
+result that was already written down, and with it the reading that the index
+handed to the stubs might be a *voice* number rather than a track number —
+1-in-16 voices would produce almost exactly the observed one-trig-in-fifteen,
+which is why it was worth checking, and tick7 refutes it outright. Kept here
+because a closed path is still a signal: if a later result ever contradicts
+tick7's, this is the first thing to re-open.
+
+What remains is the join: the key `lfo4_on_set` writes under, and the key
+`lfo4_refresh` asks under.
+
+#### Why a meter and not a fourth bisect
+
+`browser`, `keeprow` and `keepall` each answered one bit and cost one flash
+apiece. The numbers that would answer the whole question exist only on the
+instrument — the emulator runs neither the sequencer nor a pattern load, so it
+cannot be asked what key the panel wrote under while a pattern played — and
+there is no way to read a counter in BSS from the front panel.
+
+But LFO4's page is ours end to end: `csrc/lfo4/getter.c` decides what each of
+its eight columns displays. `scripts/build_lfo4_meter.py` builds `lfo4-browser`
+with three of them displaying the measurement instead of the value.
+
+| column | full right | full left | centre |
+|---|---|---|---|
+| `SPD` | the tick's last lookup **found** a row | it found nothing, and took the defaults | it has never looked |
+| `FADE` | the sound the knob wrote under **is** one of the sixteen the tick asks about | it is **not** — and that alone is the whole fault | — |
+| `DEP` | not a needle: the depth **the engine is holding right now**, out of `lfo4_rows` | | |
+
+Every reading is a needle at a stop or at centre and never a number to be
+interpreted, because nothing in `csrc/lfo4/meter.c` knows how a widget formats
+8.8 fixed point into the figure on the glass — and because §3 of the playbook
+applies to a measurement as much as to a demonstration. `MULT`, `DEST`,
+`WAVE`, `SPH` and `MODE` are untouched, so a destination can still be chosen
+and the LFO still runs while the three are read.
+
+**Only the display is diverted.** The knob still writes the table through
+`lfo4_on_set` and the save path still reads it through `ext_get`, so a metered
+build stores exactly what `lfo4-browser` stores. It is an instrument, not a
+candidate fix, and it is not meant to sound like anything.
+
+#### What each outcome sends next
+
+- `FADE` **left** — found it. The panel edits a sound the engine never asks
+  about, and the track-index build above becomes the fix rather than a probe.
+- `FADE` right, `SPD` flicking left while trigging — the keys agree and the
+  table loses the row at tick time; the search moves inside `ext_find` and to
+  what runs between the panel's write and the tick's read.
+- `FADE` right, `SPD` right, `DEP` holding the dialled value, and still no
+  modulation — then this result and tick7's disagree, and the engine path is
+  back on the table after all.
+- `DEP` **falling back to 0 on its own** — the bug happening, live, and
+  whatever the instrument was doing at that moment is what causes it.
+
+### The third `RND` site is not a literal triple — a null, 2026-09-22
+
+From the instrument, in the owner's words: *"in all fw, random shp behaves and
+at the top the legend with the value displays slew, but when not touching the
+knob the UI shows SPH under the waveform."*
+
+So two renderers disagree. The one that draws the big value at the top has the
+substitution — it names entry **326**, whose record is LFO3's `SLEW` copied —
+and the one that draws the column name under the waveform does not: it names
+entry **327**, `SPH`. Two sites were already found and patched this way
+(`DN2_RND_A_GATE`, `DN2_RND_B_GATE`); this is a third.
+
+`scan_lfo_triples.py` was run over stock 1.11 for all three literal families
+the first two were found by, and **every window it reports is one already
+patched**:
+
+| family | windows | where |
+|---|---|---|
+| 79 / 89 / 99 — the `WAVE` entries | 2 | `0x40036636`, `0x40036a80` — both patched |
+| 81 / 91 / 101 — the `SPH` entries | 1 | `0x4010db18` — the SLEW gate, patched |
+| 80 / 90 / 100 — the `SLEW` entries | 1 | `0x4029a5c2`, and it is **data**: a table of 0, 10, 20 … 120 disassembling as `moveq` |
+
+**So the third site does not name its LFO with a literal at all.** It reaches
+the column's name some other way — through the parameter record it already
+holds, or through a per-page index — which is why three passes of a scanner
+built for literals cannot see it and a fourth would not either.
+
+That makes the next step a **differential trace**, not another scan: draw
+LFO3's page and LFO4's page with `WAVE` set to `RND` and idle, record the basic
+blocks each enters, and walk *forward* from the first parting. It is the method
+that found the destination-browser gate after reading the image backwards from
+the browser had cost four disassemblies and reached a function that could only
+be guessed at. Queued behind the `lfo4-meter` gate — one machine.
+
+### `lfo4-meter2` on the instrument: the row is right — 2026-09-22
+
+The owner flashed `lfo4-meter2` and read the three columns on **track 5**,
+nothing else playing:
+
+| column | reading | means |
+|---|---|---|
+| `FADE` | 63 — and **LFO3's `FADE` at its stop also reads 63**, so 63 is confirmed as the needle's full travel | the sound the knob wrote under is one of the sixteen the tick asks about: **the keys agree** |
+| `DEP` | taken to **127.98** and it holds, no snap-back | the engine's row for that track carries `0x7ffe`, full depth |
+| `SPD` | **−64** with `DEST` at `None`; **−38** at `Ratio C`; **−32** at `Mix`; **−40** at `Mod3 Depth` | the row's `DEST`, and every one of the four is exact |
+
+**The scale was confirmed against the record table rather than assumed**, which
+is what makes this a measurement: `SPD` displays `slot − 64`, and
+
+| shown | implied slot | record at that slot |
+|---|---|---|
+| −64 | 0 | no destination |
+| −38 | 26 | `SYN Ratio C` (index 200) |
+| −32 | 32 | `SYN Mix` (index 206) |
+| −40 | 24 | `LFO3 Depth` (index 102) |
+
+Four readings, four exact matches, including one — `Mod3 Depth` → LFO3's own
+`Depth` — that nothing in the build could have produced by accident.
+
+**So the row the engine holds is complete and correct**: the right key, the
+exact destination slot chosen on the panel, and full depth. The remaining
+inputs are the ones nobody set, and they were measured too: `lfo4_init` seeds
+`ext_default` from LFO3's own records through `POSITION = {0,1,2,3,4,6,7,8}`,
+giving `SPD` 0x7000 (112), `MULT` 0x0300, `FADE` 0x4000 (no fade), `WAVE` 0
+(triangle), `MODE` 0. That is a working LFO, not a stalled one.
+
+#### What has not been controlled, and it should have been first
+
+**No control was run beside the negative.** All three destinations tried are
+ones whose silence is explicable without any fault in LFO4:
+
+- `Ratio C` is machine-dependent — slot 26 is `Ratio C` only in group 0, and
+  the same slot is `Osc1 Waveform`, `Sweep Time` and `Swarm Detune` in groups
+  1, 2 and 3 (§4b's colliding slot spaces, seen from the other end);
+- `Mod3 Depth` is LFO3's own depth, which does nothing audible unless LFO3 is
+  itself set up and aimed somewhere;
+- and the evaluator **clamps the cell to `0..0x7f00`**, so a destination
+  already sitting at an end of its range absorbs a modulation pushing it
+  further that way. `Filter Frequency`'s record default is `0x7f00` — fully
+  open — which is exactly that trap.
+
+So the next step is not another build. It is `Filter Frequency` (**slot 67**,
+so `SPD` must read **+3.00**), the destination parameter set mid-range, and
+**LFO3 configured identically on the same track as the control**. Two outcomes
+and they are clean:
+
+- LFO3 sweeps and LFO4 does not — the engine has a correct row and does nothing
+  with it, which contradicts `tick7` and puts the evaluator stubs back on the
+  table;
+- neither sweeps — the destination was inert and every negative result today
+  was measuring silence that had nothing to do with LFO4.
+
+### The emulator sweeps where the instrument does not — 2026-09-23
+
+`scripts/emu_lfo4_sweep.py`, pointed at **the instrument's own configuration**
+— track 5, slot 67 `Filter Frequency`, `DEP` at maximum — driving evaluator A
+directly for 120 frames:
+
+```
+  the live sound for track 5 is 0x4210d2ec; watching slot 67 every frame
+  no state backup:            119 change(s), turns round, 1 of 120 frame(s) at its maximum 0x5ffe
+  asking for a state backup:  119 change(s), turns round, 1 of 120 frame(s) at its maximum 0x5ffe
+  span 0x4051..0x5ffe, 120 distinct values over 120 frames
+```
+
+**A clean oscillation, and four readings fall out of it:**
+
+| | |
+|---|---|
+| it moves every frame and **turns round** | not a ramp into the clamp; the phase advances on its own, unprompted |
+| **1** frame of 120 at the maximum | not saturation — the earlier worry about `DEP` at full depth does not apply on this destination |
+| the two trajectories are **byte-identical** | the state backup and restore are not involved. That hypothesis is closed, and it was the one `emu_lfo4_sweep.py` was written to test |
+| track **5**, slot **67** | not the track, and not the destination |
+
+**So every part of the chain works when the evaluator is driven directly**, on
+exactly the configuration that is silent on the instrument.
+
+#### What the emulator has never run, and it is the whole remaining space
+
+This harness calls evaluator A 120 times in a row itself. It does not run the
+sequencer, it does not allocate a voice, and **it never performs a note-on**.
+Neither has any other probe: `emu_lfo4_trig.py` pressed a trig key and produced
+no sound copy at all, which said the harness never reached the path rather than
+that the path was innocent.
+
+And the instrument's report has been about note-on from the first sentence:
+binary per note, decided at note-on, sustained while the trig is held, more
+frequent the faster the trig is re-pressed. Every hypothesis that did not
+involve note-on has now been closed — removal (to be re-asked with a control),
+the key, the row's contents, the destination, the track, the clamp, the fade,
+the per-LFO flags, the state backup, the per-track strides.
+
+**The next instrument is the note-on routine, called directly**, the way
+`docs/instruments.md` says to reach what the sequencer will not run for us.
+Finding it is the work: what runs when a trig fires that could decide whether
+the fourth LFO's contribution survives, when the first three always do.
+
+#### The LFO state arrays are touched from nowhere else — 2026-09-23
+
+Before looking for a note-on routine that resets LFO phase, it was worth asking
+whether one can exist. Every 32-bit reference in the stock image to the three
+state array bases, and every value landing *inside* one of their 1,920-byte
+spans, was listed and checked against the built image:
+
+| reference | at | in the build |
+|---|---|---|
+| `STOCK_LIVE` | `0x40137342`, `0x40137742`, `0x40137760`, `0x401377f4` | patched |
+| `STOCK_LIVE+37` | `0x401372fe` | patched |
+| `STOCK_SECOND` | `0x40137396`, `0x40137428` | patched |
+| `STOCK_SECOND+37/+38/+80` | `0x40137352`, `0x401373ba`, `0x40137420` | patched |
+| `STOCK_BACKUP` | `0x40137748`, `0x4013780e` | patched |
+
+Three further hits read "still stock" and none is real: `0x401373c0` is the
+flag sweep's end bound, which is **dead code** behind the `jmp` that replaces
+the routine at `0x401373b8`; and `0x40236fbe`, `0x4024c07e`, `0x4026b36e` are
+2-byte-aligned windows in data that happen to fall inside a 1,920-wide range.
+
+**So every reference is inside `0x40137342..0x4013780e` — the two evaluators
+and their initialisers, and nothing else in three megabytes.** The firmware has
+no other code that can reach an LFO's phase. A note-on cannot be resetting LFO
+state directly, because there is nowhere for it to do so from.
+
+That leaves one route by which anything outside the evaluators can affect an
+LFO: **the per-record enable byte at `+38`**, the one the flag sweep sets.
+
+#### Who calls the flag sweep
+
+`0x401373b8` has **one** direct caller: `0x4012b6f4`, inside the function at
+`0x4012a89a` — and the boot log names `0x4012a9a8` as the entry of a
+**priority-8 task** created at `0x4012b892`. The call sits behind a dispatch:
+
+```
+4012b6ec  moveq #5,%d1
+4012b6ee  cmpl  %d0,%d1
+4012b6f0  bnew  0x4012b50c
+4012b6f4  jsr   0x401373b8        ; the flag sweep
+4012b6fa  clrl  %d2
+```
+
+So the sweep runs when that task receives **command 5**, and it is the only way
+the enable byte is ever set. The next questions, in order, and all of them
+static:
+
+1. what is command 5, and what sends it;
+2. where the evaluator **reads** `+38`, and whether it clears it — an enable
+   that is consumed once would be per-note by construction;
+3. whether our `flags` stub sets the fourth record's byte at the moment stock
+   sets the first three, or a frame later.
+
+`csrc/lfo4/`'s stub writes `+0/+40/+80/+120` and strides 160 where stock wrote
+`+0/+40/+80` and strode 120, which is arithmetically right. Being right about
+*where* is not the same as being right about *when*, and (2) is where that
+distinction would show.
+
+### The removal branch, closed properly this time — 2026-09-23
+
+`lfo4-meterkeep` was flashed: `lfo4-meter3` plus `LFO4_KEEP_ROWS` **and**
+`LFO4_KEEP_ALL`, so no copy, no clear and no load can drop a row. The owner ran
+it with the stage visible and, for the first time on this question, **with a
+control**:
+
+> "Still now and then" — and, asked directly whether the control worked,
+> **"Yeah LFO 3 swept normally."**
+
+**So removal is not the cause.** That is what was written down on 2026-09-22
+after `browser`, `keeprow` and `keepall`, and it was written down on evidence
+that could not carry it — three negatives taken with no control, an inert
+destination possible, the clamp uncontrolled and fade uncontrolled. The
+conclusion survives; the reasoning behind it is now sound, which is a different
+thing and the only reason to have spent the flash.
+
+**Every earlier reading stays in this file, marked.** A closed path is still a
+signal, and the shape of closing one badly is worth more than a tidy page.
+
+#### What is measured, and why it does not add up to silence
+
+| | measured how |
+|---|---|
+| the row the engine holds is **correct and continuously present** | `lfo4-meter2`/`meter3` on the glass: `SPD` = the row's `DEST` (four exact matches against the record table), `DEP` = the row's depth |
+| **nothing removes it** | `lfo4-meterkeep`, all four drop paths off, with LFO3 as the control |
+| the evaluator turns that row into a clean oscillation | `emu_lfo4_sweep.py` on track 5 into slot 67: 119 changes over 120 frames, turns round, 1 frame of 120 at the ceiling |
+| the panel's key and the engine's key agree | the `FADE` needle, before it was handed back |
+| LFO1-3 do the identical thing through the identical code | LFO3 sweeps, every time, on the same track and destination |
+
+And still: **binary per note, decided at note-on, sustained while the trig is
+held, more frequent the faster it is re-pressed.**
+
+#### The one path no probe has ever run
+
+Every harness in `scripts/` drives **evaluator A directly**. None allocates a
+voice; none performs a note-on. `emu_lfo4_trig.py` pressed a trig key and
+produced no sound copy at all — a null that said the harness never reached the
+path, not that the path was innocent.
+
+Closed by measurement, in the order they fell: the key; the row's contents; the
+destination; the track index; the mirror clamp; fade; the per-LFO enable flag
+sweep; the state backup and restore strides; the per-track pointer advances;
+and now removal. **What is left is note-on, and it is where the instrument's
+report has pointed from the first sentence.**
+
+Next: find the note-on routine and call it directly, the way
+`docs/instruments.md` says to reach what the sequencer will not run for us, and
+watch `mirror[track][67]` across a note-on rather than across frames. The
+question to answer is whether a voice samples the mirror at a moment when
+LFO4's contribution is present — and if so, why LFO1-3's always is.
+
+### Page copy/paste does not carry LFO4 — an unbuilt feature, 2026-09-23
+
+From the instrument:
+
+> "I could not use the device Copy/Paste function to paste LFO4 to LFO3 and
+> save some setup time" — "it just did nothing at pasting (it would say that it
+> was copying LFO4 though)"
+
+**The copy is recognised and the paste is empty**, which is the signature of a
+path that reaches LFO4's *page* but not LFO4's *values*.
+
+#### Why, and it is not a bug in anything that was built
+
+LFO4's eight values are **not in the sound.** §8's whole design is that a live
+sound has no free slots and cannot grow, so they live in `ext_val`, a side
+table keyed by the live sound's address. Everything that has to carry them has
+had to be taught, one path at a time and each one named in this file:
+
+| path | taught by |
+|---|---|
+| a knob turn | `csrc/lfo4/setter.c` |
+| a page read | `csrc/lfo4/getter.c` |
+| save and load | `csrc/lfo4/store.c` |
+| whole-sound copy, clear, and block moves | `csrc/lfo4/carry.c` |
+| the tick | `csrc/lfo4/bridge.c` |
+
+**A parameter-page copy is none of those.** It copies one page's slots within
+or between sounds, and the classes are there in the RTTI — `ParamPageCopy`
+(`0x40214f62`, typeinfo at `0x401dcdbc`), `PageCopy` (`0x4021584b`,
+`0x401de750`), `ModulationCopy` (`0x4021e80c`, `0x401ffc24`). Nothing in
+`csrc/lfo4/` hooks any of them, so the copy buffer gets whatever the stock
+accessor returns for slots 101..108 — and every stock accessor is bounded at
+100. It copies nothing and pastes nothing. The page name comes from the page
+record, which is ours and correct, which is exactly why the message says
+"LFO4".
+
+#### The owner's hypothesis, and why it is a real confound but not the cause
+
+> "It is maybe because some of the elements are not configured in a standard
+> way, like SPD"
+
+**Right to raise, and it matters for any copy test run on a meter build.**
+`lfo4-meter`, `meter2`, `meter3` and `meterkeep` all divert `SPD`'s and `DEP`'s
+*display* through `lfo4_on_get` — and `lfo4_on_get` is the diverted read at
+`0x4003717c`. If a copy path reads values through that same accessor, a copy
+taken on a meter build would capture the **needle**, not the setting. So a
+copy/paste test on any meter build is contaminated regardless.
+
+It is not the cause, though, because the fault would then be a *wrong* paste,
+not an empty one. An empty paste says the values never entered the buffer.
+
+**How to tell them apart if it ever matters:** repeat the test on
+`lfo4-browser`, which diverts no display. Prediction, stated before the test:
+**still empty**, because the feature does not exist. If it pastes correctly on
+`browser`, this entry is wrong and the meter builds broke something.
+
+#### What building it would cost
+
+Symmetrical with `store.c`, and probably the same shape: find where the page
+copy gathers a page's values and where the paste writes them, check whether
+either carries the familiar six-byte `moveq #100` bound, and divert it the way
+the setter and getter already are. Two hooks and two small functions if the
+bound is there; more if the page copy walks a slot list instead.
+
+**Not urgent, and worth knowing it is missing**: it costs the owner setup time
+on every test, and it is the kind of gap that makes a finished feature feel
+unfinished. Added to the punch list beside the two already standing — LFO4's
+settings not surviving a power cycle (`lfo4_on_load`'s drop), and the `RND`
+column's third site.
+
+### LFO3 and LFO4 are byte-identical in the evaluator — 2026-09-23
+
+`scripts/emu_lfo4_vs_lfo3.py`. Both LFOs configured identically except for the
+destination — LFO3 through the mirror at slots 17..24 where the firmware puts
+its parameters, LFO4 through `ext_set` where ours live — same track, same
+frame, 240 frames:
+
+```
+  LFO3 (firmware's own parameters): [16389, 16395, 16400, 16406, 16411, ...]
+      240 distinct, 239 change(s) over 240, span 0x4005..0x452f
+  LFO4 (ours, through ext_set)     : [16389, 16395, 16400, 16406, 16411, ...]
+      240 distinct, 239 change(s) over 240, span 0x4005..0x452f
+  ratio 1.00, same character
+```
+
+**Not similar — identical.** Same values in the same order, same span, same
+count of changes. Given identical parameters and a zeroed phase that is the
+correct answer, and it is the first time LFO4's behaviour has been measured
+*against something*.
+
+**This existed to correct a flaw in the earlier evidence.** `emu_lfo4_sweep.py`
+drove LFO4 alone: its mirror is refilled with the resting `0x4000` every frame,
+which leaves LFO1-3 with a `DEST` byte of `0x40` and a depth of exactly centre,
+so they contribute nothing and there was nothing for LFO4's trajectory to be
+wrong against. A trajectory with no control is the same mistake as a hardware
+negative with no control, which this project made three times in one evening on
+2026-09-22. It is now made zero times in software.
+
+**So the evaluator is exonerated with a control, not by assertion.** The row is
+right, nothing removes it, and the code that turns it into modulation treats it
+exactly as it treats LFO3's. Every difference that could be measured frame by
+frame has been measured and there is none.
+
+What remains is the thing no harness in `scripts/` has ever run: **note-on.**
+The instrument's report has named it from the first sentence — binary per note,
+decided at note-on, sustained while the trig is held, more frequent the faster
+it is re-pressed — and it is now the only place left for the difference to be.
+
+### LFO4 reaches the mirror, proved by manipulation — 2026-09-23
+
+`lfo4-cell` puts two live mirror cells on LFO4's page: `SPD` shows the cell
+LFO4 aims at, `DEP` the cell LFO3 aims at, read straight out of
+`0x800068e4 + 34 + 202*track + 2*slot`. From the instrument:
+
+> "DEP and SPD are moving and I can affect how SPD moves (the interval between
+> jumps) by changing MULT. Interestingly the higher MULT is I start seeing not
+> only jumps but also smooth sweeps in certain cases."
+
+**Both cells move, and LFO4's own `MULT` changes the rate of LFO4's cell.**
+That is causation established by manipulation, not a correlation: the only
+thing `MULT` touches is LFO4's own oscillator, so whatever is writing that cell
+*is* LFO4.
+
+The smooth sweeps at high `MULT` are the expected artefact of sampling a fast
+oscillator at the ~30 fps the page redraws — aliasing, which only appears if the
+cell is genuinely oscillating fast. It corroborates rather than complicates.
+
+**So the whole control path is now proved end to end on the instrument:** the
+panel writes the table, the table is keyed so the tick finds it, the tick fills
+the row, the evaluator turns the row into a contribution, and **the
+contribution lands in the mirror cell the destination names**. Every one of
+those was a candidate at some point in this file and every one is now closed by
+measurement, most of them with a control beside them.
+
+#### And the fault survives all of it
+
+The instrument still reports one trig in fifteen, while LFO3 — writing the same
+kind of contribution into the same mirror, from the same evaluator, in the same
+frame — sweeps every time.
+
+That is a harder statement than anything earlier in this file, because the two
+now differ in **nothing that has been measured**. What is left is between the
+mirror cell and the sound: whether a voice reads that cell at all for LFO4's
+destination, and why it always does for LFO3's.
+
+**The first thing to check is the cheapest and it needs no build.** Both LFOs
+have been aimed at *different* destinations so the two columns could be read
+apart. That also means the two have never been compared **on the same
+destination**, where the only difference left is which LFO produced the
+contribution:
+
+- put LFO3 and LFO4 both on `Filter Frequency`;
+- turn LFO3's depth to centre so only LFO4 contributes;
+- listen, and watch `SPD`.
+
+A moving cell with no sound says the voice does not read what LFO4 wrote. A
+moving cell **with** sound says the modulation works and the intermittency is
+about something other than delivery — in which case the "one in fifteen" is
+about *which* notes hear a cell that is always moving, and the question becomes
+what a trig does to the voice's parameter fetch.
+
+#### The contradiction, stated exactly — 2026-09-23
+
+The same-destination test was run with the control asked for and confirmed:
+
+> "so they move. And the LFO4 effect is present as always by chance every ~15
+> trig pushes. ... at MULT = 32 both dials move synchronously all the way
+> clockwise and then when they reach certain point they sweep back
+> counterclockwise to a symmetric position and then they repeat"
+
+and, asked directly whether LFO3's depth was at centre: **"yes"**.
+
+Both columns read the same cell in this test, which is why they moved together —
+that part is construction, not a finding. The finding is what was in the cell:
+
+| | |
+|---|---|
+| LFO3's depth was at **centre**, so it contributed nothing | the control |
+| the cell swept a **full triangle**, clockwise and back to a symmetric point, repeating | so **LFO4 alone** was writing it, which the earlier `MULT` manipulation already established |
+| **the filter did not move**, except the usual one trig in fifteen | |
+
+**A cell that traces a triangle is a parameter being modulated.** If the voice
+read that cell, the cutoff would sweep continuously and audibly. It does not.
+
+**So the memory the page reads and the memory the voice reads are not the same
+thing, or not always.** That is the first asymmetry in this entire
+investigation that LFO1-3 and LFO4 do not share, and it cannot be reconciled
+with "LFO4 writes the mirror correctly" — both are measured, and both stand.
+
+Two readings survive it, and they are distinguishable:
+
+1. **There is more than one buffer.** The page reads `0x800068e4 + 34 + 202*track`
+   directly; the evaluator writes through `%a0`, loaded from `%sp@(52)` — an
+   argument its caller supplies. Nothing has ever checked that those are the
+   same address on the instrument. The emulator cannot say, because the harness
+   *passes* that argument itself.
+2. **The voice reads it only under a condition** that LFO1-3 always satisfy and
+   LFO4 satisfies about one note in fifteen.
+
+**The test that separates them costs nothing and is a manipulation, not an
+observation.** Put LFO3 on the same destination with its depth **up**, so its
+sweep is plainly audible, then raise and lower LFO4's depth:
+
+- if the audible sweep **changes** — deeper, or a different shape — then LFO4's
+  contribution is in the cell the voice reads, and reading (2) is the live one;
+- if the audible sweep is **untouched** by LFO4's depth while `SPD` shows the
+  cell moving, the two buffers are different memory, and reading (1) is it.
+
+Reading (1) would also explain the whole history at a stroke: the panel, the
+table, the key, the row and the evaluator are all correct — as measured — and
+the contribution is simply being written somewhere the sound does not come
+from.
+
+#### The two-buffer lead collapsed — 2026-09-23
+
+Recorded because a dead lead is a signal, and because it failed in two ways
+this file has warned about before.
+
+**The claim was:** the evaluator's mirror base is loaded from a pointer at
+`0x4058f39c` (`moveal 0x4058f39c,%a2` at `0x40027120`) while
+`csrc/lfo4/meter.c` reads the constant `0x800068e4`, so the two might be
+different memory and a fixed-address reader would see a sweep the voice never
+hears.
+
+**It is wrong twice.**
+
+1. **`0x4058f39c` is not a pointer, it is a counter.** Every reference to it in
+   the image is three instructions apart and says so:
+   `movel 0x4058f39c,%d0 ; addql #1,%d0 ; moveq #31,%d1 ; andl %d0,%d1 ;
+   movel %d1,0x4058f39c` — `(x + 1) & 31`. The load at `0x40027120` copies it
+   straight into `%d5` and leaves `%a2` free. This is the `movea.l` trap in
+   `docs/instruments.md`, third time: **`movea.l` does not prove a pointer.**
+2. **The probe that "confirmed" it measured nothing.** `emu_mirror_base.py`
+   read `0x00000000` and reported "the evaluator and the page are not looking
+   at the same mirror". A base of zero would break LFO1-3 as well, so the value
+   was never the live one — the snapshot had not run whatever sets it. Its own
+   guard said "frame handler entered 64 time(s)", which counted the harness's
+   loop rather than real entries. **A null is only evidence once the input is
+   known to arrive**, and this probe asserted the guard without implementing it.
+
+**What is actually there:** `%a2` is set at `0x40027194` from `%d0`, the return
+of `jsr 0x400db12a` — the routine that holds `lea 0x800068e4,%a2` internally
+and which `fxblock16` already proved reaches the DSP. So the evaluator's mirror
+is derived from the same `0x800068e4` the page reads, and the two-buffer
+reading has no support. Reading it further stalls: the decoder reports
+"Address 0x400db166 is out of bounds" inside that routine, and chasing a return
+value through an undecodable span by eye is the chase
+`docs/FEATURE-PLAYBOOK.md` §2.4 exists to stop.
+
+**So the contradiction stands unexplained**: LFO4's cell sweeps, driven by LFO4
+alone with LFO3's depth at centre, and the filter does not move.
+
+The cheapest remaining discriminator is still the one on the instrument, and it
+is a manipulation rather than an observation: put LFO3 on the same destination
+with its depth **up** so its sweep is audible, then raise and lower **LFO4's**
+depth. If the audible sweep changes, both contributions are in the cell the
+voice reads and the question becomes why one of them is usually inaudible; if
+it does not change while `SPD` still shows movement, they are different memory
+after all and the search resumes with that established rather than guessed.

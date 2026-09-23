@@ -505,3 +505,43 @@ land 99.0% of the spans between known instruction starts, and a late-start
 control lands 94.9%. It produced two decode-table fixes, now upstream as
 `m-dwyer/digikit#31`. Its disassembly reassembles byte-identically for only
 83.9% of encodings, so patches are written as source. Built in WSL; not vendored.
+
+---
+
+## `Bezronczek/syntakt-firmware-workbench` — the first project to cite *us*
+
+<https://github.com/Bezronczek/syntakt-firmware-workbench>, by Bezronczek.
+**MIT** — the LICENSE's scope is stated narrowly in the README: *"The license
+covers the code and text in this repository only."* Added 2026-09-22 by the
+owner.
+
+A browser-only workbench that inserts **custom single-cycle waveforms into the
+Syntakt's `SY CHORD` machine**. Plain HTML/CSS/JavaScript with no external
+dependencies, a Node test suite under `web/test/`, and a small Windows MIDI
+loopback utility in `tools/`. It targets **Syntakt OS 1.41 and nothing else**,
+and refuses any other version rather than patch blind. The author reports
+hardware verification: waveform output within 1% and the screen rendering
+checked on the device.
+
+**It names this project as its model**, which is the first time our own
+published work has come back as somebody else's reference:
+
+> "[dn2_firmware_explore](https://angellinares.github.io/dn2_firmware_explore/)
+> — the model for a browser-only tool that works on the owner's own file."
+
+It credits `elektron-firmware-tool` beside us, which is the same format
+groundwork this repository ports from, so the three projects share a lineage.
+
+### Why it is worth tracking, beyond the citation
+
+| what it is evidence of | why that matters here |
+|---|---|
+| a **third** Elektron platform (Syntakt) opened by an outsider, on a machine-by-machine basis | the `SY CHORD` waveform table is the Syntakt's analogue of our LFO wavetable work; a second implementation of the same idea is a free cross-check |
+| the **browser-only, own-file** shape working for someone else | the page's stance — the owner supplies their own firmware, nothing is redistributed — is not just our preference, it travels |
+| a **version-locked refusal** rather than a best-effort patch | the same rule as our `STOCK_SHA256` guard, arrived at independently |
+
+**Nothing to port yet and no claim staked.** The MIT grant means porting stays
+open if a case appears; recorded here so that decision starts from the licence.
+Its firmware findings are the author's, on a device we do not have, so they are
+cited in our own words if they are ever used — the same rule as the lalzart
+notes.
