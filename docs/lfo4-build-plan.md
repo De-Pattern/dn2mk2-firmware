@@ -5085,3 +5085,51 @@ Four failures today share one shape, and it is not "static reads are risky":
 **Every one was a comparison where one side was controlled and the other
 assumed.** The measurements were fine. Write the control for the arm you are
 *not* thinking about.
+
+### The harness question, answered — and both my explanations were wrong
+
+`scripts/emu_call_after_panel.py`, two arms, controls on both:
+
+```
+before panel:  stub -> 42                        lfo4_sound_of(0) -> 0x4210c0c0  OK
+after  panel:  lfo4_sound_of(0) FIRST -> 0x4210c0c0  OK
+               stub bytes 702a4e75 (intact)      stub -> 0x4210c0c0  STALE
+               the function's own 64 code bytes: unchanged
+```
+
+| candidate | verdict |
+|---|---|
+| the UI clobbers the build's code region | **dead** — 64 bytes byte-identical |
+| the first call after the panel does not run | **dead** — called first, answered correctly |
+| `m.alloc` scratch is overwritten | **dead** — `702a4e75` still there |
+
+**What is true: the loaded code region stays callable across panel driving, and
+`m.alloc` scratch does not.** The stub's bytes are intact, the call mechanism
+demonstrably works in the same breath, and yet executing the stub leaves `%d0`
+holding the *previous* call's result — `emu_start` did not run it. The cause is
+unmeasured. The rule does not depend on knowing it:
+
+> **After driving the panel, call only into the build's loaded code region.
+> Never into `m.alloc` scratch, and never trust a returned value that equals the
+> previous call's.**
+
+That last clause is the cheap guard: a stale `%d0` is indistinguishable from an
+answer, which is how `emu_lfo4_uikey.py` turned an `8` into a discovery.
+
+**And this closes the LFO4 code region as a suspect.** The region is intact
+after the UI runs, so "the firmware's heap grows into `0x46800000` and corrupts
+the row table" — which would have predicted the 1-in-15 exactly — is not
+supported by anything measured. Written down because it was an attractive
+theory and it should not be re-derived later as though it were new.
+
+### Where this leaves the contradiction, honestly
+
+Every probe built today runs on a snapshot that **has already booted and never
+plays a note**. `docs/instruments.md` says so in as many words. The remaining
+explanations for the 1-in-15 all live at note-on, and no offline harness here
+can reach it.
+
+**So the next measurement is on the instrument and it costs two knob turns and
+no flash** — see `00_Notes/.../Firmware test plan.md`, the LFO3-beside-LFO4
+depth test. It discriminates between the two surviving families where nothing
+offline does.
