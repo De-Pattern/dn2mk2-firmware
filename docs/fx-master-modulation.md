@@ -2090,6 +2090,81 @@ history; and five slots of that project carry a nonsense version word (two read
 slots rather than a format -- **but if 1.11 ever writes a version 5, that is
 ours to confirm and DNX wants to know.**
 
+### The loader clears the record: `track = 16` is dead, and 106 is confirmed twice — 2026-09-23
+
+The section above ends by naming the risk the corpus could not settle: whether a
+`track = 16` record ever reaches the applier. **It does not. The loader clears
+it before the applier can see it.** DNX measured it on the owner's instrument,
+with the owner's explicit authorisation given in DNX's own session, and the
+write-up and both images are at
+`dn_sysex/99_HardwareTest/dn2-fxlock-2026-09-23/track16-probe-findings.md`.
+
+The design is worth repeating because it is the part we got right by accident of
+argument: a write-and-read-back through the +Drive would have come back clean
+and we would both have believed `track = 16` was allowed. The loader only runs
+on a **load**, so the project was written to an empty slot, loaded on the front
+panel, saved, and read back.
+
+Two probes, one unusual field each:
+
+| record | id | track | step | value | probes |
+|---|---|---|---|---|---|
+| 8 | 92 (`CHR`, known-good) | **16** | 1 | 100 | the track byte |
+| 9 | **110** (above the ceiling) | 5 | 2 | 101 | the id byte |
+
+**Both were cleared.** 8 bytes differ in 12,890,116 — four are the two probe
+headers, four are the project id.
+
+```
+0x84f044   id  92 -> 255    G2 lock record 8, header
+0x84f045   track 16 -> 255
+0x84f146   id 110 -> 255    G2 lock record 9, header
+0x84f147   track  5 -> 255
+```
+
+**Verified here, independently, from DNX's readback image:** at both addresses
+the header reads `ffff`, and the 256 value bytes of each rejected record carry
+exactly the payloads that were sent — `100` and `101`, still there beside the
+zeros. So the rejection really is *mark unused*, not *wipe*: the loader frees
+the slot using the format's ordinary `0xFFFF` marker and leaves the values
+behind it untouched.
+
+**Not verified here, and left as DNX's:** that the owner's eight FX-send records
+survived byte-identical. That claim is what makes this selective rather than a
+normalisation pass, and it is the load-bearing one. Reproducing it needs the
+crafted image, which is not in the artefact folder as a raw `.bin`, and my own
+attempt to walk the table geometry from the two known record addresses (stride
+`0x102`, base = record 8 − 8·stride) landed on records that read `ffff` in both
+files — so my base is wrong, which is a fact about my arithmetic and not about
+DNX's result. Asked back rather than assumed.
+
+### What it costs us
+
+**`track = 16` cannot be the key.** The applier arithmetic that made it
+attractive — `101·track + 17` landing on the FX/Master mirror block with no
+change at all — is still true and still unmeasured at `0x400db092`, and it no
+longer matters, because the record does not survive to reach it. A design keyed
+on `track = 16` needs a **third** edit site: the loader's validation, on top of
+relocating the inverse map and diverting the applier.
+
+**106 is structural, now by two methods with no shared assumption.** Our inverse
+map at `0x401fd0b0` covers ids 0..106 and index 107 is already a pointer
+(`0x4020ef38`); a device clears id 110 on sight. Either alone would be a reading;
+together they are a measurement, and both should be cited.
+
+**What is not yet read, and is now the blocking question:** *what* the loader
+checks. If it is a simple `track < 16` and `id <= 106`, both are two-byte
+constants and in reach of the technique `build_lfo4_table.py` already uses. If
+the check is a table lookup or a range derived from something else, it is not.
+That is a static read on our side and nobody else can do it.
+
+**One loose end, labelled a hypothesis by DNX and carried as one here:** the
+device re-minted the project id on save, where `dn2-format.md` §2 recorded the
+opposite in July. `TRACK16PROBE` was built from `TEST_FX_LOCK` and carried an id
+already present in slot 9, so the plausible reading is that it mints on finding
+a duplicate rather than on every save. Untested; one save of a project with a
+unique id would settle it, and it costs a device write nobody has asked for.
+
 ## 24. Exposed to users: `fxmod`, the mod and the page — 2026-09-23
 
 The feature worked on the instrument and existed only as a build script that
