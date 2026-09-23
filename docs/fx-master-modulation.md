@@ -1802,8 +1802,9 @@ array at `0x42432f20` holds `[123, 124, 125, 126, 127, 128, 0, 0, 130]` in
 **stock**. A header that resolves its title by indexing one of those lists and
 landing on a zero slot gets entry 0, and entry 0's short name is `ERR`.
 
-**That would be a pre-existing gap newly exposed, not damage** — which is the
-answer this section can support, and it is not yet proven.
+~~**That would be a pre-existing gap newly exposed, not damage**~~ —
+**REFUTED by the instrument, see §22.** Reverb and Delay draw `REV` and `DEL`
+correctly, with the *same* zero-padded descriptors this paragraph blames.
 
 ### What is not established, and the one question that settles it
 
@@ -1826,3 +1827,66 @@ which is the chase §18 already paid for once.
 No build was made for this and **no gates were run, because nothing was built**.
 The destinations work; the header is polish. The next step is one observation,
 not a patch.
+
+## 22. The `ERR` header: the zero-padding reading is refuted, and four leads are dead
+
+Asked whether Delay and Reverb also draw `ERR`:
+
+> "no, they show their correct short names (REV and DEL). That's why I reported
+> chorus only."
+
+**So §21's reading is wrong.** It said no FX section header had ever been drawn
+and blamed the zero-padded page descriptors. Two of the three draw correctly,
+with the same zero padding.
+
+### Why it failed, because the failure is the reusable part
+
+It **explained Chorus without predicting Delay and Reverb** — and the prediction
+was available to ask for. §21 even wrote down that the two cases needed
+different fixes and that one look would tell them apart, then offered a
+mechanism that only covered one of them. A hypothesis that accounts for the
+symptom you have, and says nothing about the cases you have not checked, has not
+been tested by the symptom; it has been *fitted* to it. The discipline is the
+same one `docs/PRINCIPLES.md` §19 asks for on negatives: say what the
+explanation predicts elsewhere, then go and look.
+
+### What is now measured, and what it kills
+
+| lead | measurement | verdict |
+|---|---|---|
+| the `+44` edit damaged something | eight of `+44`'s nine consumers read **bits 16–18 only**; `0x1e00` sets bits 9–12 and leaves 16–18 at zero, so all eight return what they returned before, bit for bit | **exonerated, and this stands** |
+| Chorus's header record was left out | entries 111 `CHR`, 120 `DEL`, 129 `REV` all carry `0x1e00` in `fxbrowser2`, 111 included | **dead** |
+| the header records differ somehow | all three are structurally **identical** — handler `0x400e2ecc`, same word 1, range `0x7f00`, no NRPN, `+44` = 0 in stock. Only group, slot, default and word 10 differ, as they must | **dead** |
+| the page descriptors differ | Chorus's entry list is `[105,106,107,108,0,0,109,110,112]`, Reverb's is `[123,124,125,126,127,128,0,0,130]` — both zero-padded, both excluding the `<Group> Mix Vol.` record. Symmetric | **dead** |
+| the stock `Mix Volume` asymmetry — 112 has `+44` = 0 where 121 and 130 have `0x1e00` | real in **stock**, and **erased by this build**: `fxbrowser2` sets 112 to `0x1e00`, so in the built image all three groups have a capable `Mix Volume` record | **cannot explain a difference in the build** |
+
+That last row is the one that matters and it is a logical point rather than a
+new scan. The asymmetry the build was suspected of exploiting is an asymmetry the
+build **removes**. For it to still be the cause, the header path would have to
+read something cached from a source the record edit does not reach, and there is
+no evidence of such a cache — the records are in the section and are read from
+the patched image at boot.
+
+### The accurate open defect
+
+**The Chorus section header in the destination modal draws `ERR`; Delay and
+Reverb draw `DEL` and `REV`. The cause is not known.** What has been ruled out is
+above. What has not been found is **what the modal calls to name a section**:
+the string objects the display-list builder at `0x40106502` hands to
+`0x401170d8` are constructed *before* the per-entry loop, so the per-group text
+must arrive either through `0x4019d140` or through the header object's own
+construction, and neither has been read.
+
+**Next instrument, named rather than run:** digikit's `tools/addrtrace.py` on
+`0x401170d8`, which reports hit counts and registers at first hit **by running**
+— the arguments at the moment a header is built are the answer, and reading more
+disassembly is what the last three leads cost. That needs a panel event this
+harness cannot yet produce, so it waits for a harness that can drive the modal.
+
+### Why it stops here
+
+The destinations work. This is the label above them, it changes no sound, and it
+has already consumed three hypotheses. An accurate open defect is worth more
+than a fourth guess, and a speculative fix would cost the owner a flash on
+something cosmetic. **No build was made and no gates were run, because nothing
+was built.**
