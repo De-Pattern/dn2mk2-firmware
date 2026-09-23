@@ -296,6 +296,15 @@ words:
 - That id space is neither the mirror slot space nor the FX set slot space. The
   per-track FX sends are lock ids 92/93/94 and mirror slots 88/86/87; nothing
   lines up.
+- **CORRECTED 2026-09-23, by DNX, and the correction narrows the problem.** The
+  line below said twelve FX controls locked on the device produced no lock
+  record. Those twelve were **not** FX controls -- they are `NOTE`, `VEL`,
+  `LEN`, `PROB`, `COND`, `FILL`, `RTRG`, `VFAD`, `RATE`, `LFO.T` and `FLT.T`.
+  **The per-track FX page is fully lockable already**, eight ids in the table:
+  `CHR` 92, `DEL` 93, `REV` 94, `BR` 101, `SRR` 102, `SR.RT` 103, `OVER` 104,
+  `OD.RT` 106. What cannot be locked is the **global** Chorus/Delay/Reverb
+  pages, which are kit data. The gap is that, and only that.
+
 - **The FX and Master settings are not in the lock table at all.** They are
   **kit** data: single bytes at a stride of two from `kit+5810` (Chorus),
   `kit+5824` (Delay), `kit+5842` (Reverb), `kit+5858` (Input) and `kit+5882`
@@ -2010,3 +2019,73 @@ FX range. The seven Chorus entries read `CHR:DPTH`, `CHR:SPD`, `CHR:HPF`,
 `CHR:WDTH`, `CHR:DEL`, `CHR:REV`, `CHR:VOL` where they read `ERR:…` before.
 Delay and Reverb must be **unchanged** — if either of them moves, the edit went
 into the wrong slot.
+
+
+## 18. The p-lock id ceiling is structural, and it is 106 — 2026-09-23
+
+DNX measured the corpus and pointed the question back here, correctly: storage
+cannot answer whether an id above 106 is usable, because its parser reads
+`parameter: header & 0xff` with no bound at all, so its silence is not evidence.
+**The bound is the firmware's own inverse map, and it is measurable.**
+
+| | |
+|---|---|
+| forward map `0x401fcf20` | 100 longwords -- live slot -> p-lock id |
+| inverse map `0x401fd0b0` | begins immediately after it |
+| inverse entries 100..106 | `93, 95, 96, 97, 98, 78, 99` -- still slot numbers |
+| **inverse entry 107** | **`0x4020ef38` -- a pointer. The table has ended.** |
+
+**So the inverse map covers ids 0..106 and index 107 is already the next
+structure.** An id of 107 would read a pointer as a slot number. The ceiling
+DNX observed in 3,277 patterns is not a habit of the music; it is the table's
+extent.
+
+That is the same wall `csrc/lfo4/store.c` met one level down -- the two maps are
+adjacent, so neither can grow in place -- and it has the same answer: **relocate
+and divert**, the technique `build_lfo4_table.py` already uses for the parameter
+table. Not free, and not new either.
+
+### What DNX settled, and what it could not
+
+**Settled from 2,041 explained records across 27 sources** -- gated so that an
+unwritten slot's uninitialised flash could not be counted, which ungated
+reported ids over 0..255 and tracks up to 255:
+
+- ids run **1..106**, never 0, 94 distinct values, nothing above 106 ever;
+- tracks run **0..13**, and **no written pattern anywhere carries a track above
+  15**;
+- **id 255 must not be used**: the unused-record marker is the header read as a
+  `u16`, `0xFFFF` -- id `0xFF` with track `0xFF`. A firmware path testing only
+  the id byte would read any id-255 record as unused.
+
+**The risk it named, which storage cannot answer and our applier must:** every
+one of the 2,041 records satisfies, with zero exceptions, that **every step a
+record locks carries a trig on the track it names**. A `track = 16` record has
+no track and therefore no step flag word. *If the scheduler fires locks from the
+track's flags rather than from the lock record, a track-16 record never fires.*
+That is the first thing to check before building anything.
+
+In our favour: a track-16 record needs **no companion structure in the stored
+file** -- the lock record is self-describing and there is no per-track lock
+bitmap in storage. And `0xFF`, not 16, is the format's "no track here" marker,
+so the sentinel cannot collide with it.
+
+**Budget, uncosted until now:** the 80-record table is shared by all tracks and
+allocated from slot 0 up. The deepest allocation seen in the corpus is **72 of
+80**. FX locks would come out of that same 80.
+
+**No reserved shape exists for FX in the lock table.** The one genuinely
+reserved-looking space in the format is `kit+5900..5956` -- 28 slots, zero in
+all 2,176 kits sampled, immediately after the compressor page -- but that is kit
+space beside the FX *values*, not lock-table space. DNX's reading, offered as a
+reading: Elektron put FX and Master outside the pattern record deliberately, so
+anything here is an invention rather than an occupation -- which is an argument
+for using the storage version field (the pattern record's first `u32`; 2, 3 and
+4 exist in the wild), not against doing it.
+
+**Two caveats to carry:** version 4 is measured on a 1.11 project captured
+2026-09-22, so if new firmware moves the record version that fixture becomes
+history; and five slots of that project carry a nonsense version word (two read
+5, two `0x3FFFFFFF`, one `0x215C7F30`), which looks like residue in unwritten
+slots rather than a format -- **but if 1.11 ever writes a version 5, that is
+ours to confirm and DNX wants to know.**
