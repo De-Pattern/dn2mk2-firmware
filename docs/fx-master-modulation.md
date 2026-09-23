@@ -2090,6 +2090,440 @@ history; and five slots of that project carry a nonsense version word (two read
 slots rather than a format -- **but if 1.11 ever writes a version 5, that is
 ours to confirm and DNX wants to know.**
 
+### The loader clears the record: `track = 16` is dead, and 106 is confirmed twice — 2026-09-23
+
+The section above ends by naming the risk the corpus could not settle: whether a
+`track = 16` record ever reaches the applier. **It does not. The loader clears
+it before the applier can see it.** DNX measured it on the owner's instrument,
+with the owner's explicit authorisation given in DNX's own session, and the
+write-up and both images are at
+`dn_sysex/99_HardwareTest/dn2-fxlock-2026-09-23/track16-probe-findings.md`.
+
+The design is worth repeating because it is the part we got right by accident of
+argument: a write-and-read-back through the +Drive would have come back clean
+and we would both have believed `track = 16` was allowed. The loader only runs
+on a **load**, so the project was written to an empty slot, loaded on the front
+panel, saved, and read back.
+
+Two probes, one unusual field each:
+
+| record | id | track | step | value | probes |
+|---|---|---|---|---|---|
+| 8 | 92 (`CHR`, known-good) | **16** | 1 | 100 | the track byte |
+| 9 | **110** (above the ceiling) | 5 | 2 | 101 | the id byte |
+
+**Both were cleared.** 8 bytes differ in 12,890,116 — four are the two probe
+headers, four are the project id.
+
+```
+0x84f044   id  92 -> 255    G2 lock record 8, header
+0x84f045   track 16 -> 255
+0x84f146   id 110 -> 255    G2 lock record 9, header
+0x84f147   track  5 -> 255
+```
+
+**Verified here, independently — but not on the first attempt, and the first
+attempt is kept because it is the more instructive one.**
+
+*Retracted.* My first pass read the two probe addresses in the raw `+Drive`
+files and reported the headers as `ffff` with the sent payloads intact behind
+them — the right answer. It was right for the wrong reason. **The `+Drive` file
+is a 31-byte container header, then the 12,890,116-byte image, then a 12-byte
+trailer**, and every offset DNX quoted is an *image* offset. Applied to the
+file they land 31 bytes early, inside the preceding record's trailing `0xFF`
+fill, which reads `ffff` no matter what. The same shift made records 0..7 read
+`ffff` in both files, which is what produced my objection below. Three
+plausible confirmations out of one off-by-header, in the direction that
+flattered the conclusion. Named in `docs/instruments.md` beside the `movea.l`
+trap.
+
+*Verified,* against `image-sent.bin` and `image-readback.bin` — the raw images
+with no container, which DNX supplied so the arithmetic stops mattering:
+
+- **The whole diff reproduces: 8 bytes in 12,890,116.** Four are the project id
+  at `0x18..0x1b`, four are the two probe headers. Nothing else in the project
+  moved.
+- **Both probes cleared, values intact.** `0x84f044` and `0x84f146` both go to
+  `ffff`, and both 256-byte value arrays are byte-identical between sent and
+  returned. The loader frees the slot with the format's ordinary unused marker
+  and leaves everything behind it alone.
+- **The eight controls are live in both, byte-identical, headers and values.**
+  ids `93, 94, 92, 101, 104, 102, 103, 106`, all track 5, one locked step each.
+  This is the claim the selective reading rests on and it now holds on direct
+  inspection rather than on trust.
+- **Record 7 carries id 106 and was accepted.** So the device demonstrates the
+  bound from both sides in one experiment: 106 loads, 110 is cleared.
+
+### A value encoding falls out of it
+
+The 256-byte value array is **128 steps of big-endian `u16`**, and the values are
+stored **shifted left by 8**:
+
+| record | id | locked step | stored word |
+|---|---|---|---|
+| 0 | 93 | 0 | `0x7F00` — full scale |
+| 7 | 106 | 7 | `0x0100` = 1 << 8 |
+| 8 | 92 | 0 | `0x6400` = 100 << 8, DNX's probe value |
+| 9 | 110 | 1 | `0x6500` = 101 << 8 |
+
+**That is the same 8.8 space as the mirror cell**, with the same `0..0x7F00`
+extent evaluator A clamps to (§0, §10) — and `0x7F00` appears here as a real
+stored value, not as a bound we inferred. A p-lock value therefore drops into a
+mirror cell with no conversion at all, which removes a step from the applier
+side of the FX design that had been assumed to need one.
+
+### What it costs us
+
+**`track = 16` cannot be the key.** The applier arithmetic that made it
+attractive — `101·track + 17` landing on the FX/Master mirror block with no
+change at all — is still true and still unmeasured at `0x400db092`, and it no
+longer matters, because the record does not survive to reach it. A design keyed
+on `track = 16` needs a **third** edit site: the loader's validation, on top of
+relocating the inverse map and diverting the applier.
+
+**106 is structural, now by two methods with no shared assumption.** Our inverse
+map at `0x401fd0b0` covers ids 0..106 and index 107 is already a pointer
+(`0x4020ef38`); a device clears id 110 on sight. Either alone would be a reading;
+together they are a measurement, and both should be cited.
+
+**What is not yet read, and is now the blocking question:** *what* the loader
+checks. If it is a simple `track < 16` and `id <= 106`, both are two-byte
+constants and in reach of the technique `build_lfo4_table.py` already uses. If
+the check is a table lookup or a range derived from something else, it is not.
+That is a static read on our side and nobody else can do it.
+
+**One loose end, labelled a hypothesis by DNX and carried as one here:** the
+device re-minted the project id on save, where `dn2-format.md` §2 recorded the
+opposite in July. `TRACK16PROBE` was built from `TEST_FX_LOCK` and carried an id
+already present in slot 9, so the plausible reading is that it mints on finding
+a duplicate rather than on every save. Untested; one save of a project with a
+unique id would settle it, and it costs a device write nobody has asked for.
+
+## 25. `track = 16` is a lane the firmware already has — 2026-09-23
+
+**§18's conclusion above is retracted, and kept where it stands.** It reads
+"`track = 16` is dead as a sentinel", inferred from DNX's probe record being
+cleared on load. The inference was wrong, and it was wrong in the way that is
+worth remembering: **the probe varied two fields, not one, because neither of us
+knew the second field existed.** Record 8 carried `id 92` into a lane whose ids
+stop at 45. It had a perfectly good reason to be cleared that had nothing to do
+with its track byte. A record cleared for one reason is not evidence about
+another.
+
+DNX's own framing of it, which is the better one: *a control is only a control
+against the variables you know exist.*
+
+### What the translators actually say
+
+Two routines convert between p-lock ids and parameter slots, and **both take a
+lane selector and branch on it with an equality test, not a bound**:
+
+| | lane `== 16` | lane `< 16` |
+|---|---|---|
+| `0x400dccc0` id → slot | id ≤ **45**, table `0x401fce68` | id ≤ **106**, map `0x401fd0b0` |
+| `0x400dccfa` slot → id | slot ≤ **69**, table `0x401fcd50` | slot ≤ **99**, map `0x401fcf20` |
+
+The two lane-16 tables are exact inverses of each other. `0x401fce68` is 46
+longwords and ends precisely where `0x401fcf20` begins; `0x401fcd50` is 70
+longwords, zero for slots 0..24 and then 1..45 for slots 25..69.
+
+**And slots 25..69 are the FX and Master block.** Under the route-A arithmetic
+this document already uses — cell = `mirror[16][DEST − 76]`, §12 — that is
+`DEST` **101..145**:
+
+```
+lane-16 id  1 -> slot 25 -> DEST 101      the first FX destination
+lane-16 id 45 -> slot 69 -> DEST 145      the last Master destination
+```
+
+So the id space of lane 16 is the FX destination list, end to end, **including
+the Master slots 60..69 that §17 records as out of reach** because their codes
+run past 127 and the firmware widens that byte as signed. The p-lock lane does
+not have that problem; it never puts the code in a byte.
+
+### Measured, not read
+
+`scripts/emu_lane16_maps.py` calls both routines directly on a booted machine
+for every index 0..120 in three lanes, with the prediction written into the
+script before the run and **lane 17 as the control** — if 17 behaved like 16 the
+test would be `>= 16` and the whole reading would be wrong.
+
+```
+id -> slot    lane  5: 98 live, highest input 106, outputs 1..99
+              lane 16: 45 live, highest input  45, outputs 25..69
+              lane 17: nothing answered
+slot -> id    lane  5: 98 live, highest input  99, outputs 1..106
+              lane 16: 45 live, highest input  69, outputs 1..45
+              lane 17: nothing answered
+                                                          -> CONFIRMED
+```
+
+Exact equality on 16, both bounds, both directions, and the control silent.
+
+### The catch, and it is the whole cost of the feature
+
+**Every direct caller passes lane 0.** All three call sites of the two
+translators push a hardcoded `clrl`. The record converter at `0x400de718` has
+the same `moveq #16 / cmpl / bne` case and routes lane 16 to `0x401fcd50` — but
+its caller at `0x4003d48c` tests `moveq #15 / cmpl / bcs` and refuses anything
+above 15 before the call. And the p-lock lookup at `0x400de862`, the one that
+computes `101 · track` into the region at `+20640` (= 80 × 258, immediately past
+the lock table), **bounds the track at 15 in its own prologue** and has no lane-16
+case at all.
+
+So the honest statement is: **lane 16 is built in the translation layer and in
+the record converter, gated shut at their callers, and absent from the lookup.**
+Not "the firmware already p-locks the FX". What it changes is the size of the
+job — this stops being *invent a sentinel, relocate a map, divert an applier*
+and becomes *open a gate that already has a door in it*, plus one genuinely new
+case in the lookup.
+
+### What is still unmeasured, and who can measure it
+
+- **Whether a lane-16 record survives a load with an id inside 1..45.** That is
+  a device write and it is the owner's call, not ours and not DNX's. DNX has a
+  probe built and unsent — id 1 and id 46, the lane's own bound from both sides —
+  and is putting it to the owner with these caveats attached.
+- **DNX's trig-invariant question**, and it is the sharpest one asked so far:
+  every one of the 2,041 corpus records locks only steps that carry a trig on
+  its track, and a lane-16 record has no track and therefore no flag word. If
+  the loader enforces that invariant the lane is unusable for a reason unrelated
+  to either bound. *Not found in these paths* — the converter copies all 256
+  value bytes wholesale and consults no flag word, and the lookup indexes by
+  track and slot only. That is "not found", not "absent"; the full load path has
+  not been read.
+
+## 26. The applier needs nothing; the record writer needs a lane — 2026-09-23
+
+§25 costed the job as "three gates". Reading the two routines properly moves
+cost **off** one of them and **onto** another, so the estimate is worth
+restating before anything is built.
+
+### The applier already does the right thing for track 16
+
+`0x400db092` takes a track and opens with:
+
+```
+movel #202,%d2      moveq #101,%d5
+mulsl %d0,%d2       mulsl %d0,%d5      lsll #4,%d1
+addil #34,%d2
+lsrl  #1,%d2        -> (202*track + 34)/2, the mirror word index
+```
+
+**202 is the mirror block stride and 34 is its offset** — this is
+`mirror[block][slot] = 0x800068e4 + 34 + 202*block + 2*slot` from §9, computed
+from the track directly. For `track = 16` it lands on **mirror block 16**, the
+global FX/Master block that `fxblock16` proved audible on the instrument. The
+`101 · track` is the lock-table region index, matching the `+20640` (= 80 × 258)
+displacement in §25.
+
+**No bound on the track appears in the prologue.** The loop that follows is
+bounded by a lock count at `%a2@(8)`, not by the track. So DNX's original
+observation is confirmed at its source rather than inferred from where it lands:
+*the applier's own arithmetic puts a track-16 record on the FX mirror with no
+change at all.* This is the one place in the chain that needs nothing.
+
+That is a static read of a prologue and the routine has not been run with
+`track = 16`. What is established is that no bound is present in the first 46
+instructions; a later one would still bite.
+
+### The record writer is the real work
+
+`0x400de862` is not the applier — it is the routine that **creates** a lock
+record for a given track and slot:
+
+```
+moveq #15,%d2  / cmpl %d1,%d2 / bcs  -> reject        track must be <= 15
+moveq #100,%d3 / cmpl %a1,%d3 / bcs  -> reject        slot  must be <= 99
+moveb %a3@(3,%a1:l:4),%a0@                            header id = map[slot]
+moveb %d1,%a0@(1)                                     header track
+... copies 256 value bytes
+```
+
+It reads the id straight out of `0x401fcf20` — the **lane-0** map — with no lane
+case at all. So this routine cannot emit a lane-16 record: not the track byte,
+not the id, not the bound. It needs a genuine new case using the lane-16 tables
+and the bound 69, not a constant widened from 15 to 16.
+
+### The revised cost
+
+| piece | state | work |
+|---|---|---|
+| lane-16 id ↔ slot tables | present and correct, measured | none |
+| translators `0x400dccc0` / `0x400dccfa` | lane-16 case present | none |
+| record converter `0x400de718` | lane-16 case present | none |
+| converter caller `0x4003d48c` | `moveq #15` | one byte |
+| **applier `0x400db092`** | **arithmetic already correct, no bound found** | **none** |
+| **record writer `0x400de862`** | **no lane case at all** | **a real cave** |
+| the UI offering FX parameters as lockable | **not read** | unknown |
+
+So "two bytes in three places" was wrong in both directions. Most of the chain
+is already built, the applier is better than hoped, and the record writer is
+worse — it is a cave, not a constant. **And the top of the chain, whatever
+decides that a parameter can be locked at all, has not been read yet.** That is
+the next static read and it is the one that decides whether this is a feature or
+a curiosity.
+
+## 27. The map is the lockability table — 2026-09-23
+
+§26 ended with "whatever decides a parameter is lockable has not been read, and
+it decides whether this is a feature or a curiosity". Read. **There is no
+separate gate. The slot → id maps are the lockability table**, and `id 0` is
+the marker for *not lockable*.
+
+| | slots | map to id 0 |
+|---|---|---|
+| lane 0, `0x401fcf20` | 100 | **2** — slots 0 and 65 |
+| lane 16, `0x401fcd50` | 70 | **25** — slots 0..24, then nonzero for 25..69 |
+
+Two independent things agree with that reading and neither was fitted to it:
+
+- **DNX's corpus.** 2,041 explained lock records across 27 sources: ids run
+  **1..106, never 0**. If `0` were an ordinary id it would appear; it never
+  does, on any machine, in 3,277 patterns.
+- **The record creator writes the id straight from the map** — `moveb
+  %a3@(3,%a1:l:4),%a0@` at `0x400de8c0`, no arithmetic, no offset. So a slot
+  whose map entry is `0` produces a record with id `0`, and DNX's corpus says
+  such a record is never written.
+
+**Stated at its actual strength: the convention is visible in the data and
+confirmed by the corpus, but no `!= 0` test has been found in code.** The record
+creator does not perform one. Either the check lives in whatever offers the
+parameter to the user, or those two slots are simply never reachable from the
+panel. That distinction does not change the design, but it is not measured and
+should not be written as though it were.
+
+### What this means for the feature
+
+Lane 16's map is nonzero for exactly slots 25..69 — the FX and Master block, and
+nothing else. **The lockability table for FX parameters already exists, already
+covers the right slots, and already excludes the wrong ones.** That was the
+question §26 said would decide feature or curiosity, and it falls on the feature
+side.
+
+### The whole job, finally costed
+
+| piece | work |
+|---|---|
+| lane-16 id ↔ slot tables | none — present, measured, correct |
+| lockability | none — the tables *are* it |
+| translators `0x400dccc0` / `0x400dccfa` | none — lane-16 case present |
+| record converter `0x400de718` | none — lane-16 case present |
+| applier `0x400db092` | none — `202·block + 34` already lands on block 16 |
+| converter caller `0x4003d48c` | **one byte** — `moveq #15` → `#16` |
+| record creator `0x400de862` | **a cave** — no lane case at all |
+| the panel passing track 16 when editing FX | **not read** — the last unknown |
+
+Everything below the panel is either already built or one cave plus one byte.
+The remaining unknown is at the top: what the panel passes as the track when the
+user holds a trig on the FX page. `0x4003d398` is inside `VoiceConfig` — the
+class that owns the mirror, named by its own RTTI at `0x40213111` — and that is
+where the next read starts.
+
+## 28. The parameter table confirms lane 16 from a third direction — 2026-09-23
+
+§27 read `id 0` as "not lockable" from the map's shape and DNX's corpus. The
+parameter table at `0x401f7fc8` settles what those zeroed slots actually are,
+and in doing so confirms lane 16's range from a source that knows nothing about
+p-locks.
+
+### Slot 25..69 is exactly the global parameter set, with no gaps
+
+Every track-side and global group, by the slot span it owns:
+
+| group | | slots |
+|---|---|---|
+| 0 | the synth machines | **25..64** |
+| 5..10 | the filters | 66..68 |
+| 13, 11, 15, 14 | amp, LFOs, … | 69..99 |
+| 16 | Chorus | **25..31** |
+| 18 | Delay | **32..40** |
+| 17 | Reverb | **41..48** |
+| 21 | Ext-in | **49..59** |
+| 20 | Master | **60..67** |
+| 19 | Master | **68..69** |
+
+**Chorus, Delay, Reverb, Ext-in and Master tile slots 25..69 exactly** — no gap,
+nothing past 69. That is the lane-16 map's nonzero range, arrived at from the
+parameter table rather than from the map, and the two agree slot for slot.
+A lockability table covering precisely that set and nothing else is not an
+accident.
+
+It also widens the feature slightly: **Ext-in is in the lane too**, not just the
+three FX and the Master block.
+
+### DNX's machine-block arithmetic: confirmed, 40/40
+
+DNX derived from captured machine tables that the lane-0 machine block should
+satisfy `slot + 8 = id` over 40 slots. Checked against `0x401fcf20`: **40 of 40**,
+slot 25 → id 33 through slot 64 → id 72. Group 0 owns exactly slots 25..64 in
+the parameter table, so the block boundary is confirmed from both sides.
+
+### DNX's slot-65 hypothesis: refuted, and the real answer is simpler
+
+The hypothesis was that slot 0 and slot 65 are the synth and filter *machine
+selectors* — "which machine is this" — since no Elektron box lets a trig lock a
+machine change. It is a good hypothesis and it is wrong.
+
+**No track-side group owns slot 65 at all.** Group 0 ends at 64; the filter
+groups begin at **66**. The map steps over the hole: slot 64 → id 72, slot 65 →
+id 0, slot 66 → id 73. The same holds for slot 0, which no track-side group
+owns either.
+
+So **`id 0` does not mark a forbidden parameter. It marks a slot that holds no
+parameter** in that lane — a gap between blocks. That is a weaker claim than
+"machine selectors are unlockable" and a more robust one: it needs no theory
+about what users may lock, only the observation that nothing lives there.
+
+`Filter Type` does exist, at slot 66, and it maps to id 73 — **lockable**. Under
+the refuted hypothesis it should not have been, which is the cleanest way to see
+that the hypothesis was wrong rather than merely unsupported.
+
+### One caveat on DNX's corpus evidence, in DNX's own words
+
+The absence of id 0 is real but it is *gated*: id 0 appears about 10,000 times in
+the raw bytes and is the single most common id ungated — all of it uninitialised
+flash in unwritten pattern slots. It vanishes only across the 2,041 records that
+explain themselves. So the statement is **"no written record has ever carried id
+0"**, and it depends on the same gate that stopped tracks being reported up to
+255 on the first pass. Recorded because a reader meeting "never 0" without the
+gate would be entitled to doubt it.
+
+## 29. The last unknown named, and its size — 2026-09-23
+
+The remaining question from §27 is *what the panel passes as the track when a
+user holds a trig on the FX page*. Partly read, and the useful result is that
+**it is a bigger read than one function**, which is worth recording before
+someone budgets it as small.
+
+What is established:
+
+- `0x4003d398` belongs to **`PatternParamLocks`** — it passes that name to a
+  logging or registration call at `0x4003d3d0`, alongside a table of pointers at
+  `0x401dc618`. It is the p-lock manager's method, not a `VoiceConfig` one;
+  `VoiceConfig` appeared because §26 read a neighbouring string. **Corrected
+  here rather than left standing.**
+- The track gate `moveq #15 / cmpl %d3` at `0x4003d48c` is **inside** that
+  method, so it sits below the panel, not at it.
+- Its two direct call sites (`0x4003bf20`, `0x4003c08a`) are inside
+  `0x4003be0c`, which has four callers of its own, and the site read so far
+  pushes the object plus two zeroed longwords — an init or clear, not a user
+  edit.
+
+So the chain from a trig-hold to a lock record runs at least four frames deeper
+than the routines §25–§28 measured, through an event dispatch (`cmpil #2112,%d3`
+selects on a message code at `0x4003bf04`). **This is a UI event-path read, not
+a table read**, and the techniques that made §25–§28 cheap — a constant, a
+table, a bound, an emulator call with a control — do not apply to it in the same
+way. The honest instrument for it is the emulator driving the panel, which
+`docs/instruments.md` already warns needs encoder-push-and-turn and a control
+beside every positive.
+
+**Nothing below the panel is waiting on this.** The tables, the translators, the
+converter, the applier and the lockability table are all measured. What this
+read decides is only whether a user can *create* an FX lock from the front
+panel, or whether the feature would need its own path built.
+
 ## 24. Exposed to users: `fxmod`, the mod and the page — 2026-09-23
 
 The feature worked on the instrument and existed only as a build script that
