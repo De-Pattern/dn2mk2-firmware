@@ -5026,3 +5026,62 @@ and compares it with `lfo4_sound_of(track)`. Prediction and control are written
 into the script before the run, and the control is `lfo4_gets != 0` — because a
 zero key with a getter that never ran is a null about navigation, not about
 keys.
+
+### Result: the keys agree, and the theory is dead
+
+```
+lfo4_gets      65
+lfo4_get_sound 0x4210c0c0   <- the UI's own virtual call
+lfo4_sound_of  0x00000008   <- the tick key, by calling it
+base+52+1163t  0x4210c0c0   <- the same, by reading memory
+```
+
+**`lfo4_get_sound == base + 52 + 1163*track`.** Those two are genuinely
+independent: one is a C++ virtual dispatch through the firmware's own object
+(`%a2@(16)` then `vtable[40]()`), the other is our arithmetic on a longword read
+straight out of `*0x800052a0`. They produce the same address.
+
+**So the UI writes LFO4's row under exactly the key the tick asks for, and the
+1-in-15 is not a key that misses.** Recorded as a refutation, not a footnote:
+the hypothesis was specific, it predicted a difference, and there is none.
+
+What survives from it is still worth having:
+
+- `ext_find` works — a row stored under the tick's key is found under it
+  (`emu_lfo4_key.py`'s control, the one real line in that probe);
+- a miss would load `ext_default`, whose `DEST` is None, so **if** a miss ever
+  happens it is silent and total. That remains the right thing to instrument on
+  hardware, because the emulator cannot produce one.
+
+### The harness fact, which is the more useful half
+
+**`m.call` into the build's code region is unreliable after the panel has been
+driven.** `lfo4_sound_of` returned `8`, and that function returns either zero or
+`base + 52 + 1163*track` — never 1..51. The call did not execute the function.
+
+This matters beyond this probe: **most remaining LFO4 questions want the panel
+driven *and* a routine called directly**, and that combination silently returns
+a plausible-looking integer. The first run of this probe turned that integer
+into "the UI stores LFO4's row under a key the tick never asks for" — a false
+positive that read exactly like a discovery.
+
+The guard is cheap and should be copied: **derive anything you compare twice, by
+two routes, and refuse to compare when they disagree.** Whether the cause is the
+code region not surviving UI execution, or the call convention not re-entering
+from that state, is unmeasured and is the next thing to find out before another
+probe of this shape is trusted.
+
+### The pattern, now specific enough to be a rule
+
+Four failures today share one shape, and it is not "static reads are risky":
+
+| | controlled | assumed |
+|---|---|---|
+| the container header | the addresses | the frame they were in |
+| the `movel` scan | the constant | the direction of the addressing mode |
+| `emu_lfo4_key.py` | the lookup | that the two sides were different formulas |
+| `emu_lfo4_uikey.py` | that the page was reached | that the other side of the comparison ran |
+
+**Every one was a comparison where one side was controlled and the other
+assumed.** The measurements were fine. Write the control for the arm you are
+*not* thinking about.

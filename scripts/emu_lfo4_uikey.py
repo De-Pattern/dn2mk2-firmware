@@ -52,6 +52,7 @@ from emulib.image import code_chunks, differences, load_build      # noqa: E402
 from emulib.machine import SNAP, Machine                           # noqa: E402
 from emulib.panel import DOWN, MOD, Panel                          # noqa: E402
 
+LIVE_CONTAINER, SOUND_AT, SOUND_STRIDE = 0x800052A0, 52, 1163
 BUILD = os.path.join("/mnt/d/01_Code/Z_Personal/dn2_firmware",
                      os.environ.get("DT2_BUILD", "out/lfo4-meterkeep"))
 
@@ -80,12 +81,24 @@ def main() -> int:
 
     gets = m.long(sym["lfo4_gets"]) if "lfo4_gets" in sym else None
     ui_key = m.long(sym["lfo4_get_sound"])
-    tick_key = m.call(sym["lfo4_sound_of"], args.track)
+    called = m.call(sym["lfo4_sound_of"], args.track)
+    base = m.long(LIVE_CONTAINER)
+    derived = base + SOUND_AT + SOUND_STRIDE * args.track if base else 0
 
     print(f"  MOD tapped {args.presses}x, then DOWN")
     print(f"  lfo4_gets      {gets}")
     print(f"  lfo4_get_sound {ui_key:#010x}   <- the UI's own virtual call")
-    print(f"  lfo4_sound_of  {tick_key:#010x}   <- what the tick asks for\n")
+    print(f"  lfo4_sound_of  {called:#010x}   <- the tick key, by calling it")
+    print(f"  base+52+1163t  {derived:#010x}   <- the same, by reading memory")
+
+    if called != derived:
+        print()
+        print("  **The two derivations of the tick key disagree, so the call is")
+        print("  unreliable here and nothing below it is a valid comparison.**")
+        print("  This is the control that was missing when this probe first")
+        print("  reported a difference: 8 is not a value lfo4_sound_of can return.")
+        return 2
+    tick_key = called
 
     if not gets:
         print("  **The getter never ran, so the page was never reached.**")
