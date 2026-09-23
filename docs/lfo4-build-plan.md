@@ -5133,3 +5133,69 @@ can reach it.
 no flash** — see `00_Notes/.../Firmware test plan.md`, the LFO3-beside-LFO4
 depth test. It discriminates between the two surviving families where nothing
 offline does.
+
+## SOLVED: LFO4's row is selected by the voice index, not the track — 2026-09-23
+
+**Found by the owner, at the instrument, by opening the voice allocation menu.**
+Four hypotheses from this session died before it and none of them would have got
+here; the menu did it in one look.
+
+### The evidence, in the order it arrived
+
+| observation | what it fixed |
+|---|---|
+| *"the triggers that work always trigger on voice number 7"*, on **track 7 (index 6)** | the selector is the voice number, and "1 in 15" was never a probability -- it is **1 of 16 voices** |
+| selecting **reuse** to pin the voice makes LFO4 work on **every** trig | nothing about the LFO, the row, the cell or the key is wrong |
+| moved to **track 11 (index 10)** -> **voice 11** now activates | the working voice follows the **track index**, on a second track, far from the first |
+| **voice 7 still activated on track 11** | *not* an anomaly -- track 7's row was still configured, so **two** populated rows meant two working voices, on any track |
+| setting track 7's `DEST` to None -> **voice 7 stops, voice 11 keeps working** | the prediction that closes it: the row is indexed by voice, populated per track, and any populated row fires on its matching voice **regardless of which track is playing** |
+
+That last one was a positive prediction made before the test and it held, which
+is worth more than the four eliminations that preceded it.
+
+### Why every previous probe missed it
+
+- **`lfo4_misses` stayed flat** on hardware with a passing liveness control --
+  and that is exactly right. The lookup never *fails*; it **succeeds on the
+  wrong row**. A row for a track with no LFO4 settings is all zeros, its `DEST`
+  is None, and a None destination is silent and total. Nothing increments.
+- **Every offline harness drives the evaluator directly and never allocates a
+  voice**, so the index it was handed was whatever the harness put there. The
+  fault needs a voice pool to exist, and the emulator has none.
+- **`emu_lfo4_vs_lfo3.py` found LFO3 and LFO4 byte-identical over 240 frames.**
+  True, and irrelevant: both were driven with the same index.
+
+### Where the wrong index comes in
+
+`scripts/build_lfo4_tick7.py` picks the index at each of the two patch sites:
+
+```python
+A_INDEX = "move.l %a5,%d0    | evaluator A's track index"
+B_INDEX = "                  | evaluator B's track index is already in %d0"
+```
+
+**Both comments were written by inference and neither was ever measured**, and
+`lfo4-bridge` inherited them unchanged when it replaced the static table with
+`lfo4_refresh(index)`. `lfo4_refresh`'s only guard is `track >= TRACKS`, so an
+index of 0..15 from any source passes straight through and selects a row.
+
+A static read of evaluator A shows `%a5` zeroed at entry (`subal %a5,%a5`) and
+used to shift a 16-bit enable mask -- which *looks* like a per-track loop, and I
+read it that way and said so. **The instrument disagrees, and the instrument
+wins.** Which of the two sites carries the voice number is now a measurement to
+make, not a register to name in a comment -- that is the mistake this whole
+section is about.
+
+### The fix, and the property it must have
+
+Whatever index reaches `lfo4_refresh` must be **the track that owns the sound
+this voice is playing**, and it must be derived from something the firmware
+itself uses for LFO1-3, so the two cannot drift. The candidate:
+
+    track = (block - 0x800068e4 - 34) / 202
+
+taken from the very mirror block the evaluator is already reading LFO1-3's
+parameters out of. Then LFO4 and LFO1-3 agree by construction rather than by
+a comment -- which is the same argument that made `fxmod` trustworthy.
+
+**Not yet built and not yet measured.** The diagnosis is closed; the fix is not.
