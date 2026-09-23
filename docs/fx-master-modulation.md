@@ -2524,6 +2524,64 @@ converter, the applier and the lockability table are all measured. What this
 read decides is only whether a user can *create* an FX lock from the front
 panel, or whether the feature would need its own path built.
 
+## 30. The track bound at 15 is in the storage path, not the live one — 2026-09-23
+
+§29 said the remaining read was "what the panel passes as the track". Reading
+further shows the question was aimed at the wrong cluster, and **two of this
+document's own labels need correcting.**
+
+### `0x4003d398` and its neighbours are serialisation, not editing
+
+The pointer table at `0x401dc618`, which §29 cited as evidence, is a **field
+descriptor list**: seven pointers into `0x401dc5xx`, then `0x2c` (44, a size),
+then zero, then three function pointers. Together with the `PatternParamLocks`
+string and the `Observable` / `DataChangeInfo` names nearby, `0x4003d398` is
+**registering the class with a serialisation framework**, not writing a lock.
+
+So the `moveq #15` track gate at `0x4003d48c`, and `0x400de862` with its own
+`track ≤ 15` and `slot ≤ 99`, belong to the **storage and version-conversion
+path**. §26 called `0x400de862` "the record creator"; it is the record creator
+*inside the storage converter*, which is a much narrower thing. Corrected here.
+
+### The live path is a different cluster, and no bound was found in it
+
+Scanning for the lock-table index arithmetic — `101 × track`, 18 sites — and for
+the 258-byte record stride puts both in one cluster the storage path never
+touches: `0x40052488`, `0x40053014`, `0x40053728`.
+
+At `0x400538b0` the live path does:
+
+```
+movel %a2@(60),%d1      the track, from an object field
+moveq #101,%d6
+mulsl %d6,%d1           the lock-table index
+```
+
+**No bound on the track appears in `0x40053728`'s prologue or at the multiply.**
+The track is an object field, not a checked argument.
+
+If that holds, the `track ≤ 15` wall is a property of *saving and loading* a
+project, not of editing one — which would change the costing in §26 and §27
+again, in the direction of less work rather than more.
+
+### Why this is written as a lead and not a result
+
+**It is one function's prologue and one arithmetic site.** "No bound found" is
+not "unbounded": `%a2@(60)` is written somewhere, and whatever writes it may be
+where the real constraint lives.
+
+And the attempt to find those writes failed in a way worth recording. A scan for
+`movel dN,aM@(60)` reported four sites in the cluster; **all four are
+`movel %a2@(60),%sp@-` — pushes, not stores.** The mask matched the wrong
+direction of the same addressing mode. No write site has been found, and the
+four "sites" are withdrawn.
+
+**The instrument that would settle it is not a static read.** It is the emulator
+with `UC_HOOK_MEM_WRITE` on the lock table, driven from the panel — encoder push
+and turn, `--panel-dwell 2`, a control beside the positive, per
+`docs/instruments.md`. That is the next step whenever this thread is picked up,
+and it should not be attempted as more disassembly.
+
 ## 24. Exposed to users: `fxmod`, the mod and the page — 2026-09-23
 
 The feature worked on the instrument and existed only as a build script that
