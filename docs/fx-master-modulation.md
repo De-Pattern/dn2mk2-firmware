@@ -2420,6 +2420,75 @@ user holds a trig on the FX page. `0x4003d398` is inside `VoiceConfig` — the
 class that owns the mirror, named by its own RTTI at `0x40213111` — and that is
 where the next read starts.
 
+## 28. The parameter table confirms lane 16 from a third direction — 2026-09-23
+
+§27 read `id 0` as "not lockable" from the map's shape and DNX's corpus. The
+parameter table at `0x401f7fc8` settles what those zeroed slots actually are,
+and in doing so confirms lane 16's range from a source that knows nothing about
+p-locks.
+
+### Slot 25..69 is exactly the global parameter set, with no gaps
+
+Every track-side and global group, by the slot span it owns:
+
+| group | | slots |
+|---|---|---|
+| 0 | the synth machines | **25..64** |
+| 5..10 | the filters | 66..68 |
+| 13, 11, 15, 14 | amp, LFOs, … | 69..99 |
+| 16 | Chorus | **25..31** |
+| 18 | Delay | **32..40** |
+| 17 | Reverb | **41..48** |
+| 21 | Ext-in | **49..59** |
+| 20 | Master | **60..67** |
+| 19 | Master | **68..69** |
+
+**Chorus, Delay, Reverb, Ext-in and Master tile slots 25..69 exactly** — no gap,
+nothing past 69. That is the lane-16 map's nonzero range, arrived at from the
+parameter table rather than from the map, and the two agree slot for slot.
+A lockability table covering precisely that set and nothing else is not an
+accident.
+
+It also widens the feature slightly: **Ext-in is in the lane too**, not just the
+three FX and the Master block.
+
+### DNX's machine-block arithmetic: confirmed, 40/40
+
+DNX derived from captured machine tables that the lane-0 machine block should
+satisfy `slot + 8 = id` over 40 slots. Checked against `0x401fcf20`: **40 of 40**,
+slot 25 → id 33 through slot 64 → id 72. Group 0 owns exactly slots 25..64 in
+the parameter table, so the block boundary is confirmed from both sides.
+
+### DNX's slot-65 hypothesis: refuted, and the real answer is simpler
+
+The hypothesis was that slot 0 and slot 65 are the synth and filter *machine
+selectors* — "which machine is this" — since no Elektron box lets a trig lock a
+machine change. It is a good hypothesis and it is wrong.
+
+**No track-side group owns slot 65 at all.** Group 0 ends at 64; the filter
+groups begin at **66**. The map steps over the hole: slot 64 → id 72, slot 65 →
+id 0, slot 66 → id 73. The same holds for slot 0, which no track-side group
+owns either.
+
+So **`id 0` does not mark a forbidden parameter. It marks a slot that holds no
+parameter** in that lane — a gap between blocks. That is a weaker claim than
+"machine selectors are unlockable" and a more robust one: it needs no theory
+about what users may lock, only the observation that nothing lives there.
+
+`Filter Type` does exist, at slot 66, and it maps to id 73 — **lockable**. Under
+the refuted hypothesis it should not have been, which is the cleanest way to see
+that the hypothesis was wrong rather than merely unsupported.
+
+### One caveat on DNX's corpus evidence, in DNX's own words
+
+The absence of id 0 is real but it is *gated*: id 0 appears about 10,000 times in
+the raw bytes and is the single most common id ungated — all of it uninitialised
+flash in unwritten pattern slots. It vanishes only across the 2,041 records that
+explain themselves. So the statement is **"no written record has ever carried id
+0"**, and it depends on the same gate that stopped tracks being reported up to
+255 on the first pass. Recorded because a reader meeting "never 0" without the
+gate would be entitled to doubt it.
+
 ## 24. Exposed to users: `fxmod`, the mod and the page — 2026-09-23
 
 The feature worked on the instrument and existed only as a build script that
