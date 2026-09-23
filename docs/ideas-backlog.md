@@ -3442,3 +3442,47 @@ is used again. Driven through the UI under the emulator, each against a control
   with and without `--ssi0-request-hz`) and reach the pattern load by PTN + trig.
 - Tools: digikit `guirun --regs-at` (registers at an address) and fault pages
   listed; the key codes PLAY 20, STOP 21, PAGE 22, PTN 23, TRK 16.
+
+## 21. Profile our firmware against factory, the way octabam profiled stock
+
+**Queued 2026-09-23 by the owner.** Source:
+`00_Resources/01_Reference/STOCK_PROFILE.md` — octabam's stock-firmware
+performance pilot of 23 September 2026.
+
+**Why it matters here.** Every build we ship adds work to paths the audio engine
+runs: the tick calls `lfo4_refresh` per evaluator pass, the FX mod widens a
+destination scan, and the loader copies an appended region at boot. **None of
+that has ever been costed.** A mod that sounds right and steals headroom is a
+mod that fails on a busy project, and the instrument is the last place we would
+want to discover it.
+
+**What transfers and what does not.** The *method* transfers; the fixtures do
+not. That document profiles an **Octatrack** — `ot_emu`, `OCTABAM` set, eight
+FLEX tracks, a `POLYBENCH` project — and none of those exist for the DN2. What
+we take is the discipline:
+
+- a **checked, reproducible fixture** committed alongside the numbers, with its
+  settings written out in full (their fixture is not effects-free and they say
+  so — inherited DELAY on seven tracks and PLATE REV on the eighth);
+- a **long enough window**: they record that an earlier 1,400-frame pilot was
+  too short to catch a model bug, and settled on 5,600 frames after a 20-second
+  loading phase;
+- **boundary buckets excluded** from percentiles, P95/P99 by nearest rank, and
+  total-over-frames reported **separately** from the mean of complete buckets;
+- the honesty that these are **instructions, not cycles or utilisation** —
+  caches, bus contention and physical deadlines are not modelled well enough to
+  support a headroom claim, and neither is ours.
+
+**The comparison we want**: factory 1.11 against each shipped build, same
+fixture, same window, reported as a delta with the fixture's limits stated. A
+number without a named fixture is not a result.
+
+**Blocked on** a DN2 equivalent of their frame accounting. digikit's emulator
+counts instructions per run but has no per-frame bucketing, and our own
+measurements this session put ~76% of a short run in `emu/symbols.py` symbol
+resolution — so the profiler would be measuring the harness before it measured
+the firmware. **The symbol-resolution cache (backlog item, ~27 s per run) is a
+prerequisite, not a nice-to-have.**
+
+**Not started.** Nothing here is measured; this is a queued method, not a
+finding.
