@@ -2122,21 +2122,55 @@ headers, four are the project id.
 0x84f147   track  5 -> 255
 ```
 
-**Verified here, independently, from DNX's readback image:** at both addresses
-the header reads `ffff`, and the 256 value bytes of each rejected record carry
-exactly the payloads that were sent — `100` and `101`, still there beside the
-zeros. So the rejection really is *mark unused*, not *wipe*: the loader frees
-the slot using the format's ordinary `0xFFFF` marker and leaves the values
-behind it untouched.
+**Verified here, independently — but not on the first attempt, and the first
+attempt is kept because it is the more instructive one.**
 
-**Not verified here, and left as DNX's:** that the owner's eight FX-send records
-survived byte-identical. That claim is what makes this selective rather than a
-normalisation pass, and it is the load-bearing one. Reproducing it needs the
-crafted image, which is not in the artefact folder as a raw `.bin`, and my own
-attempt to walk the table geometry from the two known record addresses (stride
-`0x102`, base = record 8 − 8·stride) landed on records that read `ffff` in both
-files — so my base is wrong, which is a fact about my arithmetic and not about
-DNX's result. Asked back rather than assumed.
+*Retracted.* My first pass read the two probe addresses in the raw `+Drive`
+files and reported the headers as `ffff` with the sent payloads intact behind
+them — the right answer. It was right for the wrong reason. **The `+Drive` file
+is a 31-byte container header, then the 12,890,116-byte image, then a 12-byte
+trailer**, and every offset DNX quoted is an *image* offset. Applied to the
+file they land 31 bytes early, inside the preceding record's trailing `0xFF`
+fill, which reads `ffff` no matter what. The same shift made records 0..7 read
+`ffff` in both files, which is what produced my objection below. Three
+plausible confirmations out of one off-by-header, in the direction that
+flattered the conclusion. Named in `docs/instruments.md` beside the `movea.l`
+trap.
+
+*Verified,* against `image-sent.bin` and `image-readback.bin` — the raw images
+with no container, which DNX supplied so the arithmetic stops mattering:
+
+- **The whole diff reproduces: 8 bytes in 12,890,116.** Four are the project id
+  at `0x18..0x1b`, four are the two probe headers. Nothing else in the project
+  moved.
+- **Both probes cleared, values intact.** `0x84f044` and `0x84f146` both go to
+  `ffff`, and both 256-byte value arrays are byte-identical between sent and
+  returned. The loader frees the slot with the format's ordinary unused marker
+  and leaves everything behind it alone.
+- **The eight controls are live in both, byte-identical, headers and values.**
+  ids `93, 94, 92, 101, 104, 102, 103, 106`, all track 5, one locked step each.
+  This is the claim the selective reading rests on and it now holds on direct
+  inspection rather than on trust.
+- **Record 7 carries id 106 and was accepted.** So the device demonstrates the
+  bound from both sides in one experiment: 106 loads, 110 is cleared.
+
+### A value encoding falls out of it
+
+The 256-byte value array is **128 steps of big-endian `u16`**, and the values are
+stored **shifted left by 8**:
+
+| record | id | locked step | stored word |
+|---|---|---|---|
+| 0 | 93 | 0 | `0x7F00` — full scale |
+| 7 | 106 | 7 | `0x0100` = 1 << 8 |
+| 8 | 92 | 0 | `0x6400` = 100 << 8, DNX's probe value |
+| 9 | 110 | 1 | `0x6500` = 101 << 8 |
+
+**That is the same 8.8 space as the mirror cell**, with the same `0..0x7F00`
+extent evaluator A clamps to (§0, §10) — and `0x7F00` appears here as a real
+stored value, not as a bound we inferred. A p-lock value therefore drops into a
+mirror cell with no conversion at all, which removes a step from the applier
+side of the FX design that had been assumed to need one.
 
 ### What it costs us
 

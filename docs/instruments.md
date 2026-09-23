@@ -60,12 +60,20 @@ exists, use it. If none does, say so and mark the conclusion unverified rather
 than letting a plausible reading harden into a label.
 
 A static read is evidence about *encoding*. It is rarely evidence about
-*meaning*, and this project has now been fooled twice in one day:
+*meaning*, and this project has been fooled this way more than once:
 
 - **`movea.l` does not prove a pointer.** It is also how GCC parks a 32-bit
   value it wants to index with `lea`.
 - **An unsigned range test does not prove memory.** A window check on a wrapping
   counter has exactly the same shape.
+- **An offset is meaningless without the frame it is in.** A `+Drive` file is a
+  31-byte container header, the image, then a 12-byte trailer; every offset in a
+  device write-up is an *image* offset. Applied to the file they land 31 bytes
+  early — inside the previous record's trailing `0xFF` fill, which reads as the
+  format's "unused" marker no matter what is really there. On 2026-09-23 that
+  produced **three** confirmations in a row that all looked right and all were
+  wrong, including two that agreed with the conclusion being checked. **Ask for
+  the raw image, or convert the frame explicitly and say which one you are in.**
 
 What settled that field in the end was neither: it was the *callee*, a list
 insert ordered by `subl` + `bpl` — a **signed** difference, which is how
