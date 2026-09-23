@@ -194,6 +194,14 @@ STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 OUT = pathlib.Path("00_Resources/02_Builds/fxbrowser_DN2_1.11.syx")
 SECTION_OUT = pathlib.Path("out/fxbrowser/section_3_MAIN_OS.bin")
 
+# Longwords a *later* build in this family rewrites, as
+# (address, stock hex, new hex, why). Empty here: `fxbrowser` itself changes
+# nothing outside its hooks, its six conversions and its ten record masks.
+# A successor appends to this rather than copying `main()`, so the stock-byte
+# assertion and the "nothing changed outside a declared edit" check keep
+# covering every edit in the build. See `build_fxbrowser3.py`.
+EXTRA_LONGWORDS: list[tuple[int, str, str, str]] = []
+
 
 def fx_mirror_base() -> int:
     """What `fxdest`'s cave loads into `%a0` for a code of 101..127."""
@@ -344,6 +352,12 @@ def main() -> int:
     for entry in OPEN_RECORDS:
         _open_mask(content, entry)
 
+    # --- whatever a successor adds -----------------------------------------
+    if EXTRA_LONGWORDS:
+        print()
+    for address, stock_hex, new_hex, why in EXTRA_LONGWORDS:
+        _poke_longword(content, address, stock_hex, new_hex, why)
+
     _verify(stock_bytes, content, anchor, helper_address, used)
 
     edited = bytes(content)
@@ -486,6 +500,21 @@ def _poke_byte(content, address: int, stock_hex: str, new_byte: str, why: str) -
           f"{bytes(content[off:off + len(want)]).hex(' ')}   {why}")
 
 
+def _poke_longword(content, address: int, stock_hex: str, new_hex: str, why: str) -> None:
+    """Replace one longword, refusing unless the stock one is exactly there."""
+    want, new = bytes.fromhex(stock_hex), bytes.fromhex(new_hex)
+    if len(want) != 4 or len(new) != 4:
+        raise SystemExit(f"{address:#010x}: a longword edit is four bytes")
+    off = address - BASE
+    if bytes(content[off:off + 4]) != want:
+        raise SystemExit(
+            f"{address:#010x}: expected {want.hex(' ')} ({why}) but found "
+            f"{bytes(content[off:off + 4]).hex(' ')}"
+        )
+    content[off:off + 4] = new
+    print(f"  poke    {address:#010x}  {want.hex(' ')} -> {new.hex(' ')}   {why}")
+
+
 def _repoint(content, address: int, old: int, new: int, why: str) -> None:
     """Send one `jsr` somewhere else, leaving the routine it called untouched."""
     off = address - BASE
@@ -529,6 +558,8 @@ def _verify(before: bytes, after, anchor, helper_address: int, used: int) -> Non
     allowed.append((helper_address - BASE, used))
     for entry in OPEN_RECORDS:
         allowed.append((RECORDS - BASE + RECORD_SIZE * (entry - 1) + 4 * MASK_WORD, 4))
+    for address, _stock, _new, _why in EXTRA_LONGWORDS:
+        allowed.append((address - BASE, 4))
 
     diffs = [i for i in range(len(before)) if before[i] != after[i]]
     stray = [i for i in diffs if not any(lo <= i < lo + n for lo, n in allowed)]

@@ -1890,3 +1890,123 @@ has already consumed three hypotheses. An accurate open defect is worth more
 than a fourth guess, and a speculative fix would cost the owner a flash on
 something cosmetic. **No build was made and no gates were run, because nothing
 was built.**
+
+## 23. The `ERR` is Elektron's group-name table, and `fxbrowser3` is one longword — 2026-09-23
+
+**Found, fixed, gated.** `0x400dc3f0` is the group → **short name** lookup. It
+answers `'SYN'` for groups 0..4, `'ERR'` for anything above 30, and otherwise
+indexes a 26-longword table at `0x401f76f4` with `group - 5`. That table holds:
+
+| group | slot | stock value | reads |
+|---|---|---|---|
+| 15 FX | `0x401f771c` | `0x40217641` | `FX` |
+| **16 Chorus** | **`0x401f7720`** | **`0x40210c9e`** | **`ERR` — the out-of-range fallback's own pointer** |
+| 17 Reverb | `0x401f7724` | `0x402107d2` | `REV` |
+| 18 Delay | `0x401f7728` | `0x40210919` | `DEL` |
+
+`0x402107d2` and `0x40210919` are not merely strings that happen to read `REV`
+and `DEL`: they are **the exact pointers entries 129 `Reverb Mix Vol.` and 120
+`Delay Mix Vol.` carry as their own short name** at record `+56`. Group 16's slot
+does *not* hold entry 111 `Chorus Mix Vol.`'s `'CHR'` at `0x4021077c` — it holds
+the fallback. The symmetry is exact everywhere except the one slot the owner was
+looking at. Groups 19, 20, 22 and 31..34 read `ERR` too; nothing enumerates them.
+
+`fxbrowser3` writes `0x4021077c` into `0x401f7720`. That is the whole fix: **two
+bytes** different from the image already on the instrument.
+
+### Why every one of §22's six leads had to fail
+
+They were all about **records**, and the name is not on a record. It is on a
+**group** table that no record edit can reach. And `emu_modalname.py` had
+already measured that the modal's *construction* resolves no names at all — the
+text is fetched when a row is **drawn**, which is the half nobody had run.
+
+### The measurement, and its two controls
+
+`scripts/emu_fxname.py` boots the machine and does two things. It calls
+`0x400dc3f0(g)` for every group, and it constructs the destination modal for a
+live `ParameterSet` and then calls each row widget's own label accessor
+`0x40116e5e` — which is what the paint calls, so the string that comes back is
+the string on the screen. Log: `out/emu-logs/gate_fxbrowser3.log`.
+
+On `fxbrowser2`, the build the owner has:
+
+```
+entry 105 Chorus ( DPTH) -> 'ERR:DPTH'  table reads [16]
+entry 113 Delay  ( TIME) -> 'DEL:TIME'  table reads [18]
+entry 123 Reverb (  PRE) -> 'REV:PRE'   table reads [17]
+```
+
+On `fxbrowser3`:
+
+```
+entry 105 Chorus ( DPTH) -> 'CHR:DPTH'  table reads [16]
+entry 113 Delay  ( TIME) -> 'DEL:TIME'  table reads [18]
+entry 123 Reverb (  PRE) -> 'REV:PRE'   table reads [17]
+```
+
+Twenty-four rows, twenty-four table reads, groups `[16, 17, 18]`. The probe
+**refuses to report Chorus at all** until groups 17 and 18 have come back `REV`
+and `DEL` through the same call on both images, and until the draw has produced
+text for a Delay row — §19's rule, and the rule this session broke once already
+when `emu_mirror_base.py` read a pointer that had never been set.
+
+### What the prediction said before the run, for all three groups
+
+§22's lesson was that a mechanism which explains Chorus and says nothing about
+Delay and Reverb has been *fitted* to the symptom. This one is read off one
+table for all three and predicted each separately — 16 → `ERR`, 17 → `REV`,
+18 → `DEL`, with 17's and 18's pointers equal to their `Mix Vol.` records' — and
+then the run produced exactly that, including the pointer identities.
+
+### Where the text is actually drawn, and what the "section header" is
+
+The destination modal builds **one row widget per entry plus one per group**
+(`0x401170d8`, section headers carry entry `-1`). The header's own label functor
+resolves to the empty string `0x40218572` — measured, on both images — so the
+**visible group name is not a separate header string at all**: it is the
+`"%.16s:%.32s"` short form each row falls back to, `group:parameter`, built at
+`0x40105b72` from `0x400dc3f0(group)` and the record's short name, inside the
+row-label functor `0x40105a6c` that the list builder stores in every widget.
+
+`0x400dc3f0` has exactly four callers and all four are named: `0x40105ace` (that
+row label), `0x40106786` (the modal's row-activate callback), `0x400c24ee` (a
+`DEST` value drawn as `%.4s` of the group name), and
+`0x401072a8`, which stacks the group short name at y=`0x22` and the parameter
+short name at y=`0x2a` as two `%s` lines. Every one of them reads group 16 as
+`ERR` today and `CHR` after this build.
+
+**Scope of that negative, stated:** every longword in section 3 whose value lies
+within ±104 bytes of `0x401f76f4` — the table's own length — was listed. There
+are two: `0x400dc406 -> 0x401f76f4`, the `lea` inside `0x400dc3f0`, and
+`0x400dc266 -> 0x401f775c`, which is the **next** table (the 16 track names
+`T1`..`T16`) starting where this one ends.
+
+### The `%a0@(30,%d2:l)` trap, for the third time
+
+The record's short name is at `+0x30` from the accessors' pre-biased base, not
+`+30`: objdump prints an indexed displacement in **hex with no prefix**
+(`FEATURE-PLAYBOOK.md` §2.6). Reading it as decimal points 18 bytes short and
+yields a plausible-looking non-pointer. It cost ten minutes here; it has cost
+this project more than that twice before.
+
+### Gates
+
+| gate | result |
+|---|---|
+| `check_coldfire` vs `out/lfo4-browser` | **pass** — 1,539 hits vs the 1,540 baseline; `--against`: `1539 shared ... those are its data, not this build's code` and `no scale-8 addressing`, **0 new**. Byte-identical to `fxbrowser2`'s figure |
+| `dnfw inspect` | **21/21 `[ok]`**, including `container trailer HMAC-SHA256 reproduced` |
+| build-time guards | 25 control sites asserted (9 of them new and specific to this edit), geometry 9/9, `verified: 158 bytes changed, every one inside a declared edit` |
+| `emu_boot_check` from reset | **pass** — `booted and drew its UI (1 frame(s), control 1)`, `Safe to flash as far as booting goes`. **620,522,800 instructions, the same count as the stock control to the instruction** — which is what a data-pointer edge nothing reads at boot should look like. The control was re-measured because the emulator's fingerprint changed (`digikit-up/emu/dspboot.py` grew a `coverage=` option) |
+| coverage of this build's own routines | **n/a, and it is not allowed to stand as a pass.** `fxbrowser3` writes no `symbols.json`, and `emu_boot_check` says so itself: *"a boot alone does not clear a build"*. The question it would answer — did the edited thing actually run? — is answered instead by `emu_fxname.py`, which calls the reader and draws the rows |
+| the `ERR` itself | `emu_fxname.py`, above — this is the gate that would otherwise have been an "n/a" |
+
+`fxbrowser3_DN2_1.11.syx`, sha256
+`ed3d065735b933744d8b97173cf3a367ad1a62eb2b0bfda024e300db11340f0f`.
+
+**Not flashed. Nothing goes near the instrument without the owner's go-ahead.**
+On screen, after flashing: on a synth track, `[MOD]`, LFO1, turn `DEST` into the
+FX range. The seven Chorus entries read `CHR:DPTH`, `CHR:SPD`, `CHR:HPF`,
+`CHR:WDTH`, `CHR:DEL`, `CHR:REV`, `CHR:VOL` where they read `ERR:…` before.
+Delay and Reverb must be **unchanged** — if either of them moves, the edit went
+into the wrong slot.
