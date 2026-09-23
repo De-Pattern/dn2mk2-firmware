@@ -2199,6 +2199,100 @@ already present in slot 9, so the plausible reading is that it mints on finding
 a duplicate rather than on every save. Untested; one save of a project with a
 unique id would settle it, and it costs a device write nobody has asked for.
 
+## 25. `track = 16` is a lane the firmware already has — 2026-09-23
+
+**§18's conclusion above is retracted, and kept where it stands.** It reads
+"`track = 16` is dead as a sentinel", inferred from DNX's probe record being
+cleared on load. The inference was wrong, and it was wrong in the way that is
+worth remembering: **the probe varied two fields, not one, because neither of us
+knew the second field existed.** Record 8 carried `id 92` into a lane whose ids
+stop at 45. It had a perfectly good reason to be cleared that had nothing to do
+with its track byte. A record cleared for one reason is not evidence about
+another.
+
+DNX's own framing of it, which is the better one: *a control is only a control
+against the variables you know exist.*
+
+### What the translators actually say
+
+Two routines convert between p-lock ids and parameter slots, and **both take a
+lane selector and branch on it with an equality test, not a bound**:
+
+| | lane `== 16` | lane `< 16` |
+|---|---|---|
+| `0x400dccc0` id → slot | id ≤ **45**, table `0x401fce68` | id ≤ **106**, map `0x401fd0b0` |
+| `0x400dccfa` slot → id | slot ≤ **69**, table `0x401fcd50` | slot ≤ **99**, map `0x401fcf20` |
+
+The two lane-16 tables are exact inverses of each other. `0x401fce68` is 46
+longwords and ends precisely where `0x401fcf20` begins; `0x401fcd50` is 70
+longwords, zero for slots 0..24 and then 1..45 for slots 25..69.
+
+**And slots 25..69 are the FX and Master block.** Under the route-A arithmetic
+this document already uses — cell = `mirror[16][DEST − 76]`, §12 — that is
+`DEST` **101..145**:
+
+```
+lane-16 id  1 -> slot 25 -> DEST 101      the first FX destination
+lane-16 id 45 -> slot 69 -> DEST 145      the last Master destination
+```
+
+So the id space of lane 16 is the FX destination list, end to end, **including
+the Master slots 60..69 that §17 records as out of reach** because their codes
+run past 127 and the firmware widens that byte as signed. The p-lock lane does
+not have that problem; it never puts the code in a byte.
+
+### Measured, not read
+
+`scripts/emu_lane16_maps.py` calls both routines directly on a booted machine
+for every index 0..120 in three lanes, with the prediction written into the
+script before the run and **lane 17 as the control** — if 17 behaved like 16 the
+test would be `>= 16` and the whole reading would be wrong.
+
+```
+id -> slot    lane  5: 98 live, highest input 106, outputs 1..99
+              lane 16: 45 live, highest input  45, outputs 25..69
+              lane 17: nothing answered
+slot -> id    lane  5: 98 live, highest input  99, outputs 1..106
+              lane 16: 45 live, highest input  69, outputs 1..45
+              lane 17: nothing answered
+                                                          -> CONFIRMED
+```
+
+Exact equality on 16, both bounds, both directions, and the control silent.
+
+### The catch, and it is the whole cost of the feature
+
+**Every direct caller passes lane 0.** All three call sites of the two
+translators push a hardcoded `clrl`. The record converter at `0x400de718` has
+the same `moveq #16 / cmpl / bne` case and routes lane 16 to `0x401fcd50` — but
+its caller at `0x4003d48c` tests `moveq #15 / cmpl / bcs` and refuses anything
+above 15 before the call. And the p-lock lookup at `0x400de862`, the one that
+computes `101 · track` into the region at `+20640` (= 80 × 258, immediately past
+the lock table), **bounds the track at 15 in its own prologue** and has no lane-16
+case at all.
+
+So the honest statement is: **lane 16 is built in the translation layer and in
+the record converter, gated shut at their callers, and absent from the lookup.**
+Not "the firmware already p-locks the FX". What it changes is the size of the
+job — this stops being *invent a sentinel, relocate a map, divert an applier*
+and becomes *open a gate that already has a door in it*, plus one genuinely new
+case in the lookup.
+
+### What is still unmeasured, and who can measure it
+
+- **Whether a lane-16 record survives a load with an id inside 1..45.** That is
+  a device write and it is the owner's call, not ours and not DNX's. DNX has a
+  probe built and unsent — id 1 and id 46, the lane's own bound from both sides —
+  and is putting it to the owner with these caveats attached.
+- **DNX's trig-invariant question**, and it is the sharpest one asked so far:
+  every one of the 2,041 corpus records locks only steps that carry a trig on
+  its track, and a lane-16 record has no track and therefore no flag word. If
+  the loader enforces that invariant the lane is unusable for a reason unrelated
+  to either bound. *Not found in these paths* — the converter copies all 256
+  value bytes wholesale and consults no flag word, and the lookup indexes by
+  track and slot only. That is "not found", not "absent"; the full load path has
+  not been read.
+
 ## 24. Exposed to users: `fxmod`, the mod and the page — 2026-09-23
 
 The feature worked on the instrument and existed only as a build script that
