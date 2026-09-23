@@ -269,21 +269,17 @@ def eval_payload(base: int) -> str:
 2:"""
 
 
-def main() -> int:
-    if not available():
-        raise SystemExit(
-            "no m68k assembler found -- patch/assemble.py needs m68k-linux-gnu-as "
-            "(WSL). See docs/code-caves.md."
-        )
-    if OUT.exists():
-        raise SystemExit(
-            f"{OUT} already exists. A build is never rebuilt under a name the owner "
-            f"may already have flashed -- give this one a new name instead."
-        )
+def compose(stock_bytes: bytes, dest: int, log=print) -> dict:
+    """Stock MAIN OS in, the modified bytes out. No filesystem, no .syx.
 
-    firmware = load(read_image(STOCK))
-    section = firmware.container.find(MAIN_OS)
-    stock_bytes = section.unpack()
+    Split out of `main()` on 2026-09-23 so the same composition can feed three
+    consumers instead of one: this script's `.syx`, `scripts/gen_fxmod_code.py`
+    (which turns it into the data `src/dnfw/mods/fxmod.py` and the browser
+    apply), and any harness that wants the bytes without a build directory.
+
+    -> `{content, cave, helper, used, anchor, stock}`. Everything it prints goes
+    through `log`, so a caller that wants silence passes `lambda *_: None`.
+    """
     content = bytearray(stock_bytes)
 
     anchor = ANCHORS.get(len(content))
@@ -293,16 +289,16 @@ def main() -> int:
             f"(docs/version-anchors.md)."
         )
 
-    _check_controls(content, anchor["controls"])
+    _check_controls(content, anchor["controls"], log)
     for address, length in anchor["sealed"]:
-        _check_sealed(content, address, length)
-    _check_geometry(content)
-    _check_masks(content)
+        _check_sealed(content, address, length, log)
+    _check_geometry(content, log)
+    _check_masks(content, log)
 
     # --- the two byte edits -------------------------------------------------
     for key in ("eval_bound", "enum_bound"):
         address, stock_hex, new_byte, why = anchor[key]
-        _poke_byte(content, address, stock_hex, new_byte, why)
+        _poke_byte(content, address, stock_hex, new_byte, why, log)
 
     # --- the cave layout ----------------------------------------------------
     cave_address, cave_capacity = CAVE
@@ -310,10 +306,10 @@ def main() -> int:
     if len(helper) % 2:
         helper += b"\x00"
     helper_address = cave_address
-    print(f"\n  helper at {helper_address:#010x}, {len(helper)} bytes -- "
-          f"entry -> code, +{CODE_BIAS} for groups {FX_GROUPS}")
+    log(f"\n  helper at {helper_address:#010x}, {len(helper)} bytes -- "
+        f"entry -> code, +{CODE_BIAS} for groups {FX_GROUPS}")
 
-    image = LoadedImage(dest=section.dest, content=bytes(content))
+    image = LoadedImage(dest=dest, content=bytes(content))
     offset = image.offset_of(helper_address)
     if any(image.content[offset:offset + len(helper)]):
         raise SystemExit(f"the cave at {helper_address:#010x} is not free")
@@ -336,31 +332,50 @@ def main() -> int:
             )
         hook = CaveHook(id=key, site=site, stock=bytes.fromhex(stock_hex),
                         payload=payload, cave=Cave(here, cave_capacity - used))
-        content[:] = apply(LoadedImage(dest=section.dest, content=bytes(content)), hook)
-        print(f"  {key:10} hook {site:#010x} -> cave {here:#010x}, {body} bytes "
-              f"(resume {resume:#010x})  {why}")
+        content[:] = apply(LoadedImage(dest=dest, content=bytes(content)), hook)
+        log(f"  {key:10} hook {site:#010x} -> cave {here:#010x}, {body} bytes "
+            f"(resume {resume:#010x})  {why}")
         hooks.append((hook, here, body))
         used += body
-    print(f"  cave used {used} of {cave_capacity} bytes\n")
+    log(f"  cave used {used} of {cave_capacity} bytes\n")
 
     # --- the three conversion sites ----------------------------------------
     for address, why in anchor["convert"]:
-        _repoint(content, address, 0x400DBCC4, helper_address, why)
+        _repoint(content, address, 0x400DBCC4, helper_address, why, log)
 
     # --- the ten record masks ----------------------------------------------
-    print()
+    log("")
     for entry in OPEN_RECORDS:
-        _open_mask(content, entry)
+        _open_mask(content, entry, log)
 
     # --- whatever a successor adds -----------------------------------------
     if EXTRA_LONGWORDS:
-        print()
+        log("")
     for address, stock_hex, new_hex, why in EXTRA_LONGWORDS:
-        _poke_longword(content, address, stock_hex, new_hex, why)
+        _poke_longword(content, address, stock_hex, new_hex, why, log)
 
-    _verify(stock_bytes, content, anchor, helper_address, used)
+    _verify(stock_bytes, content, anchor, helper_address, used, log)
 
-    edited = bytes(content)
+    return {"content": bytes(content), "stock": bytes(stock_bytes),
+            "cave": (cave_address, used), "helper": helper_address,
+            "anchor": anchor}
+
+
+def main() -> int:
+    if not available():
+        raise SystemExit(
+            "no m68k assembler found -- patch/assemble.py needs m68k-linux-gnu-as "
+            "(WSL). See docs/code-caves.md."
+        )
+    if OUT.exists():
+        raise SystemExit(
+            f"{OUT} already exists. A build is never rebuilt under a name the owner "
+            f"may already have flashed -- give this one a new name instead."
+        )
+
+    firmware = load(read_image(STOCK))
+    section = firmware.container.find(MAIN_OS)
+    edited = compose(section.unpack(), section.dest)["content"]
     SECTION_OUT.parent.mkdir(parents=True, exist_ok=True)
     SECTION_OUT.write_bytes(edited)
     print(f"\n  wrote {SECTION_OUT}  ({len(edited):,} bytes)")
@@ -399,7 +414,7 @@ def _name(content, pointer: int) -> str:
     return bytes(content[off:end]).decode("latin1")
 
 
-def _check_controls(content, controls) -> None:
+def _check_controls(content, controls, log=print) -> None:
     """Assert every address this build reasons from, before writing anything."""
     for address, expected, why in controls:
         want = bytes.fromhex(expected)
@@ -410,10 +425,10 @@ def _check_controls(content, controls) -> None:
                 f"{address:#010x}: expected {want.hex(' ')} ({why}) but found "
                 f"{found.hex(' ')} -- wrong build or wrong address"
             )
-        print(f"  control {address:#010x}  {want.hex(' '):<26}  {why}")
+        log(f"  control {address:#010x}  {want.hex(' '):<26}  {why}")
 
 
-def _check_sealed(content, address: int, length: int) -> None:
+def _check_sealed(content, address: int, length: int, log=print) -> None:
     """Nothing may enter the *interior* of bytes that are about to move.
 
     The first address is excluded deliberately. When the hook sits at a
@@ -435,10 +450,10 @@ def _check_sealed(content, address: int, length: int) -> None:
         )
     note = (f"; {len(entry)} longword(s) name the entry itself -- its callers, "
             f"which is what the hook is for") if entry else ""
-    print(f"  sealed  {address:#010x}+{length}: nothing points into its interior{note}")
+    log(f"  sealed  {address:#010x}+{length}: nothing points into its interior{note}")
 
 
-def _check_geometry(content) -> None:
+def _check_geometry(content, log=print) -> None:
     """A wrong anchor into a dense table still yields plausible records.
 
     So the records this build reasons about are checked by name, group and
@@ -459,10 +474,10 @@ def _check_geometry(content) -> None:
                 f"entry {entry}: expected {(name, group, slot)} but found {got} -- "
                 f"the record table is not where this build thinks it is"
             )
-    print(f"  geometry {len(expect)} records resolve to their expected name, group and slot")
+    log(f"  geometry {len(expect)} records resolve to their expected name, group and slot")
 
 
-def _check_masks(content) -> None:
+def _check_masks(content, log=print) -> None:
     """Report what `+44` carries across slots 25..48, and which `want` passes.
 
     This is the measurement §6 item 5 was guessing at, and it decides how many
@@ -483,24 +498,24 @@ def _check_masks(content) -> None:
         w = _record(content, entry)
         if (~w[MASK_WORD] & OPEN_MASK) != 0:
             blocked.append((slot, entry, _name(content, w[12])))
-    print(f"  masks    slots 25..48 resolve to 24 records; {24 - len(blocked)} already "
+    log(f"  masks    slots 25..48 resolve to 24 records; {24 - len(blocked)} already "
           f"pass a `want` of {OPEN_MASK:#06x}")
     for slot, entry, name in blocked:
-        print(f"           slot {slot:3} code {slot + CODE_BIAS:3} entry {entry:3} "
+        log(f"           slot {slot:3} code {slot + CODE_BIAS:3} entry {entry:3} "
               f"{name!r} is blocked and is opened below")
 
 
-def _poke_byte(content, address: int, stock_hex: str, new_byte: str, why: str) -> None:
+def _poke_byte(content, address: int, stock_hex: str, new_byte: str, why: str, log=print) -> None:
     want = bytes.fromhex(stock_hex)
     off = address - BASE
     if bytes(content[off:off + len(want)]) != want:
         raise SystemExit(f"{address:#010x}: expected {want.hex(' ')} ({why})")
     content[off + 1] = int(new_byte, 16)
-    print(f"  edit    {address:#010x}  {want.hex(' ')} -> "
+    log(f"  edit    {address:#010x}  {want.hex(' ')} -> "
           f"{bytes(content[off:off + len(want)]).hex(' ')}   {why}")
 
 
-def _poke_longword(content, address: int, stock_hex: str, new_hex: str, why: str) -> None:
+def _poke_longword(content, address: int, stock_hex: str, new_hex: str, why: str, log=print) -> None:
     """Replace one longword, refusing unless the stock one is exactly there."""
     want, new = bytes.fromhex(stock_hex), bytes.fromhex(new_hex)
     if len(want) != 4 or len(new) != 4:
@@ -512,10 +527,10 @@ def _poke_longword(content, address: int, stock_hex: str, new_hex: str, why: str
             f"{bytes(content[off:off + 4]).hex(' ')}"
         )
     content[off:off + 4] = new
-    print(f"  poke    {address:#010x}  {want.hex(' ')} -> {new.hex(' ')}   {why}")
+    log(f"  poke    {address:#010x}  {want.hex(' ')} -> {new.hex(' ')}   {why}")
 
 
-def _repoint(content, address: int, old: int, new: int, why: str) -> None:
+def _repoint(content, address: int, old: int, new: int, why: str, log=print) -> None:
     """Send one `jsr` somewhere else, leaving the routine it called untouched."""
     off = address - BASE
     opcode, target = struct.unpack_from(">HI", content, off)
@@ -525,13 +540,13 @@ def _repoint(content, address: int, old: int, new: int, why: str) -> None:
             f"opcode {opcode:#06x} target {target:#010x}"
         )
     struct.pack_into(">I", content, off + 2, new)
-    print(f"  repoint {address:#010x}  jsr {old:#010x} -> jsr {new:#010x}   {why}")
+    log(f"  repoint {address:#010x}  jsr {old:#010x} -> jsr {new:#010x}   {why}")
 
 
-def _open_mask(content, entry: int) -> None:
+def _open_mask(content, entry: int, log=print) -> None:
     w = _record(content, entry)
     if w[MASK_WORD] == OPEN_MASK:
-        print(f"  mask    entry {entry:3} already {OPEN_MASK:#07x}, left alone")
+        log(f"  mask    entry {entry:3} already {OPEN_MASK:#07x}, left alone")
         return
     if w[MASK_WORD] != 0:
         raise SystemExit(
@@ -540,11 +555,11 @@ def _open_mask(content, entry: int) -> None:
         )
     off = RECORDS - BASE + RECORD_SIZE * (entry - 1) + 4 * MASK_WORD
     struct.pack_into(">I", content, off, OPEN_MASK)
-    print(f"  mask    entry {entry:3} {_name(content, w[12])!r:22} group {w[GROUP_WORD]:2} "
+    log(f"  mask    entry {entry:3} {_name(content, w[12])!r:22} group {w[GROUP_WORD]:2} "
           f"slot {w[SLOT_WORD]:2}: +44 0x0 -> {OPEN_MASK:#07x}")
 
 
-def _verify(before: bytes, after, anchor, helper_address: int, used: int) -> None:
+def _verify(before: bytes, after, anchor, helper_address: int, used: int, log=print) -> None:
     after = bytes(after)
     if len(before) != len(after):
         raise SystemExit("length changed -- a cave patch must not resize the section")
@@ -568,13 +583,13 @@ def _verify(before: bytes, after, anchor, helper_address: int, used: int) -> Non
             f"{len(stray)} bytes changed outside the declared edits, first at "
             f"{BASE + stray[0]:#010x}"
         )
-    print(f"\n  verified: {len(diffs)} bytes changed, every one inside a declared edit")
+    log(f"\n  verified: {len(diffs)} bytes changed, every one inside a declared edit")
     for key in ("eval_hook", "slot_hook"):
         site = anchor[key][0]
         op, _ = struct.unpack_from(">HI", after, site - BASE)
         if op != 0x4EF9:
             raise SystemExit(f"{site:#010x} is not a `jmp`")
-    print("  both hooks read `jmp`")
+    log("  both hooks read `jmp`")
 
 
 if __name__ == "__main__":

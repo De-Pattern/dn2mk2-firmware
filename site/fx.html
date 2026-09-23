@@ -1,0 +1,144 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FX Modulation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="Aim a Digitone II LFO at the Chorus, Delay and Reverb, built entirely in your browser.">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/tool.css">
+<style>
+  .params {
+    display: grid; gap: .5rem; margin-top: .6rem;
+    grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  }
+  .param {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 8px; padding: .6rem .75rem; font-size: .88rem;
+  }
+  .param.on { border-color: var(--accent); }
+  .param .pg {
+    font-family: var(--mono); font-size: .66rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--ink-soft); display: block;
+  }
+  .param .nm { font-weight: 500; }
+  .param .sh {
+    font-family: var(--mono); font-size: .74rem; color: var(--accent);
+    float: right;
+  }
+  .group-name { margin: 1.4rem 0 0; font-size: .95rem; font-weight: 600; }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow"><a href="index.html">Digitone II Mods</a> / fx modulation</p>
+  <h1>FX Modulation</h1>
+  <p class="lede">
+    Point an LFO at the Chorus, the Delay or the Reverb. Twenty-four new entries
+    in the <code>DEST</code> list, chosen by name. Pick your firmware, download a
+    signed image.
+  </p>
+</header>
+
+<div class="note">
+  <p><strong>Everything happens in this tab.</strong> Your firmware file is never
+  uploaded — this page has no server to upload it to. It is static files on
+  GitHub Pages; you can read every line in the
+  <a href="https://github.com/angellinares/dn2_firmware_explore/tree/main/site/js">repository</a>.</p>
+  <p><strong>Prove your way back before you flash anything.</strong> The Early Start-up
+  Menu reflashes stock firmware over MIDI. Do that once, with an unmodified image,
+  <em>before</em> you flash a modified one — and back up your +Drive, which no tool
+  here can recover.</p>
+</div>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">1</span><h2>Your firmware</h2></div>
+  <p>A Digitone&nbsp;II OS 1.11 <code>.syx</code> from Elektron &mdash; or an image
+  another page here has already built, to combine mods (see below).</p>
+
+  <div class="drop" id="drop">
+    <p><label class="filebtn" for="syx">Choose a .syx file</label>
+      <input type="file" id="syx" accept=".syx,.SYX" hidden></p>
+    <p class="hint">or drag it here</p>
+  </div>
+
+  <div id="loaded" class="hidden">
+    <dl class="facts" id="facts"></dl>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</section>
+
+<section class="step hidden" id="step2">
+  <div class="step-head"><span class="step-num">2</span><h2>What opens</h2></div>
+  <p>
+    All twenty-four, or none. Every address this mod writes is checked to hold its
+    stock bytes first, and so are twenty-six more it only reads; an image that
+    differs anywhere is refused rather than written somewhere plausible.
+  </p>
+  <div id="params"></div>
+
+  <dl class="facts">
+    <dt>Where</dt><dd>On a synth track: <code>[MOD]</code>, an LFO, turn <code>DEST</code>. They sit after the <code>FX</code> group, before the rest</dd>
+    <dt>Global</dt><dd>These are the machine's one Chorus, Delay and Reverb. <strong>Every track's LFO can aim at the same one, and they add up</strong> — that is what "global" means here, not a fault</dd>
+    <dt>Not included</dt><dd>Master. Its slots need destination codes above 127, and the firmware widens that byte as signed, so it needs a different edit</dd>
+    <dt>Writes</dt><dd id="writes">&mdash;</dd>
+  </dl>
+
+  <div class="note">
+    <p><strong>Confirmed on a Digitone&nbsp;II, 2026-09-23.</strong> An LFO on a synth
+    track was pointed at Delay Feedback Gain and the delay's feedback followed it, with
+    <code>DEP</code> and <code>SPD</code> doing what they should. The owner's words:
+    <em>“works :) I can modulate with the LFOs the parameters.”</em></p>
+    <p><strong>One extra fix rides along.</strong> Stock firmware has no short name for the
+    Chorus group in its own group&nbsp;&rarr;&nbsp;name table — the slot holds the
+    out-of-range fallback, which reads <code>ERR</code>. So the first build showed
+    <code>ERR</code> over the Chorus entries while Reverb and Delay read <code>REV</code>
+    and <code>DEL</code>. This mod points that one slot at <code>CHR</code>, the short name
+    Chorus's own <em>Mix Vol.</em> record already carries. Reverb and Delay are untouched.</p>
+  </div>
+</section>
+
+<section class="step hidden" id="step3">
+  <div class="step-head"><span class="step-num">3</span><h2>Build it</h2></div>
+  <p>
+    The image is rebuilt, re-signed with the key derived from your own file, and
+    every integrity field is checked again. Nothing downloads unless all of them pass.
+  </p>
+  <div class="verdict" id="buildVerdict"></div>
+</section>
+
+<div class="bar hidden" id="bar">
+  <button class="primary" id="buildBtn">Build firmware</button>
+  <button id="resetBtn">Start over</button>
+  <span class="status" id="status"></span>
+</div>
+
+<h2>Combining with other mods</h2>
+<p>
+  Each page applies one mod. To combine them, build here, then load the downloaded
+  file into the next page &mdash; in any order. This mod writes a few edits and one
+  block of new code inside section&nbsp;3, changes no length and appends nothing.
+</p>
+<ul>
+  <li><strong><a href="destinations.html">Modulation Destinations</a></strong> &mdash; combines. Different records, different bytes.</li>
+  <li><strong><a href="lfo.html">LFO Waves</a></strong> &mdash; combines. New waveforms to aim at these destinations with.</li>
+  <li><strong><a href="arp.html">MIDI Arpeggiator</a></strong> &mdash; combines. No shared bytes.</li>
+  <li><strong><a href="transients.html">Transient Swapper</a></strong> &mdash; combines; it only writes the DSP image.</li>
+</ul>
+<div class="note">
+  <p><strong>What "combines" means here.</strong> The bytes each mod writes are checked
+  not to overlap, and that is the only guarantee offered. This mod was tested on hardware
+  on its own; a combined image has not been flashed.</p>
+</div>
+
+<footer>
+  <p>
+    Part of <a href="https://github.com/angellinares/dn2_firmware_explore">dn2_firmware_explore</a>,
+    AGPL-3.0-or-later. Not affiliated with or endorsed by Elektron.
+  </p>
+</footer>
+
+</div>
+
+<script type="module" src="js/app/fx-page.js"></script>

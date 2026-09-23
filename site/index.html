@@ -157,10 +157,53 @@ rim.wav,   0.5,</pre>
 dnfw mods apply firmware.syx --mod moddest --mod transients --from my_hits/ -o modded.syx</pre>
 
   <div class="note">
-    <p><strong>Nineteen more parameters ship closed and stay closed.</strong> Chorus
-    and Master were in the same hardware test and <em>none of them appeared</em>.
-    For those the gate is a separate enumeration, not this mask, so flipping it
-    changes nothing. This mod ships only what was measured to work.</p>
+    <p><strong>The global effects are a different gate, and they now have their own
+    mod.</strong> Chorus, Delay and Reverb were in the same hardware test and
+    <em>none of them appeared</em>: for those the gate is the enumeration, not this
+    mask, so flipping it changes nothing. That enumeration is what
+    <a href="fx.html">FX Modulation</a> opens. Master is still out — its
+    destination codes go above 127 and the firmware widens that byte as signed.</p>
+  </div>
+</article>
+
+<article class="mod">
+  <div class="mod-head">
+    <h3>LFO modulation of the FX</h3>
+    <span class="mod-id">fxmod</span>
+    <span class="tag ready">Confirmed on hardware</span>
+  </div>
+  <p>
+    Stock firmware offers an LFO a hundred destinations and every one is inside the
+    voice. This adds the machine's global effects: twenty-four Chorus, Delay and Reverb
+    parameters in the <code>DEST</code> list, chosen by name, modulated per track.
+  </p>
+
+  <p style="margin-top:1.2rem">
+    <a class="cta" href="fx.html">Open the FX Modulation tool &#8594;</a>
+  </p>
+  <p class="cta-note">
+    Runs entirely in your browser &mdash; no install, no command line, nothing uploaded.
+  </p>
+
+  <dl class="facts">
+    <dt>Adds</dt><dd>Chorus <code>DPTH SPD HPF WDTH DEL REV VOL</code>, Delay <code>TIME X WID FDBK HPF LPF REV VOL DEL</code>, Reverb <code>PRE DEC FREQ GAIN HPF LPF VOL REV</code></dd>
+    <dt>Changes</dt><dd>23 places in section 3 &mdash; two bounds, two hooks, seven <code>jsr</code> targets, ten record masks, one name pointer, and 128 bytes of new code in a free run. Nothing appended, no length changes</dd>
+    <dt>Global</dt><dd>These are the machine's one Chorus, Delay and Reverb, so every track's LFO can aim at the same one and they add up. That is what "global" means, not a fault</dd>
+    <dt>Tested</dt><dd>Flashed 2026-09-23: an LFO aimed at Delay Feedback Gain moves the feedback, responding to <code>DEP</code> and <code>SPD</code></dd>
+    <dt>Combines</dt><dd>With the destination, LFO Waves, MIDI arpeggiator and transient mods &mdash; no shared bytes</dd>
+  </dl>
+
+<pre>dnfw mods apply firmware.syx --mod fxmod -o modded.syx
+# with the per-voice destinations and the new waveforms
+dnfw mods apply firmware.syx --mod fxmod --mod moddest --mod lfowaves -o modded.syx</pre>
+
+  <div class="note">
+    <p><strong>A naming fix rides along.</strong> Stock firmware has no short name for
+    the Chorus group in its own group&nbsp;&rarr;&nbsp;name table; the slot holds the
+    out-of-range fallback, which reads <code>ERR</code>. Nothing showed it before,
+    because nothing ever drew that group's name. This mod points the slot at
+    <code>CHR</code>, the short name Chorus's own <em>Mix Vol.</em> record already
+    carries, and leaves Reverb and Delay alone.</p>
   </div>
 </article>
 
@@ -324,7 +367,7 @@ dnfw mods apply firmware.syx --mod lfowaves --mod moddest --mod midiarp -o modde
   <tbody>
     <tr>
       <td><strong>More LFO destinations</strong></td>
-      <td><span class="tag ready">Shipped once</span> 13 new modulation destinations were opened and confirmed working on hardware. Every destination a mask edit alone can open is now open.</td>
+      <td><span class="tag ready">Shipped twice</span> 13 per-voice destinations were opened by a mask edit, and the 24 global FX destinations by a second mod that opens the enumeration as well. Master is what is left, and it needs destination codes above 127.</td>
     </tr>
     <tr>
       <td><strong>A fourth LFO</strong></td>

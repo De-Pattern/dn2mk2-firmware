@@ -2005,7 +2005,7 @@ this project more than that twice before.
 |---|---|
 | `check_coldfire` vs `out/lfo4-browser` | **pass** — 1,539 hits vs the 1,540 baseline; `--against`: `1539 shared ... those are its data, not this build's code` and `no scale-8 addressing`, **0 new**. Byte-identical to `fxbrowser2`'s figure |
 | `dnfw inspect` | **21/21 `[ok]`**, including `container trailer HMAC-SHA256 reproduced` |
-| build-time guards | 25 control sites asserted (9 of them new and specific to this edit), geometry 9/9, `verified: 158 bytes changed, every one inside a declared edit` |
+| build-time guards | 26 control sites asserted (9 of them new and specific to this edit), geometry 9/9, `verified: 158 bytes changed, every one inside a declared edit` |
 | `emu_boot_check` from reset | **pass** — `booted and drew its UI (1 frame(s), control 1)`, `Safe to flash as far as booting goes`. **620,522,800 instructions, the same count as the stock control to the instruction** — which is what a data-pointer edge nothing reads at boot should look like. The control was re-measured because the emulator's fingerprint changed (`digikit-up/emu/dspboot.py` grew a `coverage=` option) |
 | coverage of this build's own routines | **n/a, and it is not allowed to stand as a pass.** `fxbrowser3` writes no `symbols.json`, and `emu_boot_check` says so itself: *"a boot alone does not clear a build"*. The question it would answer — did the edited thing actually run? — is answered instead by `emu_fxname.py`, which calls the reader and draws the rows |
 | the `ERR` itself | `emu_fxname.py`, above — this is the gate that would otherwise have been an "n/a" |
@@ -2089,3 +2089,49 @@ history; and five slots of that project carry a nonsense version word (two read
 5, two `0x3FFFFFFF`, one `0x215C7F30`), which looks like residue in unwritten
 slots rather than a format -- **but if 1.11 ever writes a version 5, that is
 ours to confirm and DNX wants to know.**
+
+## 24. Exposed to users: `fxmod`, the mod and the page — 2026-09-23
+
+The feature worked on the instrument and existed only as a build script that
+needs WSL, an m68k assembler and the owner's own image on a particular path.
+That is not a feature anyone else has. It is now a mod and a page.
+
+**The claim that makes it worth trusting:** `dnfw mods apply --mod fxmod`
+produces a `.syx` whose sha256 is
+`ed3d065735b933744d8b97173cf3a367ad1a62eb2b0bfda024e300db11340f0f` — **the same
+file as `fxbrowser3_DN2_1.11.syx`**, byte for byte. `scripts/gen_fxmod_code.py`
+composes the mod's data from `build_fxbrowser.compose`, the same function the
+gated build comes out of, so users get the image that was measured rather than a
+second implementation of it. `test/test_fxmod_mod.py` asserts that equality and
+skips loudly rather than passing when the build output is absent.
+
+`build_fxbrowser.main()` was split into `compose()` plus I/O to make that
+possible; the split is byte-checked, and `build_fxbrowser3.py` still writes the
+identical `.syx`.
+
+| piece | where |
+|---|---|
+| the data | `scripts/gen_fxmod_code.py` -> `src/dnfw/mods/fxmod_code.json`, `site/js/mods/fxmod-code.js` |
+| the CLI half | `src/dnfw/mods/fxmod.py`, registered in `src/dnfw/cli/mods.py` |
+| the browser half | `site/js/mods/fxmod.js` |
+| the page | `site/fx.html`, `site/js/app/fx-page.js` |
+| parity | `scripts/js_fxmod_check.mjs`, run by `test/test_js_fxmod.py` |
+| tests | `test/test_fxmod_mod.py` — 9, including byte equality with the gated build |
+
+**Twenty-three edits, 179 bytes, 26 guards.** The guards are the sites the mod
+reads and reasons from but never writes, and they include the three group-name
+slots and the three records whose short names they share — §23's whole argument,
+checked against the user's own file rather than asserted in prose.
+
+**The site said something that had become false.** `destinations.html` told users
+that Chorus and Master "stay closed, deliberately … for those the gate is a
+separate enumeration, not this mask". True when written, and that separate
+enumeration is exactly what this work opened. Both that page and the index card
+now say so and link across. Master is still out, and both still say why.
+
+**Rendered before it was believed.** `PRINCIPLES.md` §7 and the comment in
+`destinations-page.js` that records a card rendering as `undefined` because a
+field was read by the wrong name: the page was driven in Chrome with the stock
+`.syx`, the 24 destinations drew in three labelled groups, the build verified
+21/21 and offered `Digitone_II_OS1.11_fxmod.syx` at 2,387,616 bytes, and the
+console was clean.

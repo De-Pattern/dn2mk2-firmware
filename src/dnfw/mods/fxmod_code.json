@@ -1,0 +1,319 @@
+{
+ "os": "Digitone II 1.11",
+ "stock_length": 3192192,
+ "cave_va": 1076423170,
+ "cave_used": 128,
+ "edits": [
+  {
+   "va": 1073976761,
+   "stock": "65",
+   "new": "7d",
+   "what": "the enumeration walk, 0..100 -> 0..124"
+  },
+  {
+   "va": 1073977441,
+   "stock": "0dbcc4",
+   "new": "28ea02",
+   "what": "entry -> code: the randomiser, with `lsl.l #8` at 0x40039868"
+  },
+  {
+   "va": 1073977973,
+   "stock": "0dbcc4",
+   "new": "28ea02",
+   "what": "entry -> code: ParameterSet +0x24's DEST path -- `lsl.l #8,%d2` 18 B later"
+  },
+  {
+   "va": 1073978519,
+   "stock": "0dbcc4",
+   "new": "28ea02",
+   "what": "entry -> code: the sibling on the other set -- `lsl.l #8,%d2` 18 B later"
+  },
+  {
+   "va": 1073979029,
+   "stock": "0dbcc4",
+   "new": "28ea02",
+   "what": "entry -> code: and its setter -- `lsl.l #8,%d2` 18 B later"
+  },
+  {
+   "va": 1074150901,
+   "stock": "0dbcc4",
+   "new": "28ea02",
+   "what": "entry -> code: the sixth -- `lsl.l #8,%d0` 20 B later"
+  },
+  {
+   "va": 1074539065,
+   "stock": "0dbcc4",
+   "new": "28ea02",
+   "what": "entry -> code: the group step, with `lsl.l #8` at 0x400c2a3e"
+  },
+  {
+   "va": 1074642986,
+   "stock": "2f027264206f0008",
+   "new": "4ef94028ea584e71",
+   "what": "the slot lookup's hook into the cave"
+  },
+  {
+   "va": 1074821905,
+   "stock": "0dbcc4",
+   "new": "28ea02",
+   "what": "entry -> code: the browser's confirm path, which carries no shift"
+  },
+  {
+   "va": 1075018383,
+   "stock": "64",
+   "new": "7f",
+   "what": "the evaluator's DEST bound, 100 -> 127"
+  },
+  {
+   "va": 1075018398,
+   "stock": "736c00524df07a00",
+   "new": "4ef94028ea3e4e71",
+   "what": "the evaluator's hook into the cave"
+  },
+  {
+   "va": 1075803938,
+   "stock": "0c9e",
+   "new": "077c",
+   "what": "group 16 Chorus: 'ERR' -> 'CHR', entry 111's own short name"
+  },
+  {
+   "va": 1075812438,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 105: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1075812498,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 106: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1075812558,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 107: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1075812618,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 108: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1075812678,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 109: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1075812738,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 110: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1075812798,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 111: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1075812858,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 112: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1075813338,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 120: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1075813878,
+   "stock": "00",
+   "new": "1e",
+   "what": "entry 129: +44 opened to 0x1e00"
+  },
+  {
+   "va": 1076423170,
+   "stock": "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "new": "202f00040c8000000141650242802200e589ed88908141f9401f7f9441f008002028000422100481000000100c8100000002620606800000004c4e757264b287640641f98000750e736c00524df07a004ef940137aa6202f00047264b2806412727cb280650c41f942c6487820300c004e752f027264206f00084ef9400dc032",
+   "what": "the code cave"
+  }
+ ],
+ "guards": [
+  {
+   "va": 1074642994,
+   "bytes": "202f000c226f",
+   "what": "movel %sp@(12),%d0 -- the resume point"
+  },
+  {
+   "va": 1074643042,
+   "bytes": "43f942c64b3c",
+   "what": "lea 0x42c64b3c,%a1 -- the sound set's own table"
+  },
+  {
+   "va": 1074643120,
+   "bytes": "7264",
+   "what": "moveq #100,%d1 -- FxParameterSet keeps its bound"
+  },
+  {
+   "va": 1074643134,
+   "bytes": "41f942c649a8",
+   "what": "lea 0x42c649a8,%a0 -- the FX slot table"
+  },
+  {
+   "va": 1073964904,
+   "bytes": "2f6f000800044ef9400dc0b0",
+   "what": "FxParameterSet::slot_to_entry"
+  },
+  {
+   "va": 1073964888,
+   "bytes": "4eb9400dc02a",
+   "what": "jsr 0x400dc02a -- the sound set's vtable +0x50"
+  },
+  {
+   "va": 1073976762,
+   "bytes": "b28266cc",
+   "what": "cmpl %d2,%d1 ; bnes -- the loop"
+  },
+  {
+   "va": 1073976718,
+   "bytes": "2f0d",
+   "what": "movel %a5,%sp@- -- the set, into the +0x50 call"
+  },
+  {
+   "va": 1073976720,
+   "bytes": "20680050",
+   "what": "moveal %a0@(80),%a0 -- vtable +0x50"
+  },
+  {
+   "va": 1073976740,
+   "bytes": "c0af0038",
+   "what": "andl %sp@(56),%d0 -- the `want` subset test"
+  },
+  {
+   "va": 1074642116,
+   "bytes": "202f0004",
+   "what": "movel %sp@(4),%d0 -- entry -> +12, left untouched"
+  },
+  {
+   "va": 1074642152,
+   "bytes": "202f0004",
+   "what": "movel %sp@(4),%d0 -- entry -> +8, left untouched"
+  },
+  {
+   "va": 1073975422,
+   "bytes": "4fefffe4",
+   "what": "the sort comparator, which reads the group"
+  },
+  {
+   "va": 1076412356,
+   "bytes": "0000001e",
+   "what": "the ordering table's first entry, group 30"
+  },
+  {
+   "va": 1075018378,
+   "bytes": "752c004a",
+   "what": "mvsb %a4@(74),%d2 -- DEST, evaluator A"
+  },
+  {
+   "va": 1075018448,
+   "bytes": "3c80",
+   "what": "movew %d0,%fp@ -- the store we inherit"
+  },
+  {
+   "va": 1074639178,
+   "bytes": "45f9800068e4",
+   "what": "lea 0x800068e4,%a2 -- the mirror base"
+  },
+  {
+   "va": 1074643972,
+   "bytes": "41f9401f76f4",
+   "what": "lea 0x401f76f4,%a0 -- the table's only reader"
+  },
+  {
+   "va": 1074643992,
+   "bytes": "203c40210c9e",
+   "what": "movel #0x40210c9e,%d0 -- `ERR`, what a group above 30 gets"
+  },
+  {
+   "va": 1075803936,
+   "bytes": "40210c9e",
+   "what": "group 16 Chorus -> 'ERR', the fallback's pointer"
+  },
+  {
+   "va": 1075803940,
+   "bytes": "402107d2",
+   "what": "group 17 Reverb -> 'REV'"
+  },
+  {
+   "va": 1075803944,
+   "bytes": "40210919",
+   "what": "group 18 Delay  -> 'DEL'"
+  },
+  {
+   "va": 1075906428,
+   "bytes": "43485200",
+   "what": "'CHR' -- the string this build points group 16 at"
+  },
+  {
+   "va": 1075812808,
+   "bytes": "4021077c",
+   "what": "entry 111 'Chorus Mix Vol.' short name = 'CHR'"
+  },
+  {
+   "va": 1075813888,
+   "bytes": "402107d2",
+   "what": "entry 129 'Reverb Mix Vol.' short name = group 17's"
+  },
+  {
+   "va": 1075813348,
+   "bytes": "40210919",
+   "what": "entry 120 'Delay Mix Vol.'  short name = group 18's"
+  }
+ ],
+ "destinations": [
+  {
+   "group": "Chorus",
+   "parameters": [
+    "DPTH Depth",
+    "SPD Speed",
+    "HPF High-pass",
+    "WDTH Width",
+    "DEL Delay Send",
+    "REV Reverb Send",
+    "VOL Mix Volume"
+   ]
+  },
+  {
+   "group": "Delay",
+   "parameters": [
+    "TIME Time",
+    "X Ping-pong",
+    "WID Stereo Width",
+    "FDBK Feedback Gain",
+    "HPF High-pass",
+    "LPF Low-pass",
+    "REV Reverb Send",
+    "VOL Mix Volume",
+    "DEL Delay Overdrive"
+   ]
+  },
+  {
+   "group": "Reverb",
+   "parameters": [
+    "PRE Pre-delay",
+    "DEC Decay Time",
+    "FREQ Shelving Freq",
+    "GAIN Shelving Gain",
+    "HPF High-pass",
+    "LPF Low-pass",
+    "VOL Mix Volume",
+    "REV Reverb Routing"
+   ]
+  }
+ ]
+}

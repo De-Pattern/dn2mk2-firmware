@@ -19,6 +19,7 @@ from ..firmware.verify import verify
 from ..mods import ModError, check_compatible
 from ..mods import arpplocks as arpplocks_mod
 from ..mods import bootscreen as bootscreen_mod
+from ..mods import fxmod as fxmod_mod
 from ..mods import lfowaves as lfowaves_mod
 from ..mods import midiarp as midiarp_mod
 from ..mods import moddest as moddest_mod
@@ -33,6 +34,7 @@ REGISTRY = {transients_mod.ID: transients_mod,
             bootscreen_mod.ID: bootscreen_mod,
             lfowaves_mod.ID: lfowaves_mod,
             midiarp_mod.ID: midiarp_mod,
+            fxmod_mod.ID: fxmod_mod,
             arpplocks_mod.ID: arpplocks_mod}
 
 
