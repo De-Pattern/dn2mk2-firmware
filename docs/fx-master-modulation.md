@@ -2293,6 +2293,77 @@ case in the lookup.
   track and slot only. That is "not found", not "absent"; the full load path has
   not been read.
 
+## 26. The applier needs nothing; the record writer needs a lane — 2026-09-23
+
+§25 costed the job as "three gates". Reading the two routines properly moves
+cost **off** one of them and **onto** another, so the estimate is worth
+restating before anything is built.
+
+### The applier already does the right thing for track 16
+
+`0x400db092` takes a track and opens with:
+
+```
+movel #202,%d2      moveq #101,%d5
+mulsl %d0,%d2       mulsl %d0,%d5      lsll #4,%d1
+addil #34,%d2
+lsrl  #1,%d2        -> (202*track + 34)/2, the mirror word index
+```
+
+**202 is the mirror block stride and 34 is its offset** — this is
+`mirror[block][slot] = 0x800068e4 + 34 + 202*block + 2*slot` from §9, computed
+from the track directly. For `track = 16` it lands on **mirror block 16**, the
+global FX/Master block that `fxblock16` proved audible on the instrument. The
+`101 · track` is the lock-table region index, matching the `+20640` (= 80 × 258)
+displacement in §25.
+
+**No bound on the track appears in the prologue.** The loop that follows is
+bounded by a lock count at `%a2@(8)`, not by the track. So DNX's original
+observation is confirmed at its source rather than inferred from where it lands:
+*the applier's own arithmetic puts a track-16 record on the FX mirror with no
+change at all.* This is the one place in the chain that needs nothing.
+
+That is a static read of a prologue and the routine has not been run with
+`track = 16`. What is established is that no bound is present in the first 46
+instructions; a later one would still bite.
+
+### The record writer is the real work
+
+`0x400de862` is not the applier — it is the routine that **creates** a lock
+record for a given track and slot:
+
+```
+moveq #15,%d2  / cmpl %d1,%d2 / bcs  -> reject        track must be <= 15
+moveq #100,%d3 / cmpl %a1,%d3 / bcs  -> reject        slot  must be <= 99
+moveb %a3@(3,%a1:l:4),%a0@                            header id = map[slot]
+moveb %d1,%a0@(1)                                     header track
+... copies 256 value bytes
+```
+
+It reads the id straight out of `0x401fcf20` — the **lane-0** map — with no lane
+case at all. So this routine cannot emit a lane-16 record: not the track byte,
+not the id, not the bound. It needs a genuine new case using the lane-16 tables
+and the bound 69, not a constant widened from 15 to 16.
+
+### The revised cost
+
+| piece | state | work |
+|---|---|---|
+| lane-16 id ↔ slot tables | present and correct, measured | none |
+| translators `0x400dccc0` / `0x400dccfa` | lane-16 case present | none |
+| record converter `0x400de718` | lane-16 case present | none |
+| converter caller `0x4003d48c` | `moveq #15` | one byte |
+| **applier `0x400db092`** | **arithmetic already correct, no bound found** | **none** |
+| **record writer `0x400de862`** | **no lane case at all** | **a real cave** |
+| the UI offering FX parameters as lockable | **not read** | unknown |
+
+So "two bytes in three places" was wrong in both directions. Most of the chain
+is already built, the applier is better than hoped, and the record writer is
+worse — it is a cave, not a constant. **And the top of the chain, whatever
+decides that a parameter can be locked at all, has not been read yet.** That is
+the next static read and it is the one that decides whether this is a feature or
+a curiosity.
+
 ## 24. Exposed to users: `fxmod`, the mod and the page — 2026-09-23
 
 The feature worked on the instrument and existed only as a build script that
