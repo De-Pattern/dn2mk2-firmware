@@ -5199,3 +5199,77 @@ parameters out of. Then LFO4 and LFO1-3 agree by construction rather than by
 a comment -- which is the same argument that made `fxmod` trustworthy.
 
 **Not yet built and not yet measured.** The diagnosis is closed; the fix is not.
+
+### The readout was never calibrated, and that voided a day of readings
+
+**The LFO4 page renders the HIGH BYTE of the value a column returns.** A
+hardcoded `99` displayed as `-64`: `99` is `0x0063`, high byte `0`, and FADE
+maps `(raw >> 8) - 64`. SPH maps `raw >> 8` with no offset.
+
+Every diagnostic value returned during 2026-09-23 was in 0..15. **All of them
+have a high byte of zero, so all of them displayed identically no matter what
+they held.** These readings are withdrawn:
+
+| read as | actually showed |
+|---|---|
+| `lfo4_last_index` "always 0" | nothing — any value 0..255 looks the same |
+| `lfo4_index_max` "always 0" | nothing |
+| `lfo4_out_of_range` "always 0" | nothing |
+| `lfo4_block_track` "always 0" | nothing |
+| `lfo4_block_ptr` "stuck at 52" | only the pointer's high byte |
+
+**"The index is always 0" was never measured.** The whole evening's chain --
+index stuck at zero, therefore the stub reads the wrong slot, therefore
+`%sp@(72)` is wrong, therefore `%a4` is wrong -- rested on a readout that could
+not have shown otherwise.
+
+`lfo4_refreshes` appeared to work only because a free-running counter crosses
+high-byte boundaries. **That false positive is what made the channel look
+sound**, and it is why the calibration was never run: one column visibly moved,
+so the instrument was assumed good.
+
+**The rule, and it cost six flashes:** *before reading a number off an
+instrument you built, put a known constant through it.* The control belongs on
+the measuring device, not only on the experiment. Shifting values into the high
+byte (`value << 8`) makes them readable; a constant in a second column decodes
+the mapping instead of assuming it.
+
+### With the readout calibrated, the `%a4` fix is confirmed working
+
+`lfo4_row_for_block` now takes `%a4`, which holds the per-track mirror pointer
+on entry to the stub -- Ghidra's `local_18 = param_1 + 0x22`, advanced 202 per
+track, with `iVar12 = local_18 - 0x22` being the very instruction `a4_top`
+replaces, and our own stub source saying the same thing in a comment nobody had
+checked.
+
+Measured: **SPH reads 15 on every track**, which is `TRACKS - 1`. The page reads
+the global after the tick has walked all sixteen tracks, so it catches the last
+one. **The derivation sweeps 0..15**, so the block pointer genuinely advances,
+`%a4` genuinely is the per-track pointer, and every track's row is refreshed
+under its own index. The prediction "SPH reads 15 whatever track you are on"
+was made before the test and held.
+
+### And the bug is still there, which moves it downstream
+
+Rows are right and modulation is still gated on `voice == track`. The
+decompiler shows exactly one candidate:
+
+```c
+uVar3 = param_3 >> (uVar13 & 0x3f) & 1;   /* an enable bit per track */
+```
+
+`param_3` is an **enable mask**, tested bit by bit against the track counter,
+and it sits at `%sp@(88)` at the function entry where the disassembly shows it
+loaded (`movel %sp@(88),%d5` then `asrl %d1,%d5`).
+
+**Every harness in `scripts/` passes `0xFFFF` for it.** `emu_lfo4_vs_lfo3.py`
+calls `m.call(EVAL_A, buf, rate, 0xFFFF, 0xFFFF, ...)` -- all bits set, gate
+held open. **So no offline probe could ever reproduce a gating bug**, which is
+why LFO3 and LFO4 came back byte-identical over 240 frames while the instrument
+disagreed. The harness answered the question with the gate wedged open.
+
+If that mask carries the **voice's** bit rather than the track's, then track `n`
+is enabled only when `n` equals the voice -- the owner's law exactly, with no
+coincidence left in it. **Unmeasured.** The next read captures `param_3` at the
+function entry, which is a different site from the one this session kept getting
+wrong.

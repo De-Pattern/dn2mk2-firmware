@@ -50,6 +50,56 @@ u32 lfo4_refreshes, lfo4_copies_in;
  * puts it on the page. */
 u32 lfo4_hits, lfo4_misses;
 int lfo4_last_lookup;
+
+/* **The index the engine actually hands us, recorded rather than inferred.**
+ *
+ * On 2026-09-23 the owner found LFO4 modulating only on one voice, and the
+ * voice number follows the *track index* of whichever track has LFO4
+ * configured -- two configured tracks gave two working voices, on any track.
+ * So the row is being selected by something that is not the track, and
+ * `lfo4_refresh`'s only guard is `track >= TRACKS`, which any 0..15 passes.
+ *
+ * Both call sites name their register in a comment in `build_lfo4_tick7.py`
+ * and **neither was ever measured**. That is the bug's whole origin, so this
+ * one is measured: whatever arrives is stored here and put on the page. */
+u32 lfo4_last_index;
+
+/* **The highest index ever handed to us, because "the last one" was clobbered.**
+ *
+ * The first attempt recorded only the most recent call. Both patch sites call
+ * this function, so a site that fires constantly with 0 hides a site that fires
+ * occasionally with the real index -- and the page duly read 0 for ever while
+ * the instrument was plainly selecting rows by voice. A running maximum cannot
+ * be hidden that way: if any call ever arrives with 10, this reads 10 and stays
+ * there. */
+u32 lfo4_index_max;
+
+/* **The DEST of the row we actually hand back, recorded at the moment we hand
+ * it back.**
+ *
+ * Two measured facts do not fit together: the index reaching this function is
+ * always 0, so only row 0 is ever populated -- and row 0 is filled from track
+ * 1's sound, which has no LFO4 settings, so its DEST should be None and LFO4
+ * should never modulate anything. Yet on the instrument it modulates on the
+ * voice matching whichever track has LFO4 configured.
+ *
+ * So either the row is not what this function thinks it is, or the evaluator
+ * is not reading the row this function returns. This records the first half:
+ * the destination code sitting in the row at the moment it is returned. If it
+ * is None while the instrument is plainly modulating, the evaluator is getting
+ * LFO4's parameters from somewhere other than here. */
+u32 lfo4_row_dest;
+
+/* **The calls that never get counted, which may be all the interesting ones.**
+ *
+ * The range guard returns before `lfo4_refreshes++`, so a call with an index of
+ * 16 or more is invisible to every counter here -- it just gets row 0's base
+ * back. `%a5` at evaluator A's site is an *address* register, and an address
+ * passed as an index would do exactly that, every time, leaving the visible
+ * counters reading a steady 0 while the real traffic went unrecorded. Measured
+ * rather than assumed, because assuming what a register holds is the mistake
+ * this whole bug is made of. */
+u32 lfo4_out_of_range;
 static u32 seen_sound[TRACKS];
 static u32 seen_generation[TRACKS];
 
@@ -72,6 +122,71 @@ u32 lfo4_sound_of(u32 track)
     return base ? base + DN2_SOUND_AT + track * DN2_SOUND_STRIDE : 0;
 }
 
+/* The mirror geometry, from `docs/fx-master-modulation.md` §9 and the
+ * evaluator's own arithmetic at `0x400db092`: `202*block + 34`. */
+#define MIRROR_BASE   0x800068E4u
+#define MIRROR_AT     34u
+#define MIRROR_STRIDE 202u
+
+/* What the block pointer resolved to, for the page. A wrong answer here is
+ * visible instead of silent, which is the whole lesson of this bug. */
+u32 lfo4_block_track = 0xFFu;
+u32 lfo4_block_ptr;                  /* the last block, for the page */
+u32 lfo4_block_base = 0xFFFFFFFFu;   /* the lowest block seen = track 0's */
+
+u32 lfo4_refresh(u32 track);
+
+/* -> the row for the track whose mirror block this is.
+ *
+ * **Why a pointer and not an index.** Both patch sites used to pass a register
+ * named "the track index" in a comment that was never measured. `%a5` turned
+ * out to be zeroed at the evaluator's entry and only advanced by the per-track
+ * `outer` stub, which does not run here -- so the index was 0 on every track,
+ * on every voice, for months, and LFO4 read one fixed row.
+ *
+ * `%sp@(56)` is the pointer the stock code uses for LFO1-3: `outer` advances it
+ * by 202 per track, and `a4_bottom` restores `%a4` from it. Deriving the track
+ * from it means LFO4 and LFO1-3 cannot disagree about which track they are on,
+ * because they are reading the same pointer. That is a guarantee by
+ * construction rather than by a comment, which is the point. */
+u32 lfo4_row_for_block(u32 block)
+{
+    u32 track;
+
+    /* **`%a4` already holds it, and Ghidra is what showed that.**
+     *
+     * Two stack offsets were tried and both were wrong -- `%sp@(72)` read a
+     * constant 52 on the instrument -- because `a4_top` and `a4_bottom` are
+     * patched at different addresses and the stock code between them moves the
+     * stack. Guessing frame layout by hand cost five flashes.
+     *
+     * The decompiler settles it. Evaluator A keeps the per-track mirror pointer
+     * in a local:
+     *
+     *     local_18 = param_1 + 0x22;        // the buffer + 34
+     *     do {                               // once per track
+     *       iVar12 = local_18 + -0x22;       // the instruction a4_top replaced
+     *       ... *(short *)(iVar12 + 0x44)    // %a4@(68), the LFO reads
+     *
+     * So the displaced `lea %a4@(-34),%a4` means **`%a4` holds that pointer on
+     * entry to the stub** -- which our own stub source already said in a
+     * comment, and which nobody checked. It is a register, not a stack slot,
+     * so there is no frame layout left to get wrong.
+     *
+     * The base is still unknown, and it must not be assumed a second time: the
+     * buffer is low in RAM, not the global mirror. `local_18` advances 202 per
+     * track, so the lowest value ever seen is track 0's and every other track
+     * is a whole number of strides above it. */
+    if (block < lfo4_block_base)
+        lfo4_block_base = block;
+    lfo4_block_ptr = block;
+    track = (block - lfo4_block_base) / MIRROR_STRIDE;
+    if (track >= TRACKS)
+        track = 0;
+    lfo4_block_track = track;
+    return lfo4_refresh(track);
+}
+
 /* -> the address of this track's row, current as of now. */
 u32 lfo4_refresh(u32 track)
 {
@@ -80,9 +195,14 @@ u32 lfo4_refresh(u32 track)
     u16 *values;
     u32 k;
 
-    if (track >= TRACKS)
+    if (track >= TRACKS) {
+        lfo4_out_of_range++;
         return (u32)lfo4_rows;            /* never index past the table */
+    }
     lfo4_refreshes++;
+    lfo4_last_index = track;
+    if (track > lfo4_index_max && track < TRACKS)
+        lfo4_index_max = track;
     sound = lfo4_sound_of(track);
     generation = ext_generation;
     if (sound == seen_sound[track] && generation == seen_generation[track])
@@ -99,6 +219,7 @@ u32 lfo4_refresh(u32 track)
         lfo4_misses++;
         lfo4_last_lookup = -1;
     }
+    lfo4_row_dest = (u32)(((u16 *)row)[3] >> 8) & 0x7Fu;
     for (k = 0; k < EXT_PARAMS; k++)
         ((u16 *)row)[k] = values ? values[k] : ext_default[k];
 #ifdef LFO4_FORCE_ROW
