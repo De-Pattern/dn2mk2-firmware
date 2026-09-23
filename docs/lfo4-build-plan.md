@@ -4921,3 +4921,50 @@ Reading (1) would also explain the whole history at a stroke: the panel, the
 table, the key, the row and the evaluator are all correct — as measured — and
 the contribution is simply being written somewhere the sound does not come
 from.
+
+#### The two-buffer lead collapsed — 2026-09-23
+
+Recorded because a dead lead is a signal, and because it failed in two ways
+this file has warned about before.
+
+**The claim was:** the evaluator's mirror base is loaded from a pointer at
+`0x4058f39c` (`moveal 0x4058f39c,%a2` at `0x40027120`) while
+`csrc/lfo4/meter.c` reads the constant `0x800068e4`, so the two might be
+different memory and a fixed-address reader would see a sweep the voice never
+hears.
+
+**It is wrong twice.**
+
+1. **`0x4058f39c` is not a pointer, it is a counter.** Every reference to it in
+   the image is three instructions apart and says so:
+   `movel 0x4058f39c,%d0 ; addql #1,%d0 ; moveq #31,%d1 ; andl %d0,%d1 ;
+   movel %d1,0x4058f39c` — `(x + 1) & 31`. The load at `0x40027120` copies it
+   straight into `%d5` and leaves `%a2` free. This is the `movea.l` trap in
+   `docs/instruments.md`, third time: **`movea.l` does not prove a pointer.**
+2. **The probe that "confirmed" it measured nothing.** `emu_mirror_base.py`
+   read `0x00000000` and reported "the evaluator and the page are not looking
+   at the same mirror". A base of zero would break LFO1-3 as well, so the value
+   was never the live one — the snapshot had not run whatever sets it. Its own
+   guard said "frame handler entered 64 time(s)", which counted the harness's
+   loop rather than real entries. **A null is only evidence once the input is
+   known to arrive**, and this probe asserted the guard without implementing it.
+
+**What is actually there:** `%a2` is set at `0x40027194` from `%d0`, the return
+of `jsr 0x400db12a` — the routine that holds `lea 0x800068e4,%a2` internally
+and which `fxblock16` already proved reaches the DSP. So the evaluator's mirror
+is derived from the same `0x800068e4` the page reads, and the two-buffer
+reading has no support. Reading it further stalls: the decoder reports
+"Address 0x400db166 is out of bounds" inside that routine, and chasing a return
+value through an undecodable span by eye is the chase
+`docs/FEATURE-PLAYBOOK.md` §2.4 exists to stop.
+
+**So the contradiction stands unexplained**: LFO4's cell sweeps, driven by LFO4
+alone with LFO3's depth at centre, and the filter does not move.
+
+The cheapest remaining discriminator is still the one on the instrument, and it
+is a manipulation rather than an observation: put LFO3 on the same destination
+with its depth **up** so its sweep is audible, then raise and lower **LFO4's**
+depth. If the audible sweep changes, both contributions are in the cell the
+voice reads and the question becomes why one of them is usually inaudible; if
+it does not change while `SPD` still shows movement, they are different memory
+after all and the search resumes with that established rather than guessed.
