@@ -1723,3 +1723,106 @@ produce it just as well.
 
 Not a blocker: the destinations work. Recorded here so it is not lost, and
 handed to the browser work rather than guessed at.
+
+## 20. Backlog §4 is delivered — `fxbrowser2` works on the instrument, 2026-09-23
+
+> "works :) I can modulate with the LFOs the parameters."
+
+**The FX destinations are selectable from the `DEST` list and they modulate.**
+Route A is complete end to end: an LFO on a synth track can be pointed at any of
+the 24 Chorus, Delay and Reverb parameters by name, and the value reaches the
+DSP through mirror block 16.
+
+The fix was §18's four-site correction. Two builds were spent on one question,
+and the reason is written down in §18 rather than smoothed over: a scan window
+of twelve bytes instead of sixteen.
+
+### One defect remains, and it is cosmetic
+
+> "chorus section appears like ERR in the modal."
+
+The **section header** for Chorus draws as `ERR`. The entries under it are
+correct and they work.
+
+## 21. The `ERR` header: what is established, and the one question that splits it
+
+### `ERR` is a failed lookup, not a damaged string
+
+`ERR` is the **short name (word 14) of entries 1 and 2** — the dead `Error`
+records at the head of the parameter table. Nothing else in the image produces
+it. So whatever names that section resolved to **entry 0**, and the header path
+took its name from a record index it did not have.
+
+### The strings Chorus needs all exist and are correct
+
+| checked | result |
+|---|---|
+| the per-entry long names | **correct** — `emu_destlist.py` resolved 105 `'Depth'`, 106 `'Speed'`, 107 `'High-pass'`, 108 `'Width'` straight out of a running machine |
+| the records' **page label**, word 13 | **`'Chorus'`** at `0x402105de`, in exactly the same form as Delay's `'Delay'` and Reverb's `'Reverb'` |
+| the boot-built page descriptor | **exists** — `0x400c9e24` constructs `{name, entry list}` objects, `'Reverb'` at `0x42432f1c` and `'Chorus'` at `0x42432f48` |
+
+So this is not a missing Chorus string. The string is there three different ways.
+
+### The `+44` edit is exonerated, by naming the reads rather than by absence
+
+Chorus is the only group whose records this work wrote, so it is the obvious
+suspect and it deserves better than a shrug. §2 enumerated **all nine** consumers
+of `+44`:
+
+- **five filter-cascade sites** (`0x400397c8`, `0x40039ad0`, `0x40039cf2`,
+  `0x40039ef0`, `0x400672fa`) — each is `btst #18` / `btst #17` / `btst #16`;
+- **three `andil #0x70000` tests** (`0x40067502`, `0x400676e0`, `0x400679e2`) —
+  the "is this a `DEST` record" question;
+- **one getter** (`0x400dc32c`), which feeds the list builder's subset test.
+
+Every one of the first eight reads **bits 16–18 only**. Chorus's `+44` went from
+`0x00000000` to `0x00001e00`, which sets **bits 9–12** and leaves bits 16–18 at
+zero. **So all eight return exactly what they returned before the edit**, bit for
+bit. The ninth is the subset test, and that change is the feature.
+
+The scope of that negative, stated: it covers every read of `+44` that §2's
+resolution of the parameter-record base found — fifty `lea` and two `addal`
+sites over the whole objdump. It would not cover a consumer that received a
+record pointer as an argument from elsewhere; the getter is exactly such a
+hand-off and its callers are the list builder's four.
+
+This also agrees with the standing evidence: §15 records that the **identical**
+`0x1e00` edit was flashed on 2026-09-12 and changed nothing.
+
+### So what it most likely is, stated as a hypothesis
+
+The FX groups were **never enumerated into a destination list before this
+work**, so no section header for group 16, 17 or 18 has ever been drawn on this
+instrument. The modal names a section by some lookup that has no answer for
+those groups and falls through to entry 0.
+
+The boot-built page descriptors make that concrete and plausible: their entry
+lists legitimately contain **zeros** for empty positions on a page — Reverb's
+array at `0x42432f20` holds `[123, 124, 125, 126, 127, 128, 0, 0, 130]` in
+**stock**. A header that resolves its title by indexing one of those lists and
+landing on a zero slot gets entry 0, and entry 0's short name is `ERR`.
+
+**That would be a pre-existing gap newly exposed, not damage** — which is the
+answer this section can support, and it is not yet proven.
+
+### What is not established, and the one question that settles it
+
+**Whether Delay and Reverb draw their headers correctly.** The owner named only
+Chorus, but he was reporting what he noticed, not answering that question.
+
+- **If all three show `ERR`**, the cause is generic to newly enumerated FX
+  groups and the fix is one lookup, in one place.
+- **If only Chorus does**, something distinguishes group 16 — it is the first FX
+  group in rank order (11, before Reverb 12 and Delay 13), so it is the first
+  header drawn after the transition out of group 15, and a first-transition bug
+  is a different shape of fault entirely.
+
+Those two need different fixes, and **one look at the modal tells them apart at
+no cost**. Guessing between them would be a third build on a cosmetic defect,
+which is the chase §18 already paid for once.
+
+### Deliberately not fixed here
+
+No build was made for this and **no gates were run, because nothing was built**.
+The destinations work; the header is polish. The next step is one observation,
+not a patch.
