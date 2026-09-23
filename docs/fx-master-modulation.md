@@ -2364,6 +2364,62 @@ decides that a parameter can be locked at all, has not been read yet.** That is
 the next static read and it is the one that decides whether this is a feature or
 a curiosity.
 
+## 27. The map is the lockability table — 2026-09-23
+
+§26 ended with "whatever decides a parameter is lockable has not been read, and
+it decides whether this is a feature or a curiosity". Read. **There is no
+separate gate. The slot → id maps are the lockability table**, and `id 0` is
+the marker for *not lockable*.
+
+| | slots | map to id 0 |
+|---|---|---|
+| lane 0, `0x401fcf20` | 100 | **2** — slots 0 and 65 |
+| lane 16, `0x401fcd50` | 70 | **25** — slots 0..24, then nonzero for 25..69 |
+
+Two independent things agree with that reading and neither was fitted to it:
+
+- **DNX's corpus.** 2,041 explained lock records across 27 sources: ids run
+  **1..106, never 0**. If `0` were an ordinary id it would appear; it never
+  does, on any machine, in 3,277 patterns.
+- **The record creator writes the id straight from the map** — `moveb
+  %a3@(3,%a1:l:4),%a0@` at `0x400de8c0`, no arithmetic, no offset. So a slot
+  whose map entry is `0` produces a record with id `0`, and DNX's corpus says
+  such a record is never written.
+
+**Stated at its actual strength: the convention is visible in the data and
+confirmed by the corpus, but no `!= 0` test has been found in code.** The record
+creator does not perform one. Either the check lives in whatever offers the
+parameter to the user, or those two slots are simply never reachable from the
+panel. That distinction does not change the design, but it is not measured and
+should not be written as though it were.
+
+### What this means for the feature
+
+Lane 16's map is nonzero for exactly slots 25..69 — the FX and Master block, and
+nothing else. **The lockability table for FX parameters already exists, already
+covers the right slots, and already excludes the wrong ones.** That was the
+question §26 said would decide feature or curiosity, and it falls on the feature
+side.
+
+### The whole job, finally costed
+
+| piece | work |
+|---|---|
+| lane-16 id ↔ slot tables | none — present, measured, correct |
+| lockability | none — the tables *are* it |
+| translators `0x400dccc0` / `0x400dccfa` | none — lane-16 case present |
+| record converter `0x400de718` | none — lane-16 case present |
+| applier `0x400db092` | none — `202·block + 34` already lands on block 16 |
+| converter caller `0x4003d48c` | **one byte** — `moveq #15` → `#16` |
+| record creator `0x400de862` | **a cave** — no lane case at all |
+| the panel passing track 16 when editing FX | **not read** — the last unknown |
+
+Everything below the panel is either already built or one cave plus one byte.
+The remaining unknown is at the top: what the panel passes as the track when the
+user holds a trig on the FX page. `0x4003d398` is inside `VoiceConfig` — the
+class that owns the mirror, named by its own RTTI at `0x40213111` — and that is
+where the next read starts.
+
 ## 24. Exposed to users: `fxmod`, the mod and the page — 2026-09-23
 
 The feature worked on the instrument and existed only as a build script that
