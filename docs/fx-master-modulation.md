@@ -2489,6 +2489,41 @@ explain themselves. So the statement is **"no written record has ever carried id
 255 on the first pass. Recorded because a reader meeting "never 0" without the
 gate would be entitled to doubt it.
 
+## 29. The last unknown named, and its size — 2026-09-23
+
+The remaining question from §27 is *what the panel passes as the track when a
+user holds a trig on the FX page*. Partly read, and the useful result is that
+**it is a bigger read than one function**, which is worth recording before
+someone budgets it as small.
+
+What is established:
+
+- `0x4003d398` belongs to **`PatternParamLocks`** — it passes that name to a
+  logging or registration call at `0x4003d3d0`, alongside a table of pointers at
+  `0x401dc618`. It is the p-lock manager's method, not a `VoiceConfig` one;
+  `VoiceConfig` appeared because §26 read a neighbouring string. **Corrected
+  here rather than left standing.**
+- The track gate `moveq #15 / cmpl %d3` at `0x4003d48c` is **inside** that
+  method, so it sits below the panel, not at it.
+- Its two direct call sites (`0x4003bf20`, `0x4003c08a`) are inside
+  `0x4003be0c`, which has four callers of its own, and the site read so far
+  pushes the object plus two zeroed longwords — an init or clear, not a user
+  edit.
+
+So the chain from a trig-hold to a lock record runs at least four frames deeper
+than the routines §25–§28 measured, through an event dispatch (`cmpil #2112,%d3`
+selects on a message code at `0x4003bf04`). **This is a UI event-path read, not
+a table read**, and the techniques that made §25–§28 cheap — a constant, a
+table, a bound, an emulator call with a control — do not apply to it in the same
+way. The honest instrument for it is the emulator driving the panel, which
+`docs/instruments.md` already warns needs encoder-push-and-turn and a control
+beside every positive.
+
+**Nothing below the panel is waiting on this.** The tables, the translators, the
+converter, the applier and the lockability table are all measured. What this
+read decides is only whether a user can *create* an FX lock from the front
+panel, or whether the feature would need its own path built.
+
 ## 24. Exposed to users: `fxmod`, the mod and the page — 2026-09-23
 
 The feature worked on the instrument and existed only as a build script that
