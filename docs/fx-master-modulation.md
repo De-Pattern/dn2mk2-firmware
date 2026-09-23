@@ -1677,3 +1677,49 @@ to establish is which of the six sites the browser's confirm path actually
 reaches — by watching `0x400dbcc4`'s callers under the emulator with a real
 panel event, which this harness cannot yet produce — rather than by patching
 more sites.
+
+## 17. The browser works — backlog §4 delivered, 2026-09-23
+
+`fxbrowser2_DN2_1.11.syx` on the instrument:
+
+> "works :) I can modulate with the LFOs the parameters."
+
+**So §4 is delivered.** An LFO can be pointed at a Chorus, Delay or Reverb
+parameter from the `DEST` list, on any LFO of any track, and it modulates.
+
+The chain, every link measured or heard:
+
+| | how it was settled |
+|---|---|
+| the FX/Master parameters live in mirror block 16 | five independent reads of ColdFire code (§4c) |
+| the DSP acts on that block | `fxblock16`, a sustained sweep on hardware (§9) |
+| a `DEST` code above 100 can reach it | one cave, one `lea`, verified address-by-address against a stock control (§10, §12) |
+| what arrives is an LFO, not a ramp | `fxdest` on hardware, responding to `DEP` and `SPD` (§14) |
+| the codes can be **chosen** | `fxbrowser2` on hardware (this section) |
+
+**And it took two builds because of a counting error of ours**, kept in §16 with
+the reasoning: §10 scanned for `jsr 0x400dbcc4` with an **adjacent** `lsl.l #8`
+and reported two conversion sites. Six exist; four separate the call from the
+shift by an intervening `jsr 0x401880cc`. `fxbrowser` taught three and missed
+four, so choosing an FX entry stored a number the redraw could not find, the
+cursor reset to the top, and the 21 stock Mod destinations behind the insertion
+point went out of reach with it. `scripts/scan_dest_values.py` replaces the
+count with a rule -- **a site that shifts is producing a value and needs the
+code; a site that does not shift is using `record+12` as an index and must keep
+the raw number** -- and prints the count against the search window so the
+judgement is visible rather than asserted.
+
+### One defect outstanding, and it is cosmetic
+
+> "chorus section appears like ERR in the modal."
+
+Chorus's entries are the ones this work had to open: Delay's and Reverb's 17
+records already carried `0x1e00` in `+44` and needed no edit, while Chorus's
+eight carried `0`. So the group that shows `ERR` is exactly the group whose
+records were edited, which is where to look first -- but it is **not** yet
+established that the edit is the cause, and `ERR` is the name of the dead
+records at the head of the table, so a name lookup landing on entry 0 would
+produce it just as well.
+
+Not a blocker: the destinations work. Recorded here so it is not lost, and
+handed to the browser work rather than guessed at.
