@@ -5627,3 +5627,82 @@ On the instrument that answers, live and while the owner moves tracks:
 
 That is the first hardware test of the frame read, and it is worth one flash
 because it discriminates rather than confirms.
+
+## The offset is measured, the array is empty, and that retires a hypothesis
+
+**2026-09-24, emulator + instrument, both with controls.**
+
+### The offset, from an instrument that knew the answer first
+
+`scripts/emu_lfo4_frame.py` calls evaluator A itself, so it *chooses* the
+addresses it passes as `param_5` and `param_6` and then searches the frame our
+stub is handed for those exact values. Known answer on both arms:
+
+```
+param_5 = 0x46a10d00   param_6 = 0x46a10e00   (chosen by the harness)
+frame   = 0x469fffa0   (16 calls, 1 distinct)
+
+param_1: frame + 100
+param_5: frame + 116
+param_6: frame + 120
+```
+
+So `%sp@(96)` and `%sp@(100)` reach our stub at **`frame + 116` and
+`frame + 120`** -- exactly the pair the hardware sweep had singled out as the
+only adjacent valid pointers. **The coincidence reading is dead**: those words
+are the arguments, not two stack values that happened to look like addresses.
+That mattered, because "looks like a pointer" is the same trap as `movea.l`
+not proving a pointer.
+
+### And the array is empty
+
+With the offsets confirmed, `lfo4-voice`'s hardware reading stands as a result
+rather than a maybe. 468 bursts, `probe_a` = 99 on every one, marker sweeping
+all 128, each of the sixteen tracks sampled ~29 times, sequencer running, notes
+sounding:
+
+```
+track 0..15   param_5[track] = -1     param_6[track] = -1
+```
+
+**Every track, every sample, both arrays.** Zero bursts where
+`param_5[track] == track`.
+
+### What that retires
+
+The earlier section called `param_5[track]` "**the voice currently allocated to
+that track**". ~~That~~ is too strong and the instrument says so: if it were the
+current voice it could not read -1 on every track while notes are sounding.
+
+What it actually is follows from the caller's own three gates at `0x400271a2` --
+a per-track enable bit at `%fp@(-172)`, a non-zero field at `+326` of the
+track's object, and a non-negative result from `0x4002b1f4` -- and from what
+evaluator A does with a non-negative value: **a 40-byte record copy**. An array
+that is -1 almost always and names a voice occasionally, feeding a block that
+copies one LFO record, is **the voice whose state must be migrated this frame**,
+not the voice that is playing. It is the phase-carrying path for a voice
+changing hands, and in steady state it correctly does nothing.
+
+So: **the restore/backup copy block essentially never runs**, and it is not the
+path by which LFO4 reaches a voice. Two hypotheses die together -- the state
+machinery (already cleared as fully patched) and the voice array.
+
+### Where this leaves the hunt
+
+Everything in evaluator A's steady-state path that has now been read is
+**track-indexed**: the mirror at `%sp@(52)` (202/track), the live state array at
+`%sp@(56)` (160/track in our builds, `outer` advancing both in lockstep with
+`%a5`), and LFO4's parameter row from `lfo4_rows[track]`. No voice index
+survives in the per-frame path at all.
+
+**Which makes the reported symptom stranger, not clearer**, and that is an
+honest position rather than a discouraging one. If nothing in this function
+knows about voices, then the track -> voice coupling the owner measured happens
+**after** evaluator A -- in the frame the engine builds (`0x400274ba`) and sends
+(`0x400cf7be`), which is where a per-track mirror has to become per-voice DSP
+state. That is the next thing to read, and it has never been looked at.
+
+**What is now solid and should not be re-derived:** evaluator A's frame and its
+seven arguments; `param_5`/`param_6` at `frame + 116` / `frame + 120`; that both
+are -1 in steady state; and that the telemetry channel reads real arguments
+faithfully, which is an instrument the project did not have this morning.
