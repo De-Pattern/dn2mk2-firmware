@@ -3486,3 +3486,45 @@ prerequisite, not a nice-to-have.**
 
 **Not started.** Nothing here is measured; this is a queued method, not a
 finding.
+
+---
+
+## 22. Index the firmware into a database and traverse it, instead of re-grepping
+
+**Source.** digikit's author, 24 September 2026, reporting what replaced a pile
+of one-off scripts there: **one Python script that dumps ColdFire and SHARC into
+two separate SQLite databases**, plus a traversal script built on
+[networkx](https://networkx.org/). Their report, in our words: the agents had
+been hand-rolling Python and shelling out to the `sqlite` CLI, and the indexed
+form navigates the firmware *much* faster. They still steer it, but the steering
+is over a graph rather than over a grep.
+
+**Why it lands here.** This session is the argument for it. Finding
+`DN2_MIDI_TX` took a scan, a cross-check and an emulator run. Finding which
+call sites reach `lfo4_row_for_block` has been re-derived by grep more than
+once, because there is nowhere to *keep* the answer. Every cross-reference
+question we ask — who calls this, what reads this address, which of these
+branches is reachable from the tick — is a graph query we currently answer by
+re-reading 3 MB.
+
+**What it would hold.** The nodes we already extract separately and throw away:
+functions and their bounds, call edges (`JSR.L` targets, and the indirect ones
+we resolve by hand today), the RTTI/mangled-name symbols, the parameter table's
+320 records, the mirror and lane tables, and the string pool. Two databases, not
+one — the ColdFire main OS and the SHARC image are different address spaces and
+different ISAs, and merging them would invite exactly the kind of silent
+cross-space confusion we have already paid for once.
+
+**What it would fix that is specific to us.** Backlog item 21 is blocked on the
+symbol-resolution cache — ~76% of a short emulator run goes into
+`emu/symbols.py`. A symbol database *is* that cache, so one piece of work
+unblocks both.
+
+**Open, and honest about it.** We have not seen their script; this is their
+report plus our reasoning about our own repo, not a measurement. Before adopting
+we would want to know the dump's runtime, whether the schema survives a firmware
+version bump, and whether networkx's traversal is actually the win or the SQLite
+index is. digikit is **GPL-2.0** — if anything of ours lands there it must not
+carry selache (GPL-3.0) lineage, the standing rule.
+
+**Not started.**
