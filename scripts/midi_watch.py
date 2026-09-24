@@ -46,6 +46,13 @@ from midi_probe import InPort, list_ports  # noqa: E402
 STATUS = {0x80: "note-off", 0x90: "note-on", 0xA0: "aftertouch",
           0xB0: "cc", 0xC0: "program", 0xD0: "pressure", 0xE0: "bend"}
 
+# 0xF8..0xFF are system real-time: they carry NO channel. The first version of
+# this decoder masked them like channel messages and reported the clock as
+# "ch9", because 0xF8 & 0x0F is 8. Calibrating against the instrument's own
+# output is what caught it -- the same reason this file exists.
+SYSTEM = {0xF8: "clock", 0xFA: "start", 0xFB: "continue", 0xFC: "stop",
+          0xFE: "active-sense", 0xFF: "reset"}
+
 # The CC map, loaded from the SAME file the firmware header is generated from
 # (`src/dnfw/telemetry/channels.json`). Written twice, a decoder and an emitter
 # drift and nothing says so -- which is the shape of the bug that made a day of
@@ -65,6 +72,8 @@ def decode(raw: str) -> str:
     parts = [int(b, 16) for b in raw.split()]
     if not parts:
         return ""
+    if parts[0] >= 0xF8:
+        return f"{SYSTEM.get(parts[0], f'system {parts[0]:#04x}')}"
     status, chan = parts[0] & 0xF0, (parts[0] & 0x0F) + 1
     kind = STATUS.get(status, f"status {parts[0]:#04x}")
     d1 = parts[1] if len(parts) > 1 else 0
@@ -83,6 +92,9 @@ def main() -> int:
     p.add_argument("--seconds", type=float, default=30.0)
     p.add_argument("--cc-only", action="store_true",
                    help="drop notes and clock; keep control changes")
+    p.add_argument("--no-clock", action="store_true",
+                   help="keep everything except the 24-per-quarter-note clock, "
+                        "which is ~96%% of the traffic at 120 BPM")
     args = p.parse_args()
 
     if args.list:
@@ -105,6 +117,8 @@ def main() -> int:
                 raw = port.shorts.pop(0)
                 first = int(raw.split()[0], 16)
                 if args.cc_only and (first & 0xF0) != 0xB0:
+                    continue
+                if args.no_clock and first in (0xF8, 0xFE):
                     continue
                 line = decode(raw)
                 if line:
