@@ -155,6 +155,53 @@ u32 lfo4_refresh(u32 track);
  * from it means LFO4 and LFO1-3 cannot disagree about which track they are on,
  * because they are reading the same pointer. That is a guarantee by
  * construction rather than by a comment, which is the point. */
+/* -> the byte `param_5[track]` would hold if `w` were `param_5`, or a sentinel.
+ *
+ * **The static read says where to look; this says whether it is right.**
+ * Evaluator A takes seven arguments (the call site's `lea %sp@(28),%sp` counts
+ * them) and `param_5`, at its `%sp@(96)`, is a pointer to a sixteen-byte array
+ * holding **one signed byte per track: the voice allocated to that track, or
+ * -1**. The caller builds it at `0x400271a2` -- both arrays default to -1 (`st
+ * %d4`) and a real value is written only where `0x40138664(bit)` returns the
+ * same object as `0x4002b22e(track)`, which is what makes the byte a voice.
+ *
+ * What is *not* known is where that argument sits relative to this stub's
+ * `%sp`. The stub is reached by `jmp` from inside evaluator A, and the frame
+ * map read on the instrument does not line up with the arithmetic cleanly
+ * enough to name one offset. Three offsets have now been guessed at this frame
+ * and all three were wrong, so this one is not guessed: the existing walk
+ * already visits all 32 words of the safe window, and each is asked the same
+ * question. Whichever word is `param_5` will answer with a small number that
+ * follows the voice allocation display; the rest will answer with a sentinel.
+ *
+ * **The guard, and why it needs no constant.** `param_5` points at
+ * `%fp@(-88)` in *the caller's* frame, so it is a stack address above this one
+ * and close to it. `frame` is itself a stack address, so the check is
+ * self-referential -- nothing hardcoded to be wrong when the task stack moves.
+ * A word failing it is never dereferenced.
+ *
+ * **A read is not free.** Extending the walk to +508 killed the instrument's
+ * MIDI output on 2026-09-23 -- audio kept playing, notes and telemetry both
+ * stopped. This adds no reach at all: the same 32 words, plus one dereference
+ * that must first prove it points just above our own stack pointer. */
+#ifdef LFO4_TELEMETRY
+#define TLM_V_NOTPTR  126u    /* the word is not a plausible frame pointer */
+#define TLM_V_NONE    127u    /* it is, and the track has no voice (-1) */
+
+static u8 voice_at(u32 w, u32 track, u32 frame)
+{
+    signed char v;
+
+    /* above us, and within one frame's reach: the caller's locals, nothing else */
+    if (w <= frame || (w - frame) > 0x400u || (w & 1u))
+        return (u8)TLM_V_NOTPTR;
+    v = *(volatile signed char *)(w + track);
+    if (v < 0)
+        return (u8)TLM_V_NONE;
+    return (u8)(v & 0x7Fu);
+}
+#endif
+
 u32 lfo4_row_for_block(u32 block, u32 frame)
 {
     u32 track;
@@ -251,6 +298,7 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
             tlm_cc(TLM_CC_TRACK, (u8)track);
             tlm_cc(TLM_CC_PROBE_B, (u8)k);
             tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(w & 0x3FFFu));
+            tlm_cc(TLM_CC_VOICE, voice_at(w, track, frame));
         }
         tlm_cc(TLM_CC_MARKER, (u8)(++lfo4_beat & 0x7Fu));
         /* **A constant whose correct answer is known before the flash.**
