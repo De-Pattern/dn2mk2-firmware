@@ -5706,3 +5706,71 @@ state. That is the next thing to read, and it has never been looked at.
 seven arguments; `param_5`/`param_6` at `frame + 116` / `frame + 120`; that both
 are -1 in steady state; and that the telemetry channel reads real arguments
 faithfully, which is an instrument the project did not have this morning.
+
+## The frame builder is track-indexed too, so the gate is downstream of the CPU
+
+**2026-09-24, static read of `0x400274ba`.** The previous section ended by
+pointing here: if nothing in evaluator A knows about voices, the coupling the
+owner measured must happen where a per-track mirror becomes per-voice DSP state.
+It does not happen here either.
+
+### What the builder does
+
+```
+0x400274ba  lea 0x80005e60,%a3        | the frame, and %a4 walks it
+0x400274c4  moveal %a2,%a5            | %a2 = param_1 of evaluator A: the mirror base
+0x400274ee  movel #0x40134490,%d4     | the same copier evaluator A uses
+...
+0x40027526  pea 0x52 ; pea %a5@(84)  ; pea %a4@(218)  ; jsr %a1@   | 82 bytes
+0x40027534  pea 0x1c ; pea %a5@(166) ; pea %a4@(300) ; jsr %a0@    | 28 bytes
+0x40027544  pea 0x1a ; pea %a5@(194) ; pea %a4@(328) ; jsr %a1@    | 26 bytes
+0x40027558  pea 0x0a ; pea %a5@(224) ; pea %a4@(354) ; jsr %a0@    | 10 bytes
+0x40027568  lea %a5@(202),%a5         | source: one mirror record per TRACK
+0x4002756c  lea %a4@(146),%a4         | destination: 146 bytes per TRACK
+```
+
+`%a2` is set at `0x40027194` and handed to evaluator A as `param_1` at
+`0x400272d2`, so it is the mirror base -- the same pointer, in the same
+function, a few hundred bytes apart.
+
+**The offsets fit once the `+34` header is counted, and I had them wrong until
+it was.** A record's data starts at `base + 34 + 202*track`, so `%a5@(84)`
+through `%a5@(233)` is 150 bytes reaching **slots 25..99** -- comfortably inside
+the 202-byte record, and slots 25..69 are exactly the FX/Master range from the
+lane-16 work. My first reading said the copies overran into the next track,
+which would have been a finding; it was an arithmetic slip, and it is recorded
+because the slip is the kind that produces confident nonsense.
+
+### What that settles
+
+Three stages now read end to end -- the caller's per-track loop at `0x400271a2`,
+evaluator A, and the frame builder -- and **every index in all three is the
+track**. Strides 202 (mirror), 160 (LFO state, ours), 146 (frame record), `%a5`
+and `%d2` both stepping once per track. The only voice-indexed thing anywhere
+is the restore/backup copy block, which is -1 in steady state and does nothing.
+
+**So the DSP receives sixteen track records and does voice assignment itself.**
+Whatever couples LFO4 to one voice is **downstream of the ColdFire**, on the
+SHARC side or in how a voice picks up its track's record.
+
+### And that makes the next measurement the right one, rather than a fourth read
+
+Reading further down this path means the SHARC, which is a second processor this
+project has only partly decoded -- expensive, and it would still be static.
+
+**The telemetry channel now reads real function arguments faithfully**, and it
+can answer the question that separates upstream from downstream in one flash:
+
+> emit LFO4's **computed modulation value** and the **DEST slot it writes**, per
+> track, every burst.
+
+- If the value is non-zero continuously for the LFO4 track while the sound only
+  changes on one voice, the fault is **downstream** of evaluator A and the
+  search is on the SHARC side. That would also be the first hard evidence that
+  the ColdFire half of LFO4 is *complete*.
+- If it is zero except when that one voice is active, the fault is **inside**
+  evaluator A's per-track loop, and everything read today says where to look
+  next.
+
+Either answer closes half the remaining space, which no further static read of
+this path can do.
