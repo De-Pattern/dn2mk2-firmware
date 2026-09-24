@@ -34,6 +34,7 @@ send anything at all.
 from __future__ import annotations
 
 import argparse
+import json
 import pathlib
 import sys
 import time
@@ -45,16 +46,18 @@ from midi_probe import InPort, list_ports  # noqa: E402
 STATUS = {0x80: "note-off", 0x90: "note-on", 0xA0: "aftertouch",
           0xB0: "cc", 0xC0: "program", 0xD0: "pressure", 0xE0: "bend"}
 
-# The CC map the firmware half will use, so the decoder exists before the
-# emitter does and the two cannot drift apart silently.
-LFO4_CC = {
-    20: "derived track",
-    21: "enable mask low",
-    22: "enable mask high",
-    23: "row DEST",
-    24: "voice index",
-    25: "row hit/miss",
-}
+# The CC map, loaded from the SAME file the firmware header is generated from
+# (`src/dnfw/telemetry/channels.json`). Written twice, a decoder and an emitter
+# drift and nothing says so -- which is the shape of the bug that made a day of
+# page readings meaningless on 2026-09-23.
+def _load_map():
+    here = pathlib.Path(__file__).resolve().parent
+    spec = json.loads((here.parent / "src" / "dnfw" / "telemetry"
+                       / "channels.json").read_text(encoding="utf-8"))
+    return spec["channel"], {s["cc"]: s["name"] for s in spec["signals"]}
+
+
+TLM_CHANNEL, TLM_CC = _load_map()
 
 
 def decode(raw: str) -> str:
@@ -67,7 +70,7 @@ def decode(raw: str) -> str:
     d1 = parts[1] if len(parts) > 1 else 0
     d2 = parts[2] if len(parts) > 2 else 0
     if status == 0xB0:
-        name = LFO4_CC.get(d1)
+        name = TLM_CC.get(d1) if chan == TLM_CHANNEL else None
         label = f"CC{d1:<3d}" + (f" ({name})" if name else "")
         return f"ch{chan:<3d} {label:<26s} = {d2}"
     return f"ch{chan:<3d} {kind:<12s} {d1:>3d} {d2:>3d}"
