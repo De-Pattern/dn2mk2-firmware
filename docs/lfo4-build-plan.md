@@ -5551,3 +5551,79 @@ The voice number is **`%sp@(96)` byte `[%a5]`, sign-extended, `-1` for "no
 voice"** -- and `-1` must skip, exactly as stock's `bges`/`blts` do. A build that
 applies LFO4 to a track with no voice allocated is a build that writes into
 record -1.
+
+### Correction, same day: both indexings are real, and `outer` proves it
+
+The section above says the three arrays are "16 **voices** x 3 LFOs x 40, **not**
+16 tracks". **That is too strong, and the stub we wrote ourselves disproves it.**
+
+`outer`, the per-track advance in `build_lfo4_tick.py`, is a subroutine, so its
+`%sp@(N)` is evaluator A's `%sp@(N-4)` -- the `jsr` return address, and the
+offsets line up with the frame read exactly as they must:
+
+| `outer` | evaluator A | stride | what it walks |
+|---|---|---|---|
+| `%sp@(56)` | `%sp@(52)` | **202** | the per-track mirror |
+| `%sp@(60)` | `%sp@(56)` | **120 stock, 160 ours** | the live state array |
+| `%sp@(64)` | `%sp@(60)` | 153 | `param_1` |
+
+`addq.l #1,%a5` sits in that same block. So the live state array at
+`0x4463fc18` is **walked one 120-byte record per track**, in lockstep with the
+track index -- and that is stock arithmetic we only restrided, not a reading of
+ours.
+
+Meanwhile the restore/backup block at `0x401377d2..0x4013781c` reaches
+`0x4463ed18` and `0x4463fc18` as **`base + voice*120 + lfo*40`**, with the voice
+from `param_5`/`param_6` and `-1` meaning none.
+
+**Both are true at once, and that is the point.** One array is walked by track,
+the other is reached by voice, and that block is the **bridge between them** --
+which is exactly what carrying an LFO's phase across a voice allocation
+requires. The equality test that fills `param_5` (`0x40138664(bit)` vs
+`0x4002b22e(track)`) is not decoration; it is what makes the conversion legal.
+
+~~The arrays are 16 voices x 3 LFOs x 40, not 16 tracks.~~ **Withdrawn.** What
+survives from it, and it is the part that matters: **`param_5[track]` is a voice
+number, `-1` when the track has no voice**, and the restore/backup paths are
+voice-indexed. What does not survive is the claim that the *live* array is
+voice-indexed -- `outer` walks it by track.
+
+**Why the mistake happened, because it is a repeat.** One indexing was read and
+generalised to the whole structure without checking the other sites that reach
+it. That is the same shape as the three uncontrolled negatives: a single
+observation treated as a property. The control was available and cheap -- our
+own patch list names every site that touches these arrays.
+
+### So the state machinery is not the suspect any more
+
+Checking `edits()` against the above, **every site is patched**: the bulk copy
+length (1920 -> 2560), both restore and backup stride idioms
+(`idx<<3` -> `idx<<5`, `128-8` -> `128+32`), all three bases relocated, both
+initialisers' record count (3 -> 4), track stride and array length, and the
+inner loop counter 2 -> 3. The `flags` stub writes the fourth record too.
+
+So the voice gate is **not** an unpatched stride, and the leading hypothesis of
+the previous section is weakened rather than confirmed. Good: that is what the
+read was for.
+
+### The next step is a measurement, not another hypothesis
+
+Everything above is static. The one thing that would settle it costs one build
+and uses operands that are **valid at the hook site** -- no stack walk, nothing
+above the frame to fault on:
+
+> emit `%a5` (the track) and the sign-extended byte at `%sp@(96)` indexed by
+> `%a5` (the claimed voice) on the same telemetry burst, beside the existing
+> `probe_a = 99` constant.
+
+On the instrument that answers, live and while the owner moves tracks:
+
+- whether `param_5[track]` really is a voice number (it should follow the voice
+  allocation display the owner already has open);
+- what it reads for the track carrying LFO4, and whether it is `-1` except when
+  a voice is allocated;
+- and whether it equals the track index precisely when the modulation fires --
+  which is the reported symptom, stated in the one quantity that can confirm it.
+
+That is the first hardware test of the frame read, and it is worth one flash
+because it discriminates rather than confirms.

@@ -89,12 +89,15 @@ BASE = 0x40000400
 
 # --- where the relocated state lives ---------------------------------------
 # Unclaimed SDRAM above BSS end 0x466b74d0, below the 0x48000000 top.
-# 16 voices x 4 LFOs x 40 bytes = 2,560 each.  Page-spaced so a stray overrun
-# **Voices, not tracks** -- read 2026-09-24 from the caller at 0x400271a2, which
-# fills evaluator A's param_5 with a voice number per track (-1 when none) after
-# checking the voice belongs to that track; evaluator A multiplies it by 120.
-# The count is 16 either way, so every stride edit below is unaffected -- but the
-# index to reach these arrays with is the voice, never the track.
+# 16 x 4 LFOs x 40 bytes = 2,560 each.  Page-spaced so a stray overrun
+# **Sixteen of what, read 2026-09-24: it depends which site reaches them.**
+# `outer` below walks the live array one record per track (202 mirror / 160 state
+# / 153, with addq #1,%a5 in the same block), so the live array is TRACK-indexed.
+# The restore and backup paths in evaluator A instead compute base + voice*160 +
+# lfo*40, taking the voice from param_5/param_6 -- 16-byte arrays the caller fills
+# at 0x400271a2, defaulting to -1 and set only where the voice's owner object
+# equals the track's.  That block is the bridge between the two indexings.
+# The count is 16 either way, so every stride edit below is unaffected.
 # lands in nothing rather than in a neighbour.
 LIVE = 0x46700000
 SECOND = 0x46701000
