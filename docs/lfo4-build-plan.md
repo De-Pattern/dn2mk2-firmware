@@ -5774,3 +5774,81 @@ can answer the question that separates upstream from downstream in one flash:
 
 Either answer closes half the remaining space, which no further static read of
 this path can do.
+
+# SOLVED: the ColdFire half of LFO4 is complete, and the voice gate is downstream
+
+**2026-09-24, on the instrument, with a control on both arms.**
+
+`lfo4-slotfix` reads the mirror slot LFO4's `DEST` points at, for the previous
+track, every burst -- `block + 2*slot`, after two builds read it seventeen slots
+low. Track 7 (index 6) carried LFO4 on `Syn Ratio C`, slot 26. Every other track
+reported `DEST = 0` and never moved, on every run.
+
+| configuration | slot 26, distinct values | span |
+|---|---|---|
+| LFO1 **and** LFO4 both on `Syn Ratio C` | 17 | **1553** |
+| LFO1 off, LFO4 on | 18 | **528** |
+| **LFO4 depth 0** | 1 | **0** |
+
+**Remove one modulator and the span shrinks; remove the other and it vanishes.**
+Neither reading alone would have carried this -- the first is equally consistent
+with LFO1 doing all the work, and the third alone says nothing about which
+modulator stopped. The graded series is the result.
+
+351 bursts per run, `probe_a` reading 99 on every one, marker sweeping all 128.
+
+## What is now established
+
+**LFO4 generates its waveform, applies it, and writes the result into the
+correct mirror slot of the correct track, every audio frame.** The parameters
+come from `lfo4_rows[track]` via the bridge; the destination comes from the
+row's `DEST`; the value lands where the frame builder will copy it (slots 25..99
+are exactly what `0x400274ba` sends to the DSP).
+
+So **the ColdFire half of LFO4 is complete.** That has never been demonstrated
+before -- every previous claim rested on the owner hearing a sweep, which is
+exactly the evidence that the voice gate makes unreliable.
+
+## Which retires this branch's hypothesis
+
+`fix/lfo4-voice-index` was opened to find why modulation fires only when the
+voice index equals the track index. Today's reads settle where it *cannot* be:
+
+| stage | index |
+|---|---|
+| the caller's loop, `0x400271a2` | **track** |
+| evaluator A, `0x40137726` | **track** (`%a5`, `outer` advancing mirror 202 / state 160 / 153 in lockstep) |
+| the frame builder, `0x400274ba` | **track** (source 202, destination 146) |
+| LFO4's own write, measured above | **track** |
+
+The only voice-indexed thing anywhere on the path is the restore/backup copy
+block, whose two arrays read **-1 on all sixteen tracks across 468 bursts** --
+it migrates a voice's LFO phase when a voice changes hands, and in steady state
+it correctly does nothing.
+
+**No voice index survives anywhere in the CPU path.** The DSP is handed sixteen
+per-track records and does voice assignment itself, so the coupling the owner
+measured is **downstream of the ColdFire** -- on the SHARC, or in how a voice
+picks up its track's record.
+
+## What this cost, and the one thing that prevented it costing more
+
+Two builds were flashed with the probe reading `block - 34 + 2*slot`, seventeen
+slots low. Both returned a flat value across 468 bursts with `probe_a` reading
+99 throughout -- an honest channel reporting a real number from the wrong
+address. **"LFO4 never writes to its destination" was one message from being
+written down here as a finding.**
+
+What stopped it was the owner setting **LFO1** -- stock, known-good -- on the
+same destination. It did not move either. *A known-good source showing nothing
+means the instrument is wrong, not the source.* That is
+`run-a-control-beside-a-negative` applied **before** the conclusion rather than
+after it, for the first time in this project, and it is the reason this section
+says what it says.
+
+## Next
+
+The hunt moves to the SHARC (`docs/sharc-*.md`), and to whatever hands a voice
+its track's record. **Nothing further about the voice gate should be read into
+ColdFire code** -- four stages of it are now measured and all four are
+track-indexed.
