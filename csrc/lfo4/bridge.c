@@ -339,9 +339,29 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
             if (base != 0xFFFFFFFFu && dest <= 100u) {
                 u32 row_ptr = base + MIRROR_STRIDE * prev;
 
-                /* the slot the evaluator itself reads, reached the way it
-                 * reaches it: `%a4 - 34 + 2*slot` */
-                at_dest = *(volatile u16 *)(row_ptr - MIRROR_AT + 2u * dest);
+                /* **`block + 2*slot`, and the 34 is NOT subtracted here.**
+                 *
+                 * The first two builds read `block - 34 + 2*slot` and were 34
+                 * bytes -- seventeen slots -- low, reporting slot 9 while
+                 * calling it slot 26. Both duly read a constant, and the
+                 * constant was nearly taken as "LFO4 never writes".
+                 *
+                 * The owner's control is what caught it: with **LFO1** pointed
+                 * at the same destination and audibly modulating, the value
+                 * still did not move. A known-good LFO showing nothing means
+                 * the probe is wrong, not the LFO -- which is the whole reason
+                 * to run a positive control beside a negative result.
+                 *
+                 * The geometry: `mirror = 0x800068e4 + 34 + 202*block +
+                 * 2*slot`, so the **+34 is a one-time offset to the start of
+                 * the array**, not a per-record header. `%a4` already points at
+                 * `param_1 + 34 + 202*track`, so slots run from it directly.
+                 *
+                 * Confirmed against the evaluator's own read: after
+                 * `lea %a4@(-34),%a4` it takes a parameter from `%a4@(68)`,
+                 * which is `block + 34` = **slot 17** = `8*2+1`, LFO3's first
+                 * parameter. The mapping can only be `block + 2*slot`. */
+                at_dest = *(volatile u16 *)(row_ptr + 2u * dest);
             }
             lfo4_word = at_dest;
             tlm_cc(TLM_CC_TRACK, (u8)prev);
