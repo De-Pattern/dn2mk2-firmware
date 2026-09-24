@@ -5397,3 +5397,157 @@ instrument once already.
 and with it the arguments' offsets are known rather than swept toward. That is a
 static read costing no flash and no risk, and it is the right instrument -- the
 same one that produced `%a4` after four builds had guessed at stack slots.
+
+## Evaluator A's frame, read instead of swept -- and what it says about voices
+
+**2026-09-24, static read, no flash.** The previous section ends with "the
+decompiler can give evaluator A's frame size, and then the arguments' offsets
+are known rather than swept toward." It does, and the answer arrives in four
+instructions.
+
+### The frame
+
+```
+0x40137726  4f ef ff b4   lea %sp@(-76),%sp
+0x4013772a  12 2f 00 6b   moveb %sp@(107),%d1
+0x4013772e  48 d7 7c fc   moveml %d2-%d7/%a2-%fp,%sp@
+0x40137732  24 2f 00 50   movel %sp@(80),%d2
+```
+
+**There is no `LINK`.** The function allocates 76 bytes with a bare `lea` and
+addresses everything through `%sp`; `moveml` saves eleven registers at `%sp@(0)`
+without moving `%sp`. So the saved registers occupy +0..+43, locals +44..+75,
+the return address +76, and **the arguments begin at +80**:
+
+| | offset | what it is |
+|---|---|---|
+| `param_1` | **`%sp@(80)`** | the mirror base -- `lea %a0@(34),%a0` is applied to it immediately, the same `+34` as `0x400db092` |
+| `param_2` | `%sp@(84)` | a scalar, read at `0x40137872` |
+| `param_3` | **`%sp@(88)`** | enable mask -- `asrl %a5,%d5 ; andl #1` |
+| `param_4` | **`%sp@(92)`** | enable mask -- `asrl %a5,%d7 ; andl #1` |
+| `param_5` | **`%sp@(96)`** | pointer to a **16-byte array, one signed byte per track** |
+| `param_6` | **`%sp@(100)`** | pointer to a second such array |
+| `param_7` | `%sp@(104)`, byte at `%sp@(107)` | a flag, read *before* the prologue completes |
+
+### The control, because a prologue read on its own is one measurement
+
+The call site counts the arguments independently of any offset arithmetic:
+
+```
+0x400272ba  2f 01               movel %d1,%sp@-           | arg7
+0x400272bc  48 6e ff b8         pea %fp@(-72)             | arg6
+0x400272c0  48 6e ff a8         pea %fp@(-88)             | arg5
+0x400272c4  2f 2e ff 58         movel %fp@(-168),%sp@-    | arg4
+0x400272c8  2f 2e ff 68         movel %fp@(-152),%sp@-    | arg3
+0x400272cc  2f 39 40 2a 0d ec   movel 0x402a0dec,%sp@-    | arg2
+0x400272d2  2f 0a               movel %a2,%sp@-           | arg1
+0x400272d4  4e b9 40 13 77 26   jsr 0x40137726
+0x400272da  4f ef 00 1c         lea %sp@(28),%sp          | 28 bytes = 7 arguments
+```
+
+**Seven arguments, and the cleanup says so in one byte.** Every slot agrees with
+the prologue. `arg5` and `arg6` are `pea %fp@(-88)` and `pea %fp@(-72)` --
+adjacent locals exactly **16 bytes apart**, which is what a one-byte-per-track
+array looks like from the caller's side.
+
+### Why the +0..+124 walk found nothing, and it was closer than it looked
+
+The walk stopped at +124 after the +508 attempt killed MIDI. From the stub's
+`%sp`, evaluator A's own locals are what that window covered. **The arguments
+begin one stride above the top of it.** The enable mask was never going to
+appear in +0..+124 -- not because the reach was wrong in kind, but because it
+was short by a handful of words.
+
+**And it should not be reached by walking at all.** The hook site sits inside
+evaluator A's frame, where `%sp@(88)` and `%sp@(96)` are *valid operands*. The
+stub can be handed the masks and the voice array directly, as `build_lfo4_bridge.py`
+already hands it `%a4`. No walk, no reach to earn, nothing above the frame to
+fault on. That is the same move that retired the `%sp@(72)` guesses.
+
+### What `param_5` actually holds, and this is the finding
+
+The caller fills those two arrays in its own 16-iteration loop at
+`0x400271a2`. It opens by defaulting **both to -1 for every track**:
+
+```
+0x400271a2  50 c4         st %d4                              | d4 = 0xFF
+0x400271a4  1d 84 28 a8   moveb %d4,%fp@(-88,%d2:l)           | array5[track] = -1
+0x400271a8  1d 84 28 b8   moveb %d4,%fp@(-72,%d2:l)           | array6[track] = -1
+```
+
+and writes a real value only here:
+
+```
+0x40027240  2f 06         movel %d6,%sp@-
+0x40027242  4e 95         jsr %a5@                            | a5 = 0x40138664
+0x40027244  58 8f         addql #4,%sp
+0x40027246  b0 8b         cmpl %a3,%d0                        | a3 = 0x4002b22e(track)
+0x40027248  66 de         bnes 0x40027228                     | no: clear bit, next
+0x4002724a  1d 86 28 a8   moveb %d6,%fp@(-88,%d2:l)           | array5[track] = d6
+```
+
+`%d6` is a **bit index** -- the loop isolates the lowest set bit of a mask with
+the classic `neg ; and ; ff1` idiom and converts it to a position. The bit is
+kept only when `0x40138664(bit)` returns the same object as `0x4002b22e(track)`.
+One function maps a track to its object; the other maps this index to an object
+and the two are compared for equality. **So the index is a voice, and
+`param_5[track]` is the voice currently allocated to that track, or -1 when
+there is none.**
+
+Evaluator A then uses it as an address:
+
+```
+0x401377d2  moveal %sp@(96),%a1
+0x401377d6  mvsb %a1@(0,%a5:l),%d0    | d0 = voice for this track, sign-extended
+0x401377da  bges 0x401377fe           | -1 means no voice: skip
+...
+0x401377fe  movel %d0,%d2
+0x40137800  lsll #3,%d2
+0x40137802  lsll #7,%d0
+0x40137808  subl %d2,%d0              | d0 = voice*128 - voice*8 = voice*120
+0x4013780a  addl %a0,%d0
+0x4013780c  addil #0x4463ed18,%d0
+```
+
+### The correction: those arrays are indexed by voice, not by track
+
+`build_lfo4_tick.py` says, and this document has repeated, that the three
+1,920-byte arrays at `0x4463ed18` / `0x4463f498` / `0x4463fc18` are
+**"16 tracks x 3 LFOs x 40"**. They are **16 *voices* x 3 LFOs x 40**. The
+`x120` above is reached with a byte that the caller filled from a voice mask,
+after checking that the voice belongs to this track.
+
+~~16 tracks x 3 LFOs x 40 bytes~~ -- kept, because the stride arithmetic derived
+from it is still right and every edit made on top of it still holds. **16 is 16
+either way**, which is exactly why the 120 -> 160 change left LFO1-3 working and
+why nothing caught this for six builds. The count was never the error; the
+*name* was, and the name is what tells you which index to reach it with.
+
+### The hypothesis this makes, and it is now a named one
+
+The owner measured: LFO4 modulates only when the voice counter lands on the
+number equal to the track index -- track 3 on voice 3, track 7 on voice 7,
+track 11 on voice 11, two configured tracks giving two working voices.
+
+Put beside the above, that is the signature of **two indices that are each
+correct in their own space and are being used in one**. LFO4's *parameters*
+come from `lfo4_rows[track]`, keyed by track off `%a4`, which is right. LFO4's
+*state* record lives at `state + voice*160 + 120`, keyed by voice, which is also
+right. Any site that reaches the state with the track index lands on the correct
+record **only when track == voice** -- and that is the whole reported symptom,
+including why pinning the voice makes it work on every trig and why clearing a
+track kills its voice.
+
+**This is a hypothesis, not a result.** What is measured is the frame, the
+argument list, the two defaults of -1, the equality test that fills them, and
+the `x120` that consumes them. What is not yet measured is *which* of our patch
+sites reaches the state with the wrong index -- and the next step is to find it
+in the disassembly of our own build, which is again a static read and again
+costs no flash.
+
+### For whoever picks this up
+
+The voice number is **`%sp@(96)` byte `[%a5]`, sign-extended, `-1` for "no
+voice"** -- and `-1` must skip, exactly as stock's `bges`/`blts` do. A build that
+applies LFO4 to a track with no voice allocated is a build that writes into
+record -1.
