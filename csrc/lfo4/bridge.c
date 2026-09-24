@@ -184,23 +184,15 @@ u32 lfo4_refresh(u32 track);
  * MIDI output on 2026-09-23 -- audio kept playing, notes and telemetry both
  * stopped. This adds no reach at all: the same 32 words, plus one dereference
  * that must first prove it points just above our own stack pointer. */
-#ifdef LFO4_TELEMETRY
-#define TLM_V_NOTPTR  126u    /* the word is not a plausible frame pointer */
-#define TLM_V_NONE    127u    /* it is, and the track has no voice (-1) */
-
-static u8 voice_at(u32 w, u32 track, u32 frame)
-{
-    signed char v;
-
-    /* above us, and within one frame's reach: the caller's locals, nothing else */
-    if (w <= frame || (w - frame) > 0x400u || (w & 1u))
-        return (u8)TLM_V_NOTPTR;
-    v = *(volatile signed char *)(w + track);
-    if (v < 0)
-        return (u8)TLM_V_NONE;
-    return (u8)(v & 0x7Fu);
-}
-#endif
+/* **The voice probe lived here, and it answered.** `param_5` and `param_6` were
+ * measured to reach this stub at `frame + 116` and `frame + 120`
+ * (`scripts/emu_lfo4_frame.py`, which passes those pointers itself and then
+ * finds them -- a control on both arms). Read there on the instrument, both are
+ * **-1 for all sixteen tracks on every one of 468 bursts** while the sequencer
+ * played. So they are not "the voice allocated to this track"; they are the
+ * voice whose LFO state must be *migrated* this frame, and in steady state that
+ * path correctly does nothing. The helper is gone because the question is
+ * answered -- `docs/lfo4-build-plan.md` keeps the reasoning. */
 
 u32 lfo4_row_for_block(u32 block, u32 frame)
 {
@@ -311,14 +303,47 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
              * each track is sampled every 16 bursts -- about 1.4 s -- instead
              * of once per 45-second sweep. A voice held for the length of a
              * note cannot hide from that. */
-            u32 w5 = *(volatile u32 *)(frame + 116u);
-            u32 w6 = *(volatile u32 *)(frame + 120u);
+            /* **Is LFO4 modulating, and is it modulating on every track?**
+             *
+             * Three stages have now been read end to end -- the caller's loop
+             * at `0x400271a2`, evaluator A, and the frame builder at
+             * `0x400274ba` -- and **every index in all three is the track**.
+             * The only voice-indexed thing anywhere, the restore/backup block,
+             * reads -1 in steady state. So the DSP is handed sixteen per-track
+             * records and does voice assignment itself, and the coupling the
+             * owner measured is downstream of this processor.
+             *
+             * This separates upstream from downstream, which no further static
+             * read of that path can do. `DEST` is a slot index into the
+             * per-track mirror, and the modulated value lands in that slot. Our
+             * stub is handed `%a4`, which evaluator A immediately turns into
+             * `%a4 - 34` before reading a parameter at `%a4@(68)`; so slot `s`
+             * of this track sits at `block - 34 + 2*s`, inside the same
+             * 202-byte record the evaluator itself reads. **No new reach**: the
+             * furthest slot, 100, lands at `block + 166`.
+             *
+             * **The control is built in.** Every track reports, not just the
+             * one carrying LFO4. A track with no LFO4 configured should show
+             * `DEST = 0` and a value that does not move; if those tracks sweep
+             * too, the reading is measuring something other than LFO4 and none
+             * of it counts. That is the lesson of three uncontrolled negatives,
+             * applied before the flash instead of after.
+             *
+             * Reading the slot at the *start* of this track's pass returns what
+             * the previous frame wrote, which is what we want -- a value that
+             * sweeps is a value being written every frame. */
+            u16 *row = (u16 *)((u32)lfo4_rows + track * ROW_BYTES);
+            u32 dest = ((u32)row[3] >> 8) & 0x7Fu;
+            u16 at_dest = 0;
 
-            lfo4_word = w5;
+            if (dest <= 100u)
+                at_dest = *(volatile u16 *)(block - 34u + 2u * dest);
+            lfo4_word = at_dest;
             tlm_cc(TLM_CC_TRACK, (u8)track);
-            tlm_cc(TLM_CC_VOICE, voice_at(w5, track, frame));
-            tlm_cc(TLM_CC_DEST, voice_at(w6, track, frame));
-            tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(w5 & 0x3FFFu));
+            tlm_cc(TLM_CC_DEST, (u8)dest);
+            /* the top 14 bits: the sweep is in the high end, and 14 is what a
+             * pair of CCs carries */
+            tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(at_dest >> 2));
         }
         tlm_cc(TLM_CC_MARKER, (u8)(++lfo4_beat & 0x7Fu));
         /* **A constant whose correct answer is known before the flash.**

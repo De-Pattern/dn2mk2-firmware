@@ -76,7 +76,24 @@ SOURCES = ui2.SOURCES + ("meter.c", "telemetry/tlm.c")
 OUT = ROOT / "out/lfo4-tlm"
 SYX = ROOT / "00_Resources/02_Builds/lfo4-tlm_DN2_1.11.syx"
 
+# **`--name` exists because reusing one exists cost a gate.** On 2026-09-24 a
+# second telemetry build was written over `lfo4-tlm` while the shipping gate was
+# still running against that very directory, so the gate's pass described an
+# image that no longer existed and had to be thrown away -- and the `.syx` on
+# disk stopped matching the one on the instrument. Each experiment gets its own
+# name, and then neither can happen.
 if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser(description="the telemetry build")
+    ap.add_argument("--name", default="lfo4-tlm",
+                    help="build name: out/<name> and 00_Resources/02_Builds/<name>_DN2_1.11.syx")
+    cli = ap.parse_args()
+    OUT = ROOT / f"out/{cli.name}"
+    SYX = ROOT / f"00_Resources/02_Builds/{cli.name}_DN2_1.11.syx"
+    if SYX.exists():
+        raise SystemExit(f"  {SYX.name} already exists. Pick another --name, or "
+                         f"delete it deliberately if this is a rebuild of the same thing.")
     table.describe(bridge.load(bridge.read_image(bridge.STOCK)).container.find(3).unpack())
     raise SystemExit(bridge.main(sources=SOURCES, entries=ui2.ENTRIES,
                                  out=OUT, syx=SYX,
