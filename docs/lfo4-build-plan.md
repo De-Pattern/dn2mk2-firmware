@@ -5273,3 +5273,76 @@ is enabled only when `n` equals the voice -- the owner's law exactly, with no
 coincidence left in it. **Unmeasured.** The next read captures `param_3` at the
 function entry, which is a different site from the one this session kept getting
 wrong.
+
+## Telemetry works: the instrument reports to the computer — 2026-09-24
+
+**`DN2_MIDI_TX = 0x401233f2`.** Found by walking `MidiOutputStream`'s vtable at
+`0x40207c98`. Its `put(byte)` appends to a buffer at `this+20`, counts at
+`this+8`, and tail-calls `flush` when full; `flush` calls
+`0x401233f2(buffer, count, port, flags)`. The three callers outside the class
+push `port` and `flags` as **constants** -- `clrl` then `pea 0x2` -- so no stream
+instance is needed: three bytes on our own stack and one call.
+
+**Why it hid for a day.** A GCC RTTI name carries a length prefix. The typeinfo
+points at `0x4023100c`; the text "MidiOutputStream" starts one byte later at
+`0x4023100e`. Searching for a pointer to the *text* found nothing, and that null
+was read as "no vtable, a mangled fragment". It had a vtable all along.
+
+### Confirmed on the instrument
+
+469 control changes on channel 16 in ten seconds, `marker` stepping cleanly.
+**The firmware reports to the computer, and every future probe inherits the
+channel.**
+
+Two facts fell out of the first run that nothing had measured:
+
+- **`lfo4_row_for_block` runs ~23,500 times a second** -- the marker stepped
+  every ~87 ms at one burst per 2048 calls. That is ~1,470 evaluator passes
+  across sixteen tracks.
+- **A sampling period must be coprime with the loop length.** The first build
+  sampled every 2048 calls; the engine walks 16 tracks in order; 2048 mod 16 is
+  0, so **every burst landed on the same track for ever** and reported
+  `track = 15` on all sixteen. It looked like the firmware pinning something.
+  The owner disproved it in one move -- toggling other tracks changed nothing --
+  before the arithmetic did. 2049 mod 16 is 1, and the round-robin then reported
+  all sixteen tracks in about 1.4 s.
+
+### The frame map, and three wrong guesses finally measured
+
+Passing the stub's `%sp` and walking `+0..+124` over successive bursts:
+
+| offset | observed | reading |
+|---|---|---|
+| **+8** | 10502, 10704, 10906 | **steps of exactly 202** -- the per-track mirror pointer, `local_18` |
+| **+80, +100** | 10468, 10621, 10774 | **steps of exactly 153** -- matching `outer`'s `add.l #153` |
+| **+104** | `0x3840` | the scale constant `emu_boot_engine` prints entering evaluator A |
+| **+108** | 0 | **the slot guessed three times, confirmed empty** |
+
+Two independent strides matching constants the decompiler showed in `outer`:
+the frame identifying itself. **The enable mask is not in this window**, and
+should not be -- `%sp@(88)` was read at the *function entry* frame, and this stub
+runs below all of evaluator A's locals, so the arguments sit further up.
+
+### And extending the reach broke the instrument
+
+`+0..+508` in one step **killed MIDI output entirely**: audio kept playing, the
+sequencer kept running, and the instrument stopped sending notes *and*
+telemetry. Nothing else differed between the two builds -- same emission rate,
+same message shape, same call site.
+
+**A read is not free.** The reasoning that produced it -- *"I would rather
+over-reach and discard than under-reach and guess again"* -- treated reads as
+harmless because they do not write. 512 bytes above the stub's stack pointer is
+past evaluator A's frame, and on a 0x4000-byte task stack can leave the mapped
+region; a fault in an interrupt-driven task kills it as surely as a bad write.
+Reverted to +124, which is known good.
+
+**The next attempt is targeted, not wider**: the decompiler can give evaluator
+A's frame size, and then the arguments' offsets are known rather than swept
+toward. That is a Ghidra read, not a flash.
+
+### What the channel is worth
+
+The instrument degraded and the probe said so **in seconds**, because notes
+disappearing is unmissable. The day before, this would have read as "telemetry
+did not work" and cost hours.

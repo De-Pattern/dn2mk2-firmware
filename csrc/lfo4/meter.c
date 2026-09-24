@@ -91,6 +91,7 @@ extern u32 lfo4_row_dest;          /* bridge.c: DEST of the row it returns */
 extern u32 lfo4_out_of_range;      /* bridge.c: calls the guard threw away */
 extern u32 lfo4_block_track;       /* bridge.c: track derived from the block */
 extern u32 lfo4_block_ptr;         /* bridge.c: the block pointer itself */
+extern u32 lfo4_word;              /* bridge.c: the frame word being reported */
 
 u32 lfo4_sound_of(u32 track);
 
@@ -209,8 +210,8 @@ int lfo4_meter(u32 param, int *answered)
      * assumed a second time. */
     case 2:                                   /* FADE -> a known 99, scaled */
         return 99 << 8;
-    case 5:                                   /* SPH -> the derived track, scaled */
-        return (int)((lfo4_block_track & 0xFFu) << 8);
+    case 5:                                   /* SPH -> the enable mask's low byte */
+        return (int)((lfo4_word & 0xFFu) << 8);
     default:
         *answered = 0;
         return 0;

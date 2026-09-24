@@ -80,6 +80,7 @@
   <div class="bar">
     <button id="b-pause" aria-pressed="false">Pause</button>
     <button id="b-clear">Clear</button>
+    <button id="b-reopen" title="Re-open the MIDI port. Needed after flashing: the instrument re-enumerates and the old handle goes deaf while still looking fine.">Reopen port</button>
     <button id="b-notes" aria-pressed="true">Notes</button>
     <button id="b-cc" aria-pressed="true">CC</button>
     <span class="rate" id="since">&nbsp;</span>
@@ -282,6 +283,18 @@ $("b-clear").onclick = () => {
   events = []; total = 0; recent = []; $("rows").textContent = "";
   for (const c of cells.values()) c.el.remove();
   cells.clear(); $("cells").hidden = true; $("cells-empty").hidden = false;
+};
+$("b-reopen").onclick = async e => {
+  const b = e.target, was = b.textContent;
+  b.textContent = "reopening";
+  try {
+    const r = await fetch("/reopen").then(x => x.json());
+    b.textContent = r.ok ? "reopened" : "failed";
+    $("conn").textContent = r.message;
+  } catch (err) {
+    b.textContent = "failed";
+  }
+  setTimeout(() => { b.textContent = was; }, 1400);
 };
 $("b-notes").onclick = e => {
   showNotes = !showNotes; e.target.setAttribute("aria-pressed", String(showNotes));

@@ -23,6 +23,9 @@
  * reason a fully working page modulated nothing.
  */
 #include "ext.h"
+#ifdef LFO4_TELEMETRY
+#include "tlm.h"
+#endif
 
 #define TRACKS       16
 #define ROW_BYTES    (2u * EXT_PARAMS)
@@ -132,6 +135,9 @@ u32 lfo4_sound_of(u32 track)
  * visible instead of silent, which is the whole lesson of this bug. */
 u32 lfo4_block_track = 0xFFu;
 u32 lfo4_block_ptr;                  /* the last block, for the page */
+u32 lfo4_beat;                       /* telemetry heartbeat, steps per burst */
+u32 lfo4_frame;                      /* the stub's stack pointer */
+u32 lfo4_word;                       /* the frame word currently being reported */
 u32 lfo4_block_base = 0xFFFFFFFFu;   /* the lowest block seen = track 0's */
 
 u32 lfo4_refresh(u32 track);
@@ -149,7 +155,7 @@ u32 lfo4_refresh(u32 track);
  * from it means LFO4 and LFO1-3 cannot disagree about which track they are on,
  * because they are reading the same pointer. That is a guarantee by
  * construction rather than by a comment, which is the point. */
-u32 lfo4_row_for_block(u32 block)
+u32 lfo4_row_for_block(u32 block, u32 frame)
 {
     u32 track;
 
@@ -180,10 +186,84 @@ u32 lfo4_row_for_block(u32 block)
     if (block < lfo4_block_base)
         lfo4_block_base = block;
     lfo4_block_ptr = block;
+    lfo4_frame = frame;               /* the stub's %sp: a window into the caller */
     track = (block - lfo4_block_base) / MIRROR_STRIDE;
     if (track >= TRACKS)
         track = 0;
     lfo4_block_track = track;
+#ifdef LFO4_TELEMETRY
+    /* **The first thing this channel ever sends, and it is built to be read
+     * even if it is wrong.**
+     *
+     * `marker` is a counter that steps 0..127 on every emission: a value that
+     * visibly sweeps proves the path is alive independently of whether any
+     * diagnostic number is correct, and its rate tells us how often this
+     * function actually runs, which nothing has measured. `track` and the mask
+     * are the real payload -- the mask being the question six flashes failed to
+     * answer, because a display that renders only the high byte cannot show a
+     * 14-bit value at all.
+     *
+     * **The period must be coprime with 16, and 2048 was not.** The engine walks
+     * the sixteen tracks in order, so the track a burst lands on is the call
+     * index modulo 16 -- and 2048 mod 16 is 0, which pinned every burst to the
+     * same track for ever. The first run duly reported `track = 15` on every
+     * sample and looked like the firmware pinning something. It was the
+     * sampling period, not the firmware.
+     *
+     * 2049 mod 16 is 1, so each burst steps to the next track and all sixteen
+     * are reported in sixteen bursts -- about 1.4 s at the measured rate.
+     *
+     * Rate: the marker stepped every ~87 ms at 2048, so this function runs
+     * about 23,500 times a second, or ~1,470 evaluator passes across 16 tracks.
+     * Nothing had measured that before. Four messages per 87 ms is ~46/s
+     * against MIDI's ~1,040/s ceiling, so there is room. */
+    if (tlm_every(0, 2049)) {
+        /* **Walk the caller's frame instead of guessing one slot.**
+         * `probe_b` says which word is being reported and `mask_lo`/`mask_hi`
+         * carry its low 14 bits; the index advances every burst, so 32 words --
+         * 128 bytes of evaluator A's frame -- are mapped in 32 bursts, under
+         * three seconds. The enable mask is in there somewhere and will show
+         * itself as a value that is neither 0 nor a pointer. */
+        {
+            /* **Reach past the locals to the arguments.** The first walk
+             * covered +0..+124 and found the frame's own working set: the
+             * per-track mirror pointer at +8 stepping by 202, a second pointer
+             * at +80 and +100 stepping by 153 -- both strides matching `outer`
+             * -- and the 0x3840 scale at +104. No enable mask, and that is
+             * where it should be: `%sp@(88)` was read at the *function entry*
+             * frame, and this stub runs below all of evaluator A's locals, so
+             * the arguments sit further up. This walks +0..+508. */
+            /* **Back to 32 words, because 128 broke the instrument's MIDI.**
+             * The +0..+124 walk ran cleanly and produced a usable frame map.
+             * Extending it to +0..+508 in one step killed MIDI output entirely
+             * -- the instrument kept playing audio and stopped sending notes
+             * *and* telemetry, which is what a dead transmit task looks like.
+             * Nothing else changed between the two builds.
+             *
+             * So this is not a free read. 512 bytes above the stub's stack
+             * pointer is past evaluator A's own frame; "over-reach and discard"
+             * was wrong, and the reach is now part of what has to be earned
+             * rather than assumed. */
+            u32 k = (lfo4_beat >> 4) & 31u;        /* hold each word for 16 bursts */
+            u32 w = *(volatile u32 *)(frame + 4u * k);
+
+            lfo4_word = w;
+            tlm_cc(TLM_CC_TRACK, (u8)track);
+            tlm_cc(TLM_CC_PROBE_B, (u8)k);
+            tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(w & 0x3FFFu));
+        }
+        tlm_cc(TLM_CC_MARKER, (u8)(++lfo4_beat & 0x7Fu));
+        /* **A constant whose correct answer is known before the flash.**
+         * Twice now a number was read off an instrument of this project's own
+         * making without checking that the instrument reports faithfully: the
+         * LFO4 page renders only the high byte, and the first sampling period
+         * was a multiple of the loop length. Both looked like findings. So one
+         * signal carries 99 and nothing else: if `probe_a` reads 99, the values
+         * beside it can be trusted; if it does not, none of them can, and that
+         * is visible instead of silent. */
+        tlm_cc(TLM_CC_PROBE_A, 99);
+    }
+#endif
     return lfo4_refresh(track);
 }
 

@@ -242,6 +242,22 @@ typedef unsigned char u8;
  * modulates.
  */
 #define DN2_LIVE_CONTAINER 0x800052A0   /* holds the container's address */
+
+/* **The MIDI byte sink**, found 2026-09-24 by walking MidiOutputStream's vtable.
+ *
+ * `tx(buffer, count, port, flags)`. Reached from `MidiOutputStream::flush`
+ * (`0x401228e0`), which calls it with the stream's own buffer at `this+20` and
+ * its count at `this+8`; the other three callers push `port` and `flags` as
+ * plain constants -- `clrl` then `pea 0x2` -- so no stream instance is needed
+ * to use it. That is what makes telemetry possible without constructing or
+ * borrowing an object.
+ *
+ * The class was missed for a day because the RTTI name carries a length prefix:
+ * the typeinfo points at `0x4023100c`, not at the "MidiOutputStream" text one
+ * byte later, so searching for a pointer to the string found nothing. */
+#define DN2_MIDI_TX     0x401233F2
+#define DN2_MIDI_PORT   0
+#define DN2_MIDI_FLAGS  2
 #define DN2_SOUND_AT       52           /* the gate's own `addil #52` */
 #define DN2_SOUND_STRIDE   1163         /* and its `movel #1163` */
 

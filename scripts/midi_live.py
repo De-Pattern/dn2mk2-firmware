@@ -106,13 +106,42 @@ class Bus:
                 pass          # a tab that cannot keep up loses events, not the port
 
 
-def pump(port: InPort, bus: Bus, started: float) -> None:
+class Holder:
+    """The open port, behind a handle that can be swapped.
+
+    **A flash re-enumerates the instrument**, and Windows leaves the old
+    `midiInOpen` handle looking valid while it silently delivers nothing. That
+    cost two wrong diagnoses in ten minutes -- the page looked healthy and was
+    deaf. So the port lives here and `reopen()` replaces it without restarting
+    the server or losing the browser's connection.
+    """
+
+    def __init__(self, in_idx: int) -> None:
+        self.in_idx = in_idx
+        self.port = InPort(in_idx)
+        self.lock = threading.Lock()
+
+    def reopen(self) -> str:
+        with self.lock:
+            try:
+                self.port.close()
+            except Exception:                 # noqa: BLE001 -- a dead handle may refuse
+                pass
+            ins, _ = list_ports()
+            if self.in_idx >= len(ins):
+                return f"no input {self.in_idx}; there are {len(ins)}"
+            self.port = InPort(self.in_idx)
+            return f"reopened [{self.in_idx}] {ins[self.in_idx]}"
+
+
+def pump(holder: "Holder", bus: Bus, started: float) -> None:
     """Move messages off the callback's list and onto the bus.
 
     The callback itself must stay trivial -- `midi_probe.InPort` documents why:
     calling a multimedia function from inside it deadlocks Windows.
     """
     while True:
+        port = holder.port
         while port.shorts:
             ev = parse(port.shorts.pop(0), round(time.time() - started, 3))
             if ev:
@@ -120,7 +149,7 @@ def pump(port: InPort, bus: Bus, started: float) -> None:
         time.sleep(0.004)
 
 
-def handler(bus: Bus, started: float):
+def handler(bus: Bus, started: float, holder: "Holder"):
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):        # the page is the output, not the log
             pass
@@ -130,6 +159,10 @@ def handler(bus: Bus, started: float):
                 return self.stream()
             if self.path.startswith("/map"):
                 return self.send_json(channel_map())
+            if self.path.startswith("/reopen"):
+                msg = holder.reopen()
+                print(f"  {msg}")
+                return self.send_json({"ok": "reopened" in msg, "message": msg})
             return self.send_page()
 
         def send_page(self):
@@ -204,10 +237,11 @@ def main() -> int:
 
     started = time.time()
     bus = Bus()
-    port = InPort(args.in_idx)
-    threading.Thread(target=pump, args=(port, bus, started), daemon=True).start()
+    holder = Holder(args.in_idx)
+    threading.Thread(target=pump, args=(holder, bus, started), daemon=True).start()
 
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), handler(bus, started))
+    server = ThreadingHTTPServer(("127.0.0.1", args.port),
+                                 handler(bus, started, holder))
     print(f"  listening to [{args.in_idx}] {ins[args.in_idx]}")
     print(f"  open  http://127.0.0.1:{args.port}")
     print("  ctrl-c to stop\n")
@@ -216,7 +250,7 @@ def main() -> int:
     except KeyboardInterrupt:
         print("\n  stopped")
     finally:
-        port.close()
+        holder.port.close()
     return 0
 
 

@@ -5,39 +5,39 @@
  * MIDI transmit routine changes this file and nothing else. Everything above it
  * -- masking, splitting, rate limiting -- is testable without it.
  *
- * **Not yet resolved.** `DN2_MIDI_TX` is unset: `MidiOutputStream` appears in
- * the image at 0x4023100e as a mangled-symbol fragment with no pointer to it,
- * so a string search does not reach the routine. The route in is a MIDI machine
- * sending a note, which is a live caller of exactly this path, read from the
- * sequencer side in Ghidra. Until then `tlm_available()` returns 0 and every
- * send is a no-op -- **silent, but honestly silent**, which is the distinction
- * that matters when a probe reports nothing.
+ * **Resolved 2026-09-24.** `MidiOutputStream`'s vtable sits at `0x40207c98`;
+ * its `put(byte)` appends to a buffer at `this+20` and tail-calls `flush`, and
+ * `flush` calls `0x401233f2(buffer, count, port, flags)`. The three callers
+ * outside the class push `port` and `flags` as constants, so this needs no
+ * stream instance and no object at all -- three bytes on our own stack and one
+ * call.
+ *
+ * **Untested on hardware.** It faults or it does not; nothing here has sent a
+ * byte to a real instrument yet.
  */
 #include "tlm.h"
 
-#ifdef DN2_MIDI_TX
-extern void dn2_midi_tx(u8 status, u8 d1, u8 d2);
-#endif
+#include "dn2_111.h"
+
+/* `tx(buffer, count, port, flags)` -- see DN2_MIDI_TX in dn2_111.h. */
+typedef int (*midi_tx_fn)(const u8 *buf, u32 count, u32 port, u32 flags);
 
 #define TLM_SLOTS 4
 static u16 counter[TLM_SLOTS];
 
 int tlm_available(void)
 {
-#ifdef DN2_MIDI_TX
-    return 1;
-#else
-    return 0;
-#endif
+    return DN2_MIDI_TX != 0;
 }
 
 static void tlm_send3(u8 status, u8 d1, u8 d2)
 {
-#ifdef DN2_MIDI_TX
-    dn2_midi_tx(status, d1, d2);
-#else
-    (void)status; (void)d1; (void)d2;
-#endif
+    u8 msg[3];
+
+    msg[0] = status;
+    msg[1] = d1;
+    msg[2] = d2;
+    ((midi_tx_fn)DN2_MIDI_TX)(msg, 3u, DN2_MIDI_PORT, DN2_MIDI_FLAGS);
 }
 
 void tlm_cc(u8 cc, u8 value)

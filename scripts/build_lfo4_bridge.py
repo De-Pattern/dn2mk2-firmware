@@ -63,9 +63,10 @@ ENTRIES = ["lfo4_init", "ext_get", "ext_set", "ext_drop", "lfo4_refresh", "lfo4_
 # displacement its body reads through.
 PULL = """    lea     -16(%sp),%sp
     movem.l %d0-%d1/%a0-%a1,(%sp)
+    move.l  {mask},%sp@-
     move.l  {index},%sp@-
     jsr     {refresh:#010x}
-    addq.l  #4,%sp
+    addq.l  #8,%sp
     movea.l %d0,%a4
     lea     %a4@(-{bias}),%a4
     movem.l (%sp),%d0-%d1/%a0-%a1
@@ -89,12 +90,22 @@ def cave_source(table_va: int, refresh: int, for_block: int = 0) -> str:
     can be got wrong -- which two earlier attempts both did.
     """
     source = v6a.cave_source(table_va)
-    sites = ((68, "%a4", for_block or refresh), (34, "%d0", refresh))
-    for bias, index, callee in sites:
+    # stock `%sp@(88)` is the enable mask. The cave is entered by `jsr`, so it
+    # sits 4 bytes lower, and 16 lower again once the stub saves registers:
+    # 88 + 4 + 16 = 108. Two earlier attempts used +16 and forgot the `jsr`.
+    # **Pass the stack pointer, not a guessed slot.** Three different
+    # displacements have now been guessed at this frame and all three were
+    # wrong; the last read a constant zero on all sixteen tracks while the
+    # signals beside it carried correctly. So hand the C the frame pointer
+    # itself and let it walk the frame over successive telemetry bursts --
+    # one flash maps what four could not.
+    sites = ((68, "%a4", "%sp", for_block or refresh),
+             (34, "%d0", "#0", refresh))
+    for bias, index, mask, callee in sites:
         line = f"    lea     {table_va - bias:#010x},%a4"
         if source.count(line) != 1:
             raise SystemExit(f"expected one {line.strip()!r} in the stubs, found {source.count(line)}")
-        source = source.replace(line, PULL.format(index=index, refresh=callee, bias=bias))
+        source = source.replace(line, PULL.format(index=index, mask=mask, refresh=callee, bias=bias))
     return source
 
 
@@ -118,8 +129,8 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     # The rows are a C array now, so the address comes *out* of the build
     # instead of being told to it -- and the cave goes back to holding nothing
     # but stubs, which is all a gap in someone else's code should ever hold.
-    code = cbuild.build([SRC / "lfo4" / name for name in sources], base=CODE_VA,
-                        include=[SRC / "include"], entries=entries + ["lfo4_rows"],
+    code = cbuild.build([(SRC / name) if "/" in name else (SRC / "lfo4" / name) for name in sources], base=CODE_VA,
+                        include=[SRC / "include", SRC / "telemetry"], entries=entries + ["lfo4_rows"],
                         defines=defines)
     table_va = code["lfo4_rows"]
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
