@@ -5346,3 +5346,54 @@ toward. That is a Ghidra read, not a flash.
 The instrument degraded and the probe said so **in seconds**, because notes
 disappearing is unmissable. The day before, this would have read as "telemetry
 did not work" and cost hours.
+
+### The frame, read properly — and the mask candidate is not the gate
+
+With the walk back at +124 and the instrument playing (track 7 = index 6 with
+LFO4, track 16 = index 15 with the MIDI machine), the frame identifies itself
+through its strides:
+
+| offset | behaviour | reading |
+|---|---|---|
+| +72 | steps by **202** | the per-track mirror pointer |
+| +76 | steps by **160** | `STATE_STRIDE` -- the constant `tick7` records as "will not fit a moveq" |
+| **+68** | `0x3FFF`, or `0` | the mask-shaped candidate, sitting between them |
+
+Two of `outer`'s three strides, adjacent, exactly as the decompiler describes
+them. So `+68` is in the right neighbourhood for an enable mask.
+
+**Correlated against the track, it is not the gate.**
+
+```
+track 0        -> 0
+tracks 1..15   -> 16383 (0x3FFF)
+```
+
+A per-track field that is zero for track 0 and all-ones everywhere else. In a
+14-bit window "all ones" is what `0xFFFF` and `0xFFFFFFFF` both look like, so
+this reads as a flag rather than a sixteen-bit mask.
+
+**It cannot be what gates LFO4**: track 6 is the one with LFO4 and it reads
+*enabled*, while modulation still lands only on voice 7. It shows nothing
+special at index 15 either, so it does not track which tracks are playing.
+
+Three limits on that measurement, stated because they bound it:
+
+- **one sample per track** -- the walk visits `+68` once every ~45 s;
+- **14 bits of 32** -- a CC pair carries no more, and several 32-bit values
+  share that low pattern;
+- **track 0 reading zero may be an artifact** of being first in the loop rather
+  than a disabled state.
+
+### Where that leaves the voice question
+
+The frame has now been mapped rather than guessed at, and nothing in +0..+124
+gates on the voice. The enable-mask hypothesis from `param_3` is **not
+supported by anything measured**: the shifted-mask test at the function entry is
+a different frame, and this stub cannot see it without a reach that killed the
+instrument once already.
+
+**The next step is not another sweep.** Ghidra can give evaluator A's frame size,
+and with it the arguments' offsets are known rather than swept toward. That is a
+static read costing no flash and no risk, and it is the right instrument -- the
+same one that produced `%a4` after four builds had guessed at stack slots.
