@@ -303,46 +303,49 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
              * each track is sampled every 16 bursts -- about 1.4 s -- instead
              * of once per 45-second sweep. A voice held for the length of a
              * note cannot hide from that. */
-            /* **Is LFO4 modulating, and is it modulating on every track?**
+            /* **Read the PREVIOUS track's destination slot, not this one's.**
              *
-             * Three stages have now been read end to end -- the caller's loop
-             * at `0x400271a2`, evaluator A, and the frame builder at
-             * `0x400274ba` -- and **every index in all three is the track**.
-             * The only voice-indexed thing anywhere, the restore/backup block,
-             * reads -1 in steady state. So the DSP is handed sixteen per-track
-             * records and does voice assignment itself, and the coupling the
-             * owner measured is downstream of this processor.
+             * The first attempt read this track's slot and was blind by
+             * design. The engine's order within one audio frame is: regenerate
+             * the whole mirror from the control side, apply the six MIDI
+             * performance modulators, run the LFOs, build the DSP frame
+             * (`0x400274ba`), send it. This stub fires at the *start* of this
+             * track's LFO4 iteration -- so the mirror it sees has been
+             * regenerated and no LFO has written to it yet. It read a constant
+             * on all sixteen tracks, and it would have read a constant whether
+             * LFO4 worked perfectly or not at all.
              *
-             * This separates upstream from downstream, which no further static
-             * read of that path can do. `DEST` is a slot index into the
-             * per-track mirror, and the modulated value lands in that slot. Our
-             * stub is handed `%a4`, which evaluator A immediately turns into
-             * `%a4 - 34` before reading a parameter at `%a4@(68)`; so slot `s`
-             * of this track sits at `block - 34 + 2*s`, inside the same
-             * 202-byte record the evaluator itself reads. **No new reach**: the
-             * furthest slot, 100, lands at `block + 166`.
+             * Track `t-1` is the fix and it costs nothing. Its whole LFO pass
+             * finished moments ago and its mirror row is not regenerated until
+             * the next frame, so its destination slot holds **base plus
+             * whatever the LFOs just wrote**. A value that moves is a value
+             * being written every frame.
              *
-             * **The control is built in.** Every track reports, not just the
-             * one carrying LFO4. A track with no LFO4 configured should show
-             * `DEST = 0` and a value that does not move; if those tracks sweep
-             * too, the reading is measuring something other than LFO4 and none
-             * of it counts. That is the lesson of three uncontrolled negatives,
-             * applied before the flash instead of after.
+             * **No new reach.** One 202-byte record below, inside the same
+             * array the evaluator walks, and bounded against `lfo4_block_base`
+             * -- which is *learned*, not assumed, so nothing here depends on a
+             * constant that a project load could move.
              *
-             * Reading the slot at the *start* of this track's pass returns what
-             * the previous frame wrote, which is what we want -- a value that
-             * sweeps is a value being written every frame. */
-            u16 *row = (u16 *)((u32)lfo4_rows + track * ROW_BYTES);
-            u32 dest = ((u32)row[3] >> 8) & 0x7Fu;
+             * The control is unchanged and it is the point: **every track
+             * reports**. Tracks with no LFO4 must show `DEST = 0` and a value
+             * that does not move. If they move too, this is measuring
+             * something other than LFO4 and none of it counts. */
+            u32 prev = (track + (TRACKS - 1u)) & (TRACKS - 1u);
+            u16 *prow = (u16 *)((u32)lfo4_rows + prev * ROW_BYTES);
+            u32 dest = ((u32)prow[3] >> 8) & 0x7Fu;
             u16 at_dest = 0;
+            u32 base = lfo4_block_base;
 
-            if (dest <= 100u)
-                at_dest = *(volatile u16 *)(block - 34u + 2u * dest);
+            if (base != 0xFFFFFFFFu && dest <= 100u) {
+                u32 row_ptr = base + MIRROR_STRIDE * prev;
+
+                /* the slot the evaluator itself reads, reached the way it
+                 * reaches it: `%a4 - 34 + 2*slot` */
+                at_dest = *(volatile u16 *)(row_ptr - MIRROR_AT + 2u * dest);
+            }
             lfo4_word = at_dest;
-            tlm_cc(TLM_CC_TRACK, (u8)track);
+            tlm_cc(TLM_CC_TRACK, (u8)prev);
             tlm_cc(TLM_CC_DEST, (u8)dest);
-            /* the top 14 bits: the sweep is in the high end, and 14 is what a
-             * pair of CCs carries */
             tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(at_dest >> 2));
         }
         tlm_cc(TLM_CC_MARKER, (u8)(++lfo4_beat & 0x7Fu));
