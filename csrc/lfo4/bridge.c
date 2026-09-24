@@ -291,14 +291,34 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
              * pointer is past evaluator A's own frame; "over-reach and discard"
              * was wrong, and the reach is now part of what has to be earned
              * rather than assumed. */
-            u32 k = (lfo4_beat >> 4) & 31u;        /* hold each word for 16 bursts */
-            u32 w = *(volatile u32 *)(frame + 4u * k);
+            /* **The sweep is over: it found the pair, and then could not read
+             * it.** Walking 32 words gave one sample per (word, track) pair,
+             * and a voice exists only while a note is sounding on one track --
+             * so sixteen samples spread across sixteen tracks were never going
+             * to catch one. Words 29 and 30 duly read -1 every time. That is
+             * the probe being blind, not the array being empty, and reading it
+             * as a negative result would have been the fourth uncontrolled one
+             * in this file's history.
+             *
+             * What the sweep did establish, over 585 bursts with `probe_a`
+             * reading 99 on every one: **`frame+116` and `frame+120` are the
+             * only adjacent pair in the window that are valid frame pointers**,
+             * and `param_5`/`param_6` at `%sp@(96)`/`%sp@(100)` are adjacent
+             * and 4 apart. Everything else read 126 (not a pointer) except one
+             * word holding unrelated bytes.
+             *
+             * So both are now read **every burst**. The track still cycles, so
+             * each track is sampled every 16 bursts -- about 1.4 s -- instead
+             * of once per 45-second sweep. A voice held for the length of a
+             * note cannot hide from that. */
+            u32 w5 = *(volatile u32 *)(frame + 116u);
+            u32 w6 = *(volatile u32 *)(frame + 120u);
 
-            lfo4_word = w;
+            lfo4_word = w5;
             tlm_cc(TLM_CC_TRACK, (u8)track);
-            tlm_cc(TLM_CC_PROBE_B, (u8)k);
-            tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(w & 0x3FFFu));
-            tlm_cc(TLM_CC_VOICE, voice_at(w, track, frame));
+            tlm_cc(TLM_CC_VOICE, voice_at(w5, track, frame));
+            tlm_cc(TLM_CC_DEST, voice_at(w6, track, frame));
+            tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(w5 & 0x3FFFu));
         }
         tlm_cc(TLM_CC_MARKER, (u8)(++lfo4_beat & 0x7Fu));
         /* **A constant whose correct answer is known before the flash.**
