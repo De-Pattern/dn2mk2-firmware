@@ -3528,3 +3528,64 @@ index is. digikit is **GPL-2.0** — if anything of ours lands there it must not
 carry selache (GPL-3.0) lineage, the standing rule.
 
 **Not started.**
+
+---
+
+## 23. A visual DN2 emulator, so the owner can drive it too
+
+**The owner's reason, 2026-09-24, and it is the strongest one on this page:**
+a clickable emulator with a screen is *"a good feature so I can contribute
+actively too."* Every hardware finding in this project has come through one
+person flashing, trigging, and reporting back. That is a real bottleneck and it
+is also a single point of observation -- the voice gate took a week partly
+because only one of us could see the instrument.
+
+`irpina/digiemu` (see `docs/references.md`) proves the shape works on a sibling
+ColdFire Elektron: real firmware, live clickable panel, 48 kHz audio.
+
+### What already exists here, measured rather than assumed
+
+| piece | state |
+|---|---|
+| **boot to a drawing UI** | **done.** 400M instructions from reset; the 2026-09-13 run composed **409 frames** |
+| **the screen** | **done, and trivial to render.** A pair of **1024-byte** buffers, **128x64 mono, 8 pages of 128 columns**, addresses resolved per boot by digikit (`scripts/paint_map.py`, `FB_BYTES = 1024`) |
+| **panel input** | **exists.** `scripts/drive.py`; push codes 41..48 = A..H, `code_for = channel * 8 + bit + 1`, `--panel-dwell 2` to make a tap a tap |
+| **watching memory while it runs** | **exists.** `install_mmio_trace`, proved working by 1,637,709 framebuffer writes from 29 pcs |
+| **audio** | **not started, and the hard one** -- see below |
+
+So the gap to a *usable* visual emulator is a renderer for 1024 bytes, a mouse
+map onto codes we already have, and a loop. That is small.
+
+### The two real obstacles, stated honestly
+
+**Speed, which is the blocker.** ~4.5 min per 100M instructions, and the UI
+needs ~400M from reset -- about **18 minutes before the first pixel**. Nobody
+clicks through that.
+
+The answer is the snapshot. **`ui1200M` has already booted**, and resuming from
+it is exactly right *here*: the shipping gate refuses snapshots because a
+snapshot never runs the loader, the init, or the first call into new code from
+reset -- but interactive exploration is not verification, and that objection
+does not apply. **The rule stays**: nothing is cleared for flashing by a
+snapshot, ever. Two different jobs, two different machines.
+
+digiemu's four Unicorn patches we lack (item in `references.md`) are the other
+half of this: `fast-mem` and `digikit-speed` exist for exactly this reason.
+
+**Audio, which may be out of scope for a long time.** digiemu does 48 kHz on a
+Digitakt. On the DN2 the sound is generated on the **SHARC DSP**, a second
+processor this project has only partly read (`docs/sharc-*.md`). A silent
+emulator is still enormously useful -- every LFO4 question so far has been
+answered by what the *screen* and the *parameters* did, not by listening. **Ship
+it silent.**
+
+### The MVP, and why this order
+
+1. Resume `ui1200M`, render the 1024-byte buffer at ~10 fps. **First pixel on a
+   PC screen is the whole proof**; everything after it is ergonomics.
+2. Mouse and keyboard onto `drive.py`'s existing codes, push-and-turn included.
+3. Then, and only then, decide about audio.
+
+**Not started.** What is written above is an inventory of parts we already have,
+not a claim that they fit together; the first hour of work is finding out
+whether the snapshot's framebuffer address is still resolvable after a resume.
