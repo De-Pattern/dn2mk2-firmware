@@ -83,3 +83,18 @@ def test_carries_a_table_edit_made_before_it(dn2_111, stock):
     moved = lfo4.SPEC["area_va"] - BASE + lfo4.SPEC["table_offset"]
     for at, label in moddest._targets(stock):
         assert struct.unpack_from(">I", out, moved + at - table)[0] == moddest.OPEN, label
+
+
+def test_carries_fxmod_table_edits(dn2_111, stock):
+    """fxmod rewrites ten Chorus records' masks inside the stock table."""
+    from dnfw.mods import fxmod
+    edited = fxmod.apply(dn2_111).payloads[fxmod.SECTION]
+    out = lfo4.compose(edited)
+    lo = paramtable.TABLE - BASE
+    hi = lo + paramtable.RECORD * paramtable.COUNT
+    moved = lfo4.SPEC["area_va"] - BASE + lfo4.SPEC["table_offset"]
+    inside = [e for e in fxmod.SPEC["edits"] if lo <= e["va"] - BASE < hi]
+    assert inside, "fxmod has no edit in the table any more; this test is stale"
+    for e in inside:
+        at, new = e["va"] - BASE, bytes.fromhex(e["new"])
+        assert out[moved + at - lo:moved + at - lo + len(new)] == new, hex(e["va"])
