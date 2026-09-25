@@ -125,6 +125,34 @@ u32 lfo4_sound_of(u32 track)
     return base ? base + DN2_SOUND_AT + track * DN2_SOUND_STRIDE : 0;
 }
 
+/* -> the track that owns `object`, or 126 for a null object, or 127 for none.
+ *
+ * **The firmware's own reverse lookup, copied rather than invented.** The
+ * setter at `0x400258da` answers "which of the sixteen is this object" by
+ * scanning `DN2_OWNER_REG` linearly and using the index it stops at. This does
+ * the same scan against `DN2_TRACK_OBJ`, which is the map `0x4002b22e` reads:
+ * a pure load of `*(base + 20*i)`, no call.
+ *
+ * Sixteen compares sounds expensive next to an array index, and it is not: it
+ * runs behind `lfo4_refresh`'s `seen_sound`/`ext_generation` cache, so it
+ * happens when the owner changes and not on the 23,500 ticks a second in
+ * between. The alternative -- keying our table on something the page setter
+ * cannot know -- is not cheaper, it is wrong.
+ *
+ * The sentinels are outside 0..15 on purpose, so "the array is empty" and "no
+ * match" can never be read as track 0. */
+static u32 lfo4_track_of_object(u32 object)
+{
+    u32 t;
+
+    if (!object)
+        return 126u;
+    for (t = 0; t < TRACKS; t++)
+        if (*(volatile u32 *)(DN2_TRACK_OBJ + DN2_TRACK_OBJ_STRIDE * t) == object)
+            return t;
+    return 127u;
+}
+
 /* The mirror geometry, from `docs/fx-master-modulation.md` §9 and the
  * evaluator's own arithmetic at `0x400db092`: `202*block + 34`. */
 #define MIRROR_BASE   0x800068E4u
@@ -436,6 +464,44 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
          * beside it can be trusted; if it does not, none of them can, and that
          * is visible instead of silent. */
         tlm_cc(TLM_CC_PROBE_A, 99);
+#ifdef LFO4_REGPROBE
+        /* **The one question left, decided on the instrument rather than on
+         * the wire.**
+         *
+         * The index this stub is handed selects LFO4's row. Every probe so far
+         * has been consistent with that index being a track *and* with its
+         * being a voice, because sixteen tracks and sixteen voices mean no
+         * stride can separate them -- which is why the bug survived a week.
+         *
+         * The firmware keeps three sixteen-entry object arrays that the loop
+         * after evaluator A walks with the same counter (`dn2_111.h`). If the
+         * counter is a track, `DN2_OWNER_REG[i]` is the same object as
+         * `DN2_TRACK_OBJ[i]` and `reg_match` reads back `i` on every index. If
+         * it is a voice, `reg_match` is **the track currently on voice `i`**,
+         * and the fix is that number and nothing else -- no lookup we invent.
+         *
+         * **Shipping the pointers instead would waste the flash.** A CC is
+         * seven bits and these are 32-bit addresses, so the comparison would
+         * have to be reassembled from five messages per array per burst and
+         * then done on the host -- more wire, more decoding, and a fifth place
+         * for a readout to be wrong. The instrument already holds both sides;
+         * it should answer, not report.
+         *
+         * Sentinels, so an empty array cannot be misread as a match: **126**
+         * means the entry is null (the array has not been filled, which is
+         * exactly how it reads in every snapshot so far) and **127** means it
+         * held something that matches no track object. Both are outside 0..15,
+         * so neither can be mistaken for an index.
+         *
+         * Read-only: three loads and a compare, no call into firmware code. */
+        {
+            u32 owner = *(volatile u32 *)(DN2_OWNER_REG + 4u * track);
+            u32 alt   = *(volatile u32 *)(DN2_ALT_ARRAY + 4u * track);
+
+            tlm_cc(TLM_CC_REG_MATCH, (u8)lfo4_track_of_object(owner));
+            tlm_cc(TLM_CC_ALT_MATCH, (u8)lfo4_track_of_object(alt));
+        }
+#endif
     }
 #endif
     return lfo4_refresh(track);

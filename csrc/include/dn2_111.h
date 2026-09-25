@@ -261,6 +261,36 @@ typedef unsigned char u8;
 #define DN2_SOUND_AT       52           /* the gate's own `addil #52` */
 #define DN2_SOUND_STRIDE   1163         /* and its `movel #1163` */
 
+/* **Three sixteen-entry object arrays, and the question of what indexes them.**
+ *
+ * Found 2026-09-25 with digikit's `refscan.py`, which reports that the mirror
+ * at `0x800068e4` has exactly **three** static references in the whole image,
+ * all inside `0x400db12a` -- a routine that copies three words per 202-byte
+ * block out of a twin table at `0x80003af0` and returns the mirror's base. Its
+ * single caller is `0x4002717e`, in the per-frame driver.
+ *
+ * The loop that runs immediately after evaluator A (`0x400272de`, sixteen
+ * iterations) walks all three of these in lockstep with its counter:
+ *
+ *   `DN2_OWNER_REG`  `%a4@+` at `0x400272e8`, four bytes per entry
+ *   `DN2_TRACK_OBJ`  through `0x4002b22e`, which is a pure read of
+ *                    `*(base + 20*i)` -- `lsll #4` plus `%a1@(0,%d0:l:4)`
+ *   `DN2_ALT_ARRAY`  through `0x4002b246`, `*(base + 4*i)`
+ *
+ * **What is not known is whether that counter means track or voice**, and this
+ * is the whole of the LFO4 gate. The firmware's own reverse lookup for the
+ * first one (`0x400258da`) is a linear scan of sixteen pointers, which is what
+ * a probe here can imitate exactly.
+ *
+ * `DN2_OWNER_REG` reads as sixteen zeros in a 400M-instruction boot snapshot
+ * (`memdump.py`, 2026-09-25). That is not evidence it stays empty: no kit loads
+ * and no audio runs under any harness here, so nothing has yet had cause to
+ * fill it. It has to be read on the instrument. */
+#define DN2_OWNER_REG      0x80005308   /* 16 x 4, scanned at 0x400258f8 */
+#define DN2_TRACK_OBJ        0x40287DD4 /* 16 x 20, read by 0x4002b22e */
+#define DN2_TRACK_OBJ_STRIDE 20
+#define DN2_ALT_ARRAY      0x4059C92C   /* 16 x 4, read by 0x4002b246 */
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8
