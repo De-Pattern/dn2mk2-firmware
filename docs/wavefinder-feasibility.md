@@ -75,11 +75,17 @@ orders of magnitude.
 | 75 tables int16, **16 frames x 256 points** | **600 KB** | plausible only on the `+Drive` |
 | **one** table, 16 x 256, int16 | **8 KB** | fits a new ELE3 section |
 
-So either wavetables live on the `+Drive` as project data — which means the
-project format, and **DNX is the authority there** — or the feature ships with a
-handful of baked-in tables. **This is a design decision, not a research
-question, and it should be taken before any code is written**, because it
-changes parts 1, 2 and 5.
+**Decided by the owner, 2026-09-25: wavetables become `+Drive` project data**,
+the same as samples. DNX is the format authority for that, so the project-format
+work goes through them.
+
+And the framing above was too gloomy, which the owner corrected: relative to a
+sampler this is the *easy* storage problem. A wavetable has **fixed geometry**,
+so a useful Wavefinder can ship with a handful of tables at 8 KB each and grow
+later — where a sample bank is unbounded and user-managed, 1016 arbitrary-length
+files needing a browser, previews, assignment, per-step locks and persistence.
+See `docs/dt2-machine-port.md`: that difference is why Wavefinder is the more
+achievable target even though its DSP code has to be written from nothing.
 
 ### 3. Machine dispatch — partly mapped, on the wrong device
 
