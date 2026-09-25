@@ -285,7 +285,16 @@ typedef unsigned char u8;
  * `DN2_OWNER_REG` reads as sixteen zeros in a 400M-instruction boot snapshot
  * (`memdump.py`, 2026-09-25). That is not evidence it stays empty: no kit loads
  * and no audio runs under any harness here, so nothing has yet had cause to
- * fill it. It has to be read on the instrument. */
+ * fill it. It has to be read on the instrument.
+ *
+ * **Read on the instrument the same day, and neither is the map.** With audio
+ * running, `DN2_OWNER_REG` is populated -- every entry non-null -- but no entry
+ * is a `DN2_TRACK_OBJ` pointer, on any index, playing or idle. `DN2_ALT_ARRAY`
+ * matched only track objects 0 and 1, and flipped between them whether or not
+ * anything was playing: a two-state flag. 786 bursts, calibration constant
+ * correct on every one, with a silent baseline beside a single held note
+ * (`docs/lfo4-build-plan.md`). Kept here because the addresses are right and
+ * the next reader should not have to find them again to rule them out. */
 #define DN2_OWNER_REG      0x80005308   /* 16 x 4, scanned at 0x400258f8 */
 #define DN2_TRACK_OBJ        0x40287DD4 /* 16 x 20, read by 0x4002b22e */
 #define DN2_TRACK_OBJ_STRIDE 20

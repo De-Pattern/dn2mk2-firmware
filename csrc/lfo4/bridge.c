@@ -125,35 +125,6 @@ u32 lfo4_sound_of(u32 track)
     return base ? base + DN2_SOUND_AT + track * DN2_SOUND_STRIDE : 0;
 }
 
-/* -> the track that owns `object`, or 126 for a null object, or 127 for none.
- *
- * **The firmware's own reverse lookup, copied rather than invented.** The
- * setter at `0x400258da` answers "which of the sixteen is this object" by
- * scanning `DN2_OWNER_REG` linearly and using the index it stops at. This does
- * the same scan against `DN2_TRACK_OBJ`, which is the map `0x4002b22e` reads:
- * a pure load of `*(base + 20*i)`, no call.
- *
- * Sixteen compares sounds expensive next to an array index, and it is not: it
- * runs behind `lfo4_refresh`'s `seen_sound`/`ext_generation` cache, so it
- * happens when the owner changes and not on the 23,500 ticks a second in
- * between. The alternative -- keying our table on something the page setter
- * cannot know -- is not cheaper, it is wrong.
- *
- * The sentinels are outside 0..15 on purpose, so "the array is empty" and "no
- * match" can never be read as track 0. */
-#ifdef LFO4_REGPROBE
-static u32 lfo4_track_of_object(u32 object)
-{
-    u32 t;
-
-    if (!object)
-        return 126u;
-    for (t = 0; t < TRACKS; t++)
-        if (*(volatile u32 *)(DN2_TRACK_OBJ + DN2_TRACK_OBJ_STRIDE * t) == object)
-            return t;
-    return 127u;
-}
-#endif
 
 /* The mirror geometry, from `docs/fx-master-modulation.md` §9 and the
  * evaluator's own arithmetic at `0x400db092`: `202*block + 34`. */
@@ -437,7 +408,7 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
             lfo4_word = at_dest;
             tlm_cc(TLM_CC_TRACK, (u8)prev);
             tlm_cc(TLM_CC_DEST, (u8)dest);
-            tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(at_dest >> 2));
+            tlm_cc14(TLM_CC_OWN_LO, TLM_CC_OWN_HI, (u16)(at_dest >> 2));
 #ifdef LFO4_FRAMEREAD
             /* **The same value, one copy later.** If the mirror pair moves and
              * this pair does not, the value is lost between the LFO stage and
@@ -452,7 +423,7 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
                 u32 fa = frame_word_for(prev, dest);
                 u16 fv = fa ? *(volatile u16 *)fa : 0u;
 
-                tlm_cc14(TLM_CC_MASK_HI, TLM_CC_PROBE_B, (u16)(fv >> 2));
+                (void)fv;
                 /* **A zero here has two meanings, and they point opposite ways.**
                  *
                  * `frame_word_for` returns 0 for a slot the builder never
@@ -470,42 +441,48 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
                  * the frame, **2** no destination is set on that row. */
                 tlm_cc(TLM_CC_FRAME_ST, (u8)(dest == 0u ? 2u : (fa ? 0u : 1u)));
 
-                /* **Read all sixteen blocks, not the one we expected.**
+                /* **Rotate through all sixteen, and report both copies.**
                  *
-                 * Reading only this track's own block answered the wrong
-                 * question on 2026-09-25: it sat at a constant while the owner
-                 * could hear the modulation, and the constant was read as
-                 * "LFO4's output is frozen". It was not frozen. It was
-                 * somewhere else, which is the entire bug -- and a probe that
-                 * looks only where the value is supposed to be cannot tell
-                 * "nothing happened" from "it happened elsewhere".
+                 * The block scan settled where the mirror is written: track
+                 * 7's own block sweeps the full range for 104 seconds while the
+                 * owner hears it on voice 7 only. So the mirror is right, and
+                 * the question has moved one hop on -- the sixteen DSP frame
+                 * records the builder fills from it.
                  *
-                 * Stock LFO3 on the same destination sweeps this track's own
-                 * block continuously, whatever voice the note takes. LFO4's
-                 * does not. So the question is which block *does* move, and
-                 * that index is the voice -- the number this whole hunt has
-                 * been missing.
+                 * **Why rotate instead of picking the furthest from neutral.**
+                 * The argmax this replaces assumed neutral was 0x1000, which is
+                 * true of the mirror and *unknown* of the frame -- every frame
+                 * read so far has been of the driven record. It also produced
+                 * an artefact on the mirror: when the driven block passed near
+                 * neutral, a block with a small static offset won, and block 0's
+                 * resting 3890 was reported as "the sweeping block" for a third
+                 * of the capture. A probe that has to be explained is a probe
+                 * that will eventually be misread.
                  *
-                 * Neutral is 0x1000 on every unused block, measured: fifteen
-                 * tracks read exactly 4096 through 586 bursts. So the block
-                 * furthest from neutral is the one being driven, and reporting
-                 * its index costs one scan of sixteen halfwords.
+                 * Rotating assumes nothing. Each burst reports block and record
+                 * `scan_idx`, cycling 0..15, both at this row's destination;
+                 * over a long capture every record is sampled many times, and
+                 * the host asks which ones *vary*. A record that varies carries
+                 * a modulation, whatever its resting value turns out to be.
                  *
-                 * 127 means nothing deviates -- the honest answer when the
-                 * note is silent, and it must not be confused with block 0. */
+                 * **Run it twice, and the second run is the control.** With
+                 * stock LFO3 driving, a record that varies besides this track's
+                 * own -- or one that changes as the allocator moves the note --
+                 * means the firmware replicates a stock LFO into the voice's
+                 * record. If LFO4 then varies only in its own, that is the
+                 * difference, and it is ColdFire code. If both vary only in
+                 * their own, the ColdFire treats them identically and the
+                 * difference is inside the SHARC. */
                 if (base != 0xFFFFFFFFu && dest != 0u && dest <= 100u) {
-                    u32 b, best = 127u, far = 0u, val = 0u;
+                    static u32 scan;
+                    u32 b = scan++ & (TRACKS - 1u);
+                    u32 fb = frame_word_for(b, dest);
+                    u16 mv = *(volatile u16 *)(base + MIRROR_STRIDE * b + 2u * dest);
+                    u16 rv = fb ? *(volatile u16 *)fb : 0u;
 
-                    for (b = 0; b < TRACKS; b++) {
-                        u16 v = *(volatile u16 *)(base + MIRROR_STRIDE * b
-                                                  + 2u * dest);
-                        u32 d = (v > 0x1000u) ? (u32)(v - 0x1000u)
-                                              : (u32)(0x1000u - v);
-
-                        if (d > far) { far = d; best = b; val = v; }
-                    }
-                    tlm_cc(TLM_CC_MOD_BLOCK, (u8)best);
-                    tlm_cc14(TLM_CC_MOD_LO, TLM_CC_MOD_HI, (u16)(val >> 2));
+                    tlm_cc(TLM_CC_SCAN_IDX, (u8)b);
+                    tlm_cc14(TLM_CC_SMIR_LO, TLM_CC_SMIR_HI, (u16)(mv >> 2));
+                    tlm_cc14(TLM_CC_SFRM_LO, TLM_CC_SFRM_HI, (u16)(rv >> 2));
                 }
             }
 #endif
@@ -520,44 +497,6 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
          * beside it can be trusted; if it does not, none of them can, and that
          * is visible instead of silent. */
         tlm_cc(TLM_CC_PROBE_A, 99);
-#ifdef LFO4_REGPROBE
-        /* **The one question left, decided on the instrument rather than on
-         * the wire.**
-         *
-         * The index this stub is handed selects LFO4's row. Every probe so far
-         * has been consistent with that index being a track *and* with its
-         * being a voice, because sixteen tracks and sixteen voices mean no
-         * stride can separate them -- which is why the bug survived a week.
-         *
-         * The firmware keeps three sixteen-entry object arrays that the loop
-         * after evaluator A walks with the same counter (`dn2_111.h`). If the
-         * counter is a track, `DN2_OWNER_REG[i]` is the same object as
-         * `DN2_TRACK_OBJ[i]` and `reg_match` reads back `i` on every index. If
-         * it is a voice, `reg_match` is **the track currently on voice `i`**,
-         * and the fix is that number and nothing else -- no lookup we invent.
-         *
-         * **Shipping the pointers instead would waste the flash.** A CC is
-         * seven bits and these are 32-bit addresses, so the comparison would
-         * have to be reassembled from five messages per array per burst and
-         * then done on the host -- more wire, more decoding, and a fifth place
-         * for a readout to be wrong. The instrument already holds both sides;
-         * it should answer, not report.
-         *
-         * Sentinels, so an empty array cannot be misread as a match: **126**
-         * means the entry is null (the array has not been filled, which is
-         * exactly how it reads in every snapshot so far) and **127** means it
-         * held something that matches no track object. Both are outside 0..15,
-         * so neither can be mistaken for an index.
-         *
-         * Read-only: three loads and a compare, no call into firmware code. */
-        {
-            u32 owner = *(volatile u32 *)(DN2_OWNER_REG + 4u * track);
-            u32 alt   = *(volatile u32 *)(DN2_ALT_ARRAY + 4u * track);
-
-            tlm_cc(TLM_CC_REG_MATCH, (u8)lfo4_track_of_object(owner));
-            tlm_cc(TLM_CC_ALT_MATCH, (u8)lfo4_track_of_object(alt));
-        }
-#endif
     }
 #endif
     return lfo4_refresh(track);

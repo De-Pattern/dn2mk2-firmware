@@ -6,25 +6,25 @@
       "cc": 20,
       "name": "track",
       "width": 7,
-      "note": "the index the tick was handed"
+      "note": "the row this burst reports"
     },
     {
       "cc": 21,
-      "name": "mask_lo",
+      "name": "own_lo",
       "width": 7,
-      "note": "enable mask, low 7 bits"
+      "note": "this row's own mirror slot, low 7"
     },
     {
       "cc": 22,
-      "name": "mask_mid",
+      "name": "own_hi",
       "width": 7,
-      "note": "enable mask, bits 7..13"
+      "note": "this row's own mirror slot, high 7"
     },
     {
       "cc": 23,
-      "name": "mask_hi",
+      "name": "sfrm_hi",
       "width": 7,
-      "note": "enable mask, bits 14..20"
+      "note": "scanned frame record's word, high 7"
     },
     {
       "cc": 24,
@@ -34,45 +34,45 @@
     },
     {
       "cc": 25,
-      "name": "mod_hi",
+      "name": "smir_hi",
       "width": 7,
-      "note": "sweeping block's value, high 7 bits"
+      "note": "scanned mirror block's slot, high 7"
     },
     {
       "cc": 26,
       "name": "probe_a",
       "width": 7,
-      "note": "unassigned, for whatever is being chased"
+      "note": "the calibration constant, always 99"
     },
     {
       "cc": 27,
-      "name": "probe_b",
+      "name": "sfrm_lo",
       "width": 7,
-      "note": "unassigned"
+      "note": "scanned frame record's word, low 7"
     },
     {
       "cc": 28,
-      "name": "mod_block",
+      "name": "scan_idx",
       "width": 7,
-      "note": "which of the 16 blocks moves most at this destination; 127 none"
+      "note": "which of the 16 blocks/records this burst scanned"
     },
     {
       "cc": 29,
-      "name": "mod_lo",
+      "name": "smir_lo",
       "width": 7,
-      "note": "sweeping block's value, low 7 bits"
+      "note": "scanned mirror block's slot, low 7"
     },
     {
       "cc": 30,
       "name": "marker",
       "width": 7,
-      "note": "a caller-chosen tag, to separate call sites"
+      "note": "burst counter"
     },
     {
       "cc": 31,
       "name": "frame_st",
       "width": 7,
-      "note": "frame read status: 0 read, 1 destination never copied to the frame, 2 no destination"
+      "note": "0 read, 1 destination never copied to the frame, 2 no destination"
     }
   ]
 }

@@ -98,9 +98,6 @@ if __name__ == "__main__":
                     help="every track gets tick7's maximum-depth row, ignoring the table")
     ap.add_argument("--frame-read", action="store_true",
                     help="also report the DSP frame word the mirror slot is copied to")
-    ap.add_argument("--reg-probe", action="store_true",
-                    help="report which track owns the object the firmware's three "
-                         "sixteen-entry arrays hold at the index the tick was handed")
     ap.add_argument("--force-spd", type=lambda v: int(v, 0), default=None,
                     help="forced-row SPD (default 0x7000, the stock default)")
     ap.add_argument("--force-mult", type=lambda v: int(v, 0), default=None,
@@ -126,7 +123,6 @@ if __name__ == "__main__":
                                           "LFO4_TELEMETRY": 1,
                                           **({"LFO4_FORCE_ROW": 1} if cli.force_row else {}),
                                           **({"LFO4_FRAMEREAD": 1} if cli.frame_read else {}),
-                                          **({"LFO4_REGPROBE": 1} if cli.reg_probe else {}),
                                           **({"LFO4_FORCE_SPD": cli.force_spd} if cli.force_spd is not None else {}),
                                           **({"LFO4_FORCE_MULT": cli.force_mult} if cli.force_mult is not None else {}),
                                           **({"LFO4_FORCE_TRACK": cli.force_track} if cli.force_track is not None else {})}))
