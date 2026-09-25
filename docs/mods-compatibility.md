@@ -49,6 +49,24 @@ lift this limit (`docs/references.md`). It has not been done here yet.
 ## The table
 
 <!-- dnfw:matrix -->
+| | `arpplocks` | `bootscreen` | `fxmod` | `lfo4` | `lfowaves` | `midiarp` | `moddest` | `transients` |
+|---|---|---|---|---|---|---|---|---|
+| `arpplocks` | - | order | **NO** | yes | yes | yes | yes | yes |
+| `bootscreen` | order | - | yes | **NO** | **NO** | yes | yes | yes |
+| `fxmod` | **NO** | yes | - | order | yes | yes | yes | yes |
+| `lfo4` | yes | **NO** | order | - | **NO** | yes | order | yes |
+| `lfowaves` | yes | **NO** | yes | **NO** | - | yes | yes | yes |
+| `midiarp` | yes | yes | yes | yes | yes | - | yes | yes |
+| `moddest` | yes | yes | yes | order | yes | yes | - | yes |
+| `transients` | yes | yes | yes | yes | yes | yes | yes | - |
+
+- **arpplocks + bootscreen: order**: bootscreen refuses after arpplocks: the boot-screen code space is already in use by another mod. *Note:* bootscreen reserves 0x380 bytes at 0x402dfa1c for its code and refuses if any is used; its code is 366 bytes and ends 2 bytes before arpplocks' cave at 0x402dfb8c, so bootscreen first then arpplocks writes disjoint bytes. Whether bootscreen uses the rest of its reservation at run time is not measured.
+- **arpplocks + fxmod: NO**: arpplocks and fxmod both write section 3 0x0028e604..0x0028e682 (126 bytes).
+- **bootscreen + lfo4: NO**: bootscreen and lfo4 both write section 3 0x0000013f..0x00000146 (7 bytes).
+- **bootscreen + lfowaves: NO**: bootscreen and lfowaves both write section 3 0x0000013f..0x00000146 (7 bytes).
+- **fxmod + lfo4: order**: fxmod edits what lfo4 copies, so it must be applied first (the CLI applies lfo4 last). *Note:* emulator, 2026-09-26: the LFO4 slot harness and a turn of all eight LFO4 dials match lfo4 alone; fxmod's DEST checks and names match fxmod alone; every LFO page, LFO4's included, gains the same 24 FX destinations. The hooks are on different paths (fxmod's slot lookup at 0x400dc02a is asked above slot 100 only while the DEST list is built). Not exercised: LFO4 aimed at an FX destination. fxmod's own helper at 0x4028ea02 keeps the stock table bounds, so it would answer LFO4's own entries with -1; it is only ever called with destination entries.
+- **lfo4 + lfowaves: NO**: lfo4 and lfowaves both write section 3 0x0000013f..0x00000146 (7 bytes).
+- **lfo4 + moddest: order**: moddest refuses after lfo4: found 2 candidate parameter tables, expected 1; this image's layout is not the one this mod was measured against. *Note:* measured: with moddest applied first, all 13 masks it opens are in lfo4's relocated table (test/test_lfo4_mod.py).
 <!-- /dnfw:matrix -->
 
 ## Boot from reset, per pair

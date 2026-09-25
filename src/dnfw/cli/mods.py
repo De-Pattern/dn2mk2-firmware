@@ -384,8 +384,8 @@ def _rewrite(page: pathlib.Path, ids, found, names) -> None:
 
     text = page.read_text(encoding="utf-8")
     table = (matrix.table_md if page.suffix == ".md" else matrix.table_html)(ids, found, names)
-    text = re.sub(r"(<!-- dnfw:matrix -->\n).*?(\n<!-- /dnfw:matrix -->)",
-                  lambda m: m.group(1) + table + m.group(2), text, flags=re.S)
+    text = re.sub(r"(<!-- dnfw:matrix -->).*?(<!-- /dnfw:matrix -->)",
+                  lambda m: m.group(1) + "\n" + table + "\n" + m.group(2), text, flags=re.S)
     text = re.sub(r"(<!-- dnfw:combines (\w+) -->).*?(<!-- /dnfw:combines -->)",
                   lambda m: m.group(1) + matrix.combines_text(m.group(2), found, names) + m.group(3),
                   text, flags=re.S)
