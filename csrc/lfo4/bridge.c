@@ -194,6 +194,47 @@ u32 lfo4_refresh(u32 track);
  * path correctly does nothing. The helper is gone because the question is
  * answered -- `docs/lfo4-build-plan.md` keeps the reasoning. */
 
+#ifdef LFO4_FRAMEREAD
+/* -> the address in the DSP frame that this mirror slot is copied to, or 0.
+ *
+ * **Why read the frame and not only the mirror.** LFO4's value is measured
+ * arriving in the mirror every frame (graded control, 2026-09-24). If it is
+ * still inaudible on most voices, the next question is narrow: does it survive
+ * the copy into the frame the DSP actually receives? This answers that in one
+ * flash instead of a week of SHARC reading.
+ *
+ * The geometry is read from the frame builder at `0x400274ba`, not guessed.
+ * `%a4` starts at `0x80005e60` and strides **146 per track**; the loop runs 16
+ * times (`%d2` steps by 2 to 32). Four `memcpy`s move mirror slots into it:
+ *
+ *   dst %a4@(218) <- %a5@(84)  82 B   slots 25..65
+ *   dst %a4@(300) <- %a5@(166) 28 B   slots 66..79
+ *   dst %a4@(328) <- %a5@(194) 26 B   slots 80..92
+ *   dst %a4@(354) <- %a5@(224) 10 B   slots 95..99
+ *
+ * A row's slots start at `+34`, so `%a5@(84)` is slot 25 and the four ranges
+ * tile 25..99 with **93 and 94 deliberately absent** -- a gap worth knowing
+ * about before reading a zero there as a finding.
+ *
+ * The frame lives in fast SRAM (`0x80000000`..`0x80010000`), which is mapped
+ * and small; the furthest address this can produce is
+ * `0x80005e60 + 146*15 + 354 + 8`, comfortably inside it. **No unmapped read
+ * is reachable from here**, which is the constraint the +508 walk violated. */
+#define FRAME_BASE   0x80005E60u
+#define FRAME_STRIDE 146u
+
+static u32 frame_word_for(u32 track, u32 slot)
+{
+    u32 rec = FRAME_BASE + FRAME_STRIDE * track;
+
+    if (slot >= 25u && slot <= 65u) return rec + 218u + 2u * (slot - 25u);
+    if (slot >= 66u && slot <= 79u) return rec + 300u + 2u * (slot - 66u);
+    if (slot >= 80u && slot <= 92u) return rec + 328u + 2u * (slot - 80u);
+    if (slot >= 95u && slot <= 99u) return rec + 354u + 2u * (slot - 95u);
+    return 0u;                       /* 93, 94 and everything outside: not copied */
+}
+#endif
+
 u32 lfo4_row_for_block(u32 block, u32 frame)
 {
     u32 track;
@@ -367,6 +408,23 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
             tlm_cc(TLM_CC_TRACK, (u8)prev);
             tlm_cc(TLM_CC_DEST, (u8)dest);
             tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(at_dest >> 2));
+#ifdef LFO4_FRAMEREAD
+            /* **The same value, one copy later.** If the mirror pair moves and
+             * this pair does not, the value is lost between the LFO stage and
+             * the frame -- on this processor, and findable. If both move, the
+             * value reaches the DSP and nothing on the ColdFire is at fault.
+             *
+             * The control is free and already present: put a stock LFO on the
+             * same destination and **both** pairs must move. If they do not,
+             * this address is wrong and no reading from it counts. That is the
+             * check that was missing when the probe read seventeen slots low. */
+            {
+                u32 fa = frame_word_for(prev, dest);
+                u16 fv = fa ? *(volatile u16 *)fa : 0u;
+
+                tlm_cc14(TLM_CC_MASK_HI, TLM_CC_PROBE_B, (u16)(fv >> 2));
+            }
+#endif
         }
         tlm_cc(TLM_CC_MARKER, (u8)(++lfo4_beat & 0x7Fu));
         /* **A constant whose correct answer is known before the flash.**

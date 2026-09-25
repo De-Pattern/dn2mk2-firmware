@@ -96,6 +96,8 @@ if __name__ == "__main__":
     # also the fix if the answer turns out to be "quiet".
     ap.add_argument("--force-row", action="store_true",
                     help="every track gets tick7's maximum-depth row, ignoring the table")
+    ap.add_argument("--frame-read", action="store_true",
+                    help="also report the DSP frame word the mirror slot is copied to")
     cli = ap.parse_args()
     OUT = ROOT / f"out/{cli.name}"
     SYX = ROOT / f"00_Resources/02_Builds/{cli.name}_DN2_1.11.syx"
@@ -113,4 +115,5 @@ if __name__ == "__main__":
                                  defines={"LFO4_KEEP_ROWS": 1, "LFO4_KEEP_ALL": 1,
                                           "LFO4_METER": 1, "LFO4_COUNTERS": 1,
                                           "LFO4_TELEMETRY": 1,
-                                          **({"LFO4_FORCE_ROW": 1} if cli.force_row else {})}))
+                                          **({"LFO4_FORCE_ROW": 1} if cli.force_row else {}),
+                                          **({"LFO4_FRAMEREAD": 1} if cli.frame_read else {})}))
