@@ -23,11 +23,12 @@ from . import (
     symbolmap,
     symbols,
     validate_disasm,
+    wavefinder,
 )
 
 COMMANDS = (
     inspect, extract, build, patch, diff, symbols, symbolmap, params, disasm, validate_disasm,
-    cave, fn, ldr, mods,
+    cave, fn, ldr, mods, wavefinder,
 )
 
 
