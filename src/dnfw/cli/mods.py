@@ -20,6 +20,7 @@ from ..mods import ModError, check_compatible
 from ..mods import arpplocks as arpplocks_mod
 from ..mods import bootscreen as bootscreen_mod
 from ..mods import fxmod as fxmod_mod
+from ..mods import lfo4 as lfo4_mod
 from ..mods import lfowaves as lfowaves_mod
 from ..mods import midiarp as midiarp_mod
 from ..mods import moddest as moddest_mod
@@ -35,7 +36,8 @@ REGISTRY = {transients_mod.ID: transients_mod,
             lfowaves_mod.ID: lfowaves_mod,
             midiarp_mod.ID: midiarp_mod,
             fxmod_mod.ID: fxmod_mod,
-            arpplocks_mod.ID: arpplocks_mod}
+            arpplocks_mod.ID: arpplocks_mod,
+            lfo4_mod.ID: lfo4_mod}
 
 
 def configure(parser) -> None:
@@ -278,6 +280,9 @@ def _extract(args) -> int:
 def _apply(args) -> int:
     firmware = load(read_image(args.image))
     chosen = [REGISTRY[m] for m in dict.fromkeys(args.mod)]
+    # A mod that copies stock structures (lfo4 copies the parameter table) goes
+    # last, so what the others changed in them is carried into its copy.
+    chosen.sort(key=lambda mod: getattr(mod, "APPLY_LAST", False))
 
     named = []
     for mod in chosen:
