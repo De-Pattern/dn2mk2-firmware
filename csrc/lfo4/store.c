@@ -134,8 +134,12 @@ void lfo4_on_save(void *stored, const void *live)
     u32 k, any = 0;
 
     const u16 *v = ext_find((u32)live);
+    extern u32 lfo4_pending_sound;
 
     lfo4_saves++;
+    /* The re-serialise an LFO4 edit asked for has run (setter.c, `announce`). */
+    if ((u32)live == lfo4_pending_sound)
+        lfo4_pending_sound = 0;
     /* No entry, or an entry at the defaults: store the lane as zeros, the
      * state a stock save leaves it in -- never `ext_get`'s default row. */
     if (v && is_default(v))

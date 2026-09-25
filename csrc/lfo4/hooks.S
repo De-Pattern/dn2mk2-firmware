@@ -127,11 +127,12 @@ lfo4_set_stub:
     movea.l %a1@(40),%a0
     jsr     %a0@                    | -> d0 = the live sound
     addq.l  #4,%sp
+    move.l  %a2@(16),-(%sp)         | holder: announcing the change goes through it
     move.l  %d3,-(%sp)              | value
     move.l  %d2,-(%sp)              | slot
     move.l  %d0,-(%sp)              | sound
     jsr     lfo4_on_set
-    lea     12(%sp),%sp
+    lea     16(%sp),%sp
     movem.l (%sp),%d0-%d1/%a0-%a1
     lea     16(%sp),%sp
 lfo4_set_none:

@@ -350,6 +350,19 @@ typedef unsigned char u8;
 #define DN2_STORED_SOUND_AT  60
 #define DN2_STORED_SOUND     359
 
+/* **How a whole-sound change is announced, so the stock writer re-saves it.**
+ *
+ * `SoundConfigChangedInfo` (typeinfo `0x401dcd28`, vtable `0x401dddec`) is sent
+ * by six stock Sound methods (`0x4004b25a` .. `0x4004b540`) as
+ * `holder->vfunc@16(holder, &info)`, `info` = {vtable, flag byte}, flag 1 in
+ * every one. Its receivers: `Sound::updateMirror` (`0x4004ca80`), which for any
+ * event that is not a single- or multi-slot change queues a job that
+ * re-serialises the whole sound into its stored record through `SAVE` -- where
+ * `lfo4_on_save` writes LFO4's lane -- and the engine receiver (`0x4003f7bc`),
+ * which refreshes the sound's voices and carries no slot index. */
+#define DN2_SOUND_CONFIG_CHANGED  0x401DDDEC   /* vtable */
+#define DN2_HOLDER_NOTIFY         16           /* holder vtable byte offset */
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8

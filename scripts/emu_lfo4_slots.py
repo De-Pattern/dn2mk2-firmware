@@ -74,13 +74,16 @@ def main() -> int:
     p.add_argument("--warmup", type=int, default=60_000_000)
     p.add_argument("--delta", type=int, default=10)
     p.add_argument("--slot", type=int, default=SLOT)
+    p.add_argument("--build", default=BUILD, help="the build directory to install into the snapshot")
+    p.add_argument("--after", type=int, default=40_000_000,
+                   help="instructions to run after the turn, so a queued job can execute")
     args = p.parse_args()
 
     from unicorn import UC_HOOK_CODE
     from unicorn.m68k_const import UC_M68K_REG_D2, UC_M68K_REG_D3
 
     machine = Machine(args.snapshot)
-    image, sym = load_build(BUILD)
+    image, sym = load_build(args.build)
     stock = open(os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin"), "rb").read()
     runs = differences(stock, image)
     machine.apply(runs)
@@ -106,10 +109,31 @@ def main() -> int:
     machine.watch_writes(VALUES, VALUES + VALUES_LEN - 1,
                          lambda pc, a, v, s: writes.update([(a - VALUES) // 2]))
 
+    # **Who answers a change, counted, with a stock turn as the control.** A
+    # null from this snapshot is only evidence if a stock edit is seen to reach
+    # the same place: the emulator's boot never builds the project, so the
+    # observer that hands Sound::updateMirror a stored record may not exist here
+    # at all, and "LFO4's announcement was ignored" would look identical.
+    UPDATE_MIRROR, WHOLE_JOB = 0x4004CA80, 0x4004AD10
+    seen = collections.Counter()
+    machine.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: seen.update(["updateMirror"]),
+                        begin=UPDATE_MIRROR, end=UPDATE_MIRROR)
+    machine.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: seen.update(["whole-sound job"]),
+                        begin=WHOLE_JOB, end=WHOLE_JOB)
+
     panel = Panel(machine, png_dir="out/lfo4-slots")
     panel.settle(args.warmup)
     panel.tap(MOD)
     print(f"  {panel.screen('page-1')}")
+
+    if "lfo4_announced" in sym:
+        seen.clear()
+        panel.push_and_turn(0, args.delta)          # a STOCK turn: nothing rewritten
+        panel.settle(args.after)
+        print(f"  control, a stock turn: updateMirror ran {seen['updateMirror']}, "
+              f"whole-sound job {seen['whole-sound job']}")
+        control_reached = seen["updateMirror"] > 0
+        seen.clear()
 
     before = dict(writes)
     armed[0] = True
@@ -159,6 +183,37 @@ def main() -> int:
     print(f"  live value slots written during the turn: {sorted(moved) or 'none'}")
     check("no slot of the live sound moved", not moved,
           f"slots {sorted(moved)} were written, and above 100 stock writes nothing")
+
+    # **The announcement, for a build that makes one** (setter.c, `announce`).
+    # An LFO4 edit sends the stock SoundConfigChangedInfo through the sound's
+    # holder, and Sound::updateMirror should answer it by queueing a job that
+    # re-serialises this sound through SAVE -- where lfo4_on_save writes the
+    # lane. So: did we announce, and after letting the machine run, did a save
+    # of this sound happen carrying an LFO4? That is the whole mechanism, and
+    # the save count before the turn is the control.
+    if "lfo4_announced" in sym:
+        saves0 = machine.long(sym["lfo4_saves"])
+        carry0 = machine.long(sym["lfo4_saves_carrying"])
+        announced = machine.long(sym["lfo4_announced"])
+        held = machine.long(sym["lfo4_announce_held"])
+        pending = machine.long(sym["lfo4_pending_sound"])
+        print(f"\n  announced {announced}, held back {held}, pending {pending:#010x}")
+        check("the edit was announced", announced >= 1, "no announcement")
+        panel.settle(args.after)
+        print(f"  after LFO4's turn: updateMirror ran {seen['updateMirror']}, "
+              f"whole-sound job {seen['whole-sound job']}")
+        if not control_reached:
+            print("  ** the control never reached updateMirror either: this snapshot has no "
+                  "observer that writes a stored record, so nothing below is evidence either way **")
+        saves = machine.long(sym["lfo4_saves"]) - saves0
+        carry = machine.long(sym["lfo4_saves_carrying"]) - carry0
+        pending2 = machine.long(sym["lfo4_pending_sound"])
+        print(f"  after {args.after:,} more instructions: {saves} save(s), "
+              f"{carry} carrying an LFO4; pending now {pending2:#010x}")
+        check("the stock chain re-saved the sound", saves >= 1, "no SAVE ran after the announcement")
+        check("the re-save carried LFO4", carry >= 1, "saves ran, none carried LFO4")
+        check("the pending mark was cleared by that save", pending2 == 0,
+              f"still pending on {pending2:#010x}")
     return report()
 
 
