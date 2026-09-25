@@ -101,6 +101,16 @@ def browser(content, code):
           f"so this admits LFO4's DEST and nothing else")
 
 
+# The release build, as one list, so `scripts/gen_lfo4_code.py` packages
+# exactly what this script builds rather than a copy that could drift.
+RELEASE = dict(sources=ui2.SOURCES, entries=ui2.ENTRIES,
+               extra=[slots.divert, table.relocate, page.hooks,
+                      value.divert, value.companion, value.waveform,
+                      ui.slew, ui.dest, pagelist.pagelist, ui2.rnd,
+                      browser],
+               chunks=table.chunks)
+
+
 if __name__ == "__main__":
     import argparse
     # Same guard as build_lfo4_tlm.py: a build name is never silently reused,
@@ -115,10 +125,4 @@ if __name__ == "__main__":
         raise SystemExit(f"  {SYX.name} already exists. Pick another --name, or "
                          f"delete it deliberately if this is a rebuild of the same thing.")
     table.describe(bridge.load(bridge.read_image(bridge.STOCK)).container.find(3).unpack())
-    raise SystemExit(bridge.main(sources=ui2.SOURCES, entries=ui2.ENTRIES,
-                                 out=OUT, syx=SYX,
-                                 extra=[slots.divert, table.relocate, page.hooks,
-                                        value.divert, value.companion, value.waveform,
-                                        ui.slew, ui.dest, pagelist.pagelist, ui2.rnd,
-                                        browser],
-                                 chunks=table.chunks))
+    raise SystemExit(bridge.main(out=OUT, syx=SYX, **RELEASE))
