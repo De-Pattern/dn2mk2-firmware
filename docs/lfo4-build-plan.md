@@ -6232,3 +6232,71 @@ not need one.
 
 **[V]** -- hardware, both tests, positive and negative control, telemetry
 agreeing with the ear.
+
+
+## Persistence across a reboot: what is known, and one fix that must not be tried
+
+**2026-09-25.** LFO4 settings never survive a reboot (owner, 2026-09-22 and
+again today: *"I have to always set it up, it never stays there"*). Every other
+page's settings do.
+
+### The save side can carry LFO4
+
+- The working state is written by a job named *"Write project MRAM"* (manager
+  `0x4002bf02`, invoker `0x4002c694`), which calls the component serialiser
+  `0x400e1494(0x405cd96c, project, 0, flags, progress)`. With flags `-1` it
+  saves **129 kits** through the kit SAVE at `0x400dde44` (kit `i` from
+  `project + 0xef371c + 23921*i`) and **128 pool sounds** through
+  `0x400dd92e`. Both reach the sound `SAVE` at `0x400dd6a6` through
+  `lea %pc@(0x400dd6a6),%aN ; jsr %aN@` -- invisible to `dnfw fn callers` and,
+  until digikit PR #44, to `refscan.py`.
+- In a boot from reset the firmware runs that serialisation itself: 2,192
+  `SAVE`s, **16 keyed on the live container's own sounds**, 2,048 on the
+  23,921-byte kit grid laid out after it, 128 pool
+  (`scripts/emu_lfo4_persist.py --boot-only`). So the project's 129 kits are
+  the live kit followed by 128 pattern kits, and **the live kit is serialised
+  under exactly the addresses LFO4's table is keyed on**.
+
+### What the emulator cannot answer, and why today's negatives are void
+
+`0x4018a97a` is a lazy singleton: on first use it constructs a 451,596-byte
+object. The emulator's boot never builds it, so every call made today into the
+MRAM and MMC writers spent its whole budget inside that constructor -- 9,287
+seventeen-byte copies of controller-name strings -- and returned without
+saving. "lfo4_on_save ran 0 times" from those runs is **not evidence**; the
+work control is what showed it (20,000,000 instructions, the call budget, not a
+return).
+
+### Only one site queues the MRAM write, and it is on the project-load path
+
+`0x4002d032` (the job name "Write project MRAM" at `0x4021385b`) is the only
+reference. So the working state is not re-serialised after every edit, and how
+individual edits persist is still open.
+
+### Do not "fix" this by broadcasting SoundParamChangedInfo for LFO4
+
+The stock setter (`0x40037b74`) ends by broadcasting `SoundParamChangedInfo`
+(vtable `0x401db734`, typeinfo `0x401db708`) with the **slot** that changed.
+LFO4's setter skips that broadcast, which looked like the obvious reason nothing
+records an LFO4 edit. Its two receivers say otherwise, and say it is dangerous:
+
+- `0x4004cb30`, inside `Sound::updateMirror`: copies `sound[slot]` into a row at
+  `row + 0x1c + 2*slot`. Rows are 202 bytes, 101 slots. LFO4's slots are
+  **101..108**, so this writes into the **next voice's row**.
+- `0x4003f710`, in `0x4003f28c`: reads `sound.values[slot]` and calls
+  `0x4002585a(value, ..., slot)`, the per-voice engine push, which indexes its
+  arrays by slot -- out of bounds for 101..108.
+
+Neither receiver is a journal or a dirty flag. Both refresh the mirror and the
+engine. Replaying the stock tail for LFO4, or broadcasting its slots, would
+corrupt memory; it would not persist anything.
+
+### The instrument decides the rest
+
+`lfo4-persistprobe` reports `saves_carrying`, `loads_carrying`, the live entry
+count and drops, built with release semantics (`LFO4_KEEP_*` off). The protocol
+is in the test plan: set LFO4, nudge a stock knob, save explicitly, reboot --
+reading the counters at each step.
+
+**Status: [D]** for the structure (static and emulator, cross-checked),
+**open** for the mechanism.
