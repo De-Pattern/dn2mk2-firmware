@@ -80,17 +80,61 @@ pattern with bigger tables, so the import path is not merely designed, it is
 And it removes the item that makes every DT2 machine expensive: a file browser
 grafted into someone else's UI framework (`docs/dt2-machine-port.md`).
 
-**Two variants, and the simpler one is probably right.**
+**The mechanism, decided by the owner:** the tables are **baked into the
+firmware**, and **at flash time the firmware writes them out into the `+Drive`**.
+They are content once installed, not code — the image is the delivery vehicle,
+not the home.
 
-| | where tables live | cost |
-|---|---|---|
-| **A — in the image** | a new ELE3 section, read-only, indexed by `SLOT` | no `+Drive` writes, no new format work |
-| **B — delivered to the `+Drive`** | firmware carries blobs and writes them out on first boot | needs `+Drive` write code and the project format; DNX is the authority |
+I argued for the simpler variant (leave them read-only in an ELE3 section and
+index them directly, since a reflash is already accepted). **The owner's choice
+stands, and it is the better shape for reasons that outlast the first build:**
 
-The owner proposed B. **A gets the same result with less**, because the premise
-already accepts a reflash to change tables — so the delivery step buys capacity
-and per-project independence, and costs a write path into storage we do not yet
-write to. Worth taking A first and keeping B for when capacity actually binds.
+- wavetables end up where user content lives, so they can be named, listed and
+  eventually replaced *without* the image growing every time;
+- the firmware image does not carry a few hundred KB forever, and flash-transfer
+  time does not grow with the size of the table set;
+- it is how Tonverk itself behaves, so the feature can grow toward the real
+  thing rather than away from it;
+- and the `+Drive` write happens **once, at install**, not at run time, so the
+  audio path never touches storage.
+
+**What it costs that variant A would not:** a write path into the `+Drive`. The
+firmware already writes projects and sounds there, so the routine exists and
+finding it is ordinary static ColdFire work — our home turf. The **format** is
+`DNX`'s authority and must come from them, never be hand-rolled here.
+
+**This is now the critical unknown for parts 1, 2 and 5**, and it is reachable
+today without a SHARC core.
+
+### The staging, which settles the A-versus-B argument
+
+The owner's sequencing, and it is right: **bake one table into the firmware's
+own space now, and research `+Drive` delivery later.** A and B are not competing
+designs; A is the first milestone and B is the destination. The read path can be
+proved before the write path exists, and nothing learned by doing A is thrown
+away when B arrives — the tables, the reduction, the bake step and the reader all
+carry over. Only *where the bytes live* changes.
+
+**Milestone 0, and it is buildable today.** One table, ~16 KB at 16 frames of
+512 points, in an appended section, with the firmware reading it back and
+reporting a few samples over the telemetry channel.
+
+That is worth doing on its own terms:
+
+- it proves the **delivery vehicle** end to end — reduce, bake, load, address,
+  read — which every later variant depends on;
+- it **cannot disturb the audio path**, because it adds data and one read, and
+  changes no machine, no selector and no engine code;
+- it is sized well inside what is already proven: the whole LFO4 feature grew
+  MAIN OS by **23.7 KB**, and this is smaller;
+- and the telemetry channel is calibrated, so the check is a number rather than
+  a judgement.
+
+**What it deliberately does not do:** raise the machine-list ceiling. Selector 5
+would be clamped to 4 by the DSP (`min(R2, 4)`, `docs/machine-list.md`) and land
+on some other machine's record — untested behaviour on the audio path, for no
+gain while there is nothing to render. **The ceiling moves when there is
+something behind it.**
 
 **Sizing, at int16, against a section budget the firmware already normalises**
 (section 7 is 837 KB; section 8 is 160 KB):
