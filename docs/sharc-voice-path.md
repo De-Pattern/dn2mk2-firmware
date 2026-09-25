@@ -101,10 +101,56 @@ is the mirror of this one -- *"which ColdFire code limits the machine list to
 **It is not yet evidence that a sixth machine can be added.** A ceiling tells
 you where the wall is, not that it is the only one.
 
+## The resemblance is dead: there is no `0x1d8` record stride here
+
+`sw 0x1c8ef1` never strides `I9`/`I5` by a record size. It applies **field
+offsets to one structure**: `+0x74`, `+0x230`, `+0x358`, `-0x228`, `-0x18c`,
+`-0x11c`, `-0x9c`, plus `I4 = modify(I5, 0x1380c)` and
+`I10 = modify(I9, 0x13ea0)` in PM. And `I5` is repeatedly re-based from saved
+stack slots (`DM(I6-24)`, `-29`, `-31`).
+
+So **`0x241298` is not a 32-record array of stride `0x1d8`**, and DT2's voice
+record contract does not transfer to DN2 as written. ~~`0x241298` is the DN2
+voice record array~~ -- withdrawn before it was ever relied on. The numerical
+closeness to DT2's `0x2412cc` was a coincidence of layout, which is exactly what
+this project has twice mistaken for a finding.
+
+The 16-track loop itself streams: loads through `I5` with M-register
+post-modify, stores through `I4` with M-register post-modify. **No track-indexed
+addressing is visible in it at all** -- it is a sequential unpack, not an
+indexed scatter.
+
+## The control nobody has run, and it outranks more SHARC reading
+
+Here is a question this project has never asked, and it is embarrassing that it
+has not:
+
+> **Does a stock LFO modulating the same destination also fire only on one
+> voice?**
+
+Everything about the "voice gate" rests on LFO4's behaviour, observed alone. On
+2026-09-25 the owner pointed **LFO1** -- stock, known-good -- at the same
+destination (`Syn Ratio C`, mirror slot 26 of track 7) to control a *probe*
+address. Nobody checked **which voices it sounded on.**
+
+Both LFOs write the same mirror slot, and the frame builder copies slots 25..99
+per track. **The DSP cannot tell them apart.** So:
+
+- **LFO1 sounds on every voice while LFO4 does not** -> the two are *not* both
+  reaching the frame, even though both were measured in the mirror. The fault is
+  back on the ColdFire, between the mirror and the frame -- and everything on
+  this page is a detour.
+- **LFO1 also sounds only on voice 7** -> the gate is a property of the
+  destination or of how the DSP consumes it, **independent of which LFO
+  writes**. LFO4 is then not faulty at all, and "the voice gate" has been
+  misnamed since it was opened.
+
+Either answer is worth more than the next week of static SHARC reading, and it
+costs one minute at the instrument with no flash.
+
 ## Next
 
-1. Read `sw 0x1c8ef1`'s body for the stride applied to `I9`/`I5`. That either
-   identifies the voice record array or kills the resemblance.
-2. Find where a voice's record is chosen, and whether the track index reaches
-   it. **That is the voice gate**, and it is the only live question.
-3. Only then, the machine ceiling.
+1. **Run that control.** It may invalidate the framing of this whole document.
+2. Only if the gate survives it: find where a voice's record is chosen and
+   whether a track index reaches it.
+3. Then the machine ceiling (`min(R2, 4)`, `lshift 9`), still **[D]**.
