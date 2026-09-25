@@ -141,6 +141,7 @@ u32 lfo4_sound_of(u32 track)
  *
  * The sentinels are outside 0..15 on purpose, so "the array is empty" and "no
  * match" can never be read as track 0. */
+#ifdef LFO4_REGPROBE
 static u32 lfo4_track_of_object(u32 object)
 {
     u32 t;
@@ -152,6 +153,7 @@ static u32 lfo4_track_of_object(u32 object)
             return t;
     return 127u;
 }
+#endif
 
 /* The mirror geometry, from `docs/fx-master-modulation.md` §9 and the
  * evaluator's own arithmetic at `0x400db092`: `202*block + 34`. */
@@ -451,6 +453,22 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
                 u16 fv = fa ? *(volatile u16 *)fa : 0u;
 
                 tlm_cc14(TLM_CC_MASK_HI, TLM_CC_PROBE_B, (u16)(fv >> 2));
+                /* **A zero here has two meanings, and they point opposite ways.**
+                 *
+                 * `frame_word_for` returns 0 for a slot the builder never
+                 * copies -- 93, 94, and everything outside its four tiled
+                 * ranges -- and the read above then reports `0`, which is
+                 * indistinguishable from a frame word that genuinely holds
+                 * zero. One says "this destination cannot reach the DSP at
+                 * all", which would be the whole answer; the other says "it
+                 * can, and nothing wrote it". Leaving them to look identical is
+                 * how a probe comes back uninterpretable, which has already
+                 * cost this project two flashes.
+                 *
+                 * So the status is sent beside the value: **0** the address was
+                 * valid and read, **1** this destination is never copied into
+                 * the frame, **2** no destination is set on that row. */
+                tlm_cc(TLM_CC_FRAME_ST, (u8)(dest == 0u ? 2u : (fa ? 0u : 1u)));
             }
 #endif
         }

@@ -17,5 +17,6 @@
 #define TLM_CC_REG_MATCH   28   /* index j where trackobj[j] == registry[i]; 126 registry empty, 127 no match */
 #define TLM_CC_ALT_MATCH   29   /* same against the 0x4059c92c array; 126 empty, 127 no match */
 #define TLM_CC_MARKER      30   /* a caller-chosen tag, to separate call sites */
+#define TLM_CC_FRAME_ST    31   /* frame read status: 0 read, 1 destination never copied to the frame, 2 no destination */
 
 #endif /* TLM_CHANNELS_H */

@@ -67,6 +67,12 @@
       "name": "marker",
       "width": 7,
       "note": "a caller-chosen tag, to separate call sites"
+    },
+    {
+      "cc": 31,
+      "name": "frame_st",
+      "width": 7,
+      "note": "frame read status: 0 read, 1 destination never copied to the frame, 2 no destination"
     }
   ]
 }
