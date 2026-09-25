@@ -6066,7 +6066,8 @@ only gets modulated by LFO4 when it uses voice 7."*
 - **The frame builder** (`0x400274ba`). It copies LFO4's slot as faithfully as
   LFO3's -- same address, same lag, positive control beside it.
 - ~~The engine's index is a voice~~ -- see below. The observation that produced
-  it stands; the mechanism inferred from it does not.
+  it stands; the mechanism inferred from it does not. **[RETIREMENT WITHDRAWN
+  the same afternoon -- see "The blocks are per voice" at the end.]**
 
 ### The step that forces the conclusion
 
@@ -6118,3 +6119,64 @@ driving and once with LFO4:
 correct on every one, positive control in both directions. **[D]** for the
 conclusion that the mechanism is downstream of the frame word -- it follows from
 the measurements by elimination, and elimination is only as good as the list.
+
+
+## The blocks are per voice: the retirement above is withdrawn
+
+**2026-09-25, `lfo4-framescan`, two runs with nothing changed on the other
+tracks between them.** The previous section retired "the engine's index is a
+voice". That was wrong, and the measurement that shows it is also the fix.
+
+| run | driving | mirror blocks | DSP frame records |
+|---|---|---|---|
+| A | stock LFO3 on track 7 | 0-6 vary (7-15 not yet sampled this frame) | **all 16 vary** |
+| B | LFO4 on track 7 | **only 6 varies** | **only 6 varies** |
+
+1,231 bursts each, `probe_a` = 99 throughout, `frame_st` = 0.
+
+**The confound is ruled out by run B itself.** If other tracks' own LFOs were
+moving blocks 0-5 in run A, they would still move them in run B; nothing about
+them changed. They went flat.
+
+**So block 0 computed track 7's LFO3, which means block 0 held track 7's LFO
+parameters.** The blocks are **per voice**, each filled from the sound of the
+track that *owns* the voice; after track 7 has played across all sixteen
+voices, all sixteen carry its LFO1-3. LFO4's parameters come from
+`lfo4_rows[block]`, keyed by track, so block 6 gets track 7's LFO4 and the rest
+get nothing. Block 6 is voice 7. Every observation of the week follows.
+
+**Why the retirement looked justified**, kept so it is not repeated: block 6
+swept under LFO4 "whatever voice the note took", and that was read as "the row
+selected by track is correct". It was correct *for block 6*, because
+`lfo4_rows[6]` is track 7's -- but block 6 is a voice, and it is heard only
+when track 7's note is on it. A probe that watched only block 6 could not tell
+"the right track's row" from "the right track's row in the wrong place".
+
+**Also mis-measured on the way, and withdrawn:** the mirror half of the
+rotating scan is only valid for blocks below the current track. The stub fires
+during track 7's LFO pass, so blocks 7-15 still hold the regenerated base value
+(3890 at this destination) when they are read. The frame half has no such
+limit; the frame is built after every pass.
+
+### The owner of each voice
+
+`0x80005308` (`DN2_OWNER_REG`) was probed this morning as a candidate *track*
+map and correctly ruled out as one -- populated, never a track object. It is
+read by the firmware's fan-out writers (`0x40025d2c`, `0x40025d88`,
+`0x400258ec`), which all do the same thing: for each of sixteen, if the entry is
+this owner, write this slot. `0x4002549c(sound, slot)` stores **a sound
+pointer** into a sixteen-entry per-slot array. So the hypothesis under test is
+that `0x80005308[v]` is the live sound that owns voice `v`.
+
+If so, the owner's question -- *why does LFO4 need a lookup when LFO1-3 do
+not?* -- has the answer that it does not: our table is keyed by sound pointer,
+and the owner is the key. `lfo4-voiceowner` (`LFO4_VOICE_OWNER`) does exactly
+that, checks the entry is one of the sixteen live sounds before using it, and
+reports which track it resolved to, so a wrong guess about the array is visible
+on the first burst.
+
+### Status
+
+**[V]** for the two-run measurement. **[D]** for `0x80005308` holding sound
+pointers -- `lfo4-voiceowner` is the test, and its `owner` channel says which
+way it went.

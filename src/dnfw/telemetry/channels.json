@@ -73,6 +73,12 @@
       "name": "frame_st",
       "width": 7,
       "note": "0 read, 1 destination never copied to the frame, 2 no destination"
+    },
+    {
+      "cc": 32,
+      "name": "owner",
+      "width": 7,
+      "note": "track whose live sound owns this voice via 0x80005308; 126 empty, 127 not a live sound"
     }
   ]
 }

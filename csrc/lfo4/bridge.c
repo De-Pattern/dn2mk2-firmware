@@ -126,6 +126,58 @@ u32 lfo4_sound_of(u32 track)
 }
 
 
+#ifdef LFO4_VOICE_OWNER
+/* -> the live sound that owns voice `v`, or 0; and in `lfo4_owner[v]` the
+ * track it belongs to (126 empty, 127 not one of the sixteen live sounds).
+ *
+ * **Why this replaces a lookup instead of adding one.** The owner asked on
+ * 2026-09-25 why LFO4 needs a lookup at all, when LFO1-3 plainly do not. The
+ * answer took the whole day and it is the fix: the firmware does not keep one
+ * block per track. It keeps **one per voice**, and fills each from the sound
+ * of whichever track owns that voice -- which is why stock LFO3 on track 7
+ * appeared in every block and every frame record once track 7 had played on
+ * all sixteen voices, while LFO4, read from a table keyed by track, appeared
+ * in block 6 alone (`lfo4-framescan`, runs A and B, other tracks unchanged).
+ *
+ * The owner of each voice is kept in `DN2_OWNER_REG`, and the firmware's own
+ * fan-out writers (`0x40025d2c`, `0x40025d88`, `0x400258ec`) all use it the
+ * same way: for each of the sixteen, if the entry is this owner, write this
+ * slot. Our table is keyed by live sound pointer, so the owner *is* the key
+ * and nothing needs translating.
+ *
+ * **Checked, not trusted.** The entry must be exactly one of the sixteen live
+ * sounds (`lfo4_sound_of`) before it is used; anything else falls back to the
+ * old behaviour and says so in telemetry, so a wrong guess about what the
+ * array holds is visible on the first burst rather than silent. The check runs
+ * only when an entry changes -- voices change hands per note, the tick runs
+ * 23,500 times a second, and sixteen compares per tick would be the cost of
+ * not caching it. */
+u32 lfo4_owner[TRACKS];
+static u32 owner_raw[TRACKS];
+static u32 owner_sound[TRACKS];
+
+static u32 lfo4_voice_sound(u32 v)
+{
+    u32 raw = *(volatile u32 *)(DN2_OWNER_REG + 4u * v);
+
+    if (raw != owner_raw[v] || !owner_sound[v]) {
+        u32 t;
+
+        owner_raw[v] = raw;
+        owner_sound[v] = 0;
+        lfo4_owner[v] = raw ? 127u : 126u;
+        if (raw)
+            for (t = 0; t < TRACKS; t++)
+                if (lfo4_sound_of(t) == raw) {
+                    owner_sound[v] = raw;
+                    lfo4_owner[v] = t;
+                    break;
+                }
+    }
+    return owner_sound[v];
+}
+#endif
+
 /* The mirror geometry, from `docs/fx-master-modulation.md` §9 and the
  * evaluator's own arithmetic at `0x400db092`: `202*block + 34`. */
 #define MIRROR_BASE   0x800068E4u
@@ -408,6 +460,9 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
             lfo4_word = at_dest;
             tlm_cc(TLM_CC_TRACK, (u8)prev);
             tlm_cc(TLM_CC_DEST, (u8)dest);
+#ifdef LFO4_VOICE_OWNER
+            tlm_cc(TLM_CC_OWNER, (u8)lfo4_owner[prev]);
+#endif
             tlm_cc14(TLM_CC_OWN_LO, TLM_CC_OWN_HI, (u16)(at_dest >> 2));
 #ifdef LFO4_FRAMEREAD
             /* **The same value, one copy later.** If the mirror pair moves and
@@ -518,7 +573,14 @@ u32 lfo4_refresh(u32 track)
     lfo4_last_index = track;
     if (track > lfo4_index_max && track < TRACKS)
         lfo4_index_max = track;
-    sound = lfo4_sound_of(track);
+#ifdef LFO4_VOICE_OWNER
+    /* The index is a voice. Ask the firmware whose voice it is. */
+    sound = lfo4_voice_sound(track);
+    if (!sound)
+        sound = lfo4_sound_of(track);
+#else
+    sound = lfo4_sound_of(track);   /* treats the index as a track -- it is a voice */
+#endif
     generation = ext_generation;
     if (sound == seen_sound[track] && generation == seen_generation[track])
         return row;

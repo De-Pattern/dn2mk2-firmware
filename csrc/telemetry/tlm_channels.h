@@ -18,5 +18,6 @@
 #define TLM_CC_SMIR_LO     29   /* scanned mirror block's slot, low 7 */
 #define TLM_CC_MARKER      30   /* burst counter */
 #define TLM_CC_FRAME_ST    31   /* 0 read, 1 destination never copied to the frame, 2 no destination */
+#define TLM_CC_OWNER       32   /* track whose live sound owns this voice via 0x80005308; 126 empty, 127 not a live sound */
 
 #endif /* TLM_CHANNELS_H */
