@@ -6336,3 +6336,38 @@ stock sounds loaded, `ext_live` = 0, `ext_inserts` = 0, `ext_full` = 0,
 `lfo4_loads_carrying` = 0 (`emu_lfo4_persist.py --boot-only`). No stock sound
 looks as if it carries an LFO4, so the table cannot flood at boot. This is also
 the baseline `lfo4-persistprobe` must show at step 1 on the instrument.
+
+
+### The working state is a RAM image flushed to two flash banks
+
+**2026-09-25, static.** How a stock edit survives a reboot with no save, as far
+as reading gets it:
+
+- The serialised working project is a **RAM image at `0x405cd96c`**, inside an
+  object at `0x405cd85c` (the image is its `+0x110`). The component serialiser
+  `0x400e1494` writes it; "Write project MRAM" is the job that runs it.
+- **"MRAM write to flash"** (job name at `0x4021b13c`, queued at `0x400d0198`)
+  copies that image to the eMMC. The block writer `0x400f16bc` goes in 32 KB
+  chunks and advances its first argument by `len >> 9`, so it addresses
+  **512-byte sectors**; the two banks are **sectors `0x40000` and `0x48000`**,
+  each opening with the magic **`COKi`** (`0x434f4b69`), chosen through the
+  table at `0x401ff6f8` (`0x400f1d3e`). "MRAM" is Elektron's name for this
+  state; the device here is not memory-mapped.
+- At boot the bank headers are checked -- `MRAM HEADER BROKEN`, `MRAM STATE
+  NOT WRITTEN`, `MRAM WRITE IN PROGRESS` (`0x400cd382..0x400cd3d6`, the
+  `#TEST_STATUS` report) -- with the RAM copy of the header at `0x403057dc`
+  and state flags at `0x403057f0`.
+- The image's direct references, for whoever continues (`refscan.py` with the
+  PC-relative fix): `0x400cefde`, `0x400ceff0`, `0x400f6854`, `0x4012f06c`, the
+  load path at `0x4002cfc6`, and a flag word at `0x405cd870` (bit 1 tested at
+  `0x400cd336`, bits set at `0x400ce44a`).
+
+**So the remaining question is which of those writers carries a stock edit
+into the image between flushes.** An LFO4 edit touches only the side table, so
+if the image is updated per edit, LFO4 never reaches it; if the image is
+re-serialised from the live sounds before each flush, it does (the kit SAVE is
+keyed correctly). `lfo4-persistprobe` separates the two on the instrument:
+`sv_carry` rising after an edit means the second.
+
+**Not tried, deliberately:** writing LFO4 values into the image directly. The
+image is the user's persisted project, and a wrong offset would corrupt it.
