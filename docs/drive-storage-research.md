@@ -524,7 +524,7 @@ sharcdb to look for the SHARC link-port-0 receive handler in the DN2 image.
 
 ## Open questions
 
-- **The owner's "128 GB".** Where does the number come from? E1 answers it.
+- ~~**The owner's "128 GB".** Where does the number come from? E1 answers it.~~ **Resolved 2026-09-26 by the owner:** the +Drive is 32 GB; the 128 on the board is the NANYA DDR2's 128 MB (and the Winbond SPI flash's 128 Mbit). The DT2 and DN2 share the same board and components, which is why their eMMC tables are byte-identical.
 - **Is the unit reconfigured?** E1.
 - **Is the free region blank on the owner's unit?** Did the factory
   `#RECEIVE_AUDIO` leave data at `0x458000`? E2.
