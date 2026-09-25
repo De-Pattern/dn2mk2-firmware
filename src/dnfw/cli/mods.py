@@ -50,6 +50,16 @@ def configure(parser) -> None:
     ex.add_argument("--mod", required=True, choices=sorted(REGISTRY))
     ex.add_argument("-o", "--out", type=pathlib.Path, required=True)
 
+    mx = sub.add_parser("matrix", help="try every pair of mods, both orders, and report which combine")
+    mx.add_argument("image", type=pathlib.Path)
+    mx.add_argument("--json", type=pathlib.Path, help="also write the result as JSON")
+    mx.add_argument("--page", type=pathlib.Path, action="append", default=[],
+                    help="rewrite the generated regions (<!-- dnfw:matrix --> and "
+                         "<!-- dnfw:combines ID -->) of this HTML or Markdown file")
+    mx.add_argument("--emit", type=pathlib.Path,
+                    help="write each combinable MAIN OS pair to DIR/<a>+<b>/section_3_MAIN_OS.bin "
+                         "for scripts/emu_boot_check.py")
+
     ap = sub.add_parser("apply", help="apply a mod and rebuild the image")
     ap.add_argument("image", type=pathlib.Path)
     # Repeatable, because applying two mods together is the thing the extent
@@ -343,9 +353,107 @@ def _apply(args) -> int:
     return 0
 
 
+def _apply_default(mod, firmware, scratch: pathlib.Path):
+    """A mod with its factory or neutral inputs, for the matrix."""
+    if mod.ID == "transients":
+        import wave
+        paths = []
+        for k, raw in enumerate(mod.extract(firmware)):
+            path = scratch / f"{k:02d}.wav"
+            if not path.exists():
+                with wave.open(str(path), "wb") as w:
+                    w.setnchannels(1)
+                    w.setsampwidth(2)
+                    w.setframerate(mod.RATE)
+                    w.writeframes(raw)
+            paths.append(path)
+        return mod.apply(firmware, paths)
+    if mod.ID == "bootscreen":
+        frame = {(x, y) for x in range(128) for y in range(64)
+                 if x in (0, 127) or y in (0, 63)}
+        return mod.apply(firmware, [mod.image_from_pixels(frame)])
+    if mod.ID == "lfowaves":
+        return mod.apply(firmware, None)
+    return mod.apply(firmware)
+
+
+def _rewrite(page: pathlib.Path, ids, found, names) -> None:
+    import re
+
+    from ..mods import matrix
+
+    text = page.read_text(encoding="utf-8")
+    table = (matrix.table_md if page.suffix == ".md" else matrix.table_html)(ids, found, names)
+    text = re.sub(r"(<!-- dnfw:matrix -->\n).*?(\n<!-- /dnfw:matrix -->)",
+                  lambda m: m.group(1) + table + m.group(2), text, flags=re.S)
+    text = re.sub(r"(<!-- dnfw:combines (\w+) -->).*?(<!-- /dnfw:combines -->)",
+                  lambda m: m.group(1) + matrix.combines_text(m.group(2), found, names) + m.group(3),
+                  text, flags=re.S)
+    page.write_text(text, encoding="utf-8", newline="\n")
+
+
+def _matrix(args) -> int:
+    import json
+    import tempfile
+
+    from ..mods import matrix
+
+    firmware = load(read_image(args.image))
+    ids = sorted(REGISTRY)
+    with tempfile.TemporaryDirectory() as tmp:
+        scratch = pathlib.Path(tmp)
+        found = matrix.pairs(firmware, REGISTRY,
+                             lambda mod, fw: _apply_default(mod, fw, scratch), _staged)
+        if args.emit:
+            for pair in found:
+                mods = sorted((REGISTRY[pair.a], REGISTRY[pair.b]),
+                              key=lambda mod: getattr(mod, "APPLY_LAST", False))
+                if f"{mods[0].ID}+{mods[1].ID}" in pair.refused:
+                    mods.reverse()
+                if not pair.combines or 3 not in (mods[0].SECTION, mods[1].SECTION):
+                    continue
+                payloads = {}
+                for mod in mods:
+                    payloads.update(_apply_default(mod, _staged(firmware, payloads), scratch).payloads)
+                if 3 in payloads:
+                    out = args.emit / f"{pair.a}+{pair.b}"
+                    out.mkdir(parents=True, exist_ok=True)
+                    (out / "section_3_MAIN_OS.bin").write_bytes(payloads[3])
+
+    cell = {}
+    for pair in found:
+        mark = "yes" if pair.combines and not pair.order_only else (
+            "order" if pair.combines else "NO")
+        cell[(pair.a, pair.b)] = cell[(pair.b, pair.a)] = mark
+    width = max(map(len, ids))
+    print(" " * (width + 2) + "  ".join(f"{m[:6]:>6}" for m in ids))
+    for a in ids:
+        print(f"  {a:<{width}}" + "  ".join(f"{('-' if a == b else cell[(a, b)]):>6}" for b in ids))
+    print(f"\nyes = disjoint bytes and applies in both orders; order = only in the order "
+          "`apply` uses;\nNO = refused. Not a hardware result: no combined image has been flashed.\n")
+    for pair in found:
+        if not pair.combines or pair.order_only or pair.note:
+            print(f"  {pair.a} + {pair.b}: " + (pair.reason() or next(iter(pair.refused.values()), "")))
+            if pair.note:
+                print(f"    note: {pair.note}")
+    names = {m: getattr(REGISTRY[m], "NAME", m) for m in ids}
+    for page in args.page:
+        _rewrite(page, ids, found, names)
+        print(f"  rewrote the generated regions of {page}")
+    if args.json:
+        args.json.write_text(json.dumps(
+            {"mods": ids,
+             "pairs": [{"a": p.a, "b": p.b, "combines": p.combines, "order_only": p.order_only,
+                        "overlaps": p.overlaps, "refused": p.refused, "note": p.note}
+                       for p in found]}, indent=1) + "\n", newline="\n")
+    return 0
+
+
 def run(args) -> int:
     if args.action == "list":
         return _list()
+    if args.action == "matrix":
+        return _matrix(args)
     if args.action == "extract":
         return _extract(args)
     return _apply(args)
