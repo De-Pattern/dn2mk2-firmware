@@ -19,5 +19,10 @@
 #define TLM_CC_MARKER      30   /* burst counter */
 #define TLM_CC_FRAME_ST    31   /* 0 read, 1 destination never copied to the frame, 2 no destination */
 #define TLM_CC_OWNER       32   /* track whose live sound owns this voice via 0x80005308; 126 empty, 127 not a live sound */
+#define TLM_CC_SV_CARRY    33   /* saves that wrote a non-zero LFO4, since boot, mod 128 */
+#define TLM_CC_LD_CARRY    34   /* loads that brought a non-zero LFO4 back, since boot, mod 128 */
+#define TLM_CC_EXT_LIVE    35   /* live LFO4 table entries, capped at 127 */
+#define TLM_CC_EXT_DROP    36   /* table entries dropped since boot, mod 128 */
+#define TLM_CC_SAVES       37   /* every sound SAVE since boot, mod 128 */
 
 #endif /* TLM_CHANNELS_H */
