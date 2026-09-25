@@ -5852,3 +5852,73 @@ The hunt moves to the SHARC (`docs/sharc-*.md`), and to whatever hands a voice
 its track's record. **Nothing further about the voice gate should be read into
 ColdFire code** -- four stages of it are now measured and all four are
 track-indexed.
+
+# CLOSED: there was never a voice gate
+
+**2026-09-25, on the instrument, heard and measured.**
+
+`lfo4-loud` forces every track's LFO4 row to maximum depth on **Filter Base**
+(id 76, verified unique in the parameter table). The owner flashed it and
+reported **every track and every voice gurgling** rather than sweeping — then,
+as the rate came down, **a clean sweep on every voice and every track**.
+
+**So the modulation was always on all sixteen voices.** What made it look like a
+gate was rate and depth: at the settings in use it was slow and shallow enough
+to be missed on most voices while standing out on one.
+
+## Why the week's readings were all correct
+
+Nothing measured has to be withdrawn, which is unusual and worth stating:
+
+- **The mirror measurements were right.** LFO4 wrote its destination every
+  frame — graded 1553 / 528 / 0 as LFO1 and then LFO4 were removed.
+- **The static reads were right.** The caller's loop, evaluator A, the frame
+  builder and LFO4's own write are all track-indexed, and the DSP gets sixteen
+  per-track records. Nothing in the CPU path knows about voices.
+- **The owner's ears were right.** At the original settings the modulation
+  really was inaudible on most voices.
+
+The three were never in conflict. **The hypothesis that joined them — a gate —
+was the only wrong thing**, and it was wrong from the day the branch was named.
+
+## The rate ladder, measured from recordings
+
+`scripts/lfo_rate.py` records the instrument's own USB audio and measures the
+modulation frequency, labelling the sequencer's harmonics so they are not read
+as modulation.
+
+| build | SPD | MULT | measured |
+|---|---|---|---|
+| `lfo4-slow2` | `0x0700` | 8 | **57.0 Hz** — audio-rate, hence "gurgle" |
+| `lfo4-slow3` | `0x0020` | 8 | **6.5 Hz** |
+| `lfo4-slow4` | `0x0020` | 4 | **4.00 Hz** (reproduced on two different patches) |
+
+Two points fix a line at MULT 8: `rate ≈ 0.0287*SPD + 5.6`. **The intercept is
+the finding** — SPD cannot go below about 5.6 Hz, because MULT sets the base
+multiplier and SPD only scales on top of it. Three builds were made slower by
+guesswork before the first recording was taken, and none of them could have
+worked.
+
+## What this leaves
+
+**The ColdFire half of LFO4 is finished**: generated, applied, written to the
+right slot of the right track, and audible on every voice. `lfo4-frame` is not
+needed and should not be flashed.
+
+The SHARC work (`docs/sharc-voice-path.md`) was opened to chase this gate. It
+keeps its value — the DN2 blob is hash-identical to digikit's, the database
+builds, and the machine ceiling came out of it (`docs/machine-list.md`) — but
+its stated motive is void and the page says so.
+
+**What actually remains on LFO4** is the punch list, none of it about voices:
+settings do not survive a power cycle (`lfo4_on_load`), page copy/paste does not
+carry LFO4, and the `RND`/`SPH` third site.
+
+## The lesson, and it cost the week
+
+**Reach for the instrument that measures, before the instrument that reasons.**
+A 15-second recording said "57 Hz" in one pass and would have said it a week
+ago. Instead: six flashes to read numbers off a page that rendered only the high
+byte, a probe seventeen slots low, and three guessed slowdowns that could not
+cross a floor. Every one of those was a reasoning instrument used where a
+measuring one was available.
