@@ -295,6 +295,27 @@ typedef unsigned char u8;
  * correct on every one, with a silent baseline beside a single held note
  * (`docs/lfo4-build-plan.md`). Kept here because the addresses are right and
  * the next reader should not have to find them again to rule them out. */
+/* **The sound on each voice, written at the moment its parameters arrive.**
+ *
+ * `0x4002549c(sound, slot)` is the delivery, read 2026-09-25 after the owner
+ * asked why LFO4 needs a lookup when LFO1-3 do not:
+ *
+ *   0x400254d4  movel %a2,%a0@(0,%d0:l:4)   ; 0x80003af0 + 4*(slot+1518) = sound
+ *   0x400254f6  addil #0x80003b12,%d0       ; + 202*slot: block `slot`
+ *   0x400254fe  jsr 0x40134490              ; memcpy(block, sound+20, 202)
+ *   0x4002551a  jsr 0x40134490              ; memcpy(0x8000487c+153*slot, sound+222, 153)
+ *
+ * `0x80003b12` is `0x80003af0 + 34` -- block 0 of the table the mirror is
+ * copied from. So a sound's parameters travel into a voice's block here, in
+ * one `memcpy`, and **the same routine records which sound it was** in the
+ * sixteen longs at `0x800052a8`. That is why stock LFOs follow a track onto
+ * any voice without looking anything up.
+ *
+ * `DN2_OWNER_REG` below, 96 bytes further on, was the first guess at this and
+ * was wrong: it is what the fan-out writers compare against, and on the
+ * instrument it never held a live sound (`owner` = 127 on every voice,
+ * `lfo4-voiceowner`, 2026-09-25). */
+#define DN2_VOICE_SOUND    0x800052A8   /* 16 x 4, written by 0x4002549c */
 #define DN2_OWNER_REG      0x80005308   /* 16 x 4, scanned at 0x400258f8 */
 #define DN2_TRACK_OBJ        0x40287DD4 /* 16 x 20, read by 0x4002b22e */
 #define DN2_TRACK_OBJ_STRIDE 20

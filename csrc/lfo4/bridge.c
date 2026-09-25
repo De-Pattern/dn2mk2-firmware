@@ -139,11 +139,15 @@ u32 lfo4_sound_of(u32 track)
  * all sixteen voices, while LFO4, read from a table keyed by track, appeared
  * in block 6 alone (`lfo4-framescan`, runs A and B, other tracks unchanged).
  *
- * The owner of each voice is kept in `DN2_OWNER_REG`, and the firmware's own
- * fan-out writers (`0x40025d2c`, `0x40025d88`, `0x400258ec`) all use it the
- * same way: for each of the sixteen, if the entry is this owner, write this
- * slot. Our table is keyed by live sound pointer, so the owner *is* the key
- * and nothing needs translating.
+ * The sound on each voice is recorded by the delivery itself,
+ * `0x4002549c`, in `DN2_VOICE_SOUND` -- the same routine that copies the
+ * sound's parameters into that voice's block (`dn2_111.h`). Our table is
+ * keyed by live sound pointer, so that record *is* the key and nothing
+ * needs translating.
+ *
+ * ~~`DN2_OWNER_REG`~~ was the first version of this and read 127 on every
+ * voice on the instrument: it is what the fan-out writers compare against,
+ * not the sound.
  *
  * **Checked, not trusted.** The entry must be exactly one of the sixteen live
  * sounds (`lfo4_sound_of`) before it is used; anything else falls back to the
@@ -155,14 +159,19 @@ u32 lfo4_sound_of(u32 track)
 u32 lfo4_owner[TRACKS];
 static u32 owner_raw[TRACKS];
 static u32 owner_sound[TRACKS];
+/* Checked once per change, not once per tick. The first version re-ran
+ * all sixteen compares on every call whenever the entry was not a live
+ * sound -- which, on the wrong array, was every call. */
+static u8 owner_seen[TRACKS];
 
 static u32 lfo4_voice_sound(u32 v)
 {
-    u32 raw = *(volatile u32 *)(DN2_OWNER_REG + 4u * v);
+    u32 raw = *(volatile u32 *)(DN2_VOICE_SOUND + 4u * v);
 
-    if (raw != owner_raw[v] || !owner_sound[v]) {
+    if (!owner_seen[v] || raw != owner_raw[v]) {
         u32 t;
 
+        owner_seen[v] = 1;
         owner_raw[v] = raw;
         owner_sound[v] = 0;
         lfo4_owner[v] = raw ? 127u : 126u;
