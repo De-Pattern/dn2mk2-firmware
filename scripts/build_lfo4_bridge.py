@@ -110,7 +110,7 @@ def cave_source(table_va: int, refresh: int, for_block: int = 0) -> str:
 
 
 def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=None,
-         defines=None) -> int:
+         defines=None, include=(), exports=()) -> int:
     """Build it. `extra` are further site patches, each `f(content, code)`.
 
     The arguments exist so a build that is *this one plus a site* -- step 4's
@@ -121,6 +121,10 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     append beside the C. Step 4b's relocated parameter table is one, and it is
     built from the stock image rather than compiled, which is why the hook
     takes the image and runs before the loader is installed.
+
+    `include` adds header directories (a generated header, for one), and
+    `exports` adds symbol prefixes to `symbols.json` beside `lfo4_` and `ext_`
+    -- Wavefinder Milestone 0 is the first build to need both.
     """
     firmware = load(read_image(STOCK))
     section = firmware.container.find(MAIN_OS)
@@ -130,7 +134,8 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     # instead of being told to it -- and the cave goes back to holding nothing
     # but stubs, which is all a gap in someone else's code should ever hold.
     code = cbuild.build([(SRC / name) if "/" in name else (SRC / "lfo4" / name) for name in sources], base=CODE_VA,
-                        include=[SRC / "include", SRC / "telemetry"], entries=entries + ["lfo4_rows"],
+                        include=[SRC / "include", SRC / "telemetry", *include],
+                        entries=entries + ["lfo4_rows"],
                         defines=defines)
     table_va = code["lfo4_rows"]
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
@@ -172,7 +177,7 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     print("part 4 -- write")
     out.mkdir(parents=True, exist_ok=True)
     (out / "section_3_MAIN_OS.bin").write_bytes(bytes(content))
-    wanted = ("lfo4_", "ext_")
+    wanted = ("lfo4_", "ext_", *exports)
     symbols = {k: v for k, v in code.symbols.items() if k.startswith(wanted)}
     symbols["lfo4_rows"] = table_va
     symbols["dnfw_boot"] = loader.build()["dnfw_boot"]
