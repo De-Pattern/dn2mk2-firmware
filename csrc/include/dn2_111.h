@@ -321,6 +321,35 @@ typedef unsigned char u8;
 #define DN2_TRACK_OBJ_STRIDE 20
 #define DN2_ALT_ARRAY      0x4059C92C   /* 16 x 4, read by 0x4002b246 */
 
+/* **The working state: the serialised project image that reaches flash.**
+ *
+ * Measured on the instrument 2026-09-25 with `#MRAM_DUMP` (read-only; handler
+ * read first): after a power-cycle with no save, an unsaved `FLTR FREQ` of 37
+ * on pattern G2 track 7 is in this image at exactly the stored-sound record a
+ * save would write -- and an unsaved LFO4 edit made at the same time is not.
+ * So stock edits are written into the image as they happen; LFO4 has to be too.
+ *
+ *   image            0x405cd96c   (the dump's buffer is 0x405cd85c: 0x110 of
+ *                                  header, then this)
+ *   pattern kit k    image + 0xae0200 + 10752*k,   k = 0..127, kit k = pattern k
+ *   sound t          kit + 60 + 359*t
+ *   LFO4 lane        sound + 36 + 8*i, i = 0..7    (store.c's ids 4..32)
+ *
+ * The live kit being edited is one of the project's own 128 kits: the project
+ * (from `DN2_PROJECT_HOLDER()`, then its vtable slot +40 -- the route the MRAM
+ * job and the stock setter's tail both take) keeps them at `+0xef371c`, 23,921
+ * bytes apart, and `*DN2_LIVE_CONTAINER` points at the active pattern's. */
+#define DN2_PROJECT_HOLDER   0x4018A97A   /* -> object; its vtable +40 -> project */
+#define DN2_PROJECT_VSLOT    40
+#define DN2_PROJECT_KITS     0xEF371C     /* project + this = kit 0, live format */
+#define DN2_KIT_BYTES        23921
+#define DN2_PATTERNS         128
+#define DN2_IMAGE            0x405CD96C
+#define DN2_IMAGE_KITS       0xAE0200
+#define DN2_IMAGE_KIT_BYTES  10752
+#define DN2_STORED_SOUND_AT  60
+#define DN2_STORED_SOUND     359
+
 /* libc as the firmware has it. */
 #define DN2_MEMCPY     0x40134490
 #define DN2_MEMSET     0x401344D8
