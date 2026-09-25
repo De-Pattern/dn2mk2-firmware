@@ -47,6 +47,14 @@ Our own `src/dnfw/wavetable.py` already reads exactly this shape — float32 WAV
 2048-sample frames when the length divides by it. So the import side is **done,
 not estimated**.
 
+> **Qualified 2026-09-26 (Milestone 0):** done for the factory shape, not for every
+> table. `wavetable.parse_wav` (and its parity twin `site/js/wavetable.js`) keeps
+> every digit in the five characters after a `clm ` chunk's `<!>`, so a
+> `<!>256 00000000` header reads as a 2,560-point frame. Serum's `<!>2048 ...` is
+> unaffected, which is why nothing has noticed. Wavefinder reads the frame length
+> with `dnfw.wavefinder.source.clm_frame` instead; the LFO path is left alone
+> because it ships, and is recorded here rather than silently fixed.
+
 ## The gap, in five parts
 
 ### 1. Control surface and parameters — the part already proven
@@ -216,7 +224,64 @@ unreachable without it, and everything else is comparatively cheap.
    Static, our home turf, and useful whatever is decided.
 3. **Do not start SHARC render code** until something can run it.
 
+## Milestone 0, built and emulator-gated (2026-09-26; passed on hardware the same day, see Status)
+
+`python scripts/build_wavefinder_m0.py --name wavefinder-m0` ->
+`00_Resources/02_Builds/wavefinder-m0_DN2_1.11.syx` (sha256 `8f5d70a7...24e9`).
+
+**What it is.** `build_lfo4_tlm.py --persist` (release semantics, no page
+column diverted) plus one module and one call: `csrc/wavefinder/table.c` holds
+the table as `const` data in the C chunk; `wf_m0_report()` runs inside the LFO4
+telemetry burst right after `probe_a` = 99, sends one probe point (frame, index,
+int16) and one slice of a whole-table checksum, CCs 41-50 on channel 16. No
+machine, selector, ceiling or engine code changes.
+
+**The table** is original: `dnfw.wavefinder.testtable`, a sine morphing to a
+32-harmonic saw over 16 frames of 2048 points, reduced by `dnfw.wavefinder.reduce`
+to 16 x 512 int16. `dnfw wavefinder expect` prints what the instrument must send;
+checksum **`0x33e5`** (`h = h*31 + w mod 2^16`, frame-major).
+
+**Measured:**
+
+| | |
+|---|---|
+| table | 16,384 B at `0x468011e4`, inside the `CODE` chunk at `0x46800000` |
+| C chunk | 4,164 -> 20,972 B image, 7,016 B BSS, ends `0x46806d54`: **1,020,588 B** free below the relocated parameter table at `0x46900000` |
+| MAIN OS raw | +16,808 B over the same build without M0 (3,216,232 -> 3,233,040) |
+| MAIN OS stored (aPLib) | +18,236 B (1,137,784 -> 1,156,020). **int16 wavetables do not compress** -- budget flash at about 1.1x raw |
+| cost per burst | ~8,510 instructions (1,024-word checksum slice) + 10 MIDI sends, one burst per ~87 ms |
+
+So sixteen tables at this geometry (256 KB) would fit in the RAM gap above as
+it stands; the limit to watch is flash and transfer size, not address space.
+
+**`check_coldfire.py` over the whole section now reports the table.** 92 scale-8
+"instructions" fall inside `0x468011e4..0x468051e4` -- int16 samples read as
+code -- plus the documented record-323 false positive. The code before and after
+the table checks clean on its own, and the build's own guard (`cbuild`, which
+disassembles only the linked code) passed. A future multi-table build should give
+the checker the data ranges rather than read this as new noise each time.
+
+**Gates:** `emu_boot_engine.py` from reset: *"boot from reset, the engine, and
+save/load: all three in one machine."* `emu_wavefinder_m0.py` from reset: the
+16 KB in memory match the host bake, the probe arrays match, and 18 real bursts
+through evaluator A reported 8/8 probes and checksum `0x33e5` computed by the
+firmware. `dnfw inspect`: every checksum and the HMAC reproduced.
+
+**Input format for real tables** (`dnfw wavefinder scan PATH`, file or folder;
+`dnfw wavefinder bake PATH --out DIR`; `build_wavefinder_m0.py --wav FILE`, local
+testing only): any RIFF/WAVE, PCM 8/16/24/32 or float 32/64; first channel only;
+sample rate ignored; frame length from `clm `, else 2048 if it divides, else the
+whole file is one frame (flagged); frame count interpolated to 16; frames shorter
+than 512 points are held, not interpolated.
+
 ## Status
+
+**Milestone 0: [V]** -- passed on the instrument 2026-09-26 (test 12,
+`wavefinder-m0_DN2_1.11.syx`): a 10 s capture while a synth pattern played held
+118 complete bursts, all 8 probe points matched, the checksum read `0x33e5` in
+every burst, `probe_a` read 99 in all 118, and `wf_passes` climbed 65 to 79.
+Checked with `dnfw wavefinder verify`. The superseded status, for the record:
+[E], verified under the emulator from reset, awaiting hardware.
 
 **[D]** for the gap estimates — they are reasoned from measured facts (the file
 format, the firmware's free space, the machine table bound) but no part of the
