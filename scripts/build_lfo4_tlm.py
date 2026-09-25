@@ -124,7 +124,10 @@ if __name__ == "__main__":
                                  chunks=table.chunks,
                                  defines={**({} if cli.persist else {"LFO4_KEEP_ROWS": 1, "LFO4_KEEP_ALL": 1}),
                                           **({"LFO4_PERSIST": 1} if cli.persist else {}),
-                                          "LFO4_METER": 1, "LFO4_COUNTERS": 1,
+                                          # A persistence probe is read by the owner on the real page, so
+                                          # no column may show a diagnostic: FADE and SPH were metered in the
+                                          # first lfo4-persistprobe and read as wrong values (2026-09-25).
+                                          **({} if cli.persist else {"LFO4_METER": 1, "LFO4_COUNTERS": 1}),
                                           "LFO4_TELEMETRY": 1,
                                           **({"LFO4_FORCE_ROW": 1} if cli.force_row else {}),
                                           **({"LFO4_FRAMEREAD": 1} if cli.frame_read else {}),

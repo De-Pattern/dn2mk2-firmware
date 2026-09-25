@@ -122,6 +122,19 @@ def main() -> int:
     others = [l for _, l in saves if l not in lives]
     print(f"\n  boot SAVEs keyed on a live-container sound: {sum(in_live.values())} "
           f"(tracks {sorted(in_live)})")
+    # **Where the boot's own serialisation put each live sound.** If SAVE PROJECT
+    # writes out the RAM image rather than re-serialising, LFO4 has to reach the
+    # image -- and the only safe address for that is the one the firmware itself
+    # used. Compared against the layout read from 0x400e1646: kit i at
+    # image + 0xae0200 + 10752*i, sound t at +60 + 359*t, kit 0 the live kit.
+    IMAGE, KIT0 = 0x405CD96C, 0x405CD96C + 0xAE0200
+    for s, l in saves:
+        if l in lives:
+            t = lives[l]
+            expect = KIT0 + 60 + 359 * t
+            print(f"    track {t + 1:2d}: stored at {s:#010x}  "
+                  f"(image+{s - IMAGE:#x}; layout predicts {expect:#010x} "
+                  f"{'MATCH' if s == expect else 'differs'})")
     print(f"  boot SAVEs keyed elsewhere: {len(others)}")
     if others:
         kitish = collections.Counter(((l - SOUND_AT) - base) % 23921 // STRIDE
