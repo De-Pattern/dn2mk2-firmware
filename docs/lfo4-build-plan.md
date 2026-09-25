@@ -6180,3 +6180,55 @@ on the first burst.
 **[V]** for the two-run measurement. **[D]** for `0x80005308` holding sound
 pointers -- `lfo4-voiceowner` is the test, and its `owner` channel says which
 way it went.
+
+
+## FIXED: LFO4 modulates on every voice
+
+**2026-09-25, `lfo4-voicesound`, on the instrument.** Both tests passed, by ear
+and by probe independently.
+
+- **Test 1**, track 7 alone, voice not locked: LFO4 on every note, whichever
+  voice it lands on.
+- **Test 2**, the negative control: track 7 muted with LFO4 on, track 8 playing
+  with none. Track 8 never wobbles, on any voice.
+
+**The probe proves the mechanism without the ear.** 469 bursts, `probe_a` = 99
+on every one. On each voice, `owner` (the track whose sound is on it) and
+`dest` (the LFO4 destination the row carries) change together, count for count:
+
+| voice idx | owner | dest |
+|---|---|---|
+| 7 | track 8 x10, track 7 x20 | none x10, 68 x20 |
+| 8 | track 7 x25, track 8 x5 | 68 x25, none x5 |
+| 12 | track 8 x6, track 7 x23 | none x6, 68 x23 |
+| 13 | track 8 x1, track 7 x28 | none x1, 68 x28 |
+
+### The fix
+
+One decision. The tick asks for voice `v`'s LFO4 row, and `v` was being used as
+a track. It now reads the sound on that voice from `0x800052a8[v]`, which
+`0x4002549c` writes in the same call that copies the sound's parameters into
+voice `v`'s block -- the delivery LFO1-3 already ride. Our table was already
+keyed by sound pointer, so that record is the key. It is checked against the
+sixteen live sounds before use and falls back, visibly, if it is not one.
+
+**The owner's question was the answer:** *"why do we need a lookup, can we not
+use the same mechanism the current LFOs use to derive the used voice?"* We did
+not need one.
+
+### Recorded and still open
+
+- **Test 5's voice-8 shift is unexplained.** In `lfo4-voiceowner` (the wrong
+  array, every voice on the fallback path) track 7's LFO4 was heard on track 8's
+  notes on voice 8 and not on voice 7; the owner's depth-to-zero control proved
+  it was track 7's LFO4. On that code path voice 8's block had no destination.
+  It did not recur with the fix. Kept, because an unexplained result in a build
+  that behaved like stock is a signal about the old path that nobody measured.
+- **LFO4 settings do not survive a reboot** (owner: *"I have to always set it
+  up, it never stays there"*). The emulator round-trips our converters; it does
+  not prove the instrument's save path calls them. Separate bug.
+
+### Status
+
+**[V]** -- hardware, both tests, positive and negative control, telemetry
+agreeing with the ear.
