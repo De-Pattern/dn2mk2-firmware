@@ -102,6 +102,18 @@ def browser(content, code):
 
 
 if __name__ == "__main__":
+    import argparse
+    # Same guard as build_lfo4_tlm.py: a build name is never silently reused,
+    # because a .syx on disk that no longer matches the one on the instrument
+    # has already cost this project a gate.
+    ap = argparse.ArgumentParser(description="the release LFO4 build: every feature, no diagnostics")
+    ap.add_argument("--name", default="lfo4-browser")
+    cli = ap.parse_args()
+    OUT = ROOT / f"out/{cli.name}"
+    SYX = ROOT / f"00_Resources/02_Builds/{cli.name}_DN2_1.11.syx"
+    if SYX.exists():
+        raise SystemExit(f"  {SYX.name} already exists. Pick another --name, or "
+                         f"delete it deliberately if this is a rebuild of the same thing.")
     table.describe(bridge.load(bridge.read_image(bridge.STOCK)).container.find(3).unpack())
     raise SystemExit(bridge.main(sources=ui2.SOURCES, entries=ui2.ENTRIES,
                                  out=OUT, syx=SYX,

@@ -96,6 +96,8 @@ if __name__ == "__main__":
     # also the fix if the answer turns out to be "quiet".
     ap.add_argument("--force-row", action="store_true",
                     help="every track gets tick7's maximum-depth row, ignoring the table")
+    ap.add_argument("--track-keyed", action="store_true",
+                    help="BISECT ONLY: restore the old track-keyed row, which is the voice-gate bug")
     ap.add_argument("--frame-read", action="store_true",
                     help="also report the DSP frame word the mirror slot is copied to")
     ap.add_argument("--force-spd", type=lambda v: int(v, 0), default=None,
@@ -123,6 +125,7 @@ if __name__ == "__main__":
                                           "LFO4_TELEMETRY": 1,
                                           **({"LFO4_FORCE_ROW": 1} if cli.force_row else {}),
                                           **({"LFO4_FRAMEREAD": 1} if cli.frame_read else {}),
+                                          **({"LFO4_TRACK_KEYED": 1} if cli.track_keyed else {}),
                                           **({"LFO4_FORCE_SPD": cli.force_spd} if cli.force_spd is not None else {}),
                                           **({"LFO4_FORCE_MULT": cli.force_mult} if cli.force_mult is not None else {}),
                                           **({"LFO4_FORCE_TRACK": cli.force_track} if cli.force_track is not None else {})}))

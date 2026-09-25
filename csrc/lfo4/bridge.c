@@ -125,6 +125,68 @@ u32 lfo4_sound_of(u32 track)
     return base ? base + DN2_SOUND_AT + track * DN2_SOUND_STRIDE : 0;
 }
 
+
+#ifndef LFO4_TRACK_KEYED
+/* -> the live sound that owns voice `v`, or 0; and in `lfo4_owner[v]` the
+ * track it belongs to (126 empty, 127 not one of the sixteen live sounds).
+ *
+ * **Why this replaces a lookup instead of adding one.** The owner asked on
+ * 2026-09-25 why LFO4 needs a lookup at all, when LFO1-3 plainly do not. The
+ * answer took the whole day and it is the fix: the firmware does not keep one
+ * block per track. It keeps **one per voice**, and fills each from the sound
+ * of whichever track owns that voice -- which is why stock LFO3 on track 7
+ * appeared in every block and every frame record once track 7 had played on
+ * all sixteen voices, while LFO4, read from a table keyed by track, appeared
+ * in block 6 alone (`lfo4-framescan`, runs A and B, other tracks unchanged).
+ *
+ * The sound on each voice is recorded by the delivery itself,
+ * `0x4002549c`, in `DN2_VOICE_SOUND` -- the same routine that copies the
+ * sound's parameters into that voice's block (`dn2_111.h`). Our table is
+ * keyed by live sound pointer, so that record *is* the key and nothing
+ * needs translating.
+ *
+ * ~~`DN2_OWNER_REG`~~ was the first version of this and read 127 on every
+ * voice on the instrument: it is what the fan-out writers compare against,
+ * not the sound.
+ *
+ * **Checked, not trusted.** The entry must be exactly one of the sixteen live
+ * sounds (`lfo4_sound_of`) before it is used; anything else falls back to the
+ * old behaviour and says so in telemetry, so a wrong guess about what the
+ * array holds is visible on the first burst rather than silent. The check runs
+ * only when an entry changes -- voices change hands per note, the tick runs
+ * 23,500 times a second, and sixteen compares per tick would be the cost of
+ * not caching it. */
+u32 lfo4_owner[TRACKS];
+static u32 owner_raw[TRACKS];
+static u32 owner_sound[TRACKS];
+/* Checked once per change, not once per tick. The first version re-ran
+ * all sixteen compares on every call whenever the entry was not a live
+ * sound -- which, on the wrong array, was every call. */
+static u8 owner_seen[TRACKS];
+
+static u32 lfo4_voice_sound(u32 v)
+{
+    u32 raw = *(volatile u32 *)(DN2_VOICE_SOUND + 4u * v);
+
+    if (!owner_seen[v] || raw != owner_raw[v]) {
+        u32 t;
+
+        owner_seen[v] = 1;
+        owner_raw[v] = raw;
+        owner_sound[v] = 0;
+        lfo4_owner[v] = raw ? 127u : 126u;
+        if (raw)
+            for (t = 0; t < TRACKS; t++)
+                if (lfo4_sound_of(t) == raw) {
+                    owner_sound[v] = raw;
+                    lfo4_owner[v] = t;
+                    break;
+                }
+    }
+    return owner_sound[v];
+}
+#endif
+
 /* The mirror geometry, from `docs/fx-master-modulation.md` §9 and the
  * evaluator's own arithmetic at `0x400db092`: `202*block + 34`. */
 #define MIRROR_BASE   0x800068E4u
@@ -407,7 +469,10 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
             lfo4_word = at_dest;
             tlm_cc(TLM_CC_TRACK, (u8)prev);
             tlm_cc(TLM_CC_DEST, (u8)dest);
-            tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(at_dest >> 2));
+#ifndef LFO4_TRACK_KEYED
+            tlm_cc(TLM_CC_OWNER, (u8)lfo4_owner[prev]);
+#endif
+            tlm_cc14(TLM_CC_OWN_LO, TLM_CC_OWN_HI, (u16)(at_dest >> 2));
 #ifdef LFO4_FRAMEREAD
             /* **The same value, one copy later.** If the mirror pair moves and
              * this pair does not, the value is lost between the LFO stage and
@@ -422,7 +487,67 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
                 u32 fa = frame_word_for(prev, dest);
                 u16 fv = fa ? *(volatile u16 *)fa : 0u;
 
-                tlm_cc14(TLM_CC_MASK_HI, TLM_CC_PROBE_B, (u16)(fv >> 2));
+                (void)fv;
+                /* **A zero here has two meanings, and they point opposite ways.**
+                 *
+                 * `frame_word_for` returns 0 for a slot the builder never
+                 * copies -- 93, 94, and everything outside its four tiled
+                 * ranges -- and the read above then reports `0`, which is
+                 * indistinguishable from a frame word that genuinely holds
+                 * zero. One says "this destination cannot reach the DSP at
+                 * all", which would be the whole answer; the other says "it
+                 * can, and nothing wrote it". Leaving them to look identical is
+                 * how a probe comes back uninterpretable, which has already
+                 * cost this project two flashes.
+                 *
+                 * So the status is sent beside the value: **0** the address was
+                 * valid and read, **1** this destination is never copied into
+                 * the frame, **2** no destination is set on that row. */
+                tlm_cc(TLM_CC_FRAME_ST, (u8)(dest == 0u ? 2u : (fa ? 0u : 1u)));
+
+                /* **Rotate through all sixteen, and report both copies.**
+                 *
+                 * The block scan settled where the mirror is written: track
+                 * 7's own block sweeps the full range for 104 seconds while the
+                 * owner hears it on voice 7 only. So the mirror is right, and
+                 * the question has moved one hop on -- the sixteen DSP frame
+                 * records the builder fills from it.
+                 *
+                 * **Why rotate instead of picking the furthest from neutral.**
+                 * The argmax this replaces assumed neutral was 0x1000, which is
+                 * true of the mirror and *unknown* of the frame -- every frame
+                 * read so far has been of the driven record. It also produced
+                 * an artefact on the mirror: when the driven block passed near
+                 * neutral, a block with a small static offset won, and block 0's
+                 * resting 3890 was reported as "the sweeping block" for a third
+                 * of the capture. A probe that has to be explained is a probe
+                 * that will eventually be misread.
+                 *
+                 * Rotating assumes nothing. Each burst reports block and record
+                 * `scan_idx`, cycling 0..15, both at this row's destination;
+                 * over a long capture every record is sampled many times, and
+                 * the host asks which ones *vary*. A record that varies carries
+                 * a modulation, whatever its resting value turns out to be.
+                 *
+                 * **Run it twice, and the second run is the control.** With
+                 * stock LFO3 driving, a record that varies besides this track's
+                 * own -- or one that changes as the allocator moves the note --
+                 * means the firmware replicates a stock LFO into the voice's
+                 * record. If LFO4 then varies only in its own, that is the
+                 * difference, and it is ColdFire code. If both vary only in
+                 * their own, the ColdFire treats them identically and the
+                 * difference is inside the SHARC. */
+                if (base != 0xFFFFFFFFu && dest != 0u && dest <= 100u) {
+                    static u32 scan;
+                    u32 b = scan++ & (TRACKS - 1u);
+                    u32 fb = frame_word_for(b, dest);
+                    u16 mv = *(volatile u16 *)(base + MIRROR_STRIDE * b + 2u * dest);
+                    u16 rv = fb ? *(volatile u16 *)fb : 0u;
+
+                    tlm_cc(TLM_CC_SCAN_IDX, (u8)b);
+                    tlm_cc14(TLM_CC_SMIR_LO, TLM_CC_SMIR_HI, (u16)(mv >> 2));
+                    tlm_cc14(TLM_CC_SFRM_LO, TLM_CC_SFRM_HI, (u16)(rv >> 2));
+                }
             }
 #endif
         }
@@ -457,7 +582,23 @@ u32 lfo4_refresh(u32 track)
     lfo4_last_index = track;
     if (track > lfo4_index_max && track < TRACKS)
         lfo4_index_max = track;
-    sound = lfo4_sound_of(track);
+#ifndef LFO4_TRACK_KEYED
+    /* **The index is a voice. Ask the firmware whose voice it is.**
+     *
+     * The default since 2026-09-25, verified on the instrument with a
+     * negative control (`docs/lfo4-build-plan.md`, "FIXED"). The engine
+     * keeps one block per voice, filled from the sound on that voice; reading
+     * this index as a track is what made LFO4 audible only where the two
+     * numbers agreed.
+     *
+     * `LFO4_TRACK_KEYED` restores the old key, for bisecting only. It is the
+     * bug, reproducible on demand, and no shipped build defines it. */
+    sound = lfo4_voice_sound(track);
+    if (!sound)
+        sound = lfo4_sound_of(track);
+#else
+    sound = lfo4_sound_of(track);   /* treats the index as a track -- it is a voice */
+#endif
     generation = ext_generation;
     if (sound == seen_sound[track] && generation == seen_generation[track])
         return row;
