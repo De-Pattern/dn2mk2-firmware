@@ -6400,3 +6400,67 @@ image is the user's persisted project, and a wrong offset would corrupt it.
 the LFO4 table follows by address, so an LFO4 is per pattern, like every other
 sound parameter. The re-read should show the owner's values in exactly one kit:
 the pattern he was on.
+
+
+## Unsaved edits: the stock edit writer, found by two dumps on the instrument
+
+**2026-09-25, late.** Two read-only `#MRAM_DUMP`s of the working state
+(`scripts/service_console.py`, handler at `0x400cdfb8` read before it was added
+to the allow list) settle how unsaved edits persist:
+
+- The dumped buffer (`0x405cd85c`) opens with the flash banks' `COKi` magic and
+  holds the project image at `+0x110`: this is the working state.
+- After a power-cycle with **no save**, an unsaved `FLTR FREQ` of 37 on G2 track
+  7 is in that image at exactly the stored-sound record a save would write
+  (`image + 0xae0200 + 10752*97 + 60 + 359*6 + 176`). An unsaved LFO4 edit made at
+  the same moment is **not**: FADE at -30 read back as 0, DEP 32 as the saved
+  value.
+
+So stock edits are written into the stored record as they happen, and LFO4's
+are not. **The writer is `Sound::updateMirror` (`0x4004ca80`)**: it is a
+receiver of `SoundParamChangedInfo`, maps each slot to its stored id through
+`0x400dccfa(0, slot)`, reads the value from the sound, and stores it at
+`row + 0x1c + 2*id` -- `0x1c` being the stored value block. It takes one slot
+(`SoundParamChangedInfo`, typeinfo `0x401db708`), a list of slots (typeinfo
+`0x401db714`), or none (copy everything).
+
+**Design, by the owner's rule:** do not write a parallel writer. Hand LFO4's
+values to this routine so they persist with the stock ones. A parallel writer was
+built (`lfo4-imagesync`) and backed out unflashed for that reason. The plan:
+
+1. In `updateMirror`, an LFO4 slot (101..108) maps to LFO4's stored id (4..32)
+   and takes its value from the LFO4 table, not from past the end of the
+   sound's value array.
+2. An LFO4 edit announces itself as a stock edit does, so the stock chain calls
+   `updateMirror` with the right record.
+3. The event's other receiver (`0x4003f28c`, the per-voice engine push) skips
+   LFO4 slots, which it would otherwise index out of bounds.
+
+**Still to read before building:** `0x400dccfa`'s bounds, `0x4003f28c` in full,
+and which of the stock setter's tail branches a UI edit takes (the broadcast
+fires only with the setter's sixth argument set).
+
+## PASSED on the instrument: unsaved LFO4 edits survive a power-cycle
+
+**2026-09-26.** What shipped differs from the three-step plan above, and is
+smaller. An LFO4 edit does not go through the single-slot path at all: the
+setter hook (`setter.c`, `announce`) sends the stock *whole-sound* event,
+`SoundConfigChangedInfo` (vtable `0x401dddec`, flag 1), through the sound's
+holder (`holder->vfunc@16`), exactly as the stock senders at `0x4004b25a` do.
+`Sound::updateMirror` answers that event by queueing its whole-sound job
+(invoker `0x4004af2c`), which re-serialises the sound into its stored record
+through SAVE -- and `lfo4_on_save` writes the LFO4 lane there alongside the
+factory values. Nothing of ours writes the working state, and neither the
+slot mapper `0x400dccfa` nor the engine push `0x4003f28c` ever sees an LFO4 slot,
+so steps 1 and 3 above were not needed. A second announcement for the same sound
+is held back while its job is pending (`lfo4_pending_sound`, cleared by the save).
+
+**Hardware, `lfo4-announce_DN2_1.11.syx`, reported by the owner:**
+
+1. LFO4 edited with no save, then a power-cycle: the values survived.
+2. An explicit SAVE PROJECT stores LFO4 correctly in the project.
+
+The emulator had shown the chain down to the record's lane but not the worker
+running the queued job unprompted; the instrument closes that gap. The release
+build without telemetry is `lfo4-everyvoice4_DN2_1.11.syx` (boot gate and the
+pollution checks green).

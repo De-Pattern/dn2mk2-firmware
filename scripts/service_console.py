@@ -24,8 +24,9 @@ bound to the device, e.g. with Zadig), and `serial` uses a COM port where the
 host did manage to bind CDC -- Linux binds by interface class and does.
 
 **It will only send commands on the allow list below.** Not a deny list: a
-command this project has not read is refused, including `#MRAM_DUMP` and
-`#MMCDUMP`, whose handlers are still unread. Anything that writes, plays,
+command this project has not read is refused, including `#MMCDUMP`, whose
+handler is still unread. (`#MRAM_DUMP` was read on 2026-09-25 and added; see
+`ALLOWED`.) Anything that writes, plays,
 records, reboots or reconfigures is not here and is not reachable by argument --
 `--force` does not exist. Adding one is a deliberate edit to this file, which is
 the point.
@@ -51,6 +52,14 @@ ALLOWED = [
     "#TEST_STATUS",
     "#DUMP_UI_CALIBRATION",
     "#MMC_GET_RECONFIGURED", "#MMC_GET_HEALTH",           # the second is DN2 only
+    # **Read 2026-09-25 before it was added** (handler at 0x400cdfb8): it sends
+    # a 5-byte header -- '!' then a big-endian u32 length, 0x00c4b114 --
+    # through the console's transmit ring (0x400053d4), then streams the RAM
+    # buffer at 0x405cd85c (a 0x110-byte header followed by the serialised
+    # project image) in 512-byte chunks (0x400cd204). It reads memory and
+    # writes nothing. That buffer is the working state the firmware flushes to
+    # flash, which is why it is worth having. DN2 only. Use --out.
+    "#MRAM_DUMP",
     # Digitone 1 only, from its own command table:
     "#READ_ADC", "#READ_ADC_REF", "#READ_JACK_STATUS",
     "#READ_WHEEL_CALIBRATED", "#READ_WHEEL_CALIBRATION",
@@ -117,6 +126,24 @@ class UsbLink:
             quiet = time.time() + settle
         return out
 
+    def read_exact(self, n: int, progress=None) -> bytes:
+        """Exactly `n` bytes, or what arrived before 5 s of silence."""
+        import usb.core
+
+        out = bytearray()
+        quiet = 0
+        while len(out) < n:
+            try:
+                out += bytes(self.device.read(EP_IN, 16384, timeout=1000))
+                quiet = 0
+                if progress:
+                    progress(len(out))
+            except usb.core.USBTimeoutError:
+                quiet += 1
+                if quiet >= 5:
+                    break
+        return bytes(out[:n]) if len(out) >= n else bytes(out)
+
     def close(self):
         self.util.release_interface(self.device, DATA_INTERFACE)
         self.util.dispose_resources(self.device)
@@ -152,6 +179,22 @@ class SerialLink:
                 break
         return out
 
+    def read_exact(self, n: int, progress=None) -> bytes:
+        out = bytearray()
+        quiet = 0
+        while len(out) < n:
+            chunk = self.link.read(min(16384, n - len(out)))
+            if chunk:
+                out += chunk
+                quiet = 0
+                if progress:
+                    progress(len(out))
+            else:
+                quiet += 1
+                if quiet >= 5:
+                    break
+        return bytes(out)
+
     def close(self):
         self.link.close()
 
@@ -176,6 +219,7 @@ def main() -> int:
     p.add_argument("--port", help="COM port, for the serial transport")
     p.add_argument("--settle", type=float, default=0.6, help="quiet time that ends a reply")
     p.add_argument("--list", action="store_true", help="what the host can see")
+    p.add_argument("--out", help="file for #MRAM_DUMP's binary stream (required with it)")
     args = p.parse_args()
 
     if args.list:
@@ -198,6 +242,29 @@ def main() -> int:
     print(f"{type(link).__name__}: asking {len(commands)} read-only command(s)\n")
     try:
         for line in commands:
+            if line.split()[0].upper() == "#MRAM_DUMP":
+                if not args.out:
+                    raise SystemExit("#MRAM_DUMP streams ~12.9 MB of binary: give --out FILE")
+                link.send(line)
+                head = link.read_exact(5)
+                if len(head) < 5 or head[:1] != b"!":
+                    print(f"  > {line}\n  < unexpected header {head.hex()} -- nothing saved\n")
+                    continue
+                size = int.from_bytes(head[1:5], "big")
+                print(f"  > {line}\n  < header ok, {size:,} bytes follow")
+                last = [0]
+
+                def show(n, size=size, last=last):
+                    if n - last[0] >= 1 << 20 or n >= size:
+                        last[0] = n
+                        print(f"    {n:,} / {size:,}")
+
+                body = link.read_exact(size, progress=show)
+                import pathlib
+                pathlib.Path(args.out).write_bytes(body)
+                state = "complete" if len(body) == size else f"SHORT by {size - len(body):,}"
+                print(f"  wrote {args.out}: {len(body):,} bytes, {state}\n")
+                continue
             link.send(line)
             reply = link.receive(args.settle).decode("latin-1")
             print(f"  > {line}")
