@@ -6330,3 +6330,9 @@ by measurement on 2026-09-20 and is correct.
 
 So LFO4 cannot move into the sound. The fix is to teach it the one path that
 makes stock edits survive a reboot, and `lfo4-persistprobe` finds that path.
+
+**And the table after a boot, as a second check on the withdrawn alarm:** 2,192
+stock sounds loaded, `ext_live` = 0, `ext_inserts` = 0, `ext_full` = 0,
+`lfo4_loads_carrying` = 0 (`emu_lfo4_persist.py --boot-only`). No stock sound
+looks as if it carries an LFO4, so the table cannot flood at boot. This is also
+the baseline `lfo4-persistprobe` must show at step 1 on the instrument.
