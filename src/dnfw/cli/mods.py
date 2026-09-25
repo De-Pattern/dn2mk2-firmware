@@ -56,6 +56,9 @@ def configure(parser) -> None:
     mx.add_argument("--page", type=pathlib.Path, action="append", default=[],
                     help="rewrite the generated regions (<!-- dnfw:matrix --> and "
                          "<!-- dnfw:combines ID -->) of this HTML or Markdown file")
+    mx.add_argument("--boots", type=pathlib.Path,
+                    help="a directory of <a>+<b>/boot.txt from emu_boot_check.py, "
+                         "written into the <!-- dnfw:boots --> region")
     mx.add_argument("--emit", type=pathlib.Path,
                     help="write each combinable MAIN OS pair to DIR/<a>+<b>/section_3_MAIN_OS.bin "
                          "for scripts/emu_boot_check.py")
@@ -377,7 +380,7 @@ def _apply_default(mod, firmware, scratch: pathlib.Path):
     return mod.apply(firmware)
 
 
-def _rewrite(page: pathlib.Path, ids, found, names) -> None:
+def _rewrite(page: pathlib.Path, ids, found, names, boots=None) -> None:
     import re
 
     from ..mods import matrix
@@ -386,6 +389,18 @@ def _rewrite(page: pathlib.Path, ids, found, names) -> None:
     table = (matrix.table_md if page.suffix == ".md" else matrix.table_html)(ids, found, names)
     text = re.sub(r"(<!-- dnfw:matrix -->).*?(<!-- /dnfw:matrix -->)",
                   lambda m: m.group(1) + "\n" + table + "\n" + m.group(2), text, flags=re.S)
+    if boots is not None:
+        rows = []
+        for pair in found:
+            log = boots / f"{pair.a}+{pair.b}" / "boot.txt"
+            if log.exists():
+                last = [ln.strip() for ln in log.read_text(encoding="utf-8", errors="replace").splitlines()
+                        if ln.strip()]
+                verdict = next((ln for ln in reversed(last) if ln.startswith(("booted", "SKIPPED", "FAULT", "NO UI",
+                                                                                 "fault", "no UI"))), last[-1])
+                rows.append(f"- `{pair.a}` + `{pair.b}`: {verdict}")
+        text = re.sub(r"(<!-- dnfw:boots -->).*?(<!-- /dnfw:boots -->)",
+                      lambda m: m.group(1) + "\n" + "\n".join(rows) + "\n" + m.group(2), text, flags=re.S)
     text = re.sub(r"(<!-- dnfw:combines (\w+) -->).*?(<!-- /dnfw:combines -->)",
                   lambda m: m.group(1) + matrix.combines_text(m.group(2), found, names) + m.group(3),
                   text, flags=re.S)
@@ -438,7 +453,7 @@ def _matrix(args) -> int:
                 print(f"    note: {pair.note}")
     names = {m: getattr(REGISTRY[m], "NAME", m) for m in ids}
     for page in args.page:
-        _rewrite(page, ids, found, names)
+        _rewrite(page, ids, found, names, args.boots)
         print(f"  rewrote the generated regions of {page}")
     if args.json:
         args.json.write_text(json.dumps(

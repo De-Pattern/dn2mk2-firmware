@@ -71,4 +71,8 @@ lift this limit (`docs/references.md`). It has not been done here yet.
 
 ## Boot from reset, per pair
 
-Filled in from `out/mod-pairs/*/boot.txt`.
+Written from `out/mod-pairs/*/boot.txt` (`--boots out/mod-pairs`). A boot runs the loader and
+the init, so only pairs that include a loader mod are booted; the rest say why they were skipped.
+
+<!-- dnfw:boots -->
+<!-- /dnfw:boots -->
