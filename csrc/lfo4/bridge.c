@@ -126,7 +126,7 @@ u32 lfo4_sound_of(u32 track)
 }
 
 
-#ifdef LFO4_VOICE_OWNER
+#ifndef LFO4_TRACK_KEYED
 /* -> the live sound that owns voice `v`, or 0; and in `lfo4_owner[v]` the
  * track it belongs to (126 empty, 127 not one of the sixteen live sounds).
  *
@@ -469,7 +469,7 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
             lfo4_word = at_dest;
             tlm_cc(TLM_CC_TRACK, (u8)prev);
             tlm_cc(TLM_CC_DEST, (u8)dest);
-#ifdef LFO4_VOICE_OWNER
+#ifndef LFO4_TRACK_KEYED
             tlm_cc(TLM_CC_OWNER, (u8)lfo4_owner[prev]);
 #endif
             tlm_cc14(TLM_CC_OWN_LO, TLM_CC_OWN_HI, (u16)(at_dest >> 2));
@@ -582,8 +582,17 @@ u32 lfo4_refresh(u32 track)
     lfo4_last_index = track;
     if (track > lfo4_index_max && track < TRACKS)
         lfo4_index_max = track;
-#ifdef LFO4_VOICE_OWNER
-    /* The index is a voice. Ask the firmware whose voice it is. */
+#ifndef LFO4_TRACK_KEYED
+    /* **The index is a voice. Ask the firmware whose voice it is.**
+     *
+     * The default since 2026-09-25, verified on the instrument with a
+     * negative control (`docs/lfo4-build-plan.md`, "FIXED"). The engine
+     * keeps one block per voice, filled from the sound on that voice; reading
+     * this index as a track is what made LFO4 audible only where the two
+     * numbers agreed.
+     *
+     * `LFO4_TRACK_KEYED` restores the old key, for bisecting only. It is the
+     * bug, reproducible on demand, and no shipped build defines it. */
     sound = lfo4_voice_sound(track);
     if (!sound)
         sound = lfo4_sound_of(track);
