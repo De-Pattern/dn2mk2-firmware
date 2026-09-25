@@ -60,32 +60,56 @@ ceiling is now read (`docs/machine-list.md`): `moveq #4` at `0x400dc332` and
 zeroed bytes after the table are a live 16-long array indexed at `0x400dc1fe`,
 so a sixth row needs space found elsewhere.
 
-### 2. Storage — the constraint that shapes everything else
+### 2. Storage — settled, and it is the cheap half
 
-**Tonverk has an SD card. The DN2 does not.** Tonverk loads wavetables from
-removable storage into 127 project slots; the DN2 has the `+Drive`, and a
-firmware image with **~29 KB of padding free, largest run ~1 KB**
-(`docs/memory-map.md`). The factory set does not fit in the firmware by three
-orders of magnitude.
+**Tonverk has an SD card. The DN2 does not.** That looked like the blocking
+problem. It is not, because of a decision the owner made on 2026-09-25 that
+removes the expensive part entirely:
 
-| storage plan | size | verdict |
+> **The wavetable set ships with the firmware.** The user picks their tables in
+> our own tooling and bakes them into the image **before flashing**. No browser,
+> no file navigation, no user-facing storage management at all — `SLOT` simply
+> indexes a fixed set.
+
+That is not a new mechanism to invent. **`lfowaves` already does exactly this**:
+`dnfw mods apply firmware.syx --mod lfowaves --wavetable N=FILE`, WAV or JSON in,
+byte-identical between the CLI and the browser page. Wavefinder is the same
+pattern with bigger tables, so the import path is not merely designed, it is
+**shipped and parity-checked**.
+
+And it removes the item that makes every DT2 machine expensive: a file browser
+grafted into someone else's UI framework (`docs/dt2-machine-port.md`).
+
+**Two variants, and the simpler one is probably right.**
+
+| | where tables live | cost |
 |---|---|---|
-| 75 tables as shipped (float32, 2048) | 30.3 MB | impossible |
-| 75 tables int16, 2048-sample frames | 15.1 MB | impossible in firmware |
-| 75 tables int16, **16 frames x 256 points** | **600 KB** | plausible only on the `+Drive` |
-| **one** table, 16 x 256, int16 | **8 KB** | fits a new ELE3 section |
+| **A — in the image** | a new ELE3 section, read-only, indexed by `SLOT` | no `+Drive` writes, no new format work |
+| **B — delivered to the `+Drive`** | firmware carries blobs and writes them out on first boot | needs `+Drive` write code and the project format; DNX is the authority |
 
-**Decided by the owner, 2026-09-25: wavetables become `+Drive` project data**,
-the same as samples. DNX is the format authority for that, so the project-format
-work goes through them.
+The owner proposed B. **A gets the same result with less**, because the premise
+already accepts a reflash to change tables — so the delivery step buys capacity
+and per-project independence, and costs a write path into storage we do not yet
+write to. Worth taking A first and keeping B for when capacity actually binds.
 
-And the framing above was too gloomy, which the owner corrected: relative to a
-sampler this is the *easy* storage problem. A wavetable has **fixed geometry**,
-so a useful Wavefinder can ship with a handful of tables at 8 KB each and grow
-later — where a sample bank is unbounded and user-managed, 1016 arbitrary-length
-files needing a browser, previews, assignment, per-step locks and persistence.
-See `docs/dt2-machine-port.md`: that difference is why Wavefinder is the more
-achievable target even though its DSP code has to be written from nothing.
+**Sizing, at int16, against a section budget the firmware already normalises**
+(section 7 is 837 KB; section 8 is 160 KB):
+
+| geometry | per table | tables in 256 KB |
+|---|---|---|
+| 16 frames x 256 points | 8 KB | **32** |
+| 16 frames x 512 points | 16 KB | **16** |
+| 32 frames x 512 points | 32 KB | 8 |
+| 16 frames x 2048 points | 64 KB | 4 |
+| 64 frames x 2048 points (as shipped) | 256 KB | 1 |
+
+For comparison, the whole LFO4 feature grew MAIN OS by **23.7 KB**.
+
+**The geometry is not decidable yet.** How few points per frame stay clean
+depends on the oscillator's interpolation and any oversampling — a DSP question,
+and part 4 is where it gets answered. What is decidable now is the *budget*: a
+few hundred KB is ordinary for this firmware, and at 16 x 512 that is sixteen
+tables, which is a real instrument rather than a demo.
 
 ### 3. Machine dispatch — partly mapped, on the wrong device
 
