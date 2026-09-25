@@ -132,6 +132,17 @@ def main() -> int:
         print(f"    first few: {[hex(x) for x in others[:6]]}")
     boot_loads_live = sum(1 for l, _ in loads if l in lives)
     print(f"  boot LOADs keyed on a live-container sound: {boot_loads_live} of {len(loads)}")
+
+    # **The table after the boot.** Stored id 32 is a stock parameter (slot 3),
+    # not a free hole (emu_sound_roundtrip.py, 2026-09-25), and LFO4's DEP was
+    # stored there -- so nearly every stock sound looks as if it carries an LFO4
+    # on load, and 2,192 loads compete for a 256-entry table.
+    counters = {n: after.long(sym[n]) for n in ("ext_live", "ext_inserts", "ext_drops", "ext_full",
+                                                "ext_overflow", "lfo4_loads", "lfo4_loads_carrying")
+                if n in sym}
+    print("  after boot: " + ", ".join(f"{k}={v}" for k, v in counters.items()))
+    track7 = [eng.table_read(after, sym, target, k) for k in range(len(MARKS))]
+    print(f"  track 7's table entry after boot: {track7}")
     if args.boot_only:
         return 0
 

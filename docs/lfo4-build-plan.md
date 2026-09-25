@@ -6300,3 +6300,33 @@ reading the counters at each step.
 
 **Status: [D]** for the structure (static and emulator, cross-checked),
 **open** for the mechanism.
+
+
+### There is no free room inside the sound -- measured, not read
+
+**2026-09-25, `scripts/emu_sound_roundtrip.py`, stock 1.11 image.** The owner's
+requirement is that LFO4 persist the way LFO3 does -- with no explicit save,
+because the working project survives a reboot on its own. The complete version
+of that is to put LFO4's values in bytes the sound already carries, so no path
+has to be taught. So the stock converters were asked which bytes they carry:
+every word of a live sound tagged with its own offset, `SAVE` run, and every
+word of a stored sound tagged the same way, `LOAD` run.
+
+- 117 live words round-trip verbatim; 92 of them are the value array
+  (`sound + 20 + 2*slot` -- the address the delivery `memcpy` takes).
+- The rest: the header (+0..+3), a stride-8 grid at +230..+318, and one run of
+  nine words at +356..+373 -> stored +336..+353.
+- **DNX places stored +336 as the arpeggiator's per-step enable mask**
+  (`packages/core/src/project/arp.ts`), so that run is arp data, and the grid is
+  in the same region (`soundmap.ts`). **Every carried byte is in use.** Section
+  8's "a live sound has no free slots" stands, now by measurement.
+
+**One false alarm on the way, withdrawn:** the first run used +14 as the value
+array's base and reported stored id 32 landing in live slot 3 -- which would
+have made LFO4's `DEP` overwrite a stock parameter. The stock load map
+(`0x401fd0b0`) folds ids 0, 4 .. 32 all onto **slot 0, the sink**; only the last
+writer survives there, which is why ids 4..28 looked dropped. Id 32 was chosen
+by measurement on 2026-09-20 and is correct.
+
+So LFO4 cannot move into the sound. The fix is to teach it the one path that
+makes stock edits survive a reboot, and `lfo4-persistprobe` finds that path.
