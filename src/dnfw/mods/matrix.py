@@ -34,6 +34,14 @@ NOTES: dict[frozenset, str] = {
         "used; its code is 366 bytes and ends 2 bytes before arpplocks' cave at 0x402dfb8c, "
         "so bootscreen first then arpplocks writes disjoint bytes. Whether bootscreen uses "
         "the rest of its reservation at run time is not measured.",
+    frozenset(("fxmod", "lfo4")):
+        "emulator, 2026-09-26: the LFO4 slot harness and a turn of all eight LFO4 dials match "
+        "lfo4 alone; fxmod's DEST checks and names match fxmod alone; every LFO page, LFO4's "
+        "included, gains the same 24 FX destinations. The hooks are on different paths "
+        "(fxmod's slot lookup at 0x400dc02a is asked above slot 100 only while the DEST list "
+        "is built). Not exercised: LFO4 aimed at an FX destination. fxmod's own helper at "
+        "0x4028ea02 keeps the stock table bounds, so it would answer LFO4's own entries with "
+        "-1; it is only ever called with destination entries.",
     frozenset(("lfo4", "moddest")):
         "measured: with moddest applied first, all 13 masks it opens are in lfo4's "
         "relocated table (test/test_lfo4_mod.py).",
