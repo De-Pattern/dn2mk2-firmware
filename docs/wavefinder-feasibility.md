@@ -191,6 +191,16 @@ None of it exists. And the blocker is not the DSP code itself:
 **Months, and gated on the emulator.** Writing DSP code that cannot be run is
 how `lfo4-bridge` reached the instrument and faulted.
 
+> **Superseded 2026-09-26 (Milestone 1).** The first bullet is no longer true.
+> digikit's unmerged branch `work/sharc-emulator` (`6f812e9`) is a working
+> SHARC+ executor -- `tools/sharc_core/` plus `tools/sharc_run.Runner` -- and it
+> renders one DT2 1.16 voice to within ~3e-5 of expectation. It runs DN2 1.11
+> too, and it runs **our own** SHARC code: Milestone 1 below assembled a
+> wavetable reader with selache and matched a Python reference bit for bit.
+> So part 4 is no longer gated on an emulator; it is gated on reading the DN2
+> voice path well enough to hook it (see "The next milestone"). The second and
+> third bullets stand. The text above is kept as the estimate it was.
+
 ### 5. Persistence and the sequencer
 
 `SLOT` is p-lockable per step on Tonverk. The DN2's reserved p-lock ids and the
@@ -200,6 +210,9 @@ shape of problem, solved once already.
 **Weeks**, after part 2 decides where wavetables live.
 
 ## The measured gap
+
+> **Superseded 2026-09-26** by "The measured gap, revised after Milestone 1"
+> below. Kept as the first estimate.
 
 | part | state | cost |
 |---|---|---|
@@ -213,7 +226,9 @@ shape of problem, solved once already.
 
 **The feature is not close.** The nearest honest milestone is not Wavefinder; it
 is a SHARC emulator good enough to run one voice render offline, which digikit
-have already scoped and which we would share. Everything in part 4 is
+have already scoped and which we would share. *(Superseded 2026-09-26: that
+emulator exists, on digikit's `work/sharc-emulator`, and Milestone 1 ran our
+own reader in it. What is left of part 4 is the hook, not the core.)* Everything in part 4 is
 unreachable without it, and everything else is comparatively cheap.
 
 **What is worth doing now**, in order:
@@ -223,6 +238,8 @@ unreachable without it, and everything else is comparatively cheap.
 2. **Locate the DN2 machine dispatch**, the mirror of digikit's `0x400caf48`.
    Static, our home turf, and useful whatever is decided.
 3. **Do not start SHARC render code** until something can run it.
+   *(Superseded 2026-09-26: something can. Milestone 1 is exactly that code,
+   run and checked offline before going anywhere near the instrument.)*
 
 ## Milestone 0, built and emulator-gated (2026-09-26; passed on hardware the same day, see Status)
 
@@ -274,6 +291,260 @@ sample rate ignored; frame length from `clm `, else 2048 if it divides, else the
 whole file is one frame (flagged); frame count interpolated to 16; frames shorter
 than 512 points are held, not interpolated.
 
+## Milestone 1, the offline render gate (2026-09-26): our own SHARC code, run and checked
+
+**The question.** Can SHARC code of our own, reading a baked wavetable, be run
+and checked before any DSP code goes near the instrument? **Yes.** All three
+gates pass, and the reader matches its reference **bit for bit**.
+
+```
+python scripts/sharc_wavefinder_render.py \
+    --image 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip \
+    --digikit ../digikit-wt-sharcemu --assemble --seconds 1.0
+```
+
+`--digikit` (or `DNFW_DIGIKIT_SHARC`) names a checkout of digikit's unmerged
+`work/sharc-emulator` at `6f812e9`; this gate used a detached worktree of our
+digikit clone, `git -C ../digikit worktree add --detach ../digikit-wt-sharcemu
+6f812e9`. `--assemble` needs WSL and selache. Without it, the committed
+`csrc/wavefinder/sharc/reader.json` is used, and the script refuses it if
+`reader.asm` has changed since. Output goes to `out/wavefinder/`: `m1_report.json`,
+`m1_sharc.wav`, `m1_reference.wav`.
+
+### Gate 1: digikit's runner on DN2 1.11
+
+The runner takes any `sharcldr.LoadedMemory`, so pointing it at DN2 1.11 is one
+line: `LoadedMemory.from_stream(section 7)`. No database and no device profile
+are needed. The script checks that section 7's sha256 is `336e340a...3115e2`,
+the hash digikit's finding 11 records.
+
+**The routine: `sw 0x1c0790`**, a 13-instruction leaf with three return paths.
+It was chosen because it is pure. It reads only its argument and its own return
+slot. Its two unsigned compares sit at exact boundaries, so the inputs can land
+on both sides of each, which exercises `compu`'s flags, the `LT`/`LE`
+conditions and a conditional move. And its meaning can be read without running
+it:
+
+    R2 = R4 - 0x28000000
+    R2 <u 0x240000   -> return R4
+    R2 <=u 0x39ffff  -> return R2        (the L1 byte alias removed)
+    otherwise        -> return R4
+
+**Measured.** 11 inputs, including `0x2823ffff`, `0x28240000`, `0x2839ffff`,
+`0x283a0000`, `0`, and `0xffffffff`. **11 of 11** return at `sw 0x1c07a6` with
+the R0 the static reading predicts, in 7 or 10 instructions. **Control:**
+selache's `selmap` decodes the same 52 bytes, and its instruction boundaries
+agree with digikit's decoder at every instruction.
+
+**What did not work, from a cold start.** These are informational and are not
+part of the gate. They were run with the runner's own CLI on a
+`dn2-1.11` database built in the digikit worktree:
+
+| start | halt |
+|---|---|
+| `sw 0x1c2712` (16-track loop) | after 1,673 instructions: a fork at `sw 0xb8b513` (`GE` on unknown `ASTATX` flags). `--explicit-memory-model` gives the same |
+| `sw 0x1c8ef1` (slot dispatch) | after 198: a fork at `sw 0x1c909f`. With `--explicit-memory-model`, after 247: *unsupported shifter op cu=2 0x90* at `sw 0x1c4f4a` |
+| `sw 0x1c9e76` | returns after 136 instructions (at `sw 0x1c9e71`; not examined) |
+
+So the executor runs DN2 code, but the DN2 voice path needs a booted state,
+which is what digikit built for DT2 (`sharc_harness.setup_voice`, snapshots).
+That was not attempted here. One real gap for DN2: **the executor does not run
+Type 13a**, a `DO ... UNTIL` whose count is already in `LCNTR`, and digikit's
+finding 11 records that DN2 1.11 uses it.
+
+**Speed.** On CPython 3.13, while another job ran ColdFire emulator boots on
+the same machine, the runner managed **45,000-48,000 instructions/s**. digikit
+report 90-100k on CPython and about 270k on PyPy. PyPy was not tried here.
+
+### Gate 2: a wavetable reader of our own
+
+`csrc/wavefinder/sharc/reader.asm` holds `wf_render(R4 = params)`. It renders N
+float samples from the Milestone 0 table: 16 frames x 512 int16, packed two to
+a 32-bit word, little-endian. It interpolates linearly between samples **and**
+between frames. The phase is a u32 accumulator: its top 9 bits are the sample
+index, and it wraps mod 2^32, which is mod 512. The frame position is Q16.
+
+It is 75 instructions and 380 bytes, and it is position-independent, so the
+object carries no relocations. Built with `selas -proc ADSP-21569` (selache
+`2b26d3b`, GPL-3.0, run in WSL).
+
+The reference is `dnfw.wavefinder.render`, run with `dnfw wavefinder render
+OUT.wav`. It has two precisions: `ideal` works in double precision, and
+`float32` rounds after every operation, in the same order the SHARC code does.
+
+**Placement.** The reader's blocks are spliced into the DN2 1.11 boot stream,
+before its final block, at spans the stream never loads. The script checks
+this with `owner_runs`. These spans are unloaded by the boot stream, **not
+proven unused at run time**:
+
+| | load address | bytes |
+|---|---|---|
+| code, `sw 0x180000` | `0x28300000` | 380 |
+| table, DM `0x280000` | `0x28280000` | 16,384 |
+| parameter block, DM `0x284000` | `0x28284000` | 64 |
+| output, DM `0x288000` | `0x28288000` | 16,384 |
+
+**The decode control.** selas's own instruction boundaries are read from the
+object's symbol table. The source is reassembled with a global label in front
+of every instruction, and the reassembly must reproduce the same bytes.
+digikit's decoder must land on all 75 boundaries, with no unknown or uncertain
+form. It does.
+
+**Measured: 7 cases, all bit-exact against the float32 reference.**
+
+| case | N | max error vs ideal | float32 mismatches |
+|---|---|---|---|
+| frame 0 (sine), 440 Hz | 128 | 2.9e-8 | 0 |
+| frame 15 (saw), 440 Hz | 128 | 2.8e-8 | 0 |
+| between frames 7 and 8, 1 kHz | 128 | 3.5e-8 | 0 |
+| odd frame fraction, 97 Hz | 256 | 4.7e-8 | 0 |
+| phase wrap 511 -> 0 | 64 | 2.1e-9 | 0 |
+| 20 samples a cycle (2.4 kHz) | 64 | 4.5e-8 | 0 |
+| zero increment | 16 | 4.7e-10 | 0 |
+
+Full scale is 1.0, so the largest error is under one float32 ulp at 1.0
+(6e-8). The phase each call writes back matches the reference in every case.
+
+### Gate 3: a WAV
+
+The WAV is one second at 48 kHz, a 110 Hz tone whose frame position sweeps
+0 -> 15 -> 0. The position is updated once per 32-sample block, the way a DSP
+updates a parameter, and the phase carries across the 1,500 calls.
+
+- **48,000 samples**, max error vs ideal **5.8e-8**, **0** float32 mismatches;
+- the 16-bit PCM is **identical** to the float32 reference's;
+- 21 of 48,000 samples differ from the ideal's PCM, each by **1 LSB**. That is
+  float32 against double rounding at a PCM rounding boundary, not a fault.
+
+The files are `out/wavefinder/m1_sharc.wav` (the SHARC run) and
+`m1_reference.wav` (the ideal).
+
+**Cost.** 38 instructions a sample in the loop, plus 34 a call (measured with
+N = 1, 2, 10 and 100). One second of audio took 1,905,030 instructions and
+42 s of wall time.
+
+**An estimate only [D].** 38 x 48,000 is 1.8 M instructions/s per reader, so
+32 readers need 58 M/s. At the ADSP-21569's 800 MHz-1 GHz (`docs/hardware.md`)
+that is about 6-7% of the core **if** every instruction took one cycle. No
+cycle model, memory stall or pipeline effect has been measured, and the code
+is unoptimised: no multifunction or SIMD instructions.
+
+### What the toolchains disagree on, and how the reader avoids it
+
+Each of these was found by the gate, not by reading, and each is worked around
+in the source with the reason in a comment:
+
+1. **`MODIFY (Ia, Mb)`.** selas encodes `MODIFY (I4, M4)` as `0x04240f800000`.
+   The shipping firmware's `MODIFY (I4, M4)` is the 48-bit Type 7a
+   `0x043f20000000`, and all 497 of its 48-bit MODIFYs use that layout. DN2
+   1.11 also has 37 32-bit Type 7b MODIFYs, such as `0x043f653f`. Their second
+   parcel ends in `0x3f`, the VISA width marker. selas compresses `MODIFY (I0,
+   M0)` in this file to `0x043e0000`. Its fields match Type 7b, but it lacks the
+   marker, so digikit reads it as the first 32 bits of a 48-bit 7a. digikit's
+   decoder follows the firmware, so it reads both of selas's words as other
+   instructions, one of them a conditional `MODIFY` of different registers.
+   **The workaround:** a post-modify load, `R3 = DM(I0, M0)`. It is the same
+   DAG update, and both toolchains encode it alike.
+2. **Immediate `ASHIFT`.** selas encodes `R0 = ASHIFT R0 BY -31` as
+   `0x023e0020e100`. The firmware's immediate ASHIFTs carry a different field
+   there (`0x02087801e100` is `IF AV R0 = ashift(R0, -31)`), and digikit halts
+   on *unsupported ShiftImm opcode 0x20*. selache's own runtime library also
+   avoids the immediate form. **The workaround:** the register-count form.
+   Immediate `LSHIFT` works and is used.
+3. **`selmap` cannot read selas's own 16-bit Type 3c load** (`0x9013`). It
+   walks past it and loses three boundaries. That is why the producer's
+   boundaries come from the symbol table rather than from selache's decoder.
+4. **Type 13a is not executed by digikit.** A separate `LCNTR = R12;` before
+   the `DO` assembles to Type 13a, so the reader uses the combined
+   `LCNTR = R2, DO ... UNTIL LCE` (Type 12a), the form the firmware uses.
+
+Items 1 and 2 are selache encodings that disagree with ADI's own compiler
+output. They are selache findings, not digikit ones. **Which encoding the
+silicon accepts is not known.** The reader uses only forms that the firmware
+itself uses.
+
+### What is unverified
+
+- **Silicon.** Nothing here has run on a SHARC. The executor is a model, and
+  the reader's encodings are checked against digikit's decoder, which follows
+  the firmware, not against a DSP.
+- **The address model.** The runner treats a DM pointer as a byte address in
+  the `0x28000000` alias, with DAG steps scaled by 4 (`assume_nw32`). The
+  reader does address arithmetic only through the DAG, so it should not care,
+  but hardware normal-word addressing is not what was run.
+- **Free memory.** The placement spans are unloaded by the boot stream. They
+  may still hold BSS, a heap or a stack at run time.
+- **Byte order in transit.** The ColdFire bake is big-endian int16
+  (`bake.to_bytes`). The reader wants little-endian (`render.dsp_bytes`).
+  Which side swaps depends on a transfer path that does not exist yet.
+- **The ABI.** The reader clobbers callee-saved registers. It is a gate
+  routine, not a drop-in.
+
+## The measured gap, revised after Milestone 1
+
+| part | state | cost |
+|---|---|---|
+| wavetable import | **done** | — |
+| baked table, read on the instrument | **[V]** Milestone 0 | done |
+| control surface, parameters, pages | **proven** by LFO4 | days |
+| machine list ceiling | **read** (`docs/machine-list.md`) | done |
+| storage decision | **taken**: baked now, `+Drive` later | — |
+| SHARC executor | **exists** (digikit `work/sharc-emulator`); runs DN2 1.11 code **[E]** | — |
+| our own SHARC code, offline | **[E]** Milestone 1: a reader, bit-exact to its reference | done |
+| table delivery to the DSP | **open**: nothing moves ColdFire data into DSP memory yet | weeks |
+| DN2 voice-path hook | **open**: chain located, record and output buffer not | weeks |
+| DN2 machine dispatch (ColdFire) | partly mapped, DT2 only | weeks |
+| the 12-shape ANIM modulator, the blend, two oscillators | not started; now testable offline | weeks |
+| persistence, p-locks | same shape as LFO4 | weeks |
+
+The critical path is no longer an emulator. It is two pieces of DN2 reading:
+**where a voice's samples are produced and consumed**, and **how the table
+reaches DSP memory**. Both can now be answered with a runner that executes,
+not only with static reading.
+
+## The next milestone: where a reader would hook into the DN2 voice path (research only)
+
+What is known, from `docs/sharc-voice-path.md` and digikit's finding 11, cited
+in our words:
+
+- **The chain.** `sw 0x1c9e76` calls, at `0x1c9fbc`, the 16-track loop
+  `sw 0x1c2712`. Inside that loop, a per-track value is clamped to `0..4` and
+  shifted left by 9 (`0x1c2947`-`0x1c294f`): a candidate machine selector into five
+  512-word records **[D]**. The loop then calls `sw 0x1c8ef1`, the slot/voice
+  dispatch (1,352 instructions), at `0x1c3044`. Its `JUMP IF SZ` at `0x1c99a8`
+  reaches `sw 0x1c9b73`, 126 instructions with no static caller.
+- **`sw 0x1c9b73` calls the stage routines that DN2 shares byte for byte with
+  DT2 1.16**: stages 1, 2, 4, 5 and 6 at `0xb81368`, `0xb8265b`, `0xb81a16`,
+  `0xb80f2e` and `0xb806f5`. Where they differ at all, the only differences are
+  pc-relative call offsets and one table-pointer literal.
+- **Stage 5 has the same shape as our reader.** digikit read it as a u32 phase
+  converted to an index plus a fraction, with two `DM(I2, M)` taps and a linear
+  blend. In DN2 its table-pointer literal is `0x26b3a8`. Caveat: digikit later
+  withdrew their reading of the DT2 orchestrator around these stages as "a
+  wavetable engine". The stages' shapes stand, but their role in a voice is
+  not settled.
+
+**Three candidate hooks, not yet ranked:**
+
+1. **At the selector.** Raise the clamp at `0x1c294c` from 4 to 5 and supply a
+   sixth 512-word record. This matches the ColdFire ceiling already read in
+   `docs/machine-list.md`. It needs the record table at `I3`'s base found and
+   its consumer read.
+2. **At the dispatch.** Branch to our reader where `sw 0x1c8ef1` / `0x1c9b73`
+   picks a voice's generator for a machine type, instead of running the stage
+   chain.
+3. **At the output.** Write the reader's block where a voice's samples are
+   accumulated. On DT2 that is the per-track accumulate into the master mix
+   at `0x25f180` / `0x25f200`. **DN2's equivalent is not located.**
+
+**What Milestone 2 would be, still offline.** Get one DN2 voice to render in
+the runner, porting digikit's DT2 approach: poke a voice record and the guard
+byte that arms it. Then break at the stage-5 call and substitute our reader's
+block for its output. The open questions are the DN2 voice record layout (the
+structure at `0x241298` is **[O]**, and its field offsets are in
+`docs/sharc-voice-path.md`), the block size (32 samples on DT2), and the
+per-voice output buffer.
+
 ## Status
 
 **Milestone 0: [V]** -- passed on the instrument 2026-09-26 (test 12,
@@ -283,7 +554,14 @@ every burst, `probe_a` read 99 in all 118, and `wf_passes` climbed 65 to 79.
 Checked with `dnfw wavefinder verify`. The superseded status, for the record:
 [E], verified under the emulator from reset, awaiting hardware.
 
+**Milestone 1: [E]** -- 2026-09-26, offline only: our own SHARC reader,
+assembled with selas, runs in digikit's SHARC executor inside the DN2 1.11
+image and matches `dnfw.wavefinder.render` bit for bit (float32) over 7 cases
+and a 48,000-sample sweep; max error against the ideal 5.8e-8. Nothing has run
+on a DSP, and nothing is flashed.
+
 **[D]** for the gap estimates — they are reasoned from measured facts (the file
 format, the firmware's free space, the machine table bound) but no part of the
-feature has been attempted. The manual citation and the wavetable measurements
+feature *as a machine* has been attempted; Milestones 0 and 1 are its delivery
+and render gates. The manual citation and the wavetable measurements
 are **[V]**: read directly from Elektron's own document and files.
