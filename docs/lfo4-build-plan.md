@@ -5954,3 +5954,78 @@ ago. Instead: six flashes to read numbers off a page that rendered only the high
 byte, a probe seventeen slots low, and three guessed slowdowns that could not
 cross a floor. Every one of those was a reasoning instrument used where a
 measuring one was available.
+
+# THE VOICE GATE, DIAGNOSED: the engine's index is a VOICE, not a track
+
+**2026-09-25, confirmed on the instrument with the variables separated.**
+
+`lfo4-onetrack` forces the LFO4 row at **index 6** and leaves the other fifteen
+at depth zero. The owner then played tracks that have **no row at all**:
+
+> *"track 8 only modulates when using voice 7 on this firmware, same for track
+> 15 or any other track."*
+
+Track 8 is index 7 and track 15 is index 14. Neither has a row. **The modulation
+still appears, and always on voice 7** — index 6, which is the forced row.
+
+**So the index the engine hands our stub is the VOICE, and our table is keyed by
+it while the panel writes it by TRACK.** Writer and reader disagree, and they
+agree only where the two numbers coincide.
+
+## One rule, six observations, no exceptions
+
+| observation | under "the index is a voice" |
+|---|---|
+| track 7 alone -> voice 7 | row[6] populated; only voice 6 reads it |
+| track 11 -> voice 11 | row[10] populated |
+| two tracks configured -> two working voices | two rows populated |
+| clearing a track -> that voice stops | its row empties |
+| pinning the voice -> works every trig | that voice always reads its row |
+| `lfo4-loud` -> every voice sweeps | all sixteen rows identical |
+| **`lfo4-onetrack`, any track -> voice 7 only** | **row[6] is the only populated row** |
+
+## Why this hid for a week, and it is structural
+
+**There are sixteen tracks and sixteen voices**, so no stride can tell them
+apart. `202 * index` is a mirror row either way; `120 * index` is an LFO state
+record either way. Both patch sites were checked earlier today, both showed
+those strides, and both were pronounced "track-indexed" — the arithmetic is
+identical under either reading and proves neither.
+
+The label came from a comment. This file already says, about the `%a4` fix:
+
+> *"Both patch sites used to pass a register named 'the track index' in a
+> comment that was never measured."*
+
+That fix corrected **which register**. It never questioned **what the register
+counts**. The same sentence stayed true of the meaning for four more builds.
+
+## What this corrects in the project's model
+
+The "per-track mirror" is a **per-voice** mirror: `param_1 + 34 + 202*index` is
+a voice's row, and the frame builder's sixteen 146-byte records are per voice.
+That is consistent with a DSP that renders voices, and it means several places
+in these documents that say "track" mean "voice". **They are not being edited
+wholesale** — a sweep-and-replace on a word this load-bearing is how the
+original error got in. Each one gets checked when it is next relied on.
+
+## The fix, and what is not yet known
+
+LFO4's parameters belong to a **sound**, which belongs to a track. The engine
+gives us a voice. So the reader needs the track whose sound that voice is
+currently playing.
+
+- `0x4002b22e(track)` is a clean track -> object lookup:
+  `*(0x40287dd4 + 20*track)`. **[V]**
+- `0x40138664` was earlier called "voice -> owning object" here. **Withdrawn**:
+  it takes five arguments and indexes `0x446406e4`, and that label was inferred
+  from a comparison in the caller rather than read. **[O]**
+
+**The promising shape** is to capture the relation where it is already known —
+at the moment a voice is allocated and a sound is loaded into its row — and
+cache it, the way `lfo4_refresh` already caches on the sound pointer and
+`ext_generation`. A per-call search over sixteen tracks is not free at
+**~23,500 calls per second**.
+
+**Not yet located: the site that loads a sound into a voice's row.** That is the
+next static read, and it is ordinary ColdFire work.
