@@ -145,6 +145,24 @@ def main() -> int:
         print(f"    first few: {[hex(x) for x in others[:6]]}")
     boot_loads_live = sum(1 for l, _ in loads if l in lives)
     print(f"  boot LOADs keyed on a live-container sound: {boot_loads_live} of {len(loads)}")
+    # **Which stored copy does the live container load from?** The image holds
+    # 128 pattern kits from image+0xae0200 and one more kit at image+0xc30200,
+    # the head of the tail, which DNX found is a copy of the active pattern's
+    # kit (2026-09-25). If the live container loads from the tail, the tail is
+    # the working kit and an edit to the pattern kit is ignored for the active
+    # pattern; if it loads from a pattern kit, the tail is the saved snapshot
+    # behind "RELOAD KIT FROM SAVED".
+    IMAGE = 0x405CD96C
+    for l, s in loads:
+        if l in lives:
+            off = s - IMAGE
+            if 0xAE0200 <= off < 0xC30200:
+                where = f"pattern kit {(off - 0xAE0200) // 10752}"
+            elif 0xC30200 <= off < 0xC30200 + 10752:
+                where = "the TAIL kit"
+            else:
+                where = "outside the image"
+            print(f"    live track {lives[l] + 1:2d} loaded from {s:#010x} (image+{off:#x}): {where}")
 
     # **The table after the boot.** Stored id 32 is a stock parameter (slot 3),
     # not a free hole (emu_sound_roundtrip.py, 2026-09-25), and LFO4's DEP was
