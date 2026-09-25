@@ -83,9 +83,19 @@
 #define TRACKS     16
 extern u16 lfo4_rows[TRACKS][EXT_PARAMS];
 extern u32 lfo4_set_sound;         /* setter.c: the key the panel last wrote */
+extern u32 lfo4_misses;            /* bridge.c: ext_find came back empty */
+extern u32 lfo4_refreshes;         /* bridge.c: the tick asked for a row */
+extern u32 lfo4_last_index;        /* bridge.c: the index it was handed */
+extern u32 lfo4_index_max;         /* bridge.c: the highest it ever saw */
+extern u32 lfo4_row_dest;          /* bridge.c: DEST of the row it returns */
+extern u32 lfo4_out_of_range;      /* bridge.c: calls the guard threw away */
+extern u32 lfo4_block_track;       /* bridge.c: track derived from the block */
+extern u32 lfo4_block_ptr;         /* bridge.c: the block pointer itself */
+extern u32 lfo4_word;              /* bridge.c: the frame word being reported */
 
 u32 lfo4_sound_of(u32 track);
 
+#ifndef LFO4_COUNTERS
 /* -> the track whose live sound the panel last wrote to, or -1.
  *
  * Asked of the firmware's own arithmetic, sixteen times, rather than by
@@ -146,11 +156,67 @@ static int cell(u32 slot)
     return (int)(short)*(volatile u16 *)at;
 }
 
+#endif /* !LFO4_COUNTERS */
+
 /* -> what column `param` should display, with `*answered` set when this file
  * has an opinion at all. Columns it does not answer for keep their value. */
 int lfo4_meter(u32 param, int *answered)
 {
     *answered = 1;
+#ifdef LFO4_COUNTERS
+    /* **The counter variant, and it deliberately leaves SPD and DEP alone.**
+     *
+     * The two-knob test on 2026-09-23 came back "it changes on some trigs and
+     * not others, and when it does it sounds right". That kills the wrong-cell,
+     * different-memory and wrong-scale readings in one go: the contribution is
+     * either wholly present or wholly absent, which is what a row holding
+     * `ext_default` looks like, since its DEST is None and therefore silent.
+     *
+     * `lfo4_refresh` only re-resolves when the sound pointer or the generation
+     * changes, so a miss at note-on is invisible to every offline harness --
+     * they run on a snapshot that never plays a note. These counters have been
+     * in the build since the bridge and have never been read on hardware.
+     *
+     *   WAVE -> lfo4_misses     climbs when ext_find came back empty
+     *   SPH  -> lfo4_refreshes  climbs on every tick: the liveness control
+     *
+     * The control matters as much as the number. If `refreshes` is frozen the
+     * tick is not running and a flat `misses` means nothing at all -- the same
+     * rule that cost three flashes in September.
+     *
+     * SPD and DEP stay honest because the test still turns them. WAVE and SPH
+     * keep whatever value was set; only their *display* lies, so they must not
+     * be touched once the sound is set up. */
+    switch (param) {
+    /* **Numeric columns only, and that had to be learned the hard way.**
+     * The first attempt put the index on WAVE, which renders as a waveform
+     * *name* -- so every value landed on "TRI" and the reading said nothing.
+     * FADE and SPH are the two columns the owner has read as plain numbers on
+     * this page, so they are the two used here. */
+    /* **The page shows the HIGH BYTE of the value, which voided a day of
+     * readings.**
+     *
+     * A hardcoded 99 displayed as -64. 99 is 0x0063 and its high byte is 0, so
+     * the column renders `(raw >> 8)` offset to bipolar. Every number returned
+     * here so far -- the index, the running maximum, the guard rejections, the
+     * derived track -- was 0..15, high byte 0, and therefore displayed
+     * identically no matter what it held. **"Always 0" was never measured.**
+     * `lfo4_refreshes` only appeared to work because a free-running counter
+     * crosses high-byte boundaries, and that false positive is what made the
+     * channel look sound.
+     *
+     * So values are shifted into the high byte from here on, and one column
+     * carries a known constant so the mapping can be decoded rather than
+     * assumed a second time. */
+    case 2:                                   /* FADE -> a known 99, scaled */
+        return 99 << 8;
+    case 5:                                   /* SPH -> the enable mask's low byte */
+        return (int)((lfo4_word & 0xFFu) << 8);
+    default:
+        *answered = 0;
+        return 0;
+    }
+#else
     switch (param) {
     case 0:                                   /* SPD */
         return cell(lfo4_dest_of());
@@ -160,4 +226,5 @@ int lfo4_meter(u32 param, int *answered)
         *answered = 0;
         return 0;
     }
+#endif
 }

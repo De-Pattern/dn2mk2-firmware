@@ -3442,3 +3442,150 @@ is used again. Driven through the UI under the emulator, each against a control
   with and without `--ssi0-request-hz`) and reach the pattern load by PTN + trig.
 - Tools: digikit `guirun --regs-at` (registers at an address) and fault pages
   listed; the key codes PLAY 20, STOP 21, PAGE 22, PTN 23, TRK 16.
+
+## 21. Profile our firmware against factory, the way octabam profiled stock
+
+**Queued 2026-09-23 by the owner.** Source:
+`00_Resources/01_Reference/STOCK_PROFILE.md` — octabam's stock-firmware
+performance pilot of 23 September 2026.
+
+**Why it matters here.** Every build we ship adds work to paths the audio engine
+runs: the tick calls `lfo4_refresh` per evaluator pass, the FX mod widens a
+destination scan, and the loader copies an appended region at boot. **None of
+that has ever been costed.** A mod that sounds right and steals headroom is a
+mod that fails on a busy project, and the instrument is the last place we would
+want to discover it.
+
+**What transfers and what does not.** The *method* transfers; the fixtures do
+not. That document profiles an **Octatrack** — `ot_emu`, `OCTABAM` set, eight
+FLEX tracks, a `POLYBENCH` project — and none of those exist for the DN2. What
+we take is the discipline:
+
+- a **checked, reproducible fixture** committed alongside the numbers, with its
+  settings written out in full (their fixture is not effects-free and they say
+  so — inherited DELAY on seven tracks and PLATE REV on the eighth);
+- a **long enough window**: they record that an earlier 1,400-frame pilot was
+  too short to catch a model bug, and settled on 5,600 frames after a 20-second
+  loading phase;
+- **boundary buckets excluded** from percentiles, P95/P99 by nearest rank, and
+  total-over-frames reported **separately** from the mean of complete buckets;
+- the honesty that these are **instructions, not cycles or utilisation** —
+  caches, bus contention and physical deadlines are not modelled well enough to
+  support a headroom claim, and neither is ours.
+
+**The comparison we want**: factory 1.11 against each shipped build, same
+fixture, same window, reported as a delta with the fixture's limits stated. A
+number without a named fixture is not a result.
+
+**Blocked on** a DN2 equivalent of their frame accounting. digikit's emulator
+counts instructions per run but has no per-frame bucketing, and our own
+measurements this session put ~76% of a short run in `emu/symbols.py` symbol
+resolution — so the profiler would be measuring the harness before it measured
+the firmware. **The symbol-resolution cache (backlog item, ~27 s per run) is a
+prerequisite, not a nice-to-have.**
+
+**Not started.** Nothing here is measured; this is a queued method, not a
+finding.
+
+---
+
+## 22. Index the firmware into a database and traverse it, instead of re-grepping
+
+**Source.** digikit's author, 24 September 2026, reporting what replaced a pile
+of one-off scripts there: **one Python script that dumps ColdFire and SHARC into
+two separate SQLite databases**, plus a traversal script built on
+[networkx](https://networkx.org/). Their report, in our words: the agents had
+been hand-rolling Python and shelling out to the `sqlite` CLI, and the indexed
+form navigates the firmware *much* faster. They still steer it, but the steering
+is over a graph rather than over a grep.
+
+**Why it lands here.** This session is the argument for it. Finding
+`DN2_MIDI_TX` took a scan, a cross-check and an emulator run. Finding which
+call sites reach `lfo4_row_for_block` has been re-derived by grep more than
+once, because there is nowhere to *keep* the answer. Every cross-reference
+question we ask — who calls this, what reads this address, which of these
+branches is reachable from the tick — is a graph query we currently answer by
+re-reading 3 MB.
+
+**What it would hold.** The nodes we already extract separately and throw away:
+functions and their bounds, call edges (`JSR.L` targets, and the indirect ones
+we resolve by hand today), the RTTI/mangled-name symbols, the parameter table's
+320 records, the mirror and lane tables, and the string pool. Two databases, not
+one — the ColdFire main OS and the SHARC image are different address spaces and
+different ISAs, and merging them would invite exactly the kind of silent
+cross-space confusion we have already paid for once.
+
+**What it would fix that is specific to us.** Backlog item 21 is blocked on the
+symbol-resolution cache — ~76% of a short emulator run goes into
+`emu/symbols.py`. A symbol database *is* that cache, so one piece of work
+unblocks both.
+
+**Open, and honest about it.** We have not seen their script; this is their
+report plus our reasoning about our own repo, not a measurement. Before adopting
+we would want to know the dump's runtime, whether the schema survives a firmware
+version bump, and whether networkx's traversal is actually the win or the SQLite
+index is. digikit is **GPL-2.0** — if anything of ours lands there it must not
+carry selache (GPL-3.0) lineage, the standing rule.
+
+**Not started.**
+
+---
+
+## 23. A visual DN2 emulator, so the owner can drive it too
+
+**The owner's reason, 2026-09-24, and it is the strongest one on this page:**
+a clickable emulator with a screen is *"a good feature so I can contribute
+actively too."* Every hardware finding in this project has come through one
+person flashing, trigging, and reporting back. That is a real bottleneck and it
+is also a single point of observation -- the voice gate took a week partly
+because only one of us could see the instrument.
+
+`irpina/digiemu` (see `docs/references.md`) proves the shape works on a sibling
+ColdFire Elektron: real firmware, live clickable panel, 48 kHz audio.
+
+### What already exists here, measured rather than assumed
+
+| piece | state |
+|---|---|
+| **boot to a drawing UI** | **done.** 400M instructions from reset; the 2026-09-13 run composed **409 frames** |
+| **the screen** | **done, and trivial to render.** A pair of **1024-byte** buffers, **128x64 mono, 8 pages of 128 columns**, addresses resolved per boot by digikit (`scripts/paint_map.py`, `FB_BYTES = 1024`) |
+| **panel input** | **exists.** `scripts/drive.py`; push codes 41..48 = A..H, `code_for = channel * 8 + bit + 1`, `--panel-dwell 2` to make a tap a tap |
+| **watching memory while it runs** | **exists.** `install_mmio_trace`, proved working by 1,637,709 framebuffer writes from 29 pcs |
+| **audio** | **not started, and the hard one** -- see below |
+
+So the gap to a *usable* visual emulator is a renderer for 1024 bytes, a mouse
+map onto codes we already have, and a loop. That is small.
+
+### The two real obstacles, stated honestly
+
+**Speed, which is the blocker.** ~4.5 min per 100M instructions, and the UI
+needs ~400M from reset -- about **18 minutes before the first pixel**. Nobody
+clicks through that.
+
+The answer is the snapshot. **`ui1200M` has already booted**, and resuming from
+it is exactly right *here*: the shipping gate refuses snapshots because a
+snapshot never runs the loader, the init, or the first call into new code from
+reset -- but interactive exploration is not verification, and that objection
+does not apply. **The rule stays**: nothing is cleared for flashing by a
+snapshot, ever. Two different jobs, two different machines.
+
+digiemu's four Unicorn patches we lack (item in `references.md`) are the other
+half of this: `fast-mem` and `digikit-speed` exist for exactly this reason.
+
+**Audio, which may be out of scope for a long time.** digiemu does 48 kHz on a
+Digitakt. On the DN2 the sound is generated on the **SHARC DSP**, a second
+processor this project has only partly read (`docs/sharc-*.md`). A silent
+emulator is still enormously useful -- every LFO4 question so far has been
+answered by what the *screen* and the *parameters* did, not by listening. **Ship
+it silent.**
+
+### The MVP, and why this order
+
+1. Resume `ui1200M`, render the 1024-byte buffer at ~10 fps. **First pixel on a
+   PC screen is the whole proof**; everything after it is ergonomics.
+2. Mouse and keyboard onto `drive.py`'s existing codes, push-and-turn included.
+3. Then, and only then, decide about audio.
+
+**Not started.** What is written above is an inventory of parts we already have,
+not a claim that they fit together; the first hour of work is finding out
+whether the snapshot's framebuffer address is still resolvable after a resume.

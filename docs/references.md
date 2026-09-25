@@ -200,6 +200,7 @@ findings change what may be copied**, and both moved since this project started:
 | **`emuyia/ems-octakit`** | **MIT — added 2026-09-12** | **yes, newly.** This repo was unlicensed for the whole of this project's life; the condition recorded against it has now been met, so its `.S` stubs, `link.ld` and `firmware.json` manifest may be ported with attribution |
 | **`mxldyn/octamax`** | **NONE** | **no.** No LICENSE file and no statement in its README. Architecture-only inspiration, never copied |
 | **`m-dwyer/digikit`** | **GPL-2.0-or-later** | **yes, with care** — see below. Taken forward as GPLv3 it combines with this repo's AGPL-3.0-or-later; **using it as a tool entangles nothing at all**, which is the route to prefer |
+| **`irpina/digiemu`** (added 2026-09-24) | **GPL-2.0-or-later** | **yes, with care.** Taken forward as GPLv3 it combines with this repo's AGPL-3.0-or-later, and it is GPL-2.0-compatible for digikit. Its six files are *Unicorn* patches, so **using them is using a tool and entangles nothing at all** -- the route to prefer, exactly as with digikit |
 | `js216/selache` (added 2026-09-19) | GPL-3.0; `libsel` MIT | may link (GPL-3.0 combines with our AGPL-3.0) but **not vendored**: `tools/selmap` is our own harness over a local checkout. Never into digikit, which is GPL-2.0 |
 
 **The restriction moved rather than lifted.** `ems-octakit` was the one to avoid
@@ -545,3 +546,66 @@ open if a case appears; recorded here so that decision starts from the licence.
 Its firmware findings are the author's, on a device we do not have, so they are
 cited in our own words if they are ever used — the same rule as the lalzart
 notes.
+
+## `irpina/digiemu` — a booting Digitakt, and four Unicorn patches we do not have
+
+**Added 2026-09-24**, on the owner's instruction. GPL-2.0-or-later, Python 3.12
+over a **patched Unicorn**, 2 stars and 7 commits — small and new, and that is
+not the measure of it.
+
+### What it is
+
+An unofficial **Digitakt mk1** emulator that runs the real firmware (tested on
+OS 1.53) and reaches a **live clickable front panel with 48 kHz audio**: keys,
+encoders, key LEDs, the sequencer, patterns, the `+Drive` with projects and
+samples, sample loading, and session persistence between launches.
+
+Different device, **same CPU family** — ColdFire — which is the whole reason it
+transfers. `firmware/`, `patches/`, `docs/mk1/`, `tools/`.
+
+### Why it matters here, and it is not the Digitakt
+
+**Two of its six Unicorn patches are already in `digikit-up/patches/` under
+identical filenames** (`m68k-emac-mac-load`, `m68k-hook-ccr-sync`), and two more
+are *named after digikit*. So there is shared lineage with the emulator this
+project already runs on, and **four patches we do not have**:
+
+| patch | what it does | why we would want it |
+|---|---|---|
+| `m68k-emac-modes` | EMAC fractional/integer and signed/unsigned modes: product rounding, store shifting, S/U bit reading, accumulator repacking across mode changes | correctness in exactly the arithmetic an audio engine lives in |
+| `m68k-fast-mem` | inline memory paths for pages with no hooks, dirty-page tracking, selective slow-path routing | **speed** |
+| `m68k-digikit-accel` | **CFV4E ISA: `FF1`, `BITREV`, `BYTEREV`**, budget-based TB limiting, native eDMA channels | see below |
+| `m68k-digikit-speed` | fused MAC/MSAC, native `RTE`, optional memory-exit checks, deferred PC sync | **speed** |
+
+**Speed is not a luxury here.** A shipping-gate run is ~19 minutes at ~4.5
+min/100M instructions, and backlog item 21 (profiling our builds against
+factory) is blocked partly on harness cost. Two of these four exist only to
+address that.
+
+**`FF1` is the pointed one, and it was checked rather than assumed.** `FF1.L` is
+the instruction in the caller loop at `0x400271a2` that objdump prints as
+`.short 0x04c1` — the one that turns a voice mask into a bit index, read on
+2026-09-24. Unicorn 2.1.4 does not decode it. **digikit already emulates it in
+software** (`emu/boot.py`'s `ff1()`, counted as `ff1_count` in `dspboot.py`), so
+every emulator result this project has taken off that path is sound. The
+`digikit-accel` patch would make it *native* instead — faster, and one less
+hand-written stub between us and the machine.
+
+### The one to read first, because it questions our own results
+
+`m68k-hook-ccr-sync` exists because **"a code hook, or a `count=` stop, can
+return to the host mid-block"** before condition flags are committed, so a
+branch afterwards can take the wrong path. This project drives the emulator
+almost entirely through code hooks — the shipping gate's routine counters, the
+fault reporter at `0x4011ea6a`, and `emu_lfo4_frame.py`'s stub hook all work
+that way. digikit **already carries this patch**, so our runs are covered; the
+value is in knowing *why* it is there, because a hooked emulator without it is a
+machine that can quietly disagree with the hardware.
+
+### Status
+
+**Corpus, not adopted.** Nothing has been built or run from it. The next step,
+when the emulator is next worth an afternoon, is to apply the four missing
+patches to the local Unicorn build and re-measure the gate's wall-clock against
+today's ~19 minutes — with a stock-control boot beside it, because a faster
+emulator that is subtly wrong is worse than a slow one.

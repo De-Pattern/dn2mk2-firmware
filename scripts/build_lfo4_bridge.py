@@ -55,6 +55,7 @@ SYX = ROOT / "00_Resources/02_Builds/lfo4-bridge_DN2_1.11.syx"
 # drops both -- but the link needs the symbol to exist.
 SOURCES = ("init.c", "ext.c", "carry.c", "store.c", "bridge.c", "setter.c", "hooks.S")
 ENTRIES = ["lfo4_init", "ext_get", "ext_set", "ext_drop", "lfo4_refresh", "lfo4_sound_of",
+           "lfo4_row_for_block",
            *(s[2] for s in SITES)]
 
 # Each stub asks the C for its row instead of computing one from a fixed table.
@@ -62,23 +63,49 @@ ENTRIES = ["lfo4_init", "ext_get", "ext_set", "ext_drop", "lfo4_refresh", "lfo4_
 # displacement its body reads through.
 PULL = """    lea     -16(%sp),%sp
     movem.l %d0-%d1/%a0-%a1,(%sp)
+    move.l  {mask},%sp@-
     move.l  {index},%sp@-
     jsr     {refresh:#010x}
-    addq.l  #4,%sp
+    addq.l  #8,%sp
     movea.l %d0,%a4
     lea     %a4@(-{bias}),%a4
     movem.l (%sp),%d0-%d1/%a0-%a1
     lea     16(%sp),%sp"""
 
 
-def cave_source(table_va: int, refresh: int) -> str:
-    """tick7's stubs, with both parameter loads replaced by a call to the C."""
+def cave_source(table_va: int, refresh: int, for_block: int = 0) -> str:
+    """tick7's stubs, with both parameter loads replaced by a call to the C.
+
+    **Evaluator A passes a pointer, not an index.** `%a5` was named "the track
+    index" in a comment nobody measured; it is zeroed at the evaluator's entry
+    and only advanced by `outer`, which does not run on this path, so it was 0
+    on every track and LFO4 read one fixed row for months. `%sp@(56)` is the
+    mirror block pointer the stock code uses for LFO1-3 -- `outer` advances it
+    by 202 per track and `a4_bottom` restores `%a4` from it -- and it sits 16
+    pointer the stock code uses for LFO1-3, and the displaced instruction was
+    `lea %a4@(-34),%a4` -- so **`%a4` already holds it** when the stub runs.
+    Ghidra's decompilation of `0x40137726` confirms it: `local_18 = param_1 +
+    0x22` advances 202 per track, and `iVar12 = local_18 - 0x22` is the very
+    instruction replaced here. A register, not a stack slot, so no frame layout
+    can be got wrong -- which two earlier attempts both did.
+    """
     source = v6a.cave_source(table_va)
-    for bias, index in ((68, "%a5"), (34, "%d0")):
+    # stock `%sp@(88)` is the enable mask. The cave is entered by `jsr`, so it
+    # sits 4 bytes lower, and 16 lower again once the stub saves registers:
+    # 88 + 4 + 16 = 108. Two earlier attempts used +16 and forgot the `jsr`.
+    # **Pass the stack pointer, not a guessed slot.** Three different
+    # displacements have now been guessed at this frame and all three were
+    # wrong; the last read a constant zero on all sixteen tracks while the
+    # signals beside it carried correctly. So hand the C the frame pointer
+    # itself and let it walk the frame over successive telemetry bursts --
+    # one flash maps what four could not.
+    sites = ((68, "%a4", "%sp", for_block or refresh),
+             (34, "%d0", "#0", refresh))
+    for bias, index, mask, callee in sites:
         line = f"    lea     {table_va - bias:#010x},%a4"
         if source.count(line) != 1:
             raise SystemExit(f"expected one {line.strip()!r} in the stubs, found {source.count(line)}")
-        source = source.replace(line, PULL.format(index=index, refresh=refresh, bias=bias))
+        source = source.replace(line, PULL.format(index=index, mask=mask, refresh=callee, bias=bias))
     return source
 
 
@@ -102,8 +129,8 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     # The rows are a C array now, so the address comes *out* of the build
     # instead of being told to it -- and the cave goes back to holding nothing
     # but stubs, which is all a gap in someone else's code should ever hold.
-    code = cbuild.build([SRC / "lfo4" / name for name in sources], base=CODE_VA,
-                        include=[SRC / "include"], entries=entries + ["lfo4_rows"],
+    code = cbuild.build([(SRC / name) if "/" in name else (SRC / "lfo4" / name) for name in sources], base=CODE_VA,
+                        include=[SRC / "include", SRC / "telemetry"], entries=entries + ["lfo4_rows"],
                         defines=defines)
     table_va = code["lfo4_rows"]
     chunk = area.CodeChunk(CODE_VA, code.image, code.bss, code["lfo4_init"]).pack()
@@ -124,7 +151,8 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     print("part 3 -- the engine, from step 3")
     stub_va = v6a.CAVE
     v6a.require_zero(content, v6a.CAVE, v6a.CAVE_CAP, "cave region")
-    payload, offsets = v6a.assemble_stubs(cave_source(table_va, code["lfo4_refresh"]), stub_va)
+    payload, offsets = v6a.assemble_stubs(
+        cave_source(table_va, code["lfo4_refresh"], code["lfo4_row_for_block"]), stub_va)
     if len(payload) > v6a.CAVE_CAP:
         raise SystemExit(f"cave overflows: {len(payload)} > {v6a.CAVE_CAP}")
     content[stub_va - BASE:stub_va - BASE + len(payload)] = payload

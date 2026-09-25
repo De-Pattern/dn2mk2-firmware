@@ -23,6 +23,9 @@
  * reason a fully working page modulated nothing.
  */
 #include "ext.h"
+#ifdef LFO4_TELEMETRY
+#include "tlm.h"
+#endif
 
 #define TRACKS       16
 #define ROW_BYTES    (2u * EXT_PARAMS)
@@ -50,6 +53,56 @@ u32 lfo4_refreshes, lfo4_copies_in;
  * puts it on the page. */
 u32 lfo4_hits, lfo4_misses;
 int lfo4_last_lookup;
+
+/* **The index the engine actually hands us, recorded rather than inferred.**
+ *
+ * On 2026-09-23 the owner found LFO4 modulating only on one voice, and the
+ * voice number follows the *track index* of whichever track has LFO4
+ * configured -- two configured tracks gave two working voices, on any track.
+ * So the row is being selected by something that is not the track, and
+ * `lfo4_refresh`'s only guard is `track >= TRACKS`, which any 0..15 passes.
+ *
+ * Both call sites name their register in a comment in `build_lfo4_tick7.py`
+ * and **neither was ever measured**. That is the bug's whole origin, so this
+ * one is measured: whatever arrives is stored here and put on the page. */
+u32 lfo4_last_index;
+
+/* **The highest index ever handed to us, because "the last one" was clobbered.**
+ *
+ * The first attempt recorded only the most recent call. Both patch sites call
+ * this function, so a site that fires constantly with 0 hides a site that fires
+ * occasionally with the real index -- and the page duly read 0 for ever while
+ * the instrument was plainly selecting rows by voice. A running maximum cannot
+ * be hidden that way: if any call ever arrives with 10, this reads 10 and stays
+ * there. */
+u32 lfo4_index_max;
+
+/* **The DEST of the row we actually hand back, recorded at the moment we hand
+ * it back.**
+ *
+ * Two measured facts do not fit together: the index reaching this function is
+ * always 0, so only row 0 is ever populated -- and row 0 is filled from track
+ * 1's sound, which has no LFO4 settings, so its DEST should be None and LFO4
+ * should never modulate anything. Yet on the instrument it modulates on the
+ * voice matching whichever track has LFO4 configured.
+ *
+ * So either the row is not what this function thinks it is, or the evaluator
+ * is not reading the row this function returns. This records the first half:
+ * the destination code sitting in the row at the moment it is returned. If it
+ * is None while the instrument is plainly modulating, the evaluator is getting
+ * LFO4's parameters from somewhere other than here. */
+u32 lfo4_row_dest;
+
+/* **The calls that never get counted, which may be all the interesting ones.**
+ *
+ * The range guard returns before `lfo4_refreshes++`, so a call with an index of
+ * 16 or more is invisible to every counter here -- it just gets row 0's base
+ * back. `%a5` at evaluator A's site is an *address* register, and an address
+ * passed as an index would do exactly that, every time, leaving the visible
+ * counters reading a steady 0 while the real traffic went unrecorded. Measured
+ * rather than assumed, because assuming what a register holds is the mistake
+ * this whole bug is made of. */
+u32 lfo4_out_of_range;
 static u32 seen_sound[TRACKS];
 static u32 seen_generation[TRACKS];
 
@@ -72,6 +125,322 @@ u32 lfo4_sound_of(u32 track)
     return base ? base + DN2_SOUND_AT + track * DN2_SOUND_STRIDE : 0;
 }
 
+/* The mirror geometry, from `docs/fx-master-modulation.md` §9 and the
+ * evaluator's own arithmetic at `0x400db092`: `202*block + 34`. */
+#define MIRROR_BASE   0x800068E4u
+#define MIRROR_AT     34u
+#define MIRROR_STRIDE 202u
+
+/* What the block pointer resolved to, for the page. A wrong answer here is
+ * visible instead of silent, which is the whole lesson of this bug. */
+u32 lfo4_block_track = 0xFFu;
+u32 lfo4_block_ptr;                  /* the last block, for the page */
+u32 lfo4_beat;                       /* telemetry heartbeat, steps per burst */
+u32 lfo4_frame;                      /* the stub's stack pointer */
+u32 lfo4_word;                       /* the frame word currently being reported */
+u32 lfo4_block_base = 0xFFFFFFFFu;   /* the lowest block seen = track 0's */
+
+u32 lfo4_refresh(u32 track);
+
+/* -> the row for the track whose mirror block this is.
+ *
+ * **Why a pointer and not an index.** Both patch sites used to pass a register
+ * named "the track index" in a comment that was never measured. `%a5` turned
+ * out to be zeroed at the evaluator's entry and only advanced by the per-track
+ * `outer` stub, which does not run here -- so the index was 0 on every track,
+ * on every voice, for months, and LFO4 read one fixed row.
+ *
+ * `%sp@(56)` is the pointer the stock code uses for LFO1-3: `outer` advances it
+ * by 202 per track, and `a4_bottom` restores `%a4` from it. Deriving the track
+ * from it means LFO4 and LFO1-3 cannot disagree about which track they are on,
+ * because they are reading the same pointer. That is a guarantee by
+ * construction rather than by a comment, which is the point. */
+/* -> the byte `param_5[track]` would hold if `w` were `param_5`, or a sentinel.
+ *
+ * **The static read says where to look; this says whether it is right.**
+ * Evaluator A takes seven arguments (the call site's `lea %sp@(28),%sp` counts
+ * them) and `param_5`, at its `%sp@(96)`, is a pointer to a sixteen-byte array
+ * holding **one signed byte per track: the voice allocated to that track, or
+ * -1**. The caller builds it at `0x400271a2` -- both arrays default to -1 (`st
+ * %d4`) and a real value is written only where `0x40138664(bit)` returns the
+ * same object as `0x4002b22e(track)`, which is what makes the byte a voice.
+ *
+ * What is *not* known is where that argument sits relative to this stub's
+ * `%sp`. The stub is reached by `jmp` from inside evaluator A, and the frame
+ * map read on the instrument does not line up with the arithmetic cleanly
+ * enough to name one offset. Three offsets have now been guessed at this frame
+ * and all three were wrong, so this one is not guessed: the existing walk
+ * already visits all 32 words of the safe window, and each is asked the same
+ * question. Whichever word is `param_5` will answer with a small number that
+ * follows the voice allocation display; the rest will answer with a sentinel.
+ *
+ * **The guard, and why it needs no constant.** `param_5` points at
+ * `%fp@(-88)` in *the caller's* frame, so it is a stack address above this one
+ * and close to it. `frame` is itself a stack address, so the check is
+ * self-referential -- nothing hardcoded to be wrong when the task stack moves.
+ * A word failing it is never dereferenced.
+ *
+ * **A read is not free.** Extending the walk to +508 killed the instrument's
+ * MIDI output on 2026-09-23 -- audio kept playing, notes and telemetry both
+ * stopped. This adds no reach at all: the same 32 words, plus one dereference
+ * that must first prove it points just above our own stack pointer. */
+/* **The voice probe lived here, and it answered.** `param_5` and `param_6` were
+ * measured to reach this stub at `frame + 116` and `frame + 120`
+ * (`scripts/emu_lfo4_frame.py`, which passes those pointers itself and then
+ * finds them -- a control on both arms). Read there on the instrument, both are
+ * **-1 for all sixteen tracks on every one of 468 bursts** while the sequencer
+ * played. So they are not "the voice allocated to this track"; they are the
+ * voice whose LFO state must be *migrated* this frame, and in steady state that
+ * path correctly does nothing. The helper is gone because the question is
+ * answered -- `docs/lfo4-build-plan.md` keeps the reasoning. */
+
+#ifdef LFO4_FRAMEREAD
+/* -> the address in the DSP frame that this mirror slot is copied to, or 0.
+ *
+ * **Why read the frame and not only the mirror.** LFO4's value is measured
+ * arriving in the mirror every frame (graded control, 2026-09-24). If it is
+ * still inaudible on most voices, the next question is narrow: does it survive
+ * the copy into the frame the DSP actually receives? This answers that in one
+ * flash instead of a week of SHARC reading.
+ *
+ * The geometry is read from the frame builder at `0x400274ba`, not guessed.
+ * `%a4` starts at `0x80005e60` and strides **146 per track**; the loop runs 16
+ * times (`%d2` steps by 2 to 32). Four `memcpy`s move mirror slots into it:
+ *
+ *   dst %a4@(218) <- %a5@(84)  82 B   slots 25..65
+ *   dst %a4@(300) <- %a5@(166) 28 B   slots 66..79
+ *   dst %a4@(328) <- %a5@(194) 26 B   slots 80..92
+ *   dst %a4@(354) <- %a5@(224) 10 B   slots 95..99
+ *
+ * A row's slots start at `+34`, so `%a5@(84)` is slot 25 and the four ranges
+ * tile 25..99 with **93 and 94 deliberately absent** -- a gap worth knowing
+ * about before reading a zero there as a finding.
+ *
+ * The frame lives in fast SRAM (`0x80000000`..`0x80010000`), which is mapped
+ * and small; the furthest address this can produce is
+ * `0x80005e60 + 146*15 + 354 + 8`, comfortably inside it. **No unmapped read
+ * is reachable from here**, which is the constraint the +508 walk violated. */
+#define FRAME_BASE   0x80005E60u
+#define FRAME_STRIDE 146u
+
+static u32 frame_word_for(u32 track, u32 slot)
+{
+    u32 rec = FRAME_BASE + FRAME_STRIDE * track;
+
+    if (slot >= 25u && slot <= 65u) return rec + 218u + 2u * (slot - 25u);
+    if (slot >= 66u && slot <= 79u) return rec + 300u + 2u * (slot - 66u);
+    if (slot >= 80u && slot <= 92u) return rec + 328u + 2u * (slot - 80u);
+    if (slot >= 95u && slot <= 99u) return rec + 354u + 2u * (slot - 95u);
+    return 0u;                       /* 93, 94 and everything outside: not copied */
+}
+#endif
+
+u32 lfo4_row_for_block(u32 block, u32 frame)
+{
+    u32 track;
+
+    /* **`%a4` already holds it, and Ghidra is what showed that.**
+     *
+     * Two stack offsets were tried and both were wrong -- `%sp@(72)` read a
+     * constant 52 on the instrument -- because `a4_top` and `a4_bottom` are
+     * patched at different addresses and the stock code between them moves the
+     * stack. Guessing frame layout by hand cost five flashes.
+     *
+     * The decompiler settles it. Evaluator A keeps the per-track mirror pointer
+     * in a local:
+     *
+     *     local_18 = param_1 + 0x22;        // the buffer + 34
+     *     do {                               // once per track
+     *       iVar12 = local_18 + -0x22;       // the instruction a4_top replaced
+     *       ... *(short *)(iVar12 + 0x44)    // %a4@(68), the LFO reads
+     *
+     * So the displaced `lea %a4@(-34),%a4` means **`%a4` holds that pointer on
+     * entry to the stub** -- which our own stub source already said in a
+     * comment, and which nobody checked. It is a register, not a stack slot,
+     * so there is no frame layout left to get wrong.
+     *
+     * The base is still unknown, and it must not be assumed a second time: the
+     * buffer is low in RAM, not the global mirror. `local_18` advances 202 per
+     * track, so the lowest value ever seen is track 0's and every other track
+     * is a whole number of strides above it. */
+    if (block < lfo4_block_base)
+        lfo4_block_base = block;
+    lfo4_block_ptr = block;
+    lfo4_frame = frame;               /* the stub's %sp: a window into the caller */
+    track = (block - lfo4_block_base) / MIRROR_STRIDE;
+    if (track >= TRACKS)
+        track = 0;
+    lfo4_block_track = track;
+#ifdef LFO4_TELEMETRY
+    /* **The first thing this channel ever sends, and it is built to be read
+     * even if it is wrong.**
+     *
+     * `marker` is a counter that steps 0..127 on every emission: a value that
+     * visibly sweeps proves the path is alive independently of whether any
+     * diagnostic number is correct, and its rate tells us how often this
+     * function actually runs, which nothing has measured. `track` and the mask
+     * are the real payload -- the mask being the question six flashes failed to
+     * answer, because a display that renders only the high byte cannot show a
+     * 14-bit value at all.
+     *
+     * **The period must be coprime with 16, and 2048 was not.** The engine walks
+     * the sixteen tracks in order, so the track a burst lands on is the call
+     * index modulo 16 -- and 2048 mod 16 is 0, which pinned every burst to the
+     * same track for ever. The first run duly reported `track = 15` on every
+     * sample and looked like the firmware pinning something. It was the
+     * sampling period, not the firmware.
+     *
+     * 2049 mod 16 is 1, so each burst steps to the next track and all sixteen
+     * are reported in sixteen bursts -- about 1.4 s at the measured rate.
+     *
+     * Rate: the marker stepped every ~87 ms at 2048, so this function runs
+     * about 23,500 times a second, or ~1,470 evaluator passes across 16 tracks.
+     * Nothing had measured that before. Four messages per 87 ms is ~46/s
+     * against MIDI's ~1,040/s ceiling, so there is room. */
+    if (tlm_every(0, 2049)) {
+        /* **Walk the caller's frame instead of guessing one slot.**
+         * `probe_b` says which word is being reported and `mask_lo`/`mask_hi`
+         * carry its low 14 bits; the index advances every burst, so 32 words --
+         * 128 bytes of evaluator A's frame -- are mapped in 32 bursts, under
+         * three seconds. The enable mask is in there somewhere and will show
+         * itself as a value that is neither 0 nor a pointer. */
+        {
+            /* **Reach past the locals to the arguments.** The first walk
+             * covered +0..+124 and found the frame's own working set: the
+             * per-track mirror pointer at +8 stepping by 202, a second pointer
+             * at +80 and +100 stepping by 153 -- both strides matching `outer`
+             * -- and the 0x3840 scale at +104. No enable mask, and that is
+             * where it should be: `%sp@(88)` was read at the *function entry*
+             * frame, and this stub runs below all of evaluator A's locals, so
+             * the arguments sit further up. This walks +0..+508. */
+            /* **Back to 32 words, because 128 broke the instrument's MIDI.**
+             * The +0..+124 walk ran cleanly and produced a usable frame map.
+             * Extending it to +0..+508 in one step killed MIDI output entirely
+             * -- the instrument kept playing audio and stopped sending notes
+             * *and* telemetry, which is what a dead transmit task looks like.
+             * Nothing else changed between the two builds.
+             *
+             * So this is not a free read. 512 bytes above the stub's stack
+             * pointer is past evaluator A's own frame; "over-reach and discard"
+             * was wrong, and the reach is now part of what has to be earned
+             * rather than assumed. */
+            /* **The sweep is over: it found the pair, and then could not read
+             * it.** Walking 32 words gave one sample per (word, track) pair,
+             * and a voice exists only while a note is sounding on one track --
+             * so sixteen samples spread across sixteen tracks were never going
+             * to catch one. Words 29 and 30 duly read -1 every time. That is
+             * the probe being blind, not the array being empty, and reading it
+             * as a negative result would have been the fourth uncontrolled one
+             * in this file's history.
+             *
+             * What the sweep did establish, over 585 bursts with `probe_a`
+             * reading 99 on every one: **`frame+116` and `frame+120` are the
+             * only adjacent pair in the window that are valid frame pointers**,
+             * and `param_5`/`param_6` at `%sp@(96)`/`%sp@(100)` are adjacent
+             * and 4 apart. Everything else read 126 (not a pointer) except one
+             * word holding unrelated bytes.
+             *
+             * So both are now read **every burst**. The track still cycles, so
+             * each track is sampled every 16 bursts -- about 1.4 s -- instead
+             * of once per 45-second sweep. A voice held for the length of a
+             * note cannot hide from that. */
+            /* **Read the PREVIOUS track's destination slot, not this one's.**
+             *
+             * The first attempt read this track's slot and was blind by
+             * design. The engine's order within one audio frame is: regenerate
+             * the whole mirror from the control side, apply the six MIDI
+             * performance modulators, run the LFOs, build the DSP frame
+             * (`0x400274ba`), send it. This stub fires at the *start* of this
+             * track's LFO4 iteration -- so the mirror it sees has been
+             * regenerated and no LFO has written to it yet. It read a constant
+             * on all sixteen tracks, and it would have read a constant whether
+             * LFO4 worked perfectly or not at all.
+             *
+             * Track `t-1` is the fix and it costs nothing. Its whole LFO pass
+             * finished moments ago and its mirror row is not regenerated until
+             * the next frame, so its destination slot holds **base plus
+             * whatever the LFOs just wrote**. A value that moves is a value
+             * being written every frame.
+             *
+             * **No new reach.** One 202-byte record below, inside the same
+             * array the evaluator walks, and bounded against `lfo4_block_base`
+             * -- which is *learned*, not assumed, so nothing here depends on a
+             * constant that a project load could move.
+             *
+             * The control is unchanged and it is the point: **every track
+             * reports**. Tracks with no LFO4 must show `DEST = 0` and a value
+             * that does not move. If they move too, this is measuring
+             * something other than LFO4 and none of it counts. */
+            u32 prev = (track + (TRACKS - 1u)) & (TRACKS - 1u);
+            u16 *prow = (u16 *)((u32)lfo4_rows + prev * ROW_BYTES);
+            u32 dest = ((u32)prow[3] >> 8) & 0x7Fu;
+            u16 at_dest = 0;
+            u32 base = lfo4_block_base;
+
+            if (base != 0xFFFFFFFFu && dest <= 100u) {
+                u32 row_ptr = base + MIRROR_STRIDE * prev;
+
+                /* **`block + 2*slot`, and the 34 is NOT subtracted here.**
+                 *
+                 * The first two builds read `block - 34 + 2*slot` and were 34
+                 * bytes -- seventeen slots -- low, reporting slot 9 while
+                 * calling it slot 26. Both duly read a constant, and the
+                 * constant was nearly taken as "LFO4 never writes".
+                 *
+                 * The owner's control is what caught it: with **LFO1** pointed
+                 * at the same destination and audibly modulating, the value
+                 * still did not move. A known-good LFO showing nothing means
+                 * the probe is wrong, not the LFO -- which is the whole reason
+                 * to run a positive control beside a negative result.
+                 *
+                 * The geometry: `mirror = 0x800068e4 + 34 + 202*block +
+                 * 2*slot`, so the **+34 is a one-time offset to the start of
+                 * the array**, not a per-record header. `%a4` already points at
+                 * `param_1 + 34 + 202*track`, so slots run from it directly.
+                 *
+                 * Confirmed against the evaluator's own read: after
+                 * `lea %a4@(-34),%a4` it takes a parameter from `%a4@(68)`,
+                 * which is `block + 34` = **slot 17** = `8*2+1`, LFO3's first
+                 * parameter. The mapping can only be `block + 2*slot`. */
+                at_dest = *(volatile u16 *)(row_ptr + 2u * dest);
+            }
+            lfo4_word = at_dest;
+            tlm_cc(TLM_CC_TRACK, (u8)prev);
+            tlm_cc(TLM_CC_DEST, (u8)dest);
+            tlm_cc14(TLM_CC_MASK_LO, TLM_CC_MASK_MID, (u16)(at_dest >> 2));
+#ifdef LFO4_FRAMEREAD
+            /* **The same value, one copy later.** If the mirror pair moves and
+             * this pair does not, the value is lost between the LFO stage and
+             * the frame -- on this processor, and findable. If both move, the
+             * value reaches the DSP and nothing on the ColdFire is at fault.
+             *
+             * The control is free and already present: put a stock LFO on the
+             * same destination and **both** pairs must move. If they do not,
+             * this address is wrong and no reading from it counts. That is the
+             * check that was missing when the probe read seventeen slots low. */
+            {
+                u32 fa = frame_word_for(prev, dest);
+                u16 fv = fa ? *(volatile u16 *)fa : 0u;
+
+                tlm_cc14(TLM_CC_MASK_HI, TLM_CC_PROBE_B, (u16)(fv >> 2));
+            }
+#endif
+        }
+        tlm_cc(TLM_CC_MARKER, (u8)(++lfo4_beat & 0x7Fu));
+        /* **A constant whose correct answer is known before the flash.**
+         * Twice now a number was read off an instrument of this project's own
+         * making without checking that the instrument reports faithfully: the
+         * LFO4 page renders only the high byte, and the first sampling period
+         * was a multiple of the loop length. Both looked like findings. So one
+         * signal carries 99 and nothing else: if `probe_a` reads 99, the values
+         * beside it can be trusted; if it does not, none of them can, and that
+         * is visible instead of silent. */
+        tlm_cc(TLM_CC_PROBE_A, 99);
+    }
+#endif
+    return lfo4_refresh(track);
+}
+
 /* -> the address of this track's row, current as of now. */
 u32 lfo4_refresh(u32 track)
 {
@@ -80,9 +449,14 @@ u32 lfo4_refresh(u32 track)
     u16 *values;
     u32 k;
 
-    if (track >= TRACKS)
+    if (track >= TRACKS) {
+        lfo4_out_of_range++;
         return (u32)lfo4_rows;            /* never index past the table */
+    }
     lfo4_refreshes++;
+    lfo4_last_index = track;
+    if (track > lfo4_index_max && track < TRACKS)
+        lfo4_index_max = track;
     sound = lfo4_sound_of(track);
     generation = ext_generation;
     if (sound == seen_sound[track] && generation == seen_generation[track])
@@ -99,6 +473,7 @@ u32 lfo4_refresh(u32 track)
         lfo4_misses++;
         lfo4_last_lookup = -1;
     }
+    lfo4_row_dest = (u32)(((u16 *)row)[3] >> 8) & 0x7Fu;
     for (k = 0; k < EXT_PARAMS; k++)
         ((u16 *)row)[k] = values ? values[k] : ext_default[k];
 #ifdef LFO4_FORCE_ROW
@@ -120,10 +495,45 @@ u32 lfo4_refresh(u32 track)
      * counters still move: a build that crashed in `ext_find` would not be
      * silently exonerated by skipping it.
      */
+    /* **One track, or the test proves nothing.**
+     *
+     * Forcing *every* track's row makes all sixteen identical, so a bug that
+     * picks the wrong row becomes invisible: the wrong row and the right row
+     * hold the same values. `lfo4-loud` did exactly that and was read as
+     * "the modulation is on every voice", which it cannot show.
+     *
+     * With `LFO4_FORCE_TRACK` set, only that track gets the forced row and the
+     * other fifteen get depth zero. Then:
+     *   - a sweep on **every voice** means the row is selected by track, and
+     *     the engine is correct;
+     *   - a sweep only when the voice index equals `LFO4_FORCE_TRACK` means the
+     *     row is selected by **voice**, which is the owner's original report and
+     *     a real defect.
+     * The two outcomes finally look different, which is the whole point. */
+#ifdef LFO4_FORCE_TRACK
+    if (track != (u32)LFO4_FORCE_TRACK) {
+        ((u16 *)row)[7] = 0x4000;          /* DEP neutral: no modulation */
+        ((u16 *)row)[3] = 0;               /* DEST none */
+        return row;
+    }
+#endif
     {
         static const u16 forced[EXT_PARAMS] = {
-            0x7000,     /* SPD  -- fast */
-            0x0800,     /* MULT -- middle, not the slowest: tick7's lesson */
+            /* **SPD and MULT are build-time, because the right rate is a
+             * question the instrument answers, not the source.**
+             * 0x7000 is the stock default, not "fast" as this comment used to
+             * claim. At MULT index 8 the owner reported every track and every
+             * voice gurgling rather than sweeping -- modulation everywhere, too
+             * fast to hear as movement. `--force-spd` and `--force-mult` let the
+             * rate be dialled without touching this file. */
+#ifndef LFO4_FORCE_SPD
+#define LFO4_FORCE_SPD  0x7000
+#endif
+#ifndef LFO4_FORCE_MULT
+#define LFO4_FORCE_MULT 0x0800
+#endif
+            LFO4_FORCE_SPD,
+            LFO4_FORCE_MULT,
             0x4000,     /* FADE -- neutral */
             76 << 8,    /* DEST -- the slot tick7 swept audibly on hardware */
             0x0100,     /* WAVE -- a continuous shape */

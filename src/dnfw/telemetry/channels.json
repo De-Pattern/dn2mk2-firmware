@@ -1,0 +1,15 @@
+{
+  "comment": "One CC assignment per line of telemetry. BOTH the firmware header and the host decoder are generated from this file, so they cannot drift apart -- the failure that made a day of page readings meaningless on 2026-09-23.",
+  "channel": 16,
+  "signals": [
+    {"cc": 20, "name": "track",      "width": 7,  "note": "the index the tick was handed"},
+    {"cc": 21, "name": "mask_lo",    "width": 7,  "note": "enable mask, low 7 bits"},
+    {"cc": 22, "name": "mask_mid",   "width": 7,  "note": "enable mask, bits 7..13"},
+    {"cc": 23, "name": "mask_hi",    "width": 7,  "note": "enable mask, bits 14..20"},
+    {"cc": 24, "name": "dest",       "width": 7,  "note": "the destination code in the row"},
+    {"cc": 25, "name": "voice",      "width": 7,  "note": "the voice, when a caller knows it"},
+    {"cc": 26, "name": "probe_a",    "width": 7,  "note": "unassigned, for whatever is being chased"},
+    {"cc": 27, "name": "probe_b",    "width": 7,  "note": "unassigned"},
+    {"cc": 30, "name": "marker",     "width": 7,  "note": "a caller-chosen tag, to separate call sites"}
+  ]
+}

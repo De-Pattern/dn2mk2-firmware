@@ -48,7 +48,7 @@ into the real per-track mirror, so the modulation lands where it should.
 
 ## The state arrays have to move, and that is most of the edit count
 
-Three 1,920-byte arrays (16 tracks x 3 LFOs x 40) sit wall to wall at
+Three 1,920-byte arrays (16 **voices** x 3 LFOs x 40) sit wall to wall at
 `0x4463ed18`, `0x4463f498`, `0x4463fc18`. Four LFOs need 2,560 each, so all three
 relocate into the unclaimed 25.3 MB above BSS end `0x466b74d0`
 (`docs/memory-map.md`). Every site that names one, sizes one, strides one or
@@ -89,7 +89,15 @@ BASE = 0x40000400
 
 # --- where the relocated state lives ---------------------------------------
 # Unclaimed SDRAM above BSS end 0x466b74d0, below the 0x48000000 top.
-# 16 tracks x 4 LFOs x 40 bytes = 2,560 each.  Page-spaced so a stray overrun
+# 16 x 4 LFOs x 40 bytes = 2,560 each.  Page-spaced so a stray overrun
+# **Sixteen of what, read 2026-09-24: it depends which site reaches them.**
+# `outer` below walks the live array one record per track (202 mirror / 160 state
+# / 153, with addq #1,%a5 in the same block), so the live array is TRACK-indexed.
+# The restore and backup paths in evaluator A instead compute base + voice*160 +
+# lfo*40, taking the voice from param_5/param_6 -- 16-byte arrays the caller fills
+# at 0x400271a2, defaulting to -1 and set only where the voice's owner object
+# equals the track's.  That block is the bridge between the two indexings.
+# The count is 16 either way, so every stride edit below is unaffected.
 # lands in nothing rather than in a neighbour.
 LIVE = 0x46700000
 SECOND = 0x46701000

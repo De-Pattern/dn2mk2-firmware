@@ -4968,3 +4968,1064 @@ depth. If the audible sweep changes, both contributions are in the cell the
 voice reads and the question becomes why one of them is usually inaudible; if
 it does not change while `SPD` still shows movement, they are different memory
 after all and the search resumes with that established rather than guessed.
+
+## The 1-in-15 is a key that misses, not a cell that is wrong — 2026-09-23
+
+Everything from the panel to the mirror cell is measured and correct, the
+evaluator treats LFO4 and LFO3 byte-identically over 240 frames, and yet the
+instrument modulates on roughly **one trig in fifteen**. That number is the
+evidence nothing has used: **a wrong cell would never work.** One in fifteen is
+a lookup that usually misses.
+
+`lfo4_refresh` in `csrc/lfo4/bridge.c`:
+
+```c
+values = ext_find(lfo4_sound_of(track));
+for (k...) row[k] = values ? values[k] : ext_default[k];
+```
+
+**A miss is not a no-op. It loads the defaults, and the default `DEST` is
+None** — so a note whose row missed modulates nothing, and a note whose row hit
+modulates. That is binary-per-note exactly as reported.
+
+And the two sides derive the key differently, which is the whole question:
+
+| | how the key is built |
+|---|---|
+| the **UI** (`hooks.S`, `valuehooks.S`) | `%a2@(16)` then `vtable[40]()` — the firmware's own virtual call |
+| the **tick** (`bridge.c`) | `*0x800052a0 + 52 + 1163*track` — the firmware's arithmetic at `0x40025bda` |
+
+The getter and setter use the **identical** derivation, which is why the page
+displays what was typed. That is self-consistency, not agreement with the tick,
+and it is why the page looking right has never been evidence.
+
+### `emu_lfo4_key.py` — written, run, and its conclusion withdrawn
+
+The first probe compared `*0x800052a0 + 52 + 1163*track` against
+`lfo4_sound_of(track)` and reported **8/8 tracks agree**, concluding "the key
+theory dies here". **That conclusion is withdrawn: the probe compared the tick's
+formula with the tick's own formula.** `lfo4_sound_of` *is* that expression, so
+agreement was guaranteed before the machine was started. It is kept because the
+mistake is instructive and because one part of it is real:
+
+> `control  store under lfo4_sound_of(0) -> hits 0->1, misses 0->0, last_lookup 1  HIT`
+
+**The lookup machinery works.** A row stored under the tick's key is found under
+the tick's key. So if there is a miss on the instrument it is the key that
+differs, not `ext_find`.
+
+This is the same failure as the `movea.l` trap and the container-header offset:
+*a comparison needs two independent derivations, and "both sides call the same
+function" is not two.*
+
+### `emu_lfo4_uikey.py` — the probe that can answer it
+
+Drives the panel to the LFO4 page so `lfo4_on_get` runs through the real path,
+then reads the key the firmware's own virtual call produced (`lfo4_get_sound`)
+and compares it with `lfo4_sound_of(track)`. Prediction and control are written
+into the script before the run, and the control is `lfo4_gets != 0` — because a
+zero key with a getter that never ran is a null about navigation, not about
+keys.
+
+### Result: the keys agree, and the theory is dead
+
+```
+lfo4_gets      65
+lfo4_get_sound 0x4210c0c0   <- the UI's own virtual call
+lfo4_sound_of  0x00000008   <- the tick key, by calling it
+base+52+1163t  0x4210c0c0   <- the same, by reading memory
+```
+
+**`lfo4_get_sound == base + 52 + 1163*track`.** Those two are genuinely
+independent: one is a C++ virtual dispatch through the firmware's own object
+(`%a2@(16)` then `vtable[40]()`), the other is our arithmetic on a longword read
+straight out of `*0x800052a0`. They produce the same address.
+
+**So the UI writes LFO4's row under exactly the key the tick asks for, and the
+1-in-15 is not a key that misses.** Recorded as a refutation, not a footnote:
+the hypothesis was specific, it predicted a difference, and there is none.
+
+What survives from it is still worth having:
+
+- `ext_find` works — a row stored under the tick's key is found under it
+  (`emu_lfo4_key.py`'s control, the one real line in that probe);
+- a miss would load `ext_default`, whose `DEST` is None, so **if** a miss ever
+  happens it is silent and total. That remains the right thing to instrument on
+  hardware, because the emulator cannot produce one.
+
+### The harness fact, which is the more useful half
+
+**`m.call` into the build's code region is unreliable after the panel has been
+driven.** `lfo4_sound_of` returned `8`, and that function returns either zero or
+`base + 52 + 1163*track` — never 1..51. The call did not execute the function.
+
+This matters beyond this probe: **most remaining LFO4 questions want the panel
+driven *and* a routine called directly**, and that combination silently returns
+a plausible-looking integer. The first run of this probe turned that integer
+into "the UI stores LFO4's row under a key the tick never asks for" — a false
+positive that read exactly like a discovery.
+
+The guard is cheap and should be copied: **derive anything you compare twice, by
+two routes, and refuse to compare when they disagree.** Whether the cause is the
+code region not surviving UI execution, or the call convention not re-entering
+from that state, is unmeasured and is the next thing to find out before another
+probe of this shape is trusted.
+
+### The pattern, now specific enough to be a rule
+
+Four failures today share one shape, and it is not "static reads are risky":
+
+| | controlled | assumed |
+|---|---|---|
+| the container header | the addresses | the frame they were in |
+| the `movel` scan | the constant | the direction of the addressing mode |
+| `emu_lfo4_key.py` | the lookup | that the two sides were different formulas |
+| `emu_lfo4_uikey.py` | that the page was reached | that the other side of the comparison ran |
+
+**Every one was a comparison where one side was controlled and the other
+assumed.** The measurements were fine. Write the control for the arm you are
+*not* thinking about.
+
+### The harness question, answered — and both my explanations were wrong
+
+`scripts/emu_call_after_panel.py`, two arms, controls on both:
+
+```
+before panel:  stub -> 42                        lfo4_sound_of(0) -> 0x4210c0c0  OK
+after  panel:  lfo4_sound_of(0) FIRST -> 0x4210c0c0  OK
+               stub bytes 702a4e75 (intact)      stub -> 0x4210c0c0  STALE
+               the function's own 64 code bytes: unchanged
+```
+
+| candidate | verdict |
+|---|---|
+| the UI clobbers the build's code region | **dead** — 64 bytes byte-identical |
+| the first call after the panel does not run | **dead** — called first, answered correctly |
+| `m.alloc` scratch is overwritten | **dead** — `702a4e75` still there |
+
+**What is true: the loaded code region stays callable across panel driving, and
+`m.alloc` scratch does not.** The stub's bytes are intact, the call mechanism
+demonstrably works in the same breath, and yet executing the stub leaves `%d0`
+holding the *previous* call's result — `emu_start` did not run it. The cause is
+unmeasured. The rule does not depend on knowing it:
+
+> **After driving the panel, call only into the build's loaded code region.
+> Never into `m.alloc` scratch, and never trust a returned value that equals the
+> previous call's.**
+
+That last clause is the cheap guard: a stale `%d0` is indistinguishable from an
+answer, which is how `emu_lfo4_uikey.py` turned an `8` into a discovery.
+
+**And this closes the LFO4 code region as a suspect.** The region is intact
+after the UI runs, so "the firmware's heap grows into `0x46800000` and corrupts
+the row table" — which would have predicted the 1-in-15 exactly — is not
+supported by anything measured. Written down because it was an attractive
+theory and it should not be re-derived later as though it were new.
+
+### Where this leaves the contradiction, honestly
+
+Every probe built today runs on a snapshot that **has already booted and never
+plays a note**. `docs/instruments.md` says so in as many words. The remaining
+explanations for the 1-in-15 all live at note-on, and no offline harness here
+can reach it.
+
+**So the next measurement is on the instrument and it costs two knob turns and
+no flash** — see `00_Notes/.../Firmware test plan.md`, the LFO3-beside-LFO4
+depth test. It discriminates between the two surviving families where nothing
+offline does.
+
+## SOLVED: LFO4's row is selected by the voice index, not the track — 2026-09-23
+
+**Found by the owner, at the instrument, by opening the voice allocation menu.**
+Four hypotheses from this session died before it and none of them would have got
+here; the menu did it in one look.
+
+### The evidence, in the order it arrived
+
+| observation | what it fixed |
+|---|---|
+| *"the triggers that work always trigger on voice number 7"*, on **track 7 (index 6)** | the selector is the voice number, and "1 in 15" was never a probability -- it is **1 of 16 voices** |
+| selecting **reuse** to pin the voice makes LFO4 work on **every** trig | nothing about the LFO, the row, the cell or the key is wrong |
+| moved to **track 11 (index 10)** -> **voice 11** now activates | the working voice follows the **track index**, on a second track, far from the first |
+| **voice 7 still activated on track 11** | *not* an anomaly -- track 7's row was still configured, so **two** populated rows meant two working voices, on any track |
+| setting track 7's `DEST` to None -> **voice 7 stops, voice 11 keeps working** | the prediction that closes it: the row is indexed by voice, populated per track, and any populated row fires on its matching voice **regardless of which track is playing** |
+
+That last one was a positive prediction made before the test and it held, which
+is worth more than the four eliminations that preceded it.
+
+### Why every previous probe missed it
+
+- **`lfo4_misses` stayed flat** on hardware with a passing liveness control --
+  and that is exactly right. The lookup never *fails*; it **succeeds on the
+  wrong row**. A row for a track with no LFO4 settings is all zeros, its `DEST`
+  is None, and a None destination is silent and total. Nothing increments.
+- **Every offline harness drives the evaluator directly and never allocates a
+  voice**, so the index it was handed was whatever the harness put there. The
+  fault needs a voice pool to exist, and the emulator has none.
+- **`emu_lfo4_vs_lfo3.py` found LFO3 and LFO4 byte-identical over 240 frames.**
+  True, and irrelevant: both were driven with the same index.
+
+### Where the wrong index comes in
+
+`scripts/build_lfo4_tick7.py` picks the index at each of the two patch sites:
+
+```python
+A_INDEX = "move.l %a5,%d0    | evaluator A's track index"
+B_INDEX = "                  | evaluator B's track index is already in %d0"
+```
+
+**Both comments were written by inference and neither was ever measured**, and
+`lfo4-bridge` inherited them unchanged when it replaced the static table with
+`lfo4_refresh(index)`. `lfo4_refresh`'s only guard is `track >= TRACKS`, so an
+index of 0..15 from any source passes straight through and selects a row.
+
+A static read of evaluator A shows `%a5` zeroed at entry (`subal %a5,%a5`) and
+used to shift a 16-bit enable mask -- which *looks* like a per-track loop, and I
+read it that way and said so. **The instrument disagrees, and the instrument
+wins.** Which of the two sites carries the voice number is now a measurement to
+make, not a register to name in a comment -- that is the mistake this whole
+section is about.
+
+### The fix, and the property it must have
+
+Whatever index reaches `lfo4_refresh` must be **the track that owns the sound
+this voice is playing**, and it must be derived from something the firmware
+itself uses for LFO1-3, so the two cannot drift. The candidate:
+
+    track = (block - 0x800068e4 - 34) / 202
+
+taken from the very mirror block the evaluator is already reading LFO1-3's
+parameters out of. Then LFO4 and LFO1-3 agree by construction rather than by
+a comment -- which is the same argument that made `fxmod` trustworthy.
+
+**Not yet built and not yet measured.** The diagnosis is closed; the fix is not.
+
+### The readout was never calibrated, and that voided a day of readings
+
+**The LFO4 page renders the HIGH BYTE of the value a column returns.** A
+hardcoded `99` displayed as `-64`: `99` is `0x0063`, high byte `0`, and FADE
+maps `(raw >> 8) - 64`. SPH maps `raw >> 8` with no offset.
+
+Every diagnostic value returned during 2026-09-23 was in 0..15. **All of them
+have a high byte of zero, so all of them displayed identically no matter what
+they held.** These readings are withdrawn:
+
+| read as | actually showed |
+|---|---|
+| `lfo4_last_index` "always 0" | nothing — any value 0..255 looks the same |
+| `lfo4_index_max` "always 0" | nothing |
+| `lfo4_out_of_range` "always 0" | nothing |
+| `lfo4_block_track` "always 0" | nothing |
+| `lfo4_block_ptr` "stuck at 52" | only the pointer's high byte |
+
+**"The index is always 0" was never measured.** The whole evening's chain --
+index stuck at zero, therefore the stub reads the wrong slot, therefore
+`%sp@(72)` is wrong, therefore `%a4` is wrong -- rested on a readout that could
+not have shown otherwise.
+
+`lfo4_refreshes` appeared to work only because a free-running counter crosses
+high-byte boundaries. **That false positive is what made the channel look
+sound**, and it is why the calibration was never run: one column visibly moved,
+so the instrument was assumed good.
+
+**The rule, and it cost six flashes:** *before reading a number off an
+instrument you built, put a known constant through it.* The control belongs on
+the measuring device, not only on the experiment. Shifting values into the high
+byte (`value << 8`) makes them readable; a constant in a second column decodes
+the mapping instead of assuming it.
+
+### With the readout calibrated, the `%a4` fix is confirmed working
+
+`lfo4_row_for_block` now takes `%a4`, which holds the per-track mirror pointer
+on entry to the stub -- Ghidra's `local_18 = param_1 + 0x22`, advanced 202 per
+track, with `iVar12 = local_18 - 0x22` being the very instruction `a4_top`
+replaces, and our own stub source saying the same thing in a comment nobody had
+checked.
+
+Measured: **SPH reads 15 on every track**, which is `TRACKS - 1`. The page reads
+the global after the tick has walked all sixteen tracks, so it catches the last
+one. **The derivation sweeps 0..15**, so the block pointer genuinely advances,
+`%a4` genuinely is the per-track pointer, and every track's row is refreshed
+under its own index. The prediction "SPH reads 15 whatever track you are on"
+was made before the test and held.
+
+### And the bug is still there, which moves it downstream
+
+Rows are right and modulation is still gated on `voice == track`. The
+decompiler shows exactly one candidate:
+
+```c
+uVar3 = param_3 >> (uVar13 & 0x3f) & 1;   /* an enable bit per track */
+```
+
+`param_3` is an **enable mask**, tested bit by bit against the track counter,
+and it sits at `%sp@(88)` at the function entry where the disassembly shows it
+loaded (`movel %sp@(88),%d5` then `asrl %d1,%d5`).
+
+**Every harness in `scripts/` passes `0xFFFF` for it.** `emu_lfo4_vs_lfo3.py`
+calls `m.call(EVAL_A, buf, rate, 0xFFFF, 0xFFFF, ...)` -- all bits set, gate
+held open. **So no offline probe could ever reproduce a gating bug**, which is
+why LFO3 and LFO4 came back byte-identical over 240 frames while the instrument
+disagreed. The harness answered the question with the gate wedged open.
+
+If that mask carries the **voice's** bit rather than the track's, then track `n`
+is enabled only when `n` equals the voice -- the owner's law exactly, with no
+coincidence left in it. **Unmeasured.** The next read captures `param_3` at the
+function entry, which is a different site from the one this session kept getting
+wrong.
+
+## Telemetry works: the instrument reports to the computer — 2026-09-24
+
+**`DN2_MIDI_TX = 0x401233f2`.** Found by walking `MidiOutputStream`'s vtable at
+`0x40207c98`. Its `put(byte)` appends to a buffer at `this+20`, counts at
+`this+8`, and tail-calls `flush` when full; `flush` calls
+`0x401233f2(buffer, count, port, flags)`. The three callers outside the class
+push `port` and `flags` as **constants** -- `clrl` then `pea 0x2` -- so no stream
+instance is needed: three bytes on our own stack and one call.
+
+**Why it hid for a day.** A GCC RTTI name carries a length prefix. The typeinfo
+points at `0x4023100c`; the text "MidiOutputStream" starts one byte later at
+`0x4023100e`. Searching for a pointer to the *text* found nothing, and that null
+was read as "no vtable, a mangled fragment". It had a vtable all along.
+
+### Confirmed on the instrument
+
+469 control changes on channel 16 in ten seconds, `marker` stepping cleanly.
+**The firmware reports to the computer, and every future probe inherits the
+channel.**
+
+Two facts fell out of the first run that nothing had measured:
+
+- **`lfo4_row_for_block` runs ~23,500 times a second** -- the marker stepped
+  every ~87 ms at one burst per 2048 calls. That is ~1,470 evaluator passes
+  across sixteen tracks.
+- **A sampling period must be coprime with the loop length.** The first build
+  sampled every 2048 calls; the engine walks 16 tracks in order; 2048 mod 16 is
+  0, so **every burst landed on the same track for ever** and reported
+  `track = 15` on all sixteen. It looked like the firmware pinning something.
+  The owner disproved it in one move -- toggling other tracks changed nothing --
+  before the arithmetic did. 2049 mod 16 is 1, and the round-robin then reported
+  all sixteen tracks in about 1.4 s.
+
+### The frame map, and three wrong guesses finally measured
+
+Passing the stub's `%sp` and walking `+0..+124` over successive bursts:
+
+| offset | observed | reading |
+|---|---|---|
+| **+8** | 10502, 10704, 10906 | **steps of exactly 202** -- the per-track mirror pointer, `local_18` |
+| **+80, +100** | 10468, 10621, 10774 | **steps of exactly 153** -- matching `outer`'s `add.l #153` |
+| **+104** | `0x3840` | the scale constant `emu_boot_engine` prints entering evaluator A |
+| **+108** | 0 | **the slot guessed three times, confirmed empty** |
+
+Two independent strides matching constants the decompiler showed in `outer`:
+the frame identifying itself. **The enable mask is not in this window**, and
+should not be -- `%sp@(88)` was read at the *function entry* frame, and this stub
+runs below all of evaluator A's locals, so the arguments sit further up.
+
+### And extending the reach broke the instrument
+
+`+0..+508` in one step **killed MIDI output entirely**: audio kept playing, the
+sequencer kept running, and the instrument stopped sending notes *and*
+telemetry. Nothing else differed between the two builds -- same emission rate,
+same message shape, same call site.
+
+**A read is not free.** The reasoning that produced it -- *"I would rather
+over-reach and discard than under-reach and guess again"* -- treated reads as
+harmless because they do not write. 512 bytes above the stub's stack pointer is
+past evaluator A's frame, and on a 0x4000-byte task stack can leave the mapped
+region; a fault in an interrupt-driven task kills it as surely as a bad write.
+Reverted to +124, which is known good.
+
+**The next attempt is targeted, not wider**: the decompiler can give evaluator
+A's frame size, and then the arguments' offsets are known rather than swept
+toward. That is a Ghidra read, not a flash.
+
+### What the channel is worth
+
+The instrument degraded and the probe said so **in seconds**, because notes
+disappearing is unmissable. The day before, this would have read as "telemetry
+did not work" and cost hours.
+
+### The frame, read properly — and the mask candidate is not the gate
+
+With the walk back at +124 and the instrument playing (track 7 = index 6 with
+LFO4, track 16 = index 15 with the MIDI machine), the frame identifies itself
+through its strides:
+
+| offset | behaviour | reading |
+|---|---|---|
+| +72 | steps by **202** | the per-track mirror pointer |
+| +76 | steps by **160** | `STATE_STRIDE` -- the constant `tick7` records as "will not fit a moveq" |
+| **+68** | `0x3FFF`, or `0` | the mask-shaped candidate, sitting between them |
+
+Two of `outer`'s three strides, adjacent, exactly as the decompiler describes
+them. So `+68` is in the right neighbourhood for an enable mask.
+
+**Correlated against the track, it is not the gate.**
+
+```
+track 0        -> 0
+tracks 1..15   -> 16383 (0x3FFF)
+```
+
+A per-track field that is zero for track 0 and all-ones everywhere else. In a
+14-bit window "all ones" is what `0xFFFF` and `0xFFFFFFFF` both look like, so
+this reads as a flag rather than a sixteen-bit mask.
+
+**It cannot be what gates LFO4**: track 6 is the one with LFO4 and it reads
+*enabled*, while modulation still lands only on voice 7. It shows nothing
+special at index 15 either, so it does not track which tracks are playing.
+
+Three limits on that measurement, stated because they bound it:
+
+- **one sample per track** -- the walk visits `+68` once every ~45 s;
+- **14 bits of 32** -- a CC pair carries no more, and several 32-bit values
+  share that low pattern;
+- **track 0 reading zero may be an artifact** of being first in the loop rather
+  than a disabled state.
+
+### Where that leaves the voice question
+
+The frame has now been mapped rather than guessed at, and nothing in +0..+124
+gates on the voice. The enable-mask hypothesis from `param_3` is **not
+supported by anything measured**: the shifted-mask test at the function entry is
+a different frame, and this stub cannot see it without a reach that killed the
+instrument once already.
+
+**The next step is not another sweep.** Ghidra can give evaluator A's frame size,
+and with it the arguments' offsets are known rather than swept toward. That is a
+static read costing no flash and no risk, and it is the right instrument -- the
+same one that produced `%a4` after four builds had guessed at stack slots.
+
+## Evaluator A's frame, read instead of swept -- and what it says about voices
+
+**2026-09-24, static read, no flash.** The previous section ends with "the
+decompiler can give evaluator A's frame size, and then the arguments' offsets
+are known rather than swept toward." It does, and the answer arrives in four
+instructions.
+
+### The frame
+
+```
+0x40137726  4f ef ff b4   lea %sp@(-76),%sp
+0x4013772a  12 2f 00 6b   moveb %sp@(107),%d1
+0x4013772e  48 d7 7c fc   moveml %d2-%d7/%a2-%fp,%sp@
+0x40137732  24 2f 00 50   movel %sp@(80),%d2
+```
+
+**There is no `LINK`.** The function allocates 76 bytes with a bare `lea` and
+addresses everything through `%sp`; `moveml` saves eleven registers at `%sp@(0)`
+without moving `%sp`. So the saved registers occupy +0..+43, locals +44..+75,
+the return address +76, and **the arguments begin at +80**:
+
+| | offset | what it is |
+|---|---|---|
+| `param_1` | **`%sp@(80)`** | the mirror base -- `lea %a0@(34),%a0` is applied to it immediately, the same `+34` as `0x400db092` |
+| `param_2` | `%sp@(84)` | a scalar, read at `0x40137872` |
+| `param_3` | **`%sp@(88)`** | enable mask -- `asrl %a5,%d5 ; andl #1` |
+| `param_4` | **`%sp@(92)`** | enable mask -- `asrl %a5,%d7 ; andl #1` |
+| `param_5` | **`%sp@(96)`** | pointer to a **16-byte array, one signed byte per track** |
+| `param_6` | **`%sp@(100)`** | pointer to a second such array |
+| `param_7` | `%sp@(104)`, byte at `%sp@(107)` | a flag, read *before* the prologue completes |
+
+### The control, because a prologue read on its own is one measurement
+
+The call site counts the arguments independently of any offset arithmetic:
+
+```
+0x400272ba  2f 01               movel %d1,%sp@-           | arg7
+0x400272bc  48 6e ff b8         pea %fp@(-72)             | arg6
+0x400272c0  48 6e ff a8         pea %fp@(-88)             | arg5
+0x400272c4  2f 2e ff 58         movel %fp@(-168),%sp@-    | arg4
+0x400272c8  2f 2e ff 68         movel %fp@(-152),%sp@-    | arg3
+0x400272cc  2f 39 40 2a 0d ec   movel 0x402a0dec,%sp@-    | arg2
+0x400272d2  2f 0a               movel %a2,%sp@-           | arg1
+0x400272d4  4e b9 40 13 77 26   jsr 0x40137726
+0x400272da  4f ef 00 1c         lea %sp@(28),%sp          | 28 bytes = 7 arguments
+```
+
+**Seven arguments, and the cleanup says so in one byte.** Every slot agrees with
+the prologue. `arg5` and `arg6` are `pea %fp@(-88)` and `pea %fp@(-72)` --
+adjacent locals exactly **16 bytes apart**, which is what a one-byte-per-track
+array looks like from the caller's side.
+
+### Why the +0..+124 walk found nothing, and it was closer than it looked
+
+The walk stopped at +124 after the +508 attempt killed MIDI. From the stub's
+`%sp`, evaluator A's own locals are what that window covered. **The arguments
+begin one stride above the top of it.** The enable mask was never going to
+appear in +0..+124 -- not because the reach was wrong in kind, but because it
+was short by a handful of words.
+
+**And it should not be reached by walking at all.** The hook site sits inside
+evaluator A's frame, where `%sp@(88)` and `%sp@(96)` are *valid operands*. The
+stub can be handed the masks and the voice array directly, as `build_lfo4_bridge.py`
+already hands it `%a4`. No walk, no reach to earn, nothing above the frame to
+fault on. That is the same move that retired the `%sp@(72)` guesses.
+
+### What `param_5` actually holds, and this is the finding
+
+The caller fills those two arrays in its own 16-iteration loop at
+`0x400271a2`. It opens by defaulting **both to -1 for every track**:
+
+```
+0x400271a2  50 c4         st %d4                              | d4 = 0xFF
+0x400271a4  1d 84 28 a8   moveb %d4,%fp@(-88,%d2:l)           | array5[track] = -1
+0x400271a8  1d 84 28 b8   moveb %d4,%fp@(-72,%d2:l)           | array6[track] = -1
+```
+
+and writes a real value only here:
+
+```
+0x40027240  2f 06         movel %d6,%sp@-
+0x40027242  4e 95         jsr %a5@                            | a5 = 0x40138664
+0x40027244  58 8f         addql #4,%sp
+0x40027246  b0 8b         cmpl %a3,%d0                        | a3 = 0x4002b22e(track)
+0x40027248  66 de         bnes 0x40027228                     | no: clear bit, next
+0x4002724a  1d 86 28 a8   moveb %d6,%fp@(-88,%d2:l)           | array5[track] = d6
+```
+
+`%d6` is a **bit index** -- the loop isolates the lowest set bit of a mask with
+the classic `neg ; and ; ff1` idiom and converts it to a position. The bit is
+kept only when `0x40138664(bit)` returns the same object as `0x4002b22e(track)`.
+One function maps a track to its object; the other maps this index to an object
+and the two are compared for equality. **So the index is a voice, and
+`param_5[track]` is the voice currently allocated to that track, or -1 when
+there is none.**
+
+Evaluator A then uses it as an address:
+
+```
+0x401377d2  moveal %sp@(96),%a1
+0x401377d6  mvsb %a1@(0,%a5:l),%d0    | d0 = voice for this track, sign-extended
+0x401377da  bges 0x401377fe           | -1 means no voice: skip
+...
+0x401377fe  movel %d0,%d2
+0x40137800  lsll #3,%d2
+0x40137802  lsll #7,%d0
+0x40137808  subl %d2,%d0              | d0 = voice*128 - voice*8 = voice*120
+0x4013780a  addl %a0,%d0
+0x4013780c  addil #0x4463ed18,%d0
+```
+
+### The correction: those arrays are indexed by voice, not by track
+
+`build_lfo4_tick.py` says, and this document has repeated, that the three
+1,920-byte arrays at `0x4463ed18` / `0x4463f498` / `0x4463fc18` are
+**"16 tracks x 3 LFOs x 40"**. They are **16 *voices* x 3 LFOs x 40**. The
+`x120` above is reached with a byte that the caller filled from a voice mask,
+after checking that the voice belongs to this track.
+
+~~16 tracks x 3 LFOs x 40 bytes~~ -- kept, because the stride arithmetic derived
+from it is still right and every edit made on top of it still holds. **16 is 16
+either way**, which is exactly why the 120 -> 160 change left LFO1-3 working and
+why nothing caught this for six builds. The count was never the error; the
+*name* was, and the name is what tells you which index to reach it with.
+
+### The hypothesis this makes, and it is now a named one
+
+The owner measured: LFO4 modulates only when the voice counter lands on the
+number equal to the track index -- track 3 on voice 3, track 7 on voice 7,
+track 11 on voice 11, two configured tracks giving two working voices.
+
+Put beside the above, that is the signature of **two indices that are each
+correct in their own space and are being used in one**. LFO4's *parameters*
+come from `lfo4_rows[track]`, keyed by track off `%a4`, which is right. LFO4's
+*state* record lives at `state + voice*160 + 120`, keyed by voice, which is also
+right. Any site that reaches the state with the track index lands on the correct
+record **only when track == voice** -- and that is the whole reported symptom,
+including why pinning the voice makes it work on every trig and why clearing a
+track kills its voice.
+
+**This is a hypothesis, not a result.** What is measured is the frame, the
+argument list, the two defaults of -1, the equality test that fills them, and
+the `x120` that consumes them. What is not yet measured is *which* of our patch
+sites reaches the state with the wrong index -- and the next step is to find it
+in the disassembly of our own build, which is again a static read and again
+costs no flash.
+
+### For whoever picks this up
+
+The voice number is **`%sp@(96)` byte `[%a5]`, sign-extended, `-1` for "no
+voice"** -- and `-1` must skip, exactly as stock's `bges`/`blts` do. A build that
+applies LFO4 to a track with no voice allocated is a build that writes into
+record -1.
+
+### Correction, same day: both indexings are real, and `outer` proves it
+
+The section above says the three arrays are "16 **voices** x 3 LFOs x 40, **not**
+16 tracks". **That is too strong, and the stub we wrote ourselves disproves it.**
+
+`outer`, the per-track advance in `build_lfo4_tick.py`, is a subroutine, so its
+`%sp@(N)` is evaluator A's `%sp@(N-4)` -- the `jsr` return address, and the
+offsets line up with the frame read exactly as they must:
+
+| `outer` | evaluator A | stride | what it walks |
+|---|---|---|---|
+| `%sp@(56)` | `%sp@(52)` | **202** | the per-track mirror |
+| `%sp@(60)` | `%sp@(56)` | **120 stock, 160 ours** | the live state array |
+| `%sp@(64)` | `%sp@(60)` | 153 | `param_1` |
+
+`addq.l #1,%a5` sits in that same block. So the live state array at
+`0x4463fc18` is **walked one 120-byte record per track**, in lockstep with the
+track index -- and that is stock arithmetic we only restrided, not a reading of
+ours.
+
+Meanwhile the restore/backup block at `0x401377d2..0x4013781c` reaches
+`0x4463ed18` and `0x4463fc18` as **`base + voice*120 + lfo*40`**, with the voice
+from `param_5`/`param_6` and `-1` meaning none.
+
+**Both are true at once, and that is the point.** One array is walked by track,
+the other is reached by voice, and that block is the **bridge between them** --
+which is exactly what carrying an LFO's phase across a voice allocation
+requires. The equality test that fills `param_5` (`0x40138664(bit)` vs
+`0x4002b22e(track)`) is not decoration; it is what makes the conversion legal.
+
+~~The arrays are 16 voices x 3 LFOs x 40, not 16 tracks.~~ **Withdrawn.** What
+survives from it, and it is the part that matters: **`param_5[track]` is a voice
+number, `-1` when the track has no voice**, and the restore/backup paths are
+voice-indexed. What does not survive is the claim that the *live* array is
+voice-indexed -- `outer` walks it by track.
+
+**Why the mistake happened, because it is a repeat.** One indexing was read and
+generalised to the whole structure without checking the other sites that reach
+it. That is the same shape as the three uncontrolled negatives: a single
+observation treated as a property. The control was available and cheap -- our
+own patch list names every site that touches these arrays.
+
+### So the state machinery is not the suspect any more
+
+Checking `edits()` against the above, **every site is patched**: the bulk copy
+length (1920 -> 2560), both restore and backup stride idioms
+(`idx<<3` -> `idx<<5`, `128-8` -> `128+32`), all three bases relocated, both
+initialisers' record count (3 -> 4), track stride and array length, and the
+inner loop counter 2 -> 3. The `flags` stub writes the fourth record too.
+
+So the voice gate is **not** an unpatched stride, and the leading hypothesis of
+the previous section is weakened rather than confirmed. Good: that is what the
+read was for.
+
+### The next step is a measurement, not another hypothesis
+
+Everything above is static. The one thing that would settle it costs one build
+and uses operands that are **valid at the hook site** -- no stack walk, nothing
+above the frame to fault on:
+
+> emit `%a5` (the track) and the sign-extended byte at `%sp@(96)` indexed by
+> `%a5` (the claimed voice) on the same telemetry burst, beside the existing
+> `probe_a = 99` constant.
+
+On the instrument that answers, live and while the owner moves tracks:
+
+- whether `param_5[track]` really is a voice number (it should follow the voice
+  allocation display the owner already has open);
+- what it reads for the track carrying LFO4, and whether it is `-1` except when
+  a voice is allocated;
+- and whether it equals the track index precisely when the modulation fires --
+  which is the reported symptom, stated in the one quantity that can confirm it.
+
+That is the first hardware test of the frame read, and it is worth one flash
+because it discriminates rather than confirms.
+
+## The offset is measured, the array is empty, and that retires a hypothesis
+
+**2026-09-24, emulator + instrument, both with controls.**
+
+### The offset, from an instrument that knew the answer first
+
+`scripts/emu_lfo4_frame.py` calls evaluator A itself, so it *chooses* the
+addresses it passes as `param_5` and `param_6` and then searches the frame our
+stub is handed for those exact values. Known answer on both arms:
+
+```
+param_5 = 0x46a10d00   param_6 = 0x46a10e00   (chosen by the harness)
+frame   = 0x469fffa0   (16 calls, 1 distinct)
+
+param_1: frame + 100
+param_5: frame + 116
+param_6: frame + 120
+```
+
+So `%sp@(96)` and `%sp@(100)` reach our stub at **`frame + 116` and
+`frame + 120`** -- exactly the pair the hardware sweep had singled out as the
+only adjacent valid pointers. **The coincidence reading is dead**: those words
+are the arguments, not two stack values that happened to look like addresses.
+That mattered, because "looks like a pointer" is the same trap as `movea.l`
+not proving a pointer.
+
+### And the array is empty
+
+With the offsets confirmed, `lfo4-voice`'s hardware reading stands as a result
+rather than a maybe. 468 bursts, `probe_a` = 99 on every one, marker sweeping
+all 128, each of the sixteen tracks sampled ~29 times, sequencer running, notes
+sounding:
+
+```
+track 0..15   param_5[track] = -1     param_6[track] = -1
+```
+
+**Every track, every sample, both arrays.** Zero bursts where
+`param_5[track] == track`.
+
+### What that retires
+
+The earlier section called `param_5[track]` "**the voice currently allocated to
+that track**". ~~That~~ is too strong and the instrument says so: if it were the
+current voice it could not read -1 on every track while notes are sounding.
+
+What it actually is follows from the caller's own three gates at `0x400271a2` --
+a per-track enable bit at `%fp@(-172)`, a non-zero field at `+326` of the
+track's object, and a non-negative result from `0x4002b1f4` -- and from what
+evaluator A does with a non-negative value: **a 40-byte record copy**. An array
+that is -1 almost always and names a voice occasionally, feeding a block that
+copies one LFO record, is **the voice whose state must be migrated this frame**,
+not the voice that is playing. It is the phase-carrying path for a voice
+changing hands, and in steady state it correctly does nothing.
+
+So: **the restore/backup copy block essentially never runs**, and it is not the
+path by which LFO4 reaches a voice. Two hypotheses die together -- the state
+machinery (already cleared as fully patched) and the voice array.
+
+### Where this leaves the hunt
+
+Everything in evaluator A's steady-state path that has now been read is
+**track-indexed**: the mirror at `%sp@(52)` (202/track), the live state array at
+`%sp@(56)` (160/track in our builds, `outer` advancing both in lockstep with
+`%a5`), and LFO4's parameter row from `lfo4_rows[track]`. No voice index
+survives in the per-frame path at all.
+
+**Which makes the reported symptom stranger, not clearer**, and that is an
+honest position rather than a discouraging one. If nothing in this function
+knows about voices, then the track -> voice coupling the owner measured happens
+**after** evaluator A -- in the frame the engine builds (`0x400274ba`) and sends
+(`0x400cf7be`), which is where a per-track mirror has to become per-voice DSP
+state. That is the next thing to read, and it has never been looked at.
+
+**What is now solid and should not be re-derived:** evaluator A's frame and its
+seven arguments; `param_5`/`param_6` at `frame + 116` / `frame + 120`; that both
+are -1 in steady state; and that the telemetry channel reads real arguments
+faithfully, which is an instrument the project did not have this morning.
+
+## The frame builder is track-indexed too, so the gate is downstream of the CPU
+
+**2026-09-24, static read of `0x400274ba`.** The previous section ended by
+pointing here: if nothing in evaluator A knows about voices, the coupling the
+owner measured must happen where a per-track mirror becomes per-voice DSP state.
+It does not happen here either.
+
+### What the builder does
+
+```
+0x400274ba  lea 0x80005e60,%a3        | the frame, and %a4 walks it
+0x400274c4  moveal %a2,%a5            | %a2 = param_1 of evaluator A: the mirror base
+0x400274ee  movel #0x40134490,%d4     | the same copier evaluator A uses
+...
+0x40027526  pea 0x52 ; pea %a5@(84)  ; pea %a4@(218)  ; jsr %a1@   | 82 bytes
+0x40027534  pea 0x1c ; pea %a5@(166) ; pea %a4@(300) ; jsr %a0@    | 28 bytes
+0x40027544  pea 0x1a ; pea %a5@(194) ; pea %a4@(328) ; jsr %a1@    | 26 bytes
+0x40027558  pea 0x0a ; pea %a5@(224) ; pea %a4@(354) ; jsr %a0@    | 10 bytes
+0x40027568  lea %a5@(202),%a5         | source: one mirror record per TRACK
+0x4002756c  lea %a4@(146),%a4         | destination: 146 bytes per TRACK
+```
+
+`%a2` is set at `0x40027194` and handed to evaluator A as `param_1` at
+`0x400272d2`, so it is the mirror base -- the same pointer, in the same
+function, a few hundred bytes apart.
+
+**The offsets fit once the `+34` header is counted, and I had them wrong until
+it was.** A record's data starts at `base + 34 + 202*track`, so `%a5@(84)`
+through `%a5@(233)` is 150 bytes reaching **slots 25..99** -- comfortably inside
+the 202-byte record, and slots 25..69 are exactly the FX/Master range from the
+lane-16 work. My first reading said the copies overran into the next track,
+which would have been a finding; it was an arithmetic slip, and it is recorded
+because the slip is the kind that produces confident nonsense.
+
+### What that settles
+
+Three stages now read end to end -- the caller's per-track loop at `0x400271a2`,
+evaluator A, and the frame builder -- and **every index in all three is the
+track**. Strides 202 (mirror), 160 (LFO state, ours), 146 (frame record), `%a5`
+and `%d2` both stepping once per track. The only voice-indexed thing anywhere
+is the restore/backup copy block, which is -1 in steady state and does nothing.
+
+**So the DSP receives sixteen track records and does voice assignment itself.**
+Whatever couples LFO4 to one voice is **downstream of the ColdFire**, on the
+SHARC side or in how a voice picks up its track's record.
+
+### And that makes the next measurement the right one, rather than a fourth read
+
+Reading further down this path means the SHARC, which is a second processor this
+project has only partly decoded -- expensive, and it would still be static.
+
+**The telemetry channel now reads real function arguments faithfully**, and it
+can answer the question that separates upstream from downstream in one flash:
+
+> emit LFO4's **computed modulation value** and the **DEST slot it writes**, per
+> track, every burst.
+
+- If the value is non-zero continuously for the LFO4 track while the sound only
+  changes on one voice, the fault is **downstream** of evaluator A and the
+  search is on the SHARC side. That would also be the first hard evidence that
+  the ColdFire half of LFO4 is *complete*.
+- If it is zero except when that one voice is active, the fault is **inside**
+  evaluator A's per-track loop, and everything read today says where to look
+  next.
+
+Either answer closes half the remaining space, which no further static read of
+this path can do.
+
+# SOLVED: the ColdFire half of LFO4 is complete, and the voice gate is downstream
+
+**2026-09-24, on the instrument, with a control on both arms.**
+
+`lfo4-slotfix` reads the mirror slot LFO4's `DEST` points at, for the previous
+track, every burst -- `block + 2*slot`, after two builds read it seventeen slots
+low. Track 7 (index 6) carried LFO4 on `Syn Ratio C`, slot 26. Every other track
+reported `DEST = 0` and never moved, on every run.
+
+| configuration | slot 26, distinct values | span |
+|---|---|---|
+| LFO1 **and** LFO4 both on `Syn Ratio C` | 17 | **1553** |
+| LFO1 off, LFO4 on | 18 | **528** |
+| **LFO4 depth 0** | 1 | **0** |
+
+**Remove one modulator and the span shrinks; remove the other and it vanishes.**
+Neither reading alone would have carried this -- the first is equally consistent
+with LFO1 doing all the work, and the third alone says nothing about which
+modulator stopped. The graded series is the result.
+
+351 bursts per run, `probe_a` reading 99 on every one, marker sweeping all 128.
+
+## What is now established
+
+**LFO4 generates its waveform, applies it, and writes the result into the
+correct mirror slot of the correct track, every audio frame.** The parameters
+come from `lfo4_rows[track]` via the bridge; the destination comes from the
+row's `DEST`; the value lands where the frame builder will copy it (slots 25..99
+are exactly what `0x400274ba` sends to the DSP).
+
+So **the ColdFire half of LFO4 is complete.** That has never been demonstrated
+before -- every previous claim rested on the owner hearing a sweep, which is
+exactly the evidence that the voice gate makes unreliable.
+
+## Which retires this branch's hypothesis
+
+`fix/lfo4-voice-index` was opened to find why modulation fires only when the
+voice index equals the track index. Today's reads settle where it *cannot* be:
+
+| stage | index |
+|---|---|
+| the caller's loop, `0x400271a2` | **track** |
+| evaluator A, `0x40137726` | **track** (`%a5`, `outer` advancing mirror 202 / state 160 / 153 in lockstep) |
+| the frame builder, `0x400274ba` | **track** (source 202, destination 146) |
+| LFO4's own write, measured above | **track** |
+
+The only voice-indexed thing anywhere on the path is the restore/backup copy
+block, whose two arrays read **-1 on all sixteen tracks across 468 bursts** --
+it migrates a voice's LFO phase when a voice changes hands, and in steady state
+it correctly does nothing.
+
+**No voice index survives anywhere in the CPU path.** The DSP is handed sixteen
+per-track records and does voice assignment itself, so the coupling the owner
+measured is **downstream of the ColdFire** -- on the SHARC, or in how a voice
+picks up its track's record.
+
+## What this cost, and the one thing that prevented it costing more
+
+Two builds were flashed with the probe reading `block - 34 + 2*slot`, seventeen
+slots low. Both returned a flat value across 468 bursts with `probe_a` reading
+99 throughout -- an honest channel reporting a real number from the wrong
+address. **"LFO4 never writes to its destination" was one message from being
+written down here as a finding.**
+
+What stopped it was the owner setting **LFO1** -- stock, known-good -- on the
+same destination. It did not move either. *A known-good source showing nothing
+means the instrument is wrong, not the source.* That is
+`run-a-control-beside-a-negative` applied **before** the conclusion rather than
+after it, for the first time in this project, and it is the reason this section
+says what it says.
+
+## Next
+
+The hunt moves to the SHARC (`docs/sharc-*.md`), and to whatever hands a voice
+its track's record. **Nothing further about the voice gate should be read into
+ColdFire code** -- four stages of it are now measured and all four are
+track-indexed.
+
+# ~~CLOSED: there was never a voice gate~~ — WITHDRAWN the same day
+
+**Retracted 2026-09-25, within the hour, on the owner's question:** *"why did it
+work before only when a specific track used the voice matching in number and not
+the others?"*
+
+**Because `LFO4_FORCE_ROW` gives all sixteen tracks an identical row.** A bug
+that selects the *wrong* row is then invisible — the wrong row holds the same
+values as the right one. `lfo4-loud` removed the variable under test, so "every
+voice sweeps" is what it shows whether the selection is correct or broken.
+
+The owner's original reports fit a mechanism that "too fast and too shallow"
+never explained: track 7 alone → voice 7; track 11 → voice 11; two tracks → two
+voices; clear one → that voice stops. That is **the row being selected by voice
+index rather than track index** — voice *N* reading `lfo4_rows[N]`, which holds
+settings only when track *N* is the configured one.
+
+`lfo4-onetrack` forces the row on **one track only** (`--force-track`), leaving
+the other fifteen at depth zero, so the two outcomes finally look different:
+
+- **a sweep on every voice** → selection is by track, the engine is correct;
+- **a sweep only where the voice index equals the forced track** → selection is
+  by voice, and the defect is real.
+
+What survives from the section below: the rate measurements (57.0 / 6.5 / 4.00
+Hz), the SPD floor, and the fact that LFO4 writes its destination every frame.
+What does not survive is the conclusion.
+
+---
+
+## The withdrawn argument, kept for its reasoning
+
+
+
+**2026-09-25, on the instrument, heard and measured.**
+
+`lfo4-loud` forces every track's LFO4 row to maximum depth on **Filter Base**
+(id 76, verified unique in the parameter table). The owner flashed it and
+reported **every track and every voice gurgling** rather than sweeping — then,
+as the rate came down, **a clean sweep on every voice and every track**.
+
+**So the modulation was always on all sixteen voices.** What made it look like a
+gate was rate and depth: at the settings in use it was slow and shallow enough
+to be missed on most voices while standing out on one.
+
+## Why the week's readings were all correct
+
+Nothing measured has to be withdrawn, which is unusual and worth stating:
+
+- **The mirror measurements were right.** LFO4 wrote its destination every
+  frame — graded 1553 / 528 / 0 as LFO1 and then LFO4 were removed.
+- **The static reads were right.** The caller's loop, evaluator A, the frame
+  builder and LFO4's own write are all track-indexed, and the DSP gets sixteen
+  per-track records. Nothing in the CPU path knows about voices.
+- **The owner's ears were right.** At the original settings the modulation
+  really was inaudible on most voices.
+
+The three were never in conflict. **The hypothesis that joined them — a gate —
+was the only wrong thing**, and it was wrong from the day the branch was named.
+
+## The rate ladder, measured from recordings
+
+`scripts/lfo_rate.py` records the instrument's own USB audio and measures the
+modulation frequency, labelling the sequencer's harmonics so they are not read
+as modulation.
+
+| build | SPD | MULT | measured |
+|---|---|---|---|
+| `lfo4-slow2` | `0x0700` | 8 | **57.0 Hz** — audio-rate, hence "gurgle" |
+| `lfo4-slow3` | `0x0020` | 8 | **6.5 Hz** |
+| `lfo4-slow4` | `0x0020` | 4 | **4.00 Hz** (reproduced on two different patches) |
+
+Two points fix a line at MULT 8: `rate ≈ 0.0287*SPD + 5.6`. **The intercept is
+the finding** — SPD cannot go below about 5.6 Hz, because MULT sets the base
+multiplier and SPD only scales on top of it. Three builds were made slower by
+guesswork before the first recording was taken, and none of them could have
+worked.
+
+## What this leaves
+
+**The ColdFire half of LFO4 is finished**: generated, applied, written to the
+right slot of the right track, and audible on every voice. `lfo4-frame` is not
+needed and should not be flashed.
+
+The SHARC work (`docs/sharc-voice-path.md`) was opened to chase this gate. It
+keeps its value — the DN2 blob is hash-identical to digikit's, the database
+builds, and the machine ceiling came out of it (`docs/machine-list.md`) — but
+its stated motive is void and the page says so.
+
+**What actually remains on LFO4** is the punch list, none of it about voices:
+settings do not survive a power cycle (`lfo4_on_load`), page copy/paste does not
+carry LFO4, and the `RND`/`SPH` third site.
+
+## The lesson, and it cost the week
+
+**Reach for the instrument that measures, before the instrument that reasons.**
+A 15-second recording said "57 Hz" in one pass and would have said it a week
+ago. Instead: six flashes to read numbers off a page that rendered only the high
+byte, a probe seventeen slots low, and three guessed slowdowns that could not
+cross a floor. Every one of those was a reasoning instrument used where a
+measuring one was available.
+
+# THE VOICE GATE, DIAGNOSED: the engine's index is a VOICE, not a track
+
+**2026-09-25, confirmed on the instrument with the variables separated.**
+
+`lfo4-onetrack` forces the LFO4 row at **index 6** and leaves the other fifteen
+at depth zero. The owner then played tracks that have **no row at all**:
+
+> *"track 8 only modulates when using voice 7 on this firmware, same for track
+> 15 or any other track."*
+
+Track 8 is index 7 and track 15 is index 14. Neither has a row. **The modulation
+still appears, and always on voice 7** — index 6, which is the forced row.
+
+**So the index the engine hands our stub is the VOICE, and our table is keyed by
+it while the panel writes it by TRACK.** Writer and reader disagree, and they
+agree only where the two numbers coincide.
+
+## One rule, six observations, no exceptions
+
+| observation | under "the index is a voice" |
+|---|---|
+| track 7 alone -> voice 7 | row[6] populated; only voice 6 reads it |
+| track 11 -> voice 11 | row[10] populated |
+| two tracks configured -> two working voices | two rows populated |
+| clearing a track -> that voice stops | its row empties |
+| pinning the voice -> works every trig | that voice always reads its row |
+| `lfo4-loud` -> every voice sweeps | all sixteen rows identical |
+| **`lfo4-onetrack`, any track -> voice 7 only** | **row[6] is the only populated row** |
+
+## Why this hid for a week, and it is structural
+
+**There are sixteen tracks and sixteen voices**, so no stride can tell them
+apart. `202 * index` is a mirror row either way; `120 * index` is an LFO state
+record either way. Both patch sites were checked earlier today, both showed
+those strides, and both were pronounced "track-indexed" — the arithmetic is
+identical under either reading and proves neither.
+
+The label came from a comment. This file already says, about the `%a4` fix:
+
+> *"Both patch sites used to pass a register named 'the track index' in a
+> comment that was never measured."*
+
+That fix corrected **which register**. It never questioned **what the register
+counts**. The same sentence stayed true of the meaning for four more builds.
+
+## What this corrects in the project's model
+
+The "per-track mirror" is a **per-voice** mirror: `param_1 + 34 + 202*index` is
+a voice's row, and the frame builder's sixteen 146-byte records are per voice.
+That is consistent with a DSP that renders voices, and it means several places
+in these documents that say "track" mean "voice". **They are not being edited
+wholesale** — a sweep-and-replace on a word this load-bearing is how the
+original error got in. Each one gets checked when it is next relied on.
+
+## The fix, and what is not yet known
+
+LFO4's parameters belong to a **sound**, which belongs to a track. The engine
+gives us a voice. So the reader needs the track whose sound that voice is
+currently playing.
+
+- `0x4002b22e(track)` is a clean track -> object lookup:
+  `*(0x40287dd4 + 20*track)`. **[V]**
+- `0x40138664` was earlier called "voice -> owning object" here. **Withdrawn**:
+  it takes five arguments and indexes `0x446406e4`, and that label was inferred
+  from a comparison in the caller rather than read. **[O]**
+
+**The promising shape** is to capture the relation where it is already known —
+at the moment a voice is allocated and a sound is loaded into its row — and
+cache it, the way `lfo4_refresh` already caches on the sound pointer and
+`ext_generation`. A per-call search over sixteen tracks is not free at
+**~23,500 calls per second**.
+
+**Not yet located: the site that loads a sound into a voice's row.** That is the
+next static read, and it is ordinary ColdFire work.
