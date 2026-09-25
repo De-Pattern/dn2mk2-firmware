@@ -5853,7 +5853,39 @@ its track's record. **Nothing further about the voice gate should be read into
 ColdFire code** -- four stages of it are now measured and all four are
 track-indexed.
 
-# CLOSED: there was never a voice gate
+# ~~CLOSED: there was never a voice gate~~ — WITHDRAWN the same day
+
+**Retracted 2026-09-25, within the hour, on the owner's question:** *"why did it
+work before only when a specific track used the voice matching in number and not
+the others?"*
+
+**Because `LFO4_FORCE_ROW` gives all sixteen tracks an identical row.** A bug
+that selects the *wrong* row is then invisible — the wrong row holds the same
+values as the right one. `lfo4-loud` removed the variable under test, so "every
+voice sweeps" is what it shows whether the selection is correct or broken.
+
+The owner's original reports fit a mechanism that "too fast and too shallow"
+never explained: track 7 alone → voice 7; track 11 → voice 11; two tracks → two
+voices; clear one → that voice stops. That is **the row being selected by voice
+index rather than track index** — voice *N* reading `lfo4_rows[N]`, which holds
+settings only when track *N* is the configured one.
+
+`lfo4-onetrack` forces the row on **one track only** (`--force-track`), leaving
+the other fifteen at depth zero, so the two outcomes finally look different:
+
+- **a sweep on every voice** → selection is by track, the engine is correct;
+- **a sweep only where the voice index equals the forced track** → selection is
+  by voice, and the defect is real.
+
+What survives from the section below: the rate measurements (57.0 / 6.5 / 4.00
+Hz), the SPD floor, and the fact that LFO4 writes its destination every frame.
+What does not survive is the conclusion.
+
+---
+
+## The withdrawn argument, kept for its reasoning
+
+
 
 **2026-09-25, on the instrument, heard and measured.**
 

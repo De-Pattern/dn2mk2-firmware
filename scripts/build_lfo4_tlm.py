@@ -102,6 +102,8 @@ if __name__ == "__main__":
                     help="forced-row SPD (default 0x7000, the stock default)")
     ap.add_argument("--force-mult", type=lambda v: int(v, 0), default=None,
                     help="forced-row MULT index in the high byte (default 0x0800)")
+    ap.add_argument("--force-track", type=int, default=None,
+                    help="force the row on ONE track only (0-15); the rest get depth zero")
     cli = ap.parse_args()
     OUT = ROOT / f"out/{cli.name}"
     SYX = ROOT / f"00_Resources/02_Builds/{cli.name}_DN2_1.11.syx"
@@ -122,4 +124,5 @@ if __name__ == "__main__":
                                           **({"LFO4_FORCE_ROW": 1} if cli.force_row else {}),
                                           **({"LFO4_FRAMEREAD": 1} if cli.frame_read else {}),
                                           **({"LFO4_FORCE_SPD": cli.force_spd} if cli.force_spd is not None else {}),
-                                          **({"LFO4_FORCE_MULT": cli.force_mult} if cli.force_mult is not None else {})}))
+                                          **({"LFO4_FORCE_MULT": cli.force_mult} if cli.force_mult is not None else {}),
+                                          **({"LFO4_FORCE_TRACK": cli.force_track} if cli.force_track is not None else {})}))

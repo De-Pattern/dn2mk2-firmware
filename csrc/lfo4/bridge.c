@@ -495,6 +495,28 @@ u32 lfo4_refresh(u32 track)
      * counters still move: a build that crashed in `ext_find` would not be
      * silently exonerated by skipping it.
      */
+    /* **One track, or the test proves nothing.**
+     *
+     * Forcing *every* track's row makes all sixteen identical, so a bug that
+     * picks the wrong row becomes invisible: the wrong row and the right row
+     * hold the same values. `lfo4-loud` did exactly that and was read as
+     * "the modulation is on every voice", which it cannot show.
+     *
+     * With `LFO4_FORCE_TRACK` set, only that track gets the forced row and the
+     * other fifteen get depth zero. Then:
+     *   - a sweep on **every voice** means the row is selected by track, and
+     *     the engine is correct;
+     *   - a sweep only when the voice index equals `LFO4_FORCE_TRACK` means the
+     *     row is selected by **voice**, which is the owner's original report and
+     *     a real defect.
+     * The two outcomes finally look different, which is the whole point. */
+#ifdef LFO4_FORCE_TRACK
+    if (track != (u32)LFO4_FORCE_TRACK) {
+        ((u16 *)row)[7] = 0x4000;          /* DEP neutral: no modulation */
+        ((u16 *)row)[3] = 0;               /* DEST none */
+        return row;
+    }
+#endif
     {
         static const u16 forced[EXT_PARAMS] = {
             /* **SPD and MULT are build-time, because the right rate is a
