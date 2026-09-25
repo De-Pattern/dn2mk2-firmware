@@ -120,20 +120,30 @@ def main() -> int:
                         begin=UPDATE_MIRROR, end=UPDATE_MIRROR)
     machine.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u: seen.update(["whole-sound job"]),
                         begin=WHOLE_JOB, end=WHOLE_JOB)
+    # What updateMirror was handed, and which way it left: the row (arg 2) null
+    # returns at 0x4004caa8; a non-slot event queues the whole-sound job at
+    # 0x4004cbe6; the job itself is 0x4004ad10.
+    from unicorn.m68k_const import UC_M68K_REG_A7 as _SP
+    import struct as _st
+    um_args = []
+
+    def at_um(uc, a, s, u):
+        sp = uc.reg_read(_SP)
+        um_args.append(_st.unpack(">III", bytes(uc.mem_read(sp + 4, 12))))
+    machine.uc.hook_add(UC_HOOK_CODE, at_um, begin=UPDATE_MIRROR, end=UPDATE_MIRROR)
+    for addr, tag in ((0x4004CBE6, "queued the whole-sound job"),
+                      (0x4004CB28, "wrote one slot (multi-slot path)"),
+                      (0x4004CB90, "wrote one slot (single-slot path)"),
+                      (0x4004CBFE, "returned")):
+        machine.uc.hook_add(UC_HOOK_CODE, lambda uc, a, s, u, tag=tag: seen.update([tag]),
+                            begin=addr, end=addr)
 
     panel = Panel(machine, png_dir="out/lfo4-slots")
     panel.settle(args.warmup)
     panel.tap(MOD)
     print(f"  {panel.screen('page-1')}")
 
-    if "lfo4_announced" in sym:
-        seen.clear()
-        panel.push_and_turn(0, args.delta)          # a STOCK turn: nothing rewritten
-        panel.settle(args.after)
-        print(f"  control, a stock turn: updateMirror ran {seen['updateMirror']}, "
-              f"whole-sound job {seen['whole-sound job']}")
-        control_reached = seen["updateMirror"] > 0
-        seen.clear()
+    seen.clear()
 
     before = dict(writes)
     armed[0] = True
@@ -200,20 +210,60 @@ def main() -> int:
         print(f"\n  announced {announced}, held back {held}, pending {pending:#010x}")
         check("the edit was announced", announced >= 1, "no announcement")
         panel.settle(args.after)
-        print(f"  after LFO4's turn: updateMirror ran {seen['updateMirror']}, "
+        print(f"  during and after LFO4's turn: updateMirror ran {seen['updateMirror']}, "
               f"whole-sound job {seen['whole-sound job']}")
-        if not control_reached:
-            print("  ** the control never reached updateMirror either: this snapshot has no "
-                  "observer that writes a stored record, so nothing below is evidence either way **")
+        for k in ("queued the whole-sound job", "wrote one slot (multi-slot path)",
+                  "wrote one slot (single-slot path)", "returned"):
+            print(f"    updateMirror {k}: {seen[k]}")
+        for owner, row, info in um_args[-4:]:
+            vt = machine.long(info) if info else 0
+            print(f"    updateMirror(owner {owner:#010x}, row {row:#010x}, info {info:#010x} vtable {vt:#010x})")
         saves = machine.long(sym["lfo4_saves"]) - saves0
         carry = machine.long(sym["lfo4_saves_carrying"]) - carry0
         pending2 = machine.long(sym["lfo4_pending_sound"])
         print(f"  after {args.after:,} more instructions: {saves} save(s), "
               f"{carry} carrying an LFO4; pending now {pending2:#010x}")
+        # **The last link, run the way the worker would run it.** updateMirror
+        # queued the whole-sound job with {owner, row}; the snapshot's worker
+        # did not reach it in the time allowed. Its invoker (0x4004af2c) reads
+        # the job's storage -- a cell holding a pointer to {owner, row} -- asks
+        # the owner for the live sound, and calls SAVE(row, live, 0). Calling it
+        # with the same {owner, row} updateMirror queued is exactly the work the
+        # worker does, and shows whether that SAVE carries LFO4 into the record.
+        if not saves and um_args:
+            owner, row, _info = um_args[-1]
+            job = machine.alloc(8)
+            machine.write(job, _st.pack(">II", owner, row))
+            cell = machine.alloc(4)
+            machine.write(cell, _st.pack(">I", job))
+            machine.call(0x4004AF2C, cell)
+            saves = machine.long(sym["lfo4_saves"]) - saves0
+            carry = machine.long(sym["lfo4_saves_carrying"]) - carry0
+            pending2 = machine.long(sym["lfo4_pending_sound"])
+            lane = [machine.word(row + 36 + 8 * i) for i in range(8)]
+            print(f"  ran the queued job's invoker directly: {saves} save(s), {carry} carrying; "
+                  f"row {row:#010x} LFO4 lane now {' '.join(f'{v:04x}' for v in lane)}")
+            expect = [table_read(machine, sym, sound, k) for k in range(8)]
+            print(f"  the table's values for this sound:        "
+                  f"{' '.join(f'{v:04x}' if v is not None else '----' for v in expect)}")
+            check("the record's LFO4 lane matches the table", lane == expect,
+                  "the lane does not hold the table's values")
         check("the stock chain re-saved the sound", saves >= 1, "no SAVE ran after the announcement")
         check("the re-save carried LFO4", carry >= 1, "saves ran, none carried LFO4")
         check("the pending mark was cleared by that save", pending2 == 0,
               f"still pending on {pending2:#010x}")
+
+        # The control, AFTER the measurement: a first attempt ran it first and
+        # the LFO4 turn that followed never reached the setter, which says
+        # nothing. A stock turn must reach updateMirror in this snapshot, or
+        # nothing above is evidence either way.
+        seen.clear()
+        panel.push_and_turn(1, args.delta)           # a STOCK turn, encoder B, nothing rewritten
+        panel.settle(args.after)
+        print(f"  control, a stock turn afterwards: updateMirror ran {seen['updateMirror']}, "
+              f"whole-sound job {seen['whole-sound job']}")
+        check("control: a stock turn reaches updateMirror here", seen["updateMirror"] > 0,
+              "the stock turn did not reach it either -- the snapshot cannot test this")
     return report()
 
 
