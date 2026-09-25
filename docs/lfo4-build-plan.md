@@ -6232,3 +6232,171 @@ not need one.
 
 **[V]** -- hardware, both tests, positive and negative control, telemetry
 agreeing with the ear.
+
+
+## Persistence across a reboot: what is known, and one fix that must not be tried
+
+**2026-09-25.** LFO4 settings never survive a reboot (owner, 2026-09-22 and
+again today: *"I have to always set it up, it never stays there"*). Every other
+page's settings do.
+
+### The save side can carry LFO4
+
+- The working state is written by a job named *"Write project MRAM"* (manager
+  `0x4002bf02`, invoker `0x4002c694`), which calls the component serialiser
+  `0x400e1494(0x405cd96c, project, 0, flags, progress)`. With flags `-1` it
+  saves **129 kits** through the kit SAVE at `0x400dde44` (kit `i` from
+  `project + 0xef371c + 23921*i`) and **128 pool sounds** through
+  `0x400dd92e`. Both reach the sound `SAVE` at `0x400dd6a6` through
+  `lea %pc@(0x400dd6a6),%aN ; jsr %aN@` -- invisible to `dnfw fn callers` and,
+  until digikit PR #44, to `refscan.py`.
+- In a boot from reset the firmware runs that serialisation itself: 2,192
+  `SAVE`s, **16 keyed on the live container's own sounds**, 2,048 on the
+  23,921-byte kit grid laid out after it, 128 pool
+  (`scripts/emu_lfo4_persist.py --boot-only`). So the project's 129 kits are
+  the live kit followed by 128 pattern kits, and **the live kit is serialised
+  under exactly the addresses LFO4's table is keyed on**.
+
+### What the emulator cannot answer, and why today's negatives are void
+
+`0x4018a97a` is a lazy singleton: on first use it constructs a 451,596-byte
+object. The emulator's boot never builds it, so every call made today into the
+MRAM and MMC writers spent its whole budget inside that constructor -- 9,287
+seventeen-byte copies of controller-name strings -- and returned without
+saving. "lfo4_on_save ran 0 times" from those runs is **not evidence**; the
+work control is what showed it (20,000,000 instructions, the call budget, not a
+return).
+
+### Only one site queues the MRAM write, and it is on the project-load path
+
+`0x4002d032` (the job name "Write project MRAM" at `0x4021385b`) is the only
+reference. So the working state is not re-serialised after every edit, and how
+individual edits persist is still open.
+
+### Do not "fix" this by broadcasting SoundParamChangedInfo for LFO4
+
+The stock setter (`0x40037b74`) ends by broadcasting `SoundParamChangedInfo`
+(vtable `0x401db734`, typeinfo `0x401db708`) with the **slot** that changed.
+LFO4's setter skips that broadcast, which looked like the obvious reason nothing
+records an LFO4 edit. Its two receivers say otherwise, and say it is dangerous:
+
+- `0x4004cb30`, inside `Sound::updateMirror`: copies `sound[slot]` into a row at
+  `row + 0x1c + 2*slot`. Rows are 202 bytes, 101 slots. LFO4's slots are
+  **101..108**, so this writes into the **next voice's row**.
+- `0x4003f710`, in `0x4003f28c`: reads `sound.values[slot]` and calls
+  `0x4002585a(value, ..., slot)`, the per-voice engine push, which indexes its
+  arrays by slot -- out of bounds for 101..108.
+
+Neither receiver is a journal or a dirty flag. Both refresh the mirror and the
+engine. Replaying the stock tail for LFO4, or broadcasting its slots, would
+corrupt memory; it would not persist anything.
+
+### The instrument decides the rest
+
+`lfo4-persistprobe` reports `saves_carrying`, `loads_carrying`, the live entry
+count and drops, built with release semantics (`LFO4_KEEP_*` off). The protocol
+is in the test plan: set LFO4, nudge a stock knob, save explicitly, reboot --
+reading the counters at each step.
+
+**Status: [D]** for the structure (static and emulator, cross-checked),
+**open** for the mechanism.
+
+
+### There is no free room inside the sound -- measured, not read
+
+**2026-09-25, `scripts/emu_sound_roundtrip.py`, stock 1.11 image.** The owner's
+requirement is that LFO4 persist the way LFO3 does -- with no explicit save,
+because the working project survives a reboot on its own. The complete version
+of that is to put LFO4's values in bytes the sound already carries, so no path
+has to be taught. So the stock converters were asked which bytes they carry:
+every word of a live sound tagged with its own offset, `SAVE` run, and every
+word of a stored sound tagged the same way, `LOAD` run.
+
+- 117 live words round-trip verbatim; 92 of them are the value array
+  (`sound + 20 + 2*slot` -- the address the delivery `memcpy` takes).
+- The rest: the header (+0..+3), a stride-8 grid at +230..+318, and one run of
+  nine words at +356..+373 -> stored +336..+353.
+- **DNX places stored +336 as the arpeggiator's per-step enable mask**
+  (`packages/core/src/project/arp.ts`), so that run is arp data, and the grid is
+  in the same region (`soundmap.ts`). **Every carried byte is in use.** Section
+  8's "a live sound has no free slots" stands, now by measurement.
+
+**One false alarm on the way, withdrawn:** the first run used +14 as the value
+array's base and reported stored id 32 landing in live slot 3 -- which would
+have made LFO4's `DEP` overwrite a stock parameter. The stock load map
+(`0x401fd0b0`) folds ids 0, 4 .. 32 all onto **slot 0, the sink**; only the last
+writer survives there, which is why ids 4..28 looked dropped. Id 32 was chosen
+by measurement on 2026-09-20 and is correct.
+
+So LFO4 cannot move into the sound. The fix is to teach it the one path that
+makes stock edits survive a reboot, and `lfo4-persistprobe` finds that path.
+
+**And the table after a boot, as a second check on the withdrawn alarm:** 2,192
+stock sounds loaded, `ext_live` = 0, `ext_inserts` = 0, `ext_full` = 0,
+`lfo4_loads_carrying` = 0 (`emu_lfo4_persist.py --boot-only`). No stock sound
+looks as if it carries an LFO4, so the table cannot flood at boot. This is also
+the baseline `lfo4-persistprobe` must show at step 1 on the instrument.
+
+
+### The working state is a RAM image flushed to two flash banks
+
+**2026-09-25, static.** How a stock edit survives a reboot with no save, as far
+as reading gets it:
+
+- The serialised working project is a **RAM image at `0x405cd96c`**, inside an
+  object at `0x405cd85c` (the image is its `+0x110`). The component serialiser
+  `0x400e1494` writes it; "Write project MRAM" is the job that runs it.
+- **"MRAM write to flash"** (job name at `0x4021b13c`, queued at `0x400d0198`)
+  copies that image to the eMMC. The block writer `0x400f16bc` goes in 32 KB
+  chunks and advances its first argument by `len >> 9`, so it addresses
+  **512-byte sectors**; the two banks are **sectors `0x40000` and `0x48000`**,
+  each opening with the magic **`COKi`** (`0x434f4b69`), chosen through the
+  table at `0x401ff6f8` (`0x400f1d3e`). "MRAM" is Elektron's name for this
+  state; the device here is not memory-mapped.
+- At boot the bank headers are checked -- `MRAM HEADER BROKEN`, `MRAM STATE
+  NOT WRITTEN`, `MRAM WRITE IN PROGRESS` (`0x400cd382..0x400cd3d6`, the
+  `#TEST_STATUS` report) -- with the RAM copy of the header at `0x403057dc`
+  and state flags at `0x403057f0`.
+- The image's direct references, for whoever continues (`refscan.py` with the
+  PC-relative fix): `0x400cefde`, `0x400ceff0`, `0x400f6854`, `0x4012f06c`, the
+  load path at `0x4002cfc6`, and a flag word at `0x405cd870` (bit 1 tested at
+  `0x400cd336`, bits set at `0x400ce44a`).
+
+**So the remaining question is which of those writers carries a stock edit
+into the image between flushes.** An LFO4 edit touches only the side table, so
+if the image is updated per edit, LFO4 never reaches it; if the image is
+re-serialised from the live sounds before each flush, it does (the kit SAVE is
+keyed correctly). `lfo4-persistprobe` separates the two on the instrument:
+`sv_carry` rising after an edit means the second.
+
+**Not tried, deliberately:** writing LFO4 values into the image directly. The
+image is the user's persisted project, and a wrong offset would corrupt it.
+
+
+### Correction: the live container is the active pattern's own kit, not a separate one
+
+**2026-09-25, with DNX.** Two sections above read the serialiser's 129 kits as
+"the live kit, then 128 pattern kits". That is wrong, and DNX's layout shows why.
+
+- The image holds **128 pattern kits**, contiguous from `0xae0200` to
+  `0xc30200` (DNX's `kitBase` to `tailBase`), and DNX proved on the owner's
+  slot 9 that kit N is pattern N's: the 32 patterns carrying trigs and the 32
+  unique kits are the same indices, with no exceptions.
+- The serialiser's loop does run 129 times (`cmpil #3085809`, step 23,921). The
+  129th record lands at `0xae0200 + 128*10752 = 0xc30200` -- **the first
+  10,752 bytes of DNX's tail**, which is why DNX's sound pool starts at
+  `tailBase + 10,756`. What that 129th kit is, is still open. DNX (2026-09-25, same
+  evening): it is **not** a live working copy -- the pattern the device was on
+  at save (`position.ts`) matches it in 0 of 27 projects, and 27 projects share
+  only 8 distinct tail kits, grouped by how the project was made. A template or
+  default kit fits; DNX declines to name it. If LFO4 values ever appear there,
+  that is a bug on our side: the record has never carried session state.
+- **The live container is `&kits[active pattern]`**, returned by the project's
+  `vfunc@52`. In the emulator's default project pattern 0 is active, so the
+  live container was kit 0 -- which is what made it look like "the live kit
+  first".
+
+**What it means for LFO4:** edits go directly into the active pattern's kit, and
+the LFO4 table follows by address, so an LFO4 is per pattern, like every other
+sound parameter. The re-read should show the owner's values in exactly one kit:
+the pattern he was on.

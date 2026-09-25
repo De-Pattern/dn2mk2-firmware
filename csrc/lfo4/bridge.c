@@ -561,6 +561,34 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
          * beside it can be trusted; if it does not, none of them can, and that
          * is visible instead of silent. */
         tlm_cc(TLM_CC_PROBE_A, 99);
+#ifdef LFO4_PERSIST
+        /* **Where LFO4 is lost across a reboot, in two numbers.**
+         *
+         * The save side is not in doubt: the boot's own serialisation of the
+         * working kit calls SAVE with the live container's sixteen addresses --
+         * this table's keys (`emu_lfo4_persist.py --boot-only`, 2026-09-25). So
+         * the loss is one of two things, and these counters separate them:
+         *
+         *   `sv_carry` rises after an LFO4 edit -> the working state was saved
+         *     with LFO4 in it. It stays flat -> nothing saved after the edit:
+         *     the stock setter's tail broadcasts `SoundParamChangedInfo` and
+         *     ours skips it, so the project may never be marked dirty.
+         *   `ld_carry` > 0 after a reboot -> it was stored and brought back, and
+         *     something removed it afterwards (`ext_drop` counts that). 0 -> it
+         *     was never in storage.
+         *
+         * Built with release semantics: `LFO4_KEEP_*` off, so `lfo4_on_load`
+         * drops entries exactly as the shipped build does. */
+        {
+            extern u32 lfo4_saves, lfo4_saves_carrying, lfo4_loads_carrying;
+
+            tlm_cc(TLM_CC_SV_CARRY, (u8)(lfo4_saves_carrying & 0x7Fu));
+            tlm_cc(TLM_CC_LD_CARRY, (u8)(lfo4_loads_carrying & 0x7Fu));
+            tlm_cc(TLM_CC_EXT_LIVE, (u8)(ext_live > 127u ? 127u : ext_live));
+            tlm_cc(TLM_CC_EXT_DROP, (u8)(ext_drops & 0x7Fu));
+            tlm_cc(TLM_CC_SAVES, (u8)(lfo4_saves & 0x7Fu));
+        }
+#endif
     }
 #endif
     return lfo4_refresh(track);

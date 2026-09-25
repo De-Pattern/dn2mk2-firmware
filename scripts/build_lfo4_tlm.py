@@ -96,6 +96,8 @@ if __name__ == "__main__":
     # also the fix if the answer turns out to be "quiet".
     ap.add_argument("--force-row", action="store_true",
                     help="every track gets tick7's maximum-depth row, ignoring the table")
+    ap.add_argument("--persist", action="store_true",
+                    help="report the save/load LFO4 counters, with RELEASE semantics (LFO4_KEEP_* off)")
     ap.add_argument("--track-keyed", action="store_true",
                     help="BISECT ONLY: restore the old track-keyed row, which is the voice-gate bug")
     ap.add_argument("--frame-read", action="store_true",
@@ -120,8 +122,12 @@ if __name__ == "__main__":
                                         ui.slew, ui.dest, pagelist.pagelist, ui2.rnd,
                                         browser.browser],
                                  chunks=table.chunks,
-                                 defines={"LFO4_KEEP_ROWS": 1, "LFO4_KEEP_ALL": 1,
-                                          "LFO4_METER": 1, "LFO4_COUNTERS": 1,
+                                 defines={**({} if cli.persist else {"LFO4_KEEP_ROWS": 1, "LFO4_KEEP_ALL": 1}),
+                                          **({"LFO4_PERSIST": 1} if cli.persist else {}),
+                                          # A persistence probe is read by the owner on the real page, so
+                                          # no column may show a diagnostic: FADE and SPH were metered in the
+                                          # first lfo4-persistprobe and read as wrong values (2026-09-25).
+                                          **({} if cli.persist else {"LFO4_METER": 1, "LFO4_COUNTERS": 1}),
                                           "LFO4_TELEMETRY": 1,
                                           **({"LFO4_FORCE_ROW": 1} if cli.force_row else {}),
                                           **({"LFO4_FRAMEREAD": 1} if cli.frame_read else {}),

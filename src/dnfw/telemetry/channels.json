@@ -79,6 +79,36 @@
       "name": "owner",
       "width": 7,
       "note": "track whose live sound owns this voice via 0x80005308; 126 empty, 127 not a live sound"
+    },
+    {
+      "cc": 33,
+      "name": "sv_carry",
+      "width": 7,
+      "note": "saves that wrote a non-zero LFO4, since boot, mod 128"
+    },
+    {
+      "cc": 34,
+      "name": "ld_carry",
+      "width": 7,
+      "note": "loads that brought a non-zero LFO4 back, since boot, mod 128"
+    },
+    {
+      "cc": 35,
+      "name": "ext_live",
+      "width": 7,
+      "note": "live LFO4 table entries, capped at 127"
+    },
+    {
+      "cc": 36,
+      "name": "ext_drop",
+      "width": 7,
+      "note": "table entries dropped since boot, mod 128"
+    },
+    {
+      "cc": 37,
+      "name": "saves",
+      "width": 7,
+      "note": "every sound SAVE since boot, mod 128"
     }
   ]
 }
