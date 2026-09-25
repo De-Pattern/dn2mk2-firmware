@@ -122,6 +122,18 @@ th { font-family: var(--mono); font-size: .74rem; text-transform: uppercase; let
 td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 .scroll { overflow-x: auto; }
+
+/* The generated compatibility matrix (dnfw mods matrix). */
+table.matrix { width: auto; }
+table.matrix th, table.matrix td { text-align: center; padding: .4rem .55rem; }
+table.matrix th[scope="row"] { text-align: left; text-transform: none; letter-spacing: 0;
+  font-family: var(--sans); font-size: .86rem; color: var(--ink); white-space: nowrap; }
+table.matrix thead th { writing-mode: vertical-rl; transform: rotate(180deg); text-transform: none; }
+table.matrix td { font-size: 1rem; cursor: help; }
+table.matrix td.mx-yes   { color: var(--ok); }
+table.matrix td.mx-order { color: var(--warn); }
+table.matrix td.mx-no    { color: var(--accent); }
+table.matrix td.mx-self  { color: var(--rule); cursor: default; }
 footer {
   margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--rule);
   color: var(--ink-soft); font-size: .88rem;
