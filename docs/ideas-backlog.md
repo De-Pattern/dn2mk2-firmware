@@ -43,6 +43,7 @@ Where they disagree, they win and this table is wrong.
 | 16 | Glitch-ASCII intro | **delivered** | part of `bootscreen` / `site/boot.html` (#82, #83); hardware #84 | — |
 | 17 | Performance mixer | **not started** | — | everything. The Outbox 8 reading below is a starting point it did not have when filed |
 | 18 | P-lock arpeggiator parameters | **delivered** | `arpplocks` mod (#85, #86): MODE, SPEED, RANGE, N.LEN per trig, every edit path verified | `--all`'s LEN, the sixteen step offsets and the step mutes (mutes untested since the fix) |
+| 24 | Another random arpeggiator mode | **open — scope to settle** | — | which randomness: stock already has `SHUF` (5) and `RAND` (6), so the new mode must add something they do not (see §24) |
 
 **The numbering is wrong and is left wrong on purpose.** There are two `## 8.`
 headings — "New LFO waveforms" and "FX machines on tracks" — and `## 7.` sits
@@ -3589,3 +3590,41 @@ it silent.**
 **Not started.** What is written above is an inventory of parts we already have,
 not a claim that they fit together; the first hour of work is finding out
 whether the snapshot's framebuffer address is still resolvable after a resume.
+
+
+## 24. Another random arpeggiator mode
+
+**Raised by the owner 2026-09-25:** *"add a random mode to the arpeggiator to
+expand the current set of modes."*
+
+**What stock already has, so the new mode is not a duplicate.** The mode menu
+(`0x401d4b1c`, §18) lists **OFF 0, TRUE 1, UP 2, DOWN 3, CYCL 4, SHUF 5, RAND
+6, CHRD 7**, and the step's dispatch at `0x4002a114` switches on the same
+values. `SHUF` reorders the held notes; `RAND` already picks among them at
+random. So "a random mode" has to mean a randomness those two do not give.
+Candidates, for the owner to choose between:
+
+- **Random octave** — the note order stays UP/DOWN/etc. and each step lands in
+  a random octave within `RNG`.
+- **Random walk** — each step moves one note up or down from the last, so the
+  line wanders rather than jumps.
+- **Probability** — each step plays or rests at random, with a density control.
+- **Weighted random** — `RAND`, but favouring the lowest note or the most
+  recently pressed one.
+- **Seeded random** — a repeatable random sequence per pattern, so a take can
+  be recalled exactly, which stock `RAND` cannot do.
+
+**What it would take**, from what §10 and §18 already mapped:
+
+1. **The mode value.** `CHRD` is 7; a new mode would be 8. The menu table and
+   the step dispatch both need an entry, and anything that bounds MODE at 7
+   (the menu's value range, and `arpplocks`' per-trig lock) has to learn 8.
+2. **The step.** One new case in the dispatch at `0x4002a114`, choosing the
+   next note. A random source is needed — whether the firmware has one the arp
+   can call (stock `RAND` must use one) is the first thing to read.
+3. **Storage.** MODE is a sound value, so an 8 persists like any other — but
+   stock firmware loading such a sound will see an out-of-range MODE; what it
+   does with it has to be checked before this ships.
+
+**Not started.** The first step is the owner's choice of which randomness;
+the second is reading how stock `RAND` gets its random numbers.
