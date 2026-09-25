@@ -103,6 +103,17 @@ firmware already writes projects and sounds there, so the routine exists and
 finding it is ordinary static ColdFire work — our home turf. The **format** is
 `DNX`'s authority and must come from them, never be hand-rolled here.
 
+> **Found, 2026-09-26 (`docs/drive-storage-research.md`).** The write path is
+> the block driver's `0x4012c780(sector, bytes, buf)`, with the read path
+> `0x4012c59a`. It is lock-protected, takes sector addresses and reaches the
+> whole device. The routine the stock firmware uses for projects and sounds
+> (MmcFs, `0x4012e586`) **refuses anything above 2,224 MiB**, so Wavefinder
+> writes to its own region through the driver directly. That region starts at
+> or above `0x600000`, clear of the DT2's `ekFS` at `0x5D8000`. On first boot:
+> read our superblock, and if the magic is absent or the version older, write
+> the tables. No filesystem port and no DNX change are needed for this step.
+> The format question above stands.
+
 **This is now the critical unknown for parts 1, 2 and 5**, and it is reachable
 today without a SHARC core.
 
