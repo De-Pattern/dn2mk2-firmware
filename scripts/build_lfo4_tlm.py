@@ -88,6 +88,14 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="the telemetry build")
     ap.add_argument("--name", default="lfo4-tlm",
                     help="build name: out/<name> and 00_Resources/02_Builds/<name>_DN2_1.11.syx")
+    # **Loud beats faint.** Whether LFO4 is inaudible on most voices or merely
+    # quieter than LFO1 cannot be told apart by ear, and building an instrument
+    # to detect the difference is slower than removing it: force every track's
+    # row to maximum depth on a destination already proved audible, and the
+    # answer is unmissable within a bar on whichever voices it reaches. It is
+    # also the fix if the answer turns out to be "quiet".
+    ap.add_argument("--force-row", action="store_true",
+                    help="every track gets tick7's maximum-depth row, ignoring the table")
     cli = ap.parse_args()
     OUT = ROOT / f"out/{cli.name}"
     SYX = ROOT / f"00_Resources/02_Builds/{cli.name}_DN2_1.11.syx"
@@ -104,4 +112,5 @@ if __name__ == "__main__":
                                  chunks=table.chunks,
                                  defines={"LFO4_KEEP_ROWS": 1, "LFO4_KEEP_ALL": 1,
                                           "LFO4_METER": 1, "LFO4_COUNTERS": 1,
-                                          "LFO4_TELEMETRY": 1}))
+                                          "LFO4_TELEMETRY": 1,
+                                          **({"LFO4_FORCE_ROW": 1} if cli.force_row else {})}))
