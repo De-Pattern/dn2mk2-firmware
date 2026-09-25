@@ -6029,3 +6029,92 @@ cache it, the way `lfo4_refresh` already caches on the sound pointer and
 
 **Not yet located: the site that loads a sound into a voice's row.** That is the
 next static read, and it is ordinary ColdFire work.
+
+
+## The ColdFire half is complete: the gate is downstream of the DSP frame
+
+**2026-09-25, measured on the instrument with a positive control on both sides.**
+This closes every ColdFire hypothesis in this document. It does not close the
+bug, and the distinction matters.
+
+### What was measured
+
+`lfo4-framecmp` reports two numbers for the same destination on the same row:
+the **mirror slot** the LFO stage writes, and the **DSP frame word** that slot
+is copied into. `lfo4-blockscan` adds a scan of all sixteen blocks at that
+destination. Track 7, `DEST` = 67 (a filter cutoff), one long note.
+
+| run | driving | mirror, block 6 | frame word |
+|---|---|---|---|
+| A | **stock LFO3** | 14 distinct, 0..8128, continuous | tracks it, one-frame lag |
+| B' | **LFO4** | 38 distinct, 0..8128, continuous over **104 s** | tracks it, one-frame lag |
+
+1,230 bursts, `probe_a` = 99 on every one. The frame word agreed with the mirror
+exactly at the extremes of the sweep and differed by a few counts on the ramps,
+which is the one-frame lag and not a discrepancy.
+
+**And the owner, across the same captures and consistently all week:** *"track 7
+only gets modulated by LFO4 when it uses voice 7."*
+
+### What that eliminates
+
+- **The lookup.** `dest` reads 67 in LFO4's row -- the value the panel set. If
+  `ext_find` were missing its key the row would carry `ext_default` and the
+  destination would read 0, as it does on the fifteen tracks with no LFO4.
+- **The row table's index.** Block 6 is track 7's own block and it is the one
+  that sweeps, for 104 seconds, whatever voice the note takes.
+- **The frame builder** (`0x400274ba`). It copies LFO4's slot as faithfully as
+  LFO3's -- same address, same lag, positive control beside it.
+- ~~The engine's index is a voice~~ -- see below. The observation that produced
+  it stands; the mechanism inferred from it does not.
+
+### The step that forces the conclusion
+
+Stock LFO3 and LFO4 write **the same kind of value to the same slot of the same
+block**, and the frame word carries both. One is audible on every voice; the
+other on one. **If both write identical data to an identical address, the value
+cannot be the mechanism.** Whatever distinguishes them is past the frame word,
+where the ColdFire can no longer see.
+
+### What this retires, and it is a lot
+
+Not deleted, per this project's rule -- kept with the reasoning, because each
+was a reasonable reading of the evidence available at the time:
+
+- **"The engine's index is a voice and our table is keyed by track"**
+  (2026-09-25, from `lfo4-onetrack`). The *observation* is solid and unchanged.
+  The mechanism it implied is not: the row selected by track sweeps its own
+  block correctly, so nothing is reading the wrong row.
+- **"The value is lost at the frame builder."** Disproved by run B'.
+- **"LFO4's output is a constant."** Read off a single block in a 30-second
+  capture; the block was not the one being driven, and 3890 turned out to be
+  **block 0's** resting value. A probe with a one-block window cannot tell
+  "nothing happened" from "it happened elsewhere", and neither could I.
+- **`0x80005308` as the voice map.** `reg_match` = 127 on every index, playing
+  and idle: populated, but holding objects that are not track objects.
+- **`0x4059c92c` as the voice map.** A two-state flag. `alt_match` never read
+  anything but 0 and 1, and five indices flipped between them *whether or not*
+  anything was playing. **The idle baseline is the only reason this was caught**
+  -- without it the flips would have been written up as a voice map moving with
+  the notes.
+
+### The one measurement the ColdFire can still make
+
+Scan all sixteen **DSP frame records** at the destination offset, once with LFO3
+driving and once with LFO4:
+
+- LFO3 appears in more than one record, or moves between them as voices change,
+  while LFO4 stays in record 6 -> the firmware replicates a stock LFO into the
+  allocated voice's record and does not know to replicate ours. That is a fix we
+  can write in ColdFire.
+- Both appear only in record 6 -> the ColdFire does the same thing for both, and
+  the difference is inside the SHARC. That ends this line and makes the SHARC
+  emulator (`docs/wavefinder-feasibility.md` part 4, digikit's one-to-two-week
+  estimate) the critical path.
+
+### Status
+
+**[V]** for the measurements: hardware, 1,230 bursts, calibration constant
+correct on every one, positive control in both directions. **[D]** for the
+conclusion that the mechanism is downstream of the frame word -- it follows from
+the measurements by elimination, and elimination is only as good as the list.
