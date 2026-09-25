@@ -497,8 +497,21 @@ u32 lfo4_refresh(u32 track)
      */
     {
         static const u16 forced[EXT_PARAMS] = {
-            0x7000,     /* SPD  -- fast */
-            0x0800,     /* MULT -- middle, not the slowest: tick7's lesson */
+            /* **SPD and MULT are build-time, because the right rate is a
+             * question the instrument answers, not the source.**
+             * 0x7000 is the stock default, not "fast" as this comment used to
+             * claim. At MULT index 8 the owner reported every track and every
+             * voice gurgling rather than sweeping -- modulation everywhere, too
+             * fast to hear as movement. `--force-spd` and `--force-mult` let the
+             * rate be dialled without touching this file. */
+#ifndef LFO4_FORCE_SPD
+#define LFO4_FORCE_SPD  0x7000
+#endif
+#ifndef LFO4_FORCE_MULT
+#define LFO4_FORCE_MULT 0x0800
+#endif
+            LFO4_FORCE_SPD,
+            LFO4_FORCE_MULT,
             0x4000,     /* FADE -- neutral */
             76 << 8,    /* DEST -- the slot tick7 swept audibly on hardware */
             0x0100,     /* WAVE -- a continuous shape */

@@ -98,6 +98,10 @@ if __name__ == "__main__":
                     help="every track gets tick7's maximum-depth row, ignoring the table")
     ap.add_argument("--frame-read", action="store_true",
                     help="also report the DSP frame word the mirror slot is copied to")
+    ap.add_argument("--force-spd", type=lambda v: int(v, 0), default=None,
+                    help="forced-row SPD (default 0x7000, the stock default)")
+    ap.add_argument("--force-mult", type=lambda v: int(v, 0), default=None,
+                    help="forced-row MULT index in the high byte (default 0x0800)")
     cli = ap.parse_args()
     OUT = ROOT / f"out/{cli.name}"
     SYX = ROOT / f"00_Resources/02_Builds/{cli.name}_DN2_1.11.syx"
@@ -116,4 +120,6 @@ if __name__ == "__main__":
                                           "LFO4_METER": 1, "LFO4_COUNTERS": 1,
                                           "LFO4_TELEMETRY": 1,
                                           **({"LFO4_FORCE_ROW": 1} if cli.force_row else {}),
-                                          **({"LFO4_FRAMEREAD": 1} if cli.frame_read else {})}))
+                                          **({"LFO4_FRAMEREAD": 1} if cli.frame_read else {}),
+                                          **({"LFO4_FORCE_SPD": cli.force_spd} if cli.force_spd is not None else {}),
+                                          **({"LFO4_FORCE_MULT": cli.force_mult} if cli.force_mult is not None else {})}))
