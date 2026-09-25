@@ -469,6 +469,44 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
                  * valid and read, **1** this destination is never copied into
                  * the frame, **2** no destination is set on that row. */
                 tlm_cc(TLM_CC_FRAME_ST, (u8)(dest == 0u ? 2u : (fa ? 0u : 1u)));
+
+                /* **Read all sixteen blocks, not the one we expected.**
+                 *
+                 * Reading only this track's own block answered the wrong
+                 * question on 2026-09-25: it sat at a constant while the owner
+                 * could hear the modulation, and the constant was read as
+                 * "LFO4's output is frozen". It was not frozen. It was
+                 * somewhere else, which is the entire bug -- and a probe that
+                 * looks only where the value is supposed to be cannot tell
+                 * "nothing happened" from "it happened elsewhere".
+                 *
+                 * Stock LFO3 on the same destination sweeps this track's own
+                 * block continuously, whatever voice the note takes. LFO4's
+                 * does not. So the question is which block *does* move, and
+                 * that index is the voice -- the number this whole hunt has
+                 * been missing.
+                 *
+                 * Neutral is 0x1000 on every unused block, measured: fifteen
+                 * tracks read exactly 4096 through 586 bursts. So the block
+                 * furthest from neutral is the one being driven, and reporting
+                 * its index costs one scan of sixteen halfwords.
+                 *
+                 * 127 means nothing deviates -- the honest answer when the
+                 * note is silent, and it must not be confused with block 0. */
+                if (base != 0xFFFFFFFFu && dest != 0u && dest <= 100u) {
+                    u32 b, best = 127u, far = 0u, val = 0u;
+
+                    for (b = 0; b < TRACKS; b++) {
+                        u16 v = *(volatile u16 *)(base + MIRROR_STRIDE * b
+                                                  + 2u * dest);
+                        u32 d = (v > 0x1000u) ? (u32)(v - 0x1000u)
+                                              : (u32)(0x1000u - v);
+
+                        if (d > far) { far = d; best = b; val = v; }
+                    }
+                    tlm_cc(TLM_CC_MOD_BLOCK, (u8)best);
+                    tlm_cc14(TLM_CC_MOD_LO, TLM_CC_MOD_HI, (u16)(val >> 2));
+                }
             }
 #endif
         }

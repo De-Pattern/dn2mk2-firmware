@@ -34,9 +34,9 @@
     },
     {
       "cc": 25,
-      "name": "voice",
+      "name": "mod_hi",
       "width": 7,
-      "note": "the voice, when a caller knows it"
+      "note": "sweeping block's value, high 7 bits"
     },
     {
       "cc": 26,
@@ -52,15 +52,15 @@
     },
     {
       "cc": 28,
-      "name": "reg_match",
+      "name": "mod_block",
       "width": 7,
-      "note": "index j where trackobj[j] == registry[i]; 126 registry empty, 127 no match"
+      "note": "which of the 16 blocks moves most at this destination; 127 none"
     },
     {
       "cc": 29,
-      "name": "alt_match",
+      "name": "mod_lo",
       "width": 7,
-      "note": "same against the 0x4059c92c array; 126 empty, 127 no match"
+      "note": "sweeping block's value, low 7 bits"
     },
     {
       "cc": 30,
