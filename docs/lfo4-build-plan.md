@@ -6371,3 +6371,27 @@ keyed correctly). `lfo4-persistprobe` separates the two on the instrument:
 
 **Not tried, deliberately:** writing LFO4 values into the image directly. The
 image is the user's persisted project, and a wrong offset would corrupt it.
+
+
+### Correction: the live container is the active pattern's own kit, not a separate one
+
+**2026-09-25, with DNX.** Two sections above read the serialiser's 129 kits as
+"the live kit, then 128 pattern kits". That is wrong, and DNX's layout shows why.
+
+- The image holds **128 pattern kits**, contiguous from `0xae0200` to
+  `0xc30200` (DNX's `kitBase` to `tailBase`), and DNX proved on the owner's
+  slot 9 that kit N is pattern N's: the 32 patterns carrying trigs and the 32
+  unique kits are the same indices, with no exceptions.
+- The serialiser's loop does run 129 times (`cmpil #3085809`, step 23,921). The
+  129th record lands at `0xae0200 + 128*10752 = 0xc30200` -- **the first
+  10,752 bytes of DNX's tail**, which is why DNX's sound pool starts at
+  `tailBase + 10,756`. What that 129th kit is, is still open.
+- **The live container is `&kits[active pattern]`**, returned by the project's
+  `vfunc@52`. In the emulator's default project pattern 0 is active, so the
+  live container was kit 0 -- which is what made it look like "the live kit
+  first".
+
+**What it means for LFO4:** edits go directly into the active pattern's kit, and
+the LFO4 table follows by address, so an LFO4 is per pattern, like every other
+sound parameter. The re-read should show the owner's values in exactly one kit:
+the pattern he was on.
