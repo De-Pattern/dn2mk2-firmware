@@ -224,7 +224,7 @@ unreachable without it, and everything else is comparatively cheap.
    Static, our home turf, and useful whatever is decided.
 3. **Do not start SHARC render code** until something can run it.
 
-## Milestone 0, built and emulator-gated (2026-09-26, not yet flashed)
+## Milestone 0, built and emulator-gated (2026-09-26; passed on hardware the same day, see Status)
 
 `python scripts/build_wavefinder_m0.py --name wavefinder-m0` ->
 `00_Resources/02_Builds/wavefinder-m0_DN2_1.11.syx` (sha256 `8f5d70a7...24e9`).
@@ -276,7 +276,12 @@ than 512 points are held, not interpolated.
 
 ## Status
 
-**Milestone 0: [E]** -- verified under the emulator from reset, awaiting hardware.
+**Milestone 0: [V]** -- passed on the instrument 2026-09-26 (test 12,
+`wavefinder-m0_DN2_1.11.syx`): a 10 s capture while a synth pattern played held
+118 complete bursts, all 8 probe points matched, the checksum read `0x33e5` in
+every burst, `probe_a` read 99 in all 118, and `wf_passes` climbed 65 to 79.
+Checked with `dnfw wavefinder verify`. The superseded status, for the record:
+[E], verified under the emulator from reset, awaiting hardware.
 
 **[D]** for the gap estimates — they are reasoned from measured facts (the file
 format, the firmware's free space, the machine table bound) but no part of the
