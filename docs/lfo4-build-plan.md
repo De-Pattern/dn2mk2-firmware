@@ -6385,7 +6385,12 @@ image is the user's persisted project, and a wrong offset would corrupt it.
 - The serialiser's loop does run 129 times (`cmpil #3085809`, step 23,921). The
   129th record lands at `0xae0200 + 128*10752 = 0xc30200` -- **the first
   10,752 bytes of DNX's tail**, which is why DNX's sound pool starts at
-  `tailBase + 10,756`. What that 129th kit is, is still open.
+  `tailBase + 10,756`. What that 129th kit is, is still open. DNX (2026-09-25, same
+  evening): it is **not** a live working copy -- the pattern the device was on
+  at save (`position.ts`) matches it in 0 of 27 projects, and 27 projects share
+  only 8 distinct tail kits, grouped by how the project was made. A template or
+  default kit fits; DNX declines to name it. If LFO4 values ever appear there,
+  that is a bug on our side: the record has never carried session state.
 - **The live container is `&kits[active pattern]`**, returned by the project's
   `vfunc@52`. In the emulator's default project pattern 0 is active, so the
   live container was kit 0 -- which is what made it look like "the live kit
