@@ -26,6 +26,9 @@
 #ifdef LFO4_TELEMETRY
 #include "tlm.h"
 #endif
+#ifdef WAVEFINDER_M0
+#include "wavefinder.h"
+#endif
 
 #define TRACKS       16
 #define ROW_BYTES    (2u * EXT_PARAMS)
@@ -561,6 +564,13 @@ u32 lfo4_row_for_block(u32 block, u32 frame)
          * beside it can be trusted; if it does not, none of them can, and that
          * is visible instead of silent. */
         tlm_cc(TLM_CC_PROBE_A, 99);
+#ifdef WAVEFINDER_M0
+        /* Wavefinder Milestone 0 rides this burst, right after the constant
+         * that says the burst can be trusted: one baked-table probe and one
+         * checksum slice (`csrc/wavefinder/table.c`). It reads its own data
+         * and nothing of LFO4's. */
+        wf_m0_report();
+#endif
 #ifdef LFO4_PERSIST
         /* **Where LFO4 is lost across a reboot, in two numbers.**
          *
