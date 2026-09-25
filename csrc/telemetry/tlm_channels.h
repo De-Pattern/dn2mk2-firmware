@@ -24,5 +24,15 @@
 #define TLM_CC_EXT_LIVE    35   /* live LFO4 table entries, capped at 127 */
 #define TLM_CC_EXT_DROP    36   /* table entries dropped since boot, mod 128 */
 #define TLM_CC_SAVES       37   /* every sound SAVE since boot, mod 128 */
+#define TLM_CC_WF_FRAME    41   /* Wavefinder M0: the probe's frame, 0..15 */
+#define TLM_CC_WF_IDX_LO   42   /* Wavefinder M0: the probe's sample index, low 7 */
+#define TLM_CC_WF_IDX_HI   43   /* Wavefinder M0: the probe's sample index, high 7 */
+#define TLM_CC_WF_VAL_LO   44   /* Wavefinder M0: the int16 read at the probe, bits 0-6 */
+#define TLM_CC_WF_VAL_MID  45   /* Wavefinder M0: the int16 read at the probe, bits 7-13 */
+#define TLM_CC_WF_VAL_HI   46   /* Wavefinder M0: the int16 read at the probe, bits 14-15 */
+#define TLM_CC_WF_SUM_LO   47   /* Wavefinder M0: whole-table checksum computed on the instrument, bits 0-6 */
+#define TLM_CC_WF_SUM_MID  48   /* Wavefinder M0: whole-table checksum, bits 7-13 */
+#define TLM_CC_WF_SUM_HI   49   /* Wavefinder M0: whole-table checksum, bits 14-15 */
+#define TLM_CC_WF_PASSES   50   /* Wavefinder M0: whole-table checksum passes completed, mod 128; 0 means the sum is not yet valid */
 
 #endif /* TLM_CHANNELS_H */
