@@ -107,6 +107,11 @@ def main():
     p.add_argument("--bpm", type=float, default=None, help="to label the sequencer's peaks")
     p.add_argument("--steps", type=float, default=4, help="notes per bar (default 4)")
     p.add_argument("--hi", type=float, default=200.0, help="highest frequency to search")
+    p.add_argument("--lo", type=float, default=0.5, help="lowest frequency to search")
+    p.add_argument("--step", type=float, default=None,
+                   help="search resolution in Hz (default 0.25; 0.02 when --hi <= 10)")
+    p.add_argument("--apart", type=float, default=None,
+                   help="minimum spacing between reported peaks (default 1.5; 0.15 when --hi <= 10)")
     p.add_argument("--wav", help="analyse this file instead of recording")
     args = p.parse_args()
 
@@ -140,7 +145,7 @@ def main():
 
     rms, zcr, env_rate = envelopes(pcm, rate)
     hi = min(args.hi, env_rate / 2 - 1)
-    print(f"  envelope {len(zcr)} samples at {env_rate:.0f} Hz — searching 0.5..{hi:.0f} Hz\n")
+    print(f"  envelope {len(zcr)} samples at {env_rate:.0f} Hz")
 
     seq = note_rate(args.bpm, args.steps) if args.bpm else None
     if seq:
@@ -148,13 +153,30 @@ def main():
               f"its harmonics are marked [seq]\n")
 
     def is_seq(f):
+        """-> True only for the note rate and its first few harmonics.
+
+        **A comb this dense marks everything.** With one note per bar the
+        fundamental is 0.5 Hz, so every multiple of 0.5 is 'a harmonic' and the
+        label stops carrying information -- on 2026-09-25 it duly marked the
+        LFO's own 4.00 Hz peak, at index 0.77, as sequencer. A note envelope's
+        harmonics fall away quickly, so only the first few are plausible, and
+        the tolerance has to be tighter than the search resolution rather than a
+        fixed 0.35 Hz.
+        """
         if not seq:
             return False
         k = round(f / seq)
-        return k >= 1 and abs(f - k * seq) < 0.35
+        return 1 <= k <= 4 and abs(f - k * seq) < max(step, 0.05)
+
+    # **A slow LFO needs fine resolution; a fast one does not.** Searching
+    # 0.5..200 Hz in 0.25 Hz steps cannot separate 0.4 Hz from 0.5 Hz, which is
+    # exactly where a musical sweep lives.
+    step = args.step if args.step is not None else (0.02 if hi <= 10 else 0.25)
+    apart = args.apart if args.apart is not None else (0.15 if hi <= 10 else 1.5)
+    print(f"  searching {args.lo:g}..{hi:g} Hz at {step:g} Hz resolution\n")
 
     for series, label in ((rms, "RMS  (level)"), (zcr, "ZCR  (brightness)")):
-        mean, pk = peaks(series, env_rate, 0.5, hi, 0.25)
+        mean, pk = peaks(series, env_rate, args.lo, hi, step, apart=apart)
         print(f"  {label}   mean {mean:.1f}")
         for f, idx in pk:
             tag = "  [seq]" if is_seq(f) else ""
