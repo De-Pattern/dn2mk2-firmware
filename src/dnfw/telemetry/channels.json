@@ -112,63 +112,63 @@
     },
     {
       "cc": 41,
-      "name": "wf_frame",
+      "name": "wr_frame",
       "width": 7,
-      "note": "Wavefinder M0: the probe's frame, 0..15"
+      "note": "Waverider M0: the probe's frame, 0..15"
     },
     {
       "cc": 42,
-      "name": "wf_idx_lo",
+      "name": "wr_idx_lo",
       "width": 7,
-      "note": "Wavefinder M0: the probe's sample index, low 7"
+      "note": "Waverider M0: the probe's sample index, low 7"
     },
     {
       "cc": 43,
-      "name": "wf_idx_hi",
+      "name": "wr_idx_hi",
       "width": 7,
-      "note": "Wavefinder M0: the probe's sample index, high 7"
+      "note": "Waverider M0: the probe's sample index, high 7"
     },
     {
       "cc": 44,
-      "name": "wf_val_lo",
+      "name": "wr_val_lo",
       "width": 7,
-      "note": "Wavefinder M0: the int16 read at the probe, bits 0-6"
+      "note": "Waverider M0: the int16 read at the probe, bits 0-6"
     },
     {
       "cc": 45,
-      "name": "wf_val_mid",
+      "name": "wr_val_mid",
       "width": 7,
-      "note": "Wavefinder M0: the int16 read at the probe, bits 7-13"
+      "note": "Waverider M0: the int16 read at the probe, bits 7-13"
     },
     {
       "cc": 46,
-      "name": "wf_val_hi",
+      "name": "wr_val_hi",
       "width": 7,
-      "note": "Wavefinder M0: the int16 read at the probe, bits 14-15"
+      "note": "Waverider M0: the int16 read at the probe, bits 14-15"
     },
     {
       "cc": 47,
-      "name": "wf_sum_lo",
+      "name": "wr_sum_lo",
       "width": 7,
-      "note": "Wavefinder M0: whole-table checksum computed on the instrument, bits 0-6"
+      "note": "Waverider M0: whole-table checksum computed on the instrument, bits 0-6"
     },
     {
       "cc": 48,
-      "name": "wf_sum_mid",
+      "name": "wr_sum_mid",
       "width": 7,
-      "note": "Wavefinder M0: whole-table checksum, bits 7-13"
+      "note": "Waverider M0: whole-table checksum, bits 7-13"
     },
     {
       "cc": 49,
-      "name": "wf_sum_hi",
+      "name": "wr_sum_hi",
       "width": 7,
-      "note": "Wavefinder M0: whole-table checksum, bits 14-15"
+      "note": "Waverider M0: whole-table checksum, bits 14-15"
     },
     {
       "cc": 50,
-      "name": "wf_passes",
+      "name": "wr_passes",
       "width": 7,
-      "note": "Wavefinder M0: whole-table checksum passes completed, mod 128; 0 means the sum is not yet valid"
+      "note": "Waverider M0: whole-table checksum passes completed, mod 128; 0 means the sum is not yet valid"
     }
   ]
 }

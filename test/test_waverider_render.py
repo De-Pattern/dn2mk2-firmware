@@ -1,6 +1,6 @@
-"""Wavefinder Milestone 1, the host half: the reference reader the SHARC code is held to.
+"""Waverider Milestone 1, the host half: the reference reader the SHARC code is held to.
 
-The SHARC half is checked by running it (`scripts/sharc_wavefinder_render.py`,
+The SHARC half is checked by running it (`scripts/sharc_waverider_render.py`,
 which needs digikit's SHARC runner); this checks the reference itself, with no
 firmware and no external tool.
 """
@@ -17,7 +17,7 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from dnfw.wavefinder import render, testtable  # noqa: E402
+from dnfw.waverider import render, testtable  # noqa: E402
 
 TABLE = testtable.table()
 HALF = 1 << 22                     # half a sample of phase
@@ -121,7 +121,7 @@ def test_committed_reader_matches_its_source():
     """reader.json is selas output for reader.asm; a stale one would test old code."""
     import hashlib
     import json
-    committed = json.loads((ROOT / "csrc/wavefinder/sharc/reader.json").read_text())
+    committed = json.loads((ROOT / "csrc/waverider/sharc/reader.json").read_text())
     src = (ROOT / committed["source"]).read_bytes().replace(b"\r\n", b"\n")
     assert hashlib.sha256(src).hexdigest() == committed["source_sha256"]
     offsets = committed["instruction_offsets"]

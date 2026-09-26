@@ -1,6 +1,6 @@
-"""The reference wavetable reader: what `csrc/wavefinder/sharc/reader.asm` must compute.
+"""The reference wavetable reader: what `csrc/waverider/sharc/reader.asm` must compute.
 
-Milestone 1 (`docs/wavefinder-feasibility.md`) runs our own SHARC code offline
+Milestone 1 (`docs/waverider-feasibility.md`) runs our own SHARC code offline
 and compares it with this. So this module fixes the **contract**, bit for bit
 where it can be:
 

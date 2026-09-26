@@ -1,4 +1,6 @@
-# Wavefinder on the DN2: what it is, and what it would take
+# Waverider on the DN2: what it is, and what it would take
+
+**Renamed 2026-09-26:** our machine is **Waverider**; *Wavefinder* is Tonverk's, which it is modelled on. Build files made before the rename keep their names (`wavefinder-m0_DN2_1.11.syx`).
 
 **Opened 2026-09-25**, at the owner's request: emulate Tonverk's **Wavefinder**
 as a sixth DN2 machine. The mockup is a published artifact, built on the real
@@ -51,8 +53,8 @@ not estimated**.
 > table. `wavetable.parse_wav` (and its parity twin `site/js/wavetable.js`) keeps
 > every digit in the five characters after a `clm ` chunk's `<!>`, so a
 > `<!>256 00000000` header reads as a 2,560-point frame. Serum's `<!>2048 ...` is
-> unaffected, which is why nothing has noticed. Wavefinder reads the frame length
-> with `dnfw.wavefinder.source.clm_frame` instead; the LFO path is left alone
+> unaffected, which is why nothing has noticed. Waverider reads the frame length
+> with `dnfw.waverider.source.clm_frame` instead; the LFO path is left alone
 > because it ships, and is recorded here rather than silently fixed.
 
 ## The gap, in five parts
@@ -81,7 +83,7 @@ removes the expensive part entirely:
 
 That is not a new mechanism to invent. **`lfowaves` already does exactly this**:
 `dnfw mods apply firmware.syx --mod lfowaves --wavetable N=FILE`, WAV or JSON in,
-byte-identical between the CLI and the browser page. Wavefinder is the same
+byte-identical between the CLI and the browser page. Waverider is the same
 pattern with bigger tables, so the import path is not merely designed, it is
 **shipped and parity-checked**.
 
@@ -224,7 +226,7 @@ shape of problem, solved once already.
 | **SHARC render code** | **nothing exists; no emulator** | **months** |
 | persistence, p-locks | same shape as LFO4 | weeks |
 
-**The feature is not close.** The nearest honest milestone is not Wavefinder; it
+**The feature is not close.** The nearest honest milestone is not Waverider; it
 is a SHARC emulator good enough to run one voice render offline, which digikit
 have already scoped and which we would share. *(Superseded 2026-09-26: that
 emulator exists, on digikit's `work/sharc-emulator`, and Milestone 1 ran our
@@ -243,19 +245,19 @@ unreachable without it, and everything else is comparatively cheap.
 
 ## Milestone 0, built and emulator-gated (2026-09-26; passed on hardware the same day, see Status)
 
-`python scripts/build_wavefinder_m0.py --name wavefinder-m0` ->
+`python scripts/build_wavefinder_m0.py --name wavefinder-m0` (now `build_waverider_m0.py`) ->
 `00_Resources/02_Builds/wavefinder-m0_DN2_1.11.syx` (sha256 `8f5d70a7...24e9`).
 
 **What it is.** `build_lfo4_tlm.py --persist` (release semantics, no page
-column diverted) plus one module and one call: `csrc/wavefinder/table.c` holds
-the table as `const` data in the C chunk; `wf_m0_report()` runs inside the LFO4
+column diverted) plus one module and one call: `csrc/waverider/table.c` holds
+the table as `const` data in the C chunk; `wr_m0_report()` runs inside the LFO4
 telemetry burst right after `probe_a` = 99, sends one probe point (frame, index,
 int16) and one slice of a whole-table checksum, CCs 41-50 on channel 16. No
 machine, selector, ceiling or engine code changes.
 
-**The table** is original: `dnfw.wavefinder.testtable`, a sine morphing to a
-32-harmonic saw over 16 frames of 2048 points, reduced by `dnfw.wavefinder.reduce`
-to 16 x 512 int16. `dnfw wavefinder expect` prints what the instrument must send;
+**The table** is original: `dnfw.waverider.testtable`, a sine morphing to a
+32-harmonic saw over 16 frames of 2048 points, reduced by `dnfw.waverider.reduce`
+to 16 x 512 int16. `dnfw waverider expect` prints what the instrument must send;
 checksum **`0x33e5`** (`h = h*31 + w mod 2^16`, frame-major).
 
 **Measured:**
@@ -279,13 +281,13 @@ disassembles only the linked code) passed. A future multi-table build should giv
 the checker the data ranges rather than read this as new noise each time.
 
 **Gates:** `emu_boot_engine.py` from reset: *"boot from reset, the engine, and
-save/load: all three in one machine."* `emu_wavefinder_m0.py` from reset: the
+save/load: all three in one machine."* `emu_waverider_m0.py` from reset: the
 16 KB in memory match the host bake, the probe arrays match, and 18 real bursts
 through evaluator A reported 8/8 probes and checksum `0x33e5` computed by the
 firmware. `dnfw inspect`: every checksum and the HMAC reproduced.
 
-**Input format for real tables** (`dnfw wavefinder scan PATH`, file or folder;
-`dnfw wavefinder bake PATH --out DIR`; `build_wavefinder_m0.py --wav FILE`, local
+**Input format for real tables** (`dnfw waverider scan PATH`, file or folder;
+`dnfw waverider bake PATH --out DIR`; `build_waverider_m0.py --wav FILE`, local
 testing only): any RIFF/WAVE, PCM 8/16/24/32 or float 32/64; first channel only;
 sample rate ignored; frame length from `clm `, else 2048 if it divides, else the
 whole file is one frame (flagged); frame count interpolated to 16; frames shorter
@@ -298,7 +300,7 @@ and checked before any DSP code goes near the instrument? **Yes.** All three
 gates pass, and the reader matches its reference **bit for bit**.
 
 ```
-python scripts/sharc_wavefinder_render.py \
+python scripts/sharc_waverider_render.py \
     --image 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip \
     --digikit ../digikit-wt-sharcemu --assemble --seconds 1.0
 ```
@@ -307,8 +309,8 @@ python scripts/sharc_wavefinder_render.py \
 `work/sharc-emulator` at `6f812e9`; this gate used a detached worktree of our
 digikit clone, `git -C ../digikit worktree add --detach ../digikit-wt-sharcemu
 6f812e9`. `--assemble` needs WSL and selache. Without it, the committed
-`csrc/wavefinder/sharc/reader.json` is used, and the script refuses it if
-`reader.asm` has changed since. Output goes to `out/wavefinder/`: `m1_report.json`,
+`csrc/waverider/sharc/reader.json` is used, and the script refuses it if
+`reader.asm` has changed since. Output goes to `out/waverider/`: `m1_report.json`,
 `m1_sharc.wav`, `m1_reference.wav`.
 
 ### Gate 1: digikit's runner on DN2 1.11
@@ -358,7 +360,7 @@ report 90-100k on CPython and about 270k on PyPy. PyPy was not tried here.
 
 ### Gate 2: a wavetable reader of our own
 
-`csrc/wavefinder/sharc/reader.asm` holds `wf_render(R4 = params)`. It renders N
+`csrc/waverider/sharc/reader.asm` holds `wr_render(R4 = params)`. It renders N
 float samples from the Milestone 0 table: 16 frames x 512 int16, packed two to
 a 32-bit word, little-endian. It interpolates linearly between samples **and**
 between frames. The phase is a u32 accumulator: its top 9 bits are the sample
@@ -368,7 +370,7 @@ It is 75 instructions and 380 bytes, and it is position-independent, so the
 object carries no relocations. Built with `selas -proc ADSP-21569` (selache
 `2b26d3b`, GPL-3.0, run in WSL).
 
-The reference is `dnfw.wavefinder.render`, run with `dnfw wavefinder render
+The reference is `dnfw.waverider.render`, run with `dnfw waverider render
 OUT.wav`. It has two precisions: `ideal` works in double precision, and
 `float32` rounds after every operation, in the same order the SHARC code does.
 
@@ -416,7 +418,7 @@ updates a parameter, and the phase carries across the 1,500 calls.
 - 21 of 48,000 samples differ from the ideal's PCM, each by **1 LSB**. That is
   float32 against double rounding at a PCM rounding boundary, not a fault.
 
-The files are `out/wavefinder/m1_sharc.wav` (the SHARC run) and
+The files are `out/waverider/m1_sharc.wav` (the SHARC run) and
 `m1_reference.wav` (the ideal).
 
 **Cost.** 38 instructions a sample in the loop, plus 34 a call (measured with
@@ -550,13 +552,13 @@ per-voice output buffer.
 **Milestone 0: [V]** -- passed on the instrument 2026-09-26 (test 12,
 `wavefinder-m0_DN2_1.11.syx`): a 10 s capture while a synth pattern played held
 118 complete bursts, all 8 probe points matched, the checksum read `0x33e5` in
-every burst, `probe_a` read 99 in all 118, and `wf_passes` climbed 65 to 79.
-Checked with `dnfw wavefinder verify`. The superseded status, for the record:
+every burst, `probe_a` read 99 in all 118, and `wr_passes` climbed 65 to 79.
+Checked with `dnfw waverider verify`. The superseded status, for the record:
 [E], verified under the emulator from reset, awaiting hardware.
 
 **Milestone 1: [E]** -- 2026-09-26, offline only: our own SHARC reader,
 assembled with selas, runs in digikit's SHARC executor inside the DN2 1.11
-image and matches `dnfw.wavefinder.render` bit for bit (float32) over 7 cases
+image and matches `dnfw.waverider.render` bit for bit (float32) over 7 cases
 and a 48,000-sample sweep; max error against the ideal 5.8e-8. Nothing has run
 on a DSP, and nothing is flashed.
 

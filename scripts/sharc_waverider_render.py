@@ -1,10 +1,10 @@
-"""Wavefinder Milestone 1, the offline render gate: our own SHARC code, run and checked.
+"""Waverider Milestone 1, the offline render gate: our own SHARC code, run and checked.
 
-    python scripts/sharc_wavefinder_render.py \\
+    python scripts/sharc_waverider_render.py \\
         --image 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip \\
         --digikit ../digikit-wt-sharcemu [--assemble] [--seconds 0.5]
 
-Three gates, each one required before the next (`docs/wavefinder-feasibility.md`,
+Three gates, each one required before the next (`docs/waverider-feasibility.md`,
 "Milestone 1"):
 
 1. **The executor runs DN2 1.11.** digikit's SHARC+ runner is pointed at our
@@ -13,12 +13,12 @@ Three gates, each one required before the next (`docs/wavefinder-feasibility.md`
    against the routine as read statically (`expect_1c0790`). With `--assemble`
    the same bytes are also decoded by selache's `selmap` and the two decoders'
    instruction boundaries are compared.
-2. **Our reader runs and matches.** `csrc/wavefinder/sharc/reader.asm`, assembled
+2. **Our reader runs and matches.** `csrc/waverider/sharc/reader.asm`, assembled
    by selache's `selas`, is spliced into the DN2 1.11 boot stream at spans the
    stream never loads, with the Milestone 0 table beside it, and run case by
-   case against `dnfw.wavefinder.render` in both precisions.
+   case against `dnfw.waverider.render` in both precisions.
 3. **A WAV.** A frame-position sweep, one position per 32-sample block, rendered
-   by the SHARC code and by the reference, written under `out/wavefinder/`.
+   by the SHARC code and by the reference, written under `out/waverider/`.
 
 **digikit is a tool here, never a dependency.** It is GPL-2.0+; this script
 imports its `tools/` from a checkout you name (`--digikit`, or the
@@ -31,7 +31,7 @@ Without `--assemble` the committed `reader.json` -- selas's output for the
 committed source, checked by the source's sha256 -- is used, so the gate runs
 without WSL. With it, the source is reassembled and must reproduce those bytes.
 
-Exit 0 on PASS, 1 on FAIL. A JSON report goes to `out/wavefinder/m1_report.json`.
+Exit 0 on PASS, 1 on FAIL. A JSON report goes to `out/waverider/m1_report.json`.
 """
 
 from __future__ import annotations
@@ -53,12 +53,12 @@ sys.path.insert(0, str(ROOT / "src"))
 from dnfw.cli.files import read_image                      # noqa: E402
 from dnfw.firmware.load import load                        # noqa: E402
 from dnfw.image import bootstream, sharc_object           # noqa: E402
-from dnfw.wavefinder import render, testtable             # noqa: E402
+from dnfw.waverider import render, testtable             # noqa: E402
 
-SOURCE = ROOT / "csrc" / "wavefinder" / "sharc" / "reader.asm"
-ASSEMBLED = ROOT / "csrc" / "wavefinder" / "sharc" / "reader.json"
+SOURCE = ROOT / "csrc" / "waverider" / "sharc" / "reader.asm"
+ASSEMBLED = ROOT / "csrc" / "waverider" / "sharc" / "reader.json"
 SECTION = "seg_pmco"
-OUT = ROOT / "out" / "wavefinder"
+OUT = ROOT / "out" / "waverider"
 
 DN2_111_SECTION7 = "336e340aa0cdcd34e314cfa44849f709a3134f6bd4cd57dfc7e15702c83115e2"
 DIGIKIT_MEASURED_AT = "6f812e9"
@@ -156,7 +156,7 @@ def selas_offsets(work: pathlib.Path) -> tuple[list[int], bytes]:
     for line in SOURCE.read_text(encoding="utf-8").splitlines():
         text = line.split("//", 1)[0].strip()
         if text and not text.startswith(".") and not text.endswith(":"):
-            lines += [f".GLOBAL wf_i{k};", f"wf_i{k}:"]     # only globals reach .symtab
+            lines += [f".GLOBAL wr_i{k};", f"wr_i{k}:"]     # only globals reach .symtab
             k += 1
         lines.append(line)
     src = work / "labelled.asm"
@@ -168,7 +168,7 @@ def selas_offsets(work: pathlib.Path) -> tuple[list[int], bytes]:
     data = obj.read_bytes()
     symbols = sharc_object.symbols(data)
     # symbol values are PM short-word (16-bit parcel) addresses in the section
-    offsets = [2 * symbols[f"wf_i{j}"] for j in range(k)]
+    offsets = [2 * symbols[f"wr_i{j}"] for j in range(k)]
     return offsets, sharc_object.code(data, SECTION)
 
 
@@ -319,7 +319,7 @@ def peek(dk, state, address: int) -> int:
 
 
 class Reader:
-    """wf_render, called over and over on one runner so memory carries between calls."""
+    """wr_render, called over and over on one runner so memory carries between calls."""
 
     def __init__(self, dk, memory):
         self.dk, self.memory = dk, memory
@@ -338,7 +338,7 @@ class Reader:
             poke(dk, runner.state, PARAMS_DM + 4 * k, v)
         res = runner.run(200 * count + 200)
         if res.halt.reason != "return without followed call":
-            raise SystemExit(f"wf_render stopped: {res.halt}")
+            raise SystemExit(f"wr_render stopped: {res.halt}")
         self.instructions += res.instructions
         self.elapsed += res.elapsed
         self.calls += 1
@@ -544,7 +544,7 @@ def finish(report: dict, ok: bool) -> int:
     report["result"] = "PASS" if ok else "FAIL"
     (OUT / "m1_report.json").write_text(json.dumps(report, indent=2, default=str) + "\n",
                                         encoding="utf-8")
-    print(f"\n  {report['result']}  (report: out/wavefinder/m1_report.json)")
+    print(f"\n  {report['result']}  (report: out/waverider/m1_report.json)")
     return 0 if ok else 1
 
 

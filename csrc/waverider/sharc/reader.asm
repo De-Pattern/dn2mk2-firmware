@@ -1,18 +1,18 @@
-// reader.asm -- Wavefinder Milestone 1: a minimal SHARC+ wavetable reader.
+// reader.asm -- Waverider Milestone 1: a minimal SHARC+ wavetable reader.
 //
 // Our own code, assembled with selache's `selas` (GPL-3.0, used as a tool and
-// never linked in; docs/wavefinder-feasibility.md, "Milestone 1"). It is run
+// never linked in; docs/waverider-feasibility.md, "Milestone 1"). It is run
 // offline in digikit's SHARC executor and checked against
-// dnfw.wavefinder.render, the Python reference. It has never run on a DSP.
+// dnfw.waverider.render, the Python reference. It has never run on a DSP.
 //
-// wf_render(R4 = params): render N samples from one 16 x 512 int16 wavetable,
+// wr_render(R4 = params): render N samples from one 16 x 512 int16 wavetable,
 // linearly interpolated between neighbouring samples AND between neighbouring
 // frames.
 //
 // The parameter block, one 32-bit word each (DM, normal-word addressing):
 //   +0  table   pointer to the table: 16 frames x 256 words, frame-major, each
 //               word two int16 samples, the even sample in the low half
-//               (little-endian int16 -- dnfw.wavefinder.render.dsp_bytes)
+//               (little-endian int16 -- dnfw.waverider.render.dsp_bytes)
 //   +1  phase   u32 phase accumulator: bits 31..23 are the sample index 0..511,
 //               bits 22..0 the fraction between it and the next. Wraps mod 2^32,
 //               which is exactly mod 512 samples. Written back on return.
@@ -32,8 +32,8 @@
 
 .SECTION/PM seg_pmco;
 
-.GLOBAL wf_render.;
-wf_render.:
+.GLOBAL wr_render.;
+wr_render.:
       I4 = R4;                          // I4 -> parameter block
       R8 = DM(0, I4);                   // table
       R9 = DM(1, I4);                   // phase
@@ -85,7 +85,7 @@ wf_render.:
       // run, while the combined form below is the one the firmware uses.
       R2 = PASS R12;
       R12 = -16;
-      LCNTR = R2, DO .wf_loop_end UNTIL LCE;
+      LCNTR = R2, DO .wr_loop_end UNTIL LCE;
             // The two samples either side of the phase are indices k and k+1
             // (mod 512), which always differ in parity: when k is even they
             // share word k>>1 (low, then high half); when k is odd they are
@@ -132,7 +132,7 @@ wf_render.:
             F4 = F4 + F6;               // y = a + ff * (b - a)
 
             R9 = R9 + R10;              // phase += inc, mod 2^32
-.wf_loop_end:
+.wr_loop_end:
             DM(I2, M6) = F4;
 
       DM(1, I4) = R9;                   // phase, for the next block
@@ -140,5 +140,5 @@ wf_render.:
       JUMP (M14, I12) (DB);
       RFRAME;
       NOP;
-.wf_render..end:
-      .type wf_render.,STT_FUNC;
+.wr_render..end:
+      .type wr_render.,STT_FUNC;
