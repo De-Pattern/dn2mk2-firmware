@@ -671,3 +671,69 @@ The clones were fetched read-only. What matters here, ranked:
 
 No new commits in: elektron-firmware-tool, octa-bt-pt, octamax, selache,
 adsp-ldr. lalzart has only its CC0 commit.
+
+## `irpina/elekloader` and `irpina/digihealth`: a mod loader, and a runtime probe over USB (added 2026-09-27)
+
+By the author of digiemu. Both target the **Digitakt mk1, OS 1.53**, not the DN2.
+Tracked at the owner's request.
+
+**Licence: GPL-2.0.** The NOTICE says "version 2", and the file headers checked
+carry no "or later". Read that as **GPL-2.0-only**, which cannot be combined with
+this repository's AGPL-3.0-or-later. **Treat both as design references; copy no
+code.** elekloader's codec and ISA files come from digikit, which we already use
+as a tool.
+
+### elekloader: the loader model we are converging on
+- **A mod ships only its author's bytes plus hashes of the stock bytes it
+  expects.** Runs of 8 or more bytes that repeat stock are stored as references
+  and refilled from the user's own file. This is the same stance as our
+  `Extent`/stock-guard model and our transplant rule (donor bytes read at apply
+  time). It is also a cleaner general mechanism for "a displaced instruction is
+  stock".
+- **A `core` mod owns the shared hook sites and turns them into events**
+  (`ev_tick`, `ev_draw`, `ev_key`, `ev_enc`, `ev_settings`, `ev_render_in/out`).
+  Other mods subscribe with an `order`, and a linker places their code and
+  resolves symbols. This is the octabam platform-loader idea, carried through:
+  exactly what would lift our **lfo4 / lfowaves / bootscreen mutual exclusion**,
+  which all three have because each needs the start-up hook
+  (`docs/mods-compatibility.md`). Also: named resources (`sysex:0x7d`,
+  `settings:ROW`, `drive:/path`) are claimed and checked for clashes.
+- **What a build guarantees:** only the main OS section changes; the bootloader
+  is never touched; the unpack is simulated in place over the bootloader's
+  staged copy before the file is written. The in-place check is one we do not
+  run.
+- **For the DN2 it lacks the HMAC trailer** (`docs/DEVICES.md` says so: it
+  refuses sealed devices until ported). We have the trailer.
+
+### digihealth: the runtime probe
+- **FAST AUDIO:** copies the render's hot code (~19 KB) into free on-chip SRAM
+  that the OS clears at boot and never uses. It checksums the copy once a second
+  and falls back to the original if anything has written over it. Measured on a
+  unit: 537 → 480 µs a block; DSP load 80.5 → 72.0 %. That is a ColdFire-side
+  render on the mk1, but the technique (self-checking relocation with fallback)
+  is directly relevant to our SHARC relocation problem
+  (`docs/waverider-dsp-silence.md`).
+- **The probe:** a **read-only SysEx channel over USB**, using Elektron's
+  manufacturer header and device byte **0x7D**, which no Elektron machine uses,
+  so a stock OS ignores it. Commands:
+  - `HELLO`;
+  - `STATS`: once a second, render and idle time, the heap by block size, free
+    sample memory;
+  - `PEEK ADDR LEN`: DDR and SRAM only.
+
+  Client: `tools/digiusb.py` (Windows winmm through ctypes; close Transfer first).
+- **Why it matters here:** it is the runtime-dump instrument we have been
+  missing. Our `lfo4-tlm` probe read one value over CC25. A DN2 equivalent would:
+  - let the owner read live ColdFire state on the instrument with a read-only
+    allow list, instead of flashing a telemetry build per question;
+  - measure DSP and CPU load for the save-while-playing stutter directly;
+  - read the ColdFire's copy of DSP state (the frame, the machine type) while the
+    DSP silence is happening.
+
+  It would be our own implementation, with a read-only allow list.
+  **Not built.** A DN2 port needs our own hook, and a claim on a device byte that
+  checks for clashes with DNX's SysEx traffic.
+
+### Status
+**[O]**: read from the repositories' READMEs, NOTICE, DEVICES.md and ADAPTING.md
+on 2026-09-27. Nothing run.
