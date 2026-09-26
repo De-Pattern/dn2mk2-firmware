@@ -1,17 +1,17 @@
-"""`dnfw wavefinder` -- the baked-wavetable tooling (`docs/wavefinder-feasibility.md`).
+"""`dnfw waverider` -- the baked-wavetable tooling (`docs/waverider-feasibility.md`).
 
-  `dnfw wavefinder expect`               what Milestone 0's telemetry must show
-  `dnfw wavefinder header OUT.h`         the C header the build compiles
-  `dnfw wavefinder verify CAPTURE.txt`   check a `scripts/midi_watch.py` capture
-  `dnfw wavefinder scan PATH`            a WAV or a folder of them: format, frames,
+  `dnfw waverider expect`               what Milestone 0's telemetry must show
+  `dnfw waverider header OUT.h`         the C header the build compiles
+  `dnfw waverider verify CAPTURE.txt`   check a `scripts/midi_watch.py` capture
+  `dnfw waverider scan PATH`            a WAV or a folder of them: format, frames,
                                          and what the reduction will do to each
-  `dnfw wavefinder bake PATH --out DIR`  reduce and bake each WAV: DIR/<name>.h
+  `dnfw waverider bake PATH --out DIR`  reduce and bake each WAV: DIR/<name>.h
                                          and DIR/<name>.bin (big-endian int16)
-  `dnfw wavefinder render OUT.wav`       the reference reader (Milestone 1): what
+  `dnfw waverider render OUT.wav`       the reference reader (Milestone 1): what
                                          the SHARC code must produce, as audio
 
 `expect`, `header`, `verify` and `render` default to Milestone 0's original test table
-(`dnfw.wavefinder.testtable`); `--wav FILE` uses a WAV instead. **Tables that
+(`dnfw.waverider.testtable`); `--wav FILE` uses a WAV instead. **Tables that
 are not ours -- Elektron's factory set, third-party packs -- are for local
 testing only** and never go into a build this project ships.
 """
@@ -19,9 +19,9 @@ testing only** and never go into a build this project ships.
 import pathlib
 import wave
 
-from ..wavefinder import bake, expect, reduce, render, source, testtable
+from ..waverider import bake, expect, reduce, render, source, testtable
 
-NAME = "wavefinder"
+NAME = "waverider"
 HELP = "baked wavetables: scan and reduce WAVs, emit the C header, the expected telemetry"
 
 
@@ -39,7 +39,7 @@ def configure(parser) -> None:
             p.add_argument("capture", type=pathlib.Path, help="midi_watch.py output, saved as text")
     p = sub.add_parser("render", help="render the reference reader to a WAV",
                        description="Render the reference wavetable reader "
-                       "(dnfw.wavefinder.render) to a mono 16-bit 48 kHz WAV: "
+                       "(dnfw.waverider.render) to a mono 16-bit 48 kHz WAV: "
                        "a fixed frame position, or a sweep 0 -> 15 -> 0.")
     p.add_argument("out", type=pathlib.Path, help="the WAV to write")
     p.add_argument("--wav", type=pathlib.Path, default=None,
@@ -145,12 +145,12 @@ def run(args) -> int:
     print(f"  probe_a (CC 26) = {expect.PROBE_A} in every burst")
     print(f"  checksum {total['checksum']:#06x} = {total['checksum']}: "
           + ", ".join(f"{k} = {v}" for k, v in total["cc"].items())
-          + f"  (once wf_passes > 0; a pass is {total['bursts_per_pass']} bursts)")
+          + f"  (once wr_passes > 0; a pass is {total['bursts_per_pass']} bursts)")
     print()
     print("   #  frame index   value    u16   frame idx_lo idx_hi  val_lo val_mid val_hi")
     for k, r in enumerate(expect.probes(table)):
         c = r["cc"]
         print(f"  {k:2d}  {r['frame']:5d} {r['index']:5d}  {r['value']:6d}  {r['u16']:5d}"
-              f"   {c['wf_frame']:5d} {c['wf_idx_lo']:6d} {c['wf_idx_hi']:6d}"
-              f"  {c['wf_val_lo']:6d} {c['wf_val_mid']:7d} {c['wf_val_hi']:6d}")
+              f"   {c['wr_frame']:5d} {c['wr_idx_lo']:6d} {c['wr_idx_hi']:6d}"
+              f"  {c['wr_val_lo']:6d} {c['wr_val_mid']:7d} {c['wr_val_hi']:6d}")
     return 0

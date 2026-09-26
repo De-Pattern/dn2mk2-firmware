@@ -2,8 +2,8 @@
 
 These notes are for digikit's `work/sharc-emulator` branch at `6f812e9`. They
 record findings with no change of ours to land, so they are written up here,
-not sent as a PR. Our measurement is `docs/wavefinder-feasibility.md`,
-"Milestone 1", and `scripts/sharc_wavefinder_render.py` reproduces it. We call
+not sent as a PR. Our measurement is `docs/waverider-feasibility.md`,
+"Milestone 1", and `scripts/sharc_waverider_render.py` reproduces it. We call
 digikit as a tool from a checkout you name, and copy none of its code.
 
 ## 1. `Runner` runs DN2 1.11 unchanged

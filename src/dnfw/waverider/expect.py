@@ -4,22 +4,22 @@
 computed here first from the same generator the build baked, so reading the
 instrument is a comparison with a list, and a failure is a named mismatch.
 
-**One burst, in the order the firmware sends it** (`csrc/wavefinder/table.c`,
+**One burst, in the order the firmware sends it** (`csrc/waverider/table.c`,
 called from the LFO4 telemetry burst right after `probe_a` = 99):
 
-    wf_frame                     the probe's frame, 0..15
-    wf_idx_lo,  wf_idx_hi        the probe's sample index, 0..511, 7 + 7 bits
-    wf_val_lo, wf_val_mid, wf_val_hi
+    wr_frame                     the probe's frame, 0..15
+    wr_idx_lo,  wr_idx_hi        the probe's sample index, 0..511, 7 + 7 bits
+    wr_val_lo, wr_val_mid, wr_val_hi
                                  the int16 read there, as 16 unsigned bits:
                                  bits 0-6, 7-13, 14-15
-    wf_sum_lo, wf_sum_mid, wf_sum_hi
+    wr_sum_lo, wr_sum_mid, wr_sum_hi
                                  the whole table's checksum, computed on the
                                  instrument (`bake.checksum`), same split
-    wf_passes                    whole-table checksum passes completed, mod 128
+    wr_passes                    whole-table checksum passes completed, mod 128
 
 The probe advances by one each burst and wraps after `len(PROBES)`. The
 checksum is computed `SLICE` words per burst, so the first pass completes after
-`WORDS / SLICE` bursts; until then `wf_passes` is 0 and the sum reads 0.
+`WORDS / SLICE` bursts; until then `wr_passes` is 0 and the sum reads 0.
 """
 
 from __future__ import annotations
@@ -42,8 +42,8 @@ PROBES = [
 SLICE = 1024      # checksum words per burst -> 8 bursts per pass
 PROBE_A = 99      # the LFO4 burst's calibration constant, sent just before
 
-SIGNALS = ("wf_frame", "wf_idx_lo", "wf_idx_hi", "wf_val_lo", "wf_val_mid",
-           "wf_val_hi", "wf_sum_lo", "wf_sum_mid", "wf_sum_hi", "wf_passes")
+SIGNALS = ("wr_frame", "wr_idx_lo", "wr_idx_hi", "wr_val_lo", "wr_val_mid",
+           "wr_val_hi", "wr_sum_lo", "wr_sum_mid", "wr_sum_hi", "wr_passes")
 
 
 def split16(v: int) -> tuple[int, int, int]:
@@ -67,19 +67,19 @@ def probes(table: list[list[int]]) -> list[dict]:
         v = table[f][i]
         lo, mid, hi = split16(v)
         rows.append({"frame": f, "index": i, "value": v, "u16": v & 0xFFFF,
-                     "cc": {"wf_frame": f, "wf_idx_lo": i & 0x7F, "wf_idx_hi": i >> 7,
-                            "wf_val_lo": lo, "wf_val_mid": mid, "wf_val_hi": hi}})
+                     "cc": {"wr_frame": f, "wr_idx_lo": i & 0x7F, "wr_idx_hi": i >> 7,
+                            "wr_val_lo": lo, "wr_val_mid": mid, "wr_val_hi": hi}})
     return rows
 
 
 def summary(table: list[list[int]]) -> dict:
     s = bake.checksum(table)
     lo, mid, hi = split16(s)
-    return {"checksum": s, "cc": {"wf_sum_lo": lo, "wf_sum_mid": mid, "wf_sum_hi": hi},
+    return {"checksum": s, "cc": {"wr_sum_lo": lo, "wr_sum_mid": mid, "wr_sum_hi": hi},
             "bursts_per_pass": (reduce.FRAMES * reduce.POINTS) // SLICE}
 
 
-# A line of `scripts/midi_watch.py`: "  12.345  ch16 CC41  (wf_frame)   = 3"
+# A line of `scripts/midi_watch.py`: "  12.345  ch16 CC41  (wr_frame)   = 3"
 LINE = re.compile(r"CC\s*(\d+)\s*\((\w+)\)\s*=\s*(\d+)")
 
 
@@ -91,7 +91,7 @@ def parse(text: str) -> list[tuple[str, int]]:
 def verify(pairs: list[tuple[str, int]], table: list[list[int]]) -> tuple[bool, list[str]]:
     """Check a capture against the expectation. -> (passed, report lines).
 
-    A burst is the run of `wf_*` signals starting at `wf_frame`. A capture that
+    A burst is the run of `wr_*` signals starting at `wr_frame`. A capture that
     starts mid-burst drops its first partial one rather than misreading it.
     """
     want = {(r["frame"], r["index"]): r for r in probes(table)}
@@ -99,8 +99,8 @@ def verify(pairs: list[tuple[str, int]], table: list[list[int]]) -> tuple[bool, 
     report, fails = [], []
     bursts, cur = [], None
     for name, value in pairs:
-        if name == "wf_frame":
-            cur = {"wf_frame": value}
+        if name == "wr_frame":
+            cur = {"wr_frame": value}
             bursts.append(cur)
         elif cur is not None and name in SIGNALS:
             cur[name] = value
@@ -112,11 +112,11 @@ def verify(pairs: list[tuple[str, int]], table: list[list[int]]) -> tuple[bool, 
         fails.append(f"probe_a read {sorted(set(probe_a))}, not only {PROBE_A}: "
                      "nothing beside it can be trusted")
     if not bursts:
-        fails.append("no complete wf_* burst in the capture")
+        fails.append("no complete wr_* burst in the capture")
     seen, sums = set(), set()
     for b in bursts:
-        at = (b["wf_frame"], b["wf_idx_lo"] | (b["wf_idx_hi"] << 7))
-        got = join16(b["wf_val_lo"], b["wf_val_mid"], b["wf_val_hi"])
+        at = (b["wr_frame"], b["wr_idx_lo"] | (b["wr_idx_hi"] << 7))
+        got = join16(b["wr_val_lo"], b["wr_val_mid"], b["wr_val_hi"])
         row = want.get(at)
         if row is None:
             fails.append(f"a burst reported frame {at[0]} index {at[1]}, which is not a probe")
@@ -124,13 +124,13 @@ def verify(pairs: list[tuple[str, int]], table: list[list[int]]) -> tuple[bool, 
             fails.append(f"frame {at[0]} index {at[1]}: read {signed(got)}, expected {row['value']}")
         else:
             seen.add(at)
-        if b["wf_passes"]:
-            sums.add(join16(b["wf_sum_lo"], b["wf_sum_mid"], b["wf_sum_hi"]))
+        if b["wr_passes"]:
+            sums.add(join16(b["wr_sum_lo"], b["wr_sum_mid"], b["wr_sum_hi"]))
     missing = [p for p in want if p not in seen]
     if bursts and missing:
         fails.append(f"{len(missing)} probe(s) never read back correctly: {missing}")
     if bursts and not sums:
-        fails.append("wf_passes stayed 0: no checksum pass completed in the capture")
+        fails.append("wr_passes stayed 0: no checksum pass completed in the capture")
     for s in sorted(sums):
         if s != total["checksum"]:
             fails.append(f"checksum read {s:#06x}, expected {total['checksum']:#06x}")

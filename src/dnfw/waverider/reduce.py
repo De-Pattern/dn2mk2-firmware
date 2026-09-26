@@ -1,4 +1,4 @@
-"""Any wavetable's frames -> the geometry Wavefinder bakes: 16 frames x 512 int16.
+"""Any wavetable's frames -> the geometry Waverider bakes: 16 frames x 512 int16.
 
 The same three steps as `dnfw.wavetable` (the LFO tables), at a larger size:
 
@@ -13,7 +13,7 @@ The same three steps as `dnfw.wavetable` (the LFO tables), at a larger size:
 **Why 16 x 512.** It is Milestone 0's geometry (16 KB), not a decision about
 sound: how few points per frame stay clean depends on the oscillator's
 interpolation, which is a DSP question not yet answerable
-(`docs/wavefinder-feasibility.md`, "The geometry is not decidable yet"). Both
+(`docs/waverider-feasibility.md`, "The geometry is not decidable yet"). Both
 numbers are parameters here so the geometry can move without a rewrite.
 
 Reading a WAV is `dnfw.wavetable.parse_wav` / `split_frames`, reused, not copied:
