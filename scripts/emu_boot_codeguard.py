@@ -45,10 +45,19 @@ def main() -> int:
     p.add_argument("--span", type=lambda x: int(x, 0), default=0x4000,
                    help="bytes of our region to watch (code + BSS, with room)")
     p.add_argument("--show", type=int, default=12)
+    p.add_argument("--region", action="append", default=[], metavar="VA:BYTES",
+                   help="watch this range instead of the C chunk; repeatable. For a cave "
+                        "build (no symbols.json): its caves and its RAM")
     args = p.parse_args()
 
     build = os.path.join(ROOT, args.build)
-    sym = {k: int(v, 16) for k, v in json.load(open(f"{build}/symbols.json")).items()}
+    symbols = f"{build}/symbols.json"
+    sym = ({k: int(v, 16) for k, v in json.load(open(symbols)).items()}
+           if os.path.exists(symbols) else {})
+    regions = [(int(a, 0), int(n, 0)) for a, n in (r.split(":") for r in args.region)] \
+        or [(CODE_VA, args.span)]
+    if len(regions) > 1 or regions[0][0] != CODE_VA:
+        return watch_regions(build, regions, args)
     ours = sorted(v for v in sym.values() if CODE_VA <= v < CODE_VA + args.span)
     lo, hi = CODE_VA, CODE_VA + args.span - 1
 
@@ -99,6 +108,32 @@ def main() -> int:
           f"  That is the thing to read: our chunk is at {CODE_VA:#010x} because\n"
           f"  docs/memory-map.md called it clear, and this says it is not.")
     return 1
+
+
+def watch_regions(build, regions, args) -> int:
+    """A cave build's version of the question: does anything write to its caves or
+    its RAM during a boot from reset? Its code runs only when its feature does, so
+    at boot every write to these ranges is foreign."""
+    holder, foreign = {}, []
+
+    def pre_start(m):
+        st = holder["st"]
+
+        def wrote(uc, access, address, size, value, user):
+            foreign.append((st["n"], uc.reg_read(UC_M68K_REG_PC), address, size, value))
+
+        for va, n in regions:
+            m.uc.hook_add(UC_HOOK_MEM_WRITE, wrote, begin=va, end=va + n - 1)
+
+    for va, n in regions:
+        print(f"  watching {va:#010x}..{va + n - 1:#010x} ({n:,} B) through a boot from reset")
+    m, st, stop = dspboot.run(SYX, open(f"{build}/section_3_MAIN_OS.bin", "rb").read(),
+                              limit=args.limit, machine_out=holder, pre_start=pre_start)
+    print(f"\n  ran {st['n']:,} instruction(s), stop {stop!r}")
+    print(f"  writes to the watched ranges: {len(foreign):,}")
+    for n, pc, address, size, value in foreign[:args.show]:
+        print(f"    at {n:>13,}  pc {pc:#010x}  {address:#010x} <- {value:#x} ({size} B)")
+    return 1 if foreign else 0
 
 
 if __name__ == "__main__":

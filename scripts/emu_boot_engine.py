@@ -2,7 +2,8 @@
 
     # in WSL, with digikit's venv (docs/emulator.md):
     DT2_SECTIONS=/root/dn2-sections-111 /root/dn2-emu-venv/bin/python -u \
-        scripts/emu_boot_engine.py [--build out/lfo4-bridge] [--frames 8]
+        scripts/emu_boot_engine.py [--build out/lfo4-bridge] [--frames 8] \
+        [--arp-mode 5 --arp-mode 6 --arp-max 6]
 
 `lfo4-bridge` boots here for 400 M instructions and never faults -- and
 `emu_boot_fault.py` also reported `lfo4_refresh` **zero times**. The audio
@@ -148,6 +149,10 @@ def main() -> int:
     p.add_argument("--build", default="out/lfo4-bridge")
     p.add_argument("--limit", type=int, default=400_000_000)
     p.add_argument("--frames", type=int, default=8)
+    p.add_argument("--arp-mode", type=int, action="append", default=[],
+                   help="after the engine, SAVE and LOAD a sound with this arp MODE; repeatable")
+    p.add_argument("--arp-max", type=int, default=4,
+                   help="the highest MODE the build's LOAD keeps (4 stock, 6 arpmodes)")
     args = p.parse_args()
 
     build = os.path.join(ROOT, args.build)
@@ -224,17 +229,49 @@ def main() -> int:
     if fault:
         print(f"\n  ** the firmware drew EXCEPTION: record {fault['record']} **")
         return 1
-    if not ran:
+    if not ran and watch:
         print("\n  the engine ran and never called our code: this proves nothing.\n"
               "  Check that the build's stubs are actually in the path entered here.")
         return 1
-    print("  the engine path ran clean under a real loader boot.")
+    # Without symbols there is nothing of the build's to watch for (`watch` is
+    # empty), so `ran` is 0 whatever happens. Refusing on it made the no-symbols
+    # branch below unreachable -- every cave build failed here, engine clean or not.
+    print("  the engine path ran clean under a real loader boot"
+          + ("." if watch else " (this build puts nothing of its own on it)."))
+
+    # A sound's arp MODE through the stock converters, in the booted machine:
+    # arpmodes widens the LOAD bound (0x400dd530), and a snapshot harness never
+    # ran that converter in a machine our image booted.
+    fails = []
+    if args.arp_mode:
+        base = after.long(0x800052A0)
+        real = bytes(after.uc.mem_read(base + 52, SOUND_BYTES)) if base else bytes(SOUND_BYTES)
+        print("")
+        for v in args.arp_mode:
+            live = after.alloc(SOUND_BYTES + 16)
+            s = bytearray(real)
+            s[351] = v & 0xFF
+            after.write(live, bytes(s))
+            stored = after.alloc(STORED + 16)
+            after.call(SAVE, stored, live, 0)
+            on_disk = bytes(after.uc.mem_read(stored + 331, 1))[0]
+            back = after.alloc(SOUND_BYTES + 16)
+            after.call(LOAD, back, stored)
+            got = bytes(after.uc.mem_read(back + 351, 1))[0]
+            again = after.alloc(STORED + 16)
+            after.call(SAVE, again, back, 0)
+            same = bytes(after.uc.mem_read(again, STORED)) == bytes(after.uc.mem_read(stored, STORED))
+            want = v if 0 <= v <= args.arp_max else 0
+            ok = on_disk == v and got == want and (same or want != v)
+            print(f"  {'ok  ' if ok else 'FAIL'}  arp MODE {v}: saved {on_disk}, loaded {got} "
+                  f"(want {want}); saved again {'identical' if same else 'differs'}")
+            if not ok:
+                fails.append(f"arp MODE {v} did not round-trip as {want}")
 
     # The save/load path, in the same boot. It is the one piece the gate
     # cannot see from a boot alone: no kit loads at reset, so the two
     # converter stubs never run, and until now they had only ever been
     # exercised from `ui1200M` -- a machine our loader never booted.
-    fails = []
     if not sym:
         # Nothing to convert and no counters to read. The engine half above has
         # already run, which is the part a cave build needs; saying so beats
@@ -242,8 +279,14 @@ def main() -> int:
         print("")
         print("  save/load: skipped -- this build exports no LFO4 symbols, so")
         print("  there are no converters to exercise. The boot and the engine")
-        print("  above did run; the save/load path is untested here.")
-        return 0
+        print("  above did run; the save/load path is untested here"
+              + (", beyond the arp MODE round trip." if args.arp_mode else "."))
+        if fault:
+            print(f"\n  ** the firmware drew EXCEPTION during save/load: {fault} **")
+            return 1
+        for f in fails:
+            print("  FAIL  " + f)
+        return 1 if fails else 0
 
     src = stored_sound(after, MARKS)
     live = after.alloc(SOUND_BYTES)
