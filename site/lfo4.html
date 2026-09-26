@@ -1,0 +1,152 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A Fourth LFO</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="Add a fourth LFO page under [MOD] on the Digitone II, built entirely in your browser.">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/tool.css">
+<style>
+  .params {
+    display: grid; gap: .5rem; margin-top: .6rem;
+    grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+  }
+  .param {
+    background: var(--panel); border: 1px solid var(--accent);
+    border-radius: 8px; padding: .5rem .7rem; font-family: var(--mono);
+    font-size: .86rem; color: var(--accent); text-align: center;
+  }
+  .integrity { margin-top: .8rem; font-weight: 500; }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow"><a href="index.html">Digitone II Mods</a> / a fourth lfo</p>
+  <h1>A Fourth LFO</h1>
+  <p class="lede">
+    The Digitone&nbsp;II has three LFOs per track and an empty fourth page under
+    <code>[MOD]</code>. This fills it with a fourth LFO that behaves like the other
+    three. Pick your firmware, download a signed image.
+  </p>
+</header>
+
+<div class="note">
+  <p><strong>Everything happens in this tab.</strong> Your firmware file is never
+  uploaded — this page has no server to upload it to. It is static files on
+  GitHub Pages; you can read every line in the
+  <a href="https://github.com/angellinares/dn2_firmware_explore/tree/main/site/js">repository</a>.</p>
+  <p><strong>Prove your way back before you flash anything.</strong> The Early Start-up
+  Menu reflashes stock firmware over MIDI. Do that once, with an unmodified image,
+  <em>before</em> you flash a modified one — and back up your +Drive, which no tool
+  here can recover.</p>
+</div>
+
+<div class="note">
+  <p><strong>Apply LFO4 last.</strong> It copies the instrument's parameter table into
+  a new place with room for ten more records, and from then on the firmware reads the
+  copy. A mod that edits that table has to be in the image <em>before</em> the copy is
+  made, or its edit lands on a table nothing reads.</p>
+  <p><strong>Combines with</strong> <a href="fx.html">FX Modulation</a>,
+  <a href="destinations.html">Modulation Destinations</a>, the
+  <a href="arp.html">MIDI Arpeggiator</a> and Arpeggiator p-locks (command line): build
+  those first, then load their download here. <strong>Not with</strong>
+  <a href="lfo.html">LFO Waves</a> or <a href="boot.html">Boot Screen</a>: all three need
+  the same start-up hook and the same appended area, and this page refuses an image
+  either of them has built.</p>
+</div>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">1</span><h2>Your firmware</h2></div>
+  <p>A Digitone&nbsp;II OS 1.11 <code>.syx</code> from Elektron &mdash; or an image
+  FX Modulation, Modulation Destinations or the MIDI Arpeggiator has already built.</p>
+
+  <div class="drop" id="drop">
+    <p><label class="filebtn" for="syx">Choose a .syx file</label>
+      <input type="file" id="syx" accept=".syx,.SYX" hidden></p>
+    <p class="hint">or drag it here</p>
+  </div>
+
+  <div id="loaded" class="hidden">
+    <dl class="facts" id="facts"></dl>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</section>
+
+<section class="step hidden" id="step2">
+  <div class="step-head"><span class="step-num">2</span><h2>What it adds</h2></div>
+  <p>
+    A fourth page under <code>[MOD]</code>, with the controls LFO1-3 have. Every
+    address this mod writes is checked to hold its stock bytes first; an image that
+    differs anywhere is refused rather than written somewhere plausible.
+  </p>
+  <div class="params" id="params"></div>
+
+  <dl class="facts">
+    <dt>Where</dt><dd>On a synth track: <code>[MOD]</code>, the fourth page. Its <code>DEST</code> browser works like LFO1-3's</dd>
+    <dt>Plays</dt><dd>Modulates on every voice, so polyphonic tracks and tracks that move between voices are modulated too</dd>
+    <dt>Keeps</dt><dd>Its settings are stored with the sound by SAVE PROJECT, and survive a power-cycle even without a save, like any stock parameter</dd>
+    <dt>Not included</dt><dd>MIDI: LFO4 has no NRPN numbers, so it cannot be set or recorded over MIDI</dd>
+    <dt>Writes</dt><dd id="writes">&mdash;</dd>
+  </dl>
+
+  <div class="note">
+    <p><strong>Confirmed on a Digitone&nbsp;II.</strong> The page opens with the stock LFO
+    controls, its <code>DEST</code> browser works, it modulates on every voice, and its
+    settings are kept by an explicit SAVE PROJECT and survive a power-cycle without one.
+    This page applies exactly the bytes of that build, checked byte for byte when it is
+    packaged.</p>
+    <p><strong>None of Elektron's data ships with it.</strong> The copied parameter table —
+    the 320 stock records and LFO4's ten, which are LFO3's with five fields rewritten — is
+    rebuilt from <em>your</em> file when you press Build.</p>
+  </div>
+</section>
+
+<section class="step hidden" id="step3">
+  <div class="step-head"><span class="step-num">3</span><h2>Build it</h2></div>
+  <p>
+    The image is rebuilt, re-signed with the key derived from your own file, and
+    every integrity field is checked again. Nothing downloads unless all of them pass.
+  </p>
+  <div class="verdict" id="buildVerdict"></div>
+  <p class="integrity hidden" id="integrity"></p>
+</section>
+
+<div class="bar hidden" id="bar">
+  <button class="primary" id="buildBtn">Build firmware</button>
+  <button id="resetBtn">Start over</button>
+  <span class="status" id="status"></span>
+</div>
+
+<h2>Combining with other mods</h2>
+<p>
+  Each page applies one mod. To combine them, build on the other page first, then load
+  its download here: <strong>this one goes last</strong>. It writes 204 places in
+  section&nbsp;3 and appends 23.7&nbsp;KB to it.
+</p>
+<ul>
+  <li><strong><a href="fx.html">FX Modulation</a></strong> &mdash; combines, applied first. Its ten Chorus record masks are carried into LFO4's copy of the table. In the emulator every LFO page, LFO4's included, lists the 24 FX destinations; LFO4 actually aimed at one has not been tried. The FX page refuses an image this page has built.</li>
+  <li><strong><a href="destinations.html">Modulation Destinations</a></strong> &mdash; combines, applied first. Its thirteen opened destinations are carried into the copy. That page refuses an image this page has built.</li>
+  <li><strong><a href="arp.html">MIDI Arpeggiator</a></strong> &mdash; combines, in either order. No shared bytes.</li>
+  <li><strong>Arpeggiator p-locks</strong> &mdash; combines; command line only, <code>dnfw mods apply firmware.syx --mod arpplocks --mod lfo4</code>.</li>
+  <li><strong><a href="transients.html">Transient Swapper</a></strong> &mdash; combines; it only writes the DSP image.</li>
+  <li><strong><a href="lfo.html">LFO Waves</a></strong>, <strong><a href="boot.html">Boot Screen</a></strong> &mdash; <strong>do not combine</strong>. They need the same start-up hook and appended area.</li>
+</ul>
+<div class="note">
+  <p><strong>What "combines" means here.</strong> The bytes each mod writes are checked
+  not to overlap, and this page's output is checked byte for byte against the command
+  line's, alone and after FX Modulation. LFO4 was tested on hardware on its own; a
+  combined image has not been flashed.</p>
+</div>
+
+<footer>
+  <p>
+    Part of <a href="https://github.com/angellinares/dn2_firmware_explore">dn2_firmware_explore</a>,
+    AGPL-3.0-or-later. Not affiliated with or endorsed by Elektron.
+  </p>
+</footer>
+
+</div>
+
+<script type="module" src="js/app/lfo4-page.js"></script>
