@@ -499,12 +499,22 @@ itself uses.
 | the 12-shape ANIM modulator, the blend, two oscillators | not started; now testable offline | weeks |
 | persistence, p-locks | same shape as LFO4 | weeks |
 
+> **Superseded 2026-09-26** by "The measured gap, revised after Milestone 2"
+> below. The two open rows ("DN2 voice-path hook", "table delivery") are now
+> one located hook and one still-open transfer.
+
 The critical path is no longer an emulator. It is two pieces of DN2 reading:
 **where a voice's samples are produced and consumed**, and **how the table
 reaches DSP memory**. Both can now be answered with a runner that executes,
 not only with static reading.
 
 ## The next milestone: where a reader would hook into the DN2 voice path (research only)
+
+> **Superseded 2026-09-26 by Milestone 2**, below. `sw 0x1c9b73`'s "stage
+> calls" are per-track filter renders, and stage 5 is a filter's tanh
+> saturator, not a wavetable reader. The hooks are now ranked, and the render
+> call ranks first. The record layout, block size and output buffer below are
+> answered in Milestone 2, step 1. The text is kept as the plan it was.
 
 What is known, from `docs/sharc-voice-path.md` and digikit's finding 11, cited
 in our words:
@@ -547,6 +557,190 @@ structure at `0x241298` is **[O]**, and its field offsets are in
 `docs/sharc-voice-path.md`), the block size (32 samples on DT2), and the
 per-voice output buffer.
 
+## Milestone 2, offline (2026-09-26): one DN2 voice in the runner, with our reader substituted
+
+**The question.** Can the DN2's own voice path run in digikit's runner from a
+hand-armed state, and can our reader be put where a machine's samples go?
+**Yes, with measured limits.** The voice path runs, from the engine init to
+the end of the per-track chain, on every block. The firmware's WaveTone
+oscillator renders a waveform from its own init-built tables. Substituted at
+the machine render call, our reader's block lands in the track buffer bit for
+bit, and the per-track stages before the amp keep it. Two things stop an
+audible voice at the end of the chain: the amp stage, because nothing
+triggers a note, and WaveTone's own 2:1 decimator, which rings in the runner.
+Both are measured below and neither is solved.
+
+```
+python scripts/sharc_waverider_voice.py \
+    --image 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip \
+    --digikit ../digikit-wt-sharcemu [--blocks 16] [--seconds 2.5]
+```
+
+The first run builds the init snapshot, about 18 minutes (1,104 s), and
+caches it as `out/waverider/m2_init_<sha>.snap`. Later runs take about 4
+minutes for 16 blocks, at about 3.5 s a block. Every run writes its WAVs and `m2_report.json` to `out/waverider/`.
+The numbers below are from the 16-block run of 2026-09-26: 512 samples a
+step, digikit `6f812e9`, CPython 3.13 on a shared machine. That run reported
+**PASS on all 17 checks**.
+
+**The WAVs** are 2.5 s each at 48 kHz, 16-bit mono. Each is 512 rendered
+samples looped out to that length, because the runner renders about 17
+blocks a minute:
+
+| file | what it is |
+|---|---|
+| `m2_voice_stock_osc.wav` | the firmware's WaveTone oscillator 1, hand-armed; every other sample of its 96 kHz output, normalised (raw peak 1.2e-4 of full scale in Q31) |
+| `m2_voice_stock_machine.wav` | the track buffer after the WaveTone render: the ±1 Nyquist buzz of the ringing decimator |
+| `m2_voice_stock_chain.wav` | the end of the per-track chain: silent (peak 4e-10) |
+| `m2_voice_disarmed_osc.wav` | control: oscillator 1 unarmed, silent |
+| `m2_voice_reader.wav` | our reader in WaveTone's place, straight out of the track buffer: the Milestone 1 sweep at 375 Hz |
+| `m2_voice_reader_pre_amp.wav` | the same block as the amp stage receives it, filtered and about 20 dB down |
+| `m2_voice_reader_chain.wav` | the same block at the end of the chain: silent (peak 3.4e-5) |
+| `m2_reference.wav` | `dnfw.waverider.render` for the same blocks |
+
+### Step 1: the map, read out of a run
+
+**Getting the path to run at all took seven runner workarounds.** Each one
+is a gap in digikit's runner, measured on DN2 1.11. They live in
+`scripts/sharc_dn2_fixups.py` (G1-G7) and are written up for digikit in
+`docs/for-digikit-sharc-runner-dn2.md`, Part 2.
+
+| gap | effect on DN2 | how we got past it | control |
+|---|---|---|---|
+| G1 SIMD PEy modelled in 5 forms only | init's SIMD loops fill only the even half of a table | each such instruction run twice in SISD, PEy on a swapped copy | the sine table below |
+| G2 `Rn = data32` does not reach Sn in SIMD | PEy's loop constants are stale | Sn set too | odd half of the sine table: wrong without it, off by up to 1; right with it, max error 3.9e-7 |
+| G3 (LW) pairs in 4b/3b | a long-word load reads Unknown; the peak search forks at `0x1c4610` | pair load/store as 14a/15a do it | init returns |
+| G4 L1 normal-word addresses read as byte addresses | `sinf(x)` returns `x` | NW immediate in an I register ×4 | sinf within 1 ulp of math.sin on 58 inputs |
+| G5 Type 2b shadows 16-bit Type 2c | desync at `0x1c0e13` and `0x1c4f4a` | those parcels read as 2c | selache agrees; the code after them is coherent |
+| G6 conditional 6a/6b halt | WaveTone oscillator 2 stops at `0x1c4470` | predicate evaluated here | -- |
+| G7 Type 13a not executed | not met on this path | -- | -- |
+
+**M1's "unmodelled shifter op at `0x1c4f4a`" is withdrawn.** ~~the first
+unmodelled operation we met on the DN2 voice path~~. It is G5, a decode
+misread: `0xc029` is the 16-bit `r2 = r2 + r9`. The same misread explains
+digikit's provisional `21p_undoc16` / `8p_undoc48` on DT2 at `0x1c32b0` /
+`0x1c32b4`.
+
+**Two accelerations, each checked against the code it replaces.** Without
+them init takes hours:
+
+- **A1:** sinf computed as float32(math.sin).
+- **A2:** the 12,819 additive-synthesis loops of the table builder
+  `sw 0x1c463b` computed natively, in the firmware's float32 order. On each
+  loop's first three entries, the native result equals the emulated one
+  word for word.
+
+Init (`sw 0x1c1445`) then returns after **5.0 M instructions [E]**.
+
+**What the run shows [E]** (full list in `docs/sharc-voice-path.md`,
+"Measured in the runner"):
+
+| | |
+|---|---|
+| engine state | `0x241298`: R4 to init and to the dispatch. ~~[O] voice record array~~: it is per-machine voice state, one block per track |
+| track records | 16 at `0x2554b8`, stride `0x234`; word `+0x1b4` is the machine type (0 FM Tone, 1 WaveTone, 2 FM Drum, 3 Swarmer, 4 MIDI) |
+| arm / guard | no guard byte gates a render. Every track of a type is rendered on every block. A note is a change in a per-track counter (record word 113, compared at `0x1c90fb`, which then calls `sw 0xb82440`); poking it alone left the amp closed |
+| block size | 32 (word 0 of `0x257e6c`) |
+| per-voice output | a 32-float track buffer per track; pointers at `0x254a60`, buffers from `0x804acf90`, 0x80 apart |
+| WaveTone | state at `0x241298 + 0x2408 + t * 0x30c`; two oscillators (`sw 0x1c44ae`, `sw 0x1c43ca`) read int16 tables (init builds 3 × 48 × 1024 points), a fixed-point mixer, a 2:1 decimator `sw 0xb8286b`, then fclip into the track buffer |
+| stage 5 | `sw 0xb80f2e` is filter type 3; its table `0x26b3a8` is a tanh shaper |
+
+The chain `0x1c9e76` → `0x1c2712` → `0x1c8ef1` → `0x1c9b73` holds, with one
+correction: `0x1c9b73` is a set of jump-table arms (the filter renders), not
+a stage orchestrator.
+
+### Step 2: the stock voice
+
+Track 0 is WaveTone and the other 15 are MIDI. One dispatch takes about
+54 k instructions, about 3 s. With nothing triggered, both oscillators have
+a phase increment of 0. Hand-arming oscillator 1 means giving it an
+increment (`0x60000`, 562.5 Hz at its 96 kHz rate) and copying oscillator 2's
+index scale and segment fields (words 14-17) into it at the render call.
+
+- **The firmware's oscillator renders [E].** Its phase advances exactly
+  2 × 32 × increment (`0x1800000`) on each of the 16 blocks. The 16 blocks
+  hold 6 cycles, which is 12 zero crossings, and the buffer carries a
+  waveform read from the init-built table (`m2_voice_stock_osc.wav`).
+- **Control:** the same run unarmed leaves oscillator 1 silent
+  (`m2_voice_disarmed_osc.wav`).
+- **After WaveTone's own mixer and decimator, the track buffer is a ±1
+  Nyquist buzz [E]** (`m2_voice_stock_machine.wav`). The mixer passes the
+  oscillator through; that was checked. The decimator, run in the frame,
+  rings at ±113, ±81, ... whatever its input. Run alone from the same state
+  and input, it is linear and silent. The cause is **[O]**.
+- **At the end of the chain the block is silent [E]**
+  (`m2_voice_stock_chain.wav`). A constant 0.5 probe written in place of the
+  render changes as it goes through the per-track stages: 0.5 → 0.499
+  (written at `0xb8261c`) → 0.98 (`0x1c9492`) → 0.79 (`0x1cdbe4`) → 0.059
+  (`0xb80c60`). Then the amp stage (`sw 0xb80345`, its write at `0xb80515`)
+  makes it -0.0. That is what an untriggered voice should do.
+
+### Step 3: our reader at the WaveTone call site
+
+The hook steps over the `CALL sw 0x1c6d4a` at `0x1c9611` and runs
+`wr_render` in its place, on the block's own memory, with the track buffer as
+the output and 32 samples. The Milestone 1 table sweeps frame 0 → 15 → 0
+across the blocks at 375 Hz.
+
+- **The track buffer after the call equals `dnfw.waverider.render` (float32)
+  bit for bit [E]:** 0 mismatches in 512 samples.
+- **The stages before the amp keep our wavetable [E]:** a least-squares fit
+  to the ideal reference gives gain 0.098, correlation 0.984 and SNR 14.8 dB. These stages are filters and a level, not a pure gain,
+  so the fit is a measure, not an identity.
+- **At the end of the chain it is silent**, peak 3.4e-5, for the same
+  reason as the stock voice: the amp.
+
+**Not an exact match, and why:** the reader's output is exact where it is
+written. Beyond that, the per-track stages filter it, and nothing opens the
+amp. An exact end-to-end comparison needs a note trigger with known envelope
+parameters, and the ColdFire frame is what carries those.
+
+### Step 4: the hooks, ranked
+
+1. **Dispatch: the machine render call** (`0x1c9611` for WaveTone, one per
+   machine type in `sw 0x1c8ef1`). **Measured**: the block is exact and the
+   chain runs on it. It is also where a sixth machine's render would be
+   called, next to the other four.
+2. **The selector clamp `min(R2, 4)` at `0x1c294c`.** Needed for a sixth
+   machine, since type 5 would otherwise be clamped onto MIDI's record, but
+   it hosts no DSP code. It only chooses which render loop a track joins.
+3. **Output: the final scatter to the 16 lanes (`0x1c9ae7`).** Reachable,
+   but after the per-track filter, amp and pan; a machine written there
+   bypasses them.
+4. **Stage 5 (`sw 0xb80f2e`, `0x26b3a8`).** ~~the stage-5 call is the hook~~.
+   It is a filter's saturator, so the wrong place.
+
+### The measured gap, revised after Milestone 2
+
+| part | state | cost |
+|---|---|---|
+| wavetable import, baked table | **done**; **[V]** Milestone 0 | — |
+| control surface, parameters, pages | **proven** by LFO4 | days |
+| machine list ceiling | **read**: ColdFire `moveq #4`, DSP `min(R2, 4)` | done |
+| SHARC executor on the DN2 voice path | **[E]** with 7 workarounds (G1-G7), each a digikit fix | — for us; PRs for digikit |
+| DN2 engine layout: records, machine type, block, track buffers | **[E]** Milestone 2 | done |
+| voice-path hook | **located and measured [E]**: the per-type render call in `sw 0x1c8ef1`; our block exact in the track buffer | done offline |
+| a sixth render loop in `sw 0x1c8ef1` (type 5 → our reader) | not started; the four existing loops are the template | days-weeks |
+| note trigger and amp envelope for a new machine | **open**: record word 113 is the note counter; envelope fields not mapped | weeks |
+| table delivery to the DSP | **open**: nothing moves ColdFire data into DSP memory yet | weeks |
+| WaveTone's decimator in the runner | **[O]** rings in-frame (only matters for the stock control) | — |
+| the 12-shape ANIM modulator, the blend, two oscillators | not started; testable offline | weeks |
+| persistence, p-locks | same shape as LFO4 | weeks |
+
+### What is unverified
+
+- **Silicon**, as for Milestone 1. And three of the workarounds (G1, G2, G4)
+  are models of SHARC+ behaviour inferred from the firmware, not cited from
+  the PRM.
+- **The ColdFire frame.** Every parameter here was either init's default or
+  a hand poke; `sw 0x1c2712`'s unpack of a real frame was not run.
+- **The note trigger and the amp envelope.** An audible voice at the end of
+  the chain needs both.
+- **WaveTone's decimator in the frame.** It rings, cause unknown.
+- **The spliced spans.** The reader's table and code sat at spans the boot
+  stream never loads (Milestone 1); the bit-exact output shows that nothing
+  overwrote them during these runs.
+
 ## Status
 
 **Milestone 0: [V]** -- passed on the instrument 2026-09-26 (test 12,
@@ -561,6 +755,14 @@ assembled with selas, runs in digikit's SHARC executor inside the DN2 1.11
 image and matches `dnfw.waverider.render` bit for bit (float32) over 7 cases
 and a 48,000-sample sweep; max error against the ideal 5.8e-8. Nothing has run
 on a DSP, and nothing is flashed.
+
+**Milestone 2: [E]**, 2026-09-26, offline only. The DN2 1.11 engine init and
+slot dispatch run in digikit's runner with seven documented workarounds. The
+firmware's WaveTone oscillator renders from its own tables once hand-armed.
+Our reader, substituted at the WaveTone render call, is bit-exact in the
+track buffer and survives the per-track stages before the amp. The end of the
+chain is silent because no note is triggered, and WaveTone's decimator rings
+in the runner. Nothing is flashed.
 
 **[D]** for the gap estimates — they are reasoned from measured facts (the file
 format, the firmware's free space, the machine table bound) but no part of the
