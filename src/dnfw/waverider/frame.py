@@ -142,6 +142,25 @@ class Frame:
         return bytes(self.data)
 
 
+def init_frame(sound: dict[int, int], machine: int, *, cf_filter: int = 0, trigger: bool = False,
+               track0: dict[int, int] | None = None) -> Frame:
+    """A frame with every track on the init sound SOUND (index -> value): track 0 on
+    MACHINE and CF_FILTER with TRACK0's overrides, tracks 1-15 MIDI (type 4, no render),
+    the Trig Note default 60 and Track Level default 100 everywhere. TRIGGER sets track
+    0's four trigger bits."""
+    f = Frame()
+    for t in range(TRACKS):
+        f.header(MACHINE, t, machine if t == 0 else 4)
+        f.header(FILTER, t, cf_filter if t == 0 else 0)
+        f.header(NOTE, t, 0x3C00)
+        f.header(LEVEL, t, 0x6400)
+        f.sound(t, sound)
+    f.sound(0, dict(track0 or {}))
+    if trigger:
+        f.trigger(0)
+    return f
+
+
 def sound_defaults(records) -> dict[int, int]:
     """Parameter index -> default, for the frame's indices 66..99, from parameter
     records (anything with `.group`, `.parameter_id`, `.default`). The filter-type

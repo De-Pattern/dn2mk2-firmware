@@ -80,3 +80,13 @@ def test_record_fields_are_inside_the_track_record():
     for index, (off, kind, _) in F.RECORD_FIELDS.items():
         assert 0x1B4 < off < 0x234, index
         assert kind in "utfkvp"
+
+
+def test_init_frame_puts_track0_on_the_machine_and_the_rest_on_midi():
+    f = F.init_frame({67: 0x7F00, 90: 0x6E00}, 5, cf_filter=1, trigger=True, track0={67: 0})
+    assert f.get(F.header_offset(F.MACHINE, 0)) == 5
+    assert all(f.get(F.header_offset(F.MACHINE, t)) == 4 for t in range(1, 16))
+    assert f.get(F.header_offset(F.FILTER, 0)) == 1
+    assert f.get(F.slot_offset(0, 67)) == 0 and f.get(F.slot_offset(1, 67)) == 0x7F00
+    assert f.get(F.header_offset(F.NOTE, 7)) == 0x3C00
+    assert f.get(F.TRIG_NOTE) == 1
