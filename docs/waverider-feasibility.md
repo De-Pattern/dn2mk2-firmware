@@ -1309,7 +1309,7 @@ Not built, noted where it is cheap:
 ### What is unverified
 
 - **Silicon**, for all the SHARC code: the first time modified DSP code runs.
-- **L1 block 2 at run time**: free by every static test, not proven.
+- **L1 block 2 at run time**: ~~free by every static test, not proven~~ -- the first flash (2026-09-27) silenced the instrument, and block 2 is the ADSP-2156x PM data cache's block; see `docs/waverider-dsp-silence.md`.
 - **Loudness on the instrument**: exact at the machine tap; the chain on
   ColdFire-captured frames is quiet for the stock machine too, so the
   instrument is the first real check of level.

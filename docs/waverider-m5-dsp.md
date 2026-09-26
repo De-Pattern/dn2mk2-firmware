@@ -70,7 +70,7 @@ the image says about block 2:
   it is block 2's top, it is `0x31c000..0x31ffff`, which M5 leaves untouched; our
   spans end at `0x30a000`.
 
-So block 2's lower 112 KB is **free by every static test available [D]**, and not
+So block 2's lower 112 KB is ~~**free by every static test available [D]**~~ -- **superseded 2026-09-27 (`docs/waverider-dsp-silence.md`)**: on the ADSP-2156x block 2 is the PM data cache's block (0-128 KB of it can be cache), and the M5 and ONESHOT builds silenced the instrument; the static tests below still hold, the conclusion does not. It was not
 proven free at run time: a DMA descriptor or a pointer computed at run time could
 still reach it. This is the first-flash risk that a crash at boot would point to.
 
@@ -242,7 +242,7 @@ bit-exact to the runner's machine tap, rendered over the whole file.
 
 - **Silicon.** Nothing here has run on a DSP. The runner is a model with eleven
   documented workarounds (G1-G11).
-- **Block 2 at run time** (correction 1): free by every static test, not proven.
+- **Block 2 at run time** (correction 1): ~~free by every static test, not proven~~ -- the owner's first flash went silent; see `docs/waverider-dsp-silence.md`.
 - **Instruction encodings** agree across selas, digikit and selmap for every
   instruction shipped; none of the three is the silicon.
 - **Byte addressing.** The loop and reader do byte arithmetic on byte-address
