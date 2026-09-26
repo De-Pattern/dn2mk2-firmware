@@ -371,3 +371,48 @@ def write_span(data: bytearray, address: int, payload: bytes) -> None:
     for at, n in writable(bytes(data), address, len(payload)):
         data[at:at + n] = payload[cursor:cursor + n]
         cursor += n
+
+
+# The low byte of every block code in the Digitone II's section 7 is 0x01 (the
+# DMA width the loader uses); a producer-side block copies it rather than
+# guessing another value.
+DMA_CODE = 0x01
+
+
+def block(target: int, payload: bytes = b"", flags: int = 0, argument: int = 0,
+          count: int | None = None) -> bytes:
+    """One checksum-valid block, header and payload: the producer side of `header_at`.
+
+    The header's byte 2 (HDRCHK) is chosen so the XOR of all 16 header bytes is
+    zero, as every block in a shipped section 7 has it. `count` defaults to the
+    payload length; a fill block passes `count` and no payload.
+    """
+    if count is None:
+        count = len(payload)
+    if flags & (FLAG_FILL | FLAG_IGNORE):
+        if payload:
+            raise ValueError("a fill or ignore block carries no payload")
+    elif count != len(payload):
+        raise ValueError("a payload block's count must be its payload length")
+    header = bytearray(struct.pack("<IIII", (SIGNATURE << 24) | ((flags & 0xFF) << 8) | DMA_CODE,
+                                   target, count, argument))
+    check = 0
+    for byte in header:
+        check ^= byte
+    header[2] = check
+    return bytes(header) + payload
+
+
+def insert_before_final(data: bytes, extra: bytes) -> bytes:
+    """`data` with `extra` blocks spliced in just before its final block.
+
+    Blocks load in stream order, so anything inserted here lands after the
+    whole image and before the jump to the entry point.
+    """
+    result = walk(data)
+    final = result.final
+    if final is None or not result.complete:
+        raise ValueError(f"not a complete boot stream ({result.reason})")
+    if walk(extra).stopped_at != len(extra):
+        raise ValueError("the inserted bytes do not walk as whole blocks")
+    return data[:final.offset] + extra + data[final.offset:]

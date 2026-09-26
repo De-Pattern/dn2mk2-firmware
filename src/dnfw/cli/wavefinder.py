@@ -7,16 +7,19 @@
                                          and what the reduction will do to each
   `dnfw wavefinder bake PATH --out DIR`  reduce and bake each WAV: DIR/<name>.h
                                          and DIR/<name>.bin (big-endian int16)
+  `dnfw wavefinder render OUT.wav`       the reference reader (Milestone 1): what
+                                         the SHARC code must produce, as audio
 
-`expect`, `header` and `verify` default to Milestone 0's original test table
+`expect`, `header`, `verify` and `render` default to Milestone 0's original test table
 (`dnfw.wavefinder.testtable`); `--wav FILE` uses a WAV instead. **Tables that
 are not ours -- Elektron's factory set, third-party packs -- are for local
 testing only** and never go into a build this project ships.
 """
 
 import pathlib
+import wave
 
-from ..wavefinder import bake, expect, reduce, source, testtable
+from ..wavefinder import bake, expect, reduce, render, source, testtable
 
 NAME = "wavefinder"
 HELP = "baked wavetables: scan and reduce WAVs, emit the C header, the expected telemetry"
@@ -34,6 +37,21 @@ def configure(parser) -> None:
             p.add_argument("out", type=pathlib.Path, help="where to write the header")
         if name == "verify":
             p.add_argument("capture", type=pathlib.Path, help="midi_watch.py output, saved as text")
+    p = sub.add_parser("render", help="render the reference reader to a WAV",
+                       description="Render the reference wavetable reader "
+                       "(dnfw.wavefinder.render) to a mono 16-bit 48 kHz WAV: "
+                       "a fixed frame position, or a sweep 0 -> 15 -> 0.")
+    p.add_argument("out", type=pathlib.Path, help="the WAV to write")
+    p.add_argument("--wav", type=pathlib.Path, default=None,
+                   help="reduce this WAV wavetable instead of the original test table")
+    p.add_argument("--freq", type=float, default=110.0, help="pitch in Hz (default 110)")
+    p.add_argument("--pos", type=float, default=None,
+                   help="fixed frame position 0..15; default: sweep 0 -> 15 -> 0")
+    p.add_argument("--seconds", type=float, default=2.0, help="length (default 2)")
+    p.add_argument("--block", type=int, default=32,
+                   help="samples per position update (default 32)")
+    p.add_argument("--precision", choices=("ideal", "float32"), default="ideal",
+                   help="double precision, or float32 rounded as the SHARC code rounds")
     p = sub.add_parser("scan", help="describe a WAV or every WAV in a folder")
     p.add_argument("path", type=pathlib.Path)
     p = sub.add_parser("bake", help="reduce and bake a WAV or every WAV in a folder")
@@ -80,7 +98,28 @@ def _bake(path: pathlib.Path, out: pathlib.Path) -> int:
     return 0
 
 
+def _render(args) -> int:
+    table = _table(args)
+    blocks = max(2, int(round(args.seconds * 48000 / args.block)))
+    positions = ([render.position(args.pos)] * blocks if args.pos is not None
+                 else render.sweep(len(table), blocks))
+    samples = render.render_blocks(table, render.increment(args.freq), positions,
+                                   args.block, 0, args.precision)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(args.out), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(render.pcm16(samples))
+    print(f"  {args.out}: {len(samples):,} samples at 48 kHz, {args.freq} Hz, "
+          f"{'position ' + str(args.pos) if args.pos is not None else 'sweep 0 -> 15 -> 0'}, "
+          f"{args.precision}")
+    return 0
+
+
 def run(args) -> int:
+    if args.action == "render":
+        return _render(args)
     if args.action == "scan":
         return _scan(args.path)
     if args.action == "bake":
