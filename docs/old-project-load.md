@@ -63,8 +63,21 @@ songguard, sha256 `120c23a5...0eef`) and opened project 4, SKETCHPAD: **it
 opened, with no EXCEPTION screen** (confirmed by the owner). The same project
 on the same mods without songguard had halted.
 
-Not yet checked on the instrument: song 1 reading empty, re-opening after
-switching projects, LFO4 and the FX destinations after the load, and playback.
+Then, same session (owner): song 1 reads empty and the other songs are intact;
+SKETCHPAD re-opens after switching projects; every mod works after the load.
+
+**Playback shows the rest of the damage.** B9 track 4 and B1 track 12 lose their
+sound. Read from the capture, not measured on the device:
+- B9 track 4's stored sound is shifted by a few bytes (magic `ffffff21` where
+  `beefbace` belongs, version `0x00260000`, the name `WOODPECKER` starting 3
+  bytes late). The sound `LOAD` rejects it and puts the default sound there. That
+  is a stock converter, so every build does the same.
+- B1 track 12 has a valid header (`PRESET 12`, version 3), so its silence comes
+  from somewhere else -- the pattern's locks or the sound's own values. Not
+  traced.
+
+Neither is songguard's business, and neither halts: the guard only stops the one
+field that overwrote memory.
 
 ## What stays unverified
 
