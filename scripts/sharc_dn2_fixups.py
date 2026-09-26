@@ -44,6 +44,14 @@ post-fix), or replaces the step outright:
       differs"). Met in the amp stage sw 0xb80345 at 0xb803ee once a note is
       on. The predicate is evaluated here and, when taken, the loop and PC
       stacks are popped once, as `_apply_loop_abort` does for 9a.
+  G11 FEXT (SE) (ShiftImm opcode 0x12, Types 6b/6a) sign-extends the shifted
+      source without masking it to the field first: `_signed(src >> pos, len)`
+      returns every bit above the field unchanged, so `fext r7 by 0:16 (se)`
+      of 0x20204040 gives 0x20204040, not 0x4040. The frame unpack sw 0x1c2712
+      splits each 32-bit frame word into two 16-bit parameters this way, so a
+      parameter picked up its neighbour as bits 16-31 (Milestone 4, measured
+      at 0x1c29fa; control: plain FEXT, opcode 0x10, at 0x1c28fc is right).
+      The result register is recomputed after the step.
   G9  (ours, not the runner's) G1's two-pass assumed every memory form names
       its DAG field `i`; the 16-bit Type 3c names it `dmi`. Met in SIMD at
       0x1c2857 in sw 0x1c2712 (Milestone 3).
@@ -407,11 +415,14 @@ def run(runner, max_steps: int, fix: Fixups, stop_at=()):
             runner._cache[pc] = insn
             fix.note("2b->2c decode (G5)", pc)
         act = fix.pre(runner, insn)
+        g11 = fext_se_fix(runner, insn, fix) if insn.type_name in FEXT_SE_FORMS else None
         if isinstance(act, tuple):
             try:
                 act[1](runner)
             except sr.Halt as h:
                 return ("halt", h, n)
+            if g11:
+                g11(runner)
             n += 1
             continue
         try:
@@ -420,8 +431,69 @@ def run(runner, max_steps: int, fix: Fixups, stop_at=()):
             return ("halt", h, n)
         if act:
             act(runner)
+        if g11:
+            g11(runner)
         n += 1
     return ("max", runner.state.pc_sw, n)
+
+
+# -- G11 --------------------------------------------------------------------------------
+
+FEXT_SE_FORMS = {"6b_shiftimm", "6a_mem"}
+FEXT_SE = 0x12
+
+
+def fext_se_fields(fields) -> tuple[int, int, int, int] | None:
+    """(rn, rx, position, length) of a ShiftImm FEXT (SE), else None -- the same
+    field packing digikit's `_shift_immediate` reads."""
+    try:
+        field = (fields["shiftimm[22:16]"] << 16) | fields["shiftimm[15:0]"]
+    except KeyError:
+        return None
+    if (field >> 16) & 0x3F != FEXT_SE:
+        return None
+    data8 = (field >> 8) & 0xFF
+    length = (fields.get("dataex[3:0]", 0) << 2) | (data8 >> 6)
+    return (field >> 4) & 0xF, field & 0xF, data8 & 0x3F, length
+
+
+def fext_se(value: int, position: int, length: int) -> int:
+    """FEXT Rx BY position:length (SE), 32-bit result."""
+    if length == 0:
+        return 0
+    length = min(length, 32)
+    v = (value >> position) & ((1 << length) - 1)
+    if v & (1 << (length - 1)):
+        v -= 1 << length
+    return v & 0xFFFFFFFF
+
+
+def fext_se_fix(runner, insn, fix: "Fixups"):
+    """G11: a post-step that rewrites Rn (and Sn in SIMD) with the masked,
+    sign-extended field -- only if the step left the unmasked value there."""
+    got = fext_se_fields(insn.fields)
+    if got is None:
+        return None
+    rn, rx, pos, length = got
+    s = runner.state
+    pairs = [(rn, rx)] + ([(rn + 80, rx + 80)] if simd(s) else [])
+    before = {}
+    for dst, src in pairs:
+        v = s.uregs.get(src)
+        if isinstance(v, Const):
+            before[dst] = v.value
+    if not before:
+        return None
+    pc = s.pc_sw
+
+    def post(r):
+        for dst, src_val in before.items():
+            buggy = _signed(src_val >> pos, min(length, 32)) & 0xFFFFFFFF if length else 0
+            now = r.state.uregs.get(dst)
+            if isinstance(now, Const) and now.value == buggy and buggy != fext_se(src_val, pos, length):
+                r.state.uregs[dst] = Const(fext_se(src_val, pos, length))
+                fix.note("fext (se) mask (G11)", pc)
+    return post
 
 
 # -- accelerations ---------------------------------------------------------------------

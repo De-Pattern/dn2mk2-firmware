@@ -9,6 +9,9 @@
                                          and DIR/<name>.bin (big-endian int16)
   `dnfw waverider render OUT.wav`       the reference reader (Milestone 1): what
                                          the SHARC code must produce, as audio
+  `dnfw waverider frame IMAGE OUT.bin`  the DSP parameter frame (Milestone 4) for
+                                         the init sound, from IMAGE's own
+                                         parameter defaults: what sw 0x1c2712 unpacks
 
 `expect`, `header`, `verify` and `render` default to Milestone 0's original test table
 (`dnfw.waverider.testtable`); `--wav FILE` uses a WAV instead. **Tables that
@@ -19,7 +22,11 @@ testing only** and never go into a build this project ships.
 import pathlib
 import wave
 
-from ..waverider import bake, expect, reduce, render, source, testtable
+from ..firmware.load import load
+from ..image.coldfire import LoadedImage
+from ..params import table as ptable
+from ..waverider import bake, expect, frame, reduce, render, source, testtable
+from .files import read_image
 
 NAME = "waverider"
 HELP = "baked wavetables: scan and reduce WAVs, emit the C header, the expected telemetry"
@@ -52,6 +59,18 @@ def configure(parser) -> None:
                    help="samples per position update (default 32)")
     p.add_argument("--precision", choices=("ideal", "float32"), default="ideal",
                    help="double precision, or float32 rounded as the SHARC code rounds")
+    p = sub.add_parser("frame", help="write the DSP parameter frame for the init sound",
+                       description="Build the 2,688-byte parameter frame image the DSP's "
+                       "sw 0x1c2712 unpacks (dnfw.waverider.frame), every track carrying the "
+                       "init sound from IMAGE's parameter table defaults.")
+    p.add_argument("image", type=pathlib.Path, help=".syx file, or a .zip containing one")
+    p.add_argument("out", type=pathlib.Path, help="the frame image to write (DSP memory order)")
+    p.add_argument("--machine", type=int, default=5, help="track 0's machine type (default 5)")
+    p.add_argument("--filter", type=int, default=0, choices=range(6),
+                   help="track 0's filter type, 0..5 = " + ", ".join(frame.FILTER_NAMES))
+    p.add_argument("--trigger", action="store_true", help="set track 0's four trigger bits")
+    p.add_argument("--set", action="append", default=[], metavar="INDEX=VALUE",
+                   help="override a parameter of track 0 (16-bit value, e.g. 67=0 closes FREQ)")
     p = sub.add_parser("scan", help="describe a WAV or every WAV in a folder")
     p.add_argument("path", type=pathlib.Path)
     p = sub.add_parser("bake", help="reduce and bake a WAV or every WAV in a folder")
@@ -117,7 +136,27 @@ def _render(args) -> int:
     return 0
 
 
+def _frame(args) -> int:
+    fw = load(read_image(args.image))
+    sec = fw.container.find(3)
+    tab = ptable.find(LoadedImage(dest=sec.dest, content=sec.unpack()), 15)[0]
+    sound = frame.sound_defaults(tab.records)
+    over = {}
+    for item in args.set:
+        index, _, value = item.partition("=")
+        over[int(index, 0)] = int(value, 0)
+    f = frame.init_frame(sound, args.machine, cf_filter=args.filter, trigger=args.trigger, track0=over)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_bytes(f.to_bytes())
+    print(f"  {args.out}: {frame.FRAME_BYTES:,} B, track 0 machine {args.machine}, filter "
+          f"{frame.FILTER_NAMES[args.filter]} (DSP {frame.dsp_filter(args.filter)}), "
+          f"{len(sound)} init-sound parameters per track{', triggered' if args.trigger else ''}")
+    return 0
+
+
 def run(args) -> int:
+    if args.action == "frame":
+        return _frame(args)
     if args.action == "render":
         return _render(args)
     if args.action == "scan":
