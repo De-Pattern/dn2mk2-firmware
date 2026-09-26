@@ -65,6 +65,16 @@ data in section 7 — so the overlap test returns the right answer and would
 return the right answer if it did nothing at all. That is worth knowing about a
 check before trusting it.
 
+**Superseded 2026-09-26: the check now bites, and it is run on every pair.**
+Eight mods exist, six of them in section 3, and `dnfw mods matrix` tries every
+pair in both orders (`docs/mods-compatibility.md`, generated). It found:
+- three real overlaps: two mods in one cave, and three appending mods on one
+  start-up hook;
+- one pair that combines only in one order;
+- one trap that byte overlap cannot see. A mod that copies part of the image
+  (lfo4 copies the parameter table) silently loses a later mod's edit to that
+  part, so mods now declare what they copy (`COPIES`).
+
 ## Mod 1: `transients`
 
 Replaces the FM drum transient bank (`docs/pcm-hunt.md` §14).
@@ -455,9 +465,12 @@ group-name fix.
   the load verifies 21/21, the rebuild verifies 21/21 and offers
   `Digitone_II_OS1.11_fxmod.syx` at 2,387,616 bytes, with no console errors.
 
-**Conflicts:** none known. It writes inside section 3 only, appends nothing and
-claims no startup hook, so `check_compatible` clears it against `moddest`,
-`lfowaves`, `midiarp` and `transients`. As always that is a byte-overlap
+**Conflicts:** ~~none known~~. **Corrected 2026-09-26:** it shares a code cave
+with `arpplocks` (`0x4028ea04`, 126 bytes). `dnfw mods matrix` refuses the pair,
+and so does `apply`. It writes inside section 3 only, appends nothing and claims
+no startup hook, so `check_compatible` clears it against `moddest`, `lfowaves`,
+`midiarp` and `transients`. Against `lfo4` it is order-only: its Chorus record
+edits must be in the table before lfo4 copies it. As always that is a byte-overlap
 statement and not a musical one, and no combined image has been flashed.
 
 **What it deliberately leaves out.** Master. Its slots need destination codes
@@ -469,3 +482,34 @@ Chorus, Delay and Reverb. Sixteen tracks' LFOs can all aim at the same cell and
 they add up, because every evaluator reads the cell and adds to it before the
 clamp. That is what "global" means, not a fault — but it is surprising the first
 time, so both the page and the index card say it.
+
+## Mod 8: `lfo4` -- a fourth LFO
+
+The fourth `[MOD]` page. It modulates on every voice, and is kept by SAVE
+PROJECT and across a power-cycle without one (`docs/lfo4-build-plan.md`, tests
+10 and 11). Unlike every mod before it, it is **C**: `csrc/lfo4/`, compiled and
+linked by `scripts/build_lfo4_browser.py`.
+
+**How C becomes a mod.** The C stays the source. `scripts/gen_lfo4_code.py`
+runs the release build's own composition (`build_lfo4_browser.RELEASE`) and
+records what it changed as data (`src/dnfw/mods/lfo4_code.json`):
+- 204 in-image edits, each with the stock bytes it expects;
+- the 23,692-byte appended area.
+
+It then applies the result to stock and refuses to write unless the output is
+byte-identical to the build. `dnfw mods apply --mod lfo4` on stock 1.11 writes
+**the same `.syx`, byte for byte**, as `lfo4-everyvoice4`, the release twin of the
+code that passed on the instrument.
+
+**No stock data ships.** The appended area carries a copy of the parameter
+table, 320 stock records plus ten for LFO4 derived from LFO3's. Those 19,800
+bytes are blank in the JSON and rebuilt at apply time from the user's own image
+(`paramtable.records`, `lfo4records.build`).
+
+**Order matters, and the CLI enforces it.** Because lfo4 copies the table,
+`APPLY_LAST` puts it after every other mod. So `moddest`'s thirteen masks and
+`fxmod`'s Chorus records are in the copy (tested). It needs the start-up hook
+and the appended area, so it cannot be combined with `lfowaves` or `bootscreen`
+until one platform loader owns both (`docs/mods-compatibility.md`).
+
+**Browser:** not yet. The JSON is ready for it, but the tool pages do not carry it.
