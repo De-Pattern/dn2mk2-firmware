@@ -19,7 +19,7 @@ produce the same file, byte for byte; that is tested.
 | Mod | What it does | Status | In the browser |
 |---|---|---|---|
 | `lfo4` | A fourth LFO under `[MOD]`, like LFO1–3. Modulates on every voice; kept by SAVE PROJECT and across a power-cycle | confirmed on hardware | yes |
-| `arpmodes` | SHUF and RAND as real arpeggiator modes | confirmed on hardware | in progress |
+| `arpmodes` | SHUF and RAND as real arpeggiator modes | confirmed on hardware | yes (#131) |
 | `fxmod` | An LFO can be aimed at 24 Chorus, Delay and Reverb parameters | confirmed on hardware | yes |
 | `moddest` | 13 more per-voice parameters open as LFO destinations | confirmed on hardware | yes |
 | `lfowaves` | Seven new LFO waveforms, three of them your own wavetables | confirmed on hardware | yes |
@@ -27,6 +27,7 @@ produce the same file, byte for byte; that is tested.
 | `arpplocks` | MODE, SPEED, RANGE and N.LEN lockable per trig | confirmed on hardware; changed since, emulator-checked | no |
 | `bootscreen` | Your own mark in the start-up animation | confirmed on hardware | yes |
 | `transients` | Replace the FM drum transient bank with your own samples | confirmed on hardware | yes |
+| `songguard` | A song with a damaged row count loads as empty instead of halting the instrument (a stock bug) | confirmed on hardware | no |
 
 **Combining them.** `dnfw mods matrix` tries every pair in both orders and
 writes the result into `docs/mods-compatibility.md` and the site. Most pairs
@@ -34,9 +35,9 @@ combine freely; a few need an order (`dnfw mods apply` applies them in it), and
 `lfo4`, `lfowaves` and `bootscreen` exclude each other because each needs the
 start-up hook. No combined image has been flashed as a pair yet.
 
-**A known problem:** a project saved by stock firmware with damaged LFO values
-can halt a modded build on load (`EXCEPTION DS0059`). A fix is in progress; see
-`docs/mods-compatibility.md` and the open PRs.
+**Old projects that halt on load:** a project with a damaged song row count
+halts even stock 1.11 on load (`EXCEPTION DS0059`). The `songguard` mod bounds
+the count, and it is confirmed on the instrument (`docs/old-project-load.md`).
 
 **In development: Waverider**, a wavetable machine for the Digitone II modelled
 on Tonverk's Wavefinder (`docs/waverider-feasibility.md`). A baked table has been

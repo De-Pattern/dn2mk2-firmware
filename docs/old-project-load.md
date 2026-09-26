@@ -56,11 +56,34 @@ pointer made of song data, which is what the photographed frame looks like.
 empty song; 0..99 loads exactly as before. No cave, no hook, nothing appended,
 and it shares no byte with any other mod.
 
+## Confirmed on the instrument -- 2026-09-26
+
+The owner flashed `Digitone_II_OS1.11_fxmod_lfo4_fixed.syx` (fxmod + lfo4 +
+songguard, sha256 `120c23a5...0eef`) and opened project 4, SKETCHPAD: **it
+opened, with no EXCEPTION screen** (confirmed by the owner). The same project
+on the same mods without songguard had halted.
+
+Then, same session (owner): song 1 reads empty and the other songs are intact;
+SKETCHPAD re-opens after switching projects; every mod works after the load.
+
+**Playback shows the rest of the damage.** B9 track 4 and B1 track 12 lose their
+sound. Read from the capture, not measured on the device:
+- B9 track 4's stored sound is shifted by a few bytes (magic `ffffff21` where
+  `beefbace` belongs, version `0x00260000`, the name `WOODPECKER` starting 3
+  bytes late). The sound `LOAD` rejects it and puts the default sound there. That
+  is a stock converter, so every build does the same.
+- B1 track 12 has a valid header (`PRESET 12`, version 3), so its silence comes
+  from somewhere else -- the pattern's locks or the sound's own values. Not
+  traced.
+
+Neither is songguard's business, and neither halts: the guard only stops the one
+field that overwrote memory.
+
 ## What stays unverified
 
 - **Stock on the instrument.** The emulator says stock 1.11 takes the same
-  fault. The owner has not yet opened SKETCHPAD on stock; the prediction is that
-  it halts too.
+  fault. SKETCHPAD has not been opened on stock since the damage; the
+  prediction is that it halts too.
 - **The exact screen.** The emulator's fault is the first consequence of the
   overrun (the settings); the instrument got further before something read the
   overwritten task state. The photographed frame is consistent with that, not

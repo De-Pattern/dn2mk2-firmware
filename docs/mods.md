@@ -632,6 +632,9 @@ It rewrites the same 54 bytes with the bound: 0..99 loads exactly as before, and
 anything else loads as an empty song. One in-place edit at `0x400deac2`, no cave,
 no hook, nothing appended, so it combines with every other mod in either order.
 
+**Confirmed on the instrument, 2026-09-26:** with fxmod + lfo4 + songguard,
+SKETCHPAD opens (owner).
+
     dnfw mods apply <image> --mod fxmod --mod lfo4 --mod songguard -o out.syx
 
 **Browser:** not yet.
