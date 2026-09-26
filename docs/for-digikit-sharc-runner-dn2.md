@@ -310,3 +310,39 @@ wrong 3c variant or the executor misreads the 3c update bit; we have not
 checked which against the PRM, and the firmware's own code does not settle
 it here. We avoid the form (a post-modify dummy read, then a plain read).
 **Not a PR yet** -- it needs the PRM's Type 3c figure first.
+
+# Part 5: the DT2 ONESHOT render, transplanted into DN2 1.11 (2026-09-26)
+
+`scripts/sharc_oneshot_port.py` extracts the DT2 1.16 ONESHOT voice render
+(`FUN_1c4ecf` + `FUN_1c4f81`, its divide helper `FUN_1c06ba` and the decimator
+`FUN_b80000`) from the user's DT2 file, relocates it into the DN2 1.11 image,
+and runs it in your executor. **The render runs with no new runner workaround**
+-- it decodes and executes as is, and its output is bit-identical between the
+DT2 image (from `FUN_1c15e3` init) and the relocated DN2 copy over 4 play modes.
+That is more evidence the executor's semantics are general (Part 1, section 4):
+it ran a 611-instruction routine relocated to addresses it never held, correctly.
+
+## 20. Not a runner gap: the DN2 has no sixth per-type voice-setup entry
+
+For the record, so a reader does not take this for a runner bug. When a type-5
+track is triggered on a block it was **not** active the previous block, the DN2
+dispatch `sw 0x1c8ef1` reaches the per-type voice **setup** jump at `0x1c91ad`
+(`JUMP PM(I4, M5)`, `I4 = I10` from the setup table `0x8052db90[type]`). That
+table has five entries; `[5]` reads the first word past it and the jump lands at
+`0x0`. This is a DN2 image limit (the mirror of the machine-type clamp and the
+frame lookup, `docs/dt2-machine-port.md`), **not** an executor fault: your
+executor runs the in-range entries correctly, and it runs the transplant end to
+end when the voice is triggered on the block it is first dispatched (the note-on
+branch `0x1c9104` skips the setup jump). A sixth setup-table entry is an image
+patch we will add; nothing for the runner.
+
+## 21. The null-pointer zero-fill loop count is nonconcrete (candidate)
+
+`FUN_1c4ecf`'s silence gate (word 0 of the record is null) reaches the zero-fill
+`DO ... UNTIL LCE` at `sw 0x1c4f42`, a Type 12a `LCNTR = ureg, DO`. On both the
+DT2 image (from init) and the relocated DN2 copy, the executor halts there with
+*nonconcrete Type12a UREG loop count* -- the count register is Unknown on that
+path. The active render paths (a non-null pointer) all run and match a reference
+bit for bit, so this is only the degenerate silence path; we prove silence
+instead with a triggered all-zero sample, which renders exact zero. Worth a look
+at where the zero-fill count is meant to come from; **not a PR yet**.
