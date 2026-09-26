@@ -31,7 +31,7 @@ python -m pytest test/test_waverider_dsp.py
 Every added span is its own boot block, inserted before the final block, and is
 checked to lie outside every block of the stock stream (loaded or filled). Both
 patched words are checked to be stock first. Section 7 grows from 836,956 to
-872,524 bytes (sha256 `bb3ca2eb...158c3dff`).
+872,524 bytes (sha256 `bb3ca2eb...158c3dff` as first built; `5baf6e72...8dee7d` after correction 5).
 
 **Not done, on purpose:** the clamp `min(R2, 4)` at `0x1c294c` stays stock, and the
 per-type setup table `0x8052db90` is not touched. Both are corrections, below.
@@ -127,12 +127,26 @@ itself: `sw 0x1c2712` copies the 2,688-byte image to `0x25c48c`, verbatim (0 wor
 672 differ), and it is still there when the dispatch runs. `machine5_live.asm`
 reads WAV1 and TBL1 from that copy.
 
+### 5. The frame carries half the sound's values (found after this doc was first written)
+
+The ColdFire's own frame builder, run in the ColdFire emulator and compared field
+by field (`scripts/waverider_frame_compare.py`), sends every slot parameter at
+half the sound's value: WAV1 at its maximum is `0x3c00`, not `0x7800`; TBL1 1 is
+`0x0080`, not `0x0100`. The loop as first written used the sound's scale, so on
+the instrument POS would have stopped at frame 7.5 and **table 1 would never have
+played** -- while every gate above passed, because every frame the gate built came
+from `dnfw.waverider.frame`, which models the sound's scale. The loop now reads
+~~`min(WAV1, 0x7800) << 5`, `TBL1 >> 8`~~ `min(WAV1, 0x3c00) << 6`, `TBL1 >> 7`,
+and the gate's own frames use the halved scale. The gate numbers below are the
+re-run after the fix (26/26, section 7 sha256 `5baf6e72...8dee7d`); the frame runs
+on the ColdFire's frames are in `waverider-feasibility.md`, Milestone 5.
+
 ## How the parameters reach the loop
 
 | | read from | used as |
 |---|---|---|
-| POS = `WAV1` (param 26) | frame copy `0x25c48c + 220 + 146t`, 16-bit LE | `min(WAV1, 0x7800) << 5`, Q16 frames (0x7800 is frame 15; the fine byte counts) |
-| SLOT = `TBL1` (param 27) | frame copy `+ 222 + 146t` | `TBL1 >> 8`, through the directory; >= count plays 0 |
+| POS = `WAV1` (param 26) | frame copy `0x25c48c + 220 + 146t`, 16-bit LE, half the sound's value | `min(WAV1, 0x3c00) << 6`, Q16 frames (0x3c00 is frame 15; the fine bits count) |
+| SLOT = `TBL1` (param 27) | frame copy `+ 222 + 146t`, half the sound's value | `TBL1 >> 7`, through the directory; >= count plays 0 |
 | pitch | note cell `0x254b14 + 4t` (engine `+0x1387c`), float semitones | clamp 0..127, `inc = trunc(T[k] + fr (T[k+1] - T[k]))`, T = 440 * 2^((k-69)/12) Hz as a u32 step at 48 kHz |
 | phase | the track's reader block `0x301100 + 32t` | carried from block to block |
 
@@ -176,7 +190,10 @@ firmware's `jump 0x1c0000` at sw `0x1c1311`; the NOP is the firmware's own parce
 
 Run of 2026-09-26: `--blocks 8 --frame-be out/waverider/m5_test_frame_be.bin`,
 digikit `6f812e9`, CPython 3.13 on a shared machine, **PASS on all 26 checks**,
-554 s. About 154.5 k instructions a block. Nothing is poked into a voice block and
+554 s. Re-run 2026-09-27 after correction 5 (`--frames` from the ColdFire's own
+init frame, `--tag cfinit`): steps 1-4 **26 of 26** again with the same numbers
+(501 s); step 5's audibility check on the captured frame fails for the stock
+WaveTone control too (`waverider-feasibility.md`, Milestone 5). About 154.5 k instructions a block. Nothing is poked into a voice block and
 the entry is the image's own JUMP; the only harness inputs are frame images.
 
 | step | measured |
