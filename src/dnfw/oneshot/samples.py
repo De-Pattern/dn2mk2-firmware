@@ -45,3 +45,8 @@ def to_float(pcm: list[int]) -> list[float]:
 
 def _q15(x: float) -> int:
     return max(-32768, min(32767, round(x * 32768)))
+
+
+def silence(n: int = 2048) -> list[int]:
+    """A silent slot for the bank: N zero samples (a triggered voice that makes no sound)."""
+    return [0] * n

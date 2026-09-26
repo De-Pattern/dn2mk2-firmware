@@ -146,11 +146,14 @@ class Donor:
             info["saved"] = snap.name
         return r, info
 
-    def render(self, record: bytes, pcm: list[int], pool: int = DT2_POOL) -> Render:
-        """A render of RECORD (its word 0 re-pointed at POOL, where PCM is placed)."""
+    def render(self, record: bytes, pcm: list[int], pool: int | None = DT2_POOL) -> Render:
+        """A render of RECORD (its word 0 re-pointed at POOL, where PCM is placed).
+        `pool=None` keeps the record's own pointer -- a null-pointer record then
+        exercises the render's "no sample assigned" silence gate."""
         base = self.init.fresh_call(DT2_RENDER)
-        rec = struct.pack("<I", pool) + record[4:]
-        poke_pcm(self.dk, base.state, pool, pcm)
+        rec = record if pool is None else struct.pack("<I", pool) + record[4:]
+        if pool is not None:
+            poke_pcm(self.dk, base.state, pool, pcm)
         poke_bytes(self.dk, base.state, DT2_RECORD, rec)
         return Render(self.dk, base, DT2_RENDER, DT2_RECORD, DT2_OUT)
 
@@ -174,11 +177,14 @@ class Recipient:
         self.sha = hashlib.sha256(self.stream).hexdigest()
         self.entry = plan.spec.span(plan.spec.entry).recipient
 
-    def render(self, record: bytes, pcm: list[int], pool: int = DN2_POOL,
+    def render(self, record: bytes, pcm: list[int], pool: int | None = DN2_POOL,
                record_at: int = DN2_RECORD, fixups=None) -> Render:
-        """The transplanted render called directly, on a bare DN2 state."""
+        """The transplanted render called directly, on a bare DN2 state. `pool` is
+        the sample pool the record's word 0 points at (`None` keeps the record's
+        own pointer -- pass a null-pointer record to exercise the silence gate)."""
         base = runner_for(self.dk, self.memory, self.entry)
-        rec = struct.pack("<I", pool) + record[4:]
-        poke_pcm(self.dk, base.state, pool, pcm)
+        rec = record if pool is None else struct.pack("<I", pool) + record[4:]
+        if pool is not None:
+            poke_pcm(self.dk, base.state, pool, pcm)
         poke_bytes(self.dk, base.state, record_at, rec)
         return Render(self.dk, base, self.entry, record_at, DN2_OUT, fixups=fixups)

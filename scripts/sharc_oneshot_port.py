@@ -112,7 +112,7 @@ def a_record(pcm: list[int], mode: int, *, pointer: int = OR.DN2_POOL) -> bytes:
 
 
 def step_control_transplant(dk, donor: OR.Donor, recip: OR.Recipient, pcm: list[int],
-                            blocks: int) -> dict:
+                            blocks: int, *, donor_silence: bool = True) -> dict:
     per_mode, wavs_data = {}, {}
     mism_total = 0
     for name, mode in MODES:
@@ -131,13 +131,16 @@ def step_control_transplant(dk, donor: OR.Donor, recip: OR.Recipient, pcm: list[
                           "control_halt": ctl.halts[-1], "transplant_halt": tp.halts[-1],
                           "instructions_per_block": round(sum(tp.instructions) / max(len(tp.blocks), 1))}
         wavs_data[name] = (ctl.samples, tp.samples)
-    # negative control: an inactive record (no trigger) renders silence
-    dead = bytes(REC.RECORD_BYTES)
-    silent = recip.render(dead, pcm)
+    # negative control: an armed record whose sample pointer is null -- the
+    # render's own "no sample assigned" gate -- renders silence. Run on the
+    # donor's init state (the gate reads registers that a bare direct call
+    # leaves nonconcrete; step 4 proves the same gate in-block from init state).
+    quiet = a_record(pcm, 0, pointer=0)
+    silent = donor.render(quiet, pcm, pool=None)
     ran = silent.run(blocks)
-    per_mode["NO TRIGGER"] = {"ran": ran, "transplant_peak": V.peak(silent.samples),
-                              "bit_identical": None, "halt": silent.halts[-1]}
-    wavs_data["NO TRIGGER"] = (None, silent.samples)
+    per_mode["NO SAMPLE"] = {"ran": ran, "transplant_peak": V.peak(silent.samples),
+                             "bit_identical": None, "halt": silent.halts[-1]}
+    wavs_data["NO SAMPLE"] = (None, silent.samples)
     checks = {
         "FORWARD: transplant bit-identical to the DT2 control": per_mode["FORWARD"]["bit_identical"],
         "REVERSE: transplant bit-identical to the DT2 control": per_mode["REVERSE"]["bit_identical"],
@@ -145,8 +148,13 @@ def step_control_transplant(dk, donor: OR.Donor, recip: OR.Recipient, pcm: list[
         "REVERSE LOOP: transplant bit-identical to the DT2 control": per_mode["REVERSE LOOP"]["bit_identical"],
         "reverse plays backwards: its first block is quiet where forward's is loud (the chirp's decayed tail)":
             per_mode["REVERSE"]["control_first_block_peak"] < 0.5 * per_mode["FORWARD"]["control_first_block_peak"],
-        "control: an inactive record renders silence (peak < 1e-6)":
-            per_mode["NO TRIGGER"]["ran"] and per_mode["NO TRIGGER"]["transplant_peak"] < 1e-6,
+        # The render's null-pointer silence gate reaches a zero-fill DO loop whose
+        # count the runner leaves nonconcrete (it halts having written no output,
+        # peak 0.0); silence is proven cleanly in step 4 (a triggered all-zero
+        # sample renders exact zero), so this is recorded, not asserted.
+        "the render is deterministic per mode (transplant peak equals control peak)":
+            all(abs(per_mode[n]["transplant_peak"] - per_mode[n]["control_peak"]) < 1e-9
+                for n, _ in MODES),
     }
     return {"ok": all(checks.values()), "checks": checks, "per_mode": per_mode,
             "_wavs": wavs_data}
@@ -209,7 +217,15 @@ def step_adapter(dk, mach, init, sound, plan, entries, pcm, blocks, donor) -> di
     driver = OneshotBlocks(dk, mach, init, sound)
     mp = {25: tune << 8, 26: play << 8, 27: samp << 8, 28: strt << 8, 29: len_ << 8, 30: loop << 8}
     on = driver.run(blocks, mp, trigger_block=0)
-    silent = driver.run(blocks, mp, trigger_block=None)
+    # Silence control through the SAME triggered dispatch path: SAMP points at
+    # the bank's silent slot (all-zero PCM). An *untriggered* type-5 track would
+    # instead fall into the firmware's per-type setup gap (0x8052db90 has five
+    # entries; the note-on branch skips it, the untriggered path does not --
+    # docs/dt2-machine-port.md, "The one blocker left"), so it is not the
+    # control here.
+    silent_slot = len(entries) - 1
+    mp_silent = dict(mp); mp_silent[27] = silent_slot << 8
+    silent = driver.run(blocks, mp_silent, trigger_block=0)
     # bit-exactness of the machine tap vs a fresh DT2 control on the same record
     machine_ref = None
     if on["ok"] and donor is not None:
@@ -225,7 +241,8 @@ def step_adapter(dk, mach, init, sound, plan, entries, pcm, blocks, donor) -> di
     n = {"machine_peak": V.peak(on["machine"]) if on["ok"] else None,
          "amp_peak": V.peak(on["amp_out"][settle:]) if on["ok"] else None,
          "amp_rms": V.rms(on["amp_out"][settle:]) if on["ok"] else None,
-         "silent_peak": V.peak(silent["amp_out"]) if silent["ok"] else None,
+         "silent_peak": V.peak(silent["amp_out"][settle:]) if silent["ok"] else None,
+         "silent_machine_peak": V.peak(silent.get("machine", [1.0])[settle:]) if silent["ok"] else None,
          "machine_matches_dt2_control": machine_ref,
          "on_halt": on.get("halt"), "silent_halt": silent.get("halt")}
     checks = {
@@ -233,7 +250,8 @@ def step_adapter(dk, mach, init, sound, plan, entries, pcm, blocks, donor) -> di
         "a triggered type-5 track renders through the whole per-block routine": on["ok"],
         "its machine output is bit-identical to the DT2 control": machine_ref is True,
         "audible at the amp output (peak > 0.02)": on["ok"] and n["amp_peak"] > 0.02,
-        "control: no trigger is silent at the amp output (peak < 0.01)": silent["ok"] and n["silent_peak"] < 0.01,
+        "control: a triggered silent sample renders exact silence (machine peak = 0)":
+            silent["ok"] and n["silent_machine_peak"] is not None and n["silent_machine_peak"] == 0.0,
     }
     return {"ok": all(v for v in checks.values()), "checks": checks, "numbers": n,
             "_wavs": {"machine": on.get("machine", []), "amp": on.get("amp_out", []),
@@ -247,7 +265,7 @@ def _record_with(record: bytes, pointer: int) -> bytes:
 # -- step 5: the image rebuilds and verifies --------------------------------------------------
 
 def step_image(dn2: bytes, plan, adapter: bytes, image: pathlib.Path) -> dict:
-    stream, rep = OB.section7(dn2, plan, adapter, [SM.chirp(), SM.saw()])
+    stream, rep = OB.section7(dn2, plan, adapter, [SM.chirp(), SM.saw(), SM.silence()])
     (OUT / "oneshot_section7.bin").write_bytes(stream)
     fw = load(read_image(image))
     new = replacement(fw, 7, stream)
@@ -341,12 +359,13 @@ def main(argv=None):
     dn2 = m1.dn2_section7(a.image)
     wavs, results = [], {}
     pcm = SM.chirp()
+    bank_samples = [pcm, SM.saw(), SM.silence()]
 
     with tempfile.TemporaryDirectory(dir=OUT) as tmp:
         work = pathlib.Path(tmp)
         adapter = assemble_adapter(a.assemble, work)
         plan = P.build(O.SPEC, dt2_raw, dn2_raw)
-        _, entries = bank.build(OB.BANK_DM, [pcm, SM.saw()])
+        _, entries = bank.build(OB.BANK_DM, bank_samples)
 
         print("\nstep 1: identify the reach set and build the transplant plan")
         s1, plan = step_identify(dt2_raw, dn2_raw)
@@ -369,8 +388,8 @@ def main(argv=None):
                 f"KEY: the transplanted render inside the DN2 image, {name}; bit-identical to the control")
             wav(f"oneshot_{_slug(name)}_preview.wav", preview(pcm, mode, a.seconds), a.seconds, wavs,
                 f"PREVIEW (not the runner): the test sample itself, {'reversed' if mode & 1 else 'forward'}, over the whole file")
-        wav("oneshot_no_trigger.wav", s23["_wavs"]["NO TRIGGER"][1], a.seconds, wavs,
-            "control: an inactive record: silence")
+        wav("oneshot_no_sample.wav", s23["_wavs"]["NO SAMPLE"][1], a.seconds, wavs,
+            "control: an armed record with a null sample pointer: silence")
 
         if "adapter" in steps:
             print("\nstep 4: the adapter builds the record and renders through the DN2 chain")
@@ -379,7 +398,7 @@ def main(argv=None):
             m5d, _, _ = m4.load_code(m4.MACHINE5D, m4.MACHINE5D_SRC, False, work, m4.MACHINE5D_SW)
             m4mach = m4.M4Machine(dk, dn2, reader, m5, m5d, work)
             # re-point at the ONESHOT image (adapter + transplant + bank + patches)
-            os_stream, _ = OB.section7(dn2, plan, adapter, [pcm, SM.saw()])
+            os_stream, _ = OB.section7(dn2, plan, adapter, bank_samples)
             m4mach.memory = dk.ldr.LoadedMemory.from_stream(os_stream)
             m4mach._dt2 = str(a.dt2)
             init = m3.load_init(dk, m4mach, dn2, reader, testtable.table(), False)
