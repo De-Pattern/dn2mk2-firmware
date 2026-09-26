@@ -25,6 +25,7 @@ from ..mods import lfo4 as lfo4_mod
 from ..mods import lfowaves as lfowaves_mod
 from ..mods import midiarp as midiarp_mod
 from ..mods import moddest as moddest_mod
+from ..mods import songguard as songguard_mod
 from ..mods import transients as transients_mod
 from ..mods import waverider as waverider_mod
 from .files import read_image
@@ -40,8 +41,9 @@ REGISTRY = {transients_mod.ID: transients_mod,
             fxmod_mod.ID: fxmod_mod,
             arpplocks_mod.ID: arpplocks_mod,
             arpmodes_mod.ID: arpmodes_mod,
-            waverider_mod.ID: waverider_mod,
-            lfo4_mod.ID: lfo4_mod}
+            lfo4_mod.ID: lfo4_mod,
+            songguard_mod.ID: songguard_mod,
+            waverider_mod.ID: waverider_mod}
 
 
 def configure(parser) -> None:
@@ -58,8 +60,9 @@ def configure(parser) -> None:
     mx.add_argument("image", type=pathlib.Path)
     mx.add_argument("--json", type=pathlib.Path, help="also write the result as JSON")
     mx.add_argument("--page", type=pathlib.Path, action="append", default=[],
-                    help="rewrite the generated regions (<!-- dnfw:matrix --> and "
-                         "<!-- dnfw:combines ID -->) of this HTML or Markdown file")
+                    help="rewrite the generated regions (<!-- dnfw:matrix -->, "
+                         "<!-- dnfw:matrix-row ID --> and <!-- dnfw:combines ID -->) "
+                         "of this HTML or Markdown file")
     mx.add_argument("--boots", type=pathlib.Path,
                     help="a directory of <a>+<b>/boot.txt from emu_boot_check.py, "
                          "written into the <!-- dnfw:boots --> region")
@@ -405,6 +408,10 @@ def _rewrite(page: pathlib.Path, ids, found, names, boots=None) -> None:
                 rows.append(f"- `{pair.a}` + `{pair.b}`: {verdict}")
         text = re.sub(r"(<!-- dnfw:boots -->).*?(<!-- /dnfw:boots -->)",
                       lambda m: m.group(1) + "\n" + "\n".join(rows) + "\n" + m.group(2), text, flags=re.S)
+    text = re.sub(r"(<!-- dnfw:matrix-row (\w+) -->).*?(<!-- /dnfw:matrix-row -->)",
+                  lambda m: (m.group(1) + "\n" + matrix.table_html(ids, found, names, only=m.group(2))
+                             + "\n" + m.group(3)),
+                  text, flags=re.S)
     text = re.sub(r"(<!-- dnfw:combines (\w+) -->).*?(<!-- /dnfw:combines -->)",
                   lambda m: m.group(1) + matrix.combines_text(m.group(2), found, names) + m.group(3),
                   text, flags=re.S)

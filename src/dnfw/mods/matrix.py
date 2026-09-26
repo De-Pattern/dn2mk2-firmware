@@ -164,13 +164,16 @@ def combines_text(mod_id: str, found: list[Pair], names: dict[str, str]) -> str:
     return "; ".join(parts) + ". See the compatibility table"
 
 
-def table_html(ids: list[str], found: list[Pair], names: dict[str, str]) -> str:
+def table_html(ids: list[str], found: list[Pair], names: dict[str, str],
+               only: str | None = None) -> str:
+    """The whole matrix, or with `only` just that mod's row under the same header:
+    a tool page shows the row of the mod it builds."""
     by = {}
     for p in found:
         by[(p.a, p.b)] = by[(p.b, p.a)] = p
     head = "".join(f'<th scope="col"><code>{m}</code></th>' for m in ids)
     rows = []
-    for a in ids:
+    for a in ([only] if only else ids):
         cells = []
         for b in ids:
             if a == b:
