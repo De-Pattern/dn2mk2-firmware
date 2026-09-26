@@ -167,10 +167,18 @@ Waverider's type-5 loop plays that role on the DN2. **So port first, and write
 our own player only as the fallback.**
 
 The conditions a port has to meet:
-1. **No redistribution.** Shipping DT2 code would redistribute Elektron
-   firmware. The mod would **extract the routine from the user's own DT2 OS
-   file at apply time**, as `lfo4` rebuilds the parameter table from the user's
-   DN2 image. The owner decides whether that extra input is acceptable.
+1. **No redistribution. Decided by the owner, 2026-09-26: the user supplies
+   both firmwares.** The user uploads their DN2 1.11 OS and their DT2 OS, which
+   Elektron publish for free. Our code extracts the routine from the DT2 file
+   and transplants it into the DN2 image at apply time, in the CLI and in the
+   browser, so no Elektron code is redistributed. This is the same pattern as
+   `lfo4` rebuilding the parameter table from the user's own DN2 image.
+   - What the repository holds for a transplant: only our own work (offsets,
+     the donor's version and hash guards, relocation tables, adapter code).
+     **Never a DT2 byte**, in code, SPEC JSON, tests or fixtures; tests that
+     need the donor skip without it.
+   - A transplant mod takes a second input image and refuses a donor whose
+     version or hash it was not measured against.
 2. **An adapter.** The routine expects the DT2's voice record (32 × `0x1d8` at
    `0x2412cc`) and absolute addresses for its tables and sample pool. That
    means a DT2-shaped record per type-5 track, filled from the DN2 frame, and
@@ -184,7 +192,9 @@ The conditions a port has to meet:
 - compare it with digikit's runner executing the same routine on the DT2
   image, which is the control.
 
-**[D]**, not started.
+**In progress, 2026-09-26:** the offline port experiment runs on
+`feature/oneshot-port`, under the two-firmware rule above. Its results will be
+added here when it reports. **[D]** until then.
 
 **What has changed since** is that most of a player's infrastructure now exists
 or is being built for Waverider (`docs/waverider-feasibility.md`):
