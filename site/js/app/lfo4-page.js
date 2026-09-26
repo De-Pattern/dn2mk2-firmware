@@ -29,7 +29,7 @@ async function ready(firmware) {
   state.firmware = firmware;
   drawControls();
   $("writes").textContent =
-    `${EDITS} places in section 3, and ${(APPENDED / 1024).toFixed(1)} KB appended: a start-up `
+    `${EDITS} places in section 3, and ${(APPENDED / 1000).toFixed(1)} KB appended: a start-up `
     + `loader, the compiled C that runs LFO4, and a ${RECORDS}-record copy of the parameter table `
     + "rebuilt from this file";
   for (const id of ["step2", "step3", "bar"]) $(id).classList.remove("hidden");
