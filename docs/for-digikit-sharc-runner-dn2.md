@@ -207,3 +207,44 @@ one go away.
   additive-synthesis loops of `sw 0x1c463b` computed natively. Emulated in
   full, those loops are about 90 M instructions, around 1.7 hours. One
   dispatch with only track 0 active is about 54 k instructions, about 3 s.
+
+# Part 3: two more gaps on the note/amp path (2026-09-26, Milestone 3)
+
+Found by `scripts/sharc_waverider_m3.py` driving a note trigger and the amp
+stage (`sw 0xb80345`) on DN2 1.11 with your branch at `6f812e9`. Both are in
+`scripts/sharc_dn2_fixups.py` (G8, G10). **PR candidates; we have opened none.**
+
+## 14. Conditional Type 7a halts (PR candidate)
+
+`_type_7a` runs only `cond` 0x1F ("always") and 0x17, and stops on any other
+predicate with *"unsupported Type7a predicate"*. The amp stage's `sw 0xb80345`
+reaches `IF EQ MODIFY(I4, M4)` (a conditional bare MODIFY) at `0xb80481` once a
+voice's note is on. Our workaround evaluates the predicate and, when true, runs
+the MODIFY unconditionally; when false, advances. A bare conditional MODIFY has
+no compute to apply, so this is the same shape as your existing conditional
+handling elsewhere.
+
+## 15. Type 8a ignores the (LA) loop-abort bit (PR candidate)
+
+`_type_25a_direct` (which serves `8a_rel`/`8a_abs`) resolves the transfer with
+`transfer(state, insn, target, call, cond)` and never passes `loop_abort`,
+although `_transfer`/`_immediate_transfer` accept it and `_type_9a_abs`/
+`_type_9a_rel` do pass it. A `JUMP ... (LA)` out of a `DO` loop therefore leaves
+the loop's PC-stack and loop-stack entries in place; the next `RETURN` then
+halts with *"return target ... differs from recorded return ..."* against the
+stale loop entry. The amp stage does exactly this at `0xb803ee`
+(`JUMP IF LE 0xb80432 (LA)`), leaving a `DO ... UNTIL LCE` body. Our workaround
+evaluates the predicate and, when the jump is taken, calls your own
+`_apply_loop_abort(state)` (one pop of each stack) before the transfer -- the
+same single-level pop your Type 9a already performs. The proper fix is to thread
+`loop_abort = bool(_field(f, "a"))` through `_type_25a_direct` as the Type 9a
+handlers already do.
+
+## 16. Not a runner gap: the machine-type lookup and the selector clamp
+
+For the record, so a reader of Part 2 does not mistake these for runner bugs:
+DN2 squashes an out-of-range machine type in two firmware places, both of which
+run correctly in your executor -- the frame-nibble lookup at `0x25d748` (entry
+`[5]` is `0`) and the per-track clamp `min(R2, 4)` at `0x1c294c`. We raise both
+as image patches to add a sixth machine type; the executor runs the patched
+`min(R2, 5)` and the extra lookup entry without complaint.

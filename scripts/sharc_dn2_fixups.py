@@ -34,6 +34,19 @@ post-fix), or replaces the step outright:
   G6  a conditional Type 6a/6b halts ("unsupported Type6b predicate"). The
       predicate is evaluated and the form run unconditionally or skipped.
   G7  Type 13a is decoded but not executed (not met on this path yet).
+  G8  a conditional Type 7a (`IF EQ MODIFY(I4, M4)`, in the amp stage
+      sw 0xb80345 once a note is on) halts ("unsupported Type7a
+      predicate"): only "always" (31) and 0x17 run. Handled as G6.
+  G10 Type 8a ignores the (LA) loop-abort bit: `_type_25a_direct` calls the
+      transfer without `loop_abort`, although `_transfer` supports it (Type
+      9a passes it). A JUMP (LA) out of a DO loop then leaves the loop's
+      PC-stack entry behind, and the next RETURN halts ("return target
+      differs"). Met in the amp stage sw 0xb80345 at 0xb803ee once a note is
+      on. The predicate is evaluated here and, when taken, the loop and PC
+      stacks are popped once, as `_apply_loop_abort` does for 9a.
+  G9  (ours, not the runner's) G1's two-pass assumed every memory form names
+      its DAG field `i`; the 16-bit Type 3c names it `dmi`. Met in SIMD at
+      0x1c2857 in sw 0x1c2712 (Milestone 3).
 
 Two accelerations, each measured against the emulated code it replaces:
 
@@ -100,9 +113,11 @@ SIMD_NATIVE = {"2c", "2a_short", "14a", "3b", "15a"}
 MEM_NO_COMPANION = {"3a", "4a", "4b", "15b", "3c"}
 FLOW = {"12a_imm", "12a_ureg", "11c", "11a", "9a_abs", "9b_abs", "25c_rframe", "9a_rel",
         "25a_direct", "25a_pcrel", "8a_abs", "8a_rel", "13a"}
-COND_UNSUPPORTED = {"6b_shiftimm", "6a_mem"}
+COND_UNSUPPORTED = {"6b_shiftimm", "6a_mem", "7a"}
+COND_NATIVE = {31, 0x17}          # the predicates the runner already runs (0x17: Type 7a only)
 MR_PAIRS = (("MRF", "MSF"), ("MRB", "MSB"))     # PEx / PEy multiplier result registers
-WATCH = COND_UNSUPPORTED | {"3a", "4a", "4b", "3b", "15b", "13a", "17a", "17b", "2b"}
+LOOP_ABORT_FORMS = {"8a_rel", "8a_abs"}
+WATCH = COND_UNSUPPORTED | LOOP_ABORT_FORMS | {"3a", "4a", "4b", "3b", "15b", "13a", "17a", "17b", "2b"}
 NW_LO, NW_HI = 0x240000 // 4, 0x3A0000 // 4
 # PCs whose parcel digikit reads as a 32-bit Type 2b and selache as a 16-bit 2c
 AS_2C = {0x1C0E13, 0x1C4F4A}
@@ -183,13 +198,15 @@ class Fixups:
                     return ("replace", lambda r: self.two_pass(r, insn, flow=True))
             elif "compute[22:16]" in f or t in ("5a_move", "5b_move"):
                 return ("replace", lambda r: self.two_pass(r, insn))
+        if t in LOOP_ABORT_FORMS:
+            return self.loop_abort(insn, s, pc) if F(f, "a") else None
         if t in ("4b", "3b"):
             return self.long_word(t, f, s, pc)
         if t == "13a":
             return ("replace", lambda r: self._halt(r, insn, "Type 13a is not executed (G7)"))
         if t in ("17a", "17b"):
             return self.imm_17a(t, f, s, pc)
-        if t in COND_UNSUPPORTED and cond_of(f) != 31:
+        if t in COND_UNSUPPORTED and cond_of(f) not in (COND_NATIVE if t == "7a" else {31}):
             return ("replace", lambda r: self.conditional(r, insn))
         return None
 
@@ -246,7 +263,21 @@ class Fixups:
         else:
             runner.state = seq._advance(s, insn)[0]
         runner.instructions += 1
-        self.note(f"conditional {insn.type_name} (G6)", s.pc_sw)
+        self.note(f"conditional {insn.type_name} ({'G8' if insn.type_name == '7a' else 'G6'})", s.pc_sw)
+
+    # -- G10 -----------------------------------------------------------------------------
+    def loop_abort(self, insn, s, pc):
+        cond = cond_of(insn.fields)
+        pred = True if cond == 31 else seq._predicate(s, cond)
+        if pred is None:
+            return ("replace", lambda r: self._halt(r, insn, "JUMP (LA) predicate unknown (G10)"))
+        if not pred:
+            return None
+
+        def post(r):
+            seq._apply_loop_abort(r.state)
+            self.note("jump (LA) loop abort (G10)", pc)
+        return post
 
     # -- G3 ------------------------------------------------------------------------------
     def long_word(self, t, f, s, pc):
@@ -299,7 +330,9 @@ class Fixups:
         uy[m1] = sisd
         comp = False
         if memory:
-            idx = 16 + F(f, "i") + (8 if F(f, "g") else 0)
+            # the 16-bit Type 3c names its DAG fields dmi/dmm and is always DM
+            idx = (16 + F(f, "dmi")) if "dmi[2:0]" in f else \
+                16 + F(f, "i") + (8 if F(f, "g") else 0)
             iv = uy[idx]
             if not isinstance(iv, Const):
                 raise sr.Halt("two-pass: I register not concrete", s.pc_sw, insn.type_name)
