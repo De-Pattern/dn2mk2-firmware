@@ -56,6 +56,53 @@ SELECTOR_CLAMP = 0x1C294C     # sw 0x1c2712: min(R2, 4)
 STAGE5 = 0xB80F2E             # a per-track filter stage with a 1024-point shaper table
 STAGE5_TABLE = 0x26B3A8
 
+# -- Milestone 3: the note trigger, the amp, and where a sixth machine type hooks --
+#
+# Every address below was read out of a run in digikit's SHARC runner
+# (`scripts/sharc_waverider_m3.py`), not only out of the listing.
+
+# The note trigger. The per-track frame image (copied to 0x25c48c) carries a
+# trigger bit; the unpack raises the engine flag ENGINE + TRIG_CELL and calls
+# NOTE_ON_FN, and the dispatch's compare at 0x1c90fb (record note counter) gates
+# the amp. With the flag set the amp opens; clear, the amp is closed.
+TRIG_CELL = 0x138FC           # engine + this: the per-track note-trigger flag (byte)
+NOTE_ON_FN = 0xB82440         # arms a voice's note counter (0x1c91c5 / 0x1c96a3)
+AMP_STAGE = 0xB80345          # the per-track amp; its write at 0xb80515
+AMP_SETUP = 0xB8028C          # reads the envelope (record +0x20c..+0x228), called at 0x1c92b0
+AMP_ENV_OFFSETS = (0x20C, 0x210, 0x214, 0x218, 0x21C, 0x220, 0x224)   # record words: ADSR
+
+# The machine-type dispatch. The frame's type nibble indexes MACHINE_LOOKUP;
+# entry [5] is 0 in stock (so a type-5 frame is squashed to FM Tone). A separate
+# per-track selector is clamped by TYPE_CLAMP (min(R2, 4) at SELECTOR_CLAMP; the
+# `R0 = 0x4` that feeds it is at TYPE_CLAMP_IMM). Raising both admits type 5.
+MACHINE_LOOKUP = 0x25D748     # 8-word table: frame nibble -> machine type, [0..4]=0..4, [5..]=0
+TYPE_CLAMP_IMM = 0x1C294A     # `R0 = 0x4`; raised to `R0 = 0x5` for a sixth type
+PER_TYPE_SETUP = 0x8052DB90   # jump table sw 0x1c8ef1 uses to set up each machine type
+
+# The four stock per-type render loops in sw 0x1c8ef1, and where a fifth is added.
+# A JUMP over TYPE5_ENTRY (after the Swarmer loop, before the per-track chain)
+# reaches our own loop; it returns to TYPE5_RESUME.
+PER_TYPE_RENDER_LOOPS = (0x1C93E5, 0x1C9401, 0x1C941C, 0x1C943B)   # FM Tone/WaveTone/FM Drum/Swarmer
+TYPE5_ENTRY = 0x1C9448        # the two instructions here are replaced by JUMP wr_type5
+TYPE5_RESUME = 0x1C944C       # where wr_type5 rejoins the per-track chain
+
+# Where our own SHARC code is spliced (PM sw / DM byte; unloaded spans).
+READER_SW = 0x180000          # csrc/waverider/sharc/reader.asm  (wr_render)
+MACHINE5_SW = 0x180100        # csrc/waverider/sharc/machine5.asm (wr_type5)
+
+
+def machine_from_nibble(nibble: int, lookup: list[int] | None = None) -> int:
+    """The stock frame-nibble -> machine-type mapping (MACHINE_LOOKUP): 0..4 pass
+    through, 5+ squash to 0. A real type-5 frame needs entry [5] set to 5 too."""
+    table = lookup if lookup is not None else [0, 1, 2, 3, 4, 0, 0, 0]
+    return table[nibble] if 0 <= nibble < len(table) else 0
+
+
+def type_clamp(value: int, ceiling: int = 4) -> int:
+    """The per-track selector clamp at SELECTOR_CLAMP: max(value, 0) then min(., ceiling).
+    Stock ceiling is 4; Milestone 3 raises it to 5 for the sixth machine type."""
+    return min(max(value, 0), ceiling)
+
 
 def track_record(track: int) -> int:
     _check_track(track)
