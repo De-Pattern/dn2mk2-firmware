@@ -56,8 +56,9 @@ def configure(parser) -> None:
     mx.add_argument("image", type=pathlib.Path)
     mx.add_argument("--json", type=pathlib.Path, help="also write the result as JSON")
     mx.add_argument("--page", type=pathlib.Path, action="append", default=[],
-                    help="rewrite the generated regions (<!-- dnfw:matrix --> and "
-                         "<!-- dnfw:combines ID -->) of this HTML or Markdown file")
+                    help="rewrite the generated regions (<!-- dnfw:matrix -->, "
+                         "<!-- dnfw:matrix-row ID --> and <!-- dnfw:combines ID -->) "
+                         "of this HTML or Markdown file")
     mx.add_argument("--boots", type=pathlib.Path,
                     help="a directory of <a>+<b>/boot.txt from emu_boot_check.py, "
                          "written into the <!-- dnfw:boots --> region")
@@ -403,6 +404,10 @@ def _rewrite(page: pathlib.Path, ids, found, names, boots=None) -> None:
                 rows.append(f"- `{pair.a}` + `{pair.b}`: {verdict}")
         text = re.sub(r"(<!-- dnfw:boots -->).*?(<!-- /dnfw:boots -->)",
                       lambda m: m.group(1) + "\n" + "\n".join(rows) + "\n" + m.group(2), text, flags=re.S)
+    text = re.sub(r"(<!-- dnfw:matrix-row (\w+) -->).*?(<!-- /dnfw:matrix-row -->)",
+                  lambda m: (m.group(1) + "\n" + matrix.table_html(ids, found, names, only=m.group(2))
+                             + "\n" + m.group(3)),
+                  text, flags=re.S)
     text = re.sub(r"(<!-- dnfw:combines (\w+) -->).*?(<!-- /dnfw:combines -->)",
                   lambda m: m.group(1) + matrix.combines_text(m.group(2), found, names) + m.group(3),
                   text, flags=re.S)
