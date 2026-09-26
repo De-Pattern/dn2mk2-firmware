@@ -84,6 +84,15 @@ ONESHOT needs sample storage (1016 per project), a sample browser, sample locks
 per step, and streaming from the `+Drive` into the voice at trigger time. The
 DN2 has none of it as a user-facing sample path.
 
+> **Superseded in part, 2026-09-26 (`docs/drive-storage-research.md` §4).**
+> "Streaming from the `+Drive` into the voice at trigger time" is not how the
+> DT2 works. It **preloads** a project's samples into a 400 MiB RAM pool
+> (`0x19000000` at DT2 `0x40153814`) that sits on the SHARC side, and the voice
+> reads RAM. The DN2 also has more than "none of it". The ColdFire end of the
+> DT2's sample-page link (the `0x8c000000` port) is present and identical, and
+> the +Drive has about 20.9 GiB the stock firmware never touches. The
+> conclusion below is unchanged, because the SHARC engine is still the cost.
+
 The owner's storage decision — **wavetables and samples both become `+Drive`
 project data** — settles *where* this would live, and DNX is the format
 authority for it. It does not reduce the amount of subsystem to build.
