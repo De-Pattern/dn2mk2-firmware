@@ -151,9 +151,40 @@ same shape need not have the same semantics. No emulator run, no hardware.
 ## Revisited 2026-09-26: a ONESHOT-lite on Waverider's machinery
 
 **Raised by the owner:** port ONESHOT as a way to test sample handling, apart
-from Waverider. The conclusion above stands for a *port*: the DT2's sample
-engine has no DN2 twin, so this would be our own player, not Elektron's moved
-across.
+from Waverider.
+
+**Corrected the same day, at the owner's challenge.** ~~The conclusion above
+stands for a port: the DT2's sample engine has no DN2 twin, so this would be
+our own player, not Elektron's moved across.~~ "No twin" means the DN2 does
+not *already contain* the code, not that it cannot be moved. Both are SHARC+,
+there is room, and the part a machine needs is small:
+- the voice render `0x1c4ecf` is 84 instructions and a leaf;
+- `0x1c4f81` beside it (381 instructions) already renders correctly in
+  digikit's runner on DT2 1.16.
+
+The large missing piece, the 1,464-instruction per-slot dispatch, is not needed:
+Waverider's type-5 loop plays that role on the DN2. **So port first, and write
+our own player only as the fallback.**
+
+The conditions a port has to meet:
+1. **No redistribution.** Shipping DT2 code would redistribute Elektron
+   firmware. The mod would **extract the routine from the user's own DT2 OS
+   file at apply time**, as `lfo4` rebuilds the parameter table from the user's
+   DN2 image. The owner decides whether that extra input is acceptable.
+2. **An adapter.** The routine expects the DT2's voice record (32 × `0x1d8` at
+   `0x2412cc`) and absolute addresses for its tables and sample pool. That
+   means a DT2-shaped record per type-5 track, filled from the DN2 frame, and
+   relocated addresses.
+3. **Samples in DSP memory.** This is Waverider's table-delivery problem, which
+   M4 solved: bake a small bank into section 7 behind a directory.
+
+**The offline experiment that settles it:**
+- lift `0x1c4ecf`'s reach set into the DN2 image in the runner;
+- drive it from the type-5 loop with a DT2-shaped record and a baked sample;
+- compare it with digikit's runner executing the same routine on the DT2
+  image, which is the control.
+
+**[D]**, not started.
 
 **What has changed since** is that most of a player's infrastructure now exists
 or is being built for Waverider (`docs/waverider-feasibility.md`):
@@ -163,7 +194,7 @@ or is being built for Waverider (`docs/waverider-feasibility.md`):
 - tables baked into section 7 behind a directory (M4);
 - the first flash of modified SHARC code (M5, in progress).
 
-**So the cheap variant is a ONESHOT-lite:**
+**If the port fails, the fallback is a ONESHOT-lite of our own:**
 - a small **baked sample bank** in section 7, as Waverider bakes tables and
   `transients` replaces the drum bank, with no browser;
 - `SAMP` as a slot index, like Waverider's SLOT;
