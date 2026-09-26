@@ -148,6 +148,41 @@ per track. **The DSP cannot tell them apart.** So:
 Either answer is worth more than the next week of static SHARC reading, and it
 costs one minute at the instrument with no flash.
 
+## Measured in the runner (2026-09-26, Waverider Milestone 2)
+
+`scripts/sharc_waverider_voice.py` runs the engine init and the slot dispatch
+in digikit's SHARC runner (`docs/waverider-feasibility.md`, "Milestone 2").
+This settles the **[O]** above and corrects two readings on this page.
+
+- **`0x241298` is the engine state, not a record array [E].** It is R4 into
+  both the engine init `sw 0x1c8e1c`, called from `sw 0x1c1445` (the init
+  that DT2's `FUN_1c15e3` corresponds to), and the dispatch. Init lays out
+  per-machine voice state inside it, one block per track: FM Tone at `+0x8`
+  (stride `0x240`), WaveTone at `+0x2408` (`0x30c`), FM Drum at `+0x54c8`
+  (`0x2e8`) and Swarmer at `+0x8348` (`0x55c`). The field offsets listed
+  above (`+0x230`, `+0x358`, ...) are those blocks.
+- **`0x2554b8` holds 16 track records, stride `0x234` [E].** Word `+0x1b4`
+  is the machine type the dispatch switches on: 0 FM Tone, 1 WaveTone,
+  2 FM Drum, 3 Swarmer, 4 MIDI (no render). The order matches
+  `docs/machine-list.md`.
+- **The block size is word 0 of `0x257e6c`: 32 [E].**
+- **The per-track output is a float block per track [E].** 16 pointers at
+  `0x241298 + 0x137c8` = `0x254a60`, each pointing to 32 floats
+  (`0x804acf90 + 0x80 * t`). The machine render writes it, the per-track
+  chain processes it in place, and a final loop (`0x1c9ae7`) scatters it,
+  with a gain pair per track, to the 16-channel lanes.
+- **`sw 0x1c9b73` is not a function** but a set of jump-table arms. Its
+  "stage calls" are per-track **filter** renders, dispatched through
+  `0x8052dbc0[filter type]` with 7 entries (setup through `0x8052dba4`).
+  **Stage 5 (`sw 0xb80f2e`) is filter type 3**, and its table `0x26b3a8` is a
+  1025-point tanh shaper, running from -0.99933 to 0.99933. ~~Stage 5 has the
+  same shape as our reader~~: the shape is a fractional table read, but
+  inside a recursive filter, not an oscillator.
+- **The machine renders are dispatched per type** in `sw 0x1c8ef1`: FM Tone
+  → `sw 0x1c54c7` + `sw 0xb82728`, WaveTone → `sw 0x1c6d4a` (called at
+  `0x1c9611`), FM Drum → `sw 0x1c778b`, Swarmer → `sw 0x1c85ad`. Per-track
+  setup is dispatched through `0x8052db90[type]`.
+
 ## Next
 
 1. **Run that control.** It may invalidate the framing of this whole document.
