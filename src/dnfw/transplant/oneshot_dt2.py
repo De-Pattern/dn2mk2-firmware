@@ -34,12 +34,15 @@ RECIPIENT = Guard(device="Digitone II", product=52, version="1.11",
 
 # Where the pieces land in the DN2. Every recipient byte is one the DN2 1.11
 # boot stream never loads (checked by `plan.build`); unloaded is not the same
-# as unused at run time, which is recorded as open in the doc.
-RENDER_SW = 0x180800
-DIVIDE_SW = 0x180D00
-DECIMATOR_SW = 0x180E00
-COEFF_DM = 0x294000
-DECCOEF_DM = 0x295800
+# as unused at run time, which is recorded as open in the doc. All of it is in
+# L1 block 2, above Waverider M5's spans (0x300000..0x30a000): the first
+# placement (sw 0x180800, DM 0x294000) was in the gap between L1 blocks 0 and 1,
+# which is not memory on the part (`docs/waverider-m5-dsp.md`, correction 1).
+RENDER_SW = 0x185000                    # PM byte 0x30a000, L1 block 2 (above Waverider M5)
+DIVIDE_SW = 0x185480
+DECIMATOR_SW = 0x185500
+COEFF_DM = 0x30C400
+DECCOEF_DM = 0x30DC00
 
 SPANS = (
     Span("render", "code", 0x1C4ECF, 0x465,
