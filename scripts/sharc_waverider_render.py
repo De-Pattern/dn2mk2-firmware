@@ -432,7 +432,8 @@ def main(argv=None) -> int:
                    help="reassemble with selas and cross-decode with selmap (WSL)")
     p.add_argument("--write-assembled", action="store_true",
                    help="with --assemble: refresh the committed reader.json")
-    p.add_argument("--seconds", type=float, default=0.5, help="length of the WAV sweep")
+    p.add_argument("--seconds", type=float, default=2.0,
+                   help="length of the WAV sweep; at least 2 s, so it can be listened to")
     p.add_argument("--freq", type=float, default=110.0, help="WAV pitch, Hz")
     p.add_argument("--block", type=int, default=32, help="samples per call in the WAV")
     args = p.parse_args(argv)

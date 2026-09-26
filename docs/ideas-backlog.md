@@ -43,7 +43,7 @@ Where they disagree, they win and this table is wrong.
 | 16 | Glitch-ASCII intro | **delivered** | part of `bootscreen` / `site/boot.html` (#82, #83); hardware #84 | — |
 | 17 | Performance mixer | **not started** | — | everything. The Outbox 8 reading below is a starting point it did not have when filed |
 | 18 | P-lock arpeggiator parameters | **delivered** | `arpplocks` mod (#85, #86): MODE, SPEED, RANGE, N.LEN per trig, every edit path verified | `--all`'s LEN, the sixteen step offsets and the step mutes (mutes untested since the fix) |
-| 24 | Another random arpeggiator mode | **open — scope to settle** | — | which randomness: stock already has `SHUF` (5) and `RAND` (6), so the new mode must add something they do not (see §24) |
+| 24 | Another random arpeggiator mode | **SHUF and RAND built** as `arpmodes`, emulator-gated 2026-09-26 | `docs/arp-hidden-modes.md` §7; stock's `SHUF`/`RAND`/`CHRD` were names only, all three playing CYCL | the instrument test; CHRD left out by the owner's decision |
 
 **The numbering is wrong and is left wrong on purpose.** There are two `## 8.`
 headings — "New LFO waveforms" and "FX machines on tracks" — and `## 7.` sits
@@ -3335,6 +3335,14 @@ settings, MODE and RNG, and the rest waits on extending the mirror past 101.
   the locked byte.
 - **MODE values** (menu table `0x401d4b1c`): OFF 0, TRUE 1, UP 2, DOWN 3, CYCL 4,
   SHUF 5, RAND 6, CHRD 7 -- matching the step's dispatch (`0x4002a114`).
+  **Qualified 2026-09-26:** these are the *names in the image*, not what the
+  instrument offers.
+  - The owner reports the DN2 has no shuffle or random arp mode.
+  - The Digitone II manual (OS 1.10D, §9.7.1) and the Digitone manual (OS 1.41)
+    both list only OFF, TRUE, UP, DOWN and CYCL.
+  - SHUF, RAND and CHRD, and their long forms SHUFFLE, RANDOM and CHORD, sit
+    after CYCL in the same pointer run, hidden from the menu.
+  - Whether the dispatch implements them is **[O]**.
 - **Limits.** MODE can change per trig only while the arp is on (the sequencer
   decides the arp clock from the sound's own MODE); a lock to OFF silences the
   step. No UI yet: DNX writes the locks for testing.
@@ -3597,12 +3605,32 @@ whether the snapshot's framebuffer address is still resolvable after a resume.
 **Raised by the owner 2026-09-25:** *"add a random mode to the arpeggiator to
 expand the current set of modes."*
 
-**What stock already has, so the new mode is not a duplicate.** The mode menu
-(`0x401d4b1c`, §18) lists **OFF 0, TRUE 1, UP 2, DOWN 3, CYCL 4, SHUF 5, RAND
-6, CHRD 7**, and the step's dispatch at `0x4002a114` switches on the same
-values. `SHUF` reorders the held notes; `RAND` already picks among them at
-random. So "a random mode" has to mean a randomness those two do not give.
-Candidates, for the owner to choose between:
+**What stock already has.** ~~The mode menu (`0x401d4b1c`, §18) lists **OFF 0,
+TRUE 1, UP 2, DOWN 3, CYCL 4, SHUF 5, RAND 6, CHRD 7**, and the step's dispatch
+at `0x4002a114` switches on the same values. `SHUF` reorders the held notes;
+`RAND` already picks among them at random. So "a random mode" has to mean a
+randomness those two do not give.~~
+
+**Corrected 2026-09-26, by the owner and the manual:** the DN2 has **no random
+arp mode**. The Digitone II manual (OS 1.10D, §9.7.1) lists OFF, TRUE, UP, DOWN
+and CYCL, and nothing after CYCL. The reading above took names in the image for
+the menu.
+- The names SHUF, RAND and CHRD (with SHUFFLE, RANDOM and CHORD) are in the
+  image, after CYCL, but the instrument never offers them.
+- Shuffle and Random therefore move into the proposals, as candidates 1 and 2.
+- **They may be the cheapest proposals of all.** If the dispatch at
+  `0x4002a114` really implements values 5 and 6, unlocking them could be a bound
+  change, the way `moddest` was. That is **[O]** until the dispatch cases are
+  read and run.
+
+A page comparing them, with piano rolls and playback for each:
+https://claude.ai/artifact/4Nemg8wwenR5Evkqi66jPL
+
+Proposals, for the owner to choose between:
+
+- **Shuffle** -- every note in the range once per cycle, in a new random order
+  each cycle.
+- **Random** -- any note in the range, at random, each step.
 
 - **Random octave** — the note order stays UP/DOWN/etc. and each step lands in
   a random octave within `RNG`.
@@ -3628,3 +3656,39 @@ Candidates, for the owner to choose between:
 
 **Not started.** The first step is the owner's choice of which randomness;
 the second is reading how stock `RAND` gets its random numbers.
+
+### Measured 2026-09-26: SHUF, RAND and CHRD are names only
+
+`docs/arp-hidden-modes.md`, `scripts/emu_arp_modes.py` (stock 1.11, 28 checks).
+- **The step implements four cases, not eight.** The dispatch at
+  `0x4002a114` tells apart OFF, TRUE, UP and DOWN. It sends MODE 4, 5, 6, 7
+  and negative values to one default, CYCL at `0x4002a28a`.
+- **In the emulator, 5, 6 and 7 each play CYCL note for note.** They do so with
+  offsets, mutes and LEN too. SHUF and RAND repeat exactly on a rerun. The
+  controls, UP and CYCL, play as the manual says.
+- **The step has no random source.** The firmware's only `rand()` is the ANSI
+  LCG at `0x40150670`, and nothing in the arp calls it.
+- **The bounds are five `moveq #4`s.** Two are in setMode (`0x4004befa`,
+  `0x4004bf00`), two in the FUNC+ARP restore (`0x4004bfb4`, `0x4004bfc6`) and
+  one in the stored-sound LOAD (`0x400dd530`). SAVE writes 5..7 raw, and
+  stock LOAD turns them into **0, arp OFF**, without crashing.
+- **So there is no cheap unlock, and no `arpmodes` mod.** Widening the bounds
+  would offer three entries that all sound like CYCL. RAND and SHUF need a
+  small cave behind the default branch, with a random source of its own. CHRD
+  needs new voice code in the ISR trig handler, because the step returns one
+  note per call. `docs/arp-hidden-modes.md` §6 has the costs.
+
+### Built 2026-09-26: `arpmodes`, SHUF and RAND
+
+The owner chose to build the two modes whose names already exist, and to
+leave CHRD out. The mod is `dnfw mods` `arpmodes` (`docs/mods.md` Mod 9), and
+the evidence is in `docs/arp-hidden-modes.md` §7.
+- **SHUF:** every note of the range once per cycle, in a new random order
+  each cycle, with no repeat across the cycle boundary.
+- **RAND:** a random note of the range on each step.
+- **The rest is stock:** LEN, mutes, offsets, SPD and N.LEN all behave as in
+  the other modes.
+- **The menu stops at RAND**, and a 7 still plays CYCL.
+- **arpplocks' MODE lock** now reaches RAND too. Its ceiling is read from
+  setMode's own clamp.
+- **Not yet on the instrument.**

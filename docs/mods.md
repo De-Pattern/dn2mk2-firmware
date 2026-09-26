@@ -65,6 +65,16 @@ data in section 7 — so the overlap test returns the right answer and would
 return the right answer if it did nothing at all. That is worth knowing about a
 check before trusting it.
 
+**Superseded 2026-09-26: the check now bites, and it is run on every pair.**
+Eight mods exist, six of them in section 3, and `dnfw mods matrix` tries every
+pair in both orders (`docs/mods-compatibility.md`, generated). It found:
+- three real overlaps: two mods in one cave, and three appending mods on one
+  start-up hook;
+- one pair that combines only in one order;
+- one trap that byte overlap cannot see. A mod that copies part of the image
+  (lfo4 copies the parameter table) silently loses a later mod's edit to that
+  part, so mods now declare what they copy (`COPIES`).
+
 ## Mod 1: `transients`
 
 Replaces the FM drum transient bank (`docs/pcm-hunt.md` §14).
@@ -455,9 +465,12 @@ group-name fix.
   the load verifies 21/21, the rebuild verifies 21/21 and offers
   `Digitone_II_OS1.11_fxmod.syx` at 2,387,616 bytes, with no console errors.
 
-**Conflicts:** none known. It writes inside section 3 only, appends nothing and
-claims no startup hook, so `check_compatible` clears it against `moddest`,
-`lfowaves`, `midiarp` and `transients`. As always that is a byte-overlap
+**Conflicts:** ~~none known~~. **Corrected 2026-09-26:** it shares a code cave
+with `arpplocks` (`0x4028ea04`, 126 bytes). `dnfw mods matrix` refuses the pair,
+and so does `apply`. It writes inside section 3 only, appends nothing and claims
+no startup hook, so `check_compatible` clears it against `moddest`, `lfowaves`,
+`midiarp` and `transients`. Against `lfo4` it is order-only, and refuses an lfo4 image (2026-09-26): its Chorus record
+edits must be in the table before lfo4 copies it. As always that is a byte-overlap
 statement and not a musical one, and no combined image has been flashed.
 
 **What it deliberately leaves out.** Master. Its slots need destination codes
@@ -469,3 +482,126 @@ Chorus, Delay and Reverb. Sixteen tracks' LFOs can all aim at the same cell and
 they add up, because every evaluator reads the cell and adds to it before the
 clamp. That is what "global" means, not a fault — but it is surprising the first
 time, so both the page and the index card say it.
+
+## Mod 8: `lfo4` -- a fourth LFO
+
+The fourth `[MOD]` page. It modulates on every voice, and is kept by SAVE
+PROJECT and across a power-cycle without one (`docs/lfo4-build-plan.md`, tests
+10 and 11). Unlike every mod before it, it is **C**: `csrc/lfo4/`, compiled and
+linked by `scripts/build_lfo4_browser.py`.
+
+**How C becomes a mod.** The C stays the source. `scripts/gen_lfo4_code.py`
+runs the release build's own composition (`build_lfo4_browser.RELEASE`) and
+records what it changed as data (`src/dnfw/mods/lfo4_code.json`):
+- 204 in-image edits, each with the stock bytes it expects;
+- the 23,692-byte appended area.
+
+It then applies the result to stock and refuses to write unless the output is
+byte-identical to the build. `dnfw mods apply --mod lfo4` on stock 1.11 writes
+**the same `.syx`, byte for byte**, as `lfo4-everyvoice4`, the release twin of the
+code that passed on the instrument.
+
+**No stock data ships.** The appended area carries a copy of the parameter
+table, 320 stock records plus ten for LFO4 derived from LFO3's. Those 19,800
+bytes are blank in the JSON and rebuilt at apply time from the user's own image
+(`paramtable.records`, `lfo4records.build`).
+
+**Order matters, and the CLI enforces it.** Because lfo4 copies the table,
+`APPLY_LAST` puts it after every other mod. So `moddest`'s thirteen masks and
+`fxmod`'s Chorus records are in the copy (tested). It needs the start-up hook
+and the appended area, so it cannot be combined with `lfowaves` or `bootscreen`
+until one platform loader owns both (`docs/mods-compatibility.md`).
+
+**Browser:** `site/lfo4.html`, 2026-09-26. `gen_lfo4_code.py` also writes
+`site/js/mods/lfo4-code.js` from the same data (the JSON stays byte-identical, and
+the script still reproduces the release build byte for byte), and
+`site/js/mods/lfo4.js` ports `compose`: the stock length and every edit's stock
+bytes are checked, with the Python's wording, then the relocated table is rebuilt
+from the user's image (`paramtable.records`, `lfo4records.build` with
+`free_unique_ids` and the five field rewrites), so no table bytes ship to the
+browser either.
+- **Order in the browser.** One page, one mod: the user builds fxmod or moddest
+  first and loads that download into the LFO4 page, which says so. The pages
+  that must come first refuse an lfo4 image: moddest already did, and fxmod now
+  checks the table's 56 accessor bases (`paramtable.base_sites`, ported as
+  `fxmod.tableInPlace`) and says to apply fxmod first, in the CLI and the browser.
+  Without that, fxmod after lfo4 applied cleanly and opened ten records in a
+  table nothing reads.
+- **Parity:** `node scripts/js_lfo4_check.mjs`, run by `test_js_lfo4.py`: stock
+  -> lfo4 equals `lfo4.compose`; fxmod -> rebuilt `.syx` -> reloaded -> lfo4
+  equals MAIN OS of the CLI's `--mod fxmod --mod lfo4`; moddest -> lfo4 equals
+  the Python's; lfo4 accepts a midiarp image; every rebuilt image verifies 21/21;
+  and five refusals (lfo4 on an lfowaves image, on a longer image, on an edited
+  site; fxmod and moddest on an lfo4 image) are worded the same on both sides.
+- **Page, driven in Chrome** (the stock `.syx` uploaded, Build clicked): the load
+  verifies 21/21, the eight controls render, the rebuild verifies 21/21 and offers
+  `Digitone_II_OS1.11_lfo4.syx` at 2,398,112 bytes, **SHA-256-identical to the
+  CLI's `--mod lfo4` output**, with no console errors. An lfowaves image is
+  refused on its length; the FX page refuses the lfo4 image and names the order.
+
+## Mod 9: `arpmodes` -- SHUF and RAND, as real arp modes
+
+**Status: confirmed on the instrument 2026-09-26** (`arpmodes_DN2_1.11.syx`; the owner: *"works in device"*). ~~Built and emulator-gated 2026-09-26; not yet on the instrument.~~
+
+Stock 1.11 names eight arp modes and offers five. SHUF, RAND and CHRD have no
+code behind them, and all three play CYCL (`docs/arp-hidden-modes.md`). This mod
+gives SHUF and RAND their own code and widens the MODE menu to them. CHRD (7)
+stays out, at the owner's decision. The menu stops at RAND, and a 7 forced in
+some other way still plays CYCL.
+
+- **SHUF** plays every note of the range once per cycle, in a new random order
+  each cycle. The range is the held notes times RNG + 1 octaves. The note that
+  ends one cycle never starts the next.
+- **RAND** plays a random note of the range on each step. Repeats are allowed.
+- **Everything else is the stock step.** The new code only picks a note and an
+  octave, then hands them to the step's own tail (`0x4002a376`), as UP does. So
+  LEN, the step mask (a muted step rests and does not advance), the step
+  offsets, SPD and N.LEN behave as in every other mode.
+
+**What changes:** 8 edits in section 3, 374 bytes. Nothing is appended and no
+length changes.
+- The dispatch at `0x4002a13c`: 12 bytes become a `jmp` to the cave. The cave
+  sends 3 to DOWN, 5 and 6 to the new code, and everything else to CYCL.
+- The five `moveq #4` MODE bounds become `moveq #6`: setMode (`0x4004befa`,
+  `0x4004bf00`), the FUNC+ARP restore (`0x4004bfb4`, `0x4004bfc6`) and the
+  stored-sound LOAD (`0x400dd530`).
+- Two code caves: 230 B at `0x402d08c0` and 122 B at `0x4028fcb4`. The first is
+  the free tail of the run that midiarp and arpplocks already run from on the
+  instrument.
+- RAM: 2,320 B at `0x467a0000`, above BSS. It holds the generator and one
+  144-byte SHUF record per track (which entries this cycle has played).
+
+**Randomness.** A private xorshift32, one generator for all tracks. The
+firmware's shared `rand()` (state `0x405cd95c`) is not called or touched. When
+an arp starts on SHUF or RAND, the millisecond tick (`0x466758b0`) is XORed into
+the generator, so boots and chords do not replay one sequence.
+`scripts/build_arpmodes.py` has the design and the RAM layout.
+
+**Generator:** `scripts/gen_arpmodes_code.py` composes `build_arpmodes.compose`
+on stock and writes `arpmodes_code.json`: every edit with the stock bytes it
+expects, plus 15 guards. It refuses to write unless the JSON, replayed on
+stock, is the build byte for byte. `test_arpmodes_mod.py` checks the same
+against `out/arpmodes/section_3_MAIN_OS.bin`.
+
+**A sound saved with SHUF or RAND** is stored as MODE 5 or 6. Stock firmware,
+or any build without this mod, loads it with its arp **OFF**, because stock's
+LOAD bound turns anything above 4 into 0. That was measured on stock, not
+assumed.
+
+**With arpplocks.** arpplocks' MODE lock used to clamp to its own 0..4. It now
+takes its ceiling from the immediate of setMode's clamp (`0x4004bf01`), so it
+follows whatever the menu reaches: CYCL on its own, RAND with this mod. This is
+a **patch to arpplocks**, not an order rule or a declared conflict: 10 bytes in
+arpplocks' UI cave. The two write disjoint bytes and apply in either order, and
+neither names the other. Measured in the emulator, with arpplocks alone as the
+control.
+
+**Gates** (2026-09-26): `scripts/emu_arp_modes.py` (stock, the mod, arpplocks
+alone, both), `scripts/emu_boot_check.py`, `scripts/emu_boot_engine.py
+--arp-mode`, `scripts/check_coldfire.py`, and a push-and-turn screenshot of the
+MODE menu. The results are in `docs/arp-hidden-modes.md` §7.
+
+**Combines** with every other mod: `dnfw mods matrix` gives `yes` for all eight
+pairs. As always, that is a statement about bytes. With `midiarp`, a MIDI
+track's arp runs the same step, so SHUF and RAND should reach MIDI tracks too.
+That has not been run.
