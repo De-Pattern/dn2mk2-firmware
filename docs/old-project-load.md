@@ -56,11 +56,21 @@ pointer made of song data, which is what the photographed frame looks like.
 empty song; 0..99 loads exactly as before. No cave, no hook, nothing appended,
 and it shares no byte with any other mod.
 
+## Confirmed on the instrument -- 2026-09-26
+
+The owner flashed `Digitone_II_OS1.11_fxmod_lfo4_fixed.syx` (fxmod + lfo4 +
+songguard, sha256 `120c23a5...0eef`) and opened project 4, SKETCHPAD: **it
+opened, with no EXCEPTION screen** (confirmed by the owner). The same project
+on the same mods without songguard had halted.
+
+Not yet checked on the instrument: song 1 reading empty, re-opening after
+switching projects, LFO4 and the FX destinations after the load, and playback.
+
 ## What stays unverified
 
 - **Stock on the instrument.** The emulator says stock 1.11 takes the same
-  fault. The owner has not yet opened SKETCHPAD on stock; the prediction is that
-  it halts too.
+  fault. SKETCHPAD has not been opened on stock since the damage; the
+  prediction is that it halts too.
 - **The exact screen.** The emulator's fault is the first consequence of the
   overrun (the settings); the instrument got further before something read the
   overwritten task state. The photographed frame is consistent with that, not
