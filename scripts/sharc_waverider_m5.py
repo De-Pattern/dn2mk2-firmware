@@ -351,6 +351,7 @@ def main(argv=None):
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
     p.add_argument("--steps", default="decode,map,voice,stock,frame")
+    p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
         raise SystemExit("--seconds must be at least 2")
@@ -413,9 +414,9 @@ def main(argv=None):
                 wav("m5_preview_init_sound.wav", preview(tables, 60.0, 0, 0, 0, a.seconds), a.seconds, wavs,
                     "PREVIEW, not the runner: the reference for the init sound, note 60, POS 0, slot 0 (the saw)")
             for key, what, pv in (
-                    ("pos120", "POS (WAV1) 120: slot 0's last frame, the sine", (60.0, 0x7800, 0x7800, 0)),
-                    ("slot1", "TBL1 1, WAV1 64: the overtone table, partials 9-10", (60.0, 0x4000, 0x4000, 0x100)),
-                    ("note72", "note 72, POS 120: the sine an octave up", (72.0, 0x7800, 0x7800, 0))):
+                    ("pos120", "POS (WAV1) 120: slot 0's last frame, the sine", (60.0, 0x3C00, 0x3C00, 0)),
+                    ("slot1", "TBL1 1, WAV1 64: the overtone table, partials 9-10", (60.0, 0x2000, 0x2000, 0x80)),
+                    ("note72", "note 72, POS 120: the sine an octave up", (72.0, 0x3C00, 0x3C00, 0))):
                 if runs[key]["ok"]:
                     wav(f"m5_{key}_machine.wav", track_series(runs[key], 0), a.seconds, wavs,
                         f"track 0's buffer, {what}")
@@ -424,10 +425,10 @@ def main(argv=None):
             if runs["silent"]["ok"]:
                 wav("m5_no_trigger.wav", runs["silent"]["amp_out"], a.seconds, wavs,
                     "control: no trigger, amp output (silent)")
-            wav("m5_demo_pos_sweep_preview.wav", preview(tables, 48.0, 0, 0x7800, 0, 4.0), 4.0, wavs,
+            wav("m5_demo_pos_sweep_preview.wav", preview(tables, 48.0, 0, 0x3C00, 0, 4.0), 4.0, wavs,
                 "DEMO PREVIEW, not the runner: slot 0 at note 48, POS swept 0 -> 120 over 4 s: "
                 "a buzzy saw darkening to a sine")
-            wav("m5_demo_harmonic_climb_preview.wav", preview(tables, 48.0, 0, 0x7800, 0x100, 4.0), 4.0, wavs,
+            wav("m5_demo_harmonic_climb_preview.wav", preview(tables, 48.0, 0, 0x3C00, 0x80, 4.0), 4.0, wavs,
                 "DEMO PREVIEW, not the runner: slot 1 at note 48, POS swept 0 -> 120 over 4 s: "
                 "the overtone series climbing, partial 1 to 16")
 
@@ -440,18 +441,19 @@ def main(argv=None):
         frames = load_frames(a)
         if frames and "frame" in steps:
             print("\nstep 5: the caller's frame(s)")
+            sep = f"_{a.tag}_" if a.tag else "_"
             s5 = step_frame(init, frames, a.blocks, tables)
             results["5_frame"] = {k: v for k, v in s5.items() if k != "run"}
             show(s5)
             run = s5["run"]
             if run["ok"] and s5["numbers"]["type5_tracks"]:
                 t = s5["numbers"]["type5_tracks"][0]
-                wav("m5_frame_machine.wav", track_series(run, t), a.seconds, wavs,
+                wav(f"m5_frame{sep}machine.wav", track_series(run, t), a.seconds, wavs,
                     f"the caller's frame: track {t}'s buffer after the type-5 loop")
-                wav("m5_frame_amp_out.wav", run["amp_out"], a.seconds, wavs,
+                wav(f"m5_frame{sep}amp_out.wav", run["amp_out"], a.seconds, wavs,
                     "the caller's frame: track 0 at the amp's output")
                 i0 = run["t5_inputs"][-1][t]
-                wav("m5_preview_frame.wav", preview(tables, i0["note"], i0["wav1"], i0["wav1"],
+                wav(f"m5_preview_frame{sep[:-1]}.wav", preview(tables, i0["note"], i0["wav1"], i0["wav1"],
                                                     i0["tbl1"], a.seconds), a.seconds, wavs,
                     "PREVIEW, not the runner: the reference for the caller's frame's last block inputs")
 
@@ -460,7 +462,7 @@ def main(argv=None):
     report["wavs"] = wavs
     report["wall_s"] = round(time.perf_counter() - t_start)
     report["result"] = "PASS" if ok else "FAIL"
-    (OUT / "m5_report.json").write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
+    (OUT / (f"m5_report_{a.tag}.json" if a.tag else "m5_report.json")).write_text(json.dumps(report, indent=2, default=str) + "\n", encoding="utf-8")
     print("\nWAVs:")
     for w in wavs:
         print(f"  {w['file']}  {w['seconds']} s, peak {w['peak']:.4g} -- {w['what']}")
@@ -552,9 +554,9 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
         return fb
 
     runs = {"init": run_blocks(init, frames(), blocks),
-            "pos120": run_blocks(init, frames(overrides={WAV1: 0x7800}), blocks),
-            "slot1": run_blocks(init, frames(overrides={WAV1: 0x4000, TBL1: 0x0100}), blocks),
-            "note72": run_blocks(init, frames(overrides={WAV1: 0x7800}, note=0x4800), blocks),
+            "pos120": run_blocks(init, frames(overrides={WAV1: 0x3C00}), blocks),
+            "slot1": run_blocks(init, frames(overrides={WAV1: 0x2000, TBL1: 0x0080}), blocks),
+            "note72": run_blocks(init, frames(overrides={WAV1: 0x3C00}, note=0x4800), blocks),
             "silent": run_blocks(init, lambda b: base_frame(sound, machines).to_bytes(), blocks)}
     ok_runs = all(r["ok"] for r in runs.values())
     n, mism = {}, {}
@@ -666,6 +668,10 @@ def step_frame(init, frames, blocks, tables) -> dict:
     checks = {"the run returns every block": run["ok"],
               "at least one track is type 5": bool(types),
               "every type-5 track is bit-exact to the reference": bool(mism) and all(v == 0 for v in mism.values())}
+    if any(fr[FR.TRIG_NOTE] & 1 for fr in frames):
+        # a frame that triggers track 0: it must be heard at the amp's output
+        checks["triggered: track 0 audible at the amp's output (peak > 0.02)"] = (
+            run["ok"] and V.peak(run["amp_out"]) > 0.02)
     return {"ok": all(checks.values()), "checks": checks, "run": run,
             "numbers": {"type5_tracks": types, "mismatches": mism,
                         "inputs_last_block": run["t5_inputs"][-1] if run["ok"] and run["t5_inputs"] else None,

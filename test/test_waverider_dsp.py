@@ -143,18 +143,18 @@ def test_increment_follows_the_note():
 
 def test_position_and_slot_from_frame_words():
     assert live.position(0) == 0
-    assert live.position(0x7800) == 15 << 16
-    assert live.position(0x7F00) == 15 << 16                   # clamped
-    assert live.position(0x4000) == 0x4000 << 5
-    assert live.slot(0x0000, 2) == 0 and live.slot(0x0100, 2) == 1
-    assert live.slot(0x0200, 2) == 0                           # out of range -> 0
+    assert live.position(0x3C00) == 15 << 16                   # the frame: half the sound's 0x7800
+    assert live.position(0x3F80) == 15 << 16                   # clamped
+    assert live.position(0x2000) == 0x2000 << 6
+    assert live.slot(0x0000, 2) == 0 and live.slot(0x0080, 2) == 1   # TBL1 1, halved
+    assert live.slot(0x0100, 2) == 0                           # out of range -> 0
 
 
 def test_render_blocks_carries_phase_across_a_slot_change():
     tables = dsp.tables()
     a, ph = live.render_blocks(tables, [(60.0, 0, 0)], 32)
-    b, _ = live.render_blocks(tables, [(60.0, 0, 0x100)], 32, ph)
-    both, _ = live.render_blocks(tables, [(60.0, 0, 0), (60.0, 0, 0x100)], 32)
+    b, _ = live.render_blocks(tables, [(60.0, 0, 0x80)], 32, ph)
+    both, _ = live.render_blocks(tables, [(60.0, 0, 0), (60.0, 0, 0x80)], 32)
     assert both == a + b
 
 

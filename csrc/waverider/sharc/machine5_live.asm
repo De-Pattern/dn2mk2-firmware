@@ -12,11 +12,13 @@
 // block and calls wr_render5 (reader_m5.asm, sw 0x180000) into the track buffer:
 //
 //   SLOT  WaveTone's TBL1 (param 27), read from the frame image the unpack copied to
-//         0x25c48c (offset 222 + 146t): 0x0000 or 0x0100; >> 8 is the slot,
+//         0x25c48c (offset 222 + 146t): 0x0000 or 0x0080 -- the ColdFire sends
+//         every slot value at half the sound's (0x0100 >> 1, measured from its own
+//         frame builder in the emulator); >> 7 is the slot,
 //         resolved through the baked directory; at or above its count plays 0.
 //   POS   WaveTone's WAV1 (param 26), from the same copy (offset 220 + 146t):
-//         coarse << 8 | fine, 0..0x7800. min(WAV1, 0x7800) << 5 is Q16 frames:
-//         0x7800 << 5 = 15 << 16, frame 15. The unpack does not put a type-5 track's
+//         half the sound's coarse << 8 | fine, 0..0x3c00. min(WAV1, 0x3c00) << 6
+//         is Q16 frames: 0x3c00 << 6 = 15 << 16, frame 15. The unpack does not put a type-5 track's
 //         machine parameters in its record (measured), so the frame copy is read.
 //   pitch the engine's note cell, engine +0x1387c + 4t = 0x254b14 + 4t, a float in
 //         semitones (note + fine/256). Clamped to 0..127; k = trunc, fr = note - k;
@@ -133,11 +135,11 @@ wr_t5v_loop.:
       IF EQ R5 = LSHIFT R4 BY R7;       // t even: WAV1 low, TBL1 high half of word 0
       IF NE R4 = LSHIFT R4 BY R7;       // t odd:  WAV1 high half of word 0, TBL1 low of 1
       R6 = 0xffff;
-      R4 = R4 AND R6;                   // WAV1, coarse << 8 | fine, 0..0x7800
-      R5 = R5 AND R6;                   // TBL1, 0x0000 or 0x0100
+      R4 = R4 AND R6;                   // WAV1, half the sound's value, 0..0x3c00
+      R5 = R5 AND R6;                   // TBL1, 0x0000 or 0x0080
 
-      // SLOT = TBL1 >> 8, through the directory
-      R1 = LSHIFT R5 BY -8;
+      // SLOT = TBL1 >> 7, through the directory
+      R1 = LSHIFT R5 BY -7;
       R2 = DM(0x301804);                // the directory's count
       COMPU(R1, R2);
       IF GE R1 = R1 - R1;               // out of range -> slot 0
@@ -148,10 +150,10 @@ wr_t5v_loop.:
       R2 = DM(0, I1);                   // directory.table[slot]
       DM(0, I4) = R2;                   // the reader block's table pointer
 
-      // POS = min(WAV1, 0x7800) << 5: Q16 frames, 0x7800 << 5 = 15 << 16
-      R2 = 0x7800;
+      // POS = min(WAV1, 0x3c00) << 6: Q16 frames, 0x3c00 << 6 = 15 << 16
+      R2 = 0x3c00;
       R4 = MIN(R4, R2);
-      R4 = LSHIFT R4 BY 5;
+      R4 = LSHIFT R4 BY 6;
       DM(3, I4) = R4;                   // pos
 
       // pitch: this track's note cell, 0x254b14 + 4t
