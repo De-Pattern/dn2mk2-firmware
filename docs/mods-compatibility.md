@@ -24,6 +24,16 @@ check rather than from a README (`docs/references.md`).
     or fxmod's Chorus records still finds its stock bytes and applies cleanly, but it
     lands on a table the firmware no longer reads. `dnfw mods apply` therefore
     applies lfo4 last, whatever order it is given.
+
+    Neither edit is left to order alone any more. moddest refuses an lfo4 image
+    (it finds two candidate tables), and since 2026-09-26 fxmod does too: it checks
+    that all 56 of the table's accessor bases still reach the stock table
+    (`paramtable.base_sites`) and otherwise says to apply fxmod first. The browser
+    pages carry the same checks, which matters there: each page applies one mod
+    and the user chains them by loading one page's download into the next, so the
+    page, not the CLI, has to enforce the order. `site/lfo4.html` accepts an image
+    fxmod, moddest or midiarp already built (arpplocks too, from the CLI), and
+    refuses lfowaves and bootscreen images on their length.
 - **NO**: refused. Either the bytes overlap, or neither order applies.
 
 ## What it does not promise
