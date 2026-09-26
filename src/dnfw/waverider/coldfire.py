@@ -101,6 +101,7 @@ GUARDS = (
     (0x40027582, "37400092", "... and writes it at frame offset 148 + 2t"),
     (0x4005B35C, "2a1b", "MACHINE SEL walks the list..."),
     (0x4005B364, "4eb940059274", "... and asks the group of each type"),
+    (0x4005B6C2, "4eb94003134e", "MACHINE SEL's current machine (view +412) is 0x4003134e"),
 )
 
 
@@ -275,6 +276,23 @@ IDENTITY_SITES = (
     (0x400D675E, "4eb9", "an incoming machine type, compared with the track's before commit"),
 )
 
+# -- 7b. getMachineType(model, track) 0x4003134e: the real type -------------------------
+# The model-level question -- "what machine does track t have?" -- is 0x4003134e,
+# which finds the track and ends in a tail `jmp 0x4004b7f2`. A `jmp`, not a `jsr`,
+# so the identity search above never saw it, and the answer came back canonical:
+# a Waverider track read as WaveTone to every one of its twelve callers. Four of
+# them are MACHINE SEL: the machine it marks and puts the cursor on (view +412,
+# set at open, after every commit and on every model change). So YES on WAVERIDER
+# wrote 5, and the view at once re-read 1 and marked WAVETONE; a second YES found
+# 1 != 5 and committed 5 again; reopening marked WAVETONE (hardware, 2026-09-27;
+# `out/fix-select/`, emulator). Three more re-commit the type they read: the track
+# swap `0x40041bca`, and the two "restore the old machine" paths `0x400a7f92` /
+# `0x400b15e8` -- each would turn a Waverider track into a WaveTone one for real.
+# The rest ask "is it MIDI?" (compare 4), or hand the type to the SYN overview and
+# page accessors (0x400c248e, 0x400c24ee), which read 5 as WaveTone's rows already.
+# So the tail jump goes to raw_track, and all twelve see 5.
+MODEL_TRACK_TYPE_JMP = 0x40031394      # jmp 0x4004b7f2, the tail of 0x4003134e
+
 # -- 6. the per-machine UI tables (0x42432ad4, 0x42432b24): the SYN pages ---------------
 # `pages(type)`, `page(type, n)` and `overview(type)` read five-row tables built
 # at boot and fall back to an empty page above 4 -- which is what a type-5 track's
@@ -408,6 +426,12 @@ def compose(stock: bytes, assemble) -> dict:
         _need(content, op_va, bytes.fromhex(op), f"{what}: the instruction")
         edit(op_va + 2, _long(layout["raw_track"]), f"{what}: asks for the real type",
              _long(TRACK_TYPE_FN))
+
+    # 7b. getMachineType(model, track): the real type, for MACHINE SEL and the re-commits
+    _need(content, MODEL_TRACK_TYPE_JMP, bytes.fromhex("4ef9"), "0x4003134e's tail jump")
+    edit(MODEL_TRACK_TYPE_JMP + 2, _long(layout["raw_track"]),
+         "getMachineType(model, track) 0x4003134e: the real type (MACHINE SEL's marker and "
+         "cursor, the track swap, the machine restores)", _long(TRACK_TYPE_FN))
 
     # 8. the sound's "is this parameter mine?"
     _need(content, VALID_SITE + len(VALID_STOCK), VALID_NEXT, "the ownership test's record-page call")

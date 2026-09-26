@@ -87,6 +87,20 @@ def test_the_stored_sound_load_keeps_type_5(applied):
     assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("7407")
 
 
+def test_machine_sel_asks_for_the_real_type(applied, stock):
+    # MACHINE SEL marks and places its cursor on 0x4003134e(model, track), which ends in
+    # a tail jump to getMachineType(track). That jump must reach raw_track (the real type),
+    # not the canonicalising getMachineType: otherwise YES on WAVERIDER marks WAVETONE.
+    main = applied.payloads[3]
+    raw = waverider.SPEC["layout"]["raw_track"]
+    assert at(stock, CF.MODEL_TRACK_TYPE_JMP, 6) == bytes.fromhex("4ef94004b7f2")
+    assert at(main, CF.MODEL_TRACK_TYPE_JMP, 6) == bytes.fromhex("4ef9") + struct.pack(">I", raw)
+    for site in (0x4005A5C6, 0x4005A632, 0x4005A9C8, 0x4005B6C2):     # MACHINE SEL's callers
+        assert at(main, site, 6) == bytes.fromhex("4eb94003134e")
+    # ... and raw_track is still the stock getMachineType's body, reading sound+0xDE
+    assert at(main, raw, 4) == bytes.fromhex("2f0a246f")
+
+
 def test_every_edit_replaces_stock_bytes(stock):
     for e in waverider.SPEC["edits"]:
         assert at(stock, e["va"], len(e["stock"]) // 2).hex() == e["stock"], e["what"]
