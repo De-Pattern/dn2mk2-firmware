@@ -1,0 +1,104 @@
+"""Assemble the arp modes mod ahead of time, for `dnfw mods`.
+
+    python scripts/gen_arpmodes_code.py
+
+Runs `scripts/build_arpmodes.py`'s compose on stock Digitone II 1.11 and records
+what it changed:
+
+- `edits`: every in-image run the build changes -- each code cave whole, the
+  dispatch hook and the five MODE bounds -- with the **stock bytes it replaces**,
+  so applying is a check-then-write;
+- `guards`: the whole instructions the hook relies on, read and never written.
+
+Then it replays that data on the stock image and refuses to write unless the
+result is the compose output **byte for byte** -- the data is the build, not a
+description of it.
+
+Outputs `src/dnfw/mods/arpmodes_code.json`.
+"""
+
+from __future__ import annotations
+
+import json
+import pathlib
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+import build_arpmodes as arp  # noqa: E402
+from dnfw.cli.files import read_image  # noqa: E402
+from dnfw.firmware.load import load  # noqa: E402
+
+OUT_JSON = ROOT / "src/dnfw/mods/arpmodes_code.json"
+
+
+def what(va: int) -> str:
+    if va == arp.DISPATCH:
+        return "the arp step's dispatch: 5 and 6 to the cave"
+    for site, _, why in arp.BOUNDS:
+        if site <= va < site + 2:
+            return f"MODE bound 4 -> 6: {why}"
+    raise SystemExit(f"{va:#010x} changed but is neither the hook nor a bound")
+
+
+def replay(stock: bytes, edits: list[dict]) -> bytes:
+    content = bytearray(stock)
+    for e in edits:
+        at = e["va"] - arp.BASE
+        assert content[at:at + len(e["stock"]) // 2] == bytes.fromhex(e["stock"])
+        content[at:at + len(e["new"]) // 2] = bytes.fromhex(e["new"])
+    return bytes(content)
+
+
+def main() -> int:
+    stock = load(read_image(arp.STOCK)).container.find(arp.MAIN_OS).unpack()
+    built = arp.compose(stock, log=lambda *_: None)
+    content = built["content"]
+    caves = {va - arp.BASE: n for va, n in built["caves"]}
+
+    edits, i, n = [], 0, len(stock)
+    while i < n:
+        if i in caves:
+            j = i + caves[i]
+            edits.append({"va": arp.BASE + i, "stock": stock[i:j].hex(),
+                          "new": content[i:j].hex(), "what": "arp modes code cave"})
+            i = j
+            continue
+        if stock[i] == content[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and stock[j] != content[j] and j not in caves:
+            j += 1
+        # A bound's edit is one byte (the moveq's immediate); keep the whole
+        # instruction, so the stock guard is the instruction and not a lone 04.
+        if j - i == 1:
+            i -= 1
+        edits.append({"va": arp.BASE + i, "stock": stock[i:j].hex(),
+                      "new": content[i:j].hex(), "what": what(arp.BASE + i)})
+        i = j
+
+    if replay(stock, edits) != content:
+        raise SystemExit("the edits do not reproduce the build -- not written")
+
+    code = {
+        "os": "Digitone II 1.11",
+        "stock_length": n,
+        "mode_max": arp.MODE_MAX,
+        "edits": edits,
+        "guards": [{"va": va, "bytes": want, "what": why} for va, want, why in arp.CONTEXT],
+        "labels": {k: v for k, v in sorted(built["at"].items())},
+        "ram": [{"va": arp.RAM, "bytes": arp.RAM_BYTES,
+                 "what": "the generator, then 16 per-track SHUF records"}],
+    }
+    OUT_JSON.write_text(json.dumps(code, indent=1) + "\n", newline="\n")
+    size = sum(len(e["new"]) // 2 for e in edits)
+    print(f"wrote {OUT_JSON.relative_to(ROOT)}: {len(edits)} edits, {size} B, "
+          f"{len(code['guards'])} guards; replays to the build byte for byte")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

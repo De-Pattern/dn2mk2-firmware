@@ -29,6 +29,14 @@ from . import ModError, check_compatible
 
 # Functional findings the byte check cannot make, by unordered pair.
 NOTES: dict[frozenset, str] = {
+    frozenset(("arpmodes", "arpplocks")):
+        "emulator, 2026-09-26: arpplocks' MODE lock takes its ceiling from setMode's clamp "
+        "(0x4004bf01), which arpmodes widens to 6. Turning MODE with every step held locks "
+        "DOWN CYCL SHUF RAND RAND RAND with both, and DOWN CYCL CYCL ... with arpplocks alone "
+        "(scripts/emu_arp_modes.py). A locked SHUF or RAND playing from a trig was not run.",
+    frozenset(("arpmodes", "midiarp")):
+        "a MIDI track's arp runs the same step, so SHUF and RAND should reach MIDI tracks; "
+        "not run.",
     frozenset(("arpplocks", "bootscreen")):
         "bootscreen reserves 0x380 bytes at 0x402dfa1c for its code and refuses if any is "
         "used; its code is 366 bytes and ends 2 bytes before arpplocks' cave at 0x402dfb8c, "
