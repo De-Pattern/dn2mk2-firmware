@@ -124,7 +124,7 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
 
     `include` adds header directories (a generated header, for one), and
     `exports` adds symbol prefixes to `symbols.json` beside `lfo4_` and `ext_`
-    -- Wavefinder Milestone 0 is the first build to need both.
+    -- Waverider Milestone 0 is the first build to need both.
     """
     firmware = load(read_image(STOCK))
     section = firmware.container.find(MAIN_OS)

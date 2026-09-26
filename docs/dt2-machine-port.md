@@ -3,7 +3,7 @@
 **2026-09-25.** The question: ONESHOT is the simplest DT2 SRC machine and its
 code is already in a firmware we hold, so what would porting it cost?
 
-**Short answer: more than Wavefinder, not less.** The premise is true for 85% of
+**Short answer: more than Waverider, not less.** The premise is true for 85% of
 the image and false for exactly the part that is the machine.
 
 ## The two images are verified against digikit's own hashes
@@ -101,12 +101,12 @@ machine, not just ONESHOT.
 Storage size is the lesser half of it. The greater half is that a sample bank is
 **unbounded and user-managed** — 1016 arbitrary-length files that must be
 listed, previewed, assigned, locked per step and persisted — where a wavetable
-is **fixed geometry**, and a useful Wavefinder can ship with a handful of tables
+is **fixed geometry**, and a useful Waverider can ship with a handful of tables
 at 8 KB each and grow later.
 
-## Against Wavefinder, which is the comparison that was asked for
+## Against Waverider, which is the comparison that was asked for
 
-| | ONESHOT port | Wavefinder |
+| | ONESHOT port | Waverider |
 |---|---|---|
 | DSP render code exists in a firmware we hold | **no twin in DN2** | no |
 | the render itself | variable-length sample reader: start/length/loop, four play modes, per-voice streaming | fixed **2048-sample frames**, two readers, linear interpolation |
@@ -117,12 +117,12 @@ at 8 KB each and grow later.
 **A wavetable oscillator is strictly simpler than a sample player**: fixed frame
 geometry, no variable length, no four play modes, no loop-point arithmetic. Both
 are blocked on the same thing — nothing can execute SHARC code yet — but if that
-blocker is cleared, Wavefinder is the smaller of the two engines *and* the one
+blocker is cleared, Waverider is the smaller of the two engines *and* the one
 whose data format we already parse.
 
 ## Conclusion
 
-**Do Wavefinder first.** ONESHOT's apparent advantage — existing code — does not
+**Do Waverider first.** ONESHOT's apparent advantage — existing code — does not
 survive measurement: the sample engine has no DN2 counterpart, and the sampler
 subsystem beneath it would have to be built from nothing.
 

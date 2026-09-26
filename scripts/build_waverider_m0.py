@@ -1,8 +1,8 @@
-"""Wavefinder Milestone 0: one baked wavetable, read back over telemetry.
+"""Waverider Milestone 0: one baked wavetable, read back over telemetry.
 
-    python scripts/build_wavefinder_m0.py [--name wavefinder-m0]
+    python scripts/build_waverider_m0.py [--name waverider-m0]
 
-`docs/wavefinder-feasibility.md`, "Milestone 0": bake one table (16 frames x
+`docs/waverider-feasibility.md`, "Milestone 0": bake one table (16 frames x
 512 int16, 16 KB) into the firmware's own space, have the firmware read it back
 at run time, and report it over the telemetry channel, so the delivery chain --
 reduce, bake, load, address, read -- is proven end to end.
@@ -12,17 +12,17 @@ reduce, bake, load, address, read -- is proven end to end.
 **no** page column diverted. That is a configuration already gated and flashed,
 so the only thing this image adds is Milestone 0 itself:
 
-  * `csrc/wavefinder/table.c` -- the table as `const` data, linked into the
+  * `csrc/waverider/table.c` -- the table as `const` data, linked into the
     `CODE` chunk the loader copies to `0x46800000`, plus one reader;
-  * one call, `wf_m0_report()`, inside the LFO4 telemetry burst right after
-    `probe_a` = 99 (`csrc/lfo4/bridge.c`, under `WAVEFINDER_M0`).
+  * one call, `wr_m0_report()`, inside the LFO4 telemetry burst right after
+    `probe_a` = 99 (`csrc/lfo4/bridge.c`, under `WAVERIDER_M0`).
 
 It touches **no** machine, selector, machine-list ceiling or engine code: the
 burst it rides already exists, and what it adds reads only its own data.
 
-**The data is generated here, at build time**, by `dnfw.wavefinder` from an
-original formula (`dnfw.wavefinder.testtable`), into `out/<name>/gen/`. The
-header is output, not source. `dnfw wavefinder expect` prints what the
+**The data is generated here, at build time**, by `dnfw.waverider` from an
+original formula (`dnfw.waverider.testtable`), into `out/<name>/gen/`. The
+header is output, not source. `dnfw waverider expect` prints what the
 instrument must report from the very same generator.
 
 **Placement is checked, not assumed.** The C image grows by the table, and the
@@ -51,23 +51,23 @@ import build_lfo4_tlm as tlm                               # noqa: E402
 import build_lfo4_ui as ui                                 # noqa: E402
 import build_lfo4_ui2 as ui2                               # noqa: E402
 import build_lfo4_value as value                           # noqa: E402
-from dnfw.wavefinder import bake, expect, reduce, testtable   # noqa: E402
+from dnfw.waverider import bake, expect, reduce, testtable   # noqa: E402
 
-SOURCES = tlm.SOURCES + ("wavefinder/table.c",)
-ENTRIES = ui2.ENTRIES + ["wf_m0_report", "wf_table"]
+SOURCES = tlm.SOURCES + ("waverider/table.c",)
+ENTRIES = ui2.ENTRIES + ["wr_m0_report", "wr_table"]
 EXTRA = [slots.divert, table.relocate, page.hooks, value.divert, value.companion,
          value.waveform, ui.slew, ui.dest, pagelist.pagelist, ui2.rnd, browser.browser]
 # `build_lfo4_tlm.py --persist`, exactly: release semantics, no page diversion.
-DEFINES = {"LFO4_PERSIST": 1, "LFO4_TELEMETRY": 1, "WAVEFINDER_M0": 1}
+DEFINES = {"LFO4_PERSIST": 1, "LFO4_TELEMETRY": 1, "WAVERIDER_M0": 1}
 
 
 def placement(content, code) -> None:
     """Refuse a C image that would run into the relocated parameter table."""
-    at, n = code["wf_table"], reduce.FRAMES * reduce.POINTS * 2
+    at, n = code["wr_table"], reduce.FRAMES * reduce.POINTS * 2
     if code.end > table.TABLE_VA:
         raise SystemExit(f"the C chunk ends at {code.end:#010x}, past {table.TABLE_VA:#010x} "
                          f"where the relocated parameter table loads")
-    print(f"  wavefinder: table {n:,} B at {at:#010x}..{at + n:#010x}; the C chunk "
+    print(f"  waverider: table {n:,} B at {at:#010x}..{at + n:#010x}; the C chunk "
           f"(image {len(code.image):,} B + BSS {code.bss:,} B) ends at {code.end:#010x}, "
           f"{table.TABLE_VA - code.end:,} B below {table.TABLE_VA:#010x}")
 
@@ -75,8 +75,8 @@ def placement(content, code) -> None:
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="Wavefinder Milestone 0")
-    ap.add_argument("--name", default="wavefinder-m0",
+    ap = argparse.ArgumentParser(description="Waverider Milestone 0")
+    ap.add_argument("--name", default="waverider-m0",
                     help="build name: out/<name> and 00_Resources/02_Builds/<name>_DN2_1.11.syx")
     # **Local testing only.** A WAV that is not ours -- Elektron's factory set,
     # a third-party pack -- may be baked to try it on the owner's own instrument,
@@ -97,13 +97,13 @@ if __name__ == "__main__":
     if cli.wav:
         print(f"  ** LOCAL TESTING ONLY: baking {cli.wav.name}, not the original table. "
               f"Do not ship or offer this build. **")
-    (gen / "wf_table_data.h").write_text(bake.header(baked, expect.PROBES, expect.SLICE),
+    (gen / "wr_table_data.h").write_text(bake.header(baked, expect.PROBES, expect.SLICE),
                                          encoding="utf-8", newline="\n")
     print(f"part 0 -- baked {len(baked)} x {len(baked[0])} int16, checksum "
           f"{bake.checksum(baked):#06x}, into {gen.relative_to(ROOT)}")
     # What was baked, so the emulator check can be pointed at the same source.
-    (out / "wavefinder.json").write_text(json.dumps({
-        "source": str(cli.wav.resolve()) if cli.wav else "dnfw.wavefinder.testtable",
+    (out / "waverider.json").write_text(json.dumps({
+        "source": str(cli.wav.resolve()) if cli.wav else "dnfw.waverider.testtable",
         "local_testing_only": bool(cli.wav),
         "checksum": f"{bake.checksum(baked):#06x}"}, indent=1) + "\n", newline="\n")
 
@@ -111,5 +111,5 @@ if __name__ == "__main__":
     raise SystemExit(bridge.main(sources=SOURCES, entries=ENTRIES, out=out, syx=syx,
                                  extra=[*EXTRA, placement], chunks=table.chunks,
                                  defines=DEFINES,
-                                 include=[ROOT / "csrc" / "wavefinder", gen],
-                                 exports=("wf_",)))
+                                 include=[ROOT / "csrc" / "waverider", gen],
+                                 exports=("wr_",)))

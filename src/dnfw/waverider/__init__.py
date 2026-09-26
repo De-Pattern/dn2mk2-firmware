@@ -1,4 +1,4 @@
-"""Wavefinder: wavetables baked into the firmware (`docs/wavefinder-feasibility.md`).
+"""Waverider: wavetables baked into the firmware (`docs/waverider-feasibility.md`).
 
 Milestone 0 proves the delivery chain -- reduce, bake, load, address, read --
 with one table and no audio. One subject per module:
@@ -8,5 +8,5 @@ with one table and no audio. One subject per module:
   `bake`       int16 frames -> the checksum and the C header the build compiles
   `expect`     what the firmware's telemetry must report, and checking a capture
 
-The CLI is `dnfw wavefinder`.
+The CLI is `dnfw waverider`.
 """

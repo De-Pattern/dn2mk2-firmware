@@ -1,6 +1,6 @@
-"""Wavefinder Milestone 0, the host half: the table, the bake, the expectation.
+"""Waverider Milestone 0, the host half: the table, the bake, the expectation.
 
-The firmware half is checked by running it (`scripts/emu_wavefinder_m0.py`);
+The firmware half is checked by running it (`scripts/emu_waverider_m0.py`);
 this checks that what it is compared against is itself right.
 """
 
@@ -15,7 +15,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from dnfw.telemetry import gen  # noqa: E402
-from dnfw.wavefinder import bake, expect, reduce, testtable  # noqa: E402
+from dnfw.waverider import bake, expect, reduce, testtable  # noqa: E402
 
 TABLE = testtable.table()
 
@@ -47,8 +47,8 @@ def test_checksum_is_order_sensitive():
 def test_header_carries_the_same_numbers():
     text = bake.header(TABLE, expect.PROBES, expect.SLICE)
     assert f"checksum {bake.checksum(TABLE):#06x}" in text
-    assert "#define WF_WORDS      8192" in text
-    body = text[text.index("#define WF_TABLE_INIT {") + len("#define WF_TABLE_INIT {"):]
+    assert "#define WR_WORDS      8192" in text
+    body = text[text.index("#define WR_TABLE_INIT {") + len("#define WR_TABLE_INIT {"):]
     body = re.sub(r"/\*.*?\*/", " ", body[:body.index("}")])
     values = [int(tok) for tok in re.findall(r"-?\d+", body)]
     assert values == [v for f in TABLE for v in f]
@@ -80,10 +80,10 @@ def _capture(table, bursts, corrupt=None):
             total, passes, at = run, passes + 1, 0
         lo, mid, hi = expect.split16(v)
         slo, smid, shi = expect.split16(total)
-        pairs += [("wf_frame", f), ("wf_idx_lo", i & 0x7F), ("wf_idx_hi", i >> 7),
-                  ("wf_val_lo", lo), ("wf_val_mid", mid), ("wf_val_hi", hi),
-                  ("wf_sum_lo", slo), ("wf_sum_mid", smid), ("wf_sum_hi", shi),
-                  ("wf_passes", passes & 0x7F)]
+        pairs += [("wr_frame", f), ("wr_idx_lo", i & 0x7F), ("wr_idx_hi", i >> 7),
+                  ("wr_val_lo", lo), ("wr_val_mid", mid), ("wr_val_hi", hi),
+                  ("wr_sum_lo", slo), ("wr_sum_mid", smid), ("wr_sum_hi", shi),
+                  ("wr_passes", passes & 0x7F)]
     return pairs
 
 
@@ -101,12 +101,12 @@ def test_one_wrong_bit_fails_and_is_named():
 def test_a_short_capture_says_the_checksum_never_completed():
     ok, lines = expect.verify(_capture(TABLE, 4), TABLE)
     assert not ok
-    assert any("wf_passes stayed 0" in line for line in lines)
+    assert any("wr_passes stayed 0" in line for line in lines)
 
 
 def test_parse_reads_midi_watch_lines():
-    text = "   12.345  ch16 CC41  (wf_frame)             = 3\n   ch1  CC41  = 9\n"
-    assert expect.parse(text) == [("wf_frame", 3)]
+    text = "   12.345  ch16 CC41  (wr_frame)             = 3\n   ch1  CC41  = 9\n"
+    assert expect.parse(text) == [("wr_frame", 3)]
 
 
 def _wav(frames, rate=48000, float32=True, channels=1, clm=None):
@@ -122,7 +122,7 @@ def _wav(frames, rate=48000, float32=True, channels=1, clm=None):
                       channels * bits // 8, bits)
     body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt
     if clm:
-        text = f"<!>{clm} 00000000 wavefinder-test".encode()
+        text = f"<!>{clm} 00000000 waverider-test".encode()
         body += b"clm " + struct.pack("<I", len(text)) + text + b"\0" * (len(text) & 1)
     body += b"data" + struct.pack("<I", len(data)) + data
     return b"RIFF" + struct.pack("<I", len(body)) + body
@@ -130,7 +130,7 @@ def _wav(frames, rate=48000, float32=True, channels=1, clm=None):
 
 def test_a_float32_wav_of_the_generator_bakes_to_the_same_table():
     """The WAV path and the generator path agree, to float32's rounding."""
-    from dnfw.wavefinder import source
+    from dnfw.waverider import source
     data = _wav(testtable.source_frames())
     i = source.info(data)
     assert (i["ok"], i["encoding"], i["frames"], i["frame"], i["rate"]) == \
@@ -141,7 +141,7 @@ def test_a_float32_wav_of_the_generator_bakes_to_the_same_table():
 
 
 def test_scan_flags_what_it_changes():
-    from dnfw.wavefinder import source
+    from dnfw.waverider import source
     odd = [[math.sin(2 * math.pi * n / 256) for n in range(256)]] * 3
     i = source.info(_wav(odd, rate=44100, float32=False, channels=2))
     assert i["ok"] and i["frames"] == 1 and i["origin"] == "whole file"

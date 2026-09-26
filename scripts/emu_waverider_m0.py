@@ -1,13 +1,13 @@
-"""Wavefinder Milestone 0 under the emulator: boot from reset, then read it back.
+"""Waverider Milestone 0 under the emulator: boot from reset, then read it back.
 
     # in WSL, with digikit's venv (docs/emulator.md):
     DT2_SECTIONS=/root/dn2-sections-111 /root/dn2-emu-venv/bin/python -u \
-        scripts/emu_wavefinder_m0.py --build out/wavefinder-m0
+        scripts/emu_waverider_m0.py --build out/waverider-m0
 
 Three checks, in the order a failure would be explained:
 
-1. **load** -- after a boot from reset, the 16 KB at `wf_table` (from the
-   build's `symbols.json`) are byte-for-byte what `dnfw.wavefinder` bakes. The
+1. **load** -- after a boot from reset, the 16 KB at `wr_table` (from the
+   build's `symbols.json`) are byte-for-byte what `dnfw.waverider` bakes. The
    firmware's own loader copied them; nothing here installs anything.
 2. **address** -- the probe arrays beside the table hold `expect.PROBES`.
 3. **read and report** -- the engine is run the way `emu_boot_engine.py` runs
@@ -50,7 +50,7 @@ from emu_boot_engine import REPORTER, SYX, After              # noqa: E402
 from emu_lfo4_tick import (EVAL_A, MIRROR_AT, MIRROR_BYTES, RATE, REST,   # noqa: E402
                            SET_FRAC, STATE, STATE_LEN, TRACKS)
 from dnfw.telemetry import gen                                # noqa: E402
-from dnfw.wavefinder import bake, expect, reduce, testtable   # noqa: E402
+from dnfw.waverider import bake, expect, reduce, testtable   # noqa: E402
 
 MIDI_TX = 0x401233F2
 CALLS_PER_BURST = 2049
@@ -58,7 +58,7 @@ CALLS_PER_BURST = 2049
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--build", default="out/wavefinder-m0")
+    p.add_argument("--build", default="out/waverider-m0")
     p.add_argument("--limit", type=int, default=400_000_000)
     p.add_argument("--bursts", type=int, default=18,
                    help="telemetry bursts to capture (8 probes and 8 slices per cycle)")
@@ -89,7 +89,7 @@ def main() -> int:
             uc.emu_stop()
 
         m.uc.hook_add(UC_HOOK_CODE, at_reporter, begin=REPORTER, end=REPORTER)
-        for name in ("dnfw_boot", "lfo4_init", "lfo4_row_for_block", "wf_m0_report"):
+        for name in ("dnfw_boot", "lfo4_init", "lfo4_row_for_block", "wr_m0_report"):
             if name in sym:
                 def hit(uc, address, size, user, name=name):
                     counts[name] = counts.get(name, 0) + 1
@@ -110,9 +110,9 @@ def main() -> int:
     after = After(m.uc)
 
     # 1. load
-    got = bytes(m.uc.mem_read(sym["wf_table"], len(want)))
+    got = bytes(m.uc.mem_read(sym["wr_table"], len(want)))
     if got == want:
-        print(f"\n  1. load: {len(want):,} B at {sym['wf_table']:#010x} match the host bake")
+        print(f"\n  1. load: {len(want):,} B at {sym['wr_table']:#010x} match the host bake")
     else:
         first = next(i for i in range(len(want)) if got[i] != want[i])
         fails.append(f"table differs from the bake first at byte {first} "
@@ -121,8 +121,8 @@ def main() -> int:
 
     # 2. address
     n = len(expect.PROBES)
-    frames = struct.unpack(f">{n}H", bytes(m.uc.mem_read(sym["wf_probe_frame"], 2 * n)))
-    indices = struct.unpack(f">{n}H", bytes(m.uc.mem_read(sym["wf_probe_index"], 2 * n)))
+    frames = struct.unpack(f">{n}H", bytes(m.uc.mem_read(sym["wr_probe_frame"], 2 * n)))
+    indices = struct.unpack(f">{n}H", bytes(m.uc.mem_read(sym["wr_probe_index"], 2 * n)))
     if list(zip(frames, indices)) == expect.PROBES:
         print(f"  2. address: the {n} probe points in memory are expect.PROBES")
     else:
@@ -155,18 +155,18 @@ def main() -> int:
     try:
         for ran in range(1, frames_needed + 1):
             after.call(EVAL_A, buf, rate, 0xFFFF, 0xFFFF, out1, out2, 0)
-            if counts.get("wf_m0_report", 0) >= args.bursts or fault:
+            if counts.get("wr_m0_report", 0) >= args.bursts or fault:
                 break
     except UcError as exc:
         pc = after.uc.reg_read(UC_M68K_REG_PC)
         print(f"\n  ** the evaluator faulted: {exc} at pc {pc:#010x} after {ran} frame(s) **")
         return 1
     print(f"     {ran} frame(s): lfo4_row_for_block {counts.get('lfo4_row_for_block', 0):,}, "
-          f"wf_m0_report {counts.get('wf_m0_report', 0)}, {len(sent)} message(s) sent")
+          f"wr_m0_report {counts.get('wr_m0_report', 0)}, {len(sent)} message(s) sent")
     if fault:
         print("\n  ** the firmware drew EXCEPTION while the engine ran **")
         return 1
-    if not counts.get("wf_m0_report"):
+    if not counts.get("wr_m0_report"):
         print("\n  the burst never fired, so nothing was read: this proves nothing.")
         return 2
 
@@ -184,10 +184,10 @@ def main() -> int:
               f"{spec['channel']} -- not ours to judge, listed so they are not hidden")
     if not ok:
         fails.append("the reported values do not match the expectation")
-    sums = [(v, i) for i, (n_, v) in enumerate(pairs) if n_ == "wf_passes"]
-    print(f"     wf_passes after the run: {sums[-1][0] if sums else None}; "
-          f"memory: wf_passes {after.long(sym['wf_passes'])}, "
-          f"wf_sum {after.long(sym['wf_sum']) >> 16:#06x}, "
+    sums = [(v, i) for i, (n_, v) in enumerate(pairs) if n_ == "wr_passes"]
+    print(f"     wr_passes after the run: {sums[-1][0] if sums else None}; "
+          f"memory: wr_passes {after.long(sym['wr_passes'])}, "
+          f"wr_sum {after.long(sym['wr_sum']) >> 16:#06x}, "
           f"expected {bake.checksum(table):#06x}")
 
     if fails:

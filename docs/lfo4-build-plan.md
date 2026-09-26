@@ -6110,7 +6110,7 @@ driving and once with LFO4:
   can write in ColdFire.
 - Both appear only in record 6 -> the ColdFire does the same thing for both, and
   the difference is inside the SHARC. That ends this line and makes the SHARC
-  emulator (`docs/wavefinder-feasibility.md` part 4, digikit's one-to-two-week
+  emulator (`docs/waverider-feasibility.md` part 4, digikit's one-to-two-week
   estimate) the critical path.
 
 ### Status
