@@ -3335,6 +3335,14 @@ settings, MODE and RNG, and the rest waits on extending the mirror past 101.
   the locked byte.
 - **MODE values** (menu table `0x401d4b1c`): OFF 0, TRUE 1, UP 2, DOWN 3, CYCL 4,
   SHUF 5, RAND 6, CHRD 7 -- matching the step's dispatch (`0x4002a114`).
+  **Qualified 2026-09-26:** these are the *names in the image*, not what the
+  instrument offers.
+  - The owner reports the DN2 has no shuffle or random arp mode.
+  - The Digitone II manual (OS 1.10D, §9.7.1) and the Digitone manual (OS 1.41)
+    both list only OFF, TRUE, UP, DOWN and CYCL.
+  - SHUF, RAND and CHRD, and their long forms SHUFFLE, RANDOM and CHORD, sit
+    after CYCL in the same pointer run, hidden from the menu.
+  - Whether the dispatch implements them is **[O]**.
 - **Limits.** MODE can change per trig only while the arp is on (the sequencer
   decides the arp clock from the sound's own MODE); a lock to OFF silences the
   step. No UI yet: DNX writes the locks for testing.
@@ -3597,12 +3605,32 @@ whether the snapshot's framebuffer address is still resolvable after a resume.
 **Raised by the owner 2026-09-25:** *"add a random mode to the arpeggiator to
 expand the current set of modes."*
 
-**What stock already has, so the new mode is not a duplicate.** The mode menu
-(`0x401d4b1c`, §18) lists **OFF 0, TRUE 1, UP 2, DOWN 3, CYCL 4, SHUF 5, RAND
-6, CHRD 7**, and the step's dispatch at `0x4002a114` switches on the same
-values. `SHUF` reorders the held notes; `RAND` already picks among them at
-random. So "a random mode" has to mean a randomness those two do not give.
-Candidates, for the owner to choose between:
+**What stock already has.** ~~The mode menu (`0x401d4b1c`, §18) lists **OFF 0,
+TRUE 1, UP 2, DOWN 3, CYCL 4, SHUF 5, RAND 6, CHRD 7**, and the step's dispatch
+at `0x4002a114` switches on the same values. `SHUF` reorders the held notes;
+`RAND` already picks among them at random. So "a random mode" has to mean a
+randomness those two do not give.~~
+
+**Corrected 2026-09-26, by the owner and the manual:** the DN2 has **no random
+arp mode**. The Digitone II manual (OS 1.10D, §9.7.1) lists OFF, TRUE, UP, DOWN
+and CYCL, and nothing after CYCL. The reading above took names in the image for
+the menu.
+- The names SHUF, RAND and CHRD (with SHUFFLE, RANDOM and CHORD) are in the
+  image, after CYCL, but the instrument never offers them.
+- Shuffle and Random therefore move into the proposals, as candidates 1 and 2.
+- **They may be the cheapest proposals of all.** If the dispatch at
+  `0x4002a114` really implements values 5 and 6, unlocking them could be a bound
+  change, the way `moddest` was. That is **[O]** until the dispatch cases are
+  read and run.
+
+A page comparing them, with piano rolls and playback for each:
+https://claude.ai/artifact/4Nemg8wwenR5Evkqi66jPL
+
+Proposals, for the owner to choose between:
+
+- **Shuffle** -- every note in the range once per cycle, in a new random order
+  each cycle.
+- **Random** -- any note in the range, at random, each step.
 
 - **Random octave** — the note order stays UP/DOWN/etc. and each step lands in
   a random octave within `RNG`.
