@@ -132,6 +132,8 @@ def _short(pair: Pair) -> str:
         return "bootscreen must be applied first"
     if "candidate parameter tables" in why:
         return "moddest must be applied first"
+    if "parameter table has been moved" in why:
+        return "fxmod must be applied first"
     return why
 
 
