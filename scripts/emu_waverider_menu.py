@@ -30,8 +30,13 @@ tapped, DOWN, YES. Watched while it runs:
 
 Steps (comma-separated): `func-src` (open MACHINE SEL), `up`, `down`, `left`,
 `right`, `yes`, `no`, `png:NAME`, `wait:MILLIONS`, `turn:ENC:DELTA` (push and
-turn, for menus), `spin:ENC:DELTA` (a plain turn, for a parameter),
-`tap:CODE`, `frame:NAME`, `mem:VA:N` (print N bytes).
+turn -- what moves a value here, parameters included), `spin:ENC:DELTA` (a
+plain turn: shows the value, moves nothing in this emulator, stock included),
+`tap:CODE`, `press:CODE` / `release:CODE` (hold a key: TRIG 1-16 are 25-40 and
+play the track), `sync:T` (the track's mirror through `0x4002549c`), `sync`
+(every track through the kit-load sync `0x40025af4`), `frame:NAME` (the ISR, and
+the frame it built, with the mirror and the sixteen sounds beside it),
+`blocks:NAME:MILLIONS[:ENC:DELTA]` (every instruction address run), `mem:VA:N`.
 """
 
 from __future__ import annotations
@@ -80,7 +85,8 @@ FRAME_BUILT = 0x400275A2                # the builder's sixteen passes are done
 FRAME = 0x80005E60
 FRAME_BYTES = 2688
 FRAME_MACHINE = 148                     # + 2t
-KIT_POINTER, KIT_SYNC = 0x800052A0, 0x40025AF4   # the live kit; its sixteen-track sync
+MIRROR, MIRROR_BYTES = 0x800068E4, 202  # the modulated per-track values the builder copies
+KIT_POINTER, KIT_SYNC =0x800052A0, 0x40025AF4   # the live kit; its sixteen-track sync
 TRACK_SYNC, SOUND_STRIDE = 0x4002549C, 1163      # (sound, track) -> the mirror; kit + 52 + 1163 t
 MIRROR_TYPE, MIRROR_STRIDE =0x80003AF0 + 3468, 153   # the builder's per-track type byte
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400   # above BSS (0x466b74d0); Machine.write maps it
@@ -248,6 +254,10 @@ def main() -> int:
             _, enc, delta = step.split(":")
             machine.pc = panel.panelin.encoder(machine.m, panel.profile, int(enc), int(delta))
             panel.settle(10_000_000)
+        elif step.startswith("press:") or step.startswith("release:"):
+            kind, code = step.split(":")
+            key = ((int(code) - 1) // 8, (int(code) - 1) % 8)
+            (panel.hold if kind == "press" else panel.let_go)(key, 2_000_000)
         elif step.startswith("tap:"):
             code = int(step[4:])
             panel.tap(((code - 1) // 8, (code - 1) % 8))
@@ -299,6 +309,12 @@ def main() -> int:
             png_dir.mkdir(parents=True, exist_ok=True)
             out = png_dir / f"{name}.frame_be.bin"
             out.write_bytes(frame)
+            # what the builder read, kept beside what it wrote: the modulated
+            # per-track mirror (202 B a track) and each track's sound object
+            (png_dir / f"{name}.mirror_be.bin").write_bytes(machine.read(MIRROR, 16 * MIRROR_BYTES))
+            kit = machine.long(KIT_POINTER)
+            (png_dir / f"{name}.sounds_be.bin").write_bytes(
+                b"".join(machine.read(kit + 52 + SOUND_STRIDE * t, SOUND_STRIDE) for t in range(16)))
             words = [struct.unpack_from(">H", frame, FRAME_MACHINE + 2 * t)[0] for t in range(16)]
             frames[name] = {"file": str(out), "builder_ran": built["n"] - before,
                             "isr_instructions": ran, "machine_words": words}
