@@ -8,6 +8,13 @@ pattern, and trigless lock trigs change a running arp. **Passed on the
 instrument on 2026-09-19.** `docs/ideas-backlog.md` §18 carries the history,
 and `scripts/build_arp_plocks.py` the design, assembly and evidence.
 
+A MODE lock stops where the menu stops: its ceiling is read from setMode's own
+clamp (the immediate at `0x4004bf01`), 4 (CYCL) on stock and 6 (RAND) with
+`arpmodes`. That read was added on 2026-09-26, after the hardware pass. It
+shifts the UI cave by 10 bytes, and it is checked in the emulator
+(`scripts/emu_arp_modes.py`, `scripts/emu_arp_plocks.py`), not yet on the
+instrument.
+
 ## How it applies
 
 The code is assembled ahead of time (`scripts/gen_arpplocks_code.py` ->

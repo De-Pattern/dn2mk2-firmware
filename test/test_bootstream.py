@@ -166,3 +166,28 @@ class TestFindStreams:
 @pytest.mark.parametrize("offset", [-1, 0, 4])
 def test_header_at_out_of_range_is_none(offset):
     assert bootstream.header_at(b"\x00" * 8, offset) is None
+
+
+# -- the producer side: blocks we write ---------------------------------------
+
+def test_bootstream_block_walks_and_checksums():
+    payload = bytes(range(12))
+    blk = bootstream.block(0x28300000, payload)
+    x = 0
+    for byte in blk[:16]:
+        x ^= byte
+    assert x == 0
+    head = bootstream.header_at(blk, 0)
+    assert head is not None and head.target == 0x28300000 and head.count == 12
+    assert bootstream.walk(blk).stopped_at == len(blk)
+
+
+def test_insert_before_final_lands_before_the_entry_jump():
+    body = bootstream.block(0x28000000, b"\x01\x02\x03\x04")
+    final = bootstream.block(0x1C12E2, flags=bootstream.FLAG_FINAL, count=0)
+    stream = body + final
+    extra = bootstream.block(0x28300000, b"\xaa" * 8)
+    out = bootstream.insert_before_final(stream, extra)
+    blocks = bootstream.walk(out).blocks
+    assert [b.target for b in blocks] == [0x28000000, 0x28300000, 0x1C12E2]
+    assert blocks[-1].flags & bootstream.FLAG_FINAL

@@ -15,7 +15,7 @@ a record of its own, which the stock index never sees:
 
 | k | setting | sound byte | range | stored id |
 |---|---|---|---|---|
-| 0 | MODE | 351 | 0..4 | 107 |
+| 0 | MODE | 351 | 0..setMode's ceiling (4; 6 with arpmodes) | 107 |
 | 1 | RNG | 353 | 0..7 | 108 |
 | 2 | SPEED | 352 | 0..22 | 109 |
 | 3 | N.LEN | 354 | 0..127 | 110 |
@@ -154,6 +154,7 @@ BIT_TEST = 0x4019C40C          # (bits, step) -> bool
 # ArpSetupMenuView: the setters its edits call, and where.
 SET_MODE, SET_RNG, SET_SPD = 0x4004BEA4, 0x4004C0DA, 0x4004C03C
 SET_NLEN, SET_LEN, SET_OFF, SET_MASK = 0x4004C178, 0x4004BBD0, 0x4004BC84, 0x4004BD52
+SET_MODE_CEILING = 0x4004BF01  # setMode's clamp `moveq #4,%d1`: its immediate is MODE's ceiling
 EDITS = (  # (va, setter, label, descriptor k / flags)
     (0x40018EEE, SET_MODE, "ui_mode", K_MODE, 0),
     (0x40018FBE, SET_RNG, "ui_rng", K_RNG, 0),
@@ -633,8 +634,14 @@ def ui_source() -> str:
         stubs.append(f"""{label}:
     pea     {setter:#010x}
     move.l  #{desc(k, flags)},%sp@-
-    bra     ui_ext""")
+    bra     {"ui_mode_cap" if k == K_MODE else "ui_ext"}""")
     return "\n".join(stubs) + f"""
+
+| MODE's ceiling is the menu edit's own: the immediate of setMode's clamp
+| (4 on stock, 6 with arpmodes), so a MODE lock reaches what the menu reaches.
+ui_mode_cap:
+    move.b  {SET_MODE_CEILING:#010x},%d0
+    move.b  %d0,%sp@(3)
 
 | An edit, replacing `jsr setter(model, value)` or, for an offset,
 | `jsr setter(model, arp step, value)`. With a trig held: lock (the lock, or the
@@ -1124,6 +1131,10 @@ CONTEXT = (
     (0x4005693C, bytes.fromhex("486b0258"), "held object: the held-step set at +600"),
     (0x40019734, bytes.fromhex("700d"), "arp menu keys: 11 UP (step on), 14 DOWN (off)"),
     (0x4004BD98, bytes.fromhex("34280164"), "setStepOn edits the mask at +356"),
+    # SET_MODE_CEILING is read, and arpmodes may have widened it, so the moveq
+    # itself is not guarded: the instructions either side of it are.
+    (0x4004BEFC, bytes.fromhex("b4816c02"), "setMode: cmp.l %d1,%d2; bge past the clamp"),
+    (0x4004BF02, bytes.fromhex("7401"), "setMode: the clamp is followed by moveq #1,%d2"),
 )
 
 STOCK = pathlib.Path("00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")

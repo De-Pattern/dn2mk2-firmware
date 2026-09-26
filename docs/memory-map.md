@@ -205,6 +205,7 @@ attributes each changed run to a cave, an in-place edit, the appended area, or
 | `lfo4-table` (step 4b, part 1) | the same 376 B | **457 B, 148 sites** — 109 of them the relocated table's 56 bases and 53 bounds | 22,140 B in **two** `CODE` chunks | 26,464 B: 6,656 B at `0x46800000` (the C, the extension table, the per-track rows) and 19,808 B at `0x46900000` (the 330 parameter records and the `LFO4` label) |
 | `lfo4-page` (step 4b, part 2) | the same 376 B | 469 B, 150 sites | 22,484 B | the same, plus the page record and its name in BSS |
 | `lfo4-value` (steps 4c-4e) | the same 376 B | 493 B, 153 sites | 22,836 B | the same again — the read divert, the companion divert and the fourth waveform block are six, ten and eight bytes plus stubs |
+| `waverider-m0` (2026-09-26) | as `build_lfo4_tlm --persist` | as `build_lfo4_tlm --persist` | 40,848 B: the C chunk grows 4,164 -> 20,972 B, of which 16,384 B is the baked wavetable (`const`, `wr_table` at `0x468011e4`) | the C chunk (image + 7,016 B BSS) ends at `0x46806d54`, **1,020,588 B** below the relocated parameter table at `0x46900000` |
 | `intro-tunnel` | — | 2 B, 2 sites | — | — |
 | `intro-stamp` | 184 B at `0x402dfa1c` | 8 B, 1 site | — | — |
 

@@ -8,7 +8,7 @@ owner's captures in `00_Resources/07_DataCapture/`, and DNX's storage documents.
 **The goal, restated.** Keep everything the +Drive already holds (projects,
 presets, kits, the working state) and add a samples library beside it, which
 DNX manages. That library is what the Wavefinder tables
-(`docs/wavefinder-feasibility.md`) and any ported Digitakt II machine
+(`docs/waverider-feasibility.md`) and any ported Digitakt II machine
 (`docs/dt2-machine-port.md`) will read from.
 
 Grades: **[V]** verified, meaning something was run (a script over the image
@@ -454,7 +454,7 @@ Two routes, in increasing cost:
 
 ## 6. What changes for Wavefinder and the DT2 port
 
-- **Wavefinder (`docs/wavefinder-feasibility.md` §2).** "At flash time the
+- **Wavefinder (`docs/waverider-feasibility.md` §2).** "At flash time the
   firmware writes the tables into the +Drive" is now concrete. On the first
   boot of a new build, read our superblock through `0x4012c59a`. If the
   version is older or the magic is missing, write the tables through

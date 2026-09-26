@@ -6110,7 +6110,7 @@ driving and once with LFO4:
   can write in ColdFire.
 - Both appear only in record 6 -> the ColdFire does the same thing for both, and
   the difference is inside the SHARC. That ends this line and makes the SHARC
-  emulator (`docs/wavefinder-feasibility.md` part 4, digikit's one-to-two-week
+  emulator (`docs/waverider-feasibility.md` part 4, digikit's one-to-two-week
   estimate) the critical path.
 
 ### Status
@@ -6439,3 +6439,28 @@ built (`lfo4-imagesync`) and backed out unflashed for that reason. The plan:
 **Still to read before building:** `0x400dccfa`'s bounds, `0x4003f28c` in full,
 and which of the stock setter's tail branches a UI edit takes (the broadcast
 fires only with the setter's sixth argument set).
+
+## PASSED on the instrument: unsaved LFO4 edits survive a power-cycle
+
+**2026-09-26.** What shipped differs from the three-step plan above, and is
+smaller. An LFO4 edit does not go through the single-slot path at all: the
+setter hook (`setter.c`, `announce`) sends the stock *whole-sound* event,
+`SoundConfigChangedInfo` (vtable `0x401dddec`, flag 1), through the sound's
+holder (`holder->vfunc@16`), exactly as the stock senders at `0x4004b25a` do.
+`Sound::updateMirror` answers that event by queueing its whole-sound job
+(invoker `0x4004af2c`), which re-serialises the sound into its stored record
+through SAVE -- and `lfo4_on_save` writes the LFO4 lane there alongside the
+factory values. Nothing of ours writes the working state, and neither the
+slot mapper `0x400dccfa` nor the engine push `0x4003f28c` ever sees an LFO4 slot,
+so steps 1 and 3 above were not needed. A second announcement for the same sound
+is held back while its job is pending (`lfo4_pending_sound`, cleared by the save).
+
+**Hardware, `lfo4-announce_DN2_1.11.syx`, reported by the owner:**
+
+1. LFO4 edited with no save, then a power-cycle: the values survived.
+2. An explicit SAVE PROJECT stores LFO4 correctly in the project.
+
+The emulator had shown the chain down to the record's lane but not the worker
+running the queued job unprompted; the instrument closes that gap. The release
+build without telemetry is `lfo4-everyvoice4_DN2_1.11.syx` (boot gate and the
+pollution checks green).

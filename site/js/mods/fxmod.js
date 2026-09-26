@@ -13,6 +13,13 @@
  * Digitone II 1.11 and every one of them is guarded: 26 sites the mod reads and
  * reasons from, plus each edit's own stock bytes. An image that differs
  * anywhere is refused rather than written somewhere plausible.
+ *
+ * One more refusal, for order: ten of the edits open records in the parameter
+ * table, and `lfo4` moves that table into the appended area. Applied after
+ * lfo4, those edits would find their stock bytes and land on a copy nothing
+ * reads, so an image whose table accessors no longer reach the stock table is
+ * refused, with the order that works (`tableInPlace`, the port of
+ * `dnfw.patch.paramtable.base_sites`).
  */
 
 import { CODE } from "./fxmod-code.js";
@@ -21,6 +28,11 @@ export const ID = "fxmod";
 export const NAME = "LFO modulation of the FX";
 export const SECTION = 3;
 const BASE = 0x40000400;
+
+// dnfw.patch.paramtable: the stock table, and the biased bases its accessors carry.
+const TABLE = 0x401f7fc8, RECORD = 60;
+const STOCK_END = 0x4030b980;
+const EXPECTED_BASES = [[8, 53], [16, 1], [40, 2]];
 
 export class ModError extends Error {}
 
@@ -37,6 +49,29 @@ export function extents() {
                                   length: e.new.length / 2, what: e.what }));
 }
 
+/**
+ * Throw unless every accessor of the parameter table still carries the stock
+ * table's biased base: the same count `paramtable.base_sites` asserts.
+ */
+export function tableInPlace(content) {
+  const end = Math.max(0, Math.min(content.length, STOCK_END - BASE));
+  for (const [bias, expected] of EXPECTED_BASES) {
+    const literal = (TABLE - RECORD + bias) >>> 0;
+    const want = [literal >>> 24, (literal >>> 16) & 0xff, (literal >>> 8) & 0xff, literal & 0xff];
+    let found = 0;
+    for (let i = 0; i + 4 <= end; i += 2) {
+      if (content[i] === want[0] && content[i + 1] === want[1]
+          && content[i + 2] === want[2] && content[i + 3] === want[3]) found++;
+    }
+    if (found !== expected) {
+      throw new ModError(`the parameter table has been moved (expected ${expected} site(s) holding `
+        + `0x${literal.toString(16).padStart(8, "0")} (table - ${RECORD} + ${bias}), found ${found}); `
+        + "lfo4 does that, and fxmod opens records in the stock table, which nothing reads once it "
+        + "has moved: apply fxmod first, then lfo4");
+    }
+  }
+}
+
 /** Throw unless this image is the one the mod was measured against. */
 export function check(firmware) {
   const section = firmware.container.find(SECTION);
@@ -48,6 +83,7 @@ export function check(firmware) {
     throw new ModError(`MAIN OS is ${original.length.toLocaleString()} B, shorter than `
       + `${CODE.stock_length.toLocaleString()}: not Digitone II 1.11`);
   }
+  tableInPlace(original);
   const at = (va, n) => toHex(original.subarray(va - BASE, va - BASE + n));
   for (const g of CODE.guards) {
     if (at(g.va, g.bytes.length / 2) !== g.bytes) {

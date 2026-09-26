@@ -503,8 +503,9 @@ encoder/decoder.
 
 Scored against our DSP image in `docs/sharc-selache.md`. Its instruction lengths
 land 99.0% of the spans between known instruction starts, and a late-start
-control lands 94.9%. It produced two decode-table fixes, now upstream as
-`m-dwyer/digikit#31`. Its disassembly reassembles byte-identically for only
+control lands 94.9%. It produced two decode-table fixes, ~~now upstream as
+`m-dwyer/digikit#31`~~. **Corrected 2026-09-26:** #31 was closed unmerged on
+2026-09-20, after our own measurement. The fixes are not upstream. Its disassembly reassembles byte-identically for only
 83.9% of encodings, so patches are written as source. Built in WSL; not vendored.
 
 ---
@@ -609,3 +610,64 @@ when the emulator is next worth an afternoon, is to apply the four missing
 patches to the local Unicorn build and re-measure the gate's wall-clock against
 today's ~19 minutes — with a stock-control boot beside it, because a faster
 emulator that is subtly wrong is worse than a slow one.
+
+---
+
+## Survey, 2026-09-26: what changed in the references
+
+The clones were fetched read-only. What matters here, ranked:
+
+1. **digikit has a SHARC core.** Branch `work/sharc-emulator` (tip `6f812e9`,
+   unmerged) is a working SHARC+ executor: `tools/sharc_core/` holds the
+   semantics and `tools/sharc_run.py` provides a runner.
+   - It renders one DT2 1.16 voice correctly, at about 270k instructions/s under
+     PyPy.
+   - The claim in `docs/waverider-feasibility.md` that no SHARC core exists is
+     therefore out of date. Wavefinder Milestone 1 runs that emulator as an
+     external tool.
+   - The branch also fixes several decode errors (`DB_VERSION` 13), one of which
+     wrongly marked DN2's loader block 57 as stale. Our SHARC databases should be
+     rebuilt against it.
+2. **octabam's module system solves the clash in our compatibility matrix**
+   (MIT, portable with attribution).
+   - One platform loader (`tools/remix/loader.S`) owns the start-up hook and the
+     appended area. Modules contribute payload entries to its table.
+   - The DRAM units of every module are linked together in one link.
+   - `tools/remix/ledger.py` checks every claim before any byte is written:
+     caves, hook sites, pokes, pinned return addresses, "one appended runtime per
+     image".
+   - `tools/remix/index.py` prints the pairwise matrix from that check rather than
+     keeping it in a README. `dnfw mods matrix` follows the same principle
+     (`docs/mods-compatibility.md`).
+   - Adopting the platform loader is what would let lfowaves, bootscreen and lfo4
+     combine. Not done yet.
+3. **`irpina/digiemu` v0.2.0** (GPL-2.0+). It emulates the Digitakt mk1 and the
+   Digitone mk1; on the Digitone the second ColdFire runs the FM voices.
+   - It is not a SHARC core, and it cannot run DN2 1.11.
+   - Its `emu.fwcheck` is worth learning from: it boots stock and custom builds
+     fresh, diffs their screens as PNGs, and checks render margin. That is a
+     stronger shipping gate than ours.
+4. **`gdeo607/DT1_8_POLY_OSC`** (MIT, for its own code). Eight-voice poly as a
+   fifth SRC machine on the Digitakt 1.53.
+   - Everything happens on the ColdFire, because the DT1 renders audio there.
+   - The method is instructive for DN2 voice work. A hook rewrites the trig
+     message's voice index but keeps the control track's parameter pointer. It
+     then clears the engine's per-voice cache, so the next trig copies the
+     parameters in full.
+5. **`Bezronczek/syntakt-firmware-workbench`** has added two LFO shapes on the
+   Syntakt, confirmed on hardware. That is the first public added LFO shape on an
+   Elektron box.
+   - One of its pre-download checks confirms that each tool stayed inside the
+     regions it declared. We check that in tests for each mod
+     (`test_changes_nothing_outside_its_extents`), not at apply time.
+6. **`bkkbrls-del/midisc`** has a hardware negative worth heeding. Persisting a
+   setting as a project-settings text key bricked the device on Project Save.
+   Persistence should ride the binary project path, as LFO4's does.
+7. **`emuyia/ems-octakit`**: its exception reporter stamps a build identity into
+   the crash screen, a cheap addition to our fault reporting. **octabam** also
+   documents Octatrack LFO evaluation on the ColdFire (`docs/firmware/LFO.md`).
+8. **`timhastie/octa-panel`** is a paraphonic FM engine on the Octatrack's
+   ColdFire. Its licence is not checked, so inspiration only.
+
+No new commits in: elektron-firmware-tool, octa-bt-pt, octamax, selache,
+adsp-ldr. lalzart has only its CC0 commit.
