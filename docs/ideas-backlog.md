@@ -43,7 +43,7 @@ Where they disagree, they win and this table is wrong.
 | 16 | Glitch-ASCII intro | **delivered** | part of `bootscreen` / `site/boot.html` (#82, #83); hardware #84 | — |
 | 17 | Performance mixer | **not started** | — | everything. The Outbox 8 reading below is a starting point it did not have when filed |
 | 18 | P-lock arpeggiator parameters | **delivered** | `arpplocks` mod (#85, #86): MODE, SPEED, RANGE, N.LEN per trig, every edit path verified | `--all`'s LEN, the sixteen step offsets and the step mutes (mutes untested since the fix) |
-| 24 | Another random arpeggiator mode | **open — scope to settle** | — | which randomness: stock already has `SHUF` (5) and `RAND` (6), so the new mode must add something they do not (see §24) |
+| 24 | Another random arpeggiator mode | **open — scope to settle** | `docs/arp-hidden-modes.md`: stock's `SHUF`/`RAND`/`CHRD` are names only, all three play CYCL (measured 2026-09-26) | which randomness; every candidate is new code in a cave (see §24) |
 
 **The numbering is wrong and is left wrong on purpose.** There are two `## 8.`
 headings — "New LFO waveforms" and "FX machines on tracks" — and `## 7.` sits
@@ -3628,3 +3628,24 @@ Candidates, for the owner to choose between:
 
 **Not started.** The first step is the owner's choice of which randomness;
 the second is reading how stock `RAND` gets its random numbers.
+
+### Measured 2026-09-26: SHUF, RAND and CHRD are names only
+
+`docs/arp-hidden-modes.md`, `scripts/emu_arp_modes.py` (stock 1.11, 28 checks).
+- **The step implements four cases, not eight.** The dispatch at
+  `0x4002a114` tells apart OFF, TRUE, UP and DOWN. It sends MODE 4, 5, 6, 7
+  and negative values to one default, CYCL at `0x4002a28a`.
+- **In the emulator, 5, 6 and 7 each play CYCL note for note.** They do so with
+  offsets, mutes and LEN too. SHUF and RAND repeat exactly on a rerun. The
+  controls, UP and CYCL, play as the manual says.
+- **The step has no random source.** The firmware's only `rand()` is the ANSI
+  LCG at `0x40150670`, and nothing in the arp calls it.
+- **The bounds are five `moveq #4`s.** Two are in setMode (`0x4004befa`,
+  `0x4004bf00`), two in the FUNC+ARP restore (`0x4004bfb4`, `0x4004bfc6`) and
+  one in the stored-sound LOAD (`0x400dd530`). SAVE writes 5..7 raw, and
+  stock LOAD turns them into **0, arp OFF**, without crashing.
+- **So there is no cheap unlock, and no `arpmodes` mod.** Widening the bounds
+  would offer three entries that all sound like CYCL. RAND and SHUF need a
+  small cave behind the default branch, with a random source of its own. CHRD
+  needs new voice code in the ISR trig handler, because the step returns one
+  note per call. `docs/arp-hidden-modes.md` §6 has the costs.
