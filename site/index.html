@@ -312,6 +312,39 @@ dnfw mods apply firmware.syx --mod lfowaves --mod moddest --mod midiarp -o modde
 
 <article class="mod">
   <div class="mod-head">
+    <h3>Arpeggiator SHUF and RAND</h3>
+    <span class="mod-id">arpmodes</span>
+    <span class="tag ready">Confirmed on hardware</span>
+  </div>
+  <p>
+    The firmware names eight arp modes and offers five. This adds two of the missing
+    ones as real modes: <code>SHUF</code> plays every note in the range once per cycle,
+    in a new order each cycle, and <code>RAND</code> picks a random note from the range
+    on each step. <code>CHRD</code> stays hidden.
+  </p>
+
+  <p style="margin-top:1.2rem">
+    <a class="cta" href="arp-modes.html">Open the Arp Modes tool &#8594;</a>
+  </p>
+  <p class="cta-note">
+    Runs entirely in your browser &mdash; no install, no command line, nothing uploaded.
+    A sound saved in SHUF or RAND opens with its arp OFF on stock firmware.
+  </p>
+
+  <dl class="facts">
+    <dt>Adds</dt><dd><code>SHUF</code> and <code>RAND</code> after <code>CYCL</code> in the ARPEGGIATOR <code>MODE</code> menu; <code>SPD</code>, <code>LEN</code>, <code>N.LEN</code>, the step mask and note offsets work as in the other modes</dd>
+    <dt>Changes</dt><dd>8 edits in section 3, 374&nbsp;B: two code caves (352&nbsp;B), the arp step's dispatch and five MODE bounds. It uses 2,320&nbsp;B of unused RAM at run time; nothing appended, no length changes</dd>
+    <dt>Tested</dt><dd>Confirmed on the instrument 2026-09-26; gated in the emulator first (both modes, the MODE menu, boot)</dd>
+    <dt>Combines</dt><dd><!-- dnfw:combines arpmodes -->With Arpeggiator p-locks, Boot screen, LFO modulation of the FX, A fourth LFO, New LFO waveforms, Arpeggiator on MIDI tracks, More modulation destinations, FM drum transients. See the compatibility table<!-- /dnfw:combines --></dd>
+  </dl>
+
+<pre>dnfw mods apply firmware.syx --mod arpmodes -o modded.syx
+# with the arp on MIDI tracks
+dnfw mods apply firmware.syx --mod midiarp --mod arpmodes -o modded.syx</pre>
+</article>
+
+<article class="mod">
+  <div class="mod-head">
     <h3>Boot screen</h3>
     <span class="mod-id">bootscreen</span>
     <span class="tag ready">Confirmed on hardware</span>
