@@ -3,9 +3,14 @@
 **Generated, not kept.** The table below is rewritten by
 
     dnfw mods matrix 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip \
-        --page docs/mods-compatibility.md --page site/index.html
+        --page docs/mods-compatibility.md --page site/index.html \
+        --page site/arp-modes.html --page site/arp.html --page site/boot.html \
+        --page site/destinations.html --page site/fx.html --page site/lfo.html \
+        --page site/lfo4.html --page site/transients.html \
+        --boots out/mod-pairs
 
-which tries **every pair of mods, in both orders**, on stock 1.11 (`src/dnfw/mods/matrix.py`).
+(the tool pages each carry their own mod's row, `<!-- dnfw:matrix-row ID -->`,
+and the index carries the whole table at the top), which tries **every pair of mods, in both orders**, on stock 1.11 (`src/dnfw/mods/matrix.py`).
 A table kept by hand is a copy, and it goes stale the first time a mod changes.
 octabam's remixer makes the same choice: its `matrix()` prints from the conflict
 check rather than from a README (`docs/references.md`).

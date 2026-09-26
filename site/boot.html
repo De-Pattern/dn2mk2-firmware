@@ -52,6 +52,25 @@
   here can recover.</p>
 </div>
 
+<section class="combines">
+  <h2>Combines with</h2>
+  <p>This mod's row of the <a href="index.html#compatibility">compatibility table</a>, generated
+  by <code>dnfw mods matrix</code>: &#10003; combines in either order; &#10003;* in one order
+  only; &#10007; cannot be combined. Hover a cell for the reason. No combined image has been
+  flashed yet.</p>
+<!-- dnfw:matrix-row bootscreen -->
+<div class="scroll">
+<table class="matrix">
+  <thead><tr><th></th><th scope="col"><code>arpmodes</code></th><th scope="col"><code>arpplocks</code></th><th scope="col"><code>bootscreen</code></th><th scope="col"><code>fxmod</code></th><th scope="col"><code>lfo4</code></th><th scope="col"><code>lfowaves</code></th><th scope="col"><code>midiarp</code></th><th scope="col"><code>moddest</code></th><th scope="col"><code>transients</code></th></tr></thead>
+  <tbody>
+    <tr><th scope="row">Boot screen <code>bootscreen</code></th><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-order" title="bootscreen must be applied first">&#10003;*</td><td class="mx-self">&mdash;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-no" title="both need the start-up hook and the appended area">&#10007;</td><td class="mx-no" title="both need the start-up hook and the appended area">&#10007;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td></tr>
+  </tbody>
+</table>
+</div>
+<!-- /dnfw:matrix-row -->
+  <p><!-- dnfw:combines bootscreen -->With Arpeggiator SHUF and RAND, LFO modulation of the FX, Arpeggiator on MIDI tracks, More modulation destinations, FM drum transients; in one order only with Arpeggiator p-locks (bootscreen must be applied first); <strong>not</strong> with A fourth LFO (both need the start-up hook and the appended area); New LFO waveforms (both need the start-up hook and the appended area). See the compatibility table<!-- /dnfw:combines -->.</p>
+</section>
+
 <section class="step">
   <div class="step-head"><span class="step-num">1</span><h2>Your mark</h2></div>
   <p>The screen is 128&nbsp;×&nbsp;64 pixels, one bit each. Any picture is fitted to it and
