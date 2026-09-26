@@ -54,17 +54,20 @@ lift this limit (`docs/references.md`). It has not been done here yet.
 ## The table
 
 <!-- dnfw:matrix -->
-| | `arpplocks` | `bootscreen` | `fxmod` | `lfo4` | `lfowaves` | `midiarp` | `moddest` | `transients` |
-|---|---|---|---|---|---|---|---|---|
-| `arpplocks` | - | order | **NO** | yes | yes | yes | yes | yes |
-| `bootscreen` | order | - | yes | **NO** | **NO** | yes | yes | yes |
-| `fxmod` | **NO** | yes | - | order | yes | yes | yes | yes |
-| `lfo4` | yes | **NO** | order | - | **NO** | yes | order | yes |
-| `lfowaves` | yes | **NO** | yes | **NO** | - | yes | yes | yes |
-| `midiarp` | yes | yes | yes | yes | yes | - | yes | yes |
-| `moddest` | yes | yes | yes | order | yes | yes | - | yes |
-| `transients` | yes | yes | yes | yes | yes | yes | yes | - |
+| | `arpmodes` | `arpplocks` | `bootscreen` | `fxmod` | `lfo4` | `lfowaves` | `midiarp` | `moddest` | `transients` |
+|---|---|---|---|---|---|---|---|---|---|
+| `arpmodes` | - | yes | yes | yes | yes | yes | yes | yes | yes |
+| `arpplocks` | yes | - | order | **NO** | yes | yes | yes | yes | yes |
+| `bootscreen` | yes | order | - | yes | **NO** | **NO** | yes | yes | yes |
+| `fxmod` | yes | **NO** | yes | - | order | yes | yes | yes | yes |
+| `lfo4` | yes | yes | **NO** | order | - | **NO** | yes | order | yes |
+| `lfowaves` | yes | yes | **NO** | yes | **NO** | - | yes | yes | yes |
+| `midiarp` | yes | yes | yes | yes | yes | yes | - | yes | yes |
+| `moddest` | yes | yes | yes | yes | order | yes | yes | - | yes |
+| `transients` | yes | yes | yes | yes | yes | yes | yes | yes | - |
 
+- **arpmodes + arpplocks: yes**: disjoint bytes. *Note:* emulator, 2026-09-26: arpplocks' MODE lock takes its ceiling from setMode's clamp (0x4004bf01), which arpmodes widens to 6. Turning MODE with every step held locks DOWN CYCL SHUF RAND RAND RAND with both, and DOWN CYCL CYCL ... with arpplocks alone (scripts/emu_arp_modes.py). A locked SHUF or RAND playing from a trig was not run.
+- **arpmodes + midiarp: yes**: disjoint bytes. *Note:* a MIDI track's arp runs the same step, so SHUF and RAND should reach MIDI tracks; not run.
 - **arpplocks + bootscreen: order**: bootscreen refuses after arpplocks: the boot-screen code space is already in use by another mod. *Note:* bootscreen reserves 0x380 bytes at 0x402dfa1c for its code and refuses if any is used; its code is 366 bytes and ends 2 bytes before arpplocks' cave at 0x402dfb8c, so bootscreen first then arpplocks writes disjoint bytes. Whether bootscreen uses the rest of its reservation at run time is not measured.
 - **arpplocks + fxmod: NO**: arpplocks and fxmod both write section 3 0x0028e604..0x0028e682 (126 bytes).
 - **bootscreen + lfo4: NO**: bootscreen and lfo4 both write section 3 0x0000013f..0x00000146 (7 bytes).
