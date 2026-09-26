@@ -147,3 +147,31 @@ What this exercise did produce, and it is worth keeping:
 **[D]** — static structural comparison only, single review. `func_hash` matching
 is prioritisation evidence: collisions are possible, and two functions with the
 same shape need not have the same semantics. No emulator run, no hardware.
+
+## Revisited 2026-09-26: a ONESHOT-lite on Waverider's machinery
+
+**Raised by the owner:** port ONESHOT as a way to test sample handling, apart
+from Waverider. The conclusion above stands for a *port*: the DT2's sample
+engine has no DN2 twin, so this would be our own player, not Elektron's moved
+across.
+
+**What has changed since** is that most of a player's infrastructure now exists
+or is being built for Waverider (`docs/waverider-feasibility.md`):
+- the SHARC runner gate, and a reader of our own bit-exact to a reference (M1);
+- a sixth machine type and its render loop (M3);
+- the frame parameters and the per-track chain (M4);
+- tables baked into section 7 behind a directory (M4);
+- the first flash of modified SHARC code (M5, in progress).
+
+**So the cheap variant is a ONESHOT-lite:**
+- a small **baked sample bank** in section 7, as Waverider bakes tables and
+  `transients` replaces the drum bank, with no browser;
+- `SAMP` as a slot index, like Waverider's SLOT;
+- a one-shot reader with `STRT`, `LEN`, `LOOP` and the four `PLAY` modes.
+
+It tests the sample path end to end, but not the library: the unbounded,
+user-managed bank on the `+Drive` and the browser the DN2 UI lacks stay the
+expensive half (`docs/drive-storage-research.md`).
+
+**Order:** after Waverider M5 has run modified SHARC code on the instrument.
+Until then both carry the same first-flash risk. **[D]**, not started.
