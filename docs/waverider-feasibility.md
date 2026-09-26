@@ -712,6 +712,10 @@ parameters, and the ColdFire frame is what carries those.
 
 ### The measured gap, revised after Milestone 2
 
+> **Superseded 2026-09-26** by "The measured gap, revised after Milestone 3"
+> below. Three open rows ("a sixth render loop", "note trigger and amp
+> envelope", part of "table delivery") are now measured. Kept as it stood.
+
 | part | state | cost |
 |---|---|---|
 | wavetable import, baked table | **done**; **[V]** Milestone 0 | — |
@@ -726,6 +730,161 @@ parameters, and the ColdFire frame is what carries those.
 | WaveTone's decimator in the runner | **[O]** rings in-frame (only matters for the stock control) | — |
 | the 12-shape ANIM modulator, the blend, two oscillators | not started; testable offline | weeks |
 | persistence, p-locks | same shape as LFO4 | weeks |
+
+## Milestone 3, offline (2026-09-26): an audible Waverider voice, as a sixth machine type
+
+**The question.** With the voice-path map from Milestone 2, can the note
+trigger and the amp be driven, and can Waverider be added as **machine type 5** —
+its own render loop in `sw 0x1c8ef1`, calling our reader — without disturbing
+types 0–4? **Yes, offline.** All three steps pass in the runner.
+
+```
+python scripts/sharc_waverider_m3.py \
+    --image 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip \
+    --digikit ../digikit-wt-sharcemu [--assemble] [--blocks 6]
+```
+
+It reuses the Milestone 2 post-init snapshot (`out/waverider/m2_init_*.snap`):
+engine init never touches our spliced spans or the clamp parcel, so the snapshot
+is loaded against an M2-equivalent image (which its sha256 matches) and the
+runner's memory is then re-pointed at the full M3 image — no 18-minute rebuild.
+The run of 2026-09-26 reported **PASS on all 14 checks**, blocks = 6, digikit
+`6f812e9`, CPython 3.13 on a shared machine.
+
+### Step 1: the note trigger and the amp
+
+Mapped by running, and each recorded in `src/dnfw/waverider/voice.py`:
+
+| field | what it is |
+|---|---|
+| note counter | record word 113, compared at `0x1c90fb`; a change calls `sw 0xb82440` |
+| trigger flag | engine `+0x138fc` (byte), raised by the frame unpack `sw 0x1c2712`; the frame carries the trigger bit at image offset 34 |
+| amp stage | `sw 0xb80345` (its write at `0xb80515`) |
+| amp setup | `sw 0xb8028c`, called at `0x1c92b0`; reads the envelope from record words `+0x20c..+0x228` (an ADSR) |
+| what `sw 0x1c2712` unpacks | the 2,688-byte frame image copied to `0x25c48c`; a single-field sweep mapped its per-track offsets to the record (docs, "Measured in the runner") |
+
+**PASS.** With a hand-built ADSR (sustain 1.0) and a note trigger fired once as
+an edge, a constant 0.5 probe written where the amp reads it comes out at **0.5**
+(the amp is open). **Control:** the same probe with no trigger comes out at
+**0.0156** (closed). Files: `m3_amp_triggered.wav`, `m3_amp_control.wav`.
+
+> The stock **WaveTone** voice at the end of the chain is *not* a clean control:
+> its own 2:1 decimator rings in the runner (Milestone 2, `[O]`), and its
+> oscillator output is ~1.2e-4 of full scale. So the amp gate is proven with a
+> known probe rather than with WaveTone's own signal.
+
+### Step 2: our reader substituted, through the per-track chain
+
+Our reader (Milestone 1) replaces the WaveTone render at `0x1c9611`. **PASS.**
+
+- the track buffer after the call equals `dnfw.waverider.render` (float32) **bit
+  for bit**: 0 mismatches in 192 samples;
+- the reader survives the per-track stages to the amp input: a least-squares fit
+  to the ideal reference gives **gain 0.098, correlation 0.987, SNR 15.8 dB** —
+  the same measure Milestone 2 reported, now with the trigger and amp mapped.
+  Files: `m3_reader_machine.wav` (bit-exact buffer), `m3_reader_pre_amp.wav`.
+
+**Not end-to-end loud, and why:** the per-track *filter* stages between the
+buffer and the amp attenuate a raw wavetable by ~10× (peak 0.81 → 0.083),
+because a zeroed frame leaves their cutoff/resonance at defaults. An audible
+end-to-end voice additionally needs those filter parameters from a real frame,
+which are not mapped. The amp itself opens (step 1); the filters are the
+remaining gap, not the amp or the reader.
+
+### Step 3: a sixth machine type (type 5 → our reader)
+
+`csrc/waverider/sharc/machine5.asm` (`wr_render`'s sibling, `wr_type5`), 88
+instructions, assembled with selas and spliced at PM `sw 0x180100`. It is a
+fifth per-type render loop in the shape of the four stock ones (`0x1c93e5`,
+`0x1c9401`, `0x1c941c`, `0x1c943b` in `sw 0x1c8ef1`): it scans the 16 track
+records (`0x25566c`, stride `0x234`), and for every track whose machine type is
+5 it calls our reader (`reader.asm` at `sw 0x180000`) on that track's voice
+block, writing the track buffer. It is entered by a JUMP over `0x1c9448` — two
+instructions after the Swarmer loop, before the per-track chain — modelled in
+the runner by a pc redirect, and it rejoins at `0x1c944c`. **PASS.**
+
+- a **type-5 track renders our reader into its buffer, bit for bit**: 0
+  mismatches in 192 samples (`m3_type5_reader.wav`);
+- **types 0–4 are bit-identical to stock** — a stock run with the entry hook
+  installed (but no type-5 track) is byte-for-byte equal to one without it,
+  across all 16 track buffers; and in the type-5 run, tracks 1–15 are
+  byte-for-byte equal to the stock run. The sixth loop is purely additive;
+- the DSP type clamp `min(R2, 4)` at `0x1c294c` is raised to `min(R2, 5)` by a
+  one-parcel selas patch (`R0 = 0x4` → `R0 = 0x5` at `0x1c294a`, `800f0400` →
+  `800f0500`) placed in the loaded image; **verified by running**: fed a type-5
+  selector, the stock clamp leaves R2 = 4, the raised clamp leaves R2 = 5.
+
+Both objects reassemble byte-for-byte from source with `--assemble` (selas
+`2b26d3b`); their branch targets and boundaries are checked against digikit's
+decoder (no unknown or uncertain form).
+
+### Step 3 (research only): where the ColdFire would set type 5, and table delivery
+
+**Where the ColdFire sets type 5.** Two DSP-side gates squash a type-5 frame in
+stock, and both were found by running:
+
+1. the machine-type **lookup** at `0x25d748` (a loaded data block): the frame's
+   type nibble indexes it; entries `[0..4]` are `0..4`, `[5..]` are `0`, so a
+   nibble of 5 becomes FM Tone. Entry `[5]` must be set to `5`. **[E]**
+2. the per-track selector **clamp** `min(R2, 4)` at `0x1c294c`, raised above.
+   **[E]**
+
+The ColdFire builds the frame nibble from its own machine list (`docs/machine-list.md`:
+`moveq #4`). Raising *that* is ColdFire work and is **not touched** here, per the
+task. What the DSP needs is the two patches above.
+
+**Table delivery to DSP memory.** Cited from digikit's findings 04/06 in our own
+words, graded:
+
+- The ColdFire→DSP link is a **periodic full-duplex DSPI2 SPI frame** driven by
+  eDMA channels 28/29 (`FUN_400cf9c4`): on DN2, **TX 2,688 bytes, RX 2,748
+  bytes**, one fixed frame per audio tick (SSI0-paced, ~87 ms). **[V]** (digikit
+  finding 04; the frame's DN2 hash matches our image, Milestone 2).
+- That frame is **structured parameters, not a bulk pipe**: 16 per-track slots
+  of `0x92` bytes plus a header. A 16 KB table does **not** fit in one frame,
+  and no existing per-frame block is a free 16 KB carrier. **[D]**
+- DN2's own WaveTone tables are **built on the DSP at init** (`sw 0x1c463b`
+  additive synthesis; 3 × 48 × 1024 int16), not transferred — Milestone 2 `[E]`.
+  So one credible delivery path for Waverider is the same: **bake the table into
+  the DSP image or build/copy it at init into DSP SDRAM**, addressed by a sample
+  pointer, rather than stream it per frame. A voice's sample pointer into DSP
+  SDRAM is real (`0x8045a6c8`, the ROM default digikit's Lane J1 reads). **[D]**
+- A **bulk** transfer of sample bytes into DSP SDRAM is **not located**: digikit
+  mark the runtime SPORT4/DMA10-11 producer and the RX payload producer both
+  **[O]**. The SD-card path (eSDHC, eDMA 59) is ColdFire-side `+Drive` I/O, not a
+  DSP feed. **[O]**
+
+So table delivery is still open, but narrowed: the per-frame parameter frame is
+the wrong vehicle (too small, wrong shape); the right shape is DSP-resident data
+(baked or init-built), which is how the firmware already feeds its own
+oscillators. **[D]**
+
+### The measured gap, revised after Milestone 3
+
+| part | state | cost |
+|---|---|---|
+| wavetable import, baked table | **done**; **[V]** Milestone 0 | — |
+| control surface, parameters, pages | **proven** by LFO4 | days |
+| machine list ceiling | **read**: ColdFire `moveq #4`; DSP `min(R2,4)` **raised to 5 [E]** | done (DSP) |
+| SHARC executor on the DN2 voice path | **[E]** with 9 workarounds (G1–G10) | — for us; PRs for digikit |
+| DN2 engine layout: records, machine type, block, track buffers | **[E]** M2 | done |
+| the note trigger and the amp gate | **[E]** M3: trigger flag, note-on fn, amp stage + ADSR mapped; amp opens on trigger, closed without | done offline |
+| a sixth render loop (type 5 → our reader) | **[E]** M3: `machine5.asm`, bit-exact; types 0–4 bit-identical | done offline |
+| where the ColdFire sets type 5 | **[E]** M3 research: lookup `0x25d748[5]` + clamp `0x1c294c`; ColdFire nibble builder not touched | ColdFire work |
+| the per-track **filter** parameters (for an end-to-end loud voice) | **open**: zeroed-frame defaults attenuate ~10× | weeks |
+| table delivery to the DSP | **open, narrowed [D]**: per-frame frame is too small; DSP-resident (baked/init-built) is the shape | weeks |
+| the 12-shape ANIM modulator, the blend, two oscillators | not started; testable offline | weeks |
+| persistence, p-locks | same shape as LFO4 | weeks |
+
+Two more runner workarounds turned up on this path and are added to
+`scripts/sharc_dn2_fixups.py` and `docs/for-digikit-sharc-runner-dn2.md`:
+
+- **G8** — a conditional Type 7a (`IF EQ MODIFY(I4, M4)`, in the amp stage once a
+  note is on) halts; the runner runs only "always" and `0x17`. Evaluated here.
+- **G10** — Type 8a ignores the `(LA)` loop-abort bit (`_type_25a_direct` calls
+  the transfer without `loop_abort`, though `_transfer` supports it and Type 9a
+  passes it). A `JUMP (LA)` out of a `DO` loop then leaves the loop's PC-stack
+  entry behind and the next `RETURN` halts. Met in the amp at `0xb803ee`.
 
 ### What is unverified
 
@@ -763,6 +922,18 @@ Our reader, substituted at the WaveTone render call, is bit-exact in the
 track buffer and survives the per-track stages before the amp. The end of the
 chain is silent because no note is triggered, and WaveTone's decimator rings
 in the runner. Nothing is flashed.
+
+**Milestone 3: [E]**, 2026-09-26, offline only. The note trigger and the amp
+are mapped and driven: the amp opens on a hand-built trigger + ADSR and is
+closed without it. Our reader is added as **machine type 5** — a fifth
+per-type render loop (`csrc/waverider/sharc/machine5.asm`, selas-assembled,
+spliced) in `sw 0x1c8ef1`, with the DSP type clamp raised to `min(R2,5)`. A
+type-5 track renders our reader into its buffer bit for bit; types 0–4 stay
+bit-identical to stock. Table delivery is researched and narrowed (the
+per-frame DSPI2 frame is too small; DSP-resident data is the right shape),
+still `[O]` for a bulk transfer. An end-to-end *loud* voice additionally needs
+the per-track filter parameters from a real frame, unmapped. Nothing is
+flashed. Gate: `scripts/sharc_waverider_m3.py`, 14/14 PASS.
 
 **[D]** for the gap estimates — they are reasoned from measured facts (the file
 format, the firmware's free space, the machine table bound) but no part of the

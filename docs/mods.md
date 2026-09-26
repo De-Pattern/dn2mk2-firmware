@@ -469,7 +469,7 @@ group-name fix.
 with `arpplocks` (`0x4028ea04`, 126 bytes). `dnfw mods matrix` refuses the pair,
 and so does `apply`. It writes inside section 3 only, appends nothing and claims
 no startup hook, so `check_compatible` clears it against `moddest`, `lfowaves`,
-`midiarp` and `transients`. Against `lfo4` it is order-only: its Chorus record
+`midiarp` and `transients`. Against `lfo4` it is order-only, and refuses an lfo4 image (2026-09-26): its Chorus record
 edits must be in the table before lfo4 copies it. As always that is a byte-overlap
 statement and not a musical one, and no combined image has been flashed.
 
@@ -512,11 +512,36 @@ bytes are blank in the JSON and rebuilt at apply time from the user's own image
 and the appended area, so it cannot be combined with `lfowaves` or `bootscreen`
 until one platform loader owns both (`docs/mods-compatibility.md`).
 
-**Browser:** not yet. The JSON is ready for it, but the tool pages do not carry it.
+**Browser:** `site/lfo4.html`, 2026-09-26. `gen_lfo4_code.py` also writes
+`site/js/mods/lfo4-code.js` from the same data (the JSON stays byte-identical, and
+the script still reproduces the release build byte for byte), and
+`site/js/mods/lfo4.js` ports `compose`: the stock length and every edit's stock
+bytes are checked, with the Python's wording, then the relocated table is rebuilt
+from the user's image (`paramtable.records`, `lfo4records.build` with
+`free_unique_ids` and the five field rewrites), so no table bytes ship to the
+browser either.
+- **Order in the browser.** One page, one mod: the user builds fxmod or moddest
+  first and loads that download into the LFO4 page, which says so. The pages
+  that must come first refuse an lfo4 image: moddest already did, and fxmod now
+  checks the table's 56 accessor bases (`paramtable.base_sites`, ported as
+  `fxmod.tableInPlace`) and says to apply fxmod first, in the CLI and the browser.
+  Without that, fxmod after lfo4 applied cleanly and opened ten records in a
+  table nothing reads.
+- **Parity:** `node scripts/js_lfo4_check.mjs`, run by `test_js_lfo4.py`: stock
+  -> lfo4 equals `lfo4.compose`; fxmod -> rebuilt `.syx` -> reloaded -> lfo4
+  equals MAIN OS of the CLI's `--mod fxmod --mod lfo4`; moddest -> lfo4 equals
+  the Python's; lfo4 accepts a midiarp image; every rebuilt image verifies 21/21;
+  and five refusals (lfo4 on an lfowaves image, on a longer image, on an edited
+  site; fxmod and moddest on an lfo4 image) are worded the same on both sides.
+- **Page, driven in Chrome** (the stock `.syx` uploaded, Build clicked): the load
+  verifies 21/21, the eight controls render, the rebuild verifies 21/21 and offers
+  `Digitone_II_OS1.11_lfo4.syx` at 2,398,112 bytes, **SHA-256-identical to the
+  CLI's `--mod lfo4` output**, with no console errors. An lfowaves image is
+  refused on its length; the FX page refuses the lfo4 image and names the order.
 
 ## Mod 9: `arpmodes` -- SHUF and RAND, as real arp modes
 
-**Status: built and emulator-gated 2026-09-26; not yet on the instrument.**
+**Status: confirmed on the instrument 2026-09-26** (`arpmodes_DN2_1.11.syx`; the owner: *"works in device"*). ~~Built and emulator-gated 2026-09-26; not yet on the instrument.~~
 
 Stock 1.11 names eight arp modes and offers five. SHUF, RAND and CHRD have no
 code behind them, and all three play CYCL (`docs/arp-hidden-modes.md`). This mod

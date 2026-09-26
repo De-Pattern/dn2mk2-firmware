@@ -63,3 +63,29 @@ def test_loop_to_repeats_and_cuts():
 
 def test_unpack_int16_pairs_low_half_first():
     assert V.unpack_int16_pairs([0xFFFF0001, 0x80007FFF]) == [1, -1, 32767, -32768]
+
+
+# -- Milestone 3 landmarks ------------------------------------------------------
+
+def test_machine_from_nibble_passes_0_to_4_and_squashes_5():
+    assert [V.machine_from_nibble(n) for n in range(6)] == [0, 1, 2, 3, 4, 0]
+    # a lookup whose entry 5 is set admits type 5
+    assert V.machine_from_nibble(5, [0, 1, 2, 3, 4, 5, 0, 0]) == 5
+
+
+def test_type_clamp_stock_ceiling_is_4_raised_is_5():
+    assert V.type_clamp(5) == 4                 # stock: type 5 squashed
+    assert V.type_clamp(5, ceiling=5) == 5      # raised: type 5 admitted
+    assert V.type_clamp(-3) == 0                # the max(.,0) floor
+
+
+def test_m3_landmarks_are_the_measured_addresses():
+    assert V.TRIG_CELL == 0x138FC
+    assert V.NOTE_ON_FN == 0xB82440
+    assert V.AMP_STAGE == 0xB80345
+    assert V.MACHINE_LOOKUP == 0x25D748
+    assert V.TYPE_CLAMP_IMM == 0x1C294A
+    assert V.TYPE5_ENTRY == 0x1C9448 and V.TYPE5_RESUME == 0x1C944C
+    assert V.READER_SW == 0x180000 and V.MACHINE5_SW == 0x180100
+    # the four stock per-type render loops are all inside sw 0x1c8ef1
+    assert all(0x1C8EF1 <= pc < 0x1C9B73 for pc in V.PER_TYPE_RENDER_LOOPS)
