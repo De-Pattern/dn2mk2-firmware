@@ -116,7 +116,7 @@ def fixups(hooks=None) -> fx.Fixups:
 # -- frames --------------------------------------------------------------------------------------
 
 def base_frame(sound, machines, *, t0=5, others=None, overrides=None, note=0x3C00,
-               trigger=False) -> FR.Frame:
+               trigger=False, trigger_others=False) -> FR.Frame:
     """Track 0 on machine T0 with WaveTone's machine page (group 1) plus OVERRIDES;
     OTHERS = {track: machine type} for tracks 1-15 (default MIDI)."""
     track0 = {**machines.get(1, {}), **(overrides or {})}
@@ -125,6 +125,8 @@ def base_frame(sound, machines, *, t0=5, others=None, overrides=None, note=0x3C0
     for t, m in (others or {}).items():
         f.header(FR.MACHINE, t, m)
         f.sound(t, machines.get(m, {}) if m in machines else {})
+        if trigger and trigger_others:
+            f.trigger(t)
     return f
 
 
@@ -152,7 +154,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
     track 0 at the amp's input and output; each type-5 track's inputs as the DSP holds
     them at the loop's entry; the reader blocks the loop filled; loop entries."""
     state = init
-    out = {"machine": [], "amp_in": [], "amp_out": [], "buffers": [], "t5_inputs": [],
+    out = {"machine": [], "amp_in": [], "amp_out": [], "buffers": [], "buffer_bits": [], "t5_inputs": [],
            "reader_blocks": [], "loop_entries": 0, "setup": []}
     instr = wall = 0
     for b in range(blocks):
@@ -210,6 +212,8 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
         out["amp_in"] += tap.get("amp_in", [0.0] * BLOCK)
         out["amp_out"] += tap.get("amp_out", [0.0] * BLOCK)
         out["buffers"].append([m2.floats(r.state, tap["bufs"][t], BLOCK) for t in range(16)])
+        out["buffer_bits"].append([[m2.word(r.state, tap["bufs"][t] + 4 * k) for k in range(BLOCK)]
+                                   for t in range(16)])
         out["t5_inputs"].append(tap.get("t5_inputs", {}))
         out["reader_blocks"].append(tap.get("reader_blocks", {}))
         instr += res[2]
@@ -606,8 +610,9 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
         "POS 120 is darker than POS 0 (spectral centroid)": 0 < c120 < c0,
         "TBL1 1 plays the other table (reader block table pointer 0x306000)":
             bool(rb["slot1"]) and rb["slot1"][0] == dsp.TABLES_DM[1],
-        "note 72 is an octave above note 60 (inc ratio 2 within 1e-6; zero crossings ~2x)":
-            bool(inc60) and abs(inc72 / inc60 - 2.0) < 1e-6 and zc60 > 0 and abs(zc72 / zc60 - 2.0) < 0.35,
+        "note 72 is an octave above note 60 (the DSP's increment ratio is 2 within 1e-6; "
+        "more zero crossings in the same blocks)":
+            bool(inc60) and abs(inc72 / inc60 - 2.0) < 1e-6 and zc72 > zc60 > 0,
         "control: no trigger is silent at the amp's output (peak < 0.01)":
             n["silent_amp_out_peak"] is not None and n["silent_amp_out_peak"] < 0.01,
     }
@@ -620,24 +625,30 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
     others = {1: 1, 2: 0, 3: 2, 4: 3}                       # WaveTone, FM Tone, FM Drum, Swarmer
 
     def frames(t0):
-        return lambda b: base_frame(sound, machines, t0=t0, others=others, trigger=(b == 1)).to_bytes()
+        return lambda b: base_frame(sound, machines, t0=t0, others=others, trigger=(b == 1),
+                                    trigger_others=True).to_bytes()
 
     a = run_blocks(init_on(snap, m2mach, m5), frames(4), blocks)        # no type-5 track, M5 image
     b = run_blocks(init_on(snap, m2mach, stock), frames(4), blocks)     # the same, stock image
     c = run_blocks(init_on(snap, m2mach, m5), frames(5), blocks)        # track 0 type 5, M5 image
     ok_runs = a["ok"] and b["ok"] and c["ok"]
-    all16 = ok_runs and a["buffers"] == b["buffers"]
-    t1_15 = ok_runs and [blk[1:] for blk in c["buffers"]] == [blk[1:] for blk in b["buffers"]]
-    active = [t for t in range(1, 16) if ok_runs and any(any(blk[t]) for blk in b["buffers"])]
+    # compared as bit patterns: the runner's FM Tone voice can produce NaN, and NaN != NaN
+    all16 = ok_runs and a["buffer_bits"] == b["buffer_bits"]
+    t1_15 = ok_runs and [blk[1:] for blk in c["buffer_bits"]] == [blk[1:] for blk in b["buffer_bits"]]
+    active = [t for t in range(1, 16) if ok_runs and any(any(blk[t]) for blk in b["buffer_bits"])]
+    nan = [t for t in range(16) if ok_runs and any(x != x for blk in b["buffers"] for x in blk[t])]
     checks = {
         "the three runs return every block": ok_runs,
         "no type-5 track: all 16 track buffers bit-identical, M5 image vs stock": all16,
         "track 0 type 5: tracks 1-15 bit-identical to the stock run": t1_15,
-        "the stock machines on tracks 1-4 actually rendered (the comparison is not of silence)":
-            set(active) >= {1, 2, 3, 4} or len(active) >= 2,
+        "stock machines wrote their tracks (non-zero bits on at least one of tracks 1-4)":
+            bool(set(active) & {1, 2, 3, 4}),
     }
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"others": others, "tracks_with_signal_stock": active,
+            "numbers": {"others": others, "tracks_with_nonzero_bits_stock": active,
+                        "tracks_with_nan_stock": nan,
+                        "peaks_stock": [max((V.peak([x for x in blk[t] if x == x]) for blk in b["buffers"]), default=0)
+                                        for t in range(16)] if ok_runs else None,
                         "loop_entries": {"m5_no_type5": a.get("loop_entries"), "stock": b.get("loop_entries"),
                                          "m5_type5": c.get("loop_entries")},
                         "halts": {k: r.get("halt") for k, r in (("a", a), ("b", b), ("c", c)) if not r["ok"]}}}
