@@ -37,3 +37,17 @@ def test_moddest_then_lfo4_only(found):
 def test_disjoint_pair_combines(found):
     pair = found[("lfowaves", "moddest")]
     assert pair.combines and not pair.order_only
+
+
+def test_a_pages_row_is_that_row_of_the_table(found):
+    """A tool page shows its mod's row (`<!-- dnfw:matrix-row ID -->`): the same
+    header and the same cells as that row of the full table, and no other row."""
+    pairs = list(found.values())
+    ids = sorted({m for p in pairs for m in (p.a, p.b)})
+    names = {m: m.upper() for m in ids}
+    full = matrix.table_html(ids, pairs, names)
+    row = matrix.table_html(ids, pairs, names, only="lfo4")
+    rows = [ln for ln in row.splitlines() if ln.strip().startswith('<tr><th scope="row">')]
+    assert len(rows) == 1 and "<code>lfo4</code>" in rows[0]
+    assert rows[0] in full.splitlines()
+    assert row.splitlines()[:3] == full.splitlines()[:3]

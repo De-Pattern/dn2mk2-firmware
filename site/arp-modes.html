@@ -1,0 +1,158 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arp Modes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<meta name="description" content="Add SHUF and RAND to the Digitone II arpeggiator's MODE menu, built entirely in your browser.">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/tool.css">
+<style>
+  .params {
+    display: grid; gap: .5rem; margin-top: .6rem;
+    grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
+  }
+  .param {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-radius: 8px; padding: .5rem .7rem; font-family: var(--mono);
+    font-size: .86rem; color: var(--ink-soft); text-align: center;
+  }
+  .param.new { border-color: var(--accent); color: var(--accent); }
+  .integrity { margin-top: .8rem; font-weight: 500; }
+</style>
+
+<div class="wrap">
+
+<header class="top">
+  <p class="eyebrow"><a href="index.html">Digitone II Mods</a> / arp modes</p>
+  <h1>Arp Modes</h1>
+  <p class="lede">
+    The Digitone&nbsp;II names eight arpeggiator modes and offers five. This adds two
+    of the missing ones, <code>SHUF</code> and <code>RAND</code>, as real modes with
+    their own code. Pick your firmware, download a signed image.
+  </p>
+</header>
+
+<div class="note">
+  <p><strong>Everything happens in this tab.</strong> Your firmware file is never
+  uploaded — this page has no server to upload it to. It is static files on
+  GitHub Pages; you can read every line in the
+  <a href="https://github.com/angellinares/dn2_firmware_explore/tree/main/site/js">repository</a>.</p>
+  <p><strong>Prove your way back before you flash anything.</strong> The Early Start-up
+  Menu reflashes stock firmware over MIDI. Do that once, with an unmodified image,
+  <em>before</em> you flash a modified one — and back up your +Drive, which no tool
+  here can recover.</p>
+</div>
+
+<section class="combines">
+  <h2>Combines with</h2>
+  <p>This mod's row of the <a href="index.html#compatibility">compatibility table</a>, generated
+  by <code>dnfw mods matrix</code>: &#10003; combines in either order; &#10003;* in one order
+  only; &#10007; cannot be combined. Hover a cell for the reason. No combined image has been
+  flashed yet.</p>
+<!-- dnfw:matrix-row arpmodes -->
+<div class="scroll">
+<table class="matrix">
+  <thead><tr><th></th><th scope="col"><code>arpmodes</code></th><th scope="col"><code>arpplocks</code></th><th scope="col"><code>bootscreen</code></th><th scope="col"><code>fxmod</code></th><th scope="col"><code>lfo4</code></th><th scope="col"><code>lfowaves</code></th><th scope="col"><code>midiarp</code></th><th scope="col"><code>moddest</code></th><th scope="col"><code>songguard</code></th><th scope="col"><code>transients</code></th></tr></thead>
+  <tbody>
+    <tr><th scope="row">Arpeggiator SHUF and RAND <code>arpmodes</code></th><td class="mx-self">&mdash;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td></tr>
+  </tbody>
+</table>
+</div>
+<!-- /dnfw:matrix-row -->
+  <p><!-- dnfw:combines arpmodes -->With Arpeggiator p-locks, Boot screen, LFO modulation of the FX, A fourth LFO, New LFO waveforms, Arpeggiator on MIDI tracks, More modulation destinations, Song guard, FM drum transients. See the compatibility table<!-- /dnfw:combines -->.</p>
+</section>
+
+<section class="step">
+  <div class="step-head"><span class="step-num">1</span><h2>Your firmware</h2></div>
+  <p>A Digitone&nbsp;II OS 1.11 <code>.syx</code> from Elektron &mdash; or an image
+  another page here has already built, to combine mods (see below).</p>
+
+  <div class="drop" id="drop">
+    <p><label class="filebtn" for="syx">Choose a .syx file</label>
+      <input type="file" id="syx" accept=".syx,.SYX" hidden></p>
+    <p class="hint">or drag it here</p>
+  </div>
+
+  <div id="loaded" class="hidden">
+    <dl class="facts" id="facts"></dl>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</section>
+
+<section class="step hidden" id="step2">
+  <div class="step-head"><span class="step-num">2</span><h2>What it adds</h2></div>
+  <p>
+    The ARPEGGIATOR <code>MODE</code> menu goes on past <code>CYCL</code> to the two new
+    modes, and stops at <code>RAND</code>. Every address this mod writes is checked to
+    hold its stock bytes first; an image that differs anywhere is refused rather than
+    written somewhere plausible.
+  </p>
+  <div class="params" id="modes"></div>
+
+  <dl class="facts">
+    <dt>SHUF</dt><dd>Plays every note in the range once per cycle, in a new order each cycle. The note that ends one cycle never starts the next</dd>
+    <dt>RAND</dt><dd>Picks a random note from the range on each step; the same note can come twice</dd>
+    <dt>The range</dt><dd>The notes you hold, across <code>RNG</code> + 1 octaves, as in the other modes</dd>
+    <dt>The rest</dt><dd><code>SPD</code>, <code>LEN</code>, <code>N.LEN</code>, the step mask and the note offsets work as in every other mode: the new code only chooses the note</dd>
+    <dt>Not included</dt><dd><code>CHRD</code>, the eighth name, stays hidden</dd>
+    <dt>Writes</dt><dd id="writes">&mdash;</dd>
+  </dl>
+
+  <div class="note">
+    <p><strong>A sound saved in SHUF or RAND opens with the arp OFF on stock
+    firmware</strong>, or on any build without this mod. It is stored as mode 5 or 6,
+    and stock turns anything above <code>CYCL</code> into <code>OFF</code> when it loads a
+    sound.</p>
+    <p><strong>Confirmed on a Digitone&nbsp;II, 2026-09-26.</strong> This page applies
+    exactly the bytes of that build, checked byte for byte when it is packaged.</p>
+  </div>
+</section>
+
+<section class="step hidden" id="step3">
+  <div class="step-head"><span class="step-num">3</span><h2>Build it</h2></div>
+  <p>
+    The image is rebuilt, re-signed with the key derived from your own file, and
+    every integrity field is checked again. Nothing downloads unless all of them pass.
+  </p>
+  <div class="verdict" id="buildVerdict"></div>
+  <p class="integrity hidden" id="integrity"></p>
+</section>
+
+<div class="bar hidden" id="bar">
+  <button class="primary" id="buildBtn">Build firmware</button>
+  <button id="resetBtn">Start over</button>
+  <span class="status" id="status"></span>
+</div>
+
+<h2>Combining with other mods</h2>
+<p>
+  Each page applies one mod. To combine them, build on one page, then load the
+  downloaded file into the next. This mod combines with every other one, in either
+  order: it writes 8 places inside section&nbsp;3, changes no length and appends nothing.
+</p>
+<ul>
+  <li><strong><a href="arp.html">MIDI Arpeggiator</a></strong> &mdash; combines. A MIDI track's arp runs the same step, so SHUF and RAND should reach MIDI tracks too; that has not been tried.</li>
+  <li><strong><a href="lfo4.html">A Fourth LFO</a></strong> &mdash; combines, in either order.</li>
+  <li><strong><a href="lfo.html">LFO Waves</a></strong>, <strong><a href="boot.html">Boot Screen</a></strong> &mdash; combine. Their appended data moves no address this mod uses.</li>
+  <li><strong><a href="fx.html">FX Modulation</a></strong>, <strong><a href="destinations.html">Modulation Destinations</a></strong> &mdash; combine.</li>
+  <li><strong><a href="transients.html">Transient Swapper</a></strong> &mdash; combines; it only writes the DSP image.</li>
+  <li><strong>Arpeggiator p-locks</strong> &mdash; combines; command line only, <code>dnfw mods apply firmware.syx --mod arpplocks --mod arpmodes</code>. Its MODE lock then reaches SHUF and RAND too.</li>
+</ul>
+<div class="note">
+  <p><strong>What "combines" means here.</strong> The bytes each mod writes are checked
+  not to overlap, and this page's output is checked byte for byte against the command
+  line's, alone and after the MIDI Arpeggiator or A Fourth LFO. The arp modes were
+  tested on hardware on their own; a combined image has not been flashed.</p>
+</div>
+
+<footer>
+  <p>
+    Part of <a href="https://github.com/angellinares/dn2_firmware_explore">dn2_firmware_explore</a>,
+    AGPL-3.0-or-later. Not affiliated with or endorsed by Elektron.
+  </p>
+</footer>
+
+</div>
+
+<script type="module" src="js/app/arp-modes-page.js"></script>

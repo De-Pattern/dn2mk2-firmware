@@ -601,12 +601,45 @@ alone, both), `scripts/emu_boot_check.py`, `scripts/emu_boot_engine.py
 --arp-mode`, `scripts/check_coldfire.py`, and a push-and-turn screenshot of the
 MODE menu. The results are in `docs/arp-hidden-modes.md` §7.
 
+**Browser:** `site/arp-modes.html`, 2026-09-26. `gen_arpmodes_code.py` also
+writes `site/js/mods/arpmodes-code.js` from the same data (the JSON stays
+byte-identical, and the script still replays to the build byte for byte), and
+`site/js/mods/arpmodes.js` ports `apply`: the stock length, the 15 guards and
+every edit's stock bytes are checked with the Python's wording, then the 8 edits
+are written. arpplocks has no browser page, so its MODE-lock patch has no JS copy
+to keep in step.
+- **Parity:** `node scripts/js_arpmodes_check.mjs`, run by `test_js_arpmodes.py`:
+  stock -> arpmodes, midiarp -> rebuilt `.syx` -> reloaded -> arpmodes, and lfo4
+  -> rebuilt -> reloaded -> arpmodes each equal the CLI's `dnfw mods apply`
+  output, MAIN OS and the whole `.syx`; every rebuilt image verifies 21/21;
+  midiarp and lfo4 still apply after it; three refusals (applied twice, a
+  shorter image, an edited guard) are worded the same on both sides.
+
 **Combines** with every other mod: `dnfw mods matrix` gives `yes` for all eight
 pairs. As always, that is a statement about bytes. With `midiarp`, a MIDI
 track's arp runs the same step, so SHUF and RAND should reach MIDI tracks too.
 That has not been run.
 
-## Mod 10: `oneshot` -- the Digitakt II's sample machine, from the user's own DT2 file
+## Mod 10: `songguard` -- old projects open instead of halting
+
+Not a feature: a guard on a **stock 1.11 bug**. The song `LOAD` (`0x400dea6a`)
+trusts a stored song's row count and copies that many rows into a 99-row record.
+The owner's `SKETCHPAD` stores 21,503, and opening it overwrote the project and
+the RTOS state after it -- on stock, fxmod+lfo4 and lfowaves+moddest+midiarp
+alike, measured in the emulator (`docs/old-project-load.md`).
+
+It rewrites the same 54 bytes with the bound: 0..99 loads exactly as before, and
+anything else loads as an empty song. One in-place edit at `0x400deac2`, no cave,
+no hook, nothing appended, so it combines with every other mod in either order.
+
+**Confirmed on the instrument, 2026-09-26:** with fxmod + lfo4 + songguard,
+SKETCHPAD opens (owner).
+
+    dnfw mods apply <image> --mod fxmod --mod lfo4 --mod songguard -o out.syx
+
+**Browser:** not yet.
+
+## Mod 11: `oneshot` -- the Digitakt II's sample machine, from the user's own DT2 file
 
 **Status: built and emulator-gated 2026-09-27; not yet on the instrument.** The
 first transplant build: `docs/dt2-machine-port.md` ("The ColdFire half", "The

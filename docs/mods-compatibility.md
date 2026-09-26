@@ -3,9 +3,14 @@
 **Generated, not kept.** The table below is rewritten by
 
     dnfw mods matrix 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip \
-        --page docs/mods-compatibility.md --page site/index.html
+        --page docs/mods-compatibility.md --page site/index.html \
+        --page site/arp-modes.html --page site/arp.html --page site/boot.html \
+        --page site/destinations.html --page site/fx.html --page site/lfo.html \
+        --page site/lfo4.html --page site/transients.html \
+        --boots out/mod-pairs
 
-which tries **every pair of mods, in both orders**, on stock 1.11 (`src/dnfw/mods/matrix.py`).
+(the tool pages each carry their own mod's row, `<!-- dnfw:matrix-row ID -->`,
+and the index carries the whole table at the top), which tries **every pair of mods, in both orders**, on stock 1.11 (`src/dnfw/mods/matrix.py`).
 A table kept by hand is a copy, and it goes stale the first time a mod changes.
 octabam's remixer makes the same choice: its `matrix()` prints from the conflict
 check rather than from a README (`docs/references.md`).
@@ -64,17 +69,18 @@ lift this limit (`docs/references.md`). It has not been done here yet.
 ## The table
 
 <!-- dnfw:matrix -->
-| | `arpmodes` | `arpplocks` | `bootscreen` | `fxmod` | `lfo4` | `lfowaves` | `midiarp` | `moddest` | `transients` |
-|---|---|---|---|---|---|---|---|---|---|
-| `arpmodes` | - | yes | yes | yes | yes | yes | yes | yes | yes |
-| `arpplocks` | yes | - | order | **NO** | yes | yes | yes | yes | yes |
-| `bootscreen` | yes | order | - | yes | **NO** | **NO** | yes | yes | yes |
-| `fxmod` | yes | **NO** | yes | - | order | yes | yes | yes | yes |
-| `lfo4` | yes | yes | **NO** | order | - | **NO** | yes | order | yes |
-| `lfowaves` | yes | yes | **NO** | yes | **NO** | - | yes | yes | yes |
-| `midiarp` | yes | yes | yes | yes | yes | yes | - | yes | yes |
-| `moddest` | yes | yes | yes | yes | order | yes | yes | - | yes |
-| `transients` | yes | yes | yes | yes | yes | yes | yes | yes | - |
+| | `arpmodes` | `arpplocks` | `bootscreen` | `fxmod` | `lfo4` | `lfowaves` | `midiarp` | `moddest` | `songguard` | `transients` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `arpmodes` | - | yes | yes | yes | yes | yes | yes | yes | yes | yes |
+| `arpplocks` | yes | - | order | **NO** | yes | yes | yes | yes | yes | yes |
+| `bootscreen` | yes | order | - | yes | **NO** | **NO** | yes | yes | yes | yes |
+| `fxmod` | yes | **NO** | yes | - | order | yes | yes | yes | yes | yes |
+| `lfo4` | yes | yes | **NO** | order | - | **NO** | yes | order | yes | yes |
+| `lfowaves` | yes | yes | **NO** | yes | **NO** | - | yes | yes | yes | yes |
+| `midiarp` | yes | yes | yes | yes | yes | yes | - | yes | yes | yes |
+| `moddest` | yes | yes | yes | yes | order | yes | yes | - | yes | yes |
+| `songguard` | yes | yes | yes | yes | yes | yes | yes | yes | - | yes |
+| `transients` | yes | yes | yes | yes | yes | yes | yes | yes | yes | - |
 
 - **arpmodes + arpplocks: yes**: disjoint bytes. *Note:* emulator, 2026-09-26: arpplocks' MODE lock takes its ceiling from setMode's clamp (0x4004bf01), which arpmodes widens to 6. Turning MODE with every step held locks DOWN CYCL SHUF RAND RAND RAND with both, and DOWN CYCL CYCL ... with arpplocks alone (scripts/emu_arp_modes.py). A locked SHUF or RAND playing from a trig was not run.
 - **arpmodes + midiarp: yes**: disjoint bytes. *Note:* a MIDI track's arp runs the same step, so SHUF and RAND should reach MIDI tracks; not run.
@@ -102,6 +108,7 @@ the init, so only pairs that include a loader mod are booted; the rest say why t
 - `bootscreen` + `fxmod`: booted and drew its UI (1 frame(s), control 1).
 - `bootscreen` + `midiarp`: booted and drew its UI (1 frame(s), control 1).
 - `bootscreen` + `moddest`: booted and drew its UI (1 frame(s), control 1).
+- `bootscreen` + `songguard`: booted and drew its UI (1 frame(s), control 1).
 - `bootscreen` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
 - `fxmod` + `lfo4`: booted and drew its UI (1 frame(s), control 1).
 - `fxmod` + `lfowaves`: booted and drew its UI (1 frame(s), control 1).
@@ -110,9 +117,11 @@ the init, so only pairs that include a loader mod are booted; the rest say why t
 - `fxmod` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
 - `lfo4` + `midiarp`: booted and drew its UI (1 frame(s), control 1).
 - `lfo4` + `moddest`: booted and drew its UI (1 frame(s), control 1).
+- `lfo4` + `songguard`: booted and drew its UI (1 frame(s), control 1).
 - `lfo4` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
 - `lfowaves` + `midiarp`: booted and drew its UI (1 frame(s), control 1).
 - `lfowaves` + `moddest`: booted and drew its UI (1 frame(s), control 1).
+- `lfowaves` + `songguard`: booted and drew its UI (1 frame(s), control 1).
 - `lfowaves` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
 - `midiarp` + `moddest`: SKIPPED: no loader in this pair; a boot runs neither mod's code
 - `midiarp` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
