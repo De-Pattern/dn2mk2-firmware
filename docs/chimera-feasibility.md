@@ -190,6 +190,15 @@ So the DN2 is **not** missing storage — it has the block layer and a
 path-addressed store, which is how `/projects` works today. It is missing the
 **directory layer above it**, the handlers, and the UI.
 
+> **Refined, 2026-09-26 (`docs/drive-storage-research.md`).** The store is
+> path-addressed **only at the protocol level**. On disk it is fixed slots at
+> fixed sectors: 16 MiB per project from 176 MiB, 1 KiB per preset, 32 KiB per
+> kit. The routing layer (`RouteResolver`) maps paths onto them. The DT2's
+> missing "directory layer" is a second, separate store, `ekFS` at sector
+> `0x5D8000`, in space the DN2 leaves empty. The eMMC is the same 32 GB part,
+> exposed as 23.05 GiB after reconfigure: the table at DN2 `0x4029f554` is
+> byte-identical to the DT2's.
+
 ### One design route considered and rejected
 
 Samples could in principle live in the DN2's existing data-object store, which
