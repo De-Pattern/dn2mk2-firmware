@@ -26,6 +26,7 @@ from ..mods import lfowaves as lfowaves_mod
 from ..mods import midiarp as midiarp_mod
 from ..mods import moddest as moddest_mod
 from ..mods import transients as transients_mod
+from ..mods import waverider as waverider_mod
 from .files import read_image
 
 NAME = "mods"
@@ -39,6 +40,7 @@ REGISTRY = {transients_mod.ID: transients_mod,
             fxmod_mod.ID: fxmod_mod,
             arpplocks_mod.ID: arpplocks_mod,
             arpmodes_mod.ID: arpmodes_mod,
+            waverider_mod.ID: waverider_mod,
             lfo4_mod.ID: lfo4_mod}
 
 

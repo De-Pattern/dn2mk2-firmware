@@ -1,0 +1,258 @@
+{
+ "os": "Digitone II 1.11",
+ "stock_length": 3192192,
+ "new_type": 5,
+ "clone": 1,
+ "names": [
+  "Waverider",
+  "WVR"
+ ],
+ "edits": [
+  {
+   "va": 1073929006,
+   "stock": "4004b7f2",
+   "new": "402903c8",
+   "what": "re-commit of the track's own machine type (0x40031880): asks for the real type"
+  },
+  {
+   "va": 1073966116,
+   "stock": "772800de2f02",
+   "new": "4eb94028db34",
+   "what": "the sound's parameter-ownership test: type 5 owns WaveTone's machine parameters"
+  },
+  {
+   "va": 1074051094,
+   "stock": "712800de6002",
+   "new": "4ef9402903b6",
+   "what": "getMachineType(track): type 5 is reported as WaveTone"
+  },
+  {
+   "va": 1074059488,
+   "stock": "48780014",
+   "new": "48780018",
+   "what": "MACHINE SEL list: storage for 6 longs"
+  },
+  {
+   "va": 1074059520,
+   "stock": "4879401ddd6c",
+   "new": "48794028e9d0",
+   "what": "MACHINE SEL list: the copy's end"
+  },
+  {
+   "va": 1074059526,
+   "stock": "41e80014",
+   "new": "41e80018",
+   "what": "MACHINE SEL list: the vector's capacity, 6 longs"
+  },
+  {
+   "va": 1074059530,
+   "stock": "4879401ddd58",
+   "new": "48794028e9b8",
+   "what": "MACHINE SEL list: the copy's start"
+  },
+  {
+   "va": 1074106996,
+   "stock": "202f00046d147203b2806c0a123c0004b280670a600470014e7542004e7570024e75",
+   "new": "202f00046d107204b280670e7205b280650470014e7542004e7570024e7500000000",
+   "what": "the MACHINE SEL group: type 5 joins the synths (1)"
+  },
+  {
+   "va": 1074111662,
+   "stock": "4004b7f2",
+   "new": "402903c8",
+   "what": "MACHINE SEL: the current machine's marker (lea into a3): asks for the real type"
+  },
+  {
+   "va": 1074206996,
+   "stock": "4004b7f2",
+   "new": "402903c8",
+   "what": "the track's machine name, drawn from the long-name table: asks for the real type"
+  },
+  {
+   "va": 1074537614,
+   "stock": "7204202f0004",
+   "new": "4eb940290392",
+   "what": "overview descriptor(type): 0x42432b24 + 44 type: type 5 reads WaveTone's row"
+  },
+  {
+   "va": 1074537682,
+   "stock": "7204202f0004",
+   "new": "4eb940290392",
+   "what": "SYN page count(type): 0x42432ad4[type].count: type 5 reads WaveTone's row"
+  },
+  {
+   "va": 1074537714,
+   "stock": "222f0008202f000c",
+   "new": "4eb9402903a24e71",
+   "what": "SYN page(type, n): 0x42432ad4[type].pages[n]; type 5 reads WaveTone's"
+  },
+  {
+   "va": 1074616948,
+   "stock": "4004b7f2",
+   "new": "402903c8",
+   "what": "the track state message: machine type byte: asks for the real type"
+  },
+  {
+   "va": 1074620256,
+   "stock": "4004b7f2",
+   "new": "402903c8",
+   "what": "an incoming machine type, compared with the track's before commit: asks for the real type"
+  },
+  {
+   "va": 1074642994,
+   "stock": "202f000c226f0010",
+   "new": "4ef94029037c4e71",
+   "what": "param_set_slot_to_id: detour to the shim"
+  },
+  {
+   "va": 1074643292,
+   "stock": "7204",
+   "new": "7205",
+   "what": "attribute rows: bound 4 -> 5"
+  },
+  {
+   "va": 1074643304,
+   "stock": "401f7930",
+   "new": "4028e9a0",
+   "what": "attribute rows: the six-row copy"
+  },
+  {
+   "va": 1074643330,
+   "stock": "401f7932",
+   "new": "4028e9a2",
+   "what": "attribute rows: the six-row copy"
+  },
+  {
+   "va": 1074643356,
+   "stock": "7404",
+   "new": "7405",
+   "what": "attribute rows: bound 4 -> 5"
+  },
+  {
+   "va": 1074643380,
+   "stock": "401f7932",
+   "new": "4028e9a2",
+   "what": "attribute rows: the six-row copy"
+  },
+  {
+   "va": 1074643762,
+   "stock": "7204",
+   "new": "7205",
+   "what": "name column 0: bound 4 -> 5"
+  },
+  {
+   "va": 1074643780,
+   "stock": "401f77f4",
+   "new": "4028e958",
+   "what": "name column 0: the six-row table"
+  },
+  {
+   "va": 1074643800,
+   "stock": "7204",
+   "new": "7205",
+   "what": "name column 1: bound 4 -> 5"
+  },
+  {
+   "va": 1074643820,
+   "stock": "401f77f8",
+   "new": "4028e95c",
+   "what": "name column 1: the six-row table"
+  },
+  {
+   "va": 1074643838,
+   "stock": "7204",
+   "new": "7205",
+   "what": "name column 2: bound 4 -> 5"
+  },
+  {
+   "va": 1074643858,
+   "stock": "401f77fc",
+   "new": "4028e960",
+   "what": "name column 2: the six-row table"
+  },
+  {
+   "va": 1074647686,
+   "stock": "7406",
+   "new": "7407",
+   "what": "stored-sound LOAD: machine types -1..5 are kept (stock keeps -1..4; anything else loads as FM Tone)"
+  },
+  {
+   "va": 1076419364,
+   "stock": "00000000000000000000000000000000000000000000000000000000000000000000",
+   "new": "57617665726964657200575652000000772800de7005b08366027601225f2f024ed1",
+   "what": "Waverider's names ('Waverider', 'WVR') and the parameter-ownership shim"
+  },
+  {
+   "va": 1076423000,
+   "stock": "000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "new": "4021a6504021baf2000000004021a66f4021baf6000000004021a6924021bafa000000004021a6c34021bafe0000000040219bed40219bed000000004028db244028db2e000000000500ffff0600ffff0700ffff0800ffffff00ffff0600ffff000000000000000200000001000000030000000500000004",
+   "what": "Waverider's data: the six-row name table, the six attribute rows (the sixth is WaveTone's), the six-entry MACHINE SEL list"
+  },
+  {
+   "va": 1076429692,
+   "stock": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "new": "202f000c226f00107405b480660270014ef9400dc03a202f00087205b2806602700172044e75222f000c202f00105b81660472014e755a814e75712800de7205b280660270014ef94004b81e2f0a246f000820522f0a206800284e90588f4a8067082040712800de600270ff245f4e75",
+   "what": "the shims: type 5 resolves as WaveTone in slot_to_id, the SYN page tables and getMachineType; the real type for identity"
+  }
+ ],
+ "guards": [
+  {
+   "va": 1074642986,
+   "bytes": "2f027264206f0008",
+   "what": "slot_to_id: saves d2, d1 = 100, a0 = slot"
+  },
+  {
+   "va": 1074643002,
+   "bytes": "b288",
+   "what": "slot_to_id resumes with cmpl %a0,%d1"
+  },
+  {
+   "va": 1074643008,
+   "bytes": "7402",
+   "what": "... and overwrites d2 before it reads it"
+  },
+  {
+   "va": 1074056258,
+   "bytes": "4eb9400dc19a",
+   "what": "the machine setter asks the permission test"
+  },
+  {
+   "va": 1074056340,
+   "bytes": "114200de",
+   "what": "... and writes the type byte at sound+0xDE"
+  },
+  {
+   "va": 1073902972,
+   "bytes": "10280d8c",
+   "what": "the frame builder takes each track's type from its mirror"
+  },
+  {
+   "va": 1073902978,
+   "bytes": "37400092",
+   "what": "... and writes it at frame offset 148 + 2t"
+  },
+  {
+   "va": 1074115420,
+   "bytes": "2a1b",
+   "what": "MACHINE SEL walks the list..."
+  },
+  {
+   "va": 1074115428,
+   "bytes": "4eb940059274",
+   "what": "... and asks the group of each type"
+  }
+ ],
+ "layout": {
+  "attributes": 1076423072,
+  "canon_arg": 1076429714,
+  "canon_page": 1076429730,
+  "canon_track": 1076429750,
+  "canon_valid": 1076419380,
+  "list": 1076423096,
+  "long_name": 1076419364,
+  "names": 1076423000,
+  "raw_track": 1076429768,
+  "short_name": 1076419374,
+  "slot_shim": 1076429692
+ }
+}
