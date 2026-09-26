@@ -117,7 +117,7 @@
 <h2>Combining with other mods</h2>
 <p>
   Each page applies one mod. To combine them, build here, then load the downloaded
-  file into the next page &mdash; in any order. This mod writes a few edits and one
+  file into the next page &mdash; in any order, except that A Fourth LFO goes last. This mod writes a few edits and one
   block of new code inside section&nbsp;3, changes no length and appends nothing.
 </p>
 <ul>
@@ -125,6 +125,7 @@
   <li><strong><a href="lfo.html">LFO Waves</a></strong> &mdash; combines. New waveforms to aim at these destinations with.</li>
   <li><strong><a href="arp.html">MIDI Arpeggiator</a></strong> &mdash; combines. No shared bytes.</li>
   <li><strong><a href="transients.html">Transient Swapper</a></strong> &mdash; combines; it only writes the DSP image.</li>
+  <li><strong><a href="lfo4.html">A Fourth LFO</a></strong> &mdash; combines, <strong>built here first</strong>. LFO4 copies the table this mod opens records in, so this page refuses an image LFO4 has already built.</li>
 </ul>
 <div class="note">
   <p><strong>What "combines" means here.</strong> The bytes each mod writes are checked

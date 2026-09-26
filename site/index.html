@@ -219,6 +219,14 @@ dnfw mods apply firmware.syx --mod fxmod --mod moddest --mod lfowaves -o modded.
     three: the same controls, the same <code>DEST</code> browser, the same waveforms.
   </p>
 
+  <p style="margin-top:1.2rem">
+    <a class="cta" href="lfo4.html">Open the LFO4 tool &#8594;</a>
+  </p>
+  <p class="cta-note">
+    Runs entirely in your browser &mdash; no install, no command line, nothing uploaded.
+    Apply it last: build FX Modulation or Modulation Destinations first, then load their download.
+  </p>
+
   <dl class="facts">
     <dt>Adds</dt><dd>A fourth page under <code>[MOD]</code> with its own <code>SPD MULT FADE DEST WAVE SPH MODE DEP</code></dd>
     <dt>Plays</dt><dd>Modulates on every voice, so polyphonic tracks and tracks that move between voices are modulated too</dd>
@@ -232,10 +240,9 @@ dnfw mods apply firmware.syx --mod fxmod --mod moddest --mod lfowaves -o modded.
 dnfw mods apply firmware.syx --mod moddest --mod lfo4 -o modded.syx</pre>
 
   <div class="note">
-    <p><strong>Command line only, for now.</strong> LFO4 is C code, compiled ahead of
-    time; the browser tool pages do not carry it yet. The mod applies exactly the bytes
-    of the build that was tested on the instrument, checked byte for byte when it is
-    packaged.</p>
+    <p><strong>Exactly the tested build.</strong> LFO4 is C code, compiled ahead of time.
+    The browser tool and the command line apply the same bytes, those of the build that
+    was tested on the instrument, checked byte for byte when it is packaged.</p>
   </div>
 </article>
 
