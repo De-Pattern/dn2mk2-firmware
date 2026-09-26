@@ -3,10 +3,6 @@
 Tools for inspecting, modifying and rebuilding **Elektron Digitone** firmware —
 the Digitone II (DN2) and the original Digitone / Digitone Keys (DN1).
 
-The end goal is to fill the vacant fourth page under the Digitone II's `[MOD]`
-key with a fourth LFO behaving exactly like LFO1–3. Getting there needs a build
-loop first, and that is what exists today.
-
 **This repository holds code and documentation only.** It contains no Elektron
 firmware, original or modified, and never will. Bring your own OS file — the
 one Elektron publish for your instrument.
