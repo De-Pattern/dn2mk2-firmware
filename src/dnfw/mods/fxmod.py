@@ -51,7 +51,12 @@ exactly the bytes that were gated and flashed:
    the sort comparator, and the three group-name slots with the three records
    whose short names they share -- and every edit's own stock bytes are checked;
    an image that differs anywhere is refused;
-2. the edits are written.
+2. the parameter table must still be where stock keeps it. Ten of the edits
+   open records inside that table, and `lfo4` moves it into the appended area:
+   applied after lfo4, those edits would find their stock bytes, apply cleanly
+   and land on a copy nothing reads. So an image whose table accessors no
+   longer reach the stock table is refused, with the order that works;
+3. the edits are written.
 """
 
 from __future__ import annotations
@@ -60,6 +65,7 @@ import json
 import pathlib
 
 from . import Extent, ModError, Result
+from ..patch import paramtable
 
 ID = "fxmod"
 NAME = "LFO modulation of the FX"
@@ -93,6 +99,13 @@ def apply(firmware) -> Result:
     if len(original) < SPEC["stock_length"]:
         raise ModError(f"MAIN OS is {len(original):,} B, shorter than "
                        f"{SPEC['stock_length']:,}: not Digitone II 1.11")
+
+    try:
+        paramtable.base_sites(original, BASE)
+    except paramtable.TableError as exc:
+        raise ModError(f"the parameter table has been moved ({exc}); lfo4 does that, and "
+                       "fxmod opens records in the stock table, which nothing reads once it "
+                       "has moved: apply fxmod first, then lfo4") from None
 
     for g in SPEC["guards"]:
         want = bytes.fromhex(g["bytes"])
