@@ -369,6 +369,10 @@ def main(argv=None) -> int:
                    default=pathlib.Path(os.environ.get("DNFW_DIGIKIT_SHARC",
                                                        ROOT.parent / "digikit-wt-sharcemu")))
     p.add_argument("--blocks", type=int, default=16, help="32-sample blocks per run")
+    p.add_argument("--reader-blocks", type=int, default=None,
+                   help="blocks for our reader's run only (default --blocks). A looped WAV "
+                        "repeats 512 samples every 10.7 ms, so a sweep inside it is not "
+                        "audible; 3750 blocks render 2.5 s with no loop (about 3.5 h)")
     p.add_argument("--seconds", type=float, default=2.5, help="WAV length (looped), >= 2")
     p.add_argument("--freq", type=float, default=375.0,
                    help="our reader's pitch (375 Hz: 4 cycles in 512 samples, so the loop is seamless)")
@@ -441,12 +445,23 @@ def main(argv=None) -> int:
     show(s2)
 
     print(f"\nstep 3: our reader at the WaveTone call site, {a.freq} Hz")
-    positions = render.sweep(len(table), max(a.blocks, 2))
+    rb = a.reader_blocks or a.blocks
+    positions = render.sweep(len(table), max(rb, 2))
     reader = ReaderAtCallSite(a.freq, positions)
-    sub = render_blocks(mach, init["runner"], a.blocks, {0: 1, **midi}, replace_wavetone=reader)
+    sub = render_blocks(mach, init["runner"], rb, {0: 1, **midi}, replace_wavetone=reader)
     nb = sub["blocks"]
     ref32 = render.render_blocks(table, reader.inc, positions[:nb], BLOCK, 0, "float32")
     ideal = render.render_blocks(table, reader.inc, positions[:nb], BLOCK, 0, "ideal")
+    # A looped render repeats 512 samples every 10.7 ms, so whatever changes over
+    # time inside it -- the sweep -- is not audible. The reference is bit-exact to
+    # the runner on every rendered block (checked below), so it can play the same
+    # sweep slowly: this is the file to listen to, and it says what it is.
+    slow = render.render_blocks(table, reader.inc,
+                                render.sweep(len(table), max(int(a.seconds * RATE) // BLOCK, 2)),
+                                BLOCK, 0, "float32")
+    wav("m2_preview_reference_sweep.wav", slow, a.seconds, wavs,
+        "PREVIEW, not the runner: the reference (float32, bit-exact to the runner on the "
+        "rendered blocks) with the same sweep spread over the whole file")
     wav("m2_voice_reader.wav", sub["machine"], a.seconds, wavs,
         "our reader in place of WaveTone: the track buffer right after the call")
     wav("m2_voice_reader_pre_amp.wav", sub["pre_amp"], a.seconds, wavs,
