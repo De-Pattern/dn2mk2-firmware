@@ -1,5 +1,9 @@
 # The arp's hidden modes: SHUF, RAND and CHRD are names only
 
+> **2026-09-26, later the same day: SHUF and RAND are now built**, as the
+> `arpmodes` mod, on the owner's decision (§7). CHRD stays out. What follows up
+> to §6 is the stock measurement, and it still holds for stock.
+
 **Question (2026-09-26).** The Digitone II 1.11 image names eight arpeggiator
 modes, `OFF TRUE UP DOWN CYCL SHUF RAND CHRD`. The instrument and its manual
 (OS 1.10D, §9.7.1) offer the first five. If the step implements the last
@@ -11,7 +15,8 @@ default). MODE 4, 5, 6, 7 and every negative value all take the default, which
 is CYCL. With MODE forced to 5, 6 or 7, the stock arp plays CYCL note for note.
 There is no shuffle, no random choice and no chord anywhere in the arp. So
 widening the bounds would give three menu entries that all sound like CYCL.
-**No `arpmodes` mod was built.**
+~~**No `arpmodes` mod was built.**~~ *Superseded the same day:* an unlock alone
+would still play CYCL, so `arpmodes` adds the code as well (§7).
 
 Measured with `scripts/emu_arp_modes.py` (stock 1.11, snapshot `grid-rec`,
 28 checks, 0 failures).
@@ -186,8 +191,79 @@ does:
 A real "chord" mode, all held notes struck together on each arp step, is not
 in the firmware and would have to be written (§6.3).
 
+## 7. Built: `arpmodes` (2026-09-26)
+
+The owner decided to build the two modes whose names exist, SHUF (5) and RAND
+(6), as real modes, and to leave CHRD (7) out. `dnfw mods` `arpmodes`
+(`docs/mods.md` Mod 9, `scripts/build_arpmodes.py`) does §6.1 and §6.2 with
+three differences:
+- the bounds go to **6**, not 7;
+- the hook is the 12 bytes at `0x4002a13c` (`moveq #3; cmp; beq DOWN; bra
+  CYCL`), not the two `bra`s. The cave does the DOWN test itself, then sends 5
+  and 6 to the new code and everything else to CYCL;
+- arpplocks' MODE lock reads setMode's clamp, rather than carrying its own
+  0..7.
+
+**Measured,** with `scripts/emu_arp_modes.py --ranges` (snapshot `grid-rec`,
+the step called directly as in §3), held E4 C4 G4 B4 and RNG 1, so the range is
+8 notes:
+
+```
+2 UP     C4 E4 G4 B4 C5 E5 G5 B5 C4 E4 G4 B4 ...        (as stock)
+4 CYCL   C4 E4 G4 B4 G4 E4 C4 E5 G5 B5 G5 E5 C5 ...     (as stock)
+5 SHUF   G4 B5 E4 C4 E5 G5 C5 B4 | E4 G4 C4 G5 C5 B5 E5 B4 | E4 E5 B4 C4 B5 C5 G5 G4
+6 RAND   G4 G5 G4 E4 E5 B5 B5 E4 E4 G4 C4 G5 B4 B5 B5 C5 ...
+7 CHRD   = CYCL, note for note
+```
+
+- **SHUF:** each of 3 cycles is the whole range once, and the three orders
+  differ. All 8 cycles of a 64-step run are permutations, and no cycle starts
+  on the note the one before ended on. With RNG 7 (32 notes), 3 cycles of 32
+  are each the whole range.
+- **RAND:** 64 steps stay within the range and reach all 8 notes. The run is
+  none of TRUE, UP, DOWN, CYCL or SHUF, and has 9 immediate repeats (about
+  64/8, as expected).
+- **Randomness:** the same generator state and tick replay a run exactly. A
+  tick 1,234 ms later gives another run, and a zero state still draws within
+  the range. One note held with RNG 0 plays that note on every step, in both
+  modes.
+- **Mutes, offsets, LEN** (offsets +0 +7 -5 +12, steps 3 and 7 muted, LEN 8):
+  in SHUF, RAND and the CYCL control alike, a muted step rests and does not
+  use up a note. Take the offsets off the notes played and you get the unmuted
+  run from the same state, note for note.
+- **Bounds:** setMode 5 -> 5, 6 -> 6, 7 -> 6, -1 -> 0. FUNC+ARP restores a
+  parked 5 as 5, 6 as 6 and 7 as 6. SAVE then LOAD keeps 5 and 6, and 7 loads
+  as 0. On stock, the same harness still gives 5 and 6 -> **0, arp OFF** on
+  LOAD (§4).
+- **arpplocks:** with every step held, turning MODE up locks DOWN CYCL SHUF
+  RAND RAND RAND with both mods, and DOWN CYCL CYCL CYCL CYCL CYCL with
+  arpplocks alone. Turning down reaches OFF in both. arpplocks' own harness,
+  `emu_arp_plocks.py`, passes 42/42 before the change, after it, and combined
+  with arpmodes.
+- **The menu, push and turn** (`guirun`, grid-rec): under the emulator the
+  encoder turns MODE by 0 or 4 per detent (the delta `0x4011336e` returns).
+  So from OFF the menu visits OFF, CYCL, then RAND (8, clamped to 6), and
+  stays on RAND. From TRUE (poked), one +4 lands on **SHUF**, and stock
+  clamps the same 5 to CYCL. Stock from OFF stops at CYCL.
+- **Boot from reset** (`emu_boot_check.py`): booted and drew its UI, 1 frame in
+  450 M instructions, the same as the control. No write touches either cave or
+  the RAM in a 450 M boot (`emu_boot_codeguard.py --region`).
+- **Boot then engine** (`emu_boot_engine.py --arp-mode`): the engine ran clean.
+  In the booted machine, SAVE/LOAD keeps 2, 5 and 6 and turns 7 into 0. The
+  stock control keeps 2 and turns 5, 6 and 7 into 0.
+- `check_coldfire.py`: no scale-8 addressing, for arpmodes alone and for
+  arpmodes + arpplocks.
+
 ## Unverified
 
+- **Nothing of arpmodes has run on the instrument.** The sequencer does not
+  play under the emulator, so SHUF and RAND were heard nowhere. The step was
+  called directly, and the frame ISR's own call was not run.
+- A locked SHUF or RAND on a trig (arpplocks) playing from the sequencer, and
+  SHUF or RAND on a MIDI track (midiarp), were not run.
+- The RAM above BSS holds power-up garbage on the instrument. The code resets
+  a record on a new arp id and re-checks its count, but only a zeroed emulator
+  RAM was run.
 - The hidden names suggest Elektron wrote or planned these modes, perhaps on
   another product. That was not checked in the Digitone 1 or Digitakt images.
 - Only the 1.11 MAIN OS was read.

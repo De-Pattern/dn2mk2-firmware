@@ -43,7 +43,7 @@ Where they disagree, they win and this table is wrong.
 | 16 | Glitch-ASCII intro | **delivered** | part of `bootscreen` / `site/boot.html` (#82, #83); hardware #84 | — |
 | 17 | Performance mixer | **not started** | — | everything. The Outbox 8 reading below is a starting point it did not have when filed |
 | 18 | P-lock arpeggiator parameters | **delivered** | `arpplocks` mod (#85, #86): MODE, SPEED, RANGE, N.LEN per trig, every edit path verified | `--all`'s LEN, the sixteen step offsets and the step mutes (mutes untested since the fix) |
-| 24 | Another random arpeggiator mode | **open — scope to settle** | `docs/arp-hidden-modes.md`: stock's `SHUF`/`RAND`/`CHRD` are names only, all three play CYCL (measured 2026-09-26) | which randomness; every candidate is new code in a cave (see §24) |
+| 24 | Another random arpeggiator mode | **SHUF and RAND built** as `arpmodes`, emulator-gated 2026-09-26 | `docs/arp-hidden-modes.md` §7; stock's `SHUF`/`RAND`/`CHRD` were names only, all three playing CYCL | the instrument test; CHRD left out by the owner's decision |
 
 **The numbering is wrong and is left wrong on purpose.** There are two `## 8.`
 headings — "New LFO waveforms" and "FX machines on tracks" — and `## 7.` sits
@@ -3677,3 +3677,18 @@ the second is reading how stock `RAND` gets its random numbers.
   small cave behind the default branch, with a random source of its own. CHRD
   needs new voice code in the ISR trig handler, because the step returns one
   note per call. `docs/arp-hidden-modes.md` §6 has the costs.
+
+### Built 2026-09-26: `arpmodes`, SHUF and RAND
+
+The owner chose to build the two modes whose names already exist, and to
+leave CHRD out. The mod is `dnfw mods` `arpmodes` (`docs/mods.md` Mod 9), and
+the evidence is in `docs/arp-hidden-modes.md` §7.
+- **SHUF:** every note of the range once per cycle, in a new random order
+  each cycle, with no repeat across the cycle boundary.
+- **RAND:** a random note of the range on each step.
+- **The rest is stock:** LEN, mutes, offsets, SPD and N.LEN all behave as in
+  the other modes.
+- **The menu stops at RAND**, and a 7 still plays CYCL.
+- **arpplocks' MODE lock** now reaches RAND too. Its ceiling is read from
+  setMode's own clamp.
+- **Not yet on the instrument.**

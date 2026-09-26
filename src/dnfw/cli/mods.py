@@ -17,6 +17,7 @@ from ..firmware.build import replacement
 from ..firmware.load import load
 from ..firmware.verify import verify
 from ..mods import ModError, check_compatible
+from ..mods import arpmodes as arpmodes_mod
 from ..mods import arpplocks as arpplocks_mod
 from ..mods import bootscreen as bootscreen_mod
 from ..mods import fxmod as fxmod_mod
@@ -37,6 +38,7 @@ REGISTRY = {transients_mod.ID: transients_mod,
             midiarp_mod.ID: midiarp_mod,
             fxmod_mod.ID: fxmod_mod,
             arpplocks_mod.ID: arpplocks_mod,
+            arpmodes_mod.ID: arpmodes_mod,
             lfo4_mod.ID: lfo4_mod}
 
 
