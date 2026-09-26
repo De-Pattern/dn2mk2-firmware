@@ -33,8 +33,13 @@ check rather than from a README (`docs/references.md`).
 - **Functional clashes are not detected.** Two mods can write disjoint bytes and still
   fight over one feature. What is known about that is in each pair's note. A pair
   with no note has simply not been examined beyond bytes and apply.
-- **Boot.** Every combinable pair touching MAIN OS is also booted from reset in the
-  emulator (`scripts/emu_boot_check.py`). The results are recorded below the table.
+- **Boot.** Every combinable pair that includes a loader mod (lfo4, lfowaves or
+  bootscreen) was booted from reset in the emulator (`scripts/emu_boot_check.py`),
+  2026-09-26: **12 of 12 booted and drew their UI.**
+  - The other pairs were not booted: a boot runs a mod's loader and init and
+    nothing else, so it would run neither mod's code. Pairs with transients only
+    change section 7.
+  - The results are recorded below the table.
 
 ## Why the three appending mods exclude each other
 
@@ -75,4 +80,28 @@ Written from `out/mod-pairs/*/boot.txt` (`--boots out/mod-pairs`). A boot runs t
 the init, so only pairs that include a loader mod are booted; the rest say why they were skipped.
 
 <!-- dnfw:boots -->
+- `arpplocks` + `bootscreen`: booted and drew its UI (1 frame(s), control 1).
+- `arpplocks` + `lfo4`: booted and drew its UI (1 frame(s), control 1).
+- `arpplocks` + `lfowaves`: booted and drew its UI (1 frame(s), control 1).
+- `arpplocks` + `midiarp`: SKIPPED: no loader in this pair; a boot runs neither mod's code
+- `arpplocks` + `moddest`: SKIPPED: no loader in this pair; a boot runs neither mod's code
+- `arpplocks` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
+- `bootscreen` + `fxmod`: booted and drew its UI (1 frame(s), control 1).
+- `bootscreen` + `midiarp`: booted and drew its UI (1 frame(s), control 1).
+- `bootscreen` + `moddest`: booted and drew its UI (1 frame(s), control 1).
+- `bootscreen` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
+- `fxmod` + `lfo4`: booted and drew its UI (1 frame(s), control 1).
+- `fxmod` + `lfowaves`: booted and drew its UI (1 frame(s), control 1).
+- `fxmod` + `midiarp`: SKIPPED: no loader in this pair; a boot runs neither mod's code
+- `fxmod` + `moddest`: SKIPPED: no loader in this pair; a boot runs neither mod's code
+- `fxmod` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
+- `lfo4` + `midiarp`: booted and drew its UI (1 frame(s), control 1).
+- `lfo4` + `moddest`: booted and drew its UI (1 frame(s), control 1).
+- `lfo4` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
+- `lfowaves` + `midiarp`: booted and drew its UI (1 frame(s), control 1).
+- `lfowaves` + `moddest`: booted and drew its UI (1 frame(s), control 1).
+- `lfowaves` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
+- `midiarp` + `moddest`: SKIPPED: no loader in this pair; a boot runs neither mod's code
+- `midiarp` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
+- `moddest` + `transients`: SKIPPED: transients writes section 7 only, so this MAIN OS is the other mod's alone
 <!-- /dnfw:boots -->
