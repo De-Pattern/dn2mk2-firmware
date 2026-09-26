@@ -33,8 +33,24 @@ including stock.** Same instruction, same trail:
 | lfowaves+moddest+midiarp | **fault**, identical | opens clean |
 | project 11 (control), stock | opens clean | -- |
 
-**3. The field.** `SKETCHPAD`'s first song record (image `+0xc3e400`) stores a
-row count of **21,503** (`0x53ff`, at image `+0xc3ef4b`). The other sixteen
+**3. The field.** `SKETCHPAD`'s first song record (song 0, which the
+instrument shows as song 1) stores a row count of **21,503**: the 16-bit word
+`0x53ff` at image `+0xc3ef4b`.
+
+~~(image `+0xc3e400`)~~: **corrected 2026-09-27 with DNX.** That base was
+back-computed from the count using the pre-1.11 field position, which is wrong.
+The table did not move in the 1.11 migration. It is at **image `+0xc3ee04`**:
+16 records of 3,072 bytes. Within each record, the 1.11 (storage version 4)
+migration moved the meta block by `-0xa00`:
+- the row count went from `+0xb47` to **`+0x147`**, a u16 big-endian word, as
+  the loader reads it;
+- the tempo from `+0xb4c` to `+0x14c`.
+
+So `+0xc3ef4b` is song 0 at `+0x147`. The file offset is the image offset plus
+31. DNX measured the shift on 15 undamaged records
+(`dn_sysex/99_HardwareTest/dn2-sketchpad-2026-09-26/song-geometry-v4.md`), and
+the firmware's loader confirms the position. **A file-level repair must use
+the version-4 offsets.** The other sixteen
 songs, and every song in the 26 other projects in `dn_sysex`, store 0. The older
 export `01_Projects/004 SKETCHPAD.dn2prj` stores 0 too; the 2026-09-22 export in
 `03_OS111/` stores 21,503, so the damage entered between the two.
