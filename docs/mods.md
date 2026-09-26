@@ -605,3 +605,19 @@ MODE menu. The results are in `docs/arp-hidden-modes.md` §7.
 pairs. As always, that is a statement about bytes. With `midiarp`, a MIDI
 track's arp runs the same step, so SHUF and RAND should reach MIDI tracks too.
 That has not been run.
+
+## Mod 10: `songguard` -- old projects open instead of halting
+
+Not a feature: a guard on a **stock 1.11 bug**. The song `LOAD` (`0x400dea6a`)
+trusts a stored song's row count and copies that many rows into a 99-row record.
+The owner's `SKETCHPAD` stores 21,503, and opening it overwrote the project and
+the RTOS state after it -- on stock, fxmod+lfo4 and lfowaves+moddest+midiarp
+alike, measured in the emulator (`docs/old-project-load.md`).
+
+It rewrites the same 54 bytes with the bound: 0..99 loads exactly as before, and
+anything else loads as an empty song. One in-place edit at `0x400deac2`, no cave,
+no hook, nothing appended, so it combines with every other mod in either order.
+
+    dnfw mods apply <image> --mod fxmod --mod lfo4 --mod songguard -o out.syx
+
+**Browser:** not yet.
