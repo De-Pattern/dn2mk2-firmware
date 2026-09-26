@@ -622,7 +622,7 @@ The clones were fetched read-only. What matters here, ranked:
    semantics and `tools/sharc_run.py` provides a runner.
    - It renders one DT2 1.16 voice correctly, at about 270k instructions/s under
      PyPy.
-   - The claim in `docs/wavefinder-feasibility.md` that no SHARC core exists is
+   - The claim in `docs/waverider-feasibility.md` that no SHARC core exists is
      therefore out of date. Wavefinder Milestone 1 runs that emulator as an
      external tool.
    - The branch also fixes several decode errors (`DB_VERSION` 13), one of which

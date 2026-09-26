@@ -151,5 +151,13 @@ at, because **nothing here yet says the FsSample handlers exist** — the classe
 ship on the DN2; whether any code constructs them is exactly what the
 experiment above would settle.
 
+> **Static answer, 2026-09-26 (`docs/drive-storage-research.md` §2).** The class
+> that serves these opcodes on the DT2, `FsRequestHandler`
+> (`N16FsRequestHandler10FileWriterE` and its `handle` lambdas), **has no
+> RTTI trace in DN2 1.11**. Neither do `ekFS` or `fs_rebuild_index`. The
+> experiment above would most likely draw the clean negative, so it is no
+> longer the cheap test. It stays the definitive one, because a missing RTTI
+> name is strong evidence of a missing class, not proof. **[D]**
+
 **Requires hardware.** The experiment needs a modified image flashed, so it
 waits on the owner. Nothing up to building the image touches the device.

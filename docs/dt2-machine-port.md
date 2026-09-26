@@ -84,6 +84,15 @@ ONESHOT needs sample storage (1016 per project), a sample browser, sample locks
 per step, and streaming from the `+Drive` into the voice at trigger time. The
 DN2 has none of it as a user-facing sample path.
 
+> **Superseded in part, 2026-09-26 (`docs/drive-storage-research.md` §4).**
+> "Streaming from the `+Drive` into the voice at trigger time" is not how the
+> DT2 works. It **preloads** a project's samples into a 400 MiB RAM pool
+> (`0x19000000` at DT2 `0x40153814`) that sits on the SHARC side, and the voice
+> reads RAM. The DN2 also has more than "none of it". The ColdFire end of the
+> DT2's sample-page link (the `0x8c000000` port) is present and identical, and
+> the +Drive has about 20.9 GiB the stock firmware never touches. The
+> conclusion below is unchanged, because the SHARC engine is still the cost.
+
 The owner's storage decision — **wavetables and samples both become `+Drive`
 project data** — settles *where* this would live, and DNX is the format
 authority for it. It does not reduce the amount of subsystem to build.
@@ -138,3 +147,72 @@ What this exercise did produce, and it is worth keeping:
 **[D]** — static structural comparison only, single review. `func_hash` matching
 is prioritisation evidence: collisions are possible, and two functions with the
 same shape need not have the same semantics. No emulator run, no hardware.
+
+## Revisited 2026-09-26: a ONESHOT-lite on Waverider's machinery
+
+**Raised by the owner:** port ONESHOT as a way to test sample handling, apart
+from Waverider.
+
+**Corrected the same day, at the owner's challenge.** ~~The conclusion above
+stands for a port: the DT2's sample engine has no DN2 twin, so this would be
+our own player, not Elektron's moved across.~~ "No twin" means the DN2 does
+not *already contain* the code, not that it cannot be moved. Both are SHARC+,
+there is room, and the part a machine needs is small:
+- the voice render `0x1c4ecf` is 84 instructions and a leaf;
+- `0x1c4f81` beside it (381 instructions) already renders correctly in
+  digikit's runner on DT2 1.16.
+
+The large missing piece, the 1,464-instruction per-slot dispatch, is not needed:
+Waverider's type-5 loop plays that role on the DN2. **So port first, and write
+our own player only as the fallback.**
+
+The conditions a port has to meet:
+1. **No redistribution. Decided by the owner, 2026-09-26: the user supplies
+   both firmwares.** The user uploads their DN2 1.11 OS and their DT2 OS, which
+   Elektron publish for free. Our code extracts the routine from the DT2 file
+   and transplants it into the DN2 image at apply time, in the CLI and in the
+   browser, so no Elektron code is redistributed. This is the same pattern as
+   `lfo4` rebuilding the parameter table from the user's own DN2 image.
+   - What the repository holds for a transplant: only our own work (offsets,
+     the donor's version and hash guards, relocation tables, adapter code).
+     **Never a DT2 byte**, in code, SPEC JSON, tests or fixtures; tests that
+     need the donor skip without it.
+   - A transplant mod takes a second input image and refuses a donor whose
+     version or hash it was not measured against.
+2. **An adapter.** The routine expects the DT2's voice record (32 × `0x1d8` at
+   `0x2412cc`) and absolute addresses for its tables and sample pool. That
+   means a DT2-shaped record per type-5 track, filled from the DN2 frame, and
+   relocated addresses.
+3. **Samples in DSP memory.** This is Waverider's table-delivery problem, which
+   M4 solved: bake a small bank into section 7 behind a directory.
+
+**The offline experiment that settles it:**
+- lift `0x1c4ecf`'s reach set into the DN2 image in the runner;
+- drive it from the type-5 loop with a DT2-shaped record and a baked sample;
+- compare it with digikit's runner executing the same routine on the DT2
+  image, which is the control.
+
+**In progress, 2026-09-26:** the offline port experiment runs on
+`feature/oneshot-port`, under the two-firmware rule above. Its results will be
+added here when it reports. **[D]** until then.
+
+**What has changed since** is that most of a player's infrastructure now exists
+or is being built for Waverider (`docs/waverider-feasibility.md`):
+- the SHARC runner gate, and a reader of our own bit-exact to a reference (M1);
+- a sixth machine type and its render loop (M3);
+- the frame parameters and the per-track chain (M4);
+- tables baked into section 7 behind a directory (M4);
+- the first flash of modified SHARC code (M5, in progress).
+
+**If the port fails, the fallback is a ONESHOT-lite of our own:**
+- a small **baked sample bank** in section 7, as Waverider bakes tables and
+  `transients` replaces the drum bank, with no browser;
+- `SAMP` as a slot index, like Waverider's SLOT;
+- a one-shot reader with `STRT`, `LEN`, `LOOP` and the four `PLAY` modes.
+
+It tests the sample path end to end, but not the library: the unbounded,
+user-managed bank on the `+Drive` and the browser the DN2 UI lacks stay the
+expensive half (`docs/drive-storage-research.md`).
+
+**Order:** after Waverider M5 has run modified SHARC code on the instrument.
+Until then both carry the same first-flash risk. **[D]**, not started.

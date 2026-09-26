@@ -248,3 +248,65 @@ run correctly in your executor -- the frame-nibble lookup at `0x25d748` (entry
 `[5]` is `0`) and the per-track clamp `min(R2, 4)` at `0x1c294c`. We raise both
 as image patches to add a sixth machine type; the executor runs the patched
 `min(R2, 5)` and the extra lookup entry without complaint.
+
+# Part 4: the frame unpack, and one more gap (2026-09-26, Milestone 4)
+
+Found by `scripts/sharc_waverider_m4.py`, which runs the DN2's whole per-block
+routine `sw 0x1c2712` (frame unpack, slot dispatch, per-track chain) on a frame
+image built from the init sound, with your branch at `6f812e9`. The workaround
+is G11 in `scripts/sharc_dn2_fixups.py`. **PR candidate; we have opened none.**
+
+## 17. FEXT (SE) does not mask its field (PR candidate: a one-line fix)
+
+`_shift_immediate`, opcode `0x12` (`Rn = FEXT Rx BY pos:len (SE)`), computes
+
+    Const(_signed(source.value >> position, min(length, 32)) & 0xFFFFFFFF)
+
+and `values._signed(value, bits)` assumes `value` already fits in `bits`: it
+only subtracts `1 << bits` when bit `bits-1` is set, and returns every higher
+bit unchanged. So `fext r7 by 0:16 (se)` of `0x20204040` returns `0x20204040`
+instead of `0x00004040`.
+
+**Measured in isolation**, one step from the post-init snapshot:
+
+| pc | form | source | runner | expected |
+|---|---|---|---|---|
+| `0x1c29fa` | 6b, opcode `0x12`, `0:16 (se)` | `0x20204040` | `0x20204040` | `0x00004040` |
+| `0x1c28fc` | 6b, opcode `0x10`, `0:16` (control) | `0x20204040` | `0x00004040` | `0x00004040` |
+
+**Why it matters on DN2.** The frame unpack reads each 32-bit word of the
+2,688-byte frame and splits it into two 16-bit parameters with exactly this
+pair: `fext ... by 0:16 (se)` for the low half, `lshift ... by -16` for the high
+half. Unmasked, every low-half parameter carried its neighbour in bits 16-31 --
+FREQ picked up RESO, amp attack picked up hold -- and came out ~16384x too
+large whenever the neighbour was non-zero. A single-field sweep hides it (the
+neighbour is zero); two fields set together expose it.
+
+**The fix:** mask before sign-extending,
+`_signed((source.value >> position) & ((1 << length) - 1), length)`. selache's
+`selmap` prints the same parcel as `r2 = r2 or fext r7 by 0x0:0x10`; your PRM
+citation (Table 17-9, `010010` = FEXT (SE)) is the one the firmware's use
+agrees with, and either reading gives `0x4040` for this input.
+
+## 18. Not a runner gap: the per-track -24 dB
+
+For the record, so nobody "fixes" it: every DN2 track runs through a one-pole
+DC blocker (`sw 0xb80c39` -> kernel `sw 0xb809f2`, state at engine `+0xe088 +
+0x70 t`, cutoff ~10 Hz) whose feed-forward pair the engine init multiplies by
+0.0625 after the setup `sw 0xb80b4b` computes it (`f2 = f2 * 0.0625` at
+`0x1c8cf6`, in SIMD: PEx scales a0, PEy a1). Run alone, the setup gives
+`a0 = -a1 = 0.999346`; the init leaves `0.062459`. Together with a fixed x1.585
+(+4 dB) earlier in the chain, a track's chain gain is about -20 dB -- headroom
+for sixteen tracks, by design. Milestone 3's "the filters attenuate ~10x" was
+this.
+
+## 19. Open: a 16-bit Type 3c `DM(Mb, Ia)` read, selas vs your executor
+
+selas compresses `R2 = DM(M1, I1);` (pre-modify, no update) to a 16-bit
+Type 3c. Your executor ran it as a post-modify **with** update: it read the
+word at `I1` and advanced `I1` by `M1` (measured in `machine5_dir.asm`,
+Milestone 4: slot 1 read entry 0, and `I1` moved). Either selas encodes the
+wrong 3c variant or the executor misreads the 3c update bit; we have not
+checked which against the PRM, and the firmware's own code does not settle
+it here. We avoid the form (a post-modify dummy read, then a plain read).
+**Not a PR yet** -- it needs the PRM's Type 3c figure first.
