@@ -11,6 +11,11 @@ chain by NaN/Inf/huge values, D4 plays a quiet saw.
 the integer validation, MIN, TRUNC, FLOAT and the table interpolation -- becomes a
 constant increment (note 60). If M5d still dies and this plays, the pitch path is it.
 
+**`--variant exit-<cut>`** (on M5d's loop): an early `JUMP` to `wr_t5v_next` after
+one of `EXITS` -- `magic` (the directory magic matches, then nothing: nodir's work,
+in block 1), `blockaddr`, `framecopy`, `directory`, `pos` -- a prefix bisection of
+the tail that runs only on a trig.
+
 **D3, `--variant scratch` (the default)**:
 
 m5c silenced the instrument on a WAVERIDER trig (2026-09-27), and D2 (the reader never
@@ -124,11 +129,36 @@ def constpitch_loop(work: pathlib.Path) -> bytes:
     return sharc_object.load_bytes(be)
 
 
+# Early-exit cut points in M5d's loop tail (machine5_live.asm). Each `exit-<name>`
+# variant inserts `JUMP -> wr_t5v_next.` right after the named line, so the build runs
+# the tail only up to it: a prefix bisection of the trig-only code.
+EXITS = {
+    "magic": "      IF NE JUMP 0x16ee29;              // -> wr_t5v_next. (no directory: render nothing)\n",
+    "blockaddr": "      I4 = R2;                          // this track's reader block\n",
+    "framecopy": "      R5 = R5 AND R6;                   // TBL1, 0x0000 or 0x0080\n",
+    "directory": "      DM(0, I4) = R2;                   // the reader block's table pointer\n",
+    "pos": "      DM(3, I4) = R4;                   // pos\n",
+}
+EXIT_JUMP = "      JUMP 0x0;                         // -> wr_t5v_next. (DISCRIMINATOR: early exit)\n"
+
+
+def exit_loop(work: pathlib.Path, name: str) -> bytes:
+    """machine5_live.asm with an early exit to wr_t5v_next after EXITS[name]."""
+    import sharc_resolve_jumps as rj  # noqa: PLC0415
+    src = (ROOT / "csrc/waverider/sharc/machine5_live.asm").read_text(encoding="utf-8")
+    at = EXITS[name]
+    if src.count(at) != 1:
+        raise SystemExit(f"machine5_live.asm's cut point {at.strip()!r} is not unique")
+    src = src.replace(at, at + EXIT_JUMP)
+    _, be, _ = rj.resolve(src, dsp.LOOP_SW, work)
+    return sharc_object.load_bytes(be)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--m5b", type=pathlib.Path, required=True)
     ap.add_argument("--out", type=pathlib.Path, required=True)
-    ap.add_argument("--variant", choices=("scratch", "sanitise", "constpitch"), default="scratch")
+    ap.add_argument("--variant", choices=("scratch", "sanitise", "constpitch", *(f"exit-{k}" for k in EXITS)), default="scratch")
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
     a = ap.parse_args(argv)
@@ -142,6 +172,8 @@ def main(argv=None) -> int:
         base = dsp.objects()
         if a.variant == "constpitch":
             key, obj = "machine5_live", constpitch_loop(work)
+        elif a.variant.startswith("exit-"):
+            key, obj = "machine5_live", exit_loop(work, a.variant[5:])
         else:
             key, obj = "reader", scratch_reader(work, a.variant)
         if len(obj) > dsp.CODE_SPAN - 64:
