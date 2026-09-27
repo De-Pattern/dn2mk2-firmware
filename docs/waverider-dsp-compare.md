@@ -318,3 +318,233 @@ WaveTone trigged on every step):
 
 Suggested order: **b0code first**. If it plays, it is the fix's shape. passthru and b2
 then say how general the rule is.
+
+## 8. The reader halved, the encoding audit, and a breadcrumb channel (2026-09-27)
+
+**The instrument (owner), restated:** `wtplace-b0code` and `wtplace-b2` die at the
+first WaveTone trig, and `wtplace-passthru` survives with a normal WaveTone. So do
+`m5-nodir`'s trigs. The difference between passthru and every build that died is
+the **reader** (`reader_m5.asm`), plus the adapter's parameter-block fill and its
+call, which passthru skips.
+
+### The six builds
+
+`scripts/build_waverider_disc_wtplace.py --variant rb-*`. Each is **`b2` with one
+early exit**: block-2 layout (reader `0x300000`, adapter `0x300400`, save area
+`0x301000`, parameter block `0x301100`, table 0 `0x302000`), block 1 stock, section 3
+from m5b. Everything before the exit runs exactly as in `b2`. The exit is the full
+path's own return shape. Nothing writes a sample, so track 2 stays silent.
+
+| build | runs, in order | exit |
+|---|---|---|
+| `rb-params` | adapter: 22 saves (14a), the parameter block filled (14a stores to `0x301100..`), 22 restores | the adapter's own return; the reader is never called |
+| `rb-callret` | + the `CJUMP` to the reader and its two stack pushes | at the reader's entry: `I12 = DM(M7, I6)`, NOP, `JUMP (M14, I12) (DB)`, NOP, RFRAME |
+| `rb-loads` | + `I4 = R4`, the six parameter loads `DM(k, I4)` from block 2, `I2 = R0` | the same inline return (still no DAG store) |
+| `rb-setup` | + the frame-row arithmetic and the two row stores `DM(6/7, I4)`, the constants, the count test, the first tap address and the first `I0 = R3` | `JUMP wr5_done`: the full return, with the phase store `DM(1, I4) = R9` |
+| `rb-oneread` | + the first table read `R4 = DM(0, I0)` (block 2, table 0) | `JUMP wr5_done` |
+| `rb-noout` | the full render: 32 samples, all table reads, the count stores, the arithmetic | the full return; the output store `DM(I2, M6) = F4` is a NOP |
+| (`wtplace-b2`) | the full render **with** the output store to the track buffer | **died on silicon** |
+
+`rb-loads` is one more cut than asked for. It splits "DAG loads from our data" from
+"DAG stores to it", which the `(iii)` cut would otherwise lump together.
+
+| build | sha256 (.syx) | section 7 sha256 |
+|---|---|---|
+| `waverider-disc-rb-params_DN2_1.11.syx` | `19b61bcd6798940d02fdf0c5cb8b3772483e796a54d4bf5f1253fb5c3070c950` | `1c9fe24fe02404d8...` |
+| `waverider-disc-rb-callret_DN2_1.11.syx` | `a4eb709e567e316b219907cf149eeaf9bbcb6c3292d4446356855ad7748b0ae8` | `6087d9ea5a2eeac8...` |
+| `waverider-disc-rb-loads_DN2_1.11.syx` | `5ff785c46d2b4c40f464e2a2481f76231357db20439490218cc5b12a35a95012` | `efc2bc914ad51d2b...` |
+| `waverider-disc-rb-setup_DN2_1.11.syx` | `f036f2bcc679e92441201cbc8e262edba4624f4d35c6d57ba179ed408bce08a7` | `540e9db6ceb0ec37...` |
+| `waverider-disc-rb-oneread_DN2_1.11.syx` | `1ff9988e0e1dba7afadad64b427379a24d1452b11f61fb457b05a250f911b824` | `a2b8f5008047fe1b...` |
+| `waverider-disc-rb-noout_DN2_1.11.syx` | `3337a7ccc47c08081e4cf74e479aa586a0531e791f1590129b78cfb47f7916e3` | `fa392d700348f326...` |
+
+Gates, all six **[M]**:
+
+| gate | result |
+|---|---|
+| `sharc_waverider_wtplace_check.py S7 silent` (4 blocks, trig on block 1) | **PASS** for each: track-1 tap 0 nonzero samples of 128; tracks != 1 bit-identical to stock (tap and end-of-dispatch buffers); no-WaveTone run bit-identical to stock |
+| strict memory map, same run | **0** violations with the PC in our code, for each |
+| sharcdb decode (DB per build, blocks `...,94,95`) | every decode `confident`; every branch and pushed return address lands on an instruction of our code (`JUMP 0x1800a9` = `wr5_done` in setup and oneread; the CALL to `0x180000`; the return to `0x180264`) |
+| `sharc_encoding_audit.py` | 0 instructions whose opcode stock never uses (below) |
+| `dnfw inspect` | 21/21 ok, HMAC reproduced, for each |
+| `test/test_waverider_dsp.py` | 12 passed, 5 skipped |
+
+The `silent` mode is new in the wtplace check. A -0.0 sample counts as silence:
+the chain multiplies the untouched buffer and leaves -0.0 there, and 24 blocks in
+the runner stay at exactly 0 **[M]**.
+
+### Reading them on the instrument
+
+Use the same protocol as for wtplace: a new project, track 1 FM Tone playing a
+pattern, track 2 WaveTone trigged on every step, then listen for 4 bars.
+
+| what you hear | reads as |
+|---|---|
+| **track 1 keeps playing, and track 2 is silent from the start** (before and after its trigs, since these builds never render a sample). The sequencer and the UI respond as normal | **survived**: everything this build runs is fine on silicon |
+| the stuck 750 Hz tone, or **all** audio stops (track 1 too), at track 2's first trig; only power-off clears it | **died**: the fault is in what this build adds over the last survivor |
+
+Track 2's silence is expected in every rb build. The signal is **track 1**: if it
+stops, the build died.
+
+### Flash order: halve the suspects
+
+The suspects are ordered along the path: params < callret < loads < setup < oneread
+< noout < (b2: output store). Assume a build that runs more than a dead build also
+dies. Then:
+
+1. **`rb-setup` first.**
+   - Survives: the fault is the table read, the loop, or the output store. Go to 2a.
+   - Dies: the fault is at or before the setup. Go to 2b.
+2. a. **`rb-noout`**. Survives: the **output store** `DM(I2, M6) = F4` to the track
+      buffer, alone. Dies: then flash `rb-oneread`, which splits the first table
+      read from the loop.
+   b. **`rb-callret`**. Survives: flash `rb-loads`, which splits the DAG loads and the
+      R-to-I moves from the row and phase stores. Dies: flash `rb-params`, which
+      splits the 14a parameter stores from the CJUMP and return.
+
+Three flashes at most settle it to one step, two if 2a's first answer is "survives".
+
+### The encoding audit [M, against the PRM]
+
+`scripts/sharc_encoding_audit.py STOCK.sqlite B2.sqlite 180000-1800ae 180200-1802ac`
+reads all 149 instructions of the b2 reader and adapter, against the 40,000-odd
+aligned stock DN2 1.11 instructions in functions:
+
+- **119** have an encoding (raw) stock never uses. That is expected: the addresses
+  and immediates are ours.
+- **41** have a form-plus-register combination stock never uses:
+  - 23 `2a_short` computes, 11 `2c` computes, 5 `5b` moves, one `15b` and one `3c`.
+- **0** have an opcode stock never uses. The opcode here is the form plus the
+  mnemonic, with the data registers masked and the I/M registers kept.
+  - Every unseen shape is a stock operation with other data registers. For
+    example, `R4 = ashift(R4, R12)` has 7 stock uses of `2a_short ashift` by
+    register, and `R7 = DM(I0 + 0)` has 31 stock uses of `15b` through I0.
+
+The operand checks against the SHARC+ Core Programming Reference (Rev 1.4):
+
+- **The universal-register moves into I registers are encoded correctly.**
+  - The PRM's Figure 13-15 gives the field order of a 32-bit Type 5b move:
+    `01110`, srcureghigh[4:0], cond[4:0] and srcureglow[1] in the first parcel, then
+    srcureglow[0], dstureg[6:0] and seven fixed bits.
+  - Read as bits 47:43, 42:38, 37:33, 32 | 31, 29:23, that layout decodes all
+    3,192 stock 5b moves consistently with their meaning. Examples: `MODE1 = R0`
+    at startup, `I4 = R4` pointer moves, `R2 = I5` saves. It also leaves bit 30 = 0
+    and bits 22:16 = `0111111` in every one of them.
+  - Under the PRM's UREG code table (Chapter 26), `703f883f` is src `0000011` =
+    **R3**, dst `0010000` = **I0**, cond `11111`. `703e093f` is src `0000000` =
+    **R0**, dst `0010010` = **I2**.
+  - Both encodings are new only as a combination. Stock uses our source code R3 in
+    those bit positions 6 times (`M2 = R3` is `703f913f`), our destination code I0
+    32 times (`I0 = I13` is `71fe883f`, the same second parcel as ours), R0 34 times
+    and I2 25 times. `I0 = Rn` itself occurs once (sw `0xb8ac10`). The R-to-I moves
+    with an odd source register, which set srclow[0] in bit 31, occur 59 times.
+  - **Verdict: no encoding error.** Our emulator and decoders share selache's and
+    digikit's tables, and that path could hide a table error, so the check does not
+    rest on them. It rests on the PRM's code table and on the stock corpus, whose
+    fields sit where Figure 13-15 puts them.
+- **`FLOAT Rx BY Ry`**, which digikit marks `!!GAP!!` as a task-flagged opcode. It is
+  ALU opcode `11011010` = `0xDA`, `Fn = float Rx by Ry` (PRM Table 17-5), and stock
+  uses it 41 times in `2a_short`. `LSHIFT/ASHIFT Rx BY Ry` are shifter opcodes
+  `0x00`/`0x04` (Table 17-9). `min` is ALU `0x61`.
+- **`2c` parcels 0xc000..0xc07f** (our `c018`, `R1 = R1 + R8`). This is the range
+  runner gap G5 is about, because the Type 2b first parcel starts with the same
+  bits (Figure 13-4). Stock has 43 `2c` parcels in exactly this range (`c02d`,
+  `c010`, ...), and they run on silicon, so the silicon reads them as 16-bit. Ours
+  is the same case. **[I, strong]**
+- **17b immediates** (`R2 = 0xfff0` for -16, `R15 = 0xffe9`, `R8 = 0xfff1`): the
+  PRM's `imm16visa` type is `-0x8000:0x7fff`, so they are sign-extended. They are
+  used only as shift and scale counts.
+
+The access list **[M, from the decode]**:
+
+| question | ours |
+|---|---|
+| DAG1 vs DAG2 | data accesses only through DAG1: I0, I2, I4 (`15b` and `3c`), and I6/I7 (the stack and frame). DAG2 only in the stock return idiom: `I12 = DM(M7, I6)` loads I12, then `JUMP (M14, I12)` |
+| PM-bus data accesses | **none** (`g = 0` on every `14a`, `15b`, `3b`, `3c`, `16a`) |
+| I/M pairings stock never uses | **none**. `DM(I2, M6)` occurs 14 times in stock, `DM(I7, M7)` more than 1,500, and `DM(M7, I6)` 653 |
+| long word, byte or short word modifiers | **none** (`l = 0`; no `bw`/`sw`). Our I registers hold **byte-space** addresses (`0x301100`, `0x302000..`), and so do stock's: 317 stock `15b` accesses resolve to byte-space L1 bases, e.g. `R12 = DM(I4 + 9)` with I4 = `0x241190` reads `0x2411b4`. The offsets are scaled by 4, as ours need |
+| writes to B/L, I8-I15 (other than I12), M8-M15, USTAT, MODE1/2 | **none**. I12 is written only by the stock return idiom. I6 and I7 change only through the CJUMP, the pushes and RFRAME, and net to zero |
+
+**So the reader contains no instruction whose operation, addressing mode or register
+class is foreign to the stock image.** The fault is not an encoding. What is left is
+what the instructions **do**: which memory they touch and when. The halving builds
+measure that.
+
+### Breadcrumbs: where the DSP already talks back to the ColdFire [M static, I for the transport]
+
+The ColdFire's DSPI2 driver receives 2,748 bytes per frame into `0x800053a4`
+(digikit 04). The DSP side of that link, in stock DN2 1.11:
+
+- **Link setup, sw `0x1ca46a`** (called with R4 = `0xabc` at sw `0x1ca812`). It builds
+  two descriptor rings of two descriptors each, with CFG `0x100000` and XMOD 2 (16-bit
+  elements); the element counts it writes are `0xabc >> 1` = `0x55e`:
+  - ring 1: `0x2c2960 <-> 0x2c297c`, buffers `0x2c39d0` / `0x2c29d0`;
+  - ring 2: `0x2c2998 <-> 0x2c29b4`, buffers `0x2c59d0` / `0x2c49d0`.
+- **Per-frame handler, sw `0x1c9d6b`.** It calls `0x1ca020`, which returns
+  `p1 = 0x2c29d0 + (DM(0x2c0450) << 12)` and `p2 = 0x2c49d0 + (DM(0x2c0450) << 12)`;
+  `0x1ca04a` toggles the page. The handler:
+  - reads the command word at `p1` and dispatches through the table `0x268a68`,
+    so **ring 1 is receive**;
+  - and last, **writes one word into `p2 + 0`**: the handler's EMUCLK cycle count,
+    halves swapped (`R2 = (d << 16) | (d >> 16)`, sw `0x1c9e4c..0x1c9e62`). So
+    **ring 2 is the reply** the ColdFire receives at `0x800053a4`. The swap would
+    put the 32-bit value in natural order for a big-endian reader of MSB-first
+    16-bit halves **[I]**.
+- **A heartbeat that needs no DSP change.** Reply word 0 changes every frame while
+  the DSP runs. If the core stops, the TX ring keeps replaying its two pages
+  without the core (descriptor-list mode, as the SPORT ring does in section 4), so
+  word 0 **freezes at two alternating values**.
+  - A local USB read of `0x800053a4` repeated after a stall separates "core
+    stopped" (frozen) from "core running, silent" (changing). No DSP change is
+    needed.
+  - This is **[I]**: the transport is inferred from the descriptors, and the
+    ColdFire side may slip frames (digikit's two-frame DMA slip).
+
+**The stage-marker design (design only, not built):**
+
+1. **Choose K**, a reply offset that nothing uses.
+   - It must be written by no DSP handler case. The frame is 2,748 bytes and each
+     page is 4 KB, so only offsets below `0xabc` travel.
+   - It must be read by no ColdFire code. `0x800053c0` (K = `0x1c`) **is** read, by
+     `0x40025e0a`.
+   - Check both statically before use: the ColdFire readers of `0x800053a4 + K` in
+     MAIN OS (DNX/Ghidra), and the DSP stores into `0x2c49d0..0x2c69d0`.
+   - Candidate: the last word, K = `0xab8`. It must be checked against DT2's use of
+     the reply tail (play positions at `2(0x54e + t)`, docs/dt2-machine-port.md). If
+     DN2 has the same shape, that tail is taken, and a word just below
+     `2 * 0x54e = 0xa9c` is the next candidate.
+2. **Write the marker to both TX pages** with 14a absolute stores, the only access
+   form passthru and nodir proved survivable: `DM(0x2c49d0 + K) = Rs;
+   DM(0x2c59d0 + K) = Rs;`. It must go to both pages, because which page the DMA
+   replays at the stall is not known.
+   - Rs holds `0x5752` ("WR") in one half and a stage number in the other, halves
+     swapped as the handler does for word 0.
+   - Use a scratch register that is saved already; the adapter saves R0-R15.
+3. **Stages:**
+
+   | stage | where |
+   |---|---|
+   | 1 | adapter entry |
+   | 2 | before the CJUMP |
+   | 3 | reader entry |
+   | 4 | after the parameter loads |
+   | 5 | after the row stores |
+   | 6 | after the first `I0 = R3` |
+   | 7 | after the first table read |
+   | 8 + (n << 8) | loop iteration n |
+   | 9 | before the output store |
+   | 10 | after the reader returns |
+   | 11 | before the adapter returns |
+
+   Each marker costs two 14a stores, about 2 cycles, so they perturb nothing that
+   matters.
+4. **Read back after the stall** with a local USB read of `0x800053a4 + K` on the
+   ColdFire. Take two or three reads a frame apart: the marker should be stable, and
+   word 0 frozen. The last stage written is where the core stopped.
+   - **Control:** run the same build without a stall, for example with the WaveTone
+     track muted before the trig. The marker must then read 11 and word 0 must keep
+     changing. Without that control, a frozen or absent marker could simply mean the
+     channel is not wired.
+5. **Caveat.** Unless the ColdFire copies the reply into state, the DSP's next frame
+   overwrites K with whatever the handler case writes there. That is why K must be
+   one no case writes. Every write to the TX pages outside the handler's own stores
+   is **[I]** until step 1's checks are done.

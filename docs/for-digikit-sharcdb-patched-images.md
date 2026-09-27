@@ -27,3 +27,14 @@ no PR.
    line.
 6. **Build time.** About 160-280 s per image on a shared WSL machine, with two builds
    in parallel. The skip-rebuild check (sha256 + version) made re-runs free. Thanks.
+7. **The first instructions of an added block can stay unaligned.** In our block-2
+   builds, `insn` has `aligned = 0` and no mnemonic for sw `0x180000..0x18000d` and
+   `0x180200..0x180214`. Those are the entry of a CALL target and the entry of our
+   adapter, reached from a patched stock CALL. The rows after them are aligned, with
+   `function_sw = 0x180000`. We walk our spans by `width` ourselves
+   (`scripts/sharc_encoding_audit.py`), so it cost nothing, but a query on
+   `aligned = 1` silently drops them.
+8. **The `float_by` gap flag (item 5), checked against the PRM.** ALU opcode
+   `11011010` (`0xDA`) is `Fn = float Rx by Ry` in the SHARC+ Core Programming
+   Reference, Table 17-5, which is what sharcfn prints. If the flag is there because
+   the table was in doubt, the PRM settles it.

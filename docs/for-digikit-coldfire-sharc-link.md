@@ -282,6 +282,33 @@ being control rather than audio, though it does not name what the control is.
 **Unread, and we are not guessing:** which three of the sixteen slots the loops
 use, and whether they are a mix or three of a per-track set.
 
+## 7. The DSP side of the 2,748-byte reply, DN2 1.11 -- 2026-09-27
+
+Your finding 04 ends the SHARC-side thread with "what happens to 2748 after the call
+is not known". This is what we read in DN2 1.11's section 7, statically, with your
+`sharcdb` as the lister:
+
+- **sw `0x1ca46a`** is called with R4 = `0xabc` (sw `0x1ca812`). It builds two
+  two-descriptor rings: `0x2c2960 <-> 0x2c297c` over buffers `0x2c39d0` / `0x2c29d0`,
+  and `0x2c2998 <-> 0x2c29b4` over `0x2c59d0` / `0x2c49d0`. The descriptors carry CFG
+  `0x100000`, XMOD 2, and element counts `0xabc >> 1` = `0x55e` (16-bit elements).
+- **sw `0x1ca020`** returns the current pair: `0x2c29d0 + (DM(0x2c0450) << 12)` and
+  `0x2c49d0 + (DM(0x2c0450) << 12)`. `0x1ca04a` toggles the page word.
+- **sw `0x1c9d6b`**, the per-frame handler (the engine task at `0x1c9fe7` loops on it):
+  - reads a command word from the first buffer and dispatches through the table
+    `0x268a68`, so that ring is **receive**;
+  - and, last, stores one word at the second buffer's offset 0. That word is its own
+    EMUCLK cycle count, with the halves swapped (`0x1c9e4c..0x1c9e62`).
+
+  So the second ring is the **reply**, and reply word 0 is a per-frame DSP load
+  figure. **[D]** for the listing. That these rings are the ones on SPI2 is **[I]**:
+  your SPI instance table puts SPI2 at `0x2694f0`, and we did not follow the
+  descriptors into the DMA registers.
+
+If that holds, reply word 0 at `0x800053a4` on the ColdFire is a free DSP heartbeat.
+It changes every frame while the core runs, and it freezes if the core stops while
+the DMA replays the ring.
+
 ## Reproducing
 
 ```
