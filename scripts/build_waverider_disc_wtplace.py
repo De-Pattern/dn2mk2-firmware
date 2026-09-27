@@ -1,7 +1,7 @@
 """Build `waverider-disc-wtplace[-VARIANT]`: our reader in WaveTone's place (discriminators, never shipped).
 
     python scripts/build_waverider_disc_wtplace.py --m5b M5B.syx --out OUT.syx
-        [--variant wtplace|b0code|passthru|b2] [--stock ZIP] [--s7-only S7.bin]
+        [--variant wtplace|b0code|passthru|b2|rb-*] [--stock ZIP] [--s7-only S7.bin]
 
 `wtplace`: stock DN2 1.11 section 7 plus one CALL target and our block-1 region:
 
@@ -25,6 +25,23 @@ Variants, one change each:
   Our reader never runs.
 - `b2`: stock section 7 plus the adapter, reader, save area, parameter block and table
   0 at M5's block-2 addresses (0x300000.., the layout nodir ran in). Block 1 is stock.
+
+The reader-halving builds (`rb-*`) are `b2` with one early exit each. An exit
+leaves the track buffer as the dispatch hands it over; everything before the exit
+runs exactly as in `b2`, and the exit is the full path's own return shape:
+
+- `rb-params`: the adapter saves, fills the parameter block, restores and returns;
+  the reader is never called.
+- `rb-callret`: the adapter calls the reader, which returns at its entry (`I12 =
+  DM(M7, I6)`, a NOP where the full path stores the phase through I4, the JUMP, NOP,
+  RFRAME).
+- `rb-loads`: the reader sets `I4 = R4`, makes its six parameter loads through I4
+  and sets `I2 = R0`, then returns as `rb-callret` does (no store through a DAG).
+- `rb-setup`: the reader runs to its first `I0 = R3` (the frame rows stored through
+  I4, the constants, the count test, the first tap address), then `JUMP wr5_done`
+  (the full return, phase stored through I4).
+- `rb-oneread`: `rb-setup` plus the first table read `R4 = DM(0, I0)`.
+- `rb-noout`: the full render with the output store `DM(I2, M6) = F4` a NOP.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -68,7 +85,44 @@ def call_bytes(target_sw: int) -> bytes:
     return bytes(b)
 
 
-def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False) -> bytes:
+RB = ("rb-params", "rb-callret", "rb-loads", "rb-setup", "rb-oneread", "rb-noout")
+EARLY_RET = ("      I12 = DM(M7, I6);                 // DISCRIMINATOR: return here, the full path's shape\n"
+             "      NOP;                              // (the full path stores the phase through I4 here)\n"
+             "      JUMP (M14, I12) (DB);\n"
+             "      NOP;\n"
+             "      RFRAME;\n")
+TO_DONE = "      JUMP 0x16eba6;                    // -> wr5_done.  DISCRIMINATOR: early exit\n"
+
+
+def insert_after(src: str, anchor: str, text: str) -> str:
+    """TEXT after the first line that is exactly ANCHOR (which must exist)."""
+    lines = src.splitlines(keepends=True)
+    for k, line in enumerate(lines):
+        if line.rstrip("\n") == anchor:
+            return "".join(lines[:k + 1]) + text + "".join(lines[k + 1:])
+    raise SystemExit(f"no line {anchor!r}")
+
+
+def reader_source(rb: str | None) -> str:
+    """reader_m5.asm, cut short for one reader-halving variant (None: the full reader)."""
+    src = READER.read_text(encoding="utf-8")
+    if rb == "rb-callret":
+        return insert_after(src, "wr_render5.:", EARLY_RET)
+    if rb == "rb-loads":
+        return insert_after(src, "      I2 = R0;                          // out", EARLY_RET)
+    if rb == "rb-setup":
+        return insert_after(src, "      I0 = R3;", TO_DONE)
+    if rb == "rb-oneread":
+        return insert_after(src, "      R4 = DM(0, I0);                   // frame f0, word w0", TO_DONE)
+    if rb == "rb-noout":
+        line = "      DM(I2, M6) = F4;\n"
+        if src.count(line) != 1:
+            raise SystemExit("the output store is not one line")
+        return src.replace(line, "      NOP;                              // DISCRIMINATOR: the output store\n")
+    return src
+
+
+def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, nocall: bool = False) -> bytes:
     import sharc_resolve_jumps as rj  # noqa: PLC0415  (WSL + selas)
     rd, ad, save, par, tab = LAYOUT[layout]
     src = SOURCE.read_text(encoding="utf-8")
@@ -78,6 +132,10 @@ def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False) -> b
         src = src.replace(f"DM({0x2DDF00 + 4 * k:#x})", f"DM({par + 4 * k:#x})")
     src = src.replace("R4 = 0x2ddf00;", f"R4 = {par:#x};").replace("R8 = 0x2df000;", f"R8 = {tab:#x};")
     src = src.replace("CJUMP 0x16eb00 (DB);", f"CJUMP {rd // 2:#x} (DB);")
+    if nocall:
+        # rb-params: the parameter block filled, then straight to the restores
+        a = src.index("      CJUMP ")
+        src = src[:a] + src[src.index(".GLOBAL wr_wt_back.;"):]
     if passthru:
         # keep the saves and the restores; drop the parameter block, the call and the return
         a, b = src.index(f"      R8 = {tab:#x};"), src.index(".GLOBAL wr_wt_back.;")
@@ -91,9 +149,9 @@ def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False) -> b
     return sharc_object.load_bytes(be)
 
 
-def reader(work: pathlib.Path, layout: str) -> bytes:
+def reader(work: pathlib.Path, layout: str, rb: str | None = None) -> bytes:
     import sharc_resolve_jumps as rj  # noqa: PLC0415
-    _, be, _ = rj.resolve(READER.read_text(encoding="utf-8"), LAYOUT[layout][0] // 2, work)
+    _, be, _ = rj.resolve(reader_source(rb), LAYOUT[layout][0] // 2, work)
     return sharc_object.load_bytes(be)
 
 
@@ -149,9 +207,11 @@ def variant(stock: bytes, work: pathlib.Path, name: str) -> bytes:
     if name == "passthru":
         return section7(stock, adapter(work, passthru=True))
     lay = "b0" if name == "b0code" else "b2"
+    rb = name if name in RB else None
     rd, ad, save, par, tab = LAYOUT[lay]
-    code = [(dsp.dm_to_load(rd), pad(reader(work, lay), 0x200)),
-            (dsp.dm_to_load(ad), pad(adapter(work, lay), 0x400 if lay == "b2" else 0x200))]
+    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x200)),
+            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params"),
+                                     0x400 if lay == "b2" else 0x200))]
     if name == "b0code":
         lo, hi = dsp.dm_to_load(B0_FREE[0]), dsp.dm_to_load(B0_FREE[1])
         if not all(lo <= at and at + len(p) <= hi for at, p in code):
@@ -182,7 +242,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=pathlib.Path, required=True)
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2"), default="wtplace")
+    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2") + RB, default="wtplace")
     ap.add_argument("--s7-only", type=pathlib.Path, help="write section 7 here and stop (runner checks)")
     a = ap.parse_args(argv)
     if a.out.exists():
