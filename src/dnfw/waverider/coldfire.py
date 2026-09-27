@@ -7,7 +7,8 @@ ColdFire's job is smaller and is only this:
 1. **offer it** -- MACHINE SEL lists the machine types from a static list
    (`{0, 2, 1, 3, 4}` at `0x401ddd58`, copied into a `std::vector` by
    `0x4004d8b6`) and draws a divider wherever the group `0x40059274(type)`
-   changes. The list gains a 5 before MIDI, and 5 joins the synth group;
+   changes. The list gains a 5 before MIDI, and 5 (with 6, reserved for
+   ONESHOT) is a group of its own, so it reads synths | WAVERIDER | MIDI;
 2. **name it** -- the three name accessors (`0x400dc332` long, `0x400dc358`
    short, `0x400dc37e` the third column) are bounded at 4 and read 12-byte rows
    at `0x401f77f4`. The 192 zero bytes after that table are a live 16-long
@@ -134,23 +135,33 @@ def _long(v: int) -> bytes:
     return struct.pack(">I", v & 0xFFFFFFFF)
 
 
+SAMPLE_GROUP = 3                        # the sample-based machines: Waverider (5), ONESHOT (6)
+SAMPLE_TYPES_LAST = 6                   # 6 is reserved for ONESHOT; no row for it in this build
+
+# MACHINE SEL (and the second list at 0x40059cdc) inserts a divider row -- an
+# unlabelled row of value -1, drawn as dots -- wherever this group changes. The
+# groups are only compared for equality, so a third one is just another section.
 GROUP_SOURCE = f"""
-| group(type), rewritten in place at {GROUP_FN:#010x}: MIDI (4) -> 2, the synths
-| 0..3 and Waverider ({NEW_TYPE}) -> 1, anything else 0 (stock: 0..3 -> 1, 4 -> 2).
-    move.l  %sp@(4),%d0
-    blt.s   2f
-    moveq   #4,%d1
-    cmp.l   %d0,%d1
-    beq.s   3f
-    moveq   #{NEW_TYPE},%d1
-    cmp.l   %d0,%d1
-    bcs.s   2f
+| group(type), rewritten in place at {GROUP_FN:#010x}: the synths 0..3 -> 1, MIDI (4)
+| -> 2, the sample machines {NEW_TYPE}..{SAMPLE_TYPES_LAST} -> {SAMPLE_GROUP}, anything else 0
+| (stock: 0..3 -> 1, 4 -> 2). d0 holds the answer to each test before it is made,
+| and every branch follows the instruction that set its flags: `moveq` clears C,
+| so it never sits between a `subq` and its `bcs` (the first version of this did,
+| and put the synths in group 0 -- the emulator caught it). Borrows are unsigned,
+| after the sign test. Callers read the low byte.
+    move.l  %sp@(4),%d1
+    blt.s   0f
     moveq   #1,%d0
-    rts
-2:  clr.b   %d0
-    rts
-3:  moveq   #2,%d0
-    rts
+    subq.l  #4,%d1
+    bcs.s   9f
+    moveq   #2,%d0
+    tst.l   %d1
+    beq.s   9f
+    moveq   #{SAMPLE_GROUP},%d0
+    subq.l  #{SAMPLE_TYPES_LAST - 4},%d1
+    bls.s   9f
+0:  moveq   #0,%d0
+9:  rts
 """
 
 
@@ -372,16 +383,18 @@ def compose(stock: bytes, assemble) -> dict:
     edit(DATA_CAVE[0], blob, "Waverider's data: the six-row name table, the six attribute "
                              "rows (the sixth is WaveTone's), the six-entry MACHINE SEL list")
 
-    # 1. the list
-    edit(LIST_ALLOC, bytes.fromhex("48780018"), "MACHINE SEL list: storage for 6 longs",
-         bytes.fromhex("48780014"))
-    edit(LIST_END, bytes.fromhex("4879") + _long(layout["list"] + 4 * len(LIST_NEW)),
+    # 1. the list: its length is LIST_NEW's, so a seventh machine is one entry there
+    n = len(LIST_NEW)
+    edit(LIST_ALLOC, bytes.fromhex("4878") + struct.pack(">H", 4 * n),
+         f"MACHINE SEL list: storage for {n} longs", bytes.fromhex("48780014"))
+    edit(LIST_END, bytes.fromhex("4879") + _long(layout["list"] + 4 * n),
          "MACHINE SEL list: the copy's end", bytes.fromhex("4879") + _long(LIST_STOCK_VA + 20))
-    edit(LIST_CAP, bytes.fromhex("41e80018"), "MACHINE SEL list: the vector's capacity, 6 longs",
-         bytes.fromhex("41e80014"))
+    edit(LIST_CAP, bytes.fromhex("41e8") + struct.pack(">H", 4 * n),
+         f"MACHINE SEL list: the vector's capacity, {n} longs", bytes.fromhex("41e80014"))
     edit(LIST_BEGIN, bytes.fromhex("4879") + _long(layout["list"]),
          "MACHINE SEL list: the copy's start", bytes.fromhex("4879") + _long(LIST_STOCK_VA))
-    edit(GROUP_FN, group_function(assemble), "the MACHINE SEL group: type 5 joins the synths (1)",
+    edit(GROUP_FN, group_function(assemble), f"the MACHINE SEL group: types {NEW_TYPE}.."
+         f"{SAMPLE_TYPES_LAST} are a section of their own ({SAMPLE_GROUP}), divided off like MIDI",
          GROUP_STOCK)
 
     # 2. the names

@@ -59,8 +59,8 @@
   {
    "va": 1074106996,
    "stock": "202f00046d147203b2806c0a123c0004b280670a600470014e7542004e7570024e75",
-   "new": "202f00046d107204b280670e7205b280650470014e7542004e7570024e7500000000",
-   "what": "the MACHINE SEL group: type 5 joins the synths (1)"
+   "new": "222f00046d1270015981650e70024a81670870035581630270004e75000000000000",
+   "what": "the MACHINE SEL group: types 5..6 are a section of their own (3), divided off like MIDI"
   },
   {
    "va": 1074111662,
