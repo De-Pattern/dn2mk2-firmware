@@ -673,3 +673,94 @@ From `__start` (sw `0x1c0e70`):
 | plays **and** makes a quiet saw | level/overload, not NaN: something in the chain overloads at full scale on a type-5 track. D4's clamp and scale join the fix |
 | plays, WAVERIDER silent | our values are 0 on silicon: the inputs are wrong (the note cell or frame copy of a real trig) |
 | still dies at the trig | not our values' magnitude. Flash D3 next. **D3 plays and D4 dies** means that exciting the chain with any bounded non-zero signal kills it: a per-track stage that is unstable for a type-5 track. The next static target is then the per-track chain state that WaveTone's setup arm writes and MIDI's does not |
+
+## The uninitialised-chain hypothesis: tried offline, **not reproduced** (2026-09-27)
+
+**The hypothesis (the coordinator's).**
+
+- A type-5 track takes MIDI's no-setup arm, so its per-track chain state is never
+  initialised.
+- Zeros through that chain are harmless. That fits D1 (stock DSP, MIDI arm) and
+  D2 (the reader never runs).
+- The first non-zero audio makes it diverge: M5, m5c and ONESHOT all die at the
+  first trig. The divergence poisons the shared FX and the master.
+
+### 1. What the setup arms write
+
+The per-type setup table `0x8052db90`:
+
+| entry | machine | handler |
+|---|---|---|
+| `[0]` | FM Tone | `0x1c90b2` |
+| `[1]` | WaveTone | `0x1c91dc` |
+| `[4]` | MIDI | `0x1c90d4` |
+
+- **WaveTone's arm (`0x1c91dc`)** makes three calls:
+  - `sw 0x1c694a` (R4 = `DM(-0x24, I6)`, R8 = `I5 - 0x18c`);
+  - `sw 0x1c6757`;
+  - `sw 0x1c6c13`.
+
+  Each takes the WaveTone voice state for the track: engine `+0x2408 + 0x30c t`
+  (Milestone 2), i.e. **the machine's own oscillator and decimator state**. The
+  arm then jumps back into the dispatch.
+- **FM Tone's arm (`0x1c90b2`)** calls `sw 0x1c4f04` on its own state the same
+  way.
+- **The MIDI arm (`0x1c90d4`) is not an arm that skips the chain.** It is the
+  dispatch's common continuation, which the other arms jump back into. The
+  per-track chain after it runs for every type:
+  - the filter setup through `0x8052dba4[filter type]` at `0x1c91ad`;
+  - the filter renders, the amp stage `sw 0xb80345`, and the DC blocker at engine
+    `+0xe088 + 0x70 t`.
+- So, as far as the reading goes, **the setup arms initialise machine state, not
+  chain state**.
+- A type-5 track's chain state is whatever the engine init and the per-block chain
+  code leave there. That is `.bss` zero-filled by the stream (block 0
+  `0x28241290` fill `0x1c028`, DDR fill `0x804ace8c + 0x80904`), and then updated
+  every block by code that does not look at the machine type.
+
+### 2. The runner, from post-engine-init
+
+`scratchpad chaintrace.py`: 8 blocks. Track 0 has never had an audio machine; it
+is typed from the first frame. Track 1 is WaveTone. Both are trigged on block 2.
+Recorded per block:
+
+- the master mix at `0x268438` (the 64 floats `sw 0x1c9d3f` FIXes into the output
+  DMA buffer `0x2c0478..`);
+- the track buffers after the whole chain;
+- a census of NaN/Inf words in engine memory.
+
+| run | track 0 after the chain | engine NaN/Inf census | master `0x268438` |
+|---|---|---|---|
+| **m5c, track 0 type 5** | finite every block; peak 0.002 -> **0.051**, rising after the trig | 49 at init, 49 after every block | NaN from block 1 |
+| **stock, track 0 WaveTone** (control) | finite; peak 0.006 -> 0.118 | 49 / 49 | **NaN from block 1** |
+| **stock + lookup `[5]=5` (D1, which PLAYS on hardware)** | finite; peak 0.0013 -> 0.020 | 49 / 49 | **NaN from block 1** |
+
+**The kill does not reproduce offline, and the runner cannot judge the master.**
+
+- The type-5 track's chain output stays finite and bounded after a trig, as the
+  WaveTone control's does.
+- Nothing new goes non-finite in engine memory.
+- The master buffer goes NaN in the runner **in both controls**, the stock
+  WaveTone image and D1, and both play on silicon. So the runner's master/FX
+  path is not modelled well enough to show whether our track poisons it. That is
+  a new runner gap, to be written up for digikit, and not evidence either way.
+
+  Track 1's buffer is 0 in all three runs: the runner's WaveTone did not render
+  there. That is a known runner limitation (Milestone 2's decimator, and the
+  captured-frame audibility failure).
+
+The fresh-boot memory behind the chain is `.bss`, filled by the boot stream, so
+"unwritten" does not arise and zeros-versus-random has no case to test. **No m5d
+is built**: step 1 found nothing for a sixth setup entry to initialise in the
+chain, and step 2 did not reproduce.
+
+### What is next: D3
+
+**D3 `waverider-disc-m5c-scratch_DN2_1.11.syx` is the next flash.** It runs
+everything m5c runs (the call, every read, the return) but feeds the track's
+chain nothing new. How to read it:
+
+| D3 on the instrument | reads as |
+|---|---|
+| **plays through the trig** | the reader's code is fine on silicon. The kill needs our non-zero samples in the track's buffer: the chain or FX reacting to real audio on a type-5 track, which the runner cannot show. Then D4 (half level, clamped) says whether the level matters |
+| **still dies** | it is the reader call or its reads, independent of the chain. What is left: the CJUMP/return in our code, and the reads of the frame copy, the note cell and our block-1 data. Next, a D3 variant with the reader's CJUMP replaced by an inline no-op, to split the call from the reads |
