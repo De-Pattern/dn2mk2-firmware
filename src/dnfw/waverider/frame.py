@@ -19,6 +19,17 @@ The frame has two regions (`docs/engine-state.md`, "What the frame is"):
 A value is the ColdFire's 16-bit parameter word, `coarse << 8 | fine`: the
 parameter table's default for FREQ is `0x7f00`, coarse 127.
 
+> **Qualified 2026-09-26 (Milestone 5).** Frames the ColdFire's own builder
+> made (`scripts/emu_waverider_menu.py`, compared by
+> `scripts/waverider_frame_compare.py`) carry every slot parameter at **half**
+> the sound's value: FREQ 0x6117 -> 0x308c, 0x7f00 -> 0x3f80, TBL1 0x0100 ->
+> 0x0080. The halving is already in the modulated mirror the builder copies
+> (`0x800068e4`). `init_frame` and `sound_defaults` still write the sound's
+> scale, which is what Milestone 4's gates ran; convert with `>> 1` for a frame
+> as the instrument sends it. The header array at `84 + 2t` (the DSP clamp's
+> input, 3 in the factory project) and the word at 0 also carry data this model
+> leaves at zero.
+
 This module is pure: bytes in, bytes out.
 """
 

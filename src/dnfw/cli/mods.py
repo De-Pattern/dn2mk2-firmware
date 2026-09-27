@@ -28,6 +28,7 @@ from ..mods import moddest as moddest_mod
 from ..mods import oneshot as oneshot_mod
 from ..mods import songguard as songguard_mod
 from ..mods import transients as transients_mod
+from ..mods import waverider as waverider_mod
 from .files import read_image
 
 NAME = "mods"
@@ -43,7 +44,8 @@ REGISTRY = {transients_mod.ID: transients_mod,
             arpmodes_mod.ID: arpmodes_mod,
             lfo4_mod.ID: lfo4_mod,
             oneshot_mod.ID: oneshot_mod,
-            songguard_mod.ID: songguard_mod}
+            songguard_mod.ID: songguard_mod,
+            waverider_mod.ID: waverider_mod}
 
 
 def configure(parser) -> None:

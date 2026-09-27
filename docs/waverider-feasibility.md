@@ -828,6 +828,9 @@ the runner by a pc redirect, and it rejoins at `0x1c944c`. **PASS.**
   installed (but no type-5 track) is byte-for-byte equal to one without it,
   across all 16 track buffers; and in the type-5 run, tracks 1–15 are
   byte-for-byte equal to the stock run. The sixth loop is purely additive;
+- *(Superseded, Milestone 5: this clamp's input is the frame field at `84 + 2t`,
+  not the machine type; M5 leaves it stock. `docs/waverider-m5-dsp.md`,
+  correction 2.)*
 - the DSP type clamp `min(R2, 4)` at `0x1c294c` is raised to `min(R2, 5)` by a
   one-parcel selas patch (`R0 = 0x4` → `R0 = 0x5` at `0x1c294a`, `800f0400` →
   `800f0500`) placed in the loaded image; **verified by running**: fed a type-5
@@ -1050,7 +1053,7 @@ ringing, not a verified WaveTone waveform. The WAVs are kept for the record.
 
 | delivery | mechanism | capacity | cost | evidence |
 |---|---|---|---|---|
-| **bake into section 7** | boot-stream blocks the loader writes before the entry point (`bootstream.block`, `insert_before_final`) | the L1 span `0x280000..0x2a0000` is unloaded by the stream (128 KB: 8 tables of 16 KB); free DDR beyond the 5.4 MB image not read | +16 KB per table; section 7 is stored aPLib-compressed and int16 tables barely compress (M0: ~1.1x raw) | **[V]** that a section-7 data change reaches the DSP and plays: the `transients` mod, flashed and heard 2026-09-14 (`docs/mods.md`). **[E]** that an appended block loads and our code reads it: this step |
+| **bake into section 7** | boot-stream blocks the loader writes before the entry point (`bootstream.block`, `insert_before_final`) | the L1 span `0x280000..0x2a0000` is unloaded by the stream (128 KB: 8 tables of 16 KB) *(superseded, Milestone 5: unloaded because it is the gap between L1 blocks 0 and 1, not memory [D]; M5 uses block 2)*; free DDR beyond the 5.4 MB image not read | +16 KB per table; section 7 is stored aPLib-compressed and int16 tables barely compress (M0: ~1.1x raw) | **[V]** that a section-7 data change reaches the DSP and plays: the `transients` mod, flashed and heard 2026-09-14 (`docs/mods.md`). **[E]** that an appended block loads and our code reads it: this step |
 | build at init from a compact description | DSP code at init, as WaveTone's tables are built (`sw 0x1c463b`, additive synthesis) | unlimited for tables with a short description (a harmonic series); none for arbitrary user WAVs, whose description is the table | init time: WaveTone's 3 x 48 x 1024 points are ~90 M instructions, ~0.1 s at 1 GHz **[D]** | **[E]** mechanism (Milestone 2 ran it); **[D]** for ours |
 | bulk transfer from the ColdFire | an upload spread over frames, or a DMA/SPORT/boot block | the frame is parameters: step 1 found a destination for every slot field, and at one frame per ~87 ms a few spare bytes would take tens of seconds a table | new code on both processors | **[D]** frame; **[O]** DMA/SPORT (digikit's findings 04/06 leave the producers open) |
 
@@ -1087,7 +1090,11 @@ it is recorded as open in `docs/for-digikit-sharc-runner-dn2.md` section 19.
 ### What is unverified
 
 - **Silicon**, as for every milestone; G1, G2, G4 and now G11 are models.
-- **The ColdFire's frame.** The frame here is built from the parameter
+- **The ColdFire's frame.** *(Superseded, Milestone 5: compared field by
+  field with frames the ColdFire's own builder made -- every slot parameter
+  arrives at **half** the sound's value, `coarse << 7 | fine >> 1`; the header
+  arrays at `84 + 2t` and `116 + 2t`, left zero here, carry data. The gates here
+  ran at twice the real filter, amp and FX values.)* The frame here is built from the parameter
   table's defaults as `coarse << 8 | fine`; a frame from the firmware's own
   builder (`0x400274ba` in the ColdFire emulator, or DNX) has not been
   compared with it. The header arrays at `44..50`, `52 + 2t`, `84 + 2t`,
@@ -1102,6 +1109,9 @@ it is recorded as open in `docs/for-digikit-sharc-runner-dn2.md` section 19.
 - **Type 5's per-type setup.** The dispatch's setup table `0x8052db90` has
   five entries; with type 5 it reads the next table's first word. It ran
   without fault here, but that is luck until a sixth entry exists.
+  *(Superseded, Milestone 5: ~~reads the next table's first word~~ -- the
+  dispatch bounds the type with `compu(type, 5)` first, so type 5 takes MIDI's
+  no-setup arm and the table is never read for it. Not luck; no entry needed.)*
 
 ### The WAVs
 
@@ -1125,6 +1135,9 @@ with the sweep spread over the whole file, not the runner.
 
 ### The measured gap, revised after Milestone 4
 
+> **Superseded 2026-09-27** by "The measured gap, revised after Milestone 5"
+> below. Kept as it stood.
+
 | part | state | cost |
 |---|---|---|
 | wavetable import, baked table | **done**; **[V]** Milestone 0 | — |
@@ -1135,10 +1148,196 @@ with the sweep spread over the whole file, not the runner.
 | the per-track chain and filters | **mapped and driven [E]**: stage order, filter-type arms, the -20 dB track headroom | done offline |
 | an audible type-5 voice end to end | **[E]** M4: r = 0.987 through the chain; FREQ-0 and no-trigger controls hold | done offline |
 | table delivery to the DSP | **[E] baked into section 7 through a directory**, rebuilt and verified in memory; the section-7 route itself **[V]** by the transients mod | a flash |
-| type 5's per-type setup entry | **open**: `0x8052db90` has 5 entries | days |
-| the ColdFire frame for type 5 (machine type, a SLOT parameter) | not started | days-weeks |
+| type 5's per-type setup entry | **open**: `0x8052db90` has 5 entries *(superseded, Milestone 5: none needed)* | days |
+| the ColdFire frame for type 5 (machine type, a SLOT parameter) | not started *(superseded, Milestone 5: done [E])* | days-weeks |
 | the 12-shape ANIM modulator, the blend, two oscillators | not started; testable offline | weeks |
 | persistence, p-locks | same shape as LFO4 | weeks |
+
+## Milestone 5 (2026-09-26/27): the first flashable build -- `waverider-m5_DN2_1.11.syx`
+
+**The question.** Can Waverider be a machine a person selects, plays and saves
+-- MACHINE SEL offering it, the ColdFire sending type 5, the DSP rendering it --
+in one image that passes every gate this project has? **Yes, in the emulators.
+Nothing has run on the instrument.** This is the **first flash with modified
+SHARC code**.
+
+```
+python scripts/gen_waverider_code.py          # ColdFire edits -> src/dnfw/mods/waverider_code.json
+python scripts/gen_waverider_sharc.py --assemble   # SHARC objects -> src/dnfw/waverider/sharc_code.json
+dnfw mods apply 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip --mod waverider \
+    -o 00_Resources/02_Builds/waverider-m5_DN2_1.11.syx
+```
+
+`00_Resources/02_Builds/waverider-m5_DN2_1.11.syx`, 2,423,328 bytes, sha256
+`af7e62d51f7d19fee295341d539f6bde1c87f3ed302ad4be4c57d82f7f8da6a2`. Section 3
+sha256 `3612ed7a...a68dae` (the image the boot gates ran), section 7 872,524
+bytes, sha256 `5baf6e72...8dee7d` (the image the SHARC gate ran).
+
+### What it is, to a player
+
+MACHINE SEL (FUNC + SRC) lists **WAVERIDER** after SWARMER, above MIDI's
+divider. A Waverider track shows WaveTone's three SYN pages, and two of their
+knobs drive it:
+
+| knob | page | Waverider |
+|---|---|---|
+| `WAV1` | SYN 1, encoder B | **POS**: the frame position, 0..120 across 16 frames, interpolated |
+| `TBL1` | SYN 2, encoder B | **SLOT**: 0 (`PRIM`) a 32-harmonic saw darkening to a sine; 1 the overtone series, frame k = partial k+1 |
+
+Pitch follows the note (equal-tempered, 440 Hz at note 69). The rest of the page
+(osc 2, PD, OFS, noise, the WaveTone levels, TUN1) is shown and saved, not
+rendered. Filter, amp, FX and LFO pages are the stock ones and act on it.
+
+### The ColdFire half (`dnfw.waverider.coldfire`, 31 edits, 416 bytes)
+
+Type 5 lives in `sound+0xDE` as itself and is **WaveTone to the UI**. The full
+account of what a sixth type cost, one blank screen at a time, is in
+`docs/machine-list.md`, "What a sixth machine actually cost". In short:
+
+| edit | why |
+|---|---|
+| MACHINE SEL list `{0,2,1,3,5,4}` in a cave; its vector 6 longs; the row group puts 5 with the synths | offered, no stray dividers |
+| six-row name table (`Waverider` / `WVR`), bounds 4 -> 5 on three accessors | named |
+| six attribute rows (the sixth WaveTone's), bounds 4 -> 5 | the setter's permission test lets YES commit it |
+| stored-sound LOAD bound `moveq #6` -> `#7` | a saved Waverider sound loads as Waverider; **stock loads it as FM Tone** |
+| type 5 read as 1 in `param_set_slot_to_id`, the SYN page tables, `getMachineType(track)` and the sound's parameter-ownership test | WaveTone's pages, defaults and parameters |
+| five identity callers sent to a raw copy of `getMachineType` | MACHINE SEL's marker, the name, the re-commit and two track messages keep 5 |
+
+Four clean in-image caves (`0x4028e958`, `0x4029037c`, `0x4028db24`), nothing
+appended, so no loader.
+
+### The DSP half (`dnfw.waverider.dsp`)
+
+Written up in full in `docs/waverider-m5-dsp.md`: `reader_m5` and
+`machine5_live` in L1 block 2, the zeroed state, a 129-entry increment table,
+the directory and two tables; an entry JUMP at sw `0x1c9448`; the lookup
+`0x25d748[5] = 5`. It corrects four Milestone 3/4 readings (marked above where
+they were made): the old table spans were the gap between L1 blocks 0 and 1;
+the `min(R2, 4)` clamp is not the machine clamp; the setup table needs no sixth
+entry (the dispatch bounds the type first); and a type-5 track's machine
+parameters are read from the unpack's frame copy, not its record.
+
+**A fifth correction, found by the frame comparison below:** the ColdFire sends
+every slot parameter at **half** the sound's value. The DSP code first shipped
+with the sound's scale (`min(WAV1, 0x7800) << 5`, `TBL1 >> 8`), which on the
+instrument would have stopped POS at frame 7.5 and **never played table 1**.
+Fixed to `min(WAV1, 0x3c00) << 6` and `TBL1 >> 7`, reassembled, re-gated.
+
+### The ColdFire frame beside `frame.py` (Milestone 4's open item)
+
+`scripts/emu_waverider_menu.py` entered the audio ISR `0x40025e36` directly
+(it does not run in the emulator), with the track's mirror refreshed by the
+firmware's own `0x4002549c`, and kept the 2,688-byte frame at `0x80005e60` with
+the sounds beside it. `scripts/waverider_frame_compare.py`, track 0:
+
+| field | ColdFire | `frame.py` / the sound | |
+|---|---|---|---|
+| machine type `148` | **5** (stock track: 1) | 5 | agree |
+| filter type `180` | 0 | 0 | agree |
+| WAV1 `220`, at max | `0x3c00` | `0x7800` | **half** |
+| TBL1 `222`, at 1 | `0x0080` | `0x0100` | **half** |
+| FREQ, amp, FX, every other non-zero slot word (51 of 73) | half, rounded (`0x6117 -> 0x308c`) | the sound's | **half** |
+| header `84 + 2t` (the DSP clamp's input) | 3 | not modelled | |
+| header `116 + 2t` | `0x023a` | `0x6400` | differs; overriding it changed nothing measurable |
+
+The halving is already in the modulated mirror `0x800068e4` the builder copies.
+The layouts agree word for word (every header array at the same offsets on both
+sides), which is the evidence that the wire swaps each 16-bit word and nothing
+wider; the wire itself is not measured.
+
+### The gates
+
+| gate | result |
+|---|---|
+| `emu_boot_check.py`, from reset, stock control | **booted and drew its UI**: 1 frame in 450 M instructions (control: 1 frame in 620.5 M) |
+| `emu_boot_engine.py --machine-type 5 1 4 6 --machine-max 5` | engine path clean under a real loader boot; type 5 saved 5 / loaded 5; 1 -> 1; 4 -> 4; 6 -> 0 (the widened bound's own fallback); value array kept |
+| `check_coldfire.py` against stock | no scale-8 addressing (1,539 shared with stock, all data) |
+| ColdFire emulator (`emu_waverider_menu.py`, snapshot `wr-final-ui800M`) | MACHINE SEL shows WAVERIDER (`out/waverider-m5/final/menu.png`); two DOWNs and YES commit it (setter writes 5 at `sound+0xDE`, 40 slot lookups resolved as WaveTone, the marker on WAVERIDER); the SYN page is WaveTone's, knobs drawn; push-and-turn WAV1 -> `0x7800`; TBL1 -> `0x0100`; **the frame carries 5 at `148`** (other tracks 1) |
+| SHARC runner, `sharc_waverider_m5.py` | **26 of 26** on its own frames (501 s): decode 0 disagreements; the loop entered by the image's JUMP 8/8; no-setup arm 8/8; machine tap bit-exact in all runs; amp out peak 0.066, rms 0.034, r = 0.934; POS 120 centroid 410 Hz vs 735 Hz; TBL1 1 -> table `0x306000`; note 72 inc exactly 2x note 60; no trigger 0.0031; types 0-4 bit-identical to stock |
+| SHARC runner on **ColdFire-built frames** (init, WAV1 max, WAV1 max + TBL1 1; harness adds note 60 and one trigger, other tracks MIDI) | machine tap **bit-exact** in all three; TBL1 1 plays table 1 at POS 15 (partial 16) |
+| ... audibility on those frames | **FAIL, for the stock machine too**: amp out peak 6.4e-4 (Waverider) against **6.9e-5 for stock WaveTone on the same frame** (control). The chain is quiet on a captured frame whatever the machine, so the cause is the synthetic trigger or the halved envelope values, not the new machine. A frame from a played note was not captured (the ISR entered with a trig held did not reach the builder) |
+| `dnfw inspect` | **21 of 21** checks, HMAC reproduced |
+| tests | `test_waverider_mod.py`, `test_waverider_dsp.py`, `test_mods_matrix.py`: 30 passed |
+
+### The WAVs (`out/waverider/`, 48 kHz 16-bit mono)
+
+LOOPED files are 256 rendered samples (8 runner blocks) repeated to 2.5 s; each
+has a PREVIEW beside it (the float32 reference, bit-exact to the runner's
+machine tap, rendered over the whole file). `m5_report*.json` has the numbers.
+
+| file | what |
+|---|---|
+| `m5_demo_pos_sweep_preview.wav` | **what to listen for**, 4 s PREVIEW: note 48, TBL1 0, POS 0 -> 120: a buzzy saw darkening to a sine |
+| `m5_demo_harmonic_climb_preview.wav` | 4 s PREVIEW: TBL1 1, POS 0 -> 120: the overtones climbing, partial 1 to 16 |
+| `m5_voice_amp_out.wav` (+`_normalised`) | the init Waverider voice at the amp's output, LOOPED |
+| `m5_voice_machine.wav` / `m5_preview_init_sound.wav` | the saw at the machine tap, LOOPED / PREVIEW |
+| `m5_pos120_machine.wav` / `m5_preview_pos120.wav` | POS 120, the sine |
+| `m5_slot1_machine.wav` / `m5_preview_slot1.wav` | TBL1 1 at POS 64: partials 9-10 |
+| `m5_note72_machine.wav` / `m5_preview_note72.wav` | an octave up |
+| `m5_no_trigger.wav` | control: silent, LOOPED |
+| `m5_frame_cf{init,wav1max,tbl1}_machine.wav` / `m5_preview_frame_cf*.wav` | the ColdFire's frames at the machine tap, LOOPED / PREVIEW |
+| `m5_frame_cf*_amp_out.wav` | the same at the amp's output: near silent, and so is WaveTone's (above) |
+
+### Combining with other mods
+
+`dnfw mods matrix`: **not with `lfo4`** (both write the stored-sound LOAD at
+`0x400dd282..`: LFO4 hooks it, Waverider widens its bound), **not with
+`fxmod`** (both hook `param_set_slot_to_id`), **not with `transients`** (both
+rebuild section 7). Yes with the rest. A combined LFO4 + Waverider build needs
+the bound moved into LFO4's LOAD stub, and one owner of section 7.
+
+### Room for a seventh machine (ONESHOT, planned as type 6)
+
+Not built, noted where it is cheap:
+
+- **DSP:** the lookup `0x25d748` has eight words; `[6] = 6` is one more word.
+  The dispatch's `compu(type, 5)` guard sends 5 *and* 6 to the no-setup arm, so
+  no setup-table entry is needed for either; a type-6 render loop would chain
+  after `machine5_live` the way it chains after Swarmer's. The clamp at
+  `0x1c294c` is not a machine bound and needs nothing (ONESHOT's prototype
+  raises it; per correction 2 that raises the bound on the field at `84 + 2t`).
+- **ColdFire, per row:** a seventh entry in the list (the cave's vector grows by
+  4 bytes, storage and capacity `0x1c`), bounds 5 -> 6 on the three name
+  accessors, the attribute accessors, the permission test and the stored-sound
+  LOAD (`#7` -> `#8`), a seventh name row and attribute row, the group function's
+  upper bound, and a decision whether 6 is a clone of an existing machine (each
+  canonicalising shim takes one more compare) or needs pages of its own (the
+  0x42432ad4 page tables hold five rows; its own pages mean a relocated table).
+  The data cave has 8 bytes left, so a seventh row moves the tables to a larger
+  cave.
+
+### What is unverified
+
+- **Silicon**, for all the SHARC code: the first time modified DSP code runs.
+- **L1 block 2 at run time**: free by every static test, not proven.
+- **Loudness on the instrument**: exact at the machine tap; the chain on
+  ColdFire-captured frames is quiet for the stock machine too, so the
+  instrument is the first real check of level.
+- **A played note's frame**: the note, velocity and trigger in the CF frames are
+  the harness's, not a key press's.
+- **The UI paths not exercised**: sound browser, copy/paste, p-locks, LFO
+  destinations, song/pattern changes, a project save and reload. The save/load
+  converter round trip is exercised, not SAVE PROJECT.
+- **Not audited**: callers of the vtable getter `0x40036462` (raw type), and the
+  78 `moveq #4` compare sites beyond the per-machine ones.
+- **Cosmetic, known:** SYN pages 2 and 3 are titled "WaveTone (2/3)"; the SYN
+  pages' icons are WaveTone's.
+
+### The measured gap, revised after Milestone 5
+
+| part | state | cost |
+|---|---|---|
+| wavetable import, baked table | **done**; **[V]** Milestone 0 | — |
+| machine list, names, permission, persistence (ColdFire) | **[E]** M5: MACHINE SEL offers WAVERIDER, YES commits type 5, SAVE/LOAD keep it, the frame carries it | done offline |
+| control surface: POS and SLOT | **[E]** M5, WaveTone's `WAV1` and `TBL1` reused; the rest of WaveTone's page is inert | done offline |
+| the ColdFire frame vs `frame.py` | **compared [E]**: layout agrees; slot values are half the sound's | done |
+| DSP: type-5 loop, pitch, POS, SLOT, two baked tables | **[E]** M5, bit-exact at the machine tap on ColdFire-built frames | done offline |
+| per-type setup, the clamp | **not needed** (M5 corrections 2 and 3) | — |
+| the first flash | **built, not flashed**: `waverider-m5_DN2_1.11.syx` | a flash |
+| level through the chain on a real note | **open**: quiet on captured frames for the stock machine too | a flash |
+| TUN1, portamento, osc 2, the ANIM modulator, a Waverider page of its own | not started | weeks |
+| user tables, `+Drive` delivery | baked only; `dnfw waverider bake` makes the geometry | weeks |
+| combining with LFO4 | refused (both own the stored-sound LOAD) | days |
 
 ## Status
 
@@ -1183,6 +1382,15 @@ with FREQ 0, silent with no trigger. The table is baked into section 7 with a
 directory; both slots render bit for bit, and the rebuilt image passes all 21
 `dnfw` checks in memory. One more runner gap (G11). Nothing is flashed. Gate:
 `scripts/sharc_waverider_m4.py`, 17/17 PASS.
+
+**Milestone 5: [E], built, not flashed**, 2026-09-27.
+`waverider-m5_DN2_1.11.syx` (sha256 `af7e62d5...f8da6a2`): MACHINE SEL offers
+WAVERIDER, a type-5 track is WaveTone to the ColdFire and our own loop to the DSP.
+Boot from reset, the engine and the machine-type SAVE/LOAD, `check_coldfire`, the
+ColdFire menu and frame, the SHARC runner (26/26, and bit-exact on ColdFire-built
+frames) and `dnfw inspect` (21/21) pass. Level through the chain on a captured
+frame is quiet for the stock machine as well, so level is the instrument's to
+answer. **The first flash with modified SHARC code.**
 
 **[D]** for the gap estimates — they are reasoned from measured facts (the file
 format, the firmware's free space, the machine table bound) but no part of the
