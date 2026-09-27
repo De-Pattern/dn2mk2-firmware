@@ -886,3 +886,59 @@ strict violations from our code. The patched sites decode as intended.
 | plays | plays | the **reader's body** (D3 minus the call) |
 
 Flash D5a first. Flash D5b only if D5a plays.
+
+## Does any SHARC DMA target our memory? (static, 2026-09-27)
+
+The lead comes from irpina's Digitakt mk1 probing handoff
+(`00_Resources/01_Reference/PROBING-HANDOFF.md`): "DMA writes are invisible to
+[the emulator]", and on the mk1 a DDR range is the delay effect's DMA ring. A DMA
+engine writing into our reader's code or tables would fault the first call, and
+neither emulator would show it.
+
+**Where DN2's SHARC programs DMA.** No DMA channel MMR (`0x31022000..0x3102ffff`)
+appears as an instruction immediate in block-3 or L2 code. The drivers take their
+channel bases from static device tables in block-0 data:
+
+- the SPORT/DMA pairs `{SPORT base, DMA base, ...}` at `0x268d98..0x269000`: DMA0
+  `0x31022000` .. DMA15 `0x31023380`, with SPORT0A `0x31002000` .. SPORT4B;
+- the MDMA streams at `0x268cd0..0x268d40`: `0x3102d000/0x3102d080`,
+  `0x3102d100/0x3102d180` and `0x3102d200/0x3102d280`, with `0x3102e000` and
+  `0x3102f000`.
+
+These are the ADI drivers' full tables, not a list of the channels in use.
+Descriptors are built at run time by `0x1ca58a` and submitted by `0x1ca7e4`
+(digikit finding 06). Their `ADDRSTART` values are passed in as immediates or
+data, and every one resolved so far is in block 0 or at the start of block 1:
+
+| what | buffers | source |
+|---|---|---|
+| output rings A-D (TX, `CFG 0x00100000`) | `0x261cc8..0x261ec8`, `0x261ec8..0x2620c8`, `0x262138..0x263138`, `0x263138..0x264138`; heads `0x2620c8`, `0x262100`, `0x264138`, `0x264170` | digikit 06 |
+| the ColdFire link receive ring | `0x264220/0x265220` and `0x266220/0x267220` (`command_word`), lists `0x2641b0/0x2641cc`, `0x264204` | digikit 04, lane G1 |
+| receive descriptor | `0x268220`, `ADDRSTART 0x268240`, 1,025 words -> `0x269244` | digikit 06 |
+| per-block frame and audio pages (sw `0x1c9e76`) | `0x2c0478 + (page << 8)`, `0x2c0678..`, `0x2c08e8 + (page << 11)`, `0x2c18e8..` | the driver's own listing; ends before `0x2c2100` |
+
+**Against our spans.** No data word anywhere in the image names m5c's block-1
+region `0x2dd600..0x2e7000` in byte, `0x28`-alias, normal-word or short-word
+form.
+
+- The only alias-form hits, `0x282e9f08`/`0x282e9608` (L2 `0x20015758`,
+  `0x200158c0`) and `0x282e00b8`, decode as instruction bytes: e.g. sw `0xb8abac`
+  is `dm(0x2e, i7) = s0`, and `0x2838d064` is a `cjump` word.
+- Block 2 has no hits either, so ONESHOT's `0x30a000..0x317df8` is equally clear.
+- Silicon agrees where it has been tested:
+  - D2's absolute state at `0x301000..` survived every block;
+  - D3's always-running loop at byte `0x2dda00..0x2ddd00` survived every block
+    until the trig.
+
+  Neither would hold if a DMA ring swept those addresses.
+
+**Limit.** A descriptor whose `ADDRSTART` is computed at run time, for example a
+heap-allocated MDMA copy, cannot be excluded statically. No such descriptor is
+known, and every resolved one lands in block 0 or below `0x2c2100`.
+
+**Consequence for D5b.** The reader's code at byte `0x2dd600..0x2dd75e` is executed
+there only at its entry (`I4 = R4`, then the patched jump) and in its return
+sequence. A corruption of the reader's middle would pass D5b and fail only in D3.
+So "D5b plays, D3 dies" would point at the reader's body **or** at what lies in the
+middle of the span. A cheap check then is **D5c**: D3 with the reader moved again,
+to the directory padding (byte `0x2de800`). The DMA reading predicts no change.
