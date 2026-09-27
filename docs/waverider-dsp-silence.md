@@ -552,7 +552,7 @@ writes nothing into the track buffer, so WAVERIDER stays silent.
 | plays through the trig, WAVERIDER silent | the fault is the write into the track buffer (then: what on silicon differs about that buffer, e.g. the chain reading our floats) |
 | still dies on the trig | the reader call or its reads. What is left: the CJUMP/return mechanics in our code, and the reads of the frame copy and note cell. A note cell that is NaN or huge on silicon would make `TRUNC` raise an invalid-operation sticky, which only matters if an FP exception interrupt is enabled. Not checked; a candidate for the next static pass |
 
-## D4: the sanitised-output discriminator, and the value hypothesis (2026-09-27)
+## D4: the sanitised-output discriminator, and the value hypothesis (2026-09-27) -- **the value/NaN hypothesis is ruled out by hardware (D3, 2026-09-27)**
 
 **The hypothesis (the coordinator's).** Writing the buffer is harmless: ONESHOT's
 `os_quiet` wrote zeros into it every block, and that played. What changes at the
@@ -674,7 +674,7 @@ From `__start` (sw `0x1c0e70`):
 | plays, WAVERIDER silent | our values are 0 on silicon: the inputs are wrong (the note cell or frame copy of a real trig) |
 | still dies at the trig | not our values' magnitude. Flash D3 next. **D3 plays and D4 dies** means that exciting the chain with any bounded non-zero signal kills it: a per-track stage that is unstable for a type-5 track. The next static target is then the per-track chain state that WaveTone's setup arm writes and MIDI's does not |
 
-## The uninitialised-chain hypothesis: tried offline, **not reproduced** (2026-09-27)
+## The uninitialised-chain hypothesis: tried offline, **not reproduced** (2026-09-27) -- **ruled out by hardware (D3 writes nothing into the track and still dies)**
 
 **The hypothesis (the coordinator's).**
 
@@ -764,3 +764,125 @@ chain nothing new. How to read it:
 |---|---|
 | **plays through the trig** | the reader's code is fine on silicon. The kill needs our non-zero samples in the track's buffer: the chain or FX reacting to real audio on a type-5 track, which the runner cannot show. Then D4 (half level, clamped) says whether the level matters |
 | **still dies** | it is the reader call or its reads, independent of the chain. What is left: the CJUMP/return in our code, and the reads of the frame copy, the note cell and our block-1 data. Next, a D3 variant with the reader's CJUMP replaced by an inline no-op, to split the call from the reads |
+
+## D3 on the instrument (owner, 2026-09-27): the DSP stops at the first trig
+
+With D3, selecting WAVERIDER leaves the other tracks playing. **The first trig of
+the WAVERIDER track silences everything**, and switching that track back to FM
+Tone does **not** bring the sound back. D3 writes nothing into the track, so:
+
+- our samples are not the cause: the **chain and NaN hypotheses are ruled out**
+  (marked above);
+- the DSP halts or hangs and stays that way; the mix is not poisoned;
+- the cause is on the reader path, on its first run: the loop's type-5 tail, the
+  software call and return, or the reader's body. D2 never reached any of them
+  and played.
+
+### Strict memory map: no violation from our code
+
+`scripts/sharc_strict_memory.py` wraps digikit's `_dm_read`/`_dm_write` bindings
+and `Runner._decode` from outside; digikit itself is untouched. It flags every
+access that is:
+
+- outside the ADSP-21569's real memory: L1 blocks 0-3 at their real sizes in byte,
+  `0x28`-alias and normal-word form, L2 1 MB, DDR, and the MMR windows;
+- inside the 16 KB caches at the tops of blocks 1-3;
+- misaligned;
+- an L1 read of a byte never loaded or written;
+- a fetch outside code memory.
+
+The harness's own stand-ins are counted separately and not flagged: the runner's
+stack, which grows down from `0x300000`, and `UNPACK_LOCAL`.
+(`scratchpad strictrun.py`; 3 blocks from post-engine-init, trig on block 1.)
+
+**The stock control is not clean**, and every one of its hits is explained:
+
+| stock hits | cause |
+|---|---|
+| "outside" near 0 and near `0xffffff00`, from sw `0x1c1b65..0x1c314e` | null and negative pointers read from the caller locals the harness zeroes |
+| 24-38 misaligned 4-byte accesses in the frame copy (e.g. sw `0x1c28e3`, byte `0x25c4ae`) | 16-bit fields; the silicon evidently tolerates it, since stock plays |
+| never-written reads at `0x300000..0x300054` from sw `0x1c26b7..0x1c26c2` | the harness frame's stack arguments, which sit over the first bytes of L1 block 2. In the M5 run they overlay **M5's own reader code** (`0x300000..`), a runner-only overlap |
+
+The same hits appear in every run below. So the test is the violations raised
+**with the PC in our own code**:
+
+| run | violations from our code (sw `0x16eb00..0x16ee7c`, or block 2 for M5/ONESHOT) |
+|---|---|
+| m5c, type 5 trigged | **0** (3 blocks) |
+| D3 (scratch) | **0** |
+| M5 | **0** |
+| D5a, D5b (below) | **0** |
+| **ONESHOT** | **6 per block**: the transplanted render (sw `0x1853fa..0x185421`) reads 16-bit samples at `0x317df8..0x317f26`, **past the end of its bank** (`0x310800 + 0x75f8 = 0x317df8`), in never-written L1 |
+
+**The table of every address the m5c reader path forms** (static; each is checked
+against the boot stream):
+
+| what | instruction form | address | lands in |
+|---|---|---|---|
+| save area, counters | 14a absolute | `0x2dde00..0x2dde84` | block 1, loaded (zeros) |
+| directory magic, count, table pointer | 14a; 15b `DM(0, I1)` | `0x2de600`, `0x2de604`, `0x2de608 + 4 slot` (slot 0-1) | block 1, loaded |
+| WAV1/TBL1 | 15b `DM(0/1, I1)`, `I1 = (0x25c568 + 146 t) & ~3` | `0x25c568..0x25d0f8`, 4-aligned | block 0 `.bss`, filled |
+| note cell | 15b | `0x254b14 + 4 t` | block 0 `.bss` |
+| pitch table | 15b `DM(0/1, I1)` | `0x2de200 + 4 k`, k 0..127 (+1). A NaN note's `TRUNC` wraps to `0x2de1fc` or `0x2de200` | block 1, loaded |
+| reader block | 15b | `0x2ddf00 + 32 t`, words 0-7 | block 1, loaded |
+| table rows and taps | 15b `DM(0, I0)` | table + 1024 f + 4 w, f <= 15, w <= 255: at most `0x2e6ffc` | block 1, loaded |
+| track buffer | 3c `DM(I2, M6)` post-modify, L2 = 0 | `0x804acf90 + 128 t`, 32 words | DDR `.bss` |
+| frame pushes | 3c / 16a `DM(I7, M7)` | the task stack, 2 words | as the stock callers |
+| fetch | | sw `0x16eb00..0x16ebaf`, `0x16ed00..0x16ee7c` = byte `0x2dd600..`, `0x2dda00..` | block 1, loaded, NOP-padded |
+
+**Strict mode is clean for Waverider.** Nothing our code touches is outside real,
+written memory. The ONESHOT overrun is a real ONESHOT bug, **independent of
+Waverider**:
+
+- The render's playhead runs past the last sample of the bank. With the harness's
+  frame, SAMP/LEN are WaveTone's values, not a real ONESHOT sound's, so whether a
+  real sound reaches it is open.
+- The fix for ONESHOT is to pad the bank's end with zeros, at least the render's
+  6-tap reach plus one block's advance, and to clamp the end address.
+
+### The call and return, compared with a stock call in the same dispatch
+
+| | stock (sw `0x1c9151`, the call of `0xb809cb`) | ours (m5c sw `0x16ee0d`) |
+|---|---|---|
+| call | `cjump 0xb809cb (db)`, 25a, 48-bit | `cjump 0x16eb00 (db)`, 25a, 48-bit |
+| delay slot 1 | `dm(i7,m7)=r2`, 3c `f29f` | `dm(i7,m7)=r2`, 3c `f29f` |
+| delay slot 2 | `dm(i7,m7)=0x1c9157`, 16a, the next address - 1 | `dm(i7,m7)=0x16ee13`, 16a, the next address - 1 |
+| return | `i12=dm(m7,i6)` 3b `fe4d3f0e`; one instruction; `jump (m14,i12) (db)` `3f083f34`; slot; `rframe` `0119` (e.g. sw `0x1c9d62..0x1c9d6a`) | `fe4d3f0e`; `dm(1,i4)=r9`; `3f083f34`; `nop`; `0119`: the same forms, in the same order |
+
+What differs: the stock callee allocates a frame (`i7 = modify(i7, -n)(nw)`)
+before it touches memory, and our reader allocates none. It needs none: it uses
+no stack.
+
+**Instruction shapes our code uses and the stock corpus does not.** The corpus is
+31,102 walked stock instructions (the dispatch, the unpack, block 3 `0x1c3400..`,
+L2 `0xb80000..`). Normalised for registers and constants, the shapes absent from
+it, all on the D3-only path, are:
+
+- the conditional computes `if eq r5 = lshift r4 by r7` (sw `0x16eda7`),
+  `if ne r4 = lshift r4 by r7` (`0x16edaa`) and `if ge r1 = r1 - r1` (`0x16edba`);
+- `f1 = float r0` (`0x16edea`);
+- `r2 = r3 xor r2` (`0x16eb71`).
+
+All five decode alike in selmap and digikit. They are candidates, not findings.
+
+## D5a and D5b: bisect the reader path
+
+`scripts/build_waverider_disc_bisect.py` makes two builds, each m5c's section 7
+with one byte patch plus m5b's section 3. Both pass `dnfw inspect` (21/21); `dnfw
+diff` against m5c shows only section 7, 11 and 8 bytes; section 3 is identical.
+
+| build | patch | runs | skips |
+|---|---|---|---|
+| **D5a `waverider-disc-m5c-nocall`** | sw `0x16ee0d`: the 14-byte call (`cjump`, 2 pushes) becomes `jump 0x16ee14` + NOPs | the whole loop tail: frame copy, note cell, pitch table, directory, the five novel shapes, the reader-block writes | the call |
+| **D5b `waverider-disc-m5c-callonly`** | sw `0x16eb02`: the reader's second instruction becomes `jump 0x16eba7` (its own return sequence) | the loop tail, the CJUMP and both pushes, `I12 = DM(M7, I6)`, the return jump and RFRAME | the reader's body; no buffer is written |
+
+In the runner, both return every block for 3 blocks with a type-5 trig, with 0
+strict violations from our code. The patched sites decode as intended.
+
+| D5a | D5b | reads as |
+|---|---|---|
+| dies | (dies too) | the **loop tail** kills it: suspect the novel conditional shapes and the reads of the frame copy and note cell |
+| plays | dies | the **software call/return** into our code is what silicon refuses |
+| plays | plays | the **reader's body** (D3 minus the call) |
+
+Flash D5a first. Flash D5b only if D5a plays.
