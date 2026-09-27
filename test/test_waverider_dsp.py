@@ -47,7 +47,7 @@ def test_committed_objects_match_their_sources():
         assert spec[key]["source_sha256"] == hashlib.sha256(src).hexdigest(), name
         csrc = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         assert csrc["object_parcels_be"] == spec[key]["object_parcels_be"], name
-    assert spec["entry_jump"]["source"] == "JUMP 0x180200;"
+    assert spec["entry_jump"]["source"] == "JUMP 0x16ed00;"
 
 
 def test_our_sources_avoid_dag1_m0_m3_in_memory_accesses():
@@ -82,11 +82,13 @@ def test_is_deterministic_and_walks(stock7, built):
     assert w.complete and w.stopped_at == len(built)
 
 
-def test_every_added_span_is_in_block_2_below_its_top_16k_and_outside_every_stock_block(stock7):
+def test_every_added_span_is_in_block_1s_free_tail_and_outside_every_stock_block(stock7):
+    # Milestone 5c: M5's L1 block 2 silenced the instrument (docs/waverider-dsp-silence.md)
     stock_blocks = [b for b in bootstream.walk(stock7).blocks if b.count]
     for what, at, payload in dsp.spans():
         lo, hi = at - dsp.LOAD_ALIAS, at - dsp.LOAD_ALIAS + len(payload)
-        assert 0x300000 <= lo and hi <= 0x31C000, what
+        assert 0x2DD52C <= lo and hi <= 0x2E8000, what          # above stock, below a 32 KB DM cache
+        assert not (0x300000 <= lo < 0x320000), what            # nothing left in block 2
         for b in stock_blocks:
             assert not (b.target < at + len(payload) and at < b.target + b.count), what
 
@@ -98,7 +100,7 @@ def test_loaded_image_holds_our_bytes(built):
 
 def test_the_two_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     entry = bootstream.read_span(built, dsp.sw_to_load(dsp.ENTRY_SW), 8)
-    assert entry == bytes.fromhex("3e06180000020100")          # jump 0x180200 ; nop
+    assert entry == bytes.fromhex("3e06160000ed0100")          # jump 0x16ed00 ; nop
     lookup = struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32))
     assert lookup == (0, 1, 2, 3, 4, 5, 0, 0)
     # the clamp min(R2, 4) stays stock: its R0 = 0x4 parcel pair at sw 0x1c294a
@@ -119,7 +121,7 @@ def test_the_two_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
 
 def test_directory_names_both_tables():
     d = dsp.directory()
-    assert struct.unpack("<4I", d) == (0x57525431, 2, 0x302000, 0x306000)
+    assert struct.unpack("<4I", d) == (0x57525431, 2, 0x2DF000, 0x2E3000)
 
 
 # -- the contract -------------------------------------------------------------------------------
@@ -184,3 +186,23 @@ def test_tables_are_original_and_distinct():
     t0, t1 = dsp.tables()
     assert t0 != t1
     assert render.dsp_bytes(t0) != render.dsp_bytes(t1)
+
+
+def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
+    sp = dsp.spans()
+    at = [a - dsp.LOAD_ALIAS for _, a, _ in sp]
+    ends = [a - dsp.LOAD_ALIAS + len(p) for _, a, p in sp]
+    assert at[0] == dsp.REGION[0] and ends[-1] == dsp.REGION[1]
+    assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
+    obj = dsp.objects()
+    for (what, _, payload), code in zip(sp[:2], (obj["reader"], obj["machine5_live"])):
+        assert payload[:len(code)] == code
+        assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
+
+
+def test_the_reader_returns_in_the_firmwares_shape():
+    lines = [ln.split("//", 1)[0].strip() for ln in (SHARC / "reader_m5.asm").read_text().splitlines()]
+    lines = [ln for ln in lines if ln]
+    k = lines.index("I12 = DM(M7, I6);")
+    assert lines[k + 2] == "JUMP (M14, I12) (DB);" and lines[k + 1] != lines[k + 2]
+    assert lines[k + 4] == "RFRAME;"                           # second delay slot
