@@ -211,3 +211,110 @@ splice.
 ## Notes for digikit
 
 `docs/for-digikit-sharcdb-patched-images.md`.
+
+## 7. wtplace fails on silicon; the layout, the caches and the next three builds (2026-09-27)
+
+**The instrument (owner):** `waverider-disc-wtplace` gives the stuck tone at the first
+WaveTone trig; only power-off stops it. There is no type 5 in it, so **the type-5
+plumbing is cleared**: the lookup, the splice at `0x1c9448` and the loop.
+
+### M5d's block-1 layout, and who touches what
+
+| byte | what | pre-trig loop (every block) | trig path (tail / reader / wtplace) |
+|---|---|---|---|
+| `0x2dd600..0x2dd75c` (+ NOPs to `0x2dda00`) | reader code, 348 B | - | **fetched** (reader) |
+| `0x2dda00..0x2ddd20` (+ NOPs to `0x2dde00`) | type-5 loop, 800 B (wtplace: the adapter, 344 B) | **fetched** (head, next, exit) | fetched (tail; the adapter) |
+| `0x2dde00..0x2dde6c` | save area | 14a stores and loads | 14a |
+| `0x2dde80`, `0x2dde84` | tracks left, this reader block | 14a | 14a |
+| `0x2ddf00..0x2de100` | 16 reader blocks (wtplace: one parameter block) | - | **DAG** stores `DM(k, I4)` (tail); DAG loads (reader); 14a stores (adapter) |
+| `0x2de200..0x2de404` | increment table | - | DAG loads `DM(0/1, I1)` (M5d pitch block; not constpitch) |
+| `0x2de600..0x2de610` (zeros to `0x2df000`) | directory (scratch output at `0x2de800`) | - | 14a magic and count; **DAG** load of the table pointer `DM(0, I1)` |
+| `0x2df000..0x2e3000` | table 0 | - | **DAG** loads `DM(0, I0)` (reader) |
+| `0x2e3000..0x2e7000` | table 1 | - | (TBL1 1 only) |
+
+The pre-trig loop only **fetches code from block 1 and makes 14a (absolute) data
+accesses to block 1**. Every trig path that died adds **DAG (I-register) data
+accesses to block 1 while executing from block 1**:
+
+- constpitch-nocall: `DM(0, I1)` at `0x2de608`, and `DM(k, I4)` into the reader block;
+- the reader: `DM(k, I4)` and `DM(0, I0)`;
+- wtplace: the reader's accesses.
+
+nodir, in block 2, made only 14a accesses to block 2. The pattern is **[M]**, read
+from the listings. That it is the cause is **[I]**.
+
+### The caches, from the primary source [M]
+
+SHARC+ Core Programming Reference Rev 1.4 (May 2021, "includes ADSP-215xx"), chapter
+32, `SHL1C_CFG` (Table 32-2):
+
+| field | bits | DN2 writes | meaning |
+|---|---|---|---|
+| ICAEN, ICAINV | 0, 6 | `0x41` | I-cache on, invalidate |
+| ICASIZ | 2:1 | 0 (`lshift(0, 1)`) | **0 = 128 Kbit = 16 KB** |
+| DMCAEN, DMCAINV | 8, 14 | `0x4100` | DM cache on, invalidate |
+| DMCASIZ | 10:9 | 0 (`lshift(0, 9)`) | **0 = 16 KB** |
+| PMCAEN, PMCAINV | 16, 22 | `0x410000` | PM cache on, invalidate |
+| PMCASIZ | 18:17 | 0 (`lshift(0, 17)`) | **0 = 16 KB** |
+
+- The size codes are 0 = 128 Kbit, 1 = 256 Kbit, 2 = 512 Kbit, 3 = 1 Mbit.
+- "L1 cache uses upper portion of the L1 memory block" (Tables 8-1 and 8-2, note 1).
+  So the DM cache is `0x2ec000..0x2effff` and the PM cache is `0x31c000..0x31ffff`,
+  as decoded before. **Our span is not cache.** The `-low` build was therefore not
+  made.
+- **No later write enlarges the caches.** The only `SHL1C_CFG` (`0x3e000`) writers
+  are `0xb8b93a`, which calls sw `0x1c0272` twice with `R14 | old`, and a read at
+  `0x1c07fb`. The other stock writes, at sw `0x1c00ab` and `0x1c016d`, go to
+  `0x3e002`, the range-enable register (`SHL1C_CFG2`). They clear and set 2-bit
+  range fields for the non-cacheable ranges `0x200fa000..0x200fdfff` and
+  `0x28240000..0x2839ffff`.
+- **The same chapter has the rule we break** (section 8, "Functional Description"):
+  *"Usage of remaining L1 space may be impacted in the following ways: **Code
+  segments should not be placed in block1 and block2 when data caches are enabled in
+  those blocks.** During certain cache operations DMAs/system requests may be
+  delayed."* DN2 enables both data caches. Stock DN2 places no code in block 1 or 2.
+  Its code is in block 3, L2, and the IVT in block 0.
+  - Every Waverider and ONESHOT build runs code from block 1 or block 2.
+  - The mechanism is not documented. That "fetch from a data-cache block plus a
+    DAG access to the same block" is what hangs is **[I]**, from the pattern above.
+
+### The three builds
+
+All three are `scripts/build_waverider_disc_wtplace.py --variant ...` with section 3
+from m5b.
+
+| build | sha256 | section 7 | one change against |
+|---|---|---|---|
+| `waverider-disc-wtplace-b0code_DN2_1.11.syx` | `7147ae53bea0fccbc9e3d9180d9c9845b997d1506a6597895e9fbc5e219b5dd8` | `b04b94d8...` | wtplace: the adapter and the reader are **code in L1 block 0** (byte `0x26f800` / `0x26fa00`, sw `0x137c00` / `0x137d00`, above the system stack `0x26f000..0x26f7f4`), and the CALL goes there. The data stays in block 1 (save area, parameter block, table 0), and so do the DAG accesses |
+| `waverider-disc-wtplace-passthru_DN2_1.11.syx` | `ab618a3a50135ea91aa7d0130484546ad4843794a130ea39f2bd50f127dea3f9` | `b3589de1...` | wtplace: the adapter at the same block-1 address saves and restores the same registers with 14a accesses, then `JUMP 0x1c6d4a` (a tail jump into the stock WaveTone render, whose frame and arguments are untouched). No reader, no DAG access to block 1 |
+| `waverider-disc-wtplace-b2_DN2_1.11.syx` | `e646bb877d10bde5637c90093ac90b8dcb4e63757a97ed57ba48ad0aaf0567a1` | `e3099a76...` | wtplace relocated to M5's block-2 addresses: reader `0x300000`, adapter `0x300400`, save area `0x301000`, parameter block `0x301100`, table 0 `0x302000`. Block 1 is stock |
+
+The top of block 0 (`0x26f7f4..0x270000`) is unloaded in the stock stream.
+`mem_access`, `ptr`, `dataref` and `literals` show no reference into it in byte,
+alias, NW or SW form. The system stack is circular (`B7 = 0x26f000`, `L7 = 0x1fd`
+words, ending at `0x26f7f4`), so I7 cannot leave it. **Limit:** as before, an address
+computed at run time is not excluded.
+
+**Gates** (`scripts/sharc_waverider_wtplace_check.py`, 4 blocks from post-init, trig
+on block 1, strict memory map on):
+
+| build | runner | strict, our PCs | decode (sharcdb, our blocks added) | `dnfw inspect` |
+|---|---|---|---|---|
+| b0code | **PASS**: track-1 tap == constpitch's, 0 / 128, peak 0.993; other tracks and no-WaveTone runs bit-identical to stock | 0 | CALL `0x137d00`; reader jumps re-resolved (`0x137ca6`, `0x137c41`); the adapter calls `0x137c00` | 21/21 ok |
+| passthru | **PASS** (`stock`): all 16 machine taps and end-of-dispatch buffers bit-identical to stock, WaveTone trigged | 0 | CALL `0x16ed00`; `JUMP 0x1c6d4a` at `0x16ed84` | 21/21 ok |
+| b2 | **PASS**: 0 / 128, peak 0.993; others bit-identical | 0 | CALL `0x180200`; reader `0x1800a6`, `0x180041`; the adapter calls `0x180000` | 21/21 ok |
+
+`test/test_waverider_dsp.py`: 12 passed, 5 skipped. The SHARC type-5 gate does not
+apply (no type 5).
+
+**Reading them** (the same protocol as wtplace: track 1 FM Tone playing, track 2
+WaveTone trigged on every step):
+
+| build | a normal / saw sound | the stuck tone | silence |
+|---|---|---|---|
+| **b0code** | **saw at C4, and track 1 plays: code in block 1 was the fault.** The fix is to move all our code out of blocks 1 and 2 (block 0's top, or L2) and keep the data where it is | code location is not it: the reader's DAG accesses to block-1 data, or the reader itself | as the stuck tone |
+| **passthru** | a normal WaveTone: fetching code from block 1 on a trig, with 14a accesses, is survivable, as the pre-trig loop already showed | even this dies: any trig-time execution from block 1 does | as the stuck tone |
+| **b2** | a saw: block 2 is fine and block 1 is special. That contradicts the PRM rule as a sufficient cause, and points at block-1 run-time ownership instead | block 2 fails too once DAG accesses are made there: consistent with the PRM rule | as the stuck tone |
+
+Suggested order: **b0code first**. If it plays, it is the fix's shape. passthru and b2
+then say how general the rule is.

@@ -16,6 +16,7 @@ DK = pathlib.Path("D:/01_Code/Z_Personal/digikit-wt-sharcemu")
 IMG = pathlib.Path("../../../00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 CP = pathlib.Path("../../../00_Resources/02_Builds/waverider-disc-m5c-constpitch_DN2_1.11.syx")
 WTP = pathlib.Path(sys.argv[1])
+EXPECT = sys.argv[2] if len(sys.argv) > 2 else "saw"   # "saw": our reader; "stock": passthru
 dk = m1.Digikit(DK); fx.bind(str(DK / "tools")); m4.IMAGE = IMG
 stock = m1.dn2_section7(IMG)
 sound, machines = m4.init_sound(IMG)
@@ -46,22 +47,25 @@ def tap(r, t):
 
 ok = True
 w = run("wtp", strict=True, t0=4, others={1: 1}, trigger_others=True)
-ours = [v for v in SM.violations if v["pc"] is not None and 0x160000 <= v["pc"] < 0x178000]
+OURS = [(0x137BFA, 0x138000), (0x160000, 0x178000), (0x180000, 0x190000)]   # block 0 top, block 1, block 2 (sw)
+ours = [v for v in SM.violations if v["pc"] is not None and any(a <= v["pc"] < b for a, b in OURS)]
 print("c strict: violations with the PC in our code:", len(ours), [(v["kind"], hex(v["pc"]), hex(v["address"])) for v in ours[:10]])
 print("  all kinds:", collections.Counter(v["kind"] for v in SM.violations))
 ok &= not ours
-c = run("cp", t0=5)
-a, b = tap(w, 1), tap(c, 0)
-mism = sum(bits(x) != bits(y) for x, y in zip(a, b))
-print(f"a wtplace track-1 tap vs constpitch track-0 tap: {mism} mismatches of {len(a)}; "
-      f"peak {max(abs(x) for x in a):.4f}; first {a[:4]}")
-ok &= mism == 0 and len(a) == BLOCKS * 32 and max(abs(x) for x in a) > 0.5
+if EXPECT == "saw":
+    c = run("cp", t0=5)
+    a, b = tap(w, 1), tap(c, 0)
+    mism = sum(bits(x) != bits(y) for x, y in zip(a, b))
+    print(f"a track-1 tap vs constpitch track-0 tap: {mism} mismatches of {len(a)}; "
+          f"peak {max(abs(x) for x in a):.4f}; first {a[:4]}")
+    ok &= mism == 0 and len(a) == BLOCKS * 32 and max(abs(x) for x in a) > 0.5
 s = run("stock", t0=4, others={1: 1}, trigger_others=True)
-m_same = all([blk[t] for t in range(16) if t != 1] == [sblk[t] for t in range(16) if t != 1]
+skip = {1} if EXPECT == "saw" else set()
+m_same = all([blk[t] for t in range(16) if t not in skip] == [sblk[t] for t in range(16) if t not in skip]
              for blk, sblk in zip(w["machine"], s["machine"]))
-e_same = [[x for t, x in enumerate(blk) if t != 1] for blk in w["buffer_bits"]] == \
-         [[x for t, x in enumerate(blk) if t != 1] for blk in s["buffer_bits"]]
-print("b tracks != 1 vs stock: machine tap identical", m_same, "; end-of-dispatch buffers identical", e_same)
+e_same = [[x for t, x in enumerate(blk) if t not in skip] for blk in w["buffer_bits"]] == \
+         [[x for t, x in enumerate(blk) if t not in skip] for blk in s["buffer_bits"]]
+print(f"b tracks {'!= 1' if skip else 'all 16'} vs stock: machine tap identical", m_same, "; end-of-dispatch buffers identical", e_same)
 print("  stock WaveTone track-1 tap peak:", max(abs(x) for x in tap(s, 1)))
 ok &= m_same and e_same
 others = {1: 0, 2: 2, 3: 3, 4: 4}
@@ -69,4 +73,4 @@ d_w, d_s = run("wtp", t0=0, others=others, trigger_others=True), run("stock", t0
 same16 = d_w["buffer_bits"] == d_s["buffer_bits"]
 print("d no WaveTone track: all 16 buffers bit-identical to stock:", same16)
 ok &= same16
-print("WTPLACE CHECK", "PASS" if ok else "FAIL")
+print(f"WTPLACE CHECK ({EXPECT})", "PASS" if ok else "FAIL")
