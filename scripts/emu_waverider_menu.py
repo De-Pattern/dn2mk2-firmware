@@ -36,7 +36,21 @@ plain turn: shows the value, moves nothing in this emulator, stock included),
 play the track), `sync:T` (the track's mirror through `0x4002549c`), `sync`
 (every track through the kit-load sync `0x40025af4`), `frame:NAME` (the ISR, and
 the frame it built, with the mirror and the sixteen sounds beside it),
-`blocks:NAME:MILLIONS[:ENC:DELTA]` (every instruction address run), `mem:VA:N`.
+`blocks:NAME:MILLIONS[:ENC:DELTA]` (every instruction address run), `mem:VA:N`,
+`types` (every track's `sound+0xDE`), `call:VA[:ARG...]` (enter a routine that
+does not run here; ARG is a number, `kit`, `soundT`, `long@VA`, or `argN@VA[-OFF]`
+-- the Nth argument of the last entry to an `--args-at VA`, less OFF -- and d0 is
+reported).
+
+`--watch-types` logs every write to any track's `sound+0xDE` with the step, PC
+and the code addresses on the stack: the persistence check. The selection test
+(fix/waverider-select, `docs/machine-list.md`):
+
+    --watch-types --args-at 0x40031880 --steps "func-src,wait:20,up,up,yes,wait:20,
+      down,down,down,down,yes,wait:20,png:after_yes,types,no,wait:20,func-src,
+      wait:20,png:reopen,no,wait:10,call:0x4003134e:arg1@0x40031880:0,
+      call:0x40041acc:arg1@0x40031880-0xf4:0:1,types,
+      call:0x40041acc:arg1@0x40031880-0xf4:0:1,types,sync,sync:0,frame:f,types"
 """
 
 from __future__ import annotations
@@ -104,6 +118,10 @@ def main() -> int:
     p.add_argument("--json", default=None)
     p.add_argument("--stock", action="store_true", help="install nothing: the control")
     p.add_argument("--regs-at", action="append", default=[], help="record registers at VA")
+    p.add_argument("--args-at", action="append", default=[],
+                   help="keep the long arguments of the last entry to VA (for call: argN@VA)")
+    p.add_argument("--watch-types", action="store_true",
+                   help="log every write to a track's machine type byte (sound+0xDE)")
     a = p.parse_args()
 
     root = pathlib.Path(a.root)
@@ -124,7 +142,7 @@ def main() -> int:
 
     uc = machine.uc
     calls: dict[str, dict] = {}
-    writes, frames, shots, mems = [], {}, {}, {}
+    writes, frames, shots, mems, calls_made = [], {}, {}, {}, []
     built, counted = {"n": 0}, {"n": 0}
 
     def arg(off):
@@ -173,6 +191,14 @@ def main() -> int:
                              for r in "DA" for i in range(8)})
         uc.hook_add(UC_HOOK_CODE, at, begin=int(va, 0), end=int(va, 0))
 
+    # the long arguments of the last entry to each --args-at VA, for `call:` to reuse
+    # (`argN@VA`): MACHINE SEL's model object, say, which no fixed address holds
+    entry_args: dict[int, tuple] = {}
+    for va in a.args_at:
+        def took(uc_, address, size, user):
+            entry_args[address] = tuple(arg(4 * n) & 0xFFFFFFFF for n in range(1, 6))
+        uc.hook_add(UC_HOOK_CODE, took, begin=int(va, 0), end=int(va, 0))
+
     track_getter5: dict[str, int] = {}
 
     def track_getter_exit(uc_, address, size, user):
@@ -188,6 +214,28 @@ def main() -> int:
         writes.append({"sound": f"{a0:#010x}", "type": uc.reg_read(K.UC_M68K_REG_D2) & 0xFF})
     uc.hook_add(UC_HOOK_CODE, setter, begin=SETTER_WRITE, end=SETTER_WRITE)
 
+    # every write to any track's machine type byte `sound+0xDE` in the live kit,
+    # whoever makes it: the setter, a bulk copy, a message handler. The step it
+    # happened in and the code addresses on the stack say who asked.
+    type_writes = []
+    step_now = {"name": "warmup"}
+    type_lo = machine.long(KIT_POINTER) + 52 + 0xDE
+    type_hi = type_lo + SOUND_STRIDE * 15
+
+    def type_write(pc, address, value, size):
+        for t in range(16):
+            at = type_lo + SOUND_STRIDE * t
+            if address <= at < address + size and len(type_writes) < 256:
+                v = (value >> (8 * (address + size - 1 - at))) & 0xFF
+                sp = uc.reg_read(K.UC_M68K_REG_A7)
+                stack = struct.unpack(">24I", bytes(uc.mem_read(sp, 96)))
+                type_writes.append({"step": step_now["name"], "pc": f"{pc:#010x}", "track": t,
+                                    "value": v - 256 if v > 127 else v, "size": size,
+                                    "stack": [f"{x:#010x}" for x in stack
+                                              if 0x40000400 <= x < 0x40310000][:8]})
+    if a.watch_types:
+        machine.watch_writes(type_lo - 3, type_hi, type_write)
+
     mirror_writes = []
 
     def mirror(pc, address, value, size):
@@ -202,6 +250,8 @@ def main() -> int:
 
     def count(uc_, address, size, user):
         counted["n"] += 1
+
+    returned = {"d0": 0}
 
     def guest_call(fn, *args, limit=5_000_000):
         """Call FN in the paused machine and put every register back, as digikit's
@@ -229,6 +279,7 @@ def main() -> int:
             if stepper is not None:
                 stepper.left = 0
             uc.hook_del(h)
+            returned["d0"] = uc.reg_read(K.UC_M68K_REG_D0)
             for r, v in zip(regs, saved):
                 uc.reg_write(r, v)
             uc.reg_write(K.UC_M68K_REG_PC, saved_pc)
@@ -237,6 +288,7 @@ def main() -> int:
     panel = Panel(machine, png_dir=str(png_dir))
     panel.settle(a.warmup)
     for step in [s.strip() for s in a.steps.split(",") if s.strip()]:
+        step_now["name"] = step
         if step == "func-src":
             panel.hold(FUNC, 3_000_000)
             panel.tap(SRC, after=3_000_000)
@@ -281,6 +333,39 @@ def main() -> int:
             png_dir.mkdir(parents=True, exist_ok=True)
             (png_dir / f"{name}.blocks.txt").write_text("\n".join(f"{x:08x}" for x in sorted(seen)))
             print(f"  blocks {name}: {len(seen)} distinct")
+        elif step.startswith("call:"):
+            # call:VA[:ARG...] -- a routine that does not run here, entered directly.
+            # ARG: a number, `kit` (the live kit), `soundT` (track T's sound), or
+            # `long@VA` (the long stored at VA).
+            parts = step.split(":")
+            args = []
+            for x in parts[2:]:
+                if x == "kit":
+                    args.append(machine.long(KIT_POINTER))
+                elif x.startswith("sound"):
+                    args.append(machine.long(KIT_POINTER) + 52 + SOUND_STRIDE * int(x[5:]))
+                elif x.startswith("long@"):
+                    args.append(machine.long(int(x[5:], 0)))
+                elif x.startswith("arg") and "@" in x:
+                    # argN@VA, or argN@VA-OFF: an object that argument points into
+                    n, va = x[3:].split("@")
+                    va, _, off = va.partition("-")
+                    args.append((entry_args[int(va, 0)][int(n) - 1] - int(off or "0", 0)) & 0xFFFFFFFF)
+                else:
+                    args.append(int(x, 0) & 0xFFFFFFFF)
+            ran = guest_call(int(parts[1], 0), *args)
+            d0 = returned["d0"]
+            calls_made.append({"fn": parts[1], "args": [f"{v:#x}" for v in args], "ran": ran,
+                               "d0": d0 - (1 << 32) if d0 & 0x80000000 else d0})
+            print(f"  call {parts[1]}({', '.join(f'{v:#x}' for v in args)}): {ran:,} instructions, "
+                  f"d0 = {calls_made[-1]['d0']}")
+        elif step == "types":
+            # every track's machine type byte, as the sound holds it
+            kit = machine.long(KIT_POINTER)
+            got = [struct.unpack(">b", machine.read(kit + 52 + SOUND_STRIDE * t + 0xDE, 1))[0]
+                   for t in range(16)]
+            mems[f"types@{len(mems)}"] = got
+            print(f"  types {got}")
         elif step.startswith("mem:"):
             _, va, n = step.split(":")
             mems[va] = machine.read(int(va, 0), int(n, 0)).hex()
@@ -328,7 +413,8 @@ def main() -> int:
               "calls": calls, "type_reads": type_reads, "getter_type5_callers": getter5,
               "track_getter_type5_callers": track_getter5, "regs_at": regs_at,
               "setter_writes": writes,
-              "mirror_type_writes": mirror_writes,
+              "mirror_type_writes": mirror_writes, "type_writes": type_writes,
+              "direct_calls": calls_made,
               "frames": frames, "memory": mems}
     print(json.dumps(result, indent=1))
     if a.json:

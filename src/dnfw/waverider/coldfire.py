@@ -7,7 +7,8 @@ ColdFire's job is smaller and is only this:
 1. **offer it** -- MACHINE SEL lists the machine types from a static list
    (`{0, 2, 1, 3, 4}` at `0x401ddd58`, copied into a `std::vector` by
    `0x4004d8b6`) and draws a divider wherever the group `0x40059274(type)`
-   changes. The list gains a 5 before MIDI, and 5 joins the synth group;
+   changes. The list gains a 5 before MIDI, and 5 (with 6, reserved for
+   ONESHOT) is a group of its own, so it reads synths | WAVERIDER | MIDI;
 2. **name it** -- the three name accessors (`0x400dc332` long, `0x400dc358`
    short, `0x400dc37e` the third column) are bounded at 4 and read 12-byte rows
    at `0x401f77f4`. The 192 zero bytes after that table are a live 16-long
@@ -101,6 +102,7 @@ GUARDS = (
     (0x40027582, "37400092", "... and writes it at frame offset 148 + 2t"),
     (0x4005B35C, "2a1b", "MACHINE SEL walks the list..."),
     (0x4005B364, "4eb940059274", "... and asks the group of each type"),
+    (0x4005B6C2, "4eb94003134e", "MACHINE SEL's current machine (view +412) is 0x4003134e"),
 )
 
 
@@ -133,23 +135,33 @@ def _long(v: int) -> bytes:
     return struct.pack(">I", v & 0xFFFFFFFF)
 
 
+SAMPLE_GROUP = 3                        # the sample-based machines: Waverider (5), ONESHOT (6)
+SAMPLE_TYPES_LAST = 6                   # 6 is reserved for ONESHOT; no row for it in this build
+
+# MACHINE SEL (and the second list at 0x40059cdc) inserts a divider row -- an
+# unlabelled row of value -1, drawn as dots -- wherever this group changes. The
+# groups are only compared for equality, so a third one is just another section.
 GROUP_SOURCE = f"""
-| group(type), rewritten in place at {GROUP_FN:#010x}: MIDI (4) -> 2, the synths
-| 0..3 and Waverider ({NEW_TYPE}) -> 1, anything else 0 (stock: 0..3 -> 1, 4 -> 2).
-    move.l  %sp@(4),%d0
-    blt.s   2f
-    moveq   #4,%d1
-    cmp.l   %d0,%d1
-    beq.s   3f
-    moveq   #{NEW_TYPE},%d1
-    cmp.l   %d0,%d1
-    bcs.s   2f
+| group(type), rewritten in place at {GROUP_FN:#010x}: the synths 0..3 -> 1, MIDI (4)
+| -> 2, the sample machines {NEW_TYPE}..{SAMPLE_TYPES_LAST} -> {SAMPLE_GROUP}, anything else 0
+| (stock: 0..3 -> 1, 4 -> 2). d0 holds the answer to each test before it is made,
+| and every branch follows the instruction that set its flags: `moveq` clears C,
+| so it never sits between a `subq` and its `bcs` (the first version of this did,
+| and put the synths in group 0 -- the emulator caught it). Borrows are unsigned,
+| after the sign test. Callers read the low byte.
+    move.l  %sp@(4),%d1
+    blt.s   0f
     moveq   #1,%d0
-    rts
-2:  clr.b   %d0
-    rts
-3:  moveq   #2,%d0
-    rts
+    subq.l  #4,%d1
+    bcs.s   9f
+    moveq   #2,%d0
+    tst.l   %d1
+    beq.s   9f
+    moveq   #{SAMPLE_GROUP},%d0
+    subq.l  #{SAMPLE_TYPES_LAST - 4},%d1
+    bls.s   9f
+0:  moveq   #0,%d0
+9:  rts
 """
 
 
@@ -275,6 +287,23 @@ IDENTITY_SITES = (
     (0x400D675E, "4eb9", "an incoming machine type, compared with the track's before commit"),
 )
 
+# -- 7b. getMachineType(model, track) 0x4003134e: the real type -------------------------
+# The model-level question -- "what machine does track t have?" -- is 0x4003134e,
+# which finds the track and ends in a tail `jmp 0x4004b7f2`. A `jmp`, not a `jsr`,
+# so the identity search above never saw it, and the answer came back canonical:
+# a Waverider track read as WaveTone to every one of its twelve callers. Four of
+# them are MACHINE SEL: the machine it marks and puts the cursor on (view +412,
+# set at open, after every commit and on every model change). So YES on WAVERIDER
+# wrote 5, and the view at once re-read 1 and marked WAVETONE; a second YES found
+# 1 != 5 and committed 5 again; reopening marked WAVETONE (hardware, 2026-09-27;
+# `out/fix-select/`, emulator). Three more re-commit the type they read: the track
+# swap `0x40041bca`, and the two "restore the old machine" paths `0x400a7f92` /
+# `0x400b15e8` -- each would turn a Waverider track into a WaveTone one for real.
+# The rest ask "is it MIDI?" (compare 4), or hand the type to the SYN overview and
+# page accessors (0x400c248e, 0x400c24ee), which read 5 as WaveTone's rows already.
+# So the tail jump goes to raw_track, and all twelve see 5.
+MODEL_TRACK_TYPE_JMP = 0x40031394      # jmp 0x4004b7f2, the tail of 0x4003134e
+
 # -- 6. the per-machine UI tables (0x42432ad4, 0x42432b24): the SYN pages ---------------
 # `pages(type)`, `page(type, n)` and `overview(type)` read five-row tables built
 # at boot and fall back to an empty page above 4 -- which is what a type-5 track's
@@ -354,16 +383,18 @@ def compose(stock: bytes, assemble) -> dict:
     edit(DATA_CAVE[0], blob, "Waverider's data: the six-row name table, the six attribute "
                              "rows (the sixth is WaveTone's), the six-entry MACHINE SEL list")
 
-    # 1. the list
-    edit(LIST_ALLOC, bytes.fromhex("48780018"), "MACHINE SEL list: storage for 6 longs",
-         bytes.fromhex("48780014"))
-    edit(LIST_END, bytes.fromhex("4879") + _long(layout["list"] + 4 * len(LIST_NEW)),
+    # 1. the list: its length is LIST_NEW's, so a seventh machine is one entry there
+    n = len(LIST_NEW)
+    edit(LIST_ALLOC, bytes.fromhex("4878") + struct.pack(">H", 4 * n),
+         f"MACHINE SEL list: storage for {n} longs", bytes.fromhex("48780014"))
+    edit(LIST_END, bytes.fromhex("4879") + _long(layout["list"] + 4 * n),
          "MACHINE SEL list: the copy's end", bytes.fromhex("4879") + _long(LIST_STOCK_VA + 20))
-    edit(LIST_CAP, bytes.fromhex("41e80018"), "MACHINE SEL list: the vector's capacity, 6 longs",
-         bytes.fromhex("41e80014"))
+    edit(LIST_CAP, bytes.fromhex("41e8") + struct.pack(">H", 4 * n),
+         f"MACHINE SEL list: the vector's capacity, {n} longs", bytes.fromhex("41e80014"))
     edit(LIST_BEGIN, bytes.fromhex("4879") + _long(layout["list"]),
          "MACHINE SEL list: the copy's start", bytes.fromhex("4879") + _long(LIST_STOCK_VA))
-    edit(GROUP_FN, group_function(assemble), "the MACHINE SEL group: type 5 joins the synths (1)",
+    edit(GROUP_FN, group_function(assemble), f"the MACHINE SEL group: types {NEW_TYPE}.."
+         f"{SAMPLE_TYPES_LAST} are a section of their own ({SAMPLE_GROUP}), divided off like MIDI",
          GROUP_STOCK)
 
     # 2. the names
@@ -408,6 +439,12 @@ def compose(stock: bytes, assemble) -> dict:
         _need(content, op_va, bytes.fromhex(op), f"{what}: the instruction")
         edit(op_va + 2, _long(layout["raw_track"]), f"{what}: asks for the real type",
              _long(TRACK_TYPE_FN))
+
+    # 7b. getMachineType(model, track): the real type, for MACHINE SEL and the re-commits
+    _need(content, MODEL_TRACK_TYPE_JMP, bytes.fromhex("4ef9"), "0x4003134e's tail jump")
+    edit(MODEL_TRACK_TYPE_JMP + 2, _long(layout["raw_track"]),
+         "getMachineType(model, track) 0x4003134e: the real type (MACHINE SEL's marker and "
+         "cursor, the track swap, the machine restores)", _long(TRACK_TYPE_FN))
 
     # 8. the sound's "is this parameter mine?"
     _need(content, VALID_SITE + len(VALID_STOCK), VALID_NEXT, "the ownership test's record-page call")

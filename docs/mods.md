@@ -638,3 +638,32 @@ SKETCHPAD opens (owner).
     dnfw mods apply <image> --mod fxmod --mod lfo4 --mod songguard -o out.syx
 
 **Browser:** not yet.
+
+## Mod 11: `oneshot` -- the Digitakt II's sample machine, from the user's own DT2 file
+
+**Status: built and emulator-gated 2026-09-27; not yet on the instrument.** The
+first transplant build: `docs/dt2-machine-port.md` ("The ColdFire half", "The
+first build", and the hardware test).
+
+    dnfw mods apply <Digitone II 1.11> --mod oneshot \
+        --donor <Digitakt II 1.16 .syx> --sample <WAV> -o out/oneshot.syx
+
+MACHINE SEL offers ONESHOT after SWARMER (machine type 5). Its SYN page is the
+DT2's SRC page -- TUNE, PLAY, SAMP, STRT, LEN, LOOP, LEV, the DT2's records with
+the DT2's value formatters -- drawn by the DN2's own page view. The DSP plays it
+with the DT2's own voice render, relocated into L1 block 2, driven by our
+adapter. **One sample**: the WAV the user names (48 kHz mono after conversion, at
+most 0.49 s). No browser, no +Drive, no pool; LEV is shown and saved but not
+applied; every trig note plays at TUNE's pitch.
+
+**Two firmware inputs.** Nothing of the DT2's is committed: the render, its
+tables, the eight records, their strings, the page's knob list and the machine's
+name are read from `--donor` at apply time, each behind a SHA-256. What is
+committed is ours: the ColdFire shims (`oneshot_code.json`, from
+`scripts/gen_oneshot_code.py`), the DSP adapter (`csrc/oneshot/sharc/oneshot5.json`,
+from `scripts/gen_oneshot_sharc.py`), and the plans.
+
+**Exclusive** with waverider (the same machine type and entry sites) and with
+every mod that uses the startup loader or its chunk address (lfo4, lfowaves,
+bootscreen): it declares both sections whole. Moving to type 6 after Waverider M5
+is the plan's step 2.

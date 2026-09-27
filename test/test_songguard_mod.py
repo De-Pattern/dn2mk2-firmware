@@ -73,8 +73,11 @@ def test_refuses_an_image_already_guarded(dn2_111, applied):
 
 def test_shares_no_byte_with_any_mod(dn2_111):
     from dnfw.cli.mods import REGISTRY
+    # oneshot declares sections 3 and 7 whole, to exclude itself from every other
+    # mod until it has its own ledger; that is a choice of oneshot's, not a byte
+    # songguard shares with it.
     named = [(mid, list(mod.extents(dn2_111))) for mid, mod in REGISTRY.items()
-             if mid != "transients"]
+             if mid not in ("transients", "oneshot")]
     ours = [n for n in named if n[0] == songguard.ID]
     for other in named:
         if other[0] != songguard.ID:

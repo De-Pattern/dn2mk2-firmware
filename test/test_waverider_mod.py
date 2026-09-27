@@ -87,6 +87,61 @@ def test_the_stored_sound_load_keeps_type_5(applied):
     assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("7407")
 
 
+def test_the_group_function_gives_the_sample_machines_their_own_section(applied):
+    # run the rewritten 0x40059274 on every type: synths 1, MIDI 2, 5 and 6 3, else 0
+    main = applied.payloads[3]
+    code = at(main, CF.GROUP_FN, len(CF.GROUP_STOCK))
+    got = {t: _run_group(code, t) for t in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 100)}
+    assert got == {-1: 0, 0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 3, 6: 3, 7: 0, 100: 0}
+
+
+def _run_group(code: bytes, t: int) -> int:
+    """A reading of the group function's own bytes, instruction by instruction -- the
+    handful of opcodes it is made of, and nothing else (anything else fails)."""
+    d0, d1, pc = 0, 0, 0
+    n = z = c = False
+    while True:
+        op = struct.unpack_from(">H", code, pc)[0]
+        if op == 0x222F:                                  # move.l %sp@(d16),%d1
+            d1 = t & 0xFFFFFFFF
+            n, z = t < 0, t == 0
+            pc += 4
+        elif op & 0xFF00 == 0x7000:                       # moveq #k,%d0: N, Z set; C cleared
+            d0 = op & 0xFF
+            n, z, c = bool(d0 & 0x80), d0 == 0, False
+            pc += 2
+        elif op == 0x4A81:                                # tst.l %d1: N, Z set; C cleared
+            n, z, c = bool(d1 & 0x80000000), d1 == 0, False
+            pc += 2
+        elif op & 0xF1FF == 0x5181:                       # subq.l #k,%d1
+            k = (op >> 9) & 7 or 8
+            c, d1 = d1 < k, (d1 - k) & 0xFFFFFFFF
+            z = d1 == 0
+            pc += 2
+        elif op == 0x4E75:                                # rts
+            return d0 & 0xFF
+        elif op >> 8 in (0x6D, 0x67, 0x65, 0x63):        # blt, beq, bcs, bls (.s)
+            take = {0x6D: n, 0x67: z, 0x65: c, 0x63: c or z}[op >> 8]
+            disp = (op & 0xFF) - 256 if op & 0x80 else op & 0xFF
+            pc += 2 + (disp if take else 0)
+        else:
+            raise AssertionError(f"unexpected opcode {op:04x} at +{pc}")
+
+
+def test_machine_sel_asks_for_the_real_type(applied, stock):
+    # MACHINE SEL marks and places its cursor on 0x4003134e(model, track), which ends in
+    # a tail jump to getMachineType(track). That jump must reach raw_track (the real type),
+    # not the canonicalising getMachineType: otherwise YES on WAVERIDER marks WAVETONE.
+    main = applied.payloads[3]
+    raw = waverider.SPEC["layout"]["raw_track"]
+    assert at(stock, CF.MODEL_TRACK_TYPE_JMP, 6) == bytes.fromhex("4ef94004b7f2")
+    assert at(main, CF.MODEL_TRACK_TYPE_JMP, 6) == bytes.fromhex("4ef9") + struct.pack(">I", raw)
+    for site in (0x4005A5C6, 0x4005A632, 0x4005A9C8, 0x4005B6C2):     # MACHINE SEL's callers
+        assert at(main, site, 6) == bytes.fromhex("4eb94003134e")
+    # ... and raw_track is still the stock getMachineType's body, reading sound+0xDE
+    assert at(main, raw, 4) == bytes.fromhex("2f0a246f")
+
+
 def test_every_edit_replaces_stock_bytes(stock):
     for e in waverider.SPEC["edits"]:
         assert at(stock, e["va"], len(e["stock"]) // 2).hex() == e["stock"], e["what"]

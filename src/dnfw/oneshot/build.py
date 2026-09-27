@@ -1,17 +1,22 @@
 """The DN2 section 7 for the ONESHOT port: bytes in, bytes out.
 
-    stream, report = section7(dn2_section7, plan, adapter, samples)
+    stream, report = section7(dn2_section7, plan, adapter, samples, entry_jump=...)
 
 It adds, as boot-stream blocks spliced before the final block (the Milestone 4
-mechanism, `bootstream.insert_before_final`):
+mechanism, `bootstream.insert_before_final`), all in **L1 block 2** above
+Waverider M5's spans (`docs/waverider-m5-dsp.md`, correction 1: the M1-M4 spans
+at DM 0x28xxxx-0x29xxxx were in the gap between blocks 0 and 1, not memory):
 
 - the transplanted render (`plan.blocks()`: the user's own DT2 bytes, relocated);
-- our adapter (`csrc/oneshot/sharc/oneshot5.asm`) at sw 0x181000;
+- our adapter (`csrc/oneshot/sharc/oneshot5.asm`) at sw 0x185800;
 - our step table and the sample bank with its directory;
 - a zero-fill block for the 16 voice records;
 
-and two guarded one-word patches that admit machine type 5, Milestone 3/4's:
-the DSP type clamp `min(R2, 4)` -> `min(R2, 5)` and the frame lookup `[5] = 5`.
+and two guarded patches, Waverider M5's: the entry `JUMP 0x185800` + the
+firmware's 16-bit NOP over `i5=dm(-0x18,i6); r10=dm(-0x22,i6)` at sw 0x1c9448
+(the adapter re-executes both before it jumps back to 0x1c944c), and the frame
+lookup `0x25d748[5] = 5`. The clamp `min(R2, 4)` at 0x1c294c stays stock: it is
+not the machine clamp (M5, correction 2), and #133's raising of it is withdrawn.
 Nothing is written to disk here; `report` carries no donor bytes.
 """
 
@@ -25,14 +30,18 @@ from ..transplant import sharc
 from ..transplant.plan import Plan, loaded_bytes
 from . import bank, params
 
-ADAPTER_SW = 0x181000
-VARS_DM, VARS_BYTES = 0x295900, 0x100
-RECORDS_DM, RECORD_STRIDE, TRACKS = 0x296000, 0x1D8, 16
-STEPS_DM = 0x297E00
-BANK_DM, BANK_END = 0x298800, 0x2A0000
+# L1 block 2 (byte 0x300000..0x320000; M5 uses 0x300000..0x30a000, and its top
+# 16 KB, 0x31c000.., is left alone in case a cache is carved there).
+BLOCK2 = (0x30A000, 0x31C000)
+ADAPTER_SW = 0x185800                  # PM byte 0x30b000
+VARS_DM, VARS_BYTES = 0x30C000, 0x100
+RECORDS_DM, RECORD_STRIDE, TRACKS = 0x30E000, 0x1D8, 16
+STEPS_DM = 0x310000
+BANK_DM, BANK_END = 0x310800, 0x31C000
 
-CLAMP_SW = 0x1C294A                    # `R0 = 0x4` feeding min(R2, R0) at 0x1c294c
-CLAMP_FROM, CLAMP_TO = bytes.fromhex("800f0400"), bytes.fromhex("800f0500")
+ENTRY_SW = 0x1C9448                    # i5=dm(-0x18,i6); r10=dm(-0x22,i6)
+ENTRY_STOCK = bytes.fromhex("089ce80a089c5e05")
+NOP16 = bytes.fromhex("0100")          # the firmware's own 16-bit NOP (sw 0x1c9447)
 LOOKUP_DM = 0x25D748 + 4 * 5           # frame machine nibble 5 -> DSP type (stock: 0)
 
 
@@ -40,8 +49,8 @@ def record_address(track: int) -> int:
     return RECORDS_DM + RECORD_STRIDE * track
 
 
-def section7(dn2: bytes, plan: Plan, adapter: bytes, samples: list[list[int]]
-             ) -> tuple[bytes, dict]:
+def section7(dn2: bytes, plan: Plan, adapter: bytes, samples: list[list[int]], *,
+             entry_jump: bytes) -> tuple[bytes, dict]:
     bank_bytes, entries = bank.build(BANK_DM, samples, limit=BANK_END - BANK_DM)
     ours = [("adapter", sharc.code_address(ADAPTER_SW), adapter),
             ("step table", sharc.data_address(STEPS_DM), params.step_table()),
@@ -57,14 +66,22 @@ def section7(dn2: bytes, plan: Plan, adapter: bytes, samples: list[list[int]]
         placement.append({"what": f"transplant: {sp.name}", "load_address": f"{at:#010x}",
                           "bytes": len(payload), "whose": "the user's DT2 file, relocated"})
     _no_overlap(placement)
+    for p in placement:
+        lo = int(p["load_address"], 16) - sharc.SW_ALIAS
+        if not (BLOCK2[0] <= lo and lo + p["bytes"] <= BLOCK2[1]):
+            raise ValueError(f"{p['what']} at DM {lo:#x}+{p['bytes']:#x} leaves ONESHOT's part "
+                             f"of L1 block 2 ({BLOCK2[0]:#x}..{BLOCK2[1]:#x})")
+    entry = entry_jump + NOP16
+    if len(entry) != len(ENTRY_STOCK):
+        raise ValueError(f"the entry patch is {len(entry)} bytes, not {len(ENTRY_STOCK)}")
 
     extra = b"".join(bootstream.block(at, payload) for at, payload in plan.blocks())
     extra += b"".join(bootstream.block(at, payload) for _, at, payload in ours)
     extra += b"".join(bootstream.block(at, flags=bootstream.FLAG_FILL, count=n) for _, at, n in fills)
     stream = bytearray(bootstream.insert_before_final(dn2, extra))
 
-    patches = [_patch(stream, "type clamp min(R2,4) -> min(R2,5)", sharc.code_address(CLAMP_SW),
-                      CLAMP_FROM, CLAMP_TO),
+    patches = [_patch(stream, f"entry JUMP {ADAPTER_SW:#x} + NOP at sw {ENTRY_SW:#x}",
+                      sharc.code_address(ENTRY_SW), ENTRY_STOCK, entry),
                _patch(stream, "frame machine lookup [5] = 5", sharc.data_address(LOOKUP_DM),
                       struct.pack("<I", 0), struct.pack("<I", 5))]
     stream = bytes(stream)
