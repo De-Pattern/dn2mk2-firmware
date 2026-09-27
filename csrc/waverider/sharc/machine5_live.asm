@@ -9,7 +9,7 @@
 // Entered by the JUMP the build writes at sw 0x1c9448 (after the Swarmer render loop
 // in sw 0x1c8ef1, before the per-track chain), once per block. It scans the 16 track
 // records and, for every track whose machine type is 5, fills that track's reader
-// block and calls wr_render5 (reader_m5.asm, sw 0x180000) into the track buffer:
+// block and calls wr_render5 (reader_m5.asm, sw 0x16eb00) into the track buffer:
 //
 //   SLOT  WaveTone's TBL1 (param 27), read from the frame image the unpack copied to
 //         0x25c48c (offset 222 + 146t): 0x0000 or 0x0080 -- the ColdFire sends
@@ -30,21 +30,22 @@
 // A directory without the magic renders nothing (the track buffer is left as the
 // dispatch left it).
 //
-// PLACEMENT IS FIXED: this code loads at PM sw 0x180200 (L1 block 2, byte 0x300400).
+// PLACEMENT IS FIXED: this code loads at PM sw 0x16ed00 (L1 block 1, byte 0x2dda00).
 // The absolute targets below are written for that address from selas's own symbol
 // table (a labelled reassembly); the gate checks the decoder lands on every
 // assembler boundary.
 //
-// DM (byte addresses, L1 block 2; every span is claimed by a boot block the build
-// ships, zero-filled or data):
-//   0x301000  save area, 28 words: R0-R15, I0-I5, I12, M0-M4
-//   0x301080  tracks left, 16 - t (the loop counter; every per-track address is
+// DM (byte addresses, L1 block 1's free tail -- Milestone 5c; M5 used L1 block 2,
+// which silenced the instrument, docs/waverider-dsp-silence.md; every byte of the
+// region is written by a boot block the build ships, zeros or data):
+//   0x2dde00  save area, 28 words: R0-R15, I0-I5, I12, M0-M4
+//   0x2dde80  tracks left, 16 - t (the loop counter; every per-track address is
 //             computed from it, so no pointer has to survive the reader call)
-//   0x301084  this track's reader block, 0x301100 + 32 * t
-//   0x301100  16 reader blocks of 8 words: wr_render's six (table, phase, inc, pos,
+//   0x2dde84  this track's reader block, 0x2ddf00 + 32 * t
+//   0x2ddf00  16 reader blocks of 8 words: wr_render's six (table, phase, inc, pos,
 //             count, out), then two spare words. This loop writes all but phase.
-//   0x301400  the increment table, 129 floats
-//   0x301800  directory: +0 magic 'WRT1' (0x57525431), +4 count, +8 table[0], ...
+//   0x2de200  the increment table, 129 floats
+//   0x2de600  directory: +0 magic 'WRT1' (0x57525431), +4 count, +8 table[0], ...
 //
 // Only forms the firmware itself uses: no DAG1 M0-M3 in a memory access and no
 // pre-modify read outside a DO loop (reader_m5.asm says why); addresses are byte
@@ -54,39 +55,39 @@
 
 .GLOBAL wr_type5v.;
 wr_type5v.:
-      DM(0x301000) = R0;
-      DM(0x301004) = R1;
-      DM(0x301008) = R2;
-      DM(0x30100c) = R3;
-      DM(0x301010) = R4;
-      DM(0x301014) = R5;
-      DM(0x301018) = R6;
-      DM(0x30101c) = R7;
-      DM(0x301020) = R8;
-      DM(0x301024) = R9;
-      DM(0x301028) = R10;
-      DM(0x30102c) = R11;
-      DM(0x301030) = R12;
-      DM(0x301034) = R13;
-      DM(0x301038) = R14;
-      DM(0x30103c) = R15;
-      DM(0x301040) = I0;
-      DM(0x301044) = I1;
-      DM(0x301048) = I2;
-      DM(0x30104c) = I3;
-      DM(0x301050) = I4;
-      DM(0x301054) = I5;
-      DM(0x301058) = I12;
-      DM(0x30105c) = M0;
-      DM(0x301060) = M1;
-      DM(0x301064) = M2;
-      DM(0x301068) = M3;
-      DM(0x30106c) = M4;
+      DM(0x2dde00) = R0;
+      DM(0x2dde04) = R1;
+      DM(0x2dde08) = R2;
+      DM(0x2dde0c) = R3;
+      DM(0x2dde10) = R4;
+      DM(0x2dde14) = R5;
+      DM(0x2dde18) = R6;
+      DM(0x2dde1c) = R7;
+      DM(0x2dde20) = R8;
+      DM(0x2dde24) = R9;
+      DM(0x2dde28) = R10;
+      DM(0x2dde2c) = R11;
+      DM(0x2dde30) = R12;
+      DM(0x2dde34) = R13;
+      DM(0x2dde38) = R14;
+      DM(0x2dde3c) = R15;
+      DM(0x2dde40) = I0;
+      DM(0x2dde44) = I1;
+      DM(0x2dde48) = I2;
+      DM(0x2dde4c) = I3;
+      DM(0x2dde50) = I4;
+      DM(0x2dde54) = I5;
+      DM(0x2dde58) = I12;
+      DM(0x2dde5c) = M0;
+      DM(0x2dde60) = M1;
+      DM(0x2dde64) = M2;
+      DM(0x2dde68) = M3;
+      DM(0x2dde6c) = M4;
 
       I3 = 0x25566c;                    // &track[0].machine (0x2554b8 + 0x1b4)
       I5 = 0x254a60;                    // &track_buffer[0]
       R0 = 16;
-      DM(0x301080) = R0;                // tracks left, 16 - t
+      DM(0x2dde80) = R0;                // tracks left, 16 - t
 
 .GLOBAL wr_t5v_loop.;
 wr_t5v_loop.:
@@ -96,20 +97,20 @@ wr_t5v_loop.:
       R3 = DM(I5, M6);                  // this track's buffer; I5 -> next
       R4 = 5;
       COMP(R2, R4);
-      IF NE JUMP 0x180314;              // -> wr_t5v_next.
-      R4 = DM(0x301800);                // the baked directory's magic
+      IF NE JUMP 0x16ee14;              // -> wr_t5v_next.
+      R4 = DM(0x2de600);                // the baked directory's magic
       R2 = 0x57525431;
       COMP(R4, R2);
-      IF NE JUMP 0x180314;              // no directory: render nothing
+      IF NE JUMP 0x16ee14;              // no directory: render nothing
 
       // t, and from it every per-track address (no pointer survives the reader call)
-      R0 = DM(0x301080);
+      R0 = DM(0x2dde80);
       R1 = 16;
       R9 = R1 - R0;                     // t
       R2 = LSHIFT R9 BY 5;              // 32 bytes a reader block
-      R12 = 0x301100;
+      R12 = 0x2ddf00;
       R2 = R12 + R2;
-      DM(0x301084) = R2;
+      DM(0x2dde84) = R2;
       I4 = R2;                          // this track's reader block
 
       // WAV1 and TBL1 (params 26, 27) from the frame image the unpack copied to
@@ -140,11 +141,11 @@ wr_t5v_loop.:
 
       // SLOT = TBL1 >> 7, through the directory
       R1 = LSHIFT R5 BY -7;
-      R2 = DM(0x301804);                // the directory's count
+      R2 = DM(0x2de604);                // the directory's count
       COMPU(R1, R2);
       IF GE R1 = R1 - R1;               // out of range -> slot 0
       R1 = LSHIFT R1 BY 2;
-      R12 = 0x301808;
+      R12 = 0x2de608;
       R1 = R12 + R1;
       I1 = R1;
       R2 = DM(0, I1);                   // directory.table[slot]
@@ -170,7 +171,7 @@ wr_t5v_loop.:
       F1 = FLOAT R0;
       F8 = F8 - F1;                     // fr, 0 <= fr < 1
       R0 = LSHIFT R0 BY 2;
-      R12 = 0x301400;                   // &T[0]
+      R12 = 0x2de200;                   // &T[0]
       R0 = R12 + R0;
       I1 = R0;                          // &T[k]
       R1 = DM(0, I1);                   // T[k]
@@ -181,50 +182,50 @@ wr_t5v_loop.:
       R1 = TRUNC F1;
       DM(2, I4) = R1;                   // inc
 
-      R0 = DM(0x301024);                // the dispatch's R9: the block size
+      R0 = DM(0x2dde24);                // the dispatch's R9: the block size
       DM(4, I4) = R0;                   // count
       DM(5, I4) = R3;                   // out: the track buffer
-      R4 = DM(0x301084);                // wr_render5's argument: the reader block
-      CJUMP 0x180000 (DB);              // wr_render5(R4 = reader block)
+      R4 = DM(0x2dde84);                // wr_render5's argument: the reader block
+      CJUMP 0x16eb00 (DB);              // wr_render5(R4 = reader block)
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0x180313;            // return address - 1: wr_t5v_next. - 1
+      DM(I7, M7) = 0x16ee13;            // return address - 1: wr_t5v_next. - 1
 
 .GLOBAL wr_t5v_next.;
 wr_t5v_next.:
-      R0 = DM(0x301080);
+      R0 = DM(0x2dde80);
       R1 = 1;
       R0 = R0 - R1;
-      DM(0x301080) = R0;
-      IF NE JUMP 0x18025f;              // -> wr_t5v_loop.
+      DM(0x2dde80) = R0;
+      IF NE JUMP 0x16ed5f;              // -> wr_t5v_loop.
 
-      R0 = DM(0x301000);
-      R1 = DM(0x301004);
-      R2 = DM(0x301008);
-      R3 = DM(0x30100c);
-      R4 = DM(0x301010);
-      R5 = DM(0x301014);
-      R6 = DM(0x301018);
-      R7 = DM(0x30101c);
-      R8 = DM(0x301020);
-      R9 = DM(0x301024);
-      R10 = DM(0x301028);
-      R11 = DM(0x30102c);
-      R12 = DM(0x301030);
-      R13 = DM(0x301034);
-      R14 = DM(0x301038);
-      R15 = DM(0x30103c);
-      I0 = DM(0x301040);
-      I1 = DM(0x301044);
-      I2 = DM(0x301048);
-      I3 = DM(0x30104c);
-      I4 = DM(0x301050);
-      I5 = DM(0x301054);
-      I12 = DM(0x301058);
-      M0 = DM(0x30105c);
-      M1 = DM(0x301060);
-      M2 = DM(0x301064);
-      M3 = DM(0x301068);
-      M4 = DM(0x30106c);
+      R0 = DM(0x2dde00);
+      R1 = DM(0x2dde04);
+      R2 = DM(0x2dde08);
+      R3 = DM(0x2dde0c);
+      R4 = DM(0x2dde10);
+      R5 = DM(0x2dde14);
+      R6 = DM(0x2dde18);
+      R7 = DM(0x2dde1c);
+      R8 = DM(0x2dde20);
+      R9 = DM(0x2dde24);
+      R10 = DM(0x2dde28);
+      R11 = DM(0x2dde2c);
+      R12 = DM(0x2dde30);
+      R13 = DM(0x2dde34);
+      R14 = DM(0x2dde38);
+      R15 = DM(0x2dde3c);
+      I0 = DM(0x2dde40);
+      I1 = DM(0x2dde44);
+      I2 = DM(0x2dde48);
+      I3 = DM(0x2dde4c);
+      I4 = DM(0x2dde50);
+      I5 = DM(0x2dde54);
+      I12 = DM(0x2dde58);
+      M0 = DM(0x2dde5c);
+      M1 = DM(0x2dde60);
+      M2 = DM(0x2dde64);
+      M3 = DM(0x2dde68);
+      M4 = DM(0x2dde6c);
 
       // the two instructions the entry JUMP replaced (0x1c9448, 0x1c944a)
       I5 = DM(-24, I6);

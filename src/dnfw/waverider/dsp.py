@@ -7,14 +7,16 @@ evidence for each.
 
 **What it does to DN2 1.11's section 7:**
 
-1. **Adds boot blocks** in L1 block 2 (byte `0x300000`..), a block the stock
-   stream loads nothing into, below its top 16 KB (left alone in case a cache is
-   carved there; see the doc): `reader_m5.asm` (sw `0x180000`), `machine5_live.asm`
-   (sw `0x180200`), a zero-filled state block (save area, counters, 16 reader
-   blocks), the 129-entry increment table, the wavetable directory, and two
-   original 16 x 512 int16 tables.
+1. **Adds boot blocks** in L1 block 1's free tail, byte `0x2dd600..0x2e7000`
+   (Milestone 5c; M5 used L1 block 2, which silenced the instrument --
+   `docs/waverider-dsp-silence.md`): `reader_m5.asm` (sw `0x16eb00`),
+   `machine5_live.asm` (sw `0x16ed00`), a zeroed state block (save area, counters,
+   16 reader blocks), the 129-entry increment table, the wavetable directory, and
+   two original 16 x 512 int16 tables. Every payload is zero-padded to the next
+   span, so the region is written end to end: each code span has >= 64 bytes of
+   zeros (NOPs) after it and no byte of the region is left unwritten.
 2. **Enters the type-5 loop**: the two instructions at sw `0x1c9448` (after the
-   Swarmer render loop in `sw 0x1c8ef1`) become `JUMP 0x180200` and a 16-bit NOP;
+   Swarmer render loop in `sw 0x1c8ef1`) become `JUMP 0x16ed00` and a 16-bit NOP;
    the loop re-executes them before it jumps back to `0x1c944c`.
 3. **Lets a type-5 frame through**: the frame-nibble -> machine-type lookup
    `0x25d748[5]` becomes 5 (stock 0, FM Tone).
@@ -48,16 +50,25 @@ STOCK_SHA256 = "336e340aa0cdcd34e314cfa44849f709a3134f6bd4cd57dfc7e15702c83115e2
 LOAD_ALIAS = 0x28000000          # boot-stream load address = LOAD_ALIAS + DM byte address
 CODE = pathlib.Path(__file__).with_name("sharc_code.json")
 
-# L1 block 2 (DM byte addresses). Its top 16 KB (0x31c000..) is left untouched.
-BLOCK2 = (0x300000, 0x31C000)
-READER_SW = 0x180000
-LOOP_SW = 0x180200
-STATE_DM, STATE_BYTES = 0x301000, 0x400      # save area, counters, 16 reader blocks
-READER_BLOCKS_DM, READER_BLOCK_BYTES = 0x301100, 32
-INC_TABLE_DM = 0x301400
-DIRECTORY_DM = 0x301800
+# L1 block 1's free tail (DM byte addresses). Block 1 is 0x2c0000..0x2f0000; the
+# stock stream's last byte in it is 0x2dd52c, and the startup enables the DM cache,
+# which is carved from the top of block 1 (16 KB at size code 0, the size the
+# startup writes; see docs/waverider-dsp-silence.md). REGION ends 36 KB below the
+# block's top, so it stays clear of a 16 KB or a 32 KB DM cache.
+REGION = (0x2DD600, 0x2E7000)
+STOCK_BLOCK1_END = 0x2DD52C
+DM_CACHE_32K = 0x2E8000                      # the lowest byte a 32 KB DM cache would own
+CODE_SPAN = 0x400                            # each code object is padded to this
+READER_DM = 0x2DD600
+LOOP_DM = 0x2DDA00
+READER_SW = READER_DM // 2                   # 0x16eb00
+LOOP_SW = LOOP_DM // 2                       # 0x16ed00
+STATE_DM, STATE_BYTES = 0x2DDE00, 0x400      # save area, counters, 16 reader blocks
+READER_BLOCKS_DM, READER_BLOCK_BYTES = 0x2DDF00, 32
+INC_TABLE_DM = 0x2DE200
+DIRECTORY_DM = 0x2DE600
 DIRECTORY_MAGIC = 0x57525431                 # 'WRT1'
-TABLES_DM = (0x302000, 0x306000)
+TABLES_DM = (0x2DF000, 0x2E3000)
 
 # stock sites
 ENTRY_SW = 0x1C9448                          # i5=dm(-0x18,i6); r10=dm(-0x22,i6)
@@ -104,21 +115,31 @@ def directory() -> bytes:
 
 
 def spans() -> list[tuple[str, int, bytes]]:
-    """(what, load address, payload) of every block this adds, in stream order."""
+    """(what, load address, payload) of every block this adds, in stream order.
+
+    Each payload is zero-padded up to the next span's start (the last to REGION's
+    end), so the region is written end to end and every code object is followed by
+    at least 64 bytes of zeros (a zero word is a NOP)."""
     obj = objects()
     t = tables()
-    return [
-        ("reader_m5.asm (wr_render5)", sw_to_load(READER_SW), obj["reader"]),
-        ("machine5_live.asm (wr_type5v)", sw_to_load(LOOP_SW), obj["machine5_live"]),
-        ("state: save area, counters, 16 reader blocks (zeros)", dm_to_load(STATE_DM),
-         bytes(STATE_BYTES)),
-        ("increment table, 129 float32", dm_to_load(INC_TABLE_DM), live.table_bytes()),
-        ("wavetable directory", dm_to_load(DIRECTORY_DM), directory()),
-        ("table 0: saw -> sine (testtable reversed)", dm_to_load(TABLES_DM[0]),
-         reference.dsp_bytes(t[0])),
-        ("table 1: the overtone series (harmonics)", dm_to_load(TABLES_DM[1]),
-         reference.dsp_bytes(t[1])),
+    raw = [
+        ("reader_m5.asm (wr_render5)", READER_DM, obj["reader"]),
+        ("machine5_live.asm (wr_type5v)", LOOP_DM, obj["machine5_live"]),
+        ("state: save area, counters, 16 reader blocks (zeros)", STATE_DM, bytes(STATE_BYTES)),
+        ("increment table, 129 float32", INC_TABLE_DM, live.table_bytes()),
+        ("wavetable directory", DIRECTORY_DM, directory()),
+        ("table 0: saw -> sine (testtable reversed)", TABLES_DM[0], reference.dsp_bytes(t[0])),
+        ("table 1: the overtone series (harmonics)", TABLES_DM[1], reference.dsp_bytes(t[1])),
     ]
+    out = []
+    for k, (what, at, payload) in enumerate(raw):
+        end = raw[k + 1][1] if k + 1 < len(raw) else REGION[1]
+        if len(payload) > end - at:
+            raise DspError(f"{what} ({len(payload)} bytes) does not fit before {end:#x}")
+        if k < 2 and end - at - len(payload) < 64:
+            raise DspError(f"{what} leaves fewer than 64 bytes of NOP padding")
+        out.append((what, dm_to_load(at), payload + bytes(end - at - len(payload))))
+    return out
 
 
 def placements() -> list[dict]:
@@ -126,7 +147,7 @@ def placements() -> list[dict]:
             "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
            for what, at, payload in spans()]
     obj = objects()
-    out += [{"what": "patch: entry JUMP 0x180200 + NOP at sw 0x1c9448",
+    out += [{"what": f"patch: entry JUMP {LOOP_SW:#x} + NOP at sw 0x1c9448",
              "load_address": f"{sw_to_load(ENTRY_SW):#010x}",
              "bytes": len(obj["entry_jump"]) + len(NOP16),
              "stock": ENTRY_STOCK.hex(), "new": (obj["entry_jump"] + NOP16).hex()},
@@ -140,12 +161,14 @@ def _check_free(stock: bytes, span_list) -> None:
     blocks = [b for b in bootstream.walk(stock).blocks if b.count]
     for what, at, payload in span_list:
         lo, hi = at, at + len(payload)
-        if not (dm_to_load(BLOCK2[0]) <= lo and hi <= dm_to_load(BLOCK2[1])):
-            raise DspError(f"{what} at {lo:#x} leaves L1 block 2's lower 112 KB")
+        if not (dm_to_load(REGION[0]) <= lo and hi <= dm_to_load(REGION[1])):
+            raise DspError(f"{what} at {lo:#x} leaves the block-1 region {REGION}")
         for b in blocks:
             if b.target < hi and lo < b.target + b.count:
                 raise DspError(f"{what} at {lo:#x}+{len(payload):#x} overlaps the stock "
                                f"block at {b.target:#x}+{b.count:#x}")
+    if not (STOCK_BLOCK1_END <= REGION[0] and REGION[1] <= DM_CACHE_32K):
+        raise DspError(f"the region {REGION} is not between block 1's last stock byte and a 32 KB DM cache")
     ordered = sorted((at, at + len(p), w) for w, at, p in span_list)
     for (a0, a1, w0), (b0, b1, w1) in zip(ordered, ordered[1:]):
         if b0 < a1:

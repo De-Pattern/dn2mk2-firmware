@@ -14,7 +14,7 @@ dispatch, per-track chain), as Milestone 4 does. Steps, each PASS/FAIL
 
 1. **decode** -- the section 7 is the builder's; every instruction of our code reads
    the same to digikit's decoder and to selache's `selmap` as its source line says,
-   on the assembler's boundaries; the entry JUMP decodes as `jump 0x180200`.
+   on the assembler's boundaries; the entry JUMP decodes as `jump dsp.LOOP_SW` (0x16ed00 since M5c).
 2. **map** -- WAV1 (param 26) lands in record +0x4, TBL1 (27) in +0x8, the trig note
    in the note cell; a type-5 frame reaches record +0x1b4 as 5 with the stock clamp
    (the clamp reads frame field 84, not the machine type); control: without the
@@ -174,9 +174,17 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                               "tbl1": frame_word(r.state, FR.slot_offset(t, TBL1))}
             tap["t5_inputs"] = ins
 
+        def at_reader(r):
+            # the parameter block as the loop hands it to the reader: M5c's reader counts
+            # the count word down to 0, so the contract is read on entry, not at resume
+            blk = m2.word_reg(r, "R4") or 0
+            t = (blk - dsp.READER_BLOCKS_DM) // 32
+            tap.setdefault("reader_in", {})[t] = [m2.word(r.state, blk + 4 * k) or 0 for k in range(6)]
+
         def at_resume(r):
             tap["machine"] = [m2.floats(r.state, tap["bufs"][t], BLOCK) for t in range(16)]
-            tap["reader_blocks"] = {t: [m2.word(r.state, dsp.READER_BLOCKS_DM + 32 * t + 4 * k) or 0
+            tap["reader_blocks"] = {t: tap.get("reader_in", {}).get(t)
+                                    or [m2.word(r.state, dsp.READER_BLOCKS_DM + 32 * t + 4 * k) or 0
                                         for k in range(6)] for t in tap.get("t5_inputs", {})}
 
         def amp(r):
@@ -196,7 +204,8 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
         def none_arm(r):
             out["setup"].append(("none-arm", b, None))
 
-        hooks = {m3.DISPATCH: at_dispatch, dsp.LOOP_SW: at_loop, LOOP_RESUME: at_resume,
+        hooks = {m3.DISPATCH: at_dispatch, dsp.LOOP_SW: at_loop, dsp.READER_SW: at_reader,
+                 LOOP_RESUME: at_resume,
                  m3.AMP_STAGE: amp, AMP_RETURN: amp_ret, SETUP_GUARD: guard,
                  SETUP_TABLE_READ: table_read, SETUP_NONE: none_arm}
         hooks.update(extra_hooks or {})
@@ -610,7 +619,7 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
         "audible at the amp's output (peak > 0.02)": bool(n["amp_out_peak"]) and n["amp_out_peak"] > 0.02,
         "correlated with the ideal reference through the chain (r > 0.9)": bool(fit) and fit.correlation > 0.9,
         "POS 120 is darker than POS 0 (spectral centroid)": 0 < c120 < c0,
-        "TBL1 1 plays the other table (reader block table pointer 0x306000)":
+        "TBL1 1 plays the other table (reader block table pointer = dsp.TABLES_DM[1])":
             bool(rb["slot1"]) and rb["slot1"][0] == dsp.TABLES_DM[1],
         "note 72 is an octave above note 60 (the DSP's increment ratio is 2 within 1e-6; "
         "more zero crossings in the same blocks)":
