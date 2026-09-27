@@ -870,6 +870,18 @@ Two remixes, `octatrick` (stock effects plus the three modules) and
 `octatrick-usb` (adds `markandrus/octemu`'s USB MIDI/audio) — confirmed on the
 author's MKI for all 20 USB audio channels.
 
+**DIRECT JUMP is worth reading for its minimalism.** The first working version
+(13 Sep) needed an 18th CHAIN-AFTER index, two relocated 18-entry tables,
+eight `lea` repoints and six widened clamps. The shipped version (24 Sep)
+instead repurposes CHAIN AFTER's index 1 — already skipped by both the menu
+setter and the project loader, confirmed by disassembly before anything was
+written — collapsing the change to **one 358-byte cave, two hook sites (`jsr`
+detours into new code) and four fixed pokes** (single-value overwrites of
+stock bytes, asserted against the stock value before write: two table
+entries, two branch-condition flips). Same feature, an order of magnitude
+less surface area, because the author went looking for an unused value in an
+existing field before inventing a new one.
+
 **For our methodology:** the discipline is **pin to a tag, then re-verify byte
 identity on relink before trusting the port** — the same stance our transplant
 work takes toward donor bytes, independently arrived at here for a ColdFire
@@ -983,6 +995,13 @@ for the one non-repository source. What matters here, ranked:
      with an empty pool rather than hard-coding the literal 0 — the same
      "measured, not asserted" discipline `docs/PRINCIPLES.md` already asks of
      us, seen enforced by someone else's tooling.
+   - `tools/verify/verify_knob_clicks.py` — a **"knob click census"**: every
+     DSP module's continuous knobs are moved mid-block under the emulator and
+     the rendered audio is checked for block-rate steps (zipper crackle),
+     via third-difference energy per sample-phase, robust to clipping, a
+     −70 dBFS flag threshold. It is a test practice we do not have anywhere:
+     verifying a parameter's *actual* ramp rate against audible behaviour by
+     rendering and analysing audio, not by reading the ramp constant in code.
    - `tools/remix/loader.S` and `tools/remix/ledger.py` — the platform-loader
      and claim-checking ledger noted in the 2026-09-26 survey — are unchanged
      and still there; the new `modules/`/`remixes/` layout sits on top of them
@@ -1064,30 +1083,36 @@ Ranked by how directly each closes a gap this project already has open.
    open questions) into an unused sample slot or a spare channel of a render
    we already take, and write the small decoder now, rather than waiting on a
    DN2 port of digihealth's USB channel to get any runtime number at all.
-2. **A native, from-scratch emulator core beats a faster hooked interpreter**
+2. **A "click census": verify a ramp/glide rate from rendered audio, not from
+   the code that sets it** — from octabam's `verify_knob_clicks.py`. Concrete
+   step: every Waverider test already renders a WAV; add the same
+   third-difference, clip-robust step-energy check over an LFO or envelope
+   sweep and flag a per-block (rather than per-sample) step before it is
+   ever judged by ear.
+3. **A native, from-scratch emulator core beats a faster hooked interpreter**
    — from `octatrack-kyoti-fw`'s measured 121-143x-vs-11x finding. Concrete
    step: when the emulator work is next worth an afternoon (already flagged
    against digikit and digiemu), weigh octabam's `ot_emu` C++ architecture
    directly rather than continuing to patch Unicorn — this is now a second,
    independently measured data point saying the same thing.
-3. **A mechanically enforced dead-end tier**, not a convention — from
+4. **A mechanically enforced dead-end tier**, not a convention — from
    `octatrack-kyoti-fw`'s `KYOTI_ALLOW_SUPERSEDED` gate. Concrete step: give
    our own rejected builds (flashed and reverted) a code-level gate the same
    way, so a superseded build can't be picked up by a script by accident, the
    way our own `docs/PRINCIPLES.md` already asks us to keep them recorded but
    currently only in prose.
-4. **State the two-stage confirmation gate as a rule, not a habit** — from
+5. **State the two-stage confirmation gate as a rule, not a habit** — from
    `octatrick`/`octa-panel`: emulator agreement is necessary but never
    sufficient; a feature is done only once a *dated* hardware confirmation
    exists beside it. Concrete step: add this one sentence to
    `docs/PRINCIPLES.md` — we already do it (the Waverider milestones), but it
    is not written down as a rule anyone else could check us against.
-5. **Firmware-free CI**, even a subset — from octabam's three SHA-pinned
+6. **Firmware-free CI**, even a subset — from octabam's three SHA-pinned
    GitHub Actions jobs. Concrete step: put our own parser/codec unit tests and
    a `dnfw mods matrix` staleness check into a GitHub Actions workflow; none of
    it needs Elektron bytes, so none of it is blocked by the no-firmware-in-
    the-repo rule.
-6. **A device-profile checklist for "what a new device needs"** — from
+7. **A device-profile checklist for "what a new device needs"** — from
    elekloader's `docs/DEVICES.md` (`releases`, `sysex_id`, `main_section`,
    `stage`, `trailer`, `isa`, `areas`, `protected`, `blob_max`, `toolchain`,
    plus named tests before anything is flashed). Concrete step: use this as
