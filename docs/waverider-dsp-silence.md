@@ -942,3 +942,142 @@ sequence. A corruption of the reader's middle would pass D5b and fail only in D3
 So "D5b plays, D3 dies" would point at the reader's body **or** at what lies in the
 middle of the span. A cheap check then is **D5c**: D3 with the reader moved again,
 to the directory padding (byte `0x2de800`). The DMA reading predicts no change.
+
+## D5a on the instrument (owner, 2026-09-27): dies, so the cause is in the loop's tail
+
+D5a (`waverider-disc-m5c-nocall`) never calls the reader, and it still dies at the
+trig. Steps 1-2 play. **The cause is in the loop's tail**: the 73 instructions from
+sw `0x16ed73` to the call, which run once a type-5 track's record holds type 5.
+D5b is not needed.
+
+### 1. FP-exception interrupts: not enabled (static). Illegal opcode and parity are, and both are fatal
+
+**The IVT** (L1 `0x28240000`, 32 vectors of 4 x 48 bits). Its slots follow the
+SHARC+ PRM Table 4-46 (digikit's `IVT_VECTOR_NAMES`):
+
+| vector | name | slot holds |
+|---|---|---|
+| 0 | EMUI | `jump 0xb8b546`: records error `0x507` and the return address at `0x26ef88..0x26ef94`, then `jump 0x1c07c6` |
+| 1 | RSTI | `jump 0x1c12e2` (the entry) |
+| 3 | **PARI** (L1 parity) | `jump 0xb8b57c`: records `0x502` and PCSTK, then `jump 0x1c07c6` |
+| 4 | **ILOPI** (illegal opcode) | `jump 0xb8b560`: records `0x501` and core MMR `0x300ec`, then `jump 0x1c07c6` |
+| 2, 9, 10, 16-19 | reserved | `RTI` x 4 |
+| 5-8, 11-15, 20-31 | the rest, incl. **FIXI 23, FLTOI 24, FLTUI 25, FLTII 26** | `jump 0x1c0a70 (db)`, with the vector's dispatch id in the delay slot (the ADI dispatcher) |
+
+**Who sets IMASK.** Bits are set only through the routine at sw `0xb8b5b0` (and
+`0xb8b598` for SEC ids). It takes an id whose top byte is the IMASK bit and indexes
+a table of `bit set imask 1 << n` at sw `0xb8b60e..`. Its callers pass:
+
+| call site | id | enables |
+|---|---|---|
+| `__start` sw `0x1c13c7` | `0x04000001` | bit 4, **ILOPI** |
+| `__start` sw `0x1c13d1` | `0x03000000` | bit 3, **PARI** |
+| sw `0xb8b3b8` | `0x1600000d` | bit 22, TMZLI |
+| sw `0xb8b3dd` | `0x1f000016` | bit 31, SFT3I |
+| sw `0xb8b4a5` | `DM(0x26ef84)` | the RTOS's own run-time id |
+| sw `0xb8cee4` (via `0xb8b598`) | an argument `<= 0xffff` | a SEC id, not IMASK |
+
+No call passes 23-26. Startup clears IMASK first (sw `0x1c0e79`). **The
+FP-exception interrupts are not enabled.** A `TRUNC` or `FIX` of a NaN sets only
+the sticky flag, so the FP-exception hypothesis is **not supported**.
+
+**What is enabled and fatal**: an L1 parity error (PARI) and an **illegal opcode
+(ILOPI)**. Both record an error code and jump to `0x1c07c6`, which never returns:
+the DSP stops, permanently, which matches every failed build.
+
+- The strict memory run found no read of never-written L1 from our code, which
+  speaks against PARI.
+- ILOPI is exactly what our three toolchains cannot see: an encoding selas emits,
+  and selmap and digikit both accept, that the silicon rejects.
+
+### 2. The tail's trig path, instruction by instruction
+
+The full listing is `scratchpad tail_d5a.txt` (D5a's section 7, digikit
+boundaries, selmap text). Shape counts are for normalised shapes in the
+31,102-instruction stock corpus.
+
+| sw | encoding | instruction | input | can fault / set a flag on silicon | in stock? |
+|---|---|---|---|---|---|
+| `16ed73..16ed9d` | 14a, 17, 2a_short, 6b, 2c | t, reader block, 146t | state, constants | no (fixed-point, no overflow for t <= 15) | yes |
+| `16eda0`, `16eda2` | 15b | read WAV1/TBL1 words | frame copy `0x25c568..`, 4-aligned | no | yes |
+| **`16eda7`** | 2a `000120004705` | **`if eq r5 = lshift r4 by r7`** | | **a conditional shifter op: no stock example** | **0** |
+| **`16edaa`** | 2a `200120004704` | **`if ne r4 = lshift r4 by r7`** | | same | **0** |
+| `16edad..16edb8` | 17, 2c, 6b, 14a, 2a_short | masks, slot, `compu` | | no | yes |
+| **`16edba`** | 2a `220100001121` | **`if ge r1 = r1 - r1`** | | conditional ALU sub; stock has only `if le`, `if lt`, `if not sz` forms (e.g. `b86f23` `040100000220`) | shape rare; this cond never |
+| `16edbd..16edd2` | 6b, 17, 2a_short, 15b | directory, POS | | no | yes |
+| `16edde` | 15b | `r8 = dm(0, i1)`, the note | note cell `0x254b14 + 4t` | no | yes |
+| `16ede3`, `16ede6` | 2a_short | `f8 = min(f8, f12)`, `f8 = max(...)` | note | on NaN: result NaN, sticky only | yes |
+| `16ede8` | 2a_short `8c0180d0` | `r0 = trunc f8` | | NaN/overflow: sticky invalid (FLTII not enabled) | yes (exact) |
+| **`16edea`** | 2a_short `8c0100a1` | **`f1 = float r0`** | | **no stock example of a standalone 32-bit FLOAT without BY**: stock uses FLOAT with BY (35 x `8d01...`), or FLOAT paired with a move (4a/5a) | **0** |
+| `16edec..16edfe` | 2c, 6b, 17, 2a_short, 15b | fr, T[k], T[k+1], interpolation | pitch table | on NaN: sticky only | yes |
+| `16edff` | 2a_short `8c0110d1` | `r1 = trunc f1` | | sticky only | yes |
+| `16ee01..16ee0a` | 15b, 14a | reader-block writes | | no | yes |
+
+**What the note cell holds on a real trig.** It is a float written by the frame
+unpack from the 16-bit header field `NOTE + 2t` (note << 8 | fine), as note +
+fine/256. The per-track init (sw `0x1c8bb7..0x1c8bbd`) stores `0x42700000` = 60.0
+there.
+
+- The captured ColdFire frames (init, WAV1 max, TBL1 1, note, screens) all carry
+  NOTE = 0 and trigger mask 0: no played note was ever captured.
+- The runner fed `0x3C00` (60.0), `0x4800` (72.0) and `0x3C80` (60.5).
+- Either way, the value is **a conversion of a 16-bit integer, so always finite**.
+
+The pitch path cannot see a NaN, and none of its conversions can overflow. That
+agrees with part 1: the pitch path is an unlikely culprit, and the three shapes
+with no stock example are the likely ones.
+
+### 3. M5d: `waverider-m5d_DN2_1.11.syx`
+
+M5d is built from `fix/waverider-dsp-silence` with `main` merged in (PRs #135-#139,
+including the menu fix), via `dnfw mods apply --mod waverider`. It is
+**byte-identical** to the file in `00_Resources/02_Builds/`:
+
+- section 3 sha256 `85debe72...`, the same as m5b's, so `emu_boot_check` is not
+  needed;
+- section 7 sha256 `b13a1362e973b50e...`, 876,492 bytes;
+- `dnfw inspect` 21/21.
+
+Its changes, all in our code:
+
+- **No conditional computes.**
+  - The WAV1/TBL1 halves are chosen with `IF NE JUMP` (the form D2 proved) and
+    unconditional `lshift ... by r7`.
+  - The slot clamp is `IF LT JUMP` around `r1 = r1 - r1`.
+- **The note is validated in the integer domain before any float operation.** An
+  exponent field of `0xff` (NaN, Inf) or a set sign bit gives +0.0, by `lshift`,
+  `and`, `comp`, `pass` and conditional jumps. Then come `min` with 127.0 and
+  `trunc`. The float `max` is gone: the value is already >= 0.
+- **`f1 = float r0 by r12`** (with r12 = 0) replaces `f1 = float r0`: the FLOAT
+  shape the stock code uses.
+- In the reader, **`r2 = r2 - r3`** replaces `r2 = r3 xor r2` (shA = 16 - shB, the
+  same value).
+- The loop is 800 bytes and the reader 348. Both keep at least 64 zero bytes in
+  their spans.
+- Every absolute target is re-resolved from selas's layout by the new
+  `scripts/sharc_resolve_jumps.py`, which reads the `// -> label.` comments.
+
+### 4. `waverider-disc-m5c-constpitch_DN2_1.11.syx`
+
+M5d's loop with the pitch block (the note read, validation, `min`, `trunc`,
+`float` and the interpolation) replaced by the constant increment for note 60
+(`R1 = 23409860`): no conversion and no float operation. It otherwise has no novel
+shape. It passes `dnfw inspect` (21/21). Built by
+`scripts/build_waverider_disc_scratch.py --variant constpitch`.
+
+| M5d | constpitch | reads as |
+|---|---|---|
+| plays, and the saw sounds | | fixed: it was one of the removed shapes (most likely ILOPI) |
+| dies | plays | the pitch path (the note read or conversions), against the reading above |
+| dies | dies | neither the novel shapes nor the pitch: next, the frame-copy and directory reads |
+
+### M5d and constpitch: gates (2026-09-27, digikit `6f812e9`, after `main` was merged)
+
+| gate | result |
+|---|---|
+| `test_waverider_dsp.py` | 17 passed |
+| `sharc_waverider_m5.py --blocks 8 --tag m5d` | **PASS 23/23** (617 s): decode 0 disagreements (selas, digikit, selmap); machine tap **0 float32 mismatches** in all five runs; amp out peak 0.0665; note 72 inc ratio 2.0; types 0-4 bit-identical to stock; 155,025 instructions a block |
+| the same, on the ColdFire's init frame (`--tag m5d_cfinit`, selmap skipped) | **PASS 26/26** (803 s), step 5 bit-exact |
+| strict memory map, constpitch, 3 blocks with a type-5 trig | returns every block; **0** violations from our code |
+| `dnfw inspect` | m5d 21/21; constpitch 21/21 |
+| m5d section 3 | `85debe72...`, identical to m5b's; built from the merged source by `dnfw mods apply --mod waverider`, and byte-identical to the file in `02_Builds` |
