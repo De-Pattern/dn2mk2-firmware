@@ -803,6 +803,16 @@ that set to touch persistent per-sample state on the `+Drive` rather than
 just RAM or settings — closer to our own project/kit persistence problem than
 elekloader's own core is.
 
+**Its own verification is a test practice worth borrowing.** A cold boot of
+`core`+`digislicer` is diffed screen-for-screen and audio-for-audio against
+stock, and separately against the pre-mod monolithic build (1.8J) running a
+scripted slicer session — GRID to AUTO, the SRC page, trigs, then the pattern
+playing. Reported result: the audio is identical for 20.9 s, and the last
+silent 51 ms differ by **under 0.05 of a 16-bit step (RMS)**. That is an
+audio-identity gate with a stated numeric tolerance, not a by-ear check — the
+same shape of test our own `test_changes_nothing_outside_its_extents` takes
+for bytes, applied here to rendered audio instead.
+
 **Status: [O].** Read from the README and LICENSE on 2026-09-27. Nothing run,
 nothing ported.
 
