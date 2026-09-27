@@ -1252,7 +1252,7 @@ wider; the wire itself is not measured.
 | `emu_boot_check.py`, from reset, stock control | **booted and drew its UI**: 1 frame in 450 M instructions (control: 1 frame in 620.5 M) |
 | `emu_boot_engine.py --machine-type 5 1 4 6 --machine-max 5` | engine path clean under a real loader boot; type 5 saved 5 / loaded 5; 1 -> 1; 4 -> 4; 6 -> 0 (the widened bound's own fallback); value array kept |
 | `check_coldfire.py` against stock | no scale-8 addressing (1,539 shared with stock, all data) |
-| ColdFire emulator (`emu_waverider_menu.py`, snapshot `wr-final-ui800M`) | MACHINE SEL shows WAVERIDER (`out/waverider-m5/final/menu.png`); two DOWNs and YES commit it (setter writes 5 at `sound+0xDE`, 40 slot lookups resolved as WaveTone, the marker on WAVERIDER); the SYN page is WaveTone's, knobs drawn; push-and-turn WAV1 -> `0x7800`; TBL1 -> `0x0100`; **the frame carries 5 at `148`** (other tracks 1) |
+| ColdFire emulator (`emu_waverider_menu.py`, snapshot `wr-final-ui800M`) | MACHINE SEL shows WAVERIDER (`out/waverider-m5/final/menu.png`); two DOWNs and YES commit it (setter writes 5 at `sound+0xDE`, 40 slot lookups resolved as WaveTone, the marker on WAVERIDER); the SYN page is WaveTone's, knobs drawn; push-and-turn WAV1 -> `0x7800`; TBL1 -> `0x0100`; **the frame carries 5 at `148`** (other tracks 1) *(superseded 2026-09-27, `fix/waverider-select`: ~~the marker on WAVERIDER~~ -- `final/committed.png` is byte-identical to `final/cursor.png` and both mark WAVETONE. The byte was 5; the menu marked WaveTone. On the instrument YES jumped the marker to WAVETONE, a second YES moved it, and reopening marked WAVETONE again. Cause and fix in `docs/machine-list.md`, "The double YES")* |
 | SHARC runner, `sharc_waverider_m5.py` | **26 of 26** on its own frames (501 s): decode 0 disagreements; the loop entered by the image's JUMP 8/8; no-setup arm 8/8; machine tap bit-exact in all runs; amp out peak 0.066, rms 0.034, r = 0.934; POS 120 centroid 410 Hz vs 735 Hz; TBL1 1 -> table `0x306000`; note 72 inc exactly 2x note 60; no trigger 0.0031; types 0-4 bit-identical to stock |
 | SHARC runner on **ColdFire-built frames** (init, WAV1 max, WAV1 max + TBL1 1; harness adds note 60 and one trigger, other tracks MIDI) | machine tap **bit-exact** in all three; TBL1 1 plays table 1 at POS 15 (partial 16) |
 | ... audibility on those frames | **FAIL, for the stock machine too**: amp out peak 6.4e-4 (Waverider) against **6.9e-5 for stock WaveTone on the same frame** (control). The chain is quiet on a captured frame whatever the machine, so the cause is the synthetic trigger or the halved envelope values, not the new machine. A frame from a played note was not captured (the ISR entered with a trig held did not reach the builder) |
@@ -1391,6 +1391,30 @@ ColdFire menu and frame, the SHARC runner (26/26, and bit-exact on ColdFire-buil
 frames) and `dnfw inspect` (21/21) pass. Level through the chain on a captured
 frame is quiet for the stock machine as well, so level is the instrument's to
 answer. **The first flash with modified SHARC code.**
+
+**Milestone 5b: the menu fix**, 2026-09-27, `waverider-m5b_DN2_1.11.syx`. On the
+instrument, M5's MACHINE SEL needed two YES presses to mark WAVERIDER and marked
+WAVETONE again when reopened (ONESHOT's build, which leaves `getMachineType` alone,
+did not). The menu reads its current machine through `0x4003134e`, whose tail
+`jmp` into the canonicalising `getMachineType` the identity audit missed. One
+long moved (`docs/machine-list.md`, "The double YES"), and the sample machines
+got their own divided section. Section 7 is M5's, byte for byte.
+
+`00_Resources/02_Builds/waverider-m5b_DN2_1.11.syx`, 2,423,328 bytes, sha256
+`426e3a712ff06b1334260e69908b1cf235af353a30dd2891c74e3305dbcd46f1`; section 3
+`85debe72...cb51a3bf6`, section 7 `5baf6e72...8dee7d` (M5's). Gates, all on this
+image (`out/fix-select/`): `emu_boot_check` from reset on its own section 3;
+`emu_boot_engine --machine-type 5 1 4 6 --machine-max 5` (5 -> 5, 1 -> 1, 4 -> 4,
+6 -> 0, value array kept); `check_coldfire` (no scale-8); `dnfw inspect` 21/21;
+the SHARC gate not re-run, since section 7 did not change. The selection test on a
+`boot400M` snapshot with m5b installed (`m5b_rows/`, `m5b_sel/`): YES on each of
+the six rows commits that row's type and marks it; the dividers sit between
+SWARMER and WAVERIDER and between WAVERIDER and MIDI, and nowhere else; the owner's
+keys (FM TONE, then WAVERIDER, YES) mark WAVERIDER on the first YES and again on
+reopening; nothing but the setter writes the type through the track swap (both
+ways), the kit and track syncs and the audio ISR; the frame builder's machine words read 5 (in this harness all sixteen read the edited track's type after the syncs; stock with SWARMER reads 3 the same way). Controls:
+stock with SWARMER (`stock_swarmer/`, `stock_rows/`) and unfixed M5 (`m5_neg/`),
+which reproduces the instrument.
 
 **[D]** for the gap estimates — they are reasoned from measured facts (the file
 format, the firmware's free space, the machine table bound) but no part of the

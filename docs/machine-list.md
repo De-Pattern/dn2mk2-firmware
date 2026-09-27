@@ -161,3 +161,79 @@ above 4), not as WaveTone.
 **[E]** for the rows above: each was found by a type-5 track misbehaving in
 the emulator and each fix re-run there. The status paragraph above is the
 page's first reading, kept.
+
+## The double YES (fix/waverider-select, 2026-09-27)
+
+**What the instrument did** (M5 build, the owner): with the cursor on FM TONE,
+WAVERIDER and YES jumped the marker to WAVETONE; a second YES on WAVERIDER moved
+it there; reopening MACHINE SEL marked WAVETONE. The same with the stock section 7
+(M5's section 3 alone), and not on the ONESHOT build, which makes type 5 too but
+leaves `getMachineType` alone. So the bug was the ColdFire's, in what Waverider
+maps to WaveTone and ONESHOT does not.
+
+**What the emulator did, the same keys** (`scripts/emu_waverider_menu.py
+--watch-types`, snapshot `wr-final-ui800M`, `out/fix-select/`): exactly that.
+After the first YES the sound's byte is **5** and the marker is on WAVETONE
+(`run1/b_yes.png`); the second YES writes 5 again, from the same setter
+(`0x4004cc94`, via `0x40031880` from MACHINE SEL's `0x4005bba6`), and the marker
+moves; reopening marks WAVETONE (`run1/d_reopen.png`) with the byte still 5.
+Every write to any track's `sound+0xDE` was logged, through the menu, the kit
+sync `0x40025af4`, the track sync `0x4002549c` and the audio ISR `0x40025e36`
+entered directly: **nothing else writes it**. The stored type persisted; the
+menu misread it.
+
+**Why.** MACHINE SEL keeps the machine it marks and puts the cursor on in its
+view at `+412`, set at open (`0x4005b6c2`), after every commit and on every
+model change (`0x4005a5c6`, `0x4005a632`, `0x4005a9c8`), and its YES commits
+only when the cursor's type differs from `+412` (`0x4005bb86`). `+412` comes from
+`0x4003134e(model, track)` -- the model-level "which machine does track t have?"
+-- which finds the track and ends in a **tail `jmp 0x4004b7f2`**. Milestone 5
+canonicalised `0x4004b7f2` (5 reads as 1) and sent its identity callers to a raw
+copy by rewriting their `jsr`/`lea`; a `jmp` was not in that search. So `+412`
+was 1 after the commit, the menu redrew with WAVETONE marked, the second YES
+found 1 != 5 and committed again, and a reopened menu marked 1.
+
+| caller of `0x4003134e` | uses the type for | with 5 |
+|---|---|---|
+| `0x4005a5c6`, `0x4005a632`, `0x4005a9c8`, `0x4005b6c2` | MACHINE SEL's marker and cursor (`+412`) | **the bug** |
+| `0x40041bca` | the track swap `0x40041acc`: re-commits each track's type | commits WaveTone, then its sound copy puts 5 back (emulator, M5) |
+| `0x400a7f92`, `0x400b15e8` | keep the old type, re-commit it on cancel | would restore WaveTone (static read; not run) |
+| `0x4003e6f2`, `0x40064ea2` | the SYN overview / page accessors `0x400c248e` / `0x400c24ee` | already read 5 as WaveTone's rows |
+| `0x40071862`, `0x4008c558`, `0x400b049a` | "is it MIDI?" (`cmp #4`, `-1`) | no |
+
+**The fix** is one long: the tail jump at `0x40031394` goes to `raw_track`
+instead (`dnfw.waverider.coldfire`, 7b), so all twelve callers see 5. After it,
+the same keys mark WAVERIDER on the first YES and on reopening, and a YES on the
+marked row closes the menu, as stock does (`out/fix-select/m5b_oldrows/`, and
+`m5b_sel/` on a snapshot with the final build installed from `boot400M`);
+`0x4003134e` answers 5 (M5: 1; stock with SWARMER: 3, the control); the swap
+commits 5 directly.
+
+**Still canonical, noted:** the virtual getter `0x4004dd98` (the other tail
+`jmp 0x4004b7f2`, at `+0x74` of the vtable at `0x401de518`); there are 13
+`vtable+116` call sites, not all of that class, and one of them (`0x400d60cc`)
+packs a per-track byte into a message; and the machine step `0x4004da90` (an encoder step from the
+current machine), which steps from WaveTone's position. Neither is MACHINE SEL's
+path and neither writes the sound's byte on its own.
+
+## A section of its own for the sample machines
+
+The owner's request with the same fix: synths | WAVERIDER | MIDI, divided the
+way MIDI is. The row builder `0x4005b2c0` (and the second list at `0x40059cdc`)
+inserts a row of value `-1` wherever the group changes -- drawn as a dotted line,
+**no label**: the stock divider carries no text. The groups are only compared for
+equality, so a third is just another section. The group function becomes: synths
+0..3 -> 1, MIDI 4 -> 2, **5 and 6 -> 3** (6 reserved for ONESHOT; no row for it in
+this build), else 0, in the stock function's 34 bytes.
+
+**The first version of it put every synth in group 0**, and the emulator said
+so: called directly (`call:0x40059274:3`) it answered 0, and the menu drew no
+divider between SWARMER and WAVERIDER. A `moveq` sat between a `subq` and the
+`bcs` that tested its borrow, and `moveq` clears C. The unit test passed,
+because its little interpreter of the function's opcodes did not model that.
+Both are fixed: the branches now follow the instruction that set their
+flags, and the test's `moveq` and `tst` set N and Z and clear C. So a test that
+runs a model of the machine is only as good as the model, and the emulator is the
+test that counts. The list stays
+`{0, 2, 1, 3, 5, 4}`, and its vector's storage and capacity follow `LIST_NEW`'s
+length, so a seventh machine is one entry (and its name and attribute rows).
