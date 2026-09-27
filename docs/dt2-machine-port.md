@@ -329,6 +329,15 @@ plays the sample itself over the whole file):
   a **sixth setup-table entry** — the same class of image patch as the clamp and
   lookup, and M4's already-recorded `[O]` ("type 5's per-type setup entry"). It
   is on the critical path for Waverider too, not only ONESHOT.
+
+  > **Corrected 2026-09-27 ("The ColdFire half", below).** Not the setup table:
+  > Waverider M5 measured that the dispatch bounds the type with `compu(type, 5)`
+  > before it indexes `0x8052db90`, so type 5 takes MIDI's no-setup arm. Re-run
+  > with the clamp left stock, the idle-then-trigger case still halted at PC 0 --
+  > inside the render's own zero-fill arm for an idle record (word 0 = 0), which
+  > the adapter handed it on every idle block. The adapter now writes an idle
+  > voice's 32 zeros itself and calls the render only for an armed record, and
+  > the case passes.
 - **Silicon.** Nothing has run on a DSP; the runner uses G1–G11 (three inferred,
   not cited from the PRM). The DT2 render itself runs with **no** new runner
   workaround — it decodes and executes on digikit's runner as is.
@@ -351,3 +360,261 @@ device, a wrong OS version or a wrong section-7 hash on either image (three
 negative controls, all PASS).
 
 **[E]**, offline only. Gate: `scripts/sharc_oneshot_port.py`, all steps PASS.
+
+## The ColdFire half (2026-09-27): the DT2's page, drawn by the DN2
+
+**The question:** what does the Digitakt II's ColdFire do for a ONESHOT track,
+how much of it can be moved into the Digitone II as it is, and what is the least
+plumbing that makes a DN2 track *be* ONESHOT? **The answer:** the page moves --
+its records, its formatters and its knob list are all data or code the DN2
+already has -- and the page *class* does not, because it is wired to the DT2's
+sample subsystem. The DN2's own page class draws the DT2's page instead.
+
+Grades: **[V]** verified on the instrument, **[E]** measured in an emulator,
+**[D]** read statically once, **[O]** open.
+
+### The DT2 1.16 ColdFire side of ONESHOT
+
+| piece | DT2 1.16 | notes |
+|---|---|---|
+| machine list | display names `0x4020eb68`, 12-byte rows `{long, short, hint}`, row 0 is ONESHOT; accessor `0x400da548` (`moveq #6`) | the digikit 1.15C finding (`0x400caf48`, 7 types) re-anchored: 1.16 has the same seven machines [D] |
+| its page | a 44-byte descriptor `{title, subtitle, 8 entries, tag 10}`, array in BSS at `0x4293b960` (7 rows, `0x400c8840(type)`), row 0 written by the unrolled initializer at `0x401c47ca`: entries **202, 203, 0, 205, 206, 207, 208, 209** | the **same struct** the DN2 uses for its SYN pages (`0x42432ad4[type]`, measured live: WaveTone's first is `{"DN VA 1", "WaveTone", 238..245, 10}`) [E] |
+| its records | the parameter table at `0x4020f1c8`, 274 records, 60 bytes, the DN2's layout field for field; ONESHOT is page 0, entries 200..209: SLOT, BANK, TUNE, PLAY, CFADE, SAMP, STRT, LEN, LOOP, LEV | the page shows seven: A TUNE, B PLAY, C empty, D SAMP, E STRT, F LEN, G LOOP, H LEV. CFADE (new in 1.16) has a record and no knob; SLOT and BANK serve the sample browser [D] |
+| its page class | `SourcePageView` (RTTI), derived from `MachineParameterPageView`, 60-slot vtable at `0x401ed880`, 17 of them its own | the DN2's `MultiSourcePageView` is its sibling: same base, same vtable size [D] |
+| the frame | the DT2's builder (`0x4002eae4`) copies each track's slots 25..34 as one 20-byte block to frame `+218 + 96 t` (2,050-byte frame at `0x80005348`), machine type at `+148 + 2 t` | the DN2 does the same with slots 25..65 into 146-byte track slots: the ONESHOT values ride the same slot numbers on both [D] |
+| SAMP | a raw index 0..1023 (range `0x3ff`, formatter `%d` of the value itself, not `>> 8`) | chosen through `SourcePageView`'s key handler (vtable slots 2 and 17), which builds a `SampleListView` [D] |
+
+The record's formatter is at `+0x34`: `dnfw params` counts records from 8 bytes
+before the page-id word, so its `w0` column is the *previous* record's
+formatter. Read that way, every ONESHOT formatter has a meaning that fits its
+parameter: TUNE the bipolar decimal (`+16.00`), PLAY an enum (`REV`, `REV.L`,
+`FWD.L`, `FWD`), SAMP `%d` of the raw value, STRT/LEN a decimal, LOOP `OFF` or a
+decimal of `value - 1`.
+
+### What can move, and what cannot
+
+**The two UI frameworks are one framework** [D]: of the DT2's 989 C++ classes,
+884 exist in the DN2 with the same names, the same base chains, and -- for all
+but three (`AbstractValue`'s template family, `DataChangeInfo`,
+`SoundSlicesChangedInfo`) -- the same vtable sizes (digikit's `rttiscan` over
+both images). The DT2-only classes are the sampler's (`SamplePicker`,
+`SampleManager`, `SampleListView`, `SampleFSSelectView`,
+`SampleBrowserPopupMenuView`, `SourcePageView`, the slice editors,
+`FsRequestHandler::FileWriter`, `Recorder`, ...); the DN2-only ones are its voice,
+chord and arp views. A shape-hash map of every function (mnemonics with operands
+dropped) finds a DN2 twin for 90% of the DT2's 14,432 function entries, and a
+DT2 -> DN2 absolute-address map voted from 9,110 twin pairs (the DT2's display
+object `0x44d2e70c` -> `0x44507ef8`, 143 of 143 votes).
+
+| piece | verdict | evidence |
+|---|---|---|
+| the eight records | **transplantable with relocation** [E] | same 60-byte layout. Relocated at apply time: page id `0` -> `1`, CC and NRPN cleared, the ordinal kept from the dead record they replace, the three name pointers to copies of the donor's strings, the formatter to its DN2 twin, the unit suffix to the DN2's own empty string |
+| the six value formatters | **transplantable as they are: the DN2 already has them** [E] | each checked at apply time byte for byte outside its string and call operands: `0x400e1424 -> 0x400e2ecc`, `0x400e144e -> 0x400e2ef6`, `0x400e1618 -> 0x400e30c0`, `0x400e16ca -> 0x400e3172`, `0x400e1728 -> 0x400e31d0`, `0x400e21a6 -> 0x400e3c4e`. The PLAY formatter's DN2 twin is dead code there -- no DN2 record points at it, and its `REV`/`FWD.L` strings are in the image |
+| the page descriptor | **transplantable as data** [E] | the same struct; its entries renumbered to the recipient's |
+| the machine name | **as data** [E] | the donor's `Oneshot` / `ONE`, copied |
+| `SourcePageView` | **not now: coupled to the DT2's sample subsystem** [D] | 17 own methods reach 59 functions / 3,703 instructions with no DN2 twin, besides 99 calls to functions that have one. The coupling is concrete: slots 2 and 17 construct a `SampleListView` (the browser, `0x401ee52c`) and draw `NO SAMPLE ASSIGNED`; slots 11 and 17 read the sample pool's tables `0x405ba368` / `0x405ba768` through `0x401537b8` / `0x401537d0`; slot 11 animates a play position from the DSP's reply block (`0x80001000 + 2 (0x54e + t)`, through `0x400cd726` / `0x400cd764`); four page statics live at `0x40965b8c..0x40965bf0` |
+| the browser and the pool | **not transplantable**: DT2-only classes all the way down (`SampleManager`, the FS request handler, the pool directory) | the RTTI diff above |
+
+**The cheapest alternative, and the one taken:** move the records, the
+formatters and the descriptor, and let the DN2's own `MultiSourcePageView` draw
+them. Nothing of the page is our code; the plumbing is.
+
+**Appending the records failed first, and why is worth keeping** [E]. As LFO4
+does, the table was copied into RAM with the eight records after the stock 320
+(entries 321..328). A machine change then loaded `0xffff` into every ONESHOT slot
+and drawing the page faulted (an illegal-instruction exception through a knob
+object `0x40041a40` returned). The runtime companion table (`0x4243325c`, 68 bytes
+an entry, 321 entries, unrolled initializer) cannot grow, so entries past 320
+clamp to entry 0 there. LFO4 gets away with it because its values have storage
+of their own. The records now take the places of eight dead `Error` records
+(entries 1-5 and 11-13: no page, no slot, range 0, name `ERR`); a read watch over
+them through a stock UI session (pages, turns, MACHINE SEL, trigs) saw no reader
+[E, one session]. Entries 17 and 18 are dead too but carry a range; left alone.
+
+### The plumbing (type 5, exclusive with Waverider for now)
+
+`dnfw.oneshot.coldfire`, at Waverider M5's sites (`docs/machine-list.md` on
+`feature/waverider-m5`), answered for ONESHOT:
+
+| # | site | edit |
+|---|---|---|
+| 1 | MACHINE SEL list `0x401ddd58`, group `0x40059274` | `{0, 2, 1, 3, 5, 4}`; 5 joins the synths |
+| 2 | name accessors `0x400dc332/358/37e` | a six-row table, row 5 the DT2's own names |
+| 3 | attribute rows `0x401f7930`, permission test `0x400dc19a` | a sixth row, WaveTone's (all tracks) |
+| 4 | stored-sound LOAD `0x400dd286` | keeps -1..5 |
+| 5 | `param_set_slot_to_id` `0x400dc02a` | type 5, slots 25..64 -> ONESHOT's map (slot -> entry) |
+| 6 | SYN overview / count / page `0x400c248e`, `0x400c24d2`, `0x400c24ee` | type 5: one page, the DT2 descriptor |
+| 7 | parameter ownership `0x40036c24` | type 5 owns page-1 records (the records say page 1, which the DN2 reads as "a machine parameter", page <= 4) |
+| 8 | eight dead records | the DT2's |
+
+The shims, the tables, the strings and two static COW string reps (refcount -1)
+are one 2.5 KB CODE chunk at `0x46900000`, which the startup loader copies out
+before the BSS clear (`dnfw.patch.loader`, proven by LFO4). `getMachineType` is
+**not** canonicalised, unlike Waverider's: the DN2's page view and knob objects
+work for type 5 as they stand once the records are in-table [E].
+
+### The frame, field by field [E]
+
+| DT2 record | slot | frame byte in the track slot | the ColdFire sends | the adapter reads |
+|---|---|---|---|---|
+| TUNE | 25 | +0 | half the value | `frame >> 7`, 64 = the sample's pitch |
+| PLAY | 26 | +2 | half | `frame >> 7`: 0 REV, 1 REV.L, 2 FWD.L, 3 FWD |
+| SAMP | 28 | +6 | half, **the lowest bit lost** | the frame word: bank slot = SAMP / 2, rounded |
+| STRT | 31 | +12 | half | `2 f * len / 30720` (0x7800 = 120.00 = the end) |
+| LEN | 32 | +14 | half | the same |
+| LOOP | 33 | +16 | half | 0 = OFF (loop from STRT); else `(2 f - 1) * len / 30720` |
+| (type) | header `+148 + 2 t` | | **5** for the ONESHOT track, 1 for the others | the lookup `0x25d748[5] = 5` |
+
+The halving is Waverider M5's finding (the builder copies the modulated mirror,
+which holds half of each value, rounded up: `0x6117 -> 0x308c`), and this port's
+own frames show it too: `0xffff -> 0x8000`, `0x2d00 -> 0x1680`, `0x5a00 -> 0x2d00`.
+#133's first adapter read slots 25..30 coarse with `bit 0 reverse, bit 1 loop`,
+right for its hand-made frames and wrong for the DT2's records on three counts
+(slot numbers, PLAY's order, the halving); `oneshot5.asm` and
+`dnfw.oneshot.params` now follow the table above.
+
+**SAMP's lowest bit does not reach the DSP** [E]. A one-sample bank does not care;
+a bank of many needs SAMP sent whole -- a ColdFire shim on the mirror copy for
+slot 28, or reading it from the sound instead of the mirror [O].
+
+### SAMP without a browser [E]
+
+The DT2's SAMP record and formatter move as they are: on the DN2 it is a plain
+knob, 0..1023, drawn `%d` of the raw value (`1023` in the screenshot below). The
+browser is not bypassed so much as never reached: the DN2's page view has no key
+handler that opens one. For a small baked bank that is enough: SAMP picks a slot
+(SAMP / 2, rounded; a slot past the bank's count plays slot 0).
+
+### The prototype, in the ColdFire emulator [E]
+
+`scripts/emu_oneshot_page.py` (digikit-up `9007c2a`): the build installed over
+`boot400M` as the startup loader would leave memory (its changed runs and the
+CODE chunk at its load address) by digikit's `guirun --patch-ranges`, run to the
+UI and saved; the drive run restores that.
+
+| | |
+|---|---|
+| ![MACHINE SEL](img/oneshot-machine-sel.png) | MACHINE SEL offers ONESHOT after SWARMER |
+| ![the page](img/oneshot-page.png) | after YES and NO: the DT2's page, drawn by the DN2 -- TUNE, PLAY, (C empty), SAMP / STRT, LEN, LOOP, LEV |
+| ![TUNE](img/oneshot-tune.png) | push-and-turn A: the DT2's bipolar formatter, `16.00`; the sound's slot 25 went `0x4000 -> 0x5000` |
+| ![PLAY](img/oneshot-play-fwd.png) | push B: the DT2's enum formatter, `FWD` (the default, 3) |
+| ![REV, SAMP, LOOP](img/oneshot-rev-samp-loop.png) | after turns: PLAY `REV` (0), SAMP `1023` (raw `0x3ff`), LOOP `103.99` (`0x6800 - 1` in 8.8) |
+
+- the machine setter wrote type 5 at `sound+0xDE`; a machine change loaded the
+  DT2's own defaults: TUNE `0x4000`, PLAY `0x300`, SAMP 0, STRT 0, LEN `0x7800`,
+  LOOP 0, LEV `0x6400`;
+- every knob edits its slot (turned: slots 25, 26, 28, 31, 32, 33, 34); PLAY,
+  SAMP and LOOP need many detents, as the DN2 scales a turn by the range;
+- the frame the builder built carries type 5 at `+148` for track 0 and 1 for the
+  others; its slot words were not re-read after the turns (below).
+- **controls**: the WaveTone SYN page of the build, before ONESHOT is chosen, is
+  byte-identical to stock `ui1200M`'s render (same PNG digest); in stock, the
+  same menu steps close MACHINE SEL and draw normally; the other fifteen tracks
+  keep their types.
+
+**Not re-measured here:** the mirror refresh the builder copies from. Entering
+`0x4002549c` (track sync) or `0x40025af4` (kit sync) as a guest call faulted in
+this harness -- in the stock control as well, so it is the harness, not the
+build -- and the builder therefore copied a mirror the turns had not refreshed.
+That slot values reach the frame at half is M5's measurement on the same builder.
+
+### The first build
+
+`dnfw mods apply <DN2 1.11> --mod oneshot --donor <DT2 1.16 .syx> --sample <WAV>`,
+or `scripts/build_oneshot.py --sample <WAV>` (which also writes the sections and a
+report for the gates). Both OS files are the user's; the render, its tables, the
+records, their strings and the page's knob list are read from the donor at apply
+time, each behind a SHA-256.
+
+DSP side, corrected for the silicon (Waverider M5's corrections):
+
+- everything in **L1 block 2** above M5's spans: the render at sw `0x185000`, the
+  divider `0x185480`, the decimator `0x185500`, the adapter `0x185800`; data at
+  DM `0x30c000..0x31c000` (#133's DM `0x29xxxx` was the gap between blocks 0 and 1);
+- the entry is the image's own `JUMP 0x185800` at sw `0x1c9448`; the clamp at
+  `0x1c294c` stays stock; the lookup `[5] = 5`;
+- the bank: one sample, 48 kHz mono after conversion, **at most 0.49 s** (47 KB
+  of block 2).
+
+**The gates** (2026-09-27):
+
+| gate | result |
+|---|---|
+| SHARC runner, `scripts/sharc_oneshot_port.py --sample <the bass drum>` (digikit `6f812e9`) | **PASS on every step.** The render relocated into block 2 is bit-identical to the DT2 control in all four play modes; the image's own JUMP enters the adapter on 8/8 blocks; a trigger after two idle blocks renders, silent before it and bit-identical to the DT2 control from the trigger on (#133's blocker, gone); the adapter's record equals `dnfw.oneshot.params`; machine tap bit-exact to the DT2 control (peak 0.358), audible at the amp (peak 0.049); a triggered all-zero sample is exact zero at the machine tap |
+| ... the user's sample (`28-bda02.wav`, 44.1 kHz -> 48 kHz, 0.314 s), 16 blocks | machine tap **bit-identical to the DT2 render of the same sample** (peak 0.344), amp out peak 0.045; idle-then-trigger bit-exact too |
+| ... stock control | WaveTone on track 0 through the stock image and through the ONESHOT image: its buffer (peak 1.0) and the amp output **bit-identical** |
+| ... section 7 | 880,136 B, rebuilds and passes all 21 `dnfw` verify checks |
+| ColdFire, `scripts/emu_boot_check.py` from **reset** (the loader copying the CODE chunk) | **booted and drew its UI**: 1 frame in 450 M instructions (control: stock, 1 frame in 620.5 M) |
+| ColdFire, `scripts/emu_oneshot_page.py` | above; the gated MAIN OS is byte-identical to the one in the image |
+| image | `00_Resources/02_Builds/oneshot_DN2_1.11.syx`, 2,431,136 B, sha256 `698a3279...9473f29a`; `dnfw inspect`: 21 of 21, HMAC reproduced |
+| tests | 351 passed, 9 skipped (`test_transplant_coldfire.py`, `test_oneshot.py` among them) |
+
+WAVs (`out/oneshot/`, 2.5 s, 48 kHz; the runner renders a few blocks, so a looped
+file repeats them and a PREVIEW plays the sample itself): `oneshot_user_machine.wav`
+(the bass drum through the adapter and the DT2 render), `oneshot_user_amp.wav`,
+`oneshot_user_preview.wav`, and the chirp set from #133
+(`oneshot_{forward,reverse,...}_{control,transplant}.wav`, `oneshot_adapter_*.wav`).
+
+The gate bakes the user's sample beside a silent slot (its silence control needs
+one); the image bakes the sample alone. The two banks differ in count and length,
+nowhere else.
+
+### What a flashable ONESHOT needs, in order
+
+1. **This build** (type 5, one sample, exclusive with Waverider): ColdFire and
+   SHARC gates as above. **Hardware test below.** [E]
+2. **After Waverider M5 lands** (its ceiling and rows; do not merge them twice):
+   move ONESHOT to **type 6**: a seventh name row, attribute row and list entry
+   (`{0, 2, 1, 3, 5, 6, 4}`), LOAD bound `#8`, the slot map, SYN page and
+   ownership shims keyed on 6, the DSP lookup `[6] = 6`, and the entry chained
+   after M5's loop (M5 jumps back to `0x1c944c`; ONESHOT's adapter would take
+   over that jump and return there itself). Block 2 is already split between
+   them. [D]
+3. **SAMP whole** to the DSP (above), then a bank of several samples. [O]
+4. **The two-file input on the web**: a `site/oneshot.html` that takes the DN2 and
+   DT2 files and a WAV and runs the same plan in JS (`dnfw.transplant` ported,
+   the committed JSON of the shims and the adapter). No DT2 byte goes to the
+   site: the user's browser reads both files. [O]
+5. **The pool and the browser**: the +Drive, a sample manager, and a page class
+   of our own or `SourcePageView` with its pool and DSP-feedback reads adapted. [O]
+
+### The first flash: the hardware test
+
+Prepare: the stock `Digitone_II_OS1.11.syx` to hand and the recovery route in
+`docs/flashing.md` proven on this unit (Early Start-up Menu -> recovery, a
+class-compliant USB-MIDI link). Save any project worth keeping.
+
+| # | do | pass | fail -> |
+|---|---|---|---|
+| 1 | flash `00_Resources/02_Builds/oneshot_DN2_1.11.syx` | the device reboots to the usual screen | EXCEPTION or a hang: **recovery** with stock 1.11 |
+| 2 | play a stock project (FM Tone / WaveTone tracks) | sounds as before | a stock machine silent or changed: stop, report, recovery |
+| 3 | track 1: FUNC + SYN, move to ONESHOT (after SWARMER), YES, then NO | the SYN page shows TUNE PLAY (gap) SAMP / STRT LEN LOOP LEV | an empty or ERR page: report the screen |
+| 4 | trig track 1 | the baked sample plays once (a bass drum in this build) | silence: note the page values; a crash or noise: power off, recovery |
+| 5 | TUNE +12 (push and turn A) | an octave up | |
+| 6 | PLAY to REV (B, many detents) | the sample backwards | |
+| 7 | PLAY to FWD.L, LEN shorter, LOOP 60.00 | it loops the second half | |
+| 8 | other tracks trig while track 1 plays | no glitches, no silence | |
+| 9 | SAVE PROJECT, power-cycle, reload | track 1 is still ONESHOT with its values | it loads as FM Tone: the LOAD bound; report |
+
+A fault at step 1 or 4 points first at the unproven parts: L1 block 2 at run time,
+the DSP code's instruction forms, the CODE chunk's RAM.
+
+### What is unverified
+
+- **Silicon**, both processors. Nothing here has run on either.
+- **L1 block 2 at run time** (free by every static test, M5's reading) and the
+  SHARC instruction forms the adapter adds (the idle zero-fill's 32 stores are
+  Type 15b, the firmware's own).
+- **The dead entries 1-5 and 11-13** are unread in one UI session; a session is not
+  every path (MIDI, SysEx parameter dumps, copy/paste of a track were not tried).
+- **The frame's slot words after a turn** (the harness's mirror refresh above).
+- **Save and load of a type-5 sound**: the LOAD bound is M5's measured edit; this
+  build's round trip was not run.
+- **LOOP = OFF** is our reading (loop from STRT); the DT2's DSP-side mapping of its
+  frame was not transplanted.
+- **Pitch**: TUNE's coarse semitones only; the fine byte is dropped at `>> 7`.
+
+**Which bytes are whose, again:** committed are our adapter, shims, bank format,
+the plan (addresses, sizes, SHA-256 digests -- the donor's strings are checked by
+digest, never held -- and relocation values) and original test samples. The user's
+sample is read at build time and exists only in the image built from it.
