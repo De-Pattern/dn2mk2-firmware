@@ -108,7 +108,7 @@ RELEASE = dict(sources=ui2.SOURCES, entries=ui2.ENTRIES,
                       value.divert, value.companion, value.waveform,
                       ui.slew, ui.dest, pagelist.pagelist, ui2.rnd,
                       browser],
-               chunks=table.chunks)
+               chunks=table.chunks, idle=True)
 
 
 if __name__ == "__main__":

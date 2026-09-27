@@ -109,8 +109,100 @@ def cave_source(table_va: int, refresh: int, for_block: int = 0) -> str:
     return source
 
 
+# **An idle LFO4 costs the frame nothing (2026-09-27).** The owner's bisect put
+# the save-while-playing stutter on lfo4 alone, and `scripts/emu_mod_cost.py`
+# measured why: every track ran a fourth LFO iteration and a bridge call on
+# every frame, LFO4 in use or not -- evaluator A 9,216 -> 13,696 instructions.
+#
+# Both evaluators count down from the top LFO, and the fourth is the first
+# iteration. So when there is nothing for it to do, the top stub starts the
+# loop where stock does -- three iterations, at LFO3's records -- and the
+# fourth never runs:
+#
+# - **the table is empty** (`ext_live == 0`): no sound has an LFO4, so every
+#   row would be the default row, whose DEST is 0. Nothing is called at all;
+# - **this track's row has DEST 0**: the bridge still refreshes it (that is how
+#   the stub learns DEST), but the iteration is skipped. DEST 0 is the LFOs'
+#   no-destination sink, so the only thing a skipped iteration would have done
+#   is write slot 0 and advance LFO4's own phase.
+#
+# With a destination set, nothing changes: the same call, the same four
+# iterations. What an idle LFO4 loses is only its phase and fade advancing
+# while it has nowhere to go, so a free-running LFO4 resumes from where it
+# paused rather than from where it would have been.
+#
+# The skip leaves every register as stock's own entry would: `%a4` the mirror
+# base, `%a2`/`%a3` (and B's `%a5`) one 40-byte record lower, and the counter 2,
+# so `a4_bottom`'s "counter 2 -> back to the mirror" case never fires and its
+# plain `lea %a4@(-16)` does exactly what stock's did.
+A_TOP_IDLE = """a4_top:
+    tst.l   {ext_live:#010x}
+    beq.s   9f                      | no LFO4 anywhere: no call
+{pull}
+    tst.b   %a4@(74)                | the row's DEST (row + 6, a4 = row - 68)
+    beq.s   8f
+    lea     %a3@(116),%a3           | four iterations, the fourth LFO4
+    rts
+8:  movea.l %sp@(56),%a4            | stock %sp@(52): the mirror block pointer
+9:  lea     %a4@(-34),%a4           | as stock
+    lea     %a3@(76),%a3            | 116 - 40: LFO3's record, where stock starts
+    lea     %a2@(-40),%a2
+    moveq   #2,%d1                  | three iterations, as stock
+    rts
+"""
+
+B_TOP_IDLE = """b_top:
+    tst.l   {ext_live:#010x}
+    beq.s   9f
+{pull}
+    tst.b   %a4@(40)                | the row's DEST (row + 6, a4 = row - 34)
+    bne.s   7f
+    movea.l %sp@(60),%a4            | stock %sp@(56): the real %a4
+9:  lea     %a5@(-40),%a5           | LFO3's records, where stock starts
+    lea     %a2@(-40),%a2
+    moveq   #2,%d2                  | three iterations, as stock
+7:  lea     %a5@(36),%a3
+    addq.l  #4,%a5
+    move.l  %d2,%sp@(52)
+    move.l  %a0,%sp@(56)
+    rts
+"""
+
+
+# `outer` displaces 28 bytes, and the hook pads them with eleven `nop`s that run
+# on every track of every frame after the stub returns. On the ColdFire a
+# `nop` is not free: it waits for the pipeline to drain. So the idle build
+# branches over them: `jsr outer ; bra.s` to where the displaced block ended.
+OUTER_HOOK, OUTER_END = 0x40137AFC, 0x40137B18
+
+
+def skip_padding(content: bytearray) -> None:
+    at = OUTER_HOOK + 6 - BASE
+    pad = bytes(content[at:OUTER_END - BASE])
+    if pad != b"Nq" * (len(pad) // 2) or len(pad) != 22:
+        raise SystemExit(f"outer's padding is not eleven nops: {pad.hex()}")
+    disp = OUTER_END - (OUTER_HOOK + 6 + 2)
+    content[at:at + 2] = bytes([0x60, disp])
+    print(f"  {OUTER_HOOK + 6:#010x}  eleven nops -> bra.s {OUTER_END:#010x}")
+
+
+def idle_skip(source: str, ext_live: int, refresh: int, for_block: int) -> str:
+    """Replace `a4_top` and `b_top` with the versions that skip an idle LFO4."""
+    import re
+
+    for label, body, bias, index, mask, callee in (
+            ("a4_top", A_TOP_IDLE, 68, "%a4", "%sp", for_block or refresh),
+            ("b_top", B_TOP_IDLE, 34, "%d0", "#0", refresh)):
+        pull = PULL.format(index=index, mask=mask, refresh=callee, bias=bias)
+        pattern = re.compile(rf"^{label}:\n.*?^    rts\n", re.S | re.M)
+        if len(pattern.findall(source)) != 1:
+            raise SystemExit(f"expected one {label} stub to replace")
+        source = pattern.sub(lambda _: body.format(ext_live=ext_live, pull=pull), source)
+    return source
+
+
 def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=None,
-         defines=None, include=(), exports=()) -> int:
+         defines=None, include=(), exports=(), idle=False) -> int:
     """Build it. `extra` are further site patches, each `f(content, code)`.
 
     The arguments exist so a build that is *this one plus a site* -- step 4's
@@ -125,6 +217,9 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     `include` adds header directories (a generated header, for one), and
     `exports` adds symbol prefixes to `symbols.json` beside `lfo4_` and `ext_`
     -- Waverider Milestone 0 is the first build to need both.
+
+    `idle` builds the evaluator stubs that skip an idle LFO4 (`idle_skip`);
+    the release sets it, and every diagnostic build before it did not.
     """
     firmware = load(read_image(STOCK))
     section = firmware.container.find(MAIN_OS)
@@ -156,8 +251,10 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
     print("part 3 -- the engine, from step 3")
     stub_va = v6a.CAVE
     v6a.require_zero(content, v6a.CAVE, v6a.CAVE_CAP, "cave region")
-    payload, offsets = v6a.assemble_stubs(
-        cave_source(table_va, code["lfo4_refresh"], code["lfo4_row_for_block"]), stub_va)
+    stubs = cave_source(table_va, code["lfo4_refresh"], code["lfo4_row_for_block"])
+    if idle:
+        stubs = idle_skip(stubs, code["ext_live"], code["lfo4_refresh"], code["lfo4_row_for_block"])
+    payload, offsets = v6a.assemble_stubs(stubs, stub_va)
     if len(payload) > v6a.CAVE_CAP:
         raise SystemExit(f"cave overflows: {len(payload)} > {v6a.CAVE_CAP}")
     content[stub_va - BASE:stub_va - BASE + len(payload)] = payload
@@ -170,6 +267,8 @@ def main(sources=SOURCES, entries=ENTRIES, out=OUT, syx=SYX, extra=(), chunks=No
         new = op + v6a.be32(offsets[label])
         new += b"\x4e\x71" * ((len(was) - len(new)) // 2)
         v6a.poke(content, va, was, new, f"{kind} -> {label}")
+    if idle:
+        skip_padding(content)
 
     for patch in extra:
         patch(content, code)
