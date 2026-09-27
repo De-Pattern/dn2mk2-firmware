@@ -7,6 +7,10 @@ the track buffer. A NaN or Inf (exponent field 0xff) becomes 0; the value is
 clamped to [-1, +1] and scaled by 0.5. If the silence is poisoning of the shared
 chain by NaN/Inf/huge values, D4 plays a quiet saw.
 
+**`--variant constpitch`** (on M5d's loop): the pitch block -- the note-cell read,
+the integer validation, MIN, TRUNC, FLOAT and the table interpolation -- becomes a
+constant increment (note 60). If M5d still dies and this plays, the pitch path is it.
+
 **D3, `--variant scratch` (the default)**:
 
 m5c silenced the instrument on a WAVERIDER trig (2026-09-27), and D2 (the reader never
@@ -99,11 +103,32 @@ def scratch_reader(work: pathlib.Path, variant: str = "scratch") -> bytes:
     raise SystemExit("the reader's jump targets did not settle")
 
 
+PITCH_START = "      // pitch: this track's note cell, 0x254b14 + 4t\n"
+PITCH_END = "      DM(2, I4) = R1;                   // inc\n"
+CONST_PITCH = """      // DISCRIMINATOR: a constant increment (note 60, dnfw.waverider.live.increment),
+      // no note read, no float operation, no conversion
+      R1 = 23409860;
+      DM(2, I4) = R1;                   // inc
+"""
+
+
+def constpitch_loop(work: pathlib.Path) -> bytes:
+    """machine5_live.asm with the pitch block replaced by a constant increment."""
+    import sharc_resolve_jumps as rj  # noqa: PLC0415
+    src = (ROOT / "csrc/waverider/sharc/machine5_live.asm").read_text(encoding="utf-8")
+    a, b = src.find(PITCH_START), src.find(PITCH_END)
+    if a < 0 or b < a:
+        raise SystemExit("machine5_live.asm's pitch block is not where this expects it")
+    src = src[:a] + CONST_PITCH + src[b + len(PITCH_END):]
+    _, be, _ = rj.resolve(src, dsp.LOOP_SW, work)
+    return sharc_object.load_bytes(be)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--m5b", type=pathlib.Path, required=True)
     ap.add_argument("--out", type=pathlib.Path, required=True)
-    ap.add_argument("--variant", choices=("scratch", "sanitise"), default="scratch")
+    ap.add_argument("--variant", choices=("scratch", "sanitise", "constpitch"), default="scratch")
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
     a = ap.parse_args(argv)
@@ -114,15 +139,18 @@ def main(argv=None) -> int:
     stock = m1.dn2_section7(a.stock)
     with tempfile.TemporaryDirectory() as tmp:
         work = pathlib.Path(tmp)
-        reader = scratch_reader(work, a.variant)
         base = dsp.objects()
-        if len(reader) > dsp.CODE_SPAN - 64:
-            raise SystemExit("the scratch reader does not fit its span with 64 bytes of padding")
-        dsp.objects = lambda: {**base, "reader": reader}          # this build only
+        if a.variant == "constpitch":
+            key, obj = "machine5_live", constpitch_loop(work)
+        else:
+            key, obj = "reader", scratch_reader(work, a.variant)
+        if len(obj) > dsp.CODE_SPAN - 64:
+            raise SystemExit(f"the {key} object does not fit its span with 64 bytes of padding")
+        dsp.objects = lambda: {**base, key: obj}                  # this build only
         s7 = dsp.section7(stock)
         p = work / "s7.bin"
         p.write_bytes(s7)
-        print(f"section 7: {len(s7)} bytes, sha256 {hashlib.sha256(s7).hexdigest()}; reader {len(reader)} B, "
+        print(f"section 7: {len(s7)} bytes, sha256 {hashlib.sha256(s7).hexdigest()}; {key} {len(obj)} B, "
               f"variant {a.variant}")
         return dnfw(["build", "-o", str(a.out), "-s", f"7={p}", str(a.m5b)]) or 0
 

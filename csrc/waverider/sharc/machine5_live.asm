@@ -97,11 +97,11 @@ wr_t5v_loop.:
       R3 = DM(I5, M6);                  // this track's buffer; I5 -> next
       R4 = 5;
       COMP(R2, R4);
-      IF NE JUMP 0x16ee14;              // -> wr_t5v_next.
+      IF NE JUMP 0x16ee29;              // -> wr_t5v_next.
       R4 = DM(0x2de600);                // the baked directory's magic
       R2 = 0x57525431;
       COMP(R4, R2);
-      IF NE JUMP 0x16ee14;              // no directory: render nothing
+      IF NE JUMP 0x16ee29;              // -> wr_t5v_next. (no directory: render nothing)
 
       // t, and from it every per-track address (no pointer survives the reader call)
       R0 = DM(0x2dde80);
@@ -131,10 +131,18 @@ wr_t5v_loop.:
       I1 = R2;
       R4 = DM(0, I1);                   // the word holding WAV1
       R5 = DM(1, I1);                   // the next one
+      // M5d: no conditional computes (the stock corpus has no conditional shift);
+      // the firmware's own `IF cond JUMP abs` and unconditional shifts instead
       R7 = -16;
       R1 = PASS R1;
-      IF EQ R5 = LSHIFT R4 BY R7;       // t even: WAV1 low, TBL1 high half of word 0
-      IF NE R4 = LSHIFT R4 BY R7;       // t odd:  WAV1 high half of word 0, TBL1 low of 1
+      IF NE JUMP 0x16edaf;                   // -> wr_t5v_odd.
+      R5 = LSHIFT R4 BY R7;             // t even: WAV1 low, TBL1 high half of word 0
+      JUMP 0x16edb1;                         // -> wr_t5v_halves.
+.GLOBAL wr_t5v_odd.;
+wr_t5v_odd.:
+      R4 = LSHIFT R4 BY R7;             // t odd:  WAV1 high half of word 0, TBL1 low of 1
+.GLOBAL wr_t5v_halves.;
+wr_t5v_halves.:
       R6 = 0xffff;
       R4 = R4 AND R6;                   // WAV1, half the sound's value, 0..0x3c00
       R5 = R5 AND R6;                   // TBL1, 0x0000 or 0x0080
@@ -143,7 +151,10 @@ wr_t5v_loop.:
       R1 = LSHIFT R5 BY -7;
       R2 = DM(0x2de604);                // the directory's count
       COMPU(R1, R2);
-      IF GE R1 = R1 - R1;               // out of range -> slot 0
+      IF LT JUMP 0x16edc2;                   // -> wr_t5v_slot_ok.
+      R1 = R1 - R1;                     // out of range -> slot 0
+.GLOBAL wr_t5v_slot_ok.;
+wr_t5v_slot_ok.:
       R1 = LSHIFT R1 BY 2;
       R12 = 0x2de608;
       R1 = R12 + R1;
@@ -163,12 +174,26 @@ wr_t5v_loop.:
       R2 = R12 + R2;
       I1 = R2;
       R8 = DM(0, I1);                   // note, float semitones
+      // M5d: the note is validated in the integer domain before any float operation:
+      // an exponent field of 0xff (NaN, Inf) or a set sign bit gives +0.0
+      R2 = LSHIFT R8 BY -23;
+      R12 = 0xff;
+      R2 = R2 AND R12;                  // the exponent field
+      COMP(R2, R12);
+      IF EQ JUMP 0x16edf6;                   // -> wr_t5v_note0.
+      R8 = PASS R8;
+      IF LT JUMP 0x16edf6;                   // -> wr_t5v_note0.
+      JUMP 0x16edf7;                         // -> wr_t5v_note_ok.
+.GLOBAL wr_t5v_note0.;
+wr_t5v_note0.:
+      R8 = R8 - R8;                     // +0.0
+.GLOBAL wr_t5v_note_ok.;
+wr_t5v_note_ok.:
       R12 = 0x42fe0000;                 // 127.0
-      F8 = MIN(F8, F12);
-      R12 = R12 - R12;                  // 0.0
-      F8 = MAX(F8, F12);
+      F8 = MIN(F8, F12);                // 0 <= note <= 127, finite
       R0 = TRUNC F8;                    // k, 0..127
-      F1 = FLOAT R0;
+      R12 = R12 - R12;                  // 0: the scale of FLOAT ... BY (the stock corpus
+      F1 = FLOAT R0 BY R12;             // has FLOAT only with BY or with a parallel move)
       F8 = F8 - F1;                     // fr, 0 <= fr < 1
       R0 = LSHIFT R0 BY 2;
       R12 = 0x2de200;                   // &T[0]
@@ -188,7 +213,7 @@ wr_t5v_loop.:
       R4 = DM(0x2dde84);                // wr_render5's argument: the reader block
       CJUMP 0x16eb00 (DB);              // wr_render5(R4 = reader block)
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0x16ee13;            // return address - 1: wr_t5v_next. - 1
+      DM(I7, M7) = 0x16ee28;            // return address - 1: wr_t5v_next. - 1
 
 .GLOBAL wr_t5v_next.;
 wr_t5v_next.:

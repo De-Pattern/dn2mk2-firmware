@@ -89,7 +89,7 @@ wr_render5.:
       R15 = -23;                        // sample fraction scale, 2^-23
       R8 = -15;                         // int16 -> float full scale, 2^-15
       R12 = PASS R12;
-      IF EQ JUMP 0x16eba7;              // count 0: write nothing
+      IF EQ JUMP 0x16eba6;              // -> wr5_done. (count 0: write nothing)
       R12 = -16;
 
 .GLOBAL wr5_loop.;
@@ -116,7 +116,7 @@ wr5_loop.:
       R2 = 16;
       R3 = LSHIFT R9 BY -19;
       R3 = R3 AND R2;                   // shB = 16 * (k & 1)
-      R2 = R3 XOR R2;                   // shA = 16 - shB
+      R2 = R2 - R3;                     // shA = 16 - shB (M5d: SUB, a stock shape; XOR was not)
       R4 = LSHIFT R4 BY R2;
       R4 = ASHIFT R4 BY R12;            // s00 = sample k
       R5 = LSHIFT R5 BY R3;
@@ -146,7 +146,7 @@ wr5_loop.:
       R1 = 1;
       R0 = R0 - R1;
       DM(4, I4) = R0;                   // samples left
-      IF NE JUMP 0x16eb41;
+      IF NE JUMP 0x16eb41;              // -> wr5_loop.
 
 .GLOBAL wr5_done.;
 wr5_done.:
