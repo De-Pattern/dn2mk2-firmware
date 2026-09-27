@@ -551,3 +551,125 @@ writes nothing into the track buffer, so WAVERIDER stays silent.
 |---|---|
 | plays through the trig, WAVERIDER silent | the fault is the write into the track buffer (then: what on silicon differs about that buffer, e.g. the chain reading our floats) |
 | still dies on the trig | the reader call or its reads. What is left: the CJUMP/return mechanics in our code, and the reads of the frame copy and note cell. A note cell that is NaN or huge on silicon would make `TRUNC` raise an invalid-operation sticky, which only matters if an FP exception interrupt is enabled. Not checked; a candidate for the next static pass |
+
+## D4: the sanitised-output discriminator, and the value hypothesis (2026-09-27)
+
+**The hypothesis (the coordinator's).** Writing the buffer is harmless: ONESHOT's
+`os_quiet` wrote zeros into it every block, and that played. What changes at the
+trig is the values. NaN, Inf or huge output would enter the per-track chain and
+the shared FX feedback and poison the master mix, while the DSP keeps running.
+
+### What our reader can output, by construction
+
+Every output sample is `y = a + ff (b - a)`, where:
+
+- `a = s00 + fr (s01 - s00)` and `b = s10 + fr (s11 - s10)`;
+- each `s` is an int16 word from the table, scaled by `FLOAT ... BY -15`, so
+  `|s| <= 1`;
+- `fr = FLOAT(phase & 0x7fffff) BY -23` is in `[0, 1)`;
+- `ff = FLOAT(pos & 0xffff) BY -16` is in `[0, 1)`.
+
+No input can make a NaN or an Inf through that arithmetic: `|y| <= 1` always. A
+wrong input only changes which words are read and where:
+
+| input | wrong value | effect |
+|---|---|---|
+| note cell | NaN | `TRUNC` saturates, so it gives a wild pitch-table index |
+| pitch-table index | out of range | shifted by 2 and added to the table base, it wraps to a nearby word of our own block-1 region |
+| inc | wrong | a wrong pitch |
+| POS, SLOT | wrong | clamped (POS <= frame 15; a SLOT >= the count plays slot 0) |
+
+So **a NaN/Inf/huge output from our code is not possible on silicon either**,
+unless the silicon's FLOAT/MIN/MAX differ from IEEE float32. ONESHOT's DT2 render
+is the DT2's own shipped code and is equally bounded. Any poisoning therefore has
+to be **downstream of a bounded, non-zero input**: a per-track chain stage whose
+state or coefficients are wrong for a type-5 track, so that it blows up only when
+excited. D1 fits this: it trigs a type-5 track with a zero buffer and plays. D4
+tests the level, not NaN.
+
+### D4 `waverider-disc-m5c-sanitise_DN2_1.11.syx`
+
+m5b's section 3 plus m5c's section 7, with **one change**: 12 instructions inserted
+before the reader's store `DM(I2, M6) = F4`:
+
+```
+16eb9c  r0 = lshift r4 by -23 ; r1 = 0xff ; r0 = r0 and r1 ; comp(r0, r1)
+16eba3  if eq r4 = r4 - r4          ; exponent 0xff (NaN, Inf) -> +0
+16eba6  r0 = 0x3f800000 ; f4 = min(f4, f0)     ; <= +1
+16ebab  r0 = 0xbf800000 ; f4 = max(f4, f0)     ; >= -1
+16ebb0  r0 = 0x3f000000 ; f4 = f4 * f0         ; x 0.5
+16ebb4  dm(i2, m6) = r4
+```
+
+The listing above is digikit's boundaries with selmap's text, and the two agree
+on every instruction.
+
+- Built by `scripts/build_waverider_disc_scratch.py --variant sanitise` (reader
+  398 B, jumps re-resolved).
+- `dnfw inspect`: 21 of 21 ok.
+- `dnfw diff` against m5c: only section 7, 72 bytes inside the reader's block;
+  section 3 identical.
+- Section 7 sha256 `f0a7dff6cbeabeda...`.
+
+**Runner** (`scratchpad d4check.py`, 4 blocks each, digikit `6f812e9`):
+
+| case | result |
+|---|---|
+| track 0 type 5 trigged, tracks 1-4 WaveTone/FM Tone/FM Drum/Swarmer trigged | D4's machine tap = m5c's x 0.5, **0 mismatches in 128** (peak 0.9926 -> 0.4963); tracks 1-15 **bit-identical to stock** |
+| POS 120 | 0 mismatches in 128 (0.5550 -> 0.2775) |
+| TBL1 1, WAV1 0x2000 | 0 mismatches in 128 (0.9992 -> 0.4996) |
+| no type-5 track | all 16 buffers bit-identical to stock |
+
+Not run: the full 26-check gate, whose bit-exactness check expects x 1. The
+comparisons above are its x 0.5 counterparts.
+
+### (a) The mode and interrupt state the dispatch runs with
+
+From `__start` (sw `0x1c0e70`):
+
+- `bit set mode1 0x78`, then `bit clr mode1 0xa078`, then
+  `bit set mode1 0x1011800`. That gives:
+  - **RND32 = 1** (bit 16, 32-bit float);
+  - **TRUNC = 0** (bit 15, round to nearest);
+  - **ALUSAT = 0** (bit 13, fixed-point wraps);
+  - NESTM and IRPTEN on;
+  - **CBUFEN = 1** (bit 24, circular buffering enabled).
+- `L0-L5` and `L8-L15` are zeroed there; `L6 = L7 = 0x1fd`.
+- The slot dispatch `0x1c8ef1..0x1c9448` writes no MODE1, MODE2, L or B register.
+  It switches SIMD (bit 21) on and off only after `0x1c944c`.
+- **Our code writes no mode register.** It relies on:
+  - RND32 = 1, so float32 matches the reference;
+  - ALUSAT = 0, since the phase accumulator wraps mod 2^32;
+  - L0, L2 and L4 = 0, since `DM(I2, M6)` post-modifies with CBUFEN on. That is
+    the C ABI's own invariant, and the stock code relies on it the same way.
+
+  `TRUNC` and `FLOAT` are explicit instructions and do not depend on the TRUNC
+  bit. Only the multiplies and adds do, and round-to-nearest is what the
+  reference assumes.
+- **FP-exception interrupts: not settled statically.** `IMASK` is cleared at
+  startup (`bit clr imask`, sw `0x1c0e79`). Bits are then set through a generic
+  per-bit table in L2 (sw `0x2000b63b..0x2000b6a9`, one `bit set imask` per bit),
+  whose callers decide which are enabled at run time. Our code cannot raise an
+  overflow or an invalid operation from bounded data except through `TRUNC` of a
+  NaN note. Whether FLTII is enabled is an open, cheap follow-up (the callers of
+  that table).
+
+### (b) Inputs the reader reads, and where the runner gets them
+
+| input | in the runner | on silicon | could differ? |
+|---|---|---|---|
+| WAV1, TBL1 in the frame copy `0x25c48c` | written by the stock unpack (code that ran) from the harness's frame, or from the ColdFire emulator's own frames (init, WAV1 max, TBL1 1) | the ColdFire's DMA frame | yes, but a wrong value is clamped |
+| note cell `0x254b14 + 4t` | written by the stock unpack from the **harness's** note and trigger fields (note 60, trigger) | the unpack of a frame **from a played note**, which was never captured (M5: "the ISR entered with a trig held did not reach the builder") | **yes: the least-tested input.** A wrong value gives a wrong pitch, never a non-finite sample |
+| pitch table, directory, tables | our boot blocks | the same boot blocks; D2 proved the block reads in block 2 | unlikely |
+| count (the dispatch's R9) | code that ran; 32 | the same code | unlikely |
+| buffer pointer `0x254a60 + 4t` | written by the engine init (sw `0x1c14de`) that ran | the same | no (traced above) |
+| I6/I7 frame | the harness's `unpack_call` frame | the engine task's stack | our code pushes two words and pops them with RFRAME; the stock callers do the same |
+| the engine state behind the chain | the post-init snapshot (the runner ran `0x1c1445`) plus per-block frames | init plus every frame since boot, including the track's previous machine | **yes: the chain's per-track state for a track that became type 5 is never set up by a per-type arm** |
+
+### Reading D4 on the instrument
+
+| outcome | reads as |
+|---|---|
+| plays **and** makes a quiet saw | level/overload, not NaN: something in the chain overloads at full scale on a type-5 track. D4's clamp and scale join the fix |
+| plays, WAVERIDER silent | our values are 0 on silicon: the inputs are wrong (the note cell or frame copy of a real trig) |
+| still dies at the trig | not our values' magnitude. Flash D3 next. **D3 plays and D4 dies** means that exciting the chain with any bounded non-zero signal kills it: a per-track stage that is unstable for a type-5 track. The next static target is then the per-track chain state that WaveTone's setup arm writes and MIDI's does not |

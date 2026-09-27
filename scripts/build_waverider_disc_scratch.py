@@ -1,6 +1,13 @@
-"""Hardware discriminator: M5c with the reader's output sent to a private scratch buffer.
+"""Hardware discriminators on M5c's reader: D3 (scratch output) and D4 (sanitised output).
 
-    python scripts/build_waverider_disc_scratch.py --m5b IMAGE.syx --out OUT.syx
+    python scripts/build_waverider_disc_scratch.py --m5b IMAGE.syx --out OUT.syx [--variant scratch|sanitise]
+
+**D4, `--variant sanitise`**: the reader's value is sanitised before it is stored to
+the track buffer. A NaN or Inf (exponent field 0xff) becomes 0; the value is
+clamped to [-1, +1] and scaled by 0.5. If the silence is poisoning of the shared
+chain by NaN/Inf/huge values, D4 plays a quiet saw.
+
+**D3, `--variant scratch` (the default)**:
 
 m5c silenced the instrument on a WAVERIDER trig (2026-09-27), and D2 (the reader never
 called) did not. This build keeps everything m5c does -- the loop, the CJUMP, the
@@ -35,6 +42,21 @@ from dnfw.waverider import dsp  # noqa: E402
 SCRATCH_DM = 0x2DE800                         # 2 KB of the directory's padding, zeros at boot
 OUT_LOAD = "      R0 = DM(5, I4);\n"
 OUT_SCRATCH = f"      R0 = {SCRATCH_DM:#x};                 // DISCRIMINATOR: private scratch, not the track buffer\n"
+STORE = "      DM(I2, M6) = F4;\n"
+SANITISE = """      // DISCRIMINATOR D4: NaN/Inf -> 0, clamp to [-1, 1], scale by 0.5
+      R0 = LSHIFT R4 BY -23;
+      R1 = 0xff;
+      R0 = R0 AND R1;                   // the exponent field
+      COMP(R0, R1);
+      IF EQ R4 = R4 - R4;               // NaN or Inf -> +0 (a fixed-point subtract of the bits)
+      R0 = 0x3f800000;                  // 1.0
+      F4 = MIN(F4, F0);
+      R0 = 0xbf800000;                  // -1.0
+      F4 = MAX(F4, F0);
+      R0 = 0x3f000000;                  // 0.5
+      F4 = F4 * F0;
+      DM(I2, M6) = F4;
+"""
 
 
 def labels(text: str) -> dict[str, int]:
@@ -53,12 +75,13 @@ def labels(text: str) -> dict[str, int]:
     return out
 
 
-def scratch_reader(work: pathlib.Path) -> bytes:
+def scratch_reader(work: pathlib.Path, variant: str = "scratch") -> bytes:
     import sharc_waverider_m3 as m3  # noqa: PLC0415  (WSL + selas)
     src = (ROOT / "csrc/waverider/sharc/reader_m5.asm").read_text(encoding="utf-8")
-    if src.count(OUT_LOAD) != 1:
-        raise SystemExit("reader_m5.asm's out load is not where this expects it")
-    src = src.replace(OUT_LOAD, OUT_SCRATCH)
+    old, new = (OUT_LOAD, OUT_SCRATCH) if variant == "scratch" else (STORE, SANITISE)
+    if src.count(old) != 1:
+        raise SystemExit(f"reader_m5.asm's {old.strip()!r} is not where this expects it")
+    src = src.replace(old, new)
     jumps = re.findall(r"IF (?:EQ|NE) JUMP (0x[0-9a-f]+);", src)
     if len(jumps) != 2:
         raise SystemExit(f"expected the reader's two absolute jumps, found {jumps}")
@@ -80,6 +103,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--m5b", type=pathlib.Path, required=True)
     ap.add_argument("--out", type=pathlib.Path, required=True)
+    ap.add_argument("--variant", choices=("scratch", "sanitise"), default="scratch")
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
     a = ap.parse_args(argv)
@@ -90,7 +114,7 @@ def main(argv=None) -> int:
     stock = m1.dn2_section7(a.stock)
     with tempfile.TemporaryDirectory() as tmp:
         work = pathlib.Path(tmp)
-        reader = scratch_reader(work)
+        reader = scratch_reader(work, a.variant)
         base = dsp.objects()
         if len(reader) > dsp.CODE_SPAN - 64:
             raise SystemExit("the scratch reader does not fit its span with 64 bytes of padding")
@@ -99,7 +123,7 @@ def main(argv=None) -> int:
         p = work / "s7.bin"
         p.write_bytes(s7)
         print(f"section 7: {len(s7)} bytes, sha256 {hashlib.sha256(s7).hexdigest()}; reader {len(reader)} B, "
-              f"output -> {SCRATCH_DM:#x}")
+              f"variant {a.variant}")
         return dnfw(["build", "-o", str(a.out), "-s", f"7={p}", str(a.m5b)]) or 0
 
 
