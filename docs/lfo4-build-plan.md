@@ -6464,3 +6464,63 @@ The emulator had shown the chain down to the record's lane but not the worker
 running the queued job unprompted; the instrument closes that gap. The release
 build without telemetry is `lfo4-everyvoice4_DN2_1.11.syx` (boot gate and the
 pollution checks green).
+
+## Idle costs nothing: the save-while-playing stutter (2026-09-27)
+
+**The owner's report, restated.** With fxmod + lfo4 + songguard + arpmodes,
+SAVE PROJECT while a pattern plays gives an audible stutter until the save ends,
+heard most on track 3 (conditional trigs), with the arp on UP as much as on
+RAND. Stock 1.11 does not. The bisect settled it on the instrument:
+`fxmod-songguard-arpmodes` (the same build without lfo4) saves clean.
+
+**Measured, not inferred** (`scripts/emu_mod_cost.py`, `ui1200M`, the same
+inputs for every build). lfo4 was the only mod with a cost on the path every
+build runs:
+
+| probe | stock | lfo4 (everyvoice4) | lfo4-fast, idle | lfo4-fast, LFO4 on 16 tracks |
+|---|---|---|---|---|
+| evaluator A, one frame | 9,216 | 13,696 (+4,480, +49%) | **9,664 (+448, +4.9%)** | 13,600 |
+| evaluator B, one index | 521 | 756 (+235) | **547 (+26)** | 760 |
+| memcpy, 202 B | 103 | 120 (+17) | **107 (+4)** | 110 |
+| memcpy, 2,688 B | 1,027 | 1,110 (+82) | **1,031 (+4)** | 1,122 |
+| memset, 1,163 B | 464 | 532 (+68) | **468 (+4)** | -- |
+| whole-project serialise | 17,565,044 | 18,663,483 (+6.3%) | **18,120,160 (+3.2%)** | 18,303,765 |
+
+No mod writes the status register, none touches task creation or priorities,
+and the only writes above BSS are the evaluators' own into LFO4's relocated
+state. So the stutter was load, not scheduling: every frame paid a fourth LFO
+iteration and a bridge call per track, used or not, and every copy in the
+firmware paid a call to learn it was not a sound.
+
+**The fix, in two parts.**
+
+1. **The evaluators skip an idle LFO4** (`scripts/build_lfo4_bridge.py`,
+   `idle_skip`). Both count down from the top LFO and LFO4 is the first
+   iteration, so the top stub starts the loop where stock does -- three
+   iterations at LFO3's records -- when the table is empty (no call at all) or
+   the track's row has DEST 0. With a destination the path is unchanged. The
+   release also branches over the eleven `nop`s behind the per-track advance.
+2. **The `memcpy` / `memset` stubs test first** (`csrc/lfo4/hooks.S`): an empty
+   table or a block smaller than a sound goes straight back to the routine.
+   The C did exactly that test anyway, after a call.
+
+**What an idle LFO4 gives up:** its phase and fade stop advancing while it has
+no destination, so a free-running LFO4 given a destination resumes from where
+it paused. Its output with DEST 0 went to slot 0, the no-destination sink, and
+nothing else. With the table empty the carry's diagnostic counters
+(`lfo4_copies`, the size log) no longer count copies; no entry changes.
+
+**Checked against the old build** (`scripts/emu_lfo4_idle.py`, 64 frames of
+evaluator A and every index of B, in four cases): table empty, sixteen rows with
+no destination, a mix, and every track on filter base. Every word evaluator A
+writes is identical except, in the no-destination case, the sixteen slot-0
+sinks. Slot 76 moves in the same blocks as the old build (sixteen, because in
+`ui1200M` four tracks already own every voice).
+
+**Builds:** `lfo4-fast_DN2_1.11.syx` (`build_lfo4_browser.py --name lfo4-fast`,
+which `gen_lfo4_code.py` packages byte for byte) and the owner's combination
+`fxmod-lfo4fast-songguard-arpmodes_DN2_1.11.syx` (`dnfw mods apply`).
+
+**Not covered here:** evaluator B wrote nothing in any case from this snapshot,
+so its skip is shown by instruction count only. The frame itself, the sequencer
+and a save running beside them are not modelled; the instrument decides.
