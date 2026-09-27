@@ -120,8 +120,23 @@ must be read from the DN2 image itself.
 
 ## ems-octakit — inspiration only, not ported
 
-<https://github.com/emuyia/ems-octakit>, by emuyia. **No licence file** — so
-its code is *not* ported; it is read only for architecture.
+<https://github.com/emuyia/ems-octakit>, by emuyia. ~~**No licence file** — so
+its code is *not* ported; it is read only for architecture.~~ **Corrected
+2026-09-13, heading left stale until now:** the repo added an **MIT LICENSE**
+that day (see the Licence audit below) — it *may* be ported with attribution.
+Nothing has been ported yet regardless, so "inspiration only" still describes
+current practice, just not current permission.
+
+**Update, 2026-09-27.** Its development builds are also offered from the
+author's own site, <https://www.junes.website/goodies/octakit> — the same
+project, not a second one; the page states only "do not redistribute the
+generated `.syx`, share this page instead," which is a restriction on the
+generated firmware file, not a separate code licence. And `sambanks/octabam`
+now carries it as the **OCTAKIT** module (`modules/octakit/`): 256 Kits per
+Project replacing the stock 64 Parts, built from a pinned submodule of this
+repo and reproduced byte for byte against emuyia's own build before being
+proven on hardware (`ok-ms`, 14 Sep 2026) — a second independent
+byte-identity check of the kind this project has had little of.
 
 It patches the same Octatrack 1.40C but takes a more industrial route than a
 hand-rolled encoder: hand-written `.S` ColdFire assembly (`runtime/*.S`)
@@ -202,6 +217,12 @@ findings change what may be copied**, and both moved since this project started:
 | **`m-dwyer/digikit`** | **GPL-2.0-or-later** | **yes, with care** — see below. Taken forward as GPLv3 it combines with this repo's AGPL-3.0-or-later; **using it as a tool entangles nothing at all**, which is the route to prefer |
 | **`irpina/digiemu`** (added 2026-09-24) | **GPL-2.0-or-later** | **yes, with care.** Taken forward as GPLv3 it combines with this repo's AGPL-3.0-or-later, and it is GPL-2.0-compatible for digikit. Its six files are *Unicorn* patches, so **using them is using a tool and entangles nothing at all** -- the route to prefer, exactly as with digikit |
 | `js216/selache` (added 2026-09-19) | GPL-3.0; `libsel` MIT | may link (GPL-3.0 combines with our AGPL-3.0) but **not vendored**: `tools/selmap` is our own harness over a local checkout. Never into digikit, which is GPL-2.0 |
+| **`irpina/elekloader`** (added 2026-09-27) | **GPL-2.0-only** — `NOTICE` states "version 2" explicitly, no "or later" anywhere, confirmed 2026-09-27 | **no.** Not combinable with AGPL-3.0-or-later. Design reference and tool only |
+| **`irpina/digihealth`** (added 2026-09-27) | **GPL-2.0-only** — same as elekloader; re-checked 2026-09-27 against `LICENSE` and three source headers, all silent, none contradict | **no.** Design reference and tool only |
+| **`irpina/digislicer`** (new 2026-09-27) | **GPL-2.0-only** — same bare GPL-2.0 text, no "or later" | **no.** Design reference and tool only |
+| **`timhastie/octatrick`** (new 2026-09-27) | **MIT**, plus a trailing paragraph scoping the grant to the repo's own code (not Elektron firmware, not submodule content) — this appended text is why GitHub's API reports "NOASSERTION"/"Other" rather than plain MIT | **yes, for octatrick's own code**, with attribution. Ported submodule content (`octatrick-modules`) and any Elektron material stay out of the grant |
+| **`timhastie/octa-panel`** (licence checked for the first time 2026-09-27) | **MIT**, identical carve-out text to octatrick's (same appended paragraph, same reason for "NOASSERTION") | **yes**, with attribution, for the same reason as octatrick — though see the correction below: this repo is now a historical dev log, not the live location |
+| **`Zac-Kyoti/octatrack-kyoti-fw`** (new 2026-09-27) | **MIT with explicit exclusions**: `tools/attic/` (inherited from `mxldyn/octamax`, tagged `SPDX-License-Identifier: NONE`), patches to third-party tools and anything fetched at build time (keeps its own upstream licence — `dsp56300/dsp56300` is GPLv3, `octabam` is MIT), and all Elektron material | **yes, for the covered code**, with attribution. `tools/attic/` and vendored/patched third-party code are **not** covered — same "no" as octamax for the attic specifically |
 
 **The restriction moved rather than lifted.** `ems-octakit` was the one to avoid
 and is now free to use; `octamax` is now the one to avoid. Earlier notes in this
@@ -666,8 +687,13 @@ The clones were fetched read-only. What matters here, ranked:
 7. **`emuyia/ems-octakit`**: its exception reporter stamps a build identity into
    the crash screen, a cheap addition to our fault reporting. **octabam** also
    documents Octatrack LFO evaluation on the ColdFire (`docs/firmware/LFO.md`).
-8. **`timhastie/octa-panel`** is a paraphonic FM engine on the Octatrack's
-   ColdFire. Its licence is not checked, so inspiration only.
+8. ~~**`timhastie/octa-panel`** is a paraphonic FM engine on the Octatrack's
+   ColdFire. Its licence is not checked, so inspiration only.~~ **Corrected
+   2026-09-27:** octa-panel is Tim Hastie's dev log for a real-time C++
+   ColdFire+DSP56300 emulator with a virtual front panel, and the earlier home
+   of the synth/quantizer/direct-jump modules now live at `timhastie/octatrick`
+   and merged upstream into `sambanks/octabam`. Its licence is now checked —
+   MIT, same terms as octabam's. See the full entries below.
 
 No new commits in: elektron-firmware-tool, octa-bt-pt, octamax, selache,
 adsp-ldr. lalzart has only its CC0 commit.
@@ -705,6 +731,16 @@ as a tool.
 - **For the DN2 it lacks the HMAC trailer** (`docs/DEVICES.md` says so: it
   refuses sealed devices until ported). We have the trailer.
 
+**Correction, 2026-09-27 (same-day fact update, not a reversal).** v0.3.0
+(commit `640c580`) added a second device profile: the **Octatrack MKI/MKII, OS
+1.40C**. This is whole-image (format-1) support only — `elekloader` rebuilds
+and re-flashes the Octatrack's `.syx`/`.bin` container byte for byte — not the
+`core`/hook-bus mod system above. `docs/DEVICES.md` names why: the Octatrack's
+bootloader staging address is unknown, so the in-place unpack cannot be
+simulated, and its free run-time areas are unmapped, so there is no linker
+layout for it yet. Digitakt mk1 remains the only device with linkable
+(format-2) mods.
+
 ### digihealth: the runtime probe
 - **FAST AUDIO:** copies the render's hot code (~19 KB) into free on-chip SRAM
   that the OS clears at boot and never uses. It checksums the copy once a second
@@ -737,3 +773,324 @@ as a tool.
 ### Status
 **[O]**: read from the repositories' READMEs, NOTICE, DEVICES.md and ADAPTING.md
 on 2026-09-27. Nothing run.
+
+---
+
+## `irpina/digislicer` — a slice editor built as an elekloader mod
+
+<https://github.com/irpina/digislicer>, by irpina. Targets the **Digitakt
+mk1, OS 1.53**, confirmed from its own README rather than assumed from
+elekloader's other mods. Two releases: v1.0 (2026-09-26), v1.1 (2026-09-27,
+knob A-D labels and smooth knob-D zoom).
+
+**Licence: GPL-2.0.** Same bare Version 2 text as elekloader and digihealth,
+no "or later" anywhere in `LICENSE` or the README's licence line. Read as
+**GPL-2.0-only**, not combinable with our AGPL-3.0-or-later. Design reference
+and tool only, same as the rest of the irpina set.
+
+It adds a slice editor for the Digitakt's **SLICE machine**: hold YES for
+about a second on a SLICE track's SRC page to open it, then knobs A-D
+select/move/fine-move/zoom a slice boundary. Slices persist per sample by
+content hash to the `+Drive` (`/cfw/slices.a`, `/cfw/slices.b`), and v1.1
+added a GRID `AUTO` position that runs transient-based auto-slicing. It is
+built on elekloader's **format-2** (linkable, hook-bus) mod architecture — the
+same `core`-owned event system documented above — and is checked against a
+specific `core` version (2.0a) before it will load.
+
+**Why it matters here:** it is a second, independent mod built on the loader
+model we are already reading as a design template, and it is the first of
+that set to touch persistent per-sample state on the `+Drive` rather than
+just RAM or settings — closer to our own project/kit persistence problem than
+elekloader's own core is.
+
+**Status: [O].** Read from the README and LICENSE on 2026-09-27. Nothing run,
+nothing ported.
+
+---
+
+## `www.junes.website/goodies/octakit` — the same Octakit, hosted as a browser build
+
+<https://www.junes.website/goodies/octakit>, by June Kiff (`emuyia`) — this is
+**the same project as `emuyia/ems-octakit`**, already tracked above, not a
+second author or a second tool. The page hosts development builds of the
+Octatrack Kits patch (256 Kits per Project replacing the stock 64 Parts) that
+can be applied in-browser to the visitor's own OS 1.40C file, as an
+alternative to cloning the repository and patching locally.
+
+**Licence: none stated for the code.** The page carries only a usage
+restriction on the *output*, quoted verbatim: *"DO NOT redistribute the
+generated .syx. Share this page instead."* It also flags these as
+"bleeding-edge development builds, intended only for testing purposes," with
+the usual crash/data-loss caveats. Since the underlying project (`ems-octakit`)
+is MIT as of 2026-09-12, that licence — not this page — is what governs the
+code; the page is a distribution surface, not a separate grant or a separate
+restriction on the source.
+
+**Why this needed checking at all:** two names that read as two Octakits
+("junes' octakit" and "ems-octakit") are one project with one author and one
+licence. Recorded here so the next reader does not open a second investigation
+into a repository that does not exist.
+
+**Status: [O].** Read from the page on 2026-09-27 (`WebFetch`), cross-checked
+against `emuyia/ems-octakit`'s own README, which links this exact URL as
+"Development builds." Nothing run.
+
+---
+
+## `timhastie/octatrick` and `timhastie/octa-panel` — modules built by hardware confirmation, now upstream in octabam
+
+Two repositories by Tim Hastie, both forks of `sambanks/octabam`. Together
+they are the working record of how three Octatrack modules — a two-operator
+FM synth machine, a scale quantizer, and a "direct jump" pattern-chain
+feature — went from an idea to hardware-confirmed code merged into octabam's
+own module table.
+
+**Licence: MIT**, on both repositories, with an appended paragraph scoping the
+grant to "this repository's own source code and documentation" and explicitly
+excluding Elektron firmware and the content of any submodule. This is the
+*same* text as octabam's own `LICENSE`, copied forward with Sam Banks' original
+copyright line intact (both repos derive most of their tree from his), which
+is exactly why GitHub's API reports their licence as `NOASSERTION`/"Other"
+rather than plain MIT — the trailing carve-out paragraph breaks the exact/fuzzy
+matcher. Read correctly it is MIT for the repositories' own code, **yes,
+portable with attribution** — not for the `octatrick-modules` submodule's own
+content or for anything Elektron's, which stay under their own terms.
+
+### `timhastie/octatrick` (branch `main`) — the live location
+Composes three modules, consumed as the `timhastie/octatrick-modules` submodule
+pinned to a tag (`v9.1`, hardware build `OCTATRICK9`):
+
+| module | what it does |
+|---|---|
+| **SYNTH MACHINE** | a FLEX track whose sample is named `SYNTH*.wav` becomes a two-operator FM voice (PTCH/RATO/INDX/RATE/FDBK/DEC); VOIC 1-4 gives mono through paraphonic; 32 lockable chord shapes snapped to scale |
+| **SCALE QUANTIZER** | a SCALE row (24 scales) snaps PTCH, locks and chromatic-key trigs; a GLIDE row gives 303-style legato; live-recorded notes write AMP HOLD length locks |
+| **DIRECT JUMP** | CHAIN AFTER gains a DIRECT option: a pattern change lands on the next step at the old pattern's step count, instead of restarting (the A4/Rytm-style behaviour) |
+
+Two remixes, `octatrick` (stock effects plus the three modules) and
+`octatrick-usb` (adds `markandrus/octemu`'s USB MIDI/audio) — confirmed on the
+author's MKI for all 20 USB audio channels.
+
+**For our methodology:** the discipline is **pin to a tag, then re-verify byte
+identity on relink before trusting the port** — the same stance our transplant
+work takes toward donor bytes, independently arrived at here for a ColdFire
+module rather than a SHARC voice.
+
+### `timhastie/octa-panel` (branch `panel-ui`) — the historical dev log, now superseded as the live location
+Built a real-time C++ ColdFire+DSP56300 emulator (`tools/emu/ot_emu`) with a
+virtual front panel, and is where the three modules above were first written,
+tested and flashed — its README now says plainly: *"Looking for the firmware
+modules? Their current home is `timhastie/octatrick`."* The panel/emulator work
+itself was merged upstream into `sambanks/octabam` via PR #458 with
+attribution.
+
+**For our methodology, the more useful thing than the panel itself:** every
+commit (prefixed `CONTEXT:`) reads as a two-stage gate — a feature is built and
+checked against the emulator, then flashed and given a *dated* hardware
+confirmation, and only then treated as done. Emulator agreement alone never
+closes anything. We follow this in practice already (the Waverider milestones
+are dated and hardware-checked); it is not written down as a rule anywhere in
+our own docs, and this is a second project doing it independently, which is
+reason to write it down.
+
+**Status: [O]** for both. Read from READMEs and LICENSE files on 2026-09-27.
+Nothing ported, nothing run.
+
+---
+
+## `Zac-Kyoti/octatrack-kyoti-fw` — a personal Octatrack fork with a mechanically enforced dead-end tier
+
+<https://github.com/Zac-Kyoti/octatrack-kyoti-fw>, by Zac-Kyoti. Targets the
+**Octatrack MKI, OS 1.40C**, credits `sambanks/octabam` as the DNA it is built
+on (not a submodule fork of it), and is extremely active: 47 commits in the
+24 hours before this survey.
+
+**Licence: MIT with explicit exclusions**, stated in unusual and useful detail.
+The grant covers everything in the repository — RE notes, analysis/emulation/
+diagnostic scripts, ColdFire and DSP patch sources, build tooling, docs —
+**except**: (1) all Elektron material (none is distributed; the user supplies
+their own OS); (2) `tools/attic/`, inherited from `mxldyn/octamax` and tagged
+`SPDX-License-Identifier: NONE` in-place, kept only as a reverse-engineering
+cross-reference and never built; (3) patches to third-party tools and anything
+fetched at build time, which keep their own upstream licence (`dsp56300/dsp56300`
+is GPLv3, `octabam` is MIT — read as reference, never copied in if GPL-family);
+and (4) any third-party source generally, never copied in unless MIT-compatible
+with its own notice retained. **Verdict: yes, portable with attribution, for
+the repository's own code** — `tools/attic/` is a hard no, same reasoning as
+octamax itself.
+
+Three things earn it a full entry rather than a mention:
+
+- **A mechanically enforced SUPERSEDED tier.** Builds are FINAL, PREVIEW, WIP
+  or SUPERSEDED; a SUPERSEDED builder stays in `tools/` for its reasoning but
+  **refuses to build** unless `KYOTI_ALLOW_SUPERSEDED=1` is set, and names its
+  replacement. `tools/kyoti_status.py` enforces this in code — "the gates are a
+  courtesy, not a lock." Eleven dead-end builders are kept this way. This is
+  our own "keep superseded paths, mark them, never delete" practice, but
+  enforced by a script instead of a convention — worth mirroring literally.
+- **A documented history of hardware-rejected attempts**, kept beside the
+  eventual fix rather than replaced by it. `reference/handoffs/DIRECTJUMP_PHASE_HANDOFF.md`
+  and the README's version table run V5.1 through V5.11 for the DIRECT JUMP
+  feature: V5.1 is marked "DO NOT FLASH — hardware-rejected," an attempt at
+  "clearing the hold mask `0x80006626`" (Hook Q) is logged as rejected because
+  it did not fix the bug, and V5.8 ("THE WRAP FIX") is the point the actual
+  cause — a step count that should preserve across a pattern wrap, not
+  recompute — was isolated. Our own "a closed path is still a valid signal"
+  practice, independently arrived at.
+- **A concrete emulator-speed data point.** Route A is octabam's Unicorn-based
+  ColdFire harness (Python, hook-instrumented, control-flow only): raw Unicorn
+  TCG throughput on the author's machine is 154-252 MIPS with no hooks — faster
+  than the real ColdFire's ~176 MIPS — but 435 per-instruction code hooks at
+  EMAC macload sites degrade it to a measured "121-143x" slowdown (an
+  `emu_pattern_led.py` diagnostic: 183.8 s stock / 190.0 s patched). The same
+  diagnostic ported to `ot_emu`, octabam's native C++ ColdFire+DSP56300 port,
+  ran 16.7 s / 16.4 s — an **11x** wall-clock speedup, byte-identical output.
+  The author's own conclusion: "Route A cannot be micro-optimised into speed …
+  reach for the C++ port, not a faster route A." That is a direct, measured
+  answer to the same question this project has open against its own ~4.5
+  min/100M-instruction emulator cost.
+
+**Status: [O].** Read from the README, LICENSE, NOTES.md and
+`DIRECTJUMP_PHASE_HANDOFF.md` on 2026-09-27. Nothing run, nothing ported.
+
+---
+
+## Survey, 2026-09-27
+
+Fetched read-only via the GitHub API and raw file access, plus one `WebFetch`
+for the one non-repository source. What matters here, ranked:
+
+1. **`sambanks/octabam` has repositioned itself as an "unofficial community
+   remixer"** (its own words, README rewritten 2026-09-26) and gained
+   real verification tooling in the same push:
+   - **CI on GitHub** (`.github/workflows/ci.yml`): three jobs, all
+     firmware-free (no stock OS, no project, no hardware needed) — an
+     acceptance-runner test, a `dsp56300` + our-patch toolchain build, and
+     ColdFire-port unit tests, each matrixed over Ubuntu and macOS, actions
+     pinned to commit SHAs rather than tags. **We have no CI at all**; even
+     this firmware-free subset (parser/codec unit tests, a `dnfw mods matrix`
+     staleness check) is something ours currently lacks.
+   - **CF METER**, a module that turns the ColdFire's own frame-interrupt
+     timing into readable audio: a DMA timer stamps interrupt entry and exit,
+     the durations are packed into a per-frame table, and a 29-word DSP insert
+     reads that table back as an 8-slot square wave on a spare track,
+     decoded offline by `tools/harness/cfmeter.py` from a WAV capture. Full
+     mechanism in `modules/cfmeter/README.md`. This is a genuinely new
+     technique for us: **runtime telemetry delivered through the audio path
+     we already capture**, not a new USB or SysEx channel.
+   - The module table and remix index are now rendered from the modules' own
+     manifests, with `make check` refusing a stale copy (`verify_docs`), and
+     `verify_scenesp2` measures its "fader-0 MODE" expectation from a live run
+     with an empty pool rather than hard-coding the literal 0 — the same
+     "measured, not asserted" discipline `docs/PRINCIPLES.md` already asks of
+     us, seen enforced by someone else's tooling.
+   - `tools/remix/loader.S` and `tools/remix/ledger.py` — the platform-loader
+     and claim-checking ledger noted in the 2026-09-26 survey — are unchanged
+     and still there; the new `modules/`/`remixes/` layout sits on top of them
+     as content, not a replacement.
+   - Licence re-checked: still MIT. The `LICENSE` file carries a trailing
+     paragraph scoping the grant to octabam's own code and excluding Elektron
+     material and submodule content, which is why GitHub's API reports it as
+     `NOASSERTION` rather than plain MIT — read past that, it is unchanged and
+     still portable with attribution.
+2. **Three Octatrack modules — a two-op FM synth, a scale quantizer, and
+   "direct jump" — went from `timhastie/octa-panel`'s dev log through
+   `timhastie/octatrick` to merged, hardware-confirmed modules in octabam.**
+   New full entries above cover both repositories; the short version is that
+   `octa-panel` is now a historical record and `octatrick` the live one, and
+   the two-stage "emulator pass, then dated hardware confirmation" gate they
+   both practise is worth stating as an explicit rule in our own docs, not
+   just a habit.
+3. **`Zac-Kyoti/octatrack-kyoti-fw`**, new to the set, ships a mechanically
+   enforced SUPERSEDED build tier (`tools/kyoti_status.py`, gated behind
+   `KYOTI_ALLOW_SUPERSEDED=1`) and a measured emulator-speed finding: a
+   Unicorn-plus-435-hooks harness costs 121-143x against real ColdFire speed,
+   while a native C++ ColdFire+DSP56300 port costs only ~11x, byte-identical.
+   Full entry above. Directly bears on our own emulator-speed backlog item.
+4. **`irpina/elekloader` v0.3.0 added Octatrack MKI/MKII, OS 1.40C support**
+   — whole-image (format-1) only, since the Octatrack's bootloader staging
+   address and free run-time areas are not yet known to it, so no linkable
+   (format-2, hook-bus) mods exist for it yet. The Digitakt mk1 remains the
+   only device with the `core`/event architecture we are reading as a design
+   template. `irpina/digihealth`'s licence was re-checked and its
+   "GPL-2.0-only" reading confirmed (`NOTICE` says "version 2" outright;
+   three source file headers checked, none contradict).
+5. **`irpina/digislicer`**, new to the set: a slice editor for the Digitakt's
+   SLICE machine, built on elekloader's format-2 mod architecture and the
+   first mod in that family to touch persistent per-sample state on the
+   `+Drive`. GPL-2.0-only, same as the rest of the irpina set. Full entry
+   above.
+6. **`irpina/digiemu`: one fact correction.** Commit `3206402` corrects the
+   Digitakt mk1's DDR from a previously assumed 64 MB to the actual **128 MB**,
+   measured under stock OS 1.53 load. Licence re-confirmed GPL-2.0-or-later
+   (the README states "or-later" outright — the only one of the four irpina
+   repositories whose own text does).
+7. **`www.junes.website/goodies/octakit` is `emuyia/ems-octakit`'s own site,
+   not a second project.** Full entry above; the `ems-octakit` section is
+   corrected in place to stop reading as unlicensed and to note the site and
+   octabam's `OCTAKIT` module.
+8. **`nordseele/octalab-notes`**: 13 commits, all either a proposed **OTX**
+   shared project-settings/storage format for Octatrack tools (drafted with
+   Sam Banks, now at "draft 2," with a fresh/recovered/damaged card-state
+   table) or USB-audio-input testing on the MKI. Not adopted here — the
+   Octatrack's `+Drive` layout is not ours — but a cross-tool interchange
+   proposal for the same shape of problem our own project/kit persistence
+   work has is worth a re-read if it stabilises. Licence unchanged, MIT.
+9. **Our own site** (`angellinares.github.io/dn2_firmware_explore`) is up and
+   current: nine tool pages plus the LFO Shape Bench design tool, the
+   compatibility matrix at the top, generated by `dnfw mods matrix`.
+
+**Licence re-checks with no change:** `mischa85/elektron-firmware-tool` (MIT),
+`bryantysinger/octa-bt-pt` (MIT), `bkkbrls-del/midisc` (MIT — same trailing
+carve-out paragraph as octabam's, hence also reported `NOASSERTION` by the
+API), `emuyia/ems-octakit` (MIT, confirmed unmoved since 2026-09-12),
+`js216/selache` (GPL-3.0), `m-dwyer/digikit` (GPL-2.0-or-later),
+`dagargo/elektroid` (GPL-3.0), `lalzart/digitakt-ii-firmware-research-public`
+(CC0-1.0), `Bezronczek/syntakt-firmware-workbench` (MIT).
+
+**No new commits since 2026-09-26 in:** elektron-firmware-tool, octa-bt-pt,
+ems-octakit, midisc, `js216/selache`, `m-dwyer/digikit`,
+`dagargo/elektroid`, `Bezronczek/syntakt-firmware-workbench`,
+`lalzart/digitakt-ii-firmware-research-public`. `mxldyn/octamax` has one
+(`3083f69`, a MIDI-mode fix) — still **NO** licence file, still
+inspiration-only.
+
+### What would improve our debugging and methodology
+
+Ranked by how directly each closes a gap this project already has open.
+
+1. **Runtime telemetry over the audio path we already capture** — from
+   octabam's CF METER. Concrete step: prototype a SHARC- or ColdFire-side
+   probe that stamps frame timing (or a value from `docs/waverider-dsp-silence.md`'s
+   open questions) into an unused sample slot or a spare channel of a render
+   we already take, and write the small decoder now, rather than waiting on a
+   DN2 port of digihealth's USB channel to get any runtime number at all.
+2. **A native, from-scratch emulator core beats a faster hooked interpreter**
+   — from `octatrack-kyoti-fw`'s measured 121-143x-vs-11x finding. Concrete
+   step: when the emulator work is next worth an afternoon (already flagged
+   against digikit and digiemu), weigh octabam's `ot_emu` C++ architecture
+   directly rather than continuing to patch Unicorn — this is now a second,
+   independently measured data point saying the same thing.
+3. **A mechanically enforced dead-end tier**, not a convention — from
+   `octatrack-kyoti-fw`'s `KYOTI_ALLOW_SUPERSEDED` gate. Concrete step: give
+   our own rejected builds (flashed and reverted) a code-level gate the same
+   way, so a superseded build can't be picked up by a script by accident, the
+   way our own `docs/PRINCIPLES.md` already asks us to keep them recorded but
+   currently only in prose.
+4. **State the two-stage confirmation gate as a rule, not a habit** — from
+   `octatrick`/`octa-panel`: emulator agreement is necessary but never
+   sufficient; a feature is done only once a *dated* hardware confirmation
+   exists beside it. Concrete step: add this one sentence to
+   `docs/PRINCIPLES.md` — we already do it (the Waverider milestones), but it
+   is not written down as a rule anyone else could check us against.
+5. **Firmware-free CI**, even a subset — from octabam's three SHA-pinned
+   GitHub Actions jobs. Concrete step: put our own parser/codec unit tests and
+   a `dnfw mods matrix` staleness check into a GitHub Actions workflow; none of
+   it needs Elektron bytes, so none of it is blocked by the no-firmware-in-
+   the-repo rule.
+6. **A device-profile checklist for "what a new device needs"** — from
+   elekloader's `docs/DEVICES.md` (`releases`, `sysex_id`, `main_section`,
+   `stage`, `trailer`, `isa`, `areas`, `protected`, `blob_max`, `toolchain`,
+   plus named tests before anything is flashed). Concrete step: use this as
+   the checklist shape if this project ever formalises its own DN1/DN2/DT2
+   device-profile split, rather than growing the distinction ad hoc across
+   `docs/hardware.md` and `docs/DEVICES.md`-equivalents.
