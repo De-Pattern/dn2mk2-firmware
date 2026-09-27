@@ -1,0 +1,206 @@
+"""Build `waverider-disc-wtplace[-VARIANT]`: our reader in WaveTone's place (discriminators, never shipped).
+
+    python scripts/build_waverider_disc_wtplace.py --m5b M5B.syx --out OUT.syx
+        [--variant wtplace|b0code|passthru|b2] [--stock ZIP] [--s7-only S7.bin]
+
+`wtplace`: stock DN2 1.11 section 7 plus one CALL target and our block-1 region:
+
+- the WaveTone arm's `CALL 0x1c6d4a` at sw 0x1c9611 becomes `CALL 0x16ed00`
+  (csrc/waverider/sharc/wt_place.asm, a C-ABI adapter that calls wr_render5);
+- the region 0x2dd600..0x2e7000 as M5d ships it (the reader, state, tables), with the
+  adapter in the type-5 loop's span;
+- **no** machine-type lookup patch (so no track is ever type 5), **no** entry JUMP at
+  sw 0x1c9448, no type-5 loop.
+
+Variants, one change each:
+
+- `b0code`: wtplace, with the adapter and the reader as **code in L1 block 0** (byte
+  0x26f800 and 0x26fa00, above the system stack 0x26f000..0x26f7f4), and the CALL
+  pointed there. Their data (save area, parameter block, table 0) stays in block 1,
+  where wtplace has it. The SHARC+ PRM says code should not be placed in blocks 1 and
+  2 while the data caches are enabled there, and DN2 enables them.
+- `passthru`: wtplace, with the adapter at the same block-1 address saving and
+  restoring the same registers through the same save area, then tail-jumping to the
+  stock WaveTone render sw 0x1c6d4a with the call's own frame and arguments untouched.
+  Our reader never runs.
+- `b2`: stock section 7 plus the adapter, reader, save area, parameter block and table
+  0 at M5's block-2 addresses (0x300000.., the layout nodir ran in). Block 1 is stock.
+
+Section 3 is m5b's, as in every other Waverider discriminator.
+docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import pathlib
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from dnfw.image import bootstream, sharc_object  # noqa: E402
+from dnfw.waverider import dsp  # noqa: E402
+from dnfw.waverider import render as reference  # noqa: E402
+
+CALL_SW = 0x1C9611                                  # the WaveTone arm's render call
+CALL_STOCK = bytes.fromhex("04181c004a6d")          # CALL 0x1c6d4a (DB), 25a, 48-bit, memory order
+SOURCE = ROOT / "csrc/waverider/sharc/wt_place.asm"
+READER = ROOT / "csrc/waverider/sharc/reader_m5.asm"
+# (reader DM, adapter DM, save area, parameter block, table 0) per layout
+LAYOUT = {
+    "b1": (dsp.READER_DM, dsp.LOOP_DM, 0x2DDE00, 0x2DDF00, 0x2DF000),
+    "b0": (0x26F800, 0x26FA00, 0x2DDE00, 0x2DDF00, 0x2DF000),
+    "b2": (0x300000, 0x300400, 0x301000, 0x301100, 0x302000),
+}
+B0_FREE = (0x26F7F4, 0x270000)                      # above the system stack, to block 0's end
+PASSTHRU = ("      JUMP 0x1c6d4a;                    // DISCRIMINATOR: the stock WaveTone render,\n"
+            "                                        // with this call's frame and arguments untouched\n")
+
+
+def call_bytes(target_sw: int) -> bytes:
+    """`CALL target (DB)`, 25a, memory order: the stock call with its 24-bit target."""
+    b = bytearray(CALL_STOCK)
+    b[2], b[3], b[4], b[5] = (target_sw >> 16) & 0xFF, 0x00, target_sw & 0xFF, (target_sw >> 8) & 0xFF
+    return bytes(b)
+
+
+def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False) -> bytes:
+    import sharc_resolve_jumps as rj  # noqa: PLC0415  (WSL + selas)
+    rd, ad, save, par, tab = LAYOUT[layout]
+    src = SOURCE.read_text(encoding="utf-8")
+    for k in range(22):                                          # the save area, 22 words
+        src = src.replace(f"DM({0x2DDE00 + 4 * k:#x})", f"DM({save + 4 * k:#x})")
+    for k in range(6):                                           # the parameter block
+        src = src.replace(f"DM({0x2DDF00 + 4 * k:#x})", f"DM({par + 4 * k:#x})")
+    src = src.replace("R4 = 0x2ddf00;", f"R4 = {par:#x};").replace("R8 = 0x2df000;", f"R8 = {tab:#x};")
+    src = src.replace("CJUMP 0x16eb00 (DB);", f"CJUMP {rd // 2:#x} (DB);")
+    if passthru:
+        # keep the saves and the restores; drop the parameter block, the call and the return
+        a, b = src.index(f"      R8 = {tab:#x};"), src.index(".GLOBAL wr_wt_back.;")
+        src = src[:a] + src[b:]
+        a = src.index("      I12 = DM(M7, I6);")
+        b = src.index("      RFRAME;\n") + len("      RFRAME;\n")
+        src = src[:a] + src[a:b].split("      R0 = DM(")[0] + \
+            f"      R0 = DM({save:#x});\n" + PASSTHRU + src[b:]
+        src = src.replace("      I12 = DM(M7, I6);                 // the return address - 1, as the firmware's callees\n", "")
+    _, be, _ = rj.resolve(src, ad // 2, work)
+    return sharc_object.load_bytes(be)
+
+
+def reader(work: pathlib.Path, layout: str) -> bytes:
+    import sharc_resolve_jumps as rj  # noqa: PLC0415
+    _, be, _ = rj.resolve(READER.read_text(encoding="utf-8"), LAYOUT[layout][0] // 2, work)
+    return sharc_object.load_bytes(be)
+
+
+def pad(obj: bytes, span: int) -> bytes:
+    if len(obj) > span - 64:
+        raise SystemExit(f"a code object ({len(obj)} B) does not fit {span:#x} with 64 bytes of NOPs")
+    return obj + bytes(span - len(obj))
+
+
+def finish(stock: bytes, base: bytes, extra: list, target_sw: int) -> bytes:
+    for at, payload in extra:                                    # nothing of the stock stream there
+        for b in bootstream.walk(stock).blocks:
+            if b.count and b.target < at + len(payload) and at < b.target + b.count:
+                raise SystemExit(f"{at:#x} overlaps the stock block at {b.target:#x}")
+    out = bytearray(bootstream.insert_before_final(
+        base, b"".join(bootstream.block(at, payload) for at, payload in extra)))
+    if bootstream.read_span(out, dsp.sw_to_load(CALL_SW), 2) != CALL_STOCK[:2]:
+        raise SystemExit("sw 0x1c9611 is not a 25a CALL")
+    bootstream.write_span(out, dsp.sw_to_load(CALL_SW), call_bytes(target_sw))
+    result = bytes(out)
+    walked = bootstream.walk(result)
+    if not walked.complete or walked.stopped_at != len(result):
+        raise SystemExit(f"the result does not walk as a boot stream ({walked.reason})")
+    if bootstream.read_span(result, dsp.sw_to_load(dsp.ENTRY_SW), len(dsp.ENTRY_STOCK)) != dsp.ENTRY_STOCK:
+        raise SystemExit("the entry at sw 0x1c9448 is not stock")
+    if bootstream.read_span(result, dsp.dm_to_load(dsp.LOOKUP_DM), 32) != bootstream.read_span(
+            stock, dsp.dm_to_load(dsp.LOOKUP_DM), 32):
+        raise SystemExit("the machine lookup is not stock")
+    return result
+
+
+def section7(stock: bytes, obj: bytes) -> bytes:
+    """wtplace (and passthru): M5d's block-1 region, OBJ in the loop's span, the CALL to it."""
+    if hashlib.sha256(stock).hexdigest() != dsp.STOCK_SHA256:
+        raise SystemExit("not stock DN2 1.11 section 7")
+    if bootstream.read_span(stock, dsp.sw_to_load(CALL_SW), len(CALL_STOCK)) != CALL_STOCK:
+        raise SystemExit("sw 0x1c9611 is not the stock `CALL 0x1c6d4a`")
+    if len(obj) > dsp.CODE_SPAN - 64:
+        raise SystemExit("the adapter does not fit its span with 64 bytes of padding")
+    base = dsp.objects()
+    dsp.objects = lambda: {**base, "machine5_live": obj}   # this build only
+    try:
+        added = dsp.spans()
+        dsp._check_free(stock, added)
+    finally:
+        dsp.objects = lambda: base
+    return finish(stock, stock, [(at, payload) for _, at, payload in added], dsp.LOOP_SW)
+
+
+def variant(stock: bytes, work: pathlib.Path, name: str) -> bytes:
+    if name == "wtplace":
+        return section7(stock, adapter(work))
+    if name == "passthru":
+        return section7(stock, adapter(work, passthru=True))
+    lay = "b0" if name == "b0code" else "b2"
+    rd, ad, save, par, tab = LAYOUT[lay]
+    code = [(dsp.dm_to_load(rd), pad(reader(work, lay), 0x200)),
+            (dsp.dm_to_load(ad), pad(adapter(work, lay), 0x400 if lay == "b2" else 0x200))]
+    if name == "b0code":
+        lo, hi = dsp.dm_to_load(B0_FREE[0]), dsp.dm_to_load(B0_FREE[1])
+        if not all(lo <= at and at + len(p) <= hi for at, p in code):
+            raise SystemExit("the block-0 code leaves the free top of block 0")
+        wt = section7(stock, adapter(work))                  # wtplace; its block-1 data stays
+        # wtplace's own blocks are already in; add the block-0 code and move the CALL
+        out = bytearray(bootstream.insert_before_final(
+            wt, b"".join(bootstream.block(at, payload) for at, payload in code)))
+        bootstream.write_span(out, dsp.sw_to_load(CALL_SW), call_bytes(ad // 2))
+        result = bytes(out)
+        walked = bootstream.walk(result)
+        if not walked.complete or walked.stopped_at != len(result):
+            raise SystemExit(f"the result does not walk as a boot stream ({walked.reason})")
+        for at, payload in code:
+            for b in bootstream.walk(stock).blocks:
+                if b.count and b.target < at + len(payload) and at < b.target + b.count:
+                    raise SystemExit(f"{at:#x} overlaps the stock block at {b.target:#x}")
+        return result
+    t0 = reference.dsp_bytes(dsp.tables()[0])
+    extra = code + [(dsp.dm_to_load(save), bytes(0x100)), (dsp.dm_to_load(par), bytes(0x100)),
+                    (dsp.dm_to_load(tab), t0)]
+    return finish(stock, stock, extra, ad // 2)
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--m5b", type=pathlib.Path, required=True)
+    ap.add_argument("--out", type=pathlib.Path, required=True)
+    ap.add_argument("--stock", type=pathlib.Path,
+                    default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
+    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2"), default="wtplace")
+    ap.add_argument("--s7-only", type=pathlib.Path, help="write section 7 here and stop (runner checks)")
+    a = ap.parse_args(argv)
+    if a.out.exists():
+        raise SystemExit(f"{a.out} exists: never overwrite a build")
+    import sharc_waverider_render as m1  # noqa: PLC0415
+    from dnfw.cli.main import main as dnfw  # noqa: PLC0415
+    stock = m1.dn2_section7(a.stock)
+    with tempfile.TemporaryDirectory() as tmp:
+        work = pathlib.Path(tmp)
+        s7 = variant(stock, work, a.variant)
+        print(f"section 7 ({a.variant}): {len(s7)} bytes, sha256 {hashlib.sha256(s7).hexdigest()}")
+        if a.s7_only:
+            a.s7_only.write_bytes(s7)
+            return 0
+        p = work / "s7.bin"
+        p.write_bytes(s7)
+        return dnfw(["build", "-o", str(a.out), "-s", f"7={p}", str(a.m5b)]) or 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
