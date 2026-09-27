@@ -270,6 +270,32 @@ def measure(args) -> dict:
                 out["serialise"] = stats([r])
             except Exception as exc:                  # noqa: BLE001
                 out["serialise_error"] = repr(exc)
+
+    # -- last, with an LFO4 in use: a DEST on `--lfo4-tracks` of the live
+    # sounds, set through the table's own API as a knob turn does. An idle LFO4
+    # and a working one are different costs, and both are the build's. This
+    # runs after every idle probe, because it leaves entries in the table.
+    if args.lfo4_dest and args.build:
+        sym_path = os.path.join(args.build, "symbols.json")
+        sym = {k: int(v, 16) for k, v in json.load(open(sym_path)).items()}
+        base = m.long(LIVE_CONTAINER)
+        for t in range(args.lfo4_tracks):
+            live = base + SOUND_AT + SOUND * t
+            m.call(sym["ext_set"], live, 3, args.lfo4_dest << 8)     # DEST
+            m.call(sym["ext_set"], live, 7, 0x6000)                  # DEP, off centre
+        out["lfo4_live"] = m.long(sym["ext_live"])
+        rows = [meter.run(EVAL_A, buf, rate, 0xFFFF, 0xFFFF, o1, o2, 0)
+                for _ in range(args.warm + args.frames)][args.warm:]
+        out["eval_a_lfo4"] = stats(rows)
+        rows = [meter.run(EVAL_B, EVAL_B_STATE, t, 1 << t) for _ in range(2) for t in range(TRACKS)]
+        out["eval_b_lfo4"] = stats(rows[TRACKS:])
+        a, b = m.alloc(4096), m.alloc(4096)
+        out["memcpy_202_lfo4"] = stats([meter.run(MEMCPY, a, b, 202) for _ in range(8)])
+        out["memcpy_2688_lfo4"] = stats([meter.run(MEMCPY, a, b, 2688) for _ in range(8)])
+        if args.serialise and out.get("serialise"):
+            prog = m.alloc(16)
+            r = meter.run(SERIALISE, MRAM_IMAGE, project, 0, 0xFFFFFFFF, prog, limit=2_000_000_000)
+            out["serialise_lfo4"] = stats([r])
     return out
 
 
@@ -280,8 +306,10 @@ def table(folder: str) -> int:
         rows[d["label"]] = d
     if "stock" not in rows:
         raise SystemExit("no stock.cost.json: the control is missing, and nothing compares")
-    probes = ["eval_a", "eval_b", "memcpy_202", "memcpy_2688", "memset_1163", "save_sound", "load_sound",
-              "arp_up", "arp_rand", "arp_shuf", "arp_rand_worst", "arp_shuf_worst", "serialise"]
+    probes = ["eval_a", "eval_a_lfo4", "eval_b", "eval_b_lfo4", "memcpy_202", "memcpy_202_lfo4",
+              "memcpy_2688_lfo4", "memcpy_2688", "memset_1163", "save_sound", "load_sound",
+              "arp_up", "arp_rand", "arp_shuf", "arp_rand_worst", "arp_shuf_worst", "serialise",
+              "serialise_lfo4"]
     order = ["stock"] + sorted(k for k in rows if k != "stock")
     print(f"{'probe':<13}" + "".join(f"{k:>22}" for k in order))
     for probe in probes:
@@ -317,6 +345,9 @@ def main() -> int:
     p.add_argument("--frames", type=int, default=32)
     p.add_argument("--warm", type=int, default=8)
     p.add_argument("--serialise", action="store_true", help="also run the whole project serialiser")
+    p.add_argument("--lfo4-dest", type=int, default=0,
+                   help="also measure with LFO4 aimed at this slot (76 is filter base); needs the build's symbols.json")
+    p.add_argument("--lfo4-tracks", type=int, default=16, help="how many tracks get that LFO4")
     p.add_argument("--out", default=os.path.join(HERE, "..", "out", "modcost"))
     p.add_argument("--table", metavar="DIR", help="print the comparison of every run in DIR")
     args = p.parse_args()
