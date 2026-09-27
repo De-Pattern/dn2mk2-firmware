@@ -36,24 +36,52 @@ def test_record_rejects_bad_order():
                     step=REC.Q31, reverse=False, loop=False)
 
 
-def test_params_positions_and_step_match_the_adapter_math():
-    # LEN >= 127 means the whole sample; STRT/LOOP scale by /128
-    s, e, p = PR.positions(length=1000, strt=0, len_=127, loop=0)
-    assert (s, e, p) == (0, 1000, 0)
-    s, e, p = PR.positions(length=1000, strt=64, len_=64, loop=32)
-    assert s == (64 * 1000) >> 7
-    assert e == min(s + ((64 * 1000) >> 7), 1000)
-    assert p == (32 * 1000) >> 7
-    # centre tune is unity-ish; reverse negates
+def test_params_positions_follow_the_dt2_records():
+    # STRT / LEN / LOOP are whole 8.8 values; 0x7800 (120.00) is the sample's end
+    assert PR.positions(length=1000, strt=0, len_=PR.FULL, loop=0) == (0, 1000, 0)
+    s, e, p = PR.positions(length=1000, strt=0x3C00, len_=0x1E00, loop=0x3C00 + 1)
+    assert s == 500 and e == 750 and p == 500           # half, a quarter; LOOP - 1 = half
+    s, e, p = PR.positions(length=1000, strt=0x3C00, len_=0x1E00, loop=0x1E00 + 1)
+    assert p == 250                                      # a loop point before S is kept
+    # LOOP 0 is OFF: the loop returns to the start
+    assert PR.positions(length=1000, strt=0x1E00, len_=PR.FULL, loop=0)[2] == 250
+    # a loop point at or past the end falls back to the start
+    assert PR.positions(length=1000, strt=0, len_=0x1E00, loop=0x7000)[2] == 0
+    # the reciprocal rounds up, so a full LEN reaches the end and the clamp holds it there
+    assert 0 <= PR.scale(PR.FULL, 23540) - 23540 <= 8
+    assert PR.positions(length=23540, strt=PR.FULL, len_=PR.FULL, loop=0) == (23539, 23540, 23539)
+
+
+def test_play_modes_are_the_dt2_formatters_order():
+    # 0 REV, 1 REV.L, 2 FWD.L, 3 FWD (the DT2 formatter 0x400e16ca)
+    assert [PR.play_mode(v) for v in range(4)] == [(True, False), (True, True),
+                                                    (False, True), (False, False)]
     assert PR.step(64, False) > 0
     assert PR.step(64, True) == -PR.step(64, False)
 
 
+def test_frame_offsets_are_the_dt2_slots():
+    assert {k: PR.frame_offset(k) for k in PR.INDICES} == {
+        "TUNE": 0, "PLAY": 2, "SAMP": 6, "STRT": 12, "LEN": 14, "LOOP": 16}
+    assert PR.sound_words(tune=64, play=3, samp=2, strt=0, len_=PR.FULL, loop=0) == {
+        25: 0x4000, 26: 0x300, 28: 2, 31: 0, 32: 0x7800, 33: 0}
+    # the ColdFire sends each at half, rounded up (0x6117 -> 0x308c, 0xffff -> 0x8000)
+    assert PR.frame_words(tune=64, play=3, samp=2, strt=0, len_=PR.FULL, loop=0) == {
+        25: 0x2000, 26: 0x180, 28: 1, 31: 0, 32: 0x3C00, 33: 0}
+    assert PR.half(0x6117) == 0x308C and PR.half(0xFFFF) == 0x8000 and PR.half(0x2D00) == 0x1680
+    # SAMP's lowest bit is lost: 1 and 2 play the same bank entry
+    assert [PR.bank_slot(s, 8) for s in range(6)] == [0, 1, 1, 2, 2, 3]
+    assert PR.bank_slot(40, 8) == 0
+
+
 def test_params_record_matches_record_module():
-    rec = PR.record_fields(pointer=0x2000, length=4096, tune=64, play=3, strt=0, len_=127, loop=64)
+    rec = PR.record_fields(pointer=0x2000, length=4096, tune=64, play=1, strt=0,
+                           len_=PR.FULL, loop=0)
     assert struct.unpack_from("<I", rec, REC.SAMPLE_PTR)[0] == 0x2000
-    assert rec[REC.REVERSE] == 1 and rec[REC.LOOP] == 1     # play 3 = reverse loop
+    assert rec[REC.REVERSE] == 1 and rec[REC.LOOP] == 1     # play 1 = REV.L
     assert REC.get_q31(rec, REC.END) == 4096 << 31
+    fwd = PR.record_fields(pointer=1, length=100, tune=64, play=3, strt=0, len_=PR.FULL, loop=0)
+    assert fwd[REC.REVERSE] == 0 and fwd[REC.LOOP] == 0      # play 3 = FWD
 
 
 def test_step_table_has_256_entries():

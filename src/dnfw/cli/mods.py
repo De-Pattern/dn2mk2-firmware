@@ -25,8 +25,10 @@ from ..mods import lfo4 as lfo4_mod
 from ..mods import lfowaves as lfowaves_mod
 from ..mods import midiarp as midiarp_mod
 from ..mods import moddest as moddest_mod
+from ..mods import oneshot as oneshot_mod
 from ..mods import songguard as songguard_mod
 from ..mods import transients as transients_mod
+from ..mods import waverider as waverider_mod
 from .files import read_image
 
 NAME = "mods"
@@ -41,7 +43,9 @@ REGISTRY = {transients_mod.ID: transients_mod,
             arpplocks_mod.ID: arpplocks_mod,
             arpmodes_mod.ID: arpmodes_mod,
             lfo4_mod.ID: lfo4_mod,
-            songguard_mod.ID: songguard_mod}
+            oneshot_mod.ID: oneshot_mod,
+            songguard_mod.ID: songguard_mod,
+            waverider_mod.ID: waverider_mod}
 
 
 def configure(parser) -> None:
@@ -121,6 +125,11 @@ def configure(parser) -> None:
     boot.add_argument("--spin-smear", type=float, default=1.0, help="trail length, 0..3")
     boot.add_argument("--spin-turns", type=float, default=3.0, help="turns of the mark, 0..12")
     boot.add_argument("--spin-zoom", type=float, default=1.0, help="back-and-forth size swing, 0..2")
+    one = ap.add_argument_group("oneshot")
+    one.add_argument("--donor", type=pathlib.Path,
+                     help="the Digitakt II 1.16 OS file ONESHOT is moved from (the user's own)")
+    one.add_argument("--sample", type=pathlib.Path,
+                     help="a WAV to bake as ONESHOT's one sample (48 kHz mono after conversion)")
     lfo = ap.add_argument_group("lfowaves")
     lfo.add_argument("--wavetable", action="append", default=[], metavar="N=FILE",
                      help="replace wavetable N (1-3) with a .wav wavetable or .json table; "
@@ -331,6 +340,11 @@ def _apply(args) -> int:
             result = _apply_bootscreen(mod, staged, args)
         elif mod.ID == "lfowaves":
             result = _apply_lfowaves(mod, staged, args)
+        elif mod.ID == "oneshot":
+            if payloads:
+                raise ModError("oneshot reads both firmwares whole; apply it on its own")
+            result = mod.apply(staged, donor=args.donor, sample=args.sample,
+                               raw=read_image(args.image))
         else:
             result = mod.apply(staged)
         for note in result.notes:

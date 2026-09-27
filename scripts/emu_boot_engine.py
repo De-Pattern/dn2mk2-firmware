@@ -47,6 +47,7 @@ from emu_lfo4_tick import (EVAL_A, MIRROR_AT, MIRROR_BYTES, RATE, REST,   # noqa
 
 LOAD, SAVE = 0x400DD1EA, 0x400DD6A6     # (live, stored) and (stored, live, flag)
 SOUND_BYTES, STORED, VALUES_AT = 1163, 359, 28
+MACHINE_TYPE, STORED_MACHINE = 0xDE, 244        # sound+0xDE; stored+244 (0x400dd74e)
 LFO4_IDS = [4, 8, 12, 16, 20, 24, 28, 32]          # the reserved p-lock ranks
 MARKS = [0x2A01, 0x2A02, 0x2A03, 0x2A04, 0x2A05, 0x2A06, 0x2A07, 0x2A08]
 EXT_SLOTS, EXT_PARAMS = 256, 8
@@ -153,6 +154,11 @@ def main() -> int:
                    help="after the engine, SAVE and LOAD a sound with this arp MODE; repeatable")
     p.add_argument("--arp-max", type=int, default=4,
                    help="the highest MODE the build's LOAD keeps (4 stock, 6 arpmodes)")
+    p.add_argument("--machine-type", type=int, action="append", default=[],
+                   help="after the engine, SAVE and LOAD a sound with this machine type "
+                        "(sound+0xDE, stored+244); repeatable")
+    p.add_argument("--machine-max", type=int, default=4,
+                   help="the highest machine type the build's LOAD keeps (4 stock, 5 waverider)")
     args = p.parse_args()
 
     build = os.path.join(ROOT, args.build)
@@ -268,6 +274,30 @@ def main() -> int:
             if not ok:
                 fails.append(f"arp MODE {v} did not round-trip as {want}")
 
+    # A sound's machine type through the same converters: waverider widens the
+    # LOAD bound (0x400dd286) so type 5 survives; stock loads anything above 4
+    # as 0, FM Tone. SAVE copies sound+0xDE to stored+244 as it is.
+    for v in args.machine_type:
+        base = after.long(0x800052A0)
+        real = bytes(after.uc.mem_read(base + 52, SOUND_BYTES)) if base else bytes(SOUND_BYTES)
+        live = after.alloc(SOUND_BYTES + 16)
+        s = bytearray(real)
+        s[MACHINE_TYPE] = v & 0xFF
+        after.write(live, bytes(s))
+        stored = after.alloc(STORED + 16)
+        after.call(SAVE, stored, live, 0)
+        on_disk = bytes(after.uc.mem_read(stored + STORED_MACHINE, 1))[0]
+        back = after.alloc(SOUND_BYTES + 16)
+        after.call(LOAD, back, stored)
+        got = bytes(after.uc.mem_read(back + MACHINE_TYPE, 1))[0]
+        values_same = (bytes(after.uc.mem_read(back + 20, 202)) == bytes(s[20:222]))
+        want = v if 0 <= v <= args.machine_max else 0
+        ok = on_disk == v and got == want
+        print(f"  {'ok  ' if ok else 'FAIL'}  machine type {v}: saved {on_disk}, loaded {got} "
+              f"(want {want}); value array {'kept' if values_same else 'changed'} by the round trip")
+        if not ok:
+            fails.append(f"machine type {v} did not round-trip as {want}")
+
     # The save/load path, in the same boot. It is the one piece the gate
     # cannot see from a boot alone: no kit loads at reset, so the two
     # converter stubs never run, and until now they had only ever been
@@ -279,8 +309,10 @@ def main() -> int:
         print("")
         print("  save/load: skipped -- this build exports no LFO4 symbols, so")
         print("  there are no converters to exercise. The boot and the engine")
+        extra = [n for n, on in (("the arp MODE", args.arp_mode),
+                                 ("the machine type", args.machine_type)) if on]
         print("  above did run; the save/load path is untested here"
-              + (", beyond the arp MODE round trip." if args.arp_mode else "."))
+              + (f", beyond {' and '.join(extra)} round trip." if extra else "."))
         if fault:
             print(f"\n  ** the firmware drew EXCEPTION during save/load: {fault} **")
             return 1

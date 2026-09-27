@@ -10,7 +10,8 @@ are exactly 99 -- so a count above 99 copies past the song into whatever
 follows it.
 
 Project 4 on the owner's instrument, `SKETCHPAD`, carries a count of **21,503**
-(`0x53ff`) in its first song record (image `+0xc3e400`, count at `+0xc3ef4b`).
+(`0x53ff`) in its first song record (the table is at image `+0xc3ee04`, 3,072 B per
+record; in storage version 4 the count is the u16 at record `+0x147`, so image `+0xc3ef4b`).
 Opening it copies 795,611 bytes from `project + 0x11e4d1d`: through the other
 sixteen songs, the project settings (which is how the current pattern becomes
 `-1`), past the end of the 18,977,747-byte project object, and 580 KB into the
