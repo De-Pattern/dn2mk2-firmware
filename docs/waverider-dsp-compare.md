@@ -548,3 +548,89 @@ The ColdFire's DSPI2 driver receives 2,748 bytes per frame into `0x800053a4`
    overwrites K with whatever the handler case writes there. That is why K must be
    one no case writes. Every write to the TX pages outside the handler's own stores
    is **[I]** until step 1's checks are done.
+
+## 9. rb-setup died, rb-loads survived: the setup span split, and the parcel widths (2026-09-27)
+
+**The instrument (owner), restated:**
+
+- `rb-callret` survives: track 1 keeps playing.
+- `rb-loads` survives.
+- `rb-setup` dies: the whole device goes silent once track 2 plays.
+
+So the fault is in what `rb-setup` runs after the parameter loads.
+
+### The builds (`--variant rb-setup-*`, each exits through `JUMP wr5_done`, the full return)
+
+| build | runs after rb-loads' span | sha256 (.syx) |
+|---|---|---|
+| `rb-setup-a` | the frame rows (`lshift`, `R2 = 1`, add, `R2 = 15`, `min`, two `lshift`, add), `DM(6, I4) = R0`, **`c018`** (`R1 = R1 + R8`, 2c), `DM(7, I4) = R1` | `7c5e535ceb4b51719a039c635b6b04886949377ec28414ca6e3e841a444c6175` |
+| `rb-setup-a2` | as a, with that add written `R1 = R8 + R1`: selas emits `2a_short` `01801181` (32-bit) and no 16-bit parcel | `f0f42de15aca5c5e162cfeef30a2de04db939035f134a880b4a14662def2e4e1` |
+| `rb-setup-b` | a + `R3 = 0xffff`, `R3 = R11 AND R3`, `R2 = -16`, `F11 = FLOAT R3 BY R2` | `c16a5adb9be4e9f5e339420d3e28b086c12cf3748d01cb67ceda5d5f485d7434` |
+| `rb-setup-c` | b + `R13`, `R14`, `R15`, `R8` constants, `R12 = PASS R12`, `IF EQ JUMP` (8a abs, not taken), `R12 = -16` | `b6a66813f2c52d06aae5270a2c5ada8fda10ed12a9f3a762f990571fa45976d3` |
+| `rb-setup-d` | c + the first tap address (four shifts, `R1 = R9 + R13`, `R2 = DM(6, I4)`, `R3 = R2 + R0`), stopping before `I0 = R3` | `8099e148f9cca349f12bc425afe87bd0518dc604f55e283e77e12e6eebe25fd3` |
+| (`rb-setup`, died) | d + `I0 = R3` | |
+
+Every one of these also makes the full return's phase store `DM(1, I4) = R9`, as `rb-setup` does.
+
+**Gates [M], all five pass:**
+
+- wtplace check `silent`: 0 nonzero samples of 128 on track 1; the other tracks and the no-WaveTone run bit-identical to stock.
+- Strict memory: 0 violations with the PC in our code.
+- sharcdb decode: all confident, every branch on an instruction boundary.
+- Encoding audit: 0 opcodes that stock never uses.
+- `dnfw inspect`: 21/21 ok, HMAC reproduced.
+- Each .syx's section 7 is byte-identical to the gated one.
+
+**Flash order:**
+
+1. `rb-setup-a`.
+   - **Dies:** flash `rb-setup-a2`.
+     - a2 survives: the 16-bit parcel `c018` is the fault.
+     - a2 dies: the fault is the row arithmetic or the DAG stores (`DM(6/7, I4)`, and the phase store `DM(1, I4)`), and the next cut is stores vs arithmetic.
+   - **Survives:** flash `rb-setup-c`.
+     - c dies: flash `b`. b survives: the fault is c's constants, PASS, JUMP or `R12`. b dies: it is b's AND or FLOAT BY.
+     - c survives: flash `d`. d survives: the fault is **`I0 = R3`**. d dies: it is the tap-address block.
+
+The readout is as in section 8. Track 1 must keep playing; track 2 is silent in every rb build.
+
+### Instruction widths, from the PRM and not the tools [M for the PRM reading, I for the silicon]
+
+**The PRM states no width rule.** Chapter 12 says only that VISA types are a = 48, b = 32, c = 16 bits.
+
+So I extracted every opcode figure's fixed (grey) bits from the PDF with PyMuPDF, 51 figures (scratchpad `prmimg/figs.py`). For each of our 16-bit parcels I then listed the types whose first-parcel fixed bits it matches. Our 16-bit parcels:
+
+- 2c: `c018`, `c2cc`, `cc32`, `c123`, `c954`, `c845`, `c976`, `c867`, `c964`, `c846`, `c09a`, `c101`, `c188`;
+- 3c: `95b4`, `9ff2`;
+- NOP: `0001`;
+- RFRAME: `1901`.
+
+Three overlaps exist in the PRM's own figures:
+
+| parcel | 16-bit reading | the other figure it matches | ours |
+|---|---|---|---|
+| `0xc000..0xc07f` | 2c `Rn = Rn + Rx`, Rn in R0-R7 (ShortCompute opcode `0000`, Figure 17-2) | **Type 2b first parcel** `110000000` + compute[22:16] (Figure 13-4): a **32-bit** instruction | **`c018`** (in rb-setup's span) |
+| `0xc080..0xc0ff`, `0xc180..0xc1ff` | 2c add/sub with Rn in R8-R15 | Type 11c `1100000x 1...` (Figure 14-6), a 16-bit conditional RTS/RTI | `c09a` (loop only), `c188` (adapter; ran in rb-params, which survived) |
+| `0x0001` | 21c NOP | 22c `000000000.000001` | the return's NOP; 658 stock uses |
+
+**The figures are not authoritative.**
+
+- **11c:** the figure's grey `1100000` prefix is contradicted by all 12 stock 11c returns, which are `0x0abe`, `0x0afe` and `0x0bfe` (`0000101x 1...`, 11a's prefix).
+- **2a:** the figure shows `001`, where the 3,278 stock `2a_short` and the 48-bit 2a start `00000001`.
+- **25c:** the figure repeats 25a's first parcel; RFRAME is `0x1901`, used 983 times in stock.
+
+So a figure's grey bits can be copy errors.
+
+**The firmware is.** ADI's toolchain built stock, and stock has 16-bit 2c parcels in every overlap range, inside reached functions:
+
+- 43 in `0xc000..0xc07f`. One is `c029` at sw `0x1c4f4a` on the WaveTone voice path, whose following code is coherent only if it is 16-bit (runner gap G5, docs/waverider-feasibility.md).
+- 35 in `0xc080..0xc0ff`.
+- 3 in `0xc180..0xc1ff`.
+
+No in-function stock instruction is a confirmed Type 2b. The two sharcdb calls 2b (`0x1c0e13`, `0x1c4f4a`) are the G5 misreads.
+
+**Verdict:**
+
+- **[M]:** the PRM leaves `0xc000..0xc07f` ambiguous (2b and 2c).
+- **[I, strong]:** the silicon reads it as 16-bit, as it does in stock's WaveTone every block. That makes `c018` an unlikely cause, but not an excluded one.
+- **`rb-setup-a2` measures it.** If a dies and a2 survives, the silicon reads `c018` as a 32-bit 2b. Then the next parcel `0x9908` is taken as compute[15:0], `0x0087` starts a 48-bit Type 22a, and the stream is desynchronised. That would explain everything, and the fix would be to never emit `0xc000..0xc07f`.
+- No other parcel of ours has an ambiguous width. `c09a` and `c188` overlap only the wrong 11c figure, and both readings of them are 16-bit.

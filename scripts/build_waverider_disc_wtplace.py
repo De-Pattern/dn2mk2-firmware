@@ -42,6 +42,12 @@ runs exactly as in `b2`, and the exit is the full path's own return shape:
   (the full return, phase stored through I4).
 - `rb-oneread`: `rb-setup` plus the first table read `R4 = DM(0, I0)`.
 - `rb-noout`: the full render with the output store `DM(I2, M6) = F4` a NOP.
+- `rb-setup-a` .. `-d`: `rb-setup`'s span cut again, each exiting through `JUMP
+  wr5_done`: a after the frame rows and their two DAG stores (with the 2c parcel
+  `0xc018`, `R1 = R1 + R8`); a2 the same with that add written `R1 = R8 + R1`, which
+  has no 16-bit form; b + the frame fraction (`0xffff`, AND, FLOAT BY); c + the
+  constants, the count test and `R12 = -16`; d + the first tap address (two
+  shifts pairs, `R2 = DM(6, I4)`, the add), stopping before `I0 = R3`.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -85,7 +91,18 @@ def call_bytes(target_sw: int) -> bytes:
     return bytes(b)
 
 
-RB = ("rb-params", "rb-callret", "rb-loads", "rb-setup", "rb-oneread", "rb-noout")
+RB = ("rb-params", "rb-callret", "rb-loads", "rb-setup", "rb-oneread", "rb-noout",
+      "rb-setup-a", "rb-setup-a2", "rb-setup-b", "rb-setup-c", "rb-setup-d")
+# rb-setup's span cut again (rb-loads survived on silicon, rb-setup died): each exits
+# through the full return (JUMP wr5_done) after the anchor line
+SETUP_CUT = {
+    "rb-setup-a": "      DM(7, I4) = R1;                   // frame f1's row",
+    "rb-setup-b": "      F11 = FLOAT R3 BY R2;",
+    "rb-setup-c": "      R12 = -16;",
+    "rb-setup-d": "      R3 = R2 + R0;",               # the first tap address, before I0 = R3
+}
+C018 = "      R1 = R1 + R8;\n"                      # 2c parcel 0xc018, in 0xc000..0xc07f
+C018_32 = "      R1 = R8 + R1;                     // DISCRIMINATOR: not 2c-encodable, a 32-bit form\n"
 EARLY_RET = ("      I12 = DM(M7, I6);                 // DISCRIMINATOR: return here, the full path's shape\n"
              "      NOP;                              // (the full path stores the phase through I4 here)\n"
              "      JUMP (M14, I12) (DB);\n"
@@ -114,6 +131,12 @@ def reader_source(rb: str | None) -> str:
         return insert_after(src, "      I0 = R3;", TO_DONE)
     if rb == "rb-oneread":
         return insert_after(src, "      R4 = DM(0, I0);                   // frame f0, word w0", TO_DONE)
+    if rb == "rb-setup-a2":
+        if src.count(C018) != 1:
+            raise SystemExit("the c018 add is not one line")
+        return insert_after(src.replace(C018, C018_32), SETUP_CUT["rb-setup-a"], TO_DONE)
+    if rb in SETUP_CUT:
+        return insert_after(src, SETUP_CUT[rb], TO_DONE)
     if rb == "rb-noout":
         line = "      DM(I2, M6) = F4;\n"
         if src.count(line) != 1:
