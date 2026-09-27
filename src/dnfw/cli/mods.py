@@ -271,12 +271,22 @@ def _apply_lfowaves(mod, firmware, args):
     return mod.apply(firmware, tables)
 
 
+def _sections(mod) -> tuple[int, ...]:
+    """The sections a mod writes: its SECTION, or, for a mod that spans several
+    (oneshot writes MAIN OS and the DSP stream whole), the sections of its extents."""
+    if hasattr(mod, "SECTION"):
+        return (mod.SECTION,)
+    return tuple(sorted({extent.section for extent in mod.extents()}))
+
+
 def _list() -> int:
     print(f"{len(REGISTRY)} mod(s)\n")
     for mid, mod in sorted(REGISTRY.items()):
+        sections = _sections(mod)
+        label = "section" if len(sections) == 1 else "sections"
         print(f"  {mid}")
         print(f"    {mod.SUMMARY}")
-        print(f"    device 0x{mod.DEVICE:02x}, section {mod.SECTION}")
+        print(f"    device 0x{mod.DEVICE:02x}, {label} {', '.join(map(str, sections))}")
     print("\nTwo mods can be applied together when the byte ranges they write")
     print("do not overlap. `apply` checks that; it does not and cannot check")
     print("whether two mods make musical sense together.")
@@ -448,7 +458,7 @@ def _matrix(args) -> int:
                               key=lambda mod: getattr(mod, "APPLY_LAST", False))
                 if f"{mods[0].ID}+{mods[1].ID}" in pair.refused:
                     mods.reverse()
-                if not pair.combines or 3 not in (mods[0].SECTION, mods[1].SECTION):
+                if not pair.combines or 3 not in _sections(mods[0]) + _sections(mods[1]):
                     continue
                 payloads = {}
                 for mod in mods:
