@@ -238,7 +238,8 @@ census, span overlap). None of them is committed; each is a few lines over
 
 ### Re-ranked with D1 and D2
 
-1. **The reader's hardware DO loop**: open, leading. The reader runs
+1. ~~**The reader's hardware DO loop**: open, leading~~ -- **ruled out by hardware
+   (m5c, 2026-09-27)**: m5c has no DO loop and still dies on a WAVERIDER trig. The reader ran
    `LCNTR = R2, DO ... UNTIL LCE` (`0d0200000072`, loop-`mode` bit 23 clear) with
    pre-modify `DM(M4, I0)` taps. It is the only hardware loop in our code.
    - The firmware sets the mode bit on every short straight-line loop: the
@@ -304,7 +305,8 @@ ONESHOT's spans end at `0x317df8` and are clear too.
 `85debe72...`, passed on hardware) plus a new section 7 with three changes.
 
 **1. Everything moves out of L1 block 2 into block 1's free tail,
-`0x2dd600..0x2e7000`:**
+`0x2dd600..0x2e7000`:** ~~(the fix)~~ -- **ruled out as the cause by hardware (m5c
+still dies on a trig, 2026-09-27): the block-2 location was not it.**
 
 | span | byte | sw | bytes |
 |---|---|---|---|
@@ -338,7 +340,8 @@ How the region was shown free:
 span. Each code object is followed by at least 64 bytes of zeros (NOPs), and no
 byte is left to power-up contents. Tests assert both.
 
-**3. The reader has no hardware loop and no pre-modify access** (rank 1 above):
+**3. The reader has no hardware loop and no pre-modify access** (rank 1 above) --
+**ruled out as the cause by hardware (m5c, 2026-09-27)**:
 
 - The count word of the parameter block is decremented and stored each sample,
   then `IF NE JUMP` goes back, the form D2 proved on silicon.
@@ -461,3 +464,90 @@ run, before that change, failed only this check, on `count` = 0 at resume. It
 looked like a regression and was not one.
 
 Section 7: sha256 `7f451c57e9ed83d0...`, 876,492 bytes.
+
+## m5c on the instrument (owner, 2026-09-27): still silent on a trig
+
+`waverider-m5c` goes silent right after the WAVERIDER track is trigged, as M5 and
+ONESHOT did. Steps 1-2 (play before selecting, then select) are presumed fine;
+this is being confirmed with the owner. **Neither the block-2 location nor the
+hardware DO loop was the cause.** Both are marked above.
+
+### The track-buffer hypothesis, tested in the runner: not supported
+
+The hypothesis: a type-5 track takes MIDI's no-setup arm, so its buffer pointer
+at `0x254a60 + 4t` might be unset, stale or shared on hardware, and writing 32
+floats through it would corrupt DSP state.
+
+**Who writes the pointer array.** The array is engine `+0x137c8` (engine base
+`0x241298`).
+
+- The only instruction in the image that names it as an immediate is
+  `i4 = 0x254a60` at sw `0x1c14db`, in the engine init (`sw 0x1c1445`). It is
+  followed by the loop `lcntr = 8, do ... until lce` at sw `0x1c14de`, which fills
+  it for all 16 tracks, two per pass.
+- The only other code that forms the address is the slot dispatch,
+  `i3 = modify(i2, 0x137c8)` at sw `0x1c8f63`. It **reads** it; its store at
+  `0x1c8f88` goes to `i3 + 0x295` words, which is not the array.
+- No L2 code names `0x254a60` or offset `0x137c8`.
+- **Nothing in the writer depends on the machine type or on a setup arm.**
+
+**What the array holds, traced in the runner.** This is `scratchpad bufptr.py`,
+run on the m5c image from the post-engine-init snapshot. The snapshot is the
+runner's own run of `sw 0x1c1445`, which executed the writer loop above.
+
+- 16 distinct pointers, `0x804acf90 + 0x80 t`. That is 16 contiguous buffers of
+  exactly 32 floats (128 bytes) each, in DDR `.bss` (inside the stream's zero fill
+  `0x804ace8c + 0x80904`).
+- Over 3 blocks, with track 0 type 5 (trigged on block 1), track 1 WaveTone,
+  track 2 MIDI and track 3 FM Tone, **no pointer changed** at any dispatch.
+- The type-5 track's buffer (`0x804acf90`) is as valid as the WaveTone track's
+  (`0x804ad010`), the MIDI track's (`0x804ad090`) and the FM Tone track's
+  (`0x804ad110`).
+
+**The write length.** Our reader writes `count` floats. `count` is the dispatch's
+R9, the same register the stock chain pushes as its block size at sw `0x1c9456`.
+It is 32 in every runner block, exactly one buffer. The type-5 buffer is also
+processed in place by the stock chain every block: in the scratch run below, track
+0's buffer holds the chain's own data at resume.
+
+**ONESHOT's output path is the same array.** Its adapter reads the pointer from
+`0x254a60 + 4t` (`os_loop`, `R3 = DM(0, I4)`) and hands it to the DT2 render as
+R8, with R12 = the dispatch's R9. Its idle path `os_quiet` writes 32 zeros
+through that same pointer on **every** block once a type-5 track is selected. On
+hardware that phase played normally. So a write of 32 floats to a type-5 track's
+buffer was harmless on silicon, **provided** ONESHOT's bank magic read back, which
+is still unconfirmed.
+
+**Conclusion: step 1 does not prove the hypothesis.** The pointers are set once
+at init, for every track, independent of machine type, and a 32-float write stays
+inside the track's own buffer. **No m5d is built** on this basis. The runner cannot
+show a run-time rewrite of the array on silicon, but no code in the image performs
+one.
+
+### D3: the scratch discriminator (built anyway, it is cheap and decisive)
+
+`waverider-disc-m5c-scratch_DN2_1.11.syx` is m5b's section 3 plus m5c's section 7
+with **one change**: the reader's `out` load `R0 = DM(5, I4)` becomes
+`R0 = 0x2de800`. That is 2 KB of the directory's zero padding, inside our block-1
+region. The reader still runs in full: the CJUMP, every read of the frame copy,
+the note cell, the pitch table, the directory and the tables, and the return. It
+writes nothing into the track buffer, so WAVERIDER stays silent.
+
+- Built by `scripts/build_waverider_disc_scratch.py`. It derives the reader from
+  `reader_m5.asm` at build time, assembles it with selas, re-resolves the two
+  absolute jumps (reader 352 B), and refuses an existing output.
+- `dnfw inspect`: 21 of 21 ok. `dnfw diff` against m5c: only section 7, 314
+  bytes, all in the reader's block (stream `0xcc574..0xcc6bb`). Section 7 sha256
+  `246ed02e9ac1b6c1...`.
+- Runner, 3 blocks, track 0 type 5, trigged (`scratchpad scratchcheck.py`):
+  - both builds return every block, with 3 loop entries;
+  - the scratch span equals m5c's track-0 machine tap bit for bit on all 3
+    blocks, so the reader did exactly the same work;
+  - tracks 1-15 are bit-identical between the two builds.
+
+**Reading it on the instrument** (same three steps as m5c):
+
+| outcome | reads as |
+|---|---|
+| plays through the trig, WAVERIDER silent | the fault is the write into the track buffer (then: what on silicon differs about that buffer, e.g. the chain reading our floats) |
+| still dies on the trig | the reader call or its reads. What is left: the CJUMP/return mechanics in our code, and the reads of the frame copy and note cell. A note cell that is NaN or huge on silicon would make `TRUNC` raise an invalid-operation sticky, which only matters if an FP exception interrupt is enabled. Not checked; a candidate for the next static pass |
