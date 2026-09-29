@@ -48,6 +48,61 @@ runs exactly as in `b2`, and the exit is the full path's own return shape:
   has no 16-bit form; b + the frame fraction (`0xffff`, AND, FLOAT BY); c + the
   constants, the count test and `R12 = -16`; d + the first tap address (two
   shifts pairs, `R2 = DM(6, I4)`, the add), stopping before `I0 = R3`.
+- `rb-store1`: `rb-loads` with its return's NOP made the full path's phase store
+  `DM(1, I4) = R9`: the only store through a DAG it makes. rb-callret and rb-loads
+  (both survived) store nothing through a DAG; every build that died does, and every
+  `rb-setup-*` makes this store, so this one separates it from the setup span.
+- `stages`: `b2` (the full reader, which died on silicon) with a stage marker before
+  and after each suspect step. A marker is `I1 = 0x5752_00nn` and two 14a stores
+  of it to word 1 (byte 4) of both DSP->ColdFire reply pages (`0x2c49d4`,
+  `0x2c59d4`; the ColdFire receives the reply at `0x800053a4`, and no ColdFire code
+  reads bytes 4..0x15 of it). The scratch is I1, which the adapter saves and restores. After a stall
+  the core writes nothing more and the reply DMA replays its pages, so the last
+  marker is where the core stopped; a local USB probe reads it (`0x800053a8`). The
+  stage numbers are in STAGES_READER / STAGES_ADAPTER.
+- `stages-loads`: `stages` with a marker after each instruction of the parameter loads
+  (20 after `I4 = R4`, 21-26 after each load; `stages` stopped the chip between 3 and
+  4), and a call counter: the adapter counts its calls at save + 0x5c and stores the
+  count to word 2 (byte 8) of both reply pages, so the probe tells a first-call death
+  from a later one.
+- `stages-i2`: `stages-loads` (which stopped on the first call between marker 26 and 4:
+  `I2 = R0` or the instruction after it) with R0, the output pointer as the chip has
+  it, stored to reply word 3 before `I2 = R0`; then two NOPs, I2 stored to word 4, and
+  marker 4. Word 4 landing means the core survived `I2 = R0` itself.
+- `stages-i2l1`: `stages-i2` (which survived `I2 = R0` and the I2 stores, then stopped
+  before marker 4 landed) with I2 aimed at a free L1 scratch in the save area
+  (save + 0x60, 40 free words) instead of the DDR track buffer. R0 still goes to word
+  3. The reader then renders into that scratch, so track 2 stays silent by design.
+- `stages-r13`: `stages-i2l1` (which still stopped before marker 4 landed) with marker 4
+  written through R13 instead of I1. R13 is free there: the reader first sets it with
+  the constants, and the adapter has saved it. Markers 5 on still use I1, so a
+  stop between 4 and 5 points at an I1 write after an I2 write.
+- `stages-noirq`: `stages-r13` (which still stopped before marker 4) with interrupts
+  masked around the call: the adapter saves MODE1 at save + 0xf8 and clears IRPTEN
+  (bit 12) first thing, and puts the saved MODE1 back just before it returns. If the
+  stop goes away, an interrupt landing in our code is involved.
+- `stages-irptl`: `stages-noirq` (whose reader ran to marker 19 with interrupts masked,
+  then stopped once MODE1 was put back) with the pending-interrupt latch IRPTL stored
+  to reply word 2 after load 6 (marker 26), to word 3 after marker 4 and to word 4
+  after marker 19, all while interrupts are still masked: whichever bit our code sets
+  shows there. The call counter and the R0/I2 words give way to these.
+- `stages-ilop`: `stages-irptl` (IRPTL gained ILOPI between "after load 6" and "after
+  marker 4") with that span split: IRPTL to word 2 right after the I2 write, to word
+  3 after the two I2 stores, to word 4 after marker 4.
+- `stages-noi2`: `stages-ilop` without the I2 write: `I2 = ...` becomes a NOP and the
+  output store `DM(I2, M6) = F4` too (I2 would still be the caller's). The I2 stores
+  stay, so word 4 first shows I2 as the caller left it. If ILOPI no longer appears,
+  the I2 write is the trigger.
+- `stages-m4`: `stages-noi2` (ILOPI still after marker 4) with the three IRPTL reads
+  moved inside marker 4, via R14: after `R13 = 0x57520004` (word 2), after its first
+  store (word 3), after its second store (word 4).
+- `stages-shift`: `stages-loads` as it is, assembled with the negative-shift fix
+  (`sharc_waverider_m3.fix_shift_imm`): stock writes 0x78 in the third byte of every
+  negative shift immediate and selas wrote 0x00; the chip took ours as illegal.
+- `stages-fix`: `stages-loads` (the full reader: real output, interrupts on, the load
+  markers and the call counter) with the add at `c018` written in its 32-bit form, as
+  `rb-setup-a2` does. On silicon, ILOPI rose exactly 38 sw before `c018` in four builds
+  whose layouts differ: the chip's look-ahead rejects that 16-bit parcel.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -92,7 +147,45 @@ def call_bytes(target_sw: int) -> bytes:
 
 
 RB = ("rb-params", "rb-callret", "rb-loads", "rb-setup", "rb-oneread", "rb-noout",
-      "rb-setup-a", "rb-setup-a2", "rb-setup-b", "rb-setup-c", "rb-setup-d")
+      "rb-setup-a", "rb-setup-a2", "rb-setup-b", "rb-setup-c", "rb-setup-d", "rb-store1")
+# the stage markers (`stages`): the reply pages' word 1, both pages
+MARK_AT = (0x2C49D4, 0x2C59D4)
+# (stage, the source line the marker goes after); the reader's first I0 = R3 is its
+# first occurrence. None sits between a flag-setting op and its conditional jump.
+STAGES_READER = (
+    (3, "wr_render5.:"),
+    (4, "      I2 = R0;                          // out"),
+    (5, "      DM(6, I4) = R0;                   // frame f0's row"),
+    (6, "      R1 = R1 + R8;"),
+    (7, "      DM(7, I4) = R1;                   // frame f1's row"),
+    (8, "      F11 = FLOAT R3 BY R2;"),
+    (9, "      R12 = -16;"),
+    (10, "      I0 = R3;"),
+    (11, "      R4 = DM(0, I0);                   // frame f0, word w0"),
+    (12, "      R7 = DM(0, I0);                   // frame f1, word w1"),
+    (13, "      R9 = R9 + R10;                    // phase += inc, mod 2^32"),
+    (14, "      DM(I2, M6) = F4;"),
+    (15, "      DM(4, I4) = R0;                   // samples left"),
+    (16, "wr5_done.:"),
+)
+# the adapter's: 1 after its saves, 2 before the call, 18 back from the reader, 19 after
+# its restores but before I1's (the markers' scratch)
+STAGES_ADAPTER = (1, 2, 18, 19)
+# stages-loads: after each instruction of the parameter loads (they run between 3 and 4)
+STAGES_LOADS = (
+    (20, "      I4 = R4;                          // I4 -> parameter block"),
+    (21, "      R8 = DM(0, I4);                   // table (a byte address)"),
+    (22, "      R9 = DM(1, I4);                   // phase"),
+    (23, "      R10 = DM(2, I4);                  // inc"),
+    (24, "      R11 = DM(3, I4);                  // pos, Q16"),
+    (25, "      R12 = DM(4, I4);                  // N"),
+    (26, "      R0 = DM(5, I4);"),
+)
+COUNT_AT = (0x2C49D8, 0x2C59D8)                     # the reply pages' word 2
+OUT_AT = (0x2C49DC, 0x2C59DC)                       # stages-i2: word 3, R0 (the output pointer)
+I2_AT = (0x2C49E0, 0x2C59E0)                        # stages-i2: word 4, I2 after `I2 = R0`
+SCRATCH_L1 = LAYOUT["b2"][2] + 0x60                 # stages-i2l1: 40 free words of the save area
+
 # rb-setup's span cut again (rb-loads survived on silicon, rb-setup died): each exits
 # through the full return (JUMP wr5_done) after the anchor line
 SETUP_CUT = {
@@ -111,6 +204,15 @@ EARLY_RET = ("      I12 = DM(M7, I6);                 // DISCRIMINATOR: return h
 TO_DONE = "      JUMP 0x16eba6;                    // -> wr5_done.  DISCRIMINATOR: early exit\n"
 
 
+def mark(stage: int, reg: str = "I1") -> str:
+    """One stage marker: I1 = 0x5752_00nn, stored to both reply pages' word 1. I1 is
+    the adapter's to use (it saves and restores it) and the reader never touches it;
+    USTAT1 was the first choice, but selas and digikit disagree on the width of
+    `USTAT1 = imm32`, and `DM(abs) = I1` is a form the adapter already makes."""
+    return (f"      {reg} = {0x57520000 | stage:#x};                  // STAGE {stage}\n"
+            + "".join(f"      DM({a:#x}) = {reg};\n" for a in MARK_AT))
+
+
 def insert_after(src: str, anchor: str, text: str) -> str:
     """TEXT after the first line that is exactly ANCHOR (which must exist)."""
     lines = src.splitlines(keepends=True)
@@ -127,6 +229,13 @@ def reader_source(rb: str | None) -> str:
         return insert_after(src, "wr_render5.:", EARLY_RET)
     if rb == "rb-loads":
         return insert_after(src, "      I2 = R0;                          // out", EARLY_RET)
+    if rb == "rb-store1":
+        store = EARLY_RET.replace(
+            "      NOP;                              // (the full path stores the phase through I4 here)\n",
+            "      DM(1, I4) = R9;                   // DISCRIMINATOR: the full path's phase store, alone\n")
+        if store == EARLY_RET:
+            raise SystemExit("the early return has no phase-store slot")
+        return insert_after(src, "      I2 = R0;                          // out", store)
     if rb == "rb-setup":
         return insert_after(src, "      I0 = R3;", TO_DONE)
     if rb == "rb-oneread":
@@ -135,6 +244,77 @@ def reader_source(rb: str | None) -> str:
         if src.count(C018) != 1:
             raise SystemExit("the c018 add is not one line")
         return insert_after(src.replace(C018, C018_32), SETUP_CUT["rb-setup-a"], TO_DONE)
+    if rb == "stages-shift":
+        # stages-loads as it is; what changes is the assembler's negative-shift fix
+        # (sharc_waverider_m3.fix_shift_imm), which every build now goes through
+        return reader_source("stages-loads")
+    if rb == "stages-fix":
+        # the markers first (marker 6 is anchored on the add's own line), then the fix
+        src = reader_source("stages-loads")
+        if src.count(C018) != 1:
+            raise SystemExit("the c018 add is not one line")
+        return src.replace(C018, C018_32)
+    if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"):
+        if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"):
+            # before the markers go in, so the anchors are the reader's own lines
+            src = insert_after(src, "      R0 = DM(5, I4);",
+                               "".join(f"      DM({a:#x}) = R0;                // STAGES-I2: the output pointer\n"
+                                       for a in OUT_AT))
+            if rb in ("stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"):
+                line = "      I2 = R0;                          // out"
+                if src.count(line) != 1:
+                    raise SystemExit("I2 = R0 is not one line")
+                src = src.replace(line, f"      I2 = {SCRATCH_L1:#x};                     // STAGES-I2L1: an L1 scratch, not the track buffer")
+                anchor_i2 = f"      I2 = {SCRATCH_L1:#x};                     // STAGES-I2L1: an L1 scratch, not the track buffer"
+            else:
+                anchor_i2 = "      I2 = R0;                          // out"
+            src = insert_after(src, anchor_i2,
+                               "      NOP;\n      NOP;\n"
+                               + "".join(f"      DM({a:#x}) = I2;                // STAGES-I2: I2 after the move\n"
+                                         for a in I2_AT))
+        for stage, anchor in STAGES_READER + (STAGES_LOADS if rb != "stages" else ()):
+            if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") and stage == 4:
+                anchor = f"      DM({I2_AT[1]:#x}) = I2;                // STAGES-I2: I2 after the move"
+            if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") and stage == 26:
+                anchor = f"      DM({OUT_AT[1]:#x}) = R0;                // STAGES-I2: the output pointer"
+            src = insert_after(src, anchor, mark(stage, "R13" if rb in ("stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") and stage == 4 else "I1"))
+        if rb == "stages-m4":
+            m4 = mark(4, "R13").splitlines(keepends=True)          # the imm load, store, store
+            k = src.index(m4[0])
+            for i, words in enumerate(IRPTL_AT):
+                end = src.index(m4[i], k) + len(m4[i])
+                src = src[:end] + irptl_to(words, "R14") + src[end:]
+                k = end + len(irptl_to(words, "R14"))
+        if rb in ("stages-ilop", "stages-noi2"):
+            line = f"      I2 = {SCRATCH_L1:#x};                     // STAGES-I2L1: an L1 scratch, not the track buffer"
+            k = src.index(line) + len(line) + 1
+            src = src[:k] + irptl_to(IRPTL_AT[0], "R13") + src[k:]
+            last = f"      DM({I2_AT[1]:#x}) = I2;                // STAGES-I2: I2 after the move"
+            k = src.index(last) + len(last) + 1
+            src = src[:k] + irptl_to(IRPTL_AT[1], "R13") + src[k:]
+            last4 = f"      DM({MARK_AT[1]:#x}) = R13;"
+            k = src.index("// STAGE 4\n")
+            k = src.index(last4, k) + len(last4) + 1
+            src = src[:k] + irptl_to(IRPTL_AT[2], "R13") + src[k:]
+        if rb in ("stages-noi2", "stages-m4"):
+            line = f"      I2 = {SCRATCH_L1:#x};                     // STAGES-I2L1: an L1 scratch, not the track buffer"
+            if src.count(line) != 1:
+                raise SystemExit("the I2 write is not one line")
+            src = src.replace(line, "      NOP;                              // STAGES-NOI2: no I2 write")
+            out = "      DM(I2, M6) = F4;\n"
+            if src.count(out) != 1:
+                raise SystemExit("the output store is not one line")
+            src = src.replace(out, "      NOP;                              // STAGES-NOI2: no output store\n")
+        if rb == "stages-irptl":
+            last26 = f"      DM({MARK_AT[1]:#x}) = I1;"
+            k = src.index(f"// STAGE 26")
+            k = src.index(last26, k) + len(last26) + 1
+            src = src[:k] + irptl_to(IRPTL_AT[0], "R13") + src[k:]
+            last4 = f"      DM({MARK_AT[1]:#x}) = R13;"
+            k = src.index("// STAGE 4\n")
+            k = src.index(last4, k) + len(last4) + 1
+            src = src[:k] + irptl_to(IRPTL_AT[1], "R13") + src[k:]
+        return src
     if rb in SETUP_CUT:
         return insert_after(src, SETUP_CUT[rb], TO_DONE)
     if rb == "rb-noout":
@@ -145,7 +325,59 @@ def reader_source(rb: str | None) -> str:
     return src
 
 
-def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, nocall: bool = False) -> bytes:
+def with_counter(src: str, save: int) -> str:
+    """The adapter counting its calls: after the saves (R0 and R1 are saved and not used
+    again before the call), count += 1 at save + 0x5c, stored to the reply's word 2."""
+    cnt = save + 0x5C
+    text = (f"      R0 = DM({cnt:#x});                // CALL COUNTER\n"
+            "      R1 = 1;\n"
+            "      R0 = R0 + R1;\n"
+            f"      DM({cnt:#x}) = R0;\n"
+            + "".join(f"      DM({a:#x}) = R0;\n" for a in COUNT_AT))
+    return insert_after(src, f"      DM({save + 4 * 21:#x}) = I5;", text)
+
+
+IRPTL_AT = (COUNT_AT, OUT_AT, I2_AT)                # stages-irptl: words 2, 3, 4
+
+
+def irptl_to(words, reg: str) -> str:
+    """IRPTL through REG into both pages' copy of one reply word."""
+    return (f"      {reg} = IRPTL;                    // STAGES-IRPTL: the pending interrupts\n"
+            + "".join(f"      DM({a:#x}) = {reg};\n" for a in words))
+
+
+def with_noirq(src: str, save: int) -> str:
+    """The adapter with interrupts masked: MODE1 saved and IRPTEN cleared right after the
+    saves (R0 is saved), the saved MODE1 put back just before the return (R0 is reloaded
+    in its delay slot)."""
+    keep = save + 0xF8                                  # past the I2 scratch (0x60..0xe0)
+    src = insert_after(src, f"      DM({save + 4 * 21:#x}) = I5;",
+                       "      R0 = MODE1;                       // STAGES-NOIRQ: interrupts off\n"
+                       f"      DM({keep:#x}) = R0;\n"
+                       "      BIT CLR MODE1 0x1000;             // IRPTEN\n")
+    ret = "      I12 = DM(M7, I6);                 // the return address - 1, as the firmware's callees\n"
+    if src.count(ret) != 1:
+        raise SystemExit("the adapter's return is not one line")
+    return src.replace(ret, f"      R0 = DM({keep:#x});                // STAGES-NOIRQ: MODE1 as it was\n"
+                            "      MODE1 = R0;\n" + ret)
+
+
+def with_stages(src: str, save: int, par: int) -> str:
+    """The adapter with markers 1 (after its saves, I1 among them), 2 (before the call),
+    18 (back from the reader) and 19 (restores made, before I1's own)."""
+    s1, s2, s18, s19 = STAGES_ADAPTER
+    src = insert_after(src, f"      DM({save + 4 * 21:#x}) = I5;", mark(s1))
+    line = next(x for x in src.splitlines() if x.startswith(f"      R4 = {par:#x};"))
+    src = insert_after(src, line, mark(s2))
+    src = insert_after(src, "wr_wt_back.:", mark(s18))
+    i1 = f"      I1 = DM({save + 4 * 17:#x});\n"
+    if src.count(i1) != 1:
+        raise SystemExit("the adapter's I1 restore is not one line")
+    return src.replace(i1, mark(s19) + i1)
+
+
+def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, nocall: bool = False,
+            stages: bool = False, counter: bool = False, noirq: bool = False, irptl: bool = False) -> bytes:
     import sharc_resolve_jumps as rj  # noqa: PLC0415  (WSL + selas)
     rd, ad, save, par, tab = LAYOUT[layout]
     src = SOURCE.read_text(encoding="utf-8")
@@ -155,6 +387,17 @@ def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, noca
         src = src.replace(f"DM({0x2DDF00 + 4 * k:#x})", f"DM({par + 4 * k:#x})")
     src = src.replace("R4 = 0x2ddf00;", f"R4 = {par:#x};").replace("R8 = 0x2df000;", f"R8 = {tab:#x};")
     src = src.replace("CJUMP 0x16eb00 (DB);", f"CJUMP {rd // 2:#x} (DB);")
+    if stages:
+        src = with_stages(src, save, par)       # marker 1 goes right after the saves ...
+    if counter:
+        src = with_counter(src, save)           # ... and the counter before it
+    if noirq:
+        src = with_noirq(src, save)             # ... and interrupts off before both
+    if irptl:                                   # IRPTL after marker 19, interrupts still masked
+        k = src.index("// STAGE 19")
+        last = f"      DM({MARK_AT[1]:#x}) = I1;"
+        k = src.index(last, k) + len(last) + 1
+        src = src[:k] + irptl_to(IRPTL_AT[2], "R0") + src[k:]
     if nocall:
         # rb-params: the parameter block filled, then straight to the restores
         a = src.index("      CJUMP ")
@@ -230,10 +473,15 @@ def variant(stock: bytes, work: pathlib.Path, name: str) -> bytes:
     if name == "passthru":
         return section7(stock, adapter(work, passthru=True))
     lay = "b0" if name == "b0code" else "b2"
-    rb = name if name in RB else None
+    rb = name if name in RB + ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4", "stages-fix", "stages-shift") else None
     rd, ad, save, par, tab = LAYOUT[lay]
-    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x200)),
-            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params"),
+    # the reader has 0x400 up to b2's adapter; only `stages` (markers) needs more than 0x200,
+    # and the other builds keep their bytes
+    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages-shift", "stages-fix", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") else 0x200)),
+            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages-shift", "stages-fix", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"),
+                                     counter=rb in ("stages-shift", "stages-fix", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"),
+                                     noirq=rb in ("stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"),
+                                     irptl=rb == "stages-irptl"),
                                      0x400 if lay == "b2" else 0x200))]
     if name == "b0code":
         lo, hi = dsp.dm_to_load(B0_FREE[0]), dsp.dm_to_load(B0_FREE[1])
@@ -265,7 +513,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=pathlib.Path, required=True)
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2") + RB, default="wtplace")
+    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages-shift", "stages-fix", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") + RB, default="wtplace")
     ap.add_argument("--s7-only", type=pathlib.Path, help="write section 7 here and stop (runner checks)")
     a = ap.parse_args(argv)
     if a.out.exists():

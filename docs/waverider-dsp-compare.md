@@ -634,3 +634,90 @@ No in-function stock instruction is a confirmed Type 2b. The two sharcdb calls 2
 - **[I, strong]:** the silicon reads it as 16-bit, as it does in stock's WaveTone every block. That makes `c018` an unlikely cause, but not an excluded one.
 - **`rb-setup-a2` measures it.** If a dies and a2 survives, the silicon reads `c018` as a 32-bit 2b. Then the next parcel `0x9908` is taken as compute[15:0], `0x0087` starts a 48-bit Type 22a, and the stream is desynchronised. That would explain everything, and the fix would be to never emit `0xc000..0xc07f`.
 - No other parcel of ours has an ambiguous width. `c09a` and `c188` overlap only the wrong 11c figure, and both readings of them are 16-bit.
+
+## 10. One store no survivor made, and the stage markers built (2026-09-29)
+
+**The gap in section 9's split.** Every `rb-setup-*` exits through `wr5_done`, the full return, so each makes the phase store `DM(1, I4) = R9`. `rb-loads` returns through the early exit, whose slot for that store is a NOP.
+
+So no build that survived has ever stored through a DAG from our code: `rb-params` stores by absolute address only, and `rb-callret` and `rb-loads` only load. Every build that died does store through one. A dying `rb-setup-a` would therefore not separate a's row code from that one store.
+
+**`rb-store1`** is `rb-loads` with the early exit's NOP made `DM(1, I4) = R9`, encoded `0899 8104` as in `wr5_done`.
+- Gates [M]: wtplace check `silent` PASS, strict memory 0 violations with the PC in our code, `dnfw inspect` all ok, section 3 = m5b's.
+- Order: it goes after a dying `rb-setup-a`, in place of a2. If it dies, a single DAG store from our code is fatal, and the question becomes where it writes.
+
+**`stages`: where the core stops, in one flash.** Section 8's breadcrumb design, built on the b2 layout:
+
+- **The word.** Byte 4 (word 1) of both DSP->ColdFire reply pages, `0x2c49d4` and `0x2c59d4`.
+  - The ColdFire's readers of the reply at `0x800053a4` are the DMA setup (`0x40025e8c`, word 0), a halfword at 0x16 (`0x4002795a`), 32 records of 84 bytes from 0x1c (`0x40025400`, stride 42 halfwords, to 0xa9c) and the per-track tail from 0xa9c.
+  - **No ColdFire code reads bytes 4..0x15** [M, from the image's literals and their uses].
+  - Which DSP handler cases write there is **[I]**: the cases are reached through the table at `0x268a68` with the reply pointer in the handler's frame, and no literal names the pages outside the link setup at `0x1ca505..0x1ca5d7`.
+  - After a stall nothing writes it, since the core is stopped.
+- **The marker.** `I1 = 0x5752_00nn` and two 14a stores, one per page. I1 is saved and restored by the adapter and never touched by the reader.
+  - USTAT1 was the first choice, but selas assembles `USTAT1 = imm32` in a form digikit's decoder reads as a different width (the runner halted at `0x18026b`). Stock uses USTAT1 only in L2.
+  - `DM(abs) = I1` is a form the adapter already makes.
+- **The stages** are set by `STAGES_READER` / `STAGES_ADAPTER` in `scripts/build_waverider_disc_wtplace.py`:
+  - 1-2 in the adapter, before the call;
+  - 3-16 in the reader, with 10-15 once per sample;
+  - 18-19 back in the adapter.
+  - None sits between a flag-setting op and its conditional jump, and both return shapes are unchanged.
+  - The reader grows to 600 B, so `stages` alone takes the 0x400 up to b2's adapter; every other build keeps its bytes (b2 rebuilt byte-identical).
+
+**Gates [M]:**
+- `scripts/sharc_waverider_stages_trace.py`: both words take the same values; each of 4 blocks runs the full path (1-9, 10-15 x 32, 16, 18, 19); the last value is `0x57520013`.
+- wtplace check `saw` PASS: track 1 bit-identical to constpitch's reader output (0 of 128 differ), other tracks and the no-WaveTone run bit-identical to stock, strict memory 0 violations with the PC in our code.
+- sharcdb decode: all confident, and every branch lands on an instruction boundary.
+- Encoding audit: 0 opcodes that stock never uses.
+
+**Reading it on the instrument** needs a local USB read of `0x800053a8` (word 1) and `0x800053a4` (word 0). The reading is self-validating: `0x5752` in either half order cannot appear by chance.
+
+| reading | meaning |
+|---|---|
+| word 0 frozen, stage N | the core stopped inside the step after N |
+| word 0 changing, stage stuck | the core runs but our code stops reaching the markers |
+| word 0 changing, 19 | our code completes every frame |
+| no marker | the channel does not carry word 1; fall back to the rb splits |
+
+## 11. The cause, found on silicon: negative shift immediates (2026-09-29)
+
+**Result [M, hardware]:** `waverider-m5e` (M5d plus this fix) passes every step of the M5 hardware test on the owner's unit:
+- a saw at the key's pitch;
+- WAV1 darkens it to a sine;
+- TBL1 switches tables;
+- an octave doubles the pitch;
+- the other tracks play on;
+- it survives SAVE, reload and a power cycle.
+
+**The cause [M].** selas encodes a Type 6b shift by a negative immediate without sign-extending the 12-bit shift field:
+
+| | encoding of `R0 = LSHIFT R11 BY -16` |
+|---|---|
+| selas | `023e 0000 f00b` |
+| stock DN2 1.11 (sw `0x1c3a90`) | `023e 7800 f00b` |
+
+- Across stock, all 368 negative shift immediates carry `0x78` in the third byte (the field's top bits, at bits 14:11 of the second parcel), and all 281 positive ones carry `0x00`.
+- On the ADSP-21569, ours raises ILOPI, and the handler parks the core.
+- digikit's decoder, selmap and the runner read only the low byte, so every emulator gate passed.
+- Our reader had four such shifts: `-16` in the row arithmetic, `-24` twice and `-19` in the loop. The M5 loop had two.
+
+**How it was found.** Each step was one flash, read over USB from the DSP's reply page:
+
+| build | what it showed |
+|---|---|
+| `stages`, `stages-loads` | the core stops on the first call, after the parameter loads (section 10's markers) |
+| `stages-i2`, `-i2l1`, `-r13` | neither the I2 write, the DDR output pointer nor the marker register is the cause |
+| `stages-noirq` | with interrupts masked, the reader runs to the end, then the core stops once they are re-enabled: a pending interrupt |
+| `stages-irptl`, `-ilop`, `-noi2`, `-m4` | IRPTL names it ILOPI. In four builds with different layouts, the first flagged reading sits exactly 38 sw before the same fixed block, whose first instruction is `R0 = LSHIFT R11 BY -16`. The flag is raised by look-ahead, before that instruction executes, which is why the stop always moved with our code and why `rb-loads` (it returned before that block) survived |
+| `stages-fix` | rewriting the 16-bit `c018` as 32-bit changed nothing: the parcel was not the cause |
+| byte comparison with stock | the shift encoding differs, as above |
+| `stages-shift` | the full reader with the four shifts fixed plays on track 2; stage 19 every call, and the call counter climbing |
+
+**The fix:** `scripts/sharc_waverider_m3.fix_shift_imm`, a post-pass on selas output in `_selas`, which every SHARC build uses. `csrc/waverider/sharc/{reader_m5,machine5_live}.json` and `src/dnfw/waverider/sharc_code.json` are re-assembled through it; the change is exactly six bytes, `0x00` → `0x78`.
+
+**What this withdraws.** Several earlier readings were shaped by this bug and are superseded:
+- section 7's "no code in blocks 1/2 with data caches on" lead;
+- section 9's `c018` width concern;
+- the interrupt and MODE1 questions in `docs/for-digikit-waverider-dsp-stop.md`, as causes.
+
+The observations stay true: the runner has no interrupt delivery, and its snapshot shows MODE1 = 0.
+
+**Rule for the future:** "decodes the same" is not proof of an encoding. Compare exact bytes with stock for every instruction form that carries an immediate.

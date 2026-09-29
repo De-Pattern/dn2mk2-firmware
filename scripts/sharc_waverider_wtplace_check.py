@@ -8,7 +8,7 @@ d) no WaveTone track (tracks 1-4 FM Tone/FM Drum/Swarmer/MIDI): all 16 buffers b
 EXPECT (argv 2): "saw" (our reader renders), "stock" (passthru), or "silent" (the
 reader-halving builds rb-*: our code exits early and writes no sample, so track 1's
 machine tap must be all zeros)."""
-import sys, pathlib, tempfile, struct, collections
+import os, sys, pathlib, tempfile, struct, collections
 sys.path.insert(0, "src"); sys.path.insert(0, "scripts")
 import sharc_waverider_m5 as G
 import sharc_waverider_render as m1
@@ -16,7 +16,8 @@ import sharc_waverider_m4 as m4
 import sharc_dn2_fixups as fx
 import sharc_strict_memory as SM
 
-DK = pathlib.Path("D:/01_Code/Z_Personal/digikit-wt-sharcemu")
+# the runner: a digikit work/sharc-emulator checkout (DIGIKIT_SHARC picks another)
+DK = pathlib.Path(os.environ.get("DIGIKIT_SHARC", "D:/01_Code/Z_Personal/digikit-wt-sharcemu"))
 IMG = pathlib.Path("../../../00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
 CP = pathlib.Path("../../../00_Resources/02_Builds/waverider-disc-m5c-constpitch_DN2_1.11.syx")
 WTP = pathlib.Path(sys.argv[1])
