@@ -3,8 +3,13 @@ reproduces the image that was gated.
 
 `scripts/gen_lfo4_code.py` packages `build_lfo4_browser.RELEASE`, the build
 the release `.syx` came from, so what is asserted here is **byte equality with
-`lfo4-everyvoice4`**, the release twin of the code that passed tests 10 and 11
-on the instrument (`docs/lfo4-build-plan.md`).
+`lfo4-fast`** (`python scripts/build_lfo4_browser.py --name lfo4-fast`).
+
+`lfo4-fast` is `lfo4-everyvoice4` -- the release twin of the code that passed
+tests 10 and 11 on the instrument (`docs/lfo4-build-plan.md`) -- with an idle
+LFO4 costing the frame nothing and the `memcpy` / `memset` test moved into the
+stubs, after the owner's save-while-playing stutter was bisected to lfo4
+(2026-09-27).
 """
 
 import pathlib
@@ -17,7 +22,7 @@ from dnfw.patch import paramtable
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
-GATED = ROOT / "out/lfo4-everyvoice4/section_3_MAIN_OS.bin"
+GATED = ROOT / "out/lfo4-fast/section_3_MAIN_OS.bin"
 BASE = lfo4.BASE
 
 
@@ -42,7 +47,7 @@ def applied(stock):
 
 def test_is_the_image_that_was_gated(applied):
     if not GATED.exists():
-        pytest.skip("out/lfo4-everyvoice4 is not built")
+        pytest.skip("out/lfo4-fast is not built")
     assert applied == GATED.read_bytes()
 
 

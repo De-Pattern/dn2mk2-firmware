@@ -493,13 +493,16 @@ linked by `scripts/build_lfo4_browser.py`.
 **How C becomes a mod.** The C stays the source. `scripts/gen_lfo4_code.py`
 runs the release build's own composition (`build_lfo4_browser.RELEASE`) and
 records what it changed as data (`src/dnfw/mods/lfo4_code.json`):
-- 204 in-image edits, each with the stock bytes it expects;
-- the 23,692-byte appended area.
+- 209 in-image edits, each with the stock bytes it expects;
+- the 23,732-byte appended area.
 
 It then applies the result to stock and refuses to write unless the output is
 byte-identical to the build. `dnfw mods apply --mod lfo4` on stock 1.11 writes
-**the same `.syx`, byte for byte**, as `lfo4-everyvoice4`, the release twin of the
-code that passed on the instrument.
+**the same `.syx`, byte for byte**, as `lfo4-fast`. Until 2026-09-27 that was
+`lfo4-everyvoice4`, the release twin of the code that passed on the instrument;
+`lfo4-fast` is the same code with an idle LFO4 costing the frame nothing and
+cheap `memcpy`/`memset` stubs, after the owner bisected a save-while-playing
+stutter to lfo4 (`docs/lfo4-build-plan.md`, "Idle costs nothing").
 
 **No stock data ships.** The appended area carries a copy of the parameter
 table, 320 stock records plus ten for LFO4 derived from LFO3's. Those 19,800

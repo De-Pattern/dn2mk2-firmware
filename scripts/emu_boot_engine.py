@@ -232,6 +232,36 @@ def main() -> int:
 
     ran = counts.get("lfo4_refresh", 0) - before
     print(f"  lfo4_refresh ran {ran} time(s) during {args.frames} frame(s)")
+    # **An idle LFO4 is not called at all** since `lfo4-fast` (2026-09-27): with
+    # the table empty the evaluators skip the fourth iteration and the bridge
+    # both, so a boot that loads only stock sounds never reaches our code here.
+    # That run is the idle path, and it has just passed. The working path needs
+    # an LFO4, so give every live sound one -- DEST on filter base, through the
+    # table's own API as a knob turn does -- and run the frames again.
+    if not ran and watch and "ext_set" in sym:
+        base = after.long(0x800052A0)
+        for t in range(TRACKS if base else 0):
+            sound = base + 52 + SOUND_BYTES * t
+            after.call(sym["ext_set"], sound, 3, 76 << 8)
+            after.call(sym["ext_set"], sound, 7, 0x7000)
+        print(f"  the idle path ran clean; now with an LFO4 on the {TRACKS if base else 0} live sound(s)")
+        before = counts.get("lfo4_refresh", 0)
+        try:
+            for _ in range(args.frames):
+                after.call(EVAL_A, buf, rate, 0xFFFF, 0xFFFF, out1, out2, 0)
+        except UcError as exc:
+            pc = after.uc.reg_read(UC_M68K_REG_PC)
+            print(f"\n  ** the evaluator faulted with LFO4 in use: {exc} at pc {pc:#010x} **")
+            return 1
+        ran = counts.get("lfo4_refresh", 0) - before
+        moved = sum(1 for t in range(TRACKS)
+                    if struct.unpack(">H", bytes(after.uc.mem_read(
+                        buf + MIRROR_AT + MIRROR_BYTES * t + 2 * 76, 2)))[0] != REST)
+        print(f"  lfo4_refresh ran {ran} time(s) during {args.frames} frame(s); "
+              f"slot 76 moved in {moved} of {TRACKS} block(s)")
+        if ran and not moved:
+            print("\n  ** LFO4 was refreshed and modulated nothing **")
+            return 1
     if fault:
         print(f"\n  ** the firmware drew EXCEPTION: record {fault['record']} **")
         return 1

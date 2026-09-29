@@ -1,6 +1,7 @@
 /* The two patch sites: `memcpy` and `memset` at their entries.
  *
- * Eight bytes of each becomes `jmp <stub> ; nop`, so each stub passes the
+ * Eight bytes of each becomes `jmp <stub> ; nop`, so each stub tests whether
+ * the call can concern the table (below) and, if it can, passes the
  * routine's own three arguments to C, replays the two instructions the jump
  * displaced, and continues at entry + 8. Neither stub saves a register: the C
  * it calls follows the same convention the firmware's callers expect, so
@@ -18,8 +19,31 @@
 
     .text
 
+/* **The test is here, not in C (2026-09-27).** Every copy and every fill in
+ * the firmware passes through these two stubs, the audio frame's dozens per
+ * frame among them, and the C's first act was to return for anything smaller
+ * than a sound or while the table is empty. Paying a call, three pushes and a
+ * return to learn that cost 17 instructions on a 202-byte copy and 82 on a
+ * 2,688-byte one (`scripts/emu_mod_cost.py`); the owner heard the sum as a
+ * stutter while saving. So the stubs decide first and only call when there is
+ * work: a table with an entry in it, and a block the size of a sound or more.
+ *
+ * With the table empty the C would have done nothing but count -- `ext_copy`,
+ * `ext_carry` and `ext_clear` all return at once when `ext_live` is 0 -- so
+ * skipping it changes no entry; only the diagnostic counters in `carry.c`
+ * (`lfo4_copies`, the size log) stop counting copies made while nothing is
+ * tracked. Each stub uses a register its routine overwrites first thing after
+ * the displaced pair: `memcpy` loads `%d0` with n at entry + 8, `memset` loads
+ * `%d1` there. */
+#define SOUND_BYTES 1163
+
     .globl  lfo4_memcpy_stub
 lfo4_memcpy_stub:
+    tst.l   ext_live
+    beq.s   lfo4_memcpy_displaced   | nothing tracked: nothing to carry
+    move.l  12(%sp),%d0
+    cmp.l   #SOUND_BYTES,%d0
+    bcs.s   lfo4_memcpy_displaced   | smaller than a sound: not ours
     move.l  12(%sp),-(%sp)          | n
     move.l  12(%sp),-(%sp)          | src
     move.l  12(%sp),-(%sp)          | dst
@@ -33,6 +57,11 @@ lfo4_memcpy_displaced:
 
     .globl  lfo4_memset_stub
 lfo4_memset_stub:
+    tst.l   ext_live
+    beq.s   lfo4_memset_displaced
+    move.l  12(%sp),%d1
+    cmp.l   #SOUND_BYTES,%d1
+    bcs.s   lfo4_memset_displaced
     move.l  12(%sp),-(%sp)          | n
     move.l  12(%sp),-(%sp)          | fill
     move.l  12(%sp),-(%sp)          | dst

@@ -119,7 +119,7 @@ class Machine:
         return load
 
     # --- calling ----------------------------------------------------------
-    def call(self, fn, *args):
+    def call(self, fn, *args, limit=20_000_000):
         """Enter `fn` with `args` as a `jsr` would, and stop at the return."""
         from unicorn.m68k_const import UC_M68K_REG_A6, UC_M68K_REG_A7, UC_M68K_REG_D0
 
@@ -128,7 +128,7 @@ class Machine:
         self.write(STACK, frame)
         self.uc.reg_write(UC_M68K_REG_A7, STACK)
         self.uc.reg_write(UC_M68K_REG_A6, 0)
-        self.uc.emu_start(fn, self.ret, count=20_000_000)
+        self.uc.emu_start(fn, self.ret, count=limit)
         return self.uc.reg_read(UC_M68K_REG_D0)
 
     def cost(self, fn, *args):
