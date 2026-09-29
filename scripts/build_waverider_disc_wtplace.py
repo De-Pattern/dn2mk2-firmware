@@ -60,6 +60,11 @@ runs exactly as in `b2`, and the exit is the full path's own return shape:
   the core writes nothing more and the reply DMA replays its pages, so the last
   marker is where the core stopped; a local USB probe reads it (`0x800053a8`). The
   stage numbers are in STAGES_READER / STAGES_ADAPTER.
+- `stages-loads`: `stages` with a marker after each instruction of the parameter loads
+  (20 after `I4 = R4`, 21-26 after each load; `stages` stopped the chip between 3 and
+  4), and a call counter: the adapter counts its calls at save + 0x5c and stores the
+  count to word 2 (byte 8) of both reply pages, so the probe tells a first-call death
+  from a later one.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -128,6 +133,17 @@ STAGES_READER = (
 # the adapter's: 1 after its saves, 2 before the call, 18 back from the reader, 19 after
 # its restores but before I1's (the markers' scratch)
 STAGES_ADAPTER = (1, 2, 18, 19)
+# stages-loads: after each instruction of the parameter loads (they run between 3 and 4)
+STAGES_LOADS = (
+    (20, "      I4 = R4;                          // I4 -> parameter block"),
+    (21, "      R8 = DM(0, I4);                   // table (a byte address)"),
+    (22, "      R9 = DM(1, I4);                   // phase"),
+    (23, "      R10 = DM(2, I4);                  // inc"),
+    (24, "      R11 = DM(3, I4);                  // pos, Q16"),
+    (25, "      R12 = DM(4, I4);                  // N"),
+    (26, "      R0 = DM(5, I4);"),
+)
+COUNT_AT = (0x2C49D8, 0x2C59D8)                     # the reply pages' word 2
 
 # rb-setup's span cut again (rb-loads survived on silicon, rb-setup died): each exits
 # through the full return (JUMP wr5_done) after the anchor line
@@ -187,8 +203,8 @@ def reader_source(rb: str | None) -> str:
         if src.count(C018) != 1:
             raise SystemExit("the c018 add is not one line")
         return insert_after(src.replace(C018, C018_32), SETUP_CUT["rb-setup-a"], TO_DONE)
-    if rb == "stages":
-        for stage, anchor in STAGES_READER:
+    if rb in ("stages", "stages-loads"):
+        for stage, anchor in STAGES_READER + (STAGES_LOADS if rb == "stages-loads" else ()):
             src = insert_after(src, anchor, mark(stage))
         return src
     if rb in SETUP_CUT:
@@ -199,6 +215,18 @@ def reader_source(rb: str | None) -> str:
             raise SystemExit("the output store is not one line")
         return src.replace(line, "      NOP;                              // DISCRIMINATOR: the output store\n")
     return src
+
+
+def with_counter(src: str, save: int) -> str:
+    """The adapter counting its calls: after the saves (R0 and R1 are saved and not used
+    again before the call), count += 1 at save + 0x5c, stored to the reply's word 2."""
+    cnt = save + 0x5C
+    text = (f"      R0 = DM({cnt:#x});                // CALL COUNTER\n"
+            "      R1 = 1;\n"
+            "      R0 = R0 + R1;\n"
+            f"      DM({cnt:#x}) = R0;\n"
+            + "".join(f"      DM({a:#x}) = R0;\n" for a in COUNT_AT))
+    return insert_after(src, f"      DM({save + 4 * 21:#x}) = I5;", text)
 
 
 def with_stages(src: str, save: int, par: int) -> str:
@@ -216,7 +244,7 @@ def with_stages(src: str, save: int, par: int) -> str:
 
 
 def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, nocall: bool = False,
-            stages: bool = False) -> bytes:
+            stages: bool = False, counter: bool = False) -> bytes:
     import sharc_resolve_jumps as rj  # noqa: PLC0415  (WSL + selas)
     rd, ad, save, par, tab = LAYOUT[layout]
     src = SOURCE.read_text(encoding="utf-8")
@@ -227,7 +255,9 @@ def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, noca
     src = src.replace("R4 = 0x2ddf00;", f"R4 = {par:#x};").replace("R8 = 0x2df000;", f"R8 = {tab:#x};")
     src = src.replace("CJUMP 0x16eb00 (DB);", f"CJUMP {rd // 2:#x} (DB);")
     if stages:
-        src = with_stages(src, save, par)
+        src = with_stages(src, save, par)       # marker 1 goes right after the saves ...
+    if counter:
+        src = with_counter(src, save)           # ... and the counter before it
     if nocall:
         # rb-params: the parameter block filled, then straight to the restores
         a = src.index("      CJUMP ")
@@ -303,12 +333,13 @@ def variant(stock: bytes, work: pathlib.Path, name: str) -> bytes:
     if name == "passthru":
         return section7(stock, adapter(work, passthru=True))
     lay = "b0" if name == "b0code" else "b2"
-    rb = name if name in RB + ("stages",) else None
+    rb = name if name in RB + ("stages", "stages-loads") else None
     rd, ad, save, par, tab = LAYOUT[lay]
     # the reader has 0x400 up to b2's adapter; only `stages` (markers) needs more than 0x200,
     # and the other builds keep their bytes
-    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb == "stages" else 0x200)),
-            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb == "stages"),
+    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages", "stages-loads") else 0x200)),
+            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages", "stages-loads"),
+                                     counter=rb == "stages-loads"),
                                      0x400 if lay == "b2" else 0x200))]
     if name == "b0code":
         lo, hi = dsp.dm_to_load(B0_FREE[0]), dsp.dm_to_load(B0_FREE[1])
@@ -340,7 +371,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=pathlib.Path, required=True)
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages") + RB, default="wtplace")
+    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages", "stages-loads") + RB, default="wtplace")
     ap.add_argument("--s7-only", type=pathlib.Path, help="write section 7 here and stop (runner checks)")
     a = ap.parse_args(argv)
     if a.out.exists():

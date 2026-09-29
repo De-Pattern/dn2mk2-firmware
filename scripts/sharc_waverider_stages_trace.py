@@ -1,4 +1,6 @@
-"""scripts/sharc_waverider_stages_trace.py S7.bin -- the stage markers of waverider-disc-stages in the runner.
+"""scripts/sharc_waverider_stages_trace.py S7.bin [loads] -- the stage markers of waverider-disc-stages
+(or, with `loads`, stages-loads: markers 20-26 inside the parameter loads, and the call
+counter in the reply's word 2, which must read 1, 2, 3, 4 across the four blocks) in the runner.
 
 Runs the build as the wtplace check does (post-engine-init, 4 blocks, WaveTone on track
 1, trig on block 1) and logs every write to the markers' two reply words
@@ -21,7 +23,8 @@ sound, machines = m4.init_sound(IMG)
 img = pathlib.Path(sys.argv[1]).read_bytes()
 snap, mach = G.snapshot_path(dk, stock, pathlib.Path(tempfile.mkdtemp()))
 
-log = {a: [] for a in W.MARK_AT}
+LOADS = len(sys.argv) > 2 and sys.argv[2] == "loads"
+log = {a: [] for a in W.MARK_AT + (W.COUNT_AT if LOADS else ())}
 import sharc_core.memory as mem
 orig = getattr(mem._dm_write, "__wrapped_trace__", mem._dm_write)
 
@@ -52,11 +55,15 @@ for s in st:
         runs.append(cur); cur = []
     cur.append(s)
 runs.append(cur)
-want = [1, 2, 3, 4, 5, 6, 7, 8, 9] + [10, 11, 12, 13, 14, 15] * 32 + [16, 18, 19]
+want = [1, 2, 3] + ([20, 21, 22, 23, 24, 25, 26] if LOADS else []) + [4, 5, 6, 7, 8, 9]     + [10, 11, 12, 13, 14, 15] * 32 + [16, 18, 19]
 for k, run in enumerate(runs):
     c = collections.Counter(run)
     print(f"block {k}: {len(run)} markers, first {run[:10]}, last {run[-4:]}, stage 14 x{c[14]}; full path: {run == want}")
 ok = a == b and len(runs) == 4 and all(run == want for run in runs) and st[-1] == 19
 print("last value", hex(a[-1]) if a and a[-1] is not None else None)
+if LOADS:
+    c0, c1 = (log[x] for x in W.COUNT_AT)
+    print("call counter writes:", c0, "; pages agree:", c0 == c1)
+    ok &= c0 == c1 == [1, 2, 3, 4]
 print("STAGES TRACE", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)
