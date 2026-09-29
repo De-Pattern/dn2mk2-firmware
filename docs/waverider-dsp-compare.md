@@ -634,3 +634,45 @@ No in-function stock instruction is a confirmed Type 2b. The two sharcdb calls 2
 - **[I, strong]:** the silicon reads it as 16-bit, as it does in stock's WaveTone every block. That makes `c018` an unlikely cause, but not an excluded one.
 - **`rb-setup-a2` measures it.** If a dies and a2 survives, the silicon reads `c018` as a 32-bit 2b. Then the next parcel `0x9908` is taken as compute[15:0], `0x0087` starts a 48-bit Type 22a, and the stream is desynchronised. That would explain everything, and the fix would be to never emit `0xc000..0xc07f`.
 - No other parcel of ours has an ambiguous width. `c09a` and `c188` overlap only the wrong 11c figure, and both readings of them are 16-bit.
+
+## 10. One store no survivor made, and the stage markers built (2026-09-29)
+
+**The gap in section 9's split.** Every `rb-setup-*` exits through `wr5_done`, the full return, so each makes the phase store `DM(1, I4) = R9`. `rb-loads` returns through the early exit, whose slot for that store is a NOP.
+
+So no build that survived has ever stored through a DAG from our code: `rb-params` stores by absolute address only, and `rb-callret` and `rb-loads` only load. Every build that died does store through one. A dying `rb-setup-a` would therefore not separate a's row code from that one store.
+
+**`rb-store1`** is `rb-loads` with the early exit's NOP made `DM(1, I4) = R9`, encoded `0899 8104` as in `wr5_done`.
+- Gates [M]: wtplace check `silent` PASS, strict memory 0 violations with the PC in our code, `dnfw inspect` all ok, section 3 = m5b's.
+- Order: it goes after a dying `rb-setup-a`, in place of a2. If it dies, a single DAG store from our code is fatal, and the question becomes where it writes.
+
+**`stages`: where the core stops, in one flash.** Section 8's breadcrumb design, built on the b2 layout:
+
+- **The word.** Byte 4 (word 1) of both DSP->ColdFire reply pages, `0x2c49d4` and `0x2c59d4`.
+  - The ColdFire's readers of the reply at `0x800053a4` are the DMA setup (`0x40025e8c`, word 0), a halfword at 0x16 (`0x4002795a`), 32 records of 84 bytes from 0x1c (`0x40025400`, stride 42 halfwords, to 0xa9c) and the per-track tail from 0xa9c.
+  - **No ColdFire code reads bytes 4..0x15** [M, from the image's literals and their uses].
+  - Which DSP handler cases write there is **[I]**: the cases are reached through the table at `0x268a68` with the reply pointer in the handler's frame, and no literal names the pages outside the link setup at `0x1ca505..0x1ca5d7`.
+  - After a stall nothing writes it, since the core is stopped.
+- **The marker.** `I1 = 0x5752_00nn` and two 14a stores, one per page. I1 is saved and restored by the adapter and never touched by the reader.
+  - USTAT1 was the first choice, but selas assembles `USTAT1 = imm32` in a form digikit's decoder reads as a different width (the runner halted at `0x18026b`). Stock uses USTAT1 only in L2.
+  - `DM(abs) = I1` is a form the adapter already makes.
+- **The stages** are set by `STAGES_READER` / `STAGES_ADAPTER` in `scripts/build_waverider_disc_wtplace.py`:
+  - 1-2 in the adapter, before the call;
+  - 3-16 in the reader, with 10-15 once per sample;
+  - 18-19 back in the adapter.
+  - None sits between a flag-setting op and its conditional jump, and both return shapes are unchanged.
+  - The reader grows to 600 B, so `stages` alone takes the 0x400 up to b2's adapter; every other build keeps its bytes (b2 rebuilt byte-identical).
+
+**Gates [M]:**
+- `scripts/sharc_waverider_stages_trace.py`: both words take the same values; each of 4 blocks runs the full path (1-9, 10-15 x 32, 16, 18, 19); the last value is `0x57520013`.
+- wtplace check `saw` PASS: track 1 bit-identical to constpitch's reader output (0 of 128 differ), other tracks and the no-WaveTone run bit-identical to stock, strict memory 0 violations with the PC in our code.
+- sharcdb decode: all confident, and every branch lands on an instruction boundary.
+- Encoding audit: 0 opcodes that stock never uses.
+
+**Reading it on the instrument** needs a local USB read of `0x800053a8` (word 1) and `0x800053a4` (word 0). The reading is self-validating: `0x5752` in either half order cannot appear by chance.
+
+| reading | meaning |
+|---|---|
+| word 0 frozen, stage N | the core stopped inside the step after N |
+| word 0 changing, stage stuck | the core runs but our code stops reaching the markers |
+| word 0 changing, 19 | our code completes every frame |
+| no marker | the channel does not carry word 1; fall back to the rb splits |
