@@ -24,8 +24,9 @@ sound, machines = m4.init_sound(IMG)
 img = pathlib.Path(sys.argv[1]).read_bytes()
 snap, mach = G.snapshot_path(dk, stock, pathlib.Path(tempfile.mkdtemp()))
 
-LOADS = len(sys.argv) > 2 and sys.argv[2] == "loads"
-log = {a: [] for a in W.MARK_AT + (W.COUNT_AT if LOADS else ())}
+LOADS = len(sys.argv) > 2 and sys.argv[2] in ("loads", "i2")
+I2 = len(sys.argv) > 2 and sys.argv[2] == "i2"      # stages-i2: words 3 (R0) and 4 (I2) too
+log = {a: [] for a in W.MARK_AT + (W.COUNT_AT if LOADS else ()) + (W.OUT_AT + W.I2_AT if I2 else ())}
 import sharc_core.memory as mem
 orig = getattr(mem._dm_write, "__wrapped_trace__", mem._dm_write)
 
@@ -66,5 +67,9 @@ if LOADS:
     c0, c1 = (log[x] for x in W.COUNT_AT)
     print("call counter writes:", c0, "; pages agree:", c0 == c1)
     ok &= c0 == c1 == [1, 2, 3, 4]
+if I2:
+    o0, o1, i0, i1 = (log[x] for x in W.OUT_AT + W.I2_AT)
+    print("word 3 (R0, the output pointer):", [hex(v) for v in o0], "; word 4 (I2):", [hex(v) for v in i0])
+    ok &= o0 == o1 == i0 == i1 and len(o0) == 4
 print("STAGES TRACE", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)
