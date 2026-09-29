@@ -24,8 +24,9 @@ sound, machines = m4.init_sound(IMG)
 img = pathlib.Path(sys.argv[1]).read_bytes()
 snap, mach = G.snapshot_path(dk, stock, pathlib.Path(tempfile.mkdtemp()))
 
-LOADS = len(sys.argv) > 2 and sys.argv[2] in ("loads", "i2")
-I2 = len(sys.argv) > 2 and sys.argv[2] == "i2"      # stages-i2: words 3 (R0) and 4 (I2) too
+LOADS = len(sys.argv) > 2 and sys.argv[2] in ("loads", "i2", "i2l1")
+I2 = len(sys.argv) > 2 and sys.argv[2] in ("i2", "i2l1")   # words 3 (R0) and 4 (I2) too
+I2L1 = len(sys.argv) > 2 and sys.argv[2] == "i2l1"          # I2 is the L1 scratch, not R0
 log = {a: [] for a in W.MARK_AT + (W.COUNT_AT if LOADS else ()) + (W.OUT_AT + W.I2_AT if I2 else ())}
 import sharc_core.memory as mem
 orig = getattr(mem._dm_write, "__wrapped_trace__", mem._dm_write)
@@ -70,6 +71,7 @@ if LOADS:
 if I2:
     o0, o1, i0, i1 = (log[x] for x in W.OUT_AT + W.I2_AT)
     print("word 3 (R0, the output pointer):", [hex(v) for v in o0], "; word 4 (I2):", [hex(v) for v in i0])
-    ok &= o0 == o1 == i0 == i1 and len(o0) == 4
+    ok &= o0 == o1 and i0 == i1 and len(o0) == 4
+    ok &= all(v == W.SCRATCH_L1 for v in i0) if I2L1 else o0 == i0
 print("STAGES TRACE", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)

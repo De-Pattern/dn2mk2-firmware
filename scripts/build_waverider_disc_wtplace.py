@@ -69,6 +69,10 @@ runs exactly as in `b2`, and the exit is the full path's own return shape:
   `I2 = R0` or the instruction after it) with R0, the output pointer as the chip has
   it, stored to reply word 3 before `I2 = R0`; then two NOPs, I2 stored to word 4, and
   marker 4. Word 4 landing means the core survived `I2 = R0` itself.
+- `stages-i2l1`: `stages-i2` (which survived `I2 = R0` and the I2 stores, then stopped
+  before marker 4 landed) with I2 aimed at a free L1 scratch in the save area
+  (save + 0x60, 40 free words) instead of the DDR track buffer. R0 still goes to word
+  3. The reader then renders into that scratch, so track 2 stays silent by design.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -150,6 +154,7 @@ STAGES_LOADS = (
 COUNT_AT = (0x2C49D8, 0x2C59D8)                     # the reply pages' word 2
 OUT_AT = (0x2C49DC, 0x2C59DC)                       # stages-i2: word 3, R0 (the output pointer)
 I2_AT = (0x2C49E0, 0x2C59E0)                        # stages-i2: word 4, I2 after `I2 = R0`
+SCRATCH_L1 = LAYOUT["b2"][2] + 0x60                 # stages-i2l1: 40 free words of the save area
 
 # rb-setup's span cut again (rb-loads survived on silicon, rb-setup died): each exits
 # through the full return (JUMP wr5_done) after the anchor line
@@ -209,20 +214,28 @@ def reader_source(rb: str | None) -> str:
         if src.count(C018) != 1:
             raise SystemExit("the c018 add is not one line")
         return insert_after(src.replace(C018, C018_32), SETUP_CUT["rb-setup-a"], TO_DONE)
-    if rb in ("stages", "stages-loads", "stages-i2"):
-        if rb == "stages-i2":
+    if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1"):
+        if rb in ("stages-i2", "stages-i2l1"):
             # before the markers go in, so the anchors are the reader's own lines
             src = insert_after(src, "      R0 = DM(5, I4);",
                                "".join(f"      DM({a:#x}) = R0;                // STAGES-I2: the output pointer\n"
                                        for a in OUT_AT))
-            src = insert_after(src, "      I2 = R0;                          // out",
+            if rb == "stages-i2l1":
+                line = "      I2 = R0;                          // out"
+                if src.count(line) != 1:
+                    raise SystemExit("I2 = R0 is not one line")
+                src = src.replace(line, f"      I2 = {SCRATCH_L1:#x};                     // STAGES-I2L1: an L1 scratch, not the track buffer")
+                anchor_i2 = f"      I2 = {SCRATCH_L1:#x};                     // STAGES-I2L1: an L1 scratch, not the track buffer"
+            else:
+                anchor_i2 = "      I2 = R0;                          // out"
+            src = insert_after(src, anchor_i2,
                                "      NOP;\n      NOP;\n"
                                + "".join(f"      DM({a:#x}) = I2;                // STAGES-I2: I2 after the move\n"
                                          for a in I2_AT))
         for stage, anchor in STAGES_READER + (STAGES_LOADS if rb != "stages" else ()):
-            if rb == "stages-i2" and stage == 4:
+            if rb in ("stages-i2", "stages-i2l1") and stage == 4:
                 anchor = f"      DM({I2_AT[1]:#x}) = I2;                // STAGES-I2: I2 after the move"
-            if rb == "stages-i2" and stage == 26:
+            if rb in ("stages-i2", "stages-i2l1") and stage == 26:
                 anchor = f"      DM({OUT_AT[1]:#x}) = R0;                // STAGES-I2: the output pointer"
             src = insert_after(src, anchor, mark(stage))
         return src
@@ -352,13 +365,13 @@ def variant(stock: bytes, work: pathlib.Path, name: str) -> bytes:
     if name == "passthru":
         return section7(stock, adapter(work, passthru=True))
     lay = "b0" if name == "b0code" else "b2"
-    rb = name if name in RB + ("stages", "stages-loads", "stages-i2") else None
+    rb = name if name in RB + ("stages", "stages-loads", "stages-i2", "stages-i2l1") else None
     rd, ad, save, par, tab = LAYOUT[lay]
     # the reader has 0x400 up to b2's adapter; only `stages` (markers) needs more than 0x200,
     # and the other builds keep their bytes
-    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages", "stages-loads", "stages-i2") else 0x200)),
-            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages", "stages-loads", "stages-i2"),
-                                     counter=rb in ("stages-loads", "stages-i2")),
+    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1") else 0x200)),
+            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1"),
+                                     counter=rb in ("stages-loads", "stages-i2", "stages-i2l1")),
                                      0x400 if lay == "b2" else 0x200))]
     if name == "b0code":
         lo, hi = dsp.dm_to_load(B0_FREE[0]), dsp.dm_to_load(B0_FREE[1])
@@ -390,7 +403,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=pathlib.Path, required=True)
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages", "stages-loads", "stages-i2") + RB, default="wtplace")
+    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages", "stages-loads", "stages-i2", "stages-i2l1") + RB, default="wtplace")
     ap.add_argument("--s7-only", type=pathlib.Path, help="write section 7 here and stop (runner checks)")
     a = ap.parse_args(argv)
     if a.out.exists():
