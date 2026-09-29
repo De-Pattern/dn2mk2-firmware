@@ -1081,3 +1081,132 @@ shape. It passes `dnfw inspect` (21/21). Built by
 | strict memory map, constpitch, 3 blocks with a type-5 trig | returns every block; **0** violations from our code |
 | `dnfw inspect` | m5d 21/21; constpitch 21/21 |
 | m5d section 3 | `85debe72...`, identical to m5b's; built from the merged source by `dnfw mods apply --mod waverider`, and byte-identical to the file in `02_Builds` |
+
+## M5d dies; constpitch leaves a stuck 750 Hz tone (owner, 2026-09-27)
+
+- **M5d**: silent from the first WAVERIDER trig. Changing the machine does not
+  bring the sound back.
+- **constpitch**: after a WAVERIDER trig the only sound is a continuous tone. It
+  survives a sequencer stop and a machine change; only power-off ends it. The
+  recording (`00_Resources/07_DataCapture/constpitch-stuck-tone.wav`, measured by
+  the coordinator) shows:
+  - the normal mix until 20.07 s, then an abrupt switch;
+  - f0 = **750.000 Hz = 48,000 / 64**, harmonics at every multiple, L ≈ R, about
+    19 dB below the mix;
+  - an averaged cycle that is a descending ramp with one wrap.
+
+### The stock output path: the replayed buffer is the post-mix SPORT ring, 2 x 32 frames
+
+- `sw 0x1c9e76` (the per-block driver) calls the engine `sw 0x1c2712` and then
+  `sw 0x1c9d3f`.
+- `0x1c9d3f` converts the master mix at `0x268438` into the SPORT page:
+  - L is 32 floats at `0x268438`, R 32 floats at `+0x80`;
+  - `lcntr = 0x20`, `fix ... by 31`;
+  - the page is at `0x2c0478 + (DM(0x268a38) << 8)`, 256 bytes = 32 stereo frames.
+- The page index ping-pongs, so the TX ring is **two pages, 64 frames**. If the core
+  stops producing blocks while the DMA keeps cycling its descriptor ring, the ring
+  replays those 64 frames: **750 Hz exactly**.
+- It is the **post-mix** buffer, not our track buffer. That fits L ≈ R and the level
+  below the mix: the track goes through the chain and the mix.
+- A note-60 saw advances 261.6 x 64 / 48,000 = **0.349 cycle per 64 frames**. That
+  matches the ramp with one wrap, so **both pages hold our saw**: the render, chain,
+  mix and conversion completed for **at least two consecutive blocks** before the
+  stop.
+
+### Silence against a tone: two ways of stopping
+
+- **Every trap this image enables stops in interrupt context.** EMUI, PARI and ILOPI
+  all jump to `0x1c07c6`, which is `idle; jump 0x1c07c7`, forever, inside the
+  high-priority handler. Lower-priority interrupts, including the audio DMA/SPORT
+  service, can no longer run.
+- **A stall in task context** (an endless loop, a wait that never completes) leaves
+  the audio interrupt running, and it keeps replaying the last pages.
+- A halt that silences therefore reads as a **trap** (M5, m5c, D3, D5a, M5d,
+  ONESHOT), and a stuck tone as a **task-level stall** (constpitch).
+
+This is an inference from the handler and the two shapes. It is not measured.
+
+**So there are two faults:**
+
+1. **In M5d's pitch block**, which constpitch removed: a trap, before any output.
+2. **After at least two rendered blocks in constpitch**: a task-level stall.
+
+### What constpitch runs after the render's last store, and the same span in nodir
+
+The reader, from its last store (constpitch, sw):
+
+```
+16eb9b  dm(i2,m6)=r4           ; the last sample
+16eb9c  r0=dm(4,i4); r1=1; r0=r0-r1; dm(4,i4)=r0     ; count word -> 0
+16eba3  if ne jump 0x16eb41    ; falls through
+16eba6  i12=dm(m7,i6)          ; the pushed return address
+16eba8  dm(1,i4)=r9            ; the phase, for the next block
+16ebaa  jump (m14,i12) (db); nop; rframe     ; I7 = I6; I6 = DM(0, I6)
+```
+
+Then the loop from `0x16edef`:
+
+- `r0 = dm(0x2dde80)`, subtract 1, `dm(0x2dde80) = r0`, then `if ne jump 0x16ed5f`
+  (the remaining tracks' type checks);
+- 28 restores from `0x2dde00..0x2dde6c`;
+- `i5 = dm(-0x18, i6)`, `r10 = dm(-0x22, i6)`, `jump 0x1c944c`.
+
+**nodir runs the same loop tail and the same restores**, from block 2. The only
+things constpitch does after the render that nodir never did are:
+
+- the reader's return (`i12 = dm(m7, i6)`, `jump (m14, i12)`, `rframe`);
+- the phase store;
+- one dependency: `i5 = dm(-0x18, i6)` and `r10 = dm(-0x22, i6)` read through the
+  I6 that `rframe` restored.
+
+In the stock code downstream:
+
+- the chain processes a **non-zero** type-5 buffer (nodir and D1 fed it zeros);
+- whatever else on silicon runs outside `0x1c2712` sees a type-5 track with signal
+  for the first time: the runner does not execute that code.
+
+### Discriminators: `fix/waverider-dsp-silence-2`, `scripts/build_waverider_disc.py`
+
+All are m5b's section 3 plus M5d's section 7 with the named edits. **Each flash
+reads three ways:**
+
+- **other tracks keep playing** (WAVERIDER silent or sounding): it survived;
+- **silence**: a trap;
+- **a stuck 750 Hz tone**: a task-level stall after output reached the mix.
+
+**Keep the volume low. A stuck tone at full level is hard on ears and speakers.**
+Power-off is the only way out of either failure.
+
+**A. Where M5d's trap is: prefix exits in the pitch block.** Each build is M5d's loop
+with an early `JUMP -> wr_t5v_next` after the named line. The reader is never
+called.
+
+| build | the tail runs up to and including | section 7 sha256 |
+|---|---|---|
+| `waverider-disc-m5d-exitnoteread` | the note-cell read `R8 = DM(0, I1)` | `819ce9835cadb97e...` |
+| `waverider-disc-m5d-exitnotecheck` | the integer NaN/sign check (both arms) | `59e3e3b4d5c0da20...` |
+| `waverider-disc-m5d-exittrunc` | `F8 = MIN(F8, F12)`; `R0 = TRUNC F8` | `0560a6a83465f763...` |
+| `waverider-disc-m5d-exitfloat` | `F1 = FLOAT R0 BY R12` | `341d6c1e937e64da...` |
+| `waverider-disc-m5d-exittable` | the pitch-table reads `T[k]`, `T[k+1]` | `9d0714f45bb98b42...` |
+| `waverider-disc-m5d-exitinc` | the interpolation, `TRUNC`, the inc store (M5d minus the call) | `c72ae70e3616f5db...` |
+
+Expected: plays up to the faulting line, and silence from it on. Flash
+`exittrunc` first, then halve.
+
+Built earlier on this branch, before constpitch showed the pitch block was the
+place: `exitmagic`, `exitblockaddr`, `exitframecopy`, `exitdirectory` and
+`exitpos` cut before the pitch block. constpitch ran all of that and got further,
+so these should all play. They are a cheap control, not a priority.
+
+**B. Where constpitch's stall is.**
+
+| build | edits | section 7 sha256 | plays -> | 750 Hz -> |
+|---|---|---|---|---|
+| `waverider-disc-m5d-constpitch-nocall` | constant pitch, exit before the call | `39a030f51b2ec24b...` | the pitch block was M5d's only trap (expected) | (not expected) |
+| `waverider-disc-m5d-constpitch-callonly` | constant pitch; the reader jumps from its entry straight to its return | `aa1a0660eb44a402...` | the stall needs the render's body or output | the call/return itself stalls |
+| `waverider-disc-m5d-constpitch-scratch` | constant pitch; the reader writes to `0x2de800`, not the track buffer | `92b688150192aa94...` | the stall needs **our samples in the track** (the stock side reacting to a type-5 track with signal) | the reader's body |
+
+**Strict runner** (`scratchpad strict_all.py`): all nine builds, 4 blocks each
+from post-init, a type-5 trig on block 1. Every block returns, with **0**
+violations from our code. The runner cannot show either failure: it models no
+traps and no interrupts.
