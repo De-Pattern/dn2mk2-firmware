@@ -52,6 +52,14 @@ runs exactly as in `b2`, and the exit is the full path's own return shape:
   `DM(1, I4) = R9`: the only store through a DAG it makes. rb-callret and rb-loads
   (both survived) store nothing through a DAG; every build that died does, and every
   `rb-setup-*` makes this store, so this one separates it from the setup span.
+- `stages`: `b2` (the full reader, which died on silicon) with a stage marker before
+  and after each suspect step. A marker is `I1 = 0x5752_00nn` and two 14a stores
+  of it to word 1 (byte 4) of both DSP->ColdFire reply pages (`0x2c49d4`,
+  `0x2c59d4`; the ColdFire receives the reply at `0x800053a4`, and no ColdFire code
+  reads bytes 4..0x15 of it). The scratch is I1, which the adapter saves and restores. After a stall
+  the core writes nothing more and the reply DMA replays its pages, so the last
+  marker is where the core stopped; a local USB probe reads it (`0x800053a8`). The
+  stage numbers are in STAGES_READER / STAGES_ADAPTER.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -97,6 +105,30 @@ def call_bytes(target_sw: int) -> bytes:
 
 RB = ("rb-params", "rb-callret", "rb-loads", "rb-setup", "rb-oneread", "rb-noout",
       "rb-setup-a", "rb-setup-a2", "rb-setup-b", "rb-setup-c", "rb-setup-d", "rb-store1")
+# the stage markers (`stages`): the reply pages' word 1, both pages
+MARK_AT = (0x2C49D4, 0x2C59D4)
+# (stage, the source line the marker goes after); the reader's first I0 = R3 is its
+# first occurrence. None sits between a flag-setting op and its conditional jump.
+STAGES_READER = (
+    (3, "wr_render5.:"),
+    (4, "      I2 = R0;                          // out"),
+    (5, "      DM(6, I4) = R0;                   // frame f0's row"),
+    (6, "      R1 = R1 + R8;"),
+    (7, "      DM(7, I4) = R1;                   // frame f1's row"),
+    (8, "      F11 = FLOAT R3 BY R2;"),
+    (9, "      R12 = -16;"),
+    (10, "      I0 = R3;"),
+    (11, "      R4 = DM(0, I0);                   // frame f0, word w0"),
+    (12, "      R7 = DM(0, I0);                   // frame f1, word w1"),
+    (13, "      R9 = R9 + R10;                    // phase += inc, mod 2^32"),
+    (14, "      DM(I2, M6) = F4;"),
+    (15, "      DM(4, I4) = R0;                   // samples left"),
+    (16, "wr5_done.:"),
+)
+# the adapter's: 1 after its saves, 2 before the call, 18 back from the reader, 19 after
+# its restores but before I1's (the markers' scratch)
+STAGES_ADAPTER = (1, 2, 18, 19)
+
 # rb-setup's span cut again (rb-loads survived on silicon, rb-setup died): each exits
 # through the full return (JUMP wr5_done) after the anchor line
 SETUP_CUT = {
@@ -113,6 +145,15 @@ EARLY_RET = ("      I12 = DM(M7, I6);                 // DISCRIMINATOR: return h
              "      NOP;\n"
              "      RFRAME;\n")
 TO_DONE = "      JUMP 0x16eba6;                    // -> wr5_done.  DISCRIMINATOR: early exit\n"
+
+
+def mark(stage: int) -> str:
+    """One stage marker: I1 = 0x5752_00nn, stored to both reply pages' word 1. I1 is
+    the adapter's to use (it saves and restores it) and the reader never touches it;
+    USTAT1 was the first choice, but selas and digikit disagree on the width of
+    `USTAT1 = imm32`, and `DM(abs) = I1` is a form the adapter already makes."""
+    return (f"      I1 = {0x57520000 | stage:#x};                  // STAGE {stage}\n"
+            + "".join(f"      DM({a:#x}) = I1;\n" for a in MARK_AT))
 
 
 def insert_after(src: str, anchor: str, text: str) -> str:
@@ -146,6 +187,10 @@ def reader_source(rb: str | None) -> str:
         if src.count(C018) != 1:
             raise SystemExit("the c018 add is not one line")
         return insert_after(src.replace(C018, C018_32), SETUP_CUT["rb-setup-a"], TO_DONE)
+    if rb == "stages":
+        for stage, anchor in STAGES_READER:
+            src = insert_after(src, anchor, mark(stage))
+        return src
     if rb in SETUP_CUT:
         return insert_after(src, SETUP_CUT[rb], TO_DONE)
     if rb == "rb-noout":
@@ -156,7 +201,22 @@ def reader_source(rb: str | None) -> str:
     return src
 
 
-def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, nocall: bool = False) -> bytes:
+def with_stages(src: str, save: int, par: int) -> str:
+    """The adapter with markers 1 (after its saves, I1 among them), 2 (before the call),
+    18 (back from the reader) and 19 (restores made, before I1's own)."""
+    s1, s2, s18, s19 = STAGES_ADAPTER
+    src = insert_after(src, f"      DM({save + 4 * 21:#x}) = I5;", mark(s1))
+    line = next(x for x in src.splitlines() if x.startswith(f"      R4 = {par:#x};"))
+    src = insert_after(src, line, mark(s2))
+    src = insert_after(src, "wr_wt_back.:", mark(s18))
+    i1 = f"      I1 = DM({save + 4 * 17:#x});\n"
+    if src.count(i1) != 1:
+        raise SystemExit("the adapter's I1 restore is not one line")
+    return src.replace(i1, mark(s19) + i1)
+
+
+def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, nocall: bool = False,
+            stages: bool = False) -> bytes:
     import sharc_resolve_jumps as rj  # noqa: PLC0415  (WSL + selas)
     rd, ad, save, par, tab = LAYOUT[layout]
     src = SOURCE.read_text(encoding="utf-8")
@@ -166,6 +226,8 @@ def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, noca
         src = src.replace(f"DM({0x2DDF00 + 4 * k:#x})", f"DM({par + 4 * k:#x})")
     src = src.replace("R4 = 0x2ddf00;", f"R4 = {par:#x};").replace("R8 = 0x2df000;", f"R8 = {tab:#x};")
     src = src.replace("CJUMP 0x16eb00 (DB);", f"CJUMP {rd // 2:#x} (DB);")
+    if stages:
+        src = with_stages(src, save, par)
     if nocall:
         # rb-params: the parameter block filled, then straight to the restores
         a = src.index("      CJUMP ")
@@ -241,10 +303,12 @@ def variant(stock: bytes, work: pathlib.Path, name: str) -> bytes:
     if name == "passthru":
         return section7(stock, adapter(work, passthru=True))
     lay = "b0" if name == "b0code" else "b2"
-    rb = name if name in RB else None
+    rb = name if name in RB + ("stages",) else None
     rd, ad, save, par, tab = LAYOUT[lay]
-    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x200)),
-            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params"),
+    # the reader has 0x400 up to b2's adapter; only `stages` (markers) needs more than 0x200,
+    # and the other builds keep their bytes
+    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb == "stages" else 0x200)),
+            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb == "stages"),
                                      0x400 if lay == "b2" else 0x200))]
     if name == "b0code":
         lo, hi = dsp.dm_to_load(B0_FREE[0]), dsp.dm_to_load(B0_FREE[1])
@@ -276,7 +340,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=pathlib.Path, required=True)
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2") + RB, default="wtplace")
+    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages") + RB, default="wtplace")
     ap.add_argument("--s7-only", type=pathlib.Path, help="write section 7 here and stop (runner checks)")
     a = ap.parse_args(argv)
     if a.out.exists():
