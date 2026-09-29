@@ -5,8 +5,8 @@ almost none: the Digitakt II and the Digitone II share one UI framework (884 of
 their C++ classes have identical names, bases and vtable sizes;
 `docs/dt2-machine-port.md`, "The ColdFire half"), so the pieces a machine's page
 is built from are either **data** (parameter records, name strings, the page's
-knob list) or **code the recipient already has** (every value formatter ONESHOT
-uses has a twin in DN2 1.11). This module describes those pieces by address,
+knob list) or **code the recipient already has** (a DT2 machine page's value
+formatters have twins in DN2 1.11). This module describes those pieces by address,
 size and digest; `cfplan` checks them against the two images the user supplies
 and composes the recipient's copies in memory.
 

@@ -1,5 +1,8 @@
 # Porting a DT2 machine to the DN2: measured, not estimated
 
+> **2026-09-29: ONESHOT development continues locally and its code has been removed from this repository.** This document stays as the record of the DT2 → DN2 port research: the ColdFire half, the frame and reply layouts, and why Waverider came first. File paths below that point at ONESHOT code refer to that earlier state.
+
+
 **2026-09-25.** The question: ONESHOT is the simplest DT2 SRC machine and its
 code is already in a firmware we hold, so what would porting it cost?
 
@@ -492,13 +495,7 @@ handler that opens one. For a small baked bank that is enough: SAMP picks a slot
 CODE chunk at its load address) by digikit's `guirun --patch-ranges`, run to the
 UI and saved; the drive run restores that.
 
-| | |
-|---|---|
-| ![MACHINE SEL](img/oneshot-machine-sel.png) | MACHINE SEL offers ONESHOT after SWARMER |
-| ![the page](img/oneshot-page.png) | after YES and NO: the DT2's page, drawn by the DN2 -- TUNE, PLAY, (C empty), SAMP / STRT, LEN, LOOP, LEV |
-| ![TUNE](img/oneshot-tune.png) | push-and-turn A: the DT2's bipolar formatter, `16.00`; the sound's slot 25 went `0x4000 -> 0x5000` |
-| ![PLAY](img/oneshot-play-fwd.png) | push B: the DT2's enum formatter, `FWD` (the default, 3) |
-| ![REV, SAMP, LOOP](img/oneshot-rev-samp-loop.png) | after turns: PLAY `REV` (0), SAMP `1023` (raw `0x3ff`), LOOP `103.99` (`0x6800 - 1` in 8.8) |
+(The emulator screenshots of the page were removed with the ONESHOT code; see the note at the top.)
 
 - the machine setter wrote type 5 at `sound+0xDE`; a machine change loaded the
   DT2's own defaults: TUNE `0x4000`, PLAY `0x300`, SAMP 0, STRT 0, LEN `0x7800`,
