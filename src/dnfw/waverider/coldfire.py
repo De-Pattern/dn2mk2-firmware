@@ -8,7 +8,7 @@ ColdFire's job is smaller and is only this:
    (`{0, 2, 1, 3, 4}` at `0x401ddd58`, copied into a `std::vector` by
    `0x4004d8b6`) and draws a divider wherever the group `0x40059274(type)`
    changes. The list gains a 5 before MIDI, and 5 (with 6, reserved for
-   ONESHOT) is a group of its own, so it reads synths | WAVERIDER | MIDI;
+   a second sample machine) is a group of its own, so it reads synths | WAVERIDER | MIDI;
 2. **name it** -- the three name accessors (`0x400dc332` long, `0x400dc358`
    short, `0x400dc37e` the third column) are bounded at 4 and read 12-byte rows
    at `0x401f77f4`. The 192 zero bytes after that table are a live 16-long
@@ -135,8 +135,8 @@ def _long(v: int) -> bytes:
     return struct.pack(">I", v & 0xFFFFFFFF)
 
 
-SAMPLE_GROUP = 3                        # the sample-based machines: Waverider (5), ONESHOT (6)
-SAMPLE_TYPES_LAST = 6                   # 6 is reserved for ONESHOT; no row for it in this build
+SAMPLE_GROUP = 3                        # the sample-based machines: Waverider (5), 6 reserved
+SAMPLE_TYPES_LAST = 6                   # 6 is reserved; no row for it in this build
 
 # MACHINE SEL (and the second list at 0x40059cdc) inserts a divider row -- an
 # unlabelled row of value -1, drawn as dots -- wherever this group changes. The
