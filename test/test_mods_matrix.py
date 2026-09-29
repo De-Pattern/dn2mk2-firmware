@@ -4,7 +4,7 @@ import pathlib
 
 import pytest
 
-from dnfw.mods import lfo4, lfowaves, matrix, moddest
+from dnfw.mods import bootscreen, lfo4, lfowaves, matrix, moddest
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 STOCK_111 = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
@@ -18,14 +18,21 @@ def found():
     from dnfw.cli.mods import _apply_default, _staged
     from dnfw.firmware.load import load
     fw = load(read_image(STOCK_111))
-    registry = {m.ID: m for m in (lfo4, lfowaves, moddest)}
+    registry = {m.ID: m for m in (bootscreen, lfo4, lfowaves, moddest)}
     pairs = matrix.pairs(fw, registry, lambda mod, f: _apply_default(mod, f, ROOT), _staged)
     return {(p.a, p.b): p for p in pairs}
 
 
-def test_two_loaders_are_refused(found):
+def test_two_loader_mods_share_the_platform(found):
+    """lfo4 and lfowaves both use the start-up loader and the appended area,
+    which the platform owns; they combine with lfowaves first, because lfo4
+    edits the compare lfowaves' getShortName hook displaced."""
     pair = found[("lfo4", "lfowaves")]
-    assert not pair.combines and pair.overlaps
+    assert pair.combines and pair.order_only and not pair.overlaps
+    assert list(pair.refused) == ["lfo4+lfowaves"]
+    for other in ("lfo4", "lfowaves"):
+        boot = found[tuple(sorted(("bootscreen", other)))]
+        assert boot.combines and not boot.order_only
 
 
 def test_moddest_then_lfo4_only(found):

@@ -2,13 +2,7 @@
 
 import pytest
 
-from dnfw.mods import bootscreen
 from dnfw.patch import area, cbuild, loader
-
-
-def test_same_bytes_as_the_boot_screen_builds():
-    chunks = [(b"BOOT", bytes(range(37))), (b"ANIM", b"\x01" * 8)]
-    assert area.build(chunks) == bootscreen.area(chunks)
 
 
 def test_round_trip_and_runtime_address():

@@ -36,6 +36,11 @@ a firmware the device accepts.
 from dataclasses import dataclass
 
 
+# The pseudo-section of RAM a mod uses outside the image: an Extent in it is an
+# absolute address range at run time, compared like any other (`ram()`).
+RAM = -1
+
+
 class ModError(ValueError):
     """A mod cannot apply to this image, or its inputs are wrong."""
 
@@ -48,18 +53,32 @@ class Extent:
     start: int
     length: int
     what: str = ""
+    # Set on a range several mods share by design (the platform's loader and
+    # appended area, `mods.platform`): two extents with the same owner do not
+    # conflict, because that owner merges what each mod contributes.
+    owner: str = ""
+    # Set on a hook site whose stock bytes the hook replays unchanged in its own
+    # code (`platform.displace`): another mod's edit wholly inside it is written
+    # to that copy (`platform.write`), so it is not a conflict.
+    displaced: bool = False
 
     @property
     def end(self) -> int:
         return self.start + self.length
 
     def overlaps(self, other: "Extent") -> bool:
+        if self.owner and self.owner == other.owner:
+            return False
+        for site, edit in ((self, other), (other, self)):
+            if (site.displaced and not edit.displaced and site.section == edit.section
+                    and site.start <= edit.start and edit.end <= site.end):
+                return False
         return (self.section == other.section
                 and self.start < other.end and other.start < self.end)
 
     def __str__(self) -> str:
-        return (f"section {self.section} "
-                f"[0x{self.start:08x}..0x{self.end:08x}) "
+        return (("RAM " if self.section == RAM else f"section {self.section} ")
+                + f"[0x{self.start:08x}..0x{self.end:08x}) "
                 f"{self.length:,} B{' — ' + self.what if self.what else ''}")
 
 
@@ -90,6 +109,7 @@ def check_compatible(named_extents) -> list[str]:
                         lo = max(a.start, b.start)
                         hi = min(a.end, b.end)
                         conflicts.append(
-                            f"{a_id} and {b_id} both write section {a.section} "
-                            f"0x{lo:08x}..0x{hi:08x} ({hi - lo:,} bytes)")
+                            f"{a_id} and {b_id} both "
+                            + ("use RAM " if a.section == RAM else f"write section {a.section} ")
+                            + f"0x{lo:08x}..0x{hi:08x} ({hi - lo:,} bytes)")
     return conflicts

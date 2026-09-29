@@ -316,7 +316,7 @@ def _apply(args) -> int:
 
     named = []
     for mod in chosen:
-        found = list(mod.extents(firmware))
+        found = list(mod.extents(firmware)) + list(getattr(mod, "ram", list)())
         print(f"{mod.ID} writes:")
         for e in found:
             print(f"  {e}")
