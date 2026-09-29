@@ -79,8 +79,18 @@ One earlier build, `rb-loads`, ran the same six loads and `I2 = R0`, then return
 - **The caches** (SHL1C_CFG read as 16 KB per cache; nothing of ours in the cache regions) and the PRM's "no code in blocks 1/2 with data caches on" (block-0 placement stops the same way).
 - **The runner.** Your `2a54bdc` core, with the new `(lw)`, MODIFY and Type 4b fixes, still runs every build to the end with the expected markers (1..19 per block) and bit-exact output.
 
+## The core state at the call, stock and ours
+
+`scripts/sharc_entry_state_diff.py` snapshots every universal register except the data registers, plus the loop stack and the PC-stack depth. It takes the snapshot at the callee's first instruction of the render call at sw `0x1c9611` (stock's `0x1c6d4a`, our adapter) over 4 blocks.
+
+- **The two agree completely** (0 differences in each of 4 calls): we inherit exactly what stock's render inherits.
+- **No hardware loop is live** (`loops` empty, `CURLCNTR` = `0xffffffff`); all L registers are 0; the PC stack is 3 deep.
+- **But the runner shows MODE1 = 0 and MODE2 = 0 at the call.** Stock's start-up routine at sw `0x1c0e6e` does `MODE1 = set(MODE1, 0x1011800)` (at `0x1c0ecc`) and `MODE2 = set(MODE2, 0x1)` (at `0x1c0eec`). The routine at `0x1c10e3` sets MODE1 bit 23 (at `0x1c10ef`), and stock toggles bit 21 (`0x200000`) 87 times and the secondary-register bits (`0x78`, `0x480`) in interrupt code.
+- So either our snapshot's path never runs that start-up, or the runner does not carry MODE1/MODE2 into later execution. **Either way, the modes the silicon is in when our code runs are the one input we cannot see from the runner.**
+
 ## What we would value your view on
 
+0. **MODE1/MODE2 at the WaveTone render call on silicon.** Does your cold boot carry `0x1c0e6e`'s MODE1 `0x1011800` and MODE2 bit 0, and does bit 23 (set at `0x1c10ef`) ever stay set into the audio path? If you know which bits are live at `0x1c9611`, we can check whether any of them changes what our loads, register moves or stores do (e.g. a broadcast-load or secondary-register bit).
 1. Is there anything in the SHARC+ core, or in how the DN2 firmware configures it, that could stop the core on the first instruction or store after our parameter loads, and only in our code? For instance something about the DAG1 state, MODE1/MODE2 settings, or the loop and PC stacks at the point the WaveTone render is called.
 2. Does the firmware enable anything at run time that the runner does not model and that would react to a store sequence like ours? For instance a watchpoint, a memory-protection or bus-error path via the SEC, or an address range guard.
 3. Have you seen a SHARC stop look like this in your DT2 work, with the output DMA replaying and the link heartbeat frozen?
