@@ -56,7 +56,10 @@ RUNTIME_VA = SPEC["runtime_va"]
 # The packaged build's own copy stub, replaced by the platform loader.
 STUB = (0x402CF52C, 46)
 NOISE_RAM, NOISE_BYTES = 0x46740000, 1024 * 8     # NOIS per-LFO state
-TILE_RAM, TILE_BYTES = 0x46750000, 3 * 112         # the rendered glyph tiles
+TILE_RAM, TILE_BYTES = 0x46750000, 7 * 112         # a rendered glyph tile per new wave
+# Bytes in the blob that only look like RAM above BSS (`dnfw.mods.ramcheck`):
+# 0x467805f4 is `not.l %d0 ; subi.l #0x40000000,%d0` (46 80 04 80 40 00 ...).
+NOT_RAM = (0x467805F4,)
 
 
 def _own(e: dict) -> bool:
