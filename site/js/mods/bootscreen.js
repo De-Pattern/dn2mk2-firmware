@@ -14,12 +14,15 @@
  *   held from frame `stop`;
  * - the tunnel's texture scale, stock 128 x 64.
  *
- * All of it lands in a `BOOT` chunk of the area appended past the end of MAIN
- * OS, which a boot hook copies above BSS before the clear. Proven on the
- * instrument on 2026-09-17 by `intro-bang`, which this mod reproduces.
+ * All of it lands in a `BOOT` (or `ANIM`) chunk of the platform's area past the
+ * end of MAIN OS, and the stamp that shows it in a CODE chunk at 0x46700000; the
+ * platform loader copies both up before the BSS clear (`platform.js`). The mark
+ * was proven on the instrument on 2026-09-17 by `intro-bang`, with the stamp in
+ * a cave and a copy stub of its own; the stamp's bytes are unchanged.
  */
 
 import { CODE } from "./bootscreen-code.js";
+import * as platform from "./platform.js";
 import { W as GW, frames as glitchFrames, GlitchError } from "../asciiglitch.js";
 import { frames as spinGrids, SpinError } from "../batspin.js";
 
@@ -129,40 +132,20 @@ export function spinFrames(lit, options = {}) {
 }
 
 /** The shared appended area: 'DNFW', total length, a directory, the chunks. */
-export function area(chunks) {
-  const head = 12 + 12 * chunks.length;
-  const dir = [];
-  const body = [];
-  let offset = head;
-  for (const [id, data] of chunks) {
-    if (id.length !== 4) throw new ModError(`chunk id ${id} is not four characters`);
-    const pad = new Uint8Array((4 - (data.length % 4)) % 4);
-    dir.push(new TextEncoder().encode(id), be32(offset), be32(data.length));
-    body.push(data, pad);
-    offset += data.length + pad.length;
-  }
-  const bodyBytes = cat(...body);
-  return cat(new TextEncoder().encode(CODE.magic), be32(head + bodyBytes.length),
-             be32(chunks.length), ...dir, bodyBytes);
-}
-
 export function extents(areaLength = 0) {
   const off = (va) => va - BASE;
-  const out = [
-    { section: SECTION, start: off(CODE.calls_va), length: 8, what: "startup hook: copy the appended area up" },
+  return [
     { section: SECTION, start: off(CODE.intro_va), length: 8, what: "intro hook: the mark" },
-    { section: SECTION, start: off(CODE.cave), length: CODE.code.length / 2, what: "boot-screen code" },
     { section: SECTION, start: off(CODE.tunnel_x_va) + 2, length: 4, what: "tunnel scale x" },
     { section: SECTION, start: off(CODE.tunnel_y_va) + 2, length: 4, what: "tunnel scale y" },
+    ...platform.extents(areaLength),
   ];
-  if (areaLength) out.push({ section: SECTION, start: off(CODE.area_va), length: areaLength, what: "appended data area" });
-  return out;
 }
 
 /**
- * -> `{ content, notes, extents }`. `content` is the whole new MAIN OS, one
- * area longer than stock. Refuses anything that is not stock Digitone II 1.11
- * at every site it writes.
+ * -> `{ content, notes, extents }`. `content` is the whole new MAIN OS, with the
+ * mark's chunks and the stamp's CODE chunk added to the platform's area.
+ * Refuses anything that is not stock Digitone II 1.11 at every site it writes.
  */
 export function apply(firmware, images, {
   slow = 4, fast = 3, rush = 48, stop = 72, tunnel = STOCK_TUNNEL, ascii = null,
@@ -171,22 +154,16 @@ export function apply(firmware, images, {
   if (section === null) throw new ModError("image has no MAIN OS section");
   const original = section.unpack();
   if (original === null) throw new ModError("MAIN OS did not depack");
+  const [base, others] = platform.split(original);
 
-  if (BASE + original.length !== CODE.area_va) {
-    throw new ModError("MAIN OS is not the length this mod was built for: either not "
-                       + "Digitone II 1.11, or another mod has already appended data");
-  }
-  for (const [va, stock, what] of [[CODE.calls_va, CODE.calls_stock, "startup calls"],
-                                   [CODE.intro_va, CODE.intro_stock, "intro copy routine"]]) {
-    const have = toHex(original.subarray(va - BASE, va - BASE + 8));
-    if (have !== stock) throw new ModError(`${what} is not stock (${have}); this mod is for Digitone II 1.11`);
-  }
-  const cave = CODE.cave - BASE;
-  if (original.subarray(cave, cave + CODE.cave_cap).some((b) => b !== 0)) {
-    throw new ModError("the boot-screen code space is already in use by another mod");
+  const have = toHex(base.subarray(CODE.intro_va - BASE, CODE.intro_va - BASE + 8));
+  if (have !== CODE.intro_stock) {
+    throw new ModError(`0x${CODE.intro_va.toString(16).padStart(8, "0")} holds ${have}, not `
+      + `${CODE.intro_stock} (intro copy routine); this mod is for Digitone II 1.11, or the `
+      + "boot screen is already applied");
   }
   for (const [va, stock] of [[CODE.tunnel_x_va, STOCK_TUNNEL[0]], [CODE.tunnel_y_va, STOCK_TUNNEL[1]]]) {
-    if (toHex(original.subarray(va - BASE + 2, va - BASE + 6)) !== toHex(f32(stock))) {
+    if (toHex(base.subarray(va - BASE + 2, va - BASE + 6)) !== toHex(f32(stock))) {
       throw new ModError("the tunnel scale is not stock");
     }
   }
@@ -195,23 +172,22 @@ export function apply(firmware, images, {
   if (ascii) chunks.push([CODE.anim_chunk, animChunk(...ascii)]);
   if (images && images.length) chunks.push([CODE.boot_chunk, bootChunk(images, { slow, fast, rush, stop })]);
   if (!chunks.length) throw new ModError("give a mark (images) or an ASCII animation");
-  const blob = area(chunks);
-  const pad = new Uint8Array((4 - (blob.length % 4)) % 4);
-  const content = cat(original, blob, pad);
+  chunks.push([platform.CODE, platform.codeChunk(CODE.load, hex(CODE.code))]);
 
-  content.set(hex(CODE.code), cave);
-  content.set(cat(new Uint8Array([0x4e, 0xb9]), be32(CODE.boot), new Uint8Array([0x4e, 0x71])), CODE.calls_va - BASE);
-  content.set(cat(new Uint8Array([0x4e, 0xf9]), be32(CODE.stamp), new Uint8Array([0x4e, 0x71])), CODE.intro_va - BASE);
+  const edited = base.slice();
+  edited.set(cat(new Uint8Array([0x4e, 0xf9]), be32(CODE.stamp), new Uint8Array([0x4e, 0x71])), CODE.intro_va - BASE);
   for (const [va, scale] of [[CODE.tunnel_x_va, tunnel[0]], [CODE.tunnel_y_va, tunnel[1]]]) {
     if (!(scale >= 1 && scale <= 65536)) throw new ModError(`tunnel scale ${scale} is outside 1..65536`);
-    content.set(f32(scale), va - BASE + 2);
+    edited.set(f32(scale), va - BASE + 2);
   }
+  const content = platform.join(edited, [...others, ...chunks]);
+  const areaBytes = content.length - platform.STOCK_LENGTH;
 
   const notes = [
     ascii ? `animation: ${ascii[0].length} frames, looping from ${ascii[1]}`
       : `${images.length} image(s), ` + (images.length === 1 ? "static"
       : `flashing every 2^${slow} then 2^${fast} frames from ${rush}, held from ${stop}`),
-    `appended data area ${blob.length.toLocaleString()} B; MAIN OS ${content.length.toLocaleString()} B`,
+    `the platform's area ${areaBytes.toLocaleString()} B; MAIN OS ${content.length.toLocaleString()} B`,
   ];
-  return { content, notes, extents: extents(blob.length) };
+  return { content, notes, extents: extents(areaBytes) };
 }

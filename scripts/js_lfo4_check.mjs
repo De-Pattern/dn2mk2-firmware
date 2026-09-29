@@ -13,8 +13,8 @@
  *
  * Checks: stock -> lfo4 equals the Python; fxmod -> build -> reload -> lfo4
  * equals the CLI's pair; moddest then lfo4 equals the Python; lfo4 accepts a
- * midiarp image; the rebuilt images verify. The refusals -- lfo4 on an
- * lfowaves image, on a longer image, on an edited site, and fxmod and moddest
+ * midiarp image; the rebuilt images verify. The refusals -- lfowaves on an
+ * lfo4 image (lfo4 goes last), lfo4 on a longer image, on an edited site, and fxmod and moddest
  * on an lfo4 image -- are written to `--refusals-out` for the Python side to
  * compare against its own wording.
  */
@@ -74,9 +74,8 @@ const longer = new Uint8Array(stockContent.length + 16);
 longer.set(stockContent);
 const edited = stockContent.slice();
 edited[lfo4.extents()[0].start] ^= 0xff;
-const waves = lfowaves.apply(stock).content;
 const refusals = {
-  lfo4_after_lfowaves: refusal(() => lfo4.compose(waves)),
+  lfowaves_after_lfo4: refusal(() => lfowaves.apply(built.firmware)),
   lfo4_on_longer: refusal(() => lfo4.compose(longer)),
   lfo4_on_edited: refusal(() => lfo4.compose(edited)),
   fxmod_after_lfo4: refusal(() => fxmod.apply(built.firmware)),
