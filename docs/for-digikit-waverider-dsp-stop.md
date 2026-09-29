@@ -88,12 +88,24 @@ One earlier build, `rb-loads`, ran the same six loads and `I2 = R0`, then return
 - **But the runner shows MODE1 = 0 and MODE2 = 0 at the call.** Stock's start-up routine at sw `0x1c0e6e` does `MODE1 = set(MODE1, 0x1011800)` (at `0x1c0ecc`) and `MODE2 = set(MODE2, 0x1)` (at `0x1c0eec`). The routine at `0x1c10e3` sets MODE1 bit 23 (at `0x1c10ef`), and stock toggles bit 21 (`0x200000`) 87 times and the secondary-register bits (`0x78`, `0x480`) in interrupt code.
 - So either our snapshot's path never runs that start-up, or the runner does not carry MODE1/MODE2 into later execution. **Either way, the modes the silicon is in when our code runs are the one input we cannot see from the runner.**
 
+## Interrupts: the one thing no runner pass has covered
+
+At the render call, the firmware runs with interrupts enabled and nested (start-up sets MODE1 `0x1011800`), and peripheral interrupts arrive through SECI (`0x1c0acd`). SECI dispatches on the source ID it reads from `0x300eb`, through tables at `0x240910` / `0x240aa0`. Those tables are filled at run time by `FUN_b8b782`, called with (`0x1600000d`, `0xb8afe4`), (`0x1f000016`, `0xb8a947`), and from `0x1c0678` with `0x1c02a4`. They are empty in our runner snapshot.
+
+`scripts/sharc_irq_inject.py` enters each handler at the point where our code stops on silicon, as the hardware would on entry (the interrupted PC onto the PC stack, ASTATX/ASTATY/MODE1 onto the status stack). None of the three came back, so the test is inconclusive:
+- `0x1c02a4` reaches PC 0, likely a context switch restoring state the snapshot never set up;
+- `0xb8afe4` reaches a Type 20a `ppu`, unsupported;
+- `0xb8a947` spins at `0x1c1432`, likely waiting on a peripheral.
+
+So no runner pass has ever had an interrupt land in our code. That is the largest difference we know of between the runner and the chip.
+
 ## What we would value your view on
 
 0. **MODE1/MODE2 at the WaveTone render call on silicon.** Does your cold boot carry `0x1c0e6e`'s MODE1 `0x1011800` and MODE2 bit 0, and does bit 23 (set at `0x1c10ef`) ever stay set into the audio path? If you know which bits are live at `0x1c9611`, we can check whether any of them changes what our loads, register moves or stores do (e.g. a broadcast-load or secondary-register bit).
 1. Is there anything in the SHARC+ core, or in how the DN2 firmware configures it, that could stop the core on the first instruction or store after our parameter loads, and only in our code? For instance something about the DAG1 state, MODE1/MODE2 settings, or the loop and PC stacks at the point the WaveTone render is called.
 2. Does the firmware enable anything at run time that the runner does not model and that would react to a store sequence like ours? For instance a watchpoint, a memory-protection or bus-error path via the SEC, or an address range guard.
 3. Have you seen a SHARC stop look like this in your DT2 work, with the output DMA replaying and the link heartbeat frozen?
-4. Would a trace from your `sharc_calltrace` / `sharc_memdiff`, of stock WaveTone's render entry against ours at this call site, be the comparison you would run? If you would do it differently, we would like to follow your method.
+4. Is interrupt delivery (SEC dispatch, Type 20a push/pop, the handlers above) on your roadmap for the runner? We would gladly help test it, with this call site as a case.
+5. Would a trace from your `sharc_calltrace` / `sharc_memdiff`, of stock WaveTone's render entry against ours at this call site, be the comparison you would run? If you would do it differently, we would like to follow your method.
 
 We can share the section-7 region blocks of any of these builds (our code only) and the runner harness we use. Thank you for digikit: it is what made this narrowing possible.
