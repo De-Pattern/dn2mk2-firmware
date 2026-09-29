@@ -96,6 +96,10 @@ runs exactly as in `b2`, and the exit is the full path's own return shape:
 - `stages-m4`: `stages-noi2` (ILOPI still after marker 4) with the three IRPTL reads
   moved inside marker 4, via R14: after `R13 = 0x57520004` (word 2), after its first
   store (word 3), after its second store (word 4).
+- `stages-fix`: `stages-loads` (the full reader: real output, interrupts on, the load
+  markers and the call counter) with the add at `c018` written in its 32-bit form, as
+  `rb-setup-a2` does. On silicon, ILOPI rose exactly 38 sw before `c018` in four builds
+  whose layouts differ: the chip's look-ahead rejects that 16-bit parcel.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -237,6 +241,12 @@ def reader_source(rb: str | None) -> str:
         if src.count(C018) != 1:
             raise SystemExit("the c018 add is not one line")
         return insert_after(src.replace(C018, C018_32), SETUP_CUT["rb-setup-a"], TO_DONE)
+    if rb == "stages-fix":
+        # the markers first (marker 6 is anchored on the add's own line), then the fix
+        src = reader_source("stages-loads")
+        if src.count(C018) != 1:
+            raise SystemExit("the c018 add is not one line")
+        return src.replace(C018, C018_32)
     if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"):
         if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"):
             # before the markers go in, so the anchors are the reader's own lines
@@ -456,13 +466,13 @@ def variant(stock: bytes, work: pathlib.Path, name: str) -> bytes:
     if name == "passthru":
         return section7(stock, adapter(work, passthru=True))
     lay = "b0" if name == "b0code" else "b2"
-    rb = name if name in RB + ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") else None
+    rb = name if name in RB + ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4", "stages-fix") else None
     rd, ad, save, par, tab = LAYOUT[lay]
     # the reader has 0x400 up to b2's adapter; only `stages` (markers) needs more than 0x200,
     # and the other builds keep their bytes
-    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") else 0x200)),
-            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"),
-                                     counter=rb in ("stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"),
+    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages-fix", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") else 0x200)),
+            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages-fix", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"),
+                                     counter=rb in ("stages-fix", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"),
                                      noirq=rb in ("stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4"),
                                      irptl=rb == "stages-irptl"),
                                      0x400 if lay == "b2" else 0x200))]
@@ -496,7 +506,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=pathlib.Path, required=True)
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") + RB, default="wtplace")
+    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages-fix", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop", "stages-noi2", "stages-m4") + RB, default="wtplace")
     ap.add_argument("--s7-only", type=pathlib.Path, help="write section 7 here and stop (runner checks)")
     a = ap.parse_args(argv)
     if a.out.exists():
