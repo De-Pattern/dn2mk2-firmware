@@ -676,3 +676,48 @@ So no build that survived has ever stored through a DAG from our code: `rb-param
 | word 0 changing, stage stuck | the core runs but our code stops reaching the markers |
 | word 0 changing, 19 | our code completes every frame |
 | no marker | the channel does not carry word 1; fall back to the rb splits |
+
+## 11. The cause, found on silicon: negative shift immediates (2026-09-29)
+
+**Result [M, hardware]:** `waverider-m5e` (M5d plus this fix) passes every step of the M5 hardware test on the owner's unit:
+- a saw at the key's pitch;
+- WAV1 darkens it to a sine;
+- TBL1 switches tables;
+- an octave doubles the pitch;
+- the other tracks play on;
+- it survives SAVE, reload and a power cycle.
+
+**The cause [M].** selas encodes a Type 6b shift by a negative immediate without sign-extending the 12-bit shift field:
+
+| | encoding of `R0 = LSHIFT R11 BY -16` |
+|---|---|
+| selas | `023e 0000 f00b` |
+| stock DN2 1.11 (sw `0x1c3a90`) | `023e 7800 f00b` |
+
+- Across stock, all 368 negative shift immediates carry `0x78` in the third byte (the field's top bits, at bits 14:11 of the second parcel), and all 281 positive ones carry `0x00`.
+- On the ADSP-21569, ours raises ILOPI, and the handler parks the core.
+- digikit's decoder, selmap and the runner read only the low byte, so every emulator gate passed.
+- Our reader had four such shifts: `-16` in the row arithmetic, `-24` twice and `-19` in the loop. The M5 loop had two.
+
+**How it was found.** Each step was one flash, read over USB from the DSP's reply page:
+
+| build | what it showed |
+|---|---|
+| `stages`, `stages-loads` | the core stops on the first call, after the parameter loads (section 10's markers) |
+| `stages-i2`, `-i2l1`, `-r13` | neither the I2 write, the DDR output pointer nor the marker register is the cause |
+| `stages-noirq` | with interrupts masked, the reader runs to the end, then the core stops once they are re-enabled: a pending interrupt |
+| `stages-irptl`, `-ilop`, `-noi2`, `-m4` | IRPTL names it ILOPI. In four builds with different layouts, the first flagged reading sits exactly 38 sw before the same fixed block, whose first instruction is `R0 = LSHIFT R11 BY -16`. The flag is raised by look-ahead, before that instruction executes, which is why the stop always moved with our code and why `rb-loads` (it returned before that block) survived |
+| `stages-fix` | rewriting the 16-bit `c018` as 32-bit changed nothing: the parcel was not the cause |
+| byte comparison with stock | the shift encoding differs, as above |
+| `stages-shift` | the full reader with the four shifts fixed plays on track 2; stage 19 every call, and the call counter climbing |
+
+**The fix:** `scripts/sharc_waverider_m3.fix_shift_imm`, a post-pass on selas output in `_selas`, which every SHARC build uses. `csrc/waverider/sharc/{reader_m5,machine5_live}.json` and `src/dnfw/waverider/sharc_code.json` are re-assembled through it; the change is exactly six bytes, `0x00` → `0x78`.
+
+**What this withdraws.** Several earlier readings were shaped by this bug and are superseded:
+- section 7's "no code in blocks 1/2 with data caches on" lead;
+- section 9's `c018` width concern;
+- the interrupt and MODE1 questions in `docs/for-digikit-waverider-dsp-stop.md`, as causes.
+
+The observations stay true: the runner has no interrupt delivery, and its snapshot shows MODE1 = 0.
+
+**Rule for the future:** "decodes the same" is not proof of an encoding. Compare exact bytes with stock for every instruction form that carries an immediate.
