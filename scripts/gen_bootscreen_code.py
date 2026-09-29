@@ -56,7 +56,9 @@ under the emulator from `boot400M`.
 
 ## Where the code runs
 
-In a `CODE` chunk at `LOAD_VA`, copied up by the platform loader. Until
+In a `CODE` chunk at `LOAD_VA`, copied up by the platform loader. Not at
+`0x46700000`: lfo4 keeps its LFO state arrays there, and a stamp placed there
+was overwritten on the instrument (V04 at `0x46700000`, 2026-09-30). Until
 2026-09-30 it sat in the 896-byte cave at `0x402dfa1c` behind a boot stub of its
 own; LFO4 uses that cave too, and the start-up hook was the boot screen's alone,
 so the two could not be combined. The stamp itself is unchanged: it was always
@@ -83,8 +85,8 @@ RESUME_VA = 0x400D388E
 SOURCE_DATA_PTR = 0x42C4567C + 16            # the intro's source Bitmap data pointer
 AREA_VA = 0x4030B980                         # where appended data starts
 RUNTIME_VA = 0x46710000                      # where the boot hook copies it
-LOAD_VA = 0x46700000                         # the stamp's CODE chunk
-CODE_CAP = 0x10000                           # up to the data window at RUNTIME_VA
+LOAD_VA = 0x46708000                         # the stamp's CODE chunk, above lfo4's LFO state
+CODE_CAP = 0x8000                            # up to the data window at RUNTIME_VA
 MAGIC = b"DNFW"
 BOOT = b"BOOT"
 ANIM = b"ANIM"

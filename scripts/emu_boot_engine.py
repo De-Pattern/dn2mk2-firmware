@@ -37,6 +37,10 @@ sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/digikit-up")
 sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/dn2_firmware/scripts")
 
 from emu import dspboot                                       # noqa: E402
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+from dnfw.mods import platform                                # noqa: E402
+from dnfw.patch import area                                   # noqa: E402
 from unicorn import UC_HOOK_CODE, UC_PROT_ALL, UcError        # noqa: E402
 from unicorn.m68k_const import (UC_M68K_REG_A2, UC_M68K_REG_A6,   # noqa: E402
                                 UC_M68K_REG_A7, UC_M68K_REG_D0,
@@ -274,6 +278,30 @@ def main() -> int:
     # branch below unreachable -- every cave build failed here, engine clean or not.
     print("  the engine path ran clean under a real loader boot"
           + ("." if watch else " (this build puts nothing of its own on it)."))
+
+    # **Every CODE chunk must still be what the loader put there.** On
+    # 2026-09-30 the boot screen's stamp sat at 0x46700000, which is also lfo4's
+    # LFO state (LIVE): each check ran one of the two and passed, and the
+    # instrument raised V04 at 0x46700000 as soon as the evaluator had run and
+    # the intro called the stamp. So after the engine, compare every chunk's
+    # image against the image file; one with an init may rewrite its own data,
+    # so its difference is reported but not failed on.
+    image = open(f"{build}/section_3_MAIN_OS.bin", "rb").read()
+    clobbered = []
+    for cid, data in platform.split(image)[1]:
+        if cid != area.CODE:
+            continue
+        code = area.CodeChunk.unpack(data)
+        have = bytes(after.uc.mem_read(code.load, len(code.image)))
+        diff = sum(a != b for a, b in zip(have, code.image))
+        print(f"  CODE at 0x{code.load:08x}: {'intact' if not diff else f'{diff:,} B changed'}"
+              + (" (has an init)" if code.init and diff else ""))
+        if diff and not code.init:
+            clobbered.append(code.load)
+    if clobbered:
+        print("", "** code the loader placed was overwritten: "
+              + ", ".join(f"0x{v:08x}" for v in clobbered) + " **")
+        return 1
 
     # A sound's arp MODE through the stock converters, in the booted machine:
     # arpmodes widens the LOAD bound (0x400dd530), and a snapshot harness never

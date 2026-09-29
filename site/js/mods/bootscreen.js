@@ -15,7 +15,7 @@
  * - the tunnel's texture scale, stock 128 x 64.
  *
  * All of it lands in a `BOOT` (or `ANIM`) chunk of the platform's area past the
- * end of MAIN OS, and the stamp that shows it in a CODE chunk at 0x46700000; the
+ * end of MAIN OS, and the stamp that shows it in a CODE chunk at 0x46708000; the
  * platform loader copies both up before the BSS clear (`platform.js`). The mark
  * was proven on the instrument on 2026-09-17 by `intro-bang`, with the stamp in
  * a cave and a copy stub of its own; the stamp's bytes are unchanged.

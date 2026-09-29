@@ -86,8 +86,18 @@ def extents(firmware=None) -> list[Extent]:
     return out + platform.extents(len(spec["blob"]) // 2)
 
 
+# The evaluators' three LFO state arrays, moved above BSS so each track holds
+# four LFOs (`scripts/build_lfo4_tick.py`: LIVE, SECOND, BACKUP, 4 KB apart).
+# They are written by the LFO4 edits, not carried by a chunk, so they must be
+# declared: on 2026-09-30 the boot screen's stamp was placed at 0x46700000
+# because this list held only the chunks, and the instrument raised V04 at
+# 0x46700000 once the evaluator had written its state over the stamp.
+STATE_RAM = ((0x46700000, 2560, "LFO state LIVE"), (0x46701000, 2560, "LFO state SECOND"),
+             (0x46702000, 2560, "LFO state BACKUP"))
+
+
 def ram() -> list[Extent]:
-    out = []
+    out = [Extent(platform.RAM, va, n, what) for va, n, what in STATE_RAM]
     for _, data in _chunks(bytes.fromhex(_spec()["blob"])):
         code = platform.area.CodeChunk.unpack(data)
         out.append(Extent(platform.RAM, code.load, len(code.image) + code.bss,

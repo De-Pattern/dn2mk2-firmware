@@ -23,7 +23,7 @@ does. Every choice above lands in a `BOOT` chunk of the appended data area.
   intro's own frame counter, so the mark is scattered by the tunnel like the logo.
 - The images are **appended past the end of MAIN OS** and copied above BSS at
   boot, as data chunks in the platform's area (`dnfw.mods.platform`); the stamp
-  itself is a `CODE` chunk at `0x46700000`. Until 2026-09-30 the stamp sat in the
+  itself is a `CODE` chunk at `0x46708000`. Until 2026-09-30 the stamp sat in the
   cave at `0x402dfa1c` behind a copy stub of its own on the start-up hook, which
   kept this mod apart from lfo4 and lfowaves. The stamp's bytes are unchanged.
 - **Seen under the emulator** frame by frame against stock, and **on the

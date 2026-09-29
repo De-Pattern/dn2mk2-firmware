@@ -11,7 +11,7 @@ and captures the screen every 1M instructions (about four intro frames).
 The snapshot is past boot, so the platform loader that copies the appended area
 above BSS has already run (stock). The film therefore writes what that loader
 would have left in RAM (`platform.runtime`: the header and the mark's chunk at
-`0x46710000` plus their offsets, the stamp at `0x46700000`), along with every
+`0x46710000` plus their offsets, the stamp at `0x46708000`), along with every
 section 3 edit the mod makes: what the loader would have done, done by hand. Everything after that -- the
 intro calling the stamp, the stamp reading the chunk -- is the real code running.
 
