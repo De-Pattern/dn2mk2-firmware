@@ -8,10 +8,11 @@ Runs digikit's `guirun.py` (in WSL) twice from the same 1.11 snapshot taken just
 before the intro -- once stock, once with the mod's bytes written into memory --
 and captures the screen every 1M instructions (about four intro frames).
 
-The snapshot is past boot, so the boot hook that copies the appended area above
-BSS has already run (stock). The film therefore writes the area straight to its
-run-time address, `0x46710000`, along with every section 3 edit the mod makes:
-what the boot hook would have done, done by hand. Everything after that -- the
+The snapshot is past boot, so the platform loader that copies the appended area
+above BSS has already run (stock). The film therefore writes what that loader
+would have left in RAM (`platform.runtime`: the header and the mark's chunk at
+`0x46710000` plus their offsets, the stamp at `0x46700000`), along with every
+section 3 edit the mod makes: what the loader would have done, done by hand. Everything after that -- the
 intro calling the stamp, the stamp reading the chunk -- is the real code running.
 
 Writes `docs/img/intro-<mode>-sequence.png`, `docs/img/intro-<mode>.gif` and
@@ -32,7 +33,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from dnfw.cli.files import read_image
 from dnfw.cli.mods import _read_pgm
 from dnfw.firmware.load import load
-from dnfw.mods import bootscreen
+from dnfw.mods import bootscreen, platform
 
 STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
 SYX = "/mnt/d/01_Code/Z_Personal/dn2_firmware/00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
@@ -58,7 +59,8 @@ def ranges(stock: bytes, content: bytes) -> list[dict]:
             j += 1
         out.append({"va": f"{bootscreen.BASE + i:#x}", "hex": content[i:j].hex()})
         i = j
-    out.append({"va": f"{bootscreen.SPEC['runtime_va']:#x}", "hex": content[n:].hex()})
+    for va, data in platform.runtime(content):
+        out.append({"va": f"{va:#x}", "hex": data.hex()})
     return out
 
 
@@ -82,6 +84,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=["ascii", "spin", "tunnel"])
     ap.add_argument("--pgm", type=pathlib.Path, default=ROOT / "site/art/chimera.pgm")
+    ap.add_argument("--img-dir", type=pathlib.Path, default=ROOT / "docs/img",
+                    help="where the strip and the GIFs go (default docs/img)")
     ap.add_argument("--resolve", type=int, default=96)
     ap.add_argument("--idle-frames", type=int, default=16)
     ap.add_argument("--glitch", type=float, default=1.0)
@@ -113,7 +117,8 @@ def main() -> int:
     stock_shots = film("stock", None)
     mod_shots = film(args.mode, patch)
 
-    img = ROOT / "docs/img"
+    img = args.img_dir
+    img.mkdir(parents=True, exist_ok=True)
     frames = lambda shots: [Image.open(p).convert("RGB") for p in shots]
     s, m = frames(stock_shots), frames(mod_shots)
     w, h = s[0].size
@@ -125,7 +130,7 @@ def main() -> int:
     strip.save(img / f"intro-{args.mode}-sequence.png")
     m[0].save(img / f"intro-{args.mode}.gif", save_all=True, append_images=m[1:], duration=120, loop=0)
     s[0].save(img / "intro-stock-film.gif", save_all=True, append_images=s[1:], duration=120, loop=0)
-    print(f"wrote docs/img/intro-{args.mode}-sequence.png (top stock, bottom {args.mode}), "
+    print(f"wrote {img}/intro-{args.mode}-sequence.png (top stock, bottom {args.mode}), "
           f"intro-{args.mode}.gif, intro-stock-film.gif")
     return 0
 
