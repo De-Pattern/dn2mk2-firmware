@@ -1,9 +1,9 @@
 # Third-party notices
 
 `dn_firmware` is licensed under the [GNU AGPL-3.0-or-later](LICENSE). Parts of
-it are derived from the MIT-licensed projects below, which permits their
+it are derived from the projects below. Most are MIT-licensed, which permits their
 incorporation into an AGPL work provided their copyright and permission notices
-travel with it. Those notices are reproduced here.
+travel with it; digihealth is GPL-2.0-or-later, used under GPL-3.0. Those notices are reproduced here.
 
 What was taken from each is set out in `docs/references.md`, and every module
 that ports from one names its source — and, more usefully, names where it
@@ -69,6 +69,25 @@ test against the DN2, never as fact about it.
 > Copyright (c) 2025-2026 Maxolydian
 
 ---
+
+## digihealth (GPL-2.0-or-later)
+
+<https://github.com/irpina/digihealth> -- irpina.
+
+The USB SysEx probe's design: the read-only HELLO / STATS / PEEK protocol, the
+8-in-7 packing, the SysEx-router hook, the render timing and the Windows MIDI
+port. Adapted for the Digitone II 1.11 in `csrc/usbprobe/`,
+`src/dnfw/mods/usbprobe.py`, `scripts/{build,gen,emu}_usbprobe*.py`,
+`tools/dn2probe.py`, `tools/winmidi.py` and the live view (`tools/dn2live*`,
+`tools/dn2poll.py`, `tools/dn2port.py`, `tools/dn2stats.py`, `tools/dn2log.py`).
+Every DN2 address was found again on DN2 1.11 (`docs/usbprobe.md`); none is
+digihealth's. Each derived file names this origin in its header.
+
+digihealth is licensed GPL-2.0-or-later (irpina/digihealth `72f0183`). It is used
+here under GPL-3.0, which section 13 of the AGPL-3.0 allows to be combined with
+this project. Those parts remain under the GPL-3.0's terms.
+
+> Copyright (C) 2026 irpina and contributors
 
 ## The MIT License
 
