@@ -86,6 +86,9 @@ runs exactly as in `b2`, and the exit is the full path's own return shape:
   to reply word 2 after load 6 (marker 26), to word 3 after marker 4 and to word 4
   after marker 19, all while interrupts are still masked: whichever bit our code sets
   shows there. The call counter and the R0/I2 words give way to these.
+- `stages-ilop`: `stages-irptl` (IRPTL gained ILOPI between "after load 6" and "after
+  marker 4") with that span split: IRPTL to word 2 right after the I2 write, to word
+  3 after the two I2 stores, to word 4 after marker 4.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -227,13 +230,13 @@ def reader_source(rb: str | None) -> str:
         if src.count(C018) != 1:
             raise SystemExit("the c018 add is not one line")
         return insert_after(src.replace(C018, C018_32), SETUP_CUT["rb-setup-a"], TO_DONE)
-    if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl"):
-        if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl"):
+    if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop"):
+        if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop"):
             # before the markers go in, so the anchors are the reader's own lines
             src = insert_after(src, "      R0 = DM(5, I4);",
                                "".join(f"      DM({a:#x}) = R0;                // STAGES-I2: the output pointer\n"
                                        for a in OUT_AT))
-            if rb in ("stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl"):
+            if rb in ("stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop"):
                 line = "      I2 = R0;                          // out"
                 if src.count(line) != 1:
                     raise SystemExit("I2 = R0 is not one line")
@@ -246,11 +249,22 @@ def reader_source(rb: str | None) -> str:
                                + "".join(f"      DM({a:#x}) = I2;                // STAGES-I2: I2 after the move\n"
                                          for a in I2_AT))
         for stage, anchor in STAGES_READER + (STAGES_LOADS if rb != "stages" else ()):
-            if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl") and stage == 4:
+            if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop") and stage == 4:
                 anchor = f"      DM({I2_AT[1]:#x}) = I2;                // STAGES-I2: I2 after the move"
-            if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl") and stage == 26:
+            if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop") and stage == 26:
                 anchor = f"      DM({OUT_AT[1]:#x}) = R0;                // STAGES-I2: the output pointer"
-            src = insert_after(src, anchor, mark(stage, "R13" if rb in ("stages-r13", "stages-noirq", "stages-irptl") and stage == 4 else "I1"))
+            src = insert_after(src, anchor, mark(stage, "R13" if rb in ("stages-r13", "stages-noirq", "stages-irptl", "stages-ilop") and stage == 4 else "I1"))
+        if rb == "stages-ilop":
+            line = f"      I2 = {SCRATCH_L1:#x};                     // STAGES-I2L1: an L1 scratch, not the track buffer"
+            k = src.index(line) + len(line) + 1
+            src = src[:k] + irptl_to(IRPTL_AT[0], "R13") + src[k:]
+            last = f"      DM({I2_AT[1]:#x}) = I2;                // STAGES-I2: I2 after the move"
+            k = src.index(last) + len(last) + 1
+            src = src[:k] + irptl_to(IRPTL_AT[1], "R13") + src[k:]
+            last4 = f"      DM({MARK_AT[1]:#x}) = R13;"
+            k = src.index("// STAGE 4\n")
+            k = src.index(last4, k) + len(last4) + 1
+            src = src[:k] + irptl_to(IRPTL_AT[2], "R13") + src[k:]
         if rb == "stages-irptl":
             last26 = f"      DM({MARK_AT[1]:#x}) = I1;"
             k = src.index(f"// STAGE 26")
@@ -419,14 +433,14 @@ def variant(stock: bytes, work: pathlib.Path, name: str) -> bytes:
     if name == "passthru":
         return section7(stock, adapter(work, passthru=True))
     lay = "b0" if name == "b0code" else "b2"
-    rb = name if name in RB + ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl") else None
+    rb = name if name in RB + ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop") else None
     rd, ad, save, par, tab = LAYOUT[lay]
     # the reader has 0x400 up to b2's adapter; only `stages` (markers) needs more than 0x200,
     # and the other builds keep their bytes
-    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl") else 0x200)),
-            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl"),
-                                     counter=rb in ("stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl"),
-                                     noirq=rb in ("stages-noirq", "stages-irptl"),
+    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop") else 0x200)),
+            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop"),
+                                     counter=rb in ("stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop"),
+                                     noirq=rb in ("stages-noirq", "stages-irptl", "stages-ilop"),
                                      irptl=rb == "stages-irptl"),
                                      0x400 if lay == "b2" else 0x200))]
     if name == "b0code":
@@ -459,7 +473,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=pathlib.Path, required=True)
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl") + RB, default="wtplace")
+    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq", "stages-irptl", "stages-ilop") + RB, default="wtplace")
     ap.add_argument("--s7-only", type=pathlib.Path, help="write section 7 here and stop (runner checks)")
     a = ap.parse_args(argv)
     if a.out.exists():
