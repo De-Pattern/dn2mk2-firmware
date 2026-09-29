@@ -128,7 +128,25 @@ def _selas(src: pathlib.Path, work: pathlib.Path):
         raise SystemExit(f"selas failed for {src.name}:\n{r.stdout}{r.stderr}")
     data = obj.read_bytes()
     syms = sharc_object.symbols(data)
-    return sharc_object.code(data, "seg_pmco"), [2 * syms[f"x_i{j}"] for j in range(k)]
+    offs = [2 * syms[f"x_i{j}"] for j in range(k)]
+    return fix_shift_imm(sharc_object.code(data, "seg_pmco"), offs), offs
+
+
+def fix_shift_imm(be: bytes, offs: list[int]) -> bytes:
+    """Type 6b shift by an immediate, `Rn = LSHIFT Rx BY -k`: sign-extend the shift field.
+
+    The field is 12 bits; its top four bits sit at bits 14:11 of the instruction's third
+    and fourth bytes. selas writes them as 0 for a negative shift, so `BY -16` assembles
+    as 023e 0000 f00b. Stock DN2 1.11 writes 023e 7800 f00b: all 368 of its negative
+    shift immediates carry 0x78 there and all 281 positive ones 0x00. Both decoders ignore
+    those bits, so the runner took ours as valid; on silicon it raised ILOPI
+    (docs/waverider-dsp-compare.md, section 11)."""
+    out = bytearray(be)
+    for o in offs:
+        insn = out[o:o + 6]
+        if len(insn) == 6 and insn[0] == 0x02 and insn[1] == 0x3E and insn[2] == 0 and insn[3] == 0                 and insn[4] & 0x80:
+            out[o + 2] = 0x78
+    return bytes(out)
 
 
 def check_machine5_targets(dk, mach, m5_offsets: list[int]) -> dict:
