@@ -48,6 +48,10 @@ runs exactly as in `b2`, and the exit is the full path's own return shape:
   has no 16-bit form; b + the frame fraction (`0xffff`, AND, FLOAT BY); c + the
   constants, the count test and `R12 = -16`; d + the first tap address (two
   shifts pairs, `R2 = DM(6, I4)`, the add), stopping before `I0 = R3`.
+- `rb-store1`: `rb-loads` with its return's NOP made the full path's phase store
+  `DM(1, I4) = R9`: the only store through a DAG it makes. rb-callret and rb-loads
+  (both survived) store nothing through a DAG; every build that died does, and every
+  `rb-setup-*` makes this store, so this one separates it from the setup span.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -92,7 +96,7 @@ def call_bytes(target_sw: int) -> bytes:
 
 
 RB = ("rb-params", "rb-callret", "rb-loads", "rb-setup", "rb-oneread", "rb-noout",
-      "rb-setup-a", "rb-setup-a2", "rb-setup-b", "rb-setup-c", "rb-setup-d")
+      "rb-setup-a", "rb-setup-a2", "rb-setup-b", "rb-setup-c", "rb-setup-d", "rb-store1")
 # rb-setup's span cut again (rb-loads survived on silicon, rb-setup died): each exits
 # through the full return (JUMP wr5_done) after the anchor line
 SETUP_CUT = {
@@ -127,6 +131,13 @@ def reader_source(rb: str | None) -> str:
         return insert_after(src, "wr_render5.:", EARLY_RET)
     if rb == "rb-loads":
         return insert_after(src, "      I2 = R0;                          // out", EARLY_RET)
+    if rb == "rb-store1":
+        store = EARLY_RET.replace(
+            "      NOP;                              // (the full path stores the phase through I4 here)\n",
+            "      DM(1, I4) = R9;                   // DISCRIMINATOR: the full path's phase store, alone\n")
+        if store == EARLY_RET:
+            raise SystemExit("the early return has no phase-store slot")
+        return insert_after(src, "      I2 = R0;                          // out", store)
     if rb == "rb-setup":
         return insert_after(src, "      I0 = R3;", TO_DONE)
     if rb == "rb-oneread":
