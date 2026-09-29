@@ -77,6 +77,10 @@ runs exactly as in `b2`, and the exit is the full path's own return shape:
   written through R13 instead of I1. R13 is free there: the reader first sets it with
   the constants, and the adapter has saved it. Markers 5 on still use I1, so a
   stop between 4 and 5 points at an I1 write after an I2 write.
+- `stages-noirq`: `stages-r13` (which still stopped before marker 4) with interrupts
+  masked around the call: the adapter saves MODE1 at save + 0xf8 and clears IRPTEN
+  (bit 12) first thing, and puts the saved MODE1 back just before it returns. If the
+  stop goes away, an interrupt landing in our code is involved.
 
 Section 3 is m5b's, as in every other Waverider discriminator.
 docs/waverider-dsp-compare.md has the reading. Refuses an existing OUT.
@@ -218,13 +222,13 @@ def reader_source(rb: str | None) -> str:
         if src.count(C018) != 1:
             raise SystemExit("the c018 add is not one line")
         return insert_after(src.replace(C018, C018_32), SETUP_CUT["rb-setup-a"], TO_DONE)
-    if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13"):
-        if rb in ("stages-i2", "stages-i2l1", "stages-r13"):
+    if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq"):
+        if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq"):
             # before the markers go in, so the anchors are the reader's own lines
             src = insert_after(src, "      R0 = DM(5, I4);",
                                "".join(f"      DM({a:#x}) = R0;                // STAGES-I2: the output pointer\n"
                                        for a in OUT_AT))
-            if rb in ("stages-i2l1", "stages-r13"):
+            if rb in ("stages-i2l1", "stages-r13", "stages-noirq"):
                 line = "      I2 = R0;                          // out"
                 if src.count(line) != 1:
                     raise SystemExit("I2 = R0 is not one line")
@@ -237,11 +241,11 @@ def reader_source(rb: str | None) -> str:
                                + "".join(f"      DM({a:#x}) = I2;                // STAGES-I2: I2 after the move\n"
                                          for a in I2_AT))
         for stage, anchor in STAGES_READER + (STAGES_LOADS if rb != "stages" else ()):
-            if rb in ("stages-i2", "stages-i2l1", "stages-r13") and stage == 4:
+            if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq") and stage == 4:
                 anchor = f"      DM({I2_AT[1]:#x}) = I2;                // STAGES-I2: I2 after the move"
-            if rb in ("stages-i2", "stages-i2l1", "stages-r13") and stage == 26:
+            if rb in ("stages-i2", "stages-i2l1", "stages-r13", "stages-noirq") and stage == 26:
                 anchor = f"      DM({OUT_AT[1]:#x}) = R0;                // STAGES-I2: the output pointer"
-            src = insert_after(src, anchor, mark(stage, "R13" if rb == "stages-r13" and stage == 4 else "I1"))
+            src = insert_after(src, anchor, mark(stage, "R13" if rb in ("stages-r13", "stages-noirq") and stage == 4 else "I1"))
         return src
     if rb in SETUP_CUT:
         return insert_after(src, SETUP_CUT[rb], TO_DONE)
@@ -265,6 +269,22 @@ def with_counter(src: str, save: int) -> str:
     return insert_after(src, f"      DM({save + 4 * 21:#x}) = I5;", text)
 
 
+def with_noirq(src: str, save: int) -> str:
+    """The adapter with interrupts masked: MODE1 saved and IRPTEN cleared right after the
+    saves (R0 is saved), the saved MODE1 put back just before the return (R0 is reloaded
+    in its delay slot)."""
+    keep = save + 0xF8                                  # past the I2 scratch (0x60..0xe0)
+    src = insert_after(src, f"      DM({save + 4 * 21:#x}) = I5;",
+                       "      R0 = MODE1;                       // STAGES-NOIRQ: interrupts off\n"
+                       f"      DM({keep:#x}) = R0;\n"
+                       "      BIT CLR MODE1 0x1000;             // IRPTEN\n")
+    ret = "      I12 = DM(M7, I6);                 // the return address - 1, as the firmware's callees\n"
+    if src.count(ret) != 1:
+        raise SystemExit("the adapter's return is not one line")
+    return src.replace(ret, f"      R0 = DM({keep:#x});                // STAGES-NOIRQ: MODE1 as it was\n"
+                            "      MODE1 = R0;\n" + ret)
+
+
 def with_stages(src: str, save: int, par: int) -> str:
     """The adapter with markers 1 (after its saves, I1 among them), 2 (before the call),
     18 (back from the reader) and 19 (restores made, before I1's own)."""
@@ -280,7 +300,7 @@ def with_stages(src: str, save: int, par: int) -> str:
 
 
 def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, nocall: bool = False,
-            stages: bool = False, counter: bool = False) -> bytes:
+            stages: bool = False, counter: bool = False, noirq: bool = False) -> bytes:
     import sharc_resolve_jumps as rj  # noqa: PLC0415  (WSL + selas)
     rd, ad, save, par, tab = LAYOUT[layout]
     src = SOURCE.read_text(encoding="utf-8")
@@ -294,6 +314,8 @@ def adapter(work: pathlib.Path, layout: str = "b1", passthru: bool = False, noca
         src = with_stages(src, save, par)       # marker 1 goes right after the saves ...
     if counter:
         src = with_counter(src, save)           # ... and the counter before it
+    if noirq:
+        src = with_noirq(src, save)             # ... and interrupts off before both
     if nocall:
         # rb-params: the parameter block filled, then straight to the restores
         a = src.index("      CJUMP ")
@@ -369,13 +391,14 @@ def variant(stock: bytes, work: pathlib.Path, name: str) -> bytes:
     if name == "passthru":
         return section7(stock, adapter(work, passthru=True))
     lay = "b0" if name == "b0code" else "b2"
-    rb = name if name in RB + ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13") else None
+    rb = name if name in RB + ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq") else None
     rd, ad, save, par, tab = LAYOUT[lay]
     # the reader has 0x400 up to b2's adapter; only `stages` (markers) needs more than 0x200,
     # and the other builds keep their bytes
-    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13") else 0x200)),
-            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13"),
-                                     counter=rb in ("stages-loads", "stages-i2", "stages-i2l1", "stages-r13")),
+    code = [(dsp.dm_to_load(rd), pad(reader(work, lay, rb), 0x400 if rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq") else 0x200)),
+            (dsp.dm_to_load(ad), pad(adapter(work, lay, nocall=rb == "rb-params", stages=rb in ("stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq"),
+                                     counter=rb in ("stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq"),
+                                     noirq=rb == "stages-noirq"),
                                      0x400 if lay == "b2" else 0x200))]
     if name == "b0code":
         lo, hi = dsp.dm_to_load(B0_FREE[0]), dsp.dm_to_load(B0_FREE[1])
@@ -407,7 +430,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=pathlib.Path, required=True)
     ap.add_argument("--stock", type=pathlib.Path,
                     default=ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip")
-    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13") + RB, default="wtplace")
+    ap.add_argument("--variant", choices=("wtplace", "b0code", "passthru", "b2", "stages", "stages-loads", "stages-i2", "stages-i2l1", "stages-r13", "stages-noirq") + RB, default="wtplace")
     ap.add_argument("--s7-only", type=pathlib.Path, help="write section 7 here and stop (runner checks)")
     a = ap.parse_args(argv)
     if a.out.exists():
