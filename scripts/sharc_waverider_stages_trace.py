@@ -24,10 +24,13 @@ sound, machines = m4.init_sound(IMG)
 img = pathlib.Path(sys.argv[1]).read_bytes()
 snap, mach = G.snapshot_path(dk, stock, pathlib.Path(tempfile.mkdtemp()))
 
-LOADS = len(sys.argv) > 2 and sys.argv[2] in ("loads", "i2", "i2l1")
+LOADS = len(sys.argv) > 2 and sys.argv[2] in ("loads", "i2", "i2l1", "irptl")
+IRPTL = len(sys.argv) > 2 and sys.argv[2] == "irptl"        # words 2-4: IRPTL after 26, after 4, after 19
 I2 = len(sys.argv) > 2 and sys.argv[2] in ("i2", "i2l1")   # words 3 (R0) and 4 (I2) too
+if IRPTL:
+    I2 = False
 I2L1 = len(sys.argv) > 2 and sys.argv[2] == "i2l1"          # I2 is the L1 scratch, not R0
-log = {a: [] for a in W.MARK_AT + (W.COUNT_AT if LOADS else ()) + (W.OUT_AT + W.I2_AT if I2 else ())}
+log = {a: [] for a in W.MARK_AT + (W.COUNT_AT if LOADS else ()) + (W.OUT_AT + W.I2_AT if I2 or IRPTL else ())}
 import sharc_core.memory as mem
 orig = getattr(mem._dm_write, "__wrapped_trace__", mem._dm_write)
 
@@ -64,6 +67,11 @@ for k, run in enumerate(runs):
     print(f"block {k}: {len(run)} markers, first {run[:10]}, last {run[-4:]}, stage 14 x{c[14]}; full path: {run == want}")
 ok = a == b and len(runs) == 4 and all(run == want for run in runs) and st[-1] == 19
 print("last value", hex(a[-1]) if a and a[-1] is not None else None)
+if IRPTL:
+    for name, ws in zip(("after 26", "after 4", "after 19"), W.IRPTL_AT):
+        a0, a1 = (log.setdefault(x, []) for x in ws)
+        print(f"IRPTL {name}: writes {[hex(v) if v is not None else None for v in a0]}; pages agree: {a0 == a1}")
+    LOADS = False
 if LOADS:
     c0, c1 = (log[x] for x in W.COUNT_AT)
     print("call counter writes:", c0, "; pages agree:", c0 == c1)
