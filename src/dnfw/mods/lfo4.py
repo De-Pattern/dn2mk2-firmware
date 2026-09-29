@@ -27,9 +27,11 @@ applies this mod last.
 
 ## What it shares
 
-It uses the start-up hook and the appended data area, like `lfowaves` and
-`bootscreen`, and requires MAIN OS to end where stock 1.11 ends. So it
-cannot be combined with either of them yet: `docs/mods-compatibility.md`.
+The start-up loader and the appended area are the platform's
+(`dnfw.mods.platform`): LFO4 contributes its two `CODE` chunks to whatever
+area is already there, so it combines with `lfowaves` and `bootscreen`. The
+JSON still records the loader as LFO4's build installed it;
+`scripts/gen_platform_code.py` checks the platform installs those same bytes.
 """
 
 from __future__ import annotations
@@ -37,7 +39,7 @@ from __future__ import annotations
 import json
 import pathlib
 
-from . import Extent, ModError, Result
+from . import Extent, ModError, Result, platform
 from ..patch import lfo4records, paramtable
 
 ID = "lfo4"
@@ -64,11 +66,32 @@ def _spec() -> dict:
     return SPEC
 
 
+def _platform_owned(e: dict) -> bool:
+    """An edit the platform makes: the start-up call or the loader in its cave."""
+    lo, hi = e["va"] - BASE, e["va"] - BASE + len(e["new"]) // 2
+    return any(x.start < hi and lo < x.end for x in platform.extents())
+
+
+def _edits() -> list[dict]:
+    return [e for e in _spec()["edits"] if not _platform_owned(e)]
+
+
+def _chunks(blob: bytes) -> list[tuple[bytes, bytes]]:
+    return platform.area.parse(blob)
+
+
 def extents(firmware=None) -> list[Extent]:
     spec = _spec()
-    out = [Extent(SECTION, e["va"] - BASE, len(e["new"]) // 2, "LFO4 edit") for e in spec["edits"]]
-    out.append(Extent(SECTION, spec["area_va"] - BASE, len(spec["blob"]) // 2,
-                      "appended data area (loader, LFO4's C, the relocated table)"))
+    out = [Extent(SECTION, e["va"] - BASE, len(e["new"]) // 2, "LFO4 edit") for e in _edits()]
+    return out + platform.extents(len(spec["blob"]) // 2)
+
+
+def ram() -> list[Extent]:
+    out = []
+    for _, data in _chunks(bytes.fromhex(_spec()["blob"])):
+        code = platform.area.CodeChunk.unpack(data)
+        out.append(Extent(platform.RAM, code.load, len(code.image) + code.bss,
+                          "LFO4's C and its BSS" if code.bss else "the relocated parameter table"))
     return out
 
 
@@ -83,16 +106,11 @@ def _table(content: bytes) -> bytes:
 def compose(content: bytes) -> bytes:
     """Stock-guarded edits, then the appended area with the table filled in."""
     spec = _spec()
-    if len(content) != spec["stock_length"]:
-        raise ModError(f"MAIN OS is {len(content):,} B, not {spec['stock_length']:,}: either not "
-                       "Digitone II 1.11, or another mod has already appended data "
-                       "(lfowaves and bootscreen do)")
-    for e in spec["edits"]:
-        at = e["va"] - BASE
-        have = bytes(content[at:at + len(e["stock"]) // 2]).hex()
-        if have != e["stock"]:
-            raise ModError(f"0x{e['va']:08x} is not stock ({have[:24]}...); another mod "
-                           "has changed it, or this is not Digitone II 1.11")
+    content, others = platform.split(content)
+    out = bytearray(content)
+    others = list(others)
+    for e in _edits():
+        platform.write(out, others, e["va"], bytes.fromhex(e["stock"]), bytes.fromhex(e["new"]))
 
     blob = bytearray.fromhex(spec["blob"])
     records = _table(content)
@@ -101,12 +119,7 @@ def compose(content: bytes) -> bytes:
         raise ModError("lfo4_code.json is damaged: the table's place is not blank")
     blob[at:at + len(records)] = records
 
-    out = bytearray(content)
-    for e in spec["edits"]:
-        at = e["va"] - BASE
-        new = bytes.fromhex(e["new"])
-        out[at:at + len(new)] = new
-    return bytes(out + blob)
+    return platform.join(bytes(out), others + _chunks(bytes(blob)))
 
 
 def apply(firmware) -> Result:
@@ -115,6 +128,6 @@ def apply(firmware) -> Result:
         raise ModError("image has no MAIN OS section")
     content = compose(section.unpack())
     spec = _spec()
-    notes = [f"{len(spec['edits'])} edits, appended {len(spec['blob']) // 2:,} B; "
-             f"the parameter table rebuilt from this image; MAIN OS {len(content):,} B"]
+    notes = [f"{len(_edits())} edits, {len(spec['blob']) // 2:,} B of CODE chunks in the "
+             f"platform's area; the parameter table rebuilt from this image; MAIN OS {len(content):,} B"]
     return Result({SECTION: content}, extents(firmware), notes)
