@@ -1129,3 +1129,65 @@ Ranked by how directly each closes a gap this project already has open.
    the checklist shape if this project ever formalises its own DN1/DN2/DT2
    device-profile split, rather than growing the distinction ad hoc across
    `docs/hardware.md` and `docs/DEVICES.md`-equivalents.
+
+## Survey, 2026-09-29
+
+Local clones fetched read-only. The repositories without a clone here were read through the public GitHub API. What changed since the 2026-09-27 survey, ranked:
+
+1. **`m-dwyer/digikit`, branch `work/sharc-emulator`: 25 commits, unmerged.** The 2026-09-27 survey read `main` only and so missed them. Tip `2a54bdc`.
+   - **SHARC core fixes** (`95d92de`, about 2,800 changed lines in `tools/sharc_core/`):
+     - Type 4b widths, `(lw)` scaling, and plain MODIFY no longer scaling M (Type 7b has no (sw)/(nw) bits);
+     - `or-fdep`, SIMD companions, the PEy compute half, `fext (se)`;
+     - flag updates returned as data.
+     Our Waverider runner snapshot is `6f812e9`. Our Waverider gates, rerun on `2a54bdc` (the stage-marker trace), give the same verdict.
+   - **A native core.** The Python core is kept in a translatable subset (`tools/sharc_core/SUBSET.md`, `tools/sharc_subset_lint.py`). `tools/sharc_transpile.py` and `tools/sharc_rsgen.py` generate a Rust core from it (`native/sharc`), checked in lockstep against the Python one (`tools/sharc_diff.py`).
+     - One frame takes about 450 us of its 667 us budget, and `native/live` plays frames through cpal.
+     - For us that is the route from minutes to seconds for every SHARC gate. The generated code embeds firmware and stays under `out/`, which fits our no-firmware rule.
+   - **A native emulator plan, stage 1** (`2a54bdc`): a WASM gate, a ColdFire decoder, an MMIO recorder. A browser-hosted emulator is the natural base for a live emulator view; we would build on it rather than write our own.
+   - **`emu/dspboot.py`: a missing `dma_sem` wiring hung any cold boot doing a multi-block write** (`769d0c8`, with a test). Our slow emulator path runs dspboot, and the save-while-playing work is exactly multi-block writes.
+   - **+Drive:**
+     - the real-filesystem superblock and checksum (`tools/plusdrive.py`);
+     - the mount's `MaGj` record at sector `0x458000`;
+     - the eMMC identity whitelist;
+     - samples written in the drive's native format, and a DT2 project that loads `hat.wav` and plays it on a GUI TRIG through the SHARC in real time.
+     This bears on `docs/drive-storage-research.md`.
+   - Our PR `m-dwyer/digikit#45` (the ColdfireEMAC SLEIGH fix) is still open.
+2. **`sambanks/octabam`: two ideas we should use.**
+   - **CC FEEDBACK** (`modules/cc-feedback/`, MIT). The Octatrack transmits a CC for every live knob byte that changes, whatever changed it, so a controller's LED rings follow the unit. Stock transmits only on a panel turn of a page-1 knob.
+     - How: a 120 Hz round-robin sweep compares each track's live parameter lane with the stock emitter's per-channel value cache, and queues any difference through the stock emitter's dirty bitmaps, so stock's own drainer paces the wire.
+     - Gate: `tools/verify/verify_ccfeedback.py` reads the port's MIDI OUT under Unicorn.
+     - It is the template for the "MIDI value feedback" item on our queue. The shape to look for on the DN2 is the same: find the stock CC emitter and its cache, then sweep against it.
+   - **One boot per gate** (`ot_emu --step`, `--live-script`, `--scenario`):
+     - load the machine once, then fork a child per run (DSP memory unshared after the fork);
+     - script panel input at emulated times, not wall-clock sleeps;
+     - shard the gates longest first from recorded times.
+     `TESTING.md` now documents every gate, its cost and its blind spots. Our gates each boot from reset, so `--scenario`-style forking is how they would get cheaper next.
+   - Also: USB AUDIO OUT / USB MIDI hardware proofs, and remix pages rendered for readers. Licence unchanged (MIT with its carve-out paragraph).
+3. **`nordseele/octalab-notes` relicensed its text and images to CC BY-NC-SA 4.0 on 2026-09-27** (`12615a4`; MIT before that date).
+   - The 2026-09-27 survey's "Licence unchanged, MIT" is wrong from that commit on.
+   - Material published after 27 Sep is non-commercial share-alike: cite it, don't copy it into this repository.
+   - Also new: photos of the unit replacing emulator renders, and a reproducible USB-audio diagnostic runner (`96c493c`).
+4. **`irpina/digihealth` 1.1** adds SYSTEM INFO for the Digitone **mk1** (`356ee40`, 2026-09-28), next to the Digitakt mk1. Neither is the DN2.
+   - Licence re-read: `LICENSE` is GPL-2.0, in the first public commit (`75c03d5`, 2026-09-26); the README says "GPL-2.0".
+   - The earlier reading stands: GPL-2.0-only, which cannot be combined with this repository's AGPL-3.0-or-later, so it remains a design reference.
+5. **`timhastie/octa-panel`:** Octatrick 2.6-2.8 (chord recording, LEG on audio tracks, trig transpose), with its dev log now pointing at `octatrick` / `octatrick-modules`. Licence still unchecked: inspiration only.
+6. **`mxldyn/octamax`:** only `3083f69`, a MIDI-mode fix already noted. Still no licence file.
+7. **`gdeo607/DT1_8_POLY_OSC`** now answers "Moved Permanently". Its new location is not tracked yet.
+
+**No new commits since 2026-09-26 in:**
+- `mischa85/elektron-firmware-tool`
+- `bryantysinger/octa-bt-pt`
+- `emuyia/ems-octakit`
+- `bkkbrls-del/midisc`
+- `js216/selache`
+- `lalzart/digitakt-ii-firmware-research-public`
+- `analogdevicesinc/adsp-ldr`
+- `dagargo/elektroid`
+- `Bezronczek/syntakt-firmware-workbench`
+
+### What to bring in, ranked
+
+1. **Rebase our SHARC gates on digikit's current `work/sharc-emulator`**, and move them to the native core once it is usable from Python or a CLI. It is the same runner with fewer workarounds, and it is much faster.
+2. **Take digikit's `dspboot` `dma_sem` fix into our emulator path** before the next save-path emulation.
+3. **Model DN2 MIDI value feedback on octabam's CC FEEDBACK:** find the DN2's CC emitter and its value cache, and sweep against it.
+4. **Load once, fork per run** for the ColdFire gates, once gate time matters again.
