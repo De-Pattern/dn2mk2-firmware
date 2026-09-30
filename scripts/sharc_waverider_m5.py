@@ -78,6 +78,8 @@ SETUP_GUARD, SETUP_TABLE_READ, SETUP_NONE = 0x1C905D, 0x1C90A9, 0x1C90D4
 CLAMP_MIN = 0x1C294C
 NOTE_CELL = V.ENGINE + 0x1387C
 WAV1, TBL1 = 26, 27             # WaveTone's Osc1 Waveform, Osc1 Wave Table
+TUN1 = 25                       # WaveTone's Osc1 Tune (Milestone 6)
+TUN1_ZERO = 0x4000              # the frame word for 0 semitones: the sound's own (probe, 2026-09-30)
 FRAME_COPY = 0x25C48C           # where sw 0x1c2712 copies the frame image
 
 
@@ -119,7 +121,9 @@ def base_frame(sound, machines, *, t0=5, others=None, overrides=None, note=0x3C0
                trigger=False, trigger_others=False) -> FR.Frame:
     """Track 0 on machine T0 with WaveTone's machine page (group 1) plus OVERRIDES;
     OTHERS = {track: machine type} for tracks 1-15 (default MIDI)."""
-    track0 = {**machines.get(1, {}), **(overrides or {})}
+    # machines' defaults are the sound's scale, which is what the instrument's frame
+    # carries (read through the USB probe, 2026-09-30)
+    track0 = {**machines.get(1, {}), TUN1: TUN1_ZERO, **(overrides or {})}
     f = FR.init_frame(sound, t0, trigger=trigger, track0=track0)
     f.header(FR.NOTE, 0, note)
     for t, m in (others or {}).items():
@@ -171,7 +175,8 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                 if m2.word(r.state, rec + V.TRACK_MACHINE) == 5:
                     ins[t] = {"note": V.bits_f32(m2.word(r.state, NOTE_CELL + 4 * t) or 0),
                               "wav1": frame_word(r.state, FR.slot_offset(t, WAV1)),
-                              "tbl1": frame_word(r.state, FR.slot_offset(t, TBL1))}
+                              "tbl1": frame_word(r.state, FR.slot_offset(t, TBL1)),
+                              "tun1": frame_word(r.state, FR.slot_offset(t, TUN1))}
             tap["t5_inputs"] = ins
 
         def at_reader(r):
@@ -244,7 +249,8 @@ def track_series(run, t) -> list[float]:
 
 def reference_for(run, t, tables, precision="float32") -> list[float]:
     """live.render_blocks fed the DSP's own unpacked inputs for track T, block by block."""
-    seq = [(i[t]["note"], i[t]["wav1"], i[t]["tbl1"]) for i in run["t5_inputs"] if t in i]
+    seq = [(i[t]["note"], i[t]["wav1"], i[t]["tbl1"], i[t].get("tun1", live.TUN1_ZERO))
+           for i in run["t5_inputs"] if t in i]
     return live.render_blocks(tables, seq, BLOCK, 0, precision)[0]
 
 
@@ -423,9 +429,9 @@ def main(argv=None):
                 wav("m5_preview_init_sound.wav", preview(tables, 60.0, 0, 0, 0, a.seconds), a.seconds, wavs,
                     "PREVIEW, not the runner: the reference for the init sound, note 60, POS 0, slot 0 (the saw)")
             for key, what, pv in (
-                    ("pos120", "POS (WAV1) 120: slot 0's last frame, the sine", (60.0, 0x3C00, 0x3C00, 0)),
-                    ("slot1", "TBL1 1, WAV1 64: the overtone table, partials 9-10", (60.0, 0x2000, 0x2000, 0x80)),
-                    ("note72", "note 72, POS 120: the sine an octave up", (72.0, 0x3C00, 0x3C00, 0))):
+                    ("pos120", "POS (WAV1) 120: slot 0's last frame, the sine", (60.0, 0x7800, 0x7800, 0)),
+                    ("slot1", "TBL1 1, WAV1 64: the overtone table, partials 9-10", (60.0, 0x4000, 0x4000, 0x100)),
+                    ("note72", "note 72, POS 120: the sine an octave up", (72.0, 0x7800, 0x7800, 0))):
                 if runs[key]["ok"]:
                     wav(f"m5_{key}_machine.wav", track_series(runs[key], 0), a.seconds, wavs,
                         f"track 0's buffer, {what}")
@@ -434,10 +440,10 @@ def main(argv=None):
             if runs["silent"]["ok"]:
                 wav("m5_no_trigger.wav", runs["silent"]["amp_out"], a.seconds, wavs,
                     "control: no trigger, amp output (silent)")
-            wav("m5_demo_pos_sweep_preview.wav", preview(tables, 48.0, 0, 0x3C00, 0, 4.0), 4.0, wavs,
+            wav("m5_demo_pos_sweep_preview.wav", preview(tables, 48.0, 0, 0x7800, 0, 4.0), 4.0, wavs,
                 "DEMO PREVIEW, not the runner: slot 0 at note 48, POS swept 0 -> 120 over 4 s: "
                 "a buzzy saw darkening to a sine")
-            wav("m5_demo_harmonic_climb_preview.wav", preview(tables, 48.0, 0, 0x3C00, 0x80, 4.0), 4.0, wavs,
+            wav("m5_demo_harmonic_climb_preview.wav", preview(tables, 48.0, 0, 0x7800, 0x100, 4.0), 4.0, wavs,
                 "DEMO PREVIEW, not the runner: slot 1 at note 48, POS swept 0 -> 120 over 4 s: "
                 "the overtone series climbing, partial 1 to 16")
 
@@ -563,9 +569,11 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
         return fb
 
     runs = {"init": run_blocks(init, frames(), blocks),
-            "pos120": run_blocks(init, frames(overrides={WAV1: 0x3C00}), blocks),
-            "slot1": run_blocks(init, frames(overrides={WAV1: 0x2000, TBL1: 0x0080}), blocks),
-            "note72": run_blocks(init, frames(overrides={WAV1: 0x3C00}, note=0x4800), blocks),
+            "pos120": run_blocks(init, frames(overrides={WAV1: 0x7800}), blocks),
+            "slot1": run_blocks(init, frames(overrides={WAV1: 0x4000, TBL1: 0x0100}), blocks),
+            "note72": run_blocks(init, frames(overrides={WAV1: 0x7800}, note=0x4800), blocks),
+            "tune_up12": run_blocks(init, frames(overrides={WAV1: 0x7800, TUN1: TUN1_ZERO + 12 * 256}), blocks),
+            "tune_down12": run_blocks(init, frames(overrides={WAV1: 0x7800, TUN1: TUN1_ZERO - 12 * 256}), blocks),
             "silent": run_blocks(init, lambda b: base_frame(sound, machines).to_bytes(), blocks)}
     ok_runs = all(r["ok"] for r in runs.values())
     n, mism = {}, {}
@@ -578,6 +586,9 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
     fit = V.fit_gain(i["amp_out"][settle:], ideal[settle:]) if i["ok"] else None
     rb = {k: (r["reader_blocks"][-1].get(0) if r["ok"] and r["reader_blocks"] else None) for k, r in runs.items()}
     inc60, inc72 = (rb["pos120"] or [0] * 6)[2], (rb["note72"] or [0] * 6)[2]
+    inc_up, inc_down = (rb["tune_up12"] or [0] * 6)[2], (rb["tune_down12"] or [0] * 6)[2]
+    zc_up = zero_crossings(track_series(runs["tune_up12"], 0)) if runs["tune_up12"]["ok"] else 0
+    zc_down = zero_crossings(track_series(runs["tune_down12"], 0)) if runs["tune_down12"]["ok"] else 0
     zc60 = zero_crossings(track_series(runs["pos120"], 0)) if runs["pos120"]["ok"] else 0
     zc72 = zero_crossings(track_series(runs["note72"], 0)) if runs["note72"]["ok"] else 0
     c0 = m4.centroid(track_series(i, 0)[settle:]) if i["ok"] else 0
@@ -601,17 +612,19 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
          "centroid_pos0_hz": c0, "centroid_pos120_hz": c120,
          "inc_note60": inc60, "inc_note72": inc72, "inc_ratio": inc72 / inc60 if inc60 else None,
          "zero_crossings_note60": zc60, "zero_crossings_note72": zc72,
+         "inc_tun1_up12": inc_up, "inc_tun1_down12": inc_down,
+         "zero_crossings_tun1_up12": zc_up, "zero_crossings_tun1_down12": zc_down,
          "silent_amp_out_peak": V.peak(runs["silent"]["amp_out"]) if runs["silent"]["ok"] else None,
          "setup_events_after_type5_guard": t0_events,
          "instructions_per_block": round(i.get("instructions", 0) / max(blocks, 1)),
          "wall_s": {k: r.get("wall_s") for k, r in runs.items()},
          "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}
     checks = {
-        "the five runs return every block": ok_runs,
+        "every run returns every block": ok_runs,
         "the type-5 loop is entered by the image's own JUMP, once a block": i.get("loop_entries") == blocks,
         "the per-type setup for type 5 is the no-setup arm 0x1c90d4 (the table is never read)":
             bool(t0_events) and all(e == "none-arm" for e in t0_events),
-        "the machine tap is bit-exact to dnfw.waverider.live in all five runs":
+        "the machine tap is bit-exact to dnfw.waverider.live in every run":
             ok_runs and all(v == 0 for v in mism.values()),
         "the loop's reader block matches the contract (table, inc, pos, count)":
             bool(rb["init"]) and rb["init"][0] == dsp.TABLES_DM[0] and rb["init"][2] == live.increment(60.0)
@@ -624,6 +637,10 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
         "note 72 is an octave above note 60 (the DSP's increment ratio is 2 within 1e-6; "
         "more zero crossings in the same blocks)":
             bool(inc60) and abs(inc72 / inc60 - 2.0) < 1e-6 and zc72 > zc60 > 0,
+        "TUN1 +12 (frame word 0x4c00) is an octave up and -12 (0x3400) an octave down: "
+        "increment ratios 2 and 0.5 within 1e-6 of note 60's, zero crossings more and fewer":
+            bool(inc60) and abs(inc_up / inc60 - 2.0) < 1e-6 and abs(inc_down / inc60 - 0.5) < 1e-6
+            and zc_up > zc60 > zc_down > 0,
         "control: no trigger is silent at the amp's output (peak < 0.01)":
             n["silent_amp_out_peak"] is not None and n["silent_amp_out_peak"] < 0.01,
     }

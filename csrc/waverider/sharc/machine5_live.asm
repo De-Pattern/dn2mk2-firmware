@@ -12,16 +12,22 @@
 // block and calls wr_render5 (reader_m5.asm, sw 0x16eb00) into the track buffer:
 //
 //   SLOT  WaveTone's TBL1 (param 27), read from the frame image the unpack copied to
-//         0x25c48c (offset 222 + 146t): 0x0000 or 0x0080 -- the ColdFire sends
-//         every slot value at half the sound's (0x0100 >> 1, measured from its own
-//         frame builder in the emulator); >> 7 is the slot,
-//         resolved through the baked directory; at or above its count plays 0.
-//   POS   WaveTone's WAV1 (param 26), from the same copy (offset 220 + 146t):
-//         half the sound's coarse << 8 | fine, 0..0x3c00. min(WAV1, 0x3c00) << 6
-//         is Q16 frames: 0x3c00 << 6 = 15 << 16, frame 15. The unpack does not put a type-5 track's
-//         machine parameters in its record (measured), so the frame copy is read.
+//         0x25c48c (offset 222 + 146t): 0x0000 or 0x0100, the sound's own value
+//         (read on the instrument through the USB probe, 2026-09-30); >> 8 is the
+//         slot, resolved through the baked directory; at or above its count plays 0.
+//   POS   WaveTone's WAV1 (param 26), from the same copy (offset 220 + 146t): the
+//         sound's coarse << 8 | fine, 0..0x7800 (probe: 0x7800 at the knob's top).
+//         min(WAV1, 0x7800) << 5 is Q16 frames: 0x7800 << 5 = 15 << 16, frame 15.
+//         The unpack does not put a type-5 track's machine parameters in its
+//         record (measured), so the frame copy is read.
+//         Until 2026-09-30 this read half the sound's value, which the emulator's
+//         frames had shown; those frames were caught while the values were still
+//         gliding to their targets. On the instrument WAV1 reached the last frame
+//         halfway up and TBL1 1 never chose table 1.
 //   pitch the engine's note cell, engine +0x1387c + 4t = 0x254b14 + 4t, a float in
-//         semitones (note + fine/256). Clamped to 0..127; k = trunc, fr = note - k;
+//         semitones (note + fine/256), plus TUN1 (Milestone 6): WaveTone's param 25 at
+//         offset 218 + 146t, frame word / 256 - 64 semitones (+-60, the display's
+//         +-5 octaves). Clamped to 0..127; k = trunc, fr = note - k;
 //         inc = trunc(T[k] + fr * (T[k+1] - T[k])) from the baked 129-entry float
 //         table T (dnfw.waverider.live.increment_table): 440 * 2^((k-69)/12) Hz as a
 //         u32 phase step at 48 kHz.
@@ -97,11 +103,11 @@ wr_t5v_loop.:
       R3 = DM(I5, M6);                  // this track's buffer; I5 -> next
       R4 = 5;
       COMP(R2, R4);
-      IF NE JUMP 0x16ee29;              // -> wr_t5v_next.
+      IF NE JUMP 0x16ee46;              // -> wr_t5v_next.
       R4 = DM(0x2de600);                // the baked directory's magic
       R2 = 0x57525431;
       COMP(R4, R2);
-      IF NE JUMP 0x16ee29;              // -> wr_t5v_next. (no directory: render nothing)
+      IF NE JUMP 0x16ee46;              // -> wr_t5v_next. (no directory: render nothing)
 
       // t, and from it every per-track address (no pointer survives the reader call)
       R0 = DM(0x2dde80);
@@ -131,27 +137,37 @@ wr_t5v_loop.:
       I1 = R2;
       R4 = DM(0, I1);                   // the word holding WAV1
       R5 = DM(1, I1);                   // the next one
+      // M6: TUN1 (param 25) is the half-word before WAV1: t even -> the high half
+      // of the word before (218 + 146t is 2 mod 4), t odd -> the low half of WAV1's
+      R12 = -4;
+      R12 = R12 + R2;
+      I1 = R12;
+      R13 = DM(0, I1);                  // the word before WAV1's
       // M5d: no conditional computes (the stock corpus has no conditional shift);
       // the firmware's own `IF cond JUMP abs` and unconditional shifts instead
       R7 = -16;
       R1 = PASS R1;
-      IF NE JUMP 0x16edaf;                   // -> wr_t5v_odd.
+      IF NE JUMP 0x16edb8;                   // -> wr_t5v_odd.
       R5 = LSHIFT R4 BY R7;             // t even: WAV1 low, TBL1 high half of word 0
-      JUMP 0x16edb1;                         // -> wr_t5v_halves.
+      R13 = LSHIFT R13 BY R7;           //         TUN1 high half of the word before
+      JUMP 0x16edbc;                         // -> wr_t5v_halves.
 .GLOBAL wr_t5v_odd.;
 wr_t5v_odd.:
+      R13 = R13 - R13;                  // t odd:  TUN1 low half of word 0
+      R13 = R13 + R4;
       R4 = LSHIFT R4 BY R7;             // t odd:  WAV1 high half of word 0, TBL1 low of 1
 .GLOBAL wr_t5v_halves.;
 wr_t5v_halves.:
       R6 = 0xffff;
-      R4 = R4 AND R6;                   // WAV1, half the sound's value, 0..0x3c00
+      R4 = R4 AND R6;                   // WAV1, the sound's value, 0..0x7800
+      R13 = R13 AND R6;                 // TUN1, the sound's value, 0x0400..0x7c00
       R5 = R5 AND R6;                   // TBL1, 0x0000 or 0x0080
 
-      // SLOT = TBL1 >> 7, through the directory
-      R1 = LSHIFT R5 BY -7;
+      // SLOT = TBL1 >> 8, through the directory
+      R1 = LSHIFT R5 BY -8;
       R2 = DM(0x2de604);                // the directory's count
       COMPU(R1, R2);
-      IF LT JUMP 0x16edc2;                   // -> wr_t5v_slot_ok.
+      IF LT JUMP 0x16edce;                   // -> wr_t5v_slot_ok.
       R1 = R1 - R1;                     // out of range -> slot 0
 .GLOBAL wr_t5v_slot_ok.;
 wr_t5v_slot_ok.:
@@ -162,10 +178,10 @@ wr_t5v_slot_ok.:
       R2 = DM(0, I1);                   // directory.table[slot]
       DM(0, I4) = R2;                   // the reader block's table pointer
 
-      // POS = min(WAV1, 0x3c00) << 6: Q16 frames, 0x3c00 << 6 = 15 << 16
-      R2 = 0x3c00;
+      // POS = min(WAV1, 0x7800) << 5: Q16 frames, 0x7800 << 5 = 15 << 16
+      R2 = 0x7800;
       R4 = MIN(R4, R2);
-      R4 = LSHIFT R4 BY 6;
+      R4 = LSHIFT R4 BY 5;
       DM(3, I4) = R4;                   // pos
 
       // pitch: this track's note cell, 0x254b14 + 4t
@@ -180,15 +196,32 @@ wr_t5v_slot_ok.:
       R12 = 0xff;
       R2 = R2 AND R12;                  // the exponent field
       COMP(R2, R12);
-      IF EQ JUMP 0x16edf6;                   // -> wr_t5v_note0.
+      IF EQ JUMP 0x16ee02;                   // -> wr_t5v_note0.
       R8 = PASS R8;
-      IF LT JUMP 0x16edf6;                   // -> wr_t5v_note0.
-      JUMP 0x16edf7;                         // -> wr_t5v_note_ok.
+      IF LT JUMP 0x16ee02;                   // -> wr_t5v_note0.
+      JUMP 0x16ee03;                         // -> wr_t5v_note_ok.
 .GLOBAL wr_t5v_note0.;
 wr_t5v_note0.:
       R8 = R8 - R8;                     // +0.0
 .GLOBAL wr_t5v_note_ok.;
 wr_t5v_note_ok.:
+      // M6: + TUN1 in semitones. Read on the instrument through the USB probe
+      // (2026-09-30): the frame carries the sound's own value, 0x4000 at 0,
+      // 0x4100 at +1, 0x4c00 at +12, 0x3400 at -12. So coarse - 64 + fine / 256
+      // semitones = frame word / 256 - 64 (the display shows it as -5..+5 octaves)
+      R12 = -8;
+      F13 = FLOAT R13 BY R12;           // frame word / 256
+      R12 = 0x42800000;                 // 64.0
+      F13 = F13 - F12;
+      F8 = F8 + F13;                    // note + TUN1
+      R8 = PASS R8;
+      IF LT JUMP 0x16ee13;                   // -> wr_t5v_tune_low.
+      JUMP 0x16ee14;                         // -> wr_t5v_tuned.
+.GLOBAL wr_t5v_tune_low.;
+wr_t5v_tune_low.:
+      R8 = R8 - R8;                     // below note 0 -> +0.0
+.GLOBAL wr_t5v_tuned.;
+wr_t5v_tuned.:
       R12 = 0x42fe0000;                 // 127.0
       F8 = MIN(F8, F12);                // 0 <= note <= 127, finite
       R0 = TRUNC F8;                    // k, 0..127
@@ -213,7 +246,7 @@ wr_t5v_note_ok.:
       R4 = DM(0x2dde84);                // wr_render5's argument: the reader block
       CJUMP 0x16eb00 (DB);              // wr_render5(R4 = reader block)
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0x16ee28;            // return address - 1: wr_t5v_next. - 1
+      DM(I7, M7) = 0x16ee45;            // return address - 1: wr_t5v_next. - 1
 
 .GLOBAL wr_t5v_next.;
 wr_t5v_next.:
