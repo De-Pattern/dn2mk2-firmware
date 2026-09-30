@@ -15,6 +15,9 @@ then answer with Waverider's pages and labels:
 - `wr_icons`, entered by `jsr` from the SYN page draw at `0x4001821e`: on a Waverider
   track, WaveTone's oscillator icons (drawn at B and F from `WAV1`/`TBL1` and
   `WAV2`/`TBL2` after the grid of page id 7) are skipped; otherwise the stock page-id test.
+- `wr_grid`, entered by `jsr` from the SYN page draw at `0x40018214` (in place of its
+  call to the grid `0x40017428`): a Waverider track gets its own page, drawn by
+  `wr_page_draw` (`csrc/waverider/page.c`, M8.1); every other track the stock grid.
 - `wr_label`, entered by `jsr` from the SYN page's label fetch at `0x40064622` (in place
   of `jsr getShortName`): the record ids Waverider relabels get our labels; every
   other id, and every other track, goes to the stock `getShortName` `0x400372da`
@@ -32,17 +35,19 @@ place is an empty entry (0), drawn as an empty box, until its milestone.
 The code, the descriptors and the strings run from RAM as one platform `CODE` chunk at
 `LOAD` (`dnfw.mods.platform`): the caves Waverider already uses are full.
 
-Waverider's first page also draws its wave in cell C (`dnfw.waverider.wave`, M8),
-from `wr_icons`; its routine and tables are linked into the same chunk.
+The page is drawn in C (`csrc/waverider/page.c`), the way Tonverk's Wavefinder page
+is laid out: the wave across the middle, A..D in a slim strip above it, E..H below.
+That code is compiled and linked into the same chunk at `C_LOAD`, and reads this
+module's control table and `wave`'s spans from a generated header (`c_header`).
 
 This module is pure: it builds the source; `coldfire.compose` assembles and places it.
 """
 
 from __future__ import annotations
 
-from . import wave
-
 LOAD = 0x4670C000                 # RAM above BSS, clear of every declared range (docs/mods-compatibility.md)
+C_LOAD = LOAD + 0x400             # the C page renderer, after this assembly
+C_END = 0x46710000                # the platform runtime starts here
 ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
 KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t
 SOUND_BASE, SOUND_STRIDE, SOUND_TYPE = 52, 1163, 0xDE
@@ -68,7 +73,8 @@ PAGES = (
     (0, 0, 0, 0, 0, 0, 0, 0),         # OSC 2: all to come (M9)
 )
 
-LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "descriptors")
+LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "descriptors")
+GRID = 0x40017428                 # the stock grid: (view, canvas)
 ICON_PAGE = 7                     # the SYN page draw's id for WaveTone's OSC page
 ICON_SKIP = 0x400182C6            # its branch target past the oscillator icons
 
@@ -84,8 +90,23 @@ def _rep(label: str, text: str) -> str:
             f'{label}: .asciz "{text}"')
 
 
-def source() -> str:
-    """The chunk's assembly (GNU as, ColdFire), linked at LOAD."""
+def label(rid: int) -> str:
+    """-> what place `rid` is called on the page; "-" for a place not yet working."""
+    return LABELS.get(rid, "-") if rid else "-"
+
+
+def c_header() -> str:
+    """The control table, as C for `wr_gen.h`: per page, eight record ids and labels."""
+    ids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in PAGES)
+    names = ",\n".join(" {" + ", ".join(f'"{label(r)}"' for r in page) + "}" for page in PAGES)
+    return (f"#define WR_PAGES {len(PAGES)}\n"
+            f"static const unsigned short wr_ids[WR_PAGES][8] = {{\n{ids}\n}};\n"
+            f"static const char wr_labels[WR_PAGES][8][6] = {{\n{names}\n}};\n")
+
+
+def source(page_draw: int) -> str:
+    """The chunk's assembly (GNU as, ColdFire), linked at LOAD. PAGE_DRAW is the C
+    renderer's entry, `wr_page_draw(view, canvas)`."""
     table = "\n".join(f"    .long {rid}, lab_{rid}" for rid in LABELS)
     strings = "\n".join(f'lab_{rid}: .asciz "{name}"' for rid, name in LABELS.items())
     pages = []
@@ -192,12 +213,23 @@ wr_icons:
     beq.s   2f
 1:  move.l  #{ICON_SKIP:#010x},%sp@
 2:  rts
-| a Waverider track: its own wave where WaveTone's icons were (M8), on its first page
-3:  moveq   #{ICON_PAGE},%d0
-    cmp.l   %d3,%d0
-    bne.s   1b
-    bsr.w   wr_wave
-    bra.s   1b
+| a Waverider track: never WaveTone's icons (its page, wave included, is wr_grid's)
+3:  bra.s   1b
+
+| -- the SYN page draw at 0x40018214 (`move.l %d2,-(%sp) ; move.l %a2,-(%sp) ; jsr grid ;
+| addq.l #8,%sp`, 10 bytes), now jsr here and two nops. a2 = the view, d2 = the canvas.
+wr_grid:
+    move.l  %d2,%sp@-
+    move.l  %a2,%sp@-
+    bsr.w   is_wr
+    tst.l   %d0
+    beq.s   1f
+    jsr     {page_draw:#010x}
+    addq.l  #8,%sp
+    rts
+1:  jsr     {GRID:#010x}
+    addq.l  #8,%sp
+    rts
 
     .align 2
 labels:
@@ -209,5 +241,4 @@ descriptors:
 {chr(10).join(_rep(f"title_{k}", t) for k, t in enumerate(TITLES))}
 {strings}
     .align 2
-{wave.source()}
 """

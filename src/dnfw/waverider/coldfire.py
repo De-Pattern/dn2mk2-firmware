@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import struct
 
-from . import pages
+from . import pages, wave
 from dataclasses import dataclass
 
 BASE = 0x40000400
@@ -327,6 +327,10 @@ PAGE_STOCK = bytes.fromhex("222f0008202f000c")
 # and WAV2/TBL2. A Waverider track is type 1 to it: wr_icons takes the page id test.
 ICON_SITE = 0x4001821E                  # moveq #7,%d0 ; cmp.l %d3,%d0 ; bne.w 0x400182c6
 ICON_STOCK = bytes.fromhex("7007b083660000a2")
+# the same draw, a type-1 page other than page id 9: push the canvas and the view, call
+# the grid 0x40017428 (a pc-relative jsr), pop them. wr_grid draws Waverider's own page.
+GRID_SITE = 0x40018214
+GRID_STOCK = bytes.fromhex("2f022f0a4ebaf20e508f")
 
 
 def _cave_free(content: bytes, cave: tuple[int, int]) -> None:
@@ -335,17 +339,28 @@ def _cave_free(content: bytes, cave: tuple[int, int]) -> None:
         raise ComposeError(f"the cave at {at:#010x} (+{cap}) is not free")
 
 
-def compose(stock: bytes, assemble) -> dict:
-    """-> {"content", "edits", "layout"}. ASSEMBLE(source, base=...) -> bytes."""
+def compose(stock: bytes, assemble, compile_c) -> dict:
+    """-> {"content", "edits", "layout", "chunk"}. ASSEMBLE(source, base=...) -> bytes;
+    COMPILE_C(header, base=...) -> (image, symbols, bss): csrc/waverider/page.c linked at
+    BASE with `header` as its generated `wr_gen.h`."""
     content = bytearray(stock)
     for va, want, why in GUARDS:
         _need(content, va, bytes.fromhex(want), why)
     edits: list[Edit] = []
 
     # Milestone 7: Waverider's pages, as one platform CODE chunk in RAM (pages.LOAD)
+    # the C page renderer first (the assembly calls it), at C_LOAD
+    cimage, csyms, cbss = compile_c(pages.c_header() + wave.c_source(), base=pages.C_LOAD)
+    if cbss:
+        raise ComposeError(f"the page renderer has {cbss} bytes of BSS; nothing zeroes it")
+    if pages.C_LOAD + len(cimage) > pages.C_END:
+        raise ComposeError(f"the page renderer ends past {pages.C_END:#010x}")
     ptable = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in pages.LABELS_OUT) + "\n"
-    pblob = assemble(pages.source() + ptable, base=pages.LOAD)
-    chunk = pblob[:-4 * len(pages.LABELS_OUT)]
+    pblob = assemble(pages.source(csyms["wr_page_draw"]) + ptable, base=pages.LOAD)
+    asm = pblob[:-4 * len(pages.LABELS_OUT)]
+    if len(asm) > pages.C_LOAD - pages.LOAD:
+        raise ComposeError(f"the pages assembly ({len(asm)} B) runs into the renderer")
+    chunk = asm + bytes(pages.C_LOAD - pages.LOAD - len(asm)) + cimage
     playout = dict(zip(pages.LABELS_OUT, struct.unpack(f">{len(pages.LABELS_OUT)}I",
                                                        pblob[-4 * len(pages.LABELS_OUT):])))
 
@@ -454,6 +469,8 @@ def compose(stock: bytes, assemble) -> dict:
          "type 5 reads WaveTone's", PAGE_STOCK)
     edit(LABEL_SITE, bytes.fromhex("4eb9") + _long(playout["wr_label"]),
          "the SYN page's label fetch: Waverider's labels for a Waverider track (M7)", LABEL_STOCK)
+    edit(GRID_SITE, bytes.fromhex("4eb9") + _long(playout["wr_grid"]) + bytes.fromhex("4e714e71"),
+         "the SYN page draw: Waverider's own page for a Waverider track (M8.1)", GRID_STOCK)
     edit(ICON_SITE, bytes.fromhex("4eb9") + _long(playout["wr_icons"]) + bytes.fromhex("4e71"),
          "the SYN page draw: no WaveTone oscillator icons on a Waverider track (M7)", ICON_STOCK)
     _need(content, PAGE_SITE - 4, bytes.fromhex("2f027404"), "0x400c24ee's push of d2 and its bound")

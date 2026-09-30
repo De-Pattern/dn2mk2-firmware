@@ -69,16 +69,36 @@ def test_the_spans_are_the_tables_the_sharc_plays():
             assert all(-127 <= a <= b <= 127 for a, b in zip(lo, hi))
 
 
-def test_the_16th_partial_is_a_band_not_a_line():
-    # point samples landed on its zero crossings and drew a flat line
+def crossings(lo, hi):
+    mids = [(a + b) / 2 for a, b in zip(lo, hi)]
+    return sum(1 for a, b in zip(mids, mids[1:]) if (a < 0) != (b < 0))
+
+
+def test_the_16th_partial_draws_its_16_cycles():
+    # 16 columns put every point sample of it on a zero crossing (a flat line, M8);
+    # across the strip it is 16 cycles, full height
     lo, hi = wave.spans()[1][15]
-    assert max(lo) < -100 and min(hi) > 100
+    assert min(lo) < -100 and max(hi) > 100
+    assert 30 <= crossings(lo, hi) <= 32
 
 
 def test_the_fundamental_is_one_cycle():
     lo, hi = wave.spans()[1][0]
+    half = wave.WIDTH // 2
     mids = [(a + b) / 2 for a, b in zip(lo, hi)]
-    assert max(mids[:8]) > 90 and min(mids[8:]) < -90
+    assert max(mids[:half]) > 100 and min(mids[half:]) < -100
+    assert crossings(lo, hi) == 1
+
+
+def test_the_grid_site_calls_wr_grid_then_two_nops():
+    new = edit(CF.GRID_SITE)
+    assert len(new) == len(CF.GRID_STOCK) == 10
+    assert in_chunk(jsr_target(new)) and new[6:] == bytes.fromhex("4e714e71")
+
+
+def test_the_renderer_sits_between_the_assembly_and_the_runtime():
+    assert pages.C_LOAD - pages.LOAD >= 0x100
+    assert pages.LOAD + len(CHUNK) <= pages.C_END
 
 
 def test_the_display_data_is_in_the_chunk():
