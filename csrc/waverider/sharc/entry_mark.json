@@ -1,0 +1,16 @@
+{
+  "source": "csrc/waverider/sharc/entry_mark.asm",
+  "source_sha256": "69501ce6b076c3b45ba90d9ba83fd1b64f65a2344a568c206bb6b60dd0cf53e3",
+  "toolchain": "selache selas -proc ADSP-21569 (js216/selache 2b26d3b, GPL-3.0, WSL)",
+  "section": "seg_pmco",
+  "load_sw": "0x16f680",
+  "object_parcels_be": "1109002de13876be84bf1109002de13c1009002de1380f0400268438063e001c9fbc",
+  "instruction_offsets": [
+    0,
+    6,
+    10,
+    16,
+    22,
+    28
+  ]
+}

@@ -39,11 +39,12 @@ import sharc_waverider_m5 as m5                                # noqa: E402
 from dnfw.waverider import dsp                                  # noqa: E402
 
 PASSES, TOTAL, LAST = 0x2DE114, 0x2DE110, 0x2DE10C
-MARK, BEFORE, AFTER = 0x2DE124, 0x2DE128, 0x2DE12C
+MARK, BEFORE, AFTER, MARK0 = 0x2DE124, 0x2DE128, 0x2DE12C, 0x2DE13C
 REPLY_WORD1 = (0x2C49D4, 0x2C59D4)
 REPLY_WORD3, REPLY_WORD4 = (0x2C49DC, 0x2C59DC), (0x2C49E0, 0x2C59E0)
 SENTINELS = {"R8": 0x11111111, "R9": 0x22222222, "R10": 0x33333333, "R11": 0x44444444}
-MARK_INTO_GAP = 3000                               # where the fed mark sits inside each gap
+MARK_INTO_GAP = 3000                               # where the fed MARK (the splice) sits inside each gap
+MARK0_INTO_GAP = 1000                              # where the fed MARK0 (the routine's call) sits
 
 
 def after_emuclk() -> int:
@@ -54,18 +55,21 @@ def after_emuclk() -> int:
     return dsp.IDLE_SW + spec["instruction_offsets"][src.index("R8 = EMUCLK;") + 1] // 2
 
 
-def model(fed, marks):
-    """What the stub must leave: (idle total, BEFORE, AFTER), from the fed clock and marks."""
+def model(fed, marks, marks0):
+    """What the stub must leave: (idle total, BEFORE, AFTER), from the fed clock and marks:
+    BEFORE adds MARK0 - last, AFTER adds now - MARK, each when that mark is inside the stretch."""
     last = total = before = after = 0
-    for now, mark in zip(fed, marks):
+    for now, mark, mark0 in zip(fed, marks, marks0):
         d = (now - last) & 0xFFFFFFFF
         if d < 4096:
             total = (total + d) & 0xFFFFFFFF
         else:
-            into = (mark - last) & 0xFFFFFFFF
-            if into < d:
-                before = (before + into) & 0xFFFFFFFF
-                after = (after + d - into) & 0xFFFFFFFF
+            a = (mark0 - last) & 0xFFFFFFFF
+            if a < d:
+                before = (before + a) & 0xFFFFFFFF
+            c = (now - mark) & 0xFFFFFFFF
+            if c < d:
+                after = (after + c) & 0xFFFFFFFF
         last = now
     return total, before, after
 STEP, GAP, START = 100, 10_000, 0xFFFFF000         # START makes the counter wrap during the run
@@ -85,7 +89,7 @@ def main(argv=None) -> int:
     m5.m4.IMAGE = a.image
     stock = m5.m1.dn2_section7(a.image)
     image = m5.Image(dk, dsp.section7(stock))
-    tops, pcs, fed, marks = [], set(), [], []
+    tops, pcs, fed, marks, marks0 = [], set(), [], [], []
     at_clock = after_emuclk()
     with tempfile.TemporaryDirectory(dir=m5.OUT) as tmp:
         snap, m2mach = m5.snapshot_path(dk, stock, pathlib.Path(tmp))
@@ -103,9 +107,11 @@ def main(argv=None) -> int:
             clock = (START + STEP * n + GAP * (n // 10)) & 0xFFFFFFFF
             fed.append(clock)
             runner.state.uregs[m5.fx.UREG_CODES["R8"]] = m5.fx.Const(clock)
-            if n and n % 10 == 0:                  # a gap: the dispatch passed MARK_INTO_GAP into it
+            if n and n % 10 == 0:                  # a gap: the call and the dispatch passed inside it
+                m5.m2.poke(runner.state, MARK0, (fed[n - 1] + MARK0_INTO_GAP) & 0xFFFFFFFF)
                 m5.m2.poke(runner.state, MARK, (fed[n - 1] + MARK_INTO_GAP) & 0xFFFFFFFF)
             marks.append(m5.m2.word(runner.state, MARK) or 0)
+            marks0.append(m5.m2.word(runner.state, MARK0) or 0)
 
         f = m5.fixups({dsp.IDLE_RETURN_SW: at_top, dsp.IDLE_SW: lambda runner: pcs.add("stub"),
                        at_clock: feed})
@@ -120,7 +126,7 @@ def main(argv=None) -> int:
     swapped = ((total << 16) | (total >> 16)) & 0xFFFFFFFF
     # the first pass differences against the zeroed LAST word: a gap, left out
     want = sum(d for d in ((b - a) & 0xFFFFFFFF for a, b in zip(fed, fed[1:])) if d < 4096) & 0xFFFFFFFF
-    m_total, m_before, m_after = model(fed[:passes], marks[:passes])
+    m_total, m_before, m_after = model(fed[:passes], marks[:passes], marks0[:passes])
     sw = lambda v: ((v << 16) | (v >> 16)) & 0xFFFFFFFF
     gaps = sum(1 for n in range(1, passes) if n % 10 == 0)
     wrapped = any(b < a for a, b in zip(fed, fed[1:]))
@@ -137,8 +143,10 @@ def main(argv=None) -> int:
         "the idle total is exactly the sum of the short steps (gaps left out)": total == want > 0,
         "the fed clock wrapped during the run, and the total did not jump": wrapped and total == want,
         "BEFORE and AFTER are exactly what the stub's rule gives (model)": (before, after) == (m_before, m_after),
-        "each gap put MARK_INTO_GAP in BEFORE (the first pass's zeroed LAST aside)":
-            before == MARK_INTO_GAP * gaps and gaps > 0,
+        "each gap put MARK0_INTO_GAP in BEFORE (the first pass's zeroed LAST and marks aside)":
+            before == MARK0_INTO_GAP * gaps and gaps > 0,
+        "each gap put its tail after MARK in AFTER": after - (m_after - (STEP + GAP - MARK_INTO_GAP) * gaps) >= 0
+            and m_after >= (STEP + GAP - MARK_INTO_GAP) * gaps,
         "reply words 3 and 4 of both pages hold BEFORE and AFTER, halves swapped":
             w3[0] == w3[1] == sw(before) and w4[0] == w4[1] == sw(after),
     }

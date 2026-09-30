@@ -16,11 +16,13 @@
 //   (halves swapped, as the per-frame handler stores reply word 0, so the ColdFire reads
 //   a big-endian u32) to reply word 1 of both reply pages.
 // - d >= THRESHOLD: the idle task was preempted, and a busy stretch ran from the previous
-//   pass (`last`) to now. If block_count.asm's MARK (EMUCLK where the machine dispatch
-//   passes our splice, sw 0x1c9448) lies inside it, the stretch is split there:
-//   MARK - last goes to the BEFORE total (reply word 3) and now - MARK to the AFTER total
-//   (reply word 4). A stretch without the mark adds to neither; the host has the rest as
-//   total busy - BEFORE - AFTER.
+//   pass (`last`) to now. Two marks split it: MARK0 (entry_mark.asm: EMUCLK as the
+//   handler calls the per-block routine) and MARK (block_count.asm: EMUCLK where the
+//   machine dispatch passes our splice, sw 0x1c9448). When MARK0 lies inside the stretch,
+//   MARK0 - last (A: the handler, and whatever it waits on) goes to the BEFORE total
+//   (reply word 3); when MARK does, now - MARK (C: the per-track chain, FX, mix) goes to
+//   the AFTER total (reply word 4). The host has B (the routine from its entry to the
+//   splice: the frame unpack and the stock render loops) as busy - A - C.
 //
 // Reply words 1-4 (bytes 4..0x13) are bytes the ColdFire never reads
 // (docs/for-digikit-waverider-dsp-stop.md); word 5 is not used, since +0x16 is the
@@ -37,7 +39,7 @@
 //   0x2de10c  EMUCLK at the previous pass
 //   0x2de110  idle cycles, cumulative (mod 2^32)
 //   0x2de114  passes, cumulative
-//   0x2de124  MARK (written by block_count.asm)
+//   0x2de124  MARK (written by block_count.asm);  0x2de13c  MARK0 (entry_mark.asm)
 //   0x2de128  BEFORE, cumulative;  0x2de12c  AFTER, cumulative
 //   0x2c49d4 / 0x2c59d4, 0x2c49dc / 0x2c59dc, 0x2c49e0 / 0x2c59e0  reply words 1, 3, 4
 
@@ -71,17 +73,16 @@ wr_idle.:
       R9 = R9 OR R10;                   // halves swapped, as reply word 0
       DM(0x2c49d4) = R9;                // reply word 1, both pages
       DM(0x2c59d4) = R9;
-      JUMP 0x16f56f;                    // -> wr_idle_out.
+      JUMP 0x16f57b;                    // -> wr_idle_out.
 
 .GLOBAL wr_idle_busy.;
 wr_idle_busy.:
-      R11 = DM(0x2de124);               // MARK
-      R11 = R11 - R9;                   // MARK - last
-      COMPU(R11, R10);                  // inside the stretch (0 <= MARK - last < d)?
-      IF GE JUMP 0x16f56f;              // -> wr_idle_out. (the mark is not in it)
-
+      R11 = DM(0x2de13c);               // MARK0: the handler calling the per-block routine
+      R11 = R11 - R9;                   // MARK0 - last
+      COMPU(R11, R10);                  // inside the stretch (0 <= MARK0 - last < d)?
+      IF GE JUMP 0x16f55a;              // -> wr_idle_after. (not in it)
       R9 = DM(0x2de128);
-      R9 = R9 + R11;                    // BEFORE, cumulative
+      R9 = R9 + R11;                    // BEFORE (A: stretch start -> MARK0), cumulative
       DM(0x2de128) = R9;
       R8 = LSHIFT R9 BY 16;
       R9 = LSHIFT R9 BY -16;
@@ -89,9 +90,15 @@ wr_idle_busy.:
       DM(0x2c49dc) = R9;                // reply word 3, both pages
       DM(0x2c59dc) = R9;
 
-      R10 = R10 - R11;                  // now - MARK
+.GLOBAL wr_idle_after.;
+wr_idle_after.:
+      R8 = DM(0x2de10c);                // now (stored as LAST above)
+      R11 = DM(0x2de124);               // MARK: the machine dispatch's splice
+      R11 = R8 - R11;                   // now - MARK
+      COMPU(R11, R10);                  // inside the stretch (0 <= now - MARK < d)?
+      IF GE JUMP 0x16f57b;              // -> wr_idle_out. (not in it)
       R9 = DM(0x2de12c);
-      R9 = R9 + R10;                    // AFTER, cumulative
+      R9 = R9 + R11;                    // AFTER (C: MARK -> stretch end), cumulative
       DM(0x2de12c) = R9;
       R8 = LSHIFT R9 BY 16;
       R9 = LSHIFT R9 BY -16;

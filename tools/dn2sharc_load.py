@@ -37,8 +37,10 @@ one row per interval, N intervals. A build without the stub leaves word 1 at 0 (
 stale value) and the tool says so. A build with `block_count.asm` also keeps the
 per-block routine's passes in reply word 2, printed as blocks per second of frames
 (1,500 would be one per frame); word 2 at 0 is shown as `--`. A build whose idle stub
-splits busy stretches at block_count.asm's MARK (reply words 3 and 4) also prints the
-busy time before the dispatch's splice, after it, and elsewhere, as shares of the frame.
+splits busy stretches at entry_mark.asm's MARK0 and block_count.asm's MARK (reply
+words 3 and 4) also prints, as shares of the frame: A, the handler up to its call of the
+per-block routine (and whatever it waits on); B, the routine from its entry to the
+dispatch's splice (busy - A - C); C, from the splice to the stretch's end.
 """
 from __future__ import annotations
 
@@ -160,8 +162,8 @@ def idle_main(dp, pr, a) -> int:
                 span = frames * FRAME_CYCLES
                 before = ((cur[3] - prev[3]) & 0xFFFFFFFF) / span
                 after = ((cur[4] - prev[4]) & 0xFFFFFFFF) / span
-                split = "; before %.1f %%, after %.1f %%, other %.1f %%" % (
-                    100 * before, 100 * after, 100 * (v - before - after))
+                split = "; A handler %.1f %%, B routine to splice %.1f %%, C after %.1f %%" % (
+                    100 * before, 100 * (v - before - after), 100 * after)
             print("  %-16s SHARC load %5.1f %%   (idle %d cycles over %d frames; %s%s)"
                   % (a.label, 100 * v, (cur[0] - prev[0]) & 0xFFFFFFFF, frames, per, split))
         prev = cur
