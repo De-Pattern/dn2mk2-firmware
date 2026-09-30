@@ -34,8 +34,14 @@
         | ---- the scheduler ---------------------------------------------------
         .equ TASK_SWITCH, 0x40000438    | movel #0xffffdfff,%d0 -- a0 = incoming TCB, SR 0x2700
         .equ CUR_TCB,     0x4664acdc    | the running task's TCB
-        .equ IDLE_TCB,    0x424388ac    | the prio-0 task (entry 0x400cebb4), parked
-        .equ IDLE_PC,     0x400cebe2    | where it spins: bra.b *
+        | The idle loop is the prio-1 task, not prio 0. Read on the instrument
+        | 2026-09-30 (the ready table 0x4664ac9c, one head per priority, higher
+        | runs first): prio 0 (0x424388ac, spin 0x400cebe2) and prio 1 are both
+        | always ready, so prio 0 never runs -- layout 2's idle_in stayed 0.
+        | Prio 1 (entry 0x400cec98) does the boot's setup and parks for good at
+        | 0x400cf0e2; its saved PC was that spin in 200 of 200 reads.
+        .equ IDLE_TCB,    0x4243c900    | the prio-1 task, parked after the boot's setup
+        .equ IDLE_PC,     0x400cf0e2    | where it spins: bra.b *
 
         | ---- the clock -------------------------------------------------------
         .equ DTCN0,       0xfc07000c    | DMA timer 0 counter; the OS reads it at ten sites

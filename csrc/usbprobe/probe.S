@@ -25,7 +25,8 @@
 | There is no write command, and none can be added by a request: the
 | dispatcher only knows the three below.
 
-        .equ PROTO,       2                | 2: STATS layout 2 appends ext.S's fields
+        .equ PROTO,       3                | 2: STATS layout 2 appends ext.S's fields
+                                           | 3: idle is the prio-1 task: CPU is right
         .equ C_HELLO,     1
         .equ C_STATS,     2
         .equ C_PEEK,      3
