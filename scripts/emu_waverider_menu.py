@@ -86,6 +86,9 @@ WATCH = {
     0x4004CC08: ("machine setter(sound, type, flag)", 8),
     0x40031880: ("MACHINE SEL commit(model, track, type)", 12),
     0x4004C30C: ("machine change: reset its parameters(sound, 1, old type, 0)", 12),
+    0x400C24D2: ("SYN page count(type)", 4),
+    0x400C24EE: ("SYN page descriptor(type, page)", 4),
+    0x400C248E: ("per-machine descriptor 0x42432b24(type)", 4),
 }
 SETTER_WRITE = 0x4004CC94               # moveb %d2,%a0@(222)
 # every `mvs.b %aN@(222),%dM` in the image (objdump of MAIN OS): site -> N
@@ -104,6 +107,9 @@ KIT_POINTER, KIT_SYNC =0x800052A0, 0x40025AF4   # the live kit; its sixteen-trac
 TRACK_SYNC, SOUND_STRIDE = 0x4002549C, 1163      # (sound, track) -> the mirror; kit + 52 + 1163 t
 MIRROR_TYPE, MIRROR_STRIDE =0x80003AF0 + 3468, 153   # the builder's per-track type byte
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400   # above BSS (0x466b74d0); Machine.write maps it
+GET_SHORT_NAME = 0x400372DA             # getShortName(this, id): record + 0x30
+SET_PIXEL = 0x40113B90                  # Bitmap::setPixel(bitmap, x, y, on), docs/display-path.md
+PARAM_TABLE, PARAM_RECORDS, PARAM_BYTES = 0x401F7F94, 321, 60
 
 
 def main() -> int:
@@ -118,8 +124,18 @@ def main() -> int:
     p.add_argument("--json", default=None)
     p.add_argument("--stock", action="store_true", help="install nothing: the control")
     p.add_argument("--regs-at", action="append", default=[], help="record registers at VA")
+    p.add_argument("--regs-last", type=int, default=0, metavar="N",
+                   help="keep the last N register rows at each --regs-at VA, not the first 6")
     p.add_argument("--args-at", action="append", default=[],
                    help="keep the long arguments of the last entry to VA (for call: argN@VA)")
+    p.add_argument("--label-log", action="store_true",
+                   help="log every getShortName call (caller, this, id, this+0xDE) and every read of a "
+                        "record's short-name field (+0x30), with the reading code: where the SYN page's labels come from")
+    p.add_argument("--pixel-callers", default=None, metavar="X0,Y0,X1,Y1",
+                   help="for every setPixel inside the box, the code addresses on the stack: who draws it")
+    p.add_argument("--panel-writers", default=None, metavar="X0,Y0,X1,Y1",
+                   help="every write to the two panel buffers (0x44622bc8, 0x44622fc8; 16 B a row) "
+                        "inside the pixel box, with the code addresses on the stack")
     p.add_argument("--watch-types", action="store_true",
                    help="log every write to a track's machine type byte (sound+0xDE)")
     a = p.parse_args()
@@ -134,6 +150,15 @@ def main() -> int:
         runs = differences(stock, image)
         n = machine.apply(runs)
         print(f"  installed {len(runs)} run(s), {n} bytes, from {build}")
+        # A snapshot has booted already, so the platform loader never runs here: put
+        # its run-time copies (the area's data window and each CODE chunk) where the
+        # loader would have, or a build on the platform jumps into empty RAM.
+        if len(image) > len(stock):
+            sys.path.insert(0, str(HERE.parent / "src"))
+            from dnfw.mods import platform       # noqa: PLC0415
+            for va, blob in platform.runtime(image):
+                machine.write(va, blob)
+                print(f"  placed {len(blob)} bytes at {va:#010x} (the platform loader's copy)")
     else:
         print("  stock: nothing installed (the control)")
 
@@ -182,13 +207,74 @@ def main() -> int:
             getter5[ret] = getter5.get(ret, 0) + 1
     uc.hook_add(UC_HOOK_CODE, getter_rts, begin=GETTER_RTS, end=GETTER_RTS)
 
+    labels: dict[str, dict] = {"calls": {}, "field_reads": {}}
+    if a.label_log:
+        from unicorn import UC_HOOK_MEM_READ
+
+        def short_name(uc_, address, size, user):
+            this, rid = arg(4) & 0xFFFFFFFF, arg(8)
+            ret = arg(0) & 0xFFFFFFFF
+            try:
+                t = struct.unpack(">b", bytes(uc.mem_read(this + 0xDE, 1)))[0]
+            except Exception:                   # noqa: BLE001 -- this may not be a sound
+                t = None
+            key = f"{ret:#010x} id {rid}"
+            row = labels["calls"].setdefault(key, {"n": 0, "this": f"{this:#010x}", "this_DE": t})
+            row["n"] += 1
+
+        uc.hook_add(UC_HOOK_CODE, short_name, begin=GET_SHORT_NAME, end=GET_SHORT_NAME)
+
+        def field_read(uc_, access, address, size, value, user):
+            off = (address - PARAM_TABLE) % PARAM_BYTES
+            if 0x30 <= off < 0x34:
+                pc = uc.reg_read(K.UC_M68K_REG_PC)
+                rid = (address - PARAM_TABLE) // PARAM_BYTES
+                row = labels["field_reads"].setdefault(f"{pc:#010x}", {"n": 0, "ids": []})
+                row["n"] += 1
+                if rid not in row["ids"] and len(row["ids"]) < 24:
+                    row["ids"].append(rid)
+
+        uc.hook_add(UC_HOOK_MEM_READ, field_read, begin=PARAM_TABLE,
+                    end=PARAM_TABLE + PARAM_RECORDS * PARAM_BYTES - 1)
+
+    pixels: dict[str, int] = {}
+    if a.pixel_callers:
+        x0, y0, x1, y1 = (int(v) for v in a.pixel_callers.split(","))
+
+        def pixel(uc_, address, size, user):
+            x, y = arg(8), arg(12)
+            if x0 <= x <= x1 and y0 <= y <= y1:
+                sp = uc.reg_read(K.UC_M68K_REG_A7)
+                stack = struct.unpack(">64I", bytes(uc.mem_read(sp, 256)))
+                chain = " ".join(f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40310000 or 0x4670C000 <= v < 0x4670D000)
+                key = chain.split(" ")[:6]
+                pixels[" ".join(key)] = pixels.get(" ".join(key), 0) + 1
+        uc.hook_add(UC_HOOK_CODE, pixel, begin=SET_PIXEL, end=SET_PIXEL)
+
+    panel_writers: dict[str, int] = {}
+    if a.panel_writers:
+        px0, py0, px1, py1 = (int(v) for v in a.panel_writers.split(","))
+
+        def panel_write(pc, address, value, size):
+            for base in (0x44622BC8, 0x44622FC8):
+                off = address - base
+                if 0 <= off < 1024:
+                    y, bx = off // 16, off % 16
+                    if py0 <= y <= py1 and px0 // 8 <= bx <= px1 // 8:
+                        sp = uc.reg_read(K.UC_M68K_REG_A7)
+                        stack = struct.unpack(">64I", bytes(uc.mem_read(sp, 256)))
+                        chain = [f"{pc:08x}"] + [f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40310000][:7]
+                        panel_writers[" ".join(chain)] = panel_writers.get(" ".join(chain), 0) + 1
+        machine.watch_writes(0x44622BC8, 0x44622FC8 + 1024, panel_write)
+
     regs_at: dict[str, list] = {}
     for va in a.regs_at:
         def at(uc_, address, size, user):
             rows = regs_at.setdefault(f"{address:#010x}", [])
-            if len(rows) < 6:
+            if len(rows) < 6 or a.regs_last:
                 rows.append({f"{r}{i}": f"{uc.reg_read(getattr(K, f'UC_M68K_REG_{r}{i}')):#010x}"
                              for r in "DA" for i in range(8)})
+                del rows[:-max(6, a.regs_last)]
         uc.hook_add(UC_HOOK_CODE, at, begin=int(va, 0), end=int(va, 0))
 
     # the long arguments of the last entry to each --args-at VA, for `call:` to reuse
@@ -326,7 +412,10 @@ def main() -> int:
             def blk(uc_, address, size, user):
                 seen.add(address)
             h = uc.hook_add(UC_HOOK_CODE, blk)
-            if len(parts) == 5:
+            if len(parts) == 5 and parts[3] == "tap":     # blocks:NAME:M:tap:CODE -- a key, e.g. the page key
+                code = int(parts[4])
+                panel.tap(((code - 1) // 8, (code - 1) % 8))
+            elif len(parts) == 5:
                 machine.pc = panel.panelin.encoder(machine.m, panel.profile, int(parts[3]), int(parts[4]))
             panel.settle(int(float(millions) * 1_000_000))
             uc.hook_del(h)
@@ -359,6 +448,10 @@ def main() -> int:
                                "d0": d0 - (1 << 32) if d0 & 0x80000000 else d0})
             print(f"  call {parts[1]}({', '.join(f'{v:#x}' for v in args)}): {ran:,} instructions, "
                   f"d0 = {calls_made[-1]['d0']}")
+        elif step == "reset-trace":
+            # forget what the pixel and panel traces saw so far: trace one screen state only
+            pixels.clear()
+            panel_writers.clear()
         elif step == "types":
             # every track's machine type byte, as the sound holds it
             kit = machine.long(KIT_POINTER)
@@ -415,7 +508,8 @@ def main() -> int:
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
-              "frames": frames, "memory": mems}
+              "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels,
+              "panel_writers": panel_writers}
     print(json.dumps(result, indent=1))
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(result, indent=1) + "\n")

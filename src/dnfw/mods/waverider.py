@@ -27,6 +27,9 @@ Two sections, both from committed data:
   bytes are checked first. Four clean in-image caves, nothing appended.
 - **The DSP boot stream (7):** `dnfw.waverider.dsp.section7`, from the
   committed SHARC objects. It refuses a section 7 that is not stock.
+- **Its own SYN pages (Milestone 7):** `dnfw.waverider.pages`, one platform `CODE`
+  chunk in RAM (`dnfw.mods.platform`): a Waverider track shows two pages of its own,
+  labelled TUNE / POS / TBL where they work and empty where they do not yet.
 
 ## A sound or project saved with a Waverider track
 
@@ -40,7 +43,7 @@ from __future__ import annotations
 import json
 import pathlib
 
-from . import Extent, ModError, Result
+from . import RAM, Extent, ModError, Result, platform
 from ..waverider import dsp
 
 ID = "waverider"
@@ -53,8 +56,9 @@ BASE = 0x40000400
 SPEC = json.loads((pathlib.Path(__file__).with_name("waverider_code.json")).read_text())
 
 
-def extents(firmware=None) -> list[Extent]:
+def extents(firmware=None, area_length: int = 0) -> list[Extent]:
     out = [Extent(MAIN_OS, e["va"] - BASE, len(e["new"]) // 2, e["what"]) for e in SPEC["edits"]]
+    out += platform.extents(area_length)
     size = None
     if firmware is not None:
         section = firmware.container.find(DSP_STREAM)
@@ -66,6 +70,12 @@ def extents(firmware=None) -> list[Extent]:
                       "the DSP boot stream, rebuilt: Waverider's code, state and two "
                       "tables in L1 block 2, the entry jump, the machine lookup"))
     return out
+
+
+def ram() -> list[Extent]:
+    chunk = SPEC["chunk"]
+    return [Extent(RAM, chunk["load"], len(bytes.fromhex(chunk["code"])),
+                   "Waverider's SYN pages: code, descriptors, labels (M7)")]
 
 
 def _main_os(original: bytes) -> bytes:
@@ -97,12 +107,17 @@ def apply(firmware) -> Result:
     main_os, stream = cf.unpack(), ds.unpack()
     if main_os is None or stream is None:
         raise ModError("MAIN OS or the DSP boot stream did not depack")
+    main_os, others = platform.split(main_os)
     try:
         section7 = dsp.section7(stream)
     except dsp.DspError as exc:
         raise ModError(f"the DSP boot stream: {exc}") from exc
-    return Result(payloads={MAIN_OS: _main_os(main_os), DSP_STREAM: section7},
-                  extents=extents(firmware),
+    chunk = SPEC["chunk"]
+    code = platform.area.CodeChunk(chunk["load"], bytes.fromhex(chunk["code"])).pack()
+    content = platform.join(_main_os(main_os), others + [(platform.area.CODE, code)])
+    area_length = len(content) - platform.STOCK_LENGTH
+    return Result(payloads={MAIN_OS: content, DSP_STREAM: section7},
+                  extents=extents(firmware, area_length),
                   notes=[f"MACHINE SEL offers {SPEC['names'][0].upper()} after SWARMER "
                          f"(type {SPEC['new_type']}; WaveTone's pages)",
                          f"{len(SPEC['edits'])} edits in section 3, nothing appended; "

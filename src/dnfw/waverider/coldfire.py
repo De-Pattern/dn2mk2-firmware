@@ -39,6 +39,8 @@ stock bytes it replaces, and every cave must be zero, with a 4-byte margin.
 from __future__ import annotations
 
 import struct
+
+from . import pages
 from dataclasses import dataclass
 
 BASE = 0x40000400
@@ -310,11 +312,21 @@ MODEL_TRACK_TYPE_JMP = 0x40031394      # jmp 0x4004b7f2, the tail of 0x4003134e
 # SYN page showed in the emulator before this. Type 5 reads WaveTone's rows.
 CANON_ARG_SITES = (
     (0x400C248E, "overview descriptor(type): 0x42432b24 + 44 type"),
-    (0x400C24D2, "SYN page count(type): 0x42432ad4[type].count"),
 )
+# Milestone 7 (dnfw.waverider.pages): the page count and the page reader answer a
+# Waverider track with its own two pages, and the SYN page's label fetch gives it
+# its own labels. Everything else behaves as the M5 shims did.
+COUNT_SITE = 0x400C24D2                 # SYN page count(type): 0x42432ad4[type].count
+LABEL_SITE = 0x40064622                 # the SYN page's jsr getShortName(this, id)
+LABEL_STOCK = bytes.fromhex("4eb9400372da")
 CANON_ARG_STOCK = bytes.fromhex("7204202f0004")
 PAGE_SITE = 0x400C24F2                  # 0x400c24ee: after `move.l %d2,-(%sp) ; moveq #4,%d2`
 PAGE_STOCK = bytes.fromhex("222f0008202f000c")
+# the SYN page draw (0x40018118), after the grid of a type-1 page: page id 7 (WaveTone's
+# OSC page) goes on to draw WaveTone's two oscillator icons at B and F from WAV1/TBL1
+# and WAV2/TBL2. A Waverider track is type 1 to it: wr_icons takes the page id test.
+ICON_SITE = 0x4001821E                  # moveq #7,%d0 ; cmp.l %d3,%d0 ; bne.w 0x400182c6
+ICON_STOCK = bytes.fromhex("7007b083660000a2")
 
 
 def _cave_free(content: bytes, cave: tuple[int, int]) -> None:
@@ -329,6 +341,13 @@ def compose(stock: bytes, assemble) -> dict:
     for va, want, why in GUARDS:
         _need(content, va, bytes.fromhex(want), why)
     edits: list[Edit] = []
+
+    # Milestone 7: Waverider's pages, as one platform CODE chunk in RAM (pages.LOAD)
+    ptable = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in pages.LABELS_OUT) + "\n"
+    pblob = assemble(pages.source() + ptable, base=pages.LOAD)
+    chunk = pblob[:-4 * len(pages.LABELS_OUT)]
+    playout = dict(zip(pages.LABELS_OUT, struct.unpack(f">{len(pages.LABELS_OUT)}I",
+                                                       pblob[-4 * len(pages.LABELS_OUT):])))
 
     def edit(va: int, new: bytes, what: str, stock_bytes: bytes | None = None) -> None:
         old = _read(content, va, len(new)) if stock_bytes is None else stock_bytes
@@ -427,8 +446,16 @@ def compose(stock: bytes, assemble) -> dict:
     for site, what in CANON_ARG_SITES:
         edit(site, bytes.fromhex("4eb9") + _long(layout["canon_arg"]),
              f"{what}: type 5 reads WaveTone's row", CANON_ARG_STOCK)
-    edit(PAGE_SITE, bytes.fromhex("4eb9") + _long(layout["canon_page"]) + bytes.fromhex("4e71"),
-         "SYN page(type, n): 0x42432ad4[type].pages[n]; type 5 reads WaveTone's", PAGE_STOCK)
+    edit(COUNT_SITE, bytes.fromhex("4eb9") + _long(playout["wr_count"]),
+         "SYN page count(type): 2 for a Waverider track (M7); otherwise type 5 reads WaveTone's",
+         CANON_ARG_STOCK)
+    edit(PAGE_SITE, bytes.fromhex("4eb9") + _long(playout["wr_page"]) + bytes.fromhex("4e71"),
+         "SYN page(type, n): Waverider's own pages for a Waverider track (M7); otherwise "
+         "type 5 reads WaveTone's", PAGE_STOCK)
+    edit(LABEL_SITE, bytes.fromhex("4eb9") + _long(playout["wr_label"]),
+         "the SYN page's label fetch: Waverider's labels for a Waverider track (M7)", LABEL_STOCK)
+    edit(ICON_SITE, bytes.fromhex("4eb9") + _long(playout["wr_icons"]) + bytes.fromhex("4e71"),
+         "the SYN page draw: no WaveTone oscillator icons on a Waverider track (M7)", ICON_STOCK)
     _need(content, PAGE_SITE - 4, bytes.fromhex("2f027404"), "0x400c24ee's push of d2 and its bound")
 
     # 7. getMachineType(track): WaveTone for the UI, the real type where it is identity
@@ -451,4 +478,6 @@ def compose(stock: bytes, assemble) -> dict:
     edit(VALID_SITE, bytes.fromhex("4eb9") + _long(layout["canon_valid"]),
          "the sound's parameter-ownership test: type 5 owns WaveTone's machine parameters",
          VALID_STOCK)
-    return {"content": bytes(content), "edits": edits, "layout": layout}
+    layout.update(playout)
+    return {"content": bytes(content), "edits": edits, "layout": layout,
+            "chunk": {"load": pages.LOAD, "code": chunk}}
