@@ -42,19 +42,20 @@ def built(stock7) -> bytes:
 
 def test_committed_objects_match_their_sources():
     spec = json.loads(dsp.CODE.read_text(encoding="utf-8"))
-    for key, name in (("reader", "reader_m5"), ("machine5_live", "machine5_live")):
+    for key, name in (("reader", "reader_m5"), ("machine5_live", "machine5_live"), ("idle_load", "idle_load")):
         src = (SHARC / f"{name}.asm").read_bytes().replace(b"\r\n", b"\n")
         assert spec[key]["source_sha256"] == hashlib.sha256(src).hexdigest(), name
         csrc = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         assert csrc["object_parcels_be"] == spec[key]["object_parcels_be"], name
     assert spec["entry_jump"]["source"] == "JUMP 0x16ed00;"
+    assert spec["idle_jump"]["source"] == "JUMP 0x16f500;" and spec["idle_jump"]["at_sw"] == "0xb88abb"
 
 
 def test_our_sources_avoid_dag1_m0_m3_in_memory_accesses():
     """No DM(..M0..M3..) access and no pre-modify read outside a DO loop (the two
     forms selas and selmap disagree on; docs/waverider-m5-dsp.md)."""
     import re
-    for name in ("reader_m5", "machine5_live"):
+    for name in ("reader_m5", "machine5_live", "idle_load"):
         in_loop = False
         for line in (SHARC / f"{name}.asm").read_text().splitlines():
             code = line.split("//", 1)[0].strip().upper()
@@ -98,11 +99,15 @@ def test_loaded_image_holds_our_bytes(built):
         assert bootstream.read_span(built, at, len(payload)) == payload, what
 
 
-def test_the_two_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
+def test_the_three_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     entry = bootstream.read_span(built, dsp.sw_to_load(dsp.ENTRY_SW), 8)
     assert entry == bytes.fromhex("3e06160000ed0100")          # jump 0x16ed00 ; nop
     lookup = struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32))
     assert lookup == (0, 1, 2, 3, 4, 5, 0, 0)
+    # the idle loop's back edge, jump (pc,-0x10) at sw 0xb88abb in L2, becomes JUMP 0x16f500
+    site = dsp.l2_sw_to_load(dsp.IDLE_SITE_SW)
+    assert bootstream.read_span(stock7, site, 6) == bytes.fromhex("3e07ff00f0ff")
+    assert bootstream.read_span(built, site, 6) == bytes.fromhex("3e061600" "00f5")
     # the clamp min(R2, 4) stays stock: its R0 = 0x4 parcel pair at sw 0x1c294a
     clamp = dsp.sw_to_load(0x1C294A)
     assert bootstream.read_span(built, clamp, 4) == bootstream.read_span(stock7, clamp, 4) \
@@ -115,7 +120,9 @@ def test_the_two_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     diff = [k for k in range(final.offset) if head[k] != stock7[k]]
     entry_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.ENTRY_SW), 8)[0][0]
     look_off = bootstream.spans(stock7, dsp.dm_to_load(dsp.LOOKUP_DM + 20), 4)[0][0]
-    allowed = set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 4))
+    idle_off = bootstream.spans(stock7, dsp.l2_sw_to_load(dsp.IDLE_SITE_SW), 6)[0][0]
+    allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 4))
+               | set(range(idle_off, idle_off + 6)))
     assert diff and set(diff) <= allowed
 
 
@@ -205,9 +212,33 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     assert at[0] == dsp.REGION[0] and ends[-1] == dsp.REGION[1]
     assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
     obj = dsp.objects()
-    for (what, _, payload), code in zip(sp[:2], (obj["reader"], obj["machine5_live"])):
+    code_spans = [x for x in sp if "asm" in x[0]]
+    assert len(code_spans) == 3
+    for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["machine5_live"], obj["idle_load"])):
         assert payload[:len(code)] == code
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
+
+
+def test_the_idle_stub_is_placed_and_returns_where_its_source_says():
+    """idle_load.asm: its skip lands on wr_idle_out, it returns to the idle loop's top,
+    and its variables sit in the state block's free tail, clear of the render loop's."""
+    spec = json.loads((SHARC / "idle_load.json").read_text(encoding="utf-8"))
+    assert int(spec["load_sw"], 16) == dsp.IDLE_SW == 0x16F500
+    be = bytes.fromhex(spec["object_parcels_be"])
+    offs = spec["instruction_offsets"]
+    src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "idle_load.asm").read_text().splitlines()]
+    src = [c for c in src if c and not c.startswith(".") and not c.endswith(":")]
+    at = {c: dsp.IDLE_SW + o // 2 for c, o in zip(src, offs)}
+    assert at["R8 = DM(0x2de100);"] == 0x16F536                   # wr_idle_out.
+    assert be[offs[src.index("IF GE JUMP 0x16f536;")]:][:6].hex() == "06220016f536"
+    assert be[offs[-1]:].hex() == "063e00b88aab" and dsp.IDLE_RETURN_SW == 0xB88AAB
+    # its DM: 0x2de100..0x2de117, after the 16 reader blocks (to 0x2de100) and inside the state block
+    assert dsp.READER_BLOCKS_DM + 16 * dsp.READER_BLOCK_BYTES == dsp.IDLE_STATE_DM
+    assert dsp.IDLE_STATE_DM + 0x18 <= dsp.STATE_DM + dsp.STATE_BYTES == dsp.INC_TABLE_DM
+    stores = {c for c in src if c.startswith("DM(")}
+    assert stores <= {"DM(0x2de100) = R8;", "DM(0x2de104) = R9;", "DM(0x2de108) = R10;",
+                      "DM(0x2de114) = R9;", "DM(0x2de10c) = R8;", "DM(0x2de110) = R9;",
+                      "DM(0x2c49d4) = R9;", "DM(0x2c59d4) = R9;"}
 
 
 def test_the_reader_returns_in_the_firmwares_shape():

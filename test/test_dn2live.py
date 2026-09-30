@@ -464,8 +464,9 @@ def test_the_sharc_watch_reads_its_cycles_and_the_compressor():
     reply = bytearray(0x18)
     reply[0:4] = bytes.fromhex("000658a6")                  # silent, as read on the instrument
     struct.pack_into(">H", reply, 0x16, 0x1A87)
+    reply[4:8] = bytes.fromhex("0001d8c0")                  # an idle total, as the stub leaves it
     v = {x["name"]: x["word"] for x in w.decode({0x800053A4: bytes(reply)})}
-    assert v == {"SHARC_CYCLES": 415910, "COMP_GR": 0x1A87}
+    assert v == {"SHARC_CYCLES": 415910, "SHARC_IDLE": 0x1D8C0, "COMP_GR": 0x1A87}
 
 
 def test_stack_high_water():

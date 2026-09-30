@@ -1,6 +1,9 @@
 """Benchmark the SHARC: its per-frame cycle count, read off the reply it sends the ColdFire.
 
     python tools/dn2sharc_load.py LABEL [--n 100] [--csv out/sharc-load.csv]
+    python tools/dn2sharc_load.py LABEL --idle [--seconds 1] [--n 10]
+                                  the SHARC's whole load, from its idle time (a build
+                                  with idle_load.asm: dnfw.waverider.dsp, patch 4)
 
     e.g.  silent                  first, with nothing sounding: the baseline
           waverider-1             one held note on a Waverider track
@@ -21,6 +24,17 @@ the median, the 5th and 95th percentile, the extremes, and the median's
 difference from the CSV's latest `silent` row: the cost of what LABEL added.
 A benchmark wants the same track, the same note and no overdrive or FX, so
 only the synth differs.
+
+**Word 0 misleads** around a Waverider track (docs/sharc-load.md, the benchmark):
+it is one handler's span, not the frame. **`--idle`** reads the whole load instead.
+A build with `idle_load.asm` keeps the idle task's own cycles, cumulative, in reply
+word 1 (0x800053a8 on the ColdFire). Two readings SECONDS apart, each with the
+ColdFire's frame count from STATS, give
+
+    load = 1 - d(idle) / (d(frames) * FRAME_CYCLES)
+
+one row per interval, N intervals. A build without the stub leaves word 1 at 0 (or a
+stale value) and the tool says so.
 """
 from __future__ import annotations
 
@@ -35,6 +49,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 REPLY = 0x800053A4
+IDLE_WORD = REPLY + 4                 # reply word 1: idle_load.asm's cumulative idle cycles
 FRAME_CYCLES = 1_000_000_000 / 1500   # the core's 1 GHz (docs/sharc-load.md, the clock) per frame
 COLUMNS = ("when", "label", "n", "median", "p5", "p95", "min", "max", "over_silent")
 
@@ -48,6 +63,15 @@ def summary(values: list[int]) -> dict:
     v = sorted(values)
     at = lambda q: v[min(len(v) - 1, int(q * len(v)))]
     return {"n": len(v), "median": at(0.5), "p5": at(0.05), "p95": at(0.95), "min": v[0], "max": v[-1]}
+
+
+def load_from_idle(a: tuple[int, int], b: tuple[int, int]) -> float | None:
+    """Two (idle total, frames) readings -> the SHARC's load, 0..1; None if no frame passed."""
+    d_idle = (b[0] - a[0]) & 0xFFFFFFFF
+    d_frames = (b[1] - a[1]) & 0xFFFFFFFF
+    if not d_frames:
+        return None
+    return 1.0 - d_idle / (d_frames * FRAME_CYCLES)
 
 
 def baseline(path: pathlib.Path) -> int | None:
@@ -75,10 +99,17 @@ def main(argv=None) -> int:
     p.add_argument("--n", type=int, default=100)
     p.add_argument("--csv", type=pathlib.Path, default=HERE.parent / "out" / "sharc-load.csv")
     p.add_argument("--port", default="Digitone II")
+    p.add_argument("--idle", action="store_true", help="the whole load, from the idle stub's word 1")
+    p.add_argument("--seconds", type=float, default=1.0)
     a = p.parse_args(argv)
     import dn2probe as dp
     import winmidi
     port = winmidi.Port(a.port, None, None)
+    if a.idle:
+        try:
+            return idle_main(dp, dp.Probe(port), a)
+        finally:
+            port.close()
     try:
         pr = dp.Probe(port)
         values = []
@@ -97,6 +128,34 @@ def main(argv=None) -> int:
           % (a.label, s["median"], 100 * s["median"] / FRAME_CYCLES, s["p5"], s["p95"],
              s["min"], s["max"], s["n"], extra))
     print("  appended to", a.csv)
+    return 0
+
+
+def idle_main(dp, pr, a) -> int:
+    def reading():
+        idle = cycles(dp.decode_peek(pr.call(dp.req_peek, IDLE_WORD, 4))["data"])
+        return idle, dp.decode_stats(pr.call(dp.req_stats))["frames"]
+    prev, loads = reading(), []
+    for _ in range(a.n if a.n != 100 else 10):
+        time.sleep(a.seconds)
+        cur = reading()
+        if cur[0] == prev[0]:
+            print("  reply word 1 did not move: this build has no idle stub, or the SHARC never idled")
+            return 1
+        v = load_from_idle(prev, cur)
+        if v is not None:
+            loads.append(v)
+            print("  %-16s SHARC load %5.1f %%   (idle %d cycles over %d frames)"
+                  % (a.label, 100 * v, (cur[0] - prev[0]) & 0xFFFFFFFF, (cur[1] - prev[1]) & 0xFFFFFFFF))
+        prev = cur
+    loads.sort()
+    med = loads[len(loads) // 2]
+    append(a.csv.with_name("sharc-idle-load.csv"), {"when": time.strftime("%Y-%m-%d %H:%M:%S"),
+           "label": a.label, "n": len(loads), "median": round(100 * med, 2), "p5": round(100 * loads[0], 2),
+           "p95": round(100 * loads[-1], 2), "min": round(100 * loads[0], 2), "max": round(100 * loads[-1], 2),
+           "over_silent": ""})
+    print("%-16s SHARC load median %.1f %% (%.1f..%.1f, %d intervals)"
+          % (a.label, 100 * med, 100 * loads[0], 100 * loads[-1], len(loads)))
     return 0
 
 
