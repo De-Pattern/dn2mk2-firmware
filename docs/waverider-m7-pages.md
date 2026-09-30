@@ -1,6 +1,6 @@
-# Waverider M7: its own SYN pages (design in progress)
+# Waverider M7 and M8: its own SYN pages, and its wave
 
-**Goal (owner, 2026-10-01).** A Waverider track gets its own two SYN pages, laid out from the "Wavefinder on Digitone II" mockup but with our own names:
+**Goal (owner, 2026-10-01).** A Waverider track gets its own two SYN pages, laid out from the "Wavefinder on Digitone II" mockup but with our own names, and structured around a picture of the wave:
 
 | | A | B | C | D | E | F | G | H |
 |---|---|---|---|---|---|---|---|---|
@@ -8,11 +8,28 @@
 | page 2, OSC 2 | DETN | LEV | POS | TBL | RATE | MPOS | MLEV | MOVE |
 
 - **Header:** the machine name reads `Waverider`.
-- **Controls not yet working show `-`.** In M7 only TUNE, POS and TBL work, as in M6.
-- **Tables:** TBL picks from a pool loaded from the +Drive (`docs/waverider-tables.md`), so no part of M7 assumes two baked tables.
+- **Controls not yet working show `-`** (an empty box). In M7 only TUNE, POS and TBL work, as in M6.
+- **Tables:** TBL picks from a pool loaded from the +Drive (`docs/waverider-tables.md`), so no part of M7 assumes two baked tables. M8's display copy of the tables is the one piece that does, and it moves with them.
 - **M8** adds the waveform display. **M9** adds LEV and osc 2. **M10** adds the MOVE modulator.
 
-Grades: **[D]** read statically, **[E]** measured in an emulator, **[O]** open.
+Grades: **[D]** read statically, **[E]** measured in an emulator, **[H]** on the instrument, **[O]** open.
+
+## What is built
+
+| | where | what |
+|---|---|---|
+| page count | `0x400c24d2` → `wr_count` | 2 for a Waverider track; otherwise M5's `canon_arg` |
+| page descriptor | `0x400c24f2` → `wr_page` | our descriptor 0..1, or the stock empty page past them; otherwise M5's `canon_page` |
+| labels | `0x40064622` → `wr_label` | TUNE / POS / TBL for ids 238 / 239 / 247 on a Waverider track; everything else is the stock `getShortName` by a tail jump |
+| WaveTone's icons, and the wave | `0x4001821e` → `wr_icons` | skip WaveTone's oscillator icons on a Waverider track; on its first page, draw `wr_wave` instead (M8) |
+
+All of it is one platform `CODE` chunk at `0x4670c000` (`dnfw.waverider.pages`, `dnfw.waverider.wave`), about 1.7 KB. "Is this a Waverider track?" is `is_wr`: the **active track**'s sound (`[0x800052a0] + 52 + 1163 t`, `t` = the byte `0x42431a6c`) has 5 at `+0xDE`. The readers themselves are always handed type 1, because M5 reports 5 as 1 to the UI.
+
+**Emulator [E] (2026-10-01, `scripts/emu_waverider_menu.py`, snapshot `wr-ui800M`):**
+- a Waverider track shows `Waverider (1/2)` and `(2/2)`; page 1 is TUNE, an empty box, POS (the wave), TBL, then four empty boxes; page 2 is eight empty boxes;
+- POS moves the wave: table 0 (PRIM) goes from the saw at 0 to the sine at 120; table 1 (HARM) goes from the fundamental to the 16th partial; the marker under the wave follows POS;
+- control: a WaveTone track on the same build keeps its three pages, its labels and its icons;
+- M7e and M8b boot from reset and draw their UI (`scripts/emu_boot_check.py`).
 
 ## How the SYN pages are found (DN2 1.11) [D]
 
@@ -20,33 +37,48 @@ Grades: **[D]** read statically, **[E]** measured in an emulator, **[O]** open.
   - `+0`: the page count;
   - `+4..+0xf`: a `std::vector` of 44-byte page descriptors (begin, end, capacity).
 
-  The entries sit 16 bytes apart, so a sixth would land on `0x42432b24`, which is the start of the next table. **The table cannot grow in place.**
+  The entries sit 16 bytes apart, so a sixth would land on `0x42432b24`, which is the start of the next table. **The table cannot grow in place.** That is why the readers are hooked rather than the table extended.
 - **The readers:**
   - `0x400c24d2(type)` returns the count; it answers 1 above type 4;
   - `0x400c24ee(type, page)` returns `begin + 44 * page`, or the empty page `0x42432bd4` above type 4 or past the count;
-  - `0x400c248e(type)` returns a second per-machine descriptor, `0x42432b24 + 44 * type` (not yet identified).
+  - `0x400c248e(type)` returns an overview descriptor, `0x42432b24 + 44 * type`: every entry 0, titles only. It keeps M5's `canon_arg`.
 
   Their callers are at `0x40016856`, `0x400168e6`, `0x4001696a`, `0x40017422`, `0x400177e8`, `0x4003e6fa`, `0x40045cdc`, `0x40046120`, `0x4005c4ee` and `0x40064ece`.
-- **The initializer** (around `0x400ca800..0x400cad60`) builds each machine's descriptors on the stack and assigns the vector (`jsr %a4@` with `pea` of the entry's `+4`). **WaveTone (type 1) has 3 pages** (`moveq #3; move.l d0,0x42432ae4` at `0x400caa4a`):
+- **A descriptor** is `{std::string title, std::string subtitle, 8 record ids, tag 10}`. The page view reads id `n` at `+8 + 4n` (`0x4001683a`, the view's `vtable+188`). An id of 0 draws the dotted empty box (`0x446452a8`, blitted from `0x4001747e`) [E].
+- **The strings** are GCC's old-ABI copy-on-write `std::string`: the object is a pointer to the characters, with `{length, capacity, reference count}` in the 12 bytes before them. A live WaveTone title reads `{7, 7, 0}` + `DN VA 1` [E]. Ours carry a reference count of -1 (unshareable): a copy clones it and never shares it. With a count of 0, the last copy's release would free our static chunk.
+- **The initializer** (around `0x400ca800..0x400cad60`) builds each machine's descriptors on the stack and assigns the vector. **WaveTone (type 1) has 3 pages** (`moveq #3; move.l d0,0x42432ae4` at `0x400caa4a`):
 
   | page | title | subtitle | entries (record ids) | tag |
   |---|---|---|---|---|
   | 1 | `DN VA 1` (`0x4021a667`) | `WaveTone` (`0x4021a66f`) | 238-245 | 10 |
   | 2 | `DN VA 2` (`0x4021a678`) | `WaveTone` | 246-252 and one empty entry | 10 |
-  | 3 | `DN VA 3` (`0x4021a680`) | `WaveTone` | 253-257, 2, 3, 4 (to be re-read) | 10 |
+  | 3 | `DN VA 3` (`0x4021a680`) | `WaveTone` | 253+ | 10 |
 
-  Page 3's list and each entry's position are to be re-read from a live descriptor. The `-16..-11` byte moves are 240..245 once combined with the upper bytes of the register already loaded.
-- **Today a type-5 track gets type 1's pages,** because `getMachineType` `0x4004b7f2` reports 5 as 1 (`docs/machine-list.md`, Milestone 5, rows 7-8).
+- **The header** shows the subtitle and the page number (`Waverider (1/2)`), not the title [E].
+
+## The SYN page draw, and WaveTone's icons [D][E]
+
+`0x40018118` draws a SYN page. It reads the type (`0x4004b7f2`) and a page id `d3` (the view's `vtable+136`), then branches:
+- **type 1, page id 9** (WaveTone page 3): `0x400175e4`, the grid variant for ids 253+;
+- **type 1, otherwise:** the standard grid `0x40017428`. Then, **if the page id is 7** (WaveTone's OSC page), it draws **WaveTone's two oscillator icons**:
+  - `0x40016cee(this, canvas, col 1, row 0, value(WAV1 239), value(TBL1 247), selected)` at B;
+  - the same with WAV2 243 and TBL2 251 at F.
+
+  Each icon is a frame of a sprite sheet in RAM (`0x4464752c` for table 0, `0x44647150` otherwise), picked by the WAV value over `0x7800`.
+
+A Waverider track is type 1 to this draw, and its first page is page id 7 as well. So until `wr_icons`, **WaveTone's icons were drawn on a Waverider page at B and F, whatever our descriptor said** [E]. The WAV1 record itself draws no widget in its cell, because WaveTone always left that to the overlay. That is why POS at C first showed a label over nothing, and it is where M8 draws.
+
+**Found by:** logging the page view's id reads (`--regs-at 0x4001746a --regs-last 16`). The last draws touched only cells A and D, so the B/F pixels had to come from something else. Then a panel-buffer write watch on cell B after the page had settled (`--panel-writers 50,16,67,27` with the `reset-trace` step) showed a second blit into the cell after the empty box, returning to `0x40016d52`. Its only caller is `0x40018246`.
 
 ## The records WaveTone's pages name [D]
 
 The parameter table is at `0x401f7f94`: 321 records of 60 bytes (`+0x00` page, `+0x04` slot, `+0x28` long name, `+0x30` short name, `+0x34` formatter).
 
-| id | short | slot | long name | proposed Waverider use |
+| id | short | slot | long name | Waverider use |
 |---|---|---|---|---|
-| 238 | TUN1 | 25 | Osc1 Tune | **TUNE** (osc 1) |
-| 239 | WAV1 | 26 | Osc1 Waveform | **POS** (osc 1) |
-| 247 | TBL1 | 27 | Osc1 Wave Table | **TBL** (osc 1) |
+| 238 | TUN1 | 25 | Osc1 Tune | **TUNE** (osc 1), M7 |
+| 239 | WAV1 | 26 | Osc1 Waveform | **POS** (osc 1), M7 |
+| 247 | TBL1 | 27 | Osc1 Wave Table | **TBL** (osc 1), M7 |
 | 241 | LEV1 | 30 | Osc1 Level | LEV (osc 1) |
 | 240 | PD1 | 29 | Osc1 Phase Dist | RATE (osc 1) |
 | 246 | OFS1 | 28 | Osc1 Lin Offset | MPOS (osc 1) |
@@ -63,38 +95,36 @@ The parameter table is at `0x401f7f94`: 321 records of 60 bytes (`+0x00` page, `
 
 The storage slots are the sound's parameters 25..40, which the frame already carries to the SHARC (`dnfw.waverider.frame`). So every control keeps a real home, and M9/M10 read them from the frame, as TUN1/WAV1/TBL1 are read today.
 
-## Where the new labels come from: three options
+## Where the labels come from: the options weighed
 
 The table cannot grow in place: new ids 321+ need the table relocated and its 56 base references repointed (`docs/lfo4-feasibility.md`). Its only dead records, the 10 `ERR` ones plus id 0, are what the LFO4 mod repurposes.
 
 | | how | cost | effect on the rest |
 |---|---|---|---|
-| **A. dead ERR records** | copy 238/239/247 into ERR ids | small | **collides with LFO4**, and only 10 exist (Waverider needs about 16) |
-| **B. relocate the table** | move it to the platform's appended area with spare records, repoint 56 references | large | clean; could be a shared platform service LFO4 uses too |
-| **C. hook the short-name lookup** | keep WaveTone's records; return our label when the record belongs to a Waverider track | small | p-locks, LFO destinations, CC, SAVE/LOAD unchanged (the records are WaveTone's own) |
+| A. dead ERR records | copy 238/239/247 into ERR ids | small | **collides with LFO4**, and only 10 exist (Waverider needs about 16) |
+| B. relocate the table | move it to the platform's appended area with spare records, repoint 56 references | large | clean; could be a shared platform service LFO4 uses too |
+| **C. hook the SYN page's label fetch (chosen)** | keep WaveTone's records; return our label on a Waverider track | small | p-locks, LFO destinations, CC, SAVE/LOAD unchanged (the records are WaveTone's own) |
 
-**Option C is the likely choice, pending two checks [O]:**
-1. **Does the SYN page draw its labels through `getShortName`** (`0x400372da(this, id)`: returns `record + 0x30`, the id bounded to 321, `this` unused)? It has two direct callers:
-   - `0x40016adc` passes the object returned by a `vtable+196` call;
-   - `0x40064622` passes `%a4`.
+**C, as built [E]:** `getShortName` `0x400372da(this, id)` returns `record + 0x30`, and it is the only reader of `+0x30` measured in the emulator (`--label-log`). The SYN page calls it from `0x40064622`, and its `this` is not a sound. So the hook finds the track itself (`is_wr`, the active track) and is placed at the SYN page's call, not in `getShortName`. That also leaves lfowaves' DISP record at `0x400372da` alone.
 
-   The page view may instead read `+0x30` directly. The lfowaves mod already hooks `0x400372da` (a DISP record).
-2. **Does the hook have the track's raw machine type in reach?** Either `this` is the track's sound (then `sound+0xDE` is 5), or it can find the current track.
+**Not yet relabelled:** the header's parameter line (`Osc1 Waveform=20` while POS turns) is the record's long name, `+0x28`. A later milestone hooks that, or relabels the long names with the same test.
 
-Both need the ColdFire emulator on the SYN page of a type-5 track (`scripts/emu_waverider_menu.py`, the `boot400M` snapshot with the build patched in). A hook shared with lfowaves at `0x400372da` needs the platform's hook chaining (mod platform Stage 3) or a different site.
+## M8: the wave [E]
 
-## The page structure, whichever option labels it
+`dnfw.waverider.wave`. `wr_icons` calls `wr_wave(this, canvas)` on Waverider's first page (page id 7), in the cell WaveTone's WAV1 overlay used to own (C, x 77..94):
+- **the wave:** the frame the SHARC reader plays for the current TBL (`TBL1 >> 8`) and POS (`min(WAV1, 0x7800)`), interpolated between the two frames either side as the reader does, in 16 columns (x 78..93, y 39..51);
+- **the bar:** a dotted line at y 35 and a 3-pixel marker at POS.
 
-- **Our own entry for type 5:** a count of 2, and a descriptor array in the platform's data area (static; nothing frees it):
-  - page 1: `{title, "Waverider", 238, 0, 239, 247, 0, 0, 0, 0, 10}`, i.e. TUNE, LEV (`-` until M9), POS, TBL, then four `-`;
-  - page 2: all entries 0, until M9.
-- **The readers:** `0x400c24d2` and `0x400c24ee` (and `0x400c248e`, once identified) answer type 5 from our entry. Their callers must pass the raw type 5, the way M5 sent five callers to the raw getter.
+Coordinates are the canvas's own: y counts up from the bottom, as the page's blits do (cell row 0 spans y 34..51). Values come from the page's value getter `0x4006538e(this, id, &flag)`, the call WaveTone's icons use; pixels come from `setPixel` `0x40113b90(canvas, x, y, on)`.
 
-**Still to settle [O]:**
-- that an entry of 0 draws as an empty box on the DN2 (it does on the DT2's ONESHOT page);
-- that a page whose eight entries are all empty is allowed;
-- where the subtitle is drawn from.
+**A column is a span, not a point.** The first cut sampled one point per column. The overtone table's 16th partial has 32 points a cycle, so every sample landed on a zero crossing and POS 120 drew a flat line [E]. Each column now draws the minimum to the maximum the frame covers there, joined to its neighbour, as a sample editor's overview does. The 16th partial is a solid band, which is what 16 cycles in 16 pixels look like. The data is 2 tables × 16 frames × (16 minima + 16 maxima) signed bytes = 1 KB.
 
-## Next
+**Closed paths (kept as signals):**
+- *The page titles drive the icons:* disproven. Our own titles gave the same icons; the icons come from the page id.
+- *The overview table `0x42432b24` drives the icons:* disproven; its entries are all 0.
+- *A byte branch to skip the icons:* `bne.s` with displacement `0xa0` is **-96**, not +160. It jumped back into the dispatcher and the UI hung behind the MACHINE SEL menu (M7d, emulator). `wr_icons` now rewrites its own return address to the stock target `0x400182c6`, and the site is `jsr wr_icons ; nop`.
 
-Run a type-5 track to its SYN page in the ColdFire emulator. Trace which routine fetches each label and what `this` is; read the live WaveTone descriptors; check an entry-0 box. Then pick A, B or C, and write the edits.
+## Open [O]
+
+- The header's long name (`Osc1 Waveform`) still reads WaveTone's.
+- On the instrument: pages, labels, the wave following POS and TBL, and WaveTone untouched (the test plan entry).
