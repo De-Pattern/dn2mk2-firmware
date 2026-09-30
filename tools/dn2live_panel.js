@@ -59,6 +59,7 @@ const panel = el("section", { id: "probe" }, `
         <span class="lab">frame, track</span>
         <select id="p-w-track" aria-label="Track">${Array.from({ length: 16 }, (_, i) => `<option>${i + 1}</option>`).join("")}</select>
         <button id="p-w-frame" title="TUN1, WAV1, TBL1, TUN2 and the rest of the track's slot in the ColdFire → SHARC frame, with its note, level and machine">Watch frame</button>
+        <button id="p-w-sharc" title="The SHARC's cycles per frame (its load; docs/sharc-load.md) and the master compressor's gain reduction">Watch SHARC</button>
         <span class="sep"></span>
         <input type="text" id="p-w-spec" value="0x800068e4+32" aria-label="Watch spec"
           title="ADDR+LEN[:u8|u16|s16|u32], or frame:T">
@@ -234,7 +235,7 @@ function setWatches(names, max) {
   if (max) maxWatches = max;
   for (const n of Object.keys(watchData)) if (!names.includes(n)) { watchData[n].box.remove(); delete watchData[n]; }
   for (const n of names) if (!watchData[n]) watchData[n] = newWatch(n);
-  $("p-w-add").disabled = $("p-w-frame").disabled = names.length >= maxWatches;
+  $("p-w-add").disabled = $("p-w-frame").disabled = $("p-w-sharc").disabled = names.length >= maxWatches;
 }
 
 function newWatch(name) {
@@ -308,6 +309,7 @@ function watchCall(q) {
     onState(r);
   }).catch(() => {});
 }
+$("p-w-sharc").onclick = () => watchCall("add=sharc");
 $("p-w-frame").onclick = () => watchCall("add=" + encodeURIComponent("frame:" + $("p-w-track").value));
 $("p-w-add").onclick = () => watchCall("add=" + encodeURIComponent($("p-w-spec").value));
 $("p-w-spec").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("p-w-add").click(); } });

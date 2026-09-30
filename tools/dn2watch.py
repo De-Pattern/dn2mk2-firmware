@@ -11,6 +11,8 @@ A spec is one of:
                      machine header words, and the track slot's parameters 25..40
                      (TUN1 25, WAV1 26, TBL1 27, TUN2 31), at `dnfw.waverider.frame`'s
                      offsets. The frame is big-endian 16-bit words at those offsets.
+    sharc            the SHARC's reply at 0x800053a4: its per-frame cycle count (word 0,
+                     docs/sharc-load.md) and the master compressor's gain reduction (+0x16)
     ADDR+LEN[:FMT]   LEN bytes at ADDR as FMT words (u8, u16, s16, u32; u16 by default),
                      e.g. 0x800068e4+32 or 0x46700000+16:u32. Only what PEEK allows.
 
@@ -34,6 +36,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 from dnfw.waverider import frame as wrframe  # noqa: E402
 
 FRAME_ADDR = 0x80005E60
+REPLY_ADDR = 0x800053A4
 MAX_WATCHES = 8
 SPAN_GAP = 256                 # fields further apart are read by separate PEEKs (a round trip costs more than bytes)
 FORMATS = {"u8": ">B", "u16": ">H", "s16": ">h", "u32": ">I"}
@@ -129,8 +132,16 @@ def raw_watch(spec: str) -> Watch:
     return Watch(spec, tuple(fields), spans_of(fields))
 
 
+def sharc_watch() -> Watch:
+    """The SHARC's load and the compressor's gain reduction, from the reply it sends each frame."""
+    fields = [Field("SHARC_CYCLES", REPLY_ADDR, "u32"), Field("COMP_GR", REPLY_ADDR + 0x16)]
+    return Watch("sharc", tuple(fields), spans_of(fields))
+
+
 def parse(spec: str) -> Watch:
     spec = spec.strip()
+    if spec == "sharc":
+        return sharc_watch()
     if spec.startswith("frame:"):
         try:
             track = int(spec[6:])
