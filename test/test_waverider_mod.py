@@ -14,7 +14,7 @@ import struct
 import pytest
 
 from dnfw.mods import ModError, check_compatible
-from dnfw.mods import waverider
+from dnfw.mods import platform, waverider
 from dnfw.waverider import coldfire as CF
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -51,7 +51,10 @@ def long_at(content: bytes, va: int) -> int:
 
 def test_applies_to_both_sections(applied, dn2_111):
     assert set(applied.payloads) == {3, 7}
-    assert len(applied.payloads[3]) == len(dn2_111.container.find(3).unpack())
+    # MAIN OS: the stock image, plus the platform area carrying the M7 pages chunk
+    main, chunks = platform.split(applied.payloads[3])
+    assert len(main) == len(dn2_111.container.find(3).unpack())
+    assert [kind for kind, _ in chunks] == [platform.area.CODE]
     assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 

@@ -12,6 +12,9 @@ then answer with Waverider's pages and labels:
 - `wr_page`, entered by `jsr` from the page reader `0x400c24ee` at `0x400c24f2` (in
   place of M5's `canon_page`): our descriptor for pages 0-1, the stock empty page past
   them; otherwise exactly what `canon_page` does.
+- `wr_icons`, entered by `jsr` from the SYN page draw at `0x4001821e`: on a Waverider
+  track, WaveTone's oscillator icons (drawn at B and F from `WAV1`/`TBL1` and
+  `WAV2`/`TBL2` after the grid of page id 7) are skipped; otherwise the stock page-id test.
 - `wr_label`, entered by `jsr` from the SYN page's label fetch at `0x40064622` (in place
   of `jsr getShortName`): the record ids Waverider relabels get our labels; every
   other id, and every other track, goes to the stock `getShortName` `0x400372da`
@@ -29,10 +32,15 @@ place is an empty entry (0), drawn as an empty box, until its milestone.
 The code, the descriptors and the strings run from RAM as one platform `CODE` chunk at
 `LOAD` (`dnfw.mods.platform`): the caves Waverider already uses are full.
 
+Waverider's first page also draws its wave in cell C (`dnfw.waverider.wave`, M8),
+from `wr_icons`; its routine and tables are linked into the same chunk.
+
 This module is pure: it builds the source; `coldfire.compose` assembles and places it.
 """
 
 from __future__ import annotations
+
+from . import wave
 
 LOAD = 0x4670C000                 # RAM above BSS, clear of every declared range (docs/mods-compatibility.md)
 ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
@@ -43,8 +51,11 @@ GET_SHORT_NAME = 0x400372DA
 EMPTY_PAGE = 0x42432BD4           # the readers' own empty-page fallback
 TAG = 10                          # the tag every stock SYN descriptor ends with
 
-# WaveTone's page titles (DN2 1.11 strings), reused: they are page ids, not drawn text
-TITLES = (0x4021A667, 0x4021A678)  # "DN VA 1", "DN VA 2"
+# Waverider's own page titles (not drawn; the header shows the subtitle and the page
+# number). Our own strings, so no descriptor points into WaveTone's. The waveform icons
+# a Waverider page first showed at B and F did not come from the titles: they are the
+# SYN page draw's WaveTone OSC-page overlay (page id 7), which `wr_icons` skips.
+TITLES = ("WR 1", "WR 2")
 SUBTITLE = "Waverider"             # where WaveTone's say "WaveTone"
 
 # record id -> Waverider's label (the records stay WaveTone's: their slots are the
@@ -57,7 +68,20 @@ PAGES = (
     (0, 0, 0, 0, 0, 0, 0, 0),         # OSC 2: all to come (M9)
 )
 
-LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "descriptors")
+LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "descriptors")
+ICON_PAGE = 7                     # the SYN page draw's id for WaveTone's OSC page
+ICON_SKIP = 0x400182C6            # its branch target past the oscillator icons
+
+
+def _rep(label: str, text: str) -> str:
+    """A std::string's characters with the header the firmware's copy-on-write strings
+    keep in front of them (libstdc++'s old ABI: length, capacity, reference count; the
+    string object is a pointer to the characters). The descriptors' title and subtitle
+    are such strings (the initializer builds them with a string constructor, `jsr %a2@`
+    after `pea` of the text). Reference count -1 marks the string unshareable: a copy
+    clones it, and nothing ever frees this one."""
+    return (f"    .align 2\n    .long {len(text)}, {len(text)}, -1\n"
+            f'{label}: .asciz "{text}"')
 
 
 def source() -> str:
@@ -66,7 +90,7 @@ def source() -> str:
     strings = "\n".join(f'lab_{rid}: .asciz "{name}"' for rid, name in LABELS.items())
     pages = []
     for k, entries in enumerate(PAGES):
-        pages.append(f"    .long {TITLES[k]:#010x}, subtitle\n"
+        pages.append(f"    .long title_{k}, subtitle\n"
                      f"    .long {', '.join(str(e) for e in entries)}\n"
                      f"    .long {TAG}")
     page_data = "\n".join(pages)
@@ -155,13 +179,35 @@ wr_label:
     rts
 9:  jmp     {GET_SHORT_NAME:#010x}
 
+| -- the SYN page draw at 0x4001821e (`moveq #7 ; cmp.l %d3,%d0 ; bne.w` past the icons),
+| now `jsr` here and a nop. Back to the icons (0x40018226) when the stock test would draw
+| them: page id 7 in d3, and not a Waverider track. Otherwise the return address becomes
+| the stock branch target, past them. d0 is scratch there (the stock code loads it).
+wr_icons:
+    bsr.w   is_wr
+    tst.l   %d0
+    bne.s   3f
+    moveq   #{ICON_PAGE},%d0
+    cmp.l   %d3,%d0
+    beq.s   2f
+1:  move.l  #{ICON_SKIP:#010x},%sp@
+2:  rts
+| a Waverider track: its own wave where WaveTone's icons were (M8), on its first page
+3:  moveq   #{ICON_PAGE},%d0
+    cmp.l   %d3,%d0
+    bne.s   1b
+    bsr.w   wr_wave
+    bra.s   1b
+
     .align 2
 labels:
 {table}
     .long 0
 descriptors:
 {page_data}
-subtitle: .asciz "{SUBTITLE}"
+{_rep("subtitle", SUBTITLE)}
+{chr(10).join(_rep(f"title_{k}", t) for k, t in enumerate(TITLES))}
 {strings}
     .align 2
+{wave.source()}
 """
