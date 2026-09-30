@@ -18,10 +18,11 @@
 // It uses R8 and R9, saved to its own words. ASTAT is left as the type-5 loop leaves
 // it anyway (the loop compares before its first test).
 //
-// PLACEMENT IS FIXED: this code loads at PM sw 0x16f580 (L1 block 1, byte 0x2deb00).
+// PLACEMENT IS FIXED: this code loads at PM sw 0x16f600 (L1 block 1, byte 0x2dec00).
 //
 // DM (byte addresses, in the state block the build zero-fills):
 //   0x2de118  blocks, cumulative (mod 2^32)
+//   0x2de124  MARK: EMUCLK as this block passes (idle_load.asm splits busy time there)
 //   0x2de11c  save: R8;  0x2de120  save: R9
 //   0x2c49d8, 0x2c59d8  reply word 2 of the two reply pages
 
@@ -40,6 +41,8 @@ wr_count.:
       R8 = R8 OR R9;                    // halves swapped, as reply word 0
       DM(0x2c49d8) = R8;                // reply word 2, both pages
       DM(0x2c59d8) = R8;
+      R8 = EMUCLK;
+      DM(0x2de124) = R8;                // MARK
       R8 = DM(0x2de11c);
       R9 = DM(0x2de120);
       JUMP 0x16ed00;                    // on to the type-5 loop

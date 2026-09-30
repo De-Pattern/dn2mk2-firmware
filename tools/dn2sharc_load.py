@@ -36,7 +36,9 @@ ColdFire's frame count from STATS, give
 one row per interval, N intervals. A build without the stub leaves word 1 at 0 (or a
 stale value) and the tool says so. A build with `block_count.asm` also keeps the
 per-block routine's passes in reply word 2, printed as blocks per second of frames
-(1,500 would be one per frame); word 2 at 0 is shown as `--`.
+(1,500 would be one per frame); word 2 at 0 is shown as `--`. A build whose idle stub
+splits busy stretches at block_count.asm's MARK (reply words 3 and 4) also prints the
+busy time before the dispatch's splice, after it, and elsewhere, as shares of the frame.
 """
 from __future__ import annotations
 
@@ -53,6 +55,7 @@ sys.path.insert(0, str(HERE))
 REPLY = 0x800053A4
 IDLE_WORD = REPLY + 4                 # reply word 1: idle_load.asm's cumulative idle cycles
 BLOCKS_WORD = REPLY + 8               # reply word 2: block_count.asm's cumulative per-block passes
+# reply words 3, 4: idle_load.asm's busy time split at the dispatch's MARK (before / after it)
 FRAME_CYCLES = 1_000_000_000 / 1500   # the core's 1 GHz (docs/sharc-load.md, the clock) per frame
 COLUMNS = ("when", "label", "n", "median", "p5", "p95", "min", "max", "over_silent")
 
@@ -136,9 +139,9 @@ def main(argv=None) -> int:
 
 def idle_main(dp, pr, a) -> int:
     def reading():
-        data = dp.decode_peek(pr.call(dp.req_peek, IDLE_WORD, 8))["data"]
+        data = dp.decode_peek(pr.call(dp.req_peek, IDLE_WORD, 16))["data"]
         frames = dp.decode_stats(pr.call(dp.req_stats))["frames"]
-        return cycles(data[:4]), frames, cycles(data[4:8])
+        return cycles(data[:4]), frames, cycles(data[4:8]), cycles(data[8:12]), cycles(data[12:16])
     prev, loads = reading(), []
     for _ in range(a.n if a.n != 100 else 10):
         time.sleep(a.seconds)
@@ -152,8 +155,15 @@ def idle_main(dp, pr, a) -> int:
             frames = (cur[1] - prev[1]) & 0xFFFFFFFF
             blocks = (cur[2] - prev[2]) & 0xFFFFFFFF
             per = "--" if not cur[2] else "%.2f blocks/frame" % (blocks / frames)
-            print("  %-16s SHARC load %5.1f %%   (idle %d cycles over %d frames; %s)"
-                  % (a.label, 100 * v, (cur[0] - prev[0]) & 0xFFFFFFFF, frames, per))
+            split = ""
+            if cur[3] or cur[4]:
+                span = frames * FRAME_CYCLES
+                before = ((cur[3] - prev[3]) & 0xFFFFFFFF) / span
+                after = ((cur[4] - prev[4]) & 0xFFFFFFFF) / span
+                split = "; before %.1f %%, after %.1f %%, other %.1f %%" % (
+                    100 * before, 100 * after, 100 * (v - before - after))
+            print("  %-16s SHARC load %5.1f %%   (idle %d cycles over %d frames; %s%s)"
+                  % (a.label, 100 * v, (cur[0] - prev[0]) & 0xFFFFFFFF, frames, per, split))
         prev = cur
     loads.sort()
     med = loads[len(loads) // 2]

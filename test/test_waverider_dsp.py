@@ -48,7 +48,7 @@ def test_committed_objects_match_their_sources():
         assert spec[key]["source_sha256"] == hashlib.sha256(src).hexdigest(), name
         csrc = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         assert csrc["object_parcels_be"] == spec[key]["object_parcels_be"], name
-    assert spec["entry_jump"]["source"] == "JUMP 0x16f580;"
+    assert spec["entry_jump"]["source"] == "JUMP 0x16f600;"
     assert spec["idle_jump"]["source"] == "JUMP 0x16f500;" and spec["idle_jump"]["at_sw"] == "0xb88abb"
 
 
@@ -102,7 +102,7 @@ def test_loaded_image_holds_our_bytes(built):
 
 def test_the_three_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     entry = bootstream.read_span(built, dsp.sw_to_load(dsp.ENTRY_SW), 8)
-    assert entry == bytes.fromhex("3e06160080f50100")          # jump 0x16f580 (the block counter) ; nop
+    assert entry == bytes.fromhex("3e06160000f60100")          # jump 0x16f600 (the block counter) ; nop
     lookup = struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32))
     assert lookup == (0, 1, 2, 3, 4, 5, 0, 0)
     # the idle loop's back edge, jump (pc,-0x10) at sw 0xb88abb in L2, becomes JUMP 0x16f500
@@ -251,27 +251,30 @@ def test_the_idle_stub_is_placed_and_returns_where_its_source_says():
     src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "idle_load.asm").read_text().splitlines()]
     src = [c for c in src if c and not c.startswith(".") and not c.endswith(":")]
     at = {c: dsp.IDLE_SW + o // 2 for c, o in zip(src, offs)}
-    assert at["R8 = DM(0x2de100);"] == 0x16F536                   # wr_idle_out.
-    assert be[offs[src.index("IF GE JUMP 0x16f536;")]:][:6].hex() == "06220016f536"
+    assert at["R8 = DM(0x2de100);"] == 0x16F56F                   # wr_idle_out.
+    assert be[offs[src.index("IF GE JUMP 0x16f53d;")]:][:6].hex() == "06220016f53d"
+    assert at["R11 = DM(0x2de124);"] == 0x16F53D                  # wr_idle_busy.
     assert be[offs[-1]:].hex() == "063e00b88aab" and dsp.IDLE_RETURN_SW == 0xB88AAB
     # its DM: 0x2de100..0x2de117, after the 16 reader blocks (to 0x2de100) and inside the state block
     assert dsp.READER_BLOCKS_DM + 16 * dsp.READER_BLOCK_BYTES == dsp.IDLE_STATE_DM
-    assert dsp.IDLE_STATE_DM + 0x18 <= dsp.STATE_DM + dsp.STATE_BYTES == dsp.INC_TABLE_DM
+    assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES <= dsp.STATE_DM + dsp.STATE_BYTES == dsp.INC_TABLE_DM
     stores = {c for c in src if c.startswith("DM(")}
-    assert stores <= {"DM(0x2de100) = R8;", "DM(0x2de104) = R9;", "DM(0x2de108) = R10;",
+    assert stores <= {"DM(0x2de100) = R8;", "DM(0x2de104) = R9;", "DM(0x2de108) = R10;", "DM(0x2de134) = R11;",
                       "DM(0x2de114) = R9;", "DM(0x2de10c) = R8;", "DM(0x2de110) = R9;",
-                      "DM(0x2c49d4) = R9;", "DM(0x2c59d4) = R9;"}
+                      "DM(0x2de128) = R9;", "DM(0x2de12c) = R9;",
+                      "DM(0x2c49d4) = R9;", "DM(0x2c59d4) = R9;", "DM(0x2c49dc) = R9;", "DM(0x2c59dc) = R9;",
+                      "DM(0x2c49e0) = R9;", "DM(0x2c59e0) = R9;"}
 
 
 def test_the_block_counter_goes_on_to_the_loop():
     spec = json.loads((SHARC / "block_count.json").read_text(encoding="utf-8"))
-    assert int(spec["load_sw"], 16) == dsp.COUNT_SW == 0x16F580
+    assert int(spec["load_sw"], 16) == dsp.COUNT_SW == 0x16F600
     be = bytes.fromhex(spec["object_parcels_be"])
     assert be[spec["instruction_offsets"][-1]:].hex() == "063e0016ed00"   # JUMP 0x16ed00, the loop
     src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "block_count.asm").read_text().splitlines()]
     stores = {c for c in src if c.startswith("DM(")}
     assert stores == {"DM(0x2de11c) = R8;", "DM(0x2de120) = R9;", "DM(0x2de118) = R8;",
-                      "DM(0x2c49d8) = R8;", "DM(0x2c59d8) = R8;"}
+                      "DM(0x2c49d8) = R8;", "DM(0x2c59d8) = R8;", "DM(0x2de124) = R8;"}
     assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES >= 0x2DE124 and dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES <= dsp.INC_TABLE_DM
 
 
