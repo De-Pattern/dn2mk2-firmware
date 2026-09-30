@@ -3759,3 +3759,16 @@ with a stock wave run beside ours as the control. Then do the same in
 `lfowaves`. That means regenerating `lfowaves_code.json` and a new hardware
 pass.
 
+## 28. Waverider's DSP cost, and a benchmark of every synth
+
+The SHARC reports its own cycles per frame in the stock reply (`docs/sharc-load.md`). On 2026-09-30, one held Waverider note cost about 8,000 cycles a frame over silence. The owner's whole busy pattern of stock synths cost about 3,500.
+
+- **The owner's rule:** *one single synth with one single wave cannot consume more DSP than a whole pattern playing stock synths.*
+- **First, the benchmark.** One sustained note per engine (FM Tone, FM Drum, Wavetone, Swarmer, Waverider), on the same track, same note, no overdrive or FX, each against a fresh `silent` row, using `tools/dn2sharc_load.py`.
+- **Then optimise the loop against that number,** measured before and after each change on the instrument. It comes ahead of osc 2, which would double the cost.
+- **Where to look in `machine5_live.asm`:**
+  - the per-sample work that is really per block (TUN1, the table pointer, the position);
+  - the interpolation between frames;
+  - memory placement: the tables sit in L1 block 1's tail;
+  - whether our loop runs for tracks that aren't sounding.
+

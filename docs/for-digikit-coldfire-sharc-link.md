@@ -309,6 +309,20 @@ If that holds, reply word 0 at `0x800053a4` on the ColdFire is a free DSP heartb
 It changes every frame while the core runs, and it freezes if the core stops while
 the DMA replays the ring.
 
+## 8. The reply on the instrument -- 2026-09-30
+
+Read with our USB probe's PEEK, which is read-only: 20 readings of the 2,748-byte reply at `0x800053a4` in each of five states (silent; one held note; a busy pattern; the busy pattern again; the busy pattern with the master compressor off). **[V]**
+
+| offset | what it is | evidence |
+|---|---|---|
+| `+0x000` | the high half of word 0 | `0x0006` in every state |
+| `+0x002` | the low half of word 0 | changes every frame |
+| `+0x016` | **the master compressor's gain reduction**; the ColdFire copies it to `0x4058e82a` (`0x40027966`) | 0 silent and with one note; `0x1a87`..`0x455c` with the busy pattern; **0 in 20 of 20 readings with the compressor off**, the pattern still playing |
+| `+0x01c`..`+0xa9c` | 32 records of 84 B | all 32 change with a single held note, and the note shows at the same offsets (`+30..+35`) in every record. That fits one record per sample of the 32-sample block, with 28 channels of 24-bit audio (the per-track stream Overbridge carries). **[I]**: not checked channel by channel |
+| after `+0xa9c` | the per-track tail | 0 in every state |
+
+**Word 0 is §7's cycle count, confirmed as a load figure.** Read as one big-endian u32, it is about 416,000 silent, about 419,000 with the busy pattern, and about 424,000 with one note held on our added machine. It follows what the DSP is asked to do, so it is more than a heartbeat. `docs/sharc-load.md` has the method.
+
 ## Reproducing
 
 ```
