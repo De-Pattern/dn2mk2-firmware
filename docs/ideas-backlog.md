@@ -44,6 +44,9 @@ Where they disagree, they win and this table is wrong.
 | 17 | Performance mixer | **not started** | — | everything. The Outbox 8 reading below is a starting point it did not have when filed |
 | 18 | P-lock arpeggiator parameters | **delivered** | `arpplocks` mod (#85, #86): MODE, SPEED, RANGE, N.LEN per trig, every edit path verified | `--all`'s LEN, the sixteen step offsets and the step mutes (mutes untested since the fix) |
 | 24 | Another random arpeggiator mode | **SHUF and RAND built** as `arpmodes`, emulator-gated 2026-09-26 | `docs/arp-hidden-modes.md` §7; stock's `SHUF`/`RAND`/`CHRD` were names only, all three playing CYCL | the instrument test; CHRD left out by the owner's decision |
+| 25 | The hidden second intro, and GIF/PNG animations for the boot screen | **open** | — | the emulator film of the other branch; a GIF/PNG importer for the `ANIM` chunk |
+| 26 | Performance macros, as on the Analog Four | **open** | — | everything; ColdFire only |
+| 27 | LFO waves follow a negative SPD | **open (a fix)** | — | how a stock generator uses SPD's sign |
 
 **The numbering is wrong and is left wrong on purpose.** There are two `## 8.`
 headings — "New LFO waveforms" and "FX machines on tracks" — and `## 7.` sits
@@ -3692,3 +3695,67 @@ the evidence is in `docs/arp-hidden-modes.md` §7.
 - **arpplocks' MODE lock** now reaches RAND too. Its ceiling is read from
   setMode's own clamp.
 - **Not yet on the instrument.**
+
+
+## 25. The hidden second intro, and GIF/PNG animations for the boot screen
+
+**Filed 2026-09-30, from `DigiAlchemydsp/DigiSplash`** (`docs/references.md`).
+DigiSplash is a set of boot-splash mods for the Digitakt mk1 and the Digitone
+mk1, built for elekloader.
+
+**The hidden intro is on the Digitone II too.** The intro task (`0x400d3d86`)
+calls the ANSI C `rand()` at `0x40150670` (multiplier `0x41c64e6d`, state at
+`0x405cd95c`), then:
+
+```
+0x400d3d96  mvs.w  %d0,%d0
+0x400d3d98  cmpi.l #32735,%d0
+0x400d3d9e  ble.s  0x400d3df2       ; the usual intro
+0x400d3da0  jsr    %a3@             ; the other one begins here
+```
+
+The seed setter at `0x401506ba` is never called (`dnfw fn callers` finds 0),
+and no pointer to it exists in the image. So the draw is the same at every
+power-up, and the fall-through is never taken. That is DigiSplash's
+`rare-splash` finding on the mk1, reproduced on DN2 1.11 by reading, not yet
+by running. **What is open:**
+
+1. **A film in the emulator of the other branch**, with `0x400d3d9e` NOPed,
+   to show that it is a different animation and not a test screen.
+2. **Then a `rare` option for the `bootscreen` mod**, if it is worth
+   offering: one instruction.
+
+**GIF/PNG animations.** DigiSplash's `make-bootanim` turns an image or an
+animated GIF into a splash mod. Our `ANIM` chunk already plays any sequence
+of pre-drawn 128 x 64 frames, so all this needs is an importer (CLI and
+`site/boot.html`) that thresholds, fits and orients the frames the way the
+ASCII and spin generators do.
+
+## 26. Performance macros, as on the Analog Four
+
+**Filed 2026-09-30 at the owner's request.** The Analog Four MKII's
+performance mode (`00_Resources/06_Manuals_Text/Analog-Four-MKII-User-Manual_ENG_OS1.55_260610.pdf`):
+
+- the eight encoders drive eight **macros**;
+- each macro maps up to five parameters on any of the sixteen tracks;
+- the macros are stored per kit (the project's kit, or a kit saved to the
+  +Drive);
+- the setup UI resembles the DN2's modulation-destination list.
+
+ColdFire only. **The first questions:**
+
+- does DN2 1.11 already have a perform mode to hang this on?
+- where does a kit have room for 8 x 5 mappings that stock loads harmlessly?
+  Like every mod setting, it must survive a no-save
+  reboot and a SAVE PROJECT + reload.
+
+## 27. LFO waves follow a negative SPD
+
+**Filed 2026-09-30, from the instrument** (during the `platform-trio2`
+pass). With SPD negative, the stock waveforms run inverted, but ours (STEP,
+PULS, NOIS, TRAP, WTB1-3) do not. **First step:** in the emulator, find how a
+stock generator uses SPD's sign (the phase direction, or the output's sign),
+with a stock wave run beside ours as the control. Then do the same in
+`lfowaves`. That means regenerating `lfowaves_code.json` and a new hardware
+pass.
+

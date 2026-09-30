@@ -1191,3 +1191,33 @@ Local clones fetched read-only. The repositories without a clone here were read 
 2. **Take digikit's `dspboot` `dma_sem` fix into our emulator path** before the next save-path emulation.
 3. **Model DN2 MIDI value feedback on octabam's CC FEEDBACK:** find the DN2's CC emitter and its value cache, and sweep against it.
 4. **Load once, fork per run** for the ColdFire gates, once gate time matters again.
+
+## `DigiAlchemydsp/DigiSplash` — boot-splash mods for elekloader (added 2026-09-30)
+
+Boot-splash mods for the **Digitakt mk1 (1.53)** and the **Digitone mk1 /
+Keys (1.43)**, built as elekloader format-2 mods on its `core`. Tracked at the
+owner's request.
+
+**Licence: GPL-2.0-or-later** (`NOTICE.md` and `LICENSE`). Taken forward as
+GPLv3, it combines with this repository's AGPL-3.0-or-later, so code may be
+ported with attribution. The screenshots of the stock animation are
+Elektron's artwork and are excluded by its own notice.
+
+**What it has:**
+
+- **`rare-splash`.** The intro draws one number from an unseeded ANSI C
+  `rand()` and branches on `> 0x7fdf`, so a second built-in animation is
+  never shown. NOPing the branch shows it. Our read of DN2 1.11 finds the
+  same code at `0x400d3d98` (backlog §25).
+- **Draw mods** (`render.c`, one per splash) that paint every intro frame
+  through the intro's two present routines. The draw mods are exclusive with
+  one another.
+- **`tools/make-bootanim`**, which turns a PNG or GIF into a frame-cycling
+  splash mod. Our `ANIM` chunk is the same idea already, minus the importer
+  (backlog §25).
+- **`docs/PANEL-FORMAT.md`**, the 128 x 64 1bpp panel layout. Check it against
+  our `image_from_pixels` before relying on either.
+
+**Adopted so far:** nothing. The hidden-intro finding is reproduced by
+reading only.
+
