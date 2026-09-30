@@ -23,7 +23,7 @@ Taken on `waverider-m6b-usbprobe`, 20 readings each, from the reply captures (no
 
 - **Most of the SHARC's work is fixed:** about 416,000 cycles a frame with nothing sounding.
 - **As a share of a frame:** the core runs at 1 GHz (*The clock*, below), so a frame at 1,500 frames/s has 666,667 cycles. Silent is **62.4 %**, the busy pattern **62.9 %**, one Waverider note **63.6 %**. That leaves about 36 % of the SHARC free.
-- **Waverider is too expensive.** One Waverider voice costs more than the whole busy pattern added. As the owner put it, one synth playing one wave cannot cost more DSP than a whole pattern of stock synths. So the loop is to be optimised, measured with this count: one held note against silence, on the instrument, before and after each change (`docs/ideas-backlog.md` §28).
+- ~~**Waverider is too expensive.**~~ **Withdrawn the same day:** the benchmark below found that word 0 misreads around a Waverider track, and that in the emulator Waverider is the lightest engine. What this bullet said, kept for the record: one Waverider voice costs more than the whole busy pattern added. As the owner put it, one synth playing one wave cannot cost more DSP than a whole pattern of stock synths. So the loop is to be optimised, measured with this count: one held note against silence, on the instrument, before and after each change (`docs/ideas-backlog.md` §28).
 - **To make that a fair comparison,** each synth is to be benchmarked the same way: the same track, note and sustain, with no overdrive or FX, one run per engine.
 
 ## The benchmark, 2026-09-30, and why word 0 did not settle it
