@@ -142,6 +142,30 @@ The routine runs once a frame in both states, so the missing ~17-23 points are n
 
 **What is left:** either each pass does less in the low state, or the work is outside the per-block routine. Next: reproduce the latch in digikit's runner, running MIDI, then a Waverider trig, then stop, then FM Tone frame by frame, and compare what each block executes.
 
+## Where the low state's time goes: inside the per-block routine, before the dispatch (2026-10-01, parked)
+
+The split timer divides each frame's single busy stretch at two marks (`idle_load.asm`):
+- MARK0, as the handler calls the per-block routine (`entry_mark.asm`, the call site sw `0x1c9fb9`);
+- MARK, where the machine dispatch passes our splice (`block_count.asm`, sw `0x1c9448`).
+
+**[V]**, on `waverider-m6f-split3-usbprobe`, 6 one-second intervals each:
+
+| part | high: FM Tone on track 1, no Waverider yet | low: Waverider playing on track 2 | change |
+|---|---|---|---|
+| A: the handler, up to the call | 0.5 % | 0.5 % | 0 |
+| **B: the routine, from its entry to the splice** | **33.3 %** | **10.6 %** | **-22.7** |
+| C: the splice to the stretch's end | 29.2 % | 34.7 % | +5.5 (our loop rendering) |
+| load | 63.0 % | 45.8 % | -17.2 |
+| other (busy time outside the stretch) | 0 | 0 | -- |
+
+- **Where it is:** the whole drop lies in B, which holds the frame unpack and the stock machines' render loops.
+- **Not fewer instructions:** in digikit's runner the routine executes the same number of instructions in both states. So the instrument spends fewer *cycles* on the same instructions.
+- **A likely cause is memory stalls.** An idle FM Tone costs about 100,000 cycles a frame on the instrument, but about 11,000 instructions in the runner, around 9 cycles per instruction. So the stock render code mostly waits on memory, and Waverider being active cuts those waits.
+- **Not a busy-wait on a peripheral:** B's code reads no peripheral register directly (`sharcimm`: only a `0x30000000` constant). A poll through a pointer table is not ruled out.
+- **Nothing is audibly missing,** and stock is flat.
+
+**Parked (owner, 2026-10-01).** Nothing is broken and the load goes down, not up. To resume: put marks at the start of each stock render loop in the dispatch (FM Tone, FM Drum, WaveTone, Swarmer, before sw `0x1c9448`) to find which loop gets cheaper, then read what it touches (`docs/ideas-backlog.md` §29).
+
 ## The clock: 1 GHz, from the init program
 
 The SHARC boot stream carries two programs: a small init program entered at sw `0x120230`, then the main one (digikit `docs/sharc/SPEC-FINDINGS.md`). The init program is block 1, which loads at bw `0x282403f0` (sw `0x1201f8`, 10,312 bytes). It sets the clocks. Read with selmap (`js216/selache`) and digikit's `sharcimm.py`. **[D]**
