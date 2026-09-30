@@ -3761,6 +3761,11 @@ pass.
 
 ## 28. Waverider's DSP cost, and a benchmark of every synth
 
+> **Revised 2026-09-30, after the benchmark (`docs/sharc-load.md`).** The premise below did not hold.
+> - **On the instrument,** word 0 misreads around a Waverider track: adding FX lowered it.
+> - **In the emulator,** Waverider is the lightest engine: +1,800 instructions per block idle, against +8,000 to +11,000 for the stock engines, and its note adds about 720.
+> - **So the owner's rule is met.** What is left of this item is a load figure that covers the whole frame, so that osc 2 and more voices can be measured on the instrument. The original text is kept.
+
 The SHARC reports its own cycles per frame in the stock reply (`docs/sharc-load.md`). On 2026-09-30, one held Waverider note cost about 8,000 cycles a frame over silence. The owner's whole busy pattern of stock synths cost about 3,500.
 
 - **The owner's rule:** *one single synth with one single wave cannot consume more DSP than a whole pattern playing stock synths.*

@@ -23,8 +23,63 @@ Taken on `waverider-m6b-usbprobe`, 20 readings each, from the reply captures (no
 
 - **Most of the SHARC's work is fixed:** about 416,000 cycles a frame with nothing sounding.
 - **As a share of a frame:** the core runs at 1 GHz (*The clock*, below), so a frame at 1,500 frames/s has 666,667 cycles. Silent is **62.4 %**, the busy pattern **62.9 %**, one Waverider note **63.6 %**. That leaves about 36 % of the SHARC free.
-- **Waverider is too expensive.** One Waverider voice costs more than the whole busy pattern added. As the owner put it, one synth playing one wave cannot cost more DSP than a whole pattern of stock synths. So the loop is to be optimised, measured with this count: one held note against silence, on the instrument, before and after each change (`docs/ideas-backlog.md` §28).
+- ~~**Waverider is too expensive.**~~ **Withdrawn the same day:** the benchmark below found that word 0 misreads around a Waverider track, and that in the emulator Waverider is the lightest engine. What this bullet said, kept for the record: one Waverider voice costs more than the whole busy pattern added. As the owner put it, one synth playing one wave cannot cost more DSP than a whole pattern of stock synths. So the loop is to be optimised, measured with this count: one held note against silence, on the instrument, before and after each change (`docs/ideas-backlog.md` §28).
 - **To make that a fair comparison,** each synth is to be benchmarked the same way: the same track, note and sustain, with no overdrive or FX, one run per engine.
+
+## The benchmark, 2026-09-30, and why word 0 did not settle it
+
+On the instrument (`waverider-m6b-usbprobe3`), in a fresh project, with overdrive and sends at 0 and the compressor off, the owner ran track 1 through each engine on a pattern (one trig, 16 steps long). Each row below is 150 PEEKs of word 0, in the order taken. **[V]** for the numbers; see below for what they measure.
+
+| order | state | median cycles |
+|---|---|---|
+| 1 | silent, fresh project | 413,746 |
+| 2 | FM Tone playing | 414,207 |
+| 3-4 | FM Drum playing / stopped | 398,668 / 372,067 |
+| 5-6 | WaveTone playing / stopped | 377,700 / 379,037 |
+| 7-8 | Swarmer playing / stopped | 378,963 / 375,055 |
+| 9-10 | Waverider playing / stopped | 313,936 / 259,812 |
+| 11-12 | FM Tone stopped (twice) | 260,128 / 259,725 |
+| 13 | FM Tone playing | 347,323 |
+| 14 | all tracks muted, stopped | 413,585 |
+| 15 | unmuted, stopped (twice, 20 s apart) | 413,759 / 413,800 |
+| 16 | MIDI on all 16 tracks (twice, 60 s apart) | 413,406 / 413,952 |
+| 17 | track 1 Waverider, never played | 413,774 |
+| 18-19 | Waverider playing, then stopped | 327,683 / **259,667, held** |
+| 20 | FM Tone playing, sends up | 413,868 |
+| 21-23 | Waverider playing / stopping / stopped, sends up | 308,417 / 308,179 / 308,283 |
+| 24 | FM Tone playing, sends up | 404,954 |
+| 25 | Waverider playing, more FX and the filter | **271,204** |
+
+What these rows show:
+
+- **The floor is about 413,700.** It holds with no synth anywhere (MIDI on every track), steady over a minute. Muting does not change it.
+- **Once a Waverider note has played, word 0 falls 90,000-154,000 below that floor,** and stays low after the note stops. Switching machine or toggling mutes lifts it again, but not every time.
+- **Adding FX and a filter lowered it further** (row 25).
+- **The owner heard every effect throughout.** No work audibly went missing.
+
+**So word 0 is not the SHARC's total load around a Waverider track.** Adding work cannot read as less work. The reply's word 0 is the span between two EMUCLK reads in the command handler (sw `0x1c9d89` -> `0x1c9e47`). Between them, the handler reads a command word and dispatches through the table `0x268a68` (`jump (m13,i8)` at `0x1c9dbf`). Whether that span includes waiting (for the link, or the next frame), and so shifts with timing, is **[O]**: the linear decode desyncs right after the dispatch. The register the span keeps its start in, R14, is saved and restored by `machine5_live.asm`, which has a single exit.
+
+## The engines in the emulator: instructions per block
+
+digikit's SHARC runner, the DN2 1.11 engine-init snapshot, runs sw `0x1c2712` (frame unpack and machine dispatch). Track 0 is on each machine and tracks 1-15 are MIDI, three blocks each, with the last block shown. These are instructions executed, not cycles: a relative measure. **[E]**
+
+| track 0 | parameters (owner) | no note | note | idle over MIDI |
+|---|---|---|---|---|
+| MIDI | -- | 152,780 | 153,502 | -- |
+| **Waverider** | 3 | 154,605 | 155,327 | **+1,825** |
+| WaveTone | 23 | 160,957 | 162,359 | +8,177 |
+| FM Drum | 30 | 161,549 | 162,451 | +8,769 |
+| Swarmer | 7 | 161,747 | 162,493 | +8,967 |
+| FM Tone | 30 | 163,893 | 164,635 | +11,113 |
+
+- **The stock image** gives every one of types 0-4 exactly 238 fewer instructions: that is our entry check. Our build leaves the stock engines untouched.
+- **Every stock engine does nearly all its work whether or not a note plays;** a note adds 700-1,400. The owner's guess, that the engines keep their machinery computed at all times, holds.
+- **The parameter count does not set the cost.** Swarmer, with 7 parameters, costs as much as FM Drum with 30.
+- **Waverider** skips that standing work, and its note adds about 720, about 22 per sample: the reader's loop.
+
+**The two measures disagree in size.** Changing the machine moves this routine by at most 11,000 of 153,000 instructions, while word 0 moved by 150,000 cycles on the instrument. So word 0's swings are not this routine's work.
+
+**Next:** a load figure that covers the whole frame. Either our own EMUCLK stamps at the per-block routine's entry and exit, written to reply bytes 4-0x15 (a Waverider build; the ColdFire reads none of those bytes), or the handler run whole in the emulator, to see what the dispatched command does between the two reads.
 
 ## The clock: 1 GHz, from the init program
 
