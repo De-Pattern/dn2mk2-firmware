@@ -511,9 +511,10 @@ bytes are blank in the JSON and rebuilt at apply time from the user's own image
 
 **Order matters, and the CLI enforces it.** Because lfo4 copies the table,
 `APPLY_LAST` puts it after every other mod. So `moddest`'s thirteen masks and
-`fxmod`'s Chorus records are in the copy (tested). It needs the start-up hook
-and the appended area, so it cannot be combined with `lfowaves` or `bootscreen`
-until one platform loader owns both (`docs/mods-compatibility.md`).
+`fxmod`'s Chorus records are in the copy (tested). Since 2026-09-30 the start-up
+loader and the appended area are the platform's (`src/dnfw/mods/platform.py`), and
+lfo4 adds its two `CODE` chunks to them, so it combines with `lfowaves` (applied
+first) and `bootscreen` (`docs/mods-compatibility.md`).
 
 **Browser:** `site/lfo4.html`, 2026-09-26. `gen_lfo4_code.py` also writes
 `site/js/mods/lfo4-code.js` from the same data (the JSON stays byte-identical, and
