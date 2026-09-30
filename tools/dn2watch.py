@@ -134,7 +134,8 @@ def raw_watch(spec: str) -> Watch:
 
 def sharc_watch() -> Watch:
     """The SHARC's load and the compressor's gain reduction, from the reply it sends each frame."""
-    fields = [Field("SHARC_CYCLES", REPLY_ADDR, "u32"), Field("COMP_GR", REPLY_ADDR + 0x16)]
+    fields = [Field("SHARC_CYCLES", REPLY_ADDR, "u32"), Field("SHARC_IDLE", REPLY_ADDR + 4, "u32"),
+              Field("COMP_GR", REPLY_ADDR + 0x16)]
     return Watch("sharc", tuple(fields), spans_of(fields))
 
 

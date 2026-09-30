@@ -20,6 +20,11 @@ evidence for each.
    the loop re-executes them before it jumps back to `0x1c944c`.
 3. **Lets a type-5 frame through**: the frame-nibble -> machine-type lookup
    `0x25d748[5]` becomes 5 (stock 0, FM Tone).
+4. **Times the idle task** (`idle_load.asm`, sw `0x16f500`): the back edge of
+   FreeRTOS's idle loop, `jump (pc,-0x10)` at sw `0xb88abb` in L2, becomes
+   `JUMP 0x16f500`; the stub adds the idle task's own cycles to a running total in
+   reply word 1 and jumps back to `0xb88aab`. The SHARC's load is then
+   1 - idle / elapsed (`docs/sharc-load.md`).
 
 **What it does not do, on purpose:**
 
@@ -70,12 +75,20 @@ DIRECTORY_DM = 0x2DE600
 DIRECTORY_MAGIC = 0x57525431                 # 'WRT1'
 TABLES_DM = (0x2DF000, 0x2E3000)
 
+IDLE_DM = 0x2DEA00                           # idle_load.asm, in the gap before table 0
+IDLE_SW = IDLE_DM // 2                       # 0x16f500
+IDLE_STATE_DM = 0x2DE100                     # its save area and counters (state block tail)
+L2_LOAD, L2_SW = 0x20000000, 0xB80000        # L2 code: load address 0x20000000 is sw 0xb80000
+
 # stock sites
 ENTRY_SW = 0x1C9448                          # i5=dm(-0x18,i6); r10=dm(-0x22,i6)
 ENTRY_STOCK = bytes.fromhex("089ce80a089c5e05")
 NOP16 = bytes.fromhex("0100")                # the firmware's own 16-bit NOP (sw 0x1c9447)
 LOOKUP_DM = 0x25D748                         # frame nibble -> machine type, 8 words
 LOOKUP_STOCK = (0, 1, 2, 3, 4, 0, 0, 0)
+IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
+IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")
+IDLE_RETURN_SW = 0xB88AAB                    # the loop's top: call prvCheckTasksWaitingTermination
 
 
 class DspError(ValueError):
@@ -96,6 +109,10 @@ def dm_to_load(dm: int) -> int:
     return LOAD_ALIAS + dm
 
 
+def l2_sw_to_load(sw: int) -> int:
+    return L2_LOAD + 2 * (sw - L2_SW)
+
+
 def _code() -> dict:
     if not CODE.exists():
         raise DspError(f"{CODE.name} is missing: run scripts/gen_waverider_sharc.py")
@@ -103,10 +120,10 @@ def _code() -> dict:
 
 
 def objects() -> dict[str, bytes]:
-    """The committed SHARC objects, memory order: reader, loop, entry JUMP."""
+    """The committed SHARC objects: reader, loop, entry JUMP, idle stub, idle JUMP."""
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
-            for name in ("reader", "machine5_live", "entry_jump")}
+            for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump")}
 
 
 def directory() -> bytes:
@@ -128,6 +145,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("state: save area, counters, 16 reader blocks (zeros)", STATE_DM, bytes(STATE_BYTES)),
         ("increment table, 129 float32", INC_TABLE_DM, live.table_bytes()),
         ("wavetable directory", DIRECTORY_DM, directory()),
+        ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
         ("table 0: saw -> sine (testtable reversed)", TABLES_DM[0], reference.dsp_bytes(t[0])),
         ("table 1: the overtone series (harmonics)", TABLES_DM[1], reference.dsp_bytes(t[1])),
     ]
@@ -136,7 +154,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         end = raw[k + 1][1] if k + 1 < len(raw) else REGION[1]
         if len(payload) > end - at:
             raise DspError(f"{what} ({len(payload)} bytes) does not fit before {end:#x}")
-        if k < 2 and end - at - len(payload) < 64:
+        if "asm" in what and end - at - len(payload) < 64:
             raise DspError(f"{what} leaves fewer than 64 bytes of NOP padding")
         out.append((what, dm_to_load(at), payload + bytes(end - at - len(payload))))
     return out
@@ -153,7 +171,10 @@ def placements() -> list[dict]:
              "stock": ENTRY_STOCK.hex(), "new": (obj["entry_jump"] + NOP16).hex()},
             {"what": "patch: machine lookup 0x25d748[5] 0 -> 5",
              "load_address": f"{dm_to_load(LOOKUP_DM + 20):#010x}", "bytes": 4,
-             "stock": "00000000", "new": "05000000"}]
+             "stock": "00000000", "new": "05000000"},
+            {"what": f"patch: the idle loop's back edge at sw {IDLE_SITE_SW:#x} -> JUMP {IDLE_SW:#x}",
+             "load_address": f"{l2_sw_to_load(IDLE_SITE_SW):#010x}", "bytes": len(obj["idle_jump"]),
+             "stock": IDLE_SITE_STOCK.hex(), "new": obj["idle_jump"].hex()}]
     return out
 
 
@@ -187,6 +208,10 @@ def section7(stock: bytes) -> bytes:
         raise DspError(f"the entry patch is {len(entry)} bytes, not {len(ENTRY_STOCK)}")
     if bootstream.read_span(stock, sw_to_load(ENTRY_SW), len(ENTRY_STOCK)) != ENTRY_STOCK:
         raise DspError("sw 0x1c9448 is not the stock `i5=dm(-0x18,i6); r10=dm(-0x22,i6)`")
+    if len(obj["idle_jump"]) != len(IDLE_SITE_STOCK):
+        raise DspError(f"the idle JUMP is {len(obj['idle_jump'])} bytes, not {len(IDLE_SITE_STOCK)}")
+    if bootstream.read_span(stock, l2_sw_to_load(IDLE_SITE_SW), len(IDLE_SITE_STOCK)) != IDLE_SITE_STOCK:
+        raise DspError("sw 0xb88abb is not the stock idle loop's `jump (pc,-0x10)`")
     lookup = struct.unpack("<8I", bootstream.read_span(stock, dm_to_load(LOOKUP_DM), 32))
     if lookup != LOOKUP_STOCK:
         raise DspError(f"the machine lookup is {lookup}, not stock {LOOKUP_STOCK}")
@@ -197,6 +222,7 @@ def section7(stock: bytes) -> bytes:
         stock, b"".join(bootstream.block(at, payload) for _, at, payload in added)))
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
     bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<I", 5))
+    bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
     result = bytes(out)
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):

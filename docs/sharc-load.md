@@ -81,6 +81,34 @@ digikit's SHARC runner, the DN2 1.11 engine-init snapshot, runs sw `0x1c2712` (f
 
 **Next:** a load figure that covers the whole frame. Either our own EMUCLK stamps at the per-block routine's entry and exit, written to reply bytes 4-0x15 (a Waverider build; the ColdFire reads none of those bytes), or the handler run whole in the emulator, to see what the dispatched command does between the two reads.
 
+## The whole load, from the idle task (2026-09-30, awaiting the instrument)
+
+The SHARC runs FreeRTOS. **[D]**
+- `vTaskStartScheduler` (sw `0xb887db`, in L2 code that loads at `0x20000000`, i.e. sw `0xb80000`) creates the idle task with `r8 = "IDLE"` (`0x2d0760`) and `r4 = 0xb88aa6`.
+- `prvIdleTask` has no idle hook and no `IDLE` instruction. It spins:
+
+  ```
+  b88aab  call prvCheckTasksWaitingTermination
+  b88ab2  if more than one task is ready at the idle priority: yield (IRPTL bit 31)
+  b88abb  jump (pc,-0x10)   -> b88aab
+  ```
+
+So its time is the SHARC's spare time, and the build measures it (`csrc/waverider/sharc/idle_load.asm`, `dnfw.waverider.dsp` patch 4):
+- **The patch.** The back edge at sw `0xb88abb` becomes `JUMP 0x16f500`, in L1 block 1's free tail, between the directory and table 0.
+- **Each pass.** The stub reads EMUCLK, and adds the cycles since the previous pass to a running total when they are fewer than 4,096. A longer gap means the idle task was preempted by real work.
+- **What it publishes.** The total, halves swapped like word 0, goes to reply word 1 of both reply pages (`0x2c49d4`, `0x2c59d4`); the ColdFire reads it at `0x800053a8`. The stub uses R8-R10 only, saved in its own area at `0x2de100`, and jumps back to `0xb88aab`.
+- **The host side.** `tools/dn2sharc_load.py LABEL --idle` takes the total and the ColdFire's frame count from STATS, twice a second apart, and computes load = 1 - d(idle) / (d(frames) x 666,667). The probe page's **Watch SHARC** shows the total as SHARC_IDLE.
+- **What it can miss.** An interrupt shorter than 4,096 cycles that lands inside the idle loop is counted as idle. That reads the load slightly low.
+
+**Checked in digikit's runner** (`scripts/sharc_idle_load_check.py`, 7 of 7, on the engine-init snapshot):
+- the patched loop goes round;
+- every pass is counted;
+- R8-R10 are intact at every return;
+- with a fed clock, the total is exactly the sum of the short steps, across a counter wrap;
+- both reply pages hold it.
+
+The Waverider gate on the instrument's captured frames still passes 6 of 6. The build is `waverider-m6c-idle-usbprobe_DN2_1.11.syx`; its section 3 is `usbprobe3`'s but for the HELLO tag.
+
 ## The clock: 1 GHz, from the init program
 
 The SHARC boot stream carries two programs: a small init program entered at sw `0x120230`, then the main one (digikit `docs/sharc/SPEC-FINDINGS.md`). The init program is block 1, which loads at bw `0x282403f0` (sw `0x1201f8`, 10,312 bytes). It sets the clocks. Read with selmap (`js216/selache`) and digikit's `sharcimm.py`. **[D]**
