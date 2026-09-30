@@ -3,6 +3,8 @@ stream), applied from committed artefacts. `docs/waverider-m5-dsp.md` has the
 evidence for each.
 
     section7(stock) -> the modified boot stream
+    section7_idle_only(stock) -> stock plus the idle-time stub alone (patch 4), for
+                       measuring the stock engine with nothing of Waverider in it
     placements()    -> what goes where, for a report or a mod's extents
 
 **What it does to DN2 1.11's section 7:**
@@ -194,6 +196,55 @@ def _check_free(stock: bytes, span_list) -> None:
     for (a0, a1, w0), (b0, b1, w1) in zip(ordered, ordered[1:]):
         if b0 < a1:
             raise DspError(f"{w0} and {w1} overlap")
+
+
+IDLE_STATE_BYTES = 0x20                      # save area, LAST, total, passes (+ spare)
+
+
+def idle_spans() -> list[tuple[str, int, bytes]]:
+    """The idle stub's own blocks: its zeroed state, and its code padded to table 0."""
+    code = objects()["idle_load"]
+    end = TABLES_DM[0]
+    if end - IDLE_DM - len(code) < 64:
+        raise DspError("idle_load.asm leaves fewer than 64 bytes of NOP padding")
+    return [("idle_load state (zeros)", dm_to_load(IDLE_STATE_DM), bytes(IDLE_STATE_BYTES)),
+            ("idle_load.asm (wr_idle)", dm_to_load(IDLE_DM), code + bytes(end - IDLE_DM - len(code)))]
+
+
+def _check_stock(stock: bytes) -> None:
+    digest = hashlib.sha256(stock).hexdigest()
+    if digest != STOCK_SHA256:
+        raise DspError(f"section 7 sha256 {digest[:12]}... is not stock DN2 1.11's "
+                       f"({STOCK_SHA256[:12]}...)")
+
+
+def _check_idle_site(stock: bytes, obj: dict) -> None:
+    if len(obj["idle_jump"]) != len(IDLE_SITE_STOCK):
+        raise DspError(f"the idle JUMP is {len(obj['idle_jump'])} bytes, not {len(IDLE_SITE_STOCK)}")
+    if bootstream.read_span(stock, l2_sw_to_load(IDLE_SITE_SW), len(IDLE_SITE_STOCK)) != IDLE_SITE_STOCK:
+        raise DspError("sw 0xb88abb is not the stock idle loop's `jump (pc,-0x10)`")
+
+
+def _finish(out: bytearray) -> bytes:
+    result = bytes(out)
+    walked = bootstream.walk(result)
+    if not walked.complete or walked.stopped_at != len(result):
+        raise DspError(f"the result does not walk as a boot stream ({walked.reason})")
+    return result
+
+
+def section7_idle_only(stock: bytes) -> bytes:
+    """Stock DN2 1.11's section 7 plus the idle-time stub and nothing else: the stock
+    engine, measured. Refuses anything but stock."""
+    _check_stock(stock)
+    obj = objects()
+    _check_idle_site(stock, obj)
+    added = idle_spans()
+    _check_free(stock, added)
+    out = bytearray(bootstream.insert_before_final(
+        stock, b"".join(bootstream.block(at, payload) for _, at, payload in added)))
+    bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
+    return _finish(out)
 
 
 def section7(stock: bytes) -> bytes:

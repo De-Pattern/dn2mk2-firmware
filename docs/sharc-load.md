@@ -109,6 +109,24 @@ So its time is the SHARC's spare time, and the build measures it (`csrc/waveride
 
 The Waverider gate on the instrument's captured frames still passes 6 of 6. The build is `waverider-m6c-idle-usbprobe_DN2_1.11.syx`; its section 3 is `usbprobe3`'s but for the HELLO tag.
 
+## The idle measure on the instrument, and the stock control (2026-09-30)
+
+`dn2sharc_load.py --idle`, 6 one-second intervals each. It is steady to 0.1-0.3 % within a state. **[V]**
+
+| state | `waverider-m6c-idle-usbprobe` | `stock-idle-usbprobe` (no Waverider code) |
+|---|---|---|
+| first reading, MIDI on all tracks | 41.6 % (Waverider had played with FX) | **64.5 %** (fresh project) |
+| FM Tone playing | 56.7 % (54.6-58.0) | 64.7 % (with FX and envelope); 63.5 % (cleared) |
+| FM Tone stopped | 64.7 % | 62.9 % |
+| MIDI on all tracks, again | 64.7 % | **62.9 %** |
+| Waverider played, then stopped | 60.4 % | -- |
+
+- **Stock is flat:** 63-65 % whatever plays. The engine runs its full machinery every frame.
+- **Only the Waverider build drops,** to 41.6 %, after a Waverider note. It stays down across machine changes until something resets it. The drop is about 23 points, 154,000 cycles a frame: the same step reply word 0 showed.
+- **So Waverider's code stops about 23 % of work that stock always does.**
+- **It is inaudible on the instrument:** the owner heard every effect in the low state.
+- **What stops is [O].** One candidate fits both facts: the per-track audio records in the reply (`+0x1c..+0xa9c`, 28 channels of 24-bit, the stream Overbridge carries), which the instrument's own outputs never play. Next: read those records with the probe in the low state on a Waverider build.
+
 ## The clock: 1 GHz, from the init program
 
 The SHARC boot stream carries two programs: a small init program entered at sw `0x120230`, then the main one (digikit `docs/sharc/SPEC-FINDINGS.md`). The init program is block 1, which loads at bw `0x282403f0` (sw `0x1201f8`, 10,312 bytes). It sets the clocks. Read with selmap (`js216/selache`) and digikit's `sharcimm.py`. **[D]**

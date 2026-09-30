@@ -219,6 +219,26 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
 
 
+def test_the_idle_only_stream_is_stock_but_the_stub(stock7):
+    """section7_idle_only: the stock engine with the idle stub and nothing of Waverider."""
+    built = dsp.section7_idle_only(stock7)
+    w = bootstream.walk(built)
+    assert w.complete and w.stopped_at == len(built)
+    site = dsp.l2_sw_to_load(dsp.IDLE_SITE_SW)
+    assert bootstream.read_span(built, site, 6) == bytes.fromhex("3e061600" "00f5")
+    code = dsp.objects()["idle_load"]
+    assert bootstream.read_span(built, dsp.dm_to_load(dsp.IDLE_DM), len(code)) == code
+    assert bootstream.read_span(built, dsp.dm_to_load(dsp.IDLE_STATE_DM), 0x20) == bytes(0x20)
+    # none of Waverider: the entry and the lookup stay stock
+    assert bootstream.read_span(built, dsp.sw_to_load(dsp.ENTRY_SW), 8) == dsp.ENTRY_STOCK
+    lookup = struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32))
+    assert lookup == dsp.LOOKUP_STOCK
+    final = bootstream.walk(stock7).final
+    diff = [k for k in range(final.offset) if built[k] != stock7[k]]
+    idle_off = bootstream.spans(stock7, site, 6)[0][0]
+    assert diff and set(diff) <= set(range(idle_off, idle_off + 6))
+
+
 def test_the_idle_stub_is_placed_and_returns_where_its_source_says():
     """idle_load.asm: its skip lands on wr_idle_out, it returns to the idle loop's top,
     and its variables sit in the state block's free tail, clear of the render loop's."""
