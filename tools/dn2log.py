@@ -12,6 +12,10 @@ that the page does not know goes, raw, in its `extra` column as
 `+offset=value/delta` items, and the JSONL has every field as published.
 Each row is flushed as it is written: a run stopped with the window's close
 button keeps everything up to that instant.
+
+A watch's reading (`dn2watch`) is a row of kind `watch`: its name in `label`,
+its fields as `name=hex` in `extra` (semitones beside a TUN field), and the
+fields that changed since its last reading in `state`.
 """
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ import time
 
 import dn2probe
 import dn2stats
+import dn2watch
 
 COLUMNS = (['t', 'kind', 'label', 'state', 'frames_s', 'isr_avg', 'isr_peak', 'isr_peak_1s',
             'switches_s', 'switches_probe', 'cpu', 'timer_mhz', 'clock']
@@ -93,6 +98,9 @@ def row_of(ev: dict) -> dict | None:
         for k, v in ev['fast'].items():
             row['lfo4_' + k] = v
         return row
+    if kind == 'probe-watch':
+        return {'t': ev['t'], 'kind': 'watch', 'label': ev['name'],
+                'state': ' '.join(ev.get('changed') or ()), 'extra': dn2watch.summary(ev['values'])}
     if kind == 'mark':
         return {'t': ev['t'], 'kind': 'mark', 'label': ev.get('label', '')}
     if kind == 'probe-status':

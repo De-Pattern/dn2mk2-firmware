@@ -24,6 +24,7 @@ import dn2log  # noqa: E402
 import dn2poll  # noqa: E402
 import dn2probe  # noqa: E402
 import dn2stats  # noqa: E402
+import dn2watch  # noqa: E402
 
 # the probe's own bytes, from the emulator (2026-09-27, out/usbprobe, digikit-up)
 EMU_HELLO = bytes.fromhex("f000203c7d001003010100000100000000007573627000726f626500f7")
@@ -56,6 +57,7 @@ class Device:
         self.isr, self.peak, self.switches, self.fps = isr, peak, switches, fps
         self.layout = layout
         self.lfo4 = None          # (base, bytearray) of a profiling build's lfo4 block, if any
+        self.regions = []         # more (base, bytearray) memory PEEK can read
         self.per_request = per_request
         self.t = 0.0
         self.c = {k: 0 for k in dn2stats.ALL_WORDS}
@@ -91,10 +93,11 @@ class Device:
         if cmd == dn2probe.STATS:
             self.c["switches"] += int(self.per_request)
             return reply(seq, cmd, stats_payload(self.c, layout=self.layout, extra=self.extra))
-        if cmd == dn2probe.PEEK and self.lfo4:
+        if cmd == dn2probe.PEEK:
             addr, n = struct.unpack_from(">IH", body, 3)
-            base, mem = self.lfo4
-            return reply(seq, cmd, struct.pack(">I", addr) + bytes(mem[addr - base:addr - base + n]))
+            for base, mem in ([self.lfo4] if self.lfo4 else []) + self.regions:
+                if base <= addr and addr + n <= base + len(mem):
+                    return reply(seq, cmd, struct.pack(">I", addr) + bytes(mem[addr - base:addr - base + n]))
         return reply(seq, cmd, b"", status=2)
 
 
@@ -407,6 +410,103 @@ def test_poller_reads_lfo4_timers_by_peek_after_each_stats():
     assert len(wire.pending) <= 1
 
 
+# ---- the watches -------------------------------------------------------------------
+
+def frame_image(track, values):
+    """A frame as the ColdFire holds it: big-endian words at dnfw.waverider.frame's offsets."""
+    from dnfw.waverider import frame as wrframe
+    img = bytearray(wrframe.FRAME_BYTES)
+    for p, v in values.items():
+        struct.pack_into(">H", img, wrframe.slot_offset(track - 1, p), v)
+    return img
+
+
+def test_a_frame_watch_names_the_tracks_fields_at_the_frames_offsets():
+    from dnfw.waverider import frame as wrframe
+    w = dn2watch.parse("frame:1")
+    by = {f.name: f for f in w.fields}
+    assert by["TUN1"].addr == 0x80005E60 + 218 and by["WAV1"].addr == 0x80005E60 + 220
+    assert by["TBL1"].addr == 0x80005E60 + 222 and by["TUN2"].addr == 0x80005E60 + 230
+    assert by["NOTE"].addr == 0x80005E60 + wrframe.NOTE
+    assert w.spans == ((0x80005E62, 248),)                  # one PEEK for track 1
+    w16 = dn2watch.parse("frame:16")
+    assert len(w16.spans) == 2 and all(n <= dn2probe.PEEK_MAX for _, n in w16.spans)
+    assert dict((f.name, f.addr) for f in w16.fields)["TUN1"] == 0x80005E60 + 218 + 146 * 15
+    for bad in ("frame:0", "frame:17", "frame:x", "0x80005e60", "0x80005e60+3", "0x10000000+4",
+                "0x80005e60+4:f32"):
+        with pytest.raises(ValueError):
+            dn2watch.parse(bad)
+
+
+def test_a_frame_watch_reads_what_the_probe_read_on_the_instrument():
+    """The 2026-09-30 readings: TUN1 +12 = 0x4c00, WAV1 top = 0x7800, TBL1 1 = 0x0100."""
+    w = dn2watch.parse("frame:1")
+    img = frame_image(1, {25: 0x4C00, 26: 0x7800, 27: 0x0100, 31: 0x3400})
+    reads = {lo: bytes(img[lo - 0x80005E60:lo - 0x80005E60 + n]) for lo, n in w.spans}
+    v = {x["name"]: x for x in w.decode(reads)}
+    assert v["TUN1"]["semitones"] == 12 and v["TUN1"]["hex"] == "0x4c00"
+    assert v["TUN2"]["semitones"] == -12
+    assert v["WAV1"]["word"] == 0x7800 and v["WAV1"]["coarse_fine"] == 120
+    assert v["TBL1"]["coarse_fine"] == 1 and "semitones" not in v["TBL1"]
+    assert "TUN1=0x4c00(+12 st)" in dn2watch.summary(list(v.values()))
+
+
+def test_a_raw_watch_reads_words_of_its_format():
+    w = dn2watch.parse("0x800068e4+8:s16")
+    assert [f.name for f in w.fields] == ["+0", "+2", "+4", "+6"] and w.spans == ((0x800068E4, 8),)
+    vals = w.decode({0x800068E4: struct.pack(">4h", 1, -1, 300, -300)})
+    assert [v["word"] for v in vals] == [1, -1, 300, -300]
+    raw = dn2watch.parse("0x46700000+8:u32").decode({0x46700000: bytes.fromhex("00000005ffffffff")})
+    assert [v["word"] for v in raw] == [5, 0xFFFFFFFF]
+
+
+def test_poller_reads_the_watches_after_each_stats_and_says_what_changed():
+    d = Device()
+    img = frame_image(1, {25: 0x4000, 26: 0x0000})
+    d.regions.append((0x80005E60, img))
+    events, wire = [], Wire(d)
+    wire.now = 0.0
+    p = dn2poll.Poller(wire.send, events.append, rate_hz=10, t0=0.0,
+                       watches=[dn2watch.parse("frame:1"), dn2watch.parse("0x80005e60+4")])
+    p.restart(0.0)
+    t = drive(p, wire, d, 2)
+    struct.pack_into(">H", img, 218, 0x4100)                # the owner turns TUN1 to +1
+    drive(p, wire, d, 0.5, t)
+    ws = [e for e in events if e["type"] == "probe-watch"]
+    fr = [e for e in ws if e["name"] == "frame:1"]
+    assert fr and {e["name"] for e in ws} == {"frame:1", "0x80005e60+4"}
+    tun = [next(v for v in e["values"] if v["name"] == "TUN1") for e in fr]
+    assert tun[0]["semitones"] == 0 and tun[-1]["semitones"] == 1
+    assert sum(1 for e in fr if e["changed"] == ["TUN1"]) == 1
+    stats = [s for s in wire.sent if dn2probe.unpack7(s[6:-1])[2] == dn2probe.STATS]
+    peeks = [s for s in wire.sent if dn2probe.unpack7(s[6:-1])[2] == dn2probe.PEEK]
+    assert abs(len(peeks) - 2 * len(stats)) <= 2            # one span each, after every STATS
+    assert len(wire.pending) <= 1                           # still one in flight
+    assert not [e for e in events if e["type"] == "probe-error"]
+    p.set_watches([])
+    n = len(ws)
+    drive(p, wire, d, 0.5, t + 0.5)
+    assert len([e for e in events if e["type"] == "probe-watch"]) <= n + 2
+    with pytest.raises(ValueError):
+        p.set_watches([dn2watch.parse("frame:%d" % k) for k in range(1, 10)])
+
+
+def test_a_refused_watch_is_said_and_does_not_slow_the_poll():
+    d = Device()
+    d.regions.append((0x80005E60, frame_image(1, {25: 0x4000})))
+    events, wire = [], Wire(d, rtt=0.004)
+    wire.now = 0.0
+    p = dn2poll.Poller(wire.send, events.append, rate_hz=10, t0=0.0,
+                       watches=[dn2watch.parse("0x800068e4+32"), dn2watch.parse("frame:1")])
+    p.restart(0.0)
+    drive(p, wire, d, 3)
+    last = [e for e in events if e["type"] == "probe"][-1]
+    assert abs(last["rate_hz"] - 10) <= 1 and last["lost_replies"] == 0
+    errs = [e["error"] for e in events if e["type"] == "probe-error"]
+    assert errs and "0x800068e4+32, 0x800068e4 +32" in errs[-1]
+    assert [e for e in events if e["type"] == "probe-watch" and e["name"] == "frame:1"]
+
+
 # ---- the log ---------------------------------------------------------------------
 
 def test_log_rows(tmp_path):
@@ -418,13 +518,18 @@ def test_log_rows(tmp_path):
     r["type"] = "probe"
     log.write(r)
     log.write({"type": "mark", "t": 0.2, "label": "save pressed"})
+    w = dn2watch.parse("frame:1")
+    img = frame_image(1, {25: 0x4C00})
+    vals = w.decode({lo: bytes(img[lo - 0x80005E60:lo - 0x80005E60 + n]) for lo, n in w.spans})
+    log.write({"type": "probe-watch", "t": 0.25, "name": "frame:1", "values": vals, "changed": ["TUN1"]})
     log.write({"t": 0.3, "kind": "cc", "ch": 1, "d1": 7, "d2": 64, "raw": "b0 07 40"})
     log.close()
     rows = (tmp_path / "t.csv").read_text(encoding="utf-8").splitlines()
-    assert rows[0].split(",")[:3] == ["t", "kind", "label"] and len(rows) == 3
+    assert rows[0].split(",")[:3] == ["t", "kind", "label"] and len(rows) == 4
     assert ",probe," in rows[1] and "+80=42/" in rows[1]
     assert rows[2].startswith("0.2,mark,save pressed")
-    assert len((tmp_path / "t.jsonl").read_text(encoding="utf-8").splitlines()) == 3
+    assert rows[3].startswith("0.25,watch,frame:1,TUN1,") and "TUN1=0x4c00(+12 st)" in rows[3]
+    assert len((tmp_path / "t.jsonl").read_text(encoding="utf-8").splitlines()) == 4
 
 
 # ---- the server, with a fake port ------------------------------------------------
@@ -479,7 +584,9 @@ def test_server_streams_probe_and_midi_but_not_the_probes_sysex(tmp_path):
     import dn2live
     from http.server import ThreadingHTTPServer
 
-    port = FakePort(Device())
+    dev = Device()
+    dev.regions.append((0x80005E60, frame_image(1, {25: 0x4C00})))
+    port = FakePort(dev)
     live = dn2live.Live(lambda: (port, ("[0] fake in", "[0] fake out")), log_dir=tmp_path)
     live.start()
     srv = ThreadingHTTPServer(("127.0.0.1", 0), dn2live.handler(live))
@@ -512,6 +619,15 @@ def test_server_streams_probe_and_midi_but_not_the_probes_sysex(tmp_path):
         assert sx and all(not e["raw"].startswith("f0 00 20 3c 7d") for e in sx)
         probes = [e for n, e in evs if n == "probe"]
         assert abs(probes[-1]["isr_avg"] - 51) < 1
+
+        st = json.loads(get(http_port, "/watch?add=frame:1"))
+        assert st["ok"] and st["watches"] == ["frame:1"]
+        assert not json.loads(get(http_port, "/watch?add=frame:1"))["ok"]            # already watched
+        assert "1..16" in json.loads(get(http_port, "/watch?add=frame:99"))["message"]
+        evs = sse("127.0.0.1", http_port, lambda e: any(n == "probe-watch" for n, _ in e))
+        wv = next(e for n, e in evs if n == "probe-watch")
+        assert next(v for v in wv["values"] if v["name"] == "TUN1")["semitones"] == 12
+        assert json.loads(get(http_port, "/watch?drop=frame:1"))["watches"] == []
 
         r = json.loads(get(http_port, "/rate?hz=50"))
         assert r["rate_hz"] == 10 and "capped" in r["message"]

@@ -50,3 +50,17 @@
 #p-lfo4 h2 .pill{text-transform:none}
 #p-lfo4 .meta{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--faint);margin-top:6px}
 #p-lfo4 .sw{border-radius:2px}
+#p-watch{margin-top:14px}
+#p-watch h2 .pill{text-transform:none}
+#p-watch select{font:13px "IBM Plex Mono",monospace;background:var(--panel);color:var(--ink);
+  border:1px solid var(--rule);padding:4px 6px}
+#p-watch .rate{color:var(--amber)}
+#p-watch .watch{margin-top:10px;border:1px solid var(--rule)}
+#p-watch .w-head{display:flex;gap:12px;align-items:baseline;padding:6px 10px;background:var(--panel2)}
+#p-watch .w-name{font:600 13px "IBM Plex Mono",monospace;color:var(--ink)}
+#p-watch .w-age{font:11px "IBM Plex Mono",monospace;color:var(--faint);flex:1}
+#p-watch .w-drop{padding:0 8px}
+#p-watch table td,#p-watch table th{padding:3px 10px}
+#p-watch th{text-transform:none;letter-spacing:.02em}
+#p-watch tr.fresh td{color:var(--amber)}
+#p-watch .w-spark{display:block;width:120px;height:18px}

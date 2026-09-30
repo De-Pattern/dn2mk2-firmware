@@ -386,11 +386,40 @@ adds a per-piece table (calls/s, us/s, recent and boot peaks) and a graph lane
 of us per reply. It is a second request per reading: it halves the rate the
 round trip allows and doubles the probe's own cost.
 
+**Memory watches** (`tools/dn2watch.py`). Any memory PEEK allows, read live
+and logged, with no build of its own: the page's *Watch frame* (a track's
+fields in the ColdFire -> SHARC frame at `0x80005e60`: NOTE, LEVEL, MACHINE and
+slot parameters 25..40, named TUN1, WAV1, TBL1, TUN2 where known) or *Watch*
+with a spec, or on the command line:
+
+    python tools/dn2live.py --watch frame:1 --watch 0x800068e4+32 --watch 0x46700000+16:u32
+
+A spec is `frame:T` (T 1..16, as the instrument numbers tracks) or
+`ADDR+LEN[:u8|u16|s16|u32]`. Each watch is a table of its fields (word, hex,
+`coarse.fine`, and semitones for TUN1/TUN2 at the scale read on the instrument:
+`word / 256 - 64`), a 20 s sparkline per field, and when each last changed; a
+field that just changed is lit. Each reading is a `watch` row in the CSV (the
+fields as `name=hex` in `extra`, the ones that changed in `state`), and a
+`probe-watch` event in the JSONL.
+
+The watches are read after each STATS, one PEEK per span (fields within 256
+bytes of each other share one, up to `PEEK_MAX`), still one request in flight;
+at most 8. Every span is a round trip, so a watch lowers the achieved rate the
+same way lfo4's timers do (the Round trip tile shows it). A PEEK the probe
+refuses is reported beside the watch controls and ends only that watch's round;
+the poll does not wait out `GIVE_UP` for it.
+
+This is what `tools/dn2probe_frame.py` did by hand for Waverider M6 (a frame
+saved per setting), live: turn TUN1 and watch its word move, and see a value
+glide rather than jump (the emulator's mid-glide frames were the M6 half-scale
+bug, PR #154).
+
 | file | |
 |---|---|
 | `tools/dn2live.py` | wiring, HTTP and SSE |
+| `tools/dn2watch.py` | watch specs, their PEEK spans, and decoding them |
 | `tools/dn2port.py` | winmm in (callback, buffers re-posted outside it) and out |
-| `tools/dn2poll.py` | HELLO/STATS, round trips, states, the cost calibration |
+| `tools/dn2poll.py` | HELLO/STATS, the PEEKs after them, round trips, states, the cost calibration |
 | `tools/dn2stats.py` | the STATS decoder and the readings |
 | `tools/dn2log.py` | the CSV and JSONL |
 | `tools/dn2live_panel.js`, `.css` | the panel |
