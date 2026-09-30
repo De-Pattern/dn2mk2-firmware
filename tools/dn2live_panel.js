@@ -3,7 +3,7 @@
 // The USB probe panel, added at the foot of scripts/midi_live_page.html by
 // tools/dn2live.py. It opens its own EventSource and listens for the named
 // events dn2live sends -- state, backlog, probe, probe-status, probe-cost,
-// probe-error, mark -- and never touches the MIDI view's code, only hides it
+// probe-error, probe-lfo4, probe-watch, mark -- and never touches the MIDI view's code, only hides it
 // when the MIDI view is switched off.
 (() => {
 "use strict";
@@ -54,6 +54,18 @@ const panel = el("section", { id: "probe" }, `
   <div id="p-live">
     <div class="grid" id="p-tiles"></div>
     <div class="links" id="p-links"></div>
+    <div id="p-watch"><h2>Memory watches <span class="pill">PEEK after each STATS · read-only</span></h2>
+      <div class="bar">
+        <span class="lab">frame, track</span>
+        <select id="p-w-track" aria-label="Track">${Array.from({ length: 16 }, (_, i) => `<option>${i + 1}</option>`).join("")}</select>
+        <button id="p-w-frame" title="TUN1, WAV1, TBL1, TUN2 and the rest of the track's slot in the ColdFire → SHARC frame, with its note, level and machine">Watch frame</button>
+        <span class="sep"></span>
+        <input type="text" id="p-w-spec" value="0x800068e4+32" aria-label="Watch spec"
+          title="ADDR+LEN[:u8|u16|s16|u32], or frame:T">
+        <button id="p-w-add">Watch</button>
+        <span class="rate" id="p-w-msg">&nbsp;</span>
+      </div>
+      <div id="p-w-list"></div></div>
     <div id="p-lfo4" hidden><h2>lfo4's pieces <span class="pill">PEEK after each STATS · µs of DTCN0</span></h2>
       <div class="scroll"><table><thead><tr><th>Piece</th><th>Calls / s</th><th>µs / s</th>
       <th>Peak µs (recent)</th><th>Peak µs (boot)</th><th>Calls since boot</th></tr></thead>
@@ -104,6 +116,9 @@ const chips = LINKS.map(n => {
 
 // ---- state -----------------------------------------------------------------
 let lfo4s = [];
+const WATCH_S = 20;             // the sparkline's span
+let watchNames = [], maxWatches = 8;
+const watchData = {};           // name -> {last, hist: [[t, [words]]], box, rows}
 let readings = [], marks = [], lastErr = null, status = {}, cost = null, midiOn = true;
 let rates = [10, 25, 50], midiMaxHz = 10, dirty = true, hoverT = null;
 
@@ -138,6 +153,7 @@ function onState(s) {
   if (s.rates) rates = s.rates;
   if (s.midi_on_max_hz) midiMaxHz = s.midi_on_max_hz;
   setMidi(!!s.midi_on);
+  if (s.watches) setWatches(s.watches, s.max_watches);
   if (s.log) $("p-log").textContent = "log " + s.log.replace(/^.*[\\/](out[\\/])/, "$1");
   if (s.log) $("p-log").title = s.log + "\n" + (s.jsonl || "");
   note();
@@ -211,6 +227,90 @@ function renderLfo4() {
   $("p-lfo4-fast").textContent = "per reply: memcpy " + f.memcpy_calls + " · memset " + f.memset_calls +
     " · evaluator skips A " + f.skip_a + " / B " + f.skip_b + (last.clock ? "" : " · µs need DTCN0 running");
 }
+
+// ---- the watches -------------------------------------------------------------------
+function setWatches(names, max) {
+  watchNames = names;
+  if (max) maxWatches = max;
+  for (const n of Object.keys(watchData)) if (!names.includes(n)) { watchData[n].box.remove(); delete watchData[n]; }
+  for (const n of names) if (!watchData[n]) watchData[n] = newWatch(n);
+  $("p-w-add").disabled = $("p-w-frame").disabled = names.length >= maxWatches;
+}
+
+function newWatch(name) {
+  const box = el("div", { class: "watch" }, `<div class="w-head"><span class="w-name"></span>
+    <span class="w-age">waiting for a reading</span><button class="w-drop" title="Stop watching">×</button></div>
+    <div class="scroll"><table><thead><tr><th>Field</th><th>Address</th><th>Word</th><th>Hex</th>
+    <th>coarse.fine</th><th>Semitones</th><th>Last ${WATCH_S} s</th><th>Changed</th></tr></thead><tbody></tbody></table></div>`);
+  box.querySelector(".w-name").textContent = name;
+  box.querySelector(".w-drop").onclick = () => watchCall("drop=" + encodeURIComponent(name));
+  $("p-w-list").appendChild(box);
+  return { box, rows: null, last: null, hist: [], changedAt: {} };
+}
+
+function onWatch(e) {
+  const w = watchData[e.name];
+  if (!w) return;
+  w.last = e;
+  w.hist.push([e.t, e.values.map(v => v.word)]);
+  while (w.hist.length && w.hist[0][0] < e.t - WATCH_S) w.hist.shift();
+  for (const n of e.changed || []) w.changedAt[n] = e.t;
+  renderWatch(w);
+}
+
+function renderWatch(w) {
+  const e = w.last, tb = w.box.querySelector("tbody");
+  if (!w.rows) {
+    w.rows = e.values.map(v => {
+      const tr = el("tr");
+      const cells = Array.from({ length: 7 }, () => el("td", { class: "num" }));
+      const spark = el("canvas", { class: "w-spark", width: "120", height: "18" });
+      cells.splice(6, 0, el("td", {}));
+      cells[6].appendChild(spark);
+      cells.forEach(c => tr.appendChild(c));
+      tb.appendChild(tr);
+      return { tr, cells, spark };
+    });
+  }
+  w.box.querySelector(".w-age").textContent = "t " + fx(e.t, 1) + " s";
+  e.values.forEach((v, i) => {
+    const r = w.rows[i];
+    if (!r) return;
+    const at = w.changedAt[v.name];
+    const vals = [v.name, "0x" + v.addr.toString(16).padStart(8, "0"), String(v.word), v.hex,
+      v.coarse_fine === undefined ? "" : fx(v.coarse_fine, 3),
+      v.semitones === undefined ? "" : (v.semitones > 0 ? "+" : "") + fx(v.semitones, 2), null,
+      at === undefined ? "" : fx(at - e.t, 1) + " s"];
+    vals.forEach((t, k) => { if (t !== null && r.cells[k].textContent !== t) r.cells[k].textContent = t; });
+    r.tr.classList.toggle("fresh", at !== undefined && e.t - at < 1.0);
+    spark(r.spark, w.hist, i, e.t);
+  });
+}
+
+function spark(cv, hist, i, t1) {
+  const x = cv.getContext("2d"), W = cv.width, H = cv.height;
+  x.clearRect(0, 0, W, H);
+  if (hist.length < 2) return;
+  const ys = hist.map(h => h[1][i]);
+  let lo = Math.min(...ys), hi = Math.max(...ys);
+  if (lo === hi) { lo -= 1; hi += 1; }
+  x.strokeStyle = css("--blue") || "#6FA8CF"; x.lineWidth = 1.5; x.beginPath();
+  hist.forEach(([t, w], k) => {
+    const X = W - (t1 - t) / WATCH_S * W, Y = H - 2 - (w[i] - lo) / (hi - lo) * (H - 4);
+    k ? x.lineTo(X, Y) : x.moveTo(X, Y);
+  });
+  x.stroke();
+}
+
+function watchCall(q) {
+  fetch("/watch?" + q).then(r => r.json()).then(r => {
+    $("p-w-msg").textContent = r.message || "";
+    onState(r);
+  }).catch(() => {});
+}
+$("p-w-frame").onclick = () => watchCall("add=" + encodeURIComponent("frame:" + $("p-w-track").value));
+$("p-w-add").onclick = () => watchCall("add=" + encodeURIComponent($("p-w-spec").value));
+$("p-w-spec").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); $("p-w-add").click(); } });
 
 function onMark(m) {
   marks.push(m);
@@ -551,15 +651,20 @@ on("backlog", b => {
     else if (ev.type === "mark") marks.push(ev);
     else if (ev.type === "probe-cost") cost = ev;
     else if (ev.type === "probe-lfo4") lfo4s.push(ev);
+    else if (ev.type === "probe-watch") onWatch(ev);
   }
   if (readings.length) render(readings[readings.length - 1]);
   dirty = true; note();
 });
 on("probe", onProbe);
 on("probe-lfo4", onLfo4);
+on("probe-watch", onWatch);
 on("probe-status", onStatus);
 on("mark", onMark);
 on("probe-cost", c => { cost = c; note(); });
-on("probe-error", e => { lastErr = e.error; note(); });
+on("probe-error", e => {
+  lastErr = e.error; note();
+  if (watchNames.some(n => e.error.includes("(" + n + ","))) $("p-w-msg").textContent = e.error;
+});
 setMidi(true);
 })();

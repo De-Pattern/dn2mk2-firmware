@@ -12,6 +12,7 @@ keeps it), and publishes events:
                                     plus the round trip and the achieved rate)
     {'type': 'probe-cost', ...}     a calibration's result: context switches per request
     {'type': 'probe-lfo4', ...}     a profiling build's lfo4 timers, per STATS (with --symbols)
+    {'type': 'probe-watch', ...}    one watch's named values, per STATS (`dn2watch`)
     {'type': 'probe-error', ...}    a reply that could not be read, and why
 
 **One request in flight, never more.** STATS goes out when the previous one
@@ -38,6 +39,12 @@ after each STATS reply, at the addresses in the build's `symbols.json`
 second request per reading, still one in flight at a time, so it halves the
 rate the round trip allows and doubles the probe's own cost.
 
+**Watches** (`dn2watch`: the frame's fields for a track, or any span PEEK
+allows) are read the same way: after each STATS, one PEEK per span of each
+watch, in turn, still one in flight. Each costs a round trip, so every watch
+lowers the achieved rate; `dn2watch.MAX_WATCHES` bounds them. A PEEK given up
+on drops the rest of that round.
+
 **States.** `searching`: HELLO once a second since the port opened. `absent`:
 three seconds of that with no answer -- stock firmware, or a probe build with
 USB CONFIG not on USB MIDI / Overbridge; HELLO goes on every three seconds, so
@@ -57,6 +64,7 @@ from collections import deque
 
 import dn2probe
 import dn2stats
+import dn2watch
 
 SEARCH_EVERY, SEARCH_FOR, ABSENT_EVERY, LOST_AFTER = 1.0, 3.0, 3.0, 2.0
 GIVE_UP = 0.5                  # a STATS unanswered this long is counted lost, and the next goes out
@@ -116,8 +124,9 @@ def _r(v, nd=1):
 
 class Poller:
     def __init__(self, send, publish, rate_hz: float = DEFAULT_HZ, t0: float | None = None,
-                 lfo4: tuple | None = None):
+                 lfo4: tuple | None = None, watches=()):
         self.send = send
+        self.watches: list = list(watches)
         self.lfo4 = lfo4           # (start, length, offsets) from dn2probe.lfo4_layout, or None
         if lfo4 and not dn2probe.peek_allowed(lfo4[0], lfo4[1]):
             raise ValueError('lfo4 profile block 0x%08x+%d is outside what PEEK allows' % lfo4[:2])
@@ -146,6 +155,15 @@ class Poller:
             self.calibration = Calibration(**kw)
             self._set(self.state, time.time())
 
+    def set_watches(self, watches) -> None:
+        """Replace what is read after each STATS (a list of dn2watch.Watch)."""
+        watches = list(watches)
+        if len(watches) > dn2watch.MAX_WATCHES:
+            raise ValueError('at most %d watches' % dn2watch.MAX_WATCHES)
+        with self.lock:
+            self.watches = watches
+            self.watch_prev = {k: v for k, v in self.watch_prev.items() if k in {w.name for w in watches}}
+
     def _period(self) -> float:
         return 1.0 / (self.calibration.rate() if self.calibration else self.rate_hz)
 
@@ -162,8 +180,11 @@ class Poller:
         self.search_from = now
         self.last_hello = None
         self.last_reply = None
-        self.inflight: tuple[int, float, str] | None = None    # (seq, sent at, 'stats' | 'peek')
+        self.inflight: tuple | None = None     # (seq, sent at, 'stats' | 'peek'[, what the peek reads])
+        self.round: list = []                  # the PEEKs still to send after this STATS
+        self.reads: dict = {}                  # a watch's spans read so far this round
         self.lfo4_prev: dict | None = None
+        self.watch_prev: dict = {}
         self.last_sent = None
         self.rtts: deque = deque(maxlen=64)
         self.arrivals: deque = deque()
@@ -206,6 +227,7 @@ class Poller:
                 if self.inflight and now - self.inflight[1] > GIVE_UP:
                     self.lost_replies += 1
                     self.inflight = None
+                    self.round, self.reads = [], {}
                 if self.inflight is None and (self.last_sent is None
                                               or now - self.last_sent >= self._period()):
                     self.last_sent = now
@@ -241,9 +263,21 @@ class Poller:
         with self.lock:
             self.last_reply = now
             if r['status']:
+                fl = self.inflight
+                what = ''
+                if fl and fl[0] == r['seq']:    # answered, if refused: the next goes out now, not in GIVE_UP
+                    self.inflight = None
+                    if fl[2] == 'peek':
+                        item = fl[3]
+                        what = ' (%s, 0x%08x +%d)' % ('lfo4' if item[0] == 'lfo4' else item[1].name,
+                                                      item[2], item[3])
+                        if item[0] == 'watch':    # the rest of that watch cannot complete this round
+                            self.round = [x for x in self.round if x[1] is not item[1]]
                 self.publish({'type': 'probe-error', 't': self._rel(now),
-                              'error': 'the probe answered 0x%02x with status %d (%s)'
-                              % (r['cmd'], r['status'], dn2probe.STATUS.get(r['status'], '?'))})
+                              'error': 'the probe answered 0x%02x with status %d (%s)%s'
+                              % (r['cmd'], r['status'], dn2probe.STATUS.get(r['status'], '?'), what)})
+                if fl and fl[0] == r['seq'] and fl[2] == 'peek':
+                    self._next_peek(now)
                 return True
             cmd = r['cmd'] & 0x7F
             try:
@@ -251,11 +285,23 @@ class Poller:
                     self._hello(r['payload'], now)
                 elif cmd == dn2probe.STATS and self.state == 'present':
                     self._stats(r, now)
-                    if self.lfo4 and self.inflight is None:
-                        lo, n, _ = self.lfo4
-                        self.inflight = (self._ask(lambda q: dn2probe.req_peek(q, lo, n), now), now, 'peek')
+                    if self.inflight is None:
+                        lfo4 = [('lfo4', None, self.lfo4[0], self.lfo4[1])] if self.lfo4 else []
+                        self.round = lfo4 + [('watch', w, lo, n) for w in self.watches for lo, n in w.spans]
+                        self.reads = {}
+                        self._next_peek(now)
                 elif cmd == dn2probe.PEEK and self.state == 'present':
-                    self._peek(r, now)
+                    fl = self.inflight
+                    if not (fl and fl[0] == r['seq'] and fl[2] == 'peek'):
+                        return True             # a reply to a PEEK given up on: its round is gone
+                    self.inflight = None
+                    try:
+                        if fl[3][0] == 'lfo4':
+                            self._peek(r, now)
+                        else:
+                            self._watch(fl[3], r, now)
+                    finally:
+                        self._next_peek(now)
             except ValueError as exc:
                 self.publish({'type': 'probe-error', 't': self._rel(now), 'error': str(exc),
                               'raw': r['payload'][:96].hex(' ')})
@@ -309,9 +355,31 @@ class Poller:
                 self.publish(res)
                 self._set(self.state, now)
 
+    def _next_peek(self, now: float) -> None:
+        """Send the round's next PEEK, if any is left and none is in flight."""
+        if self.inflight is not None or not self.round:
+            return
+        item = self.round.pop(0)
+        lo, n = item[2], item[3]
+        self.inflight = (self._ask(lambda q: dn2probe.req_peek(q, lo, n), now), now, 'peek', item)
+
+    def _watch(self, item: tuple, r: dict, now: float) -> None:
+        _, w, lo, n = item
+        p = dn2probe.decode_peek(r['payload'])
+        if p['addr'] != lo or len(p['data']) != n:
+            self.round = [x for x in self.round if x[1] is not w]
+            raise ValueError('watch %s: PEEK came back at 0x%08x +%d, not 0x%08x +%d'
+                             % (w.name, p['addr'], len(p['data']), lo, n))
+        reads = self.reads.setdefault(w.name, {})
+        reads[lo] = p['data']
+        if len(reads) < len(w.spans):
+            return
+        values = w.decode(reads)
+        prev, self.watch_prev[w.name] = self.watch_prev.get(w.name), values
+        self.publish({'type': 'probe-watch', 't': self._rel(now), 'name': w.name, 'values': values,
+                      'changed': dn2watch.changed(prev, values)})
+
     def _peek(self, r: dict, now: float) -> None:
-        if self.inflight and self.inflight[0] == r['seq'] and self.inflight[2] == 'peek':
-            self.inflight = None
         if not self.lfo4:
             return
         p = dn2probe.decode_peek(r['payload'])

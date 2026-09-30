@@ -7,6 +7,9 @@ derived from irpina/digihealth (tools/digiusb.py, tools/winmidi.py), GPL-2.0-or-
     python tools/dn2live.py --in 1 --out 2 --http 8737
     python tools/dn2live.py --symbols out/fxmod-lfo4fast-songguard-arpmodes-usbprobe/symbols.json
                                                   a profiling build: lfo4's timers too
+    python tools/dn2live.py --watch frame:1 --watch 0x800068e4+32
+                                                  memory read live after each STATS (dn2watch);
+                                                  the page adds and drops watches too
     powershell -File tools/dn2live_launch.ps1     kill a stale one, start, open the page
 
 It is `scripts/midi_live.py` (whose parser, bus and signal map are imported,
@@ -24,8 +27,8 @@ the wiring and the HTTP/SSE server; the panel is `dn2live_panel.js` / `.css`.
 logged, and the poll rate may go past 10 Hz to 25 or 50. The rate the port
 actually sustains is measured per request and shown beside the asked one.
 
-**Read-only on the instrument.** The only bytes sent are the probe's HELLO and
-STATS, and the probe has no command that writes. Stock firmware drops them
+**Read-only on the instrument.** The only bytes sent are the probe's HELLO,
+STATS and PEEK (lfo4's timers, the watches), and the probe has no command that writes. Stock firmware drops them
 (device byte 0x7D is above its router's table) and the page says "no probe on
 this firmware" while the MIDI view goes on working.
 
@@ -52,6 +55,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import dn2log  # noqa: E402
 import dn2poll  # noqa: E402
+import dn2watch  # noqa: E402
 
 PANEL_JS = HERE / "dn2live_panel.js"
 PANEL_CSS = HERE / "dn2live_panel.css"
@@ -118,7 +122,7 @@ class Live:
 
     def __init__(self, opener, rate_hz: float = dn2poll.DEFAULT_HZ, midi_on: bool = True,
                  log_dir: pathlib.Path = LOG_DIR, started: float | None = None,
-                 lfo4: tuple | None = None):
+                 lfo4: tuple | None = None, watches=()):
         ml = _midi_live()
         self.ml = ml
         self.started = time.time() if started is None else started
@@ -134,7 +138,7 @@ class Live:
         if midi_on:
             rate_hz = min(rate_hz, MIDI_ON_MAX_HZ)
         self.poller = dn2poll.Poller(self.holder.send, self.publish, rate_hz=rate_hz, t0=self.started,
-                                     lfo4=lfo4)
+                                     lfo4=lfo4, watches=watches)
 
     # ---- events ---------------------------------------------------------------
 
@@ -146,7 +150,7 @@ class Live:
             self.last_cost = ev
         elif kind == "mark":
             self.marks.append(ev)
-        if kind in ("probe", "mark", "probe-cost", "probe-lfo4"):
+        if kind in ("probe", "mark", "probe-cost", "probe-lfo4", "probe-watch"):
             self.backlog.append(ev)
             cut = ev["t"] - BACKLOG_S
             while self.backlog and self.backlog[0]["t"] < cut:
@@ -166,6 +170,7 @@ class Live:
                 "jsonl": str(self.log.jsonl_path), "names": list(self.holder.names),
                 "midi_on_max_hz": MIDI_ON_MAX_HZ, "rates": list(dn2poll.RATES),
                 "lfo4": bool(self.poller.lfo4),
+                "watches": [w.name for w in self.poller.watches], "max_watches": dn2watch.MAX_WATCHES,
                 "now": round(time.time() - self.started, 3)}
 
     def set_midi(self, on: bool) -> dict:
@@ -175,6 +180,25 @@ class Live:
         st = self.state()
         self.bus.publish(st)
         return st
+
+    def watch(self, add: str | None = None, drop: str | None = None) -> dict:
+        """Add a watch by its spec, or drop one by name. -> the state, with a message."""
+        ws, msg = list(self.poller.watches), ""
+        try:
+            if add:
+                w = dn2watch.parse(add)
+                if w.name in [x.name for x in ws]:
+                    msg = f"{w.name} is already watched"
+                else:
+                    ws.append(w)
+            if drop:
+                ws = [x for x in ws if x.name != drop]
+            self.poller.set_watches(ws)
+        except ValueError as exc:
+            msg = str(exc)
+        st = self.state()
+        self.bus.publish(st)
+        return {**st, "ok": not msg, "message": msg}
 
     def set_rate(self, hz: float) -> tuple[float, str]:
         note = ""
@@ -268,6 +292,8 @@ def handler(live: Live):
                 return self.send_json({"ok": True, "rate_hz": hz, "message": note})
             if p == "/midi":
                 return self.send_json(live.set_midi(q.get("on", "1") not in ("0", "off", "false")))
+            if p == "/watch":
+                return self.send_json(live.watch(q.get("add"), q.get("drop")))
             if p == "/calibrate":
                 live.poller.calibrate()
                 return self.send_json({"ok": True, "message": "calibrating: 5 Hz, then 25 Hz, 5 s each"})
@@ -353,7 +379,14 @@ def main(argv=None) -> int:
                    help="STATS requests a second (10; 25 or 50 with --no-midi)")
     p.add_argument("--no-midi", action="store_true", help="start with the MIDI view off")
     p.add_argument("--symbols", help="a profiling build's symbols.json: read lfo4's timers by PEEK too")
+    p.add_argument("--watch", action="append", default=[], metavar="SPEC",
+                   help="memory to read live: frame:T (track 1..16) or ADDR+LEN[:u8|u16|s16|u32]")
     args = p.parse_args(argv)
+    try:
+        watches = [dn2watch.parse(s) for s in args.watch]
+    except ValueError as exc:
+        print(f"  --watch: {exc}")
+        return 1
     lfo4 = None
     if args.symbols:
         import dn2probe
@@ -372,7 +405,7 @@ def main(argv=None) -> int:
         return 0
     try:
         live = Live(real_opener(args.port, args.i, args.o), rate_hz=args.rate,
-                    midi_on=not args.no_midi, lfo4=lfo4)
+                    midi_on=not args.no_midi, lfo4=lfo4, watches=watches)
     except OSError as exc:
         print(f"  {exc}")
         print("  Close Elektron Transfer, DNX and midi_live first: Windows lets one program")
@@ -382,10 +415,12 @@ def main(argv=None) -> int:
     server = ThreadingHTTPServer(("127.0.0.1", args.http), handler(live))
     server.daemon_threads = True
     print(f"  MIDI in  {live.holder.names[0]}")
-    print(f"  MIDI out {live.holder.names[1]}   (probe HELLO/STATS only; read-only)")
+    print(f"  MIDI out {live.holder.names[1]}   (probe HELLO/STATS/PEEK only; read-only)")
     print(f"  log      {live.log.csv_path}")
     if lfo4:
         print(f"  lfo4     PEEK 0x{lfo4[0]:08x} +{lfo4[1]} after every STATS")
+    for w in watches:
+        print(f"  watch    {w.name}: " + ", ".join(f"PEEK 0x{lo:08x} +{n}" for lo, n in w.spans))
     print(f"  open     http://127.0.0.1:{args.http}")
     print("  ctrl-c to stop\n")
     try:
