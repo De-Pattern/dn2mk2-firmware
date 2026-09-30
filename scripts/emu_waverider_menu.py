@@ -86,6 +86,9 @@ WATCH = {
     0x4004CC08: ("machine setter(sound, type, flag)", 8),
     0x40031880: ("MACHINE SEL commit(model, track, type)", 12),
     0x4004C30C: ("machine change: reset its parameters(sound, 1, old type, 0)", 12),
+    0x400C24D2: ("SYN page count(type)", 4),
+    0x400C24EE: ("SYN page descriptor(type, page)", 4),
+    0x400C248E: ("per-machine descriptor 0x42432b24(type)", 4),
 }
 SETTER_WRITE = 0x4004CC94               # moveb %d2,%a0@(222)
 # every `mvs.b %aN@(222),%dM` in the image (objdump of MAIN OS): site -> N
@@ -104,6 +107,8 @@ KIT_POINTER, KIT_SYNC =0x800052A0, 0x40025AF4   # the live kit; its sixteen-trac
 TRACK_SYNC, SOUND_STRIDE = 0x4002549C, 1163      # (sound, track) -> the mirror; kit + 52 + 1163 t
 MIRROR_TYPE, MIRROR_STRIDE =0x80003AF0 + 3468, 153   # the builder's per-track type byte
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400   # above BSS (0x466b74d0); Machine.write maps it
+GET_SHORT_NAME = 0x400372DA             # getShortName(this, id): record + 0x30
+PARAM_TABLE, PARAM_RECORDS, PARAM_BYTES = 0x401F7F94, 321, 60
 
 
 def main() -> int:
@@ -120,6 +125,9 @@ def main() -> int:
     p.add_argument("--regs-at", action="append", default=[], help="record registers at VA")
     p.add_argument("--args-at", action="append", default=[],
                    help="keep the long arguments of the last entry to VA (for call: argN@VA)")
+    p.add_argument("--label-log", action="store_true",
+                   help="log every getShortName call (caller, this, id, this+0xDE) and every read of a "
+                        "record's short-name field (+0x30), with the reading code: where the SYN page's labels come from")
     p.add_argument("--watch-types", action="store_true",
                    help="log every write to a track's machine type byte (sound+0xDE)")
     a = p.parse_args()
@@ -134,6 +142,15 @@ def main() -> int:
         runs = differences(stock, image)
         n = machine.apply(runs)
         print(f"  installed {len(runs)} run(s), {n} bytes, from {build}")
+        # A snapshot has booted already, so the platform loader never runs here: put
+        # its run-time copies (the area's data window and each CODE chunk) where the
+        # loader would have, or a build on the platform jumps into empty RAM.
+        if len(image) > len(stock):
+            sys.path.insert(0, str(HERE.parent / "src"))
+            from dnfw.mods import platform       # noqa: PLC0415
+            for va, blob in platform.runtime(image):
+                machine.write(va, blob)
+                print(f"  placed {len(blob)} bytes at {va:#010x} (the platform loader's copy)")
     else:
         print("  stock: nothing installed (the control)")
 
@@ -181,6 +198,36 @@ def main() -> int:
             ret = f"{arg(0) & 0xFFFFFFFF:#010x}"
             getter5[ret] = getter5.get(ret, 0) + 1
     uc.hook_add(UC_HOOK_CODE, getter_rts, begin=GETTER_RTS, end=GETTER_RTS)
+
+    labels: dict[str, dict] = {"calls": {}, "field_reads": {}}
+    if a.label_log:
+        from unicorn import UC_HOOK_MEM_READ
+
+        def short_name(uc_, address, size, user):
+            this, rid = arg(4) & 0xFFFFFFFF, arg(8)
+            ret = arg(0) & 0xFFFFFFFF
+            try:
+                t = struct.unpack(">b", bytes(uc.mem_read(this + 0xDE, 1)))[0]
+            except Exception:                   # noqa: BLE001 -- this may not be a sound
+                t = None
+            key = f"{ret:#010x} id {rid}"
+            row = labels["calls"].setdefault(key, {"n": 0, "this": f"{this:#010x}", "this_DE": t})
+            row["n"] += 1
+
+        uc.hook_add(UC_HOOK_CODE, short_name, begin=GET_SHORT_NAME, end=GET_SHORT_NAME)
+
+        def field_read(uc_, access, address, size, value, user):
+            off = (address - PARAM_TABLE) % PARAM_BYTES
+            if 0x30 <= off < 0x34:
+                pc = uc.reg_read(K.UC_M68K_REG_PC)
+                rid = (address - PARAM_TABLE) // PARAM_BYTES
+                row = labels["field_reads"].setdefault(f"{pc:#010x}", {"n": 0, "ids": []})
+                row["n"] += 1
+                if rid not in row["ids"] and len(row["ids"]) < 24:
+                    row["ids"].append(rid)
+
+        uc.hook_add(UC_HOOK_MEM_READ, field_read, begin=PARAM_TABLE,
+                    end=PARAM_TABLE + PARAM_RECORDS * PARAM_BYTES - 1)
 
     regs_at: dict[str, list] = {}
     for va in a.regs_at:
@@ -415,7 +462,7 @@ def main() -> int:
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
-              "frames": frames, "memory": mems}
+              "frames": frames, "memory": mems, "labels": labels}
     print(json.dumps(result, indent=1))
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(result, indent=1) + "\n")

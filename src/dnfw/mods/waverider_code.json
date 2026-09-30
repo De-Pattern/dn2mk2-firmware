@@ -69,6 +69,12 @@
    "what": "MACHINE SEL: the current machine's marker (lea into a3): asks for the real type"
   },
   {
+   "va": 1074152994,
+   "stock": "4eb9400372da",
+   "new": "4eb94670c086",
+   "what": "the SYN page's label fetch: Waverider's labels for a Waverider track (M7)"
+  },
+  {
    "va": 1074206996,
    "stock": "4004b7f2",
    "new": "402903c8",
@@ -83,14 +89,14 @@
   {
    "va": 1074537682,
    "stock": "7204202f0004",
-   "new": "4eb940290392",
-   "what": "SYN page count(type): 0x42432ad4[type].count: type 5 reads WaveTone's row"
+   "new": "4eb94670c02a",
+   "what": "SYN page count(type): 2 for a Waverider track (M7); otherwise type 5 reads WaveTone's"
   },
   {
    "va": 1074537714,
    "stock": "222f0008202f000c",
-   "new": "4eb9402903a24e71",
-   "what": "SYN page(type, n): 0x42432ad4[type].pages[n]; type 5 reads WaveTone's"
+   "new": "4eb94670c0484e71",
+   "what": "SYN page(type, n): Waverider's own pages for a Waverider track (M7); otherwise type 5 reads WaveTone's"
   },
   {
    "va": 1074616948,
@@ -259,11 +265,20 @@
   "canon_page": 1076429730,
   "canon_track": 1076429750,
   "canon_valid": 1076419380,
+  "descriptors": 1181794504,
+  "is_wr": 1181794304,
   "list": 1076423096,
   "long_name": 1076419364,
   "names": 1076423000,
   "raw_track": 1076429768,
   "short_name": 1076419374,
-  "slot_shim": 1076429692
+  "slot_shim": 1076429692,
+  "wr_count": 1181794346,
+  "wr_label": 1181794438,
+  "wr_page": 1181794376
+ },
+ "chunk": {
+  "load": 1181794304,
+  "code": "2f082f017200123942431a6cc2fc048b2079800052a0d1c17328011270005b8166027001221f205f4e756100ffd44a806706588f70024e75202f00087205b2806602700172044e756100ffb64a806722202f00107202b0816508203c42432bd4600a722cc0c106804670c0c8588f241f4e75222f000c202f00105b81660472014e755a814e756100ff784a806718202f000841fa00182218670cb2806704588860f420104e754ef9400372da000000ee4670c12a000000ef4670c12f000000f74670c133000000004021a6674670c120000000ee00000000000000ef000000f7000000000000000000000000000000000000000a4021a6784670c12000000000000000000000000000000000000000000000000000000000000000000000000a5761766572696465720054554e4500504f530054424c0000"
  }
 }
