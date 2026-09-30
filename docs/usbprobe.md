@@ -119,13 +119,16 @@ stock guard moved with them, and `PROTO` is 3. The build differs from
 |---|---|---|---|
 | stopped | 60.5 % | 56.3 % (peak 64 %) | ~264, all from the spin |
 | a Waverider pattern playing | 58-61 % | 54 % (peak 63-72 %) | ~260-287 |
+| a busy pattern (the owner's) | 59 % | 55 % (**peak 75-83 %**) | ~240 |
 | SAVE PROJECT | 100 % for ~1 s, then 77-83 % for ~3 s | 57-61 % (peak 76 %) | switches up to ~1,350/s |
 
 During the save, frames/s held 1500, nothing was late and no ISR ran over a
 frame: the save takes all the idle time, the audio keeps its priority. The
 ColdFire's load is mostly the audio ISR, which runs every frame whether a
 pattern plays or not, so playing barely moves it; the SHARC's load is not in
-this figure.
+this figure. What a busy pattern does raise is the ISR's **peak**: the
+frames where trigs, locks and LFOs land cost more, and that peak (not the
+average) is the headroom to watch -- over 100 % of a frame, audio is late.
 
 ### PEEK's allow list: DN2 1.11's own map, not the mk1's
 
