@@ -48,7 +48,7 @@ from __future__ import annotations
 import json
 import pathlib
 
-from . import Extent, ModError, Result
+from . import RAM, Extent, ModError, Result
 
 ID = "arpmodes"
 NAME = "Arpeggiator SHUF and RAND"
@@ -98,3 +98,8 @@ def apply(firmware) -> Result:
                   notes=["the ARPEGGIATOR MODE menu offers SHUF and RAND after CYCL, "
                          "and stops there",
                          f"{len(SPEC['edits'])} edits in section 3, nothing appended"])
+
+
+def ram() -> list[Extent]:
+    """The RAM above BSS the code uses (`SPEC["ram"]`), for the platform's comparison."""
+    return [Extent(RAM, r["va"], r["bytes"], r["what"]) for r in SPEC.get("ram", [])]

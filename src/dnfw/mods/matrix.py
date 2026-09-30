@@ -37,11 +37,6 @@ NOTES: dict[frozenset, str] = {
     frozenset(("arpmodes", "midiarp")):
         "a MIDI track's arp runs the same step, so SHUF and RAND should reach MIDI tracks; "
         "not run.",
-    frozenset(("arpplocks", "bootscreen")):
-        "bootscreen reserves 0x380 bytes at 0x402dfa1c for its code and refuses if any is "
-        "used; its code is 366 bytes and ends 2 bytes before arpplocks' cave at 0x402dfb8c, "
-        "so bootscreen first then arpplocks writes disjoint bytes. Whether bootscreen uses "
-        "the rest of its reservation at run time is not measured.",
     frozenset(("fxmod", "lfo4")):
         "emulator, 2026-09-26: the LFO4 slot harness and a turn of all eight LFO4 dials match "
         "lfo4 alone; fxmod's DEST checks and names match fxmod alone; every LFO page, LFO4's "
@@ -84,10 +79,12 @@ class Pair:
 
 
 def _extents(mod, firmware):
+    """What a mod writes, and the RAM it uses at run time (`ram()`, if any)."""
     try:
-        return list(mod.extents(firmware))
+        found = list(mod.extents(firmware))
     except TypeError:
-        return list(mod.extents())
+        found = list(mod.extents())
+    return found + list(getattr(mod, "ram", list)())
 
 
 def pairs(firmware, registry: dict, apply_one, stage) -> list[Pair]:
@@ -130,14 +127,12 @@ def cell(pair: Pair) -> str:
 def _short(pair: Pair) -> str:
     """Why a pair is refused or ordered, in one clause a reader can use."""
     why = pair.reason()
-    if "0x0000013f" in why:
-        return "both need the start-up hook and the appended area"
+    if "both use RAM" in why:
+        return "both use the same RAM"
     if "both write" in why:
         return "both use the same code cave"
     if "must be applied first" in why:
         return why.split(" (")[0]
-    if "boot-screen code space" in why:
-        return "bootscreen must be applied first"
     if "candidate parameter tables" in why:
         return "moddest must be applied first"
     if "parameter table has been moved" in why:

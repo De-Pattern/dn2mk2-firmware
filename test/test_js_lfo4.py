@@ -125,11 +125,10 @@ def test_the_refusals_are_worded_the_same(run):
 
     stock = run["stock"]
     edited = bytearray(stock)
-    edited[lfo4.SPEC["edits"][0]["va"] - lfo4.BASE] ^= 0xFF
+    edited[lfo4._edits()[0]["va"] - lfo4.BASE] ^= 0xFF
     after = _Staged(lfo4.compose(stock))
     python = {
-        "lfo4_after_lfowaves": _refusal(lambda: lfo4.compose(
-            lfowaves.apply(run["firmware"]).payloads[lfo4.SECTION])),
+        "lfowaves_after_lfo4": _refusal(lambda: lfowaves.apply(after)),
         "lfo4_on_longer": _refusal(lambda: lfo4.compose(stock + bytes(16))),
         "lfo4_on_edited": _refusal(lambda: lfo4.compose(bytes(edited))),
         "fxmod_after_lfo4": _refusal(lambda: fxmod.apply(after)),

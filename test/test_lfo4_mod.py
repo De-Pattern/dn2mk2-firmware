@@ -72,7 +72,7 @@ def test_refuses_an_image_that_already_grew(stock):
 
 
 def test_refuses_a_changed_edit_site(stock):
-    e = lfo4.SPEC["edits"][0]
+    e = lfo4._edits()[0]
     bad = bytearray(stock)
     bad[e["va"] - BASE] ^= 0xFF
     with pytest.raises(ModError, match="not stock"):

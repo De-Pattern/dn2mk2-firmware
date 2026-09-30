@@ -2,9 +2,11 @@
  * A fourth LFO: a fourth page under `[MOD]` that behaves like LFO1-3.
  *
  * The browser half of `src/dnfw/mods/lfo4.py`, which carries the evidence and
- * the hardware result. Same steps, same order: check the stock length and every
- * edit's stock bytes, rebuild the relocated parameter table from this image,
- * put it in the appended blob, write the edits, append the blob.
+ * the hardware result. Same steps, same order: split off any area the image
+ * already carries, check and write every edit (through `platform.write`, so an
+ * edit in a site another mod displaced lands on its copy), rebuild the
+ * relocated parameter table from this image, and add LFO4's two CODE chunks to
+ * the platform's area. The loader and its start-up call are the platform's.
  * `scripts/js_lfo4_check.mjs` fails if the bytes differ from the Python's, and
  * the Python's are checked byte for byte against the release build when
  * `scripts/gen_lfo4_code.py` packages it.
@@ -18,6 +20,7 @@
  */
 
 import { CODE } from "./lfo4-code.js";
+import * as platform from "./platform.js";
 
 export const ID = "lfo4";
 export const NAME = "A fourth LFO";
@@ -36,7 +39,6 @@ const SLOTS = [0, 1, 2, 3, 4, 5, 5, 6, 7, 1];
 export class ModError extends Error {}
 
 const hex = (s) => Uint8Array.from(s.match(/../g) ?? [], (b) => parseInt(b, 16));
-const toHex = (a) => Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
 /** Python's `f"{n:,}"`, whatever the browser's locale. */
 const grouped = (n) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 const u32 = (d, at) => ((d[at] << 24) >>> 0) + (d[at + 1] << 16) + (d[at + 2] << 8) + d[at + 3];
@@ -44,17 +46,23 @@ const put32 = (d, at, v) => {
   d[at] = v >>> 24; d[at + 1] = (v >>> 16) & 0xff; d[at + 2] = (v >>> 8) & 0xff; d[at + 3] = v & 0xff;
 };
 
-export const EDITS = CODE.edits.length;
-export const EDITED_BYTES = CODE.edits.reduce((n, e) => n + e.new.length / 2, 0);
+/** An edit the platform makes: the start-up call or the loader in its cave. */
+const platformOwned = (e) => {
+  const lo = e.va - BASE, hi = lo + e.new.length / 2;
+  return platform.extents().some((x) => x.start < hi && lo < x.start + x.length);
+};
+const OWN = CODE.edits.filter((e) => !platformOwned(e));
+
+export const EDITS = OWN.length;
+export const EDITED_BYTES = OWN.reduce((n, e) => n + e.new.length / 2, 0);
 export const APPENDED = CODE.blob.length / 2;
 export const RECORDS = CODE.table_records;
 
 export function extents() {
   return [
-    ...CODE.edits.map((e) => ({ section: SECTION, start: e.va - BASE,
-                                length: e.new.length / 2, what: "LFO4 edit" })),
-    { section: SECTION, start: CODE.area_va - BASE, length: APPENDED,
-      what: "appended data area (loader, LFO4's C, the relocated table)" },
+    ...OWN.map((e) => ({ section: SECTION, start: e.va - BASE,
+                         length: e.new.length / 2, what: "LFO4 edit" })),
+    ...platform.extents(APPENDED),
   ];
 }
 
@@ -100,39 +108,20 @@ export function table(content) {
   return out;
 }
 
-/** Throw unless `content` is stock 1.11 MAIN OS wherever this mod writes. */
-export function guard(content) {
-  if (content.length !== CODE.stock_length) {
-    throw new ModError(`MAIN OS is ${grouped(content.length)} B, not ${grouped(CODE.stock_length)}: `
-      + "either not Digitone II 1.11, or another mod has already appended data "
-      + "(lfowaves and bootscreen do)");
-  }
-  for (const e of CODE.edits) {
-    const at = e.va - BASE;
-    const have = toHex(content.subarray(at, at + e.stock.length / 2));
-    if (have !== e.stock) {
-      throw new ModError(`0x${e.va.toString(16).padStart(8, "0")} is not stock (${have.slice(0, 24)}...); `
-        + "another mod has changed it, or this is not Digitone II 1.11");
-    }
-  }
-}
-
-/** Stock-guarded edits, then the appended area with the table filled in. */
+/** Stock-guarded edits, then LFO4's chunks, with the table filled in, in the platform's area. */
 export function compose(content) {
-  guard(content);
+  const [base, others] = platform.split(content);
+  const out = base.slice();
+  for (const e of OWN) platform.write(out, others, e.va, hex(e.stock), hex(e.new));
+
   const blob = hex(CODE.blob);
-  const records = table(content);
+  const records = table(base);
   const at = CODE.table_offset;
   if (blob.subarray(at, at + records.length).some((b) => b !== 0)) {
     throw new ModError("lfo4_code.json is damaged: the table's place is not blank");
   }
   blob.set(records, at);
-
-  const out = new Uint8Array(content.length + blob.length);
-  out.set(content);
-  for (const e of CODE.edits) out.set(hex(e.new), e.va - BASE);
-  out.set(blob, content.length);
-  return out;
+  return platform.join(out, [...others, ...platform.parseArea(blob)]);
 }
 
 /** Throw unless this image is one the mod applies to; -> MAIN OS. */
@@ -141,7 +130,7 @@ export function check(firmware) {
   if (section === null) throw new ModError("image has no MAIN OS section");
   const original = section.unpack();
   if (original === null) throw new ModError("MAIN OS did not depack");
-  guard(original);
+  compose(original);                 // every refusal, before anything is offered
   return original;
 }
 
@@ -151,7 +140,7 @@ export function apply(firmware) {
   const content = compose(original);
   return {
     content,
-    notes: [`${EDITS} edits, appended ${grouped(APPENDED)} B; the parameter table rebuilt `
-            + `from this image; MAIN OS ${grouped(content.length)} B`],
+    notes: [`${EDITS} edits, ${grouped(APPENDED)} B of CODE chunks in the platform's area; `
+            + `the parameter table rebuilt from this image; MAIN OS ${grouped(content.length)} B`],
   };
 }

@@ -34,7 +34,7 @@ from __future__ import annotations
 import json
 import pathlib
 
-from . import Extent, ModError, Result
+from . import RAM, Extent, ModError, Result
 
 ID = "arpplocks"
 NAME = "Arpeggiator p-locks"
@@ -79,3 +79,13 @@ def apply(firmware) -> Result:
                   notes=["hold a trig in grid recording, turn MODE / SPEED / RANGE / N.LEN "
                          "in the ARPEGGIATOR menu: a p-lock",
                          f"{len(SPEC['edits'])} edits in section 3, nothing appended"])
+
+
+def ram() -> list[Extent]:
+    """The RAM above BSS the code uses (`SPEC["ram"]`), for the platform's comparison."""
+    return [Extent(RAM, r["va"], r["bytes"], r["what"]) for r in SPEC.get("ram", [])]
+
+
+# Bytes that only look like RAM above BSS (`dnfw.mods.ramcheck`): at 0x4028d214,
+# `lea 0x40054690,%a4 ; rts` (49 f9 40 05 46 90 4e 75) straddles into 0x46904e75.
+NOT_RAM = (0x4028D214,)

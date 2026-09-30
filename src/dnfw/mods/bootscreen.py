@@ -1,8 +1,7 @@
 """The boot screen: your mark in the intro, static or flashing, and the tunnel's density.
 
 Everything shown between power-on and the OS is one mod, because every change to
-it goes through the same two hooks -- the startup call that copies appended data
-up before the BSS clear, and the intro copy routine. Two boot-screen mods would
+it goes through the same hook, the intro copy routine. Two boot-screen mods would
 collide by construction, so there is one, with options.
 
 ## What the user chooses, and it is all data
@@ -23,7 +22,10 @@ does. Every choice above lands in a `BOOT` chunk of the appended data area.
   Each frame the stamp copies the chosen image over that bitmap, keyed on the
   intro's own frame counter, so the mark is scattered by the tunnel like the logo.
 - The images are **appended past the end of MAIN OS** and copied above BSS at
-  boot. Bigger than any free cave, so it has to be.
+  boot, as data chunks in the platform's area (`dnfw.mods.platform`); the stamp
+  itself is a `CODE` chunk at `0x46708000`. Until 2026-09-30 the stamp sat in the
+  cave at `0x402dfa1c` behind a copy stub of its own on the start-up hook, which
+  kept this mod apart from lfo4 and lfowaves. The stamp's bytes are unchanged.
 - **Seen under the emulator** frame by frame against stock, and **on the
   instrument on 2026-09-17**: the owner's Digitone II booted and played the
   animation.
@@ -32,10 +34,9 @@ does. Every choice above lands in a `BOOT` chunk of the appended data area.
 
 `dnfw.mods` says no section's unpacked length may change. That rule exists
 because addresses after a resize move. Appending **after the last byte** of MAIN
-OS moves nothing, since nothing addresses that space but this mod's own boot
-hook. So MAIN OS may grow, **only** through the shared area at `area_va`, and this
-mod refuses an image that already has one rather than overwriting it -- merging
-chunks from several data mods is the next step, not a silent collision.
+OS moves nothing, since nothing addresses that space but the platform loader. So
+MAIN OS may grow, **only** through the platform's area, which this mod adds its
+chunks to rather than replacing.
 
 ## What it cannot yet do
 
@@ -51,7 +52,7 @@ import json
 import pathlib
 import struct
 
-from . import Extent, ModError, Result
+from . import RAM, Extent, ModError, Result, platform
 
 ID = "bootscreen"
 NAME = "Boot screen"
@@ -146,33 +147,17 @@ def spin_frames(lit, **options) -> tuple[list[bytes], int]:
     return _images(grids, batspin.W), options.get("resolve", 120)
 
 
-def area(chunks: list[tuple[bytes, bytes]]) -> bytes:
-    """The shared appended area: 'DNFW', total length, a directory, the chunks."""
-    head = 12 + 12 * len(chunks)
-    directory, body, offset = b"", b"", head
-    for cid, data in chunks:
-        if len(cid) != 4:
-            raise ModError(f"chunk id {cid!r} is not four bytes")
-        pad = bytes(-len(data) % 4)
-        directory += cid + struct.pack(">II", offset, len(data))
-        body += data + pad
-        offset += len(data) + len(pad)
-    blob = SPEC["magic"].encode() + struct.pack(">II", head + len(body), len(chunks)) + directory + body
-    return blob
-
-
 def extents(firmware, area_length: int = 0) -> list[Extent]:
     off = lambda va: va - BASE
-    out = [
-        Extent(SECTION, off(SPEC["calls_va"]), 8, "startup hook: copy the appended area up"),
+    return [
         Extent(SECTION, off(SPEC["intro_va"]), 8, "intro hook: the mark"),
-        Extent(SECTION, off(SPEC["cave"]), len(bytes.fromhex(SPEC["code"])), "boot-screen code"),
         Extent(SECTION, off(SPEC["tunnel_x_va"]) + 2, 4, "tunnel scale x"),
         Extent(SECTION, off(SPEC["tunnel_y_va"]) + 2, 4, "tunnel scale y"),
-    ]
-    if area_length:
-        out.append(Extent(SECTION, off(SPEC["area_va"]), area_length, "appended data area"))
-    return out
+    ] + platform.extents(area_length)
+
+
+def ram() -> list[Extent]:
+    return [Extent(RAM, SPEC["load"], len(bytes.fromhex(SPEC["code"])), "the boot-screen stamp")]
 
 
 def apply(firmware, images: list[bytes], slow: int = 4, fast: int = 3,
@@ -182,22 +167,14 @@ def apply(firmware, images: list[bytes], slow: int = 4, fast: int = 3,
     section = firmware.container.find(SECTION)
     if section is None:
         raise ModError("image has no MAIN OS section")
-    content = bytearray(section.unpack())
+    base, others = platform.split(section.unpack())
+    content = bytearray(base)
 
-    if BASE + len(content) != SPEC["area_va"]:
-        raise ModError(
-            f"MAIN OS ends at 0x{BASE + len(content):08x}, not 0x{SPEC['area_va']:08x}: "
-            "either not Digitone II 1.11, or another mod has already appended data")
-    for va, stock, what in ((SPEC["calls_va"], SPEC["calls_stock"], "startup calls"),
-                            (SPEC["intro_va"], SPEC["intro_stock"], "intro copy routine")):
-        have = bytes(content[va - BASE:va - BASE + 8]).hex()
-        if have != stock:
-            raise ModError(f"0x{va:08x} holds {have}, not {stock} ({what}); "
-                           "this mod is for Digitone II 1.11")
-    code = bytes.fromhex(SPEC["code"])
-    cave = SPEC["cave"] - BASE
-    if any(content[cave:cave + SPEC["cave_cap"]]):
-        raise ModError("the boot-screen code space is already in use by another mod")
+    va, stock = SPEC["intro_va"], SPEC["intro_stock"]
+    have = bytes(content[va - BASE:va - BASE + 8]).hex()
+    if have != stock:
+        raise ModError(f"0x{va:08x} holds {have}, not {stock} (intro copy routine); "
+                       "this mod is for Digitone II 1.11, or the boot screen is already applied")
     for va, stock_scale in ((SPEC["tunnel_x_va"], STOCK_TUNNEL[0]), (SPEC["tunnel_y_va"], STOCK_TUNNEL[1])):
         have = bytes(content[va - BASE:va - BASE + 6])
         if have[2:] != struct.pack(">f", stock_scale):
@@ -210,22 +187,21 @@ def apply(firmware, images: list[bytes], slow: int = 4, fast: int = 3,
         chunks.append((SPEC["boot_chunk"].encode(), boot_chunk(images, slow, fast, rush, stop)))
     if not chunks:
         raise ModError("give a mark (images) or an ASCII animation")
-    blob = area(chunks)
+    chunks.append((platform.area.CODE,
+                   platform.area.CodeChunk(SPEC["load"], bytes.fromhex(SPEC["code"])).pack()))
 
-    content[cave:cave + len(code)] = code
-    jsr = b"\x4e\xb9" + struct.pack(">I", SPEC["boot"]) + b"\x4e\x71"
     jmp = b"\x4e\xf9" + struct.pack(">I", SPEC["stamp"]) + b"\x4e\x71"
-    content[SPEC["calls_va"] - BASE:SPEC["calls_va"] - BASE + 8] = jsr
     content[SPEC["intro_va"] - BASE:SPEC["intro_va"] - BASE + 8] = jmp
     for va, scale in ((SPEC["tunnel_x_va"], tunnel[0]), (SPEC["tunnel_y_va"], tunnel[1])):
         if not 1.0 <= scale <= 65536.0:
             raise ModError(f"tunnel scale {scale} is outside 1..65536")
         content[va - BASE + 2:va - BASE + 6] = struct.pack(">f", scale)
-    content += blob + bytes(-len(blob) % 4)
+    content = platform.join(bytes(content), others + chunks)
+    blob = content[platform.STOCK_LENGTH:]
 
     notes = [(f"animation: {len(ascii[0])} frames, looping from {ascii[1]}" if ascii is not None else
               f"{len(images)} image(s), " + ("static" if len(images) == 1 else
               f"flashing every 2^{slow} then 2^{fast} frames from {rush}, held from {stop}")),
-             f"appended data area {len(blob):,} B; MAIN OS {len(content):,} B",
+             f"the platform's area {len(blob):,} B; MAIN OS {len(content):,} B",
              f"tunnel scale {tunnel[0]:g} x {tunnel[1]:g}" + (" (stock)" if tuple(tunnel) == STOCK_TUNNEL else "")]
-    return Result({SECTION: bytes(content)}, extents(firmware, len(blob)), notes)
+    return Result({SECTION: content}, extents(firmware, len(blob)), notes)

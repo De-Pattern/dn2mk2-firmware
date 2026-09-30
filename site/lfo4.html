@@ -51,10 +51,10 @@
   <p><strong>Combines with</strong> <a href="fx.html">FX Modulation</a>,
   <a href="destinations.html">Modulation Destinations</a>, the
   <a href="arp.html">MIDI Arpeggiator</a> and Arpeggiator p-locks (command line): build
-  those first, then load their download here. <strong>Not with</strong>
-  <a href="lfo.html">LFO Waves</a> or <a href="boot.html">Boot Screen</a>: all three need
-  the same start-up hook and the same appended area, and this page refuses an image
-  either of them has built.</p>
+  those first, then load their download here. <a href="lfo.html">LFO Waves</a> too, which
+  must also come first, and the <a href="boot.html">Boot Screen</a>, in either order: all
+  of them share one start-up loader and one appended area, and this page adds LFO4 to
+  whatever that area already holds.</p>
 </div>
 
 <section class="combines">
@@ -66,14 +66,14 @@
 <!-- dnfw:matrix-row lfo4 -->
 <div class="scroll">
 <table class="matrix">
-  <thead><tr><th></th><th scope="col"><code>arpmodes</code></th><th scope="col"><code>arpplocks</code></th><th scope="col"><code>bootscreen</code></th><th scope="col"><code>fxmod</code></th><th scope="col"><code>lfo4</code></th><th scope="col"><code>lfowaves</code></th><th scope="col"><code>midiarp</code></th><th scope="col"><code>moddest</code></th><th scope="col"><code>songguard</code></th><th scope="col"><code>transients</code></th></tr></thead>
+  <thead><tr><th></th><th scope="col"><code>arpmodes</code></th><th scope="col"><code>arpplocks</code></th><th scope="col"><code>bootscreen</code></th><th scope="col"><code>fxmod</code></th><th scope="col"><code>lfo4</code></th><th scope="col"><code>lfowaves</code></th><th scope="col"><code>midiarp</code></th><th scope="col"><code>moddest</code></th><th scope="col"><code>songguard</code></th><th scope="col"><code>transients</code></th><th scope="col"><code>usbprobe</code></th><th scope="col"><code>waverider</code></th></tr></thead>
   <tbody>
-    <tr><th scope="row">A fourth LFO <code>lfo4</code></th><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-no" title="both need the start-up hook and the appended area">&#10007;</td><td class="mx-order" title="fxmod must be applied first">&#10003;*</td><td class="mx-self">&mdash;</td><td class="mx-no" title="both need the start-up hook and the appended area">&#10007;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-order" title="moddest must be applied first">&#10003;*</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td></tr>
+    <tr><th scope="row">A fourth LFO <code>lfo4</code></th><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-order" title="fxmod must be applied first">&#10003;*</td><td class="mx-self">&mdash;</td><td class="mx-order" title="lfowaves refuses after lfo4: 0x400372da is not stock (202f00080c800000014b...); lfo4 widens this bound: apply lfowaves first, then lfo4">&#10003;*</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-order" title="moddest must be applied first">&#10003;*</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-yes" title="disjoint bytes; applies in either order">&#10003;</td><td class="mx-no" title="both use the same code cave">&#10007;</td></tr>
   </tbody>
 </table>
 </div>
 <!-- /dnfw:matrix-row -->
-  <p><!-- dnfw:combines lfo4 -->With Arpeggiator SHUF and RAND, Arpeggiator p-locks, Arpeggiator on MIDI tracks, Song guard, FM drum transients; in one order only with LFO modulation of the FX (fxmod must be applied first); More modulation destinations (moddest must be applied first); <strong>not</strong> with Boot screen (both need the start-up hook and the appended area); New LFO waveforms (both need the start-up hook and the appended area). See the compatibility table<!-- /dnfw:combines -->.</p>
+  <p><!-- dnfw:combines lfo4 -->With Arpeggiator SHUF and RAND, Arpeggiator p-locks, Boot screen, Arpeggiator on MIDI tracks, Song guard, FM drum transients, USB SysEx probe (diagnostic); in one order only with LFO modulation of the FX (fxmod must be applied first); New LFO waveforms (lfowaves refuses after lfo4: 0x400372da is not stock (202f00080c800000014b...); lfo4 widens this bound: apply lfowaves first, then lfo4); More modulation destinations (moddest must be applied first); <strong>not</strong> with Waverider, a sixth machine (both use the same code cave). See the compatibility table<!-- /dnfw:combines -->.</p>
 </section>
 
 <section class="step">
@@ -150,7 +150,8 @@
   <li><strong><a href="arp.html">MIDI Arpeggiator</a></strong> &mdash; combines, in either order. No shared bytes.</li>
   <li><strong>Arpeggiator p-locks</strong> &mdash; combines; command line only, <code>dnfw mods apply firmware.syx --mod arpplocks --mod lfo4</code>.</li>
   <li><strong><a href="transients.html">Transient Swapper</a></strong> &mdash; combines; it only writes the DSP image.</li>
-  <li><strong><a href="lfo.html">LFO Waves</a></strong>, <strong><a href="boot.html">Boot Screen</a></strong> &mdash; <strong>do not combine</strong>. They need the same start-up hook and appended area.</li>
+  <li><strong><a href="lfo.html">LFO Waves</a></strong> &mdash; combines; build LFO Waves first, then load its download here. Its SPH-label hook moved the parameter table's bound check, and LFO4 widens that bound, so the order matters.</li>
+  <li><strong><a href="boot.html">Boot Screen</a></strong> &mdash; combines, in either order. Both add to the one appended area.</li>
 </ul>
 <div class="note">
   <p><strong>What "combines" means here.</strong> The bytes each mod writes are checked
