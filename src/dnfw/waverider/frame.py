@@ -29,6 +29,14 @@ parameter table's default for FREQ is `0x7f00`, coarse 127.
 > as the instrument sends it. The header array at `84 + 2t` (the DSP clamp's
 > input, 3 in the factory project) and the word at 0 also carry data this model
 > leaves at zero.
+>
+> **Corrected 2026-09-30, on the instrument.** The live frame, read through the USB
+> probe (`tools/dn2probe_frame.py`), carries the sound's **own** values: TUN1
+> `0x4000` at 0 and `0x4c00` at +12, WAV1 `0x7800` at its top, TBL1 `0x0100` at 1.
+> The halving above was a moment, not a scale: the emulator's frames were taken
+> while the values were still gliding to their targets after the snapshot loaded.
+> So `init_frame` and `sound_defaults`, which write the sound's scale, are what the
+> instrument sends.
 
 This module is pure: bytes in, bytes out.
 """

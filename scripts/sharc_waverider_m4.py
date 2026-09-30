@@ -138,6 +138,10 @@ class M4Machine:
         self.memory = dk.ldr.LoadedMemory.from_stream(stream)
         self.sha = hashlib.sha256(stream).hexdigest()
 
+    # m3.load_init runs the firmware's init through `mach.runner`; M4's memory is
+    # built the same way, so M3's runner serves it unchanged.
+    runner = m3.M3Machine.runner
+
     @staticmethod
     def _patch_word(dk, stream: bytes, dm: int, old: int, new: int):
         blocks = dk.ldr.parse_blocks(stream)
