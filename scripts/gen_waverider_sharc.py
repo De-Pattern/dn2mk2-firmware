@@ -35,6 +35,7 @@ SHARC = ROOT / "csrc" / "waverider" / "sharc"
 TOOLCHAIN = "selache selas -proc ADSP-21569 (js216/selache 2b26d3b, GPL-3.0, WSL)"
 ENTRY_LINE = f"JUMP {dsp.COUNT_SW:#x};"           # the block counter, which goes on to the loop
 IDLE_LINE = f"JUMP {dsp.IDLE_SW:#x};"
+EMARK_LINE = f"JUMP {dsp.EMARK_SW:#x};"
 
 
 def sha(path: pathlib.Path) -> str:
@@ -79,6 +80,8 @@ def main(argv=None) -> int:
             loop = assemble("machine5_live", dsp.LOOP_SW, work)
             idle = assemble("idle_load", dsp.IDLE_SW, work)
             count = assemble("block_count", dsp.COUNT_SW, work)
+            emark = assemble("entry_mark", dsp.EMARK_SW, work)
+            ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
             jump = one_jump(ENTRY_LINE, dsp.ENTRY_SW, work)
             ijump = one_jump(IDLE_LINE, dsp.IDLE_SITE_SW, work)
         else:
@@ -86,6 +89,8 @@ def main(argv=None) -> int:
             loop = committed("machine5_live")
             idle = committed("idle_load")
             count = committed("block_count")
+            emark = committed("entry_mark")
+            ejump = old["emark_jump"]
             if "entry_jump" not in old or "idle_jump" not in old:
                 raise SystemExit("no entry or idle JUMP committed yet: run with --assemble")
             jump, ijump = old["entry_jump"], old["idle_jump"]
@@ -95,7 +100,9 @@ def main(argv=None) -> int:
             "entry_jump": jump,
             "idle_load": {k: v for k, v in idle.items() if k != "instruction_offsets"},
             "idle_jump": ijump,
-            "block_count": {k: v for k, v in count.items() if k != "instruction_offsets"}}
+            "block_count": {k: v for k, v in count.items() if k != "instruction_offsets"},
+            "entry_mark": {k: v for k, v in emark.items() if k != "instruction_offsets"},
+            "emark_jump": ejump}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {dsp.CODE.relative_to(ROOT)}: reader {len(reader['object_parcels_be']) // 2} B, "
           f"loop {len(loop['object_parcels_be']) // 2} B, entry {len(jump['object_parcels_be']) // 2} B")

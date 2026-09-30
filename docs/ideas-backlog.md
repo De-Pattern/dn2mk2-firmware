@@ -3777,3 +3777,10 @@ The SHARC reports its own cycles per frame in the stock reply (`docs/sharc-load.
   - memory placement: the tables sit in L1 block 1's tail;
   - whether our loop runs for tracks that aren't sounding.
 
+## 29. Why the stock render stretch gets cheaper while a Waverider track plays (parked)
+
+On the instrument, the SHARC's time from the per-block routine's entry to the machine dispatch falls from 33.3 % to 10.6 % of a frame while a Waverider track plays, and recovers slowly after. The runner executes the same instructions in both states, so it is cycles, probably memory stalls (`docs/sharc-load.md`). It is inaudible, and stock is flat.
+
+- **When to resume:** before Waverider's DSP work grows (osc 2, more voices), or if it ever turns audible.
+- **How:** marks at the start of each stock render loop in the dispatch, as `block_count.asm` does at the splice; the split timer's builds and tools already exist.
+

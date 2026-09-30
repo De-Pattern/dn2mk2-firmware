@@ -18,7 +18,7 @@ evidence for each.
    span, so the region is written end to end: each code span has >= 64 bytes of
    zeros (NOPs) after it and no byte of the region is left unwritten.
 2. **Enters the type-5 loop**: the two instructions at sw `0x1c9448` (after the
-   Swarmer render loop in `sw 0x1c8ef1`) become `JUMP 0x16f580` and a 16-bit NOP.
+   Swarmer render loop in `sw 0x1c8ef1`) become `JUMP 0x16f600` and a 16-bit NOP.
    `block_count.asm` there counts the block into reply word 2 and jumps to the loop
    at `0x16ed00`, which re-executes the two instructions before it jumps back to
    `0x1c944c`. (Until the block counter, the JUMP went straight to `0x16ed00`.)
@@ -82,8 +82,10 @@ TABLES_DM = (0x2DF000, 0x2E3000)
 IDLE_DM = 0x2DEA00                           # idle_load.asm, in the gap before table 0
 IDLE_SW = IDLE_DM // 2                       # 0x16f500
 IDLE_STATE_DM = 0x2DE100                     # its save area and counters (state block tail)
-COUNT_DM = 0x2DEB00                          # block_count.asm, after idle_load.asm
-COUNT_SW = COUNT_DM // 2                     # 0x16f580: the entry JUMP's target
+COUNT_DM = 0x2DEC00                          # block_count.asm, after idle_load.asm
+COUNT_SW = COUNT_DM // 2                     # 0x16f600: the entry JUMP's target
+EMARK_DM = 0x2DED00                          # entry_mark.asm: EMUCLK as the handler calls 0x1c2712
+EMARK_SW = EMARK_DM // 2                     # 0x16f680
 L2_LOAD, L2_SW = 0x20000000, 0xB80000        # L2 code: load address 0x20000000 is sw 0xb80000
 
 # stock sites
@@ -95,6 +97,8 @@ LOOKUP_STOCK = (0, 1, 2, 3, 4, 0, 0, 0)
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
 IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")
 IDLE_RETURN_SW = 0xB88AAB                    # the loop's top: call prvCheckTasksWaitingTermination
+CALL_SITE_SW = 0x1C9FB9                      # the handler's `r4 = 0x268438` before `cjump 0x1c2712`
+CALL_SITE_STOCK = bytes.fromhex("040f26003884")
 
 
 class DspError(ValueError):
@@ -129,7 +133,8 @@ def objects() -> dict[str, bytes]:
     """The committed SHARC objects: reader, loop, entry JUMP, idle stub, idle JUMP."""
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
-            for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump", "block_count")}
+            for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump", "block_count",
+                         "entry_mark", "emark_jump")}
 
 
 def directory() -> bytes:
@@ -153,6 +158,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("wavetable directory", DIRECTORY_DM, directory()),
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
         ("block_count.asm (wr_count)", COUNT_DM, obj["block_count"]),
+        ("entry_mark.asm (wr_emark)", EMARK_DM, obj["entry_mark"]),
         ("table 0: saw -> sine (testtable reversed)", TABLES_DM[0], reference.dsp_bytes(t[0])),
         ("table 1: the overtone series (harmonics)", TABLES_DM[1], reference.dsp_bytes(t[1])),
     ]
@@ -203,7 +209,7 @@ def _check_free(stock: bytes, span_list) -> None:
             raise DspError(f"{w0} and {w1} overlap")
 
 
-IDLE_STATE_BYTES = 0x28                      # idle: save, LAST, total, passes; count: blocks, saves
+IDLE_STATE_BYTES = 0x40                      # idle: saves, LAST, total, passes, BEFORE, AFTER; count: blocks, saves, MARK; MARK0
 
 
 def idle_spans() -> list[tuple[str, int, bytes]]:
@@ -268,6 +274,10 @@ def section7(stock: bytes) -> bytes:
         raise DspError(f"the idle JUMP is {len(obj['idle_jump'])} bytes, not {len(IDLE_SITE_STOCK)}")
     if bootstream.read_span(stock, l2_sw_to_load(IDLE_SITE_SW), len(IDLE_SITE_STOCK)) != IDLE_SITE_STOCK:
         raise DspError("sw 0xb88abb is not the stock idle loop's `jump (pc,-0x10)`")
+    if bootstream.read_span(stock, sw_to_load(CALL_SITE_SW), len(CALL_SITE_STOCK)) != CALL_SITE_STOCK:
+        raise DspError("sw 0x1c9fb9 is not the stock `r4 = 0x268438`")
+    if len(obj["emark_jump"]) != len(CALL_SITE_STOCK):
+        raise DspError(f"the entry-mark JUMP is {len(obj['emark_jump'])} bytes, not {len(CALL_SITE_STOCK)}")
     lookup = struct.unpack("<8I", bootstream.read_span(stock, dm_to_load(LOOKUP_DM), 32))
     if lookup != LOOKUP_STOCK:
         raise DspError(f"the machine lookup is {lookup}, not stock {LOOKUP_STOCK}")
@@ -279,6 +289,7 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
     bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<I", 5))
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
+    bootstream.write_span(out, sw_to_load(CALL_SITE_SW), obj["emark_jump"])
     result = bytes(out)
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):
