@@ -24,8 +24,9 @@ cave at `0x402cf52c` and records it with four 6-byte `jsr` hooks in
    differs is refused;
 2. the edits are written, and the HELLO tag is filled in.
 
-Section 3 only, no length change, nothing appended. The cave is also used by
-lfowaves and arpplocks, so the probe does not combine with those two.
+Section 3 only, no length change, nothing appended. Its caves are also used by
+arpplocks and midiarp, so it does not combine with those two. lfowaves left the
+cave on the mod platform (2026-09-30) and combines with it.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ from __future__ import annotations
 import json
 import pathlib
 
-from . import Extent, ModError, Result
+from . import RAM, Extent, ModError, Result
 
 ID = "usbprobe"
 NAME = "USB SysEx probe (diagnostic)"
@@ -74,7 +75,7 @@ def apply(firmware, tag: str = DEFAULT_TAG) -> Result:
         if original[e["va"] - BASE:e["va"] - BASE + len(want)] != want:
             raise ModError(f"0x{e['va']:08x} is not stock; this mod is for unmodified "
                            "Digitone II 1.11, or another mod already wrote there "
-                           "(lfowaves and arpplocks share the probe's cave)")
+                           "(arpplocks and midiarp share the probe's caves)")
 
     content = bytearray(original)
     for e in SPEC["edits"]:
@@ -88,3 +89,14 @@ def apply(firmware, tag: str = DEFAULT_TAG) -> Result:
                          "python tools/dn2probe.py hello",
                          f"{len(SPEC['edits']) - 1} hooks and a {SPEC['cave']['used']} B cave "
                          "in section 3, nothing appended"])
+
+
+def ram() -> list[Extent]:
+    """The scratch buffers and timing words above BSS (`csrc/usbprobe/layout.inc`)."""
+    return [Extent(RAM, SPEC["ram"]["va"], SPEC["ram"]["length"], "the probe's buffers and timing state")]
+
+
+# Bytes that only look like RAM above BSS (`dnfw.mods.ramcheck`):
+# 0x402cf6b4: `move.w %sr,%d0 ; move.w #0x2700,%sr` (40 c0 46 fc 27 00);
+# 0x402cf6dc: `move.w %d7,%sr ; movem.l ...` (46 c7 48 d1).
+NOT_RAM = (0x402CF6B4, 0x402CF6DC)
