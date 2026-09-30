@@ -394,7 +394,9 @@ with a spec, or on the command line:
 
     python tools/dn2live.py --watch frame:1 --watch 0x800068e4+32 --watch 0x46700000+16:u32
 
-A spec is `frame:T` (T 1..16, as the instrument numbers tracks) or
+A spec is `frame:T` (T 1..16, as the instrument numbers tracks), `sharc`
+(the page's *Watch SHARC*: the SHARC's cycles per frame, its load, and the master
+compressor's gain reduction, from the reply at `0x800053a4`; `docs/sharc-load.md`), or
 `ADDR+LEN[:u8|u16|s16|u32]`. Each watch is a table of its fields (word, hex,
 `coarse.fine`, and semitones for TUN1/TUN2 at the scale read on the instrument:
 `word / 256 - 64`), a 20 s sparkline per field, and when each last changed; a
@@ -413,6 +415,10 @@ This is what `tools/dn2probe_frame.py` did by hand for Waverider M6 (a frame
 saved per setting), live: turn TUN1 and watch its word move, and see a value
 glide rather than jump (the emulator's mid-glide frames were the M6 half-scale
 bug, PR #154).
+
+**Stacks** are read on demand, not live (about 440 KB): `python tools/dn2probe.py
+stacks` prints every task's stack high-water mark (`docs/coldfire-tasks.md`).
+**SHARC benchmarks:** `python tools/dn2sharc_load.py LABEL`.
 
 | file | |
 |---|---|

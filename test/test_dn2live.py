@@ -451,6 +451,22 @@ def test_a_frame_watch_reads_what_the_probe_read_on_the_instrument():
     assert "TUN1=0x4c00(+12 st)" in dn2watch.summary(list(v.values()))
 
 
+def test_the_sharc_watch_reads_its_cycles_and_the_compressor():
+    w = dn2watch.parse("sharc")
+    assert w.spans == ((0x800053A4, 0x18),)
+    reply = bytearray(0x18)
+    reply[0:4] = bytes.fromhex("000658a6")                  # silent, as read on the instrument
+    struct.pack_into(">H", reply, 0x16, 0x1A87)
+    v = {x["name"]: x["word"] for x in w.decode({0x800053A4: bytes(reply)})}
+    assert v == {"SHARC_CYCLES": 415910, "COMP_GR": 0x1A87}
+
+
+def test_stack_high_water():
+    assert dn2probe.high_water(bytes(64)) == 0
+    assert dn2probe.high_water(bytes(40) + b"\x01" + bytes(23)) == 24
+    assert {t[2] for t in dn2probe.TASKS} == set(range(11))
+
+
 def test_a_raw_watch_reads_words_of_its_format():
     w = dn2watch.parse("0x800068e4+8:s16")
     assert [f.name for f in w.fields] == ["+0", "+2", "+4", "+6"] and w.spans == ((0x800068E4, 8),)

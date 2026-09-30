@@ -7,6 +7,7 @@
     python tools/dn2probe.py peek ADDR [LEN]    hex dump of DDR, the SRAM or the audio windows
     python tools/dn2probe.py watch [SECONDS] [--symbols out/<build>/symbols.json]
                                                 10 readings a second: frames, ISR, lfo4's pieces
+    python tools/dn2probe.py stacks             every task's stack high-water mark (docs/coldfire-tasks.md)
     python tools/dn2probe.py selftest           the codec, with no device
 
     options: --port "Digitone II" (a substring of the port name), or --in N --out N
@@ -378,6 +379,41 @@ def cmd_irptl(pr, args):
         print('IRPTL %-18s 0x%08x  %s' % (name, v, irptl_names(v)))
 
 
+# TASK_CREATE's constant arguments in DN2 1.11 (docs/coldfire-tasks.md): tcb, entry, prio, stack, size
+TASKS = ((0x4058D604, 0x40002A46, 10, 0x4058D658, 0x800), (0x4058BEE4, 0x40000EA0, 9, 0x4058BF38, 0x1000),
+         (0x46678E7C, 0x4012A9A8, 8, 0x44617484, 0x4000), (0x445E6764, 0x40120722, 7, 0x445E67B8, 0x8000),
+         (0x42C45624, 0x400D3D86, 7, 0x42C41624, 0x4000), (0x4059D1C0, 0x4002ED34, 6, 0x4059DA34, 0x28000),
+         (0x4461EB74, 0x40131A2A, 6, 0x4461EBC8, 0x4000), (0x446235F4, 0x401334E4, 5, 0x44635A68, 0x8000),
+         (0x44623580, 0x40133638, 4, 0x4462CA68, 0x8000), (0x4462350C, 0x4013375E, 4, 0x44623A68, 0x8000),
+         (0x445EF420, 0x40122676, 3, 0x445EF474, 0x8000), (0x40385E48, 0x400CD48E, 2, 0x40385E9C, 0x4000),
+         (0x4243C900, 0x400CEC98, 1, 0x4243C954, 0x4000), (0x424388AC, 0x400CEBB4, 0, 0x42438900, 0x4000))
+READY_TABLE = 0x4664AC9C
+
+
+def high_water(stack):
+    """Bytes of a zero-filled stack ever used: from the deepest non-zero word to its top."""
+    k = next((i for i in range(0, len(stack) - 3, 4) if stack[i:i + 4] != b'\0\0\0\0'), len(stack))
+    return len(stack) - k
+
+
+def read_span(pr, addr, length):
+    out = b''
+    while len(out) < length:
+        n = min(PEEK_MAX, length - len(out))
+        out += decode_peek(pr.call(req_peek, addr + len(out), n))['data']
+    return out
+
+
+def cmd_stacks(pr, args):
+    print('  tcb        entry      prio  size     used   peak    state')
+    for tcb, entry, prio, base, size in TASKS:
+        slot = struct.unpack('>I', read_span(pr, tcb + 8, 4))[0]
+        used = high_water(read_span(pr, base, size))
+        state = ('running' if slot == READY_TABLE + 4 * prio else
+                 'not created' if slot == 0 else 'slot 0x%08x?' % slot)
+        print('  %08x   %08x   %2d   %6d  %6d  %5.1f %%  %s' % (tcb, entry, prio, size, used, 100 * used / size, state))
+
+
 def selftest():
     assert irptl_names(0x100) == 'ILADI' and irptl_names(0) == 'none'
     assert decode_stage(0x57520013) == 19 and decode_stage(0x00065752) == 6 and decode_stage(0x12345678) is None
@@ -486,7 +522,7 @@ def cmd_watch(pr, args):
         last = s
 
 
-COMMANDS = {'hello': cmd_hello, 'stats': cmd_stats, 'dsp': cmd_dsp, 'peek': cmd_peek, 'stage': cmd_stage, 'irptl': cmd_irptl,
+COMMANDS = {'stacks': cmd_stacks, 'hello': cmd_hello, 'stats': cmd_stats, 'dsp': cmd_dsp, 'peek': cmd_peek, 'stage': cmd_stage, 'irptl': cmd_irptl,
             'watch': cmd_watch}
 
 
