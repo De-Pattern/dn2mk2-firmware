@@ -1,0 +1,24 @@
+{
+  "source": "csrc/waverider/sharc/block_count.asm",
+  "source_sha256": "df262f27af49dd3b85663b1186b63e97f111d2d8783f442507af11a5f3d68054",
+  "toolchain": "selache selas -proc ADSP-21569 (js216/selache 2b26d3b, GPL-3.0, WSL)",
+  "section": "seg_pmco",
+  "load_sw": "0x16f580",
+  "object_parcels_be": "1108002de11c1109002de1201008002de1180f890001c0891108002de118023e00001098023e7800f088cd891108002c49d81108002c59d81008002de11c1009002de120063e0016ed00",
+  "instruction_offsets": [
+    0,
+    6,
+    12,
+    18,
+    22,
+    24,
+    30,
+    36,
+    42,
+    44,
+    50,
+    56,
+    62,
+    68
+  ]
+}

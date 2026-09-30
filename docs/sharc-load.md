@@ -127,6 +127,21 @@ The Waverider gate on the instrument's captured frames still passes 6 of 6. The 
 - **It is inaudible on the instrument:** the owner heard every effect in the low state.
 - **What stops is [O].** One candidate fits both facts: the per-track audio records in the reply (`+0x1c..+0xa9c`, 28 channels of 24-bit, the stream Overbridge carries), which the instrument's own outputs never play. Next: read those records with the probe in the low state on a Waverider build.
 
+## Ruled out: a skipped render pass, and the Overbridge stream (2026-09-30)
+
+**The Overbridge stream.** In the low state, with Overbridge enabled and its app open, its input meters showed Main, track 1 (FM Tone) and track 2 (Waverider) all carrying audio. The reply's `+0x1c..+0xa9c` records stayed empty whether or not Overbridge was enabled and streaming, so they are not that stream (the per-track-audio reading in section 8 of the digikit note is withdrawn). **[V]**
+
+**A second pass of the per-block routine.** `block_count.asm` (the build `waverider-m6d-count-usbprobe`) counts every pass of the machine dispatch into reply word 2:
+
+| state | SHARC load | blocks per frame |
+|---|---|---|
+| high: FM Tone on track 1, no Waverider yet | 63.0 % | 1.00 |
+| low: after Waverider played on track 2 | 45.8 % | 1.00 |
+
+The routine runs once a frame in both states, so the missing ~17-23 points are not a pass that stops. **[V]**
+
+**What is left:** either each pass does less in the low state, or the work is outside the per-block routine. Next: reproduce the latch in digikit's runner, running MIDI, then a Waverider trig, then stop, then FM Tone frame by frame, and compare what each block executes.
+
 ## The clock: 1 GHz, from the init program
 
 The SHARC boot stream carries two programs: a small init program entered at sw `0x120230`, then the main one (digikit `docs/sharc/SPEC-FINDINGS.md`). The init program is block 1, which loads at bw `0x282403f0` (sw `0x1201f8`, 10,312 bytes). It sets the clocks. Read with selmap (`js216/selache`) and digikit's `sharcimm.py`. **[D]**

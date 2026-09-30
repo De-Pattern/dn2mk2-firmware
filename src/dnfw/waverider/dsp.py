@@ -18,8 +18,10 @@ evidence for each.
    span, so the region is written end to end: each code span has >= 64 bytes of
    zeros (NOPs) after it and no byte of the region is left unwritten.
 2. **Enters the type-5 loop**: the two instructions at sw `0x1c9448` (after the
-   Swarmer render loop in `sw 0x1c8ef1`) become `JUMP 0x16ed00` and a 16-bit NOP;
-   the loop re-executes them before it jumps back to `0x1c944c`.
+   Swarmer render loop in `sw 0x1c8ef1`) become `JUMP 0x16f580` and a 16-bit NOP.
+   `block_count.asm` there counts the block into reply word 2 and jumps to the loop
+   at `0x16ed00`, which re-executes the two instructions before it jumps back to
+   `0x1c944c`. (Until the block counter, the JUMP went straight to `0x16ed00`.)
 3. **Lets a type-5 frame through**: the frame-nibble -> machine-type lookup
    `0x25d748[5]` becomes 5 (stock 0, FM Tone).
 4. **Times the idle task** (`idle_load.asm`, sw `0x16f500`): the back edge of
@@ -80,6 +82,8 @@ TABLES_DM = (0x2DF000, 0x2E3000)
 IDLE_DM = 0x2DEA00                           # idle_load.asm, in the gap before table 0
 IDLE_SW = IDLE_DM // 2                       # 0x16f500
 IDLE_STATE_DM = 0x2DE100                     # its save area and counters (state block tail)
+COUNT_DM = 0x2DEB00                          # block_count.asm, after idle_load.asm
+COUNT_SW = COUNT_DM // 2                     # 0x16f580: the entry JUMP's target
 L2_LOAD, L2_SW = 0x20000000, 0xB80000        # L2 code: load address 0x20000000 is sw 0xb80000
 
 # stock sites
@@ -125,7 +129,7 @@ def objects() -> dict[str, bytes]:
     """The committed SHARC objects: reader, loop, entry JUMP, idle stub, idle JUMP."""
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
-            for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump")}
+            for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump", "block_count")}
 
 
 def directory() -> bytes:
@@ -148,6 +152,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("increment table, 129 float32", INC_TABLE_DM, live.table_bytes()),
         ("wavetable directory", DIRECTORY_DM, directory()),
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
+        ("block_count.asm (wr_count)", COUNT_DM, obj["block_count"]),
         ("table 0: saw -> sine (testtable reversed)", TABLES_DM[0], reference.dsp_bytes(t[0])),
         ("table 1: the overtone series (harmonics)", TABLES_DM[1], reference.dsp_bytes(t[1])),
     ]
@@ -167,7 +172,7 @@ def placements() -> list[dict]:
             "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
            for what, at, payload in spans()]
     obj = objects()
-    out += [{"what": f"patch: entry JUMP {LOOP_SW:#x} + NOP at sw 0x1c9448",
+    out += [{"what": f"patch: entry JUMP {COUNT_SW:#x} (the block counter, then the loop) + NOP at sw 0x1c9448",
              "load_address": f"{sw_to_load(ENTRY_SW):#010x}",
              "bytes": len(obj["entry_jump"]) + len(NOP16),
              "stock": ENTRY_STOCK.hex(), "new": (obj["entry_jump"] + NOP16).hex()},
@@ -198,7 +203,7 @@ def _check_free(stock: bytes, span_list) -> None:
             raise DspError(f"{w0} and {w1} overlap")
 
 
-IDLE_STATE_BYTES = 0x20                      # save area, LAST, total, passes (+ spare)
+IDLE_STATE_BYTES = 0x28                      # idle: save, LAST, total, passes; count: blocks, saves
 
 
 def idle_spans() -> list[tuple[str, int, bytes]]:

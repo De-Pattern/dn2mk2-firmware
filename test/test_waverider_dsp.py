@@ -42,12 +42,13 @@ def built(stock7) -> bytes:
 
 def test_committed_objects_match_their_sources():
     spec = json.loads(dsp.CODE.read_text(encoding="utf-8"))
-    for key, name in (("reader", "reader_m5"), ("machine5_live", "machine5_live"), ("idle_load", "idle_load")):
+    for key, name in (("reader", "reader_m5"), ("machine5_live", "machine5_live"), ("idle_load", "idle_load"),
+                      ("block_count", "block_count")):
         src = (SHARC / f"{name}.asm").read_bytes().replace(b"\r\n", b"\n")
         assert spec[key]["source_sha256"] == hashlib.sha256(src).hexdigest(), name
         csrc = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         assert csrc["object_parcels_be"] == spec[key]["object_parcels_be"], name
-    assert spec["entry_jump"]["source"] == "JUMP 0x16ed00;"
+    assert spec["entry_jump"]["source"] == "JUMP 0x16f580;"
     assert spec["idle_jump"]["source"] == "JUMP 0x16f500;" and spec["idle_jump"]["at_sw"] == "0xb88abb"
 
 
@@ -55,7 +56,7 @@ def test_our_sources_avoid_dag1_m0_m3_in_memory_accesses():
     """No DM(..M0..M3..) access and no pre-modify read outside a DO loop (the two
     forms selas and selmap disagree on; docs/waverider-m5-dsp.md)."""
     import re
-    for name in ("reader_m5", "machine5_live", "idle_load"):
+    for name in ("reader_m5", "machine5_live", "idle_load", "block_count"):
         in_loop = False
         for line in (SHARC / f"{name}.asm").read_text().splitlines():
             code = line.split("//", 1)[0].strip().upper()
@@ -101,7 +102,7 @@ def test_loaded_image_holds_our_bytes(built):
 
 def test_the_three_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     entry = bootstream.read_span(built, dsp.sw_to_load(dsp.ENTRY_SW), 8)
-    assert entry == bytes.fromhex("3e06160000ed0100")          # jump 0x16ed00 ; nop
+    assert entry == bytes.fromhex("3e06160080f50100")          # jump 0x16f580 (the block counter) ; nop
     lookup = struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32))
     assert lookup == (0, 1, 2, 3, 4, 5, 0, 0)
     # the idle loop's back edge, jump (pc,-0x10) at sw 0xb88abb in L2, becomes JUMP 0x16f500
@@ -213,8 +214,9 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
     obj = dsp.objects()
     code_spans = [x for x in sp if "asm" in x[0]]
-    assert len(code_spans) == 3
-    for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["machine5_live"], obj["idle_load"])):
+    assert len(code_spans) == 4
+    for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["machine5_live"], obj["idle_load"],
+                                                     obj["block_count"])):
         assert payload[:len(code)] == code
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
 
@@ -259,6 +261,18 @@ def test_the_idle_stub_is_placed_and_returns_where_its_source_says():
     assert stores <= {"DM(0x2de100) = R8;", "DM(0x2de104) = R9;", "DM(0x2de108) = R10;",
                       "DM(0x2de114) = R9;", "DM(0x2de10c) = R8;", "DM(0x2de110) = R9;",
                       "DM(0x2c49d4) = R9;", "DM(0x2c59d4) = R9;"}
+
+
+def test_the_block_counter_goes_on_to_the_loop():
+    spec = json.loads((SHARC / "block_count.json").read_text(encoding="utf-8"))
+    assert int(spec["load_sw"], 16) == dsp.COUNT_SW == 0x16F580
+    be = bytes.fromhex(spec["object_parcels_be"])
+    assert be[spec["instruction_offsets"][-1]:].hex() == "063e0016ed00"   # JUMP 0x16ed00, the loop
+    src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "block_count.asm").read_text().splitlines()]
+    stores = {c for c in src if c.startswith("DM(")}
+    assert stores == {"DM(0x2de11c) = R8;", "DM(0x2de120) = R9;", "DM(0x2de118) = R8;",
+                      "DM(0x2c49d8) = R8;", "DM(0x2c59d8) = R8;"}
+    assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES >= 0x2DE124 and dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES <= dsp.INC_TABLE_DM
 
 
 def test_the_reader_returns_in_the_firmwares_shape():
