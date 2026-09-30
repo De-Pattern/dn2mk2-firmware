@@ -323,6 +323,12 @@ Read with our USB probe's PEEK, which is read-only: 20 readings of the 2,748-byt
 
 **Word 0 is §7's cycle count, confirmed as a load figure.** Read as one big-endian u32, it is about 416,000 silent, about 419,000 with the busy pattern, and about 424,000 with one note held on our added machine. It follows what the DSP is asked to do, so it is more than a heartbeat. `docs/sharc-load.md` has the method.
 
+**The core clock is 1 GHz, from the init program** (DN2 1.11; DT2 1.16's init block has the same size and the same CGU table at `0x242c88`, not otherwise compared). **[D]**
+- CLKIN is 20 MHz (`r8=0x1312d00` at sw `0x120230`).
+- The settings record `0x06a10464` / `0x310` is built at `0x120532` and unpacked at `0x120a06` into MSEL 100, DF 0, CSEL 2, SYSSEL 4, S0SEL 4, S1SEL 2, DSEL 3 and OSEL 16.
+- So a frame at 1,500 frames/s has 666,667 cycles, and word 0 reads about 62 % silent.
+- `docs/sharc-load.md` has the field-by-field reading.
+
 ## Reproducing
 
 ```

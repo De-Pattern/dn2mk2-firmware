@@ -35,6 +35,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 REPLY = 0x800053A4
+FRAME_CYCLES = 1_000_000_000 / 1500   # the core's 1 GHz (docs/sharc-load.md, the clock) per frame
 COLUMNS = ("when", "label", "n", "median", "p5", "p95", "min", "max", "over_silent")
 
 
@@ -92,8 +93,9 @@ def main(argv=None) -> int:
     row = {"when": time.strftime("%Y-%m-%d %H:%M:%S"), "label": a.label, **s}
     append(a.csv, row)
     extra = "" if s["over_silent"] == "" else "   %+d over silent" % s["over_silent"]
-    print("%-16s median %7d cycles  (p5 %d, p95 %d, %d..%d, n %d)%s"
-          % (a.label, s["median"], s["p5"], s["p95"], s["min"], s["max"], s["n"], extra))
+    print("%-16s median %7d cycles = %.1f %% of a frame  (p5 %d, p95 %d, %d..%d, n %d)%s"
+          % (a.label, s["median"], 100 * s["median"] / FRAME_CYCLES, s["p5"], s["p95"],
+             s["min"], s["max"], s["n"], extra))
     print("  appended to", a.csv)
     return 0
 
