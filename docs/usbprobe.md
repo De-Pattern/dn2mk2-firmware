@@ -96,6 +96,37 @@ bogus idle interval at the first switch out of idle after boot.
   level-7 handlers that can preempt the level-5 audio ISR are not hooked, so a
   peak over 100 % is the ISR's wall time, nesting included.
 
+**Protocol 3 (2026-09-30): the idle loop is the prio-1 task, and CPU is right.**
+Layout 2 answered the question above: on `wr-m6b-probe` (protocol 2) `idle_in`
+stayed 0 for a whole run, so the prio-0 task was never switched in. The
+probe's PEEK then read why, with no new build:
+
+- the scheduler's ready table at `0x4664ac9c` holds one list head per
+  priority (a TCB's word at +8 points at its slot; higher numbers run first:
+  the MIDI task answering the probe is prio 7). Prio 0 (`0x424388ac`) and
+  prio 1 (`0x4243c900`) were ready in 60 of 60 reads, so prio 0 can never run;
+- prio 1 (entry `0x400cec98`) runs the boot's setup and ends at `bra.s *`
+  `0x400cf0e2` (either branch of its last test lands there); its saved PC was
+  that spin in 200 of 200 reads.
+
+So `IDLE_TCB`/`IDLE_PC` (`dn2_111.inc`) now name prio 1 and `0x400cf0e2`, the
+stock guard moved with them, and `PROTO` is 3. The build differs from
+`waverider-m6b-usbprobe` in 14 bytes of MAIN OS (the immediates and the tag).
+`dn2stats.reliability` trusts CPU from protocol 3. On the instrument
+(`waverider-m6b-usbprobe3`, 2026-09-30):
+
+| state | CPU | audio ISR | idle in/out per s |
+|---|---|---|---|
+| stopped | 60.5 % | 56.3 % (peak 64 %) | ~264, all from the spin |
+| a Waverider pattern playing | 58-61 % | 54 % (peak 63-72 %) | ~260-287 |
+| SAVE PROJECT | 100 % for ~1 s, then 77-83 % for ~3 s | 57-61 % (peak 76 %) | switches up to ~1,350/s |
+
+During the save, frames/s held 1500, nothing was late and no ISR ran over a
+frame: the save takes all the idle time, the audio keeps its priority. The
+ColdFire's load is mostly the audio ISR, which runs every frame whether a
+pattern plays or not, so playing barely moves it; the SHARC's load is not in
+this figure.
+
 ### PEEK's allow list: DN2 1.11's own map, not the mk1's
 
 | range | why it is plain memory |
@@ -372,9 +403,8 @@ words (`isr_over`, `idle_in`, `idle_out`, `idle_offpc`, `idle_lastpc`). A
 layout above 2 is read as layout 2 plus raw words with their per-reply
 difference, assuming it appends as 2 did. Layout 2 adds a tile and a graph
 lane for ISRs over a frame (they also count as late), and an idle-task tile.
-**CPU stays marked unreliable on layout 2**: layout 2 does not correct it, it
-adds the idle counters, and the tile shows their verdict (never switched in:
-100 % is real; switched in but never off the spin: the credit misses it). The
+**CPU is trusted from protocol 3** (above); on protocols 1 and 2 it is
+marked unreliable, and on layout 2 the tile shows the idle counters' verdict. The
 fourth hash is labelled "USB audio -> SHARC" and STILL is shown as expected,
 not as a fault, on every layout. The ISR's own vs nested time is not shown:
 the hooks cannot separate them (above).
