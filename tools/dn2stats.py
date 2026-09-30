@@ -131,10 +131,11 @@ def decode_hello(payload: bytes) -> dict:
 def reliability(proto: int | None, layout: int | None) -> dict:
     """-> which figures the page may trust, for this probe version.
 
-    CPU: not fixed by any layout so far (layout 2 adds the counters that
-    explain it, not a corrected figure). The fourth hash: correct in every
-    layout -- STILL means no USB audio is streaming in."""
-    return {'cpu': False, 'audio_out': True,
+    CPU: right from protocol 3, which credits the real idle loop (the prio-1
+    task's spin). Protocols 1 and 2 timed the prio-0 task, which never runs
+    because prio 1 is always ready: they read 100 %. The fourth hash: correct
+    in every layout -- STILL means no USB audio is streaming in."""
+    return {'cpu': (proto or 0) >= 3, 'audio_out': True,
             'explains_cpu': (layout or 0) >= 2}
 
 
@@ -143,7 +144,8 @@ def cpu_verdict(d: dict) -> str | None:
     if 'idle_in' not in d:
         return None
     if not d['idle_in'] and not d['idle_out']:
-        return 'the idle task was never switched in: the CPU is never idle, so 100 % is real'
+        return ('the idle task was never switched in: on protocol 1-2 that is the prio-0 task, '
+                'which never runs (prio 1 is the idle loop); flash a protocol 3 probe')
     if d['idle_out'] and d['idle_offpc'] == d['idle_out']:
         return ('the idle task runs but never leaves from its spin: the idle credit misses it, '
                 'so CPU reads high falsely')

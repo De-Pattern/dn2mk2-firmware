@@ -242,6 +242,13 @@ def run2(tr, d, seconds, hz=10, start=0.0):
     return out, t
 
 
+def test_cpu_is_trusted_from_protocol_3():
+    """Protocol 3 times the prio-1 task's spin, the real idle loop (read on the instrument 2026-09-30)."""
+    assert dn2stats.reliability(2, 2)["cpu"] is False
+    assert dn2stats.reliability(3, 2)["cpu"] is True
+    assert dn2stats.reliability(None, 2)["cpu"] is False
+
+
 def test_no_timer_falls_back_to_the_host_clock():
     tr, d = dn2stats.Tracker(), Device()
     d.TIMER = 0

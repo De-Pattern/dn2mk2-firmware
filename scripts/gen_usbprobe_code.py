@@ -83,7 +83,7 @@ GUARDS = [
     (0x40027BBE, "4cee3fffff144e5e4e73"),                # ... and its only rte
     (0x40000410, "46fc2700"),                            # the switch masks interrupts
     (0x40000452, "4ce8ffff000c4e73"),                    # ... and reloads every register
-    (0x400CEBE2, "60fe"),                                # the idle task's spin
+    (0x400CF0E2, "60fe"),                                # the idle loop's spin (the prio-1 task)
 ]
 
 
