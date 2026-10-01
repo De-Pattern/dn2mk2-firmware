@@ -3784,3 +3784,15 @@ On the instrument, the SHARC's time from the per-block routine's entry to the ma
 - **When to resume:** before Waverider's DSP work grows (osc 2, more voices), or if it ever turns audible.
 - **How:** marks at the start of each stock render loop in the dispatch, as `block_count.asm` does at the splice; the split timer's builds and tools already exist.
 
+
+## 30. The modulation preview as an opt-in: a PERSONALIZE setting and a key combo (after Waverider)
+
+**Owner, 2026-10-01:** the modulation preview (`docs/modulation-display.md`; the markers and the redraw that follows them, `feature/modview-markers`) should be **opt in**, through a new toggle in **SETTINGS > PERSONALIZE**, and reachable from a free key combo. Parked until Waverider is finished.
+
+**What is known (static read of OS 1.11):**
+- PERSONALIZE has eleven items, not the two the manual lists (§13.7): LED INTENSITY, LED BACKLIGHT, REMEMBER SUBPAGE, U/D KEY MODE, PAGE AUTOCOPY, NOTE PARAM, LIVE REC OVERDUB, PARAM LIVE REC, TRK SELECT, NOTE PREVIEW, NOTE EDIT MENU. Not yet confirmed on the screen.
+- `PersonalizeMenuView`'s constructor (around `0x40097e86`) builds each item from a name routine (`0x400963c4`, `0x400963ec`, … one per item, each making its string with `0x401ce69e`) and value routines. It builds the item with `0x401170d8` and appends it with `0x4011690e`. A twelfth item means repeating one block, with LED BACKLIGHT's on/off item as the model.
+- The values are one byte each at `0x405cd898..0x405cd8ad`, each read and written individually by the settings load and save around `0x400bb3fa` and `0x400bb634`. The unreferenced bytes `0x405cd89d..0x405cd89f` are therefore **not persisted**. A persistent toggle needs the load/save pair hooked, after checking that stock ignores a value it doesn't know.
+- The combo: the manual's own PERSONALIZE shortcuts are "hold [SETTINGS] + [TRIG 1..3]" (LED intensity) and "+ [TRIG 9]" (backlight), so a hold [SETTINGS] + an unused TRIG fits the idiom. Still to read: which TRIG keys the SETTINGS-hold handler acts on. The combo must not collide with the private combos kept in dn_sysex.
+
+**Order:** a RAM-only flag on the combo first; then the PERSONALIZE item; then its persistence.
