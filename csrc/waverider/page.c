@@ -436,7 +436,9 @@ static void wave(void *c, void *view)
 #if WR_MARKERS
     int m = WAVE_X + set_pos * (WR_WIDTH - MARK) / WR_POS_MAX;
     int h = WAVE_X + pos * (WR_WIDTH - MARK) / WR_POS_MAX;
-    if (moved >= QUANT || moved <= -QUANT)
+    /* while POS is modulated at all (the range swept is wider than a step), even
+     * as the cursor passes under the knob's own marker (owner, modview4f) */
+    if (sweeps[0].hi - sweeps[0].lo > QUANT || moved >= QUANT || moved <= -QUANT)
         for (int k = 0; k < MARK; k += 2)
             px(c, h + k, CURSOR_Y);
 #else
