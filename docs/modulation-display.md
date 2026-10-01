@@ -16,7 +16,7 @@ Grades: **[D]** read statically, **[E]** measured in an emulator, **[O]** open.
 - **The range** needs no depth decoding: keep the lowest and highest value heard over the last few cycles, and let it relax when the modulation stops.
 - **The emulator doesn't run the audio tick** [E]: `0x400db22c` and `0x400db1dc` never execute in the `wr-ui800M` snapshot. A prototype has to call the evaluator itself (as `scripts/lfo4_harness.py` does), or write test values into the array.
 
-**Open [O]:**
+**Open [O]** at the time, both answered on the instrument below ("As built on Waverider"):
 - the array's address and layout, read live on the instrument (usbprobe PEEK while an LFO runs);
 - how to ask a page to redraw at about 25 Hz while something on it is modulated. Today it redraws when a value changes.
 
@@ -85,9 +85,34 @@ The recommended option everywhere, except **9 (tick scale)** and **10 (Waverider
 - Emulator [E]: the stock SYN page redraws on its own at rest (5 draws in 100 M instructions, each a screen frame) and several times faster while a knob turns (18 in about 40 M). So the cursor can live on the redraws that already happen; the emulator's clock cannot give the rate in Hz.
 - The measurement builds `modview1` and `modview2` (`scripts/build_modview_probe.py`, `tools/dn2modview.py`) read the real redraw rate, the cost of one page draw, the markers' share, and the value heard, on the instrument.
 
+## As built on Waverider (2026-10-01)
+
+Grade **[I]**: measured on the instrument, over the usbprobe, with the owner at the panel. Builds `modview1` … `modview4g`; the readings are in `out/modview.csv` and the owner's test plan.
+
+### What the instrument showed
+
+- **The redraw rate [I].** At rest, and while a pattern plays with LFOs moving a parameter, the stock UI redraws a shown page **once a second**. Turning a knob redraws it at **~26 a second**. One Waverider page draw costs **~1.4 ms**, so 25 a second is **~3.7 %** of the ColdFire: what turning a knob already costs. CPU load: ~61 % at rest, ~66 % turning.
+- **The value heard [I]** is the array at `0x800068e4`, slot *s* of track *t* at `+34 + 202 t + 2 s`, **at the record's own scale**. POS 74 with no LFO reads `0x4a00` = 74 << 8. The emulator's half scale was wrong (corrected in `modview2b`).
+- **It holds what was last heard.** It only follows the knob while notes play: stopped, a turn doesn't change it. So the markers show the modulation as an **offset, heard − target**, where the target array `0x80003af0` has the same layout, and draw it **around the knob's own value**. A turn moves the knob, the dot and the range together.
+- **The redraw request [D, I].** The UI task polls its screen's dirty byte (`isDirty`, `0x4011d2f4`, screen +32) once a pass at `0x4002e464`, and redraws every view on it when set (`0x4011d32a`). The stock setter is `0x4011d2fe`; `View::invalidate` (`0x4011c7ba`) sets view +20 and then the screen's byte. `wr_poll` replaces that one call. While Waverider's page drew in the last 1.2 s and a marker would move, it sets the byte through the stock setter, at most every 5 ticks, then answers as stock. Off the page, or with nothing modulated, it adds no redraws (emulator control, and `modview3` at rest: 1 draw a second).
+- **`0x466758b0` is not milliseconds [I].** It advances ~120 a second (239 in 2.0 s). The first cap, written as 40 "ms", held the page to ~4 redraws a second (`modview3`). Corrected in `docs/display-path.md`.
+- **The LFO settings [I]** are the target array's slots 1–24, eight per LFO: SPD MULT FADE DEST WAVE SPH MODE DEP. DEST holds the destination's slot << 8 (`0x1a00` = POS). MULT raw 0–11 are 1…2K BPM (synced) and 12–23 are 1…2K fixed at 120 (raw 0 "1 BPM", 8 "256 BPM", 12 "1"). SPD `0x7000` = 48.
+- **The tempo [I]** is BPM × 120 at `0x800026c2` (14400 at 120.0, 14520 at 121.0; three RAM snapshots, stopped). The SHARC's control frame carries a copy at `0x80005f38`.
+- **Two LFOs on one destination [D]** (evaluator `0x40137726`, write-back `0x40137a8a`–`0x40137ad0`) add up. Each adds `(DEP − 0x4000) × 2 × wave` to the value the previous one left, clamped to 0…`0x7f00` at every step. LFO1's DEP `0x4c65` gives ±`0x18ca` (about ±25 of POS's 120), close to the ±`0x181b` the page learned on the instrument.
+- **Before the first PLAY [I],** the engine's copy of a track is not the project's sound. Track 2 held defaults (no DEST, DEP 0, POS 3.0) while the page showed POS 60. So the preview stays empty until playback starts. That's faithful: nothing is modulated yet. The owner declined reading the LFO settings from the UI side to show the range earlier.
+- **A positive FADE in FREE mode [I]:** after the fade, the value heard equals the knob (`0x2f00` on every read), so nothing is drawn.
+
+### What Waverider's page draws (option B, and the owner's later choices)
+
+- **Rate tiers** (the owner's choice D, mockups at https://claude.ai/artifact/CR7EEvwbHYo12sEQbcnGbH). The fastest LFO aimed at the parameter decides, with f = |SPD| × MULT × BPM / 30720 Hz (the manual's speed table, p. 64):
+  - **up to 3 Hz** (a redraw rate's eighth): the dot under the label, the dotted range, and the wave as heard, with the LFO's dotted cursor under the position bar;
+  - **3–12 Hz:** the dot over a 50 % dithered band, and the POS wave as the **two frames at the ends of the sweep**, with one pixel in nine filled between them;
+  - **above 12 Hz:** the band and the two curves, no dot, `≈` beside the label, and no redraws asked for it.
+- **The range** is the offset swept lately: an edge widens at once, holds 2 s, then relaxes. Only POS and TBL are marked: TUNE is pitch-converted in the array.
+- **The wave** is drawn thin, as one solid span per column (Tonverk's Wavefinder draws a column the same way, 2–4 px tall). A span of 2 px or less is shrunk to its middle pixel, and each column joins its neighbour only across the gap. Drawing only a span's two edges split steep slopes into two traces (`modview4e`).
+
 ## Next
 
-1. The owner picks the options, on the mockup page.
-2. Read the array live on the instrument, with an LFO running, to confirm where "the value heard" lives.
-3. Prototype on Waverider's own page first (we own its drawing): markers for TUNE and POS.
-4. Then the stock widgets, through the per-parameter drawer `0x400169de` after its widget draw, per widget geometry. Solve the redraw cadence alongside.
+1. The stock widgets, through the per-parameter drawer `0x400169de` after its widget draw, per the chosen options and each widget's geometry. The redraw mechanism above already serves any page.
+2. TUNE's marker: decode the pitch conversion in the array.
+3. The opt-in: a PERSONALIZE toggle and a key combo (`docs/ideas-backlog.md` §30), after Waverider.
