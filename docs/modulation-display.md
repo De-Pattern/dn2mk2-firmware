@@ -63,6 +63,28 @@ Markers go into pixels the stock widget leaves empty (the cell's 1–2 px margin
 | tick scale | **hollow pointer under the scale** | baseline dotted over the range + pointer | the nearest tick grows | A |
 | Waverider strip | dot below the track | dotted row below + dot | **hollow marker; the big wave already draws what you hear** | C |
 
+## The owner's choice (2026-10-01)
+
+The recommended option everywhere, except **9 (tick scale)** and **10 (Waverider strip)**, which take **option B**:
+
+| type | chosen |
+|---|---|
+| dial | B: range arc outside the rim + orbit dot |
+| vertical fader | B: dotted side rail + tick |
+| horizontal slider | B: dotted underline + tick |
+| number box | B: bottom edge dotted over the range + marker |
+| morphing glyph | B: glyph still, dotted meter under it + dot |
+| graph across cells | A: dotted ghost curve as it sounds |
+| discrete choice | A: hollow pointer at the choice heard |
+| pan / balance | B: dotted bracket above + tick |
+| tick scale | **B**: baseline dotted over the range + hollow pointer |
+| Waverider strip | **B**: dotted row below the track + dot |
+
+**On refreshing.** The owner proposed a static bracket worked out from the settings, with the cursor animating only while a value changes; anything that avoids a constant refresh is welcome, and a constant refresh may be measured and decided on numbers. No stock capability may be hindered.
+- The bracket can be computed from the settings: each LFO's DEST and DEP (bipolar waves ± DEP, unipolar one side), and the six performance sources' depths in their descriptor lists (`docs/modulation-matrix.md`). It only changes when a setting does, and that redraws the page anyway.
+- Emulator [E]: the stock SYN page redraws on its own at rest (5 draws in 100 M instructions, each a screen frame) and several times faster while a knob turns (18 in about 40 M). So the cursor can live on the redraws that already happen; the emulator's clock cannot give the rate in Hz.
+- The measurement builds `modview1` and `modview2` (`scripts/build_modview_probe.py`, `tools/dn2modview.py`) read the real redraw rate, the cost of one page draw, the markers' share, and the value heard, on the instrument.
+
 ## Next
 
 1. The owner picks the options, on the mockup page.
