@@ -124,6 +124,8 @@ def main() -> int:
     p.add_argument("--json", default=None)
     p.add_argument("--stock", action="store_true", help="install nothing: the control")
     p.add_argument("--regs-at", action="append", default=[], help="record registers at VA")
+    p.add_argument("--access", action="append", default=[], metavar="VA:N",
+                   help="record every read and write of N bytes at VA, by PC")
     p.add_argument("--regs-last", type=int, default=0, metavar="N",
                    help="keep the last N register rows at each --regs-at VA, not the first 6")
     p.add_argument("--args-at", action="append", default=[],
@@ -236,6 +238,23 @@ def main() -> int:
 
         uc.hook_add(UC_HOOK_MEM_READ, field_read, begin=PARAM_TABLE,
                     end=PARAM_TABLE + PARAM_RECORDS * PARAM_BYTES - 1)
+
+    # every read and write of a range, by the PC that made it (and the code on the stack)
+    access: dict[str, int] = {}
+    for spec in a.access:
+        from unicorn import UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE, UC_MEM_WRITE
+        va, n = (int(v, 0) for v in spec.split(":"))
+
+        def touched(uc_, kind, address, size, value, user, va=va):
+            pc = uc.reg_read(K.UC_M68K_REG_PC)
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            stack = struct.unpack(">24I", bytes(uc.mem_read(sp, 96)))
+            chain = " ".join(f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40220000)[:44]
+            what = "w" if kind == UC_MEM_WRITE else "r"
+            key = f"{what} +{address - va:#x} pc {pc:#010x} <- {chain}"
+            access[key] = access.get(key, 0) + 1
+
+        uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, touched, begin=va, end=va + n - 1)
 
     pixels: dict[str, int] = {}
     if a.pixel_callers:
@@ -452,6 +471,7 @@ def main() -> int:
             # forget what the pixel and panel traces saw so far: trace one screen state only
             pixels.clear()
             panel_writers.clear()
+            access.clear()
         elif step == "types":
             # every track's machine type byte, as the sound holds it
             kit = machine.long(KIT_POINTER)
@@ -461,7 +481,9 @@ def main() -> int:
             print(f"  types {got}")
         elif step.startswith("mem:"):
             _, va, n = step.split(":")
-            mems[va] = machine.read(int(va, 0), int(n, 0)).hex()
+            # a second read of the same address keeps the first: key it by its order
+            key = va if va not in mems else f"{va}@{len(mems)}"
+            mems[key] = machine.read(int(va, 0), int(n, 0)).hex()
         elif step.startswith("sync:"):
             # One track, through the routine the ISR's note path calls when a
             # triggered track's sound has changed (0x40026bbc / 0x40026bfe).
@@ -508,7 +530,7 @@ def main() -> int:
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
-              "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels,
+              "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels, "access": access,
               "panel_writers": panel_writers}
     print(json.dumps(result, indent=1))
     if a.json:

@@ -1,4 +1,4 @@
-# Waverider M7 and M8: its own SYN pages, and its wave
+# Waverider M7, M8 and M8.1: its own SYN pages, and its wave
 
 **Goal (owner, 2026-10-01).** A Waverider track gets its own two SYN pages, laid out from the "Wavefinder on Digitone II" mockup but with our own names, and structured around a picture of the wave:
 
@@ -21,9 +21,10 @@ Grades: **[D]** read statically, **[E]** measured in an emulator, **[H]** on the
 | page count | `0x400c24d2` → `wr_count` | 2 for a Waverider track; otherwise M5's `canon_arg` |
 | page descriptor | `0x400c24f2` → `wr_page` | our descriptor 0..1, or the stock empty page past them; otherwise M5's `canon_page` |
 | labels | `0x40064622` → `wr_label` | TUNE / POS / TBL for ids 238 / 239 / 247 on a Waverider track; everything else is the stock `getShortName` by a tail jump |
-| WaveTone's icons, and the wave | `0x4001821e` → `wr_icons` | skip WaveTone's oscillator icons on a Waverider track; on its first page, draw `wr_wave` instead (M8) |
+| the page itself | `0x40018214` → `wr_grid` | a Waverider track's page is drawn by `wr_page_draw` (`csrc/waverider/page.c`, M8.1) in place of the stock grid `0x40017428` |
+| WaveTone's icons | `0x4001821e` → `wr_icons` | skip WaveTone's oscillator icons on a Waverider track |
 
-All of it is one platform `CODE` chunk at `0x4670c000` (`dnfw.waverider.pages`, `dnfw.waverider.wave`), about 1.7 KB. "Is this a Waverider track?" is `is_wr`: the **active track**'s sound (`[0x800052a0] + 52 + 1163 t`, `t` = the byte `0x42431a6c`) has 5 at `+0xDE`. The readers themselves are always handed type 1, because M5 reports 5 as 1 to the UI.
+All of it is one platform `CODE` chunk at `0x4670c000`, about 8.4 KB: the assembly (`dnfw.waverider.pages`) up to `0x4670c400`, then the C renderer, compiled by `dnfw.waverider.cpage` with its control table and wave spans in a generated `wr_gen.h`. "Is this a Waverider track?" is `is_wr`: the **active track**'s sound (`[0x800052a0] + 52 + 1163 t`, `t` = the byte `0x42431a6c`) has 5 at `+0xDE`. The readers themselves are always handed type 1, because M5 reports 5 as 1 to the UI.
 
 **Emulator [E] (2026-10-01, `scripts/emu_waverider_menu.py`, snapshot `wr-ui800M`):**
 - a Waverider track shows `Waverider (1/2)` and `(2/2)`; page 1 is TUNE, an empty box, POS (the wave), TBL, then four empty boxes; page 2 is eight empty boxes;
@@ -123,6 +124,30 @@ Coordinates are the canvas's own: y counts up from the bottom, as the page's bli
 - *The page titles drive the icons:* disproven. Our own titles gave the same icons; the icons come from the page id.
 - *The overview table `0x42432b24` drives the icons:* disproven; its entries are all 0.
 - *A byte branch to skip the icons:* `bne.s` with displacement `0xa0` is **-96**, not +160. It jumped back into the dispatcher and the UI hung behind the MACHINE SEL menu (M7d, emulator). `wr_icons` now rewrites its own return address to the stock target `0x400182c6`, and the site is `jsr wr_icons ; nop`.
+
+## M8.1: the page, laid out like Tonverk's Wavefinder [E]
+
+**Why.** The owner, 2026-10-01: all that picture on a tiny rectangle is not ideal, and the controls can be elements that feed the wave graph rather than dials. Tonverk has the answer on a screen of the same size (User Manual OS 1.4.1, p. 94, the Wavefinder SRC page): the wave across the middle, A..D in a slim strip above it, E..H below, each control its label with a small indicator, and a position bar under the wave. So both pages keep all eight controls, and the wave is on every page. We follow the layout, with our own widgets.
+
+**What it draws** (`csrc/waverider/page.c`; y counts up from the bottom):
+
+| | where | what |
+|---|---|---|
+| A..D | labels y 46, indicators y 43..44, columns of 25 from x 22 | the label, then a dotted track filled to the value: from the centre when the default is mid-range (TUNE), from the left otherwise (POS); a control of a few steps is segments with the current one filled (TBL: 2) |
+| the wave | x 24..119, y 17..39 | the frame the reader plays for TBL and POS, one min..max span a column (96 columns, 6 KB of spans) |
+| the position bar | y 15..16 | dotted, with a 3-pixel marker at POS |
+| E..H | indicators y 9..10, labels y 1 | as A..D; "-" until their milestone |
+| kept from the stock grid | | the level meter (`view->vtable[184]`) and the page dots (`0x4006598a`) |
+
+The ranges come from each record: `+8` min, `+12` max, `+16` default (TUN1: 0x400, 0x7c00, 0x4000; WAV1: 0, 0x7800, 0; TBL1: 0, 0x100, 0). Values come from the page's getter `0x4006538e`, text from `0x4011545c(canvas, font 0x44507ed8, x, y, 2 = centred, "%.5s", label)`.
+
+**Emulator:** PRIM saw → sine and HARM fundamental → 16th partial as POS turns, with the marker following; TBL's segments follow push-and-turn; page 2 shows eight "-"; a WaveTone track keeps its grid and icons. The HARM 16th partial is now 16 visible cycles.
+
+**Closed on the way:**
+- *A frame round the control being turned:* dropped (owner). The per-place state `0x40113346(view + 148, i)` is 20 bytes; `+0` counts a turn up and decays (`0x401132da`), written by the encoder path `0x4011336e` from `0x400675c4`. Nothing in the grid consumes it; the grid only reads it (`0x40113568`).
+- *A plain turn does not move POS on our page:* not our page. On a WaveTone track the same plain turn does not move WAV1 either; it only shows the value. Push-and-turn moves both.
+
+**To iterate (owner: "we will need to iterate the dressing anyway"):** the widgets, the spacing, and the two oscillators dim with their sum bright once osc 2 exists (M9).
 
 ## Open [O]
 

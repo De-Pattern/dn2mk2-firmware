@@ -182,9 +182,10 @@ def test_extents_do_not_overlap_each_other(dn2_111):
 
 def test_the_json_reproduces_the_compose(stock):
     from dnfw.patch.assemble import assemble, available
-    if not available():
-        pytest.skip("no m68k assembler")
-    built = CF.compose(stock, assemble)
+    from dnfw.waverider import cpage
+    if not (available() and cpage.available()):
+        pytest.skip("no m68k assembler or GCC")
+    built = CF.compose(stock, assemble, cpage.compile_page)
     content = bytearray(stock)
     for e in waverider.SPEC["edits"]:
         new = bytes.fromhex(e["new"])
