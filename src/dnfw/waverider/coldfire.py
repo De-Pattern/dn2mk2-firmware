@@ -508,5 +508,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the sound's parameter-ownership test: type 5 owns WaveTone's machine parameters",
          VALID_STOCK)
     layout.update(playout)
+    # the wave spans are data (signed sample bytes): where they lie, so the RAM check
+    # (dnfw.mods.ramcheck) can tell four of their bytes from an address
+    layout["wr_spans"] = csyms["wr_spans"]
+    layout["wr_spans_end"] = csyms["wr_spans"] + wave.TABLES * wave.FRAMES * 2 * wave.WIDTH
     return {"content": bytes(content), "edits": edits, "layout": layout,
             "chunk": {"load": pages.LOAD, "code": chunk}}
