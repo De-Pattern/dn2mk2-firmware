@@ -53,6 +53,44 @@ typedef unsigned char u8;
 #define POS_Y   15
 #define MARK    3
 
+#ifndef WR_MARKERS
+#define WR_MARKERS 0
+#endif
+
+#ifdef WR_PROBE
+/* Measurement builds only (scripts/build_modview_probe.py; tools/dn2modview.py reads
+ * this over the probe's PEEK). DTCN0 is the free-running timer the probe also reads
+ * (132 MHz on the instrument), so `ticks` over `draws` is the time one page draw
+ * takes, and `marker_ticks` the part the markers take. */
+#define DTCN0   (*(volatile u32 *)0xFC07000Cu)
+struct wr_probe { u32 magic, draws, ticks, marker_ticks, markers, spare; };
+volatile struct wr_probe wr_probe __attribute__((section(".data"))) =
+    { 0x57525052u, 0, 0, 0, WR_MARKERS, 0x2D2D2D2Du };
+#endif
+
+#if WR_MARKERS
+/* The value heard: the per-track array the audio tick fills from each sound and then
+ * modulates in place (0x400db12a, 0x400db22c): slot s of track t at
+ * 0x800068e4 + 34 + 202 t + 2 s, at half the record's scale for a linear parameter
+ * (emulator: WAV1 at POS 120 reads 0x3c00). TUNE goes through a pitch conversion, so
+ * its marker is only indicative. docs/modulation-display.md. */
+#define ACTIVE_TRACK (*(volatile u8 *)0x42431A6Cu)
+#define VALUES 0x800068E4u
+
+static int heard(u32 id, int fallback)
+{
+    int t = ACTIVE_TRACK, slot = RECORD(id)[1];
+    if (t > 15 || slot < 0 || slot > 99)
+        return fallback;
+    return 2 * *(volatile unsigned short *)(VALUES + 34u + 202u * t + 2u * slot);
+}
+
+/* the range each place has swept lately: widened at once, relaxed slowly */
+static int span_lo[8] __attribute__((section(".data"))) = { -1, -1, -1, -1, -1, -1, -1, -1 };
+static int span_hi[8] __attribute__((section(".data"))) = { -1, -1, -1, -1, -1, -1, -1, -1 };
+static int span_id[8] __attribute__((section(".data"))) = { -1, -1, -1, -1, -1, -1, -1, -1 };
+#endif
+
 static void *method(void *obj, int offset)
 {
     return *(void **)(*(char **)obj + offset);
@@ -109,14 +147,55 @@ static void indicator(void *c, int cx, int y, u32 id, int v)
         px(c, x, y + 1);
 }
 
+#if WR_MARKERS
+/* x of value v on place cx's track, as `indicator` places it */
+static int track_x(u32 id, int cx, int v)
+{
+    const int *r = RECORD(id);
+    int lo = r[2], hi = r[3];
+    if (v < lo) v = lo;
+    if (v > hi) v = hi;
+    return cx - BAR_HALF + (v - lo) * (2 * BAR_HALF) / (hi - lo);
+}
+
+/* Place i's modulation, on the row beside its track (y): the range it swept lately,
+ * dotted, and a two-pixel dot at the value heard. Drawn for every working place on
+ * every draw, modulated or not: the worst case, which is what build 2 measures. */
+static void modulation(void *c, int i, int cx, int y, u32 id, int set)
+{
+    const int *r = RECORD(id);
+    if (r[3] <= r[2])
+        return;
+    int now = heard(id, set);
+    if (span_id[i] != (int)id) {
+        span_id[i] = id;
+        span_lo[i] = span_hi[i] = now;
+    }
+    if (now < span_lo[i]) span_lo[i] = now;
+    if (now > span_hi[i]) span_hi[i] = now;
+    span_lo[i] += (now - span_lo[i]) / 64;          /* relax toward what is heard */
+    span_hi[i] += (now - span_hi[i]) / 64;
+    int a = track_x(id, cx, span_lo[i]), b = track_x(id, cx, span_hi[i]);
+    for (int x = a; x <= b; x += 2)
+        px(c, x, y);
+    column(c, track_x(id, cx, now), y - 1, y);
+}
+#endif
+
 /* The frame the SHARC reader plays for the current TBL and POS, interpolated
  * between the two frames either side, one span a column; then the table's
- * position as a dotted bar with a marker. */
+ * position as a dotted bar with a marker. Build 2 draws the wave as heard, and
+ * a second marker above the bar at the position heard. */
 static void wave(void *c, void *view)
 {
     u8 flag;
     int tbl = GET_VALUE(view, WR_TBL_ID, &flag) >> 8;
     int pos = GET_VALUE(view, WR_POS_ID, &flag);
+#if WR_MARKERS
+    int set_pos = pos < 0 ? 0 : pos > WR_POS_MAX ? WR_POS_MAX : pos;
+    pos = heard(WR_POS_ID, pos);
+    tbl = heard(WR_TBL_ID, tbl << 8) >> 8;
+#endif
     if (tbl < 0) tbl = 0;
     if (tbl >= WR_TABLES) tbl = WR_TABLES - 1;
     if (pos < 0) pos = 0;
@@ -146,13 +225,23 @@ static void wave(void *c, void *view)
 
     for (int x = 0; x < WR_WIDTH; x += 2)
         px(c, WAVE_X + x, POS_Y);
+#if WR_MARKERS
+    int m = WAVE_X + set_pos * (WR_WIDTH - MARK) / WR_POS_MAX;
+    int h = WAVE_X + pos * (WR_WIDTH - MARK) / WR_POS_MAX;
+    for (int k = 0; k < MARK; k += 2)
+        px(c, h + k, POS_Y + 3);
+#else
     int m = WAVE_X + pos * (WR_WIDTH - MARK) / WR_POS_MAX;
+#endif
     for (int k = 0; k < MARK; k++)
         column(c, m + k, POS_Y, POS_Y + 1);
 }
 
 void wr_page_draw(void *view, void *canvas)
 {
+#ifdef WR_PROBE
+    u32 t0 = DTCN0, tm = 0;
+#endif
     int page = ((int (*)(void *))method(view, 132))(view);
     if (page < 0 || page >= WR_PAGES)
         page = 0;
@@ -167,7 +256,17 @@ void wr_page_draw(void *view, void *canvas)
         if (!id)
             continue;
         u8 flag;
-        indicator(canvas, cx, top ? TOP_BAR_Y : BOT_BAR_Y, id, GET_VALUE(view, id, &flag));
+        int set = GET_VALUE(view, id, &flag);
+        indicator(canvas, cx, top ? TOP_BAR_Y : BOT_BAR_Y, id, set);
+#if WR_MARKERS
+#ifdef WR_PROBE
+        u32 m0 = DTCN0;
+#endif
+        modulation(canvas, i, cx, top ? TOP_BAR_Y - 2 : BOT_BAR_Y + 3, id, set);
+#ifdef WR_PROBE
+        tm += DTCN0 - m0;
+#endif
+#endif
     }
 
     /* the stock grid's own tail: the level meter, then the page dots */
@@ -175,4 +274,9 @@ void wr_page_draw(void *view, void *canvas)
     int n = PAGE_COUNT(view);
     if (n > 1)
         PAGE_DOTS(view, canvas, n, page, 7);
+#ifdef WR_PROBE
+    wr_probe.draws++;
+    wr_probe.ticks += DTCN0 - t0;
+    wr_probe.marker_ticks += tm;
+#endif
 }
