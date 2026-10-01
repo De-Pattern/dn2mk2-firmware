@@ -16,11 +16,13 @@ emulator's captures use). Only reads; nothing is written to the instrument.
 Prints how long each read took, so the frames a second the probe can give are
 measured rather than assumed.
 
-`--gif SECONDS` reads both buffers as fast as the probe answers (about 6 ms a read)
-for that long and writes `DIR/NAME.glass.gif` (and each buffer's own, `.a`, `.b`),
-one frame per change, each held for as long as the screen held it. The firmware
-draws into the two buffers in turn, so the glass is whichever changed last. It
-prints how many times each changed: the rate the screen really updates.
+`--gif SECONDS` reads both buffers as fast as the probe answers for that long and
+writes `DIR/NAME.glass.gif` (and each buffer's own, `.a`, `.b`), one frame per
+change, each held for as long as the screen held it. Every frame is whole: a
+buffer counts only when two reads in a row agree, so one caught mid-draw is
+dropped (and counted). The firmware draws the frames into the two buffers in
+turn, so the glass is whichever last settled on a new one. It prints how many
+times each changed: the rate the screen really updates.
 """
 from __future__ import annotations
 
@@ -52,21 +54,32 @@ def image(buf: bytes, scale: int):
     return img.resize((W * scale, H * scale), Image.NEAREST)
 
 
-def record(pr, dp, seconds: float) -> dict[str, list[tuple[float, bytes]]]:
-    """-> per buffer, (time, bytes) at each change, from as many reads as fit."""
+def record(pr, dp, seconds: float) -> tuple[dict[str, list[tuple[float, bytes]]], int]:
+    """-> (per buffer and for the glass, (time, bytes) at each change; torn reads).
+
+    A read can land while the firmware is drawing, so a buffer is taken only when
+    two reads in a row agree: a page draw takes ~1.5 ms, a read ~3 ms. The two
+    buffers never hold the same frame (instrument, modview3): the firmware draws
+    each frame into one and shows it, then the next into the other, so the glass is
+    whichever buffer last settled on a new frame."""
     seen: dict[str, list[tuple[float, bytes]]] = {n: [] for n in (*BUFFERS, "glass")}
+    torn = 0
     t0 = time.perf_counter()
     while (now := time.perf_counter() - t0) < seconds:
         for name, addr in BUFFERS.items():
+            first = dp.decode_peek(pr.call(dp.req_peek, addr, SIZE))["data"]
             buf = dp.decode_peek(pr.call(dp.req_peek, addr, SIZE))["data"]
+            if first != buf:
+                torn += 1
+                continue
             if not seen[name] or seen[name][-1][1] != buf:
                 seen[name].append((now, buf))
-                # the two buffers take turns: the one that changed last is the newest frame
                 if not seen["glass"] or seen["glass"][-1][1] != buf:
                     seen["glass"].append((now, buf))
     for name in seen:
-        seen[name].append((seconds, seen[name][-1][1]))
-    return seen
+        if seen[name]:
+            seen[name].append((seconds, seen[name][-1][1]))
+    return seen, torn
 
 
 def write_gif(changes: list[tuple[float, bytes]], path: pathlib.Path, scale: int) -> None:
@@ -94,7 +107,11 @@ def main(argv=None) -> int:
         pr = dp.Probe(port)
         print(dp.decode_hello(pr.call(dp.req_hello))["tag"])
         if a.gif:
-            for name, changes in record(pr, dp, a.gif).items():
+            seen, torn = record(pr, dp, a.gif)
+            print(f"  {torn} torn read(s) dropped (caught mid-draw)")
+            for name, changes in seen.items():
+                if not changes:
+                    continue
                 write_gif(changes, a.dir / f"{a.name}.{name}.gif", a.scale)
                 print(f"  buffer {name}: {len(changes) - 2} changes in {a.gif:.1f} s"
                       f" = {(len(changes) - 2) / a.gif:.1f} a second -> {a.dir / f'{a.name}.{name}.gif'}")
