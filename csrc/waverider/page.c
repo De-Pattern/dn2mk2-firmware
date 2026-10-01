@@ -84,13 +84,16 @@ volatile struct wr_probe wr_probe __attribute__((section(".data"))) =
 #define ACTIVE_TRACK (*(volatile u8 *)0x42431A6Cu)
 #define TARGETS 0x80003AF0u
 #define VALUES  0x800068E4u
-#define MS      (*(volatile u32 *)0x466758B0u)                  /* the millisecond tick */
+/* the UI tick, about 120 a second (instrument, modview3, 2026-10-01: 239 in 2.0 s).
+ * Not a millisecond count, as docs/display-path.md had it from the emulator. */
+#define TICKS   (*(volatile u32 *)0x466758B0u)
+#define TICK_HZ 120
 #define SET_DIRTY ((void (*)(void *))0x4011D2FEu)               /* screen: redraw */
 
 #define QUANT   0x300           /* an offset step worth a redraw: about half a pixel */
-#define HOLD_MS 2000            /* a range edge holds this long before it relaxes */
-#define SHOWN_MS 1200           /* the stock UI redraws a shown page at least once a second */
-#define FRAME_MS 40             /* at most 25 redraws a second, a turn's own rate */
+#define HOLD    (2 * TICK_HZ)   /* a range edge holds 2 s before it relaxes */
+#define SHOWN   (TICK_HZ * 6 / 5)   /* 1.2 s: the stock UI redraws a shown page once a second */
+#define FRAME   5               /* ticks: at most 24 redraws a second, about a turn's own rate */
 #define MARKED  2               /* the places with markers: POS and TBL (TUNE is
                                  * pitch-converted in the array, so not yet) */
 
@@ -106,11 +109,11 @@ static int mod_offset(u32 id)
 static const u32 marked[MARKED] = { WR_POS_ID, WR_TBL_ID };
 
 /* per marked parameter: the offset range swept lately, and when each edge last grew */
-struct sweep { int lo, hi; u32 lo_ms, hi_ms; };
+struct sweep { int lo, hi; u32 lo_at, hi_at; };
 static struct sweep sweeps[MARKED] __attribute__((section(".data"))) = { { 0, 0, 0, 0 }, { 0, 0, 0, 0 } };
 /* what the last draw showed, for wr_poll to compare against */
-static u32 drawn_ms __attribute__((section(".data"))) = 0;
-static u32 asked_ms __attribute__((section(".data"))) = 0;
+static u32 drawn_at __attribute__((section(".data"))) = 0;
+static u32 asked_at __attribute__((section(".data"))) = 0;
 static int drawn_sig __attribute__((section(".data"))) = 0;
 static int settling __attribute__((section(".data"))) = 0;
 
@@ -130,14 +133,14 @@ static int signature(void)
     return sig;
 }
 
-/* widen at once; after HOLD_MS without growing, an edge relaxes toward the offset */
+/* widen at once; after HOLD without growing, an edge relaxes toward the offset */
 static void sweep(int k, int off, u32 now)
 {
     struct sweep *w = &sweeps[k];
-    if (off <= w->lo) { w->lo = off; w->lo_ms = now; }
-    else if (now - w->lo_ms > HOLD_MS) w->lo += (off - w->lo) / 4 + 1;
-    if (off >= w->hi) { w->hi = off; w->hi_ms = now; }
-    else if (now - w->hi_ms > HOLD_MS) w->hi += (off - w->hi) / 4 - 1;
+    if (off <= w->lo) { w->lo = off; w->lo_at = now; }
+    else if (now - w->lo_at > HOLD) w->lo += (off - w->lo) / 4 + 1;
+    if (off >= w->hi) { w->hi = off; w->hi_at = now; }
+    else if (now - w->hi_at > HOLD) w->hi += (off - w->hi) / 4 - 1;
     if (w->lo > off) w->lo = off;
     if (w->hi < off) w->hi = off;
     if (w->hi - w->lo > QUANT)
@@ -145,15 +148,15 @@ static void sweep(int k, int off, u32 now)
 }
 
 /* Called by the UI task in place of its `isDirty(screen)` (0x4002e464), once a loop:
- * while Waverider's page is on screen (it drew in the last SHOWN_MS) and a marker
- * would move, ask the stock redraw (0x4011d2fe), at most every FRAME_MS. Off the
+ * while Waverider's page is on screen (it drew in the last SHOWN) and a marker
+ * would move, ask the stock redraw (0x4011d2fe), at most every FRAME. Off the
  * page, or with nothing modulated, it costs a compare and the stock call. */
 int wr_poll(void *screen)
 {
-    u32 now = MS;
-    if (now - drawn_ms < SHOWN_MS && now - asked_ms >= FRAME_MS
+    u32 now = TICKS;
+    if (now - drawn_at < SHOWN && now - asked_at >= FRAME
             && (settling || signature() != drawn_sig)) {
-        asked_ms = now;
+        asked_at = now;
         SET_DIRTY(screen);
     }
     return IS_DIRTY(screen);
@@ -323,7 +326,7 @@ void wr_page_draw(void *view, void *canvas)
     if (page < 0 || page >= WR_PAGES)
         page = 0;
 #if WR_MARKERS
-    u32 now = MS;
+    u32 now = TICKS;
     settling = 0;
     drawn_sig = signature();
 #endif
@@ -357,7 +360,7 @@ void wr_page_draw(void *view, void *canvas)
     if (n > 1)
         PAGE_DOTS(view, canvas, n, page, 7);
 #if WR_MARKERS
-    drawn_ms = now;
+    drawn_at = now;
 #endif
 #ifdef WR_PROBE
     wr_probe.draws++;
