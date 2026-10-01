@@ -126,6 +126,8 @@ def main() -> int:
     p.add_argument("--regs-at", action="append", default=[], help="record registers at VA")
     p.add_argument("--access", action="append", default=[], metavar="VA:N",
                    help="record every read and write of N bytes at VA, by PC")
+    p.add_argument("--count", action="append", default=[], metavar="VA",
+                   help="count the entries to VA (after reset-trace, if one is given)")
     p.add_argument("--regs-last", type=int, default=0, metavar="N",
                    help="keep the last N register rows at each --regs-at VA, not the first 6")
     p.add_argument("--args-at", action="append", default=[],
@@ -255,6 +257,14 @@ def main() -> int:
             access[key] = access.get(key, 0) + 1
 
         uc.hook_add(UC_HOOK_MEM_READ | UC_HOOK_MEM_WRITE, touched, begin=va, end=va + n - 1)
+
+    counts: dict[str, int] = {}
+    frames_at_reset = [0]
+    for va in a.count:
+        def counted(uc_, address, size, user):
+            key = f"{address:#010x}"
+            counts[key] = counts.get(key, 0) + 1
+        uc.hook_add(UC_HOOK_CODE, counted, begin=int(va, 0), end=int(va, 0))
 
     pixels: dict[str, int] = {}
     if a.pixel_callers:
@@ -472,6 +482,8 @@ def main() -> int:
             pixels.clear()
             panel_writers.clear()
             access.clear()
+            counts.clear()
+            frames_at_reset[0] = panel.frames()
         elif step == "types":
             # every track's machine type byte, as the sound holds it
             kit = machine.long(KIT_POINTER)
@@ -530,7 +542,8 @@ def main() -> int:
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
-              "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels, "access": access,
+              "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
+              "screen_frames": panel.frames() - frames_at_reset[0],
               "panel_writers": panel_writers}
     print(json.dumps(result, indent=1))
     if a.json:
