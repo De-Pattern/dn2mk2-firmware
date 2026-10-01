@@ -125,11 +125,54 @@ static int which(u32 id)
     return -1;
 }
 
+/* How fast the parameter moves, from the settings of the LFOs aimed at it
+ * (docs/modulation-display.md, "faster than the screen"): tier 0 is slow enough for
+ * a moving dot (up to a redraw rate's eighth, 3 Hz at 24 a second), tier 1 is jerky
+ * (up to half the rate, 12 Hz) and gets the dot over a dithered band, tier 2 would
+ * alias and gets the band alone. The rate is the manual's table (p. 64):
+ *   f = |SPD| x MULT x BPM / 30720 Hz, BPM 120 for a fixed MULT.
+ * The LFO settings are the target array's slots 1..24, eight an LFO: SPD, MULT,
+ * FADE, DEST, WAVE, SPH, MODE, DEP (the record table: ids 75..83, 85..93, 95..103).
+ * DEST holds the destination's slot << 8 (docs/fx-master-modulation.md). */
+#define TIER_FPS 24
+#ifndef WR_BPM
+#define WR_BPM() 120            /* the tempo; read from the project once located */
+#endif
+
+static int lfo_word(int t, int slot)
+{
+    return *(volatile unsigned short *)(TARGETS + 34u + 202u * t + 2u * slot);
+}
+
+static int tier(u32 id)
+{
+    int t = ACTIVE_TRACK, slot = RECORD(id)[1], fastest = 0;
+    if (t > 15)
+        return 0;
+    for (int l = 0; l < 3; l++) {
+        int base = 1 + 8 * l;
+        int dep = lfo_word(t, base + 7) - 0x4000;
+        if (lfo_word(t, base + 3) != slot << 8 || (dep < 0x80 && dep > -0x80))
+            continue;
+        int spd = lfo_word(t, base) - 0x4000, m = lfo_word(t, base + 1) >> 8;
+        if (spd < 0) spd = -spd;
+        /* MULT: twelve tempo-synced 1..2048, then twelve fixed at 120 BPM */
+        int bpm = m < 12 ? WR_BPM() : 120, mult = 1 << (m < 12 ? m : m - 12);
+        /* spd/16 x mult x bpm stays in 31 bits; Hz x 30720 x 256 / 16 = Hz x 491520 */
+        int rate = (spd >> 4) * mult * bpm;
+        int k = rate > 491520 * (TIER_FPS / 2) ? 2 : rate > 491520 * (TIER_FPS / 8) ? 1 : 0;
+        if (k > fastest)
+            fastest = k;
+    }
+    return fastest;
+}
+
+/* what a redraw would change: the offsets of the places slow enough to animate */
 static int signature(void)
 {
     int sig = 0;
     for (int k = 0; k < MARKED; k++)
-        sig = sig * 131 + mod_offset(marked[k]) / QUANT;
+        sig = sig * 131 + (tier(marked[k]) < 2 ? mod_offset(marked[k]) / QUANT : 0);
     return sig;
 }
 
@@ -228,6 +271,16 @@ static void indicator(void *c, int cx, int y, u32 id, int v)
 }
 
 #if WR_MARKERS
+/* a small "approximately" sign, two tildes 4 wide, 4 x 5, its bottom-left corner at
+ * (x, y): each tilde low, high, low, high, so it reads as a wave and not as carets */
+static void approx(void *c, int x, int y)
+{
+    for (int k = 0; k < 2; k++) {
+        int yy = y + 1 + 3 * k;
+        px(c, x, yy); px(c, x + 1, yy + 1); px(c, x + 2, yy); px(c, x + 3, yy + 1);
+    }
+}
+
 /* x of value v on place cx's track, as `indicator` places it */
 static int track_x(u32 id, int cx, int v)
 {
@@ -241,7 +294,7 @@ static int track_x(u32 id, int cx, int v)
 /* Place i's modulation, on the row beside its track (y), option B: the range swept
  * lately around the knob, dotted, and a two-pixel dot at knob + offset. Nothing at
  * all while the parameter is not modulated. */
-static void modulation(void *c, int cx, int y, u32 id, int set, u32 now)
+static void modulation(void *c, int cx, int y, int label_y, u32 id, int set, u32 now)
 {
     int k = which(id);
     const int *r = RECORD(id);
@@ -253,9 +306,20 @@ static void modulation(void *c, int cx, int y, u32 id, int set, u32 now)
     if (w->hi - w->lo <= QUANT && off < QUANT && off > -QUANT)
         return;
     int a = track_x(id, cx, set + w->lo), b = track_x(id, cx, set + w->hi);
-    for (int x = a; x <= b; x += 2)
-        px(c, x, y);
-    column(c, track_x(id, cx, set + off), y - 1, y);
+    int speed = tier(id);
+    if (speed == 0) {
+        for (int x = a; x <= b; x += 2)
+            px(c, x, y);
+    } else {
+        for (int x = a; x <= b; x++)            /* the band: a 50 % dither, the panel's grey */
+            for (int yy = y - 1; yy <= y; yy++)
+                if (((x + yy) & 1) == 0)
+                    px(c, x, yy);
+    }
+    if (speed < 2)
+        column(c, track_x(id, cx, set + off), y - 1, y);
+    else
+        approx(c, cx + 10, label_y);            /* "too fast to draw" beside the label */
 }
 #endif
 
@@ -264,34 +328,79 @@ static void modulation(void *c, int cx, int y, u32 id, int set, u32 now)
  * position as a dotted bar with a marker. With the markers, the wave is the frame
  * heard (the knob plus the modulation), and a dotted marker above the bar shows
  * where the modulation has it, while the solid one stays on the knob. */
+/* column x of the frame at (tbl, pos), interpolated: its span, in canvas rows */
+static void span(int tbl, int pos, int x, int *lo, int *hi)
+{
+    int fx = pos >> 3;                      /* pos * 15 * 256 / 0x7800, exactly */
+    int f = fx >> 8, frac = fx & 0xFF;
+    int g = f < WR_FRAMES - 1 ? f + 1 : f;
+    int l = wr_spans[tbl][f][0][x] + (((wr_spans[tbl][g][0][x] - wr_spans[tbl][f][0][x]) * frac) >> 8);
+    int h = wr_spans[tbl][f][1][x] + (((wr_spans[tbl][g][1][x] - wr_spans[tbl][f][1][x]) * frac) >> 8);
+    *lo = WAVE_CY + l * WAVE_AMP / 127;
+    *hi = WAVE_CY + h * WAVE_AMP / 127;
+}
+
+static int clamp_pos(int pos)
+{
+    return pos < 0 ? 0 : pos > WR_POS_MAX ? WR_POS_MAX : pos;
+}
+
+#define GHOST_STEPS 8
+
 static void wave(void *c, void *view)
 {
     u8 flag;
     int tbl = GET_VALUE(view, WR_TBL_ID, &flag) >> 8;
     int pos = GET_VALUE(view, WR_POS_ID, &flag);
 #if WR_MARKERS
-    int set_pos = pos < 0 ? 0 : pos > WR_POS_MAX ? WR_POS_MAX : pos;
+    int set_pos = clamp_pos(pos);
     int moved = mod_offset(WR_POS_ID);
+    int speed = tier(WR_POS_ID);
     pos += moved;
     tbl = (GET_VALUE(view, WR_TBL_ID, &flag) + mod_offset(WR_TBL_ID)) >> 8;
 #endif
     if (tbl < 0) tbl = 0;
     if (tbl >= WR_TABLES) tbl = WR_TABLES - 1;
-    if (pos < 0) pos = 0;
-    if (pos > WR_POS_MAX) pos = WR_POS_MAX;
+    pos = clamp_pos(pos);
 
-    int fx = pos >> 3;                      /* pos * 15 * 256 / 0x7800, exactly */
-    int f = fx >> 8, frac = fx & 0xFF;
-    int g = f < WR_FRAMES - 1 ? f + 1 : f;
-    const signed char *a = wr_spans[tbl][f][0], *b = wr_spans[tbl][g][0];
-    const signed char *A = wr_spans[tbl][f][1], *B = wr_spans[tbl][g][1];
+#if WR_MARKERS
+    if (speed > 0) {
+        /* Faster than the screen: the ghost wave, the outline of every frame the
+         * modulation sweeps, solid at its edges and dithered inside -- the blend
+         * of frames that is being heard. */
+        int from = clamp_pos(set_pos + sweeps[0].lo), to = clamp_pos(set_pos + sweeps[0].hi);
+        for (int x = 0; x < WR_WIDTH; x++) {
+            int bottom = 999, top = -999;
+            for (int k = 0; k <= GHOST_STEPS; k++) {
+                int lo, hi;
+                span(tbl, from + (to - from) * k / GHOST_STEPS, x, &lo, &hi);
+                if (lo < bottom) bottom = lo;
+                if (hi > top) top = hi;
+            }
+            px(c, WAVE_X + x, bottom);
+            px(c, WAVE_X + x, top);
+            for (int y = bottom + 1; y < top; y++)
+                if (((x + y) & 1) == 0)
+                    px(c, WAVE_X + x, y);
+        }
+        for (int x = 0; x < WR_WIDTH; x += 2)
+            px(c, WAVE_X + x, POS_Y);
+        int a = WAVE_X + from * (WR_WIDTH - MARK) / WR_POS_MAX;
+        int b = WAVE_X + to * (WR_WIDTH - MARK) / WR_POS_MAX + MARK - 1;
+        for (int x = a; x <= b; x++)            /* the positions swept, above the bar */
+            if ((x & 1) == 0)
+                px(c, x, POS_Y + 3);
+        int m = WAVE_X + set_pos * (WR_WIDTH - MARK) / WR_POS_MAX;
+        for (int k = 0; k < MARK; k++)
+            column(c, m + k, POS_Y, POS_Y + 1);
+        return;
+    }
+#endif
 
     int last_lo = 0, last_hi = 0;
     for (int x = 0; x < WR_WIDTH; x++) {
-        int lo = a[x] + (((b[x] - a[x]) * frac) >> 8);
-        int hi = A[x] + (((B[x] - A[x]) * frac) >> 8);
-        lo = WAVE_CY + lo * WAVE_AMP / 127;
-        hi = WAVE_CY + hi * WAVE_AMP / 127;
+        int lo, hi;
+        span(tbl, pos, x, &lo, &hi);
         if (x == 0) {
             last_lo = lo;
             last_hi = hi;
@@ -347,7 +456,8 @@ void wr_page_draw(void *view, void *canvas)
 #ifdef WR_PROBE
         u32 m0 = DTCN0;
 #endif
-        modulation(canvas, cx, top ? TOP_BAR_Y - 2 : BOT_BAR_Y + 3, id, set, now);
+        modulation(canvas, cx, top ? TOP_BAR_Y - 2 : BOT_BAR_Y + 3, top ? TOP_LABEL_Y : BOT_LABEL_Y,
+                   id, set, now);
 #ifdef WR_PROBE
         tm += DTCN0 - m0;
 #endif
