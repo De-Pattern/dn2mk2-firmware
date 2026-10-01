@@ -72,6 +72,14 @@ def extents(firmware=None, area_length: int = 0) -> list[Extent]:
     return out
 
 
+# The wave spans (`wr_spans`, dnfw.waverider.wave) are signed sample bytes, and any
+# four in a row can read as an address above BSS: 2026-10-01, `46 d6 a7 12` inside
+# them did, once the page code before them grew. They are data by construction, so
+# every word place inside them is declared not to hold an address; the code around
+# them is still checked.
+NOT_RAM = tuple(range(SPEC["layout"]["wr_spans"] & ~1, SPEC["layout"]["wr_spans_end"], 2))
+
+
 def ram() -> list[Extent]:
     chunk = SPEC["chunk"]
     return [Extent(RAM, chunk["load"], len(bytes.fromhex(chunk["code"])),

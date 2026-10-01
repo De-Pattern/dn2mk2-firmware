@@ -394,7 +394,13 @@ encoder's sensitivity by how fast it is turned.
 |---|---|---|
 | `0xfc07000c` | DTIM0 `DTCN` | **0, 0, 0** — never advances |
 | `0xfc070000` | DTIM0 `DTMR` | `0x0000` — not enabled |
-| `0x466758b0` | the millisecond tick global | 1095 → 1426 over 30M instructions ✓ |
+| `0x466758b0` | a tick global (**not** milliseconds: see below) | 1095 → 1426 over 30M instructions ✓ |
+
+**[CORRECTED 2026-10-01, on the instrument]** `0x466758b0` is not a millisecond
+count. Read over the probe for 2.0 s of host time on `modview3`, it advanced 239:
+**about 120 a second**, one tick every ~8.3 ms. The emulator's advance above is
+real but its clock cannot give a rate. Waverider's redraw cap, written as 40 "ms",
+was 40 ticks (a third of a second) and held the page to ~4 redraws a second.
 
 digikit models DMA timer channels by request and defaults to `(3,)`; **channel
 0 is never among them**. So every encoder event is stamped `0`, every interval

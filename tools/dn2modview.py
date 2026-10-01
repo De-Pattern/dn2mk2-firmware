@@ -20,8 +20,9 @@ probe answers HELLO with, or --json), or
 - CPU %: the probe's whole ColdFire load (1 - idle), for comparison.
 
 `--slot S` also reads slot S of the active track's value array (0x800068e4 + 34 +
-202 t + 2 s): the value heard, as the audio tick left it (x2 = the record's scale,
-for a linear parameter; docs/modulation-display.md). Only reads; read-only PEEK.
+202 t + 2 s): the value heard, as the audio tick left it, at the record's own scale for a linear
+parameter (instrument: POS 74 reads 0x4a00 = 74 << 8; docs/modulation-display.md).
+Only reads; read-only PEEK.
 """
 from __future__ import annotations
 
@@ -129,7 +130,7 @@ def main(argv=None) -> int:
                    "slot": "", "heard": ""}
             if a.slot is not None:
                 t, raw = heard(dp, pr, a.slot)
-                row["slot"], row["heard"] = f"t{t + 1}:{a.slot}", f"{raw:#06x} (x2 = {2 * raw:#06x})"
+                row["slot"], row["heard"] = f"t{t + 1}:{a.slot}", f"{raw:#06x} ({raw / 256:.1f})"
             append(a.csv, row)
             print("%-10s %6s draws/s  %7s us/draw  (markers %6s us)  page %6.3f %%  markers %6.3f %%"
                   "  CPU %5s %%  %s"

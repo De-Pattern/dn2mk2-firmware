@@ -31,6 +31,7 @@ typedef unsigned char u8;
 #define TEXT       ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011545C)
 #define PAGE_COUNT ((int (*)(void *))0x400173CA)
 #define PAGE_DOTS  ((void (*)(void *, void *, int, int, int))0x4006598A)
+#define IS_DIRTY   ((int (*)(void *))0x4011D2F4u)               /* screen: a redraw due? */
 #define FONT       0x44507ED8u                                  /* the grid's label font */
 #define CENTRED    2                                            /* TEXT flag: x is the centre */
 
@@ -51,10 +52,11 @@ typedef unsigned char u8;
 #define WAVE_CY 28
 #define WAVE_AMP 11
 #define POS_Y   15
+#define CURSOR_Y (POS_Y - 2)    /* the LFO's position cursor: under the bar (owner) */
 #define MARK    3
 
 #ifndef WR_MARKERS
-#define WR_MARKERS 0
+#define WR_MARKERS 1          /* the modulation markers and the redraw they need */
 #endif
 
 #ifdef WR_PROBE
@@ -69,26 +71,156 @@ volatile struct wr_probe wr_probe __attribute__((section(".data"))) =
 #endif
 
 #if WR_MARKERS
-/* The value heard: the per-track array the audio tick fills from each sound and then
- * modulates in place (0x400db12a, 0x400db22c): slot s of track t at
- * 0x800068e4 + 34 + 202 t + 2 s, at half the record's scale for a linear parameter
- * (emulator: WAV1 at POS 120 reads 0x3c00). TUNE goes through a pitch conversion, so
- * its marker is only indicative. docs/modulation-display.md. */
+/* Modulation (docs/modulation-display.md). The audio tick keeps, per track, a target
+ * array (the sound's values, refreshed when a note plays) and the value array it
+ * smooths from it and then modulates in place (0x400db12a, 0x400db22c); slot s of
+ * track t is at +34 + 202 t + 2 s in both, at the record's own scale for a linear
+ * parameter (instrument, modview1, 2026-10-01: POS 74 with no LFO reads 0x4a00).
+ *
+ * The value array alone lags the knob: it holds what was last heard, so with the
+ * sequencer stopped it does not follow a turn (owner, modview2b). So the markers
+ * show the modulation as an offset, heard - target, drawn around the knob's own
+ * value: the dot at knob + offset, and the range the offset swept lately around the
+ * knob. A turn moves all three together. */
 #define ACTIVE_TRACK (*(volatile u8 *)0x42431A6Cu)
-#define VALUES 0x800068E4u
+#define TARGETS 0x80003AF0u
+#define VALUES  0x800068E4u
+/* the UI tick, about 120 a second (instrument, modview3, 2026-10-01: 239 in 2.0 s).
+ * Not a millisecond count, as docs/display-path.md had it from the emulator. */
+#define TICKS   (*(volatile u32 *)0x466758B0u)
+#define TICK_HZ 120
+#define SET_DIRTY ((void (*)(void *))0x4011D2FEu)               /* screen: redraw */
 
-static int heard(u32 id, int fallback)
+#define QUANT   0x300           /* an offset step worth a redraw: about half a pixel */
+#define HOLD    (2 * TICK_HZ)   /* a range edge holds 2 s before it relaxes */
+#define SHOWN   (TICK_HZ * 6 / 5)   /* 1.2 s: the stock UI redraws a shown page once a second */
+#define FRAME   5               /* ticks: at most 24 redraws a second, about a turn's own rate */
+#define MARKED  2               /* the places with markers: POS and TBL (TUNE is
+                                 * pitch-converted in the array, so not yet) */
+
+static int mod_offset(u32 id)
 {
     int t = ACTIVE_TRACK, slot = RECORD(id)[1];
     if (t > 15 || slot < 0 || slot > 99)
-        return fallback;
-    return 2 * *(volatile unsigned short *)(VALUES + 34u + 202u * t + 2u * slot);
+        return 0;
+    u32 at = 34u + 202u * t + 2u * slot;
+    return *(volatile unsigned short *)(VALUES + at) - *(volatile unsigned short *)(TARGETS + at);
 }
 
-/* the range each place has swept lately: widened at once, relaxed slowly */
-static int span_lo[8] __attribute__((section(".data"))) = { -1, -1, -1, -1, -1, -1, -1, -1 };
-static int span_hi[8] __attribute__((section(".data"))) = { -1, -1, -1, -1, -1, -1, -1, -1 };
-static int span_id[8] __attribute__((section(".data"))) = { -1, -1, -1, -1, -1, -1, -1, -1 };
+static const u32 marked[MARKED] = { WR_POS_ID, WR_TBL_ID };
+
+/* per marked parameter: the offset range swept lately, and when each edge last grew */
+struct sweep { int lo, hi; u32 lo_at, hi_at; };
+static struct sweep sweeps[MARKED] __attribute__((section(".data"))) = { { 0, 0, 0, 0 }, { 0, 0, 0, 0 } };
+/* what the last draw showed, for wr_poll to compare against */
+static u32 drawn_at __attribute__((section(".data"))) = 0;
+static u32 asked_at __attribute__((section(".data"))) = 0;
+static int drawn_sig __attribute__((section(".data"))) = 0;
+static int settling __attribute__((section(".data"))) = 0;
+
+static int which(u32 id)
+{
+    for (int k = 0; k < MARKED; k++)
+        if (marked[k] == id)
+            return k;
+    return -1;
+}
+
+/* How fast the parameter moves, from the settings of the LFOs aimed at it
+ * (docs/modulation-display.md, "faster than the screen"): tier 0 is slow enough for
+ * a moving dot (up to a redraw rate's eighth, 3 Hz at 24 a second), tier 1 is jerky
+ * (up to half the rate, 12 Hz) and gets the dot over a dithered band, tier 2 would
+ * alias and gets the band alone. The rate is the manual's table (p. 64):
+ *   f = |SPD| x MULT x BPM / 30720 Hz, BPM 120 for a fixed MULT.
+ * The LFO settings are the target array's slots 1..24, eight an LFO: SPD, MULT,
+ * FADE, DEST, WAVE, SPH, MODE, DEP (the record table: ids 75..83, 85..93, 95..103).
+ * DEST holds the destination's slot << 8 (docs/fx-master-modulation.md). */
+#define TIER_FPS 24
+/* The tempo, as BPM x 120: 14400 at 120.0, 14520 at 121.0 (instrument, modview3b,
+ * 2026-10-01, three snapshots of the on-chip RAM, stopped). The control frame for the
+ * SHARC carries a copy at 0x80005f38. */
+#define TEMPO_X120 (*(volatile unsigned short *)0x800026C2u)
+
+static int bpm(void)
+{
+    int t = TEMPO_X120 / 120;
+    return t >= 20 && t <= 400 ? t : 120;
+}
+
+static int lfo_word(int t, int slot)
+{
+    return *(volatile unsigned short *)(TARGETS + 34u + 202u * t + 2u * slot);
+}
+
+static int tier(u32 id)
+{
+    int t = ACTIVE_TRACK, slot = RECORD(id)[1], fastest = 0;
+    if (t > 15)
+        return 0;
+    for (int l = 0; l < 3; l++) {
+        int base = 1 + 8 * l;
+        int dep = lfo_word(t, base + 7) - 0x4000;
+        if (lfo_word(t, base + 3) != slot << 8 || (dep < 0x80 && dep > -0x80))
+            continue;
+        int spd = lfo_word(t, base) - 0x4000, m = lfo_word(t, base + 1) >> 8;
+        if (spd < 0) spd = -spd;
+        /* MULT: 0..11 are 1..2K BPM, synced; 12..23 are 1..2K fixed at 120 BPM
+         * (instrument, modview3b: raw 8 reads "256 BPM", 0 "1 BPM", 12 "1") */
+        int beats = m < 12 ? bpm() : 120, mult = 1 << (m < 12 ? m : m - 12);
+        /* spd/16 x mult x bpm stays in 31 bits; Hz x 30720 x 256 / 16 = Hz x 491520 */
+        int rate = (spd >> 4) * mult * beats;
+        int k = rate > 491520 * (TIER_FPS / 2) ? 2 : rate > 491520 * (TIER_FPS / 8) ? 1 : 0;
+        if (k > fastest)
+            fastest = k;
+    }
+    return fastest;
+}
+
+/* what a redraw would change: the offsets of the places slow enough to animate */
+static int signature(void)
+{
+    int sig = 0;
+    for (int k = 0; k < MARKED; k++)
+        sig = sig * 131 + (tier(marked[k]) < 2 ? mod_offset(marked[k]) / QUANT : 0);
+    return sig;
+}
+
+/* widen at once; after HOLD without growing, an edge relaxes toward the offset */
+static void sweep(int k, int off, u32 now)
+{
+    struct sweep *w = &sweeps[k];
+    if (off <= w->lo) { w->lo = off; w->lo_at = now; }
+    else if (now - w->lo_at > HOLD) w->lo += (off - w->lo) / 4 + 1;
+    if (off >= w->hi) { w->hi = off; w->hi_at = now; }
+    else if (now - w->hi_at > HOLD) w->hi += (off - w->hi) / 4 - 1;
+    if (w->lo > off) w->lo = off;
+    if (w->hi < off) w->hi = off;
+    if (w->hi - w->lo > QUANT)
+        settling = 1;
+}
+
+/* Called by the UI task in place of its `isDirty(screen)` (0x4002e464), once a loop:
+ * while Waverider's page is on screen (it drew in the last SHOWN) and a marker
+ * would move, ask the stock redraw (0x4011d2fe), at most every FRAME. Off the
+ * page, or with nothing modulated, it costs a compare and the stock call. */
+int wr_poll(void *screen)
+{
+    u32 now = TICKS;
+    if (now - drawn_at < SHOWN && now - asked_at >= FRAME
+            && (settling || signature() != drawn_sig)) {
+        asked_at = now;
+        SET_DIRTY(screen);
+    }
+    return IS_DIRTY(screen);
+}
+#endif
+
+#if !WR_MARKERS
+/* the UI loop's redraw test, as stock: nothing on the page moves by itself */
+int wr_poll(void *screen)
+{
+    return IS_DIRTY(screen);
+}
 #endif
 
 static void *method(void *obj, int offset)
@@ -148,6 +280,16 @@ static void indicator(void *c, int cx, int y, u32 id, int v)
 }
 
 #if WR_MARKERS
+/* a small "approximately" sign, two tildes 4 wide, 4 x 5, its bottom-left corner at
+ * (x, y): each tilde low, high, low, high, so it reads as a wave and not as carets */
+static void approx(void *c, int x, int y)
+{
+    for (int k = 0; k < 2; k++) {
+        int yy = y + 1 + 3 * k;
+        px(c, x, yy); px(c, x + 1, yy + 1); px(c, x + 2, yy); px(c, x + 3, yy + 1);
+    }
+}
+
 /* x of value v on place cx's track, as `indicator` places it */
 static int track_x(u32 id, int cx, int v)
 {
@@ -158,78 +300,147 @@ static int track_x(u32 id, int cx, int v)
     return cx - BAR_HALF + (v - lo) * (2 * BAR_HALF) / (hi - lo);
 }
 
-/* Place i's modulation, on the row beside its track (y): the range it swept lately,
- * dotted, and a two-pixel dot at the value heard. Drawn for every working place on
- * every draw, modulated or not: the worst case, which is what build 2 measures. */
-static void modulation(void *c, int i, int cx, int y, u32 id, int set)
+/* Place i's modulation, on the row beside its track (y), option B: the range swept
+ * lately around the knob, dotted, and a two-pixel dot at knob + offset. Nothing at
+ * all while the parameter is not modulated. */
+static void modulation(void *c, int cx, int y, int label_y, u32 id, int set, u32 now)
 {
+    int k = which(id);
     const int *r = RECORD(id);
-    if (r[3] <= r[2])
+    if (k < 0 || r[3] <= r[2])
         return;
-    int now = heard(id, set);
-    if (span_id[i] != (int)id) {
-        span_id[i] = id;
-        span_lo[i] = span_hi[i] = now;
+    int off = mod_offset(id);
+    sweep(k, off, now);
+    struct sweep *w = &sweeps[k];
+    if (w->hi - w->lo <= QUANT && off < QUANT && off > -QUANT)
+        return;
+    int a = track_x(id, cx, set + w->lo), b = track_x(id, cx, set + w->hi);
+    int speed = tier(id);
+    if (speed == 0) {
+        for (int x = a; x <= b; x += 2)
+            px(c, x, y);
+    } else {
+        for (int x = a; x <= b; x++)            /* the band: a 50 % dither, the panel's grey */
+            for (int yy = y - 1; yy <= y; yy++)
+                if (((x + yy) & 1) == 0)
+                    px(c, x, yy);
     }
-    if (now < span_lo[i]) span_lo[i] = now;
-    if (now > span_hi[i]) span_hi[i] = now;
-    span_lo[i] += (now - span_lo[i]) / 64;          /* relax toward what is heard */
-    span_hi[i] += (now - span_hi[i]) / 64;
-    int a = track_x(id, cx, span_lo[i]), b = track_x(id, cx, span_hi[i]);
-    for (int x = a; x <= b; x += 2)
-        px(c, x, y);
-    column(c, track_x(id, cx, now), y - 1, y);
+    if (speed < 2)
+        column(c, track_x(id, cx, set + off), y - 1, y);
+    else
+        approx(c, cx + 10, label_y);            /* "too fast to draw" beside the label */
 }
 #endif
 
 /* The frame the SHARC reader plays for the current TBL and POS, interpolated
  * between the two frames either side, one span a column; then the table's
- * position as a dotted bar with a marker. Build 2 draws the wave as heard, and
- * a second marker above the bar at the position heard. */
+ * position as a dotted bar with a marker. With the markers, the wave is the frame
+ * heard (the knob plus the modulation), and a dotted marker under the bar shows
+ * where the modulation has it, while the solid one stays on the knob. */
+/* column x of the frame at (tbl, pos), interpolated: its span, in canvas rows */
+static void span(int tbl, int pos, int x, int *lo, int *hi)
+{
+    int fx = pos >> 3;                      /* pos * 15 * 256 / 0x7800, exactly */
+    int f = fx >> 8, frac = fx & 0xFF;
+    int g = f < WR_FRAMES - 1 ? f + 1 : f;
+    int l = wr_spans[tbl][f][0][x] + (((wr_spans[tbl][g][0][x] - wr_spans[tbl][f][0][x]) * frac) >> 8);
+    int h = wr_spans[tbl][f][1][x] + (((wr_spans[tbl][g][1][x] - wr_spans[tbl][f][1][x]) * frac) >> 8);
+    *lo = WAVE_CY + l * WAVE_AMP / 127;
+    *hi = WAVE_CY + h * WAVE_AMP / 127;
+}
+
+static int clamp_pos(int pos)
+{
+    return pos < 0 ? 0 : pos > WR_POS_MAX ? WR_POS_MAX : pos;
+}
+
+/* The frame at (tbl, pos) as a thin line. Each column is its span drawn solid --
+ * its real extent, as Tonverk's Wavefinder draws a column -- with a span of two
+ * pixels or less shrunk to its middle pixel, and joined to the column before only
+ * across the gap between them, if there is one. A smooth stretch is one pixel
+ * thick, a steep one a single solid stroke. Drawing each span by its two edges
+ * instead split every steep slope into two traces (modview4e, on the instrument). */
+static void curve(void *c, int tbl, int pos)
+{
+    int last_lo = 0, last_hi = 0;
+    for (int x = 0; x < WR_WIDTH; x++) {
+        int lo, hi;
+        span(tbl, pos, x, &lo, &hi);
+        if (hi - lo <= 2)                   /* a smooth stretch: one pixel, at its middle */
+            lo = hi = (lo + hi) >> 1;
+        column(c, WAVE_X + x, lo, hi);
+        if (x > 0 && lo > last_hi)
+            column(c, WAVE_X + x, last_hi + 1, lo);
+        else if (x > 0 && hi < last_lo)
+            column(c, WAVE_X + x, hi, last_lo - 1);
+        last_lo = lo;
+        last_hi = hi;
+    }
+}
+
 static void wave(void *c, void *view)
 {
     u8 flag;
     int tbl = GET_VALUE(view, WR_TBL_ID, &flag) >> 8;
     int pos = GET_VALUE(view, WR_POS_ID, &flag);
 #if WR_MARKERS
-    int set_pos = pos < 0 ? 0 : pos > WR_POS_MAX ? WR_POS_MAX : pos;
-    pos = heard(WR_POS_ID, pos);
-    tbl = heard(WR_TBL_ID, tbl << 8) >> 8;
+    int set_pos = clamp_pos(pos);
+    int moved = mod_offset(WR_POS_ID);
+    int speed = tier(WR_POS_ID);
+    pos += moved;
+    tbl = (GET_VALUE(view, WR_TBL_ID, &flag) + mod_offset(WR_TBL_ID)) >> 8;
 #endif
     if (tbl < 0) tbl = 0;
     if (tbl >= WR_TABLES) tbl = WR_TABLES - 1;
-    if (pos < 0) pos = 0;
-    if (pos > WR_POS_MAX) pos = WR_POS_MAX;
+    pos = clamp_pos(pos);
 
-    int fx = pos >> 3;                      /* pos * 15 * 256 / 0x7800, exactly */
-    int f = fx >> 8, frac = fx & 0xFF;
-    int g = f < WR_FRAMES - 1 ? f + 1 : f;
-    const signed char *a = wr_spans[tbl][f][0], *b = wr_spans[tbl][g][0];
-    const signed char *A = wr_spans[tbl][f][1], *B = wr_spans[tbl][g][1];
-
-    int last_lo = 0, last_hi = 0;
-    for (int x = 0; x < WR_WIDTH; x++) {
-        int lo = a[x] + (((b[x] - a[x]) * frac) >> 8);
-        int hi = A[x] + (((B[x] - A[x]) * frac) >> 8);
-        lo = WAVE_CY + lo * WAVE_AMP / 127;
-        hi = WAVE_CY + hi * WAVE_AMP / 127;
-        if (x == 0) {
-            last_lo = lo;
-            last_hi = hi;
+#if WR_MARKERS
+    if (speed > 0) {
+        /* Faster than the screen: the two frames at the ends of the sweep, drawn as
+         * ordinary curves, with a sparse dotted fill between them (one pixel in
+         * nine) -- the frames being heard lie in there. A dense 50 % envelope read
+         * as too heavy on the panel (owner, modview4b). */
+        int from = clamp_pos(set_pos + sweeps[0].lo), to = clamp_pos(set_pos + sweeps[0].hi);
+        curve(c, tbl, from);
+        curve(c, tbl, to);
+        for (int x = 0; x < WR_WIDTH; x += 3) {
+            int alo, ahi, blo, bhi;
+            span(tbl, from, x, &alo, &ahi);
+            span(tbl, to, x, &blo, &bhi);
+            int y0, y1;                         /* the gap between the two curves */
+            if (ahi < blo) { y0 = ahi; y1 = blo; }
+            else if (bhi < alo) { y0 = bhi; y1 = alo; }
+            else continue;                      /* they touch in this column */
+            for (int y = y0 + 2; y <= y1 - 2; y++)
+                if (y % 3 == 0)
+                    px(c, WAVE_X + x, y);
         }
-        /* reach the last column's span, so neighbours always meet */
-        column(c, WAVE_X + x, lo < last_hi ? lo : last_hi, hi > last_lo ? hi : last_lo);
-        last_lo = lo;
-        last_hi = hi;
+        for (int x = 0; x < WR_WIDTH; x += 2)
+            px(c, WAVE_X + x, POS_Y);
+        int a = WAVE_X + from * (WR_WIDTH - MARK) / WR_POS_MAX;
+        int b = WAVE_X + to * (WR_WIDTH - MARK) / WR_POS_MAX + MARK - 1;
+        for (int x = a; x <= b; x++)            /* the positions swept, under the bar */
+            if ((x & 1) == 0)
+                px(c, x, CURSOR_Y);
+        int m = WAVE_X + set_pos * (WR_WIDTH - MARK) / WR_POS_MAX;
+        for (int k = 0; k < MARK; k++)
+            column(c, m + k, POS_Y, POS_Y + 1);
+        return;
     }
+#endif
+
+    curve(c, tbl, pos);
 
     for (int x = 0; x < WR_WIDTH; x += 2)
         px(c, WAVE_X + x, POS_Y);
 #if WR_MARKERS
     int m = WAVE_X + set_pos * (WR_WIDTH - MARK) / WR_POS_MAX;
     int h = WAVE_X + pos * (WR_WIDTH - MARK) / WR_POS_MAX;
-    for (int k = 0; k < MARK; k += 2)
-        px(c, h + k, POS_Y + 3);
+    /* while POS is modulated at all (the range swept is wider than a step), even
+     * as the cursor passes under the knob's own marker (owner, modview4f) */
+    if (sweeps[0].hi - sweeps[0].lo > QUANT || moved >= QUANT || moved <= -QUANT)
+        for (int k = 0; k < MARK; k += 2)
+            px(c, h + k, CURSOR_Y);
 #else
     int m = WAVE_X + pos * (WR_WIDTH - MARK) / WR_POS_MAX;
 #endif
@@ -245,6 +456,11 @@ void wr_page_draw(void *view, void *canvas)
     int page = ((int (*)(void *))method(view, 132))(view);
     if (page < 0 || page >= WR_PAGES)
         page = 0;
+#if WR_MARKERS
+    u32 now = TICKS;
+    settling = 0;
+    drawn_sig = signature();
+#endif
 
     wave(canvas, view);
 
@@ -262,7 +478,8 @@ void wr_page_draw(void *view, void *canvas)
 #ifdef WR_PROBE
         u32 m0 = DTCN0;
 #endif
-        modulation(canvas, i, cx, top ? TOP_BAR_Y - 2 : BOT_BAR_Y + 3, id, set);
+        modulation(canvas, cx, top ? TOP_BAR_Y - 2 : BOT_BAR_Y + 3, top ? TOP_LABEL_Y : BOT_LABEL_Y,
+                   id, set, now);
 #ifdef WR_PROBE
         tm += DTCN0 - m0;
 #endif
@@ -274,6 +491,9 @@ void wr_page_draw(void *view, void *canvas)
     int n = PAGE_COUNT(view);
     if (n > 1)
         PAGE_DOTS(view, canvas, n, page, 7);
+#if WR_MARKERS
+    drawn_at = now;
+#endif
 #ifdef WR_PROBE
     wr_probe.draws++;
     wr_probe.ticks += DTCN0 - t0;

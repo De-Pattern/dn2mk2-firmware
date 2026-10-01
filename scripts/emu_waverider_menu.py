@@ -37,6 +37,7 @@ play the track), `sync:T` (the track's mirror through `0x4002549c`), `sync`
 (every track through the kit-load sync `0x40025af4`), `frame:NAME` (the ISR, and
 the frame it built, with the mirror and the sixteen sounds beside it),
 `blocks:NAME:MILLIONS[:ENC:DELTA]` (every instruction address run), `mem:VA:N`,
+`poke:VA:HEX` (write bytes: a value the audio tick would have left, say),
 `types` (every track's `sound+0xDE`), `call:VA[:ARG...]` (enter a routine that
 does not run here; ARG is a number, `kit`, `soundT`, `long@VA`, or `argN@VA[-OFF]`
 -- the Nth argument of the last entry to an `--args-at VA`, less OFF -- and d0 is
@@ -128,6 +129,8 @@ def main() -> int:
                    help="record every read and write of N bytes at VA, by PC")
     p.add_argument("--count", action="append", default=[], metavar="VA",
                    help="count the entries to VA (after reset-trace, if one is given)")
+    p.add_argument("--stack-at", action="append", default=[], metavar="VA",
+                   help="at every entry to VA, the code addresses on the stack: who calls it")
     p.add_argument("--regs-last", type=int, default=0, metavar="N",
                    help="keep the last N register rows at each --regs-at VA, not the first 6")
     p.add_argument("--args-at", action="append", default=[],
@@ -295,6 +298,17 @@ def main() -> int:
                         chain = [f"{pc:08x}"] + [f"{v:08x}" for v in stack if 0x40000400 <= v < 0x40310000][:7]
                         panel_writers[" ".join(chain)] = panel_writers.get(" ".join(chain), 0) + 1
         machine.watch_writes(0x44622BC8, 0x44622FC8 + 1024, panel_write)
+
+    # who calls VA: the code addresses on the stack at its entry, deepest first
+    stacks: dict[str, int] = {}
+    for va in a.stack_at:
+        def stacked(uc_, address, size, user):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            words = struct.unpack(">256I", bytes(uc.mem_read(sp, 1024)))
+            chain = " ".join(f"{v:08x}" for v in words if 0x40000400 <= v < 0x40310000)
+            key = f"{address:#010x}: " + " ".join(chain.split(" ")[:12])
+            stacks[key] = stacks.get(key, 0) + 1
+        uc.hook_add(UC_HOOK_CODE, stacked, begin=int(va, 0), end=int(va, 0))
 
     regs_at: dict[str, list] = {}
     for va in a.regs_at:
@@ -491,6 +505,10 @@ def main() -> int:
                    for t in range(16)]
             mems[f"types@{len(mems)}"] = got
             print(f"  types {got}")
+        elif step.startswith("poke:"):
+            _, va, data = step.split(":")
+            machine.write(int(va, 0), bytes.fromhex(data))
+            print(f"  poke {va} = {data}")
         elif step.startswith("mem:"):
             _, va, n = step.split(":")
             # a second read of the same address keeps the first: key it by its order
@@ -538,7 +556,7 @@ def main() -> int:
 
     result = {"build": str(build), "snapshot": a.snapshot, "stock": a.stock, "screens": shots,
               "calls": calls, "type_reads": type_reads, "getter_type5_callers": getter5,
-              "track_getter_type5_callers": track_getter5, "regs_at": regs_at,
+              "track_getter_type5_callers": track_getter5, "regs_at": regs_at, "stacks": stacks,
               "setter_writes": writes,
               "mirror_type_writes": mirror_writes, "type_writes": type_writes,
               "direct_calls": calls_made,
