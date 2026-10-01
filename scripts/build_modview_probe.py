@@ -5,8 +5,16 @@
 
 - **Build 1** counts and times every Waverider page draw (`WR_PROBE`): how often the
   page really redraws on the instrument, and what one draw costs.
-- **Build 2** adds the markers (`WR_MARKERS`) on every working control on every draw,
-  modulated or not -- the worst case -- and times them apart.
+- **Build 2** added the first markers (`WR_MARKERS`), drawn on every working control on
+  every draw, modulated or not -- the worst case -- and timed them apart (modview2b,
+  2026-10-01: at most 0.16 % of the ColdFire). It is history now: build 2 and build 3
+  compile the same source.
+- **Build 3** is the shipped page with the probe: the markers as they ship (the
+  modulation as an offset around the knob, only where there is one) and `wr_poll`,
+  which redraws the page while a marker moves. The probe then measures the redraws
+  the markers cause, on top of the stock ones.
+
+    python scripts/build_modview_probe.py --build 3 -o 00_Resources/02_Builds/modview3-usbprobe_DN2_1.11.syx
 
 The page renderer is compiled with those switches (`csrc/waverider/page.c`), so the
 shipped mod (`src/dnfw/mods/waverider_code.json`) is untouched: this script composes its
@@ -36,13 +44,13 @@ from dnfw.waverider import coldfire as CF               # noqa: E402
 from dnfw.waverider import cpage                        # noqa: E402
 
 STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
-TAGS = {1: "modview1", 2: "modview2"}
+TAGS = {1: "modview1", 2: "modview2", 3: "modview3"}
 
 
 def spec_for(build: int) -> tuple[dict, int]:
     """-> (the Waverider spec with the measurement switches, the probe block's address)."""
     stock = load(read_image(STOCK)).container.find(3).unpack()
-    defines = f"#define WR_PROBE 1\n#define WR_MARKERS {1 if build == 2 else 0}\n"
+    defines = f"#define WR_PROBE 1\n#define WR_MARKERS {0 if build == 1 else 1}\n"
     seen: dict[str, int] = {}
 
     def compile_c(header: str, *, base: int):
@@ -60,7 +68,7 @@ def spec_for(build: int) -> tuple[dict, int]:
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--build", type=int, choices=(1, 2), required=True)
+    p.add_argument("--build", type=int, choices=(1, 2, 3), required=True)
     p.add_argument("-o", "--out", type=pathlib.Path, required=True)
     p.add_argument("--tag", default=None, help="the probe's HELLO tag (default modview1/2)")
     a = p.parse_args()

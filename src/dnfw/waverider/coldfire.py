@@ -331,6 +331,13 @@ ICON_STOCK = bytes.fromhex("7007b083660000a2")
 # the grid 0x40017428 (a pc-relative jsr), pop them. wr_grid draws Waverider's own page.
 GRID_SITE = 0x40018214
 GRID_STOCK = bytes.fromhex("2f022f0a4ebaf20e508f")
+# the UI task's loop asks its screen `isDirty()` (0x4011d2f4, the byte at screen +32) once
+# a pass, and redraws every view on it when set (0x4011d32a). The stock UI sets it on a
+# change: at rest a shown page redraws once a second, and a modulation never redraws it
+# (instrument, modview1). wr_poll asks the same question, first setting the byte through
+# the stock 0x4011d2fe while a modulation marker on Waverider's page would move.
+POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
+POLL_STOCK = bytes.fromhex("4eb94011d2f4")
 
 
 def _cave_free(content: bytes, cave: tuple[int, int]) -> None:
@@ -474,6 +481,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(ICON_SITE, bytes.fromhex("4eb9") + _long(playout["wr_icons"]) + bytes.fromhex("4e71"),
          "the SYN page draw: no WaveTone oscillator icons on a Waverider track (M7)", ICON_STOCK)
     _need(content, PAGE_SITE - 4, bytes.fromhex("2f027404"), "0x400c24ee's push of d2 and its bound")
+    _need(content, POLL_SITE - 2, bytes.fromhex("2f0a"), "the UI loop pushes the screen")
+    _need(content, POLL_SITE + 6, bytes.fromhex("588f4a00"), "... and tests the answer's low byte")
+    edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
+         "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
+         "Waverider's page would move, then answers as stock", POLL_STOCK)
 
     # 7. getMachineType(track): WaveTone for the UI, the real type where it is identity
     _need(content, TRACK_TYPE_FN, TRACK_TYPE_FN_STOCK, "getMachineType(track), as raw_track copies it")
