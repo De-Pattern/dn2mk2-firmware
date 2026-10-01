@@ -135,9 +135,16 @@ static int which(u32 id)
  * FADE, DEST, WAVE, SPH, MODE, DEP (the record table: ids 75..83, 85..93, 95..103).
  * DEST holds the destination's slot << 8 (docs/fx-master-modulation.md). */
 #define TIER_FPS 24
-#ifndef WR_BPM
-#define WR_BPM() 120            /* the tempo; read from the project once located */
-#endif
+/* The tempo, as BPM x 120: 14400 at 120.0, 14520 at 121.0 (instrument, modview3b,
+ * 2026-10-01, three snapshots of the on-chip RAM, stopped). The control frame for the
+ * SHARC carries a copy at 0x80005f38. */
+#define TEMPO_X120 (*(volatile unsigned short *)0x800026C2u)
+
+static int bpm(void)
+{
+    int t = TEMPO_X120 / 120;
+    return t >= 20 && t <= 400 ? t : 120;
+}
 
 static int lfo_word(int t, int slot)
 {
@@ -156,10 +163,11 @@ static int tier(u32 id)
             continue;
         int spd = lfo_word(t, base) - 0x4000, m = lfo_word(t, base + 1) >> 8;
         if (spd < 0) spd = -spd;
-        /* MULT: twelve tempo-synced 1..2048, then twelve fixed at 120 BPM */
-        int bpm = m < 12 ? WR_BPM() : 120, mult = 1 << (m < 12 ? m : m - 12);
+        /* MULT: 0..11 are 1..2K BPM, synced; 12..23 are 1..2K fixed at 120 BPM
+         * (instrument, modview3b: raw 8 reads "256 BPM", 0 "1 BPM", 12 "1") */
+        int beats = m < 12 ? bpm() : 120, mult = 1 << (m < 12 ? m : m - 12);
         /* spd/16 x mult x bpm stays in 31 bits; Hz x 30720 x 256 / 16 = Hz x 491520 */
-        int rate = (spd >> 4) * mult * bpm;
+        int rate = (spd >> 4) * mult * beats;
         int k = rate > 491520 * (TIER_FPS / 2) ? 2 : rate > 491520 * (TIER_FPS / 8) ? 1 : 0;
         if (k > fastest)
             fastest = k;
