@@ -354,15 +354,18 @@ static int clamp_pos(int pos)
 }
 
 /* The frame at (tbl, pos) as a thin line: each column's span is drawn by its two
- * edges only, each edge joined to the same edge of the column before. A smooth
- * frame is one pixel thick; a frame of dense partials is two thin outlines, so the
- * 16th partial still shows (M8's flat line) without filling the panel in solid. */
+ * edges only, each edge joined to the same edge of the column before, and a span
+ * of two pixels or less as its middle pixel alone. A smooth frame is one pixel
+ * thick; a frame of dense partials is two thin outlines, so the 16th partial still
+ * shows (M8's flat line) without filling the panel in solid. */
 static void curve(void *c, int tbl, int pos)
 {
     int last_lo = 0, last_hi = 0;
     for (int x = 0; x < WR_WIDTH; x++) {
         int lo, hi;
         span(tbl, pos, x, &lo, &hi);
+        if (hi - lo <= 2)                   /* a smooth stretch: one pixel, at its middle */
+            lo = hi = (lo + hi) >> 1;
         if (x == 0) {
             last_lo = lo;
             last_hi = hi;
