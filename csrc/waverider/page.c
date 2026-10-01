@@ -52,6 +52,7 @@ typedef unsigned char u8;
 #define WAVE_CY 28
 #define WAVE_AMP 11
 #define POS_Y   15
+#define CURSOR_Y (POS_Y - 2)    /* the LFO's position cursor: under the bar (owner) */
 #define MARK    3
 
 #ifndef WR_MARKERS
@@ -334,7 +335,7 @@ static void modulation(void *c, int cx, int y, int label_y, u32 id, int set, u32
 /* The frame the SHARC reader plays for the current TBL and POS, interpolated
  * between the two frames either side, one span a column; then the table's
  * position as a dotted bar with a marker. With the markers, the wave is the frame
- * heard (the knob plus the modulation), and a dotted marker above the bar shows
+ * heard (the knob plus the modulation), and a dotted marker under the bar shows
  * where the modulation has it, while the solid one stays on the knob. */
 /* column x of the frame at (tbl, pos), interpolated: its span, in canvas rows */
 static void span(int tbl, int pos, int x, int *lo, int *hi)
@@ -353,11 +354,12 @@ static int clamp_pos(int pos)
     return pos < 0 ? 0 : pos > WR_POS_MAX ? WR_POS_MAX : pos;
 }
 
-/* The frame at (tbl, pos) as a thin line: each column's span is drawn by its two
- * edges only, each edge joined to the same edge of the column before, and a span
- * of two pixels or less as its middle pixel alone. A smooth frame is one pixel
- * thick; a frame of dense partials is two thin outlines, so the 16th partial still
- * shows (M8's flat line) without filling the panel in solid. */
+/* The frame at (tbl, pos) as a thin line. Each column is its span drawn solid --
+ * its real extent, as Tonverk's Wavefinder draws a column -- with a span of two
+ * pixels or less shrunk to its middle pixel, and joined to the column before only
+ * across the gap between them, if there is one. A smooth stretch is one pixel
+ * thick, a steep one a single solid stroke. Drawing each span by its two edges
+ * instead split every steep slope into two traces (modview4e, on the instrument). */
 static void curve(void *c, int tbl, int pos)
 {
     int last_lo = 0, last_hi = 0;
@@ -366,12 +368,11 @@ static void curve(void *c, int tbl, int pos)
         span(tbl, pos, x, &lo, &hi);
         if (hi - lo <= 2)                   /* a smooth stretch: one pixel, at its middle */
             lo = hi = (lo + hi) >> 1;
-        if (x == 0) {
-            last_lo = lo;
-            last_hi = hi;
-        }
-        column(c, WAVE_X + x, lo, last_lo);
-        column(c, WAVE_X + x, hi, last_hi);
+        column(c, WAVE_X + x, lo, hi);
+        if (x > 0 && lo > last_hi)
+            column(c, WAVE_X + x, last_hi + 1, lo);
+        else if (x > 0 && hi < last_lo)
+            column(c, WAVE_X + x, hi, last_lo - 1);
         last_lo = lo;
         last_hi = hi;
     }
@@ -418,9 +419,9 @@ static void wave(void *c, void *view)
             px(c, WAVE_X + x, POS_Y);
         int a = WAVE_X + from * (WR_WIDTH - MARK) / WR_POS_MAX;
         int b = WAVE_X + to * (WR_WIDTH - MARK) / WR_POS_MAX + MARK - 1;
-        for (int x = a; x <= b; x++)            /* the positions swept, above the bar */
+        for (int x = a; x <= b; x++)            /* the positions swept, under the bar */
             if ((x & 1) == 0)
-                px(c, x, POS_Y + 3);
+                px(c, x, CURSOR_Y);
         int m = WAVE_X + set_pos * (WR_WIDTH - MARK) / WR_POS_MAX;
         for (int k = 0; k < MARK; k++)
             column(c, m + k, POS_Y, POS_Y + 1);
@@ -437,7 +438,7 @@ static void wave(void *c, void *view)
     int h = WAVE_X + pos * (WR_WIDTH - MARK) / WR_POS_MAX;
     if (moved >= QUANT || moved <= -QUANT)
         for (int k = 0; k < MARK; k += 2)
-            px(c, h + k, POS_Y + 3);
+            px(c, h + k, CURSOR_Y);
 #else
     int m = WAVE_X + pos * (WR_WIDTH - MARK) / WR_POS_MAX;
 #endif
