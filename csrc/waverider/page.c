@@ -71,8 +71,9 @@ volatile struct wr_probe wr_probe __attribute__((section(".data"))) =
 #if WR_MARKERS
 /* The value heard: the per-track array the audio tick fills from each sound and then
  * modulates in place (0x400db12a, 0x400db22c): slot s of track t at
- * 0x800068e4 + 34 + 202 t + 2 s, at half the record's scale for a linear parameter
- * (emulator: WAV1 at POS 120 reads 0x3c00). TUNE goes through a pitch conversion, so
+ * 0x800068e4 + 34 + 202 t + 2 s, at the record's own scale for a linear parameter
+ * (instrument, modview1, 2026-10-01: POS 74 with no LFO reads 0x4a00 = 74 << 8; the
+ * emulator's half-scale reading was wrong). TUNE goes through a pitch conversion, so
  * its marker is only indicative. docs/modulation-display.md. */
 #define ACTIVE_TRACK (*(volatile u8 *)0x42431A6Cu)
 #define VALUES 0x800068E4u
@@ -82,7 +83,7 @@ static int heard(u32 id, int fallback)
     int t = ACTIVE_TRACK, slot = RECORD(id)[1];
     if (t > 15 || slot < 0 || slot > 99)
         return fallback;
-    return 2 * *(volatile unsigned short *)(VALUES + 34u + 202u * t + 2u * slot);
+    return *(volatile unsigned short *)(VALUES + 34u + 202u * t + 2u * slot);
 }
 
 /* the range each place has swept lately: widened at once, relaxed slowly */

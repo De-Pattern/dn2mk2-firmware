@@ -62,17 +62,19 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--build", type=int, choices=(1, 2), required=True)
     p.add_argument("-o", "--out", type=pathlib.Path, required=True)
+    p.add_argument("--tag", default=None, help="the probe's HELLO tag (default modview1/2)")
     a = p.parse_args()
     if a.out.exists():
         raise SystemExit(f"{a.out} exists; builds are never overwritten")
+    tag = a.tag or TAGS[a.build]
     spec, probe = spec_for(a.build)
     waverider_mod.SPEC = spec
     code = dnfw_main(["mods", "apply", str(STOCK), "--mod", "waverider", "--mod", "usbprobe",
-                      "--probe-tag", TAGS[a.build], "-o", str(a.out)])
+                      "--probe-tag", tag, "-o", str(a.out)])
     if code:
         return code
     side = a.out.with_name(a.out.name + ".modview.json")
-    side.write_text(json.dumps({"build": a.build, "tag": TAGS[a.build], "probe": probe,
+    side.write_text(json.dumps({"build": a.build, "tag": tag, "probe": probe,
                                 "chunk": [spec["chunk"]["load"], len(spec["chunk"]["code"]) // 2]},
                                indent=1) + "\n")
     print(f"probe block at {probe:#010x}; wrote {side}")
