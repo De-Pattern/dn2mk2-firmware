@@ -353,7 +353,26 @@ static int clamp_pos(int pos)
     return pos < 0 ? 0 : pos > WR_POS_MAX ? WR_POS_MAX : pos;
 }
 
-#define GHOST_STEPS 8
+/* The frame at (tbl, pos) as a thin line: each column's span is drawn by its two
+ * edges only, each edge joined to the same edge of the column before. A smooth
+ * frame is one pixel thick; a frame of dense partials is two thin outlines, so the
+ * 16th partial still shows (M8's flat line) without filling the panel in solid. */
+static void curve(void *c, int tbl, int pos)
+{
+    int last_lo = 0, last_hi = 0;
+    for (int x = 0; x < WR_WIDTH; x++) {
+        int lo, hi;
+        span(tbl, pos, x, &lo, &hi);
+        if (x == 0) {
+            last_lo = lo;
+            last_hi = hi;
+        }
+        column(c, WAVE_X + x, lo, last_lo);
+        column(c, WAVE_X + x, hi, last_hi);
+        last_lo = lo;
+        last_hi = hi;
+    }
+}
 
 static void wave(void *c, void *view)
 {
@@ -373,22 +392,23 @@ static void wave(void *c, void *view)
 
 #if WR_MARKERS
     if (speed > 0) {
-        /* Faster than the screen: the ghost wave, the outline of every frame the
-         * modulation sweeps, solid at its edges and dithered inside -- the blend
-         * of frames that is being heard. */
+        /* Faster than the screen: the two frames at the ends of the sweep, drawn as
+         * ordinary curves, with a sparse dotted fill between them (one pixel in
+         * nine) -- the frames being heard lie in there. A dense 50 % envelope read
+         * as too heavy on the panel (owner, modview4b). */
         int from = clamp_pos(set_pos + sweeps[0].lo), to = clamp_pos(set_pos + sweeps[0].hi);
-        for (int x = 0; x < WR_WIDTH; x++) {
-            int bottom = 999, top = -999;
-            for (int k = 0; k <= GHOST_STEPS; k++) {
-                int lo, hi;
-                span(tbl, from + (to - from) * k / GHOST_STEPS, x, &lo, &hi);
-                if (lo < bottom) bottom = lo;
-                if (hi > top) top = hi;
-            }
-            px(c, WAVE_X + x, bottom);
-            px(c, WAVE_X + x, top);
-            for (int y = bottom + 1; y < top; y++)
-                if (((x + y) & 1) == 0)
+        curve(c, tbl, from);
+        curve(c, tbl, to);
+        for (int x = 0; x < WR_WIDTH; x += 3) {
+            int alo, ahi, blo, bhi;
+            span(tbl, from, x, &alo, &ahi);
+            span(tbl, to, x, &blo, &bhi);
+            int y0, y1;                         /* the gap between the two curves */
+            if (ahi < blo) { y0 = ahi; y1 = blo; }
+            else if (bhi < alo) { y0 = bhi; y1 = alo; }
+            else continue;                      /* they touch in this column */
+            for (int y = y0 + 2; y <= y1 - 2; y++)
+                if (y % 3 == 0)
                     px(c, WAVE_X + x, y);
         }
         for (int x = 0; x < WR_WIDTH; x += 2)
@@ -405,19 +425,7 @@ static void wave(void *c, void *view)
     }
 #endif
 
-    int last_lo = 0, last_hi = 0;
-    for (int x = 0; x < WR_WIDTH; x++) {
-        int lo, hi;
-        span(tbl, pos, x, &lo, &hi);
-        if (x == 0) {
-            last_lo = lo;
-            last_hi = hi;
-        }
-        /* reach the last column's span, so neighbours always meet */
-        column(c, WAVE_X + x, lo < last_hi ? lo : last_hi, hi > last_lo ? hi : last_lo);
-        last_lo = lo;
-        last_hi = hi;
-    }
+    curve(c, tbl, pos);
 
     for (int x = 0; x < WR_WIDTH; x += 2)
         px(c, WAVE_X + x, POS_Y);
