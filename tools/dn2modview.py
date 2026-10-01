@@ -10,7 +10,8 @@
 Needs a modview build (scripts/build_modview_probe.py): the usbprobe plus a probe
 block in the page renderer (csrc/waverider/page.c, `WR_PROBE`) counting every page
 draw and the DTCN0 ticks it takes (build 2 also times its markers). The block is found
-from the build's `.modview.json` (the newest in 00_Resources/02_Builds, or --json), or
+from the build's `.modview.json` (the one in 00_Resources/02_Builds whose tag the
+probe answers HELLO with, or --json), or
 --addr. Each interval reads STATS and the block, twice, and prints:
 
 - draws/s: how often the page really redraws;
@@ -43,13 +44,16 @@ COLUMNS = ("when", "label", "tag", "draws_s", "us_draw", "us_markers", "page_pct
            "cpu_pct", "slot", "heard")
 
 
-def find_json(path: pathlib.Path | None) -> dict:
-    if path is None:
-        found = sorted(BUILDS.glob("*.modview.json"), key=lambda p: p.stat().st_mtime)
-        if not found:
-            raise SystemExit("no .modview.json in 00_Resources/02_Builds; pass --json or --addr")
-        path = found[-1]
-    return json.loads(path.read_text())
+def find_json(path: pathlib.Path | None, tag: str) -> dict:
+    """The build's .modview.json: PATH, or the one in 02_Builds whose tag is what the
+    probe answers HELLO with."""
+    if path is not None:
+        return json.loads(path.read_text())
+    for found in sorted(BUILDS.glob("*.modview.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        meta = json.loads(found.read_text())
+        if meta.get("tag") == tag:
+            return meta
+    raise SystemExit(f"no .modview.json for {tag!r} in 00_Resources/02_Builds; pass --json or --addr")
 
 
 def read(dp, pr, addr: int, n: int) -> bytes:
@@ -94,17 +98,14 @@ def main(argv=None) -> int:
     p.add_argument("--csv", type=pathlib.Path, default=HERE.parent / "out" / "modview.csv")
     p.add_argument("--port", default="Digitone II")
     a = p.parse_args(argv)
-    meta = {} if a.addr is not None else find_json(a.json)
-    addr = a.addr if a.addr is not None else meta["probe"]
-
     import dn2probe as dp
     import winmidi
     port = winmidi.Port(a.port, None, None)
     try:
         pr = dp.Probe(port)
         tag = dp.decode_hello(pr.call(dp.req_hello))["tag"]
-        if meta and tag != meta["tag"]:
-            print(f"warning: the probe answers {tag!r}, the build json says {meta['tag']!r}")
+        meta = {} if a.addr is not None else find_json(a.json, tag)
+        addr = a.addr if a.addr is not None else meta["probe"]
         s0, b0 = dp.decode_stats(pr.call(dp.req_stats)), block(dp, pr, addr)
         print(f"{tag}: probe block at {addr:#010x}, markers {'on' if b0['markers'] else 'off'}")
         for _ in range(a.n):
