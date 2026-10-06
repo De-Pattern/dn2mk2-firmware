@@ -121,6 +121,8 @@ def gate1(dk, memory) -> dict:
 
 def _wsl_path(p: pathlib.Path) -> str:
     p = p.resolve()
+    if not p.drive:                       # already on Linux: no WSL hop
+        return p.as_posix()
     return f"/mnt/{p.drive[0].lower()}{p.as_posix()[2:]}"
 
 
@@ -128,7 +130,9 @@ def _wsl(script: str, work: pathlib.Path) -> subprocess.CompletedProcess:
     """Run a shell script in WSL from a file -- never an inline string."""
     sh = work / "run.sh"
     sh.write_bytes(script.encode())
-    return subprocess.run(["wsl", "-e", "sh", _wsl_path(sh)], capture_output=True, text=True)
+    import shutil
+    cmd = ["wsl", "-e", "sh"] if shutil.which("wsl") else ["sh"]
+    return subprocess.run(cmd + [_wsl_path(sh)], capture_output=True, text=True)
 
 
 def assemble(work: pathlib.Path) -> bytes:
