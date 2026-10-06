@@ -67,7 +67,9 @@ Each stage passes the upstream gates (`dnfw inspect`, boot from reset,
 the SHARC runner against `grains/model.py` as the reference) before a flash.
 The SHARC code is checked byte for byte against stock encodings for every
 instruction form with an immediate (upstream's rule after the negative-shift
-bug, `waverider-dsp-compare.md` §11).
+bug, `waverider-dsp-compare.md` §11). The engine's output is sanitised
+(NaN/inf → 0, clamped) before the stock per-track chain, and every build must
+pass the stock-unchanged gate and `docs/SAFETY.md`'s regression check.
 
 ## DSP budget [D]
 

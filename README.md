@@ -65,17 +65,25 @@ Regenerate them with `python grains/demos.py`.
 
 ## Before you flash anything
 
+**Read [`docs/SAFETY.md`](docs/SAFETY.md).** It lists every way a flash could
+harm a DN2 and what stops each one. In short:
+
 1. **Use OS 1.11.** Every address in this project is measured on Digitone II
    OS 1.11 (sha256 `2af43e65…472e0`). The tools refuse anything else.
-2. **Have a 5-pin DIN MIDI cable to the DN2's MIDI IN.** Recovery (hold
+2. **The bootstrap is never touched.** `dnfw mods apply` refuses to write a
+   build whose bootstrap, updater, metadata or Outbox section differs from
+   stock by a single byte, so the recovery route always survives.
+3. **Have a 5-pin DIN MIDI cable to the DN2's MIDI IN.** Recovery (hold
    [FUNC] at power-on → [TRIG 4] → Transfer's *Legacy OS upgrade*) does not
-   work over USB.
-3. **Prove recovery on your unit first** by sending stock 1.11 that way.
-4. Then flash a mod through Transfer as you would any OS update.
+   work over USB. **Prove it once with stock 1.11** before flashing anything
+   modified.
+4. **Preflight the exact file you send:**
+   `dnfw preflight Digitone_II_OS1.11.syx build.syx` must print `PASS`.
+5. **Back up the +Drive**, start at **low volume**, and run the regression
+   check in `docs/SAFETY.md` after every flash.
 
-Recovery is proven on hardware upstream (`docs/flashing.md`). Still: this is
-unofficial firmware, Elektron does not support it, and you flash it at your own
-risk. Back up your +Drive with Transfer first.
+This is unofficial firmware. Elektron does not support it, and you flash it at
+your own risk.
 
 ---
 
@@ -101,6 +109,8 @@ same way; see `docs/UPSTREAM-README.md` and `docs/mods.md`.
 | unit tests | `pytest -m "not slow"` | pytest, numpy |
 | GRAINS model | `pytest test/test_grains_model.py` | numpy |
 | integrity + signature | `dnfw inspect build.syx` | — |
+| **safety preflight** | `dnfw preflight STOCK.syx build.syx` (also run by `mods apply`) | — |
+| safety guard's own tests | `pytest test/test_safety.py` | stock 1.11 in `00_Resources/` |
 | boot from reset | `scripts/emu_boot_check.py` | [digikit](https://github.com/m-dwyer/digikit) (ColdFire emulator) |
 | DSP voice | `scripts/sharc_waverider_m5.py` | digikit's `work/sharc-emulator`, [selache](https://github.com/js216/selache) |
 
@@ -135,6 +145,9 @@ As required by the AGPL, a dated record of what this repository changes:
   `test/test_grains_model.py`, `docs/grains.md`.
 - **2026-10-06** — this README; the upstream README moved to
   `docs/UPSTREAM-README.md`.
+- **2026-10-06** — safety: `src/dnfw/safety.py` (the preflight, enforced in
+  `dnfw mods apply`), `dnfw preflight`, `test/test_safety.py`,
+  `docs/SAFETY.md`.
 
 ## Credits
 
