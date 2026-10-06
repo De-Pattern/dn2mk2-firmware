@@ -1,178 +1,161 @@
-# dn_firmware
+```
+  ▗▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▖
+  ▐█▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█▌
+  ▐█   ▐█▌   ▐█▌   █▌    ██████╗ ███╗   ██╗██████╗
+  ▐█   ▝▀▘   ▝▀▘   █▌    ██╔══██╗████╗  ██║╚════██╗
+  ▐█   ▂▃▅▇█▇▅▃▂   █▌    ██║  ██║██╔██╗ ██║ █████╔╝
+  ▐█▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█▌    ██║  ██║██║╚██╗██║██╔═══╝
+  ▐█▌▐▌▐▌▐▌▐▌▐▌▐▌▐▌▐▌    ██████╔╝██║ ╚████║███████╗
+  ▝▀▘▝▘▝▘▝▘▝▘▝▘▝▘▝▘▝▘    ╚═════╝ ╚═╝  ╚═══╝╚══════╝
+     ▘ ▝       ▘ ▝         m k 2   ·   m o d
+```
 
-Tools for inspecting, modifying and rebuilding **Elektron Digitone** firmware —
-the Digitone II (DN2) and the original Digitone / Digitone Keys (DN1) — and a
-set of mods for the Digitone II built with them.
+# DN2-mk2-Mod
 
-**This repository holds code and documentation only.** It contains no Elektron
-firmware, original or modified, and never will. Bring your own OS file — the
-one Elektron publish for your instrument. Every mod applies to *your* copy of
-it, and checks that copy is the one it was measured against before it writes.
+**New synth engines and effects for the Elektron Digitone II, built as
+firmware mods you apply to your own OS file.**
 
-## Mods for the Digitone II 1.11
+The Digitone II ships five machines. This project adds more: wavetable,
+granular, resonator and others, running on the instrument's own SHARC+ DSP and
+sitting in MACHINE SEL beside the stock ones. Every change is checked in an
+emulator before it goes near hardware, and the way back to stock is always one
+MIDI transfer away.
 
-Applied with `dnfw mods apply`, or in the browser on the project site,
-**<https://angellinares.github.io/dn2_firmware_explore/>**, which runs entirely
-in your browser, with nothing uploaded. The browser and the command line
-produce the same file, byte for byte; that is tested.
+It builds on [**dn2_firmware_explore**](https://github.com/xrcstrecords/dn2_firmware_explore)
+by Ángel Linares, which mapped the firmware, wrote the tooling, and put the
+first new machine (Waverider) on the instrument. Everything from upstream is
+here with its history; this repository adds engines on top. The upstream
+README is kept at [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
 
-| Mod | What it does | Status | In the browser |
+> **No Elektron firmware lives in this repository, original or modified, and
+> none ever will.** You bring the OS file Elektron publish for your instrument;
+> every mod applies to *your* copy and checks it is the exact file it was
+> measured against before writing anything.
+
+---
+
+## The engines
+
+| | engine | what it is | state |
 |---|---|---|---|
-| `lfo4` | A fourth LFO under `[MOD]`, like LFO1–3. Modulates on every voice; kept by SAVE PROJECT and across a power-cycle | confirmed on hardware | yes |
-| `arpmodes` | SHUF and RAND as real arpeggiator modes | confirmed on hardware | yes (#131) |
-| `fxmod` | An LFO can be aimed at 24 Chorus, Delay and Reverb parameters | confirmed on hardware | yes |
-| `moddest` | 13 more per-voice parameters open as LFO destinations | confirmed on hardware | yes |
-| `lfowaves` | Seven new LFO waveforms, three of them your own wavetables | confirmed on hardware | yes |
-| `midiarp` | The arpeggiator on MIDI tracks | confirmed on hardware | yes |
-| `arpplocks` | MODE, SPEED, RANGE and N.LEN lockable per trig | confirmed on hardware; changed since, emulator-checked | no |
-| `bootscreen` | Your own mark in the start-up animation | confirmed on hardware | yes |
-| `transients` | Replace the FM drum transient bank with your own samples | confirmed on hardware | yes |
-| `songguard` | A song with a damaged row count loads as empty instead of halting the instrument (a stock bug) | confirmed on hardware | no |
+| 🌊 | **Waverider** | two-oscillator wavetable machine, after Tonverk's Wavefinder (upstream) | DSP core **passed on hardware** upstream; full build **emulator-gated** here from OS 1.11 |
+| ✨ | **GRAINS** | granular synthesis on wavetables, after the Virus TI grain tables: formant grains (SYNC) and clouds (CLOUD) | **reference model + demos**; control layout awaiting sign-off → [`docs/grains.md`](docs/grains.md) |
+| 🔀 | **Frequency shifter** | a send/master effect after Tonverk's | planned, next after GRAINS G1 |
+| 🎻 | **Resonator** | polyphonic string/modal resonator, after Mutable Instruments Rings (MIT) | planned: port of open-source C to the SHARC |
+| 🥁 | **Digitakt II machines** | same DSP family, so their code moves across; you supply both OS files and nothing of Elektron's is redistributed | upstream proved it offline (ONESHOT) |
+| 🧪 | **Syntakt / Model:Cycles / Monomachine / Machinedrum voices** | those boxes run their engines on different processors (ColdFire, DSP56300), so these are **new implementations by ear**, not ports | later |
 
-**Combining them.** `dnfw mods matrix` tries every pair in both orders and
-writes the result into `docs/mods-compatibility.md` and the site. Most pairs
-combine freely; a few need an order (`dnfw mods apply` applies them in it), and
-`lfo4`, `lfowaves` and `bootscreen` exclude each other because each needs the
-start-up hook. No combined image has been flashed as a pair yet.
+### Hear GRAINS before it exists
 
-**Old projects that halt on load:** a project with a damaged song row count
-halts even stock 1.11 on load (`EXCEPTION DS0059`). The `songguard` mod bounds
-the count, and it is confirmed on the instrument (`docs/old-project-load.md`).
+`grains/demos/` holds renders from the reference model on Waverider's two
+built-in tables:
 
-**In development: Waverider**, a wavetable machine for the Digitone II modelled
-on Tonverk's Wavefinder (`docs/waverider-feasibility.md`). A baked table has been
-read back on the instrument (Milestone 0), and Milestones 1–4 run offline in
-digikit's SHARC emulator: our own SHARC reader, inside a real DN2 voice, through
-the per-track chain, with its tables baked into the DSP image. The first
-flashable build is Milestone 5.
+| file | what to listen for |
+|---|---|
+| `01_sync_formant_sweep.wav` | one held C2, FMNT −12 → +24: the vowel moves, the pitch does not |
+| `02_sync_size_sweep.wav` | SIZE 1 → 4: buzzy and wide → ringing and vocal |
+| `03_sync_spread.wav` | SPRD 0 → 7: a doubled, chorused formant |
+| `04_sync_talking_bass.wav` | POS and FMNT moving together on the harmonic table |
+| `05_sync_melody.wav` | a short line, to hear it as an instrument |
+| `06_cloud_density.wav` | CLOUD: sparse → dense, scattered and scanning |
+| `07_cloud_pitch_jitter.wav` | CLOUD with pitch scatter: shimmer and smear |
 
-## Install and run
+Regenerate them with `python grains/demos.py`.
 
-Python 3.11+, no dependencies.
+---
 
-```
+## Before you flash anything
+
+1. **Use OS 1.11.** Every address in this project is measured on Digitone II
+   OS 1.11 (sha256 `2af43e65…472e0`). The tools refuse anything else.
+2. **Have a 5-pin DIN MIDI cable to the DN2's MIDI IN.** Recovery (hold
+   [FUNC] at power-on → [TRIG 4] → Transfer's *Legacy OS upgrade*) does not
+   work over USB.
+3. **Prove recovery on your unit first** by sending stock 1.11 that way.
+4. Then flash a mod through Transfer as you would any OS update.
+
+Recovery is proven on hardware upstream (`docs/flashing.md`). Still: this is
+unofficial firmware, Elektron does not support it, and you flash it at your own
+risk. Back up your +Drive with Transfer first.
+
+---
+
+## Quick start
+
+Python 3.11+, no runtime dependencies for the tools themselves.
+
+```sh
 pip install -e .
-dnfw inspect 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip
-dnfw mods apply Digitone_II_OS1.11.syx --mod lfo4 -o modded.syx
+dnfw inspect Digitone_II_OS1.11.syx
+dnfw mods list
+dnfw mods apply Digitone_II_OS1.11.syx --mod waverider -o waverider.syx
 ```
 
-Or without installing: `PYTHONPATH=src python -m dnfw.cli.main ...`
+The upstream mods (`lfo4`, `arpmodes`, `fxmod`, `moddest`, `lfowaves`,
+`midiarp`, `arpplocks`, `bootscreen`, `transients`, `songguard`) all work the
+same way; see `docs/UPSTREAM-README.md` and `docs/mods.md`.
 
-A `.zip` as Elektron ship it is accepted anywhere a `.syx` is.
+### The gates
 
-### Commands
+| gate | command | needs |
+|---|---|---|
+| unit tests | `pytest -m "not slow"` | pytest, numpy |
+| GRAINS model | `pytest test/test_grains_model.py` | numpy |
+| integrity + signature | `dnfw inspect build.syx` | — |
+| boot from reset | `scripts/emu_boot_check.py` | [digikit](https://github.com/m-dwyer/digikit) (ColdFire emulator) |
+| DSP voice | `scripts/sharc_waverider_m5.py` | digikit's `work/sharc-emulator`, [selache](https://github.com/js216/selache) |
 
-| Command | Does |
-|---|---|
-| `dnfw inspect <image>` | report transport, container, sections and every integrity field |
-| `dnfw extract <image> -o DIR` | write each section out, depacked where it is compressed |
-| `dnfw build <image> -s 3=FILE -o OUT` | rebuild with a replaced section, recomputing every checksum |
-| `dnfw diff <a> <b>` | compare two images section by section |
-| `dnfw mods list` / `apply` / `extract` | the mods above: list them, apply them, extract their factory content |
-| `dnfw mods matrix <image>` | try every pair of mods and report which combine |
-| `dnfw patch list` / `apply` | declarative single patches with stock-byte guards |
-| `dnfw params <image>` | find and dump the instrument's parameter table |
-| `dnfw symbols` / `symbolmap <image>` | the C++ names GCC left in the image; a Ghidra seeding script |
-| `dnfw disasm <image> ADDR [N]` | disassemble a span (ColdFire V4e, via objdump) |
-| `dnfw validate-disasm <image> ADDR [N]` | check another disassembler against objdump |
-| `dnfw cave <image>` | find free space and size a hook for a code-cave detour |
-| `dnfw fn <image> ADDR` | count direct callers of an address, or find the function containing it |
-| `dnfw ldr <image>` | walk the SHARC program (section 7) as an ADI boot stream |
-| `dnfw waverider ...` | Waverider's tables: scan and reduce WAVs, bake, render a reference, build a frame |
+Upstream works on Windows + WSL. This fork also runs the DSP gates natively on
+Linux (`sharc_waverider_render.py` skips the WSL hop when there is none).
+Several scripts still expect upstream's paths under `/mnt/d/01_Code/Z_Personal/`;
+symlinking your checkouts there is the quickest way through for now.
 
-`build`, `patch apply` and `mods apply` re-load and re-verify their own output
-before writing it. Nothing leaves this tool that it cannot check.
+---
 
-## How a change is checked before it reaches an instrument
-
-- **Integrity:** every checksum and the HMAC-SHA256 signature are recomputed and
-  re-verified on the rebuilt file.
-- **Boot from reset in an emulator:** `scripts/emu_boot_check.py`, on digikit's
-  ColdFire emulator, against a stock control. A snapshot of a machine that has
-  already booted does not count (`docs/emulator.md`).
-- **The engine and save/load:** `scripts/emu_boot_engine.py` runs the audio
-  engine's evaluator and a stored sound through LOAD and SAVE.
-- **ColdFire encodings:** `scripts/check_coldfire.py` rejects an addressing mode
-  the chip refuses and generic emulators run.
-- **Per-mod harnesses** under `scripts/emu_*.py`, each with a stock control.
-- **DSP code** runs offline in digikit's SHARC runner and is compared with a
-  Python reference (`scripts/sharc_waverider_*.py`).
-- **On the instrument:** each hardware test has a written pass and fail in the
-  project's test plan before anything is flashed. The recovery route (stock
-  through the Early Start-up Menu) is proven; send it over a clean MIDI link
-  (`docs/flashing.md`).
-
-## What the firmware is
-
-Measured from the images. Evidence in `docs/ele3-format.md` and
-`docs/mainos-image.md`.
-
-- An `ELE3` container inside a block-streaming SysEx transport.
-- Sections compressed with an aPLib variant. `MAIN OS` loads at `0x40000400`:
-  big-endian **ColdFire V4e** code, built with GCC and still carrying its **C++
-  RTTI names**. Section 7 is the **SHARC+ DSP** program, as an ADI boot stream.
-- The DN2 container is signed with **HMAC-SHA256**, keyed from material in the
-  image itself, so a modified image can be signed correctly. The DN1 container
-  is **unsigned**: its trailer is 32 zero bytes.
-- The +Drive is a 32 GB eMMC with no filesystem: fixed slots for projects,
-  presets and kits, and about 21 GiB the stock firmware never touches
-  (`docs/drive-storage-research.md`).
-
-## Testing
+## Layout
 
 ```
-pytest -m "not slow"     # the fast set
-pytest                   # everything, a few minutes
+src/dnfw/         the tool: container, codec, integrity, mods, waverider
+grains/           GRAINS: model.py (the reference), demos.py, demos/*.wav
+csrc/             our own ColdFire C/asm and SHARC asm (waverider/, lfo4/, ...)
+scripts/          builders and emulator gates
+test/             pytest
+docs/             everything measured, with evidence; grains.md is new here
+site/             upstream's in-browser patcher
 ```
 
-Gate F needs an m68k objdump; on Windows,
-`wsl -u root apt-get install -y binutils-m68k-linux-gnu`. The browser parity
-tests need Node. The emulator gates need digikit (`docs/emulator.md`). Tests
-that need something absent — the OS images in `00_Resources/`, objdump, Node —
-skip and say so.
+## Changes from upstream
 
-## Documentation
+As required by the AGPL, a dated record of what this repository changes:
 
-| File | Subject |
-|---|---|
-| `docs/PRINCIPLES.md` | how code here is built, and why |
-| `docs/mods.md` | every mod: what it changes, how it was verified |
-| `docs/mods-compatibility.md` | which mods combine, generated by `dnfw mods matrix` |
-| `docs/flashing.md` | the recovery path, and the order hardware steps happen in |
-| `docs/emulator.md` | running builds in digikit's ColdFire emulator |
-| `docs/instruments.md` | which tool answers which question |
-| `docs/lfo4-build-plan.md` | the whole LFO4 story, including the dead ends |
-| `docs/waverider-feasibility.md` | Waverider, milestone by milestone |
-| `docs/drive-storage-research.md` | the +Drive, and where a sample library could live |
-| `docs/ideas-backlog.md` | ideas, costed, with their state |
-| `docs/ele3-format.md` | the transport, container, codec and integrity layers |
-| `docs/mainos-image.md` | the CPU, the load address, and which disassembler to trust |
-| `docs/sharc-voice-path.md` | the DSP voice path, as measured in the runner |
-| `docs/references.md` | prior art, what each is good for, and its licence |
+- **2026-10-06** — forked from `dn2_firmware_explore` at `8c40698`
+  (2026-10-01).
+- **2026-10-06** — `scripts/sharc_waverider_render.py`: run selache natively
+  when WSL is absent.
+- **2026-10-06** — GRAINS: `grains/` (reference model, demos),
+  `test/test_grains_model.py`, `docs/grains.md`.
+- **2026-10-06** — this README; the upstream README moved to
+  `docs/UPSTREAM-README.md`.
+
+## Credits
+
+- **[dn2_firmware_explore](https://github.com/xrcstrecords/dn2_firmware_explore)**
+  — Ángel Linares. The firmware map, the tooling, the upstream mods and
+  Waverider. Its own credits (elektron-firmware-tool, octa-bt-pt, octabam,
+  digikit, selache, DNX) are in `docs/UPSTREAM-README.md` and
+  `THIRD-PARTY.md`.
+- **[digikit](https://github.com/m-dwyer/digikit)** — the ColdFire and
+  SHARC emulators (GPL-2.0-or-later), used as external tools.
+- **[selache](https://github.com/js216/selache)** — the SHARC+ assembler and
+  C compiler (GPL-3.0), used as an external tool.
+
+Not affiliated with Elektron. *Digitone*, *Digitakt*, *Syntakt*, *Tonverk*,
+*Model:Cycles*, *Monomachine* and *Machinedrum* are Elektron's; *Virus* is
+Access Music's; *Rings* is Mutable Instruments'. Names are used only to
+describe what an engine is modelled on.
 
 ## Licence
 
-**[GNU AGPL-3.0-or-later](LICENSE).** Use it, fork it, change it; keep the
-notices and pass on the same freedoms. A modified version you distribute — or
-run as a service — stays open. Same licence as DNX, for the same reasons.
-
-Parts of it derive from MIT projects, whose notices are carried in
-[THIRD-PARTY.md](THIRD-PARTY.md).
-
-## Credit
-
-The container, transport, codec and integrity work stands on
-[mischa85/elektron-firmware-tool](https://github.com/mischa85/elektron-firmware-tool)
-(MIT). The patch model comes from
-[bryantysinger/octa-bt-pt](https://github.com/bryantysinger/octa-bt-pt) (MIT),
-and the ColdFire disassembly findings from
-[sambanks/octabam](https://github.com/sambanks/octabam) (MIT). The ColdFire and
-SHARC emulators are [m-dwyer/digikit](https://github.com/m-dwyer/digikit)'s
-(GPL-2.0-or-later), used as external tools; our own SHARC code is assembled with
-[js216/selache](https://github.com/js216/selache) (GPL-3.0). The Digitone data
-formats come from the sibling project DNX. What was taken from each, and where
-this project deliberately diverges, is in `docs/references.md`.
-
-None of them is affiliated with Elektron, and neither is this. Everything in
-`docs/` was measured from OS files Elektron publish; no Elektron code has been
-copied into this repository and no firmware is redistributed by it.
+[GNU AGPL-3.0-or-later](LICENSE), as upstream. Use it, fork it, change it;
+keep the notices and pass on the same freedoms. A modified version you
+distribute, or run as a service, stays open.
