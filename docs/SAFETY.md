@@ -18,7 +18,7 @@ What it does is name every way harm could happen, and say what stops each one.
 |---|---|---|
 | **The bootstrap (section 2) is damaged.** It runs the Early Start-up Menu and the recovery flash, so losing it is the one true brick | permanent without a hardware programmer | **Enforced:** `dnfw mods apply` refuses to write any build whose section 2, 4, 5 or 8 differs from stock by a single byte (`src/dnfw/safety.py`, tested in `test/test_safety.py`). Mods only ever change MAIN OS (3) and the DSP program (7). |
 | **Power is lost while the OS is being written to flash** | can be as bad as the above | Same risk as an official Elektron update. Use stable power, don't touch the unit during `UPGRADING… DO NOT TURN OFF`. |
-| **The bootstrap is rewritten by a downgrade.** Elektron: *"After some upgrades the bootstrap is also upgraded… right after the first restart."* | as above, if power fails during it | Stay on the version the mods are built for (**1.11**). Our builds carry 1.11's bootstrap byte for byte, so a unit already on 1.11 has nothing to rewrite. **If your unit is on 1.12, read "Getting onto 1.11" below first.** |
+| **The bootstrap is rewritten by an OS change.** Elektron: *"After some upgrades the bootstrap is also upgraded… right after the first restart."* 1.10 → 1.11 is such an upgrade. | as above, if power fails during it | Do that move **once, with Elektron's own stock 1.11**, on its own (below). After that, our builds carry 1.11's bootstrap byte for byte, so a unit on 1.11 has nothing left to rewrite. **From 1.10 or 1.12, read "Getting onto 1.11" first.** |
 | **A build crashes MAIN OS or won't boot** | recoverable | Recovery runs from the bootstrap, not MAIN OS: [FUNC] at power-on → [TRIG 4] → stock 1.11 over **DIN MIDI**. Every build also boots from reset in the emulator first (`scripts/emu_boot_check.py`). |
 | **The DSP stops and the unit goes silent** | recoverable | Upstream hit exactly this (`docs/waverider-dsp-silence.md`) and recovered by reflashing. Every build runs the DSP code in the SHARC emulator first; our code uses only instruction encodings found byte for byte in stock (the rule after upstream's negative-shift bug). |
 | **Loud noise, DC or full-scale output** from a DSP bug | can harm speakers and ears | First test of every DSP build: **low volume, no headphones, monitors down.** And a rule for our DSP code: every engine sanitises its output (NaN/inf → 0, hard-clamped) before it reaches the stock chain. |
@@ -31,14 +31,43 @@ What it does is name every way harm could happen, and say what stops each one.
 ## Before the first flash, once
 
 1. **Back up everything** with Elektron Transfer (projects, presets, samples).
-2. **Prove recovery on your unit with stock 1.11**: DIN cable from the
+2. **If your unit is on 1.10-anything, update it to stock 1.11 first** (see
+   below). That's an official upgrade, and it rewrites the bootstrap.
+3. **Prove recovery on your unit with stock 1.11**: DIN cable from the
    computer's MIDI OUT to the DN2's MIDI IN, hold [FUNC] at power-on, [TRIG 4],
    Transfer's *Legacy OS upgrade mode*, send `Digitone_II_OS1.11.syx`. It takes
    about 12 minutes; don't interrupt. Note which interface you used: that's
-   your recovery cable from now on.
-3. Confirm the unit boots stock 1.11 and plays normally.
+   your recovery cable from now on. Doing this *after* step 2 matters: it
+   proves the recovery route of the bootstrap you will actually have.
+4. Confirm the unit boots stock 1.11 and plays normally.
 
-Until step 2 has worked once, flash nothing modified.
+Until step 3 has worked once, flash nothing modified.
+
+### Getting onto 1.11 from 1.10, 1.10A–E
+
+This is an upgrade, the direction Elektron supports, but it **changes the
+bootstrap**: 1.10E rebuilt it almost entirely (and moved its load address),
+and 1.11 changed it again (`docs/os-versions.md`; measured here between 1.10A
+and 1.11 too). Elektron's release notes: *"After some upgrades the bootstrap
+is also upgraded. This upgrade is performed right after the first restart of
+the device. Do not turn the power off during the upgrade."*
+
+That restart is the most sensitive moment in the whole project, so it is kept
+apart from everything else:
+
+- Use **Elektron's own, unmodified `Digitone_II_OS1.11.syx`**, never a mod, for
+  this step. The preflight guarantees our builds carry 1.11's bootstrap byte
+  for byte, but the first move onto it should still involve nothing of ours.
+- **Normal update route**: Transfer over USB to the running unit, as Elektron
+  describe. Stable power; if you have a UPS or a reliable outlet, use it.
+- After `UPGRADING… DO NOT TURN OFF` and the first restart, **leave it alone
+  until it reaches the normal screen.** If it shows a bootstrap upgrade
+  message, wait it out.
+- Back up first. Elektron's own update is non-destructive to projects, but a
+  backup is still the rule.
+
+Upstream's unit made the same 1.10E → 1.11 move, through the recovery route,
+and booted 1.11 cleanly (`docs/flashing.md`, 2026-09-11).
 
 ### Getting onto 1.11 if your unit runs 1.12
 
