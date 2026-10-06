@@ -20,6 +20,7 @@ from . import (
     mods,
     params,
     patch,
+    preflight,
     symbolmap,
     symbols,
     validate_disasm,
@@ -28,7 +29,7 @@ from . import (
 
 COMMANDS = (
     inspect, extract, build, patch, diff, symbols, symbolmap, params, disasm, validate_disasm,
-    cave, fn, ldr, mods, waverider,
+    cave, fn, ldr, mods, waverider, preflight,
 )
 
 

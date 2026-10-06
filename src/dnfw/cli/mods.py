@@ -370,6 +370,14 @@ def _apply(args) -> int:
               "leaves here.")
         return 1
 
+    from .. import safety
+    ok, text = safety.report(safety.preflight(firmware, out))
+    print("\npreflight (docs/SAFETY.md):")
+    print(text)
+    if not ok:
+        print("\nNot written. A build that fails the preflight never leaves here.")
+        return 1
+
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_bytes(out)
     print(f"wrote {args.out} ({len(out):,} bytes)")
