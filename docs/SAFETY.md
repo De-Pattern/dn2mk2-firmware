@@ -88,8 +88,11 @@ at your own risk, with possible loss of user content. So:
 
 1. **Build** with `dnfw mods apply` (it runs the preflight and refuses on any
    failure).
-2. **Gates** pass on this exact build: boot from reset, and for anything that
-   touches the DSP, the SHARC runner, including the stock-unchanged step.
+2. **`scripts/ship_gate.py` prints `CLEARED TO FLASH` on this exact file.** It
+   runs every gate (preflight, DSP identity, SHARC runner incl. the
+   stock-unchanged step, ColdFire instruction set, boot from reset, engine +
+   SAVE/LOAD, unit tests) and records the pass, with the file's sha256, in
+   `BUILD.syx.gate.json`. Every build, every time; no exceptions.
 3. **Preflight the file you will actually send:**
    `dnfw preflight Digitone_II_OS1.11.syx build.syx` must print `PASS`.
 4. **Back up** the +Drive.
