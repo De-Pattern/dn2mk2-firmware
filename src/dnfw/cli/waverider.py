@@ -7,6 +7,8 @@
                                          and what the reduction will do to each
   `dnfw waverider bake PATH --out DIR`  reduce and bake each WAV: DIR/<name>.h
                                          and DIR/<name>.bin (big-endian int16)
+  `dnfw waverider slice IN.wav -o OUT.wav`  any short sample -> a wavetable WAV, the
+                                         way Tonverk makes one (`waverider.slicer`)
   `dnfw waverider render OUT.wav`       the reference reader (Milestone 1): what
                                          the SHARC code must produce, as audio
   `dnfw waverider frame IMAGE OUT.bin`  the DSP parameter frame (Milestone 4) for
@@ -25,7 +27,7 @@ import wave
 from ..firmware.load import load
 from ..image.coldfire import LoadedImage
 from ..params import table as ptable
-from ..waverider import bake, expect, frame, reduce, render, source, testtable
+from ..waverider import bake, expect, frame, reduce, render, slicer, source, testtable
 from .files import read_image
 
 NAME = "waverider"
@@ -73,6 +75,20 @@ def configure(parser) -> None:
                    help="override a parameter of track 0 (16-bit value, e.g. 67=0 closes FREQ)")
     p = sub.add_parser("scan", help="describe a WAV or every WAV in a folder")
     p.add_argument("path", type=pathlib.Path)
+    p = sub.add_parser("slice", help="turn any short sample into a wavetable WAV",
+                       description=slicer.__doc__.split("\n\n")[0])
+    p.add_argument("wav", type=pathlib.Path, help="the sample (any WAV: 8/16/24/32-bit, float)")
+    p.add_argument("-o", "--out", type=pathlib.Path, required=True,
+                   help="the wavetable WAV to write (float32, 2,048-sample frames)")
+    p.add_argument("--mode", choices=("auto", "pitch", "window"), default="auto",
+                   help="pitch: one cycle per frame; window: Tonverk's fixed frames; "
+                        "auto: pitch where the sound is periodic (default)")
+    p.add_argument("--frame", type=int, default=None,
+                   help="window mode's frame length (default 2048, or the name's _wtN)")
+    p.add_argument("--frames", type=int, default=slicer.FRAMES, help="frames in the table (16)")
+    p.add_argument("--harmonics", type=int, default=48, help="partials kept per frame (48)")
+    p.add_argument("--preview", type=pathlib.Path, default=None,
+                   help="also render a 4 s sweep through the table at 110 Hz to this WAV")
     p = sub.add_parser("bake", help="reduce and bake a WAV or every WAV in a folder")
     p.add_argument("path", type=pathlib.Path)
     p.add_argument("--out", type=pathlib.Path, required=True, help="directory for .h and .bin")
@@ -114,6 +130,34 @@ def _bake(path: pathlib.Path, out: pathlib.Path) -> int:
                                          encoding="utf-8", newline="\n")
         (out / f"{f.stem}.bin").write_bytes(bake.to_bytes(table))
         print(f"  {f.name} -> {f.stem}.h / .bin, checksum {bake.checksum(table):#06x}")
+    return 0
+
+
+def _slice(args) -> int:
+    data = args.wav.read_bytes()
+    window = args.frame or slicer.name_window(str(args.wav))
+    frames, report = slicer.slice_wav(data, args.mode, window, args.frames, args.harmonics)
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_bytes(slicer.wav_bytes(frames))
+    kinds = [f[0] for f in report["frames"]]
+    pitched = [f[1] for f in report["frames"] if f[0] == "pitch"]
+    print(f"  {args.wav.name}: {report['samples']:,} samples at {report['rate']} Hz -> "
+          f"{len(frames)} frames of {len(frames[0])}")
+    print(f"  {kinds.count('pitch')} frame(s) cut as one cycle"
+          + (f" ({min(pitched)}-{max(pitched)} Hz)" if pitched else "")
+          + f", {kinds.count('window')} as a {report['window']}-sample window")
+    print(f"  wrote {args.out}")
+    if args.preview:
+        table = reduce.to_int16(frames)
+        blocks = int(4.0 * 48000 / 32)
+        samples = render.render_blocks(table, render.increment(110.0),
+                                       render.sweep(len(table), blocks), 32, 0, "ideal")
+        with wave.open(str(args.preview), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(48000)
+            w.writeframes(render.pcm16(samples))
+        print(f"  preview: {args.preview}")
     return 0
 
 
@@ -163,6 +207,8 @@ def run(args) -> int:
         return _scan(args.path)
     if args.action == "bake":
         return _bake(args.path, args.out)
+    if args.action == "slice":
+        return _slice(args)
     table = _table(args)
     if args.action == "header":
         args.out.parent.mkdir(parents=True, exist_ok=True)

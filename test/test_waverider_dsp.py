@@ -186,11 +186,70 @@ def test_tun1_is_the_sounds_own_scale():
 
 
 def test_render_blocks_carries_phase_across_a_slot_change():
+    # each block a note, so each call starts the W2 gain at its own value (a split
+    # render otherwise ramps its first block up from the zeroed state)
     tables = dsp.tables()
-    a, ph = live.render_blocks(tables, [(60.0, 0, 0)], 32)
-    b, _ = live.render_blocks(tables, [(60.0, 0, 0x100)], 32, ph)
-    both, _ = live.render_blocks(tables, [(60.0, 0, 0), (60.0, 0, 0x100)], 32)
+    z = live.TUN1_ZERO
+    a, ph = live.render_blocks(tables, [(60.0, 0, 0, z, True)], 32)
+    b, _ = live.render_blocks(tables, [(60.0, 0, 0x100, z, True)], 32, ph)
+    both, _ = live.render_blocks(tables, [(60.0, 0, 0, z, True), (60.0, 0, 0x100, z, True)], 32)
     assert both == a + b
+
+
+# -- W2: the scanner (docs/w2-scanner.md) ---------------------------------------------------
+
+def test_w2_defaults_change_nothing():
+    """MPOS and MLEV at their centre, LEV at 100: POS exactly the glided value, the
+    gain exactly 1.0, so a sound that never touches them plays as W5."""
+    rates, levels, rnd = live.rate_table(), live.level_table(), live.rnd_table()
+    for k in range(8):
+        sc = live.Scanner()
+        for b in range(60):
+            p = {**live.DEFAULTS, "nlev": k << 4 << 8 if k else 0, "atk": 0x7F00}
+            s, u = sc.block(p, b == 0, rates, rnd)
+            assert live.scanned(0x50000, s, p["ofs1"]) == 0x50000
+            assert live.gain(u, p, levels) == 1.0
+    assert levels[100] == 1.0
+
+
+def test_w2_shapes_stay_in_range_and_one_shots_finish():
+    rates, rnd = live.rate_table(), live.rnd_table()
+    for k in range(8):
+        sc = live.Scanner()
+        us = []
+        for b in range(120):
+            s, u = sc.block({**live.DEFAULTS, "nlev": (k * 16) << 8, "atk": 0x7F00}, b == 0, rates, rnd)
+            assert 0.0 <= u <= 1.0 and -1.0 <= s <= 1.0
+            us.append(u)
+        if k == 6:
+            assert us[-1] == 1.0 and sc.done
+        if k == 7:
+            assert us[-1] == 0.0 and sc.done
+    assert [live.shape_of(v << 8) for v in (0, 16, 32, 48, 64, 80, 96, 127)] == list(range(8))
+
+
+def test_w2_rate_spans_its_range():
+    t = live.rate_table()
+    assert t == sorted(t) and t[-1] < 1 << 31
+    assert abs(t[0] / 2 ** 32 * live.BLOCK_HZ - live.RATE_MIN_HZ) < 1e-4
+    assert abs(t[-1] / 2 ** 32 * live.BLOCK_HZ - live.RATE_MAX_HZ) < 1e-3
+
+
+def test_w2_mpos_and_mlev_reach_their_ends():
+    levels = live.level_table()
+    assert live.scanned(0, 1.0, 0x6400) == 15 << 16              # +1 sweeps to the last frame
+    assert live.scanned(15 << 16, -1.0, 0x6400) == 0
+    assert live.scanned(0, -1.0, 0x6400) == 0                     # clamped
+    p = {**live.DEFAULTS, "pd1": 0x6400}
+    assert live.gain(0.0, p, levels) == 0.0 and live.gain(1.0, p, levels) == 1.0
+    p = {**live.DEFAULTS, "pd1": 0}
+    assert live.gain(1.0, p, levels) == 0.0 and live.gain(0.0, p, levels) == 1.0
+
+
+def test_w2_state_fits_after_the_loop():
+    assert dsp.W2_STATE_DM == dsp.LOOP_DM + dsp.LOOP_SPAN
+    assert dsp.W2_RND_DM + 4 * live.RND_COUNT == dsp.REGION[1]
+    assert dsp.REGION[1] <= 0x2E7000                              # M5c's proven span
 
 
 # -- the tables -----------------------------------------------------------------------------------

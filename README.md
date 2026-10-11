@@ -37,12 +37,20 @@ README is kept at [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
 
 | | engine | what it is | state |
 |---|---|---|---|
-| 🌊 | **Waverider** | wavetable machine after Tonverk's Wavefinder (upstream): **W5** adds 11 original tables in DSP RAM, TBL with table names, a smooth POS glide, and a wave display that follows p-locks and motion | upstream DSP core **passed on hardware**; polyphony and TBL/POS **confirmed on the owner's unit**; W5 **emulator-gated**, awaiting a flash → [`docs/w5-tables.md`](docs/w5-tables.md) |
+| 🌊 | **Waverider** | wavetable machine after Tonverk's Wavefinder (upstream): **W5** adds 11 original tables, TBL with table names, a smooth POS glide, a display that follows p-locks and motion; **W2** puts every page-1 control to work (LEV, and a per-voice scanner: RATE, MPOS, MLEV, MOVE with 8 shapes) and gives the LFO/MOD lists Waverider's own names | upstream DSP core **passed on hardware**; W5 **flashed and working** on the owner's unit (tables, save/load); W2 **emulator-gated**, awaiting a flash → [`docs/w2-scanner.md`](docs/w2-scanner.md), [`docs/w5-tables.md`](docs/w5-tables.md) |
 | ✨ | **GRAINS** | granular synthesis on wavetables, after the Virus TI grain tables: formant grains (SYNC) and clouds (CLOUD) | **reference model + demos**; control layout awaiting sign-off → [`docs/grains.md`](docs/grains.md) |
 | 🔀 | **Frequency shifter** | a send/master effect after Tonverk's | planned, next after GRAINS G1 |
 | 🎻 | **Resonator** | polyphonic string/modal resonator, after Mutable Instruments Rings (MIT) | planned: port of open-source C to the SHARC |
 | 🥁 | **Digitakt II machines** | same DSP family, so their code moves across; you supply both OS files and nothing of Elektron's is redistributed | upstream proved it offline (ONESHOT) |
 | 🧪 | **Syntakt / Model:Cycles / Monomachine / Machinedrum voices** | those boxes run their engines on different processors (ColdFire, DSP56300), so these are **new implementations by ear**, not ports | later |
+
+### Make a wavetable from any sample
+
+`dnfw waverider slice voice.wav -o voice_wt.wav --preview sweep.wav` turns any
+short WAV into a wavetable the way Tonverk does: one exact cycle per frame where the
+sound is pitched (so a voice becomes a playable table of its own waveforms), fixed
+windows where it is not (`_wt1024` in the name sets their size, as on Tonverk), each
+frame band-limited. The output is a standard wavetable WAV (Serum, Vital, Tonverk).
 
 ### Hear GRAINS before it exists
 
@@ -111,6 +119,7 @@ same way; see `docs/UPSTREAM-README.md` and `docs/mods.md`.
 | integrity + signature | `dnfw inspect build.syx` | — |
 | **safety preflight** | `dnfw preflight STOCK.syx build.syx` (also run by `mods apply`) | — |
 | safety guard's own tests | `pytest test/test_safety.py` | stock 1.11 in `00_Resources/` |
+| **everything, on the file you flash** | `scripts/ship_gate.py STOCK.syx build.syx` → `CLEARED TO FLASH` | all of the below |
 | boot from reset | `scripts/emu_boot_check.py` | [digikit](https://github.com/m-dwyer/digikit) (ColdFire emulator) |
 | DSP voice | `scripts/sharc_waverider_m5.py` | digikit's `work/sharc-emulator`, [selache](https://github.com/js216/selache) |
 
@@ -154,6 +163,13 @@ As required by the AGPL, a dated record of what this repository changes:
   as its own RAM chunk; the preflight's DSP limit tightened to the uploader's real
   check; `scripts/sharc_ddr_ceiling.py`, `scripts/emu_install_snapshot.py`;
   `docs/w5-tables.md`.
+- **2026-10-11** — `scripts/ship_gate.py`: every gate on the exact file, every build
+  (`CLAUDE.md`); `docs/SAFETY.md`: the recovery cable's role.
+- **2026-10-11** — Waverider W2: LEV and the scanner (RATE, MPOS, MLEV, MOVE) on page
+  1, in `machine5_live.asm` and `live` (bit-exact); Waverider's names in every
+  destination list (`wr_names`, `page.c`); the code ranges a CODE chunk executes,
+  recorded for the gate (`__text_end`, `labels`); `dnfw waverider slice`
+  (`waverider.slicer`); `docs/w2-scanner.md`.
 
 ## Credits
 

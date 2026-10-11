@@ -508,6 +508,10 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the sound's parameter-ownership test: type 5 owns WaveTone's machine parameters",
          VALID_STOCK)
     layout.update(playout)
+    # W2: where the C renderer's code ends (its rodata and data follow): the ship gate
+    # checks [C_LOAD, c_text_end) as code
+    layout["c_load"] = pages.C_LOAD
+    layout["c_text_end"] = csyms["__text_end"]
     # the wave spans are data (signed sample bytes): where they lie, so the RAM check
     # (dnfw.mods.ramcheck) can tell four of their bytes from an address
     spans = wave.span_bytes()

@@ -116,11 +116,11 @@ wr_t5v_loop.:
       R3 = DM(I5, M6);                  // this track's buffer; I5 -> next
       R4 = 5;
       COMP(R2, R4);
-      IF NE JUMP 0x16f8ff;              // -> wr_t5v_next.
+      IF NE JUMP 0x16fba0;              // -> wr_t5v_next.
       R4 = DM(0x2de600);                // the baked directory's magic
       R2 = 0x57525431;
       COMP(R4, R2);
-      IF NE JUMP 0x16f8ff;              // -> wr_t5v_next. (no directory: render nothing)
+      IF NE JUMP 0x16fba0;              // -> wr_t5v_next. (no directory: render nothing)
 
       // t, and from it every per-track address (no pointer survives the reader call)
       R0 = DM(0x2dde80);
@@ -230,8 +230,369 @@ wr_t5v_glide.:
 .GLOBAL wr_t5v_glided.;
 wr_t5v_glided.:
       DM(0, I1) = R14;
-      R4 = PASS R14;
+
+      // ---- W2 (docs/w2-scanner.md): the scanner, MPOS, MLEV, LEV. dnfw.waverider.live
+      // (Scanner, scanned, gain, ramp) is the contract, operation by operation. ----
+      DM(0x2dde88) = R14;               // the glided POS, Q16
+      R12 = LSHIFT R9 BY 6;             // 64 bytes of W2 state a voice
+      R11 = 0x2df900;
+      R12 = R11 + R12;
+      I2 = R12;                         // this voice's W2 state (the reader clobbers I2 later)
+      R7 = -16;
+      R6 = 0xffff;
+      // the five controls, each a 16-bit word of the frame copy, into state 8..12
+      R11 = 0x25c570;                 // LEV1: 0x25c48c + its offset
+      R0 = R11 + R10;                   // + 146t
+      R1 = 2;
+      R1 = R0 AND R1;                   // 2: the high half
+      R2 = -4;
+      R0 = R0 AND R2;
+      I1 = R0;
+      R0 = DM(0, I1);
+      R1 = PASS R1;
+      IF EQ JUMP 0x16f8c3;                   // -> wr_w2_lev1_lo.
+      R0 = LSHIFT R0 BY R7;
+.GLOBAL wr_w2_lev1_lo.;
+wr_w2_lev1_lo.:
+      R0 = R0 AND R6;
+      DM(8, I2) = R0;              // state 8: LEV1
+      R11 = 0x25c584;                 // ATK: 0x25c48c + its offset
+      R0 = R11 + R10;                   // + 146t
+      R1 = 2;
+      R1 = R0 AND R1;                   // 2: the high half
+      R2 = -4;
+      R0 = R0 AND R2;
+      I1 = R0;
+      R0 = DM(0, I1);
+      R1 = PASS R1;
+      IF EQ JUMP 0x16f8dc;                   // -> wr_w2_atk_lo.
+      R0 = LSHIFT R0 BY R7;
+.GLOBAL wr_w2_atk_lo.;
+wr_w2_atk_lo.:
+      R0 = R0 AND R6;
+      DM(9, I2) = R0;              // state 9: ATK
+      R11 = 0x25c56c;                 // OFS1: 0x25c48c + its offset
+      R0 = R11 + R10;                   // + 146t
+      R1 = 2;
+      R1 = R0 AND R1;                   // 2: the high half
+      R2 = -4;
+      R0 = R0 AND R2;
+      I1 = R0;
+      R0 = DM(0, I1);
+      R1 = PASS R1;
+      IF EQ JUMP 0x16f8f5;                   // -> wr_w2_ofs1_lo.
+      R0 = LSHIFT R0 BY R7;
+.GLOBAL wr_w2_ofs1_lo.;
+wr_w2_ofs1_lo.:
+      R0 = R0 AND R6;
+      DM(10, I2) = R0;              // state 10: OFS1
+      R11 = 0x25c56e;                 // PD1: 0x25c48c + its offset
+      R0 = R11 + R10;                   // + 146t
+      R1 = 2;
+      R1 = R0 AND R1;                   // 2: the high half
+      R2 = -4;
+      R0 = R0 AND R2;
+      I1 = R0;
+      R0 = DM(0, I1);
+      R1 = PASS R1;
+      IF EQ JUMP 0x16f90e;                   // -> wr_w2_pd1_lo.
+      R0 = LSHIFT R0 BY R7;
+.GLOBAL wr_w2_pd1_lo.;
+wr_w2_pd1_lo.:
+      R0 = R0 AND R6;
+      DM(11, I2) = R0;              // state 11: PD1
+      R11 = 0x25c58a;                 // NLEV: 0x25c48c + its offset
+      R0 = R11 + R10;                   // + 146t
+      R1 = 2;
+      R1 = R0 AND R1;                   // 2: the high half
+      R2 = -4;
+      R0 = R0 AND R2;
+      I1 = R0;
+      R0 = DM(0, I1);
+      R1 = PASS R1;
+      IF EQ JUMP 0x16f927;                   // -> wr_w2_nlev_lo.
+      R0 = LSHIFT R0 BY R7;
+.GLOBAL wr_w2_nlev_lo.;
+wr_w2_nlev_lo.:
+      R0 = R0 AND R6;
+      DM(12, I2) = R0;              // state 12: NLEV
+
+      // this voice's note trigger (TRIG_NOTE bit t), into state 7
+      R0 = DM(0x25c4ac);
+      R0 = LSHIFT R0 BY -16;
+      R2 = 1;
+      R2 = LSHIFT R2 BY R9;
+      R0 = R0 AND R2;
+      DM(7, I2) = R0;
+      // MOVE: shape = (min(NLEV >> 8, 127) * 8) >> 7, into state 15
+      R0 = DM(12, I2);
+      R0 = LSHIFT R0 BY -8;
+      R1 = 127;
+      R0 = MIN(R0, R1);
+      R0 = LSHIFT R0 BY 3;
+      R0 = LSHIFT R0 BY -7;
+      DM(15, I2) = R0;
+      // a note restarts the scanner: phase 0, not done, the next random value
+      R0 = DM(7, I2);
+      R0 = PASS R0;
+      IF EQ JUMP 0x16f98f;                   // -> wr_w2_running.
+      R0 = R0 - R0;
+      DM(0, I2) = R0;                   // phase
+      DM(4, I2) = R0;                   // done
+      // twice: a note starts the random walk from a fresh value, not the last one
+      R1 = DM(2, I2);
+      DM(1, I2) = R1;                   // a = b
+      R1 = DM(3, I2);                   // idx
+      R2 = 255;
+      R2 = R1 AND R2;
+      R2 = LSHIFT R2 BY 2;
+      R11 = 0x2e0100;                   // the random table
+      R2 = R11 + R2;
+      I1 = R2;
+      R2 = DM(0, I1);
+      DM(2, I2) = R2;                   // b = rnd[idx & 255]
+      R12 = 1;
+      R1 = R12 + R1;
+      DM(3, I2) = R1;                   // idx + 1
+      R1 = DM(2, I2);
+      DM(1, I2) = R1;                   // a = b
+      R1 = DM(3, I2);                   // idx
+      R2 = 255;
+      R2 = R1 AND R2;
+      R2 = LSHIFT R2 BY 2;
+      R11 = 0x2e0100;                   // the random table
+      R2 = R11 + R2;
+      I1 = R2;
+      R2 = DM(0, I1);
+      DM(2, I2) = R2;                   // b = rnd[idx & 255]
+      R12 = 1;
+      R1 = R12 + R1;
+      DM(3, I2) = R1;                   // idx + 1
+.GLOBAL wr_w2_running.;
+wr_w2_running.:
+      // ph = (phase >> 8) * 2^-24, exact
+      R0 = DM(0, I2);
+      R0 = LSHIFT R0 BY -8;
+      R1 = -24;
+      F8 = FLOAT R0 BY R1;
+      // u (F10) and s (F11) by shape
+      R0 = DM(15, I2);
+      R1 = 1;
+      COMP(R0, R1);
+      IF EQ JUMP 0x16f9e8;                   // -> wr_w2_s1.
+      R1 = 2;
+      COMP(R0, R1);
+      IF EQ JUMP 0x16f9f3;                   // -> wr_w2_s2.
+      R1 = 3;
+      COMP(R0, R1);
+      IF EQ JUMP 0x16f9fd;                   // -> wr_w2_s3.
+      R1 = 4;
+      COMP(R0, R1);
+      IF EQ JUMP 0x16fa11;                   // -> wr_w2_s4.
+      R1 = 5;
+      COMP(R0, R1);
+      IF EQ JUMP 0x16fa23;                   // -> wr_w2_s5.
+      R1 = 6;
+      COMP(R0, R1);
+      IF EQ JUMP 0x16fa2e;                   // -> wr_w2_s6.
+      R1 = 7;
+      COMP(R0, R1);
+      IF EQ JUMP 0x16fa3e;                   // -> wr_w2_s7.
+      // TRI: q = ph + 0.25, wrapped; u = 2q below a half, else 2 - 2q
+      R12 = 0x3e800000;
+      F2 = F8 + F12;
+      R12 = 0x3f800000;
+      COMP(F2, F12);
+      IF LT JUMP 0x16f9d1;                   // -> wr_w2_tri_in.
+      F2 = F2 - F12;
+.GLOBAL wr_w2_tri_in.;
+wr_w2_tri_in.:
+      F10 = F2 + F2;
+      R12 = 0x3f000000;
+      COMP(F2, F12);
+      IF LT JUMP 0x16f9df;                   // -> wr_w2_tri_up.
+      R12 = 0x40000000;
+      F10 = F12 - F10;
+.GLOBAL wr_w2_tri_up.;
+wr_w2_tri_up.:
+      F11 = F10 + F10;
+      R12 = 0x3f800000;
+      F11 = F11 - F12;                  // s = 2u - 1
+      JUMP 0x16fa4c;                         // -> wr_w2_shaped.
+.GLOBAL wr_w2_s1.;
+wr_w2_s1.:
+      F10 = PASS F8;                    // SAW: u = ph
+      F11 = F10 + F10;
+      R12 = 0x3f800000;
+      F11 = F11 - F12;                  // s = 2u - 1
+      JUMP 0x16fa4c;                         // -> wr_w2_shaped.
+.GLOBAL wr_w2_s2.;
+wr_w2_s2.:
+      R12 = 0x3f800000;
+      F10 = F12 - F8;                   // RAMP: u = 1 - ph
+      F11 = PASS F10;                   // s = u
+      JUMP 0x16fa4c;                         // -> wr_w2_shaped.
+.GLOBAL wr_w2_s3.;
+wr_w2_s3.:
+      R10 = 0x3f800000;                 // SQR: u = 1 below half a cycle, else 0
+      R12 = 0x3f000000;
+      COMP(F8, F12);
+      IF LT JUMP 0x16fa08;                   // -> wr_w2_sqr_hi.
+      R10 = R10 - R10;
+.GLOBAL wr_w2_sqr_hi.;
+wr_w2_sqr_hi.:
+      F11 = F10 + F10;
+      R12 = 0x3f800000;
+      F11 = F11 - F12;                  // s = 2u - 1
+      JUMP 0x16fa4c;                         // -> wr_w2_shaped.
+.GLOBAL wr_w2_s4.;
+wr_w2_s4.:
+      R1 = DM(1, I2);                   // a
+      R2 = DM(2, I2);                   // b
+      F10 = F2 - F1;
+      F10 = F10 * F8;
+      F10 = F1 + F10;                   // RND: u = a + (b - a) ph
+      F11 = F10 + F10;
+      R12 = 0x3f800000;
+      F11 = F11 - F12;                  // s = 2u - 1
+      JUMP 0x16fa4c;                         // -> wr_w2_shaped.
+.GLOBAL wr_w2_s5.;
+wr_w2_s5.:
+      R10 = DM(1, I2);                  // S&H: u = a
+      F11 = F10 + F10;
+      R12 = 0x3f800000;
+      F11 = F11 - F12;                  // s = 2u - 1
+      JUMP 0x16fa4c;                         // -> wr_w2_shaped.
+.GLOBAL wr_w2_s6.;
+wr_w2_s6.:
+      F10 = PASS F8;                    // ONE: u = ph, or 1 once done
+      R0 = DM(4, I2);
+      R0 = PASS R0;
+      IF EQ JUMP 0x16fa39;                   // -> wr_w2_s6_on.
+      R10 = 0x3f800000;
+.GLOBAL wr_w2_s6_on.;
+wr_w2_s6_on.:
+      F11 = PASS F10;                   // s = u
+      JUMP 0x16fa4c;                         // -> wr_w2_shaped.
+.GLOBAL wr_w2_s7.;
+wr_w2_s7.:
+      R12 = 0x3f800000;
+      F10 = F12 - F8;                   // ENV: u = 1 - ph, or 0 once done
+      R0 = DM(4, I2);
+      R0 = PASS R0;
+      IF EQ JUMP 0x16fa4a;                   // -> wr_w2_s7_on.
+      R10 = R10 - R10;
+.GLOBAL wr_w2_s7_on.;
+wr_w2_s7_on.:
+      F11 = PASS F10;                   // s = u
+.GLOBAL wr_w2_shaped.;
+wr_w2_shaped.:
+      DM(13, I2) = R10;                 // u
+      DM(14, I2) = R11;                 // s
+      // the phase advances by RATE's step; a wrap ends a cycle: a one-shot is done,
+      // and the random walk takes its next value
+      R0 = DM(9, I2);
+      R0 = LSHIFT R0 BY -8;
+      R1 = 127;
+      R0 = MIN(R0, R1);
+      R0 = LSHIFT R0 BY 2;
+      R11 = 0x2dfd00;                   // the RATE table
+      R0 = R11 + R0;
+      I1 = R0;
+      R1 = DM(0, I1);                   // the step
+      R0 = DM(0, I2);                   // the phase
+      R8 = DM(0, I2);
+      R8 = R8 + R1;                     // + step, mod 2^32
+      DM(0, I2) = R8;
+      COMPU(R8, R0);
+      IF LT JUMP 0x16fa74;                   // -> wr_w2_wrap.
+      JUMP 0x16fa9e;                         // -> wr_w2_advanced.
+.GLOBAL wr_w2_wrap.;
+wr_w2_wrap.:
+      R0 = DM(15, I2);
+      R1 = 6;
+      COMP(R0, R1);
+      IF LT JUMP 0x16fa80;                   // -> wr_w2_cycle.
+      R1 = 1;
+      DM(4, I2) = R1;                   // ONE, ENV: done
+.GLOBAL wr_w2_cycle.;
+wr_w2_cycle.:
+      R1 = DM(2, I2);
+      DM(1, I2) = R1;                   // a = b
+      R1 = DM(3, I2);                   // idx
+      R2 = 255;
+      R2 = R1 AND R2;
+      R2 = LSHIFT R2 BY 2;
+      R11 = 0x2e0100;                   // the random table
+      R2 = R11 + R2;
+      I1 = R2;
+      R2 = DM(0, I1);
+      DM(2, I2) = R2;                   // b = rnd[idx & 255]
+      R12 = 1;
+      R1 = R12 + R1;
+      DM(3, I2) = R1;                   // idx + 1
+.GLOBAL wr_w2_advanced.;
+wr_w2_advanced.:
+      // POS = trunc(clamp(float(glided) + (s * MPOS) * 983040.0, 0, 983040.0))
+      R5 = DM(10, I2);                  // OFS1
+      R1 = 0x3200;
+      R5 = R5 - R1;                     // signed, the centre is 0
+      R1 = R1 - R1;
+      F0 = FLOAT R5 BY R1;
+      R1 = 0x38a3d70a;                  // 1 / 0x3200
+      F0 = F0 * F1;                     // MPOS depth, -1..+1
+      R11 = DM(14, I2);                 // s
+      F0 = F11 * F0;
+      R1 = 0x49700000;                  // 983040.0: 15 frames, Q16
+      F0 = F0 * F1;
+      R2 = DM(0x2dde88);                // the glided POS
+      R1 = R1 - R1;
+      F2 = FLOAT R2 BY R1;
+      F2 = F2 + F0;
+      F2 = MAX(F2, F1);                 // >= 0.0
+      R1 = 0x49700000;
+      F2 = MIN(F2, F1);                 // <= 983040.0
+      R4 = TRUNC F2;
       DM(3, I4) = R4;                   // pos
+      // the gain: LEV x the scanner's level
+      R5 = DM(11, I2);                  // PD1 (MLEV)
+      R1 = 0x3200;
+      R5 = R5 - R1;
+      R1 = R1 - R1;
+      F0 = FLOAT R5 BY R1;
+      R1 = 0x38a3d70a;
+      F0 = F0 * F1;                     // MLEV depth, -1..+1
+      R10 = DM(13, I2);                 // u
+      R12 = 0x3f800000;
+      R5 = PASS R5;
+      IF LT JUMP 0x16fae2;                   // -> wr_w2_mlev_neg.
+      F2 = F12 - F10;                   // 1 - u
+      F2 = F0 * F2;
+      F2 = F12 - F2;                    // a = 1 - d (1 - u)
+      JUMP 0x16fae6;                         // -> wr_w2_mlev_done.
+.GLOBAL wr_w2_mlev_neg.;
+wr_w2_mlev_neg.:
+      F2 = F0 * F10;
+      F2 = F12 + F2;                    // a = 1 + d u
+.GLOBAL wr_w2_mlev_done.;
+wr_w2_mlev_done.:
+      R0 = DM(8, I2);                   // LEV1
+      R0 = LSHIFT R0 BY -8;
+      R1 = 127;
+      R0 = MIN(R0, R1);
+      R0 = LSHIFT R0 BY 2;
+      R11 = 0x2dff00;                   // the LEV table
+      R0 = R11 + R0;
+      I1 = R0;
+      R1 = DM(0, I1);                   // LEV's gain
+      F2 = F1 * F2;
+      DM(6, I2) = R2;                   // g, this block's gain
+      R0 = DM(7, I2);
+      R0 = PASS R0;
+      IF EQ JUMP 0x16fb07;                   // -> wr_w2_gain_set.
+      DM(5, I2) = R2;                   // a note starts at its own gain
+.GLOBAL wr_w2_gain_set.;
+wr_w2_gain_set.:
 
       // pitch: this track's note cell, 0x254b14 + 4t
       R2 = LSHIFT R9 BY 2;
@@ -245,10 +606,10 @@ wr_t5v_glided.:
       R12 = 0xff;
       R2 = R2 AND R12;                  // the exponent field
       COMP(R2, R12);
-      IF EQ JUMP 0x16f8bb;                   // -> wr_t5v_note0.
+      IF EQ JUMP 0x16fb24;                   // -> wr_t5v_note0.
       R8 = PASS R8;
-      IF LT JUMP 0x16f8bb;                   // -> wr_t5v_note0.
-      JUMP 0x16f8bc;                         // -> wr_t5v_note_ok.
+      IF LT JUMP 0x16fb24;                   // -> wr_t5v_note0.
+      JUMP 0x16fb25;                         // -> wr_t5v_note_ok.
 .GLOBAL wr_t5v_note0.;
 wr_t5v_note0.:
       R8 = R8 - R8;                     // +0.0
@@ -264,8 +625,8 @@ wr_t5v_note_ok.:
       F13 = F13 - F12;
       F8 = F8 + F13;                    // note + TUN1
       R8 = PASS R8;
-      IF LT JUMP 0x16f8cc;                   // -> wr_t5v_tune_low.
-      JUMP 0x16f8cd;                         // -> wr_t5v_tuned.
+      IF LT JUMP 0x16fb35;                   // -> wr_t5v_tune_low.
+      JUMP 0x16fb36;                         // -> wr_t5v_tuned.
 .GLOBAL wr_t5v_tune_low.;
 wr_t5v_tune_low.:
       R8 = R8 - R8;                     // below note 0 -> +0.0
@@ -295,7 +656,41 @@ wr_t5v_tuned.:
       R4 = DM(0x2dde84);                // wr_render5's argument: the reader block
       CJUMP 0x16eb00 (DB);              // wr_render5(R4 = reader block)
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0x16f8fe;            // return address - 1: wr_t5v_next. - 1
+      DM(I7, M7) = 0x16fb67;                 // return address - 1: wr_t5v_gain. - 1
+
+      // ---- W2: the gain, ramped across the block from the last block's: step =
+      // (g - gp) / 32, accumulated before each sample (live.ramp) ----
+.GLOBAL wr_t5v_gain.;
+wr_t5v_gain.:
+      R0 = DM(0x2dde80);
+      R1 = 16;
+      R9 = R1 - R0;                     // t
+      R12 = LSHIFT R9 BY 6;
+      R11 = 0x2df900;
+      R12 = R11 + R12;
+      I2 = R12;                         // this voice's W2 state
+      R0 = DM(0x2dde84);
+      I4 = R0;                          // the reader block
+      R0 = DM(5, I4);
+      I1 = R0;                          // the track buffer
+      R1 = DM(5, I2);                   // gp
+      R2 = DM(6, I2);                   // g
+      DM(5, I2) = R2;                   // the next block starts from g
+      F3 = F2 - F1;
+      R4 = 0x3d000000;                  // 1/32
+      F3 = F3 * F4;                     // step
+      R5 = DM(0x2dde24);                // the block size
+      R5 = PASS R5;
+      IF EQ JUMP 0x16fba0;                   // -> wr_t5v_next.
+.GLOBAL wr_t5v_ramp.;
+wr_t5v_ramp.:
+      F1 = F1 + F3;
+      R0 = DM(0, I1);
+      F0 = F0 * F1;
+      DM(I1, M6) = F0;
+      R12 = 1;
+      R5 = R5 - R12;
+      IF NE JUMP 0x16fb95;                   // -> wr_t5v_ramp.
 
 .GLOBAL wr_t5v_next.;
 wr_t5v_next.:

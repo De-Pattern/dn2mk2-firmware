@@ -64,13 +64,13 @@ CODE = pathlib.Path(__file__).with_name("sharc_code.json")
 # which is carved from the top of block 1 (16 KB at size code 0, the size the
 # startup writes; see docs/waverider-dsp-silence.md). REGION ends 36 KB below the
 # block's top, so it stays clear of a 16 KB or a 32 KB DM cache.
-REGION = (0x2DD600, 0x2DF500)                # W5: the tables moved to DDR; code and state only
+REGION = (0x2DD600, 0x2E0500)                # W5: the tables moved to DDR; W2: + the scanner's state and tables
 STOCK_BLOCK1_END = 0x2DD52C
 DM_CACHE_32K = 0x2E8000                      # the lowest byte a 32 KB DM cache would own
 CODE_SPAN = 0x400                            # each code object is padded to this
 READER_DM = 0x2DD600
 LOOP_DM = 0x2DEF00                           # W5: moved from 0x2dda00, which held 1 KB; the loop is now ~1 KB
-LOOP_SPAN = 0x600
+LOOP_SPAN = 0xA00                            # W2: the scanner and the gain ramp, ~2 KB
 READER_SW = READER_DM // 2                   # 0x16eb00
 LOOP_SW = LOOP_DM // 2                       # 0x16f780 (0x16ed00 before W5)
 STATE_DM, STATE_BYTES = 0x2DDE00, 0x400      # save area, counters, 16 reader blocks
@@ -82,6 +82,13 @@ DIRECTORY_CAP = 0x200                        # magic, count, pointers: at most 1
 LUT_DM = DIRECTORY_DM + DIRECTORY_CAP        # 0x2de800: TBL (0..127) -> slot, 128 words
 SMOOTH_DM = 0x2DEE00                         # W5 per-voice POS glide: 16 x pos, then 16 x note counter
 SMOOTH_BYTES = 0x80
+# W2 (docs/w2-scanner.md): per voice 16 words of scanner state, then three tables,
+# after the loop. L1 block 1 up to 0x2e7000 held M5c's tables on the instrument, so
+# this stays inside memory already proven free.
+W2_STATE_DM, W2_STATE_STRIDE = LOOP_DM + LOOP_SPAN, 64       # 0x2df900
+W2_RATE_DM = W2_STATE_DM + 16 * W2_STATE_STRIDE              # 0x2dfd00: RATE -> u32 step a block
+W2_LEVEL_DM = W2_RATE_DM + 128 * 4                           # 0x2dff00: LEV -> float32 gain
+W2_RND_DM = W2_LEVEL_DM + 128 * 4                            # 0x2e0100: 256 float32 in [0, 1)
 
 # W5: the tables live in the SHARC's DDR (docs/w5-tables.md). The stock boot stream
 # loads DDR to 0x8052fbe0 and the engine's init writes up to 0x80530be8
@@ -188,6 +195,10 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("entry_mark.asm (wr_emark)", EMARK_DM, obj["entry_mark"]),
         ("W5 POS glide state: 16 positions, 16 note counters (zeros)", SMOOTH_DM, bytes(SMOOTH_BYTES)),
         ("machine5_live.asm (wr_type5v)", LOOP_DM, obj["machine5_live"]),
+        ("W2 scanner state: 16 voices x 16 words (zeros)", W2_STATE_DM, bytes(16 * W2_STATE_STRIDE)),
+        ("W2 RATE table, 128 u32", W2_RATE_DM, struct.pack("<128I", *live.rate_table())),
+        ("W2 LEV table, 128 float32", W2_LEVEL_DM, struct.pack("<128f", *live.level_table())),
+        ("W2 random table, 256 float32", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):

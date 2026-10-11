@@ -131,22 +131,181 @@ def glide(target: int, s: int, trig: bool) -> int:
     return s + ((target - s) >> GLIDE_SHIFT)
 
 
+# -- W2: the scanner, LEV, MPOS, MLEV ------------------------------------------------------
+#
+# Page 1's four lower controls drive a per-voice modulator of Waverider's own, the
+# "scanner" (owner, 2026-10-11): RATE its speed, MOVE its shape, MPOS how far it sweeps
+# POS (+-), MLEV how much it moves the level (+-). LEV is the oscillator's level.
+# They sit on WaveTone records whose range fits (docs/w2-scanner.md):
+#
+# | control | record | slot | frame offset | range, default |
+# |---|---|---|---|---|
+# | LEV  | LEV1 241 | 30 | 228 + 146t | 0..0x7f00, 0x6400 (100 = unity) |
+# | RATE | ATK  253 | 40 | 248 + 146t | 0..0x7f00, 0 |
+# | MPOS | OFS1 246 | 28 | 224 + 146t | 0..0x6400, 0x3200 (centre = 0) |
+# | MLEV | PD1  240 | 29 | 226 + 146t | 0..0x6400, 0x3200 (centre = 0) |
+# | MOVE | NLEV 256 | 43 | 254 + 146t | 0..0x7f00, 0 (TRI) |
+#
+# With MPOS and MLEV at their centre and LEV at 100 the loop adds exactly 0 to POS and
+# multiplies by exactly 1.0: a sound that never touches them plays bit for bit as W5.
+#
+# Everything here is float32 in the loop's order (`_f32` after each operation), the
+# scanner's phase a u32 per voice advanced once a block, restarted by the voice's note.
+
+SHAPES = ("TRI", "SAW", "RAMP", "SQR", "RND", "S&H", "ONE", "ENV")
+UNIPOLAR = {2, 6, 7}             # RAMP, ONE, ENV: 0..1; the rest swing -1..+1
+CENTRE = 0x3200                  # MPOS / MLEV: no modulation
+DEPTH_SCALE = 1.0 / 0x3200       # (word - centre) -> -1..+1, as a float32 constant
+POS_SPAN = float(15 << 16)       # Q16 frames: MPOS +-1 sweeps the whole table
+RATE_MIN_HZ, RATE_MAX_HZ = 0.05, 30.0
+BLOCK_HZ = 48000.0 / 32
+LEV_UNITY = 100                  # LEV1's default, 0x6400
+RND_COUNT = 256
+DEFAULTS = {"lev1": 0x6400, "atk": 0, "ofs1": CENTRE, "pd1": CENTRE, "nlev": 0}
+
+
+def rate_hz(v: int) -> float:
+    """RATE 0..127 -> Hz, exponential from RATE_MIN_HZ to RATE_MAX_HZ."""
+    return RATE_MIN_HZ * (RATE_MAX_HZ / RATE_MIN_HZ) ** (v / 127.0)
+
+
+def rate_table() -> list[int]:
+    """RATE (0..127) -> the scanner's u32 phase step per 32-sample block."""
+    return [int(round(rate_hz(v) / BLOCK_HZ * 2.0 ** 32)) for v in range(128)]
+
+
+def level_table() -> list[float]:
+    """LEV (0..127) -> gain, float32: v / 100, so the default 100 is exactly 1.0."""
+    return [_f32(v / LEV_UNITY) for v in range(128)]
+
+
+def rnd_table() -> list[float]:
+    """256 float32 values in [0, 1) the RND and S&H shapes step through: seeded, so the
+    table is the same on every build."""
+    import random
+    rng = random.Random(0x5CA77E)
+    return [_f32(rng.randrange(1 << 24) / float(1 << 24)) for _ in range(RND_COUNT)]
+
+
+def shape_of(nlev: int) -> int:
+    return ((min((nlev & 0xFFFF) >> 8, 127)) * 8) >> 7
+
+
+class Scanner:
+    """One voice's scanner state, as the DSP holds it (W2 state block, zeroed at boot):
+    phase (u32), a and b (the random walk's two values), idx (its place in the table),
+    done (a one-shot has finished), gp (the gain the last block ended on)."""
+
+    def __init__(self, t: int = 0):
+        self.phase, self.a, self.b, self.idx, self.done, self.gp = 0, 0.0, 0.0, 0, 0, 0.0
+
+    def _next(self, rnd):
+        self.a = self.b
+        self.b = rnd[self.idx & (RND_COUNT - 1)]
+        self.idx = (self.idx + 1) & 0xFFFFFFFF
+
+    def block(self, p: dict, trig: bool, rates, rnd) -> tuple[float, float]:
+        """-> (s, u) for this block: s the POS modulator (-1..1 bipolar, 0..1 unipolar),
+        u its unipolar form, used for the level. Advances the phase afterwards."""
+        k = shape_of(p["nlev"])
+        if trig:                                   # a fresh start: both values new
+            self.phase, self.done = 0, 0
+            self._next(rnd)
+            self._next(rnd)
+        ph = _f32(float(self.phase >> 8) * 2.0 ** -24)       # FLOAT (phase >> 8) BY -24
+        if k == 0:
+            q = _f32(ph + 0.25)
+            if q >= 1.0:
+                q = _f32(q - 1.0)
+            u = _f32(q + q) if q < 0.5 else _f32(2.0 - _f32(q + q))
+        elif k == 1:
+            u = ph
+        elif k == 2:
+            u = _f32(1.0 - ph)
+        elif k == 3:
+            u = 1.0 if ph < 0.5 else 0.0
+        elif k == 4:
+            u = _f32(self.a + _f32(_f32(self.b - self.a) * ph))
+        elif k == 5:
+            u = self.a
+        elif k == 6:
+            u = 1.0 if self.done else ph
+        else:
+            u = 0.0 if self.done else _f32(1.0 - ph)
+        s = u if k in UNIPOLAR else _f32(_f32(u + u) - 1.0)
+        nxt = (self.phase + rates[min((p["atk"] & 0xFFFF) >> 8, 127)]) & 0xFFFFFFFF
+        if nxt < self.phase:                                  # a cycle ended
+            if k in (6, 7):
+                self.done = 1
+            self._next(rnd)
+        self.phase = nxt
+        return s, u
+
+
+def depth(word: int) -> float:
+    """MPOS / MLEV word -> -1..+1 (float32): (word - 0x3200) * (1 / 0x3200)."""
+    return _f32(float((word & 0xFFFF) - CENTRE) * _f32(DEPTH_SCALE))
+
+
+def scanned(pos_q16: int, s: float, ofs1: int) -> int:
+    """POS after the scanner: the glided Q16 position plus s x MPOS x the table's
+    span, clamped to the table, truncated."""
+    y = _f32(_f32(s * depth(ofs1)) * POS_SPAN)
+    f = _f32(float(pos_q16) + y)
+    f = min(max(f, 0.0), POS_SPAN)
+    return trunc(f)
+
+
+def gain(u: float, p: dict, levels) -> float:
+    """LEV x the scanner's level: MLEV > 0 dips toward 0 as u falls, MLEV < 0 as it
+    rises; MLEV 0 is exactly 1."""
+    d = depth(p["pd1"])
+    if d >= 0:
+        a = _f32(1.0 - _f32(d * _f32(1.0 - u)))
+    else:
+        a = _f32(1.0 + _f32(d * u))
+    return _f32(levels[min((p["lev1"] & 0xFFFF) >> 8, 127)] * a)
+
+
+def ramp(samples: list[float], gp: float, g: float) -> list[float]:
+    """The block's samples times a gain ramped from gp to g: step = (g - gp) / 32,
+    accumulated before each sample, so the last sample is at gp + 32 steps."""
+    step = _f32(_f32(g - gp) * 0.03125)
+    out, x = [], gp
+    for v in samples:
+        x = _f32(x + step)
+        out.append(_f32(v * x))
+    return out
+
+
 def render_blocks(tables, blocks, block: int = 32, phase: int = 0,
                   precision: str = "float32") -> tuple[list[float], int]:
     """The loop's output for a sequence of blocks, each (note, WAV1, DRIF[, TUN1
-    [, trig]]) -- the frame's 16-bit words and whether the frame triggers the voice;
-    TUN1 defaults to 0 semitones, trig to False. The phase carries across blocks and
+    [, trig[, w2]]]) -- the frame's 16-bit words and whether the frame triggers the
+    voice; TUN1 defaults to 0 semitones, trig to False, w2 (a dict of LEV1, ATK, OFS1,
+    PD1, NLEV words) to WaveTone's defaults. The phase carries across blocks and
     across slot changes, as the reader block holds it; POS goes through the W5 glide
-    from the DSP's zeroed state (s = 0)."""
+    from the DSP's zeroed state (s = 0), then the W2 scanner; the samples are scaled
+    by the W2 gain, ramped across the block from the gain the last one ended on (0.0
+    at boot, as the DSP's zeroed state holds it; a note starts at its own gain)."""
     out: list[float] = []
     table_t = increment_table()
+    rates, levels, rnd = rate_table(), level_table(), rnd_table()
+    sc = Scanner()
     s = 0
     for note, wav1, drif, *rest in blocks:
         tun1 = rest[0] if rest else TUN1_ZERO
         trig = bool(rest[1]) if len(rest) > 1 else False
+        p = {**DEFAULTS, **(rest[2] if len(rest) > 2 and rest[2] else {})}
         s = glide(position(wav1), s, trig)
+        sv, u = sc.block(p, trig, rates, rnd)
+        pos = scanned(s, sv, p["ofs1"])
         tab = tables[slot(drif, len(tables))]
         samples, phase = render.render(tab, phase, increment(tuned(note, tun1), table_t),
-                                       s, block, precision)
-        out += samples
+                                       pos, block, precision)
+        g = gain(u, p, levels)
+        if trig:
+            sc.gp = g
+        out += ramp(samples, sc.gp, g)
+        sc.gp = g
     return out, phase

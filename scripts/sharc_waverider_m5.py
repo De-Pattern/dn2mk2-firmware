@@ -83,6 +83,9 @@ TRIG_WORD = 0x25C4AC            # W5: the frame copy's word holding TRIG_NOTE (o
 TUN1 = 25                       # WaveTone's Osc1 Tune (Milestone 6)
 TUN1_ZERO = 0x4000              # the frame word for 0 semitones: the sound's own (probe, 2026-09-30)
 FRAME_COPY = 0x25C48C           # where sw 0x1c2712 copies the frame image
+# W2: the scanner's controls (dnfw.waverider.live, docs/w2-scanner.md)
+LEV1, ATK, OFS1, PD1, NLEV = 30, 40, 28, 29, 43
+W2_FIELDS = {"lev1": LEV1, "atk": ATK, "ofs1": OFS1, "pd1": PD1, "nlev": NLEV}
 
 
 # -- the machine ------------------------------------------------------------------------------
@@ -180,7 +183,9 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                               "tbl1": frame_word(r.state, FR.slot_offset(t, TBL1)),
                               "drif": frame_word(r.state, FR.slot_offset(t, DRIF)),
                               "trig": bool(((m2.word(r.state, TRIG_WORD) or 0) >> 16) & (1 << t)),
-                              "tun1": frame_word(r.state, FR.slot_offset(t, TUN1))}
+                              "tun1": frame_word(r.state, FR.slot_offset(t, TUN1)),
+                              "w2": {k: frame_word(r.state, FR.slot_offset(t, slot))
+                                     for k, slot in W2_FIELDS.items()}}
             tap["t5_inputs"] = ins
 
         def at_reader(r):
@@ -253,7 +258,8 @@ def track_series(run, t) -> list[float]:
 
 def reference_for(run, t, tables, precision="float32") -> list[float]:
     """live.render_blocks fed the DSP's own unpacked inputs for track T, block by block."""
-    seq = [(i[t]["note"], i[t]["wav1"], i[t]["drif"], i[t].get("tun1", live.TUN1_ZERO), i[t]["trig"])
+    seq = [(i[t]["note"], i[t]["wav1"], i[t]["drif"], i[t].get("tun1", live.TUN1_ZERO), i[t]["trig"],
+            i[t].get("w2"))
            for i in run["t5_inputs"] if t in i]
     return live.render_blocks(tables, seq, BLOCK, 0, precision)[0]
 
@@ -568,6 +574,8 @@ def step_map(dk, snap, m2mach, m5: Image, stock: bytes, init, sound, machines) -
 
 SLOT1_DRIF = next(v for v in range(128) if dsp.slot_lut()[v] == 1) << 8
 GLIDE_AT = 4
+W2_RETRIG = 5
+W2_ENV_BLOCKS = 56              # RATE 127 is 30 Hz: one cycle is 50 blocks of 32
 
 
 def step_voice(init, sound, machines, blocks, tables) -> dict:
@@ -586,7 +594,18 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
             "note72": run_blocks(init, frames(overrides={WAV1: 0x7800}, note=0x4800), blocks),
             "tune_up12": run_blocks(init, frames(overrides={WAV1: 0x7800, TUN1: TUN1_ZERO + 12 * 256}), blocks),
             "tune_down12": run_blocks(init, frames(overrides={WAV1: 0x7800, TUN1: TUN1_ZERO - 12 * 256}), blocks),
-            "silent": run_blocks(init, lambda b: base_frame(sound, machines).to_bytes(), blocks)}
+            "silent": run_blocks(init, lambda b: base_frame(sound, machines).to_bytes(), blocks),
+            # W2: the scanner. TRI at full RATE sweeping POS (MPOS +0.5, inside the table), the level against
+            # it (MLEV -1), LEV at its top
+            "w2_scan": run_blocks(init, frames(overrides={WAV1: 0x3C00, ATK: 0x7F00, OFS1: 0x4B00,
+                                                          PD1: 0, LEV1: 0x7F00, NLEV: 0}), blocks),
+            # RND, two notes, MPOS +0.5 (never clamped): each note starts the walk afresh
+            "w2_rnd": run_blocks(init, lambda b: base_frame(sound, machines, trigger=b in (1, W2_RETRIG), overrides={
+                WAV1: 0x3C00, ATK: 0x7F00, OFS1: 0x4B00, NLEV: 0x4000}).to_bytes(), blocks),
+            # ENV, one cycle at full RATE (50 blocks) and past it: the level follows it to 0
+            # (MLEV +1) and stays there once the one-shot is done
+            "w2_env": run_blocks(init, frames(overrides={WAV1: 0x3C00, ATK: 0x7F00, PD1: 0x6400,
+                                                         NLEV: 0x7F00}), W2_ENV_BLOCKS)}
     ok_runs = all(r["ok"] for r in runs.values())
     n, mism = {}, {}
     for k, r in runs.items():
@@ -614,6 +633,12 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
         s_ = live.glide(live.position(x["wav1"]), s_, x["trig"])
         glide_want.append(s_)
     counters = [x[0]["trig"] for x in i["t5_inputs"] if 0 in x] if i["ok"] else []
+    ws, wr, we = runs["w2_scan"], runs["w2_rnd"], runs["w2_env"]
+    scan_pos = [blk.get(0)[3] for blk in ws["reader_blocks"] if blk.get(0)] if ws["ok"] else []
+    rnd_pos = [blk.get(0)[3] for blk in wr["reader_blocks"] if blk.get(0)] if wr["ok"] else []
+    env = track_series(we, 0) if we["ok"] else []
+    env_tail = V.peak(env[-BLOCK * 3:]) if env else None
+    env_head = V.peak(env[BLOCK:BLOCK * 6]) if env else None
     # the guard sees each track's type in order; for track 0 (type 5) the next event
     # must be the no-setup arm, never the table read
     t0_events = []
@@ -626,6 +651,8 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
          "expected_reader_block_init": [dsp.table_addresses()[0], None, live.increment(60.0), live.position(0), BLOCK],
          "glide_pos_per_block": glide_pos, "glide_expected": glide_want,
          "trig_bits_init_run": counters,
+         "w2_scan_pos_per_block": scan_pos, "w2_rnd_pos_per_block": rnd_pos,
+         "w2_env_peak_first_blocks": env_head, "w2_env_peak_last_3_blocks": env_tail,
          "machine_peak": V.peak(track_series(i, 0)) if i["ok"] else None,
          "amp_in_peak": V.peak(i["amp_in"]) if i["ok"] else None,
          "amp_out_peak": V.peak(i["amp_out"][settle:]) if i["ok"] else None,
@@ -673,6 +700,14 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
         "increment ratios 2 and 0.5 within 1e-6 of note 60's, zero crossings more and fewer":
             bool(inc60) and abs(inc_up / inc60 - 2.0) < 1e-6 and abs(inc_down / inc60 - 0.5) < 1e-6
             and zc_up > zc60 > zc_down > 0,
+        "W2: the scanner moves POS (TRI, full RATE, MPOS +0.5): the reader's position changes "
+        "every block after the note, and differs from the glided POS":
+            len(scan_pos) == blocks and len(set(scan_pos[1:])) == len(scan_pos[1:])
+            and any(p != live.position(0x3C00) for p in scan_pos[1:]),
+        "W2: RND takes a new value at each note (POS differs between the two notes' blocks)":
+            len(rnd_pos) == blocks and rnd_pos[1] != rnd_pos[W2_RETRIG],
+        "W2: ENV with MLEV +1 is audible after the note and silent once the one-shot is done":
+            bool(env_head) and env_head > 0.02 and env_tail == 0.0,
         "control: no trigger is silent at the amp's output (peak < 0.01)":
             n["silent_amp_out_peak"] is not None and n["silent_amp_out_peak"] < 0.01,
     }

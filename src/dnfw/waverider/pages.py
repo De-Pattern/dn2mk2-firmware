@@ -64,16 +64,33 @@ TITLES = ("WR 1", "WR 2")
 SUBTITLE = "Waverider"             # where WaveTone's say "WaveTone"
 
 # record id -> Waverider's label (the records stay WaveTone's: their slots are the
-# frame's params 25..27, which the SHARC loop reads)
-LABELS = {238: "TUNE", 239: "POS", 252: "TBL"}     # W5: TBL is DRIF (252), 0..127, not TBL1 (247)
+# frame's params, which the SHARC loop reads). W5: TBL is DRIF (252), 0..127, not TBL1
+# (247). W2 (docs/w2-scanner.md): the scanner's four and LEV, each on a WaveTone record
+# whose range fits -- MOD (0..3) and RSET (0..2), the first plan, could not hold a
+# depth or eight shapes.
+LABELS = {238: "TUNE", 241: "LEV", 239: "POS", 252: "TBL",
+          253: "RATE", 246: "MPOS", 240: "MLEV", 256: "MOVE"}
+
+# W2: what every list, the LFO DEST field and the header line call those records while
+# a Waverider track is active (the names are swapped in the record table at run time,
+# `wr_names` in page.c, and put back as soon as the active track is not a Waverider)
+LONG_NAMES = {238: "Tune", 241: "Wave Level", 239: "Wave Position", 252: "Wave Table",
+              253: "Scan Rate", 246: "Scan Pos Depth", 240: "Scan Lev Depth", 256: "Scan Shape"}
+# WaveTone's other records: Waverider reads nothing from them, so they say so
+UNUSED = (242, 243, 244, 245, 247, 248, 249, 250, 251, 254, 255, 257, 258, 259, 260, 261, 262)
+UNUSED_LONG, UNUSED_SHORT = "Unused", "-"
+MOVE_ID = 256
+SHAPES = ("TRI", "SAW", "RAMP", "SQR", "RND", "S&H", "ONE", "ENV")   # live.SHAPES
 
 # the two pages, encoders A..H; 0 is an empty place
 PAGES = (
-    (238, 0, 239, 252, 0, 0, 0, 0),   # OSC 1: TUNE - POS TBL - - - -
-    (0, 0, 0, 0, 0, 0, 0, 0),         # OSC 2: all to come (M9)
+    (238, 241, 239, 252, 253, 246, 240, 256),   # OSC 1: TUNE LEV POS TBL / RATE MPOS MLEV MOVE
+    (0, 0, 0, 0, 0, 0, 0, 0),                   # OSC 2: all to come (W3)
 )
 
-LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "descriptors")
+LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "labels", "descriptors")
+# W2: `labels` is where the assembly's code ends and its data (the label table, the
+# descriptors, the strings) begins: the ship gate checks only [is_wr, labels) as code
 GRID = 0x40017428                 # the stock grid: (view, canvas)
 ICON_PAGE = 7                     # the SYN page draw's id for WaveTone's OSC page
 ICON_SKIP = 0x400182C6            # its branch target past the oscillator icons
@@ -95,13 +112,27 @@ def label(rid: int) -> str:
     return LABELS.get(rid, "-") if rid else "-"
 
 
+def named() -> list[tuple[int, str, str]]:
+    """(record id, long name, short name) for every record `wr_names` renames."""
+    return ([(r, LONG_NAMES[r], LABELS[r]) for r in LABELS]
+            + [(r, UNUSED_LONG, UNUSED_SHORT) for r in UNUSED])
+
+
 def c_header() -> str:
-    """The control table, as C for `wr_gen.h`: per page, eight record ids and labels."""
+    """The control table, as C for `wr_gen.h`: per page, eight record ids and labels;
+    W2: the names `wr_names` swaps in, and the scanner's shape names."""
     ids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in PAGES)
     names = ",\n".join(" {" + ", ".join(f'"{label(r)}"' for r in page) + "}" for page in PAGES)
+    n = named()
     return (f"#define WR_PAGES {len(PAGES)}\n"
             f"static const unsigned short wr_ids[WR_PAGES][8] = {{\n{ids}\n}};\n"
-            f"static const char wr_labels[WR_PAGES][8][6] = {{\n{names}\n}};\n")
+            f"static const char wr_labels[WR_PAGES][8][6] = {{\n{names}\n}};\n"
+            f"#define WR_NAMED {len(n)}\n"
+            f"static const unsigned short wr_named_ids[WR_NAMED] = {{{', '.join(str(r) for r, _, _ in n)}}};\n"
+            f"static const char *const wr_named_long[WR_NAMED] = {{{', '.join(chr(34) + l + chr(34) for _, l, _ in n)}}};\n"
+            f"static const char *const wr_named_short[WR_NAMED] = {{{', '.join(chr(34) + sh + chr(34) for _, _, sh in n)}}};\n"
+            f"#define WR_MOVE_ID {MOVE_ID}\n"
+            f"static const char wr_shape_names[8][5] = {{{', '.join(chr(34) + x + chr(34) for x in SHAPES)}}};\n")
 
 
 def source(page_draw: int) -> str:

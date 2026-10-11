@@ -38,6 +38,15 @@ typedef unsigned char u8;
 /* a parameter record: +8 min, +12 max, +16 default (TUN1: 0x400, 0x7c00, 0x4000) */
 #define RECORD(id) ((const int *)(0x401F7F94u + 60u * (id)))
 
+/* W2: the record's name pointers, as every stock reader takes them (0x401f7f94 +
+ * 60 id, then +0x28 the long name, +0x30 the short one: getLongName 0x400365c8,
+ * getShortName 0x400372da, and the eleven places that read +0x30 directly, among
+ * them the LFO destination list's row label 0x40105b72) */
+#define NAME_LONG(id)  (*(const char **)(0x401F7F94u + 60u * (id) + 0x28u))
+#define NAME_SHORT(id) (*(const char **)(0x401F7F94u + 60u * (id) + 0x30u))
+#define KIT_POINTER (*(unsigned char *volatile *)0x800052A0u)
+#define UI_TRACK    (*(volatile u8 *)0x42431A6Cu)
+
 /* the strips: four columns of 25 across x 22..121 */
 #define COL0  22
 #define COLW  25
@@ -69,6 +78,45 @@ struct wr_probe { u32 magic, draws, ticks, marker_ticks, markers, spare; };
 volatile struct wr_probe wr_probe __attribute__((section(".data"))) =
     { 0x57525052u, 0, 0, 0, WR_MARKERS, 0x2D2D2D2Du };
 #endif
+
+/* W2: is the active track a Waverider? (pages.is_wr's test: the active track's sound,
+ * [0x800052a0] + 52 + 1163 t, has machine type 5 at +0xDE) */
+static int wr_active(void)
+{
+    u8 t = UI_TRACK;
+    unsigned char *kit = KIT_POINTER;
+    if (t > 15 || !kit)
+        return 0;
+    return (signed char)kit[52u + 1163u * t + 0xDEu] == 5;
+}
+
+/* W2 (docs/w2-scanner.md): while the active track is a Waverider, WaveTone's records
+ * carry Waverider's names, so the LFO and modulation destination lists, the LFO page's
+ * DEST field and the header's parameter line all say TBL / Wave Table where they said
+ * DRIF / Osc Drift; as soon as it is not, the stock pointers go back. Only the two
+ * name pointers of the records in wr_named_ids are written, and only on a change. The
+ * table is in RAM, and ACR0 (0x4007e020, set at 0x40000564) leaves 0x40000000-
+ * 0x47ffffff writable: its W bit is clear. */
+static const char *stock_long[WR_NAMED] __attribute__((section(".data")));
+static const char *stock_short[WR_NAMED] __attribute__((section(".data")));
+static int names_on __attribute__((section(".data"))) = -1;
+
+static void wr_names(void)
+{
+    int on = wr_active();
+    if (on == names_on)
+        return;
+    for (int k = 0; k < WR_NAMED; k++) {
+        u32 id = wr_named_ids[k];
+        if (names_on < 0) {                     /* the first call: keep the stock pointers */
+            stock_long[k] = NAME_LONG(id);
+            stock_short[k] = NAME_SHORT(id);
+        }
+        NAME_LONG(id) = on ? wr_named_long[k] : stock_long[k];
+        NAME_SHORT(id) = on ? wr_named_short[k] : stock_short[k];
+    }
+    names_on = on;
+}
 
 #if WR_MARKERS
 /* Modulation (docs/modulation-display.md). The audio tick keeps, per track, a target
@@ -254,6 +302,7 @@ static void sweep(int k, int off, u32 now)
  * page, or with nothing modulated, it costs a compare and the stock call. */
 int wr_poll(void *screen)
 {
+    wr_names();
     u32 now = TICKS;
     if (now - drawn_at < SHOWN && now - asked_at >= FRAME
             && (settling || signature() != drawn_sig)) {
@@ -268,6 +317,7 @@ int wr_poll(void *screen)
 /* the UI loop's redraw test, as stock: nothing on the page moves by itself */
 int wr_poll(void *screen)
 {
+    wr_names();
     return IS_DIRTY(screen);
 }
 #endif
@@ -543,6 +593,10 @@ void wr_page_draw(void *view, void *canvas)
         if (id == WR_TBL_ID) {                  /* W5: the table's name where TBL would be */
             int set_tbl;
             label = wr_table_names[table_of(heard(view, WR_TBL_ID, &set_tbl))];
+        } else if (id == WR_MOVE_ID) {          /* W2: the scanner's shape where MOVE would be */
+            u8 f;
+            int v = GET_VALUE(view, id, &f) >> 8;
+            label = wr_shape_names[((v < 0 ? 0 : v > 127 ? 127 : v) * 8) >> 7];
         }
         TEXT(canvas, FONT, cx, top ? TOP_LABEL_Y : BOT_LABEL_Y, CENTRED, "%.5s", label);
         if (!id)

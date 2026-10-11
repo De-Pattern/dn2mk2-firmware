@@ -63,6 +63,17 @@ MAIN_BASE = 0x40000400
 # CODE chunks that hold only data, reached through a pointer and never jumped to.
 # Each is listed by name, on purpose: a chunk is assumed to execute unless it is here.
 DATA_ONLY = {wave.SPANS_LOAD: "Waverider's wave-display bytes (wave.SPANS_LOAD), never executed"}
+
+
+def code_ranges() -> dict[int, list[tuple[int, int]]]:
+    """CODE chunks whose code and data the build itself has recorded: {load: [(start,
+    end)]}, the ranges that execute. Waverider's page chunk is assembly (is_wr up to its
+    label table) and then C (C_LOAD up to __text_end); between and after them are its
+    descriptors, strings, rodata and data, which a scan would misread as instructions
+    (W2: a descriptor's two pointers read as `and.l %d0,%a4@(70,%d4:w:8)`). Any other
+    CODE chunk is checked whole."""
+    lay = json.loads((ROOT / "src/dnfw/mods/waverider_code.json").read_text())["layout"]
+    return {lay["is_wr"]: [(lay["is_wr"], lay["labels"]), (lay["c_load"], lay["c_text_end"])]}
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py"]
@@ -167,12 +178,17 @@ def main() -> int:
                 results[f"ColdFire: chunk {va:#x}"] = f"n/a: {DATA_ONLY[va]}"
                 print(f"[n/a ] ColdFire: chunk {va:#x}: {DATA_ONLY[va]}\n", flush=True)
                 continue
-            f = work / f"code_{va:08x}.bin"
-            f.write_bytes(image)
-            rc, out = run(f"coldfire_{va:08x}", [sys.executable, "scripts/check_coldfire.py",
-                                                 f, "--base", hex(va)], logs)
-            gate(f"ColdFire: chunk {va:#x}", rc == 0, "no scale-8 addressing"
-                 if rc == 0 else out[-800:])
+            spans = code_ranges().get(va, [(va, va + len(image))])
+            for lo, hi in spans:
+                if not (va <= lo < hi <= va + len(image)):
+                    gate(f"ColdFire: chunk {va:#x}", False,
+                         f"recorded code range {lo:#x}..{hi:#x} is outside the chunk")
+                f = work / f"code_{lo:08x}.bin"
+                f.write_bytes(image[lo - va:hi - va])
+                rc, out = run(f"coldfire_{lo:08x}", [sys.executable, "scripts/check_coldfire.py",
+                                                     f, "--base", hex(lo)], logs)
+                gate(f"ColdFire: code {lo:#x}..{hi:#x}", rc == 0, "no scale-8 addressing"
+                     if rc == 0 else out[-800:])
         executed = [(at, n) for va, at, n, _ in code_chunks if va not in DATA_ONLY]
         rc, out = run("coldfire_main", [sys.executable, "scripts/check_coldfire.py",
                                         bdir / "section_3_MAIN_OS.bin", "--base", hex(MAIN_BASE),

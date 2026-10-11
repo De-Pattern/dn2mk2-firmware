@@ -55,6 +55,7 @@ SECTIONS
 {{
   . = 0x{base:08x};
   .text : {{ KEEP(*(.text.entry)) *(.text .text.*) }}
+  __text_end = .;
   .rodata : ALIGN(4) {{ *(.rodata .rodata.*) }}
   .data : ALIGN(4) {{ *(.data .data.*) }}
   . = ALIGN(4);
