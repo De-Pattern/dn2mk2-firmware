@@ -1421,3 +1421,16 @@ format, the firmware's free space, the machine table bound) but no part of the
 feature *as a machine* has been attempted; Milestones 0 and 1 are its delivery
 and render gates. The manual citation and the wavetable measurements
 are **[V]**: read directly from Elektron's own document and files.
+
+## On the owner's DN2-mk2-Mod unit (2026-10-11) [H]
+
+`waverider_DN2_1.11.syx` built from stock 1.11 by `dnfw mods apply --mod waverider`
+in this fork (preflight PASS), flashed on a second instrument:
+
+- WAVERIDER in MACHINE SEL; its two SYN pages draw, with the wave and the
+  TUNE / POS / TBL controls (the others `-`, as built);
+- it plays, TBL switches between the two baked tables, POS moves the wave;
+- **polyphonic**: chords play once the track's VOICE SETUP allows more than one
+  voice. An apparent mono result was the track set to 1 voice, not the mod. This
+  agrees with upstream's finding that the DSP's 16 slots are voices: the type-5
+  loop renders every voice slot that carries the machine.
