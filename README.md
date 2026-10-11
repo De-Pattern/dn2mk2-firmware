@@ -37,7 +37,7 @@ README is kept at [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
 
 | | engine | what it is | state |
 |---|---|---|---|
-| 🌊 | **Waverider** | two-oscillator wavetable machine, after Tonverk's Wavefinder (upstream) | DSP core **passed on hardware** upstream; full build **emulator-gated** here from OS 1.11 |
+| 🌊 | **Waverider** | wavetable machine after Tonverk's Wavefinder (upstream): **W5** adds 11 original tables in DSP RAM, TBL with table names, a smooth POS glide, and a wave display that follows p-locks and motion | upstream DSP core **passed on hardware**; polyphony and TBL/POS **confirmed on the owner's unit**; W5 **emulator-gated**, awaiting a flash → [`docs/w5-tables.md`](docs/w5-tables.md) |
 | ✨ | **GRAINS** | granular synthesis on wavetables, after the Virus TI grain tables: formant grains (SYNC) and clouds (CLOUD) | **reference model + demos**; control layout awaiting sign-off → [`docs/grains.md`](docs/grains.md) |
 | 🔀 | **Frequency shifter** | a send/master effect after Tonverk's | planned, next after GRAINS G1 |
 | 🎻 | **Resonator** | polyphonic string/modal resonator, after Mutable Instruments Rings (MIT) | planned: port of open-source C to the SHARC |
@@ -148,6 +148,12 @@ As required by the AGPL, a dated record of what this repository changes:
 - **2026-10-06** — safety: `src/dnfw/safety.py` (the preflight, enforced in
   `dnfw mods apply`), `dnfw preflight`, `test/test_safety.py`,
   `docs/SAFETY.md`.
+- **2026-10-11** — Waverider W5: `dnfw.waverider.factory` (11 original tables),
+  the tables moved to DSP DDR, TBL on `DRIF`, the POS glide (`machine5_live.asm`,
+  `live.glide`), the display following the heard value (`page.c`), the display data
+  as its own RAM chunk; the preflight's DSP limit tightened to the uploader's real
+  check; `scripts/sharc_ddr_ceiling.py`, `scripts/emu_install_snapshot.py`;
+  `docs/w5-tables.md`.
 
 ## Credits
 
