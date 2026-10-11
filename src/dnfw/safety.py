@@ -19,8 +19,9 @@ So, as rules:
    product, version and build string (a different version string could make
    the device decide its bootstrap needs upgrading).
 3. Every section other than 3 and 7 is byte-identical to stock.
-4. The DSP program, unpacked, fits the 1 MiB buffer MAIN OS allocates to push
-   it to the SHARC (`docs/waverider-dsp-silence.md`, "The boot stream").
+4. The DSP program fits the buffers MAIN OS uploads it through: stored size at
+   most 1 MiB, unpacked size at most 1 MiB less the one-byte header the uploader
+   writes first (read from `0x400cf34c`; see SHARC_MAX_UNPACKED).
 5. The build verifies: checksums, padding, Elektron's limits, the HMAC.
 
 Nothing here reads an instrument or sends anything. It is a gate on bytes.
@@ -56,6 +57,11 @@ NEVER = {2: "bootstrap: runs recovery; a damaged one can brick the instrument",
          4: "updater", 5: "build metadata", 8: "Outbox 8 firmware"}
 
 SHARC_BUFFER = 1 << 20       # MAIN OS mallocs 1 MiB to push section 7 to the SHARC
+# The uploader (0x400cf34c) checks the *stored* length against 1 MiB (0x400cf5ac), then
+# depacks into a second 1 MiB buffer after a one-byte 0x03 header (0x400cf5ce) and only
+# then compares length + 1 with 1 MiB (0x400cf5e4). The depack has already written by
+# then, so an image over the limit overruns the heap before the check can refuse it.
+SHARC_MAX_UNPACKED = SHARC_BUFFER - 1
 
 
 @dataclasses.dataclass
@@ -105,8 +111,10 @@ def build_checks(stock, built_bytes: bytes) -> list[Check]:
     dsp = b.find(7)
     if dsp is not None:
         n = len(dsp.unpack())
-        out.append(Check("DSP program fits the 1 MiB upload buffer", n <= SHARC_BUFFER,
-                         f"{n:,} of {SHARC_BUFFER:,} bytes"))
+        stored = len(dsp.raw_payload)
+        out.append(Check("DSP program fits the 1 MiB upload buffer",
+                         n <= SHARC_MAX_UNPACKED and stored <= SHARC_BUFFER,
+                         f"{n:,} unpacked of {SHARC_MAX_UNPACKED:,}; {stored:,} stored of {SHARC_BUFFER:,}"))
     report = verify(built)
     bad = [c.name for c in report.checks if not c.ok]
     out.append(Check("integrity and signature", not bad,

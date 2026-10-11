@@ -69,7 +69,7 @@ def test_a_changed_updater_is_refused(stock):
 
 def test_an_oversized_dsp_program_is_refused(stock):
     dsp = stock.container.find(7).unpack()
-    big = dsp + bytes(safety.SHARC_BUFFER - len(dsp) + 4)
+    big = dsp + bytes(safety.SHARC_MAX_UNPACKED - len(dsp) + 1)   # one byte over
     failed = _failed(safety.build_checks(stock, _with_section(stock, 7, big)))
     assert any("1 MiB" in n for n in failed)
 
