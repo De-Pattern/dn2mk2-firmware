@@ -95,35 +95,66 @@ volatile struct wr_probe wr_probe __attribute__((section(".data"))) =
 #define HOLD    (2 * TICK_HZ)   /* a range edge holds 2 s before it relaxes */
 #define SHOWN   (TICK_HZ * 6 / 5)   /* 1.2 s: the stock UI redraws a shown page once a second */
 #define FRAME   4               /* ticks: at most 30 redraws a second (W5; 5, 24 a second, before) */
-#define TURNED  (TICK_HZ * 3 / 5)   /* W5: 0.6 s after the knob moved, the knob is what is shown */
 #define MARKED  2               /* the places with markers: POS and TBL (TUNE is
                                  * pitch-converted in the array, so not yet) */
+
+static int which(u32 id);
+static int live(int k, u32 id);
 
 static int mod_offset(u32 id)
 {
     int t = ACTIVE_TRACK, slot = RECORD(id)[1];
     if (t > 15 || slot < 0 || slot > 99)
         return 0;
+    int k = which(id);
+    if (k >= 0 && !live(k, id))                 /* W5: a stale difference is not modulation */
+        return 0;
     u32 at = 34u + 202u * t + 2u * slot;
     return *(volatile unsigned short *)(VALUES + at) - *(volatile unsigned short *)(TARGETS + at);
 }
 
-/* W5: the target array holds the value a note started with -- a p-lock, a recorded
- * motion, or the knob as it was then -- so target - knob is the lock's offset. While
- * the knob is being turned the arrays lag it (the sequencer may be stopped), so for
- * TURNED after a turn the knob wins. */
-static int lock_offset(u32 id, int set)
+/* W5 (measured in the emulator, 2026-10-11): the target array is the live sound --
+ * a knob turn writes it at once (TBL: 0x0000 -> 0x6800 on a turn), and a p-lock
+ * reaches it while it plays. The value array is the audio tick's: the target,
+ * smoothed, plus every modulator; on the instrument it does not follow a turn while
+ * the sequencer is stopped (owner, modview2b), and the emulator never runs it. So the
+ * value array is believed only once it has moved since the target last did; until
+ * then the target (the knob, or the lock) is what the page shows, and no modulation
+ * is drawn from a stale difference. */
+static int array_word(u32 base, u32 id)
 {
     int t = ACTIVE_TRACK, slot = RECORD(id)[1];
     if (t > 15 || slot < 0 || slot > 99)
-        return 0;
-    return *(volatile unsigned short *)(TARGETS + 34u + 202u * t + 2u * slot) - set;
+        return -1;
+    return *(volatile unsigned short *)(base + 34u + 202u * t + 2u * slot);
 }
 
 static const u32 marked[MARKED] = { WR_POS_ID, WR_TBL_ID };
-/* per marked parameter: the knob's value at the last look, and when it last moved */
-static int last_set[MARKED] __attribute__((section(".data"))) = { -1, -1 };
-static u32 set_at[MARKED] __attribute__((section(".data"))) = { 0, 0 };
+/* per marked parameter: the target and the value at the last look, and when each last
+ * moved. A first look marks the target as the newer, so the page starts on the sound
+ * and waits for the audio tick to say otherwise. */
+static int last_target[MARKED] __attribute__((section(".data"))) = { -1, -1 };
+static int last_value[MARKED] __attribute__((section(".data"))) = { -1, -1 };
+static u32 target_at[MARKED] __attribute__((section(".data"))) = { 0, 0 };
+static u32 value_at[MARKED] __attribute__((section(".data"))) = { 0, 0 };
+
+/* note what moved; -> 1 when the value array is live (moved since the target did) */
+static int live(int k, u32 id)
+{
+    int target = array_word(TARGETS, id), value = array_word(VALUES, id);
+    u32 now = TICKS;
+    if (target < 0)
+        return 0;
+    if (last_target[k] < 0) {
+        last_target[k] = target;
+        last_value[k] = value;
+        target_at[k] = now;
+        value_at[k] = now - 1;
+    }
+    if (target != last_target[k]) { last_target[k] = target; target_at[k] = now; }
+    if (value != last_value[k]) { last_value[k] = value; value_at[k] = now; }
+    return (int)(value_at[k] - target_at[k]) >= 0;
+}
 
 /* per marked parameter: the offset range swept lately, and when each edge last grew */
 struct sweep { int lo, hi; u32 lo_at, hi_at; };
@@ -198,8 +229,7 @@ static int signature(void)
     int sig = 0;
     for (int k = 0; k < MARKED; k++) {
         sig = sig * 131 + (tier(marked[k]) < 2 ? mod_offset(marked[k]) / QUANT : 0);
-        if (last_set[k] >= 0)                       /* W5: a lock or motion moves the wave too */
-            sig = sig * 131 + lock_offset(marked[k], last_set[k]) / QUANT;
+        sig = sig * 131 + array_word(TARGETS, marked[k]) / QUANT;  /* W5: a lock, a motion or a turn */
     }
     return sig;
 }
@@ -397,24 +427,18 @@ static void curve(void *c, int tbl, int pos)
     }
 }
 
-/* W5: the value a place sounds at -- the knob, plus a p-lock or recorded motion once
- * the knob has rested TURNED, plus the modulation -- and the knob's own value in *set */
+/* W5: the value a place sounds at -- the live sound (the knob, or a p-lock while it
+ * plays), plus the modulation once the audio tick has caught up -- and the knob's own
+ * value in *set */
 static int heard(void *view, u32 id, int *set)
 {
     u8 flag;
     int v = GET_VALUE(view, id, &flag);
     *set = v;
 #if WR_MARKERS
-    int k = which(id);
-    u32 now = TICKS;
-    if (k >= 0) {
-        if (v != last_set[k]) {
-            last_set[k] = v;
-            set_at[k] = now;
-        }
-        if (now - set_at[k] >= TURNED)
-            v += lock_offset(id, v);
-    }
+    int target = array_word(TARGETS, id);
+    if (which(id) >= 0 && target >= 0)
+        v = target;
     v += mod_offset(id);
 #endif
     return v;

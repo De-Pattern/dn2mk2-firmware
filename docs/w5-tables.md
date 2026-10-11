@@ -97,9 +97,23 @@ belongs to W2, which gives the remaining controls their records.
   outgrew the page's 15 KB chunk. It is now a second platform `CODE` chunk at
   `0x46b00000` (clear of every mod's RAM and of the emulator harness's scratch at
   `0x46a00000`); `page.c` reaches it through a pointer.
-- `heard()`: the knob, plus the p-lock or recorded motion once the knob has rested
-  0.6 s (the target array lags a turn when the sequencer is stopped), plus the
-  modulation. The wave, its cursor and TBL's name all follow it.
+- **The two arrays, measured** (emulator, 2026-10-11, `mem` before and after a TBL
+  turn): the *target* array (`0x80003af0`) is the live sound. A turn writes it at once
+  (`0x0000` → `0x6800`), and a p-lock reaches it while it plays. The *value* array
+  (`0x800068e4`) is the audio tick's: the target smoothed, plus every modulator. The
+  emulator never runs that tick, and on the instrument it does not follow a turn while
+  the sequencer is stopped (upstream's modview2b).
+- **So `heard()` is the target, plus the value array's offset only while that array
+  is live**, meaning it has moved since the target last did (`live()` in `page.c`).
+  During playback that is exactly what is heard, LFO included; stopped, a turn
+  shows the knob at once, and a stale difference is never drawn as modulation (the
+  markers use the same test).
+- **Emulator check of the page** (`scripts/emu_waverider_menu.py` on a snapshot
+  made with `scripts/emu_install_snapshot.py`; screens in `out/w5/screens/`):
+  WAVERIDER in MACHINE SEL; TBL turned → `RESO`, then `PHAS` at the top, each with
+  its wave; a p-lock value written to the target → `FOLD`; a heard value from the
+  audio tick → `PHAS` with the modulation marker; a further turn → the knob again;
+  POS at the top → FOLD's last frame.
 - The redraw signature includes the lock offset, so a p-lock or recorded motion
   asks for a redraw. The cap went from 5 UI ticks (24 fps) to 4 (30 fps). Upstream
   measured a page draw at ~1.4 ms (`docs/modulation-display.md`), so about 4 % of
@@ -111,6 +125,7 @@ belongs to W2, which gives the remaining controls their records.
 |---|---|
 | `dnfw mods apply` + preflight | PASS: bootstrap, updater, metadata and Outbox untouched; DSP 1,025,436 of 1,048,575 |
 | `emu_boot_check` from reset | booted and drew its UI |
+| the page in the ColdFire emulator | table names, waves, knob / lock / heard paths as above |
 | `sharc_waverider_m5` (SHARC runner) | **all PASS**: bit-exact to `live` in every run; TBL picks table 1 and the last table, both in DDR; the glide matches `live.glide` block by block; a triggered block starts at its POS; types 0–4 bit-identical to stock with and without a Waverider track |
 | unit tests | `test_waverider_*`, `test_mods_*`, `test_grains_model`: pass |
 | MAIN OS size | 3,230,988 B unpacked, under upstream's M0 build (3,233,040 B, flashed and passed on hardware) |
@@ -132,7 +147,7 @@ belongs to W2, which gives the remaining controls their records.
 
 - That DDR from `0x81000000` stays untouched on the instrument (emulator-measured,
   with a wide margin).
-- The display's lock path on the instrument (the emulator does not run the audio
-  tick that fills the target array).
+- The display on the instrument, where the audio tick runs: the arrays' behaviour
+  above is measured in the emulator plus upstream's hardware note, not on your unit.
 - CPU cost of DDR reads for 16 voices (the reader's table reads went from L1 to
   DDR, through the data cache).
