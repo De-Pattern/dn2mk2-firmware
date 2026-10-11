@@ -33,6 +33,11 @@ class Machine:
         from emu.longrun import build
 
         settings = dict(FLAGS)
+        # DNFW_EMU_FLAGS='{"weakptr": false}': a snapshot made by digikit's own
+        # `emu.checkpoint` on a clone whose weak-pointer site is Digitakt II's
+        import json
+        import os
+        settings.update(json.loads(os.environ.get("DNFW_EMU_FLAGS", "{}")))
         settings.update(flags)
         if defer_timers:
             settings["deferred_components"] = ("timers",)

@@ -101,6 +101,12 @@ def test_the_renderer_sits_between_the_assembly_and_the_runtime():
     assert pages.LOAD + len(CHUNK) <= pages.C_END
 
 
-def test_the_display_data_is_in_the_chunk():
+def test_the_display_data_is_its_own_chunk_where_the_page_reads_it():
+    # W5: the spans are a chunk at wave.SPANS_LOAD, in [table][frame][min, max][column]
+    # order, the layout page.c's `wr_spans` pointer casts it to
+    from dnfw.mods.waverider import SPEC
     data = bytes(v & 0xFF for table in wave.spans() for lo, hi in table for v in lo + hi)
-    assert data in CHUNK
+    assert SPEC["spans_chunk"]["load"] == wave.SPANS_LOAD
+    assert bytes.fromhex(SPEC["spans_chunk"]["code"]) == data == wave.span_bytes()
+    assert len(data) == wave.TABLES * wave.FRAMES * 2 * wave.WIDTH
+    assert data not in CHUNK

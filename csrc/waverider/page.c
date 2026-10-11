@@ -94,7 +94,8 @@ volatile struct wr_probe wr_probe __attribute__((section(".data"))) =
 #define QUANT   0x300           /* an offset step worth a redraw: about half a pixel */
 #define HOLD    (2 * TICK_HZ)   /* a range edge holds 2 s before it relaxes */
 #define SHOWN   (TICK_HZ * 6 / 5)   /* 1.2 s: the stock UI redraws a shown page once a second */
-#define FRAME   5               /* ticks: at most 24 redraws a second, about a turn's own rate */
+#define FRAME   4               /* ticks: at most 30 redraws a second (W5; 5, 24 a second, before) */
+#define TURNED  (TICK_HZ * 3 / 5)   /* W5: 0.6 s after the knob moved, the knob is what is shown */
 #define MARKED  2               /* the places with markers: POS and TBL (TUNE is
                                  * pitch-converted in the array, so not yet) */
 
@@ -107,7 +108,22 @@ static int mod_offset(u32 id)
     return *(volatile unsigned short *)(VALUES + at) - *(volatile unsigned short *)(TARGETS + at);
 }
 
+/* W5: the target array holds the value a note started with -- a p-lock, a recorded
+ * motion, or the knob as it was then -- so target - knob is the lock's offset. While
+ * the knob is being turned the arrays lag it (the sequencer may be stopped), so for
+ * TURNED after a turn the knob wins. */
+static int lock_offset(u32 id, int set)
+{
+    int t = ACTIVE_TRACK, slot = RECORD(id)[1];
+    if (t > 15 || slot < 0 || slot > 99)
+        return 0;
+    return *(volatile unsigned short *)(TARGETS + 34u + 202u * t + 2u * slot) - set;
+}
+
 static const u32 marked[MARKED] = { WR_POS_ID, WR_TBL_ID };
+/* per marked parameter: the knob's value at the last look, and when it last moved */
+static int last_set[MARKED] __attribute__((section(".data"))) = { -1, -1 };
+static u32 set_at[MARKED] __attribute__((section(".data"))) = { 0, 0 };
 
 /* per marked parameter: the offset range swept lately, and when each edge last grew */
 struct sweep { int lo, hi; u32 lo_at, hi_at; };
@@ -180,8 +196,11 @@ static int tier(u32 id)
 static int signature(void)
 {
     int sig = 0;
-    for (int k = 0; k < MARKED; k++)
+    for (int k = 0; k < MARKED; k++) {
         sig = sig * 131 + (tier(marked[k]) < 2 ? mod_offset(marked[k]) / QUANT : 0);
+        if (last_set[k] >= 0)                       /* W5: a lock or motion moves the wave too */
+            sig = sig * 131 + lock_offset(marked[k], last_set[k]) / QUANT;
+    }
     return sig;
 }
 
@@ -378,20 +397,48 @@ static void curve(void *c, int tbl, int pos)
     }
 }
 
-static void wave(void *c, void *view)
+/* W5: the value a place sounds at -- the knob, plus a p-lock or recorded motion once
+ * the knob has rested TURNED, plus the modulation -- and the knob's own value in *set */
+static int heard(void *view, u32 id, int *set)
 {
     u8 flag;
-    int tbl = GET_VALUE(view, WR_TBL_ID, &flag) >> 8;
-    int pos = GET_VALUE(view, WR_POS_ID, &flag);
+    int v = GET_VALUE(view, id, &flag);
+    *set = v;
 #if WR_MARKERS
-    int set_pos = clamp_pos(pos);
-    int moved = mod_offset(WR_POS_ID);
-    int speed = tier(WR_POS_ID);
-    pos += moved;
-    tbl = (GET_VALUE(view, WR_TBL_ID, &flag) + mod_offset(WR_TBL_ID)) >> 8;
+    int k = which(id);
+    u32 now = TICKS;
+    if (k >= 0) {
+        if (v != last_set[k]) {
+            last_set[k] = v;
+            set_at[k] = now;
+        }
+        if (now - set_at[k] >= TURNED)
+            v += lock_offset(id, v);
+    }
+    v += mod_offset(id);
 #endif
-    if (tbl < 0) tbl = 0;
-    if (tbl >= WR_TABLES) tbl = WR_TABLES - 1;
+    return v;
+}
+
+/* W5: TBL's value -> the table the SHARC plays, through the same table it uses */
+static int table_of(int v)
+{
+    v >>= 8;
+    if (v < 0) v = 0;
+    if (v > 127) v = 127;
+    return wr_slot[v];
+}
+
+static void wave(void *c, void *view)
+{
+    int set_pos, set_tbl;
+    int pos = heard(view, WR_POS_ID, &set_pos);
+    int tbl = table_of(heard(view, WR_TBL_ID, &set_tbl));
+#if WR_MARKERS
+    int moved = pos - set_pos;
+    int speed = tier(WR_POS_ID);
+    set_pos = clamp_pos(set_pos);
+#endif
     pos = clamp_pos(pos);
 
 #if WR_MARKERS
@@ -468,7 +515,12 @@ void wr_page_draw(void *view, void *canvas)
         int top = i < 4;
         int cx = COL0 + COLW * (i & 3) + COLW / 2;
         u32 id = wr_ids[page][i];
-        TEXT(canvas, FONT, cx, top ? TOP_LABEL_Y : BOT_LABEL_Y, CENTRED, "%.5s", wr_labels[page][i]);
+        const char *label = wr_labels[page][i];
+        if (id == WR_TBL_ID) {                  /* W5: the table's name where TBL would be */
+            int set_tbl;
+            label = wr_table_names[table_of(heard(view, WR_TBL_ID, &set_tbl))];
+        }
+        TEXT(canvas, FONT, cx, top ? TOP_LABEL_Y : BOT_LABEL_Y, CENTRED, "%.5s", label);
         if (!id)
             continue;
         u8 flag;

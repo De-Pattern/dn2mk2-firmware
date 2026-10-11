@@ -68,6 +68,7 @@ def main() -> int:
         "guards": [{"va": va, "bytes": want, "what": why} for va, want, why in CF.GUARDS],
         "layout": {k: v for k, v in sorted(built["layout"].items())},
         "chunk": {"load": built["chunk"]["load"], "code": built["chunk"]["code"].hex()},
+        "spans_chunk": {"load": built["spans_chunk"]["load"], "code": built["spans_chunk"]["code"].hex()},
     }
     OUT_JSON.write_bytes((json.dumps(code, indent=1) + "\n").encode())
     size = sum(len(e["new"]) // 2 for e in edits)

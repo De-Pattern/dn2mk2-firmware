@@ -67,8 +67,8 @@ def extents(firmware=None, area_length: int = 0) -> list[Extent]:
     # The boot stream is rebuilt as a whole (blocks inserted before its final
     # block), so the whole of it is declared: nothing else may write it too.
     out.append(Extent(DSP_STREAM, 0, size or 836_956,
-                      "the DSP boot stream, rebuilt: Waverider's code, state and two "
-                      "tables in L1 block 2, the entry jump, the machine lookup"))
+                      "the DSP boot stream, rebuilt: Waverider's code and state in L1 "
+                      "block 1, its wavetables in DDR, the entry jump, the machine lookup"))
     return out
 
 
@@ -80,10 +80,17 @@ def extents(firmware=None, area_length: int = 0) -> list[Extent]:
 NOT_RAM = tuple(range(SPEC["layout"]["wr_spans"] & ~1, SPEC["layout"]["wr_spans_end"], 2))
 
 
+def _chunks() -> list[tuple[int, bytes, str]]:
+    out = [(SPEC["chunk"]["load"], bytes.fromhex(SPEC["chunk"]["code"]),
+            "Waverider's SYN pages: code, descriptors, labels (M7)")]
+    if "spans_chunk" in SPEC:
+        out.append((SPEC["spans_chunk"]["load"], bytes.fromhex(SPEC["spans_chunk"]["code"]),
+                    "Waverider's wave display: every table's frames, one span a column (W5)"))
+    return out
+
+
 def ram() -> list[Extent]:
-    chunk = SPEC["chunk"]
-    return [Extent(RAM, chunk["load"], len(bytes.fromhex(chunk["code"])),
-                   "Waverider's SYN pages: code, descriptors, labels (M7)")]
+    return [Extent(RAM, load, len(code), what) for load, code, what in _chunks()]
 
 
 def _main_os(original: bytes) -> bytes:
@@ -120,9 +127,9 @@ def apply(firmware) -> Result:
         section7 = dsp.section7(stream)
     except dsp.DspError as exc:
         raise ModError(f"the DSP boot stream: {exc}") from exc
-    chunk = SPEC["chunk"]
-    code = platform.area.CodeChunk(chunk["load"], bytes.fromhex(chunk["code"])).pack()
-    content = platform.join(_main_os(main_os), others + [(platform.area.CODE, code)])
+    codes = [(platform.area.CODE, platform.area.CodeChunk(load, code).pack())
+             for load, code, _ in _chunks()]
+    content = platform.join(_main_os(main_os), others + codes)
     area_length = len(content) - platform.STOCK_LENGTH
     return Result(payloads={MAIN_OS: content, DSP_STREAM: section7},
                   extents=extents(firmware, area_length),

@@ -65,11 +65,11 @@ SUBTITLE = "Waverider"             # where WaveTone's say "WaveTone"
 
 # record id -> Waverider's label (the records stay WaveTone's: their slots are the
 # frame's params 25..27, which the SHARC loop reads)
-LABELS = {238: "TUNE", 239: "POS", 247: "TBL"}
+LABELS = {238: "TUNE", 239: "POS", 252: "TBL"}     # W5: TBL is DRIF (252), 0..127, not TBL1 (247)
 
 # the two pages, encoders A..H; 0 is an empty place
 PAGES = (
-    (238, 0, 239, 247, 0, 0, 0, 0),   # OSC 1: TUNE - POS TBL - - - -
+    (238, 0, 239, 252, 0, 0, 0, 0),   # OSC 1: TUNE - POS TBL - - - -
     (0, 0, 0, 0, 0, 0, 0, 0),         # OSC 2: all to come (M9)
 )
 

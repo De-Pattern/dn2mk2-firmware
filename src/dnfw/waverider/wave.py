@@ -18,7 +18,8 @@ is about 6 pixels a cycle, and a span still never loses it.
 When the tables move to the +Drive (`docs/waverider-tables.md`), this copy is made
 at load time instead.
 
-The reader's mapping, which the page reproduces: `TBL1 >> 8` picks the table,
+The reader's mapping, which the page reproduces: since W5, `wr_slot[DRIF >> 8]` picks
+the table (before, `TBL1 >> 8`),
 `min(WAV1, 0x7800)` the position across the 16 frames, interpolated between the two
 frames either side.
 
@@ -27,13 +28,26 @@ This module is pure: it computes the spans and writes them as C.
 
 from __future__ import annotations
 
-from . import dsp
+from . import dsp, factory
 
-POS_ID, TBL_ID = 239, 247         # WAV1 (POS) and TBL1 (TBL)
+POS_ID, TBL_ID = 239, 252         # WAV1 (POS) and, since W5, DRIF (TBL; 247 = TBL1 before)
 POS_MAX = 0x7800                  # the reader's clamp on WAV1
-TABLES = 2
+TABLES = dsp.TABLE_COUNT
 FRAMES = 16
 WIDTH = 96                        # screen columns the strip spans
+# W5: the spans outgrew the page's chunk (11 tables x 3 KB), so they are a chunk of
+# their own at a fixed address in the free RAM above BSS (dnfw.mods.ramcheck), clear of
+# every other mod's RAM; page.c reaches them through this address.
+SPANS_LOAD = 0x46B00000         # (0x46a00000.. is the emulator harness's scratch stack, emulib.machine)
+
+
+def span_bytes() -> bytes:
+    """The spans as the RAM chunk holds them: [table][frame][min, max][column], int8."""
+    out = bytearray()
+    for table in spans():
+        for lo, hi in table:
+            out += bytes(v & 0xFF for v in lo) + bytes(v & 0xFF for v in hi)
+    return bytes(out)
 
 
 def _byte(v: int) -> int:
@@ -61,15 +75,16 @@ def spans(width: int = WIDTH) -> list[list[tuple[list[int], list[int]]]]:
 
 
 def c_source() -> str:
-    """The spans and the reader's constants, as C for `wr_gen.h`."""
-    rows = []
-    for table in spans():
-        frames = []
-        for lo, hi in table:
-            frames.append("  {{" + ",".join(map(str, lo)) + "},\n   {" + ",".join(map(str, hi)) + "}}")
-        rows.append(" {\n" + ",\n".join(frames) + "\n }")
+    """The reader's constants, the TBL -> slot table and the table names, as C for
+    `wr_gen.h`. The spans themselves are a separate RAM chunk (`span_bytes`, at
+    SPANS_LOAD); C reaches them as a pointer."""
+    lut = ",".join(str(v) for v in dsp.slot_lut())
+    names = ",".join(f'"{n[:4]}"' for n in factory.names(TABLES))
     return (f"#define WR_POS_ID {POS_ID}\n#define WR_TBL_ID {TBL_ID}\n"
             f"#define WR_POS_MAX {POS_MAX:#x}\n#define WR_TABLES {TABLES}\n"
             f"#define WR_FRAMES {FRAMES}\n#define WR_WIDTH {WIDTH}\n"
-            f"static const signed char wr_spans[WR_TABLES][WR_FRAMES][2][WR_WIDTH] = {{\n"
-            + ",\n".join(rows) + "\n};\n")
+            f"#define WR_SPANS_LOAD {SPANS_LOAD:#x}u\n"
+            f"typedef signed char wr_span_t[WR_TABLES][WR_FRAMES][2][WR_WIDTH];\n"
+            f"#define wr_spans (*(const wr_span_t *)WR_SPANS_LOAD)\n"
+            f"static const unsigned char wr_slot[128] = {{{lut}}};\n"
+            f"static const char wr_table_names[WR_TABLES][5] = {{{names}}};\n")

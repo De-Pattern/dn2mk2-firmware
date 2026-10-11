@@ -510,7 +510,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     layout.update(playout)
     # the wave spans are data (signed sample bytes): where they lie, so the RAM check
     # (dnfw.mods.ramcheck) can tell four of their bytes from an address
-    layout["wr_spans"] = csyms["wr_spans"]
-    layout["wr_spans_end"] = csyms["wr_spans"] + wave.TABLES * wave.FRAMES * 2 * wave.WIDTH
+    spans = wave.span_bytes()
+    layout["wr_spans"] = wave.SPANS_LOAD
+    layout["wr_spans_end"] = wave.SPANS_LOAD + len(spans)
     return {"content": bytes(content), "edits": edits, "layout": layout,
-            "chunk": {"load": pages.LOAD, "code": chunk}}
+            "chunk": {"load": pages.LOAD, "code": chunk},
+            "spans_chunk": {"load": wave.SPANS_LOAD, "code": spans}}
