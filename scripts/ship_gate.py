@@ -189,7 +189,10 @@ def main() -> int:
                                                      f, "--base", hex(lo)], logs)
                 gate(f"ColdFire: code {lo:#x}..{hi:#x}", rc == 0, "no scale-8 addressing"
                      if rc == 0 else out[-800:])
-        executed = [(at, n) for va, at, n, _ in code_chunks if va not in DATA_ONLY]
+        # each executed range, at its place in MAIN OS's appended area (where the chunk's
+        # image sits before the loader copies it): file offset + (start - load)
+        executed = [(at + lo - va, hi - lo) for va, at, n, image in code_chunks if va not in DATA_ONLY
+                    for lo, hi in code_ranges().get(va, [(va, va + n)])]
         rc, out = run("coldfire_main", [sys.executable, "scripts/check_coldfire.py",
                                         bdir / "section_3_MAIN_OS.bin", "--base", hex(MAIN_BASE),
                                         "--against", work / "stock_section_3_MAIN_OS.bin"], logs)
