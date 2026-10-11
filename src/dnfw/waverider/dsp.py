@@ -52,7 +52,7 @@ import pathlib
 import struct
 
 from ..image import bootstream, sharc_object
-from . import harmonics, live, testtable
+from . import factory, live
 from . import render as reference
 
 STOCK_SHA256 = "336e340aa0cdcd34e314cfa44849f709a3134f6bd4cd57dfc7e15702c83115e2"
@@ -64,20 +64,32 @@ CODE = pathlib.Path(__file__).with_name("sharc_code.json")
 # which is carved from the top of block 1 (16 KB at size code 0, the size the
 # startup writes; see docs/waverider-dsp-silence.md). REGION ends 36 KB below the
 # block's top, so it stays clear of a 16 KB or a 32 KB DM cache.
-REGION = (0x2DD600, 0x2E7000)
+REGION = (0x2DD600, 0x2DF500)                # W5: the tables moved to DDR; code and state only
 STOCK_BLOCK1_END = 0x2DD52C
 DM_CACHE_32K = 0x2E8000                      # the lowest byte a 32 KB DM cache would own
 CODE_SPAN = 0x400                            # each code object is padded to this
 READER_DM = 0x2DD600
-LOOP_DM = 0x2DDA00
+LOOP_DM = 0x2DEF00                           # W5: moved from 0x2dda00, which held 1 KB; the loop is now ~1 KB
+LOOP_SPAN = 0x600
 READER_SW = READER_DM // 2                   # 0x16eb00
-LOOP_SW = LOOP_DM // 2                       # 0x16ed00
+LOOP_SW = LOOP_DM // 2                       # 0x16f780 (0x16ed00 before W5)
 STATE_DM, STATE_BYTES = 0x2DDE00, 0x400      # save area, counters, 16 reader blocks
 READER_BLOCKS_DM, READER_BLOCK_BYTES = 0x2DDF00, 32
 INC_TABLE_DM = 0x2DE200
 DIRECTORY_DM = 0x2DE600
 DIRECTORY_MAGIC = 0x57525431                 # 'WRT1'
-TABLES_DM = (0x2DF000, 0x2E3000)
+DIRECTORY_CAP = 0x200                        # magic, count, pointers: at most 126 tables
+LUT_DM = DIRECTORY_DM + DIRECTORY_CAP        # 0x2de800: TBL (0..127) -> slot, 128 words
+SMOOTH_DM = 0x2DEE00                         # W5 per-voice POS glide: 16 x pos, then 16 x note counter
+SMOOTH_BYTES = 0x80
+
+# W5: the tables live in the SHARC's DDR (docs/w5-tables.md). The stock boot stream
+# loads DDR to 0x8052fbe0 and the engine's init writes up to 0x80530be8
+# (scripts/sharc_ddr_ceiling.py); the tables start 16 MB in, far above both.
+TABLES_DDR = 0x81000000
+TABLE_BYTES = 16 * 512 * 2                   # 16 frames x 512 int16
+DDR_FLOOR = 0x80600000                       # nothing of ours below this in DDR
+TABLE_COUNT = len(factory.TABLES)
 
 IDLE_DM = 0x2DEA00                           # idle_load.asm, in the gap before table 0
 IDLE_SW = IDLE_DM // 2                       # 0x16f500
@@ -106,9 +118,21 @@ class DspError(ValueError):
 
 
 def tables() -> list[list[list[int]]]:
-    """The two original tables, in slot order: 0 = a 32-harmonic saw darkening to a
-    sine (`testtable`'s frames reversed), 1 = the overtone series (`harmonics`)."""
-    return [list(reversed(testtable.table())), harmonics.table()]
+    """The factory tables in slot order (`factory.TABLES`); slots 0 and 1 are the two
+    M5 shipped: the saw darkening to a sine, and the overtone series."""
+    return factory.tables()
+
+
+def table_addresses(count: int | None = None) -> list[int]:
+    n = TABLE_COUNT if count is None else count
+    return [TABLES_DDR + k * TABLE_BYTES for k in range(n)]
+
+
+def slot_lut(count: int | None = None) -> list[int]:
+    """TBL's value >> 8 (0..127, WaveTone's DRIF record) -> table slot, the knob's
+    travel shared evenly between the tables."""
+    n = TABLE_COUNT if count is None else count
+    return [min(n - 1, (v * n) >> 7) for v in range(128)]
 
 
 def sw_to_load(sw: int) -> int:
@@ -138,8 +162,13 @@ def objects() -> dict[str, bytes]:
 
 
 def directory() -> bytes:
-    return struct.pack("<II", DIRECTORY_MAGIC, len(TABLES_DM)) + struct.pack(
-        "<%dI" % len(TABLES_DM), *TABLES_DM)
+    """magic, count, the table pointers, zero-padded to DIRECTORY_CAP, then the
+    128-word TBL -> slot table."""
+    addrs = table_addresses()
+    head = struct.pack("<II", DIRECTORY_MAGIC, len(addrs)) + struct.pack("<%dI" % len(addrs), *addrs)
+    if len(head) > DIRECTORY_CAP:
+        raise DspError(f"{len(addrs)} tables do not fit the directory")
+    return head + bytes(DIRECTORY_CAP - len(head)) + struct.pack("<128I", *slot_lut())
 
 
 def spans() -> list[tuple[str, int, bytes]]:
@@ -149,18 +178,16 @@ def spans() -> list[tuple[str, int, bytes]]:
     end), so the region is written end to end and every code object is followed by
     at least 64 bytes of zeros (a zero word is a NOP)."""
     obj = objects()
-    t = tables()
     raw = [
         ("reader_m5.asm (wr_render5)", READER_DM, obj["reader"]),
-        ("machine5_live.asm (wr_type5v)", LOOP_DM, obj["machine5_live"]),
         ("state: save area, counters, 16 reader blocks (zeros)", STATE_DM, bytes(STATE_BYTES)),
         ("increment table, 129 float32", INC_TABLE_DM, live.table_bytes()),
         ("wavetable directory", DIRECTORY_DM, directory()),
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
         ("block_count.asm (wr_count)", COUNT_DM, obj["block_count"]),
         ("entry_mark.asm (wr_emark)", EMARK_DM, obj["entry_mark"]),
-        ("table 0: saw -> sine (testtable reversed)", TABLES_DM[0], reference.dsp_bytes(t[0])),
-        ("table 1: the overtone series (harmonics)", TABLES_DM[1], reference.dsp_bytes(t[1])),
+        ("W5 POS glide state: 16 positions, 16 note counters (zeros)", SMOOTH_DM, bytes(SMOOTH_BYTES)),
+        ("machine5_live.asm (wr_type5v)", LOOP_DM, obj["machine5_live"]),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):
@@ -173,10 +200,32 @@ def spans() -> list[tuple[str, int, bytes]]:
     return out
 
 
+def ddr_spans() -> list[tuple[str, int, bytes]]:
+    """(what, load address, payload) of each table, in DDR (load address = address)."""
+    names = factory.names()
+    return [(f"table {k}: {names[k]}", at, reference.dsp_bytes(tab))
+            for k, (at, tab) in enumerate(zip(table_addresses(), tables()))]
+
+
+def _check_ddr(stock: bytes, span_list) -> None:
+    blocks = [b for b in bootstream.walk(stock).blocks if b.count]
+    for what, at, payload in span_list:
+        lo, hi = at, at + len(payload)
+        if lo < DDR_FLOOR or hi > 0x88000000:
+            raise DspError(f"{what} at {lo:#x} is outside {DDR_FLOOR:#x}..0x88000000")
+        for b in blocks:
+            if b.target < hi and lo < b.target + b.count:
+                raise DspError(f"{what} overlaps the stock block at {b.target:#x}")
+    ordered = sorted((at, at + len(p), w) for w, at, p in span_list)
+    for (a0, a1, w0), (b0, b1, w1) in zip(ordered, ordered[1:]):
+        if b0 < a1:
+            raise DspError(f"{w0} and {w1} overlap")
+
+
 def placements() -> list[dict]:
     out = [{"what": what, "load_address": f"{at:#010x}", "dm_byte": f"{at - LOAD_ALIAS:#08x}",
             "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
-           for what, at, payload in spans()]
+           for what, at, payload in spans() + ddr_spans()]
     obj = objects()
     out += [{"what": f"patch: entry JUMP {COUNT_SW:#x} (the block counter, then the loop) + NOP at sw 0x1c9448",
              "load_address": f"{sw_to_load(ENTRY_SW):#010x}",
@@ -215,7 +264,7 @@ IDLE_STATE_BYTES = 0x40                      # idle: saves, LAST, total, passes,
 def idle_spans() -> list[tuple[str, int, bytes]]:
     """The idle stub's own blocks: its zeroed state, and its code padded to table 0."""
     code = objects()["idle_load"]
-    end = TABLES_DM[0]
+    end = COUNT_DM                           # block_count.asm follows (W5: tables are in DDR)
     if end - IDLE_DM - len(code) < 64:
         raise DspError("idle_load.asm leaves fewer than 64 bytes of NOP padding")
     return [("idle_load state (zeros)", dm_to_load(IDLE_STATE_DM), bytes(IDLE_STATE_BYTES)),
@@ -283,9 +332,11 @@ def section7(stock: bytes) -> bytes:
         raise DspError(f"the machine lookup is {lookup}, not stock {LOOKUP_STOCK}")
     added = spans()
     _check_free(stock, added)
+    ddr = ddr_spans()
+    _check_ddr(stock, ddr)
 
     out = bytearray(bootstream.insert_before_final(
-        stock, b"".join(bootstream.block(at, payload) for _, at, payload in added)))
+        stock, b"".join(bootstream.block(at, payload) for _, at, payload in added + ddr)))
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
     bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<I", 5))
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])

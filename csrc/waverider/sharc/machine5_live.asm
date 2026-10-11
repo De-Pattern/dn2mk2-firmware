@@ -11,6 +11,11 @@
 // records and, for every track whose machine type is 5, fills that track's reader
 // block and calls wr_render5 (reader_m5.asm, sw 0x16eb00) into the track buffer:
 //
+//   W5 (DN2-mk2-Mod, 2026-10-11): SLOT now comes from WaveTone's DRIF (param 38, 0..127,
+//         offset 244 + 146t, the same half-word as WAV1 six words on) through a
+//         128-entry TBL -> slot table after the directory (0x2de800), so the knob
+//         spreads over every table; and POS glides (below). The text from here to
+//         POS describes M5's TBL1 and is kept for the record.
 //   SLOT  WaveTone's TBL1 (param 27), read from the frame image the unpack copied to
 //         0x25c48c (offset 222 + 146t): 0x0000 or 0x0100, the sound's own value
 //         (read on the instrument through the USB probe, 2026-09-30); >> 8 is the
@@ -32,11 +37,19 @@
 //         table T (dnfw.waverider.live.increment_table): 440 * 2^((k-69)/12) Hz as a
 //         u32 phase step at 48 kHz.
 //   phase kept in the reader block, per track, from block to block.
+//   glide (W5) POS reaches the reader through a one-pole per voice: s += (target - s)
+//         >> 5 each block (32 samples at 48 kHz: a time constant of about 21 ms), so
+//         a knob's coarse steps, a p-lock or a recorded motion no longer step the
+//         timbre. s is set to the target outright in the block whose frame triggers
+//         this voice (TRIG_NOTE, frame offset 34, bit t), so a new note never sweeps in
+//         from where the voice last played. (Track record word 113, tried first, stays
+//         0 through a trigger in the runner.) State: 0x2dee00 + 4t (s, Q16).
 //
 // A directory without the magic renders nothing (the track buffer is left as the
 // dispatch left it).
 //
-// PLACEMENT IS FIXED: this code loads at PM sw 0x16ed00 (L1 block 1, byte 0x2dda00).
+// PLACEMENT IS FIXED: this code loads at PM sw 0x16f780 (L1 block 1, byte 0x2def00;
+// 0x16ed00 / 0x2dda00 until W5, when it outgrew that 1 KB slot).
 // The absolute targets below are written for that address from selas's own symbol
 // table (a labelled reassembly); the gate checks the decoder lands on every
 // assembler boundary.
@@ -103,11 +116,11 @@ wr_t5v_loop.:
       R3 = DM(I5, M6);                  // this track's buffer; I5 -> next
       R4 = 5;
       COMP(R2, R4);
-      IF NE JUMP 0x16ee46;              // -> wr_t5v_next.
+      IF NE JUMP 0x16f8ff;              // -> wr_t5v_next.
       R4 = DM(0x2de600);                // the baked directory's magic
       R2 = 0x57525431;
       COMP(R4, R2);
-      IF NE JUMP 0x16ee46;              // -> wr_t5v_next. (no directory: render nothing)
+      IF NE JUMP 0x16f8ff;              // -> wr_t5v_next. (no directory: render nothing)
 
       // t, and from it every per-track address (no pointer survives the reader call)
       R0 = DM(0x2dde80);
@@ -136,7 +149,7 @@ wr_t5v_loop.:
       R2 = R2 AND R4;
       I1 = R2;
       R4 = DM(0, I1);                   // the word holding WAV1
-      R5 = DM(1, I1);                   // the next one
+      R5 = DM(6, I1);                   // W5: the word holding DRIF (param 38), same half as WAV1
       // M6: TUN1 (param 25) is the half-word before WAV1: t even -> the high half
       // of the word before (218 + 146t is 2 mod 4), t odd -> the low half of WAV1's
       R12 = -4;
@@ -147,27 +160,35 @@ wr_t5v_loop.:
       // the firmware's own `IF cond JUMP abs` and unconditional shifts instead
       R7 = -16;
       R1 = PASS R1;
-      IF NE JUMP 0x16edb8;                   // -> wr_t5v_odd.
-      R5 = LSHIFT R4 BY R7;             // t even: WAV1 low, TBL1 high half of word 0
-      R13 = LSHIFT R13 BY R7;           //         TUN1 high half of the word before
-      JUMP 0x16edbc;                         // -> wr_t5v_halves.
+      IF NE JUMP 0x16f836;                   // -> wr_t5v_odd.
+      R13 = LSHIFT R13 BY R7;           // t even: TUN1 high half of the word before
+                                        //         (WAV1 and DRIF are the low halves)
+      JUMP 0x16f83c;                         // -> wr_t5v_halves.
 .GLOBAL wr_t5v_odd.;
 wr_t5v_odd.:
       R13 = R13 - R13;                  // t odd:  TUN1 low half of word 0
       R13 = R13 + R4;
-      R4 = LSHIFT R4 BY R7;             // t odd:  WAV1 high half of word 0, TBL1 low of 1
+      R4 = LSHIFT R4 BY R7;             // t odd:  WAV1 high half of word 0
+      R5 = LSHIFT R5 BY R7;             //         DRIF high half of word 6
 .GLOBAL wr_t5v_halves.;
 wr_t5v_halves.:
       R6 = 0xffff;
       R4 = R4 AND R6;                   // WAV1, the sound's value, 0..0x7800
       R13 = R13 AND R6;                 // TUN1, the sound's value, 0x0400..0x7c00
-      R5 = R5 AND R6;                   // TBL1, 0x0000 or 0x0080
+      R5 = R5 AND R6;                   // DRIF, 0x0000..0x7f00 (TBL on Waverider's page)
 
-      // SLOT = TBL1 >> 8, through the directory
+      // SLOT = lut[DRIF >> 8], then through the directory
       R1 = LSHIFT R5 BY -8;
+      R2 = 127;
+      R1 = MIN(R1, R2);
+      R1 = LSHIFT R1 BY 2;
+      R12 = 0x2de800;                   // the TBL -> slot table
+      R1 = R12 + R1;
+      I1 = R1;
+      R1 = DM(0, I1);                   // the slot
       R2 = DM(0x2de604);                // the directory's count
       COMPU(R1, R2);
-      IF LT JUMP 0x16edce;                   // -> wr_t5v_slot_ok.
+      IF LT JUMP 0x16f85e;                   // -> wr_t5v_slot_ok.
       R1 = R1 - R1;                     // out of range -> slot 0
 .GLOBAL wr_t5v_slot_ok.;
 wr_t5v_slot_ok.:
@@ -181,7 +202,35 @@ wr_t5v_slot_ok.:
       // POS = min(WAV1, 0x7800) << 5: Q16 frames, 0x7800 << 5 = 15 << 16
       R2 = 0x7800;
       R4 = MIN(R4, R2);
-      R4 = LSHIFT R4 BY 5;
+      R4 = LSHIFT R4 BY 5;              // the target, Q16 frames
+
+      // W5 glide: this voice's note trigger, bit t of the frame's TRIG_NOTE word (offset
+      // 34), read from the frame copy the unpack made: 0x25c48c + 34 = 0x25c4ae, the
+      // high half of the word at 0x25c4ac
+      R0 = DM(0x25c4ac);
+      R0 = LSHIFT R0 BY -16;            // TRIG_NOTE
+      R2 = 1;
+      R2 = LSHIFT R2 BY R9;             // 1 << t
+      R0 = R0 AND R2;
+      R2 = LSHIFT R9 BY 2;
+      R12 = 0x2dee00;                   // s[0]
+      R2 = R12 + R2;
+      I1 = R2;
+      R14 = DM(0, I1);                  // s
+      R0 = PASS R0;
+      IF EQ JUMP 0x16f892;              // -> wr_t5v_glide.
+      R14 = PASS R4;                    // a note starts on this voice: start at the target
+      JUMP 0x16f899;                    // -> wr_t5v_glided.
+.GLOBAL wr_t5v_glide.;
+wr_t5v_glide.:
+      R15 = R4 - R14;                   // target - s
+      R12 = -5;
+      R15 = ASHIFT R15 BY R12;          // / 32, toward -inf (an exact arrival from above)
+      R14 = R14 + R15;
+.GLOBAL wr_t5v_glided.;
+wr_t5v_glided.:
+      DM(0, I1) = R14;
+      R4 = PASS R14;
       DM(3, I4) = R4;                   // pos
 
       // pitch: this track's note cell, 0x254b14 + 4t
@@ -196,10 +245,10 @@ wr_t5v_slot_ok.:
       R12 = 0xff;
       R2 = R2 AND R12;                  // the exponent field
       COMP(R2, R12);
-      IF EQ JUMP 0x16ee02;                   // -> wr_t5v_note0.
+      IF EQ JUMP 0x16f8bb;                   // -> wr_t5v_note0.
       R8 = PASS R8;
-      IF LT JUMP 0x16ee02;                   // -> wr_t5v_note0.
-      JUMP 0x16ee03;                         // -> wr_t5v_note_ok.
+      IF LT JUMP 0x16f8bb;                   // -> wr_t5v_note0.
+      JUMP 0x16f8bc;                         // -> wr_t5v_note_ok.
 .GLOBAL wr_t5v_note0.;
 wr_t5v_note0.:
       R8 = R8 - R8;                     // +0.0
@@ -215,8 +264,8 @@ wr_t5v_note_ok.:
       F13 = F13 - F12;
       F8 = F8 + F13;                    // note + TUN1
       R8 = PASS R8;
-      IF LT JUMP 0x16ee13;                   // -> wr_t5v_tune_low.
-      JUMP 0x16ee14;                         // -> wr_t5v_tuned.
+      IF LT JUMP 0x16f8cc;                   // -> wr_t5v_tune_low.
+      JUMP 0x16f8cd;                         // -> wr_t5v_tuned.
 .GLOBAL wr_t5v_tune_low.;
 wr_t5v_tune_low.:
       R8 = R8 - R8;                     // below note 0 -> +0.0
@@ -246,7 +295,7 @@ wr_t5v_tuned.:
       R4 = DM(0x2dde84);                // wr_render5's argument: the reader block
       CJUMP 0x16eb00 (DB);              // wr_render5(R4 = reader block)
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0x16ee45;            // return address - 1: wr_t5v_next. - 1
+      DM(I7, M7) = 0x16f8fe;            // return address - 1: wr_t5v_next. - 1
 
 .GLOBAL wr_t5v_next.;
 wr_t5v_next.:
@@ -254,7 +303,7 @@ wr_t5v_next.:
       R1 = 1;
       R0 = R0 - R1;
       DM(0x2dde80) = R0;
-      IF NE JUMP 0x16ed5f;              // -> wr_t5v_loop.
+      IF NE JUMP 0x16f7df;              // -> wr_t5v_loop.
 
       R0 = DM(0x2dde00);
       R1 = DM(0x2dde04);

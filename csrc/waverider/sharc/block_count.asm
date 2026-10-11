@@ -45,5 +45,5 @@ wr_count.:
       DM(0x2de124) = R8;                // MARK
       R8 = DM(0x2de11c);
       R9 = DM(0x2de120);
-      JUMP 0x16ed00;                    // on to the type-5 loop
+      JUMP 0x16f780;                    // on to the type-5 loop (W5: moved from 0x16ed00)
 .wr_count..end:

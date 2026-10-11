@@ -110,24 +110,43 @@ def position(wav1: int) -> int:
     return min(wav1 & 0xFFFF, POS_MAX) << POS_SHIFT
 
 
-def slot(tbl1: int, count: int) -> int:
-    """The directory slot the loop plays for the frame's 16-bit TBL1 word."""
-    s = (tbl1 & 0xFFFF) >> SLOT_SHIFT
+def slot(drif: int, count: int) -> int:
+    """W5: the directory slot the loop plays for the frame's 16-bit DRIF word (TBL on
+    Waverider's page): lut[min(DRIF >> 8, 127)], the knob shared evenly between the
+    tables (`dsp.slot_lut`); a slot at or above the count plays 0."""
+    v = min((drif & 0xFFFF) >> SLOT_SHIFT, 127)
+    s = min(count - 1, (v * count) >> 7)
     return s if s < count else 0
+
+
+GLIDE_SHIFT = 5                   # s += (target - s) >> 5 per 32-sample block
+
+
+def glide(target: int, s: int, trig: bool) -> int:
+    """W5: one block of the loop's POS one-pole. A block whose frame triggers the voice
+    (TRIG_NOTE bit t) sets s to the target; otherwise s moves 1/32 of the way, the
+    shift arithmetic (toward -inf), as the DSP holds it."""
+    if trig:
+        return target
+    return s + ((target - s) >> GLIDE_SHIFT)
 
 
 def render_blocks(tables, blocks, block: int = 32, phase: int = 0,
                   precision: str = "float32") -> tuple[list[float], int]:
-    """The loop's output for a sequence of blocks, each (note, WAV1, TBL1[, TUN1] -- the
-    frame's 16-bit words; TUN1 defaults to 0 semitones): the phase
-    carries across blocks and across slot changes, as the reader block holds it."""
+    """The loop's output for a sequence of blocks, each (note, WAV1, DRIF[, TUN1
+    [, trig]]) -- the frame's 16-bit words and whether the frame triggers the voice;
+    TUN1 defaults to 0 semitones, trig to False. The phase carries across blocks and
+    across slot changes, as the reader block holds it; POS goes through the W5 glide
+    from the DSP's zeroed state (s = 0)."""
     out: list[float] = []
     table_t = increment_table()
-    for note, wav1, tbl1, *rest in blocks:
+    s = 0
+    for note, wav1, drif, *rest in blocks:
         tun1 = rest[0] if rest else TUN1_ZERO
-        tab = tables[slot(tbl1, len(tables))]
+        trig = bool(rest[1]) if len(rest) > 1 else False
+        s = glide(position(wav1), s, trig)
+        tab = tables[slot(drif, len(tables))]
         samples, phase = render.render(tab, phase, increment(tuned(note, tun1), table_t),
-                                       position(wav1),
-                                       block, precision)
+                                       s, block, precision)
         out += samples
     return out, phase

@@ -132,9 +132,17 @@ def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     assert diff and set(diff) <= allowed
 
 
-def test_directory_names_both_tables():
+def test_directory_names_every_table_in_ddr_then_the_slot_table():
+    # W5: magic, count, one DDR pointer per table, zeros to 0x200, then TBL -> slot
     d = dsp.directory()
-    assert struct.unpack("<4I", d) == (0x57525431, 2, 0x2DF000, 0x2E3000)
+    n = dsp.TABLE_COUNT
+    head = struct.unpack(f"<{2 + n}I", d[:8 + 4 * n])
+    assert head[:2] == (0x57525431, n)
+    assert list(head[2:]) == [0x81000000 + 0x4000 * k for k in range(n)]
+    assert not any(d[8 + 4 * n:dsp.DIRECTORY_CAP])
+    lut = struct.unpack("<128I", d[dsp.DIRECTORY_CAP:])
+    assert lut[0] == 0 and lut[127] == n - 1
+    assert list(lut) == sorted(lut) and set(lut) == set(range(n))   # every table reachable, in order
 
 
 # -- the contract -------------------------------------------------------------------------------
@@ -161,8 +169,10 @@ def test_position_and_slot_from_frame_words():
     assert live.position(0x7800) == 15 << 16                   # the frame: the sound's own 0x7800
     assert live.position(0x7F00) == 15 << 16                   # clamped
     assert live.position(0x4000) == 0x4000 << 5
-    assert live.slot(0x0000, 2) == 0 and live.slot(0x0100, 2) == 1   # TBL1 1, as the probe read it
-    assert live.slot(0x0200, 2) == 0                           # out of range -> 0
+    # W5: TBL is DRIF (0..0x7f00); its travel is shared evenly between the tables
+    assert live.slot(0x0000, 11) == 0 and live.slot(0x7F00, 11) == 10
+    assert [live.slot(v << 8, 11) for v in range(128)] == dsp.slot_lut(11)
+    assert live.slot(0x7F00, 2) == 1 and live.slot(0x3F00, 2) == 0
 
 
 def test_tun1_is_the_sounds_own_scale():
@@ -206,9 +216,26 @@ def test_harmonics_frame_k_is_partial_k_plus_1():
 
 
 def test_tables_are_original_and_distinct():
-    t0, t1 = dsp.tables()
-    assert t0 != t1
-    assert render.dsp_bytes(t0) != render.dsp_bytes(t1)
+    tabs = dsp.tables()
+    assert len(tabs) == dsp.TABLE_COUNT
+    blobs = [render.dsp_bytes(t) for t in tabs]
+    assert len(set(blobs)) == len(blobs)
+    assert all(len(b) == dsp.TABLE_BYTES for b in blobs)
+
+
+def test_slots_0_and_1_keep_the_m5_tables():
+    # a sound saved on the M5 build (TBL1 0 or 1, and DRIF 0 now) keeps its first table
+    from dnfw.waverider import harmonics, testtable
+    tabs = dsp.tables()
+    assert tabs[0] == list(reversed(testtable.table())) and tabs[1] == harmonics.table()
+
+
+def test_tables_are_in_ddr_clear_of_the_stock_image_and_the_engine():
+    ddr = dsp.ddr_spans()
+    assert [a for _, a, _ in ddr] == dsp.table_addresses()
+    # the stock stream loads DDR to 0x8052fbe0 and init writes up to 0x80530be8
+    # (scripts/sharc_ddr_ceiling.py); the tables start 16 MB in
+    assert min(a for _, a, _ in ddr) >= dsp.DDR_FLOOR > 0x80530BE8
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
@@ -220,8 +247,9 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     obj = dsp.objects()
     code_spans = [x for x in sp if "asm" in x[0]]
     assert len(code_spans) == 5
-    for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["machine5_live"], obj["idle_load"],
-                                                     obj["block_count"], obj["entry_mark"])):
+    # W5: the loop moved to the end of the region (0x2def00), after the glide state
+    for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["idle_load"],
+                                                     obj["block_count"], obj["entry_mark"], obj["machine5_live"])):
         assert payload[:len(code)] == code
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
 
@@ -278,7 +306,7 @@ def test_the_block_counter_goes_on_to_the_loop():
     spec = json.loads((SHARC / "block_count.json").read_text(encoding="utf-8"))
     assert int(spec["load_sw"], 16) == dsp.COUNT_SW == 0x16F600
     be = bytes.fromhex(spec["object_parcels_be"])
-    assert be[spec["instruction_offsets"][-1]:].hex() == "063e0016ed00"   # JUMP 0x16ed00, the loop
+    assert be[spec["instruction_offsets"][-1]:].hex() == "063e0016f780"   # JUMP 0x16f780, the loop (W5)
     src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "block_count.asm").read_text().splitlines()]
     stores = {c for c in src if c.startswith("DM(")}
     assert stores == {"DM(0x2de11c) = R8;", "DM(0x2de120) = R9;", "DM(0x2de118) = R8;",

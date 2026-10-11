@@ -78,6 +78,8 @@ SETUP_GUARD, SETUP_TABLE_READ, SETUP_NONE = 0x1C905D, 0x1C90A9, 0x1C90D4
 CLAMP_MIN = 0x1C294C
 NOTE_CELL = V.ENGINE + 0x1387C
 WAV1, TBL1 = 26, 27             # WaveTone's Osc1 Waveform, Osc1 Wave Table
+DRIF = 38                       # W5: WaveTone's Osc Drift, TBL on Waverider's page
+TRIG_WORD = 0x25C4AC            # W5: the frame copy's word holding TRIG_NOTE (offset 34), high half
 TUN1 = 25                       # WaveTone's Osc1 Tune (Milestone 6)
 TUN1_ZERO = 0x4000              # the frame word for 0 semitones: the sound's own (probe, 2026-09-30)
 FRAME_COPY = 0x25C48C           # where sw 0x1c2712 copies the frame image
@@ -176,6 +178,8 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                     ins[t] = {"note": V.bits_f32(m2.word(r.state, NOTE_CELL + 4 * t) or 0),
                               "wav1": frame_word(r.state, FR.slot_offset(t, WAV1)),
                               "tbl1": frame_word(r.state, FR.slot_offset(t, TBL1)),
+                              "drif": frame_word(r.state, FR.slot_offset(t, DRIF)),
+                              "trig": bool(((m2.word(r.state, TRIG_WORD) or 0) >> 16) & (1 << t)),
                               "tun1": frame_word(r.state, FR.slot_offset(t, TUN1))}
             tap["t5_inputs"] = ins
 
@@ -249,7 +253,7 @@ def track_series(run, t) -> list[float]:
 
 def reference_for(run, t, tables, precision="float32") -> list[float]:
     """live.render_blocks fed the DSP's own unpacked inputs for track T, block by block."""
-    seq = [(i[t]["note"], i[t]["wav1"], i[t]["tbl1"], i[t].get("tun1", live.TUN1_ZERO))
+    seq = [(i[t]["note"], i[t]["wav1"], i[t]["drif"], i[t].get("tun1", live.TUN1_ZERO), i[t]["trig"])
            for i in run["t5_inputs"] if t in i]
     return live.render_blocks(tables, seq, BLOCK, 0, precision)[0]
 
@@ -469,7 +473,7 @@ def main(argv=None):
                     "the caller's frame: track 0 at the amp's output")
                 i0 = run["t5_inputs"][-1][t]
                 wav(f"m5_preview_frame{sep[:-1]}.wav", preview(tables, i0["note"], i0["wav1"], i0["wav1"],
-                                                    i0["tbl1"], a.seconds), a.seconds, wavs,
+                                                    i0["drif"], a.seconds), a.seconds, wavs,
                     "PREVIEW, not the runner: the reference for the caller's frame's last block inputs")
 
     ok = bool(results) and all(r.get("ok") for r in results.values())
@@ -562,6 +566,10 @@ def step_map(dk, snap, m2mach, m5: Image, stock: bytes, init, sound, machines) -
 
 # -- step 3 -------------------------------------------------------------------------------------------
 
+SLOT1_DRIF = next(v for v in range(128) if dsp.slot_lut()[v] == 1) << 8
+GLIDE_AT = 4
+
+
 def step_voice(init, sound, machines, blocks, tables) -> dict:
     def frames(**kw):
         def fb(b):
@@ -570,7 +578,11 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
 
     runs = {"init": run_blocks(init, frames(), blocks),
             "pos120": run_blocks(init, frames(overrides={WAV1: 0x7800}), blocks),
-            "slot1": run_blocks(init, frames(overrides={WAV1: 0x4000, TBL1: 0x0100}), blocks),
+            "slot1": run_blocks(init, frames(overrides={WAV1: 0x4000, DRIF: SLOT1_DRIF}), blocks),
+            "slot_last": run_blocks(init, frames(overrides={WAV1: 0x4000, DRIF: 0x7F00}), blocks),
+            # W5 glide: POS jumps 0 -> 120 at block GLIDE_AT with no new note
+            "glide": run_blocks(init, lambda b: base_frame(sound, machines, trigger=(b == 1), overrides={
+                WAV1: 0 if b < GLIDE_AT else 0x7800}).to_bytes(), blocks),
             "note72": run_blocks(init, frames(overrides={WAV1: 0x7800}, note=0x4800), blocks),
             "tune_up12": run_blocks(init, frames(overrides={WAV1: 0x7800, TUN1: TUN1_ZERO + 12 * 256}), blocks),
             "tune_down12": run_blocks(init, frames(overrides={WAV1: 0x7800, TUN1: TUN1_ZERO - 12 * 256}), blocks),
@@ -594,6 +606,14 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
     c0 = m4.centroid(track_series(i, 0)[settle:]) if i["ok"] else 0
     c120 = m4.centroid(track_series(runs["pos120"], 0)[settle:]) if runs["pos120"]["ok"] else 0
     setup = [e for e in i["setup"]] if i["ok"] else []
+    g = runs["glide"]
+    glide_pos = [blk.get(0)[3] for blk in g["reader_blocks"] if blk.get(0)] if g["ok"] else []
+    glide_in = [x[0] for x in g["t5_inputs"] if 0 in x] if g["ok"] else []
+    glide_want, s_ = [], 0
+    for x in glide_in:
+        s_ = live.glide(live.position(x["wav1"]), s_, x["trig"])
+        glide_want.append(s_)
+    counters = [x[0]["trig"] for x in i["t5_inputs"] if 0 in x] if i["ok"] else []
     # the guard sees each track's type in order; for track 0 (type 5) the next event
     # must be the no-setup arm, never the table read
     t0_events = []
@@ -603,7 +623,9 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
     n = {"float32_mismatches_machine_tap": mism,
          "loop_entries_init_run": i.get("loop_entries"),
          "reader_block_last": rb,
-         "expected_reader_block_init": [dsp.TABLES_DM[0], None, live.increment(60.0), live.position(0), BLOCK],
+         "expected_reader_block_init": [dsp.table_addresses()[0], None, live.increment(60.0), live.position(0), BLOCK],
+         "glide_pos_per_block": glide_pos, "glide_expected": glide_want,
+         "trig_bits_init_run": counters,
          "machine_peak": V.peak(track_series(i, 0)) if i["ok"] else None,
          "amp_in_peak": V.peak(i["amp_in"]) if i["ok"] else None,
          "amp_out_peak": V.peak(i["amp_out"][settle:]) if i["ok"] else None,
@@ -627,13 +649,23 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
         "the machine tap is bit-exact to dnfw.waverider.live in every run":
             ok_runs and all(v == 0 for v in mism.values()),
         "the loop's reader block matches the contract (table, inc, pos, count)":
-            bool(rb["init"]) and rb["init"][0] == dsp.TABLES_DM[0] and rb["init"][2] == live.increment(60.0)
+            bool(rb["init"]) and rb["init"][0] == dsp.table_addresses()[0] and rb["init"][2] == live.increment(60.0)
             and rb["init"][3] == 0 and rb["init"][4] == BLOCK,
         "audible at the amp's output (peak > 0.02)": bool(n["amp_out_peak"]) and n["amp_out_peak"] > 0.02,
         "correlated with the ideal reference through the chain (r > 0.9)": bool(fit) and fit.correlation > 0.9,
         "POS 120 is darker than POS 0 (spectral centroid)": 0 < c120 < c0,
-        "TBL1 1 plays the other table (reader block table pointer = dsp.TABLES_DM[1])":
-            bool(rb["slot1"]) and rb["slot1"][0] == dsp.TABLES_DM[1],
+        "W5: TBL (DRIF) selects table 1 at its first step and the last table at its top "
+        "(reader block table pointers = dsp.table_addresses()[1] and [-1], in DDR)":
+            bool(rb["slot1"]) and rb["slot1"][0] == dsp.table_addresses()[1]
+            and bool(rb["slot_last"]) and rb["slot_last"][0] == dsp.table_addresses()[-1],
+        "W5: POS glides after a jump with no new note: each block 1/32 of the remaining way, "
+        "as dnfw.waverider.live.glide computes it":
+            bool(glide_pos) and glide_pos == glide_want and glide_pos[-1] > glide_pos[GLIDE_AT - 1],
+        "W5: a triggered block starts POS at its target (the voice's trigger bit is seen "
+        "on the trigger block only, and the pos120 run reads POS 120 from that block on)":
+            counters == [b == 1 for b in range(len(counters))] and bool(rb["pos120"])
+            and all(blk.get(0)[3] == live.position(0x7800)
+                    for blk in runs["pos120"]["reader_blocks"][1:] if blk.get(0)),
         "note 72 is an octave above note 60 (the DSP's increment ratio is 2 within 1e-6; "
         "more zero crossings in the same blocks)":
             bool(inc60) and abs(inc72 / inc60 - 2.0) < 1e-6 and zc72 > zc60 > 0,
