@@ -93,8 +93,12 @@ at your own risk, with possible loss of user content. So:
 3. **Preflight the file you will actually send:**
    `dnfw preflight Digitone_II_OS1.11.syx build.syx` must print `PASS`.
 4. **Back up** the +Drive.
-5. **Flash** through the normal Transfer drop over USB. Keep the DIN recovery
-   cable connected and ready.
+5. **Flash** through the normal Transfer drop over USB. The DIN cable plays
+   no part in this; the flash itself goes over USB alone. Have it within reach
+   (plugged in is easiest) only so that, if the build does not boot, recovery
+   is a cable you have already proven rather than a hunt for an interface. If it
+   stays plugged in, make sure nothing (a sequencer, clock, DAW) is sending on
+   it during the transfer.
 6. **Low volume** for the first notes.
 7. **Run the regression check** below before using it for music.
 8. If anything is off: **recovery to stock 1.11**, then report what you saw.

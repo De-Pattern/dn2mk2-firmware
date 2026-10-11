@@ -127,12 +127,15 @@ belongs to W2, which gives the remaining controls their records.
 | `emu_boot_check` from reset | booted and drew its UI |
 | the page in the ColdFire emulator | table names, waves, knob / lock / heard paths as above |
 | `sharc_waverider_m5` (SHARC runner) | **all PASS**: bit-exact to `live` in every run; TBL picks table 1 and the last table, both in DDR; the glide matches `live.glide` block by block; a triggered block starts at its POS; types 0–4 bit-identical to stock with and without a Waverider track |
+| `check_coldfire --against` stock | PASS: the page code (`0x4670c000`, 5,112 B) has no scale-8 addressing; the 131 hits in the scan all lie in the display's wave bytes after it, which never execute |
+| `emu_boot_engine` (real loader, from reset) | PASS: 400 M instructions, evaluator A ran 8 frames clean, both CODE chunks intact; SAVE/LOAD round trip keeps machine type 5 and 3 |
 | unit tests | `test_waverider_*`, `test_mods_*`, `test_grains_model`: pass |
 | MAIN OS size | 3,230,988 B unpacked, under upstream's M0 build (3,233,040 B, flashed and passed on hardware) |
 
 ## On the instrument: what to check (W5 test)
 
-1. **Low volume first.** Recovery cable connected.
+1. **Low volume first.** Flash over USB as usual; keep the proven DIN recovery
+   cable at hand in case it does not boot (it is not used by the flash).
 2. WAVERIDER on a track, VOICE SETUP > 1 voice. TBL's label shows `PRIM`; turn it
    through all 11 names. Each sounds different, and none is silent or noise.
 3. Slow POS sweeps: continuous, no stepping.
