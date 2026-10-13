@@ -51,6 +51,43 @@ That turns "difficult, can't say why" into numbers: Q reached, ring time, keytra
    change. It means the stock filter dispatch, its records and its UI, and it touches
    stock machines' signal path, so it would come after 1 or 2 has proven the sound.
 
+### Added 2026-10-13: the owner's own diagnosis, and the target sound
+
+> *"faster snappier envelopes would be my dream … i would love if i could set
+> exponential/log on attack and decay and really tweak the speed manually"*, and the
+> filters *"seem too brittle and fragile. the resonance can get relatively high, but it
+> starts to sound bad and blown out pretty quickly. then thin and not organic … maybe
+> its even too dirty. i need a rounded, watery timbre … more like a marble being smacked
+> against a thick bowl at a high rate of speed"*. Wanted references: Serge VCFQ,
+> Buchla-style, Roland-style filters; Mutable's Ripples/Blades are analog, so there is
+> no code to port from them. Beads, for a later granular FX, if its licence allows.
+
+**What that points to:**
+
+- **A vactrol low-pass gate (Buchla 292 style).** One envelope opens the amplitude and
+  the cutoff together, with the vactrol's fast attack and slow, curved release. That is
+  the classic "bongo" / liquid ping. Mutable's Plaits has an LPG model in its MIT
+  codebase (I believe `plaits/dsp/fx/low_pass_gate.h`; to verify before use), and
+  `stmlib`'s zero-delay-feedback state-variable filter. The SVF stays clean and stable
+  at high Q, which is the opposite of "brittle".
+- **"Marble on a thick bowl" is modal synthesis, more than filtering**: a struck
+  object is a few inharmonic resonant modes with their own decays, hit by a very short
+  exciter. Plaits' modal engine and Rings' modal resonator (MIT) do exactly this. It is
+  also where the Rings-style resonator was headed anyway.
+- **"Rounded" rather than "blown out"**: zero-delay-feedback (TPT) filters with soft
+  saturation inside the feedback loop, so resonance compresses instead of clipping.
+  A Roland-style 4-pole OTA cascade and a Serge-VCFQ-style resonant band-pass can both
+  be built from the same parts (Zavalishin, *The Art of VA Filter Design*).
+- **Envelopes**: our own per-voice AD inside Waverider. Attack from 0.1 ms, a CURVE
+  control running log ↔ linear ↔ exp for attack and decay, per-sample rather than
+  per-block, and optionally driving the LPG. The stock envelopes and their menu stay
+  untouched. Changing those would alter every stock machine, which `docs/SAFETY.md`
+  rules out.
+
+**First measurement** (unverified until done): the stock filter's impulse response,
+and the stock amp envelope's shortest attack and decay, in the SHARC runner, to
+compare against.
+
 Safety: a ring at high Q must be bounded (gain-limited feedback and a hard ceiling)
 so it can never blow up into a full-scale tone, and the SHARC gate needs a check for
 exactly that.
