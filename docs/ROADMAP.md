@@ -121,3 +121,47 @@ Waverider getting records of its own (relocating the parameter table, option B i
 
 **First step:** a Python reference model of all four types with audition WAVs
 (as `grains/` did), so the sound is chosen by ear before any firmware.
+
+### 2026-10-13: the owner's ear, and PING moves to the FLTR page
+
+Owner, on the demos: *"these sound pretty good, especially 2, 4, and 8"* (LADR thick,
+LPG bongo, VCFQ liquid fast). Mostly for **percussion synthesis, non-melodic**. And:
+*"is it not going to be possible to put these somewhere where it will be possible to
+use them on any machine, like the actual filter selection page?"*
+
+**Yes, and it is probably the better home.** It is the same pattern Waverider used for
+machines, applied to filters [D, from what this project has already read]:
+
+- The FLTR page offers 6 filter types (Multimode, Lowpass 4, Equalizer, Comb-, Legacy
+  LP/HP, Comb+). The frame unpack maps the page's type through a lookup to the DSP's
+  own number (0->1, 1->3, 2->2, 3->4, 4->5, 5->6), and **anything else becomes 0, no
+  filter** (`dnfw.waverider.frame.FILTER_TO_DSP`). That mirrors the machine lookup W5
+  patched for type 5.
+- The DSP renders each track's filter through a jump table, `0x8052dbc0[filter
+  type]`, 7 entries (`docs/sharc-voice-path.md`). That mirrors the machine dispatch
+  Waverider's loop is entered from.
+- **The FLTR page's own records almost exactly fit PING's controls**, which also
+  solves the records problem: FREQ (67), RESO (68, the ring time), the type's third
+  parameter (66, the sub-type SVF/LADR/VCFQ/LPG), env depth (69, ENV), the filter
+  envelope's delay/attack/decay/sustain/release (70-74: ATK, DEC, and CURVE on one of
+  the others), key tracking (79).
+
+So **PING becomes a 7th filter type**, selectable on any machine, the stock ones
+included. Its own envelope is computed at sample rate from the filter envelope's
+settings, with the curves.
+
+To find out before committing (instruments: the ColdFire emulator for the filter
+selection list and the page's labels; the SHARC runner for the dispatch, the unpack
+lookup and the filter envelope's form):
+
+1. where the FLTR page's type list is built, and whether it can take a 7th row the way
+   MACHINE SEL took WAVERIDER;
+2. whether the 7-entry dispatch table can take an 8th entry, or the type must be
+   redirected the way the machine loop was;
+3. what the stock filter envelope delivers to the DSP (per block or per sample), so
+   PING's own envelope reads its settings correctly;
+4. the gate extended: **filter types 0-5 bit-identical to stock**, as machines 0-4 are.
+
+Tuning for percussion: strike-led, an option for FREQ not to follow the note (fixed
+pitch), a noise component in the strike, and later a modal "bowl" sub-type (a few
+inharmonic modes).
