@@ -91,3 +91,33 @@ compare against.
 Safety: a ring at high Q must be bounded (gain-limited feedback and a hard ceiling)
 so it can never blow up into a full-scale tone, and the SHARC gate needs a check for
 exactly that.
+
+### Decided 2026-10-13: one PING section, four types, its own envelope
+
+Owner: the Mutable-style SVF, a Roland-style filter, a round LPG with exponential/log
+(variable) decay, and VCFQ "if we can even do multiple … maybe an amalgamation of
+everything with the best parts decided by you". Beads is now open source (MIT, per
+the owner, 2026-10-12); Nebulae is the preferred reference for later granular work.
+
+**Design (proposed):** one filter slot per voice, after the reader, with TYPE choosing
+the core. All four share one zero-delay-feedback engine, with the same keytracking,
+soft-saturating feedback, hard output ceiling and built-in strike, so four types cost
+little more than one:
+
+| TYPE | what | character |
+|---|---|---|
+| SVF | Mutable `stmlib`-style 2-pole, LP↔BP↔HP | clean, glassy, stable at any Q |
+| LADR | Roland-style 4-pole OTA cascade, soft-clipped feedback | thick, rounded, squelchy |
+| VCFQ | Serge-style resonant band-pass, Q into soft self-oscillation | the ping: watery, vocal |
+| LPG | vactrol low-pass gate: the envelope opens level and cutoff together | the bongo: round, liquid |
+
+Controls (8): TYPE FREQ RES DRIVE / ATK DEC CURVE ENV, where CURVE runs log ↔ lin ↔
+exp, DEC is variable decay and ENV is the envelope's depth on the cutoff.
+
+**Open: where the 8 controls live.** WaveTone's spare records cannot hold them as well
+as osc 2's page: only 7 spare records have a 0..127 range, and osc 2 needs 3 of them.
+Waverider getting records of its own (relocating the parameter table, option B in
+`docs/waverider-m7-pages.md`) would unlock this, osc 2, GRAINS and every later machine.
+
+**First step:** a Python reference model of all four types with audition WAVs
+(as `grains/` did), so the sound is chosen by ear before any firmware.
