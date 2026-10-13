@@ -39,10 +39,18 @@ README is kept at [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
 |---|---|---|---|
 | 🌊 | **Waverider** | wavetable machine after Tonverk's Wavefinder (upstream): **W5** adds 11 original tables, TBL with table names, a smooth POS glide, a display that follows p-locks and motion; **W2** puts every page-1 control to work (LEV, and a per-voice scanner: RATE, MPOS, MLEV, MOVE with 8 shapes) and gives the LFO/MOD lists Waverider's own names | upstream DSP core **passed on hardware**; W5 **flashed and working** on the owner's unit (tables, save/load); W2 **emulator-gated**, awaiting a flash → [`docs/w2-scanner.md`](docs/w2-scanner.md), [`docs/w5-tables.md`](docs/w5-tables.md) |
 | ✨ | **GRAINS** | granular synthesis on wavetables, after the Virus TI grain tables: formant grains (SYNC) and clouds (CLOUD) | **reference model + demos**; control layout awaiting sign-off → [`docs/grains.md`](docs/grains.md) |
+| 💧 | **PING** (in Waverider) | a filter section for round, liquid pings: SVF, Roland-style 4-pole, Serge-VCFQ-style band-pass, vactrol LPG; own envelope with log/exp curves and a strike | **reference model + demos**; awaiting the owner's ear → [`docs/ping.md`](docs/ping.md) |
 | 🔀 | **Frequency shifter** | a send/master effect after Tonverk's | planned, next after GRAINS G1 |
 | 🎻 | **Resonator** | polyphonic string/modal resonator, after Mutable Instruments Rings (MIT) | planned: port of open-source C to the SHARC |
 | 🥁 | **Digitakt II machines** | same DSP family, so their code moves across; you supply both OS files and nothing of Elektron's is redistributed | upstream proved it offline (ONESHOT) |
 | 🧪 | **Syntakt / Model:Cycles / Monomachine / Machinedrum voices** | those boxes run their engines on different processors (ColdFire, DSP56300), so these are **new implementations by ear**, not ports | later |
+
+### Hear PING before it exists
+
+`ping/demos/` holds the planned filter section for Waverider, rendered from its
+reference model (`ping/model.py`, `docs/ping.md`): SVF, LADR (4-pole), VCFQ and a
+vactrol LPG, with their own envelope and a strike, aimed at round, watery pings.
+Regenerate with `python ping/demos.py`.
 
 ### Make a wavetable from any sample
 
