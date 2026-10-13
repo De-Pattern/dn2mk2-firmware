@@ -6,6 +6,9 @@ enough of a plan that it can be picked up cold. Upstream's own parked ideas are 
 
 ## Next
 
+- **PING P3**: tuning by ear on hardware; TYPE's icon saying SVF / LADR / VCFQ / LPG;
+  the curve drawn as PING's. P1 (DSP) and P2 (FLTR page) are built: `docs/ping.md`.
+
 - **W3: Waverider osc 2** (page 2: DETN, LEV, POS, TBL, RATE, MPOS, MLEV, MOVE on
   osc 2's WaveTone records, `docs/w2-scanner.md`).
 - **The owner's own tables in a build**: `dnfw waverider slice` output into a table

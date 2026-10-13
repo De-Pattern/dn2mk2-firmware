@@ -118,6 +118,40 @@ static void wr_names(void)
     names_on = on;
 }
 
+/* PING (src/dnfw/ping/pages.py): while the active track's filter is PING (type 6, the
+ * byte at sound+0xDF), Multi-Mode's and the filter envelope's records whose meaning
+ * PING changes carry PING's names; the stock pointers go back when it is not. The
+ * same mechanism as wr_names, on records it does not touch. */
+static const char *ping_stock_long[PING_NAMED] __attribute__((section(".data")));
+static const char *ping_stock_short[PING_NAMED] __attribute__((section(".data")));
+static int ping_on __attribute__((section(".data"))) = -1;
+
+static int ping_active(void)
+{
+    u8 t = UI_TRACK;
+    unsigned char *kit = KIT_POINTER;
+    if (t > 15 || !kit)
+        return 0;
+    return (signed char)kit[52u + 1163u * t + 0xDFu] == PING_FILTER;
+}
+
+static void ping_names(void)
+{
+    int on = ping_active();
+    if (on == ping_on)
+        return;
+    for (int k = 0; k < PING_NAMED; k++) {
+        u32 id = ping_named_ids[k];
+        if (ping_on < 0) {
+            ping_stock_long[k] = NAME_LONG(id);
+            ping_stock_short[k] = NAME_SHORT(id);
+        }
+        NAME_LONG(id) = on ? ping_named_long[k] : ping_stock_long[k];
+        NAME_SHORT(id) = on ? ping_named_short[k] : ping_stock_short[k];
+    }
+    ping_on = on;
+}
+
 #if WR_MARKERS
 /* Modulation (docs/modulation-display.md). The audio tick keeps, per track, a target
  * array (the sound's values, refreshed when a note plays) and the value array it
@@ -303,6 +337,7 @@ static void sweep(int k, int off, u32 now)
 int wr_poll(void *screen)
 {
     wr_names();
+    ping_names();
     u32 now = TICKS;
     if (now - drawn_at < SHOWN && now - asked_at >= FRAME
             && (settling || signature() != drawn_sig)) {
@@ -318,6 +353,7 @@ int wr_poll(void *screen)
 int wr_poll(void *screen)
 {
     wr_names();
+    ping_names();
     return IS_DIRTY(screen);
 }
 #endif

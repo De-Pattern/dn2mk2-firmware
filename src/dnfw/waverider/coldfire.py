@@ -41,6 +41,8 @@ from __future__ import annotations
 import struct
 
 from . import pages, wave
+from ..ping import coldfire as ping_cf
+from ..ping import pages as ping_pages
 from dataclasses import dataclass
 
 BASE = 0x40000400
@@ -357,11 +359,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
 
     # Milestone 7: Waverider's pages, as one platform CODE chunk in RAM (pages.LOAD)
     # the C page renderer first (the assembly calls it), at C_LOAD
-    cimage, csyms, cbss = compile_c(pages.c_header() + wave.c_source(), base=pages.C_LOAD)
+    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header() + wave.c_source(),
+                                     base=pages.C_LOAD)
     if cbss:
         raise ComposeError(f"the page renderer has {cbss} bytes of BSS; nothing zeroes it")
-    if pages.C_LOAD + len(cimage) > pages.C_END:
-        raise ComposeError(f"the page renderer ends past {pages.C_END:#010x}")
+    if pages.C_LOAD + len(cimage) > ping_cf.LOAD:
+        raise ComposeError(f"the page renderer ends past {ping_cf.LOAD:#010x}, PING's chunk")
     ptable = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in pages.LABELS_OUT) + "\n"
     pblob = assemble(pages.source(csyms["wr_page_draw"]) + ptable, base=pages.LOAD)
     asm = pblob[:-4 * len(pages.LABELS_OUT)]
@@ -517,6 +520,10 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     spans = wave.span_bytes()
     layout["wr_spans"] = wave.SPANS_LOAD
     layout["wr_spans_end"] = wave.SPANS_LOAD + len(spans)
+    # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
+    pbuilt = ping_cf.compose(content, edit, assemble)
+    layout.update(pbuilt["layout"])
     return {"content": bytes(content), "edits": edits, "layout": layout,
             "chunk": {"load": pages.LOAD, "code": chunk},
-            "spans_chunk": {"load": wave.SPANS_LOAD, "code": spans}}
+            "spans_chunk": {"load": wave.SPANS_LOAD, "code": spans},
+            "ping_chunk": pbuilt["chunk"]}

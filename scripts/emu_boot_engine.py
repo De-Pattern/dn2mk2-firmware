@@ -52,6 +52,7 @@ from emu_lfo4_tick import (EVAL_A, MIRROR_AT, MIRROR_BYTES, RATE, REST,   # noqa
 LOAD, SAVE = 0x400DD1EA, 0x400DD6A6     # (live, stored) and (stored, live, flag)
 SOUND_BYTES, STORED, VALUES_AT = 1163, 359, 28
 MACHINE_TYPE, STORED_MACHINE = 0xDE, 244        # sound+0xDE; stored+244 (0x400dd74e)
+FILTER_TYPE, STORED_FILTER = 0xDF, 245          # sound+0xDF; stored+245 (0x400dd754)
 LFO4_IDS = [4, 8, 12, 16, 20, 24, 28, 32]          # the reserved p-lock ranks
 MARKS = [0x2A01, 0x2A02, 0x2A03, 0x2A04, 0x2A05, 0x2A06, 0x2A07, 0x2A08]
 EXT_SLOTS, EXT_PARAMS = 256, 8
@@ -163,6 +164,11 @@ def main() -> int:
                         "(sound+0xDE, stored+244); repeatable")
     p.add_argument("--machine-max", type=int, default=4,
                    help="the highest machine type the build's LOAD keeps (4 stock, 5 waverider)")
+    p.add_argument("--filter-type", type=int, action="append", default=[],
+                   help="after the engine, SAVE and LOAD a sound with this filter type "
+                        "(sound+0xDF, stored+245); repeatable")
+    p.add_argument("--filter-max", type=int, default=5,
+                   help="the highest filter type the build's LOAD keeps (5 stock, 6 PING)")
     args = p.parse_args()
 
     build = os.path.join(ROOT, args.build)
@@ -356,6 +362,30 @@ def main() -> int:
         if not ok:
             fails.append(f"machine type {v} did not round-trip as {want}")
 
+    # The filter type, the same way: PING widens the LOAD bound (0x400dd2bc) so
+    # type 6 survives; stock loads anything above 5 as 0, Multi-Mode.
+    for v in args.filter_type:
+        base = after.long(0x800052A0)
+        real = bytes(after.uc.mem_read(base + 52, SOUND_BYTES)) if base else bytes(SOUND_BYTES)
+        live = after.alloc(SOUND_BYTES + 16)
+        s = bytearray(real)
+        s[FILTER_TYPE] = v & 0xFF
+        after.write(live, bytes(s))
+        stored = after.alloc(STORED + 16)
+        after.call(SAVE, stored, live, 0)
+        on_disk = bytes(after.uc.mem_read(stored + STORED_FILTER, 1))[0]
+        back = after.alloc(SOUND_BYTES + 16)
+        after.call(LOAD, back, stored)
+        got = bytes(after.uc.mem_read(back + FILTER_TYPE, 1))[0]
+        machine_same = bytes(after.uc.mem_read(back + MACHINE_TYPE, 1))[0] == s[MACHINE_TYPE] or \
+            s[MACHINE_TYPE] > args.machine_max
+        want = v if 0 <= v <= args.filter_max else 0
+        ok = on_disk == v and got == want and machine_same
+        print(f"  {'ok  ' if ok else 'FAIL'}  filter type {v}: saved {on_disk}, loaded {got} "
+              f"(want {want}); machine type {'kept' if machine_same else 'changed'}")
+        if not ok:
+            fails.append(f"filter type {v} did not round-trip as {want}")
+
     # The save/load path, in the same boot. It is the one piece the gate
     # cannot see from a boot alone: no kit loads at reset, so the two
     # converter stubs never run, and until now they had only ever been
@@ -368,7 +398,8 @@ def main() -> int:
         print("  save/load: skipped -- this build exports no LFO4 symbols, so")
         print("  there are no converters to exercise. The boot and the engine")
         extra = [n for n, on in (("the arp MODE", args.arp_mode),
-                                 ("the machine type", args.machine_type)) if on]
+                                 ("the machine type", args.machine_type),
+                                 ("the filter type", args.filter_type)) if on]
         print("  above did run; the save/load path is untested here"
               + (f", beyond {' and '.join(extra)} round trip." if extra else "."))
         if fault:

@@ -95,6 +95,51 @@ key tracking).
 To confirm while building: that every machine's buffer is complete at the loop's
 entry, and that nothing in the chain runs before the filter stage.
 
+## P2: PING on the FLTR page (2026-10-13)
+
+Built (`dnfw.ping.coldfire`, `dnfw.ping.pages`, part of the waverider mod). In the
+ColdFire emulator, on the factory project:
+
+- MACHINE SEL's FLTR tab lists **PING** last, after Equalizer; YES sets the track's
+  filter byte (`sound+0xDF`) to 6, which the frame builder sends from its per-track
+  mirror with no bound (the frame read in the emulator carries 6 at `180 + 2t`; the
+  SHARC gate's step 6 renders a type-6 track from that field);
+- the FLTR page is Multi-Mode's page with PING's names:
+
+      page 1   ATK  DEC  CURV STRK  /  FREQ RING TYPE ENV
+      page 2   DRIV  .    .   KEY.T /  BASE WDTH BW.RT RSET
+
+  with Multi-Mode's response curve under FREQ / RING, which moves with FREQ;
+- choosing another filter puts every stock name back (`ping_names` follows the active
+  track, as W2's `wr_names` does);
+- SAVE / LOAD keep filter 6 (`emu_boot_engine.py --filter-type 6 --filter-max 6`, in
+  the ship gate); 7 and above still load as Multi-Mode, as on stock.
+
+| control | record (Multi-Mode / filter envelope) | PING |
+|---|---|---|
+| ATK | Attack Time (45) | the attack, 0.1 ms up |
+| DEC | Decay Time (46) | the decay |
+| CURV | Sustain Level (47) | the curve: log <- lin -> exp |
+| STRK | Release Time (48) | the built-in strike's level |
+| FREQ | Frequency (36) | the cutoff / ring pitch |
+| RING | Resonance (37) | the ring time |
+| TYPE | Filter Type (38) | quarters: SVF, LADR, VCFQ, LPG |
+| ENV | Env. Depth (49) | the envelope's depth on the cutoff |
+| DRIV | Env. Delay (44) | the drive into the loop |
+| KEY.T | Key Tracking (51) | the cutoff's tracking of the note |
+
+What the ColdFire changes (each with the stock bytes it replaces): the list (4 edits),
+the two name accessors (bound and table), the LOAD bound, `slot_to_id` (filter 6 reads
+Multi-Mode's row), the FLTR page descriptor (6 reads Multi-Mode's), and the page's
+response curve (6 draws Multi-Mode's). New code and data are one platform `CODE`
+chunk at `0x4670F000`.
+
+Known, not yet done:
+- TYPE's icon is Multi-Mode's LP/BP/HP morph; its four quarters are PING's four
+  types, but the icon does not say SVF / LADR / VCFQ / LPG.
+- The curve is Multi-Mode's shape, not PING's.
+- A sound saved with PING and loaded on stock firmware loads as Multi-Mode.
+
 ## Open
 
 - The owner's verdict on each type, by ear, and tuning from it.

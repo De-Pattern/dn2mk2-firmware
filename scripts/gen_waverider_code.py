@@ -32,6 +32,7 @@ from dnfw.firmware.load import load                     # noqa: E402
 from dnfw.patch.assemble import assemble, available     # noqa: E402
 from dnfw.waverider import coldfire as CF               # noqa: E402
 from dnfw.waverider import cpage                        # noqa: E402
+from dnfw.ping import coldfire as ping_cf               # noqa: E402
 
 STOCK = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip"
 OUT_JSON = ROOT / "src/dnfw/mods/waverider_code.json"
@@ -65,10 +66,12 @@ def main() -> int:
         "clone": CF.CLONE,
         "names": [CF.LONG_NAME, CF.SHORT_NAME],
         "edits": edits,
-        "guards": [{"va": va, "bytes": want, "what": why} for va, want, why in CF.GUARDS],
+        "guards": [{"va": va, "bytes": want, "what": why}
+                   for va, want, why in CF.GUARDS + ping_cf.GUARDS],
         "layout": {k: v for k, v in sorted(built["layout"].items())},
         "chunk": {"load": built["chunk"]["load"], "code": built["chunk"]["code"].hex()},
         "spans_chunk": {"load": built["spans_chunk"]["load"], "code": built["spans_chunk"]["code"].hex()},
+        "ping_chunk": {"load": built["ping_chunk"]["load"], "code": built["ping_chunk"]["code"].hex()},
     }
     OUT_JSON.write_bytes((json.dumps(code, indent=1) + "\n").encode())
     size = sum(len(e["new"]) // 2 for e in edits)
