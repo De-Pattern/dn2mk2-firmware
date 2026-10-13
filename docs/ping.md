@@ -54,6 +54,47 @@ Every type stays below the ceiling at full RES, DRIVE, STRIKE and ENV on a loud 
 | `07_types_side_by_side` | the same phrase through SVF, LADR, VCFQ, LPG on the VOX table |
 | `08_vcfq_liquid_fast` | 16ths at 150 BPM near self-oscillation |
 
+## As a filter type on every machine: feasibility (2026-10-13)
+
+The owner wants PING on the FLTR page, for any machine. Answered with the instruments:
+
+**ColdFire [D].** The FLTR tab of MACHINE SEL is built like the SYN tab Waverider
+extended:
+- the list `0x401ddd40` = `{0, 1, 4, 3, 5, 2}` (6 entries, UI order), copied into a
+  `std::vector` by `0x4004dae2` (`pea 0x18`, called from the view's builder at
+  `0x4005b4de`), beside the machine list `0x401ddd58` / `0x4004d8b6`;
+- the names: 12-byte rows `{long, short, 0}` at `0x401f77ac` (Multi-Mode/MM, Lowpass
+  4/LP4, Equalizer/EQU, Comb-/COMB-, Legacy LP/HP/LEG, Comb+/COMB+), read by
+  `0x400dc3a4` (long) and `0x400dc3ca` (short), each `moveq #5` bounded. The row after
+  Comb+ is the machine table's FM Tone, so a 7th name goes in a cave, as Waverider's
+  machine names did.
+So a 7th filter repeats Waverider's ColdFire steps (`docs/machine-list.md`): the list,
+the names, then whatever else bounds a filter type at 5 (stored-sound LOAD, the FLTR
+page tables, the slot-to-id map), with type 6 shown to the UI as Multimode, whose page
+fits PING one to one (ATK DEC SUS->CURVE REL->STRIKE / FREQ RESO->ring TYPE->sub-type
+ENV).
+
+**DSP [E].** `scripts/sharc_filter_probe.py` runs the stock per-block routine on the
+stock section 7 with each filter type in frame field `180 + 2t`, and reads the record:
+
+| ColdFire type | 0 | 1 | 2 | 3 | 4 | 5 | **6** | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| DSP number (record `+0x1dc`) | 1 | 3 | 2 | 4 | 5 | 6 | **0** | 0 | 0 | 1 |
+
+DSP number 0 is "no filter": the per-track chain skips the filter stage
+(`0x8052dbc0[n]`, bound `r1 = 7; compu(r2, r1); if ge jump` at sw `0x1c9581`). So
+**type 6 already reaches the DSP as a track with no filter, and no stock DSP table,
+bound or map needs to change.** PING runs inside Waverider's own per-block loop
+(`machine5_live.asm`), which is entered after every machine has rendered and before
+the per-track chain: for every track whose frame filter type is 6, whatever its
+machine, it filters the track buffer where the stock filter would have, reading the
+filter settings the unpack already put in the track record as floats (`+0x1c8` TYPE,
+`+0x1cc` FREQ, `+0x1d0` RESO, `+0x1ec..+0x1fc` the envelope, `+0x204` depth, `+0x208`
+key tracking).
+
+To confirm while building: that every machine's buffer is complete at the loop's
+entry, and that nothing in the chain runs before the filter stage.
+
 ## Open
 
 - The owner's verdict on each type, by ear, and tuning from it.
