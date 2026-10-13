@@ -64,7 +64,7 @@ CODE = pathlib.Path(__file__).with_name("sharc_code.json")
 # which is carved from the top of block 1 (16 KB at size code 0, the size the
 # startup writes; see docs/waverider-dsp-silence.md). REGION ends 36 KB below the
 # block's top, so it stays clear of a 16 KB or a 32 KB DM cache.
-REGION = (0x2DD600, 0x2E0500)                # W5: the tables moved to DDR; W2: + the scanner's state and tables
+REGION = (0x2DD600, 0x2E3B00)                # W5: tables to DDR; W2: + the scanner; PING: + its code, state, tables
 STOCK_BLOCK1_END = 0x2DD52C
 DM_CACHE_32K = 0x2E8000                      # the lowest byte a 32 KB DM cache would own
 CODE_SPAN = 0x400                            # each code object is padded to this
@@ -89,6 +89,13 @@ W2_STATE_DM, W2_STATE_STRIDE = LOOP_DM + LOOP_SPAN, 64       # 0x2df900
 W2_RATE_DM = W2_STATE_DM + 16 * W2_STATE_STRIDE              # 0x2dfd00: RATE -> u32 step a block
 W2_LEVEL_DM = W2_RATE_DM + 128 * 4                           # 0x2dff00: LEV -> float32 gain
 W2_RND_DM = W2_LEVEL_DM + 128 * 4                            # 0x2e0100: 256 float32 in [0, 1)
+# PING (docs/ping.md): its code (entered from machine5_live's tail), 16 x 128 bytes
+# of state, a few words of scratch, then its tables (dnfw.ping.live.tables_bytes)
+PING_CODE_DM, PING_CODE_SPAN = 0x2E0500, 0x1800
+PING_SW = PING_CODE_DM // 2                                  # 0x170280
+PING_STATE_DM = PING_CODE_DM + PING_CODE_SPAN                # 0x2e1d00
+PING_T_DM = PING_STATE_DM + 16 * 128                         # 0x2e2500: t, then scratch
+PING_TABLES_DM = PING_T_DM + 0x40                            # 0x2e2540
 
 # W5: the tables live in the SHARC's DDR (docs/w5-tables.md). The stock boot stream
 # loads DDR to 0x8052fbe0 and the engine's init writes up to 0x80530be8
@@ -165,7 +172,7 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump")}
+                         "entry_mark", "emark_jump", "ping")}
 
 
 def directory() -> bytes:
@@ -199,6 +206,9 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("W2 RATE table, 128 u32", W2_RATE_DM, struct.pack("<128I", *live.rate_table())),
         ("W2 LEV table, 128 float32", W2_LEVEL_DM, struct.pack("<128f", *live.level_table())),
         ("W2 random table, 256 float32", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
+        ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
+        ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),
+        ("PING tables", PING_TABLES_DM, _ping_tables()),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):
@@ -209,6 +219,11 @@ def spans() -> list[tuple[str, int, bytes]]:
             raise DspError(f"{what} leaves fewer than 64 bytes of NOP padding")
         out.append((what, dm_to_load(at), payload + bytes(end - at - len(payload))))
     return out
+
+
+def _ping_tables() -> bytes:
+    from ..ping import live as ping_live
+    return ping_live.tables_bytes()[0]
 
 
 def ddr_spans() -> list[tuple[str, int, bytes]]:

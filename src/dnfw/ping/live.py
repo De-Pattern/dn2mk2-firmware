@@ -201,6 +201,7 @@ def at127(t: list[float], v: float) -> float:
 def knee(x: float, k: float, room: float) -> float:
     """Exactly x while |x| <= k; above it, o = min(|x| - k, room) bends as
     o - o^2 / (2 room), reaching k + room / 2 with slope 0."""
+    k, room = _f32(k), _f32(room)              # the DSP's constants are float32
     a = abs(x)
     if a <= k:
         return x
@@ -229,20 +230,26 @@ def cubic(x: float) -> float:
 # -- the voice ----------------------------------------------------------------------------
 
 class Voice:
-    """One track's PING state, as the DSP holds it (zeroed at boot)."""
+    """One track's PING state, as the DSP holds it. The DSP's is zeroed at boot, so every
+    field's zero is its resting value: stage 0 is idle (1 attack, 2 decay), and hit 0 is
+    no strike (a note sets it to 1; sample n of the strike is hit = n + 1)."""
 
     def __init__(self):
         self.ic1 = self.ic2 = 0.0
         self.s = [0.0, 0.0, 0.0, 0.0]
-        self.stage = 2                      # 0 attack, 1 decay, 2 idle
+        self.stage = 0
         self.x = 0.0                        # the envelope phase in its stage
         self.vac = 0.0
-        self.hit = STRIKE_N                 # samples into the strike (STRIKE_N = none)
+        self.hit = 0
 
 
 def controls(rec: dict[int, float], note: float, T: dict) -> dict:
     """The block's settings from the record's floats and the note: everything that is
     constant across a block."""
+    # the note is validated as machine5_live does it: NaN, an infinity or a negative
+    # value (by its bits) is +0.0
+    if math.isnan(note) or math.isinf(note) or _bits(note) >> 31:
+        note = 0.0
     kind = min(3, trunc(_f32(min(max(rec[R_TYPE], 0.0), 1.0) * 4.0)))
     keyt = min(max(rec[R_KEYT], 0.0), 1.0)
     base = _f32(_f32(rec[R_FREQ] * 128.0) + _f32(keyt * _f32(note - 60.0)))
@@ -252,7 +259,7 @@ def controls(rec: dict[int, float], note: float, T: dict) -> dict:
         "env": _f32(_f32(rec[R_DEPTH] - 0.5) * 144.0),       # +-72 semitones
         "inv_tau": at127(T["inv_tau"], rec[R_RES]),
         "res": min(max(rec[R_RES], 0.0), 1.0),
-        "drive": _f32(0.4 + _f32(1.6 * min(max(rec[R_DRIVE], 0.0), 1.0))),
+        "drive": _f32(_f32(0.4) + _f32(_f32(1.6) * min(max(rec[R_DRIVE], 0.0), 1.0))),
         "atk": at127(T["atk"], rec[R_ATK]),
         "dec": at127(T["dec"], rec[R_DEC]),
         "curve": curve,
@@ -274,18 +281,18 @@ LPG_PULSE_INC = 1.0 / (4.0 * 48.0)  # the LPG's trigger: 4 ms, then the vactrol'
 
 
 def envelope(v: Voice, c: dict, T: dict) -> float:
-    if v.stage == 0:
+    if v.stage == 1:
         a = shape(v.x, -1.0 if c["kind"] == 3 else c["curve"], T)
         v.x = _f32(v.x + c["atk"])
         if v.x >= 1.0:
-            v.stage, v.x = 1, 0.0
+            v.stage, v.x = 2, 0.0
         return a
-    if v.stage == 1:
+    if v.stage == 2:
         lpg = c["kind"] == 3
         a = shape(_f32(1.0 - v.x), -1.0 if lpg else c["curve"], T)
         v.x = _f32(v.x + (_f32(LPG_PULSE_INC) if lpg else c["dec"]))
         if v.x >= 1.0:
-            v.stage, v.x = 2, 0.0
+            v.stage, v.x = 0, 0.0
         return a
     return 0.0
 
@@ -306,7 +313,7 @@ def svf(v: Voice, x: float, g: float, k: float) -> tuple[float, float]:
 def ladder(v: Voice, x: float, g: float, res: float) -> float:
     G = _f32(g * recip(_f32(1.0 + g)))
     d = recip(_f32(1.0 + g))
-    k = _f32(4.1 * res)
+    k = _f32(_f32(4.1) * res)
     G2 = _f32(G * G)
     G3 = _f32(G2 * G)
     G4 = _f32(G3 * G)
@@ -319,7 +326,7 @@ def ladder(v: Voice, x: float, g: float, res: float) -> float:
         y = _f32(w + v.s[i])
         v.s[i] = _f32(y + w)
         u = y
-    return _f32(u * _f32(1.0 + _f32(0.6 * k)))
+    return _f32(u * _f32(1.0 + _f32(_f32(0.6) * k)))
 
 
 def block(v: Voice, buf: list[float], rec: dict[int, float], note: float, trig: bool,
@@ -329,21 +336,21 @@ def block(v: Voice, buf: list[float], rec: dict[int, float], note: float, trig: 
     T = T or tables()
     c = controls(rec, note, T)
     if trig:
-        v.stage, v.x, v.hit = 0, 0.0, 0
+        v.stage, v.x, v.hit = 1, 0.0, 1
     late = 120 if c["kind"] == 3 else 0          # the LPG's click lands as it opens (2.5 ms)
     out = []
     for s in buf:
         x = _f32(s * c["drive"])
-        h = v.hit - late
-        if 0 <= h < STRIKE_N:
+        h = v.hit - 1 - late
+        if v.hit and 0 <= h < STRIKE_N:
             x = _f32(x + _f32(_f32(c["strike"] * c["hit"]) * T["strike"][h]))
-        if v.hit < STRIKE_N + late:
+        if v.hit and v.hit <= STRIKE_N + late:
             v.hit += 1
         a = envelope(v, c, T)
         if c["kind"] == 3:                                   # LPG
             led = a
             if led > v.vac:
-                v.vac = _f32(v.vac + _f32(_f32(led - v.vac) * 0.026)) # ~0.8 ms rise
+                v.vac = _f32(v.vac + _f32(_f32(led - v.vac) * _f32(0.026)))   # ~0.8 ms rise
             else:
                 step = _f32(c["dec"] * interp(T["vac"], _f32(v.vac * 64.0)))
                 v.vac = _f32(v.vac + _f32(_f32(led - v.vac) * min(step, 1.0)))
@@ -351,10 +358,10 @@ def block(v: Voice, buf: list[float], rec: dict[int, float], note: float, trig: 
             # the note number moves linearly, so the frequency moves exponentially
             p = _f32(22.5 + _f32(_f32(_f32(c["base"] + c["env"]) - 22.5) * v.vac))
             g = interp(T["g"], p)
-            k = max(_f32(interp(T["w"], p) * at127(T["inv_tau"], _f32(0.6 * c["res"]))), 0.05)
+            k = max(_f32(interp(T["w"], p) * at127(T["inv_tau"], _f32(_f32(0.6) * c["res"]))), _f32(0.05))
             _, low = svf(v, x, g, min(k, 2.0))
             # the level, about vactrol ** 1.4: v (0.6 + 0.4 v) agrees at 0, 0.5 and 1
-            y = _f32(low * _f32(v.vac * _f32(0.6 + _f32(0.4 * v.vac))))
+            y = _f32(low * _f32(v.vac * _f32(_f32(0.6) + _f32(_f32(0.4) * v.vac))))
         else:
             p = _f32(c["base"] + _f32(c["env"] * a))
             g = interp(T["g"], p)
@@ -362,10 +369,10 @@ def block(v: Voice, buf: list[float], rec: dict[int, float], note: float, trig: 
                 y = _f32(ladder(v, x, g, c["res"]) * a)
             else:
                 k = _f32(interp(T["w"], p) * c["inv_tau"])
-                if c["kind"] == 2 and c["res"] >= 0.97:      # VCFQ past its edge
-                    k = _f32(-0.004 * _f32(_f32(c["res"] - 0.97) * _f32(1.0 / 0.03)))
+                if c["kind"] == 2 and c["res"] >= _f32(0.97):      # VCFQ past its edge
+                    k = _f32(_f32(-0.004) * _f32(_f32(c["res"] - _f32(0.97)) * _f32(1.0 / 0.03)))
                 else:
-                    k = min(max(k, 0.0004), 2.0)
+                    k = min(max(k, _f32(0.0004)), 2.0)
                 band, low = svf(v, x, g, k)
                 y = _f32((band if c["kind"] == 2 else low) * a)
         out.append(ceiling(y))

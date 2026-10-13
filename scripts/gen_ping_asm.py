@@ -1,0 +1,738 @@
+"""Write `csrc/waverider/sharc/ping.asm`: PING on the DSP, generated from one template so
+that every repeated idiom (a table read, the reciprocal, a knee) is written once.
+
+    python scripts/gen_ping_asm.py
+
+The output is committed and is what selas assembles (`scripts/gen_waverider_sharc.py
+--assemble`); this script only exists so the 400-odd instructions are produced the
+same way every time. The code mirrors `dnfw.ping.live` operation by operation, in its
+order, so the SHARC gate can hold it to that module bit for bit. Branch targets are
+written as `0x0` with a `// -> label.` comment; `scripts/sharc_resolve_jumps.py`
+fills them in.
+
+Instruction forms: only those Waverider's loop already uses (and the gate checks
+that selmap and digikit read every one as written).
+"""
+
+from __future__ import annotations
+
+import pathlib
+import struct
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from dnfw.ping import live as L                     # noqa: E402
+from dnfw.waverider import dsp                      # noqa: E402
+
+OUT = ROOT / "csrc" / "waverider" / "sharc" / "ping.asm"
+
+
+def fbits(x: float) -> str:
+    return f"0x{struct.unpack('<I', struct.pack('<f', x))[0]:08x}"
+
+
+_, AT = L.tables_bytes()
+TAB = {name: dsp.PING_TABLES_DM + off for name, off in AT.items()}
+LENS = {name: len(t) for name, t in L.tables().items()}
+STATE = dsp.PING_STATE_DM
+SAVE = 0x2DDE00                      # machine5_live's save area (R0-R15, I0-I5, I12, M0-M4)
+
+# per-track state words (dnfw.ping.live.Voice, then the block's controls)
+S = dict(ic1=0, ic2=1, s0=2, s1=3, s2=4, s3=5, stage=6, x=7, vac=8, hit=9,
+         kind=16, base=17, env=18, inv_tau=19, res=20, drive=21, atk=22, dec_env=23,
+         curve=24, strike_hit=25, late=26, hit_end=27, left=28, k_vcfq=29, lpg_q=30,
+         dec_vac=31, lpg_inv_tau=10, t=11)
+STATE_STRIDE = 128
+
+lines: list[str] = []
+n_label = [0]
+
+
+def emit(s: str = "") -> None:
+    lines.append(s)
+
+
+def label(stem: str) -> str:
+    n_label[0] += 1
+    return f"wr_p_{stem}_{n_label[0]}"
+
+
+def place(name: str) -> None:
+    emit(f".GLOBAL {name}.;")
+    emit(f"{name}.:")
+
+
+def jump(cond: str, target: str) -> None:
+    pre = f"IF {cond} " if cond else ""
+    emit(f"      {pre}JUMP 0x0;".ljust(40) + f"// -> {target}.")
+
+
+def fconst(reg: int, value: float, note: str = "") -> None:
+    """R{reg} = the float32 bits of VALUE; a value with the top bit set is written as a
+    negative number, as selmap prints it (the same 32 bits either way)."""
+    b = struct.unpack('<I', struct.pack('<f', value))[0]
+    lit = f"-{(1 << 32) - b:#x}" if b >> 31 else f"{b:#010x}"
+    emit(f"      R{reg} = {lit};".ljust(40) + (f"// {note}" if note else f"// {value!r}"))
+
+
+def interp(table: str, fx: int, out: int) -> None:
+    """F{out} = live.interp(table, F{fx}). Clobbers R0-R3, R12, I1; F{fx} is clamped in
+    place. live: x = min(max(x, 0), top); i = trunc(x); f = x - float(i);
+    t[i] + f * (t[i+1] - t[i])."""
+    top = LENS[table] - 2
+    emit(f"      // F{out} = {table}[F{fx}], interpolated")
+    emit("      R12 = R12 - R12;")
+    emit(f"      F{fx} = MAX(F{fx}, F12);")
+    fconst(12, float(top))
+    emit(f"      F{fx} = MIN(F{fx}, F12);")
+    emit(f"      R0 = TRUNC F{fx};")
+    emit("      R12 = R12 - R12;")
+    emit("      F1 = FLOAT R0 BY R12;")
+    emit(f"      F1 = F{fx} - F1;".ljust(40) + "// f")
+    emit("      R0 = LSHIFT R0 BY 2;")
+    emit(f"      R12 = {TAB[table]:#x};".ljust(40) + f"// {table}")
+    emit("      R0 = R12 + R0;")
+    emit("      I1 = R0;")
+    emit("      R2 = DM(0, I1);")
+    emit("      R3 = DM(1, I1);")
+    emit("      F3 = F3 - F2;")
+    emit("      F3 = F1 * F3;")
+    emit(f"      F{out} = F2 + F3;")
+
+
+def at127(table: str, fv: int, out: int) -> None:
+    """F{out} = table[trunc(clamp(F{fv}, 0, 1) * 127)]. Clobbers R0, R12, I1, F{fv}."""
+    emit(f"      // F{out} = {table}[trunc(F{fv} * 127)]")
+    emit("      R12 = R12 - R12;")
+    emit(f"      F{fv} = MAX(F{fv}, F12);")
+    fconst(12, 1.0)
+    emit(f"      F{fv} = MIN(F{fv}, F12);")
+    fconst(12, 127.0)
+    emit(f"      F{fv} = F{fv} * F12;")
+    emit(f"      R0 = TRUNC F{fv};")
+    emit("      R0 = LSHIFT R0 BY 2;")
+    emit(f"      R12 = {TAB[table]:#x};".ljust(40) + f"// {table}")
+    emit("      R0 = R12 + R0;")
+    emit("      I1 = R0;")
+    emit(f"      R{out} = DM(0, I1);")
+
+
+def clamp01(f: int) -> None:
+    emit("      R12 = R12 - R12;")
+    emit(f"      F{f} = MAX(F{f}, F12);")
+    fconst(12, 1.0)
+    emit(f"      F{f} = MIN(F{f}, F12);")
+
+
+def recip(fx: int, out: int) -> None:
+    """F{out} = live.recip(F{fx}): R{out} = 0x7ef311c7 - R{fx}, then three times
+    r = r * (2 - x * r). Clobbers R12, R13."""
+    emit(f"      // F{out} = 1 / F{fx}")
+    emit("      R12 = 0x7ef311c7;")
+    emit(f"      R{out} = R12 - R{fx};")
+    for _ in range(3):
+        emit(f"      F13 = F{fx} * F{out};")
+        fconst(12, 2.0)
+        emit("      F13 = F12 - F13;")
+        emit(f"      F{out} = F{out} * F13;")
+
+
+def knee(f: int, k: float, room: float) -> None:
+    """F{f} = live.knee(F{f}, k, room), in place. Clobbers R12, R13, R14, R15."""
+    lin, neg, done = label("lin"), label("neg"), label("kdone")
+    emit(f"      // F{f} = knee(F{f}, {k}, {room})")
+    emit("      R12 = R12 - R12;")
+    emit(f"      F14 = F12 - F{f};".ljust(40) + "// -x")
+    emit(f"      COMP(F{f}, F12);")
+    jump("LT", neg)
+    emit(f"      F14 = PASS F{f};".ljust(40) + "// |x|")
+    place(neg)
+    fconst(12, k)
+    emit("      COMP(F14, F12);")
+    jump("LE", lin)
+    emit("      F14 = F14 - F12;".ljust(40) + "// |x| - k")
+    fconst(12, room)
+    emit("      F14 = MIN(F14, F12);".ljust(40) + "// o")
+    emit("      F15 = F14 * F14;")
+    fconst(12, 0.5 / room)
+    emit("      F15 = F15 * F12;")
+    emit("      F15 = F14 - F15;")
+    fconst(12, k)
+    emit("      F15 = F12 + F15;".ljust(40) + "// y = k + (o - o^2 / 2room)")
+    emit("      R12 = R12 - R12;")
+    emit(f"      COMP(F{f}, F12);")
+    jump("LT", neg2 := label("kneg"))                 # the sign of x (x != 0 here)
+    emit(f"      F{f} = PASS F15;")
+    jump("", lin)
+    place(neg2)
+    emit(f"      F{f} = F12 - F15;")
+    place(lin)
+
+
+def cubic(f: int) -> None:
+    """F{f} = live.cubic(F{f}). Clobbers R12, R13."""
+    fconst(12, -1.5)
+    emit(f"      F{f} = MAX(F{f}, F12);")
+    fconst(12, 1.5)
+    emit(f"      F{f} = MIN(F{f}, F12);")
+    emit(f"      F13 = F{f} * F{f};")
+    emit(f"      F13 = F13 * F{f};")
+    fconst(12, 4.0 / 27.0)
+    emit("      F13 = F13 * F12;")
+    emit(f"      F{f} = F{f} - F13;")
+
+
+def ld(reg: int, word: str) -> None:
+    emit(f"      R{reg} = DM({S[word]}, I2);".ljust(40) + f"// {word}")
+
+
+def st(reg: int, word: str) -> None:
+    emit(f"      DM({S[word]}, I2) = R{reg};".ljust(40) + f"// {word}")
+
+
+def svf(fx: int, fg: int, fk: int) -> None:
+    """live.svf: band -> F6, low -> F7. Inputs F{fx}, F{fg}, F{fk} (fk is clobbered).
+    Uses R4..R7, R10, R11 and the state's ic1/ic2."""
+    emit("      // the SVF step")
+    emit(f"      F{fk} = F{fg} + F{fk};".ljust(40) + "// g + k")
+    emit(f"      F{fk} = F{fg} * F{fk};")
+    fconst(12, 1.0)
+    emit(f"      F{fk} = F12 + F{fk};".ljust(40) + "// 1 + g (g + k)")
+    recip(fk, 14)                                    # a1 -> F14
+    emit(f"      F5 = F{fg} * F14;".ljust(40) + "// a2")
+    emit(f"      F10 = F{fg} * F5;".ljust(40) + "// a3")
+    ld(6, "ic1")
+    ld(7, "ic2")
+    emit(f"      F11 = F{fx} - F7;".ljust(40) + "// v3")
+    emit("      F12 = F14 * F6;")
+    emit("      F13 = F5 * F11;")
+    emit("      F4 = F12 + F13;".ljust(40) + "// v1")
+    emit("      F12 = F5 * F6;")
+    emit("      F12 = F7 + F12;")
+    emit("      F13 = F10 * F11;")
+    emit("      F5 = F12 + F13;".ljust(40) + "// v2")
+    emit("      F12 = F4 + F4;")
+    emit("      F6 = F12 - F6;".ljust(40) + "// 2 v1 - ic1")
+    knee(6, 1.0, 1.2)
+    st(6, "ic1")
+    emit("      F12 = F5 + F5;")
+    emit("      F7 = F12 - F7;")
+    st(7, "ic2")
+    emit("      F6 = PASS F4;".ljust(40) + "// band")
+    emit("      F7 = PASS F5;".ljust(40) + "// low")
+
+
+def build() -> str:
+    emit("// ping.asm -- PING, a filter on any track whose filter type is 6 (docs/ping.md).")
+    emit("// GENERATED by scripts/gen_ping_asm.py from one template; do not edit by hand.")
+    emit("// The contract is dnfw.ping.live, operation by operation and in its order: the")
+    emit("// SHARC gate holds this code to it bit for bit.")
+    emit("//")
+    emit("// Entered by machine5_live.asm's tail (in place of its register restore), once a")
+    emit("// block, after every machine has rendered and before the per-track chain. The")
+    emit("// stock unpack maps filter type 6 to DSP filter 0, \"no filter\" (measured), so")
+    emit("// this is the only filter such a track gets. For each of the 16 tracks whose")
+    emit("// frame filter type (0x25c48c + 180 + 2t) is 6, it reads the stock filter fields")
+    emit("// the unpack wrote to the track record as floats, and filters the track buffer")
+    emit("// in place. Then it restores what machine5_live saved and rejoins the chain.")
+    emit(f"// State: 16 x {STATE_STRIDE} bytes at {STATE:#x}. Tables: {dsp.PING_TABLES_DM:#x}.")
+    emit("")
+    emit(".SECTION/PM seg_pmco;")
+    emit("")
+    emit(".GLOBAL wr_ping.;")
+    emit("wr_ping.:")
+    emit("      R0 = R0 - R0;")
+    emit(f"      DM({dsp.PING_T_DM:#x}) = R0;".ljust(40) + "// t = 0")
+    place("wr_p_track")
+    emit(f"      R9 = DM({dsp.PING_T_DM:#x});".ljust(40) + "// t")
+    # filter type: 16-bit word at 0x25c48c + 180 + 2t = 0x25c540 + 2t
+    emit("      R0 = LSHIFT R9 BY 1;")
+    emit("      R12 = 0x25c540;".ljust(40) + "// frame copy + 180")
+    emit("      R0 = R12 + R0;")
+    emit("      R1 = 2;")
+    emit("      R1 = R0 AND R1;")
+    emit("      R2 = -4;")
+    emit("      R0 = R0 AND R2;")
+    emit("      I1 = R0;")
+    emit("      R0 = DM(0, I1);")
+    emit("      R7 = -16;")
+    emit("      R1 = PASS R1;")
+    lo = label("ftlo")
+    jump("EQ", lo)
+    emit("      R0 = LSHIFT R0 BY R7;")
+    place(lo)
+    emit("      R6 = 0xffff;")
+    emit("      R0 = R0 AND R6;")
+    emit(f"      R1 = {L.FILTER_TYPE};")
+    emit("      COMP(R0, R1);")
+    jump("NE", "wr_p_next")
+    # state base and record base
+    emit("      R12 = LSHIFT R9 BY 7;")
+    emit(f"      R11 = {STATE:#x};")
+    emit("      R12 = R11 + R12;")
+    emit("      I2 = R12;".ljust(40) + "// this track's PING state")
+    emit("      R12 = LSHIFT R9 BY 9;".ljust(40) + "// record: 0x2554b8 + 0x234 t")
+    emit("      R13 = LSHIFT R9 BY 5;")
+    emit("      R12 = R12 + R13;")
+    emit("      R13 = LSHIFT R9 BY 4;")
+    emit("      R12 = R12 + R13;")
+    emit("      R13 = LSHIFT R9 BY 2;")
+    emit("      R12 = R12 + R13;")
+    emit("      R11 = 0x2554b8;")
+    emit("      R12 = R11 + R12;")
+    emit("      I4 = R12;")
+    # --- controls (live.controls) ---
+    emit("      // kind = min(3, trunc(clamp(TYPE) * 4))")
+    emit(f"      R8 = DM({L.R_TYPE // 4}, I4);")
+    clamp01(8)
+    fconst(12, 4.0)
+    emit("      F8 = F8 * F12;")
+    emit("      R8 = TRUNC F8;")
+    emit("      R12 = 3;")
+    emit("      R8 = MIN(R8, R12);")
+    st(8, "kind")
+    emit("      // keyt, note (validated as machine5_live does), base")
+    emit(f"      R10 = DM({L.R_KEYT // 4}, I4);")
+    clamp01(10)
+    emit("      R12 = LSHIFT R9 BY 2;")
+    emit("      R11 = 0x254b14;".ljust(40) + "// the note cells")
+    emit("      R12 = R11 + R12;")
+    emit("      I1 = R12;")
+    emit("      R11 = DM(0, I1);".ljust(40) + "// note, float semitones")
+    emit("      R12 = LSHIFT R11 BY -23;")
+    emit("      R13 = 0xff;")
+    emit("      R12 = R12 AND R13;")
+    bad, ok = label("note0"), label("noteok")
+    emit("      COMP(R12, R13);")
+    jump("EQ", bad)
+    emit("      R11 = PASS R11;")
+    jump("LT", bad)
+    jump("", ok)
+    place(bad)
+    emit("      R11 = R11 - R11;")
+    place(ok)
+    fconst(12, 60.0)
+    emit("      F11 = F11 - F12;")
+    emit("      F11 = F10 * F11;".ljust(40) + "// keyt (note - 60)")
+    emit(f"      R10 = DM({L.R_FREQ // 4}, I4);")
+    fconst(12, 128.0)
+    emit("      F10 = F10 * F12;")
+    emit("      F10 = F10 + F11;".ljust(40) + "// base")
+    st(10, "base")
+    emit(f"      R11 = DM({L.R_DEPTH // 4}, I4);")
+    fconst(12, 0.5)
+    emit("      F11 = F11 - F12;")
+    fconst(12, 144.0)
+    emit("      F11 = F11 * F12;")
+    st(11, "env")
+    emit(f"      R4 = DM({L.R_RES // 4}, I4);")
+    emit("      R5 = PASS R4;")
+    at127("inv_tau", 4, 6)
+    st(6, "inv_tau")
+    clamp01(5)
+    st(5, "res")
+    emit(f"      R4 = DM({L.R_DRIVE // 4}, I4);")
+    clamp01(4)
+    fconst(12, 1.6)
+    emit("      F4 = F12 * F4;")
+    fconst(12, 0.4)
+    emit("      F4 = F12 + F4;")
+    st(4, "drive")
+    emit(f"      R4 = DM({L.R_ATK // 4}, I4);")
+    at127("atk", 4, 6)
+    st(6, "atk")
+    emit(f"      R4 = DM({L.R_DEC // 4}, I4);")
+    at127("dec", 4, 6)
+    st(6, "dec_vac")
+    st(6, "dec_env")
+    emit(f"      R4 = DM({L.R_CURVE // 4}, I4);")
+    clamp01(4)
+    fconst(12, 2.0)
+    emit("      F4 = F4 * F12;")
+    fconst(12, 1.0)
+    emit("      F4 = F4 - F12;")
+    st(4, "curve")
+    emit(f"      R4 = DM({L.R_STRIKE // 4}, I4);")
+    clamp01(4)
+    emit("      // hit gain: interp(hit, base) for SVF and VCFQ, else 2.5")
+    fconst(6, 2.5)
+    emit("      R12 = 1;")
+    emit("      COMP(R8, R12);")
+    nohit = label("nohit")
+    jump("EQ", nohit)
+    emit("      R12 = 3;")
+    emit("      COMP(R8, R12);")
+    jump("EQ", nohit)
+    ld(7, "base")
+    interp("hit", 7, 6)
+    place(nohit)
+    emit("      F4 = F4 * F6;".ljust(40) + "// strike * hit")
+    st(4, "strike_hit")
+    # LPG specifics; VCFQ's k past its edge
+    emit("      R0 = R0 - R0;")
+    st(0, "late")
+    emit("      R12 = 3;")
+    emit("      COMP(R8, R12);")
+    notlpg = label("notlpg")
+    jump("NE", notlpg)
+    emit("      R0 = 120;")
+    st(0, "late")
+    fconst(0, -1.0)
+    st(0, "curve")
+    fconst(0, L._f32(L.LPG_PULSE_INC))
+    st(0, "dec_env")
+    ld(4, "res")
+    fconst(12, 0.6)
+    emit("      F4 = F4 * F12;")
+    at127("inv_tau", 4, 6)
+    st(6, "lpg_inv_tau")
+    ld(4, "base")
+    ld(5, "env")
+    emit("      F4 = F4 + F5;")
+    fconst(12, 22.5)
+    emit("      F4 = F4 - F12;")
+    st(4, "lpg_q")
+    place(notlpg)
+    emit("      // VCFQ past its edge: k = -0.004 (res - 0.97) / 0.03")
+    ld(4, "res")
+    fconst(12, 0.97)
+    emit("      F4 = F4 - F12;")
+    fconst(12, 1.0 / 0.03)
+    emit("      F4 = F4 * F12;")
+    fconst(12, -0.004)
+    emit("      F4 = F12 * F4;")
+    st(4, "k_vcfq")
+    ld(0, "late")
+    emit(f"      R12 = {L.STRIKE_N};")
+    emit("      R0 = R12 + R0;")
+    st(0, "hit_end")
+    # trigger
+    emit("      R0 = DM(0x25c4ac);")
+    emit("      R0 = LSHIFT R0 BY -16;".ljust(40) + "// TRIG_NOTE")
+    emit("      R2 = 1;")
+    emit("      R2 = LSHIFT R2 BY R9;")
+    emit("      R0 = R0 AND R2;")
+    notrig = label("notrig")
+    jump("EQ", notrig)
+    emit("      R0 = 1;")
+    st(0, "stage")                                   # attack
+    st(0, "hit")                                     # the strike's first sample
+    emit("      R0 = R0 - R0;")
+    st(0, "x")
+    place(notrig)
+    # the buffer and the count
+    emit("      R12 = LSHIFT R9 BY 2;")
+    emit("      R11 = 0x254a60;".ljust(40) + "// the track buffers")
+    emit("      R12 = R11 + R12;")
+    emit("      I1 = R12;")
+    emit("      R0 = DM(0, I1);")
+    emit("      I0 = R0;".ljust(40) + "// this track's 32 floats")
+    emit(f"      R0 = DM({SAVE + 0x24:#x});".ljust(40) + "// the block size (the dispatch's R9)")
+    emit("      R0 = PASS R0;")
+    jump("EQ", "wr_p_next")
+    st(0, "left")
+
+    # ---------------- per sample ----------------
+    place("wr_p_sample")
+    emit("      R8 = DM(0, I0);".ljust(40) + "// the machine's sample")
+    ld(12, "drive")
+    emit("      F8 = F8 * F12;")
+    emit("      // the strike: hit 0 is none; h = hit - 1 - late; 0 <= h < 15 adds strike_hit * click[h]")
+    ld(0, "hit")
+    hdone, nos = label("hdone"), label("nostrike")
+    emit("      R0 = PASS R0;")
+    jump("EQ", hdone)
+    ld(1, "late")
+    emit("      R2 = R0 - R1;")
+    emit("      R12 = 1;")
+    emit("      R2 = R2 - R12;")
+    jump("LT", nos)
+    emit(f"      R12 = {L.STRIKE_N};")
+    emit("      COMP(R2, R12);")
+    jump("GE", nos)
+    emit("      R2 = LSHIFT R2 BY 2;")
+    emit(f"      R12 = {TAB['strike']:#x};")
+    emit("      R2 = R12 + R2;")
+    emit("      I1 = R2;")
+    emit("      R3 = DM(0, I1);")
+    ld(12, "strike_hit")
+    emit("      F3 = F12 * F3;")
+    emit("      F8 = F8 + F3;")
+    place(nos)
+    ld(1, "hit_end")
+    emit("      COMP(R0, R1);")
+    jump("GT", hdone)
+    emit("      R12 = 1;")
+    emit("      R0 = R12 + R0;")
+    st(0, "hit")
+    place(hdone)
+
+    # envelope -> F9
+    emit("      // the envelope (live.envelope) -> F9: stage 1 attack, 2 decay, else idle")
+    ld(0, "stage")
+    s_dec, s_idle, e_done = label("edec"), label("eidle"), label("edone")
+    emit("      R12 = 1;")
+    emit("      COMP(R0, R12);")
+    jump("NE", s_dec)
+    ld(4, "x")
+    shape_into(4, 9)
+    ld(4, "x")
+    ld(12, "atk")
+    emit("      F4 = F4 + F12;")
+    st(4, "x")
+    fconst(12, 1.0)
+    emit("      COMP(F4, F12);")
+    jump("LT", e_done)
+    emit("      R0 = 2;")
+    st(0, "stage")
+    emit("      R0 = R0 - R0;")
+    st(0, "x")
+    jump("", e_done)
+    place(s_dec)
+    emit("      R12 = 2;")
+    emit("      COMP(R0, R12);")
+    jump("NE", s_idle)
+    ld(4, "x")
+    fconst(12, 1.0)
+    emit("      F4 = F12 - F4;")
+    shape_into(4, 9)
+    ld(4, "x")
+    ld(12, "dec_env")
+    emit("      F4 = F4 + F12;")
+    st(4, "x")
+    fconst(12, 1.0)
+    emit("      COMP(F4, F12);")
+    jump("LT", e_done)
+    emit("      R0 = R0 - R0;")
+    st(0, "stage")
+    st(0, "x")
+    jump("", e_done)
+    place(s_idle)
+    emit("      R9 = R9 - R9;".ljust(40) + "// a = 0.0")
+    place(e_done)
+
+    # the cores -> F10
+    ld(0, "kind")
+    emit("      R12 = 3;")
+    emit("      COMP(R0, R12);")
+    jump("EQ", "wr_p_lpg")
+    emit("      // SVF, LADR, VCFQ: p = base + env a; g = interp(g, p)")
+    ld(4, "env")
+    emit("      F4 = F4 * F9;")
+    ld(12, "base")
+    emit("      F4 = F12 + F4;")
+    emit("      F11 = PASS F4;".ljust(40) + "// p, kept for w")
+    emit("      R15 = PASS R4;")
+    interp("g", 15, 15)                         # g -> F15 (F15 was a copy of p, clamped)
+    emit(f"      DM({dsp.PING_T_DM + 4:#x}) = R15;".ljust(40) + "// g (scratch)")
+    ld(0, "kind")
+    emit("      R12 = 1;")
+    emit("      COMP(R0, R12);")
+    jump("EQ", "wr_p_ladr")
+    emit("      // SVF / VCFQ: k = interp(w, p) * inv_tau, or VCFQ's past its edge")
+    interp("w", 11, 4)
+    ld(12, "inv_tau")
+    emit("      F4 = F4 * F12;")
+    fconst(12, 0.0004)
+    emit("      F4 = MAX(F4, F12);")
+    fconst(12, 2.0)
+    emit("      F4 = MIN(F4, F12);")
+    ld(0, "kind")
+    emit("      R12 = 2;")
+    emit("      COMP(R0, R12);")
+    kset = label("kset")
+    jump("NE", kset)
+    ld(5, "res")
+    fconst(12, 0.97)
+    emit("      COMP(F5, F12);")
+    jump("LT", kset)
+    ld(4, "k_vcfq")
+    place(kset)
+    emit(f"      R15 = DM({dsp.PING_T_DM + 4:#x});".ljust(40) + "// g")
+    svf(8, 15, 4)
+    ld(0, "kind")
+    emit("      R12 = 2;")
+    emit("      F10 = PASS F7;".ljust(40) + "// low (SVF)")
+    emit("      COMP(R0, R12);")
+    lowk = label("lowk")
+    jump("NE", lowk)
+    emit("      F10 = PASS F6;".ljust(40) + "// band (VCFQ)")
+    place(lowk)
+    emit("      F10 = F10 * F9;")
+    jump("", "wr_p_out")
+
+    # ---- LADR ----
+    place("wr_p_ladr")
+    emit("      // the ladder (live.ladder): F15 = g")
+    fconst(12, 1.0)
+    emit("      F4 = F12 + F15;")
+    recip(4, 5)                                  # d = 1 / (1 + g) -> F5
+    emit("      F6 = F15 * F5;".ljust(40) + "// G")
+    ld(4, "res")
+    fconst(12, 4.1)
+    emit("      F7 = F12 * F4;".ljust(40) + "// k")
+    emit("      F0 = F6 * F6;".ljust(40) + "// G2")
+    emit("      F1 = F0 * F6;".ljust(40) + "// G3")
+    emit("      F2 = F1 * F6;".ljust(40) + "// G4")
+    emit(f"      DM({dsp.PING_T_DM + 8:#x}) = R2;".ljust(40) + "// G4 (scratch)")
+    ld(3, "s0")
+    emit("      F3 = F3 * F5;")
+    emit("      F3 = F1 * F3;".ljust(40) + "// G3 s1'")
+    ld(4, "s1")
+    emit("      F4 = F4 * F5;")
+    emit("      F4 = F0 * F4;".ljust(40) + "// G2 s2'")
+    emit("      F3 = F3 + F4;")
+    ld(4, "s2")
+    emit("      F4 = F4 * F5;")
+    emit("      F4 = F6 * F4;".ljust(40) + "// G s3'")
+    emit("      F3 = F3 + F4;")
+    ld(4, "s3")
+    emit("      F4 = F4 * F5;")
+    emit("      F3 = F3 + F4;".ljust(40) + "// sigma")
+    emit("      F4 = F2 * F8;".ljust(40) + "// G4 x")
+    emit("      F4 = F4 + F3;")
+    emit("      F10 = PASS F4;")
+    emit("      F4 = F7 * F2;".ljust(40) + "// k G4")
+    fconst(12, 1.0)
+    emit("      F4 = F12 + F4;")
+    recip(4, 5)
+    emit("      F10 = F10 * F5;".ljust(40) + "// y4")
+    emit("      F10 = F7 * F10;")
+    emit("      F10 = F8 - F10;".ljust(40) + "// x - k y4")
+    cubic(10)                                    # u -> F10
+    for i in range(4):
+        ld(3, f"s{i}")
+        emit("      F4 = F10 - F3;")
+        emit("      F4 = F4 * F6;".ljust(40) + "// w")
+        emit("      F5 = F4 + F3;".ljust(40) + "// y")
+        emit("      F3 = F5 + F4;")
+        st(3, f"s{i}")
+        emit("      F10 = PASS F5;")
+    fconst(12, 0.6)
+    emit("      F4 = F12 * F7;")
+    fconst(12, 1.0)
+    emit("      F4 = F12 + F4;")
+    emit("      F10 = F10 * F4;")
+    emit("      F10 = F10 * F9;")
+    jump("", "wr_p_out")
+
+    # ---- LPG ----
+    place("wr_p_lpg")
+    emit("      // the vactrol: rise 0.026 a sample, fall dec_vac * vac_table[vac * 64]")
+    ld(4, "vac")
+    emit("      COMP(F9, F4);")
+    fall, vset = label("fall"), label("vset")
+    jump("LE", fall)
+    emit("      F5 = F9 - F4;")
+    fconst(12, L._f32(0.026))
+    emit("      F5 = F5 * F12;")
+    emit("      F4 = F4 + F5;")
+    jump("", vset)
+    place(fall)
+    emit("      F11 = PASS F4;")
+    fconst(12, 64.0)
+    emit("      F11 = F11 * F12;")
+    interp("vac", 11, 6)
+    ld(4, "vac")
+    ld(12, "dec_vac")
+    emit("      F6 = F12 * F6;".ljust(40) + "// step")
+    fconst(12, 1.0)
+    emit("      F6 = MIN(F6, F12);")
+    emit("      F5 = F9 - F4;")
+    emit("      F5 = F5 * F6;")
+    emit("      F4 = F4 + F5;")
+    place(vset)
+    st(4, "vac")
+    emit("      // p = 22.5 + q vac; g; k = max(interp(w, p) * lpg_inv_tau, 0.05)")
+    ld(5, "lpg_q")
+    emit("      F5 = F5 * F4;")
+    fconst(12, 22.5)
+    emit("      F11 = F12 + F5;")
+    emit("      F15 = PASS F11;")
+    emit(f"      DM({dsp.PING_T_DM + 8:#x}) = R11;".ljust(40) + "// p (scratch)")
+    interp("g", 15, 15)
+    emit(f"      R11 = DM({dsp.PING_T_DM + 8:#x});")
+    interp("w", 11, 4)
+    ld(12, "lpg_inv_tau")
+    emit("      F4 = F4 * F12;")
+    fconst(12, 0.05)
+    emit("      F4 = MAX(F4, F12);")
+    fconst(12, 2.0)
+    emit("      F4 = MIN(F4, F12);")
+    svf(8, 15, 4)
+    ld(4, "vac")
+    fconst(12, 0.4)
+    emit("      F5 = F12 * F4;")
+    fconst(12, 0.6)
+    emit("      F5 = F12 + F5;")
+    emit("      F5 = F4 * F5;")
+    emit("      F10 = F7 * F5;")
+
+    # ---- out ----
+    place("wr_p_out")
+    knee(10, 0.6, 0.6)
+    emit("      DM(I0, M6) = F10;")
+    ld(0, "left")
+    emit("      R12 = 1;")
+    emit("      R0 = R0 - R12;")
+    st(0, "left")
+    jump("NE", "wr_p_sample")
+
+    place("wr_p_next")
+    emit(f"      R0 = DM({dsp.PING_T_DM:#x});")
+    emit("      R12 = 1;")
+    emit("      R0 = R12 + R0;")
+    emit(f"      DM({dsp.PING_T_DM:#x}) = R0;")
+    emit("      R12 = 16;")
+    emit("      COMP(R0, R12);")
+    jump("LT", "wr_p_track")
+
+    # restore what machine5_live saved, and rejoin the chain (its own former tail)
+    regs = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12",
+                                          "M0", "M1", "M2", "M3", "M4"]
+    for k, r in enumerate(regs):
+        emit(f"      {r} = DM({SAVE + 4 * k:#x});")
+    emit("      // the two instructions the entry JUMP replaced (0x1c9448, 0x1c944a)")
+    emit("      I5 = DM(-24, I6);")
+    emit("      R10 = DM(-34, I6);")
+    emit("      JUMP 0x1c944c;")
+    emit(".wr_ping..end:")
+    emit("      .type wr_ping.,STT_FUNC;")
+    return "\n".join(lines) + "\n"
+
+
+def shape_into(fx: int, out: int) -> None:
+    """F{out} = live.shape(F{fx}, curve): p = x * 256; c >= 0: x + c (exp[p] - x),
+    else x - c (log[p] - x). Clobbers R0-R3, R5, R6, R12, R13, I1."""
+    pos, done = label("cpos"), label("cdone")
+    emit(f"      F5 = PASS F{fx};".ljust(40) + "// x")
+    fconst(12, float(L.SHAPE_N))
+    emit(f"      F13 = F{fx} * F12;".ljust(40) + "// p")
+    ld(6, "curve")
+    emit("      R12 = R12 - R12;")
+    emit("      COMP(F6, F12);")
+    jump("GE", pos)
+    interp("log", 13, out)
+    emit(f"      F{out} = F{out} - F5;")
+    emit(f"      F{out} = F6 * F{out};")
+    emit(f"      F{out} = F5 - F{out};")
+    jump("", done)
+    place(pos)
+    interp("exp", 13, out)
+    emit(f"      F{out} = F{out} - F5;")
+    emit(f"      F{out} = F6 * F{out};")
+    emit(f"      F{out} = F5 + F{out};")
+    place(done)
+
+
+def main() -> int:
+    text = build()
+    OUT.write_text(text, encoding="utf-8", newline="\n")
+    print(f"wrote {OUT.relative_to(ROOT)}: {sum(1 for l in text.splitlines() if l.startswith('      ') and not l.strip().startswith('//'))} instructions")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

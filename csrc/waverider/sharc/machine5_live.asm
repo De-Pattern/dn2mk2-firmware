@@ -700,38 +700,9 @@ wr_t5v_next.:
       DM(0x2dde80) = R0;
       IF NE JUMP 0x16f7df;              // -> wr_t5v_loop.
 
-      R0 = DM(0x2dde00);
-      R1 = DM(0x2dde04);
-      R2 = DM(0x2dde08);
-      R3 = DM(0x2dde0c);
-      R4 = DM(0x2dde10);
-      R5 = DM(0x2dde14);
-      R6 = DM(0x2dde18);
-      R7 = DM(0x2dde1c);
-      R8 = DM(0x2dde20);
-      R9 = DM(0x2dde24);
-      R10 = DM(0x2dde28);
-      R11 = DM(0x2dde2c);
-      R12 = DM(0x2dde30);
-      R13 = DM(0x2dde34);
-      R14 = DM(0x2dde38);
-      R15 = DM(0x2dde3c);
-      I0 = DM(0x2dde40);
-      I1 = DM(0x2dde44);
-      I2 = DM(0x2dde48);
-      I3 = DM(0x2dde4c);
-      I4 = DM(0x2dde50);
-      I5 = DM(0x2dde54);
-      I12 = DM(0x2dde58);
-      M0 = DM(0x2dde5c);
-      M1 = DM(0x2dde60);
-      M2 = DM(0x2dde64);
-      M3 = DM(0x2dde68);
-      M4 = DM(0x2dde6c);
-
-      // the two instructions the entry JUMP replaced (0x1c9448, 0x1c944a)
-      I5 = DM(-24, I6);
-      R10 = DM(-34, I6);
-      JUMP 0x1c944c;
+      // PING (ping.asm, docs/ping.md) takes the tail: it filters every track whose
+      // filter type is 6, then restores what this loop saved and rejoins the chain at
+      // 0x1c944c, as this tail did before PING.
+      JUMP 0x170280;                    // ping.asm's wr_ping (dnfw.waverider.dsp.PING_SW)
 .wr_type5v..end:
       .type wr_type5v.,STT_FUNC;
