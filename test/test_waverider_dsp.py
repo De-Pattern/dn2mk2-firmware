@@ -248,7 +248,8 @@ def test_w2_mpos_and_mlev_reach_their_ends():
 
 def test_w2_state_fits_after_the_loop():
     assert dsp.W2_STATE_DM == dsp.LOOP_DM + dsp.LOOP_SPAN
-    assert dsp.W2_RND_DM + 4 * live.RND_COUNT == dsp.REGION[1]
+    # PING (P1b) follows the W2 tables: its code, state and tables end the region
+    assert dsp.W2_RND_DM + 4 * live.RND_COUNT == dsp.PING_CODE_DM
     assert dsp.REGION[1] <= 0x2E7000                              # M5c's proven span
 
 
@@ -305,10 +306,11 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
     obj = dsp.objects()
     code_spans = [x for x in sp if "asm" in x[0]]
-    assert len(code_spans) == 5
-    # W5: the loop moved to the end of the region (0x2def00), after the glide state
+    assert len(code_spans) == 6
+    # W5: the loop moved to 0x2def00, after the glide state; P1b: PING after the W2 tables
     for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["idle_load"],
-                                                     obj["block_count"], obj["entry_mark"], obj["machine5_live"])):
+                                                     obj["block_count"], obj["entry_mark"],
+                                                     obj["machine5_live"], obj["ping"])):
         assert payload[:len(code)] == code
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
 
