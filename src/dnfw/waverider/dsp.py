@@ -311,6 +311,38 @@ def _check_idle_site(stock: bytes, obj: dict) -> None:
         raise DspError("sw 0xb88abb is not the stock idle loop's `jump (pc,-0x10)`")
 
 
+# A run of zeros this long or longer inside a payload goes into the stream as a fill
+# block (16 bytes, no payload) instead of as bytes. The stock stream does exactly this
+# into the same L1 block (e.g. 36 bytes at 0x2dd328): the memory after boot is the
+# same, byte for byte, and the stream is shorter -- the DSP upload budget is the
+# stream's length (2026-10-14).
+FILL_MIN = 64
+
+
+def _blocks(at: int, payload: bytes) -> bytes:
+    """`payload` at load address `at`, as payload blocks with every 4-aligned run of
+    at least FILL_MIN zero bytes as a fill block."""
+    out, i, n, start = [], 0, len(payload), 0
+    while i < n:
+        if i % 4 == 0 and payload[i] == 0:
+            j = i
+            while j < n and payload[j] == 0:
+                j += 1
+            k = i + ((j - i) // 4) * 4           # whole words only
+            if k - i >= FILL_MIN:
+                if start < i:
+                    out.append(bootstream.block(at + start, payload[start:i]))
+                out.append(bootstream.block(at + i, flags=bootstream.FLAG_FILL, count=k - i))
+                start = i = k
+                continue
+            i = max(j, i + 1)
+        else:
+            i += 1
+    if start < n:
+        out.append(bootstream.block(at + start, payload[start:]))
+    return b"".join(out)
+
+
 def _finish(out: bytearray) -> bytes:
     result = bytes(out)
     walked = bootstream.walk(result)
@@ -362,7 +394,7 @@ def section7(stock: bytes) -> bytes:
     _check_ddr(stock, ddr)
 
     out = bytearray(bootstream.insert_before_final(
-        stock, b"".join(bootstream.block(at, payload) for _, at, payload in added + ddr)))
+        stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr)))
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
     bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<I", 5))
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
