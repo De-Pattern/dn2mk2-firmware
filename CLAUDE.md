@@ -25,3 +25,15 @@ reset → engine + SAVE/LOAD → unit tests. About an hour; run it in the backgr
   `ship_gate.py` in the same commit.
 
 See `docs/SAFETY.md` for the risks each gate covers.
+
+## Every cleared build is published
+
+When a build prints `CLEARED TO FLASH`, in the same session:
+
+1. Give it the next version number and add its entry to `FIRMWARE.md` (top of the table
+   and a section: file name, sha256, gate date, source commit, what it adds, numbered
+   tests, known issues).
+2. Copy it and its `.gate.json` to the `builds` branch as
+   `vX.Y-NAME/DN2mod_vX.Y_NAME_OS1.11.syx` (a worktree), with `FIRMWARE.md` as that
+   branch's `README.md`, and push. Renaming keeps the sha256, so the gate record holds.
+3. Firmware never goes on `main` (`.gitignore`); only the `builds` branch carries it.
