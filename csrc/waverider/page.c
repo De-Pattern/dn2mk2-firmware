@@ -87,7 +87,8 @@ static int wr_active(void)
     unsigned char *kit = KIT_POINTER;
     if (t > 15 || !kit)
         return 0;
-    return (signed char)kit[52u + 1163u * t + 0xDEu] == 5;
+    signed char m = (signed char)kit[52u + 1163u * t + 0xDEu];
+    return m == 5 ? 1 : m == 6 ? 2 : 0;     /* Waverider, RESONATOR (docs/rings.md) */
 }
 
 /* W2 (docs/w2-scanner.md): while the active track is a Waverider, WaveTone's records
@@ -112,8 +113,10 @@ static void wr_names(void)
             stock_long[k] = NAME_LONG(id);
             stock_short[k] = NAME_SHORT(id);
         }
-        NAME_LONG(id) = on ? wr_named_long[k] : stock_long[k];
-        NAME_SHORT(id) = on ? wr_named_short[k] : stock_short[k];
+        const char *l = on ? wr_named_long[on - 1][k] : 0;
+        const char *sh = on ? wr_named_short[on - 1][k] : 0;
+        NAME_LONG(id) = l ? l : stock_long[k];
+        NAME_SHORT(id) = sh ? sh : stock_short[k];
     }
     names_on = on;
 }
@@ -612,13 +615,64 @@ static void wave(void *c, void *view)
         column(c, m + k, POS_Y, POS_Y + 1);
 }
 
+/* RESONATOR's picture across the middle: one vertical line a mode, at its pitch above
+ * the note (STRC moves them from harmonic through a bar to a plate), its height the
+ * mode's level at POS (sin(pi n POS), dnfw.rings.live), the first 24 within 4 octaves.
+ * Integers only: the anchors in tenths of a semitone (res_anchor), a 64-step sine. */
+static const unsigned char res_sin64[65] = {
+    0, 6, 12, 19, 25, 31, 37, 43, 49, 54, 60, 65, 71, 76, 81, 85, 90, 94, 98, 102, 106, 109,
+    112, 115, 117, 120, 122, 123, 125, 126, 126, 127, 127, 127, 126, 126, 125, 123, 122, 120,
+    117, 115, 112, 109, 106, 102, 98, 94, 90, 85, 81, 76, 71, 65, 60, 54, 49, 43, 37, 31, 25,
+    19, 12, 6, 0};
+
+static int res_sin(int x)                       /* x in 1/128 of a half turn -> +-127 */
+{
+    x &= 255;
+    int s = x < 128 ? 1 : -1;
+    x &= 127;
+    return s * res_sin64[x >> 1];
+}
+
+#define RES_SPAN 480                            /* tenths of a semitone across the picture */
+#define RES_BASE 24                             /* canvas row of the baseline */
+#define RES_TALL 12
+
+static void modes(void *c, void *view)
+{
+    u8 flag;
+    int st = GET_VALUE(view, 239, &flag);       /* STRC: WAV1, 0..0x7800 */
+    int pos = GET_VALUE(view, 246, &flag);      /* POS: OFS1, 0..0x6400 */
+    if (st < 0) st = 0;
+    if (st > 0x7800) st = 0x7800;
+    if (pos < 0) pos = 0;
+    if (pos > 0x6400) pos = 0x6400;
+    int a, frac;                                /* the anchor pair and 0..256 between them */
+    if (st <= 0x3C00) { a = 0; frac = st * 256 / 0x3C00; }
+    else { a = 1; frac = (st - 0x3C00) * 256 / 0x3C00; }
+    int p = 2 + 48 * pos / 0x6400;              /* POS, in hundredths of a length: 2..50 */
+    for (int x = 0; x < WR_WIDTH; x += 2)
+        px(c, WAVE_X + x, RES_BASE);
+    for (int n = 0; n < 24; n++) {
+        int lo = res_anchor[a][n], hi = res_anchor[a + 1][n];
+        int semi = lo + (hi - lo) * frac / 256;
+        if (semi > RES_SPAN)
+            break;
+        int x = WAVE_X + semi * (WR_WIDTH - 1) / RES_SPAN;
+        int amp = res_sin((n + 1) * p * 128 / 100);
+        if (amp < 0) amp = -amp;
+        int h = 1 + amp * RES_TALL / 127;
+        column(c, x, RES_BASE + 1, RES_BASE + h);
+    }
+}
+
 void wr_page_draw(void *view, void *canvas)
 {
 #ifdef WR_PROBE
     u32 t0 = DTCN0, tm = 0;
 #endif
     int page = ((int (*)(void *))method(view, 132))(view);
-    if (page < 0 || page >= WR_PAGES)
+    int res = wr_active() == 2;                 /* RESONATOR's page, not Waverider's */
+    if (page < 0 || page >= (res ? RES_PAGES : WR_PAGES))
         page = 0;
 #if WR_MARKERS
     u32 now = TICKS;
@@ -626,14 +680,19 @@ void wr_page_draw(void *view, void *canvas)
     drawn_sig = signature();
 #endif
 
-    wave(canvas, view);
+    if (res)
+        modes(canvas, view);
+    else
+        wave(canvas, view);
 
     for (int i = 0; i < 8; i++) {
         int top = i < 4;
         int cx = COL0 + COLW * (i & 3) + COLW / 2;
-        u32 id = wr_ids[page][i];
-        const char *label = wr_labels[page][i];
-        if (id == WR_TBL_ID) {                  /* W5: the table's name where TBL would be */
+        u32 id = res ? res_ids[page][i] : wr_ids[page][i];
+        const char *label = res ? res_labels[page][i] : wr_labels[page][i];
+        if (res) {
+            /* RESONATOR: plain labels */
+        } else if (id == WR_TBL_ID) {                  /* W5: the table's name where TBL would be */
             int set_tbl;
             label = wr_table_names[table_of(heard(view, WR_TBL_ID, &set_tbl))];
         } else if (id == WR_MOVE_ID) {          /* W2: the scanner's shape where MOVE would be */

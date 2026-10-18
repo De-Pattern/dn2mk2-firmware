@@ -72,6 +72,8 @@ def main() -> int:
         "chunk": {"load": built["chunk"]["load"], "code": built["chunk"]["code"].hex()},
         "spans_chunk": {"load": built["spans_chunk"]["load"], "code": built["spans_chunk"]["code"].hex()},
         "ping_chunk": {"load": built["ping_chunk"]["load"], "code": built["ping_chunk"]["code"].hex()},
+        "machines_chunk": {"load": built["machines_chunk"]["load"],
+                           "code": built["machines_chunk"]["code"].hex()},
     }
     OUT_JSON.write_bytes((json.dumps(code, indent=1) + "\n").encode())
     size = sum(len(e["new"]) // 2 for e in edits)

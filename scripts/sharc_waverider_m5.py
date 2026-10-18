@@ -299,7 +299,7 @@ def selmap_text(code: bytes, work: pathlib.Path) -> dict[int, tuple[int, str]]:
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
     for name, load_sw in (("reader_m5", dsp.READER_SW), ("machine5_live", dsp.LOOP_SW),
-                          ("ping", dsp.PING_SW)):
+                          ("ping", dsp.PING_SW), ("rings", dsp.RINGS_SW)):
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -332,7 +332,7 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("reader_m5", "machine5_live", "ping")) and entry.type_name.startswith("8a") \
+             for n in ("reader_m5", "machine5_live", "ping", "rings")) and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
 
@@ -376,7 +376,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,frame")
+    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,rings,frame")
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -413,7 +413,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("reader_m5", "machine5_live", "ping"):
+            for n in ("reader_m5", "machine5_live", "ping", "rings"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
@@ -477,6 +477,11 @@ def main(argv=None):
             print("\nstep 7: SHFT")
             results["7_shft"] = step_shft(init, sound, machines, a.blocks)
             show(results["7_shft"])
+
+        if "rings" in steps:
+            print("\nstep 8: RESONATOR")
+            results["8_rings"] = step_rings(init, sound, machines, a.blocks)
+            show(results["8_rings"])
 
         frames = load_frames(a)
         if frames and "frame" in steps:
@@ -954,6 +959,110 @@ def step_shft(init, sound, machines, blocks) -> dict:
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {k: {kk: vv for kk, vv in v.items() if kk != "want"} for k, v in results.items()}}
+
+
+# -- step 8: RESONATOR (docs/rings.md) ------------------------------------------------------------
+
+def run_rings(init, sound, machines, blocks, words0, words1, others=None, trig_every=0, ftype1=None):
+    """Tracks 0 and 1 on machine 6 (RESONATOR) with frame words WORDS0 / WORDS1 (param slot
+    -> 16-bit), the rest OTHERS ({track: machine}); triggered on block 1 (and every
+    TRIG_EVERY blocks after, if set). Taps at wr_rings' entry: each track's buffer, the
+    note, the trigger, its machine type and its eight control words."""
+    from dnfw.rings import live as RL
+    taps = []
+
+    def at_entry(r):
+        bufs = [m2.word(r.state, V.TRACK_BUFFERS + 4 * t) for t in range(16)]
+        trig = (m2.word(r.state, TRIG_WORD) or 0) >> 16
+        tap = {}
+        for t in range(16):
+            rec = V.track_record(t)
+            words = {}
+            for slot in RL.CONTROL_SLOTS:
+                words[slot] = frame_word(r.state, RL.frame_offset(slot, t))
+            tap[t] = {"before": [m2.word(r.state, bufs[t] + 4 * k) or 0 for k in range(BLOCK)],
+                      "note": f32_of(m2.word(r.state, NOTE_CELL + 4 * t)),
+                      "trig": bool(trig & (1 << t)),
+                      "mtype": m2.word(r.state, rec + 0x1B4),
+                      "words": words}
+        taps.append(tap)
+
+    def frames(b):
+        hit = b == 1 or (trig_every and b > 1 and (b - 1) % trig_every == 0)
+        f = base_frame(sound, machines, t0=RL.MACHINE_TYPE, others={1: RL.MACHINE_TYPE, **(others or {})},
+                       trigger=hit, trigger_others=True, overrides=words0)
+        for t in [1] + [t for t, m in (others or {}).items() if m == RL.MACHINE_TYPE]:
+            f.sound(t, {**machines.get(1, {}), TUN1: TUN1_ZERO, **words1})
+        if ftype1 is not None:
+            f.header(FR.FILTER, 1, ftype1)
+        return f.to_bytes()
+    run = run_blocks(init, frames, blocks, extra_hooks={dsp.RINGS_SW: at_entry})
+    return run, taps
+
+
+def step_rings(init, sound, machines, blocks) -> dict:
+    """RESONATOR on tracks 0 and 1 (machine 6), WaveTone on track 2, FM Tone on 3: every
+    type-6 track bit-exact to dnfw.rings.live, audible and bounded, other tracks
+    untouched by wr_rings; a second run with retriggers, the noise exciter and a plate."""
+    from dnfw.rings import live as RL
+    T = RL.tables()
+    base = dict(RL.DEFAULTS)
+    cases = {
+        "defaults (harmonic, bright, long) + a bar": (
+            base, {**base, RL.P_STRC: 0x3C00, RL.P_BRIT: 0x4000, RL.P_DAMP: 0x5000}, 0),
+        "plate + noise exciter, retriggered every 6 blocks": (
+            {**base, RL.P_STRC: 0x7800, RL.P_EXCT: 0x6400, RL.P_DAMP: 0x2000, RL.P_TUN: 0x4C00},
+            {**base, RL.P_POS: 0x0000, RL.P_HIT: 0x7F00, RL.P_LEV: 0x7F00}, 6),
+        "six machine-6 voices: the first four render, the rest are silent": (
+            base, {**base, RL.P_STRC: 0x5000}, 0),
+    }
+    others = {"six machine-6 voices: the first four render, the rest are silent":
+              {2: RL.MACHINE_TYPE, 3: RL.MACHINE_TYPE, 4: RL.MACHINE_TYPE, 5: RL.MACHINE_TYPE, 6: 1}}
+    results = {}
+    for name, (w0, w1, every) in cases.items():
+        run, taps = run_rings(init, sound, machines, blocks, w0, w1,
+                              others=others.get(name, {2: 1, 3: 0}), trig_every=every)
+        if not run["ok"] or len(taps) != blocks:
+            results[name] = {"ok": False, "why": run.get("halt") or f"{len(taps)} entries"}
+            continue
+        voices = {t: RL.Voice() for t in range(16)}
+        mism, peaks, untouched, seen = {}, {}, True, set()
+        for b, tap in enumerate(taps):
+            after = run["machine"][b]
+            rendered = 0
+            for t in range(16):
+                x = tap[t]
+                if x["mtype"] != RL.MACHINE_TYPE:
+                    untouched &= [bits_of(v) for v in after[t]] == x["before"]
+                    continue
+                seen.add(t)
+                want, did = RL.block(voices[t], rendered, x["words"], x["note"], x["trig"], T)
+                rendered += did
+                got = [bits_of(v) for v in after[t]]
+                mism[t] = mism.get(t, 0) + sum(1 for g, w in zip(got, want) if g != bits_of(w))
+                peaks[t] = max(peaks.get(t, 0.0), max(abs(v) for v in after[t] if v == v))
+        results[name] = {"ok": True, "mismatches": mism, "peaks": peaks,
+                         "others_untouched": untouched, "tracks": sorted(seen)}
+    six = results.get("six machine-6 voices: the first four render, the rest are silent", {})
+    checks = {
+        "RESONATOR runs on every machine-6 track, and only on them":
+            all(r.get("ok") for r in results.values())
+            and all(r["tracks"] == [0, 1] for k, r in results.items() if r is not six)
+            and six.get("tracks") == [0, 1, 2, 3, 4, 5],
+        "with six machine-6 voices the first four sound and the fifth and sixth are silent":
+            bool(six.get("ok")) and all(six["peaks"][t] > 0.001 for t in (0, 1, 2, 3))
+            and all(six["peaks"][t] == 0.0 for t in (4, 5)),
+        "every RESONATOR track bit-exact to dnfw.rings.live, fed the DSP's own inputs, in every "
+        "block (harmonic, bar, plate; mallet and noise; retriggers)":
+            all(r.get("ok") and not any(r["mismatches"].values()) for r in results.values()),
+        "every rendered RESONATOR voice is audible and bounded (0.001 < peak <= 0.9)":
+            all(r.get("ok") and all(0.001 < p <= 0.9 + 1e-6 for t, p in r["peaks"].items()
+                                    if not (r is six and t in (4, 5)))
+                for r in results.values()),
+        "WaveTone, FM Tone and the MIDI tracks pass through wr_rings bit-identical":
+            all(r.get("ok") and r["others_untouched"] for r in results.values()),
+    }
+    return {"ok": all(checks.values()), "checks": checks, "numbers": results}
 
 
 def step_filters_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -> dict:

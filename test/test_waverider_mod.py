@@ -55,40 +55,56 @@ def test_applies_to_both_sections(applied, dn2_111):
     # since W5, the wave display's chunk, and since PING P2, PING's FLTR-list chunk
     main, chunks = platform.split(applied.payloads[3])
     assert len(main) == len(dn2_111.container.find(3).unpack())
-    assert [kind for kind, _ in chunks] == [platform.area.CODE] * 3
+    assert [kind for kind, _ in chunks] == [platform.area.CODE] * 4     # + the machines chunk
     assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 
-def test_the_list_offers_type_5_before_midi(applied):
+def _chunked(va: int, n: int) -> bytes:
+    """N bytes at VA from the RAM chunks the mod loads (the machines chunk holds the
+    name table, the attribute rows and the list since RESONATOR)."""
+    for name in ("machines_chunk", "ping_chunk", "chunk"):
+        c = waverider.SPEC[name]
+        code = bytes.fromhex(c["code"])
+        if c["load"] <= va and va + n <= c["load"] + len(code):
+            return code[va - c["load"]:va - c["load"] + n]
+    raise AssertionError(f"{va:#x} is in no chunk")
+
+
+def _clong(va: int) -> int:
+    return struct.unpack(">I", _chunked(va, 4))[0]
+
+
+def test_the_list_offers_waverider_and_resonator_before_midi(applied):
     main = applied.payloads[3]
     begin = long_at(main, CF.LIST_BEGIN + 2)
     end = long_at(main, CF.LIST_END + 2)
-    types = [long_at(main, a) for a in range(begin, end, 4)]
-    assert types == [0, 2, 1, 3, 5, 4]
-    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("48780018")
-    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e80018")
+    types = [_clong(a) for a in range(begin, end, 4)]
+    assert types == [0, 2, 1, 3, 5, 6, 4]
+    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("4878001c")
+    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e8001c")
 
 
-def test_row_5_of_the_name_table_names_waverider(applied):
+def test_rows_5_and_6_of_the_name_table(applied):
     main = applied.payloads[3]
     table = long_at(main, 0x400DC344)
-    long_ptr, short_ptr = long_at(main, table + 60), long_at(main, table + 64)
-    assert at(main, long_ptr, 10) == b"Waverider\0"
-    assert at(main, short_ptr, 4) == b"WVR\0"
+    for row, (lo, sh) in ((5, (b"Waverider\0", b"WVR\0")), (6, (b"Resonator\0", b"RSN\0"))):
+        long_ptr, short_ptr = _clong(table + 12 * row), _clong(table + 12 * row + 4)
+        assert _chunked(long_ptr, len(lo)) == lo and _chunked(short_ptr, len(sh)) == sh
     for bound in (0x400DC332, 0x400DC358, 0x400DC37E):
-        assert at(main, bound, 2) == bytes.fromhex("7205")
+        assert at(main, bound, 2) == bytes.fromhex("7206")
 
 
-def test_the_sixth_attribute_row_is_wavetones(applied, stock):
+def test_attribute_rows_5_and_6_are_wavetones(applied, stock):
     main = applied.payloads[3]
     rows = long_at(main, 0x400DC168)
-    assert at(main, rows, 20) == at(stock, CF.ATTR_STOCK_VA, 20)
-    assert at(main, rows + 20, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
-    assert at(main, 0x400DC19C, 2) == bytes.fromhex("7405")
+    assert _chunked(rows, 20) == at(stock, CF.ATTR_STOCK_VA, 20)
+    assert _chunked(rows + 20, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
+    assert _chunked(rows + 24, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
+    assert at(main, 0x400DC19C, 2) == bytes.fromhex("7406")
 
 
-def test_the_stored_sound_load_keeps_type_5(applied):
-    assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("7407")
+def test_the_stored_sound_load_keeps_types_5_and_6(applied):
+    assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("7408")
 
 
 def test_the_group_function_gives_the_sample_machines_their_own_section(applied):
@@ -143,7 +159,7 @@ def test_machine_sel_asks_for_the_real_type(applied, stock):
     for site in (0x4005A5C6, 0x4005A632, 0x4005A9C8, 0x4005B6C2):     # MACHINE SEL's callers
         assert at(main, site, 6) == bytes.fromhex("4eb94003134e")
     # ... and raw_track is still the stock getMachineType's body, reading sound+0xDE
-    assert at(main, raw, 4) == bytes.fromhex("2f0a246f")
+    assert _chunked(raw, 4) == bytes.fromhex("2f0a246f")
 
 
 def test_every_edit_replaces_stock_bytes(stock):
@@ -161,9 +177,9 @@ def test_nothing_is_written_outside_its_extents(applied, stock, dn2_111):
             assert any(s <= i < t for s, t in spans), f"{BASE + i:#010x} is outside every extent"
 
 
-def test_the_caves_were_free_in_stock(stock):
-    for cave, cap in (CF.DATA_CAVE, CF.CODE_CAVE, CF.NAME_CAVE):
-        assert not any(at(stock, cave - 4, cap + 8))
+def test_the_machines_chunk_fits_between_pings_and_the_runtime():
+    c = waverider.SPEC["machines_chunk"]
+    assert c["load"] == CF.MCHUNK and c["load"] + len(bytes.fromhex(c["code"])) <= CF.MCHUNK_END
 
 
 def test_refuses_an_image_already_modified(dn2_111):

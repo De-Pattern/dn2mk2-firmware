@@ -53,7 +53,7 @@ NAMES = {6: ("Ping", "PING"), 7: ("Shift", "SHFT")}
 LONG_NAME, SHORT_NAME = NAMES[6]
 
 LOAD = 0x4670F000                       # Waverider's region (pages.LOAD..C_END), its last 4 KB
-END = 0x46710000                        # pages.C_END: the platform runtime starts here
+END = 0x4670F800                        # the machines chunk (dnfw.waverider.coldfire.MCHUNK) starts here
 
 LIST_STOCK_VA = 0x401DDD40              # {0, 1, 4, 3, 5, 2}, six longs
 LIST_STOCK = (0, 1, 4, 3, 5, 2)

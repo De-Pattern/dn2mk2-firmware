@@ -64,7 +64,7 @@ CODE = pathlib.Path(__file__).with_name("sharc_code.json")
 # which is carved from the top of block 1 (16 KB at size code 0, the size the
 # startup writes; see docs/waverider-dsp-silence.md). REGION ends 36 KB below the
 # block's top, so it stays clear of a 16 KB or a 32 KB DM cache.
-REGION = (0x2DD600, 0x2E5300)                # W5: tables to DDR; W2: + the scanner; PING: + its code, state, tables; SHFT: + state, tables
+REGION = (0x2DD600, 0x2E7000)                # W5: tables to DDR; W2: + the scanner; PING: + its code, state, tables; SHFT: + state, tables; RESONATOR: + code, scratch, tables
 STOCK_BLOCK1_END = 0x2DD52C
 DM_CACHE_32K = 0x2E8000                      # the lowest byte a 32 KB DM cache would own
 CODE_SPAN = 0x400                            # each code object is padded to this
@@ -100,6 +100,16 @@ PING_TABLES_DM = PING_T_DM + 0x40                            # 0x2e2540
 # fill block in the stream), then its sine and pow2 tables (dnfw.shft.live)
 SHFT_STATE_DM, SHFT_STATE_STRIDE = 0x2E3B00, 256             # after PING's tables
 SHFT_TABLES_DM = SHFT_STATE_DM + 16 * SHFT_STATE_STRIDE      # 0x2e4b00
+# RESONATOR (docs/rings.md, machine type 6): its code (entered from machine5_live's
+# tail, on to wr_ping), a scratch block (the exciter and the mode sum of one voice, the
+# loop's counters), its tables (dnfw.rings.live), all up to 0x2e7000, the memory M5c's
+# tables proved free on the instrument; its 16 voices' state is in DDR (zeros: a fill
+# block), read and written once a mode a block
+RINGS_CODE_DM, RINGS_CODE_SPAN = 0x2E5300, 0x1100
+RINGS_SW = RINGS_CODE_DM // 2                                # 0x172980
+RINGS_SCRATCH_DM = RINGS_CODE_DM + RINGS_CODE_SPAN           # 0x2e6400
+RINGS_TABLES_DM = RINGS_SCRATCH_DM + 0x200                   # 0x2e6600
+RINGS_STATE_DDR, RINGS_STATE_STRIDE = 0x81200000, 256
 
 # W5: the tables live in the SHARC's DDR (docs/w5-tables.md). The stock boot stream
 # loads DDR to 0x8052fbe0 and the engine's init writes up to 0x80530be8
@@ -124,6 +134,7 @@ ENTRY_STOCK = bytes.fromhex("089ce80a089c5e05")
 NOP16 = bytes.fromhex("0100")                # the firmware's own 16-bit NOP (sw 0x1c9447)
 LOOKUP_DM = 0x25D748                         # frame nibble -> machine type, 8 words
 LOOKUP_STOCK = (0, 1, 2, 3, 4, 0, 0, 0)
+MACHINE6 = 6                                 # RESONATOR: lookup[6] = 6 (stock 0, FM Tone)
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
 IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")
 IDLE_RETURN_SW = 0xB88AAB                    # the loop's top: call prvCheckTasksWaitingTermination
@@ -176,7 +187,7 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "ping")}
+                         "entry_mark", "emark_jump", "ping", "rings")}
 
 
 def directory() -> bytes:
@@ -215,6 +226,9 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("PING tables", PING_TABLES_DM, _ping_tables()),
         ("SHFT state: 16 tracks x 256 bytes (zeros)", SHFT_STATE_DM, bytes(16 * SHFT_STATE_STRIDE)),
         ("SHFT tables", SHFT_TABLES_DM, _shft_tables()),
+        ("rings.asm (wr_rings)", RINGS_CODE_DM, obj["rings"]),
+        ("RESONATOR scratch (zeros)", RINGS_SCRATCH_DM, bytes(0x200)),
+        ("RESONATOR tables", RINGS_TABLES_DM, _rings_tables()),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):
@@ -237,11 +251,19 @@ def _shft_tables() -> bytes:
     return shft_live.tables_bytes()[0]
 
 
+def _rings_tables() -> bytes:
+    from ..rings import live as rings_live
+    return rings_live.tables_bytes()[0]
+
+
 def ddr_spans() -> list[tuple[str, int, bytes]]:
-    """(what, load address, payload) of each table, in DDR (load address = address)."""
+    """(what, load address, payload) of each table, in DDR (load address = address),
+    then RESONATOR's voice state (zeros, so a fill block)."""
     names = factory.names()
     return [(f"table {k}: {names[k]}", at, reference.dsp_bytes(tab))
-            for k, (at, tab) in enumerate(zip(table_addresses(), tables()))]
+            for k, (at, tab) in enumerate(zip(table_addresses(), tables()))] + [
+        ("RESONATOR state: 16 voices x 256 bytes (zeros)", RINGS_STATE_DDR,
+         bytes(16 * RINGS_STATE_STRIDE))]
 
 
 def _check_ddr(stock: bytes, span_list) -> None:
@@ -268,9 +290,9 @@ def placements() -> list[dict]:
              "load_address": f"{sw_to_load(ENTRY_SW):#010x}",
              "bytes": len(obj["entry_jump"]) + len(NOP16),
              "stock": ENTRY_STOCK.hex(), "new": (obj["entry_jump"] + NOP16).hex()},
-            {"what": "patch: machine lookup 0x25d748[5] 0 -> 5",
-             "load_address": f"{dm_to_load(LOOKUP_DM + 20):#010x}", "bytes": 4,
-             "stock": "00000000", "new": "05000000"},
+            {"what": "patch: machine lookup 0x25d748[5] 0 -> 5, [6] 0 -> 6 (RESONATOR)",
+             "load_address": f"{dm_to_load(LOOKUP_DM + 20):#010x}", "bytes": 8,
+             "stock": "0000000000000000", "new": "0500000006000000"},
             {"what": f"patch: the idle loop's back edge at sw {IDLE_SITE_SW:#x} -> JUMP {IDLE_SW:#x}",
              "load_address": f"{l2_sw_to_load(IDLE_SITE_SW):#010x}", "bytes": len(obj["idle_jump"]),
              "stock": IDLE_SITE_STOCK.hex(), "new": obj["idle_jump"].hex()}]
@@ -407,7 +429,7 @@ def section7(stock: bytes) -> bytes:
     out = bytearray(bootstream.insert_before_final(
         stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr)))
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
-    bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<I", 5))
+    bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<II", 5, MACHINE6))
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
     bootstream.write_span(out, sw_to_load(CALL_SITE_SW), obj["emark_jump"])
     result = bytes(out)

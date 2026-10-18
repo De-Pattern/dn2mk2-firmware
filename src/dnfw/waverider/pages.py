@@ -88,6 +88,16 @@ PAGES = (
     (0, 0, 0, 0, 0, 0, 0, 0),                   # OSC 2: all to come (W3)
 )
 
+# RESONATOR (machine 6, docs/rings.md): one page, on WaveTone records whose range and
+# default fit (dnfw.rings.live's table), named while a RESONATOR track is active
+RES_TITLE, RES_SUBTITLE = "RES", "Resonator"
+RES_PAGES = ((238, 241, 239, 258, 254, 246, 240, 245),)   # TUNE LEV STRC BRIT / DAMP POS EXCT HIT
+RES_LABELS = {238: "TUNE", 241: "LEV", 239: "STRC", 258: "BRIT",
+              254: "DAMP", 246: "POS", 240: "EXCT", 245: "HIT"}
+RES_LONG_NAMES = {238: "Tune", 241: "Level", 239: "Structure", 258: "Brightness",
+                  254: "Damping", 246: "Position", 240: "Exciter", 245: "Hit Level"}
+RES_UNUSED = tuple(r for r in range(238, 263) if r not in RES_LABELS)
+
 LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "labels", "descriptors")
 # W2: `labels` is where the assembly's code ends and its data (the label table, the
 # descriptors, the strings) begins: the ship gate checks only [is_wr, labels) as code
@@ -113,26 +123,51 @@ def label(rid: int) -> str:
 
 
 def named() -> list[tuple[int, str, str]]:
-    """(record id, long name, short name) for every record `wr_names` renames."""
+    """(record id, long name, short name) for every record `wr_names` renames for a
+    Waverider track."""
     return ([(r, LONG_NAMES[r], LABELS[r]) for r in LABELS]
             + [(r, UNUSED_LONG, UNUSED_SHORT) for r in UNUSED])
 
 
+def res_named() -> dict[int, tuple[str, str]]:
+    """The same for a RESONATOR track."""
+    out = {r: (RES_LONG_NAMES[r], RES_LABELS[r]) for r in RES_LABELS}
+    out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in RES_UNUSED})
+    return out
+
+
 def c_header() -> str:
-    """The control table, as C for `wr_gen.h`: per page, eight record ids and labels;
-    W2: the names `wr_names` swaps in, and the scanner's shape names."""
+    """The control tables, as C for `wr_gen.h`: per page, eight record ids and labels
+    (Waverider's, then RESONATOR's); the names `wr_names` swaps in for each machine (a
+    0 keeps the stock name); the scanner's shape names."""
+    q = chr(34)
     ids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in PAGES)
     names = ",\n".join(" {" + ", ".join(f'"{label(r)}"' for r in page) + "}" for page in PAGES)
-    n = named()
+    rids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in RES_PAGES)
+    rnames = ",\n".join(" {" + ", ".join(q + RES_LABELS.get(r, "-") + q for r in page) + "}"
+                         for page in RES_PAGES)
+    from ..rings import live as rings_live
+    res_anchor = ", ".join("{" + ", ".join(str(round(10 * v)) for v in a) + "}"
+                           for a in rings_live._anchor_semitones())
+    wr = {r: (lo, sh) for r, lo, sh in named()}
+    res = res_named()
+    order = sorted(set(wr) | set(res))
+
+    def row(m, col):
+        return "{" + ", ".join(q + m[r][col] + q if r in m else "0" for r in order) + "}"
     return (f"#define WR_PAGES {len(PAGES)}\n"
             f"static const unsigned short wr_ids[WR_PAGES][8] = {{\n{ids}\n}};\n"
             f"static const char wr_labels[WR_PAGES][8][6] = {{\n{names}\n}};\n"
-            f"#define WR_NAMED {len(n)}\n"
-            f"static const unsigned short wr_named_ids[WR_NAMED] = {{{', '.join(str(r) for r, _, _ in n)}}};\n"
-            f"static const char *const wr_named_long[WR_NAMED] = {{{', '.join(chr(34) + l + chr(34) for _, l, _ in n)}}};\n"
-            f"static const char *const wr_named_short[WR_NAMED] = {{{', '.join(chr(34) + sh + chr(34) for _, _, sh in n)}}};\n"
+            f"#define RES_PAGES {len(RES_PAGES)}\n"
+            f"static const unsigned short res_ids[RES_PAGES][8] = {{\n{rids}\n}};\n"
+            f"static const char res_labels[RES_PAGES][8][6] = {{\n{rnames}\n}};\n"
+            f"#define WR_NAMED {len(order)}\n"
+            f"static const unsigned short wr_named_ids[WR_NAMED] = {{{', '.join(map(str, order))}}};\n"
+            f"static const char *const wr_named_long[2][WR_NAMED] = {{{row(wr, 0)}, {row(res, 0)}}};\n"
+            f"static const char *const wr_named_short[2][WR_NAMED] = {{{row(wr, 1)}, {row(res, 1)}}};\n"
+            f"static const short res_anchor[3][24] = {{{res_anchor}}};\n"
             f"#define WR_MOVE_ID {MOVE_ID}\n"
-            f"static const char wr_shape_names[8][5] = {{{', '.join(chr(34) + x + chr(34) for x in SHAPES)}}};\n")
+            f"static const char wr_shape_names[8][5] = {{{', '.join(q + x + q for x in SHAPES)}}};\n")
 
 
 def source(page_draw: int) -> str:
@@ -146,8 +181,14 @@ def source(page_draw: int) -> str:
                      f"    .long {', '.join(str(e) for e in entries)}\n"
                      f"    .long {TAG}")
     page_data = "\n".join(pages)
+    rtable = "\n".join(f"    .long {rid}, rlab_{rid}" for rid in RES_LABELS)
+    rstrings = "\n".join(f'rlab_{rid}: .asciz "{name}"' for rid, name in RES_LABELS.items())
+    res_page_data = "\n".join(f"    .long res_title, res_subtitle\n"
+                              f"    .long {', '.join(str(e) for e in entries)}\n"
+                              f"    .long {TAG}" for entries in RES_PAGES)
     return f"""
-| -- is the active track a Waverider? d0 = 1 if so, else 0; every other register kept
+| -- the active track's machine, as ours: d0 = 1 Waverider (5), 2 RESONATOR (6), else 0;
+| every other register kept
 is_wr:
     move.l  %a0,%sp@-
     move.l  %d1,%sp@-
@@ -159,8 +200,12 @@ is_wr:
     mvs.b   %a0@({SOUND_BASE + SOUND_TYPE}),%d1
     moveq   #0,%d0
     subq.l  #{NEW_TYPE},%d1
-    bne.s   1f
+    bne.s   2f
     moveq   #1,%d0
+    bra.s   1f
+2:  subq.l  #1,%d1
+    bne.s   1f
+    moveq   #2,%d0
 1:  move.l  %sp@+,%d1
     movea.l %sp@+,%a0
     rts
@@ -173,13 +218,20 @@ wr_count:
     tst.l   %d0
     beq.s   1f
     addq.l  #4,%sp
+    subq.l  #1,%d0
+    bne.s   3f
     moveq   #{len(PAGES)},%d0
     rts
+3:  moveq   #{len(RES_PAGES)},%d0
+    rts
 1:  move.l  %sp@(8),%d0
-    moveq   #{NEW_TYPE},%d1
+    moveq   #5,%d1
+    cmp.l   %d0,%d1
+    beq.s   0f
+    moveq   #6,%d1
     cmp.l   %d0,%d1
     bne.s   2f
-    moveq   #{CLONE},%d0
+0:  moveq   #{CLONE},%d0
 2:  moveq   #4,%d1
     rts
 
@@ -191,25 +243,37 @@ wr_page:
     bsr.w   is_wr
     tst.l   %d0
     beq.s   3f
+    subq.l  #1,%d0
+    bne.s   5f
     move.l  %sp@(16),%d0
     moveq   #{len(PAGES)},%d1
     cmp.l   %d1,%d0
     bcs.s   1f
-    move.l  #{EMPTY_PAGE:#010x},%d0
+6:  move.l  #{EMPTY_PAGE:#010x},%d0
     bra.s   2f
 1:  moveq   #44,%d1
     mulu.w  %d1,%d0
     addi.l  #descriptors,%d0
+    bra.s   2f
+5:  move.l  %sp@(16),%d0
+    moveq   #{len(RES_PAGES)},%d1
+    cmp.l   %d1,%d0
+    bcc.s   6b
+    moveq   #44,%d1
+    mulu.w  %d1,%d0
+    addi.l  #res_descriptors,%d0
 2:  addq.l  #4,%sp
     move.l  %sp@+,%d2
     rts
 3:  move.l  %sp@(12),%d1
     move.l  %sp@(16),%d0
-    subq.l  #{NEW_TYPE},%d1
-    bne.s   4f
-    moveq   #{CLONE},%d1
+    subq.l  #5,%d1
+    beq.s   0f
+    subq.l  #1,%d1
+    beq.s   0f
+    addq.l  #6,%d1
     rts
-4:  addq.l  #{NEW_TYPE},%d1
+0:  moveq   #{CLONE},%d1
     rts
 
 | -- the SYN page's label fetch at 0x40064622 (jsr getShortName(this, id)), now jsr
@@ -219,8 +283,11 @@ wr_label:
     bsr.w   is_wr
     tst.l   %d0
     beq.s   9f
-    move.l  %sp@(8),%d0
     lea     labels,%a0
+    subq.l  #1,%d0
+    beq.s   0f
+    lea     res_label_table,%a0
+0:  move.l  %sp@(8),%d0
 1:  move.l  %a0@+,%d1
     beq.s   9f
     cmp.l   %d0,%d1
@@ -266,10 +333,18 @@ wr_grid:
 labels:
 {table}
     .long 0
+res_label_table:
+{rtable}
+    .long 0
 descriptors:
 {page_data}
+res_descriptors:
+{res_page_data}
 {_rep("subtitle", SUBTITLE)}
+{_rep("res_subtitle", RES_SUBTITLE)}
+{_rep("res_title", RES_TITLE)}
 {chr(10).join(_rep(f"title_{k}", t) for k, t in enumerate(TITLES))}
 {strings}
+{rstrings}
     .align 2
 """

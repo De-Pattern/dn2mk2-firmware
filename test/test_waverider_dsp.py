@@ -104,7 +104,7 @@ def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     entry = bootstream.read_span(built, dsp.sw_to_load(dsp.ENTRY_SW), 8)
     assert entry == bytes.fromhex("3e06160000f60100")          # jump 0x16f600 (the block counter) ; nop
     lookup = struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32))
-    assert lookup == (0, 1, 2, 3, 4, 5, 0, 0)
+    assert lookup == (0, 1, 2, 3, 4, 5, 6, 0)            # Waverider 5, RESONATOR 6
     # the idle loop's back edge, jump (pc,-0x10) at sw 0xb88abb in L2, becomes JUMP 0x16f500
     site = dsp.l2_sw_to_load(dsp.IDLE_SITE_SW)
     assert bootstream.read_span(stock7, site, 6) == bytes.fromhex("3e07ff00f0ff")
@@ -124,10 +124,10 @@ def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     head = built[:final.offset]
     diff = [k for k in range(final.offset) if head[k] != stock7[k]]
     entry_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.ENTRY_SW), 8)[0][0]
-    look_off = bootstream.spans(stock7, dsp.dm_to_load(dsp.LOOKUP_DM + 20), 4)[0][0]
+    look_off = bootstream.spans(stock7, dsp.dm_to_load(dsp.LOOKUP_DM + 20), 8)[0][0]
     idle_off = bootstream.spans(stock7, dsp.l2_sw_to_load(dsp.IDLE_SITE_SW), 6)[0][0]
     call_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.CALL_SITE_SW), 6)[0][0]
-    allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 4))
+    allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 8))
                | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6)))
     assert diff and set(diff) <= allowed
 
@@ -292,7 +292,8 @@ def test_slots_0_and_1_keep_the_m5_tables():
 
 def test_tables_are_in_ddr_clear_of_the_stock_image_and_the_engine():
     ddr = dsp.ddr_spans()
-    assert [a for _, a, _ in ddr] == dsp.table_addresses()
+    assert [a for _, a, _ in ddr][:-1] == dsp.table_addresses()
+    assert ddr[-1][1] == dsp.RINGS_STATE_DDR and not any(ddr[-1][2])   # RESONATOR's state, zeros
     # the stock stream loads DDR to 0x8052fbe0 and init writes up to 0x80530be8
     # (scripts/sharc_ddr_ceiling.py); the tables start 16 MB in
     assert min(a for _, a, _ in ddr) >= dsp.DDR_FLOOR > 0x80530BE8
@@ -306,11 +307,13 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
     obj = dsp.objects()
     code_spans = [x for x in sp if "asm" in x[0]]
-    assert len(code_spans) == 6
-    # W5: the loop moved to 0x2def00, after the glide state; P1b: PING after the W2 tables
+    assert len(code_spans) == 7
+    # W5: the loop moved to 0x2def00, after the glide state; P1b: PING after the W2 tables;
+    # RESONATOR's after SHFT's tables
     for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["idle_load"],
                                                      obj["block_count"], obj["entry_mark"],
-                                                     obj["machine5_live"], obj["ping"])):
+                                                     obj["machine5_live"], obj["ping"],
+                                                     obj["rings"])):
         assert payload[:len(code)] == code
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
 

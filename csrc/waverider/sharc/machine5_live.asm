@@ -703,6 +703,6 @@ wr_t5v_next.:
       // PING (ping.asm, docs/ping.md) takes the tail: it filters every track whose
       // filter type is 6, then restores what this loop saved and rejoins the chain at
       // 0x1c944c, as this tail did before PING.
-      JUMP 0x170280;                    // ping.asm's wr_ping (dnfw.waverider.dsp.PING_SW)
+      JUMP 0x172980;                    // rings.asm's wr_rings (dnfw.waverider.dsp.RINGS_SW), which goes on to wr_ping
 .wr_type5v..end:
       .type wr_type5v.,STT_FUNC;

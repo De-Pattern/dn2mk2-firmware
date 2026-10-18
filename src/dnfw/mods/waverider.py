@@ -86,6 +86,9 @@ def _chunks() -> list[tuple[int, bytes, str]]:
     if "spans_chunk" in SPEC:
         out.append((SPEC["spans_chunk"]["load"], bytes.fromhex(SPEC["spans_chunk"]["code"]),
                     "Waverider's wave display: every table's frames, one span a column (W5)"))
+    if "machines_chunk" in SPEC:
+        out.append((SPEC["machines_chunk"]["load"], bytes.fromhex(SPEC["machines_chunk"]["code"]),
+                    "the machine shims, names, attributes and MACHINE SEL list (Waverider, RESONATOR)"))
     if "ping_chunk" in SPEC:
         out.append((SPEC["ping_chunk"]["load"], bytes.fromhex(SPEC["ping_chunk"]["code"]),
                     "PING's FLTR-list shims, list and names (P2)"))

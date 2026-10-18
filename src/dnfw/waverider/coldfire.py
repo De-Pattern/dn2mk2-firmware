@@ -47,13 +47,21 @@ from dataclasses import dataclass
 
 BASE = 0x40000400
 NEW_TYPE = 5
+NEW_TYPES = (5, 6)                      # Waverider; RESONATOR (docs/rings.md), both WaveTone clones
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Waverider", "WVR"
+MACHINE_NAMES = {5: ("Waverider", "WVR"), 6: ("Resonator", "RSN")}
+# RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list
+# outgrew the three caves W5 used, so all of it is a platform CODE chunk in RAM, after
+# PING's (dnfw.ping.coldfire.LOAD) and below the platform runtime; the caves are
+# left as stock had them.
+MCHUNK = 0x4670F800
+MCHUNK_END = 0x46710000
 
 # -- 1. the MACHINE SEL list -------------------------------------------------------------
 LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
-LIST_NEW = (0, 2, 1, 3, NEW_TYPE, 4)    # Waverider after Swarmer, before MIDI's divider
+LIST_NEW = (0, 2, 1, 3, 5, 6, 4)        # Waverider, RESONATOR after Swarmer, before MIDI's divider
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -91,9 +99,7 @@ LOAD_BOUND = 0x400DD286
 
 # the caves: clean runs from `dnfw cave scan` that no other mod writes, entered
 # 4 bytes in and left 4 bytes short, as arpmodes does (docs/memory-map.md).
-DATA_CAVE = (0x4028E958, 128)           # the run 0x4028e952, 138 B; long-aligned
-CODE_CAVE = (0x4029037C, 129)           # the run 0x40290378, 137 B: the shims
-NAME_CAVE = (0x4028DB24, 120)           # the run 0x4028db1d, 131 B: the two names
+# (W5 to v0.5: DATA_CAVE 0x4028e958, CODE_CAVE 0x4029037c, NAME_CAVE 0x4028db24; now unused)
 
 # Read, never written: what the edits rely on.
 GUARDS = (
@@ -185,10 +191,13 @@ SHIMS = f"""
 slot_shim:
     move.l  %sp@(12),%d0
     movea.l %sp@(16),%a1
-    moveq   #{NEW_TYPE},%d2
+    moveq   #5,%d2
+    cmp.l   %d0,%d2
+    beq.s   0f
+    moveq   #6,%d2
     cmp.l   %d0,%d2
     bne.s   1f
-    moveq   #{CLONE},%d0
+0:  moveq   #{CLONE},%d0
 1:  jmp     {SLOT_RESUME:#010x}
 
 | A one-argument per-machine UI accessor whose first two instructions were
@@ -197,10 +206,13 @@ slot_shim:
 | caller's argument is at 8. The accessor goes on to `cmp.l %d0,%d1`.
 canon_arg:
     move.l  %sp@(8),%d0
-    moveq   #{NEW_TYPE},%d1
+    moveq   #5,%d1
+    cmp.l   %d0,%d1
+    beq.s   0f
+    moveq   #6,%d1
     cmp.l   %d0,%d1
     bne.s   1f
-    moveq   #{CLONE},%d0
+0:  moveq   #{CLONE},%d0
 1:  moveq   #4,%d1
     rts
 
@@ -210,11 +222,13 @@ canon_arg:
 canon_page:
     move.l  %sp@(12),%d1
     move.l  %sp@(16),%d0
-    subq.l  #{NEW_TYPE},%d1
-    bne.s   1f
-    moveq   #{CLONE},%d1
+    subq.l  #5,%d1
+    beq.s   0f
+    subq.l  #1,%d1
+    beq.s   0f
+    addq.l  #6,%d1
     rts
-1:  addq.l  #{NEW_TYPE},%d1
+0:  moveq   #{CLONE},%d1
     rts
 
 | getMachineType(track) 0x4004b7f2, from its read of sound+0xDE: the UI's view of
@@ -222,10 +236,13 @@ canon_page:
 | asks behave as they do for WaveTone. Back to its common exit.
 canon_track:
     mvs.b   %a0@(222),%d0
-    moveq   #{NEW_TYPE},%d1
+    moveq   #5,%d1
+    cmp.l   %d0,%d1
+    beq.s   0f
+    moveq   #6,%d1
     cmp.l   %d0,%d1
     bne.s   1f
-    moveq   #{CLONE},%d0
+0:  moveq   #{CLONE},%d0
 1:  jmp     {TRACK_TYPE_EXIT:#010x}
 
 | The same question, answered with the machine the track really has: for the
@@ -264,10 +281,13 @@ SHIMS2 = f"""
 | that follows (0x400dbce8) is a scratch-register call.
 canon_valid:
     mvs.b   %a0@(222),%d3
-    moveq   #{NEW_TYPE},%d0
+    moveq   #5,%d0
+    cmp.l   %d3,%d0
+    beq.s   0f
+    moveq   #6,%d0
     cmp.l   %d3,%d0
     bne.s   1f
-    moveq   #{CLONE},%d3
+0:  moveq   #{CLONE},%d3
 1:  movea.l %sp@+,%a1
     move.l  %d2,%sp@-
     jmp     %a1@
@@ -380,52 +400,37 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
         content[va - BASE:va - BASE + len(new)] = new
         edits.append(Edit(va, old, new, what))
 
-    # the code cave: the three shims, then the two name strings
-    _cave_free(content, CODE_CAVE)
-    _cave_free(content, DATA_CAVE)
-    table = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in SHIM_LABELS) + "\n"
-    blob = assemble(SHIMS + table, base=CODE_CAVE[0])
-    shim = blob[:-4 * len(SHIM_LABELS)]
-    layout = dict(zip(SHIM_LABELS, struct.unpack(f">{len(SHIM_LABELS)}I",
-                                                 blob[-4 * len(SHIM_LABELS):])))
-    if len(shim) > CODE_CAVE[1]:
-        raise ComposeError(f"the code cave overflows: {len(shim)} > {CODE_CAVE[1]}")
-    edit(CODE_CAVE[0], shim, "the shims: type 5 resolves as WaveTone in slot_to_id, the SYN "
-                             "page tables and getMachineType; the real type for identity")
-
-    # the name cave: the two strings, then the second shim block
-    _cave_free(content, NAME_CAVE)
-    names = LONG_NAME.encode("ascii") + b"\0" + SHORT_NAME.encode("ascii") + b"\0"
-    names += bytes(-len(names) % 4)
-    layout["long_name"] = NAME_CAVE[0]
-    layout["short_name"] = NAME_CAVE[0] + len(LONG_NAME) + 1
-    at2 = NAME_CAVE[0] + len(names)
-    table2 = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in SHIM2_LABELS) + "\n"
-    blob2 = assemble(SHIMS2 + table2, base=at2)
-    shim2 = blob2[:-4 * len(SHIM2_LABELS)]
-    layout.update(zip(SHIM2_LABELS, struct.unpack(f">{len(SHIM2_LABELS)}I",
-                                                  blob2[-4 * len(SHIM2_LABELS):])))
-    names += shim2
-    if len(names) > NAME_CAVE[1]:
-        raise ComposeError(f"the name cave overflows: {len(names)} > {NAME_CAVE[1]}")
-    edit(NAME_CAVE[0], names, f"Waverider's names ({LONG_NAME!r}, {SHORT_NAME!r}) and the "
-                              "parameter-ownership shim")
-
-    # the data cave: the six-row name table, the six attribute rows, the list
+    # the machines chunk (RAM, MCHUNK): the shims, the names, the name table, the
+    # attribute rows, the list -- what W5 kept in three caves, for two machines now
     _need(content, LIST_STOCK_VA, b"".join(_long(t) for t in LIST_STOCK), "the MACHINE SEL list")
     names_rows = _read(content, NAMES_STOCK_VA, NAME_ROW * 5)
     attr_rows = _read(content, ATTR_STOCK_VA, ATTR_ROW * 5)
-    layout["names"] = DATA_CAVE[0]
-    layout["attributes"] = layout["names"] + NAME_ROW * 6
-    layout["list"] = layout["attributes"] + ATTR_ROW * 6
-    row5 = _long(layout["long_name"]) + _long(layout["short_name"]) + _long(0)
-    blob = (names_rows + row5
-            + attr_rows + attr_rows[ATTR_ROW * CLONE:ATTR_ROW * (CLONE + 1)]
-            + b"".join(_long(t) for t in LIST_NEW))
-    if len(blob) > DATA_CAVE[1]:
-        raise ComposeError(f"the data cave overflows: {len(blob)} > {DATA_CAVE[1]}")
-    edit(DATA_CAVE[0], blob, "Waverider's data: the six-row name table, the six attribute "
-                             "rows (the sixth is WaveTone's), the six-entry MACHINE SEL list")
+    strings = "\n".join(f'name_long_{t}:\n    .asciz "{MACHINE_NAMES[t][0]}"\n'
+                        f'name_short_{t}:\n    .asciz "{MACHINE_NAMES[t][1]}"' for t in NEW_TYPES)
+    labels = SHIM_LABELS + SHIM2_LABELS + tuple(f"name_{c}_{t}" for t in NEW_TYPES
+                                                for c in ("long", "short")) + ("mdata",)
+    table = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in labels) + "\n"
+    src = SHIMS + SHIMS2 + "\n" + strings + "\n    .align 2\nmdata:\n" + table
+    blob = assemble(src, base=MCHUNK)
+    head = blob[:-4 * len(labels)]
+    layout = dict(zip(labels, struct.unpack(f">{len(labels)}I", blob[-4 * len(labels):])))
+    if layout["mdata"] != MCHUNK + len(head):
+        raise ComposeError("the machines chunk's data does not follow its code")
+    layout["long_name"], layout["short_name"] = layout["name_long_5"], layout["name_short_5"]
+    rows = bytearray(names_rows)
+    for t in NEW_TYPES:
+        rows += _long(layout[f"name_long_{t}"]) + _long(layout[f"name_short_{t}"]) + _long(0)
+    n_rows = 5 + len(NEW_TYPES)
+    layout["names"] = layout["mdata"]
+    layout["attributes"] = layout["names"] + NAME_ROW * n_rows
+    layout["list"] = layout["attributes"] + ATTR_ROW * n_rows
+    clone_attr = attr_rows[ATTR_ROW * CLONE:ATTR_ROW * (CLONE + 1)]
+    mchunk = (head + bytes(rows) + attr_rows + clone_attr * len(NEW_TYPES)
+              + b"".join(_long(t) for t in LIST_NEW))
+    if MCHUNK + len(mchunk) > MCHUNK_END:
+        raise ComposeError(f"the machines chunk ends past {MCHUNK_END:#010x}")
+    layout["mchunk_code_end"] = layout["mdata"]
+    top = len(NEW_TYPES) + 4                    # the highest type with a row: 6
 
     # 1. the list: its length is LIST_NEW's, so a seventh machine is one entry there
     n = len(LIST_NEW)
@@ -437,31 +442,31 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          f"MACHINE SEL list: the vector's capacity, {n} longs", bytes.fromhex("41e80014"))
     edit(LIST_BEGIN, bytes.fromhex("4879") + _long(layout["list"]),
          "MACHINE SEL list: the copy's start", bytes.fromhex("4879") + _long(LIST_STOCK_VA))
-    edit(GROUP_FN, group_function(assemble), f"the MACHINE SEL group: types {NEW_TYPE}.."
+    edit(GROUP_FN, group_function(assemble), f"the MACHINE SEL group: types {NEW_TYPES[0]}.."
          f"{SAMPLE_TYPES_LAST} are a section of their own ({SAMPLE_GROUP}), divided off like MIDI",
          GROUP_STOCK)
 
     # 2. the names
     for bound, base, op, col in NAME_SITES:
-        edit(bound, bytes.fromhex("7205"), f"name column {col // 4}: bound 4 -> 5",
+        edit(bound, bytes([0x72, top]), f"name column {col // 4}: bound 4 -> {top}",
              bytes.fromhex("7204"))
-        edit(base + 2, _long(layout["names"] + col), f"name column {col // 4}: the six-row table",
-             _long(NAMES_STOCK_VA + col))
+        edit(base + 2, _long(layout["names"] + col),
+             f"name column {col // 4}: the {n_rows}-row table", _long(NAMES_STOCK_VA + col))
         _need(content, base, bytes.fromhex(op), "the name accessor's base instruction")
 
     # 3. the attribute rows
     for bound in ATTR_BOUNDS:
-        edit(bound, bytes.fromhex("7405" if bound == 0x400DC19C else "7205"),
-             "attribute rows: bound 4 -> 5", bytes.fromhex("7404" if bound == 0x400DC19C else "7204"))
+        edit(bound, bytes([0x74 if bound == 0x400DC19C else 0x72, top]),
+             f"attribute rows: bound 4 -> {top}",
+             bytes.fromhex("7404" if bound == 0x400DC19C else "7204"))
     for site, col in ATTR_BASES:
         _need(content, site, bytes.fromhex("41f9"), "the attribute accessor's lea")
-        edit(site + 2, _long(layout["attributes"] + col), "attribute rows: the six-row copy",
+        edit(site + 2, _long(layout["attributes"] + col), f"attribute rows: the {n_rows}-row copy",
              _long(ATTR_STOCK_VA + col))
 
     # 5. the stored-sound LOAD keeps type 5 (stock turns it into FM Tone)
-    edit(LOAD_BOUND, bytes.fromhex("7407"), "stored-sound LOAD: machine types -1..5 are kept "
-                                            "(stock keeps -1..4; anything else loads as FM Tone)",
-         bytes.fromhex("7406"))
+    edit(LOAD_BOUND, bytes([0x74, top + 2]), f"stored-sound LOAD: machine types -1..{top} are "
+         "kept (stock keeps -1..4; anything else loads as FM Tone)", bytes.fromhex("7406"))
 
     # 4. slot_to_id
     edit(SLOT_HOOK, bytes.fromhex("4ef9") + _long(layout["slot_shim"]) + bytes.fromhex("4e71"),
@@ -526,4 +531,5 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     return {"content": bytes(content), "edits": edits, "layout": layout,
             "chunk": {"load": pages.LOAD, "code": chunk},
             "spans_chunk": {"load": wave.SPANS_LOAD, "code": spans},
+            "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)},
             "ping_chunk": pbuilt["chunk"]}
