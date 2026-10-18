@@ -376,7 +376,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,stock,ping,frame")
+    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,frame")
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -472,6 +472,11 @@ def main(argv=None):
             print("\nstep 6: PING")
             results["6_ping"] = step_ping(init, sound, machines, a.blocks)
             show(results["6_ping"])
+
+        if "shft" in steps:
+            print("\nstep 7: SHFT")
+            results["7_shft"] = step_shft(init, sound, machines, a.blocks)
+            show(results["7_shft"])
 
         frames = load_frames(a)
         if frames and "frame" in steps:
@@ -854,6 +859,101 @@ def step_ping(init, sound, machines, blocks) -> dict:
             all(r.get("ok") and r["others_untouched"] for r in results.values()),
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": numbers}
+
+
+# -- step 7: SHFT (docs/shft.md) -----------------------------------------------------------------
+
+def shft_settings(mode: int, *, freq=0x5400, fdbk=0x0000, drive=0x3000, atk=0x0300, dec=0x5000,
+                  mix=0x7f00, depth=0x4000, keyt=0) -> dict:
+    """Frame parameter words for a FLTR page set to SHFT (the stock filter parameters)."""
+    return {66: int((mode + 0.5) / 3 * 32512), 67: freq, 68: fdbk, 69: depth, 70: drive,
+            71: atk, 72: dec, 73: mix, 79: keyt}
+
+
+def run_filter_pair(init, sound, machines, blocks, ftypes, settings):
+    """Track 0 (Waverider) and track 1 (WaveTone) on filter types FTYPES[0], FTYPES[1],
+    with frame parameter words SETTINGS[0], SETTINGS[1], triggered on block 1; taps as
+    run_ping's, at wr_ping's entry."""
+    taps = []
+
+    def at_entry(r):
+        bufs = [m2.word(r.state, V.TRACK_BUFFERS + 4 * t) for t in range(16)]
+        trig = (m2.word(r.state, TRIG_WORD) or 0) >> 16
+        tap = {}
+        for t in range(16):
+            rec = V.track_record(t)
+            tap[t] = {"before": [m2.word(r.state, bufs[t] + 4 * k) or 0 for k in range(BLOCK)],
+                      "rec": {o: f32_of(m2.word(r.state, rec + o)) for o in PING_FIELDS},
+                      "note": f32_of(m2.word(r.state, NOTE_CELL + 4 * t)),
+                      "trig": bool(trig & (1 << t)),
+                      "ftype": frame_word(r.state, FR.FILTER + 2 * t)}
+        taps.append(tap)
+
+    def frames(b):
+        f = base_frame(sound, machines, t0=5, others={1: 1}, trigger=(b == 1), trigger_others=True,
+                       overrides={WAV1: 0x3C00, **settings[0]})
+        f.header(FR.FILTER, 0, ftypes[0])
+        f.header(FR.FILTER, 1, ftypes[1])
+        f.sound(1, {**machines.get(1, {}), TUN1: TUN1_ZERO, **settings[1]})
+        return f.to_bytes()
+    run = run_blocks(init, frames, blocks, extra_hooks={dsp.PING_SW: at_entry})
+    return run, taps
+
+
+def step_shft(init, sound, machines, blocks) -> dict:
+    """SHFT on its own (UP with feedback beside DOWN with the envelope), then beside PING
+    (BOTH on track 0, PING VCFQ on track 1): every SHFT track bit-exact to
+    dnfw.shft.live, every PING track still bit-exact to dnfw.ping.live."""
+    from dnfw.ping import live as PL
+    from dnfw.shft import live as SL
+    PT, ST = PL.tables(), SL.tables()
+    cases = {
+        "UP+fdbk / DOWN+env": ((SL.FILTER_TYPE, SL.FILTER_TYPE),
+                               (shft_settings(0, fdbk=0x7800), shft_settings(1, freq=0x3000, depth=0x7000))),
+        "BOTH / PING VCFQ": ((SL.FILTER_TYPE, PL.FILTER_TYPE),
+                             (shft_settings(2, freq=0x6000, mix=0x4000, keyt=0x7f00),
+                              ping_settings(2, freq=0x3C00))),
+    }
+    results = {}
+    for name, (ftypes, settings) in cases.items():
+        run, taps = run_filter_pair(init, sound, machines, blocks, ftypes, settings)
+        if not run["ok"] or len(taps) != blocks:
+            results[name] = {"ok": False, "why": run.get("halt") or f"{len(taps)} entries"}
+            continue
+        sv = {t: SL.Voice() for t in range(16)}
+        pv = {t: PL.Voice() for t in range(16)}
+        mism, peaks, untouched, seen = {}, {}, True, set()
+        for b, tap in enumerate(taps):
+            after = run["machine"][b]
+            for t in range(16):
+                x = tap[t]
+                if x["ftype"] == SL.FILTER_TYPE:
+                    want = SL.block(sv[t], [f32_of(w) for w in x["before"]], x["rec"], x["note"], x["trig"], ST)
+                elif x["ftype"] == PL.FILTER_TYPE:
+                    want = PL.block(pv[t], [f32_of(w) for w in x["before"]], x["rec"], x["note"], x["trig"], PT)
+                else:
+                    untouched &= [bits_of(v) for v in after[t]] == x["before"]
+                    continue
+                seen.add((t, x["ftype"]))
+                got = [bits_of(v) for v in after[t]]
+                mism[t] = mism.get(t, 0) + sum(1 for g, w in zip(got, want) if g != bits_of(w))
+                peaks[t] = max(peaks.get(t, 0.0), max(abs(v) for v in after[t] if v == v))
+        results[name] = {"ok": True, "mismatches": mism, "peaks": peaks, "others_untouched": untouched,
+                         "tracks": sorted(seen), "want": [(0, ftypes[0]), (1, ftypes[1])]}
+    checks = {
+        "SHFT runs on every track set to filter type 7, beside SHFT and beside PING":
+            all(r.get("ok") and r["tracks"] == r["want"] for r in results.values()),
+        "every SHFT track bit-exact to dnfw.shft.live, and PING beside it to dnfw.ping.live, "
+        "fed the DSP's own inputs, in every block (UP, DOWN, BOTH)":
+            all(r.get("ok") and not any(r["mismatches"].values()) for r in results.values()),
+        "every SHFT / PING track is audible and bounded (0.001 < peak <= 1.0)":
+            all(r.get("ok") and all(0.001 < p <= 1.0 + 1e-6 for p in r["peaks"].values())
+                for r in results.values()),
+        "tracks on other filter types pass through bit-identical":
+            all(r.get("ok") and r["others_untouched"] for r in results.values()),
+    }
+    return {"ok": all(checks.values()), "checks": checks,
+            "numbers": {k: {kk: vv for kk, vv in v.items() if kk != "want"} for k, v in results.items()}}
 
 
 def step_filters_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -> dict:

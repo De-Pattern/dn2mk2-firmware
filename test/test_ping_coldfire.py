@@ -38,10 +38,10 @@ def test_chunk_place():
 def test_list_has_ping_last():
     n = len(P.LIST_NEW)
     got = struct.unpack(f">{n}i", _at(LAY["ping_list"], 4 * n))
-    assert got == (0, 1, 4, 3, 5, 2, 6)
+    assert got == (0, 1, 4, 3, 5, 2, 6, 7)
     assert LAY["ping_list_end"] == LAY["ping_list"] + 4 * n
-    assert _edit(P.LIST_ALLOC)["new"] == "4878001c"
-    assert _edit(P.LIST_CAP)["new"] == "41e8001c"
+    assert _edit(P.LIST_ALLOC)["new"] == "48780020"
+    assert _edit(P.LIST_CAP)["new"] == "41e80020"
     assert _edit(P.LIST_BEGIN)["new"] == "4879" + f"{LAY['ping_list']:08x}"
     assert _edit(P.LIST_END)["new"] == "4879" + f"{LAY['ping_list_end']:08x}"
 
@@ -51,18 +51,18 @@ def _cstr(va: int) -> str:
     return CODE[off:CODE.index(b"\0", off)].decode()
 
 
-def test_names_row_six():
-    row = _at(LAY["ping_names"] + 12 * 6, 12)
-    lo, sh, third = struct.unpack(">III", row)
-    assert (_cstr(lo), _cstr(sh), third) == ("Ping", "PING", 0)
+def test_names_rows_six_and_seven():
+    for t, want in ((6, ("Ping", "PING")), (7, ("Shift", "SHFT"))):
+        lo, sh, third = struct.unpack(">III", _at(LAY["ping_names"] + 12 * t, 12))
+        assert (_cstr(lo), _cstr(sh), third) == (*want, 0)
     for bound, base, _op, col in P.NAME_SITES:
-        assert _edit(bound)["stock"] == "7205" and _edit(bound)["new"] == "7206"
+        assert _edit(bound)["stock"] == "7205" and _edit(bound)["new"] == "7207"
         assert _edit(base + 2)["new"] == f"{LAY['ping_names'] + col:08x}"
 
 
 def test_load_keeps_six_and_hooks():
     e = _edit(P.LOAD_BOUND)
-    assert (e["stock"], e["new"]) == ("143c0007", "143c0008")
+    assert (e["stock"], e["new"]) == ("143c0007", "143c0009")
     assert _edit(P.SLOT_SITE)["new"] == "4ef9" + f"{LAY['ping_slot']:08x}"
     assert _edit(P.SLOT_SITE)["stock"] == P.SLOT_STOCK.hex()
     assert _edit(P.OVER_SITE)["new"] == "4eb9" + f"{LAY['ping_over']:08x}"
@@ -81,7 +81,8 @@ def test_renamed_records_are_filter_records():
     if not stock.exists():
         return
     d = stock.read_bytes()
-    for rid, _long, short in PP.NAMED:
-        page = struct.unpack(">i", d[0x401F7F94 - 0x40000400 + 60 * rid:][:4])[0]
-        assert page in (5, 13), (rid, page)
-        assert 1 <= len(short) <= 5
+    for names in PP.SETS.values():
+        for rid, (_long, short) in names.items():
+            page = struct.unpack(">i", d[0x401F7F94 - 0x40000400 + 60 * rid:][:4])[0]
+            assert page in (5, 13), (rid, page)
+            assert 1 <= len(short) <= 5

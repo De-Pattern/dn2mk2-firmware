@@ -46,17 +46,18 @@ from __future__ import annotations
 import struct
 
 BASE = 0x40000400
-NEW_FILTER = 6
+NEW_FILTER = 6                          # PING
+NEW_FILTERS = (6, 7)                    # PING, SHFT (docs/shft.md)
 CLONE = 0                               # Multi-Mode
-LONG_NAME = "Ping"
-SHORT_NAME = "PING"
+NAMES = {6: ("Ping", "PING"), 7: ("Shift", "SHFT")}
+LONG_NAME, SHORT_NAME = NAMES[6]
 
 LOAD = 0x4670F000                       # Waverider's region (pages.LOAD..C_END), its last 4 KB
 END = 0x46710000                        # pages.C_END: the platform runtime starts here
 
 LIST_STOCK_VA = 0x401DDD40              # {0, 1, 4, 3, 5, 2}, six longs
 LIST_STOCK = (0, 1, 4, 3, 5, 2)
-LIST_NEW = LIST_STOCK + (NEW_FILTER,)   # Ping at the end
+LIST_NEW = LIST_STOCK + NEW_FILTERS     # Ping, then Shift, at the end
 LIST_ALLOC = 0x4004DB0C                 # pea 0x18 -- the vector's storage
 LIST_END = 0x4004DB2C                   # pea 0x401ddd58 -- the copy's end
 LIST_CAP = 0x4004DB32                   # lea %a0@(24),%a0 -- the capacity
@@ -110,15 +111,25 @@ GUARDS = (
     (0x4006ED90, "7801", "... d4 is next written, not read, past the cases"),
 )
 
+def _is_new(reg: str, scratch: str, done: str) -> str:
+    """GNU as: branch to `done` unless REG is one of NEW_FILTERS (scratch is clobbered);
+    falls through to the next line when it is."""
+    out = []
+    for k, t in enumerate(NEW_FILTERS):
+        out.append(f"    moveq   #{t},{scratch}")
+        out.append(f"    cmp.l   {reg},{scratch}")
+        out.append(f"    beq.s   0f" if k < len(NEW_FILTERS) - 1 else f"    bne.s   {done}")
+    out.append("0:")
+    return "\n".join(out)
+
+
 SOURCE = f"""
 | param_set_slot_to_id, from {SLOT_SITE:#010x} by jmp: a1 is the filter type, d1 and
 | d2 are free (d2 was saved at entry and is restored at the exit; d1 is not read on
-| the row path). Filter {NEW_FILTER} reads Multi-Mode's row ({CLONE}); then the stock
+| the row path). Filters {NEW_FILTERS} read Multi-Mode's row ({CLONE}); then the stock
 | bound, 0..5, and the stock paths.
 ping_slot:
-    moveq   #{NEW_FILTER},%d2
-    cmp.l   %a1,%d2
-    bne.s   1f
+{_is_new("%a1", "%d2", "1f")}
     suba.l  %a1,%a1
 1:  moveq   #5,%d2
     cmp.l   %a1,%d2
@@ -127,26 +138,22 @@ ping_slot:
 2:  jmp     {SLOT_ZERO:#010x}
 
 | The FLTR page descriptor accessor {OVER_SITE:#010x}(filter): its first two
-| instructions, `moveq #5,%d1 ; move.l %sp@(4),%d0`, now `jsr` here, with filter
-| {NEW_FILTER} read as {CLONE}. The jsr's return address is on top, so the argument
+| instructions, `moveq #5,%d1 ; move.l %sp@(4),%d0`, now `jsr` here, with filters
+| {NEW_FILTERS} read as {CLONE}. The jsr's return address is on top, so the argument
 | is at 8. The accessor compares next.
 ping_over:
     move.l  %sp@(8),%d0
-    moveq   #{NEW_FILTER},%d1
-    cmp.l   %d0,%d1
-    bne.s   1f
+{_is_new("%d0", "%d1", "1f")}
     moveq   #{CLONE},%d0
 1:  moveq   #5,%d1
     rts
 
 | The FLTR page's response curve, from {GRAPH_SITE:#010x} by jmp (both of its entries,
 | the fall-through and `bcs.s` from 0x4006ec84, land on the jmp itself): d4 is the
-| filter type and the cases read it only as the jump's index. Filter {NEW_FILTER} draws
-| Multi-Mode's curve, so FREQ and RING show where they are; then the stock bound.
+| filter type and the cases read it only as the jump's index. Filters {NEW_FILTERS} draw
+| Multi-Mode's curve, so FREQ and RESO's places show where they are; then the stock bound.
 ping_graph:
-    moveq   #{NEW_FILTER},%d0
-    cmp.l   %d4,%d0
-    bne.s   1f
+{_is_new("%d4", "%d0", "1f")}
     moveq   #{CLONE},%d4
 1:  moveq   #5,%d0
     cmp.l   %d4,%d0
@@ -159,15 +166,12 @@ ping_code_end:
 ping_list:
 {chr(10).join(f"    .long {t}" for t in LIST_NEW)}
 ping_list_end:
-ping_long:
-    .asciz  "{LONG_NAME}"
-ping_short:
-    .asciz  "{SHORT_NAME}"
+{chr(10).join(f'name_long_{t}:{chr(10)}    .asciz  "{NAMES[t][0]}"{chr(10)}name_short_{t}:{chr(10)}    .asciz  "{NAMES[t][1]}"' for t in NEW_FILTERS)}
     .align 2
 ping_names:
 """
-LABELS = ("ping_slot", "ping_over", "ping_graph", "ping_code_end", "ping_list", "ping_list_end",
-          "ping_long", "ping_short", "ping_names")
+LABELS = (("ping_slot", "ping_over", "ping_graph", "ping_code_end", "ping_list", "ping_list_end")
+          + tuple(f"name_{c}_{t}" for t in NEW_FILTERS for c in ("long", "short")) + ("ping_names",))
 
 
 class ComposeError(ValueError):
@@ -206,7 +210,8 @@ def compose(content: bytearray, edit, assemble) -> dict:
     for r in range(6):
         if _read(content, NAMES_STOCK_VA + NAME_ROW * r + 8, 4) != bytes(4):
             raise ComposeError(f"filter name row {r}: its third column is not 0")
-    rows += _long(layout["ping_long"]) + _long(layout["ping_short"]) + bytes(4)
+    for t in NEW_FILTERS:
+        rows += _long(layout[f"name_long_{t}"]) + _long(layout[f"name_short_{t}"]) + bytes(4)
     code = head + bytes(rows)
     if LOAD + len(code) > END:
         raise ComposeError(f"PING's chunk ends past {END:#010x}")
@@ -226,22 +231,23 @@ def compose(content: bytearray, edit, assemble) -> dict:
     # 2. the names
     for bound, base, op, col in NAME_SITES:
         _need(content, base, bytes.fromhex(op), "the name accessor's base instruction")
-        edit(bound, bytes.fromhex("7206"), f"filter name column {col // 4}: bound 5 -> 6",
-             bytes.fromhex("7205"))
+        edit(bound, bytes([0x72, NEW_FILTERS[-1]]),
+             f"filter name column {col // 4}: bound 5 -> {NEW_FILTERS[-1]}", bytes.fromhex("7205"))
         edit(base + 2, _long(layout["ping_names"] + col),
              f"filter name column {col // 4}: the seven-row table", _long(NAMES_STOCK_VA + col))
 
     # 3. the stored-sound LOAD keeps filter 6
-    edit(LOAD_BOUND, bytes.fromhex("143c0008"), "stored-sound LOAD: filter types -1..6 are "
-         "kept (stock keeps -1..5; anything else loads as Multi-Mode)", LOAD_BOUND_STOCK)
+    edit(LOAD_BOUND, bytes([0x14, 0x3C, 0, NEW_FILTERS[-1] + 2]),
+         f"stored-sound LOAD: filter types -1..{NEW_FILTERS[-1]} are kept (stock keeps -1..5; "
+         "anything else loads as Multi-Mode)", LOAD_BOUND_STOCK)
 
     # 4. slot_to_id and the FLTR page descriptor: 6 reads Multi-Mode's
     edit(SLOT_SITE, bytes.fromhex("4ef9") + _long(layout["ping_slot"]),
-         "param_set_slot_to_id: filter 6 resolves as Multi-Mode", SLOT_STOCK)
+         "param_set_slot_to_id: filters 6 and 7 resolve as Multi-Mode", SLOT_STOCK)
     edit(OVER_SITE, bytes.fromhex("4eb9") + _long(layout["ping_over"]),
-         "the FLTR page descriptor: filter 6 reads Multi-Mode's", OVER_STOCK)
+         "the FLTR page descriptor: filters 6 and 7 read Multi-Mode's", OVER_STOCK)
 
     edit(GRAPH_SITE, bytes.fromhex("4ef9") + _long(layout["ping_graph"]) + bytes.fromhex("4e71"),
-         "the FLTR page's response curve: filter 6 draws Multi-Mode's", GRAPH_STOCK)
+         "the FLTR page's response curve: filters 6 and 7 draw Multi-Mode's", GRAPH_STOCK)
 
     return {"layout": layout, "chunk": {"load": LOAD, "code": bytes(code)}}

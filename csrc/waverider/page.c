@@ -124,15 +124,20 @@ static void wr_names(void)
  * same mechanism as wr_names, on records it does not touch. */
 static const char *ping_stock_long[PING_NAMED] __attribute__((section(".data")));
 static const char *ping_stock_short[PING_NAMED] __attribute__((section(".data")));
-static int ping_on __attribute__((section(".data"))) = -1;
+static int ping_on __attribute__((section(".data"))) = -2;   /* -2: not yet run */
 
+/* -> which of ping_filters the active track's filter is (0..PING_SETS-1), or -1 */
 static int ping_active(void)
 {
     u8 t = UI_TRACK;
     unsigned char *kit = KIT_POINTER;
     if (t > 15 || !kit)
-        return 0;
-    return (signed char)kit[52u + 1163u * t + 0xDFu] == PING_FILTER;
+        return -1;
+    signed char f = (signed char)kit[52u + 1163u * t + 0xDFu];
+    for (int k = 0; k < PING_SETS; k++)
+        if (f == ping_filters[k])
+            return k;
+    return -1;
 }
 
 static void ping_names(void)
@@ -142,12 +147,14 @@ static void ping_names(void)
         return;
     for (int k = 0; k < PING_NAMED; k++) {
         u32 id = ping_named_ids[k];
-        if (ping_on < 0) {
+        if (ping_on == -2) {                    /* the first call: keep the stock pointers */
             ping_stock_long[k] = NAME_LONG(id);
             ping_stock_short[k] = NAME_SHORT(id);
         }
-        NAME_LONG(id) = on ? ping_named_long[k] : ping_stock_long[k];
-        NAME_SHORT(id) = on ? ping_named_short[k] : ping_stock_short[k];
+        const char *l = on >= 0 ? ping_named_long[on][k] : 0;
+        const char *sh = on >= 0 ? ping_named_short[on][k] : 0;
+        NAME_LONG(id) = l ? l : ping_stock_long[k];
+        NAME_SHORT(id) = sh ? sh : ping_stock_short[k];
     }
     ping_on = on;
 }

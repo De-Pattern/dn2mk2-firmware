@@ -79,7 +79,8 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
     return out
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
-         "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py"]
+         "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
+         "test/test_shft_live.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 
@@ -218,9 +219,10 @@ def main() -> int:
         # 6. engine + LOAD/SAVE
         types = ["--machine-type", "3"] + (["--machine-type", "5", "--machine-max", "5"]
                                            if dsp_changed else [])
-        # PING (filter type 6): kept by LOAD; 7 still loads as Multi-Mode; 2 is unchanged
+        # PING (6) and SHFT (7) are kept by LOAD; 8 still loads as Multi-Mode
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",
-                                            "--filter-max", "6"] if dsp_changed else [])
+                                            "--filter-type", "8", "--filter-max", "7"]
+                                           if dsp_changed else [])
         rc, out = run("boot_engine", [a.venv, "-u", "scripts/emu_boot_engine.py",
                                       "--build", bdir, "--frames", "8", *types], logs)
         clean = rc == 0 and "ran clean" in out and "FAIL" not in out and "corrupt" not in out
