@@ -1,0 +1,21 @@
+{
+  "build": "res-r1_DN2_1.11.syx",
+  "sha256": "920ee105803cd1114770b38bdf94b8de325539c73b31371144795d495f5dd847",
+  "stock": "Digitone_II_OS1.11.syx",
+  "date": "2026-10-18T13:01:13",
+  "gates": {
+    "preflight": "PASS: bootstrap/updater/meta/Outbox untouched, signature, DSP size",
+    "DSP identity": "PASS: section 7 is exactly dsp.section7(stock), the image the SHARC gate runs",
+    "SHARC runner": "PASS: all steps PASS, incl. types 0-4 bit-identical to stock",
+    "ColdFire: code 0x4670c000..0x4670c120": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x4670c400..0x4670d62e": "PASS: no scale-8 addressing",
+    "ColdFire: chunk 0x46b00000": "n/a: Waverider's wave-display bytes (wave.SPANS_LOAD), never executed",
+    "ColdFire: code 0x4670f800..0x4670f89e": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x4670f000..0x4670f056": "PASS: no scale-8 addressing",
+    "ColdFire: MAIN OS": "PASS: 134 hit(s), all in appended data that never executes",
+    "boot from reset": "PASS: booted and drew its UI, no fault",
+    "engine + LOAD/SAVE": "PASS: evaluator clean, CODE intact, machine and filter types round-trip",
+    "unit tests": "PASS: 101 passed in 253.87s (0:04:13)"
+  },
+  "logs": "/home/claude/dn2/repo/out/ship_gate_rna09ceg/logs"
+}

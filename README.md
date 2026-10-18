@@ -28,11 +28,62 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.5** | 2026-10-18 | SHIFT filter type (frequency shifter) beside PING; DSP memory packed tighter | `builds/v0.5-SHIFT/` | yes |
+| **v0.6** | 2026-10-18 | RESONATOR machine (Rings-style modal resonator), up to 4 voices | `builds/v0.6-RESONATOR/` | yes |
+| v0.5 | 2026-10-18 | SHIFT filter type (frequency shifter) beside PING; DSP memory packed tighter | `builds/v0.5-SHIFT/` | yes |
 | v0.4 | 2026-10-13 | PING filter type (SVF / LADR / VCFQ / LPG) on the FLTR page, any machine | `builds/v0.4-PING/` | yes |
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.6 — RESONATOR (Rings-style machine)
+
+`DN2mod_v0.6_RESONATOR_OS1.11.syx`
+sha256 `920ee105803cd1114770b38bdf94b8de325539c73b31371144795d495f5dd847`
+Gate: CLEARED TO FLASH, 2026-10-18. Source: commit `8e6854e`. Docs: `docs/rings.md`.
+
+**Adds.** A new machine, **RESONATOR**, in MACHINE SEL after WAVERIDER. Each note hits a
+bank of 24 resonant modes with a mallet or a noise burst: strings, marimba bars, bells,
+plates, glass and drums. Polyphonic up to **4 voices** (set the track's VOICE SETUP to
+4 or fewer; a 5th and 6th voice are silent, by design, to keep the DSP load bounded).
+
+    TUNE  LEV   STRC  BRIT  /  DAMP  POS   EXCT  HIT
+
+| control | what it does |
+|---|---|
+| TUNE | pitch, ±5 octaves |
+| LEV | level (100 = unity) |
+| STRC | structure: left = harmonic (a string), middle = a bar (marimba), right = a plate / bell |
+| BRIT | brightness: the mallet's hardness, and how fast the high modes die |
+| DAMP | decay, 0.1 s to 12 s |
+| POS | where it is hit: the middle mutes every other mode (hollow), the edge keeps them all |
+| EXCT | the exciter: left = mallet, right = a noise burst, between = both |
+| HIT | how hard it is hit |
+
+The page draws the modes as lines: STRC moves their spacing, POS their heights.
+
+**Test:**
+1. FUNC + SYN, scroll to **RESONATOR** (after WAVERIDER), YES. VOICE SETUP: 4 voices.
+2. The page reads TUNE LEV STRC BRIT / DAMP POS EXCT HIT, with the lines in the middle.
+3. Play notes: a long, bright string (the defaults). Sweep STRC left to right: string →
+   marimba → bell. Then BRIT and DAMP short for drums; POS for hollow vs full.
+4. EXCT to the right with a low note: a noisy, struck plate.
+5. Chords of 3–4 notes: all sound. A 5-note chord with VOICE SETUP above 4: the extra
+   notes are silent (expected).
+6. **Load test:** 4 voices ringing with long DAMP plus a busy pattern on other tracks:
+   any crackle or dropouts? (Not measured on hardware yet; estimated ~8 % of the DSP.)
+7. RESONATOR through PING and SHIFT (FLTR page): works on it like any machine.
+8. LFO page on a RESONATOR track: DEST shows Structure, Brightness, Damping…; a
+   WaveTone or Waverider track: their own names.
+9. Save a RESONATOR sound, reload: still RESONATOR. Save the project, power-cycle,
+   reload.
+10. The v0.5 / v0.4 tests briefly (PING, SHIFT, Waverider as before).
+
+**Known:** MODAL only (the plucked STRING model in the first demo is not in the machine:
+a delay line a voice does not fit the DSP memory; STRC at the left is the string-like
+setting). Low notes with the bright default can push into a soft limiter (LEV down).
+A RESONATOR sound loads as FM Tone on stock firmware.
 
 ---
 
