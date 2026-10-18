@@ -54,7 +54,8 @@ MODES = 24
 MAX_VOICES = 4
 TOP_NOTE = 135.0                        # 19.9 kHz
 IDLE = 1.0e-5
-OUT_GAIN = 0.035                        # the mode sum to the track: the default sound peaks near 0.6
+OUT_GAIN = 0.12                         # the mode sum to the track, before the normalisation
+NORM = 0.25                             # g = lev OUT_GAIN / (1 + NORM sum |amp_n|)
 NOISE_LEN = 576                         # 12 ms
 NOISE_DECAY = math.exp(-1.0 / (NOISE_LEN / 4))
 NOISE_J = 251
@@ -112,6 +113,7 @@ TABLES = (("cosw", table_cos), ("sinw", table_sin), ("r", table_r), ("anchors", 
 def tables() -> dict[str, list[float]]:
     out = {name: build() for name, build in TABLES}
     out["sin"] = S.table_sin()           # SHFT's: 256 points a turn
+    out["pow2"] = S.table_pow2()         # SHFT's: 2^((i - 64) / 12)
     out["rnd"] = [_f32(x) for x in W.rnd_table()]    # W2's: 256 in [0, 1)
     return out
 
@@ -175,8 +177,10 @@ def controls(words: dict[int, int], note: float, T: dict) -> dict:
 
 
 def coefs(c: dict, T: dict) -> list[tuple[float, float, float]]:
-    """(a1, a2, b0) of each mode that sounds, low to high."""
+    """(a1, a2, b0) of each mode that sounds, low to high; c["asum"] gets the sum of
+    their |amp| (the level the output is normalised by)."""
     out = []
+    asum = 0.0
     an = T["anchors"]
     tilt = 1.0
     for n in range(MODES):
@@ -194,7 +198,9 @@ def coefs(c: dict, T: dict) -> list[tuple[float, float, float]]:
         idx = _f32(float(xi & 255) + _f32(x - float(xi)))
         amp = _f32(interp(T["sin"], idx) * tilt)
         out.append((_f32(2.0 * _f32(R * cw)), _f32(R * R), _f32(amp * sw)))
+        asum = _f32(asum + (amp if amp >= 0.0 else _f32(0.0 - amp)))
         tilt = _f32(tilt * c["tilt_g"])
+    c["asum"] = asum
     return out
 
 
@@ -244,7 +250,12 @@ def block(v: Voice, rendered: int, words: dict[int, int], note: float, trig: boo
             y2, y1 = y1, y
             acc[k] = _f32(acc[k] + y)
         v.y1[n], v.y2[n] = y1, y2
-    g = _f32(c["lev"] * _f32(OUT_GAIN))
+    # normalised by the modes' summed level: 24 modes in phase (a bright string) and a
+    # handful (a dark plate) come out much closer in level
+    # ... and by pitch, 2^((pitch - 60) / 24): a mallet excites low notes more fully
+    tilt_p = interp(T["pow2"], _f32(64.0 + _f32(_f32(c["pitch"] - 60.0) * 0.5)))
+    g = _f32(_f32(_f32(c["lev"] * _f32(OUT_GAIN)) * P.recip(_f32(1.0 + _f32(_f32(NORM) * c["asum"]))))
+             * tilt_p)
     out = [knee(_f32(a * g), 0.6, 0.6) for a in acc]
     peak = max(abs(a) for a in acc)
     if v.exc >= EXC_END and peak < IDLE:

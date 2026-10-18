@@ -31,13 +31,14 @@ _, RAT = RL.tables_bytes()
 RTAB = {name: dsp.RINGS_TABLES_DM + off for name, off in RAT.items()}
 RTAB["sin"] = G.STAB["sin"]                          # SHFT's sine table
 RTAB["rnd"] = dsp.W2_RND_DM                          # W2's random table
+RTAB["pow2"] = G.STAB["pow2"]                        # SHFT's 2^((i - 64) / 12)
 RLEN = {name: len(t) for name, t in RL.tables().items()}
 
 SC = dsp.RINGS_SCRATCH_DM
 X, ACC, W0 = SC, SC + 0x80, SC + 0x100
 WORDS = ("t", "count", "pitch", "frac", "a0addr", "l0", "kexp", "pos", "mix", "hit", "lev",
          "tilt_g", "minc", "mnorm", "nlp_a", "n", "tilt", "peak", "buf", "b", "semi", "q",
-         "cw", "sw", "g", "cnt", "sbase", "i146")
+         "cw", "sw", "g", "cnt", "sbase", "i146", "asum")
 A = {w: W0 + 4 * k for k, w in enumerate(WORDS)}
 assert A[WORDS[-1]] < SC + 0x200
 # per-voice state words (dnfw.rings.live.Voice), off I2 / I3
@@ -436,6 +437,7 @@ def build() -> str:
     jump("NE", zl)
     emit("      R0 = R0 - R0;")
     st(0, "n")
+    st(0, "asum")
     fconst(0, 1.0)
     st(0, "tilt")
     place("wr_r_mode")
@@ -499,6 +501,16 @@ def build() -> str:
     interp_at("sin", 10, 9)
     ld(12, "tilt")
     emit("      F9 = F9 * F12;".ljust(40) + "// amp")
+    emit("      R11 = PASS R9;")
+    emit("      R12 = R12 - R12;")
+    emit("      COMP(F9, F12);")
+    apos = label("rapos")
+    jump("GE", apos)
+    emit("      F11 = F12 - F9;".ljust(40) + "// |amp|")
+    place(apos)
+    ld(12, "asum")
+    emit("      F12 = F12 + F11;")
+    st(12, "asum")
     emit("      R7 = PASS R13;".ljust(40) + "// R")
     ld(5, "cw")
     emit("      F5 = F7 * F5;")
@@ -548,10 +560,26 @@ def build() -> str:
     place("wr_r_modes_done")
 
     # ---- out ----
-    ld(12, "lev")
-    fconst(13, RL.OUT_GAIN)
-    emit("      F12 = F12 * F13;")
-    st(12, "g")
+    ld(4, "asum")
+    fconst(12, RL._f32(RL.NORM))
+    emit("      F4 = F12 * F4;")
+    fconst(12, 1.0)
+    emit("      F4 = F12 + F4;")
+    recip(4, 5)
+    ld(6, "lev")
+    fconst(12, RL._f32(RL.OUT_GAIN))
+    emit("      F6 = F6 * F12;")
+    emit("      F6 = F6 * F5;".ljust(40) + "// lev OUT_GAIN norm")
+    ld(8, "pitch")
+    fconst(12, 60.0)
+    emit("      F8 = F8 - F12;")
+    fconst(12, 0.5)
+    emit("      F8 = F8 * F12;")
+    fconst(12, 64.0)
+    emit("      F8 = F12 + F8;")
+    interp_at("pow2", 8, 9)
+    emit("      F6 = F6 * F9;".ljust(40) + "// g")
+    st(6, "g")
     emit("      R0 = R0 - R0;")
     st(0, "peak")
     emit(f"      R0 = {ACC:#x};")
