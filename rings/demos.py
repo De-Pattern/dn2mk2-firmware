@@ -29,8 +29,8 @@ MEL = [72, None, 79, 76, None, 84, 79, None, 72, 74, None, 79, 76, 72, None, 67]
 
 
 def main():
-    demo("01_marimba_bar", steps(110, MEL * 2), 4.8, structure=0.5, brightness=0.45,
-         damping=0.35, position=0.25)
+    demo("01_marimba_bar", steps(110, MEL * 2), 5.5, structure=0.5, brightness=0.45,
+         damping=0.5, position=0.25)
     demo("02_bells_chords", chords([0.05, 1.6, 3.2], [(60, 67, 76), (57, 64, 72), (62, 69, 77, 81)]),
          6.5, structure=0.92, brightness=0.6, damping=0.75, position=0.2)
     demo("03_string_pluck", steps(100, [48, 55, 60, 63, 67, 63, 60, 55] * 2, every=0.5), 5.2,
@@ -44,8 +44,8 @@ def main():
     demo("07_four_voice_chords", chords([0.05, 1.2, 2.4, 3.6], [(48, 55, 64, 71), (45, 52, 60, 67),
                                                                (41, 48, 57, 64), (43, 50, 59, 62)]),
          6.5, structure=0.3, brightness=0.5, damping=0.7, position=0.35)
-    demo("08_plate_drums", steps(120, [40, None, 40, 47, None, 40, 43, None] * 2), 4.2,
-         structure=0.8, brightness=0.35, damping=0.2, position=0.4)
+    demo("08_plate_drums", steps(120, [40, None, 40, 47, None, 40, 43, None] * 2), 5.0,
+         structure=0.8, brightness=0.4, damping=0.52, position=0.4)
 
 
 if __name__ == "__main__":

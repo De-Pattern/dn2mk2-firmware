@@ -12,7 +12,7 @@ filter), not from any module's source.
                1 a plate / bell (inharmonic clusters)
     BRIGHTNESS how much of the top survives: the exciter's tone, and how much faster
                the high modes decay than the low
-    DAMPING    the decay, 0.05 s .. 10 s
+    DAMPING    the decay, 0.1 s .. 12 s
     POSITION   where the object is hit, 0..0.5 of its length: the middle cancels
                every other mode, the edge keeps them all
     EXCITER    MALLET (a soft half-cosine, its width from BRIGHTNESS) / NOISE (a
@@ -53,7 +53,7 @@ def ratios(structure: float) -> np.ndarray:
 
 
 def t60(damping: float) -> float:
-    return 0.05 * 200.0 ** min(max(damping, 0.0), 1.0)          # 0.05 s .. 10 s
+    return 0.1 * 120.0 ** min(max(damping, 0.0), 1.0)           # 0.1 s .. 12 s
 
 
 def exciter(kind: str, brightness: float, n: int, rng) -> np.ndarray:
@@ -82,7 +82,10 @@ def modal(x: np.ndarray, f0: float, structure: float, brightness: float, damping
         decay = t60(damping) * ratio ** (-(1.0 - brightness) * 1.3 - 0.2)
         R = math.exp(-6.91 / (decay * RATE))
         w = 2 * math.pi * f / RATE
-        amp = math.sin(math.pi * (n + 1) * pos) * (1 - R) * 4.0 * (brightness + 0.25) ** (n * 0.08)
+        # b0 = amp sin(w): an impulse rings at about amp whatever the decay, so a long
+        # DAMPING is as loud as a short one (the (1 - R) factor this had made long decays
+        # near silent: the owner's demo 6, 2026-10-18)
+        amp = math.sin(math.pi * (n + 1) * pos) * (0.6 + 0.4 * brightness) ** n
         y += lfilter([amp * math.sin(w)], [1, -2 * R * math.cos(w), R * R], x)
     return y
 

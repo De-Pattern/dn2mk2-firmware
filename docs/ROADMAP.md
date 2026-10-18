@@ -6,6 +6,17 @@ enough of a plan that it can be picked up cold. Upstream's own parked ideas are 
 
 ## Next
 
+- **RESONATOR** (Rings-style machine, type 6): building now (`docs/rings.md`).
+- **After it: a Casio CZ phase-distortion machine** (owner, 2026-10-18): *"a complex phase
+  distortion engine based on the casio cz3000 with the envelopes for synthesis built into
+  subsequent pages in the synth machine ui ... as close as possible to the actual casio
+  cz synths. cz-101 is another one you could pull from, should be close to identical"*.
+  CZ voice: two lines (DCO -> DCW -> DCA each), the eight PD waveforms (saw, square,
+  pulse, double sine, saw-pulse, and the three resonance waves), line select 1 / 2 /
+  1+1' / 1+2', ring and noise modulation, and the CZ's 8-stage envelopes (rate / level,
+  sustain and end points) for DCO, DCW and DCA, on the following pages of the machine.
+  Model first, checked against CZ recordings / documentation, then the DSP.
+
 - **PING P3**: tuning by ear on hardware; TYPE's icon saying SVF / LADR / VCFQ / LPG;
   the curve drawn as PING's. P1 (DSP) and P2 (FLTR page) are built: `docs/ping.md`.
 
