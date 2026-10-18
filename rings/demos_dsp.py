@@ -39,7 +39,10 @@ def render(events, seconds, words, voices=4):
 
 
 def write(name, x):
-    y = np.clip(x, -1, 1)
+    """Voices are summed as the track would sum them, then the file is scaled to a
+    0.89 peak for listening (the machine's own level is in the print-out)."""
+    pk = float(np.max(np.abs(x))) or 1.0
+    y = np.clip(x / pk * 0.89, -1, 1)
     with wave.open(str(OUT / f"{name}.wav"), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
