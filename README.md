@@ -28,12 +28,70 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.6** | 2026-10-18 | RESONATOR machine (Rings-style modal resonator), up to 4 voices | `builds/v0.6-RESONATOR/` | yes |
+| **v0.7** | 2026-10-18 | CZ PHASE machine (Casio CZ phase distortion), 8-step DCW envelope on pages 2–3, up to 6 voices | `builds/v0.7-CZ/` | yes |
+| v0.6 | 2026-10-18 | RESONATOR machine (Rings-style modal resonator), up to 4 voices | `builds/v0.6-RESONATOR/` | yes |
 | v0.5 | 2026-10-18 | SHIFT filter type (frequency shifter) beside PING; DSP memory packed tighter | `builds/v0.5-SHIFT/` | yes |
 | v0.4 | 2026-10-13 | PING filter type (SVF / LADR / VCFQ / LPG) on the FLTR page, any machine | `builds/v0.4-PING/` | yes |
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.7 — CZ PHASE (Casio CZ phase-distortion machine)
+
+`DN2mod_v0.7_CZ_OS1.11.syx`
+sha256 `0751bb0dfab83d4e9d227db7d1f9eb1ce2a1967b0e93d3db40e5901cf56c4527`
+Gate: CLEARED TO FLASH, 2026-10-18. Source: commit `37fd1f4`. Docs: `docs/cz.md`.
+
+**Adds.** A new machine, **CZ PHASE**, in MACHINE SEL after RESONATOR: the CZ-101 /
+CZ-3000's phase distortion. Eight waves (saw, square, pulse, double, saw-pulse, and the
+three resonance waves) and their pairs, two lines, ring and noise, and the CZ's 8-step
+DCW envelope across pages 2 and 3. The DCA is the DN2's AMP page. Polyphonic up to
+**6 voices** (a 7th and 8th are silent, by design). Everything else is as v0.6.
+
+    page 1  WAVE  SEL   DET   OCT   /  MOD   DCW   KF    SUS
+    page 2  R1    R2    R3    R4    /  L1    L2    L3    L4
+    page 3  R5    R6    R7    R8    /  L5    L6    L7    L8
+
+| control | what it does |
+|---|---|
+| WAVE | 33 choices: the 8 waves, then pairs (e.g. SW+SQ) that alternate cycle by cycle |
+| SEL | lines: 1, 2, 1+1' (line 2 detuned), 1+2' (line 2 detuned, octave, MOD) |
+| DET | line 2 detune, ±1 semitone |
+| OCT | line 2 octave: 0, +1, −1 |
+| MOD | in 1+2': RING, OFF, NOISE |
+| DCW | how far the envelope bends the wave (0 = sine) |
+| KF | key follow: higher notes duller |
+| SUS | which step the envelope holds on (SUS1–SUS8), or NOSUS |
+| R1–R8 / L1–L8 | the DCW envelope: rate and level of each step |
+
+Page 1 draws the wave pair as it sounds at the top of the envelope; pages 2 and 3 draw
+the envelope, the page's four steps solid, the sustain step marked.
+
+**Test:**
+1. FUNC + SYN, scroll to **CZ PHASE** (after RESONATOR), YES.
+2. Page 1 reads SAW 1 DET OCT0 / OFF DCW KFOFF SUS1 with a wave in the middle. Turn
+   WAVE: the label and the picture change (SAW, SQR… then pairs like SW+SQ).
+3. Play: a bright saw that settles. DCW to 0: a pure sine. DCW up: brighter.
+4. Pages 2 and 3 (press SYN again): the envelope picture follows R1–R8 / L1–L8. Set
+   SUS to NOSUS and short rates: a plucky sweep; long rates: slow filter-like sweeps.
+5. SEL 1+1' with DET a little off centre: chorus-like doubling. SEL 1+2', OCT +1,
+   MOD RING: bell tones; MOD NOISE: a gritty, noisy line.
+6. WAVE on RS1 / RS2 / RS3 with the envelope sweeping: the CZ resonance sweep.
+7. Chords up to 6 notes (VOICE SETUP 6 or fewer): all sound.
+8. **Load test:** 6 CZ voices plus 4 RESONATOR voices plus a busy pattern: any crackle?
+   (Not measured on hardware; about 7,700 cycles a CZ voice a block, by instruction count.)
+9. Save a CZ sound, reload: still CZ PHASE. Save the project, power-cycle, reload.
+10. WaveTone's page 3 still shows its own envelope widgets (this build re-routes page 3
+    for CZ tracks only).
+11. RESONATOR (moved its tables and scratch to make room), PING, SHIFT and Waverider
+    briefly, as in v0.6.
+
+**Known:** the steps after the sustain step do not run at note-off yet (the envelope
+holds on SUS until the next note; the frame's note-off is not located). The AMP
+envelope still ends the note. One wave choice and one DCW envelope for both lines
+(the DN2 sound has 25 machine parameters). A CZ sound loads as FM Tone on stock firmware.
 
 ---
 
