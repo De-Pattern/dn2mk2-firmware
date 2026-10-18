@@ -10,6 +10,12 @@ switch the branch selector from `main` to `builds`, open the version's folder, c
 the `.syx`, then **Download raw file**. They are kept off `main` so that the code
 branch never holds Elektron firmware (see the note at the end).
 
+**v0.4 to v0.7 are withdrawn (2026-10-18).** Their images are larger than the 2 MiB the
+OS's USB upgrade receives into, and the receiver does not check: the transfer stalls at
+the very end (nothing is written to flash; a power cycle clears it). Their sections
+below are kept for the record; the files are gone from `builds`. Every build from v0.8
+on is checked against that limit by the gate (`docs/usb-upgrade-limit.md`).
+
 **Only flash a file whose sha256 matches its gate record** (`CLEARED TO FLASH` from
 `scripts/ship_gate.py`; CLAUDE.md). The sha256 is listed below and in the
 `.gate.json` beside it. On Windows: `certutil -hashfile FILE SHA256`.
@@ -28,17 +34,17 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.7** | 2026-10-18 | CZ PHASE machine (Casio CZ phase distortion), 8-step DCW envelope on pages 2–3, up to 6 voices | `builds/v0.7-CZ/` | yes |
-| v0.6 | 2026-10-18 | RESONATOR machine (Rings-style modal resonator), up to 4 voices | `builds/v0.6-RESONATOR/` | yes |
-| v0.5 | 2026-10-18 | SHIFT filter type (frequency shifter) beside PING; DSP memory packed tighter | `builds/v0.5-SHIFT/` | yes |
-| v0.4 | 2026-10-13 | PING filter type (SVF / LADR / VCFQ / LPG) on the FLTR page, any machine | `builds/v0.4-PING/` | yes |
+| v0.7 | 2026-10-18 | CZ PHASE machine (Casio CZ phase distortion), 8-step DCW envelope on pages 2–3, up to 6 voices | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
+| v0.6 | 2026-10-18 | RESONATOR machine (Rings-style modal resonator), up to 4 voices | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
+| v0.5 | 2026-10-18 | SHIFT filter type (frequency shifter) beside PING; DSP memory packed tighter | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
+| v0.4 | 2026-10-13 | PING filter type (SVF / LADR / VCFQ / LPG) on the FLTR page, any machine | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
 
-## v0.7 — CZ PHASE (Casio CZ phase-distortion machine)
+## v0.7 — CZ PHASE (Casio CZ phase-distortion machine) — WITHDRAWN (over 2 MiB, see the top)
 
 `DN2mod_v0.7_CZ_OS1.11.syx`
 sha256 `0751bb0dfab83d4e9d227db7d1f9eb1ce2a1967b0e93d3db40e5901cf56c4527`
@@ -95,7 +101,7 @@ envelope still ends the note. One wave choice and one DCW envelope for both line
 
 ---
 
-## v0.6 — RESONATOR (Rings-style machine)
+## v0.6 — RESONATOR (Rings-style machine) — WITHDRAWN (over 2 MiB, see the top)
 
 `DN2mod_v0.6_RESONATOR_OS1.11.syx`
 sha256 `920ee105803cd1114770b38bdf94b8de325539c73b31371144795d495f5dd847`
@@ -145,7 +151,7 @@ A RESONATOR sound loads as FM Tone on stock firmware.
 
 ---
 
-## v0.5 — SHIFT (frequency shifter)
+## v0.5 — SHIFT (frequency shifter) — WITHDRAWN (over 2 MiB, see the top)
 
 `DN2mod_v0.5_SHIFT_OS1.11.syx`
 sha256 `1ff987df0d6dd8ef3ed718682bf9e899b1f9af2fe8b71995c29d66a63e315e98`
@@ -194,7 +200,7 @@ icon is Multi-Mode's LP/BP/HP picture; REL on page 1 does nothing (`-`).
 
 ---
 
-## v0.4 — PING filter
+## v0.4 — PING filter — WITHDRAWN (over 2 MiB, see the top)
 
 `DN2mod_v0.4_PING-filter_OS1.11.syx`
 sha256 `86fc590931251776b14b7bad075336177f5b20aca60fc6c8bf557ec892d427dc`
