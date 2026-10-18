@@ -500,6 +500,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the SYN page's label fetch: Waverider's labels for a Waverider track (M7)", LABEL_STOCK)
     edit(GRID_SITE, bytes.fromhex("4eb9") + _long(playout["wr_grid"]) + bytes.fromhex("4e714e71"),
          "the SYN page draw: Waverider's own page for a Waverider track (M8.1)", GRID_STOCK)
+    edit(pages.ID9_SITE, bytes.fromhex("4eb9") + _long(playout["wr_id9"]),
+         "the SYN page draw: a CZ track's third page (id 9 to the draw) to wr_grid, not "
+         "WaveTone's page-3 grid", bytes.fromhex(pages.ID9_STOCK))
     edit(ICON_SITE, bytes.fromhex("4eb9") + _long(playout["wr_icons"]) + bytes.fromhex("4e71"),
          "the SYN page draw: no WaveTone oscillator icons on a Waverider track (M7)", ICON_STOCK)
     _need(content, PAGE_SITE - 4, bytes.fromhex("2f027404"), "0x400c24ee's push of d2 and its bound")

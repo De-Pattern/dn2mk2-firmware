@@ -120,12 +120,19 @@ CZ_UNUSED = tuple(r for r in range(238, 263) if r not in CZ_LABELS)
 CZ_RATE_IDS = (240, 246, 244, 250, 255, 256, 257, 258)
 CZ_LEVEL_IDS = (245, 252, 253, 254, 260, 261, 262, 238)
 
-LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "labels", "descriptors")
+LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "wr_id9", "labels",
+              "descriptors")
 # W2: `labels` is where the assembly's code ends and its data (the label table, the
 # descriptors, the strings) begins: the ship gate checks only [is_wr, labels) as code
 GRID = 0x40017428                 # the stock grid: (view, canvas)
 ICON_PAGE = 7                     # the SYN page draw's id for WaveTone's OSC page
 ICON_SKIP = 0x400182C6            # its branch target past the oscillator icons
+# CZ: the draw sends a type-1 page of id 9 (WaveTone's third page, which a CZ track's
+# third page is to it) to the grid variant 0x400175e4; wr_id9 sends ours to the grid
+# call wr_grid hooks instead
+ID9_SITE = 0x40018202             # moveq #9,%d1 ; cmp.l %d3,%d1 ; bne.s 0x40018214
+ID9_STOCK = "7209b283660c"
+ID9_GRID = 0x40018214             # the standard grid's call (wr_grid's site)
 
 
 def _rep(label: str, text: str) -> str:
@@ -400,6 +407,21 @@ wr_grid:
 1:  jsr     {GRID:#010x}
     addq.l  #8,%sp
     rts
+
+| -- the SYN page draw at 0x40018202 (`moveq #9,%d1 ; cmp.l %d3,%d1 ; bne.s` to the grid
+| call), now jsr here: back to the id-9 grid variant (0x40018208) only when the stock
+| test would go there -- page id 9 in d3 and not one of our tracks; otherwise to the
+| standard grid's call ({ID9_GRID:#010x}), which wr_grid answers. d1 = 9 either way,
+| as stock leaves it; d0 is scratch (the grid call follows).
+wr_id9:
+    bsr.w   is_wr
+    moveq   #9,%d1
+    tst.l   %d0
+    bne.s   1f
+    cmp.l   %d3,%d1
+    beq.s   2f
+1:  move.l  #{ID9_GRID:#010x},%sp@
+2:  rts
 
     .align 2
 labels:
