@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| **v0.8** | 2026-10-18 | Everything in v0.7 (CZ PHASE, RESONATOR, SHIFT, PING, Waverider), sized to fit the USB upgrade: Waverider has 9 tables (BITS, PHAS out) | `builds/v0.8-CZ/` | yes |
 | v0.7 | 2026-10-18 | CZ PHASE machine (Casio CZ phase distortion), 8-step DCW envelope on pages 2–3, up to 6 voices | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
 | v0.6 | 2026-10-18 | RESONATOR machine (Rings-style modal resonator), up to 4 voices | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
 | v0.5 | 2026-10-18 | SHIFT filter type (frequency shifter) beside PING; DSP memory packed tighter | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
@@ -41,6 +42,29 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.8 — CZ PHASE, sized for the USB upgrade
+
+`DN2mod_v0.8_CZ_OS1.11.syx`
+sha256 `5301fb4169f9d5f97c35109a15216c847e69106b56e06dc571ca4f6562fdf897`
+Gate: CLEARED TO FLASH, 2026-10-18, including the new USB-size check (2,076,863 of
+2,097,152 bytes, 20,289 to spare). Source: commit `89b057b`. Docs: `docs/cz.md`,
+`docs/usb-upgrade-limit.md`.
+
+**What it is.** v0.7's contents (CZ PHASE, RESONATOR, SHIFT, PING, Waverider W2) in an
+image small enough for the OS's USB upgrade: Waverider's factory set is **9 tables**
+(PRIM HARM PWM SYNC VOX FM FOLD ORGN RESO); BITS and PHAS are out. v0.4 to v0.7 never
+install over USB (see the top).
+
+**Test:** flash over USB from Transfer as usual; it should finish and reboot like stock.
+Then the v0.7 tests below (CZ, 1–11), then v0.6 (RESONATOR), v0.5 (SHIFT) and v0.4
+(PING) — none of them has run on hardware yet — and Waverider: TBL now steps through 9
+tables (a saved Waverider sound may land on a different table).
+
+**Known:** as v0.7 (CZ's steps after sustain do not run at note-off). The image is 20 KB
+under the USB limit; new features must pay for their size.
 
 ---
 
