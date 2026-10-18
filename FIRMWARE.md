@@ -28,10 +28,60 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.4** | 2026-10-13 | PING filter type (SVF / LADR / VCFQ / LPG) on the FLTR page, any machine | `builds/v0.4-PING/` | yes |
+| **v0.5** | 2026-10-18 | SHIFT filter type (frequency shifter) beside PING; DSP memory packed tighter | `builds/v0.5-SHIFT/` | yes |
+| v0.4 | 2026-10-13 | PING filter type (SVF / LADR / VCFQ / LPG) on the FLTR page, any machine | `builds/v0.4-PING/` | yes |
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.5 — SHIFT (frequency shifter)
+
+`DN2mod_v0.5_SHIFT_OS1.11.syx`
+sha256 `1ff987df0d6dd8ef3ed718682bf9e899b1f9af2fe8b71995c29d66a63e315e98`
+Gate: CLEARED TO FLASH, 2026-10-18. Source: commit `be8d0ad`. Docs: `docs/shft.md`.
+
+**Adds.** An 8th filter type, **SHIFT**, last in the FLTR tab (after PING), on every
+machine. A frequency shifter: every partial moves by the same number of Hz, so sounds
+go metallic and bell-like, small shifts shimmer, and feedback makes the endless
+"barber-pole" climb. It takes the track's filter slot (no low-pass on a SHIFT track;
+BASE / WDTH on page 2 still work).
+
+    FLTR page 1   ATK  DEC  MIX  -    /  SHFT FDBK MODE ENV
+    FLTR page 2   DRIV  .    .   KEY.T / BASE WDTH BW.RT RSET
+
+| control | what it does |
+|---|---|
+| SHFT | the shift: centre (64) is none, left shifts down, right up, to ±2.5 kHz; fine near the centre |
+| FDBK | feedback through the shifter (the barber-pole), soft-limited |
+| MODE | thirds: UP (shifts the way SHFT points), DOWN (the opposite way), BOTH (both sidebands: ring-mod bells) |
+| ENV | the envelope's push on the shift (centre is none) |
+| ATK / DEC | the envelope, restarted by each note |
+| MIX | dry → wet |
+| DRIV | level into the shifter |
+| KEY.T | the shift follows the note |
+
+Also: the DSP code's empty blocks now load as "fill" blocks, as Elektron's own code
+does; the DSP memory after boot is identical, with 10.6 KB more room in the upload.
+
+**Test:**
+1. A WaveTone or FM track: FUNC + SYN, RIGHT to FLTR, scroll to **SHIFT** (last), YES.
+2. The FLTR page reads ATK DEC MIX - / SHFT FDBK MODE ENV.
+3. MIX to the top. SHFT a little right of centre on a held chord: slow shimmer. Further:
+   metallic. Left of centre: shifts down.
+4. MODE through its thirds (UP, DOWN, BOTH) with SHFT ~ 3/4 right.
+5. FDBK up with SHFT just off centre on a long note: the endless climb (or fall). Turn
+   FDBK fully up: it must stay controlled, never blast.
+6. ENV up, short DEC, on hits: a zap on each note.
+7. PING and SHIFT on different tracks at once; then switch a SHIFT track back to
+   Multi-Mode: stock labels return and it sounds as before.
+8. Save a sound with SHIFT, load it back: still SHIFT. Save the project, power-cycle,
+   reload.
+9. The v0.4 PING tests, briefly.
+
+**Known:** SHFT's readout is Multi-Mode's cutoff number, not Hz (64 = no shift); MODE's
+icon is Multi-Mode's LP/BP/HP picture; REL on page 1 does nothing (`-`).
 
 ---
 
