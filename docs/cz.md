@@ -56,8 +56,8 @@ Proposal (to confirm with the owner):
 
 - DCW gets the full 8-step CZ envelope (the CZ's character lives there).
 - DCA is the DN2's own AMP envelope (attack, hold, decay, sustain, release).
-- Both lines share the DCW envelope; line 2 has its own wave pair choice? No: SEL
-  1 / 2 / 1+1' / 1+2' with line 2 detuned (DET, OCT) and ring / noise (MOD).
+- Both lines share the wave pair and the DCW envelope: SEL picks 1 / 2 / 1+1' / 1+2',
+  with line 2 detuned (DET, OCT) and ring or noise modulation (MOD).
 - The pitch envelope is the DN2's LFO / envelope routing, not a CZ DCO envelope.
 
 Model first (`cz/model.py`, `cz/demos.py`): the eight waves, the envelopes, lines,
