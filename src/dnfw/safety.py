@@ -63,6 +63,29 @@ SHARC_BUFFER = 1 << 20       # MAIN OS mallocs 1 MiB to push section 7 to the SH
 # then, so an image over the limit overruns the heap before the check can refuse it.
 SHARC_MAX_UNPACKED = SHARC_BUFFER - 1
 
+# The OS's USB upgrade (Elektron Transfer, OsUpgradeStart/Write/End) decodes every
+# 0x7E data packet's 101 bytes into a static buffer at 0x4038aed4 (the receive state
+# 0x4038aec0, + 20), indexed by packet number, with NO bound: the next global is at
+# 0x4058aee0, so the buffer is 0x200000 bytes. A larger image overruns RAM near the
+# end of the transfer, which then stalls (owner, 2026-10-18: v0.7 hung twice at the
+# same spot; stock went through). docs/usb-upgrade-limit.md. The firmware slot the
+# image is then written to is erased from flash 0x80000 in 256 KB blocks; 0x80000 +
+# 2 MiB is that slot's natural end, so the same bound keeps the image inside it.
+USB_UPGRADE_BUFFER = 0x200000
+USB_PACKET_BYTES = 101
+
+
+def usb_upgrade_bytes(syx: bytes) -> int:
+    """The bytes the USB receiver decodes: 101 per SysEx data packet (0x7E)."""
+    n, i = 0, 0
+    while True:
+        i = syx.find(b"\xf0", i)
+        if i < 0:
+            return n * USB_PACKET_BYTES
+        if i + 6 < len(syx) and syx[i + 6] == 0x7E:
+            n += 1
+        i += 1
+
 
 @dataclasses.dataclass
 class Check:
@@ -101,6 +124,11 @@ def build_checks(stock, built_bytes: bytes) -> list[Check]:
     ids = tuple(x.id for x in b.sections)
     out.append(Check("build has stock's sections, in stock's order",
                      ids == tuple(x.id for x in s.sections), f"{ids}"))
+    n = usb_upgrade_bytes(built_bytes) if built_bytes[:1] == b"\xf0" else None
+    out.append(Check("image fits the 2 MiB USB upgrade buffer (no bound in the receiver)",
+                     n is not None and 0 < n <= USB_UPGRADE_BUFFER,
+                     "not a SysEx image: cannot check" if n is None else
+                     f"{n:,} of {USB_UPGRADE_BUFFER:,} bytes, {USB_UPGRADE_BUFFER - n:+,}"))
     stock_by_id = {x.id: x for x in s.sections}
     for x in b.sections:
         if x.id in MAY_CHANGE:

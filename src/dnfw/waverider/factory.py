@@ -193,12 +193,14 @@ TABLES = (
     ("PWM ", lambda: frames_of(pwm)), ("SYNC", lambda: frames_of(sync)),
     ("VOX ", lambda: frames_of(vox)), ("FM  ", lambda: frames_of(fm)),
     ("FOLD", lambda: frames_of(fold)), ("ORGN", lambda: frames_of(organ)),
-    ("RESO", lambda: frames_of(reso)), ("BITS", lambda: frames_of(bits)),
-    ("PHAS", lambda: frames_of(phase)),
+    ("RESO", lambda: frames_of(reso)),
 )
-# Built but not in the default set: it does not fit the DSP upload budget beside the
-# others (docs/w5-tables.md, "Budget"). A user set can include it.
-EXTRA = (("SPEC", lambda: frames_of(spectra)),)
+# Built but not in the default set. SPEC never fit the DSP upload budget beside the
+# others (docs/w5-tables.md, "Budget"); BITS and PHAS left it in v0.8, to keep the
+# whole image under the 2 MiB the OS's USB upgrade receives into (docs/usb-upgrade-limit.md).
+# A user set can include them.
+EXTRA = (("BITS", lambda: frames_of(bits)), ("PHAS", lambda: frames_of(phase)),
+         ("SPEC", lambda: frames_of(spectra)))
 
 
 def names(count: int | None = None) -> list[str]:

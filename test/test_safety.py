@@ -79,3 +79,12 @@ def test_an_input_that_is_not_stock_is_refused(stock):
     main_os[0x1000] ^= 0x01
     modified = load(_with_section(stock, 3, bytes(main_os)))
     assert any("input section 3" in n for n in _failed(safety.stock_checks(modified)))
+
+
+def test_usb_upgrade_buffer_bound():
+    # 101 decoded bytes a 0x7E data packet; the OS's USB receiver has 0x200000 of room
+    pkt = bytes([0xF0, 0, 0x20, 0x3C, 0x15, 0, 0x7E]) + bytes(120) + b"\xf7"
+    start = bytes([0xF0, 0, 0x20, 0x3C, 0x15, 0, 0x7F]) + bytes(8) + b"\xf7"
+    fits = 0x200000 // safety.USB_PACKET_BYTES
+    assert safety.usb_upgrade_bytes(start + pkt * fits + start) == fits * 101 <= 0x200000
+    assert safety.usb_upgrade_bytes(pkt * (fits + 1)) > safety.USB_UPGRADE_BUFFER
