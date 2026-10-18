@@ -101,15 +101,24 @@ PING_TABLES_DM = PING_T_DM + 0x40                            # 0x2e2540
 SHFT_STATE_DM, SHFT_STATE_STRIDE = 0x2E3B00, 256             # after PING's tables
 SHFT_TABLES_DM = SHFT_STATE_DM + 16 * SHFT_STATE_STRIDE      # 0x2e4b00
 # RESONATOR (docs/rings.md, machine type 6): its code (entered from machine5_live's
-# tail, on to wr_ping), a scratch block (the exciter and the mode sum of one voice, the
-# loop's counters), its tables (dnfw.rings.live), all up to 0x2e7000, the memory M5c's
-# tables proved free on the instrument; its 16 voices' state is in DDR (zeros: a fill
-# block), read and written once a mode a block
-RINGS_CODE_DM, RINGS_CODE_SPAN = 0x2E5300, 0x1100
+# tail, on to wr_cz), a scratch block (the exciter and the mode sum of one voice, the
+# loop's counters) in the reader span's tail; its tables (dnfw.rings.live) and its 16
+# voices' state in DDR (the state zeros: a fill block), read once a mode a block.
+# (v0.6 had the scratch at 0x2e6400 and the tables at 0x2e6600; CZ took that room.)
+RINGS_CODE_DM, RINGS_CODE_SPAN = 0x2E5300, 0xD00
 RINGS_SW = RINGS_CODE_DM // 2                                # 0x172980
-RINGS_SCRATCH_DM = RINGS_CODE_DM + RINGS_CODE_SPAN           # 0x2e6400
-RINGS_TABLES_DM = RINGS_SCRATCH_DM + 0x200                   # 0x2e6600
+RINGS_SCRATCH_DM = 0x2DDB00                                  # after reader_m5's code + padding
 RINGS_STATE_DDR, RINGS_STATE_STRIDE = 0x81200000, 256
+RINGS_TABLES_DDR = RINGS_STATE_DDR + 16 * RINGS_STATE_STRIDE  # 0x81201000
+# CZ (docs/cz.md, machine type 7): its code (entered from rings.asm's tail, on to
+# wr_ping) up to 0x2e7000, the end of the memory M5c's tables proved free on the
+# instrument; a scratch block in the reader span's tail; its 16 voices' state and its
+# tables in DDR
+CZ_SCRATCH_DM = RINGS_SCRATCH_DM + 0x200                     # 0x2ddd00
+CZ_CODE_DM = RINGS_CODE_DM + RINGS_CODE_SPAN                 # 0x2e6000
+CZ_SW = CZ_CODE_DM // 2                                      # 0x173000
+CZ_STATE_DDR, CZ_STATE_STRIDE = 0x81202000, 64
+CZ_TABLES_DDR = CZ_STATE_DDR + 16 * CZ_STATE_STRIDE          # 0x81202400
 
 # W5: the tables live in the SHARC's DDR (docs/w5-tables.md). The stock boot stream
 # loads DDR to 0x8052fbe0 and the engine's init writes up to 0x80530be8
@@ -135,6 +144,7 @@ NOP16 = bytes.fromhex("0100")                # the firmware's own 16-bit NOP (sw
 LOOKUP_DM = 0x25D748                         # frame nibble -> machine type, 8 words
 LOOKUP_STOCK = (0, 1, 2, 3, 4, 0, 0, 0)
 MACHINE6 = 6                                 # RESONATOR: lookup[6] = 6 (stock 0, FM Tone)
+MACHINE7 = 7                                 # CZ: lookup[7] = 7 (stock 0, FM Tone)
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
 IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")
 IDLE_RETURN_SW = 0xB88AAB                    # the loop's top: call prvCheckTasksWaitingTermination
@@ -187,7 +197,7 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "ping", "rings")}
+                         "entry_mark", "emark_jump", "ping", "rings", "cz")}
 
 
 def directory() -> bytes:
@@ -209,6 +219,8 @@ def spans() -> list[tuple[str, int, bytes]]:
     obj = objects()
     raw = [
         ("reader_m5.asm (wr_render5)", READER_DM, obj["reader"]),
+        ("RESONATOR scratch (zeros)", RINGS_SCRATCH_DM, bytes(0x200)),
+        ("CZ scratch (zeros)", CZ_SCRATCH_DM, bytes(0x100)),
         ("state: save area, counters, 16 reader blocks (zeros)", STATE_DM, bytes(STATE_BYTES)),
         ("increment table, 129 float32", INC_TABLE_DM, live.table_bytes()),
         ("wavetable directory", DIRECTORY_DM, directory()),
@@ -227,8 +239,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("SHFT state: 16 tracks x 256 bytes (zeros)", SHFT_STATE_DM, bytes(16 * SHFT_STATE_STRIDE)),
         ("SHFT tables", SHFT_TABLES_DM, _shft_tables()),
         ("rings.asm (wr_rings)", RINGS_CODE_DM, obj["rings"]),
-        ("RESONATOR scratch (zeros)", RINGS_SCRATCH_DM, bytes(0x200)),
-        ("RESONATOR tables", RINGS_TABLES_DM, _rings_tables()),
+        ("cz.asm (wr_cz)", CZ_CODE_DM, obj["cz"]),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):
@@ -256,14 +267,22 @@ def _rings_tables() -> bytes:
     return rings_live.tables_bytes()[0]
 
 
+def _cz_tables() -> bytes:
+    from ..cz import live as cz_live
+    return cz_live.tables_bytes()[0]
+
+
 def ddr_spans() -> list[tuple[str, int, bytes]]:
     """(what, load address, payload) of each table, in DDR (load address = address),
-    then RESONATOR's voice state (zeros, so a fill block)."""
+    then RESONATOR's voice state (zeros, so a fill block) and tables, then CZ's."""
     names = factory.names()
     return [(f"table {k}: {names[k]}", at, reference.dsp_bytes(tab))
             for k, (at, tab) in enumerate(zip(table_addresses(), tables()))] + [
         ("RESONATOR state: 16 voices x 256 bytes (zeros)", RINGS_STATE_DDR,
-         bytes(16 * RINGS_STATE_STRIDE))]
+         bytes(16 * RINGS_STATE_STRIDE)),
+        ("RESONATOR tables", RINGS_TABLES_DDR, _rings_tables()),
+        ("CZ state: 16 voices x 64 bytes (zeros)", CZ_STATE_DDR, bytes(16 * CZ_STATE_STRIDE)),
+        ("CZ tables", CZ_TABLES_DDR, _cz_tables())]
 
 
 def _check_ddr(stock: bytes, span_list) -> None:
@@ -290,9 +309,9 @@ def placements() -> list[dict]:
              "load_address": f"{sw_to_load(ENTRY_SW):#010x}",
              "bytes": len(obj["entry_jump"]) + len(NOP16),
              "stock": ENTRY_STOCK.hex(), "new": (obj["entry_jump"] + NOP16).hex()},
-            {"what": "patch: machine lookup 0x25d748[5] 0 -> 5, [6] 0 -> 6 (RESONATOR)",
-             "load_address": f"{dm_to_load(LOOKUP_DM + 20):#010x}", "bytes": 8,
-             "stock": "0000000000000000", "new": "0500000006000000"},
+            {"what": "patch: machine lookup 0x25d748[5] 0 -> 5, [6] 0 -> 6 (RESONATOR), [7] 0 -> 7 (CZ)",
+             "load_address": f"{dm_to_load(LOOKUP_DM + 20):#010x}", "bytes": 12,
+             "stock": "000000000000000000000000", "new": "050000000600000007000000"},
             {"what": f"patch: the idle loop's back edge at sw {IDLE_SITE_SW:#x} -> JUMP {IDLE_SW:#x}",
              "load_address": f"{l2_sw_to_load(IDLE_SITE_SW):#010x}", "bytes": len(obj["idle_jump"]),
              "stock": IDLE_SITE_STOCK.hex(), "new": obj["idle_jump"].hex()}]
@@ -429,7 +448,7 @@ def section7(stock: bytes) -> bytes:
     out = bytearray(bootstream.insert_before_final(
         stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr)))
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
-    bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<II", 5, MACHINE6))
+    bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<III", 5, MACHINE6, MACHINE7))
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
     bootstream.write_span(out, sw_to_load(CALL_SITE_SW), obj["emark_jump"])
     result = bytes(out)

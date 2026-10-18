@@ -88,7 +88,7 @@ static int wr_active(void)
     if (t > 15 || !kit)
         return 0;
     signed char m = (signed char)kit[52u + 1163u * t + 0xDEu];
-    return m == 5 ? 1 : m == 6 ? 2 : 0;     /* Waverider, RESONATOR (docs/rings.md) */
+    return m == 5 ? 1 : m == 6 ? 2 : m == 7 ? 3 : 0;   /* Waverider, RESONATOR, CZ (docs/cz.md) */
 }
 
 /* W2 (docs/w2-scanner.md): while the active track is a Waverider, WaveTone's records
@@ -665,14 +665,172 @@ static void modes(void *c, void *view)
     }
 }
 
+/* CZ (docs/cz.md). Page 1: the wave pair as the voice plays it with the DCW envelope
+ * at its top (two cycles, the pair's first wave then its second, at DCW depth), and its
+ * enumerated controls' values as text where their labels would be. Pages 2 and 3: the
+ * DCW envelope, eight steps of (rate, level), the page's four steps solid and the
+ * others dotted, a mark at the sustain step. Integers only: a phase in 1/256 turn, the
+ * DCW in 1/256, res_sin's 64-step sine. dnfw.cz.live.wave is the sound; this is its
+ * picture. */
+static const char cz_wave_names[8][4] = {"SAW", "SQR", "PLS", "DBL", "SWP", "RS1", "RS2", "RS3"};
+static const char cz_wave_short[8][3] = {"SW", "SQ", "PL", "DB", "SP", "R1", "R2", "R3"};
+static const char cz_sel_names[4][5] = {"1", "2", "1+1'", "1+2'"};
+static const char cz_oct_names[3][6] = {"OCT0", "OCT+1", "OCT-1"};
+static const char cz_mod_names[3][6] = {"RING", "OFF", "NOISE"};
+static const char cz_sus_names[9][6] = {"SUS1", "SUS2", "SUS3", "SUS4", "SUS5", "SUS6",
+                                        "SUS7", "SUS8", "NOSUS"};
+
+static int cz_get(void *view, u32 id)
+{
+    u8 flag;
+    int v = GET_VALUE(view, id, &flag);
+    const int *r = RECORD(id);
+    return v < r[2] ? r[2] : v > r[3] ? r[3] : v;
+}
+
+static int cz_wave_index(void *view)        /* 0..32, as dnfw.cz.live.controls */
+{
+    int k = cz_get(view, 239) * 33 / 0x7800;
+    return k > 32 ? 32 : k;
+}
+
+static int cz_knee(int x, int d)            /* phase bent at d: 0..d -> 0..128, d..256 -> 128..256 */
+{
+    return x < d ? x * 128 / d : 128 + (x - d) * 128 / (256 - d);
+}
+
+/* wave W at phase p (0..255) and DCW d (0..256) -> -127..127 */
+static int cz_wave(int w, int p, int d)
+{
+    int f;
+    if (w == 0) {
+        f = cz_knee(p, 128 - 125 * d / 256);
+    } else if (w == 1) {
+        int wd = 128 - 125 * d / 256, h = p < 128 ? p : p - 128;
+        int q = h * 128 / wd;
+        f = (p < 128 ? 0 : 128) + (q > 128 ? 128 : q);
+    } else if (w == 2) {
+        int wd = 256 - 243 * d / 256;
+        f = p * 256 / wd;
+        if (f > 256) f = 256;
+    } else if (w == 3) {
+        f = p < 128 ? p * (256 + d) / 256 : 128 * (256 + d) / 256 + (p - 128) * (256 - d) / 256;
+    } else if (w == 4) {
+        int x = 2 * p > 256 ? 256 : 2 * p;
+        int g = p < 128 ? cz_knee(x, 26) : 256;
+        f = ((256 - d) * p + d * g) / 256;
+    } else {
+        int k = 256 + 15 * d;                   /* the resonance, harmonic 1..16, in 1/256 */
+        int x = (k * p / 256) & 255;
+        int r = (127 - res_sin(x + 64)) / 2;    /* 0..127 */
+        int win = w == 5 ? 256 - p : w == 6 ? 256 - (2 * p > 256 ? 2 * p - 256 : 256 - 2 * p)
+                : (2 * (256 - p) > 256 ? 256 : 2 * (256 - p));
+        return r * win / 128 - 127;
+    }
+    return -res_sin(f + 64);
+}
+
+static void cz_wave_picture(void *c, void *view)
+{
+    int k = cz_wave_index(view);
+    int d = cz_get(view, 241) * 256 / 0x7F00;   /* DCW depth, the envelope at its top */
+    int half = WR_WIDTH / 2, last = 0;
+    for (int x = 0; x < WR_WIDTH; x++) {
+        int w = cz_combos[k][x < half ? 0 : 1];
+        int p = (x % half) * 256 / half;
+        int y = WAVE_CY + cz_wave(w, p, d) * WAVE_AMP / 127;
+        if (x == 0 || x == half)
+            column(c, WAVE_X + x, y, y);
+        else
+            column(c, WAVE_X + x, last, y);
+        last = y;
+    }
+}
+
+static int cz_99(void *view, u32 id)        /* a rate's or level's 0..99 */
+{
+    const int *r = RECORD(id);
+    int span = r[3] - r[2];
+    return span > 0 ? (cz_get(view, id) - r[2]) * 99 / span : 0;
+}
+
+static void cz_line(void *c, int x0, int y0, int x1, int y1, int dotted)
+{
+    int dx = x1 - x0, dy = y1 > y0 ? y1 - y0 : y0 - y1, sy = y1 > y0 ? 1 : -1;
+    int err = dx - dy, n = 0;
+    for (;;) {
+        if (!dotted || (n++ & 1) == 0)
+            px(c, x0, y0);
+        if (x0 == x1 && y0 == y1)
+            break;
+        int e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x0++; }
+        if (e2 < dx) { err += dx; y0 += sy; }
+    }
+}
+
+#define CZ_ENV_BASE 14
+#define CZ_ENV_TALL 26
+
+static void cz_envelope(void *c, void *view, int page)
+{
+    int wid[8], total = 0;
+    for (int k = 0; k < 8; k++) {
+        wid[k] = 3 + (99 - cz_99(view, cz_rate_ids[k])) / 6;   /* slower: wider */
+        total += wid[k];
+    }
+    int sus = cz_get(view, 243) * 9 / 0x7800;
+    int x = WAVE_X, y = CZ_ENV_BASE, used = 0;
+    for (int k = 0; k < 8; k++) {
+        used += wid[k];
+        int nx = WAVE_X + used * (WR_WIDTH - 1) / total;
+        int ny = CZ_ENV_BASE + cz_99(view, cz_level_ids[k]) * CZ_ENV_TALL / 99;
+        cz_line(c, x, y, nx, ny, (k >> 2) != page - 1);
+        if (k == sus)
+            for (int yy = CZ_ENV_BASE; yy <= CZ_ENV_BASE + CZ_ENV_TALL; yy += 3)
+                px(c, nx, yy);
+        x = nx;
+        y = ny;
+    }
+}
+
+static const char *cz_text(void *view, u32 id, const char *label)
+{
+    static char pair[6] __attribute__((section(".data")));
+    if (id == 239) {
+        int k = cz_wave_index(view), a = cz_combos[k][0], b = cz_combos[k][1];
+        if (a == b)
+            return cz_wave_names[a];
+        pair[0] = cz_wave_short[a][0]; pair[1] = cz_wave_short[a][1]; pair[2] = '+';
+        pair[3] = cz_wave_short[b][0]; pair[4] = cz_wave_short[b][1]; pair[5] = 0;
+        return pair;
+    }
+    int v = cz_get(view, id) >> 8;
+    if (id == 248)
+        return cz_sel_names[v > 3 ? 3 : v];
+    if (id == 259)
+        return cz_oct_names[v > 2 ? 2 : v];
+    if (id == 249)
+        return cz_mod_names[v > 2 ? 2 : v];
+    if (id == 247)
+        return v ? "KF ON" : "KFOFF";
+    if (id == 243) {
+        int k = cz_get(view, id) * 9 / 0x7800;
+        return cz_sus_names[k > 8 ? 8 : k];
+    }
+    return label;
+}
+
 void wr_page_draw(void *view, void *canvas)
 {
 #ifdef WR_PROBE
     u32 t0 = DTCN0, tm = 0;
 #endif
     int page = ((int (*)(void *))method(view, 132))(view);
-    int res = wr_active() == 2;                 /* RESONATOR's page, not Waverider's */
-    if (page < 0 || page >= (res ? RES_PAGES : WR_PAGES))
+    int kind = wr_active();
+    int res = kind == 2;                        /* RESONATOR's page, not Waverider's */
+    int cz = kind == 3;                         /* CZ's */
+    if (page < 0 || page >= (cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
         page = 0;
 #if WR_MARKERS
     u32 now = TICKS;
@@ -680,7 +838,11 @@ void wr_page_draw(void *view, void *canvas)
     drawn_sig = signature();
 #endif
 
-    if (res)
+    if (cz && page == 0)
+        cz_wave_picture(canvas, view);
+    else if (cz)
+        cz_envelope(canvas, view, page);
+    else if (res)
         modes(canvas, view);
     else
         wave(canvas, view);
@@ -688,9 +850,11 @@ void wr_page_draw(void *view, void *canvas)
     for (int i = 0; i < 8; i++) {
         int top = i < 4;
         int cx = COL0 + COLW * (i & 3) + COLW / 2;
-        u32 id = res ? res_ids[page][i] : wr_ids[page][i];
-        const char *label = res ? res_labels[page][i] : wr_labels[page][i];
-        if (res) {
+        u32 id = cz ? cz_ids[page][i] : res ? res_ids[page][i] : wr_ids[page][i];
+        const char *label = cz ? cz_labels[page][i] : res ? res_labels[page][i] : wr_labels[page][i];
+        if (cz) {
+            label = cz_text(view, id, label);   /* CZ: page 1's values as text */
+        } else if (res) {
             /* RESONATOR: plain labels */
         } else if (id == WR_TBL_ID) {                  /* W5: the table's name where TBL would be */
             int set_tbl;

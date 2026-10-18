@@ -83,6 +83,7 @@ def main(argv=None) -> int:
             emark = assemble("entry_mark", dsp.EMARK_SW, work)
             ping = assemble("ping", dsp.PING_SW, work)
             rings = assemble("rings", dsp.RINGS_SW, work)
+            cz = assemble("cz", dsp.CZ_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
             jump = one_jump(ENTRY_LINE, dsp.ENTRY_SW, work)
             ijump = one_jump(IDLE_LINE, dsp.IDLE_SITE_SW, work)
@@ -94,6 +95,7 @@ def main(argv=None) -> int:
             emark = committed("entry_mark")
             ping = committed("ping")
             rings = committed("rings")
+            cz = committed("cz")
             ejump = old["emark_jump"]
             if "entry_jump" not in old or "idle_jump" not in old:
                 raise SystemExit("no entry or idle JUMP committed yet: run with --assemble")
@@ -108,7 +110,8 @@ def main(argv=None) -> int:
             "entry_mark": {k: v for k, v in emark.items() if k != "instruction_offsets"},
             "emark_jump": ejump,
             "ping": {k: v for k, v in ping.items() if k != "instruction_offsets"},
-            "rings": {k: v for k, v in rings.items() if k != "instruction_offsets"}}
+            "rings": {k: v for k, v in rings.items() if k != "instruction_offsets"},
+            "cz": {k: v for k, v in cz.items() if k != "instruction_offsets"}}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {dsp.CODE.relative_to(ROOT)}: reader {len(reader['object_parcels_be']) // 2} B, "
           f"loop {len(loop['object_parcels_be']) // 2} B, ping {len(ping['object_parcels_be']) // 2} B, entry {len(jump['object_parcels_be']) // 2} B")

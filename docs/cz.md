@@ -1,4 +1,4 @@
-# CZ: a Casio CZ phase-distortion machine (planned, after RESONATOR)
+# CZ: a Casio CZ phase-distortion machine (machine type 7, built 2026-10-18)
 
 Owner, 2026-10-18: *"a complex phase distortion engine based on the casio cz3000 with the
 envelopes for synthesis built into subsequent pages in the synth machine ui? i would
@@ -62,3 +62,57 @@ Proposal (to confirm with the owner):
 
 Model first (`cz/model.py`, `cz/demos.py`): the eight waves, the envelopes, lines,
 detune and ring, rendered to WAVs for the owner's ear.
+
+## Built (2026-10-18)
+
+The owner kept the full envelope on DCW (*"id rather keep them on the dcw. thats fine"*).
+Machine type 7, **CZ Phase** / `CZP` in MACHINE SEL after RESONATOR. The contract is
+`dnfw.cz.live` (float32, the operations in the DSP's order); `cz.asm` is generated from it
+by `scripts/gen_cz_asm.py` and the SHARC gate (step 9) holds it to it bit for bit.
+
+    page 1  WAVE  SEL   DET   OCT   /  MOD   DCW   KF    SUS
+    page 2  R1    R2    R3    R4    /  L1    L2    L3    L4
+    page 3  R5    R6    R7    R8    /  L5    L6    L7    L8
+
+| control | record (slot) | what |
+|---|---|---|
+| WAVE | WAV1 (26) | one of 33: the eight waves, the 20 pairs of two non-resonant waves, five non-resonant + resonant pairs; a pair alternates cycle by cycle |
+| SEL | MOD (37) | 1, 2, 1+1', 1+2' |
+| DET | TUN2 (31) | line 2 detune, +-1 semitone (centre 0) |
+| OCT | TYPE (46) | line 2 octave: 0, +1, -1 |
+| MOD | RSET (39) | in 1+2': RING (line 2 x line 1), OFF, NOISE (line 2's pitch wanders) |
+| DCW | LEV1 (30) | the envelope's depth |
+| KF | TBL1 (27) | DCW key follow: higher notes duller |
+| SUS | WAV2 (32) | the sustain step 1..8, or NOSUS |
+| R1..R8, L1..L8 | PD1, OFS1, PD2, OFS2, DEC, NLEV, BASE, WDTH; LEV2, DRIF, ATK, HOLD, CHAR, MAST, FINE, TUN1 | the DCW envelope, 0..99 each (rate 99: 1.5 ms across the range; 0: about 30 s) |
+
+The records keep their stock ranges (the indicator bars span them; the page draws the
+CZ's values: page 1's enumerated controls as text, the wave pair's shape at DCW depth,
+and on pages 2 and 3 the envelope with the page's four steps solid and the sustain step
+marked). WaveTone's names are swapped for CZ's while a CZ track is active, as
+Waverider and RESONATOR do. TBL2 (251) is unused.
+
+**Departures from the CZ, and why.**
+
+- One wave choice for both lines, and one DCW envelope: 25 parameters (above).
+- The DCA is the DN2's AMP page, the pitch envelope its LFOs.
+- **The release.** A trigger restarts the envelope from step 1; it runs to the sustain
+  step and holds there until the next trigger (with NOSUS it runs all eight steps and
+  stays on step 8's level). A CZ goes on past sustain when the key is let go; the frame's
+  note-off has not been located yet (a probe of the four trigger masks ran out of time),
+  so the steps after sustain do not run. The AMP envelope's release still ends the note.
+- Line 2's detune is +-1 semitone, not the CZ's octave / note / fine.
+
+**DSP.** `cz.asm` (868 instructions, 3,528 B) at `0x2e6000` (sw `0x173000`), entered
+from RESONATOR's tail, on to `wr_ping`; its scratch block at `0x2ddd00` (the reader
+span's tail, beside RESONATOR's, which moved there from `0x2e6400`); its 16 voices'
+state (64 B each, zeros) and its tables (increments, rates, the 33 pairs, the page's
+rate/level frame offsets) in DDR at `0x81202000`. RESONATOR's tables moved to DDR
+(`0x81201000`) to make the room; they are read once a mode a block. The machine lookup
+`0x25d748[7]` becomes 7 (the last of its eight entries). Section 7 is 1,046,884 bytes
+of the 1,048,575 the uploader takes: 1,691 to spare, no wavetable dropped.
+
+**Voices.** Six CZ voices render a block (`live.MAX_VOICES`); a seventh and eighth are
+silent and rest. A CZ voice never goes idle by itself (its DCA is the AMP stage, after
+it), so a slot that has played keeps rendering until it is over the cap. (RESONATOR's
+cap is four.)

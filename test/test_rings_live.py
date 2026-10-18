@@ -50,6 +50,6 @@ def test_voices_past_the_cap_are_silent():
     assert o == [0.0] * 32 and not did and v.active == 0
 
 
-def test_tables_fit_the_dsp_region():
+def test_tables_sit_in_ddr_before_cz():
     from dnfw.waverider import dsp
-    assert dsp.RINGS_TABLES_DM + len(L.tables_bytes()[0]) <= dsp.REGION[1]
+    assert dsp.RINGS_TABLES_DDR + len(L.tables_bytes()[0]) <= dsp.CZ_STATE_DDR

@@ -47,10 +47,10 @@ from dataclasses import dataclass
 
 BASE = 0x40000400
 NEW_TYPE = 5
-NEW_TYPES = (5, 6)                      # Waverider; RESONATOR (docs/rings.md), both WaveTone clones
+NEW_TYPES = (5, 6, 7)                   # Waverider; RESONATOR (docs/rings.md); CZ (docs/cz.md): WaveTone clones
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Waverider", "WVR"
-MACHINE_NAMES = {5: ("Waverider", "WVR"), 6: ("Resonator", "RSN")}
+MACHINE_NAMES = {5: ("Waverider", "WVR"), 6: ("Resonator", "RSN"), 7: ("CZ Phase", "CZP")}
 # RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list
 # outgrew the three caves W5 used, so all of it is a platform CODE chunk in RAM, after
 # PING's (dnfw.ping.coldfire.LOAD) and below the platform runtime; the caves are
@@ -61,7 +61,7 @@ MCHUNK_END = 0x46710000
 # -- 1. the MACHINE SEL list -------------------------------------------------------------
 LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
-LIST_NEW = (0, 2, 1, 3, 5, 6, 4)        # Waverider, RESONATOR after Swarmer, before MIDI's divider
+LIST_NEW = (0, 2, 1, 3, 5, 6, 7, 4)     # Waverider, RESONATOR, CZ after Swarmer, before MIDI's divider
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -145,8 +145,8 @@ def _long(v: int) -> bytes:
     return struct.pack(">I", v & 0xFFFFFFFF)
 
 
-SAMPLE_GROUP = 3                        # the sample-based machines: Waverider (5), 6 reserved
-SAMPLE_TYPES_LAST = 6                   # 6 is reserved; no row for it in this build
+SAMPLE_GROUP = 3                        # our machines: Waverider (5), RESONATOR (6), CZ (7)
+SAMPLE_TYPES_LAST = 7
 
 # MACHINE SEL (and the second list at 0x40059cdc) inserts a divider row -- an
 # unlabelled row of value -1, drawn as dots -- wherever this group changes. The
@@ -196,6 +196,9 @@ slot_shim:
     beq.s   0f
     moveq   #6,%d2
     cmp.l   %d0,%d2
+    beq.s   0f
+    moveq   #7,%d2
+    cmp.l   %d0,%d2
     bne.s   1f
 0:  moveq   #{CLONE},%d0
 1:  jmp     {SLOT_RESUME:#010x}
@@ -210,6 +213,9 @@ canon_arg:
     cmp.l   %d0,%d1
     beq.s   0f
     moveq   #6,%d1
+    cmp.l   %d0,%d1
+    beq.s   0f
+    moveq   #7,%d1
     cmp.l   %d0,%d1
     bne.s   1f
 0:  moveq   #{CLONE},%d0
@@ -226,7 +232,9 @@ canon_page:
     beq.s   0f
     subq.l  #1,%d1
     beq.s   0f
-    addq.l  #6,%d1
+    subq.l  #1,%d1
+    beq.s   0f
+    addq.l  #7,%d1
     rts
 0:  moveq   #{CLONE},%d1
     rts
@@ -240,6 +248,9 @@ canon_track:
     cmp.l   %d0,%d1
     beq.s   0f
     moveq   #6,%d1
+    cmp.l   %d0,%d1
+    beq.s   0f
+    moveq   #7,%d1
     cmp.l   %d0,%d1
     bne.s   1f
 0:  moveq   #{CLONE},%d0
@@ -285,6 +296,9 @@ canon_valid:
     cmp.l   %d3,%d0
     beq.s   0f
     moveq   #6,%d0
+    cmp.l   %d3,%d0
+    beq.s   0f
+    moveq   #7,%d0
     cmp.l   %d3,%d0
     bne.s   1f
 0:  moveq   #{CLONE},%d3
@@ -430,7 +444,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     if MCHUNK + len(mchunk) > MCHUNK_END:
         raise ComposeError(f"the machines chunk ends past {MCHUNK_END:#010x}")
     layout["mchunk_code_end"] = layout["mdata"]
-    top = len(NEW_TYPES) + 4                    # the highest type with a row: 6
+    top = len(NEW_TYPES) + 4                    # the highest type with a row: 7
 
     # 1. the list: its length is LIST_NEW's, so a seventh machine is one entry there
     n = len(LIST_NEW)

@@ -46,7 +46,7 @@ This module is pure: it builds the source; `coldfire.compose` assembles and plac
 from __future__ import annotations
 
 LOAD = 0x4670C000                 # RAM above BSS, clear of every declared range (docs/mods-compatibility.md)
-C_LOAD = LOAD + 0x400             # the C page renderer, after this assembly
+C_LOAD = LOAD + 0x600             # the C page renderer, after this assembly (0x400 until CZ)
 C_END = 0x46710000                # the platform runtime starts here
 ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
 KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t
@@ -98,6 +98,28 @@ RES_LONG_NAMES = {238: "Tune", 241: "Level", 239: "Structure", 258: "Brightness"
                   254: "Damping", 246: "Position", 240: "Exciter", 245: "Hit Level"}
 RES_UNUSED = tuple(r for r in range(238, 263) if r not in RES_LABELS)
 
+# CZ (machine 7, docs/cz.md): three pages -- the voice, then the DCW envelope's eight
+# rates and levels -- on WaveTone records (dnfw.cz.live's table); page 1's WAVE, SEL,
+# OCT, MOD, KF and SUS draw their value as text where the label would be
+CZ_TITLE, CZ_SUBTITLE = "CZ", "CZ Phase"
+CZ_PAGES = (
+    (239, 248, 242, 259, 249, 241, 247, 243),   # WAVE SEL DET OCT / MOD DCW KF SUS
+    (240, 246, 244, 250, 245, 252, 253, 254),   # R1 R2 R3 R4 / L1 L2 L3 L4
+    (255, 256, 257, 258, 260, 261, 262, 238),   # R5 R6 R7 R8 / L5 L6 L7 L8
+)
+CZ_LABELS = {239: "WAVE", 248: "SEL", 242: "DET", 259: "OCT", 249: "MOD", 241: "DCW",
+             247: "KF", 243: "SUS",
+             240: "R1", 246: "R2", 244: "R3", 250: "R4", 245: "L1", 252: "L2", 253: "L3", 254: "L4",
+             255: "R5", 256: "R6", 257: "R7", 258: "R8", 260: "L5", 261: "L6", 262: "L7", 238: "L8"}
+CZ_LONG_NAMES = {239: "Wave", 248: "Line Select", 242: "Line 2 Detune", 259: "Line 2 Octave",
+                 249: "Line 2 Mod", 241: "DCW Depth", 247: "DCW Key Follow", 243: "DCW Sustain",
+                 **{r: f"DCW Rate {k + 1}" for k, r in enumerate((240, 246, 244, 250, 255, 256, 257, 258))},
+                 **{r: f"DCW Level {k + 1}" for k, r in enumerate((245, 252, 253, 254, 260, 261, 262, 238))}}
+CZ_UNUSED = tuple(r for r in range(238, 263) if r not in CZ_LABELS)
+# the records the page draws as text, and the envelope's (rate, level) pairs in step order
+CZ_RATE_IDS = (240, 246, 244, 250, 255, 256, 257, 258)
+CZ_LEVEL_IDS = (245, 252, 253, 254, 260, 261, 262, 238)
+
 LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "labels", "descriptors")
 # W2: `labels` is where the assembly's code ends and its data (the label table, the
 # descriptors, the strings) begins: the ship gate checks only [is_wr, labels) as code
@@ -136,6 +158,13 @@ def res_named() -> dict[int, tuple[str, str]]:
     return out
 
 
+def cz_named() -> dict[int, tuple[str, str]]:
+    """The same for a CZ track."""
+    out = {r: (CZ_LONG_NAMES[r], CZ_LABELS[r]) for r in CZ_LABELS}
+    out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in CZ_UNUSED})
+    return out
+
+
 def c_header() -> str:
     """The control tables, as C for `wr_gen.h`: per page, eight record ids and labels
     (Waverider's, then RESONATOR's); the names `wr_names` swaps in for each machine (a
@@ -151,7 +180,13 @@ def c_header() -> str:
                            for a in rings_live._anchor_semitones())
     wr = {r: (lo, sh) for r, lo, sh in named()}
     res = res_named()
-    order = sorted(set(wr) | set(res))
+    cz = cz_named()
+    order = sorted(set(wr) | set(res) | set(cz))
+    zids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in CZ_PAGES)
+    znames = ",\n".join(" {" + ", ".join(q + CZ_LABELS.get(r, "-") + q for r in page) + "}"
+                         for page in CZ_PAGES)
+    from ..cz import live as cz_live
+    combos = ", ".join(f"{{{a}, {b}}}" for a, b in cz_live.COMBOS)
 
     def row(m, col):
         return "{" + ", ".join(q + m[r][col] + q if r in m else "0" for r in order) + "}"
@@ -163,8 +198,14 @@ def c_header() -> str:
             f"static const char res_labels[RES_PAGES][8][6] = {{\n{rnames}\n}};\n"
             f"#define WR_NAMED {len(order)}\n"
             f"static const unsigned short wr_named_ids[WR_NAMED] = {{{', '.join(map(str, order))}}};\n"
-            f"static const char *const wr_named_long[2][WR_NAMED] = {{{row(wr, 0)}, {row(res, 0)}}};\n"
-            f"static const char *const wr_named_short[2][WR_NAMED] = {{{row(wr, 1)}, {row(res, 1)}}};\n"
+            f"static const char *const wr_named_long[3][WR_NAMED] = {{{row(wr, 0)}, {row(res, 0)}, {row(cz, 0)}}};\n"
+            f"static const char *const wr_named_short[3][WR_NAMED] = {{{row(wr, 1)}, {row(res, 1)}, {row(cz, 1)}}};\n"
+            f"#define CZ_PAGES {len(CZ_PAGES)}\n"
+            f"static const unsigned short cz_ids[CZ_PAGES][8] = {{\n{zids}\n}};\n"
+            f"static const char cz_labels[CZ_PAGES][8][6] = {{\n{znames}\n}};\n"
+            f"static const unsigned short cz_rate_ids[8] = {{{', '.join(map(str, CZ_RATE_IDS))}}};\n"
+            f"static const unsigned short cz_level_ids[8] = {{{', '.join(map(str, CZ_LEVEL_IDS))}}};\n"
+            f"static const unsigned char cz_combos[{len(cz_live.COMBOS)}][2] = {{{combos}}};\n"
             f"static const short res_anchor[3][24] = {{{res_anchor}}};\n"
             f"#define WR_MOVE_ID {MOVE_ID}\n"
             f"static const char wr_shape_names[8][5] = {{{', '.join(q + x + q for x in SHAPES)}}};\n")
@@ -186,9 +227,14 @@ def source(page_draw: int) -> str:
     res_page_data = "\n".join(f"    .long res_title, res_subtitle\n"
                               f"    .long {', '.join(str(e) for e in entries)}\n"
                               f"    .long {TAG}" for entries in RES_PAGES)
+    ztable = "\n".join(f"    .long {rid}, zlab_{rid}" for rid in CZ_LABELS)
+    zstrings = "\n".join(f'zlab_{rid}: .asciz "{name}"' for rid, name in CZ_LABELS.items())
+    cz_page_data = "\n".join(f"    .long cz_title, cz_subtitle\n"
+                             f"    .long {', '.join(str(e) for e in entries)}\n"
+                             f"    .long {TAG}" for entries in CZ_PAGES)
     return f"""
-| -- the active track's machine, as ours: d0 = 1 Waverider (5), 2 RESONATOR (6), else 0;
-| every other register kept
+| -- the active track's machine, as ours: d0 = 1 Waverider (5), 2 RESONATOR (6), 3 CZ (7),
+| else 0; every other register kept
 is_wr:
     move.l  %a0,%sp@-
     move.l  %d1,%sp@-
@@ -204,8 +250,12 @@ is_wr:
     moveq   #1,%d0
     bra.s   1f
 2:  subq.l  #1,%d1
-    bne.s   1f
+    bne.s   3f
     moveq   #2,%d0
+    bra.s   1f
+3:  subq.l  #1,%d1
+    bne.s   1f
+    moveq   #3,%d0
 1:  move.l  %sp@+,%d1
     movea.l %sp@+,%a0
     rts
@@ -222,13 +272,20 @@ wr_count:
     bne.s   3f
     moveq   #{len(PAGES)},%d0
     rts
-3:  moveq   #{len(RES_PAGES)},%d0
+3:  subq.l  #1,%d0
+    bne.s   4f
+    moveq   #{len(RES_PAGES)},%d0
+    rts
+4:  moveq   #{len(CZ_PAGES)},%d0
     rts
 1:  move.l  %sp@(8),%d0
     moveq   #5,%d1
     cmp.l   %d0,%d1
     beq.s   0f
     moveq   #6,%d1
+    cmp.l   %d0,%d1
+    beq.s   0f
+    moveq   #7,%d1
     cmp.l   %d0,%d1
     bne.s   2f
 0:  moveq   #{CLONE},%d0
@@ -255,13 +312,23 @@ wr_page:
     mulu.w  %d1,%d0
     addi.l  #descriptors,%d0
     bra.s   2f
-5:  move.l  %sp@(16),%d0
+5:  subq.l  #1,%d0
+    bne.s   7f
+    move.l  %sp@(16),%d0
     moveq   #{len(RES_PAGES)},%d1
     cmp.l   %d1,%d0
     bcc.s   6b
     moveq   #44,%d1
     mulu.w  %d1,%d0
     addi.l  #res_descriptors,%d0
+    bra.s   2f
+7:  move.l  %sp@(16),%d0
+    moveq   #{len(CZ_PAGES)},%d1
+    cmp.l   %d1,%d0
+    bcc.s   6b
+    moveq   #44,%d1
+    mulu.w  %d1,%d0
+    addi.l  #cz_descriptors,%d0
 2:  addq.l  #4,%sp
     move.l  %sp@+,%d2
     rts
@@ -271,7 +338,9 @@ wr_page:
     beq.s   0f
     subq.l  #1,%d1
     beq.s   0f
-    addq.l  #6,%d1
+    subq.l  #1,%d1
+    beq.s   0f
+    addq.l  #7,%d1
     rts
 0:  moveq   #{CLONE},%d1
     rts
@@ -287,6 +356,9 @@ wr_label:
     subq.l  #1,%d0
     beq.s   0f
     lea     res_label_table,%a0
+    subq.l  #1,%d0
+    beq.s   0f
+    lea     cz_label_table,%a0
 0:  move.l  %sp@(8),%d0
 1:  move.l  %a0@+,%d1
     beq.s   9f
@@ -336,15 +408,23 @@ labels:
 res_label_table:
 {rtable}
     .long 0
+cz_label_table:
+{ztable}
+    .long 0
 descriptors:
 {page_data}
 res_descriptors:
 {res_page_data}
+cz_descriptors:
+{cz_page_data}
 {_rep("subtitle", SUBTITLE)}
 {_rep("res_subtitle", RES_SUBTITLE)}
 {_rep("res_title", RES_TITLE)}
+{_rep("cz_subtitle", CZ_SUBTITLE)}
+{_rep("cz_title", CZ_TITLE)}
 {chr(10).join(_rep(f"title_{k}", t) for k, t in enumerate(TITLES))}
 {strings}
 {rstrings}
+{zstrings}
     .align 2
 """

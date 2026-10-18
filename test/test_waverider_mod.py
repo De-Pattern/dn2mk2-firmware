@@ -74,45 +74,47 @@ def _clong(va: int) -> int:
     return struct.unpack(">I", _chunked(va, 4))[0]
 
 
-def test_the_list_offers_waverider_and_resonator_before_midi(applied):
+def test_the_list_offers_waverider_resonator_and_cz_before_midi(applied):
     main = applied.payloads[3]
     begin = long_at(main, CF.LIST_BEGIN + 2)
     end = long_at(main, CF.LIST_END + 2)
     types = [_clong(a) for a in range(begin, end, 4)]
-    assert types == [0, 2, 1, 3, 5, 6, 4]
-    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("4878001c")
-    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e8001c")
+    assert types == [0, 2, 1, 3, 5, 6, 7, 4]
+    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("48780020")
+    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e80020")
 
 
-def test_rows_5_and_6_of_the_name_table(applied):
+def test_rows_5_to_7_of_the_name_table(applied):
     main = applied.payloads[3]
     table = long_at(main, 0x400DC344)
-    for row, (lo, sh) in ((5, (b"Waverider\0", b"WVR\0")), (6, (b"Resonator\0", b"RSN\0"))):
+    for row, (lo, sh) in ((5, (b"Waverider\0", b"WVR\0")), (6, (b"Resonator\0", b"RSN\0")),
+                          (7, (b"CZ Phase\0", b"CZP\0"))):
         long_ptr, short_ptr = _clong(table + 12 * row), _clong(table + 12 * row + 4)
         assert _chunked(long_ptr, len(lo)) == lo and _chunked(short_ptr, len(sh)) == sh
     for bound in (0x400DC332, 0x400DC358, 0x400DC37E):
-        assert at(main, bound, 2) == bytes.fromhex("7206")
+        assert at(main, bound, 2) == bytes.fromhex("7207")
 
 
-def test_attribute_rows_5_and_6_are_wavetones(applied, stock):
+def test_attribute_rows_5_to_7_are_wavetones(applied, stock):
     main = applied.payloads[3]
     rows = long_at(main, 0x400DC168)
     assert _chunked(rows, 20) == at(stock, CF.ATTR_STOCK_VA, 20)
     assert _chunked(rows + 20, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
     assert _chunked(rows + 24, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
-    assert at(main, 0x400DC19C, 2) == bytes.fromhex("7406")
+    assert _chunked(rows + 28, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
+    assert at(main, 0x400DC19C, 2) == bytes.fromhex("7407")
 
 
-def test_the_stored_sound_load_keeps_types_5_and_6(applied):
-    assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("7408")
+def test_the_stored_sound_load_keeps_types_5_to_7(applied):
+    assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("7409")
 
 
 def test_the_group_function_gives_the_sample_machines_their_own_section(applied):
-    # run the rewritten 0x40059274 on every type: synths 1, MIDI 2, 5 and 6 3, else 0
+    # run the rewritten 0x40059274 on every type: synths 1, MIDI 2, 5 to 7 3, else 0
     main = applied.payloads[3]
     code = at(main, CF.GROUP_FN, len(CF.GROUP_STOCK))
-    got = {t: _run_group(code, t) for t in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 100)}
-    assert got == {-1: 0, 0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 3, 6: 3, 7: 0, 100: 0}
+    got = {t: _run_group(code, t) for t in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 100)}
+    assert got == {-1: 0, 0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 3, 6: 3, 7: 3, 8: 0, 100: 0}
 
 
 def _run_group(code: bytes, t: int) -> int:

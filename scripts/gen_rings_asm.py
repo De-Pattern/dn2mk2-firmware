@@ -28,7 +28,7 @@ emit, fconst, label, jump, place, knee, recip, clamp01 = (G.emit, G.fconst, G.la
                                                           G.place, G.knee, G.recip, G.clamp01)
 
 _, RAT = RL.tables_bytes()
-RTAB = {name: dsp.RINGS_TABLES_DM + off for name, off in RAT.items()}
+RTAB = {name: dsp.RINGS_TABLES_DDR + off for name, off in RAT.items()}
 RTAB["sin"] = G.STAB["sin"]                          # SHFT's sine table
 RTAB["rnd"] = dsp.W2_RND_DM                          # W2's random table
 RTAB["pow2"] = G.STAB["pow2"]                        # SHFT's 2^((i - 64) / 12)
@@ -45,6 +45,11 @@ assert A[WORDS[-1]] < SC + 0x200
 Y1, Y2, ACTIVE, EXC, NENV, NLP, NI, NJ = 0, RL.MODES, 48, 49, 50, 51, 52, 53
 STATE_WORDS = 54
 FRAME_BASE = 0x25C48C
+
+
+def imm(v: int) -> str:
+    """an address as selmap prints it: one at or above 2^31 (DDR) written signed"""
+    return f"-{(1 << 32) - v:#x}" if v >> 31 else f"{v:#x}"
 
 
 def ld(reg, w):
@@ -68,7 +73,7 @@ def interp_at(table: str, fx: int, out: int) -> None:
     emit("      F1 = FLOAT R0 BY R12;")
     emit(f"      F1 = F{fx} - F1;")
     emit("      R0 = LSHIFT R0 BY 2;")
-    emit(f"      R12 = {RTAB[table]:#x};".ljust(40) + f"// {table}")
+    emit(f"      R12 = {imm(RTAB[table])};".ljust(40) + f"// {table}")
     emit("      R0 = R12 + R0;")
     emit("      I1 = R0;")
     emit("      R2 = DM(0, I1);")
@@ -155,10 +160,10 @@ def build() -> str:
     emit("// dnfw.rings.live, operation by operation: the SHARC gate holds this to it bit for bit.")
     emit("//")
     emit("// Entered from machine5_live.asm's tail once a block (after every machine has")
-    emit("// rendered), on to wr_ping (PING / SHFT) when done. For each voice slot whose record")
+    emit("// rendered), on to wr_cz (then PING / SHFT) when done. For each voice slot whose record")
     emit("// says machine 6 it renders the block into the slot's buffer, replacing it.")
     emit(f"// State: 16 x {dsp.RINGS_STATE_STRIDE} bytes in DDR at {dsp.RINGS_STATE_DDR:#x}; scratch {SC:#x};")
-    emit(f"// tables {dsp.RINGS_TABLES_DM:#x}.")
+    emit(f"// tables {dsp.RINGS_TABLES_DDR:#x} (DDR).")
     emit("")
     emit(".SECTION/PM seg_pmco;")
     emit("")
@@ -244,7 +249,7 @@ def build() -> str:
     fconst(12, 2.0)
     emit("      F4 = F4 * F12;")
     st(4, "frac")
-    emit(f"      R0 = {RTAB['anchors']:#x};")
+    emit(f"      R0 = {imm(RTAB['anchors'])};".ljust(40) + "// anchors")
     st(0, "a0addr")
     jump("", done)
     place(hi_half)
@@ -253,7 +258,7 @@ def build() -> str:
     fconst(12, 1.0)
     emit("      F4 = F4 - F12;")
     st(4, "frac")
-    emit(f"      R0 = {RTAB['anchors'] + 4 * RL.MODES:#x};")
+    emit(f"      R0 = {imm(RTAB['anchors'] + 4 * RL.MODES)};".ljust(40) + "// anchors, the upper half")
     st(0, "a0addr")
     place(done)
     ld(10, "i146")
@@ -359,7 +364,7 @@ def build() -> str:
     sld(7, NI)
     sld(8, NJ)
     emit("      R0 = LSHIFT R7 BY 2;")
-    emit(f"      R12 = {RTAB['rnd']:#x};")
+    emit(f"      R12 = {imm(RTAB['rnd'])};")
     emit("      R0 = R12 + R0;")
     emit("      I1 = R0;")
     emit("      R1 = DM(0, I1);")
@@ -643,7 +648,7 @@ def build() -> str:
     emit("      COMP(R0, R12);")
     jump("LT", "wr_r_track")
     place("wr_r_done")
-    emit(f"      JUMP {dsp.PING_SW:#x};".ljust(40) + "// ping.asm's wr_ping")
+    emit(f"      JUMP {dsp.CZ_SW:#x};".ljust(40) + "// cz.asm's wr_cz")
     emit(".wr_rings..end:")
     emit("      .type wr_rings.,STT_FUNC;")
     return "\n".join(G.lines) + "\n"

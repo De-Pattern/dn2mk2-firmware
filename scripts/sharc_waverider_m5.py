@@ -299,7 +299,8 @@ def selmap_text(code: bytes, work: pathlib.Path) -> dict[int, tuple[int, str]]:
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
     for name, load_sw in (("reader_m5", dsp.READER_SW), ("machine5_live", dsp.LOOP_SW),
-                          ("ping", dsp.PING_SW), ("rings", dsp.RINGS_SW)):
+                          ("ping", dsp.PING_SW), ("rings", dsp.RINGS_SW),
+                          ("cz", dsp.CZ_SW)):
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -332,7 +333,7 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("reader_m5", "machine5_live", "ping", "rings")) and entry.type_name.startswith("8a") \
+             for n in ("reader_m5", "machine5_live", "ping", "rings", "cz")) and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
 
@@ -376,7 +377,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,rings,frame")
+    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,rings,cz,frame")
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -413,7 +414,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("reader_m5", "machine5_live", "ping", "rings"):
+            for n in ("reader_m5", "machine5_live", "ping", "rings", "cz"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
@@ -482,6 +483,11 @@ def main(argv=None):
             print("\nstep 8: RESONATOR")
             results["8_rings"] = step_rings(init, sound, machines, a.blocks)
             show(results["8_rings"])
+
+        if "cz" in steps:
+            print("\nstep 9: CZ")
+            results["9_cz"] = step_cz(init, sound, machines, a.blocks)
+            show(results["9_cz"])
 
         frames = load_frames(a)
         if frames and "frame" in steps:
@@ -1060,6 +1066,140 @@ def step_rings(init, sound, machines, blocks) -> dict:
                                     if not (r is six and t in (4, 5)))
                 for r in results.values()),
         "WaveTone, FM Tone and the MIDI tracks pass through wr_rings bit-identical":
+            all(r.get("ok") and r["others_untouched"] for r in results.values()),
+    }
+    return {"ok": all(checks.values()), "checks": checks, "numbers": results}
+
+
+# -- step 9: CZ (docs/cz.md) -----------------------------------------------------------------------
+
+def _cz_wave_word(index: int) -> int:
+    """the WAVE frame word whose 33-way choice is INDEX"""
+    return int((index + 0.5) * 0x7800 / 33)
+
+
+def _cz_sus_word(step: int) -> int:
+    """the SUS frame word for sustain step 0..7, or 8 for none"""
+    return int((step + 0.5) * 0x7800 / 9)
+
+
+def run_cz(init, sound, machines, blocks, words, others=None, trig_every=0):
+    """WORDS = {track: frame words (param slot -> 16-bit)} for the machine-7 tracks (track
+    0 among them), the rest OTHERS ({track: machine}); triggered on block 1 (and every
+    TRIG_EVERY blocks after, if set). Taps at wr_cz's entry: each track's buffer, note,
+    trigger, machine type and control words."""
+    from dnfw.cz import live as CL
+    taps = []
+
+    def at_entry(r):
+        bufs = [m2.word(r.state, V.TRACK_BUFFERS + 4 * t) for t in range(16)]
+        trig = (m2.word(r.state, TRIG_WORD) or 0) >> 16
+        tap = {}
+        for t in range(16):
+            rec = V.track_record(t)
+            tap[t] = {"before": [m2.word(r.state, bufs[t] + 4 * k) or 0 for k in range(BLOCK)],
+                      "note": f32_of(m2.word(r.state, NOTE_CELL + 4 * t)),
+                      "trig": bool(trig & (1 << t)),
+                      "mtype": m2.word(r.state, rec + 0x1B4),
+                      "words": {slot: frame_word(r.state, CL.frame_offset(slot, t))
+                                for slot in CL.CONTROL_SLOTS}}
+        taps.append(tap)
+
+    mtypes = {**{t: CL.MACHINE_TYPE for t in words if t}, **(others or {})}
+
+    def frames(b):
+        hit = b == 1 or (trig_every and b > 1 and (b - 1) % trig_every == 0)
+        f = base_frame(sound, machines, t0=CL.MACHINE_TYPE, others=mtypes,
+                       trigger=hit, trigger_others=True, overrides=words[0])
+        for t, w in words.items():
+            if t:
+                f.sound(t, {**machines.get(1, {}), TUN1: TUN1_ZERO, **w})
+        return f.to_bytes()
+    run = run_blocks(init, frames, blocks, extra_hooks={dsp.CZ_SW: at_entry})
+    return run, taps
+
+
+def step_cz(init, sound, machines, blocks) -> dict:
+    """CZ (machine 7) on several tracks beside WaveTone and FM Tone: every type-7 track
+    bit-exact to dnfw.cz.live in every block -- all eight waves, wave pairs, the four
+    SELECTs, ring and noise, the octaves, key follow, sustain steps and none, the DCW
+    envelope through its steps, retriggers -- audible and bounded; the voice cap; other
+    tracks untouched by wr_cz."""
+    from dnfw.cz import live as CL
+    T = CL.tables()
+    blocks = max(blocks, 16)
+    base = dict(CL.DEFAULTS)
+    fast = {**{p: 0x6400 for p in CL.P_RATES[:4]}, **{p: 0x7F00 for p in CL.P_RATES[4:]}}
+    levels = dict(zip(CL.P_LEVELS, (0x7F00, 0x3400, 0x6800, 0x1000, 0x7F00, 0x4000, 0x0000,
+                                    0x400 + int(0.7 * 0x7800))))
+    W, S = _cz_wave_word, _cz_sus_word
+    cases = {
+        "saw and square, the DCW envelope through all eight steps (no sustain); 1+1' detuned": (
+            {0: {**base, **fast, **levels, CL.P_WAVE: W(0), CL.P_SUS: S(8), CL.P_DCW: 0x7F00},
+             1: {**base, **levels, CL.P_WAVE: W(1), CL.P_SEL: 0x200, CL.P_DET: 0x5E00,
+                 CL.P_SUS: S(2), CL.P_RATES[0]: 0x6000, CL.P_RATES[1]: 0x5800}},
+            {2: 1, 3: 0}, 0),
+        "pulse and saw-pulse, 1+2' ring an octave up, key follow, retriggered every 5 blocks": (
+            {0: {**base, **fast, **levels, CL.P_WAVE: W(2), CL.P_SEL: 0x300, CL.P_MOD: 0,
+                 CL.P_OCT: 0x100, CL.P_KF: 0x100, CL.P_SUS: S(3)},
+             1: {**base, **fast, CL.P_WAVE: W(4), CL.P_SEL: 0x300, CL.P_MOD: 0x100,
+                 CL.P_OCT: 0x200, CL.P_DET: 0x2800, CL.P_SUS: S(8)}},
+            {2: 1, 3: 0}, 5),
+        "resonant pairs and double: 1+2' noise, line 2 alone; pairs alternate by cycle": (
+            {0: {**base, **fast, **levels, CL.P_WAVE: W(28), CL.P_SEL: 0x300, CL.P_MOD: 0x200,
+                 CL.P_SUS: S(8)},
+             1: {**base, **fast, **levels, CL.P_WAVE: W(31), CL.P_SUS: S(5), CL.P_KF: 0x100},
+             2: {**base, **fast, **levels, CL.P_WAVE: W(29), CL.P_SEL: 0x100, CL.P_SUS: S(8)}},
+            {3: 1, 4: 0}, 0),
+        "eight machine-7 voices: the first six render, the rest are silent": (
+            {t: {**base, **fast, **levels, CL.P_WAVE: W(30 if t % 2 else 9 + t)}
+             for t in range(8)},
+            {8: 1}, 0),
+    }
+    cap = "eight machine-7 voices: the first six render, the rest are silent"
+    results = {}
+    for name, (words, others, every) in cases.items():
+        run, taps = run_cz(init, sound, machines, blocks, words, others=others, trig_every=every)
+        if not run["ok"] or len(taps) != blocks:
+            results[name] = {"ok": False, "why": run.get("halt") or f"{len(taps)} entries"}
+            continue
+        voices = {t: CL.Voice() for t in range(16)}
+        mism, peaks, untouched, seen, steps = {}, {}, True, set(), {}
+        for b, tap in enumerate(taps):
+            after = run["machine"][b]
+            rendered = 0
+            for t in range(16):
+                x = tap[t]
+                if x["mtype"] != CL.MACHINE_TYPE:
+                    untouched &= [bits_of(v) for v in after[t]] == x["before"]
+                    continue
+                seen.add(t)
+                want, did = CL.block(voices[t], rendered, x["words"], x["note"], x["trig"], T)
+                rendered += did
+                steps[t] = max(steps.get(t, 0), voices[t].step)
+                got = [bits_of(v) for v in after[t]]
+                mism[t] = mism.get(t, 0) + sum(1 for g, w in zip(got, want) if g != bits_of(w))
+                peaks[t] = max(peaks.get(t, 0.0), max(abs(v) for v in after[t] if v == v))
+        results[name] = {"ok": True, "mismatches": mism, "peaks": peaks, "steps": steps,
+                         "others_untouched": untouched, "tracks": sorted(seen)}
+    six = results.get(cap, {})
+    first = results.get(next(iter(cases)), {})
+    checks = {
+        "CZ runs on every machine-7 track, and only on them":
+            all(r.get("ok") for r in results.values())
+            and all(r["tracks"] == sorted(cases[k][0]) for k, r in results.items()),
+        "with eight machine-7 voices the first six sound and the seventh and eighth are silent":
+            bool(six.get("ok")) and all(six["peaks"][t] > 0.001 for t in range(6))
+            and all(six["peaks"][t] == 0.0 for t in (6, 7)),
+        "every CZ track bit-exact to dnfw.cz.live, fed the DSP's own inputs, in every block":
+            all(r.get("ok") and not any(r["mismatches"].values()) for r in results.values()),
+        "every rendered CZ voice is audible and bounded (0.01 < peak <= 1.0)":
+            all(r.get("ok") and all(0.01 < p <= 1.0 for t, p in r["peaks"].items()
+                                    if not (r is six and t in (6, 7)))
+                for r in results.values()),
+        "the DCW envelope reached its last step on the no-sustain voice":
+            bool(first.get("ok")) and first["steps"].get(0) == 7,
+        "WaveTone, FM Tone and the MIDI tracks pass through wr_cz bit-identical":
             all(r.get("ok") and r["others_untouched"] for r in results.values()),
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": results}

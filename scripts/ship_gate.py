@@ -82,7 +82,7 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
-         "test/test_shft_live.py", "test/test_rings_live.py"]
+         "test/test_shft_live.py", "test/test_rings_live.py", "test/test_cz_live.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 
@@ -219,9 +219,10 @@ def main() -> int:
              "booted and drew its UI, no fault" if rc == 0 else out[-800:])
 
         # 6. engine + LOAD/SAVE
-        # Waverider (5) and RESONATOR (6) are kept by LOAD; 7 still loads as FM Tone
+        # Waverider (5), RESONATOR (6) and CZ (7) are kept by LOAD; 8 still loads as FM Tone
         types = ["--machine-type", "3"] + (["--machine-type", "5", "--machine-type", "6",
-                                            "--machine-type", "7", "--machine-max", "6"]
+                                            "--machine-type", "7", "--machine-type", "8",
+                                            "--machine-max", "7"]
                                            if dsp_changed else [])
         # PING (6) and SHFT (7) are kept by LOAD; 8 still loads as Multi-Mode
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",
