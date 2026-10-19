@@ -27,7 +27,9 @@ relabelled), each a float 0..1:
 | `+0x1ec` | env delay | DRIV, 0.4 .. 2.0 into the buffer (as SHFT's) |
 
 **A grain.** Its read position starts `D` samples behind the write head:
-`64 + (UP ? L : 0) + trunc(r x SPRD x SCATTER)`, `r` from a per-track LCG; it moves by
+`64 + (UP ? L : 0) + trunc(r x SPRD x SCATTER)`, `r` the next of Waverider's 256 random
+values (`dnfw.waverider.live.rnd_table`, already in L1), a track stepping through them
+in turn; it moves by
 its rate a sample (1, 2, 0.5 or -1), read with linear interpolation; its window is the
 parabola `4 x (1 - x)` over its `L` samples. A new grain starts every `L / DENS`
 samples, in the next of the four slots (the oldest is stolen). The wet sum is scaled
@@ -44,6 +46,7 @@ import math
 import struct
 
 from ..ping import live as P
+from ..waverider import live as WL
 
 _f32, at127, knee, trunc = P._f32, P.at127, P.knee, P.trunc
 
@@ -58,8 +61,7 @@ GUARD = 64                                # the nearest a grain starts to the wr
 SCATTER = 16384.0                         # SPRD's reach, samples
 SIZE_MIN, SIZE_MAX = 480.0, 7680.0        # 10 ms, 160 ms
 FDBK_MAX = 0.9
-LCG_A, LCG_C = 1664525, 1013904223
-SEED = 0x9E3779B9
+RND = WL.rnd_table()
 
 R_TYPE, R_FREQ, R_RES = P.R_TYPE, P.R_FREQ, P.R_RES
 R_DRIVE, R_FDBK, R_MIX, R_SPRD = P.R_DRIVE, P.R_ATK, P.R_CURVE, P.R_DEPTH
@@ -123,7 +125,7 @@ class Voice:
 
     def __init__(self):
         self.w = 0                        # the write head
-        self.seed = 0                     # 0: not yet seeded (SEED on first use)
+        self.idx = 0                      # the next random value
         self.count = 0                    # samples to the next grain
         self.k = 0                        # the slot the next grain takes
         self.wet = 0.0                    # the last sample's wet, for the feedback
@@ -152,10 +154,8 @@ def controls(rec: dict[int, float], T: dict) -> dict:
 
 
 def _start(v: Voice, c: dict) -> None:
-    if v.seed == 0:
-        v.seed = SEED
-    v.seed = (v.seed * LCG_A + LCG_C) & 0xFFFFFFFF
-    r = _f32(float(v.seed >> 8) * 2.0 ** -24)
+    r = RND[v.idx & (WL.RND_COUNT - 1)]
+    v.idx = (v.idx + 1) & 0xFFFFFFFF
     d = c["base"] + trunc(_f32(r * c["scatter"]))
     g = v.g[v.k]
     g.pos = _f32(float((v.w - d) & MASK))

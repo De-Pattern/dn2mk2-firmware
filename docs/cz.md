@@ -114,7 +114,20 @@ rate/level frame offsets) in DDR at `0x81202000`. RESONATOR's tables moved to DD
 `0x25d748[7]` becomes 7 (the last of its eight entries). Section 7 is 1,046,884 bytes
 of the 1,048,575 the uploader takes: 1,691 to spare, no wavetable dropped.
 
-**Voices.** Six CZ voices render a block (`live.MAX_VOICES`); a seventh and eighth are
-silent and rest. A CZ voice never goes idle by itself (its DCA is the AMP stage, after
-it), so a slot that has played keeps rendering until it is over the cap. (RESONATOR's
-cap is four.)
+**Voices.** Six CZ voices render a block (`live.MAX_VOICES`); RESONATOR's cap is four.
+A CZ voice never goes idle by itself (its DCA is the AMP stage, after it), so a slot
+that has played keeps rendering until it is stolen.
+
+**Voice stealing (v0.10, `dnfw.voices`).** Until v0.10 the cap counted slots in slot
+order. With the DN2's dynamic voice allocation, which can hand a new note to any of the
+16 slots, a new note on a high slot found the cap already taken by older voices on lower
+slots and stayed silent. The owner, 2026-10-19: *"on the resonator and cz phase engines,
+i have to set an explicit voice limit, or else i get a lot of dead notes"*.
+
+Now every slot has an age, counted in blocks: 0 on the block its note arrives, one more
+for each block it stays active. The slots are ranked by age, newest first, and those
+ranked below the cap render. A voice past the cap is stolen: its state goes back to rest
+and it falls silent. RESONATOR's entry computes the ages for both machines in one pass.
+The SHARC runner holds both to `dnfw.voices.plan` bit for bit (step 9: with eight notes
+on eight slots, the newest six sound). A fixed voice count of 8 on the Voice Setup page
+still works as before.

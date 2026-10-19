@@ -292,11 +292,14 @@ def test_slots_0_and_1_keep_the_m5_tables():
 
 def test_tables_are_in_ddr_clear_of_the_stock_image_and_the_engine():
     ddr = dsp.ddr_spans()
-    assert [a for _, a, _ in ddr][:-4] == dsp.table_addresses()
-    # then RESONATOR's state (zeros) and tables, CZ's state (zeros) and tables
-    assert [a for _, a, _ in ddr][-4:] == [dsp.RINGS_STATE_DDR, dsp.RINGS_TABLES_DDR,
-                                          dsp.CZ_STATE_DDR, dsp.CZ_TABLES_DDR]
-    assert not any(ddr[-4][2]) and not any(ddr[-2][2])
+    assert [a for _, a, _ in ddr][:-8] == dsp.table_addresses()
+    # then RESONATOR's state (zeros) and tables, CZ's state (zeros) and tables; v0.10:
+    # PING's and SHFT's tables, GRAN's tables and its buffers (zeros)
+    assert [a for _, a, _ in ddr][-8:] == [dsp.RINGS_STATE_DDR, dsp.RINGS_TABLES_DDR,
+                                          dsp.CZ_STATE_DDR, dsp.CZ_TABLES_DDR,
+                                          dsp.PING_TABLES_DDR, dsp.SHFT_TABLES_DDR,
+                                          dsp.GRAN_TABLES_DDR, dsp.GRAN_BUF_DDR]
+    assert not any(ddr[-8][2]) and not any(ddr[-6][2]) and not any(ddr[-1][2])
     # the stock stream loads DDR to 0x8052fbe0 and init writes up to 0x80530be8
     # (scripts/sharc_ddr_ceiling.py); the tables start 16 MB in
     assert min(a for _, a, _ in ddr) >= dsp.DDR_FLOOR > 0x80530BE8
@@ -310,13 +313,14 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
     obj = dsp.objects()
     code_spans = [x for x in sp if "asm" in x[0]]
-    assert len(code_spans) == 8
+    assert len(code_spans) == 11
     # W5: the loop moved to 0x2def00, after the glide state; P1b: PING after the W2 tables;
-    # RESONATOR's after SHFT's tables, CZ's after RESONATOR's
-    for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["idle_load"],
+    # RESONATOR's after SHFT's tables, CZ's after RESONATOR's; v0.10: osc 2 after the
+    # reader and after PING, GRAN where PING's tables were
+    for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["osc2"], obj["idle_load"],
                                                      obj["block_count"], obj["entry_mark"],
-                                                     obj["machine5_live"], obj["ping"],
-                                                     obj["rings"], obj["cz"])):
+                                                     obj["machine5_live"], obj["ping"], obj["osc2b"],
+                                                     obj["gran"], obj["rings"], obj["cz"])):
         assert payload[:len(code)] == code
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
 

@@ -35,11 +35,16 @@ def fbits(x: float) -> str:
 
 
 _, AT = L.tables_bytes()
-TAB = {name: dsp.PING_TABLES_DM + off for name, off in AT.items()}
+TAB = {name: dsp.PING_TABLES_DDR + off for name, off in AT.items()}
 LENS = {name: len(t) for name, t in L.tables().items()}
 STATE = dsp.PING_STATE_DM
 _, SAT = SL.tables_bytes()
-STAB = {name: dsp.SHFT_TABLES_DM + off for name, off in SAT.items()}
+STAB = {name: dsp.SHFT_TABLES_DDR + off for name, off in SAT.items()}
+
+
+def imm(v: int) -> str:
+    """A DDR address as selmap prints it: signed."""
+    return f"-{(1 << 32) - v:#x}" if v >> 31 else f"{v:#x}"
 SLENS = {name: len(t) for name, t in SL.tables().items()}
 # SHFT's per-track state words (dnfw.shft.live.Voice, then the block's controls)
 SS = dict(in1=0, in2=1, iprev=18, phase=19, fb=20, stage=21, x=22,
@@ -103,7 +108,7 @@ def interp(table: str, fx: int, out: int, shft: bool = False) -> None:
     emit("      F1 = FLOAT R0 BY R12;")
     emit(f"      F1 = F{fx} - F1;".ljust(40) + "// f")
     emit("      R0 = LSHIFT R0 BY 2;")
-    emit(f"      R12 = {addr:#x};".ljust(40) + f"// {table}")
+    emit(f"      R12 = {imm(addr)};".ljust(40) + f"// {table} ({addr:#x}, DDR)")
     emit("      R0 = R12 + R0;")
     emit("      I1 = R0;")
     emit("      R2 = DM(0, I1);")
@@ -124,7 +129,7 @@ def at127(table: str, fv: int, out: int) -> None:
     emit(f"      F{fv} = F{fv} * F12;")
     emit(f"      R0 = TRUNC F{fv};")
     emit("      R0 = LSHIFT R0 BY 2;")
-    emit(f"      R12 = {TAB[table]:#x};".ljust(40) + f"// {table}")
+    emit(f"      R12 = {imm(TAB[table])};".ljust(40) + f"// {table} ({TAB[table]:#x}, DDR)")
     emit("      R0 = R12 + R0;")
     emit("      I1 = R0;")
     emit(f"      R{out} = DM(0, I1);")
@@ -248,7 +253,7 @@ def build() -> str:
     emit("// frame filter type (0x25c48c + 180 + 2t) is 6, it reads the stock filter fields")
     emit("// the unpack wrote to the track record as floats, and filters the track buffer")
     emit("// in place. Then it restores what machine5_live saved and rejoins the chain.")
-    emit(f"// State: 16 x {STATE_STRIDE} bytes at {STATE:#x}. Tables: {dsp.PING_TABLES_DM:#x}.")
+    emit(f"// State: 16 x {STATE_STRIDE} bytes at {STATE:#x}. Tables: {dsp.PING_TABLES_DDR:#x} (DDR).")
     emit("")
     emit(".SECTION/PM seg_pmco;")
     emit("")
@@ -279,6 +284,9 @@ def build() -> str:
     emit(f"      R1 = {SL.FILTER_TYPE};".ljust(40) + "// SHFT")
     emit("      COMP(R0, R1);")
     jump("EQ", "wr_s_track")
+    emit("      R1 = 8;".ljust(40) + "// GRAN (gran.asm, docs/gran.md)")
+    emit("      COMP(R0, R1);")
+    emit(f"      IF EQ JUMP {dsp.GRAN_SW:#x};".ljust(40) + "// gran.asm's wr_gran, which comes back to wr_p_next")
     emit(f"      R1 = {L.FILTER_TYPE};")
     emit("      COMP(R0, R1);")
     jump("NE", "wr_p_next")
@@ -467,7 +475,7 @@ def build() -> str:
     emit("      COMP(R2, R12);")
     jump("GE", nos)
     emit("      R2 = LSHIFT R2 BY 2;")
-    emit(f"      R12 = {TAB['strike']:#x};")
+    emit(f"      R12 = {imm(TAB['strike'])};".ljust(40) + "// strike (DDR)")
     emit("      R2 = R12 + R2;")
     emit("      I1 = R2;")
     emit("      R3 = DM(0, I1);")

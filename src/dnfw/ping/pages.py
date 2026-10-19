@@ -11,6 +11,7 @@ unchanged keep their names.
 
     PING   ATK  DEC  CURV STRK  /  FREQ RING TYPE ENV     (DRIV on page 2)
     SHFT   ATK  DEC  MIX  -     /  SHFT FDBK MODE ENV     (DRIV on page 2)
+    GRAN   FDBK -    MIX  -     /  SIZE DENS MODE SPRD    (DRIV on page 2)
 """
 
 from __future__ import annotations
@@ -27,6 +28,16 @@ SETS = {                  # filter type -> {record id: (long name, short name)},
         44: ("Shift Drive", "DRIV"),    # Env. Delay
         47: ("Shift Mix", "MIX"),       # Sustain Level: dry -> wet
         48: ("Unused", "-")},           # Release Time: nothing
+    8: {36: ("Grain Size", "SIZE"),     # Frequency: 10 .. 160 ms (docs/gran.md)
+        37: ("Grain Density", "DENS"),  # Resonance: 1 .. 4 grains overlapping
+        38: ("Grain Mode", "MODE"),     # Filter Type: NORM / UP / DOWN / REV
+        44: ("Grain Drive", "DRIV"),    # Env. Delay
+        45: ("Grain Feedback", "FDBK"),  # Attack Time
+        46: ("Unused", "-"),            # Decay Time: nothing
+        47: ("Grain Mix", "MIX"),       # Sustain Level: dry -> wet
+        48: ("Unused", "-"),            # Release Time: nothing
+        49: ("Grain Spread", "SPRD"),   # Env. Depth: how far back grains scatter
+        51: ("Unused", "-")},           # Key Tracking: nothing
 }
 NAMED = tuple((rid, *SETS[6][rid]) for rid in SETS[6])     # PING's, as P2 had it
 FILTER = 6
@@ -39,7 +50,8 @@ def ids() -> list[int]:
 # the TYPE cell (Multi-Mode's Filter Type, record 38) as text, quarters / thirds of its
 # range: what the type's core or mode is called (dnfw.ping.live.TYPES, shft.live.MODES)
 TYPE_ID = 38
-TYPE_TEXT = {6: ("SVF", "LADR", "VCFQ", "LPG"), 7: ("UP", "DOWN", "BOTH")}
+TYPE_TEXT = {6: ("SVF", "LADR", "VCFQ", "LPG"), 7: ("UP", "DOWN", "BOTH"),
+             8: ("NORM", "UP", "DOWN", "REV")}
 
 
 def c_header() -> str:

@@ -20,7 +20,7 @@ instrument, **[O]** open.
 | TUNE | pitch, ±5 octaves | as WaveTone's | 0 |
 | **LEV** | the oscillator's level; 100 is unity, 127 is +2 dB | 0..127 | 100 |
 | POS | position in the table (glides ~21 ms, W5) | 0..120 | 0 |
-| TBL | the table, by name (`PRIM`, `VOX`, …) | 0..127 over 11 tables | `PRIM` |
+| TBL | the table, by name (`PRIM`, `VOX`, …) | 0..127 over the tables (9 since v0.7) | `PRIM` |
 | **RATE** | the scanner's speed, 0.05 Hz to 30 Hz, exponential | 0..127 | 0 |
 | **MPOS** | how far the scanner sweeps POS, ± (centre: none; ±50 sweeps the whole table) | -50..+50 | 0 |
 | **MLEV** | how much the scanner moves the level, ± (+: dips as the shape falls; -: as it rises) | -50..+50 | 0 |

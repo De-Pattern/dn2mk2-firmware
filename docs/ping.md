@@ -135,8 +135,10 @@ response curve (6 draws Multi-Mode's). New code and data are one platform `CODE`
 chunk at `0x4670F000`.
 
 Known, not yet done:
-- TYPE's icon is Multi-Mode's LP/BP/HP morph; its four quarters are PING's four
-  types, but the icon does not say SVF / LADR / VCFQ / LPG.
+- ~~TYPE's icon says nothing of PING's types.~~ Done in v0.10: the TYPE cell reads
+  SVF / LADR / VCFQ / LPG with a dot for each (SHFT's MODE: UP / DOWN / BOTH; GRAN's:
+  NORM / UP / DOWN / REV). The stock cell widget `0x4006448a` exits through
+  `wr_cell_tail`, and `wr_cell` (page.c) redraws only record 38 on our filter types.
 - The curve is Multi-Mode's shape, not PING's.
 - A sound saved with PING and loaded on stock firmware loads as Multi-Mode.
 

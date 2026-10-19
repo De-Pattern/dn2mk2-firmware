@@ -83,7 +83,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
          "test/test_shft_live.py", "test/test_rings_live.py", "test/test_cz_live.py",
-         "test/test_w3_osc2.py"]
+         "test/test_w3_osc2.py", "test/test_gran_live.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 

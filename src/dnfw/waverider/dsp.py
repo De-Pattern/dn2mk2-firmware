@@ -95,11 +95,21 @@ PING_CODE_DM, PING_CODE_SPAN = 0x2E0500, 0x1800
 PING_SW = PING_CODE_DM // 2                                  # 0x170280
 PING_STATE_DM = PING_CODE_DM + PING_CODE_SPAN                # 0x2e1d00
 PING_T_DM = PING_STATE_DM + 16 * 128                         # 0x2e2500: t, then scratch
-PING_TABLES_DM = PING_T_DM + 0x40                            # 0x2e2540
+# GRAN (v0.10): PING's and SHFT's tables moved to DDR, so GRAN's code takes theirs
+# in L1 (0x2e2540, where PING's tables were) and its state SHFT's (0x2e4b00)
+PING_TABLES_DDR = 0x81210000
+GRAN_CODE_DM = PING_T_DM + 0x40                              # 0x2e2540
+GRAN_SW = GRAN_CODE_DM // 2                                  # 0x1712a0
+GRAN_SCRATCH_DM = 0x2E3A00                                   # 32 words, after GRAN's code
 # SHFT (docs/shft.md): its code is in ping.asm; 16 x 256 bytes of state (zeros, so a
-# fill block in the stream), then its sine and pow2 tables (dnfw.shft.live)
-SHFT_STATE_DM, SHFT_STATE_STRIDE = 0x2E3B00, 256             # after PING's tables
-SHFT_TABLES_DM = SHFT_STATE_DM + 16 * SHFT_STATE_STRIDE      # 0x2e4b00
+# fill block in the stream); its sine and pow2 tables (dnfw.shft.live) in DDR
+SHFT_STATE_DM, SHFT_STATE_STRIDE = 0x2E3B00, 256             # after GRAN's code
+SHFT_TABLES_DDR = 0x81212000
+# GRAN (docs/gran.md, filter type 8): 16 x 128 bytes of state in L1, its tables and
+# 16 ring buffers of 32768 float32 (128 KB a track, zeros: a fill block) in DDR
+GRAN_STATE_DM, GRAN_STATE_STRIDE = SHFT_STATE_DM + 16 * SHFT_STATE_STRIDE, 128   # 0x2e4b00
+GRAN_TABLES_DDR = 0x81214000
+GRAN_BUF_DDR, GRAN_BUF_STRIDE = 0x81400000, 0x20000
 # RESONATOR (docs/rings.md, machine type 6): its code (entered from machine5_live's
 # tail, on to wr_cz), a scratch block (the exciter and the mode sum of one voice, the
 # loop's counters) in the reader span's tail; its tables (dnfw.rings.live) and its 16
@@ -209,7 +219,7 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "ping", "rings", "cz", "osc2", "osc2b")}
+                         "entry_mark", "emark_jump", "ping", "rings", "cz", "osc2", "osc2b", "gran")}
 
 
 def directory() -> bytes:
@@ -251,9 +261,10 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
         ("osc2b.asm (wr_osc2b)", OSC2B_CODE_DM, obj["osc2b"]),
         ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),
-        ("PING tables", PING_TABLES_DM, _ping_tables()),
+        ("gran.asm (wr_gran)", GRAN_CODE_DM, obj["gran"]),
+        ("GRAN scratch (zeros)", GRAN_SCRATCH_DM, bytes(0x100)),
         ("SHFT state: 16 tracks x 256 bytes (zeros)", SHFT_STATE_DM, bytes(16 * SHFT_STATE_STRIDE)),
-        ("SHFT tables", SHFT_TABLES_DM, _shft_tables()),
+        ("GRAN state: 16 tracks x 128 bytes (zeros)", GRAN_STATE_DM, bytes(16 * GRAN_STATE_STRIDE)),
         ("rings.asm (wr_rings)", RINGS_CODE_DM, obj["rings"]),
         ("cz.asm (wr_cz)", CZ_CODE_DM, obj["cz"]),
     ]
@@ -298,7 +309,16 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
          bytes(16 * RINGS_STATE_STRIDE)),
         ("RESONATOR tables", RINGS_TABLES_DDR, _rings_tables()),
         ("CZ state: 16 voices x 64 bytes (zeros)", CZ_STATE_DDR, bytes(16 * CZ_STATE_STRIDE)),
-        ("CZ tables", CZ_TABLES_DDR, _cz_tables())]
+        ("CZ tables", CZ_TABLES_DDR, _cz_tables()),
+        ("PING tables", PING_TABLES_DDR, _ping_tables()),
+        ("SHFT tables", SHFT_TABLES_DDR, _shft_tables()),
+        ("GRAN tables", GRAN_TABLES_DDR, _gran_tables()),
+        ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE))]
+
+
+def _gran_tables() -> bytes:
+    from ..grain import live as gran_live
+    return gran_live.tables_bytes()[0]
 
 
 def _check_ddr(stock: bytes, span_list) -> None:

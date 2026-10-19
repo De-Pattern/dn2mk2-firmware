@@ -315,11 +315,24 @@ def osc2_links_ok() -> bool:
             and [int(x, 16) for x in back.findall(b)] == [nxt])
 
 
+def gran_links_ok() -> bool:
+    """GRAN: ping.asm's jump into wr_gran, and wr_gran's back to ping's wr_p_next."""
+    import sharc_resolve_jumps as R                      # noqa: PLC0415
+    ping = (SHARC / "ping.asm").read_text(encoding="utf-8")
+    spec = json.loads((SHARC / "ping.json").read_text(encoding="utf-8"))
+    nxt = dsp.PING_SW + spec["instruction_offsets"][R.labels(ping)["wr_p_next"]] // 2
+    g = (SHARC / "gran.asm").read_text(encoding="utf-8")
+    back = re.compile(r"JUMP (0x[0-9a-f]+);\s*// ping.asm's wr_p_next")
+    return (f"IF EQ JUMP {dsp.GRAN_SW:#x};" in ping
+            and [int(x, 16) for x in back.findall(g)] == [nxt])
+
+
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
     for name, load_sw in (("reader_m5", dsp.READER_SW), ("machine5_live", dsp.LOOP_SW),
                           ("ping", dsp.PING_SW), ("rings", dsp.RINGS_SW),
-                          ("cz", dsp.CZ_SW), ("osc2", dsp.OSC2_SW), ("osc2b", dsp.OSC2B_SW)):
+                          ("cz", dsp.CZ_SW), ("osc2", dsp.OSC2_SW), ("osc2b", dsp.OSC2B_SW),
+                          ("gran", dsp.GRAN_SW)):
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -352,8 +365,8 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("reader_m5", "machine5_live", "ping", "rings", "cz", "osc2", "osc2b")) \
-        and osc2_links_ok() and entry.type_name.startswith("8a") \
+             for n in ("reader_m5", "machine5_live", "ping", "rings", "cz", "osc2", "osc2b", "gran")) \
+        and osc2_links_ok() and gran_links_ok() and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
 
@@ -397,7 +410,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,rings,cz,frame")
+    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,gran,rings,cz,frame")
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -434,7 +447,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("reader_m5", "machine5_live", "ping", "rings", "cz", "osc2", "osc2b"):
+            for n in ("reader_m5", "machine5_live", "ping", "rings", "cz", "osc2", "osc2b", "gran"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
@@ -498,6 +511,11 @@ def main(argv=None):
             print("\nstep 7: SHFT")
             results["7_shft"] = step_shft(init, sound, machines, a.blocks)
             show(results["7_shft"])
+
+        if "gran" in steps:
+            print("\nstep 7b: GRAN")
+            results["7b_gran"] = step_gran(init, sound, machines)
+            show(results["7b_gran"])
 
         if "rings" in steps:
             print("\nstep 8: RESONATOR")
@@ -1013,6 +1031,77 @@ def step_shft(init, sound, machines, blocks) -> dict:
         "every SHFT / PING track is audible and bounded (0.001 < peak <= 1.0)":
             all(r.get("ok") and all(0.001 < p <= 1.0 + 1e-6 for p in r["peaks"].values())
                 for r in results.values()),
+        "tracks on other filter types pass through bit-identical":
+            all(r.get("ok") and r["others_untouched"] for r in results.values()),
+    }
+    return {"ok": all(checks.values()), "checks": checks,
+            "numbers": {k: {kk: vv for kk, vv in v.items() if kk != "want"} for k, v in results.items()}}
+
+
+# -- step 7b: GRAN (docs/gran.md) -----------------------------------------------------------------
+
+GRAN_BLOCKS = 24                # 768 samples: grains start, overlap, end and read back the feedback
+
+
+def gran_settings(mode: int, *, size=0x3000, dens=0x7f00, sprd=0x4000, drive=0x3000, fdbk=0,
+                  mix=0x7f00) -> dict:
+    """Frame parameter words for a FLTR page set to GRAN (the stock filter parameters)."""
+    return {66: int((mode + 0.5) / 4 * 32512), 67: size, 68: dens, 69: sprd, 70: drive,
+            71: fdbk, 73: mix}
+
+
+def step_gran(init, sound, machines) -> dict:
+    """GRAN in each mode, beside itself and beside SHFT: every GRAN track bit-exact to
+    dnfw.grain.live (its buffer carried from block to block), SHFT beside it still
+    bit-exact to dnfw.shft.live, every other track untouched."""
+    from dnfw.grain import live as GL
+    from dnfw.shft import live as SL
+    GT, ST = GL.tables(), SL.tables()
+    cases = {
+        "NORM / UP+fdbk": ((GL.FILTER_TYPE, GL.FILTER_TYPE),
+                           (gran_settings(0), gran_settings(1, size=0x1000, fdbk=0x6000, mix=0x5000))),
+        "DOWN+sprd / REV": ((GL.FILTER_TYPE, GL.FILTER_TYPE),
+                            (gran_settings(2, sprd=0x7f00, dens=0x2000), gran_settings(3, size=0x0800, dens=0))),
+        "GRAN / SHFT": ((GL.FILTER_TYPE, SL.FILTER_TYPE),
+                        (gran_settings(0, sprd=0x0400, fdbk=0x7f00), shft_settings(0, fdbk=0x7800))),
+    }
+    results = {}
+    for name, (ftypes, settings) in cases.items():
+        run, taps = run_filter_pair(init, sound, machines, GRAN_BLOCKS, ftypes, settings)
+        if not run["ok"] or len(taps) != GRAN_BLOCKS:
+            results[name] = {"ok": False, "why": run.get("halt") or f"{len(taps)} entries"}
+            continue
+        gv = {t: GL.Voice() for t in range(16)}
+        sv = {t: SL.Voice() for t in range(16)}
+        mism, peaks, untouched, seen = {}, {}, True, set()
+        for b, tap in enumerate(taps):
+            after = run["machine"][b]
+            for t in range(16):
+                x = tap[t]
+                if x["ftype"] == GL.FILTER_TYPE:
+                    want = GL.block(gv[t], [f32_of(w) for w in x["before"]], x["rec"], x["note"], x["trig"], GT)
+                elif x["ftype"] == SL.FILTER_TYPE:
+                    want = SL.block(sv[t], [f32_of(w) for w in x["before"]], x["rec"], x["note"], x["trig"], ST)
+                else:
+                    untouched &= [bits_of(v) for v in after[t]] == x["before"]
+                    continue
+                seen.add((t, x["ftype"]))
+                got = [bits_of(v) for v in after[t]]
+                mism[t] = mism.get(t, 0) + sum(1 for g, w in zip(got, want) if g != bits_of(w))
+                peaks[t] = max(peaks.get(t, 0.0), max(abs(v) for v in after[t] if v == v))
+        results[name] = {"ok": True, "mismatches": mism, "peaks": peaks, "others_untouched": untouched,
+                         "tracks": sorted(seen), "want": [(0, ftypes[0]), (1, ftypes[1])],
+                         "grains_started": {t: gv[t].idx for t, ft in enumerate(ftypes)
+                                            if ft == GL.FILTER_TYPE}}
+    checks = {
+        "GRAN runs on every track set to filter type 8, beside GRAN and beside SHFT":
+            all(r.get("ok") and r["tracks"] == r["want"] for r in results.values()),
+        "every GRAN track bit-exact to dnfw.grain.live, fed the DSP's own inputs, in every block of "
+        f"{GRAN_BLOCKS} (NORM, UP, DOWN, REV; feedback; scatter), and SHFT beside it to dnfw.shft.live":
+            all(r.get("ok") and not any(r["mismatches"].values()) for r in results.values()),
+        "every GRAN / SHFT track is audible and bounded (0.001 < peak <= 1.0), and grains start":
+            all(r.get("ok") and all(0.001 < p <= 1.0 + 1e-6 for p in r["peaks"].values())
+                and all(n > 0 for n in r["grains_started"].values()) for r in results.values()),
         "tracks on other filter types pass through bit-identical":
             all(r.get("ok") and r["others_untouched"] for r in results.values()),
     }

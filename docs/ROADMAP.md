@@ -6,18 +6,31 @@ enough of a plan that it can be picked up cold. Upstream's own parked ideas are 
 
 ## Next
 
-- **CZ** (Casio CZ phase-distortion machine, type 7): built (`docs/cz.md`); the DCW
-  envelope's steps after sustain wait on finding the frame's note-off.
+Built in v0.10 (2026-10-19), waiting on the instrument:
 
-- **PING P3**: tuning by ear on hardware; TYPE's icon saying SVF / LADR / VCFQ / LPG;
-  the curve drawn as PING's. P1 (DSP) and P2 (FLTR page) are built: `docs/ping.md`.
+- **Voice stealing on RESONATOR and CZ** (`dnfw.voices`): the newest voices render up
+  to the cap and the oldest are stolen, so the dynamic voice setting no longer leaves
+  dead notes (owner: *"if its a fixable bug/behavior"*).
+- **CZ note-off** (`docs/cz.md`): the DCW envelope's steps after sustain run on the
+  frame's note-off.
+- **PING / SHFT TYPE by name** on the FLTR page: SVF / LADR / VCFQ / LPG and
+  UP / DOWN / BOTH (`docs/ping.md`).
+- **W3: Waverider osc 2** (`docs/w3-osc2.md`): page 2, DETN LEV POS TBL / - MPOS MLEV -,
+  off by default. Its own RATE and MOVE (a second scanner) are not built.
+- **GRAN** (`docs/gran.md`): a granular effect as filter type 8.
 
-- **W3: Waverider osc 2** (page 2: DETN, LEV, POS, TBL, RATE, MPOS, MLEV, MOVE on
-  osc 2's WaveTone records, `docs/w2-scanner.md`).
+Still to do:
+
+- **PING P3**: tuning by ear on the instrument (the owner wants it *"rounder and
+  prettier"*), and the response curve drawn as PING's.
+- **GRAN**: FREEZE, and the envelope on SIZE or SPRD (decay and release are free).
 - **The owner's own tables in a build**: `dnfw waverider slice` output into a table
-  slot. This needs table compression first, because each table is 16 KB and the DSP
-  has 18,979 bytes of budget left.
-- **GRAINS G1** (`docs/grains.md`), the frequency shifter FX, a Rings-style resonator.
+  slot. This needs table compression first, since each table is 16 KB. The binding
+  limit is now the USB upgrade buffer, 16,350 bytes left (`docs/usb-upgrade-limit.md`).
+- **GRAINS G1** (`docs/grains.md`), a grain *oscillator* machine, as distinct from
+  GRAN the effect.
+- **L1 is full.** Every gap in the DSP's L1 tail is now used, so the next DSP feature
+  moves more read-only tables to DDR first, as GRAN did with PING's and SHFT's.
 
 ## A pingable filter (owner, 2026-10-13)
 
