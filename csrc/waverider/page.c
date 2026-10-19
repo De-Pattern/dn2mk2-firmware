@@ -821,6 +821,42 @@ static const char *cz_text(void *view, u32 id, const char *label)
     return label;
 }
 
+/* PING and SHFT (src/dnfw/ping/pages.py): every cell widget of a stock page is drawn by
+ * 0x4006448a(view, canvas, x, y, id, ...), and as each one finishes (wr_cell_tail) this
+ * is told which. The cell of Multi-Mode's Filter Type (record 38) -- PING's TYPE, SHFT's
+ * MODE -- then shows the name of what it selects, with a dot a choice under it, in place
+ * of Multi-Mode's LP/BP/HP icons. The widget is x..x+23, y+8..y+23 (canvas, y up); the
+ * label under it is untouched. Any other cell, and any track whose filter is neither,
+ * is left as stock drew it. */
+void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
+{
+    if (id != PING_TYPE_ID)
+        return;
+    int set = ping_active();
+    if (set < 0)
+        return;
+    for (int x = x0; x < x0 + 24; x++)
+        for (int y = y0 + 8; y < y0 + 24; y++)
+            SET_PIXEL(canvas, x, y, 0);
+    u8 flag;
+    const int *r = RECORD(id);
+    int n = ping_type_count[set], span = r[3] - r[2];
+    int v = GET_VALUE(view, id, &flag) - r[2];
+    int at = span > 0 ? v * n / span : 0;     /* as the DSP: trunc(v / span * n), the top clamped */
+    if (at < 0) at = 0;
+    if (at >= n) at = n - 1;
+    TEXT(canvas, FONT, x0 + 12, y0 + 14, CENTRED, "%.4s", ping_type_text[set][at]);
+    for (int j = 0; j < n; j++) {                 /* a dot a choice, the current one bold */
+        int cx = x0 + 12 + (2 * j - (n - 1)) * 3;
+        px(canvas, cx, y0 + 10);
+        if (j == at) {
+            px(canvas, cx, y0 + 11);
+            px(canvas, cx + 1, y0 + 10);
+            px(canvas, cx + 1, y0 + 11);
+        }
+    }
+}
+
 void wr_page_draw(void *view, void *canvas)
 {
 #ifdef WR_PROBE

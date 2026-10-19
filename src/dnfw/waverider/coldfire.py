@@ -400,7 +400,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     if pages.C_LOAD + len(cimage) > ping_cf.LOAD:
         raise ComposeError(f"the page renderer ends past {ping_cf.LOAD:#010x}, PING's chunk")
     ptable = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in pages.LABELS_OUT) + "\n"
-    pblob = assemble(pages.source(csyms["wr_page_draw"]) + ptable, base=pages.LOAD)
+    pblob = assemble(pages.source(csyms["wr_page_draw"], csyms["wr_cell"]) + ptable, base=pages.LOAD)
     asm = pblob[:-4 * len(pages.LABELS_OUT)]
     if len(asm) > pages.C_LOAD - pages.LOAD:
         raise ComposeError(f"the pages assembly ({len(asm)} B) runs into the renderer")
@@ -500,6 +500,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the SYN page's label fetch: Waverider's labels for a Waverider track (M7)", LABEL_STOCK)
     edit(GRID_SITE, bytes.fromhex("4eb9") + _long(playout["wr_grid"]) + bytes.fromhex("4e714e71"),
          "the SYN page draw: Waverider's own page for a Waverider track (M8.1)", GRID_STOCK)
+    edit(pages.CELL_EXIT, bytes.fromhex("4ef9") + _long(playout["wr_cell_tail"]) + bytes.fromhex("4e714e71"),
+         "a stock page cell's widget (0x4006448a): its exit through wr_cell_tail, which draws "
+         "PING's and SHFT's TYPE as a name", bytes.fromhex(pages.CELL_EXIT_STOCK))
     edit(pages.ID9_SITE, bytes.fromhex("4eb9") + _long(playout["wr_id9"]),
          "the SYN page draw: a CZ track's third page (id 9 to the draw) to wr_grid, not "
          "WaveTone's page-3 grid", bytes.fromhex(pages.ID9_STOCK))

@@ -120,8 +120,11 @@ CZ_UNUSED = tuple(r for r in range(238, 263) if r not in CZ_LABELS)
 CZ_RATE_IDS = (240, 246, 244, 250, 255, 256, 257, 258)
 CZ_LEVEL_IDS = (245, 252, 253, 254, 260, 261, 262, 238)
 
-LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "wr_id9", "labels",
-              "descriptors")
+LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "wr_id9",
+              "wr_cell_tail", "labels", "descriptors")
+# PING / SHFT: every stock page cell's widget is drawn by 0x4006448a; its one exit
+CELL_EXIT = 0x400646CA            # movem.l %sp@,%d2-%d7/%a2-%fp ; lea %sp@(80),%sp ; rts
+CELL_EXIT_STOCK = "4cd77cfc4fef00504e75"
 # W2: `labels` is where the assembly's code ends and its data (the label table, the
 # descriptors, the strings) begins: the ship gate checks only [is_wr, labels) as code
 GRID = 0x40017428                 # the stock grid: (view, canvas)
@@ -218,9 +221,10 @@ def c_header() -> str:
             f"static const char wr_shape_names[8][5] = {{{', '.join(q + x + q for x in SHAPES)}}};\n")
 
 
-def source(page_draw: int) -> str:
+def source(page_draw: int, cell: int) -> str:
     """The chunk's assembly (GNU as, ColdFire), linked at LOAD. PAGE_DRAW is the C
-    renderer's entry, `wr_page_draw(view, canvas)`."""
+    renderer's entry, `wr_page_draw(view, canvas)`; CELL its `wr_cell(view, canvas, x,
+    y, id)`, run as each cell widget of a stock page finishes (PING's and SHFT's TYPE)."""
     table = "\n".join(f"    .long {rid}, lab_{rid}" for rid in LABELS)
     strings = "\n".join(f'lab_{rid}: .asciz "{name}"' for rid, name in LABELS.items())
     pages = []
@@ -406,6 +410,26 @@ wr_grid:
     rts
 1:  jsr     {GRID:#010x}
     addq.l  #8,%sp
+    rts
+
+| -- the exit of 0x4006448a, a page's cell widget (view, canvas, x, y, id, ...), at
+| 0x400646ca, now `jmp` here: its own epilogue, then wr_cell(view, canvas, x, y, id)
+| with its d0 and d1 kept, and back to its caller.
+wr_cell_tail:
+    movem.l %sp@,%d2-%d7/%a2-%a6
+    lea     %sp@(80),%sp
+    movea.l %sp,%a1
+    move.l  %d0,%sp@-
+    move.l  %d1,%sp@-
+    move.l  %a1@(20),%sp@-
+    move.l  %a1@(16),%sp@-
+    move.l  %a1@(12),%sp@-
+    move.l  %a1@(8),%sp@-
+    move.l  %a1@(4),%sp@-
+    jsr     {cell:#010x}
+    lea     %sp@(20),%sp
+    move.l  %sp@+,%d1
+    move.l  %sp@+,%d0
     rts
 
 | -- the SYN page draw at 0x40018202 (`moveq #9,%d1 ; cmp.l %d3,%d1 ; bne.s` to the grid

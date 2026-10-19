@@ -36,6 +36,12 @@ def ids() -> list[int]:
     return sorted({rid for names in SETS.values() for rid in names})
 
 
+# the TYPE cell (Multi-Mode's Filter Type, record 38) as text, quarters / thirds of its
+# range: what the type's core or mode is called (dnfw.ping.live.TYPES, shft.live.MODES)
+TYPE_ID = 38
+TYPE_TEXT = {6: ("SVF", "LADR", "VCFQ", "LPG"), 7: ("UP", "DOWN", "BOTH")}
+
+
 def c_header() -> str:
     q = chr(34)
     order = ids()
@@ -50,4 +56,9 @@ def c_header() -> str:
             f"static const char *const ping_named_long[PING_SETS][PING_NAMED] = "
             f"{{{', '.join(row(t, 0) for t in filters)}}};\n"
             f"static const char *const ping_named_short[PING_SETS][PING_NAMED] = "
-            f"{{{', '.join(row(t, 1) for t in filters)}}};\n")
+            f"{{{', '.join(row(t, 1) for t in filters)}}};\n"
+            f"#define PING_TYPE_ID {TYPE_ID}\n"
+            f"static const unsigned char ping_type_count[PING_SETS] = "
+            f"{{{', '.join(str(len(TYPE_TEXT[t])) for t in filters)}}};\n"
+            f"static const char ping_type_text[PING_SETS][4][5] = "
+            f"{{{', '.join('{' + ', '.join(q + x + q for x in TYPE_TEXT[t]) + '}' for t in filters)}}};\n")
