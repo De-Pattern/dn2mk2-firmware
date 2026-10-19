@@ -161,7 +161,8 @@ RATE_MIN_HZ, RATE_MAX_HZ = 0.05, 30.0
 BLOCK_HZ = 48000.0 / 32
 LEV_UNITY = 100                  # LEV1's default, 0x6400
 RND_COUNT = 256
-DEFAULTS = {"lev1": 0x6400, "atk": 0, "ofs1": CENTRE, "pd1": CENTRE, "nlev": 0}
+DEFAULTS = {"lev1": 0x6400, "atk": 0, "ofs1": CENTRE, "pd1": CENTRE, "nlev": 0,
+            "tun2": TUN1_ZERO, "wav2": 0, "base": 0, "char": 0, "ofs2": CENTRE, "pd2": CENTRE}
 
 
 def rate_hz(v: int) -> float:
@@ -267,6 +268,50 @@ def gain(u: float, p: dict, levels) -> float:
     return _f32(levels[min((p["lev1"] & 0xFFFF) >> 8, 127)] * a)
 
 
+# -- W3: osc 2 (page 2) ---------------------------------------------------------------------
+#
+# A second reader on the same voice, mixed into osc 1's output. Its controls sit on
+# WaveTone records whose default leaves it silent, so every sound saved before W3 plays
+# bit for bit as it did (docs/w3-osc2.md):
+#
+# | control | record | slot | frame offset | range, default |
+# |---|---|---|---|---|
+# | DETN | TUN2 242 | 31 | 230 + 146t | 0x0400..0x7c00, 0x4000 (0 semitones from osc 1) |
+# | LEV  | CHAR 260 | 47 | 262 + 146t | 0..0x7f00, 0: osc 2 off |
+# | POS  | WAV2 243 | 32 | 232 + 146t | 0..0x7800, 0 |
+# | TBL  | BASE 257 | 44 | 256 + 146t | 0..0x7f00, 0 |
+# | MPOS | OFS2 250 | 34 | 236 + 146t | 0..0x6400, 0x3200 (centre = 0) |
+# | MLEV | PD2  244 | 35 | 238 + 146t | 0..0x6400, 0x3200 (centre = 0) |
+#
+# Osc 2 shares osc 1's scanner (RATE, MOVE) with depths of its own. LEV 0 skips it
+# outright -- no reader, no state change but its gain, which rests at 0 so turning it on
+# ramps in from silence.
+
+
+class Osc2:
+    """One voice's osc 2 state: phase (u32), s (its POS glide, Q16), gp (the gain the
+    last block ended on)."""
+
+    def __init__(self):
+        self.phase, self.s, self.gp = 0, 0, 0.0
+
+
+def detuned(n1: float, tun2: int) -> float:
+    """Osc 2's note: osc 1's (tuned, then at most 127) plus DETN, word / 256 - 64
+    semitones, float32; the reader's increment() clamps it to 0..127."""
+    d = _f32(_f32(float(tun2 & 0xFFFF) / 256.0) - 64.0)
+    return _f32(min(n1, 127.0) + d)
+
+
+def osc2_gain(u: float, p: dict, levels) -> float:
+    """as gain(), on osc 2's own level (CHAR) and depth (PD2)."""
+    return gain(u, {"pd1": p["pd2"], "lev1": p["char"]}, levels)
+
+
+def osc2_on(p: dict) -> bool:
+    return min((p["char"] & 0xFFFF) >> 8, 127) != 0
+
+
 def ramp(samples: list[float], gp: float, g: float) -> list[float]:
     """The block's samples times a gain ramped from gp to g: step = (g - gp) / 32,
     accumulated before each sample, so the last sample is at gp + 32 steps."""
@@ -292,6 +337,7 @@ def render_blocks(tables, blocks, block: int = 32, phase: int = 0,
     table_t = increment_table()
     rates, levels, rnd = rate_table(), level_table(), rnd_table()
     sc = Scanner()
+    o2 = Osc2()
     s = 0
     for note, wav1, drif, *rest in blocks:
         tun1 = rest[0] if rest else TUN1_ZERO
@@ -306,6 +352,22 @@ def render_blocks(tables, blocks, block: int = 32, phase: int = 0,
         g = gain(u, p, levels)
         if trig:
             sc.gp = g
-        out += ramp(samples, sc.gp, g)
+        mixed = ramp(samples, sc.gp, g)
         sc.gp = g
+        if osc2_on(p):
+            o2.s = glide(position(p["wav2"]), o2.s, trig)
+            pos2 = scanned(o2.s, sv, p["ofs2"])
+            tab2 = tables[slot(p["base"], len(tables))]
+            n1 = tuned(note, tun1)
+            two, o2.phase = render.render(tab2, o2.phase,
+                                          increment(detuned(n1, p["tun2"]), table_t),
+                                          pos2, block, precision)
+            g2 = osc2_gain(u, p, levels)
+            if trig:
+                o2.gp = g2
+            mixed = [_f32(a + b) for a, b in zip(mixed, ramp(two, o2.gp, g2))]
+            o2.gp = g2
+        else:
+            o2.gp = 0.0
+        out += mixed
     return out, phase

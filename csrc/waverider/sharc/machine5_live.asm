@@ -116,11 +116,11 @@ wr_t5v_loop.:
       R3 = DM(I5, M6);                  // this track's buffer; I5 -> next
       R4 = 5;
       COMP(R2, R4);
-      IF NE JUMP 0x16fba0;              // -> wr_t5v_next.
+      IF NE JUMP 0x16fba6;              // -> wr_t5v_next.
       R4 = DM(0x2de600);                // the baked directory's magic
       R2 = 0x57525431;
       COMP(R4, R2);
-      IF NE JUMP 0x16fba0;              // -> wr_t5v_next. (no directory: render nothing)
+      IF NE JUMP 0x16fba6;              // -> wr_t5v_next. (no directory: render nothing)
 
       // t, and from it every per-track address (no pointer survives the reader call)
       R0 = DM(0x2dde80);
@@ -634,6 +634,7 @@ wr_t5v_tune_low.:
 wr_t5v_tuned.:
       R12 = 0x42fe0000;                 // 127.0
       F8 = MIN(F8, F12);                // 0 <= note <= 127, finite
+      DM(0x2dde8c) = R8;                // W3: osc 1's note, for osc2.asm
       R0 = TRUNC F8;                    // k, 0..127
       R12 = R12 - R12;                  // 0: the scale of FLOAT ... BY (the stock corpus
       F1 = FLOAT R0 BY R12;             // has FLOAT only with BY or with a parallel move)
@@ -656,7 +657,7 @@ wr_t5v_tuned.:
       R4 = DM(0x2dde84);                // wr_render5's argument: the reader block
       CJUMP 0x16eb00 (DB);              // wr_render5(R4 = reader block)
       DM(I7, M7) = R2;
-      DM(I7, M7) = 0x16fb67;                 // return address - 1: wr_t5v_gain. - 1
+      DM(I7, M7) = 0x16fb6a;                 // return address - 1: wr_t5v_gain. - 1
 
       // ---- W2: the gain, ramped across the block from the last block's: step =
       // (g - gp) / 32, accumulated before each sample (live.ramp) ----
@@ -681,7 +682,7 @@ wr_t5v_gain.:
       F3 = F3 * F4;                     // step
       R5 = DM(0x2dde24);                // the block size
       R5 = PASS R5;
-      IF EQ JUMP 0x16fba0;                   // -> wr_t5v_next.
+      IF EQ JUMP 0x16fba6;                   // -> wr_t5v_next.
 .GLOBAL wr_t5v_ramp.;
 wr_t5v_ramp.:
       F1 = F1 + F3;
@@ -690,7 +691,9 @@ wr_t5v_ramp.:
       DM(I1, M6) = F0;
       R12 = 1;
       R5 = R5 - R12;
-      IF NE JUMP 0x16fb95;                   // -> wr_t5v_ramp.
+      IF NE JUMP 0x16fb98;                   // -> wr_t5v_ramp.
+      // W3: osc 2 (osc2.asm, dnfw.waverider.dsp.OSC2_SW), which comes back to wr_t5v_next
+      JUMP 0x16ebd0;                    // osc2.asm's wr_osc2
 
 .GLOBAL wr_t5v_next.;
 wr_t5v_next.:

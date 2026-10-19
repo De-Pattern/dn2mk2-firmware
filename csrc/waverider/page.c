@@ -549,6 +549,19 @@ static int table_of(int v)
     return wr_slot[v];
 }
 
+/* W3: page 2's picture, osc 2's wave: as page 1's, without the modulation markers */
+static void wave2(void *c, void *view)
+{
+    u8 f;
+    int pos = clamp_pos(GET_VALUE(view, WR_POS2_ID, &f));
+    curve(c, table_of(GET_VALUE(view, WR_TBL2_ID, &f)), pos);
+    for (int x = 0; x < WR_WIDTH; x += 2)
+        px(c, WAVE_X + x, POS_Y);
+    int m = WAVE_X + pos * (WR_WIDTH - MARK) / WR_POS_MAX;
+    for (int k = 0; k < MARK; k++)
+        column(c, m + k, POS_Y, POS_Y + 1);
+}
+
 static void wave(void *c, void *view)
 {
     int set_pos, set_tbl;
@@ -880,6 +893,8 @@ void wr_page_draw(void *view, void *canvas)
         cz_envelope(canvas, view, page);
     else if (res)
         modes(canvas, view);
+    else if (page == 1)
+        wave2(canvas, view);
     else
         wave(canvas, view);
 
@@ -895,6 +910,9 @@ void wr_page_draw(void *view, void *canvas)
         } else if (id == WR_TBL_ID) {                  /* W5: the table's name where TBL would be */
             int set_tbl;
             label = wr_table_names[table_of(heard(view, WR_TBL_ID, &set_tbl))];
+        } else if (id == WR_TBL2_ID) {                 /* W3: osc 2's */
+            u8 f;
+            label = wr_table_names[table_of(GET_VALUE(view, id, &f))];
         } else if (id == WR_MOVE_ID) {          /* W2: the scanner's shape where MOVE would be */
             u8 f;
             int v = GET_VALUE(view, id, &f) >> 8;

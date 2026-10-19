@@ -128,6 +128,18 @@ TABLE_BYTES = 16 * 512 * 2                   # 16 frames x 512 int16
 DDR_FLOOR = 0x80600000                       # nothing of ours below this in DDR
 TABLE_COUNT = len(factory.TABLES)
 
+# W3: osc 2 (docs/w3-osc2.md), one routine in two of L1's free gaps: osc2.asm after
+# reader_m5's code, osc2b.asm in the tail of PING's code span (which ping.asm does not
+# reach). Its per-voice state and its buffer in the gap after the increment table; its
+# reader block and scratch in the state block's free words.
+OSC2_CODE_DM = 0x2DD7A0
+OSC2_SW = OSC2_CODE_DM // 2                  # 0x16ebd0
+OSC2B_CODE_DM = 0x2E1A40
+OSC2B_SW = OSC2B_CODE_DM // 2                # 0x170d20
+OSC2_SCRATCH_DM = 0x2DDE8C                   # osc 1's note, LEV, g, the trigger
+OSC2_BLOCK_DM = 0x2DDEC0                     # one reader block, 8 words
+OSC2_STATE_DM, OSC2_STATE_STRIDE = 0x2DE480, 16   # phase, s, gp
+OSC2_BUF_DM = 0x2DE580                       # 32 float32
 IDLE_DM = 0x2DEA00                           # idle_load.asm, in the gap before table 0
 IDLE_SW = IDLE_DM // 2                       # 0x16f500
 IDLE_STATE_DM = 0x2DE100                     # its save area and counters (state block tail)
@@ -197,7 +209,7 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "ping", "rings", "cz")}
+                         "entry_mark", "emark_jump", "ping", "rings", "cz", "osc2", "osc2b")}
 
 
 def directory() -> bytes:
@@ -219,10 +231,13 @@ def spans() -> list[tuple[str, int, bytes]]:
     obj = objects()
     raw = [
         ("reader_m5.asm (wr_render5)", READER_DM, obj["reader"]),
+        ("osc2.asm (wr_osc2)", OSC2_CODE_DM, obj["osc2"]),
         ("RESONATOR scratch (zeros)", RINGS_SCRATCH_DM, bytes(0x200)),
         ("CZ scratch (zeros)", CZ_SCRATCH_DM, bytes(0x100)),
         ("state: save area, counters, 16 reader blocks (zeros)", STATE_DM, bytes(STATE_BYTES)),
         ("increment table, 129 float32", INC_TABLE_DM, live.table_bytes()),
+        ("osc 2 state, 16 voices x 16 bytes, then its buffer (zeros)", OSC2_STATE_DM,
+         bytes(16 * OSC2_STATE_STRIDE + 128)),
         ("wavetable directory", DIRECTORY_DM, directory()),
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
         ("block_count.asm (wr_count)", COUNT_DM, obj["block_count"]),
@@ -234,6 +249,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("W2 LEV table, 128 float32", W2_LEVEL_DM, struct.pack("<128f", *live.level_table())),
         ("W2 random table, 256 float32", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
         ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
+        ("osc2b.asm (wr_osc2b)", OSC2B_CODE_DM, obj["osc2b"]),
         ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),
         ("PING tables", PING_TABLES_DM, _ping_tables()),
         ("SHFT state: 16 tracks x 256 bytes (zeros)", SHFT_STATE_DM, bytes(16 * SHFT_STATE_STRIDE)),

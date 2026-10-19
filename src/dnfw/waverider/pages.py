@@ -69,23 +69,29 @@ SUBTITLE = "Waverider"             # where WaveTone's say "WaveTone"
 # whose range fits -- MOD (0..3) and RSET (0..2), the first plan, could not hold a
 # depth or eight shapes.
 LABELS = {238: "TUNE", 241: "LEV", 239: "POS", 252: "TBL",
-          253: "RATE", 246: "MPOS", 240: "MLEV", 256: "MOVE"}
+          253: "RATE", 246: "MPOS", 240: "MLEV", 256: "MOVE",
+          # W3 (docs/w3-osc2.md): osc 2, on records whose default leaves it silent
+          242: "DETN", 260: "LEV", 243: "POS", 257: "TBL", 250: "MPOS", 244: "MLEV"}
 
 # W2: what every list, the LFO DEST field and the header line call those records while
 # a Waverider track is active (the names are swapped in the record table at run time,
 # `wr_names` in page.c, and put back as soon as the active track is not a Waverider)
 LONG_NAMES = {238: "Tune", 241: "Wave Level", 239: "Wave Position", 252: "Wave Table",
-              253: "Scan Rate", 246: "Scan Pos Depth", 240: "Scan Lev Depth", 256: "Scan Shape"}
+              253: "Scan Rate", 246: "Scan Pos Depth", 240: "Scan Lev Depth", 256: "Scan Shape",
+              242: "Osc2 Detune", 260: "Osc2 Level", 243: "Osc2 Position", 257: "Osc2 Table",
+              250: "Osc2 Pos Depth", 244: "Osc2 Lev Depth"}
 # WaveTone's other records: Waverider reads nothing from them, so they say so
-UNUSED = (242, 243, 244, 245, 247, 248, 249, 250, 251, 254, 255, 257, 258, 259, 260, 261, 262)
+UNUSED = (245, 247, 248, 249, 251, 254, 255, 258, 259, 261, 262)
 UNUSED_LONG, UNUSED_SHORT = "Unused", "-"
 MOVE_ID = 256
+POS2_ID, TBL2_ID = 243, 257       # W3: osc 2's POS and TBL
 SHAPES = ("TRI", "SAW", "RAMP", "SQR", "RND", "S&H", "ONE", "ENV")   # live.SHAPES
 
 # the two pages, encoders A..H; 0 is an empty place
 PAGES = (
     (238, 241, 239, 252, 253, 246, 240, 256),   # OSC 1: TUNE LEV POS TBL / RATE MPOS MLEV MOVE
-    (0, 0, 0, 0, 0, 0, 0, 0),                   # OSC 2: all to come (W3)
+    (242, 260, 243, 257, 0, 250, 244, 0),       # OSC 2 (W3): DETN LEV POS TBL / - MPOS MLEV -
+                                                # (RATE and MOVE are osc 1's: one scanner)
 )
 
 # RESONATOR (machine 6, docs/rings.md): one page, on WaveTone records whose range and
@@ -218,6 +224,7 @@ def c_header() -> str:
             f"static const unsigned char cz_combos[{len(cz_live.COMBOS)}][2] = {{{combos}}};\n"
             f"static const short res_anchor[3][24] = {{{res_anchor}}};\n"
             f"#define WR_MOVE_ID {MOVE_ID}\n"
+            f"#define WR_POS2_ID {POS2_ID}\n#define WR_TBL2_ID {TBL2_ID}\n"
             f"static const char wr_shape_names[8][5] = {{{', '.join(q + x + q for x in SHAPES)}}};\n")
 
 

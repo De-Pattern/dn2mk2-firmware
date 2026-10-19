@@ -86,7 +86,10 @@ TUN1_ZERO = 0x4000              # the frame word for 0 semitones: the sound's ow
 FRAME_COPY = 0x25C48C           # where sw 0x1c2712 copies the frame image
 # W2: the scanner's controls (dnfw.waverider.live, docs/w2-scanner.md)
 LEV1, ATK, OFS1, PD1, NLEV = 30, 40, 28, 29, 43
-W2_FIELDS = {"lev1": LEV1, "atk": ATK, "ofs1": OFS1, "pd1": PD1, "nlev": NLEV}
+TUN2, WAV2, OFS2, PD2, BASE, CHAR = 31, 32, 34, 35, 44, 47     # W3: osc 2's records
+W2_FIELDS = {"lev1": LEV1, "atk": ATK, "ofs1": OFS1, "pd1": PD1, "nlev": NLEV,
+             "tun2": TUN2, "wav2": WAV2, "ofs2": OFS2, "pd2": PD2, "base": BASE, "char": CHAR}
+W3_ON = 4                       # w3_late: osc 2's LEV comes up at this block
 
 
 # -- the machine ------------------------------------------------------------------------------
@@ -297,11 +300,26 @@ def selmap_text(code: bytes, work: pathlib.Path) -> dict[int, tuple[int, str]]:
     return out
 
 
+def osc2_links_ok() -> bool:
+    """W3: the jumps between objects are addresses, not labels: machine5_live's into
+    wr_osc2, osc2's into wr_osc2b, and both of theirs back to machine5_live's wr_t5v_next."""
+    import sharc_resolve_jumps as R                      # noqa: PLC0415
+    loop = (SHARC / "machine5_live.asm").read_text(encoding="utf-8")
+    spec = json.loads((SHARC / "machine5_live.json").read_text(encoding="utf-8"))
+    nxt = dsp.LOOP_SW + spec["instruction_offsets"][R.labels(loop)["wr_t5v_next"]] // 2
+    a = (SHARC / "osc2.asm").read_text(encoding="utf-8")
+    b = (SHARC / "osc2b.asm").read_text(encoding="utf-8")
+    back = re.compile(r"JUMP (0x[0-9a-f]+);\s*// machine5_live.asm's wr_t5v_next")
+    return (f"JUMP {dsp.OSC2_SW:#x};" in loop and f"JUMP {dsp.OSC2B_SW:#x};" in a
+            and [int(x, 16) for x in back.findall(a)] == [nxt]
+            and [int(x, 16) for x in back.findall(b)] == [nxt])
+
+
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
     for name, load_sw in (("reader_m5", dsp.READER_SW), ("machine5_live", dsp.LOOP_SW),
                           ("ping", dsp.PING_SW), ("rings", dsp.RINGS_SW),
-                          ("cz", dsp.CZ_SW)):
+                          ("cz", dsp.CZ_SW), ("osc2", dsp.OSC2_SW), ("osc2b", dsp.OSC2B_SW)):
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -334,7 +352,8 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("reader_m5", "machine5_live", "ping", "rings", "cz")) and entry.type_name.startswith("8a") \
+             for n in ("reader_m5", "machine5_live", "ping", "rings", "cz", "osc2", "osc2b")) \
+        and osc2_links_ok() and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
 
@@ -415,7 +434,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("reader_m5", "machine5_live", "ping", "rings", "cz"):
+            for n in ("reader_m5", "machine5_live", "ping", "rings", "cz", "osc2", "osc2b"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
@@ -632,7 +651,22 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
             # ENV, one cycle at full RATE (50 blocks) and past it: the level follows it to 0
             # (MLEV +1) and stays there once the one-shot is done
             "w2_env": run_blocks(init, frames(overrides={WAV1: 0x3C00, ATK: 0x7F00, PD1: 0x6400,
-                                                         NLEV: 0x7F00}), W2_ENV_BLOCKS)}
+                                                         NLEV: 0x7F00}), W2_ENV_BLOCKS),
+            # W3: osc 2 a fifth up on another table, swept by the shared scanner (MPOS2 -0.5)
+            # with its level against it (MLEV2 +1)
+            "w3_osc2": run_blocks(init, frames(overrides={WAV1: 0x3C00, ATK: 0x7F00, OFS1: 0x4B00,
+                                                          TUN2: TUN1_ZERO + 7 * 256, WAV2: 0x2000,
+                                                          BASE: 0x7F00, CHAR: 0x6400, OFS2: 0x1900,
+                                                          PD2: 0x6400}), blocks),
+            # the same sound with osc 2 off: the control
+            "w3_off": run_blocks(init, frames(overrides={WAV1: 0x3C00, ATK: 0x7F00, OFS1: 0x4B00,
+                                                         TUN2: TUN1_ZERO + 7 * 256, WAV2: 0x2000,
+                                                         BASE: 0x7F00, CHAR: 0, OFS2: 0x1900,
+                                                         PD2: 0x6400}), blocks),
+            # osc 2 turned up with no new note: it ramps in from silence; DETN far down
+            "w3_late": run_blocks(init, lambda b: base_frame(sound, machines, trigger=(b == 1), overrides={
+                WAV1: 0x7800, TUN2: TUN1_ZERO - 30 * 256, WAV2: 0x7800,
+                CHAR: 0 if b < W3_ON else 0x7F00}).to_bytes(), blocks)}
     ok_runs = all(r["ok"] for r in runs.values())
     n, mism = {}, {}
     for k, r in runs.items():
@@ -661,6 +695,16 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
         glide_want.append(s_)
     counters = [x[0]["trig"] for x in i["t5_inputs"] if 0 in x] if i["ok"] else []
     ws, wr, we = runs["w2_scan"], runs["w2_rnd"], runs["w2_env"]
+    w3, w3off, w3late = runs["w3_osc2"], runs["w3_off"], runs["w3_late"]
+    w3_series = track_series(w3, 0) if w3["ok"] else []
+    w3off_series = track_series(w3off, 0) if w3off["ok"] else []
+    late = track_series(w3late, 0) if w3late["ok"] else []
+    late_base = track_series(runs["pos120"], 0) if runs["pos120"]["ok"] else []
+    # the w3_late run is the pos120 sound until W3_ON; after it, osc 2's first block ramps in
+    late_same_before = bool(late) and late[:BLOCK * W3_ON] == late_base[:BLOCK * W3_ON]
+    late_diff_after = bool(late) and late[BLOCK * W3_ON:] != late_base[BLOCK * W3_ON:]
+    late_first = ([a - b for a, b in zip(late[BLOCK * W3_ON:BLOCK * (W3_ON + 1)],
+                                         late_base[BLOCK * W3_ON:BLOCK * (W3_ON + 1)])] if late else [])
     scan_pos = [blk.get(0)[3] for blk in ws["reader_blocks"] if blk.get(0)] if ws["ok"] else []
     rnd_pos = [blk.get(0)[3] for blk in wr["reader_blocks"] if blk.get(0)] if wr["ok"] else []
     env = track_series(we, 0) if we["ok"] else []
@@ -680,6 +724,9 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
          "trig_bits_init_run": counters,
          "w2_scan_pos_per_block": scan_pos, "w2_rnd_pos_per_block": rnd_pos,
          "w2_env_peak_first_blocks": env_head, "w2_env_peak_last_3_blocks": env_tail,
+         "w3_peak": V.peak(w3_series) if w3_series else None,
+         "w3_off_peak": V.peak(w3off_series) if w3off_series else None,
+         "w3_late_first_block_osc2_first_last": (late_first[0], late_first[-1]) if late_first else None,
          "machine_peak": V.peak(track_series(i, 0)) if i["ok"] else None,
          "amp_in_peak": V.peak(i["amp_in"]) if i["ok"] else None,
          "amp_out_peak": V.peak(i["amp_out"][settle:]) if i["ok"] else None,
@@ -735,6 +782,11 @@ def step_voice(init, sound, machines, blocks, tables) -> dict:
             len(rnd_pos) == blocks and rnd_pos[1] != rnd_pos[W2_RETRIG],
         "W2: ENV with MLEV +1 is audible after the note and silent once the one-shot is done":
             bool(env_head) and env_head > 0.02 and env_tail == 0.0,
+        "W3: osc 2 adds to osc 1 (the w3 run differs from the same sound with osc 2's LEV at 0)":
+            bool(w3_series) and bool(w3off_series) and w3_series != w3off_series,
+        "W3: osc 2 at LEV 0 leaves osc 1 bit for bit as before (w3_late's first blocks equal pos120's), "
+        "and turned up with no new note it is heard (its ramp from 0 is held to the model above)":
+            late_same_before and late_diff_after,
         "control: no trigger is silent at the amp's output (peak < 0.01)":
             n["silent_amp_out_peak"] is not None and n["silent_amp_out_peak"] < 0.01,
     }
