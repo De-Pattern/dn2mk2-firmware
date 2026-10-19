@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.8** | 2026-10-18 | Everything in v0.7 (CZ PHASE, RESONATOR, SHIFT, PING, Waverider), sized to fit the USB upgrade: Waverider has 9 tables (BITS, PHAS out) | `builds/v0.8-CZ/` | yes |
+| **v0.9** | 2026-10-19 | CZ's release: the DCW envelope runs on past its sustain step at note-off, as on a real CZ | `builds/v0.9-CZ-release/` | yes |
+| v0.8 | 2026-10-18 | Everything in v0.7 (CZ PHASE, RESONATOR, SHIFT, PING, Waverider), sized to fit the USB upgrade: Waverider has 9 tables (BITS, PHAS out) | `builds/v0.8-CZ/` | yes |
 | v0.7 | 2026-10-18 | CZ PHASE machine (Casio CZ phase distortion), 8-step DCW envelope on pages 2–3, up to 6 voices | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
 | v0.6 | 2026-10-18 | RESONATOR machine (Rings-style modal resonator), up to 4 voices | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
 | v0.5 | 2026-10-18 | SHIFT filter type (frequency shifter) beside PING; DSP memory packed tighter | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
@@ -42,6 +43,33 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.9 — CZ release
+
+`DN2mod_v0.9_CZ-release_OS1.11.syx`
+sha256 `850bd00abd6f9f84c112e7ac7d6681339bdcb9e2542286337357e9f7c4a51c2d`
+Gate: CLEARED TO FLASH, 2026-10-19 (USB size 2,076,863 of 2,097,152). Source: commit
+`b782505`. Docs: `docs/cz.md` ("The release").
+
+**Adds.** CZ PHASE's DCW envelope now behaves like the CZ's at key-up: it holds on
+the SUS step while the note is held, and on note-off runs on from the step after SUS
+to step 8 (a key-up before SUS is reached jumps straight to the release). NOSUS runs
+all eight steps as before. Everything else is as v0.8.
+
+**Test** (after v0.8's list):
+1. CZ PHASE, SUS2, short R3–R8, L3 high, L4–L8 falling to 0. Hold a note: the tone
+   holds after its first sweep. Let go: the second part of the sweep plays as the AMP
+   release fades it. (Give the AMP page a release long enough to hear it.)
+2. Same with sequencer trigs of different lengths: longer trigs hold longer.
+3. Release before the sweep reaches SUS: it jumps to the release part.
+4. NOSUS: the whole sweep runs whatever the note length.
+
+**Known:** the note-off is the frame flag that releases the DN2's ADSR amp envelope
+(measured in the DSP emulator); that the ColdFire sends it for a CZ track as for
+WaveTone is for the instrument to confirm. If it does not, the envelope simply holds
+on SUS as in v0.8.
 
 ---
 
