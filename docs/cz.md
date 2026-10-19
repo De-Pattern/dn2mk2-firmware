@@ -96,11 +96,13 @@ Waverider and RESONATOR do. TBL2 (251) is unused.
 
 - One wave choice for both lines, and one DCW envelope: 25 parameters (above).
 - The DCA is the DN2's AMP page, the pitch envelope its LFOs.
-- **The release.** A trigger restarts the envelope from step 1; it runs to the sustain
-  step and holds there until the next trigger (with NOSUS it runs all eight steps and
-  stays on step 8's level). A CZ goes on past sustain when the key is let go; the frame's
-  note-off has not been located yet (a probe of the four trigger masks ran out of time),
-  so the steps after sustain do not run. The AMP envelope's release still ends the note.
+- **The release** (v0.9). A trigger restarts the envelope from step 1; it runs to the
+  sustain step and holds. The note-off sends it on to the step after sustain, from
+  wherever it is (a key-up before sustain jumps straight to the release, as on the CZ),
+  and it runs to step 8 and stays there; END is fixed at step 8. The note-off is frame
+  mask 36, bit t: measured in the SHARC runner, it is the mask that releases the DN2's
+  own ADSR amp envelope (masks 38 and 40 do nothing to it). Whether the ColdFire sends
+  it for a CZ track as it does for WaveTone is for the instrument to show.
 - Line 2's detune is +-1 semitone, not the CZ's octave / note / fine.
 
 **DSP.** `cz.asm` (868 instructions, 3,528 B) at `0x2e6000` (sw `0x173000`), entered
