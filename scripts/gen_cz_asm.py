@@ -21,6 +21,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import gen_ping_asm as G                             # noqa: E402
+import voice_alloc_asm as VA                         # noqa: E402
 from dnfw.cz import live as CL                       # noqa: E402
 from dnfw.waverider import dsp                       # noqa: E402
 
@@ -39,10 +40,11 @@ WORDS = ("t", "count", "buf", "sbase", "i146", "sel", "mod", "sus", "dcw", "wa",
 A = {w: SC + 4 * k for k, w in enumerate(WORDS)}
 LV = SC + 0x80                                        # the eight levels, then the eight rates
 RT = LV + 0x20
-assert A[WORDS[-1]] < LV and RT + 0x20 <= SC + 0x100
+E_ADDR = RT + 0x20                                    # 16 slot ages (dnfw.voices)
+assert A[WORDS[-1]] < LV and E_ADDR + 0x40 <= SC + 0x100
 # per-voice state words (dnfw.cz.live.Voice), off I2, in DDR
-PH1, PH2, PAR1, PAR2, STEP, VV, NI, NJ, ACTIVE = range(9)
-STATE_WORDS = 9
+PH1, PH2, PAR1, PAR2, STEP, VV, NI, NJ, ACTIVE, AGE = range(10)
+STATE_WORDS = 10
 LOADED = (("ph1", PH1), ("ph2", PH2), ("par1", PAR1), ("par2", PAR2), ("step", STEP),
           ("v", VV), ("ni", NI), ("nj", NJ))
 FRAME_BASE = 0x25C48C
@@ -575,9 +577,7 @@ def release() -> None:
     emit("      R12 = 8;")
     emit("      COMP(R1, R12);")
     jump("GE", norel)
-    ld(0, "sbase")
-    emit("      I2 = R0;")
-    sld(0, STEP)
+    sld(0, STEP)                                  # I2: this voice's state, since the track's start
     emit("      COMP(R0, R1);")
     jump("GT", norel)
     emit("      R12 = 1;")
@@ -739,9 +739,7 @@ def samples() -> None:
     emit("      R0 = R0 - R12;")
     st(0, "cnt")
     jump("NE", "wr_z_samp")
-    ld(0, "sbase")
-    emit("      I2 = R0;")
-    for w, k in LOADED:
+    for w, k in LOADED:                           # I2 is untouched by the loop
         ld(0, w)
         sst(0, k)
 
@@ -766,11 +764,11 @@ def build() -> str:
     emit("      I5 = R0;".ljust(40) + "// the scratch block (I5 is restored at wr_ping's end)")
     emit("      R0 = R0 - R0;")
     st(0, "t")
-    st(0, "count")
     emit(f"      R0 = DM({G.SAVE + 0x24:#x});".ljust(40) + "// the block size")
     emit("      R12 = 32;")
     emit("      COMP(R0, R12);")
     jump("NE", "wr_z_done")
+    # every slot's age is already in E_ADDR: RESONATOR's entry, just before, wrote it
     place("wr_z_track")
     ld(9, "t")
     G.record_base()
@@ -790,10 +788,8 @@ def build() -> str:
     emit("      I1 = R12;")
     emit("      R0 = DM(0, I1);")
     st(0, "buf")
-    ld(0, "count")
-    emit(f"      R12 = {CL.MAX_VOICES};")
-    emit("      COMP(R0, R12);")
-    jump("GE", "wr_z_capped")
+    VA.rank(E_ADDR, CL.MAX_VOICES, "wr_z_quiet", "wr_z_capped")
+    sst(3, AGE)                                   # I2 is still this voice's state
     # trigger
     emit("      R0 = DM(0x25c4ac);")
     emit("      R0 = LSHIFT R0 BY -16;".ljust(40) + "// TRIG_NOTE")
@@ -816,10 +812,6 @@ def build() -> str:
     controls()
     release()
     samples()
-    ld(0, "count")
-    emit("      R12 = 1;")
-    emit("      R0 = R12 + R0;")
-    st(0, "count")
     jump("", "wr_z_next")
 
     wave_code()

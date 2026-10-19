@@ -10,7 +10,7 @@ T = L.tables()
 def _run(words, note=60.0, blocks=40, trig_at=(0,)):
     v, out = L.Voice(), []
     for b in range(blocks):
-        o, _ = L.block(v, 0, words, note, b in trig_at, T)
+        o, _ = L.block(v, True, words, note, b in trig_at, T)
         out += o
     return v, out
 
@@ -27,7 +27,7 @@ def _wave_word(i):
 
 def test_rest_is_silent():
     v = L.Voice()
-    o, did = L.block(v, 0, dict(L.DEFAULTS), 60.0, False, T)
+    o, did = L.block(v, True, dict(L.DEFAULTS), 60.0, False, T)
     assert o == [0.0] * 32 and not did
 
 
@@ -85,7 +85,7 @@ def test_no_sustain_runs_all_eight_steps():
 def test_a_trigger_restarts_the_envelope():
     words = {**L.DEFAULTS, L.P_SUS: 0x7800}
     v, _ = _run(words, blocks=30)
-    L.block(v, 0, words, 60.0, True, T)
+    L.block(v, True, words, 60.0, True, T)
     assert v.step == 0
 
 
@@ -93,7 +93,7 @@ def test_pairs_alternate_cycle_by_cycle():
     v = L.Voice()
     words = {**L.DEFAULTS, L.P_WAVE: _wave_word(8)}             # SAW then SQUARE
     for b in range(40):
-        L.block(v, 0, words, 60.0, b == 0, T)
+        L.block(v, True, words, 60.0, b == 0, T)
     assert v.par1 in (0, 1)
     c = L.controls(words, 60.0, T)
     assert (c["a"], c["b"]) == (0, 1)
@@ -101,7 +101,7 @@ def test_pairs_alternate_cycle_by_cycle():
 
 def test_voices_past_the_cap_are_silent():
     v = L.Voice()
-    o, did = L.block(v, L.MAX_VOICES, dict(L.DEFAULTS), 60.0, True, T)
+    o, did = L.block(v, False, dict(L.DEFAULTS), 60.0, True, T)
     assert o == [0.0] * 32 and not did and v.active == 0
 
 
@@ -134,17 +134,36 @@ def test_note_off_sends_the_envelope_past_sustain():
              L.P_SUS: int(1.5 * 0x7800 / 9)}                    # sustain on step 2
     v = L.Voice()
     for b in range(30):
-        L.block(v, 0, words, 60.0, b == 0, T)
+        L.block(v, True, words, 60.0, b == 0, T)
     assert v.step == 1                                           # held
-    L.block(v, 0, words, 60.0, False, T, off=True)
+    L.block(v, True, words, 60.0, False, T, off=True)
     assert v.step >= 2                                           # released
     for b in range(80):
-        L.block(v, 0, words, 60.0, False, T)
+        L.block(v, True, words, 60.0, False, T)
     assert v.step == 7
 
 
 def test_note_off_with_a_trigger_is_a_new_note():
     words = {**L.DEFAULTS, L.P_SUS: int(1.5 * 0x7800 / 9)}
     v = L.Voice()
-    L.block(v, 0, words, 60.0, True, T, off=True)
+    L.block(v, True, words, 60.0, True, T, off=True)
     assert v.step == 0
+
+
+def test_the_newest_voices_render_and_the_oldest_is_stolen():
+    from dnfw import voices
+    vs = [L.Voice() for _ in range(8)]
+    for b in range(16):
+        trig = {b // 2} if b % 2 == 0 else set()
+        keep = voices.plan({t: (t in trig, bool(v.active), v.age) for t, v in enumerate(vs)},
+                           L.MAX_VOICES)
+        did = {t for t, v in enumerate(vs)
+               if L.block(v, keep[t], dict(L.DEFAULTS), 60.0, t in trig, T)[1]}
+    assert did == {2, 3, 4, 5, 6, 7} and vs[0].active == 0 and vs[1].active == 0
+
+
+def test_voice_plan_ranks_by_age_then_slot():
+    from dnfw import voices
+    p = voices.plan({0: (False, True, 10), 1: (True, False, 0), 2: (True, False, 0),
+                     3: (False, False, 0)}, 2)
+    assert p == {0: False, 1: True, 2: True, 3: False}

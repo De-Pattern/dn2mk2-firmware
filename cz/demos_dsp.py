@@ -59,13 +59,14 @@ def render(events, seconds, words, voices=6, dca=None):
     lines = np.zeros((voices, n))
     for b in range(n_blocks):
         hits = {s: (note, gate) for s, note, gate in trig_at.get(b, [])}
-        rendered = 0
+        from dnfw import voices as VOICES
+        keep = VOICES.plan({k: (k in hits, bool(x.active), x.age) for k, x in enumerate(slots)},
+                           L.MAX_VOICES)
         for s, v in enumerate(slots):
             if s in hits:
                 notes[s], gates[s] = float(hits[s][0]), hits[s][1]
                 starts[s] = b * B
-            o, did = L.block(v, rendered, words, notes[s], s in hits, T)
-            rendered += did
+            o, did = L.block(v, keep[s], words, notes[s], s in hits, T)
             lines[s, b * B:(b + 1) * B] = o
     out = np.zeros(n)
     for s in range(voices):

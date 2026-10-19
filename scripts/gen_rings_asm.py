@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import gen_ping_asm as G                             # noqa: E402
+import voice_alloc_asm as VA                         # noqa: E402
 from dnfw.rings import live as RL                    # noqa: E402
 from dnfw.waverider import dsp                       # noqa: E402
 
@@ -38,12 +39,13 @@ SC = dsp.RINGS_SCRATCH_DM
 X, ACC, W0 = SC, SC + 0x80, SC + 0x100
 WORDS = ("t", "count", "pitch", "frac", "a0addr", "l0", "kexp", "pos", "mix", "hit", "lev",
          "tilt_g", "minc", "mnorm", "nlp_a", "n", "tilt", "peak", "buf", "b", "semi", "q",
-         "cw", "sw", "g", "cnt", "sbase", "i146", "asum")
+         "cw", "sw", "g", "cnt", "sbase", "i146", "asum", "j")
 A = {w: W0 + 4 * k for k, w in enumerate(WORDS)}
-assert A[WORDS[-1]] < SC + 0x200
+E_ADDR = SC + 0x180                                   # 16 slot ages (dnfw.voices)
+assert A[WORDS[-1]] < E_ADDR and E_ADDR + 64 <= SC + 0x200
 # per-voice state words (dnfw.rings.live.Voice), off I2 / I3
-Y1, Y2, ACTIVE, EXC, NENV, NLP, NI, NJ = 0, RL.MODES, 48, 49, 50, 51, 52, 53
-STATE_WORDS = 54
+Y1, Y2, ACTIVE, EXC, NENV, NLP, NI, NJ, AGE = 0, RL.MODES, 48, 49, 50, 51, 52, 53, 54
+STATE_WORDS = 55
 FRAME_BASE = 0x25C48C
 
 
@@ -53,11 +55,11 @@ def imm(v: int) -> str:
 
 
 def ld(reg, w):
-    emit(f"      R{reg} = DM({A[w]:#x});".ljust(40) + f"// {w}")
+    emit(f"      R{reg} = DM({(A[w] - W0) // 4}, I5);".ljust(40) + f"// {w}")
 
 
 def st(reg, w):
-    emit(f"      DM({A[w]:#x}) = R{reg};".ljust(40) + f"// {w}")
+    emit(f"      DM({(A[w] - W0) // 4}, I5) = R{reg};".ljust(40) + f"// {w}")
 
 
 def interp_at(table: str, fx: int, out: int) -> None:
@@ -169,13 +171,18 @@ def build() -> str:
     emit("")
     emit(".GLOBAL wr_rings.;")
     emit("wr_rings.:")
+    emit(f"      R0 = {W0:#x};")
+    emit("      I5 = R0;".ljust(40) + "// the scratch words (I5 is restored at wr_ping's end)")
     emit("      R0 = R0 - R0;")
     st(0, "t")
-    st(0, "count")
     emit(f"      R0 = DM({G.SAVE + 0x24:#x});".ljust(40) + "// the block size")
     emit("      R12 = 32;")
     emit("      COMP(R0, R12);")
     jump("NE", "wr_r_done")
+    import gen_cz_asm as CZA                         # noqa: PLC0415  (CZ's ages too)
+    VA.ages(((RL.MACHINE_TYPE, dsp.RINGS_STATE_DDR, 8, ACTIVE, AGE, E_ADDR),
+             (CZA.CL.MACHINE_TYPE, dsp.CZ_STATE_DDR, 6, CZA.ACTIVE, CZA.AGE, CZA.E_ADDR)),
+            ld, st, "j")
     place("wr_r_track")
     ld(9, "t")
     G.record_base()
@@ -195,10 +202,8 @@ def build() -> str:
     emit("      I1 = R12;")
     emit("      R0 = DM(0, I1);")
     st(0, "buf")
-    ld(0, "count")
-    emit(f"      R12 = {RL.MAX_VOICES};")
-    emit("      COMP(R0, R12);")
-    jump("GE", "wr_r_capped")
+    VA.rank(E_ADDR, RL.MAX_VOICES, "wr_r_quiet", "wr_r_capped")
+    sst(3, AGE)                                   # I2 is still this voice's state
     # trigger
     emit("      R0 = DM(0x25c4ac);")
     emit("      R0 = LSHIFT R0 BY -16;".ljust(40) + "// TRIG_NOTE")
@@ -628,10 +633,6 @@ def build() -> str:
     jump("GE", alive)
     zero_state()
     place(alive)
-    ld(0, "count")
-    emit("      R12 = 1;")
-    emit("      R0 = R12 + R0;")
-    st(0, "count")
     jump("", "wr_r_next")
 
     place("wr_r_capped")

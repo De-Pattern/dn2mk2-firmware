@@ -10,14 +10,14 @@ T = L.tables()
 def _run(words, note=60.0, blocks=60, trig_at=(0,)):
     v, out = L.Voice(), []
     for b in range(blocks):
-        o, _ = L.block(v, 0, words, note, b in trig_at, T)
+        o, _ = L.block(v, True, words, note, b in trig_at, T)
         out += o
     return v, out
 
 
 def test_rest_is_silent_and_costs_nothing():
     v = L.Voice()
-    o, did = L.block(v, 0, dict(L.DEFAULTS), 60.0, False, T)
+    o, did = L.block(v, True, dict(L.DEFAULTS), 60.0, False, T)
     assert o == [0.0] * 32 and not did
 
 
@@ -46,7 +46,7 @@ def test_voice_goes_idle_after_a_short_decay():
 
 def test_voices_past_the_cap_are_silent():
     v = L.Voice()
-    o, did = L.block(v, L.MAX_VOICES, dict(L.DEFAULTS), 60.0, True, T)
+    o, did = L.block(v, False, dict(L.DEFAULTS), 60.0, True, T)
     assert o == [0.0] * 32 and not did and v.active == 0
 
 

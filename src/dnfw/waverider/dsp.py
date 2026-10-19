@@ -105,7 +105,7 @@ SHFT_TABLES_DM = SHFT_STATE_DM + 16 * SHFT_STATE_STRIDE      # 0x2e4b00
 # loop's counters) in the reader span's tail; its tables (dnfw.rings.live) and its 16
 # voices' state in DDR (the state zeros: a fill block), read once a mode a block.
 # (v0.6 had the scratch at 0x2e6400 and the tables at 0x2e6600; CZ took that room.)
-RINGS_CODE_DM, RINGS_CODE_SPAN = 0x2E5300, 0xD00
+RINGS_CODE_DM, RINGS_CODE_SPAN = 0x2E5300, 0xE40
 RINGS_SW = RINGS_CODE_DM // 2                                # 0x172980
 RINGS_SCRATCH_DM = 0x2DDB00                                  # after reader_m5's code + padding
 RINGS_STATE_DDR, RINGS_STATE_STRIDE = 0x81200000, 256
@@ -115,8 +115,8 @@ RINGS_TABLES_DDR = RINGS_STATE_DDR + 16 * RINGS_STATE_STRIDE  # 0x81201000
 # instrument; a scratch block in the reader span's tail; its 16 voices' state and its
 # tables in DDR
 CZ_SCRATCH_DM = RINGS_SCRATCH_DM + 0x200                     # 0x2ddd00
-CZ_CODE_DM = RINGS_CODE_DM + RINGS_CODE_SPAN                 # 0x2e6000
-CZ_SW = CZ_CODE_DM // 2                                      # 0x173000
+CZ_CODE_DM = RINGS_CODE_DM + RINGS_CODE_SPAN                 # 0x2e6140
+CZ_SW = CZ_CODE_DM // 2                                      # 0x1730a0 (0x173000 until v0.10)
 CZ_STATE_DDR, CZ_STATE_STRIDE = 0x81202000, 64
 CZ_TABLES_DDR = CZ_STATE_DDR + 16 * CZ_STATE_STRIDE          # 0x81202400
 

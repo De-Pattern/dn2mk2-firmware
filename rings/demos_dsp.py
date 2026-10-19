@@ -28,12 +28,13 @@ def render(events, seconds, words, voices=4):
     out = np.zeros(n_blocks * B)
     for b in range(n_blocks):
         hits = dict(trig_at.get(b, []))
-        rendered = 0
+        from dnfw import voices as VOICES
+        keep = VOICES.plan({k: (k in hits, bool(x.active), x.age) for k, x in enumerate(slots)},
+                           L.MAX_VOICES)
         for s, v in enumerate(slots):
             if s in hits:
                 notes[s] = float(hits[s])
-            o, did = L.block(v, rendered, words, notes[s], s in hits, T)
-            rendered += did
+            o, did = L.block(v, keep[s], words, notes[s], s in hits, T)
             out[b * B:(b + 1) * B] += o
     return out
 

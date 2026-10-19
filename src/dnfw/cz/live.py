@@ -41,6 +41,7 @@ from __future__ import annotations
 import math
 import struct
 
+from .. import voices
 from ..ping import live as P
 from ..shft import live as S
 from ..waverider import live as W
@@ -156,6 +157,7 @@ class Voice:
         self.v = 0.0
         self.ni = self.nj = 0
         self.active = 0
+        self.age = 0                     # blocks since the trigger (dnfw.voices)
 
 
 def _word_knob(word: int, lo: int, span: int) -> float:
@@ -273,17 +275,20 @@ def _advance(ph: float, par: int, inc: float) -> tuple[float, int]:
     return ph, par
 
 
-def block(v: Voice, rendered: int, words: dict, note: float, trig: bool,
+def block(v: Voice, keep: bool, words: dict, note: float, trig: bool,
           T: dict | None = None, off: bool = False) -> tuple[list[float], bool]:
-    """One 32-sample block of a type-7 slot. RENDERED: how many type-7 voices this block
-    has rendered before this one (over MAX_VOICES: rest and silence). Silent until the
-    slot's first trigger. OFF: the frame's note-off for the slot (mask 36), which sends
+    """One 32-sample block of a type-7 slot. KEEP: whether it is among the newest
+    MAX_VOICES (dnfw.voices.plan); a triggered or active slot that is not is stolen (to
+    rest, silent). Silent until the slot's first trigger. OFF: the frame's note-off for the slot (mask 36), which sends
     the envelope on past its sustain step, as a CZ's key-up does; a trigger in the same
     block wins. -> (the 32 samples, whether this voice rendered)."""
     T = T or tables()
-    if rendered >= MAX_VOICES:
+    if not (trig or v.active):
+        return [0.0] * BLOCK, False
+    if not keep:
         v.__init__()
         return [0.0] * BLOCK, False
+    v.age = voices.age_of(trig, v.active, v.age)
     if trig:
         v.ph1 = v.ph2 = 0.0
         v.par1 = v.par2 = 0

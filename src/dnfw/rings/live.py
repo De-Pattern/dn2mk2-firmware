@@ -41,6 +41,7 @@ from __future__ import annotations
 import math
 import struct
 
+from .. import voices
 from ..ping import live as P
 from ..shft import live as S
 from ..waverider import live as W
@@ -141,6 +142,7 @@ class Voice:
         self.ni = 0                      # the noise: two walks through W2's random table,
         self.nj = 0                      # 256 and 251 long, the second read from the top
                                          # (rnd[ni] - rnd[255 - nj]: a period of 64,256)
+        self.age = 0                     # blocks since the trigger (dnfw.voices)
 
 
 def _knob(word: int, inv: float) -> float:
@@ -228,14 +230,18 @@ def exciter(v: Voice, c: dict, T: dict) -> list[float]:
     return out
 
 
-def block(v: Voice, rendered: int, words: dict[int, int], note: float, trig: bool,
+def block(v: Voice, keep: bool, words: dict[int, int], note: float, trig: bool,
           T: dict | None = None) -> tuple[list[float], bool]:
-    """One block of a type-6 slot. RENDERED: how many type-6 voices this block has
-    rendered before this one. -> (the 32 samples, whether this voice rendered)."""
+    """One block of a type-6 slot. KEEP: whether it is among the newest MAX_VOICES
+    (dnfw.voices.plan); a triggered or active slot that is not is stolen (to rest,
+    silent). -> (the 32 samples, whether this voice rendered)."""
     T = T or tables()
-    if rendered >= MAX_VOICES:
+    if not (trig or v.active):
+        return [0.0] * BLOCK, False
+    if not keep:
         v.__init__()
         return [0.0] * BLOCK, False
+    v.age = voices.age_of(trig, v.active, v.age)
     if trig:
         v.active, v.exc, v.nenv, v.nlp = 1, 0, 1.0, 0.0
     if not v.active:
