@@ -102,3 +102,28 @@ def test_the_jumps_between_ping_and_gran_land_on_their_labels():
     assert [int(x, 16) for x in back.findall(g)] == [nxt]
     gs = json.loads((SHARC / "gran.json").read_text(encoding="utf-8"))
     assert int(gs["load_sw"], 16) == dsp.GRAN_SW
+
+
+def test_every_generated_asm_is_what_its_generator_writes_now():
+    """v0.10's gate caught RESONATOR and CZ still reading SHFT's tables from L1 after the
+    tables moved to DDR: their asm had not been regenerated. Each generated source must
+    equal its generator's output today, branch targets aside (the resolver fills those)."""
+    import importlib
+    lit = re.compile(r"(JUMP\s+)0x[0-9a-f]+;|(=\s*)0x[0-9a-f]+(;\s*// return address)")
+
+    def norm(text):
+        return lit.sub(lambda m: (m.group(1) or m.group(2)) + "0x0;" + (m.group(3) or "")[1:], text)
+    for gen, name in (("gen_ping_asm", "ping"), ("gen_rings_asm", "rings"), ("gen_cz_asm", "cz"),
+                      ("gen_gran_asm", "gran")):
+        mod = importlib.import_module(gen)
+        import gen_ping_asm
+        gen_ping_asm.n_label[0] = 0                     # labels count from a fresh run's
+        built = mod.build()
+        built = built[0] if isinstance(built, tuple) else built
+        assert norm(built) == norm((SHARC / f"{name}.asm").read_text(encoding="utf-8")), name
+    import gen_osc2_asm
+    import gen_ping_asm
+    gen_ping_asm.n_label[0] = 0
+    a, b = gen_osc2_asm.build()
+    assert norm(a) == norm((SHARC / "osc2.asm").read_text(encoding="utf-8"))
+    assert norm(b) == norm((SHARC / "osc2b.asm").read_text(encoding="utf-8"))

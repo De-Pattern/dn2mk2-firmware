@@ -961,7 +961,7 @@ wr_z_cos.:
       F1 = FLOAT R0 BY R12;
       F1 = F9 - F1;                     // f
       R0 = LSHIFT R0 BY 2;
-      R12 = 0x2e4b00;                   // sin
+      R12 = -0x7edee000;                // sin (0x81212000, DDR)
       R0 = R12 + R0;
       I1 = R0;
       R2 = DM(0, I1);
@@ -996,7 +996,7 @@ wr_z_res.:
       F1 = FLOAT R0 BY R12;
       F1 = F8 - F1;                     // f
       R0 = LSHIFT R0 BY 2;
-      R12 = 0x2e4b00;                   // sin
+      R12 = -0x7edee000;                // sin (0x81212000, DDR)
       R0 = R12 + R0;
       I1 = R0;
       R2 = DM(0, I1);

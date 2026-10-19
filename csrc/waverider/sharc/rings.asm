@@ -561,7 +561,7 @@ wr_p_rgo_25.:
       F1 = FLOAT R0 BY R12;
       F1 = F5 - F1;
       R0 = LSHIFT R0 BY 2;
-      R12 = 0x2e4b00;                   // sin
+      R12 = -0x7edee000;                // sin
       R0 = R12 + R0;
       I1 = R0;
       R2 = DM(0, I1);
@@ -777,7 +777,7 @@ wr_r_mode.:
       F1 = FLOAT R0 BY R12;
       F1 = F10 - F1;
       R0 = LSHIFT R0 BY 2;
-      R12 = 0x2e4b00;                   // sin
+      R12 = -0x7edee000;                // sin
       R0 = R12 + R0;
       I1 = R0;
       R2 = DM(0, I1);
@@ -887,7 +887,7 @@ wr_r_modes_done.:
       F1 = FLOAT R0 BY R12;
       F1 = F8 - F1;
       R0 = LSHIFT R0 BY 2;
-      R12 = 0x2e5008;                   // pow2
+      R12 = -0x7ededaf8;                // pow2
       R0 = R12 + R0;
       I1 = R0;
       R2 = DM(0, I1);
