@@ -12,9 +12,11 @@ noise-modulated). The DCA is the DN2's own AMP envelope; the machine's output is
 0.5 a line.
 
 **The envelope and the gate.** A trigger restarts DCW at 0 from step 1. It runs step
-by step to the sustain step and holds there until the next trigger; with no sustain
-step it runs all eight and stays at step 8's level. (The CZ goes on past sustain at
-note-off; the frame's note-off is not yet located, `docs/cz.md`.)
+by step to the sustain step and holds there; the note-off (frame mask 36, bit t: the
+mask that releases the DN2's own ADSR amp envelope, measured 2026-10-18) sends it on
+from wherever it is to the step after sustain, and it runs to step 8 and stays at its
+level. With no sustain step it runs all eight regardless. A key-up before the sustain
+step is reached jumps to the release, as on the CZ.
 
 **Controls**, frame words (`0x25c48c + 218 + 2 (p - 25) + 146 t`) on WaveTone's records:
 
@@ -272,10 +274,12 @@ def _advance(ph: float, par: int, inc: float) -> tuple[float, int]:
 
 
 def block(v: Voice, rendered: int, words: dict, note: float, trig: bool,
-          T: dict | None = None) -> tuple[list[float], bool]:
+          T: dict | None = None, off: bool = False) -> tuple[list[float], bool]:
     """One 32-sample block of a type-7 slot. RENDERED: how many type-7 voices this block
     has rendered before this one (over MAX_VOICES: rest and silence). Silent until the
-    slot's first trigger. -> (the 32 samples, whether this voice rendered)."""
+    slot's first trigger. OFF: the frame's note-off for the slot (mask 36), which sends
+    the envelope on past its sustain step, as a CZ's key-up does; a trigger in the same
+    block wins. -> (the 32 samples, whether this voice rendered)."""
     T = T or tables()
     if rendered >= MAX_VOICES:
         v.__init__()
@@ -288,6 +292,8 @@ def block(v: Voice, rendered: int, words: dict, note: float, trig: bool,
     if not v.active:
         return [0.0] * BLOCK, False
     c = controls(words, note, T)
+    if off and not trig and c["sus"] < 8 and v.step <= c["sus"]:
+        v.step = min(c["sus"] + 1, 7)                            # key-up: on to the release
     out = []
     for _ in range(BLOCK):
         e = envelope(v, c)

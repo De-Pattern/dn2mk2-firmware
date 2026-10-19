@@ -1083,7 +1083,7 @@ def _cz_sus_word(step: int) -> int:
     return int((step + 0.5) * 0x7800 / 9)
 
 
-def run_cz(init, sound, machines, blocks, words, others=None, trig_every=0):
+def run_cz(init, sound, machines, blocks, words, others=None, trig_every=0, off_at=None):
     """WORDS = {track: frame words (param slot -> 16-bit)} for the machine-7 tracks (track
     0 among them), the rest OTHERS ({track: machine}); triggered on block 1 (and every
     TRIG_EVERY blocks after, if set). Taps at wr_cz's entry: each track's buffer, note,
@@ -1094,12 +1094,14 @@ def run_cz(init, sound, machines, blocks, words, others=None, trig_every=0):
     def at_entry(r):
         bufs = [m2.word(r.state, V.TRACK_BUFFERS + 4 * t) for t in range(16)]
         trig = (m2.word(r.state, TRIG_WORD) or 0) >> 16
+        off = (m2.word(r.state, TRIG_WORD + 4) or 0) & 0xFFFF       # mask 36: the note-off
         tap = {}
         for t in range(16):
             rec = V.track_record(t)
             tap[t] = {"before": [m2.word(r.state, bufs[t] + 4 * k) or 0 for k in range(BLOCK)],
                       "note": f32_of(m2.word(r.state, NOTE_CELL + 4 * t)),
                       "trig": bool(trig & (1 << t)),
+                      "off": bool(off & (1 << t)),
                       "mtype": m2.word(r.state, rec + 0x1B4),
                       "words": {slot: frame_word(r.state, CL.frame_offset(slot, t))
                                 for slot in CL.CONTROL_SLOTS}}
@@ -1114,6 +1116,8 @@ def run_cz(init, sound, machines, blocks, words, others=None, trig_every=0):
         for t, w in words.items():
             if t:
                 f.sound(t, {**machines.get(1, {}), TUN1: TUN1_ZERO, **w})
+        for t in (off_at or {}).get(b, ()):
+            f.trigger(t, masks=(36,))
         return f.to_bytes()
     run = run_blocks(init, frames, blocks, extra_hooks={dsp.CZ_SW: at_entry})
     return run, taps
@@ -1156,15 +1160,23 @@ def step_cz(init, sound, machines, blocks) -> dict:
              for t in range(8)},
             {8: 1}, 0),
     }
+    rel = "the note-off: sustain on step 2, key-up at block 8 (a released and a held voice)"
+    cases[rel] = ({0: {**base, **levels, CL.P_RATES[0]: 0x6400, CL.P_RATES[1]: 0x6400,
+                       **{p: 0x7F00 for p in CL.P_RATES[4:]}, CL.P_RATES[2]: 0x6400,
+                       CL.P_RATES[3]: 0x6400, CL.P_SUS: S(1), CL.P_DCW: 0x7F00},
+                   1: {**base, **fast, **levels, CL.P_SUS: S(1), CL.P_WAVE: W(3)}},
+                  {2: 1, 3: 0}, 0)
+    offs = {rel: {8: (0,), 12: (1,)}}
     cap = "eight machine-7 voices: the first six render, the rest are silent"
     results = {}
     for name, (words, others, every) in cases.items():
-        run, taps = run_cz(init, sound, machines, blocks, words, others=others, trig_every=every)
+        run, taps = run_cz(init, sound, machines, blocks, words, others=others, trig_every=every,
+                           off_at=offs.get(name))
         if not run["ok"] or len(taps) != blocks:
             results[name] = {"ok": False, "why": run.get("halt") or f"{len(taps)} entries"}
             continue
         voices = {t: CL.Voice() for t in range(16)}
-        mism, peaks, untouched, seen, steps = {}, {}, True, set(), {}
+        mism, peaks, untouched, seen, steps, offs_seen = {}, {}, True, set(), {}, set()
         for b, tap in enumerate(taps):
             after = run["machine"][b]
             rendered = 0
@@ -1174,14 +1186,18 @@ def step_cz(init, sound, machines, blocks) -> dict:
                     untouched &= [bits_of(v) for v in after[t]] == x["before"]
                     continue
                 seen.add(t)
-                want, did = CL.block(voices[t], rendered, x["words"], x["note"], x["trig"], T)
+                want, did = CL.block(voices[t], rendered, x["words"], x["note"], x["trig"], T,
+                                     off=x["off"])
                 rendered += did
                 steps[t] = max(steps.get(t, 0), voices[t].step)
+                if x["off"]:
+                    offs_seen.add((b, t))
                 got = [bits_of(v) for v in after[t]]
                 mism[t] = mism.get(t, 0) + sum(1 for g, w in zip(got, want) if g != bits_of(w))
                 peaks[t] = max(peaks.get(t, 0.0), max(abs(v) for v in after[t] if v == v))
         results[name] = {"ok": True, "mismatches": mism, "peaks": peaks, "steps": steps,
-                         "others_untouched": untouched, "tracks": sorted(seen)}
+                         "others_untouched": untouched, "tracks": sorted(seen),
+                         "offs": sorted(offs_seen)}
     six = results.get(cap, {})
     first = results.get(next(iter(cases)), {})
     checks = {
@@ -1199,6 +1215,10 @@ def step_cz(init, sound, machines, blocks) -> dict:
                 for r in results.values()),
         "the DCW envelope reached its last step on the no-sustain voice":
             bool(first.get("ok")) and first["steps"].get(0) == 7,
+        "the note-off reaches wr_cz on its track and block, and sends both sustained voices "
+        "on past their sustain step":
+            bool(results.get(rel, {}).get("ok")) and results[rel]["offs"] == [(8, 0), (12, 1)]
+            and results[rel]["steps"].get(0, 0) >= 2 and results[rel]["steps"].get(1, 0) >= 2,
         "WaveTone, FM Tone and the MIDI tracks pass through wr_cz bit-identical":
             all(r.get("ok") and r["others_untouched"] for r in results.values()),
     }

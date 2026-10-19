@@ -127,3 +127,24 @@ def test_the_pages_carry_every_control_once():
     assert [slot[r] for r in pages.CZ_LEVEL_IDS] == list(L.P_LEVELS)
     assert [slot[r] for r in pages.CZ_PAGES[0]] == [L.P_WAVE, L.P_SEL, L.P_DET, L.P_OCT,
                                                     L.P_MOD, L.P_DCW, L.P_KF, L.P_SUS]
+
+
+def test_note_off_sends_the_envelope_past_sustain():
+    words = {**L.DEFAULTS, **{p: 0x7F00 if p >= 42 else 0x6400 for p in L.P_RATES},
+             L.P_SUS: int(1.5 * 0x7800 / 9)}                    # sustain on step 2
+    v = L.Voice()
+    for b in range(30):
+        L.block(v, 0, words, 60.0, b == 0, T)
+    assert v.step == 1                                           # held
+    L.block(v, 0, words, 60.0, False, T, off=True)
+    assert v.step >= 2                                           # released
+    for b in range(80):
+        L.block(v, 0, words, 60.0, False, T)
+    assert v.step == 7
+
+
+def test_note_off_with_a_trigger_is_a_new_note():
+    words = {**L.DEFAULTS, L.P_SUS: int(1.5 * 0x7800 / 9)}
+    v = L.Voice()
+    L.block(v, 0, words, 60.0, True, T, off=True)
+    assert v.step == 0

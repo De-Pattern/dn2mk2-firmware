@@ -35,7 +35,7 @@ CTAB = {name: dsp.CZ_TABLES_DDR + off for name, off in CAT.items()}
 SC = dsp.CZ_SCRATCH_DM
 WORDS = ("t", "count", "buf", "sbase", "i146", "sel", "mod", "sus", "dcw", "wa", "wb",
          "inc1", "inc2", "ph1", "ph2", "par1", "par2", "step", "v", "ni", "nj", "cnt", "d",
-         "y1", "y", "inc2c", "ret", "k", "note", "oct", "det")
+         "y1", "y", "inc2c", "ret", "k", "note", "oct", "det", "trig")
 A = {w: SC + 4 * k for k, w in enumerate(WORDS)}
 LV = SC + 0x80                                        # the eight levels, then the eight rates
 RT = LV + 0x20
@@ -555,6 +555,39 @@ def controls() -> None:
     st(5, "inc2")
 
 
+def release() -> None:
+    """live.block: a note-off (frame mask 36, bit t) and no trigger sends the envelope on
+    from a step at or before sustain to the step after it."""
+    emit("      // ---- the note-off (frame mask 36) ----")
+    norel = label("norel")
+    ld(0, "trig")
+    emit("      R0 = PASS R0;")
+    jump("NE", norel)
+    ld(9, "t")
+    emit("      R0 = DM(0x25c4b0);".ljust(40) + "// mask 36: the low half")
+    emit("      R1 = 0xffff;")
+    emit("      R0 = R0 AND R1;")
+    emit("      R2 = 1;")
+    emit("      R2 = LSHIFT R2 BY R9;")
+    emit("      R0 = R0 AND R2;")
+    jump("EQ", norel)
+    ld(1, "sus")
+    emit("      R12 = 8;")
+    emit("      COMP(R1, R12);")
+    jump("GE", norel)
+    ld(0, "sbase")
+    emit("      I2 = R0;")
+    sld(0, STEP)
+    emit("      COMP(R0, R1);")
+    jump("GT", norel)
+    emit("      R12 = 1;")
+    emit("      R0 = R12 + R1;")
+    emit("      R12 = 7;")
+    emit("      R0 = MIN(R0, R12);")
+    sst(0, STEP)
+    place(norel)
+
+
 def samples() -> None:
     emit("      // ---- the block's samples ----")
     for w, k in LOADED:
@@ -767,6 +800,8 @@ def build() -> str:
     emit("      R2 = 1;")
     emit("      R2 = LSHIFT R2 BY R9;")
     emit("      R0 = R0 AND R2;")
+    st(0, "trig")
+    emit("      R0 = PASS R0;")
     notrig = label("znotrig")
     jump("EQ", notrig)
     emit("      R0 = R0 - R0;")
@@ -779,6 +814,7 @@ def build() -> str:
     emit("      R0 = PASS R0;")
     jump("EQ", "wr_z_quiet")
     controls()
+    release()
     samples()
     ld(0, "count")
     emit("      R12 = 1;")
