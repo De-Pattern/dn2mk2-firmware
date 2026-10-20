@@ -37,7 +37,8 @@ README is kept at [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
 
 | | engine | what it is | state |
 |---|---|---|---|
-| 🌊 | **Waverider** | wavetable machine after Tonverk's Wavefinder (upstream): **W5** adds 11 original tables, TBL with table names, a smooth POS glide, a display that follows p-locks and motion; **W2** puts every page-1 control to work (LEV, and a per-voice scanner: RATE, MPOS, MLEV, MOVE with 8 shapes) and gives the LFO/MOD lists Waverider's own names | upstream DSP core **passed on hardware**; W5 **flashed and working** on the owner's unit (tables, save/load); W2 **emulator-gated**, awaiting a flash → [`docs/w2-scanner.md`](docs/w2-scanner.md), [`docs/w5-tables.md`](docs/w5-tables.md) |
+| 🥁 | **PERC** | machine type 5 (since v0.11, in Waverider's place): the owner's 24 Ravel PERC drum machines (TRX, EFM, GND; after the Machinedrum's), TYPE plus eight per-machine parameters | **gated v0.11**, awaiting a flash → [`docs/perc.md`](docs/perc.md) |
+| 🌊 | **Waverider** | wavetable machine after Tonverk's Wavefinder; type 5 up to v0.10 | **removed in v0.11** for PERC; its docs stay for the record → [`docs/w5-tables.md`](docs/w5-tables.md) |
 | ✨ | **GRAINS** | granular synthesis on wavetables, after the Virus TI grain tables: formant grains (SYNC) and clouds (CLOUD) | **reference model + demos**; control layout awaiting sign-off → [`docs/grains.md`](docs/grains.md) |
 | 💧 | **PING** (in Waverider) | a filter section for round, liquid pings: SVF, Roland-style 4-pole, Serge-VCFQ-style band-pass, vactrol LPG; own envelope with log/exp curves and a strike | **reference model + demos**; awaiting the owner's ear → [`docs/ping.md`](docs/ping.md) |
 | 🔀 | **Frequency shifter** | a send/master effect after Tonverk's | planned, next after GRAINS G1 |
