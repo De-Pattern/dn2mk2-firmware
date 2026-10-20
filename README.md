@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.9** | 2026-10-19 | CZ's release: the DCW envelope runs on past its sustain step at note-off, as on a real CZ | `builds/v0.9-CZ-release/` | yes |
+| **v0.10** | 2026-10-20 | No more dead notes on RESONATOR/CZ (voice stealing); PING/SHFT TYPE by name; Waverider osc 2 (page 2); GRAN granular filter type | `builds/v0.10-GRAN/` | yes |
+| v0.9 | 2026-10-19 | CZ's release: the DCW envelope runs on past its sustain step at note-off, as on a real CZ | `builds/v0.9-CZ-release/` | yes |
 | v0.8 | 2026-10-18 | Everything in v0.7 (CZ PHASE, RESONATOR, SHIFT, PING, Waverider), sized to fit the USB upgrade: Waverider has 9 tables (BITS, PHAS out) | `builds/v0.8-CZ/` | yes |
 | v0.7 | 2026-10-18 | CZ PHASE machine (Casio CZ phase distortion), 8-step DCW envelope on pages 2–3, up to 6 voices | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
 | v0.6 | 2026-10-18 | RESONATOR machine (Rings-style modal resonator), up to 4 voices | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
@@ -43,6 +44,54 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.10 — GRAN, osc 2, voice stealing
+
+`DN2mod_v0.10_GRAN_OS1.11.syx`
+sha256 `fb18ef71eda483bd0592b145fd6b567b340c0317cc8c092fcf52b88ce8400910`
+Gate: CLEARED TO FLASH, 2026-10-20 (USB size 2,080,802 of 2,097,152, 16,350 to spare).
+Source: commit `456d4b9`. Docs: `docs/gran.md`, `docs/w3-osc2.md`, `docs/cz.md`
+("Voice stealing"), `docs/ping.md`.
+
+**Adds.**
+- **Voice stealing on RESONATOR and CZ.** The newest notes sound, up to each machine's
+  cap (RESONATOR 4, CZ 6); the oldest is stolen. With the dynamic voice setting, notes no
+  longer drop out.
+- **TYPE by name** on the FLTR page: PING shows SVF / LADR / VCFQ / LPG; SHIFT's MODE
+  shows UP / DOWN / BOTH.
+- **Waverider osc 2** on page 2: DETN LEV POS TBL / - MPOS MLEV -. Its LEV starts at 0 (off),
+  so saved Waverider sounds play exactly as before.
+- **GRAN (GRAINS)**, a granular effect as a new filter type, last in the FLTR list:
+  SIZE DENS MODE SPRD on the bottom row, FDBK and MIX on the top, DRIV on page 2. MODE is
+  NORM / UP / DOWN / REV. **MIX starts at 0: turn it up to hear it.**
+- Inside: PING's and SHIFT's tables moved to the DSP's DDR to make room; they are
+  checked bit for bit as before.
+
+**Test** (after the regression check):
+1. RESONATOR, then CZ, with the Voice Setup page on dynamic allocation: play fast
+   chords and runs of 8+ notes. No dead notes; when the cap is reached the oldest
+   note cuts off.
+2. The same with a fixed 8 voices: as v0.9.
+3. FLTR page on PING: turn TYPE; the cell reads SVF, LADR, VCFQ, LPG. On SHIFT, MODE reads
+   UP, DOWN, BOTH. On Multi-Mode the TYPE cell is the stock picture.
+4. Waverider: load a saved Waverider sound; it sounds the same as on v0.9. Page 2: turn
+   LEV up, then DETN (+7 is a fifth), POS and TBL (the wave and the name follow), then
+   MPOS/MLEV with a scanner RATE set on page 1.
+5. Any machine, FLTR > GRAINS. MIX up. Try each MODE; SIZE short and long; DENS; SPRD
+   away from the centre; FDBK high (it should build and smear but stay bounded).
+6. SAVE PROJECT with a GRAN track and a Waverider osc-2 sound; power-cycle; reload:
+   both come back.
+7. CPU: a few tracks on GRAN at once, and 8 Waverider voices with osc 2 on. Listen for
+   crackles.
+
+**Known:**
+- GRAN's buffers sit in DSP memory (DDR at `0x81400000`) that nothing has used before on
+  the instrument. The same DDR area holds Waverider's tables and RESONATOR/CZ state,
+  which play fine on your unit. This exact range is untested on hardware.
+- A sound saved with GRAN, loaded on stock firmware, loads as Multi-Mode.
+- Osc 2 shares osc 1's scanner (no RATE or MOVE of its own).
 
 ---
 
