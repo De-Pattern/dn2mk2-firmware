@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.10** | 2026-10-20 | No more dead notes on RESONATOR/CZ (voice stealing); PING/SHFT TYPE by name; Waverider osc 2 (page 2); GRAN granular filter type | `builds/v0.10-GRAN/` | yes |
+| **v0.11** | 2026-10-20 | PERC: your 24 Ravel drum machines (TRX/EFM/GND) as a machine, TYPE + 8 named parameters; Waverider removed | `builds/v0.11-PERC/` | yes |
+| v0.10 | 2026-10-20 | No more dead notes on RESONATOR/CZ (voice stealing); PING/SHFT TYPE by name; Waverider osc 2 (page 2); GRAN granular filter type | `builds/v0.10-GRAN/` | yes |
 | v0.9 | 2026-10-19 | CZ's release: the DCW envelope runs on past its sustain step at note-off, as on a real CZ | `builds/v0.9-CZ-release/` | yes |
 | v0.8 | 2026-10-18 | Everything in v0.7 (CZ PHASE, RESONATOR, SHIFT, PING, Waverider), sized to fit the USB upgrade: Waverider has 9 tables (BITS, PHAS out) | `builds/v0.8-CZ/` | yes |
 | v0.7 | 2026-10-18 | CZ PHASE machine (Casio CZ phase distortion), 8-step DCW envelope on pages 2–3, up to 6 voices | **withdrawn**: too big for the USB upgrade (`docs/usb-upgrade-limit.md`) | yes, but over 2 MiB |
@@ -44,6 +45,55 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.11 — PERC
+
+`DN2mod_v0.11_PERC_OS1.11.syx`
+sha256 `9e44b90562348210be34a8edb549599b35306795a94507e5db6ddf340764f13d`
+Gate: CLEARED TO FLASH, 2026-10-20 (USB size 1,914,556 of 2,097,152, 182,596 to spare). Source: commit `5ff5e05`. Docs: `docs/perc.md`.
+
+**Adds.**
+- **PERC**, in MACHINE SEL where Waverider was (after Swarmer): your Ravel PERC drum
+  machines on the Digitone, one a track. **TYPE** (page 1, A) picks one of 24:
+  TRX BD B2 SD XT CP RS CB CH OH CY MA CL XC, EFM BD SD XT CP RS CB HH CY, GND SN NS IM.
+  The middle of the page names it (`TRX-BD`, `Bass Drum`).
+- **Eight parameters** follow it: B–H on page 1, A on page 2, named per machine as in
+  Ravel (TRX-BD: PTCH DEC RAMP RDEC STRT NOIS HARM CLIP; `-` where a machine has fewer).
+  The names also show in the header line and the LFO destination lists. Every one is a
+  normal parameter: p-locks, LFOs, SAVE/LOAD all work.
+- A note keeps the machine TYPE had when it started; the parameters are live.
+- **Waverider is removed** (its tables, display and osc 2). A saved Waverider sound
+  loads as PERC.
+- Inside: PERC's code runs from the DSP's L2 memory (it is too big for the L1 space the
+  other machines use), checked bit for bit in the runner against the same program run
+  in Python, which is itself checked against your C.
+
+**Test** (after the regression check):
+1. A new track: MACHINE SEL → PERC. Page 1 shows TYPE and TRX-BD / Bass Drum; trig it.
+   A kick.
+2. Turn TYPE through all 24: the name, the description, the dot and the labels follow;
+   trig each. All 24 sound (several peak loud: TRX-CB, TRX-MA, GND-IM, as in Ravel).
+3. On a few machines turn each labelled knob while a pattern plays; a `-` knob does
+   nothing.
+4. Note pitch: play the track chromatically from the keys (TRX-RS, EFM-BD): pitch follows.
+5. P-lock TYPE on one step and a parameter on another; an LFO on PTCH. Check the LFO
+   DEST list shows PERC's names while the PERC track is active and WaveTone's on a
+   WaveTone track.
+6. **Load:** eight PERC tracks playing at once (a busy beat). Listen for crackles or
+   dropouts, and check the stock tracks and FX still sound right.
+7. SAVE PROJECT with a PERC track, power-cycle, reload: TYPE and the parameters are
+   back.
+8. RESONATOR, CZ, PING, SHIFT and GRAN as in v0.10.
+
+**Known:**
+- PERC's code in L2 (`0x200c0000`) is memory the stock firmware never touched in the
+  emulator (from a fresh boot of the engine, every stock machine); untested on hardware.
+  The DSP's load with many PERC tracks is not measured on the instrument (step 6).
+- Selecting PERC starts from WaveTone's knob defaults, not each machine's Ravel defaults.
+- P-I (the modal machines) is not ported.
+- A sound saved with PERC, loaded on stock firmware, loads as FM Tone.
 
 ---
 
