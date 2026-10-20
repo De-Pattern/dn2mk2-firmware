@@ -56,43 +56,52 @@ GET_SHORT_NAME = 0x400372DA
 EMPTY_PAGE = 0x42432BD4           # the readers' own empty-page fallback
 TAG = 10                          # the tag every stock SYN descriptor ends with
 
-# Waverider's own page titles (not drawn; the header shows the subtitle and the page
-# number). Our own strings, so no descriptor points into WaveTone's. The waveform icons
-# a Waverider page first showed at B and F did not come from the titles: they are the
-# SYN page draw's WaveTone OSC-page overlay (page id 7), which `wr_icons` skips.
-TITLES = ("WR 1", "WR 2")
-SUBTITLE = "Waverider"             # where WaveTone's say "WaveTone"
+# PERC (machine 5, docs/perc.md; Waverider's place until v0.11): two pages on WaveTone
+# records -- TYPE (DRIF) and the eight parameters of dnfw.perc.machines.PARAMS. What each
+# parameter is depends on TYPE, so its names are swapped per machine at run time
+# (wr_names in page.c, from perc_c_header's tables); the page reads them back from the
+# records, so it, the header line and the LFO lists always agree.
+from ..perc import machines as _perc
 
-# record id -> Waverider's label (the records stay WaveTone's: their slots are the
-# frame's params, which the SHARC loop reads). W5: TBL is DRIF (252), 0..127, not TBL1
-# (247). W2 (docs/w2-scanner.md): the scanner's four and LEV, each on a WaveTone record
-# whose range fits -- MOD (0..3) and RSET (0..2), the first plan, could not hold a
-# depth or eight shapes.
-LABELS = {238: "TUNE", 241: "LEV", 239: "POS", 252: "TBL",
-          253: "RATE", 246: "MPOS", 240: "MLEV", 256: "MOVE",
-          # W3 (docs/w3-osc2.md): osc 2, on records whose default leaves it silent
-          242: "DETN", 260: "LEV", 243: "POS", 257: "TBL", 250: "MPOS", 244: "MLEV"}
-
-# W2: what every list, the LFO DEST field and the header line call those records while
-# a Waverider track is active (the names are swapped in the record table at run time,
-# `wr_names` in page.c, and put back as soon as the active track is not a Waverider)
-LONG_NAMES = {238: "Tune", 241: "Wave Level", 239: "Wave Position", 252: "Wave Table",
-              253: "Scan Rate", 246: "Scan Pos Depth", 240: "Scan Lev Depth", 256: "Scan Shape",
-              242: "Osc2 Detune", 260: "Osc2 Level", 243: "Osc2 Position", 257: "Osc2 Table",
-              250: "Osc2 Pos Depth", 244: "Osc2 Lev Depth"}
-# WaveTone's other records: Waverider reads nothing from them, so they say so
-UNUSED = (245, 247, 248, 249, 251, 254, 255, 258, 259, 261, 262)
-UNUSED_LONG, UNUSED_SHORT = "Unused", "-"
-MOVE_ID = 256
-POS2_ID, TBL2_ID = 243, 257       # W3: osc 2's POS and TBL
-SHAPES = ("TRI", "SAW", "RAMP", "SQR", "RND", "S&H", "ONE", "ENV")   # live.SHAPES
-
-# the two pages, encoders A..H; 0 is an empty place
+TITLES = ("PRC 1", "PRC 2")
+SUBTITLE = "Perc"
+TYPE_ID = _perc.TYPE_REC[0]                                  # 252, DRIF
+PARAM_IDS = tuple(r for r, _slot, _lo, _top in _perc.PARAMS)  # 238 242 254 253 256 257 260 240
 PAGES = (
-    (238, 241, 239, 252, 253, 246, 240, 256),   # OSC 1: TUNE LEV POS TBL / RATE MPOS MLEV MOVE
-    (242, 260, 243, 257, 0, 250, 244, 0),       # OSC 2 (W3): DETN LEV POS TBL / - MPOS MLEV -
-                                                # (RATE and MOVE are osc 1's: one scanner)
+    (TYPE_ID, *PARAM_IDS[:7]),                  # TYPE, parameters 1-7
+    (PARAM_IDS[7], 0, 0, 0, 0, 0, 0, 0),        # parameter 8
 )
+# no static labels: wr_label hands every PERC record to the stock getShortName, which
+# reads the names wr_names swapped in
+LABELS: dict[int, str] = {}
+TYPE_NAMES = ("Perc Type", "TYPE")
+UNUSED = tuple(r for r in range(238, 263) if r != TYPE_ID and r not in PARAM_IDS)
+UNUSED_LONG, UNUSED_SHORT = "Unused", "-"
+# a parameter's long name (LFO and modulation lists, the header line) from its short one
+LONG = {"PTCH": "Pitch", "DEC": "Decay", "RAMP": "Ramp", "RDEC": "Ramp Decay", "STRT": "Start",
+        "NOIS": "Noise", "HARM": "Harmonics", "CLIP": "Clip", "HOLD": "Hold", "TICK": "Tick",
+        "DIRT": "Dirt", "DIST": "Distortion", "BUMP": "Bump", "BENV": "Bump Env", "SNAP": "Snap",
+        "TONE": "Tone", "TUNE": "Tune", "DAMP": "Damping", "DTYP": "Dist Type", "CLPY": "Claps",
+        "HARD": "Hardness", "RICH": "Richness", "RATE": "Rate", "ROOM": "Room", "RSIZ": "Room Size",
+        "RTUN": "Room Tune", "ENH": "Enhance", "GAP": "Gap", "HPF": "High-Pass", "LPF": "Low-Pass",
+        "MTAL": "Metal", "TOP": "Top", "TTUN": "Top Tune", "SIZE": "Size", "PEAK": "Peak",
+        "ATT": "Attack", "SUS": "Sustain", "REV": "Reverse", "RATL": "Rattle", "RTYP": "Rattle Type",
+        "DUAL": "Dual", "CLIC": "Click", "MOD": "Mod Amount", "MFRQ": "Mod Freq", "MDEC": "Mod Decay",
+        "MFB": "Mod Feedback", "NDEC": "Noise Decay", "CLPS": "Claps", "CDEC": "Clap Decay",
+        "SNAR": "Snare", "SPTC": "Snare Pitch", "SDEC": "Snare Decay", "SMOD": "Snare Mod",
+        "FB": "Feedback", "TREM": "Tremolo", "TFRQ": "Trem Freq", "UP": "Up", "UVAL": "Up Value",
+        "DOWN": "Down", "DVAL": "Down Value", "-": "Unused"}
+# what each machine is, under its name in the middle of the page
+DESCRIPTIONS = {"BD": "Bass Drum", "B2": "Bass Drum 2", "SD": "Snare", "XT": "Tom", "CP": "Clap",
+                "RS": "Rimshot", "CB": "Cowbell", "CH": "Closed Hat", "OH": "Open Hat",
+                "CY": "Cymbal", "MA": "Maracas", "CL": "Claves", "XC": "Conga", "HH": "Hi-Hat",
+                "SN": "Sine", "NS": "Noise", "IM": "Impulse"}
+
+
+def type_of(word: int) -> int:
+    """TYPE's record value (0..0x7f00) -> the machine, as the DSP reads it (dnfw.perc.program)"""
+    return (min(127, max(0, word >> 8)) * _perc.N) >> 7
+
 
 # RESONATOR (machine 6, docs/rings.md): one page, on WaveTone records whose range and
 # default fit (dnfw.rings.live's table), named while a RESONATOR track is active
@@ -156,15 +165,20 @@ def _rep(label: str, text: str) -> str:
 
 
 def label(rid: int) -> str:
-    """-> what place `rid` is called on the page; "-" for a place not yet working."""
+    """-> what place `rid` is called on the page with no machine applied ("-" if none)."""
     return LABELS.get(rid, "-") if rid else "-"
 
 
 def named() -> list[tuple[int, str, str]]:
-    """(record id, long name, short name) for every record `wr_names` renames for a
-    Waverider track."""
-    return ([(r, LONG_NAMES[r], LABELS[r]) for r in LABELS]
-            + [(r, UNUSED_LONG, UNUSED_SHORT) for r in UNUSED])
+    """(record id, long name, short name) of the names wr_names swaps in for every PERC
+    machine alike: TYPE, and the WaveTone records PERC leaves unused. The parameters'
+    are per machine (perc_names)."""
+    return [(TYPE_ID, *TYPE_NAMES)] + [(r, UNUSED_LONG, UNUSED_SHORT) for r in UNUSED]
+
+
+def perc_names() -> list[list[tuple[str, str]]]:
+    """[machine][parameter] = (long, short), PARAM_IDS order"""
+    return [[(LONG[sh], sh) for sh in _perc.PNAMES[name]] for name in _perc.NAMES]
 
 
 def res_named() -> dict[int, tuple[str, str]]:
@@ -197,7 +211,7 @@ def c_header() -> str:
     wr = {r: (lo, sh) for r, lo, sh in named()}
     res = res_named()
     cz = cz_named()
-    order = sorted(set(wr) | set(res) | set(cz))
+    order = sorted(set(wr) | set(res) | set(cz) | set(PARAM_IDS))
     zids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in CZ_PAGES)
     znames = ",\n".join(" {" + ", ".join(q + CZ_LABELS.get(r, "-") + q for r in page) + "}"
                          for page in CZ_PAGES)
@@ -223,9 +237,26 @@ def c_header() -> str:
             f"static const unsigned short cz_level_ids[8] = {{{', '.join(map(str, CZ_LEVEL_IDS))}}};\n"
             f"static const unsigned char cz_combos[{len(cz_live.COMBOS)}][2] = {{{combos}}};\n"
             f"static const short res_anchor[3][24] = {{{res_anchor}}};\n"
-            f"#define WR_MOVE_ID {MOVE_ID}\n"
-            f"#define WR_POS2_ID {POS2_ID}\n#define WR_TBL2_ID {TBL2_ID}\n"
-            f"static const char wr_shape_names[8][5] = {{{', '.join(q + x + q for x in SHAPES)}}};\n")
+            + perc_c_header())
+
+
+def perc_c_header() -> str:
+    """PERC's tables for page.c: the machines' names and what they are, the records its
+    parameters sit on, and each machine's names for them (short, as chars; long, as an
+    index into one list of distinct long names)."""
+    q = chr(34)
+    longs = sorted({lo for row in perc_names() for lo, _ in row})
+    names = ", ".join(q + n + q for n in _perc.NAMES)
+    desc = ", ".join(q + DESCRIPTIONS[n.split("-")[1]] + q for n in _perc.NAMES)
+    shorts = ",\n".join(" {" + ", ".join(q + sh + q for _, sh in row) + "}" for row in perc_names())
+    lidx = ",\n".join(" {" + ", ".join(str(longs.index(lo)) for lo, _ in row) + "}" for row in perc_names())
+    return (f"#define PERC_N {_perc.N}\n#define PERC_TYPE_ID {TYPE_ID}\n"
+            f"static const char perc_machine[PERC_N][7] = {{{names}}};\n"
+            f"static const char perc_what[PERC_N][12] = {{{desc}}};\n"
+            f"static const unsigned short perc_param_ids[8] = {{{', '.join(map(str, PARAM_IDS))}}};\n"
+            f"static const char perc_short[PERC_N][8][5] = {{\n{shorts}\n}};\n"
+            f"static const char *const perc_longs[{len(longs)}] = {{{', '.join(q + x + q for x in longs)}}};\n"
+            f"static const unsigned char perc_long[PERC_N][8] = {{\n{lidx}\n}};\n")
 
 
 def source(page_draw: int, cell: int) -> str:

@@ -1,0 +1,106 @@
+{
+ "image_end": "0x2008823c",
+ "init": {
+  "ok": true,
+  "instructions": 5019618,
+  "wall_s": 920.4,
+  "read": [
+   null,
+   null
+  ],
+  "write": [
+   "0x2002f0d0",
+   "0x200779f8"
+  ],
+  "accesses_above_image_end": {
+   "r": 0,
+   "w": 0
+  },
+  "pages_above_image_end": {},
+  "far_writes_by_pc": {}
+ },
+ "FM Tone": {
+  "ok": true,
+  "read": [
+   null,
+   null
+  ],
+  "write": [
+   "0x2002f0d0",
+   "0x200779f8"
+  ],
+  "accesses_above_image_end": {
+   "r": 0,
+   "w": 0
+  },
+  "pages_above_image_end": {},
+  "far_writes_by_pc": {}
+ },
+ "WaveTone": {
+  "ok": true,
+  "read": [
+   "0x2002f0d0",
+   "0x20047938"
+  ],
+  "write": [
+   "0x2002f0d0",
+   "0x200779f8"
+  ],
+  "accesses_above_image_end": {
+   "r": 0,
+   "w": 0
+  },
+  "pages_above_image_end": {},
+  "far_writes_by_pc": {}
+ },
+ "FM Drum": {
+  "ok": true,
+  "read": [
+   "0x2002f0d0",
+   "0x20078256"
+  ],
+  "write": [
+   "0x2002f0d0",
+   "0x200779f8"
+  ],
+  "accesses_above_image_end": {
+   "r": 0,
+   "w": 0
+  },
+  "pages_above_image_end": {},
+  "far_writes_by_pc": {}
+ },
+ "Swarmer": {
+  "ok": true,
+  "read": [
+   "0x2002f0d0",
+   "0x20078256"
+  ],
+  "write": [
+   "0x2002f0d0",
+   "0x200779f8"
+  ],
+  "accesses_above_image_end": {
+   "r": 0,
+   "w": 0
+  },
+  "pages_above_image_end": {},
+  "far_writes_by_pc": {}
+ },
+ "all_sixteen": {
+  "read": [
+   "0x2002f0d0",
+   "0x20078256"
+  ],
+  "write": [
+   "0x2002f0d0",
+   "0x200779f8"
+  ],
+  "accesses_above_image_end": {
+   "r": 0,
+   "w": 0
+  },
+  "pages_above_image_end": {},
+  "far_writes_by_pc": {}
+ }
+}

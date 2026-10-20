@@ -15,15 +15,15 @@ failure:
 2. **DSP identity**: if section 7 changed, it must be *exactly*
    `dnfw.waverider.dsp.section7(stock)` -- the image the SHARC gate runs. Otherwise the
    SHARC gate would be testing a different program from the one being flashed.
-3. **SHARC runner** (`sharc_waverider_m5.py`, if section 7 changed): Waverider
-   bit-exact, and types 0-4 bit-identical to stock.
+3. **SHARC runner** (`sharc_waverider_m5.py`, if section 7 changed): PERC and every
+   filter and machine of ours bit-exact to its model, and types 0-4 bit-identical to stock.
 4. **ColdFire instruction set** (`check_coldfire.py`): every `CODE` chunk the loader
    runs has no scale-8 addressing; and every hit in MAIN OS against stock lies past
    stock's end *and* outside every `CODE` chunk (i.e. in data that never executes).
 5. **boot from reset** (`emu_boot_check.py`): boots and draws its UI, no fault.
 6. **engine + LOAD/SAVE** (`emu_boot_engine.py`): the evaluator runs clean under the
    real loader; CODE chunks intact; machine types survive a SAVE/LOAD round trip.
-7. **unit tests** (`pytest -m "not slow"` on the safety, mod and Waverider tests).
+7. **unit tests** (`pytest -m "not slow"` on the safety, mod, PERC and filter tests).
 
 Only if all pass does it write `BUILD.gate.json` beside the build (the build's
 sha256, each gate's result, the date) and print `CLEARED TO FLASH`. Anything else
@@ -57,12 +57,12 @@ from dnfw.cli.files import read_image                      # noqa: E402
 from dnfw.firmware.load import load                        # noqa: E402
 from dnfw.mods import platform                             # noqa: E402
 from dnfw.patch import area                                # noqa: E402
-from dnfw.waverider import dsp, wave                       # noqa: E402
+from dnfw.waverider import dsp                             # noqa: E402
 
 MAIN_BASE = 0x40000400
 # CODE chunks that hold only data, reached through a pointer and never jumped to.
 # Each is listed by name, on purpose: a chunk is assumed to execute unless it is here.
-DATA_ONLY = {wave.SPANS_LOAD: "Waverider's wave-display bytes (wave.SPANS_LOAD), never executed"}
+DATA_ONLY: dict[int, str] = {}       # (Waverider's wave-display bytes were one, until v0.11)
 
 
 def code_ranges() -> dict[int, list[tuple[int, int]]]:
@@ -83,7 +83,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
          "test/test_shft_live.py", "test/test_rings_live.py", "test/test_cz_live.py",
-         "test/test_w3_osc2.py", "test/test_gran_live.py"]
+         "test/test_gran_live.py", "test/test_perc_live.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 
@@ -220,7 +220,7 @@ def main() -> int:
              "booted and drew its UI, no fault" if rc == 0 else out[-800:])
 
         # 6. engine + LOAD/SAVE
-        # Waverider (5), RESONATOR (6) and CZ (7) are kept by LOAD; 8 still loads as FM Tone
+        # PERC (5), RESONATOR (6) and CZ (7) are kept by LOAD; 8 still loads as FM Tone
         types = ["--machine-type", "3"] + (["--machine-type", "5", "--machine-type", "6",
                                             "--machine-type", "7", "--machine-type", "8",
                                             "--machine-max", "7"]

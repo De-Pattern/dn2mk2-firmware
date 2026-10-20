@@ -1,41 +1,29 @@
-"""Waverider: a sixth machine, a wavetable oscillator with two baked tables.
+"""Our machines and filters (the mod is still called `waverider`, its first machine).
 
-**Not yet on the instrument.** Milestone 5 of `docs/waverider-feasibility.md`:
-the first build with modified SHARC code. Everything here passed in the
-emulators (ColdFire: digikit's; DSP: digikit's SHARC runner), nothing on silicon.
-
-## What it is
-
-MACHINE SEL offers **WAVERIDER** after SWARMER. A Waverider track is machine
-type 5 in the sound and in the frame, and WaveTone everywhere else on the
-ColdFire: its SYN pages are WaveTone's, and two of their knobs drive it --
-
-- `WAV1` is the **frame position** (POS) across the table;
-- `TBL1` is the **table** (SLOT): 0 a saw that darkens to a sine, 1 the
-  overtone series, partial 1 to 16.
-
-Pitch follows the trig note. The rest of WaveTone's page (osc 2, noise, PD,
-the levels) is shown and saved but not rendered.
+**Since v0.11 machine type 5 is PERC** (docs/perc.md): the owner's 24 drum machines
+(TRX, EFM, GND, from his Ravel firmware), one a track, chosen with TYPE; Waverider, the
+wavetable machine that held type 5 until v0.10, is gone. Also: RESONATOR (type 6,
+docs/rings.md), CZ (type 7, docs/cz.md), and the filters PING, SHFT and GRAN (types 6-8,
+docs/ping.md, docs/shft.md, docs/gran.md).
 
 ## How it applies
 
 Two sections, both from committed data:
 
-- **MAIN OS (3):** `waverider_code.json`, written by
-  `scripts/gen_waverider_code.py` from `dnfw.waverider.coldfire` (the list,
-  the names, the permission rows, the WaveTone clone). Every edit's stock
-  bytes are checked first. Four clean in-image caves, nothing appended.
-- **The DSP boot stream (7):** `dnfw.waverider.dsp.section7`, from the
-  committed SHARC objects. It refuses a section 7 that is not stock.
-- **Its own SYN pages (Milestone 7):** `dnfw.waverider.pages`, one platform `CODE`
-  chunk in RAM (`dnfw.mods.platform`): a Waverider track shows two pages of its own,
-  labelled TUNE / POS / TBL where they work and empty where they do not yet.
+- **MAIN OS (3):** `waverider_code.json`, written by `scripts/gen_waverider_code.py`
+  from `dnfw.waverider.coldfire` (the MACHINE SEL list, the names, the permission rows,
+  the WaveTone clone, our SYN pages). Every edit's stock bytes are checked first; the
+  pages, the machines' tables and PING's lists run from RAM as platform `CODE` chunks.
+- **The DSP boot stream (7):** `dnfw.waverider.dsp.section7`, from the committed SHARC
+  objects. It refuses a section 7 that is not stock.
 
-## A sound or project saved with a Waverider track
+## A sound or project saved with one of our machines
 
-Saved as machine type 5 by the stock SAVE. This build keeps 5 on LOAD; stock
-firmware (and any build without this mod) loads it as **FM Tone**, the stock
-LOAD bound's own fallback (`0x400dd286`), with its parameters as they were.
+Saved as its machine type by the stock SAVE. This build keeps 5-7 on LOAD; stock
+firmware (and any build without this mod) loads them as **FM Tone**, the stock LOAD
+bound's own fallback (`0x400dd286`), with their parameters as they were. A sound saved
+with Waverider (type 5) on v0.10 or earlier loads as PERC here, its WaveTone values
+read as PERC's controls.
 """
 
 from __future__ import annotations
@@ -47,9 +35,9 @@ from . import RAM, Extent, ModError, Result, platform
 from ..waverider import dsp
 
 ID = "waverider"
-NAME = "Waverider, a sixth machine"
-SUMMARY = ("A wavetable machine, WAVERIDER in MACHINE SEL: WAV1 sweeps the frame, "
-           "TBL1 picks one of two baked tables. First build with modified DSP code.")
+NAME = "PERC, RESONATOR and CZ machines; PING, SHFT and GRAN filters"
+SUMMARY = ("PERC (24 drum machines, type 5), RESONATOR and CZ in MACHINE SEL; PING, SHFT "
+           "and GRAN in the filter list. Modified DSP code.")
 DEVICE = 0x15                      # Digitone II
 MAIN_OS, DSP_STREAM = 3, 7
 BASE = 0x40000400
@@ -67,28 +55,17 @@ def extents(firmware=None, area_length: int = 0) -> list[Extent]:
     # The boot stream is rebuilt as a whole (blocks inserted before its final
     # block), so the whole of it is declared: nothing else may write it too.
     out.append(Extent(DSP_STREAM, 0, size or 836_956,
-                      "the DSP boot stream, rebuilt: Waverider's code and state in L1 "
-                      "block 1, its wavetables in DDR, the entry jump, the machine lookup"))
+                      "the DSP boot stream, rebuilt: our code and state in L1 block 1, "
+                      "PERC's code in L2, tables in DDR, the entry jump, the machine lookup"))
     return out
-
-
-# The wave spans (`wr_spans`, dnfw.waverider.wave) are signed sample bytes, and any
-# four in a row can read as an address above BSS: 2026-10-01, `46 d6 a7 12` inside
-# them did, once the page code before them grew. They are data by construction, so
-# every word place inside them is declared not to hold an address; the code around
-# them is still checked.
-NOT_RAM = tuple(range(SPEC["layout"]["wr_spans"] & ~1, SPEC["layout"]["wr_spans_end"], 2))
 
 
 def _chunks() -> list[tuple[int, bytes, str]]:
     out = [(SPEC["chunk"]["load"], bytes.fromhex(SPEC["chunk"]["code"]),
-            "Waverider's SYN pages: code, descriptors, labels (M7)")]
-    if "spans_chunk" in SPEC:
-        out.append((SPEC["spans_chunk"]["load"], bytes.fromhex(SPEC["spans_chunk"]["code"]),
-                    "Waverider's wave display: every table's frames, one span a column (W5)"))
+            "our machines' SYN pages: code, descriptors, labels")]
     if "machines_chunk" in SPEC:
         out.append((SPEC["machines_chunk"]["load"], bytes.fromhex(SPEC["machines_chunk"]["code"]),
-                    "the machine shims, names, attributes and MACHINE SEL list (Waverider, RESONATOR)"))
+                    "the machine shims, names, attributes and MACHINE SEL list (PERC, RESONATOR, CZ)"))
     if "ping_chunk" in SPEC:
         out.append((SPEC["ping_chunk"]["load"], bytes.fromhex(SPEC["ping_chunk"]["code"]),
                     "PING's FLTR-list shims, list and names (P2)"))

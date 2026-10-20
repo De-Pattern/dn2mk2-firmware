@@ -121,9 +121,5 @@ def test_every_generated_asm_is_what_its_generator_writes_now():
         built = mod.build()
         built = built[0] if isinstance(built, tuple) else built
         assert norm(built) == norm((SHARC / f"{name}.asm").read_text(encoding="utf-8")), name
-    import gen_osc2_asm
-    import gen_ping_asm
-    gen_ping_asm.n_label[0] = 0
-    a, b = gen_osc2_asm.build()
-    assert norm(a) == norm((SHARC / "osc2.asm").read_text(encoding="utf-8"))
-    assert norm(b) == norm((SHARC / "osc2b.asm").read_text(encoding="utf-8"))
+    import gen_perc_asm                                 # v0.11: PERC (osc 2 went with Waverider)
+    assert norm(gen_perc_asm.build()) == norm((SHARC / "perc.asm").read_text(encoding="utf-8"))

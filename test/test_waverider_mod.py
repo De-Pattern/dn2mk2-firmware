@@ -55,7 +55,7 @@ def test_applies_to_both_sections(applied, dn2_111):
     # since W5, the wave display's chunk, and since PING P2, PING's FLTR-list chunk
     main, chunks = platform.split(applied.payloads[3])
     assert len(main) == len(dn2_111.container.find(3).unpack())
-    assert [kind for kind, _ in chunks] == [platform.area.CODE] * 4     # + the machines chunk
+    assert [kind for kind, _ in chunks] == [platform.area.CODE] * 3     # pages, machines, PING (the wave display chunk went with Waverider, v0.11)
     assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 
@@ -87,7 +87,7 @@ def test_the_list_offers_waverider_resonator_and_cz_before_midi(applied):
 def test_rows_5_to_7_of_the_name_table(applied):
     main = applied.payloads[3]
     table = long_at(main, 0x400DC344)
-    for row, (lo, sh) in ((5, (b"Waverider\0", b"WVR\0")), (6, (b"Resonator\0", b"RSN\0")),
+    for row, (lo, sh) in ((5, (b"Perc\0", b"PRC\0")), (6, (b"Resonator\0", b"RSN\0")),
                           (7, (b"CZ Phase\0", b"CZP\0"))):
         long_ptr, short_ptr = _clong(table + 12 * row), _clong(table + 12 * row + 4)
         assert _chunked(long_ptr, len(lo)) == lo and _chunked(short_ptr, len(sh)) == sh

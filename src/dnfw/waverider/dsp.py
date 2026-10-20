@@ -52,8 +52,7 @@ import pathlib
 import struct
 
 from ..image import bootstream, sharc_object
-from . import factory, live
-from . import render as reference
+from . import live
 
 STOCK_SHA256 = "336e340aa0cdcd34e314cfa44849f709a3134f6bd4cd57dfc7e15702c83115e2"
 LOAD_ALIAS = 0x28000000          # boot-stream load address = LOAD_ALIAS + DM byte address
@@ -68,27 +67,24 @@ REGION = (0x2DD600, 0x2E7000)                # W5: tables to DDR; W2: + the scan
 STOCK_BLOCK1_END = 0x2DD52C
 DM_CACHE_32K = 0x2E8000                      # the lowest byte a 32 KB DM cache would own
 CODE_SPAN = 0x400                            # each code object is padded to this
-READER_DM = 0x2DD600
-LOOP_DM = 0x2DEF00                           # W5: moved from 0x2dda00, which held 1 KB; the loop is now ~1 KB
-LOOP_SPAN = 0xA00                            # W2: the scanner and the gain ramp, ~2 KB
-READER_SW = READER_DM // 2                   # 0x16eb00
-LOOP_SW = LOOP_DM // 2                       # 0x16f780 (0x16ed00 before W5)
-STATE_DM, STATE_BYTES = 0x2DDE00, 0x400      # save area, counters, 16 reader blocks
-READER_BLOCKS_DM, READER_BLOCK_BYTES = 0x2DDF00, 32
-INC_TABLE_DM = 0x2DE200
-DIRECTORY_DM = 0x2DE600
-DIRECTORY_MAGIC = 0x57525431                 # 'WRT1'
-DIRECTORY_CAP = 0x200                        # magic, count, pointers: at most 126 tables
-LUT_DM = DIRECTORY_DM + DIRECTORY_CAP        # 0x2de800: TBL (0..127) -> slot, 128 words
-SMOOTH_DM = 0x2DEE00                         # W5 per-voice POS glide: 16 x pos, then 16 x note counter
-SMOOTH_BYTES = 0x80
-# W2 (docs/w2-scanner.md): per voice 16 words of scanner state, then three tables,
-# after the loop. L1 block 1 up to 0x2e7000 held M5c's tables on the instrument, so
-# this stays inside memory already proven free.
-W2_STATE_DM, W2_STATE_STRIDE = LOOP_DM + LOOP_SPAN, 64       # 0x2df900
-W2_RATE_DM = W2_STATE_DM + 16 * W2_STATE_STRIDE              # 0x2dfd00: RATE -> u32 step a block
-W2_LEVEL_DM = W2_RATE_DM + 128 * 4                           # 0x2dff00: LEV -> float32 gain
-W2_RND_DM = W2_LEVEL_DM + 128 * 4                            # 0x2e0100: 256 float32 in [0, 1)
+STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_load's state
+# PERC (v0.11, docs/perc.md): machine type 5, in Waverider's former place. Its code is
+# too big for L1 (about 26 KB), so it runs from L2, above everything the stock stream
+# loads (scripts/sharc_l2_ceiling.py: neither the engine's init nor any stock machine
+# touches L2 above the image's end) and well below the startup's non-cacheable window
+# 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
+# serves it. Its voices' state and scratch stay in L1, its tables in DDR.
+PERC_L2_LOAD = 0x200C0000
+PERC_L2_SPAN = 0x10000                       # 64 KB reserved; the code is about 26 KB
+PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
+L2_IMAGE_END = 0x2008823C                    # the stock stream's last L2 byte
+L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 window starts here
+PERC_SCRATCH_DM = 0x2DDE80                   # 55 words (dnfw.perc.machines.SC_WORDS)
+PERC_STATE_DM, PERC_STATE_STRIDE = 0x2DE180, 128             # 16 voices x 32 words
+PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
+# W2's random table (dnfw.waverider.live.rnd_table): Waverider is gone (v0.11), but
+# RESONATOR, CZ and GRAN read it here
+W2_RND_DM = 0x2E0100                                         # 256 float32 in [0, 1)
 # PING (docs/ping.md): its code (entered from machine5_live's tail), 16 x 128 bytes
 # of state, a few words of scratch, then its tables (dnfw.ping.live.tables_bytes)
 PING_CODE_DM, PING_CODE_SPAN = 0x2E0500, 0x1800
@@ -130,31 +126,12 @@ CZ_SW = CZ_CODE_DM // 2                                      # 0x1730a0 (0x17300
 CZ_STATE_DDR, CZ_STATE_STRIDE = 0x81202000, 64
 CZ_TABLES_DDR = CZ_STATE_DDR + 16 * CZ_STATE_STRIDE          # 0x81202400
 
-# W5: the tables live in the SHARC's DDR (docs/w5-tables.md). The stock boot stream
-# loads DDR to 0x8052fbe0 and the engine's init writes up to 0x80530be8
-# (scripts/sharc_ddr_ceiling.py); the tables start 16 MB in, far above both.
-TABLES_DDR = 0x81000000
-TABLE_BYTES = 16 * 512 * 2                   # 16 frames x 512 int16
 DDR_FLOOR = 0x80600000                       # nothing of ours below this in DDR
-TABLE_COUNT = len(factory.TABLES)
-
-# W3: osc 2 (docs/w3-osc2.md), one routine in two of L1's free gaps: osc2.asm after
-# reader_m5's code, osc2b.asm in the tail of PING's code span (which ping.asm does not
-# reach). Its per-voice state and its buffer in the gap after the increment table; its
-# reader block and scratch in the state block's free words.
-OSC2_CODE_DM = 0x2DD7A0
-OSC2_SW = OSC2_CODE_DM // 2                  # 0x16ebd0
-OSC2B_CODE_DM = 0x2E1A40
-OSC2B_SW = OSC2B_CODE_DM // 2                # 0x170d20
-OSC2_SCRATCH_DM = 0x2DDE8C                   # osc 1's note, LEV, g, the trigger
-OSC2_BLOCK_DM = 0x2DDEC0                     # one reader block, 8 words
-OSC2_STATE_DM, OSC2_STATE_STRIDE = 0x2DE480, 16   # phase, s, gp
-OSC2_BUF_DM = 0x2DE580                       # 32 float32
-IDLE_DM = 0x2DEA00                           # idle_load.asm, in the gap before table 0
+IDLE_DM = 0x2DEA00                           # idle_load.asm
 IDLE_SW = IDLE_DM // 2                       # 0x16f500
 IDLE_STATE_DM = 0x2DE100                     # its save area and counters (state block tail)
 COUNT_DM = 0x2DEC00                          # block_count.asm, after idle_load.asm
-COUNT_SW = COUNT_DM // 2                     # 0x16f600: the entry JUMP's target
+COUNT_SW = COUNT_DM // 2                     # 0x16f600: the entry JUMP's target, which goes on to PERC
 EMARK_DM = 0x2DED00                          # entry_mark.asm: EMUCLK as the handler calls 0x1c2712
 EMARK_SW = EMARK_DM // 2                     # 0x16f680
 L2_LOAD, L2_SW = 0x20000000, 0xB80000        # L2 code: load address 0x20000000 is sw 0xb80000
@@ -178,24 +155,6 @@ class DspError(ValueError):
     pass
 
 
-def tables() -> list[list[list[int]]]:
-    """The factory tables in slot order (`factory.TABLES`); slots 0 and 1 are the two
-    M5 shipped: the saw darkening to a sine, and the overtone series."""
-    return factory.tables()
-
-
-def table_addresses(count: int | None = None) -> list[int]:
-    n = TABLE_COUNT if count is None else count
-    return [TABLES_DDR + k * TABLE_BYTES for k in range(n)]
-
-
-def slot_lut(count: int | None = None) -> list[int]:
-    """TBL's value >> 8 (0..127, WaveTone's DRIF record) -> table slot, the knob's
-    travel shared evenly between the tables."""
-    n = TABLE_COUNT if count is None else count
-    return [min(n - 1, (v * n) >> 7) for v in range(128)]
-
-
 def sw_to_load(sw: int) -> int:
     return LOAD_ALIAS + 2 * sw
 
@@ -215,21 +174,11 @@ def _code() -> dict:
 
 
 def objects() -> dict[str, bytes]:
-    """The committed SHARC objects: reader, loop, entry JUMP, idle stub, idle JUMP."""
+    """The committed SHARC objects: PERC, the entry JUMP, the stubs, the filters, the machines."""
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
-            for name in ("reader", "machine5_live", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "ping", "rings", "cz", "osc2", "osc2b", "gran")}
-
-
-def directory() -> bytes:
-    """magic, count, the table pointers, zero-padded to DIRECTORY_CAP, then the
-    128-word TBL -> slot table."""
-    addrs = table_addresses()
-    head = struct.pack("<II", DIRECTORY_MAGIC, len(addrs)) + struct.pack("<%dI" % len(addrs), *addrs)
-    if len(head) > DIRECTORY_CAP:
-        raise DspError(f"{len(addrs)} tables do not fit the directory")
-    return head + bytes(DIRECTORY_CAP - len(head)) + struct.pack("<128I", *slot_lut())
+            for name in ("perc", "entry_jump", "idle_load", "idle_jump", "block_count",
+                         "entry_mark", "emark_jump", "ping", "rings", "cz", "gran")}
 
 
 def spans() -> list[tuple[str, int, bytes]]:
@@ -240,26 +189,17 @@ def spans() -> list[tuple[str, int, bytes]]:
     at least 64 bytes of zeros (a zero word is a NOP)."""
     obj = objects()
     raw = [
-        ("reader_m5.asm (wr_render5)", READER_DM, obj["reader"]),
-        ("osc2.asm (wr_osc2)", OSC2_CODE_DM, obj["osc2"]),
+        ("free since v0.11 (Waverider's reader and osc 2; zeros)", REGION[0], b""),
         ("RESONATOR scratch (zeros)", RINGS_SCRATCH_DM, bytes(0x200)),
         ("CZ scratch (zeros)", CZ_SCRATCH_DM, bytes(0x100)),
-        ("state: save area, counters, 16 reader blocks (zeros)", STATE_DM, bytes(STATE_BYTES)),
-        ("increment table, 129 float32", INC_TABLE_DM, live.table_bytes()),
-        ("osc 2 state, 16 voices x 16 bytes, then its buffer (zeros)", OSC2_STATE_DM,
-         bytes(16 * OSC2_STATE_STRIDE + 128)),
-        ("wavetable directory", DIRECTORY_DM, directory()),
+        ("state: save area, PERC scratch, idle_load's counters (zeros)", STATE_DM, bytes(STATE_BYTES)),
+        ("PERC state: 16 voices x 128 bytes (zeros)", PERC_STATE_DM, bytes(16 * PERC_STATE_STRIDE)),
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
         ("block_count.asm (wr_count)", COUNT_DM, obj["block_count"]),
         ("entry_mark.asm (wr_emark)", EMARK_DM, obj["entry_mark"]),
-        ("W5 POS glide state: 16 positions, 16 note counters (zeros)", SMOOTH_DM, bytes(SMOOTH_BYTES)),
-        ("machine5_live.asm (wr_type5v)", LOOP_DM, obj["machine5_live"]),
-        ("W2 scanner state: 16 voices x 16 words (zeros)", W2_STATE_DM, bytes(16 * W2_STATE_STRIDE)),
-        ("W2 RATE table, 128 u32", W2_RATE_DM, struct.pack("<128I", *live.rate_table())),
-        ("W2 LEV table, 128 float32", W2_LEVEL_DM, struct.pack("<128f", *live.level_table())),
-        ("W2 random table, 256 float32", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
+        ("free since v0.11 (Waverider's loop, scanner and tables; zeros)", EMARK_DM + 0x100, b""),
+        ("W2 random table, 256 float32 (RESONATOR, CZ, GRAN)", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
         ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
-        ("osc2b.asm (wr_osc2b)", OSC2B_CODE_DM, obj["osc2b"]),
         ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),
         ("gran.asm (wr_gran)", GRAN_CODE_DM, obj["gran"]),
         ("GRAN scratch (zeros)", GRAN_SCRATCH_DM, bytes(0x100)),
@@ -299,12 +239,15 @@ def _cz_tables() -> bytes:
     return cz_live.tables_bytes()[0]
 
 
+def _perc_tables() -> bytes:
+    from ..perc import machines as perc_machines
+    return perc_machines.tables_bytes()[0]
+
+
 def ddr_spans() -> list[tuple[str, int, bytes]]:
-    """(what, load address, payload) of each table, in DDR (load address = address),
-    then RESONATOR's voice state (zeros, so a fill block) and tables, then CZ's."""
-    names = factory.names()
-    return [(f"table {k}: {names[k]}", at, reference.dsp_bytes(tab))
-            for k, (at, tab) in enumerate(zip(table_addresses(), tables()))] + [
+    """(what, load address, payload) of each DDR span (load address = address): the
+    machines' and filters' state (zeros, so fill blocks) and tables."""
+    return [
         ("RESONATOR state: 16 voices x 256 bytes (zeros)", RINGS_STATE_DDR,
          bytes(16 * RINGS_STATE_STRIDE)),
         ("RESONATOR tables", RINGS_TABLES_DDR, _rings_tables()),
@@ -313,7 +256,33 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("PING tables", PING_TABLES_DDR, _ping_tables()),
         ("SHFT tables", SHFT_TABLES_DDR, _shft_tables()),
         ("GRAN tables", GRAN_TABLES_DDR, _gran_tables()),
+        ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
         ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE))]
+
+
+def l2_spans() -> list[tuple[str, int, bytes]]:
+    """(what, load address, payload) of what goes in L2: PERC's code, zero-padded to
+    PERC_L2_SPAN (so at least 64 bytes of NOPs after it)."""
+    code = objects()["perc"]
+    if PERC_L2_SPAN - len(code) < 64:
+        raise DspError(f"perc.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
+    return [("perc.asm (wr_perc), in L2", PERC_L2_LOAD, code + bytes(PERC_L2_SPAN - len(code)))]
+
+
+def _check_l2(stock: bytes, span_list) -> None:
+    blocks = [b for b in bootstream.walk(stock).blocks if b.count]
+    for what, at, payload in span_list:
+        lo, hi = at, at + len(payload)
+        if lo < L2_IMAGE_END + 0x10000 or hi > L2_NOCACHE - 0x10000:
+            raise DspError(f"{what} at {lo:#x}..{hi:#x} is outside {L2_IMAGE_END + 0x10000:#x}.."
+                           f"{L2_NOCACHE - 0x10000:#x} (64 KB clear of the stock image and the "
+                           "non-cacheable window)")
+        for b in blocks:
+            if b.target < hi and lo < b.target + b.count:
+                raise DspError(f"{what} overlaps the stock block at {b.target:#x}")
+    for b in blocks:
+        if 0x20000000 <= b.target < 0x20100000 and b.target + b.count > L2_IMAGE_END:
+            raise DspError(f"the stock block at {b.target:#x} ends past L2_IMAGE_END")
 
 
 def _gran_tables() -> bytes:
@@ -339,13 +308,13 @@ def _check_ddr(stock: bytes, span_list) -> None:
 def placements() -> list[dict]:
     out = [{"what": what, "load_address": f"{at:#010x}", "dm_byte": f"{at - LOAD_ALIAS:#08x}",
             "bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
-           for what, at, payload in spans() + ddr_spans()]
+           for what, at, payload in spans() + ddr_spans() + l2_spans()]
     obj = objects()
-    out += [{"what": f"patch: entry JUMP {COUNT_SW:#x} (the block counter, then the loop) + NOP at sw 0x1c9448",
+    out += [{"what": f"patch: entry JUMP {COUNT_SW:#x} (the block counter, then PERC) + NOP at sw 0x1c9448",
              "load_address": f"{sw_to_load(ENTRY_SW):#010x}",
              "bytes": len(obj["entry_jump"]) + len(NOP16),
              "stock": ENTRY_STOCK.hex(), "new": (obj["entry_jump"] + NOP16).hex()},
-            {"what": "patch: machine lookup 0x25d748[5] 0 -> 5, [6] 0 -> 6 (RESONATOR), [7] 0 -> 7 (CZ)",
+            {"what": "patch: machine lookup 0x25d748[5] 0 -> 5 (PERC), [6] 0 -> 6 (RESONATOR), [7] 0 -> 7 (CZ)",
              "load_address": f"{dm_to_load(LOOKUP_DM + 20):#010x}", "bytes": 12,
              "stock": "000000000000000000000000", "new": "050000000600000007000000"},
             {"what": f"patch: the idle loop's back edge at sw {IDLE_SITE_SW:#x} -> JUMP {IDLE_SW:#x}",
@@ -454,7 +423,7 @@ def section7_idle_only(stock: bytes) -> bytes:
 
 
 def section7(stock: bytes) -> bytes:
-    """DN2 1.11's section 7 -> Waverider's. Refuses anything else."""
+    """DN2 1.11's section 7 -> the mod's. Refuses anything else."""
     digest = hashlib.sha256(stock).hexdigest()
     if digest != STOCK_SHA256:
         raise DspError(f"section 7 sha256 {digest[:12]}... is not stock DN2 1.11's "
@@ -480,9 +449,11 @@ def section7(stock: bytes) -> bytes:
     _check_free(stock, added)
     ddr = ddr_spans()
     _check_ddr(stock, ddr)
+    l2 = l2_spans()
+    _check_l2(stock, l2)
 
     out = bytearray(bootstream.insert_before_final(
-        stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr)))
+        stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr + l2)))
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
     bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<III", 5, MACHINE6, MACHINE7))
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])

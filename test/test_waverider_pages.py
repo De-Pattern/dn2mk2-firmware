@@ -1,5 +1,5 @@
-"""Waverider's own SYN pages (M7) and its waveform display (M8): the committed code
-spec, the hooks it installs, and the display's copy of the tables."""
+"""Our machines' own SYN pages (Waverider's M7/M8 mechanism; PERC's since v0.11): the
+committed code spec, the hooks it installs, and PERC's names."""
 
 from __future__ import annotations
 
@@ -8,7 +8,8 @@ import pathlib
 import struct
 
 from dnfw.waverider import coldfire as CF
-from dnfw.waverider import dsp, pages, wave
+from dnfw.perc import machines as PM
+from dnfw.waverider import pages
 
 SPEC = json.loads((pathlib.Path(__file__).parents[1] / "src/dnfw/mods/waverider_code.json").read_text())
 CHUNK = bytes.fromhex(SPEC["chunk"]["code"])
@@ -59,35 +60,41 @@ def test_the_strings_carry_an_unshareable_header():
         assert struct.unpack(">IIi", CHUNK[at - 12:at]) == (len(text), len(text), -1)
 
 
-def test_the_spans_are_the_tables_the_sharc_plays():
-    got = wave.spans()
-    assert len(got) == len(dsp.tables()) == wave.TABLES
-    for table in got:
-        assert len(table) == wave.FRAMES
-        for lo, hi in table:
-            assert len(lo) == len(hi) == wave.WIDTH
-            assert all(-127 <= a <= b <= 127 for a, b in zip(lo, hi))
+def test_perc_pages_are_type_then_the_eight_parameters():
+    assert pages.PAGES[0][0] == PM.TYPE_REC[0] == 252
+    assert list(pages.PAGES[0][1:]) + [pages.PAGES[1][0]] == [r for r, *_ in PM.PARAMS]
+    assert pages.PAGES[1][1:] == (0,) * 7
+    used = set(pages.PAGES[0]) | set(pages.PAGES[1])
+    assert not used & set(pages.UNUSED)
+    assert pages.LABELS == {}                       # every label comes from the record's name
 
 
-def crossings(lo, hi):
-    mids = [(a + b) / 2 for a, b in zip(lo, hi)]
-    return sum(1 for a, b in zip(mids, mids[1:]) if (a < 0) != (b < 0))
+def test_every_machine_names_its_eight_parameters():
+    names = pages.perc_names()
+    assert len(names) == PM.N
+    for k, row in enumerate(names):
+        assert [sh for _, sh in row] == list(PM.PNAMES[PM.NAMES[k]])
+        assert all(lo and len(sh) <= 4 for lo, sh in row)
+        assert all((sh == "-") == (lo == "Unused") for lo, sh in row)
 
 
-def test_the_16th_partial_draws_its_16_cycles():
-    # 16 columns put every point sample of it on a zero crossing (a flat line, M8);
-    # across the strip it is 16 cycles, full height
-    lo, hi = wave.spans()[1][15]
-    assert min(lo) < -100 and max(hi) > 100
-    assert 30 <= crossings(lo, hi) <= 32
+def test_the_page_type_matches_the_dsp():
+    # page.c's perc_of and dnfw.perc.program both: (min(v >> 8, 127) * N) >> 7
+    from dnfw.perc import live as PL
+    h = PL.Harness(0)
+    for k in range(PM.N):
+        h.set_controls(k, [0.5] * 8)
+        word = h.mem.get((PM.FRAME + PM.frame_offset(PM.TYPE_REC[1])) & ~3)
+        off = PM.FRAME + PM.frame_offset(PM.TYPE_REC[1])
+        word = (word >> 16) & 0xFFFF if off & 2 else word & 0xFFFF
+        assert pages.type_of(word) == k
 
 
-def test_the_fundamental_is_one_cycle():
-    lo, hi = wave.spans()[1][0]
-    half = wave.WIDTH // 2
-    mids = [(a + b) / 2 for a, b in zip(lo, hi)]
-    assert max(mids[:half]) > 100 and min(mids[half:]) < -100
-    assert crossings(lo, hi) == 1
+def test_the_c_header_carries_perc_tables():
+    h = pages.c_header()
+    assert f"#define PERC_N {PM.N}" in h
+    for name in PM.NAMES:
+        assert f'"{name}"' in h
 
 
 def test_the_grid_site_calls_wr_grid_then_two_nops():
@@ -101,12 +108,6 @@ def test_the_renderer_sits_between_the_assembly_and_the_runtime():
     assert pages.LOAD + len(CHUNK) <= pages.C_END
 
 
-def test_the_display_data_is_its_own_chunk_where_the_page_reads_it():
-    # W5: the spans are a chunk at wave.SPANS_LOAD, in [table][frame][min, max][column]
-    # order, the layout page.c's `wr_spans` pointer casts it to
+def test_no_wave_display_chunk_since_perc():
     from dnfw.mods.waverider import SPEC
-    data = bytes(v & 0xFF for table in wave.spans() for lo, hi in table for v in lo + hi)
-    assert SPEC["spans_chunk"]["load"] == wave.SPANS_LOAD
-    assert bytes.fromhex(SPEC["spans_chunk"]["code"]) == data == wave.span_bytes()
-    assert len(data) == wave.TABLES * wave.FRAMES * 2 * wave.WIDTH
-    assert data not in CHUNK
+    assert "spans_chunk" not in SPEC

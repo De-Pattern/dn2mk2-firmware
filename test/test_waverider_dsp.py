@@ -16,7 +16,7 @@ import struct
 import pytest
 
 from dnfw.image import bootstream, sharc_object
-from dnfw.waverider import dsp, harmonics, live, reduce, render, testtable
+from dnfw.waverider import dsp
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 IMAGE = ROOT / "00_Resources" / "00_Firmware" / "Digitone_II_OS1.11_dist.zip"
@@ -42,8 +42,9 @@ def built(stock7) -> bytes:
 
 def test_committed_objects_match_their_sources():
     spec = json.loads(dsp.CODE.read_text(encoding="utf-8"))
-    for key, name in (("reader", "reader_m5"), ("machine5_live", "machine5_live"), ("idle_load", "idle_load"),
-                      ("block_count", "block_count"), ("entry_mark", "entry_mark")):
+    for key, name in (("perc", "perc"), ("idle_load", "idle_load"), ("block_count", "block_count"),
+                      ("entry_mark", "entry_mark"), ("ping", "ping"), ("rings", "rings"), ("cz", "cz"),
+                      ("gran", "gran")):
         src = (SHARC / f"{name}.asm").read_bytes().replace(b"\r\n", b"\n")
         assert spec[key]["source_sha256"] == hashlib.sha256(src).hexdigest(), name
         csrc = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
@@ -56,7 +57,7 @@ def test_our_sources_avoid_dag1_m0_m3_in_memory_accesses():
     """No DM(..M0..M3..) access and no pre-modify read outside a DO loop (the two
     forms selas and selmap disagree on; docs/waverider-m5-dsp.md)."""
     import re
-    for name in ("reader_m5", "machine5_live", "idle_load", "block_count", "entry_mark"):
+    for name in ("perc", "idle_load", "block_count", "entry_mark"):
         in_loop = False
         for line in (SHARC / f"{name}.asm").read_text().splitlines():
             code = line.split("//", 1)[0].strip().upper()
@@ -104,7 +105,7 @@ def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     entry = bootstream.read_span(built, dsp.sw_to_load(dsp.ENTRY_SW), 8)
     assert entry == bytes.fromhex("3e06160000f60100")          # jump 0x16f600 (the block counter) ; nop
     lookup = struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32))
-    assert lookup == (0, 1, 2, 3, 4, 5, 6, 7)            # Waverider 5, RESONATOR 6, CZ 7
+    assert lookup == (0, 1, 2, 3, 4, 5, 6, 7)            # PERC 5, RESONATOR 6, CZ 7
     # the idle loop's back edge, jump (pc,-0x10) at sw 0xb88abb in L2, becomes JUMP 0x16f500
     site = dsp.l2_sw_to_load(dsp.IDLE_SITE_SW)
     assert bootstream.read_span(stock7, site, 6) == bytes.fromhex("3e07ff00f0ff")
@@ -132,177 +133,33 @@ def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     assert diff and set(diff) <= allowed
 
 
-def test_directory_names_every_table_in_ddr_then_the_slot_table():
-    # W5: magic, count, one DDR pointer per table, zeros to 0x200, then TBL -> slot
-    d = dsp.directory()
-    n = dsp.TABLE_COUNT
-    head = struct.unpack(f"<{2 + n}I", d[:8 + 4 * n])
-    assert head[:2] == (0x57525431, n)
-    assert list(head[2:]) == [0x81000000 + 0x4000 * k for k in range(n)]
-    assert not any(d[8 + 4 * n:dsp.DIRECTORY_CAP])
-    lut = struct.unpack("<128I", d[dsp.DIRECTORY_CAP:])
-    assert lut[0] == 0 and lut[127] == n - 1
-    assert list(lut) == sorted(lut) and set(lut) == set(range(n))   # every table reachable, in order
-
-
-# -- the contract -------------------------------------------------------------------------------
-
-def test_increment_table_is_equal_tempered_at_48k():
-    t = live.increment_table()
-    assert len(t) == 129
-    assert t[69] == pytest.approx(440 / 48000 * 2 ** 32, rel=1e-7)
-    assert all(b > a for a, b in zip(t, t[1:]))
-    assert t[128] < 2 ** 31                                    # TRUNC stays in range
-    assert live.table_bytes() == struct.pack("<129f", *t)
-
-
-def test_increment_follows_the_note():
-    assert live.increment(72.0) == 2 * live.increment(60.0)
-    assert live.increment(-5.0) == live.increment(0.0)         # clamped
-    assert live.increment(200.0) == live.increment(127.0)
-    lo, mid, hi = live.increment(60.0), live.increment(60.5), live.increment(61.0)
-    assert lo < mid < hi
-
-
-def test_position_and_slot_from_frame_words():
-    assert live.position(0) == 0
-    assert live.position(0x7800) == 15 << 16                   # the frame: the sound's own 0x7800
-    assert live.position(0x7F00) == 15 << 16                   # clamped
-    assert live.position(0x4000) == 0x4000 << 5
-    # W5: TBL is DRIF (0..0x7f00); its travel is shared evenly between the tables
-    assert live.slot(0x0000, 11) == 0 and live.slot(0x7F00, 11) == 10
-    assert [live.slot(v << 8, 11) for v in range(128)] == dsp.slot_lut(11)
-    assert live.slot(0x7F00, 2) == 1 and live.slot(0x3F00, 2) == 0
-
-
-def test_tun1_is_the_sounds_own_scale():
-    """Read on the instrument through the USB probe, 2026-09-30."""
-    assert live.tuned(60.0, 0x4000) == 60.0
-    assert live.tuned(60.0, 0x4100) == 61.0
-    assert live.tuned(60.0, 0x4c00) == 72.0
-    assert live.tuned(60.0, 0x3400) == 48.0
-    assert live.tuned(60.0, 0x4080) == 60.5
-    assert live.tuned(3.0, 0x0400) == 0.0                      # below note 0 -> 0
-
-
-def test_render_blocks_carries_phase_across_a_slot_change():
-    # each block a note, so each call starts the W2 gain at its own value (a split
-    # render otherwise ramps its first block up from the zeroed state)
-    tables = dsp.tables()
-    z = live.TUN1_ZERO
-    a, ph = live.render_blocks(tables, [(60.0, 0, 0, z, True)], 32)
-    b, _ = live.render_blocks(tables, [(60.0, 0, 0x100, z, True)], 32, ph)
-    both, _ = live.render_blocks(tables, [(60.0, 0, 0, z, True), (60.0, 0, 0x100, z, True)], 32)
-    assert both == a + b
-
-
-# -- W2: the scanner (docs/w2-scanner.md) ---------------------------------------------------
-
-def test_w2_defaults_change_nothing():
-    """MPOS and MLEV at their centre, LEV at 100: POS exactly the glided value, the
-    gain exactly 1.0, so a sound that never touches them plays as W5."""
-    rates, levels, rnd = live.rate_table(), live.level_table(), live.rnd_table()
-    for k in range(8):
-        sc = live.Scanner()
-        for b in range(60):
-            p = {**live.DEFAULTS, "nlev": k << 4 << 8 if k else 0, "atk": 0x7F00}
-            s, u = sc.block(p, b == 0, rates, rnd)
-            assert live.scanned(0x50000, s, p["ofs1"]) == 0x50000
-            assert live.gain(u, p, levels) == 1.0
-    assert levels[100] == 1.0
-
-
-def test_w2_shapes_stay_in_range_and_one_shots_finish():
-    rates, rnd = live.rate_table(), live.rnd_table()
-    for k in range(8):
-        sc = live.Scanner()
-        us = []
-        for b in range(120):
-            s, u = sc.block({**live.DEFAULTS, "nlev": (k * 16) << 8, "atk": 0x7F00}, b == 0, rates, rnd)
-            assert 0.0 <= u <= 1.0 and -1.0 <= s <= 1.0
-            us.append(u)
-        if k == 6:
-            assert us[-1] == 1.0 and sc.done
-        if k == 7:
-            assert us[-1] == 0.0 and sc.done
-    assert [live.shape_of(v << 8) for v in (0, 16, 32, 48, 64, 80, 96, 127)] == list(range(8))
-
-
-def test_w2_rate_spans_its_range():
-    t = live.rate_table()
-    assert t == sorted(t) and t[-1] < 1 << 31
-    assert abs(t[0] / 2 ** 32 * live.BLOCK_HZ - live.RATE_MIN_HZ) < 1e-4
-    assert abs(t[-1] / 2 ** 32 * live.BLOCK_HZ - live.RATE_MAX_HZ) < 1e-3
-
-
-def test_w2_mpos_and_mlev_reach_their_ends():
-    levels = live.level_table()
-    assert live.scanned(0, 1.0, 0x6400) == 15 << 16              # +1 sweeps to the last frame
-    assert live.scanned(15 << 16, -1.0, 0x6400) == 0
-    assert live.scanned(0, -1.0, 0x6400) == 0                     # clamped
-    p = {**live.DEFAULTS, "pd1": 0x6400}
-    assert live.gain(0.0, p, levels) == 0.0 and live.gain(1.0, p, levels) == 1.0
-    p = {**live.DEFAULTS, "pd1": 0}
-    assert live.gain(1.0, p, levels) == 0.0 and live.gain(0.0, p, levels) == 1.0
-
-
-def test_w2_state_fits_after_the_loop():
-    assert dsp.W2_STATE_DM == dsp.LOOP_DM + dsp.LOOP_SPAN
-    # PING (P1b) follows the W2 tables: its code, state and tables end the region
-    assert dsp.W2_RND_DM + 4 * live.RND_COUNT == dsp.PING_CODE_DM
-    assert dsp.REGION[1] <= 0x2E7000                              # M5c's proven span
-
-
-# -- the tables -----------------------------------------------------------------------------------
-
-def _partial(frame, h):
-    n = len(frame)
-    return abs(sum(v * cmath.exp(-2j * math.pi * h * k / n) for k, v in enumerate(frame))) / n
-
-
-def test_slot0_is_the_saw_at_pos0_and_the_sine_at_pos15():
-    t0 = dsp.tables()[0]
-    assert t0 == list(reversed(testtable.table()))
-    assert _partial(t0[0], 2) > 0.2 * _partial(t0[0], 1)       # bright: harmonics present
-    assert _partial(t0[15], 2) < 1e-3 * _partial(t0[15], 1)    # pure sine
-
-
-def test_harmonics_frame_k_is_partial_k_plus_1():
-    t = harmonics.table()
-    assert len(t) == reduce.FRAMES and all(len(f) == reduce.POINTS for f in t)
-    for k in (0, 1, 7, 15):
-        strongest = max(range(1, 20), key=lambda h: _partial(t[k], h))
-        assert strongest == k + 1
-
-
-def test_tables_are_original_and_distinct():
-    tabs = dsp.tables()
-    assert len(tabs) == dsp.TABLE_COUNT
-    blobs = [render.dsp_bytes(t) for t in tabs]
-    assert len(set(blobs)) == len(blobs)
-    assert all(len(b) == dsp.TABLE_BYTES for b in blobs)
-
-
-def test_slots_0_and_1_keep_the_m5_tables():
-    # a sound saved on the M5 build (TBL1 0 or 1, and DRIF 0 now) keeps its first table
-    from dnfw.waverider import harmonics, testtable
-    tabs = dsp.tables()
-    assert tabs[0] == list(reversed(testtable.table())) and tabs[1] == harmonics.table()
-
-
-def test_tables_are_in_ddr_clear_of_the_stock_image_and_the_engine():
+def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     ddr = dsp.ddr_spans()
-    assert [a for _, a, _ in ddr][:-8] == dsp.table_addresses()
-    # then RESONATOR's state (zeros) and tables, CZ's state (zeros) and tables; v0.10:
-    # PING's and SHFT's tables, GRAN's tables and its buffers (zeros)
-    assert [a for _, a, _ in ddr][-8:] == [dsp.RINGS_STATE_DDR, dsp.RINGS_TABLES_DDR,
-                                          dsp.CZ_STATE_DDR, dsp.CZ_TABLES_DDR,
-                                          dsp.PING_TABLES_DDR, dsp.SHFT_TABLES_DDR,
-                                          dsp.GRAN_TABLES_DDR, dsp.GRAN_BUF_DDR]
-    assert not any(ddr[-8][2]) and not any(ddr[-6][2]) and not any(ddr[-1][2])
+    # RESONATOR's state (zeros) and tables, CZ's state (zeros) and tables, PING's, SHFT's,
+    # GRAN's and PERC's tables, GRAN's buffers (zeros); Waverider's wavetables went in v0.11
+    assert [a for _, a, _ in ddr] == [dsp.RINGS_STATE_DDR, dsp.RINGS_TABLES_DDR,
+                                      dsp.CZ_STATE_DDR, dsp.CZ_TABLES_DDR,
+                                      dsp.PING_TABLES_DDR, dsp.SHFT_TABLES_DDR,
+                                      dsp.GRAN_TABLES_DDR, dsp.PERC_TABLES_DDR, dsp.GRAN_BUF_DDR]
+    assert not any(ddr[0][2]) and not any(ddr[2][2]) and not any(ddr[-1][2])
     # the stock stream loads DDR to 0x8052fbe0 and init writes up to 0x80530be8
-    # (scripts/sharc_ddr_ceiling.py); the tables start 16 MB in
+    # (scripts/sharc_ddr_ceiling.py); ours start 16 MB in
     assert min(a for _, a, _ in ddr) >= dsp.DDR_FLOOR > 0x80530BE8
+
+
+def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(stock7, built):
+    # scripts/sharc_l2_ceiling.py (2026-10-20, a fresh engine init and every stock machine):
+    # nothing reads or writes L2 above the image's end, 0x2008823c
+    ((what, at, payload),) = dsp.l2_spans()
+    code = dsp.objects()["perc"]
+    assert at == dsp.PERC_L2_LOAD and payload[:len(code)] == code and not any(payload[len(code):])
+    assert len(payload) - len(code) >= 64
+    assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.L2_NOCACHE - 0x10000
+    for b in bootstream.walk(stock7).blocks:
+        if b.count and 0x20000000 <= b.target < 0x20100000:
+            assert b.target + b.count <= dsp.L2_IMAGE_END
+    assert bootstream.read_span(built, at, len(payload)) == payload
+    assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
@@ -313,14 +170,10 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
     obj = dsp.objects()
     code_spans = [x for x in sp if "asm" in x[0]]
-    assert len(code_spans) == 11
-    # W5: the loop moved to 0x2def00, after the glide state; P1b: PING after the W2 tables;
-    # RESONATOR's after SHFT's tables, CZ's after RESONATOR's; v0.10: osc 2 after the
-    # reader and after PING, GRAN where PING's tables were
-    for (what, _, payload), code in zip(code_spans, (obj["reader"], obj["osc2"], obj["idle_load"],
-                                                     obj["block_count"], obj["entry_mark"],
-                                                     obj["machine5_live"], obj["ping"], obj["osc2b"],
-                                                     obj["gran"], obj["rings"], obj["cz"])):
+    assert len(code_spans) == 7
+    # v0.11: Waverider's reader, loop and osc 2 are gone (their room is zeros); PERC is in L2
+    for (what, _, payload), code in zip(code_spans, (obj["idle_load"], obj["block_count"], obj["entry_mark"],
+                                                     obj["ping"], obj["gran"], obj["rings"], obj["cz"])):
         assert payload[:len(code)] == code
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
 
@@ -362,9 +215,10 @@ def test_the_idle_stub_is_placed_and_returns_where_its_source_says():
     assert be[offs[src.index("IF GE JUMP 0x16f53d;")]:][:6].hex() == "06220016f53d"
     assert at["R11 = DM(0x2de13c);"] == 0x16F53D                  # wr_idle_busy.
     assert be[offs[-1]:].hex() == "063e00b88aab" and dsp.IDLE_RETURN_SW == 0xB88AAB
-    # its DM: 0x2de100..0x2de117, after the 16 reader blocks (to 0x2de100) and inside the state block
-    assert dsp.READER_BLOCKS_DM + 16 * dsp.READER_BLOCK_BYTES == dsp.IDLE_STATE_DM
-    assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES <= dsp.STATE_DM + dsp.STATE_BYTES == dsp.INC_TABLE_DM
+    # its DM: 0x2de100..0x2de13f, inside the state block, after PERC's scratch, before PERC's state
+    from dnfw.perc import machines as PM
+    assert dsp.PERC_SCRATCH_DM + 4 * len(PM.SC_WORDS) <= dsp.IDLE_STATE_DM
+    assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES <= dsp.STATE_DM + dsp.STATE_BYTES == dsp.PERC_STATE_DM
     stores = {c for c in src if c.startswith("DM(")}
     assert stores <= {"DM(0x2de100) = R8;", "DM(0x2de104) = R9;", "DM(0x2de108) = R10;", "DM(0x2de134) = R11;",
                       "DM(0x2de114) = R9;", "DM(0x2de10c) = R8;", "DM(0x2de110) = R9;",
@@ -373,16 +227,16 @@ def test_the_idle_stub_is_placed_and_returns_where_its_source_says():
                       "DM(0x2c49e0) = R9;", "DM(0x2c59e0) = R9;"}
 
 
-def test_the_block_counter_goes_on_to_the_loop():
+def test_the_block_counter_goes_on_to_perc():
     spec = json.loads((SHARC / "block_count.json").read_text(encoding="utf-8"))
     assert int(spec["load_sw"], 16) == dsp.COUNT_SW == 0x16F600
     be = bytes.fromhex(spec["object_parcels_be"])
-    assert be[spec["instruction_offsets"][-1]:].hex() == "063e0016f780"   # JUMP 0x16f780, the loop (W5)
+    assert be[spec["instruction_offsets"][-1]:].hex() == "063e00be0000"   # JUMP 0xbe0000, PERC in L2 (v0.11)
     src = [ln.split("//", 1)[0].strip() for ln in (SHARC / "block_count.asm").read_text().splitlines()]
     stores = {c for c in src if c.startswith("DM(")}
     assert stores == {"DM(0x2de11c) = R8;", "DM(0x2de120) = R9;", "DM(0x2de118) = R8;",
                       "DM(0x2c49d8) = R8;", "DM(0x2c59d8) = R8;", "DM(0x2de124) = R8;"}
-    assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES >= 0x2DE124 and dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES <= dsp.INC_TABLE_DM
+    assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES >= 0x2DE124 and dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES <= dsp.PERC_STATE_DM
 
 
 def test_the_entry_mark_does_the_displaced_load_and_returns_to_the_call():
@@ -397,9 +251,16 @@ def test_the_entry_mark_does_the_displaced_load_and_returns_to_the_call():
     assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES >= 0x2DE140
 
 
-def test_the_reader_returns_in_the_firmwares_shape():
-    lines = [ln.split("//", 1)[0].strip() for ln in (SHARC / "reader_m5.asm").read_text().splitlines()]
-    lines = [ln for ln in lines if ln]
-    k = lines.index("I12 = DM(M7, I6);")
-    assert lines[k + 2] == "JUMP (M14, I12) (DB);" and lines[k + 1] != lines[k + 2]
-    assert lines[k + 4] == "RFRAME;"                           # second delay slot
+def test_perc_saves_what_ping_restores_and_hands_on_to_resonator():
+    lines = [ln.split("//", 1)[0].strip() for ln in (SHARC / "perc.asm").read_text().splitlines()]
+    lines = [ln for ln in lines if ln and not ln.startswith(".") and not ln.endswith(":")]
+    regs = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12", "M0", "M1", "M2", "M3", "M4"]
+    assert lines[:len(regs)] == [f"DM({0x2DDE00 + 4 * k:#x}) = {r};" for k, r in enumerate(regs)]
+    assert f"JUMP {dsp.RINGS_SW:#x};" in lines
+    # only the registers saved there are written (and no M, L, B or DAG2 other than I12)
+    import re
+    for ln in lines:
+        m = re.match(r"(I|M|L|B)(\d+) =", ln)
+        if m:
+            assert f"{m.group(1)}{m.group(2)}" in ("I1", "I2", "I4", "I12"), ln
+    assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)

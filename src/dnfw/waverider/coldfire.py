@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import struct
 
-from . import pages, wave
+from . import pages
 from ..ping import coldfire as ping_cf
 from ..ping import pages as ping_pages
 from dataclasses import dataclass
@@ -49,8 +49,8 @@ BASE = 0x40000400
 NEW_TYPE = 5
 NEW_TYPES = (5, 6, 7)                   # Waverider; RESONATOR (docs/rings.md); CZ (docs/cz.md): WaveTone clones
 CLONE = 1                               # WaveTone
-LONG_NAME, SHORT_NAME = "Waverider", "WVR"
-MACHINE_NAMES = {5: ("Waverider", "WVR"), 6: ("Resonator", "RSN"), 7: ("CZ Phase", "CZP")}
+LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's place
+MACHINE_NAMES = {5: ("Perc", "PRC"), 6: ("Resonator", "RSN"), 7: ("CZ Phase", "CZP")}
 # RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list
 # outgrew the three caves W5 used, so all of it is a platform CODE chunk in RAM, after
 # PING's (dnfw.ping.coldfire.LOAD) and below the platform runtime; the caves are
@@ -393,7 +393,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
 
     # Milestone 7: Waverider's pages, as one platform CODE chunk in RAM (pages.LOAD)
     # the C page renderer first (the assembly calls it), at C_LOAD
-    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header() + wave.c_source(),
+    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header(),
                                      base=pages.C_LOAD)
     if cbss:
         raise ComposeError(f"the page renderer has {cbss} bytes of BSS; nothing zeroes it")
@@ -540,16 +540,10 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # checks [C_LOAD, c_text_end) as code
     layout["c_load"] = pages.C_LOAD
     layout["c_text_end"] = csyms["__text_end"]
-    # the wave spans are data (signed sample bytes): where they lie, so the RAM check
-    # (dnfw.mods.ramcheck) can tell four of their bytes from an address
-    spans = wave.span_bytes()
-    layout["wr_spans"] = wave.SPANS_LOAD
-    layout["wr_spans_end"] = wave.SPANS_LOAD + len(spans)
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)
     layout.update(pbuilt["layout"])
     return {"content": bytes(content), "edits": edits, "layout": layout,
             "chunk": {"load": pages.LOAD, "code": chunk},
-            "spans_chunk": {"load": wave.SPANS_LOAD, "code": spans},
             "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)},
             "ping_chunk": pbuilt["chunk"]}

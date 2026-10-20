@@ -1,4 +1,4 @@
-"""Waverider Milestone 5 (offline): the section 7 a flashable build ships, run in the runner.
+"""The section 7 a flashable build ships, run in the SHARC runner (offline; Waverider M5 began it).
 
     python scripts/sharc_waverider_m5.py \\
         --image 00_Resources/00_Firmware/Digitone_II_OS1.11_dist.zip \\
@@ -12,29 +12,26 @@ through the firmware's own per-block routine `sw 0x1c2712` (frame unpack, slot
 dispatch, per-track chain), as Milestone 4 does. Steps, each PASS/FAIL
 (`docs/waverider-m5-dsp.md`):
 
-1. **decode** -- the section 7 is the builder's; every instruction of our code reads
-   the same to digikit's decoder and to selache's `selmap` as its source line says,
-   on the assembler's boundaries; the entry JUMP decodes as `jump dsp.LOOP_SW` (0x16ed00 since M5c).
-2. **map** -- WAV1 (param 26) lands in record +0x4, TBL1 (27) in +0x8, the trig note
-   in the note cell; a type-5 frame reaches record +0x1b4 as 5 with the stock clamp
-   (the clamp reads frame field 84, not the machine type); control: without the
-   lookup patch the type is squashed to 0; our spans read back as the image put them.
-3. **voice** -- the init Waverider sound (WaveTone's machine defaults, WAV1 0, TBL1 0,
-   note 60), a trigger on block 1: the type-5 loop is entered from the image's JUMP,
-   the per-type setup is the no-setup arm, the machine tap is bit-exact to
-   `dnfw.waverider.live` fed the DSP's own unpacked inputs, audible and correlated at
-   the amp's output. Controls: POS 120 (darker), TBL1 1 (the other table, bit-exact),
-   note 72 (an octave up), no trigger (silent).
+1. **decode** -- the section 7 is the builder's; every instruction of our code (PERC in
+   L2 included) reads the same to digikit's decoder and to selache's `selmap` as its
+   source line says, on the assembler's boundaries; the entry decodes as a 48-bit jump.
+2. **map** -- frame words land where the machines read them, the trig note in the note
+   cell; a type-5 frame reaches record +0x1b4 as 5 (control: without the lookup patch it
+   is squashed to 0); every span we add (L1 and L2) reads back as the image put it.
+3. **PERC** (docs/perc.md) -- at PERC's entry every block, `dnfw.perc.program` is run on
+   the DSP's own memory; every type-5 track's buffer and voice state when PERC hands on
+   must be bit-exact to it. All 24 machines (eight tracks at a time), pitch, retrigger,
+   TYPE turned mid-note, every parameter at its top and bottom, silence without a note.
 4. **stock** -- types 0-4 are bit-identical: the same frames with no type-5 track on
-   the M5 and the stock image give identical buffers on all 16 tracks, and in a
-   type-5 run tracks 1-15 match a stock run.
+   the modded and the stock image give identical buffers on all 16 tracks, and in a
+   type-5 run tracks 1-15 match a stock run; the stock filter types likewise.
 5. **frame** (with --frame/--frame-be/--frames) -- a caller's frame(s), used verbatim
-   every block; every type-5 track's buffer checked against the reference.
+   every block; every type-5 track bit-exact to the model.
+6-9. **PING, SHFT, GRAN, RESONATOR, CZ** -- each bit-exact to its own model.
 
 Every step writes WAVs under out/waverider/m5_*.wav (48 kHz, 16-bit mono, >= 2 s).
-Runner blocks are short, so a WAV made of them is LOOPED and says so, with a PREVIEW
-beside it: `dnfw.waverider.live`'s float32 reference -- bit-exact to the runner's
-machine tap -- over the whole file. `m5_report.json` has the numbers. Exit 0 when
+Runner blocks are short, so a WAV made of them is LOOPED and says so.
+`m5_report.json` has the numbers. Exit 0 when
 every step passes.
 """
 
@@ -66,14 +63,17 @@ from dnfw import voices as VOICES                                # noqa: E402
 import sharc_waverider_render as m1                            # noqa: E402
 import sharc_waverider_voice as m2                             # noqa: E402
 from dnfw.image import bootstream, sharc_object                # noqa: E402
-from dnfw.waverider import dsp, live, render, testtable        # noqa: E402
+from dnfw.waverider import dsp, testtable                       # noqa: E402
+from dnfw.perc import live as PL                                # noqa: E402
+from dnfw.perc import machines as PM                            # noqa: E402
+from dnfw.perc import program as PP                             # noqa: E402
 from dnfw.waverider import frame as FR                         # noqa: E402
 from dnfw.waverider import voice as V                          # noqa: E402
 
 OUT = ROOT / "out" / "waverider"
 SHARC = ROOT / "csrc" / "waverider" / "sharc"
 RATE, BLOCK = 48000, 32
-LOOP_RESUME = 0x1C944C          # where machine5_live rejoins the per-track chain
+LOOP_RESUME = 0x1C944C          # where the chain after PERC (RESONATOR, CZ, PING) rejoins the per-track chain
 AMP_RETURN = 0x1C99D3
 SETUP_GUARD, SETUP_TABLE_READ, SETUP_NONE = 0x1C905D, 0x1C90A9, 0x1C90D4
 CLAMP_MIN = 0x1C294C
@@ -84,12 +84,7 @@ TRIG_WORD = 0x25C4AC            # W5: the frame copy's word holding TRIG_NOTE (o
 TUN1 = 25                       # WaveTone's Osc1 Tune (Milestone 6)
 TUN1_ZERO = 0x4000              # the frame word for 0 semitones: the sound's own (probe, 2026-09-30)
 FRAME_COPY = 0x25C48C           # where sw 0x1c2712 copies the frame image
-# W2: the scanner's controls (dnfw.waverider.live, docs/w2-scanner.md)
-LEV1, ATK, OFS1, PD1, NLEV = 30, 40, 28, 29, 43
-TUN2, WAV2, OFS2, PD2, BASE, CHAR = 31, 32, 34, 35, 44, 47     # W3: osc 2's records
-W2_FIELDS = {"lev1": LEV1, "atk": ATK, "ofs1": OFS1, "pd1": PD1, "nlev": NLEV,
-             "tun2": TUN2, "wav2": WAV2, "ofs2": OFS2, "pd2": PD2, "base": BASE, "char": CHAR}
-W3_ON = 4                       # w3_late: osc 2's LEV comes up at this block
+PERC_L = PL.layout()            # where the build puts PERC (dnfw.waverider.dsp)
 
 
 # -- the machine ------------------------------------------------------------------------------
@@ -165,10 +160,11 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
     """BLOCKS calls of sw 0x1c2712, FRAMES(b) -> frame bytes. Records, per block: every
     track buffer after the type-5 loop (at 0x1c944c) and at the end of the dispatch;
     track 0 at the amp's input and output; each type-5 track's inputs as the DSP holds
-    them at the loop's entry; the reader blocks the loop filled; loop entries."""
+    them at PERC's entry, PERC's output and state against the model's (dnfw.perc.program
+    run on the DSP's memory at that entry); loop entries."""
     state = init
     out = {"machine": [], "amp_in": [], "amp_out": [], "buffers": [], "buffer_bits": [], "t5_inputs": [],
-           "reader_blocks": [], "loop_entries": 0, "setup": []}
+           "perc": [], "loop_entries": 0, "setup": []}
     instr = wall = 0
     for b in range(blocks):
         tap = {}
@@ -177,33 +173,40 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             tap["bufs"] = [m2.word(r.state, V.TRACK_BUFFERS + 4 * t) for t in range(16)]
 
         def at_loop(r):
+            # PERC's entry: each type-5 track's inputs, and the model (dnfw.perc.program,
+            # the same program as the assembled code) run on the DSP's memory as it is here
             out["loop_entries"] += 1
-            ins = {}
+            ins, model = {}, {}
             for t in range(16):
                 rec = V.track_record(t)
                 if m2.word(r.state, rec + V.TRACK_MACHINE) == 5:
                     ins[t] = {"note": V.bits_f32(m2.word(r.state, NOTE_CELL + 4 * t) or 0),
-                              "wav1": frame_word(r.state, FR.slot_offset(t, WAV1)),
-                              "tbl1": frame_word(r.state, FR.slot_offset(t, TBL1)),
-                              "drif": frame_word(r.state, FR.slot_offset(t, DRIF)),
                               "trig": bool(((m2.word(r.state, TRIG_WORD) or 0) >> 16) & (1 << t)),
-                              "tun1": frame_word(r.state, FR.slot_offset(t, TUN1)),
-                              "w2": {k: frame_word(r.state, FR.slot_offset(t, slot))
-                                     for k, slot in W2_FIELDS.items()}}
+                              "type": frame_word(r.state, FR.slot_offset(t, PM.TYPE_REC[1])),
+                              "params": [frame_word(r.state, FR.slot_offset(t, slot))
+                                         for _rid, slot, _lo, _top in PM.PARAMS]}
+                    st = r.state
+                    p, mem = PP.run_voice(PERC_L, lambda a, st=st: m2.word(st, a) or 0, t)
+                    buf = m2.word(st, PP.BUFFERS + 4 * t) or 0
+                    model[t] = {"out": [mem.get(buf + 4 * k) for k in range(BLOCK)],
+                                "state": [mem.get(PERC_L.state + 128 * t + 4 * k)
+                                          for k in range(PM.STATE_WORDS)],
+                                "steps": p.steps}
             tap["t5_inputs"] = ins
+            tap["perc_model"] = model
 
-        def at_reader(r):
-            # the parameter block as the loop hands it to the reader: M5c's reader counts
-            # the count word down to 0, so the contract is read on entry, not at resume
-            blk = m2.word_reg(r, "R4") or 0
-            t = (blk - dsp.READER_BLOCKS_DM) // 32
-            tap.setdefault("reader_in", {})[t] = [m2.word(r.state, blk + 4 * k) or 0 for k in range(6)]
+        def at_after_perc(r):
+            # RESONATOR's entry, PERC's tail: what PERC left in each type-5 track's buffer
+            # and state
+            if "perc_dsp" in tap:
+                return
+            tap["perc_dsp"] = {t: {"out": [m2.word(r.state, tap["bufs"][t] + 4 * k) or 0 for k in range(BLOCK)],
+                                   "state": [m2.word(r.state, PERC_L.state + 128 * t + 4 * k) or 0
+                                             for k in range(PM.STATE_WORDS)]}
+                               for t in tap.get("perc_model", {})}
 
         def at_resume(r):
             tap["machine"] = [m2.floats(r.state, tap["bufs"][t], BLOCK) for t in range(16)]
-            tap["reader_blocks"] = {t: tap.get("reader_in", {}).get(t)
-                                    or [m2.word(r.state, dsp.READER_BLOCKS_DM + 32 * t + 4 * k) or 0
-                                        for k in range(6)] for t in tap.get("t5_inputs", {})}
 
         def amp(r):
             if m2.word_reg(r, "R12") == tap["bufs"][0] and "amp_in" not in tap:
@@ -222,11 +225,15 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
         def none_arm(r):
             out["setup"].append(("none-arm", b, None))
 
-        hooks = {m3.DISPATCH: at_dispatch, dsp.LOOP_SW: at_loop, dsp.READER_SW: at_reader,
+        hooks = {m3.DISPATCH: at_dispatch, dsp.PERC_SW: at_loop, dsp.RINGS_SW: at_after_perc,
                  LOOP_RESUME: at_resume,
                  m3.AMP_STAGE: amp, AMP_RETURN: amp_ret, SETUP_GUARD: guard,
                  SETUP_TABLE_READ: table_read, SETUP_NONE: none_arm}
-        hooks.update(extra_hooks or {})
+        for k, fn in (extra_hooks or {}).items():
+            if k in hooks:                      # both: ours first, then the step's
+                hooks[k] = (lambda f0, f1: lambda r: (f0(r), f1(r)))(hooks[k], fn)
+            else:
+                hooks[k] = fn
         f = fixups(hooks)
         r = m4.unpack_call(state, frames(b))
         t0 = time.perf_counter()
@@ -242,7 +249,13 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
         out["buffer_bits"].append([[m2.word(r.state, tap["bufs"][t] + 4 * k) for k in range(BLOCK)]
                                    for t in range(16)])
         out["t5_inputs"].append(tap.get("t5_inputs", {}))
-        out["reader_blocks"].append(tap.get("reader_blocks", {}))
+        model, got = tap.get("perc_model", {}), tap.get("perc_dsp", {})
+        out["perc"].append({t: {"out_mismatches": sum(1 for x, y in zip(model[t]["out"], got.get(t, {}).get("out", [])) if x != y)
+                                + (0 if t in got else BLOCK),
+                                "state_mismatches": sum(1 for x, y in zip(model[t]["state"], got.get(t, {}).get("state", [])) if x != y)
+                                + (0 if t in got else PM.STATE_WORDS),
+                                "out": [V.bits_f32(x) for x in got.get(t, {}).get("out", [])],
+                                "model_steps": model[t]["steps"]} for t in model})
         instr += res[2]
         state = r
     return {**out, "ok": True, "blocks": blocks, "instructions": instr, "wall_s": round(wall, 1),
@@ -258,14 +271,6 @@ def frame_word(state, offset: int) -> int:
 
 def track_series(run, t) -> list[float]:
     return [x for blk in run["machine"] if blk for x in blk[t]]
-
-
-def reference_for(run, t, tables, precision="float32") -> list[float]:
-    """live.render_blocks fed the DSP's own unpacked inputs for track T, block by block."""
-    seq = [(i[t]["note"], i[t]["wav1"], i[t]["drif"], i[t].get("tun1", live.TUN1_ZERO), i[t]["trig"],
-            i[t].get("w2"))
-           for i in run["t5_inputs"] if t in i]
-    return live.render_blocks(tables, seq, BLOCK, 0, precision)[0]
 
 
 def mismatches(a, b) -> int:
@@ -300,19 +305,13 @@ def selmap_text(code: bytes, work: pathlib.Path) -> dict[int, tuple[int, str]]:
     return out
 
 
-def osc2_links_ok() -> bool:
-    """W3: the jumps between objects are addresses, not labels: machine5_live's into
-    wr_osc2, osc2's into wr_osc2b, and both of theirs back to machine5_live's wr_t5v_next."""
-    import sharc_resolve_jumps as R                      # noqa: PLC0415
-    loop = (SHARC / "machine5_live.asm").read_text(encoding="utf-8")
-    spec = json.loads((SHARC / "machine5_live.json").read_text(encoding="utf-8"))
-    nxt = dsp.LOOP_SW + spec["instruction_offsets"][R.labels(loop)["wr_t5v_next"]] // 2
-    a = (SHARC / "osc2.asm").read_text(encoding="utf-8")
-    b = (SHARC / "osc2b.asm").read_text(encoding="utf-8")
-    back = re.compile(r"JUMP (0x[0-9a-f]+);\s*// machine5_live.asm's wr_t5v_next")
-    return (f"JUMP {dsp.OSC2_SW:#x};" in loop and f"JUMP {dsp.OSC2B_SW:#x};" in a
-            and [int(x, 16) for x in back.findall(a)] == [nxt]
-            and [int(x, 16) for x in back.findall(b)] == [nxt])
+def perc_links_ok() -> bool:
+    """PERC: the block counter's jump into wr_perc (L2), and wr_perc's tail into
+    rings.asm's wr_rings: addresses, not labels."""
+    count = (SHARC / "block_count.asm").read_text(encoding="utf-8")
+    perc = (SHARC / "perc.asm").read_text(encoding="utf-8")
+    return (f"JUMP {dsp.PERC_SW:#x};" in count
+            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// rings.asm's wr_rings", perc) == [f"{dsp.RINGS_SW:#x}"])
 
 
 def gran_links_ok() -> bool:
@@ -329,10 +328,9 @@ def gran_links_ok() -> bool:
 
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
-    for name, load_sw in (("reader_m5", dsp.READER_SW), ("machine5_live", dsp.LOOP_SW),
+    for name, load_sw in (("perc", dsp.PERC_SW), ("block_count", dsp.COUNT_SW),
                           ("ping", dsp.PING_SW), ("rings", dsp.RINGS_SW),
-                          ("cz", dsp.CZ_SW), ("osc2", dsp.OSC2_SW), ("osc2b", dsp.OSC2B_SW),
-                          ("gran", dsp.GRAN_SW)):
+                          ("cz", dsp.CZ_SW), ("gran", dsp.GRAN_SW)):
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -365,8 +363,8 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("reader_m5", "machine5_live", "ping", "rings", "cz", "osc2", "osc2b", "gran")) \
-        and osc2_links_ok() and gran_links_ok() and entry.type_name.startswith("8a") \
+             for n in ("perc", "block_count", "ping", "rings", "cz", "gran")) \
+        and perc_links_ok() and gran_links_ok() and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
 
@@ -387,13 +385,6 @@ def wav(name, samples, seconds, wavs, what, normalise=False):
                  "what": what + (" -- LOOPED from %d rendered samples" % len(samples) if looped else "")})
 
 
-def preview(tables, note, wav1_from, wav1_to, tbl1, seconds):
-    blocks = int(seconds * RATE) // BLOCK
-    seq = [(note, round(wav1_from + (wav1_to - wav1_from) * k / max(blocks - 1, 1)), tbl1)
-           for k in range(blocks)]
-    return live.render_blocks(tables, seq, BLOCK, 0, "float32")[0]
-
-
 # -- main ------------------------------------------------------------------------------------------
 
 def main(argv=None):
@@ -410,7 +401,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,gran,rings,cz,frame")
+    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -427,7 +418,6 @@ def main(argv=None):
     stock_img = Image(dk, stock)
     s7 = OUT / "m5_section7_waverider.bin"
     s7.write_bytes(m5.stream)
-    tables = dsp.tables()
     report = {"digikit": {"path": str(a.digikit), "head": dk.head}, "section7_sha256": m5.sha,
               "section7_bytes": len(m5.stream), "section7_file": str(s7),
               "placements": dsp.placements(), "blocks": a.blocks}
@@ -447,7 +437,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("reader_m5", "machine5_live", "ping", "rings", "cz", "osc2", "osc2b", "gran"):
+            for n in ("perc", "block_count", "ping", "rings", "cz", "gran"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
@@ -458,39 +448,20 @@ def main(argv=None):
             show(results["2_map"])
 
         if "voice" in steps:
-            print("\nstep 3: voice")
-            s3 = step_voice(init, sound, machines, a.blocks, tables)
-            results["3_voice"] = {k: v for k, v in s3.items() if k != "runs"}
+            print("\nstep 3: PERC")
+            s3 = step_perc(init, sound, machines, a.blocks)
+            results["3_perc"] = {k: v for k, v in s3.items() if k != "runs"}
             show(s3)
             runs = s3["runs"]
-            if runs["init"]["ok"]:
-                wav("m5_voice_amp_out.wav", runs["init"]["amp_out"], a.seconds, wavs,
-                    "the init Waverider sound (saw, note 60, trigger on block 1) at the amp's output, "
-                    "end of the per-track chain", normalise=False)
-                wav("m5_voice_amp_out_normalised.wav", runs["init"]["amp_out"], a.seconds, wavs,
-                    "the same, scaled to 0.9 peak for listening", normalise=True)
-                wav("m5_voice_machine.wav", track_series(runs["init"], 0), a.seconds, wavs,
-                    "track 0's buffer after the type-5 loop, bit-exact to the reference (init sound)")
-                wav("m5_preview_init_sound.wav", preview(tables, 60.0, 0, 0, 0, a.seconds), a.seconds, wavs,
-                    "PREVIEW, not the runner: the reference for the init sound, note 60, POS 0, slot 0 (the saw)")
-            for key, what, pv in (
-                    ("pos120", "POS (WAV1) 120: slot 0's last frame, the sine", (60.0, 0x7800, 0x7800, 0)),
-                    ("slot1", "TBL1 1, WAV1 64: the overtone table, partials 9-10", (60.0, 0x4000, 0x4000, 0x100)),
-                    ("note72", "note 72, POS 120: the sine an octave up", (72.0, 0x7800, 0x7800, 0))):
-                if runs[key]["ok"]:
-                    wav(f"m5_{key}_machine.wav", track_series(runs[key], 0), a.seconds, wavs,
-                        f"track 0's buffer, {what}")
-                    wav(f"m5_preview_{key}.wav", preview(tables, *pv[:1], pv[1], pv[2], pv[3], a.seconds),
-                        a.seconds, wavs, f"PREVIEW, not the runner: the reference for {what}")
-            if runs["silent"]["ok"]:
-                wav("m5_no_trigger.wav", runs["silent"]["amp_out"], a.seconds, wavs,
-                    "control: no trigger, amp output (silent)")
-            wav("m5_demo_pos_sweep_preview.wav", preview(tables, 48.0, 0, 0x7800, 0, 4.0), 4.0, wavs,
-                "DEMO PREVIEW, not the runner: slot 0 at note 48, POS swept 0 -> 120 over 4 s: "
-                "a buzzy saw darkening to a sine")
-            wav("m5_demo_harmonic_climb_preview.wav", preview(tables, 48.0, 0, 0x7800, 0x100, 4.0), 4.0, wavs,
-                "DEMO PREVIEW, not the runner: slot 1 at note 48, POS swept 0 -> 120 over 4 s: "
-                "the overtone series climbing, partial 1 to 16")
+            for k, name in enumerate(PM.NAMES):
+                r = runs[f"g{k // 8}"]
+                if r["ok"]:
+                    wav(f"perc_{k:02d}_{name}.wav", perc_series(r, k % 8), a.seconds, wavs,
+                        f"PERC {name} (the owner's defaults, note 60, trigger on block 1): track 0's "
+                        "buffer as PERC left it, bit-exact to dnfw.perc.program")
+            if runs["g0"]["ok"]:
+                wav("perc_amp_out.wav", runs["g0"]["amp_out"], a.seconds, wavs,
+                    "TRX-BD at the amp's output, the end of the per-track chain")
 
         if "stock" in steps:
             print("\nstep 4: types 0-4 unchanged")
@@ -531,20 +502,16 @@ def main(argv=None):
         if frames and "frame" in steps:
             print("\nstep 5: the caller's frame(s)")
             sep = f"_{a.tag}_" if a.tag else "_"
-            s5 = step_frame(init, frames, a.blocks, tables)
+            s5 = step_frame(init, frames, a.blocks)
             results["5_frame"] = {k: v for k, v in s5.items() if k != "run"}
             show(s5)
             run = s5["run"]
             if run["ok"] and s5["numbers"]["type5_tracks"]:
                 t = s5["numbers"]["type5_tracks"][0]
-                wav(f"m5_frame{sep}machine.wav", track_series(run, t), a.seconds, wavs,
-                    f"the caller's frame: track {t}'s buffer after the type-5 loop")
+                wav(f"m5_frame{sep}perc.wav", perc_series(run, t), a.seconds, wavs,
+                    f"the caller's frame: track {t}'s buffer as PERC left it")
                 wav(f"m5_frame{sep}amp_out.wav", run["amp_out"], a.seconds, wavs,
                     "the caller's frame: track 0 at the amp's output")
-                i0 = run["t5_inputs"][-1][t]
-                wav(f"m5_preview_frame{sep[:-1]}.wav", preview(tables, i0["note"], i0["wav1"], i0["wav1"],
-                                                    i0["drif"], a.seconds), a.seconds, wavs,
-                    "PREVIEW, not the runner: the reference for the caller's frame's last block inputs")
 
     ok = bool(results) and all(r.get("ok") for r in results.values())
     report["steps"] = results
@@ -609,8 +576,8 @@ def step_map(dk, snap, m2mach, m5: Image, stock: bytes, init, sound, machines) -
     type_ctl = m2.word(unpack(ctl, base_frame(sound, machines).to_bytes()).state, rec0 + V.TRACK_MACHINE)
     # our spans, as the runner's memory holds them after init
     spans = {}
-    for what, at, payload in dsp.spans():
-        dm = at - dsp.LOAD_ALIAS
+    for what, at, payload in dsp.spans() + dsp.l2_spans():
+        dm = at - dsp.LOAD_ALIAS if at >= dsp.LOAD_ALIAS else at
         words = [m2.word(init.state, dm + 4 * k) for k in range(len(payload) // 4)]
         want = [struct.unpack_from("<I", payload, 4 * k)[0] for k in range(len(payload) // 4)]
         spans[what] = sum(1 for x, y in zip(words, want) if x != y)
@@ -634,179 +601,134 @@ def step_map(dk, snap, m2mach, m5: Image, stock: bytes, init, sound, machines) -
                         "clamp_parcel_at_0x1c294a": clamp_imm}}
 
 
-# -- step 3 -------------------------------------------------------------------------------------------
+# -- step 3: PERC (docs/perc.md) -------------------------------------------------------------------
 
-SLOT1_DRIF = next(v for v in range(128) if dsp.slot_lut()[v] == 1) << 8
-GLIDE_AT = 4
-W2_RETRIG = 5
-W2_ENV_BLOCKS = 56              # RATE 127 is 30 Hz: one cycle is 50 blocks of 32
+PERC_TYPE_SLOT = PM.TYPE_REC[1]         # DRIF: TYPE
+RETRIG = 4                              # the retrigger run's second note
+TYPE_SWITCH = 3                         # the type-switch run turns TYPE at this block, no new note
 
 
-def step_voice(init, sound, machines, blocks, tables) -> dict:
-    def frames(**kw):
+def perc_type_word(k: int) -> int:
+    """the frame word that selects machine K (as dnfw.perc.live.Harness sets it)"""
+    knob = (k * 128 + 127) // PM.N
+    while (knob * PM.N) >> 7 != k:
+        knob -= 1
+    return knob << 8
+
+
+def perc_words(k: int, params=None) -> dict:
+    """frame slot -> word for machine K with PARAMS (eight 0..1, default the owner's)"""
+    params = PL.defaults(PM.NAMES[k]) if params is None else params
+    out = {PERC_TYPE_SLOT: perc_type_word(k)}
+    for (_rid, slot, lo, top), x in zip(PM.PARAMS, params):
+        out[slot] = PL.word_of(x, top, lo)
+    return out
+
+
+def perc_series(run, t) -> list[float]:
+    return [x for blk in run["perc"] if t in blk for x in blk[t]["out"]]
+
+
+def perc_exact(run) -> tuple[int, int, int]:
+    """(type-5 voice-blocks checked, output words differing, state words differing)"""
+    n = o = st = 0
+    for blk in run["perc"]:
+        for v in blk.values():
+            n += 1
+            o += v["out_mismatches"]
+            st += v["state_mismatches"]
+    return n, o, st
+
+
+def step_perc(init, sound, machines, blocks) -> dict:
+    def frames(k, note=0x3C00, trig=(1,), params=None, others=None, other_words=None):
         def fb(b):
-            return base_frame(sound, machines, trigger=(b == 1), **kw).to_bytes()
+            f = base_frame(sound, machines, overrides=perc_words(k, params), note=note, trigger=b in trig,
+                           others=others, trigger_others=True)
+            for t, words in (other_words or {}).items():
+                for slot, w in words.items():
+                    f.param(t, slot, w)
+            return f.to_bytes()
         return fb
 
-    runs = {"init": run_blocks(init, frames(), blocks),
-            "pos120": run_blocks(init, frames(overrides={WAV1: 0x7800}), blocks),
-            "slot1": run_blocks(init, frames(overrides={WAV1: 0x4000, DRIF: SLOT1_DRIF}), blocks),
-            "slot_last": run_blocks(init, frames(overrides={WAV1: 0x4000, DRIF: 0x7F00}), blocks),
-            # W5 glide: POS jumps 0 -> 120 at block GLIDE_AT with no new note
-            "glide": run_blocks(init, lambda b: base_frame(sound, machines, trigger=(b == 1), overrides={
-                WAV1: 0 if b < GLIDE_AT else 0x7800}).to_bytes(), blocks),
-            "note72": run_blocks(init, frames(overrides={WAV1: 0x7800}, note=0x4800), blocks),
-            "tune_up12": run_blocks(init, frames(overrides={WAV1: 0x7800, TUN1: TUN1_ZERO + 12 * 256}), blocks),
-            "tune_down12": run_blocks(init, frames(overrides={WAV1: 0x7800, TUN1: TUN1_ZERO - 12 * 256}), blocks),
-            "silent": run_blocks(init, lambda b: base_frame(sound, machines).to_bytes(), blocks),
-            # W2: the scanner. TRI at full RATE sweeping POS (MPOS +0.5, inside the table), the level against
-            # it (MLEV -1), LEV at its top
-            "w2_scan": run_blocks(init, frames(overrides={WAV1: 0x3C00, ATK: 0x7F00, OFS1: 0x4B00,
-                                                          PD1: 0, LEV1: 0x7F00, NLEV: 0}), blocks),
-            # RND, two notes, MPOS +0.5 (never clamped): each note starts the walk afresh
-            "w2_rnd": run_blocks(init, lambda b: base_frame(sound, machines, trigger=b in (1, W2_RETRIG), overrides={
-                WAV1: 0x3C00, ATK: 0x7F00, OFS1: 0x4B00, NLEV: 0x4000}).to_bytes(), blocks),
-            # ENV, one cycle at full RATE (50 blocks) and past it: the level follows it to 0
-            # (MLEV +1) and stays there once the one-shot is done
-            "w2_env": run_blocks(init, frames(overrides={WAV1: 0x3C00, ATK: 0x7F00, PD1: 0x6400,
-                                                         NLEV: 0x7F00}), W2_ENV_BLOCKS),
-            # W3: osc 2 a fifth up on another table, swept by the shared scanner (MPOS2 -0.5)
-            # with its level against it (MLEV2 +1)
-            "w3_osc2": run_blocks(init, frames(overrides={WAV1: 0x3C00, ATK: 0x7F00, OFS1: 0x4B00,
-                                                          TUN2: TUN1_ZERO + 7 * 256, WAV2: 0x2000,
-                                                          BASE: 0x7F00, CHAR: 0x6400, OFS2: 0x1900,
-                                                          PD2: 0x6400}), blocks),
-            # the same sound with osc 2 off: the control
-            "w3_off": run_blocks(init, frames(overrides={WAV1: 0x3C00, ATK: 0x7F00, OFS1: 0x4B00,
-                                                         TUN2: TUN1_ZERO + 7 * 256, WAV2: 0x2000,
-                                                         BASE: 0x7F00, CHAR: 0, OFS2: 0x1900,
-                                                         PD2: 0x6400}), blocks),
-            # osc 2 turned up with no new note: it ramps in from silence; DETN far down
-            "w3_late": run_blocks(init, lambda b: base_frame(sound, machines, trigger=(b == 1), overrides={
-                WAV1: 0x7800, TUN2: TUN1_ZERO - 30 * 256, WAV2: 0x7800,
-                CHAR: 0 if b < W3_ON else 0x7F00}).to_bytes(), blocks)}
+    # the 24 machines, eight tracks at a time (track t of group g plays machine 8 g + t,
+    # all triggered on block 1): three runs, eight PERC slots busy at once
+    runs = {}
+    for g in range(PM.N // 8):
+        t0 = time.perf_counter()
+        runs[f"g{g}"] = run_blocks(init, frames(8 * g, others={t: 5 for t in range(1, 8)},
+                                               other_words={t: perc_words(8 * g + t) for t in range(1, 8)}),
+                                   blocks)
+        print(f"    machines {8 * g}-{8 * g + 7}: {round(time.perf_counter() - t0)} s", flush=True)
+    rs = PM.NAMES.index("TRX-RS")
+    sd = PM.NAMES.index("TRX-SD")
+    hh = PM.NAMES.index("EFM-HH")
+    runs["note60"] = run_blocks(init, frames(rs), blocks)
+    runs["single_sd"] = run_blocks(init, frames(sd), blocks)
+    runs["note72"] = run_blocks(init, frames(rs, note=0x4800), blocks)
+    runs["retrig"] = run_blocks(init, frames(sd, trig=(1, RETRIG)), blocks)
+    runs["silent"] = run_blocks(init, frames(0, trig=()), blocks)
+    # TYPE turned mid-note: the voice keeps the machine its note latched
+    # (only TYPE moves: the parameters stay TRX-BD's, which the voice goes on reading)
+    runs["type_switch"] = run_blocks(init, lambda b: base_frame(
+        sound, machines, overrides={**perc_words(0), PERC_TYPE_SLOT: perc_type_word(0 if b < TYPE_SWITCH else hh)},
+        trigger=b == 1).to_bytes(), blocks)
+    # every parameter at its top, and at its bottom, on an FM machine and a TRX one
+    runs["tops"] = run_blocks(init, frames(PM.NAMES.index("EFM-CB"), params=[1.0] * 8), blocks)
+    runs["bottoms"] = run_blocks(init, frames(PM.NAMES.index("TRX-CY"), params=[0.0] * 8), blocks)
     ok_runs = all(r["ok"] for r in runs.values())
-    n, mism = {}, {}
-    for k, r in runs.items():
-        if r["ok"]:
-            mism[k] = mismatches(track_series(r, 0), reference_for(r, 0, tables))
-    i = runs["init"]
-    settle = BLOCK * min(3, blocks // 2)
-    ideal = reference_for(i, 0, tables, "ideal") if i["ok"] else []
-    fit = V.fit_gain(i["amp_out"][settle:], ideal[settle:]) if i["ok"] else None
-    rb = {k: (r["reader_blocks"][-1].get(0) if r["ok"] and r["reader_blocks"] else None) for k, r in runs.items()}
-    inc60, inc72 = (rb["pos120"] or [0] * 6)[2], (rb["note72"] or [0] * 6)[2]
-    inc_up, inc_down = (rb["tune_up12"] or [0] * 6)[2], (rb["tune_down12"] or [0] * 6)[2]
-    zc_up = zero_crossings(track_series(runs["tune_up12"], 0)) if runs["tune_up12"]["ok"] else 0
-    zc_down = zero_crossings(track_series(runs["tune_down12"], 0)) if runs["tune_down12"]["ok"] else 0
-    zc60 = zero_crossings(track_series(runs["pos120"], 0)) if runs["pos120"]["ok"] else 0
-    zc72 = zero_crossings(track_series(runs["note72"], 0)) if runs["note72"]["ok"] else 0
-    c0 = m4.centroid(track_series(i, 0)[settle:]) if i["ok"] else 0
-    c120 = m4.centroid(track_series(runs["pos120"], 0)[settle:]) if runs["pos120"]["ok"] else 0
-    setup = [e for e in i["setup"]] if i["ok"] else []
-    g = runs["glide"]
-    glide_pos = [blk.get(0)[3] for blk in g["reader_blocks"] if blk.get(0)] if g["ok"] else []
-    glide_in = [x[0] for x in g["t5_inputs"] if 0 in x] if g["ok"] else []
-    glide_want, s_ = [], 0
-    for x in glide_in:
-        s_ = live.glide(live.position(x["wav1"]), s_, x["trig"])
-        glide_want.append(s_)
-    counters = [x[0]["trig"] for x in i["t5_inputs"] if 0 in x] if i["ok"] else []
-    ws, wr, we = runs["w2_scan"], runs["w2_rnd"], runs["w2_env"]
-    w3, w3off, w3late = runs["w3_osc2"], runs["w3_off"], runs["w3_late"]
-    w3_series = track_series(w3, 0) if w3["ok"] else []
-    w3off_series = track_series(w3off, 0) if w3off["ok"] else []
-    late = track_series(w3late, 0) if w3late["ok"] else []
-    late_base = track_series(runs["pos120"], 0) if runs["pos120"]["ok"] else []
-    # the w3_late run is the pos120 sound until W3_ON; after it, osc 2's first block ramps in
-    late_same_before = bool(late) and late[:BLOCK * W3_ON] == late_base[:BLOCK * W3_ON]
-    late_diff_after = bool(late) and late[BLOCK * W3_ON:] != late_base[BLOCK * W3_ON:]
-    late_first = ([a - b for a, b in zip(late[BLOCK * W3_ON:BLOCK * (W3_ON + 1)],
-                                         late_base[BLOCK * W3_ON:BLOCK * (W3_ON + 1)])] if late else [])
-    scan_pos = [blk.get(0)[3] for blk in ws["reader_blocks"] if blk.get(0)] if ws["ok"] else []
-    rnd_pos = [blk.get(0)[3] for blk in wr["reader_blocks"] if blk.get(0)] if wr["ok"] else []
-    env = track_series(we, 0) if we["ok"] else []
-    env_tail = V.peak(env[-BLOCK * 3:]) if env else None
-    env_head = V.peak(env[BLOCK:BLOCK * 6]) if env else None
-    # the guard sees each track's type in order; for track 0 (type 5) the next event
-    # must be the no-setup arm, never the table read
-    t0_events = []
-    for k, e in enumerate(setup):
-        if e[0] == "guard" and e[2] == 5:
-            t0_events.append(setup[k + 1][0] if k + 1 < len(setup) else None)
-    n = {"float32_mismatches_machine_tap": mism,
-         "loop_entries_init_run": i.get("loop_entries"),
-         "reader_block_last": rb,
-         "expected_reader_block_init": [dsp.table_addresses()[0], None, live.increment(60.0), live.position(0), BLOCK],
-         "glide_pos_per_block": glide_pos, "glide_expected": glide_want,
-         "trig_bits_init_run": counters,
-         "w2_scan_pos_per_block": scan_pos, "w2_rnd_pos_per_block": rnd_pos,
-         "w2_env_peak_first_blocks": env_head, "w2_env_peak_last_3_blocks": env_tail,
-         "w3_peak": V.peak(w3_series) if w3_series else None,
-         "w3_off_peak": V.peak(w3off_series) if w3off_series else None,
-         "w3_late_first_block_osc2_first_last": (late_first[0], late_first[-1]) if late_first else None,
-         "machine_peak": V.peak(track_series(i, 0)) if i["ok"] else None,
-         "amp_in_peak": V.peak(i["amp_in"]) if i["ok"] else None,
-         "amp_out_peak": V.peak(i["amp_out"][settle:]) if i["ok"] else None,
-         "amp_out_rms": V.rms(i["amp_out"][settle:]) if i["ok"] else None,
-         "fit_amp_out_vs_ideal": fit.__dict__ if fit else None,
-         "centroid_pos0_hz": c0, "centroid_pos120_hz": c120,
-         "inc_note60": inc60, "inc_note72": inc72, "inc_ratio": inc72 / inc60 if inc60 else None,
-         "zero_crossings_note60": zc60, "zero_crossings_note72": zc72,
-         "inc_tun1_up12": inc_up, "inc_tun1_down12": inc_down,
-         "zero_crossings_tun1_up12": zc_up, "zero_crossings_tun1_down12": zc_down,
-         "silent_amp_out_peak": V.peak(runs["silent"]["amp_out"]) if runs["silent"]["ok"] else None,
-         "setup_events_after_type5_guard": t0_events,
-         "instructions_per_block": round(i.get("instructions", 0) / max(blocks, 1)),
+    exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
+    peaks = {PM.NAMES[k]: V.peak(perc_series(runs[f"g{k // 8}"], k % 8)) if runs[f"g{k // 8}"]["ok"] else None
+             for k in range(PM.N)}
+    m0 = runs["g0"]
+    zc60 = zero_crossings(perc_series(runs["note60"], 0)) if runs["note60"]["ok"] else 0
+    zc72 = zero_crossings(perc_series(runs["note72"], 0)) if runs["note72"]["ok"] else 0
+    groups = [sorted({t for blk in runs[f"g{g}"]["perc"] for t in blk}) if runs[f"g{g}"]["ok"] else []
+              for g in range(PM.N // 8)]
+    sw = runs["type_switch"]
+    sw_state = [blk[0]["out"] for blk in sw["perc"] if 0 in blk] if sw["ok"] else []
+    base = perc_series(runs["g0"], 0)
+    sw_series = perc_series(sw, 0)
+    rt = perc_series(runs["retrig"], 0)
+    one = perc_series(runs["single_sd"], 0)
+    silent = perc_series(runs["silent"], 0)
+    trig_bits = [x[0]["trig"] for x in m0["t5_inputs"] if 0 in x] if m0["ok"] else []
+    n = {"perc_exact_voice_blocks_out_state_mismatches": exact,
+         "peaks_by_machine": peaks,
+         "loop_entries_m0": m0.get("loop_entries"),
+         "trig_bits_m0": trig_bits,
+         "zero_crossings_TRX-RS_note60_note72": (zc60, zc72),
+         "tracks_rendered_per_group": groups,
+         "model_steps_per_block": {k: max((v["model_steps"] for blk in r["perc"] for v in blk.values()), default=0)
+                                   for k, r in runs.items() if r["ok"]},
+         "amp_out_peak_m0": V.peak(m0["amp_out"]) if m0["ok"] else None,
+         "silent_peak": V.peak(silent) if silent else 0.0,
+         "instructions_per_block_m0": round(m0.get("instructions", 0) / max(blocks, 1)),
          "wall_s": {k: r.get("wall_s") for k, r in runs.items()},
          "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}
     checks = {
         "every run returns every block": ok_runs,
-        "the type-5 loop is entered by the image's own JUMP, once a block": i.get("loop_entries") == blocks,
-        "the per-type setup for type 5 is the no-setup arm 0x1c90d4 (the table is never read)":
-            bool(t0_events) and all(e == "none-arm" for e in t0_events),
-        "the machine tap is bit-exact to dnfw.waverider.live in every run":
-            ok_runs and all(v == 0 for v in mism.values()),
-        "the loop's reader block matches the contract (table, inc, pos, count)":
-            bool(rb["init"]) and rb["init"][0] == dsp.table_addresses()[0] and rb["init"][2] == live.increment(60.0)
-            and rb["init"][3] == 0 and rb["init"][4] == BLOCK,
-        "audible at the amp's output (peak > 0.02)": bool(n["amp_out_peak"]) and n["amp_out_peak"] > 0.02,
-        "correlated with the ideal reference through the chain (r > 0.9)": bool(fit) and fit.correlation > 0.9,
-        "POS 120 is darker than POS 0 (spectral centroid)": 0 < c120 < c0,
-        "W5: TBL (DRIF) selects table 1 at its first step and the last table at its top "
-        "(reader block table pointers = dsp.table_addresses()[1] and [-1], in DDR)":
-            bool(rb["slot1"]) and rb["slot1"][0] == dsp.table_addresses()[1]
-            and bool(rb["slot_last"]) and rb["slot_last"][0] == dsp.table_addresses()[-1],
-        "W5: POS glides after a jump with no new note: each block 1/32 of the remaining way, "
-        "as dnfw.waverider.live.glide computes it":
-            bool(glide_pos) and glide_pos == glide_want and glide_pos[-1] > glide_pos[GLIDE_AT - 1],
-        "W5: a triggered block starts POS at its target (the voice's trigger bit is seen "
-        "on the trigger block only, and the pos120 run reads POS 120 from that block on)":
-            counters == [b == 1 for b in range(len(counters))] and bool(rb["pos120"])
-            and all(blk.get(0)[3] == live.position(0x7800)
-                    for blk in runs["pos120"]["reader_blocks"][1:] if blk.get(0)),
-        "note 72 is an octave above note 60 (the DSP's increment ratio is 2 within 1e-6; "
-        "more zero crossings in the same blocks)":
-            bool(inc60) and abs(inc72 / inc60 - 2.0) < 1e-6 and zc72 > zc60 > 0,
-        "TUN1 +12 (frame word 0x4c00) is an octave up and -12 (0x3400) an octave down: "
-        "increment ratios 2 and 0.5 within 1e-6 of note 60's, zero crossings more and fewer":
-            bool(inc60) and abs(inc_up / inc60 - 2.0) < 1e-6 and abs(inc_down / inc60 - 0.5) < 1e-6
-            and zc_up > zc60 > zc_down > 0,
-        "W2: the scanner moves POS (TRI, full RATE, MPOS +0.5): the reader's position changes "
-        "every block after the note, and differs from the glided POS":
-            len(scan_pos) == blocks and len(set(scan_pos[1:])) == len(scan_pos[1:])
-            and any(p != live.position(0x3C00) for p in scan_pos[1:]),
-        "W2: RND takes a new value at each note (POS differs between the two notes' blocks)":
-            len(rnd_pos) == blocks and rnd_pos[1] != rnd_pos[W2_RETRIG],
-        "W2: ENV with MLEV +1 is audible after the note and silent once the one-shot is done":
-            bool(env_head) and env_head > 0.02 and env_tail == 0.0,
-        "W3: osc 2 adds to osc 1 (the w3 run differs from the same sound with osc 2's LEV at 0)":
-            bool(w3_series) and bool(w3off_series) and w3_series != w3off_series,
-        "W3: osc 2 at LEV 0 leaves osc 1 bit for bit as before (w3_late's first blocks equal pos120's), "
-        "and turned up with no new note it is heard (its ramp from 0 is held to the model above)":
-            late_same_before and late_diff_after,
-        "control: no trigger is silent at the amp's output (peak < 0.01)":
-            n["silent_amp_out_peak"] is not None and n["silent_amp_out_peak"] < 0.01,
+        "PERC is entered by the image's own JUMP (the block counter's), once a block":
+            m0.get("loop_entries") == blocks,
+        "the trigger bit is seen on the trigger block only": trig_bits == [b == 1 for b in range(len(trig_bits))],
+        "every type-5 track's buffer and state, every block of every run, are bit-exact to "
+        "dnfw.perc.program run on the DSP's memory at PERC's entry":
+            ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for k, v in exact.items() if k != "silent")
+            and exact.get("silent", (0, 1, 1))[1:] == (0, 0),
+        f"all {PM.N} machines sound with the owner's defaults (peak > 0.05 within {blocks} blocks)":
+            all(v is not None and v > 0.05 for v in peaks.values()),
+        "nothing is non-finite or above 4.0 in any PERC buffer":
+            ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["perc"]
+                            for v in blk.values() for x in v["out"]),
+        "TRX-BD is heard at the amp's output (peak > 0.02)": bool(n["amp_out_peak_m0"]) and n["amp_out_peak_m0"] > 0.02,
+        "note 72 is higher than note 60 on TRX-RS (more zero crossings)": zc72 > zc60 > 0,
+        "eight PERC tracks at once are all rendered, in each of the three groups":
+            groups == [list(range(8))] * (PM.N // 8),
+        "TYPE turned mid-note leaves the note on its machine (track 0 identical to the untouched TRX-BD's)":
+            bool(sw_series) and sw_series == base,
+        "a second note restarts the voice (the retrigger run departs from the single note's at it)":
+            bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG] and rt[BLOCK * RETRIG:] != one[BLOCK * RETRIG:],
+        "control: no trigger is silent (every PERC sample 0)": bool(silent) and all(x == 0.0 for x in silent),
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
 
@@ -1413,22 +1335,22 @@ def step_filters_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, b
 
 # -- step 5 -------------------------------------------------------------------------------------------
 
-def step_frame(init, frames, blocks, tables) -> dict:
+def step_frame(init, frames, blocks) -> dict:
     for fr in frames:
         if len(fr) != FR.FRAME_BYTES:
             raise SystemExit(f"a frame is {len(fr)} bytes, not {FR.FRAME_BYTES}")
     run = run_blocks(init, lambda b: frames[min(b, len(frames) - 1)], blocks)
     types = sorted({t for i in run["t5_inputs"] for t in i}) if run["ok"] else []
-    mism = {t: mismatches(track_series(run, t), reference_for(run, t, tables)) for t in types} if run["ok"] else {}
+    exact = perc_exact(run) if run["ok"] else (0, -1, -1)
     checks = {"the run returns every block": run["ok"],
               "at least one track is type 5": bool(types),
-              "every type-5 track is bit-exact to the reference": bool(mism) and all(v == 0 for v in mism.values())}
+              "every type-5 track is bit-exact to dnfw.perc.program": exact[0] > 0 and exact[1:] == (0, 0)}
     if any(fr[FR.TRIG_NOTE] & 1 for fr in frames):
         # a frame that triggers track 0: it must be heard at the amp's output
         checks["triggered: track 0 audible at the amp's output (peak > 0.02)"] = (
             run["ok"] and V.peak(run["amp_out"]) > 0.02)
     return {"ok": all(checks.values()), "checks": checks, "run": run,
-            "numbers": {"type5_tracks": types, "mismatches": mism,
+            "numbers": {"type5_tracks": types, "exact": exact,
                         "inputs_last_block": run["t5_inputs"][-1] if run["ok"] and run["t5_inputs"] else None,
                         "amp_out_peak": V.peak(run["amp_out"]) if run["ok"] else None,
                         "halt": run.get("halt")}}

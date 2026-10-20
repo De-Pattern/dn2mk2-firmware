@@ -8,7 +8,7 @@
 // comes here instead of straight to the type-5 loop. Every block passes it, whatever
 // the machines: it adds 1 to a running count, writes the count, halves swapped as the
 // per-frame handler stores reply word 0, to reply word 2 of both reply pages (bytes the
-// ColdFire never reads), and goes on to the type-5 loop at sw 0x16ed00, unchanged.
+// ColdFire never reads), and goes on to the type-5 loop (PERC, sw 0xbe0000 in L2 since v0.11), unchanged.
 //
 // Why: on the Waverider build the SHARC's load falls about 23 points after a Waverider
 // note (docs/sharc-load.md), about 154,000 cycles a frame, which is close to the
@@ -45,5 +45,5 @@ wr_count.:
       DM(0x2de124) = R8;                // MARK
       R8 = DM(0x2de11c);
       R9 = DM(0x2de120);
-      JUMP 0x16f780;                    // on to the type-5 loop (W5: moved from 0x16ed00)
+      JUMP 0xbe0000;                    // on to PERC, the type-5 loop (v0.11: perc.asm in L2; 0x16f780, Waverider's, until then)
 .wr_count..end:
