@@ -225,9 +225,10 @@ def main() -> int:
                                             "--machine-type", "7", "--machine-type", "8",
                                             "--machine-max", "7"]
                                            if dsp_changed else [])
-        # PING (6) and SHFT (7) are kept by LOAD; 8 still loads as Multi-Mode
+        # PING (6), SHFT (7) and GRAN (8) are kept by LOAD; 9 still loads as Multi-Mode
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",
-                                            "--filter-type", "8", "--filter-max", "7"]
+                                            "--filter-type", "8", "--filter-type", "9",
+                                            "--filter-max", "8"]
                                            if dsp_changed else [])
         rc, out = run("boot_engine", [a.venv, "-u", "scripts/emu_boot_engine.py",
                                       "--build", bdir, "--frames", "8", *types], logs)
