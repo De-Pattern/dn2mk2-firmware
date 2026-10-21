@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.11** | 2026-10-20 | PERC: your 24 Ravel drum machines (TRX/EFM/GND) as a machine, TYPE + 8 named parameters; Waverider removed | `builds/v0.11-PERC/` | yes |
+| **v0.12** | 2026-10-21 | PERC: labels follow TYPE; page 1 the machine's 8 parameters; page 2 TYPE + Machinedrum effects (AMD AMF EQF EQG FLTF FLTW FLTQ); no stray ring | `builds/v0.12-PERC-FX/` | yes |
+| v0.11 | 2026-10-20 | PERC: your 24 Ravel drum machines (TRX/EFM/GND) as a machine, TYPE + 8 named parameters; Waverider removed | `builds/v0.11-PERC/` | yes |
 | v0.10 | 2026-10-20 | No more dead notes on RESONATOR/CZ (voice stealing); PING/SHFT TYPE by name; Waverider osc 2 (page 2); GRAN granular filter type | `builds/v0.10-GRAN/` | yes |
 | v0.9 | 2026-10-19 | CZ's release: the DCW envelope runs on past its sustain step at note-off, as on a real CZ | `builds/v0.9-CZ-release/` | yes |
 | v0.8 | 2026-10-18 | Everything in v0.7 (CZ PHASE, RESONATOR, SHIFT, PING, Waverider), sized to fit the USB upgrade: Waverider has 9 tables (BITS, PHAS out) | `builds/v0.8-CZ/` | yes |
@@ -45,6 +46,54 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.12 — PERC pages and effects
+
+`DN2mod_v0.12_PERC-FX_OS1.11.syx`
+sha256 `c441b07c26e42a31b77ac3c366724fba7a7c84b5f7fa11ffab410b14a26dbb79`
+Gate: CLEARED TO FLASH, 2026-10-21 (USB size 1,915,364 of 2,097,152, 181,788 to spare). Source: commit `0c682bf`. Docs: `docs/perc.md`.
+
+**Adds / fixes.**
+- **Labels follow TYPE.** v0.11's labels came from a copy of the sound that does not follow
+  the knob, so they showed another machine's names (they only changed on a pattern change).
+  Now they are read from TYPE as the page reads it: turn TYPE and every label changes
+  with the name in the middle.
+- **Page 1 is the machine:** its eight synthesis parameters on A–H, as on the Machinedrum
+  (TRX-BD: PTCH DEC RAMP RDEC / STRT NOIS HARM CLIP).
+- **Page 2 is TYPE and the Machinedrum's track effects**, ported from your Ravel code:
+  AMD AMF EQF on the top row with TYPE; EQG FLTF FLTW FLTQ below. All off at their
+  defaults (AMD 0, EQG centre, FLTF 0, FLTW full), so a sound plays as before until you
+  turn them.
+  - AMD / AMF: amplitude modulation depth and rate (0.1 Hz to 2.3 kHz).
+  - EQF / EQG: one EQ band, 40 Hz to 19 kHz, ±18 dB.
+  - FLTF / FLTW / FLTQ: a band filter, with a high pass at FLTF (0 is off) and a low pass
+    at FLTF + FLTW (full is off), and resonance.
+- **No stray ring.** A track that stops being PERC has its voice silenced, so coming back
+  to PERC it waits for a note (the brief ring you heard on v0.11).
+- Parameter 4 moved from one WaveTone record to another to free a record for FLTQ: on
+  PERC sounds saved with v0.11, knob D of page 1 starts from a different value.
+
+**Test** (after the regression check):
+1. A PERC track: turn TYPE (page 2, A) slowly through all 24. On page 1 the labels change
+   with the machine every step (TRX-BD: PTCH DEC RAMP RDEC STRT NOIS HARM CLIP; TRX-CP:
+   CLPY TONE HARD RICH RATE ROOM RSIZ RTUN; GND-NS: DEC and seven `-`).
+2. On a few machines, turn each labelled knob while it plays: each does what it says.
+3. Page 2: with a pattern running, turn AMD up (tremolo), then AMF (its rate); EQG away
+   from centre and sweep EQF; FLTF up (thinner), FLTW down (darker), FLTQ up
+   (resonant). Return them to their defaults: the sound is back as it was.
+4. The LFO DEST list on a PERC track shows the machine's names and AMD..FLTQ.
+5. Switch a ringing PERC track to another machine and back (MACHINE SEL): no ring until
+   the next trig.
+6. Eight PERC tracks at once, some with the effects on: listen for crackles.
+7. SAVE PROJECT, power-cycle, reload: TYPE, the parameters and the effects come back.
+
+**Known:**
+- The header line and LFO lists take the names of the machine the PERC page last showed:
+  switching to another PERC track shows its names once its SYN page is drawn.
+- PERC's code in L2 and the DSP's load with many PERC tracks: as v0.11.
+- A sound saved with PERC, loaded on stock firmware, loads as FM Tone.
 
 ---
 
