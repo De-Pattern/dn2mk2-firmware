@@ -78,11 +78,24 @@ TYPE_REC = (252, 38)                      # DRIF: 0..0x7f00, default 0 (TRX-BD)
 PARAMS = ((238, 25, 4, 120),              # TUN1: 0x400..0x7c00, default 0x4000 (0.5)
           (242, 31, 4, 120),              # TUN2: the same
           (254, 41, 0, 127),              # HOLD: default 0x7f00
-          (253, 40, 0, 127),              # ATK: default 0
+          (241, 30, 0, 127),              # LEV1: default 0x6400 (v0.12; ATK until v0.11, now FLTQ's)
           (256, 43, 0, 127),              # NLEV: default 0
           (257, 44, 0, 127),              # BASE: default 0
           (260, 47, 0, 127),              # CHAR: default 0
           (240, 29, 0, 100))              # PD1: 0..0x6400, default 0x3200 (0.5)
+# the Machinedrum's track effects (Ravel's SRC_PERC_FX, rv_perc.c perc_render), page 2:
+# AM depth and rate, a one-band EQ, a band filter (base, width, resonance). The same for
+# every machine; all off at the records' defaults.
+FX_PARAMS = ((239, 26, 0, 120),           # AMD: WAV1, 0..0x7800, default 0 (off)
+             (246, 28, 0, 100),           # AMF: OFS1, 0..0x6400, default 0x3200
+             (250, 34, 0, 100),           # EQF: OFS2, 0..0x6400, default 0x3200
+             (244, 35, 0, 100),           # EQG: PD2, 0..0x6400, default 0x3200 (0 dB)
+             (243, 32, 0, 120),           # FLTF: WAV2, 0..0x7800, default 0 (no high pass)
+             (258, 45, 0, 127),           # FLTW: WDTH, 0..0x7f00, default 0x7f00 (no low pass)
+             (253, 40, 0, 127))           # FLTQ: ATK, 0..0x7f00, default 0
+FX_NAMES = (("AMD", "Amp Mod Depth"), ("AMF", "Amp Mod Rate"), ("EQF", "EQ Freq"),
+            ("EQG", "EQ Gain"), ("FLTF", "Filter Base"), ("FLTW", "Filter Width"),
+            ("FLTQ", "Filter Q"))
 FRAME = 0x25C48C
 
 
@@ -120,12 +133,17 @@ def tables_bytes() -> tuple[bytes, dict[str, int]]:
 # -- voice state (I2: 32 words a slot, L1) and the block's scratch (absolute) ------------
 V = dict(on=0, rng=1, t=2, aenv=3, penv=4, nenv=5, menv=6, xenv=7, cnt=8, next=9, fbv=10,
          last=11, hps=12, hps2=13, ph0=14, ph1=15, ph2=16, ph3=17, ph4=18, ph5=19,
-         f1a=20, f1b=21, f2a=22, f2b=23, mach=24)
+         f1a=20, f1b=21, f2a=22, f2b=23, mach=24,
+         f3a=25, f3b=26, f4a=27, f4b=28, f5a=29, f5b=30, amph=31)   # the track effects' (v0.12)
 STATE_WORDS = 32
 SC_WORDS = ("t", "count", "out", "tr", "type", "note", "trig", "sbase",
             "p0", "p1", "p2", "p3", "p4", "p5", "p6", "p7",
             "s1k", "s1a1", "s1a2", "s1a3", "s2k", "s2a1", "s2a2", "s2a3",
-            *(f"c{k}" for k in range(24)), "y", "ns", "tmp", "tmp2", "m", "gain", "fl")
+            *(f"c{k}" for k in range(24)), "y", "ns", "tmp", "tmp2", "m", "gain", "fl",
+            # v0.12: the track effects -- their seven controls, three filters, the block's set-up
+            *(f"q{k}" for k in range(7)),
+            "s3k", "s3a1", "s3a2", "s3a3", "s4k", "s4a1", "s4a2", "s4a3",
+            "s5k", "s5a1", "s5a2", "s5a3", "buf", "amd", "amdt", "eqm", "fxam", "fxeq", "fxhp", "fxlp", "fxy")
 
 
 class Layout:

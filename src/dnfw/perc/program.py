@@ -86,7 +86,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.iop(4, 12, "+", 6)
     p.lsh(4, 4, -7)
     p.st(C["type"], 4)
-    for k, (_rid, slot, lo, top) in enumerate(M.PARAMS):
+    for k, (_rid, slot, lo, top) in enumerate(M.PARAMS + M.FX_PARAMS):
         half(p, 4, M.frame_offset(slot), 10)
         p.lsh(4, 4, -8)
         p.iconst(12, -lo)
@@ -99,7 +99,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.float_(5, 4, 12)
         p.fconst(12, 1.0 / top)
         p.fop(5, 5, "*", 12)
-        p.st(C[f"p{k}"], 5)
+        p.st(C[f"p{k}" if k < 8 else f"q{k - 8}"], 5)
     # the note: machine5_live's validation, then the transpose 2^((note - 60) / 12)
     p.ld(9, C["t"])
     p.lsh(12, 9, 2)
@@ -150,6 +150,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.seti(1, 12)
     p.ldi(0, 0, 1)
     p.seti(4, 0, "the slot's buffer")
+    p.st(C["buf"], 0)
     M.v(p, 0, "on")
 
     def silent():
@@ -158,6 +159,7 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
 
     def sounding():
         dispatch(p, L)
+        fx(p, L)
         # done when the drum has died away
         M.v(p, 4, "t")
         p.fconst(12, 0.02)
@@ -171,6 +173,187 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.fconst(12, 30.0)
         p.if_(4, "GT", 12, lambda: (p.iconst(0, 0), M.vs(p, "on", 0)))
     p.ifz(0, "EQ", silent, sounding)
+
+
+def fx(p: Prog, L: M.Layout) -> None:
+    """The Machinedrum's track effects on the block the machine just wrote (rv_perc.c
+    perc_render): amplitude modulation, a one-band peaking EQ, a high pass and a low pass
+    (the band filter). Each runs only when its control turns it on; at the records'
+    defaults none does and the block is left as it is. Linear, so run after the machine's
+    trim rather than before it."""
+    C = L.C
+    one = 12
+
+    def q(d, k):
+        p.ld(d, C[f"q{k}"])
+
+    # AM: depth, and the phase step a sample (0.1 Hz .. 2.3 kHz)
+    q(4, 0)
+    p.st(C["amd"], 4)
+    p.iconst(5, 0)
+    p.st(C["fxam"], 5)
+    p.fconst(6, 0.0)
+    p.if_(4, "GT", 6, lambda: (p.iconst(5, 1), p.st(C["fxam"], 5)))
+    q(8, 1)
+    p.fconst(one, 14.5)
+    p.fop(8, 8, "*", one)
+    M.exp2(p, L, 8, 8)
+    p.fconst(one, 0.1 * M.DT)
+    p.fop(8, 8, "*", one)
+    p.st(C["amdt"], 8)
+    # EQ: gain in dB, (EQG - 0.5) x 36: +-18, 0 at the record's default
+    q(4, 3)
+    p.fconst(one, 0.5)
+    p.fop(4, 4, "-", one)
+    p.fconst(one, 36.0)
+    p.fop(4, 4, "*", one)
+    p.st(C["tmp"], 4)
+    p.iconst(5, 0)
+    p.st(C["fxeq"], 5)
+
+    def eq_on():
+        p.iconst(5, 1)
+        p.st(C["fxeq"], 5)
+        p.ld(4, C["tmp"])
+        p.fconst(one, 0.1661)
+        p.fop(4, 4, "*", one)
+        M.exp2(p, L, 9, 4)
+        p.fconst(one, 1.0)
+        p.fop(9, 9, "-", one)
+        p.st(C["eqm"], 9)                   # 2^(eqg 0.1661) - 1
+        q(8, 2)
+        p.fconst(one, 8.9)
+        p.fop(8, 8, "*", one)
+        M.exp2(p, L, 8, 8)
+        p.fconst(one, 40.0)
+        p.fop(8, 8, "*", one)                # 40 .. 19 kHz
+        M.svf_set(p, L, 3, 8, qc=1.2)
+        p.ld(9, C["eqm"])
+        p.ld(10, C["s3k"])
+        p.fop(9, 9, "*", 10)
+        p.st(C["eqm"], 9)                   # eq.k (2^(eqg 0.1661) - 1)
+    p.fconst(one, 0.2)
+    p.if_(4, "GT", one, eq_on, lambda: (p.fconst(one, -0.2), p.if_(4, "LT", one, eq_on)))
+    # the band filter: base FLTF, width FLTW, q 0.5 + FLTQ^2 x 12 / 16129 (0..127 each)
+    q(4, 4)
+    p.fconst(one, 127.0)
+    p.fop(4, 4, "*", one)
+    p.st(C["y"], 4)                          # e13
+    q(5, 5)
+    p.fop(5, 5, "*", one)
+    p.st(C["ns"], 5)                         # e14
+    q(6, 6)
+    p.fop(6, 6, "*", one)
+    p.fop(6, 6, "*", 6)
+    p.fconst(one, 12.0 / 16129.0)
+    p.fop(6, 6, "*", one)
+    p.fconst(one, 0.5)
+    p.fop(6, 6, "+", one)
+    p.st(C["tmp2"], 6)                       # fq
+    p.iconst(7, 0)
+    p.st(C["fxhp"], 7)
+    p.st(C["fxlp"], 7)
+
+    def hp_on():
+        p.iconst(7, 1)
+        p.st(C["fxhp"], 7)
+        p.ld(8, C["y"])
+        p.fconst(one, 10.0 / 127.0)
+        p.fop(8, 8, "*", one)
+        M.exp2(p, L, 8, 8)
+        p.fconst(one, 20.0)
+        p.fop(8, 8, "*", one)
+        p.ld(6, C["tmp2"])
+        M.svf_set(p, L, 4, 8, q=6)
+    p.ld(4, C["y"])
+    p.fconst(one, 0.5)
+    p.if_(4, "GE", one, hp_on)
+
+    def lp_on():
+        p.iconst(7, 1)
+        p.st(C["fxlp"], 7)
+        p.ld(8, C["y"])
+        p.ld(5, C["ns"])
+        p.fop(8, 8, "+", 5)
+        p.fconst(one, 127.0)
+        p.fop(8, 8, "MIN", one)
+        p.fconst(9, 0.0)
+        p.fop(8, 8, "MAX", 9)
+        p.fconst(one, 10.0 / 127.0)
+        p.fop(8, 8, "*", one)
+        M.exp2(p, L, 8, 8)
+        p.fconst(one, 20.0)
+        p.fop(8, 8, "*", one)
+        p.ld(6, C["tmp2"])
+        M.svf_set(p, L, 5, 8, q=6)
+    p.ld(5, C["ns"])
+    p.fconst(one, 126.5)
+    p.if_(5, "LE", one, lp_on)
+    # anything on? then once more through the block
+    p.ld(0, C["fxam"])
+    p.ld(1, C["fxeq"])
+    p.iop(0, 0, "OR", 1)
+    p.ld(1, C["fxhp"])
+    p.iop(0, 0, "OR", 1)
+    p.ld(1, C["fxlp"])
+    p.iop(0, 0, "OR", 1)
+
+    def run():
+        p.ld(0, C["buf"])
+        p.seti(4, 0, "the slot's buffer, again")
+
+        def sample():
+            p.ldi(0, 0, 4)
+            p.st(C["fxy"], 0)
+
+            def am():
+                M.v(p, 13, "amph")
+                p.ld(12, C["amdt"])
+                p.fop(13, 13, "+", 12)
+                M.frac(p, 13)
+                M.vs(p, "amph", 13)
+                M.sin_(p, L, 9, 13)
+                p.fconst(12, 0.5)
+                p.fop(9, 9, "*", 12)
+                p.fop(9, 12, "-", 9)            # 0.5 - 0.5 sin
+                p.ld(10, C["amd"])
+                p.fop(9, 10, "*", 9)
+                p.fconst(12, 1.0)
+                p.fop(9, 12, "-", 9)
+                p.ld(0, C["fxy"])
+                p.fop(0, 0, "*", 9)
+                p.st(C["fxy"], 0)
+            p.ld(5, C["fxam"])
+            p.ifz(5, "NE", am)
+
+            def eq():
+                p.ld(0, C["fxy"])
+                M.svf_tick(p, L, 3)
+                p.ld(12, C["eqm"])
+                p.fop(2, 2, "*", 12)
+                p.ld(0, C["fxy"])
+                p.fop(0, 0, "+", 2)
+                p.st(C["fxy"], 0)
+            p.ld(5, C["fxeq"])
+            p.ifz(5, "NE", eq)
+
+            def hp():
+                p.ld(0, C["fxy"])
+                M.svf_tick(p, L, 4, hp=True)
+                p.st(C["fxy"], 3)
+            p.ld(5, C["fxhp"])
+            p.ifz(5, "NE", hp)
+
+            def lp():
+                p.ld(0, C["fxy"])
+                M.svf_tick(p, L, 5)
+                p.st(C["fxy"], 1)
+            p.ld(5, C["fxlp"])
+            p.ifz(5, "NE", lp)
+            p.ld(0, C["fxy"])
+            p.stpost(4, 0)
+        M.samples(p, L, sample)
+    p.ifz(0, "NE", run)
 
 
 def _shift_by(p: Prog, d: int, s: int) -> None:
@@ -246,8 +429,20 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.ldi(0, 109, 4, "the record's machine type (+0x1b4)")
     p.iconst(12, MACHINE_TYPE)
     p.e("COMP(R0, R12);")
-    p.jump("NE", nxt)
+    other = p.label("other")
+    p.jump("NE", other)
     voice(p, L)
+    p.jump("", nxt)
+    # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
+    # (v0.12: v0.11 resumed what it had left ringing)
+    p.place(other)
+    p.ld(9, L.C["t"])
+    p.lsh(12, 9, 7)
+    p.iconst(11, L.state)
+    p.iop(12, 11, "+", 12)
+    p.seti(2, 12)
+    p.iconst(0, 0)
+    M.vs(p, "on", 0)
     p.place(nxt)
     p.ld(0, L.C["t"])
     p.iconst(12, 1)

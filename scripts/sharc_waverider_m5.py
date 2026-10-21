@@ -605,6 +605,8 @@ def step_map(dk, snap, m2mach, m5: Image, stock: bytes, init, sound, machines) -
 
 PERC_TYPE_SLOT = PM.TYPE_REC[1]         # DRIF: TYPE
 RETRIG = 4                              # the retrigger run's second note
+FX_ON = (0.8, 0.6, 0.5, 0.9, 0.3, 0.4, 0.7)   # AMD AMF EQF EQG FLTF FLTW FLTQ, every effect on
+LEAVE = (3, 5)                          # the leave run: FM Tone on blocks 3-4, PERC again from 5
 TYPE_SWITCH = 3                         # the type-switch run turns TYPE at this block, no new note
 
 
@@ -616,11 +618,12 @@ def perc_type_word(k: int) -> int:
     return knob << 8
 
 
-def perc_words(k: int, params=None) -> dict:
-    """frame slot -> word for machine K with PARAMS (eight 0..1, default the owner's)"""
+def perc_words(k: int, params=None, fx=None) -> dict:
+    """frame slot -> word for machine K with PARAMS (eight 0..1, default the owner's) and
+    the track effects FX (seven 0..1, default all off)"""
     params = PL.defaults(PM.NAMES[k]) if params is None else params
     out = {PERC_TYPE_SLOT: perc_type_word(k)}
-    for (_rid, slot, lo, top), x in zip(PM.PARAMS, params):
+    for (_rid, slot, lo, top), x in zip(PM.PARAMS + PM.FX_PARAMS, list(params) + list(fx or PL.FX_OFF)):
         out[slot] = PL.word_of(x, top, lo)
     return out
 
@@ -674,6 +677,13 @@ def step_perc(init, sound, machines, blocks) -> dict:
         sound, machines, overrides={**perc_words(0), PERC_TYPE_SLOT: perc_type_word(0 if b < TYPE_SWITCH else hh)},
         trigger=b == 1).to_bytes(), blocks)
     # every parameter at its top, and at its bottom, on an FM machine and a TRX one
+    # v0.12: the track effects, every one on (AM, EQ boost, high and low pass, resonance)
+    runs["fx"] = run_blocks(init, lambda b: base_frame(
+        sound, machines, overrides=perc_words(sd, fx=FX_ON), trigger=b == 1).to_bytes(), blocks)
+    # v0.12: the track leaves PERC while it rings and comes back with no new note: silent
+    runs["leave"] = run_blocks(init, lambda b: base_frame(
+        sound, machines, t0=0 if LEAVE[0] <= b < LEAVE[1] else 5, overrides=perc_words(sd),
+        trigger=b == 1).to_bytes(), blocks)
     runs["tops"] = run_blocks(init, frames(PM.NAMES.index("EFM-CB"), params=[1.0] * 8), blocks)
     runs["bottoms"] = run_blocks(init, frames(PM.NAMES.index("TRX-CY"), params=[0.0] * 8), blocks)
     ok_runs = all(r["ok"] for r in runs.values())
@@ -693,6 +703,10 @@ def step_perc(init, sound, machines, blocks) -> dict:
     one = perc_series(runs["single_sd"], 0)
     silent = perc_series(runs["silent"], 0)
     trig_bits = [x[0]["trig"] for x in m0["t5_inputs"] if 0 in x] if m0["ok"] else []
+    fxs = perc_series(runs["fx"], 0)
+    lv = runs["leave"]
+    back = [x for b, blk in enumerate(lv["perc"]) if b >= LEAVE[1] and 0 in blk for x in blk[0]["out"]] if lv["ok"] else []
+    before = [x for b, blk in enumerate(lv["perc"]) if b < LEAVE[0] and 0 in blk for x in blk[0]["out"]] if lv["ok"] else []
     n = {"perc_exact_voice_blocks_out_state_mismatches": exact,
          "peaks_by_machine": peaks,
          "loop_entries_m0": m0.get("loop_entries"),
@@ -729,6 +743,11 @@ def step_perc(init, sound, machines, blocks) -> dict:
         "a second note restarts the voice (the retrigger run departs from the single note's at it)":
             bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG] and rt[BLOCK * RETRIG:] != one[BLOCK * RETRIG:],
         "control: no trigger is silent (every PERC sample 0)": bool(silent) and all(x == 0.0 for x in silent),
+        "v0.12: the track effects change the sound (every one on: the block differs from TRX-SD's own)":
+            bool(fxs) and bool(one) and fxs != one and all(math.isfinite(x) for x in fxs),
+        "v0.12: a track that leaves PERC while it rings is silent when it comes back with no note":
+            bool(before) and V.peak(before) > 0.05 and len(back) == BLOCK * (blocks - LEAVE[1])
+            and all(x == 0.0 for x in back),
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
 

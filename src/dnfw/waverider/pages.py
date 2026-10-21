@@ -57,7 +57,8 @@ EMPTY_PAGE = 0x42432BD4           # the readers' own empty-page fallback
 TAG = 10                          # the tag every stock SYN descriptor ends with
 
 # PERC (machine 5, docs/perc.md; Waverider's place until v0.11): two pages on WaveTone
-# records -- TYPE (DRIF) and the eight parameters of dnfw.perc.machines.PARAMS. What each
+# records -- the eight parameters of dnfw.perc.machines.PARAMS; then TYPE (DRIF) and the
+# track effects (FX_PARAMS). What each
 # parameter is depends on TYPE, so its names are swapped per machine at run time
 # (wr_names in page.c, from perc_c_header's tables); the page reads them back from the
 # records, so it, the header line and the LFO lists always agree.
@@ -67,15 +68,16 @@ TITLES = ("PRC 1", "PRC 2")
 SUBTITLE = "Perc"
 TYPE_ID = _perc.TYPE_REC[0]                                  # 252, DRIF
 PARAM_IDS = tuple(r for r, _slot, _lo, _top in _perc.PARAMS)  # 238 242 254 253 256 257 260 240
+FX_IDS = tuple(r for r, _slot, _lo, _top in _perc.FX_PARAMS)   # 239 246 250 244 243 258 253
 PAGES = (
-    (TYPE_ID, *PARAM_IDS[:7]),                  # TYPE, parameters 1-7
-    (PARAM_IDS[7], 0, 0, 0, 0, 0, 0, 0),        # parameter 8
+    PARAM_IDS,                                  # the machine's eight, as the Machinedrum's page
+    (TYPE_ID, *FX_IDS),                         # TYPE; AMD AMF EQF / EQG FLTF FLTW FLTQ (v0.12)
 )
 # no static labels: wr_label hands every PERC record to the stock getShortName, which
 # reads the names wr_names swapped in
 LABELS: dict[int, str] = {}
 TYPE_NAMES = ("Perc Type", "TYPE")
-UNUSED = tuple(r for r in range(238, 263) if r != TYPE_ID and r not in PARAM_IDS)
+UNUSED = tuple(r for r in range(238, 263) if r != TYPE_ID and r not in PARAM_IDS and r not in FX_IDS)
 UNUSED_LONG, UNUSED_SHORT = "Unused", "-"
 # a parameter's long name (LFO and modulation lists, the header line) from its short one
 LONG = {"PTCH": "Pitch", "DEC": "Decay", "RAMP": "Ramp", "RDEC": "Ramp Decay", "STRT": "Start",
@@ -171,9 +173,10 @@ def label(rid: int) -> str:
 
 def named() -> list[tuple[int, str, str]]:
     """(record id, long name, short name) of the names wr_names swaps in for every PERC
-    machine alike: TYPE, and the WaveTone records PERC leaves unused. The parameters'
-    are per machine (perc_names)."""
-    return [(TYPE_ID, *TYPE_NAMES)] + [(r, UNUSED_LONG, UNUSED_SHORT) for r in UNUSED]
+    machine alike: TYPE, the track effects, and the WaveTone records PERC leaves unused.
+    The machine's eight are per machine (perc_names)."""
+    return ([(TYPE_ID, *TYPE_NAMES)] + [(r, lo, sh) for r, (sh, lo) in zip(FX_IDS, _perc.FX_NAMES)]
+            + [(r, UNUSED_LONG, UNUSED_SHORT) for r in UNUSED])
 
 
 def perc_names() -> list[list[tuple[str, str]]]:

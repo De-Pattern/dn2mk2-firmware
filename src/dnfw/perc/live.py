@@ -57,14 +57,15 @@ class Harness:
         self.mem = Mem(lambda a: self.words.get(a, 0))
         self.steps = 0
 
-    def set_controls(self, mtype: int, params) -> None:
-        """mtype 0..N-1; params: eight 0..1 values."""
+    def set_controls(self, mtype: int, params, fx=None) -> None:
+        """mtype 0..N-1; params: eight 0..1 values; fx: the seven track effects' (0..1,
+        default FX_OFF: every effect off, as at the records' defaults)."""
         t = self.t
         knob = (mtype * 128 + 127) // M.N            # a knob value that lands on mtype
         while (knob * M.N) >> 7 != mtype:
             knob -= 1
         self._half(M.frame_offset(M.TYPE_REC[1]), knob << 8)
-        for (_rid, slot, lo, top), x in zip(M.PARAMS, params):
+        for (_rid, slot, lo, top), x in zip(M.PARAMS + M.FX_PARAMS, list(params) + list(fx or FX_OFF)):
             self._half(M.frame_offset(slot), word_of(x, top, lo))
 
     def _half(self, off: int, value: int) -> None:
@@ -88,14 +89,18 @@ class Harness:
         return [flt(self.mem.get(BUF + 4 * k)) for k in range(32)]
 
     def render(self, mtype: int, params, seconds: float, note: float = 60.0,
-               hits=(0.0,)) -> list[float]:
-        self.set_controls(mtype, params)
+               hits=(0.0,), fx=None) -> list[float]:
+        self.set_controls(mtype, params, fx)
         n = int(seconds * M.RATE) // 32
         at = {int(h * M.RATE) // 32 for h in hits}
         out = []
         for b in range(n):
             out += self.block(note, b in at)
         return out
+
+
+# AMD AMF EQF EQG FLTF FLTW FLTQ at the WaveTone records' defaults: every effect off
+FX_OFF = (0.0, 0.5, 0.5, 0.5, 0.0, 1.0, 0.0)
 
 
 def defaults(name: str) -> list[float]:

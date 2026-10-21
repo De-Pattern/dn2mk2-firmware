@@ -60,13 +60,16 @@ def test_the_strings_carry_an_unshareable_header():
         assert struct.unpack(">IIi", CHUNK[at - 12:at]) == (len(text), len(text), -1)
 
 
-def test_perc_pages_are_type_then_the_eight_parameters():
-    assert pages.PAGES[0][0] == PM.TYPE_REC[0] == 252
-    assert list(pages.PAGES[0][1:]) + [pages.PAGES[1][0]] == [r for r, *_ in PM.PARAMS]
-    assert pages.PAGES[1][1:] == (0,) * 7
+def test_perc_pages_are_the_eight_parameters_then_type_and_the_effects():
+    # v0.12: page 1 is the machine's eight (the Machinedrum's page); page 2 TYPE, then
+    # AMD AMF EQF / EQG FLTF FLTW FLTQ
+    assert pages.PAGES[0] == tuple(r for r, *_ in PM.PARAMS)
+    assert pages.PAGES[1] == (PM.TYPE_REC[0], *(r for r, *_ in PM.FX_PARAMS))
     used = set(pages.PAGES[0]) | set(pages.PAGES[1])
-    assert not used & set(pages.UNUSED)
+    assert len(used) == 16 and not used & set(pages.UNUSED)
     assert pages.LABELS == {}                       # every label comes from the record's name
+    named = {r: sh for r, _lo, sh in pages.named()}
+    assert [named[r] for r in pages.PAGES[1]] == ["TYPE", "AMD", "AMF", "EQF", "EQG", "FLTF", "FLTW", "FLTQ"]
 
 
 def test_every_machine_names_its_eight_parameters():

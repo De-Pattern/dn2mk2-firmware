@@ -79,3 +79,61 @@ def test_the_program_assembles_from_the_model():
     lines = [ln for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//")]
     assert 3000 < len(lines) < 6000
     assert f"JUMP {dsp.RINGS_SW:#x};" in text
+
+
+def _ravel_fx(x, q, fs=48000.0):
+    """rv_perc.c perc_render's track effects in float64 with libm's tan and sin"""
+    e = [v * 127 for v in q]
+    amd, amf, eqf = q[0], 0.1 * 2 ** (e[1] * 14.5 / 127), 40 * 2 ** (e[2] * 8.9 / 127)
+    eqg = (q[3] - 0.5) * 36
+    flo = 0 if e[4] < 0.5 else 20 * 2 ** (e[4] * 10 / 127)
+    fhi = 0 if e[5] > 126.5 else 20 * 2 ** (min(max(e[4] + e[5], 0), 127) * 10 / 127)
+    fq = 0.5 + e[6] ** 2 * 12 / 16129
+
+    def mk(hz, qq):
+        hz = min(max(hz, 10), fs / 2 * 0.9)
+        g, k = math.tan(math.pi * hz / fs), 1 / max(qq, 0.05)
+        a1 = 1 / (1 + g * (g + k))
+        return {"k": k, "a1": a1, "a2": g * a1, "a3": g * g * a1, "ic1": 0.0, "ic2": 0.0}
+
+    def tick(f, v):
+        v3 = v - f["ic2"]
+        v1 = f["a1"] * f["ic1"] + f["a2"] * v3
+        v2 = f["ic2"] + f["a2"] * f["ic1"] + f["a3"] * v3
+        f["ic1"], f["ic2"] = 2 * v1 - f["ic1"], 2 * v2 - f["ic2"]
+        return v2, v1, v - f["k"] * v1 - v2
+    eq, hp, lp = mk(eqf, 1.2), mk(flo, fq) if flo else None, mk(fhi, fq) if fhi else None
+    ph, out = 0.0, []
+    for y in x:
+        if amd > 0:
+            ph += amf / fs
+            ph -= math.floor(ph)
+            y *= 1 - amd * (0.5 - 0.5 * math.sin(2 * math.pi * ph))
+        if abs(eqg) > 0.2:
+            y += tick(eq, y)[1] * eq["k"] * (2 ** (eqg * 0.1661) - 1)
+        if hp:
+            y = tick(hp, y)[2]
+        if lp:
+            y = tick(lp, y)[0]
+        out.append(y)
+    return out
+
+
+@pytest.mark.parametrize("name,fx", [("TRX-SD", (0.8, 0.6, 0.5, 0.9, 0.3, 0.4, 0.7)),
+                                     ("EFM-HH", (0.0, 0.5, 0.7, 0.1, 0.0, 0.5, 0.2)),
+                                     ("TRX-BD", (0.5, 0.9, 0.5, 0.5, 0.0, 1.0, 0.0)),
+                                     ("GND-NS", (0.0, 0.5, 0.5, 0.5, 0.6, 1.0, 0.9))])
+def test_the_track_effects_follow_ravels(name, fx):
+    """v0.12: AMD AMF EQF EQG FLTF FLTW FLTQ, as rv_perc.c applies them to a voice"""
+    k = PM.NAMES.index(name)
+    off = PL.Harness().render(k, PL.defaults(name), 0.05)
+    on = PL.Harness().render(k, PL.defaults(name), 0.05, fx=fx)
+    ref = _ravel_fx(off, fx)
+    peak = max(map(abs, ref))
+    assert on != off
+    assert max(abs(a - b) for a, b in zip(on, ref)) < 0.08 * peak
+
+
+def test_the_effects_are_off_at_the_records_defaults():
+    assert PL.Harness().render(2, PL.defaults("TRX-SD"), 0.01, fx=PL.FX_OFF) == \
+        PL.Harness().render(2, PL.defaults("TRX-SD"), 0.01)

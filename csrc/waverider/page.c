@@ -79,11 +79,6 @@ static int wr_active(void)
     return m == 5 ? 1 : m == 6 ? 2 : m == 7 ? 3 : 0;   /* PERC, RESONATOR, CZ (docs/cz.md) */
 }
 
-/* The active track's TYPE knob as the sound holds it: the target array the audio tick
- * reads the sound from (0x80003af0; slot s of track t at +34 + 202 t + 2 s, the record's
- * own scale; a knob turn writes it at once, measured in the emulator 2026-10-11) */
-#define TARGETS 0x80003AF0u
-
 /* TYPE's value (0..0x7f00) -> the machine, as the DSP reads it (dnfw.perc.program) */
 static int perc_of(int v)
 {
@@ -93,12 +88,14 @@ static int perc_of(int v)
     return (v * PERC_N) >> 7;
 }
 
+/* the machine the PERC page last read from TYPE (GET_VALUE, as the page draws it). v0.11
+ * read the sound's target array instead, and on the instrument that did not follow TYPE:
+ * every machine kept one set of names. */
+static int perc_seen __attribute__((section(".data"))) = 0;
+
 static int perc_type(void)
 {
-    int t = UI_TRACK, slot = RECORD(PERC_TYPE_ID)[1];
-    if (t > 15 || slot < 0 || slot > 99)
-        return 0;
-    return perc_of(*(volatile unsigned short *)(TARGETS + 34u + 202u * t + 2u * slot));
+    return perc_seen;
 }
 
 /* While the active track is one of ours, WaveTone's records carry our names, so the LFO
@@ -512,7 +509,11 @@ void wr_page_draw(void *view, void *canvas)
     int cz = kind == 3;                         /* CZ's */
     if (page < 0 || page >= (cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
         page = 0;
-    wr_names();                                 /* PERC: the names TYPE has now */
+    if (kind == 1) {                            /* PERC: the names TYPE has now */
+        u8 flag;
+        perc_seen = perc_of(GET_VALUE(view, PERC_TYPE_ID, &flag));
+    }
+    wr_names();
 
     if (cz && page == 0)
         cz_wave_picture(canvas, view);

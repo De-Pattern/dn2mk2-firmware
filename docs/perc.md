@@ -1,4 +1,4 @@
-# PERC: the owner's drum machines as machine type 5 (v0.11)
+# PERC: the owner's drum machines as machine type 5 (v0.11, v0.12)
 
 PERC replaces Waverider. MACHINE SEL offers **Perc** after Swarmer (type 5, Waverider's
 slot; every one of the engine's eight machine-lookup entries is in use, so a new machine
@@ -20,33 +20,58 @@ P-I machines are not ported.
 
 | page | A | B | C | D | E | F | G | H |
 |---|---|---|---|---|---|---|---|---|
-| 1 | TYPE | p1 | p2 | p3 | p4 | p5 | p6 | p7 |
-| 2 | p8 | | | | | | | |
+| 1 | p1 | p2 | p3 | p4 | p5 | p6 | p7 | p8 |
+| 2 | TYPE | AMD | AMF | EQF | EQG | FLTF | FLTW | FLTQ |
+
+**Page 1 is the machine** (v0.12; v0.11 had TYPE on A and p8 alone on page 2): its eight
+synthesis parameters, named per machine (`dnfw.perc.machines.PNAMES`: TRX-BD's are PTCH
+DEC RAMP RDEC STRT NOIS HARM CLIP). A parameter a machine lacks is labelled `-` and has no
+indicator. **Page 2 is TYPE and the Machinedrum's track effects**, as Ravel has them
+(`rv_perc.c perc_render`), the same for every machine and all off at their defaults:
+
+| | what | range |
+|---|---|---|
+| AMD | amplitude modulation depth | 0 (off) .. full |
+| AMF | its rate | 0.1 Hz .. 2.3 kHz |
+| EQF | the EQ band's frequency | 40 Hz .. 19 kHz |
+| EQG | its gain (centre 0 dB) | -18 .. +18 dB |
+| FLTF | the band filter's base: a high pass from 20 Hz up (0 = off) | 20 Hz .. 20 kHz |
+| FLTW | its width: a low pass at base + width (127 = off) | |
+| FLTQ | the filters' resonance | q 0.5 .. 12.5 |
 
 The middle of the page shows the machine (`TRX-BD`), what it is (`Bass Drum`) and a dot
-row with the machine's place among the 24. The eight parameters' names follow TYPE
-(`dnfw.perc.machines.PNAMES`: TRX-BD's are PTCH DEC RAMP RDEC STRT NOIS HARM CLIP); a
-parameter a machine lacks is labelled `-` and has no indicator. The names are swapped in
-the record table itself (`wr_names`, `csrc/waverider/page.c`), so the header's value line
-and the LFO destination lists use them too.
+row with the machine's place among the 24. The names are swapped in the record table
+itself (`wr_names`, `csrc/waverider/page.c`), so the header's value line and the LFO
+destination lists use them too. **v0.12 fix:** the names follow TYPE as the page reads it
+(`GET_VALUE`); v0.11 read the sound's target array, which on the instrument did not follow
+TYPE, so every machine showed one machine's names.
 
 Every PERC control is a WaveTone record, so every one is p-lockable and an LFO
 destination like any WaveTone parameter, and SAVE/LOAD keep them:
 
 | place | record (WaveTone) | frame slot | value read |
 |---|---|---|---|
-| TYPE | 252 DRIF | 38 | `(min(v >> 8, 127) * 24) >> 7` |
 | p1 | 238 TUN1 | 25 | `(v >> 8) - 4`, over 120 |
 | p2 | 242 TUN2 | 31 | as p1 |
-| p3 | 254 | 41 | `v >> 8`, over 127 |
-| p4 | 253 | 40 | over 127 |
-| p5 | 256 | 43 | over 127 |
-| p6 | 257 | 44 | over 127 |
-| p7 | 260 | 47 | over 127 |
-| p8 | 240 | 29 | over 100 |
+| p3 | 254 HOLD | 41 | `v >> 8`, over 127 |
+| p4 | 241 LEV1 | 30 | over 127 (ATK until v0.12) |
+| p5 | 256 NLEV | 43 | over 127 |
+| p6 | 257 BASE | 44 | over 127 |
+| p7 | 260 CHAR | 47 | over 127 |
+| p8 | 240 PD1 | 29 | over 100 |
+| TYPE | 252 DRIF | 38 | `(min(v >> 8, 127) * 24) >> 7` |
+| AMD | 239 WAV1 | 26 | over 120 |
+| AMF | 246 OFS1 | 28 | over 100 |
+| EQF | 250 OFS2 | 34 | over 100 |
+| EQG | 244 PD2 | 35 | over 100 (0.5: 0 dB) |
+| FLTF | 243 WAV2 | 32 | over 120 |
+| FLTW | 258 WDTH | 45 | over 127 |
+| FLTQ | 253 ATK | 40 | over 127 |
 
 A note latches the machine TYPE names at that moment: turning TYPE while a hit rings
-changes the labels at once and the sound at the next note. The parameters are read every
+changes the labels at once and the sound at the next note. A track that stops being PERC
+has its voice silenced (v0.12): coming back to PERC, it waits for a note (v0.11 resumed
+whatever it had left ringing, heard once as a short ring). The parameters are read every
 32-sample block. Selecting PERC gives the WaveTone records' defaults, not the per-machine
 defaults the Ravel firmware had; the PERC voice reads the knobs wherever they are.
 
@@ -91,14 +116,16 @@ about 220 M instructions a second.
 - **The DSP against the model, bit for bit** (`sharc_waverider_m5.py` step 3, in the ship
   gate): at PERC's entry each block the runner runs `dnfw.perc.program` on the DSP's own
   memory, then compares every type-5 track's buffer and voice state when PERC hands on.
-  Runs: all 24 machines at the owner's defaults, a note an octave up, a retrigger, two
-  PERC tracks at once, TYPE turned mid-note, every parameter at its top and at its
-  bottom, and no note (silence). Steps 4-9 (stock machines and filters unchanged, PING,
+  Runs: all 24 machines at the owner's defaults (eight PERC tracks at once), a note an
+  octave up, a retrigger, TYPE turned mid-note, every parameter at its top and at its
+  bottom, every track effect on, a track leaving PERC while it rings and coming back
+  (silent), and no note (silence). Steps 4-9 (stock machines and filters unchanged, PING,
   SHFT, GRAN, RESONATOR, CZ) run with a PERC track 0 as their source.
 - **The model against the owner's C** (`test/test_perc_live.py`): peak within 8 %, the
   10 ms envelope within 0.8-1.25x, the zero-crossing rate within 25 %, for every machine,
   against `test/data/perc_c_reference.json` (the C compiled at 48 kHz, each machine at
-  its Ravel defaults).
+  its Ravel defaults). The track effects against Ravel's formulas in float64 with libm's
+  tan and sin (within 8 % of the peak; the AM rate's table exp2 drifts its phase slowly).
 - `test/test_waverider_dsp.py`: the L2 placement, the saves, the registers PERC writes.
 - `test/test_waverider_pages.py`: the pages, the per-machine names, TYPE's mapping
   agreeing with the DSP's.
