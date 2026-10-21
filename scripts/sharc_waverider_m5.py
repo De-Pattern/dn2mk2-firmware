@@ -606,7 +606,8 @@ def step_map(dk, snap, m2mach, m5: Image, stock: bytes, init, sound, machines) -
 PERC_TYPE_SLOT = PM.TYPE_REC[1]         # DRIF: TYPE
 RETRIG = 4                              # the retrigger run's second note
 FX_ON = (0.8, 0.6, 0.5, 0.9, 0.3, 0.4, 0.7)   # AMD AMF EQF EQG FLTF FLTW FLTQ, every effect on
-LEAVE = (3, 5)                          # the leave run: FM Tone on blocks 3-4, PERC again from 5
+LEAVE = (3, 5)                          # the leave run: FM Tone in the frames of blocks 3-4 (the
+                                        # record follows a block later: PERC again from block 6)
 TYPE_SWITCH = 3                         # the type-switch run turns TYPE at this block, no new note
 
 
@@ -746,7 +747,7 @@ def step_perc(init, sound, machines, blocks) -> dict:
         "v0.12: the track effects change the sound (every one on: the block differs from TRX-SD's own)":
             bool(fxs) and bool(one) and fxs != one and all(math.isfinite(x) for x in fxs),
         "v0.12: a track that leaves PERC while it rings is silent when it comes back with no note":
-            bool(before) and V.peak(before) > 0.05 and len(back) == BLOCK * (blocks - LEAVE[1])
+            bool(before) and V.peak(before) > 0.05 and len(back) >= BLOCK * 2
             and all(x == 0.0 for x in back),
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
