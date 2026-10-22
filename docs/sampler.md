@@ -87,7 +87,7 @@ part that plays solid, LOOP's point marked in the loop modes, GRID's slices tick
 - **The ColdFire** (`dnfw.waverider.coldfire`, `pages`, `csrc/waverider/page.c`): types
   5..12 are WaveTone clones (one range check in each shim); the name table, attribute
   rows and LOAD bound grow to 12; MACHINE SEL's group function puts 8..12 in a section
-  of their own; the page renderer moved to a CODE chunk of its own at `0x46a00000`.
+  of their own; the page renderer moved to a CODE chunk of its own at `0x46ac0000` (clear of the emulator harnesses' scratch at 0x46a00000).
 - A sample machine with no renderer yet (WERP, STRETCH, REPITCH) has its buffer
   cleared each block: silent, never a stale block.
 
