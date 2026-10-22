@@ -96,11 +96,13 @@ LONG = {"PTCH": "Pitch", "DEC": "Decay", "RAMP": "Ramp", "RDEC": "Ramp Decay", "
         "MFB": "Mod Feedback", "NDEC": "Noise Decay", "CLPS": "Claps", "CDEC": "Clap Decay",
         "SNAR": "Snare", "SPTC": "Snare Pitch", "SDEC": "Snare Decay", "SMOD": "Snare Mod",
         "FB": "Feedback", "TREM": "Tremolo", "TFRQ": "Trem Freq", "UP": "Up", "UVAL": "Up Value",
-        "DOWN": "Down", "DVAL": "Down Value", "-": "Unused"}
+        "DOWN": "Down", "DVAL": "Down Value", "POWR": "Power", "NTUN": "Noise Tune",
+        "NTYP": "Noise Type", "-": "Unused"}
 # what each machine is, under its name in the middle of the page
 DESCRIPTIONS = {"BD": "Bass Drum", "B2": "Bass Drum 2", "SD": "Snare", "XT": "Tom", "CP": "Clap",
                 "RS": "Rimshot", "CB": "Cowbell", "CH": "Closed Hat", "OH": "Open Hat",
                 "CY": "Cymbal", "MA": "Maracas", "CL": "Claves", "XC": "Conga", "HH": "Hi-Hat",
+                "S2": "Snare 2",
                 "SN": "Sine", "NS": "Noise", "IM": "Impulse"}
 
 

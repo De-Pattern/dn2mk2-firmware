@@ -27,49 +27,12 @@ DT = 1.0 / RATE
 R44 = 44100.0 / RATE            # a per-sample constant c at 44.1 kHz is c ** R44 here
 LOG2E = 1.0 / math.log(2.0)
 
-# -- the machines, in TYPE order ---------------------------------------------------------
-NAMES = ("TRX-BD", "TRX-B2", "TRX-SD", "TRX-XT", "TRX-CP", "TRX-RS", "TRX-CB", "TRX-CH",
-         "TRX-OH", "TRX-CY", "TRX-MA", "TRX-CL", "TRX-XC",
-         "EFM-BD", "EFM-SD", "EFM-XT", "EFM-CP", "EFM-RS", "EFM-CB", "EFM-HH", "EFM-CY",
-         "GND-SN", "GND-NS", "GND-IM")
+# -- the machines, in TYPE order: the Machinedrum's own since v0.17 (dnfw.md, docs/md.md) --
+from ..md import machines as _MD                                  # noqa: E402
+
+NAMES = _MD.NAMES
 N = len(NAMES)
-# each machine's eight parameter names (rv_params.c perc_pi); "-" does nothing
-PNAMES = {
-    "TRX-BD": ("PTCH", "DEC", "RAMP", "RDEC", "STRT", "NOIS", "HARM", "CLIP"),
-    "TRX-B2": ("PTCH", "DEC", "RAMP", "HOLD", "TICK", "NOIS", "DIRT", "DIST"),
-    "TRX-SD": ("PTCH", "DEC", "BUMP", "BENV", "SNAP", "TONE", "TUNE", "CLIP"),
-    "TRX-XT": ("PTCH", "DEC", "RAMP", "RDEC", "DAMP", "DIST", "DTYP", "-"),
-    "TRX-CP": ("CLPY", "TONE", "HARD", "RICH", "RATE", "ROOM", "RSIZ", "RTUN"),
-    "TRX-RS": ("PTCH", "DEC", "DIST", "-", "-", "-", "-", "-"),
-    "TRX-CB": ("PTCH", "DEC", "ENH", "DAMP", "TONE", "BUMP", "-", "-"),
-    "TRX-CH": ("GAP", "DEC", "HPF", "LPF", "MTAL", "-", "-", "-"),
-    "TRX-OH": ("GAP", "DEC", "HPF", "LPF", "MTAL", "-", "-", "-"),
-    "TRX-CY": ("RICH", "DEC", "TOP", "TTUN", "SIZE", "PEAK", "-", "-"),
-    "TRX-MA": ("ATT", "SUS", "REV", "DAMP", "RATL", "RTYP", "TONE", "HARD"),
-    "TRX-CL": ("PTCH", "DEC", "DUAL", "ENH", "TUNE", "CLIC", "-", "-"),
-    "TRX-XC": ("PTCH", "DEC", "RAMP", "RDEC", "DAMP", "DIST", "DTYP", "-"),
-    "EFM-BD": ("PTCH", "DEC", "RAMP", "RDEC", "MOD", "MFRQ", "MDEC", "MFB"),
-    "EFM-SD": ("PTCH", "DEC", "NOIS", "NDEC", "MOD", "MFRQ", "MDEC", "HPF"),
-    "EFM-XT": ("PTCH", "DEC", "RAMP", "RDEC", "MOD", "MFRQ", "MDEC", "CLIC"),
-    "EFM-CP": ("PTCH", "DEC", "CLPS", "CDEC", "MOD", "MFRQ", "MDEC", "HPF"),
-    "EFM-RS": ("PTCH", "DEC", "MOD", "HPF", "SNAR", "SPTC", "SDEC", "SMOD"),
-    "EFM-CB": ("PTCH", "DEC", "SNAP", "FB", "MOD", "MFRQ", "MDEC", "-"),
-    "EFM-HH": ("PTCH", "DEC", "TREM", "TFRQ", "MOD", "MFRQ", "MDEC", "FB"),
-    "EFM-CY": ("PTCH", "DEC", "FB", "HPF", "MOD", "MFRQ", "MDEC", "-"),
-    "GND-SN": ("PTCH", "DEC", "RAMP", "RDEC", "-", "-", "-", "-"),
-    "GND-NS": ("DEC", "-", "-", "-", "-", "-", "-", "-"),
-    "GND-IM": ("UP", "UVAL", "DOWN", "DVAL", "-", "-", "-", "-"),
-}
-# rv_perc.c perc_trim, by Ravel's machine order, and the EFM output scales
-_TRIM = dict(zip(("TRX-BD", "TRX-B2", "TRX-SD", "TRX-XT", "TRX-CP", "TRX-RS", "TRX-CB", "TRX-CH",
-                  "TRX-OH", "TRX-CY", "TRX-MA", "TRX-CL", "TRX-XC", "EFM-BD", "EFM-SD", "EFM-XT",
-                  "EFM-CP", "EFM-RS", "EFM-CB", "EFM-HH", "EFM-CY", "PI-BD", "PI-SD", "PI-MT",
-                  "PI-RS", "PI-ML", "PI-MA", "PI-HH", "PI-RC", "PI-CC", "GND-SN", "GND-NS", "GND-IM"),
-                 (1.000, 0.785, 0.822, 0.851, 1.334, 1.175, 1.429, 2.512, 1.462, 1.995, 1.135, 1.122,
-                  0.794, 1.245, 1.622, 1.000, 1.288, 1.216, 1.000, 0.851, 0.813, 1.000, 0.692, 0.759,
-                  0.684, 0.684, 1.585, 0.716, 0.589, 0.589, 0.785, 1.274, 2.512)))
-_EFM_OUT = {"EFM-CP": 1.9, "EFM-CY": 1.6, "EFM-RS": 1.4, "EFM-HH": 1.5}
-GAIN = {n: 0.7 * _TRIM[n] * (_EFM_OUT.get(n, 0.8) if n.startswith("EFM") else 1.0) for n in NAMES}
+PNAMES = {M.NAME: M.PNAMES for M in _MD.MACHINES}
 
 # -- where the controls come from: WaveTone records (id, frame slot, value low, top) -----
 # p = clamp((word >> 8) - low, 0, top) / top. TYPE spreads the 0..127 knob over the N
