@@ -1224,6 +1224,14 @@ def step_tdm(init, sound, machines, blocks) -> dict:
                 state["hits"] = hits[:12] + [len(hits)]
             for i in range(SM.TX_UNITS):              # as stock leaves it: zeros
                 m2.poke(r.state, at + 64 * (i >> 1) + 4 * (i & 1), 0)
+        probe = SM.TDM_TX + (pg << 11) + 56
+        if b == 3:
+            state["marker_before"] = [hex(m2.word(r.state, probe + 64 * f) or 0) for f in (0, 23, 24)]
+            for f in (0, 23, 24):
+                m2.poke(r.state, probe + 64 * f, 0x12345678)
+            state["marker_poked"] = [hex(m2.word(r.state, probe + 64 * f) or 0) for f in (0, 23, 24)]
+        if b == 4:
+            state["marker_after"] = [hex(m2.word(r.state, probe + 64 * f) or 0) for f in (0, 23, 24)]
         rx = SM.TDM_RX + (pg << 11) + 32
         if b < n:
             off = base_w + SM.RX_WORDS * b
@@ -1247,9 +1255,27 @@ def step_tdm(init, sound, machines, blocks) -> dict:
     def frames(b):
         return base_frame(sound, machines, t0=ONE, trigger=(b == 1),
                           overrides=smp_words({SM.SAMP_REC: 1})).to_bytes()
+    watch = []
+    if os.environ.get("TDM_WATCH"):
+        import sharc_core.memory as mem       # noqa: PLC0415
+        orig_w = mem._dm_write
+
+        def w(stt, address, width, value):
+            a = getattr(address, "value", address)
+            if isinstance(a, int) and SM.TDM_TX <= a < SM.TDM_TX + 0x1000 and len(watch) < 40:
+                o = (a - SM.TDM_TX) % 64
+                pc = getattr(stt, "pc_sw", None)
+                if o in (56, 60) and not (pc and 0xbe8000 <= pc < 0xbf0000):
+                    v = getattr(value, "value", None)
+                    watch.append((state["b"], hex(a), hex(pc) if pc else None, hex(v) if v is not None else None))
+            return orig_w(stt, address, width, value)
+        for m in list(sys.modules.values()):
+            if getattr(m, "_dm_write", None) is orig_w:
+                setattr(m, "_dm_write", w)
     run = run_blocks(init, frames, total, extra_hooks={m3.DISPATCH: at_dispatch})
     ok = run["ok"]
     st = run["state"].state if ok else None
+    state["watch"] = [x for x in watch if x[2] is None or not (0xbe8000 <= int(x[2], 16) < 0xbf0000)][:40]
 
     def pool_word(w):
         return (m2.word(st, dsp.SMP_POOL_DDR + 4 * w) or 0) & 0xFFFFFFFF
@@ -1294,7 +1320,7 @@ def step_tdm(init, sound, machines, blocks) -> dict:
             "numbers": {"status": stat, "packets_back": sum(1 for p in state["tx"] if p),
                         "mismatch": [(k, hex(got[k]), hex(want[k])) for k in range(len(got))
                                      if got[k] != want[k]][:6] if ok else None,
-                        "tx_raw": state.get("raw"), "hits": state.get("hits"), "cols": state.get("cols"),
+                        "tx_raw": state.get("raw"), "hits": state.get("hits"), "watch": state.get("watch"), "cols": state.get("cols"), "marker": [state.get(k) for k in ("marker_before", "marker_poked", "marker_after")],
                         "pages": sorted(set(state["pg"])), "exact": exact, "halt": run.get("halt")}}
 
 
