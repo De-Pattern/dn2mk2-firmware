@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import gc
 import glob
 import hashlib
 import json
@@ -506,6 +507,8 @@ def main(argv=None):
             if runs["g0"]["ok"]:
                 wav("perc_amp_out.wav", runs["g0"]["amp_out"], a.seconds, wavs,
                     "TRX-BD at the amp's output, the end of the per-track chain")
+            del s3, runs                        # each run holds a whole DSP memory: free them
+            gc.collect()
 
         if "smp" in steps:
             print("\nstep 3b: the sample machines")
@@ -517,15 +520,20 @@ def main(argv=None):
                 for t, what in ((0, "SNARE reversed"), (1, "GRID on BEAT"), (4, "HAT looping")):
                     wav(f"smp_{t}.wav", smp_series(mr, t), a.seconds, wavs,
                         f"the sample machines, mixed run, track {t}: {what}")
+            del s3b, mr
+            gc.collect()
 
         if "link" in steps:
             print("\nstep 3c: the sample link")
-            results["3c_link"] = step_link(init, sound, machines, a.blocks)
+            results["3c_link"] = {k: v for k, v in step_link(init, sound, machines, a.blocks).items()
+                                  if k != "runs"}
+            gc.collect()
             show(results["3c_link"])
 
         if "rec" in steps:
             print("\nstep 3d: the recorder")
             results["3d_rec"] = step_rec(init, sound, machines, a.blocks)
+            gc.collect()
             show(results["3d_rec"])
 
         if "stock" in steps:
@@ -847,6 +855,11 @@ def smp_exact(run) -> tuple[int, int, int]:
 
 
 def step_smp(init, sound, machines, blocks) -> dict:
+    def rb(*args, **kw):                # a run without its final DSP memory: 12 runs, held at once
+        r = run_blocks(*args, **kw)
+        r.pop("state", None)
+        return r
+
     ONE, GRID, WERP = SM.TYPE_OF["ONESHOT"], SM.TYPE_OF["GRID"], SM.TYPE_OF["WERP"]
 
     def frames(t0, words, others=None, other_words=None, trig=(1,), note=0x3C00):
@@ -861,13 +874,13 @@ def step_smp(init, sound, machines, blocks) -> dict:
 
     runs = {}
     t0 = time.perf_counter()
-    runs["kick"] = run_blocks(init, frames(ONE, smp_words()), blocks)
-    runs["kick_up"] = run_blocks(init, frames(ONE, smp_words({SM.TUNE_REC: 72})), blocks)
+    runs["kick"] = rb(init, frames(ONE, smp_words()), blocks)
+    runs["kick_up"] = rb(init, frames(ONE, smp_words({SM.TUNE_REC: 72})), blocks)
     # four sample voices, PERC and a machine with no renderer side by side: track 0 the
     # snare reversed, 1 GRID slicing BEAT, 2 PERC TRX-SD, 3 WERP (silent), 4 the hat
     # looping forward, 5 FM Tone
     sd = PM.NAMES.index("TRX-SD")
-    runs["mixed"] = run_blocks(init, frames(
+    runs["mixed"] = rb(init, frames(
         ONE, smp_words({SM.SAMP_REC: 2, SM.PLAY_REC: 0}),
         others={1: GRID, 2: 5, 3: WERP, 4: ONE, 5: 0},      # (3: WERP, on its defaults)
         other_words={1: smp_words({SM.SAMP_REC: 4, SM.GRID_REC: 48, SM.SLICE_REC: 40}),
@@ -888,17 +901,17 @@ def step_smp(init, sound, machines, blocks) -> dict:
                 f.param(t, slot, w)
         f.put(SP.TEMPO_OFFSET, 140 * 120)
         return f.to_bytes()
-    runs["timed"] = run_blocks(init, timed, blocks)
+    runs["timed"] = rb(init, timed, blocks)
     # v0.14: CFAD, a short forward loop on the hat, with and without the crossfade
     loopw = {SM.SAMP_REC: 3, SM.PLAY_REC: 80, SM.LOOP_REC: 5, SM.LEN_REC: 10}
-    runs["cfad"] = run_blocks(init, frames(ONE, smp_words(loopw | {SM.CFAD_REC: 100})), blocks)
-    runs["nocfad"] = run_blocks(init, frames(ONE, smp_words(loopw)), blocks)
-    runs["off"] = run_blocks(init, frames(ONE, smp_words({SM.SAMP_REC: 0})), blocks)
-    runs["empty_slot"] = run_blocks(init, frames(ONE, smp_words({SM.SAMP_REC: 90})), blocks)
-    runs["silent"] = run_blocks(init, frames(ONE, smp_words(), trig=()), blocks)
-    runs["retrig"] = run_blocks(init, frames(ONE, smp_words(), trig=(1, RETRIG)), blocks)
-    runs["tops"] = run_blocks(init, frames(GRID, smp_words({r: 127 for r in SM.RECORDS})), blocks)
-    runs["bottoms"] = run_blocks(init, frames(ONE, smp_words({r: 0 for r in SM.RECORDS} | {SM.SAMP_REC: 1,
+    runs["cfad"] = rb(init, frames(ONE, smp_words(loopw | {SM.CFAD_REC: 100})), blocks)
+    runs["nocfad"] = rb(init, frames(ONE, smp_words(loopw)), blocks)
+    runs["off"] = rb(init, frames(ONE, smp_words({SM.SAMP_REC: 0})), blocks)
+    runs["empty_slot"] = rb(init, frames(ONE, smp_words({SM.SAMP_REC: 90})), blocks)
+    runs["silent"] = rb(init, frames(ONE, smp_words(), trig=()), blocks)
+    runs["retrig"] = rb(init, frames(ONE, smp_words(), trig=(1, RETRIG)), blocks)
+    runs["tops"] = rb(init, frames(GRID, smp_words({r: 127 for r in SM.RECORDS})), blocks)
+    runs["bottoms"] = rb(init, frames(ONE, smp_words({r: 0 for r in SM.RECORDS} | {SM.SAMP_REC: 1,
                                                                                        SM.LEV_REC: 100})), blocks)
     print(f"    sample machines: {round(time.perf_counter() - t0)} s", flush=True)
     ok_runs = all(r["ok"] for r in runs.values())
