@@ -69,8 +69,19 @@ def _table_layout() -> dict[str, tuple[int, int]]:
     for name, (_a, n) in rom.DSP_TABLES.items():
         out[name] = (at, n)
         at += 4 * n
+    # the Q23 tables (hostD on) ship packed, 24 bits a word (tpack), and the DSP unpacks
+    # them into their places (unpack_fill); fpad rounds them to whole blocks of the fill
+    nf = (at - out["hostD"][0]) // 4
+    groups = -(-nf // (4 * UNPACK_PER_BLOCK)) * UNPACK_PER_BLOCK
+    out["fpad"] = (at, 4 * groups - nf)
+    at += 4 * (4 * groups - nf)
+    out["tpack"] = (at, 3 * groups)
+    at += 4 * 3 * groups
     out["_end"] = (at, 0)
     return out
+
+
+UNPACK_PER_BLOCK = 256                        # groups of four words unpacked a block
 
 
 TABLE_LAYOUT = _table_layout()
@@ -83,7 +94,7 @@ def tables_bytes() -> bytes:
     start = TABLE_LAYOUT["sinecorr"][0]
     out = bytearray(TABLE_LAYOUT["_end"][0] - start)
     for name, (off, n) in TABLE_LAYOUT.items():
-        if name in ("sine", "_end"):
+        if name in ("sine", "_end", "fpad", "tpack"):
             continue
         if name == "sinecorr":
             data = struct.pack(f"<{n}I", *sine_corrections())
@@ -96,7 +107,81 @@ def tables_bytes() -> bytes:
         else:
             data = struct.pack(f"<{n}f", *(x * Q23 for x in rom.dsp_table(name)))
         out[off - start:off - start + len(data)] = data
+    # pack the Q23 floats (hostD .. fpad) 24 bits a word into tpack, and zero them: the
+    # DSP's unpack_fill puts them back, word for word
+    lo = TABLE_LAYOUT["hostD"][0] - start
+    hi = TABLE_LAYOUT["tpack"][0] - start
+    vals = []
+    for k in range(lo, hi, 4):
+        x = struct.unpack_from("<f", out, k)[0] * 2.0 ** 23
+        assert x == int(x) and -(1 << 23) <= x < (1 << 23)
+        vals.append(int(x) & 0xFFFFFF)
+    packed = []
+    for g in range(0, len(vals), 4):
+        v0, v1, v2, v3 = vals[g:g + 4]
+        packed += [v0 | (v1 & 0xFF) << 24, v1 >> 8 | (v2 & 0xFFFF) << 16, v2 >> 16 | v3 << 8]
+    assert len(packed) == TABLE_LAYOUT["tpack"][1]
+    out[lo:hi] = bytes(hi - lo)
+    off = TABLE_LAYOUT["tpack"][0] - start
+    out[off:off + 4 * len(packed)] = struct.pack(f"<{len(packed)}I", *packed)
     return bytes(out)
+
+
+def unpack_fill(p: Prog, L: Layout) -> None:
+    """UNPACK_PER_BLOCK more groups of the packed Q23 tables (tpack: four 24-bit words in
+    three) into their floats (hostD on), from C['ufill'] (0 at power-on) until all are
+    (C['ufill'] = the groups). Each word w becomes FLOAT (w << 8) BY -31 = w / 2^23, as
+    the build's float. Clobbers R0-R8, R12, I1, I2."""
+    C = L.C
+    groups = TABLE_LAYOUT["tpack"][1] // 3
+    p.ld(0, C["ufill"])
+    p.iconst(12, groups)
+    p.e("COMP(R0, R12);")
+
+    def more():
+        p.ld(0, C["ufill"])
+        p.lsh(1, 0, 2)                          # 4 g
+        p.lsh(2, 0, 4)                          # 16 g: the floats' bytes
+        p.iconst(12, L.T["hostD"])
+        p.iop(2, 12, "+", 2)
+        p.seti(2, 2)
+        p.lsh(3, 0, 3)                          # 8 g
+        p.ipass(12, 3)
+        p.iop(1, 12, "+", 1)                    # 12 g: the packed words' bytes
+        p.iconst(12, L.T["tpack"])
+        p.iop(1, 12, "+", 1)
+        p.seti(1, 1)
+
+        def group():
+            p.ldpost(2, 1)                      # A
+            p.ldpost(3, 1)                      # B
+            p.ldpost(4, 1)                      # C
+            p.iconst(8, -31)
+            p.lsh(5, 2, 8)                      # w0 << 8
+            p.float_(5, 5, 8)
+            p.stpost(2, 5)
+            p.lsh(5, 2, -24)
+            p.lsh(5, 5, 8)
+            p.lsh(6, 3, 16)
+            p.iop(5, 5, "OR", 6)                # w1 << 8
+            p.float_(5, 5, 8)
+            p.stpost(2, 5)
+            p.lsh(5, 3, -16)
+            p.lsh(5, 5, 8)
+            p.lsh(6, 4, 24)
+            p.iop(5, 5, "OR", 6)                # w2 << 8
+            p.float_(5, 5, 8)
+            p.stpost(2, 5)
+            p.iconst(6, -256)
+            p.iop(5, 4, "AND", 6)               # w3 << 8
+            p.float_(5, 5, 8)
+            p.stpost(2, 5)
+        p.loop(C["tmp"], UNPACK_PER_BLOCK, group)
+        p.ld(0, C["ufill"])
+        p.iconst(12, UNPACK_PER_BLOCK)
+        p.iop(0, 12, "+", 0)
+        p.st(C["ufill"], 0)
+    p._branch(lambda: p.r[0] < groups, "LT", more, None)
 
 
 def _s24(v: int) -> int:
@@ -114,7 +199,8 @@ class Layout:
 
 
 SC_WORDS = ("n1", "n2", "n3", "a", "b", "c", "d", "e", "f", "g", "h", "k", "fill", "tmp", "mdb",
-            "cw", "cs", "cv")
+            "cw", "cs", "cv", "ash", "ufill")
+# ash: the word dsl.ash saves its count register in
 # mdb: the slot's words' address (what I3 holds), for code that needs it in an R register
 
 

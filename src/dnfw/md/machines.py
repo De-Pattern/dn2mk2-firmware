@@ -15,7 +15,12 @@ try:
 except ImportError:                           # pragma: no cover
     _EFM = ()
 
-MACHINES = (*_TRX, *_EFM, *gnd.MACHINES)
+ORDER = ("TRX-BD", "TRX-B2", "TRX-SD", "TRX-XT", "TRX-CP", "TRX-RS", "TRX-CB", "TRX-CH",
+         "TRX-OH", "TRX-CY", "TRX-MA", "TRX-CL", "TRX-XC", "TRX-S2",
+         "EFM-BD", "EFM-SD", "EFM-XT", "EFM-CP", "EFM-RS", "EFM-CB", "EFM-HH", "EFM-CY",
+         "GND-SN", "GND-NS", "GND-IM")              # PERC's order until v0.16, TRX-S2 added
+_ALL = {M.NAME: M for M in (*_TRX, *_EFM, *gnd.MACHINES)}
+MACHINES = tuple(_ALL[n] for n in ORDER if n in _ALL)
 NAMES = tuple(M.NAME for M in MACHINES)
 BY_NAME = {M.NAME: M for M in MACHINES}
 

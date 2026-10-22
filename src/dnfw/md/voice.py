@@ -37,6 +37,7 @@ def _same_code(step: str) -> dict[int, int]:
     shares that machine's render, init and trig): the same function, emitting the same text."""
     def text(M):
         q = Prog("emit", prefix="md_probe")
+        q.spill = _PROBE_L.C["ash"]
         getattr(M, step)(q, _PROBE_L)
         return q.text()
     out, seen = {}, {}

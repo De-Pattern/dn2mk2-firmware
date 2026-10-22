@@ -84,6 +84,7 @@ class Prog:
         self.steps = 0
         self.subs: dict[str, object] = {}       # name -> body, emitted once by emit_subs()
         self.in_sub = False
+        self.spill: int | None = None           # a DM word `ash` may use (see ash)
 
     # -- emit helpers -------------------------------------------------------------------
     @property
@@ -200,10 +201,28 @@ class Prog:
             self.setR(d, (x << n) if n >= 0 else (x >> -n))
 
     def ash(self, d: int, a: int, n: int, note: str = "") -> None:
+        """Rd = Ra >> -n, arithmetic. selas mis-encodes the immediate form `ASHIFT Rx BY n`
+        (its shifter-op field is not the one the firmware's immediate ASHIFTs carry:
+        digikit reads it as "unsupported ShiftImm opcode 0x20", reader.asm), so the count
+        goes in a register: one not in (d, a), saved to and restored from the word
+        `self.spill` (a DM address the program owns). Every register is as before."""
         assert n < 0
-        self.e(f"R{d} = ASHIFT R{a} BY {n};", note)
+        if not self.run:
+            assert self.spill is not None, "ash needs Prog.spill"
+        t = next(r for r in (12, 13, 14) if r not in (d, a))
+        if self.spill is not None:
+            self.st(self.spill, t)
+        else:
+            self.steps += 1
+        x = s32(self.r[a]) >> -n if self.run else 0
+        self.iconst(t, n)
+        self.e(f"R{d} = ASHIFT R{a} BY R{t};", note)
+        if self.spill is not None:
+            self.ld(t, self.spill)
+        else:
+            self.steps += 1
         if self.run:
-            self.setR(d, s32(self.r[a]) >> -n)
+            self.setR(d, x)
 
     def xor(self, d: int, a: int, b: int, t: int) -> None:
         """Rd = Ra ^ Rb as (Ra | Rb) - (Ra & Rb) (no XOR form in the stock corpus).

@@ -60,7 +60,9 @@ def table_mem(L: K.Layout) -> dict[int, int]:
         p = Prog("run", mem=mem)
         for _ in range(K.SINE_N // K.SINE_PER_BLOCK):
             K.sine_fill(p, L)
-        m.update({a: v for a, v in mem.w.items() if L.T["sine"] <= a < L.T["sine"] + 4 * K.SINE_N})
+            K.unpack_fill(p, L)
+        m.update({a: v for a, v in mem.w.items()
+                  if L.T["sine"] <= a < L.T["sine"] + 4 * K.SINE_N or L.T["hostD"] <= a < L.T["tpack"]})
         _TABLE_MEM[L.tables] = m
     return _TABLE_MEM[L.tables]
 

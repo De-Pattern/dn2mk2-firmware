@@ -190,6 +190,15 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             # the same program as the assembled code) run on the DSP's memory as it is here
             out["loop_entries"] += 1
             ins, model = {}, {}
+            # wr_perc first fills more of the Machinedrum's sine and tables (until whole):
+            # the model does the same on the memory here before its voices run
+            from dnfw.perc.dsl import Mem as _Mem, Prog as _Prog
+            st0 = r.state
+            filled = _Mem(lambda a, st0=st0: m2.word(st0, a) or 0)
+            fp = _Prog("run", mem=filled)
+            fp.spill = PERC_L.md.C["ash"]
+            MDK.sine_fill(fp, PERC_L.md)
+            MDK.unpack_fill(fp, PERC_L.md)
             for t in range(16):
                 rec = V.track_record(t)
                 if (m2.word(r.state, rec + V.TRACK_MACHINE) == 5
@@ -200,7 +209,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                               "params": [frame_word(r.state, FR.slot_offset(t, slot))
                                          for _rid, slot, _lo, _top in PM.PARAMS]}
                     st = r.state
-                    p, mem = PP.run_voice(PERC_L, lambda a, st=st: m2.word(st, a) or 0, t)
+                    p, mem = PP.run_voice(PERC_L, filled.get, t)
                     buf = m2.word(st, PP.BUFFERS + 4 * t) or 0
                     model[t] = {"out": [mem.get(buf + 4 * k) for k in range(BLOCK)],
                                 "state": [mem.get(PERC_L.state + 128 * t + 4 * k)
@@ -792,6 +801,12 @@ def step_perc(init, sound, machines, blocks) -> dict:
         L = PL.layout()
         got = [round(V.bits_f32(m2.word(st, L.md.T["sine"] + 4 * k) or 0) * 2 ** 23) for k in range(MDK.SINE_N)]
         sine_ok = got == MDK.md_sine_words()
+        # and the packed tables, unpacked into their floats (unpack_fill), word for word
+        from dnfw.md import bench as MDB
+        want = MDB.table_mem(L.md)
+        lo, hi = L.md.T["hostD"], L.md.T["tpack"]
+        tables_ok = all((m2.word(st, a) or 0) == want.get(a, 0) for a in range(lo, hi, 4))
+        sine_ok = sine_ok and tables_ok
     runs["sine"].pop("state", None)
     sw = runs["type_switch"]
     sw_state = [blk[0]["out"] for blk in sw["perc"] if 0 in blk] if sw["ok"] else []
@@ -829,7 +844,7 @@ def step_perc(init, sound, machines, blocks) -> dict:
             and exact.get("silent", (0, 1, 1))[1:] == (0, 0),
         f"all {PM.N} Machinedrum machines sound at the Machinedrum's defaults (peak > 0.005 within {blocks} blocks)":
             all(v is not None and v > 0.005 for v in peaks.values()),
-        "v0.17: the DSP's sine is the Machinedrum's own table, word for word, once filled": sine_ok,
+        "v0.17: the DSP's sine is the Machinedrum's own table, and its unpacked tables the firmware's, word for word, once filled": sine_ok,
         "nothing is non-finite or above 4.0 in any PERC buffer":
             ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["perc"]
                             for v in blk.values() for x in v["out"]),
