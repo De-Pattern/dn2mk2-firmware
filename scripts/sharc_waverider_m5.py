@@ -1212,6 +1212,13 @@ def step_tdm(init, sound, machines, blocks) -> dict:
             state["tx"].append(got)
             if b == send_from + 2:
                 state["raw"] = [hex(m2.word(r.state, at + o) or 0) for o in (0, 4, 64, 68)]
+                hits = []
+                for base in (SM.TDM_TX, SM.TDM_RX, 0x2C0000):
+                    for o in range(0, 0x1000, 4):
+                        w = m2.word(r.state, base + o) or 0
+                        if w >> 24 == SM.TDM_TAG or (w >> 16) & 0xFF == SM.TDM_TAG:
+                            hits.append((hex(base + o), hex(w)))
+                state["hits"] = hits[:12] + [len(hits)]
             for i in range(SM.TX_UNITS):              # as stock leaves it: zeros
                 m2.poke(r.state, at + 64 * (i >> 1) + 4 * (i & 1), 0)
         rx = SM.TDM_RX + (pg << 11) + 32
@@ -1284,7 +1291,7 @@ def step_tdm(init, sound, machines, blocks) -> dict:
             "numbers": {"status": stat, "packets_back": sum(1 for p in state["tx"] if p),
                         "mismatch": [(k, hex(got[k]), hex(want[k])) for k in range(len(got))
                                      if got[k] != want[k]][:6] if ok else None,
-                        "tx_raw": state.get("raw"),
+                        "tx_raw": state.get("raw"), "hits": state.get("hits"),
                         "pages": sorted(set(state["pg"])), "exact": exact, "halt": run.get("halt")}}
 
 
