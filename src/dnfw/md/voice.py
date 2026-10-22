@@ -27,6 +27,8 @@ from ..perc.dsl import Prog
 N = len(MM.MACHINES)
 KNOB_SCALE = 16256.0                          # knob 0..1 -> 0..127 << 7
 START = 35.0                                  # the read position that asks for a new block
+QUIET_LEVEL = 2.0 ** -21                      # a block whose peak is under this is silence
+QUIET_BLOCKS = 32                             # this many in a row (23 ms) and the machine rests
 
 
 def _each(p: Prog, L: K.Layout, step: str) -> None:
@@ -109,8 +111,7 @@ def advance(p: Prog, L: K.Layout) -> None:
                 K.vws(p, "dirty", 0)
             p.ifz(0, "NE", again)
         p.ifz(0, "GE", playing)
-    p.ifz(0, "NE", note, no_note)
-    K.vw(p, 0, "mach")
+    p.ifz(0, "NE", lambda: (note(), p.iconst(0, 0), K.vws(p, "quiet", 0)), no_note)
 
     def silent():
         p.ld(1, L.C["mdb"])
@@ -119,7 +120,36 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.seti(5, 1)
         p.fconst(6, 0.0)
         p.loop(L.C["n1"], 32, lambda: p.stpost(5, 6))
-    p.ifz(0, "GE", lambda: _each(p, L, "render"), silent)
+
+    def sound():
+        _each(p, L, "render")
+        # silent long enough (QUIET_BLOCKS blocks under QUIET_LEVEL): the machine rests
+        # until the next note, as its sound has died away (it costs the DSP nothing then)
+        p.ld(1, L.C["mdb"])
+        p.iconst(12, 4 * K.OUT0)
+        p.iop(1, 12, "+", 1)
+        p.seti(5, 1)
+        p.fconst(7, 0.0)
+
+        def peak():
+            p.ldpost(6, 5)
+            p.fop(7, 7, "MAX", 6)
+            p.fconst(13, 0.0)
+            p.fop(6, 13, "-", 6)
+            p.fop(7, 7, "MAX", 6)
+        p.loop(L.C["n1"], 32, peak)
+        K.vw(p, 0, "quiet")
+        p.fconst(12, QUIET_LEVEL)
+        p.if_(7, "LT", 12, lambda: (p.iconst(12, 1), p.iop(0, 12, "+", 0)),
+              lambda: p.iconst(0, 0))
+        K.vws(p, "quiet", 0)
+    K.vw(p, 0, "mach")
+
+    def playing():
+        K.vw(p, 0, "quiet")
+        p.iconst(12, QUIET_BLOCKS)
+        p.if_(0, "GE", 12, silent, sound, kind="i")
+    p.ifz(0, "GE", playing, silent)
 
 
 def inputs(p: Prog, L: K.Layout, knobs: list[int]) -> None:
