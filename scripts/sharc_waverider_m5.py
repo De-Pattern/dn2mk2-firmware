@@ -445,7 +445,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,smp,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,smp,link,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -517,6 +517,11 @@ def main(argv=None):
                 for t, what in ((0, "SNARE reversed"), (1, "GRID on BEAT"), (4, "HAT looping")):
                     wav(f"smp_{t}.wav", smp_series(mr, t), a.seconds, wavs,
                         f"the sample machines, mixed run, track {t}: {what}")
+
+        if "link" in steps:
+            print("\nstep 3c: the sample link")
+            results["3c_link"] = step_link(init, sound, machines, a.blocks)
+            show(results["3c_link"])
 
         if "stock" in steps:
             print("\nstep 4: types 0-4 unchanged")
@@ -859,10 +864,26 @@ def step_smp(init, sound, machines, blocks) -> dict:
     sd = PM.NAMES.index("TRX-SD")
     runs["mixed"] = run_blocks(init, frames(
         ONE, smp_words({SM.SAMP_REC: 2, SM.PLAY_REC: 0}),
-        others={1: GRID, 2: 5, 3: WERP, 4: ONE, 5: 0},
+        others={1: GRID, 2: 5, 3: WERP, 4: ONE, 5: 0},      # (3: WERP, on its defaults)
         other_words={1: smp_words({SM.SAMP_REC: 4, SM.GRID_REC: 48, SM.SLICE_REC: 40}),
                      2: perc_words(sd), 3: smp_words(),
                      4: smp_words({SM.SAMP_REC: 3, SM.PLAY_REC: 80, SM.LOOP_REC: 20})}), blocks)
+    # v0.15, the time machines at 140 BPM: track 0 WERP on BEAT (1/8 bar, 64 segments,
+    # FWD LOOP segments), 1 STRETCH on KICK (1/8 bar), 2 REPITCH on SNARE (1/4 bar)
+    STR, REP = SM.TYPE_OF["STRETCH"], SM.TYPE_OF["REPITCH"]
+
+    def timed(b):
+        f = base_frame(sound, machines, t0=WERP, trigger=b == 1, others={1: STR, 2: REP},
+                       trigger_others=True,
+                       overrides=smp_words({SM.SAMP_REC: 4, SM.BARS_REC: 0, SM.SEG_REC: 20,
+                                            SM.MODE_REC: 80}))
+        for t, ws in ((1, smp_words({SM.SAMP_REC: 1, SM.BARS_REC: 0})),
+                      (2, smp_words({SM.SAMP_REC: 2, SM.BARS_REC: 13}))):
+            for slot, w in ws.items():
+                f.param(t, slot, w)
+        f.put(SP.TEMPO_OFFSET, 140 * 120)
+        return f.to_bytes()
+    runs["timed"] = run_blocks(init, timed, blocks)
     runs["off"] = run_blocks(init, frames(ONE, smp_words({SM.SAMP_REC: 0})), blocks)
     runs["empty_slot"] = run_blocks(init, frames(ONE, smp_words({SM.SAMP_REC: 90})), blocks)
     runs["silent"] = run_blocks(init, frames(ONE, smp_words(), trig=()), blocks)
@@ -876,8 +897,8 @@ def step_smp(init, sound, machines, blocks) -> dict:
     mx = runs["mixed"]
     kick = smp_series(runs["kick"], 0)
     up = smp_series(runs["kick_up"], 0)
-    ref = SL.test_samples()
-    # the kick as the DSP played it against the sample itself: 0.5 frames a sample, linear
+    ref = [[max(-32768, min(32767, round(x * 32768))) / 32768 for x in snd] for snd in SL.test_samples()]
+    # (v0.14: the test sounds are int16) the kick as the DSP played it against the sample itself: 0.5 frames a sample, linear
     exp = [ref[0][k // 2] if k % 2 == 0 else 0.5 * (ref[0][k // 2] + ref[0][k // 2 + 1])
            for k in range(len(kick) - BLOCK)]
     kick_err = max((abs(a - b) for a, b in zip(kick[BLOCK:], exp)), default=1.0)
@@ -895,6 +916,7 @@ def step_smp(init, sound, machines, blocks) -> dict:
          "smp_entries_kick": runs["kick"].get("smp_entries"),
          "perc_in_mixed": perc_exact(mx) if mx["ok"] else None,
          "werp_peak": V.peak(werp_buf) if werp_buf else None,
+         "timed_peaks": [V.peak(smp_series(runs["timed"], t)) for t in (0, 1, 2)] if runs["timed"]["ok"] else None,
          "model_steps_per_block": {k: max((v["model_steps"] for blk in r["smp"] for v in blk.values()), default=0)
                                    for k, r in runs.items() if r["ok"]},
          "instructions_per_block_mixed": round(mx.get("instructions", 0) / max(blocks, 1)),
@@ -914,7 +936,8 @@ def step_smp(init, sound, machines, blocks) -> dict:
         "PERC beside them is bit-exact to its model and sounds":
             mx["ok"] and perc_exact(mx)[0] > 0 and perc_exact(mx)[1:] == (0, 0)
             and V.peak(perc_series(mx, 2)) > 0.05,
-        "a sample machine with no renderer (WERP) leaves its buffer at 0": bool(werp_buf) and all(x == 0.0 for x in werp_buf),
+        "v0.15: WERP, STRETCH and REPITCH at 140 BPM sound (peak > 0.05), bit-exact (above)":
+            runs["timed"]["ok"] and all(V.peak(smp_series(runs["timed"], t)) > 0.05 for t in (0, 1, 2)),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]
@@ -924,6 +947,70 @@ def step_smp(init, sound, machines, blocks) -> dict:
                             for v in blk.values() for x in v["out"]),
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
+
+
+# -- step 3c: the sample link (v0.14, docs/sampler.md) ------------------------------------------
+
+def step_link(init, sound, machines, blocks) -> dict:
+    """The DSP end of the sample link: packets in the frame's words 2650..2681 land in the
+    pool; bad ones and stock's own words write nothing; and those words change nothing
+    else the DSP does."""
+    import random
+    rnd = random.Random(14)
+    n = max(blocks, 12)
+    data = bytes(rnd.randrange(256) for _ in range(24 * n))
+    base_off = SM.DATA_OFFSET + 0x8000            # past the test sounds: an unused stretch
+    good = [SP.link_packet((base_off + 24 * b) // 4, struct.unpack_from("<6I", data, 24 * b))
+            for b in range(n)]
+
+    def with_tail(words_of, t0=0, others=None, trig=True):
+        def fb(b):
+            f = base_frame(sound, machines, t0=t0, others=others, trigger=trig and b == 1,
+                           overrides=smp_words({SM.SAMP_REC: 1}) if t0 == SM.TYPE_OF["ONESHOT"] else None)
+            ws = words_of(b)
+            for k, w in enumerate(ws or ()):
+                f.put(SM.LINK_OFFSET + 2 * k, w)
+            return f.to_bytes()
+        return fb
+
+    def pool_bytes_at(run, off, length):
+        st = run["state"]
+        return b"".join(struct.pack("<I", (m2.word(st, dsp.SMP_POOL_DDR + off + 4 * k) or 0) & 0xFFFFFFFF)
+                        for k in range(length // 4))
+
+    runs = {}
+    runs["good"] = run_blocks(init, with_tail(lambda b: good[b]), n)
+    bad = [h[:15] + [(h[15] + 1) & 0xFFFF] for h in good]
+    runs["bad_check"] = run_blocks(init, with_tail(lambda b: bad[b]), n)
+    far = [SP.link_packet(SM.POOL_WORDS - 3, [0x11111111] * 6)]
+    runs["out_of_pool"] = run_blocks(init, with_tail(lambda b: far[0]), 3)
+    # stock's own words there (a per-track array the DSP never reads), random, against zeros:
+    # every track buffer, with FM Tone, PERC and ONESHOT tracks, bit-identical
+    noise = [[rnd.randrange(0x5A31) for _ in range(16)] for _ in range(n)]
+    mix = {1: 0, 2: 5, 3: SM.TYPE_OF["ONESHOT"]}
+    runs["noise"] = run_blocks(init, with_tail(lambda b: noise[b], others=mix), n)
+    runs["zeros"] = run_blocks(init, with_tail(lambda b: None, others=mix), n)
+    ok_runs = all(r["ok"] for r in runs.values())
+    got = pool_bytes_at(runs["good"], base_off, 24 * n) if ok_runs else b""
+    before = pool_bytes_at(runs["zeros"], base_off, 24 * n) if ok_runs else b""
+    after_bad = pool_bytes_at(runs["bad_check"], base_off, 24 * n) if ok_runs else b"x"
+    edge = pool_bytes_at(runs["out_of_pool"], SM.POOL_BYTES - 16, 16) if ok_runs else b"x"
+    counts = {k: (m2.word(r["state"], SMP_L.C["mbn"]) or 0) if r["ok"] else None for k, r in runs.items()}
+    checks = {
+        "every run returns every block": ok_runs,
+        f"{n} good packets put their {24 * n} bytes in the pool, one a block": got == data
+            and counts["good"] - counts["zeros"] == n,
+        "a packet whose check is wrong writes nothing": after_bad == before
+            and counts["bad_check"] == counts["zeros"],
+        "a packet past the pool's end writes nothing": edge == bytes(16)
+            and counts["out_of_pool"] == counts["zeros"],
+        "random words where the packets go (not the magic) change no track buffer of FM Tone, "
+        "PERC or ONESHOT, nor the pool": ok_runs
+            and runs["noise"]["buffer_bits"] == runs["zeros"]["buffer_bits"]
+            and counts["noise"] == counts["zeros"],
+    }
+    return {"ok": all(checks.values()), "checks": checks,
+            "numbers": {"packets_written": counts, "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}}
 
 
 # -- step 4 -------------------------------------------------------------------------------------------

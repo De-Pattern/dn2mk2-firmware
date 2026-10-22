@@ -87,8 +87,8 @@ PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
 SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200d0000
 SMP_L2_SPAN = 0x8000
 SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbe8000
-SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 64  # 16 voices x 64 bytes
-SMP_SCRATCH_DM = 0x2DF300
+SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
+SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0.15)
 SMP_POOL_DDR = 0x84000000                    # the pool's directory, then its frames
 # W2's random table (dnfw.waverider.live.rnd_table): Waverider is gone (v0.11), but
 # RESONATOR, CZ and GRAN read it here
@@ -231,7 +231,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("block_count.asm (wr_count)", COUNT_DM, obj["block_count"]),
         ("entry_mark.asm (wr_emark)", EMARK_DM, obj["entry_mark"]),
         ("machine lookup, 16 types ([-1] guard, then the table; v0.13)", LOOKUP16_DM - 4, lookup16()),
-        ("sample machines' state: 16 voices x 64 bytes (zeros; v0.13)", SMP_STATE_DM, bytes(16 * SMP_STATE_STRIDE)),
+        ("sample machines' state: 16 voices x 128 bytes (zeros)", SMP_STATE_DM, bytes(16 * SMP_STATE_STRIDE)),
         ("sample machines' scratch (zeros)", SMP_SCRATCH_DM, bytes(0x100)),
         ("free since v0.11 (Waverider's loop, scanner and tables; zeros)", SMP_SCRATCH_DM + 0x100, b""),
         ("W2 random table, 256 float32 (RESONATOR, CZ, GRAN)", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
@@ -299,7 +299,8 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
 
 def _smp_pool() -> bytes:
     from ..sampler import live as smp_live
-    return smp_live.pool_bytes(smp_live.test_samples(), SMP_POOL_DDR, smp_live.test_rates())
+    return smp_live.pool_bytes(smp_live.test_samples(), SMP_POOL_DDR, smp_live.test_rates(),
+                               smp_live.test_fmts(), smp_live.TEST_NAMES)
 
 
 def l2_spans() -> list[tuple[str, int, bytes]]:

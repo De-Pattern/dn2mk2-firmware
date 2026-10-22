@@ -58,6 +58,23 @@ def test_applies_to_both_sections(applied, dn2_111):
     # pages, the page renderer (its own chunk since v0.13), machines, PING (the wave
     # display chunk went with Waverider, v0.11)
     assert [kind for kind, _ in chunks] == [platform.area.CODE] * 4
+
+
+def test_the_sample_link_hooks_call_into_the_renderer_chunk(applied, stock):
+    # v0.14: the SysEx router and the frame builder each jsr into the C chunk, and
+    # replace exactly the stock lea each one displaced
+    main = applied.payloads[3]
+    c = waverider.SPEC["c_chunk"]
+    lo, hi = c["load"], c["load"] + len(bytes.fromhex(c["code"]))
+    for site, stock_bytes, sym in ((CF.LINK_RX_SITE, CF.LINK_RX_STOCK, "smp_rx_hook"),
+                                   (CF.LINK_FEED_SITE, CF.LINK_FEED_STOCK, "smp_feed_hook")):
+        assert at(stock, site, 6) == stock_bytes
+        assert at(main, site, 2) == bytes.fromhex("4eb9")
+        target = long_at(main, site + 2)
+        assert lo <= target < hi, hex(target)
+        # the hook replays the displaced lea and returns
+        code = _chunked(target, 64)
+        assert stock_bytes in code and bytes.fromhex("4e75") in code[code.index(stock_bytes):]
     assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 
@@ -81,10 +98,10 @@ def test_the_list_offers_our_machines_then_the_sample_machines_before_midi(appli
     begin = long_at(main, CF.LIST_BEGIN + 2)
     end = long_at(main, CF.LIST_END + 2)
     types = [_clong(a) for a in range(begin, end, 4)]
-    # v0.13: ONESHOT (8) and GRID (12), the sample machines this build renders
-    assert types == [0, 2, 1, 3, 5, 6, 7, 8, 12, 4]
-    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("48780028")
-    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e80028")
+    # v0.15: the five sample machines in the Digitakt II's order (v0.13: ONESHOT, GRID)
+    assert types == [0, 2, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 4]
+    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("48780034")
+    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e80034")
 
 
 def test_rows_5_to_12_of_the_name_table(applied):

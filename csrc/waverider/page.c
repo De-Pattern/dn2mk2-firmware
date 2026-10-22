@@ -477,6 +477,19 @@ static int smp_get(void *view, u32 id)
     return v < 0 ? 0 : v > top ? top : v;
 }
 
+/* the pool's names: the sample link's (csrc/sampler/link.c) once a pool has been sent,
+ * the built-in test sounds until then; 0 for a slot the pool does not hold (K from 1) */
+extern int smp_count(void);
+extern const char *smp_name(int k);
+
+static const char *sound_name(int k)
+{
+    int n = smp_count();
+    if (n >= 0)
+        return k <= n ? smp_name(k - 1) : 0;
+    return k <= SMP_SOUNDS ? smp_sound[k - 1] : 0;
+}
+
 static const char *smp_text(void *view, u32 id, int kind, const char *label)
 {
     static char buf[6] __attribute__((section(".data")));
@@ -488,10 +501,32 @@ static const char *smp_text(void *view, u32 id, int kind, const char *label)
         int k = smp_get(view, id);
         if (k == 0)
             return "OFF";
-        if (k <= SMP_SOUNDS)
-            return smp_sound[k - 1];
+        const char *nm = sound_name(k);
+        if (nm && nm[0])
+            return nm;
         buf[0] = '0' + k / 100; buf[1] = '0' + k / 10 % 10; buf[2] = '0' + k % 10; buf[3] = 0;
         return buf[0] == '0' ? buf + 1 : buf;
+    }
+    if (id == SMP_BARS_ID) {                    /* the DSP's index: the thresholds it compares */
+        int v = smp_get(view, id), k = 0;
+        while (k < 7 && v >= smp_bars_steps[k])
+            k++;
+        return smp_bars[k];
+    }
+    if (id == SMP_SEG_ID) {                     /* segments: 128 >> index */
+        int v = smp_get(view, id), k = 0;
+        while (k < 7 && v >= smp_seg_steps[k])
+            k++;
+        int n = 128 >> k;
+        buf[0] = 'S';
+        if (n >= 100) { buf[1] = '1'; buf[2] = '2'; buf[3] = '8'; buf[4] = 0; }
+        else if (n >= 10) { buf[1] = '0' + n / 10; buf[2] = '0' + n % 10; buf[3] = 0; }
+        else { buf[1] = '0' + n; buf[2] = 0; }
+        return buf;
+    }
+    if (id == SMP_MODE_ID) {
+        int k = smp_get(view, id) * 4 / 128;
+        return smp_play[k > 3 ? 3 : k];
     }
     if (kind == SMP_GRID_KIND && id == SMP_GRID_ID) {
         int g = smp_get(view, id) / 24;
@@ -508,7 +543,9 @@ static const char *smp_text(void *view, u32 id, int kind, const char *label)
 static void smp_picture(void *c, void *view, int kind)
 {
     int k = smp_get(view, SMP_SAMP_ID);
-    const char *snd = k == 0 ? "OFF" : k <= SMP_SOUNDS ? smp_sound[k - 1] : "EMPTY";
+    const char *snd = k == 0 ? "OFF" : sound_name(k);
+    if (!snd)
+        snd = "EMPTY";
     TEXT(c, FONT, WAVE_X + WR_WIDTH / 2, 30, CENTRED, "%.7s", smp_machine[kind - SMP_KIND0]);
     TEXT(c, FONT, WAVE_X + WR_WIDTH / 2, 21, CENTRED, "%.5s", snd);
     int w = WR_WIDTH - 8, x0 = WAVE_X + 4, a, b, loop = -1;
@@ -520,6 +557,15 @@ static void smp_picture(void *c, void *view, int kind)
         b = (s + len) * w / n;
         for (int j = 0; j <= n && n <= 32; j++)
             px(c, x0 + j * w / n, POS_Y + 2);
+    } else if (kind == SMP_WERP_KIND) {         /* the whole sample, its segments ticked */
+        int v = smp_get(view, SMP_SEG_ID), j = 0;
+        while (j < 7 && v >= smp_seg_steps[j])
+            j++;
+        int n = 128 >> j;
+        a = 0;
+        b = w;
+        for (int i = 0; i <= n && n <= 32; i++)
+            px(c, x0 + i * w / n, POS_Y + 2);
     } else {
         a = smp_get(view, SMP_STRT_ID) * w / 120;
         b = a + smp_get(view, SMP_LEN_ID) * w / 127;

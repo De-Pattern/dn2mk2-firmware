@@ -99,6 +99,7 @@ TYPE_READS = {0x400254B4: 2, 0x40031BD2: 0, 0x40031C1C: 0, 0x40036478: 0, 0x4003
 GETTER_RTS = 0x4003647C                 # rts of the machine-type getter 0x40036462
 TRACK_GETTER_EXIT = 0x4004B81E          # getMachineType(track) 0x4004b7f2: the common exit
 ISR = 0x40025E36                        # the audio frame handler: modulation, frame, send
+SYSEX_ROUTER, SYSEX_SENDER = 0x4012166E, 0x401233F2    # docs/usbprobe.md
 FRAME_BUILT = 0x400275A2                # the builder's sixteen passes are done
 FRAME = 0x80005E60
 FRAME_BYTES = 2688
@@ -505,6 +506,39 @@ def main() -> int:
                    for t in range(16)]
             mems[f"types@{len(mems)}"] = got
             print(f"  types {got}")
+        elif step.startswith("sysex:"):
+            # v0.14, the sample link: each message in FILE (hex, one a line) through the
+            # stock SysEx router (msg, len, source 2 = USB), as the MIDI input task would;
+            # what reaches the stock sender is kept (FILE.replies.json)
+            path = pathlib.Path(step[6:])
+            msgs = [bytes.fromhex(x) for x in path.read_text().split()]
+            buf = SENTINEL + 0x1000
+            sent = []
+
+            def at_sender(uc_, address, size, user):
+                sp = uc.reg_read(K.UC_M68K_REG_A7)
+                b, n, _ab, port = struct.unpack(">4I", bytes(uc.mem_read(sp + 4, 16)))
+                sent.append((bytes(uc.mem_read(b, n)).hex() if 0 < n < 4096 else "", port))
+            hs = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+            total = 0
+            for msg in msgs:
+                machine.write(buf, msg)
+                total += guest_call(SYSEX_ROUTER, buf, len(msg), 2)
+            uc.hook_del(hs)
+            (path.parent / (path.name + ".replies.json")).write_text(json.dumps(sent))
+            print(f"  sysex: {len(msgs)} message(s), {len(sent)} repl(ies), {total:,} instructions")
+        elif step.startswith("isr:"):
+            # the ISR N times; the frame's words 2650..2681 (the sample link's packet,
+            # big-endian 16-bit) after each, to png_dir/NAME.link.json
+            _, n, name = step.split(":")
+            got = []
+            for _k in range(int(n)):
+                guest_call(ISR)
+                fr = machine.read(FRAME + 2650, 32)
+                got.append([struct.unpack_from(">H", fr, 2 * k)[0] for k in range(16)])
+            png_dir.mkdir(parents=True, exist_ok=True)
+            (png_dir / f"{name}.link.json").write_text(json.dumps(got))
+            print(f"  isr x{n}: {sum(1 for g in got if g[0] == 0x5A31)} packet(s)")
         elif step.startswith("poke:"):
             _, va, data = step.split(":")
             machine.write(int(va, 0), bytes.fromhex(data))

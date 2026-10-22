@@ -22,20 +22,28 @@ def layout() -> P.Layout:
                     exp2=PL.layout().T["exp2"])
 
 
-def pool_bytes(samples, base: int, rates=None) -> bytes:
+def pool_bytes(samples, base: int, rates=None, fmts=None, names=None) -> bytes:
     """the directory and the frames of SAMPLES (lists of floats), as the DSP's DDR holds
-    them from BASE: magic, count, POOL_SLOTS entries, then each sample's float32 frames
-    on a 64-byte (cache line) boundary"""
+    them from BASE: magic, count, POOL_SLOTS entries (address, frames, rate, format),
+    the names (dnfw.sampler.machines.NAME_BYTES each, for the ColdFire's pages; the DSP
+    ignores them), then each sample's frames -- float32 (format 0) or int16 (format 1)
+    -- on a 64-byte (cache line) boundary"""
     rates = rates or [1.0] * len(samples)
-    head = 8 + SM.POOL_SLOTS * SM.ENTRY_WORDS * 4
-    at = (head + 0x3F) & ~0x3F
+    fmts = fmts or [0] * len(samples)
+    names = names or [""] * len(samples)
+    head = SM.DATA_OFFSET
     entries, data = [], bytearray()
-    for s, r in zip(samples, rates):
-        entries.append(struct.pack("<IIfI", base + at + len(data), len(s), r, 0))
-        data += struct.pack(f"<{len(s)}f", *s)
+    for s, r, f in zip(samples, rates, fmts):
+        entries.append(struct.pack("<IIfI", base + head + len(data), len(s), r, f))
+        if f == 1:
+            data += struct.pack(f"<{len(s)}h", *(max(-32768, min(32767, round(x * 32768))) for x in s))
+        else:
+            data += struct.pack(f"<{len(s)}f", *s)
         data += bytes((-len(data)) % 0x40)
     d = struct.pack("<II", SM.POOL_MAGIC, len(samples)) + b"".join(entries)
-    d += bytes(at - len(d))
+    d += bytes(SM.NAMES_OFFSET - len(d))
+    d += b"".join(n.encode("ascii", "replace")[:SM.NAME_BYTES - 1].ljust(SM.NAME_BYTES, b"\0") for n in names)
+    d += bytes(head - len(d))
     return d + bytes(data)
 
 
@@ -86,16 +94,22 @@ def test_samples() -> list[list[float]]:
 TEST_NAMES = ("KICK", "SNARE", "HAT", "BEAT")
 
 
+def test_fmts() -> list[int]:
+    """the test sounds are int16 (v0.14: half the bytes of v0.13's float32)"""
+    return [SM.FMT_I16] * 4
+
+
 def test_rates() -> list[float]:
     return [TEST_STEP] * 3 + [TEST_STEP / 2]
 
 
 class Harness:
-    def __init__(self, t: int = 0, samples=None, rates=None):
+    def __init__(self, t: int = 0, samples=None, rates=None, fmts=None):
         self.t, self.L = t, layout()
         self.samples = samples if samples is not None else test_samples()
         data = pool_bytes(self.samples, self.L.pool,
-                          rates if rates is not None else test_rates())
+                          rates if rates is not None else test_rates(),
+                          fmts if fmts is not None else test_fmts(), TEST_NAMES)
         self.words = {self.L.pool + 4 * k: struct.unpack_from("<I", data, 4 * k)[0]
                       for k in range(len(data) // 4)}
         from ..perc import live as PL

@@ -76,7 +76,10 @@ def _chunks() -> list[tuple[int, bytes, str]]:
 
 
 def ram() -> list[Extent]:
-    return [Extent(RAM, load, len(code), what) for load, code, what in _chunks()]
+    from ..sampler import machines as SM
+    return ([Extent(RAM, load, len(code), what) for load, code, what in _chunks()]
+            + [Extent(RAM, SM.MIRROR, SM.MIRROR_BYTES,
+                      "the sample link's mirror of the pool (csrc/sampler/link.c, v0.14)")])
 
 
 def _main_os(original: bytes) -> bytes:

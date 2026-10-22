@@ -19,6 +19,9 @@ SOURCE = pathlib.Path(__file__).resolve().parents[3] / "csrc" / "waverider" / "p
 ENTRY = "wr_page_draw"
 POLL = "wr_poll"                        # the UI loop's redraw test (coldfire.POLL_SITE)
 OVERLAY = "wr_cell"                     # after each stock cell widget: PING's and SHFT's TYPE
+# v0.14: the sample link (csrc/sampler), linked into the same chunk
+LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "sampler" / "hooks.S"]
+LINK_ENTRIES = ["smp_rx_hook", "smp_feed_hook"]
 
 
 def available() -> bool:
@@ -29,5 +32,15 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
     """-> (image, symbols, bss) of page.c linked at BASE, with HEADER as wr_gen.h."""
     with tempfile.TemporaryDirectory(prefix="wr_gen_", dir=SOURCE.parent) as tmp:
         (pathlib.Path(tmp) / "wr_gen.h").write_bytes(header.encode())
-        linked = cbuild.build([SOURCE], base=base, entries=[ENTRY, POLL, OVERLAY], include=[pathlib.Path(tmp)])
+        from ..sampler import machines as SM
+        from . import dsp
+        defines = {"SMP_MIRROR": hex(SM.MIRROR), "SMP_MIRROR_BYTES": hex(SM.MIRROR_BYTES),
+                   "SMP_POOL_DDR": hex(dsp.SMP_POOL_DDR), "LINK_OFFSET": SM.LINK_OFFSET,
+                   "LINK_MAGIC": hex(SM.LINK_MAGIC), "LINK_SEED": hex(SM.LINK_SEED),
+                   "POOL_MAGIC": hex(SM.POOL_MAGIC) + "u", "NAMES_OFFSET": SM.NAMES_OFFSET,
+                   "NAME_BYTES": SM.NAME_BYTES, "DATA_OFFSET": hex(SM.DATA_OFFSET),
+                   "POOL_SLOTS": SM.POOL_SLOTS}
+        linked = cbuild.build([SOURCE, *LINK_SOURCES], base=base,
+                              entries=[ENTRY, POLL, OVERLAY, *LINK_ENTRIES],
+                              include=[pathlib.Path(tmp)], defines=defines)
     return linked.image, linked.symbols, linked.bss

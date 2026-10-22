@@ -64,9 +64,9 @@ MCHUNK_END = 0x46710000
 # -- 1. the MACHINE SEL list -------------------------------------------------------------
 LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
-# PERC, RESONATOR, CZ after Swarmer; then the sample machines this build renders (v0.13:
-# ONESHOT and GRID; WERP, STRETCH and REPITCH have rows but are not offered); then MIDI
-LIST_NEW = (0, 2, 1, 3, 5, 6, 7, 8, 12, 4)
+# PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
+# order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
+LIST_NEW = (0, 2, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 4)
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -360,6 +360,12 @@ GRID_STOCK = bytes.fromhex("2f022f0a4ebaf20e508f")
 # change: at rest a shown page redraws once a second, and a modulation never redraws it
 # (instrument, modview1). wr_poll asks the same question, first setting the byte through
 # the stock 0x4011d2fe while a modulation marker on Waverider's page would move.
+# v0.14, the sample link (csrc/sampler, docs/sampler.md): the SysEx router's hook (the USB
+# probe's site, docs/usbprobe.md) and the frame builder's, after its last word
+LINK_RX_SITE = 0x4012169A               # lea 0x40207ae6,%a3: F0 00 20 3C, before the compare
+LINK_RX_STOCK = bytes.fromhex("47f940207ae6")
+LINK_FEED_SITE = 0x400276A2             # lea 0x40006c4a,%a2: the frame is built
+LINK_FEED_STOCK = bytes.fromhex("45f940006c4a")
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
 POLL_STOCK = bytes.fromhex("4eb94011d2f4")
 
@@ -504,6 +510,14 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
          "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
          "Waverider's page would move, then answers as stock", POLL_STOCK)
+
+    # the sample link: SysEx in, a packet a frame out (v0.14)
+    _need(content, LINK_FEED_SITE + 6, bytes.fromhex("7a054e92"), "the builder goes on: moveq #5 ; jsr %a2@")
+    edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),
+         "the SysEx router: the sample link's requests (F0 00 20 3C 7D 01) to smp_rx", LINK_RX_STOCK)
+    edit(LINK_FEED_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_feed_hook"]),
+         "the frame builder, its frame built: the sample link's packet into words 2650..2681",
+         LINK_FEED_STOCK)
 
     # 7. getMachineType(track): WaveTone for the UI, the real type where it is identity
     _need(content, TRACK_TYPE_FN, TRACK_TYPE_FN_STOCK, "getMachineType(track), as raw_track copies it")
