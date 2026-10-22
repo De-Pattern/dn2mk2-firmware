@@ -370,6 +370,8 @@ KEY_SLOT = 0x401D49A8                    # the parameter page view's key handler
 KEY_STOCK = 0x40016480                   # stock's: code 2 cycles the pages, the rest to its base
 QUANT_SITE = 0x40037BE6                  # the setter's write: movea.l %d0,%a0 ; move.w %d3,14(%a0,%d2.l*2)
 QUANT_STOCK = bytes.fromhex("204031832a14")
+TDM_SITE = 0x40026098                    # the SSI ISR, its transmit fill done: move.l %fp,%d2 ; addi.l #-72,%d2 (v0.16)
+TDM_STOCK = bytes.fromhex("240e0682ffffffb8")
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
 POLL_STOCK = bytes.fromhex("4eb94011d2f4")
 
@@ -523,6 +525,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the frame builder, its frame built: the sample link's packet into words 2650..2681",
          LINK_FEED_STOCK)
 
+    # the fast link (v0.16): the SSI ISR, its transmit fill done, through smp_tdm_hook
+    _need(content, TDM_SITE + 8, bytes.fromhex("2f024eb94012a4e6"), "the ISR goes on: push d2 ; jsr 0x4012a4e6")
+    edit(TDM_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_tdm_hook"]) + bytes.fromhex("4e71"),
+         "the SSI audio ISR after its transmit fill: smp_tdm writes the sample link's packet "
+         "into TDM slots 8..15 and reads the DSP's from slots 14..15", TDM_STOCK)
+
     # the RECORDER page's YES (v0.15): the parameter page's key handler through smp_key,
     # which takes YES on that page and hands everything else to stock's
     edit(KEY_SLOT, _long(csyms["smp_key"]),
@@ -562,7 +570,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # checks [C_LOAD, c_text_end) as code
     layout["c_load"] = pages.C_LOAD
     layout["c_text_end"] = csyms["__text_end"]
-    for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds"):   # the sample link's state (v0.15)
+    for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds", "smp_tdm_sent", "smp_tdm_heard",
+                 "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)

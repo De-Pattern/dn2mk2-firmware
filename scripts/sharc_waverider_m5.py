@@ -446,7 +446,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,tdm,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -535,6 +535,12 @@ def main(argv=None):
             results["3d_rec"] = step_rec(init, sound, machines, a.blocks)
             gc.collect()
             show(results["3d_rec"])
+
+        if "tdm" in steps:
+            print("\nstep 3e: the fast link (TDM)")
+            results["3e_tdm"] = step_tdm(init, sound, machines, a.blocks)
+            gc.collect()
+            show(results["3e_tdm"])
 
         if "stock" in steps:
             print("\nstep 4: types 0-4 unchanged")
@@ -1153,12 +1159,12 @@ def step_rec(init, sound, machines, blocks) -> dict:
             and words[0] == dsp.SMP_POOL_DDR + SM.REC_OFFSET and words[3] == SM.FMT_I16,
         "the recorded frames are the input's, as the model converts them": ok1 and got == want,
         "STOP keeps the slot; the status says done (3), in both reply pages, checked":
-            ok1 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 3 and h[2] == n for h in stat1),
+            ok1 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 3 and h[2] == (32 * n) >> 6 for h in stat1),
         "SAMP 124 plays the recording back": ok1 and len(back) == play * BLOCK and V.peak(back) > 0.3,
         "TRK6, MONO L: track 6's slot's left, back to its level, into SAMP 125 (within 2 LSB)":
             ok2 and words2[1] == 32 * n and close2,
-        "the status while recording: state 2, the command's sequence, frames / 32, the peak":
-            ok2 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 2 and h[1] == 7 and h[2] == n
+        "the status while recording: state 2, the command's sequence, frames / 64, the peak":
+            ok2 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 2 and h[1] == 7 and h[2] == (32 * n) >> 6
                         and abs(h[3] / 32767 - max(abs(x) for x in left[-32:])) < 0.01 for h in stat2),
         "every sample track bit-exact to the model, every block of both runs":
             ok1 and ok2 and exact1[1] == exact1[2] == exact2[1] == exact2[2] == 0,
@@ -1167,6 +1173,113 @@ def step_rec(init, sound, machines, blocks) -> dict:
             "numbers": {"entry": [hex(w) for w in words], "entry2": [hex(w) for w in words2],
                         "status1": stat1, "status2": stat2, "exact": (exact1, exact2),
                         "halt": (rec.get("halt"), rec2.get("halt"))}}
+
+
+# -- step 3e: the fast link (v0.16, docs/sampler.md) -------------------------------------------------
+
+def step_tdm(init, sound, machines, blocks) -> dict:
+    """The fast link's DSP end on the SHARC: the ColdFire's packets poked into slots 8..15
+    of the TDM receive page the engine reads (DM 0x268a38 picks it), in both
+    justifications, land in the pool, one a block; a packet with a wrong check, or aimed at
+    the command block, writes nothing (the recorder's parts are written: v0.16); VERIFY's sums are the pool's; SEND streams
+    the pool back through slots 14..15 of the transmit page, every word, decoded as the
+    ColdFire decodes it; every sample track stays bit-exact."""
+    import random
+    rnd = random.Random(16)
+    n = max(blocks, 12)
+    base_w = (SM.DATA_OFFSET + 0x20000) // 4          # an unused stretch of the pool, words
+    words = [rnd.randrange(1 << 32) for _ in range(SM.RX_WORDS * n)]
+    ONE = SM.TYPE_OF["ONESHOT"]
+    cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
+    bad_at = 3                                        # the block whose packet's check is wrong
+    rec_at = 5                                        # the block whose packet spans the command block
+    verify_from, send_from = n + 2, n + 30
+    total = send_from + (SM.RX_WORDS * n) // SM.TX_WORDS + 6
+    state = {"b": 0, "pg": [], "tx": []}
+
+    def command(r, seq, cmd, a0, a1):
+        for k, w in enumerate((seq, cmd, a0, a1, 0, 0)):
+            m2.poke(r.state, cmd_at + 4 * k, w)
+
+    def at_dispatch(r):
+        b = state["b"]
+        pg = (m2.word(r.state, SM.TDM_PAGE) or 0) & 1
+        state["pg"].append(pg)
+        if b > 0:                                     # what the last block sent back
+            prev = state["pg"][b - 1]
+            at = SM.TDM_TX + (prev << 11) + 56
+            got = SL.tx_decode(lambda o: m2.word(r.state, at + o) or 0)
+            state["tx"].append(got)
+            for i in range(SM.TX_UNITS):              # as stock leaves it: zeros
+                m2.poke(r.state, at + 64 * (i >> 1) + 4 * (i & 1), 0)
+        rx = SM.TDM_RX + (pg << 11) + 32
+        if b < n:
+            off = base_w + SM.RX_WORDS * b
+            u = SL.rx_units(off, words[SM.RX_WORDS * b:SM.RX_WORDS * (b + 1)], b)
+            if b == bad_at:
+                u[255] = (u[255] + 1) & 0xFFFF
+            if b == rec_at:
+                u = SL.rx_units(SM.CMD_OFFSET // 4 - 60, [0x5A5A5A5A] * SM.RX_WORDS, b)
+            for o, w in SL.rx_page(u, high=b % 2 == 0).items():
+                m2.poke(r.state, rx + o, w)
+        else:
+            for o in range(0, 32 * 64, 64):           # stock's zeros in slots 8..15
+                for k in range(8):
+                    m2.poke(r.state, rx + o + 4 * k, 0)
+        if b == verify_from:
+            command(r, 21, SM.CMD_VERIFY, base_w, SM.RX_WORDS * n)
+        if b == send_from:
+            command(r, 22, SM.CMD_SEND, base_w, SM.RX_WORDS * n)
+        state["b"] += 1
+
+    def frames(b):
+        return base_frame(sound, machines, t0=ONE, trigger=(b == 1),
+                          overrides=smp_words({SM.SAMP_REC: 1})).to_bytes()
+    run = run_blocks(init, frames, total, extra_hooks={m3.DISPATCH: at_dispatch})
+    ok = run["ok"]
+    st = run["state"].state if ok else None
+
+    def pool_word(w):
+        return (m2.word(st, dsp.SMP_POOL_DDR + 4 * w) or 0) & 0xFFFFFFFF
+    want = list(words)
+    for k in range(SM.RX_WORDS * bad_at, SM.RX_WORDS * (bad_at + 1)):
+        want[k] = 0                                   # never written: the pool's zeros
+    got = [pool_word(base_w + k) for k in range(len(words))] if ok else []
+    rec_clean = ok and all(pool_word(SM.CMD_OFFSET // 4 - 60 + k) != 0x5A5A5A5A for k in range(SM.RX_WORDS))
+    x = y = 0
+    for w in want:
+        x = (x + w) & 0xFFFFFFFF
+        y = (y + x) & 0xFFFFFFFF
+    stat = []
+    if ok:
+        for page in SM.REPLY_PAGES:
+            h = []
+            for k in range(8):
+                w = m2.word(st, page + SM.REPLY_TAIL + 4 * k) or 0
+                h += [w & 0xFFFF, w >> 16]
+            stat.append(h)
+    sent = {}
+    for p in state["tx"]:
+        if p:
+            for k, w in enumerate(p[2:]):
+                sent[p[0] + k] = w
+    back = [sent.get(base_w + k) for k in range(len(words))]
+    exact = smp_exact(run) if ok else (0, 1, 1)
+    run.pop("state", None)
+    checks = {
+        "the run returns every block": ok,
+        f"{n - 2} good packets (both justifications) put their words in the pool, one a block; "
+        "the bad check's and the one over the command block wrote nothing": ok and got == want and rec_clean,
+        "VERIFY: the sums of the range, and its sequence, in both reply pages, checked": ok and all(
+            h[15] == (SM.LINK_SEED + sum(h[:15])) & 0xFFFF and h[14] == 21
+            and (h[10] | h[11] << 16) == x and (h[12] | h[13] << 16) == y for h in stat),
+        "SEND: every word of the range back through slots 14..15, as the ColdFire decodes them":
+            ok and back == want,
+        "every sample track bit-exact to the model, every block": ok and exact[1] == exact[2] == 0,
+    }
+    return {"ok": all(checks.values()), "checks": checks,
+            "numbers": {"status": stat, "packets_back": sum(1 for p in state["tx"] if p),
+                        "pages": sorted(set(state["pg"])), "exact": exact, "halt": run.get("halt")}}
 
 
 # -- step 4 -------------------------------------------------------------------------------------------

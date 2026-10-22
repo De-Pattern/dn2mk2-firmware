@@ -82,7 +82,7 @@ LINK_OFFSET = 2650                         # the frame's 16 words at 2650 + 2k (
 LINK_MAGIC = 0x5A31
 LINK_SEED = 0x1D0F
 LINK_WORDS = 6                             # 24 bytes of pool a packet
-POOL_BYTES = 16 << 20                      # the pool's extent in DSP DDR: 16 MB from SMP_POOL_DDR
+POOL_BYTES = 128 << 20                     # the pool's extent in DSP DDR: 128 MB from SMP_POOL_DDR (v0.16)
 POOL_WORDS = POOL_BYTES // 4
 MIRROR = 0x46B00000                        # the ColdFire's copy of the pool (RAM above BSS)
 MIRROR_BYTES = 0x00500000                  # 5 MB, to 0x47000000 (nothing of anyone's above it)
@@ -94,8 +94,9 @@ MIRROR_BYTES = 0x00500000                  # 5 MB, to 0x47000000 (nothing of any
 REC_FIRST = 123                            # slots 123..126 (SAMP 124..127) are the DSP's own
 REC_SLOTS = 4
 USER_SLOTS = 122                           # what the host tool may fill (SAMP 1..122)
-REC_OFFSET = 8 << 20                       # their frames: 8..16 MB into the pool, past any mirror
-REC_FRAMES = (2 << 20) // 2                # 2 MB of int16 a slot: 21.8 s at 48 kHz
+REC_OFFSET = 96 << 20                      # their frames: 96..128 MB into the pool (v0.16)
+REC_SLOT_SHIFT = 23                        # 8 MB a slot
+REC_FRAMES = 66 * 48000                    # the DT2's maximum: 66 s of int16 at 48 kHz (v0.16)
 IN_BUF = 0x268538                          # the engine's input block: L 32 floats, R at +0x80
 MIX_BUF = 0x268438                         # the main mix (the last block's when we run)
 TRK_BUF = 0x259F68                         # track t's audio, panned, the last block's: L at
@@ -105,7 +106,9 @@ TRK_GAIN = 11.627                          # 0x1c244d's gain into that buffer, b
 REC_STAGE = 0x2DF800                       # 32 floats of the block being recorded (dnfw.waverider.dsp)
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames
-CMD_NONE, CMD_ARM, CMD_NOW, CMD_STOP, CMD_MONITOR, CMD_ARM_PLAY = 0, 1, 2, 3, 4, 5
+CMD_NONE, CMD_ARM, CMD_NOW, CMD_STOP, CMD_MONITOR, CMD_ARM_PLAY, CMD_SEND, CMD_VERIFY = 0, 1, 2, 3, 4, 5, 6, 7
+# VERIFY (v0.16): the sum of the pool's words [src, src + chan), to the status when done
+# SEND (v0.16): the pool's words [src, src + chan) back to the ColdFire over the TDM link
 # ARM waits for the threshold; ARM_PLAY (R.STRT PLAY) for the first note any track plays
 # the DSP's status, in the 32 bytes of the SPI reply that stock leaves unwritten
 # (0xa9c..0xabb), written into both reply pages each block: 16 halves, the last a check
@@ -149,3 +152,25 @@ QUANT_STEP = (                                  # (machines, record, raw coarse 
     (("GRID",), SLICE_REC, 2),
     (("GRID",), SLEN_REC, 2),
 )
+
+
+# -- the fast link (v0.16, docs/link-research.md) ---------------------------------------------
+# The SSI0 TDM link between the ColdFire and the DSP carries 16 slots a frame, 32 frames a
+# block; stock writes ColdFire -> DSP slots 0..7 at most and reads 0..7, and DSP -> ColdFire
+# slots 0..13. Ours: slots 8..15 ColdFire -> DSP (a 512-byte packet a block, 124 words of
+# pool), slots 14..15 DSP -> ColdFire (a 128-byte packet a block, 29 words). Each slot
+# carries 16 bits under a tag byte, so either justification of the 24 bits on the wire
+# decodes: the DSP sees TAG << 24 | v << 8 or TAG << 16 | v.
+TDM_RX = 0x2C18E8                           # the DSP's receive ring: two pages of 0x800
+TDM_TX = 0x2C08E8                           # its transmit ring
+TDM_PAGE = 0x268A38                         # the page this block (0 / 1), stable in the engine
+TDM_TAG = 0xA5
+RX_MAGIC, TX_MAGIC = 0x5A32, 0x5A33
+RX_UNITS, RX_WORDS = 256, 124               # 8 slots x 32 frames; words of pool a packet
+TX_UNITS, TX_WORDS = 64, 29                 # 2 slots x 32 frames
+LINK_DM = 0x2DF880                          # the link's scratch (dnfw.waverider.dsp)
+LINK_BUF = 0x2DF980                         # a packet's 256 units, decoded
+LINK_WORDS = ("u", "v", "w", "sum", "bad", "good", "lseq", "nbad", "sbusy", "spos", "send",
+              "sseq", "cnt", "off", "a", "pg",
+              "vpos", "vend", "vsum", "vsum2", "vdone", "vseq")       # VERIFY: the running sum of a word range
+VERIFY_CHUNK = 1024                          # words a block VERIFY adds up

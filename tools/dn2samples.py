@@ -13,18 +13,20 @@
     options: --port "Digitone II" (a substring of the port name), --chunk 256 (bytes a message)
 
 What happens (docs/sampler.md): this tool lays the samples out as the DSP's pool -- a
-directory, the names, then each sample's frames as 16-bit (dnfw.sampler.live.pool_bytes)
--- and writes it, a piece a message, into the instrument's RAM (its mirror of the pool).
-The instrument then streams the mirror to the DSP, 36 KB a second, over and over, so a
-slot sounds once the stream has passed it. `status` tells you when: a pass is complete.
+directory, the names, then each sample's frames as 16-bit (dnfw.sampler.live.pool_bytes).
+From v0.16 (sample link 3) it writes the pool, a piece a message, straight onto the
+instrument's +Drive; the instrument then loads it into the DSP, 64 KB at a time, each
+piece checked, and loads it again at every power-on (as the DT2 keeps its samples).
+`save` and `--keep` have nothing left to do. Up to 96 MB of yours (the DSP's pool is
+128 MB; its last 32 MB are the recorder's four slots, which are kept on the +Drive too).
 
-The samples last until power-off unless you `save` them (v0.15): `send --keep` saves
-them on the +Drive when the send is done, and the instrument loads them at power-on.
+Before v0.16 the pool went into a 5 MB mirror in RAM, streamed to the DSP over and over,
+and was kept on the +Drive only after `save`; this tool still speaks that to those builds.
 They go to a region of the +Drive the DN2 itself never uses (above 3 GiB), so your
 projects, presets and kits are not touched; `forget` marks the copy empty. A WAV is read as
 it is: 8, 16, 24 or 32-bit PCM or 32-bit float, any rate (played at its own pitch on
-C4), stereo mixed to mono. Up to 122 slots (SAMP 1..122; 124..127 are the recorder's) and about 2.5 minutes of 16-bit mono at 44.1
-kHz in all (the mirror is 5 MB).
+C4), stereo mixed to mono. Up to 122 slots (SAMP 1..122; 124..127 are the recorder's) and
+about 18 minutes of 16-bit mono at 44.1 kHz in all (96 MB; 5 MB before v0.16).
 
     request  F0 00 20 3C 7D 01 <pack7: u16 seq, u8 cmd, payload> F7
     reply    F0 00 20 3C 7D 01 <pack7: u16 seq, u8 cmd | 0x80, u8 status, payload> F7
@@ -46,8 +48,8 @@ sys.path.insert(0, str(HERE))
 from dn2probe import pack7, unpack7          # noqa: E402  (Elektron's 7-bit packing)
 
 HEADER = bytes([0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01])
-HELLO, WRITE, STATUS, CLEAR, SAVE, LOAD, FORGET = 1, 2, 3, 4, 5, 6, 7
-STATUS_TEXT = {0: "ok", 1: "refused", 2: "unknown command"}
+HELLO, WRITE, STATUS, CLEAR, SAVE, LOAD, FORGET, BEGIN, END = 1, 2, 3, 4, 5, 6, 7, 8, 9
+STATUS_TEXT = {0: "ok", 1: "refused", 2: "unknown command", 3: "the +Drive refused the write"}
 DSP_RATE = 48000
 LINK_BYTES_PER_S = 24 * 1500
 
@@ -148,8 +150,8 @@ def build_pool(paths):
         rates.append(r / DSP_RATE)
         names.append(pathlib.Path(p).stem.upper()[:SM.NAME_BYTES - 1])
     pool = SL.pool_bytes(samples, dsp.SMP_POOL_DDR, rates, [SM.FMT_I16] * len(samples), names)
-    if len(pool) > SM.MIRROR_BYTES:
-        raise SystemExit(f"{len(pool):,} bytes: more than the {SM.MIRROR_BYTES:,} the instrument holds")
+    if len(pool) > SM.REC_OFFSET:
+        raise SystemExit(f"{len(pool):,} bytes: more than the {SM.REC_OFFSET:,} the pool holds for yours")
     return pool, names, [len(s) / r / DSP_RATE * DSP_RATE for s, r in zip(samples, rates)]
 
 
@@ -157,6 +159,7 @@ class Link:
     def __init__(self, port):
         self.port = port
         self.seq = 0x300
+        self.proto = 0
 
     def call(self, cmd, payload=b"", timeout=2.0, tries=3):
         for attempt in range(tries):
@@ -188,8 +191,53 @@ class Link:
 
 
 def status(link):
+    if link.proto >= 3:
+        keys = ("image_bytes", "load_state", "loaded", "retried", "fast_link", "frames")
+        return dict(zip(keys, struct.unpack(">6I", link.call(STATUS)[:24])))
     hi, walk, passes, packets, frames = struct.unpack(">5I", link.call(STATUS)[:20])
     return {"high_water": hi, "walk": walk, "passes": passes, "packets": packets, "frames": frames}
+
+
+LOAD_DONE = 4
+
+
+def cmd_send3(link, pool, names, chunk):
+    """v0.16 (sample link 3): the pool is written to the +Drive in order, then loaded into
+    the DSP from there, each 64 KB checked"""
+    print(f"{len(names)} sample(s), {len(pool):,} bytes:")
+    for k, n in enumerate(names):
+        print(f"  SAMP {k + 1:3d}  {n}")
+    t0 = time.time()
+    link.call(BEGIN, struct.pack(">I", len(pool)), timeout=10.0)
+    at, total = 0, len(pool)
+    while at < total:
+        piece = pool[at:min(at + chunk, total)]
+        try:
+            link.call(WRITE, struct.pack(">I", at) + piece, timeout=5.0, tries=2)
+        except TimeoutError:
+            if chunk <= 32:
+                raise
+            chunk //= 2
+            print(f"\n  (no answer: pieces of {chunk} bytes from here)")
+            continue
+        at += len(piece)
+        print(f"\r  to the +Drive: {100 * at // total:3d} %", end="", flush=True)
+    link.call(END, timeout=20.0)
+    print(f"\r  to the +Drive: done in {time.time() - t0:.0f} s")
+    t1 = time.time()
+    while True:
+        st = status(link)
+        print(f"\r  into the DSP: {100 * min(st['loaded'], total) // max(total, 1):3d} %"
+              f"{'' if st['fast_link'] else ' (slow link)'}", end="", flush=True)
+        if st["load_state"] == LOAD_DONE:
+            break
+        if st["load_state"] == 0:
+            raise SystemExit("\n  the load stopped: the DSP did not take the samples (see "
+                             "docs/sampler.md); they are on the +Drive, `load` tries again")
+        time.sleep(1.0)
+    print(f"\r  into the DSP: done in {time.time() - t1:.0f} s"
+          f"{'' if st['fast_link'] else ' (over the slow link)'}")
+    print(f"  the samples are on SAMP 1..{len(names)}, and load at every power-on")
 
 
 def cmd_send(link, pool, names, chunk):
@@ -237,7 +285,7 @@ def main(argv=None):
     ap.add_argument("--keep", action="store_true", help="send: then save on the +Drive")
     ap.add_argument("files", nargs="*")
     ap.add_argument("--port", default="Digitone II")
-    ap.add_argument("--chunk", type=int, default=256)
+    ap.add_argument("--chunk", type=int, default=512)
     ap.add_argument("-o", "--out")
     a = ap.parse_args(argv)
     if a.command == "build":
@@ -251,10 +299,11 @@ def main(argv=None):
     port = winmidi.Port(a.port)
     try:
         link = Link(port)
+        p = link.call(HELLO)
+        proto, room, ddr = struct.unpack(">HII", p[:10])
+        link.proto = proto
         if a.command == "hello":
-            p = link.call(HELLO)
-            proto, mirror, ddr = struct.unpack(">HII", p[:10])
-            print(f"sample link {proto}: mirror {mirror:,} bytes, the pool at DSP 0x{ddr:08x}")
+            print(f"sample link {proto}: room for {room:,} bytes of samples, the pool at DSP 0x{ddr:08x}")
         elif a.command == "status":
             print(status(link))
         elif a.command == "save":
@@ -269,8 +318,13 @@ def main(argv=None):
         elif a.command == "clear":
             link.call(CLEAR)
             print("cleared: the instrument stops sending; the DSP keeps what it has")
+        elif proto >= 3:
+            pool, names, _ = build_pool(wav_list(a.files))
+            cmd_send3(link, pool, names, a.chunk)
         else:
             pool, names, _ = build_pool(wav_list(a.files))
+            if len(pool) > 5 << 20:
+                raise SystemExit("this build holds 5 MB: flash v0.16 or later for more")
             cmd_send(link, pool, names, a.chunk)
             if a.keep:
                 n = struct.unpack(">I", link.call(SAVE, timeout=20.0)[:4])[0]

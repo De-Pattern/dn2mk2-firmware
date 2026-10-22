@@ -1085,7 +1085,7 @@ def recorder(p: Prog, L: Layout) -> None:
                 p.iconst(12, SM.REC_FRAMES)
                 p.iop(6, 6, "MIN", 12)
                 p.st(C["rmax"], 6)
-                p.lsh(6, 5, 21)               # 2 MB a slot
+                p.lsh(6, 5, SM.REC_SLOT_SHIFT)  # 8 MB a slot
                 p.iconst(13, L.pool + SM.REC_OFFSET)
                 p.iop(6, 13, "+", 6)
                 p.st(C["rbase"], 6)
@@ -1127,6 +1127,42 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iconst(12, 2)
             p.if_(3, "EQ", 12, lambda: (p.iconst(7, 3), p.st(C["rst"], 7)), kind="i")
         p.if_(2, "EQ", 12, stop, kind="i")
+        p.ld(2, cmd + 4)
+        p.iconst(12, SM.CMD_SEND)
+
+        def send():                           # v0.16: pool words back over the TDM link
+            K = LK
+            p.ld(4, cmd + 8)
+            p.st(K["spos"], 4)
+            p.ld(5, cmd + 12)
+            p.ipass(12, 4)
+            p.iop(5, 12, "+", 5)
+            p.iconst(12, SM.POOL_WORDS)
+            p.iop(5, 5, "MIN", 12)
+            p.st(K["send"], 5)
+            p.iconst(6, 1)
+            p.st(K["sbusy"], 6)
+        p.if_(2, "EQ", 12, send, kind="i")
+        p.ld(2, cmd + 4)
+        p.iconst(12, SM.CMD_VERIFY)
+
+        def verify():                         # v0.16: a word range's sums, a chunk a block
+            K = LK
+            p.ld(4, cmd + 8)
+            p.st(K["vpos"], 4)
+            p.ld(5, cmd + 12)
+            p.ipass(12, 4)
+            p.iop(5, 12, "+", 5)
+            p.iconst(12, SM.POOL_WORDS)
+            p.iop(5, 5, "MIN", 12)
+            p.st(K["vend"], 5)
+            p.iconst(6, 0)
+            p.st(K["vsum"], 6)
+            p.st(K["vsum2"], 6)
+            p.st(K["vdone"], 6)
+            p.ld(6, cmd)                      # its own sequence, for vdone
+            p.st(K["vseq"], 6)
+        p.if_(2, "EQ", 12, verify, kind="i")
     p.e("COMP(R0, R1);")
     p._branch(lambda: p.r[0] != p.r[1], "NE", new_command, None)
 
@@ -1274,51 +1310,437 @@ def recorder(p: Prog, L: Layout) -> None:
     status(p, L)
 
 
-def status(p: Prog, L: Layout) -> None:
-    """The recorder's state to the ColdFire: 16 halves in the SPI reply's tail, a 32-bit
-    store putting its low half first (docs/sampler.md): STATUS_MAGIC | state, the last
-    command's sequence, frames / 32, the peak x 32767, the link's packet count, ten
-    zeros, and a check (0x1D0F + the fifteen, 16 bits). Into both reply pages."""
-    C = L.C
-    p.ld(0, C["rst"])
-    p.iconst(12, SM.STATUS_MAGIC)
-    p.iop(0, 12, "+", 0)                      # h0
-    p.ld(1, C["rseq"])
-    p.iconst(12, 0xFFFF)
-    p.iop(1, 1, "AND", 12)                    # h1
-    p.ld(2, C["rpos"])
-    p.lsh(2, 2, -5)
-    p.iop(2, 2, "AND", 12)                    # h2
-    p.ld(5, C["rpk"])
-    p.fconst(12, 32767.0)
-    p.fop(5, 5, "*", 12)
-    p.trunc(3, 5)
-    p.iconst(12, 0xFFFF)
-    p.iop(3, 3, "AND", 12)                    # h3
-    p.ld(4, C["mbn"])
-    p.iop(4, 4, "AND", 12)                    # h4
-    p.iconst(5, SM.LINK_SEED)                 # the check
-    for k in range(5):
+LK = {w: SM.LINK_DM + 4 * k for k, w in enumerate(SM.LINK_WORDS)}
+
+
+def tdm_rx(p: Prog, L: Layout) -> None:
+    """The fast link in (v0.16, dnfw.sampler.machines): the ColdFire's packet in slots 8..15
+    of the TDM receive page the engine read this block. 256 units of 16 bits, each under
+    the tag byte in either justification: MAGIC, sequence, a word offset (low, high), 248
+    units of data (124 words, low half first), the count of words, two spare, a check
+    (0x1D0F + the 255 before it). A packet that checks out, whose words lie in the pool
+    and clear of the command block (commands come by the frame's words), is written;
+    anything else -- stock's zeros included -- writes nothing."""
+    K = LK
+    p.ld(0, SM.TDM_PAGE)
+    p.iconst(12, 1)
+    p.iop(0, 0, "AND", 12)
+    p.lsh(0, 0, 11)
+    p.iconst(12, SM.TDM_RX + 32)              # slot 8 of frame 0
+    p.iop(0, 12, "+", 0)
+    p.st(K["pg"], 0)
+
+    def unit(d):
+        """Rd = the unit at C(a) (an address), or K['bad'] set. Clobbers R1..R3, R12, I1."""
+        p.ld(1, K["a"])
+        p.seti(1, 1)
+        p.ldi(1, 0, 1)
+        p.lsh(2, 1, -24)
+        p.iconst(12, SM.TDM_TAG)
+
+        def high():
+            p.lsh(d, 1, -8)
+        def low():
+            p.lsh(2, 1, -16)
+            p.iconst(12, 0xFF)
+            p.iop(2, 2, "AND", 12)
+            p.iconst(12, SM.TDM_TAG)
+            p.if_(2, "EQ", 12, lambda: p.ipass(d, 1),
+                  lambda: (p.iconst(3, 1), p.st(K["bad"], 3)), kind="i")
+        p.if_(2, "EQ", 12, high, low, kind="i")
+        p.iconst(12, 0xFFFF)
+        p.iop(d, d, "AND", 12)
+
+    p.iconst(0, 0)
+    p.st(K["bad"], 0)
+    p.ld(0, K["pg"])
+    p.st(K["a"], 0)
+    unit(4)
+    p.ld(0, K["bad"])
+    p.iconst(12, SM.RX_MAGIC)
+
+    def packet():
+        # every unit into the buffer, and the sum of the first 255
+        p.iconst(0, SM.LINK_SEED)
+        p.st(K["sum"], 0)
+        p.iconst(0, 0)
+        p.st(K["u"], 0)
+
+        def each():
+            p.ld(0, K["u"])                   # its address: page + 64 (u >> 3) + 4 (u & 7)
+            p.lsh(1, 0, -3)
+            p.lsh(1, 1, 6)
+            p.iconst(12, 7)
+            p.iop(2, 0, "AND", 12)
+            p.lsh(2, 2, 2)
+            p.ld(3, K["pg"])
+            p.ipass(12, 3)
+            p.iop(3, 12, "+", 1)
+            p.ipass(12, 3)
+            p.iop(3, 12, "+", 2)
+            p.st(K["a"], 3)
+            unit(4)
+            p.ld(0, K["u"])
+            p.lsh(1, 0, 2)
+            p.iconst(12, SM.LINK_BUF)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.sti(0, 1, 4)
+            p.iconst(12, SM.RX_UNITS - 1)
+            p.e("COMP(R0, R12);")
+
+            def add():
+                p.ld(5, K["sum"])
+                p.ipass(12, 5)
+                p.iop(5, 12, "+", 4)
+                p.st(K["sum"], 5)
+            p._branch(lambda: s32(p.r[0]) < s32(p.r[12]), "LT", add, None)
+            p.ld(0, K["u"])
+            p.iconst(12, 1)
+            p.iop(0, 12, "+", 0)
+            p.st(K["u"], 0)
+        p.loop(K["v"], SM.RX_UNITS, each)
+        p.ld(0, K["bad"])
+
+        def tagged():
+            p.ld(5, K["sum"])
+            p.iconst(12, 0xFFFF)
+            p.iop(5, 5, "AND", 12)
+            p.ld(6, SM.LINK_BUF + 4 * 255)
+            p.e("COMP(R5, R6);")
+
+            def checked():
+                p.ld(7, SM.LINK_BUF + 4 * 252)    # count
+                p.iconst(12, SM.RX_WORDS)
+                p.e("COMP(R7, R12);")
+
+                def counted():
+                    p.ld(8, SM.LINK_BUF + 4 * 3)  # the offset, words
+                    p.lsh(8, 8, 16)
+                    p.ld(9, SM.LINK_BUF + 4 * 2)
+                    p.ipass(12, 8)
+                    p.iop(8, 12, "+", 9)
+                    p.st(K["off"], 8)
+                    p.ld(7, SM.LINK_BUF + 4 * 252)
+                    p.ipass(12, 8)
+                    p.iop(9, 12, "+", 7)          # its end
+                    # anywhere in the pool but over the command block (the commands come
+                    # by the frame's words alone): wholly before it, or wholly after
+                    lo = SM.CMD_OFFSET // 4
+                    hi = SM.CMD_OFFSET // 4 + 6
+                    top = SM.POOL_WORDS
+                    p.iconst(12, lo)
+                    p.e("COMP(R9, R12);")
+
+                    def write():
+                        p.ld(8, K["off"])
+                        p.lsh(8, 8, 2)
+                        p.iconst(12, L.pool)
+                        p.iop(8, 12, "+", 8)
+                        p.seti(4, 8)
+                        p.ld(0, SM.LINK_BUF + 4 * 252)
+                        p.st(K["cnt"], 0)
+                        p.iconst(0, SM.LINK_BUF + 16)
+                        p.st(K["a"], 0)
+
+                        def word():
+                            p.ld(0, K["a"])
+                            p.seti(1, 0)
+                            p.ldi(5, 0, 1)
+                            p.ldi(6, 1, 1)
+                            p.lsh(6, 6, 16)
+                            p.ipass(12, 6)
+                            p.iop(5, 12, "+", 5)
+                            p.ld(7, K["cnt"])
+                            p.ifz(7, "GT", lambda: p.stpost(4, 5))
+                            p.ld(7, K["cnt"])
+                            p.iconst(12, -1)
+                            p.iop(7, 12, "+", 7)
+                            p.st(K["cnt"], 7)
+                            p.iconst(12, 8)
+                            p.iop(0, 12, "+", 0)
+                            p.st(K["a"], 0)
+                        p.loop(K["w"], SM.RX_WORDS, word)
+                        p.ld(0, K["good"])
+                        p.iconst(12, 1)
+                        p.iop(0, 12, "+", 0)
+                        p.st(K["good"], 0)
+                        p.ld(0, SM.LINK_BUF + 4)
+                        p.st(K["lseq"], 0)
+
+                    def above():
+                        p.ld(8, K["off"])
+                        p.iconst(12, hi)
+                        p.e("COMP(R8, R12);")
+
+                        def below_top():
+                            p.iconst(12, top)
+                            p.e("COMP(R9, R12);")
+                            p._branch(lambda: s32(p.r[9]) <= s32(p.r[12]), "LE", write, None)
+                        p._branch(lambda: s32(p.r[8]) >= s32(p.r[12]), "GE", below_top, None)
+                    p._branch(lambda: s32(p.r[9]) <= s32(p.r[12]), "LE", write, above)
+                p._branch(lambda: s32(p.r[7]) <= s32(p.r[12]), "LE", counted, None)
+
+            def failed():
+                p.ld(0, K["nbad"])
+                p.iconst(12, 1)
+                p.iop(0, 12, "+", 0)
+                p.st(K["nbad"], 0)
+            p._branch(lambda: p.r[5] == p.r[6], "EQ", checked, failed)
+        p.ifz(0, "EQ", tagged)
+    # the first unit decides: our MAGIC (stock's zeros are not tagged)
+    p.ifz(0, "EQ", lambda: (p.iconst(12, SM.RX_MAGIC), p.if_(4, "EQ", 12, packet, kind="i")))
+
+
+def tdm_tx(p: Prog, L: Layout) -> None:
+    """The fast link out (v0.16): while a SEND is running, the next 29 pool words in slots
+    14..15 of the TDM transmit page this block (64 units: MAGIC, sequence, the word
+    offset, 58 units of data, the count, a check), each as TAG << 24 | v << 8; idle, those
+    slots are zeroed, so the ColdFire sees no packet."""
+    K = LK
+    p.ld(0, SM.TDM_PAGE)
+    p.iconst(12, 1)
+    p.iop(0, 0, "AND", 12)
+    p.lsh(0, 0, 11)
+    p.iconst(12, SM.TDM_TX + 56)              # slot 14 of frame 0
+    p.iop(0, 12, "+", 0)
+    p.st(K["pg"], 0)
+    p.ld(0, K["sbusy"])
+
+    def idle():
+        p.ld(0, K["pg"])
+        p.st(K["a"], 0)
+
+        def clear():                          # (the loop takes R0 and R12 each time round)
+            p.ld(0, K["a"])
+            p.iconst(6, 0)
+            p.seti(1, 0)
+            p.sti(0, 1, 6)
+            p.sti(1, 1, 6)
+            p.iconst(12, 64)
+            p.iop(0, 12, "+", 0)
+            p.st(K["a"], 0)
+        p.loop(K["v"], 32, clear)
+
+    def busy():
+        # the units: build into the buffer, then write them out tagged
+        p.ld(4, K["spos"])
+        p.ld(5, K["send"])
         p.ipass(12, 5)
-        p.iop(5, 12, "+", k)
+        p.iop(5, 12, "-", 4)                  # what is left
+        p.iconst(12, SM.TX_WORDS)
+        p.iop(5, 5, "MIN", 12)
+        p.st(K["cnt"], 5)
+        p.iconst(6, SM.TX_MAGIC)
+        p.st(SM.LINK_BUF, 6)
+        p.ld(6, K["sseq"])
+        p.iconst(12, 0xFFFF)
+        p.iop(6, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 4, 6)
+        p.iop(7, 4, "AND", 12)
+        p.st(SM.LINK_BUF + 8, 7)
+        p.lsh(7, 4, -16)
+        p.st(SM.LINK_BUF + 12, 7)
+        p.st(SM.LINK_BUF + 4 * 62, 5)
+        p.lsh(8, 4, 2)                        # the words, from pool + 4 spos
+        p.iconst(12, L.pool)
+        p.iop(8, 12, "+", 8)
+        p.st(K["a"], 8)
+        p.iconst(0, 0)
+        p.st(K["u"], 0)
+
+        def word():
+            p.ld(0, K["u"])
+            p.ld(8, K["a"])
+            p.seti(1, 8)
+            p.ldi(5, 0, 1)
+            p.ld(7, K["cnt"])
+            p.e("COMP(R0, R7);")
+            p._branch(lambda: s32(p.r[0]) >= s32(p.r[7]), "GE", lambda: p.iconst(5, 0), None)
+            p.lsh(1, 0, 3)
+            p.iconst(12, SM.LINK_BUF + 16)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.iconst(12, 0xFFFF)
+            p.iop(6, 5, "AND", 12)
+            p.sti(0, 1, 6)
+            p.lsh(6, 5, -16)
+            p.sti(1, 1, 6)
+            p.ld(8, K["a"])
+            p.iconst(12, 4)
+            p.iop(8, 12, "+", 8)
+            p.st(K["a"], 8)
+            p.iconst(12, 1)
+            p.iop(0, 12, "+", 0)
+            p.st(K["u"], 0)
+        p.loop(K["v"], SM.TX_WORDS, word)
+        p.iconst(5, SM.LINK_SEED)             # the check
+        p.iconst(0, 0)
+        p.st(K["u"], 0)
+
+        def sumup():
+            p.ld(0, K["u"])
+            p.lsh(1, 0, 2)
+            p.iconst(12, SM.LINK_BUF)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.ldi(2, 0, 1)
+            p.ipass(12, 5)
+            p.iop(5, 12, "+", 2)
+            p.iconst(12, 1)
+            p.iop(0, 12, "+", 0)
+            p.st(K["u"], 0)
+        p.loop(K["v"], SM.TX_UNITS - 1, sumup)
+        p.iconst(12, 0xFFFF)
+        p.iop(5, 5, "AND", 12)
+        p.st(SM.LINK_BUF + 4 * 63, 5)
+        # out: unit i at frame i >> 1, slot 14 + (i & 1), tagged
+        p.iconst(0, 0)
+        p.st(K["u"], 0)
+
+        def out():
+            p.ld(0, K["u"])
+            p.lsh(1, 0, 2)
+            p.iconst(12, SM.LINK_BUF)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.ldi(2, 0, 1)
+            p.lsh(2, 2, 8)
+            p.iconst(12, SM.TDM_TAG << 24)
+            p.iop(2, 12, "+", 2)
+            p.lsh(3, 0, -1)
+            p.lsh(3, 3, 6)
+            p.iconst(12, 1)
+            p.iop(4, 0, "AND", 12)
+            p.lsh(4, 4, 2)
+            p.ld(5, K["pg"])
+            p.ipass(12, 5)
+            p.iop(5, 12, "+", 3)
+            p.ipass(12, 5)
+            p.iop(5, 12, "+", 4)
+            p.seti(1, 5)
+            p.sti(0, 1, 2)
+            p.iconst(12, 1)
+            p.iop(0, 12, "+", 0)
+            p.st(K["u"], 0)
+        p.loop(K["v"], SM.TX_UNITS, out)
+        # on
+        p.ld(4, K["spos"])
+        p.ld(5, K["cnt"])
+        p.ipass(12, 4)
+        p.iop(4, 12, "+", 5)
+        p.st(K["spos"], 4)
+        p.ld(6, K["sseq"])
+        p.iconst(12, 1)
+        p.iop(6, 12, "+", 6)
+        p.st(K["sseq"], 6)
+        p.ld(5, K["send"])
+        p.e("COMP(R4, R5);")
+        p._branch(lambda: s32(p.r[4]) >= s32(p.r[5]), "GE",
+                  lambda: (p.iconst(6, 0), p.st(K["sbusy"], 6)), None)
+    p.ifz(0, "EQ", idle, busy)
+
+
+def verify_step(p: Prog, L: Layout) -> None:
+    """VERIFY's work this block: up to VERIFY_CHUNK words of [vpos, vend) into two sums
+    (a += w, b += a, mod 2^32); at the end, vdone = the command's sequence."""
+    K, C = LK, L.C
+    p.ld(4, K["vpos"])
+    p.ld(5, K["vend"])
+    p.e("COMP(R4, R5);")
+
+    def work():
+        p.lsh(6, 4, 2)
+        p.iconst(12, L.pool)
+        p.iop(6, 12, "+", 6)
+        p.seti(4, 6)
+
+        def word():
+            p.ld(4, K["vpos"])
+            p.ld(5, K["vend"])
+            p.e("COMP(R4, R5);")
+
+            def add():
+                p.ldpost(6, 4)
+                p.ld(7, K["vsum"])
+                p.ipass(12, 7)
+                p.iop(7, 12, "+", 6)
+                p.st(K["vsum"], 7)
+                p.ld(8, K["vsum2"])
+                p.ipass(12, 8)
+                p.iop(8, 12, "+", 7)
+                p.st(K["vsum2"], 8)
+                p.iconst(12, 1)
+                p.iop(4, 12, "+", 4)
+                p.st(K["vpos"], 4)
+            p._branch(lambda: s32(p.r[4]) < s32(p.r[5]), "LT", add, None)
+        p.loop(K["v"], SM.VERIFY_CHUNK, word)
+        p.ld(4, K["vpos"])
+        p.ld(5, K["vend"])
+        p.e("COMP(R4, R5);")
+        p._branch(lambda: s32(p.r[4]) >= s32(p.r[5]), "GE",
+                  lambda: (p.ld(6, K["vseq"]), p.st(K["vdone"], 6)), None)
+    p._branch(lambda: s32(p.r[4]) < s32(p.r[5]), "LT", work, None)
+
+
+def status(p: Prog, L: Layout) -> None:
+    """The recorder's and the fast link's state to the ColdFire: 16 halves in the SPI
+    reply's tail, a 32-bit store putting its low half first (docs/sampler.md):
+    STATUS_MAGIC | state, the last command's sequence, frames / 32, the peak x 32767,
+    the link's packet count; v0.16: TDM packets in (good), the last one's sequence, TDM
+    packets out, a SEND running, TDM packets refused; five zeros; a check (0x1D0F + the
+    fifteen, 16 bits). Into both reply pages."""
+    C, K = L.C, LK
+    h = []
+    for k, (addr, scale) in enumerate(((C["rst"], None), (C["rseq"], None), (C["rpos"], -6),
+                                       (C["rpk"], "peak"), (C["mbn"], None), (K["good"], None),
+                                       (K["lseq"], None), (K["sseq"], None), (K["sbusy"], None),
+                                       (K["nbad"], None), (K["vsum"], None), (K["vsum"], -16),
+                                       (K["vsum2"], None), (K["vsum2"], -16), (K["vdone"], None))):
+        p.ld(0, addr)
+        if scale == "peak":
+            p.fconst(12, 32767.0)
+            p.fop(0, 0, "*", 12)
+            p.trunc(0, 0)
+        elif scale is not None:
+            p.lsh(0, 0, scale)
+        if k == 0:
+            p.iconst(12, SM.STATUS_MAGIC)
+            p.iop(0, 12, "+", 0)
+        p.iconst(12, 0xFFFF)
+        p.iop(0, 0, "AND", 12)
+        p.st(SM.LINK_BUF + 0x300 + 4 * k, 0)      # staged halves (the buffer's spare end)
+        h.append(SM.LINK_BUF + 0x300 + 4 * k)
+    p.iconst(5, SM.LINK_SEED)
+    for a in h:
+        p.ld(0, a)
+        p.ipass(12, 5)
+        p.iop(5, 12, "+", 0)
     p.iconst(12, 0xFFFF)
-    p.iop(5, 5, "AND", 12)                    # h15
-    p.lsh(6, 1, 16)
-    p.ipass(12, 6)
-    p.iop(6, 12, "+", 0)                      # h0 | h1 << 16
-    p.lsh(7, 3, 16)
-    p.ipass(12, 7)
-    p.iop(7, 12, "+", 2)                      # h2 | h3 << 16
-    p.lsh(8, 5, 16)                           # h14 (0) | h15 << 16
-    p.iconst(9, 0)
+    p.iop(5, 5, "AND", 12)                      # h15
+    words = []
+    for k in range(8):
+        lo = h[2 * k] if 2 * k < len(h) else None
+        hi = h[2 * k + 1] if 2 * k + 1 < len(h) else None
+        words.append((lo, hi))
     for page in SM.REPLY_PAGES:
         a = page + SM.REPLY_TAIL
-        p.st(a, 6)
-        p.st(a + 4, 7)
-        p.st(a + 8, 4)                        # h4 | 0
-        for k in range(3, 7):
-            p.st(a + 4 * k, 9)
-        p.st(a + 28, 8)
+        for k, (lo, hi) in enumerate(words):
+            if k == 7:                            # h14, then h15 = the check
+                p.ld(6, lo)
+                p.lsh(7, 5, 16)
+                p.ipass(12, 7)
+                p.iop(6, 12, "+", 6)
+            else:
+                p.iconst(6, 0)
+                if lo is not None:
+                    p.ld(6, lo)
+                if hi is not None:
+                    p.ld(7, hi)
+                    p.lsh(7, 7, 16)
+                    p.ipass(12, 7)
+                    p.iop(6, 12, "+", 6)
+            p.st(a + 4 * k, 6)
 
 
 def mailbox(p: Prog, L: Layout) -> None:
@@ -1378,20 +1800,9 @@ def mailbox(p: Prog, L: Layout) -> None:
                     p.iop(6, 12, "+", 6)
                     p.st(C["mbn"], 6)
 
-                def inside():
-                    # not over the recorder's four directory entries (slots 123..126), which
-                    # are the DSP's own: a packet with any word in them writes nothing
-                    lo = (8 + 16 * SM.REC_FIRST) // 4
-                    hi = (8 + 16 * (SM.REC_FIRST + SM.REC_SLOTS)) // 4
-                    p.iconst(12, lo - 6)
-                    p.e("COMP(R5, R12);")
-
-                    def above():
-                        p.iconst(12, hi)
-                        p.e("COMP(R5, R12);")
-                        p._branch(lambda: s32(p.r[5]) >= s32(p.r[12]), "GE", write, None)
-                    p._branch(lambda: s32(p.r[5]) <= s32(p.r[12]), "LE", write, above)
-                p._branch(lambda: s32(p.r[5]) <= s32(p.r[12]), "LE", inside, None)
+                # v0.16: anywhere in the pool, the recorder's entries included (the
+                # ColdFire restores them from the +Drive; nothing streams over them now)
+                p._branch(lambda: s32(p.r[5]) <= s32(p.r[12]), "LE", write, None)
             p._branch(lambda: s32(p.r[5]) < s32(p.r[12]), "LT", small, None)
         p._branch(lambda: p.r[4] == p.r[2], "EQ", checked, None)
     p._branch(lambda: p.r[2] == p.r[12], "EQ", magic, None)
@@ -1408,8 +1819,13 @@ def link_packet(offset: int, words) -> list[int]:
 
 
 def run_recorder(L: Layout, mem):
+    """the block's front, as the DSP runs it before the voices: the fast link in, the
+    recorder (and its status), the fast link out"""
     p = Prog("run", mem=mem)
+    tdm_rx(p, L)
+    verify_step(p, L)
     recorder(p, L)
+    tdm_tx(p, L)
     return p
 
 
@@ -1431,7 +1847,10 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.raw(".GLOBAL wr_smp.;")
     p.raw("wr_smp.:")
     mailbox(p, L)
+    tdm_rx(p, L)
+    verify_step(p, L)
     recorder(p, L)
+    tdm_tx(p, L)
     p.iconst(0, 0)
     p.st(L.C["t"], 0)
     top = p.label("slot")

@@ -35,8 +35,7 @@ typedef unsigned char u8;
 
 extern int smp_count(void);
 extern const char *smp_name(int k);
-extern int smp_entry(int k, u32 *off, u32 *frames, u32 *fmt);
-extern int smp_frame(u32 off, u32 fmt, u32 i);
+extern const u8 *smp_overview(int k);    /* 100 column peaks, 0..255 (link.c, v0.16) */
 
 static void on(void *c, int x, int y) { SET_PIXEL(c, x, y, 1); }
 
@@ -295,29 +294,18 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
  * CY; 0 drawn if the slot is off or empty (a flat dotted line) */
 static void waveform(void *c, int slot, int x0, int cy)
 {
-    u32 off, frames, fmt;
     int test = smp_count() < 0 && slot >= 1 && slot <= SMP_SOUNDS;
-    int have = !test && slot >= 1 && smp_entry(slot - 1, &off, &frames, &fmt) && frames > 1;
-    if (!test && !have) {
+    const u8 *ov = !test && slot >= 1 ? smp_overview(slot - 1) : 0;
+    if (!test && !ov) {
         hline(c, x0, x0 + SMP_WAVE_W - 1, cy, 1);
         return;
     }
     for (int k = 0; k < SMP_WAVE_W; k++) {
         int h;
-        if (test) {
+        if (test)
             h = smp_test_wave[slot - 1][k];
-        } else {
-            u32 a = (u32)k * frames / SMP_WAVE_W, b = (u32)(k + 1) * frames / SMP_WAVE_W;
-            if (b <= a) b = a + 1;
-            u32 step = (b - a) / 16 + 1;
-            int peak = 0;
-            for (u32 i = a; i < b; i += step) {
-                int s = smp_frame(off, fmt, i);
-                if (s < 0) s = -s;
-                if (s > peak) peak = s;
-            }
-            h = peak * SMP_WAVE_AMP / 32767;
-        }
+        else
+            h = ov[k * 100 / SMP_WAVE_W] * SMP_WAVE_AMP / 255;
         vline(c, x0 + k, cy - h, cy + h, 0);
     }
 }

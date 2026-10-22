@@ -78,6 +78,17 @@ def test_the_sample_link_hooks_call_into_the_renderer_chunk(applied, stock):
         assert stock_bytes in code and bytes.fromhex("4e75") in code[code.index(stock_bytes):]
 
 
+def test_the_fast_link_hook_replays_the_isr_instructions(applied, stock):
+    # v0.16: the SSI ISR's 8 bytes at TDM_SITE become jsr smp_tdm_hook ; nop, and the
+    # hook ends with the two instructions it displaced, then rts
+    main = applied.payloads[3]
+    assert at(stock, CF.TDM_SITE, 8) == CF.TDM_STOCK
+    assert at(main, CF.TDM_SITE, 2) == bytes.fromhex("4eb9")
+    assert at(main, CF.TDM_SITE + 6, 2) == bytes.fromhex("4e71")
+    code = _chunked(long_at(main, CF.TDM_SITE + 2), 64)
+    assert CF.TDM_STOCK + bytes.fromhex("4e75") in code
+
+
 def _chunked(va: int, n: int) -> bytes:
     """N bytes at VA from the RAM chunks the mod loads (the machines chunk holds the
     name table, the attribute rows and the list since RESONATOR)."""

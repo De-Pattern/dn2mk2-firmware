@@ -148,7 +148,7 @@ def test_the_drive_region_is_above_everything_the_dn2_uses():
     src = (pathlib.Path(__file__).resolve().parents[1] / "csrc/sampler/link.c").read_text()
     assert "#define STORE_SECTOR 0x600000u" in src
     assert "#define STORE_FLOOR 0x458000u" in src and "STORE_SECTOR >= STORE_FLOOR" in src
-    assert 0x600000 * 512 >= 3 << 30 and (0x600000 + 1 + SM.MIRROR_BYTES // 512) * 512 < 4 << 30
+    assert 0x600000 * 512 >= 3 << 30 and (0x600000 + 1 + SM.POOL_BYTES // 512) * 512 < 4 << 30
 
 
 def test_cfad_is_off_with_its_control_off_the_page():
@@ -196,10 +196,10 @@ def test_the_recorder_records_and_plays_back():
     for b in range(20):
         h.block(ONE, recorder=True, inp=sig[32 * b:32 * b + 32])
     st = h.status()
-    assert _check(h) and st[0] == SM.STATUS_MAGIC | 2 and st[2] == 20 and st[1] == 1
+    assert _check(h) and st[0] == SM.STATUS_MAGIC | 2 and st[2] == 10 and st[1] == 1
     assert abs(st[3] / 32767 - 0.5) < 0.01                          # the peak, for the meter
     ent = h.L.pool + 8 + 16 * (SM.REC_FIRST + 1)
-    assert h.mem.get(ent) == h.L.pool + SM.REC_OFFSET + (2 << 20)
+    assert h.mem.get(ent) == h.L.pool + SM.REC_OFFSET + (1 << SM.REC_SLOT_SHIFT)
     assert h.mem.get(ent + 4) == 32 * 20 and h.mem.get(ent + 12) == SM.FMT_I16
     h.command(SM.CMD_STOP)
     h.block(ONE, recorder=True)
@@ -277,15 +277,12 @@ def test_a_saved_sound_cannot_start_the_recorder():
     assert all(h.mem.get(h.L.pool + 8 + 16 * (SM.REC_FIRST + k) + 4) == 0 for k in range(4))
 
 
-def test_the_mailbox_leaves_the_recorders_entries_alone():
+def test_the_mailbox_writes_the_recorders_entries_too():
+    # v0.16: the ColdFire restores the recorder's entries from the +Drive (nothing streams
+    # over them any more), so a packet there is written like any other
     L = SL.layout()
     lo = (8 + 16 * SM.REC_FIRST) // 4
-    hi = (8 + 16 * (SM.REC_FIRST + SM.REC_SLOTS)) // 4
-    for w in (lo - 5, lo, hi - 1):
-        mem = _frame_mem(P.link_packet(w, [7] * 6))
-        P.run_mailbox(L, mem)
-        assert mem.get(L.C["mbn"]) == 0, w
-    for w in (lo - 6, hi):
+    for w in (lo - 5, lo, SM.CMD_OFFSET // 4):
         mem = _frame_mem(P.link_packet(w, [7] * 6))
         P.run_mailbox(L, mem)
         assert mem.get(L.C["mbn"]) == 1 and mem.get(L.pool + 4 * w) == 7, w
@@ -348,3 +345,96 @@ def test_one_detent_a_choice_lands_inside_each_choice():
         assert zone(SM.QUANT[4][2], v) == min(4, v // 24)
     for v in range(128):
         assert zone(SM.QUANT[5][2], v) == v * len(SM.SRC_NAMES) // 128
+
+
+def _rx(h, units, high=True, pg=0):
+    h.mem.put(SM.TDM_PAGE, pg)
+    base = SM.TDM_RX + (pg << 11) + 32
+    for off, w in SL.rx_page(units, high).items():
+        h.mem.put(base + off, w)
+
+
+def test_the_fast_link_writes_a_packet_in_either_justification():
+    ONE = SM.TYPE_OF["ONESHOT"]
+    for high, pg in ((True, 0), (False, 1)):
+        h = SL.Harness(0)
+        h.defaults()
+        words = [(0x01020304 * k) & 0xFFFFFFFF for k in range(1, 125)]
+        _rx(h, SL.rx_units(0x2000, words, seq=9), high, pg)
+        h.block(ONE, recorder=True)
+        assert [h.mem.get(h.L.pool + 4 * (0x2000 + k)) for k in range(124)] == words
+        st = h.status()
+        assert st[5] == 1 and st[6] == 9 and st[9] == 0
+
+
+def test_the_fast_link_refuses_bad_packets_and_the_command_block():
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    u = SL.rx_units(0x2000, [7] * 10)
+    u[100] ^= 1                                   # a bit wrong: the check fails
+    _rx(h, u)
+    h.block(ONE, recorder=True)
+    assert h.mem.get(h.L.pool + 4 * 0x2000) == 0 and h.status()[9] == 1
+    for off in (SM.CMD_OFFSET // 4 - 9, SM.CMD_OFFSET // 4 + 5, SM.POOL_WORDS - 3):
+        _rx(h, SL.rx_units(off, [7] * 10))
+        h.block(ONE, recorder=True)
+        assert h.mem.get(h.L.pool + 4 * off) == 0, off
+    # the recorder's entries and frames: written (the ColdFire restores them, v0.16)
+    for off in ((8 + 16 * SM.REC_FIRST) // 4 - 5, SM.REC_OFFSET // 4 - 5, SM.CMD_OFFSET // 4 - 10,
+                SM.CMD_OFFSET // 4 + 6):
+        _rx(h, SL.rx_units(off, [7] * 10))
+        h.block(ONE, recorder=True)
+        assert h.mem.get(h.L.pool + 4 * off) == 7, off
+    _rx(h, [0] * 256)                             # stock's zeros: nothing, not even counted
+    h.block(ONE, recorder=True)
+    assert h.status()[5] == 4
+
+
+def test_send_streams_pool_words_back_and_then_falls_silent():
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    data = [(k * 2654435761) & 0xFFFFFFFF for k in range(70)]
+    for k, w in enumerate(data):
+        h.mem.put(h.L.pool + 4 * (0x3000 + k), w)
+    a = h.L.pool + SM.CMD_OFFSET                   # SEND 70 words from 0x3000
+    for k, w in enumerate((1, SM.CMD_SEND, 0x3000, 70, 0, 0)):
+        h.mem.put(a + 4 * k, w)
+    got = {}
+    for b in range(6):
+        pg = b & 1
+        h.mem.put(SM.TDM_PAGE, pg)
+        h.block(ONE, recorder=True)
+        base = SM.TDM_TX + (pg << 11) + 56
+        pk = SL.tx_decode(lambda o: h.mem.get(base + o))
+        if b < 3:
+            assert pk is not None and pk[1] == b
+            for k, w in enumerate(pk[2:]):
+                got[pk[0] + k] = w
+        elif b >= 4:
+            assert pk is None                      # done: each page zeroed on its next turn
+    assert [got[0x3000 + k] for k in range(70)] == data
+    assert h.status()[7] == 3 and h.status()[8] == 0
+
+
+def test_verify_sums_a_word_range_and_reports_it():
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    n = 3000
+    data = [(k * 2246822519 + 7) & 0xFFFFFFFF for k in range(n)]
+    for k, w in enumerate(data):
+        h.mem.put(h.L.pool + 4 * (0x5000 + k), w)
+    a = h.L.pool + SM.CMD_OFFSET
+    for k, w in enumerate((4, SM.CMD_VERIFY, 0x5000, n, 0, 0)):
+        h.mem.put(a + 4 * k, w)
+    for b in range(4):
+        h.block(ONE, recorder=True)
+    st = h.status()
+    sa = sb = 0
+    for w in data:
+        sa = (sa + w) & 0xFFFFFFFF
+        sb = (sb + sa) & 0xFFFFFFFF
+    assert st[14] == 4 and st[10] | st[11] << 16 == sa and st[12] | st[13] << 16 == sb
+    assert st[15] == (SM.LINK_SEED + sum(st[:15])) & 0xFFFF

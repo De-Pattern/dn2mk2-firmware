@@ -10,6 +10,7 @@
  *     note any track plays) or, armed or recording, stops it. ARM's switch shows what the
  *     DSP is doing, not the record's value, so a sound saved with ARM on arms nothing.
  *   - SRC and CHAN are sent as they change, so the meter shows the source.
+ * A recording, once it ends, is saved to the +Drive (link.c's smp_save_recording, v0.16).
  * The DSP answers in the SPI reply's tail (link.c's smp_status): its state, the command it
  * last took, the frames recorded, the block's peak.
  */
@@ -36,6 +37,7 @@ typedef unsigned char u8;
 
 extern void smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
 extern int smp_status(u16 *out);
+extern void smp_save_recording(int slot, u32 frames);
 
 /* what the page last drew (smp_rec_draw fills these each time it draws) */
 void *rec_view __attribute__((section(".data"))) = 0;
@@ -60,6 +62,8 @@ static int mon_known __attribute__((section(".data"))) = 0;
 static int mon_src __attribute__((section(".data"))) = 0;
 static int mon_chan __attribute__((section(".data"))) = 0;
 static u16 st[16] __attribute__((section(".data")));
+static int rec_taken __attribute__((section(".data"))) = 0;   /* the slot a recording goes into */
+static int was_recording __attribute__((section(".data"))) = 0;
 
 int rec_visible(void)
 {
@@ -84,6 +88,8 @@ static void send(int cmd)
 {
     u32 thr = (u32)rec_thres * 32767u / 120u;
     smp_command((u32)cmd, (u32)rec_src, (u32)rec_chan, thr, (u32)rec_dest << 24 | rec_length());
+    if (cmd == CMD_NOW || cmd == CMD_ARM || cmd == CMD_ARM_PLAY)
+        rec_taken = rec_dest;
     if (cmd != CMD_MONITOR) {
         mon_src = rec_src;
         mon_chan = rec_chan;
@@ -101,9 +107,17 @@ void rec_poll(void)
 {
     if (smp_status(st)) {
         rec_state = st[0] & 3;
-        rec_frames = (u32)st[2] << 5;
+        rec_frames = (u32)st[2] << 6;              /* 64 frames a unit (v0.16) */
         rec_peak = st[3] & 0x7FFF;
         rec_heard = FRAMES + 1u;
+        /* a recording has ended (v0.16): it is kept on the +Drive, as the DT2 keeps its
+         * recordings, and is there again after a power cycle */
+        if (rec_state == 2)
+            was_recording = 1;
+        else if (was_recording) {
+            was_recording = 0;
+            smp_save_recording(rec_taken, rec_frames);
+        }
     }
     if (!rec_visible()) {                       /* off the page: nothing is sent */
         arm_known = mon_known = 0;

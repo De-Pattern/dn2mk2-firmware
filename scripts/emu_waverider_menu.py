@@ -114,6 +114,248 @@ SET_PIXEL = 0x40113B90                  # Bitmap::setPixel(bitmap, x, y, on), do
 PARAM_TABLE, PARAM_RECORDS, PARAM_BYTES = 0x401F7F94, 321, 60
 
 
+BLK_READ, BLK_WRITE = 0x4012C59A, 0x4012C780
+BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
+STORE_SECTOR = 0x600000
+REPLY_TAIL = 0x80005E40
+TDM_TX, TDM_RX = 0x4E6E0100, 0x4E6DF100
+
+
+def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
+    """the scenario's run: -> what was checked (see the link16: step)"""
+    import random
+    from unicorn import UC_HOOK_CODE
+    disk: dict[int, bytes] = {}
+    io = {"reads": 0, "writes": 0}
+
+    def blk(uc_, address, size, user):
+        sp = uc.reg_read(K.UC_M68K_REG_A7)
+        sector, n, buf = struct.unpack(">3I", bytes(uc.mem_read(sp + 4, 12)))
+        if address == BLK_READ:
+            io["reads"] += 1
+            data = b"".join(disk.get(sector + k, bytes(512)) for k in range(n // 512))
+            uc.mem_write(buf, data)
+        else:
+            io["writes"] += 1
+            data = bytes(uc.mem_read(buf, n))
+            for k in range(n // 512):
+                disk[sector + k] = data[512 * k:512 * k + 512]
+    # the stock driver does not run here: each entry becomes moveq #0,%d0 ; rts, and the
+    # hook does its work first
+    for va in (BLK_READ, BLK_WRITE):
+        machine.write(va, bytes.fromhex("70004e75"))
+        uc.hook_add(UC_HOOK_CODE, blk, begin=va, end=va)
+    machine.write(BLK_READY, struct.pack(">I", 1))
+    machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))   # 29 GiB
+
+    def long(name):
+        return struct.unpack(">I", machine.read(syms[name], 4))[0]
+
+    def call(name, *args):
+        guest_call(syms[name], *args, limit=50_000_000)
+
+    # the DSP: its pool as words, the commands it took, the status it answers with
+    pool: dict[int, int] = {}
+    dsp = {"seq": None, "state": 0, "vdone": 0, "vsum": 0, "vsum2": 0, "send": None,
+           "sseq": 0, "fast": 0, "slow": 0, "dropped": 0, "cmds": [], "sent_back": 0}
+    rng = random.Random(16)
+
+    def status_out():
+        h = [SM.STATUS_MAGIC | dsp["state"], 0, 0, 0, 0, 0, 0, 0, 0, 0,
+             dsp["vsum"] & 0xFFFF, dsp["vsum"] >> 16, dsp["vsum2"] & 0xFFFF, dsp["vsum2"] >> 16,
+             dsp["vdone"] & 0xFFFF]
+        h.append((SM.LINK_SEED + sum(h)) & 0xFFFF)
+        machine.write(REPLY_TAIL, struct.pack(">16H", *h))
+
+    def mailbox():
+        h = struct.unpack(">16H", machine.read(0x80005E60 + SM.LINK_OFFSET, 32))
+        if h[0] != SM.LINK_MAGIC or h[15] != (SM.LINK_SEED + sum(h[:15])) & 0xFFFF:
+            return
+        w = h[1] | h[2] << 16
+        words = [h[3 + 2 * j] | h[4 + 2 * j] << 16 for j in range(6)]
+        if 4 * w == SM.CMD_OFFSET:
+            seq, cmd, a0, a1 = words[:4]
+            if seq == dsp["seq"]:
+                return
+            dsp["seq"] = seq
+            dsp["cmds"].append(cmd)
+            if cmd == SM.CMD_VERIFY:
+                x = y = 0
+                for k in range(a0, a0 + a1):
+                    x = (x + pool.get(k, 0)) & 0xFFFFFFFF
+                    y = (y + x) & 0xFFFFFFFF
+                dsp.update(vsum=x, vsum2=y, vdone=seq)
+            elif cmd == SM.CMD_SEND:
+                dsp["send"] = [a0, a0 + a1]
+            status_out()
+        else:
+            dsp["slow"] += 1
+            for j, x in enumerate(words):
+                pool[w + j] = x
+
+    last = {}
+
+    def tdm_in():
+        for half in (0, 1):
+            base = TDM_TX + (half << 11)
+            raw = machine.read(base, 0x800)
+            units = []
+            for i in range(SM.RX_UNITS):
+                x = struct.unpack_from(">I", raw, 4 * (16 * (i >> 3) + 8 + (i & 7)))[0]
+                if x >> 16 != SM.TDM_TAG:
+                    break
+                units.append(x & 0xFFFF)
+            if len(units) != SM.RX_UNITS or units[0] != SM.RX_MAGIC:
+                continue
+            if units[255] != (SM.LINK_SEED + sum(units[:255])) & 0xFFFF:
+                raise AssertionError("a TDM packet with a bad check")
+            # what the DSP decodes is what live.rx_units builds: the same units
+            off, n = units[2] | units[3] << 16, units[252]
+            words = [units[4 + 2 * j] | units[5 + 2 * j] << 16 for j in range(n)]
+            assert SL.rx_units(off, words, units[1]) == units
+            machine.write(base + 32, bytes(0x800 - 32))   # stock's memset, as each period
+            if last.get(half) == units[1]:
+                continue
+            last[half] = units[1]
+            drop = (scenario == "slow") or (scenario == "fast" and dsp["fast"] == 5 and not dsp["dropped"])
+            dsp["fast"] += 1
+            if drop:
+                dsp["dropped"] += 1
+                continue
+            for j, x in enumerate(words):
+                pool[off + j] = x
+
+    def tdm_out():
+        # the DSP's SEND: TX_WORDS a block, left-justified as the DSP writes them (the
+        # ColdFire's receive slots carry them right-justified: both are tried, by turns)
+        if not dsp["send"]:
+            for half in (0, 1):
+                for i in range(64):
+                    machine.write(TDM_RX + (half << 11) + 4 * (16 * (i >> 1) + 14 + (i & 1)), bytes(4))
+            return
+        a, b = dsp["send"]
+        n = min(SM.TX_WORDS, b - a)
+        words = [pool.get(a + j, 0) for j in range(n)] + [0] * (SM.TX_WORDS - n)
+        u = [SM.TX_MAGIC, dsp["sseq"] & 0xFFFF, a & 0xFFFF, a >> 16]
+        for x in words:
+            u += [x & 0xFFFF, x >> 16]
+        u += [n]
+        u.append((SM.LINK_SEED + sum(u)) & 0xFFFF)
+        assert len(u) == SM.TX_UNITS
+        left = dsp["sseq"] & 1
+        for half in (0, 1):
+            for i, v in enumerate(u):
+                w = (SM.TDM_TAG << 24 | v << 8) if left else (SM.TDM_TAG << 16 | v)
+                machine.write(TDM_RX + (half << 11) + 4 * (16 * (i >> 1) + 14 + (i & 1)),
+                              struct.pack(">I", w))
+        dsp["sseq"] += 1
+        dsp["sent_back"] += 1
+        dsp["send"][0] += n
+        if dsp["send"][0] >= b:
+            dsp["send"] = None
+
+    def period():
+        tdm_out()
+        guest_call(ISR)
+        mailbox()
+        tdm_in()
+
+    log = []
+    out = {"scenario": scenario}
+    base = WD.SMP_POOL_DDR
+    if scenario in ("fast", "slow"):
+        # an image on the +Drive: two sounds, one longer than a 64 KB chunk (fast) or both
+        # short (slow), and a recording kept in slot 125
+        n_long = 40000 if scenario == "fast" else 900
+        snd = [[0.6 * ((k * 37 % 200) / 100 - 1) for k in range(n_long)],
+               [0.3 * ((k % 50) / 25 - 1) for k in range(700)]]
+        img = SL.pool_bytes(snd, base, [1.0, 0.5], [SM.FMT_I16] * 2, ["SAW", "TRI"])
+        img = bytearray(img + bytes((-len(img)) % 512))
+        rec = bytes(rng.randrange(256) for _ in range(2 * 1000))
+        rec_off = SM.REC_OFFSET + (1 << SM.REC_SLOT_SHIFT)
+        struct.pack_into("<IIfI", img, 8 + 16 * (SM.REC_FIRST + 1), base + rec_off, 1000, 1.0, 1)
+        import zlib  # noqa: F401
+        hdr_dir = bytes(img[:SM.DATA_OFFSET])
+
+        def adler(b):
+            a_, b_ = 1, 0
+            for x in b:
+                a_ = (a_ + x) & 0xFFFFFFFF
+                b_ = (b_ + a_) & 0xFFFFFFFF
+            return (b_ << 16 ^ a_) & 0xFFFFFFFF
+        magic, nbytes, ck = 0x444E3251, rec_off + len(rec), adler(hdr_dir)
+        hdr = struct.pack(">5I", magic, 2, nbytes, ck, (~magic ^ nbytes ^ ck) & 0xFFFFFFFF)
+        disk[STORE_SECTOR] = hdr.ljust(512, b"\0")
+        for k in range(len(img) // 512):
+            disk[STORE_SECTOR + 1 + k] = bytes(img[512 * k:512 * k + 512])
+        recp = rec + bytes((-len(rec)) % 512)
+        for k in range(len(recp) // 512):
+            disk[STORE_SECTOR + 1 + rec_off // 512 + k] = recp[512 * k:512 * k + 512]
+        call("smp_load")
+        status_out()
+        periods = 0
+        limit = 4000 if scenario == "fast" else 30000
+        while periods < limit:
+            period()
+            call("smp_boot")
+            periods += 1
+            if long("smp_walk") and not dsp["send"] and periods % 50 == 0:
+                log.append([periods, long("smp_walk"), long("smp_retries")])
+            # done: the directory page (the last range) is in
+            if all(pool.get(k // 4) == struct.unpack_from("<I", img, k)[0] for k in range(0, SM.CMD_OFFSET, 4)):
+                break
+        want = {}
+        for k in range(0, len(img), 4):
+            want[k // 4] = struct.unpack_from("<I", img, k)[0]
+        for k in range(0, len(recp), 4):
+            want[(rec_off + k) // 4] = struct.unpack_from("<I", recp, k)[0]
+        # what the directory points at must all be there: frames of used slots + dir
+        wrong = [k for k, v in want.items() if k * 4 < SM.CMD_OFFSET and pool.get(k) != v]
+        frames_wrong = 0
+        for slot in list(range(2)) + [SM.REC_FIRST + 1]:
+            addr, fr, _r, fmt = struct.unpack_from("<IIfI", img, 8 + 16 * slot)
+            lo = addr - base
+            for k in range(lo // 4, (lo + fr * 2 + 3) // 4):
+                if pool.get(k) != want.get(k, 0):
+                    frames_wrong += 1
+        out.update(periods=periods, dir_wrong=len(wrong), frames_wrong=frames_wrong,
+                   walk=long("smp_walk"), retries=long("smp_retries"),
+                   tdm_sent=long("smp_tdm_sent"), fast=dsp["fast"], dropped=dsp["dropped"],
+                   slow_packets=dsp["slow"], verifies=dsp["cmds"].count(SM.CMD_VERIFY),
+                   hi=long("smp_hi"), disk_reads=io["reads"], disk_writes=io["writes"])
+        out["ok"] = not wrong and not frames_wrong and periods < limit
+    elif scenario == "save":
+        # a recording of 3,000 frames in slot 126 on the DSP; no image on the +Drive yet
+        rec_off = SM.REC_OFFSET + (2 << SM.REC_SLOT_SHIFT)
+        recw = [rng.randrange(1 << 32) for _ in range(1500)]
+        for k, x in enumerate(recw):
+            pool[rec_off // 4 + k] = x
+        status_out()
+        call("smp_save_recording", 2, 3000)
+        periods = 0
+        while periods < 3000:
+            period()
+            call("smp_boot")
+            periods += 1
+            if long("smp_saved"):
+                break
+        got = b"".join(disk.get(STORE_SECTOR + 1 + rec_off // 512 + k, bytes(512)) for k in range(12))
+        exp = struct.pack("<1500I", *recw)
+        exp += bytes(len(got) - len(exp))
+        d = b"".join(disk.get(STORE_SECTOR + 1 + k, bytes(512)) for k in range(8))
+        entry = struct.unpack_from("<IIfI", d, 8 + 16 * (SM.REC_FIRST + 2))
+        hdr = disk.get(STORE_SECTOR, bytes(512))
+        out.update(periods=periods, saved=struct.unpack(">i", machine.read(syms["smp_saved"], 4))[0],
+                   frames_equal=got == exp, entry=[hex(entry[0]), entry[1], entry[2], entry[3]],
+                   dir_magic=hex(struct.unpack_from("<I", d, 0)[0]),
+                   header=hdr[:12].hex(), sent_back=dsp["sent_back"],
+                   heard=long("smp_tdm_heard"), disk_writes=io["writes"])
+        out["ok"] = (out["saved"] == 1 and got == exp and entry[0] == base + rec_off
+                     and entry[1] == 3000 and entry[3] == 1 and hdr[:4] == b"DN2Q")
+    out["log"] = log[-20:]
+    return out
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--build", default="out/waverider-m5")
@@ -539,6 +781,20 @@ def main() -> int:
             png_dir.mkdir(parents=True, exist_ok=True)
             (png_dir / f"{name}.link.json").write_text(json.dumps(got))
             print(f"  isr x{n}: {sum(1 for g in got if g[0] == 0x5A31)} packet(s)")
+        elif step.startswith("link16:"):
+            # v0.16, the sample link end to end on the ColdFire (csrc/sampler/link.c), with
+            # the +Drive and the DSP played by Python: link16:SYMS.json:SCENARIO, SCENARIO
+            # fast (one TDM packet dropped once), slow (every TDM packet dropped: the frame's
+            # words take over), save (a recording read back over TDM and written)
+            _, syms_path, scenario = step.split(":")
+            syms = json.loads(pathlib.Path(syms_path).read_text())
+            sys.path.insert(0, str(HERE.parent / "src"))
+            from dnfw.sampler import live as SL, machines as SM      # noqa: PLC0415
+            from dnfw.waverider import dsp as WD                       # noqa: PLC0415
+            result = link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD)
+            png_dir.mkdir(parents=True, exist_ok=True)
+            (png_dir / f"link16_{scenario}.json").write_text(json.dumps(result, indent=1))
+            print(f"  link16 {scenario}: {json.dumps({k: v for k, v in result.items() if k != 'log'})}")
         elif step.startswith("poke:"):
             _, va, data = step.split(":")
             machine.write(int(va, 0), bytes.fromhex(data))

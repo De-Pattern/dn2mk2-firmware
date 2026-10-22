@@ -178,3 +178,44 @@ class Harness:
         p, _ = P.run_voice(self.L, None, t, mtype, mem=self.mem)
         self.steps += p.steps
         return [flt(self.mem.get(BUF + 4 * k)) for k in range(32)]
+
+
+# -- the fast link (v0.16): what each end puts on the TDM slots ---------------------------------
+
+def rx_units(offset: int, words, seq: int = 0) -> list[int]:
+    """the ColdFire's 256 units for WORDS (<= 124) at word OFFSET into the pool"""
+    words = list(words)
+    assert len(words) <= SM.RX_WORDS
+    u = [SM.RX_MAGIC, seq & 0xFFFF, offset & 0xFFFF, offset >> 16]
+    for w in words + [0] * (SM.RX_WORDS - len(words)):
+        u += [w & 0xFFFF, w >> 16]
+    u += [len(words), 0, 0]
+    u.append((SM.LINK_SEED + sum(u)) & 0xFFFF)
+    assert len(u) == SM.RX_UNITS
+    return u
+
+
+def rx_page(units, high: bool = True) -> dict[int, int]:
+    """the DSP's receive page as words {byte offset from slot 8 of frame 0: word}: unit i in
+    frame i >> 3, slot 8 + (i & 7); HIGH: the 24 bits arrive left-justified (TAG << 24 |
+    v << 8), else right-justified (TAG << 16 | v)"""
+    out = {}
+    for i, v in enumerate(units):
+        w = (SM.TDM_TAG << 24 | v << 8) if high else (SM.TDM_TAG << 16 | v)
+        out[64 * (i >> 3) + 4 * (i & 7)] = w
+    return out
+
+
+def tx_decode(word_at) -> list[int] | None:
+    """the DSP's packet from its transmit page (WORD_AT(byte offset from slot 14 of frame
+    0) -> word), checked: [offset, seq, words...] or None"""
+    u = []
+    for i in range(SM.TX_UNITS):
+        w = word_at(64 * (i >> 1) + 4 * (i & 1))
+        if w >> 24 != SM.TDM_TAG:
+            return None
+        u.append((w >> 8) & 0xFFFF)
+    if u[0] != SM.TX_MAGIC or u[63] != (SM.LINK_SEED + sum(u[:63])) & 0xFFFF:
+        return None
+    n = u[62]
+    return [u[2] | u[3] << 16, u[1]] + [u[4 + 2 * k] | u[5 + 2 * k] << 16 for k in range(n)]

@@ -54,3 +54,22 @@ smp_quant_hook:
         movea.l %d0, %a0
         move.w  %d3, 0x14(%a0,%d2.l*2)
         rts
+
+| The SSI audio ISR 0x40025e36 at 0x40026098 (was: move.l %fp,%d2 ; addi.l #-72,%d2, 8
+| bytes; now jsr here and a nop), v0.16: every mode's transmit fill has ended there
+| (docs/link-research.md 6c), so smp_tdm(h) writes our packet into slots 8..15 of the
+| transmit half h = %fp@(-56) and reads the DSP's from slots 14..15 of the receive half.
+| Every register lives on in the ISR, so every one C may touch is kept; d2 leaves as the
+| two replayed instructions leave it (the ISR pushes it next).
+        .globl  smp_tdm_hook
+smp_tdm_hook:
+        lea     -20(%sp), %sp
+        movem.l %d0-%d2/%a0-%a1, (%sp)
+        move.l  -56(%fp), -(%sp)
+        jsr     smp_tdm
+        addq.l  #4, %sp
+        movem.l (%sp), %d0-%d2/%a0-%a1
+        lea     20(%sp), %sp
+        move.l  %fp, %d2
+        addi.l  #-72, %d2
+        rts
