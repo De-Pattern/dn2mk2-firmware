@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.15** | 2026-10-22 | DT2 SRC pages (knobs, waveform, RECORDER), one encoder click a choice, value names in the header, loops follow the knobs live; RECORDER: SRC IN/MAIN/TRK1-16, CHAN, YES records, ARM, R.LEN, R.STRT | `builds/v0.15-RECORDER/` | yes |
+| **v0.16** | 2026-10-22 | 96 MB of your samples on the +Drive, loaded at power-on over a fast checked link; recordings kept after power-off; the SAMP name list; waveforms for every slot | `builds/v0.16-DRIVE/` | yes |
+| v0.15 | 2026-10-22 | DT2 SRC pages (knobs, waveform, RECORDER), one encoder click a choice, value names in the header, loops follow the knobs live; RECORDER: SRC IN/MAIN/TRK1-16, CHAN, YES records, ARM, R.LEN, R.STRT | `builds/v0.15-RECORDER/` | yes |
 | v0.14 | 2026-10-22 | Sampling: page 2 of every sample machine records IN / IN L / IN R / MAIN into SAMP 124-127 (threshold, length); ONESHOT's CFAD heard | `builds/v0.14-SAMPLING/` | yes |
 | v0.13 | 2026-10-22 | The Digitakt II's sample machines (ONESHOT, WERP, STRETCH, REPITCH, GRID) with DT2-style pages; four test sounds; your WAVs over USB, kept on the +Drive | `builds/v0.13-SAMPLER/` | yes |
 | v0.12 | 2026-10-21 | PERC: labels follow TYPE; page 1 the machine's 8 parameters; page 2 TYPE + Machinedrum effects (AMD AMF EQF EQG FLTF FLTW FLTQ); no stray ring | `builds/v0.12-PERC-FX/` | yes |
@@ -51,6 +52,59 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.16 — 96 MB of samples on the +Drive, recordings kept, the sample list
+
+`DN2mod_v0.16_DRIVE_OS1.11.syx`
+sha256 `98da318511036ff8acf8349f8f0d83c7052f35270a75774aa8570f0dd665af29`
+Gate: CLEARED TO FLASH, 2026-10-22 (USB size 1,961,622 of 2,097,152). Source: commit `b502e6d`. Docs: `docs/sampler.md` (v0.16 section), `docs/link-research.md`.
+
+**Adds.**
+- **128 MB sample pool**: 96 MB for your samples (about 18 minutes of 16-bit mono at
+  44.1 kHz, up from 5 MB), and four recorder slots of 8 MB (a recording runs up to 66 s).
+- **Your samples live on the +Drive** and load at every power-on, as the DT2's do: the
+  tool (`tools/dn2samples.py send ...`, update it from the repo) writes them straight to
+  the +Drive's private region, then the instrument loads them into the DSP. `--keep` and
+  `save` are no longer needed.
+- **Recordings are kept**: when the RECORDER stops, the recording is saved to the +Drive by
+  itself and SAMP 124..127 still hold it after a power cycle.
+- **A fast link** to the DSP (spare TDM slots, about 0.7 MB/s; 20× v0.15's), every 64 KB
+  checked by the DSP's own sums and sent again if wrong; if the fast link does not
+  check out it falls back to the old one (slow, but always there).
+- **Slots play as soon as they are in**: while a big pool loads, each sample becomes
+  playable when its frames have arrived.
+- **The sample list**: turning SAMP shows five sample names around the chosen one for a
+  second, the chosen one framed.
+- **The waveform** (SYN page 2) is drawn for every slot, the recorder's included, and for
+  samples of any length.
+
+**Test** (after the regression check; **back up the +Drive first**):
+1. Power on with nothing sent: the four test sounds play as before (SAMP 1..4).
+2. `python tools/dn2samples.py hello`: "sample link 3: room for 100,663,296 bytes".
+3. `send` a folder of a few WAVs: the tool shows "to the +Drive" then "into the DSP"
+   and says whether the fast link was used. Play them on SAMP 1..
+4. Send something big (tens of MB): note the time "into the DSP" took, and whether it said
+   "(slow link)".
+5. Power-cycle: the samples come back by themselves (a big pool takes a while; small
+   samples are playable first).
+6. RECORDER: record a few seconds into SAMP 124 (YES, YES). Wait a few seconds, power-cycle:
+   SAMP 124 still plays it, and page 2 draws its waveform.
+7. Send samples again after recording: the recording is still in SAMP 124.
+8. Turn SAMP on SYN page 1 or 2: the list of names appears and goes after a second.
+9. `python tools/dn2samples.py status`: `fast_link` 1 is the fast link working; 0 is the
+   fallback; `retried` counts chunks sent again.
+
+**Known issues.**
+- The fast link and the readback of recordings rely on two TDM details only the hardware
+  can confirm (which 24 bits arrive, and that slots 14..15 come back from the DSP).
+  If either is wrong the samples still load over the slow link (36 KB/s: 5 MB takes
+  about 2.5 minutes; 96 MB would take most of an hour), and recordings are not kept
+  (`status` shows `fast_link` 0). Please report what `status` says.
+- A full 96 MB pool takes over two minutes to load at power-on even on the fast link.
+- Writing to the +Drive happens while you play (64 KB at a time); a project save at the
+  same moment waits for it.
+- The sample list's timing comes from the audio clock; how it feels is for the
+  instrument to say.
 
 ## v0.15 — DT2 pages, the RECORDER, track sampling, live loops
 
