@@ -398,7 +398,7 @@ static void sample_list(void *c, void *view, int slot)
     }
     if (now - list_at >= LIST_FRAMES)
         return;
-    int x0 = 46, x1 = 127, y0 = 2, y1 = 45;
+    int x0 = 26, x1 = 124, y0 = 1, y1 = 46;
     for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++)
             SET_PIXEL(c, x, y, 0);
@@ -414,7 +414,7 @@ static void sample_list(void *c, void *view, int slot)
         num[2] = (char)('0' + k % 10);
         num[3] = 0;
         TEXT(c, FONT, x0 + 3, y, 0, "%.3s", num);
-        TEXT(c, FONT, x0 + 21, y, 0, "%.7s", nm);
+        TEXT(c, FONT, x0 + 24, y, 0, "%.7s", nm);
         if (k == slot)
             box(c, x0 + 1, y - 1, x1 - 1, y + 7, 0);
     }

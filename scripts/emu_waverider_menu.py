@@ -125,16 +125,19 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     """the scenario's run: -> what was checked (see the link16: step)"""
     import random
     from unicorn import UC_HOOK_CODE
+    # the +Drive, fresh for each scenario; the hooks once per machine
+    shared = link16.__dict__.setdefault("shared", {})
     disk: dict[int, bytes] = {}
     io = {"reads": 0, "writes": 0}
+    shared["disk"], shared["io"] = disk, io
 
     def blk(uc_, address, size, user):
         try:
-            blk_(address)
+            blk_(address, shared["disk"], shared["io"])
         except Exception as e:                  # noqa: BLE001 -- kept for the report
-            io.setdefault("errors", []).append(repr(e)[:200])
+            shared["io"].setdefault("errors", []).append(repr(e)[:200])
 
-    def blk_(address):
+    def blk_(address, disk, io):
         sp = uc.reg_read(K.UC_M68K_REG_A7)
         sector, n, buf = struct.unpack(">3I", bytes(uc.mem_read(sp + 4, 12)))
         if address == BLK_READ:
@@ -148,9 +151,11 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                 disk[sector + k] = data[512 * k:512 * k + 512]
     # the stock driver does not run here: each entry becomes moveq #0,%d0 ; rts, and the
     # hook does its work first
-    for va in (BLK_READ, BLK_WRITE):
-        machine.write(va, bytes.fromhex("70004e75"))
-        uc.hook_add(UC_HOOK_CODE, blk, begin=va, end=va)
+    if not shared.get("hooked"):
+        shared["hooked"] = True
+        for va in (BLK_READ, BLK_WRITE):
+            machine.write(va, bytes.fromhex("70004e75"))
+            uc.hook_add(UC_HOOK_CODE, blk, begin=va, end=va)
     machine.write(BLK_READY, struct.pack(">I", 1))
     machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))   # 29 GiB
 
@@ -304,18 +309,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         limit = int(os.environ.get("LINK16_LIMIT", 4000 if scenario == "fast" else 30000))
         while periods < limit:
             period()
-            if periods == 17:
-                import collections
-                trace = collections.deque(maxlen=8000)
-                th = uc.hook_add(UC_HOOK_CODE, lambda u, a, sz, us: trace.append(a))
-                ran = call("smp_boot")
-                uc.hook_del(th)
-                out["trace"] = [hex(a) for a in trace]
-            else:
-                ran = call("smp_boot")
+            call("smp_boot")
             periods += 1
-            if periods < 40 or periods % 25 == 0:
-                log.append(["ran", periods, ran])
             if periods % 25 == 0:
                 log.append([periods, long("smp_walk"), long("smp_retries"), long("smp_lstate"),
                             long("smp_tdm_sent"), len(dsp["cmds"]), io["reads"]])
@@ -371,7 +366,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    heard=long("smp_tdm_heard"), disk_writes=io["writes"])
         out["ok"] = (out["saved"] == 1 and got == exp and entry[0] == base + rec_off
                      and entry[1] == 3000 and entry[3] == 1 and hdr[:4] == b"DN2Q")
-    out["log"] = log[:60] + log[-20:]
+    out["log"] = log[-8:]
     return out
 
 

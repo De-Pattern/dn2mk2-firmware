@@ -23,6 +23,10 @@ failure:
 5. **boot from reset** (`emu_boot_check.py`): boots and draws its UI, no fault.
 6. **engine + LOAD/SAVE** (`emu_boot_engine.py`): the evaluator runs clean under the
    real loader; CODE chunks intact; machine types survive a SAVE/LOAD round trip.
+6b. **sample link** (v0.16, `emu_waverider_menu.py`'s `link16`): on the ColdFire, the
+   +Drive's pool image loads into a Python DSP over the fast link (one packet lost and
+   resent) and, with the fast link gone, over the frame's words; a recording comes back
+   over TDM and is written to a Python +Drive. Every byte checked.
 7. **unit tests** (`pytest -m "not slow"` on the safety, mod, PERC and filter tests).
 
 Only if all pass does it write `BUILD.gate.json` beside the build (the build's
@@ -238,6 +242,29 @@ def main() -> int:
         clean = rc == 0 and "ran clean" in out and "FAIL" not in out and "corrupt" not in out
         gate("engine + LOAD/SAVE", clean, "evaluator clean, CODE intact, machine and filter "
              "types round-trip" if clean else out[-800:])
+
+        # 6b. the sample link on the ColdFire (v0.16): the +Drive's image loaded over the
+        # fast link with a packet lost (resent), over the frame's words with the fast link
+        # gone, and a recording read back and saved -- each against a Python DSP and +Drive
+        # (scripts/emu_waverider_menu.py's link16 step)
+        from dnfw.mods import waverider as W        # noqa: PLC0415
+        lay = W.SPEC.get("layout", {})
+        if "smp_tdm_sent" in lay:
+            syms = work / "link16_syms.json"
+            syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith("smp_")}))
+            steps = ",".join(f"link16:{syms}:{sc}" for sc in ("save", "fast", "slow"))
+            snap = ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"
+            rc, out = run("link16", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                                     "--build", bdir, "--snapshot", snap, "--steps", steps,
+                                     "--png-dir", work / "link16"], logs,
+                          env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
+                                                   / "section_3_MAIN_OS.bin"),
+                               "DNFW_EMU_FLAGS": '{"weakptr": false}'})
+            oks = re.findall(r"link16 (save|fast|slow): .*\"ok\": (true|false)", out)
+            good = rc == 0 and len(oks) == 3 and all(v == "true" for _, v in oks)
+            gate("sample link (ColdFire)", good,
+                 "save, fast (a lost packet resent), slow (fast link gone): every byte loaded "
+                 "and saved" if good else out[-800:])
 
         # 7. unit tests
         tests = [t for t in TESTS if (ROOT / t).exists()]
