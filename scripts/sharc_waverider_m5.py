@@ -974,7 +974,7 @@ def step_link(init, sound, machines, blocks) -> dict:
         return fb
 
     def pool_bytes_at(run, off, length):
-        st = run["state"]
+        st = run["state"].state
         return b"".join(struct.pack("<I", (m2.word(st, dsp.SMP_POOL_DDR + off + 4 * k) or 0) & 0xFFFFFFFF)
                         for k in range(length // 4))
 
@@ -995,7 +995,7 @@ def step_link(init, sound, machines, blocks) -> dict:
     before = pool_bytes_at(runs["zeros"], base_off, 24 * n) if ok_runs else b""
     after_bad = pool_bytes_at(runs["bad_check"], base_off, 24 * n) if ok_runs else b"x"
     edge = pool_bytes_at(runs["out_of_pool"], SM.POOL_BYTES - 16, 16) if ok_runs else b"x"
-    counts = {k: (m2.word(r["state"], SMP_L.C["mbn"]) or 0) if r["ok"] else None for k, r in runs.items()}
+    counts = {k: (m2.word(r["state"].state, SMP_L.C["mbn"]) or 0) if r["ok"] else None for k, r in runs.items()}
     checks = {
         "every run returns every block": ok_runs,
         f"{n} good packets put their {24 * n} bytes in the pool, one a block": got == data

@@ -394,9 +394,10 @@ def fetch(p: Prog, d: int, k: int) -> None:
         p.iconst(12, 2)
         p.iop(13, 13, "AND", 12)
         p.ifz(13, "EQ", lambda: p.lsh(d, d, 16))    # the low half to the top
-        p.ash(d, d, -16)                 # sign-extended
-        p.iconst(12, -15)
-        p.float_(d, d, 12)               # / 32768
+        p.iconst(12, 0xFFFF0000 - (1 << 32))
+        p.iop(d, d, "AND", 12)           # the half alone, on top: a signed 32-bit value
+        p.iconst(12, -31)
+        p.float_(d, d, 12)               # / 2^31 = the int16 / 32768 (no ASHIFT: the runner lacks it)
     p.ifz(8, "NE", i16, f32)
 
 
