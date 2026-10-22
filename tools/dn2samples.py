@@ -5,6 +5,9 @@
     python tools/dn2samples.py send FOLDER              every .wav in a folder, by name
     python tools/dn2samples.py status                   how far the DSP has been sent
     python tools/dn2samples.py clear                    stop sending (the DSP keeps what it has)
+    python tools/dn2samples.py save                     keep what was sent on the +Drive (v0.15)
+    python tools/dn2samples.py load                     the +Drive's copy back (as at power-on)
+    python tools/dn2samples.py forget                   the +Drive's copy no longer loads
     python tools/dn2samples.py build A.wav ... -o pool.bin   the pool as it would be sent (no device)
 
     options: --port "Digitone II" (a substring of the port name), --chunk 256 (bytes a message)
@@ -15,7 +18,10 @@ directory, the names, then each sample's frames as 16-bit (dnfw.sampler.live.poo
 The instrument then streams the mirror to the DSP, 36 KB a second, over and over, so a
 slot sounds once the stream has passed it. `status` tells you when: a pass is complete.
 
-The samples last until power-off: send them again after you switch on. A WAV is read as
+The samples last until power-off unless you `save` them (v0.15): `send --keep` saves
+them on the +Drive when the send is done, and the instrument loads them at power-on.
+They go to a region of the +Drive the DN2 itself never uses (above 3 GiB), so your
+projects, presets and kits are not touched; `forget` marks the copy empty. A WAV is read as
 it is: 8, 16, 24 or 32-bit PCM or 32-bit float, any rate (played at its own pitch on
 C4), stereo mixed to mono. Up to 128 slots and about 2.5 minutes of 16-bit mono at 44.1
 kHz in all (the mirror is 5 MB).
@@ -40,8 +46,8 @@ sys.path.insert(0, str(HERE))
 from dn2probe import pack7, unpack7          # noqa: E402  (Elektron's 7-bit packing)
 
 HEADER = bytes([0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01])
-HELLO, WRITE, STATUS, CLEAR = 1, 2, 3, 4
-STATUS_TEXT = {0: "ok", 1: "refused (outside the mirror)", 2: "unknown command"}
+HELLO, WRITE, STATUS, CLEAR, SAVE, LOAD, FORGET = 1, 2, 3, 4, 5, 6, 7
+STATUS_TEXT = {0: "ok", 1: "refused", 2: "unknown command"}
 DSP_RATE = 48000
 LINK_BYTES_PER_S = 24 * 1500
 
@@ -226,7 +232,8 @@ def cmd_send(link, pool, names, chunk):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=("hello", "send", "status", "clear", "build"))
+    ap.add_argument("command", choices=("hello", "send", "status", "clear", "build", "save", "load", "forget"))
+    ap.add_argument("--keep", action="store_true", help="send: then save on the +Drive")
     ap.add_argument("files", nargs="*")
     ap.add_argument("--port", default="Digitone II")
     ap.add_argument("--chunk", type=int, default=256)
@@ -249,12 +256,24 @@ def main(argv=None):
             print(f"sample link {proto}: mirror {mirror:,} bytes, the pool at DSP 0x{ddr:08x}")
         elif a.command == "status":
             print(status(link))
+        elif a.command == "save":
+            n = struct.unpack(">I", link.call(SAVE, timeout=20.0)[:4])[0]
+            print(f"saved {n:,} bytes on the +Drive: they load at power-on")
+        elif a.command == "load":
+            n = struct.unpack(">I", link.call(LOAD, timeout=20.0)[:4])[0]
+            print(f"loaded {n:,} bytes from the +Drive")
+        elif a.command == "forget":
+            link.call(FORGET, timeout=10.0)
+            print("the +Drive's copy is forgotten: nothing loads at power-on")
         elif a.command == "clear":
             link.call(CLEAR)
             print("cleared: the instrument stops sending; the DSP keeps what it has")
         else:
             pool, names, _ = build_pool(wav_list(a.files))
             cmd_send(link, pool, names, a.chunk)
+            if a.keep:
+                n = struct.unpack(">I", link.call(SAVE, timeout=20.0)[:4])[0]
+                print(f"  saved {n:,} bytes on the +Drive: they load at power-on")
     finally:
         port.close()
     return 0

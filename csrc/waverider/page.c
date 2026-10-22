@@ -176,9 +176,13 @@ static void ping_names(void)
     ping_on = on;
 }
 
-/* the UI loop's redraw test, as stock (and the names kept current, once a loop) */
+/* the UI loop's redraw test, as stock (and the names kept current, once a loop; and
+ * v0.15: the sample link's +Drive copy loaded once the device is up) */
+extern void smp_boot(void);
+
 int wr_poll(void *screen)
 {
+    smp_boot();
     wr_names();
     ping_names();
     return IS_DIRTY(screen);

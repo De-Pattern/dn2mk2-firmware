@@ -17,6 +17,16 @@
  *   2 WRITE   u32 offset, data (to the end)  -> status 1 if it would leave the mirror
  *   3 STATUS  -> u32 high-water, u32 walk, u32 passes, u32 packets, u32 frames
  *   4 CLEAR   -> the walk stops (high-water 0); the DSP keeps what it has
+ *   5 SAVE    -> the mirror to the +Drive (v0.15): u32 bytes written; status 1 if none
+ *   6 LOAD    -> the +Drive's copy into the mirror: u32 bytes; status 1 if none or bad
+ *   7 FORGET  -> the +Drive's copy is marked empty (its header sector zeroed)
+ *
+ * The +Drive copy (v0.15) is a region of the eMMC the DN2 never uses: the stock storage
+ * code reads and writes nothing above 2,224 MiB (docs/drive-storage-research.md); ours
+ * starts at sector 0x600000 (3 GiB), one header sector and then the mirror's bytes. Read
+ * and written through the stock block driver (0x4012c59a / 0x4012c780, under its own
+ * mutex), and only inside that region. At power-on the UI loop's first passes load it
+ * (smp_boot, from wr_poll), so your samples come back without the computer.
  *
  * Nothing here writes anything but the mirror, its own counters and the frame's sixteen
  * words; no peripheral, no flash. The mirror is RAM above BSS, declared by the mod.
@@ -45,19 +55,105 @@ typedef unsigned char u8;
 #define POOL_SLOTS 128
 #endif
 
-#define PROTO 1
+#define PROTO 2
+#define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
+#define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
+#define BLK_READY (*(volatile u32 *)0x4461B68Cu)                    /* the device is up */
+#define BLK_SECTORS (*(volatile u32 *)0x4461B6B0u)                  /* its size, sectors */
+#ifndef STORE_SECTOR
+#define STORE_SECTOR 0x600000u
+#endif
+#define STORE_SECTORS (1u + SMP_MIRROR_BYTES / 512u)
+#define STORE_MAGIC 0x444E3250u                                     /* 'DN2P' */
 #define RQ_MAX 600
 #define TX_MAX 160
 
 static u8 *const mirror = (u8 *)SMP_MIRROR;
 
-static u32 smp_hi __attribute__((section(".data"))) = 0;       /* bytes of the mirror in use */
-static u32 smp_walk __attribute__((section(".data"))) = 0;     /* the next byte to send */
+u32 smp_hi __attribute__((section(".data"))) = 0;       /* bytes of the mirror in use */
+u32 smp_walk __attribute__((section(".data"))) = 0;     /* the next byte to send */
 static u32 smp_passes __attribute__((section(".data"))) = 0;
 static u32 smp_packets __attribute__((section(".data"))) = 0;
 static u8 rq[RQ_MAX] __attribute__((section(".data")));
 static u8 rp[48] __attribute__((section(".data")));
 static u8 tx[TX_MAX] __attribute__((section(".data")));
+static u32 store_hdr[128] __attribute__((section(".data"), aligned(16)));   /* one sector */
+int smp_booted __attribute__((section(".data"))) = 0;
+
+static u32 checksum(const u8 *p, u32 n)
+{
+    u32 a = 1, b = 0;
+    for (u32 k = 0; k < n; k++) {
+        a += p[k];
+        b += a;
+    }
+    return b << 16 ^ a;
+}
+
+/* the region is ours and inside the device, or nothing is touched */
+static int store_ok(void)
+{
+    return BLK_READY && BLK_SECTORS >= STORE_SECTOR + STORE_SECTORS
+           && STORE_SECTOR > 0x458000u;                               /* above the stock store */
+}
+
+static u32 smp_save(void)
+{
+    u32 hi = smp_hi;
+    if (hi < 8 || hi > SMP_MIRROR_BYTES || !store_ok())
+        return 0;
+    u32 bytes = (hi + 511u) & ~511u;
+    if (BLK_WRITE(STORE_SECTOR + 1u, bytes, mirror) != 0)
+        return 0;
+    for (int k = 0; k < 128; k++)
+        store_hdr[k] = 0;
+    store_hdr[0] = STORE_MAGIC;
+    store_hdr[1] = 1;
+    store_hdr[2] = hi;
+    store_hdr[3] = checksum(mirror, hi);
+    store_hdr[4] = ~store_hdr[0] ^ store_hdr[2] ^ store_hdr[3];
+    if (BLK_WRITE(STORE_SECTOR, 512u, store_hdr) != 0)
+        return 0;
+    return hi;
+}
+
+static u32 smp_load(void)
+{
+    if (!store_ok() || BLK_READ(STORE_SECTOR, 512u, store_hdr) != 0)
+        return 0;
+    u32 hi = store_hdr[2];
+    if (store_hdr[0] != STORE_MAGIC || store_hdr[1] != 1 || hi < 8 || hi > SMP_MIRROR_BYTES
+        || store_hdr[4] != (~store_hdr[0] ^ store_hdr[2] ^ store_hdr[3]))
+        return 0;
+    smp_hi = 0;                                 /* the feeder rests while the mirror changes */
+    if (BLK_READ(STORE_SECTOR + 1u, (hi + 511u) & ~511u, mirror) != 0)
+        return 0;
+    if (checksum(mirror, hi) != store_hdr[3])
+        return 0;
+    smp_walk = 0;
+    smp_hi = hi;
+    return hi;
+}
+
+static int smp_forget(void)
+{
+    if (!store_ok())
+        return 0;
+    for (int k = 0; k < 128; k++)
+        store_hdr[k] = 0;
+    return BLK_WRITE(STORE_SECTOR, 512u, store_hdr) == 0;
+}
+
+/* from the UI loop (page.c's wr_poll), every pass until it has run once with the device
+ * up: the +Drive's copy, if there is one, into the mirror */
+void smp_boot(void)
+{
+    if (smp_booted || !BLK_READY)
+        return;
+    smp_booted = 1;
+    if (smp_hi == 0)
+        smp_load();
+}
 
 /* the frame builder has just built the frame: our packet over its words 2650..2681 */
 void smp_feed(void)
@@ -185,6 +281,14 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
     } else if (cmd == 4) {                      /* CLEAR */
         smp_hi = 0;
         smp_walk = 0;
+    } else if (cmd == 5 || cmd == 6) {          /* SAVE, LOAD */
+        u32 n6 = cmd == 5 ? smp_save() : smp_load();
+        if (!n6)
+            rp[3] = 1;
+        put32(rp + r, n6); r += 4;
+    } else if (cmd == 7) {                      /* FORGET */
+        if (!smp_forget())
+            rp[3] = 1;
     } else {
         rp[3] = 2;
     }
