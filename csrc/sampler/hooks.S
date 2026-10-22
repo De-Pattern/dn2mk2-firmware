@@ -33,3 +33,24 @@ smp_feed_hook:
         lea     16(%sp), %sp
         lea     0x40006c4a, %a2
         rts
+
+| The parameter setter 0x40037b74 at 0x40037be6 (was: movea.l %d0,%a0 ; move.w
+| %d3,0x14(%a0,%d2.l*2)), where a turn's value is written into the sound: d0 the sound,
+| d2 the slot, d3 the value (values[] at sound + 0x14; objdump prints the 0x14 as "14"). smp_quant (fmt.c) may move the value to the next
+| choice of a sample machine's control; d3 leaves as what was written, a0 as d0, every
+| other register as it came (the setter goes on to pass d0 and d3 along).
+        .globl  smp_quant_hook
+smp_quant_hook:
+        lea     -12(%sp), %sp
+        movem.l %d0-%d1/%a1, (%sp)
+        move.l  %d3, -(%sp)
+        move.l  %d2, -(%sp)
+        move.l  %d0, -(%sp)
+        jsr     smp_quant
+        lea     12(%sp), %sp
+        move.l  %d0, %d3
+        movem.l (%sp), %d0-%d1/%a1
+        lea     12(%sp), %sp
+        movea.l %d0, %a0
+        move.w  %d3, 0x14(%a0,%d2.l*2)
+        rts

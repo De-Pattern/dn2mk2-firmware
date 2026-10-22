@@ -32,7 +32,8 @@ SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "gain",
             "xfn", "xfa", "xfi", "xfs",                # CFAD: its length, where it starts, 1/length, the shift
             # the recorder: its state (0 idle, 1 armed, 2 recording, 3 full), slot entry,
             # frames so far, their limit, source, threshold, its frames' base, the track
-            "rst", "rent", "rpos", "rmax", "rsrc", "rthr", "rbase", "rtk", "rpk")
+            "rst", "rent", "rpos", "rmax", "rsrc", "rthr", "rbase", "rchan", "rpk",
+            "rseq", "rmode")                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
 GRAIN = 2048                              # STRETCH's grain, output samples (43 ms); two, half apart
 TEMPO_OFFSET = 216                        # the frame's tempo word: BPM x 120 (docs/modulation-display.md)
 
@@ -131,6 +132,11 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
     v(p, 0, "on")
 
     def sounding():
+        live(p, L)
+        v(p, 0, "on")
+        p.ifz(0, "NE", sounding_on, lambda: silence(p, L))
+
+    def sounding_on():
         p.ld(4, C["tr"])
         v(p, 5, "rate")
         p.fop(4, 4, "*", 5)
@@ -236,6 +242,95 @@ def start(p: Prog, L: Layout) -> None:
     p._branch(lambda: p.r[0] == p.r[12], "EQ", found, None)
 
 
+def oneshot_bounds(p: Prog, L: Layout) -> None:
+    """lo, hi and loop from STRT, LEN and LOOP (R10: the track's frame slot base, F13: the
+    sample's frames). Clobbers R4..R7, R12, R14, R15, I1."""
+    ctl(p, 4, SM.STRT_REC, 10)           # 0..120
+    tofloat(p, 14, 4, 1.0 / 120.0)
+    p.fop(14, 14, "*", 13)               # lo = STRT frames
+    ctl(p, 4, SM.LEN_REC, 10)            # 0..127
+    tofloat(p, 15, 4, 1.0 / 127.0)
+    p.fop(15, 15, "*", 13)
+    p.fop(15, 15, "+", 14)               # hi = lo + LEN frames
+    p.trunc(4, 14)
+    p.trunc(5, 15)
+    v(p, 6, "frames")
+    p.iop(5, 5, "MIN", 6)
+    vs(p, "lo", 4)
+    vs(p, "hi", 5)
+    ctl(p, 7, SM.LOOP_REC, 10)           # 0..127: the loop point, in the whole sample
+    tofloat(p, 7, 7, 1.0 / 127.0)
+    p.fop(7, 7, "*", 13)
+    p.trunc(6, 7)
+    v(p, 4, "lo")
+    v(p, 5, "hi")
+    p.iop(6, 6, "MAX", 4)                # kept inside lo .. hi - 1
+    p.iconst(12, -1)
+    p.iop(12, 12, "+", 5)
+    p.iop(6, 6, "MIN", 12)
+    vs(p, "loop", 6)
+
+
+def live(p: Prog, L: Layout) -> None:
+    """v0.15: ONESHOT, STRETCH and REPITCH follow STRT, LEN, LOOP and PLAY while the note
+    sounds, as the DT2's do (GRID's slice and WERP's segments are taken at the note). The
+    position stays where it is unless the region moved past it: then it is put at the
+    region's start (forward) or end (backward); a region with nothing in it ends the note."""
+    C = L.C
+    v(p, 0, "mach")
+    p.iconst(12, SM.TYPE_OF["GRID"])
+    p.e("COMP(R0, R12);")
+
+    def follow():
+        p.ld(9, C["t"])
+        PP.t146(p, 10, 9)
+        v(p, 6, "frames")
+        tofloat(p, 13, 6)
+        oneshot_bounds(p, L)
+        p.ld(9, C["t"])
+        PP.t146(p, 10, 9)
+        ctl(p, 4, SM.PLAY_REC, 10)
+        p.lsh(4, 4, -5)
+        vs(p, "mode", 4)
+        v(p, 4, "lo")
+        vs(p, "low", 4)
+        v(p, 0, "mode")
+        p.iconst(12, 1)
+        p.if_(0, "EQ", 12, lambda: (v(p, 4, "loop"), vs(p, "low", 4)), kind="i")
+        v(p, 4, "lo")
+        v(p, 5, "hi")
+        p.e("COMP(R4, R5);")
+
+        def inside():
+            v(p, 9, "pos")
+            v(p, 0, "mode")
+            p.iconst(12, 2)
+
+            def fwd():
+                v(p, 4, "lo")
+                p.iop(9, 9, "MAX", 4)
+                vs(p, "pos", 9)
+
+            def rev():
+                v(p, 5, "hi")
+                p.iconst(12, -1)
+                p.iop(12, 12, "+", 5)
+                p.iop(9, 9, "MIN", 12)
+                vs(p, "pos", 9)
+            p.if_(0, "GE", 12, fwd, rev, kind="i")
+
+        def empty():
+            p.iconst(0, 0)
+            vs(p, "on", 0)
+        p._branch(lambda: s32(p.r[4]) - s32(p.r[5]) < 0, "LT", inside, empty)
+
+    def not_grid():
+        p.iconst(12, SM.TYPE_OF["WERP"])
+        p.e("COMP(R0, R12);")
+        p._branch(lambda: p.r[0] != p.r[12], "NE", follow, None)
+    p._branch(lambda: p.r[0] != p.r[12], "NE", not_grid, None)
+
+
 def region(p: Prog, L: Layout) -> None:
     """lo, hi (exclusive), loop and the start position for the latched machine, then on."""
     C = L.C
@@ -292,30 +387,8 @@ def region(p: Prog, L: Layout) -> None:
         vs(p, "hi", 5)
 
     def oneshot():
-        ctl(p, 4, SM.STRT_REC, 10)           # 0..120
-        tofloat(p, 14, 4, 1.0 / 120.0)
-        p.fop(14, 14, "*", 13)               # lo = STRT frames
-        ctl(p, 4, SM.LEN_REC, 10)            # 0..127
-        tofloat(p, 15, 4, 1.0 / 127.0)
-        p.fop(15, 15, "*", 13)
-        p.fop(15, 15, "+", 14)               # hi = lo + LEN frames
-        p.trunc(4, 14)
-        p.trunc(5, 15)
-        v(p, 6, "frames")
-        p.iop(5, 5, "MIN", 6)
-        vs(p, "lo", 4)
-        vs(p, "hi", 5)
-        ctl(p, 7, SM.LOOP_REC, 10)           # 0..127: the loop point, in the whole sample
-        tofloat(p, 7, 7, 1.0 / 127.0)
-        p.fop(7, 7, "*", 13)
-        p.trunc(6, 7)
-        v(p, 4, "lo")
-        v(p, 5, "hi")
-        p.iop(6, 6, "MAX", 4)                # kept inside lo .. hi - 1
-        p.iconst(12, -1)
-        p.iop(12, 12, "+", 5)
-        p.iop(6, 6, "MIN", 12)
-        vs(p, "loop", 6)
+        oneshot_bounds(p, L)
+
     def whole():                              # WERP: the whole sample, segment by segment
         p.iconst(4, 0)
         vs(p, "lo", 4)
@@ -408,6 +481,9 @@ def fetch(p: Prog, d: int, k: int) -> None:
     p.ifz(8, "NE", i16, f32)
 
 
+CFAD_ON = False                               # v0.14's CFAD; off with its control off the page
+
+
 def crossfade_setup(p: Prog, L: Layout) -> None:
     """ONESHOT's CFAD in FWD LOOP: over the last X frames before the end (X = CFAD/127 of
     the shorter of the loop and what lies before it), the sound fades into the audio
@@ -457,7 +533,11 @@ def crossfade_setup(p: Prog, L: Layout) -> None:
 def render(p: Prog, L: Layout) -> None:
     """32 samples of the latched region at the block's rate, linear interpolation."""
     C = L.C
-    crossfade_setup(p, L)
+    if CFAD_ON:
+        crossfade_setup(p, L)
+    else:                                     # v0.15: the DT2's ONESHOT has no CFAD control
+        p.fconst(0, 0.0)
+        p.st(C["xfn"], 0)
     buffer(p, L)
 
     def sample():
@@ -954,193 +1034,291 @@ def render_werp(p: Prog, L: Layout) -> None:
 
 
 def recorder(p: Prog, L: Layout) -> None:
-    """The recorder (docs/sampler.md): a sample-machine track whose REC is on records, into
-    one of four slots of the DSP's own (SAMP 124..127, 2 MB of int16 each, 21.8 s), the
-    block's input (IN L+R, L or R: the codec's input as the engine converts it, at
-    0x268538, L then R) or the main mix (the last block's, at 0x268438). Armed, it waits
-    for the block's peak to reach THRS; recording, it appends 32 frames a block and
-    keeps the slot's directory entry current, so the slot plays at once; it stops at
-    RLEN (0: the slot's whole length) or when REC is turned off."""
+    """The recorder (docs/sampler.md, v0.15). The ColdFire drives it with commands it writes,
+    through the sample link, into the pool's command block (SM.CMD_OFFSET): sequence,
+    command, source, channel, threshold, and dest << 24 | frames. A new sequence acts:
+    ARM empties the slot and waits for the block's peak to reach the threshold; NOW
+    empties it and records at once; STOP ends a recording (or cancels an arm); every
+    command sets the source and channel the peak is measured on (MONITOR only that).
+    Sources: IN (the codec's input as the engine converts it, 0x268538), MAIN (the last
+    block's mix, 0x268438), TRK1..16 (track t's audio, panned, the last block's: the
+    buffer Overbridge sends, SM.TRK_BUF + 0x100 t); channels MONO L+R, L, R. Recording
+    appends 32 frames a block as int16 to the slot (SAMP 124..127, 2 MB each) and keeps
+    its directory entry current, so it plays at once; it stops at the frame count. Each
+    block the state, the command echoed, the frames so far and the peak go to the
+    ColdFire in the SPI reply's unused tail (SM.REPLY_TAIL), in both reply pages."""
     C = L.C
-    # the lowest sample-machine track with REC on, if any (scanned 15 down to 0)
-    p.iconst(0, -1)
-    p.st(C["rtk"], 0)
-    p.iconst(0, 15)
-    p.st(C["j"], 0)
+    cmd = L.pool + SM.CMD_OFFSET
+    p.ld(0, cmd)                              # the command's sequence
+    p.ld(1, C["rseq"])
 
-    def scan():
-        p.ld(9, C["j"])
-        PP.raw_type(p, 2)
-        p.iconst(12, SM.FIRST_TYPE)
+    def new_command():
+        p.ld(0, cmd)
+        p.st(C["rseq"], 0)
+        p.ld(4, cmd + 8)                      # source: 0 IN, 1 MAIN, 2 + t a track
+        p.iconst(12, 0)
+        p.iop(4, 4, "MAX", 12)
+        p.iconst(12, 17)
+        p.iop(4, 4, "MIN", 12)
+        p.st(C["rsrc"], 4)
+        p.ld(4, cmd + 12)                     # channel: 0 L+R, 1 L, 2 R
+        p.iconst(12, 0)
+        p.iop(4, 4, "MAX", 12)
+        p.iconst(12, 2)
+        p.iop(4, 4, "MIN", 12)
+        p.st(C["rchan"], 4)
+        p.ld(4, cmd + 16)                     # the threshold, 0..32767 for a peak 0..1
+        tofloat(p, 5, 4, 1.0 / 32767.0)
+        p.st(C["rthr"], 5)
+        p.ld(2, cmd + 4)                      # the command
 
-        def sample_type():
-            p.iconst(12, SM.FIRST_TYPE + len(SM.NAMES) - 1)
-
-            def rec_on():
-                p.ld(9, C["j"])
-                PP.t146(p, 10, 9)
-                ctl(p, 4, SM.REC_REC, 10)
-                p.ifz(4, "NE", lambda: (p.ld(0, C["j"]), p.st(C["rtk"], 0)))
-            p.if_(2, "LE", 12, rec_on, kind="i")
-        p.if_(2, "GE", 12, sample_type, kind="i")
-        p.ld(0, C["j"])
-        p.iconst(12, -1)
-        p.iop(0, 12, "+", 0)
-        p.st(C["j"], 0)
-    p.loop(C["n"], 16, scan)
-    p.ld(0, C["rtk"])
-
-    def off():                                # no track records: idle
-        p.iconst(0, 0)
-        p.st(C["rst"], 0)
-
-    def on():
-        p.ld(1, C["rst"])
-
-        def arm():                            # turned on: the slot, emptied, and the settings
-            p.ld(9, C["rtk"])
-            PP.t146(p, 10, 9)
-            ctl(p, 4, SM.RDST_REC, 10)       # 0..127 -> slot 0..3
-            p.lsh(4, 4, -5)
-            p.ipass(12, 4)
-            p.lsh(5, 4, 21)                  # 2 MB a slot
-            p.iconst(13, L.pool + SM.REC_OFFSET)
-            p.iop(5, 13, "+", 5)
-            p.st(C["rbase"], 5)
-            p.iconst(13, SM.REC_FIRST)
-            p.iop(4, 13, "+", 4)
-            p.lsh(4, 4, 4)
-            p.iconst(13, L.pool + 8)
-            p.iop(4, 13, "+", 4)
-            p.st(C["rent"], 4)
-            p.seti(1, 4)
-            p.sti(0, 1, 5)                   # address
-            p.iconst(6, 0)
-            p.sti(1, 1, 6)                   # frames: none yet
-            p.fconst(6, 1.0)
-            p.sti(2, 1, 6)                   # rate 1
-            p.iconst(6, SM.FMT_I16)
-            p.sti(3, 1, 6)
-            p.iconst(6, 0)
-            p.st(C["rpos"], 6)
-            ctl(p, 4, SM.RLEN_REC, 10)       # 0 the whole slot, else n x 1/127 of it
-            p.iconst(6, SM.REC_FRAMES)
-            p.ifz(4, "NE", lambda: (tofloat(p, 7, 4, SM.REC_FRAMES / 127.0), p.trunc(6, 7)))
-            p.st(C["rmax"], 6)
-            ctl(p, 4, SM.RSRC_REC, 10)       # 0 IN L+R, 1 IN L, 2 IN R, 3 MAIN
-            p.st(C["rsrc"], 4)
-            ctl(p, 4, SM.RTHR_REC, 10)       # 0..120: the peak to start at, 0 at once
-            tofloat(p, 5, 4, 1.0 / 120.0)
-            p.st(C["rthr"], 5)
-            p.iconst(0, 1)
-            p.st(C["rst"], 0)
-        p.ifz(1, "EQ", arm)
-        p.ld(1, C["rst"])
-        p.iconst(12, 1)
-        p.e("COMP(R1, R12);")
-
-        def capture():                        # 32 frames of the source, mono, -> acc..
-            p.fconst(0, 0.0)
-            p.st(C["rpk"], 0)
-            p.iconst(6, 0)
-            p.st(C["x"], 6)
-
-            def frame():
-                p.ld(6, C["x"])
-                p.lsh(7, 6, 2)
-                p.ld(8, C["rsrc"])
+        def start(state):
+            def body():                       # the slot, emptied
+                p.ld(4, cmd + 20)
+                p.lsh(5, 4, -24)              # dest 0..3
                 p.iconst(12, 3)
-                p.iconst(9, SM.IN_BUF)
-                p.if_(8, "EQ", 12, lambda: p.iconst(9, SM.MIX_BUF), kind="i")
-                p.ipass(12, 9)
-                p.iop(9, 12, "+", 7)
-                p.seti(1, 9)
-                p.ldi(3, 0, 1)                # L
-                p.ldi(4, 32, 1)               # R
-                p.ld(8, C["rsrc"])
-                p.iconst(12, 1)
-                p.if_(8, "EQ", 12, lambda: p.fpass(4, 3), kind="i")
-                p.iconst(12, 2)
-                p.if_(8, "EQ", 12, lambda: p.fpass(3, 4), kind="i")
-                p.fop(3, 3, "+", 4)
-                p.fconst(12, 0.5)
-                p.fop(3, 3, "*", 12)          # mono
-                p.fconst(12, 0.999969)
-                p.fop(3, 3, "MIN", 12)
-                p.fconst(12, -1.0)
-                p.fop(3, 3, "MAX", 12)
-                p.ld(5, C["rpk"])             # the block's peak
-                p.fconst(12, 0.0)
-                p.fop(6, 12, "-", 3)
-                p.fop(6, 6, "MAX", 3)
-                p.fop(5, 5, "MAX", 6)
-                p.st(C["rpk"], 5)
-                p.ld(6, C["x"])
-                p.lsh(7, 6, 2)
-                p.iconst(12, SM.REC_STAGE)
-                p.iop(7, 12, "+", 7)
-                p.seti(1, 7)
-                p.sti(0, 1, 3)                # staged as floats
-                p.iconst(12, 1)
-                p.iop(6, 12, "+", 6)
-                p.st(C["x"], 6)
-            p.loop(C["n"], 32, frame)
-        capture()
-        p.ld(1, C["rst"])
-        p.iconst(12, 1)
+                p.iop(5, 5, "AND", 12)
+                p.iconst(12, 0x00FFFFFF)
+                p.iop(6, 4, "AND", 12)        # frames: 32 .. the slot's whole length
+                p.iconst(12, 32)
+                p.iop(6, 6, "MAX", 12)
+                p.iconst(12, SM.REC_FRAMES)
+                p.iop(6, 6, "MIN", 12)
+                p.st(C["rmax"], 6)
+                p.lsh(6, 5, 21)               # 2 MB a slot
+                p.iconst(13, L.pool + SM.REC_OFFSET)
+                p.iop(6, 13, "+", 6)
+                p.st(C["rbase"], 6)
+                p.iconst(13, SM.REC_FIRST)
+                p.iop(5, 13, "+", 5)
+                p.lsh(5, 5, 4)
+                p.iconst(13, L.pool + 8)
+                p.iop(5, 13, "+", 5)
+                p.st(C["rent"], 5)
+                p.seti(1, 5)
+                p.sti(0, 1, 6)                # address
+                p.iconst(7, 0)
+                p.sti(1, 1, 7)                # frames: none yet
+                p.fconst(7, 1.0)
+                p.sti(2, 1, 7)                # rate 1
+                p.iconst(7, SM.FMT_I16)
+                p.sti(3, 1, 7)
+                p.iconst(7, 0)
+                p.st(C["rpos"], 7)
+                p.iconst(7, state)
+                p.st(C["rst"], 7)
+            return body
+        p.iconst(12, SM.CMD_ARM)
+        p.if_(2, "EQ", 12, lambda: (start(1)(), p.iconst(7, 0), p.st(C["rmode"], 7)), kind="i")
+        p.ld(2, cmd + 4)
+        p.iconst(12, SM.CMD_ARM_PLAY)
+        p.if_(2, "EQ", 12, lambda: (start(1)(), p.iconst(7, 1), p.st(C["rmode"], 7)), kind="i")
+        p.ld(2, cmd + 4)
+        p.iconst(12, SM.CMD_NOW)
+        p.if_(2, "EQ", 12, start(2), kind="i")
+        p.ld(2, cmd + 4)
+        p.iconst(12, SM.CMD_STOP)
 
-        def armed():                          # the peak reached the threshold: record
+        def stop():
+            p.ld(3, C["rst"])
+            p.iconst(12, 1)
+            p.if_(3, "EQ", 12, lambda: (p.iconst(7, 0), p.st(C["rst"], 7)), kind="i")
+            p.ld(3, C["rst"])
+            p.iconst(12, 2)
+            p.if_(3, "EQ", 12, lambda: (p.iconst(7, 3), p.st(C["rst"], 7)), kind="i")
+        p.if_(2, "EQ", 12, stop, kind="i")
+    p.e("COMP(R0, R1);")
+    p._branch(lambda: p.r[0] != p.r[1], "NE", new_command, None)
+
+    # the source's block, mono, staged as floats; and its peak (for the meter)
+    p.fconst(0, 0.0)
+    p.st(C["rpk"], 0)
+    p.ld(8, C["rsrc"])                        # its L (R at + 0x80)
+    p.iconst(9, SM.IN_BUF)
+    p.iconst(12, 1)
+    p.if_(8, "EQ", 12, lambda: p.iconst(9, SM.MIX_BUF), kind="i")
+    p.iconst(12, 2)
+
+    def track():
+        # track t is in the slot its routing half says (s16 at TRK_ROUTE + 2t, 0..15;
+        # the ColdFire's slot map, normally t): the panned block 0x1c244d left there
+        p.ld(8, C["rsrc"])
+        p.iconst(12, -2)
+        p.iop(8, 12, "+", 8)                  # t
+        p.lsh(9, 8, -1)
+        p.lsh(9, 9, 2)
+        p.iconst(12, SM.TRK_ROUTE)
+        p.iop(9, 12, "+", 9)
+        p.seti(1, 9)
+        p.ldi(10, 0, 1)                       # the word holding t's half
+        p.iconst(12, 1)
+        p.iop(8, 8, "AND", 12)
+        p.ifz(8, "NE", lambda: p.lsh(10, 10, -16))
+        p.iconst(12, 0xFFFF)
+        p.iop(10, 10, "AND", 12)
+        p.iconst(12, 15)
+        p.if_(10, "GT", 12, lambda: p.iconst(10, 0), kind="i")   # negative or past 15: slot 0
+        p.lsh(10, 10, 8)                      # 0x100 a slot
+        p.iconst(12, SM.TRK_BUF)
+        p.iop(9, 12, "+", 10)
+    p.if_(8, "GE", 12, track, kind="i")
+    p.st(C["a"], 9)
+    p.iconst(6, 0)
+    p.st(C["x"], 6)
+
+    def frame():
+        p.ld(6, C["x"])
+        p.lsh(7, 6, 2)
+        p.ld(9, C["a"])
+        p.ipass(12, 9)
+        p.iop(9, 12, "+", 7)
+        p.seti(1, 9)
+        p.ldi(3, 0, 1)                        # L
+        p.ldi(4, 32, 1)                       # R
+        p.ld(8, C["rchan"])
+        p.iconst(12, 1)
+        p.if_(8, "EQ", 12, lambda: p.fpass(4, 3), kind="i")
+        p.iconst(12, 2)
+        p.if_(8, "EQ", 12, lambda: p.fpass(3, 4), kind="i")
+        p.fop(3, 3, "+", 4)
+        p.fconst(12, 0.5)
+        p.fop(3, 3, "*", 12)                  # mono
+        p.ld(8, C["rsrc"])
+        p.iconst(12, 2)
+        p.if_(8, "GE", 12, lambda: (p.fconst(12, 1.0 / SM.TRK_GAIN), p.fop(3, 3, "*", 12)),
+              kind="i")                       # a track's slot carries it x TRK_GAIN
+        p.fconst(12, 0.999969)
+        p.fop(3, 3, "MIN", 12)
+        p.fconst(12, -1.0)
+        p.fop(3, 3, "MAX", 12)
+        p.ld(5, C["rpk"])                     # the block's peak
+        p.fconst(12, 0.0)
+        p.fop(6, 12, "-", 3)
+        p.fop(6, 6, "MAX", 3)
+        p.fop(5, 5, "MAX", 6)
+        p.st(C["rpk"], 5)
+        p.ld(6, C["x"])
+        p.lsh(7, 6, 2)
+        p.iconst(12, SM.REC_STAGE)
+        p.iop(7, 12, "+", 7)
+        p.seti(1, 7)
+        p.sti(0, 1, 3)                        # staged as floats
+        p.iconst(12, 1)
+        p.iop(6, 12, "+", 6)
+        p.st(C["x"], 6)
+    p.loop(C["n"], 32, frame)
+
+    p.ld(1, C["rst"])
+    p.iconst(12, 1)
+
+    def armed():
+        p.ld(7, C["rmode"])
+
+        def on_thres():                       # the peak reached the threshold: record
             p.ld(5, C["rpk"])
             p.ld(6, C["rthr"])
             p.if_(5, "GE", 6, lambda: (p.iconst(0, 2), p.st(C["rst"], 0)))
-        p.if_(1, "EQ", 12, armed, kind="i")
-        p.ld(1, C["rst"])
-        p.iconst(12, 2)
 
-        def record():                         # 32 frames as int16, two a word
-            p.ld(5, C["rpos"])
-            p.lsh(5, 5, 1)
-            p.ld(6, C["rbase"])
-            p.ipass(12, 6)
-            p.iop(5, 12, "+", 5)
-            p.seti(4, 5)
-            p.iconst(6, 0)
+        def on_play():                        # R.STRT PLAY: the first note any track plays
+            p.ld(5, PP.TRIG_WORD)
+            p.lsh(5, 5, -16)
+            p.ifz(5, "NE", lambda: (p.iconst(0, 2), p.st(C["rst"], 0)))
+        p.ifz(7, "EQ", on_thres, on_play)
+    p.if_(1, "EQ", 12, armed, kind="i")
+    p.ld(1, C["rst"])
+    p.iconst(12, 2)
+
+    def record():                             # 32 frames as int16, two a word
+        p.ld(5, C["rpos"])
+        p.lsh(5, 5, 1)
+        p.ld(6, C["rbase"])
+        p.ipass(12, 6)
+        p.iop(5, 12, "+", 5)
+        p.seti(4, 5)
+        p.iconst(6, 0)
+        p.st(C["x"], 6)
+
+        def pair():
+            p.ld(6, C["x"])
+            p.lsh(7, 6, 3)
+            p.iconst(12, SM.REC_STAGE)
+            p.iop(7, 12, "+", 7)
+            p.seti(1, 7)
+            p.ldi(3, 0, 1)
+            p.ldi(4, 1, 1)
+            p.fconst(12, 32768.0)
+            p.fop(3, 3, "*", 12)
+            p.fop(4, 4, "*", 12)
+            p.trunc(8, 3)
+            p.trunc(9, 4)
+            p.iconst(12, 0xFFFF)
+            p.iop(8, 8, "AND", 12)
+            p.lsh(9, 9, 16)
+            p.ipass(12, 9)
+            p.iop(8, 12, "+", 8)
+            p.stpost(4, 8)
+            p.iconst(12, 1)
+            p.iop(6, 12, "+", 6)
             p.st(C["x"], 6)
+        p.loop(C["n"], 16, pair)
+        p.ld(5, C["rpos"])
+        p.iconst(12, 32)
+        p.iop(5, 12, "+", 5)
+        p.st(C["rpos"], 5)
+        p.ld(6, C["rent"])
+        p.seti(1, 6)
+        p.sti(1, 1, 5)                        # the slot plays what is there
+        p.ld(6, C["rmax"])
+        p.if_(5, "GE", 6, lambda: (p.iconst(0, 3), p.st(C["rst"], 0)), kind="i")
+    p.if_(1, "EQ", 12, record, kind="i")
+    status(p, L)
 
-            def pair():
-                p.ld(6, C["x"])
-                p.lsh(7, 6, 3)
-                p.iconst(12, SM.REC_STAGE)
-                p.iop(7, 12, "+", 7)
-                p.seti(1, 7)
-                p.ldi(3, 0, 1)
-                p.ldi(4, 1, 1)
-                p.fconst(12, 32768.0)
-                p.fop(3, 3, "*", 12)
-                p.fop(4, 4, "*", 12)
-                p.trunc(8, 3)
-                p.trunc(9, 4)
-                p.iconst(12, 0xFFFF)
-                p.iop(8, 8, "AND", 12)
-                p.lsh(9, 9, 16)
-                p.ipass(12, 9)
-                p.iop(8, 12, "+", 8)
-                p.stpost(4, 8)
-                p.iconst(12, 1)
-                p.iop(6, 12, "+", 6)
-                p.st(C["x"], 6)
-            p.loop(C["n"], 16, pair)
-            p.ld(5, C["rpos"])
-            p.iconst(12, 32)
-            p.iop(5, 12, "+", 5)
-            p.st(C["rpos"], 5)
-            p.ld(6, C["rent"])
-            p.seti(1, 6)
-            p.sti(1, 1, 5)                    # the slot plays what is there
-            p.ld(6, C["rmax"])
-            p.if_(5, "GE", 6, lambda: (p.iconst(0, 3), p.st(C["rst"], 0)), kind="i")
-        p.if_(1, "EQ", 12, record, kind="i")
-    p.ifz(0, "LT", off, on)
+
+def status(p: Prog, L: Layout) -> None:
+    """The recorder's state to the ColdFire: 16 halves in the SPI reply's tail, a 32-bit
+    store putting its low half first (docs/sampler.md): STATUS_MAGIC | state, the last
+    command's sequence, frames / 32, the peak x 32767, the link's packet count, ten
+    zeros, and a check (0x1D0F + the fifteen, 16 bits). Into both reply pages."""
+    C = L.C
+    p.ld(0, C["rst"])
+    p.iconst(12, SM.STATUS_MAGIC)
+    p.iop(0, 12, "+", 0)                      # h0
+    p.ld(1, C["rseq"])
+    p.iconst(12, 0xFFFF)
+    p.iop(1, 1, "AND", 12)                    # h1
+    p.ld(2, C["rpos"])
+    p.lsh(2, 2, -5)
+    p.iop(2, 2, "AND", 12)                    # h2
+    p.ld(5, C["rpk"])
+    p.fconst(12, 32767.0)
+    p.fop(5, 5, "*", 12)
+    p.trunc(3, 5)
+    p.iconst(12, 0xFFFF)
+    p.iop(3, 3, "AND", 12)                    # h3
+    p.ld(4, C["mbn"])
+    p.iop(4, 4, "AND", 12)                    # h4
+    p.iconst(5, SM.LINK_SEED)                 # the check
+    for k in range(5):
+        p.ipass(12, 5)
+        p.iop(5, 12, "+", k)
+    p.iconst(12, 0xFFFF)
+    p.iop(5, 5, "AND", 12)                    # h15
+    p.lsh(6, 1, 16)
+    p.ipass(12, 6)
+    p.iop(6, 12, "+", 0)                      # h0 | h1 << 16
+    p.lsh(7, 3, 16)
+    p.ipass(12, 7)
+    p.iop(7, 12, "+", 2)                      # h2 | h3 << 16
+    p.lsh(8, 5, 16)                           # h14 (0) | h15 << 16
+    p.iconst(9, 0)
+    for page in SM.REPLY_PAGES:
+        a = page + SM.REPLY_TAIL
+        p.st(a, 6)
+        p.st(a + 4, 7)
+        p.st(a + 8, 4)                        # h4 | 0
+        for k in range(3, 7):
+            p.st(a + 4 * k, 9)
+        p.st(a + 28, 8)
 
 
 def mailbox(p: Prog, L: Layout) -> None:

@@ -133,11 +133,11 @@ def test_the_host_tool_codec_and_pool(tmp_path):
 
 
 def test_the_pages_follow_the_dt2_layout():
-    # v0.15: A TUNE (or nothing), B PLAY, C empty or CFAD, D SAMP on every machine
+    # v0.15: A TUNE (or nothing), B PLAY, C empty, D SAMP on every machine
     for name, page in SM.PAGES.items():
         assert page[1][0] == SM.PLAY_REC and page[3][0] == SM.SAMP_REC, name
         assert page[7][0] == SM.LEV_REC, name
-        assert page[2][0] in (0, 260), name
+        assert page[2][0] == 0, name                 # the DT2: C is an empty box on every machine
     from dnfw.waverider import pages
     hdr = pages.smp_widgets_header()
     assert "#define W_SAMP" in hdr and "smp_test_wave[4][SMP_WAVE_W]" in hdr
@@ -151,7 +151,13 @@ def test_the_drive_region_is_above_everything_the_dn2_uses():
     assert 0x600000 * 512 >= 3 << 30 and (0x600000 + 1 + SM.MIRROR_BYTES // 512) * 512 < 4 << 30
 
 
-def test_cfad_makes_the_loop_seamless():
+def test_cfad_is_off_with_its_control_off_the_page():
+    assert P.CFAD_ON is False
+    assert all(r != SM.CFAD_REC for r, _s, _l in SM.PAGES["ONESHOT"])
+
+
+def test_cfad_makes_the_loop_seamless(monkeypatch):
+    monkeypatch.setattr(P, "CFAD_ON", True)
     # ONESHOT FWD LOOP on a sine whose loop does not meet itself: without CFAD the wrap
     # jumps; with it the step there is no bigger than the sine's own
     n = 4000
@@ -174,21 +180,30 @@ def test_cfad_makes_the_loop_seamless():
     assert jump(run(127)) <= own * 1.05
 
 
+def _check(h):
+    st = h.status()
+    return st[15] == (SM.LINK_SEED + sum(st[:15])) & 0xFFFF and st[0] & 0xFF00 == SM.STATUS_MAGIC
+
+
 def test_the_recorder_records_and_plays_back():
     ONE = SM.TYPE_OF["ONESHOT"]
     h = SL.Harness(0)
     h.defaults()
     sig = [0.5 * math.sin(2 * math.pi * 440 * k / 48000) for k in range(32 * 20)]
-    h.set(SM.REC_REC, 1)
-    h.set(SM.RDST_REC, 32)                       # slot 2 of 4: SAMP 125
+    h.block(ONE, recorder=True)
+    assert _check(h) and h.status()[0] == SM.STATUS_MAGIC          # idle
+    h.command(SM.CMD_NOW, src=0, dest=1)                            # IN, SAMP 125
     for b in range(20):
         h.block(ONE, recorder=True, inp=sig[32 * b:32 * b + 32])
+    st = h.status()
+    assert _check(h) and st[0] == SM.STATUS_MAGIC | 2 and st[2] == 20 and st[1] == 1
+    assert abs(st[3] / 32767 - 0.5) < 0.01                          # the peak, for the meter
     ent = h.L.pool + 8 + 16 * (SM.REC_FIRST + 1)
     assert h.mem.get(ent) == h.L.pool + SM.REC_OFFSET + (2 << 20)
     assert h.mem.get(ent + 4) == 32 * 20 and h.mem.get(ent + 12) == SM.FMT_I16
-    h.set(SM.REC_REC, 0)
+    h.command(SM.CMD_STOP)
     h.block(ONE, recorder=True)
-    assert h.mem.get(ent + 4) == 32 * 20          # REC off keeps what it took
+    assert h.status()[0] == SM.STATUS_MAGIC | 3 and h.mem.get(ent + 4) == 32 * 20
     h.set(SM.SAMP_REC, SM.REC_FIRST + 2)
     out = []
     for b in range(20):
@@ -196,18 +211,70 @@ def test_the_recorder_records_and_plays_back():
     assert max(abs(a - b) for a, b in zip(out, sig[:len(out)])) < 1e-4
 
 
-def test_the_recorder_waits_for_its_threshold():
+def test_the_recorder_waits_for_its_threshold_and_stops_at_its_length():
     ONE = SM.TYPE_OF["ONESHOT"]
     h = SL.Harness(0)
     h.defaults()
-    h.set(SM.REC_REC, 1)
-    h.set(SM.RTHR_REC, 60)                       # half scale
+    h.command(SM.CMD_ARM, thres=0.5, frames=64)
     ent = h.L.pool + 8 + 16 * SM.REC_FIRST
     for b in range(5):
         h.block(ONE, recorder=True, inp=[0.1] * 32)
-    assert h.mem.get(ent + 4) == 0
-    h.block(ONE, recorder=True, inp=[0.7] * 32)
-    assert h.mem.get(ent + 4) == 32
+    assert h.mem.get(ent + 4) == 0 and h.status()[0] == SM.STATUS_MAGIC | 1
+    for b in range(4):
+        h.block(ONE, recorder=True, inp=[0.7] * 32)
+    assert h.mem.get(ent + 4) == 64 and h.status()[0] == SM.STATUS_MAGIC | 3
+
+
+def _route(h, slots):
+    for t in range(0, 16, 2):
+        h.mem.put(SM.TRK_ROUTE + 2 * t, (slots[t] & 0xFFFF) | (slots[t + 1] & 0xFFFF) << 16)
+
+
+def test_the_recorder_records_a_track_and_a_channel():
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    _route(h, list(range(16)))
+    g = SM.TRK_GAIN
+    left, right = [0.25 * g] * 32, [-0.5 * g] * 32
+    h.command(SM.CMD_NOW, src=2 + 5, chan=2, dest=3)                # TRK6, MONO R, SAMP 127
+    h.block(ONE, recorder=True, trk={5: (left, right), 4: ([0.9 * g] * 32, [0.9 * g] * 32)})
+    ent = h.L.pool + 8 + 16 * (SM.REC_FIRST + 3)
+    w = h.mem.get(h.mem.get(ent))
+    assert h.mem.get(ent + 4) == 32 and abs((w & 0xFFFF) - ((-16384) & 0xFFFF)) <= 1
+    h.command(SM.CMD_MONITOR, src=2 + 5, chan=1)                    # the meter on TRK6 L
+    h.block(ONE, recorder=True, trk={5: (left, right)})
+    assert abs(h.status()[3] / 32767 - 0.25) < 0.001
+    _route(h, [9] * 16)                                             # every track in slot 9
+    h.block(ONE, recorder=True, trk={5: (left, right), 9: ([0.125 * g] * 32, right)})
+    assert abs(h.status()[3] / 32767 - 0.125) < 0.001
+
+
+def test_r_strt_play_starts_at_the_first_note():
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    h.command(SM.CMD_ARM_PLAY, thres=0.0)
+    ent = h.L.pool + 8 + 16 * SM.REC_FIRST
+    for b in range(3):
+        h.block(ONE, recorder=True, inp=[0.9] * 32)                 # loud, but no note: waits
+    assert h.mem.get(ent + 4) == 0 and h.status()[0] == SM.STATUS_MAGIC | 1
+    h.block(ONE, 60.0, True, recorder=True, inp=[0.2] * 32)        # a note: it starts
+    h.block(ONE, recorder=True, inp=[0.2] * 32)
+    assert h.mem.get(ent + 4) == 64 and h.status()[0] == SM.STATUS_MAGIC | 2
+
+
+def test_a_saved_sound_cannot_start_the_recorder():
+    # nothing the frame carries starts it: every recorder record turned up, no command
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    for r in (SM.ARM_REC, SM.RSRC_REC, SM.RDST_REC, SM.RLEN_REC, SM.RSTRT_REC, SM.RCHAN_REC):
+        h.set(r, SM.RECORDS[r][2])
+    for b in range(3):
+        h.block(ONE, recorder=True, inp=[0.9] * 32)
+    assert h.status()[0] == SM.STATUS_MAGIC
+    assert all(h.mem.get(h.L.pool + 8 + 16 * (SM.REC_FIRST + k) + 4) == 0 for k in range(4))
 
 
 def test_the_mailbox_leaves_the_recorders_entries_alone():
@@ -231,3 +298,53 @@ def test_the_host_tool_leaves_the_recorders_slots():
     assert "SM.USER_SLOTS" in src
     c = (pathlib.Path(__file__).resolve().parents[1] / "csrc" / "sampler" / "link.c").read_text()
     assert f"16u * {SM.REC_FIRST}u" in c and f"16u * {SM.REC_FIRST + SM.REC_SLOTS}u" in c
+
+
+def test_a_loop_follows_len_loop_and_play_while_it_sounds():
+    # a ramp, so the output says where in the sample the voice is
+    n = 48000
+    ramp = [k / n for k in range(n)]
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0, samples=[ramp], rates=[1.0], fmts=[0])
+    h.defaults()
+    h.set(SM.PLAY_REC, 80)                       # FWD LOOP
+    h.set(SM.LEN_REC, 127)
+    h.set(SM.LOOP_REC, 0)
+    out = []
+    for b in range(10):
+        out += h.block(ONE, 60.0, b == 0)
+    h.set(SM.LEN_REC, 2)                         # the end moves in to 756 frames, mid-note
+    h.set(SM.LOOP_REC, 1)                        # and the loop to 377
+    later = []
+    for b in range(100):
+        later += h.block(ONE, 60.0, False)
+    tail = later[-2000:]
+    assert max(tail) < 757 / n and min(tail) >= 377 / n - 1e-6    # looping in the new region
+    h.set(SM.PLAY_REC, 40)                       # REV LOOP, mid-note: it turns round
+    rev = []
+    for b in range(40):
+        rev += h.block(ONE, 60.0, False)
+    steps = [rev[k + 1] - rev[k] for k in range(len(rev) - 1)]
+    assert sum(1 for d in steps if d < 0) > 0.9 * len(steps)        # mostly backward
+    assert max(rev[-1000:]) < 757 / n and min(rev[-1000:]) >= 377 / n - 1e-6
+
+
+def test_one_detent_a_choice_lands_inside_each_choice():
+    # every value the setter sets is read by the DSP (and the page) as that choice
+    def zone(th, c):
+        return sum(1 for x in th if c >= x)
+    for names, rec, th, rep in SM.QUANT:
+        slot, lo, top = SM.RECORDS[rec]
+        assert len(rep) == len(th) + 1 and len(rep) <= 18 and len(th) <= 17
+        for z, r in enumerate(rep):
+            assert lo <= r <= lo + top and zone(th, r) == z, (rec, z, r)
+    # and the zones are the DSP's: PLAY and MODE v >> 5, BARS and SEG their steps, GRID v // 24
+    for c in range(128):
+        assert zone(SM.QUANT[0][2], c) == min(3, c >> 5)
+    for c in range(101):
+        assert zone(SM.QUANT[2][2], c) == sum(1 for x in SM.BARS_STEPS if c >= x)
+    for v in range(121):
+        assert zone(SM.QUANT[3][2], v + 4) == sum(1 for x in SM.SEG_STEPS if v >= x)
+        assert zone(SM.QUANT[4][2], v) == min(4, v // 24)
+    for v in range(128):
+        assert zone(SM.QUANT[5][2], v) == v * len(SM.SRC_NAMES) // 128

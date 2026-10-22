@@ -233,3 +233,28 @@ def test_the_json_reproduces_the_compose(stock):
         new = bytes.fromhex(e["new"])
         content[e["va"] - BASE:e["va"] - BASE + len(new)] = new
     assert bytes(content) == built["content"]
+
+
+def _edit(va):
+    return next(e for e in waverider.SPEC["edits"] if e["va"] == va)
+
+
+def test_the_setter_hook_writes_where_stock_wrote():
+    # v0.15: the parameter setter's write goes through smp_quant_hook, which must end in
+    # stock's own store (move.w %d3,0x14(%a0,%d2.l*2): 31 83 2a 14) and return; a store
+    # at a different displacement would write the wrong slot of every sound edited
+    e = _edit(CF.QUANT_SITE)
+    assert bytes.fromhex(e["stock"]) == CF.QUANT_STOCK
+    new = bytes.fromhex(e["new"])
+    assert new[:2] == bytes.fromhex("4eb9")
+    code = _chunked(struct.unpack(">I", new[2:6])[0], 64)
+    tail = code.index(bytes.fromhex("2040" "31832a14"))          # movea.l %d0,%a0 ; the store
+    assert code[tail + 6:tail + 8] == bytes.fromhex("4e75")
+
+
+def test_the_key_handler_slot_points_into_the_renderer_and_stock_is_kept():
+    e = _edit(CF.KEY_SLOT)
+    assert struct.unpack(">I", bytes.fromhex(e["stock"]))[0] == CF.KEY_STOCK
+    target = struct.unpack(">I", bytes.fromhex(e["new"]))[0]
+    code = _chunked(target, 256)
+    assert struct.pack(">I", CF.KEY_STOCK) in code          # smp_key calls stock's handler

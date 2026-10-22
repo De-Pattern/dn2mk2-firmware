@@ -960,10 +960,10 @@ def step_smp(init, sound, machines, blocks) -> dict:
             and V.peak(perc_series(mx, 2)) > 0.05,
         "v0.15: WERP, STRETCH and REPITCH at 140 BPM sound (peak > 0.05), bit-exact (above)":
             runs["timed"]["ok"] and all(V.peak(smp_series(runs["timed"], t)) > 0.05 for t in (0, 1, 2)),
-        "v0.14: CFAD's loop sounds and differs from the same loop without it (bit-exact above)":
+        "v0.15: CFAD is off (the DT2's ONESHOT has no such control): its record changes nothing; the loop sounds":
             runs["cfad"]["ok"] and runs["nocfad"]["ok"]
             and V.peak(smp_series(runs["cfad"], 0)) > 0.01
-            and smp_series(runs["cfad"], 0) != smp_series(runs["nocfad"], 0),
+            and smp_series(runs["cfad"], 0) == smp_series(runs["nocfad"], 0),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]
@@ -1042,62 +1042,131 @@ def step_link(init, sound, machines, blocks) -> dict:
 # -- step 3d: the recorder (docs/sampler.md) ------------------------------------------------------
 
 def step_rec(init, sound, machines, blocks) -> dict:
-    """Track 0 ONESHOT with REC on records the engine's input block (poked in at the
-    dispatch, as the per-block driver would have converted it) into slot 124; the slot's
-    entry and frames are what the recorder's model says; then SAMP 124 plays it back."""
+    """The recorder (v0.15), driven as the ColdFire drives it: commands written into the
+    pool's command block (dnfw.sampler.machines.CMD_OFFSET). Run 1: RECORD NOW from IN
+    (the engine's input block, poked in at the dispatch, as the per-block driver would
+    have converted it) into SAMP 124, STOP, then SAMP 124 plays it back. Run 2: RECORD NOW
+    from TRK6, MONO L, into SAMP 125: track 6's panned block (poked into its slot of the
+    buffer 0x1c244d fills, its routing half set to 5). Both: the recorded int16 frames
+    are the model's, the status in both reply pages checks out, every sample track is
+    bit-exact."""
     import math as _m
     n = max(blocks, 12)
     sig = [0.6 * _m.sin(2 * _m.pi * 330 * k / 48000) for k in range(32 * n)]
     ONE = SM.TYPE_OF["ONESHOT"]
+    cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
 
-    def frames_at(b):
-        # n blocks recording (SAMP 1, no trigger), then REC off, SAMP 124, a note
-        if b < n:
-            w = smp_words({SM.SAMP_REC: 1, SM.REC_REC: 1})
-        else:
-            w = smp_words({SM.SAMP_REC: SM.REC_FIRST + 1, SM.REC_REC: 0})
+    def bits(x):
+        return struct.unpack("<I", struct.pack("<f", x))[0]
+
+    def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES):
+        for k, w in enumerate((seq, cmd, src, chan, 0, dest << 24 | frames)):
+            m2.poke(r.state, cmd_at + 4 * k, w)
+
+    def status(st):
+        out = []
+        for page in SM.REPLY_PAGES:
+            h = []
+            for k in range(8):
+                w = m2.word(st, page + SM.REPLY_TAIL + 4 * k) or 0
+                h += [w & 0xFFFF, w >> 16]
+            out.append(h)
+        return out
+
+    def ok_status(h):
+        return h[15] == (SM.LINK_SEED + sum(h[:15])) & 0xFFFF and h[0] & 0xFF00 == SM.STATUS_MAGIC
+
+    def recorded(st, slot):
+        ent = dsp.SMP_POOL_DDR + 8 + 16 * (SM.REC_FIRST + slot)
+        words = [m2.word(st, ent + 4 * k) or 0 for k in range(4)]
+        got = []
+        for k in range(words[1] // 2):
+            w = m2.word(st, words[0] + 4 * k) or 0
+            for h in (w & 0xFFFF, w >> 16):
+                got.append((h - 65536 if h >= 32768 else h) / 32768.0)
+        return words, got
+
+    play = 4
+
+    # run 1: IN
+    def frames_1(b):
+        w = smp_words({SM.SAMP_REC: 1}) if b < n else smp_words({SM.SAMP_REC: SM.REC_FIRST + 1})
         return base_frame(sound, machines, t0=ONE, trigger=(b == n), overrides=w).to_bytes()
-
     state = {"b": 0}
 
-    def at_dispatch(r):
+    def at_dispatch_1(r):
         b = state["b"]
+        if b == 0:
+            command(r, 1, SM.CMD_NOW, src=0, dest=0)
+        if b == n:
+            command(r, 2, SM.CMD_STOP)
         for k in range(32):
-            x = struct.unpack("<I", struct.pack("<f", sig[32 * b + k] if b < n else 0.0))[0]
+            x = bits(sig[32 * b + k] if b < n else 0.0)
             m2.poke(r.state, SM.IN_BUF + 4 * k, x)
             m2.poke(r.state, SM.IN_BUF + 0x80 + 4 * k, x)
         state["b"] += 1
-    play = 4
-    rec = run_blocks(init, frames_at, n + play, extra_hooks={m3.DISPATCH: at_dispatch})
-    ok = rec["ok"]
-    st = rec["state"].state if ok else None
-    ent = dsp.SMP_POOL_DDR + 8 + 16 * SM.REC_FIRST
-    words = [m2.word(st, ent + 4 * k) or 0 for k in range(4)] if ok else [0] * 4
-    frames, base = words[1], words[0]
-    got = []
-    for k in range(frames // 2):
-        w = m2.word(st, base + 4 * k) or 0
-        for h in (w & 0xFFFF, w >> 16):
-            got.append((h - 65536 if h >= 32768 else h) / 32768.0)
-    # the model: trunc of the mono (L = R) times 32768, two a word
-    want = [max(-32768, min(32767, int(x * 32768.0))) / 32768.0 for x in sig[:frames]]
-    rst = (m2.word(st, SMP_L.C["rst"]) or 0) if ok else None
-    back = smp_series(rec, 0)[-play * BLOCK:] if ok else []
-    exact = smp_exact(rec) if ok else (0, 1, 1)
+    rec = run_blocks(init, frames_1, n + play, extra_hooks={m3.DISPATCH: at_dispatch_1})
+    ok1 = rec["ok"]
+    st = rec["state"].state if ok1 else None
+    words, got = recorded(st, 0) if ok1 else ([0] * 4, [])
+    want = [max(-32768, min(32767, int(x * 32768.0))) / 32768.0 for x in sig[:words[1]]]
+    stat1 = status(st) if ok1 else []
+    back = smp_series(rec, 0)[-play * BLOCK:] if ok1 else []
+    exact1 = smp_exact(rec) if ok1 else (0, 1, 1)
+    rec.pop("state", None)
+
+    # run 2: TRK6, MONO L
+    g = SM.TRK_GAIN
+    left = [0.3 * _m.sin(2 * _m.pi * 500 * k / 48000) for k in range(32 * n)]
+    right = [-0.7] * (32 * n)
+    state2 = {"b": 0}
+
+    def at_dispatch_2(r):
+        b = state2["b"]
+        if b == 0:
+            command(r, 7, SM.CMD_NOW, src=2 + 5, chan=1, dest=1)
+        route = SM.TRK_ROUTE + 2 * 4                     # tracks 4, 5: halves of one word
+        m2.poke(r.state, route, 4 | 5 << 16)
+        for k in range(32):
+            m2.poke(r.state, SM.TRK_BUF + SM.TRK_STRIDE * 5 + 4 * k, bits(left[32 * b + k] * g))
+            m2.poke(r.state, SM.TRK_BUF + SM.TRK_STRIDE * 5 + 0x80 + 4 * k, bits(right[32 * b + k] * g))
+        state2["b"] += 1
+
+    def frames_2(b):
+        return base_frame(sound, machines, t0=ONE, trigger=False, overrides=smp_words({SM.SAMP_REC: 1})).to_bytes()
+    rec2 = run_blocks(init, frames_2, n, extra_hooks={m3.DISPATCH: at_dispatch_2})
+    ok2 = rec2["ok"]
+    st2 = rec2["state"].state if ok2 else None
+    words2, got2 = recorded(st2, 1) if ok2 else ([0] * 4, [])
+    want2 = []
+    for k in range(words2[1]):
+        x = min(0.999969, max(-1.0, (left[k] * g + left[k] * g) * 0.5 * (1.0 / g)))
+        want2.append(max(-32768, min(32767, int(x * 32768.0))) / 32768.0)
+    stat2 = status(st2) if ok2 else []
+    exact2 = smp_exact(rec2) if ok2 else (0, 1, 1)
+    rec2.pop("state", None)
+    close2 = bool(got2) and max(abs(a - b) for a, b in zip(got2, want2)) <= 2 / 32768
     checks = {
-        "the run returns every block": ok,
-        f"REC on records every block from the first ({n * 32} frames into slot 124's entry, "
-        "int16 at 8 MB into the pool)": ok and frames == 32 * n and base == dsp.SMP_POOL_DDR + SM.REC_OFFSET
-            and words[3] == SM.FMT_I16,
-        "the recorded frames are the input's, as the model converts them": ok and got == want,
-        "REC off stops the recorder and keeps the slot": ok and rst == 0 and frames == 32 * n,
-        "SAMP 124 plays the recording back": ok and len(back) == play * BLOCK and V.peak(back) > 0.3,
-        "every sample track bit-exact to the model, every block": ok and exact[1] == 0 and exact[2] == 0,
+        "both runs return every block": ok1 and ok2,
+        f"RECORD NOW records every block from the command ({n * 32} frames into slot 124's "
+        "entry, int16 at 8 MB into the pool)": ok1 and words[1] == 32 * n
+            and words[0] == dsp.SMP_POOL_DDR + SM.REC_OFFSET and words[3] == SM.FMT_I16,
+        "the recorded frames are the input's, as the model converts them": ok1 and got == want,
+        "STOP keeps the slot; the status says done (3), in both reply pages, checked":
+            ok1 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 3 and h[2] == n for h in stat1),
+        "SAMP 124 plays the recording back": ok1 and len(back) == play * BLOCK and V.peak(back) > 0.3,
+        "TRK6, MONO L: track 6's slot's left, back to its level, into SAMP 125 (within 2 LSB)":
+            ok2 and words2[1] == 32 * n and close2,
+        "the status while recording: state 2, the command's sequence, frames / 32, the peak":
+            ok2 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 2 and h[1] == 7 and h[2] == n
+                        and abs(h[3] / 32767 - max(abs(x) for x in left[-32:])) < 0.01 for h in stat2),
+        "every sample track bit-exact to the model, every block of both runs":
+            ok1 and ok2 and exact1[1] == exact1[2] == exact2[1] == exact2[2] == 0,
     }
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"entry": [hex(w) for w in words], "state": rst, "exact": exact,
-                        "peak": V.peak(back) if back else None,
-                        "halt": rec.get("halt")}}
+            "numbers": {"entry": [hex(w) for w in words], "entry2": [hex(w) for w in words2],
+                        "status1": stat1, "status2": stat2, "exact": (exact1, exact2),
+                        "halt": (rec.get("halt"), rec2.get("halt"))}}
 
 
 # -- step 4 -------------------------------------------------------------------------------------------

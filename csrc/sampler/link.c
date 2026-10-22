@@ -56,6 +56,11 @@ typedef unsigned char u8;
 #endif
 #define REC_DIR_START (8u + 16u * 123u)                             /* dnfw.sampler.machines.REC_FIRST */
 #define REC_DIR_END (8u + 16u * 127u)
+#define CMD_OFFSET 0xF00u                                           /* the recorder's command block */
+#define CMD_END (CMD_OFFSET + 24u)
+#define CMD_REPEAT 16u                                              /* frames a command is sent for */
+#define REPLY_TAIL ((volatile u16 *)0x80005E40u)                    /* 0x800053a4 + 0xa9c: the DSP's status */
+#define STATUS_MAGIC 0x5A00u
 
 #define PROTO 2
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
@@ -84,6 +89,36 @@ static u8 rp[48] __attribute__((section(".data")));
 static u8 tx[TX_MAX] __attribute__((section(".data")));
 static u32 store_hdr[128] __attribute__((section(".data"), aligned(16)));   /* one sector */
 int smp_booted __attribute__((section(".data"))) = 0;
+static volatile u32 cmd_w[6] __attribute__((section(".data")));    /* the recorder's next command */
+static volatile u32 cmd_pending __attribute__((section(".data"))) = 0;
+static u32 cmd_seq __attribute__((section(".data"))) = 0;
+u32 smp_cmds __attribute__((section(".data"))) = 0;                /* commands sent */
+
+/* the recorder's next command (dnfw.sampler.program.recorder), sent ahead of the pool
+ * for CMD_REPEAT frames; the DSP acts once on its sequence number */
+void smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames)
+{
+    cmd_pending = 0;                            /* the feeder leaves it while it changes */
+    cmd_w[0] = ++cmd_seq;
+    cmd_w[1] = cmd;
+    cmd_w[2] = src;
+    cmd_w[3] = chan;
+    cmd_w[4] = thres;
+    cmd_w[5] = dest_frames;
+    smp_cmds++;
+    cmd_pending = CMD_REPEAT;
+}
+
+/* the DSP's status from the SPI reply's tail, if it checks out: 16 halves */
+int smp_status(u16 *out)
+{
+    u32 sum = LINK_SEED;
+    for (int k = 0; k < 16; k++)
+        out[k] = REPLY_TAIL[k];
+    for (int k = 0; k < 15; k++)
+        sum += out[k];
+    return (out[0] & 0xFF00u) == STATUS_MAGIC && (u16)sum == out[15];
+}
 
 static u32 checksum(const u8 *p, u32 n)
 {
@@ -161,9 +196,37 @@ void smp_boot(void)
 }
 
 /* the frame builder has just built the frame: our packet over its words 2650..2681 */
+static void send(u32 o, const u32 *words)
+{
+    volatile u16 *mb = CTL_FRAME + LINK_OFFSET / 2;
+    u16 h[16];
+    u32 w = o >> 2;
+    h[0] = LINK_MAGIC;
+    h[1] = (u16)w;
+    h[2] = (u16)(w >> 16);
+    for (int j = 0; j < 6; j++) {
+        h[3 + 2 * j] = (u16)words[j];
+        h[4 + 2 * j] = (u16)(words[j] >> 16);
+    }
+    u32 sum = LINK_SEED;
+    for (int k = 0; k < 15; k++)
+        sum += h[k];
+    h[15] = (u16)sum;
+    for (int k = 0; k < 16; k++)
+        mb[k] = h[k];
+}
+
 void smp_feed(void)
 {
     u32 hi = smp_hi, o = smp_walk;
+    if (cmd_pending) {                          /* a recorder command goes first */
+        u32 c[6];
+        for (int j = 0; j < 6; j++)
+            c[j] = cmd_w[j];
+        send(CMD_OFFSET, c);
+        cmd_pending--;
+        return;
+    }
     if (hi < 4 || hi > SMP_MIRROR_BYTES)
         return;                                 /* nothing to send: stock's words stay */
     if (o >= hi) {
@@ -175,6 +238,8 @@ void smp_feed(void)
      * below is moved back to end at them, one inside them on past them */
     if (o < REC_DIR_END && o + 24 > REC_DIR_START)
         o = o < REC_DIR_START ? REC_DIR_START - 24 : REC_DIR_END;
+    if (o < CMD_END && o + 24 > CMD_OFFSET)     /* nor the recorder's command block */
+        o = o < CMD_OFFSET ? CMD_OFFSET - 24 : CMD_END;
     if (o >= hi) {
         o = 0;
         smp_passes++;

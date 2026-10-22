@@ -136,24 +136,45 @@ class Harness:
         self.set(SM.LOOP_REC, 0)
         self.set(SM.SLEN_REC, 0)
 
+    def command(self, cmd: int, src: int = 0, chan: int = 0, thres: float = 0.0, dest: int = 0,
+                frames: int = SM.REC_FRAMES) -> None:
+        """the ColdFire's next recorder command, as the sample link writes it"""
+        a = self.L.pool + SM.CMD_OFFSET
+        seq = (self.mem.get(a) + 1) & 0xFFFFFFFF
+        for k, w in enumerate((seq, cmd, src, chan, int(thres * 32767), dest << 24 | frames)):
+            self.mem.put(a + 4 * k, w)
+
+    def status(self) -> list[int]:
+        """the 16 halves of the recorder's status, as the ColdFire reads them"""
+        a = SM.REPLY_PAGES[0] + SM.REPLY_TAIL
+        out = []
+        for k in range(8):
+            w = self.mem.get(a + 4 * k)
+            out += [w & 0xFFFF, w >> 16]
+        return out
+
     def block(self, mtype: int, note: float = 60.0, trig: bool = False, recorder: bool = False,
-              inp=None) -> list[float]:
+              inp=None, trk=None) -> list[float]:
         """one block on track T as MTYPE; RECORDER: run the recorder first (as the DSP
         does), with INP (32 floats, L = R) in the engine's input block"""
         t = self.t
         a = PM.FRAME + 148 + 2 * t                # the frame's type word for the track
         w = self.mem.get(a & ~3)
         self.mem.put(a & ~3, (w & 0xFFFF) | (mtype << 16) if a & 2 else (w & 0xFFFF0000) | mtype)
-        if recorder:
-            for k, x in enumerate(inp or [0.0] * 32):
-                self.mem.put(SM.IN_BUF + 4 * k, bits(x))
-                self.mem.put(SM.IN_BUF + 0x80 + 4 * k, bits(x))
-            P.run_recorder(self.L, self.mem)
         self.mem.put(PP.NOTE_CELLS + 4 * t, bits(note))
         self.mem.put(PP.TRIG_WORD, (1 << (16 + t)) if trig else 0)
         self.mem.put(PP.BUFFERS + 4 * t, BUF)
         for k in range(32):
             self.mem.put(BUF + 4 * k, bits(0.0))
+        if recorder:
+            for k, x in enumerate(inp or [0.0] * 32):
+                self.mem.put(SM.IN_BUF + 4 * k, bits(x))
+                self.mem.put(SM.IN_BUF + 0x80 + 4 * k, bits(x))
+            for tk, (l, r) in (trk or {}).items():
+                for k in range(32):
+                    self.mem.put(SM.TRK_BUF + SM.TRK_STRIDE * tk + 4 * k, bits(l[k]))
+                    self.mem.put(SM.TRK_BUF + SM.TRK_STRIDE * tk + 0x80 + 4 * k, bits(r[k]))
+            P.run_recorder(self.L, self.mem)
         p, _ = P.run_voice(self.L, None, t, mtype, mem=self.mem)
         self.steps += p.steps
         return [flt(self.mem.get(BUF + 4 * k)) for k in range(32)]

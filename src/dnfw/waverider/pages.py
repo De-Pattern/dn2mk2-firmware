@@ -287,24 +287,51 @@ def smp_c_header() -> str:
             f"#define SMP_BARS_ID {_smp.BARS_REC}\n#define SMP_SEG_ID {_smp.SEG_REC}\n"
             f"#define SMP_MODE_ID {_smp.MODE_REC}\n"
             f"static const unsigned short smp_rec_ids[8] = {{{', '.join(str(r) for r in SMP_REC_IDS)}}};\n"
-            f"#define SMP_REC_ID {_smp.REC_REC}\n#define SMP_RSRC_ID {_smp.RSRC_REC}\n"
-            f"#define SMP_RTHR_ID {_smp.RTHR_REC}\n#define SMP_RLEN_ID {_smp.RLEN_REC}\n"
-            f"#define SMP_RDST_ID {_smp.RDST_REC}\n#define SMP_REC_FIRST {_smp.REC_FIRST}\n"
-            f"#define SMP_REC_SECONDS {_smp.REC_FRAMES // 48000}\n"
-            f"static const char smp_rec_src[4][5] = {{{', '.join(q + m + q for m in _smp.SRC_NAMES)}}};\n"
+            f"#define SMP_RSRC_ID {_smp.RSRC_REC}\n#define SMP_RCHAN_ID {_smp.RCHAN_REC}\n"
+            f"#define SMP_RTHR_ID {_smp.RTHR_REC}\n#define SMP_RDST_ID {_smp.RDST_REC}\n"
+            f"#define SMP_RLEN_ID {_smp.RLEN_REC}\n#define SMP_RSTRT_ID {_smp.RSTRT_REC}\n"
+            f"#define SMP_ARM_ID {_smp.ARM_REC}\n#define SMP_REC_FIRST {_smp.REC_FIRST}\n"
+            f"#define SMP_REC_SECONDS10 {_smp.REC_FRAMES * 10 // 48000}\n"
+            f"#define SMP_REC_SOURCES {len(_smp.SRC_NAMES)}\n"
+            f"static const char smp_rec_chan[3][4] = {{{', '.join(q + m + q for m in ('L+R', 'L', 'R'))}}};\n"
+            f"static const char smp_rec_src[{len(_smp.SRC_NAMES)}][6] = {{{', '.join(q + m + q for m in _smp.SRC_NAMES)}}};\n"
             f"static const char smp_bars[8][4] = {{{', '.join(q + b + q for b in ('1/8', '1/4', '1/2', '1', '2', '4', '8', '16'))}}};\n"
             f"static const unsigned char smp_bars_steps[7] = {{{', '.join(map(str, _smp.BARS_STEPS))}}};\n"
             f"static const unsigned char smp_seg_steps[7] = {{{', '.join(map(str, _smp.SEG_STEPS))}}};\n"
             f"static const char smp_play[4][5] = {{{', '.join(q + m + q for m in _smp.PLAY_MODES)}}};\n"
             f"static const unsigned char smp_grids[{len(_smp.GRIDS)}] = {{{', '.join(map(str, _smp.GRIDS))}}};\n"
-            + smp_widgets_header() +
+            + smp_widgets_header() + smp_quant_header() +
             f"#define SMP_SOUNDS {len(smp_live.TEST_NAMES)}\n"
             f"static const char smp_sound[SMP_SOUNDS][6] = {{{snd}}};\n")
 
 
 SMP_FIRST_KIND = 4                 # is_wr's answer for type 8; 5..8 for 9..12
+
+
+def smp_quant_header() -> str:
+    """v0.15: the one-detent-a-choice tables for csrc/sampler/fmt.c (dnfw.sampler.machines.QUANT)"""
+    def mask(names):
+        return sum(1 << _smp.NAMES.index(n) for n in names)
+    rows, steps = [], []
+    for names, rec, th, rep in _smp.QUANT:
+        slot = _smp.RECORDS[rec][0]
+        thr = list(th) + [255] * (17 - len(th))
+        rp = list(rep) + [0] * (18 - len(rep))
+        rows.append(f" {{{mask(names)}, {slot}, {len(rep)}, {{{', '.join(map(str, thr))}}}, "
+                    f"{{{', '.join(map(str, rp))}}}}}")
+    for names, rec, step in _smp.QUANT_STEP:
+        slot, lo, top = _smp.RECORDS[rec]
+        steps.append(f" {{{mask(names)}, {slot}, {step}, {lo}, {lo + top}}}")
+    return ("struct smp_q { unsigned char types, slot, n, th[17], rep[18]; };\n"
+            "struct smp_qs { unsigned char types, slot, step, lo, hi; };\n"
+            f"#define SMP_NQ {len(rows)}\nstatic const struct smp_q smp_q[SMP_NQ] = {{\n" + ",\n".join(rows) + "\n};\n"
+            f"#define SMP_NQS {len(steps)}\nstatic const struct smp_qs smp_qs[SMP_NQS] = {{\n" + ",\n".join(steps) + "\n};\n"
+            f"#define SMP_PLAY_REC {_smp.PLAY_REC}\n#define SMP_MODE_REC {_smp.MODE_REC}\n"
+            f"#define SMP_BARS_REC {_smp.BARS_REC}\n#define SMP_SEG_REC {_smp.SEG_REC}\n"
+            f"#define SMP_GRID_REC {_smp.GRID_REC}\n#define SMP_SAMP_REC {_smp.SAMP_REC}\n"
+            f"#define SMP_SEG_LO {_smp.RECORDS[_smp.SEG_REC][1]}\n")
 SMP_WAVE_W, SMP_WAVE_AMP = 100, 11         # the waveform strip: columns, half-height in pixels
-SMP_GLYPHS = "0123456789AB/-"
+SMP_GLYPHS = "0123456789AB/-YES"
 
 
 def smp_widgets_header() -> str:
@@ -426,7 +453,7 @@ wr_count:
     bne.s   5f
     moveq   #{len(CZ_PAGES)},%d0
     rts
-5:  moveq   #2,%d0                         | a sample machine: its page and the recorder
+5:  moveq   #3,%d0                         | a sample machine: its two pages and the recorder
     rts
 1:  move.l  %sp@(8),%d0
     cmpi.l  #{NEW_TYPE},%d0
@@ -477,10 +504,11 @@ wr_page:
     mulu.w  %d1,%d0
     addi.l  #cz_descriptors,%d0
     bra.s   2f
-| a sample machine (d0 = its kind - 4): page 0 its own, page 1 the recorder
+| a sample machine (d0 = its kind - 4): pages 0 and 1 its own (the DT2's SRC page 1 and
+| page 2, the same parameters), page 2 the recorder
 8:  move.l  %sp@(16),%d1
-    beq.s   9f
-    subq.l  #1,%d1
+    subq.l  #2,%d1
+    bcs.s   9f
     bne.s   6b
     move.l  #smp_rec_descriptor,%d0
     bra.s   2f
@@ -620,7 +648,7 @@ smp_descriptors:
 {chr(10).join(_rep(f"smp_title_{k}", t) for k, t in enumerate(SMP_TITLES))}
 {chr(10).join(_rep(f"smp_subtitle_{k}", t) for k, t in enumerate(SMP_SUBTITLES))}
 {_rep("smp_rec_title", "REC")}
-{_rep("smp_rec_subtitle", "Sampling")}
+{_rep("smp_rec_subtitle", "Recorder")}
 {chr(10).join(_rep(f"title_{k}", t) for k, t in enumerate(TITLES))}
 {strings}
 {rstrings}

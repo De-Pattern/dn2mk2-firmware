@@ -1,4 +1,4 @@
-# The Digitakt II's sample machines on the DN2 (v0.13, v0.14)
+# The Digitakt II's sample machines on the DN2 (v0.13 - v0.15)
 
 The Digitone II and the Digitakt II are the same board and one codebase; what makes a
 Digitakt a sampler is its sample machines, a sample pool in the DSP's memory, and the
@@ -78,43 +78,82 @@ the bottom row's labels under it and LEV as a pill, as on the DT2.
 The page shows the machine and the sound in the middle, and the sample as a bar: the
 part that plays solid, LOOP's point marked in the loop modes, GRID's slices ticked.
 
-## Page 2: sampling (v0.14)
+## v0.15: the DT2's two SRC pages, one detent a choice, live loops
 
-Every sample machine has a second page, after the DT2's sampling page: press **SYN** again
-on a sample track (SYN 1/2, 2/2, as on WaveTone).
+- **Page 1** (SYN) is the widgets and their labels for every machine, as the DT2's SRC
+  page 1; **page 2** (SYN again) is the same controls with the sample's waveform across
+  the middle (the start, end, loop or slices marked; WERP its segments), as the DT2's
+  page 2. The box at the left reads **SMP**. The widgets are redrawn after the DT2's: TUNE
+  a box with its value in the middle, the knobs whole rings, the empty place a dotted
+  square, the segment icon, BARS as one, two or four blocks.
+- **ONESHOT's C is the DT2's empty box.** CFAD (v0.14) is not a DT2 ONESHOT control, so it
+  is off the page and off in the DSP (`dnfw.sampler.program.CFAD_ON`).
+- **One detent a choice.** PLAY, WERP's MODE, BARS, SEG, GRID's GRID, SLCE and LEN, and
+  the recorder's SRC sit on records of 0..127 or so; the stock parameter setter
+  (`0x40037b74`) now asks `smp_quant` (`csrc/sampler/fmt.c`) before it writes, and a turn of
+  up to 8 raw steps moves to the next choice (`dnfw.sampler.machines.QUANT`; each value it
+  sets is inside the choice the DSP reads, `test_sampler` checks every one). Only for a
+  sound whose machine is one of ours, only those slots. ARM, R.STRT, CHAN and DEST are on
+  2-, 3- and 4-step records and step natively.
+- **The value text** the header shows as a control moves is ours: REV / REV LOOP / FWD
+  LOOP / FWD, 1/4, 1/16, G16, a sample's name for SAMP (KICK, your WAV's name, REC 1..4),
+  IN / MAIN / TRK3, MONO L, OFF / ON, MAX. The records' formatters (record + 0x34) are
+  swapped while a sample machine's track is active, as `wr_names` swaps their names.
+- **Loops follow the controls while they sound.** ONESHOT, STRETCH and REPITCH re-read
+  STRT, LEN, LOOP and PLAY every block (`dnfw.sampler.program.live`), so a held loop moves
+  its end and loop point as LEN and LOOP turn and turns round when PLAY does. GRID takes
+  its slice, and WERP its segments, at the note. How long a note (and a loop) sounds is
+  the track's AMP envelope, as on the DT2 (its manual: "constrained by the AMP page
+  envelope parameters HLD and DEC").
 
-| A | B | C | D | E | F | G | H |
-|---|---|---|---|---|---|---|---|
-| REC | SRC | THRS | - | RLEN | DEST | - | - |
+## Page 3: the RECORDER (v0.15)
 
-- **REC** on arms the recorder; off stops it (what it took stays). The button fills
-  when on.
-- **SRC** what it records: **IN** (the two inputs, mixed to mono), **IN L**, **IN R**,
-  or **MAIN** (the DN2's own main mix).
-- **THRS** 0 starts at once; above 0 the recorder waits, armed, until a block's peak
-  reaches THRS (120 = full scale), so a hit starts the recording.
-- **RLEN** how long: MAX (0) the slot's whole 21.8 s, else n/127 of it; the page shows
-  the seconds.
-- **DEST** the slot it records into: **SAMP 124, 125, 126 or 127**, the recorder's own
-  four slots (2 MB of 16-bit mono each, at 48 kHz). Recording empties the slot first.
-- The recording plays at once: set SAMP to its slot on any sample track (the waveform
-  is not drawn for these slots: the ColdFire cannot see the DSP's memory).
-- One recorder: if several sample tracks have REC on, the lowest-numbered one sets it.
-- REC is an ordinary parameter, so it is saved with the sound: a sound saved with REC
-  on starts recording when loaded. Turn REC off after recording.
-- **Recordings live in the DSP's memory only**: they last until power-off and are not
-  kept on the +Drive (the ColdFire cannot read them back from the DSP yet).
+The third SYN page of every sample machine, laid out as the DT2's RECORDER (its manual
+13.1, the owner's photograph) under the DN2's header:
 
-How: the recorder (`dnfw.sampler.program.recorder`) runs at the top of the sample
-machines' code each block, before the voices. It reads the engine's input block
-(`0x268538`: 32 floats of L, then R, as the per-block driver converts the codec's input)
-or the main mix (`0x268438`, the previous block's), and appends 32 frames as int16 to
-the slot's frames at 8 MB + 2 MB x slot in the pool, past anything the ColdFire's
-mirror can reach (5 MB). It keeps the slot's directory entry (slots 123..126 of the
-pool, `SAMP 124..127`) current: address, frames so far, rate 1, int16. The sample link
-never writes those four entries: the feeder steps its walk around them
-(`csrc/sampler/link.c`) and the DSP refuses any packet that touches them; the host tool
-fills at most SAMP 1..122.
+| place | control | |
+|---|---|---|
+| A | **SRC** | IN, MAIN, TRK1..TRK16, with the channel under it |
+| B | **CHAN** | MONO L+R, MONO L, MONO R (the DN2's tracks are mono: no STEREO) |
+| C | **RECORD NOW** | the dotted box: **YES** records at once; YES again stops |
+| D | **THRES** | 0..120, ticked on the meter |
+| E | **DEST** | SAMP 124..127 (the DT2 has MON here; the DN2 monitors its inputs itself) |
+| F | **R.LEN** | MAX (21.8 s, the slot) or 1..127 sixteenth steps at the tempo |
+| G | **R.STRT** | THRES: ARM waits for the threshold; PLAY: for the first note any track plays |
+| H | **ARM** | turn it to arm; turn it again (armed or recording) to stop |
+
+Across the top, the source's **input meter**; in the box, ARMED / ON THRES, or REC and
+the seconds, or RECORD AGAIN when a recording is done.
+
+**Nothing about the recorder is saved with a sound.** Its settings sit on the page's
+records, but the DSP acts only on a **command**, and commands are sent only while the
+page is on the screen: YES, a turn of ARM, and SRC or CHAN as they change (for the
+meter). ARM's switch shows what the DSP is doing, not the record's value.
+
+How:
+
+- **Commands** (`csrc/sampler/rec.c`, `link.c`'s `smp_command`): six words -- a sequence
+  number, the command (ARM, NOW, STOP, MONITOR, ARM_PLAY), source, channel, threshold,
+  DEST << 24 | frames -- sent through the sample link into the pool's **command block**
+  (`dnfw.sampler.machines.CMD_OFFSET`, 0xF00) ahead of the pool's walk, 16 frames running.
+  The walk steps around the block. The DSP (`dnfw.sampler.program.recorder`) acts once on
+  each new sequence number.
+- **Status**: every block the DSP writes 16 halves into the **SPI reply's tail** (bytes
+  0xa9c..0xabb, which stock never writes and nothing the DN2 runs reads), in both reply
+  pages: STATUS_MAGIC | state, the last command's sequence, frames / 32, the peak, the
+  link's packet count, and a check. The ColdFire reads them from its copy of the reply
+  (`0x80005E40`) in the UI loop (`smp_status`), and draws the meter and the state from
+  them; a status that does not check out is ignored.
+- **YES** on the page: the parameter page view's key handler (its vtable slot
+  `0x401d49a8`) points to `smp_key`, which takes YES while the RECORDER is on the screen
+  and hands every other key, and every other page, to stock's `0x40016480`.
+- **Sources**: IN is the engine's input block (`0x268538`); MAIN the last block's mix
+  (`0x268438`); **TRKn** the buffer stock fills for Overbridge's per-track stream
+  (`0x259f68` + 0x100 k: the track's block, panned, the last block's, written after the
+  machine dispatch by `0x1c244d`), k the track's slot from its routing half (`0x257898` +
+  2t, the ColdFire's slot map), scaled back by 0x1c244d's gain (11.627).
+  (`docs/link-research.md` has the reading.)
+- The recordings are in the DSP's memory only: they are lost at power-off.
 
 ## How it works
 
@@ -228,5 +267,14 @@ kits are not touched; `forget` zeroes the header sector so nothing loads.
 
 ## Next
 
-1. Keeping recordings on the +Drive (a DSP-to-ColdFire path for the pool).
-2. The comb filter.
+1. **Keeping recordings, and much more sample memory.** The DSP's 512 MB part is mostly
+   free (`docs/link-research.md` §6b: stock's DDR immediates end at `0x80530be8`), and the
+   +Drive's eMMC is 32 GB with everything above 2,224 MiB unused. What limits both today
+   is the link: 36 KB/s each way through spare SPI frame words. The research found eight
+   TDM slots (8..15) ColdFire -> DSP that stock neither writes nor reads (~0.7 MB/s), and
+   two the other way (14..15, ~0.2 MB/s): a sample library on the +Drive, loaded into a
+   pool of a hundred MB or more, and recordings saved back to it.
+2. A sample list (names) when choosing SAMP, as the DT2's.
+3. Closer clones of the DT2's machines (its OS 1.17 is on hand to read) and the
+   Machinedrum's (`docs/perc.md`).
+4. The comb filter.

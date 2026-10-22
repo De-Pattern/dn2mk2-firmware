@@ -148,19 +148,22 @@ static void w_play(void *c, int x, int y, int mode)
 
 static void w_bipolar(void *c, int x, int y, int v, int top)
 {
-    int x0 = x + 1, x1 = x + 22, y0 = y + 4, y1 = y + 12;
+    /* the DT2's TUNE: a rounded box, a dotted line through it, the value in the middle */
+    int x0 = x + 1, x1 = x + 22, y0 = y + 3, y1 = y + 13, cy = (y0 + y1) / 2;
     box(c, x0, y0, x1, y1, 0);
-    hline(c, x0 + 2, x1 - 2, (y0 + y1) / 2, 1);
-    int cx = (x0 + x1) / 2;
-    vline(c, cx, y0 + 2, y1 - 2, 0);
-    int at = x0 + 2 + v * (x1 - x0 - 4) / (top ? top : 1);
-    vline(c, at, y0 + 1, y1 - 1, 0);
-    vline(c, at + (at < cx ? 1 : -1), y0 + 1, y1 - 1, 0);
+    int semis = v - top / 2;
+    hline(c, x0 + 2, x0 + 6, cy, 1);
+    hline(c, x1 - 6, x1 - 2, cy, 1);
+    if (semis == 0)
+        TEXT(c, FONT, (x0 + x1) / 2 + 1, cy - 3, CENTRED, "0");
+    else
+        TEXT(c, FONT, (x0 + x1) / 2 + 1, cy - 3, CENTRED, "%c%d", semis < 0 ? '-' : '+',
+             semis < 0 ? -semis : semis);
 }
 
 static void w_empty(void *c, int x, int y)
 {
-    box(c, x + 3, y + 3, x + 20, y + 13, 1);
+    box(c, x + 5, y + 1, x + 19, y + 15, 1);    /* the DT2's empty place: a dotted square */
 }
 
 static void w_samp(void *c, int x, int y, int slot)
@@ -187,11 +190,8 @@ static void w_samp(void *c, int x, int y, int slot)
 static void w_knob(void *c, int x, int y, int v, int top)
 {
     int cx = x + 12, cy = y + 8, r = 7;
-    for (int a = 0; a < 256; a += 6) {          /* the ring, open at the bottom */
-        if (a > 96 && a < 160)
-            continue;
+    for (int a = 0; a < 256; a += 2)            /* a whole ring, as the DT2 draws it */
         on(c, cx + sin256(a) * r / 127, cy + sin256(a + 64) * r / 127);
-    }
     int ang = 160 + v * 192 / (top ? top : 1);  /* 7 o'clock .. 5 o'clock, clockwise */
     for (int k = 0; k <= r - 1; k++)
         on(c, cx + sin256(ang) * k / 127, cy + sin256(ang + 64) * k / 127);
@@ -216,10 +216,12 @@ static void w_pill(void *c, int x, int y, int v, int top)
 
 static void w_seg(void *c, int x, int y, int n)
 {
+    /* the DT2's segment icon: a filled dot between two brackets, then 1/n */
     int cx = x + 12, cy = y + 12;
-    for (int a = 0; a < 256; a += 16)           /* a ring of segments */
-        on(c, cx + sin256(a) * 3 / 127, cy + sin256(a + 64) * 3 / 127);
-    on(c, cx - 6, cy); on(c, cx + 6, cy);
+    fill(c, cx - 1, cy - 1, cx + 1, cy + 1);
+    on(c, cx - 2, cy); on(c, cx + 2, cy); on(c, cx, cy + 2); on(c, cx, cy - 2);
+    vline(c, cx - 5, cy - 1, cy + 1, 0); on(c, cx - 4, cy + 2); on(c, cx - 4, cy - 2);
+    vline(c, cx + 5, cy - 1, cy + 1, 0); on(c, cx + 4, cy + 2); on(c, cx + 4, cy - 2);
     if (n > 1)
         TEXT(c, FONT, cx, y + 1, CENTRED, "1/%d", n);
     else
@@ -228,13 +230,13 @@ static void w_seg(void *c, int x, int y, int n)
 
 static void w_bars(void *c, int x, int y, int idx, const char *text)
 {
-    for (int k = 0; k < 4; k++) {               /* four blocks, lit to the value's place */
-        int bx = x + 4 + 4 * k;
-        if (k <= idx / 2)
-            fill(c, bx, y + 12, bx + 2, y + 14);
-        else
-            box(c, bx, y + 12, bx + 2, y + 14, 0);
-    }
+    /* the DT2's BARS icon: one short bar for a fraction, then 1, 2 or 4 blocks */
+    int n = idx < 3 ? 1 : idx == 3 ? 1 : idx == 4 ? 2 : 4;
+    int w = idx < 3 ? 3 + 3 * idx : 12;
+    int gap = n > 1 ? 2 : 0, each = (w - gap * (n - 1)) / n;
+    int x0 = x + 12 - w / 2;
+    for (int k = 0; k < n; k++)
+        fill(c, x0 + k * (each + gap), y + 11, x0 + k * (each + gap) + each - 1, y + 13);
     TEXT(c, FONT, x + 12, y + 1, CENTRED, "%s", text);
 }
 
@@ -330,18 +332,49 @@ static void marker(void *c, int x, int cy, int dotted)
     }
 }
 
-void smp_page_draw(void *view, void *c, int kind)
+/* the machine box at the left, as the DT2 labels it: SMP over the page number (the stock
+ * page draws SYN there; its letters are overwritten in the same 3 x 6 hand) */
+static void smp_box(void *c)
+{
+    static const char *g[3][6] = {
+        {".##", "#..", "##.", ".##", "..#", "##."},             /* S */
+        {"#.#", "###", "###", "#.#", "#.#", "#.#"},             /* M */
+        {"##.", "#.#", "#.#", "##.", "#..", "#.."},             /* P */
+    };
+    for (int k = 0; k < 3; k++)
+        for (int r = 0; r < 6; r++)
+            for (int b = 0; b < 3; b++)
+                SET_PIXEL(c, 2 + 4 * k + b, 48 - r, g[k][r][b] == '#');
+}
+
+/* a small icon for WERP's waveform page, as the DT2 draws its bottom row there */
+static void mini_seg(void *c, int x, int y)
+{
+    vline(c, x + 6, y + 1, y + 5, 0);
+    vline(c, x + 17, y + 1, y + 5, 0);
+    hline(c, x + 6, x + 17, y + 3, 0);
+}
+
+static void mini_mode(void *c, int x, int y, int mode)
+{
+    vline(c, x + 5, y + 1, y + 5, 0);
+    hline(c, x + 5, x + 14, y + 3, 1);
+    on(c, x + 13, y + 4); on(c, x + 13, y + 2);
+    TEXT(c, FONT, x + 18, y, CENTRED, "%c", mode == 0 || mode == 1 ? 'R' : 'F');
+}
+
+void smp_page_draw(void *view, void *c, int kind, int wave)
 {
     u32 ids[8];
     for (int i = 0; i < 8; i++)
         ids[i] = smp_ids[kind - SMP_KIND0][i];
-    int strip = kind == SMP_KIND0 || kind == SMP_GRID_KIND;      /* ONESHOT, GRID */
-    if (!strip) {
+    smp_box(c);
+    if (!wave) {                                /* page 1: the widgets and their labels */
         for (int i = 0; i < 8; i++)
             cell(c, view, kind, ids[i], CELL_X(i & 3), i < 4 ? TOP_Y : BOT_Y, 1, 0);
         return;
     }
-    /* the top row, unlabelled, raised a little; the strip; the bottom labels */
+    /* page 2: the top row, unlabelled, raised a little; the waveform; the bottom labels */
     for (int i = 0; i < 4; i++)
         cell(c, view, kind, ids[i], CELL_X(i), TOP_Y + 4, 0, 0);
     int slot = value(view, SMP_SAMP_ID, 0);
@@ -357,68 +390,150 @@ void smp_page_draw(void *view, void *c, int kind)
         int a = x0 + s * (w - 1) / n, b = x0 + (s + len > n ? n : s + len) * (w - 1) / n;
         marker(c, a, cy, 0);
         marker(c, b, cy, 0);
+    } else if (kind == SMP_WERP_KIND) {         /* the whole sample, its segments marked */
+        int n = 128 >> steps_index(value(view, SMP_SEG_ID, 0), smp_seg_steps);
+        for (int j = 0; j <= n && n <= 32; j++)
+            marker(c, x0 + j * (w - 1) / n, cy, j != 0 && j != n);
     } else {
         int a = value(view, SMP_STRT_ID, 0) * (w - 1) / 120;
         int b = a + value(view, SMP_LEN_ID, 0) * (w - 1) / 127;
         if (b > w - 1) b = w - 1;
-        int lp = value(view, SMP_LOOP_ID, 0) * (w - 1) / 127;
         marker(c, x0 + a, cy, 0);
         marker(c, x0 + b, cy, 0);
-        int mode = value(view, SMP_PLAY_ID, 0) * 4 / 128;
-        if (mode == 1 || mode == 2)
-            marker(c, x0 + lp, cy, 1);
+        if (kind == SMP_KIND0) {
+            int lp = value(view, SMP_LOOP_ID, 0) * (w - 1) / 127;
+            int mode = value(view, SMP_PLAY_ID, 0) * 4 / 128;
+            if (mode == 1 || mode == 2)
+                marker(c, x0 + lp, cy, 1);
+        }
     }
-    /* the bottom row: E, F, G's labels, H's level as the DT2's pill */
-    for (int i = 4; i < 7; i++)
-        if (ids[i])
-            TEXT(c, FONT, CELL_X(i - 4) + 12, 0, CENTRED, "%.4s", NAME_SHORT(ids[i]));
+    /* the bottom row: E, F, G's labels (WERP: its icons), H's level as the DT2's pill */
+    for (int i = 4; i < 7; i++) {
+        if (!ids[i])
+            continue;
+        int x = CELL_X(i - 4);
+        if (kind == SMP_WERP_KIND && ids[i] == SMP_SEG_ID)
+            mini_seg(c, x, 0);
+        else if (kind == SMP_WERP_KIND && ids[i] == SMP_MODE_ID)
+            mini_mode(c, x, 0, value(view, SMP_MODE_ID, 0) * 4 / 128);
+        else if (kind == SMP_WERP_KIND && ids[i] == SMP_BARS_ID)
+            fill(c, x + 6, 2, x + 17, 4);
+        else
+            TEXT(c, FONT, x + 12, 0, CENTRED, "%.5s", NAME_SHORT(ids[i]));
+    }
     if (ids[7]) {
         int top, v = value(view, ids[7], &top);
         w_pill(c, CELL_X(3), 0, v, top);
     }
 }
 
-/* page 2, the recorder (dnfw.sampler.program.recorder): REC a round button, filled when
- * on; SRC its source as text; THRS a knob (0: at once); RLEN a knob and its seconds
- * (0: the slot's whole length); DEST the slot it records into, as the SAMP box */
+/* page 3, the RECORDER, laid out as the DT2's (its manual 13.1 and the owner's photograph):
+ * RECORDER and the input meter across the top; SRC on the left; the RECORD NOW box in the
+ * middle (YES), THRES on the right; DEST (the DT2's MON place), R.LEN, R.STRT and ARM's
+ * switch along the bottom. The page draws over the stock header and machine box. */
+#define FONT_BIG 0x44507EF0u                    /* the stock header's 11-pixel font */
+extern void *rec_view;
+extern u32 rec_seen;
+extern int rec_src, rec_chan, rec_thres, rec_dest, rec_rlen, rec_rstrt, rec_arm;
+extern int rec_state, rec_peak;
+extern u32 rec_frames, rec_heard;
+#define FRAMES_NOW (*(volatile u32 *)0x4058E8D4u)
+
+static void clear(void *c, int x0, int y0, int x1, int y1)
+{
+    for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++)
+            SET_PIXEL(c, x, y, 0);
+}
+
+/* a meter position for a level 0..32767: about 60 dB across W pixels (6 dB a step of W/10) */
+static int meter_x(int v, int w)
+{
+    int x = 0, t = 32767;
+    while (t > 32 && v < t) {                   /* each halving of the level: W/10 to the left */
+        t >>= 1;
+        x++;
+    }
+    int pos = w - x * w / 10;
+    return pos < 0 ? 0 : pos;
+}
+
 void smp_rec_draw(void *view, void *c)
 {
-    int top, v;
-    for (int i = 0; i < 8; i++) {
-        u32 id = smp_rec_ids[i];
-        int x = CELL_X(i & 3), y = i < 4 ? TOP_Y : BOT_Y;
-        if (!id) {
-            w_empty(c, x, y);
-            continue;
-        }
-        v = value(view, id, &top);
-        if (id == SMP_REC_ID) {
-            int cx = x + 12, cy = y + 8;
-            for (int a = 0; a < 256; a += 8)
-                on(c, cx + sin256(a) * 6 / 127, cy + sin256(a + 64) * 6 / 127);
-            if (v)
-                for (int dy = -4; dy <= 4; dy++)
-                    for (int dx = -4; dx <= 4; dx++)
-                        if (dx * dx + dy * dy <= 17)
-                            on(c, cx + dx, cy + dy);
-        } else if (id == SMP_RSRC_ID) {
-            box(c, x + 1, y + 3, x + 22, y + 13, 0);
-            TEXT(c, FONT, x + 12, y + 5, CENTRED, "%.4s", smp_rec_src[v > 3 ? 3 : v]);
-        } else if (id == SMP_RDST_ID) {
-            w_samp(c, x, y, SMP_REC_FIRST + 1 + (v >> 5));
-        } else if (id == SMP_RLEN_ID) {
-            w_knob(c, x, y + 3, v, top);
-            if (v == 0)
-                TEXT(c, FONT, x + 12, y - 1, CENTRED, "MAX");
-            else {
-                int ds = v * SMP_REC_SECONDS * 10 / 127;     /* tenths of a second */
-                TEXT(c, FONT, x + 12, y - 1, CENTRED, "%d.%d", ds / 10, ds % 10);
-            }
-            TEXT(c, FONT, x + 12, y - 7, CENTRED, "%.4s", NAME_SHORT(id));
-            continue;
-        } else {
-            w_knob(c, x, y, v, top);
-        }
-        TEXT(c, FONT, x + 12, y - 7, CENTRED, "%.4s", NAME_SHORT(id));
+    int top;
+    rec_view = view;
+    rec_seen = FRAMES_NOW + 1u;
+    rec_src = value(view, SMP_RSRC_ID, &top) * SMP_REC_SOURCES / (top + 1);
+    rec_chan = value(view, SMP_RCHAN_ID, 0);
+    rec_thres = value(view, SMP_RTHR_ID, 0);
+    rec_dest = value(view, SMP_RDST_ID, 0);
+    rec_rlen = value(view, SMP_RLEN_ID, 0);
+    rec_rstrt = value(view, SMP_RSTRT_ID, 0);
+    rec_arm = value(view, SMP_ARM_ID, 0);
+    int heard = rec_heard && FRAMES_NOW + 1u - rec_heard < 1500u;
+    int state = heard ? rec_state : 0;
+
+    clear(c, 0, 0, 23, 52);                     /* the stock machine box and level */
+
+    /* the input meter under the header: a bar, filled to the source's peak, THRES ticked */
+    int mx0 = 2, mx1 = 125, my0 = 46, my1 = 51, w = mx1 - mx0 - 2;
+    box(c, mx0, my0, mx1, my1, 0);
+    int lv = heard ? meter_x(rec_peak, w) : 0;
+    if (lv > 0)
+        fill(c, mx0 + 1, my0 + 1, mx0 + lv, my1 - 1);
+    int tx = mx0 + 1 + rec_thres * w / 120;
+    vline(c, tx, my0 - 2, my0 - 1, 0);
+    vline(c, tx, my1 + 1, my1 + 2, 0);
+
+    /* SRC, on the left: the source over the channel */
+    const char *src = smp_rec_src[rec_src > SMP_REC_SOURCES - 1 ? SMP_REC_SOURCES - 1 : rec_src];
+    TEXT(c, FONT, 14, 37, CENTRED, "%.5s", src);
+    TEXT(c, FONT, 14, 30, CENTRED, "%.3s", smp_rec_chan[rec_chan > 2 ? 2 : rec_chan]);
+    TEXT(c, FONT, 14, 22, CENTRED, "SRC");
+
+    /* the RECORD NOW box: what YES does, or what the recorder is doing */
+    int bx0 = 31, bx1 = 95, by0 = 22, by1 = 43;
+    box(c, bx0, by0, bx1, by1, 1);
+    if (state == 2) {
+        fill(c, bx0 + 4, by0 + 8, bx0 + 10, by0 + 14);   /* a solid dot: recording */
+        int ds = (int)(rec_frames / 4800u);
+        TEXT(c, FONT, bx0 + 14, by0 + 12, 0, "REC");
+        TEXT(c, FONT, bx0 + 14, by0 + 4, 0, "%d.%d s", ds / 10, ds % 10);
+    } else if (state == 1) {
+        TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 12, CENTRED, "ARMED");
+        TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 4, CENTRED, rec_rstrt ? "ON PLAY" : "ON THRES");
+    } else {
+        fill(c, bx0 + 3, by0 + 7, bx0 + 17, by0 + 15);   /* YES, cut out of a filled badge */
+        glyph(c, bx0 + 5, by0 + 9, 'Y', 0);
+        glyph(c, bx0 + 9, by0 + 9, 'E', 0);
+        glyph(c, bx0 + 13, by0 + 9, 'S', 0);
+        TEXT(c, FONT, bx0 + 20, by0 + 12, 0, "RECORD");
+        TEXT(c, FONT, bx0 + 20, by0 + 4, 0, state == 3 ? "AGAIN!" : "NOW!");
     }
+
+    /* THRES, on the right */
+    TEXT(c, FONT, 111, 33, CENTRED, "%d", rec_thres);
+    TEXT(c, FONT, 111, 22, CENTRED, "THRES");
+
+    /* the bottom row: DEST, R.LEN, R.STRT, ARM */
+    w_samp(c, 3, 4, SMP_REC_FIRST + 1 + rec_dest);
+    TEXT(c, FONT, 14, 0, CENTRED, "DEST");
+    if (rec_rlen <= 0) {
+        TEXT(c, FONT, 50, 13, CENTRED, "MAX");
+        TEXT(c, FONT, 50, 6, CENTRED, "%d.%d", SMP_REC_SECONDS10 / 10, SMP_REC_SECONDS10 % 10);
+    } else {
+        TEXT(c, FONT, 50, 13, CENTRED, "%d", rec_rlen);
+        TEXT(c, FONT, 50, 6, CENTRED, "STEPS");
+    }
+    TEXT(c, FONT, 50, 0, CENTRED, "R.LEN");
+    TEXT(c, FONT, 82, 8, CENTRED, rec_rstrt ? "PLAY" : "THRES");
+    TEXT(c, FONT, 82, 0, CENTRED, "R.STRT");
+    int on = state == 1 || state == 2;           /* ARM's switch: what the DSP is doing */
+    int sx0 = 103, sx1 = 119, sy0 = 8, sy1 = 14;
+    box(c, sx0, sy0, sx1, sy1, 0);
+    if (on)
+        fill(c, sx1 - 7, sy0 + 2, sx1 - 2, sy1 - 2);
+    else
+        box(c, sx0 + 2, sy0 + 2, sx0 + 7, sy1 - 2, 0);
+    TEXT(c, FONT, 111, 0, CENTRED, "ARM");
 }

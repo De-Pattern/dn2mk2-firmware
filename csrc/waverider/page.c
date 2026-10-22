@@ -115,6 +115,8 @@ static void wr_names(void)
     int key = on == 1 ? 16 + perc_type() : on;   /* PERC: one set of names a machine */
     if (key == names_on)
         return;
+    extern void smp_formats(int kind);
+    smp_formats(on);                            /* v0.15: the sample machines' value text */
     for (int k = 0; k < WR_NAMED; k++) {
         u32 id = wr_named_ids[k];
         if (names_on < 0) {                     /* the first call: keep the stock pointers */
@@ -182,9 +184,14 @@ extern void smp_boot(void);
 
 int wr_poll(void *screen)
 {
+    extern void rec_poll(void);
+    extern int rec_visible(void);
     smp_boot();
+    rec_poll();
     wr_names();
     ping_names();
+    if (rec_visible())                          /* the RECORDER's meter and state move */
+        return 1;
     return IS_DIRTY(screen);
 }
 
@@ -632,7 +639,7 @@ void wr_page_draw(void *view, void *canvas)
     int res = kind == 2;                        /* RESONATOR's page */
     int cz = kind == 3;                         /* CZ's */
     int smp = kind >= SMP_KIND0;                /* a sample machine's: one page */
-    if (page < 0 || page >= (smp ? 2 : cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
+    if (page < 0 || page >= (smp ? 3 : cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
         page = 0;
     if (kind == 1) {                            /* PERC: the names TYPE has now */
         u8 flag;
@@ -640,13 +647,14 @@ void wr_page_draw(void *view, void *canvas)
     }
     wr_names();
 
-    if (smp) {                                  /* the DT2's own SRC page; page 2 the recorder */
-        extern void smp_page_draw(void *view, void *canvas, int kind);
+    if (smp) {                                  /* the DT2's SRC pages 1 and 2; page 3 the recorder */
+        extern void smp_page_draw(void *view, void *canvas, int kind, int wave);
         extern void smp_rec_draw(void *view, void *canvas);
-        if (page == 1)
+        if (page == 2) {                        /* the RECORDER fills the screen, as the DT2's */
             smp_rec_draw(view, canvas);
-        else
-            smp_page_draw(view, canvas, kind);
+            return;
+        }
+        smp_page_draw(view, canvas, kind, page == 1);
         ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
         int n = PAGE_COUNT(view);
         if (n > 1)

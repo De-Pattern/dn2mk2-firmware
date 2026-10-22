@@ -366,6 +366,10 @@ LINK_RX_SITE = 0x4012169A               # lea 0x40207ae6,%a3: F0 00 20 3C, befor
 LINK_RX_STOCK = bytes.fromhex("47f940207ae6")
 LINK_FEED_SITE = 0x400276A2             # lea 0x40006c4a,%a2: the frame is built
 LINK_FEED_STOCK = bytes.fromhex("45f940006c4a")
+KEY_SLOT = 0x401D49A8                    # the parameter page view's key handler, in its vtable (v0.15)
+KEY_STOCK = 0x40016480                   # stock's: code 2 cycles the pages, the rest to its base
+QUANT_SITE = 0x40037BE6                  # the setter's write: movea.l %d0,%a0 ; move.w %d3,14(%a0,%d2.l*2)
+QUANT_STOCK = bytes.fromhex("204031832a14")
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
 POLL_STOCK = bytes.fromhex("4eb94011d2f4")
 
@@ -519,6 +523,20 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the frame builder, its frame built: the sample link's packet into words 2650..2681",
          LINK_FEED_STOCK)
 
+    # the RECORDER page's YES (v0.15): the parameter page's key handler through smp_key,
+    # which takes YES on that page and hands everything else to stock's
+    edit(KEY_SLOT, _long(csyms["smp_key"]),
+         "the parameter page's key handler (vtable): smp_key, YES on the sample machines' "
+         "RECORDER page records; every other key and page goes on to stock's 0x40016480",
+         _long(KEY_STOCK))
+
+    # one detent a choice (v0.15): the setter's write through smp_quant_hook
+    _need(content, QUANT_SITE - 4, bytes.fromhex("4e90588f"), "the setter's jsr %a0@ ; addq #4 before its write")
+    _need(content, QUANT_SITE + 6, bytes.fromhex("4a07"), "... and its tst.b %d7 after")
+    edit(QUANT_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_quant_hook"]),
+         "the parameter setter's write: smp_quant moves a sample machine's few-choice "
+         "control one choice a detent, then writes as stock", QUANT_STOCK)
+
     # 7. getMachineType(track): WaveTone for the UI, the real type where it is identity
     _need(content, TRACK_TYPE_FN, TRACK_TYPE_FN_STOCK, "getMachineType(track), as raw_track copies it")
     edit(TRACK_TYPE_READ, bytes.fromhex("4ef9") + _long(layout["canon_track"]),
@@ -544,7 +562,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # checks [C_LOAD, c_text_end) as code
     layout["c_load"] = pages.C_LOAD
     layout["c_text_end"] = csyms["__text_end"]
-    for name in ("smp_hi", "smp_walk", "smp_booted"):          # the sample link's state (v0.15)
+    for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)
