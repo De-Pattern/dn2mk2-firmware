@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.12** | 2026-10-21 | PERC: labels follow TYPE; page 1 the machine's 8 parameters; page 2 TYPE + Machinedrum effects (AMD AMF EQF EQG FLTF FLTW FLTQ); no stray ring | `builds/v0.12-PERC-FX/` | yes |
+| **v0.13** | 2026-10-22 | The Digitakt II's sample machines (ONESHOT, WERP, STRETCH, REPITCH, GRID) with DT2-style pages; four test sounds; your WAVs over USB, kept on the +Drive | `builds/v0.13-SAMPLER/` | yes |
+| v0.12 | 2026-10-21 | PERC: labels follow TYPE; page 1 the machine's 8 parameters; page 2 TYPE + Machinedrum effects (AMD AMF EQF EQG FLTF FLTW FLTQ); no stray ring | `builds/v0.12-PERC-FX/` | yes |
 | v0.11 | 2026-10-20 | PERC: your 24 Ravel drum machines (TRX/EFM/GND) as a machine, TYPE + 8 named parameters; Waverider removed | `builds/v0.11-PERC/` | yes |
 | v0.10 | 2026-10-20 | No more dead notes on RESONATOR/CZ (voice stealing); PING/SHFT TYPE by name; Waverider osc 2 (page 2); GRAN granular filter type | `builds/v0.10-GRAN/` | yes |
 | v0.9 | 2026-10-19 | CZ's release: the DCW envelope runs on past its sustain step at note-off, as on a real CZ | `builds/v0.9-CZ-release/` | yes |
@@ -48,6 +49,66 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.13 — the Digitakt II's sample machines, and your samples
+
+`DN2mod_v0.13_SAMPLER_OS1.11.syx`
+sha256 `ae5637c4b5a04661179d7d36d1619901662958c0fa788f2328a7c0f659c61fdb`
+Gate: CLEARED TO FLASH, 2026-10-22 (USB size 1,953,542 of 2,097,152). Source: commit `602ee63`. Docs: `docs/sampler.md`.
+
+**Adds.**
+- **Five Digitakt II machines** in MACHINE SEL, a section of their own after PERC,
+  RESONATOR and CZ: **ONESHOT, WERP, STRETCH, REPITCH, GRID**.
+- **Their pages look like the DT2's SRC page**: TUNE as the bipolar box, PLAY as the
+  play icon, the dotted empty box, SAMP as the box with the bank letter and slot on top;
+  ONESHOT and GRID show the sample's waveform across the middle with the start, end and
+  loop (or slice) markers, STRT LEN LOOP (SLCE LEN GRID) under it and LEV as a pill;
+  WERP, STRETCH and REPITCH show knobs, the SEG ring, MODE, BARS and the LEV fader.
+- PLAY is REV, REVL, FWDL, FWD as on the DT2; SAMP 0 is OFF; BARS (1/8 to 16 bars)
+  follows the DN2's tempo. Every control is an ordinary parameter: p-lockable (sample
+  locks), an LFO destination, saved with the sound.
+- **Four built-in test sounds** in slots 1-4 until you send your own: KICK, SNARE, HAT,
+  BEAT.
+- **Your own samples over USB**: `python tools/dn2samples.py send FOLDER --keep`
+  (Windows, no packages; close Elektron Transfer first). The WAVs go to slots 1, 2, 3,
+  ... with their names, and `--keep` stores them on the +Drive so they load at
+  power-on. Up to 128 slots, 5 MB (about 54 s of mono at 48 kHz).
+- They are kept in a part of the +Drive the DN2 never uses (above 3 GiB): projects,
+  presets and kits are not touched.
+
+**Test** (after the regression check; **back up the +Drive first**, as always):
+1. MACHINE SEL: after CZ PHASE a dotted line, then ONESHOT, WERP, STRETCH, REPITCH,
+   GRID, a dotted line, MIDI.
+2. ONESHOT: the page as on the DT2 (TUNE box, PLAY icon, dotted box, SAMP box with
+   `A --`). Turn SAMP (D) to 1-4: KICK, SNARE, HAT, BEAT appear as a waveform. Play.
+3. PLAY: REV, REVL, FWDL (the loop marker appears, dotted), FWD. STRT and LEN move the
+   markers and shorten the sound; a held note loops in FWDL.
+4. GRID on BEAT: GRID (G) to 16, SLCE (E) through the hits, LEN (F) for several.
+5. With a pattern running: REPITCH on BEAT, BARS 1, 2, 1/2 (speeds and pitch follow
+   the tempo); STRETCH the same, pitch kept; WERP with SEG and MODE.
+6. Your samples: `python tools/dn2samples.py hello` answers. Then
+   `python tools/dn2samples.py send FOLDER --keep` with a few WAVs; when it says done,
+   SAMP shows them and plays them; the waveform is theirs. Play a pattern on other tracks
+   while it sends: nothing else should glitch.
+7. Power-cycle: after the boot, SAMP shows your samples again and they play (the
+   instrument loads them; give it a few seconds). `python tools/dn2samples.py forget`,
+   power-cycle: the test sounds are back.
+8. A sound with a sample machine: SAVE PROJECT, power-cycle, reload: machine and
+   parameters come back.
+9. Eight sample tracks at once with a pattern: listen for crackles (STRETCH is the
+   heaviest).
+
+**Known issues.**
+- CFAD is shown but not heard yet.
+- WERP, STRETCH and REPITCH are our own readings of the DT2 manual; the DT2's own
+  algorithms are not public, so they are close in kind, not identical.
+- The widgets are drawn in the DT2's shapes by our own code; they are close, not
+  pixel-identical.
+- No sampling from the inputs yet; no comb filter.
+- The +Drive keep was proven in the emulator (save, clear, reload at boot, checksum
+  checked) with the region moved inside the emulator's small device; the real region
+  (3 GiB in) is untested until your unit runs it.
+- The DSP's load with many STRETCH tracks has not been measured on the instrument.
 
 ## v0.12 — PERC pages and effects
 
