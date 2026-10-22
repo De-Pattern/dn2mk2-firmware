@@ -193,12 +193,25 @@ def cmd_send(link, pool, names, chunk):
     # the frames first, the directory (offset 0) last: no slot points at a sample
     # before the sample is there
     from dnfw.sampler import machines as SM
-    order = list(range(SM.DATA_OFFSET, len(pool), chunk)) + list(range(0, SM.DATA_OFFSET, chunk))
-    for i, at in enumerate(order):
-        piece = pool[at:min(at + chunk, len(pool), SM.DATA_OFFSET if at < SM.DATA_OFFSET else len(pool))]
-        link.call(WRITE, struct.pack(">I", at) + piece)
-        if i % 64 == 0:
-            print(f"\r  to the instrument: {100 * (i + 1) // len(order):3d} %", end="", flush=True)
+    # pieces of CHUNK bytes; a piece that draws no answer is sent again in halves (the
+    # instrument's SysEx input may take less than CHUNK), down to 32 bytes
+    spans = [(SM.DATA_OFFSET, len(pool)), (0, min(SM.DATA_OFFSET, len(pool)))]
+    total, done = len(pool), 0
+    for lo, hi in spans:
+        at = lo
+        while at < hi:
+            piece = pool[at:min(at + chunk, hi)]
+            try:
+                link.call(WRITE, struct.pack(">I", at) + piece, tries=2)
+            except TimeoutError:
+                if chunk <= 32:
+                    raise
+                chunk //= 2
+                print(f"\n  (no answer: pieces of {chunk} bytes from here)")
+                continue
+            at += len(piece)
+            done += len(piece)
+            print(f"\r  to the instrument: {100 * done // total:3d} %", end="", flush=True)
     print(f"\r  to the instrument: done in {time.time() - t0:.0f} s")
     st = status(link)
     first = st["passes"]

@@ -1,4 +1,4 @@
-# The Digitakt II's sample machines on the DN2 (v0.13)
+# The Digitakt II's sample machines on the DN2 (v0.13, v0.14)
 
 The Digitone II and the Digitakt II are the same board and one codebase; what makes a
 Digitakt a sampler is its sample machines, a sample pool in the DSP's memory, and the
@@ -13,14 +13,15 @@ MACHINE SEL gains a section after PERC, RESONATOR and CZ:
 | type | machine | in v0.13 |
 |---|---|---|
 | 8 | **ONESHOT** | plays |
-| 9 | WERP | a row, not offered (needs the tempo) |
-| 10 | STRETCH | a row, not offered (needs the tempo) |
-| 11 | REPITCH | a row, not offered (needs the tempo) |
+| 9 | **WERP** | plays (v0.14) |
+| 10 | **STRETCH** | plays (v0.14) |
+| 11 | **REPITCH** | plays (v0.14) |
 | 12 | **GRID** | plays |
 
-The pool holds **four test sounds**, made by `dnfw.sampler.live.test_samples` (no one's
-recordings): 1 KICK, 2 SNARE, 3 HAT, 4 BEAT (sixteen steps of the three, for GRID).
-Loading your own samples is the next part.
+The pool holds **four test sounds** until you send your own, made by
+`dnfw.sampler.live.test_samples` (no one's recordings): 1 KICK, 2 SNARE, 3 HAT, 4 BEAT
+(sixteen steps of the three, for GRID). **v0.14: your own samples**, sent over USB with
+`tools/dn2samples.py` (below).
 
 ## The pages
 
@@ -30,6 +31,9 @@ One page each, as the Digitakt II's SRC page (DT2 1.17's parameter descriptors,
 | machine | A | B | C | D | E | F | G | H |
 |---|---|---|---|---|---|---|---|---|
 | ONESHOT | TUNE | PLAY | SAMP | CFAD | STRT | LEN | LOOP | LEV |
+| WERP | TUNE | PLAY | SAMP | SEG | MODE | BARS | - | LEV |
+| STRETCH | TUNE | PLAY | SAMP | LOOP | STRT | LEN | BARS | LEV |
+| REPITCH | - | PLAY | SAMP | LOOP | STRT | LEN | BARS | LEV |
 | GRID | TUNE | PLAY | SAMP | GRID | SLCE | LEN | - | LEV |
 
 - **TUNE** ±60 semitones around the note (C4 plays the sample at its own pitch).
@@ -42,6 +46,19 @@ One page each, as the Digitakt II's SRC page (DT2 1.17's parameter descriptors,
 - **GRID** 4, 8, 16, 32 or 64 equal slices; **SLCE** which one; **LEN** how many
   consecutive slices.
 - **LEV** the sample's level (100 = as recorded).
+- **BARS** (WERP, STRETCH, REPITCH) how long the sample (STRT..LEN) lasts: 1/8, 1/4, 1/2,
+  1, 2, 4, 8 or 16 bars at the tempo. The tempo is the DN2's own, which its frame already
+  carries to the DSP (BPM x 120 at frame offset 216).
+- **REPITCH** plays the region faster or slower so that it lasts BARS (the note still
+  transposes it). **STRETCH** keeps the pitch (TUNE and the note set it): two grains of
+  43 ms, half a grain apart, cross-faded with triangle windows, each reading from where
+  the region's source position was when it began, while that position moves so the
+  region lasts BARS. **WERP** cuts the whole sample into **SEG** equal segments (128 down
+  to 1) and starts segment k at k/SEG of BARS, each played at its own pitch in **MODE**
+  (REV, REV LOOP, FWD LOOP, FWD) until the next starts; PLAY sets the order (REV plays the
+  segments last to first) and whether the whole loops.
+- These are our own readings of the DT2 manual (Appendix A); the DT2's own stretching
+  algorithms are not public, so the sound is close in kind, not identical.
 - **CFAD** (ONESHOT) is drawn but not yet heard.
 
 The page shows the machine and the sound in the middle, and the sample as a bar: the
@@ -74,6 +91,42 @@ part that plays solid, LOOP's point marked in the loop modes, GRID's slices tick
 - A sample machine with no renderer yet (WERP, STRETCH, REPITCH) has its buffer
   cleared each block: silent, never a stale block.
 
+## Your samples (v0.14): `tools/dn2samples.py`
+
+    python tools/dn2samples.py hello
+    python tools/dn2samples.py send C:\samples\kit            every .wav in the folder
+    python tools/dn2samples.py send kick.wav snare.wav loop.wav
+
+Windows, no packages needed; close Elektron Transfer first (one program per MIDI port).
+The WAVs (8/16/24/32-bit PCM or 32-bit float, any rate, mono or stereo) go into slots
+1, 2, 3, ... in the order given (a folder: by name), named on the page by their file
+names. They play at their own rate and pitch on C4. Up to 128 slots and 5 MB in all
+(16-bit mono: about 54 s at 48 kHz). **They last until power-off**: send them again
+after switching on (the pool on the +Drive comes later).
+
+How it works:
+
+- The tool lays the samples out as the DSP's pool (`dnfw.sampler.live.pool_bytes`:
+  directory, names, frames as int16) and writes it in 256-byte pieces over USB SysEx,
+  `F0 00 20 3C 7D 01 ...` (Elektron's header and a device byte no Elektron machine
+  uses, as the read-only probe of `docs/usbprobe.md`; sub-id 01), into a **mirror** of
+  the pool in the ColdFire's RAM above BSS (`0x46b00000`, 5 MB, declared by the mod).
+  `csrc/sampler/link.c`, entered from the SysEx router at `0x4012169a`.
+- **The link to the DSP**: the frame the ColdFire pushes to the DSP 1,500 times a
+  second carries, at offsets 2650..2681, a per-track array the DSP never reads (no
+  direct read in the image, and the runner's step 3c shows random words there change
+  nothing). After the frame builder has built each frame (`0x400276a2`), `smp_feed`
+  puts one packet there: a magic word, a word offset into the pool, six 32-bit words,
+  a 16-bit check. The DSP (`dnfw.sampler.program.mailbox`, at the top of `wr_smp`)
+  writes a packet that checks out, inside the pool's 16 MB, and nothing else.
+  36 KB a second.
+- The feeder walks the mirror from 0 to its end **over and over**, so a frame the DSP
+  misses is put right on the next pass, and the DSP's pool always converges to the
+  mirror. A write moves the walk back to it, so what was just sent goes first. The tool
+  sends the frames first and the directory last, so no slot points at a sample before
+  it is there, and waits for a whole pass before it says done.
+- The page names the slots from the mirror once a pool has been sent.
+
 ## Checked
 
 - `scripts/sharc_waverider_m5.py` step **3b** (in the ship gate): every sample track's
@@ -82,13 +135,22 @@ part that plays solid, LOOP's point marked in the loop modes, GRID's slices tick
   < 1e-5); TUNE +12 is higher; reversed, looping and GRID tracks sound; PERC beside them
   stays bit-exact; WERP's buffer is 0; OFF, an empty slot and no trigger are silent; a
   second note restarts.
+- Step **3c** (v0.14): good packets land in the pool, one a block; a bad check or an
+  offset past the pool writes nothing; random words where the packets go (not the magic)
+  change no track buffer of FM Tone, PERC or ONESHOT.
+- The ColdFire end in the emulator (`scripts/emu_waverider_menu.py`'s `sysex:` and
+  `isr:` steps): HELLO, WRITE, STATUS answered on USB; a write past the mirror refused;
+  every packet the frame builder sent is exactly `dnfw.sampler.program.link_packet` of
+  the mirror's bytes.
 - Step 4: tracks 1-15 bit-identical to stock with track 0 on ONESHOT or WERP.
+- `test/test_sampler.py`: the pool layout, the int16 kick, each time machine lasting
+  BARS at two tempos, STRETCH keeping the pitch while REPITCH does not, the mailbox, the
+  host tool's codec and WAV reading.
 - The ship gate's SAVE/LOAD: types 8 and 12 round-trip; 13 loads as FM Tone.
 - `test/test_waverider_dsp.py`, `test_waverider_mod.py`, `test_waverider_pages.py`.
 
 ## Next
 
-1. **Your samples**: a way to put sounds in the pool (an upload tool and the ColdFire
-   writing them through to the DSP) and to keep them (the eMMC).
-2. WERP, STRETCH and REPITCH, which need the tempo on the DSP side.
-3. CFAD.
+1. Keeping your samples: the pool on the +Drive, loaded at power-on.
+2. CFAD (ONESHOT's crossfade at the loop point).
+3. Sampling from the inputs.
