@@ -419,7 +419,7 @@ static void overview_add(u32 off, u32 bytes, const u8 *buf)
 /* -- loading the image into the DSP -------------------------------------------------------- */
 
 enum { L_IDLE, L_READ, L_SEND, L_VERIFY, L_DONE };
-static int lstate __attribute__((section(".data"))) = L_IDLE;
+int smp_lstate __attribute__((section(".data"))) = L_IDLE;
 static u32 l_slot __attribute__((section(".data"))) = 0;        /* the range being loaded */
 static u32 l_off __attribute__((section(".data"))) = 0;         /* in it, bytes */
 static u32 l_end __attribute__((section(".data"))) = 0;
@@ -513,7 +513,7 @@ void smp_load(void)                             /* load (again) whatever the ima
     smp_hi = header_read();
     dir_ok = smp_hi != 0;
     if (!dir_ok) {
-        lstate = L_IDLE;
+        smp_lstate = L_IDLE;
         return;
     }
     for (u32 k = 0; k < POOL_SLOTS * OVERVIEW_W; k++)
@@ -523,18 +523,18 @@ void smp_load(void)                             /* load (again) whatever the ima
     l_kind = K_BLANK;
     l_entry = -1;
     l_end = 0;
-    lstate = next_range() ? L_READ : L_DONE;
+    smp_lstate = next_range() ? L_READ : L_DONE;
 }
 
 static void load_poll(void)
 {
-    if (lstate == L_READ) {
+    if (smp_lstate == L_READ) {
         u32 n = l_end - l_off;
         if (n > CHUNK)
             n = CHUNK;
         if (l_kind == K_FRAMES) {
             if (image_read(l_off, n, STAGE(0)) != 0) {
-                lstate = L_IDLE;                            /* the +Drive refused: stop */
+                smp_lstate = L_IDLE;                            /* the +Drive refused: stop */
                 return;
             }
             overview_add(l_off, n, STAGE(0));
@@ -550,8 +550,8 @@ static void load_poll(void)
         l_tries = 0;
         job_start(STAGE(0), l_off, n);
         l_since = 0;
-        lstate = L_SEND;
-    } else if (lstate == L_SEND) {
+        smp_lstate = L_SEND;
+    } else if (smp_lstate == L_SEND) {
         if (!job_sent())
             return;
         if (!l_since) {                         /* a few periods for the last packets to land */
@@ -562,8 +562,8 @@ static void load_poll(void)
             return;
         l_vseq = smp_command(CMD_VERIFY, l_chunk_off / 4u, l_chunk_bytes / 4u, 0, 0) & 0xFFFFu;
         l_since = periods;
-        lstate = L_VERIFY;
-    } else if (lstate == L_VERIFY) {
+        smp_lstate = L_VERIFY;
+    } else if (smp_lstate == L_VERIFY) {
         int ok = smp_status(st);
         if (ok && st[14] == l_vseq) {
             u32 a, b;
@@ -572,7 +572,7 @@ static void load_poll(void)
                 if (l_kind == K_FRAMES)
                     smp_walk += l_chunk_bytes;
                 l_off += l_chunk_bytes;
-                lstate = l_off < l_end || next_range() ? L_READ : L_DONE;
+                smp_lstate = l_off < l_end || next_range() ? L_READ : L_DONE;
                 return;
             }
         } else if (periods - l_since < 1500u) {
@@ -582,12 +582,12 @@ static void load_poll(void)
         if (++l_tries >= 2 && fast_on)
             fast_on = 0;                                    /* the TDM link is set aside */
         if (l_tries > 6) {
-            lstate = L_IDLE;                                /* nothing gets through: stop */
+            smp_lstate = L_IDLE;                                /* nothing gets through: stop */
             return;
         }
         job_start(STAGE(0), l_chunk_off, l_chunk_bytes);
         l_since = 0;
-        lstate = L_SEND;
+        smp_lstate = L_SEND;
     }
 }
 
@@ -834,7 +834,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         }
     } else if (cmd == 3) {                      /* STATUS */
         put32(rp + r, smp_hi); r += 4;
-        put32(rp + r, (u32)lstate); r += 4;
+        put32(rp + r, (u32)smp_lstate); r += 4;
         put32(rp + r, smp_walk); r += 4;
         put32(rp + r, smp_retries); r += 4;
         put32(rp + r, (u32)fast_on); r += 4;
@@ -855,7 +855,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         if (bytes < DIR_BYTES || bytes > REC_OFFSET || header_write(0) != 0) {
             rp[3] = 1;
         } else {
-            lstate = L_IDLE;                    /* no load runs while the image changes */
+            smp_lstate = L_IDLE;                    /* no load runs while the image changes */
             job_data = 0;
             if (!dir_ok)                        /* no recordings kept yet */
                 for (u32 k = REC_DIR_START; k < REC_DIR_END; k++)

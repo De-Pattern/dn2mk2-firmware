@@ -526,6 +526,7 @@
   "smp_cmds": 1185705116,
   "smp_hi": 1185705112,
   "smp_load": 1185684456,
+  "smp_lstate": 1185704764,
   "smp_retries": 1185704728,
   "smp_save_recording": 1185684812,
   "smp_saved": 1185704684,

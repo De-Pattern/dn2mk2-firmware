@@ -259,6 +259,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         guest_call(ISR)
         mailbox()
         tdm_in()
+        status_out()        # the ISR copies the SPI reply over the tail each frame: ours again
 
     log = []
     out = {"scenario": scenario}
@@ -299,8 +300,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             period()
             call("smp_boot")
             periods += 1
-            if long("smp_walk") and not dsp["send"] and periods % 50 == 0:
-                log.append([periods, long("smp_walk"), long("smp_retries")])
+            if periods % 25 == 0:
+                log.append([periods, long("smp_walk"), long("smp_retries"), long("smp_lstate"),
+                            long("smp_tdm_sent"), len(dsp["cmds"]), io["reads"]])
             # done: the directory page (the last range) is in
             if all(pool.get(k // 4) == struct.unpack_from("<I", img, k)[0] for k in range(0, SM.CMD_OFFSET, 4)):
                 break
