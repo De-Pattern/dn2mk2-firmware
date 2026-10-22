@@ -4,8 +4,8 @@ by block, and the DN2's 48 kHz block read from that stream.
 `block(p, L, knobs, note, want)` is one DN2 block for the slot whose words I3 points at
 (and C['mdb'] holds), writing 32 samples at I4:
   1. the eight knobs (floats 0..1 in the scratch words KNOBS) become the Machinedrum's
-     eight 14-bit inputs (knob x 16256: the MD's knob << 7); a change marks the words
-     dirty;
+     eight 14-bit inputs (the nearest of its 128 knob positions, << 7); a change marks
+     the words dirty;
   2. a note (Rnote != 0) asks for machine WANT (the TYPE now) and marks a trig waiting;
   3. if the read position has passed the stream's first block, the stream moves on a
      block and the machine renders the next (`advance`): a waiting note runs init (if the
@@ -31,14 +31,39 @@ QUIET_LEVEL = 2.0 ** -21                      # a block whose peak is under this
 QUIET_BLOCKS = 32                             # this many in a row (23 ms) and the machine rests
 
 
+def _same_code(step: str) -> dict[int, int]:
+    """machine index -> the index of the first machine whose STEP is the same code (a
+    machine that is another's DSP code with its own scale function, TRX-OH on TRX-CH's,
+    shares that machine's render, init and trig): the same function, emitting the same text."""
+    def text(M):
+        q = Prog("emit", prefix="md_probe")
+        getattr(M, step)(q, _PROBE_L)
+        return q.text()
+    out, seen = {}, {}
+    for k, M in enumerate(MM.MACHINES):
+        f = getattr(M, step)
+        key = getattr(f, "__func__", f)
+        if key in seen and text(MM.MACHINES[seen[key]]) == text(M):
+            out[k] = seen[key]
+        else:
+            seen.setdefault(key, k)
+            out[k] = k
+    return out
+
+
+_PROBE_L = K.Layout(0x100000, 0x80000, 0x200000)
+
+
 def _each(p: Prog, L: K.Layout, step: str) -> None:
     """STEP of the machine whose index is in VW['mach'] (>= 0): a compare chain in emit
-    mode; run mode calls the one machine."""
+    mode, each distinct code once; run mode calls the one machine."""
     if p.run:
         K.vw(p, 0, "mach")
         getattr(MM.MACHINES[min(p.r[0], N - 1)], step)(p, L)
         return
+    same = _same_code(step)
     end = p.label(f"md_{step}_end")
+    body = {k: p.label(f"md_{step}_{k}") for k in set(same.values())}
     for k, M in enumerate(MM.MACHINES):
         nxt = p.label("md_next")
         if k < N - 1:
@@ -46,9 +71,14 @@ def _each(p: Prog, L: K.Layout, step: str) -> None:
             p.iconst(12, k)
             p.e("COMP(R0, R12);")
             p.jump("NE", nxt)
-        p.comment(f"---- {M.NAME} {step} ----")
-        getattr(M, step)(p, L)
-        p.jump("", end)
+        if same[k] == k:
+            p.comment(f"---- {M.NAME} {step} ----")
+            p.place(body[k])
+            getattr(M, step)(p, L)
+            p.jump("", end)
+        else:
+            p.comment(f"---- {M.NAME} {step}: {MM.MACHINES[same[k]].NAME}'s ----")
+            p.jump("", body[same[k]])
         p.place(nxt)
     p.place(end)
 
@@ -157,11 +187,12 @@ def inputs(p: Prog, L: K.Layout, knobs: list[int]) -> None:
     inputs; any change marks the words dirty. Clobbers R0-R2, R12."""
     for k, a in enumerate(knobs):
         p.ld(0, a)
-        p.fconst(12, KNOB_SCALE)
+        p.fconst(12, 127.0)
         p.fop(0, 0, "*", 12)
         p.fconst(12, 0.5)
         p.fop(0, 0, "+", 12)
         p.trunc(0, 0)
+        p.lsh(0, 0, 7)                         # the Machinedrum's knob, 0..127, << 7
         p.iconst(12, 0)
         p.iop(0, 0, "MAX", 12)
         p.iconst(12, 16383)

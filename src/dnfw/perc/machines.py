@@ -67,8 +67,8 @@ def frame_offset(slot: int) -> int:
 
 
 # -- tables (DDR) ------------------------------------------------------------------------
-EXP2_LO, EXP2_STEPS = -32.0, 16           # 2^x for x in -32..32, 1/16 apart
-EXP2_N = int(64 * EXP2_STEPS) + 1
+EXP2_LO, EXP2_STEPS = -16.0, 16           # 2^x for x in -16..16, 1/16 apart (-32..32 until v0.16)
+EXP2_N = int(-2 * EXP2_LO * EXP2_STEPS) + 1
 TAN_TOP, TAN_N = 0.45, 512                # tan(pi u) for u = f / fs in 0..0.45
 
 
@@ -184,7 +184,7 @@ def _io(p: Prog, d: int, x: int | None, name: str, body) -> None:
 
 
 def exp2(p: Prog, L: Layout, d: int, x: int) -> None:
-    """Fd = 2^Fx (EXP2, -32..32). Clobbers R0-R3, R12, R15, I1, I12."""
+    """Fd = 2^Fx (EXP2, -16..16). Clobbers R0-R3, R12, R15, I1, I12."""
     _io(p, d, x, "exp2", lambda: _exp2_body(p, L))
 
 

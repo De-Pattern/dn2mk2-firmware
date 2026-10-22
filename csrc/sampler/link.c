@@ -365,7 +365,7 @@ static u32 header_read(void)
 int smp_count(void)
 {
     if (!dir_ok)
-        return -1;
+        return 0;                               /* v0.17: no image, no samples (no test sounds) */
     u32 count = le32(DIR + 4);
     return count > POOL_SLOTS ? -1 : (int)count;
 }

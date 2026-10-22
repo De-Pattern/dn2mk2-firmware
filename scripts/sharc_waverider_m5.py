@@ -71,6 +71,7 @@ from dnfw.perc import program as PP                             # noqa: E402
 from dnfw.sampler import live as SL                             # noqa: E402
 from dnfw.sampler import machines as SM                         # noqa: E402
 from dnfw.sampler import program as SP                          # noqa: E402
+from dnfw.md import core as MDK                                 # noqa: E402
 from dnfw.waverider import frame as FR                         # noqa: E402
 from dnfw.waverider import voice as V                          # noqa: E402
 
@@ -118,6 +119,12 @@ def init_on(snap, m2mach, image: Image):
     runner = fx.sr.load_snapshot(str(snap), m2mach.memory)
     runner.data = image.memory
     runner.state = dataclasses.replace(runner.state, concrete=image.memory)
+    # v0.17: the build ships an empty pool; the test sounds go in as the ColdFire's loader
+    # would put samples there
+    pool = SL.pool_bytes(SL.test_samples(), dsp.SMP_POOL_DDR, SL.test_rates(), SL.test_fmts(),
+                         SL.TEST_NAMES)
+    for k in range(0, len(pool), 4):
+        m2.poke(runner.state, dsp.SMP_POOL_DDR + k, struct.unpack_from("<I", pool, k)[0])
     return runner
 
 
@@ -734,21 +741,25 @@ def step_perc(init, sound, machines, blocks) -> dict:
             return f.to_bytes()
         return fb
 
-    # the 24 machines, eight tracks at a time (track t of group g plays machine 8 g + t,
-    # all triggered on block 1): three runs, eight PERC slots busy at once
+    # the 25 Machinedrum machines (v0.17), eight tracks at a time (track t of group g plays
+    # machine 8 g + t, all triggered on block 1): four runs, up to eight PERC slots busy
     runs = {}
-    for g in range(PM.N // 8):
+    groups_n = (PM.N + 7) // 8
+    for g in range(groups_n):
         t0 = time.perf_counter()
-        runs[f"g{g}"] = run_blocks(init, frames(8 * g, others={t: 5 for t in range(1, 8)},
-                                               other_words={t: perc_words(8 * g + t) for t in range(1, 8)}),
+        n_g = min(8, PM.N - 8 * g)
+        runs[f"g{g}"] = run_blocks(init, frames(8 * g, others={t: 5 for t in range(1, n_g)},
+                                               other_words={t: perc_words(8 * g + t) for t in range(1, n_g)}),
                                    blocks)
-        print(f"    machines {8 * g}-{8 * g + 7}: {round(time.perf_counter() - t0)} s", flush=True)
+        print(f"    machines {8 * g}-{8 * g + n_g - 1}: {round(time.perf_counter() - t0)} s", flush=True)
     rs = PM.NAMES.index("TRX-RS")
     sd = PM.NAMES.index("TRX-SD")
     hh = PM.NAMES.index("EFM-HH")
     runs["note60"] = run_blocks(init, frames(rs), blocks)
     runs["single_sd"] = run_blocks(init, frames(sd), blocks)
     runs["note72"] = run_blocks(init, frames(rs, note=0x4800), blocks)
+    # v0.17: the Machinedrum's sine, which the DSP fills itself 1,024 words a block
+    runs["sine"] = run_blocks(init, frames(0, trig=()), MDK.SINE_N // MDK.SINE_PER_BLOCK + 1)
     runs["retrig"] = run_blocks(init, frames(sd, trig=(1, RETRIG)), blocks)
     runs["silent"] = run_blocks(init, frames(0, trig=()), blocks)
     # TYPE turned mid-note: the voice keeps the machine its note latched
@@ -774,7 +785,14 @@ def step_perc(init, sound, machines, blocks) -> dict:
     zc60 = zero_crossings(perc_series(runs["note60"], 0)) if runs["note60"]["ok"] else 0
     zc72 = zero_crossings(perc_series(runs["note72"], 0)) if runs["note72"]["ok"] else 0
     groups = [sorted({t for blk in runs[f"g{g}"]["perc"] for t in blk}) if runs[f"g{g}"]["ok"] else []
-              for g in range(PM.N // 8)]
+              for g in range(groups_n)]
+    sine_ok = False
+    if runs["sine"]["ok"]:
+        st = runs["sine"]["state"].state
+        L = PL.layout()
+        got = [round(V.bits_f32(m2.word(st, L.md.T["sine"] + 4 * k) or 0) * 2 ** 23) for k in range(MDK.SINE_N)]
+        sine_ok = got == MDK.md_sine_words()
+    runs["sine"].pop("state", None)
     sw = runs["type_switch"]
     sw_state = [blk[0]["out"] for blk in sw["perc"] if 0 in blk] if sw["ok"] else []
     base = perc_series(runs["g0"], 0)
@@ -809,15 +827,17 @@ def step_perc(init, sound, machines, blocks) -> dict:
         "dnfw.perc.program run on the DSP's memory at PERC's entry":
             ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for k, v in exact.items() if k != "silent")
             and exact.get("silent", (0, 1, 1))[1:] == (0, 0),
-        f"all {PM.N} machines sound with the owner's defaults (peak > 0.05 within {blocks} blocks)":
-            all(v is not None and v > 0.05 for v in peaks.values()),
+        f"all {PM.N} Machinedrum machines sound at the Machinedrum's defaults (peak > 0.005 within {blocks} blocks)":
+            all(v is not None and v > 0.005 for v in peaks.values()),
+        "v0.17: the DSP's sine is the Machinedrum's own table, word for word, once filled": sine_ok,
         "nothing is non-finite or above 4.0 in any PERC buffer":
             ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["perc"]
                             for v in blk.values() for x in v["out"]),
         "TRX-BD is heard at the amp's output (peak > 0.02)": bool(n["amp_out_peak_m0"]) and n["amp_out_peak_m0"] > 0.02,
-        "note 72 is higher than note 60 on TRX-RS (more zero crossings)": zc72 > zc60 > 0,
-        "eight PERC tracks at once are all rendered, in each of the three groups":
-            groups == [list(range(8))] * (PM.N // 8),
+        "v0.17: the note does not tune a Machinedrum machine (as on the Machinedrum): note 72 is note 60":
+            zc72 == zc60 > 0,
+        "up to eight PERC tracks at once are all rendered, in each group":
+            groups == [list(range(min(8, PM.N - 8 * g))) for g in range(groups_n)],
         "TYPE turned mid-note leaves the note on its machine (track 0 identical to the untouched TRX-BD's)":
             bool(sw_series) and sw_series == base,
         "a second note restarts the voice (the retrigger run departs from the single note's at it)":
@@ -826,7 +846,7 @@ def step_perc(init, sound, machines, blocks) -> dict:
         "v0.12: the track effects change the sound (every one on: the block differs from TRX-SD's own)":
             bool(fxs) and bool(one) and fxs != one and all(math.isfinite(x) for x in fxs),
         "v0.12: a track that leaves PERC while it rings is silent when it comes back with no note":
-            bool(before) and V.peak(before) > 0.05 and len(back) >= BLOCK * 2
+            bool(before) and V.peak(before) > 0.005 and len(back) >= BLOCK * 2
             and all(x == 0.0 for x in back),
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}

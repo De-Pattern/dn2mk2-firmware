@@ -145,17 +145,23 @@ def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
 
 
 def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
+    from dnfw.md import core as MDK
     ddr = dsp.ddr_spans()
     # RESONATOR's state (zeros) and tables, CZ's state (zeros) and tables, PING's, SHFT's,
     # GRAN's and PERC's tables, GRAN's buffers (zeros); Waverider's wavetables went in v0.11
     assert [a for _, a, _ in ddr] == [dsp.RINGS_STATE_DDR, dsp.RINGS_TABLES_DDR,
                                       dsp.CZ_STATE_DDR, dsp.CZ_TABLES_DDR,
                                       dsp.PING_TABLES_DDR, dsp.SHFT_TABLES_DDR,
-                                      dsp.GRAN_TABLES_DDR, dsp.PERC_TABLES_DDR, dsp.GRAN_BUF_DDR,
-                                      dsp.SMP_POOL_DDR]
-    assert not any(ddr[0][2]) and not any(ddr[2][2]) and not any(ddr[-2][2])
-    # v0.13: the sample pool's directory begins with its magic and holds the test sounds
-    assert struct.unpack_from("<II", ddr[-1][2]) == (0x31504D53, 4)
+                                      dsp.GRAN_TABLES_DDR, dsp.PERC_TABLES_DDR,
+                                      dsp.MD_TABLES_DDR,
+                                      dsp.MD_TABLES_DDR + MDK.TABLE_LAYOUT["sinecorr"][0],
+                                      dsp.MD_STATE_DDR, dsp.GRAN_BUF_DDR,
+                                      dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
+    assert not any(ddr[0][2]) and not any(ddr[2][2]) and not any(ddr[-1][2])
+    assert not any(ddr[8][2]) and not any(ddr[10][2])     # the MD's sine (the DSP fills it), its voices
+    # v0.17: the sample pool's directory begins with its magic, and holds nothing (the
+    # +Drive's samples are loaded in; the test sounds are gone)
+    assert struct.unpack_from("<II", ddr[-2][2]) == (0x31504D53, 0)
     # the stock stream loads DDR to 0x8052fbe0 and init writes up to 0x80530be8
     # (scripts/sharc_ddr_ceiling.py); ours start 16 MB in
     assert min(a for _, a, _ in ddr) >= dsp.DDR_FLOOR > 0x80530BE8
@@ -179,7 +185,7 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
         if b.count and 0x20000000 <= b.target < 0x20100000:
             assert b.target + b.count <= dsp.L2_IMAGE_END
     assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
-    assert dsp.SMP_SW == 0xBE8000 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
+    assert dsp.SMP_SW == 0xBE9600 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
@@ -284,7 +290,8 @@ def test_smp_hands_on_to_resonator_and_writes_only_saved_registers():
     for ln in lines:
         m = re.match(r"(I|M|L|B)(\d+) =", ln)
         if m:
-            assert f"{m.group(1)}{m.group(2)}" in ("I1", "I2", "I4", "I12"), ln
+            # v0.17: I3 (a slot's Machinedrum words) and I5 (a machine's output), both saved
+            assert f"{m.group(1)}{m.group(2)}" in ("I1", "I2", "I3", "I4", "I5", "I12"), ln
         assert not re.search(r"\b(R1[6-9]|R[2-9]\d|F1[6-9]|USTAT|MODE1|MODE2|LCNTR)\b", ln), ln
     assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
 
@@ -299,5 +306,6 @@ def test_perc_saves_what_ping_restores_and_hands_on_to_resonator():
     for ln in lines:
         m = re.match(r"(I|M|L|B)(\d+) =", ln)
         if m:
-            assert f"{m.group(1)}{m.group(2)}" in ("I1", "I2", "I4", "I12"), ln
+            # v0.17: I3 (a slot's Machinedrum words) and I5 (a machine's output), both saved
+            assert f"{m.group(1)}{m.group(2)}" in ("I1", "I2", "I3", "I4", "I5", "I12"), ln
     assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)

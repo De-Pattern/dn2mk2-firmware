@@ -1,83 +1,112 @@
-"""PERC (docs/perc.md): the model -- dnfw.perc.program run in Python, the same program the
-SHARC runs (the runner holds the DSP to it bit for bit) -- against the owner's own C.
-
-test/data/perc_c_reference.json is the owner's Ravel PERC C (rv_perc.c, perc_machine)
-at 48 kHz, each machine at its defaults: its peak, 10 ms RMS envelope and zero-crossing
-rate. The model is not the C bit for bit (tables instead of libm, float32 throughout), so
-these are the measures a listener hears: level, decay, pitch.
-"""
+"""PERC (docs/perc.md, docs/md.md): the model -- dnfw.perc.program run in Python, the same
+program the SHARC runs (the runner holds the DSP to it bit for bit). Since v0.17 its
+machines are the Machinedrum's (dnfw.md): test/test_md.py holds each machine to the
+Machinedrum's own output; here the whole PERC voice is held to it, at 48 kHz, through the
+frame's controls."""
 
 from __future__ import annotations
 
-import json
 import math
-import pathlib
 
 import pytest
 
+from dnfw.md import bench as MDB
+from dnfw.md import core as MDK
+from dnfw.md import machines as MM
 from dnfw.perc import live as PL
 from dnfw.perc import machines as PM
 from dnfw.perc import program as PP
 
-REF = json.loads((pathlib.Path(__file__).parent / "data" / "perc_c_reference.json").read_text())["machines"]
-SECONDS = 0.1
+
+def _catmull(a, b, c, d, f):
+    return b + 0.5 * f * (c - a + f * (2 * a - 5 * b + 4 * c - d + f * (3 * (b - c) + d - a)))
 
 
-def env(x, w=480):
-    return [math.sqrt(sum(a * a for a in x[i:i + w]) / w) for i in range(0, len(x) - w + 1, w)]
+def _resampled(md: list[float], n: int) -> list[float]:
+    """The Machinedrum's 44.1 kHz output as the voice reads it: its position is a float32
+    (dnfw.md.voice), 35 down to 3 as each block of the stream moves on, so this keeps it
+    the same way rather than as an exact count."""
+    from dnfw.perc.dsl import f32
+    stream = [0.0] * 35 + md + [0.0] * 64
+    out, pos, base, step = [], f32(35.0), 0, f32(MDK.STEP)
+    while len(out) < n:
+        if pos >= 35.0:
+            pos, base = f32(pos - 32.0), base + 32
+        for _ in range(32):
+            i = int(pos)
+            j = base + i - 32                  # the stream as B holds it after the move
+            out.append(PP.MD_LEVEL * _catmull(*stream[j - 1:j + 3], pos - i))
+            pos = f32(pos + step)
+    return out[:n]
 
 
-def zcr(x):
-    x = x[:1440]
-    return sum(1 for a, b in zip(x, x[1:]) if (a < 0) != (b < 0)) / len(x) * 48000 / 2
+def _record_value(knob: int, top: int) -> float | None:
+    """the 0..1 control on a record of TOP steps that lands on the Machinedrum KNOB, if any"""
+    for k in range(top + 1):
+        if int(k / top * 127.0 + 0.5) == knob:
+            return k / top
+    return None
 
 
-@pytest.fixture(scope="module")
-def renders():
-    out = {}
-    for k, name in enumerate(PM.NAMES):
-        out[name] = PL.Harness().render(k, PL.defaults(name), SECONDS)
-    return out
-
-
-def test_every_machine_is_in_the_reference():
-    assert set(REF) == set(PM.NAMES) and PM.N == 24
+def test_every_machine_is_the_machinedrums():
+    assert PM.NAMES == MM.NAMES and PM.N == 25
+    assert set(PM.NAMES) == set(MM.DEFAULTS)
 
 
 @pytest.mark.parametrize("name", PM.NAMES)
-def test_level_decay_and_pitch_follow_the_owners_c(renders, name):
-    m, c = renders[name], REF[name]
-    peak = max(map(abs, m))
-    assert abs(peak / c["peak"] - 1) < 0.08, (peak, c["peak"])
-    em = env(m)
-    for a, b in zip(em, c["env10ms"]):
-        if b > 0.02 * c["peak"]:
-            assert 0.8 < a / b < 1.25, (name, em, c["env10ms"])
-    if c["zcr30ms"] > 50:
-        assert abs(zcr(m) / c["zcr30ms"] - 1) < 0.25, (zcr(m), c["zcr30ms"])
+def test_the_voice_plays_the_machinedrums_default_hit_at_48k(name):
+    """Each machine's 'default' golden case (the MD's own output at its default knobs), read
+    through the voice's Catmull-Rom at 0.91875 samples a sample, x the level: the PERC
+    voice, from the frame's records, gives the same."""
+    if not MDB.golden_available():
+        pytest.fail("no reference (docs/md.md)")
+    case = MDB.golden(name)["cases"][0]
+    assert case["name"] == "default"
+    inputs = case["events"][0][1]
+    params = []
+    for (_rid, _slot, _lo, top), x in zip(PM.PARAMS, inputs):
+        v = _record_value(x >> 7, top)
+        if v is None:
+            pytest.skip(f"knob {x >> 7} is not on a {top}-step record")
+        params.append(v)
+    h = PL.Harness()
+    h.set_controls(PM.NAMES.index(name), params)
+    ours = []
+    for b in range(case["nblocks"] - 4):
+        ours += h.block(60.0, b == 0)
+    want = _resampled(MDB.unpack(case["out"]), len(ours))
+    r = MDB.compare(ours, want)
+    assert r["snr_db"] > 60 or r["rms_err"] < 2 ** -20, r
 
 
 def test_the_model_is_finite_and_silent_without_a_note():
     h = PL.Harness()
-    h.set_controls(0, PL.defaults("TRX-BD"))
+    h.set_controls(0, PL.defaults(PM.NAMES[0]))
     assert all(x == 0.0 for _ in range(4) for x in h.block(60.0, False))
 
 
 def test_two_slots_keep_their_own_state():
     a, b = PL.Harness(0), PL.Harness(5)
     a.set_controls(PM.NAMES.index("TRX-SD"), PL.defaults("TRX-SD"))
-    b.set_controls(PM.NAMES.index("TRX-SD"), PL.defaults("TRX-SD"))
-    xa = [a.block(60.0, k == 0) for k in range(3)]
-    xb = [b.block(60.0, k == 0) for k in range(3)]
-    # the same machine and note on two slots: the noise is seeded by slot, the tone is not
-    assert xa != xb and all(math.isfinite(v) for blk in xa + xb for v in blk)
+    b.set_controls(PM.NAMES.index("TRX-BD"), PL.defaults("TRX-BD"))
+    b.mem = a.mem                              # one memory, two slots
+    xa, xb = [], []
+    for k in range(4):
+        xa += a.block(60.0, k == 0)
+        xb += b.block(60.0, k == 0)
+    ref = PL.Harness(0)
+    ref.set_controls(PM.NAMES.index("TRX-SD"), PL.defaults("TRX-SD"))
+    alone = []
+    for k in range(4):
+        alone += ref.block(60.0, k == 0)
+    assert xa == alone and xa != xb and all(math.isfinite(v) for v in xa + xb)
 
 
 def test_the_program_assembles_from_the_model():
     from dnfw.waverider import dsp
     text = PP.program(PL.layout(), dsp.RINGS_SW)
     lines = [ln for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//")]
-    assert 3000 < len(lines) < 6000
+    assert 5000 < len(lines) < 30000
     assert f"JUMP {dsp.RINGS_SW:#x};" in text
 
 
@@ -123,6 +152,7 @@ def _ravel_fx(x, q, fs=48000.0):
                                      ("EFM-HH", (0.0, 0.5, 0.7, 0.1, 0.0, 0.5, 0.2)),
                                      ("TRX-BD", (0.5, 0.9, 0.5, 0.5, 0.0, 1.0, 0.0)),
                                      ("GND-NS", (0.0, 0.5, 0.5, 0.5, 0.6, 1.0, 0.9))])
+# (v0.17: the voices are the Machinedrum's; the effects are still Ravel's, after the voice)
 def test_the_track_effects_follow_ravels(name, fx):
     """v0.12: AMD AMF EQF EQG FLTF FLTW FLTQ, as rv_perc.c applies them to a voice"""
     k = PM.NAMES.index(name)
@@ -135,5 +165,6 @@ def test_the_track_effects_follow_ravels(name, fx):
 
 
 def test_the_effects_are_off_at_the_records_defaults():
-    assert PL.Harness().render(2, PL.defaults("TRX-SD"), 0.01, fx=PL.FX_OFF) == \
-        PL.Harness().render(2, PL.defaults("TRX-SD"), 0.01)
+    k = PM.NAMES.index("TRX-SD")
+    assert PL.Harness().render(k, PL.defaults("TRX-SD"), 0.01, fx=PL.FX_OFF) == \
+        PL.Harness().render(k, PL.defaults("TRX-SD"), 0.01)

@@ -75,7 +75,7 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
 PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x10000                       # 64 KB reserved; the code is about 26 KB
+PERC_L2_SPAN = 0x12C00                       # 75 KB (v0.17: the Machinedrum machines, about 74.7 KB)
 PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
 L2_IMAGE_END = 0x2008823C                    # the stock stream's last L2 byte
 L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 window starts here
@@ -89,9 +89,9 @@ MD_TABLES_DDR = 0x82000000
 MD_STATE_DDR = 0x82100000
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
-SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200d0000
-SMP_L2_SPAN = 0x8000
-SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbe8000
+SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200d2c00 (0x200d0000 until v0.16)
+SMP_L2_SPAN = 0x4000                         # the code is about 16 KB (32 KB until v0.16)
+SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbe9600 (0xbe8000 until v0.16)
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
 SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0.15)
 SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sampler.machines.REC_STAGE)
@@ -312,13 +312,18 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
          _md_core().tables_bytes()),
         ("Machinedrum voices: 16 slots x 1 KB (zeros)", MD_STATE_DDR, bytes(16 * _md_core().MD_STRIDE)),
         ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE)),
-        ("sample pool: directory and the test sounds (v0.13)", SMP_POOL_DDR, _smp_pool())]
+        ("sample pool: its empty directory's magic and count (v0.17: no test sounds; the +Drive's load in)",
+         SMP_POOL_DDR, _smp_pool()[:8]),
+        ("sample pool: the rest of its directory and names (zeros)", SMP_POOL_DDR + 8,
+         bytes(len(_smp_pool()) - 8))]
 
 
 def _smp_pool() -> bytes:
     from ..sampler import live as smp_live
-    return smp_live.pool_bytes(smp_live.test_samples(), SMP_POOL_DDR, smp_live.test_rates(),
-                               smp_live.test_fmts(), smp_live.TEST_NAMES)
+    # v0.17: the Machinedrum's tables needed the DSP image's room, and since v0.16 the
+    # +Drive holds the owner's own samples: the build ships an empty pool (the runner puts
+    # the test sounds in itself, as the ColdFire's loader would)
+    return smp_live.pool_bytes([], SMP_POOL_DDR)
 
 
 def l2_spans() -> list[tuple[str, int, bytes]]:
