@@ -1180,10 +1180,16 @@ def step_rec(init, sound, machines, blocks) -> dict:
 def step_tdm(init, sound, machines, blocks) -> dict:
     """The fast link's DSP end on the SHARC: the ColdFire's packets poked into slots 8..15
     of the TDM receive page the engine reads (DM 0x268a38 picks it), in both
-    justifications, land in the pool, one a block; a packet with a wrong check, or aimed at
-    the command block, writes nothing (the recorder's parts are written: v0.16); VERIFY's sums are the pool's; SEND streams
-    the pool back through slots 14..15 of the transmit page, every word, decoded as the
-    ColdFire decodes it; every sample track stays bit-exact."""
+    justifications, land in the pool, one a block; a packet with a wrong check, or one over
+    the command block, writes nothing (the recorder's parts are written: v0.16); VERIFY's
+    sums are the pool's; SEND streams the pool back through slots 14..15 of the transmit
+    page, every word, decoded as the ColdFire decodes it; every sample track stays
+    bit-exact.
+
+    The transmit page is read right after the sample machines' program (at RINGS_SW): the
+    runner puts each block's frame where the codec's DAC page is (m4.unpack_call), which
+    reaches over the transmit page's first 24 frames, before the next block's dispatch. On
+    the instrument the frame arrives in its own SPI page (docs/link-research.md)."""
     import random
     rnd = random.Random(16)
     n = max(blocks, 12)
@@ -1192,7 +1198,7 @@ def step_tdm(init, sound, machines, blocks) -> dict:
     ONE = SM.TYPE_OF["ONESHOT"]
     cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
     bad_at = 3                                        # the block whose packet's check is wrong
-    rec_at = 5                                        # the block whose packet spans the command block
+    cmd_blk = 5                                       # the block whose packet spans the command block
     verify_from, send_from = n + 2, n + 30
     total = send_from + (SM.RX_WORDS * n) // SM.TX_WORDS + 6
     state = {"b": 0, "pg": [], "tx": []}
@@ -1205,40 +1211,13 @@ def step_tdm(init, sound, machines, blocks) -> dict:
         b = state["b"]
         pg = (m2.word(r.state, SM.TDM_PAGE) or 0) & 1
         state["pg"].append(pg)
-        if b > 0:                                     # what the last block sent back
-            prev = state["pg"][b - 1]
-            at = SM.TDM_TX + (prev << 11) + 56
-            got = SL.tx_decode(lambda o: m2.word(r.state, at + o) or 0)
-            state["tx"].append(got)
-            if b in (send_from - 2, send_from + 2):
-                state.setdefault("cols", {})[b] = [hex(m2.word(r.state, at + 64 * f + 4 * k) or 0)
-                                                 for f in range(32) for k in (0, 1)]
-            if b == send_from + 2:
-                state["raw"] = [hex(m2.word(r.state, at + o) or 0) for o in (0, 4, 64, 68)]
-                hits = []
-                for base in (SM.TDM_TX, SM.TDM_RX, 0x2C0000):
-                    for o in range(0, 0x1000, 4):
-                        w = m2.word(r.state, base + o) or 0
-                        if w >> 24 == SM.TDM_TAG or (w >> 16) & 0xFF == SM.TDM_TAG:
-                            hits.append((hex(base + o), hex(w)))
-                state["hits"] = hits[:12] + [len(hits)]
-            for i in range(SM.TX_UNITS):              # as stock leaves it: zeros
-                m2.poke(r.state, at + 64 * (i >> 1) + 4 * (i & 1), 0)
-        probe = SM.TDM_TX + (pg << 11) + 56
-        if b == 3:
-            state["marker_before"] = [hex(m2.word(r.state, probe + 64 * f) or 0) for f in (0, 23, 24)]
-            for f in (0, 23, 24):
-                m2.poke(r.state, probe + 64 * f, 0x12345678)
-            state["marker_poked"] = [hex(m2.word(r.state, probe + 64 * f) or 0) for f in (0, 23, 24)]
-        if b == 4:
-            state["marker_after"] = [hex(m2.word(r.state, probe + 64 * f) or 0) for f in (0, 23, 24)]
         rx = SM.TDM_RX + (pg << 11) + 32
         if b < n:
             off = base_w + SM.RX_WORDS * b
             u = SL.rx_units(off, words[SM.RX_WORDS * b:SM.RX_WORDS * (b + 1)], b)
             if b == bad_at:
                 u[255] = (u[255] + 1) & 0xFFFF
-            if b == rec_at:
+            if b == cmd_blk:
                 u = SL.rx_units(SM.CMD_OFFSET // 4 - 60, [0x5A5A5A5A] * SM.RX_WORDS, b)
             for o, w in SL.rx_page(u, high=b % 2 == 0).items():
                 m2.poke(r.state, rx + o, w)
@@ -1252,39 +1231,26 @@ def step_tdm(init, sound, machines, blocks) -> dict:
             command(r, 22, SM.CMD_SEND, base_w, SM.RX_WORDS * n)
         state["b"] += 1
 
+    def after_smp(r):
+        at = SM.TDM_TX + (state["pg"][-1] << 11) + 56
+        state["tx"].append(SL.tx_decode(lambda o: m2.word(r.state, at + o) or 0))
+
     def frames(b):
         return base_frame(sound, machines, t0=ONE, trigger=(b == 1),
                           overrides=smp_words({SM.SAMP_REC: 1})).to_bytes()
-    watch = []
-    if os.environ.get("TDM_WATCH"):
-        import sharc_core.memory as mem       # noqa: PLC0415
-        orig_w = mem._dm_write
-
-        def w(stt, address, width, value):
-            a = getattr(address, "value", address)
-            if isinstance(a, int) and SM.TDM_TX <= a < SM.TDM_TX + 0x1000 and len(watch) < 40:
-                o = (a - SM.TDM_TX) % 64
-                pc = getattr(stt, "pc_sw", None)
-                if o in (56, 60) and not (pc and 0xbe8000 <= pc < 0xbf0000):
-                    v = getattr(value, "value", None)
-                    watch.append((state["b"], hex(a), hex(pc) if pc else None, hex(v) if v is not None else None))
-            return orig_w(stt, address, width, value)
-        for m in list(sys.modules.values()):
-            if getattr(m, "_dm_write", None) is orig_w:
-                setattr(m, "_dm_write", w)
-    run = run_blocks(init, frames, total, extra_hooks={m3.DISPATCH: at_dispatch})
+    run = run_blocks(init, frames, total, extra_hooks={m3.DISPATCH: at_dispatch,
+                                                       dsp.RINGS_SW: after_smp})
     ok = run["ok"]
     st = run["state"].state if ok else None
-    state["watch"] = [x for x in watch if x[2] is None or not (0xbe8000 <= int(x[2], 16) < 0xbf0000)][:40]
 
     def pool_word(w):
         return (m2.word(st, dsp.SMP_POOL_DDR + 4 * w) or 0) & 0xFFFFFFFF
     want = list(words)
-    for blk in (bad_at, rec_at):                      # never written: the pool's zeros
+    for blk in (bad_at, cmd_blk):                     # never written: the pool's zeros
         for k in range(SM.RX_WORDS * blk, SM.RX_WORDS * (blk + 1)):
             want[k] = 0
     got = [pool_word(base_w + k) for k in range(len(words))] if ok else []
-    rec_clean = ok and all(pool_word(SM.CMD_OFFSET // 4 - 60 + k) != 0x5A5A5A5A for k in range(SM.RX_WORDS))
+    cmd_clean = ok and all(pool_word(SM.CMD_OFFSET // 4 - 60 + k) != 0x5A5A5A5A for k in range(SM.RX_WORDS))
     x = y = 0
     for w in want:
         x = (x + w) & 0xFFFFFFFF
@@ -1308,7 +1274,7 @@ def step_tdm(init, sound, machines, blocks) -> dict:
     checks = {
         "the run returns every block": ok,
         f"{n - 2} good packets (both justifications) put their words in the pool, one a block; "
-        "the bad check's and the one over the command block wrote nothing": ok and got == want and rec_clean,
+        "the bad check's and the one over the command block wrote nothing": ok and got == want and cmd_clean,
         "VERIFY: the sums of the range, and its sequence, in both reply pages, checked": ok and all(
             h[15] == (SM.LINK_SEED + sum(h[:15])) & 0xFFFF and h[14] == 21
             and (h[10] | h[11] << 16) == x and (h[12] | h[13] << 16) == y for h in stat),
@@ -1318,9 +1284,6 @@ def step_tdm(init, sound, machines, blocks) -> dict:
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"status": stat, "packets_back": sum(1 for p in state["tx"] if p),
-                        "mismatch": [(k, hex(got[k]), hex(want[k])) for k in range(len(got))
-                                     if got[k] != want[k]][:6] if ok else None,
-                        "tx_raw": state.get("raw"), "hits": state.get("hits"), "watch": state.get("watch"), "cols": state.get("cols"), "marker": [state.get(k) for k in ("marker_before", "marker_poked", "marker_after")],
                         "pages": sorted(set(state["pg"])), "exact": exact, "halt": run.get("halt")}}
 
 
