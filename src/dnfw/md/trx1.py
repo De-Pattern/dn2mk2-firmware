@@ -24,7 +24,8 @@ from ..perc.dsl import Prog
 Q = K.Q23
 ATTACK = 0x50C335 * Q                         # the amp env's restart, on top of its level
 FADE = 0x733333 * Q                           # 0.9: the previous note's fade-out a sample
-IDX_LO = 0x1FFFF                              # a phase's fraction (below the sine index)
+TROUGH = -1.0 + 12.25 * Q                     # see TRXRS
+IDX_LO = 0x1FFFF                            # a phase's fraction (below the sine index)
 
 
 # -- helpers ---------------------------------------------------------------------------
@@ -81,6 +82,40 @@ def ffloor(p: Prog, x: int, t: int = 13, u: int = 14) -> None:
     p.if_(u, "GT", x, lambda: (p.iconst(12, -1), p.iop(t, 12, "+", t)))
     p.iconst(12, 0)
     p.float_(x, t, 12)
+
+
+def one_minus(p: Prog, r: int) -> None:
+    """Fr = 1 - Fr (exact for a Q23 coefficient). Clobbers R12."""
+    p.fconst(12, 1.0)
+    p.fop(r, 12, "-", r)
+
+
+def env_mul(p: Prog, x: int, dd: int, t: int, u: int, v: int) -> None:
+    """Fx = floor(Fx (1 - Fdd)) on the Q23 grid, Fx >= 0 on the grid, 1 - Fdd a Q23
+    coefficient: as Fx - ceil(Fx Fdd), whose small product a float holds (all but)
+    exactly where Fx (1 - Fdd) itself would round before the floor -- an envelope that
+    holds (1 - 2^-20 a sample) loses 0.25 LSB a sample to that. Clobbers R12, Rt, Ru,
+    Rv."""
+    p.fop(v, x, "*", dd)
+    K.mul_k(p, v, v, -(2.0 ** 23))
+    ffloor(p, v, t, u)
+    K.mul_k(p, v, v, Q)
+    p.fop(x, x, "+", v)
+
+
+def smpy(p: Prog, d: int, a: int, b: int, s1: int, s2: int, s3: int) -> None:
+    """Fd = the 56300's product of the Q23 words Fa, Fb through the limiter's truncation,
+    signed: core.mpy_floor on the magnitudes, then floor(-x) = -floor(x) - 2^-23 for a
+    negative product (a product that is a whole Q23 word is taken as not one: 2^-23 of
+    the cases). A filter's coefficients come out exact, where a float product is a LSB
+    off often enough to move a resonance. Clobbers R0-R3, R12-R15, Rs1-Rs3."""
+    p.fop(s3, a, "*", b)
+    K.mul_k(p, s1, a, -1.0)
+    p.fop(s1, s1, "MAX", a)
+    K.mul_k(p, s2, b, -1.0)
+    p.fop(s2, s2, "MAX", b)
+    K.mpy_floor(p, d, s1, s2)
+    p.ifz(s3, "LT", lambda: (K.mul_k(p, d, d, -1.0), K.add_k(p, d, d, -Q)), kind="f")
 
 
 def sgrid(p: Prog, x: int, t: int = 13, u: int = 14) -> None:
@@ -439,8 +474,8 @@ class TRXBD:
                 p.fop(4, 4, "+", 9)
                 K.sat(p, 4)
                 w(p, 8, 1)
-                p.fop(6, 6, "*", 8)
-                grid(p, 6)
+                one_minus(p, 8)
+                env_mul(p, 6, 8, 9, 10, 8)
                 w(p, 8, 8)                           # the soft clipper
                 w(p, 10, 9)
                 p.fpass(9, 4)
@@ -591,6 +626,8 @@ class TRXB2:
         ss(p, M.HOLD, 6)
         p.fconst(7, 0x147AE * Q)
         p.if_(6, "GE", 7, lambda: p.fconst(4, 0x7FFFF8 * Q), lambda: w(p, 4, 3))
+        p.fconst(12, 1.0)
+        p.fop(4, 12, "-", 4)                             # 1 - dec (exact)
         p.st(C["c"], 4)
         w(p, 0, 9)                                       # the crusher's scales 2^(23-n), 2^(n-23)
         p.iconst(2, 1)
@@ -628,9 +665,11 @@ class TRXB2:
                 iadd_k(p, 10, 10, add - 8192)
 
         def one():
-            fl(p, 8, 2)                                  # ramp env (a sample), then the phase
-            K.mul_k(p, 8, 8, 0x7FEF9E * Q)
-            p.trunc(2, 8)
+            fl(p, 8, 2)                                  # ramp env (a sample): y0 - ceil(y0 d)
+            K.mul_k(p, 8, 8, -0x1062 * Q)
+            ffloor(p, 8, 9, 10)
+            p.trunc(9, 8)
+            p.iop(2, 9, "+", 2)
             w(p, 8, 1)
             p.iop(1, 8, "+", 1)
             p.ipass(8, 2)
@@ -668,13 +707,11 @@ class TRXB2:
             p.ifz(8, "EQ", lambda: K.fib(p, L, M.F1, M.F2, 9), lambda: p.fconst(9, 0.0))
             iadd_k(p, 7, 7, 1)
             p.ld(10, C["c"])                             # amp env: attack until 0.5, decay
-            p.fop(10, 3, "*", 10)
-            p.fop(10, 10, "+", 5)
+            env_mul(p, 3, 10, 11, 13, 14)
+            p.fop(3, 3, "+", 5)
             p.fconst(12, 0.5)
-            p.if_(10, "GE", 12, lambda: p.fconst(5, 0.0))
-            K.sat(p, 10)
-            grid(p, 10)
-            p.fpass(3, 10)
+            p.if_(3, "GE", 12, lambda: p.fconst(5, 0.0))
+            K.sat(p, 3)
             p.fop(4, 4, "*", 3)
             p.fconst(12, FADE)                           # the tick
             p.fop(10, 6, "*", 12)
@@ -837,22 +874,19 @@ class TRXSD:
         w(p, 0, 11)                                      # the resonators' coefficients
         x14(p, L, 4, 0, 0x900 - 3)                       # t1
         x14(p, L, 5, 0, 0x1900 - 0x241)                  # t2
-        p.fop(6, 5, "*", 4)
-        p.fop(6, 6, "+", 6)                              # A0 = 2 t1 t2
-        p.fop(7, 5, "*", 5)
-        K.mul_k(p, 7, 7, -1.0)
-        K.sat(p, 7)
-        sgrid(p, 7)                                      # c1 = sat(-t2^2)
+        K.mul_k(p, 6, 5, -1.0)
+        smpy(p, 7, 5, 6, 8, 9, 10)
+        K.sat(p, 7)                                      # c1 = sat(-t2^2)
         p.st(C["e"], 7)
-        p.fpass(8, 6)
-        K.sat(p, 8)
-        sgrid(p, 8)                                      # g = sat(A0)
+        K.mul_k(p, 6, 5, 2.0)
+        smpy(p, 8, 4, 6, 9, 10, 11)
+        K.sat(p, 8)                                      # g = sat(A0), A0 = 2 t1 t2
         p.st(C["f"], 8)
-        p.fconst(12, 0.5)
-        p.fop(9, 12, "-", 6)
+        K.mul_k(p, 6, 5, -2.0)
+        smpy(p, 9, 4, 6, 8, 10, 11)                      # floor(-A0)
+        K.add_k(p, 9, 9, 0.5)
         p.fop(9, 9, "-", 7)
-        K.sat(p, 9)
-        sgrid(p, 9)                                      # c0 = sat(0.5 - A0 - c1)
+        K.sat(p, 9)                                      # c0 = sat(0.5 - A0 - c1)
         p.st(C["d"], 9)
         s(p, 0, M.CNT)                                   # the snap table, for 4128 samples
         p.iconst(12, 0xFE0)
@@ -892,15 +926,15 @@ class TRXSD:
             K.sat(p, 15)
             p.fop(15, 15, "*", 3)                        # amp env
             w(p, 14, 1)
-            p.fop(3, 3, "*", 14)
-            grid(p, 3)
+            one_minus(p, 14)
+            env_mul(p, 3, 14, 4, 11, 14)
             K.fib(p, L, M.F1, M.F2, 11)                  # noise -> two resonators
             resonance(p, L, 11, 6, 7, C)
             resonance(p, L, 11, 8, 9, C)
             p.fop(11, 11, "*", 5)                        # noise env
             w(p, 14, 2)
-            p.fop(5, 5, "*", 14)
-            grid(p, 5)
+            one_minus(p, 14)
+            env_mul(p, 5, 14, 4, 13, 14)
             w(p, 14, 6)
             p.fop(11, 11, "*", 14)
             p.fop(15, 15, "+", 11)
@@ -1044,6 +1078,10 @@ class TRXXT:
             w(p, 5, 7)                                   # the ramp decays (a block)
             K.mpy_floor(p, 6, 4, 5)
             ss(p, M.RAMP, 6)
+            w(p, 4, 1)                                   # 1 - the amp decay
+            p.fconst(12, 1.0)
+            p.fop(4, 12, "-", 4)
+            p.st(C["c"], 4)
             s(p, 1, M.PH)
             p.ld(3, C["b"])
             w(p, 2, 8)
@@ -1053,9 +1091,8 @@ class TRXXT:
             def one():
                 quirk(p, L, 4, 1, 3, C["a"])
                 p.fop(4, 4, "*", 2)                      # amp env (in W8)
-                w(p, 8, 1)
-                p.fop(2, 2, "*", 8)
-                grid(p, 2)
+                p.ld(8, C["c"])
+                env_mul(p, 2, 8, 9, 10, 8)
                 K.mul_k(p, 7, 4, -1.0)                   # the slew stage, on -x
                 w(p, 8, 4)
                 w(p, 9, 5)
@@ -1200,15 +1237,13 @@ class TRXCL:
         w(p, 8, 5)
         p.iop(1, 8, "+", 1)                              # r2 = W5 + T[$80 + W6]
         x14(p, L, 7, 1, 0x1900)                          # t2
-        p.fop(4, 7, "*", 7)
-        K.mul_k(p, 4, 4, -1.0)
+        K.mul_k(p, 8, 7, -1.0)
+        smpy(p, 4, 7, 8, 9, 10, 11)
         K.sat(p, 4)
-        sgrid(p, 4)
         p.st(C["c"], 4)                                  # cb = sat(-t2^2)
-        p.fop(4, 7, "*", 6)
-        p.fop(4, 4, "+", 4)
+        K.mul_k(p, 8, 7, 2.0)
+        smpy(p, 4, 6, 8, 9, 10, 11)
         K.sat(p, 4)
-        sgrid(p, 4)
         p.st(C["d"], 4)                                  # g = sat(2 t1 t2)
         w(p, 0, 2)                                       # osc1: the DUAL delay
 
@@ -1258,8 +1293,8 @@ class TRXCL:
             p.fop(4, 4, "*", 6)                          # amp env, / 8
             K.mul_k(p, 4, 4, 0.125)
             w(p, 8, 1)
-            p.fop(6, 6, "*", 8)
-            grid(p, 6)
+            one_minus(p, 8)
+            env_mul(p, 6, 8, 9, 10, 8)
             s(p, 9, M.U1)                                # stage 1: in u, out H
             s(p, 10, M.U2)
             hp_stage(p, C, 4, 11, M.H1, M.H2, 9, 10)
@@ -1286,7 +1321,12 @@ class TRXRS:
     (int), W3 the shaper's threshold, W4 its ramp step.
     State: amp env, the phase (free running), the click count (int), the shaper's ramp,
     the two accumulating biquads' accumulators A, B (48-bit in the firmware: floats here)
-    and histories."""
+    and histories.
+
+    The shaper flips where the sine reaches its threshold, and with DIST 0 the threshold is
+    1 - 2^-23, which DSP2's sine reaches only at its trough: there its table is exactly -1
+    (k = 24573..24577, the recursion's limiter), where core.sine_fill gives -1 + 11..13 LSB.
+    So a sine at or below TROUGH (exactly those five words) is taken as -1 here."""
     NAME, ID = "TRX-RS", 20
     PNAMES = ("PTCH", "DEC", "DIST", "-", "-", "-", "-", "-")
     AMP, PH, CNT, RAMP, A, B, H1, H2, G1, G2, U1, U2 = range(12)
@@ -1346,18 +1386,20 @@ class TRXRS:
         K.mul_k(p, 4, 4, 2.0 ** 23)
         p.trunc(1, 4)
         x14(p, L, 7, 1, 0x200 + 0x1900)                  # t2
-        p.fop(4, 7, "*", 7)
-        K.mul_k(p, 4, 4, -2.0)
+        K.mul_k(p, 8, 7, -2.0)
+        smpy(p, 4, 7, 8, 9, 10, 11)
         K.sat(p, 4)
-        sgrid(p, 4)
         p.st(C["c"], 4)                                  # cb = sat(-2 t2^2)
-        p.fop(4, 7, "*", 6)
-        p.fop(4, 4, "+", 4)
+        K.mul_k(p, 8, 7, 2.0)
+        smpy(p, 4, 6, 8, 9, 10, 11)
         K.add_k(p, 4, 4, -0.5)
         K.sat(p, 4)
-        sgrid(p, 4)
         p.fop(4, 4, "+", 4)
         p.st(C["d"], 4)                                  # 2 g, g = sat(2 t1 t2 - 0.5)
+        w(p, 4, 1)                                       # 1 - the amp decay
+        p.fconst(12, 1.0)
+        p.fop(4, 12, "-", 4)
+        p.st(C["e"], 4)
         w(p, 0, 2)
         p.lsh(0, 0, 12)                                  # W2 / 32 indices
         p.st(C["a"], 0)
@@ -1388,7 +1430,9 @@ class TRXRS:
 
         def one():
             K.sine(p, L, 4, 1)
-            p.ld(8 + 6, C["a"])
+            p.fconst(13, TROUGH)                         # DSP2's table is -1 at its trough
+            p.if_(4, "LE", 13, lambda: p.fconst(4, -1.0))
+            p.ld(14, C["a"])
             p.iop(1, 14, "+", 1)
             w(p, 13, 3)                                  # the flip shaper
 
@@ -1417,9 +1461,9 @@ class TRXRS:
             K.sat(p, 4)
             iadd_k(p, 11, 11, 1)
             p.fop(4, 4, "*", 3)                          # u = amp env x
-            w(p, 14, 1)
-            p.fop(3, 3, "*", 14)
-            grid(p, 3)
+            sgrid(p, 4)
+            p.ld(15, C["e"])
+            env_mul(p, 3, 15, 13, 14, 15)
             # stage 1: A += cb H2 + 2g H1 + u2/2 - u1 + u/2; H = floor(sat A)
             s(p, 14, M.U1)
             s(p, 15, M.U2)
