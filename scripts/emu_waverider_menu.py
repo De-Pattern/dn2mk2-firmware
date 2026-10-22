@@ -223,7 +223,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             if last.get(half) == units[1]:
                 continue
             last[half] = units[1]
-            drop = (scenario == "slow") or (scenario == "fast" and dsp["fast"] == 5 and not dsp["dropped"])
+            drop = (scenario == "slow") or (scenario == "fast" and dsp["fast"] == 20 and not dsp["dropped"])
             dsp["fast"] += 1
             if drop:
                 dsp["dropped"] += 1
