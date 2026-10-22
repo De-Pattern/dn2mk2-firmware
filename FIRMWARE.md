@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.13** | 2026-10-22 | The Digitakt II's sample machines (ONESHOT, WERP, STRETCH, REPITCH, GRID) with DT2-style pages; four test sounds; your WAVs over USB, kept on the +Drive | `builds/v0.13-SAMPLER/` | yes |
+| **v0.14** | 2026-10-22 | Sampling: page 2 of every sample machine records IN / IN L / IN R / MAIN into SAMP 124-127 (threshold, length); ONESHOT's CFAD heard | `builds/v0.14-SAMPLING/` | yes |
+| v0.13 | 2026-10-22 | The Digitakt II's sample machines (ONESHOT, WERP, STRETCH, REPITCH, GRID) with DT2-style pages; four test sounds; your WAVs over USB, kept on the +Drive | `builds/v0.13-SAMPLER/` | yes |
 | v0.12 | 2026-10-21 | PERC: labels follow TYPE; page 1 the machine's 8 parameters; page 2 TYPE + Machinedrum effects (AMD AMF EQF EQG FLTF FLTW FLTQ); no stray ring | `builds/v0.12-PERC-FX/` | yes |
 | v0.11 | 2026-10-20 | PERC: your 24 Ravel drum machines (TRX/EFM/GND) as a machine, TYPE + 8 named parameters; Waverider removed | `builds/v0.11-PERC/` | yes |
 | v0.10 | 2026-10-20 | No more dead notes on RESONATOR/CZ (voice stealing); PING/SHFT TYPE by name; Waverider osc 2 (page 2); GRAN granular filter type | `builds/v0.10-GRAN/` | yes |
@@ -49,6 +50,56 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.14 — sampling, and CFAD
+
+`DN2mod_v0.14_SAMPLING_OS1.11.syx`
+sha256 `fd3253d66e16cd72c9ec7dc47e9b149820464a99588333b9cb134fe2beb0ac25`
+Gate: CLEARED TO FLASH, 2026-10-22 (USB size 1,955,057 of 2,097,152). Source: commit `eb06398` (gated with the runner of `6a30218`). Docs: `docs/sampler.md` ("Page 2: sampling").
+
+**Adds.**
+- **Sampling**, as on the DT2: every sample machine (ONESHOT, WERP, STRETCH, REPITCH,
+  GRID) has a **second page** (press **SYN** again): **REC** (the button fills when on),
+  **SRC** (IN, IN L, IN R, or MAIN — the DN2's own mix), **THRS** (0 starts at once;
+  above it waits for a hit that loud), **RLEN** (MAX = 21.8 s, else the seconds shown),
+  **DEST** (the recorder's own slots, **SAMP 124-127**).
+- What you record plays at once: set SAMP to its slot (124-127) on any sample track,
+  and play it with every machine (GRID slices it, REPITCH fits it to BARS, ...).
+- **CFAD on ONESHOT is heard now**: in FWD LOOP it crossfades the loop's end into the
+  audio before LOOP, so a loop cut anywhere does not click. Drawn as a knob.
+- Your USB samples use SAMP 1-122 (124-127 are the recorder's); the tool refuses more.
+
+**Test** (after the regression check; **back up the +Drive first**, as always):
+1. ONESHOT track, SAMP 1: CFAD (C) is a knob. PLAY to FWDL, LEN short, LOOP part-way;
+   hold a note: with CFAD 0 the loop clicks, turned up it is smooth.
+2. Page 2 (press SYN again): `Sampling (2/2)`, REC SRC THRS on top, RLEN (MAX) and DEST
+   (`A 124`) below; the page dots show two pages.
+3. A synth into the DN2's inputs. SRC IN, THRS 0, DEST 124: REC on, play a few seconds,
+   REC off. Page 1: SAMP 124, play the track: your recording.
+4. THRS up (half), REC on, wait (silence: nothing recorded), then play loud: it starts
+   with the first hit.
+5. SRC MAIN, DEST 125: record a pattern running on other tracks; SAMP 125 plays it.
+6. RLEN to 1.0 s: the recording stops by itself after a second.
+7. GRID on SAMP 125: slices of what you recorded.
+8. `python tools/dn2samples.py send FOLDER` while a recording is in SAMP 124: your
+   samples arrive in 1.., and SAMP 124 still plays the recording.
+9. Leave REC off before SAVE (REC is saved with the sound; a sound saved with REC on
+   starts recording when loaded).
+
+**Known issues.**
+- **Recordings are lost at power-off** and are not kept on the +Drive (`--keep` keeps
+  only your USB samples): the ColdFire cannot read the DSP's memory back yet.
+- The waveform is not drawn for SAMP 124-127 (same reason); the slot box shows the
+  number.
+- No input-level meter and no armed/recording indicator on page 2 (the DSP's state is
+  not visible to the ColdFire); REC's button shows only that REC is on.
+- One recorder: with REC on on several sample tracks, the lowest-numbered one records.
+- The inputs are read as the DN2's engine converts them (the block the DSP's driver
+  writes at `0x268538`); proven in the SHARC runner, not yet heard on the instrument.
+  MAIN is the previous block's mix (one block, 0.7 ms, late).
+- From v0.13: WERP/STRETCH/REPITCH are our readings of the manual; the widgets are close
+  to the DT2's, not pixel-identical; the +Drive region (3 GiB in) and the DSP load with
+  many STRETCH tracks are untested on the instrument.
 
 ## v0.13 — the Digitakt II's sample machines, and your samples
 
@@ -99,7 +150,7 @@ Gate: CLEARED TO FLASH, 2026-10-22 (USB size 1,953,542 of 2,097,152). Source: co
    heaviest).
 
 **Known issues.**
-- CFAD is shown but not heard yet.
+- CFAD is shown but not heard yet (heard from v0.14).
 - WERP, STRETCH and REPITCH are our own readings of the DT2 manual; the DT2's own
   algorithms are not public, so they are close in kind, not identical.
 - The widgets are drawn in the DT2's shapes by our own code; they are close, not
