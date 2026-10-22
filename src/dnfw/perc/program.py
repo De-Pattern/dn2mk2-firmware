@@ -52,6 +52,16 @@ def half(p: Prog, d: int, off: int, k146: int) -> None:
     p.iop(d, d, "AND", 12)
 
 
+def raw_type(p: Prog, d: int) -> None:
+    """Rd = this slot's machine type as the ColdFire sent it: the frame's header word at
+    148 + 2 t (v0.13). The record's copy (+0x1b4) is the lookup's answer, which is 5 for
+    PERC and for every sample machine (types 8..12 borrow PERC's engine slot, the one
+    path through the stock code the runner and the instrument have proven), so the frame
+    word tells them apart. Needs C['t'] in R9; clobbers R0, R1, R10, R12, I1."""
+    p.iop(10, 9, "+", 9)
+    half(p, d, 148, 10)
+
+
 def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     """One slot's block. In run mode T is the slot (also stored at C['t']); in emit mode
     the slot is read from C['t']."""
@@ -426,7 +436,8 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.iconst(11, RECORDS)
     p.iop(12, 11, "+", 12)
     p.seti(4, 12, "record: 0x2554b8 + 0x234 t")
-    p.ldi(0, 109, 4, "the record's machine type (+0x1b4)")
+    raw_type(p, 2)
+    p.ipass(0, 2)
     p.iconst(12, MACHINE_TYPE)
     p.e("COMP(R0, R12);")
     other = p.label("other")
@@ -451,7 +462,7 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.iconst(12, 16)
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
-    p.e(f"JUMP {rings_sw:#x};", "rings.asm's wr_rings, then CZ, then PING (which restores)")
+    p.e(f"JUMP {rings_sw:#x};", "smp.asm's wr_smp, then RESONATOR, CZ, PING (which restores)")
     p.emit_subs()
     p.raw(".wr_perc..end:")
     p.raw("      .type wr_perc.,STT_FUNC;")

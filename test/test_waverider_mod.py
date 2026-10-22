@@ -55,14 +55,16 @@ def test_applies_to_both_sections(applied, dn2_111):
     # since W5, the wave display's chunk, and since PING P2, PING's FLTR-list chunk
     main, chunks = platform.split(applied.payloads[3])
     assert len(main) == len(dn2_111.container.find(3).unpack())
-    assert [kind for kind, _ in chunks] == [platform.area.CODE] * 3     # pages, machines, PING (the wave display chunk went with Waverider, v0.11)
+    # pages, the page renderer (its own chunk since v0.13), machines, PING (the wave
+    # display chunk went with Waverider, v0.11)
+    assert [kind for kind, _ in chunks] == [platform.area.CODE] * 4
     assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 
 def _chunked(va: int, n: int) -> bytes:
     """N bytes at VA from the RAM chunks the mod loads (the machines chunk holds the
     name table, the attribute rows and the list since RESONATOR)."""
-    for name in ("machines_chunk", "ping_chunk", "chunk"):
+    for name in ("machines_chunk", "ping_chunk", "chunk", "c_chunk"):
         c = waverider.SPEC[name]
         code = bytes.fromhex(c["code"])
         if c["load"] <= va and va + n <= c["load"] + len(code):
@@ -74,47 +76,51 @@ def _clong(va: int) -> int:
     return struct.unpack(">I", _chunked(va, 4))[0]
 
 
-def test_the_list_offers_waverider_resonator_and_cz_before_midi(applied):
+def test_the_list_offers_our_machines_then_the_sample_machines_before_midi(applied):
     main = applied.payloads[3]
     begin = long_at(main, CF.LIST_BEGIN + 2)
     end = long_at(main, CF.LIST_END + 2)
     types = [_clong(a) for a in range(begin, end, 4)]
-    assert types == [0, 2, 1, 3, 5, 6, 7, 4]
-    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("48780020")
-    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e80020")
+    # v0.13: ONESHOT (8) and GRID (12), the sample machines this build renders
+    assert types == [0, 2, 1, 3, 5, 6, 7, 8, 12, 4]
+    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("48780028")
+    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e80028")
 
 
-def test_rows_5_to_7_of_the_name_table(applied):
+def test_rows_5_to_12_of_the_name_table(applied):
     main = applied.payloads[3]
     table = long_at(main, 0x400DC344)
     for row, (lo, sh) in ((5, (b"Perc\0", b"PRC\0")), (6, (b"Resonator\0", b"RSN\0")),
-                          (7, (b"CZ Phase\0", b"CZP\0"))):
+                          (7, (b"CZ Phase\0", b"CZP\0")), (8, (b"Oneshot\0", b"ONE\0")),
+                          (9, (b"Werp\0", b"WRP\0")), (10, (b"Stretch\0", b"STR\0")),
+                          (11, (b"Repitch\0", b"RPT\0")), (12, (b"Grid\0", b"GRD\0"))):
         long_ptr, short_ptr = _clong(table + 12 * row), _clong(table + 12 * row + 4)
         assert _chunked(long_ptr, len(lo)) == lo and _chunked(short_ptr, len(sh)) == sh
     for bound in (0x400DC332, 0x400DC358, 0x400DC37E):
-        assert at(main, bound, 2) == bytes.fromhex("7207")
+        assert at(main, bound, 2) == bytes.fromhex("720c")
 
 
-def test_attribute_rows_5_to_7_are_wavetones(applied, stock):
+def test_attribute_rows_5_to_12_are_wavetones(applied, stock):
     main = applied.payloads[3]
     rows = long_at(main, 0x400DC168)
     assert _chunked(rows, 20) == at(stock, CF.ATTR_STOCK_VA, 20)
-    assert _chunked(rows + 20, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
-    assert _chunked(rows + 24, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
-    assert _chunked(rows + 28, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
-    assert at(main, 0x400DC19C, 2) == bytes.fromhex("7407")
+    for row in range(5, 13):
+        assert _chunked(rows + 4 * row, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
+    assert at(main, 0x400DC19C, 2) == bytes.fromhex("740c")
 
 
-def test_the_stored_sound_load_keeps_types_5_to_7(applied):
-    assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("7409")
+def test_the_stored_sound_load_keeps_types_5_to_12(applied):
+    assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("740e")
 
 
 def test_the_group_function_gives_the_sample_machines_their_own_section(applied):
-    # run the rewritten 0x40059274 on every type: synths 1, MIDI 2, 5 to 7 3, else 0
+    # run the rewritten 0x40059274 on every type: synths 1, MIDI 2, 5 to 7 3, the sample
+    # machines 8 to 12 4 (v0.13), else 0
     main = applied.payloads[3]
     code = at(main, CF.GROUP_FN, len(CF.GROUP_STOCK))
-    got = {t: _run_group(code, t) for t in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 100)}
-    assert got == {-1: 0, 0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 3, 6: 3, 7: 3, 8: 0, 100: 0}
+    got = {t: _run_group(code, t) for t in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 100)}
+    assert got == {-1: 0, 0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 3, 6: 3, 7: 3, 8: 4, 9: 4, 12: 4,
+                   13: 0, 100: 0}
 
 
 def _run_group(code: bytes, t: int) -> int:

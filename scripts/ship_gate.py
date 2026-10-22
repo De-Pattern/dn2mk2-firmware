@@ -73,7 +73,8 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
     (W2: a descriptor's two pointers read as `and.l %d0,%a4@(70,%d4:w:8)`). Any other
     CODE chunk is checked whole."""
     lay = json.loads((ROOT / "src/dnfw/mods/waverider_code.json").read_text())["layout"]
-    out = {lay["is_wr"]: [(lay["is_wr"], lay["labels"]), (lay["c_load"], lay["c_text_end"])]}
+    out = {lay["is_wr"]: [(lay["is_wr"], lay["labels"])],
+           lay["c_load"]: [(lay["c_load"], lay["c_text_end"])]}      # v0.13: a chunk of its own
     if "ping_slot" in lay:      # PING's chunk: its shims, then its list, names and table
         out[lay["ping_slot"]] = [(lay["ping_slot"], lay["ping_code_end"])]
     if "mchunk_code_end" in lay:  # the machines chunk: the shims, then strings and tables
@@ -220,10 +221,12 @@ def main() -> int:
              "booted and drew its UI, no fault" if rc == 0 else out[-800:])
 
         # 6. engine + LOAD/SAVE
-        # PERC (5), RESONATOR (6) and CZ (7) are kept by LOAD; 8 still loads as FM Tone
+        # PERC (5), RESONATOR (6), CZ (7) and the sample machines (8..12, v0.13) are kept by
+        # LOAD; 13 still loads as FM Tone
         types = ["--machine-type", "3"] + (["--machine-type", "5", "--machine-type", "6",
                                             "--machine-type", "7", "--machine-type", "8",
-                                            "--machine-max", "7"]
+                                            "--machine-type", "12", "--machine-type", "13",
+                                            "--machine-max", "12"]
                                            if dsp_changed else [])
         # PING (6), SHFT (7) and GRAN (8) are kept by LOAD; 9 still loads as Multi-Mode
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",

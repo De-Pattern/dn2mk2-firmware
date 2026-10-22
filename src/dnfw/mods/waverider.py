@@ -63,6 +63,9 @@ def extents(firmware=None, area_length: int = 0) -> list[Extent]:
 def _chunks() -> list[tuple[int, bytes, str]]:
     out = [(SPEC["chunk"]["load"], bytes.fromhex(SPEC["chunk"]["code"]),
             "our machines' SYN pages: code, descriptors, labels")]
+    if "c_chunk" in SPEC:
+        out.append((SPEC["c_chunk"]["load"], bytes.fromhex(SPEC["c_chunk"]["code"]),
+                    "our machines' page renderer (csrc/waverider/page.c)"))
     if "machines_chunk" in SPEC:
         out.append((SPEC["machines_chunk"]["load"], bytes.fromhex(SPEC["machines_chunk"]["code"]),
                     "the machine shims, names, attributes and MACHINE SEL list (PERC, RESONATOR, CZ)"))

@@ -70,6 +70,7 @@ def main() -> int:
                    for va, want, why in CF.GUARDS + ping_cf.GUARDS],
         "layout": {k: v for k, v in sorted(built["layout"].items())},
         "chunk": {"load": built["chunk"]["load"], "code": built["chunk"]["code"].hex()},
+        "c_chunk": {"load": built["c_chunk"]["load"], "code": built["c_chunk"]["code"].hex()},
         "ping_chunk": {"load": built["ping_chunk"]["load"], "code": built["ping_chunk"]["code"].hex()},
         "machines_chunk": {"load": built["machines_chunk"]["load"],
                            "code": built["machines_chunk"]["code"].hex()},

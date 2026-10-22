@@ -114,3 +114,31 @@ def test_the_renderer_sits_between_the_assembly_and_the_runtime():
 def test_no_wave_display_chunk_since_perc():
     from dnfw.mods.waverider import SPEC
     assert "spans_chunk" not in SPEC
+
+
+# -- the sample machines (v0.13, docs/sampler.md) -----------------------------------------
+
+def test_each_sample_machine_has_its_descriptor_and_names():
+    from dnfw.sampler import machines as SM
+    assert len(pages.SMP_PAGES) == len(SM.NAMES) == 5
+    for k, ids in enumerate(pages.SMP_PAGES):
+        at = CHUNK.find(struct.pack(">8I", *ids))
+        assert at >= 8, SM.NAMES[k]
+        assert struct.unpack(">I", CHUNK[at + 32:at + 36])[0] == pages.TAG
+    for name in SM.NAMES:
+        named = pages.smp_named(name)
+        assert set(named) == set(range(238, 263))
+        for rid, short, long_ in SM.PAGES.get(name, SM.PAGES["ONESHOT"]):
+            if rid:
+                assert named[rid] == (long_, short)
+    hdr = pages.c_header()
+    assert "#define WR_KINDS 8" in hdr and "#define SMP_KIND0 4" in hdr
+    assert '"KICK", "SNARE", "HAT", "BEAT"' in hdr
+
+
+def test_the_samples_play_modes_and_grids_agree_with_the_dsp():
+    # page.c draws PLAY as smp_play[v * 4 / 128] and GRID as smp_grids[v / 24]: the
+    # DSP's own readings (dnfw.sampler.program: mode = v * 4 >> 7, g = v // 24)
+    from dnfw.sampler import machines as SM
+    assert SM.PLAY_MODES[127 * 4 // 128] == "FWD" and SM.PLAY_MODES[0] == "REV"
+    assert [SM.GRIDS[min(v // 24, 4)] for v in (0, 24, 48, 72, 96, 120)] == [4, 8, 16, 32, 64, 64]

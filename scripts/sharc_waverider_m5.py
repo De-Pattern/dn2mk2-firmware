@@ -67,6 +67,9 @@ from dnfw.waverider import dsp, testtable                       # noqa: E402
 from dnfw.perc import live as PL                                # noqa: E402
 from dnfw.perc import machines as PM                            # noqa: E402
 from dnfw.perc import program as PP                             # noqa: E402
+from dnfw.sampler import live as SL                             # noqa: E402
+from dnfw.sampler import machines as SM                         # noqa: E402
+from dnfw.sampler import program as SP                          # noqa: E402
 from dnfw.waverider import frame as FR                         # noqa: E402
 from dnfw.waverider import voice as V                          # noqa: E402
 
@@ -85,6 +88,8 @@ TUN1 = 25                       # WaveTone's Osc1 Tune (Milestone 6)
 TUN1_ZERO = 0x4000              # the frame word for 0 semitones: the sound's own (probe, 2026-09-30)
 FRAME_COPY = 0x25C48C           # where sw 0x1c2712 copies the frame image
 PERC_L = PL.layout()            # where the build puts PERC (dnfw.waverider.dsp)
+SMP_L = SL.layout()             # and the sample machines (v0.13)
+SMP_RENDERED = tuple(SM.TYPE_OF[n] for n in SM.ENGINED)
 
 
 # -- the machine ------------------------------------------------------------------------------
@@ -164,7 +169,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
     run on the DSP's memory at that entry); loop entries."""
     state = init
     out = {"machine": [], "amp_in": [], "amp_out": [], "buffers": [], "buffer_bits": [], "t5_inputs": [],
-           "perc": [], "loop_entries": 0, "setup": []}
+           "perc": [], "smp": [], "loop_entries": 0, "smp_entries": 0, "setup": []}
     instr = wall = 0
     for b in range(blocks):
         tap = {}
@@ -179,7 +184,8 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             ins, model = {}, {}
             for t in range(16):
                 rec = V.track_record(t)
-                if m2.word(r.state, rec + V.TRACK_MACHINE) == 5:
+                if (m2.word(r.state, rec + V.TRACK_MACHINE) == 5
+                        and frame_word(r.state, FR.header_offset(FR.MACHINE, t)) == PP.MACHINE_TYPE):
                     ins[t] = {"note": V.bits_f32(m2.word(r.state, NOTE_CELL + 4 * t) or 0),
                               "trig": bool(((m2.word(r.state, TRIG_WORD) or 0) >> 16) & (1 << t)),
                               "type": frame_word(r.state, FR.slot_offset(t, PM.TYPE_REC[1])),
@@ -196,14 +202,37 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             tap["perc_model"] = model
 
         def at_after_perc(r):
-            # RESONATOR's entry, PERC's tail: what PERC left in each type-5 track's buffer
-            # and state
+            # the sample machines' entry, PERC's tail: what PERC left in each type-5
+            # track's buffer and state; then the sample machines' model (dnfw.sampler.program
+            # run on the DSP's memory here) for every track on a rendered sample machine
             if "perc_dsp" in tap:
                 return
             tap["perc_dsp"] = {t: {"out": [m2.word(r.state, tap["bufs"][t] + 4 * k) or 0 for k in range(BLOCK)],
                                    "state": [m2.word(r.state, PERC_L.state + 128 * t + 4 * k) or 0
                                              for k in range(PM.STATE_WORDS)]}
                                for t in tap.get("perc_model", {})}
+            out["smp_entries"] += 1
+            model = {}
+            for t in range(16):
+                ty = frame_word(r.state, FR.header_offset(FR.MACHINE, t))
+                if ty in SMP_RENDERED:
+                    st = r.state
+                    p, mem = SP.run_voice(SMP_L, lambda a, st=st: m2.word(st, a) or 0, t, ty)
+                    buf = m2.word(st, PP.BUFFERS + 4 * t) or 0
+                    model[t] = {"type": ty, "out": [mem.get(buf + 4 * k) for k in range(BLOCK)],
+                                "state": [mem.get(SMP_L.state + SP.STATE_STRIDE * t + 4 * k)
+                                          for k in range(SP.STATE_STRIDE // 4)],
+                                "steps": p.steps}
+            tap["smp_model"] = model
+
+        def at_after_smp(r):
+            # RESONATOR's entry, the sample machines' tail
+            if "smp_dsp" in tap:
+                return
+            tap["smp_dsp"] = {t: {"out": [m2.word(r.state, tap["bufs"][t] + 4 * k) or 0 for k in range(BLOCK)],
+                                  "state": [m2.word(r.state, SMP_L.state + SP.STATE_STRIDE * t + 4 * k) or 0
+                                            for k in range(SP.STATE_STRIDE // 4)]}
+                              for t in tap.get("smp_model", {})}
 
         def at_resume(r):
             tap["machine"] = [m2.floats(r.state, tap["bufs"][t], BLOCK) for t in range(16)]
@@ -225,7 +254,8 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
         def none_arm(r):
             out["setup"].append(("none-arm", b, None))
 
-        hooks = {m3.DISPATCH: at_dispatch, dsp.PERC_SW: at_loop, dsp.RINGS_SW: at_after_perc,
+        hooks = {m3.DISPATCH: at_dispatch, dsp.PERC_SW: at_loop, dsp.SMP_SW: at_after_perc,
+                 dsp.RINGS_SW: at_after_smp,
                  LOOP_RESUME: at_resume,
                  m3.AMP_STAGE: amp, AMP_RETURN: amp_ret, SETUP_GUARD: guard,
                  SETUP_TABLE_READ: table_read, SETUP_NONE: none_arm}
@@ -256,6 +286,14 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                                 + (0 if t in got else PM.STATE_WORDS),
                                 "out": [V.bits_f32(x) for x in got.get(t, {}).get("out", [])],
                                 "model_steps": model[t]["steps"]} for t in model})
+        model, got = tap.get("smp_model", {}), tap.get("smp_dsp", {})
+        out["smp"].append({t: {"type": model[t]["type"],
+                               "out_mismatches": sum(1 for x, y in zip(model[t]["out"], got.get(t, {}).get("out", [])) if x != y)
+                               + (0 if t in got else BLOCK),
+                               "state_mismatches": sum(1 for x, y in zip(model[t]["state"], got.get(t, {}).get("state", [])) if x != y)
+                               + (0 if t in got else SP.STATE_STRIDE // 4),
+                               "out": [V.bits_f32(x) for x in got.get(t, {}).get("out", [])],
+                               "model_steps": model[t]["steps"]} for t in model})
         instr += res[2]
         state = r
     return {**out, "ok": True, "blocks": blocks, "instructions": instr, "wall_s": round(wall, 1),
@@ -290,6 +328,10 @@ def norm(text: str) -> str:
     t = re.sub(r"\bf(\d+)\b", r"r\1", t)
     t = re.sub(r"(?<![\w.])(-?)(\d+)\b(?!x)", lambda m: f"{m.group(1)}0x{int(m.group(2)):x}", t)
     t = re.sub(r"0x0*([0-9a-f]+)", r"0x\1", t)
+    # an absolute DDR address the assembler takes signed (DM(-0x7c000000)) and selmap prints
+    # unsigned (dm (0x84000000)): one 32-bit address either way
+    t = re.sub(r"dm\((\s*)-0x([0-9a-f]{7,8})\)",
+               lambda m: f"dm({(-int(m.group(2), 16)) & 0xFFFFFFFF:#x})", t)
     return re.sub(r"\s+", "", t)
 
 
@@ -311,7 +353,9 @@ def perc_links_ok() -> bool:
     count = (SHARC / "block_count.asm").read_text(encoding="utf-8")
     perc = (SHARC / "perc.asm").read_text(encoding="utf-8")
     return (f"JUMP {dsp.PERC_SW:#x};" in count
-            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// rings.asm's wr_rings", perc) == [f"{dsp.RINGS_SW:#x}"])
+            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// smp.asm's wr_smp", perc) == [f"{dsp.SMP_SW:#x}"]
+            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// rings.asm's wr_rings",
+                           (SHARC / "smp.asm").read_text(encoding="utf-8")) == [f"{dsp.RINGS_SW:#x}"])
 
 
 def gran_links_ok() -> bool:
@@ -328,7 +372,7 @@ def gran_links_ok() -> bool:
 
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
-    for name, load_sw in (("perc", dsp.PERC_SW), ("block_count", dsp.COUNT_SW),
+    for name, load_sw in (("perc", dsp.PERC_SW), ("smp", dsp.SMP_SW), ("block_count", dsp.COUNT_SW),
                           ("ping", dsp.PING_SW), ("rings", dsp.RINGS_SW),
                           ("cz", dsp.CZ_SW), ("gran", dsp.GRAN_SW)):
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
@@ -363,7 +407,7 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("perc", "block_count", "ping", "rings", "cz", "gran")) \
+             for n in ("perc", "smp", "block_count", "ping", "rings", "cz", "gran")) \
         and perc_links_ok() and gran_links_ok() and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
@@ -401,7 +445,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,smp,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -437,7 +481,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("perc", "block_count", "ping", "rings", "cz", "gran"):
+            for n in ("perc", "smp", "block_count", "ping", "rings", "cz", "gran"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
@@ -462,6 +506,17 @@ def main(argv=None):
             if runs["g0"]["ok"]:
                 wav("perc_amp_out.wav", runs["g0"]["amp_out"], a.seconds, wavs,
                     "TRX-BD at the amp's output, the end of the per-track chain")
+
+        if "smp" in steps:
+            print("\nstep 3b: the sample machines")
+            s3b = step_smp(init, sound, machines, a.blocks)
+            results["3b_smp"] = {k: v for k, v in s3b.items() if k != "runs"}
+            show(s3b)
+            mr = s3b["runs"]["mixed"]
+            if mr["ok"]:
+                for t, what in ((0, "SNARE reversed"), (1, "GRID on BEAT"), (4, "HAT looping")):
+                    wav(f"smp_{t}.wav", smp_series(mr, t), a.seconds, wavs,
+                        f"the sample machines, mixed run, track {t}: {what}")
 
         if "stock" in steps:
             print("\nstep 4: types 0-4 unchanged")
@@ -571,7 +626,7 @@ def step_map(dk, snap, m2mach, m5: Image, stock: bytes, init, sound, machines) -
     unpack(init, f.to_bytes(), {CLAMP_MIN: lambda rr: seen.append(m2.word_reg(rr, "R2"))})
     # control: the same frame on an image without the lookup patch
     nolook = bytearray(m5.stream)
-    bootstream.write_span(nolook, dsp.dm_to_load(dsp.LOOKUP_DM + 20), struct.pack("<I", 0))
+    bootstream.write_span(nolook, dsp.dm_to_load(dsp.LOOKUP16_DM + 20), struct.pack("<I", 0))
     ctl = init_on(snap, m2mach, Image(dk, bytes(nolook)))
     type_ctl = m2.word(unpack(ctl, base_frame(sound, machines).to_bytes()).state, rec0 + V.TRACK_MACHINE)
     # our spans, as the runner's memory holds them after init
@@ -753,6 +808,124 @@ def step_perc(init, sound, machines, blocks) -> dict:
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
 
 
+# -- step 3b: the sample machines (v0.13, docs/sampler.md) ----------------------------------------
+
+def smp_words(values: dict | None = None) -> dict:
+    """frame slot -> word for a sample machine: SL.Harness.defaults() plus VALUES
+    {record: knob value 0..top}"""
+    v = {SM.TUNE_REC: 60, SM.PLAY_REC: 127, SM.SAMP_REC: 1, SM.LEV_REC: SM.LEV_UNITY,
+         SM.STRT_REC: 0, SM.LEN_REC: 127, SM.LOOP_REC: 0, SM.SLEN_REC: 0, **(values or {})}
+    out = {}
+    for rec, x in v.items():
+        slot, lo, top = SM.RECORDS[rec]
+        out[slot] = (min(top, max(0, x)) + lo) << 8
+    return out
+
+
+def smp_series(run, t) -> list[float]:
+    return [x for blk in run["smp"] if t in blk for x in blk[t]["out"]]
+
+
+def smp_exact(run) -> tuple[int, int, int]:
+    n = o = st = 0
+    for blk in run["smp"]:
+        for v in blk.values():
+            n += 1
+            o += v["out_mismatches"]
+            st += v["state_mismatches"]
+    return n, o, st
+
+
+def step_smp(init, sound, machines, blocks) -> dict:
+    ONE, GRID, WERP = SM.TYPE_OF["ONESHOT"], SM.TYPE_OF["GRID"], SM.TYPE_OF["WERP"]
+
+    def frames(t0, words, others=None, other_words=None, trig=(1,), note=0x3C00):
+        def fb(b):
+            f = base_frame(sound, machines, t0=t0, overrides=words, note=note, trigger=b in trig,
+                           others=others, trigger_others=True)
+            for t, ws in (other_words or {}).items():
+                for slot, w in ws.items():
+                    f.param(t, slot, w)
+            return f.to_bytes()
+        return fb
+
+    runs = {}
+    t0 = time.perf_counter()
+    runs["kick"] = run_blocks(init, frames(ONE, smp_words()), blocks)
+    runs["kick_up"] = run_blocks(init, frames(ONE, smp_words({SM.TUNE_REC: 72})), blocks)
+    # four sample voices, PERC and a machine with no renderer side by side: track 0 the
+    # snare reversed, 1 GRID slicing BEAT, 2 PERC TRX-SD, 3 WERP (silent), 4 the hat
+    # looping forward, 5 FM Tone
+    sd = PM.NAMES.index("TRX-SD")
+    runs["mixed"] = run_blocks(init, frames(
+        ONE, smp_words({SM.SAMP_REC: 2, SM.PLAY_REC: 0}),
+        others={1: GRID, 2: 5, 3: WERP, 4: ONE, 5: 0},
+        other_words={1: smp_words({SM.SAMP_REC: 4, SM.GRID_REC: 48, SM.SLICE_REC: 40}),
+                     2: perc_words(sd), 3: smp_words(),
+                     4: smp_words({SM.SAMP_REC: 3, SM.PLAY_REC: 80, SM.LOOP_REC: 20})}), blocks)
+    runs["off"] = run_blocks(init, frames(ONE, smp_words({SM.SAMP_REC: 0})), blocks)
+    runs["empty_slot"] = run_blocks(init, frames(ONE, smp_words({SM.SAMP_REC: 90})), blocks)
+    runs["silent"] = run_blocks(init, frames(ONE, smp_words(), trig=()), blocks)
+    runs["retrig"] = run_blocks(init, frames(ONE, smp_words(), trig=(1, RETRIG)), blocks)
+    runs["tops"] = run_blocks(init, frames(GRID, smp_words({r: 127 for r in SM.RECORDS})), blocks)
+    runs["bottoms"] = run_blocks(init, frames(ONE, smp_words({r: 0 for r in SM.RECORDS} | {SM.SAMP_REC: 1,
+                                                                                       SM.LEV_REC: 100})), blocks)
+    print(f"    sample machines: {round(time.perf_counter() - t0)} s", flush=True)
+    ok_runs = all(r["ok"] for r in runs.values())
+    exact = {k: smp_exact(r) for k, r in runs.items() if r["ok"]}
+    mx = runs["mixed"]
+    kick = smp_series(runs["kick"], 0)
+    up = smp_series(runs["kick_up"], 0)
+    ref = SL.test_samples()
+    # the kick as the DSP played it against the sample itself: 0.5 frames a sample, linear
+    exp = [ref[0][k // 2] if k % 2 == 0 else 0.5 * (ref[0][k // 2] + ref[0][k // 2 + 1])
+           for k in range(len(kick) - BLOCK)]
+    kick_err = max((abs(a - b) for a, b in zip(kick[BLOCK:], exp)), default=1.0)
+    werp_buf = [x for blk in mx["buffers"][1:] for x in blk[3]] if mx["ok"] else []
+    rev = smp_series(mx, 0) if mx["ok"] else []
+    rev_grows = len(rev) >= 4 * BLOCK and V.rms(rev[-2 * BLOCK:]) > V.rms(rev[BLOCK:3 * BLOCK])
+    off = smp_series(runs["off"], 0)
+    empty = smp_series(runs["empty_slot"], 0)
+    silent = smp_series(runs["silent"], 0)
+    rt, one = smp_series(runs["retrig"], 0), kick
+    n = {"smp_exact_voice_blocks_out_state_mismatches": exact,
+         "peaks_mixed": {t: V.peak(smp_series(mx, t)) for t in (0, 1, 4)} if mx["ok"] else None,
+         "kick_vs_sample_max_err": kick_err,
+         "zero_crossings_kick_kick_up": (zero_crossings(kick), zero_crossings(up)),
+         "smp_entries_kick": runs["kick"].get("smp_entries"),
+         "perc_in_mixed": perc_exact(mx) if mx["ok"] else None,
+         "werp_peak": V.peak(werp_buf) if werp_buf else None,
+         "model_steps_per_block": {k: max((v["model_steps"] for blk in r["smp"] for v in blk.values()), default=0)
+                                   for k, r in runs.items() if r["ok"]},
+         "instructions_per_block_mixed": round(mx.get("instructions", 0) / max(blocks, 1)),
+         "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}
+    checks = {
+        "every run returns every block": ok_runs,
+        "the sample machines are entered from PERC's tail, once a block": runs["kick"].get("smp_entries") == blocks,
+        "every rendered sample track's buffer and state, every block of every run, are bit-exact to "
+        "dnfw.sampler.program run on the DSP's memory at its entry":
+            ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for v in exact.values()),
+        "ONESHOT plays KICK from the pool as the sample is (max error < 1e-5)": kick_err < 1e-5,
+        "TUNE +12 is higher (more zero crossings)": zero_crossings(up) > zero_crossings(kick) > 0,
+        "in the mixed run, GRID's slice and the looping hat sound (peak > 0.05); the reversed "
+        "snare, which starts at its quiet end, sounds (> 0.01) and grows":
+            bool(n["peaks_mixed"]) and n["peaks_mixed"][1] > 0.05 and n["peaks_mixed"][4] > 0.05
+            and n["peaks_mixed"][0] > 0.01 and rev_grows,
+        "PERC beside them is bit-exact to its model and sounds":
+            mx["ok"] and perc_exact(mx)[0] > 0 and perc_exact(mx)[1:] == (0, 0)
+            and V.peak(perc_series(mx, 2)) > 0.05,
+        "a sample machine with no renderer (WERP) leaves its buffer at 0": bool(werp_buf) and all(x == 0.0 for x in werp_buf),
+        "SAMP 0 (OFF), an empty slot and no trigger are silent":
+            all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
+        "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]
+            and rt[BLOCK * RETRIG:] != one[BLOCK * RETRIG:],
+        "nothing non-finite or above 4.0 in any sample buffer":
+            ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["smp"]
+                            for v in blk.values() for x in v["out"]),
+    }
+    return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
+
+
 # -- step 4 -------------------------------------------------------------------------------------------
 
 def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -> dict:
@@ -765,16 +938,21 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
     a = run_blocks(init_on(snap, m2mach, m5), frames(4), blocks)        # no type-5 track, M5 image
     b = run_blocks(init_on(snap, m2mach, stock), frames(4), blocks)     # the same, stock image
     c = run_blocks(init_on(snap, m2mach, m5), frames(5), blocks)        # track 0 type 5, M5 image
-    ok_runs = a["ok"] and b["ok"] and c["ok"]
+    d = run_blocks(init_on(snap, m2mach, m5), frames(SM.TYPE_OF["ONESHOT"]), blocks)   # track 0 ONESHOT
+    e = run_blocks(init_on(snap, m2mach, m5), frames(SM.TYPE_OF["WERP"]), blocks)      # track 0 WERP
+    ok_runs = a["ok"] and b["ok"] and c["ok"] and d["ok"] and e["ok"]
     # compared as bit patterns: the runner's FM Tone voice can produce NaN, and NaN != NaN
     all16 = ok_runs and a["buffer_bits"] == b["buffer_bits"]
     t1_15 = ok_runs and [blk[1:] for blk in c["buffer_bits"]] == [blk[1:] for blk in b["buffer_bits"]]
     active = [t for t in range(1, 16) if ok_runs and any(any(blk[t]) for blk in b["buffer_bits"])]
     nan = [t for t in range(16) if ok_runs and any(x != x for blk in b["buffers"] for x in blk[t])]
     checks = {
-        "the three runs return every block": ok_runs,
+        "the five runs return every block": ok_runs,
         "no type-5 track: all 16 track buffers bit-identical, M5 image vs stock": all16,
         "track 0 type 5: tracks 1-15 bit-identical to the stock run": t1_15,
+        "v0.13: track 0 ONESHOT (8), then WERP (9): tracks 1-15 bit-identical to the stock run":
+            ok_runs and all([blk[1:] for blk in x["buffer_bits"]] == [blk[1:] for blk in b["buffer_bits"]]
+                            for x in (d, e)),
         "stock machines wrote their tracks (non-zero bits on at least one of tracks 1-4)":
             bool(set(active) & {1, 2, 3, 4}),
     }
@@ -785,7 +963,8 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
                                         for t in range(16)] if ok_runs else None,
                         "loop_entries": {"m5_no_type5": a.get("loop_entries"), "stock": b.get("loop_entries"),
                                          "m5_type5": c.get("loop_entries")},
-                        "halts": {k: r.get("halt") for k, r in (("a", a), ("b", b), ("c", c)) if not r["ok"]}}}
+                        "halts": {k: r.get("halt") for k, r in (("a", a), ("b", b), ("c", c), ("d", d), ("e", e))
+                                  if not r["ok"]}}}
 
 
 # -- step 6: PING (docs/ping.md) -----------------------------------------------------------------

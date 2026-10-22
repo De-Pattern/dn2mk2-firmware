@@ -67,8 +67,8 @@ typedef unsigned char u8;
 #define WR_WIDTH 96              /* the picture's width, from WAVE_X */
 
 /* is the active track one of ours? (pages.is_wr's test: the active track's sound,
- * [0x800052a0] + 52 + 1163 t, has machine type 5, 6 or 7 at +0xDE) -> 1 PERC,
- * 2 RESONATOR, 3 CZ, 0 none */
+ * [0x800052a0] + 52 + 1163 t, has machine type 5..12 at +0xDE) -> 1 PERC,
+ * 2 RESONATOR, 3 CZ, 4..8 the sample machines (types 8..12, docs/sampler.md), 0 none */
 static int wr_active(void)
 {
     u8 t = UI_TRACK;
@@ -76,7 +76,7 @@ static int wr_active(void)
     if (t > 15 || !kit)
         return 0;
     signed char m = (signed char)kit[52u + 1163u * t + 0xDEu];
-    return m == 5 ? 1 : m == 6 ? 2 : m == 7 ? 3 : 0;   /* PERC, RESONATOR, CZ (docs/cz.md) */
+    return m >= 5 && m <= 12 ? m - 4 : 0;
 }
 
 /* TYPE's value (0..0x7f00) -> the machine, as the DSP reads it (dnfw.perc.program) */
@@ -465,6 +465,80 @@ static const char *cz_text(void *view, u32 id, const char *label)
     return label;
 }
 
+/* The sample machines (docs/sampler.md). A control's 0..top value, as the DSP reads it
+ * (dnfw.sampler.program.ctl). */
+static int smp_get(void *view, u32 id)
+{
+    u8 flag;
+    int v = GET_VALUE(view, id, &flag) >> 8;
+    const int *r = RECORD(id);
+    int lo = r[2] >> 8, top = (r[3] >> 8) - lo;
+    v -= lo;
+    return v < 0 ? 0 : v > top ? top : v;
+}
+
+static const char *smp_text(void *view, u32 id, int kind, const char *label)
+{
+    static char buf[6] __attribute__((section(".data")));
+    if (id == SMP_PLAY_ID) {
+        int k = smp_get(view, id) * 4 / 128;
+        return smp_play[k > 3 ? 3 : k];
+    }
+    if (id == SMP_SAMP_ID) {
+        int k = smp_get(view, id);
+        if (k == 0)
+            return "OFF";
+        if (k <= SMP_SOUNDS)
+            return smp_sound[k - 1];
+        buf[0] = '0' + k / 100; buf[1] = '0' + k / 10 % 10; buf[2] = '0' + k % 10; buf[3] = 0;
+        return buf[0] == '0' ? buf + 1 : buf;
+    }
+    if (kind == SMP_GRID_KIND && id == SMP_GRID_ID) {
+        int g = smp_get(view, id) / 24;
+        int n = smp_grids[g > 4 ? 4 : g];
+        buf[0] = 'G'; buf[1] = '0' + n / 10; buf[2] = '0' + n % 10; buf[3] = 0;
+        if (n < 10) { buf[1] = '0' + n; buf[2] = 0; }
+        return buf;
+    }
+    return label;
+}
+
+/* the picture: the machine and the sound in the middle; under them the sample as a bar,
+ * the part that plays solid (STRT..STRT+LEN, or GRID's slice) and LOOP's point marked */
+static void smp_picture(void *c, void *view, int kind)
+{
+    int k = smp_get(view, SMP_SAMP_ID);
+    const char *snd = k == 0 ? "OFF" : k <= SMP_SOUNDS ? smp_sound[k - 1] : "EMPTY";
+    TEXT(c, FONT, WAVE_X + WR_WIDTH / 2, 30, CENTRED, "%.7s", smp_machine[kind - SMP_KIND0]);
+    TEXT(c, FONT, WAVE_X + WR_WIDTH / 2, 21, CENTRED, "%.5s", snd);
+    int w = WR_WIDTH - 8, x0 = WAVE_X + 4, a, b, loop = -1;
+    if (kind == SMP_GRID_KIND) {
+        int g = smp_get(view, SMP_GRID_ID) / 24, n = smp_grids[g > 4 ? 4 : g];
+        int s = (smp_get(view, SMP_SLICE_ID) >> 1) & (n - 1);
+        int len = (smp_get(view, SMP_SLEN_ID) >> 1) + 1;
+        a = s * w / n;
+        b = (s + len) * w / n;
+        for (int j = 0; j <= n && n <= 32; j++)
+            px(c, x0 + j * w / n, POS_Y + 2);
+    } else {
+        a = smp_get(view, SMP_STRT_ID) * w / 120;
+        b = a + smp_get(view, SMP_LEN_ID) * w / 127;
+        loop = smp_get(view, SMP_LOOP_ID) * w / 127;
+    }
+    if (b > w) b = w;
+    for (int x = 0; x <= w; x += 2)
+        px(c, x0 + x, POS_Y);
+    for (int x = a; x <= b; x++) {
+        px(c, x0 + x, POS_Y);
+        px(c, x0 + x, POS_Y + 1);
+    }
+    if (loop >= 0) {
+        int pmode = smp_get(view, SMP_PLAY_ID) * 4 / 128;
+        if (pmode == 1 || pmode == 2)               /* REVL, FWDL: the loop point */
+            column(c, x0 + loop, POS_Y - 2, POS_Y + 3);
+    }
+}
+
 /* PING and SHFT (src/dnfw/ping/pages.py): every cell widget of a stock page is drawn by
  * 0x4006448a(view, canvas, x, y, id, ...), and as each one finishes (wr_cell_tail) this
  * is told which. The cell of Multi-Mode's Filter Type (record 38) -- PING's TYPE, SHFT's
@@ -507,7 +581,8 @@ void wr_page_draw(void *view, void *canvas)
     int kind = wr_active();
     int res = kind == 2;                        /* RESONATOR's page */
     int cz = kind == 3;                         /* CZ's */
-    if (page < 0 || page >= (cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
+    int smp = kind >= SMP_KIND0;                /* a sample machine's: one page */
+    if (page < 0 || page >= (smp ? 1 : cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
         page = 0;
     if (kind == 1) {                            /* PERC: the names TYPE has now */
         u8 flag;
@@ -521,18 +596,24 @@ void wr_page_draw(void *view, void *canvas)
         cz_envelope(canvas, view, page);
     else if (res)
         modes(canvas, view);
+    else if (smp)
+        smp_picture(canvas, view, kind);
     else
         perc_picture(canvas, view);
 
     for (int i = 0; i < 8; i++) {
         int top = i < 4;
         int cx = COL0 + COLW * (i & 3) + COLW / 2;
-        u32 id = cz ? cz_ids[page][i] : res ? res_ids[page][i] : wr_ids[page][i];
-        const char *label = cz ? cz_labels[page][i] : res ? res_labels[page][i] : wr_labels[page][i];
+        u32 id = smp ? smp_ids[kind - SMP_KIND0][i] : cz ? cz_ids[page][i] : res ? res_ids[page][i]
+                 : wr_ids[page][i];
+        const char *label = smp ? "-" : cz ? cz_labels[page][i] : res ? res_labels[page][i]
+                            : wr_labels[page][i];
         if (cz)
             label = cz_text(view, id, label);   /* CZ: page 1's values as text */
         else if (!res && id)
-            label = NAME_SHORT(id);             /* PERC: the name wr_names gave the record */
+            label = NAME_SHORT(id);             /* PERC, samples: the name wr_names gave the record */
+        if (smp && id)
+            label = smp_text(view, id, kind, label);
         TEXT(canvas, FONT, cx, top ? TOP_LABEL_Y : BOT_LABEL_Y, CENTRED, "%.5s", label);
         if (!id || (!res && !cz && label[0] == '-' && !label[1]))
             continue;                           /* an empty place, or a parameter this machine lacks */

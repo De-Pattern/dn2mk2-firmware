@@ -47,10 +47,13 @@ from dataclasses import dataclass
 
 BASE = 0x40000400
 NEW_TYPE = 5
-NEW_TYPES = (5, 6, 7)                   # Waverider; RESONATOR (docs/rings.md); CZ (docs/cz.md): WaveTone clones
+NEW_TYPES = (5, 6, 7, 8, 9, 10, 11, 12)  # PERC; RESONATOR (docs/rings.md); CZ (docs/cz.md); the
+                                        # Digitakt II's sample machines (docs/sampler.md): WaveTone clones
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's place
-MACHINE_NAMES = {5: ("Perc", "PRC"), 6: ("Resonator", "RSN"), 7: ("CZ Phase", "CZP")}
+MACHINE_NAMES = {5: ("Perc", "PRC"), 6: ("Resonator", "RSN"), 7: ("CZ Phase", "CZP"),
+                 8: ("Oneshot", "ONE"), 9: ("Werp", "WRP"), 10: ("Stretch", "STR"),
+                 11: ("Repitch", "RPT"), 12: ("Grid", "GRD")}
 # RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list
 # outgrew the three caves W5 used, so all of it is a platform CODE chunk in RAM, after
 # PING's (dnfw.ping.coldfire.LOAD) and below the platform runtime; the caves are
@@ -61,7 +64,9 @@ MCHUNK_END = 0x46710000
 # -- 1. the MACHINE SEL list -------------------------------------------------------------
 LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
-LIST_NEW = (0, 2, 1, 3, 5, 6, 7, 4)     # Waverider, RESONATOR, CZ after Swarmer, before MIDI's divider
+# PERC, RESONATOR, CZ after Swarmer; then the sample machines this build renders (v0.13:
+# ONESHOT and GRID; WERP, STRETCH and REPITCH have rows but are not offered); then MIDI
+LIST_NEW = (0, 2, 1, 3, 5, 6, 7, 8, 12, 4)
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -145,20 +150,24 @@ def _long(v: int) -> bytes:
     return struct.pack(">I", v & 0xFFFFFFFF)
 
 
-SAMPLE_GROUP = 3                        # our machines: Waverider (5), RESONATOR (6), CZ (7)
+SAMPLE_GROUP = 3                        # our synth machines: PERC (5), RESONATOR (6), CZ (7)
 SAMPLE_TYPES_LAST = 7
+SAMPLER_GROUP = 4                       # the sample machines (8..12), a section of their own
+SAMPLER_FIRST, SAMPLER_LAST = 8, 12
+TYPES_LAST = NEW_TYPES[-1]              # every type 5..TYPES_LAST is a WaveTone clone
 
 # MACHINE SEL (and the second list at 0x40059cdc) inserts a divider row -- an
 # unlabelled row of value -1, drawn as dots -- wherever this group changes. The
 # groups are only compared for equality, so a third one is just another section.
 GROUP_SOURCE = f"""
 | group(type), rewritten in place at {GROUP_FN:#010x}: the synths 0..3 -> 1, MIDI (4)
-| -> 2, the sample machines {NEW_TYPE}..{SAMPLE_TYPES_LAST} -> {SAMPLE_GROUP}, anything else 0
-| (stock: 0..3 -> 1, 4 -> 2). d0 holds the answer to each test before it is made,
-| and every branch follows the instruction that set its flags: `moveq` clears C,
-| so it never sits between a `subq` and its `bcs` (the first version of this did,
-| and put the synths in group 0 -- the emulator caught it). Borrows are unsigned,
-| after the sign test. Callers read the low byte.
+| -> 2, our synth machines {NEW_TYPE}..{SAMPLE_TYPES_LAST} -> {SAMPLE_GROUP}, the sample
+| machines {SAMPLER_FIRST}..{SAMPLER_LAST} -> {SAMPLER_GROUP}, anything else 0 (stock: 0..3 -> 1,
+| 4 -> 2). d0 holds the answer to each test before it is made, and every branch follows
+| the instruction that set its flags: `moveq` clears C, so it never sits between a
+| `subq` and its `bcs`/`bls` (the first version of this did, and put the synths in group
+| 0 -- the emulator caught it). Borrows are unsigned, after the sign test. Callers read
+| the low byte. 34 bytes, the stock function's own size.
     move.l  %sp@(4),%d1
     blt.s   0f
     moveq   #1,%d0
@@ -169,6 +178,9 @@ GROUP_SOURCE = f"""
     beq.s   9f
     moveq   #{SAMPLE_GROUP},%d0
     subq.l  #{SAMPLE_TYPES_LAST - 4},%d1
+    bls.s   9f
+    moveq   #{SAMPLER_GROUP},%d0
+    subq.l  #{SAMPLER_LAST - SAMPLE_TYPES_LAST},%d1
     bls.s   9f
 0:  moveq   #0,%d0
 9:  rts
@@ -186,74 +198,55 @@ TRACK_TYPE_EXIT = 0x4004B81E            # getMachineType(track): its common exit
 
 SHIMS = f"""
 | param_set_slot_to_id, entered from {SLOT_HOOK:#010x}: the two loads it displaced,
-| then type {NEW_TYPE} -> {CLONE} (WaveTone), then back. d2 is saved at entry and
+| then types {NEW_TYPE}..{TYPES_LAST} -> {CLONE} (WaveTone), then back. d2 is saved at entry and
 | overwritten before it is read ({SLOT_TO_ID + 0x16:#010x}).
 slot_shim:
     move.l  %sp@(12),%d0
     movea.l %sp@(16),%a1
-    moveq   #5,%d2
-    cmp.l   %d0,%d2
-    beq.s   0f
-    moveq   #6,%d2
-    cmp.l   %d0,%d2
-    beq.s   0f
-    moveq   #7,%d2
-    cmp.l   %d0,%d2
-    bne.s   1f
-0:  moveq   #{CLONE},%d0
+    cmpi.l  #{NEW_TYPE},%d0
+    blt.s   1f
+    cmpi.l  #{TYPES_LAST},%d0
+    bgt.s   1f
+    moveq   #{CLONE},%d0
 1:  jmp     {SLOT_RESUME:#010x}
 
 | A one-argument per-machine UI accessor whose first two instructions were
 | `moveq #4,%d1 ; move.l %sp@(4),%d0`, now `jsr` here: the same two loads, with
-| type {NEW_TYPE} read as {CLONE}. The jsr's return address sits on top, so the
+| types {NEW_TYPE}..{TYPES_LAST} read as {CLONE}. The jsr's return address sits on top, so the
 | caller's argument is at 8. The accessor goes on to `cmp.l %d0,%d1`.
 canon_arg:
     move.l  %sp@(8),%d0
-    moveq   #5,%d1
-    cmp.l   %d0,%d1
-    beq.s   0f
-    moveq   #6,%d1
-    cmp.l   %d0,%d1
-    beq.s   0f
-    moveq   #7,%d1
-    cmp.l   %d0,%d1
-    bne.s   1f
-0:  moveq   #{CLONE},%d0
+    cmpi.l  #{NEW_TYPE},%d0
+    blt.s   1f
+    cmpi.l  #{TYPES_LAST},%d0
+    bgt.s   1f
+    moveq   #{CLONE},%d0
 1:  moveq   #4,%d1
     rts
 
 | The page accessor 0x400c24ee(type, page): its `move.l %sp@(8),%d1 ; move.l
-| %sp@(12),%d0` (after its own push of d2), now `jsr` here, with type {NEW_TYPE}
+| %sp@(12),%d0` (after its own push of d2), now `jsr` here, with types {NEW_TYPE}..{TYPES_LAST}
 | read as {CLONE}. d2 holds its bound 4 and is left alone; it compares next.
 canon_page:
     move.l  %sp@(12),%d1
     move.l  %sp@(16),%d0
-    subq.l  #5,%d1
-    beq.s   0f
-    subq.l  #1,%d1
-    beq.s   0f
-    subq.l  #1,%d1
-    beq.s   0f
-    addq.l  #7,%d1
-    rts
-0:  moveq   #{CLONE},%d1
-    rts
+    cmpi.l  #{NEW_TYPE},%d1
+    blt.s   1f
+    cmpi.l  #{TYPES_LAST},%d1
+    bgt.s   1f
+    moveq   #{CLONE},%d1
+1:  rts
 
 | getMachineType(track) 0x4004b7f2, from its read of sound+0xDE: the UI's view of
-| a track's machine. Type {NEW_TYPE} is reported as {CLONE}, so the ~60 places the UI
+| a track's machine. Types {NEW_TYPE}..{TYPES_LAST} are reported as {CLONE}, so the ~60 places the UI
 | asks behave as they do for WaveTone. Back to its common exit.
 canon_track:
     mvs.b   %a0@(222),%d0
-    moveq   #5,%d1
-    cmp.l   %d0,%d1
-    beq.s   0f
-    moveq   #6,%d1
-    cmp.l   %d0,%d1
-    beq.s   0f
-    moveq   #7,%d1
-    cmp.l   %d0,%d1
-    bne.s   1f
-0:  moveq   #{CLONE},%d0
+    cmpi.l  #{NEW_TYPE},%d0
+    blt.s   1f
+    cmpi.l  #{TYPES_LAST},%d0
+    bgt.s   1f
+    moveq   #{CLONE},%d0
 1:  jmp     {TRACK_TYPE_EXIT:#010x}
 
 | The same question, answered with the machine the track really has: for the
@@ -287,21 +280,16 @@ VALID_SITE = 0x40036C24                 # mvs.b %a0@(222),%d3 ; move.l %d2,-(%sp
 VALID_STOCK = bytes.fromhex("772800de2f02")
 VALID_NEXT = bytes.fromhex("4eb9400dbce8")   # jsr record page(param)
 SHIMS2 = f"""
-| from {VALID_SITE:#010x} by jsr: the type byte into d3, 5 read as 1, then the
-| displaced `move.l %d2,-(%sp)` under the return address. a1 is free: the jsr
+| from {VALID_SITE:#010x} by jsr: the type byte into d3, {NEW_TYPE}..{TYPES_LAST} read as {CLONE}, then
+| the displaced `move.l %d2,-(%sp)` under the return address. a1 is free: the jsr
 | that follows (0x400dbce8) is a scratch-register call.
 canon_valid:
     mvs.b   %a0@(222),%d3
-    moveq   #5,%d0
-    cmp.l   %d3,%d0
-    beq.s   0f
-    moveq   #6,%d0
-    cmp.l   %d3,%d0
-    beq.s   0f
-    moveq   #7,%d0
-    cmp.l   %d3,%d0
-    bne.s   1f
-0:  moveq   #{CLONE},%d3
+    cmpi.l  #{NEW_TYPE},%d3
+    blt.s   1f
+    cmpi.l  #{TYPES_LAST},%d3
+    bgt.s   1f
+    moveq   #{CLONE},%d3
 1:  movea.l %sp@+,%a1
     move.l  %d2,%sp@-
     jmp     %a1@
@@ -397,14 +385,14 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                                      base=pages.C_LOAD)
     if cbss:
         raise ComposeError(f"the page renderer has {cbss} bytes of BSS; nothing zeroes it")
-    if pages.C_LOAD + len(cimage) > ping_cf.LOAD:
-        raise ComposeError(f"the page renderer ends past {ping_cf.LOAD:#010x}, PING's chunk")
+    if len(cimage) > pages.C_SPAN:
+        raise ComposeError(f"the page renderer ({len(cimage)} B) is larger than its {pages.C_SPAN:#x}")
     ptable = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in pages.LABELS_OUT) + "\n"
     pblob = assemble(pages.source(csyms["wr_page_draw"], csyms["wr_cell"]) + ptable, base=pages.LOAD)
     asm = pblob[:-4 * len(pages.LABELS_OUT)]
-    if len(asm) > pages.C_LOAD - pages.LOAD:
-        raise ComposeError(f"the pages assembly ({len(asm)} B) runs into the renderer")
-    chunk = asm + bytes(pages.C_LOAD - pages.LOAD - len(asm)) + cimage
+    if pages.LOAD + len(asm) > ping_cf.LOAD:
+        raise ComposeError(f"the pages assembly ({len(asm)} B) runs into PING's chunk")
+    chunk = asm
     playout = dict(zip(pages.LABELS_OUT, struct.unpack(f">{len(pages.LABELS_OUT)}I",
                                                        pblob[-4 * len(pages.LABELS_OUT):])))
 
@@ -444,7 +432,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     if MCHUNK + len(mchunk) > MCHUNK_END:
         raise ComposeError(f"the machines chunk ends past {MCHUNK_END:#010x}")
     layout["mchunk_code_end"] = layout["mdata"]
-    top = len(NEW_TYPES) + 4                    # the highest type with a row: 7
+    top = TYPES_LAST                            # the highest type with a row
+    if NEW_TYPES != tuple(range(NEW_TYPE, top + 1)):
+        raise ComposeError("the new types must be one run from 5: each has a row")
 
     # 1. the list: its length is LIST_NEW's, so a seventh machine is one entry there
     n = len(LIST_NEW)
@@ -545,5 +535,6 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     layout.update(pbuilt["layout"])
     return {"content": bytes(content), "edits": edits, "layout": layout,
             "chunk": {"load": pages.LOAD, "code": chunk},
+            "c_chunk": {"load": pages.C_LOAD, "code": cimage},
             "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)},
             "ping_chunk": pbuilt["chunk"]}

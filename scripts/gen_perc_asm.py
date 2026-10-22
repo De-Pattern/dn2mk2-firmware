@@ -28,7 +28,7 @@ OUT = ROOT / "csrc" / "waverider" / "sharc" / "perc.asm"
 
 
 def build() -> str:
-    return P.program(PL.layout(), dsp.RINGS_SW)
+    return P.program(PL.layout(), dsp.SMP_SW)     # on to the sample machines (v0.13)
 
 
 def main(argv=None) -> int:

@@ -46,12 +46,16 @@ This module is pure: it builds the source; `coldfire.compose` assembles and plac
 from __future__ import annotations
 
 LOAD = 0x4670C000                 # RAM above BSS, clear of every declared range (docs/mods-compatibility.md)
-C_LOAD = LOAD + 0x600             # the C page renderer, after this assembly (0x400 until CZ)
+# v0.13: the C page renderer is a CODE chunk of its own, well above the others (it outgrew
+# the room after this assembly, LOAD + 0x600 .. PING's chunk)
+C_LOAD = 0x46A00000
+C_SPAN = 0x10000
 C_END = 0x46710000                # the platform runtime starts here
 ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
 KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t
 SOUND_BASE, SOUND_STRIDE, SOUND_TYPE = 52, 1163, 0xDE
 NEW_TYPE, CLONE = 5, 1
+TYPES_LAST = 12                   # dnfw.waverider.coldfire.TYPES_LAST: 5..12 are ours
 GET_SHORT_NAME = 0x400372DA
 EMPTY_PAGE = 0x42432BD4           # the readers' own empty-page fallback
 TAG = 10                          # the tag every stock SYN descriptor ends with
@@ -137,6 +141,22 @@ CZ_UNUSED = tuple(r for r in range(238, 263) if r not in CZ_LABELS)
 CZ_RATE_IDS = (240, 246, 244, 250, 255, 256, 257, 258)
 CZ_LEVEL_IDS = (245, 252, 253, 254, 260, 261, 262, 238)
 
+# the Digitakt II's sample machines (types 8..12, docs/sampler.md): one page each, on
+# WaveTone records (dnfw.sampler.machines.PAGES); named per machine by wr_names, as PERC's
+from ..sampler import machines as _smp
+SMP_FIRST = _smp.FIRST_TYPE
+SMP_PAGES = tuple(tuple(r for r, _sh, _lo in _smp.PAGES.get(n, _smp.PAGES["ONESHOT"])) for n in _smp.NAMES)
+SMP_TITLES = _smp.SHORT
+SMP_SUBTITLES = tuple(n.capitalize() for n in _smp.NAMES)
+
+
+def smp_named(name: str) -> dict[int, tuple[str, str]]:
+    """record -> (long, short) on a sample machine's track"""
+    out = {r: (lo, sh) for r, sh, lo in _smp.PAGES.get(name, _smp.PAGES["ONESHOT"]) if r}
+    out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in range(238, 263) if r not in out})
+    return out
+
+
 LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "wr_id9",
               "wr_cell_tail", "labels", "descriptors")
 # PING / SHFT: every stock page cell's widget is drawn by 0x4006448a; its one exit
@@ -214,7 +234,8 @@ def c_header() -> str:
     wr = {r: (lo, sh) for r, lo, sh in named()}
     res = res_named()
     cz = cz_named()
-    order = sorted(set(wr) | set(res) | set(cz) | set(PARAM_IDS))
+    smp = [smp_named(n) for n in _smp.NAMES]
+    order = sorted(set(wr) | set(res) | set(cz) | set(PARAM_IDS) | {r for m in smp for r in m})
     zids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in CZ_PAGES)
     znames = ",\n".join(" {" + ", ".join(q + CZ_LABELS.get(r, "-") + q for r in page) + "}"
                          for page in CZ_PAGES)
@@ -231,8 +252,9 @@ def c_header() -> str:
             f"static const char res_labels[RES_PAGES][8][6] = {{\n{rnames}\n}};\n"
             f"#define WR_NAMED {len(order)}\n"
             f"static const unsigned short wr_named_ids[WR_NAMED] = {{{', '.join(map(str, order))}}};\n"
-            f"static const char *const wr_named_long[3][WR_NAMED] = {{{row(wr, 0)}, {row(res, 0)}, {row(cz, 0)}}};\n"
-            f"static const char *const wr_named_short[3][WR_NAMED] = {{{row(wr, 1)}, {row(res, 1)}, {row(cz, 1)}}};\n"
+            f"#define WR_KINDS {3 + len(smp)}\n"
+            f"static const char *const wr_named_long[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 0) for m in [wr, res, cz] + smp)}}};\n"
+            f"static const char *const wr_named_short[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 1) for m in [wr, res, cz] + smp)}}};\n"
             f"#define CZ_PAGES {len(CZ_PAGES)}\n"
             f"static const unsigned short cz_ids[CZ_PAGES][8] = {{\n{zids}\n}};\n"
             f"static const char cz_labels[CZ_PAGES][8][6] = {{\n{znames}\n}};\n"
@@ -240,7 +262,32 @@ def c_header() -> str:
             f"static const unsigned short cz_level_ids[8] = {{{', '.join(map(str, CZ_LEVEL_IDS))}}};\n"
             f"static const unsigned char cz_combos[{len(cz_live.COMBOS)}][2] = {{{combos}}};\n"
             f"static const short res_anchor[3][24] = {{{res_anchor}}};\n"
-            + perc_c_header())
+            + perc_c_header() + smp_c_header())
+
+
+def smp_c_header() -> str:
+    """The sample machines' tables for page.c: each machine's page (record ids), the
+    records drawn as text, and the pool's sound names (the test sounds until loading)."""
+    q = chr(34)
+    from ..sampler import live as smp_live
+    ids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in SMP_PAGES)
+    names = ", ".join(q + n + q for n in _smp.NAMES)
+    snd = ", ".join(q + n + q for n in smp_live.TEST_NAMES)
+    return (f"#define SMP_KIND0 4\n#define SMP_N {len(_smp.NAMES)}\n"
+            f"static const unsigned short smp_ids[SMP_N][8] = {{\n{ids}\n}};\n"
+            f"static const char smp_machine[SMP_N][8] = {{{names}}};\n"
+            f"#define SMP_PLAY_ID {_smp.PLAY_REC}\n#define SMP_SAMP_ID {_smp.SAMP_REC}\n"
+            f"#define SMP_STRT_ID {_smp.STRT_REC}\n#define SMP_LEN_ID {_smp.LEN_REC}\n"
+            f"#define SMP_LOOP_ID {_smp.LOOP_REC}\n#define SMP_GRID_ID {_smp.GRID_REC}\n"
+            f"#define SMP_SLICE_ID {_smp.SLICE_REC}\n#define SMP_SLEN_ID {_smp.SLEN_REC}\n"
+            f"#define SMP_GRID_KIND {SMP_FIRST_KIND + _smp.NAMES.index('GRID')}\n"
+            f"static const char smp_play[4][5] = {{{', '.join(q + m + q for m in _smp.PLAY_MODES)}}};\n"
+            f"static const unsigned char smp_grids[{len(_smp.GRIDS)}] = {{{', '.join(map(str, _smp.GRIDS))}}};\n"
+            f"#define SMP_SOUNDS {len(smp_live.TEST_NAMES)}\n"
+            f"static const char smp_sound[SMP_SOUNDS][6] = {{{snd}}};\n")
+
+
+SMP_FIRST_KIND = 4                 # is_wr's answer for type 8; 5..8 for 9..12
 
 
 def perc_c_header() -> str:
@@ -284,9 +331,12 @@ def source(page_draw: int, cell: int) -> str:
     cz_page_data = "\n".join(f"    .long cz_title, cz_subtitle\n"
                              f"    .long {', '.join(str(e) for e in entries)}\n"
                              f"    .long {TAG}" for entries in CZ_PAGES)
+    smp_page_data = "\n".join(f"    .long smp_title_{k}, smp_subtitle_{k}\n"
+                              f"    .long {', '.join(str(e) for e in entries)}\n"
+                              f"    .long {TAG}" for k, entries in enumerate(SMP_PAGES))
     return f"""
-| -- the active track's machine, as ours: d0 = 1 Waverider (5), 2 RESONATOR (6), 3 CZ (7),
-| else 0; every other register kept
+| -- the active track's machine, as ours: d0 = 1 PERC (5), 2 RESONATOR (6), 3 CZ (7),
+| 4..8 the sample machines (8..12), else 0; every other register kept
 is_wr:
     move.l  %a0,%sp@-
     move.l  %d1,%sp@-
@@ -297,17 +347,11 @@ is_wr:
     adda.l  %d1,%a0
     mvs.b   %a0@({SOUND_BASE + SOUND_TYPE}),%d1
     moveq   #0,%d0
-    subq.l  #{NEW_TYPE},%d1
-    bne.s   2f
-    moveq   #1,%d0
-    bra.s   1f
-2:  subq.l  #1,%d1
-    bne.s   3f
-    moveq   #2,%d0
-    bra.s   1f
-3:  subq.l  #1,%d1
-    bne.s   1f
-    moveq   #3,%d0
+    subq.l  #{NEW_TYPE - 1},%d1
+    ble.s   1f
+    cmpi.l  #{TYPES_LAST - NEW_TYPE + 1},%d1
+    bgt.s   1f
+    move.l  %d1,%d0
 1:  move.l  %sp@+,%d1
     movea.l %sp@+,%a0
     rts
@@ -328,19 +372,18 @@ wr_count:
     bne.s   4f
     moveq   #{len(RES_PAGES)},%d0
     rts
-4:  moveq   #{len(CZ_PAGES)},%d0
+4:  subq.l  #1,%d0
+    bne.s   5f
+    moveq   #{len(CZ_PAGES)},%d0
+    rts
+5:  moveq   #1,%d0
     rts
 1:  move.l  %sp@(8),%d0
-    moveq   #5,%d1
-    cmp.l   %d0,%d1
-    beq.s   0f
-    moveq   #6,%d1
-    cmp.l   %d0,%d1
-    beq.s   0f
-    moveq   #7,%d1
-    cmp.l   %d0,%d1
-    bne.s   2f
-0:  moveq   #{CLONE},%d0
+    cmpi.l  #{NEW_TYPE},%d0
+    blt.s   2f
+    cmpi.l  #{TYPES_LAST},%d0
+    bgt.s   2f
+    moveq   #{CLONE},%d0
 2:  moveq   #4,%d1
     rts
 
@@ -374,28 +417,34 @@ wr_page:
     mulu.w  %d1,%d0
     addi.l  #res_descriptors,%d0
     bra.s   2f
-7:  move.l  %sp@(16),%d0
+7:  subq.l  #1,%d0
+    bne.s   8f
+    move.l  %sp@(16),%d0
     moveq   #{len(CZ_PAGES)},%d1
     cmp.l   %d1,%d0
     bcc.s   6b
     moveq   #44,%d1
     mulu.w  %d1,%d0
     addi.l  #cz_descriptors,%d0
+    bra.s   2f
+| a sample machine (d0 = its kind - 4): one page, its own
+8:  tst.l   %sp@(16)
+    bne.s   6b
+    subq.l  #1,%d0
+    moveq   #44,%d1
+    mulu.w  %d1,%d0
+    addi.l  #smp_descriptors,%d0
 2:  addq.l  #4,%sp
     move.l  %sp@+,%d2
     rts
 3:  move.l  %sp@(12),%d1
     move.l  %sp@(16),%d0
-    subq.l  #5,%d1
-    beq.s   0f
-    subq.l  #1,%d1
-    beq.s   0f
-    subq.l  #1,%d1
-    beq.s   0f
-    addq.l  #7,%d1
-    rts
-0:  moveq   #{CLONE},%d1
-    rts
+    cmpi.l  #{NEW_TYPE},%d1
+    blt.s   0f
+    cmpi.l  #{TYPES_LAST},%d1
+    bgt.s   0f
+    moveq   #{CLONE},%d1
+0:  rts
 
 | -- the SYN page's label fetch at 0x40064622 (jsr getShortName(this, id)), now jsr
 | here. A Waverider track and a relabelled id: our label. Anything else: the stock
@@ -404,6 +453,9 @@ wr_label:
     bsr.w   is_wr
     tst.l   %d0
     beq.s   9f
+    moveq   #{SMP_FIRST_KIND},%d1
+    cmp.l   %d1,%d0
+    bge.s   9f
     lea     labels,%a0
     subq.l  #1,%d0
     beq.s   0f
@@ -504,11 +556,15 @@ res_descriptors:
 {res_page_data}
 cz_descriptors:
 {cz_page_data}
+smp_descriptors:
+{smp_page_data}
 {_rep("subtitle", SUBTITLE)}
 {_rep("res_subtitle", RES_SUBTITLE)}
 {_rep("res_title", RES_TITLE)}
 {_rep("cz_subtitle", CZ_SUBTITLE)}
 {_rep("cz_title", CZ_TITLE)}
+{chr(10).join(_rep(f"smp_title_{k}", t) for k, t in enumerate(SMP_TITLES))}
+{chr(10).join(_rep(f"smp_subtitle_{k}", t) for k, t in enumerate(SMP_SUBTITLES))}
 {chr(10).join(_rep(f"title_{k}", t) for k, t in enumerate(TITLES))}
 {strings}
 {rstrings}

@@ -104,8 +104,17 @@ def test_loaded_image_holds_our_bytes(built):
 def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     entry = bootstream.read_span(built, dsp.sw_to_load(dsp.ENTRY_SW), 8)
     assert entry == bytes.fromhex("3e06160000f60100")          # jump 0x16f600 (the block counter) ; nop
-    lookup = struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32))
-    assert lookup == (0, 1, 2, 3, 4, 5, 6, 7)            # PERC 5, RESONATOR 6, CZ 7
+    # v0.13: the stock 8-entry lookup stays stock; its base pointer (sw 0x1c2958) moves to
+    # a 16-entry copy with the same [-1] guard
+    assert struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32)) == dsp.LOOKUP_STOCK
+    lookup = struct.unpack("<17I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP16_DM - 4), 68))
+    assert lookup[0] == struct.unpack("<I", bootstream.read_span(stock7, dsp.dm_to_load(dsp.LOOKUP_DM - 4), 4))[0] == 0
+    assert lookup[1:9] == (0, 1, 2, 3, 4, 5, 6, 7)
+    # the sample machines (8..12) borrow PERC's engine slot; nothing reads past slot 7
+    assert lookup[9:14] == (dsp.SMP_ENGINE_SLOT,) * 5 and dsp.SMP_ENGINE_SLOT == 5
+    assert all(v in (0, k) for k, v in enumerate(lookup[1:])
+               if k not in dsp.SMP_TYPES) and max(lookup) <= 7
+    assert bootstream.read_span(built, dsp.sw_to_load(dsp.LOOKUP_SITE_SW), 6) == dsp.objects()["lookup_ptr"]
     # the idle loop's back edge, jump (pc,-0x10) at sw 0xb88abb in L2, becomes JUMP 0x16f500
     site = dsp.l2_sw_to_load(dsp.IDLE_SITE_SW)
     assert bootstream.read_span(stock7, site, 6) == bytes.fromhex("3e07ff00f0ff")
@@ -125,10 +134,12 @@ def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     head = built[:final.offset]
     diff = [k for k in range(final.offset) if head[k] != stock7[k]]
     entry_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.ENTRY_SW), 8)[0][0]
-    look_off = bootstream.spans(stock7, dsp.dm_to_load(dsp.LOOKUP_DM + 20), 12)[0][0]
+    look_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.LOOKUP_SITE_SW), 6)[0][0]
     idle_off = bootstream.spans(stock7, dsp.l2_sw_to_load(dsp.IDLE_SITE_SW), 6)[0][0]
     call_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.CALL_SITE_SW), 6)[0][0]
     allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 12))
+               | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6)))
+    allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 6))
                | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6)))
     assert diff and set(diff) <= allowed
 
@@ -140,8 +151,11 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     assert [a for _, a, _ in ddr] == [dsp.RINGS_STATE_DDR, dsp.RINGS_TABLES_DDR,
                                       dsp.CZ_STATE_DDR, dsp.CZ_TABLES_DDR,
                                       dsp.PING_TABLES_DDR, dsp.SHFT_TABLES_DDR,
-                                      dsp.GRAN_TABLES_DDR, dsp.PERC_TABLES_DDR, dsp.GRAN_BUF_DDR]
-    assert not any(ddr[0][2]) and not any(ddr[2][2]) and not any(ddr[-1][2])
+                                      dsp.GRAN_TABLES_DDR, dsp.PERC_TABLES_DDR, dsp.GRAN_BUF_DDR,
+                                      dsp.SMP_POOL_DDR]
+    assert not any(ddr[0][2]) and not any(ddr[2][2]) and not any(ddr[-2][2])
+    # v0.13: the sample pool's directory begins with its magic and holds the test sounds
+    assert struct.unpack_from("<II", ddr[-1][2]) == (0x31504D53, 4)
     # the stock stream loads DDR to 0x8052fbe0 and init writes up to 0x80530be8
     # (scripts/sharc_ddr_ceiling.py); ours start 16 MB in
     assert min(a for _, a, _ in ddr) >= dsp.DDR_FLOOR > 0x80530BE8
@@ -150,16 +164,22 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
 def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(stock7, built):
     # scripts/sharc_l2_ceiling.py (2026-10-20, a fresh engine init and every stock machine):
     # nothing reads or writes L2 above the image's end, 0x2008823c
-    ((what, at, payload),) = dsp.l2_spans()
-    code = dsp.objects()["perc"]
-    assert at == dsp.PERC_L2_LOAD and payload[:len(code)] == code and not any(payload[len(code):])
-    assert len(payload) - len(code) >= 64
-    assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.L2_NOCACHE - 0x10000
+    # v0.13: the sample machines' code follows PERC's span
+    spans = dsp.l2_spans()
+    assert [(at, len(pl)) for _, at, pl in spans] == [(dsp.PERC_L2_LOAD, dsp.PERC_L2_SPAN),
+                                                      (dsp.SMP_L2_LOAD, dsp.SMP_L2_SPAN)]
+    assert dsp.SMP_L2_LOAD == dsp.PERC_L2_LOAD + dsp.PERC_L2_SPAN
+    for (what, at, payload), name in zip(spans, ("perc", "smp")):
+        code = dsp.objects()[name]
+        assert payload[:len(code)] == code and not any(payload[len(code):])
+        assert len(payload) - len(code) >= 64
+        assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.L2_NOCACHE - 0x10000
+        assert bootstream.read_span(built, at, len(payload)) == payload
     for b in bootstream.walk(stock7).blocks:
         if b.count and 0x20000000 <= b.target < 0x20100000:
             assert b.target + b.count <= dsp.L2_IMAGE_END
-    assert bootstream.read_span(built, at, len(payload)) == payload
     assert dsp.PERC_SW == 0xBE0000 and dsp.l2_sw_to_load(dsp.PERC_SW) == dsp.PERC_L2_LOAD
+    assert dsp.SMP_SW == 0xBE8000 and dsp.l2_sw_to_load(dsp.SMP_SW) == dsp.SMP_L2_LOAD
 
 
 def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
@@ -170,7 +190,7 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
     obj = dsp.objects()
     code_spans = [x for x in sp if "asm" in x[0]]
-    assert len(code_spans) == 7
+    assert len(code_spans) == 7       # (the 16-type lookup is data, not code)
     # v0.11: Waverider's reader, loop and osc 2 are gone (their room is zeros); PERC is in L2
     for (what, _, payload), code in zip(code_spans, (obj["idle_load"], obj["block_count"], obj["entry_mark"],
                                                      obj["ping"], obj["gran"], obj["rings"], obj["cz"])):
@@ -251,12 +271,29 @@ def test_the_entry_mark_does_the_displaced_load_and_returns_to_the_call():
     assert dsp.IDLE_STATE_DM + dsp.IDLE_STATE_BYTES >= 0x2DE140
 
 
+def _code_lines(name):
+    lines = [ln.split("//", 1)[0].strip() for ln in (SHARC / f"{name}.asm").read_text().splitlines()]
+    return [ln for ln in lines if ln and not ln.startswith(".") and not ln.endswith(":")]
+
+
+def test_smp_hands_on_to_resonator_and_writes_only_saved_registers():
+    # v0.13: PERC -> the sample machines -> RESONATOR; PING's tail restores what PERC saved
+    lines = _code_lines("smp")
+    assert f"JUMP {dsp.RINGS_SW:#x};" in lines
+    import re
+    for ln in lines:
+        m = re.match(r"(I|M|L|B)(\d+) =", ln)
+        if m:
+            assert f"{m.group(1)}{m.group(2)}" in ("I1", "I2", "I4", "I12"), ln
+        assert not re.search(r"\b(R1[6-9]|R[2-9]\d|F1[6-9]|USTAT|MODE1|MODE2|LCNTR)\b", ln), ln
+    assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
+
+
 def test_perc_saves_what_ping_restores_and_hands_on_to_resonator():
-    lines = [ln.split("//", 1)[0].strip() for ln in (SHARC / "perc.asm").read_text().splitlines()]
-    lines = [ln for ln in lines if ln and not ln.startswith(".") and not ln.endswith(":")]
+    lines = _code_lines("perc")
     regs = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12", "M0", "M1", "M2", "M3", "M4"]
     assert lines[:len(regs)] == [f"DM({0x2DDE00 + 4 * k:#x}) = {r};" for k, r in enumerate(regs)]
-    assert f"JUMP {dsp.RINGS_SW:#x};" in lines
+    assert f"JUMP {dsp.SMP_SW:#x};" in lines
     # only the registers saved there are written (and no M, L, B or DAG2 other than I12)
     import re
     for ln in lines:

@@ -82,6 +82,14 @@ L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 wi
 PERC_SCRATCH_DM = 0x2DDE80                   # 55 words (dnfw.perc.machines.SC_WORDS)
 PERC_STATE_DM, PERC_STATE_STRIDE = 0x2DE180, 128             # 16 voices x 32 words
 PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
+# the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
+# scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
+SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200d0000
+SMP_L2_SPAN = 0x8000
+SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbe8000
+SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 64  # 16 voices x 64 bytes
+SMP_SCRATCH_DM = 0x2DF300
+SMP_POOL_DDR = 0x84000000                    # the pool's directory, then its frames
 # W2's random table (dnfw.waverider.live.rnd_table): Waverider is gone (v0.11), but
 # RESONATOR, CZ and GRAN read it here
 W2_RND_DM = 0x2E0100                                         # 256 float32 in [0, 1)
@@ -144,6 +152,18 @@ LOOKUP_DM = 0x25D748                         # frame nibble -> machine type, 8 w
 LOOKUP_STOCK = (0, 1, 2, 3, 4, 0, 0, 0)
 MACHINE6 = 6                                 # RESONATOR: lookup[6] = 6 (stock 0, FM Tone)
 MACHINE7 = 7                                 # CZ: lookup[7] = 7 (stock 0, FM Tone)
+# v0.13: the lookup moves to a 16-entry copy in our region (the frame field indexes it
+# unmasked, sw 0x1c295d `R2 = DM(I5, M0)` after `I5 = 0x25d748` at sw 0x1c2958), so the
+# machine types can grow past 8. The word before it is 0, as stock's is (0x25d744), so a
+# frame value of -1 reads FM Tone as before. Types with no engine read 0 (FM Tone).
+LOOKUP_SITE_SW = 0x1C2958                    # I5 = 0x25d748
+LOOKUP_SITE_STOCK = bytes.fromhex("0f150025d748")   # parcels, MSW first
+LOOKUP16_DM = 0x2DEE04                       # 16 words; 0x2dee00 is the [-1] guard (0)
+MACHINE_TYPES = 16
+SMP_ENGINE_SLOT = 5                          # the engine slot the sample machines borrow
+SMP_TYPES = range(8, 13)                     # ONESHOT WERP STRETCH REPITCH GRID
+ENGINES = {5: "PERC", 6: "RESONATOR", 7: "CZ", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
+
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
 IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")
 IDLE_RETURN_SW = 0xB88AAB                    # the loop's top: call prvCheckTasksWaitingTermination
@@ -153,6 +173,19 @@ CALL_SITE_STOCK = bytes.fromhex("040f26003884")
 
 class DspError(ValueError):
     pass
+
+
+def lookup16() -> bytes:
+    """the relocated machine lookup: [-1] = 0, then type -> engine slot: the stock five
+    and ours as themselves, the sample machines (8..12) to 5 -- PERC's slot, so the stock
+    code takes the one path for them the runner and the instrument have proven (the
+    record's +0x1b4 copy indexes 8-entry tables at sw 0x1c299f and in the render code; 8
+    and above would read past them). PERC and the sample machines tell themselves apart by
+    the frame's own type word; one whose machine has no renderer yet stays silent on that
+    slot. Any other type reads 0 (FM Tone), as stock answers 5-7."""
+    table = [t if t < 5 or t in ENGINES and t < 8 else SMP_ENGINE_SLOT if t in SMP_TYPES else 0
+             for t in range(MACHINE_TYPES)]
+    return struct.pack(f"<{1 + MACHINE_TYPES}I", 0, *table)
 
 
 def sw_to_load(sw: int) -> int:
@@ -177,8 +210,8 @@ def objects() -> dict[str, bytes]:
     """The committed SHARC objects: PERC, the entry JUMP, the stubs, the filters, the machines."""
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
-            for name in ("perc", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "ping", "rings", "cz", "gran")}
+            for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
+                         "entry_mark", "emark_jump", "lookup_ptr", "ping", "rings", "cz", "gran")}
 
 
 def spans() -> list[tuple[str, int, bytes]]:
@@ -197,7 +230,10 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
         ("block_count.asm (wr_count)", COUNT_DM, obj["block_count"]),
         ("entry_mark.asm (wr_emark)", EMARK_DM, obj["entry_mark"]),
-        ("free since v0.11 (Waverider's loop, scanner and tables; zeros)", EMARK_DM + 0x100, b""),
+        ("machine lookup, 16 types ([-1] guard, then the table; v0.13)", LOOKUP16_DM - 4, lookup16()),
+        ("sample machines' state: 16 voices x 64 bytes (zeros; v0.13)", SMP_STATE_DM, bytes(16 * SMP_STATE_STRIDE)),
+        ("sample machines' scratch (zeros)", SMP_SCRATCH_DM, bytes(0x100)),
+        ("free since v0.11 (Waverider's loop, scanner and tables; zeros)", SMP_SCRATCH_DM + 0x100, b""),
         ("W2 random table, 256 float32 (RESONATOR, CZ, GRAN)", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
         ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
         ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),
@@ -257,16 +293,27 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("SHFT tables", SHFT_TABLES_DDR, _shft_tables()),
         ("GRAN tables", GRAN_TABLES_DDR, _gran_tables()),
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
-        ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE))]
+        ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE)),
+        ("sample pool: directory and the test sounds (v0.13)", SMP_POOL_DDR, _smp_pool())]
+
+
+def _smp_pool() -> bytes:
+    from ..sampler import live as smp_live
+    return smp_live.pool_bytes(smp_live.test_samples(), SMP_POOL_DDR, smp_live.test_rates())
 
 
 def l2_spans() -> list[tuple[str, int, bytes]]:
-    """(what, load address, payload) of what goes in L2: PERC's code, zero-padded to
-    PERC_L2_SPAN (so at least 64 bytes of NOPs after it)."""
-    code = objects()["perc"]
-    if PERC_L2_SPAN - len(code) < 64:
-        raise DspError(f"perc.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
-    return [("perc.asm (wr_perc), in L2", PERC_L2_LOAD, code + bytes(PERC_L2_SPAN - len(code)))]
+    """(what, load address, payload) of what goes in L2: PERC's code, then the sample
+    machines', each zero-padded to its span (so at least 64 bytes of NOPs after it)."""
+    obj = objects()
+    out = []
+    for what, name, at, span in (("perc.asm (wr_perc), in L2", "perc", PERC_L2_LOAD, PERC_L2_SPAN),
+                                 ("smp.asm (wr_smp), in L2", "smp", SMP_L2_LOAD, SMP_L2_SPAN)):
+        code = obj[name]
+        if span - len(code) < 64:
+            raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
+        out.append((what, at, code + bytes(span - len(code))))
+    return out
 
 
 def _check_l2(stock: bytes, span_list) -> None:
@@ -314,9 +361,10 @@ def placements() -> list[dict]:
              "load_address": f"{sw_to_load(ENTRY_SW):#010x}",
              "bytes": len(obj["entry_jump"]) + len(NOP16),
              "stock": ENTRY_STOCK.hex(), "new": (obj["entry_jump"] + NOP16).hex()},
-            {"what": "patch: machine lookup 0x25d748[5] 0 -> 5 (PERC), [6] 0 -> 6 (RESONATOR), [7] 0 -> 7 (CZ)",
-             "load_address": f"{dm_to_load(LOOKUP_DM + 20):#010x}", "bytes": 12,
-             "stock": "000000000000000000000000", "new": "050000000600000007000000"},
+            {"what": f"patch: the machine lookup's base at sw {LOOKUP_SITE_SW:#x}, I5 = 0x25d748 -> "
+                     f"{LOOKUP16_DM:#x} (16 types)",
+             "load_address": f"{sw_to_load(LOOKUP_SITE_SW):#010x}", "bytes": 6,
+             "stock": sharc_object.load_bytes(LOOKUP_SITE_STOCK).hex(), "new": obj["lookup_ptr"].hex()},
             {"what": f"patch: the idle loop's back edge at sw {IDLE_SITE_SW:#x} -> JUMP {IDLE_SW:#x}",
              "load_address": f"{l2_sw_to_load(IDLE_SITE_SW):#010x}", "bytes": len(obj["idle_jump"]),
              "stock": IDLE_SITE_STOCK.hex(), "new": obj["idle_jump"].hex()}]
@@ -445,6 +493,10 @@ def section7(stock: bytes) -> bytes:
     lookup = struct.unpack("<8I", bootstream.read_span(stock, dm_to_load(LOOKUP_DM), 32))
     if lookup != LOOKUP_STOCK:
         raise DspError(f"the machine lookup is {lookup}, not stock {LOOKUP_STOCK}")
+    if bootstream.read_span(stock, sw_to_load(LOOKUP_SITE_SW), 6) != sharc_object.load_bytes(LOOKUP_SITE_STOCK):
+        raise DspError("sw 0x1c2958 is not the stock `I5 = 0x25d748`")
+    if len(obj["lookup_ptr"]) != 6:
+        raise DspError("the lookup pointer patch is not one 48-bit instruction")
     added = spans()
     _check_free(stock, added)
     ddr = ddr_spans()
@@ -455,7 +507,7 @@ def section7(stock: bytes) -> bytes:
     out = bytearray(bootstream.insert_before_final(
         stock, b"".join(_blocks(at, payload) for _, at, payload in added + ddr + l2)))
     bootstream.write_span(out, sw_to_load(ENTRY_SW), entry)
-    bootstream.write_span(out, dm_to_load(LOOKUP_DM + 20), struct.pack("<III", 5, MACHINE6, MACHINE7))
+    bootstream.write_span(out, sw_to_load(LOOKUP_SITE_SW), obj["lookup_ptr"])
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
     bootstream.write_span(out, sw_to_load(CALL_SITE_SW), obj["emark_jump"])
     result = bytes(out)
