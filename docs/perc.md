@@ -137,3 +137,13 @@ about 220 M instructions a second.
   headroom for the track's level and the filter, not a clip in PERC itself.
 - The DSP's load in L2 has not been measured on the instrument.
 - P-I machines are not ported.
+
+## Planned: PERC's page drawn as the Machinedrum's (owner, 2026-10-22)
+
+After the Digitakt II work, PERC's SYN page is to look like the Machinedrum SPS-1's
+machine pages (its manual, Appendix A, in the project library): a 2 x 4 grid of knobs,
+each label in a dotted box above its knob (PTCH DEC RAMP RDEC / STRT NOIS HARM CLIP on
+TRX-BD), a bipolar knob marked at its centre for the pitch-like controls, empty boxes
+for the places a machine lacks, and the machine's name ("TRX>BD>SYNT") at the left. The
+drawing would follow `csrc/sampler/smp_page.c`'s approach (our own widgets in the
+original's shapes). Not started.
