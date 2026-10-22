@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.14** | 2026-10-22 | Sampling: page 2 of every sample machine records IN / IN L / IN R / MAIN into SAMP 124-127 (threshold, length); ONESHOT's CFAD heard | `builds/v0.14-SAMPLING/` | yes |
+| **v0.15** | 2026-10-22 | DT2 SRC pages (knobs, waveform, RECORDER), one encoder click a choice, value names in the header, loops follow the knobs live; RECORDER: SRC IN/MAIN/TRK1-16, CHAN, YES records, ARM, R.LEN, R.STRT | `builds/v0.15-RECORDER/` | yes |
+| v0.14 | 2026-10-22 | Sampling: page 2 of every sample machine records IN / IN L / IN R / MAIN into SAMP 124-127 (threshold, length); ONESHOT's CFAD heard | `builds/v0.14-SAMPLING/` | yes |
 | v0.13 | 2026-10-22 | The Digitakt II's sample machines (ONESHOT, WERP, STRETCH, REPITCH, GRID) with DT2-style pages; four test sounds; your WAVs over USB, kept on the +Drive | `builds/v0.13-SAMPLER/` | yes |
 | v0.12 | 2026-10-21 | PERC: labels follow TYPE; page 1 the machine's 8 parameters; page 2 TYPE + Machinedrum effects (AMD AMF EQF EQG FLTF FLTW FLTQ); no stray ring | `builds/v0.12-PERC-FX/` | yes |
 | v0.11 | 2026-10-20 | PERC: your 24 Ravel drum machines (TRX/EFM/GND) as a machine, TYPE + 8 named parameters; Waverider removed | `builds/v0.11-PERC/` | yes |
@@ -50,6 +51,64 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.15 — DT2 pages, the RECORDER, track sampling, live loops
+
+`DN2mod_v0.15_RECORDER_OS1.11.syx`
+sha256 `ac54c048b93474ed8f0bd12abd07966b8589400710de75150f9c59c535df2edf`
+Gate: CLEARED TO FLASH, 2026-10-22 (USB size 1,957,986 of 2,097,152). Source: commit `6032b50`. Docs: `docs/sampler.md` (v0.15 sections), `docs/link-research.md`.
+
+**Adds.**
+- **Loops and reverse follow the knobs while they play**: on ONESHOT, STRETCH and REPITCH,
+  turning LEN, LOOP, STRT or PLAY changes a held loop at once (before, only the next trig
+  did). GRID takes its slice at the trig; WERP its segments. A loop lasts as long as the
+  track's AMP envelope, as on the DT2: set AMP's hold/sustain long to hear it loop.
+- **One encoder click a choice** on PLAY, WERP's MODE, BARS, SEG, GRID, SLCE/LEN (GRID)
+  and the recorder's SRC; ARM, R.STRT, CHAN and DEST step natively.
+- **The header names the value**: REV / REV LOOP / FWD LOOP / FWD, 1/4, 1/16, OFF / ON,
+  MONO L, TRK3, and SAMP shows the sample's name (KICK, your WAV's name, REC 1..4). No
+  more "Prim." / "Harm.".
+- **The DT2's SRC pages**: SYN page 1 the knobs (labelled), page 2 the same with the
+  waveform, the machine box reading SMP; widgets redrawn after the DT2's (TUNE's value in
+  its box, whole knob rings, the dotted square, BARS blocks, the SEG icon).
+- **The RECORDER**, SYN page 3 of every sample machine, laid out as the DT2's: SRC (IN,
+  MAIN, **TRK1..TRK16**), CHAN (MONO L+R / L / R), the RECORD NOW box (**YES** records,
+  YES again stops), THRES, DEST (SAMP 124..127), R.LEN (MAX or steps at the tempo),
+  R.STRT (THRES or PLAY: the first note of the pattern), ARM (turn to arm, turn again to
+  stop), and an input meter. **Nothing about the recorder is saved with a sound** any
+  more.
+- CFAD is gone from ONESHOT (the DT2's ONESHOT has an empty place there).
+
+**Test** (after the regression check; **back up the +Drive first**):
+1. ONESHOT, SAMP 1 (KICK) or a longer sample of yours: SYN page 1 shows knobs with labels;
+   SYN again: the waveform page; SYN again: RECORDER; SYN again: back to page 1.
+2. PLAY: each click is one mode (FWD, FWD LOOP, REV LOOP, REV), and the header names it.
+3. Set AMP hold/sustain long. PLAY FWD LOOP, hold a note (or a long trig): turn LEN and
+   LOOP while it plays: the loop's end and start move at once. Switch PLAY to REV LOOP
+   while it plays: it turns round. STRETCH and REPITCH: the same with LEN.
+4. SAMP: the header shows KICK, SNARE, HAT, BEAT (or your samples' names).
+5. WERP: SEG and BARS and MODE one click a choice; GRID: GRID, SLCE one click each.
+6. RECORDER: a synth into the inputs, SRC IN, the meter moves with it. YES: the box shows
+   REC and the seconds; YES again: stops. Page 1, SAMP 124: your recording.
+7. THRES up to about the middle, ARM (turn H): the box says ARMED; play loud: it records.
+   R.STRT PLAY, ARM, then start the pattern: it starts with the pattern.
+8. SRC TRK3 (a track playing a pattern), YES, a few bars, YES; SAMP 125 (set DEST first):
+   track 3's sound. SRC MAIN: the whole mix.
+9. R.LEN 16 (steps): it stops by itself after a bar.
+10. SAVE PROJECT with the RECORDER page showing ARM turned on, power-cycle, reload: nothing
+    records on its own.
+
+**Known issues.**
+- Recordings are still lost at power-off (keeping them on the +Drive is the next build),
+  and the waveform is not drawn for SAMP 124..127.
+- The TRK sources and the input meter read DSP buffers whose meaning was read from the
+  code (`docs/link-research.md`), not yet heard on the instrument: if TRK records the
+  wrong track or the wrong level, say which.
+- R.STRT PLAY starts at the first note any track plays, not at the PLAY key itself.
+- The DN2's header is kept above the RECORDER (the DT2 shows a big "RECORDER" title).
+- STEREO recording is not offered (the DN2's tracks are mono).
+- The emulator showed the one-click-a-choice turns working, but its encoder is not a
+  real one: how a fast spin feels is for the instrument to say.
 
 ## v0.14 — sampling, and CFAD
 

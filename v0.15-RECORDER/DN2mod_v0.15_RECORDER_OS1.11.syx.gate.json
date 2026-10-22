@@ -1,0 +1,20 @@
+{
+  "build": "v015.syx",
+  "sha256": "ac54c048b93474ed8f0bd12abd07966b8589400710de75150f9c59c535df2edf",
+  "stock": "Digitone_II_OS1.11.syx",
+  "date": "2026-10-22T12:54:33",
+  "gates": {
+    "preflight": "PASS: bootstrap/updater/meta/Outbox untouched, signature, DSP size",
+    "DSP identity": "PASS: section 7 is exactly dsp.section7(stock), the image the SHARC gate runs",
+    "SHARC runner": "PASS: all steps PASS, incl. types 0-4 bit-identical to stock",
+    "ColdFire: code 0x4670c000..0x4670c1cc": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x46ac0000..0x46ac3b0a": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x4670f800..0x4670f8b2": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x4670f000..0x4670f068": "PASS: no scale-8 addressing",
+    "ColdFire: MAIN OS": "PASS: 39 hit(s), all in appended data that never executes",
+    "boot from reset": "PASS: booted and drew its UI, no fault",
+    "engine + LOAD/SAVE": "PASS: evaluator clean, CODE intact, machine and filter types round-trip",
+    "unit tests": "PASS: 173 passed in 326.43s (0:05:26)"
+  },
+  "logs": "/home/claude/dn2/wt16/out/ship_gate_w_6cf1b_/logs"
+}
