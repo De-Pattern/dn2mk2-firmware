@@ -438,3 +438,20 @@ def test_verify_sums_a_word_range_and_reports_it():
         sb = (sb + sa) & 0xFFFFFFFF
     assert st[14] == 4 and st[10] | st[11] << 16 == sa and st[12] | st[13] << 16 == sb
     assert st[15] == (SM.LINK_SEED + sum(st[:15])) & 0xFFFF
+
+
+def test_smp_asm_is_the_program_as_it_now_is():
+    # v0.16: csrc/waverider/sharc/smp.asm is written by scripts/gen_smp_asm.py from
+    # dnfw.sampler.program; a change to the program without a regeneration ships the old
+    # DSP code (caught by the runner once). Every line but the resolved jump targets.
+    import re
+    import sys
+    root = pathlib.Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(root / "scripts"))
+    import gen_smp_asm as G
+    def norm(ln):
+        ln = re.sub(r"(JUMP|CALL) 0x[0-9a-f]+;\s*", r"\1 T; ", ln)
+        return re.sub(r"R12 = 0x[0-9a-f]+;\s*(// return address)", r"R12 = T; \1", ln)
+    want = [norm(ln) for ln in G.build().splitlines()]
+    have = [norm(ln) for ln in (root / "csrc/waverider/sharc/smp.asm").read_text().splitlines()]
+    assert have == want, "run scripts/gen_smp_asm.py, then gen_waverider_sharc.py --assemble"
