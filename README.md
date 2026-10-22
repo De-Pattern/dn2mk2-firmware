@@ -37,6 +37,7 @@ README is kept at [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
 
 | | engine | what it is | state |
 |---|---|---|---|
+| 💾 | **Digitakt II sample machines** | machine types 8-12: ONESHOT, WERP, STRETCH, REPITCH, GRID on DT2-style SRC pages; a sample pool in the DSP's memory; your WAVs sent over USB (`tools/dn2samples.py`) and kept on the +Drive | **v0.13** → [`docs/sampler.md`](docs/sampler.md) |
 | 🥁 | **PERC** | machine type 5 (since v0.11, in Waverider's place): the owner's 24 Ravel PERC drum machines (TRX, EFM, GND; after the Machinedrum's), TYPE plus eight per-machine parameters | **gated v0.11**, awaiting a flash → [`docs/perc.md`](docs/perc.md) |
 | 🌊 | **Waverider** | wavetable machine after Tonverk's Wavefinder; type 5 up to v0.10 | **removed in v0.11** for PERC; its docs stay for the record → [`docs/w5-tables.md`](docs/w5-tables.md) |
 | ✨ | **GRAINS** | granular synthesis on wavetables, after the Virus TI grain tables: formant grains (SYNC) and clouds (CLOUD) | **reference model + demos**; control layout awaiting sign-off → [`docs/grains.md`](docs/grains.md) |
