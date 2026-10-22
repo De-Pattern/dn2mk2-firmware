@@ -431,10 +431,28 @@ static u32 l_tries __attribute__((section(".data"))) = 0;
 u32 smp_retries __attribute__((section(".data"))) = 0;
 static u16 st[16] __attribute__((section(".data")));
 
-/* the next range to load: each used slot's frames (sorted by nothing: in slot order),
- * then the recorder's slots that hold frames, then the directory page; -> 0 when done */
+/* the next range to load: first the directory page with every entry empty (the names and
+ * the count, so the page can name the slots, and nothing points at frames not yet there);
+ * then each used slot's frames, the recorder's included, and at once that slot's entry,
+ * so a slot plays as soon as it is in; last the whole directory page again. -> 0 when done */
+enum { K_BLANK, K_FRAMES, K_ENTRY, K_FULL };
+static int l_kind __attribute__((section(".data"))) = K_BLANK;
+static int l_entry __attribute__((section(".data"))) = -1;       /* the entry due next */
+
 static int next_range(void)
 {
+    if (l_slot == 0 && l_kind == K_BLANK && l_end == 0) {
+        l_off = 0;
+        l_end = CMD_OFFSET;                     /* up to the command block: the DSP's */
+        return 1;
+    }
+    if (l_entry >= 0) {
+        l_kind = K_ENTRY;
+        l_off = 8u + 16u * (u32)l_entry;
+        l_end = l_off + 16u;
+        l_entry = -1;
+        return 1;
+    }
     while (l_slot < POOL_SLOTS) {
         u32 k = l_slot++;
         const u8 *e = DIR + 8 + 16 * k;
@@ -444,12 +462,17 @@ static int next_range(void)
         u32 lo = addr - SMP_POOL_DDR, bytes = fr * (fmt ? 2u : 4u);
         if (lo >= POOL_BYTES || bytes > POOL_BYTES - lo)
             continue;
+        l_kind = K_FRAMES;
         l_off = lo & ~511u;
         l_end = (lo + bytes + 511u) & ~511u;
+        if (l_end > POOL_BYTES)
+            l_end = POOL_BYTES;
+        l_entry = (int)k;
         return 1;
     }
-    if (l_slot == POOL_SLOTS) {                 /* last: the directory page, up to the */
-        l_slot++;                               /* command block (the DSP's, not ours) */
+    if (l_slot == POOL_SLOTS) {                 /* last: the whole directory page */
+        l_slot++;
+        l_kind = K_FULL;
         l_off = 0;
         l_end = CMD_OFFSET;
         return 1;
@@ -497,6 +520,9 @@ void smp_load(void)                             /* load (again) whatever the ima
         OVERVIEW[k] = 0;
     smp_walk = 0;
     l_slot = 0;
+    l_kind = K_BLANK;
+    l_entry = -1;
+    l_end = 0;
     lstate = next_range() ? L_READ : L_DONE;
 }
 
@@ -506,14 +532,19 @@ static void load_poll(void)
         u32 n = l_end - l_off;
         if (n > CHUNK)
             n = CHUNK;
-        if (l_slot > POOL_SLOTS && l_off == 0) {            /* the directory page: from DIR */
+        if (l_kind == K_FRAMES) {
+            if (image_read(l_off, n, STAGE(0)) != 0) {
+                lstate = L_IDLE;                            /* the +Drive refused: stop */
+                return;
+            }
+            overview_add(l_off, n, STAGE(0));
+        } else {                                            /* the directory page's: from DIR */
             for (u32 k = 0; k < n; k++)
-                STAGE(0)[k] = DIR[k];
-        } else if (image_read(l_off, n, STAGE(0)) != 0) {
-            lstate = L_IDLE;                                /* the +Drive refused: stop */
-            return;
+                STAGE(0)[k] = DIR[l_off + k];
+            if (l_kind == K_BLANK)
+                for (u32 k = 8; k < 8u + 16u * POOL_SLOTS; k++)
+                    STAGE(0)[k] = 0;
         }
-        overview_add(l_off, n, STAGE(0));
         l_chunk_off = l_off;
         l_chunk_bytes = n;
         l_tries = 0;
@@ -538,7 +569,8 @@ static void load_poll(void)
             u32 a, b;
             sums(STAGE(0), l_chunk_bytes / 4u, &a, &b);
             if ((st[10] | (u32)st[11] << 16) == a && (st[12] | (u32)st[13] << 16) == b) {
-                smp_walk += l_chunk_bytes;
+                if (l_kind == K_FRAMES)
+                    smp_walk += l_chunk_bytes;
                 l_off += l_chunk_bytes;
                 lstate = l_off < l_end || next_range() ? L_READ : L_DONE;
                 return;

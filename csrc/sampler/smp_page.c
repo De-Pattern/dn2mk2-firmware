@@ -351,6 +351,75 @@ static void mini_mode(void *c, int x, int y, int mode)
     TEXT(c, FONT, x + 18, y, CENTRED, "%c", mode == 0 || mode == 1 ? 'R' : 'F');
 }
 
+/* the sample list (v0.16), as the DT2 shows its sample names while SAMP turns: for a second
+ * after SAMP changes, five slots around the chosen one, the chosen one framed */
+#define LIST_FRAMES 1500u
+static int list_slot __attribute__((section(".data"))) = -1;
+static void *list_view __attribute__((section(".data"))) = 0;
+static u32 list_at __attribute__((section(".data"))) = 0;
+
+static void slot_name(int k, char *out)
+{
+    const char *n = 0;
+    int cnt = smp_count();
+    if (k <= 0)
+        n = "OFF";
+    else if (k > SMP_REC_FIRST && k <= SMP_REC_FIRST + 4) {
+        out[0] = 'R'; out[1] = 'E'; out[2] = 'C'; out[3] = ' ';
+        out[4] = (char)('0' + k - SMP_REC_FIRST); out[5] = 0;
+        return;
+    } else if (cnt >= 0 && k <= cnt)
+        n = smp_name(k - 1);
+    else if (cnt < 0 && k <= SMP_SOUNDS)
+        n = smp_sound[k - 1];
+    int j = 0;
+    if (n && n[0])
+        for (; j < 7 && n[j]; j++)
+            out[j] = n[j];
+    else {                                      /* empty: its number */
+        out[j++] = '-';
+        out[j++] = '-';
+    }
+    out[j] = 0;
+}
+
+static void sample_list(void *c, void *view, int slot)
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    if (view != list_view || list_slot < 0) {   /* first sight of this page: no list */
+        list_view = view;
+        list_slot = slot;
+        list_at = now - LIST_FRAMES;
+        return;
+    }
+    if (slot != list_slot) {
+        list_slot = slot;
+        list_at = now;
+    }
+    if (now - list_at >= LIST_FRAMES)
+        return;
+    int x0 = 46, x1 = 127, y0 = 2, y1 = 45;
+    for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++)
+            SET_PIXEL(c, x, y, 0);
+    box(c, x0, y0, x1, y1, 0);
+    for (int r = 0; r < 5; r++) {
+        int k = slot - 2 + r, y = y1 - 9 - 8 * r;
+        if (k < 0 || k > 127)
+            continue;
+        char nm[8], num[4];
+        slot_name(k, nm);
+        num[0] = k >= 100 ? (char)('0' + k / 100) : ' ';
+        num[1] = k >= 10 ? (char)('0' + k / 10 % 10) : ' ';
+        num[2] = (char)('0' + k % 10);
+        num[3] = 0;
+        TEXT(c, FONT, x0 + 3, y, 0, "%.3s", num);
+        TEXT(c, FONT, x0 + 21, y, 0, "%.7s", nm);
+        if (k == slot)
+            box(c, x0 + 1, y - 1, x1 - 1, y + 7, 0);
+    }
+}
+
 void smp_page_draw(void *view, void *c, int kind, int wave)
 {
     u32 ids[8];
@@ -360,6 +429,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     if (!wave) {                                /* page 1: the widgets and their labels */
         for (int i = 0; i < 8; i++)
             cell(c, view, kind, ids[i], CELL_X(i & 3), i < 4 ? TOP_Y : BOT_Y, 1, 0);
+        sample_list(c, view, value(view, SMP_SAMP_ID, 0));
         return;
     }
     /* page 2: the top row, unlabelled, raised a little; the waveform; the bottom labels */
@@ -413,6 +483,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         int top, v = value(view, ids[7], &top);
         w_pill(c, CELL_X(3), 0, v, top);
     }
+    sample_list(c, view, slot);
 }
 
 /* page 3, the RECORDER, laid out as the DT2's (its manual 13.1 and the owner's photograph):

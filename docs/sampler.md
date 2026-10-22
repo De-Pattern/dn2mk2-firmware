@@ -1,4 +1,4 @@
-# The Digitakt II's sample machines on the DN2 (v0.13 - v0.15)
+# The Digitakt II's sample machines on the DN2 (v0.13 - v0.16)
 
 The Digitone II and the Digitakt II are the same board and one codebase; what makes a
 Digitakt a sampler is its sample machines, a sample pool in the DSP's memory, and the
@@ -182,7 +182,7 @@ How:
 - A sample machine with no renderer yet (WERP, STRETCH, REPITCH) has its buffer
   cleared each block: silent, never a stale block.
 
-## Your samples: `tools/dn2samples.py`
+## Your samples: `tools/dn2samples.py` (v0.14 - v0.15; v0.16 below)
 
     python tools/dn2samples.py hello
     python tools/dn2samples.py send C:\samples\kit            every .wav in the folder
@@ -220,7 +220,7 @@ How it works:
   it is there, and waits for a whole pass before it says done.
 - The page names the slots from the mirror once a pool has been sent.
 
-## Keeping them on the +Drive
+## Keeping them on the +Drive (v0.15)
 
     python tools/dn2samples.py send C:\samples\kit --keep
     python tools/dn2samples.py save | load | forget
@@ -235,6 +235,53 @@ length and a checksum of the bytes, and a load that does not match them changes
 nothing. At power-on the UI loop's first passes, once the device is up, load it into
 the mirror; the feeder then sends it to the DSP as after a send. Projects, presets and
 kits are not touched; `forget` zeroes the header sector so nothing loads.
+
+## v0.16: 96 MB of yours on the +Drive, the fast link, recordings kept
+
+**The pool is 128 MB** in the DSP's DDR (`dnfw.sampler.machines.POOL_BYTES`): the first
+96 MB yours (SAMP 1..122), the last 32 MB the recorder's four slots, 8 MB each (a recording
+runs up to 66 s of 48 kHz int16, `REC_FRAMES`). The DSP's 512 MB part leaves stock's 5 MB and our
+pool far apart (`docs/link-research.md` §6b).
+
+**The +Drive holds the pool's image**, byte for byte as the DSP holds it, in the region of
+the eMMC the DN2 never uses (sector `0x600000`, 3 GiB, and up: a header sector `DN2Q`
+with the image's length and the directory page's checksum, then the image). The image is
+the master copy: the host tool writes your samples straight into it, and the recorder's
+recordings are written into it when they end. v0.15's `DN2P` images load as they are.
+
+    python tools/dn2samples.py send C:\samples\kit           (sample link 3: v0.16)
+
+- **Sending** (`tools/dn2samples.py`, sample link 3): BEGIN (the old image is marked
+  empty), WRITE in order (512-byte pieces; the ColdFire gathers 64 KB and writes it to the
+  eMMC), END (the header is written, then the image is loaded into the DSP). The
+  recorder's four directory entries in the image are kept as they were, so sending your
+  samples does not forget your recordings.
+- **Loading** (power-on, END, `load`): `link.c`'s loader reads the image's directory, then
+  each used slot's frames, 64 KB at a time, and sends them to the DSP; the directory page
+  (up to the DSP's command block at `0xf00`) goes last, so no slot points at frames that
+  are not there yet. **Every chunk is checked**: the ColdFire asks the DSP for two sums
+  of the words it now holds (`CMD_VERIFY`; `a += w, b += a`, mod 2^32, 1,024 words a
+  block) and compares them with its own. A chunk that does not check out is sent again.
+- **The fast link** (`docs/link-research.md` §6): eight TDM slots ColdFire -> DSP (8..15)
+  that stock neither fills nor reads. A hook in the SSI ISR (`0x40026098`, where every
+  transmit-fill mode has ended: `smp_tdm_hook` replays the two instructions it displaced)
+  writes one packet a period: 256 16-bit units under the tag byte `0xa5` (magic,
+  sequence, word offset, 124 words, count, check), so 124 words, 496 bytes, 1,500 times a
+  second: **about 0.7 MB/s**, 20 times the frame's words. The DSP (`tdm_rx`) reads the
+  page the engine read that block and writes a packet that checks out anywhere in the
+  pool but over the command block. Twice wrong on the fast link and the loader sets it
+  aside for the frame's words (36 KB/s, slow but always there); the host tool says which.
+- **Recordings kept**: when the recorder stops (YES, R.LEN, or the slot full), the
+  ColdFire asks the DSP to send the slot back (`CMD_SEND`, 64 KB windows) over the two
+  TDM slots DSP -> ColdFire (14..15; 29 words a period, about 170 KB/s), checks every
+  packet, writes each window to the +Drive, and then the slot's directory entry. After a
+  power cycle SAMP 124..127 play what they held. The status's frame count is in 64-frame
+  units now (a slot holds more than 65,535 x 32 frames).
+- **The waveform** on page 2 comes from an overview the ColdFire makes while a slot's
+  frames pass through it (100 column peaks a slot), so it is drawn for the recorder's
+  slots too, and for samples of any length.
+- **Commands queue** (eight deep, each sent for eight frames), so VERIFY, SEND and the
+  recorder's commands no longer overwrite one another.
 
 ## Checked
 
@@ -267,13 +314,8 @@ kits are not touched; `forget` zeroes the header sector so nothing loads.
 
 ## Next
 
-1. **Keeping recordings, and much more sample memory.** The DSP's 512 MB part is mostly
-   free (`docs/link-research.md` §6b: stock's DDR immediates end at `0x80530be8`), and the
-   +Drive's eMMC is 32 GB with everything above 2,224 MiB unused. What limits both today
-   is the link: 36 KB/s each way through spare SPI frame words. The research found eight
-   TDM slots (8..15) ColdFire -> DSP that stock neither writes nor reads (~0.7 MB/s), and
-   two the other way (14..15, ~0.2 MB/s): a sample library on the +Drive, loaded into a
-   pool of a hundred MB or more, and recordings saved back to it.
+1. ~~Keeping recordings, and much more sample memory~~: v0.16. More than 128 MB is
+   possible (the DDR has room) once the fast link is heard working on the instrument.
 2. A sample list (names) when choosing SAMP, as the DT2's.
 3. Closer clones of the DT2's machines (its OS 1.17 is on hand to read) and the
    Machinedrum's (`docs/perc.md`).
