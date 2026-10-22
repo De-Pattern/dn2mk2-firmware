@@ -632,7 +632,7 @@ void wr_page_draw(void *view, void *canvas)
     int res = kind == 2;                        /* RESONATOR's page */
     int cz = kind == 3;                         /* CZ's */
     int smp = kind >= SMP_KIND0;                /* a sample machine's: one page */
-    if (page < 0 || page >= (smp ? 1 : cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
+    if (page < 0 || page >= (smp ? 2 : cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
         page = 0;
     if (kind == 1) {                            /* PERC: the names TYPE has now */
         u8 flag;
@@ -640,10 +640,17 @@ void wr_page_draw(void *view, void *canvas)
     }
     wr_names();
 
-    if (smp) {                                  /* v0.15: the DT2's own SRC page */
+    if (smp) {                                  /* the DT2's own SRC page; page 2 the recorder */
         extern void smp_page_draw(void *view, void *canvas, int kind);
-        smp_page_draw(view, canvas, kind);
+        extern void smp_rec_draw(void *view, void *canvas);
+        if (page == 1)
+            smp_rec_draw(view, canvas);
+        else
+            smp_page_draw(view, canvas, kind);
         ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
+        int n = PAGE_COUNT(view);
+        if (n > 1)
+            PAGE_DOTS(view, canvas, n, page, 7);
         return;
     }
     if (cz && page == 0)

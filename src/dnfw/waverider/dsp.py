@@ -89,6 +89,7 @@ SMP_L2_SPAN = 0x8000
 SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbe8000
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
 SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0.15)
+SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sampler.machines.REC_STAGE)
 SMP_POOL_DDR = 0x84000000                    # the pool's directory, then its frames
 # W2's random table (dnfw.waverider.live.rnd_table): Waverider is gone (v0.11), but
 # RESONATOR, CZ and GRAN read it here
@@ -233,7 +234,8 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("machine lookup, 16 types ([-1] guard, then the table; v0.13)", LOOKUP16_DM - 4, lookup16()),
         ("sample machines' state: 16 voices x 128 bytes (zeros)", SMP_STATE_DM, bytes(16 * SMP_STATE_STRIDE)),
         ("sample machines' scratch (zeros)", SMP_SCRATCH_DM, bytes(0x100)),
-        ("free since v0.11 (Waverider's loop, scanner and tables; zeros)", SMP_SCRATCH_DM + 0x100, b""),
+        ("the recorder's staging block: 32 floats (zeros)", SMP_STAGE_DM, bytes(0x80)),
+        ("free since v0.11 (Waverider's loop, scanner and tables; zeros)", SMP_STAGE_DM + 0x80, b""),
         ("W2 random table, 256 float32 (RESONATOR, CZ, GRAN)", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
         ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
         ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),

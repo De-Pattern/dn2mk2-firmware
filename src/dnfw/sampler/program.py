@@ -28,7 +28,11 @@ STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "gain",
             "tune", "play", "samp", "a", "b", "c", "lev", "x", "y", "n", "tmp",
             *(f"mb{k}" for k in range(16)), "mbn",     # v0.14: the mailbox's sixteen halves
-            "sr", "dir", "sdir", "smode", "nseg", "nin", "nout", "acc", "gpos", "j")   # v0.15
+            "sr", "dir", "sdir", "smode", "nseg", "nin", "nout", "acc", "gpos", "j",   # v0.15
+            "xfn", "xfa", "xfi", "xfs",                # CFAD: its length, where it starts, 1/length, the shift
+            # the recorder: its state (0 idle, 1 armed, 2 recording, 3 full), slot entry,
+            # frames so far, their limit, source, threshold, its frames' base, the track
+            "rst", "rent", "rpos", "rmax", "rsrc", "rthr", "rbase", "rtk", "rpk")
 GRAIN = 2048                              # STRETCH's grain, output samples (43 ms); two, half apart
 TEMPO_OFFSET = 216                        # the frame's tempo word: BPM x 120 (docs/modulation-display.md)
 
@@ -204,6 +208,9 @@ def start(p: Prog, L: Layout) -> None:
         p.iconst(12, -1)
         p.iop(4, 12, "+", 4)                 # SAMP 0 is OFF: slot = SAMP - 1
         p.st(C["samp"], 4)
+        # the recorder's slots are the DSP's own, whatever count the pool has
+        p.iconst(12, SM.REC_FIRST)
+        p.if_(4, "GE", 12, lambda: p.iconst(0, SM.POOL_SLOTS), kind="i")
         p.e("COMP(R4, R0);")
 
         def have():
@@ -401,9 +408,56 @@ def fetch(p: Prog, d: int, k: int) -> None:
     p.ifz(8, "NE", i16, f32)
 
 
+def crossfade_setup(p: Prog, L: Layout) -> None:
+    """ONESHOT's CFAD in FWD LOOP: over the last X frames before the end (X = CFAD/127 of
+    the shorter of the loop and what lies before it), the sound fades into the audio
+    just before LOOP, so the wrap from the end back to LOOP is seamless. C['xfn'] = X
+    (0: none), C['xfa'] = where it starts, C['xfs'] = end - LOOP, C['xfi'] = 1 / X."""
+    C = L.C
+    p.fconst(0, 0.0)
+    p.st(C["xfn"], 0)
+    v(p, 0, "mach")
+    p.iconst(12, SM.TYPE_OF["ONESHOT"])
+    p.e("COMP(R0, R12);")
+
+    def oneshot():
+        v(p, 0, "mode")
+        p.iconst(12, 2)
+
+        def fwdl():
+            p.ld(9, C["t"])
+            PP.t146(p, 10, 9)
+            ctl(p, 4, SM.CFAD_REC, 10)       # 0..127
+            v(p, 5, "hi")
+            v(p, 6, "loop")
+            p.ipass(12, 5)
+            p.iop(7, 12, "-", 6)             # hi - loop
+            p.iop(8, 6, "MIN", 7)            # min(loop, hi - loop): room on both sides
+            tofloat(p, 8, 8)
+            tofloat(p, 4, 4, 1.0 / 127.0)
+            p.fop(8, 8, "*", 4)              # X
+            p.fconst(12, 1.0)
+
+            def some():
+                p.st(C["xfn"], 8)
+                tofloat(p, 7, 7)
+                p.st(C["xfs"], 7)
+                v(p, 5, "hi")
+                tofloat(p, 5, 5)
+                p.fop(5, 5, "-", 8)
+                p.st(C["xfa"], 5)
+                p.fpass(9, 8)
+                PM.recip(p, 10, 9)
+                p.st(C["xfi"], 10)
+            p.if_(8, "GE", 12, some)         # at least a frame
+        p.if_(0, "EQ", 12, fwdl, kind="i")
+    p._branch(lambda: p.r[0] == p.r[12], "EQ", oneshot, None)
+
+
 def render(p: Prog, L: Layout) -> None:
     """32 samples of the latched region at the block's rate, linear interpolation."""
     C = L.C
+    crossfade_setup(p, L)
     buffer(p, L)
 
     def sample():
@@ -438,6 +492,33 @@ def render(p: Prog, L: Layout) -> None:
             p.fop(1, 1, "-", 0)
             p.fop(1, 1, "*", 2)
             p.fop(0, 0, "+", 1)              # s0 + (s1 - s0) frac
+            p.ld(3, C["xfn"])
+            p.fconst(12, 0.0)
+
+            def xfade():                     # inside the crossfade? g = (pos - start) / X
+                v(p, 9, "pos")
+                tofloat(p, 5, 9)
+                v(p, 2, "frac")
+                p.fop(5, 5, "+", 2)
+                p.ld(6, C["xfa"])
+                p.fop(7, 5, "-", 6)
+
+                def inside():
+                    p.st(C["acc"], 0)
+                    p.ld(6, C["xfi"])
+                    p.fop(7, 7, "*", 6)
+                    p.st(C["gpos"], 7)       # g
+                    p.ld(6, C["xfs"])
+                    p.fop(5, 5, "-", 6)      # the same distance before LOOP
+                    read_at(p, L, 1, 5)
+                    p.ld(0, C["acc"])
+                    p.ld(7, C["gpos"])
+                    p.fop(1, 1, "-", 0)
+                    p.fop(1, 1, "*", 7)
+                    p.fop(0, 0, "+", 1)      # s + (s' - s) g
+                p.fconst(12, 0.0)
+                p.if_(7, "GE", 12, inside)
+            p.if_(3, "GT", 12, xfade)
             p.ld(3, C["lev"])
             p.fop(0, 0, "*", 3)
             p.stpost(4, 0)
@@ -872,6 +953,196 @@ def render_werp(p: Prog, L: Layout) -> None:
     p.loop(C["count"], 32, sample)
 
 
+def recorder(p: Prog, L: Layout) -> None:
+    """The recorder (docs/sampler.md): a sample-machine track whose REC is on records, into
+    one of four slots of the DSP's own (SAMP 124..127, 2 MB of int16 each, 21.8 s), the
+    block's input (IN L+R, L or R: the codec's input as the engine converts it, at
+    0x268538, L then R) or the main mix (the last block's, at 0x268438). Armed, it waits
+    for the block's peak to reach THRS; recording, it appends 32 frames a block and
+    keeps the slot's directory entry current, so the slot plays at once; it stops at
+    RLEN (0: the slot's whole length) or when REC is turned off."""
+    C = L.C
+    # the lowest sample-machine track with REC on, if any (scanned 15 down to 0)
+    p.iconst(0, -1)
+    p.st(C["rtk"], 0)
+    p.iconst(0, 15)
+    p.st(C["j"], 0)
+
+    def scan():
+        p.ld(9, C["j"])
+        PP.raw_type(p, 2)
+        p.iconst(12, SM.FIRST_TYPE)
+
+        def sample_type():
+            p.iconst(12, SM.FIRST_TYPE + len(SM.NAMES) - 1)
+
+            def rec_on():
+                p.ld(9, C["j"])
+                PP.t146(p, 10, 9)
+                ctl(p, 4, SM.REC_REC, 10)
+                p.ifz(4, "NE", lambda: (p.ld(0, C["j"]), p.st(C["rtk"], 0)))
+            p.if_(2, "LE", 12, rec_on, kind="i")
+        p.if_(2, "GE", 12, sample_type, kind="i")
+        p.ld(0, C["j"])
+        p.iconst(12, -1)
+        p.iop(0, 12, "+", 0)
+        p.st(C["j"], 0)
+    p.loop(C["n"], 16, scan)
+    p.ld(0, C["rtk"])
+
+    def off():                                # no track records: idle
+        p.iconst(0, 0)
+        p.st(C["rst"], 0)
+
+    def on():
+        p.ld(1, C["rst"])
+
+        def arm():                            # turned on: the slot, emptied, and the settings
+            p.ld(9, C["rtk"])
+            PP.t146(p, 10, 9)
+            ctl(p, 4, SM.RDST_REC, 10)       # 0..127 -> slot 0..3
+            p.lsh(4, 4, -5)
+            p.ipass(12, 4)
+            p.lsh(5, 4, 21)                  # 2 MB a slot
+            p.iconst(13, L.pool + SM.REC_OFFSET)
+            p.iop(5, 13, "+", 5)
+            p.st(C["rbase"], 5)
+            p.iconst(13, SM.REC_FIRST)
+            p.iop(4, 13, "+", 4)
+            p.lsh(4, 4, 4)
+            p.iconst(13, L.pool + 8)
+            p.iop(4, 13, "+", 4)
+            p.st(C["rent"], 4)
+            p.seti(1, 4)
+            p.sti(0, 1, 5)                   # address
+            p.iconst(6, 0)
+            p.sti(1, 1, 6)                   # frames: none yet
+            p.fconst(6, 1.0)
+            p.sti(2, 1, 6)                   # rate 1
+            p.iconst(6, SM.FMT_I16)
+            p.sti(3, 1, 6)
+            p.iconst(6, 0)
+            p.st(C["rpos"], 6)
+            ctl(p, 4, SM.RLEN_REC, 10)       # 0 the whole slot, else n x 1/127 of it
+            p.iconst(6, SM.REC_FRAMES)
+            p.ifz(4, "NE", lambda: (tofloat(p, 7, 4, SM.REC_FRAMES / 127.0), p.trunc(6, 7)))
+            p.st(C["rmax"], 6)
+            ctl(p, 4, SM.RSRC_REC, 10)       # 0 IN L+R, 1 IN L, 2 IN R, 3 MAIN
+            p.st(C["rsrc"], 4)
+            ctl(p, 4, SM.RTHR_REC, 10)       # 0..120: the peak to start at, 0 at once
+            tofloat(p, 5, 4, 1.0 / 120.0)
+            p.st(C["rthr"], 5)
+            p.iconst(0, 1)
+            p.st(C["rst"], 0)
+        p.ifz(1, "EQ", arm)
+        p.ld(1, C["rst"])
+        p.iconst(12, 1)
+        p.e("COMP(R1, R12);")
+
+        def capture():                        # 32 frames of the source, mono, -> acc..
+            p.fconst(0, 0.0)
+            p.st(C["rpk"], 0)
+            p.iconst(6, 0)
+            p.st(C["x"], 6)
+
+            def frame():
+                p.ld(6, C["x"])
+                p.lsh(7, 6, 2)
+                p.ld(8, C["rsrc"])
+                p.iconst(12, 3)
+                p.iconst(9, SM.IN_BUF)
+                p.if_(8, "EQ", 12, lambda: p.iconst(9, SM.MIX_BUF), kind="i")
+                p.ipass(12, 9)
+                p.iop(9, 12, "+", 7)
+                p.seti(1, 9)
+                p.ldi(3, 0, 1)                # L
+                p.ldi(4, 32, 1)               # R
+                p.ld(8, C["rsrc"])
+                p.iconst(12, 1)
+                p.if_(8, "EQ", 12, lambda: p.fpass(4, 3), kind="i")
+                p.iconst(12, 2)
+                p.if_(8, "EQ", 12, lambda: p.fpass(3, 4), kind="i")
+                p.fop(3, 3, "+", 4)
+                p.fconst(12, 0.5)
+                p.fop(3, 3, "*", 12)          # mono
+                p.fconst(12, 0.999969)
+                p.fop(3, 3, "MIN", 12)
+                p.fconst(12, -1.0)
+                p.fop(3, 3, "MAX", 12)
+                p.ld(5, C["rpk"])             # the block's peak
+                p.fconst(12, 0.0)
+                p.fop(6, 12, "-", 3)
+                p.fop(6, 6, "MAX", 3)
+                p.fop(5, 5, "MAX", 6)
+                p.st(C["rpk"], 5)
+                p.ld(6, C["x"])
+                p.lsh(7, 6, 2)
+                p.iconst(12, SM.REC_STAGE)
+                p.iop(7, 12, "+", 7)
+                p.seti(1, 7)
+                p.sti(0, 1, 3)                # staged as floats
+                p.iconst(12, 1)
+                p.iop(6, 12, "+", 6)
+                p.st(C["x"], 6)
+            p.loop(C["n"], 32, frame)
+        capture()
+        p.ld(1, C["rst"])
+        p.iconst(12, 1)
+
+        def armed():                          # the peak reached the threshold: record
+            p.ld(5, C["rpk"])
+            p.ld(6, C["rthr"])
+            p.if_(5, "GE", 6, lambda: (p.iconst(0, 2), p.st(C["rst"], 0)))
+        p.if_(1, "EQ", 12, armed, kind="i")
+        p.ld(1, C["rst"])
+        p.iconst(12, 2)
+
+        def record():                         # 32 frames as int16, two a word
+            p.ld(5, C["rpos"])
+            p.lsh(5, 5, 1)
+            p.ld(6, C["rbase"])
+            p.ipass(12, 6)
+            p.iop(5, 12, "+", 5)
+            p.seti(4, 5)
+            p.iconst(6, 0)
+            p.st(C["x"], 6)
+
+            def pair():
+                p.ld(6, C["x"])
+                p.lsh(7, 6, 3)
+                p.iconst(12, SM.REC_STAGE)
+                p.iop(7, 12, "+", 7)
+                p.seti(1, 7)
+                p.ldi(3, 0, 1)
+                p.ldi(4, 1, 1)
+                p.fconst(12, 32768.0)
+                p.fop(3, 3, "*", 12)
+                p.fop(4, 4, "*", 12)
+                p.trunc(8, 3)
+                p.trunc(9, 4)
+                p.iconst(12, 0xFFFF)
+                p.iop(8, 8, "AND", 12)
+                p.lsh(9, 9, 16)
+                p.ipass(12, 9)
+                p.iop(8, 12, "+", 8)
+                p.stpost(4, 8)
+                p.iconst(12, 1)
+                p.iop(6, 12, "+", 6)
+                p.st(C["x"], 6)
+            p.loop(C["n"], 16, pair)
+            p.ld(5, C["rpos"])
+            p.iconst(12, 32)
+            p.iop(5, 12, "+", 5)
+            p.st(C["rpos"], 5)
+            p.ld(6, C["rent"])
+            p.seti(1, 6)
+            p.sti(1, 1, 5)                    # the slot plays what is there
+            p.ld(6, C["rmax"])
+            p.if_(5, "GE", 6, lambda: (p.iconst(0, 3), p.st(C["rst"], 0)), kind="i")
+        p.if_(1, "EQ", 12, record, kind="i")
+    p.ifz(0, "LT", off, on)
+
+
 def mailbox(p: Prog, L: Layout) -> None:
     """The sample link (v0.14, docs/sampler.md): sixteen 16-bit words the ColdFire puts in
     the frame at 2650 + 2k (where stock carries a per-track array the DSP never reads):
@@ -912,7 +1183,7 @@ def mailbox(p: Prog, L: Layout) -> None:
                 p.iconst(12, SM.POOL_WORDS - 6)
                 p.e("COMP(R5, R12);")
 
-                def inside():
+                def write():
                     p.lsh(5, 5, 2)
                     p.iconst(12, L.pool)
                     p.iop(5, 12, "+", 5)
@@ -928,6 +1199,20 @@ def mailbox(p: Prog, L: Layout) -> None:
                     p.iconst(12, 1)
                     p.iop(6, 12, "+", 6)
                     p.st(C["mbn"], 6)
+
+                def inside():
+                    # not over the recorder's four directory entries (slots 123..126), which
+                    # are the DSP's own: a packet with any word in them writes nothing
+                    lo = (8 + 16 * SM.REC_FIRST) // 4
+                    hi = (8 + 16 * (SM.REC_FIRST + SM.REC_SLOTS)) // 4
+                    p.iconst(12, lo - 6)
+                    p.e("COMP(R5, R12);")
+
+                    def above():
+                        p.iconst(12, hi)
+                        p.e("COMP(R5, R12);")
+                        p._branch(lambda: s32(p.r[5]) >= s32(p.r[12]), "GE", write, None)
+                    p._branch(lambda: s32(p.r[5]) <= s32(p.r[12]), "LE", write, above)
                 p._branch(lambda: s32(p.r[5]) <= s32(p.r[12]), "LE", inside, None)
             p._branch(lambda: s32(p.r[5]) < s32(p.r[12]), "LT", small, None)
         p._branch(lambda: p.r[4] == p.r[2], "EQ", checked, None)
@@ -942,6 +1227,12 @@ def link_packet(offset: int, words) -> list[int]:
         h += [w & 0xFFFF, (w >> 16) & 0xFFFF]
     h.append((SM.LINK_SEED + sum(h)) & 0xFFFF)
     return h
+
+
+def run_recorder(L: Layout, mem):
+    p = Prog("run", mem=mem)
+    recorder(p, L)
+    return p
 
 
 def run_mailbox(L: Layout, mem):
@@ -962,6 +1253,7 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.raw(".GLOBAL wr_smp.;")
     p.raw("wr_smp.:")
     mailbox(p, L)
+    recorder(p, L)
     p.iconst(0, 0)
     p.st(L.C["t"], 0)
     top = p.label("slot")

@@ -54,6 +54,8 @@ typedef unsigned char u8;
 #define DATA_OFFSET 0x1000
 #define POOL_SLOTS 128
 #endif
+#define REC_DIR_START (8u + 16u * 123u)                             /* dnfw.sampler.machines.REC_FIRST */
+#define REC_DIR_END (8u + 16u * 127u)
 
 #define PROTO 2
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
@@ -164,6 +166,15 @@ void smp_feed(void)
     u32 hi = smp_hi, o = smp_walk;
     if (hi < 4 || hi > SMP_MIRROR_BYTES)
         return;                                 /* nothing to send: stock's words stay */
+    if (o >= hi) {
+        o = 0;
+        smp_passes++;
+    }
+    /* the recorder's four directory entries (slots 123..126) are the DSP's own: no packet
+     * touches them (the DSP refuses one that does); one that would cross into them from
+     * below is moved back to end at them, one inside them on past them */
+    if (o < REC_DIR_END && o + 24 > REC_DIR_START)
+        o = o < REC_DIR_START ? REC_DIR_START - 24 : REC_DIR_END;
     if (o >= hi) {
         o = 0;
         smp_passes++;

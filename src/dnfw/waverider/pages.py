@@ -148,11 +148,13 @@ SMP_FIRST = _smp.FIRST_TYPE
 SMP_PAGES = tuple(tuple(r for r, _sh, _lo in _smp.PAGES.get(n, _smp.PAGES["ONESHOT"])) for n in _smp.NAMES)
 SMP_TITLES = _smp.SHORT
 SMP_SUBTITLES = tuple(n.capitalize() for n in _smp.NAMES)
+SMP_REC_IDS = tuple(r for r, _sh, _lo in _smp.REC_PAGE)            # every sample machine's page 2
 
 
 def smp_named(name: str) -> dict[int, tuple[str, str]]:
     """record -> (long, short) on a sample machine's track"""
     out = {r: (lo, sh) for r, sh, lo in _smp.PAGES.get(name, _smp.PAGES["ONESHOT"]) if r}
+    out.update({r: (lo, sh) for r, sh, lo in _smp.REC_PAGE if r})      # page 2, the recorder
     out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in range(238, 263) if r not in out})
     return out
 
@@ -284,6 +286,12 @@ def smp_c_header() -> str:
             f"#define SMP_WERP_KIND {SMP_FIRST_KIND + _smp.NAMES.index('WERP')}\n"
             f"#define SMP_BARS_ID {_smp.BARS_REC}\n#define SMP_SEG_ID {_smp.SEG_REC}\n"
             f"#define SMP_MODE_ID {_smp.MODE_REC}\n"
+            f"static const unsigned short smp_rec_ids[8] = {{{', '.join(str(r) for r in SMP_REC_IDS)}}};\n"
+            f"#define SMP_REC_ID {_smp.REC_REC}\n#define SMP_RSRC_ID {_smp.RSRC_REC}\n"
+            f"#define SMP_RTHR_ID {_smp.RTHR_REC}\n#define SMP_RLEN_ID {_smp.RLEN_REC}\n"
+            f"#define SMP_RDST_ID {_smp.RDST_REC}\n#define SMP_REC_FIRST {_smp.REC_FIRST}\n"
+            f"#define SMP_REC_SECONDS {_smp.REC_FRAMES // 48000}\n"
+            f"static const char smp_rec_src[4][5] = {{{', '.join(q + m + q for m in _smp.SRC_NAMES)}}};\n"
             f"static const char smp_bars[8][4] = {{{', '.join(q + b + q for b in ('1/8', '1/4', '1/2', '1', '2', '4', '8', '16'))}}};\n"
             f"static const unsigned char smp_bars_steps[7] = {{{', '.join(map(str, _smp.BARS_STEPS))}}};\n"
             f"static const unsigned char smp_seg_steps[7] = {{{', '.join(map(str, _smp.SEG_STEPS))}}};\n"
@@ -374,6 +382,8 @@ def source(page_draw: int, cell: int) -> str:
     smp_page_data = "\n".join(f"    .long smp_title_{k}, smp_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in entries)}\n"
                               f"    .long {TAG}" for k, entries in enumerate(SMP_PAGES))
+    smp_page_data += ("\nsmp_rec_descriptor:\n    .long smp_rec_title, smp_rec_subtitle\n"
+                      f"    .long {', '.join(str(e) for e in SMP_REC_IDS)}\n    .long {TAG}")
     return f"""
 | -- the active track's machine, as ours: d0 = 1 PERC (5), 2 RESONATOR (6), 3 CZ (7),
 | 4..8 the sample machines (8..12), else 0; every other register kept
@@ -416,7 +426,7 @@ wr_count:
     bne.s   5f
     moveq   #{len(CZ_PAGES)},%d0
     rts
-5:  moveq   #1,%d0
+5:  moveq   #2,%d0                         | a sample machine: its page and the recorder
     rts
 1:  move.l  %sp@(8),%d0
     cmpi.l  #{NEW_TYPE},%d0
@@ -467,10 +477,14 @@ wr_page:
     mulu.w  %d1,%d0
     addi.l  #cz_descriptors,%d0
     bra.s   2f
-| a sample machine (d0 = its kind - 4): one page, its own
-8:  tst.l   %sp@(16)
+| a sample machine (d0 = its kind - 4): page 0 its own, page 1 the recorder
+8:  move.l  %sp@(16),%d1
+    beq.s   9f
+    subq.l  #1,%d1
     bne.s   6b
-    subq.l  #1,%d0
+    move.l  #smp_rec_descriptor,%d0
+    bra.s   2f
+9:  subq.l  #1,%d0
     moveq   #44,%d1
     mulu.w  %d1,%d0
     addi.l  #smp_descriptors,%d0
@@ -605,6 +619,8 @@ smp_descriptors:
 {_rep("cz_title", CZ_TITLE)}
 {chr(10).join(_rep(f"smp_title_{k}", t) for k, t in enumerate(SMP_TITLES))}
 {chr(10).join(_rep(f"smp_subtitle_{k}", t) for k, t in enumerate(SMP_SUBTITLES))}
+{_rep("smp_rec_title", "REC")}
+{_rep("smp_rec_subtitle", "Sampling")}
 {chr(10).join(_rep(f"title_{k}", t) for k, t in enumerate(TITLES))}
 {strings}
 {rstrings}

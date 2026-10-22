@@ -7,6 +7,8 @@
  * Drawn with our own widgets in the DT2's shapes (its widget classes are not in the DN2):
  * the bipolar box, the play-mode icon, the dotted empty box, the SAMP box (an inverted
  * bank letter and the slot), the knob, the fader, the segment ring and the bars.
+ * Page 2, the recorder (smp_rec_draw): REC, SRC, THRS on top, RLEN and DEST below.
+ *
  * Entered from page.c's wr_page_draw for a sample machine's track; page.c then draws the
  * stock grid's own tail (the level meter on the left and the page dots).
  *
@@ -373,5 +375,50 @@ void smp_page_draw(void *view, void *c, int kind)
     if (ids[7]) {
         int top, v = value(view, ids[7], &top);
         w_pill(c, CELL_X(3), 0, v, top);
+    }
+}
+
+/* page 2, the recorder (dnfw.sampler.program.recorder): REC a round button, filled when
+ * on; SRC its source as text; THRS a knob (0: at once); RLEN a knob and its seconds
+ * (0: the slot's whole length); DEST the slot it records into, as the SAMP box */
+void smp_rec_draw(void *view, void *c)
+{
+    int top, v;
+    for (int i = 0; i < 8; i++) {
+        u32 id = smp_rec_ids[i];
+        int x = CELL_X(i & 3), y = i < 4 ? TOP_Y : BOT_Y;
+        if (!id) {
+            w_empty(c, x, y);
+            continue;
+        }
+        v = value(view, id, &top);
+        if (id == SMP_REC_ID) {
+            int cx = x + 12, cy = y + 8;
+            for (int a = 0; a < 256; a += 8)
+                on(c, cx + sin256(a) * 6 / 127, cy + sin256(a + 64) * 6 / 127);
+            if (v)
+                for (int dy = -4; dy <= 4; dy++)
+                    for (int dx = -4; dx <= 4; dx++)
+                        if (dx * dx + dy * dy <= 17)
+                            on(c, cx + dx, cy + dy);
+        } else if (id == SMP_RSRC_ID) {
+            box(c, x + 1, y + 3, x + 22, y + 13, 0);
+            TEXT(c, FONT, x + 12, y + 5, CENTRED, "%.4s", smp_rec_src[v > 3 ? 3 : v]);
+        } else if (id == SMP_RDST_ID) {
+            w_samp(c, x, y, SMP_REC_FIRST + 1 + (v >> 5));
+        } else if (id == SMP_RLEN_ID) {
+            w_knob(c, x, y + 3, v, top);
+            if (v == 0)
+                TEXT(c, FONT, x + 12, y - 1, CENTRED, "MAX");
+            else {
+                int ds = v * SMP_REC_SECONDS * 10 / 127;     /* tenths of a second */
+                TEXT(c, FONT, x + 12, y - 1, CENTRED, "%d.%d", ds / 10, ds % 10);
+            }
+            TEXT(c, FONT, x + 12, y - 7, CENTRED, "%.4s", NAME_SHORT(id));
+            continue;
+        } else {
+            w_knob(c, x, y, v, top);
+        }
+        TEXT(c, FONT, x + 12, y - 7, CENTRED, "%.4s", NAME_SHORT(id));
     }
 }

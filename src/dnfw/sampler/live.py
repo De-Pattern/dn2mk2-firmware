@@ -136,8 +136,19 @@ class Harness:
         self.set(SM.LOOP_REC, 0)
         self.set(SM.SLEN_REC, 0)
 
-    def block(self, mtype: int, note: float = 60.0, trig: bool = False) -> list[float]:
+    def block(self, mtype: int, note: float = 60.0, trig: bool = False, recorder: bool = False,
+              inp=None) -> list[float]:
+        """one block on track T as MTYPE; RECORDER: run the recorder first (as the DSP
+        does), with INP (32 floats, L = R) in the engine's input block"""
         t = self.t
+        a = PM.FRAME + 148 + 2 * t                # the frame's type word for the track
+        w = self.mem.get(a & ~3)
+        self.mem.put(a & ~3, (w & 0xFFFF) | (mtype << 16) if a & 2 else (w & 0xFFFF0000) | mtype)
+        if recorder:
+            for k, x in enumerate(inp or [0.0] * 32):
+                self.mem.put(SM.IN_BUF + 4 * k, bits(x))
+                self.mem.put(SM.IN_BUF + 0x80 + 4 * k, bits(x))
+            P.run_recorder(self.L, self.mem)
         self.mem.put(PP.NOTE_CELLS + 4 * t, bits(note))
         self.mem.put(PP.TRIG_WORD, (1 << (16 + t)) if trig else 0)
         self.mem.put(PP.BUFFERS + 4 * t, BUF)

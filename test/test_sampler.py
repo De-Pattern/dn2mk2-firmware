@@ -149,3 +149,85 @@ def test_the_drive_region_is_above_everything_the_dn2_uses():
     assert "#define STORE_SECTOR 0x600000u" in src
     assert "#define STORE_FLOOR 0x458000u" in src and "STORE_SECTOR >= STORE_FLOOR" in src
     assert 0x600000 * 512 >= 3 << 30 and (0x600000 + 1 + SM.MIRROR_BYTES // 512) * 512 < 4 << 30
+
+
+def test_cfad_makes_the_loop_seamless():
+    # ONESHOT FWD LOOP on a sine whose loop does not meet itself: without CFAD the wrap
+    # jumps; with it the step there is no bigger than the sine's own
+    n = 4000
+    snd = [0.8 * math.sin(2 * math.pi * k / 97.3) for k in range(n)]
+
+    def run(cfad):
+        h = SL.Harness(0, samples=[snd], rates=[1.0], fmts=[0])
+        h.defaults()
+        h.set(SM.PLAY_REC, 80)                   # FWDL
+        h.set(SM.LEN_REC, 40)
+        h.set(SM.LOOP_REC, 20)
+        h.set(SM.CFAD_REC, cfad)
+        out = []
+        for b in range(120):
+            out += h.block(SM.TYPE_OF["ONESHOT"], 60.0, b == 1)
+        return out
+    own = max(abs(snd[k + 1] - snd[k]) for k in range(n - 1))
+    jump = lambda o: max(abs(o[k + 1] - o[k]) for k in range(64, len(o) - 1))
+    assert jump(run(0)) > 2 * own
+    assert jump(run(127)) <= own * 1.05
+
+
+def test_the_recorder_records_and_plays_back():
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    sig = [0.5 * math.sin(2 * math.pi * 440 * k / 48000) for k in range(32 * 20)]
+    h.set(SM.REC_REC, 1)
+    h.set(SM.RDST_REC, 32)                       # slot 2 of 4: SAMP 125
+    for b in range(20):
+        h.block(ONE, recorder=True, inp=sig[32 * b:32 * b + 32])
+    ent = h.L.pool + 8 + 16 * (SM.REC_FIRST + 1)
+    assert h.mem.get(ent) == h.L.pool + SM.REC_OFFSET + (2 << 20)
+    assert h.mem.get(ent + 4) == 32 * 20 and h.mem.get(ent + 12) == SM.FMT_I16
+    h.set(SM.REC_REC, 0)
+    h.block(ONE, recorder=True)
+    assert h.mem.get(ent + 4) == 32 * 20          # REC off keeps what it took
+    h.set(SM.SAMP_REC, SM.REC_FIRST + 2)
+    out = []
+    for b in range(20):
+        out += h.block(ONE, 60.0, b == 0)
+    assert max(abs(a - b) for a, b in zip(out, sig[:len(out)])) < 1e-4
+
+
+def test_the_recorder_waits_for_its_threshold():
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    h.set(SM.REC_REC, 1)
+    h.set(SM.RTHR_REC, 60)                       # half scale
+    ent = h.L.pool + 8 + 16 * SM.REC_FIRST
+    for b in range(5):
+        h.block(ONE, recorder=True, inp=[0.1] * 32)
+    assert h.mem.get(ent + 4) == 0
+    h.block(ONE, recorder=True, inp=[0.7] * 32)
+    assert h.mem.get(ent + 4) == 32
+
+
+def test_the_mailbox_leaves_the_recorders_entries_alone():
+    L = SL.layout()
+    lo = (8 + 16 * SM.REC_FIRST) // 4
+    hi = (8 + 16 * (SM.REC_FIRST + SM.REC_SLOTS)) // 4
+    for w in (lo - 5, lo, hi - 1):
+        mem = _frame_mem(P.link_packet(w, [7] * 6))
+        P.run_mailbox(L, mem)
+        assert mem.get(L.C["mbn"]) == 0, w
+    for w in (lo - 6, hi):
+        mem = _frame_mem(P.link_packet(w, [7] * 6))
+        P.run_mailbox(L, mem)
+        assert mem.get(L.C["mbn"]) == 1 and mem.get(L.pool + 4 * w) == 7, w
+
+
+def test_the_host_tool_leaves_the_recorders_slots():
+    assert SM.USER_SLOTS < SM.REC_FIRST
+    assert SM.POOL_SLOTS >= SM.REC_FIRST + SM.REC_SLOTS
+    src = (pathlib.Path(__file__).resolve().parents[1] / "tools" / "dn2samples.py").read_text()
+    assert "SM.USER_SLOTS" in src
+    c = (pathlib.Path(__file__).resolve().parents[1] / "csrc" / "sampler" / "link.c").read_text()
+    assert f"16u * {SM.REC_FIRST}u" in c and f"16u * {SM.REC_FIRST + SM.REC_SLOTS}u" in c

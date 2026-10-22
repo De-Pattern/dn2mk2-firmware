@@ -23,7 +23,7 @@ them on the +Drive when the send is done, and the instrument loads them at power
 They go to a region of the +Drive the DN2 itself never uses (above 3 GiB), so your
 projects, presets and kits are not touched; `forget` marks the copy empty. A WAV is read as
 it is: 8, 16, 24 or 32-bit PCM or 32-bit float, any rate (played at its own pitch on
-C4), stereo mixed to mono. Up to 128 slots and about 2.5 minutes of 16-bit mono at 44.1
+C4), stereo mixed to mono. Up to 122 slots (SAMP 1..122; 124..127 are the recorder's) and about 2.5 minutes of 16-bit mono at 44.1
 kHz in all (the mirror is 5 MB).
 
     request  F0 00 20 3C 7D 01 <pack7: u16 seq, u8 cmd, payload> F7
@@ -133,8 +133,9 @@ def wav_list(items):
 def build_pool(paths):
     from dnfw.sampler import live as SL, machines as SM
     from dnfw.waverider import dsp
-    if len(paths) > SM.POOL_SLOTS:
-        raise SystemExit(f"{len(paths)} files: the pool has {SM.POOL_SLOTS} slots")
+    if len(paths) > SM.USER_SLOTS:
+        raise SystemExit(f"{len(paths)} files: the pool has {SM.USER_SLOTS} slots for yours "
+                         "(124..127 are the recorder's)")
     samples, rates, names = [], [], []
     for p in paths:
         s, r = read_wav_any(p)

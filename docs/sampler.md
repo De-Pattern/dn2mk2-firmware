@@ -1,4 +1,4 @@
-# The Digitakt II's sample machines on the DN2 (v0.13)
+# The Digitakt II's sample machines on the DN2 (v0.13, v0.14)
 
 The Digitone II and the Digitakt II are the same board and one codebase; what makes a
 Digitakt a sampler is its sample machines, a sample pool in the DSP's memory, and the
@@ -69,10 +69,52 @@ the bottom row's labels under it and LEV as a pill, as on the DT2.
   segments last to first) and whether the whole loops.
 - These are our own readings of the DT2 manual (Appendix A); the DT2's own stretching
   algorithms are not public, so the sound is close in kind, not identical.
-- **CFAD** (ONESHOT) is drawn but not yet heard.
+- **CFAD** (ONESHOT, v0.14) crossfades the loop: in FWD LOOP, over the last X frames
+  before the end (X = CFAD/127 of the shorter of the loop and what lies before LOOP)
+  the sound fades into the audio just before LOOP, so the jump from the end back to
+  LOOP lands where the sound already is: no click, however the loop is cut. 0 is off;
+  drawn as a knob.
 
 The page shows the machine and the sound in the middle, and the sample as a bar: the
 part that plays solid, LOOP's point marked in the loop modes, GRID's slices ticked.
+
+## Page 2: sampling (v0.14)
+
+Every sample machine has a second page, after the DT2's sampling page: press the page
+key (SRC again) on a sample track.
+
+| A | B | C | D | E | F | G | H |
+|---|---|---|---|---|---|---|---|
+| REC | SRC | THRS | - | RLEN | DEST | - | - |
+
+- **REC** on arms the recorder; off stops it (what it took stays). The button fills
+  when on.
+- **SRC** what it records: **IN** (the two inputs, mixed to mono), **IN L**, **IN R**,
+  or **MAIN** (the DN2's own main mix).
+- **THRS** 0 starts at once; above 0 the recorder waits, armed, until a block's peak
+  reaches THRS (120 = full scale), so a hit starts the recording.
+- **RLEN** how long: MAX (0) the slot's whole 21.8 s, else n/127 of it; the page shows
+  the seconds.
+- **DEST** the slot it records into: **SAMP 124, 125, 126 or 127**, the recorder's own
+  four slots (2 MB of 16-bit mono each, at 48 kHz). Recording empties the slot first.
+- The recording plays at once: set SAMP to its slot on any sample track (the waveform
+  is not drawn for these slots: the ColdFire cannot see the DSP's memory).
+- One recorder: if several sample tracks have REC on, the lowest-numbered one sets it.
+- REC is an ordinary parameter, so it is saved with the sound: a sound saved with REC
+  on starts recording when loaded. Turn REC off after recording.
+- **Recordings live in the DSP's memory only**: they last until power-off and are not
+  kept on the +Drive (the ColdFire cannot read them back from the DSP yet).
+
+How: the recorder (`dnfw.sampler.program.recorder`) runs at the top of the sample
+machines' code each block, before the voices. It reads the engine's input block
+(`0x268538`: 32 floats of L, then R, as the per-block driver converts the codec's input)
+or the main mix (`0x268438`, the previous block's), and appends 32 frames as int16 to
+the slot's frames at 8 MB + 2 MB x slot in the pool, past anything the ColdFire's
+mirror can reach (5 MB). It keeps the slot's directory entry (slots 123..126 of the
+pool, `SAMP 124..127`) current: address, frames so far, rate 1, int16. The sample link
+never writes those four entries: the feeder steps its walk around them
+(`csrc/sampler/link.c`) and the DSP refuses any packet that touches them; the host tool
+fills at most SAMP 1..122.
 
 ## How it works
 
@@ -110,7 +152,8 @@ part that plays solid, LOOP's point marked in the loop modes, GRID's slices tick
 Windows, no packages needed; close Elektron Transfer first (one program per MIDI port).
 The WAVs (8/16/24/32-bit PCM or 32-bit float, any rate, mono or stereo) go into slots
 1, 2, 3, ... in the order given (a folder: by name), named on the page by their file
-names. They play at their own rate and pitch on C4. Up to 128 slots and 5 MB in all
+names. They play at their own rate and pitch on C4. Up to 122 slots (124..127 are the
+recorder's) and 5 MB in all
 (16-bit mono: about 54 s at 48 kHz). **They last until power-off** unless you keep them:
 `send --keep` (or `save` afterwards) writes them to the +Drive, and the instrument loads
 them at power-on (below).
@@ -170,7 +213,14 @@ kits are not touched; `forget` zeroes the header sector so nothing loads.
   every packet the frame builder sent is exactly `dnfw.sampler.program.link_packet` of
   the mirror's bytes.
 - Step 4: tracks 1-15 bit-identical to stock with track 0 on ONESHOT or WERP.
-- `test/test_sampler.py`: the pool layout, the int16 kick, each time machine lasting
+- Step **3d** (v0.14): a track recording a 330 Hz input block by block: the slot's entry
+  and int16 frames are exactly the model's; REC off keeps them; SAMP 124 plays it back,
+  every sample track bit-exact. Step 3b also runs CFAD (bit-exact; the loop differs from
+  the same loop without it).
+- The feeder in the emulator (v0.14): 220 packets after a 2,400-byte write, each
+  `link_packet` of the mirror, none touching bytes 1976..2039, every other byte sent.
+- `test/test_sampler.py`: CFAD removes the loop's jump; the recorder records, keeps and
+  plays back, and waits for THRS; the mailbox refuses the recorder's entries; the pool layout, the int16 kick, each time machine lasting
   BARS at two tempos, STRETCH keeping the pitch while REPITCH does not, the mailbox, the
   host tool's codec and WAV reading.
 - The ship gate's SAVE/LOAD: types 8 and 12 round-trip; 13 loads as FM Tone.
@@ -178,6 +228,5 @@ kits are not touched; `forget` zeroes the header sector so nothing loads.
 
 ## Next
 
-1. CFAD (ONESHOT's crossfade at the loop point).
-2. Sampling from the inputs.
-3. The comb filter.
+1. Keeping recordings on the +Drive (a DSP-to-ColdFire path for the pool).
+2. The comb filter.

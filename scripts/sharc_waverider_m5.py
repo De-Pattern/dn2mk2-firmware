@@ -445,7 +445,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,smp,link,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -522,6 +522,11 @@ def main(argv=None):
             print("\nstep 3c: the sample link")
             results["3c_link"] = step_link(init, sound, machines, a.blocks)
             show(results["3c_link"])
+
+        if "rec" in steps:
+            print("\nstep 3d: the recorder")
+            results["3d_rec"] = step_rec(init, sound, machines, a.blocks)
+            show(results["3d_rec"])
 
         if "stock" in steps:
             print("\nstep 4: types 0-4 unchanged")
@@ -884,6 +889,10 @@ def step_smp(init, sound, machines, blocks) -> dict:
         f.put(SP.TEMPO_OFFSET, 140 * 120)
         return f.to_bytes()
     runs["timed"] = run_blocks(init, timed, blocks)
+    # v0.14: CFAD, a short forward loop on the hat, with and without the crossfade
+    loopw = {SM.SAMP_REC: 3, SM.PLAY_REC: 80, SM.LOOP_REC: 5, SM.LEN_REC: 10}
+    runs["cfad"] = run_blocks(init, frames(ONE, smp_words(loopw | {SM.CFAD_REC: 100})), blocks)
+    runs["nocfad"] = run_blocks(init, frames(ONE, smp_words(loopw)), blocks)
     runs["off"] = run_blocks(init, frames(ONE, smp_words({SM.SAMP_REC: 0})), blocks)
     runs["empty_slot"] = run_blocks(init, frames(ONE, smp_words({SM.SAMP_REC: 90})), blocks)
     runs["silent"] = run_blocks(init, frames(ONE, smp_words(), trig=()), blocks)
@@ -938,6 +947,10 @@ def step_smp(init, sound, machines, blocks) -> dict:
             and V.peak(perc_series(mx, 2)) > 0.05,
         "v0.15: WERP, STRETCH and REPITCH at 140 BPM sound (peak > 0.05), bit-exact (above)":
             runs["timed"]["ok"] and all(V.peak(smp_series(runs["timed"], t)) > 0.05 for t in (0, 1, 2)),
+        "v0.14: CFAD's loop sounds and differs from the same loop without it (bit-exact above)":
+            runs["cfad"]["ok"] and runs["nocfad"]["ok"]
+            and V.peak(smp_series(runs["cfad"], 0)) > 0.01
+            and smp_series(runs["cfad"], 0) != smp_series(runs["nocfad"], 0),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]
@@ -1011,6 +1024,67 @@ def step_link(init, sound, machines, blocks) -> dict:
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"packets_written": counts, "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}}
+
+
+# -- step 3d: the recorder (docs/sampler.md) ------------------------------------------------------
+
+def step_rec(init, sound, machines, blocks) -> dict:
+    """Track 0 ONESHOT with REC on records the engine's input block (poked in at the
+    dispatch, as the per-block driver would have converted it) into slot 124; the slot's
+    entry and frames are what the recorder's model says; then SAMP 124 plays it back."""
+    import math as _m
+    n = max(blocks, 12)
+    sig = [0.6 * _m.sin(2 * _m.pi * 330 * k / 48000) for k in range(32 * n)]
+    ONE = SM.TYPE_OF["ONESHOT"]
+
+    def frames_at(b):
+        # n blocks recording (SAMP 1, no trigger), then REC off, SAMP 124, a note
+        if b < n:
+            w = smp_words({SM.SAMP_REC: 1, SM.REC_REC: 1})
+        else:
+            w = smp_words({SM.SAMP_REC: SM.REC_FIRST + 1, SM.REC_REC: 0})
+        return base_frame(sound, machines, t0=ONE, trigger=(b == n), overrides=w).to_bytes()
+
+    state = {"b": 0}
+
+    def at_dispatch(r):
+        b = state["b"]
+        for k in range(32):
+            x = struct.unpack("<I", struct.pack("<f", sig[32 * b + k] if b < n else 0.0))[0]
+            m2.poke(r.state, SM.IN_BUF + 4 * k, x)
+            m2.poke(r.state, SM.IN_BUF + 0x80 + 4 * k, x)
+        state["b"] += 1
+    play = 4
+    rec = run_blocks(init, frames_at, n + play, extra_hooks={m3.DISPATCH: at_dispatch})
+    ok = rec["ok"]
+    st = rec["state"].state if ok else None
+    ent = dsp.SMP_POOL_DDR + 8 + 16 * SM.REC_FIRST
+    words = [m2.word(st, ent + 4 * k) or 0 for k in range(4)] if ok else [0] * 4
+    frames, base = words[1], words[0]
+    got = []
+    for k in range(frames // 2):
+        w = m2.word(st, base + 4 * k) or 0
+        for h in (w & 0xFFFF, w >> 16):
+            got.append((h - 65536 if h >= 32768 else h) / 32768.0)
+    # the model: trunc of the mono (L = R) times 32768, two a word
+    want = [max(-32768, min(32767, int(x * 32768.0))) / 32768.0 for x in sig[:frames]]
+    rst = (m2.word(st, SMP_L.C["rst"]) or 0) if ok else None
+    back = smp_series(rec, 0)[-play * BLOCK:] if ok else []
+    exact = smp_exact(rec) if ok else (0, 1, 1)
+    checks = {
+        "the run returns every block": ok,
+        f"REC on records every block from the first ({n * 32} frames into slot 124's entry, "
+        "int16 at 8 MB into the pool)": ok and frames == 32 * n and base == dsp.SMP_POOL_DDR + SM.REC_OFFSET
+            and words[3] == SM.FMT_I16,
+        "the recorded frames are the input's, as the model converts them": ok and got == want,
+        "REC off stops the recorder and keeps the slot": ok and rst == 0 and frames == 32 * n,
+        "SAMP 124 plays the recording back": ok and len(back) == play * BLOCK and V.peak(back) > 0.3,
+        "every sample track bit-exact to the model, every block": ok and exact[1] == 0 and exact[2] == 0,
+    }
+    return {"ok": all(checks.values()), "checks": checks,
+            "numbers": {"entry": [hex(w) for w in words], "state": rst, "exact": exact,
+                        "peak": V.peak(back) if back else None,
+                        "halt": rec.get("halt")}}
 
 
 # -- step 4 -------------------------------------------------------------------------------------------
