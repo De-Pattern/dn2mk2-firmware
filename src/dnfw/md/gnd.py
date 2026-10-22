@@ -18,11 +18,8 @@ from ..perc.dsl import Prog
 def out_loop(p: Prog, L: K.Layout, body) -> None:
     """for each of the block's 32 samples: body() leaves the sample in F4, stored at
     OUT0 + i (I5 walks it). The loop takes R0 and R12 each time round."""
-    p.iconst(0, 4 * K.OUT0)
-    p.ipass(12, 0)
-    p.e("R0 = I3;") if not p.run else None
-    if p.run:
-        p.setR(0, p.i[3])
+    p.ld(0, L.C["mdb"])
+    p.iconst(12, 4 * K.OUT0)
     p.iop(0, 12, "+", 0)
     p.seti(5, 0)
 

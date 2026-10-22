@@ -149,11 +149,17 @@ SC_WORDS = ("t", "count", "out", "tr", "type", "note", "trig", "sbase",
 class Layout:
     """Addresses the program is built for (dnfw.waverider.dsp provides them)."""
 
-    def __init__(self, state, scratch, tables, sin):
+    def __init__(self, state, scratch, tables, sin, md_state=None, md_tables=None):
         self.state, self.tables, self.sin = state, tables, sin
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
         _, at = tables_bytes()
         self.T = {name: tables + off for name, off in at.items()}
+        # the Machinedrum voices (v0.17, docs/md.md): their words, their tables, and their
+        # scratch in the words the Ravel machines' controls had (c0..c23)
+        from ..md import core as MDK
+        assert len(MDK.SC_WORDS) <= 24
+        self.md = MDK.Layout(md_state if md_state is not None else 0, self.C["c0"],
+                             md_tables if md_tables is not None else 0)
 
 
 # -- primitives -----------------------------------------------------------------------------

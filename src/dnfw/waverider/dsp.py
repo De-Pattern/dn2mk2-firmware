@@ -82,6 +82,11 @@ L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 wi
 PERC_SCRATCH_DM = 0x2DDE80                   # 55 words (dnfw.perc.machines.SC_WORDS)
 PERC_STATE_DM, PERC_STATE_STRIDE = 0x2DE180, 128             # 16 voices x 32 words
 PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
+# the Machinedrum machines (v0.17, docs/md.md): their tables (the sine, which the DSP fills
+# itself, then the host's and DSP2's tables, read from the owner's MD firmware at build
+# time), and 16 slots x 1 KB of words
+MD_TABLES_DDR = 0x82000000
+MD_STATE_DDR = 0x82100000
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
 SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200d0000
@@ -279,6 +284,11 @@ def _cz_tables() -> bytes:
     return cz_live.tables_bytes()[0]
 
 
+def _md_core():
+    from ..md import core
+    return core
+
+
 def _perc_tables() -> bytes:
     from ..perc import machines as perc_machines
     return perc_machines.tables_bytes()[0]
@@ -297,6 +307,10 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("SHFT tables", SHFT_TABLES_DDR, _shft_tables()),
         ("GRAN tables", GRAN_TABLES_DDR, _gran_tables()),
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
+        ("Machinedrum sine (zeros: the DSP fills it)", MD_TABLES_DDR, bytes(4 * _md_core().SINE_N)),
+        ("Machinedrum tables (from the owner's MD firmware)", MD_TABLES_DDR + _md_core().TABLE_LAYOUT["hostP"][0],
+         _md_core().tables_bytes()),
+        ("Machinedrum voices: 16 slots x 1 KB (zeros)", MD_STATE_DDR, bytes(16 * _md_core().MD_STRIDE)),
         ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE)),
         ("sample pool: directory and the test sounds (v0.13)", SMP_POOL_DDR, _smp_pool())]
 

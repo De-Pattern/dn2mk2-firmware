@@ -27,7 +27,8 @@ def layout(state=None, scratch=None, tables=None, sin=None) -> M.Layout:
         from ..shft import live as SL
         _, at = SL.tables_bytes()
         sin = dsp.SHFT_TABLES_DDR + at["sin"]
-    return M.Layout(state=state, scratch=scratch, tables=tables, sin=sin)
+    return M.Layout(state=state, scratch=scratch, tables=tables, sin=sin,
+                    md_state=dsp.MD_STATE_DDR, md_tables=dsp.MD_TABLES_DDR)
 
 
 def table_words(L: M.Layout) -> dict[int, int]:
@@ -42,6 +43,8 @@ def table_words(L: M.Layout) -> dict[int, int]:
     base = L.sin - sat["sin"]
     for k in range(len(sdata) // 4):
         out[base + 4 * k] = struct.unpack_from("<I", sdata, 4 * k)[0]
+    from ..md import bench as MDB                 # the Machinedrum's tables, the sine filled (v0.17)
+    out.update(MDB.table_mem(L.md))
     return out
 
 
@@ -61,8 +64,9 @@ class Harness:
         """mtype 0..N-1; params: eight 0..1 values; fx: the seven track effects' (0..1,
         default FX_OFF: every effect off, as at the records' defaults)."""
         t = self.t
-        knob = (mtype * 128 + 127) // M.N            # a knob value that lands on mtype
-        while (knob * M.N) >> 7 != mtype:
+        from ..md import voice as MDV
+        knob = (mtype * 128 + 127) // MDV.N          # a knob value that lands on mtype
+        while (knob * MDV.N) >> 7 != mtype:
             knob -= 1
         self._half(M.frame_offset(M.TYPE_REC[1]), knob << 8)
         for (_rid, slot, lo, top), x in zip(M.PARAMS + M.FX_PARAMS, list(params) + list(fx or FX_OFF)):

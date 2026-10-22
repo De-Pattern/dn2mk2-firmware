@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import math
 
-from . import kit as K
 from . import machines as M
 from .dsl import Prog
+from ..md import voice as MDV
+
+MD_LEVEL = 0.7                            # the Machinedrum's full scale on a DN2 track (v0.17)
 
 SAVE = 0x2DDE00                          # the save area PING's tail restores from
 SAVE_REGS = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12",
@@ -90,11 +92,11 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.lsh(4, 4, -8)
     p.iconst(12, 127)
     p.iop(4, 4, "MIN", 12)
-    p.lsh(5, 4, 4)
-    p.lsh(6, 4, 3)
-    p.ipass(12, 5)
-    p.iop(4, 12, "+", 6)
-    p.lsh(4, 4, -7)
+    p.iconst(12, 0)
+    p.float_(4, 4, 12)
+    p.fconst(12, MDV.N / 128.0)               # 0..127 over the machines (v0.17)
+    p.fop(4, 4, "*", 12)
+    p.trunc(4, 4)
     p.st(C["type"], 4)
     for k, (_rid, slot, lo, top) in enumerate(M.PARAMS + M.FX_PARAMS):
         half(p, 4, M.frame_offset(slot), 10)
@@ -110,48 +112,13 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.fconst(12, 1.0 / top)
         p.fop(5, 5, "*", 12)
         p.st(C[f"p{k}" if k < 8 else f"q{k - 8}"], 5)
-    # the note: machine5_live's validation, then the transpose 2^((note - 60) / 12)
+    # the Machinedrum machine (v0.17, docs/md.md): its slot's words at I3
     p.ld(9, C["t"])
-    p.lsh(12, 9, 2)
-    p.iconst(11, NOTE_CELLS)
+    p.lsh(12, 9, 10)
+    p.iconst(11, L.md.state)
     p.iop(12, 11, "+", 12)
-    p.seti(1, 12)
-    p.ldi(8, 0, 1)
-    p.lsh(12, 8, -23)
-    p.iconst(13, 0xFF)
-    p.iop(12, 12, "AND", 13)
-    p.if_(12, "EQ", 13, lambda: p.iconst(8, 0), kind="i")
-    p.ifz(8, "LT", lambda: p.iconst(8, 0))
-    p.fconst(12, 60.0)
-    p.fop(8, 8, "-", 12)
-    p.fconst(12, 1.0 / 12.0)
-    p.fop(8, 8, "*", 12)
-    M.exp2(p, L, 9, 8)
-    p.st(C["tr"], 9)
-    # a note: the voice starts afresh on the machine TYPE names now
-    p.ld(0, C["trig"])
-
-    def start():
-        M.v(p, 5, "rng")
-
-        def seed():
-            p.ld(9, C["t"])
-            p.lsh(9, 9, 20)
-            p.iconst(12, SEED)
-            p.iop(5, 12, "+", 9)
-        p.ifz(5, "EQ", seed)
-        p.iconst(0, 0)
-        for k in range(M.STATE_WORDS):
-            p.sti(k, 2, 0)
-        M.vs(p, "rng", 5)
-        p.iconst(0, 1)
-        M.vs(p, "on", 0)
-        p.fconst(0, 1.0)
-        for w in ("aenv", "penv", "nenv", "menv", "xenv"):
-            M.vs(p, w, 0)
-        p.ld(0, C["type"])
-        M.vs(p, "mach", 0)
-    p.ifz(0, "NE", start)
+    p.seti(3, 12, "this slot's Machinedrum words")
+    p.st(L.md.C["mdb"], 12)
     # the slot's buffer
     p.ld(9, C["t"])
     p.lsh(12, 9, 2)
@@ -161,28 +128,20 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.ldi(0, 0, 1)
     p.seti(4, 0, "the slot's buffer")
     p.st(C["buf"], 0)
+    # a slot that has just become PERC starts clean, playing nothing until its first note
     M.v(p, 0, "on")
 
-    def silent():
-        p.iconst(6, 0)
-        p.loop(C["count"], 32, lambda: p.stpost(4, 6))
-
-    def sounding():
-        dispatch(p, L)
-        fx(p, L)
-        # done when the drum has died away
-        M.v(p, 4, "t")
-        p.fconst(12, 0.02)
-
-        def late():
-            M.v(p, 5, "aenv")
-            p.fconst(12, OFF_LEVEL)
-            p.if_(5, "LT", 12, lambda: (p.iconst(0, 0), M.vs(p, "on", 0)))
-        p.if_(4, "GT", 12, late)
-        M.v(p, 4, "t")
-        p.fconst(12, 30.0)
-        p.if_(4, "GT", 12, lambda: (p.iconst(0, 0), M.vs(p, "on", 0)))
-    p.ifz(0, "EQ", silent, sounding)
+    def fresh():
+        MDV.reset(p, L.md)
+        p.iconst(0, 1)
+        M.vs(p, "on", 0)
+    p.ifz(0, "EQ", fresh)
+    p.ld(2, C["trig"])
+    p.ld(5, C["type"])
+    MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, MD_LEVEL)
+    p.ld(12, C["sbase"])
+    p.seti(2, 12, "this slot's state, again")
+    fx(p, L)
 
 
 def fx(p: Prog, L: M.Layout) -> None:
@@ -375,38 +334,6 @@ def _shift_by(p: Prog, d: int, s: int) -> None:
         p.setR(d, p.r[d] << n)
 
 
-def dispatch(p: Prog, L: M.Layout) -> None:
-    """The machine the voice latched at its note: a chain of compares to its setup, then
-    its family's loop (each loop emitted once, after the chain), then on past them."""
-    if p.run:
-        M.v(p, 0, "mach")
-        name = M.NAMES[min(p.r[0], M.N - 1)]
-        setup, loop = K.MACHINE[name]
-        setup(p, L, name)
-        K.LOOPS[loop](p, L)
-        return
-    end = p.label("vend")
-    loops: dict[str, str] = {}
-    for k, name in enumerate(M.NAMES):
-        setup, loop = K.MACHINE[name]
-        lab = loops.setdefault(loop, p.label(f"loop_{loop}"))
-        nxt = p.label("mnext")
-        if k < M.N - 1:
-            M.v(p, 0, "mach")
-            p.iconst(12, k)
-            p.e("COMP(R0, R12);")
-            p.jump("NE", nxt)
-        p.comment(f"---- {name} ----")
-        setup(p, L, name)
-        p.jump("", lab)
-        p.place(nxt)
-    for loop, lab in loops.items():
-        p.place(lab)
-        K.LOOPS[loop](p, L)
-        p.jump("", end)
-    p.place(end)
-
-
 def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     """perc.asm: entered by the block counter's JUMP (in machine5_live's former place)."""
     p = Prog("emit", prefix=prefix)
@@ -420,6 +347,8 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.raw("wr_perc.:")
     for k, r in enumerate(SAVE_REGS):
         p.e(f"DM({SAVE + 4 * k:#x}) = {r};")
+    from ..md import core as MDK
+    MDK.sine_fill(p, L.md)                     # v0.17: the Machinedrum's sine, 1024 words a block until whole
     p.iconst(0, 0)
     p.st(L.C["t"], 0)
     top = p.label("slot")

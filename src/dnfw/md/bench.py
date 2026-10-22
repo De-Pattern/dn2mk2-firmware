@@ -22,9 +22,9 @@ from ..perc.dsl import Mem, Prog, bits
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 GOLDEN = pathlib.Path(os.environ.get("MD_GOLDEN", str(ROOT.parent / "md163" / "research" / "emu56k" / "golden")))
-STATE = 0x200E0000                     # where the bench puts slot 0 (any address will do)
+STATE = 0x82100000                     # where the build puts slot 0 (dnfw.waverider.dsp.MD_STATE_DDR)
 SCRATCH = 0x2DF000
-TABLES = 0x82000000
+TABLES = 0x82000000                    # dnfw.waverider.dsp.MD_TABLES_DDR
 
 
 def layout() -> K.Layout:
@@ -44,14 +44,13 @@ def unpack(s: str) -> list[float]:
     return [x * K.Q23 for x in struct.unpack(f"<{len(raw) // 4}i", raw)]
 
 
-_TABLE_MEM: dict[int, int] | None = None
+_TABLE_MEM: dict[int, dict[int, int]] = {}
 
 
 def table_mem(L: K.Layout) -> dict[int, int]:
     """The tables as the DSP holds them: the ROM's from the firmware, and the sine as the
     DSP's own fill computes it (run once here, through the DSL)."""
-    global _TABLE_MEM
-    if _TABLE_MEM is None:
+    if L.tables not in _TABLE_MEM:
         m: dict[int, int] = {}
         data = K.tables_bytes()
         base = L.T["hostP"]
@@ -62,8 +61,8 @@ def table_mem(L: K.Layout) -> dict[int, int]:
         for _ in range(K.SINE_N // K.SINE_PER_BLOCK):
             K.sine_fill(p, L)
         m.update({a: v for a, v in mem.w.items() if L.T["sine"] <= a < L.T["sine"] + 4 * K.SINE_N})
-        _TABLE_MEM = m
-    return _TABLE_MEM
+        _TABLE_MEM[L.tables] = m
+    return _TABLE_MEM[L.tables]
 
 
 class Bench:
@@ -78,6 +77,7 @@ class Bench:
     def _prog(self) -> Prog:
         p = Prog("run", mem=self.mem)
         p.i[3] = self.L.state
+        self.mem.put(self.L.C["mdb"], self.L.state)
         return p
 
     def block(self, inputs=None, trig=False) -> list[float]:
