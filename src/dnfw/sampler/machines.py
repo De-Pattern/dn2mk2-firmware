@@ -29,23 +29,26 @@ RECORDS = {238: (25, 4, 120), 254: (41, 0, 127), 256: (43, 0, 127), 239: (26, 0,
            240: (29, 0, 100), 242: (31, 4, 120), 255: (42, 0, 127)}
 
 # the eight controls each machine shows, in page order A..H: (record, short, long)
-PAGES = {
-    "ONESHOT": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (256, "SAMP", "Sample Slot"),
-                (260, "CFAD", "Crossfade"), (239, "STRT", "Start"), (258, "LEN", "Length"),
+PAGES = {        # v0.15: the DT2's own SRC layout -- A TUNE, B PLAY, C (empty), D SAMP on top
+    "ONESHOT": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (260, "CFAD", "Crossfade"),
+                (256, "SAMP", "Sample Slot"), (239, "STRT", "Start"), (258, "LEN", "Length"),
                 (257, "LOOP", "Loop Pos"), (241, "LEV", "Sample Level")),
-    "WERP": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (256, "SAMP", "Sample Slot"),
-             (242, "SEG", "Segment Size"), (255, "MODE", "Segment Mode"), (240, "BARS", "Bars"),
-             (0, "-", "Unused"), (241, "LEV", "Sample Level")),
-    "STRETCH": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (256, "SAMP", "Sample Slot"),
-                (257, "LOOP", "Loop Pos"), (239, "STRT", "Start"), (258, "LEN", "Length"),
+    "WERP": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
+             (256, "SAMP", "Sample Slot"), (242, "SEG", "Segment Size"), (255, "MODE", "Segment Mode"),
+             (240, "BARS", "Bars"), (241, "LEV", "Sample Level")),
+    "STRETCH": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
+                (256, "SAMP", "Sample Slot"), (239, "STRT", "Start"), (258, "LEN", "Length"),
                 (240, "BARS", "Bars"), (241, "LEV", "Sample Level")),
-    "REPITCH": ((0, "-", "Unused"), (254, "PLAY", "Play Mode"), (256, "SAMP", "Sample Slot"),
-                (257, "LOOP", "Loop Pos"), (239, "STRT", "Start"), (258, "LEN", "Length"),
+    "REPITCH": ((0, "-", "Unused"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
+                (256, "SAMP", "Sample Slot"), (239, "STRT", "Start"), (258, "LEN", "Length"),
                 (240, "BARS", "Bars"), (241, "LEV", "Sample Level")),
-    "GRID": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (256, "SAMP", "Sample Slot"),
-             (239, "GRID", "Slice Grid"), (257, "SLCE", "Slice Select"), (260, "LEN", "Slice Length"),
-             (0, "-", "Unused"), (241, "LEV", "Sample Level")),
+    "GRID": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
+             (256, "SAMP", "Sample Slot"), (257, "SLCE", "Slice Select"), (260, "LEN", "Slice Length"),
+             (239, "GRID", "Slice Grid"), (241, "LEV", "Sample Level")),
 }
+# how page.c draws each control (v0.15, after the DT2's widgets)
+WIDGETS = {238: "bipolar", 254: "play", 260: "empty", 256: "samp", 239: "knob", 258: "knob",
+           257: "knob", 241: "fader", 242: "seg", 255: "play", 240: "bars"}
 # what each control's value means here
 TUNE_REC, PLAY_REC, SAMP_REC, LEV_REC = 238, 254, 256, 241
 STRT_REC, LEN_REC, LOOP_REC = 239, 258, 257

@@ -289,11 +289,45 @@ def smp_c_header() -> str:
             f"static const unsigned char smp_seg_steps[7] = {{{', '.join(map(str, _smp.SEG_STEPS))}}};\n"
             f"static const char smp_play[4][5] = {{{', '.join(q + m + q for m in _smp.PLAY_MODES)}}};\n"
             f"static const unsigned char smp_grids[{len(_smp.GRIDS)}] = {{{', '.join(map(str, _smp.GRIDS))}}};\n"
+            + smp_widgets_header() +
             f"#define SMP_SOUNDS {len(smp_live.TEST_NAMES)}\n"
             f"static const char smp_sound[SMP_SOUNDS][6] = {{{snd}}};\n")
 
 
 SMP_FIRST_KIND = 4                 # is_wr's answer for type 8; 5..8 for 9..12
+SMP_WAVE_W, SMP_WAVE_AMP = 100, 11         # the waveform strip: columns, half-height in pixels
+SMP_GLYPHS = "0123456789AB/-"
+
+
+def smp_widgets_header() -> str:
+    """v0.15, the DT2-style page: each record's widget kind, a 3x5 font for the SAMP box's
+    inverted bank letter and digits, and the test sounds' waveform overviews (peak per
+    column, 0..SMP_WAVE_AMP) -- the uploaded sounds' are read from the mirror."""
+    import json
+    import pathlib
+    from ..sampler import live as smp_live
+    kinds = ("none", "bipolar", "play", "empty", "samp", "knob", "fader", "seg", "bars")
+    w = _smp.WIDGETS
+    font = json.loads((pathlib.Path(__file__).resolve().parents[1] / "font3x5.json").read_text())["glyphs"]
+    glyphs = ", ".join("{" + ", ".join(str(int(r, 2)) for r in font[ch]) + "}" for ch in SMP_GLYPHS)
+    waves = []
+    for snd in smp_live.test_samples():
+        n = len(snd)
+        col = []
+        for c in range(SMP_WAVE_W):
+            seg = snd[c * n // SMP_WAVE_W:max(c * n // SMP_WAVE_W + 1, (c + 1) * n // SMP_WAVE_W)]
+            col.append(min(SMP_WAVE_AMP, round(max(abs(x) for x in seg) * SMP_WAVE_AMP)))
+        waves.append("{" + ", ".join(map(str, col)) + "}")
+    ids = sorted(w)
+    q = chr(34)
+    return (f"#define SMP_WAVE_W {SMP_WAVE_W}\n#define SMP_WAVE_AMP {SMP_WAVE_AMP}\n"
+            + "".join(f"#define W_{k.upper()} {i}\n" for i, k in enumerate(kinds))
+            + f"#define SMP_WIDGETS {len(ids)}\n"
+            f"static const unsigned short smp_widget_ids[SMP_WIDGETS] = {{{', '.join(map(str, ids))}}};\n"
+            f"static const unsigned char smp_widget_kind[SMP_WIDGETS] = {{{', '.join(str(kinds.index(w[r])) for r in ids)}}};\n"
+            f"static const char smp_glyph_chars[] = {q}{SMP_GLYPHS}{q};\n"
+            f"static const unsigned char smp_glyph[{len(SMP_GLYPHS)}][5] = {{{glyphs}}};\n"
+            f"static const unsigned char smp_test_wave[{len(waves)}][SMP_WAVE_W] = {{{', '.join(waves)}}};\n")
 
 
 def perc_c_header() -> str:

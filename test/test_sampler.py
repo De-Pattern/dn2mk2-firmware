@@ -130,3 +130,22 @@ def test_the_host_tool_codec_and_pool(tmp_path):
     addr, frames, rate, fmt = struct.unpack_from("<IIfI", pool, 8)
     assert names == ["TONE"] and frames == 4410 and abs(rate - 44100 / 48000) < 1e-6 and fmt == SM.FMT_I16
     assert len(pool) <= SM.MIRROR_BYTES
+
+
+def test_the_pages_follow_the_dt2_layout():
+    # v0.15: A TUNE (or nothing), B PLAY, C empty or CFAD, D SAMP on every machine
+    for name, page in SM.PAGES.items():
+        assert page[1][0] == SM.PLAY_REC and page[3][0] == SM.SAMP_REC, name
+        assert page[7][0] == SM.LEV_REC, name
+        assert page[2][0] in (0, 260), name
+    from dnfw.waverider import pages
+    hdr = pages.smp_widgets_header()
+    assert "#define W_SAMP" in hdr and "smp_test_wave[4][SMP_WAVE_W]" in hdr
+    assert all(r in SM.WIDGETS for page in SM.PAGES.values() for r, _s, _l in page if r)
+
+
+def test_the_drive_region_is_above_everything_the_dn2_uses():
+    src = (pathlib.Path(__file__).resolve().parents[1] / "csrc/sampler/link.c").read_text()
+    assert "#define STORE_SECTOR 0x600000u" in src
+    assert "STORE_SECTOR > 0x458000u" in src          # the stock store ends at 2,224 MiB
+    assert 0x600000 * 512 >= 3 << 30 and (0x600000 + 1 + SM.MIRROR_BYTES // 512) * 512 < 4 << 30

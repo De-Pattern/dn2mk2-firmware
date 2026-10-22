@@ -316,3 +316,39 @@ const char *smp_name(int k)
 {
     return (const char *)(mirror + NAMES_OFFSET + NAME_BYTES * k);
 }
+
+/* for the page's waveform: slot K's bytes in the mirror (offset, frames, format), when the
+ * mirror holds a whole pool and the slot's frames lie inside it */
+int smp_entry(int k, u32 *off, u32 *frames, u32 *fmt)
+{
+    int n = smp_count();
+    if (n < 0 || k < 0 || k >= n)
+        return 0;
+    const u8 *e = mirror + 8 + 16 * k;
+    u32 addr = e[0] | e[1] << 8 | (u32)e[2] << 16 | (u32)e[3] << 24;
+    u32 fr = e[4] | e[5] << 8 | (u32)e[6] << 16 | (u32)e[7] << 24;
+    u32 f = e[12];
+    u32 o = addr - SMP_POOL_DDR, bytes = fr * (f ? 2u : 4u);
+    if (addr < SMP_POOL_DDR || o > smp_hi || bytes > smp_hi - o)
+        return 0;
+    *off = o;
+    *frames = fr;
+    *fmt = f;
+    return 1;
+}
+
+/* the sample at frame I of the slot just looked up, -32768..32767 */
+int smp_frame(u32 off, u32 fmt, u32 i)
+{
+    const u8 *s = mirror + off;
+    if (fmt) {
+        int v = s[2 * i] | s[2 * i + 1] << 8;
+        return v >= 32768 ? v - 65536 : v;
+    }
+    /* float32 (the tool sends int16; this is for completeness): the top bits as a
+     * rough magnitude, no FPU needed */
+    u32 b = s[4 * i] | s[4 * i + 1] << 8 | (u32)s[4 * i + 2] << 16 | (u32)s[4 * i + 3] << 24;
+    int e = (int)((b >> 23) & 0xFF) - 127;                  /* |x| ~ 2^e */
+    int m = e >= 0 ? 32767 : e < -15 ? 0 : 32768 >> -e;
+    return (b >> 31) ? -m : m;
+}

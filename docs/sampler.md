@@ -1,4 +1,4 @@
-# The Digitakt II's sample machines on the DN2 (v0.13, v0.14)
+# The Digitakt II's sample machines on the DN2 (v0.13 - v0.15)
 
 The Digitone II and the Digitakt II are the same board and one codebase; what makes a
 Digitakt a sampler is its sample machines, a sample pool in the DSP's memory, and the
@@ -25,16 +25,26 @@ The pool holds **four test sounds** until you send your own, made by
 
 ## The pages
 
-One page each, as the Digitakt II's SRC page (DT2 1.17's parameter descriptors,
-`dnfw.sampler.machines.PAGES`):
+One page each, laid out as the Digitakt II's SRC page (v0.15; the owner's photographs of
+the DT2 and its manual): A TUNE, B PLAY, C an empty dotted box (CFAD on ONESHOT), D SAMP
+on top, and the machine's own four below.
 
 | machine | A | B | C | D | E | F | G | H |
 |---|---|---|---|---|---|---|---|---|
-| ONESHOT | TUNE | PLAY | SAMP | CFAD | STRT | LEN | LOOP | LEV |
-| WERP | TUNE | PLAY | SAMP | SEG | MODE | BARS | - | LEV |
-| STRETCH | TUNE | PLAY | SAMP | LOOP | STRT | LEN | BARS | LEV |
-| REPITCH | - | PLAY | SAMP | LOOP | STRT | LEN | BARS | LEV |
-| GRID | TUNE | PLAY | SAMP | GRID | SLCE | LEN | - | LEV |
+| ONESHOT | TUNE | PLAY | CFAD | SAMP | STRT | LEN | LOOP | LEV |
+| WERP | TUNE | PLAY | - | SAMP | SEG | MODE | BARS | LEV |
+| STRETCH | TUNE | PLAY | - | SAMP | STRT | LEN | BARS | LEV |
+| REPITCH | - | PLAY | - | SAMP | STRT | LEN | BARS | LEV |
+| GRID | TUNE | PLAY | - | SAMP | SLCE | LEN | GRID | LEV |
+
+The widgets are drawn in the DT2's shapes (`csrc/sampler/smp_page.c`; its widget classes
+are not in the DN2, so these are our own): TUNE a bipolar box, PLAY and MODE the play
+icon (|->|, |<-|, a loop with F or R), SAMP a box with an inverted bank letter and the
+slot, STRT and LEN knobs, LEV a fader, SEG a ring and 1/n, BARS four blocks and the
+value, an unused place a dotted box. **ONESHOT and GRID** show the sample's waveform
+across the middle instead of the bottom row's widgets: the start and end as solid
+markers, LOOP dotted in the loop modes, GRID's slices ticked and the slice played marked;
+the bottom row's labels under it and LEV as a pill, as on the DT2.
 
 - **TUNE** ±60 semitones around the note (C4 plays the sample at its own pitch).
 - **PLAY** REV, REV LOOP, FWD LOOP, FWD (the DT2's order; FWD is the default).
@@ -101,8 +111,9 @@ Windows, no packages needed; close Elektron Transfer first (one program per MIDI
 The WAVs (8/16/24/32-bit PCM or 32-bit float, any rate, mono or stereo) go into slots
 1, 2, 3, ... in the order given (a folder: by name), named on the page by their file
 names. They play at their own rate and pitch on C4. Up to 128 slots and 5 MB in all
-(16-bit mono: about 54 s at 48 kHz). **They last until power-off**: send them again
-after switching on (the pool on the +Drive comes later).
+(16-bit mono: about 54 s at 48 kHz). **They last until power-off** unless you keep them:
+`send --keep` (or `save` afterwards) writes them to the +Drive, and the instrument loads
+them at power-on (v0.15, below).
 
 How it works:
 
@@ -126,6 +137,22 @@ How it works:
   sends the frames first and the directory last, so no slot points at a sample before
   it is there, and waits for a whole pass before it says done.
 - The page names the slots from the mirror once a pool has been sent.
+
+## Keeping them on the +Drive (v0.15)
+
+    python tools/dn2samples.py send C:\samples\kit --keep
+    python tools/dn2samples.py save | load | forget
+
+The pool is written to a region of the eMMC the DN2 itself never uses: the stock storage
+code reads and writes nothing above 2,224 MiB, and refuses to
+(`docs/drive-storage-research.md`); ours is one header sector at sector `0x600000`
+(3 GiB) and the mirror's bytes after it, about 5 MB. Read and written through the stock
+block driver (`0x4012c59a` / `0x4012c780`, under its own mutex), and only when every
+sector is inside that region and inside the device. The header carries a magic, the
+length and a checksum of the bytes, and a load that does not match them changes
+nothing. At power-on the UI loop's first passes, once the device is up, load it into
+the mirror; the feeder then sends it to the DSP as after a send. Projects, presets and
+kits are not touched; `forget` zeroes the header sector so nothing loads.
 
 ## Checked
 
@@ -151,6 +178,6 @@ How it works:
 
 ## Next
 
-1. Keeping your samples: the pool on the +Drive, loaded at power-on.
-2. CFAD (ONESHOT's crossfade at the loop point).
-3. Sampling from the inputs.
+1. CFAD (ONESHOT's crossfade at the loop point).
+2. Sampling from the inputs.
+3. The comb filter.

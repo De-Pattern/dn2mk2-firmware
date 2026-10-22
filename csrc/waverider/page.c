@@ -640,6 +640,12 @@ void wr_page_draw(void *view, void *canvas)
     }
     wr_names();
 
+    if (smp) {                                  /* v0.15: the DT2's own SRC page */
+        extern void smp_page_draw(void *view, void *canvas, int kind);
+        smp_page_draw(view, canvas, kind);
+        ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
+        return;
+    }
     if (cz && page == 0)
         cz_wave_picture(canvas, view);
     else if (cz)

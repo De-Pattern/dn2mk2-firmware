@@ -20,7 +20,8 @@ ENTRY = "wr_page_draw"
 POLL = "wr_poll"                        # the UI loop's redraw test (coldfire.POLL_SITE)
 OVERLAY = "wr_cell"                     # after each stock cell widget: PING's and SHFT's TYPE
 # v0.14: the sample link (csrc/sampler), linked into the same chunk
-LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "sampler" / "hooks.S"]
+LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "sampler" / "hooks.S",
+                SOURCE.parents[1] / "sampler" / "smp_page.c"]
 LINK_ENTRIES = ["smp_rx_hook", "smp_feed_hook", "smp_hi", "smp_walk", "smp_booted"]
 
 
