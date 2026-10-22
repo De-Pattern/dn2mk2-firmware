@@ -48,7 +48,7 @@ from __future__ import annotations
 LOAD = 0x4670C000                 # RAM above BSS, clear of every declared range (docs/mods-compatibility.md)
 # v0.13: the C page renderer is a CODE chunk of its own, well above the others (it outgrew
 # the room after this assembly, LOAD + 0x600 .. PING's chunk)
-C_LOAD = 0x46A00000
+C_LOAD = 0x46AC0000                # clear of the emulator harnesses' stack and scratch (0x46a00000..)
 C_SPAN = 0x10000
 C_END = 0x46710000                # the platform runtime starts here
 ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
