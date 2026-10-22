@@ -103,19 +103,31 @@ def env_mul(p: Prog, x: int, dd: int, t: int, u: int, v: int) -> None:
     p.fop(x, x, "+", v)
 
 
-def smpy(p: Prog, d: int, a: int, b: int, s1: int, s2: int, s3: int) -> None:
+def mpyf(p: Prog, d: int, a: int, b: int) -> None:
+    """Fd = core.mpy_floor(Fa, Fb) (Fa, Fb >= 0), through one shared copy (a leaf
+    subroutine: F9 = floor(F10 F11)). Clobbers R0-R3, R9-R15, I12."""
+    assert b != 10
+    p.fpass(10, a)
+    p.fpass(11, b)
+    p.call("trx1_mpyf", lambda: K.mpy_floor(p, 9, 10, 11))
+    p.fpass(d, 9)
+
+
+def smpy(p: Prog, d: int, a: int, b: int, sg: int) -> None:
     """Fd = the 56300's product of the Q23 words Fa, Fb through the limiter's truncation,
-    signed: core.mpy_floor on the magnitudes, then floor(-x) = -floor(x) - 2^-23 for a
-    negative product (a product that is a whole Q23 word is taken as not one: 2^-23 of
-    the cases). A filter's coefficients come out exact, where a float product is a LSB
-    off often enough to move a resonance. Clobbers R0-R3, R12-R15, Rs1-Rs3."""
-    p.fop(s3, a, "*", b)
-    K.mul_k(p, s1, a, -1.0)
-    p.fop(s1, s1, "MAX", a)
-    K.mul_k(p, s2, b, -1.0)
-    p.fop(s2, s2, "MAX", b)
-    K.mpy_floor(p, d, s1, s2)
-    p.ifz(s3, "LT", lambda: (K.mul_k(p, d, d, -1.0), K.add_k(p, d, d, -Q)), kind="f")
+    signed: mpyf on the magnitudes, then floor(-x) = -floor(x) - 2^-23 for a negative
+    product (one that is a whole Q23 word is taken as not one: 2^-23 of the cases). A
+    filter's coefficients come out exact, where a float product is a LSB off often enough
+    to move a resonance. Rsg in R4..R8. Clobbers R0-R3, R9-R15, Rsg."""
+    assert 4 <= sg <= 8 and b != 10
+    p.fop(sg, a, "*", b)
+    K.mul_k(p, 10, a, -1.0)
+    p.fop(10, 10, "MAX", a)
+    K.mul_k(p, 11, b, -1.0)
+    p.fop(11, 11, "MAX", b)
+    p.call("trx1_mpyf", lambda: K.mpy_floor(p, 9, 10, 11))
+    p.fpass(d, 9)
+    p.ifz(sg, "LT", lambda: (K.mul_k(p, d, d, -1.0), K.add_k(p, d, d, -Q)), kind="f")
 
 
 def sgrid(p: Prog, x: int, t: int = 13, u: int = 14) -> None:
@@ -360,7 +372,7 @@ class TRXBD:
         s(p, 4, M.NENV)
         p.st(C["e"], 4)
         w(p, 5, 12)
-        K.mpy_floor(p, 6, 5, 4)
+        mpyf(p, 6, 5, 4)
         ss(p, M.NENV, 6)
         p.ld(0, C["mdb"])
         iadd_k(p, 0, 0, 4 * (K.S0 + M.NZ))
@@ -411,12 +423,12 @@ class TRXBD:
             p.iop(7, 8, "+", 5)
             p.st(C["b"], 7)
             w(p, 5, 5)
-            K.mpy_floor(p, 6, 4, 5)
+            mpyf(p, 6, 4, 5)
             ss(p, M.RAMP, 6)
             s(p, 4, M.HARM)                          # the harmonic's level, then its decay
             p.st(C["c"], 4)
             p.fconst(5, 0x7FDBB4 * Q)
-            K.mpy_floor(p, 6, 4, 5)
+            mpyf(p, 6, 4, 5)
             ss(p, M.HARM, 6)
             s(p, 4, M.THI)                           # this block's thresholds; they widen
             p.st(C["d"], 4)
@@ -617,12 +629,12 @@ class TRXB2:
         M, C = TRXB2, L.C
         s(p, 4, M.NENV)                                  # the noise env decays first
         p.fconst(5, 0x75C28F * Q)
-        K.mpy_floor(p, 6, 4, 5)
+        mpyf(p, 6, 4, 5)
         ss(p, M.NENV, 6)
         p.st(C["f"], 6)
         s(p, 4, M.HOLD)                                  # the hold env picks the decay
         w(p, 5, 4)
-        K.mpy_floor(p, 6, 4, 5)
+        mpyf(p, 6, 4, 5)
         ss(p, M.HOLD, 6)
         p.fconst(7, 0x147AE * Q)
         p.if_(6, "GE", 7, lambda: p.fconst(4, 0x7FFFF8 * Q), lambda: w(p, 4, 3))
@@ -861,7 +873,7 @@ class TRXSD:
         def decay():
             s(p, 4, M.BUMP)
             w(p, 5, 12)
-            K.mpy_floor(p, 6, 5, 4)
+            mpyf(p, 6, 5, 4)
             ss(p, M.BUMP, 6)
         s(p, 0, M.CNT)
         p.iconst(12, 320)
@@ -869,23 +881,24 @@ class TRXSD:
         s(p, 4, M.DRIVE)                                 # the drive, then its decay
         p.st(C["c"], 4)
         w(p, 5, 9)
-        K.mpy_floor(p, 6, 5, 4)
+        mpyf(p, 6, 5, 4)
         ss(p, M.DRIVE, 6)
         w(p, 0, 11)                                      # the resonators' coefficients
         x14(p, L, 4, 0, 0x900 - 3)                       # t1
         x14(p, L, 5, 0, 0x1900 - 0x241)                  # t2
         K.mul_k(p, 6, 5, -1.0)
-        smpy(p, 7, 5, 6, 8, 9, 10)
+        smpy(p, 7, 5, 6, 8)
         K.sat(p, 7)                                      # c1 = sat(-t2^2)
         p.st(C["e"], 7)
         K.mul_k(p, 6, 5, 2.0)
-        smpy(p, 8, 4, 6, 9, 10, 11)
+        smpy(p, 8, 4, 6, 7)
         K.sat(p, 8)                                      # g = sat(A0), A0 = 2 t1 t2
         p.st(C["f"], 8)
         K.mul_k(p, 6, 5, -2.0)
-        smpy(p, 9, 4, 6, 8, 10, 11)                      # floor(-A0)
+        smpy(p, 9, 4, 6, 7)                              # floor(-A0)
         K.add_k(p, 9, 9, 0.5)
-        p.fop(9, 9, "-", 7)
+        p.ld(8, C["e"])
+        p.fop(9, 9, "-", 8)
         K.sat(p, 9)                                      # c0 = sat(0.5 - A0 - c1)
         p.st(C["d"], 9)
         s(p, 0, M.CNT)                                   # the snap table, for 4128 samples
@@ -1076,7 +1089,7 @@ class TRXXT:
             p.st(C["a"], 5)
             p.st(C["b"], 6)
             w(p, 5, 7)                                   # the ramp decays (a block)
-            K.mpy_floor(p, 6, 4, 5)
+            mpyf(p, 6, 4, 5)
             ss(p, M.RAMP, 6)
             w(p, 4, 1)                                   # 1 - the amp decay
             p.fconst(12, 1.0)
@@ -1238,11 +1251,11 @@ class TRXCL:
         p.iop(1, 8, "+", 1)                              # r2 = W5 + T[$80 + W6]
         x14(p, L, 7, 1, 0x1900)                          # t2
         K.mul_k(p, 8, 7, -1.0)
-        smpy(p, 4, 7, 8, 9, 10, 11)
+        smpy(p, 4, 7, 8, 5)
         K.sat(p, 4)
         p.st(C["c"], 4)                                  # cb = sat(-t2^2)
         K.mul_k(p, 8, 7, 2.0)
-        smpy(p, 4, 6, 8, 9, 10, 11)
+        smpy(p, 4, 6, 8, 5)
         K.sat(p, 4)
         p.st(C["d"], 4)                                  # g = sat(2 t1 t2)
         w(p, 0, 2)                                       # osc1: the DUAL delay
@@ -1387,11 +1400,11 @@ class TRXRS:
         p.trunc(1, 4)
         x14(p, L, 7, 1, 0x200 + 0x1900)                  # t2
         K.mul_k(p, 8, 7, -2.0)
-        smpy(p, 4, 7, 8, 9, 10, 11)
+        smpy(p, 4, 7, 8, 5)
         K.sat(p, 4)
         p.st(C["c"], 4)                                  # cb = sat(-2 t2^2)
         K.mul_k(p, 8, 7, 2.0)
-        smpy(p, 4, 6, 8, 9, 10, 11)
+        smpy(p, 4, 6, 8, 5)
         K.add_k(p, 4, 4, -0.5)
         K.sat(p, 4)
         p.fop(4, 4, "+", 4)

@@ -259,6 +259,11 @@ def wmulr(p: Prog) -> None:
     p.call("trx_wmulr", lambda: _wmul_body(p, 23, True))
 
 
+def wmul4(p: Prog) -> None:
+    """R4 = floor(4 mpy(R5, R6)) as a word (no limiter), exactly."""
+    p.call("trx_wmul21", lambda: _wmul_body(p, 21))
+
+
 def wmul2(p: Prog) -> None:
     """R4 = floor(2 mpy(R5, R6)) as a word (no limiter), exactly."""
     p.call("trx_wmul22", lambda: _wmul_body(p, 22))
@@ -1520,4 +1525,300 @@ class TRXMA:
         p._branch(lambda: p.r[0] != 2, "NE", lambda: (p.ld(0, C["g"]), p.ifz(0, "NE", store)), None)
 
 
-MACHINES = (TRXCP, TRXCB, TRXCH, TRXOH, TRXCY, TRXMA)
+# =========================================================================== TRX-S2
+class TRXS2:
+    """Snare 2 (md_models.TRXS2): a note's first block is a "power" click only (and the
+    last block's noise again); then two bumped sines plus the power's decay, under an amp
+    envelope, and 96 noise words a block: 32 drive a crackle envelope gating the next
+    32, 16 more are mixed in, the rest only move the generator (stored swapped) -> hpc
+    (NTUN) -> res4 (1900 / 0) -> the noise envelope; out = 2 (body amp + noise).
+    FIRMWARE BUG kept: the scale function never writes W14/W15 (the bump decays), which
+    init sets; every later host block overwrites them with the host buffer's leftovers
+    (0, host_scale.UNWRITTEN), so only the first note after the machine is chosen has the
+    intended decays. (S12 marks a fresh init, so the voice's init-then-host order keeps
+    them for that note as the Machinedrum's host-then-init does.)
+    W1 noise tune, W2 decay, W3/W4 osc levels, W5 DEC blocks, W6 POWR, W7/W8 osc pitch,
+    W9 noise mix, W10/W11 bump rates, W12 noise attack, W13 noise decay, W14/W15 bump
+    decays, W16 0, W17 1900, W18 crackle threshold, W19 0, W20 NDEC blocks.
+    State: S0/S1 bumps, S2 noise env, S3/S4 phases, S5 the last sample, S6/S7 noise,
+    S8 power, S9 block count, S10 amp, S11 crackle env, S12 fresh, S13.. hpc, S31.. res4,
+    S47..S78 the noise block (kept for a note's first block)."""
+    NAME, ID = "TRX-S2", 29
+    PNAMES = ("PTCH", "DEC", "NOIS", "NDEC", "POWR", "TUNE", "NTUN", "NTYP")
+    HP, RS = 13, 13 + HPC_N
+    XA = 13 + HPC_N + RES4_N
+    K39, K59, K40 = 0x7FFB11, 0x7FA33A, 0x7CE567
+    K57, K58 = 0x0A3D71, 0x79999A
+
+    @staticmethod
+    def host(p: Prog, L: K.Layout) -> None:
+        inp(p, 0, 0)                                  # PTCH
+        p.lsh(1, 0, -2)
+        iaddk(p, 1, 1, 2000)
+        ws(p, 7, 1)
+        p.iconst(1, 3)
+        imul_small(p, 2, 0, 1)
+        p.lsh(2, 2, -4)                               # t
+        p.iconst(1, 1495)
+        imul_small(p, 3, 2, 1)
+        iaddk(p, 3, 3, 3061760)
+        p.ash(3, 3, -10)
+        ws(p, 8, 3)
+
+        def two_part(k, base, tw, nw):
+            inp(p, 0, k)
+            p.iconst(12, 8191)
+
+            def lo():
+                p.iconst(1, base)
+                table_word(p, L, 2, "hostD", 1)
+                ws(p, tw, 2)
+                p.lsh(1, 0, -6)
+                ws(p, nw, 1)
+
+            def hi():
+                iaddk(p, 1, 0, -8192)
+                p.lsh(1, 1, -6)
+                iaddk(p, 1, 1, base)
+                table_word(p, L, 2, "hostD", 1)
+                ws(p, tw, 2)
+                p.iconst(1, 128)
+                ws(p, nw, 1)
+            p.if_(0, "LE", 12, lo, hi, kind="i")
+        two_part(1, 130, 2, 5)                        # DEC
+        two_part(3, 45, 13, 20)                       # NDEC
+        inp(p, 0, 2)                                  # NOIS
+        p.lsh(1, 0, 6)
+        p.iconst(12, 0x3FFFC0)
+        p.iop(1, 1, "AND", 12)
+        ws(p, 12, 1)
+        inp(p, 0, 4)                                  # POWR
+        p.lsh(1, 0, 7)
+        ws(p, 6, 1)
+        imul_var(p, 1, 0, 0)
+        p.lsh(2, 1, -23)
+        ws(p, 10, 2)
+        p.lsh(2, 1, -22)
+        ws(p, 11, 2)
+        inp(p, 0, 7)                                  # NTYP
+        p.lsh(1, 0, 7)
+        isubk(p, 2, 7500000, 1)
+        ws(p, 18, 2)
+        p.iconst(12, 8191)
+        p.if_(0, "LE", 12, lambda: ws(p, 9, 1),
+              lambda: (p.lsh(1, 0, 9), iaddk(p, 1, 1, -3145728), ws(p, 9, 1)), kind="i")
+        inp(p, 0, 5)                                  # TUNE
+        p.lsh(1, 0, 7)
+        isubk(p, 2, 0x7FFFFF, 1)
+        p.ash(2, 2, -1)
+        ws(p, 3, 2)
+        p.lsh(1, 1, -1)
+        ws(p, 4, 1)
+        inp(p, 0, 6)                                  # NTUN
+        p.lsh(1, 0, -4)
+        iaddk(p, 1, 1, 1024)
+        ws(p, 1, 1)
+        p.iconst(1, 1900)
+        ws(p, 17, 1)
+        p.iconst(1, 0)
+        ws(p, 16, 1)
+        ws(p, 19, 1)
+        s(p, 2, 12)                                   # W14/W15: the leftovers (0), but
+        p.ifz(2, "EQ", lambda: (ws(p, 14, 1), ws(p, 15, 1)))   # not over a fresh init's
+        w(p, 9, 1)
+        w(p, 10, 16)
+        set_hpc(p, L, TRXS2.HP)
+        w(p, 9, 17)
+        w(p, 10, 19)
+        set_res4(p, L, TRXS2.RS)
+
+    @staticmethod
+    def init(p: Prog, L: K.Layout) -> None:
+        for k, v in ((6, 0x29A), (7, 1), (11, 0x7EB852), (12, 1)):
+            p.iconst(0, v)
+            ss(p, k, 0)
+        for k, v in ((14, 0x74CB2B), (15, 0x75FC33)):
+            p.iconst(0, v)
+            ws(p, k, 0)
+        # (the DSP leaves the filters and the noise block as they were; here they start
+        # clear, as the golden vectors have them, not as another machine left them)
+        hpc_clear(p, TRXS2.HP)
+        res4_clear(p, TRXS2.RS)
+        clear(p, range(TRXS2.XA, TRXS2.XA + 32))
+
+    @staticmethod
+    def trig(p: Prog, L: K.Layout) -> None:
+        p.iconst(0, 0x50C335)
+        ss(p, 10, 0)
+        clear(p, (8, 2, 0, 1, 9, 3, 4, 12))
+
+    @staticmethod
+    def _osc(p: Prog, L: K.Layout, k: int) -> None:
+        """The increment of osc K (0, 1) this block into scratch a / b, then its bump."""
+        C = L.C
+        w(p, 1, 7 + k)
+        p.lsh(1, 1, 12)
+        s(p, 2, k)
+        p.lsh(3, 2, 13)
+        iadd(p, 1, 1, 3)
+        p.st(C["ab"[k]], 1)
+        s(p, 0, 9)
+        p.iconst(12, 12)
+
+        def decay():
+            w(p, 5, 14 + k)
+            p.ipass(6, 2)
+            wmul(p)
+            ss(p, k, 4)
+
+        def rise():
+            w(p, 1, 10 + k)
+            p.lsh(1, 1, 1)
+            iadd(p, 1, 1, 2)
+            _clamp(p, 1)
+            ss(p, k, 1)
+        p.if_(0, "GT", 12, decay, rise, kind="i")
+
+    @staticmethod
+    def render(p: Prog, L: K.Layout) -> None:
+        C = L.C
+        S = TRXS2
+        s(p, 0, 9)
+
+        def power_block():
+            s(p, 1, 8)                                # x1
+
+            def one():
+                p.iconst(5, S.K40)
+                p.ipass(6, 1)
+                wmul2(p)                              # floor(2 mpy(k40, x1))
+                w(p, 5, 6)
+                p.ash(1, 4, -1)
+                iadd(p, 1, 1, 5)
+                _clamp(p, 1)                          # x1 = sat(a)
+                p.lsh(5, 5, 1)
+                iadd(p, 4, 4, 5)
+                _clamp(p, 4)                          # sat(2 a)
+            out_loop(p, L, one)
+            ss(p, 8, 1)
+
+        def body_block():
+            S._osc(p, L, 0)
+            S._osc(p, L, 1)
+            # noise words 0..31: the crackle envelope (at OUT0)
+            s(p, 1, 11)
+            w(p, 2, 18)
+
+            def crackle():
+                fibw(p, 6, 7, 4)
+                p.if_(4, "GT", 2, lambda: iaddk(p, 1, 1, S.K57), kind="i")
+                _clamp(p, 1)
+                p.ipass(9, 1)
+                p.st(C["c"], 9)
+                p.ipass(6, 1)
+                p.iconst(5, S.K58)
+                wmul(p)                               # (R2 is kept: wmul leaves it)
+                p.ipass(1, 4)
+                p.ld(4, C["c"])
+            out_loop(p, L, crackle)
+            _clamp(p, 1)
+            ss(p, 11, 1)
+            # 32..63: gated by it
+            p.ld(1, C["mdb"])
+            iaddk(p, 1, 1, 4 * K.OUT0)
+
+            def gate():
+                fibw(p, 6, 7, 5)
+                p.seti(1, 1)
+                p.ldi(6, 0, 1)
+                wmul(p)
+                p.seti(1, 1)
+                p.sti(0, 1, 4)
+                p.iconst(12, 4)
+                p.iop(1, 12, "+", 1)
+            p.loop(C["n1"], 32, gate)
+            # 64..79: mixed in, each into a pair
+            p.ld(1, C["mdb"])
+            iaddk(p, 1, 1, 4 * K.OUT0)
+
+            def mix():
+                fibw(p, 6, 7, 6)
+                w(p, 5, 9)
+                wmul(p)
+                p.seti(1, 1)
+                p.ldi(5, 0, 1)
+                iadd(p, 4, 4, 5)
+                p.ash(4, 4, -1)
+                p.sti(0, 1, 4)
+                p.sti(1, 1, 4)
+                p.iconst(12, 8)
+                p.iop(1, 12, "+", 1)
+            p.loop(C["n1"], 16, mix)
+            p.loop(C["n1"], 16, lambda: fibw(p, 6, 7, 4))    # 80..95
+            s(p, 0, 6)
+            s(p, 1, 7)
+            ss(p, 6, 1)
+            ss(p, 7, 0)                               # stored swapped
+            # the noise envelope (a block)
+            s(p, 1, 2)
+            s(p, 0, 9)
+            p.iconst(12, 32)
+            p.if_(0, "LE", 12, lambda: (w(p, 2, 12), iadd(p, 1, 1, 2)), kind="i")
+            _clamp(p, 1)
+            w(p, 2, 20)
+            p.if_(0, "LE", 2, lambda: p.iconst(5, S.K59), lambda: w(p, 5, 13), kind="i")
+            p.ipass(6, 1)
+            wmul(p)
+            ss(p, 2, 4)
+            p.st(C["d"], 4)
+            # the samples: noise -> hpc -> res4 -> * noise env (kept); the body
+            state_base(p, L)
+            p.ld(1, C["mdb"])
+            iaddk(p, 1, 1, 4 * (K.S0 + S.XA))
+
+            def one():
+                p.ldi(4, 0, 5)
+                hpc(p, S.HP)
+                res4(p, S.RS)
+                p.ipass(5, 4)
+                p.ld(6, C["d"])
+                wmul(p)
+                p.seti(1, 1)
+                p.sti(0, 1, 4)                        # xa0[i]
+                for k in (0, 1):
+                    s(p, 6, 3 + k)
+                    K.sine(p, L, 4, 6)
+                    p.ld(10, C["ab"[k]])
+                    p.iop(6, 10, "+", 6)
+                    ss(p, 3 + k, 6)
+                    to_word(p, 5, 4)
+                    w(p, 6, 3 + k)
+                    wmul(p)
+                    if k == 0:
+                        p.ipass(2, 4)
+                    else:
+                        iadd(p, 2, 2, 4)              # o1 + o2
+                p.iconst(5, S.K40)
+                s(p, 6, 8)
+                wmul4(p)                              # floor(4 mpy(k40, x0))
+                iadd(p, 2, 2, 4)
+                p.ash(4, 4, -2)
+                ss(p, 8, 4)                           # x0 = sat(mpy(k40, x0))
+                p.ash(4, 2, -1)
+                _clamp(p, 4)
+                p.st(C["c"], 4)                       # the body
+                S._amp_out(p, L)
+                p.iconst(12, 4)
+                p.iop(1, 12, "+", 1)
+            p.loop(C["n2"], 32, lambda: None) if False else None
+            S._samples(p, L, one)
+
+        p.ifz(0, "LE", power_block, body_block)
+        # (the power block's samples got the amp and the old noise in _amp_out below)
+
+    @staticmethod
+    def _amp_out(p: Prog, L: K.Layout) -> None:
+        pass
+
+
+MACHINES = (TRXCP, TRXCB, TRXCH, TRXOH, TRXCY, TRXMA, TRXS2)
