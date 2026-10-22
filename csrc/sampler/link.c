@@ -408,7 +408,7 @@ static void overview_add(u32 off, u32 bytes, const u8 *buf)
             u32 i = (x - lo) / 2u;
             int s = (short)(buf[x - off] | buf[x - off + 1] << 8);
             if (s < 0) s = -s;
-            u32 col = (u32)((unsigned long long)i * OVERVIEW_W / fr);
+            u32 col = (i >> 6) * OVERVIEW_W / ((fr >> 6) + 1);     /* 32-bit: no libgcc */
             u8 pk = (u8)(s >> 7);
             if (col < OVERVIEW_W && pk > o[col])
                 o[col] = pk;

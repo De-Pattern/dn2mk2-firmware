@@ -57,4 +57,9 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
         linked = cbuild.build([SOURCE, *LINK_SOURCES], base=base,
                               entries=[ENTRY, POLL, OVERLAY, *LINK_ENTRIES],
                               include=[pathlib.Path(tmp)], defines=defines)
+    # libgcc's 64-bit helpers use instructions the ColdFire lacks (an illegal-instruction
+    # exception on the instrument, found in the emulator in v0.16): none may be linked
+    wide = sorted(n for n in linked.symbols if n.endswith("di3") or n.endswith("di4"))
+    if wide:
+        raise RuntimeError(f"the page renderer links libgcc's 64-bit helpers {wide}: use 32-bit arithmetic")
     return linked.image, linked.symbols, linked.bss

@@ -129,6 +129,12 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     io = {"reads": 0, "writes": 0}
 
     def blk(uc_, address, size, user):
+        try:
+            blk_(address)
+        except Exception as e:                  # noqa: BLE001 -- kept for the report
+            io.setdefault("errors", []).append(repr(e)[:200])
+
+    def blk_(address):
         sp = uc.reg_read(K.UC_M68K_REG_A7)
         sector, n, buf = struct.unpack(">3I", bytes(uc.mem_read(sp + 4, 12)))
         if address == BLK_READ:
@@ -152,7 +158,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         return struct.unpack(">I", machine.read(syms[name], 4))[0]
 
     def call(name, *args):
-        guest_call(syms[name], *args, limit=50_000_000)
+        return guest_call(syms[name], *args, limit=50_000_000)
 
     # the DSP: its pool as words, the commands it took, the status it answers with
     pool: dict[int, int] = {}
@@ -295,11 +301,21 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         call("smp_load")
         status_out()
         periods = 0
-        limit = 4000 if scenario == "fast" else 30000
+        limit = int(os.environ.get("LINK16_LIMIT", 4000 if scenario == "fast" else 30000))
         while periods < limit:
             period()
-            call("smp_boot")
+            if periods == 17:
+                import collections
+                trace = collections.deque(maxlen=8000)
+                th = uc.hook_add(UC_HOOK_CODE, lambda u, a, sz, us: trace.append(a))
+                ran = call("smp_boot")
+                uc.hook_del(th)
+                out["trace"] = [hex(a) for a in trace]
+            else:
+                ran = call("smp_boot")
             periods += 1
+            if periods < 40 or periods % 25 == 0:
+                log.append(["ran", periods, ran])
             if periods % 25 == 0:
                 log.append([periods, long("smp_walk"), long("smp_retries"), long("smp_lstate"),
                             long("smp_tdm_sent"), len(dsp["cmds"]), io["reads"]])
@@ -324,7 +340,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    walk=long("smp_walk"), retries=long("smp_retries"),
                    tdm_sent=long("smp_tdm_sent"), fast=dsp["fast"], dropped=dsp["dropped"],
                    slow_packets=dsp["slow"], verifies=dsp["cmds"].count(SM.CMD_VERIFY),
-                   hi=long("smp_hi"), disk_reads=io["reads"], disk_writes=io["writes"])
+                   hi=long("smp_hi"), disk_reads=io["reads"], disk_writes=io["writes"],
+                   disk_errors=io.get("errors", [])[:3])
         out["ok"] = not wrong and not frames_wrong and periods < limit
     elif scenario == "save":
         # a recording of 3,000 frames in slot 126 on the DSP; no image on the +Drive yet
@@ -354,7 +371,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    heard=long("smp_tdm_heard"), disk_writes=io["writes"])
         out["ok"] = (out["saved"] == 1 and got == exp and entry[0] == base + rec_off
                      and entry[1] == 3000 and entry[3] == 1 and hdr[:4] == b"DN2Q")
-    out["log"] = log[-20:]
+    out["log"] = log[:60] + log[-20:]
     return out
 
 
