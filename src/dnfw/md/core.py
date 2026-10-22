@@ -235,9 +235,9 @@ SINE_PER_BLOCK = 1024
 
 
 def sine_value(k: int) -> float:
-    """The table's word k as the fill computes it (a float32 polynomial; the run-mode model
-    and the tests use this same computation through the DSL)."""
-    return math.sin(2.0 * math.pi * k / SINE_N)
+    """What the table's word k approximates (DSP2's own table, within 6.5 LSB)."""
+    x = k + (1.5 if k >= 3 * SINE_N // 4 else 0.0)
+    return max(-1.0, min(TOP, math.sin(2.0 * math.pi * x / SINE_N)))
 
 
 # sin(pi x / 2) on [-1, 1]: odd polynomial (a minimax fit, |error| < 6e-8)
@@ -264,6 +264,11 @@ def sine_fill(p: Prog, L: Layout) -> None:
             # the quarter: k in 0..32767 -> x in quarter turns, folded to [-1, 1]
             p.iconst(12, 0)
             p.float_(2, 0, 12)
+            # DSP2 makes its table with a 48-bit recursion whose limiter clamps at the
+            # trough (k = 24573..24577): from there on it runs 1.5 indices ahead. Its table
+            # is sin(2 pi (k + 1.5 [k >= 24576]) / 32768), clamped at -1 (within 6.5 LSB)
+            p.iconst(12, 3 * SINE_N // 4)
+            p.if_(0, "GE", 12, lambda: (p.fconst(13, 1.5), p.fop(2, 2, "+", 13)), kind="i")
             p.fconst(12, 4.0 / SINE_N)
             p.fop(2, 2, "*", 12)            # 0..4 quarter turns
             p.fconst(12, 2.0)
@@ -279,6 +284,7 @@ def sine_fill(p: Prog, L: Layout) -> None:
                 p.fconst(12, c)
                 p.fop(4, 4, "+", 12)
             p.fop(4, 4, "*", 2)
+            sat(p, 4)
             p.stpost(1, 4)
             p.ld(0, C["fill"])
             p.iconst(12, 1)
