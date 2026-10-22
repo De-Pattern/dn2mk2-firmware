@@ -80,8 +80,8 @@ part that plays solid, LOOP's point marked in the loop modes, GRID's slices tick
 
 ## Page 2: sampling (v0.14)
 
-Every sample machine has a second page, after the DT2's sampling page: press the page
-key (SRC again) on a sample track.
+Every sample machine has a second page, after the DT2's sampling page: press **SYN** again
+on a sample track (SYN 1/2, 2/2, as on WaveTone).
 
 | A | B | C | D | E | F | G | H |
 |---|---|---|---|---|---|---|---|
