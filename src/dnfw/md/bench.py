@@ -53,7 +53,7 @@ def table_mem(L: K.Layout) -> dict[int, int]:
     if L.tables not in _TABLE_MEM:
         m: dict[int, int] = {}
         data = K.tables_bytes()
-        base = L.T["hostP"]
+        base = L.T["sinecorr"]
         for k in range(0, len(data), 4):
             m[base + k] = struct.unpack_from("<I", data, k)[0]
         mem = Mem(lambda a: m.get(a, 0))

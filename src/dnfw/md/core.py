@@ -53,10 +53,16 @@ MD_STRIDE = 4 * MD_WORDS                 # 1 KB a slot
 #   the ROM tables: floats (Q23)
 
 
+CORR_BITS, CORR_PER_WORD = 5, 6               # the sine's corrections, packed (sine_fill)
+CORR_WORDS = (SINE_N + CORR_PER_WORD - 1) // CORR_PER_WORD
+
+
 def _table_layout() -> dict[str, tuple[int, int]]:
     at, out = 0, {}
     out["sine"] = (at, SINE_N)
     at += 4 * SINE_N
+    out["sinecorr"] = (at, CORR_WORDS)
+    at += 4 * CORR_WORDS
     for name, (_a, n) in rom.HOST_TABLES.items():
         out[f"host{name}"] = (at, n)
         at += 4 * n
@@ -74,12 +80,14 @@ def tables_bytes() -> bytes:
     """Everything in TABLES but the sine (which the DSP fills itself): read from the
     owner's Machinedrum firmware (rom.py), at build time."""
     import struct
-    start = TABLE_LAYOUT["hostP"][0]
+    start = TABLE_LAYOUT["sinecorr"][0]
     out = bytearray(TABLE_LAYOUT["_end"][0] - start)
     for name, (off, n) in TABLE_LAYOUT.items():
         if name in ("sine", "_end"):
             continue
-        if name.startswith("host"):
+        if name == "sinecorr":
+            data = struct.pack(f"<{n}I", *sine_corrections())
+        elif name.startswith("host"):
             t = rom.host_table(name[4:])
             if name == "hostP":
                 data = struct.pack(f"<{n}I", *t)
@@ -105,7 +113,8 @@ class Layout:
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
 
 
-SC_WORDS = ("n1", "n2", "n3", "a", "b", "c", "d", "e", "f", "g", "h", "k", "fill", "tmp", "mdb")
+SC_WORDS = ("n1", "n2", "n3", "a", "b", "c", "d", "e", "f", "g", "h", "k", "fill", "tmp", "mdb",
+            "cw", "cs", "cv")
 # mdb: the slot's words' address (what I3 holds), for code that needs it in an R register
 
 
@@ -244,9 +253,75 @@ def sine_value(k: int) -> float:
 SIN_POLY = (1.5707963185, -0.6459637111, 0.0796915052, -0.0046769631, 0.0001514842)
 
 
-def sine_fill(p: Prog, L: Layout) -> None:
+def md_sine_words() -> list[int]:
+    """DSP2's sine table, word for word (signed 24-bit): its boot code's 48-bit recursion
+    y[n+1] = 2 cos(2 pi / 32768) y[n] - y[n-1], with its partial products' shifts and its
+    limiter, from y[0] = 0, y[1] = sin(2 pi / 32768) (both as 48-bit fractions). The
+    limiter clamps at the trough, after which the table runs 1.5 indices ahead."""
+    def s24(v):
+        v &= 0xFFFFFF
+        return v - (1 << 24) if v & 0x800000 else v
+    x1, x0 = 0x7FFFFF, 0xD88586                # cos, hi:lo
+    st = [0, (0x000648 << 24) | 0x7ED46B]
+    out = [0, 0x648]
+    idx = 1
+    for _ in range(SINE_N - 2):
+        y = st[idx]
+        y1, y0 = y >> 24, y & 0xFFFFFF
+        a = (x0 * y0) << 1
+        a = (a >> 24) + ((s24(x1) * y0) << 1)
+        a += (s24(y1) * x0) << 1
+        a = (a >> 24) + ((s24(x1) * s24(y1)) << 1)
+        a <<= 1
+        idx ^= 1
+        o = st[idx]
+        a -= (s24(o >> 24) << 24) | (o & 0xFFFFFF)
+        a = max(-(1 << 47), min((1 << 47) - 1, a))
+        st[idx] = a & ((1 << 48) - 1)
+        out.append((a >> 24) & 0xFFFFFF)
+    return [s24(v) for v in out]
+
+
+def _poly_words() -> list[int]:
+    """What sine_fill computes before its corrections, word by word (run through the DSL)."""
+    from ..perc.dsl import Mem
+    m = Mem()
+    p = Prog("run", mem=m)
+    L = Layout(0x100000, 0x80000, 0x200000)
+    for _ in range(SINE_N // SINE_PER_BLOCK):
+        sine_fill(p, L, corrected=False)
+    import struct
+    return [round(struct.unpack("<f", struct.pack("<I", m.get(L.T["sine"] + 4 * k)))[0] * 2.0 ** 23)
+            for k in range(SINE_N)]
+
+
+_CORR: list[int] | None = None
+
+
+def sine_corrections() -> list[int]:
+    """DSP2's table less the polynomial's (each within +-15), CORR_PER_WORD to a word."""
+    global _CORR
+    if _CORR is None:
+        md, base = md_sine_words(), _poly_words()
+        d = [m - b for m, b in zip(md, base)]
+        lim = 1 << (CORR_BITS - 1)
+        assert all(-lim <= x < lim for x in d), max(map(abs, d))
+        mask = (1 << CORR_BITS) - 1
+        _CORR = []
+        for j in range(CORR_WORDS):
+            w = 0
+            for i, x in enumerate(d[CORR_PER_WORD * j:CORR_PER_WORD * (j + 1)]):
+                w |= (x & mask) << (CORR_BITS * i)
+            _CORR.append(w)
+    return _CORR
+
+
+def sine_fill(p: Prog, L: Layout, corrected: bool = True) -> None:
     """SINE_PER_BLOCK more words of the sine table, from C['fill'] (0 at power-on) until
-    the table is whole (C['fill'] = SINE_N). Clobbers R0-R7, R12, R13, I1."""
+    the table is whole (C['fill'] = SINE_N): a float polynomial rounded to the Q23 word,
+    plus the correction (sinecorr, CORR_BITS each) that makes it DSP2's own table word for
+    word (md_sine_words): FM machines feed their output back into their phase, and there
+    one LSB becomes another waveform. Clobbers R0-R8, R12, R13, I1, I2."""
     C = L.C
     p.ld(0, C["fill"])
     p.iconst(12, SINE_N)
@@ -264,9 +339,7 @@ def sine_fill(p: Prog, L: Layout) -> None:
             # the quarter: k in 0..32767 -> x in quarter turns, folded to [-1, 1]
             p.iconst(12, 0)
             p.float_(2, 0, 12)
-            # DSP2 makes its table with a 48-bit recursion whose limiter clamps at the
-            # trough (k = 24573..24577): from there on it runs 1.5 indices ahead. Its table
-            # is sin(2 pi (k + 1.5 [k >= 24576]) / 32768), clamped at -1 (within 6.5 LSB)
+            # past the trough DSP2's recursion runs 1.5 indices ahead (its limiter clamped)
             p.iconst(12, 3 * SINE_N // 4)
             p.if_(0, "GE", 12, lambda: (p.fconst(13, 1.5), p.fop(2, 2, "+", 13)), kind="i")
             p.fconst(12, 4.0 / SINE_N)
@@ -285,19 +358,44 @@ def sine_fill(p: Prog, L: Layout) -> None:
                 p.fop(4, 4, "+", 12)
             p.fop(4, 4, "*", 2)
             sat(p, 4)
-            # two of DSP2's words the formula misses: the clamped trough, exactly -1 at
-            # k = 24573..24577 (a shaper keys on it), and -6 LSB at k = 16384 (its one sign
-            # error: an oscillator feeds the word back into its own increment)
-            p.ld(0, C["fill"])
-            p.iconst(12, 24573)
-            p.iop(5, 0, "-", 12)
-            p.iconst(12, 4)
+            # to the nearest Q23 word, an integer
+            p.fconst(12, 2.0 ** 23)
+            p.fop(4, 4, "*", 12)
+            p.fconst(12, 0.5)
+            p.fconst(13, -0.5)
+            p.ifz(4, "LT", lambda: p.fpass(12, 13), kind="f")
+            p.fop(4, 4, "+", 12)
+            p.trunc(6, 4)
+            if corrected:
+                p.ld(7, C["cs"])
 
-            def trough():
-                p.ifz(5, "GE", lambda: p.fconst(4, -1.0))
-            p.if_(5, "LE", 12, trough, kind="i")
-            p.iconst(12, 16384)
-            p.if_(0, "EQ", 12, lambda: p.fconst(4, -6.0 * Q23), kind="i")
+                def fetch():                    # the next packed word
+                    p.ld(7, C["cw"])
+                    p.lsh(8, 7, 2)
+                    p.iconst(12, L.T["sinecorr"])
+                    p.iop(8, 12, "+", 8)
+                    p.seti(2, 8)
+                    p.ldi(8, 0, 2)
+                    p.st(C["cv"], 8)
+                    p.iconst(12, 1)
+                    p.iop(7, 12, "+", 7)
+                    p.st(C["cw"], 7)
+                p.ifz(7, "EQ", fetch)
+                p.ld(8, C["cv"])
+                p.lsh(7, 8, 32 - CORR_BITS)
+                p.ash(7, 7, -(32 - CORR_BITS))  # the low CORR_BITS, signed
+                p.lsh(8, 8, -CORR_BITS)
+                p.st(C["cv"], 8)
+                p.ipass(12, 6)
+                p.iop(6, 12, "+", 7)
+                p.ld(7, C["cs"])
+                p.iconst(12, 1)
+                p.iop(7, 12, "+", 7)
+                p.iconst(12, CORR_PER_WORD)
+                p.if_(7, "GE", 12, lambda: p.iconst(7, 0), kind="i")
+                p.st(C["cs"], 7)
+            p.iconst(12, -23)
+            p.float_(4, 6, 12)
             p.stpost(1, 4)
             p.ld(0, C["fill"])
             p.iconst(12, 1)

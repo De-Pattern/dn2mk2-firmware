@@ -308,7 +308,7 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("GRAN tables", GRAN_TABLES_DDR, _gran_tables()),
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
         ("Machinedrum sine (zeros: the DSP fills it)", MD_TABLES_DDR, bytes(4 * _md_core().SINE_N)),
-        ("Machinedrum tables (from the owner's MD firmware)", MD_TABLES_DDR + _md_core().TABLE_LAYOUT["hostP"][0],
+        ("Machinedrum tables (from the owner's MD firmware)", MD_TABLES_DDR + _md_core().TABLE_LAYOUT["sinecorr"][0],
          _md_core().tables_bytes()),
         ("Machinedrum voices: 16 slots x 1 KB (zeros)", MD_STATE_DDR, bytes(16 * _md_core().MD_STRIDE)),
         ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE)),
