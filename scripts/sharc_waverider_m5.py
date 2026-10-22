@@ -1210,6 +1210,9 @@ def step_tdm(init, sound, machines, blocks) -> dict:
             at = SM.TDM_TX + (prev << 11) + 56
             got = SL.tx_decode(lambda o: m2.word(r.state, at + o) or 0)
             state["tx"].append(got)
+            if b in (send_from - 2, send_from + 2):
+                state.setdefault("cols", {})[b] = [hex(m2.word(r.state, at + 64 * f + 4 * k) or 0)
+                                                 for f in range(32) for k in (0, 1)]
             if b == send_from + 2:
                 state["raw"] = [hex(m2.word(r.state, at + o) or 0) for o in (0, 4, 64, 68)]
                 hits = []
@@ -1291,7 +1294,7 @@ def step_tdm(init, sound, machines, blocks) -> dict:
             "numbers": {"status": stat, "packets_back": sum(1 for p in state["tx"] if p),
                         "mismatch": [(k, hex(got[k]), hex(want[k])) for k in range(len(got))
                                      if got[k] != want[k]][:6] if ok else None,
-                        "tx_raw": state.get("raw"), "hits": state.get("hits"),
+                        "tx_raw": state.get("raw"), "hits": state.get("hits"), "cols": state.get("cols"),
                         "pages": sorted(set(state["pg"])), "exact": exact, "halt": run.get("halt")}}
 
 
