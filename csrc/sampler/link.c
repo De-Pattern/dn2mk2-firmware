@@ -63,6 +63,9 @@ typedef unsigned char u8;
 #ifndef STORE_SECTOR
 #define STORE_SECTOR 0x600000u
 #endif
+#ifndef STORE_FLOOR
+#define STORE_FLOOR 0x458000u                                       /* the stock store's end */
+#endif
 #define STORE_SECTORS (1u + SMP_MIRROR_BYTES / 512u)
 #define STORE_MAGIC 0x444E3250u                                     /* 'DN2P' */
 #define RQ_MAX 600
@@ -94,7 +97,7 @@ static u32 checksum(const u8 *p, u32 n)
 static int store_ok(void)
 {
     return BLK_READY && BLK_SECTORS >= STORE_SECTOR + STORE_SECTORS
-           && STORE_SECTOR > 0x458000u;                               /* above the stock store */
+           && STORE_SECTOR >= STORE_FLOOR;                            /* above the stock store */
 }
 
 static u32 smp_save(void)

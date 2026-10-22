@@ -52,6 +52,9 @@ def replay(stock: bytes, edits: list[dict]) -> bytes:
 def main() -> int:
     if not available():
         raise SystemExit("no m68k assembler found (m68k-linux-gnu-as; WSL is fine)")
+    import os
+    if os.environ.get("DNFW_SMP_STORE_TEST"):
+        raise SystemExit("DNFW_SMP_STORE_TEST is for emulator builds only; unset it to write the spec")
     stock = load(read_image(STOCK)).container.find(3).unpack()
     if not cpage.available():
         raise SystemExit("no m68k GCC found (m68k-linux-gnu-gcc; WSL is fine)")

@@ -147,5 +147,5 @@ def test_the_pages_follow_the_dt2_layout():
 def test_the_drive_region_is_above_everything_the_dn2_uses():
     src = (pathlib.Path(__file__).resolve().parents[1] / "csrc/sampler/link.c").read_text()
     assert "#define STORE_SECTOR 0x600000u" in src
-    assert "STORE_SECTOR > 0x458000u" in src          # the stock store ends at 2,224 MiB
+    assert "#define STORE_FLOOR 0x458000u" in src and "STORE_SECTOR >= STORE_FLOOR" in src
     assert 0x600000 * 512 >= 3 << 30 and (0x600000 + 1 + SM.MIRROR_BYTES // 512) * 512 < 4 << 30

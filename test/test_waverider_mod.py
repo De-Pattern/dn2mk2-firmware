@@ -58,6 +58,7 @@ def test_applies_to_both_sections(applied, dn2_111):
     # pages, the page renderer (its own chunk since v0.13), machines, PING (the wave
     # display chunk went with Waverider, v0.11)
     assert [kind for kind, _ in chunks] == [platform.area.CODE] * 4
+    assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 
 def test_the_sample_link_hooks_call_into_the_renderer_chunk(applied, stock):
@@ -75,7 +76,6 @@ def test_the_sample_link_hooks_call_into_the_renderer_chunk(applied, stock):
         # the hook replays the displaced lea and returns
         code = _chunked(target, 64)
         assert stock_bytes in code and bytes.fromhex("4e75") in code[code.index(stock_bytes):]
-    assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 
 def _chunked(va: int, n: int) -> bytes:

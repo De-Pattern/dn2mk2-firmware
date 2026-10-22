@@ -167,8 +167,9 @@ static void w_samp(void *c, int x, int y, int slot)
     fill(c, x0, y0, x0 + 8, y1);                /* the bank letter, cut out */
     box(c, x0, y0, x1, y1, 0);
     glyph(c, x0 + 3, y0 + 3, 'A', 0);
-    if (slot == 0) {
-        TEXT(c, FONT, x0 + 16, y0 + 2, CENTRED, "OFF");
+    if (slot == 0) {                            /* OFF: two dashes */
+        glyph(c, x0 + 11, y0 + 3, '-', 1);
+        glyph(c, x0 + 15, y0 + 3, '-', 1);
         return;
     }
     char d[4];

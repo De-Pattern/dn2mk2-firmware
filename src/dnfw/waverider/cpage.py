@@ -41,6 +41,12 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
                    "POOL_MAGIC": hex(SM.POOL_MAGIC) + "u", "NAMES_OFFSET": SM.NAMES_OFFSET,
                    "NAME_BYTES": SM.NAME_BYTES, "DATA_OFFSET": hex(SM.DATA_OFFSET),
                    "POOL_SLOTS": SM.POOL_SLOTS}
+        import os
+        if os.environ.get("DNFW_SMP_STORE_TEST"):
+            # an emulator-only build: the +Drive region inside the emulator's 15 MB device
+            # (never shipped: scripts/gen_waverider_code.py refuses to write it)
+            sector, floor = os.environ["DNFW_SMP_STORE_TEST"].split(",")
+            defines.update({"STORE_SECTOR": sector + "u", "STORE_FLOOR": floor + "u"})
         linked = cbuild.build([SOURCE, *LINK_SOURCES], base=base,
                               entries=[ENTRY, POLL, OVERLAY, *LINK_ENTRIES],
                               include=[pathlib.Path(tmp)], defines=defines)

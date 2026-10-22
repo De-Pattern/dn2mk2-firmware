@@ -1,4 +1,4 @@
-# The Digitakt II's sample machines on the DN2 (v0.13 - v0.15)
+# The Digitakt II's sample machines on the DN2 (v0.13)
 
 The Digitone II and the Digitakt II are the same board and one codebase; what makes a
 Digitakt a sampler is its sample machines, a sample pool in the DSP's memory, and the
@@ -13,19 +13,19 @@ MACHINE SEL gains a section after PERC, RESONATOR and CZ:
 | type | machine | in v0.13 |
 |---|---|---|
 | 8 | **ONESHOT** | plays |
-| 9 | **WERP** | plays (v0.14) |
-| 10 | **STRETCH** | plays (v0.14) |
-| 11 | **REPITCH** | plays (v0.14) |
+| 9 | **WERP** | plays |
+| 10 | **STRETCH** | plays |
+| 11 | **REPITCH** | plays |
 | 12 | **GRID** | plays |
 
 The pool holds **four test sounds** until you send your own, made by
 `dnfw.sampler.live.test_samples` (no one's recordings): 1 KICK, 2 SNARE, 3 HAT, 4 BEAT
-(sixteen steps of the three, for GRID). **v0.14: your own samples**, sent over USB with
+(sixteen steps of the three, for GRID). **your own samples**, sent over USB with
 `tools/dn2samples.py` (below).
 
 ## The pages
 
-One page each, laid out as the Digitakt II's SRC page (v0.15; the owner's photographs of
+One page each, laid out as the Digitakt II's SRC page (the owner's photographs of
 the DT2 and its manual): A TUNE, B PLAY, C an empty dotted box (CFAD on ONESHOT), D SAMP
 on top, and the machine's own four below.
 
@@ -101,7 +101,7 @@ part that plays solid, LOOP's point marked in the loop modes, GRID's slices tick
 - A sample machine with no renderer yet (WERP, STRETCH, REPITCH) has its buffer
   cleared each block: silent, never a stale block.
 
-## Your samples (v0.14): `tools/dn2samples.py`
+## Your samples: `tools/dn2samples.py`
 
     python tools/dn2samples.py hello
     python tools/dn2samples.py send C:\samples\kit            every .wav in the folder
@@ -113,7 +113,7 @@ The WAVs (8/16/24/32-bit PCM or 32-bit float, any rate, mono or stereo) go into 
 names. They play at their own rate and pitch on C4. Up to 128 slots and 5 MB in all
 (16-bit mono: about 54 s at 48 kHz). **They last until power-off** unless you keep them:
 `send --keep` (or `save` afterwards) writes them to the +Drive, and the instrument loads
-them at power-on (v0.15, below).
+them at power-on (below).
 
 How it works:
 
@@ -138,7 +138,7 @@ How it works:
   it is there, and waits for a whole pass before it says done.
 - The page names the slots from the mirror once a pool has been sent.
 
-## Keeping them on the +Drive (v0.15)
+## Keeping them on the +Drive
 
     python tools/dn2samples.py send C:\samples\kit --keep
     python tools/dn2samples.py save | load | forget
@@ -162,7 +162,7 @@ kits are not touched; `forget` zeroes the header sector so nothing loads.
   < 1e-5); TUNE +12 is higher; reversed, looping and GRID tracks sound; PERC beside them
   stays bit-exact; WERP's buffer is 0; OFF, an empty slot and no trigger are silent; a
   second note restarts.
-- Step **3c** (v0.14): good packets land in the pool, one a block; a bad check or an
+- Step **3c**: good packets land in the pool, one a block; a bad check or an
   offset past the pool writes nothing; random words where the packets go (not the magic)
   change no track buffer of FM Tone, PERC or ONESHOT.
 - The ColdFire end in the emulator (`scripts/emu_waverider_menu.py`'s `sysex:` and
