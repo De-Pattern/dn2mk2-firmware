@@ -285,6 +285,19 @@ def sine_fill(p: Prog, L: Layout) -> None:
                 p.fop(4, 4, "+", 12)
             p.fop(4, 4, "*", 2)
             sat(p, 4)
+            # two of DSP2's words the formula misses: the clamped trough, exactly -1 at
+            # k = 24573..24577 (a shaper keys on it), and -6 LSB at k = 16384 (its one sign
+            # error: an oscillator feeds the word back into its own increment)
+            p.ld(0, C["fill"])
+            p.iconst(12, 24573)
+            p.iop(5, 0, "-", 12)
+            p.iconst(12, 4)
+
+            def trough():
+                p.ifz(5, "GE", lambda: p.fconst(4, -1.0))
+            p.if_(5, "LE", 12, trough, kind="i")
+            p.iconst(12, 16384)
+            p.if_(0, "EQ", 12, lambda: p.fconst(4, -6.0 * Q23), kind="i")
             p.stpost(1, 4)
             p.ld(0, C["fill"])
             p.iconst(12, 1)

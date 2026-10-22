@@ -542,7 +542,11 @@ def table_word(p: Prog, L: K.Layout, d: int, name: str, idx: int) -> None:
 def coefs(p: Prog, L: K.Layout) -> None:
     """From R9 (the tune word) and R10 (the table index word): R9 = c1 (= cb), R15 = g,
     R10 = c0, integer words (md_models.sd_coefs; hp_cascade's cb, g are c1, g).
-    Clobbers R1-R8, R12-R14, I1."""
+    A leaf subroutine. Clobbers R1-R8, R12-R14, I1."""
+    p.call("trx_coefs", lambda: _coefs_body(p, L))
+
+
+def _coefs_body(p: Prog, L: K.Layout) -> None:
     xint(p, L, 5, 10, 0)
     iadd(p, 5, 9, 5)
     xint(p, L, 1, 5, 0x900)                  # t1
@@ -1683,7 +1687,6 @@ class TRXS2:
     def render(p: Prog, L: K.Layout) -> None:
         C = L.C
         S = TRXS2
-        s(p, 0, 9)
 
         def power_block():
             s(p, 1, 8)                                # x1
@@ -1784,7 +1787,9 @@ class TRXS2:
                 p.ld(6, C["d"])
                 wmul(p)
                 p.seti(1, 1)
-                p.sti(0, 1, 4)                        # xa0[i]
+                p.sti(0, 1, 4)                        # the noise, kept (S47..)
+                p.iconst(12, 4)
+                p.iop(1, 12, "+", 1)
                 for k in (0, 1):
                     s(p, 6, 3 + k)
                     K.sine(p, L, 4, 6)
@@ -1805,20 +1810,41 @@ class TRXS2:
                 p.ash(4, 4, -2)
                 ss(p, 8, 4)                           # x0 = sat(mpy(k40, x0))
                 p.ash(4, 2, -1)
-                _clamp(p, 4)
-                p.st(C["c"], 4)                       # the body
-                S._amp_out(p, L)
-                p.iconst(12, 4)
-                p.iop(1, 12, "+", 1)
-            p.loop(C["n2"], 32, lambda: None) if False else None
-            S._samples(p, L, one)
+                _clamp(p, 4)                          # the body
+            out_loop(p, L, one)
 
+        s(p, 0, 9)
         p.ifz(0, "LE", power_block, body_block)
-        # (the power block's samples got the amp and the old noise in _amp_out below)
+        # the amp envelope (DEC blocks of $7FFB11, then W2) and the sum with the noise
+        s(p, 0, 9)
+        w(p, 1, 5)
+        p.if_(0, "GT", 1, lambda: w(p, 2, 2), lambda: p.iconst(2, S.K39), kind="i")
+        p.st(C["e"], 2)
+        iaddk(p, 0, 0, 1)
+        ss(p, 9, 0)
+        s(p, 2, 10)
+        p.ld(1, C["mdb"])
+        iaddk(p, 1, 1, 4 * (K.S0 + S.XA))
 
-    @staticmethod
-    def _amp_out(p: Prog, L: K.Layout) -> None:
-        pass
+        def out():
+            p.ldi(5, 0, 5)
+            p.ipass(6, 2)
+            wmul(p)
+            p.st(C["c"], 4)
+            p.ipass(5, 2)
+            p.ld(6, C["e"])
+            wmul(p)
+            p.ipass(2, 4)
+            p.ld(4, C["c"])
+            p.seti(1, 1)
+            p.ldi(5, 0, 1)
+            iadd(p, 4, 4, 5)
+            p.lsh(4, 4, 1)
+            _clamp(p, 4)
+            p.iconst(12, 4)
+            p.iop(1, 12, "+", 1)
+        out_ints(p, L, out)
+        ss(p, 10, 2)
 
 
 MACHINES = (TRXCP, TRXCB, TRXCH, TRXOH, TRXCY, TRXMA, TRXS2)
