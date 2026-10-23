@@ -119,7 +119,10 @@ selas encodes the immediate `Rd = ASHIFT Rx BY -n` with a shifter-op field the f
 own immediate ASHIFTs do not carry (digikit: "unsupported ShiftImm opcode 0x20";
 `reader.asm` met it first). So `dsl.ash` puts the count in a register (`ASHIFT Rx BY Rt`,
 the form the firmware and our other code use), saving and restoring Rt in a scratch word
-(`ash`): every register is as before, at three more instructions a shift.
+(`ash`): every register is as before, at three more instructions a shift. v0.18: the
+count goes in R12, the DSL's scratch, wherever the shift's own registers leave it free (run
+mode sets R12 too, so a machine that kept something in R12 across a shift would fail its
+golden cases: none does); TRX-CY's block went from 30.5k instructions to 28k.
 
 ## Rate
 
