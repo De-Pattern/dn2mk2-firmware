@@ -153,12 +153,13 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
                                       dsp.CZ_STATE_DDR, dsp.CZ_TABLES_DDR,
                                       dsp.PING_TABLES_DDR, dsp.SHFT_TABLES_DDR,
                                       dsp.GRAN_TABLES_DDR, dsp.PERC_TABLES_DDR,
+                                      dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_TABLES_DDR + MDK.TABLE_LAYOUT["sinecorr"][0],
                                       dsp.MD_STATE_DDR, dsp.GRAN_BUF_DDR,
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[0][2]) and not any(ddr[2][2]) and not any(ddr[-1][2])
-    assert not any(ddr[8][2]) and not any(ddr[10][2])     # the MD's sine (the DSP fills it), its voices
+    assert not any(ddr[9][2]) and not any(ddr[11][2])     # the MD's sine (the DSP fills it), its voices
     # v0.17: the sample pool's directory begins with its magic, and holds nothing (the
     # +Drive's samples are loaded in; the test sounds are gone)
     assert struct.unpack_from("<II", ddr[-2][2]) == (0x31504D53, 0)
@@ -290,9 +291,12 @@ def test_smp_hands_on_to_resonator_and_writes_only_saved_registers():
     for ln in lines:
         m = re.match(r"(I|M|L|B)(\d+) =", ln)
         if m:
-            # v0.17: I3 (a slot's Machinedrum words) and I5 (a machine's output), both saved
-            assert f"{m.group(1)}{m.group(2)}" in ("I1", "I2", "I3", "I4", "I5", "I12"), ln
+            # v0.18: I0 (the DT2 decimator's coefficients), I3 (its interpolator's row) and I5
+            # (its state): saved by PERC; used only pre-modified, DM(k, In), which no circular
+            # buffer (L) touches
+            assert f"{m.group(1)}{m.group(2)}" in ("I0", "I1", "I2", "I3", "I4", "I5", "I12"), ln
         assert not re.search(r"\b(R1[6-9]|R[2-9]\d|F1[6-9]|USTAT|MODE1|MODE2|LCNTR)\b", ln), ln
+        assert not re.search(r"DM\(I[035], M", ln), ln
     assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
 
 

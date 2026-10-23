@@ -26,7 +26,8 @@ V = dict(on=0, mach=1, pos=2, frac=3, lo=4, hi=5, loop=6, mode=7, base=8, frames
          # v0.18: the block's end fade (the DT2's: a voice that ends inside a block fades
          # over it), and STRETCH's jump (source frames, signed by the play direction)
          fade=22, fg=23, dg=24, jj=25,
-         fixed=26)                       # GRID's NOTE mode: the note picks the slice, not the pitch
+         fixed=26,                       # GRID's NOTE mode: the note picks the slice, not the pitch
+         son=27)                         # WERP: its segment sounds (V['on'] is the voice)
 STATE_WORDS = 16
 STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "gain",
@@ -550,7 +551,13 @@ def window(p: Prog, L: Layout) -> None:
 def tick(p: Prog, L: Layout, word: str) -> None:
     """One 96 kHz sample of the DT2's reader into C[word]: the six taps from pos (forward:
     s[pos..pos+5]; backward: s[pos-5..pos]) wrapping inside the window, against the
-    coefficient row floor(frac 256). Clobbers R0-R15 but R4, I1, I3."""
+    coefficient row floor(frac 256). One copy of the code (a leaf subroutine).
+    Clobbers R0-R3, R5-R15, I1, I3, I12."""
+    p.call("tick", lambda: _tick(p, L))
+    p.st(L.C[word], 7)
+
+
+def _tick(p: Prog, L: Layout) -> None:
     C = L.C
     v(p, 2, "frac")
     p.fconst(12, 256.0)
@@ -608,10 +615,16 @@ def tick(p: Prog, L: Layout, word: str) -> None:
     p.if_(7, "LT", 1, lambda: (p.iconst(12, -1), p.iop(0, 12, "+", 0)))
     p.iconst(12, -15)
     p.float_(7, 0, 12)
-    p.st(C[word], 7)
 
 
 def decimate(p: Prog, L: Layout, ye: str, yo: str, d: int) -> None:
+    """(one copy: a leaf subroutine, F0 its output) -- see _decimate"""
+    p.call(f"decim_{ye}_{yo}", lambda: _decimate(p, L, ye, yo, 0))
+    if d != 0:
+        p.fpass(d, 0)
+
+
+def _decimate(p: Prog, L: Layout, ye: str, yo: str, d: int) -> None:
     """Fd = the DT2's 2:1 decimator's next output from the 96 kHz pair C[ye], C[yo]: half
     the sum of a fourth-order all-pass of the even samples and the odd ones four outputs
     late (its 0xb80000), in its order of operations. The voice's twelve words at I5: the
@@ -823,7 +836,11 @@ def tempo(p: Prog, L: Layout) -> None:
     tofloat(p, 6, 4)
     p.fop(6, 6, "*", 9)
     p.st(C["sr"], 6)
-    v(p, 0, "mode")
+    p.ld(9, C["t"])
+    PP.t146(p, 10, 9)
+    ctl(p, 0, SM.PLAY_REC, 10)               # PLAY (v0.18: from the record; WERP's V['mode'] is its segment's)
+    p.lsh(0, 0, -5)
+    p.st(C["play"], 0)
     p.iconst(1, 1)
     p.iconst(12, 2)
     p.if_(0, "LT", 12, lambda: p.iconst(1, -1), kind="i")
@@ -904,8 +921,13 @@ T_MIN, T_MAX = 0.125, 4.0                 # STRETCH's time rate, clamped (the DT
 
 def read2(p: Prog, L: Layout, d: int, i: int, f: int) -> None:
     """Fd = s[Ri] (1 - Ff) + s[Ri + 1] Ff, the next frame held at the sample's end: the
-    DT2 STRETCH's two-tap read. Ri inside 0 .. frames - 1. Clobbers R0-R3, R8-R13, I1;
-    keeps Ri in C['x'], Ff in C['y']."""
+    DT2 STRETCH's two-tap read (one copy: a leaf subroutine on R9, F3 -> F4). Ri inside
+    0 .. frames - 1. Clobbers R0-R3, R6, R8-R13, I1, I12; keeps Ri in C['x'], Ff in C['y']."""
+    assert (d, i, f) == (4, 9, 3)
+    p.call("read2", lambda: _read2(p, L, d, i, f))
+
+
+def _read2(p: Prog, L: Layout, d: int, i: int, f: int) -> None:
     C = L.C
     p.st(C["x"], i)
     p.st(C["y"], f)
@@ -1152,12 +1174,94 @@ def render_stretch(p: Prog, L: Layout) -> None:
 
 
 def render_werp(p: Prog, L: Layout) -> None:
-    """WERP: the sample in NSEG equal segments; segment k starts at output sample k NOUT
-    (NOUT = NIN / sr: the whole lasts BARS), in the play direction; each plays at the
-    note's pitch in MODE (REV, REV LOOP, FWD LOOP, FWD) until the next one starts. FWD and
-    REV stop after the last segment; the loop modes start again."""
+    """WERP (v0.18, through the DT2's reader): the sample in NSEG equal segments; segment k
+    starts at output sample k NOUT (NOUT = NIN / sr: the whole lasts BARS), in PLAY's
+    direction, and plays as a note of its own -- the DT2 plays one segment a trigger --
+    at the note's pitch in MODE (REV, REV LOOP, FWD LOOP, FWD) through the six-tap
+    interpolator and the decimator, until the next one starts. FWD and REV stop after the
+    last segment; the loop modes start again. V['on'] is the voice, V['son'] its segment."""
     C = L.C
     buffer(p, L)
+    p.ld(0, C["rate"])
+    p.fconst(12, 0.5)
+    p.fop(0, 0, "*", 12)
+    p.st(C["rate"], 0)                        # frames a 96 kHz sample
+    p.iconst(12, L.T["gain"])
+    p.seti(0, 12)
+    p.ldi(1, 0, 0)
+    p.ld(0, C["lev"])
+    p.fop(0, 0, "*", 1)
+    p.st(C["lev"], 0)
+    dec_at(p, L)
+
+    def next_seg():
+        p.iconst(5, 0)
+        vs(p, "cnt", 5)
+        p.ld(9, C["dir"])
+        v(p, 7, "seg")
+        p.ld(6, C["nseg"])
+
+        def first():                           # -1: the first segment of the direction
+            p.iconst(7, 0)
+            p.ifz(9, "LT", lambda: (p.iconst(12, -1), p.iop(7, 12, "+", 6)))
+
+        def step():
+            p.ipass(12, 7)
+            p.iop(7, 12, "+", 9)
+        p.ifz(7, "LT", first, step)
+        # past either end: PLAY's loop modes start again, the others end the voice
+        p.iconst(8, 0)
+        p.if_(7, "GE", 6, lambda: p.iconst(8, 1), kind="i")
+        p.ifz(7, "LT", lambda: p.iconst(8, 1))
+
+        def wrap():
+            p.ld(0, C["play"])
+            p.iconst(12, 1)
+
+            def again():
+                p.iconst(7, 0)
+                p.ifz(9, "LT", lambda: (p.iconst(12, -1), p.iop(7, 12, "+", 6)))
+
+            def end():
+                p.iconst(6, 0)
+                vs(p, "on", 6)
+                vs(p, "son", 6)
+                p.iconst(7, 0)
+            p.if_(0, "EQ", 12, again,
+                  lambda: (p.iconst(12, 2), p.if_(0, "EQ", 12, again, end, kind="i")), kind="i")
+        p.ifz(8, "NE", wrap)
+
+        def segment():
+            vs(p, "seg", 7)
+            # the segment: [seg nin, seg nin + nin), its own play mode, from its start or end
+            p.ld(5, C["nin"])
+            tofloat(p, 3, 7)
+            tofloat(p, 4, 5)
+            p.fop(3, 3, "*", 4)
+            p.trunc(4, 3)                          # lo
+            vs(p, "lo", 4)
+            vs(p, "loop", 4)
+            vs(p, "low", 4)
+            p.ipass(12, 4)
+            p.iop(5, 12, "+", 5)
+            v(p, 6, "frames")
+            p.iop(5, 5, "MIN", 6)
+            vs(p, "hi", 5)
+            p.ld(0, C["smode"])
+            vs(p, "mode", 0)
+            p.iconst(12, 2)
+            p.if_(0, "LT", 12, lambda: (p.iconst(12, -1), p.iop(4, 12, "+", 5)), kind="i")
+            vs(p, "pos", 4)
+            p.fconst(0, 0.0)
+            vs(p, "frac", 0)
+            p.iconst(0, 1)
+            vs(p, "son", 0)
+            p.iconst(0, 0)
+            vs(p, "fade", 0)
+            window(p, L)
+        v(p, 0, "on")
+        p.ifz(0, "NE", segment)
+
 
     def sample():
         v(p, 0, "on")
@@ -1166,115 +1270,24 @@ def render_werp(p: Prog, L: Layout) -> None:
             v(p, 5, "cnt")
             p.ld(6, C["nout"])
             v(p, 7, "seg")
+            p.ifz(7, "LT", next_seg, lambda: p.if_(5, "GE", 6, next_seg, kind="i"))
+            for word in ("x", "y"):
+                v(p, 0, "son")
 
-            def next_seg():
-                p.iconst(5, 0)
-                vs(p, "cnt", 5)
-                p.ld(9, C["dir"])
-                v(p, 7, "seg")
-                p.ld(6, C["nseg"])
-
-                def first():                       # -1: the first segment of the direction
-                    p.iconst(7, 0)
-                    p.ifz(9, "LT", lambda: (p.iconst(12, -1), p.iop(7, 12, "+", 6)))
-
-                def step():
-                    p.ipass(12, 7)
-                    p.iop(7, 12, "+", 9)
-                p.ifz(7, "LT", first, step)
-                # past either end: loop modes start again, the others stop
-                p.iconst(8, 0)
-                p.if_(7, "GE", 6, lambda: p.iconst(8, 1), kind="i")
-                p.ifz(7, "LT", lambda: p.iconst(8, 1))
-
-                def wrap():
-                    v(p, 0, "mode")
-                    p.iconst(12, 1)
-
-                    def again():
-                        p.iconst(7, 0)
-                        p.ifz(9, "LT", lambda: (p.iconst(12, -1), p.iop(7, 12, "+", 6)))
-                    p.ipass(10, 0)
-                    p.iconst(12, 1)
-                    p.e("COMP(R10, R12);")
-                    p._branch(lambda: p.r[10] == p.r[12], "EQ", again,
-                              lambda: (p.iconst(12, 2), p.if_(0, "EQ", 12, again,
-                                                               lambda: (p.iconst(6, 0), vs(p, "on", 6), p.iconst(7, 0)),
-                                                               kind="i")))
-                p.ifz(8, "NE", wrap)
-                vs(p, "seg", 7)
-                # the segment's own start: 0 forward, its end backward (MODE)
-                p.fconst(0, 0.0)
-                p.ld(4, C["smode"])
-                p.iconst(12, 2)
-
-                def back():
-                    p.ld(5, C["nin"])
-                    p.iconst(12, -1)
-                    p.iop(5, 12, "+", 5)
-                    tofloat(p, 0, 5)
-                p.if_(4, "LT", 12, back, kind="i")
-                vs(p, "rel", 0)
-            p.ifz(7, "LT", next_seg,
-                  lambda: p.if_(5, "GE", 6, next_seg, kind="i"))
-            v(p, 0, "on")
-
-            def sounding_seg():
-                # inside the segment? (FWD and REV play it once)
-                v(p, 0, "rel")
-                p.ld(5, C["nin"])
-                tofloat(p, 1, 5)
-                p.fconst(2, 0.0)
-                p.iconst(6, 1)
-                p.if_(0, "LT", 2, lambda: p.iconst(6, 0))
-                p.if_(0, "GE", 1, lambda: p.iconst(6, 0))
-
-                def inside():
-                    v(p, 7, "seg")
-                    p.ld(5, C["nin"])
-                    # seg * nin by doubling: nin is frames / nseg, seg < nseg <= 128
-                    tofloat(p, 3, 7)
-                    tofloat(p, 4, 5)
-                    p.fop(3, 3, "*", 4)
-                    v(p, 0, "rel")
-                    p.fop(0, 0, "+", 3)
-                    read_at(p, L, 5, 0)
-                    p.ld(3, C["lev"])
-                    p.fop(5, 5, "*", 3)
-                    p.st(C["acc"], 5)
-
-                p.fconst(0, 0.0)
-                p.st(C["acc"], 0)
-                p.ifz(6, "NE", inside)
-                # on in the segment: rel +- pitch, wrapped in the loop modes
-                v(p, 0, "rel")
-                p.ld(1, C["rate"])
-                p.ld(4, C["smode"])
-                p.iconst(12, 2)
-                p.if_(4, "LT", 12, lambda: (p.fconst(12, 0.0), p.fop(1, 12, "-", 1)), kind="i")
-                p.fop(0, 0, "+", 1)
-                p.ld(5, C["nin"])
-                tofloat(p, 2, 5)
-
-                def fwd_loop():
-                    p.if_(0, "GE", 2, lambda: p.fop(0, 0, "-", 2))
-
-                def rev_loop():
-                    p.fconst(3, 0.0)
-                    p.if_(0, "LT", 3, lambda: p.fop(0, 0, "+", 2))
-                p.iconst(12, 2)
-                p.if_(4, "EQ", 12, fwd_loop, kind="i")
-                p.iconst(12, 1)
-                p.if_(4, "EQ", 12, rev_loop, kind="i")
-                vs(p, "rel", 0)
-                v(p, 5, "cnt")
-                p.iconst(12, 1)
-                p.iop(5, 12, "+", 5)
-                vs(p, "cnt", 5)
-                p.ld(0, C["acc"])
-                p.stpost(4, 0)
-
-            p.ifz(0, "NE", sounding_seg, lambda: (p.iconst(6, 0), p.stpost(4, 6)))
+                def read(word=word):
+                    tick(p, L, word)
+                    advance(p, L)
+                    v(p, 0, "on")              # the segment's end is not the voice's
+                    p.ifz(0, "EQ", lambda: (p.iconst(0, 0), vs(p, "son", 0), p.iconst(0, 1), vs(p, "on", 0)))
+                p.ifz(0, "NE", read, lambda word=word: (p.fconst(0, 0.0), p.st(C[word], 0)))
+            decimate(p, L, "x", "y", 0)
+            p.ld(3, C["lev"])
+            p.fop(0, 0, "*", 3)
+            p.stpost(4, 0)
+            v(p, 5, "cnt")
+            p.iconst(12, 1)
+            p.iop(5, 12, "+", 5)
+            vs(p, "cnt", 5)
 
         def rest():
             p.iconst(6, 0)
