@@ -638,7 +638,63 @@ def _tick(p: Prog, L: Layout) -> None:
                 p.iconst(12, -1)
                 p.iop(9, 12, "+", 9)
                 p.if_(9, "LT", 14, lambda: (p.ipass(12, 9), p.iop(9, 12, "+", 6)), kind="i")
-    p.if_(0, "GE", 12, fwd, rev, kind="i")
+    def slow():                              # the taps wrap at the window's edge
+        v(p, 0, "mode")
+        p.iconst(12, 2)
+        p.if_(0, "GE", 12, fwd, rev, kind="i")
+
+    # v0.18: where the six taps lie inside the window, s[st .. st + 5] (st = pos forward,
+    # pos - 5 backward: both are the row against six frames in order) are read in a row
+    p.iconst(11, 0)
+    p.if_(0, "LT", 12, lambda: p.iconst(11, -(POLY_TAPS - 1)), kind="i")
+    p.iop(11, 11, "+", 9)                    # st
+    p.iconst(13, 0)                          # inside: st >= lo and st + 5 < hi
+    p.if_(11, "LT", 14, lambda: p.iconst(13, 1), kind="i")
+    p.iconst(12, POLY_TAPS - 1)
+    p.iop(12, 12, "+", 11)
+    p.if_(12, "GE", 15, lambda: p.iconst(13, 1), kind="i")
+
+    def fast():
+        v(p, 8, "fmt")
+
+        def f32():
+            p.lsh(12, 11, 2)
+            p.iop(12, 10, "+", 12)
+            p.seti(1, 12)
+            for k in range(POLY_TAPS):
+                p.ldpost(5, 1)
+                p.ldi(6, k, 3)
+                p.fop(5, 5, "*", 6)
+                p.fop(7, 7, "+", 5)
+
+        def i16():
+            p.lsh(12, 11, 1)
+            p.iop(12, 10, "+", 12)           # s[st]'s byte address
+            p.iconst(13, 2)
+            p.iop(13, 12, "AND", 13)         # 2: it is a word's upper half
+            p.iconst(14, -4)
+            p.iop(12, 12, "AND", 14)
+            p.seti(1, 12)
+            for r in range(4):
+                p.ldpost(r, 1)               # four words: eight frames from the aligned one
+            p.iconst(8, -31)
+            p.iconst(14, 0xFFFF0000 - (1 << 32))
+
+            def taps(halves):
+                for k, (w, upper) in enumerate(halves):
+                    if upper:
+                        p.iop(5, w, "AND", 14)
+                    else:
+                        p.lsh(5, w, 16)
+                    p.float_(5, 5, 8)        # the frame / 32768
+                    p.ldi(6, k, 3)
+                    p.fop(5, 5, "*", 6)
+                    p.fop(7, 7, "+", 5)
+            even = [(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1)]
+            odd = [(0, 1), (1, 0), (1, 1), (2, 0), (2, 1), (3, 0)]
+            p.ifz(13, "EQ", lambda: taps(even), lambda: taps(odd))
+        p.ifz(8, "NE", i16, f32)
+    p.ifz(13, "EQ", fast, slow)
     # the DT2's MAC keeps the sum's whole 16-bit steps, toward -inf: floor(32768 y) / 32768
     p.fconst(12, 32768.0)
     p.fop(7, 7, "*", 12)
