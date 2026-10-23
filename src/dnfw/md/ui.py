@@ -105,7 +105,7 @@ def font(addr: int) -> tuple[int, dict[int, list[int]]]:
 def machines() -> dict[str, tuple[int, str, str]]:
     """{"TRX-BD": (nibbles, synth, machine)} for every machine record in the OS."""
     out = {}
-    for m in range(128):
+    for m in range(160):
         p = _long(RECORDS + 4 * m)
         if not OS_VMA <= p < OS_VMA + len(_os()) - 0x40:
             continue
@@ -115,6 +115,13 @@ def machines() -> dict[str, tuple[int, str, str]]:
         if not (synth.isalnum() and mach.isalnum()):
             continue
         out.setdefault(f"{synth}-{mach}", (struct.unpack_from(">I", rec, NIBBLES)[0], synth, mach))
+    # a record no table entry points at (TRX-S2: entry 29 is "GND--" in 1.63): found by name
+    for name in ("TRX-S2",):
+        if name not in out:
+            i = _os().find(name.replace("-", "").encode() + b"PTCH")
+            if i > 5:
+                rec = _os()[i - 5:i - 5 + 0x40]
+                out[name] = (struct.unpack_from(">I", rec, NIBBLES)[0], name[:3], name[4:])
     return out
 
 

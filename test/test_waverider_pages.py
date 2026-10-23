@@ -64,12 +64,13 @@ def test_perc_pages_are_the_eight_parameters_then_type_and_the_effects():
     # v0.12: page 1 is the machine's eight (the Machinedrum's page); page 2 TYPE, then
     # AMD AMF EQF / EQG FLTF FLTW FLTQ
     assert pages.PAGES[0] == tuple(r for r, *_ in PM.PARAMS)
-    assert pages.PAGES[1] == (PM.TYPE_REC[0], *(r for r, *_ in PM.FX_PARAMS))
+    # v0.20: the Machinedrum's FX page, AMD AMF EQF EQG / FLTF FLTW FLTQ, TYPE in SRR's place
+    assert pages.PAGES[1] == (*(r for r, *_ in PM.FX_PARAMS), PM.TYPE_REC[0])
     used = set(pages.PAGES[0]) | set(pages.PAGES[1])
     assert len(used) == 16 and not used & set(pages.UNUSED)
     assert pages.LABELS == {}                       # every label comes from the record's name
     named = {r: sh for r, _lo, sh in pages.named()}
-    assert [named[r] for r in pages.PAGES[1]] == ["TYPE", "AMD", "AMF", "EQF", "EQG", "FLTF", "FLTW", "FLTQ"]
+    assert [named[r] for r in pages.PAGES[1]] == ["AMD", "AMF", "EQF", "EQG", "FLTF", "FLTW", "FLTQ", "TYPE"]
 
 
 def test_every_machine_names_its_eight_parameters():
@@ -142,3 +143,16 @@ def test_the_samples_play_modes_and_grids_agree_with_the_dsp():
     from dnfw.sampler import machines as SM
     assert SM.PLAY_MODES[127 * 4 // 128] == "FWD" and SM.PLAY_MODES[0] == "REV"
     assert [SM.GRIDS[min(v // 24, 4)] for v in (0, 24, 48, 72, 96, 120)] == [4, 8, 16, 32, 64, 64]
+
+
+def test_every_new_type_has_our_pages():
+    """v0.19 shipped with pages.TYPES_LAST at 12 while the machine list went to 13: a SLICE
+    track got WaveTone's pages and stock tables read past their end. Every type the list
+    offers is one the page shims claim, and every sample machine has its page."""
+    from dnfw.waverider import coldfire as CF
+    from dnfw.waverider import pages as P
+    from dnfw.sampler import machines as SM
+    assert P.TYPES_LAST == CF.TYPES_LAST == max(CF.NEW_TYPES)
+    assert P.NEW_TYPE == CF.NEW_TYPES[0]
+    assert len(P.SMP_PAGES) == CF.SAMPLER_LAST - CF.SAMPLER_FIRST + 1 == len(SM.NAMES)
+    assert all(SM.TYPE_OF[n] == CF.SAMPLER_FIRST + k for k, n in enumerate(SM.NAMES))

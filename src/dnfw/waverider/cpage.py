@@ -22,7 +22,7 @@ OVERLAY = "wr_cell"                     # after each stock cell widget: PING's a
 # v0.14: the sample link (csrc/sampler), linked into the same chunk
 LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "sampler" / "hooks.S",
                 SOURCE.parents[1] / "sampler" / "smp_page.c", SOURCE.parents[1] / "sampler" / "rec.c",
-                SOURCE.parents[1] / "sampler" / "fmt.c"]
+                SOURCE.parents[1] / "sampler" / "fmt.c", SOURCE.parent / "md_page.c"]
 LINK_ENTRIES = ["smp_rx_hook", "smp_feed_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "smp_cmds", "smp_quant_hook", "smp_tdm_hook", "smp_tdm_sent", "smp_tdm_heard", "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate"]
 
 

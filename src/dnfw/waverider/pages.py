@@ -55,7 +55,8 @@ ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
 KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t
 SOUND_BASE, SOUND_STRIDE, SOUND_TYPE = 52, 1163, 0xDE
 NEW_TYPE, CLONE = 5, 1
-TYPES_LAST = 12                   # dnfw.waverider.coldfire.TYPES_LAST: 5..12 are ours
+TYPES_LAST = 13                   # dnfw.waverider.coldfire.TYPES_LAST: 5..13 are ours (v0.20: 13,
+                                  # SLICE, had been left out here: its track got WaveTone's pages)
 GET_SHORT_NAME = 0x400372DA
 EMPTY_PAGE = 0x42432BD4           # the readers' own empty-page fallback
 TAG = 10                          # the tag every stock SYN descriptor ends with
@@ -75,8 +76,8 @@ PARAM_IDS = tuple(r for r, _slot, _lo, _top in _perc.PARAMS)  # 238 242 254 253 
 FX_IDS = tuple(r for r, _slot, _lo, _top in _perc.FX_PARAMS)   # 239 246 250 244 243 258 253
 PAGES = (
     PARAM_IDS,                                  # the machine's eight, as the Machinedrum's page
-    (TYPE_ID, *FX_IDS),                         # TYPE; AMD AMF EQF / EQG FLTF FLTW FLTQ (v0.12)
-)
+    (*FX_IDS, TYPE_ID),                         # AMD AMF EQF EQG / FLTF FLTW FLTQ, TYPE: the
+)                                               # Machinedrum's FX page, TYPE in SRR's place (v0.20)
 # no static labels: wr_label hands every PERC record to the stock getShortName, which
 # reads the names wr_names swapped in
 LABELS: dict[int, str] = {}
@@ -384,7 +385,24 @@ def perc_c_header() -> str:
             f"static const unsigned short perc_param_ids[8] = {{{', '.join(map(str, PARAM_IDS))}}};\n"
             f"static const char perc_short[PERC_N][8][5] = {{\n{shorts}\n}};\n"
             f"static const char *const perc_longs[{len(longs)}] = {{{', '.join(q + x + q for x in longs)}}};\n"
-            f"static const unsigned char perc_long[PERC_N][8] = {{\n{lidx}\n}};\n")
+            f"static const unsigned char perc_long[PERC_N][8] = {{\n{lidx}\n}};\n"
+            + md_c_header())
+
+
+MDUI_LOAD = 0x46AE0000                          # the Machinedrum's screen graphics (dnfw.md.ui)
+MD_FX_NIBBLES = 0x31313311                      # AMD-AMF, EQF-EQG, FLTF-FLTW-FLTQ clipped, as the MD's
+TRACK_LEVEL_ID = 10                             # the track's LEVEL (docs/lfo4-feasibility.md)
+
+
+def md_c_header() -> str:
+    """md_page.c's: where the MD's graphics are and how they are laid out (dnfw.md.ui: no
+    Elektron data here), the FX page's clips, the machines' descriptions in capitals."""
+    from ..md import ui
+    q = chr(34)
+    upper = ", ".join(q + DESCRIPTIONS[n.split("-")[1]].upper() + q for n in _perc.NAMES)
+    return (ui.c_header() + f"#define MDUI_LOAD {MDUI_LOAD:#x}u\n#define MD_FX_NIBBLES {MD_FX_NIBBLES:#x}u\n"
+            f"#define TRACK_LEVEL_ID {TRACK_LEVEL_ID}\n"
+            f"static const char perc_what_upper[PERC_N][12] = {{{upper}}};\n")
 
 
 def source(page_draw: int, cell: int) -> str:

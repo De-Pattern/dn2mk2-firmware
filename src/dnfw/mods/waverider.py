@@ -72,7 +72,22 @@ def _chunks() -> list[tuple[int, bytes, str]]:
     if "ping_chunk" in SPEC:
         out.append((SPEC["ping_chunk"]["load"], bytes.fromhex(SPEC["ping_chunk"]["code"]),
                     "PING's FLTR-list shims, list and names (P2)"))
+    md = _md_ui()
+    if md is not None:
+        out.append(md)
     return out
+
+
+def _md_ui() -> tuple[int, bytes, str] | None:
+    """v0.20: the Machinedrum's screen graphics for PERC's page (csrc/waverider/md_page.c),
+    read from the owner's MD OS 1.63 now (dnfw.md.ui; never committed). Without it the page
+    is drawn as before."""
+    from ..md import rom as md_rom, ui as md_ui
+    from ..waverider import pages
+    if not md_rom.available():
+        return None
+    return (pages.MDUI_LOAD, md_ui.blob(),
+            "the Machinedrum's knob, pointers, clip and fonts (read from your MD OS, v0.20)")
 
 
 def ram() -> list[Extent]:

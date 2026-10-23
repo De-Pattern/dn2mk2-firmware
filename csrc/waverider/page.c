@@ -646,6 +646,11 @@ void wr_page_draw(void *view, void *canvas)
         perc_seen = perc_of(GET_VALUE(view, PERC_TYPE_ID, &flag));
     }
     wr_names();
+    if (kind == 1) {                            /* v0.20: the Machinedrum's own screen */
+        extern int md_page_draw(void *view, void *canvas, int page, int type);
+        if (md_page_draw(view, canvas, page, perc_seen))
+            return;
+    }
 
     if (smp) {                                  /* the DT2's SRC pages 1 and 2; page 3 the recorder */
         extern void smp_page_draw(void *view, void *canvas, int kind, int wave);
