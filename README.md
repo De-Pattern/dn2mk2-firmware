@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.16** | 2026-10-22 | 96 MB of your samples on the +Drive, loaded at power-on over a fast checked link; recordings kept after power-off; the SAMP name list; waveforms for every slot | `builds/v0.16-DRIVE/` | yes |
+| **v0.17** | 2026-10-22 | PERC is the Machinedrum: its 25 TRX/EFM/GND machines from the MD's own firmware (every reference case matches), TYPE p-lockable as before | `builds/v0.17-MACHINEDRUM/` | yes |
+| v0.16 | 2026-10-22 | 96 MB of your samples on the +Drive, loaded at power-on over a fast checked link; recordings kept after power-off; the SAMP name list; waveforms for every slot | `builds/v0.16-DRIVE/` | yes |
 | v0.15 | 2026-10-22 | DT2 SRC pages (knobs, waveform, RECORDER), one encoder click a choice, value names in the header, loops follow the knobs live; RECORDER: SRC IN/MAIN/TRK1-16, CHAN, YES records, ARM, R.LEN, R.STRT | `builds/v0.15-RECORDER/` | yes |
 | v0.14 | 2026-10-22 | Sampling: page 2 of every sample machine records IN / IN L / IN R / MAIN into SAMP 124-127 (threshold, length); ONESHOT's CFAD heard | `builds/v0.14-SAMPLING/` | yes |
 | v0.13 | 2026-10-22 | The Digitakt II's sample machines (ONESHOT, WERP, STRETCH, REPITCH, GRID) with DT2-style pages; four test sounds; your WAVs over USB, kept on the +Drive | `builds/v0.13-SAMPLER/` | yes |
@@ -52,6 +53,52 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.17 — PERC is the Machinedrum
+
+`DN2mod_v0.17_MACHINEDRUM_OS1.11.syx`
+sha256 `9803119ed145485d8b5c9e1067eaec366b4bb24a8d08128f85634e5936cb878c`
+Gate: CLEARED TO FLASH, 2026-10-23 (USB size 1,982,125 of 2,097,152; DSP 1,037,552 of 1,048,575). Source: commit `f98caa6`. Docs: `docs/md.md`.
+
+**Adds.**
+- **PERC's drum machines are the Machinedrum's own** (SPS-1 UW, OS 1.63): all 25 — TRX
+  BD B2 SD XT CP RS CB CH OH CY MA CL XC S2, EFM BD SD XT CP RS CB HH CY, GND SN NS IM —
+  ported from DSP2's code in your Machinedrum firmware file and checked against the MD's
+  own output, case by case (most within 75..120 dB of it, several bit-exact). They run at
+  the MD's 44.1 kHz and are resampled to the DN2's 48 kHz.
+- **TYPE stays** (page 2, with the track effects AMD..FLTQ): it picks one of the 25 and
+  is latched by each note, so p-locking TYPE still plays a different machine on each step.
+- Page 1 is the machine's eight parameters under the MD's names; each knob lands on one of
+  the MD's 128 positions.
+- As on the Machinedrum, **the note does not tune** a machine (PTCH does).
+
+**Test** (after the regression check; **back up the +Drive first**):
+1. A PERC track: turn TYPE through all 25; each name shows and each sounds on a trig
+   (TRX-MA, the maracas, builds up over a second).
+2. P-lock TYPE on a few steps: each step plays its own machine.
+3. Page 1: the eight names change with TYPE; turn each knob on a few machines.
+4. Page 2: AMD..FLTQ still change the sound.
+5. If you have your Machinedrum: same machine, same settings, side by side.
+6. **DSP load**: eight PERC tracks of TRX-CY / EFM-CY / TRX-CH ringing together, with the
+   rest of a busy pattern: listen for crackles or dropouts and report them.
+   (`python tools/dn2sharc_load.py` on a usbprobe build measures it.)
+7. The sample machines play your +Drive samples as before (SAMP 1..).
+
+**Known issues.**
+- **The four test sounds are gone from the image** (the Machinedrum's tables needed the
+  room): SAMP 1..4 are empty until you send samples (`tools/dn2samples.py send`), which
+  then load at every power-on as in v0.16.
+- **TYPE's machines changed**: a sound saved with a PERC TYPE on v0.11..v0.16 (the Ravel
+  set) now plays the MD machine at that TYPE position.
+- **DSP cost**: the MD's machines are heavier than the Ravel ones: 3.5k..31k DSP
+  instructions a block each (a stock synth is about 8..11k); TRX-CP/CY/MA/S2 and the EFMs
+  are the heavy ones. A machine stops costing anything once its sound has died away, but
+  many long cymbals at once could overload the DSP (crackles). Not measured on the
+  instrument yet.
+- For the first 0.7 s after power-on the DSP is still filling the MD's sine and tables
+  (a note in that time sounds wrong).
+- PERC's level (0.7 of the MD's full scale) is a guess; how it sits beside the DN2's own
+  machines is for you to say.
 
 ## v0.16 — 96 MB of samples on the +Drive, recordings kept, the sample list
 
