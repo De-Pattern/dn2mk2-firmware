@@ -92,6 +92,12 @@ and on pages 2 and 3 the envelope with the page's four steps solid and the susta
 marked). WaveTone's names are swapped for CZ's while a CZ track is active, as
 Waverider and RESONATOR do. TBL2 (251) is unused.
 
+v0.20: page 1 (CZ's and RESONATOR's) is drawn as the Elektron grid the DT2 pages use: a
+knob for each continuous control (DET, DCW; RESONATOR's eight), and the enumerated ones
+(WAVE, SEL, OCT, MOD, KF, SUS) as their value in a box, each over its label in the
+stock 4 x 5 label font (`smp_knob_page`, `csrc/sampler/smp_page.c`). The wave-pair
+picture is gone from page 1; WAVE's box names the pair.
+
 **Departures from the CZ, and why.**
 
 - One wave choice for both lines, and one DCW envelope: 25 parameters (above).
