@@ -57,8 +57,8 @@ Every flash, every version:
 ## v0.17 — PERC is the Machinedrum
 
 `DN2mod_v0.17_MACHINEDRUM_OS1.11.syx`
-sha256 `SHA_HERE`
-Gate: GATE_HERE. Source: commit `92c46a6`. Docs: `docs/md.md`.
+sha256 `9803119ed145485d8b5c9e1067eaec366b4bb24a8d08128f85634e5936cb878c`
+Gate: CLEARED TO FLASH, 2026-10-23 (USB size 1,982,125 of 2,097,152; DSP 1,037,552 of 1,048,575). Source: commit `f98caa6`. Docs: `docs/md.md`.
 
 **Adds.**
 - **PERC's drum machines are the Machinedrum's own** (SPS-1 UW, OS 1.63): all 25 — TRX
