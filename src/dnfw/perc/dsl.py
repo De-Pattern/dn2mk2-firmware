@@ -200,16 +200,24 @@ class Prog:
             x = self.r[a]
             self.setR(d, (x << n) if n >= 0 else (x >> -n))
 
-    def ash(self, d: int, a: int, n: int, note: str = "") -> None:
+    def ash(self, d: int, a: int, n: int, note: str = "", keep12: bool = False) -> None:
         """Rd = Ra >> -n, arithmetic. selas mis-encodes the immediate form `ASHIFT Rx BY n`
         (its shifter-op field is not the one the firmware's immediate ASHIFTs carry:
         digikit reads it as "unsupported ShiftImm opcode 0x20", reader.asm), so the count
-        goes in a register: one not in (d, a), saved to and restored from the word
-        `self.spill` (a DM address the program owns). Every register is as before."""
+        goes in a register: R12, the DSL's scratch (the run mode sets it too, so a caller
+        that needed R12 kept fails its model), unless d or a is R12 or KEEP12 -- then
+        another register, saved to and restored from the word `self.spill`."""
         assert n < 0
+        if 12 not in (d, a) and not keep12:
+            x = s32(self.r[a]) >> -n if self.run else 0
+            self.iconst(12, n)
+            self.e(f"R{d} = ASHIFT R{a} BY R12;", note)
+            if self.run:
+                self.setR(d, x)
+            return
         if not self.run:
             assert self.spill is not None, "ash needs Prog.spill"
-        t = next(r for r in (12, 13, 14) if r not in (d, a))
+        t = next(r for r in (13, 14, 15) if r not in (d, a))
         if self.spill is not None:
             self.st(self.spill, t)
         else:
