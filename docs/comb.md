@@ -18,8 +18,8 @@ it rings; DAMP darkens each pass, so high harmonics die first (plucked, then mut
 COMB- feeds back inverted: a hollow sound an octave down, odd harmonics only. The dry
 signal passes at unity (there is no mix: the DT2 has none).
 
-    FLTR page 1   FREQ FDBK  -   (Delay) DAMP  /  KEY.T
-    FLTR page 2   the envelope's cells read -  /  BASE WDTH BW.RT RSET
+    FLTR page 1   ATK  DEC   -    -   /  FREQ FDBK  -   ENV
+    FLTR page 2   DAMP  .    .  KEY.T /  BASE WDTH BW.RT RSET
 
 | control | DN2 record | DT2 | what it does |
 |---|---|---|---|
@@ -27,8 +27,11 @@ signal passes at unity (there is no mix: the DT2 has none).
 | FDBK | Resonance | FDBK | the feedback, through the DT2's own 128-point curve (≈ 1 − (1 − x)^2.93) |
 | DAMP | Env. Delay | LPF, reversed | 0 = open (the DT2's LPF 127, its default), up = darker |
 | KEY.T | Key Tracking | KEY.T | the note moves FREQ: full = one FREQ step a semitone, from C3 (note 48) |
+| ATK, DEC | Attack, Decay Time | the filter envelope | an envelope restarted by every note: attack, then a decay to 0 (SHFT's and PING's times, 0.1 ms .. 400 ms and 2 ms .. 10 s) |
+| ENV | Env. Depth | ENV depth | how far the envelope moves FREQ: centre none, ends +-the whole range |
 
-Unused cells read `-`. BASE and WDTH (the filter page's fixed band filter) still apply
+Unused cells read `-`. ENV at its centre (the default) leaves FREQ alone, and the comb is
+exactly the DT2's. BASE and WDTH (the filter page's fixed band filter) still apply
 after it.
 
 ## How it matches the DT2 [E]
@@ -69,6 +72,7 @@ models are present). Cost: about 4,000 SHARC instructions a block per COMB track
 
 - **[E]** `test/test_comb.py`: against the DT2 model; the pitch; the ring and its bound;
   COMB-'s sign; reset on a note and on a type change; zero feedback is the dry signal;
+  the envelope on FREQ, each depth, block by block; ENV at its centre changes nothing;
   layout; the jumps between ping.asm and comb.asm; comb.asm is its generator's output;
   no committed source keeps an unresolved branch.
 - **[E]** The SHARC gate's step 7c: COMB- and COMB+ on a PERC track (the MD's TRX-CY) and
@@ -79,7 +83,10 @@ models are present). Cost: about 4,000 SHARC instructions a block per COMB track
 
 ## Open
 
-- **[O]** The DT2's filter envelope (ENV depth into FREQ) is not there: the DN2's filter
-  envelope is computed in the stock filter code, which COMB replaces. FREQ can be
-  p-locked or modulated by an LFO instead.
+- **[O]** The envelope is not the DT2's: the DT2 adds its filter envelope (DEL, ATK, DEC,
+  SUS, REL, shared by every filter type) to FREQ, but that routine has not been read.
+  Here it is SHFT's attack / decay, restarted by every note, stepped once a block (as the
+  DT2 recomputes the comb once a block), with no sustain or release: the DSP is not told
+  when a note is released. ENV's sign and scale follow the DT2's (a term added to FREQ
+  before the clamp).
 - **[O]** The DT2 runs a comb per voice (32); here it is one per track, after the machine.

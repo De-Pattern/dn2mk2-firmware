@@ -43,8 +43,9 @@ SETS = {                  # filter type -> {record id: (long name, short name)},
         37: ("Comb Feedback", "FDBK"),  # Resonance
         38: ("Unused", "-"),            # Filter Type: nothing
         44: ("Comb Damping", "DAMP"),   # Env. Delay: the loop's low-pass, closed as it rises
-        45: ("Unused", "-"), 46: ("Unused", "-"), 47: ("Unused", "-"),   # (the envelope's
-        48: ("Unused", "-"), 49: ("Unused", "-")},   # cells, kept free for it); KEY.T keeps its name
+        45: ("Comb Env. Attack", "ATK"),  # Attack Time: SHFT's envelope, on FREQ
+        46: ("Comb Env. Decay", "DEC"),  # Decay Time
+        47: ("Unused", "-"), 48: ("Unused", "-")},   # ENV (Env. Depth) and KEY.T keep their names
 }
 SETS[10] = SETS[9]
 NAMED = tuple((rid, *SETS[6][rid]) for rid in SETS[6])     # PING's, as P2 had it

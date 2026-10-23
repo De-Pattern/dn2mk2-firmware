@@ -1716,8 +1716,8 @@ def step_comb(init, sound, machines) -> dict:
     source = {PERC_TYPE_SLOT: perc_type_word(cy)}
     for (_rid, slot, lo, top), x in zip(PM.PARAMS, PL.defaults("TRX-CY")):
         source[slot] = PL.word_of(x, top, lo)
-    cases = {"COMB- / COMB+": ((9, 10), ({67: 0x5000, 68: 0x6800, 70: 0x2000}, {67: 0x3000, 68: 0x7f00, 70: 0x0})),
-             "COMB+ / COMB-": ((10, 9), ({67: 0x7000, 68: 0x4000, 70: 0x6000}, {67: 0x1000, 68: 0x7800, 70: 0x4000}))}
+    cases = {"COMB- / COMB+": ((9, 10), ({67: 0x5000, 68: 0x6800, 70: 0x2000, 69: 0x7000, 71: 0x0800, 72: 0x3000}, {67: 0x3000, 68: 0x7f00, 70: 0x0})),
+             "COMB+ / COMB-": ((10, 9), ({67: 0x7000, 68: 0x4000, 70: 0x6000}, {67: 0x1000, 68: 0x7800, 70: 0x4000, 69: 0x1800, 71: 0x0, 72: 0x2000}))}
     results = {}
     for name, (ftypes, settings) in cases.items():
         pend, seen = {}, {"checked": 0, "out_bad": 0, "state_bad": 0, "changed": 0, "peak": 0.0}

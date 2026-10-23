@@ -41,20 +41,30 @@ BUF_N = 8192                              # the delay line, float32 a track (the
 MASK = BUF_N - 1
 GAIN_N = 128                              # the feedback curve's points
 R_FREQ, R_RES, R_DAMP, R_KEYT = 0x1CC, 0x1D0, 0x1EC, 0x208   # DAMP: Env. Delay
+R_ATK, R_DEC, R_DEPTH = 0x1F0, 0x1F4, 0x204                 # the envelope: ATK, DEC, ENV
 PING_T = 0x2E2500                         # PING's track word (ping.asm)
 RECORDS = 0x2554B8                        # track t's record: + 0x234 t
 
 # a track's state, words at I2
-S = dict(lp=0, c=1, A=2, At=3, pos2=4, w=5, D=6, fill=7, ptype=8, f=9, fb=10, lpf=11)
+S = dict(lp=0, c=1, A=2, At=3, pos2=4, w=5, D=6, fill=7, ptype=8, f=9, fb=10, lpf=11,
+         stage=12, ex=13)                 # the envelope (v0.20): stage, phase
 STATE_WORDS = 16
 SC_WORDS = ("cnt", "inv", "dA", "wt", "fr1", "om1", "fr2", "a", "a1", "b", "b1", "buf", "x", "y", "e")
 
 
 class Layout:
-    def __init__(self, state: int, scratch: int, tables: int, buf: int, exp2: int):
+    def __init__(self, state: int, scratch: int, tables: int, buf: int, exp2: int, ping: int):
         self.state, self.tables, self.buf = state, tables, buf
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
-        self.T = {"gain": tables, "exp2": exp2}
+        self.T = {"gain": tables, "exp2": exp2, "ping": ping}     # ping: PING's tables (ATK, DEC)
+
+
+def _ping_at() -> dict[str, int]:
+    from ..ping import live as PGL
+    return PGL.tables_bytes()[1]
+
+
+PING_AT = _ping_at()                       # byte offsets of PING's tables (ATK, DEC)
 
 
 def tables_bytes() -> bytes:
@@ -365,6 +375,76 @@ def render(p: Prog, L: Layout) -> None:
     ss(p, "pos2", 0)
 
 
+def at127(p: Prog, L: Layout, d: int, rid: int, table: str) -> None:
+    """Fd = PING's TABLE[trunc(clamp(record[rid]) 127)] (dnfw.ping.live.at127). Uses R3, R4,
+    R11, R12, I3."""
+    p.ldi(3, rid // 4, 1)
+    p.fconst(4, 0.0)
+    p.fop(3, 3, "MAX", 4)
+    p.fconst(4, 1.0)
+    p.fop(3, 3, "MIN", 4)
+    p.fconst(4, 127.0)
+    p.fop(3, 3, "*", 4)
+    p.trunc(3, 3)
+    p.lsh(3, 3, 2)
+    p.iconst(11, L.T["ping"] + PING_AT[table])
+    p.iop(12, 11, "+", 3)
+    p.seti(3, 12)
+    p.ldi(d, 0, 3)
+
+
+def envelope(p: Prog, L: Layout) -> None:
+    """SHFT's envelope (dnfw.shft.live.envelope: attack x, decay (1 - x)^3, PING's ATK and
+    DEC tables), restarted by a note or a new type, stepped a block at a time: R5 = its
+    value at the block's start. Keeps R8, I1, I2."""
+    C = L.C
+    s(p, 6, "stage")
+    s(p, 7, "ex")
+    p.ld(0, C["y"])
+
+    def restart():
+        p.iconst(6, 1)
+        p.fconst(7, 0.0)
+    p.ifz(0, "NE", restart)
+    p.fconst(5, 0.0)
+    p.fconst(10, 1.0)
+
+    def attack():
+        p.fpass(5, 7)                                   # a = x
+        at127(p, L, 13, R_ATK, "atk")
+        p.fconst(12, float(BLOCK))
+        p.fop(13, 13, "*", 12)
+        p.fop(7, 7, "+", 13)
+        p.fconst(10, 1.0)
+
+        def to_decay():
+            p.iconst(6, 2)
+            p.fconst(7, 0.0)
+        p.if_(7, "GE", 10, to_decay)
+
+    def decay():
+        p.fop(5, 10, "-", 7)                            # d = 1 - x; a = d^3
+        p.fop(12, 5, "*", 5)
+        p.fop(5, 12, "*", 5)
+        at127(p, L, 13, R_DEC, "dec")
+        p.fconst(12, float(BLOCK))
+        p.fop(13, 13, "*", 12)
+        p.fop(7, 7, "+", 13)
+        p.fconst(10, 1.0)
+
+        def to_idle():
+            p.iconst(6, 0)
+            p.fconst(7, 0.0)
+        p.if_(7, "GE", 10, to_idle)
+
+    p.iconst(9, 2)                                      # (decay first: an attack that ends
+    p.if_(6, "EQ", 9, decay, kind="i")                  # here decays from the next block)
+    p.iconst(9, 1)
+    p.if_(6, "EQ", 9, attack, kind="i")
+    ss(p, "stage", 6)
+    ss(p, "ex", 7)
+
+
 def track(p: Prog, L: Layout) -> None:
     """One track on COMB- or COMB+ (its type in R0 at entry). Clobbers everything."""
     C = L.C
@@ -418,6 +498,13 @@ def track(p: Prog, L: Layout) -> None:
     p.ldi(9, R_KEYT // 4, 1)
     p.fop(8, 8, "*", 9)
     p.ldi(9, R_FREQ // 4, 1)
+    p.fop(8, 8, "+", 9)
+    envelope(p, L)                                      # R5 = the envelope, 0..1
+    p.ldi(9, R_DEPTH // 4, 1)                           # ENV: (depth - 0.5) 2, +-1 = the range
+    p.fconst(12, 0.5)
+    p.fop(9, 9, "-", 12)
+    p.fop(9, 9, "+", 9)
+    p.fop(9, 9, "*", 5)
     p.fop(8, 8, "+", 9)
     p.fconst(12, 0.0)
     p.fop(8, 8, "MAX", 12)
@@ -497,4 +584,4 @@ def layout() -> Layout:
     from ..perc import live as PL
     from ..waverider import dsp
     return Layout(dsp.COMB_STATE_DDR, dsp.COMB_SCRATCH_DDR, dsp.COMB_TABLES_DDR, dsp.COMB_BUF_DDR,
-                  PL.layout().T["exp2"])
+                  PL.layout().T["exp2"], dsp.PING_TABLES_DDR)

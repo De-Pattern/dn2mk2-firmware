@@ -18,6 +18,7 @@ from dnfw.dt2 import rom
 from dnfw.perc import live as PL
 from dnfw.perc import program as PP
 from dnfw.perc.dsl import Mem, bits, flt
+from dnfw.ping import live as PGL
 from dnfw.waverider import dsp
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -25,23 +26,29 @@ SHARC = ROOT / "csrc" / "waverider" / "sharc"
 import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "scripts"))
 DT2_MODELS = ROOT.parent / "dt2s117" / "research" / "tools"
-L = CP.Layout(0x81220000, 0x81221000, 0x81222000, 0x81300000, PL.layout().T["exp2"])
+L = CP.Layout(0x81220000, 0x81221000, 0x81222000, 0x81300000, PL.layout().T["exp2"], 0x81230000)
 BUF, BLOCK = 0x300000, 32
 
 needs_rom = pytest.mark.skipif(not rom.available(), reason="the owner's DT2 section 7 is not here")
 
 
-def machine(freq, fb, damp, note=60.0):
+def machine(freq, fb, damp, note=60.0, depth=0.5, atk=0.0, dec=0.5):
     words = {}
     tb = CP.tables_bytes()
     for k in range(CP.GAIN_N):
         words[L.tables + 4 * k] = struct.unpack_from("<I", tb, 4 * k)[0]
+    pt = PGL.tables_bytes()[0]
+    for k in range(len(pt) // 4):
+        words[L.T["ping"] + 4 * k] = struct.unpack_from("<I", pt, 4 * k)[0]
     mem = Mem(lambda a: words.get(a, 0))
     rec = CP.RECORDS
     mem.put(rec + CP.R_FREQ, bits(freq))
     mem.put(rec + CP.R_RES, bits(fb))
     mem.put(rec + CP.R_DAMP, bits(damp))
     mem.put(rec + CP.R_KEYT, bits(0.0))
+    mem.put(rec + CP.R_DEPTH, bits(depth))
+    mem.put(rec + CP.R_ATK, bits(atk))
+    mem.put(rec + CP.R_DEC, bits(dec))
     mem.put(PP.NOTE_CELLS, bits(note))
     mem.put(PP.BUFFERS, BUF)
     return mem
@@ -186,3 +193,56 @@ def test_no_committed_source_has_an_unresolved_jump():
         text = f.read_text(encoding="utf-8")
         assert not re.search(r"JUMP\s+0x0;", text), f.name
         assert not re.search(r"=\s*0x0;\s*// return address", text), f.name
+
+
+def _env_expected(atk_v, dec_v, blocks):
+    """SHFT's envelope a block at a time: the value at each block's start."""
+    from dnfw.perc.dsl import f32
+    T = PGL.tables()
+    atk, dec = PGL.at127(T["atk"], atk_v), PGL.at127(T["dec"], dec_v)
+    stage, x, out = 1, 0.0, []
+    for _ in range(blocks):
+        a = 0.0
+        if stage == 2:
+            d = f32(1.0 - x)
+            a = f32(f32(d * d) * d)
+            x = f32(x + f32(dec * 32.0))
+            if x >= 1.0:
+                stage, x = 0, 0.0
+        elif stage == 1:
+            a = x
+            x = f32(x + f32(atk * 32.0))
+            if x >= 1.0:
+                stage, x = 2, 0.0
+        out.append(a)
+    return out
+
+
+@needs_rom
+@pytest.mark.parametrize("atk,dec", [(0.3, 0.4), (0.0, 0.2), (0.6, 0.0)])
+def test_the_envelope_moves_freq_by_env_depth(atk, dec):
+    base = 0.4
+    want = _env_expected(atk, dec, 60)
+    for depth, sign in ((1.0, 1.0), (0.0, -1.0), (0.75, 0.5)):
+        mem = machine(base, 0.5, 0.0, depth=depth, atk=atk, dec=dec)
+        got = []
+        for b in range(60):
+            block(mem, [0.0] * BLOCK, 10, trig=(b == 0))
+            got.append(flt(mem.get(L.state + 4 * CP.S["f"])))
+        exp = [min(max(base + sign * a, 0.0), 1.0) for a in want]
+        assert got == pytest.approx(exp, abs=1e-6), (depth, atk, dec)
+    assert max(want) > 0.2                                # it moves
+
+
+@needs_rom
+def test_env_depth_at_the_centre_changes_nothing():
+    a, _, _ = impulse_response(10, 0.6, 0.9, 0.0)
+    mem = machine(0.6, 0.9, 0.0, depth=0.5, atk=0.1, dec=0.1)
+    out = []
+    for b in range(40):
+        x = [0.0] * BLOCK
+        if b == 0:
+            x[0] = 0.5
+        y, _ = block(mem, x, 10, trig=(b == 0))
+        out += y
+    assert out == a
