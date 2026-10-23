@@ -18,7 +18,7 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 
 #define TYPE_FIRST 8
-#define TYPES 5
+#define TYPES 6                                 /* v0.19: SLICE */
 #define SOUND_TYPE 0xDE                         /* the sound's machine type byte */
 #define SOUND_VALUES 0x14                       /* its values, a 16-bit word a slot */
 #define RECORD_FMT(id) (*(void **)(0x401F7F94u + 60u * (id) + 0x34u))
@@ -253,9 +253,10 @@ void smp_formats(int kind)
     int smp = kind >= SMP_KIND0;
     for (int k = 0; k < NFMT; k++) {
         void *f = stock_fmt[k];
-        int grid_only = fmt_ids[k] == SMP_GRID_REC || fmt_ids[k] == SMP_SLICE_ID
-                        || fmt_ids[k] == SMP_SLEN_ID;
+        int grid_only = fmt_ids[k] == SMP_GRID_REC;
+        int slices = fmt_ids[k] == SMP_SLICE_ID || fmt_ids[k] == SMP_SLEN_ID;  /* GRID's, SLICE's */
         if (smp && (!grid_only || kind == SMP_GRID_KIND)
+            && (!slices || kind == SMP_GRID_KIND || kind == SMP_SLICE_KIND)
             && (fmt_ids[k] != SMP_MODE_REC || kind == SMP_WERP_KIND))
             f = (void *)fmt_fns[k];
         RECORD_FMT(fmt_ids[k]) = f;

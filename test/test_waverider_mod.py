@@ -110,9 +110,9 @@ def test_the_list_offers_our_machines_then_the_sample_machines_before_midi(appli
     end = long_at(main, CF.LIST_END + 2)
     types = [_clong(a) for a in range(begin, end, 4)]
     # v0.15: the five sample machines in the Digitakt II's order (v0.13: ONESHOT, GRID)
-    assert types == [0, 2, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 4]
-    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("48780034")
-    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e80034")
+    assert types == [0, 2, 1, 3, 5, 6, 7, 8, 9, 10, 11, 13, 12, 4]   # v0.19: SLICE before GRID
+    assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("48780038")   # v0.19: 14 longs
+    assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e80038")
 
 
 def test_rows_5_to_12_of_the_name_table(applied):
@@ -121,11 +121,12 @@ def test_rows_5_to_12_of_the_name_table(applied):
     for row, (lo, sh) in ((5, (b"Perc\0", b"PRC\0")), (6, (b"Resonator\0", b"RSN\0")),
                           (7, (b"CZ Phase\0", b"CZP\0")), (8, (b"Oneshot\0", b"ONE\0")),
                           (9, (b"Werp\0", b"WRP\0")), (10, (b"Stretch\0", b"STR\0")),
-                          (11, (b"Repitch\0", b"RPT\0")), (12, (b"Grid\0", b"GRD\0"))):
+                          (11, (b"Repitch\0", b"RPT\0")), (12, (b"Grid\0", b"GRD\0")),
+                              (13, (b"Slice\0", b"SLC\0"))):
         long_ptr, short_ptr = _clong(table + 12 * row), _clong(table + 12 * row + 4)
         assert _chunked(long_ptr, len(lo)) == lo and _chunked(short_ptr, len(sh)) == sh
     for bound in (0x400DC332, 0x400DC358, 0x400DC37E):
-        assert at(main, bound, 2) == bytes.fromhex("720c")
+        assert at(main, bound, 2) == bytes.fromhex("720d")       # v0.19: rows to 13
 
 
 def test_attribute_rows_5_to_12_are_wavetones(applied, stock):
@@ -134,11 +135,11 @@ def test_attribute_rows_5_to_12_are_wavetones(applied, stock):
     assert _chunked(rows, 20) == at(stock, CF.ATTR_STOCK_VA, 20)
     for row in range(5, 13):
         assert _chunked(rows + 4 * row, 4) == at(stock, CF.ATTR_STOCK_VA + 4, 4)
-    assert at(main, 0x400DC19C, 2) == bytes.fromhex("740c")
+    assert at(main, 0x400DC19C, 2) == bytes.fromhex("740d")   # v0.19: to 13
 
 
 def test_the_stored_sound_load_keeps_types_5_to_12(applied):
-    assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("740e")
+    assert at(applied.payloads[3], CF.LOAD_BOUND, 2) == bytes.fromhex("740f")   # v0.19: 13 SLICE kept
 
 
 def test_the_group_function_gives_the_sample_machines_their_own_section(applied):
@@ -146,9 +147,9 @@ def test_the_group_function_gives_the_sample_machines_their_own_section(applied)
     # machines 8 to 12 4 (v0.13), else 0
     main = applied.payloads[3]
     code = at(main, CF.GROUP_FN, len(CF.GROUP_STOCK))
-    got = {t: _run_group(code, t) for t in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 100)}
+    got = {t: _run_group(code, t) for t in (-1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 14, 100)}
     assert got == {-1: 0, 0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 3, 6: 3, 7: 3, 8: 4, 9: 4, 12: 4,
-                   13: 0, 100: 0}
+                   13: 4, 14: 0, 100: 0}                    # v0.19: 13 SLICE
 
 
 def _run_group(code: bytes, t: int) -> int:

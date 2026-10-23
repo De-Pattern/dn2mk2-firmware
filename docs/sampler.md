@@ -338,6 +338,30 @@ repository: they are derived from Elektron's firmware).
   DT2's runs on its ColdFire, to the same arithmetic); the DT2's zero-crossing mute (a
   second declick it chooses by flags not yet read) is not here.
 
+## v0.19: SLICE
+
+The DT2's sixth machine (OS 1.15 on, its manual A.2.5), machine type 13, listed before GRID
+as on the DT2. Its page: TUNE, PLAY, SAMP; SLCE (NOTE, 1..63), LEN (1..64 slices), LEV.
+
+- **The slices are the sample's own**, made on the computer: `tools/dn2samples.py send`
+  takes each WAV's **cue points** as its slices (most editors write them; `--slices
+  cue`, the default), or `--slices grid:N` (N equal slices), `--slices onsets` (where the
+  sound's energy jumps), `--slices none`. Up to 64; each slice runs from its start to the
+  next start (the last to the end) and loops at its start. They travel with the sample:
+  in the pool its entry's format word counts them (bits 8..15) and the table (start, end,
+  loop in frames) follows its frames; the +Drive keeps them with it.
+- **The DSP** (`dnfw.sampler.program.slice_bounds`, the DT2's type 5 handler): SLCE k plays
+  slice k (past the last, the last); LEN plays on through the next slices; **NOTE** picks
+  the slice by the note from C1 up, wrapping after the last, at the sample's own pitch
+  (the DT2: "Slices play from C1 and upwards, wrapping around"). A sample with no slices
+  plays nothing on SLICE. The DT2's reader, fades and retrigger as the other machines.
+- **The page** marks the slices on SYN page 2's waveform (their starts, read as the
+  sample loads) and the ones that play.
+- Not here: the DT2's on-device SLICE menu and slice editor (CREATE SLICE GRID, transient
+  detection, EDIT SLICE POINTS, linear and random locks) -- the slices come from the
+  computer instead; and the DT2 keeps slices with the sound (preset), here with the
+  sample.
+
 ## Checked
 
 - `scripts/sharc_waverider_m5.py` step **3b** (in the ship gate): every sample track's

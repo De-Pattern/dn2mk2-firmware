@@ -120,7 +120,7 @@ def test_no_wave_display_chunk_since_perc():
 
 def test_each_sample_machine_has_its_descriptor_and_names():
     from dnfw.sampler import machines as SM
-    assert len(pages.SMP_PAGES) == len(SM.NAMES) == 5
+    assert len(pages.SMP_PAGES) == len(SM.NAMES) == 6               # v0.19: SLICE
     for k, ids in enumerate(pages.SMP_PAGES):
         at = CHUNK.find(struct.pack(">8I", *ids))
         assert at >= 8, SM.NAMES[k]
@@ -132,7 +132,7 @@ def test_each_sample_machine_has_its_descriptor_and_names():
             if rid:
                 assert named[rid] == (long_, short)
     hdr = pages.c_header()
-    assert "#define WR_KINDS 8" in hdr and "#define SMP_KIND0 4" in hdr
+    assert "#define WR_KINDS 9" in hdr and "#define SMP_KIND0 4" in hdr
     assert '"KICK", "SNARE", "HAT", "BEAT"' in hdr
 
 

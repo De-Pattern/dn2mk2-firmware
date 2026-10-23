@@ -28,7 +28,8 @@ V = dict(on=0, mach=1, pos=2, frac=3, lo=4, hi=5, loop=6, mode=7, base=8, frames
          fade=22, fg=23, dg=24, jj=25,
          fixed=26,                       # GRID's NOTE mode: the note picks the slice, not the pitch
          walive=27,                      # WERP: its run of segments goes on (V['on'] is its segment)
-         fin=28, fig=29)                 # the note's first block fades in (the DT2's 0x17c), its gain
+         fin=28, fig=29,                 # the note's first block fades in (the DT2's 0x17c), its gain
+         nsl=30)                         # v0.19: the sample's slices (its entry's format word, bits 8..15)
 STATE_WORDS = 16
 STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
@@ -301,6 +302,11 @@ def start(p: Prog, L: Layout) -> None:
             p.ldi(7, 2, 1)
             vs(p, "rate", 7)
             p.ldi(8, 3, 1)                   # the format: 0 float32, 1 int16 (v0.14)
+            p.lsh(9, 8, -8)                  # v0.19: bits 8..15 the slices it has
+            p.iconst(12, 0xFF)
+            p.iop(9, 9, "AND", 12)
+            vs(p, "nsl", 9)
+            p.iop(8, 8, "AND", 12)
             vs(p, "fmt", 8)
             region(p, L)
         def inrange():
@@ -341,6 +347,113 @@ def oneshot_bounds(p: Prog, L: Layout) -> None:
     v(p, 0, "mach")                       # v0.18: STRETCH has no LOOP: it loops at STRT (the DT2's)
     p.iconst(12, SM.TYPE_OF["STRETCH"])
     p.if_(0, "EQ", 12, lambda: (v(p, 4, "lo"), vs(p, "loop", 4)), kind="i")
+
+
+SLICE_WORDS = 3                                # a slice: start, end, loop (frames), after the frames
+
+
+def slice_bounds(p: Prog, L: Layout) -> None:
+    """v0.19, SLICE (the DT2's, its type 5 handler): lo, hi, loop from the sample's own slice
+    table (V['nsl'] slices of start, end, loop in frames, after its frames, on a word:
+    dn2samples.py writes it). SLCE (0..127 -> 0..63): 0 NOTE, the note picks the slice
+    from C1 up, wrapping after the last, and the sample keeps its pitch; else slice SLCE,
+    past the last held at it. LEN (0..127 -> 1..64) slices play on from it. No slices: the
+    region is empty (nothing plays). Clobbers R0-R15, I1."""
+    C = L.C
+    p.iconst(4, 0)
+    vs(p, "lo", 4)
+    vs(p, "hi", 4)
+    v(p, 6, "nsl")
+
+    def some():
+        ctl(p, 4, SM.SLICE_REC, 10)           # 0..127 -> 0..63
+        p.lsh(4, 4, -1)
+        v(p, 6, "nsl")
+
+        def by_note():                         # (note - 12) mod nsl
+            p.iconst(0, 1)
+            vs(p, "fixed", 0)
+            p.ld(5, C["note"])
+            p.trunc(4, 5)
+            p.iconst(12, -12)
+            p.iop(4, 12, "+", 4)
+            tofloat(p, 2, 4)
+            tofloat(p, 3, 6)
+            PM._recip_inline(p, 5, 3, 13)
+            p.fop(2, 2, "*", 5)
+            p.trunc(7, 2)                      # toward 0; then one step either way
+            tofloat(p, 2, 7)
+            p.fop(2, 2, "*", 3)
+            p.trunc(7, 2)                      # q nsl
+            p.ipass(12, 4)
+            p.iop(4, 12, "-", 7)
+            v(p, 6, "nsl")
+            p.iconst(12, 0)
+            p.if_(4, "LT", 12, lambda: (p.ipass(12, 4), p.iop(4, 12, "+", 6)), kind="i")
+            p.if_(4, "GE", 6, lambda: (p.ipass(12, 4), p.iop(4, 12, "-", 6)), kind="i")
+            p.if_(4, "LT", 12, lambda: (p.ipass(12, 4), p.iop(4, 12, "+", 6)), kind="i")
+
+        def by_knob():                         # min(s, nsl) - 1
+            p.iop(4, 4, "MIN", 6)
+            p.iconst(12, -1)
+            p.iop(4, 12, "+", 4)
+        p.ifz(4, "EQ", by_note, by_knob)
+        p.st(C["a"], 4)                        # k
+        p.ld(9, C["t"])
+        PP.t146(p, 10, 9)
+        ctl(p, 5, SM.SLEN_REC, 10)             # 0..127 -> 1..64 slices
+        p.lsh(5, 5, -1)
+        p.ld(4, C["a"])
+        p.ipass(12, 4)
+        p.iop(5, 12, "+", 5)                   # k + len - 1
+        v(p, 6, "nsl")
+        p.iconst(12, -1)
+        p.iop(12, 12, "+", 6)
+        p.iop(5, 5, "MIN", 12)
+        p.st(C["b"], 5)                        # the last slice
+        # the table: after the frames (2 or 4 bytes each), on a word
+        v(p, 6, "frames")
+        v(p, 8, "fmt")
+        p.lsh(7, 6, 2)
+        p.ifz(8, "NE", lambda: p.lsh(7, 6, 1))
+        p.iconst(12, 3)
+        p.iop(7, 12, "+", 7)
+        p.iconst(12, -4)
+        p.iop(7, 7, "AND", 12)
+        v(p, 9, "base")
+        p.iop(7, 9, "+", 7)
+        p.st(C["c"], 7)                        # the table's address
+        # slice k's start and loop, the last's end: k 12 bytes in = (k << 3) + (k << 2)
+        def entry(word, kname):
+            p.ld(4, C[kname])
+            p.lsh(5, 4, 3)
+            p.lsh(4, 4, 2)
+            p.ipass(12, 5)
+            p.iop(4, 12, "+", 4)
+            p.ld(5, C["c"])
+            p.ipass(12, 5)
+            p.iop(4, 12, "+", 4)
+            p.seti(1, 4)
+            p.ldi(0, word, 1)
+        entry(0, "a")
+        p.iconst(12, 0)
+        p.iop(0, 0, "MAX", 12)
+        v(p, 6, "frames")
+        p.iop(0, 0, "MIN", 6)
+        vs(p, "lo", 0)
+        entry(1, "b")
+        v(p, 6, "frames")
+        p.iop(0, 0, "MIN", 6)
+        vs(p, "hi", 0)
+        entry(2, "a")
+        v(p, 4, "lo")
+        v(p, 5, "hi")
+        p.iop(0, 0, "MAX", 4)
+        p.iconst(12, -1)
+        p.iop(12, 12, "+", 5)
+        p.iop(0, 0, "MIN", 12)
+        vs(p, "loop", 0)
+    p.ifz(6, "GT", some)
 
 
 def live(p: Prog, L: Layout) -> None:
@@ -399,7 +512,12 @@ def live(p: Prog, L: Layout) -> None:
     def not_grid():
         p.iconst(12, SM.TYPE_OF["WERP"])
         p.e("COMP(R0, R12);")
-        p._branch(lambda: p.r[0] != p.r[12], "NE", follow, None)
+
+        def not_werp():                      # v0.19: SLICE takes its slices at the note too
+            p.iconst(12, SM.TYPE_OF["SLICE"])
+            p.e("COMP(R0, R12);")
+            p._branch(lambda: p.r[0] != p.r[12], "NE", follow, None)
+        p._branch(lambda: p.r[0] != p.r[12], "NE", not_werp, None)
     p._branch(lambda: p.r[0] != p.r[12], "NE", not_grid, None)
 
 
@@ -477,6 +595,9 @@ def region(p: Prog, L: Layout) -> None:
     def oneshot():
         oneshot_bounds(p, L)
 
+    def slice_():                             # v0.19: the sample's own slices
+        slice_bounds(p, L)
+
     def whole():                              # WERP: the whole sample, segment by segment
         p.iconst(4, 0)
         vs(p, "lo", 4)
@@ -488,7 +609,12 @@ def region(p: Prog, L: Layout) -> None:
         p.ld(0, C["type"])
         p.iconst(12, SM.TYPE_OF["WERP"])
         p.e("COMP(R0, R12);")
-        p._branch(lambda: p.r[0] == p.r[12], "EQ", whole, oneshot)
+        def not_werp():
+            p.ld(0, C["type"])
+            p.iconst(12, SM.TYPE_OF["SLICE"])
+            p.e("COMP(R0, R12);")
+            p._branch(lambda: p.r[0] == p.r[12], "EQ", slice_, oneshot)
+        p._branch(lambda: p.r[0] == p.r[12], "EQ", whole, not_werp)
     p._branch(lambda: p.r[0] == p.r[12], "EQ", grid, not_grid)
     # an empty region plays nothing
     v(p, 4, "lo")

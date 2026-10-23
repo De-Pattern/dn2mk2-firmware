@@ -121,8 +121,11 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
     runner.state = dataclasses.replace(runner.state, concrete=image.memory)
     # v0.17: the build ships an empty pool; the test sounds go in as the ColdFire's loader
     # would put samples there
+    # (v0.19: BEAT with sixteen slices of its own, for SLICE)
+    beat = len(SL.test_samples()[3])
     pool = SL.pool_bytes(SL.test_samples(), dsp.SMP_POOL_DDR, SL.test_rates(), SL.test_fmts(),
-                         SL.TEST_NAMES)
+                         SL.TEST_NAMES, [(), (), (), [(beat * k // 16, beat * (k + 1) // 16, beat * k // 16)
+                                                      for k in range(16)]])
     for k in range(0, len(pool), 4):
         m2.poke(runner.state, dsp.SMP_POOL_DDR + k, struct.unpack_from("<I", pool, k)[0])
     if warm:
@@ -974,6 +977,11 @@ def step_smp(init, sound, machines, blocks) -> dict:
     runs["silent"] = rb(init, frames(ONE, smp_words(), trig=()), blocks)
     runs["retrig"] = rb(init, frames(ONE, smp_words(), trig=(1, RETRIG)), blocks)
     runs["tops"] = rb(init, frames(GRID, smp_words({r: 127 for r in SM.RECORDS})), blocks)
+    # v0.19, SLICE on BEAT's own sixteen slices: slice 3 and the next; NOTE, C1 + 5 (the sixth)
+    SLC = SM.TYPE_OF["SLICE"]
+    runs["slice"] = rb(init, frames(SLC, smp_words({SM.SAMP_REC: 4, SM.SLICE_REC: 6, SM.SLEN_REC: 2})), blocks)
+    runs["slice_note"] = rb(init, frames(SLC, smp_words({SM.SAMP_REC: 4, SM.SLICE_REC: 0}),
+                                         note=(12 + 5) << 8), blocks)
     runs["bottoms"] = rb(init, frames(ONE, smp_words({r: 0 for r in SM.RECORDS} | {SM.SAMP_REC: 1,
                                                                                        SM.LEV_REC: 100})), blocks)
     print(f"    sample machines: {round(time.perf_counter() - t0)} s", flush=True)
@@ -1037,6 +1045,8 @@ def step_smp(init, sound, machines, blocks) -> dict:
             runs["cfad"]["ok"] and runs["nocfad"]["ok"]
             and V.peak(smp_series(runs["cfad"], 0)) > 0.01
             and smp_series(runs["cfad"], 0) == smp_series(runs["nocfad"], 0),
+        "v0.19: SLICE plays BEAT's own slices, by SLCE and by the note (peak > 0.05; bit-exact above)":
+            all(runs[k]["ok"] and V.peak(smp_series(runs[k], 0)) > 0.05 for k in ("slice", "slice_note")),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]

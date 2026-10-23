@@ -76,7 +76,7 @@ static int wr_active(void)
     if (t > 15 || !kit)
         return 0;
     signed char m = (signed char)kit[52u + 1163u * t + 0xDEu];
-    return m >= 5 && m <= 12 ? m - 4 : 0;
+    return m >= 5 && m <= 13 ? m - 4 : 0;      /* v0.19: 13 SLICE */
 }
 
 /* TYPE's value (0..0x7f00) -> the machine, as the DSP reads it (dnfw.perc.program) */

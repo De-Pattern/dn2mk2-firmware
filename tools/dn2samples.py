@@ -121,6 +121,58 @@ def read_float_wav(path):
     return vals, rate
 
 
+def read_cues(path):
+    """the sample offsets of a WAV's cue points ('cue ' chunk), sorted; [] if none"""
+    data = pathlib.Path(path).read_bytes()
+    if data[:4] != b"RIFF" or data[8:12] != b"WAVE":
+        return []
+    at, out = 12, []
+    while at + 8 <= len(data):
+        cid, size = data[at:at + 4], struct.unpack_from("<I", data, at + 4)[0]
+        if cid == b"cue ":
+            n = struct.unpack_from("<I", data, at + 8)[0]
+            for k in range(n):
+                out.append(struct.unpack_from("<I", data, at + 12 + 24 * k + 20)[0])  # dwSampleOffset
+        at += 8 + size + (size & 1)
+    return sorted(set(out))
+
+
+def onsets(s, rate, most=64):
+    """where the sound's energy jumps (a simple onset finder): frame offsets, the first 0"""
+    hop = max(64, int(rate * 0.005))
+    env = [sum(x * x for x in s[i:i + hop]) / hop for i in range(0, len(s), hop)]
+    gap = max(1, int(0.05 * rate / hop))
+    floor = max(env) * 1e-4 if env else 0.0
+    out, last = [0], -gap
+    for k in range(1, len(env)):
+        prev = sum(env[max(0, k - 4):k]) / min(4, k)
+        if env[k] > floor and env[k] > 4.0 * (prev + 1e-12) and k - last >= gap:
+            if k * hop - out[-1] >= 0.05 * rate:
+                out.append(k * hop)
+                last = k
+    return out[:most]
+
+
+def slices_from(starts, frames):
+    """(start, end, loop) from the slice starts: each to the next start, the last to the end"""
+    starts = sorted(set(x for x in starts if 0 <= x < frames))[:64]
+    return [(a, b, a) for a, b in zip(starts, starts[1:] + [frames])]
+
+
+def slicing(mode, path, s, rate):
+    """v0.19, SLICE: a WAV's slices -- MODE cue (its cue points, if it has any; the default),
+    grid:N (N equal slices), onsets (where the sound's energy jumps), none"""
+    if mode == "none":
+        return []
+    if mode.startswith("grid:"):
+        n = max(1, min(64, int(mode[5:])))
+        return slices_from([len(s) * k // n for k in range(n)], len(s))
+    if mode == "onsets":
+        return slices_from(onsets(s, rate), len(s))
+    cues = read_cues(path)
+    return slices_from(cues, len(s)) if cues else []
+
+
 def wav_list(items):
     out = []
     for it in items:
@@ -132,13 +184,13 @@ def wav_list(items):
     return out
 
 
-def build_pool(paths):
+def build_pool(paths, slice_mode="cue"):
     from dnfw.sampler import live as SL, machines as SM
     from dnfw.waverider import dsp
     if len(paths) > SM.USER_SLOTS:
         raise SystemExit(f"{len(paths)} files: the pool has {SM.USER_SLOTS} slots for yours "
                          "(124..127 are the recorder's)")
-    samples, rates, names = [], [], []
+    samples, rates, names, cuts = [], [], [], []
     for p in paths:
         s, r = read_wav_any(p)
         if not s:
@@ -147,9 +199,10 @@ def build_pool(paths):
         if peak > 1.0:
             s = [x / peak for x in s]
         samples.append(s)
+        cuts.append(slicing(slice_mode, p, s, r))
         rates.append(r / DSP_RATE)
         names.append(pathlib.Path(p).stem.upper()[:SM.NAME_BYTES - 1])
-    pool = SL.pool_bytes(samples, dsp.SMP_POOL_DDR, rates, [SM.FMT_I16] * len(samples), names)
+    pool = SL.pool_bytes(samples, dsp.SMP_POOL_DDR, rates, [SM.FMT_I16] * len(samples), names, cuts)
     if len(pool) > SM.REC_OFFSET:
         raise SystemExit(f"{len(pool):,} bytes: more than the {SM.REC_OFFSET:,} the pool holds for yours")
     return pool, names, [len(s) / r / DSP_RATE * DSP_RATE for s, r in zip(samples, rates)]
@@ -287,9 +340,12 @@ def main(argv=None):
     ap.add_argument("--port", default="Digitone II")
     ap.add_argument("--chunk", type=int, default=512)
     ap.add_argument("-o", "--out")
+    ap.add_argument("--slices", default="cue",
+                    help="send/build: each WAV's slices for the SLICE machine: cue (its cue points, "
+                         "if any; the default), grid:N, onsets, none")
     a = ap.parse_args(argv)
     if a.command == "build":
-        pool, names, _ = build_pool(wav_list(a.files))
+        pool, names, _ = build_pool(wav_list(a.files), a.slices)
         pathlib.Path(a.out or "pool.bin").write_bytes(pool)
         print(f"{len(names)} sample(s), {len(pool):,} bytes -> {a.out or 'pool.bin'}")
         return 0
@@ -319,10 +375,10 @@ def main(argv=None):
             link.call(CLEAR)
             print("cleared: the instrument stops sending; the DSP keeps what it has")
         elif proto >= 3:
-            pool, names, _ = build_pool(wav_list(a.files))
+            pool, names, _ = build_pool(wav_list(a.files), a.slices)
             cmd_send3(link, pool, names, a.chunk)
         else:
-            pool, names, _ = build_pool(wav_list(a.files))
+            pool, names, _ = build_pool(wav_list(a.files), a.slices)
             if len(pool) > 5 << 20:
                 raise SystemExit("this build holds 5 MB: flash v0.16 or later for more")
             cmd_send(link, pool, names, a.chunk)

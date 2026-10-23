@@ -22,7 +22,7 @@ def layout() -> P.Layout:
                     exp2=PL.layout().T["exp2"], tables=dsp.SMP_TABLES_DDR, dec=dsp.SMP_DEC_DM)
 
 
-def pool_bytes(samples, base: int, rates=None, fmts=None, names=None) -> bytes:
+def pool_bytes(samples, base: int, rates=None, fmts=None, names=None, slices=None) -> bytes:
     """the directory and the frames of SAMPLES (lists of floats), as the DSP's DDR holds
     them from BASE: magic, count, POOL_SLOTS entries (address, frames, rate, format),
     the names (dnfw.sampler.machines.NAME_BYTES each, for the ColdFire's pages; the DSP
@@ -31,14 +31,22 @@ def pool_bytes(samples, base: int, rates=None, fmts=None, names=None) -> bytes:
     rates = rates or [1.0] * len(samples)
     fmts = fmts or [0] * len(samples)
     names = names or [""] * len(samples)
+    slices = slices or [()] * len(samples)
     head = SM.DATA_OFFSET
     entries, data = [], bytearray()
-    for s, r, f in zip(samples, rates, fmts):
-        entries.append(struct.pack("<IIfI", base + head + len(data), len(s), r, f))
+    for s, r, f, sl in zip(samples, rates, fmts, slices):
+        # v0.19: the format word's bits 8..15 count the sample's slices (SLICE), whose
+        # table -- start, end, loop in frames -- follows its frames on a word
+        assert len(sl) <= SM.MAX_SLICES
+        entries.append(struct.pack("<IIfI", base + head + len(data), len(s), r, f | len(sl) << 8))
         if f == 1:
             data += struct.pack(f"<{len(s)}h", *(max(-32768, min(32767, round(x * 32768))) for x in s))
         else:
             data += struct.pack(f"<{len(s)}f", *s)
+        if sl:
+            data += bytes((-len(data)) % 4)
+            for a, b, lp in sl:
+                data += struct.pack("<III", a, b, lp)
         data += bytes((-len(data)) % 0x40)
     d = struct.pack("<II", SM.POOL_MAGIC, len(samples)) + b"".join(entries)
     d += bytes(SM.NAMES_OFFSET - len(d))
@@ -104,12 +112,12 @@ def test_rates() -> list[float]:
 
 
 class Harness:
-    def __init__(self, t: int = 0, samples=None, rates=None, fmts=None):
+    def __init__(self, t: int = 0, samples=None, rates=None, fmts=None, slices=None):
         self.t, self.L = t, layout()
         self.samples = samples if samples is not None else test_samples()
         data = pool_bytes(self.samples, self.L.pool,
                           rates if rates is not None else test_rates(),
-                          fmts if fmts is not None else test_fmts(), TEST_NAMES)
+                          fmts if fmts is not None else test_fmts(), TEST_NAMES, slices)
         self.words = {self.L.pool + 4 * k: struct.unpack_from("<I", data, 4 * k)[0]
                       for k in range(len(data) // 4)}
         from ..perc import live as PL

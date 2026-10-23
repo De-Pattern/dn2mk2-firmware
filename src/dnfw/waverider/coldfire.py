@@ -47,13 +47,13 @@ from dataclasses import dataclass
 
 BASE = 0x40000400
 NEW_TYPE = 5
-NEW_TYPES = (5, 6, 7, 8, 9, 10, 11, 12)  # PERC; RESONATOR (docs/rings.md); CZ (docs/cz.md); the
+NEW_TYPES = (5, 6, 7, 8, 9, 10, 11, 12, 13)  # PERC; RESONATOR (docs/rings.md); CZ (docs/cz.md); the
                                         # Digitakt II's sample machines (docs/sampler.md): WaveTone clones
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's place
 MACHINE_NAMES = {5: ("Perc", "PRC"), 6: ("Resonator", "RSN"), 7: ("CZ Phase", "CZP"),
                  8: ("Oneshot", "ONE"), 9: ("Werp", "WRP"), 10: ("Stretch", "STR"),
-                 11: ("Repitch", "RPT"), 12: ("Grid", "GRD")}
+                 11: ("Repitch", "RPT"), 12: ("Grid", "GRD"), 13: ("Slice", "SLC")}
 # RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list
 # outgrew the three caves W5 used, so all of it is a platform CODE chunk in RAM, after
 # PING's (dnfw.ping.coldfire.LOAD) and below the platform runtime; the caves are
@@ -66,7 +66,7 @@ LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
 # PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
 # order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
-LIST_NEW = (0, 2, 1, 3, 5, 6, 7, 8, 9, 10, 11, 12, 4)
+LIST_NEW = (0, 2, 1, 3, 5, 6, 7, 8, 9, 10, 11, 13, 12, 4)   # v0.19: SLICE before GRID, the DT2's order
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -153,7 +153,7 @@ def _long(v: int) -> bytes:
 SAMPLE_GROUP = 3                        # our synth machines: PERC (5), RESONATOR (6), CZ (7)
 SAMPLE_TYPES_LAST = 7
 SAMPLER_GROUP = 4                       # the sample machines (8..12), a section of their own
-SAMPLER_FIRST, SAMPLER_LAST = 8, 12
+SAMPLER_FIRST, SAMPLER_LAST = 8, 13
 TYPES_LAST = NEW_TYPES[-1]              # every type 5..TYPES_LAST is a WaveTone clone
 
 # MACHINE SEL (and the second list at 0x40059cdc) inserts a divider row -- an

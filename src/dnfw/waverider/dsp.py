@@ -172,7 +172,7 @@ LOOKUP_SITE_STOCK = bytes.fromhex("0f150025d748")   # parcels, MSW first
 LOOKUP16_DM = 0x2DEE04                       # 16 words; 0x2dee00 is the [-1] guard (0)
 MACHINE_TYPES = 16
 SMP_ENGINE_SLOT = 5                          # the engine slot the sample machines borrow
-SMP_TYPES = range(8, 13)                     # ONESHOT WERP STRETCH REPITCH GRID
+SMP_TYPES = range(8, 14)                     # ONESHOT WERP STRETCH REPITCH GRID SLICE (v0.19)
 ENGINES = {5: "PERC", 6: "RESONATOR", 7: "CZ", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
 
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)

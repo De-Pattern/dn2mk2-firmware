@@ -95,6 +95,10 @@ _Static_assert(CMD_OFFSET % 4u == 0 && CMD_OFFSET >= 8u + 16u * POOL_SLOTS + NAM
 /* our RAM (the mirror's 5 MB, laid out anew in v0.16) */
 #define DIR ((u8 *)SMP_MIRROR)                                      /* the image's directory page */
 #define OVERVIEW ((u8 *)(SMP_MIRROR + 0x1000u))                     /* 128 x 100 column peaks */
+#define SLICE_MAX 64                                                /* v0.19, SLICE: a slot's slices */
+#define SLICECOL ((u8 *)(SMP_MIRROR + 0x5000u))                     /* 128 x 64 slice starts, columns */
+_Static_assert(0x1000u + POOL_SLOTS * OVERVIEW_W <= 0x5000u && 0x5000u + POOL_SLOTS * SLICE_MAX <= 0x10000u,
+               "the overview and the slice columns fit below the stages");
 #define STAGE(k) ((u8 *)(SMP_MIRROR + 0x10000u + (u32)(k) * CHUNK))   /* 0: loading, 1: saving, 2: upload */
 
 static u8 rq[RQ_MAX] __attribute__((section(".data")));
@@ -387,6 +391,46 @@ const u8 *smp_overview(int k)
     return 0;
 }
 
+/* v0.19, SLICE: a slot's slices (its entry's byte 13) and where its table lies in the pool
+ * (after its frames, on a word: dnfw.sampler.live.pool_bytes) */
+static u32 slice_table(const u8 *e, u32 *n)
+{
+    u32 addr = le32(e), fr = le32(e + 4), fmt = e[12];
+    *n = e[13] > SLICE_MAX ? SLICE_MAX : e[13];
+    return ((addr - SMP_POOL_DDR) + fr * (fmt ? 2u : 4u) + 3u) & ~3u;
+}
+
+/* the slices' starts as overview columns, for the page; 0xFF where none */
+const u8 *smp_slices(int k, int *n)
+{
+    if (k < 0 || k >= POOL_SLOTS || !dir_ok)
+        return 0;
+    u32 ns;
+    slice_table(DIR + 8 + 16 * k, &ns);
+    *n = (int)ns;
+    return ns ? SLICECOL + SLICE_MAX * k : 0;
+}
+
+static void slices_add(u32 off, u32 bytes, const u8 *buf)
+{
+    if (!dir_ok)
+        return;
+    for (int k = 0; k < POOL_SLOTS; k++) {
+        const u8 *e = DIR + 8 + 16 * k;
+        u32 ns, fr = le32(e + 4);
+        if (le32(e) < SMP_POOL_DDR || fr < 2)
+            continue;
+        u32 t = slice_table(e, &ns);
+        for (u32 j = 0; j < ns; j++) {
+            u32 at = t + 12u * j;                           /* slice j's start */
+            if (at < off || at + 4u > off + bytes)
+                continue;
+            u32 s = le32(buf + (at - off));
+            SLICECOL[SLICE_MAX * k + j] = (u8)(s >= fr ? OVERVIEW_W - 1 : s / (fr / (OVERVIEW_W - 1) + 1u));
+        }
+    }
+}
+
 /* the overview of the slots whose frames lie in [OFF, OFF + BYTES) of the pool, from BUF */
 static void overview_add(u32 off, u32 bytes, const u8 *buf)
 {
@@ -460,6 +504,9 @@ static int next_range(void)
         if (addr < SMP_POOL_DDR + DATA_OFFSET || fr == 0)
             continue;
         u32 lo = addr - SMP_POOL_DDR, bytes = fr * (fmt ? 2u : 4u);
+        u32 ns, tbl = slice_table(e, &ns);                  /* v0.19: and its slices, if any */
+        if (ns)
+            bytes = tbl - lo + 12u * ns;
         if (lo >= POOL_BYTES || bytes > POOL_BYTES - lo)
             continue;
         l_kind = K_FRAMES;
@@ -518,6 +565,8 @@ void smp_load(void)                             /* load (again) whatever the ima
     }
     for (u32 k = 0; k < POOL_SLOTS * OVERVIEW_W; k++)
         OVERVIEW[k] = 0;
+    for (u32 k = 0; k < POOL_SLOTS * SLICE_MAX; k++)
+        SLICECOL[k] = 0;
     smp_walk = 0;
     l_slot = 0;
     l_kind = K_BLANK;
@@ -538,6 +587,7 @@ static void load_poll(void)
                 return;
             }
             overview_add(l_off, n, STAGE(0));
+            slices_add(l_off, n, STAGE(0));
         } else {                                            /* the directory page's: from DIR */
             for (u32 k = 0; k < n; k++)
                 STAGE(0)[k] = DIR[l_off + k];

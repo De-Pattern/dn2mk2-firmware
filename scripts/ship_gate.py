@@ -225,12 +225,12 @@ def main() -> int:
              "booted and drew its UI, no fault" if rc == 0 else out[-800:])
 
         # 6. engine + LOAD/SAVE
-        # PERC (5), RESONATOR (6), CZ (7) and the sample machines (8..12, v0.13) are kept by
-        # LOAD; 13 still loads as FM Tone
+        # PERC (5), RESONATOR (6), CZ (7) and the sample machines (8..13, v0.13; 13 SLICE,
+        # v0.19) are kept by LOAD; 14 still loads as FM Tone
         types = ["--machine-type", "3"] + (["--machine-type", "5", "--machine-type", "6",
                                             "--machine-type", "7", "--machine-type", "8",
                                             "--machine-type", "12", "--machine-type", "13",
-                                            "--machine-max", "12"]
+                                            "--machine-type", "14", "--machine-max", "13"]
                                            if dsp_changed else [])
         # PING (6), SHFT (7) and GRAN (8) are kept by LOAD; 9 still loads as Multi-Mode
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",

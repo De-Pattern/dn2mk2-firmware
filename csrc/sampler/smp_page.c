@@ -36,6 +36,7 @@ typedef unsigned char u8;
 extern int smp_count(void);
 extern const char *smp_name(int k);
 extern const u8 *smp_overview(int k);    /* 100 column peaks, 0..255 (link.c, v0.16) */
+extern const u8 *smp_slices(int k, int *n);   /* v0.19: SLICE's starts as columns (link.c) */
 
 static void on(void *c, int x, int y) { SET_PIXEL(c, x, y, 1); }
 
@@ -99,7 +100,7 @@ static int widget_of(u32 id, int kind)
 {
     if (kind == SMP_GRID_KIND && id == SMP_GRID_ID)
         return W_BARS;                          /* GRID: the slice count, drawn as bars */
-    if (kind == SMP_GRID_KIND && id == SMP_SLEN_ID)
+    if ((kind == SMP_GRID_KIND || kind == SMP_SLICE_KIND) && id == SMP_SLEN_ID)
         return W_KNOB;
     for (int k = 0; k < SMP_WIDGETS; k++)
         if (smp_widget_ids[k] == id)
@@ -449,6 +450,18 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         int a = x0 + s * (w - 1) / n, b = x0 + (s + len > n ? n : s + len) * (w - 1) / n;
         marker(c, a, cy, 0);
         marker(c, b, cy, 0);
+    } else if (kind == SMP_SLICE_KIND) {        /* v0.19: the sample's own slices, the played ones marked */
+        int n = 0;
+        const u8 *col = slot >= 1 ? smp_slices(slot - 1, &n) : 0;
+        int s = value(view, SMP_SLICE_ID, 0) >> 1;    /* 0 NOTE (drawn at the first), 1..63 */
+        s = s <= 0 ? 0 : (s > n ? n : s) - 1;
+        int last = s + (value(view, SMP_SLEN_ID, 0) >> 1);
+        for (int j = 0; col && j < n; j++)
+            vline(c, x0 + col[j] * (w - 1) / (100 - 1), cy - SMP_WAVE_AMP - 1, cy - SMP_WAVE_AMP + 1, 0);
+        if (col && n) {
+            marker(c, x0 + col[s] * (w - 1) / (100 - 1), cy, 0);
+            marker(c, last + 1 < n ? x0 + col[last + 1] * (w - 1) / (100 - 1) : x0 + w - 1, cy, 0);
+        }
     } else if (kind == SMP_WERP_KIND) {         /* the whole sample, its segments marked */
         int n = (32 >> steps_index(value(view, SMP_SEG_ID, 0), smp_seg_steps))
                 << steps_index(value(view, SMP_BARS_ID, 0), smp_bars_steps);   /* the segments: (32 >> SEG) << BARS */

@@ -515,3 +515,62 @@ def test_werp_segments_are_the_dt2s_note_values_and_change_at_blocks():
         changes = [b for b in range(1, len(segs)) if segs[b] != segs[b - 1]]
         assert len(changes) == n - 1, (seg, len(changes))
         assert abs(changes[1] - changes[0] - 750 / n) <= 1
+
+
+def test_slice_plays_the_samples_own_slices():
+    # v0.19: SLICE (the DT2's): a ramp with three slices of its own; SLCE picks one, LEN
+    # plays on into the next, SLCE NOTE picks by the note from C1 (wrapping) at the
+    # sample's pitch
+    n = 3000
+    ramp = [k / n for k in range(n)]
+    cuts = [(0, 1000, 0), (1000, 1800, 1000), (1800, 3000, 1800)]
+    SL_ = SM.TYPE_OF["SLICE"]
+
+    def play(slce, slen=0, note=60.0, slices=cuts):
+        h = SL.Harness(0, samples=[ramp], rates=[1.0], fmts=[0], slices=[slices])
+        h.defaults()
+        h.set(SM.SLICE_REC, slce)
+        h.set(SM.SLEN_REC, slen)
+        out = []
+        for b in range(120):
+            out += h.block(SL_, note, b == 1)
+        nz = [x for x in out if abs(x) > 1e-4]
+        return nz[64:-64]                      # (its first block fades in, its last two out)
+    g = struct.unpack("<f", P.tables_bytes()[-4:])[0]
+    for k, (a, b, _) in enumerate(cuts):
+        nz = play(2 * (k + 1))
+        assert abs(len(nz) + 128 - (b - a)) <= 140, (k, len(nz))  # the slice's frames
+        assert abs(min(nz) - a / n) < 0.05 and abs(max(nz) - b / n) < 0.05
+    nz = play(2, slen=2)                       # slices 1 and 2
+    assert abs(max(nz) - 1800 / n) < 0.05
+    nz = play(2 * 9)                           # past the last: the last
+    assert abs(min(nz) - 1800 / n) < 0.05
+    nz = play(0, note=12.0 + 4)                # NOTE: C1 + 4 -> slice 4 mod 3 = 1 (the second)
+    assert abs(min(nz) - 1000 / n) < 0.05 and abs(max(nz) - 1800 / n) < 0.05
+    assert play(2, slices=()) == []            # no slices: nothing
+
+
+def test_the_host_tool_writes_a_wavs_slices(tmp_path):
+    # v0.19: dn2samples.py takes a WAV's cue points as its SLICE slices (or a grid, or onsets)
+    import dn2samples as T
+    rate, n = 24000, 2400
+    frames = struct.pack(f"<{n}h", *(int(8000 * math.sin(k / 7)) for k in range(n)))
+    cues = (0, 700, 1500)
+    cue = struct.pack("<I", len(cues)) + b"".join(
+        struct.pack("<II4sIII", k, 0, b"data", 0, 0, c) for k, c in enumerate(cues))
+    fmt = struct.pack("<HHIIHH", 1, 1, rate, rate * 2, 2, 16)
+    body = (b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"cue " + struct.pack("<I", len(cue)) + cue
+            + b"data" + struct.pack("<I", len(frames)) + frames)
+    p = tmp_path / "loop.wav"
+    p.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+    assert T.read_cues(p) == list(cues)
+    pool, names, _ = T.build_pool([p])
+    addr, fr, _r, fmtw = struct.unpack_from("<IIfI", pool, 8)
+    assert fr == n and fmtw == SM.FMT_I16 | 3 << 8
+    tbl = addr - 0x84000000 + 2 * n
+    assert [struct.unpack_from("<III", pool, tbl + 12 * k) for k in range(3)] == \
+        [(0, 700, 0), (700, 1500, 700), (1500, 2400, 1500)]
+    pool, _, _ = T.build_pool([p], "grid:4")
+    assert struct.unpack_from("<I", pool, 8 + 12)[0] >> 8 == 4
+    pool, _, _ = T.build_pool([p], "none")
+    assert struct.unpack_from("<I", pool, 8 + 12)[0] == SM.FMT_I16

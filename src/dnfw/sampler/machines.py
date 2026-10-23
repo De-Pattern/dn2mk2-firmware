@@ -16,8 +16,8 @@ and default suit it (a DT2 default of "full" on a record whose default is its to
 from __future__ import annotations
 
 FIRST_TYPE = 8
-NAMES = ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID")      # types 8..12
-SHORT = ("ONE", "WRP", "STRE", "RPI", "GRD")
+NAMES = ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE")   # types 8..13 (v0.19: SLICE)
+SHORT = ("ONE", "WRP", "STRE", "RPI", "GRD", "SLC")
 TYPE_OF = {n: FIRST_TYPE + k for k, n in enumerate(NAMES)}
 ENGINED = NAMES                           # the machines this build renders (v0.15: all five)
 
@@ -49,6 +49,10 @@ PAGES = {        # v0.15: the DT2's own SRC layout -- A TUNE, B PLAY, C (empty),
     "GRID": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
              (256, "SAMP", "Sample Slot"), (257, "SLCE", "Slice Select"), (260, "LEN", "Slice Length"),
              (239, "GRID", "Slice Grid"), (241, "LEV", "Sample Level")),
+    # v0.19, the DT2's SLICE (OS 1.15+): the sample's own slices (dn2samples.py makes them)
+    "SLICE": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
+              (256, "SAMP", "Sample Slot"), (257, "SLCE", "Slice Select"), (260, "LEN", "Slice Length"),
+              (0, "-", "Unused"), (241, "LEV", "Sample Level")),
 }
 # how page.c draws each control (v0.15, after the DT2's widgets)
 WIDGETS = {238: "bipolar", 254: "play", 260: "knob", 256: "samp", 239: "knob", 258: "knob",
@@ -78,6 +82,7 @@ POOL_MAGIC = 0x31504D53                    # 'SMP1'
 POOL_SLOTS = 128
 ENTRY_WORDS = 4                            # data address, frames, rate (float), format
 FMT_F32, FMT_I16 = 0, 1
+MAX_SLICES = 64                            # v0.19, SLICE: the format word's bits 8..15, the DT2's 64
 NAMES_OFFSET = 8 + POOL_SLOTS * ENTRY_WORDS * 4      # 2056: the names, which only the ColdFire reads
 NAME_BYTES = 8                             # seven characters and a NUL
 DATA_OFFSET = 0x1000                       # the frames start here (the header is 3,080 bytes)
@@ -154,8 +159,8 @@ QUANT = (
     (ALL, RSRC_REC, _zones(len(SRC_NAMES), 128), (0,) + _zones(len(SRC_NAMES), 128)),
 )
 QUANT_STEP = (                                  # (machines, record, raw coarse a choice)
-    (("GRID",), SLICE_REC, 2),
-    (("GRID",), SLEN_REC, 2),
+    (("GRID", "SLICE"), SLICE_REC, 2),
+    (("GRID", "SLICE"), SLEN_REC, 2),
 )
 
 
