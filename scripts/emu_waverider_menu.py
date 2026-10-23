@@ -312,6 +312,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         recp = rec + bytes((-len(rec)) % 512)
         for k in range(len(recp) // 512):
             disk[STORE_SECTOR + 1 + rec_off // 512 + k] = recp[512 * k:512 * k + 512]
+        retries0 = long("smp_retries")       # (the machine runs the scenarios in turn: its count goes on)
         call("smp_load")
         status_out()
         periods = 0
@@ -355,7 +356,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         else:
             # nothing gets through: the loader tries each chunk seven times and stops, and
             # the frame stays stock's
-            out["ok"] = (periods < limit and out["lstate"] == 0 and out["retries"] == 7
+            out["ok"] = (periods < limit and out["lstate"] == 0 and out["retries"] - retries0 == 7
                          and not dsp["cmds"] and not route.get("changed"))
     elif scenario == "save":
         # a recording of 3,000 frames in slot 126 on the DSP; no image on the +Drive yet
