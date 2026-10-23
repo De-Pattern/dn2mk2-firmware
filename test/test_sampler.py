@@ -474,3 +474,24 @@ def test_stretch_crossfades_its_jumps_without_a_step():
     st = _play(SM.TYPE_OF["STRETCH"], {SM.SAMP_REC: 1, SM.BARS_REC: 26}, 200)
     d = max(abs(a - b) for a, b in zip(st[64:], st[65:]))
     assert d < 0.2
+
+
+def test_a_retrigger_fades_the_old_note_under_the_new_one():
+    # v0.18, as the DT2's second voice: the block of the new note is the new note plus the
+    # old one fading out; from the next block on, the new note alone
+    ONE = SM.TYPE_OF["ONESHOT"]
+
+    def run(trigs):
+        h = SL.Harness(0)
+        h.defaults()
+        h.set(SM.SAMP_REC, 4)                    # BEAT: long enough to be sounding at the retrigger
+        out = []
+        for b in range(10):
+            out.append(h.block(ONE, 60.0, b in trigs))
+        return out
+    both, alone, first = run((1, 5)), run((5,)), run((1,))
+    assert both[6:] == alone[6:]
+    old = [a - b for a, b in zip(both[5], alone[5])]
+    fade = [x * (1.0 - k / 31.0) for k, x in enumerate(first[5])]     # the old note, 1 -> 0
+    assert max(abs(x) for x in first[5]) > 1e-2
+    assert max(abs(a - b) for a, b in zip(old, fade)) < 1e-5

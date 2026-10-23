@@ -30,10 +30,10 @@ V = dict(on=0, mach=1, pos=2, frac=3, lo=4, hi=5, loop=6, mode=7, base=8, frames
          son=27)                         # WERP: its segment sounds (V['on'] is the voice)
 STATE_WORDS = 16
 STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
-SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "gain",
+SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
             "tune", "play", "samp", "a", "b", "c", "lev", "x", "y", "n", "tmp",
             *(f"mb{k}" for k in range(16)), "mbn",     # v0.14: the mailbox's sixteen halves
-            "sr", "dir", "sdir", "smode", "nseg", "nin", "nout", "acc", "gpos", "j",   # v0.15
+            "sr", "dir", "add", "smode", "nseg", "nin", "nout", "acc", "pass", "lp",   # v0.15; v0.18 kill, add, pass, lp
             "xfn", "xfa", "xfi", "xfs",                # CFAD: its length, where it starts, 1/length, the shift
             # the recorder: its state (0 idle, 1 armed, 2 recording, 3 full), slot entry,
             # frames so far, their limit, source, threshold, its frames' base, the track
@@ -156,11 +156,36 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
     p.ld(8, C["tune"])                       # v0.18: TUNE alone (GRID's NOTE mode)
     PM.exp2(p, L, 9, 8)
     p.st(C["tr0"], 9)
-    # a note: latch the machine, the slot and the region
+    # v0.18: a note while the voice sounds: the old note is rendered first, fading out over
+    # the block, and the new one is added to it (the DT2 gives a retrigger a second voice,
+    # and fades the first): two passes, the first only for that
+    p.iconst(0, 0)
+    p.st(C["kill"], 0)
+    p.st(C["add"], 0)
+    p.st(C["pass"], 0)
     p.ld(0, C["trig"])
-    p.ifz(0, "NE", lambda: start(p, L))
-    # the voice's rate and level this block
-    v(p, 0, "on")
+    p.ifz(0, "NE", lambda: (v(p, 0, "on"), p.ifz(0, "NE", lambda: (p.iconst(0, 1), p.st(C["kill"], 0)))))
+
+    def a_pass():
+        p.ld(0, C["pass"])
+        p.ld(1, C["kill"])
+        p.iop(0, 0, "OR", 1)
+        p.ifz(0, "NE", lambda: (v(p, 0, "on"), p.ifz(0, "NE", sounding, lambda: silence(p, L))))
+        p.ld(0, C["pass"])
+
+        def first():                          # a note: latch the machine, the slot and the region
+            p.ld(0, C["trig"])
+
+            def note():
+                start(p, L)
+                p.ld(0, C["kill"])
+                p.st(C["add"], 0)
+                p.iconst(0, 0)
+                p.st(C["kill"], 0)
+            p.ifz(0, "NE", note)
+        p.ifz(0, "EQ", first)
+        p.iconst(0, 1)
+        p.st(C["pass"], 0)
 
     def sounding():
         live(p, L)
@@ -174,39 +199,47 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
         v(p, 5, "rate")
         p.fop(4, 4, "*", 5)
         p.st(C["rate"], 4)
+        # the time machines (WERP 9, STRETCH 10, REPITCH 11) take the tempo
+        v(p, 0, "mach")
+        p.iconst(12, SM.TYPE_OF["WERP"])
+
+        def maybe_timed():
+            p.iconst(12, SM.TYPE_OF["REPITCH"])
+            p.if_(0, "LE", 12, lambda: tempo(p, L), kind="i")
+        p.if_(0, "GE", 12, maybe_timed, kind="i")
+        v(p, 0, "mach")
+        p.iconst(12, SM.TYPE_OF["REPITCH"])
+        # REPITCH: the region in BARS, no TUNE, no note (as the DT2's)
+        p.if_(0, "EQ", 12, lambda: (p.ld(4, C["sr"]), p.st(C["rate"], 4)), kind="i")
         v(p, 0, "mach")
         p.iconst(12, SM.TYPE_OF["WERP"])
         p.e("COMP(R0, R12);")
 
-        def timed():
-            p.iconst(12, SM.TYPE_OF["REPITCH"])
+        def not_werp():
+            p.iconst(12, SM.TYPE_OF["STRETCH"])
             p.e("COMP(R0, R12);")
+            p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: render_stretch(p, L), lambda: render(p, L))
+        p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: render_werp(p, L), not_werp)
+    p.loop(C["lp"], 2, a_pass)
 
-            def dispatch():
-                tempo(p, L)
-                v(p, 0, "mach")
-                p.iconst(12, SM.TYPE_OF["WERP"])
-                p.e("COMP(R0, R12);")
 
-                def not_werp():
-                    p.iconst(12, SM.TYPE_OF["STRETCH"])
-                    p.e("COMP(R0, R12);")
-
-                    def repitch():                # the region in BARS: no TUNE, no note (as the DT2's)
-                        p.ld(4, C["sr"])
-                        p.st(C["rate"], 4)
-                        render(p, L)
-                    p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: render_stretch(p, L), repitch)
-                p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: render_werp(p, L), not_werp)
-            p._branch(lambda: s32(p.r[0]) <= s32(p.r[12]), "LE", dispatch, lambda: render(p, L))
-        p._branch(lambda: s32(p.r[0]) >= s32(p.r[12]), "GE", timed, lambda: render(p, L))
-    p.ifz(0, "NE", sounding, lambda: silence(p, L))
+def out(p: Prog, L: Layout, x: int) -> None:
+    """the next sample of the slot's buffer (I4) = Fx, or + Fx when C['add'] (a retrigger's
+    second pass, v0.18). Clobbers R13."""
+    p.ld(13, L.C["add"])
+    p.ifz(13, "NE", lambda: (p.ldi(13, 0, 4), p.fop(x, x, "+", 13)))
+    p.stpost(4, x)
 
 
 def silence(p: Prog, L: Layout) -> None:
-    buffer(p, L)
-    p.iconst(6, 0)
-    p.loop(L.C["count"], 32, lambda: p.stpost(4, 6))
+    """32 zeros (nothing, on a retrigger's second pass: the old note's fade is there)"""
+    p.ld(0, L.C["add"])
+
+    def zeros():
+        buffer(p, L)
+        p.iconst(6, 0)
+        p.loop(L.C["count"], 32, lambda: p.stpost(4, 6))
+    p.ifz(0, "EQ", zeros)
 
 
 def buffer(p: Prog, L: Layout) -> None:
@@ -707,7 +740,7 @@ def render(p: Prog, L: Layout) -> None:
     p.ldi(1, 0, 0)
     p.ld(0, C["lev"])
     p.fop(0, 0, "*", 1)
-    p.st(C["lev"], 0)                         # LEV, made up for the interpolator's gain
+    p.st(C["tmp"], 0)                         # LEV with the make-up (C['lev'] stays: a retrigger renders twice)
     dec_at(p, L)
 
     def sample():
@@ -720,10 +753,10 @@ def render(p: Prog, L: Layout) -> None:
 
             p.ifz(0, "NE", play, lambda word=word: (p.fconst(0, 0.0), p.st(C[word], 0)))
         decimate(p, L, "x", "y", 0)
-        p.ld(3, C["lev"])
+        p.ld(3, C["tmp"])
         p.fop(0, 0, "*", 3)
         faded(p, L, 0)
-        p.stpost(4, 0)
+        out(p, L, 0)
     p.loop(C["count"], 32, sample)
     v(p, 0, "fade")
     p.ifz(0, "NE", lambda: (p.iconst(0, 0), vs(p, "on", 0)))
@@ -988,6 +1021,8 @@ def end_fade(p: Prog, L: Layout, ahead: int = 64) -> None:
         p.if_(4, "LT", 6, lambda: (p.iconst(0, 1), vs(p, "fade", 0)))
     p.if_(7, "EQ", 12, once, kind="i")
     p.ifz(7, "EQ", rev_once)
+    p.ld(0, C["kill"])                        # a retrigger's first pass: the old note fades out
+    p.ifz(0, "NE", lambda: (p.iconst(0, 1), vs(p, "fade", 0)))
 
 
 def faded(p: Prog, L: Layout, x: int) -> None:
@@ -1161,12 +1196,12 @@ def render_stretch(p: Prog, L: Layout) -> None:
             p.ld(3, C["lev"])
             p.fop(4, 4, "*", 3)
             faded(p, L, 4)
-            p.stpost(4, 4)
+            out(p, L, 4)
             advance(p, L)
 
         def rest():
             p.iconst(6, 0)
-            p.stpost(4, 6)
+            out(p, L, 6)
         p.ifz(0, "NE", play, rest)
     p.loop(C["count"], 32, sample)
     v(p, 0, "fade")
@@ -1191,8 +1226,12 @@ def render_werp(p: Prog, L: Layout) -> None:
     p.ldi(1, 0, 0)
     p.ld(0, C["lev"])
     p.fop(0, 0, "*", 1)
-    p.st(C["lev"], 0)
+    p.st(C["tmp"], 0)                         # LEV with the make-up (C['lev'] stays: a retrigger renders twice)
     dec_at(p, L)
+    p.ld(0, C["kill"])                        # a retrigger's first pass: this block fades out
+    vs(p, "fade", 0)
+    p.fconst(0, 1.0)
+    vs(p, "fg", 0)
 
     def next_seg():
         p.iconst(5, 0)
@@ -1256,8 +1295,6 @@ def render_werp(p: Prog, L: Layout) -> None:
             vs(p, "frac", 0)
             p.iconst(0, 1)
             vs(p, "son", 0)
-            p.iconst(0, 0)
-            vs(p, "fade", 0)
             window(p, L)
         v(p, 0, "on")
         p.ifz(0, "NE", segment)
@@ -1281,9 +1318,10 @@ def render_werp(p: Prog, L: Layout) -> None:
                     p.ifz(0, "EQ", lambda: (p.iconst(0, 0), vs(p, "son", 0), p.iconst(0, 1), vs(p, "on", 0)))
                 p.ifz(0, "NE", read, lambda word=word: (p.fconst(0, 0.0), p.st(C[word], 0)))
             decimate(p, L, "x", "y", 0)
-            p.ld(3, C["lev"])
+            p.ld(3, C["tmp"])
             p.fop(0, 0, "*", 3)
-            p.stpost(4, 0)
+            faded(p, L, 0)
+            out(p, L, 0)
             v(p, 5, "cnt")
             p.iconst(12, 1)
             p.iop(5, 12, "+", 5)
@@ -1291,9 +1329,11 @@ def render_werp(p: Prog, L: Layout) -> None:
 
         def rest():
             p.iconst(6, 0)
-            p.stpost(4, 6)
+            out(p, L, 6)
         p.ifz(0, "NE", play, rest)
     p.loop(C["count"], 32, sample)
+    v(p, 0, "fade")
+    p.ifz(0, "NE", lambda: (p.iconst(0, 0), vs(p, "on", 0)))
 
 
 def recorder(p: Prog, L: Layout) -> None:
