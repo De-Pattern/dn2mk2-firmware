@@ -313,10 +313,20 @@ repository: they are derived from Elektron's firmware).
 - **GRID**: SLCE 0 is **NOTE**: the note picks the slice ((note - 12) mod the grid) and the
   sample plays at its own pitch; SLCE 1..63 pick a slice as before, past the grid held at
   the last (the DT2 clamps). The header shows NOTE, and GRID's LEN as the number of slices.
-- **WERP** plays each segment as a note of its own through the reader (the DT2 plays one
-  segment a trigger), in MODE, until the next one starts.
+- **WERP** is played as the DT2 plays it (`dt2-coldfire-werp.md`): its ColdFire's segment
+  clock, in its own integers, a block at a time -- each block adds (BPM x 120 x 16) >> BARS,
+  and a segment ends when the sum reaches 691,200,000 >> log2(segments), the remainder
+  carried -- so segments start on blocks and never drift. Each segment is a note of its own
+  through the reader (fresh decimator, its first block fading in), in MODE, and the one
+  still sounding fades out under it over that block. FWD and FWD LOOP play the segments
+  first to last, REV and REV LOOP last to first; the loop modes go round until the next
+  note, FWD and REV end after the last.
 - **Ends**: a voice that does not loop and reaches its end within the next two blocks is
   faded out over this one and ends (the DT2's look-ahead): no click at a sample's end.
+- **Starts**: a note's first block fades in, except ONESHOT from STRT 0, whose attack is
+  kept (the DT2's ColdFire sends its declick flag, frame +0x73c, as 0 only then).
+- **Retriggers**: a note while the voice sounds renders the old note first, fading out over
+  the block, and adds the new one to it -- what the DT2 does with its second voice a track.
 - **BARS is 1, 2, 4 or 8** (default 4) and **WERP's SEG is a segment's length, 1/32, 1/16
   or 1/8 of a bar** (default 1/16), as on the DT2 OS 1.17 (its parameter descriptors and
   formatters; `dt2-coldfire-werp.md`): the sample is (32 >> SEG) << BARS segments, each
@@ -324,9 +334,9 @@ repository: they are derived from Elektron's firmware).
   BARS 1/8 .. 16 and SEG 128 .. 1 segments, from an earlier reading.)
 - **CFAD** (v0.14, off since v0.15) is gone: the DT2 has no such control.
 - What is still ours: the loops follow STRT, LEN, LOOP and PLAY while a note sounds (the
-  DT2 takes them at the note; v0.15 asked for this); WERP sequences its segments on the
-  DSP (the DT2's ColdFire triggers each one); one voice a track (the DT2 alternates two,
-  so a retrigger fades the old note while the new one starts).
+  DT2 takes them at the note; v0.15 asked for this); WERP's clock runs on the DSP (the
+  DT2's runs on its ColdFire, to the same arithmetic); the DT2's zero-crossing mute (a
+  second declick it chooses by flags not yet read) is not here.
 
 ## Checked
 
