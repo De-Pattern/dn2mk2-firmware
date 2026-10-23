@@ -441,7 +441,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     int w = SMP_WAVE_W;
     if (kind == SMP_GRID_KIND) {
         int gi = value(view, SMP_GRID_ID, 0) / 24, n = smp_grids[gi > 4 ? 4 : gi];
-        int s = (value(view, SMP_SLICE_ID, 0) >> 1) & (n - 1);
+        int s = value(view, SMP_SLICE_ID, 0) >> 1;    /* 0 NOTE (drawn at the first), 1..63 */
+        s = s <= 0 ? 0 : (s > n ? n : s) - 1;
         int len = (value(view, SMP_SLEN_ID, 0) >> 1) + 1;
         for (int j = 0; j <= n && n <= 32; j++)
             vline(c, x0 + j * (w - 1) / n, cy - SMP_WAVE_AMP - 1, cy - SMP_WAVE_AMP + 1, 0);

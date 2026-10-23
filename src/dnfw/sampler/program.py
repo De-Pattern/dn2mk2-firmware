@@ -22,7 +22,11 @@ V = dict(on=0, mach=1, pos=2, frac=3, lo=4, hi=5, loop=6, mode=7, base=8, frames
          last=11, low=12, fmt=13,
          # v0.15, the time machines: STRETCH's source position and two grains (phase,
          # position); WERP's segment, its sample count, and the position in it
-         spos=14, ph0=15, gp0=16, ph1=17, gp1=18, seg=19, cnt=20, rel=21)
+         spos=14, ph0=15, gp0=16, ph1=17, gp1=18, seg=19, cnt=20, rel=21,
+         # v0.18: the block's end fade (the DT2's: a voice that ends inside a block fades
+         # over it), and STRETCH's jump (source frames, signed by the play direction)
+         fade=22, fg=23, dg=24, jj=25,
+         fixed=26)                       # GRID's NOTE mode: the note picks the slice, not the pitch
 STATE_WORDS = 16
 STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "gain",
@@ -33,17 +37,39 @@ SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "gain",
             # the recorder: its state (0 idle, 1 armed, 2 recording, 3 full), slot entry,
             # frames so far, their limit, source, threshold, its frames' base, the track
             "rst", "rent", "rpos", "rmax", "rsrc", "rthr", "rbase", "rchan", "rpk",
-            "rseq", "rmode")                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
+            "rseq", "rmode",
+            "tr0", "note")                             # v0.18: TUNE's transposition alone; the note                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
 GRAIN = 2048                              # STRETCH's grain, output samples (43 ms); two, half apart
 TEMPO_OFFSET = 216                        # the frame's tempo word: BPM x 120 (docs/modulation-display.md)
 
 
 class Layout:
-    def __init__(self, state: int, scratch: int, pool: int, exp2: int):
-        self.state, self.pool, self.exp2 = state, pool, exp2
+    def __init__(self, state: int, scratch: int, pool: int, exp2: int, tables: int = 0, dec: int = 0):
+        self.state, self.pool, self.exp2, self.dec = state, pool, exp2, dec
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
-        # PM.exp2 reads the table through L.T
-        self.T = {"exp2": exp2}
+        # PM.exp2 reads the table through L.T; v0.18: the DT2 reader's tables (tables_bytes)
+        self.T = {"exp2": exp2, "poly": tables, "decim": tables + 4 * POLY_ROWS * POLY_TAPS,
+                  "gain": tables + 4 * POLY_ROWS * POLY_TAPS + 16}
+
+
+# -- v0.18: the DT2's sample reader (docs/sampler.md) -------------------------------------
+# its 6-tap, 256-phase interpolator at 96 kHz and its 2:1 all-pass decimator, with the
+# coefficients read from the owner's DT2 image at build time (dnfw.dt2.rom)
+POLY_ROWS, POLY_TAPS = 256, 6
+DEC_WORDS = 12                            # a voice's decimator: 4 even inputs, 4 outputs, 4 odd
+DEC_STRIDE = 4 * DEC_WORDS
+
+
+def tables_bytes() -> bytes:
+    """the interpolator's 256 x 6 coefficients, then the decimator's four, as float32;
+    then the gain that makes LEV 100 play a sample at its own level (the interpolator's
+    rows sum to about 0.4045, -7.9 dB, which the DT2 makes up after it)"""
+    import struct
+    from ..dt2 import rom
+    rows = rom.polyphase()
+    g = sum(sum(r) for r in rows) / len(rows)
+    return struct.pack(f"<{POLY_ROWS * POLY_TAPS}f", *(c for r in rows for c in r)) + \
+        struct.pack("<4f", *rom.decimator()) + struct.pack("<f", 1.0 / g)
 
 
 def v(p: Prog, d: int, w: str) -> None:
@@ -117,6 +143,7 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
     p.iop(12, 12, "AND", 13)
     p.if_(12, "EQ", 13, lambda: p.iconst(8, 0), kind="i")
     p.ifz(8, "LT", lambda: p.iconst(8, 0))
+    p.st(C["note"], 8)
     p.fconst(12, 60.0)
     p.fop(8, 8, "-", 12)
     p.fconst(12, 1.0 / 12.0)
@@ -125,6 +152,9 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
     p.fop(8, 8, "+", 5)
     PM.exp2(p, L, 9, 8)
     p.st(C["tr"], 9)
+    p.ld(8, C["tune"])                       # v0.18: TUNE alone (GRID's NOTE mode)
+    PM.exp2(p, L, 9, 8)
+    p.st(C["tr0"], 9)
     # a note: latch the machine, the slot and the region
     p.ld(0, C["trig"])
     p.ifz(0, "NE", lambda: start(p, L))
@@ -138,6 +168,8 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
 
     def sounding_on():
         p.ld(4, C["tr"])
+        v(p, 0, "fixed")
+        p.ifz(0, "NE", lambda: p.ld(4, C["tr0"]))
         v(p, 5, "rate")
         p.fop(4, 4, "*", 5)
         p.st(C["rate"], 4)
@@ -159,10 +191,8 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
                     p.iconst(12, SM.TYPE_OF["STRETCH"])
                     p.e("COMP(R0, R12);")
 
-                    def repitch():                # the region in BARS, at the note's transposition
+                    def repitch():                # the region in BARS: no TUNE, no note (as the DT2's)
                         p.ld(4, C["sr"])
-                        p.ld(5, C["tr"])
-                        p.fop(4, 4, "*", 5)
                         p.st(C["rate"], 4)
                         render(p, L)
                     p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: render_stretch(p, L), repitch)
@@ -193,8 +223,10 @@ def start(p: Prog, L: Layout) -> None:
     play mode from the machine's controls. A slot the pool does not hold leaves the
     voice off."""
     C = L.C
+    dec_reset(p, L)
     p.iconst(0, 0)
     vs(p, "on", 0)
+    vs(p, "fixed", 0)
     p.ld(0, C["type"])
     vs(p, "mach", 0)
     p.ld(9, C["t"])
@@ -269,6 +301,9 @@ def oneshot_bounds(p: Prog, L: Layout) -> None:
     p.iop(12, 12, "+", 5)
     p.iop(6, 6, "MIN", 12)
     vs(p, "loop", 6)
+    v(p, 0, "mach")                       # v0.18: STRETCH has no LOOP: it loops at STRT (the DT2's)
+    p.iconst(12, SM.TYPE_OF["STRETCH"])
+    p.if_(0, "EQ", 12, lambda: (v(p, 4, "lo"), vs(p, "loop", 4)), kind="i")
 
 
 def live(p: Prog, L: Layout) -> None:
@@ -357,11 +392,27 @@ def region(p: Prog, L: Layout) -> None:
         p.float_(8, 8, 7)                    # F8 = 1/n, exactly
         p.ld(9, C["t"])
         PP.t146(p, 10, 9)
-        ctl(p, 4, SM.SLICE_REC, 10)          # 0..127 -> 0..63
+        ctl(p, 4, SM.SLICE_REC, 10)          # 0..127 -> 0 NOTE, 1..63 the slice (v0.18, the DT2's SLCE)
         p.lsh(4, 4, -1)
-        p.iconst(12, -1)
-        p.iop(12, 12, "+", 6)                # n - 1 (n is a power of two)
-        p.iop(4, 4, "AND", 12)               # s mod n
+        p.iconst(0, 0)
+        vs(p, "fixed", 0)
+
+        def by_note():                       # NOTE: (note - 12) mod n picks it, the pitch stays
+            p.iconst(0, 1)
+            vs(p, "fixed", 0)
+            p.ld(5, C["note"])
+            p.trunc(4, 5)
+            p.iconst(12, -12)
+            p.iop(4, 12, "+", 4)
+            p.iconst(12, -1)
+            p.iop(12, 12, "+", 6)            # n - 1 (n is a power of two)
+            p.iop(4, 4, "AND", 12)
+
+        def by_knob():                       # min(n, s) - 1
+            p.iop(4, 4, "MIN", 6)
+            p.iconst(12, -1)
+            p.iop(4, 12, "+", 4)
+        p.ifz(4, "EQ", by_note, by_knob)
         p.st(C["a"], 4)
         ctl(p, 5, SM.SLEN_REC, 10)           # 0..127 -> slices 1..64
         p.lsh(5, 5, -1)
@@ -481,134 +532,188 @@ def fetch(p: Prog, d: int, k: int) -> None:
     p.ifz(8, "NE", i16, f32)
 
 
-CFAD_ON = False                               # v0.14's CFAD; off with its control off the page
-
-
-def crossfade_setup(p: Prog, L: Layout) -> None:
-    """ONESHOT's CFAD in FWD LOOP: over the last X frames before the end (X = CFAD/127 of
-    the shorter of the loop and what lies before it), the sound fades into the audio
-    just before LOOP, so the wrap from the end back to LOOP is seamless. C['xfn'] = X
-    (0: none), C['xfa'] = where it starts, C['xfs'] = end - LOOP, C['xfi'] = 1 / X."""
+def window(p: Prog, L: Layout) -> None:
+    """C['b'], C['c']: the interpolator's tap window, [loop, hi) in the loop modes and
+    [lo, hi) otherwise (the DT2's circular buffer over [w64, w68)). Clobbers R0, R4, R12."""
     C = L.C
-    p.fconst(0, 0.0)
-    p.st(C["xfn"], 0)
-    v(p, 0, "mach")
-    p.iconst(12, SM.TYPE_OF["ONESHOT"])
-    p.e("COMP(R0, R12);")
+    v(p, 4, "lo")
+    v(p, 0, "mode")
+    p.iconst(12, 1)
+    p.if_(0, "EQ", 12, lambda: v(p, 4, "loop"), kind="i")
+    p.iconst(12, 2)
+    p.if_(0, "EQ", 12, lambda: v(p, 4, "loop"), kind="i")
+    p.st(C["b"], 4)
+    v(p, 4, "hi")
+    p.st(C["c"], 4)
 
-    def oneshot():
-        v(p, 0, "mode")
-        p.iconst(12, 2)
 
-        def fwdl():
-            p.ld(9, C["t"])
-            PP.t146(p, 10, 9)
-            ctl(p, 4, SM.CFAD_REC, 10)       # 0..127
-            v(p, 5, "hi")
-            v(p, 6, "loop")
-            p.ipass(12, 5)
-            p.iop(7, 12, "-", 6)             # hi - loop
-            p.iop(8, 6, "MIN", 7)            # min(loop, hi - loop): room on both sides
-            tofloat(p, 8, 8)
-            tofloat(p, 4, 4, 1.0 / 127.0)
-            p.fop(8, 8, "*", 4)              # X
-            p.fconst(12, 1.0)
+def tick(p: Prog, L: Layout, word: str) -> None:
+    """One 96 kHz sample of the DT2's reader into C[word]: the six taps from pos (forward:
+    s[pos..pos+5]; backward: s[pos-5..pos]) wrapping inside the window, against the
+    coefficient row floor(frac 256). Clobbers R0-R15 but R4, I1, I3."""
+    C = L.C
+    v(p, 2, "frac")
+    p.fconst(12, 256.0)
+    p.fop(2, 2, "*", 12)
+    p.trunc(3, 2)
+    p.iconst(12, POLY_ROWS - 1)
+    p.iop(3, 3, "MIN", 12)
+    p.iconst(12, 0)
+    p.iop(3, 3, "MAX", 12)
+    p.lsh(5, 3, 4)
+    p.lsh(3, 3, 3)
+    p.ipass(12, 5)
+    p.iop(3, 12, "+", 3)                     # row * 24 bytes
+    p.iconst(12, L.T["poly"])
+    p.iop(3, 12, "+", 3)
+    p.seti(3, 3)
+    p.fconst(7, 0.0)
+    v(p, 9, "pos")
+    v(p, 10, "base")
+    p.ld(14, C["b"])
+    p.ld(15, C["c"])
+    p.ipass(12, 15)
+    p.iop(6, 12, "-", 14)                    # the window's length
+    v(p, 0, "mode")
+    p.iconst(12, 2)
 
-            def some():
-                p.st(C["xfn"], 8)
-                tofloat(p, 7, 7)
-                p.st(C["xfs"], 7)
-                v(p, 5, "hi")
-                tofloat(p, 5, 5)
-                p.fop(5, 5, "-", 8)
-                p.st(C["xfa"], 5)
-                p.fpass(9, 8)
-                PM.recip(p, 10, 9)
-                p.st(C["xfi"], 10)
-            p.if_(8, "GE", 12, some)         # at least a frame
-        p.if_(0, "EQ", 12, fwdl, kind="i")
-    p._branch(lambda: p.r[0] == p.r[12], "EQ", oneshot, None)
+    def fwd():
+        for k in range(POLY_TAPS):
+            fetch(p, 0, 9)
+            p.ldi(1, k, 3)
+            p.fop(0, 0, "*", 1)
+            p.fop(7, 7, "+", 0)
+            if k < POLY_TAPS - 1:
+                p.iconst(12, 1)
+                p.iop(9, 12, "+", 9)
+                p.if_(9, "GE", 15, lambda: p.iop(9, 9, "-", 6), kind="i")
+
+    def rev():
+        for k in range(POLY_TAPS):
+            fetch(p, 0, 9)
+            p.ldi(1, POLY_TAPS - 1 - k, 3)
+            p.fop(0, 0, "*", 1)
+            p.fop(7, 7, "+", 0)
+            if k < POLY_TAPS - 1:
+                p.iconst(12, -1)
+                p.iop(9, 12, "+", 9)
+                p.if_(9, "LT", 14, lambda: (p.ipass(12, 9), p.iop(9, 12, "+", 6)), kind="i")
+    p.if_(0, "GE", 12, fwd, rev, kind="i")
+    # the DT2's MAC keeps the sum's whole 16-bit steps, toward -inf: floor(32768 y) / 32768
+    p.fconst(12, 32768.0)
+    p.fop(7, 7, "*", 12)
+    p.trunc(0, 7)
+    p.iconst(12, 0)
+    p.float_(1, 0, 12)
+    p.if_(7, "LT", 1, lambda: (p.iconst(12, -1), p.iop(0, 12, "+", 0)))
+    p.iconst(12, -15)
+    p.float_(7, 0, 12)
+    p.st(C[word], 7)
+
+
+def decimate(p: Prog, L: Layout, ye: str, yo: str, d: int) -> None:
+    """Fd = the DT2's 2:1 decimator's next output from the 96 kHz pair C[ye], C[yo]: half
+    the sum of a fourth-order all-pass of the even samples and the odd ones four outputs
+    late (its 0xb80000), in its order of operations. The voice's twelve words at I5: the
+    even inputs e1..e4, the all-pass's outputs h1..h4, the odd ring r0..r3.
+    Clobbers R0-R3, R5-R7, R12, I0."""
+    C = L.C
+    p.iconst(12, L.T["decim"])
+    p.seti(0, 12)                            # c0..c3 at DM(k, I0)
+    p.ld(0, C[ye])
+    p.ldi(1, 3, 0)
+    p.fop(2, 0, "*", 1)                      # xe c3
+    for e, k, first in ((0, 2, True), (1, 1, False), (2, 0, False)):
+        p.ldi(5, e, 5)                       # e1, e2, e3
+        p.ldi(1, k, 0)
+        p.fop(5, 5, "*", 1)
+        if first:
+            p.fop(2, 2, "+", 5)
+        else:
+            p.fop(2, 5, "+", 2)
+    p.ldi(5, 3, 5)                           # + e4
+    p.fop(2, 5, "+", 2)
+    for h, k in ((4, 0), (5, 1), (6, 2), (7, 3)):
+        p.ldi(5, h, 5)                       # - h1 c0 .. - h4 c3
+        p.ldi(1, k, 0)
+        p.fop(5, 5, "*", 1)
+        p.fop(2, 2, "-", 5)
+    p.ldi(6, 11, 5)                          # the odd sample four outputs back
+    for a, b in ((3, 2), (2, 1), (1, 0), (7, 6), (6, 5), (5, 4), (11, 10), (10, 9), (9, 8)):
+        p.ldi(5, b, 5)
+        p.sti(a, 5, 5)
+    p.sti(0, 5, 0)                           # e1 = xe
+    p.sti(4, 5, 2)                           # h1 = the all-pass's output
+    p.ld(7, C[yo])
+    p.sti(8, 5, 7)                           # r0 = xo
+    p.fop(2, 2, "+", 6)
+    p.fconst(12, 0.5)
+    p.fop(d, 2, "*", 12)
+
+
+def dec_reset(p: Prog, L: Layout) -> None:
+    """the voice's decimator cleared (the DT2 resets it at each note). Clobbers R0, R5,
+    R6, R12, I5."""
+    dec_at(p, L)
+    p.iconst(0, 0)
+    for k in range(DEC_WORDS):
+        p.sti(k, 5, 0)
+
+
+def dec_at(p: Prog, L: Layout) -> None:
+    """I5 = this voice's decimator words: dec + t (32 + 16). Clobbers R5, R6, R9, R12."""
+    p.ld(9, L.C["t"])
+    p.lsh(5, 9, 5)
+    p.lsh(6, 9, 4)
+    p.ipass(12, 5)
+    p.iop(5, 12, "+", 6)
+    p.iconst(12, L.dec)
+    p.iop(5, 12, "+", 5)
+    p.seti(5, 5)
 
 
 def render(p: Prog, L: Layout) -> None:
-    """32 samples of the latched region at the block's rate, linear interpolation."""
+    """ONESHOT, REPITCH and GRID (v0.18): the DT2's reader. Each output sample is two
+    96 kHz samples of the six-tap interpolator (`tick`), stepping half the block's rate,
+    through the 2:1 decimator; a voice that ends inside the next two blocks fades out
+    over this one and ends (`end_fade`)."""
     C = L.C
-    if CFAD_ON:
-        crossfade_setup(p, L)
-    else:                                     # v0.15: the DT2's ONESHOT has no CFAD control
-        p.fconst(0, 0.0)
-        p.st(C["xfn"], 0)
     buffer(p, L)
+    v(p, 0, "on")
+
+    def setup():
+        end_fade(p, L, 64)
+        window(p, L)
+        p.ld(0, C["rate"])
+        p.fconst(12, 0.5)
+        p.fop(0, 0, "*", 12)
+        p.st(C["rate"], 0)                    # frames a 96 kHz sample
+    p.ifz(0, "NE", setup)
+    p.iconst(12, L.T["gain"])
+    p.seti(0, 12)
+    p.ldi(1, 0, 0)
+    p.ld(0, C["lev"])
+    p.fop(0, 0, "*", 1)
+    p.st(C["lev"], 0)                         # LEV, made up for the interpolator's gain
+    dec_at(p, L)
 
     def sample():
-        v(p, 0, "on")
+        for word in ("x", "y"):
+            v(p, 0, "on")
 
-        def play():
-            v(p, 9, "pos")
-            v(p, 10, "base")
-            fetch(p, 0, 9)                   # s0 = pool[pos]
-            # s1: the next frame in the play direction, held at the sample's ends
-            v(p, 6, "frames")
-            v(p, 7, "mode")
-            p.iconst(12, 2)
-            p.e("COMP(R7, R12);")
+            def play(word=word):
+                tick(p, L, word)
+                advance(p, L)
 
-            def nxt_f():
-                p.iconst(12, 1)
-                p.iop(11, 12, "+", 9)
-                p.iconst(12, -1)
-                p.iop(12, 12, "+", 6)        # frames - 1
-                p.iop(11, 11, "MIN", 12)
-
-            def nxt_r():
-                p.iconst(12, -1)
-                p.iop(11, 12, "+", 9)
-                p.iconst(12, 0)
-                p.iop(11, 11, "MAX", 12)
-            p._branch(lambda: s32(p.r[7]) - s32(p.r[12]) >= 0, "GE", nxt_f, nxt_r)
-            v(p, 10, "base")
-            fetch(p, 1, 11)                  # s1
-            v(p, 2, "frac")
-            p.fop(1, 1, "-", 0)
-            p.fop(1, 1, "*", 2)
-            p.fop(0, 0, "+", 1)              # s0 + (s1 - s0) frac
-            p.ld(3, C["xfn"])
-            p.fconst(12, 0.0)
-
-            def xfade():                     # inside the crossfade? g = (pos - start) / X
-                v(p, 9, "pos")
-                tofloat(p, 5, 9)
-                v(p, 2, "frac")
-                p.fop(5, 5, "+", 2)
-                p.ld(6, C["xfa"])
-                p.fop(7, 5, "-", 6)
-
-                def inside():
-                    p.st(C["acc"], 0)
-                    p.ld(6, C["xfi"])
-                    p.fop(7, 7, "*", 6)
-                    p.st(C["gpos"], 7)       # g
-                    p.ld(6, C["xfs"])
-                    p.fop(5, 5, "-", 6)      # the same distance before LOOP
-                    read_at(p, L, 1, 5)
-                    p.ld(0, C["acc"])
-                    p.ld(7, C["gpos"])
-                    p.fop(1, 1, "-", 0)
-                    p.fop(1, 1, "*", 7)
-                    p.fop(0, 0, "+", 1)      # s + (s' - s) g
-                p.fconst(12, 0.0)
-                p.if_(7, "GE", 12, inside)
-            p.if_(3, "GT", 12, xfade)
-            p.ld(3, C["lev"])
-            p.fop(0, 0, "*", 3)
-            p.stpost(4, 0)
-            advance(p, L)
-
-        def rest():
-            p.iconst(6, 0)
-            p.stpost(4, 6)
-        p.ifz(0, "NE", play, rest)
+            p.ifz(0, "NE", play, lambda word=word: (p.fconst(0, 0.0), p.st(C[word], 0)))
+        decimate(p, L, "x", "y", 0)
+        p.ld(3, C["lev"])
+        p.fop(0, 0, "*", 3)
+        faded(p, L, 0)
+        p.stpost(4, 0)
     p.loop(C["count"], 32, sample)
+    v(p, 0, "fade")
+    p.ifz(0, "NE", lambda: (p.iconst(0, 0), vs(p, "on", 0)))
 
 
 def advance(p: Prog, L: Layout) -> None:
@@ -793,112 +898,257 @@ def read_at(p: Prog, L: Layout, d: int, x: int) -> None:
     p.fop(d, 3, "+", 4)
 
 
+GRAIN_XF = 128                            # STRETCH's crossfade after a jump, output samples
+T_MIN, T_MAX = 0.125, 4.0                 # STRETCH's time rate, clamped (the DT2's 0x3e000000 .. 0x40800000)
+
+
+def read2(p: Prog, L: Layout, d: int, i: int, f: int) -> None:
+    """Fd = s[Ri] (1 - Ff) + s[Ri + 1] Ff, the next frame held at the sample's end: the
+    DT2 STRETCH's two-tap read. Ri inside 0 .. frames - 1. Clobbers R0-R3, R8-R13, I1;
+    keeps Ri in C['x'], Ff in C['y']."""
+    C = L.C
+    p.st(C["x"], i)
+    p.st(C["y"], f)
+    v(p, 10, "base")
+    fetch(p, 0, i)
+    p.ld(9, C["x"])
+    p.iconst(12, 1)
+    p.iop(11, 12, "+", 9)
+    v(p, 6, "frames")
+    p.iconst(12, -1)
+    p.iop(12, 12, "+", 6)
+    p.iop(11, 11, "MIN", 12)
+    v(p, 10, "base")
+    fetch(p, 1, 11)
+    p.ld(2, C["y"])
+    p.fop(1, 1, "-", 0)
+    p.fop(1, 1, "*", 2)
+    p.fop(d, 0, "+", 1)
+
+
+def end_fade(p: Prog, L: Layout, ahead: int = 64) -> None:
+    """V['fade'] = 1 when the voice, not looping, passes its region's end within AHEAD
+    output samples (the DT2's look-ahead, two blocks: such a block is faded 1 -> 0 and the
+    voice ends after it); V['fg'] = 1, the block's first gain. Rate in C['rate'] (frames
+    an output sample, > 0). Clobbers R0-R7, R12."""
+    C = L.C
+    p.iconst(0, 0)
+    vs(p, "fade", 0)
+    p.fconst(0, 1.0)
+    vs(p, "fg", 0)
+    v(p, 7, "mode")
+    p.iconst(12, 3)
+
+    def once():                                # FWD: pos + 32 rate >= hi
+        v(p, 4, "pos")
+        tofloat(p, 4, 4)
+        v(p, 5, "frac")
+        p.fop(4, 4, "+", 5)
+        p.ld(5, C["rate"])
+        p.fconst(12, float(ahead))
+        p.fop(5, 5, "*", 12)
+        p.fop(4, 4, "+", 5)
+        v(p, 6, "hi")
+        tofloat(p, 6, 6)
+        p.if_(4, "GE", 6, lambda: (p.iconst(0, 1), vs(p, "fade", 0)))
+
+    def rev_once():                            # REV: pos - 32 rate < low
+        v(p, 4, "pos")
+        tofloat(p, 4, 4)
+        v(p, 5, "frac")
+        p.fop(4, 4, "+", 5)
+        p.ld(5, C["rate"])
+        p.fconst(12, float(ahead))
+        p.fop(5, 5, "*", 12)
+        p.fop(4, 4, "-", 5)
+        v(p, 6, "low")
+        tofloat(p, 6, 6)
+        p.if_(4, "LT", 6, lambda: (p.iconst(0, 1), vs(p, "fade", 0)))
+    p.if_(7, "EQ", 12, once, kind="i")
+    p.ifz(7, "EQ", rev_once)
+
+
+def faded(p: Prog, L: Layout, x: int) -> None:
+    """Fx *= V['fg'], which steps 1 -> 0 over the block when V['fade'] is set (1/31 a
+    sample, as the DT2's). Clobbers R5, R6, R12."""
+    v(p, 5, "fade")
+
+    def ramp():
+        v(p, 6, "fg")
+        p.fop(x, x, "*", 6)
+        p.fconst(12, 1.0 / 31.0)
+        p.fop(6, 6, "-", 12)
+        p.fconst(12, 0.0)
+        p.fop(6, 6, "MAX", 12)
+        vs(p, "fg", 6)
+    p.ifz(5, "NE", ramp)
+
+
 def render_stretch(p: Prog, L: Layout) -> None:
-    """STRETCH: two grains of GRAIN samples, half a grain apart, each a triangle window
-    (the two sum to 1), each reading from where the source position was when it began,
-    at the note's pitch; the source position moves at BARS' rate (C['sr']). PLAY as
-    ONESHOT's: the source position stops, or loops, at the region's end."""
+    """STRETCH as the DT2's (its reader at 0x1c5576, docs/sampler.md): one read head moves
+    at the note's pitch (C['rate'] frames a sample); every 2048 samples it jumps by
+    (T - rate) 2048 frames, T the time rate that makes the region last BARS (C['sr'],
+    clamped to 1/8 .. 4), so that on average it moves at T; for 128 samples after a jump
+    the old head (where the head would have been) crossfades linearly into the new one.
+    Two-tap linear reads, the old head with the new one's fraction. The region loops at
+    its own start (the DT2's STRETCH has no LOOP)."""
     C = L.C
     buffer(p, L)
+    # the jump this block: (T - rate) 2048, by the play direction
+    p.ld(0, C["sr"])
+    p.fconst(12, T_MIN)
+    p.fop(0, 0, "MAX", 12)
+    p.fconst(12, T_MAX)
+    p.fop(0, 0, "MIN", 12)
+    p.ld(1, C["rate"])
+    p.fop(0, 0, "-", 1)
+    p.fconst(12, float(GRAIN))
+    p.fop(0, 0, "*", 12)
+    p.ld(9, C["dir"])
+    p.ifz(9, "LT", lambda: (p.fconst(12, 0.0), p.fop(0, 12, "-", 0)))
+    vs(p, "jj", 0)
+    v(p, 0, "on")
+
+    def grain():
+        v(p, 4, "ph0")                          # the grain counter
+        p.iconst(12, GRAIN)
+
+        def jump():
+            p.iconst(12, -GRAIN)
+            p.iop(4, 12, "+", 4)
+            vs(p, "ph0", 4)
+            v(p, 2, "jj")                       # pos + frac += jj, then into [low, hi)
+            v(p, 1, "frac")
+            p.fop(2, 2, "+", 1)
+            p.fpass(3, 2)
+            PM.frac(p, 2)                       # F2: the new fraction (R0, R1, R12)
+            vs(p, "frac", 2)
+            p.fop(2, 3, "-", 2)                 # whole frames moved
+            p.fconst(12, 0.5)
+            p.ifz(2, "LT", lambda: p.fconst(12, -0.5), kind="f")
+            p.fop(2, 2, "+", 12)
+            p.trunc(2, 2)
+            v(p, 9, "pos")
+            p.iop(9, 9, "+", 2)
+            v(p, 10, "hi")
+            v(p, 11, "low")
+            p.ipass(12, 10)
+            p.iop(12, 12, "-", 11)              # the span
+            v(p, 7, "mode")                     # PLAY 1, 2 are the loops: (mode + 1) & 2
+            p.iconst(13, 1)
+            p.iop(13, 13, "+", 7)
+            p.iconst(14, 2)
+            p.iop(13, 13, "AND", 14)
+            p.st(C["a"], 13)
+
+            def over():
+                p.iop(9, 9, "-", 12)
+                p.ld(13, C["a"])
+                p.ifz(13, "EQ", lambda: (p.iconst(0, 0), vs(p, "on", 0)))
+
+            def under():
+                p.iop(9, 9, "+", 12)
+                p.ld(13, C["a"])
+                p.ifz(13, "EQ", lambda: (p.iconst(0, 0), vs(p, "on", 0)))
+            p.if_(9, "GE", 10, over, kind="i")
+            p.if_(9, "LT", 11, under, kind="i")
+            p.iop(9, 9, "MAX", 11)
+            p.iconst(12, -1)
+            p.iop(12, 12, "+", 10)
+            p.iop(9, 9, "MIN", 12)
+            vs(p, "pos", 9)
+            p.fconst(0, 0.0)
+            vs(p, "gp0", 0)                     # the new head's gain
+            p.fconst(0, 1.0)
+            vs(p, "gp1", 0)                     # the old head's
+        p.if_(4, "GE", 12, jump, kind="i")
+        v(p, 4, "ph0")
+        p.iconst(12, GRAIN_XF)
+
+        def ramping():
+            p.fconst(0, 1.0 / (GRAIN_XF - 1))
+            vs(p, "dg", 0)
+
+        def steady():
+            p.fconst(0, 0.0)
+            vs(p, "dg", 0)
+            vs(p, "gp1", 0)
+            p.fconst(0, 1.0)
+            vs(p, "gp0", 0)
+        p.if_(4, "LT", 12, ramping, steady, kind="i")
+        v(p, 4, "ph0")
+        p.iconst(12, 32)
+        p.iop(4, 12, "+", 4)
+        vs(p, "ph0", 4)
+        end_fade(p, L)
+    p.ifz(0, "NE", grain)
 
     def sample():
         v(p, 0, "on")
 
         def play():
-            p.fconst(0, 0.0)
-            p.st(C["acc"], 0)
-            for j in (0, 1):
-                ph, gp = f"ph{j}", f"gp{j}"
-                v(p, 0, gp)
-                read_at(p, L, 5, 0)
-                v(p, 6, ph)
-                tofloat(p, 7, 6, 2.0 / GRAIN)
-                p.fconst(12, 1.0)
-                p.fop(7, 7, "-", 12)
-                p.fconst(12, 0.0)
-                p.fop(8, 12, "-", 7)
-                p.fop(7, 7, "MAX", 8)                 # |2 ph / G - 1|
-                p.fconst(12, 1.0)
-                p.fop(7, 12, "-", 7)                  # 1 - |2 ph / G - 1|
-                p.fop(5, 5, "*", 7)
-                p.ld(8, C["acc"])
-                p.fop(8, 8, "+", 5)
-                p.st(C["acc"], 8)
-                # on: phase + 1, position + pitch (in the play direction)
-                v(p, 6, ph)
-                p.iconst(12, 1)
-                p.iop(6, 12, "+", 6)
-                v(p, 0, gp)
-                p.ld(1, C["rate"])
-                p.ld(9, C["dir"])
-                p.ifz(9, "LT", lambda: (p.fconst(12, 0.0), p.fop(1, 12, "-", 1)))
-                p.fop(0, 0, "+", 1)
-                vs(p, gp, 0)
-                vs(p, ph, 6)
-                p.iconst(12, GRAIN)
-
-                def restart(ph=ph, gp=gp):
-                    p.iconst(6, 0)
-                    vs(p, ph, 6)
-                    v(p, 0, "spos")
-                    vs(p, gp, 0)
-                p.if_(6, "GE", 12, restart, kind="i")
-            p.ld(0, C["acc"])
+            v(p, 9, "pos")
+            v(p, 3, "frac")
+            read2(p, L, 4, 9, 3)                # the head
+            v(p, 0, "gp0")
+            p.fop(4, 4, "*", 0)
+            p.st(C["acc"], 4)
+            # the old head: floor(pos + frac - jj), the head's fraction; into 0 .. frames - 1
+            v(p, 0, "frac")
+            v(p, 1, "jj")
+            p.fop(0, 0, "-", 1)
+            p.fpass(2, 0)
+            PM.frac(p, 2)                       # F2 = x - floor(x) (R0, R1, R12)
+            v(p, 0, "frac")
+            v(p, 1, "jj")
+            p.fop(0, 0, "-", 1)
+            p.fop(0, 0, "-", 2)                 # floor(x), whole
+            p.fconst(12, 0.5)
+            p.ifz(0, "LT", lambda: p.fconst(12, -0.5), kind="f")
+            p.fop(0, 0, "+", 12)
+            p.trunc(0, 0)
+            v(p, 9, "pos")
+            p.iop(9, 9, "+", 0)
+            v(p, 6, "frames")
+            p.iconst(12, 0)
+            p.if_(9, "LT", 12, lambda: p.iop(9, 9, "+", 6), kind="i")
+            p.if_(9, "GE", 6, lambda: p.iop(9, 9, "-", 6), kind="i")
+            p.iconst(12, 0)
+            p.iop(9, 9, "MAX", 12)
+            p.iconst(12, -1)
+            p.iop(12, 12, "+", 6)
+            p.iop(9, 9, "MIN", 12)
+            v(p, 3, "frac")
+            read2(p, L, 4, 9, 3)
+            v(p, 0, "gp1")
+            p.fop(4, 4, "*", 0)
+            p.ld(5, C["acc"])
+            p.fop(4, 4, "+", 5)
+            # the gains move on every sample (held inside 0 .. 1)
+            v(p, 0, "gp0")
+            v(p, 1, "dg")
+            p.fop(0, 0, "+", 1)
+            p.fconst(12, 1.0)
+            p.fop(0, 0, "MIN", 12)
+            vs(p, "gp0", 0)
+            v(p, 0, "gp1")
+            p.fop(0, 0, "-", 1)
+            p.fconst(12, 0.0)
+            p.fop(0, 0, "MAX", 12)
+            vs(p, "gp1", 0)
             p.ld(3, C["lev"])
-            p.fop(0, 0, "*", 3)
-            p.stpost(4, 0)
-            source_step(p, L)
+            p.fop(4, 4, "*", 3)
+            faded(p, L, 4)
+            p.stpost(4, 4)
+            advance(p, L)
 
         def rest():
             p.iconst(6, 0)
             p.stpost(4, 6)
         p.ifz(0, "NE", play, rest)
     p.loop(C["count"], 32, sample)
-
-
-def source_step(p: Prog, L: Layout) -> None:
-    """STRETCH's source position: + sr in the play direction; at the region's end it
-    loops (FWD LOOP from LOOP, REV LOOP back to the top) or the voice stops."""
-    C = L.C
-    v(p, 0, "spos")
-    p.ld(1, C["sr"])
-    p.ld(9, C["dir"])
-
-    def fwd():
-        p.fop(0, 0, "+", 1)
-        v(p, 5, "hi")
-        tofloat(p, 2, 5)
-
-        def over():
-            v(p, 7, "mode")
-            p.iconst(12, 2)
-
-            def lp():
-                v(p, 6, "loop")
-                tofloat(p, 3, 6)
-                p.fop(4, 2, "-", 3)               # the loop's length
-                p.fop(0, 0, "-", 4)
-            p.if_(7, "EQ", 12, lp, lambda: (p.iconst(6, 0), vs(p, "on", 6)), kind="i")
-        p.if_(0, "GE", 2, over)
-
-    def rev():
-        p.fop(0, 0, "-", 1)
-        v(p, 5, "low")
-        tofloat(p, 2, 5)
-
-        def under():
-            v(p, 7, "mode")
-            p.iconst(12, 1)
-
-            def lp():
-                v(p, 6, "hi")
-                tofloat(p, 3, 6)
-                p.fop(4, 3, "-", 2)
-                p.fop(0, 0, "+", 4)
-            p.if_(7, "EQ", 12, lp, lambda: (p.iconst(6, 0), vs(p, "on", 6)), kind="i")
-        p.if_(0, "LT", 2, under)
-    p.ifz(9, "GT", fwd, rev)
-    vs(p, "spos", 0)
+    v(p, 0, "fade")
+    p.ifz(0, "NE", lambda: (p.iconst(0, 0), vs(p, "on", 0)))
 
 
 def render_werp(p: Prog, L: Layout) -> None:

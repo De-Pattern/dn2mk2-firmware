@@ -216,12 +216,27 @@ static void f_rlen(int v, char *buf)
         put_num(buf, c);
 }
 
-/* the records whose text is ours on a sample machine's track; 239 only on GRID's */
+static void f_slce(int v, char *buf)            /* GRID's SLCE: NOTE, then 1..63 (v0.18, the DT2's) */
+{
+    int s = coarse(v, SMP_SLICE_ID) >> 1;
+    if (s <= 0)
+        put(buf, "NOTE", 4);
+    else
+        put_num(buf, s);
+}
+
+static void f_slen(int v, char *buf)            /* GRID's LEN: how many slices, 1..64 */
+{
+    put_num(buf, (coarse(v, SMP_SLEN_ID) >> 1) + 1);
+}
+
+/* the records whose text is ours on a sample machine's track; 239, SLCE's and LEN's
+ * records only on GRID's (ONESHOT's STRT, LOOP and CFAD are the same records) */
 static const u16 fmt_ids[] = {SMP_PLAY_REC, SMP_MODE_REC, SMP_BARS_REC, SMP_SEG_REC, SMP_GRID_REC,
                               SMP_SAMP_REC, SMP_RSRC_ID, SMP_RCHAN_ID, SMP_ARM_ID, SMP_RSTRT_ID,
-                              SMP_RDST_ID, SMP_RLEN_ID};
+                              SMP_RDST_ID, SMP_RLEN_ID, SMP_SLICE_ID, SMP_SLEN_ID};
 static void (*const fmt_fns[])(int, char *) = {f_play, f_mode, f_bars, f_seg, f_grid, f_samp, f_src,
-                                               f_chan, f_onoff, f_rstrt, f_dest, f_rlen};
+                                               f_chan, f_onoff, f_rstrt, f_dest, f_rlen, f_slce, f_slen};
 #define NFMT (int)(sizeof fmt_ids / sizeof fmt_ids[0])
 static void *stock_fmt[NFMT] __attribute__((section(".data")));
 static int fmt_saved __attribute__((section(".data"))) = 0;
@@ -238,7 +253,9 @@ void smp_formats(int kind)
     int smp = kind >= SMP_KIND0;
     for (int k = 0; k < NFMT; k++) {
         void *f = stock_fmt[k];
-        if (smp && (fmt_ids[k] != SMP_GRID_REC || kind == SMP_GRID_KIND)
+        int grid_only = fmt_ids[k] == SMP_GRID_REC || fmt_ids[k] == SMP_SLICE_ID
+                        || fmt_ids[k] == SMP_SLEN_ID;
+        if (smp && (!grid_only || kind == SMP_GRID_KIND)
             && (fmt_ids[k] != SMP_MODE_REC || kind == SMP_WERP_KIND))
             f = (void *)fmt_fns[k];
         RECORD_FMT(fmt_ids[k]) = f;

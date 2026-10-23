@@ -56,11 +56,27 @@ def test_the_pool_layout():
     assert SM.NAMES_OFFSET + 8 * SM.POOL_SLOTS <= SM.DATA_OFFSET
 
 
-def test_oneshot_plays_the_int16_kick_exactly():
+DT2_MODELS = pathlib.Path(__file__).resolve().parents[2] / "dt2s117" / "research" / "tools"
+
+
+@pytest.mark.skipif(not (DT2_MODELS / "models_reader.py").is_file(),
+                    reason="the DT2 reader's reference model (outside the repository) is not here")
+def test_oneshot_is_the_dt2s_reader():
+    # v0.18: ONESHOT through the DT2's own reader -- its 6-tap interpolator at 96 kHz and
+    # its decimator -- against the bit-exact model of the DT2's code (dt2-reader-exact.md,
+    # outside the repository: it is derived from Elektron's firmware)
+    sys.path.insert(0, str(DT2_MODELS))
+    import models_reader as MR
     out = _play(SM.TYPE_OF["ONESHOT"], {}, 20)
-    q = [max(-32768, min(32767, round(x * 32768))) / 32768 for x in SL.test_samples()[0]]
-    exp = [q[k // 2] if k % 2 == 0 else 0.5 * (q[k // 2] + q[k // 2 + 1]) for k in range(500)]
-    assert max(abs(a - b) for a, b in zip(out[32:532], exp)) < 1e-6
+    pcm = [max(-32768, min(32767, round(x * 32768))) for x in SL.test_samples()[0]]
+    v = MR.Voice(pcm, 0, 0, len(pcm) << 31, 1 << 29, 0)          # 0.25 frames a 96 kHz tick
+    ref = [0.0] * 32
+    for _ in range(19):
+        ref += [float(x) for x in MR.read_block(v, MR.load_polyphase())]
+    # LEV 100 makes up the interpolator's gain (0.4045): the DT2's output times 1 / 0.4045
+    g = struct.unpack("<f", P.tables_bytes()[-4:])[0]
+    err = [abs(a - g * b) for a, b in zip(out, ref)]
+    assert max(err) <= 2.0 ** -13 and sum(e < 1e-6 for e in err) >= 0.99 * len(err)
 
 
 @pytest.mark.parametrize("name", ["REPITCH", "STRETCH", "WERP"])
@@ -69,7 +85,10 @@ def test_the_time_machines_last_bars_at_the_tempo(name):
     samp = 4 if name == "WERP" else 1
     for bpm, want in ((120.0, 0.25), (60.0, 0.5)):
         out = _play(SM.TYPE_OF[name], {SM.BARS_REC: 0, SM.SAMP_REC: samp}, int(want * 1500) + 60, bpm)
-        assert abs(_span(out) - want) < 0.03, (name, bpm, _span(out))
+        # STRETCH (the DT2's): the head reaches the end at the pitch's speed between jumps,
+        # so the region ends up to one grain (2048 samples, 43 ms) early
+        tol = 0.03 + (2048 / 48000 if name == "STRETCH" else 0.0)
+        assert abs(_span(out) - want) < tol, (name, bpm, _span(out))
         assert all(math.isfinite(x) and abs(x) <= 2.0 for x in out)
 
 
@@ -151,35 +170,6 @@ def test_the_drive_region_is_above_everything_the_dn2_uses():
     assert 0x600000 * 512 >= 3 << 30 and (0x600000 + 1 + SM.POOL_BYTES // 512) * 512 < 4 << 30
 
 
-def test_cfad_is_off_with_its_control_off_the_page():
-    assert P.CFAD_ON is False
-    assert all(r != SM.CFAD_REC for r, _s, _l in SM.PAGES["ONESHOT"])
-
-
-def test_cfad_makes_the_loop_seamless(monkeypatch):
-    monkeypatch.setattr(P, "CFAD_ON", True)
-    # ONESHOT FWD LOOP on a sine whose loop does not meet itself: without CFAD the wrap
-    # jumps; with it the step there is no bigger than the sine's own
-    n = 4000
-    snd = [0.8 * math.sin(2 * math.pi * k / 97.3) for k in range(n)]
-
-    def run(cfad):
-        h = SL.Harness(0, samples=[snd], rates=[1.0], fmts=[0])
-        h.defaults()
-        h.set(SM.PLAY_REC, 80)                   # FWDL
-        h.set(SM.LEN_REC, 40)
-        h.set(SM.LOOP_REC, 20)
-        h.set(SM.CFAD_REC, cfad)
-        out = []
-        for b in range(120):
-            out += h.block(SM.TYPE_OF["ONESHOT"], 60.0, b == 1)
-        return out
-    own = max(abs(snd[k + 1] - snd[k]) for k in range(n - 1))
-    jump = lambda o: max(abs(o[k + 1] - o[k]) for k in range(64, len(o) - 1))
-    assert jump(run(0)) > 2 * own
-    assert jump(run(127)) <= own * 1.05
-
-
 def _check(h):
     st = h.status()
     return st[15] == (SM.LINK_SEED + sum(st[:15])) & 0xFFFF and st[0] & 0xFF00 == SM.STATUS_MAGIC
@@ -208,7 +198,11 @@ def test_the_recorder_records_and_plays_back():
     out = []
     for b in range(20):
         out += h.block(ONE, 60.0, b == 0)
-    assert max(abs(a - b) for a, b in zip(out, sig[:len(out)])) < 1e-4
+    # v0.18: through the DT2's reader, a 440 Hz sine plays back at its level, a few samples
+    # late (the interpolator and the decimator); the last two blocks fade out (the DT2's)
+    best = min(max(abs(a - b) for a, b in zip(out[64 + d:-64], sig[64:len(out) - 64 - d]))
+               for d in range(8))
+    assert best < 0.03                       # (the all-pass delays by a fraction of a sample too)
 
 
 def test_the_recorder_waits_for_its_threshold_and_stops_at_its_length():
@@ -316,14 +310,17 @@ def test_a_loop_follows_len_loop_and_play_while_it_sounds():
     for b in range(100):
         later += h.block(ONE, 60.0, False)
     tail = later[-2000:]
-    assert max(tail) < 757 / n and min(tail) >= 377 / n - 1e-6    # looping in the new region
+    # v0.18: through the DT2's reader (its interpolator and decimator ring a little at
+    # the loop's seam, a few frames' worth of the ramp)
+    eps = 100 / n                                 # (a quarter of the seam's step)
+    assert max(tail) < 757 / n + eps and min(tail) >= 377 / n - eps    # looping in the new region
     h.set(SM.PLAY_REC, 40)                       # REV LOOP, mid-note: it turns round
     rev = []
     for b in range(40):
         rev += h.block(ONE, 60.0, False)
-    steps = [rev[k + 1] - rev[k] for k in range(len(rev) - 1)]
+    steps = [rev[k + 16] - rev[k] for k in range(0, len(rev) - 16, 16)]   # (over 16: the filters ripple)
     assert sum(1 for d in steps if d < 0) > 0.9 * len(steps)        # mostly backward
-    assert max(rev[-1000:]) < 757 / n and min(rev[-1000:]) >= 377 / n - 1e-6
+    assert max(rev[-1000:]) < 757 / n + eps and min(rev[-1000:]) >= 377 / n - eps
 
 
 def test_one_detent_a_choice_lands_inside_each_choice():
@@ -455,3 +452,25 @@ def test_smp_asm_is_the_program_as_it_now_is():
     want = [norm(ln) for ln in G.build().splitlines()]
     have = [norm(ln) for ln in (root / "csrc/waverider/sharc/smp.asm").read_text().splitlines()]
     assert have == want, "run scripts/gen_smp_asm.py, then gen_waverider_sharc.py --assemble"
+
+
+def test_repitch_ignores_the_note_and_tune_as_the_dt2s():
+    rp = SM.TYPE_OF["REPITCH"]
+    a = _play(rp, {SM.SAMP_REC: 4, SM.BARS_REC: 50}, 30, note=60.0)
+    b = _play(rp, {SM.SAMP_REC: 4, SM.BARS_REC: 50, SM.TUNE_REC: 100}, 30, note=72.0)
+    assert any(abs(x) > 1e-3 for x in a) and a == b
+
+
+def test_grid_slce_note_lets_the_note_pick_the_slice_at_the_samples_pitch():
+    g = SM.TYPE_OF["GRID"]
+    for k in (0, 3, 9):
+        by_note = _play(g, {SM.SAMP_REC: 4, SM.SLICE_REC: 0}, 12, note=12.0 + k)
+        by_knob = _play(g, {SM.SAMP_REC: 4, SM.SLICE_REC: 2 * (k + 1)}, 12, note=60.0)
+        assert any(abs(x) > 1e-3 for x in by_note) and by_note == by_knob, k
+
+
+def test_stretch_crossfades_its_jumps_without_a_step():
+    # a sine stretched: after each jump the output moves no more than a ramp would
+    st = _play(SM.TYPE_OF["STRETCH"], {SM.SAMP_REC: 1, SM.BARS_REC: 26}, 200)
+    d = max(abs(a - b) for a, b in zip(st[64:], st[65:]))
+    assert d < 0.2

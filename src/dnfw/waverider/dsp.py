@@ -97,6 +97,10 @@ SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0
 SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sampler.machines.REC_STAGE)
 SMP_LINK_DM = SMP_STAGE_DM + 0x80            # the fast link's scratch, then its packet buffer (v0.16)
 SMP_POOL_DDR = 0x84000000                    # the pool's directory, then its frames
+# v0.18: the DT2 reader's coefficients (dnfw.sampler.program.tables_bytes, from the owner's
+# DT2 image) in DDR; each voice's decimator (12 words) in L1, where Waverider's loop was
+SMP_TABLES_DDR = 0x81218000
+SMP_DEC_DM = SMP_LINK_DM + 0x500                        # 16 x 48 bytes, to 0x2e0080 (W2_RND_DM is 0x2e0100)
 # W2's random table (dnfw.waverider.live.rnd_table): Waverider is gone (v0.11), but
 # RESONATOR, CZ and GRAN read it here
 W2_RND_DM = 0x2E0100                                         # 256 float32 in [0, 1)
@@ -242,7 +246,7 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("sample machines' scratch (zeros)", SMP_SCRATCH_DM, bytes(0x100)),
         ("the recorder's staging block: 32 floats (zeros)", SMP_STAGE_DM, bytes(0x80)),
         ("the fast link's scratch and packet buffer (zeros; v0.16)", SMP_LINK_DM, bytes(0x500)),
-        ("free since v0.11 (Waverider's loop, scanner and tables; zeros)", SMP_LINK_DM + 0x500, b""),
+        ("sample machines' decimators: 16 voices x 48 bytes (zeros; v0.18)", SMP_DEC_DM, bytes(16 * 48)),
         ("W2 random table, 256 float32 (RESONATOR, CZ, GRAN)", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
         ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
         ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),
@@ -307,6 +311,8 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("SHFT tables", SHFT_TABLES_DDR, _shft_tables()),
         ("GRAN tables", GRAN_TABLES_DDR, _gran_tables()),
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
+        ("the DT2 sample reader's coefficients (from the owner's DT2 image; v0.18)", SMP_TABLES_DDR,
+         _smp_tables()),
         ("Machinedrum sine (zeros: the DSP fills it)", MD_TABLES_DDR, bytes(4 * _md_core().SINE_N)),
         ("Machinedrum tables (from the owner's MD firmware)", MD_TABLES_DDR + _md_core().TABLE_LAYOUT["sinecorr"][0],
          _md_core().tables_bytes()),
@@ -316,6 +322,11 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
          SMP_POOL_DDR, _smp_pool()[:8]),
         ("sample pool: the rest of its directory and names (zeros)", SMP_POOL_DDR + 8,
          bytes(len(_smp_pool()) - 8))]
+
+
+def _smp_tables() -> bytes:
+    from ..sampler import program as smp_program
+    return smp_program.tables_bytes()
 
 
 def _smp_pool() -> bytes:
