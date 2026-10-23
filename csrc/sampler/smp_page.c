@@ -25,11 +25,16 @@ typedef unsigned char u8;
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90)
 #define TEXT      ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011545C)
 #define FONT      0x44507ED8u
+#define LABEL_FONT 0x40291760u                  /* the stock grid's 4 x 5 label font: the DT2's labels' */
+/* the stock grid's label text (0x40115668, as 0x4006448a calls it for each cell's name):
+ * (canvas, font, x, y, align 1 centred, frame 0 none, width template 0, format, ...) */
+#define LABEL_TEXT ((void (*)(void *, u32, int, int, int, int, const char *, const char *, ...))0x40115668u)
+#define LABEL(c, x, y, fmt, ...) LABEL_TEXT((c), LABEL_FONT, (x), (y), 1, 0, 0, fmt, __VA_ARGS__)
 #define CENTRED   2
 #define RECORD(id) ((const int *)(0x401F7F94u + 60u * (id)))
 #define NAME_SHORT(id) (*(const char **)(0x401F7F94u + 60u * (id) + 0x30u))
 
-#define CELL_X(k) (25 + 26 * (k))
+#define CELL_X(k) (21 + 26 * (k))         /* v0.20: the DT2's centres, 33 + 26 k (its own screen, measured) */
 #define TOP_Y 34
 #define BOT_Y 7
 
@@ -122,60 +127,81 @@ static int sin256(int x)
     return s * (a + (b - a) * (i & 3) / 4);
 }
 
+/* v0.20: the widgets in the DT2's own geometry, measured from its SRC page (OS 1.17 in
+ * the emulator, digikit): a cell is 26 wide, centred at X + 12; a widget 17 rows tall from
+ * Y; its label 7 below, in the 4 x 5 label font. */
+
 /* the play-mode icon (PLAY, and WERP's MODE): FWD |->|, REV |<-|, the loops a loop */
 static void w_play(void *c, int x, int y, int mode)
 {
-    int cy = y + 8, x0 = x + 5, x1 = x + 18;
+    int cx = x + 12, cy = y + 8, x0 = cx - 8, x1 = cx + 8;
     if (mode == 3 || mode == 0) {
-        vline(c, x0, cy - 4, cy + 4, 0);
-        vline(c, x1, cy - 4, cy + 4, 0);
-        hline(c, x0, x1, cy, 0);
-        int tip = mode == 3 ? x1 - 1 : x0 + 1, d = mode == 3 ? -1 : 1;
-        for (int k = 1; k <= 3; k++) {
-            on(c, tip + d * k, cy + k);
-            on(c, tip + d * k, cy - k);
-        }
+        vline(c, x0, y + 2, y + 14, 0);
+        vline(c, x1, y + 2, y + 14, 0);
+        int fwd = mode == 3;                    /* PLAY_MODES: REV, REVL, FWDL, FWD */
+        hline(c, fwd ? x0 : x0 + 2, fwd ? x1 - 2 : x1, cy, 0);
+        int tip = fwd ? cx + 4 : cx - 4, d = fwd ? 1 : -1;
+        vline(c, tip, cy - 2, cy + 2, 0);
+        vline(c, tip + d, cy - 1, cy + 1, 0);
     } else {                                    /* a loop of arrows, F or R beside it */
-        hline(c, x0 + 2, x0 + 8, cy + 4, 0);
-        hline(c, x0 + 2, x0 + 8, cy - 4, 0);
-        vline(c, x0, cy - 2, cy + 2, 0);
-        vline(c, x0 + 10, cy - 2, cy + 2, 0);
-        on(c, x0 + 1, cy + 3); on(c, x0 + 9, cy + 3); on(c, x0 + 1, cy - 3); on(c, x0 + 9, cy - 3);
-        int ax = mode == 2 ? x0 + 7 : x0 + 3, d = mode == 2 ? -1 : 1;
+        int lx = cx - 7;
+        hline(c, lx + 2, lx + 8, cy + 4, 0);
+        hline(c, lx + 2, lx + 8, cy - 4, 0);
+        vline(c, lx, cy - 2, cy + 2, 0);
+        vline(c, lx + 10, cy - 2, cy + 2, 0);
+        on(c, lx + 1, cy + 3); on(c, lx + 9, cy + 3); on(c, lx + 1, cy - 3); on(c, lx + 9, cy - 3);
+        int ax = mode == 2 ? lx + 7 : lx + 3, d = mode == 2 ? -1 : 1;
         on(c, ax + d, cy + 5); on(c, ax + d, cy + 3);
-        TEXT(c, FONT, x0 + 15, cy - 3, 0, "%c", mode == 2 ? 'F' : 'R');
+        LABEL(c, lx + 15, cy - 2, "%c", mode == 2 ? 'F' : 'R');
     }
 }
 
 static void w_bipolar(void *c, int x, int y, int v, int top)
 {
-    /* the DT2's TUNE: a rounded box, a dotted line through it, the value in the middle */
-    int x0 = x + 1, x1 = x + 22, y0 = y + 3, y1 = y + 13, cy = (y0 + y1) / 2;
+    /* the DT2's TUNE: a box 21 x 15 with a tick at the middle of its top and bottom, the
+     * value in the middle */
+    int cx = x + 12, x0 = cx - 10, x1 = cx + 10, y0 = y + 1, y1 = y + 15;
     box(c, x0, y0, x1, y1, 0);
+    vline(c, cx, y1 - 2, y1 - 1, 0);
+    vline(c, cx, y0 + 1, y0 + 2, 0);
     int semis = v - top / 2;
-    hline(c, x0 + 2, x0 + 6, cy, 1);
-    hline(c, x1 - 6, x1 - 2, cy, 1);
     if (semis == 0)
-        TEXT(c, FONT, (x0 + x1) / 2 + 1, cy - 3, CENTRED, "0");
+        LABEL(c, cx + 1, y + 6, "%s", "0");
     else
-        TEXT(c, FONT, (x0 + x1) / 2 + 1, cy - 3, CENTRED, "%c%d", semis < 0 ? '-' : '+',
-             semis < 0 ? -semis : semis);
+        LABEL(c, cx + 1, y + 6, "%c%d", semis < 0 ? '-' : '+', semis < 0 ? -semis : semis);
 }
 
 static void w_empty(void *c, int x, int y)
 {
-    box(c, x + 5, y + 1, x + 19, y + 15, 1);    /* the DT2's empty place: a dotted square */
+    int cx = x + 12;                            /* the DT2's empty place: a dotted square */
+    for (int k = -7; k <= 7; k += 2) {
+        on(c, cx + k, y);
+        on(c, cx + k, y + 16);
+    }
+    for (int r = 1; r <= 15; r += 2) {
+        on(c, cx - 8, y + r);
+        on(c, cx + 8, y + r);
+    }
 }
 
 static void w_samp(void *c, int x, int y, int slot)
 {
-    int x0 = x + 1, x1 = x + 22, y0 = y + 3, y1 = y + 13;
-    fill(c, x0, y0, x0 + 8, y1);                /* the bank letter, cut out */
-    box(c, x0, y0, x1, y1, 0);
-    glyph(c, x0 + 3, y0 + 3, 'A', 0);
+    /* the DT2's SAMP: a box 22 x 15, its left seven columns filled with the bank letter
+     * cut out, the slot's number on the right */
+    int cx = x + 12, x0 = cx - 10, x1 = cx + 10, y0 = y + 1, y1 = y + 15;
+    hline(c, x0 + 1, x1 - 1, y0, 0);
+    hline(c, x0 + 1, x1 - 1, y1, 0);
+    vline(c, x1, y0 + 1, y1 - 1, 0);
+    fill(c, x0, y0 + 1, x0 + 6, y1 - 1);
+    /* the bank letter, cut out: the DT2's flat-topped A */
+    static const unsigned char bank_a[5] = {7, 5, 7, 5, 5};      /* rows top..bottom, bit 2 = left */
+    for (int r = 0; r < 5; r++)
+        for (int b = 0; b < 3; b++)
+            if (bank_a[r] & (4 >> b))
+                SET_PIXEL(c, x0 + 2 + b, y + 10 - r, 0);
     if (slot == 0) {                            /* OFF: two dashes */
-        glyph(c, x0 + 11, y0 + 3, '-', 1);
-        glyph(c, x0 + 15, y0 + 3, '-', 1);
+        glyph(c, cx + 0, y + 6, '-', 1);
+        glyph(c, cx + 4, y + 6, '-', 1);
         return;
     }
     char d[4];
@@ -183,27 +209,62 @@ static void w_samp(void *c, int x, int y, int slot)
     if (slot >= 100) d[n++] = '0' + slot / 100;
     if (slot >= 10) d[n++] = '0' + slot / 10 % 10;
     d[n++] = '0' + slot % 10;
-    int gx = x0 + 11 + (3 - n) * 2;
+    int gx = cx + 2 - 2 * (n - 1);
     for (int k = 0; k < n; k++)
-        glyph(c, gx + 4 * k, y0 + 3, d[k], 1);
+        glyph(c, gx + 4 * k, y + 6, d[k], 1);
 }
 
-static void w_knob(void *c, int x, int y, int v, int top)
+/* the DT2's knob: a circle of radius 8 (its own pixels, by row from the centre) */
+static const signed char knob_x[9][2] = {
+    {8, 8}, {8, 8}, {8, 8}, {7, 7}, {7, 7}, {6, 6}, {5, 5}, {3, 4}, {0, 2}};
+
+static void w_knob_ring(void *c, int cx, int cy)
 {
-    int cx = x + 12, cy = y + 8, r = 7;
-    for (int a = 0; a < 256; a += 2)            /* a whole ring, as the DT2 draws it */
-        on(c, cx + sin256(a) * r / 127, cy + sin256(a + 64) * r / 127);
+    for (int r = 0; r <= 8; r++) {
+        int a = knob_x[r][0], b = knob_x[r][1];
+        for (int k = a; k <= b; k++) {
+            on(c, cx - k, cy + r); on(c, cx + k, cy + r);
+            on(c, cx - k, cy - r); on(c, cx + k, cy - r);
+        }
+    }
+}
+
+static void w_knob_at(void *c, int x, int y, int v, int top, int dotted)
+{
+    int cx = x + 12, cy = y + 8;
+    w_knob_ring(c, cx, cy);
     int ang = 160 + v * 192 / (top ? top : 1);  /* 7 o'clock .. 5 o'clock, clockwise */
-    for (int k = 0; k <= r - 1; k++)
-        on(c, cx + sin256(ang) * k / 127, cy + sin256(ang + 64) * k / 127);
+    /* the pointer: a line from the centre, 7 long (at 7:30, five steps on the diagonal,
+     * as the DT2's); dotted, every other point of it */
+    int ex = (sin256(ang) * 7 + (sin256(ang) < 0 ? -63 : 63)) / 127;
+    int ey = (sin256(ang + 64) * 7 + (sin256(ang + 64) < 0 ? -63 : 63)) / 127;
+    int dx = ex < 0 ? -ex : ex, dy = ey < 0 ? -ey : ey, sx = ex < 0 ? -1 : 1, sy = ey < 0 ? -1 : 1;
+    int err = dx - dy, px = 0, py = 0;
+    for (int k = 0; k < 16; k++) {
+        if (!dotted || !(k & 1))
+            on(c, cx + px, cy + py);
+        if (px == ex && py == ey)
+            break;
+        int e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; px += sx; }
+        if (e2 < dx) { err += dx; py += sy; }
+    }
 }
 
 static void w_fader(void *c, int x, int y, int v, int top)
 {
-    int x0 = x + 9, x1 = x + 14, y0 = y + 1, y1 = y + 16;
-    box(c, x0, y0, x1, y1, 0);
-    int h = v * (y1 - y0 - 2) / (top ? top : 1);
-    fill(c, x0 + 2, y0 + 1, x1 - 2, y0 + 1 + h);
+    /* the DT2's level fader: a 9 x 17 outline, filled from the bottom; two marks at its top */
+    int cx = x + 12, x0 = cx - 4, x1 = cx + 4;
+    hline(c, x0 + 1, x1 - 1, y, 0);
+    hline(c, x0 + 1, x1 - 1, y + 16, 0);
+    vline(c, x0, y + 1, y + 15, 0);
+    vline(c, x1, y + 1, y + 15, 0);
+    on(c, cx - 2, y + 14);
+    on(c, cx + 2, y + 14);
+    int h = top ? (v * 13 + top - 1) / top : 0;
+    if (h > 13) h = 13;
+    if (h > 0)
+        fill(c, cx - 2, y + 2, cx + 2, y + 1 + h);
 }
 
 /* a level as the DT2's ONESHOT shows it on its bottom row: a pill, filled to the value */
@@ -266,8 +327,11 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
         w_empty(c, x, y);
     else if (w == W_SAMP)
         w_samp(c, x, y, v);
-    else if (w == W_KNOB)
-        w_knob(c, x, y, v, top);
+    else if (w == W_KNOB) {
+        /* LOOP's pointer dotted while PLAY does not loop, as the DT2 draws it */
+        int mode = kind == SMP_KIND0 && id == SMP_LOOP_ID ? value(view, SMP_PLAY_ID, 0) * 4 / 128 : 1;
+        w_knob_at(c, x, y, v, top, mode != 1 && mode != 2);
+    }
     else if (w == W_FADER) {
         if (pill)
             w_pill(c, x, y, v, top);
@@ -289,7 +353,7 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
         }
     }
     if (labelled && id)
-        TEXT(c, FONT, x + 12, y - 7, CENTRED, "%.4s", label);
+        LABEL(c, x + 12, y - 7, "%.4s", label);
 }
 
 /* the waveform strip: the slot's sound, peak per column, from X0 across SMP_WAVE_W at
@@ -451,7 +515,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     }
     /* page 2: the top row, unlabelled, raised a little; the waveform; the bottom labels */
     for (int i = 0; i < 4; i++)
-        cell(c, view, kind, ids[i], CELL_X(i), TOP_Y + 4, 0, 0);
+        cell(c, view, kind, ids[i], CELL_X(i), TOP_Y + 3, 0, 0);
     int slot = value(view, SMP_SAMP_ID, 0);
     int x0 = CELL_X(0) - 1, cy = 21;
     waveform(c, slot, x0, cy);
@@ -508,7 +572,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         else if (kind == SMP_WERP_KIND && ids[i] == SMP_BARS_ID)
             fill(c, x + 6, 2, x + 17, 4);
         else
-            TEXT(c, FONT, x + 12, 0, CENTRED, "%.5s", NAME_SHORT(ids[i]));
+            LABEL(c, x + 12, 0, "%.5s", NAME_SHORT(ids[i]));
     }
     if (ids[7]) {
         int top, v = value(view, ids[7], &top);
@@ -579,7 +643,7 @@ void smp_rec_draw(void *view, void *c)
     const char *src = smp_rec_src[rec_src > SMP_REC_SOURCES - 1 ? SMP_REC_SOURCES - 1 : rec_src];
     TEXT(c, FONT, 14, 37, CENTRED, "%.5s", src);
     TEXT(c, FONT, 14, 30, CENTRED, "%.3s", smp_rec_chan[rec_chan > 2 ? 2 : rec_chan]);
-    TEXT(c, FONT, 14, 22, CENTRED, "SRC");
+    LABEL(c, 14, 22, "%s", "SRC");
 
     /* the RECORD NOW box: what YES does, or what the recorder is doing */
     int bx0 = 31, bx1 = 95, by0 = 22, by1 = 43;
@@ -608,11 +672,11 @@ void smp_rec_draw(void *view, void *c)
 
     /* THRES, on the right */
     TEXT(c, FONT, 111, 33, CENTRED, "%d", rec_thres);
-    TEXT(c, FONT, 111, 22, CENTRED, "THRES");
+    LABEL(c, 111, 22, "%s", "THRES");
 
     /* the bottom row: DEST, R.LEN, R.STRT, ARM */
-    w_samp(c, 3, 4, SMP_REC_FIRST + 1 + rec_dest);
-    TEXT(c, FONT, 14, 0, CENTRED, "DEST");
+    w_samp(c, 3, 5, SMP_REC_FIRST + 1 + rec_dest);
+    LABEL(c, 14, 0, "%s", "DEST");
     if (rec_rlen <= 0) {
         TEXT(c, FONT, 50, 13, CENTRED, "MAX");
         TEXT(c, FONT, 50, 6, CENTRED, "%d.%d", SMP_REC_SECONDS10 / 10, SMP_REC_SECONDS10 % 10);
@@ -620,9 +684,9 @@ void smp_rec_draw(void *view, void *c)
         TEXT(c, FONT, 50, 13, CENTRED, "%d", rec_rlen);
         TEXT(c, FONT, 50, 6, CENTRED, "STEPS");
     }
-    TEXT(c, FONT, 50, 0, CENTRED, "R.LEN");
+    LABEL(c, 50, 0, "%s", "R.LEN");
     TEXT(c, FONT, 82, 8, CENTRED, rec_rstrt ? "PLAY" : "THRES");
-    TEXT(c, FONT, 82, 0, CENTRED, "R.STRT");
+    LABEL(c, 82, 0, "%s", "R.STRT");
     int on = state == 1 || state == 2;           /* ARM's switch: what the DSP is doing */
     int sx0 = 103, sx1 = 119, sy0 = 8, sy1 = 14;
     box(c, sx0, sy0, sx1, sy1, 0);
@@ -630,5 +694,5 @@ void smp_rec_draw(void *view, void *c)
         fill(c, sx1 - 7, sy0 + 2, sx1 - 2, sy1 - 2);
     else
         box(c, sx0 + 2, sy0 + 2, sx0 + 7, sy1 - 2, 0);
-    TEXT(c, FONT, 111, 0, CENTRED, "ARM");
+    LABEL(c, 111, 0, "%s", "ARM");
 }
