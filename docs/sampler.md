@@ -317,6 +317,11 @@ repository: they are derived from Elektron's firmware).
   segment a trigger), in MODE, until the next one starts.
 - **Ends**: a voice that does not loop and reaches its end within the next two blocks is
   faded out over this one and ends (the DT2's look-ahead): no click at a sample's end.
+- **BARS is 1, 2, 4 or 8** (default 4) and **WERP's SEG is a segment's length, 1/32, 1/16
+  or 1/8 of a bar** (default 1/16), as on the DT2 OS 1.17 (its parameter descriptors and
+  formatters; `dt2-coldfire-werp.md`): the sample is (32 >> SEG) << BARS segments, each
+  lasting its note value at the tempo, so the whole lasts BARS bars. (v0.13..v0.17 had
+  BARS 1/8 .. 16 and SEG 128 .. 1 segments, from an earlier reading.)
 - **CFAD** (v0.14, off since v0.15) is gone: the DT2 has no such control.
 - What is still ours: the loops follow STRT, LEN, LOOP and PLAY while a note sounds (the
   DT2 takes them at the note; v0.15 asked for this); WERP sequences its segments on the

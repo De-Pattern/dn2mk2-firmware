@@ -81,13 +81,14 @@ def test_oneshot_is_the_dt2s_reader():
 
 @pytest.mark.parametrize("name", ["REPITCH", "STRETCH", "WERP"])
 def test_the_time_machines_last_bars_at_the_tempo(name):
-    # 1/8 bar (BARS 0) at 120 BPM: 0.25 s; at 60 BPM, 0.5 s
+    # 1 bar (BARS 0, v0.18: the DT2's 1, 2, 4, 8) at 480 BPM: 0.5 s; at 240 BPM, 1 s
     samp = 4 if name == "WERP" else 1
-    for bpm, want in ((120.0, 0.25), (60.0, 0.5)):
+    for bpm, want in ((480.0, 0.5), (240.0, 1.0)):
         out = _play(SM.TYPE_OF[name], {SM.BARS_REC: 0, SM.SAMP_REC: samp}, int(want * 1500) + 60, bpm)
         # STRETCH (the DT2's): the head reaches the end at the pitch's speed between jumps,
         # so the region ends up to one grain (2048 samples, 43 ms) early
-        tol = 0.03 + (2048 / 48000 if name == "STRETCH" else 0.0)
+        # (by up to (pitch / T - 1) grains: the kick's pitch is 4 T here)
+        tol = 0.03 + (3 * 2048 / 48000 if name == "STRETCH" else 0.0)
         assert abs(_span(out) - want) < tol, (name, bpm, _span(out))
         assert all(math.isfinite(x) and abs(x) <= 2.0 for x in out)
 

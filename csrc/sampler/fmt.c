@@ -137,7 +137,7 @@ static void f_bars(int v, char *buf)
 
 static void f_seg(int v, char *buf)
 {
-    int n = 128 >> steps_at(coarse(v, SMP_SEG_REC), smp_seg_steps);
+    int n = 32 >> steps_at(coarse(v, SMP_SEG_REC), smp_seg_steps);   /* v0.18: 1/32, 1/16, 1/8 (the DT2's) */
     if (n == 1) {
         put(buf, "1", 2);
         return;

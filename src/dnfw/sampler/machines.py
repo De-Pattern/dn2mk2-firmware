@@ -60,10 +60,15 @@ GRID_REC, SLICE_REC, SLEN_REC = 239, 257, 260
 BARS_REC, SEG_REC, MODE_REC = 240, 242, 255
 CFAD_REC = 260                                     # ONESHOT's crossfade (v0.14; off the page from v0.15,
                                                    # whose C is the DT2's empty box; GRID's LEN is the same record)
-BARS = (0.125, 0.25, 0.5, 1, 2, 4, 8, 16)          # BARS 0..100 in eight: index v * 8 // 101
-BARS_STEPS = tuple(-(-101 * k // 8) for k in range(1, 8))   # the thresholds: 13 26 38 51 64 76 89
-SEGS = (128, 64, 32, 16, 8, 4, 2, 1)               # SEG 0..120 in eight: index v * 8 // 121
-SEG_STEPS = tuple(-(-121 * k // 8) for k in range(1, 8))
+# v0.18, the DT2's own (its OS 1.17 descriptors and formatters, dt2-coldfire-werp.md):
+# BARS 1, 2, 4, 8 (default 4); WERP's SEG a segment's length, 1/32, 1/16, 1/8 of a bar
+# (default 1/16), so the sample is (32 >> SEG) << BARS segments. The thresholds put
+# the records' defaults (BARS 50, SEG 60) on the DT2's. Seven thresholds each, as the
+# ColdFire's tables have room for, the unused ones past any value (255).
+BARS = (1, 2, 4, 8)                                # BARS 0..100 in four: 0..12, 13..37, 38..62, 63..
+BARS_STEPS = (13, 38, 63, 255, 255, 255, 255)
+SEGS = (32, 16, 8)                                 # 1/32, 1/16, 1/8 of a bar: SEG 0..120 in three
+SEG_STEPS = (40, 80, 255, 255, 255, 255, 255)
 PLAY_MODES = ("REV", "REVL", "FWDL", "FWD")        # PLAY 0..127 in four, FWD at its default (top)
 GRIDS = (4, 8, 16, 32, 64)                         # GRID 0..120 in five
 LEV_UNITY = 100                                    # LEV 100 plays the sample at its level
@@ -143,8 +148,8 @@ QUANT = (
     # (machines, record, zone starts (raw), the value set for each choice (raw))
     (ALL, PLAY_REC, (32, 64, 96), (0, 32, 64, 127)),
     (("WERP",), MODE_REC, (32, 64, 96), (0, 32, 64, 127)),
-    (("WERP", "STRETCH", "REPITCH"), BARS_REC, BARS_STEPS, (0, 13, 26, 50, 51, 64, 76, 89)),
-    (("WERP",), SEG_REC, tuple(4 + x for x in SEG_STEPS), (4, 20, 35, 64, 65, 80, 95, 110)),
+    (("WERP", "STRETCH", "REPITCH"), BARS_REC, BARS_STEPS[:3], (0, 25, 50, 75)),
+    (("WERP",), SEG_REC, tuple(4 + x for x in SEG_STEPS[:2]), (24, 64, 104)),
     (("GRID",), GRID_REC, (24, 48, 72, 96), (0, 24, 48, 72, 96)),
     (ALL, RSRC_REC, _zones(len(SRC_NAMES), 128), (0,) + _zones(len(SRC_NAMES), 128)),
 )

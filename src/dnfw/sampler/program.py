@@ -902,13 +902,14 @@ def tempo(p: Prog, L: Layout) -> None:
     C = L.C
     p.ld(9, C["t"])
     PP.t146(p, 10, 9)
-    ctl(p, 4, SM.BARS_REC, 10)               # 0..100 -> 0..7
-    p.iconst(5, -3)
-    for k in SM.BARS_STEPS:
+    ctl(p, 4, SM.BARS_REC, 10)               # 0..100 -> 0..3: 1, 2, 4, 8 bars (v0.18, the DT2's)
+    p.iconst(5, 0)
+    for k in SM.BARS_STEPS[:len(SM.BARS) - 1]:
         p.iconst(12, k)
         p.if_(4, "GE", 12, lambda: (p.iconst(12, 1), p.iop(5, 12, "+", 5)), kind="i")
+    p.st(C["b"], 5)                          # BARS' index (WERP's segments, below)
     p.iconst(8, 1)
-    p.float_(8, 8, 5)                        # bars = 2^(idx - 3)
+    p.float_(8, 8, 5)                        # bars = 2^idx
     p.fconst(12, 4 * 60 * 48000 * 120.0)
     p.fop(8, 8, "*", 12)                     # bars x 1.3824e9
     p.iconst(10, 0)
@@ -920,6 +921,9 @@ def tempo(p: Prog, L: Layout) -> None:
     PM.recip(p, 9, 8)
     v(p, 4, "hi")
     v(p, 5, "lo")
+    v(p, 0, "mach")                          # v0.18: WERP's lo..hi is its segment: the whole sample
+    p.iconst(12, SM.TYPE_OF["WERP"])
+    p.if_(0, "EQ", 12, lambda: (v(p, 4, "frames"), p.iconst(5, 0)), kind="i")
     p.ipass(12, 4)
     p.iop(4, 12, "-", 5)
     tofloat(p, 6, 4)
@@ -934,16 +938,19 @@ def tempo(p: Prog, L: Layout) -> None:
     p.iconst(12, 2)
     p.if_(0, "LT", 12, lambda: p.iconst(1, -1), kind="i")
     p.st(C["dir"], 1)
-    # WERP: SEG (0..120) -> 128 >> (v * 8 // 121) segments, MODE (0..127) -> 0..3
+    # WERP (v0.18, the DT2's): SEG (0..120) -> a segment of 1/32, 1/16 or 1/8 bar, so
+    # (32 >> SEG) << BARS segments: 2^(5 - SEG + BARS); MODE (0..127) -> 0..3
     p.ld(9, C["t"])
     PP.t146(p, 10, 9)
     ctl(p, 4, SM.SEG_REC, 10)
-    p.iconst(5, 7)
-    for k in SM.SEG_STEPS:
+    p.ld(5, C["b"])
+    p.iconst(12, 5)
+    p.iop(5, 12, "+", 5)
+    for k in SM.SEG_STEPS[:len(SM.SEGS) - 1]:
         p.iconst(12, k)
         p.if_(4, "GE", 12, lambda: (p.iconst(12, -1), p.iop(5, 12, "+", 5)), kind="i")
     p.iconst(6, 1)
-    PP._shift_by(p, 6, 5)                    # nseg = 2^(7 - idx)
+    PP._shift_by(p, 6, 5)                    # nseg = 2^(5 - SEG + BARS)
     p.st(C["nseg"], 6)
     p.iconst(12, 0)
     p.iop(12, 12, "-", 5)                    # -log2(nseg)

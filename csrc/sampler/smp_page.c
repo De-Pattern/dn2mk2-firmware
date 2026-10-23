@@ -229,9 +229,9 @@ static void w_seg(void *c, int x, int y, int n)
 
 static void w_bars(void *c, int x, int y, int idx, const char *text)
 {
-    /* the DT2's BARS icon: one short bar for a fraction, then 1, 2 or 4 blocks */
-    int n = idx < 3 ? 1 : idx == 3 ? 1 : idx == 4 ? 2 : 4;
-    int w = idx < 3 ? 3 + 3 * idx : 12;
+    /* the DT2's BARS icon: 1, 2 or 4 blocks (v0.18: BARS 1, 2, 4, 8; 8 is four too) */
+    int n = idx == 0 ? 1 : idx == 1 ? 2 : 4;
+    int w = 12;
     int gap = n > 1 ? 2 : 0, each = (w - gap * (n - 1)) / n;
     int x0 = x + 12 - w / 2;
     for (int k = 0; k < n; k++)
@@ -272,7 +272,7 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
         else
             w_fader(c, x, y, v, top);
     } else if (w == W_SEG)
-        w_seg(c, x, y, 128 >> steps_index(v, smp_seg_steps));
+        w_seg(c, x, y, 32 >> steps_index(v, smp_seg_steps));    /* v0.18: a segment, 1/32 .. 1/8 */
     else if (w == W_BARS) {
         if (kind == SMP_GRID_KIND && id == SMP_GRID_ID) {
             static char g[4] __attribute__((section(".data")));
@@ -450,7 +450,8 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         marker(c, a, cy, 0);
         marker(c, b, cy, 0);
     } else if (kind == SMP_WERP_KIND) {         /* the whole sample, its segments marked */
-        int n = 128 >> steps_index(value(view, SMP_SEG_ID, 0), smp_seg_steps);
+        int n = (32 >> steps_index(value(view, SMP_SEG_ID, 0), smp_seg_steps))
+                << steps_index(value(view, SMP_BARS_ID, 0), smp_bars_steps);   /* the segments: (32 >> SEG) << BARS */
         for (int j = 0; j <= n && n <= 32; j++)
             marker(c, x0 + j * (w - 1) / n, cy, j != 0 && j != n);
     } else {

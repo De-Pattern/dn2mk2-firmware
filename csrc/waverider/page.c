@@ -524,11 +524,11 @@ static const char *smp_text(void *view, u32 id, int kind, const char *label)
             k++;
         return smp_bars[k];
     }
-    if (id == SMP_SEG_ID) {                     /* segments: 128 >> index */
+    if (id == SMP_SEG_ID) {                     /* a segment, 1/n of a bar: 32 >> index (v0.18) */
         int v = smp_get(view, id), k = 0;
         while (k < 7 && v >= smp_seg_steps[k])
             k++;
-        int n = 128 >> k;
+        int n = 32 >> k;
         buf[0] = 'S';
         if (n >= 100) { buf[1] = '1'; buf[2] = '2'; buf[3] = '8'; buf[4] = 0; }
         else if (n >= 10) { buf[1] = '0' + n / 10; buf[2] = '0' + n % 10; buf[3] = 0; }
@@ -572,7 +572,7 @@ static void smp_picture(void *c, void *view, int kind)
         int v = smp_get(view, SMP_SEG_ID), j = 0;
         while (j < 7 && v >= smp_seg_steps[j])
             j++;
-        int n = 128 >> j;
+        int n = 32 >> j;                        /* (per bar; the ticks are drawn up to 32) */
         a = 0;
         b = w;
         for (int i = 0; i <= n && n <= 32; i++)

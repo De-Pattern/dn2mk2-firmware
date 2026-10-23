@@ -297,7 +297,7 @@ def smp_c_header() -> str:
             f"#define SMP_REC_SOURCES {len(_smp.SRC_NAMES)}\n"
             f"static const char smp_rec_chan[3][4] = {{{', '.join(q + m + q for m in ('L+R', 'L', 'R'))}}};\n"
             f"static const char smp_rec_src[{len(_smp.SRC_NAMES)}][6] = {{{', '.join(q + m + q for m in _smp.SRC_NAMES)}}};\n"
-            f"static const char smp_bars[8][4] = {{{', '.join(q + b + q for b in ('1/8', '1/4', '1/2', '1', '2', '4', '8', '16'))}}};\n"
+            f"static const char smp_bars[8][4] = {{{', '.join(q + b + q for b in ('1', '2', '4', '8', '8', '8', '8', '8'))}}};\n"
             f"static const unsigned char smp_bars_steps[7] = {{{', '.join(map(str, _smp.BARS_STEPS))}}};\n"
             f"static const unsigned char smp_seg_steps[7] = {{{', '.join(map(str, _smp.SEG_STEPS))}}};\n"
             f"static const char smp_play[4][5] = {{{', '.join(q + m + q for m in _smp.PLAY_MODES)}}};\n"
