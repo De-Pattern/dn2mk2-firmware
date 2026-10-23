@@ -356,6 +356,27 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
         LABEL(c, x + 12, y - 7, "%.4s", label);
 }
 
+/* v0.20: RESONATOR's and CZ's first pages (page.c), as the Elektron grid: eight knobs at
+ * the DT2's centres, each its label under it; an empty place (id 0) is left empty */
+void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *const *labels,
+                   const char *const *texts)
+{
+    for (int i = 0; i < 8; i++) {
+        int x = CELL_X(i & 3), y = i < 4 ? TOP_Y : BOT_Y;
+        if (!ids[i])
+            continue;
+        if (texts[i]) {                         /* a choice: its name in a box, as the DT2's */
+            int cx = x + 12;
+            box(c, cx - 11, y + 3, cx + 11, y + 13, 0);
+            LABEL(c, cx, y + 6, "%.5s", texts[i]);
+        } else {
+            int top, v = value(view, ids[i], &top);
+            w_knob_at(c, x, y, v, top, 0);
+        }
+        LABEL(c, x + 12, y - 7, "%.5s", labels[i]);
+    }
+}
+
 /* the waveform strip: the slot's sound, peak per column, from X0 across SMP_WAVE_W at
  * CY; 0 drawn if the slot is off or empty (a flat dotted line) */
 static void waveform(void *c, int slot, int x0, int cy)

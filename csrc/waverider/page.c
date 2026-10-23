@@ -676,6 +676,25 @@ void wr_page_draw(void *view, void *canvas)
             PAGE_DOTS(view, canvas, n, page, 7);
         return;
     }
+    if ((res || cz) && page == 0) {             /* v0.20: page 1 as knobs, in the Elektron grid */
+        extern void smp_knob_page(void *view, void *canvas, const unsigned short *ids,
+                                  const char *const *labels, const char *const *texts);
+        const char *labels[8], *texts[8];
+        for (int i = 0; i < 8; i++) {
+            labels[i] = cz ? cz_labels[0][i] : res_labels[0][i];
+            texts[i] = cz ? cz_text(view, cz_ids[0][i], labels[i]) : labels[i];
+            if (texts[i] == labels[i])
+                texts[i] = 0;                   /* a knob; else a choice, shown by name */
+            else if (cz && cz_ids[0][i] == 247)
+                texts[i] = cz_get(view, 247) >> 8 ? "ON" : "OFF";   /* KF under its own label */
+        }
+        smp_knob_page(view, canvas, cz ? cz_ids[0] : res_ids[0], labels, texts);
+        ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
+        int n = PAGE_COUNT(view);
+        if (n > 1)
+            PAGE_DOTS(view, canvas, n, page, 7);
+        return;
+    }
     if (cz && page == 0)
         cz_wave_picture(canvas, view);
     else if (cz)
