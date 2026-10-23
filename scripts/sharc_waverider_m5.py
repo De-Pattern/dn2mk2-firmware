@@ -113,7 +113,7 @@ def snapshot_path(dk, stock: bytes, work: pathlib.Path) -> pathlib.Path:
     return snap, m2mach
 
 
-def init_on(snap, m2mach, image: Image):
+def init_on(snap, m2mach, image: Image, warm: bool = False):
     """The Milestone 2 post-init snapshot, re-pointed at IMAGE (engine init never
     touches the spans we add or the two words we patch; step 2 checks the spans)."""
     runner = fx.sr.load_snapshot(str(snap), m2mach.memory)
@@ -125,6 +125,17 @@ def init_on(snap, m2mach, image: Image):
                          SL.TEST_NAMES)
     for k in range(0, len(pool), 4):
         m2.poke(runner.state, dsp.SMP_POOL_DDR + k, struct.unpack_from("<I", pool, k)[0])
+    if warm:
+        # v0.17: the Machinedrum's sine and tables as the DSP has them 0.7 s after power-on
+        # (it fills them itself, 32 blocks; the "sine" run checks that fill word for word),
+        # so the machines' runs hear them from their first note
+        from dnfw.md import bench as MDB
+        L = PL.layout().md
+        for a, w in MDB.table_mem(L).items():
+            if L.T["sine"] <= a < L.T["sinecorr"] or L.T["hostD"] <= a < L.T["tpack"]:
+                m2.poke(runner.state, a, w)
+        m2.poke(runner.state, L.C["fill"], MDK.SINE_N)
+        m2.poke(runner.state, L.C["ufill"], MDK.TABLE_LAYOUT["tpack"][1] // 3)
     return runner
 
 
@@ -503,6 +514,15 @@ def main(argv=None):
                     print("     ", n, d)
 
         init = init_on(snap, m2mach, m5)
+        # v0.17: the same with the Machinedrum's sine and tables already filled, as 0.7 s after
+        # power-on, for runs whose track 0 is a PERC voice heard from its first blocks (a
+        # second image: the warm tables must not reach the cold runs' memory)
+        warm_init = []
+
+        def warm():
+            if not warm_init:
+                warm_init.append(init_on(snap, m2mach, Image(dk, m5.stream), warm=True))
+            return warm_init[0]
         if "map" in steps:
             print("\nstep 2: map")
             results["2_map"] = step_map(dk, snap, m2mach, m5, stock, init, sound, machines)
@@ -510,7 +530,8 @@ def main(argv=None):
 
         if "voice" in steps:
             print("\nstep 3: PERC")
-            s3 = step_perc(init, sound, machines, a.blocks)
+            s3 = step_perc(warm(), sound, machines,
+                           a.blocks, cold=init)
             results["3_perc"] = {k: v for k, v in s3.items() if k != "runs"}
             show(s3)
             runs = s3["runs"]
@@ -575,12 +596,12 @@ def main(argv=None):
 
         if "shft" in steps:
             print("\nstep 7: SHFT")
-            results["7_shft"] = step_shft(init, sound, machines, a.blocks)
+            results["7_shft"] = step_shft(warm(), sound, machines, a.blocks)     # (track 0 is PERC)
             show(results["7_shft"])
 
         if "gran" in steps:
             print("\nstep 7b: GRAN")
-            results["7b_gran"] = step_gran(init, sound, machines)
+            results["7b_gran"] = step_gran(warm(), sound, machines)             # (track 0 is PERC)
             show(results["7b_gran"])
 
         if "rings" in steps:
@@ -739,7 +760,7 @@ def perc_exact(run) -> tuple[int, int, int]:
     return n, o, st
 
 
-def step_perc(init, sound, machines, blocks) -> dict:
+def step_perc(init, sound, machines, blocks, cold=None) -> dict:
     def frames(k, note=0x3C00, trig=(1,), params=None, others=None, other_words=None):
         def fb(b):
             f = base_frame(sound, machines, overrides=perc_words(k, params), note=note, trigger=b in trig,
@@ -768,7 +789,7 @@ def step_perc(init, sound, machines, blocks) -> dict:
     runs["single_sd"] = run_blocks(init, frames(sd), blocks)
     runs["note72"] = run_blocks(init, frames(rs, note=0x4800), blocks)
     # v0.17: the Machinedrum's sine, which the DSP fills itself 1,024 words a block
-    runs["sine"] = run_blocks(init, frames(0, trig=()), MDK.SINE_N // MDK.SINE_PER_BLOCK + 1)
+    runs["sine"] = run_blocks(cold or init, frames(0, trig=()), MDK.SINE_N // MDK.SINE_PER_BLOCK + 1)
     runs["retrig"] = run_blocks(init, frames(sd, trig=(1, RETRIG)), blocks)
     runs["silent"] = run_blocks(init, frames(0, trig=()), blocks)
     # TYPE turned mid-note: the voice keeps the machine its note latched
@@ -842,8 +863,9 @@ def step_perc(init, sound, machines, blocks) -> dict:
         "dnfw.perc.program run on the DSP's memory at PERC's entry":
             ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for k, v in exact.items() if k != "silent")
             and exact.get("silent", (0, 1, 1))[1:] == (0, 0),
-        f"all {PM.N} Machinedrum machines sound at the Machinedrum's defaults (peak > 0.005 within {blocks} blocks)":
-            all(v is not None and v > 0.005 for v in peaks.values()),
+        # (TRX-MA's shaker builds up over a second: 0.004 in its first 8 blocks, as the MD's)
+        f"all {PM.N} Machinedrum machines sound at the Machinedrum's defaults (peak > 0.002 within {blocks} blocks)":
+            all(v is not None and v > 0.002 for v in peaks.values()),
         "v0.17: the DSP's sine is the Machinedrum's own table, and its unpacked tables the firmware's, word for word, once filled": sine_ok,
         "nothing is non-finite or above 4.0 in any PERC buffer":
             ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["perc"]
@@ -1484,6 +1506,12 @@ def run_filter_pair(init, sound, machines, blocks, ftypes, settings):
     with frame parameter words SETTINGS[0], SETTINGS[1], triggered on block 1; taps as
     run_ping's, at wr_ping's entry."""
     taps = []
+    # v0.17: track 0's PERC voice is the Machinedrum's TRX-CY (a long ring, so a grain
+    # scattered late still finds sound): its TYPE and its eight parameters, no effects
+    cy = PM.NAMES.index("TRX-CY")
+    source = {PERC_TYPE_SLOT: perc_type_word(cy)}
+    for (_rid, slot, lo, top), x in zip(PM.PARAMS, PL.defaults("TRX-CY")):
+        source[slot] = PL.word_of(x, top, lo)
 
     def at_entry(r):
         bufs = [m2.word(r.state, V.TRACK_BUFFERS + 4 * t) for t in range(16)]
@@ -1500,7 +1528,7 @@ def run_filter_pair(init, sound, machines, blocks, ftypes, settings):
 
     def frames(b):
         f = base_frame(sound, machines, t0=5, others={1: 1}, trigger=(b == 1), trigger_others=True,
-                       overrides={WAV1: 0x3C00, **settings[0]})
+                       overrides={WAV1: 0x3C00, **source, **settings[0]})
         f.header(FR.FILTER, 0, ftypes[0])
         f.header(FR.FILTER, 1, ftypes[1])
         f.sound(1, {**machines.get(1, {}), TUN1: TUN1_ZERO, **settings[1]})
@@ -1588,7 +1616,9 @@ def step_gran(init, sound, machines) -> dict:
         "NORM / UP+fdbk": ((GL.FILTER_TYPE, GL.FILTER_TYPE),
                            (gran_settings(0), gran_settings(1, size=0x1000, fdbk=0x6000, mix=0x5000))),
         "DOWN+sprd / REV": ((GL.FILTER_TYPE, GL.FILTER_TYPE),
-                            (gran_settings(2, sprd=0x7f00, dens=0x2000), gran_settings(3, size=0x0800, dens=0))),
+                            # (v0.17: track 0's source is the MD's TRX-CY, which starts at the
+                            # note: a spread of 0x7f00 put this case's one grain before it)
+                            (gran_settings(2, sprd=0x2000, dens=0x2000), gran_settings(3, size=0x0800, dens=0))),
         "GRAN / SHFT": ((GL.FILTER_TYPE, SL.FILTER_TYPE),
                         (gran_settings(0, sprd=0x0400, fdbk=0x7f00), shft_settings(0, fdbk=0x7800))),
     }
