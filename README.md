@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.17** | 2026-10-22 | PERC is the Machinedrum: its 25 TRX/EFM/GND machines from the MD's own firmware (every reference case matches), TYPE p-lockable as before | `builds/v0.17-MACHINEDRUM/` | yes |
+| **v0.18** | 2026-10-23 | The Digitakt II's own sample engine: its interpolator and decimator, its STRETCH, WERP's clock, GRID NOTE mode, BARS 1-8 and SEG 1/32-1/8, no clicks at starts, ends and retriggers | `builds/v0.18-DT2-ENGINE/` | yes |
+| v0.17 | 2026-10-22 | PERC is the Machinedrum: its 25 TRX/EFM/GND machines from the MD's own firmware (every reference case matches), TYPE p-lockable as before | `builds/v0.17-MACHINEDRUM/` | yes |
 | v0.16 | 2026-10-22 | 96 MB of your samples on the +Drive, loaded at power-on over a fast checked link; recordings kept after power-off; the SAMP name list; waveforms for every slot | `builds/v0.16-DRIVE/` | yes |
 | v0.15 | 2026-10-22 | DT2 SRC pages (knobs, waveform, RECORDER), one encoder click a choice, value names in the header, loops follow the knobs live; RECORDER: SRC IN/MAIN/TRK1-16, CHAN, YES records, ARM, R.LEN, R.STRT | `builds/v0.15-RECORDER/` | yes |
 | v0.14 | 2026-10-22 | Sampling: page 2 of every sample machine records IN / IN L / IN R / MAIN into SAMP 124-127 (threshold, length); ONESHOT's CFAD heard | `builds/v0.14-SAMPLING/` | yes |
@@ -53,6 +54,56 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.18 — the Digitakt II's own sample engine
+
+`DN2mod_v0.18_DT2-ENGINE_OS1.11.syx`
+sha256 `8ef50012e8dd0936c93ec5bb504583ca7c53830647ce45a0883d795abb8e6576`
+Gate: CLEARED TO FLASH, 2026-10-23 (USB size 1,987,983 of 2,097,152). Source: commit `cbf5a1a`. Docs: `docs/sampler.md` (v0.18 section).
+
+**Adds.**
+- **The DT2's own reader** for ONESHOT, REPITCH, GRID and WERP: its 6-tap, 256-phase
+  interpolator at 96 kHz and its 2:1 decimator, with the coefficients read from your DT2
+  firmware file at build time. Against a bit-exact model of the DT2's code, ONESHOT agrees
+  on 639 samples of 640 (the last within one 16-bit step). Pitched-up samples now alias as
+  little as on the DT2.
+- **STRETCH is the DT2's**: one read head at the pitch, jumping every 2048 samples so the
+  region lasts BARS, with a 128-sample crossfade from the old head.
+- **REPITCH** ignores the note and TUNE, as the DT2's does: the region simply lasts BARS.
+- **GRID: SLCE 0 is NOTE** — the note picks the slice and the sample plays at its own pitch.
+  LEN shows the number of slices.
+- **WERP is played as the DT2 plays it**: its segment clock (the DT2's own arithmetic),
+  segments starting on block boundaries, each a fresh note fading in while the previous
+  one fades out under it.
+- **BARS is 1, 2, 4, 8** (default 4) and **SEG is 1/32, 1/16, 1/8** (default 1/16), as on the
+  DT2 OS 1.17.
+- **Clicks gone**: a note's first block fades in (not ONESHOT from STRT 0, whose attack is
+  kept, as on the DT2); a sample's end fades out over a block; a retrigger fades the old
+  note out under the new one.
+- PERC: the Machinedrum machines take a little less DSP (TRX-CY 30.5k -> 28k a block).
+
+**Test** (after the regression check; **back up the +Drive first**):
+1. ONESHOT on one of your samples: plays as before (same level at LEV 100); TUNE far up
+   (+24, +36): cleaner than v0.17 (less metallic aliasing).
+2. Start a sample mid-way (STRT > 0): no click at the start. FWD to its end: no click.
+3. Retrigger a long sample quickly (a 16th-note pattern): no clicks between notes.
+4. STRETCH on a drum loop at BARS 1/2/4/8: the loop lasts that many bars, pitch kept;
+   TUNE changes pitch without changing the length.
+5. REPITCH: the note and TUNE do not change it; BARS does.
+6. GRID with SLCE NOTE: notes C1, C#1, D1... play slices 1, 2, 3...; at its own pitch.
+7. WERP on a loop: SEG 1/32, 1/16, 1/8; MODE FWD/REV/loops; PLAY REV plays the segments
+   backwards; FWD stops after the last segment, FWD LOOP goes round.
+8. Your saved sounds with BARS/SEG from v0.13..v0.17 now read the DT2's values (see Known
+   issues).
+
+**Known issues.**
+- BARS and SEG changed meaning (DT2's ranges): a sound saved on v0.13..v0.17 with a
+  sample machine now shows the nearest DT2 choice.
+- The reader costs about 9.5k DSP instructions a voice-block (a stock synth's), STRETCH
+  about 6.4k; sixteen sample tracks at once plus heavy PERC machines have not been measured.
+- The DT2's second declick (a zero-crossing mute it picks by flags not yet decoded) is not
+  here; its loop-seam circular taps are as the DT2's code reads (not confirmable in the
+  emulator).
 
 ## v0.17 — PERC is the Machinedrum
 
