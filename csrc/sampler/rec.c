@@ -27,6 +27,9 @@ typedef unsigned char u8;
 #define KEY_CODE ((int (*)(void *))0x40116018u)
 #define KEY_PRESSED ((int (*)(void *))0x401160BCu)
 #define KEY_YES 10
+#define KEY_UP 11                                                    /* UP 11, NO 12, LEFT 13, DOWN 14, RIGHT 15 */
+#define KEY_NO 12
+#define KEY_RIGHT 15
 #define VISIBLE 750u                                                 /* frames: half a second */
 
 #define CMD_ARM 1
@@ -35,7 +38,7 @@ typedef unsigned char u8;
 #define CMD_MONITOR 4
 #define CMD_ARM_PLAY 5
 
-extern void smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
+extern u32 smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
 extern int smp_status(u16 *out);
 extern void smp_save_recording(int slot, u32 frames);
 
@@ -55,6 +58,11 @@ int rec_state __attribute__((section(".data"))) = 0;         /* 0 idle, 1 armed,
 u32 rec_frames __attribute__((section(".data"))) = 0;
 int rec_peak __attribute__((section(".data"))) = 0;          /* 0..32767 */
 u32 rec_heard __attribute__((section(".data"))) = 0;         /* FRAMES of the last good status, + 1 */
+/* v0.20: whether the DSP took our last command (its status echoes the sequence): 1 yes,
+ * -1 no answer within a second of sending it, 0 not known yet */
+int rec_link __attribute__((section(".data"))) = 0;
+static u32 sent_seq __attribute__((section(".data"))) = 0;
+static u32 sent_at __attribute__((section(".data"))) = 0;
 
 static int arm_known __attribute__((section(".data"))) = 0;
 static int arm_last __attribute__((section(".data"))) = 0;
@@ -87,7 +95,10 @@ static u32 rec_length(void)
 static void send(int cmd)
 {
     u32 thr = (u32)rec_thres * 32767u / 120u;
-    smp_command((u32)cmd, (u32)rec_src, (u32)rec_chan, thr, (u32)rec_dest << 24 | rec_length());
+    sent_seq = smp_command((u32)cmd, (u32)rec_src, (u32)rec_chan, thr, (u32)rec_dest << 24 | rec_length());
+    sent_at = FRAMES;
+    if (rec_link < 0)
+        rec_link = 0;
     if (cmd == CMD_NOW || cmd == CMD_ARM || cmd == CMD_ARM_PLAY)
         rec_taken = rec_dest;
     if (cmd != CMD_MONITOR) {
@@ -110,6 +121,8 @@ void rec_poll(void)
         rec_frames = (u32)st[2] << 6;              /* 64 frames a unit (v0.16) */
         rec_peak = st[3] & 0x7FFF;
         rec_heard = FRAMES + 1u;
+        if (sent_seq && st[1] == (u16)sent_seq)
+            rec_link = 1;
         /* a recording has ended (v0.16): it is kept on the +Drive, as the DT2 keeps its
          * recordings, and is there again after a power cycle */
         if (rec_state == 2)
@@ -119,6 +132,8 @@ void rec_poll(void)
             smp_save_recording(rec_taken, rec_frames);
         }
     }
+    if (sent_seq && rec_link == 0 && FRAMES - sent_at > 1500u)
+        rec_link = -1;                          /* sent, and no echo within a second */
     if (!rec_visible()) {                       /* off the page: nothing is sent */
         arm_known = mon_known = 0;
         return;
@@ -144,11 +159,21 @@ void rec_poll(void)
 
 /* the parameter page's key handler (its vtable slot at 0x401d49a8 points here): YES on the
  * RECORDER page is ours; everything else, and every other page, is stock's */
+extern int smp_list_up(void *view);
+extern void smp_list_hold(void);
+
 int smp_key(void *view, void *ev)
 {
-    if (view == rec_view && rec_visible() && KEY_CODE(ev) == KEY_YES) {
+    int code = KEY_CODE(ev);
+    if (view == rec_view && rec_visible() && code == KEY_YES) {
         if (KEY_PRESSED(ev) & 0xFF)
             rec_yes();
+        return 1;
+    }
+    /* v0.20: while the sample list is up, the arrows keep it up (they paged and closed it,
+     * owner on v0.19); SAMP's encoder moves through it */
+    if (code >= KEY_UP && code <= KEY_RIGHT && code != KEY_NO && smp_list_up(view)) {
+        smp_list_hold();
         return 1;
     }
     return KEY_ORIG(view, ev);

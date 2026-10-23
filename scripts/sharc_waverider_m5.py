@@ -570,8 +570,8 @@ def main(argv=None):
 
         if "link" in steps:
             print("\nstep 3c: the sample link")
-            results["3c_link"] = {k: v for k, v in step_link(init, sound, machines, a.blocks).items()
-                                  if k != "runs"}
+            results["3c_link"] = {k: v for k, v in step_link(snap, m2mach, m5, stock_img, sound, machines,
+                                                             a.blocks).items() if k != "runs"}
             gc.collect()
             show(results["3c_link"])
 
@@ -1063,68 +1063,78 @@ def step_smp(init, sound, machines, blocks) -> dict:
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
 
 
-# -- step 3c: the sample link (v0.14, docs/sampler.md) ------------------------------------------
+# -- step 3c: the sample link and the stock voices (v0.20, docs/sampler.md) ---------------------
 
-def step_link(init, sound, machines, blocks) -> dict:
-    """The DSP end of the sample link: packets in the frame's words 2650..2681 land in the
-    pool; bad ones and stock's own words write nothing; and those words change nothing
-    else the DSP does."""
+def step_link(snap, m2mach, m5, stock, sound, machines, blocks) -> dict:
+    """v0.20: the sample link's traffic leaves the stock voices alone. v0.14..v0.19 put
+    packets in the frame's words 2650..2681, the DSP's per-track routing: WaveTone and FM
+    buzzed after a sample track was used (the owner's report on v0.19). Now everything,
+    commands too, comes over the TDM link (slots 8..15). Two runs on our image, track 0 a
+    ONESHOT and WaveTone, FM Tone, FM Drum, Swarmer on tracks 1..4, all triggered: one with
+    a packet every block (pool words, then MONITOR, VERIFY, ARM, STOP commands, each sent
+    as the ColdFire sends them, several blocks running), one with stock's zeros in those
+    slots; and the same tracks on the stock image. Tracks 1..15 must be bit-identical in
+    all three; the frame's routing words are stock's in every frame (the runner's frame
+    builder writes them as stock's does: nothing of ours touches them)."""
     import random
-    rnd = random.Random(14)
-    n = max(blocks, 12)
-    data = bytes(rnd.randrange(256) for _ in range(24 * n))
-    base_off = SM.DATA_OFFSET + 0x8000            # past the test sounds: an unused stretch
-    good = [SP.link_packet((base_off + 24 * b) // 4, struct.unpack_from("<6I", data, 24 * b))
-            for b in range(n)]
+    rnd = random.Random(20)
+    n = max(blocks, 16)
+    ONE = SM.TYPE_OF["ONESHOT"]
+    others = {1: 1, 2: 0, 3: 2, 4: 3}
+    base_w = (SM.DATA_OFFSET + 0x30000) // 4
+    cmds = {4: (1, SM.CMD_MONITOR, 0, 0, 1000, 0), 8: (2, SM.CMD_VERIFY, base_w, 124 * 3, 0, 0),
+            11: (3, SM.CMD_ARM, 1, 0, 32000, (2 << 24) | 2000), 14: (4, SM.CMD_STOP, 1, 0, 0, 0)}
 
-    def with_tail(words_of, t0=0, others=None, trig=True):
-        def fb(b):
-            f = base_frame(sound, machines, t0=t0, others=others, trigger=trig and b == 1,
-                           overrides=smp_words({SM.SAMP_REC: 1}) if t0 == SM.TYPE_OF["ONESHOT"] else None)
-            ws = words_of(b)
-            for k, w in enumerate(ws or ()):
-                f.put(SM.LINK_OFFSET + 2 * k, w)
-            return f.to_bytes()
-        return fb
+    def traffic(r, b):
+        pg = (m2.word(r.state, SM.TDM_PAGE) or 0) & 1
+        rx = SM.TDM_RX + (pg << 11) + 32
+        live = [c for k, c in cmds.items() if k <= b < k + 3]
+        if live:
+            u = SL.rx_units(SM.CMD_OFFSET // 4, list(live[0]), b)
+        else:
+            u = SL.rx_units(base_w + 124 * (b % 3), [rnd.randrange(1 << 32) for _ in range(124)], b)
+        for o, w in SL.rx_page(u, high=b % 2 == 0).items():
+            m2.poke(r.state, rx + o, w)
 
-    def pool_bytes_at(run, off, length):
-        st = run["state"].state
-        return b"".join(struct.pack("<I", (m2.word(st, dsp.SMP_POOL_DDR + off + 4 * k) or 0) & 0xFFFFFFFF)
-                        for k in range(length // 4))
+    def frames(t0):
+        return lambda b: base_frame(sound, machines, t0=t0, others=others, trigger=(b == 1),
+                                    trigger_others=True,
+                                    overrides=smp_words({SM.SAMP_REC: 1}) if t0 == ONE else None).to_bytes()
+    state = {"b": 0}
 
-    runs = {}
-    runs["good"] = run_blocks(init, with_tail(lambda b: good[b]), n)
-    bad = [h[:15] + [(h[15] + 1) & 0xFFFF] for h in good]
-    runs["bad_check"] = run_blocks(init, with_tail(lambda b: bad[b]), n)
-    far = [SP.link_packet(SM.POOL_WORDS - 3, [0x11111111] * 6)]
-    runs["out_of_pool"] = run_blocks(init, with_tail(lambda b: far[0]), 3)
-    # stock's own words there (a per-track array the DSP never reads), random, against zeros:
-    # every track buffer, with FM Tone, PERC and ONESHOT tracks, bit-identical
-    noise = [[rnd.randrange(0x5A31) for _ in range(16)] for _ in range(n)]
-    mix = {1: 0, 2: 5, 3: SM.TYPE_OF["ONESHOT"]}
-    runs["noise"] = run_blocks(init, with_tail(lambda b: noise[b], others=mix), n)
-    runs["zeros"] = run_blocks(init, with_tail(lambda b: None, others=mix), n)
+    def at_dispatch(r):
+        traffic(r, state["b"])
+        state["b"] += 1
+    runs = {"traffic": run_blocks(init_on(snap, m2mach, m5), frames(ONE), n,
+                                  extra_hooks={m3.DISPATCH: at_dispatch}),
+            "quiet": run_blocks(init_on(snap, m2mach, m5), frames(ONE), n),
+            "stock": run_blocks(init_on(snap, m2mach, stock), frames(4), n)}
     ok_runs = all(r["ok"] for r in runs.values())
-    got = pool_bytes_at(runs["good"], base_off, 24 * n) if ok_runs else b""
-    before = pool_bytes_at(runs["zeros"], base_off, 24 * n) if ok_runs else b""
-    after_bad = pool_bytes_at(runs["bad_check"], base_off, 24 * n) if ok_runs else b"x"
-    edge = pool_bytes_at(runs["out_of_pool"], SM.POOL_BYTES - 16, 16) if ok_runs else b"x"
-    counts = {k: (m2.word(r["state"].state, SMP_L.C["mbn"]) or 0) if r["ok"] else None for k, r in runs.items()}
+
+    def tail(r):
+        return [blk[1:] for blk in r["buffer_bits"]]
+    sounding = [t for t in (1, 2, 3, 4) if ok_runs and any(any(blk[t]) for blk in runs["stock"]["buffer_bits"])]
+    stat = []
+    if ok_runs:
+        st = runs["traffic"]["state"].state
+        for k in range(8):
+            w = m2.word(st, SM.REPLY_PAGES[0] + SM.REPLY_TAIL + 4 * k) or 0
+            stat += [w & 0xFFFF, w >> 16]
+    for r in runs.values():
+        r.pop("state", None)
     checks = {
-        "every run returns every block": ok_runs,
-        f"{n} good packets put their {24 * n} bytes in the pool, one a block": got == data
-            and counts["good"] - counts["zeros"] == n,
-        "a packet whose check is wrong writes nothing": after_bad == before
-            and counts["bad_check"] == counts["zeros"],
-        "a packet past the pool's end writes nothing": edge == bytes(16)
-            and counts["out_of_pool"] == counts["zeros"],
-        "random words where the packets go (not the magic) change no track buffer of FM Tone, "
-        "PERC or ONESHOT, nor the pool": ok_runs
-            and runs["noise"]["buffer_bits"] == runs["zeros"]["buffer_bits"]
-            and counts["noise"] == counts["zeros"],
+        "the three runs return every block": ok_runs,
+        "WaveTone, FM Tone, FM Drum and Swarmer sound in the stock run (tracks 1..4)":
+            sorted(sounding) == [1, 2, 3, 4],
+        f"with a link packet every block ({n} blocks: pool words and four commands), tracks "
+        "1..15 bit-identical to the run without, and to the stock image's":
+            ok_runs and tail(runs["traffic"]) == tail(runs["quiet"]) == tail(runs["stock"]),
+        "the commands arrived by the TDM link: the status echoes the last (STOP, sequence 4)":
+            ok_runs and stat[1] == 4 and stat[15] == (SM.LINK_SEED + sum(stat[:15])) & 0xFFFF,
     }
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"packets_written": counts, "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}}
+            "numbers": {"status": stat, "sounding": sounding,
+                        "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}}
 
 
 # -- step 3d: the recorder (docs/sampler.md) ------------------------------------------------------
@@ -1285,9 +1295,9 @@ def step_tdm(init, sound, machines, blocks) -> dict:
     total = send_from + (SM.RX_WORDS * n) // SM.TX_WORDS + 6
     state = {"b": 0, "pg": [], "tx": []}
 
-    def command(r, seq, cmd, a0, a1):
-        for k, w in enumerate((seq, cmd, a0, a1, 0, 0)):
-            m2.poke(r.state, cmd_at + 4 * k, w)
+    def command(r, rx, seq, cmd, a0, a1):         # v0.20: as the ColdFire sends it, by TDM
+        for o, w in SL.rx_page(SL.rx_units(SM.CMD_OFFSET // 4, [seq, cmd, a0, a1, 0, 0], seq)).items():
+            m2.poke(r.state, rx + o, w)
 
     def at_dispatch(r):
         b = state["b"]
@@ -1308,9 +1318,9 @@ def step_tdm(init, sound, machines, blocks) -> dict:
                 for k in range(8):
                     m2.poke(r.state, rx + o + 4 * k, 0)
         if b == verify_from:
-            command(r, 21, SM.CMD_VERIFY, base_w, SM.RX_WORDS * n)
+            command(r, rx, 21, SM.CMD_VERIFY, base_w, SM.RX_WORDS * n)
         if b == send_from:
-            command(r, 22, SM.CMD_SEND, base_w, SM.RX_WORDS * n)
+            command(r, rx, 22, SM.CMD_SEND, base_w, SM.RX_WORDS * n)
         state["b"] += 1
 
     def after_smp(r):

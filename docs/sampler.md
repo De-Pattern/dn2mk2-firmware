@@ -205,14 +205,20 @@ How it works:
   uses, as the read-only probe of `docs/usbprobe.md`; sub-id 01), into a **mirror** of
   the pool in the ColdFire's RAM above BSS (`0x46b00000`, 5 MB, declared by the mod).
   `csrc/sampler/link.c`, entered from the SysEx router at `0x4012169a`.
-- **The link to the DSP**: the frame the ColdFire pushes to the DSP 1,500 times a
-  second carries, at offsets 2650..2681, a per-track array the DSP never reads (no
-  direct read in the image, and the runner's step 3c shows random words there change
-  nothing). After the frame builder has built each frame (`0x400276a2`), `smp_feed`
-  puts one packet there: a magic word, a word offset into the pool, six 32-bit words,
-  a 16-bit check. The DSP (`dnfw.sampler.program.mailbox`, at the top of `wr_smp`)
-  writes a packet that checks out, inside the pool's 16 MB, and nothing else.
-  36 KB a second.
+- **The link to the DSP** (v0.14..v0.19; **withdrawn in v0.20**): the frame the ColdFire
+  pushes to the DSP 1,500 times a second carries, at offsets 2650..2681, sixteen
+  halfwords that this page used to call "a per-track array the DSP never reads". **That
+  was wrong**: they are the DSP's per-track routing (`docs/link-research.md`, "Who sets
+  the two tables": the engine copies frame `0xa5a + 2t` into `0x257898 + 2t`, and an
+  entry of 16 or more lands in the FX send buses and beyond). The runner's old step 3c
+  missed it because its random words left the tracks it compared alone; a run with
+  random words in all eight first words changes track 0 from block 4. `smp_feed` wrote a
+  packet there after the frame builder (`0x400276a2`) whenever a command or a slow-link
+  chunk was due: the owner's v0.19 report, WaveTone and FM buzzy and crackling after a
+  sample track was used until a reboot, is that. **v0.20** removes the hook, `smp_feed`
+  and the DSP's `mailbox`; the frame builder is stock's again, commands go over the TDM
+  link, and the gate checks the frame's routing words every period (`link16`), the C
+  sources (`test_sources`), and the stock voices under link traffic (runner step 3c).
 - The feeder walks the mirror from 0 to its end **over and over**, so a frame the DSP
   misses is put right on the next pass, and the DSP's pool always converges to the
   mirror. A write moves the walk back to it, so what was just sent goes first. The tool
@@ -267,10 +273,12 @@ recordings are written into it when they end. v0.15's `DN2P` images load as they
   transmit-fill mode has ended: `smp_tdm_hook` replays the two instructions it displaced)
   writes one packet a period: 256 16-bit units under the tag byte `0xa5` (magic,
   sequence, word offset, 124 words, count, check), so 124 words, 496 bytes, 1,500 times a
-  second: **about 0.7 MB/s**, 20 times the frame's words. The DSP (`tdm_rx`) reads the
-  page the engine read that block and writes a packet that checks out anywhere in the
-  pool but over the command block. Twice wrong on the fast link and the loader sets it
-  aside for the frame's words (36 KB/s, slow but always there); the host tool says which.
+  second: **about 0.7 MB/s**. The DSP (`tdm_rx`) reads the page the engine read that
+  block and writes a packet that checks out anywhere in the pool but over the command
+  block. v0.20: the recorder's and the loader's commands come this way too, as a packet
+  of exactly the command block's six words (each sent for 8 periods, ahead of any data);
+  there is no slow link any more. Seven times wrong and the loader stops; STATUS reports
+  the link down and the host tool says so.
 - **Recordings kept**: when the recorder stops (YES, R.LEN, or the slot full), the
   ColdFire asks the DSP to send the slot back (`CMD_SEND`, 64 KB windows) over the two
   TDM slots DSP -> ColdFire (14..15; 29 words a period, about 170 KB/s), checks every

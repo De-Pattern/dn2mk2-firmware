@@ -172,11 +172,8 @@ static void f_samp(int v, char *buf)
             put(buf, nm, 7);
             return;
         }
-    } else if (n < 0 && s <= SMP_SOUNDS) {      /* the test sounds */
-        put(buf, smp_sound[s - 1], 5);
-        return;
     }
-    put_num(buf, s);
+    put_num(buf, s);                            /* nothing there (v0.20: no test sounds) */
 }
 
 static void f_src(int v, char *buf)

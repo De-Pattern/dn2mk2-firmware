@@ -118,6 +118,7 @@ BLK_READ, BLK_WRITE = 0x4012C59A, 0x4012C780
 BLK_READY, BLK_SECTORS = 0x4461B68C, 0x4461B6B0
 STORE_SECTOR = 0x600000
 REPLY_TAIL = 0x80005E40
+ROUTE_OFFSET = 0xA5A                     # the frame's per-track routing words (docs/link-research.md)
 TDM_TX, TDM_RX = 0x4E6E0100, 0x4E6DF100
 
 
@@ -178,31 +179,33 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         h.append((SM.LINK_SEED + sum(h)) & 0xFFFF)
         machine.write(REPLY_TAIL, struct.pack(">16H", *h))
 
-    def mailbox():
-        h = struct.unpack(">16H", machine.read(0x80005E60 + SM.LINK_OFFSET, 32))
-        if h[0] != SM.LINK_MAGIC or h[15] != (SM.LINK_SEED + sum(h[:15])) & 0xFFFF:
+    def command(words):
+        """a command, as the DSP's recorder takes it from the command block (v0.20: by TDM)"""
+        seq, cmd, a0, a1 = words[:4]
+        if seq == dsp["seq"]:
             return
-        w = h[1] | h[2] << 16
-        words = [h[3 + 2 * j] | h[4 + 2 * j] << 16 for j in range(6)]
-        if 4 * w == SM.CMD_OFFSET:
-            seq, cmd, a0, a1 = words[:4]
-            if seq == dsp["seq"]:
-                return
-            dsp["seq"] = seq
-            dsp["cmds"].append(cmd)
-            if cmd == SM.CMD_VERIFY:
-                x = y = 0
-                for k in range(a0, a0 + a1):
-                    x = (x + pool.get(k, 0)) & 0xFFFFFFFF
-                    y = (y + x) & 0xFFFFFFFF
-                dsp.update(vsum=x, vsum2=y, vdone=seq)
-            elif cmd == SM.CMD_SEND:
-                dsp["send"] = [a0, a0 + a1]
-            status_out()
-        else:
-            dsp["slow"] += 1
-            for j, x in enumerate(words):
-                pool[w + j] = x
+        dsp["seq"] = seq
+        dsp["cmds"].append(cmd)
+        if cmd == SM.CMD_VERIFY:
+            x = y = 0
+            for k in range(a0, a0 + a1):
+                x = (x + pool.get(k, 0)) & 0xFFFFFFFF
+                y = (y + x) & 0xFFFFFFFF
+            dsp.update(vsum=x, vsum2=y, vdone=seq)
+        elif cmd == SM.CMD_SEND:
+            dsp["send"] = [a0, a0 + a1]
+        status_out()
+
+    # v0.20: the frame's words 2650..2681 are the DSP's per-track routing; ours never
+    # writes them. Each period they must be what stock's builder put there: the snapshot's
+    # own, as the first period finds them
+    route = {}
+
+    def routing():
+        h = struct.unpack(">16H", machine.read(0x80005E60 + ROUTE_OFFSET, 32))
+        route.setdefault("stock", h)
+        if h != route["stock"]:
+            route["changed"] = route.get("changed", 0) + 1
 
     last = {}
 
@@ -228,11 +231,17 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             if last.get(half) == units[1]:
                 continue
             last[half] = units[1]
-            drop = (scenario == "slow") or (scenario == "fast" and dsp["fast"] == 20 and not dsp["dropped"])
+            drop = (scenario == "dead") or (scenario == "fast" and dsp["fast"] == 20 and not dsp["dropped"])
             dsp["fast"] += 1
             if drop:
                 dsp["dropped"] += 1
                 continue
+            if 4 * off == SM.CMD_OFFSET:            # a command: exactly the block's words
+                assert n == SM.CMD_WORDS, n
+                dsp["cmd_packets"] = dsp.get("cmd_packets", 0) + 1
+                command(words)
+                continue
+            assert 4 * (off + n) <= SM.CMD_OFFSET or 4 * off >= SM.CMD_OFFSET + 4 * SM.CMD_WORDS
             for j, x in enumerate(words):
                 pool[off + j] = x
 
@@ -268,16 +277,16 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     def period():
         tdm_out()
         guest_call(ISR)
-        mailbox()
+        routing()
         tdm_in()
         status_out()        # the ISR copies the SPI reply over the tail each frame: ours again
 
     log = []
     out = {"scenario": scenario}
     base = WD.SMP_POOL_DDR
-    if scenario in ("fast", "slow"):
+    if scenario in ("fast", "dead"):
         # an image on the +Drive: two sounds, one longer than a 64 KB chunk (fast) or both
-        # short (slow), and a recording kept in slot 125
+        # short (dead: every TDM packet lost), and a recording kept in slot 125
         n_long = 40000 if scenario == "fast" else 900
         snd = [[0.6 * ((k * 37 % 200) / 100 - 1) for k in range(n_long)],
                [0.3 * ((k % 50) / 25 - 1) for k in range(700)]]
@@ -314,6 +323,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             if periods % 25 == 0:
                 log.append([periods, long("smp_walk"), long("smp_retries"), long("smp_lstate"),
                             long("smp_tdm_sent"), len(dsp["cmds"]), io["reads"]])
+            if scenario == "dead" and periods > 100 and long("smp_lstate") == 0:
+                break                           # the loader gave up
             # done: the directory page (the last range) is in
             if all(pool.get(k // 4) == struct.unpack_from("<I", img, k)[0] for k in range(0, SM.CMD_OFFSET, 4)):
                 break
@@ -334,10 +345,18 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out.update(periods=periods, dir_wrong=len(wrong), frames_wrong=frames_wrong,
                    walk=long("smp_walk"), retries=long("smp_retries"),
                    tdm_sent=long("smp_tdm_sent"), fast=dsp["fast"], dropped=dsp["dropped"],
-                   slow_packets=dsp["slow"], verifies=dsp["cmds"].count(SM.CMD_VERIFY),
+                   cmd_packets=dsp.get("cmd_packets", 0), verifies=dsp["cmds"].count(SM.CMD_VERIFY),
                    hi=long("smp_hi"), disk_reads=io["reads"], disk_writes=io["writes"],
-                   disk_errors=io.get("errors", [])[:3])
-        out["ok"] = not wrong and not frames_wrong and periods < limit
+                   disk_errors=io.get("errors", [])[:3], routing_changed=route.get("changed", 0),
+                   lstate=long("smp_lstate"))
+        if scenario == "fast":
+            out["ok"] = (not wrong and not frames_wrong and periods < limit and out["cmd_packets"] > 0
+                         and not route.get("changed"))
+        else:
+            # nothing gets through: the loader tries each chunk seven times and stops, and
+            # the frame stays stock's
+            out["ok"] = (periods < limit and out["lstate"] == 0 and out["retries"] == 7
+                         and not dsp["cmds"] and not route.get("changed"))
     elif scenario == "save":
         # a recording of 3,000 frames in slot 126 on the DSP; no image on the +Drive yet
         rec_off = SM.REC_OFFSET + (2 << SM.REC_SLOT_SHIFT)
@@ -363,9 +382,11 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    frames_equal=got == exp, entry=[hex(entry[0]), entry[1], entry[2], entry[3]],
                    dir_magic=hex(struct.unpack_from("<I", d, 0)[0]),
                    header=hdr[:12].hex(), sent_back=dsp["sent_back"],
-                   heard=long("smp_tdm_heard"), disk_writes=io["writes"])
+                   heard=long("smp_tdm_heard"), disk_writes=io["writes"],
+                   routing_changed=route.get("changed", 0))
         out["ok"] = (out["saved"] == 1 and got == exp and entry[0] == base + rec_off
-                     and entry[1] == 3000 and entry[3] == 1 and hdr[:4] == b"DN2Q")
+                     and entry[1] == 3000 and entry[3] == 1 and hdr[:4] == b"DN2Q"
+                     and not route.get("changed"))
     out["log"] = log[-8:]
     return out
 
@@ -798,8 +819,9 @@ def main() -> int:
         elif step.startswith("link16:"):
             # v0.16, the sample link end to end on the ColdFire (csrc/sampler/link.c), with
             # the +Drive and the DSP played by Python: link16:SYMS.json:SCENARIO, SCENARIO
-            # fast (one TDM packet dropped once), slow (every TDM packet dropped: the frame's
-            # words take over), save (a recording read back over TDM and written)
+            # fast (one TDM packet dropped once), dead (every TDM packet dropped: the loader
+            # stops; v0.20, the frame's words are never used), save (a recording read back over
+            # TDM and written). Every period: the frame's routing words stay stock's
             _, syms_path, scenario = step.split(":")
             syms = json.loads(pathlib.Path(syms_path).read_text())
             sys.path.insert(0, str(HERE.parent / "src"))

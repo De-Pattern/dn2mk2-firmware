@@ -98,8 +98,32 @@ TRX (BD B2 SD XT CP RS CB CH OH CY MA CL XC S2), EFM (BD SD XT CP RS CB HH CY), 
 IM); the note latches it, so
 a p-locked TYPE changes the machine step by step, as before. Page 1 is the machine's
 eight parameters under the Machinedrum's names; each knob is the nearest of the
-Machinedrum's 128 positions. Page 2 keeps the track effects (AMD .. FLTQ). The note does
-not tune a machine (as on the Machinedrum: PTCH does).
+Machinedrum's 128 positions. Page 2 keeps the track effects in the Machinedrum's FX order
+(AMD AMF EQF EQG / FLTF FLTW FLTQ, TYPE in SRR's place). The note does not tune a machine
+(as on the Machinedrum: PTCH does).
+
+### Drawn as the Machinedrum draws it (v0.20, `csrc/waverider/md_page.c`)
+
+Under the DN2's header, both pages are the Machinedrum's main screen as its own screen
+code draws it, eight rows shorter (the MD's screen has no header):
+
+- right, x 48..127: two rows of four 20-pixel cells, each its name in the MD's small font
+  over the MD's own knob (11 x 13) and pointer (one of its 128 7 x 7 pointers); dotted
+  lines between the cells and under the names, a solid line along the bottom; the MD's
+  "clip" over two cells whose parameters belong together (the machine record's nibble
+  bit 1). TYPE's cell shows the synth and machine instead of a knob.
+- left: the tempo in the MD's big font; LEV and the track's level (record 10, "Track
+  Level") as a bar; the kit box, inverted, with the track and the machine's long name;
+  `>PERC 1` / `>PERC 2`; and the machine line, inverted: `TRX > BD > SYNT` (page 1) or
+  `TFX` (page 2).
+
+**Nothing of the Machinedrum is in the repository.** `dnfw.md.ui` runs the owner's MD OS
+(`os_main.bin`, the decompressed OS at 0x200000) in a 68k emulator when the build is made,
+reads the knob, pointers, clip, three fonts and every machine's nibbles from it, and the
+mod places that blob (`MDUI`, version 1) at `MDUI_LOAD` in RAM. Without the MD OS the
+blob is absent and the page falls back to the v0.19 grid. How the layout was measured:
+the MD's own drawing routines run in the emulator (fill `0x210f84`, blit `0x21124c`, text
+`0x211384`; canvas `0x2ab836`, column-major, y up).
 
 ## Room
 

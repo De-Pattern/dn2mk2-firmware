@@ -34,7 +34,7 @@ STATE_WORDS = 16
 STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
             "tune", "play", "samp", "a", "b", "c", "lev", "x", "y", "n", "tmp",
-            *(f"mb{k}" for k in range(16)), "mbn",     # v0.14: the mailbox's sixteen halves
+            *(f"mb{k}" for k in range(16)), "mbn",     # v0.14..v0.19's mailbox (unused since v0.20; kept for the layout)
             "sr", "dir", "add", "smode", "nseg", "nin", "nout", "acc", "pass", "lp",   # v0.15; v0.18 kill, add, pass, lp
             "xfn", "xfa", "xfi", "xfs",                # CFAD: its length, where it starts, 1/length, the shift
             # the recorder: its state (0 idle, 1 armed, 2 recording, 3 full), slot entry,
@@ -1834,8 +1834,9 @@ def tdm_rx(p: Prog, L: Layout) -> None:
     of the TDM receive page the engine read this block. 256 units of 16 bits, each under
     the tag byte in either justification: MAGIC, sequence, a word offset (low, high), 248
     units of data (124 words, low half first), the count of words, two spare, a check
-    (0x1D0F + the 255 before it). A packet that checks out, whose words lie in the pool
-    and clear of the command block (commands come by the frame's words), is written;
+    (0x1D0F + the 255 before it). A packet that checks out, whose words lie in the pool,
+    either clear of the command block or within it from its start (v0.20: the commands
+    come this way too; the frame's words are the DSP's routing, never ours), is written;
     anything else -- stock's zeros included -- writes nothing."""
     K = LK
     p.ld(0, SM.TDM_PAGE)
@@ -1940,8 +1941,9 @@ def tdm_rx(p: Prog, L: Layout) -> None:
                     p.ld(7, SM.LINK_BUF + 4 * 252)
                     p.ipass(12, 8)
                     p.iop(9, 12, "+", 7)          # its end
-                    # anywhere in the pool but over the command block (the commands come
-                    # by the frame's words alone): wholly before it, or wholly after
+                    # anywhere in the pool: wholly before the command block, wholly after
+                    # it, or (v0.20, the recorder's commands) starting at it and ending
+                    # within it; nothing that runs over it from one side
                     lo = SM.CMD_OFFSET // 4
                     hi = SM.CMD_OFFSET // 4 + 6
                     top = SM.POOL_WORDS
@@ -1993,7 +1995,17 @@ def tdm_rx(p: Prog, L: Layout) -> None:
                             p.iconst(12, top)
                             p.e("COMP(R9, R12);")
                             p._branch(lambda: s32(p.r[9]) <= s32(p.r[12]), "LE", write, None)
-                        p._branch(lambda: s32(p.r[8]) >= s32(p.r[12]), "GE", below_top, None)
+
+                        def command():            # v0.20: exactly the command block's words
+                            p.iconst(12, lo)
+                            p.e("COMP(R8, R12);")
+
+                            def at_lo():
+                                p.iconst(12, hi)
+                                p.e("COMP(R9, R12);")
+                                p._branch(lambda: s32(p.r[9]) <= s32(p.r[12]), "LE", write, None)
+                            p._branch(lambda: p.r[8] == p.r[12], "EQ", at_lo, None)
+                        p._branch(lambda: s32(p.r[8]) >= s32(p.r[12]), "GE", below_top, command)
                     p._branch(lambda: s32(p.r[9]) <= s32(p.r[12]), "LE", write, above)
                 p._branch(lambda: s32(p.r[7]) <= s32(p.r[12]), "LE", counted, None)
 
@@ -2259,81 +2271,6 @@ def status(p: Prog, L: Layout) -> None:
             p.st(a + 4 * k, 6)
 
 
-def mailbox(p: Prog, L: Layout) -> None:
-    """The sample link (v0.14, docs/sampler.md): sixteen 16-bit words the ColdFire puts in
-    the frame at 2650 + 2k (where stock carries a per-track array the DSP never reads):
-    MAGIC, a word offset into the pool (low, high), six 32-bit words (low half first),
-    and a check (0x1D0F + the sum of the fifteen before it, 16 bits). A packet that
-    checks out writes its six words at pool + 4 offset, offset < POOL_WORDS - 6; anything
-    else -- stock's zeros included -- writes nothing. Counts the packets written."""
-    C = L.C
-    p.iconst(10, 0)
-    for k in range(16):
-        PP.half(p, 2, SM.LINK_OFFSET + 2 * k, 10)
-        p.st(C[f"mb{k}"], 2)
-    p.ld(2, C["mb0"])
-    p.iconst(12, SM.LINK_MAGIC)
-    p.e("COMP(R2, R12);")
-
-    def magic():
-        p.iconst(4, SM.LINK_SEED)
-        for k in range(15):
-            p.ld(2, C[f"mb{k}"])
-            p.ipass(12, 4)
-            p.iop(4, 12, "+", 2)
-        p.iconst(12, 0xFFFF)
-        p.iop(4, 4, "AND", 12)
-        p.ld(2, C["mb15"])
-        p.e("COMP(R4, R2);")
-
-        def checked():
-            p.ld(5, C["mb2"])                # the offset's high half: < POOL_WORDS >> 16
-            p.iconst(12, SM.POOL_WORDS >> 16)
-            p.e("COMP(R5, R12);")
-
-            def small():
-                p.lsh(5, 5, 16)
-                p.ld(6, C["mb1"])
-                p.ipass(12, 5)
-                p.iop(5, 12, "+", 6)         # offset, words
-                p.iconst(12, SM.POOL_WORDS - 6)
-                p.e("COMP(R5, R12);")
-
-                def write():
-                    p.lsh(5, 5, 2)
-                    p.iconst(12, L.pool)
-                    p.iop(5, 12, "+", 5)
-                    p.seti(4, 5)
-                    for j in range(6):
-                        p.ld(6, C[f"mb{4 + 2 * j}"])
-                        p.lsh(6, 6, 16)
-                        p.ld(7, C[f"mb{3 + 2 * j}"])
-                        p.ipass(12, 6)
-                        p.iop(6, 12, "+", 7)
-                        p.stpost(4, 6)
-                    p.ld(6, C["mbn"])
-                    p.iconst(12, 1)
-                    p.iop(6, 12, "+", 6)
-                    p.st(C["mbn"], 6)
-
-                # v0.16: anywhere in the pool, the recorder's entries included (the
-                # ColdFire restores them from the +Drive; nothing streams over them now)
-                p._branch(lambda: s32(p.r[5]) <= s32(p.r[12]), "LE", write, None)
-            p._branch(lambda: s32(p.r[5]) < s32(p.r[12]), "LT", small, None)
-        p._branch(lambda: p.r[4] == p.r[2], "EQ", checked, None)
-    p._branch(lambda: p.r[2] == p.r[12], "EQ", magic, None)
-
-
-def link_packet(offset: int, words) -> list[int]:
-    """the sixteen 16-bit words of one packet (what the ColdFire's feeder writes)"""
-    words = list(words) + [0] * (6 - len(words))
-    h = [SM.LINK_MAGIC, offset & 0xFFFF, (offset >> 16) & 0xFFFF]
-    for w in words:
-        h += [w & 0xFFFF, (w >> 16) & 0xFFFF]
-    h.append((SM.LINK_SEED + sum(h)) & 0xFFFF)
-    return h
-
-
 def run_recorder(L: Layout, mem):
     """the block's front, as the DSP runs it before the voices: the fast link in, the
     recorder (and its status), the fast link out"""
@@ -2342,12 +2279,6 @@ def run_recorder(L: Layout, mem):
     verify_step(p, L)
     recorder(p, L)
     tdm_tx(p, L)
-    return p
-
-
-def run_mailbox(L: Layout, mem):
-    p = Prog("run", mem=mem)
-    mailbox(p, L)
     return p
 
 
@@ -2362,7 +2293,6 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.raw("")
     p.raw(".GLOBAL wr_smp.;")
     p.raw("wr_smp.:")
-    mailbox(p, L)
     tdm_rx(p, L)
     verify_step(p, L)
     recorder(p, L)

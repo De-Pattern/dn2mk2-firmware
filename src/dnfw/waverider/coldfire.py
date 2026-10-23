@@ -361,7 +361,9 @@ GRID_STOCK = bytes.fromhex("2f022f0a4ebaf20e508f")
 # (instrument, modview1). wr_poll asks the same question, first setting the byte through
 # the stock 0x4011d2fe while a modulation marker on Waverider's page would move.
 # v0.14, the sample link (csrc/sampler, docs/sampler.md): the SysEx router's hook (the USB
-# probe's site, docs/usbprobe.md) and the frame builder's, after its last word
+# probe's site, docs/usbprobe.md). v0.14..v0.19 also hooked the frame builder (0x400276a2)
+# to put packets in the frame's words 2650..2681; those are the DSP's per-track routing,
+# so v0.20 leaves the frame builder stock (LINK_FEED_SITE is kept for the test that says so)
 LINK_RX_SITE = 0x4012169A               # lea 0x40207ae6,%a3: F0 00 20 3C, before the compare
 LINK_RX_STOCK = bytes.fromhex("47f940207ae6")
 LINK_FEED_SITE = 0x400276A2             # lea 0x40006c4a,%a2: the frame is built
@@ -517,13 +519,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
          "Waverider's page would move, then answers as stock", POLL_STOCK)
 
-    # the sample link: SysEx in, a packet a frame out (v0.14)
-    _need(content, LINK_FEED_SITE + 6, bytes.fromhex("7a054e92"), "the builder goes on: moveq #5 ; jsr %a2@")
+    # the sample link: SysEx in (v0.14); out over the TDM link alone (v0.20)
     edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),
          "the SysEx router: the sample link's requests (F0 00 20 3C 7D 01) to smp_rx", LINK_RX_STOCK)
-    edit(LINK_FEED_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_feed_hook"]),
-         "the frame builder, its frame built: the sample link's packet into words 2650..2681",
-         LINK_FEED_STOCK)
 
     # the fast link (v0.16): the SSI ISR, its transmit fill done, through smp_tdm_hook
     _need(content, TDM_SITE + 8, bytes.fromhex("2f024eb94012a4e6"), "the ISR goes on: push d2 ; jsr 0x4012a4e6")

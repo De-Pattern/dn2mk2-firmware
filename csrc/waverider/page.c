@@ -32,6 +32,9 @@ typedef unsigned char u8;
 #define PAGE_COUNT ((int (*)(void *))0x400173CA)
 #define PAGE_DOTS  ((void (*)(void *, void *, int, int, int))0x4006598A)
 #define IS_DIRTY   ((int (*)(void *))0x4011D2F4u)               /* screen: a redraw due? */
+#define SET_DIRTY  ((void (*)(void *))0x4011D2FEu)              /* screen: ask for one */
+#define FRAMES_NOW (*(volatile u32 *)0x4058E8D4u)               /* 1,500 a second */
+#define REC_REDRAW 60u                                          /* the recorder's: 25 a second */
 #define FONT       0x44507ED8u                                  /* the grid's label font */
 #define CENTRED    2                                            /* TEXT flag: x is the centre */
 
@@ -190,8 +193,15 @@ int wr_poll(void *screen)
     rec_poll();
     wr_names();
     ping_names();
-    if (rec_visible())                          /* the RECORDER's meter and state move */
-        return 1;
+    /* the RECORDER's meter and state move: a redraw asked for as stock asks (the dirty
+     * byte), 25 times a second. v0.15..v0.19 answered 1 here without setting the byte:
+     * the loop then pushed its other buffer undrawn (0x4011d32a draws only when the byte
+     * is set), and the page flashed between the last two screens it had (owner, v0.19) */
+    static u32 rec_next __attribute__((section(".data"))) = 0;
+    if (rec_visible() && (int)(FRAMES_NOW - rec_next) >= 0) {
+        rec_next = FRAMES_NOW + REC_REDRAW;
+        SET_DIRTY(screen);
+    }
     return IS_DIRTY(screen);
 }
 

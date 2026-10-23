@@ -62,13 +62,14 @@ def test_applies_to_both_sections(applied, dn2_111):
 
 
 def test_the_sample_link_hooks_call_into_the_renderer_chunk(applied, stock):
-    # v0.14: the SysEx router and the frame builder each jsr into the C chunk, and
-    # replace exactly the stock lea each one displaced
+    # v0.14: the SysEx router jsr's into the C chunk, and replays exactly the stock lea it
+    # displaced; v0.20: the frame builder is stock again (its words 2650.. are the DSP's
+    # per-track routing: writing them made the stock voices buzz)
     main = applied.payloads[3]
     c = waverider.SPEC["c_chunk"]
     lo, hi = c["load"], c["load"] + len(bytes.fromhex(c["code"]))
-    for site, stock_bytes, sym in ((CF.LINK_RX_SITE, CF.LINK_RX_STOCK, "smp_rx_hook"),
-                                   (CF.LINK_FEED_SITE, CF.LINK_FEED_STOCK, "smp_feed_hook")):
+    assert at(main, CF.LINK_FEED_SITE, 6) == at(stock, CF.LINK_FEED_SITE, 6) == CF.LINK_FEED_STOCK
+    for site, stock_bytes, sym in ((CF.LINK_RX_SITE, CF.LINK_RX_STOCK, "smp_rx_hook"),):
         assert at(stock, site, 6) == stock_bytes
         assert at(main, site, 2) == bytes.fromhex("4eb9")
         target = long_at(main, site + 2)

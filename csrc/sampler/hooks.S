@@ -1,9 +1,9 @@
-| The sample link's two hooks in stock code (csrc/sampler/link.c, docs/sampler.md).
-| Each replaces one 6-byte `lea` with a `jsr` here, calls the C, and replays the lea.
+| The sample link's hooks in stock code (csrc/sampler/link.c, docs/sampler.md): each
+| replaces a few bytes with a `jsr` here, calls the C, and replays what it replaced.
+| (v0.20: the frame builder's hook is gone: the frame is stock's again.)
 
         .text
         .globl  smp_rx_hook
-        .globl  smp_feed_hook
 
 | The SysEx router 0x4012166e at 0x4012169a (was: lea 0x40207ae6,%a3), once per F0
 | message other than F0 7E, in the MIDI input task: a0 = a1 = the message, d1 its
@@ -20,18 +20,6 @@ smp_rx_hook:
         movem.l (%sp), %d0-%d2/%a0-%a1
         lea     20(%sp), %sp
         lea     0x40207ae6, %a3
-        rts
-
-| The frame builder 0x400274ba at 0x400276a2 (was: lea 0x40006c4a,%a2), every frame
-| after the frame's last word is written, in the audio-frame ISR. Every register but
-| a2 is kept; a2 gets what the lea gave it.
-smp_feed_hook:
-        lea     -16(%sp), %sp
-        movem.l %d0-%d1/%a0-%a1, (%sp)
-        jsr     smp_feed
-        movem.l (%sp), %d0-%d1/%a0-%a1
-        lea     16(%sp), %sp
-        lea     0x40006c4a, %a2
         rts
 
 | The parameter setter 0x40037b74 at 0x40037be6 (was: movea.l %d0,%a0 ; move.w

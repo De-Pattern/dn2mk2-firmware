@@ -104,32 +104,12 @@ def test_stretch_keeps_the_pitch_repitch_does_not():
     assert zc(rp) < 0.5 * zc(one)
 
 
-def _frame_mem(halves):
-    words = {}
-    mem = Mem(lambda a: words.get(a, 0))
-    for k, h in enumerate(halves):
-        a = PM.FRAME + SM.LINK_OFFSET + 2 * k
-        w = mem.get(a & ~3)
-        mem.put(a & ~3, (w & 0xFFFF) | (h << 16) if a & 2 else (w & 0xFFFF0000) | h)
-    return mem
-
-
-def test_the_mailbox_writes_good_packets_only():
-    L = SL.layout()
-    mem = _frame_mem(P.link_packet(100, [1, 2, 3, 0xDEADBEEF, 5, 6]))
-    P.run_mailbox(L, mem)
-    assert [mem.get(L.pool + 400 + 4 * j) for j in range(6)] == [1, 2, 3, 0xDEADBEEF, 5, 6]
-    bad = P.link_packet(100, [9] * 6)
-    bad[15] ^= 1
-    mem = _frame_mem(bad)
-    P.run_mailbox(L, mem)
-    assert mem.get(L.pool + 400) == 0 and mem.get(L.C["mbn"]) == 0
-    mem = _frame_mem(P.link_packet(SM.POOL_WORDS - 5, [7] * 6))
-    P.run_mailbox(L, mem)
-    assert mem.get(L.C["mbn"]) == 0
-    mem = _frame_mem([0] * 16)                    # stock's words: nothing
-    P.run_mailbox(L, mem)
-    assert mem.get(L.C["mbn"]) == 0
+def test_the_dsp_program_never_reads_the_frames_routing_words():
+    # v0.20: the frame's words 2650..2681 are the DSP's per-track routing (stock's own,
+    # docs/link-research.md); v0.14..v0.19 read packets from them there, and the ColdFire
+    # wrote them. Nothing of ours names them now.
+    text = P.program(SL.layout(), 0x1000)
+    assert "mb0" not in text and not hasattr(P, "mailbox") and not hasattr(SM, "LINK_OFFSET")
 
 
 def test_the_host_tool_codec_and_pool(tmp_path):
@@ -272,17 +252,6 @@ def test_a_saved_sound_cannot_start_the_recorder():
     assert all(h.mem.get(h.L.pool + 8 + 16 * (SM.REC_FIRST + k) + 4) == 0 for k in range(4))
 
 
-def test_the_mailbox_writes_the_recorders_entries_too():
-    # v0.16: the ColdFire restores the recorder's entries from the +Drive (nothing streams
-    # over them any more), so a packet there is written like any other
-    L = SL.layout()
-    lo = (8 + 16 * SM.REC_FIRST) // 4
-    for w in (lo - 5, lo, SM.CMD_OFFSET // 4):
-        mem = _frame_mem(P.link_packet(w, [7] * 6))
-        P.run_mailbox(L, mem)
-        assert mem.get(L.C["mbn"]) == 1 and mem.get(L.pool + 4 * w) == 7, w
-
-
 def test_the_host_tool_leaves_the_recorders_slots():
     assert SM.USER_SLOTS < SM.REC_FIRST
     assert SM.POOL_SLOTS >= SM.REC_FIRST + SM.REC_SLOTS
@@ -378,6 +347,10 @@ def test_the_fast_link_refuses_bad_packets_and_the_command_block():
         _rx(h, SL.rx_units(off, [7] * 10))
         h.block(ONE, recorder=True)
         assert h.mem.get(h.L.pool + 4 * off) == 0, off
+    # v0.20: at the command block's start, its six words or fewer, but never more
+    _rx(h, SL.rx_units(SM.CMD_OFFSET // 4, [7] * 7))
+    h.block(ONE, recorder=True)
+    assert h.mem.get(h.L.pool + SM.CMD_OFFSET) == 0
     # the recorder's entries and frames: written (the ColdFire restores them, v0.16)
     for off in ((8 + 16 * SM.REC_FIRST) // 4 - 5, SM.REC_OFFSET // 4 - 5, SM.CMD_OFFSET // 4 - 10,
                 SM.CMD_OFFSET // 4 + 6):
@@ -387,6 +360,22 @@ def test_the_fast_link_refuses_bad_packets_and_the_command_block():
     _rx(h, [0] * 256)                             # stock's zeros: nothing, not even counted
     h.block(ONE, recorder=True)
     assert h.status()[5] == 4
+
+
+def test_a_command_comes_by_the_fast_link():
+    # v0.20: the ColdFire's command, six words at the command block, written and acted on
+    # once (here MONITOR from MAIN, MONO L: the status echoes its sequence); sent again
+    # (the ColdFire repeats each a few periods), nothing new
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    cmd = [41, SM.CMD_MONITOR, 1, 1, 100, 0]
+    for _ in range(3):
+        _rx(h, SL.rx_units(SM.CMD_OFFSET // 4, cmd, seq=3))
+        h.block(ONE, recorder=True)
+        assert [h.mem.get(h.L.pool + SM.CMD_OFFSET + 4 * j) for j in range(6)] == cmd
+        st = h.status()
+        assert st[1] == 41 and st[0] == SM.STATUS_MAGIC
 
 
 def test_send_streams_pool_words_back_and_then_falls_silent():

@@ -3,8 +3,7 @@
  *
  *   computer --USB SysEx--> smp_rx --> the +Drive's pool image (eMMC, 64 KB at a time)
  *   +Drive --smp_poll, 64 KB a chunk--> the TDM link (smp_tdm, a 124-word packet a period)
- *        or, if that does not verify, the frame's spare words (smp_feed, 6 words a frame)
- *        --> the pool (DSP DDR)
+ *        --> the pool (DSP DDR); the recorder's commands the same way, into the command block
  *   DSP --SEND, the TDM link back (smp_tdm)--> 64 KB at a time --> the +Drive
  *
  * The +Drive keeps an IMAGE of the pool as the DSP holds it, byte for byte: directory,
@@ -18,8 +17,11 @@
  * Loading: at power-on (and after a send), the image's directory decides what is read:
  * each slot's frames, then the directory last, so no slot points at frames not yet there.
  * Every chunk is checked: the DSP adds up the words it now holds (VERIFY) and the sums
- * must be the ColdFire's own. A chunk that does not check out is sent again; twice wrong
- * on the TDM link and the link is set aside for the frame's words (slow, but always there).
+ * must be the ColdFire's own. A chunk that does not check out is sent again; seven times
+ * wrong and loading stops (STATUS reports the link down). v0.20: nothing goes by the
+ * frame's words any more: the words at 2650.. that v0.14..v0.19 used are the DSP's
+ * per-track routing (docs/link-research.md, "Who sets the two tables"), and writing
+ * packets there is what made the stock voices buzz after a sample track was used.
  *
  * The TDM link (docs/link-research.md): ColdFire -> DSP in slots 8..15, which stock never
  * fills with data and the DSP never reads; DSP -> ColdFire in slots 14..15, which neither
@@ -39,8 +41,8 @@
  *   8 BEGIN   u32 bytes -> a new image follows (the old one is marked empty first)
  *   9 END     -> the image is complete: its header is written, and it is loaded
  *
- * Nothing here writes anything but its own RAM, the eMMC region above, the frame's spare
- * words and the TDM slots above.
+ * Nothing here writes anything but its own RAM, the eMMC region above and the TDM slots
+ * above. It never writes the frame (CTL_FRAME): test_sources checks the C for it.
  */
 
 typedef unsigned int u32;
@@ -49,7 +51,6 @@ typedef unsigned char u8;
 
 #define SYSEX_SEND ((int (*)(const u8 *, u32, void *, u32))0x401233F2u)  /* (buf, len, abort*, port) */
 #define PORT_USB 2
-#define CTL_FRAME ((volatile u16 *)0x80005E60u)                          /* the frame pushed each tick */
 #define FRAMES (*(volatile u32 *)0x4058E8D4u)
 
 /* dnfw.sampler.machines' constants come from the build (cpage.py's defines): SMP_MIRROR,
@@ -134,10 +135,13 @@ static void put_le32(u8 *p, u32 v)
 /* -- commands to the DSP: a queue, each sent for a few frames ------------------------------ */
 
 #define CMDQ 8
+#ifndef CMD_WORDS
+#define CMD_WORDS 6u
+#endif
 #define CMD_REPEAT 8u
 static volatile u32 cmdq[CMDQ][6] __attribute__((section(".data")));
 static volatile u32 cmd_head __attribute__((section(".data"))) = 0;   /* written by the UI */
-static volatile u32 cmd_tail __attribute__((section(".data"))) = 0;   /* by the frame ISR */
+static volatile u32 cmd_tail __attribute__((section(".data"))) = 0;   /* by the audio ISR */
 static volatile u32 cmd_left __attribute__((section(".data"))) = 0;
 static u32 cmd_seq __attribute__((section(".data"))) = 0;
 
@@ -177,61 +181,10 @@ static const u8 *volatile job_data __attribute__((section(".data"))) = 0;
 static volatile u32 job_base __attribute__((section(".data"))) = 0;   /* its first word's offset */
 static volatile u32 job_n __attribute__((section(".data"))) = 0;      /* its words */
 static volatile u32 job_fast_next __attribute__((section(".data"))) = 0;
-static volatile u32 job_slow_next __attribute__((section(".data"))) = 0;
-static volatile int fast_on __attribute__((section(".data"))) = 1;   /* the TDM link, until it fails */
+static volatile int fast_on __attribute__((section(".data"))) = 1;   /* the TDM link: 0 once a load gave up */
 static volatile u32 rx_seq __attribute__((section(".data"))) = 0;
 u32 smp_tdm_sent __attribute__((section(".data"))) = 0;
 u32 smp_tdm_heard __attribute__((section(".data"))) = 0;
-
-static void send(u32 o, const u32 *words)
-{
-    volatile u16 *mb = CTL_FRAME + LINK_OFFSET / 2;
-    u16 h[16];
-    u32 w = o >> 2;
-    h[0] = LINK_MAGIC;
-    h[1] = (u16)w;
-    h[2] = (u16)(w >> 16);
-    for (int j = 0; j < 6; j++) {
-        h[3 + 2 * j] = (u16)words[j];
-        h[4 + 2 * j] = (u16)(words[j] >> 16);
-    }
-    u32 sum = LINK_SEED;
-    for (int k = 0; k < 15; k++)
-        sum += h[k];
-    h[15] = (u16)sum;
-    for (int k = 0; k < 16; k++)
-        mb[k] = h[k];
-}
-
-/* from the frame builder (hooks.S), every frame: a command, or six words of a slow job */
-void smp_feed(void)
-{
-    if (cmd_tail != cmd_head) {
-        u32 c[6];
-        for (int j = 0; j < 6; j++)
-            c[j] = cmdq[cmd_tail % CMDQ][j];
-        send(CMD_OFFSET, c);
-        if (++cmd_left >= CMD_REPEAT) {
-            cmd_left = 0;
-            cmd_tail++;
-        }
-        return;
-    }
-    if (fast_on || !job_data || job_slow_next >= job_n)
-        return;                                 /* nothing for the frame: stock's words stay */
-    u32 c[6], k = job_slow_next, n = job_n - k;
-    if (n > 6) {
-        k = k > job_n - 6 ? job_n - 6 : k;      /* (a job's last packet ends at its end) */
-        n = 6;
-    } else if (job_n >= 6) {
-        k = job_n - 6;
-        n = 6;
-    }
-    for (u32 j = 0; j < 6; j++)
-        c[j] = j < n ? le32(job_data + 4u * (k + j)) : 0;
-    send((job_base + k) * 4u, c);
-    job_slow_next = k + 6;
-}
 
 /* from the audio ISR (hooks.S, smp_tdm_hook), every period, after stock has filled its
  * half H of the transmit window: our packet into slots 8..15; and the DSP's, if any, out
@@ -246,11 +199,21 @@ static volatile u32 periods __attribute__((section(".data"))) = 0;   /* smp_tdm'
 void smp_tdm(u32 h)
 {
     periods++;
-    if (fast_on && job_data && job_fast_next < job_n) {
+    u32 cw[CMD_WORDS];
+    int is_cmd = cmd_tail != cmd_head;
+    if (is_cmd)                                 /* a command first: the command block's words */
+        for (int j = 0; j < CMD_WORDS; j++)
+            cw[j] = cmdq[cmd_tail % CMDQ][j];
+    if (is_cmd || (job_data && job_fast_next < job_n)) {
         volatile u32 *t = TDM_TX(h);
         u32 k = job_fast_next, n = job_n - k, off = job_base + k;
-        if (n > RX_WORDS)
+        if (is_cmd) {
+            k = 0;
+            n = CMD_WORDS;
+            off = CMD_OFFSET / 4u;
+        } else if (n > RX_WORDS) {
             n = RX_WORDS;
+        }
         u32 sum = LINK_SEED, u;
         static u32 seq __attribute__((section(".data"))) = 0;
 #define UNIT(i, v) do { u = (v) & 0xFFFFu; t[16 * ((i) >> 3) + 8 + ((i) & 7)] = TDM_TAG << 16 | u; sum += u; } while (0)
@@ -259,7 +222,7 @@ void smp_tdm(u32 h)
         UNIT(2, off);
         UNIT(3, off >> 16);
         for (u32 j = 0; j < RX_WORDS; j++) {
-            u32 w = j < n ? le32(job_data + 4u * (k + j)) : 0;
+            u32 w = j >= n ? 0 : is_cmd ? cw[j] : le32(job_data + 4u * (k + j));
             UNIT(4 + 2 * j, w);
             UNIT(5 + 2 * j, w >> 16);
         }
@@ -269,7 +232,12 @@ void smp_tdm(u32 h)
         t[16 * 31 + 8 + 7] = TDM_TAG << 16 | (sum & 0xFFFFu);
 #undef UNIT
         seq++;
-        job_fast_next = k + n;
+        if (!is_cmd)
+            job_fast_next = k + n;
+        else if (++cmd_left >= CMD_REPEAT) {    /* sent a few times: one may be lost */
+            cmd_left = 0;
+            cmd_tail++;
+        }
         smp_tdm_sent++;
     }
     /* the DSP's packet: 64 units in slots 14..15, frame by frame */
@@ -533,13 +501,12 @@ static void job_start(const u8 *data, u32 off, u32 bytes)
     job_base = off / 4u;
     job_n = bytes / 4u;
     job_fast_next = 0;
-    job_slow_next = 0;
     job_data = data;
 }
 
 static int job_sent(void)
 {
-    return fast_on ? job_fast_next >= job_n : job_slow_next >= job_n;
+    return job_fast_next >= job_n;
 }
 
 /* the two sums VERIFY makes (dnfw.sampler.program.verify_step) of the pool's words as they
@@ -568,6 +535,7 @@ void smp_load(void)                             /* load (again) whatever the ima
     for (u32 k = 0; k < POOL_SLOTS * SLICE_MAX; k++)
         SLICECOL[k] = 0;
     smp_walk = 0;
+    fast_on = 1;
     l_slot = 0;
     l_kind = K_BLANK;
     l_entry = -1;
@@ -629,10 +597,9 @@ static void load_poll(void)
             return;                                         /* a second for the DSP to answer */
         }
         smp_retries++;                                      /* wrong, or no answer: again */
-        if (++l_tries >= 2 && fast_on)
-            fast_on = 0;                                    /* the TDM link is set aside */
-        if (l_tries > 6) {
-            smp_lstate = L_IDLE;                                /* nothing gets through: stop */
+        if (++l_tries > 6) {
+            fast_on = 0;                                    /* nothing gets through: stop */
+            smp_lstate = L_IDLE;
             return;
         }
         job_start(STAGE(0), l_chunk_off, l_chunk_bytes);

@@ -391,7 +391,7 @@ def perc_c_header() -> str:
 
 MDUI_LOAD = 0x46AE0000                          # the Machinedrum's screen graphics (dnfw.md.ui)
 MD_FX_NIBBLES = 0x31313311                      # AMD-AMF, EQF-EQG, FLTF-FLTW-FLTQ clipped, as the MD's
-TRACK_LEVEL_ID = 10                             # the track's LEVEL (docs/lfo4-feasibility.md)
+TRACK_LEVEL_ID = 10                             # record 10, "Track Level" / LEV, 0..0x7f00 (read from the 1.11 record table)
 
 
 def md_c_header() -> str:

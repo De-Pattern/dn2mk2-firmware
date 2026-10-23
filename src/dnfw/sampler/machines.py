@@ -87,9 +87,10 @@ NAMES_OFFSET = 8 + POOL_SLOTS * ENTRY_WORDS * 4      # 2056: the names, which on
 NAME_BYTES = 8                             # seven characters and a NUL
 DATA_OFFSET = 0x1000                       # the frames start here (the header is 3,080 bytes)
 
-# -- the sample link (v0.14): a packet a frame, ColdFire -> DSP (docs/sampler.md) ----------
-LINK_OFFSET = 2650                         # the frame's 16 words at 2650 + 2k (stock: a per-track array the DSP never reads)
-LINK_MAGIC = 0x5A31
+# -- the sample link (docs/sampler.md) ---------------------------------------------------------
+# v0.14..v0.19 also sent packets in the frame's words 2650 + 2k: those are the DSP's
+# per-track routing (docs/link-research.md, "Who sets the two tables"), not spare, and
+# writing them made the stock voices buzz. v0.20 sends everything over the TDM link.
 LINK_SEED = 0x1D0F
 LINK_WORDS = 6                             # 24 bytes of pool a packet
 POOL_BYTES = 128 << 20                     # the pool's extent in DSP DDR: 128 MB from SMP_POOL_DDR (v0.16)

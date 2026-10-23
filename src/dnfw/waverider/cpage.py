@@ -23,7 +23,7 @@ OVERLAY = "wr_cell"                     # after each stock cell widget: PING's a
 LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "sampler" / "hooks.S",
                 SOURCE.parents[1] / "sampler" / "smp_page.c", SOURCE.parents[1] / "sampler" / "rec.c",
                 SOURCE.parents[1] / "sampler" / "fmt.c", SOURCE.parent / "md_page.c"]
-LINK_ENTRIES = ["smp_rx_hook", "smp_feed_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "smp_cmds", "smp_quant_hook", "smp_tdm_hook", "smp_tdm_sent", "smp_tdm_heard", "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate"]
+LINK_ENTRIES = ["smp_rx_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "smp_cmds", "smp_quant_hook", "smp_tdm_hook", "smp_tdm_sent", "smp_tdm_heard", "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate"]
 
 
 def available() -> bool:
@@ -37,8 +37,7 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
         from ..sampler import machines as SM
         from . import dsp
         defines = {"SMP_MIRROR": hex(SM.MIRROR), "SMP_MIRROR_BYTES": hex(SM.MIRROR_BYTES),
-                   "SMP_POOL_DDR": hex(dsp.SMP_POOL_DDR), "LINK_OFFSET": SM.LINK_OFFSET,
-                   "LINK_MAGIC": hex(SM.LINK_MAGIC), "LINK_SEED": hex(SM.LINK_SEED),
+                   "SMP_POOL_DDR": hex(dsp.SMP_POOL_DDR), "LINK_SEED": hex(SM.LINK_SEED),
                    "POOL_MAGIC": hex(SM.POOL_MAGIC) + "u", "NAMES_OFFSET": SM.NAMES_OFFSET,
                    "NAME_BYTES": SM.NAME_BYTES, "DATA_OFFSET": hex(SM.DATA_OFFSET),
                    "POOL_SLOTS": SM.POOL_SLOTS}
@@ -46,7 +45,7 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
                      "RX_MAGIC", "TX_MAGIC"):      # v0.16
             defines[name] = hex(getattr(SM, name)) + "u"
         for name in ("REC_FIRST", "REC_SLOTS", "REC_SLOT_SHIFT", "CMD_SEND", "CMD_VERIFY",
-                     "RX_WORDS", "TX_WORDS"):
+                     "RX_WORDS", "TX_WORDS", "CMD_WORDS"):
             defines[name] = int(getattr(SM, name))
         import os
         if os.environ.get("DNFW_SMP_STORE_TEST"):

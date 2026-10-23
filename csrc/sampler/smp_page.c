@@ -34,6 +34,7 @@ typedef unsigned char u8;
 #define BOT_Y 7
 
 extern int smp_count(void);
+extern int smp_lstate;                  /* link.c: 0 idle, 4 done, else loading */
 extern const char *smp_name(int k);
 extern const u8 *smp_overview(int k);    /* 100 column peaks, 0..255 (link.c, v0.16) */
 extern const u8 *smp_slices(int k, int *n);   /* v0.19: SLICE's starts as columns (link.c) */
@@ -295,18 +296,22 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
  * CY; 0 drawn if the slot is off or empty (a flat dotted line) */
 static void waveform(void *c, int slot, int x0, int cy)
 {
-    int test = smp_count() < 0 && slot >= 1 && slot <= SMP_SOUNDS;
-    const u8 *ov = !test && slot >= 1 ? smp_overview(slot - 1) : 0;
-    if (!test && !ov) {
+    /* v0.20: no test sounds any more (gone from the DSP since v0.17): a slot with nothing
+     * loaded says so, rather than showing a wave that does not play */
+    const u8 *ov = slot >= 1 ? smp_overview(slot - 1) : 0;
+    if (!ov) {
         hline(c, x0, x0 + SMP_WAVE_W - 1, cy, 1);
+        int bx = x0 + SMP_WAVE_W / 2;
+        for (int y = cy - 4; y <= cy + 4; y++)
+            for (int x = bx - 16; x <= bx + 16; x++)
+                SET_PIXEL(c, x, y, 0);
+        int named = slot >= 1 && slot <= smp_count() && smp_name(slot - 1)[0];
+        TEXT(c, FONT, bx, cy - 3, CENTRED, slot < 1 ? "OFF"
+             : named && smp_lstate != 0 && smp_lstate != 4 ? "LOADING" : "EMPTY");
         return;
     }
     for (int k = 0; k < SMP_WAVE_W; k++) {
-        int h;
-        if (test)
-            h = smp_test_wave[slot - 1][k];
-        else
-            h = ov[k * 100 / SMP_WAVE_W] * SMP_WAVE_AMP / 255;
+        int h = ov[k * 100 / SMP_WAVE_W] * SMP_WAVE_AMP / 255;
         vline(c, x0 + k, cy - h, cy + h, 0);
     }
 }
@@ -371,17 +376,28 @@ static void slot_name(int k, char *out)
         return;
     } else if (cnt >= 0 && k <= cnt)
         n = smp_name(k - 1);
-    else if (cnt < 0 && k <= SMP_SOUNDS)
-        n = smp_sound[k - 1];
     int j = 0;
     if (n && n[0])
         for (; j < 7 && n[j]; j++)
             out[j] = n[j];
-    else {                                      /* empty: its number */
-        out[j++] = '-';
-        out[j++] = '-';
+    else {                                      /* v0.20: nothing loaded there */
+        static const char e[] = "EMPTY";
+        for (; e[j]; j++)
+            out[j] = e[j];
     }
     out[j] = 0;
+}
+
+/* the list is up on VIEW's page (rec.c's key handler: UP and DOWN keep it, v0.20) */
+int smp_list_up(void *view)
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    return view == list_view && list_slot >= 0 && now - list_at < LIST_FRAMES;
+}
+
+void smp_list_hold(void)
+{
+    list_at = *(volatile u32 *)0x4058E8D4u;
 }
 
 static void sample_list(void *c, void *view, int slot)
@@ -509,7 +525,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
 extern void *rec_view;
 extern u32 rec_seen;
 extern int rec_src, rec_chan, rec_thres, rec_dest, rec_rlen, rec_rstrt, rec_arm;
-extern int rec_state, rec_peak;
+extern int rec_state, rec_peak, rec_link;
 extern u32 rec_frames, rec_heard;
 #define FRAMES_NOW (*(volatile u32 *)0x4058E8D4u)
 
@@ -576,6 +592,11 @@ void smp_rec_draw(void *view, void *c)
     } else if (state == 1) {
         TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 12, CENTRED, "ARMED");
         TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 4, CENTRED, rec_rstrt ? "ON PLAY" : "ON THRES");
+    } else if (!heard || rec_link < 0) {
+        /* v0.20: the DSP is not answering (no status), or did not take the last command
+         * (its status does not echo it): YES would do nothing, so say so */
+        TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 12, CENTRED, !heard ? "NO DSP" : "NO LINK");
+        TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 4, CENTRED, !heard ? "STATUS" : "TO DSP");
     } else {
         fill(c, bx0 + 3, by0 + 7, bx0 + 17, by0 + 15);   /* YES, cut out of a filled badge */
         glyph(c, bx0 + 5, by0 + 9, 'Y', 0);
