@@ -27,7 +27,8 @@ V = dict(on=0, mach=1, pos=2, frac=3, lo=4, hi=5, loop=6, mode=7, base=8, frames
          # over it), and STRETCH's jump (source frames, signed by the play direction)
          fade=22, fg=23, dg=24, jj=25,
          fixed=26,                       # GRID's NOTE mode: the note picks the slice, not the pitch
-         walive=27)                      # WERP: its run of segments goes on (V['on'] is its segment)
+         walive=27,                      # WERP: its run of segments goes on (V['on'] is its segment)
+         fin=28, fig=29)                 # the note's first block fades in (the DT2's 0x17c), its gain
 STATE_WORDS = 16
 STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
@@ -537,6 +538,21 @@ def region(p: Prog, L: Layout) -> None:
         p.iconst(12, SM.TYPE_OF["WERP"])
         p.if_(0, "EQ", 12, lambda: (p.iconst(0, 1), vs(p, "walive", 0), p.st(C["segnext"], 0),
                                     p.iconst(0, 0), vs(p, "on", 0)), kind="i")
+        # the first block fades in -- but for ONESHOT from STRT 0, whose attack stays (the
+        # DT2's ColdFire sends the declick flag, frame +0x73c, 0 only then)
+        p.fconst(0, 0.0)
+        vs(p, "fig", 0)
+        p.iconst(0, 1)
+        vs(p, "fin", 0)
+        p.ld(0, C["type"])
+        p.iconst(12, SM.TYPE_OF["ONESHOT"])
+
+        def oneshot():
+            p.ld(9, C["t"])
+            PP.t146(p, 10, 9)
+            ctl(p, 4, SM.STRT_REC, 10)
+            p.ifz(4, "EQ", lambda: (p.iconst(0, 0), vs(p, "fin", 0)))
+        p.if_(0, "EQ", 12, oneshot, kind="i")
     p._branch(lambda: s32(p.r[4]) - s32(p.r[5]) < 0, "LT", go, None)
 
 
@@ -816,8 +832,21 @@ def render(p: Prog, L: Layout) -> None:
         p.ld(3, C["tmp"])
         p.fop(0, 0, "*", 3)
         faded(p, L, 0)
+        v(p, 5, "fin")
+
+        def fade_in():                       # 0, 1/31, .. 1 over the note's first block
+            v(p, 6, "fig")
+            p.fop(0, 0, "*", 6)
+            p.fconst(12, 1.0 / 31.0)
+            p.fop(6, 6, "+", 12)
+            p.fconst(12, 1.0)
+            p.fop(6, 6, "MIN", 12)
+            vs(p, "fig", 6)
+        p.ifz(5, "NE", fade_in)
         out(p, L, 0)
     p.loop(C["count"], 32, sample)
+    p.iconst(0, 0)
+    vs(p, "fin", 0)
     v(p, 0, "fade")
     p.ifz(0, "NE", lambda: (p.iconst(0, 0), vs(p, "on", 0)))
 
@@ -1386,6 +1415,9 @@ def werp_next(p: Prog, L: Layout) -> None:
         vs(p, "frac", 0)
         p.iconst(0, 1)
         vs(p, "on", 0)
+        vs(p, "fin", 0)                        # a segment's first block fades in (+0x73c is 1)
+        p.fconst(0, 0.0)
+        vs(p, "fig", 0)
         dec_reset(p, L)
     p.ld(0, C["a"])
     p.ifz(0, "NE", segment)
