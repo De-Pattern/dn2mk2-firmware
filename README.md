@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.18** | 2026-10-23 | The Digitakt II's own sample engine: its interpolator and decimator, its STRETCH, WERP's clock, GRID NOTE mode, BARS 1-8 and SEG 1/32-1/8, no clicks at starts, ends and retriggers | `builds/v0.18-DT2-ENGINE/` | yes |
+| **v0.19** | 2026-10-23 | SLICE, the Digitakt II's sixth sample machine: your WAV's cue points (or a grid, or its hits) as up to 64 slices, SLCE / LEN / NOTE mode, slices marked on the waveform | `builds/v0.19-SLICE/` | yes |
+| v0.18 | 2026-10-23 | The Digitakt II's own sample engine: its interpolator and decimator, its STRETCH, WERP's clock, GRID NOTE mode, BARS 1-8 and SEG 1/32-1/8, no clicks at starts, ends and retriggers | `builds/v0.18-DT2-ENGINE/` | yes |
 | v0.17 | 2026-10-22 | PERC is the Machinedrum: its 25 TRX/EFM/GND machines from the MD's own firmware (every reference case matches), TYPE p-lockable as before | `builds/v0.17-MACHINEDRUM/` | yes |
 | v0.16 | 2026-10-22 | 96 MB of your samples on the +Drive, loaded at power-on over a fast checked link; recordings kept after power-off; the SAMP name list; waveforms for every slot | `builds/v0.16-DRIVE/` | yes |
 | v0.15 | 2026-10-22 | DT2 SRC pages (knobs, waveform, RECORDER), one encoder click a choice, value names in the header, loops follow the knobs live; RECORDER: SRC IN/MAIN/TRK1-16, CHAN, YES records, ARM, R.LEN, R.STRT | `builds/v0.15-RECORDER/` | yes |
@@ -54,6 +55,41 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.19 — SLICE
+
+`DN2mod_v0.19_SLICE_OS1.11.syx`
+sha256 `5bf20c2e9b2d602dd0fd122be459fa43983bfc7904793834b817d401cfd1cf1e`
+Gate: CLEARED TO FLASH, 2026-10-23 (USB size 1,988,690 of 2,097,152). Source: commit `de12fa5`. Docs: `docs/sampler.md` (v0.19 section).
+
+**Adds.**
+- **SLICE**, the Digitakt II's sixth sample machine (DT2 OS 1.15 on), listed before GRID as on
+  the DT2. Page: TUNE, PLAY, SAMP, SLCE (NOTE, 1..63), LEN (how many slices play on), LEV.
+- **Your slices come from your WAVs**: `tools/dn2samples.py send` takes each WAV's cue points
+  as its slices (most editors write them), or `--slices grid:16` (equal slices), or
+  `--slices onsets` (it finds the hits), or `--slices none`. Up to 64 a sample; each runs to
+  the next and loops at its start. They are kept with the sample on the +Drive.
+- **SLCE NOTE**: the note picks the slice from C1 up, wrapping after the last, at the
+  sample's own pitch, as on the DT2. Page 2 marks the slices on the waveform.
+- Everything of v0.18's reader: its interpolation, fades and retriggers.
+
+**Test** (after the regression check; **back up the +Drive first**; update
+`tools/dn2samples.py` from the repo):
+1. `python tools/dn2samples.py send --slices grid:16 yourloop.wav` (and a WAV with cue
+   points with the default). Put SLICE on a track, SAMP on it.
+2. SLCE 1, 2, 3...: each plays its slice; LEN 2, 4: plays on into the next slices.
+3. SLCE NOTE, keyboard mode: C1, C#1, D1... play slices 1, 2, 3..., all at one pitch.
+4. P-lock SLCE on steps: a chopped loop.
+5. SYN page 2: the slices marked on the waveform, the played ones framed.
+6. Power-cycle: the slices are still there.
+7. `--slices onsets` on a drum loop: one slice a hit.
+
+**Known issues.**
+- No slice editor on the instrument (the DT2's SLICE menu, EDIT SLICE POINTS, CREATE SLICE
+  GRID, linear/random locks): slices are made on the computer. A sample sent without slices
+  plays nothing on SLICE.
+- The DT2 keeps slices with the sound; here they belong to the sample (every sound using it
+  shares them).
 
 ## v0.18 — the Digitakt II's own sample engine
 
