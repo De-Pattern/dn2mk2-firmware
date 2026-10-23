@@ -960,11 +960,21 @@ def step_smp(init, sound, machines, blocks) -> dict:
     mx = runs["mixed"]
     kick = smp_series(runs["kick"], 0)
     up = smp_series(runs["kick_up"], 0)
-    ref = [[max(-32768, min(32767, round(x * 32768))) / 32768 for x in snd] for snd in SL.test_samples()]
-    # (v0.14: the test sounds are int16) the kick as the DSP played it against the sample itself: 0.5 frames a sample, linear
-    exp = [ref[0][k // 2] if k % 2 == 0 else 0.5 * (ref[0][k // 2] + ref[0][k // 2 + 1])
-           for k in range(len(kick) - BLOCK)]
-    kick_err = max((abs(a - b) for a, b in zip(kick[BLOCK:], exp)), default=1.0)
+    # v0.18: the kick as the DSP played it against the DT2's own reader (the bit-exact model
+    # of its code, outside the repository: ../dt2s117/research/tools/models_reader.py), times
+    # LEV's make-up gain; 0.25 frames a 96 kHz sample
+    kick_err = 1.0
+    dt2_models = ROOT.parent / "dt2s117" / "research" / "tools"
+    if (dt2_models / "models_reader.py").is_file():
+        sys.path.insert(0, str(dt2_models))
+        import models_reader as MR
+        pcm = [max(-32768, min(32767, round(x * 32768))) for x in SL.test_samples()[0]]
+        mv = MR.Voice(pcm, 0, 0, len(pcm) << 31, 1 << 29, 0)
+        g = struct.unpack("<f", SP.tables_bytes()[-4:])[0]
+        exp = []
+        for _ in range(len(kick) // BLOCK - 1):
+            exp += [g * float(x) for x in MR.read_block(mv, MR.load_polyphase())]
+        kick_err = max((abs(a - b) for a, b in zip(kick[BLOCK:], exp)), default=1.0)
     werp_buf = [x for blk in mx["buffers"][1:] for x in blk[3]] if mx["ok"] else []
     rev = smp_series(mx, 0) if mx["ok"] else []
     rev_grows = len(rev) >= 4 * BLOCK and V.rms(rev[-2 * BLOCK:]) > V.rms(rev[BLOCK:3 * BLOCK])
@@ -990,7 +1000,7 @@ def step_smp(init, sound, machines, blocks) -> dict:
         "every rendered sample track's buffer and state, every block of every run, are bit-exact to "
         "dnfw.sampler.program run on the DSP's memory at its entry":
             ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for v in exact.values()),
-        "ONESHOT plays KICK from the pool as the sample is (max error < 1e-5)": kick_err < 1e-5,
+        "v0.18: ONESHOT plays KICK from the pool as the DT2's reader does (max error < 2^-13)": kick_err < 2.0 ** -13,
         "TUNE +12 is higher (more zero crossings)": zero_crossings(up) > zero_crossings(kick) > 0,
         "in the mixed run, GRID's slice and the looping hat sound (peak > 0.05); the reversed "
         "snare, which starts at its quiet end, sounds (> 0.01) and grows":
@@ -1001,7 +1011,7 @@ def step_smp(init, sound, machines, blocks) -> dict:
             and V.peak(perc_series(mx, 2)) > 0.05,
         "v0.15: WERP, STRETCH and REPITCH at 140 BPM sound (peak > 0.05), bit-exact (above)":
             runs["timed"]["ok"] and all(V.peak(smp_series(runs["timed"], t)) > 0.05 for t in (0, 1, 2)),
-        "v0.15: CFAD is off (the DT2's ONESHOT has no such control): its record changes nothing; the loop sounds":
+        "v0.18: CFAD is gone (the DT2's ONESHOT has no such control): its record changes nothing; the loop sounds":
             runs["cfad"]["ok"] and runs["nocfad"]["ok"]
             and V.peak(smp_series(runs["cfad"], 0)) > 0.01
             and smp_series(runs["cfad"], 0) == smp_series(runs["nocfad"], 0),

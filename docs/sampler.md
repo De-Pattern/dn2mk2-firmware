@@ -283,6 +283,46 @@ recordings are written into it when they end. v0.15's `DN2P` images load as they
 - **Commands queue** (eight deep, each sent for eight frames), so VERIFY, SEND and the
   recorder's commands no longer overwrite one another.
 
+## v0.18: the DT2's own reader and its STRETCH
+
+The machines now play through the Digitakt II's own DSP code, as read from DT2 OS 1.17
+(`../dt2s117/research/dt2-srcmachines.md` and `dt2-reader-exact.md`, outside the
+repository: they are derived from Elektron's firmware).
+
+- **The reader** (ONESHOT, REPITCH, GRID, WERP): each output sample is two samples at
+  96 kHz from a 6-tap, 256-phase polyphase interpolator, taken through the DT2's 2:1
+  decimator (a fourth-order all-pass on the even samples, averaged with the odd ones
+  four outputs late). Its taps wrap inside the loop window, as the DT2's circular
+  buffer does, and each 96 kHz sample keeps the DT2 MAC's whole 16-bit steps. The
+  coefficients (256 x 6, and the decimator's four) are read from the owner's DT2 image
+  at build time (`dnfw.dt2.rom`, `DT2_SECTION7`) and live in DDR. Against the bit-exact
+  model of the DT2's code, ONESHOT's output agrees on 639 samples of 640, the last within
+  one 96 kHz LSB (`test_sampler.test_oneshot_is_the_dt2s_reader`). The interpolator's
+  rows sum to 0.4045 (-7.9 dB), which the DT2 makes up later in its chain; LEV 100 makes
+  it up here, so a sample still plays at its own level.
+- **STRETCH** is the DT2's: one read head moves at the note's pitch, and every 2048
+  samples it jumps by (T - pitch) x 2048 frames, T the rate that makes the region last
+  BARS (clamped to 1/8 .. 4), so that it moves at T on average; for 128 samples after a
+  jump the old head crossfades linearly into the new one (both read with two taps, the old
+  with the new one's fraction). A note starts by fading in from the second head, as the
+  DT2's does. The region loops at STRT (the DT2's STRETCH has no LOOP). Because the head
+  reaches the end at the pitch's speed between jumps, a region can end up to one grain
+  (43 ms) before BARS.
+- **REPITCH** plays the region so that it lasts BARS, whatever the note and TUNE (the
+  DT2's takes neither; v0.13..v0.17 transposed it by the note).
+- **GRID**: SLCE 0 is **NOTE**: the note picks the slice ((note - 12) mod the grid) and the
+  sample plays at its own pitch; SLCE 1..63 pick a slice as before, past the grid held at
+  the last (the DT2 clamps). The header shows NOTE, and GRID's LEN as the number of slices.
+- **WERP** plays each segment as a note of its own through the reader (the DT2 plays one
+  segment a trigger), in MODE, until the next one starts.
+- **Ends**: a voice that does not loop and reaches its end within the next two blocks is
+  faded out over this one and ends (the DT2's look-ahead): no click at a sample's end.
+- **CFAD** (v0.14, off since v0.15) is gone: the DT2 has no such control.
+- What is still ours: the loops follow STRT, LEN, LOOP and PLAY while a note sounds (the
+  DT2 takes them at the note; v0.15 asked for this); WERP sequences its segments on the
+  DSP (the DT2's ColdFire triggers each one); one voice a track (the DT2 alternates two,
+  so a retrigger fades the old note while the new one starts).
+
 ## Checked
 
 - `scripts/sharc_waverider_m5.py` step **3b** (in the ship gate): every sample track's
