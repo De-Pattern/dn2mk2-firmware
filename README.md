@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.19** | 2026-10-23 | SLICE, the Digitakt II's sixth sample machine: your WAV's cue points (or a grid, or its hits) as up to 64 slices, SLCE / LEN / NOTE mode, slices marked on the waveform | `builds/v0.19-SLICE/` | yes |
+| **v0.20** | 2026-10-23 | Fixes: the buzz on WaveTone/FM after a sample or PERC track (the link no longer touches the DSP's per-track routing), the RECORDER's flashing, SLICE's pages, the sample list; PERC drawn as the Machinedrum's screen; sample pages in the DT2's own geometry | `builds/v0.20-FIXES/` | yes |
+| v0.19 | 2026-10-23 | SLICE, the Digitakt II's sixth sample machine: your WAV's cue points (or a grid, or its hits) as up to 64 slices, SLCE / LEN / NOTE mode, slices marked on the waveform | `builds/v0.19-SLICE/` | yes |
 | v0.18 | 2026-10-23 | The Digitakt II's own sample engine: its interpolator and decimator, its STRETCH, WERP's clock, GRID NOTE mode, BARS 1-8 and SEG 1/32-1/8, no clicks at starts, ends and retriggers | `builds/v0.18-DT2-ENGINE/` | yes |
 | v0.17 | 2026-10-22 | PERC is the Machinedrum: its 25 TRX/EFM/GND machines from the MD's own firmware (every reference case matches), TYPE p-lockable as before | `builds/v0.17-MACHINEDRUM/` | yes |
 | v0.16 | 2026-10-22 | 96 MB of your samples on the +Drive, loaded at power-on over a fast checked link; recordings kept after power-off; the SAMP name list; waveforms for every slot | `builds/v0.16-DRIVE/` | yes |
@@ -55,6 +56,79 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.20 — FIXES (the buzz, the recorder, the pages)
+
+`DN2mod_v0.20_FIXES_OS1.11.syx`
+sha256 `e87c23626cc794547e65275176ae7f6cc914d73d86a086a09fa33d717641eb8f`
+Gate: CLEARED TO FLASH, 2026-10-23 (USB size 1,991,619 of 2,097,152). Source: commit `61be36e` (the gate's own test fixes after it: `15b21f5`, `c69a379`, no firmware change). Docs: `docs/sampler.md` (the link), `docs/md.md` (the PERC page).
+
+**Fixes.**
+- **The buzz on WaveTone and FM after a sample or PERC track.** The cause was ours: the
+  sample link (v0.14 to v0.19) wrote packets into 16 words of the frame the ColdFire sends
+  the DSP 1,500 times a second. Those words were wrongly documented as unused. They are the
+  DSP's per-track routing, so every packet (each recorder command, each check while
+  samples loaded, and the whole load if the fast link was down) sent tracks' audio to the
+  wrong places. That made the "fizzy" doubled sound, and only a reboot cleared it. v0.20
+  never writes those words. Everything, commands included, now goes over the TDM slots
+  stock leaves empty. The gate now checks the routing words in every period of every link
+  test, so this mistake cannot come back unseen. The check fails on v0.19, as it should.
+- **The RECORDER page flashing between two pages.** The page asked for a redraw without
+  setting the screen's "redraw due" flag, so the UI pushed its other, undrawn buffer every
+  other pass. It now asks the way stock pages do, 25 times a second. If the DSP does not
+  answer, the RECORD box says **NO DSP / STATUS**. If the DSP does not echo our last
+  command, it says **NO LINK / TO DSP**, instead of offering a YES that does nothing.
+- **SLICE opened WaveTone's pages** (a table ended one machine short). Fixed: SLICE has its
+  own pages.
+- **The sample chooser:**
+  - The old test sounds and their waveform are gone, so slots no longer all look alike.
+  - A slot with nothing loaded says **EMPTY**.
+  - A slot still loading says **LOADING**.
+  - The arrows no longer close the list and change page while it is up.
+
+**Looks.**
+- **PERC is drawn as the Machinedrum's screen**, using its knobs, its 128 pointer
+  positions, its fonts and its "clip" ties. The build reads them from your MD OS file, so
+  none of the Machinedrum's art is in the repository. Page 2 lists the effects in the MD's
+  order.
+- **The sample machines' SRC page is drawn to the Digitakt II's own pixel geometry.** The
+  geometry was measured from the DT2 OS 1.17 running in the emulator: its knob circles and
+  pointers, the LEV fader, the SAMP box, the PLAY icon, the dotted empty place, the label
+  font and the cell positions. LOOP's pointer is dotted while PLAY does not loop, as on the
+  DT2.
+
+**Test** (after the regression check):
+1. **The buzz.** On track 1, WaveTone, play a few notes and listen. Put ONESHOT on track 2
+   and play it. Open its RECORDER page (SYN page 3) for a few seconds. Go back to track 1:
+   WaveTone must sound exactly as before, with no fizz. Do the same with FM Tone and with
+   PERC instead of ONESHOT.
+2. **If you have samples on the +Drive.** After power-on, while they load, play WaveTone
+   and FM: clean.
+3. **RECORDER.** The page must be steady, with no flashing.
+   - The RECORD box says **YES RECORD NOW!** if the link works. It says **NO DSP** or
+     **NO LINK** if not. Tell me which you see: this is the first test of the
+     ColdFire-to-DSP TDM link on hardware.
+   - If it says YES: press YES and talk into the input. It shows REC and the seconds.
+   - YES again stops it. Play SAMP 124: your recording.
+4. **The sample list.** Turn SAMP: slots without a sample say EMPTY. While the list is up,
+   the arrows keep it up.
+5. **PERC.** Its pages look like the Machinedrum's screen. Turn each knob: the MD-style
+   pointer follows. The LEV bar on the left follows the track level.
+6. **SLICE.** Choose SLICE: its own pages (TUNE, PLAY, SAMP, SLCE, LEN, LEV), not WaveTone's.
+7. **Notes that start late.** Tell me if you still hear a note only after you page or turn
+   a knob. I believe the routing fix covers this, but it is not proven.
+
+**Known issues / not yet done.**
+- **The ColdFire-to-DSP fast link has never been checked on hardware.** Loading samples and
+  the recorder depend on it now. If test 3 says NO LINK, samples and recording will not
+  work in this build, but nothing else is affected. The old fallback (the frame's words)
+  was what caused the buzz, so it is gone for good.
+- **No trig-key audition** in the sample list yet.
+- **The arrows do not move the list**: SAMP's encoder does.
+- **The DT2's TUNE box** shows its value as plain text. The DT2 draws a small ruler there,
+  which is not reproduced yet.
+- **Only the DT2's SRC page 1 has been compared pixel by pixel.** The emulator would not
+  change page on the DT2 side, so page 2 and the RECORDER are laid out from the manual.
 
 ## v0.19 — SLICE
 
