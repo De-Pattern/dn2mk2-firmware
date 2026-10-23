@@ -428,6 +428,11 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
                     same = got == want
                 if n != end - off or not same:
                     bad.append(f"+{off} selmap {n}B '{text}' vs source '{lines[k].strip()}'")
+        # (a source committed with its branch targets unresolved decodes fine and jumps
+        # to 0 -- PING's first block did, mid-way through a change: every target must be
+        # filled, scripts/sharc_resolve_jumps.py)
+        src = (SHARC / f"{name}.asm").read_text(encoding="utf-8")
+        bad += [f"unresolved: {m.group(0)}" for m in re.finditer(r"JUMP\s+0x0;|=\s*0x0;\s*// return address", src)]
         res[name] = {"instructions": len(offsets), "bytes": len(code), "disagreements": bad,
                      "source_sha256_matches": spec["source_sha256"] == hashlib.sha256(
                          (SHARC / f"{name}.asm").read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
