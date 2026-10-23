@@ -73,7 +73,7 @@ def test_grains_never_read_ahead_of_the_write_head():
 
 
 def test_the_filter_list_names_and_type_text():
-    assert PCF.NEW_FILTERS[-1] == G.FILTER_TYPE and PCF.NAMES[8] == ("Grains", "GRAN")
+    assert G.FILTER_TYPE in PCF.NEW_FILTERS and PCF.NAMES[8] == ("Grains", "GRAN")
     assert PP.TYPE_TEXT[8] == G.MODES
     assert {PP.SETS[8][r][1] for r in (36, 37, 38, 49, 45, 47)} == {"SIZE", "DENS", "MODE", "SPRD",
                                                                      "FDBK", "MIX"}

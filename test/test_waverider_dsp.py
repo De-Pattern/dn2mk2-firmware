@@ -154,12 +154,13 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
                                       dsp.PING_TABLES_DDR, dsp.SHFT_TABLES_DDR,
                                       dsp.GRAN_TABLES_DDR, dsp.PERC_TABLES_DDR,
                                       dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
+                                      dsp.COMB_STATE_DDR, dsp.COMB_TABLES_DDR,  # v0.20: COMB's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_TABLES_DDR + MDK.TABLE_LAYOUT["sinecorr"][0],
-                                      dsp.MD_STATE_DDR, dsp.GRAN_BUF_DDR,
+                                      dsp.MD_STATE_DDR, dsp.GRAN_BUF_DDR, dsp.COMB_BUF_DDR,
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[0][2]) and not any(ddr[2][2]) and not any(ddr[-1][2])
-    assert not any(ddr[9][2]) and not any(ddr[11][2])     # the MD's sine (the DSP fills it), its voices
+    assert not any(ddr[11][2]) and not any(ddr[13][2]) and not any(ddr[15][2])   # the MD's sine (the DSP fills it), its voices
     # v0.17: the sample pool's directory begins with its magic, and holds nothing (the
     # +Drive's samples are loaded in; the test sounds are gone)
     assert struct.unpack_from("<II", ddr[-2][2]) == (0x31504D53, 0)
@@ -174,9 +175,11 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     # v0.13: the sample machines' code follows PERC's span
     spans = dsp.l2_spans()
     assert [(at, len(pl)) for _, at, pl in spans] == [(dsp.PERC_L2_LOAD, dsp.PERC_L2_SPAN),
-                                                      (dsp.SMP_L2_LOAD, dsp.SMP_L2_SPAN)]
+                                                      (dsp.SMP_L2_LOAD, dsp.SMP_L2_SPAN),
+                                                      (dsp.COMB_L2_LOAD, dsp.COMB_L2_SPAN)]   # v0.20
     assert dsp.SMP_L2_LOAD == dsp.PERC_L2_LOAD + dsp.PERC_L2_SPAN
-    for (what, at, payload), name in zip(spans, ("perc", "smp")):
+    assert dsp.COMB_L2_LOAD >= dsp.SMP_L2_LOAD + dsp.SMP_L2_SPAN
+    for (what, at, payload), name in zip(spans, ("perc", "smp", "comb")):
         code = dsp.objects()[name]
         assert payload[:len(code)] == code and not any(payload[len(code):])
         assert len(payload) - len(code) >= 64

@@ -53,3 +53,10 @@ def polyphase() -> list[list[float]]:
 
 def decimator() -> tuple[float, float, float, float]:
     return struct.unpack("<4f", _span(DECIM_DM, 16))
+
+
+COMB_GAIN_DM = 0x26B338                      # v0.20: COMB's feedback curve, 128 float32
+
+
+def comb_gain() -> tuple[float, ...]:
+    return struct.unpack("<128f", _span(COMB_GAIN_DM, 512))

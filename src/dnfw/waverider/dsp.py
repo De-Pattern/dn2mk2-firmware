@@ -97,6 +97,16 @@ SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0
 SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sampler.machines.REC_STAGE)
 SMP_LINK_DM = SMP_STAGE_DM + 0x80            # the fast link's scratch, then its packet buffer (v0.16)
 SMP_POOL_DDR = 0x84000000                    # the pool's directory, then its frames
+# COMB- and COMB+ (v0.20, docs/comb.md): filter types 9 and 10, code in L2 after the sample
+# machines', entered from PING's track loop; their state, scratch, the DT2's feedback curve
+# and 16 delay lines of 8192 float32 (zeros: fill blocks) in DDR
+COMB_L2_LOAD = 0x200DA000
+COMB_L2_SPAN = 0x2000
+COMB_SW = 0xB80000 + (COMB_L2_LOAD - 0x20000000) // 2        # 0xbed000
+COMB_STATE_DDR = 0x81220000                  # 16 x 64 bytes
+COMB_SCRATCH_DDR = 0x81220400
+COMB_TABLES_DDR = 0x81220800                 # 128 float32
+COMB_BUF_DDR = 0x81600000                    # 16 x 32 KB, after GRAN's buffers
 # v0.18: the DT2 reader's coefficients (dnfw.sampler.program.tables_bytes, from the owner's
 # DT2 image) in DDR; each voice's decimator (12 words) in L1, where Waverider's loop was
 SMP_TABLES_DDR = 0x81218000
@@ -222,7 +232,7 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "lookup_ptr", "ping", "rings", "cz", "gran")}
+                         "entry_mark", "emark_jump", "lookup_ptr", "ping", "rings", "cz", "gran", "comb")}
 
 
 def spans() -> list[tuple[str, int, bytes]]:
@@ -313,15 +323,23 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
         ("the DT2 sample reader's coefficients (from the owner's DT2 image; v0.18)", SMP_TABLES_DDR,
          _smp_tables()),
+        ("COMB's state and scratch (zeros; v0.20)", COMB_STATE_DDR, bytes(0x800)),
+        ("COMB's feedback curve (from the owner's DT2 image; v0.20)", COMB_TABLES_DDR, _comb_tables()),
         ("Machinedrum sine (zeros: the DSP fills it)", MD_TABLES_DDR, bytes(4 * _md_core().SINE_N)),
         ("Machinedrum tables (from the owner's MD firmware)", MD_TABLES_DDR + _md_core().TABLE_LAYOUT["sinecorr"][0],
          _md_core().tables_bytes()),
         ("Machinedrum voices: 16 slots x 1 KB (zeros)", MD_STATE_DDR, bytes(16 * _md_core().MD_STRIDE)),
         ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE)),
+        ("COMB's delay lines: 16 tracks x 8192 float32 (zeros; v0.20)", COMB_BUF_DDR, bytes(16 * 0x8000)),
         ("sample pool: its empty directory's magic and count (v0.17: no test sounds; the +Drive's load in)",
          SMP_POOL_DDR, _smp_pool()[:8]),
         ("sample pool: the rest of its directory and names (zeros)", SMP_POOL_DDR + 8,
          bytes(len(_smp_pool()) - 8))]
+
+
+def _comb_tables() -> bytes:
+    from ..comb import program as comb_program
+    return comb_program.tables_bytes()
 
 
 def _smp_tables() -> bytes:
@@ -343,7 +361,8 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     obj = objects()
     out = []
     for what, name, at, span in (("perc.asm (wr_perc), in L2", "perc", PERC_L2_LOAD, PERC_L2_SPAN),
-                                 ("smp.asm (wr_smp), in L2", "smp", SMP_L2_LOAD, SMP_L2_SPAN)):
+                                 ("smp.asm (wr_smp), in L2", "smp", SMP_L2_LOAD, SMP_L2_SPAN),
+                                 ("comb.asm (wr_comb), in L2 (v0.20)", "comb", COMB_L2_LOAD, COMB_L2_SPAN)):
         code = obj[name]
         if span - len(code) < 64:
             raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")

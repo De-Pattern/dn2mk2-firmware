@@ -38,7 +38,15 @@ SETS = {                  # filter type -> {record id: (long name, short name)},
         48: ("Unused", "-"),            # Release Time: nothing
         49: ("Grain Spread", "SPRD"),   # Env. Depth: how far back grains scatter
         51: ("Unused", "-")},           # Key Tracking: nothing
+    # v0.20, the DT2's comb filters (docs/comb.md): FREQ, FDBK, DAMP (1 - the DT2's LPF), KEY.T
+    9: {36: ("Comb Frequency", "FREQ"),  # Frequency: the comb's pitch
+        37: ("Comb Feedback", "FDBK"),  # Resonance
+        38: ("Unused", "-"),            # Filter Type: nothing
+        44: ("Comb Damping", "DAMP"),   # Env. Delay: the loop's low-pass, closed as it rises
+        45: ("Unused", "-"), 46: ("Unused", "-"), 47: ("Unused", "-"),   # (the envelope's
+        48: ("Unused", "-"), 49: ("Unused", "-")},   # cells, kept free for it); KEY.T keeps its name
 }
+SETS[10] = SETS[9]
 NAMED = tuple((rid, *SETS[6][rid]) for rid in SETS[6])     # PING's, as P2 had it
 FILTER = 6
 
@@ -51,7 +59,7 @@ def ids() -> list[int]:
 # range: what the type's core or mode is called (dnfw.ping.live.TYPES, shft.live.MODES)
 TYPE_ID = 38
 TYPE_TEXT = {6: ("SVF", "LADR", "VCFQ", "LPG"), 7: ("UP", "DOWN", "BOTH"),
-             8: ("NORM", "UP", "DOWN", "REV")}
+             8: ("NORM", "UP", "DOWN", "REV"), 9: ("-",), 10: ("-",)}
 
 
 def c_header() -> str:

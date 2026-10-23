@@ -599,6 +599,6 @@ wr_p_lin_22.:
       R0 = R0 - R12;
       DM(0x2e3a34) = R0;                // n
       IF NE JUMP 0x171414;                   // -> wr_g_sample.
-      JUMP 0x170921;                    // ping.asm's wr_p_next (checked by test_gran_live)
+      JUMP 0x17092d;                    // ping.asm's wr_p_next (checked by test_gran_live)
 .wr_gran..end:
       .type wr_gran.,STT_FUNC;

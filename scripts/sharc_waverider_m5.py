@@ -401,11 +401,23 @@ def gran_links_ok() -> bool:
             and [int(x, 16) for x in back.findall(g)] == [nxt])
 
 
+def comb_links_ok() -> bool:
+    """ping.asm jumps to comb.asm for filter types 9 and 10; comb.asm comes back to wr_p_next."""
+    import sharc_resolve_jumps as R
+    ping = (SHARC / "ping.asm").read_text(encoding="utf-8")
+    spec = json.loads((SHARC / "ping.json").read_text(encoding="utf-8"))
+    nxt = dsp.PING_SW + spec["instruction_offsets"][R.labels(ping)["wr_p_next"]] // 2
+    c = (SHARC / "comb.asm").read_text(encoding="utf-8")
+    back = re.compile(r"JUMP (0x[0-9a-f]+);\s*// ping.asm's wr_p_next")
+    return (ping.count(f"IF EQ JUMP {dsp.COMB_SW:#x};") == 2
+            and [int(x, 16) for x in back.findall(c)] == [nxt])
+
+
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
     for name, load_sw in (("perc", dsp.PERC_SW), ("smp", dsp.SMP_SW), ("block_count", dsp.COUNT_SW),
                           ("ping", dsp.PING_SW), ("rings", dsp.RINGS_SW),
-                          ("cz", dsp.CZ_SW), ("gran", dsp.GRAN_SW)):
+                          ("cz", dsp.CZ_SW), ("gran", dsp.GRAN_SW), ("comb", dsp.COMB_SW)):
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -428,6 +440,10 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
                     same = got == want
                 if n != end - off or not same:
                     bad.append(f"+{off} selmap {n}B '{text}' vs source '{lines[k].strip()}'")
+        # (v0.20: a source committed with its branch targets unresolved decodes fine and
+        # jumps to 0: every target must be filled)
+        src = (SHARC / f"{name}.asm").read_text(encoding="utf-8")
+        bad += [f"unresolved: {m.group(0)}" for m in re.finditer(r"JUMP\s+0x0;|=\s*0x0;\s*// return address", src)]
         res[name] = {"instructions": len(offsets), "bytes": len(code), "disagreements": bad,
                      "source_sha256_matches": spec["source_sha256"] == hashlib.sha256(
                          (SHARC / f"{name}.asm").read_bytes().replace(b"\r\n", b"\n")).hexdigest()}
@@ -438,8 +454,8 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("perc", "smp", "block_count", "ping", "rings", "cz", "gran")) \
-        and perc_links_ok() and gran_links_ok() and entry.type_name.startswith("8a") \
+             for n in ("perc", "smp", "block_count", "ping", "rings", "cz", "gran", "comb")) \
+        and perc_links_ok() and gran_links_ok() and comb_links_ok() and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
 
@@ -476,7 +492,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,tdm,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,tdm,stock,ping,shft,gran,comb,rings,cz,frame")   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -512,7 +528,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("perc", "smp", "block_count", "ping", "rings", "cz", "gran"):
+            for n in ("perc", "smp", "block_count", "ping", "rings", "cz", "gran", "comb"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
@@ -606,6 +622,11 @@ def main(argv=None):
             print("\nstep 7b: GRAN")
             results["7b_gran"] = step_gran(warm(), sound, machines)             # (track 0 is PERC)
             show(results["7b_gran"])
+
+        if "comb" in steps:
+            print("\nstep 7c: COMB")
+            results["7c_comb"] = step_comb(warm(), sound, machines)             # (track 0 is PERC)
+            show(results["7c_comb"])
 
         if "rings" in steps:
             print("\nstep 8: RESONATOR")
@@ -1674,6 +1695,75 @@ def step_gran(init, sound, machines) -> dict:
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {k: {kk: vv for kk, vv in v.items() if kk != "want"} for k, v in results.items()}}
+
+
+# -- step 7c: COMB (v0.20, docs/comb.md) -----------------------------------------------------------
+
+COMB_BLOCKS = 24
+
+
+def step_comb(init, sound, machines) -> dict:
+    """COMB- on track 0 (PERC's TRX-CY) and COMB+ on track 1 (WaveTone), then the same
+    swapped with other settings: at each comb.asm entry the model (dnfw.comb.program) is
+    run on the DSP's memory there, and at PING's wr_p_next, where comb.asm returns, the
+    track's buffer and state must be the model's, bit for bit; the comb is heard (it
+    changes the block) and bounded; other tracks pass untouched."""
+    import gen_gran_asm as G
+    from dnfw.comb import program as CP
+    L = CP.layout()
+    back = G.ping_next()
+    cy = PM.NAMES.index("TRX-CY")
+    source = {PERC_TYPE_SLOT: perc_type_word(cy)}
+    for (_rid, slot, lo, top), x in zip(PM.PARAMS, PL.defaults("TRX-CY")):
+        source[slot] = PL.word_of(x, top, lo)
+    cases = {"COMB- / COMB+": ((9, 10), ({67: 0x5000, 68: 0x6800, 70: 0x2000}, {67: 0x3000, 68: 0x7f00, 70: 0x0})),
+             "COMB+ / COMB-": ((10, 9), ({67: 0x7000, 68: 0x4000, 70: 0x6000}, {67: 0x1000, 68: 0x7800, 70: 0x4000}))}
+    results = {}
+    for name, (ftypes, settings) in cases.items():
+        pend, seen = {}, {"checked": 0, "out_bad": 0, "state_bad": 0, "changed": 0, "peak": 0.0}
+
+        def at_comb(r):
+            seen["entries"] = seen.get("entries", 0) + 1
+            st = r.state
+            t = m2.word(st, CP.PING_T) or 0
+            ft = frame_word(st, FR.FILTER + 2 * t)
+            buf = m2.word(st, PP.BUFFERS + 4 * t) or 0
+            before = [m2.word(st, buf + 4 * k) or 0 for k in range(BLOCK)]
+            _, mem = CP.run_track(L, lambda a, st=st: m2.word(st, a) or 0, t, ft)
+            pend["t"] = (t, buf, before, [mem.get(buf + 4 * k) for k in range(BLOCK)],
+                         [mem.get(L.state + 64 * t + 4 * k) for k in range(CP.STATE_WORDS)])
+
+        def at_next(r):
+            if "t" not in pend:
+                return
+            t, buf, before, want, wstate = pend.pop("t")
+            got = [m2.word(r.state, buf + 4 * k) or 0 for k in range(BLOCK)]
+            gstate = [m2.word(r.state, L.state + 64 * t + 4 * k) or 0 for k in range(CP.STATE_WORDS)]
+            seen["checked"] += 1
+            seen["out_bad"] += sum(1 for g, w in zip(got, want) if g != w)
+            seen["state_bad"] += sum(1 for g, w in zip(gstate, wstate) if g != w)
+            seen["changed"] += got != before
+            seen["peak"] = max(seen["peak"], max(abs(f32_of(g)) for g in got))
+
+        def frames(b, ftypes=ftypes, settings=settings):
+            f = base_frame(sound, machines, t0=5, others={1: 1}, trigger=(b == 1), trigger_others=True,
+                           overrides={**source, **settings[0]})
+            f.header(FR.FILTER, 0, ftypes[0])
+            f.header(FR.FILTER, 1, ftypes[1])
+            f.sound(1, {**machines.get(1, {}), TUN1: TUN1_ZERO, **settings[1]})
+            return f.to_bytes()
+        run = run_blocks(init, frames, COMB_BLOCKS, extra_hooks={dsp.COMB_SW: at_comb, back: at_next})
+        results[name] = {"ok": run["ok"], "why": run.get("halt"), "at_block": run["blocks"], **seen}
+    checks = {
+        "COMB runs on both tracks set to filter types 9 and 10, every block":
+            all(r["ok"] and r["checked"] == 2 * COMB_BLOCKS for r in results.values()),
+        "every COMB track's buffer and state bit-exact to dnfw.comb.program, run on the DSP's memory "
+        "at comb.asm's entry, every block":
+            all(r["ok"] and r["out_bad"] == 0 and r["state_bad"] == 0 for r in results.values()),
+        "the combs change the sound and stay bounded (|x| <= 1)":
+            all(r["ok"] and r["changed"] > 0 and 0.001 < r["peak"] <= 1.0 for r in results.values()),
+    }
+    return {"ok": all(checks.values()), "checks": checks, "numbers": results}
 
 
 # -- step 8: RESONATOR (docs/rings.md) ------------------------------------------------------------

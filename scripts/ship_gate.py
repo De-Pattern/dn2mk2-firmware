@@ -88,7 +88,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
          "test/test_shft_live.py", "test/test_rings_live.py", "test/test_cz_live.py",
-         "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py"]
+         "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
+         "test/test_comb.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 
@@ -232,10 +233,12 @@ def main() -> int:
                                             "--machine-type", "12", "--machine-type", "13",
                                             "--machine-type", "14", "--machine-max", "13"]
                                            if dsp_changed else [])
-        # PING (6), SHFT (7) and GRAN (8) are kept by LOAD; 9 still loads as Multi-Mode
+        # PING (6), SHFT (7), GRAN (8), COMB- (9) and COMB+ (10, v0.20) are kept by LOAD;
+        # 11 still loads as Multi-Mode
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",
                                             "--filter-type", "8", "--filter-type", "9",
-                                            "--filter-max", "8"]
+                                            "--filter-type", "10", "--filter-type", "11",
+                                            "--filter-max", "10"]
                                            if dsp_changed else [])
         rc, out = run("boot_engine", [a.venv, "-u", "scripts/emu_boot_engine.py",
                                       "--build", bdir, "--frames", "8", *types], logs)
