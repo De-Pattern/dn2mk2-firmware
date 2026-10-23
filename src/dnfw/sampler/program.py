@@ -22,12 +22,12 @@ V = dict(on=0, mach=1, pos=2, frac=3, lo=4, hi=5, loop=6, mode=7, base=8, frames
          last=11, low=12, fmt=13,
          # v0.15, the time machines: STRETCH's source position and two grains (phase,
          # position); WERP's segment, its sample count, and the position in it
-         spos=14, ph0=15, gp0=16, ph1=17, gp1=18, seg=19, cnt=20, rel=21,
+         spos=14, ph0=15, gp0=16, ph1=17, gp1=18, seg=19, wacc=20, rel=21,
          # v0.18: the block's end fade (the DT2's: a voice that ends inside a block fades
          # over it), and STRETCH's jump (source frames, signed by the play direction)
          fade=22, fg=23, dg=24, jj=25,
          fixed=26,                       # GRID's NOTE mode: the note picks the slice, not the pitch
-         son=27)                         # WERP: its segment sounds (V['on'] is the voice)
+         walive=27)                      # WERP: its run of segments goes on (V['on'] is its segment)
 STATE_WORDS = 16
 STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
@@ -39,7 +39,7 @@ SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
             # frames so far, their limit, source, threshold, its frames' base, the track
             "rst", "rent", "rpos", "rmax", "rsrc", "rthr", "rbase", "rchan", "rpk",
             "rseq", "rmode",
-            "tr0", "note")                             # v0.18: TUNE's transposition alone; the note                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
+            "tr0", "note", "segnext")                  # v0.18: TUNE's transposition alone; the note; WERP's boundary                           # v0.15: the last command's sequence; armed on 0 THRES, 1 PLAY
 GRAIN = 2048                              # STRETCH's grain, output samples (43 ms); two, half apart
 TEMPO_OFFSET = 216                        # the frame's tempo word: BPM x 120 (docs/modulation-display.md)
 
@@ -163,8 +163,10 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
     p.st(C["kill"], 0)
     p.st(C["add"], 0)
     p.st(C["pass"], 0)
+    p.st(C["segnext"], 0)
     p.ld(0, C["trig"])
-    p.ifz(0, "NE", lambda: (v(p, 0, "on"), p.ifz(0, "NE", lambda: (p.iconst(0, 1), p.st(C["kill"], 0)))))
+    p.ifz(0, "NE", lambda: (v(p, 0, "on"), p.ifz(0, "NE", lambda: (p.iconst(0, 1), p.st(C["kill"], 0)))),
+          lambda: werp_clock(p, L))
 
     def a_pass():
         p.ld(0, C["pass"])
@@ -176,13 +178,13 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
         def first():                          # a note: latch the machine, the slot and the region
             p.ld(0, C["trig"])
 
-            def note():
-                start(p, L)
-                p.ld(0, C["kill"])
-                p.st(C["add"], 0)
-                p.iconst(0, 0)
-                p.st(C["kill"], 0)
-            p.ifz(0, "NE", note)
+            p.ifz(0, "NE", lambda: start(p, L))
+            p.ld(0, C["segnext"])                 # WERP: the next segment starts (a note of its own)
+            p.ifz(0, "NE", lambda: werp_next(p, L))
+            p.ld(0, C["kill"])
+            p.st(C["add"], 0)
+            p.iconst(0, 0)
+            p.st(C["kill"], 0)
         p.ifz(0, "EQ", first)
         p.iconst(0, 1)
         p.st(C["pass"], 0)
@@ -219,7 +221,7 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
             p.iconst(12, SM.TYPE_OF["STRETCH"])
             p.e("COMP(R0, R12);")
             p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: render_stretch(p, L), lambda: render(p, L))
-        p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: render_werp(p, L), not_werp)
+        p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: render(p, L), not_werp)
     p.loop(C["lp"], 2, a_pass)
 
 
@@ -517,22 +519,24 @@ def region(p: Prog, L: Layout) -> None:
         p._branch(lambda: p.r[0] == p.r[12], "EQ", lambda: (v(p, 4, "loop"), vs(p, "low", 4)), None)
         p.fconst(0, 0.0)
         vs(p, "frac", 0)
-        # the time machines start here: STRETCH's grains at the start, half a grain apart;
-        # WERP before its first segment
-        v(p, 4, "pos")
-        tofloat(p, 0, 4)
-        vs(p, "spos", 0)
+        # the time machines start here (v0.18): STRETCH's grain counter at 0, its new head
+        # silent and its second head whole (the DT2 fades a note in from the second head);
+        # WERP before its first segment, which the note's block starts (`werp_next`)
+        p.fconst(0, 0.0)
         vs(p, "gp0", 0)
+        p.fconst(0, 1.0)
         vs(p, "gp1", 0)
         p.iconst(0, 0)
         vs(p, "ph0", 0)
-        vs(p, "cnt", 0)
-        p.iconst(0, GRAIN // 2)
-        vs(p, "ph1", 0)
+        vs(p, "wacc", 0)
         p.iconst(0, -1)
         vs(p, "seg", 0)
         p.iconst(0, 1)
         vs(p, "on", 0)
+        p.ld(0, C["type"])
+        p.iconst(12, SM.TYPE_OF["WERP"])
+        p.if_(0, "EQ", 12, lambda: (p.iconst(0, 1), vs(p, "walive", 0), p.st(C["segnext"], 0),
+                                    p.iconst(0, 0), vs(p, "on", 0)), kind="i")
     p._branch(lambda: s32(p.r[4]) - s32(p.r[5]) < 0, "LT", go, None)
 
 
@@ -896,9 +900,15 @@ def advance(p: Prog, L: Layout) -> None:
 
 def tempo(p: Prog, L: Layout) -> None:
     """C['sr'] = the region's frames over BARS at the tempo, in output samples: the
-    source frames a sample. BARS (0..100) picks 1/8 .. 16 bars; the tempo is the frame's
-    word at 216, BPM x 120 (120 BPM if it reads 0). Also C['dir'] (+1 or -1, PLAY) and,
-    for WERP, C['nseg'], C['nin'], C['nout'] and C['smode']. Clobbers R0-R15, I1, I12."""
+    source frames a sample. BARS (0..100) picks 1, 2, 4 or 8 bars; the tempo is the frame's
+    word at 216, BPM x 120 (120 BPM if it reads 0). Also C['dir'] (+1 or -1, PLAY), C['play']
+    and, for WERP, C['nseg'], C['smode'], and the DT2's segment clock: C['nin'] its step a
+    block ((BPM x 120 x 16) >> BARS) and C['nout'] a segment's length (691,200,000 >>
+    log2(nseg)). One copy (a leaf subroutine). Clobbers R0-R15, I1, I12."""
+    p.call("tempo", lambda: _tempo(p, L))
+
+
+def _tempo(p: Prog, L: Layout) -> None:
     C = L.C
     p.ld(9, C["t"])
     PP.t146(p, 10, 9)
@@ -916,9 +926,10 @@ def tempo(p: Prog, L: Layout) -> None:
     PP.half(p, 6, TEMPO_OFFSET, 10)
     p.ifz(6, "EQ", lambda: p.iconst(6, 120 * 120))
     tofloat(p, 7, 6)
-    PM.recip(p, 9, 7)
+    p.st(C["nin"], 6)                        # BPM x 120, for WERP's clock below
+    PM._recip_inline(p, 9, 7, 13)
     p.fop(8, 8, "*", 9)                      # the output samples BARS lasts
-    PM.recip(p, 9, 8)
+    PM._recip_inline(p, 9, 8, 13)
     v(p, 4, "hi")
     v(p, 5, "lo")
     v(p, 0, "mach")                          # v0.18: WERP's lo..hi is its segment: the whole sample
@@ -952,25 +963,20 @@ def tempo(p: Prog, L: Layout) -> None:
     p.iconst(6, 1)
     PP._shift_by(p, 6, 5)                    # nseg = 2^(5 - SEG + BARS)
     p.st(C["nseg"], 6)
-    p.iconst(12, 0)
-    p.iop(12, 12, "-", 5)                    # -log2(nseg)
-    p.iconst(13, 1)
-    p.float_(9, 13, 12)                      # 1 / nseg, exactly
-    v(p, 7, "frames")
-    tofloat(p, 7, 7)
-    p.fop(7, 7, "*", 9)
-    p.trunc(7, 7)                            # nin = frames / nseg
-    p.iconst(12, 1)
-    p.iop(7, 7, "MAX", 12)
-    p.st(C["nin"], 7)
-    tofloat(p, 8, 7)
-    p.ld(9, C["sr"])
-    PM.recip(p, 10, 9)
-    p.fop(8, 8, "*", 10)                     # nout = nin / sr
-    p.trunc(8, 8)
-    p.iconst(12, 1)
-    p.iop(8, 8, "MAX", 12)
-    p.st(C["nout"], 8)
+    # the DT2's segment clock (its ColdFire, each frame): the step (BPM x 120 x 16) >> BARS,
+    # a segment 691,200,000 >> log2(nseg); a boundary when the sum reaches it
+    p.iconst(6, 691200000 >> 3)                # log2(nseg) is 3 (1/8, 1 bar) .. 8 (1/32, 8 bars)
+    for k in (4, 5, 6, 7, 8):
+        p.iconst(12, k)
+        p.if_(5, "GE", 12, lambda: p.lsh(6, 6, -1), kind="i")
+    p.st(C["nout"], 6)
+    p.ld(6, C["nin"])
+    p.lsh(6, 6, 4)
+    p.ld(4, C["b"])
+    for k in (1, 2, 3):
+        p.iconst(12, k)
+        p.if_(4, "GE", 12, lambda: p.lsh(6, 6, -1), kind="i")
+    p.st(C["nin"], 6)
     p.ld(9, C["t"])
     PP.t146(p, 10, 9)
     ctl(p, 4, SM.MODE_REC, 10)
@@ -1271,132 +1277,118 @@ def render_stretch(p: Prog, L: Layout) -> None:
     p.ifz(0, "NE", lambda: (p.iconst(0, 0), vs(p, "on", 0)))
 
 
-def render_werp(p: Prog, L: Layout) -> None:
-    """WERP (v0.18, through the DT2's reader): the sample in NSEG equal segments; segment k
-    starts at output sample k NOUT (NOUT = NIN / sr: the whole lasts BARS), in PLAY's
-    direction, and plays as a note of its own -- the DT2 plays one segment a trigger --
-    at the note's pitch in MODE (REV, REV LOOP, FWD LOOP, FWD) through the six-tap
-    interpolator and the decimator, until the next one starts. FWD and REV stop after the
-    last segment; the loop modes start again. V['on'] is the voice, V['son'] its segment."""
+def werp_clock(p: Prog, L: Layout) -> None:
+    """WERP's segment clock (v0.18, the DT2's ColdFire, a block at a time): while its run of
+    segments goes on, add the block's step; when the sum reaches a segment's length, take it
+    off and start the next segment this block (C['segnext']), the one sounding fading out
+    under it (C['kill']), as the DT2's retrigger does. Clobbers R0-R15, I1, I12."""
     C = L.C
-    buffer(p, L)
-    p.ld(0, C["rate"])
-    p.fconst(12, 0.5)
-    p.fop(0, 0, "*", 12)
-    p.st(C["rate"], 0)                        # frames a 96 kHz sample
-    p.iconst(12, L.T["gain"])
-    p.seti(0, 12)
-    p.ldi(1, 0, 0)
-    p.ld(0, C["lev"])
-    p.fop(0, 0, "*", 1)
-    p.st(C["tmp"], 0)                         # LEV with the make-up (C['lev'] stays: a retrigger renders twice)
-    dec_at(p, L)
-    p.ld(0, C["kill"])                        # a retrigger's first pass: this block fades out
-    vs(p, "fade", 0)
-    p.fconst(0, 1.0)
-    vs(p, "fg", 0)
+    v(p, 0, "mach")
+    p.iconst(12, SM.TYPE_OF["WERP"])
 
-    def next_seg():
-        p.iconst(5, 0)
-        vs(p, "cnt", 5)
-        p.ld(9, C["dir"])
-        v(p, 7, "seg")
-        p.ld(6, C["nseg"])
+    def werp():
+        v(p, 0, "walive")
 
-        def first():                           # -1: the first segment of the direction
+        def run():
+            tempo(p, L)
+            v(p, 4, "wacc")
+            p.ld(5, C["nin"])
+            p.ipass(12, 4)
+            p.iop(4, 12, "+", 5)
+            p.ld(6, C["nout"])
+
+            def boundary():
+                p.iop(4, 4, "-", 6)
+                p.iconst(0, 1)
+                p.st(C["segnext"], 0)
+                v(p, 0, "on")
+                p.st(C["kill"], 0)
+            p.if_(4, "GE", 6, boundary, kind="i")
+            vs(p, "wacc", 4)
+        p.ifz(0, "NE", run)
+    p.if_(0, "EQ", 12, werp, kind="i")
+
+
+def werp_next(p: Prog, L: Layout) -> None:
+    """WERP's next segment, as the DT2 plays one (dt2-coldfire-werp.md): in PLAY's
+    direction (REV, REV LOOP from the last); past the end the loop modes start again and
+    the others end the run. The segment k of n is the region [k/n, (k+1)/n) of the sample,
+    played as a note in MODE from its start (FWD, FWD LOOP) or its end, through a fresh
+    decimator. Clobbers R0-R15, I1, I5, I12."""
+    C = L.C
+    p.iconst(0, 0)
+    p.st(C["segnext"], 0)
+    tempo(p, L)
+    p.ld(9, C["dir"])
+    v(p, 7, "seg")
+    p.ld(6, C["nseg"])
+
+    def first():                               # -1: the first segment of the direction
+        p.iconst(7, 0)
+        p.ifz(9, "LT", lambda: (p.iconst(12, -1), p.iop(7, 12, "+", 6)))
+
+    def step():
+        p.ipass(12, 7)
+        p.iop(7, 12, "+", 9)
+    p.ifz(7, "LT", first, step)
+    p.iconst(8, 0)
+    p.if_(7, "GE", 6, lambda: p.iconst(8, 1), kind="i")
+    p.ifz(7, "LT", lambda: p.iconst(8, 1))
+    p.iconst(0, 1)
+    p.st(C["a"], 0)                            # the run goes on
+
+    def wrap():
+        p.ld(0, C["play"])
+        p.iconst(12, 1)
+
+        def again():
             p.iconst(7, 0)
             p.ifz(9, "LT", lambda: (p.iconst(12, -1), p.iop(7, 12, "+", 6)))
 
-        def step():
-            p.ipass(12, 7)
-            p.iop(7, 12, "+", 9)
-        p.ifz(7, "LT", first, step)
-        # past either end: PLAY's loop modes start again, the others end the voice
-        p.iconst(8, 0)
-        p.if_(7, "GE", 6, lambda: p.iconst(8, 1), kind="i")
-        p.ifz(7, "LT", lambda: p.iconst(8, 1))
+        def end():                             # FWD, REV: the run is over
+            p.iconst(0, 0)
+            p.st(C["a"], 0)
+            vs(p, "walive", 0)
+            p.iconst(7, 0)
+        p.if_(0, "EQ", 12, again,
+              lambda: (p.iconst(12, 2), p.if_(0, "EQ", 12, again, end, kind="i")), kind="i")
+    p.ifz(8, "NE", wrap)
 
-        def wrap():
-            p.ld(0, C["play"])
-            p.iconst(12, 1)
-
-            def again():
-                p.iconst(7, 0)
-                p.ifz(9, "LT", lambda: (p.iconst(12, -1), p.iop(7, 12, "+", 6)))
-
-            def end():
-                p.iconst(6, 0)
-                vs(p, "on", 6)
-                vs(p, "son", 6)
-                p.iconst(7, 0)
-            p.if_(0, "EQ", 12, again,
-                  lambda: (p.iconst(12, 2), p.if_(0, "EQ", 12, again, end, kind="i")), kind="i")
-        p.ifz(8, "NE", wrap)
-
-        def segment():
-            vs(p, "seg", 7)
-            # the segment: [seg nin, seg nin + nin), its own play mode, from its start or end
-            p.ld(5, C["nin"])
-            tofloat(p, 3, 7)
-            tofloat(p, 4, 5)
-            p.fop(3, 3, "*", 4)
-            p.trunc(4, 3)                          # lo
-            vs(p, "lo", 4)
-            vs(p, "loop", 4)
-            vs(p, "low", 4)
-            p.ipass(12, 4)
-            p.iop(5, 12, "+", 5)
-            v(p, 6, "frames")
-            p.iop(5, 5, "MIN", 6)
-            vs(p, "hi", 5)
-            p.ld(0, C["smode"])
-            vs(p, "mode", 0)
-            p.iconst(12, 2)
-            p.if_(0, "LT", 12, lambda: (p.iconst(12, -1), p.iop(4, 12, "+", 5)), kind="i")
-            vs(p, "pos", 4)
-            p.fconst(0, 0.0)
-            vs(p, "frac", 0)
-            p.iconst(0, 1)
-            vs(p, "son", 0)
-            window(p, L)
-        v(p, 0, "on")
-        p.ifz(0, "NE", segment)
-
-
-    def sample():
-        v(p, 0, "on")
-
-        def play():
-            v(p, 5, "cnt")
-            p.ld(6, C["nout"])
-            v(p, 7, "seg")
-            p.ifz(7, "LT", next_seg, lambda: p.if_(5, "GE", 6, next_seg, kind="i"))
-            for word in ("x", "y"):
-                v(p, 0, "son")
-
-                def read(word=word):
-                    tick(p, L, word)
-                    advance(p, L)
-                    v(p, 0, "on")              # the segment's end is not the voice's
-                    p.ifz(0, "EQ", lambda: (p.iconst(0, 0), vs(p, "son", 0), p.iconst(0, 1), vs(p, "on", 0)))
-                p.ifz(0, "NE", read, lambda word=word: (p.fconst(0, 0.0), p.st(C[word], 0)))
-            decimate(p, L, "x", "y", 0)
-            p.ld(3, C["tmp"])
-            p.fop(0, 0, "*", 3)
-            faded(p, L, 0)
-            out(p, L, 0)
-            v(p, 5, "cnt")
-            p.iconst(12, 1)
-            p.iop(5, 12, "+", 5)
-            vs(p, "cnt", 5)
-
-        def rest():
-            p.iconst(6, 0)
-            out(p, L, 6)
-        p.ifz(0, "NE", play, rest)
-    p.loop(C["count"], 32, sample)
-    v(p, 0, "fade")
-    p.ifz(0, "NE", lambda: (p.iconst(0, 0), vs(p, "on", 0)))
+    def segment():
+        vs(p, "seg", 7)
+        p.ld(6, C["nseg"])
+        tofloat(p, 3, 6)
+        PM._recip_inline(p, 2, 3, 13)          # 1 / n (exact: n is a power of two)
+        v(p, 6, "frames")
+        tofloat(p, 4, 6)
+        p.fop(4, 4, "*", 2)                    # frames / n
+        tofloat(p, 3, 7)
+        p.fop(3, 3, "*", 4)                    # k frames / n
+        p.fop(5, 3, "+", 4)                    # (k + 1) frames / n
+        p.trunc(4, 3)                          # lo
+        p.trunc(5, 5)                          # hi
+        v(p, 6, "frames")
+        p.iop(5, 5, "MIN", 6)
+        p.iconst(12, 1)
+        p.iop(12, 12, "+", 4)
+        p.iop(5, 5, "MAX", 12)                 # at least a frame
+        p.iop(5, 5, "MIN", 6)
+        vs(p, "lo", 4)
+        vs(p, "loop", 4)
+        vs(p, "low", 4)
+        vs(p, "hi", 5)
+        p.ld(0, C["smode"])
+        vs(p, "mode", 0)
+        p.iconst(12, 2)
+        p.if_(0, "LT", 12, lambda: (p.iconst(12, -1), p.iop(4, 12, "+", 5)), kind="i")
+        vs(p, "pos", 4)
+        p.fconst(0, 0.0)
+        vs(p, "frac", 0)
+        p.iconst(0, 1)
+        vs(p, "on", 0)
+        dec_reset(p, L)
+    p.ld(0, C["a"])
+    p.ifz(0, "NE", segment)
 
 
 def recorder(p: Prog, L: Layout) -> None:

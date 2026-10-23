@@ -496,3 +496,22 @@ def test_a_retrigger_fades_the_old_note_under_the_new_one():
     fade = [x * (1.0 - k / 31.0) for k, x in enumerate(first[5])]     # the old note, 1 -> 0
     assert max(abs(x) for x in first[5]) > 1e-2
     assert max(abs(a - b) for a, b in zip(old, fade)) < 1e-5
+
+
+def test_werp_segments_are_the_dt2s_note_values_and_change_at_blocks():
+    # v0.18: SEG 1/32, 1/16, 1/8 of a bar, a segment starting on a block (the DT2's ColdFire
+    # clock); at 480 BPM a bar is 750 blocks: 32, 16 or 8 segments in it
+    for seg, n in ((0, 32), (60, 16), (100, 8)):
+        h = SL.Harness(0)
+        h.defaults()
+        h.set(SM.BARS_REC, 0)
+        h.set(SM.SAMP_REC, 4)
+        h.set(SM.SEG_REC, seg)
+        _tempo(h, 480.0)
+        segs = []
+        for b in range(800):
+            h.block(SM.TYPE_OF["WERP"], 60.0, b == 1)
+            segs.append(h.mem.get(h.L.state + 4 * P.V["seg"]))
+        changes = [b for b in range(1, len(segs)) if segs[b] != segs[b - 1]]
+        assert len(changes) == n - 1, (seg, len(changes))
+        assert abs(changes[1] - changes[0] - 750 / n) <= 1
