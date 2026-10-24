@@ -142,7 +142,9 @@ const DN2 = (() => {
     HEADER: [0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01],
     CMD: { HELLO: 1, WRITE: 2, STATUS: 3, BEGIN: 8, END: 9, DIR: 10 },
   };
-  C.REC_BYTES = C.REC_END - C.REC_OFFSET;
+  C.HOLE_BYTES = C.REC_END - C.REC_OFFSET;           /* what a send skips */
+  C.SLICE_AREA = C.REC_END - (128 << 10);           /* v0.23: slices made on the instrument */
+  C.REC_BYTES = C.SLICE_AREA - C.REC_OFFSET;
 
   function pack7(data) {
     const out = [];
@@ -271,7 +273,7 @@ const DN2 = (() => {
     return out;
   }
   function payloadBytes(len) {                      /* what a send moves: all but the hole */
-    return len > C.REC_END ? len - C.REC_BYTES : Math.min(len, C.REC_OFFSET);
+    return len > C.REC_END ? len - C.HOLE_BYTES : Math.min(len, C.REC_OFFSET);
   }
   function stem(name) {
     return name.replace(/\.[^.]*$/, "").toUpperCase().replace(/[^A-Z0-9 _#-]/g, "").slice(0, 7) || "SAMPLE";
@@ -404,7 +406,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     /* memory */
     const ramOk = dev ? dev.ram === 1 : true;
     const top = ramOk ? C.POOL_BYTES : C.REC_END;
-    const cap = (ramOk ? C.POOL_BYTES - C.REC_BYTES : C.REC_OFFSET) - C.DATA_OFFSET;
+    const cap = (ramOk ? C.POOL_BYTES - C.HOLE_BYTES : C.REC_OFFSET) - C.DATA_OFFSET;
     const len = plan(), send = len ? DN2.payloadBytes(len) - C.DATA_OFFSET : 0;
     const now = dev ? dev.slots.filter(s => !s.rec).reduce((a, s) => a + s.frames * 2, 0) : null;
     const recs = dev ? dev.slots.filter(s => s.rec).reduce((a, s) => a + s.frames * 2, 0) : null;
@@ -416,7 +418,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     const secs = len ? (DN2.payloadBytes(len) / rate) : 0;
     $("sTime").textContent = len ? (secs < 90 ? `${Math.ceil(secs)} s` : `${Math.round(secs / 60)} min`) : "–";
     const bar = $("bar"); bar.innerHTML = "";
-    const seg = (bytes, color, title) => { const d = document.createElement("div"); d.style.width = (100 * bytes / (cap + C.REC_BYTES)) + "%"; d.style.background = color; d.title = title; bar.append(d); };
+    const seg = (bytes, color, title) => { const d = document.createElement("div"); d.style.width = (100 * bytes / (cap + C.HOLE_BYTES)) + "%"; d.style.background = color; d.title = title; bar.append(d); };
     seg(Math.min(send, cap), "var(--new)", "what you send: " + fmtMB(send));
     if (recs) seg(recs, "var(--rec)", "recordings: " + fmtMB(recs));
     const over = send > cap || len > top;

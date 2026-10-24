@@ -208,7 +208,7 @@ def build_pool(paths, slice_mode="cue", big=True):
                          hole=SM.USER_HOLE if big else None)
     room = SM.POOL_BYTES if big else SM.REC_OFFSET
     if len(pool) > room:
-        mb = (len(pool) - (SM.REC_BYTES if len(pool) > SM.REC_END else 0)) / 2 ** 20
+        mb = (len(pool) - (SM.HOLE_BYTES if len(pool) > SM.REC_END else 0)) / 2 ** 20
         raise SystemExit(f"{mb:.0f} MB of samples: more than the {SM.USER_BYTES / 2 ** 20 if big else 96:.0f} MB "
                          "the pool holds for yours" + ("" if big else " (flash v0.22 or later for 368 MB)"))
     return pool, names, [len(s) / r / DSP_RATE * DSP_RATE for s, r in zip(samples, rates)]
@@ -374,7 +374,7 @@ def main(argv=None):
         ram = None
         if proto >= 4 and len(p) >= 22:
             _hole_end, room, ram = struct.unpack(">III", p[10:22])
-            room -= SM.REC_BYTES
+            room -= SM.HOLE_BYTES
         if a.command == "hello":
             print(f"sample link {proto}: room for {room / 2 ** 20:.0f} MB of samples, the pool at DSP 0x{ddr:08x}")
             if ram is not None:

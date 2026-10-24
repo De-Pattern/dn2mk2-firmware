@@ -166,6 +166,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     def call(name, *args):
         return guest_call(syms[name], *args, limit=50_000_000)
 
+    def returned_d0():
+        return guest_call.returned["d0"]
+
     # the DSP: its pool as words, the commands it took, the status it answers with
     pool: dict[int, int] = {}
     dsp = {"seq": None, "state": 0, "vdone": 0, "vsum": 0, "vsum2": 0, "send": None,
@@ -412,6 +415,83 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                          and not dsp["cmds"] and not route.get("changed"))
         if scenario == "fast":                  # v0.22: the RAM check came first
             out["ok"] = out["ok"] and dsp["cmds"][0] == SM.CMD_PROBE
+    elif scenario == "slices":
+        # v0.23: SLICE's editor's side: a 3 s int16 sample with four hits on the +Drive,
+        # loaded; read back (smp_analyse, a chunk a pass: its transients found where the
+        # hits are); a slice table set (smp_slices_set): the slice area's sectors written
+        # on the +Drive, the DSP given the table before the entry that points at it (bit
+        # 16, the count), and the table read back the same (smp_slices_get)
+        n = 144000
+        hits = [0, 36000, 72000, 108000]
+        snd = [0.0] * n
+        for h in hits:
+            for k in range(6000):
+                snd[h + k] = 0.8 * ((k * 37 % 50) / 25 - 1) * (1 - k / 6000)
+        img = SL.pool_bytes([snd], base, [1.0], [SM.FMT_I16], ["HITS"])
+        img = bytearray(img + bytes((-len(img)) % 512))
+        hdr_dir = bytes(img[:SM.DATA_OFFSET])
+
+        def adler3(b):
+            a_, b_ = 1, 0
+            for x in b:
+                a_ = (a_ + x) & 0xFFFFFFFF
+                b_ = (b_ + a_) & 0xFFFFFFFF
+            return (b_ << 16 ^ a_) & 0xFFFFFFFF
+        magic, nbytes, ck = 0x444E3251, len(img), adler3(hdr_dir)
+        disk[STORE_SECTOR] = struct.pack(">5I", magic, 2, nbytes, ck,
+                                         (~magic ^ nbytes ^ ck) & 0xFFFFFFFF).ljust(512, b"\0")
+        for k in range(len(img) // 512):
+            disk[STORE_SECTOR + 1 + k] = bytes(img[512 * k:512 * k + 512])
+        periods = 0
+        while periods < 3000:
+            period()
+            call("smp_boot")
+            periods += 1
+            if long("smp_lstate") == 4:
+                break
+        loaded = long("smp_lstate") == 4
+        call("smp_analyse", 0)
+        for _ in range(400):
+            call("smp_boot")
+            call("smp_analysis", 0)
+            if returned_d0() == 2:
+                break
+        an = returned_d0()
+        buf = STACK_TOP - 0x2000
+        call("smp_onsets", buf, 16)
+        nos = returned_d0()
+        ons = list(struct.unpack(f">{nos}I", machine.read(buf, 4 * nos))) if 0 < nos <= 16 else []
+        table = [0, 30000, 0, 36000, 70000, 40000, 72000, 140000, 72000]
+        machine.write(buf, struct.pack(">9I", *table))
+        call("smp_slices_set", 0, buf, 3)
+        set_rc = returned_d0()
+        sent_at = len(dsp["cmds"])
+        order = []
+        area = SM.SLICE_AREA // 4
+        for _ in range(3000):
+            period()
+            call("smp_boot")
+            got_area = all(pool.get(area + j) == table[j] for j in range(9))
+            e = pool.get((8 + 12) // 4, 0)
+            if got_area and "area" not in order:
+                order.append("area")
+            if (e >> 16) & 1 and "entry" not in order:
+                order.append("entry")
+            if len(order) == 2 and long("smp_lstate") == 4:
+                break
+        machine.write(buf, bytes(4 * 9))
+        call("smp_slices_get", 0, buf)
+        back_n = returned_d0()
+        back = list(struct.unpack(">9I", machine.read(buf, 36)))
+        sec = SM.SLICE_AREA // 512
+        on_disk = disk.get(STORE_SECTOR + 1 + sec, bytes(512))[:36]
+        out.update(loaded=loaded, analysis=an, onsets=ons, set=set_rc, order=order, back_n=back_n,
+                   back=back, disk_table=list(struct.unpack("<9I", on_disk)),
+                   entry_word=hex(pool.get((8 + 12) // 4, 0)), routing_changed=route.get("changed", 0))
+        near = all(any(abs(o - h) <= 400 for o in ons) for h in hits)
+        out["ok"] = (loaded and an == 2 and near and len(ons) == 4 and set_rc == 0
+                     and order == ["area", "entry"] and back_n == 3 and back == table
+                     and out["disk_table"] == table and not route.get("changed"))
     elif scenario == "save":
         # a recording of 3,000 frames on the DSP, 16 MB into the recordings' area, for slot
         # 40 (SAMP 41; v0.22: any slot, any place); no image on the +Drive yet
@@ -771,6 +851,7 @@ def main() -> int:
             uc.reg_write(K.UC_M68K_REG_PC, saved_pc)
         return counted["n"]
 
+    guest_call.returned = returned
     panel = Panel(machine, png_dir=str(png_dir))
     panel.settle(a.warmup)
     for step in [s.strip() for s in a.steps.split(",") if s.strip()]:

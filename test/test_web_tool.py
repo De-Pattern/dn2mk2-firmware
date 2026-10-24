@@ -36,7 +36,7 @@ def _node(js: str):
 def test_the_constants_are_the_builds():
     c = _node("console.log(JSON.stringify(DN2.C))")
     for k in ("POOL_MAGIC", "POOL_SLOTS", "USER_SLOTS", "NAMES_OFFSET", "NAME_BYTES", "DATA_OFFSET",
-              "FMT_I16", "MAX_SLICES", "REC_OFFSET", "REC_END", "POOL_BYTES", "REC_BYTES"):
+              "FMT_I16", "MAX_SLICES", "REC_OFFSET", "REC_END", "POOL_BYTES", "REC_BYTES", "HOLE_BYTES", "SLICE_AREA"):
         assert c[k] == getattr(SM, k), k
     assert c["POOL_DDR"] == dsp.SMP_POOL_DDR
 

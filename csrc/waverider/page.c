@@ -204,9 +204,13 @@ void wr_screen(void *screen, void *canvas)
 {
     extern int rec_visible(void);
     extern void rec_screen_draw(void *canvas);
+    extern int slc_visible(void);
+    extern void slc_draw(void *canvas);
     SCREEN_DRAW(screen, canvas);
     if (rec_visible())
         rec_screen_draw(canvas);
+    else if (slc_visible())
+        slc_draw(canvas);
 }
 
 /* the UI loop's redraw test, as stock (and the names kept current, once a loop; and
@@ -226,9 +230,16 @@ int wr_poll(void *screen)
      * the loop then pushed its other buffer undrawn (0x4011d32a draws only when the byte
      * is set), and the page flashed between the last two screens it had (owner, v0.19) */
     static u32 rec_next __attribute__((section(".data"))) = 0;
-    if (rec_visible() && (int)(FRAMES_NOW - rec_next) >= 0) {
+    extern void slc_poll(void);
+    extern int slc_visible(void);
+    extern int slc_busy(void);
+    slc_poll();
+    static int slc_was __attribute__((section(".data"))) = 0;
+    int slc = slc_visible() || slc_busy();      /* v0.23: SLICE's menus, and their notes */
+    if ((rec_visible() || slc || slc_was) && (int)(FRAMES_NOW - rec_next) >= 0) {
         rec_next = FRAMES_NOW + REC_REDRAW;
         SET_DIRTY(screen);
+        slc_was = slc;                          /* once more after it closes: the page again */
     }
     return IS_DIRTY(screen);
 }

@@ -556,7 +556,8 @@ def test_slice_plays_the_samples_own_slices():
     assert abs(min(nz) - 1800 / n) < 0.05
     nz = play(0, note=12.0 + 4)                # NOTE: C1 + 4 -> slice 4 mod 3 = 1 (the second)
     assert abs(min(nz) - 1000 / n) < 0.05 and abs(max(nz) - 1800 / n) < 0.05
-    assert play(2, slices=()) == []            # no slices: nothing
+    whole = play(2, slices=())                 # v0.23: no slices: the whole sample (v0.19..v0.22: nothing)
+    assert abs(min(whole) - 0.0) < 0.05 and abs(max(whole) - 1.0) < 0.05
 
 
 def test_the_host_tool_writes_a_wavs_slices(tmp_path):
@@ -657,7 +658,7 @@ def test_v022_send_skips_the_recordings_area_and_link4_reports_the_ram():
             return b"\0" * 8
     T.cmd_send3(FakeLink(), pool, ["X"], 1 << 16)
     assert sent and all(not (a < SM.REC_END and a + n > SM.REC_OFFSET) for a, n in sent)
-    assert sum(n for _, n in sent) == len(pool) - SM.REC_BYTES
+    assert sum(n for _, n in sent) == len(pool) - SM.HOLE_BYTES
     assert sent[-1][0] + sent[-1][1] == len(pool)
     src = (pathlib.Path(__file__).resolve().parents[1] / "csrc/sampler/link.c").read_text()
     assert "(at < REC_END && at + k > REC_OFFSET)" in src and "#define PROTO 4" in src
@@ -703,3 +704,33 @@ def test_v022_stretch_and_repitch_at_len_0_are_heard():
         for b in range(120):
             out += h.block(SM.TYPE_OF[name], 60.0, b == 0)
         assert max(abs(x) for x in out[-1600:]) > floor, name
+
+
+def test_v023_slices_made_on_the_instrument_come_from_the_slice_area():
+    # the entry's bit 16: the table is the slot's in the slice area (link.c's
+    # smp_slices_set), not after the frames; a sample sent without slices gets them so
+    n = 3000
+    ramp = [k / n for k in range(n)]
+    SL_ = SM.TYPE_OF["SLICE"]
+    cuts = [(0, 900, 0), (900, 2100, 900), (2100, 3000, 2100)]
+
+    def play(slce):
+        h = SL.Harness(0, samples=[ramp], rates=[1.0], fmts=[0])
+        h.defaults()
+        ent = h.L.pool + 8                      # slot 0 (SAMP 1)
+        h.mem.put(ent + 12, h.mem.get(ent + 12) | len(cuts) << 8 | 1 << 16)
+        area = h.L.pool + SM.SLICE_AREA
+        for j, (a, b, lp) in enumerate(cuts):
+            for w, x in enumerate((a, b, lp)):
+                h.mem.put(area + 12 * j + 4 * w, x)
+        h.set(SM.SLICE_REC, slce)
+        out = []
+        for b in range(120):
+            out += h.block(SL_, 60.0, b == 1)
+        nz = [x for x in out if abs(x) > 1e-4]
+        return nz[64:-64]
+    for k, (a, b, _) in enumerate(cuts):
+        nz = play(2 * (k + 1))
+        assert abs(min(nz) - a / n) < 0.05 and abs(max(nz) - b / n) < 0.05, k
+    assert SM.SLICE_AREA + SM.POOL_SLOTS * SM.SLICE_TABLE_BYTES <= SM.REC_END
+    assert SM.REC_OFFSET + SM.REC_BYTES == SM.SLICE_AREA

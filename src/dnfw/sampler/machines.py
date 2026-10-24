@@ -113,9 +113,14 @@ REC_FRAMES = 66 * 48000                    # the DT2's maximum: 66 s of int16 at
 # v0.22: the recordings' area is the pool's last 32 MB, shared: a recording goes where the
 # ColdFire finds room (link.c's smp_rec_place), at REC_OFFSET + 512 u, into any slot
 REC_END = 128 << 20                        # v0.22: the recordings' area stays 96..128 MB (proven RAM)
-REC_BYTES = REC_END - REC_OFFSET
+# v0.23: the slices made on the instrument, a table of SLICE_MAX (start, end, loop) per
+# slot, in the recordings' area's last 128 KB (proven RAM; loaded at power-on like the rest)
+SLICE_TABLE_BYTES = 768                    # 64 x 12
+SLICE_AREA = REC_END - (128 << 10)
+REC_BYTES = SLICE_AREA - REC_OFFSET        # v0.23: the recordings' area ends at the slice area
 USER_HOLE = (REC_OFFSET, REC_END)           # yours: 0..96 MB, then 128..400 MB (dn2samples.py skips the hole)
-USER_BYTES = POOL_BYTES - REC_BYTES - DATA_OFFSET
+HOLE_BYTES = REC_END - REC_OFFSET              # what a send skips: the recordings and the slice area
+USER_BYTES = POOL_BYTES - HOLE_BYTES - DATA_OFFSET
 REC_UNIT = 512
 REC_MIN_BYTES = 0x10000                    # the least room a recording starts in
 IN_BUF = 0x268538                          # the engine's input block: L 32 floats, R at +0x80

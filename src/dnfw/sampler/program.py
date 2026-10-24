@@ -29,7 +29,8 @@ V = dict(on=0, mach=1, pos=2, frac=3, lo=4, hi=5, loop=6, mode=7, base=8, frames
          fixed=26,                       # GRID's NOTE mode: the note picks the slice, not the pitch
          walive=27,                      # WERP: its run of segments goes on (V['on'] is its segment)
          fin=28, fig=29,                 # the note's first block fades in (the DT2's 0x17c), its gain
-         nsl=30)                         # v0.19: the sample's slices (its entry's format word, bits 8..15)
+         nsl=30,                         # v0.19: the sample's slices (its entry's format word, bits 8..15)
+         sla=31)                         # v0.23: its slice table's address when edited on the instrument (0: after its frames)
 STATE_WORDS = 16
 STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
@@ -307,6 +308,23 @@ def start(p: Prog, L: Layout) -> None:
             p.iconst(12, 0xFF)
             p.iop(9, 9, "AND", 12)
             vs(p, "nsl", 9)
+            # v0.23: bit 16, the slices were made on the instrument: their table is the
+            # slot's in the slice area (SM.SLICE_AREA + SM.SLICE_TABLE_BYTES slot)
+            p.lsh(9, 8, -16)
+            p.iconst(12, 1)
+            p.iop(9, 9, "AND", 12)
+
+            def area():
+                p.ld(4, C["samp"])
+                p.lsh(5, 4, 9)
+                p.lsh(4, 4, 8)
+                p.ipass(12, 5)
+                p.iop(4, 12, "+", 4)          # slot x 768
+                p.iconst(12, L.pool + SM.SLICE_AREA)
+                p.iop(9, 12, "+", 4)
+            p.ifz(9, "NE", area)
+            vs(p, "sla", 9)
+            p.iconst(12, 0xFF)
             p.iop(8, 8, "AND", 12)
             vs(p, "fmt", 8)
             region(p, L)
@@ -374,11 +392,14 @@ def slice_bounds(p: Prog, L: Layout) -> None:
     dn2samples.py writes it). SLCE (0..127 -> 0..63): 0 NOTE, the note picks the slice
     from C1 up, wrapping after the last, and the sample keeps its pitch; else slice SLCE,
     past the last held at it. LEN (0..127 -> 1..64) slices play on from it. No slices: the
-    region is empty (nothing plays). Clobbers R0-R15, I1."""
+    region is the whole sample (v0.23; v0.19..v0.22: empty, nothing played). Clobbers
+    R0-R15, I1."""
     C = L.C
     p.iconst(4, 0)
     vs(p, "lo", 4)
-    vs(p, "hi", 4)
+    vs(p, "loop", 4)
+    v(p, 5, "frames")
+    vs(p, "hi", 5)
     v(p, 6, "nsl")
 
     def some():
@@ -438,6 +459,8 @@ def slice_bounds(p: Prog, L: Layout) -> None:
         p.iop(7, 7, "AND", 12)
         v(p, 9, "base")
         p.iop(7, 9, "+", 7)
+        v(p, 9, "sla")                         # v0.23: or the slice area's
+        p.ifz(9, "NE", lambda: p.ipass(7, 9))
         p.st(C["c"], 7)                        # the table's address
         # slice k's start and loop, the last's end: k 12 bytes in = (k << 3) + (k << 2)
         def entry(word, kname):

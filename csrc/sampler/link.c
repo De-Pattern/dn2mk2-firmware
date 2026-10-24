@@ -63,7 +63,7 @@ typedef unsigned char u8;
  * is room, and into any slot (rec.c's DEST): a directory entry whose frames lie there is a
  * recording, kept on the +Drive and kept when the host tool sends a new image. Yours are
  * below it and above it, to POOL_BYTES (400 MB): the host tool skips the recordings' area. */
-#define REC_BYTES (REC_END - REC_OFFSET)
+#define REC_BYTES (SLICE_AREA - REC_OFFSET)       /* v0.23: the slice area follows */
 #define ENTRY(k) (DIR + 8 + 16 * (u32)(k))
 #define NAME(k) (DIR + NAMES_OFFSET + NAME_BYTES * (u32)(k))
 _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in our RAM");
@@ -103,7 +103,19 @@ _Static_assert(CMD_OFFSET % 4u == 0 && CMD_OFFSET >= 8u + 16u * POOL_SLOTS + NAM
 #define SLICECOL ((u8 *)(SMP_MIRROR + 0x5000u))                     /* 128 x 64 slice starts, columns */
 _Static_assert(0x1000u + POOL_SLOTS * OVERVIEW_W <= 0x5000u && 0x5000u + POOL_SLOTS * SLICE_MAX <= 0x10000u,
                "the overview and the slice columns fit below the stages");
-#define STAGE(k) ((u8 *)(SMP_MIRROR + 0x10000u + (u32)(k) * CHUNK))   /* 0: loading, 1: saving, 2: upload */
+#define STAGE(k) ((u8 *)(SMP_MIRROR + 0x10000u + (u32)(k) * CHUNK))   /* 0: loading, 1: saving, 2: upload, 3: analysis */
+/* v0.23: the slice area's copy (SLICE_TABLE_BYTES a slot), the analysis' envelope and its
+ * fine waveform */
+#define SLICE_TB 768u
+#define SLAREA_BYTES (POOL_SLOTS * SLICE_TB)
+#define SLAREA ((u8 *)(SMP_MIRROR + 0x50000u))
+#define ENV_MAX 16384u
+#define ENV ((u32 *)(SMP_MIRROR + 0x68000u))
+#define HIRES_W 1024u
+#define HIRES ((u8 *)(SMP_MIRROR + 0x78000u))
+_Static_assert(0x50000u + SLAREA_BYTES <= 0x68000u && 0x68000u + 4u * ENV_MAX <= 0x78000u
+               && 0x78000u + HIRES_W <= SMP_MIRROR_BYTES, "the slice editor's RAM fits");
+_Static_assert(SLICE_AREA + SLAREA_BYTES <= REC_END && SLICE_AREA % 512u == 0, "the slice area");
 
 static u8 rq[RQ_MAX] __attribute__((section(".data")));
 static u8 rp[96] __attribute__((section(".data")));
@@ -375,6 +387,8 @@ static u32 slice_table(const u8 *e, u32 *n)
 {
     u32 addr = le32(e), fr = le32(e + 4), fmt = e[12];
     *n = e[13] > SLICE_MAX ? SLICE_MAX : e[13];
+    if (e[14] & 1)                              /* v0.23: made on the instrument: the slice area's */
+        return SLICE_AREA + SLICE_TB * (u32)((e - (DIR + 8)) / 16);
     return ((addr - SMP_POOL_DDR) + fr * (fmt ? 2u : 4u) + 3u) & ~3u;
 }
 
@@ -457,7 +471,11 @@ static u16 st[16] __attribute__((section(".data")));
  * the count, so the page can name the slots, and nothing points at frames not yet there);
  * then each used slot's frames, the recorder's included, and at once that slot's entry,
  * so a slot plays as soon as it is in; last the whole directory page again. -> 0 when done */
-enum { K_BLANK, K_FRAMES, K_ENTRY, K_FULL };
+enum { K_BLANK, K_FRAMES, K_ENTRY, K_FULL, K_AREA };
+static int area_due __attribute__((section(".data"))) = 0;      /* the slice area loads at the end */
+static int area_push __attribute__((section(".data"))) = -1;    /* one slot's table to the DSP */
+static int l_area_read __attribute__((section(".data"))) = 0;   /* K_AREA from the +Drive (else from the copy) */
+int smp_area_ok(void);
 static int l_kind __attribute__((section(".data"))) = K_BLANK;
 static int l_entry __attribute__((section(".data"))) = -1;       /* the entry due next */
 
@@ -466,6 +484,14 @@ static int next_range(void)
     if (l_slot == 0 && l_kind == K_BLANK && l_end == 0) {
         l_off = 0;
         l_end = CMD_OFFSET;                     /* up to the command block: the DSP's */
+        return 1;
+    }
+    if (area_push >= 0) {                       /* v0.23: one slot's slice table */
+        l_kind = K_AREA;
+        l_area_read = 0;
+        l_off = SLICE_AREA + SLICE_TB * (u32)area_push;
+        l_end = l_off + SLICE_TB;
+        area_push = -1;
         return 1;
     }
     if (l_entry >= 0) {
@@ -483,8 +509,10 @@ static int next_range(void)
             continue;
         u32 lo = addr - SMP_POOL_DDR, bytes = fr * (fmt ? 2u : 4u);
         u32 ns, tbl = slice_table(e, &ns);                  /* v0.19: and its slices, if any */
-        if (ns)
+        if (ns && !(e[14] & 1))
             bytes = tbl - lo + 12u * ns;
+        if (e[14] & 1)
+            area_due = 1;
         if (lo >= ram_top || bytes > ram_top - lo)             /* v0.22: past the RAM proven */
             continue;
         l_kind = K_FRAMES;
@@ -494,6 +522,16 @@ static int next_range(void)
             l_end = ram_top;
         l_entry = (int)k;
         return 1;
+    }
+    if (l_slot == POOL_SLOTS && area_due) {     /* v0.23: the slice area, before the page */
+        area_due = 0;
+        if (smp_area_ok()) {
+            l_kind = K_AREA;
+            l_area_read = 1;
+            l_off = SLICE_AREA;
+            l_end = SLICE_AREA + SLAREA_BYTES;
+            return 1;
+        }
     }
     if (l_slot == POOL_SLOTS) {                 /* last: the whole directory page */
         l_slot++;
@@ -559,7 +597,20 @@ static void load_poll(void)
         u32 n = l_end - l_off;
         if (n > CHUNK)
             n = CHUNK;
-        if (l_kind == K_FRAMES) {
+        if (l_kind == K_AREA) {                             /* v0.23: from the copy */
+            if (l_area_read) {
+                if (image_read(l_off, n, STAGE(0)) != 0) {
+                    smp_lstate = L_IDLE;
+                    return;
+                }
+                for (u32 k = 0; k < n; k++)
+                    SLAREA[l_off - SLICE_AREA + k] = STAGE(0)[k];
+                slices_add(l_off, n, STAGE(0));
+            } else {
+                for (u32 k = 0; k < n; k++)
+                    STAGE(0)[k] = SLAREA[l_off - SLICE_AREA + k];
+            }
+        } else if (l_kind == K_FRAMES) {
             if (image_read(l_off, n, STAGE(0)) != 0) {
                 smp_lstate = L_IDLE;                            /* the +Drive refused: stop */
                 return;
@@ -649,6 +700,19 @@ int smp_slot_empty(int k)
         return 1;
     const u8 *e = ENTRY(k);
     return le32(e) < SMP_POOL_DDR + DATA_OFFSET || le32(e + 4) == 0;
+}
+
+/* v0.23: the slice area is free (no recording of v0.22's reaches into it) */
+int smp_area_ok(void)
+{
+    for (u32 k = 0; k < POOL_SLOTS; k++) {
+        if (!is_recording(k))
+            continue;
+        u32 a = le32(ENTRY(k)) - SMP_POOL_DDR, b = a + le32(ENTRY(k) + 4) * 2u;
+        if (b > SLICE_AREA && a < SLICE_AREA + SLAREA_BYTES)
+            return 0;
+    }
+    return 1;
 }
 
 /* where a recording into slot DEST may go: the largest stretch of the recordings' area
@@ -805,6 +869,7 @@ static void save_poll(void)
 
 static int dir_due __attribute__((section(".data"))) = 0;       /* DIR to the +Drive when idle */
 static int push_slot __attribute__((section(".data"))) = -1;    /* an entry the DSP must take */
+static int area_slot_due __attribute__((section(".data"))) = -1; /* v0.23: a slot's slice table to the +Drive and the DSP */
 
 /* slot K's frames: 0 if none */
 u32 smp_frames(int k)
@@ -869,6 +934,179 @@ void smp_rename(int k, const char *name)
     dir_due = 1;
 }
 
+/* -- v0.23: the slice editor's side (slice.c) ------------------------------------------------ */
+
+static int an_state __attribute__((section(".data"))) = 0;      /* 0 idle, 1 running, 2 done, -1 failed */
+static int an_slot __attribute__((section(".data"))) = -1;
+#define D_ __attribute__((section(".data")))
+static u32 an_lo D_ = 0, an_hi D_ = 0, an_at D_ = 0;           /* bytes into the image */
+static u32 an_hop D_ = 64, an_n D_ = 0, an_acc D_ = 0, an_cnt D_ = 0;   /* frames a step; steps */
+
+/* slot K's frames and whether its frames are int16 (all that dn2samples and the recorder make) */
+u32 smp_slot_frames(int k, int *i16)
+{
+    u32 n = smp_frames(k);
+    if (i16)
+        *i16 = n && ENTRY(k)[12] == 1;
+    return n;
+}
+
+/* read slot K's frames from the +Drive, a chunk a UI pass: the fine waveform (HIRES_W
+ * column peaks 0..255) and the energy envelope the transient finder reads */
+int smp_analyse(int k)
+{
+    int i16;
+    u32 n = smp_slot_frames(k, &i16);
+    if (!n || !i16 || an_state == 1 || !store_ok())
+        return -1;
+    an_slot = k;
+    an_lo = le32(ENTRY(k)) - SMP_POOL_DDR;
+    an_hi = an_lo + 2u * n;
+    an_at = an_lo & ~511u;
+    an_hop = n / ENV_MAX + 1u;
+    if (an_hop < 64u)
+        an_hop = 64u;
+    an_n = 0;
+    an_acc = 0;
+    an_cnt = 0;
+    for (u32 j = 0; j < HIRES_W; j++)
+        HIRES[j] = 0;
+    an_state = 1;
+    return 0;
+}
+
+int smp_analysis(int *pct)
+{
+    if (pct)
+        *pct = an_state == 1 && an_hi > an_lo ? (int)((an_at - (an_lo & ~511u)) / ((an_hi - an_lo) / 100u + 1u)) : 100;
+    return an_state;
+}
+
+const u8 *smp_hires(void)
+{
+    return HIRES;
+}
+
+static void analyse_poll(void)
+{
+    if (an_state != 1)
+        return;
+    u32 n = an_hi - an_at;
+    if (n > CHUNK)
+        n = CHUNK;
+    n = (n + 511u) & ~511u;
+    if (image_read(an_at, n, STAGE(3)) != 0) {
+        an_state = -1;
+        return;
+    }
+    u32 frames = (an_hi - an_lo) / 2u;
+    for (u32 x = an_at; x < an_at + n; x += 2) {
+        if (x < an_lo || x + 1 >= an_hi)
+            continue;
+        u32 i = (x - an_lo) / 2u;
+        int v = (short)(STAGE(3)[x - an_at] | STAGE(3)[x - an_at + 1] << 8);
+        int a = v < 0 ? -v : v;
+        u32 col = (i >> 6) * HIRES_W / ((frames >> 6) + 1u);
+        u8 pk = (u8)(a >> 7);
+        if (col < HIRES_W && pk > HIRES[col])
+            HIRES[col] = pk;
+        u32 q = (u32)(a >> 6);
+        an_acc += q * q;
+        if (++an_cnt == an_hop) {
+            if (an_n < ENV_MAX)
+                ENV[an_n++] = an_acc / an_hop;
+            an_acc = 0;
+            an_cnt = 0;
+        }
+    }
+    an_at += n;
+    if (an_at >= an_hi)
+        an_state = 2;
+}
+
+/* the transients of the analysed slot, as the host tool finds them (dn2samples.onsets):
+ * where the energy jumps fourfold over the last four steps, 50 ms apart at least. -> how
+ * many starts (the first 0), at most MOST */
+int smp_onsets(u32 *out, int most)
+{
+    if (an_state != 2 || most < 1)
+        return 0;
+    u32 top = 0;
+    for (u32 k = 0; k < an_n; k++)
+        if (ENV[k] > top)
+            top = ENV[k];
+    u32 floor = top / 10000u, gap = 2400u / an_hop;
+    if (gap < 1u)
+        gap = 1u;
+    int c = 0;
+    out[c++] = 0;
+    u32 last = 0;
+    for (u32 k = 1; k < an_n && c < most; k++) {
+        u32 lo = k > 4u ? k - 4u : 0u, sum = 0;
+        for (u32 j = lo; j < k; j++)
+            sum += ENV[j] / 4u;
+        u32 prev = sum * 4u / (k - lo);
+        if (ENV[k] > floor && ENV[k] / 4u > prev && k - last >= gap
+            && k * an_hop - out[c - 1] >= 2400u) {
+            out[c++] = k * an_hop;
+            last = k;
+        }
+    }
+    return c;
+}
+
+/* slot K's slices into T (start, end, loop each): -> how many. From the slice area's copy
+ * or, made by the host tool, read from the +Drive */
+int smp_slices_get(int k, u32 *t)
+{
+    if (k < 0 || k >= POOL_SLOTS || !dir_ok)
+        return 0;
+    const u8 *e = ENTRY(k);
+    u32 ns, at = slice_table(e, &ns);
+    if (!ns)
+        return 0;
+    const u8 *src;
+    if (e[14] & 1) {
+        src = SLAREA + SLICE_TB * (u32)k;
+    } else {
+        u32 a0 = at & ~511u, nb = ((at + 12u * ns + 511u) & ~511u) - a0;
+        if (nb > CHUNK || image_read(a0, nb, STAGE(3)) != 0)
+            return 0;
+        src = STAGE(3) + (at - a0);
+    }
+    for (u32 j = 0; j < 3u * ns; j++)
+        t[j] = le32(src + 4u * j);
+    return (int)ns;
+}
+
+/* slot K's slices from T (N of them, sorted by start): kept in the slice area, on the
+ * +Drive and in the DSP (the table first, then the entry that points at it) */
+int smp_slices_set(int k, const u32 *t, int n)
+{
+    if (k < 0 || k >= POOL_SLOTS - 1 || !dir_ok || n < 0 || n > SLICE_MAX || !smp_area_ok()
+        || !smp_frames(k))
+        return -1;
+    u32 fr = smp_frames(k);
+    u8 *tb = SLAREA + SLICE_TB * (u32)k;
+    for (u32 j = 0; j < SLICE_TB; j++)
+        tb[j] = 0;
+    for (int j = 0; j < 3 * n; j++)
+        put_le32(tb + 4 * j, t[j] > fr ? fr : t[j]);
+    u8 *e = ENTRY(k);
+    e[13] = (u8)n;
+    e[14] = (u8)(n ? e[14] | 1u : e[14] & ~1u);
+    for (int j = 0; j < SLICE_MAX; j++)
+        SLICECOL[SLICE_MAX * k + j] = 0;
+    for (int j = 0; j < n; j++) {
+        u32 st = t[3 * j];
+        SLICECOL[SLICE_MAX * k + j] = (u8)(st >= fr ? OVERVIEW_W - 1 : st / (fr / (OVERVIEW_W - 1) + 1u));
+    }
+    area_slot_due = k;                          /* to the +Drive, then the DSP */
+    dir_due = 1;
+    push_slot = k;
+    return 0;
+}
+
 /* the directory to the +Drive, and a changed entry to the DSP, once nothing else runs */
 static void edits_poll(void)
 {
@@ -890,6 +1128,15 @@ static void edits_poll(void)
         if (image_write(0, DIR_BYTES, DIR) == 0 && header_write(bytes) == 0)
             smp_hi = bytes;
         return;
+    }
+    if (area_slot_due >= 0) {                       /* v0.23: the slot's table's sectors */
+        u32 a0 = (SLICE_AREA + SLICE_TB * (u32)area_slot_due) & ~511u;
+        u32 a1 = (SLICE_AREA + SLICE_TB * (u32)(area_slot_due + 1) + 511u) & ~511u;
+        image_write(a0, a1 - a0, SLAREA + (a0 - SLICE_AREA));
+        if (smp_hi < SLICE_AREA + SLAREA_BYTES && header_write(SLICE_AREA + SLAREA_BYTES) == 0)
+            smp_hi = SLICE_AREA + SLAREA_BYTES;
+        area_push = area_slot_due;                  /* the table goes before the entry */
+        area_slot_due = -1;
     }
     if (push_slot >= 0 && fast_on) {                /* the loader's own path: sent, checked */
         l_entry = push_slot;
@@ -926,6 +1173,7 @@ void smp_boot(void)
     load_poll();
     save_poll();
     edits_poll();
+    analyse_poll();
 }
 
 /* -- USB ------------------------------------------------------------------------------------ */

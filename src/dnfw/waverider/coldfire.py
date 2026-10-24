@@ -391,6 +391,8 @@ REC_COMBO_STOCK = bytes.fromhex("2f2a00a44eb940046bfe")
 REC_COMBO_EXIT = 0x4005FC50             # the handler's common exit (the key offered to the base)
 LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc30e,%a2 (v0.22)
 LFO_MASK_STOCK = 0x400DC30E
+KEYNOTES_SITE = 0x40058BE8              # v0.23: KeyboardView's jsr 0x40034460(kbd, &notes, key)
+KEYNOTES_STOCK = bytes.fromhex("4eb940034460")
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
 POLL_STOCK = bytes.fromhex("4eb94011d2f4")
 
@@ -554,6 +556,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "FUNC + VOICE: the RECORDER opens or closes (stock: unison on/off; VOICE alone "
          "still opens its menu)", REC_COMBO_STOCK)
 
+    # v0.23: SLICES: in KEYBOARD mode a SLICE track (SLCE NOTE) plays slice k on trig k
+    _need(content, KEYNOTES_SITE - 8, bytes.fromhex("2f04486effd42f00"), "the KeyboardView pushes key, &notes, view")
+    edit(KEYNOTES_SITE, bytes.fromhex("4eb9") + _long(csyms["slc_keynotes"]),
+         "a trig key's notes in KEYBOARD mode: on a SLICE track (SLCE NOTE) slice k, else stock's",
+         KEYNOTES_STOCK)
+
     # v0.22: the LFOs' destination list leaves out the WaveTone records our machines do not use
     _need(content, LFO_MASK_LEA, bytes.fromhex("45f9400dc30e"), "the destination list: lea 0x400dc30e,%a2")
     _need(content, LFO_MASK_LEA + 0x30, bytes.fromhex("4e92"), "... called once a slot (jsr %a2@)")
@@ -614,7 +622,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds", "smp_tdm_sent", "smp_tdm_heard",
                  "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate",
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
-                 "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text"):   # the sample link's state (v0.15)
+                 "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen",
+                 "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
+                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)
