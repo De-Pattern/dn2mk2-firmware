@@ -379,7 +379,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             if periods % 25 == 0:
                 log.append([periods, long("smp_walk"), long("smp_retries"), long("smp_lstate"),
                             long("smp_tdm_sent"), len(dsp["cmds"]), io["reads"]])
-            if scenario == "dead" and periods > 100 and long("smp_lstate") == 0:
+            if (scenario == "dead" and periods > 100 and long("smp_lstate") == 0
+                    and long("smp_booted") == 2):     # (v0.22: after the RAM check's four seconds)
                 break                           # the loader gave up
             # done: the directory page (the last range) is in
             if all(pool.get(k // 4) == struct.unpack_from("<I", img, k)[0] for k in range(0, SM.CMD_OFFSET, 4)):
