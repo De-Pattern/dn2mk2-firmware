@@ -155,7 +155,7 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
                                       dsp.GRAN_TABLES_DDR, dsp.PERC_TABLES_DDR,
                                       dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
-                                      dsp.MD_TABLES_DDR + MDK.TABLE_LAYOUT["sinecorr"][0],
+                                      dsp.MD_TABLES_DDR + MDK.TABLE_LAYOUT[MDK.SHIPPED][0],
                                       dsp.MD_STATE_DDR, dsp.GRAN_BUF_DDR,
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[0][2]) and not any(ddr[2][2]) and not any(ddr[-1][2])

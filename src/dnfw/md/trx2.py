@@ -106,11 +106,23 @@ def imul_var(p: Prog, d: int, a: int, b: int) -> None:
 def idiv(p: Prog, d: int, n: int, m: int) -> None:
     """Rd = Rn / Rm, truncated (Rn in 0..2^24, Rm in 1..2^16; the 68k's DIVS for these):
     a reciprocal by Newton's method from the float's bits, then corrected to the exact
-    quotient. Clobbers R5-R7, R12-R14 (d, n, m not among them)."""
+    quotient. Clobbers R5-R7, R12-R14 (d, n, m not among them), and I12 (v0.24: one
+    shared copy, a subroutine, except inside another)."""
     assert not {d, n, m} & {5, 6, 7, 12, 13, 14}
+    p.ipass(5, m)
+    p.ipass(6, n)
+    if p.in_sub:
+        _idiv_body(p)
+    else:
+        p.call("md_idiv", lambda: _idiv_body(p))
+    p.ipass(d, 14)
+
+
+def _idiv_body(p: Prog) -> None:
+    """R14 = R6 / R5 (integers), truncated; F5 = R5, F6 = R6 as floats after."""
     p.iconst(12, 0)
-    p.float_(5, m, 12)                       # F5 = m
-    p.float_(6, n, 12)                       # F6 = n
+    p.float_(5, 5, 12)                       # F5 = m
+    p.float_(6, 6, 12)                       # F6 = n
     p.iconst(12, 0x7EF311C3)
     p.iop(7, 12, "-", 5)                     # F7 ~ 1/m (to 12%)
     for _ in range(4):                       # y (2 - m y)
@@ -119,14 +131,14 @@ def idiv(p: Prog, d: int, n: int, m: int) -> None:
         p.fop(13, 12, "-", 13)
         p.fop(7, 7, "*", 13)
     p.fop(7, 6, "*", 7)
-    p.trunc(d, 7)                            # q, within one of the quotient
+    p.trunc(14, 7)                           # q, within one of the quotient
     p.iconst(12, 0)
-    p.float_(7, d, 12)
+    p.float_(7, 14, 12)
     p.fop(7, 7, "*", 5)
     p.fop(7, 6, "-", 7)                      # r = n - q m (exact: < 2^24)
     p.fconst(12, 0.0)
-    p.if_(7, "LT", 12, lambda: (p.iconst(12, -1), p.iop(d, 12, "+", d)))
-    p.if_(7, "GE", 5, lambda: (p.iconst(12, 1), p.iop(d, 12, "+", d)))
+    p.if_(7, "LT", 12, lambda: (p.iconst(12, -1), p.iop(14, 12, "+", 14)))
+    p.if_(7, "GE", 5, lambda: (p.iconst(12, 1), p.iop(14, 12, "+", 14)))
 
 
 def wsf(p: Prog, k: int, r: int) -> None:

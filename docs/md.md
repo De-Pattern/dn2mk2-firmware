@@ -76,9 +76,9 @@ What it took:
   indices ahead, and one word (k = 16384) has the wrong sign. The FM machines feed their
   output back into their phase, so one LSB becomes another waveform within a few hundred
   samples. `core.md_sine_words` is that recursion in Python (equal to the emulator's
-  table); the DSP fills its table with a float polynomial rounded to the word plus a
-  packed correction (`sinecorr`, 5 bits a word, 22 KB), 1,024 words a block for the
-  first 32 blocks after power-on. The runner checks the DSP's table against it.
+  table). v0.24: the DSP decodes the table, with every Q23 table, from one compressed
+  stream (`zpack`, below), 1,024 words a block for the first 58 blocks after power-on.
+  The runner checks the DSP's table against it.
 - **The 56300's truncation where it feeds back**: envelopes multiplied once a block or
   once a sample (`mpy_floor`, `env_mul`), filter coefficients and recursions on
   integer words with 12-bit partial products a float holds exactly; the EFM pairs
@@ -164,3 +164,23 @@ defaults: WaveTone peaks at 0.16, FM Tone at 0.10; at 0.7 the MD machines peaked
 (EFM-SD) to 0.09 (TRX-BD), so the owner heard them as quiet. At 1.4 they sit at 0.09 to
 0.17, with WaveTone and FM Tone. Only the scale changed: the machines' sound, parameters
 and effects are as before.
+
+## v0.24: the tables' stream (`zpack`) and the P-I machines' room
+
+The P-I machines' code and tables took the DSP image over its 1 MiB upload buffer (by
+80 KB). What made the room, with the sound unchanged word for word:
+
+- **`zpack`** (`core.table_fill`): the sine and every Q23 table (the host's D, Q, R, A, S,
+  B and DSP2's ROM tables) ship as one bit stream, in groups of 16 words: a 7-bit header
+  (a predictor, 0-3: none, the last word, a line through the last two, a parabola through
+  the last three; and a width) and 16 residuals of that width. 46.7 KB, where the
+  sine's corrections and the tables packed 24 bits a word took 101.7 KB. The DSP decodes
+  1,024 words a block after power-on (58 blocks, 39 ms), as it filled the sine before.
+  `core.z_decode` is the decoder in Python; the model runs the DSP's own (`bench`).
+- **The host's scale function once**: the voice ran it from two places (a note, and
+  dirty words), and the chain of 34 machines was emitted twice (35 KB).
+- **One copy of the division** (`trx2.idiv`) and of `mpy_floor` (`core.mpyf_any`), as
+  subroutines, and the machine chains read the machine once.
+- **No constant loaded twice**: the DSL leaves out a load of a register already known
+  to hold that constant (only along straight code: a label or a jump forgets them all).
+

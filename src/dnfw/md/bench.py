@@ -53,16 +53,14 @@ def table_mem(L: K.Layout) -> dict[int, int]:
     if L.tables not in _TABLE_MEM:
         m: dict[int, int] = {}
         data = K.tables_bytes()
-        base = L.T["sinecorr"]
+        base = L.T[K.SHIPPED]
         for k in range(0, len(data), 4):
             m[base + k] = struct.unpack_from("<I", data, k)[0]
         mem = Mem(lambda a: m.get(a, 0))
         p = Prog("run", mem=mem)
-        for _ in range(K.SINE_N // K.SINE_PER_BLOCK):
-            K.sine_fill(p, L)
-            K.unpack_fill(p, L)
-        m.update({a: v for a, v in mem.w.items()
-                  if L.T["sine"] <= a < L.T["sine"] + 4 * K.SINE_N or L.T["hostD"] <= a < L.T["tpack"]})
+        for _ in range(K.Z_N // K.Z_PER_BLOCK):
+            K.table_fill(p, L)
+        m.update({a: v for a, v in mem.w.items() if L.T["sine"] <= a < L.T[K.SHIPPED]})
         _TABLE_MEM[L.tables] = m
     return _TABLE_MEM[L.tables]
 

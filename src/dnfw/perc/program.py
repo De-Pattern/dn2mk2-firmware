@@ -350,8 +350,7 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     for k, r in enumerate(SAVE_REGS):
         p.e(f"DM({SAVE + 4 * k:#x}) = {r};")
     from ..md import core as MDK
-    MDK.sine_fill(p, L.md)                     # v0.17: the Machinedrum's sine, 1024 words a block until whole
-    MDK.unpack_fill(p, L.md)                   # and its packed tables, 1024 words a block until whole
+    MDK.table_fill(p, L.md)                    # the Machinedrum's sine and tables, 1024 words a block until whole (v0.24: zpack)
     p.iconst(0, 0)
     p.st(L.C["t"], 0)
     top = p.label("slot")

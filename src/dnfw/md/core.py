@@ -47,141 +47,7 @@ INP0 = 236                               # the eight 14-bit inputs (ints), 236..
 MD_WORDS = 256
 MD_STRIDE = 4 * MD_WORDS                 # 1 KB a slot
 
-# -- the tables in DDR ------------------------------------------------------------------
-#   sine: 32768 floats, made by the DSP itself at start-up (sine_fill), not shipped
-#   P: 128 ints (pitch), D: 512 floats (decay coefficients, Q23), Q: 512, R: 128 floats
-#   the ROM tables: floats (Q23)
-
-
-CORR_BITS, CORR_PER_WORD = 5, 6               # the sine's corrections, packed (sine_fill)
-CORR_WORDS = (SINE_N + CORR_PER_WORD - 1) // CORR_PER_WORD
-
-
-def _table_layout() -> dict[str, tuple[int, int]]:
-    at, out = 0, {}
-    out["sine"] = (at, SINE_N)
-    at += 4 * SINE_N
-    out["sinecorr"] = (at, CORR_WORDS)
-    at += 4 * CORR_WORDS
-    for name, (_a, n) in rom.HOST_TABLES.items():
-        out[f"host{name}"] = (at, n)
-        at += 4 * n
-    for name, (_a, n) in rom.DSP_TABLES.items():
-        out[name] = (at, n)
-        at += 4 * n
-    # the Q23 tables (hostD on) ship packed, 24 bits a word (tpack), and the DSP unpacks
-    # them into their places (unpack_fill); fpad rounds them to whole blocks of the fill
-    nf = (at - out["hostD"][0]) // 4
-    groups = -(-nf // (4 * UNPACK_PER_BLOCK)) * UNPACK_PER_BLOCK
-    out["fpad"] = (at, 4 * groups - nf)
-    at += 4 * (4 * groups - nf)
-    out["tpack"] = (at, 3 * groups)
-    at += 4 * 3 * groups
-    out["_end"] = (at, 0)
-    return out
-
-
-UNPACK_PER_BLOCK = 256                        # groups of four words unpacked a block
-
-
-TABLE_LAYOUT = _table_layout()
-
-
-def tables_bytes() -> bytes:
-    """Everything in TABLES but the sine (which the DSP fills itself): read from the
-    owner's Machinedrum firmware (rom.py), at build time."""
-    import struct
-    start = TABLE_LAYOUT["sinecorr"][0]
-    out = bytearray(TABLE_LAYOUT["_end"][0] - start)
-    for name, (off, n) in TABLE_LAYOUT.items():
-        if name in ("sine", "_end", "fpad", "tpack"):
-            continue
-        if name == "sinecorr":
-            data = struct.pack(f"<{n}I", *sine_corrections())
-        elif name.startswith("host"):
-            t = rom.host_table(name[4:])
-            if name == "hostP":
-                data = struct.pack(f"<{n}I", *t)
-            else:
-                data = struct.pack(f"<{n}f", *(float(_s24(x)) * Q23 for x in t))
-        else:
-            data = struct.pack(f"<{n}f", *(x * Q23 for x in rom.dsp_table(name)))
-        out[off - start:off - start + len(data)] = data
-    # pack the Q23 floats (hostD .. fpad) 24 bits a word into tpack, and zero them: the
-    # DSP's unpack_fill puts them back, word for word
-    lo = TABLE_LAYOUT["hostD"][0] - start
-    hi = TABLE_LAYOUT["tpack"][0] - start
-    vals = []
-    for k in range(lo, hi, 4):
-        x = struct.unpack_from("<f", out, k)[0] * 2.0 ** 23
-        assert x == int(x) and -(1 << 23) <= x < (1 << 23)
-        vals.append(int(x) & 0xFFFFFF)
-    packed = []
-    for g in range(0, len(vals), 4):
-        v0, v1, v2, v3 = vals[g:g + 4]
-        packed += [v0 | (v1 & 0xFF) << 24, v1 >> 8 | (v2 & 0xFFFF) << 16, v2 >> 16 | v3 << 8]
-    assert len(packed) == TABLE_LAYOUT["tpack"][1]
-    out[lo:hi] = bytes(hi - lo)
-    off = TABLE_LAYOUT["tpack"][0] - start
-    out[off:off + 4 * len(packed)] = struct.pack(f"<{len(packed)}I", *packed)
-    return bytes(out)
-
-
-def unpack_fill(p: Prog, L: Layout) -> None:
-    """UNPACK_PER_BLOCK more groups of the packed Q23 tables (tpack: four 24-bit words in
-    three) into their floats (hostD on), from C['ufill'] (0 at power-on) until all are
-    (C['ufill'] = the groups). Each word w becomes FLOAT (w << 8) BY -31 = w / 2^23, as
-    the build's float. Clobbers R0-R8, R12, I1, I2."""
-    C = L.C
-    groups = TABLE_LAYOUT["tpack"][1] // 3
-    p.ld(0, C["ufill"])
-    p.iconst(12, groups)
-    p.e("COMP(R0, R12);")
-
-    def more():
-        p.ld(0, C["ufill"])
-        p.lsh(1, 0, 2)                          # 4 g
-        p.lsh(2, 0, 4)                          # 16 g: the floats' bytes
-        p.iconst(12, L.T["hostD"])
-        p.iop(2, 12, "+", 2)
-        p.seti(2, 2)
-        p.lsh(3, 0, 3)                          # 8 g
-        p.ipass(12, 3)
-        p.iop(1, 12, "+", 1)                    # 12 g: the packed words' bytes
-        p.iconst(12, L.T["tpack"])
-        p.iop(1, 12, "+", 1)
-        p.seti(1, 1)
-
-        def group():
-            p.ldpost(2, 1)                      # A
-            p.ldpost(3, 1)                      # B
-            p.ldpost(4, 1)                      # C
-            p.iconst(8, -31)
-            p.lsh(5, 2, 8)                      # w0 << 8
-            p.float_(5, 5, 8)
-            p.stpost(2, 5)
-            p.lsh(5, 2, -24)
-            p.lsh(5, 5, 8)
-            p.lsh(6, 3, 16)
-            p.iop(5, 5, "OR", 6)                # w1 << 8
-            p.float_(5, 5, 8)
-            p.stpost(2, 5)
-            p.lsh(5, 3, -16)
-            p.lsh(5, 5, 8)
-            p.lsh(6, 4, 24)
-            p.iop(5, 5, "OR", 6)                # w2 << 8
-            p.float_(5, 5, 8)
-            p.stpost(2, 5)
-            p.iconst(6, -256)
-            p.iop(5, 4, "AND", 6)               # w3 << 8
-            p.float_(5, 5, 8)
-            p.stpost(2, 5)
-        p.loop(C["tmp"], UNPACK_PER_BLOCK, group)
-        p.ld(0, C["ufill"])
-        p.iconst(12, UNPACK_PER_BLOCK)
-        p.iop(0, 12, "+", 0)
-        p.st(C["ufill"], 0)
-    p._branch(lambda: p.r[0] < groups, "LT", more, None)
+# -- the tables in DDR: see the end of this module (they need md_sine_words) ------------
 
 
 def _s24(v: int) -> int:
@@ -206,6 +72,7 @@ class Layout:
 
 SC_WORDS = ("n1", "n2", "n3", "a", "b", "c", "d", "e", "f", "g", "h", "k", "fill", "tmp", "mdb",
             "cw", "cs", "cv", "ash", "ufill")
+# fill, cw, cs, cv, ufill: table_fill's (the words decoded, the bit, the last three words)
 # ash: the word dsl.ash saves its count register in
 # mdb: the slot's words' address (what I3 holds), for code that needs it in an R register
 
@@ -341,18 +208,11 @@ def fib(p: Prog, L: Layout, k1: int, k2: int, d: int) -> None:
     p.float_(d, 12, 13)
 
 
-# -- the sine, filled by the DSP itself ----------------------------------------------------
-SINE_PER_BLOCK = 1024
-
-
+# -- the sine -----------------------------------------------------------------------------
 def sine_value(k: int) -> float:
     """What the table's word k approximates (DSP2's own table, within 6.5 LSB)."""
     x = k + (1.5 if k >= 3 * SINE_N // 4 else 0.0)
     return max(-1.0, min(TOP, math.sin(2.0 * math.pi * x / SINE_N)))
-
-
-# sin(pi x / 2) on [-1, 1]: odd polynomial (a minimax fit, |error| < 6e-8)
-SIN_POLY = (1.5707963185, -0.6459637111, 0.0796915052, -0.0046769631, 0.0001514842)
 
 
 def md_sine_words() -> list[int]:
@@ -382,129 +242,6 @@ def md_sine_words() -> list[int]:
         st[idx] = a & ((1 << 48) - 1)
         out.append((a >> 24) & 0xFFFFFF)
     return [s24(v) for v in out]
-
-
-def _poly_words() -> list[int]:
-    """What sine_fill computes before its corrections, word by word (run through the DSL)."""
-    from ..perc.dsl import Mem
-    m = Mem()
-    p = Prog("run", mem=m)
-    L = Layout(0x100000, 0x80000, 0x200000)
-    for _ in range(SINE_N // SINE_PER_BLOCK):
-        sine_fill(p, L, corrected=False)
-    import struct
-    return [round(struct.unpack("<f", struct.pack("<I", m.get(L.T["sine"] + 4 * k)))[0] * 2.0 ** 23)
-            for k in range(SINE_N)]
-
-
-_CORR: list[int] | None = None
-
-
-def sine_corrections() -> list[int]:
-    """DSP2's table less the polynomial's (each within +-15), CORR_PER_WORD to a word."""
-    global _CORR
-    if _CORR is None:
-        md, base = md_sine_words(), _poly_words()
-        d = [m - b for m, b in zip(md, base)]
-        lim = 1 << (CORR_BITS - 1)
-        assert all(-lim <= x < lim for x in d), max(map(abs, d))
-        mask = (1 << CORR_BITS) - 1
-        _CORR = []
-        for j in range(CORR_WORDS):
-            w = 0
-            for i, x in enumerate(d[CORR_PER_WORD * j:CORR_PER_WORD * (j + 1)]):
-                w |= (x & mask) << (CORR_BITS * i)
-            _CORR.append(w)
-    return _CORR
-
-
-def sine_fill(p: Prog, L: Layout, corrected: bool = True) -> None:
-    """SINE_PER_BLOCK more words of the sine table, from C['fill'] (0 at power-on) until
-    the table is whole (C['fill'] = SINE_N): a float polynomial rounded to the Q23 word,
-    plus the correction (sinecorr, CORR_BITS each) that makes it DSP2's own table word for
-    word (md_sine_words): FM machines feed their output back into their phase, and there
-    one LSB becomes another waveform. Clobbers R0-R8, R12, R13, I1, I2."""
-    C = L.C
-    p.ld(0, C["fill"])
-    p.iconst(12, SINE_N)
-    p.e("COMP(R0, R12);")
-
-    def more():
-        p.ld(0, C["fill"])
-        p.lsh(1, 0, 2)
-        p.iconst(12, L.T["sine"])
-        p.iop(1, 12, "+", 1)
-        p.seti(1, 1)
-
-        def word():
-            p.ld(0, C["fill"])
-            # the quarter: k in 0..32767 -> x in quarter turns, folded to [-1, 1]
-            p.iconst(12, 0)
-            p.float_(2, 0, 12)
-            # past the trough DSP2's recursion runs 1.5 indices ahead (its limiter clamped)
-            p.iconst(12, 3 * SINE_N // 4)
-            p.if_(0, "GE", 12, lambda: (p.fconst(13, 1.5), p.fop(2, 2, "+", 13)), kind="i")
-            p.fconst(12, 4.0 / SINE_N)
-            p.fop(2, 2, "*", 12)            # 0..4 quarter turns
-            p.fconst(12, 2.0)
-            p.if_(2, "GT", 12, lambda: (p.fconst(13, 4.0), p.fop(2, 2, "-", 13)))  # -2..2
-            p.fconst(12, 1.0)
-            p.if_(2, "GT", 12, lambda: (p.fconst(13, 2.0), p.fop(2, 13, "-", 2)))
-            p.fconst(12, -1.0)
-            p.if_(2, "LT", 12, lambda: (p.fconst(13, -2.0), p.fop(2, 13, "-", 2)))
-            p.fop(3, 2, "*", 2)             # x^2
-            p.fconst(4, SIN_POLY[4])
-            for c in reversed(SIN_POLY[:4]):
-                p.fop(4, 4, "*", 3)
-                p.fconst(12, c)
-                p.fop(4, 4, "+", 12)
-            p.fop(4, 4, "*", 2)
-            sat(p, 4)
-            # to the nearest Q23 word, an integer
-            p.fconst(12, 2.0 ** 23)
-            p.fop(4, 4, "*", 12)
-            p.fconst(12, 0.5)
-            p.fconst(13, -0.5)
-            p.ifz(4, "LT", lambda: p.fpass(12, 13), kind="f")
-            p.fop(4, 4, "+", 12)
-            p.trunc(6, 4)
-            if corrected:
-                p.ld(7, C["cs"])
-
-                def fetch():                    # the next packed word
-                    p.ld(7, C["cw"])
-                    p.lsh(8, 7, 2)
-                    p.iconst(12, L.T["sinecorr"])
-                    p.iop(8, 12, "+", 8)
-                    p.seti(2, 8)
-                    p.ldi(8, 0, 2)
-                    p.st(C["cv"], 8)
-                    p.iconst(12, 1)
-                    p.iop(7, 12, "+", 7)
-                    p.st(C["cw"], 7)
-                p.ifz(7, "EQ", fetch)
-                p.ld(8, C["cv"])
-                p.lsh(7, 8, 32 - CORR_BITS)
-                p.ash(7, 7, -(32 - CORR_BITS))  # the low CORR_BITS, signed
-                p.lsh(8, 8, -CORR_BITS)
-                p.st(C["cv"], 8)
-                p.ipass(12, 6)
-                p.iop(6, 12, "+", 7)
-                p.ld(7, C["cs"])
-                p.iconst(12, 1)
-                p.iop(7, 12, "+", 7)
-                p.iconst(12, CORR_PER_WORD)
-                p.if_(7, "GE", 12, lambda: p.iconst(7, 0), kind="i")
-                p.st(C["cs"], 7)
-            p.iconst(12, -23)
-            p.float_(4, 6, 12)
-            p.stpost(1, 4)
-            p.ld(0, C["fill"])
-            p.iconst(12, 1)
-            p.iop(0, 12, "+", 0)
-            p.st(C["fill"], 0)
-        p.loop(C["tmp"], SINE_PER_BLOCK, word)
-    p._branch(lambda: p.r[0] < SINE_N, "LT", more, None)
 
 
 def mpy_floor(p: Prog, d: int, a: int, b: int) -> None:
@@ -542,3 +279,268 @@ def mpy_floor(p: Prog, d: int, a: int, b: int) -> None:
     p.iop(13, 13, "+", 14)
     p.iconst(12, -23)
     p.float_(d, 13, 12)
+
+
+def mpyf_any(p: Prog, d: int, a: int, b: int) -> None:
+    """Fd = mpy_floor(Fa, Fb) through trx1.mpyf's one shared copy (F9 = floor(F10 F11)),
+    or inline inside another subroutine (v0.24: the DSP's 1 MiB upload buffer). Clobbers
+    R0-R3, R9-R15, I12."""
+    if p.in_sub:
+        mpy_floor(p, d, a, b)
+        return
+    assert b != 10
+    p.fpass(10, a)
+    p.fpass(11, b)
+    p.call("trx1_mpyf", lambda: mpy_floor(p, 9, 10, 11))
+    p.fpass(d, 9)
+
+
+# -- the tables in DDR ------------------------------------------------------------------
+#   sine: 32768 floats (Q23), DSP2's own table word for word
+#   the host's D, Q, R, A, S, B and DSP2's ROM tables: floats (Q23)
+#   P: 128 ints (pitch), shipped as they are
+# v0.24: the sine and every Q23 table ship as one compressed stream (zpack) that the DSP
+# decodes into its floats at power-on, Z_PER_BLOCK words a block (table_fill); before,
+# the sine shipped as 5-bit corrections to a polynomial and the tables packed 24 bits a
+# word, and the P-I machines' tables no longer fitted the DSP's 1 MiB upload buffer.
+#
+# zpack: a bit stream, least significant bit first through 32-bit words. Blocks of
+# Z_GROUP words, each a 7-bit header (mode: 2 bits, then width: 5 bits) and Z_GROUP
+# residuals of WIDTH bits, signed (none when WIDTH is 0). A word x is its residual r plus
+# a prediction from the three words before it (p1, p2, p3: across blocks and tables, 0 at
+# the start): mode 0, x = r; 1, p1 + r; 2, 2 p1 - p2 + r; 3, 3 p1 - 3 p2 + p3 + r.
+
+Z_GROUP = 16
+Z_PER_BLOCK = 1024                          # words decoded a DN2 block (64 groups)
+
+
+def _table_layout() -> dict[str, tuple[int, int]]:
+    at, out = 0, {}
+    out["sine"] = (at, SINE_N)
+    at += 4 * SINE_N
+    for name, (_a, n) in rom.HOST_TABLES.items():
+        if name != "P":
+            out[f"host{name}"] = (at, n)
+            at += 4 * n
+    for name, (_a, n) in rom.DSP_TABLES.items():
+        out[name] = (at, n)
+        at += 4 * n
+    nz = at // 4
+    out["zpad"] = (at, -nz % Z_PER_BLOCK)       # rounds the decoded words to whole blocks
+    at += 4 * out["zpad"][1]
+    out["hostP"] = (at, rom.HOST_TABLES["P"][1])
+    at += 4 * out["hostP"][1]
+    out["zpack"] = (at, len(_zpack_words()))
+    at += 4 * out["zpack"][1]
+    out["_end"] = (at, 0)
+    return out
+
+
+Z_N = None                                   # the decoded words (set below)
+
+
+def _z_values() -> list[int]:
+    """The words zpack decodes to, in order (signed 24-bit): the sine, then the tables."""
+    vals = list(md_sine_words())
+    for name, (_a, n) in rom.HOST_TABLES.items():
+        if name != "P":
+            vals += [_s24(x) for x in rom.host_table(name)]
+    for name in rom.DSP_TABLES:
+        vals += [_s24(x) for x in rom.dsp_table(name)]
+    vals += [0] * (-len(vals) % Z_PER_BLOCK)
+    return vals
+
+
+def _z_width(xs: list[int]) -> int:
+    m = max(max(xs), -min(xs) - 1)
+    return m.bit_length() + 1 if any(xs) else 0
+
+
+_ZPACK: list[int] | None = None
+
+
+def _zpack_words() -> list[int]:
+    """zpack as 32-bit words, and one more (the reader may look a word ahead)."""
+    global _ZPACK
+    if _ZPACK is None:
+        vals = _z_values()
+        acc, nbits = 0, 0
+        p1 = p2 = p3 = 0
+        for g in range(0, len(vals), Z_GROUP):
+            best = None
+            for mode in range(4):
+                q1, q2, q3, rs = p1, p2, p3, []
+                for x in vals[g:g + Z_GROUP]:
+                    rs.append(x - (0, q1, 2 * q1 - q2, 3 * q1 - 3 * q2 + q3)[mode])
+                    q3, q2, q1 = q2, q1, x
+                w = _z_width(rs)
+                if w <= 24 and (best is None or w < best[1]):
+                    best = (mode, w, rs)
+            mode, w, rs = best
+            acc |= (mode | w << 2) << nbits
+            nbits += 7
+            for r in (rs if w else ()):
+                acc |= (r & ((1 << w) - 1)) << nbits
+                nbits += w
+            p3, p2, p1 = vals[g + Z_GROUP - 3], vals[g + Z_GROUP - 2], vals[g + Z_GROUP - 1]
+        n = (nbits + 31) // 32 + 1
+        _ZPACK = [(acc >> (32 * k)) & 0xFFFFFFFF for k in range(n)]
+    return _ZPACK
+
+
+def z_decode(words: list[int], n: int) -> list[int]:
+    """zpack's words -> the first N words it holds (the decoder's model, in Python)."""
+    acc = sum(w << (32 * k) for k, w in enumerate(words))
+    pos, out, p1, p2, p3 = 0, [], 0, 0, 0
+
+    def read(k):
+        nonlocal pos
+        v = (acc >> pos) & ((1 << k) - 1)
+        pos += k
+        return v
+    while len(out) < n:
+        h = read(7)
+        mode, w = h & 3, h >> 2
+        for _ in range(Z_GROUP):
+            r = read(w) if w else 0
+            if w and r >> (w - 1):
+                r -= 1 << w
+            x = r + (0, p1, 2 * p1 - p2, 3 * p1 - 3 * p2 + p3)[mode]
+            out.append(x)
+            p3, p2, p1 = p2, p1, x
+    return out
+
+
+TABLE_LAYOUT = _table_layout()
+Z_N = len(_z_values())
+SHIPPED = "hostP"                             # the first shipped word: hostP, then zpack
+
+
+def tables_bytes() -> bytes:
+    """What ships, from TABLE_LAYOUT[SHIPPED] on: the host's pitch table and zpack (the
+    sine and the Q23 tables, which the DSP decodes itself); read from the owner's
+    Machinedrum firmware (rom.py), at build time."""
+    import struct
+    p = struct.pack(f"<{TABLE_LAYOUT['hostP'][1]}I", *rom.host_table("P"))
+    z = struct.pack(f"<{TABLE_LAYOUT['zpack'][1]}I", *_zpack_words())
+    return p + z
+
+
+def _shift_r(p: Prog, d: int, a: int, s: int, arith: bool = False) -> None:
+    """Rd = (A|L)SHIFT Ra BY Rs, Rs's low byte a signed count in -31..31."""
+    p.e(f"R{d} = {'ASHIFT' if arith else 'LSHIFT'} R{a} BY R{s};")
+    if p.run:
+        from ..perc.dsl import s32
+        n = p.r[s] & 0xFF
+        n = n - 256 if n & 0x80 else n
+        assert -31 <= n <= 31, n
+        x = s32(p.r[a]) if arith else p.r[a] & 0xFFFFFFFF
+        p.setR(d, (x << n) if n >= 0 else (x >> -n))
+
+
+def _z_read(p: Prog, L: Layout, n: int, signed: bool) -> None:
+    """R2 = the next Rn bits of zpack (1..24; n is R5 or R6), signed or not; the bit
+    position (C['cw']) moves on. Clobbers R0-R4, R7, R12, R13, I1."""
+    C = L.C
+    p.ld(0, C["cw"])
+    p.lsh(1, 0, -5)
+    p.lsh(1, 1, 2)
+    p.iconst(12, L.T["zpack"])
+    p.iop(1, 12, "+", 1)
+    p.seti(1, 1)
+    p.ldi(2, 0, 1)
+    p.iconst(12, 31)
+    p.iop(3, 0, "AND", 12)                    # sh: the bit in the word
+    p.iconst(12, 0)
+    p.iop(4, 12, "-", 3)
+    _shift_r(p, 2, 2, 4)                       # the word's bits from sh on
+    p.ipass(12, n)
+    p.iop(4, 12, "+", 3)                       # sh + n
+    p.iconst(13, 32)
+
+    def straddle():                            # sh >= 9 here: the rest from the next word
+        p.ldi(7, 1, 1)
+        p.iconst(12, 32)
+        p.iop(4, 12, "-", 3)
+        _shift_r(p, 7, 7, 4)
+        p.iop(2, 2, "OR", 7)
+    p.if_(4, "GT", 13, straddle, kind="i")
+    p.iconst(12, 32)
+    p.iop(4, 12, "-", n)                       # 32 - n
+    _shift_r(p, 2, 2, 4)
+    p.iconst(12, 0)
+    p.iop(4, 12, "-", 4)
+    _shift_r(p, 2, 2, 4, arith=signed)
+    p.ld(12, C["cw"])
+    p.iop(0, 12, "+", n)
+    p.st(C["cw"], 0)
+
+
+def table_fill(p: Prog, L: Layout) -> None:
+    """Z_PER_BLOCK more words of the sine and the Q23 tables from zpack, from C['fill']
+    (0 at power-on, as are the bit position C['cw'] and the last words C['cs'], C['cv'],
+    C['ufill'])
+    until all Z_N are (C['fill'] = Z_N). Each word x is stored as FLOAT x BY -23. Clobbers
+    R0-R13, I1, I2."""
+    C = L.C
+    p.ld(0, C["fill"])
+    p.iconst(12, Z_N)
+    p.e("COMP(R0, R12);")
+
+    def more():
+        p.ld(0, C["fill"])
+        p.lsh(1, 0, 2)
+        p.iconst(12, L.T["sine"])
+        p.iop(1, 12, "+", 1)
+        p.seti(2, 1)                           # I2: where the words go
+
+        def group():
+            p.iconst(5, 7)
+            _z_read(p, L, 5, False)
+            p.iconst(12, 3)
+            p.iop(0, 2, "AND", 12)
+            p.st(C["g"], 0)                    # mode
+            p.lsh(6, 2, -2)
+            p.st(C["h"], 6)                    # width
+
+            def word():
+                p.ld(6, C["h"])
+                p.iconst(2, 0)
+                p.ifz(6, "NE", lambda: _z_read(p, L, 6, True))
+                p.ld(8, C["cs"])               # p1
+                p.ld(9, C["cv"])               # p2
+                p.ld(0, C["g"])
+                p.iconst(12, 1)
+
+                def d1():
+                    p.iop(2, 8, "+", 2)
+                p.if_(0, "EQ", 12, d1, kind="i")
+                p.iconst(12, 2)
+
+                def d2():
+                    p.iop(2, 8, "+", 2)
+                    p.iop(2, 8, "+", 2)
+                    p.iop(2, 2, "-", 9)
+                p.if_(0, "EQ", 12, d2, kind="i")
+                p.iconst(12, 3)
+
+                def d3():
+                    p.ld(10, C["ufill"])       # p3
+                    for _ in range(3):
+                        p.iop(2, 8, "+", 2)
+                        p.iop(2, 2, "-", 9)
+                    p.iop(2, 10, "+", 2)
+                p.if_(0, "EQ", 12, d3, kind="i")
+                p.st(C["ufill"], 9)
+                p.st(C["cv"], 8)
+                p.st(C["cs"], 2)
+                p.iconst(12, -23)
+                p.float_(4, 2, 12)
+                p.stpost(2, 4)
+            p.loop(C["n3"], Z_GROUP, word)
+        p.loop(C["tmp"], Z_PER_BLOCK // Z_GROUP, group)
+        p.ld(0, C["fill"])
+        p.iconst(12, Z_PER_BLOCK)
+        p.iop(0, 12, "+", 0)
+        p.st(C["fill"], 0)
+    p._branch(lambda: p.r[0] < Z_N, "LT", more, None)

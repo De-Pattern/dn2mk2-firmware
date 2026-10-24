@@ -65,10 +65,10 @@ def _each(p: Prog, L: K.Layout, step: str) -> None:
     same = _same_code(step)
     end = p.label(f"md_{step}_end")
     body = {k: p.label(f"md_{step}_{k}") for k in set(same.values())}
+    K.vw(p, 0, "mach")                         # once: each body leaves by JUMP, so R0 stays
     for k, M in enumerate(MM.MACHINES):
         nxt = p.label("md_next")
         if k < N - 1:
-            K.vw(p, 0, "mach")
             p.iconst(12, k)
             p.e("COMP(R0, R12);")
             p.jump("NE", nxt)
@@ -117,9 +117,11 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.ldpost(6, 1)
         p.stpost(5, 6)
     p.loop(L.C["n1"], 35, move)
+    # v0.24: the host's scale function is emitted once (it was twice: after a note and
+    # for dirty words), run when a note waits or, with a machine, when words are dirty
     K.vw(p, 0, "trg")
 
-    def note():
+    def change_if_new():
         K.vw(p, 0, "want")
         K.vw(p, 1, "mach")
         p.e("COMP(R0, R1);")
@@ -129,25 +131,28 @@ def advance(p: Prog, L: K.Layout) -> None:
             K.vws(p, "mach", 0)
             _each(p, L, "init")
         p._branch(lambda: p.r[0] != p.r[1], "NE", change, None)
+    p.ifz(0, "NE", change_if_new)
+    K.vw(p, 0, "trg")
+
+    def no_trg():                              # R0 = dirty, or 0 with no machine
+        K.vw(p, 1, "mach")
+        K.vw(p, 0, "dirty")
+        p.ifz(1, "LT", lambda: p.iconst(0, 0))
+    p.ifz(0, "EQ", no_trg)
+
+    def host():
         _each(p, L, "host")
+        p.iconst(0, 0)
+        K.vws(p, "dirty", 0)
+    p.ifz(0, "NE", host)
+    K.vw(p, 0, "trg")
+
+    def trig():
         _each(p, L, "trig")
         p.iconst(0, 0)
         K.vws(p, "trg", 0)
-        K.vws(p, "dirty", 0)
-
-    def no_note():
-        K.vw(p, 0, "mach")
-
-        def playing():
-            K.vw(p, 0, "dirty")
-
-            def again():
-                _each(p, L, "host")
-                p.iconst(0, 0)
-                K.vws(p, "dirty", 0)
-            p.ifz(0, "NE", again)
-        p.ifz(0, "GE", playing)
-    p.ifz(0, "NE", lambda: (note(), p.iconst(0, 0), K.vws(p, "quiet", 0)), no_note)
+        K.vws(p, "quiet", 0)
+    p.ifz(0, "NE", trig)
 
     def silent():
         p.ld(1, L.C["mdb"])

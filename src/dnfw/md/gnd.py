@@ -108,7 +108,7 @@ class GNDSN:
         K.phase_inc(p, 6, 5)
         p.st(L.C["a"], 6)
         w(p, 5, 4)                              # the ramp decays once a block (truncated)
-        K.mpy_floor(p, 6, 4, 5)
+        K.mpyf_any(p, 6, 4, 5)
         ss(p, 0, 6)
 
         def one():

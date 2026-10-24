@@ -1338,7 +1338,7 @@ class TRXRS:
 
     The shaper flips where the sine reaches its threshold, and with DIST 0 the threshold is
     1 - 2^-23, which DSP2's sine reaches only at its trough: there its table is exactly -1
-    (k = 24573..24577, the recursion's limiter), where core.sine_fill gives -1 + 11..13 LSB.
+    (k = 24573..24577, the recursion's limiter), where the old polynomial sine (before its corrections) gave -1 + 11..13 LSB.
     So a sine at or below TROUGH (exactly those five words) is taken as -1 here."""
     NAME, ID = "TRX-RS", 20
     PNAMES = ("PTCH", "DEC", "DIST", "-", "-", "-", "-", "-")

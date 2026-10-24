@@ -21,6 +21,7 @@ loops, no CALL; every integer add has R8..R15 as its first operand.
 from __future__ import annotations
 
 import math
+import re
 import struct
 
 
@@ -85,6 +86,7 @@ class Prog:
         self.subs: dict[str, object] = {}       # name -> body, emitted once by emit_subs()
         self.in_sub = False
         self.spill: int | None = None           # a DM word `ash` may use (see ash)
+        self.known: dict[int, int] = {}         # emit mode: register -> the constant it holds
 
     # -- emit helpers -------------------------------------------------------------------
     @property
@@ -93,10 +95,27 @@ class Prog:
 
     def e(self, text: str, note: str = "") -> None:
         if not self.run:
+            self._forget(text)
             line = f"      {text}"
             self.lines.append(line.ljust(40) + f"// {note}" if note else line)
         else:
             self.steps += 1
+
+    _DEST = re.compile(r"^[RF](\d+) = ")
+
+    def _forget(self, text: str) -> None:
+        """v0.24, emit mode: what TEXT does to the registers known to hold a constant
+        (`known`, which lets a constant load that would reload the same value be left
+        out). Anything but a plain one-destination R/F write, a store, a compare or an
+        I-register load forgets them all."""
+        m = self._DEST.match(text)
+        if m and "," not in text.split("=", 1)[1].replace(", I", "").replace(", M", "") \
+                and "(" not in text.split("=", 1)[0]:
+            self.known.pop(int(m.group(1)), None)
+        elif text.startswith(("DM(", "COMP(")) or re.match(r"^I\d+ = R\d+;$", text):
+            pass
+        else:
+            self.known.clear()
 
     def comment(self, text: str) -> None:
         if not self.run:
@@ -104,6 +123,7 @@ class Prog:
 
     def raw(self, text: str) -> None:
         if not self.run:
+            self.known.clear()
             self.lines.append(text)
 
     def label(self, stem: str) -> str:
@@ -112,15 +132,18 @@ class Prog:
 
     def place(self, name: str) -> None:
         if not self.run:
+            self.known.clear()                 # control can arrive here from elsewhere
             self.lines += [f".GLOBAL {name}.;", f"{name}.:"]
 
     def jump(self, cond: str, target: str) -> None:
         if not self.run:
+            self.known.clear()
             pre = f"IF {cond} " if cond else ""
             self.lines.append(f"      {pre}JUMP 0x0;".ljust(40) + f"// -> {target}.")
 
     def jump_abs(self, cond: str, addr: int, note: str) -> None:
         if not self.run:
+            self.known.clear()
             pre = f"IF {cond} " if cond else ""
             self.lines.append(f"      {pre}JUMP {addr:#x};".ljust(40) + f"// {note}")
 
@@ -136,14 +159,23 @@ class Prog:
 
     # -- constants ----------------------------------------------------------------------
     def fconst(self, d: int, x: float, note: str = "") -> None:
-        self.e(f"R{d} = {fimm(x)};", note or repr(f32(x)))
-        if self.run:
-            self.setF(d, f32(x))
+        self._const(d, bits(f32(x)), note or repr(f32(x)))
 
     def iconst(self, d: int, v: int, note: str = "") -> None:
-        self.e(f"R{d} = {imm(v)};", note)
+        self._const(d, v & 0xFFFFFFFF, note)
+
+    def _const(self, d: int, v: int, note: str) -> None:
+        """Rd = the 32-bit V. Emit mode leaves the load out when Rd is known to hold V
+        already (v0.24: the DSP's 1 MiB upload buffer); run mode loads it either way,
+        which changes nothing then, so the model is the same program."""
         if self.run:
-            self.setR(d, v)
+            self.steps += 1
+            self.r[d] = v
+            return
+        if self.known.get(d) == v:
+            return
+        self.e(f"R{d} = {imm(v)};", note)
+        self.known[d] = v
 
     # -- float -------------------------------------------------------------------------
     def fop(self, d: int, a: int, op: str, b: int, note: str = "") -> None:
@@ -357,6 +389,7 @@ class Prog:
             return
         self.subs.setdefault(name, body)
         ret = self.label("ret")
+        self.known.clear()
         self.lines.append("      R12 = 0x0;".ljust(40) + f"// return address - 1: {ret}. - 1")
         self.e("I12 = R12;")
         self.jump("", f"wr_{self.prefix}_sub_{name}")

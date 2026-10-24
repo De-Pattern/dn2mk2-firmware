@@ -135,10 +135,9 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
         from dnfw.md import bench as MDB
         L = PL.layout().md
         for a, w in MDB.table_mem(L).items():
-            if L.T["sine"] <= a < L.T["sinecorr"] or L.T["hostD"] <= a < L.T["tpack"]:
+            if L.T["sine"] <= a < L.T[MDK.SHIPPED]:
                 m2.poke(runner.state, a, w)
-        m2.poke(runner.state, L.C["fill"], MDK.SINE_N)
-        m2.poke(runner.state, L.C["ufill"], MDK.TABLE_LAYOUT["tpack"][1] // 3)
+        m2.poke(runner.state, L.C["fill"], MDK.Z_N)
     return runner
 
 
@@ -211,8 +210,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             filled = _Mem(lambda a, st0=st0: m2.word(st0, a) or 0)
             fp = _Prog("run", mem=filled)
             fp.spill = PERC_L.md.C["ash"]
-            MDK.sine_fill(fp, PERC_L.md)
-            MDK.unpack_fill(fp, PERC_L.md)
+            MDK.table_fill(fp, PERC_L.md)
             for t in range(16):
                 rec = V.track_record(t)
                 if (m2.word(r.state, rec + V.TRACK_MACHINE) == 5
@@ -797,7 +795,7 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
     runs["single_sd"] = run_blocks(init, frames(sd), blocks)
     runs["note72"] = run_blocks(init, frames(rs, note=0x4800), blocks)
     # v0.17: the Machinedrum's sine, which the DSP fills itself 1,024 words a block
-    runs["sine"] = run_blocks(cold or init, frames(0, trig=()), MDK.SINE_N // MDK.SINE_PER_BLOCK + 1)
+    runs["sine"] = run_blocks(cold or init, frames(0, trig=()), MDK.Z_N // MDK.Z_PER_BLOCK + 1)
     runs["retrig"] = run_blocks(init, frames(sd, trig=(1, RETRIG)), blocks)
     runs["silent"] = run_blocks(init, frames(0, trig=()), blocks)
     # TYPE turned mid-note: the voice keeps the machine its note latched
@@ -833,7 +831,7 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
         # and the packed tables, unpacked into their floats (unpack_fill), word for word
         from dnfw.md import bench as MDB
         want = MDB.table_mem(L.md)
-        lo, hi = L.md.T["hostD"], L.md.T["tpack"]
+        lo, hi = L.md.T["hostD"], L.md.T[MDK.SHIPPED]
         tables_ok = all((m2.word(st, a) or 0) == want.get(a, 0) for a in range(lo, hi, 4))
         sine_ok = sine_ok and tables_ok
     runs["sine"].pop("state", None)

@@ -334,11 +334,11 @@ class _PI:
         # the strike's envelopes and pitch
         s(p, 4, 19)
         p.fconst(5, 0x7C28F6 * Q)
-        K.mpy_floor(p, 6, 4, 5)
+        K.mpyf_any(p, 6, 4, 5)
         ss(p, 19, 6)
         s(p, 4, 15)
         p.fconst(5, 0x7F7CEE * Q)
-        K.mpy_floor(p, 7, 4, 5)
+        K.mpyf_any(p, 7, 4, 5)
         ss(p, 15, 7)
         p.fconst(11, 2.0 ** 23)
         if rs:
@@ -445,11 +445,11 @@ class _PI:
         # the block's envelopes, the waveguide's gain, the lowpasses' coefficient
         s(p, 4, 38)
         p.fconst(5, 0x7F5C29 * Q)
-        K.mpy_floor(p, 6, 4, 5)
+        K.mpyf_any(p, 6, 4, 5)
         ss(p, 38, 6)
         s(p, 4, 36)
         w(p, 5, 7)
-        K.mpy_floor(p, 7, 5, 4)
+        K.mpyf_any(p, 7, 5, 4)
         ss(p, 36, 7)
         w(p, 4, 2)
         K.mul_k(p, 4, 4, float(cls.GAINK))
