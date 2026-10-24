@@ -31306,7 +31306,7 @@ wr_pk_next_13.:
       R12 = 0x10;
       COMP(R0, R12);
       IF LT JUMP 0xbe01b2;                   // -> wr_pk_slot_12.
-      JUMP 0xbf0000;                    // smp.asm's wr_smp, then RESONATOR, CZ, PING (which restores)
+      JUMP 0xbf1800;                    // smp.asm's wr_smp, then RESONATOR, CZ, PING (which restores)
 .GLOBAL wr_pk_sub_trx_coefs.;
 wr_pk_sub_trx_coefs.:
       R12 = 0x0;

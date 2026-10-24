@@ -112,9 +112,10 @@ def machines() -> dict[str, tuple[int, str, str]]:
         o = p - OS_VMA
         rec = _os()[o:o + 0x40]
         synth, mach = rec[5:8].decode("latin-1"), rec[8:10].decode("latin-1")
-        if not (synth.isalnum() and mach.isalnum()):
+        if not ((synth.isalnum() or synth == "P-I") and mach.isalnum()):
             continue
-        out.setdefault(f"{synth}-{mach}", (struct.unpack_from(">I", rec, NIBBLES)[0], synth, mach))
+        key = f"PI-{mach}" if synth == "P-I" else f"{synth}-{mach}"      # v0.24: P-I's records
+        out.setdefault(key, (struct.unpack_from(">I", rec, NIBBLES)[0], synth, mach))
     # a record no table entry points at (TRX-S2: entry 29 is "GND--" in 1.63): found by name
     for name in ("TRX-S2",):
         if name not in out:

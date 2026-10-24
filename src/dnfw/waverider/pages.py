@@ -85,7 +85,10 @@ TYPE_NAMES = ("Perc Type", "TYPE")
 UNUSED = tuple(r for r in range(238, 263) if r != TYPE_ID and r not in PARAM_IDS and r not in FX_IDS)
 UNUSED_LONG, UNUSED_SHORT = "Unused", "-"
 # a parameter's long name (LFO and modulation lists, the header line) from its short one
-LONG = {"PTCH": "Pitch", "DEC": "Decay", "RAMP": "Ramp", "RDEC": "Ramp Decay", "STRT": "Start",
+LONG = {"HAMR": "Hammer", "TENS": "Tension", "RING": "Ring", "RVOL": "Rattle Vol", "POS": "Position",   # v0.24 P-I
+        "GRNS": "Grains", "GLEN": "Grain Length", "AG": "Highs Up", "AU": "Highs Down", "BR": "Lows",
+        "GRAB": "Grab", "CLSN": "Closeness", "CLOS": "Close Time",
+        "PTCH": "Pitch", "DEC": "Decay", "RAMP": "Ramp", "RDEC": "Ramp Decay", "STRT": "Start",
         "NOIS": "Noise", "HARM": "Harmonics", "CLIP": "Clip", "HOLD": "Hold", "TICK": "Tick",
         "DIRT": "Dirt", "DIST": "Distortion", "BUMP": "Bump", "BENV": "Bump Env", "SNAP": "Snap",
         "TONE": "Tone", "TUNE": "Tune", "DAMP": "Damping", "DTYP": "Dist Type", "CLPY": "Claps",
@@ -104,7 +107,8 @@ DESCRIPTIONS = {"BD": "Bass Drum", "B2": "Bass Drum 2", "SD": "Snare", "XT": "To
                 "RS": "Rimshot", "CB": "Cowbell", "CH": "Closed Hat", "OH": "Open Hat",
                 "CY": "Cymbal", "MA": "Maracas", "CL": "Claves", "XC": "Conga", "HH": "Hi-Hat",
                 "S2": "Snare 2",
-                "SN": "Sine", "NS": "Noise", "IM": "Impulse"}
+                "SN": "Sine", "NS": "Noise", "IM": "Impulse",
+                "MT": "Tom", "ML": "Metallica", "RC": "Ride", "CC": "Crash"}       # v0.24: P-I's
 
 
 def type_of(word: int) -> int:
