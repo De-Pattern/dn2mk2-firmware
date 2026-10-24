@@ -189,11 +189,17 @@ def _s24(v: int) -> int:
     return v - (1 << 24) if v & 0x800000 else v
 
 
-class Layout:
-    """Where the MD voices live (dnfw.waverider.dsp gives the addresses)."""
+PI_DELAY_STRIDE = 8192                   # v0.24: a slot's P-I delay lines, 2048 words (floats)
+PI_DELAY_WORDS = PI_DELAY_STRIDE // 4
 
-    def __init__(self, state: int, scratch: int, tables: int):
+
+class Layout:
+    """Where the MD voices live (dnfw.waverider.dsp gives the addresses). DELAY: the
+    P-I machines' delay lines, PI_DELAY_STRIDE a slot (default 1 MB past the state)."""
+
+    def __init__(self, state: int, scratch: int, tables: int, delay: int | None = None):
         self.state, self.tables = state, tables
+        self.delay = state + 0x100000 if delay is None else delay
         self.T = {name: tables + off for name, (off, _n) in TABLE_LAYOUT.items()}
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
 
@@ -202,6 +208,16 @@ SC_WORDS = ("n1", "n2", "n3", "a", "b", "c", "d", "e", "f", "g", "h", "k", "fill
             "cw", "cs", "cv", "ash", "ufill")
 # ash: the word dsl.ash saves its count register in
 # mdb: the slot's words' address (what I3 holds), for code that needs it in an R register
+
+
+def delay_base(p: Prog, L: Layout, d: int) -> None:
+    """Rd = this slot's P-I delay lines (L.delay + PI_DELAY_STRIDE x the slot). Clobbers R12."""
+    p.ld(d, L.C["mdb"])
+    p.iconst(12, -L.state)
+    p.iop(d, 12, "+", d)                       # slot x 1 KB
+    p.lsh(d, d, 3)                             # x 8 KB
+    p.iconst(12, L.delay)
+    p.iop(d, 12, "+", d)
 
 
 # -- slot words --------------------------------------------------------------------------

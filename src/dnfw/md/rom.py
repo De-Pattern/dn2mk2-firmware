@@ -151,6 +151,8 @@ DSP_TABLES = {
     "TRXCH_W2": (0x102780, 86), "TRXCH_W3": (0x102800, 80), "TRXCH_W4": (0x102880, 58),
     "TRXCH_W5": (0x1028C0, 52), "TRXXC_CLICK": (0x102C0F, 32),
 }
+from .pi_tables import TABLES as _PI_TABLES          # noqa: E402  (v0.24: P-I's)
+DSP_TABLES.update(_PI_TABLES)
 
 
 @functools.lru_cache(maxsize=None)
