@@ -75,7 +75,7 @@ STATE_DM, STATE_BYTES = 0x2DDE00, 0x380      # save area, PERC's scratch, idle_l
 # 0x200fa000..0x200fdfff; the I-cache (enabled by the startup, docs/waverider-dsp-silence.md)
 # serves it. Its voices' state and scratch stay in L1, its tables in DDR.
 PERC_L2_LOAD = 0x200C0000
-PERC_L2_SPAN = 0x20000                       # 128 KB (v0.24: with P-I; 80 KB v0.17..v0.23)
+PERC_L2_SPAN = 0x23000                       # 140 KB (v0.24: with P-I, about 132 KB; 80 KB v0.17..v0.23)
 PERC_SW = 0xB80000 + (PERC_L2_LOAD - 0x20000000) // 2       # 0xbe0000
 L2_IMAGE_END = 0x2008823C                    # the stock stream's last L2 byte
 L2_NOCACHE = 0x200FA000                      # the startup's non-cacheable L2 window starts here
@@ -89,9 +89,9 @@ MD_TABLES_DDR = 0x82000000
 MD_STATE_DDR = 0x82100000
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
-SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200e0000 (v0.24; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
+SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200e3000 (v0.24; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
 SMP_L2_SPAN = 0x5000                         # the code is about 19 KB (v0.18: the DT2 reader; 32 KB until v0.16)
-SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf0000 (v0.24; 0xbea000 v0.17..v0.23)
+SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf1800 (v0.24; 0xbea000 v0.17..v0.23)
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
 SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0.15)
 SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sampler.machines.REC_STAGE)
