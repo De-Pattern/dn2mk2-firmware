@@ -23,7 +23,7 @@ OVERLAY = "wr_cell"                     # after each stock cell widget: PING's a
 LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "sampler" / "hooks.S",
                 SOURCE.parents[1] / "sampler" / "smp_page.c", SOURCE.parents[1] / "sampler" / "rec.c",
                 SOURCE.parents[1] / "sampler" / "fmt.c", SOURCE.parent / "md_page.c"]
-LINK_ENTRIES = ["smp_rx_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "smp_cmds", "smp_quant_hook", "smp_tdm_hook", "smp_tdm_sent", "smp_tdm_heard", "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate", "smp_ui_pop", "wr_screen", "rec_combo", "wr_lfo_mask"]
+LINK_ENTRIES = ["smp_rx_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "smp_cmds", "smp_quant_hook", "smp_tdm_hook", "smp_tdm_sent", "smp_tdm_heard", "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate", "smp_ui_pop", "wr_screen", "rec_combo", "wr_lfo_mask", "rec_overlay", "rec_src", "rec_dest"]
 
 
 def available() -> bool:

@@ -359,13 +359,16 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             out["ok"] = (periods < limit and out["lstate"] == 0 and out["retries"] - retries0 == 7
                          and not dsp["cmds"] and not route.get("changed"))
     elif scenario == "save":
-        # a recording of 3,000 frames in slot 126 on the DSP; no image on the +Drive yet
-        rec_off = SM.REC_OFFSET + (2 << SM.REC_SLOT_SHIFT)
+        # a recording of 3,000 frames on the DSP, 16 MB into the recordings' area, for slot
+        # 40 (SAMP 41; v0.22: any slot, any place); no image on the +Drive yet
+        place = 16 << 20
+        slot = 40
+        rec_off = SM.REC_OFFSET + place
         recw = [rng.randrange(1 << 32) for _ in range(1500)]
         for k, x in enumerate(recw):
             pool[rec_off // 4 + k] = x
         status_out()
-        call("smp_save_recording", 2, 3000)
+        call("smp_save_recording", slot, place, 3000)
         periods = 0
         while periods < 3000:
             period()
@@ -377,16 +380,19 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         exp = struct.pack("<1500I", *recw)
         exp += bytes(len(got) - len(exp))
         d = b"".join(disk.get(STORE_SECTOR + 1 + k, bytes(512)) for k in range(8))
-        entry = struct.unpack_from("<IIfI", d, 8 + 16 * (SM.REC_FIRST + 2))
+        entry = struct.unpack_from("<IIfI", d, 8 + 16 * slot)
+        name = d[SM.NAMES_OFFSET + SM.NAME_BYTES * slot:SM.NAMES_OFFSET + SM.NAME_BYTES * slot + 6]
+        count = struct.unpack_from("<I", d, 4)[0]
         hdr = disk.get(STORE_SECTOR, bytes(512))
         out.update(periods=periods, saved=struct.unpack(">i", machine.read(syms["smp_saved"], 4))[0],
                    frames_equal=got == exp, entry=[hex(entry[0]), entry[1], entry[2], entry[3]],
                    dir_magic=hex(struct.unpack_from("<I", d, 0)[0]),
                    header=hdr[:12].hex(), sent_back=dsp["sent_back"],
                    heard=long("smp_tdm_heard"), disk_writes=io["writes"],
-                   routing_changed=route.get("changed", 0))
+                   routing_changed=route.get("changed", 0), name=name.decode("latin-1"), count=count)
         out["ok"] = (out["saved"] == 1 and got == exp and entry[0] == base + rec_off
                      and entry[1] == 3000 and entry[3] == 1 and hdr[:4] == b"DN2Q"
+                     and name == b"REC041" and count >= slot + 1
                      and not route.get("changed"))
     out["log"] = log[-8:]
     return out

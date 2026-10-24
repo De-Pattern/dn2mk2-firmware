@@ -252,11 +252,11 @@ def main() -> int:
         # (scripts/emu_waverider_menu.py's link16 step)
         from dnfw.mods import waverider as W        # noqa: PLC0415
         lay = W.SPEC.get("layout", {})
+        snap = ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"
         if "smp_tdm_sent" in lay:
             syms = work / "link16_syms.json"
             syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith("smp_")}))
             steps = ",".join(f"link16:{syms}:{sc}" for sc in ("save", "fast", "dead"))
-            snap = ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"
             rc, out = run("link16", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                      "--build", bdir, "--snapshot", snap, "--steps", steps,
                                      "--png-dir", work / "link16"], logs,
@@ -269,6 +269,36 @@ def main() -> int:
                  "save, fast (a lost packet resent), dead (nothing gets through: the loader "
                  "stops); every byte loaded and saved; the frame's routing words stock's in "
                  "every period" if good else out[-800:])
+
+        # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
+        # change the recorder and never the track's sound, NO closes it, and the UI keeps
+        # drawing throughout (scripts/emu_waverider_menu.py, keys and knob as the panel)
+        if "rec_overlay" in lay:
+            ov, src = hex(lay["rec_overlay"]), hex(lay["rec_src"])
+            steps = (f"wait:5,png:p0,mem:{ov}:4,press:17,wait:3,tap:49,wait:3,release:17,"
+                     f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,png:a2,no,"
+                     f"wait:30,mem:{ov}:4,png:a3,wait:5,png:a4")
+            js = work / "recorder.json"
+            rc, out = run("recorder", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                                       "--build", bdir, "--snapshot", snap, "--steps", steps,
+                                       "--png-dir", work / "recorder", "--json", js], logs,
+                          env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
+                                                   / "section_3_MAIN_OS.bin"),
+                               "DNFW_EMU_FLAGS": '{"weakptr": false}'})
+            why = out[-800:]
+            good = False
+            if rc == 0 and js.exists():
+                r = json.loads(js.read_text())
+                m = r["memory"]
+                seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@3")]
+                shots = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "a2", "a4")]
+                good = (seen == [0, 1, 0] and int(m[src], 16) == 3 and not r["setter_writes"]
+                        and r["screen_frames"] > 0 and shots[1] != shots[0] and shots[1] != shots[2])
+                why = (f"overlay {seen}, src {int(m[src], 16)}, setter writes "
+                       f"{len(r['setter_writes'])}, frames {r['screen_frames']}")
+            gate("recorder screen (ColdFire)", good,
+                 "FUNC+VOICE opens it, knob A moves SRC with no write to the sound, NO closes it, "
+                 "the screen drawn throughout" if good else why)
 
         # 7. unit tests
         tests = [t for t in TESTS if (ROOT / t).exists()]

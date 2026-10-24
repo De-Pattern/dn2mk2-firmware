@@ -612,7 +612,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     layout["c_load"] = pages.C_LOAD
     layout["c_text_end"] = csyms["__text_end"]
     for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds", "smp_tdm_sent", "smp_tdm_heard",
-                 "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate"):   # the sample link's state (v0.15)
+                 "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate",
+                 "rec_overlay", "rec_src", "rec_dest"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)
