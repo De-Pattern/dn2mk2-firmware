@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.20** | 2026-10-23 | Fixes: the buzz on WaveTone/FM after a sample or PERC track (the link no longer touches the DSP's per-track routing), the RECORDER's flashing, SLICE's pages, the sample list; PERC drawn as the Machinedrum's screen; sample pages in the DT2's own geometry | `builds/v0.20-FIXES/` | yes |
+| **v0.21** | 2026-10-23 | RESONATOR and CZ PHASE page 1 in the Elektron style: knobs for continuous controls, choices (WAVE, SEL, OCT, MOD, KF, SUS) by name in a box | `builds/v0.21-KNOBS/` | yes |
+| v0.20 | 2026-10-23 | Fixes: the buzz on WaveTone/FM after a sample or PERC track (the link no longer touches the DSP's per-track routing), the RECORDER's flashing, SLICE's pages, the sample list; PERC drawn as the Machinedrum's screen; sample pages in the DT2's own geometry | `builds/v0.20-FIXES/` | yes |
 | v0.19 | 2026-10-23 | SLICE, the Digitakt II's sixth sample machine: your WAV's cue points (or a grid, or its hits) as up to 64 slices, SLCE / LEN / NOTE mode, slices marked on the waveform | `builds/v0.19-SLICE/` | yes |
 | v0.18 | 2026-10-23 | The Digitakt II's own sample engine: its interpolator and decimator, its STRETCH, WERP's clock, GRID NOTE mode, BARS 1-8 and SEG 1/32-1/8, no clicks at starts, ends and retriggers | `builds/v0.18-DT2-ENGINE/` | yes |
 | v0.17 | 2026-10-22 | PERC is the Machinedrum: its 25 TRX/EFM/GND machines from the MD's own firmware (every reference case matches), TYPE p-lockable as before | `builds/v0.17-MACHINEDRUM/` | yes |
@@ -56,6 +57,31 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.21 — KNOBS (RESONATOR and CZ PHASE page 1)
+
+`DN2mod_v0.21_KNOBS_OS1.11.syx`
+sha256 `173948455e1a7668ab0797403e1eb7923dfb69f437ddf8d1c744f9201cfa4094`
+Gate: CLEARED TO FLASH, 2026-10-23 (USB size 1,991,417 of 2,097,152). Source: commit `8e3e5e7`. Docs: `docs/cz.md`.
+
+Everything in v0.20, plus:
+
+**Adds.**
+- **RESONATOR's page** is drawn the way the Digitakt II's pages are. Its eight controls (TUNE,
+  LEV, STRC, BRIT / DAMP, POS, EXCT, HIT) are knobs in the Elektron grid, each over its label.
+- **CZ PHASE's page 1** is drawn the same way. DET and DCW are knobs. The choices (WAVE, SEL,
+  OCT, MOD, KF, SUS) show their value by name in a box, for example SAW, OCT0, OFF, SUS1.
+  The wave-pair picture is no longer on page 1; WAVE's box names the pair.
+- CZ's envelope pages (2 and 3) are unchanged.
+
+**Test** (after the regression check, and v0.20's tests if you have not run them):
+1. **RESONATOR.** Put it on a track. Turn each of the eight knobs: the pointer follows, and
+   the sound changes as before.
+2. **CZ PHASE, page 1.** Turn WAVE: the box names the wave or pair. Turn SEL, OCT, MOD, KF and
+   SUS: each box steps through its choices. DET and DCW are knobs.
+3. **CZ pages 2 and 3.** They show the envelopes as before.
+
+**Known issues.** Same as v0.20.
 
 ## v0.20 — FIXES (the buzz, the recorder, the pages)
 
