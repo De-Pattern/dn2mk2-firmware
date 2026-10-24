@@ -106,7 +106,7 @@ _Static_assert(0x1000u + POOL_SLOTS * OVERVIEW_W <= 0x5000u && 0x5000u + POOL_SL
 #define STAGE(k) ((u8 *)(SMP_MIRROR + 0x10000u + (u32)(k) * CHUNK))   /* 0: loading, 1: saving, 2: upload */
 
 static u8 rq[RQ_MAX] __attribute__((section(".data")));
-static u8 rp[48] __attribute__((section(".data")));
+static u8 rp[96] __attribute__((section(".data")));
 static u8 tx[TX_MAX] __attribute__((section(".data")));
 static u32 hdr[128] __attribute__((section(".data"), aligned(16)));   /* one sector */
 int smp_booted __attribute__((section(".data"))) = 0;
@@ -1128,6 +1128,20 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         }
         up_bytes = 0;
         put32(rp + r, smp_hi); r += 4;
+    } else if (cmd == 10) {                     /* DIR (v0.22, link 4): five slots from K */
+        u32 k = n >= 4 ? rq[3] : 0;
+        put32(rp + r, dir_ok ? (u32)smp_count() : 0); r += 4;
+        for (u32 j = 0; j < 5; j++, k++) {
+            u32 off = 0, fr = 0;
+            if (dir_ok && k < POOL_SLOTS && !smp_slot_empty((int)k)) {
+                off = le32(ENTRY(k)) - SMP_POOL_DDR;
+                fr = le32(ENTRY(k) + 4);
+            }
+            put32(rp + r, off); r += 4;
+            put32(rp + r, fr); r += 4;
+            for (u32 c = 0; c < 8; c++)
+                rp[r++] = dir_ok && k < POOL_SLOTS && fr ? NAME(k)[c] : 0;
+        }
     } else {
         rp[3] = 2;
     }

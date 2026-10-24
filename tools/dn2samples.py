@@ -49,7 +49,7 @@ from dnfw.sampler import machines as SM  # noqa: E402
 from dn2probe import pack7, unpack7          # noqa: E402  (Elektron's 7-bit packing)
 
 HEADER = bytes([0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01])
-HELLO, WRITE, STATUS, CLEAR, SAVE, LOAD, FORGET, BEGIN, END = 1, 2, 3, 4, 5, 6, 7, 8, 9
+HELLO, WRITE, STATUS, CLEAR, SAVE, LOAD, FORGET, BEGIN, END, DIR = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 STATUS_TEXT = {0: "ok", 1: "refused", 2: "unknown command", 3: "the +Drive refused the write"}
 DSP_RATE = 48000
 LINK_BYTES_PER_S = 24 * 1500
@@ -347,7 +347,7 @@ def cmd_send(link, pool, names, chunk):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=("hello", "send", "status", "clear", "build", "save", "load", "forget"))
+    ap.add_argument("command", choices=("hello", "send", "status", "clear", "build", "save", "load", "forget", "dir"))
     ap.add_argument("--keep", action="store_true", help="send: then save on the +Drive")
     ap.add_argument("files", nargs="*")
     ap.add_argument("--port", default="Digitone II")
@@ -382,6 +382,17 @@ def main(argv=None):
                                                      2: "FAILED: only the first 128 MB load"}.get(ram, str(ram)))
         elif a.command == "status":
             print(status(link))
+        elif a.command == "dir":                            # v0.22 (link 4): what the slots hold
+            if proto < 4:
+                raise SystemExit("dir needs v0.22 or later on the instrument")
+            for k0 in range(0, SM.POOL_SLOTS, 5):
+                p = link.call(DIR, bytes([k0]))
+                for j in range(5):
+                    off, fr = struct.unpack_from(">II", p, 4 + 16 * j)
+                    nm = p[12 + 16 * j:20 + 16 * j].split(b"\0")[0].decode("ascii", "replace")
+                    if fr and k0 + j < SM.POOL_SLOTS:
+                        kind = "recording" if SM.REC_OFFSET <= off < SM.REC_END else "yours"
+                        print(f"  SAMP {k0 + j + 1:3d}  {nm:8s} {fr / DSP_RATE:7.2f} s  {kind}")
         elif a.command == "save":
             n = struct.unpack(">I", link.call(SAVE, timeout=20.0)[:4])[0]
             print(f"saved {n:,} bytes on the +Drive: they load at power-on")
