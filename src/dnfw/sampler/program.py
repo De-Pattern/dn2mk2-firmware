@@ -318,6 +318,9 @@ def start(p: Prog, L: Layout) -> None:
     p._branch(lambda: p.r[0] == p.r[12], "EQ", found, None)
 
 
+MIN_REGION = 32                                # v0.22: the shortest ONESHOT region, frames
+
+
 def oneshot_bounds(p: Prog, L: Layout) -> None:
     """lo, hi and loop from STRT, LEN and LOOP (R10: the track's frame slot base, F13: the
     sample's frames). Clobbers R4..R7, R12, R14, R15, I1."""
@@ -327,6 +330,18 @@ def oneshot_bounds(p: Prog, L: Layout) -> None:
     ctl(p, 4, SM.LEN_REC, 10)            # 0..127
     tofloat(p, 15, 4, 1.0 / 127.0)
     p.fop(15, 15, "*", 13)
+    # v0.22: never an empty region (an empty one ended the note, and a held note stayed
+    # silent when the knob came back): at least MIN_REGION frames, or a 508th of the
+    # sample (LEN 0: a quarter of LEN 1's), so LEN at its lowest loops a short stretch as
+    # fast as it goes (the owner's "markers touching"); STRT at its end keeps that much
+    p.fconst(12, 1.0 / 508.0)
+    p.fop(12, 12, "*", 13)
+    p.fconst(7, float(MIN_REGION))
+    p.fop(12, 12, "MAX", 7)
+    p.fop(12, 12, "MIN", 13)              # a sample shorter than that: all of it
+    p.fop(15, 15, "MAX", 12)
+    p.fop(7, 13, "-", 12)
+    p.fop(14, 14, "MIN", 7)              # lo <= frames - that
     p.fop(15, 15, "+", 14)               # hi = lo + LEN frames
     p.trunc(4, 14)
     p.trunc(5, 15)

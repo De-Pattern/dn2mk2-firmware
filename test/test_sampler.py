@@ -661,3 +661,30 @@ def test_v022_send_skips_the_recordings_area_and_link4_reports_the_ram():
     assert sent[-1][0] + sent[-1][1] == len(pool)
     src = (pathlib.Path(__file__).resolve().parents[1] / "csrc/sampler/link.c").read_text()
     assert "(at < REC_END && at + k > REC_OFFSET)" in src and "#define PROTO 4" in src
+
+
+def test_v022_len_at_its_lowest_still_loops_and_a_held_note_survives_the_knobs():
+    # the owner: LEN at its lowest went silent instead of looping a short stretch, and a
+    # held looped note sometimes stopped while the knobs moved (an empty region ended it)
+    n = 48000
+    ramp = [0.2 + 0.6 * k / n for k in range(n)]
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0, samples=[ramp], rates=[1.0], fmts=[0])
+    h.defaults()
+    h.set(SM.PLAY_REC, 80)                       # FWD LOOP
+    h.set(SM.LEN_REC, 0)
+    h.set(SM.LOOP_REC, 0)
+    out = []
+    for b in range(60):
+        out += h.block(ONE, 60.0, b == 0)
+    tail = out[-500:]
+    assert min(tail) > 0.1                                       # sounding: a short loop
+    assert max(tail) - min(tail) < 0.6 * (n // 508 + 4) / n + 0.01   # .. of about n / 508 frames
+    # the knobs swept to their ends and back, the note held: it never stops
+    for strt, ln in ((120, 0), (120, 127), (0, 0), (60, 1), (0, 127)):
+        h.set(SM.STRT_REC, strt)
+        h.set(SM.LEN_REC, ln)
+        seg = []
+        for b in range(8):
+            seg += h.block(ONE, 60.0, False)
+        assert max(abs(x) for x in seg[-64:]) > 0.1, (strt, ln)

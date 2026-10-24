@@ -479,3 +479,10 @@ as on the DT2. Its page: TUNE, PLAY, SAMP; SLCE (NOTE, 1..63), LEN (1..64 slices
 3. Closer clones of the DT2's machines (its OS 1.17 is on hand to read) and the
    Machinedrum's (`docs/perc.md`).
 4. The comb filter.
+
+**v0.22: ONESHOT never has an empty region.** LEN at 0 made the region empty, which ended
+the note: silence where the owner expected the shortest, fastest loop, and a held looped
+note that met an empty region while the knobs moved (STRT at its end, LEN at 0) stayed
+silent when they came back. `oneshot_bounds` now keeps at least 32 frames, or a 508th of
+the sample (a quarter of LEN 1's stretch), whichever is more, and holds STRT that far from
+the end (`MIN_REGION`). The same bounds serve STRETCH and REPITCH.
