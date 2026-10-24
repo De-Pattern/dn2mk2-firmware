@@ -909,13 +909,13 @@ void smp_boot(void)
         smp_ram = 0;                                    /* this power-on's verdict, not an older one */
         ram_top = RAM_PROVEN;
         ram_seq = smp_command(CMD_PROBE, 0, 0, 0, 0);
-        ram_since = FRAMES;
+        ram_since = periods;                            /* the audio periods, 1,500 a second */
     }
     if (smp_booted == 1) {
         u16 h[16];
         if (smp_status(h) && h[1] == (u16)ram_seq && (h[4] == 1 || h[4] == 2))
             smp_ram = h[4];
-        else if (FRAMES - ram_since > 6000u)            /* four seconds and no verdict */
+        else if (periods - ram_since > 6000u)           /* four seconds and no verdict */
             smp_ram = 2;
         if (!smp_ram)
             return;
