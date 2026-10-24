@@ -311,6 +311,41 @@ static int steps_index(int v, const unsigned char *steps)
     return k;
 }
 
+/* v0.22, GRID's and SLICE's own widgets, as the DT2 draws them: SLCE a keyboard while
+ * NOTE picks the slice, else the slice's number; LEN the slices it plays on, under a
+ * bracket; GRID a grid of four squares (its count is in the header as it turns) */
+static void w_slce(void *c, int x, int y, int s)
+{
+    int cx = x + 12;
+    if (s <= 0) {                               /* NOTE: three white keys, two black */
+        box(c, cx - 7, y + 3, cx + 7, y + 13, 0);
+        vline(c, cx - 2, y + 4, y + 12, 0);
+        vline(c, cx + 2, y + 4, y + 12, 0);
+        fill(c, cx - 4, y + 8, cx - 3, y + 12);
+        fill(c, cx + 3, y + 8, cx + 4, y + 12);
+        return;
+    }
+    LABEL(c, cx, y + 6, "%d", s);
+}
+
+static void w_slen(void *c, int x, int y, int n)
+{
+    int cx = x + 12;
+    hline(c, cx - 7, cx + 7, y + 13, 0);        /* the bracket |----| */
+    vline(c, cx - 7, y + 11, y + 15, 0);
+    vline(c, cx + 7, y + 11, y + 15, 0);
+    LABEL(c, cx, y + 4, "%d", n);
+}
+
+static void w_gridicon(void *c, int x, int y)
+{
+    int cx = x + 12;
+    fill(c, cx - 7, y + 9, cx - 1, y + 15);
+    fill(c, cx + 1, y + 9, cx + 7, y + 15);
+    fill(c, cx - 7, y + 1, cx - 1, y + 7);
+    fill(c, cx + 1, y + 1, cx + 7, y + 7);
+}
+
 /* one cell: its widget at (X, Y) and, LABELLED, its label under it */
 static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labelled, int pill)
 {
@@ -320,7 +355,14 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
     else
         v = top = 0;
     const char *label = id ? NAME_SHORT(id) : "";
-    if (w == W_BIPOLAR)
+    int sliced = kind == SMP_GRID_KIND || kind == SMP_SLICE_KIND;
+    if (sliced && id == SMP_SLICE_ID)
+        w_slce(c, x, y, v >> 1);                /* 0 NOTE, 1..63 */
+    else if (sliced && id == SMP_SLEN_ID)
+        w_slen(c, x, y, (v >> 1) + 1);
+    else if (kind == SMP_GRID_KIND && id == SMP_GRID_ID)
+        w_gridicon(c, x, y);
+    else if (w == W_BIPOLAR)
         w_bipolar(c, x, y, v, top);
     else if (w == W_PLAY)
         w_play(c, x, y, v * 4 / 128 > 3 ? 3 : v * 4 / 128);
@@ -546,28 +588,37 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     int x0 = CELL_X(0) - 1, cy = 21;
     waveform(c, slot, x0, cy);
     int w = SMP_WAVE_W;
-    if (kind == SMP_GRID_KIND) {
-        int gi = value(view, SMP_GRID_ID, 0) / 24, n = smp_grids[gi > 4 ? 4 : gi];
-        int s = value(view, SMP_SLICE_ID, 0) >> 1;    /* 0 NOTE (drawn at the first), 1..63 */
-        s = s <= 0 ? 0 : (s > n ? n : s) - 1;
-        int len = (value(view, SMP_SLEN_ID, 0) >> 1) + 1;
-        for (int j = 0; j <= n && n <= 32; j++)
-            vline(c, x0 + j * (w - 1) / n, cy - SMP_WAVE_AMP - 1, cy - SMP_WAVE_AMP + 1, 0);
-        int a = x0 + s * (w - 1) / n, b = x0 + (s + len > n ? n : s + len) * (w - 1) / n;
-        marker(c, a, cy, 0);
-        marker(c, b, cy, 0);
-    } else if (kind == SMP_SLICE_KIND) {        /* v0.19: the sample's own slices, the played ones marked */
+    if (kind == SMP_GRID_KIND || kind == SMP_SLICE_KIND) {
+        /* v0.22, as the DT2: every slice's start marked down the strip, and the slices
+         * that play (SLCE, then LEN of them) shaded with a dot matrix; NOTE shades none */
         int n = 0;
-        const u8 *col = slot >= 1 ? smp_slices(slot - 1, &n) : 0;
-        int s = value(view, SMP_SLICE_ID, 0) >> 1;    /* 0 NOTE (drawn at the first), 1..63 */
-        s = s <= 0 ? 0 : (s > n ? n : s) - 1;
-        int last = s + (value(view, SMP_SLEN_ID, 0) >> 1);
-        for (int j = 0; col && j < n; j++)
-            vline(c, x0 + col[j] * (w - 1) / (100 - 1), cy - SMP_WAVE_AMP - 1, cy - SMP_WAVE_AMP + 1, 0);
-        if (col && n) {
-            marker(c, x0 + col[s] * (w - 1) / (100 - 1), cy, 0);
-            marker(c, last + 1 < n ? x0 + col[last + 1] * (w - 1) / (100 - 1) : x0 + w - 1, cy, 0);
+        const u8 *col = 0;
+        if (kind == SMP_GRID_KIND) {
+            int gi = value(view, SMP_GRID_ID, 0) / 24;
+            n = smp_grids[gi > 4 ? 4 : gi];
+        } else if (slot >= 1) {
+            col = smp_slices(slot - 1, &n);
         }
+        int s = value(view, SMP_SLICE_ID, 0) >> 1;    /* 0 NOTE, 1..63 */
+        int len = (value(view, SMP_SLEN_ID, 0) >> 1) + 1;
+#define SLICE_X(j) ((j) >= n ? x0 + w - 1 : col ? x0 + col[j] * (w - 1) / (100 - 1) : x0 + (j) * (w - 1) / n)
+        if (n > 0 && slot >= 1 && smp_overview(slot - 1)) {     /* (nothing to slice: OFF, EMPTY) */
+            if (s > 0) {
+                int first = (s > n ? n : s) - 1, end = first + len > n ? n : first + len;
+                int a = SLICE_X(first), b = SLICE_X(end);
+                for (int x = a; x <= b; x++)
+                    for (int y = cy - SMP_WAVE_AMP - 1; y <= cy + SMP_WAVE_AMP + 1; y++)
+                        if (((x + y) & 1) == 0)
+                            on(c, x, y);
+            }
+            for (int j = 0; j < n; j++) {
+                int x = SLICE_X(j);
+                vline(c, x, cy - SMP_WAVE_AMP - 2, cy + SMP_WAVE_AMP + 2, 0);
+                on(c, x + 1, cy - 1); on(c, x + 1, cy); on(c, x + 1, cy + 1); on(c, x + 2, cy);   /* its flag */
+            }
+            vline(c, x0 + w - 1, cy - SMP_WAVE_AMP - 2, cy + SMP_WAVE_AMP + 2, 0);
+        }
+#undef SLICE_X
     } else if (kind == SMP_WERP_KIND) {         /* the whole sample, its segments marked */
         int n = (32 >> steps_index(value(view, SMP_SEG_ID, 0), smp_seg_steps))
                 << steps_index(value(view, SMP_BARS_ID, 0), smp_bars_steps);   /* the segments: (32 >> SEG) << BARS */

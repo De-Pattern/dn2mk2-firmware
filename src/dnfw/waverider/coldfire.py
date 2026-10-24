@@ -311,6 +311,11 @@ IDENTITY_SITES = (
     (0x4002DB2C, "4eb9", "re-commit of the track's own machine type (0x40031880)"),
     (0x400D5A72, "4eb9", "the track state message: machine type byte"),
     (0x400D675E, "4eb9", "an incoming machine type, compared with the track's before commit"),
+    # v0.22: TRK + CLEAR (0x40071e80, "CLEAR TRK %d PRESET") re-initialises the sound as
+    # the machine it reads here (0x4004d5f0 -> 0x400e7d4c: the type into +0xde, every slot's
+    # record through param_set_slot_to_id, which reads ours as WaveTone's); canonical, a
+    # cleared PERC, sample or RESONATOR track became WaveTone (the owner's v0.21 report)
+    (0x40071EB6, "4eb9", "TRK + CLEAR: the machine the cleared preset is made for"),
 )
 
 # -- 7b. getMachineType(model, track) 0x4003134e: the real type -------------------------
@@ -384,6 +389,8 @@ SCREEN_STOCK = bytes.fromhex("4eb94011d32a")
 REC_COMBO_SITE = 0x4005F008             # the VOICE case's FUNC branch: push, jsr 0x40046bfe (unison)
 REC_COMBO_STOCK = bytes.fromhex("2f2a00a44eb940046bfe")
 REC_COMBO_EXIT = 0x4005FC50             # the handler's common exit (the key offered to the base)
+LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc30e,%a2 (v0.22)
+LFO_MASK_STOCK = 0x400DC30E
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
 POLL_STOCK = bytes.fromhex("4eb94011d2f4")
 
@@ -546,6 +553,14 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          + disp.to_bytes(2, "big"),
          "FUNC + VOICE: the RECORDER opens or closes (stock: unison on/off; VOICE alone "
          "still opens its menu)", REC_COMBO_STOCK)
+
+    # v0.22: the LFOs' destination list leaves out the WaveTone records our machines do not use
+    _need(content, LFO_MASK_LEA, bytes.fromhex("45f9400dc30e"), "the destination list: lea 0x400dc30e,%a2")
+    _need(content, LFO_MASK_LEA + 0x30, bytes.fromhex("4e92"), "... called once a slot (jsr %a2@)")
+    edit(LFO_MASK_LEA + 2, _long(csyms["wr_lfo_mask"]),
+         "the LFO destination list's mask lookup: wr_lfo_mask answers 0 for a record our "
+         "machine leaves unused (named -), stock's 0x400dc30e for everything else",
+         _long(LFO_MASK_STOCK))
 
     # the sample link: SysEx in (v0.14); out over the TDM link alone (v0.20)
     edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),

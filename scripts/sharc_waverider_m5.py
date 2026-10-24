@@ -1157,8 +1157,9 @@ def step_rec(init, sound, machines, blocks) -> dict:
     def bits(x):
         return struct.unpack("<I", struct.pack("<f", x))[0]
 
-    def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES):
-        for k, w in enumerate((seq, cmd, src, chan, 0, dest << 24 | frames)):
+    def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES, place=0):
+        # v0.22: DEST the slot, PLACE where in the recordings' area (512-byte units)
+        for k, w in enumerate((seq, cmd, src, chan | place << 8, 0, (SM.REC_FIRST + dest) << 24 | frames)):
             m2.poke(r.state, cmd_at + 4 * k, w)
 
     def status(st):
@@ -1222,9 +1223,11 @@ def step_rec(init, sound, machines, blocks) -> dict:
     def at_dispatch_2(r):
         b = state2["b"]
         if b == 0:
-            command(r, 7, SM.CMD_NOW, src=2 + 5, chan=1, dest=1)
-        route = SM.TRK_ROUTE + 2 * 4                     # tracks 4, 5: halves of one word
-        m2.poke(r.state, route, 4 | 5 << 16)
+            command(r, 7, SM.CMD_NOW, src=2 + 5, chan=1, dest=1, place=0x4000)
+        # v0.22: track 6 is bucket 5 whatever the voices' routing says (here every voice
+        # in reach plays track 10): the recorder reads the track's bucket, not route[t]'s
+        route = SM.TRK_ROUTE + 2 * 4                     # voices 4, 5: halves of one word
+        m2.poke(r.state, route, 9 | 9 << 16)
         for k in range(32):
             m2.poke(r.state, SM.TRK_BUF + SM.TRK_STRIDE * 5 + 4 * k, bits(left[32 * b + k] * g))
             m2.poke(r.state, SM.TRK_BUF + SM.TRK_STRIDE * 5 + 0x80 + 4 * k, bits(right[32 * b + k] * g))
@@ -1253,8 +1256,9 @@ def step_rec(init, sound, machines, blocks) -> dict:
         "STOP keeps the slot; the status says done (3), in both reply pages, checked":
             ok1 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 3 and h[2] == (32 * n) >> 6 for h in stat1),
         "SAMP 124 plays the recording back": ok1 and len(back) == play * BLOCK and V.peak(back) > 0.3,
-        "TRK6, MONO L: track 6's slot's left, back to its level, into SAMP 125 (within 2 LSB)":
-            ok2 and words2[1] == 32 * n and close2,
+        "TRK6, MONO L: track 6's bucket's left (the voices' routing elsewhere), back to its level, "
+        "into SAMP 125 at 8 MB into the recordings' area (within 2 LSB)":
+            ok2 and words2[1] == 32 * n and close2 and words2[0] == dsp.SMP_POOL_DDR + SM.REC_OFFSET + 0x4000 * 512,
         "the status while recording: state 2, the command's sequence, frames / 64, the peak":
             ok2 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 2 and h[1] == 7 and h[2] == (32 * n) >> 6
                         and abs(h[3] / 32767 - max(abs(x) for x in left[-32:])) < 0.01 for h in stat2),

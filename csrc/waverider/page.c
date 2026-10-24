@@ -82,6 +82,22 @@ static int wr_active(void)
     return m >= 5 && m <= 13 ? m - 4 : 0;      /* v0.19: 13 SLICE */
 }
 
+/* v0.22: the LFOs' destination list (0x4003951e) asks each of the track's 101 slots'
+ * record for its modulation mask (0x400dc30e) and lists it if the LFO's bit is set. On a
+ * track of ours, a WaveTone record our machine does not use (its name made "-" by
+ * wr_names) answers 0, and is left out of the list. Every other record, and every other
+ * track, as stock. */
+#define STOCK_MASK ((u32 (*)(u32))0x400DC30Eu)
+u32 wr_lfo_mask(u32 rec)
+{
+    if (rec >= 238u && rec <= 262u && wr_active()) {
+        const char *sh = NAME_SHORT(rec);
+        if (sh && sh[0] == '-' && sh[1] == 0)
+            return 0;
+    }
+    return STOCK_MASK(rec);
+}
+
 /* TYPE's value (0..0x7f00) -> the machine, as the DSP reads it (dnfw.perc.program) */
 static int perc_of(int v)
 {
