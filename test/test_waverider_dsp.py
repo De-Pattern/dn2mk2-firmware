@@ -311,5 +311,6 @@ def test_perc_saves_what_ping_restores_and_hands_on_to_resonator():
         m = re.match(r"(I|M|L|B)(\d+) =", ln)
         if m:
             # v0.17: I3 (a slot's Machinedrum words) and I5 (a machine's output), both saved
-            assert f"{m.group(1)}{m.group(2)}" in ("I1", "I2", "I3", "I4", "I5", "I12"), ln
+            # (v0.24: and I0, the P-I machines', saved with the rest)
+            assert f"{m.group(1)}{m.group(2)}" in ("I0", "I1", "I2", "I3", "I4", "I5", "I12"), ln
     assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
