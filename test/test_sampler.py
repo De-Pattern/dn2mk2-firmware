@@ -688,3 +688,18 @@ def test_v022_len_at_its_lowest_still_loops_and_a_held_note_survives_the_knobs()
         for b in range(8):
             seg += h.block(ONE, 60.0, False)
         assert max(abs(x) for x in seg[-64:]) > 0.1, (strt, ln)
+
+
+def test_v022_stretch_and_repitch_at_len_0_are_heard():
+    # the owner: STRETCH (no LOOP of its own) went silent with LEN at its lowest, as ONESHOT
+    n = 48000
+    snd = [0.5 * math.sin(2 * math.pi * 220 * k / 48000) for k in range(n)]
+    for name, floor in (("STRETCH", 0.3), ("REPITCH", 0.03)):
+        h = SL.Harness(0, samples=[snd], rates=[1.0], fmts=[0])
+        h.defaults()
+        h.set(SM.PLAY_REC, 80)
+        h.set(SM.LEN_REC, 0)
+        out = []
+        for b in range(120):
+            out += h.block(SM.TYPE_OF[name], 60.0, b == 0)
+        assert max(abs(x) for x in out[-1600:]) > floor, name
