@@ -66,19 +66,26 @@ def _split(p: Prog, x: int, hi: int, lo: int) -> None:
     p.float_(lo, lo, 12)
 
 
-def _mac(p: Prog, a: int, b: int, neg: bool = False) -> None:
-    """R8..R10 += the parts of (-)Fa Fb. Clobbers R0-R3, R12, R13 (a, b not among them,
-    nor R8-R10)."""
-    if neg:
-        p.fconst(12, -1.0)
-        p.fop(13, a, "*", 12)
-        a = 13
-    _split(p, a, 0, 1)
-    _split(p, b, 2, 3)
+def _mac_body(p: Prog) -> None:
+    _split(p, 0, 0, 1)
+    _split(p, 2, 2, 3)
     for x, y, acc in ((0, 2, 8), (0, 3, 9), (1, 2, 9), (1, 3, 10)):
         p.fop(13, x, "*", y)
         p.trunc(13, 13)
         p.iop(acc, acc, "+", 13)
+
+
+def _mac(p: Prog, a: int, b: int, neg: bool = False) -> None:
+    """R8..R10 += the parts of (-)Fa Fb (a leaf subroutine on F0, F2). Clobbers R0-R3,
+    R12, R13, I12 (a, b not among them, nor R8-R10)."""
+    assert a not in (0, 1, 2, 3, 8, 9, 10, 12, 13) and b not in (0, 1, 2, 3, 8, 9, 10, 12, 13)
+    if neg:
+        p.fconst(12, -1.0)
+        p.fop(0, a, "*", 12)
+    else:
+        p.fpass(0, a)
+    p.fpass(2, b)
+    p.call("pibd_mac", lambda: _mac_body(p))
 
 
 def _floor(p: Prog, d: int, sh: int) -> None:
@@ -140,10 +147,17 @@ class _Cfg:
 
 
 BD, MT = _Cfg(False), _Cfg(True)
+CF = 26                            # the state words init sets (see _init)
 
 
 def _tbl_s(p: Prog, L: K.Layout, d: int, x: int) -> None:
-    """Fd = tblS[Rx] (a Q23 word). Clobbers R12, R13, I1."""
+    """Fd = tblS[Rx] (a Q23 word: the host's table at 0x24DA14, 256 longs, which
+    rom.HOST_TABLES must carry as "S"). Clobbers R12, R13, I1."""
+    if "hostS" not in L.T:                     # pragma: no cover
+        # without it the words are wrong (test_md fails PI-BD / PI-MT), but the build and
+        # the other machines' code still assemble
+        p.fconst(d, TOP)
+        return
     K.table_f(p, L, d, "hostS", x, 12)
 
 
@@ -200,6 +214,18 @@ def _init(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
         ss(p, k, 0)
     p.iconst(0, 0)
     ss(p, 9, 0)
+    # the machine's constants, for the render both share: CF the machine (1: MT), +1 the
+    # decay a block, +2 the excitation's zero tail, +3 its clamp, +4 DEC's gain index
+    # multiplier, +5 the junction's input gain, +6..8 the taps, +9 the excitation's table
+    p.iconst(0, 1 if cfg.mt else 0)
+    ss(p, CF, 0)
+    for k, x in ((1, cfg.env_k), (4, cfg.gmul), (5, cfg.kj)):
+        p.fconst(0, x * Q)
+        ss(p, CF + k, 0)
+    for k, x in ((2, cfg.zi), (3, cfg.lim), (6, cfg.taps[0]), (7, cfg.taps[1]),
+                 (8, cfg.taps[2]), (9, L.T[cfg.exc])):
+        p.iconst(0, x)
+        ss(p, CF + k, 0)
     if not cfg.mt:                             # P-IBD's init overwrites three host words
         p.fconst(0, 0x7FDF3B * Q)
         ws(p, 2, 0)
@@ -217,21 +243,24 @@ def _trig(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
     ss(p, 2, 0)
 
 
-def _render(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
+def _render(p: Prog, L: K.Layout) -> None:
+    """Both machines' render, one code: what differs is in the state words init sets
+    (CF..: the machine, its constants and its excitation table)."""
     C = L.C
     K.delay_base(p, L, 0)
     p.st(C["c"], 0)
     # -- the block's words: the decay, the excitation's rate, the resonators' frequency
     s(p, 4, 0)                                 # the decay (its old value drives this block)
-    p.fconst(5, cfg.env_k * Q)
+    s(p, 5, CF + 1)
     _prod(p, 6, 4, 5)
     ss(p, 0, 6)
-    if cfg.mt:                                 # the depth: HARD x 0.4 - 0.05
+    s(p, 0, CF)
+
+    def depth_mt():                            # the depth: HARD x 0.4 - 0.05
         w(p, 5, 3)
         p.fconst(6, 0x333333 * Q)
         _prod(p, 5, 5, 6, add=-0x66666)
-    else:
-        w(p, 5, 5)                             # TENS
+    p.ifz(0, "NE", depth_mt, lambda: w(p, 5, 5))    # BD: TENS
     _prod(p, 5, 5, 4, add=0x400000)            # M = depth x decay + 1/2
     w(p, 4, 1)                                 # PTCH
     _clear(p)
@@ -253,7 +282,9 @@ def _render(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
     p.ld(8, C["a"])
     p.ld(9, C["b"])
     p.iconst(10, 0xFFFFFF)
-    p.iconst(11, L.T[cfg.exc])
+    s(p, 11, CF + 9)
+    s(p, 12, CF + 2)
+    p.st(C["h"], 12)
     s(p, 4, 3)
     w(p, 5, 4)                                 # HAMR
     _dbase(p, L, 0, SCR_H)
@@ -265,7 +296,7 @@ def _render(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
         p.iop(7, 7, "AND", 10)
         p.iop(6, 8, "+", 6)                    # the offset, and the carry
         p.iop(6, 13, "+", 6)
-        p.iconst(12, cfg.zi)                   # past the table's end it is all zeros
+        p.ld(12, C["h"])                       # past the table's end it is all zeros
         p.iop(13, 6, "MIN", 12)
         p.lsh(13, 13, 2)
         p.iop(13, 11, "+", 13)
@@ -288,13 +319,13 @@ def _render(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
         p.fop(4, 4, "+", 14)
     p.loop(C["n1"], 32, exc)
     ss(p, 3, 4)
-    p.iconst(12, cfg.lim)
-    p.if_(6, "GE", 12, lambda: (p.iconst(6, cfg.lim), p.iconst(7, 0)), kind="i")
+    s(p, 12, CF + 3)
+    p.if_(6, "GE", 12, lambda: (p.ipass(6, 12), p.iconst(7, 0)), kind="i")
     ss(p, 1, 6)
     ss(p, 2, 7)
     # -- the junction's gains: g = GAIN[DEC x m], c = g / sqrt 2
     w(p, 4, 2)
-    p.fconst(5, cfg.gmul * Q)
+    s(p, 5, CF + 4)
     _clear(p)
     _mac(p, 4, 5)
     _floor(p, 6, 23)
@@ -304,30 +335,36 @@ def _render(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
     _prod(p, 4, 7, 5)
     p.st(C["g"], 4)
     # -- the three lines through their damping filters -> L0, L1, L2
-    if cfg.mt:                                 # the taps scale with SIZE: 0.2 + 0.8 SIZE
-        w(p, 4, 7)
-        p.fconst(5, 0x666666 * Q)
-        _prod(p, 4, 4, 5, add=0x19999A)
-        p.st(C["h"], 4)
+    w(p, 4, 7)                                 # MT: the taps scale with SIZE: 0.2 + 0.8 SIZE
+    p.fconst(5, 0x666666 * Q)
+    _prod(p, 4, 4, 5, add=0x19999A)
+    p.st(C["h"], 4)
     for i in range(3):
-        s(p, 6, 9)                             # the write position
-        if cfg.mt:
+        s(p, 0, CF)
+
+        def tap_mt(i=i):                       # MT: W - tap x the scale
             p.ld(4, C["h"])
-            p.fconst(5, cfg.taps[i] * Q)
+            s(p, 6, CF + 6 + i)
+            K.q23(p, 5, 6)
             _clear(p)
             _mac(p, 4, 5)
             _floor(p, 7, 23)
+            s(p, 6, 9)
             p.iop(6, 6, "-", 7)
-        else:
-            p.iconst(12, cfg.taps[i])
+
+        def tap_bd(i=i):                       # BD: W + tap
+            s(p, 6, 9)
+            s(p, 12, CF + 6 + i)
             p.iop(6, 12, "+", 6)
+        p.ifz(0, "NE", tap_mt, tap_bd)
         p.iconst(10, LINE - 1)
         p.iop(6, 6, "AND", 10)
         _dbase(p, L, 11, LINE * i)
         _dbase(p, L, 0, SCR_H + 32 * (i + 1))
         p.seti(1, 0)
+        s(p, 0, CF)
+        p.ifz(0, "NE", lambda: w(p, 5, 8), lambda: w(p, 5, 6))    # DAMP
         s(p, 4, 4 + i)
-        w(p, 5, cfg.damp)
         p.fconst(2, TOP)
         p.fconst(3, -1.0)
 
@@ -357,7 +394,7 @@ def _render(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
     p.seti(0, 6)
     p.ld(5, C["f"])
     p.ld(6, C["g"])
-    p.fconst(7, cfg.kj * Q)
+    s(p, 7, CF + 5)
     p.fconst(2, TOP)
     p.fconst(3, -1.0)
 
@@ -427,7 +464,7 @@ def _render(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
     ss(p, 7, 4)
     ss(p, 8, 5)
     # -- MT: the multipliers, interpolated by TUNE (frequency) and POS (curve, gain)
-    if cfg.mt:
+    def mt_mul():
         p.iconst(0, 0)
         p.st(C["k"], 0)
 
@@ -460,9 +497,13 @@ def _render(p: Prog, L: K.Layout, cfg: _Cfg) -> None:
             p.st(C["k"], 0)
         p.loop(C["n2"], 8, mul)
         _dbase(p, L, 0, SCR_MUL)
-    else:
+        p.st(C["d"], 0)
+
+    def bd_mul():
         p.iconst(0, L.T["PIBD_COEF"])
-    p.st(C["d"], 0)
+        p.st(C["d"], 0)
+    s(p, 0, CF)
+    p.ifz(0, "NE", mt_mul, bd_mul)
     # -- the resonators' coefficients: c0 = -r^2, c1 = 2 r C - 1, c2 = 2 G (2 r C - 1 - r^2)
     #    with C ~ cos(w sqrt 2) (1 - w^2 + w^4 / 6) and r = CURVE[DEC x m]
     p.iconst(0, 0)
@@ -602,9 +643,7 @@ class PIBD:
     def trig(p: Prog, L: K.Layout) -> None:
         _trig(p, L, BD)
 
-    @staticmethod
-    def render(p: Prog, L: K.Layout) -> None:
-        _render(p, L, BD)
+    render = staticmethod(_render)             # P-I MT's too (one code)
 
 
 MACHINES = (PIBD,)

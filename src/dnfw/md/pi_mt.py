@@ -27,9 +27,7 @@ class PIMT:
     def trig(p: Prog, L: K.Layout) -> None:
         _trig(p, L, MT)
 
-    @staticmethod
-    def render(p: Prog, L: K.Layout) -> None:
-        _render(p, L, MT)
+    render = staticmethod(_render)             # P-I BD's (one code)
 
 
 MACHINES = (PIMT,)

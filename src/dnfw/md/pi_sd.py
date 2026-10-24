@@ -152,6 +152,37 @@ def _onepole(p: Prog, L: K.Layout, st: int, coef, src, dst: int, extra=None) -> 
     ss(p, st, 4)
 
 
+import os as _os
+_EXP = {k: 1 for k in _os.environ.get("PIEXP", "").split(",") if k}
+
+
+def _exact_coef(p, L, half, rs):   # EXPERIMENT
+    from ..perc.dsl import flt, bits
+    def wd(x): return int(round(x * 2 ** 23))
+    def sat(a): return max(-(1 << 23), min((1 << 23) - 1, a >> 24))
+    def m(a, b): return a * b * 2
+    i2 = p.i[2]
+    T = wd(flt(p.mem.get(i2))); V = wd(flt(p.mem.get(i2 + 32))); U = wd(flt(p.mem.get(i2 + 64)))
+    mult, W8, W2 = wd(p.F(8)), wd(p.F(9)), wd(p.F(10))
+    F = sat(m(T, mult))
+    b = -m(F, F); y0 = b >> 24; y1 = m(0x155555, y0) >> 24
+    C = sat((0x7FFFFF << 24) + b + m(y1, y0))
+    g = sat(m(U, W8)) if half else U
+    idx = m(V, W2) >> 24
+    R = wd(flt(p.mem.get(L.T["PISD_CURVE"] + 4 * idx)))
+    if rs:
+        a = (m(R, C) << 1) - (1 << 47)
+    else:
+        a = (m(R, C) - (1 << 46)) << 1
+    c1 = sat(a)
+    b = -m(R, R); c0 = b >> 24
+    a += b
+    y0 = sat(a)
+    c2 = sat(m(g, y0) << 1)
+    for r, v in ((2, c0), (1, c1), (15, c2)):
+        p.setF(r, v * 2.0 ** -23)
+
+
 class _PI:
     RS = False
     TAB = "PISD_TAB"
@@ -393,6 +424,7 @@ class _PI:
             p.ipass(5, 4)
             q24(p, 7, 5)
             p.stpost(5, 7)
+            p.ipass(5, 6)
         p.loop(C["n1"], 16, noise)
         ss(p, 34, 6)
         ss(p, 35, 4)
@@ -564,7 +596,7 @@ class _PI:
                 p.fop(7, 7, "*", 5)
                 p.fop(11, 11, "+", 7)
                 K.sat(p, 11)                       # C
-                p.ldi(6, 17, 2)
+                p.ldi(6, 16, 2)
                 if half:
                     p.fop(6, 6, "*", 9)
                     K.sat(p, 6)                    # g
@@ -593,6 +625,8 @@ class _PI:
                 p.fop(15, 6, "*", 15)
                 p.fop(15, 15, "+", 15)
                 K.sat(p, 15)                       # c2
+                if p.run and _EXP.get("coef"):
+                    _exact_coef(p, L, half, rs)
                 p.stpost(5, 2)
                 p.stpost(5, 1)
                 p.stpost(5, 15)
