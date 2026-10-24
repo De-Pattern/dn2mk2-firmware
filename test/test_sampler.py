@@ -638,3 +638,26 @@ def test_v022_the_ram_check_does_nothing_from_stray_words():
     P.run_recorder(h.L, h.mem)
     assert h.mem.get(h.L.C["pph"]) == 0
     assert not [a for a in h.mem.w if a >= 0x80000000]
+
+
+def test_v022_send_skips_the_recordings_area_and_link4_reports_the_ram():
+    import dn2samples as T
+    pool = bytes(range(256)) * ((SM.REC_END + (1 << 20)) // 256)       # past the hole
+    sent = []
+
+    class FakeLink:
+        proto = 4
+
+        def call(self, cmd, payload=b"", timeout=2.0, tries=3):
+            if cmd == T.WRITE:
+                at = struct.unpack(">I", payload[:4])[0]
+                sent.append((at, len(payload) - 4))
+            if cmd == T.STATUS:
+                return struct.pack(">7I", len(pool), 4, len(pool), 0, 1, 0, 1)
+            return b"\0" * 8
+    T.cmd_send3(FakeLink(), pool, ["X"], 1 << 16)
+    assert sent and all(not (a < SM.REC_END and a + n > SM.REC_OFFSET) for a, n in sent)
+    assert sum(n for _, n in sent) == len(pool) - SM.REC_BYTES
+    assert sent[-1][0] + sent[-1][1] == len(pool)
+    src = (pathlib.Path(__file__).resolve().parents[1] / "csrc/sampler/link.c").read_text()
+    assert "(at < REC_END && at + k > REC_OFFSET)" in src and "#define PROTO 4" in src
