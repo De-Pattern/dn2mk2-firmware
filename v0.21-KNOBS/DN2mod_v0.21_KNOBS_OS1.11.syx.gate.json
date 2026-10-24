@@ -1,0 +1,22 @@
+{
+  "build": "BUILD.syx",
+  "sha256": "173948455e1a7668ab0797403e1eb7923dfb69f437ddf8d1c744f9201cfa4094",
+  "stock": "Digitone_II_OS1.11.syx",
+  "date": "2026-10-23T20:03:14",
+  "gates": {
+    "preflight": "PASS: bootstrap/updater/meta/Outbox untouched, signature, DSP size",
+    "DSP identity": "PASS: section 7 is exactly dsp.section7(stock), the image the SHARC gate runs",
+    "SHARC runner": "PASS: all steps PASS, incl. types 0-4 bit-identical to stock",
+    "ColdFire: code 0x4670c000..0x4670c1cc": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x46ac0000..0x46ac587e": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x4670f800..0x4670f8b2": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x4670f000..0x4670f068": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x46ae0000..0x46ae1a54": "PASS: no scale-8 addressing",
+    "ColdFire: MAIN OS": "PASS: 13 hit(s), all in appended data that never executes",
+    "boot from reset": "PASS: booted and drew its UI, no fault",
+    "engine + LOAD/SAVE": "PASS: evaluator clean, CODE intact, machine and filter types round-trip",
+    "sample link (ColdFire)": "PASS: save, fast (a lost packet resent), dead (nothing gets through: the loader stops); every byte loaded and saved; the frame's routing words stock's in every period",
+    "unit tests": "PASS: 191 passed, 1 skipped in 311.57s (0:05:11)"
+  },
+  "logs": "/home/claude/dn2/wt22/out/ship_gate_i8fnnxh8/logs"
+}
