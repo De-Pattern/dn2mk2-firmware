@@ -169,11 +169,12 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     # the DSP: its pool as words, the commands it took, the status it answers with
     pool: dict[int, int] = {}
     dsp = {"seq": None, "state": 0, "vdone": 0, "vsum": 0, "vsum2": 0, "send": None,
-           "sseq": 0, "fast": 0, "slow": 0, "dropped": 0, "cmds": [], "sent_back": 0}
+           "sseq": 0, "fast": 0, "slow": 0, "dropped": 0, "cmds": [], "sent_back": 0,
+           "ram": 0, "ram_answer": 2 if scenario == "lowram" else 1}
     rng = random.Random(16)
 
     def status_out():
-        h = [SM.STATUS_MAGIC | dsp["state"], 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        h = [SM.STATUS_MAGIC | dsp["state"], (dsp["seq"] or 0) & 0xFFFF, 0, 0, dsp["ram"], 0, 0, 0, 0, 0,
              dsp["vsum"] & 0xFFFF, dsp["vsum"] >> 16, dsp["vsum2"] & 0xFFFF, dsp["vsum2"] >> 16,
              dsp["vdone"] & 0xFFFF]
         h.append((SM.LINK_SEED + sum(h)) & 0xFFFF)
@@ -194,6 +195,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             dsp.update(vsum=x, vsum2=y, vdone=seq)
         elif cmd == SM.CMD_SEND:
             dsp["send"] = [a0, a0 + a1]
+        elif cmd == SM.CMD_PROBE:               # v0.22: the RAM check's verdict, at once
+            dsp["ram"] = dsp["ram_answer"]
         status_out()
 
     # v0.20: the frame's words 2650..2681 are the DSP's per-track routing; ours never
@@ -284,7 +287,56 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
     log = []
     out = {"scenario": scenario}
     base = WD.SMP_POOL_DDR
-    if scenario in ("fast", "dead"):
+    # v0.22: each scenario from power-on: the RAM check first, then the image
+    machine.write(syms["smp_booted"], bytes(4))
+    if scenario in ("high", "lowram"):
+        # an image whose second sound lies past the proven 128 MB (at 130 MB, after the
+        # recordings' area): loaded when the RAM check passes (high), left out when it
+        # fails (lowram), the first sound loaded either way
+        snd = [[0.5 * ((k % 100) / 50 - 1) for k in range(3000)],
+               [0.25 * ((k % 40) / 20 - 1) for k in range(2000)]]
+        img = SL.pool_bytes(snd, base, [1.0, 1.0], [SM.FMT_I16] * 2, ["LOW", "HIGH"],
+                            hole=(SM.DATA_OFFSET + 6400, (130 << 20)))
+        hi_addr = struct.unpack_from("<I", img, 8 + 16)[0] - base
+        assert hi_addr == 130 << 20, hex(hi_addr)
+        img = bytearray(img + bytes((-len(img)) % 512))
+        hdr_dir = bytes(img[:SM.DATA_OFFSET])
+
+        def adler2(b):
+            a_, b_ = 1, 0
+            for x in b:
+                a_ = (a_ + x) & 0xFFFFFFFF
+                b_ = (b_ + a_) & 0xFFFFFFFF
+            return (b_ << 16 ^ a_) & 0xFFFFFFFF
+        magic, nbytes, ck = 0x444E3251, len(img), adler2(hdr_dir)
+        disk[STORE_SECTOR] = struct.pack(">5I", magic, 2, nbytes, ck,
+                                         (~magic ^ nbytes ^ ck) & 0xFFFFFFFF).ljust(512, b"\0")
+        for k in range(len(img) // 512):
+            chunk = bytes(img[512 * k:512 * k + 512])
+            if any(chunk):
+                disk[STORE_SECTOR + 1 + k] = chunk
+        periods = 0
+        while periods < 8000:
+            period()
+            call("smp_boot")
+            periods += 1
+            if all(pool.get(k // 4) == struct.unpack_from("<I", img, k)[0] for k in range(0, SM.CMD_OFFSET, 4)):
+                break
+
+        def has(lo, n):
+            return all(pool.get((lo + k) // 4) == struct.unpack_from("<I", img, lo + k)[0]
+                       for k in range(0, n, 4))
+        low_in = has(struct.unpack_from("<I", img, 8)[0] - base, 6000)
+        high_in = has(hi_addr, 4000)
+        high_any = any(hi_addr // 4 <= k < (hi_addr + 4000) // 4 for k in pool)
+        out.update(periods=periods, low_loaded=low_in, high_loaded=high_in, high_touched=high_any,
+                   probes=dsp["cmds"].count(SM.CMD_PROBE), ram=dsp["ram"],
+                   probe_first=bool(dsp["cmds"]) and dsp["cmds"][0] == SM.CMD_PROBE,
+                   routing_changed=route.get("changed", 0))
+        want_high = scenario == "high"
+        out["ok"] = (periods < 8000 and low_in and out["probe_first"] and out["probes"] == 1
+                     and (high_in if want_high else not high_any) and not route.get("changed"))
+    elif scenario in ("fast", "dead"):
         # an image on the +Drive: two sounds, one longer than a 64 KB chunk (fast) or both
         # short (dead: every TDM packet lost), and a recording kept in slot 125
         n_long = 40000 if scenario == "fast" else 900
@@ -313,7 +365,6 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         for k in range(len(recp) // 512):
             disk[STORE_SECTOR + 1 + rec_off // 512 + k] = recp[512 * k:512 * k + 512]
         retries0 = long("smp_retries")       # (the machine runs the scenarios in turn: its count goes on)
-        call("smp_load")
         status_out()
         periods = 0
         limit = int(os.environ.get("LINK16_LIMIT", 4000 if scenario == "fast" else 30000))
@@ -358,6 +409,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             # the frame stays stock's
             out["ok"] = (periods < limit and out["lstate"] == 0 and out["retries"] - retries0 == 7
                          and not dsp["cmds"] and not route.get("changed"))
+        if scenario == "fast":                  # v0.22: the RAM check came first
+            out["ok"] = out["ok"] and dsp["cmds"][0] == SM.CMD_PROBE
     elif scenario == "save":
         # a recording of 3,000 frames on the DSP, 16 MB into the recordings' area, for slot
         # 40 (SAMP 41; v0.22: any slot, any place); no image on the +Drive yet
@@ -368,6 +421,11 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         for k, x in enumerate(recw):
             pool[rec_off // 4 + k] = x
         status_out()
+        for _ in range(200):                    # v0.22: past the boot's RAM check first
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
         call("smp_save_recording", slot, place, 3000)
         periods = 0
         while periods < 3000:

@@ -56,13 +56,14 @@ typedef unsigned char u8;
 /* dnfw.sampler.machines' constants come from the build (cpage.py's defines): SMP_MIRROR,
  * SMP_POOL_DDR, POOL_BYTES, the link's and the pool's, the recorder's, the commands', the
  * TDM link's */
-#if !defined(POOL_BYTES) || !defined(REC_OFFSET) || !defined(TX_WORDS) || !defined(SMP_MIRROR)
+#if !defined(POOL_BYTES) || !defined(REC_OFFSET) || !defined(REC_END) || !defined(TX_WORDS) || !defined(SMP_MIRROR)
 #error "the sampler's constants are passed by the build (dnfw.waverider.cpage)"
 #endif
-/* v0.22: recordings go into the pool's last REC_BYTES (from REC_OFFSET), wherever there is
- * room, and into any slot (rec.c's DEST): a directory entry whose frames lie there is a
- * recording, kept on the +Drive and kept when the host tool sends a new image */
-#define REC_BYTES (POOL_BYTES - REC_OFFSET)
+/* v0.22: recordings go into [REC_OFFSET, REC_END) of the pool (96..128 MB), wherever there
+ * is room, and into any slot (rec.c's DEST): a directory entry whose frames lie there is a
+ * recording, kept on the +Drive and kept when the host tool sends a new image. Yours are
+ * below it and above it, to POOL_BYTES (400 MB): the host tool skips the recordings' area. */
+#define REC_BYTES (REC_END - REC_OFFSET)
 #define ENTRY(k) (DIR + 8 + 16 * (u32)(k))
 #define NAME(k) (DIR + NAMES_OFFSET + NAME_BYTES * (u32)(k))
 _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in our RAM");
@@ -71,7 +72,7 @@ _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in 
 #define TDM_TX(h) ((volatile u32 *)(0x4E6E0100u + ((u32)(h) << 11)))
 #define TDM_RX(h) ((volatile u32 *)(0x4E6DF100u + ((u32)(h) << 11)))
 
-#define PROTO 3
+#define PROTO 4                                 /* v0.22: 400 MB, the recordings' area a hole */
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
 #define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
 #define BLK_READY (*(volatile u32 *)0x4461B68Cu)                    /* the device is up */
@@ -113,6 +114,12 @@ u32 smp_cmds __attribute__((section(".data"))) = 0;                /* commands s
 u32 smp_hi __attribute__((section(".data"))) = 0;                  /* the image's bytes (0: none) */
 u32 smp_walk __attribute__((section(".data"))) = 0;                /* bytes loaded into the DSP */
 static int dir_ok __attribute__((section(".data"))) = 0;          /* DIR holds a whole directory */
+/* v0.22: the DSP's RAM check this power-on (dnfw.sampler.machines.CMD_PROBE): until it has
+ * passed, nothing loads past RAM_PROVEN (what ran on the instrument before v0.22) */
+int smp_ram __attribute__((section(".data"))) = 0;               /* 0 not yet, 1 passed, 2 failed or no answer */
+static u32 ram_top __attribute__((section(".data"))) = RAM_PROVEN;
+static u32 ram_seq __attribute__((section(".data"))) = 0;
+static u32 ram_since __attribute__((section(".data"))) = 0;
 static int rec_keep __attribute__((section(".data"))) = 0;        /* a send merges DIR's recordings (v0.22) */
 
 static u32 checksum(const u8 *p, u32 n)
@@ -478,13 +485,13 @@ static int next_range(void)
         u32 ns, tbl = slice_table(e, &ns);                  /* v0.19: and its slices, if any */
         if (ns)
             bytes = tbl - lo + 12u * ns;
-        if (lo >= POOL_BYTES || bytes > POOL_BYTES - lo)
+        if (lo >= ram_top || bytes > ram_top - lo)             /* v0.22: past the RAM proven */
             continue;
         l_kind = K_FRAMES;
         l_off = lo & ~511u;
         l_end = (lo + bytes + 511u) & ~511u;
-        if (l_end > POOL_BYTES)
-            l_end = POOL_BYTES;
+        if (l_end > ram_top)
+            l_end = ram_top;
         l_entry = (int)k;
         return 1;
     }
@@ -630,7 +637,7 @@ static int is_recording(u32 k)                  /* slot K's frames lie in the re
 {
     const u8 *e = ENTRY(k);
     u32 a = le32(e), f = le32(e + 4);
-    return dir_ok && a >= SMP_POOL_DDR + REC_OFFSET && a < SMP_POOL_DDR + POOL_BYTES && f;
+    return dir_ok && a >= SMP_POOL_DDR + REC_OFFSET && a < SMP_POOL_DDR + REC_END && f;
 }
 
 /* slot K holds nothing (SAMP K + 1) */
@@ -695,6 +702,21 @@ void smp_save_recording(int slot, u32 off, u32 frames)
     s_frames = frames;
     s_off = REC_OFFSET + off;
     s_end = s_off + ((frames * 2u + 511u) & ~511u);
+    /* v0.22: the slot's entry first (as the DSP already has it), so the frames read back
+     * draw the slot's own waveform (overview_add), and none of an older one's is left */
+    if (!dir_ok) {                                   /* no image yet: an empty pool */
+        for (u32 k = 0; k < DIR_BYTES; k++)
+            DIR[k] = 0;
+        put_le32(DIR, POOL_MAGIC);
+        dir_ok = 1;
+    }
+    u8 *e = ENTRY(slot);
+    put_le32(e, SMP_POOL_DDR + REC_OFFSET + off);
+    put_le32(e + 4, frames);
+    put_le32(e + 8, 0x3F800000u);                    /* rate 1.0 */
+    put_le32(e + 12, 1);                             /* int16 */
+    for (u32 j = 0; j < OVERVIEW_W; j++)
+        OVERVIEW[OVERVIEW_W * (u32)slot + j] = 0;
     smp_saved = 0;
     sstate = 1;
 }
@@ -745,12 +767,6 @@ static void save_poll(void)
                 return;
             }
             /* the slot's directory entry and name, into the image's directory page */
-            if (!dir_ok) {                                   /* no image yet: an empty pool */
-                for (u32 k = 0; k < DIR_BYTES; k++)
-                    DIR[k] = 0;
-                put_le32(DIR, POOL_MAGIC);
-                dir_ok = 1;
-            }
             u8 *e = ENTRY(s_slot);
             put_le32(e, SMP_POOL_DDR + REC_OFFSET + s_place);
             put_le32(e + 4, s_frames);
@@ -785,15 +801,129 @@ static void save_poll(void)
     }
 }
 
+/* -- v0.22: after a recording, the DT2's TRIM and NAME (rec.c) -------------------------------- */
+
+static int dir_due __attribute__((section(".data"))) = 0;       /* DIR to the +Drive when idle */
+static int push_slot __attribute__((section(".data"))) = -1;    /* an entry the DSP must take */
+
+/* slot K's frames: 0 if none */
+u32 smp_frames(int k)
+{
+    if (k < 0 || k >= POOL_SLOTS || smp_slot_empty(k))
+        return 0;
+    return le32(ENTRY(k) + 4);
+}
+
+/* slot K keeps frames [S, E) of what it holds: its entry moves (on an even frame, so the
+ * address stays on a word), its waveform is redrawn from the columns it keeps */
+int smp_trim(int k, u32 s, u32 e)
+{
+    u32 n = smp_frames(k);
+    s &= ~1u;
+    if (!n || e > n || s + 64u > e)
+        return -1;
+    u8 *en = ENTRY(k);
+    put_le32(en, le32(en) + 2u * s);
+    put_le32(en + 4, e - s);
+    u8 *o = OVERVIEW + OVERVIEW_W * (u32)k, t[OVERVIEW_W];
+    for (u32 j = 0; j < OVERVIEW_W; j++) {
+        u32 f = s + (e - s) / OVERVIEW_W * j;
+        u32 c = (f >> 6) * OVERVIEW_W / ((n >> 6) + 1);
+        t[j] = o[c < OVERVIEW_W ? c : OVERVIEW_W - 1];
+    }
+    for (u32 j = 0; j < OVERVIEW_W; j++)
+        o[j] = t[j];
+    dir_due = 1;
+    push_slot = k;
+    return 0;
+}
+
+/* slot K forgets its sound (FUNC + NO on TRIM): an empty slot again, its room free */
+void smp_discard(int k)
+{
+    if (k < 0 || k >= POOL_SLOTS - 1 || !dir_ok)
+        return;
+    u8 *en = ENTRY(k);
+    for (int j = 0; j < 16; j++)
+        en[j] = 0;
+    u8 *nm = NAME(k);
+    for (int j = 0; j < NAME_BYTES; j++)
+        nm[j] = 0;
+    for (u32 j = 0; j < OVERVIEW_W; j++)
+        OVERVIEW[OVERVIEW_W * (u32)k + j] = 0;
+    dir_due = 1;
+    push_slot = k;
+}
+
+/* slot K's name (NAME_BYTES - 1 characters at most) */
+void smp_rename(int k, const char *name)
+{
+    if (k < 0 || k >= POOL_SLOTS || !dir_ok)
+        return;
+    u8 *nm = NAME(k);
+    int j = 0;
+    for (; j < NAME_BYTES - 1 && name[j]; j++)
+        nm[j] = (u8)name[j];
+    for (; j < NAME_BYTES; j++)
+        nm[j] = 0;
+    dir_due = 1;
+}
+
+/* the directory to the +Drive, and a changed entry to the DSP, once nothing else runs */
+static void edits_poll(void)
+{
+    if (sstate || (smp_lstate != L_DONE && smp_lstate != L_IDLE))
+        return;
+    if (dir_due) {
+        dir_due = 0;
+        u32 bytes = smp_hi;
+        for (u32 k = 0; k < POOL_SLOTS; k++) {          /* the image runs to its last recording */
+            if (!is_recording(k))
+                continue;
+            u32 a = le32(ENTRY(k)) - SMP_POOL_DDR + le32(ENTRY(k) + 4) * 2u;
+            if (a > bytes)
+                bytes = a;
+        }
+        bytes = (bytes + 511u) & ~511u;
+        if (bytes < DIR_BYTES)
+            bytes = DIR_BYTES;
+        if (image_write(0, DIR_BYTES, DIR) == 0 && header_write(bytes) == 0)
+            smp_hi = bytes;
+        return;
+    }
+    if (push_slot >= 0 && fast_on) {                /* the loader's own path: sent, checked */
+        l_entry = push_slot;
+        push_slot = -1;
+        l_slot = POOL_SLOTS + 1;
+        smp_lstate = next_range() ? L_READ : L_DONE;
+    }
+}
+
 /* from the UI loop (page.c's wr_poll), every pass */
 void smp_boot(void)
 {
     if (!smp_booted && BLK_READY) {
+        /* v0.22: first the DSP's RAM check (about 0.7 s); then the image loads, past
+         * RAM_PROVEN only if the check passed */
         smp_booted = 1;
+        ram_seq = smp_command(CMD_PROBE, 0, 0, 0, 0);
+        ram_since = FRAMES;
+    }
+    if (smp_booted == 1) {
+        u16 h[16];
+        if (smp_status(h) && h[1] == (u16)ram_seq && (h[4] == 1 || h[4] == 2))
+            smp_ram = h[4];
+        else if (FRAMES - ram_since > 6000u)            /* four seconds and no verdict */
+            smp_ram = 2;
+        if (!smp_ram)
+            return;
+        ram_top = smp_ram == 1 ? POOL_BYTES : RAM_PROVEN;
+        smp_booted = 2;
         smp_load();
     }
     load_poll();
     save_poll();
+    edits_poll();
 }
 
 /* -- USB ------------------------------------------------------------------------------------ */
@@ -912,11 +1042,15 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
     rp[3] = 0;
     if (cmd == 1) {                             /* HELLO */
         rp[r++] = 0; rp[r++] = PROTO;
-        put32(rp + r, REC_OFFSET); r += 4;      /* the image's room for yours */
+        put32(rp + r, REC_OFFSET); r += 4;      /* the image's room for yours below the hole */
         put32(rp + r, SMP_POOL_DDR); r += 4;
+        put32(rp + r, REC_END); r += 4;         /* v0.22 (link 4): yours again from here */
+        put32(rp + r, POOL_BYTES); r += 4;      /*   to here */
+        put32(rp + r, (u32)smp_ram); r += 4;    /*   the RAM check: 1 passed (all loads) */
     } else if (cmd == 2) {                      /* WRITE, in order, after BEGIN */
         u32 at = n >= 7 ? get32(rq + 3) : 0, k = n >= 7 ? n - 7 : 0;
-        if (!up_bytes || n < 7 || at > up_bytes || k > up_bytes - at || at + k > REC_OFFSET) {
+        if (!up_bytes || n < 7 || at > up_bytes || k > up_bytes - at || at + k > POOL_BYTES
+            || (at < REC_END && at + k > REC_OFFSET)) {        /* v0.22: never the recordings' */
             rp[3] = 1;
         } else {
             for (u32 j = 0; j < k; j++) {
@@ -943,6 +1077,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         put32(rp + r, smp_retries); r += 4;
         put32(rp + r, (u32)fast_on); r += 4;
         put32(rp + r, FRAMES); r += 4;
+        put32(rp + r, (u32)smp_ram); r += 4;    /* v0.22 */
     } else if (cmd == 4 || cmd == 5) {          /* CLEAR, SAVE: nothing to do */
         put32(rp + r, smp_hi); r += 4;
     } else if (cmd == 6) {                      /* LOAD */
@@ -956,7 +1091,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         smp_hi = 0;
     } else if (cmd == 8) {                      /* BEGIN */
         u32 bytes = n >= 7 ? get32(rq + 3) : 0;
-        if (bytes < DIR_BYTES || bytes > REC_OFFSET || header_write(0) != 0) {
+        if (bytes < DIR_BYTES || bytes > POOL_BYTES || header_write(0) != 0) {
             rp[3] = 1;
         } else {
             smp_lstate = L_IDLE;                    /* no load runs while the image changes */

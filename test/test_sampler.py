@@ -583,3 +583,58 @@ def test_the_host_tool_writes_a_wavs_slices(tmp_path):
     assert struct.unpack_from("<I", pool, 8 + 12)[0] >> 8 == 4
     pool, _, _ = T.build_pool([p], "none")
     assert struct.unpack_from("<I", pool, 8 + 12)[0] == SM.FMT_I16
+
+
+def _probe(mem_cls):
+    from dnfw.perc.dsl import Mem
+    h = SL.Harness(0)
+    if mem_cls is not None:
+        old = h.mem
+        h.mem = mem_cls(old.read)
+    h.command(SM.CMD_PROBE)
+    blocks = 0
+    while True:
+        P.run_recorder(h.L, h.mem)
+        blocks += 1
+        st = h.status()
+        if st[4] in (1, 2) or blocks > 5000:
+            return h, st[4], blocks
+
+
+def test_v022_the_ram_check_passes_on_a_whole_512_mb_part():
+    h, res, blocks = _probe(None)
+    n = SM.PROBE_BYTES // 4
+    assert res == 1 and blocks == 4 * n // SM.PROBE_STEP + 1      # the verdict shows a block later
+    lo, hi = h.L.pool + SM.PROBE_LO, h.L.pool + SM.PROBE_HI
+    assert hi + SM.PROBE_BYTES <= h.L.pool + SM.POOL_BYTES <= 0xA0000000
+    assert h.mem.get(lo + 4 * 7) == SM.PROBE_PAT[0] + 7 and h.mem.get(hi + 4 * 7) == SM.PROBE_PAT[1] + 7
+    # it writes nowhere but its two areas and its own words
+    ddr = [a for a in h.mem.w if a >= 0x80000000]
+    assert all(lo <= a < lo + SM.PROBE_BYTES or hi <= a < hi + SM.PROBE_BYTES or a == h.L.pool + SM.CMD_OFFSET
+               or h.L.pool + SM.CMD_OFFSET <= a < h.L.pool + SM.CMD_OFFSET + 4 * SM.CMD_WORDS for a in ddr)
+    # and once done, a block more does nothing
+    before = dict(h.mem.w)
+    P.run_recorder(h.L, h.mem)
+    assert {a: v for a, v in h.mem.w.items() if a >= 0x80000000} == {a: v for a, v in before.items() if a >= 0x80000000}
+
+
+def test_v022_the_ram_check_fails_on_a_256_mb_part():
+    from dnfw.perc.dsl import Mem
+
+    class Folded(Mem):                     # a 256 MB part: address bit 28 is not decoded
+        def get(self, a):
+            return super().get(a & ~0x10000000 if a >= 0x80000000 else a)
+
+        def put(self, a, v):
+            super().put(a & ~0x10000000 if a >= 0x80000000 else a, v)
+    _h, res, _ = _probe(Folded)
+    assert res == 2
+
+
+def test_v022_the_ram_check_does_nothing_from_stray_words():
+    h = SL.Harness(0)
+    h.mem.put(h.L.C["pph"], 3)
+    h.mem.put(h.L.C["pix"], 0x40000000)           # far out of range: stops, writes nothing
+    P.run_recorder(h.L, h.mem)
+    assert h.mem.get(h.L.C["pph"]) == 0
+    assert not [a for a in h.mem.w if a >= 0x80000000]

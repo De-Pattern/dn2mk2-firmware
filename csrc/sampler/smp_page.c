@@ -687,8 +687,93 @@ static int meter_x(int v, int w)
     return pos < 0 ? 0 : pos;
 }
 
+/* v0.22: the DT2's steps after a recording (rec.c): TRIM, NAME, ASSIGN */
+extern int rec_phase, trim_slot, nm_cur, as_done, smp_saved;
+extern u32 trim_n, trim_s, trim_e;
+extern char nm_text[8];
+
+static void secs(void *c, int x, int y, u32 frames)        /* 1.234 S */
+{
+    u32 ms = frames / 48u;
+    LABEL(c, x, y, "%d.%d%d%d", (int)(ms / 1000u), (int)(ms / 100u % 10u), (int)(ms / 10u % 10u),
+          (int)(ms % 10u));
+}
+
+static void trim_draw(void *c)
+{
+    LABEL(c, 14, 57, "%s", "TRIM");
+    LABEL(c, 104, 57, "SAMP %d", trim_slot + 1);
+    hline(c, 0, 127, 54, 1);
+    const u8 *o = smp_overview(trim_slot);
+    int x0 = 4, x1 = 123, yc = 36, h = 13, w = x1 - x0 + 1;
+    u32 n = trim_n ? trim_n : 1;
+    int sx = x0 + (int)((trim_s >> 4) * (u32)w / ((n >> 4) + 1u));
+    int ex = x0 + (int)((trim_e >> 4) * (u32)w / ((n >> 4) + 1u));
+    if (ex > x1) ex = x1;
+    hline(c, x0, x1, yc, 1);
+    if (o)
+        for (int x = x0; x <= x1; x++) {
+            int col = (x - x0) * 100 / w;
+            int a = o[col] * h / 255;
+            int inside = x >= sx && x <= ex;
+            for (int y = yc - a; y <= yc + a; y++)
+                if (inside || ((x + y) & 1) == 0)       /* outside the trim: half lit */
+                    on(c, x, y);
+        }
+    else
+        LABEL(c, 64, 39, "%s", smp_saved == 0 ? "SAVING" : "NO WAVEFORM");
+    vline(c, sx, yc - h - 2, yc + h + 2, 0);
+    vline(c, ex, yc - h - 2, yc + h + 2, 0);
+    fill(c, sx, yc + h + 1, sx + 2, yc + h + 2);
+    fill(c, ex - 2, yc + h + 1, ex, yc + h + 2);
+    LABEL(c, 64, 14, "%s", "YES OK  NO ALL  F+NO DROP");
+    secs(c, 14, 7, trim_s);
+    LABEL(c, 14, 0, "%s", "START");
+    secs(c, 64, 7, trim_e - trim_s);
+    LABEL(c, 64, 0, "%s", "LENGTH");
+    secs(c, 113, 7, trim_e);
+    LABEL(c, 113, 0, "%s", "END");
+}
+
+static void name_draw(void *c)
+{
+    LABEL(c, 14, 57, "%s", "NAME");
+    LABEL(c, 104, 57, "SAMP %d", trim_slot + 1);
+    hline(c, 0, 127, 54, 1);
+    for (int j = 0; j < 7; j++) {
+        int x = 22 + 14 * j;
+        char ch = nm_text[j] ? nm_text[j] : ' ';
+        LABEL(c, x, 32, "%c", ch == ' ' ? '_' : ch);
+        if (j == nm_cur)
+            fill(c, x - 4, 27, x + 4, 28);
+    }
+    LABEL(c, 64, 12, "%s", "UP/DN:LETTER  L/R:MOVE");
+    LABEL(c, 64, 2, "%s", "YES:SAVE  NO:KEEP");
+}
+
+static void assign_draw(void *c)
+{
+    LABEL(c, 18, 57, "%s", "ASSIGN");
+    LABEL(c, 104, 57, "SAMP %d", trim_slot + 1);
+    hline(c, 0, 127, 54, 1);
+    LABEL(c, 64, 38, "%s", "PRESS A TRIG KEY:");
+    LABEL(c, 64, 30, "%s", "THAT TRACK PLAYS IT");
+    LABEL(c, 64, 18, "%s", "SYNTH TRK: ONESHOT");
+    LABEL(c, 64, 4, "%s", "NO: NONE");
+}
+
 void rec_screen_draw(void *c)
 {
+    if (rec_phase) {
+        clear(c, 0, 0, 127, 63);
+        if (rec_phase == 1)
+            trim_draw(c);
+        else if (rec_phase == 2)
+            name_draw(c);
+        else
+            assign_draw(c);
+        return;
+    }
     int heard = rec_heard && FRAMES_NOW + 1u - rec_heard < 1500u;
     int state = heard ? rec_state : 0;
     clear(c, 0, 0, 127, 63);
@@ -747,7 +832,9 @@ void rec_screen_draw(void *c)
         LABEL(c, cx + 11, by0 + 16, "%s", state == 3 ? "AGAIN" : "RECORD");
         u32 secs = rec_room / 96000u;           /* int16 at 48 kHz */
         LABEL(c, cx, by0 + 6, "%d S FREE", (int)(secs > 999 ? 999 : secs));
-        if (state == 3 && rec_saved_slot >= 0)
+        if (as_done >= 0 && rec_saved_slot >= 0)
+            LABEL(c, cx, by0 + 0, "%d ON TRK %d", rec_saved_slot + 1, as_done + 1);
+        else if (state == 3 && rec_saved_slot >= 0)
             LABEL(c, cx, by0 + 0, "SAVED %d", rec_saved_slot + 1);
     }
 

@@ -51,7 +51,7 @@ typedef unsigned char u8;
 #define F_RELEASE 0x10
 enum { K_TRIG = 1, K_MOD = 6, K_PRESET = 7, K_SETTINGS = 8, K_YES = 10, K_UP = 11, K_NO = 12,
        K_LEFT = 13, K_DOWN = 14, K_RIGHT = 15, K_TRK = 16, K_PTN = 23, K_SONG = 24,
-       K_ENC_A = 41, K_ENC_H = 48 };
+       K_FUNC = 17, K_ENC_A = 41, K_ENC_H = 48 };
 
 extern u32 smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
 extern int smp_status(u16 *out);
@@ -62,6 +62,26 @@ extern int smp_list_up(void *view);
 extern void smp_list_hold(void);
 extern void smp_list_close(void);
 extern void *smp_list_view;
+extern u32 smp_frames(int k);
+extern int smp_trim(int k, u32 s, u32 e);
+extern void smp_discard(int k);
+extern void smp_rename(int k, const char *name);
+extern const char *smp_name(int k);
+extern int smp_saved;
+int smp_assign(int track, int slot);                 /* below: 0 done */
+
+/* v0.22: after a recording, the DT2's steps (manual 13.2, 9..11): TRIM, then NAME, then
+ * ASSIGN (a [TRIG] key: that track plays it; NO: none). rec_phase 0 is the RECORDER. */
+enum { PH_REC, PH_TRIM, PH_NAME, PH_ASSIGN };
+int rec_phase __attribute__((section(".data"))) = PH_REC;
+int trim_slot __attribute__((section(".data"))) = -1;
+u32 trim_n __attribute__((section(".data"))) = 0;           /* its frames, as recorded */
+u32 trim_s __attribute__((section(".data"))) = 0;
+u32 trim_e __attribute__((section(".data"))) = 0;
+char nm_text[8] __attribute__((section(".data")));           /* the name being edited */
+int nm_cur __attribute__((section(".data"))) = 0;
+int as_done __attribute__((section(".data"))) = -1;          /* the track it went to, for the screen */
+static const char NM_SET[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
 
 /* the recorder's settings: the instrument's, not a sound's (none of it is saved) */
 int rec_overlay __attribute__((section(".data"))) = 0;      /* the screen is up */
@@ -168,6 +188,7 @@ static void rec_arm_toggle(void)
 void rec_combo(void)
 {
     rec_overlay = !rec_overlay;
+    rec_phase = PH_REC;                         /* a recording mid-TRIM keeps what it is */
     if (rec_overlay) {
         mon_known = 0;
         if (rec_dest < 0 || (!smp_slot_empty(rec_dest) && rec_dest != rec_saved_slot))
@@ -197,6 +218,13 @@ void rec_poll(void)
             if (rec_taken >= 0) {
                 smp_save_recording(rec_taken, rec_off, rec_frames);
                 rec_saved_slot = rec_taken;
+                if (rec_overlay) {                  /* on to TRIM, as the DT2 */
+                    rec_phase = PH_TRIM;
+                    trim_slot = rec_taken;
+                    trim_n = rec_frames;
+                    trim_s = 0;
+                    trim_e = rec_frames;
+                }
                 rec_dest = next_empty(rec_taken + 1);
                 if (rec_dest == rec_taken)
                     rec_dest = rec_taken;
@@ -243,6 +271,190 @@ static int closes(u32 code)
            || code == K_TRK || code == K_PTN || code == K_SONG;
 }
 
+/* -- v0.22: TRIM, NAME, ASSIGN ------------------------------------------------------------- */
+
+#define K_TRIG1 25                              /* the sixteen [TRIG] keys: 25..40 (digikit's panel map) */
+
+/* the recording to track TRACK: its SAMP, and ONESHOT if it plays no sample (-> 0 done) */
+/* the stock calls a knob turn and MACHINE SEL make (found and called in the emulator):
+ * the UI's owner (a singleton, built long before), its model, a parameter's set on a track,
+ * setValue(set, id, value << 8, track, rec 0, midi 0, announce 1) as the knob path, and
+ * MACHINE SEL's commit(model, track, type, 1, 1), which resets the sound to the machine's
+ * defaults (so SAMP is set after it) */
+#define UI_OWNER   ((u32 (*)(void))0x4018A97Au)
+#define PARAM_SET  ((u32 (*)(u32, u32, u32))0x40041A40u)
+#define SET_VALUE  ((u32 (*)(u32, u32, u32, u32, u32, u32, u32))0x40037326u)
+#define MACHINE_COMMIT ((u32 (*)(u32, u32, u32, u32, u32))0x40031880u)
+#define KIT (*(volatile u32 *)0x800052A0u)
+#define SOUND_TYPE(t) (*(volatile signed char *)(KIT + 52u + 1163u * (u32)(t) + 0xDEu))
+#define ONESHOT 8                               /* dnfw.sampler.machines.TYPE_OF; 8..8 + SMP_N - 1 */
+
+int smp_assign(int track, int slot)
+{
+    if (track < 0 || track > 15 || slot < 0 || slot > 126 || !KIT)
+        return -1;
+    u32 owner = UI_OWNER();
+    if (!owner)
+        return -1;
+    int ty = SOUND_TYPE(track);
+    if (ty < ONESHOT || ty >= ONESHOT + SMP_N) {    /* not a sample machine: ONESHOT, as the DT2's audio tracks */
+        MACHINE_COMMIT(owner + 0xF4u, (u32)track, ONESHOT, 1, 1);
+        if (SOUND_TYPE(track) != ONESHOT)
+            return -1;                          /* refused (stock's permission): nothing set */
+    }
+    u32 ps = PARAM_SET(owner, SMP_SAMP_ID, (u32)track);
+    if (!ps)
+        return -1;
+    SET_VALUE(ps, SMP_SAMP_ID, (u32)(slot + 1) << 8, (u32)track, 0, 0, 1);
+    return 0;
+}
+
+/* a [TRIG] key's track, or -1 */
+int smp_trig_track(u32 code)
+{
+    return code >= K_TRIG1 && code < K_TRIG1 + 16u ? (int)(code - K_TRIG1) : -1;
+}
+
+static void name_start(void)
+{
+    const char *n = smp_name(trim_slot);
+    int j = 0;
+    for (; j < 7 && n && n[j]; j++)
+        nm_text[j] = n[j];
+    for (; j < 8; j++)
+        nm_text[j] = 0;
+    nm_cur = 0;
+    rec_phase = PH_NAME;
+}
+
+static void name_step(int d)
+{
+    char ch = nm_text[nm_cur] ? nm_text[nm_cur] : ' ';
+    int i = 0, n = (int)sizeof NM_SET - 1;
+    while (i < n && NM_SET[i] != ch)
+        i++;
+    i = ((i + d) % n + n) % n;
+    nm_text[nm_cur] = NM_SET[i];
+    for (int j = 0; j < nm_cur; j++)            /* no hole before the cursor */
+        if (!nm_text[j])
+            nm_text[j] = ' ';
+}
+
+static void name_done(void)
+{
+    char t[8];
+    int j, last = -1;
+    for (j = 0; j < 7; j++) {
+        t[j] = nm_text[j] ? nm_text[j] : ' ';
+        if (t[j] != ' ')
+            last = j;
+    }
+    if (last >= 0) {                            /* trailing spaces off; an empty name stays as it was */
+        t[last + 1] = 0;
+        smp_rename(trim_slot, t);
+    }
+    as_done = -1;
+    rec_phase = PH_ASSIGN;
+}
+
+/* a TRIM knob: E START, H END, a detent a 200th of the recording (FUNC: finer) */
+static void trim_knob(int index, int delta, int fine)
+{
+    u32 step = trim_n / (fine ? 2000u : 200u);
+    if (step < 32u)
+        step = 32u;
+    if (index == 5) {
+        int v = (int)trim_s + delta * (int)step;
+        if (v < 0) v = 0;
+        if ((u32)v + 64u > trim_e) v = (int)trim_e - 64;
+        trim_s = (u32)(v < 0 ? 0 : v);
+    } else if (index == 8) {
+        int v = (int)trim_e + delta * (int)step;
+        if ((u32)(v < 0 ? 0 : v) < trim_s + 64u) v = (int)trim_s + 64;
+        if ((u32)v > trim_n) v = (int)trim_n;
+        trim_e = (u32)v;
+    }
+}
+
+static int func_held __attribute__((section(".data"))) = 0;
+
+static u32 after_pop(u8 *it, u32 code, u32 flags)
+{
+    if (it[0] == IT_KNOB) {
+        int delta = (signed char)it[8];
+        if (code >= 1 && code <= 9) {                /* A..H, and LEVEL/DATA (9) */
+            if (rec_phase == PH_TRIM)
+                trim_knob((int)code, delta, func_held);
+            else if (rec_phase == PH_NAME)
+                name_step(delta);
+            it[0] = IT_DROP;
+        }
+        return (u32)it;
+    }
+    if (it[0] != IT_KEY)
+        return (u32)it;
+    int press = (flags & F_PRESS) && !(flags & F_RELEASE);
+    int chord = (flags & 0x02) != 0;
+    if (code == K_FUNC) {                       /* FUNC goes on to stock, and is noted */
+        func_held = press ? 1 : (flags & F_RELEASE) ? 0 : func_held;
+        return (u32)it;
+    }
+    int ours = code == K_YES || code == K_NO || (code >= K_UP && code <= K_RIGHT)
+               || (code >= K_ENC_A && code <= K_ENC_H);
+    if (rec_phase == PH_ASSIGN && smp_trig_track(code) >= 0)
+        ours = 1;
+    if (!ours) {
+        if (press && closes(code)) {
+            rec_overlay = 0;
+            rec_phase = PH_REC;
+        }
+        return (u32)it;
+    }
+    if (press && code < 32)
+        eaten |= 1u << code;
+    it[0] = IT_DROP;
+    if (!press)
+        return (u32)it;
+    if (rec_phase == PH_TRIM) {
+        if (code == K_YES && !chord && !func_held) {
+            if (trim_s > 0 || trim_e < trim_n)
+                smp_trim(trim_slot, trim_s, trim_e);
+            name_start();
+        } else if (code == K_NO && (chord || func_held)) {   /* FUNC + NO: the recording is dropped */
+            smp_discard(trim_slot);
+            rec_saved_slot = -1;
+            rec_dest = trim_slot;
+            rec_phase = PH_REC;
+        } else if (code == K_NO) {
+            name_start();                       /* untrimmed */
+        } else if (code == K_LEFT || code == K_RIGHT) {
+            trim_knob(code == K_LEFT ? 5 : 8, code == K_LEFT ? -1 : 1, 1);
+        }
+    } else if (rec_phase == PH_NAME) {
+        if (code == K_YES)
+            name_done();
+        else if (code == K_NO) {
+            as_done = -1;
+            rec_phase = PH_ASSIGN;              /* the name it has */
+        } else if (code == K_LEFT && nm_cur > 0)
+            nm_cur--;
+        else if (code == K_RIGHT && nm_cur < 6)
+            nm_cur++;
+        else if (code == K_UP || code == K_DOWN)
+            name_step(code == K_UP ? 1 : -1);
+    } else if (rec_phase == PH_ASSIGN) {
+        int t = smp_trig_track(code);
+        if (t >= 0) {
+            if (smp_assign(t, trim_slot) == 0)
+                as_done = t;
+            rec_phase = PH_REC;
+        } else if (code == K_NO || code == K_YES) {
+            rec_phase = PH_REC;
+        }
+    }
+    return (u32)it;
+}
+
 /* the UI loop's queue receive (coldfire.py's UI_POP_SITE): every item passes here before
  * any view sees it. With the recorder up, its keys and knobs are taken; with the sample
  * list up, UP and DOWN become SAMP's knob (D) a detent, and pushing that knob closes the
@@ -261,6 +473,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         }
         return (u32)it;
     }
+    if (rec_overlay && rec_phase != PH_REC)
+        return after_pop(it, code, flags);
     if (rec_overlay) {
         if (it[0] == IT_KNOB) {
             u32 index = code;

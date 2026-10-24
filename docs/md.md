@@ -155,3 +155,12 @@ the DSP clock from an 11.2896 MHz crystal). The DN2 runs at 48 kHz. Each voice r
 machine at 44.1 kHz, block by block, and the DN2's block reads that stream through a
 4-point interpolator at 0.91875 Machinedrum samples a sample; the machine itself is
 unchanged.
+
+## v0.22: level
+
+The Machinedrum voice's output scale (`dnfw.perc.program.MD_LEVEL`) is 1.4, up from 0.7
+(+6 dB). Measured in the SHARC runner at the amp stage over a note's first 40 ms at
+defaults: WaveTone peaks at 0.16, FM Tone at 0.10; at 0.7 the MD machines peaked at 0.05
+(EFM-SD) to 0.09 (TRX-BD), so the owner heard them as quiet. At 1.4 they sit at 0.09 to
+0.17, with WaveTone and FM Tone. Only the scale changed: the machines' sound, parameters
+and effects are as before.

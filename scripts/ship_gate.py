@@ -256,19 +256,21 @@ def main() -> int:
         if "smp_tdm_sent" in lay:
             syms = work / "link16_syms.json"
             syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith("smp_")}))
-            steps = ",".join(f"link16:{syms}:{sc}" for sc in ("save", "fast", "dead"))
+            scen = ("save", "fast", "dead", "high", "lowram") if "smp_ram" in lay else ("save", "fast", "dead")
+            steps = ",".join(f"link16:{syms}:{sc}" for sc in scen)
             rc, out = run("link16", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                      "--build", bdir, "--snapshot", snap, "--steps", steps,
                                      "--png-dir", work / "link16"], logs,
                           env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
                                                    / "section_3_MAIN_OS.bin"),
                                "DNFW_EMU_FLAGS": '{"weakptr": false}'})
-            oks = re.findall(r"link16 (save|fast|dead): .*\"ok\": (true|false)", out)
-            good = rc == 0 and len(oks) == 3 and all(v == "true" for _, v in oks)
+            oks = re.findall(r"link16 (save|fast|dead|high|lowram): .*\"ok\": (true|false)", out)
+            good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
             gate("sample link (ColdFire)", good,
                  "save, fast (a lost packet resent), dead (nothing gets through: the loader "
                  "stops); every byte loaded and saved; the frame's routing words stock's in "
-                 "every period" if good else out[-800:])
+                 "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
+                 "passes (high, lowram)" if good else out[-800:])
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
         # change the recorder and never the track's sound, NO closes it, and the UI keeps
@@ -299,6 +301,49 @@ def main() -> int:
             gate("recorder screen (ColdFire)", good,
                  "FUNC+VOICE opens it, knob A moves SRC with no write to the sound, NO closes it, "
                  "the screen drawn throughout" if good else why)
+
+        # 6d. after a recording (v0.22): TRIM (knobs E and H move the ends), NAME (a knob
+        # and the arrows spell it), ASSIGN (a [TRIG] key: that track becomes ONESHOT playing
+        # the slot, through stock's MACHINE SEL commit and setValue), each step's key
+        if "rec_phase" in lay:
+            g = {k: hex(lay[k]) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n",
+                                           "trim_s", "trim_e", "nm_text")}
+            kit = 0x4210C08C                    # the snapshot's live kit ([0x800052a0])
+            snd = hex(kit + 52 + 1163 * 2)      # track 3's sound
+            steps = (f"wait:3,mem:0x800052a0:4,mem:{snd}:256,poke:{g['trim_slot']}:00000004,"
+                     f"poke:{g['trim_n']}:00017700,poke:{g['trim_s']}:00000000,"
+                     f"poke:{g['trim_e']}:00017700,poke:{g['rec_overlay']}:00000001,"
+                     f"poke:{g['rec_phase']}:00000001,wait:20,png:t1,spin:4:5,wait:5,"
+                     f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,yes,wait:10,"
+                     f"mem:{g['rec_phase']}:4,spin:0:3,wait:3,right,wait:3,spin:0:2,wait:3,up,wait:10,"
+                     f"mem:{g['nm_text']}:8,png:n1,yes,wait:10,mem:{g['rec_phase']}:4,png:a1,tap:27,"
+                     f"wait:20,mem:{g['rec_phase']}:4,mem:{snd}:256,png:r1")
+            js = work / "recflow.json"
+            rc, out = run("recorder flow", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                                            "--build", bdir, "--snapshot", snap, "--steps", steps,
+                                            "--png-dir", work / "recflow", "--json", js], logs,
+                          env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
+                                                   / "section_3_MAIN_OS.bin"),
+                               "DNFW_EMU_FLAGS": '{"weakptr": false}'})
+            why, good = out[-800:], False
+            if rc == 0 and js.exists():
+                r = json.loads(js.read_text())
+                m = r["memory"]
+                ph = g["rec_phase"]
+                phases = [int(m[k], 16) for k in (ph, f"{ph}@6", f"{ph}@7")]
+                before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[f"{snd}@8"])
+                facts = {"kit": m["0x800052a0"] == f"{kit:08x}",
+                         "trim": (int(m[g["trim_s"]], 16), int(m[g["trim_e"]], 16)) == (2400, 94560),
+                         "phases": phases == [2, 3, 0],
+                         "name": bytes.fromhex(m[g["nm_text"]])[:3] == b"CC\0",
+                         "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
+                         "samp": after[0x6A] == 5,
+                         "frames": r["screen_frames"] > 0}
+                good = all(facts.values())
+                why = str(facts)
+            gate("recorder flow (ColdFire)", good,
+                 "TRIM's ends move, YES on to NAME (spelt by knob and arrows), YES on to ASSIGN, a "
+                 "[TRIG] key makes track 3 ONESHOT on the slot" if good else why)
 
         # 7. unit tests
         tests = [t for t in TESTS if (ROOT / t).exists()]

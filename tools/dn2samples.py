@@ -45,6 +45,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "src"))
 sys.path.insert(0, str(HERE))
 
+from dnfw.sampler import machines as SM  # noqa: E402
 from dn2probe import pack7, unpack7          # noqa: E402  (Elektron's 7-bit packing)
 
 HEADER = bytes([0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01])
@@ -184,7 +185,8 @@ def wav_list(items):
     return out
 
 
-def build_pool(paths, slice_mode="cue"):
+def build_pool(paths, slice_mode="cue", big=True):
+    """BIG (sample link 4, v0.22 or later): up to 400 MB, around the recordings' area"""
     from dnfw.sampler import live as SL, machines as SM
     from dnfw.waverider import dsp
     if len(paths) > SM.USER_SLOTS:
@@ -202,9 +204,13 @@ def build_pool(paths, slice_mode="cue"):
         cuts.append(slicing(slice_mode, p, s, r))
         rates.append(r / DSP_RATE)
         names.append(pathlib.Path(p).stem.upper()[:SM.NAME_BYTES - 1])
-    pool = SL.pool_bytes(samples, dsp.SMP_POOL_DDR, rates, [SM.FMT_I16] * len(samples), names, cuts)
-    if len(pool) > SM.REC_OFFSET:
-        raise SystemExit(f"{len(pool):,} bytes: more than the {SM.REC_OFFSET:,} the pool holds for yours")
+    pool = SL.pool_bytes(samples, dsp.SMP_POOL_DDR, rates, [SM.FMT_I16] * len(samples), names, cuts,
+                         hole=SM.USER_HOLE if big else None)
+    room = SM.POOL_BYTES if big else SM.REC_OFFSET
+    if len(pool) > room:
+        mb = (len(pool) - (SM.REC_BYTES if len(pool) > SM.REC_END else 0)) / 2 ** 20
+        raise SystemExit(f"{mb:.0f} MB of samples: more than the {SM.USER_BYTES / 2 ** 20 if big else 96:.0f} MB "
+                         "the pool holds for yours" + ("" if big else " (flash v0.22 or later for 368 MB)"))
     return pool, names, [len(s) / r / DSP_RATE * DSP_RATE for s, r in zip(samples, rates)]
 
 
@@ -245,8 +251,9 @@ class Link:
 
 def status(link):
     if link.proto >= 3:
-        keys = ("image_bytes", "load_state", "loaded", "retried", "fast_link", "frames")
-        return dict(zip(keys, struct.unpack(">6I", link.call(STATUS)[:24])))
+        keys = ("image_bytes", "load_state", "loaded", "retried", "fast_link", "frames", "ram_check")
+        p = link.call(STATUS)
+        return dict(zip(keys, struct.unpack(f">{min(7, len(p) // 4)}I", p[:4 * min(7, len(p) // 4)])))
     hi, walk, passes, packets, frames = struct.unpack(">5I", link.call(STATUS)[:20])
     return {"high_water": hi, "walk": walk, "passes": passes, "packets": packets, "frames": frames}
 
@@ -264,7 +271,13 @@ def cmd_send3(link, pool, names, chunk):
     link.call(BEGIN, struct.pack(">I", len(pool)), timeout=10.0)
     at, total = 0, len(pool)
     while at < total:
-        piece = pool[at:min(at + chunk, total)]
+        if SM.USER_HOLE[0] <= at < SM.USER_HOLE[1]:     # v0.22: the recordings' area: not ours
+            at = SM.USER_HOLE[1]
+            continue
+        end = min(at + chunk, total)
+        if at < SM.USER_HOLE[0] < end:
+            end = SM.USER_HOLE[0]
+        piece = pool[at:end]
         try:
             link.call(WRITE, struct.pack(">I", at) + piece, timeout=5.0, tries=2)
         except TimeoutError:
@@ -358,8 +371,15 @@ def main(argv=None):
         p = link.call(HELLO)
         proto, room, ddr = struct.unpack(">HII", p[:10])
         link.proto = proto
+        ram = None
+        if proto >= 4 and len(p) >= 22:
+            _hole_end, room, ram = struct.unpack(">III", p[10:22])
+            room -= SM.REC_BYTES
         if a.command == "hello":
-            print(f"sample link {proto}: room for {room:,} bytes of samples, the pool at DSP 0x{ddr:08x}")
+            print(f"sample link {proto}: room for {room / 2 ** 20:.0f} MB of samples, the pool at DSP 0x{ddr:08x}")
+            if ram is not None:
+                print("  the DSP's RAM check: " + {0: "not run yet", 1: "passed (all 400 MB load)",
+                                                     2: "FAILED: only the first 128 MB load"}.get(ram, str(ram)))
         elif a.command == "status":
             print(status(link))
         elif a.command == "save":
@@ -375,7 +395,7 @@ def main(argv=None):
             link.call(CLEAR)
             print("cleared: the instrument stops sending; the DSP keeps what it has")
         elif proto >= 3:
-            pool, names, _ = build_pool(wav_list(a.files), a.slices)
+            pool, names, _ = build_pool(wav_list(a.files), a.slices, big=proto >= 4)
             cmd_send3(link, pool, names, a.chunk)
         else:
             pool, names, _ = build_pool(wav_list(a.files), a.slices)

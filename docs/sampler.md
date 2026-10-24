@@ -192,6 +192,41 @@ both (never past the pool's end, never past slot 126). Each is saved to the +Dri
 `RECnnn` when it ends, and DEST moves on. A host-tool `send` keeps every recording, in its
 own slot if the new image leaves it empty, else in the first empty one.
 
+**After a recording: TRIM, NAME, ASSIGN** (the DT2's steps, manual 13.2 9..11), when the
+screen is up as it ends (`rec_phase` in rec.c, drawn by `trim_draw`/`name_draw`/
+`assign_draw` in smp_page.c):
+- **TRIM**: the recording's waveform (filled in as it is saved), **E** START and **H** END
+  (a detent a 200th of it; with FUNC held, a 2000th; LEFT and RIGHT nudge them), START,
+  LENGTH and END in seconds. **YES** keeps [START, END) (`smp_trim`: the entry moves, on an
+  even frame; the waveform is redrawn from the columns kept), **NO** keeps it all,
+  **FUNC + NO** drops it (`smp_discard`: the slot empty again, its room free).
+- **NAME**: seven characters; a knob (A..H or LEVEL), UP and DOWN change the letter,
+  LEFT and RIGHT move. **YES** saves it, **NO** keeps RECnnn.
+- **ASSIGN**: a **[TRIG]** key (panel codes 25..40) gives track 1..16 the sample: a track
+  not on a sample machine becomes ONESHOT first, through MACHINE SEL's own commit
+  (`0x40031880(model, track, 8, 1, 1)`, which resets the sound to ONESHOT's defaults), then
+  SAMP is set through the knob path's setter (`0x40037326(set, id, value << 8, track, 0,
+  0, 1)`, the set from `0x40041A40(owner, id, track)`, the owner from `0x4018A97A()`, the
+  model at owner + 0xF4). **NO** assigns none. The directory goes to the +Drive, and a
+  changed entry to the DSP (the loader's own sent-and-checked path), once nothing else runs.
+- Not done: the DT2's zoom, its FUNC + YES preview (on the DT2 the active track's voice
+  plays it; here the DSP has no such path yet) and its normalising.
+
+**400 MB, and a RAM check.** The pool now runs to 400 MB of the DSP's 512 MB part
+(`0x84000000..0x9D000000`): yours in 0..96 MB and 128..400 MB, the recordings' 32 MB
+between (the RAM proven on the instrument before v0.22: the recordings stay there). The
++Drive's image is the pool byte for byte, so the +Drive holds the same 400 MB (the eMMC
+region from 3 GiB has room for far more). Nothing past 128 MB had run on the instrument,
+and the DMC's size field (`docs/link-research.md`) was read, not tested, so at every
+power-on the ColdFire first asks the DSP for a RAM check (`CMD_PROBE`,
+`dnfw.sampler.program.probe`): 256 KB at 143 MB and the 256 KB 256 MB above it (399 MB)
+are filled with two patterns and read back, 256 words a block (about 0.7 s; more than
+the data cache holds, so the reads come from the RAM). On a 256 MB part the second fill
+lands on the first, and the check fails. Only a passed check lets the loader load past
+128 MB (`ram_top`); a failed one, or no answer in four seconds, keeps it to the proven
+128 MB. Both areas are the pool's own and not yet loaded while it runs. `dn2samples.py
+hello` says which (sample link 4); `send` skips the recordings' area.
+
 ## How it works
 
 - **The DSP** (`dnfw.sampler.program`, written by `scripts/gen_smp_asm.py` to

@@ -15,7 +15,8 @@ from . import machines as M
 from .dsl import Prog
 from ..md import voice as MDV
 
-MD_LEVEL = 0.7                            # the Machinedrum's full scale on a DN2 track (v0.17)
+MD_LEVEL = 1.4                            # the Machinedrum's full scale on a DN2 track: v0.22 +6 dB (0.7 in v0.17..v0.21),
+                                          # its default hits as loud as WaveTone's and FM Tone's default notes
 
 SAVE = 0x2DDE00                          # the save area PING's tail restores from
 SAVE_REGS = [f"R{k}" for k in range(16)] + ["I0", "I1", "I2", "I3", "I4", "I5", "I12",

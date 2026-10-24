@@ -34,7 +34,8 @@ STATE_WORDS = 16
 STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
             "tune", "play", "samp", "a", "b", "c", "lev", "x", "y", "n", "tmp",
-            *(f"mb{k}" for k in range(16)), "mbn",     # v0.14..v0.19's mailbox (unused since v0.20; kept for the layout)
+            "pph", "pix", "pbad", "pres", "pcnt",   # v0.22: the RAM check (probe); before, v0.14..v0.19's mailbox
+            *(f"spare{k}" for k in range(12)),        # (unused since v0.20; kept for the layout)
             "sr", "dir", "add", "smode", "nseg", "nin", "nout", "acc", "pass", "lp",   # v0.15; v0.18 kill, add, pass, lp
             "xfn", "xfa", "xfi", "xfs",                # CFAD: its length, where it starts, 1/length, the shift
             # the recorder: its state (0 idle, 1 armed, 2 recording, 3 full), slot entry,
@@ -1693,6 +1694,18 @@ def recorder(p: Prog, L: Layout) -> None:
             p.ld(6, cmd)                      # its own sequence, for vdone
             p.st(K["vseq"], 6)
         p.if_(2, "EQ", 12, verify, kind="i")
+        p.ld(2, cmd + 4)
+        p.iconst(12, SM.CMD_PROBE)
+
+        def probe_start():                    # v0.22: the RAM check, from its first word
+            p.iconst(6, 1)
+            p.st(C["pph"], 6)
+            p.iconst(6, 0)
+            p.st(C["pix"], 6)
+            p.st(C["pbad"], 6)
+            p.iconst(6, 3)
+            p.st(C["pres"], 6)
+        p.if_(2, "EQ", 12, probe_start, kind="i")
     p.e("COMP(R0, R1);")
     p._branch(lambda: p.r[0] != p.r[1], "NE", new_command, None)
 
@@ -2026,6 +2039,93 @@ def tdm_rx(p: Prog, L: Layout) -> None:
     p.ifz(0, "EQ", lambda: (p.iconst(12, SM.RX_MAGIC), p.if_(4, "EQ", 12, packet, kind="i")))
 
 
+def probe(p: Prog, L: Layout) -> None:
+    """v0.22, the RAM check (CMD_PROBE, dnfw.sampler.machines.PROBE_*): PROBE_STEP words a
+    block of four phases -- fill the low area, fill the high one, check the low, check the
+    high -- then pres = 1 (every word as written) or 2. A phase or index out of range (the
+    words as the DSP's memory holds them before any check) stops it, writing nothing."""
+    C = L.C
+    n = SM.PROBE_BYTES // 4
+    p.ld(0, C["pph"])
+
+    def stop():                               # out of range: stop, writing nothing
+        p.iconst(6, 0)
+        p.st(C["pph"], 6)
+
+    def work():
+        for ph, base, pat, check in ((1, SM.PROBE_LO, SM.PROBE_PAT[0], False),
+                                     (2, SM.PROBE_HI, SM.PROBE_PAT[1], False),
+                                     (3, SM.PROBE_LO, SM.PROBE_PAT[0], True),
+                                     (4, SM.PROBE_HI, SM.PROBE_PAT[1], True)):
+            def phase(base=base, pat=pat, check=check):
+                p.ld(8, C["pix"])
+                p.lsh(6, 8, 2)
+                p.iconst(12, L.pool + base)
+                p.iop(6, 12, "+", 6)
+                p.seti(4, 6)
+
+                def word():
+                    p.ld(8, C["pix"])
+                    p.iconst(9, pat)
+                    p.iop(7, 8, "+", 9)               # word i: i + the pattern
+                    if check:
+                        p.ldpost(5, 4)
+
+                        def wrong():
+                            p.ld(10, C["pbad"])
+                            p.iconst(11, 1)
+                            p.iop(10, 10, "+", 11)
+                            p.st(C["pbad"], 10)
+                        p.if_(5, "NE", 7, wrong, kind="i")
+                    else:
+                        p.stpost(4, 7)
+                    p.ld(8, C["pix"])
+                    p.iconst(9, 1)
+                    p.iop(8, 8, "+", 9)
+                    p.st(C["pix"], 8)
+                p.loop(C["pcnt"], SM.PROBE_STEP, word)
+            p.ld(0, C["pph"])
+            p.iconst(12, ph)
+            p.if_(0, "EQ", 12, phase, kind="i")
+        # the phase's end: on to the next; after the fourth, the verdict
+        p.ld(8, C["pix"])
+        p.iconst(12, n)
+
+        def next_phase():
+            p.iconst(6, 0)
+            p.st(C["pix"], 6)
+            p.ld(8, C["pph"])
+            p.iconst(9, 1)
+            p.iop(8, 8, "+", 9)
+            p.st(C["pph"], 8)
+            p.iconst(12, 5)
+
+            def verdict():
+                p.iconst(6, 0)
+                p.st(C["pph"], 6)
+                p.ld(5, C["pbad"])
+                p.iconst(6, 1)
+                p.ifz(5, "NE", lambda: p.iconst(6, 2))
+                p.st(C["pres"], 6)
+            p.if_(8, "EQ", 12, verdict, kind="i")
+        p.if_(8, "GE", 12, next_phase, kind="i")
+
+    def running():
+        p.ld(8, C["pix"])
+        p.iconst(12, 0)
+
+        def nonneg():
+            p.iconst(13, n - SM.PROBE_STEP)
+
+            def below():
+                p.ld(0, C["pph"])
+                p.iconst(12, 4)
+                p.if_(0, "LE", 12, work, stop, kind="i")
+            p.if_(8, "LE", 13, below, stop, kind="i")
+        p.if_(8, "GE", 12, nonneg, stop, kind="i")
+    p.ifz(0, "NE", running)
+
+
 def tdm_tx(p: Prog, L: Layout) -> None:
     """The fast link out (v0.16): while a SEND is running, the next 29 pool words in slots
     14..15 of the TDM transmit page this block (64 units: MAGIC, sequence, the word
@@ -2227,7 +2327,7 @@ def status(p: Prog, L: Layout) -> None:
     C, K = L.C, LK
     h = []
     for k, (addr, scale) in enumerate(((C["rst"], None), (C["rseq"], None), (C["rpos"], -6),
-                                       (C["rpk"], "peak"), (C["mbn"], None), (K["good"], None),
+                                       (C["rpk"], "peak"), (C["pres"], None), (K["good"], None),
                                        (K["lseq"], None), (K["sseq"], None), (K["sbusy"], None),
                                        (K["nbad"], None), (K["vsum"], None), (K["vsum"], -16),
                                        (K["vsum2"], None), (K["vsum2"], -16), (K["vdone"], None))):
@@ -2284,6 +2384,7 @@ def run_recorder(L: Layout, mem):
     tdm_rx(p, L)
     verify_step(p, L)
     recorder(p, L)
+    probe(p, L)
     tdm_tx(p, L)
     return p
 
@@ -2302,6 +2403,7 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     tdm_rx(p, L)
     verify_step(p, L)
     recorder(p, L)
+    probe(p, L)
     tdm_tx(p, L)
     p.iconst(0, 0)
     p.st(L.C["t"], 0)

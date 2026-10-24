@@ -1247,6 +1247,48 @@ def step_rec(init, sound, machines, blocks) -> dict:
     exact2 = smp_exact(rec2) if ok2 else (0, 1, 1)
     rec2.pop("state", None)
     close2 = bool(got2) and max(abs(a - b) for a, b in zip(got2, want2)) <= 2 / 32768
+
+    # v0.22: the RAM check (CMD_PROBE) on the image's own code. Block 0 takes the command
+    # and fills the low area's first 256 words; then the last chunk of phase 3 and of
+    # phase 4 are set up (both areas' last 256 words as the fills would leave them; the
+    # phases between are the same loop) and each runs in a block: the verdict is 1, and
+    # 2 when one word of the high area is wrong
+    pn = SM.PROBE_BYTES // 4
+    lo, hi = dsp.SMP_POOL_DDR + SM.PROBE_LO, dsp.SMP_POOL_DDR + SM.PROBE_HI
+    C = SMP_L.C
+
+    def probe_run(bad):
+        seen = {}
+
+        def at_dispatch_p(r):
+            b = seen.setdefault("b", 0)
+            seen["b"] = b + 1
+            if b == 0:
+                command(r, 9, SM.CMD_PROBE)
+            elif b == 1:
+                seen["first"] = [m2.word(r.state, lo + 4 * k) for k in range(258)]
+                seen["after0"] = (m2.word(r.state, C["pph"]), m2.word(r.state, C["pix"]))
+                m2.poke(r.state, C["pph"], 3)
+                m2.poke(r.state, C["pix"], pn - SM.PROBE_STEP)
+                for k in range(pn - SM.PROBE_STEP, pn):
+                    m2.poke(r.state, lo + 4 * k, SM.PROBE_PAT[0] + k)
+            elif b == 2:
+                seen["after1"] = (m2.word(r.state, C["pph"]), m2.word(r.state, C["pix"]))
+                m2.poke(r.state, C["pix"], pn - SM.PROBE_STEP)
+                for k in range(pn - SM.PROBE_STEP, pn):
+                    m2.poke(r.state, hi + 4 * k, SM.PROBE_PAT[1] + k + (1 if bad and k == pn - 7 else 0))
+
+        def frames_p(b):
+            return base_frame(sound, machines, t0=ONE, trigger=False, overrides=smp_words({SM.SAMP_REC: 1})).to_bytes()
+        rp = run_blocks(init, frames_p, 4, extra_hooks={m3.DISPATCH: at_dispatch_p})
+        stp = status(rp["state"].state) if rp["ok"] else []
+        pph = m2.word(rp["state"].state, C["pph"]) if rp["ok"] else None
+        rp.pop("state", None)
+        return rp["ok"], seen, stp, pph
+    okp, seenp, statp, pphp = probe_run(False)
+    okq, _seenq, statq, _ = probe_run(True)
+    first_ok = okp and seenp.get("first", [None])[:256] == [SM.PROBE_PAT[0] + k for k in range(256)] \
+        and all(not x for x in seenp["first"][256:]) and seenp.get("after0") == (1, SM.PROBE_STEP)
     checks = {
         "both runs return every block": ok1 and ok2,
         f"RECORD NOW records every block from the command ({n * 32} frames into slot 124's "
@@ -1264,6 +1306,12 @@ def step_rec(init, sound, machines, blocks) -> dict:
                         and abs(h[3] / 32767 - max(abs(x) for x in left[-32:])) < 0.01 for h in stat2),
         "every sample track bit-exact to the model, every block of both runs":
             ok1 and ok2 and exact1[1] == exact1[2] == exact2[1] == exact2[2] == 0,
+        "v0.22: the RAM check takes its command and fills 256 words a block of the low area, "
+        "no more": first_ok,
+        "v0.22: the RAM check's last chunks: phase 3 on to 4, then the verdict 1 (status half 4, "
+        "both pages), the check idle again; one wrong word: 2":
+            okp and okq and seenp.get("after1") == (4, pn) and pphp == 0
+            and all(ok_status(h) and h[4] == 1 for h in statp) and all(ok_status(h) and h[4] == 2 for h in statq),
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"entry": [hex(w) for w in words], "entry2": [hex(w) for w in words2],

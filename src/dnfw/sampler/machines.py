@@ -93,7 +93,9 @@ DATA_OFFSET = 0x1000                       # the frames start here (the header i
 # writing them made the stock voices buzz. v0.20 sends everything over the TDM link.
 LINK_SEED = 0x1D0F
 LINK_WORDS = 6                             # 24 bytes of pool a packet
-POOL_BYTES = 128 << 20                     # the pool's extent in DSP DDR: 128 MB from SMP_POOL_DDR (v0.16)
+POOL_BYTES = 400 << 20                     # the pool's extent in DSP DDR: 400 MB from SMP_POOL_DDR (v0.22; 128 MB v0.16..v0.21)
+RAM_PROVEN = 128 << 20                     # what ran on the instrument before v0.22: the pool loads past it only
+                                           # once the DSP's RAM check (CMD_PROBE) has passed this power-on
 POOL_WORDS = POOL_BYTES // 4
 MIRROR = 0x46B00000                        # the ColdFire's copy of the pool (RAM above BSS)
 MIRROR_BYTES = 0x00500000                  # 5 MB, to 0x47000000 (nothing of anyone's above it)
@@ -110,7 +112,10 @@ REC_SLOT_SHIFT = 23                        # 8 MB a slot
 REC_FRAMES = 66 * 48000                    # the DT2's maximum: 66 s of int16 at 48 kHz (v0.16)
 # v0.22: the recordings' area is the pool's last 32 MB, shared: a recording goes where the
 # ColdFire finds room (link.c's smp_rec_place), at REC_OFFSET + 512 u, into any slot
-REC_BYTES = (128 << 20) - REC_OFFSET
+REC_END = 128 << 20                        # v0.22: the recordings' area stays 96..128 MB (proven RAM)
+REC_BYTES = REC_END - REC_OFFSET
+USER_HOLE = (REC_OFFSET, REC_END)           # yours: 0..96 MB, then 128..400 MB (dn2samples.py skips the hole)
+USER_BYTES = POOL_BYTES - REC_BYTES - DATA_OFFSET
 REC_UNIT = 512
 REC_MIN_BYTES = 0x10000                    # the least room a recording starts in
 IN_BUF = 0x268538                          # the engine's input block: L 32 floats, R at +0x80
@@ -123,6 +128,18 @@ REC_STAGE = 0x2DF800                       # 32 floats of the block being record
 CMD_OFFSET = 0xF00                         # the command block in the pool's directory page:
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames
 CMD_NONE, CMD_ARM, CMD_NOW, CMD_STOP, CMD_MONITOR, CMD_ARM_PLAY, CMD_SEND, CMD_VERIFY = 0, 1, 2, 3, 4, 5, 6, 7
+CMD_PROBE = 8
+# PROBE (v0.22): is all of the 512 MB part there? PROBE_BYTES at PROBE_LO and at PROBE_LO +
+# 256 MB (PROBE_HI) are filled with two patterns, then both read back (more than the DSP's
+# data cache holds, so the reads come from the RAM). A 256 MB part would put the second
+# fill on top of the first: the check fails, and the pool stays in its proven 128 MB. Both
+# areas are the pool's own and unloaded while the check runs. Status half 4: 0 never run,
+# 3 running, 1 passed, 2 failed.
+PROBE_LO = 0x08F00000                      # bytes into the pool (143 MB)
+PROBE_HI = PROBE_LO + (256 << 20)          # 399 MB in: 0x9CF00000, under the pool's end
+PROBE_BYTES = 256 << 10
+PROBE_STEP = 256                           # words a block
+PROBE_PAT = (0x5A5A0000, 0x3C3C0000)       # word i holds i + this, low area then high
 # VERIFY (v0.16): the sum of the pool's words [src, src + chan), to the status when done
 # SEND (v0.16): the pool's words [src, src + chan) back to the ColdFire over the TDM link
 # ARM waits for the threshold; ARM_PLAY (R.STRT PLAY) for the first note any track plays

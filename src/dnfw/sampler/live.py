@@ -22,7 +22,7 @@ def layout() -> P.Layout:
                     exp2=PL.layout().T["exp2"], tables=dsp.SMP_TABLES_DDR, dec=dsp.SMP_DEC_DM)
 
 
-def pool_bytes(samples, base: int, rates=None, fmts=None, names=None, slices=None) -> bytes:
+def pool_bytes(samples, base: int, rates=None, fmts=None, names=None, slices=None, hole=None) -> bytes:
     """the directory and the frames of SAMPLES (lists of floats), as the DSP's DDR holds
     them from BASE: magic, count, POOL_SLOTS entries (address, frames, rate, format),
     the names (dnfw.sampler.machines.NAME_BYTES each, for the ColdFire's pages; the DSP
@@ -38,16 +38,22 @@ def pool_bytes(samples, base: int, rates=None, fmts=None, names=None, slices=Non
         # v0.19: the format word's bits 8..15 count the sample's slices (SLICE), whose
         # table -- start, end, loop in frames -- follows its frames on a word
         assert len(sl) <= SM.MAX_SLICES
-        entries.append(struct.pack("<IIfI", base + head + len(data), len(s), r, f | len(sl) << 8))
+        one = bytearray()
         if f == 1:
-            data += struct.pack(f"<{len(s)}h", *(max(-32768, min(32767, round(x * 32768))) for x in s))
+            one += struct.pack(f"<{len(s)}h", *(max(-32768, min(32767, round(x * 32768))) for x in s))
         else:
-            data += struct.pack(f"<{len(s)}f", *s)
+            one += struct.pack(f"<{len(s)}f", *s)
         if sl:
-            data += bytes((-len(data)) % 4)
+            one += bytes((-len(one)) % 4)
             for a, b, lp in sl:
-                data += struct.pack("<III", a, b, lp)
-        data += bytes((-len(data)) % 0x40)
+                one += struct.pack("<III", a, b, lp)
+        one += bytes((-len(one)) % 0x40)
+        # v0.22: HOLE (lo, hi), bytes into the pool, is not yours (the recordings' area):
+        # a sample that would reach into it starts after it
+        if hole and head + len(data) < hole[1] and head + len(data) + len(one) > hole[0]:
+            data += bytes(hole[1] - head - len(data))
+        entries.append(struct.pack("<IIfI", base + head + len(data), len(s), r, f | len(sl) << 8))
+        data += one
     d = struct.pack("<II", SM.POOL_MAGIC, len(samples)) + b"".join(entries)
     d += bytes(SM.NAMES_OFFSET - len(d))
     d += b"".join(n.encode("ascii", "replace")[:SM.NAME_BYTES - 1].ljust(SM.NAME_BYTES, b"\0") for n in names)
