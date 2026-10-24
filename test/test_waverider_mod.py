@@ -274,3 +274,38 @@ def test_the_key_handler_slot_points_into_the_renderer_and_stock_is_kept():
     target = struct.unpack(">I", bytes.fromhex(e["new"]))[0]
     code = _chunked(target, 256)
     assert struct.pack(">I", CF.KEY_STOCK) in code          # smp_key calls stock's handler
+
+
+def test_the_recorder_screen_hooks_replace_exactly_the_stock_calls():
+    # v0.22: the UI loop's queue receive and screen draw become jsr's into the renderer
+    # chunk (which call stock's own: 0x40001928, 0x4011d32a); FUNC + VOICE's branch of the
+    # key handler becomes jsr rec_combo + bra to the handler's common exit
+    c = waverider.SPEC["c_chunk"]
+    lo, hi = c["load"], c["load"] + len(bytes.fromhex(c["code"]))
+    for site, stock_bytes, called in ((CF.UI_POP_SITE, CF.UI_POP_STOCK, 0x40001928),
+                                      (CF.SCREEN_SITE, CF.SCREEN_STOCK, 0x4011D32A)):
+        e = _edit(site)
+        assert bytes.fromhex(e["stock"]) == stock_bytes
+        new = bytes.fromhex(e["new"])
+        assert new[:2] == bytes.fromhex("4eb9") and len(new) == 6
+        target = struct.unpack(">I", new[2:])[0]
+        assert lo <= target < hi
+        assert struct.pack(">I", called) in _chunked(target, 128)
+    e = _edit(CF.REC_COMBO_SITE)
+    assert bytes.fromhex(e["stock"]) == CF.REC_COMBO_STOCK
+    new = bytes.fromhex(e["new"])
+    assert len(new) == len(CF.REC_COMBO_STOCK) and new[:2] == bytes.fromhex("4eb9") and new[6:8] == bytes.fromhex("6000")
+    assert lo <= struct.unpack(">I", new[2:6])[0] < hi
+    assert CF.REC_COMBO_SITE + 8 + struct.unpack(">h", new[8:10])[0] == CF.REC_COMBO_EXIT
+
+
+def test_the_lfo_list_asks_wr_lfo_mask_which_asks_stock():
+    e = _edit(CF.LFO_MASK_LEA + 2)
+    assert struct.unpack(">I", bytes.fromhex(e["stock"]))[0] == CF.LFO_MASK_STOCK
+    target = struct.unpack(">I", bytes.fromhex(e["new"]))[0]
+    assert struct.pack(">I", CF.LFO_MASK_STOCK) in _chunked(target, 128)
+
+
+def test_trk_clear_reads_the_real_machine():
+    # v0.22: TRK + CLEAR's getMachineType call is one of the identity sites
+    assert any(va == 0x40071EB6 for va, _op, _w in CF.IDENTITY_SITES)

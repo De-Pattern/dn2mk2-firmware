@@ -106,7 +106,7 @@ part that plays solid, LOOP's point marked in the loop modes, GRID's slices tick
   the track's AMP envelope, as on the DT2 (its manual: "constrained by the AMP page
   envelope parameters HLD and DEC").
 
-## Page 3: the RECORDER (v0.15)
+## Page 3: the RECORDER (v0.15..v0.21; v0.22 below)
 
 The third SYN page of every sample machine, laid out as the DT2's RECORDER (its manual
 13.1, the owner's photograph) under the DN2's header:
@@ -154,6 +154,43 @@ How:
   2t, the ColdFire's slot map), scaled back by 0x1c244d's gain (11.627).
   (`docs/link-research.md` has the reading.)
 - The recordings are in the DSP's memory only: they are lost at power-off.
+
+## v0.22: the RECORDER is a screen of its own
+
+**FUNC + VOICE** opens the RECORDER over whatever page is up; FUNC + VOICE again, or
+**NO**, closes it. (Stock FUNC + VOICE toggled unison; VOICE alone still opens the voice
+menu, where unison is.) As on the DT2's SAMPLING screen it belongs to no track: you can
+start a recording, change tracks and play, and come back to stop it.
+
+- Its knobs are its own while it is up: **A SRC** (EXT L+R, EXT L, EXT R, MAIN, TRK1..16),
+  **D THRES**, **E DEST**, **F R.LEN**, **G R.STRT**, **H ARM** (a turn arms, or stops).
+  **YES** records at once, or stops. The track underneath is not touched.
+- Any page key, TRK, PTN, SONG, PRESET or SETTINGS closes it and does what it does;
+  PLAY, STOP, the trigs and FUNC pass through with it up. A recording runs on regardless.
+- **How**: `smp_ui_pop` (csrc/sampler/rec.c) replaces the UI loop's queue receive
+  (`0x4002f17e`): while the screen is up a knob or key item it takes has its type set
+  to 0xFF, which the loop's switch passes over (types past 41 are skipped by stock).
+  `wr_screen` replaces the loop's draw of the screen (`0x4002e4ca`) and draws the
+  recorder after stock's. `rec_combo` replaces the key handler's FUNC + VOICE branch
+  (`0x4005f008`, then on to the handler's common exit `0x4005fc50`).
+- The old SYN page 3 recorder is gone: sample machines have two pages, as the DT2's.
+
+**Track sources were wrong before v0.22.** The routing halves at `0x257898 + 2v` say which
+*track* each DSP *voice* plays (the ColdFire fills them from `0x80005308`, slot -> track);
+`0x1c244d` sums voice v into bucket route[v] of `0x259f68`. So track t's audio is bucket t.
+v0.15..v0.21 read bucket route[t], which is track t's only while voice t plays track t:
+with the DN2's voice allocation the meter of a silent track moved and a track recording
+held another track's audio, or silence.
+
+**Room for recordings, not four slots.** The pool's last 32 MB (about 5 1/2 minutes of 48 kHz
+int16 in all) is shared by every recording; each goes where the largest free stretch is
+(`smp_rec_place`: the stretches between the recordings the directory points at; the
+slot's own old recording is free), into any slot: **DEST** defaults to the next empty
+one, as the DT2 saves to the next free slot. The command carries the place (bits 8..23 of
+its channel word, 512-byte units) and the slot (top byte of its last word); the DSP clamps
+both (never past the pool's end, never past slot 126). Each is saved to the +Drive named
+`RECnnn` when it ends, and DEST moves on. A host-tool `send` keeps every recording, in its
+own slot if the new image leaves it empty, else in the first empty one.
 
 ## How it works
 
