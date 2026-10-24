@@ -6,5 +6,4 @@ PIML_C: the decay curve the modes' radii come from ($142949, 512 words)."""
 
 TABLES = {
     "PIML_T": (0x143F38, 0x144A4C - 0x143F38),
-    "PIML_C": (0x142949, 512),
 }

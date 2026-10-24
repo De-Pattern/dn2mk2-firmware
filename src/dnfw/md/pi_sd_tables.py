@@ -5,6 +5,4 @@ the clamp plus a block at the fastest step); GAIN: the waveguide's gain by DEC (
 
 TABLES = {
     "PISD_TAB": (0x142F33, 1281),
-    "PISD_GAIN": (0x142B49, 100),
-    "PISD_CURVE": (0x142949, 511),
 }

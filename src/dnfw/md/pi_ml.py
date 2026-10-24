@@ -346,7 +346,7 @@ class PIML:
             p.iconst(5, Y9)
             xmul(p)                                     # the curve's index
             clamp(p, 2, 0, 511)
-            K.table_f(p, L, 4, "PIML_C", 2)
+            K.table_f(p, L, 4, "PI_CURVE_142949", 2)
             to_word(p, 4, 4)
             ss(p, M.CC, 4)                              # c
             s(p, 5, M.CS)

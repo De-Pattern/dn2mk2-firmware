@@ -5,6 +5,6 @@ each), and the radius curve and gain table P-I MT shares."""
 TABLES = {
     "PIBD_EXC": (0x142291, 1358),
     "PIBD_COEF": (0x142279, 24),
-    "PIBD_CURVE": (0x142949, 512),
-    "PIBD_GAIN": (0x142B49, 512),
+    "PI_CURVE_142949": (0x142949, 512),     # (BD, MT, ML, SD, RS)
+    "PI_GAIN_142B49": (0x142B49, 512),      # (BD, MT, SD, RS, RC, CC, HH read it)
 }

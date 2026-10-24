@@ -71,10 +71,6 @@ NZ = XB + 256                    # the noise words (Y:$00..$21), ints << 8
 SB = XB + 0x40                   # the mix's 32 outputs
 
 
-def _const(p: Prog, d: int, v: int) -> None:
-    p.iconst(d, v)
-
-
 def _xb(p: Prog, L: K.Layout, d: int, k: int = 0) -> None:
     """Rd = the address of XB word k. Clobbers R12."""
     p.ld(d, L.C["k"])
@@ -203,7 +199,9 @@ class _Cym:
         p.lsh(0, 0, -7)
         p.iconst(12, 1)
         p.iop(0, 0, "AND", 12)
-        p.e("R4 = LSHIFT R4 BY R0;") if not p.run else p.setR(4, p.r[4] << p.r[0])
+        p.e("R4 = LSHIFT R4 BY R0;")            # tblP << (p >> 7)
+        if p.run:
+            p.setR(4, p.r[4] << p.r[0])
         _div2k(p, 3, 4, 30)
         p.lsh(3, 3, 4)
         p.iconst(12, -1)
@@ -224,6 +222,9 @@ class _Cym:
             p.iop(3, 12, "-", 0)
         elif k == "CC":
             p.lsh(0, 0, -7)
+            if "hostB" not in L.T:
+                raise KeyError("P-ICC's HARD reads the host's tblB: rom.HOST_TABLES needs "
+                               "'B': (0x24BB90, 128)")
             _tword(p, L, 3, "hostB", 0)
             p.lsh(3, 3, 7)
         else:
@@ -302,6 +303,7 @@ class _Cym:
             ss(p, G60, 2)
         else:
             cls._env_consts(p)
+            p.iconst(0, 0)
             ss(p, G60, 0)
             ss(p, G59, 1)
         p.iconst(0, 0x2000)                   # $14A000: a quarter turn into the sine
@@ -804,7 +806,7 @@ class _Cym:
             p.iconst(12, 0x54)
             p.if_(1, "LT", 12, lambda: p.iconst(0, 0x0CCCCD), kind="i")
         _mulk(p, 1, 0, 0x1FF if k == "RC" else 0x1F4)
-        K.table_f(p, L, 2, "PIRC_GAIN", 1)
+        K.table_f(p, L, 2, "PI_GAIN_142B49", 1)
         p.fconst(12, 0x5A827A * Q)
         p.fop(2, 2, "*", 12)
         p.st(C["f"], 2)                         # kc
@@ -866,10 +868,13 @@ class _Cym:
             p.fconst(12, excm * Q)
             p.fop(6, 0, "*", 12)
             p.fop(5, 5, "+", 6)
+            _qf(p, 5)
             p.sti(0x40, 5, 5)                   # the mix
             p.iop(9, 11, "+", 9)
             p.fconst(12, h * Q)
             p.fop(0, 0, "*", 12)                # h e
+            p.fconst(12, -0.5 * Q)              # the stores' floor, on average
+            p.fop(0, 0, "+", 12)
             p.ld(5, C["f"])                     # kc
             p.seti(5, 10)
             p.fop(6, 3, "-", 4)                 # Q - R
@@ -933,11 +938,267 @@ class _Cym:
     # 9 ---------------------------------------------------------------------------------
     @classmethod
     def _click(cls, p: Prog, L: K.Layout) -> None:
-        raise NotImplementedError
+        """The click through the third biquad; out = sat(2 (mix + X[4 + k]))."""
+        k = cls.KIND
+        C = L.C
+        cv, nc = {"RC": (0x666666, 16), "CC": (0x333333, 6), "HH": (0x666666, 8)}[k]
+        s(p, 0, F55)
+        p.iconst(1, 0)
+        p.iconst(12, cv)
+        if k == "HH":
+            p.iconst(13, 0x7FFFFF)
+            p.if_(0, "EQ", 13, lambda: p.ipass(1, 12), kind="i")
+        else:
+            p.ifz(0, "NE", lambda: p.ipass(1, 12))
+        p.st(C["e"], 1)                         # the click's word (0: none)
+        p.iconst(0, 0)
+        ss(p, F55, 0)
+        # its coefficients: C0 C1 from BR's row, C2 C3 = x0 t2, x0 t3 (exact)
+        if k == "HH":
+            p.iconst(1, 127)
+        else:
+            w(p, 1, 8)
+        cls._coefs(p, L, "PIRC_BR", 1)
+        for j in range(4):
+            _wi(p, 1 + j, 1 + j)
+            p.st(C[("a", "b", "c", "d")[j]], 1 + j)
+        if k == "RC":
+            w(p, 0, 3)
+            p.iconst(12, 0x7FFFFF)
+            p.iop(0, 12, "-", 0)
+        elif k == "CC":
+            w(p, 0, 3)
+            p.iconst(12, -0x19999A)
+            p.iop(0, 12, "+", 0)
+            p.iconst(12, 0)
+            p.iop(0, 0, "MAX", 12)
+        else:
+            p.iconst(0, 0x666666)
+        p.st(C["f"], 0)
+        p.ld(1, C["c"])
+        _mul(p, 1, 0, 1)
+        p.st(C["c"], 1)
+        p.ld(0, C["f"])
+        p.ld(1, C["d"])
+        _mul(p, 1, 0, 1)
+        p.st(C["d"], 1)
+        if k == "HH":
+            cls._click_float(p, L, cv, nc)
+        else:
+            cls._click_exact(p, L, cv, nc)
+        # out = sat(2 (mix + X[4 + k])); X[34], X[35] are the click's zeros
+        _xb(p, L, 0, 4)
+        p.seti(2, 0)
+        p.ld(0, C["mdb"])
+        p.iconst(12, 4 * K.OUT0)
+        p.iop(0, 12, "+", 0)
+        p.seti(5, 0)
+
+        def one():
+            p.ldi(1, 0x3C, 2)                   # SB + k = X[4 + k] + 0x3C
+            p.ldpost(2, 2)
+            p.fop(1, 1, "+", 2)
+            p.fop(1, 1, "+", 1)
+            p.fconst(12, TOP)
+            p.fop(1, 1, "MIN", 12)
+            p.fconst(12, -1.0)
+            p.fop(1, 1, "MAX", 12)
+            p.stpost(5, 1)
+        p.loop(C["n1"], 32, one)
+
+    @staticmethod
+    def _click_fill(p: Prog, L: K.Layout, nc: int) -> None:
+        """X[4 .. 35] = the click (C[e] for nc words, then 0)."""
+        _xb(p, L, 0, 4)
+        p.seti(2, 0)
+        p.ld(1, L.C["e"])
+        p.iconst(12, 0)
+        p.float_(3, 12, 12)
+        p.iconst(12, -23)
+        p.float_(1, 1, 12)
+        p.loop(L.C["n1"], nc, lambda: p.stpost(2, 1))
+        p.loop(L.C["n1"], 32 - nc, lambda: p.stpost(2, 3))
+
+    @classmethod
+    def _click_float(cls, p: Prog, L: K.Layout, cv: int, nc: int) -> None:
+        cls._click_fill(p, L, nc)
+        _xb(p, L, 0)
+        p.seti(2, 0)
+        p.iconst(1, 0)
+        for x, word in ((0, Y330), (1, Y331)):
+            s(p, 3, word)
+            p.sti(x, 2, 3)
+        p.sti(2, 2, 1)
+        p.sti(3, 2, 1)
+        for j in range(4):
+            p.ld(1 + j, L.C[("a", "b", "c", "d")[j]])
+            _fw(p, 1 + j, 1 + j)
+        cls._bq(p, L, 0, BH, Y330, Y331)
+
+    @staticmethod
+    def _split(p: Prog, fh: int, fl: int, r: int) -> None:
+        """Ffh, Ffl = the high (signed) and low 12 bits of the integer Rr, as floats.
+        Clobbers R12 (r not 12)."""
+        p.ash(fh, r, -12)
+        p.iconst(12, 4095)
+        p.iop(fl, r, "AND", 12)
+        p.iconst(12, 0)
+        p.float_(fh, fh, 12)
+        p.float_(fl, fl, 12)
+
+    @staticmethod
+    def _mac(p: Prog, bh: int, bl: int, kh: int, kl: int, yh: int, yl: int) -> None:
+        """(Rbh, Rbl) += 2 K y exactly (the 56300's mac in the accumulator's units: Rbh the
+        bits from 24 up, Rbl the low 24, left unnormalised: < 2^27). Clobbers R12-R15."""
+        p.fop(13, kh, "*", yh)
+        p.trunc(13, 13)
+        p.lsh(13, 13, 1)
+        p.iop(bh, 13, "+", bh)
+        p.fop(14, kh, "*", yl)
+        p.trunc(14, 14)
+        p.fop(15, kl, "*", yh)
+        p.trunc(15, 15)
+        p.iop(14, 14, "+", 15)                  # m
+        p.ash(15, 14, -11)
+        p.iop(bh, 15, "+", bh)
+        p.iconst(12, 2047)
+        p.iop(15, 14, "AND", 12)
+        p.lsh(15, 15, 13)
+        p.iop(bl, 15, "+", bl)
+        p.fop(13, kl, "*", yl)
+        p.trunc(13, 13)
+        p.lsh(13, 13, 1)
+        p.iop(bl, 13, "+", bl)
+
+    @staticmethod
+    def _norm(p: Prog, bh: int, bl: int) -> None:
+        """Carry Rbl's bits from 24 up into Rbh. Clobbers R12, R13."""
+        p.lsh(13, bl, -24)
+        p.iop(bh, 13, "+", bh)
+        p.iconst(12, 0xFFFFFF)
+        p.iop(bl, bl, "AND", 12)
+
+    @classmethod
+    def _click_exact(cls, p: Prog, L: K.Layout, cv: int, nc: int) -> None:
+        """The third biquad on 48-bit integers: B_j = B_(j-1) + 2 (C0 y_(j-2) + 2 C1
+        y_(j-1)) + U_j, U_j = 2 cv (C2 [j-2] + C3 [j-1] + C2 [j]) over the click's words;
+        y_j = the high word, into X[2 + j]; the low word of B_30 is Y:$20's next value."""
+        C = L.C
+        # U: (h, l) pairs at XB + 0x60 + 2 j: V1 = 2 C2 cv, V2 = V1 + 2 C3 cv, V3 = V2 + V1
+        _xb(p, L, 0, 0x60)
+        p.seti(2, 0)
+        p.iconst(1, 0)
+        p.loop(C["n1"], 64, lambda: p.stpost(2, 1))
+        p.ld(0, C["e"])
+
+        def build():
+            p.ld(0, C["e"])
+            cls._split(p, 9, 10, 0)             # cv
+            for word, hi, lo in (("c", "g", "n2"), ("d", "h", "n3")):
+                p.ld(0, C[word])
+                cls._split(p, 7, 8, 0)
+                p.iconst(1, 0)
+                p.iconst(2, 0)
+                cls._mac(p, 1, 2, 7, 8, 9, 10)
+                cls._norm(p, 1, 2)
+                p.st(C[hi], 1)
+                p.st(C[lo], 2)
+            # V1 = (g, n2); V2 = V1 + (h, n3); V3 = V2 + V1
+            p.ld(1, C["g"])
+            p.ld(2, C["n2"])
+            p.ld(3, C["h"])
+            p.ld(4, C["n3"])
+            p.ipass(13, 3)
+            p.iop(3, 13, "+", 1)
+            p.ipass(13, 4)
+            p.iop(4, 13, "+", 2)
+            cls._norm(p, 3, 4)                  # V2 in R3, R4
+            p.ipass(13, 3)
+            p.iop(5, 13, "+", 1)
+            p.ipass(13, 4)
+            p.iop(6, 13, "+", 2)
+            cls._norm(p, 5, 6)                  # V3 in R5, R6
+            _xb(p, L, 0, 0x60)
+            p.seti(2, 0)
+            for (h, l) in ((1, 2), (3, 4)) + ((5, 6),) * (nc - 2) + ((3, 4), (1, 2)):
+                p.stpost(2, h)
+                p.stpost(2, l)
+        p.ifz(0, "NE", build)
+        # the coefficients' halves: K0 = C0 in F3, F4; K1 = 2 C1 in F5, F6
+        p.ld(0, C["a"])
+        cls._split(p, 3, 4, 0)
+        p.ld(0, C["b"])
+        p.lsh(0, 0, 1)
+        cls._split(p, 5, 6, 0)
+        p.st(C["a"], 3)
+        p.st(C["b"], 4)
+        p.st(C["c"], 5)
+        p.st(C["d"], 6)
+        s(p, 1, BH)
+        s(p, 2, BL)
+        s(p, 0, Y330)
+        cls._split(p, 7, 8, 0)                  # y_(j-2)
+        p.ipass(0, 1)
+        _sat(p, 0)
+        cls._split(p, 9, 10, 0)                 # y_(j-1)
+        _xb(p, L, 0, 0x60)
+        p.seti(2, 0)                            # U
+        _xb(p, L, 0, 2)
+        p.seti(1, 0)                            # y_j -> X[2 + j]
+        _xb(p, L, 0, 0xA0)
+        p.seti(5, 0)                            # the low words
+
+        def one():
+            p.ld(3, C["a"])
+            p.ld(4, C["b"])
+            cls._mac(p, 1, 2, 3, 4, 7, 8)
+            p.ld(3, C["c"])
+            p.ld(4, C["d"])
+            cls._mac(p, 1, 2, 3, 4, 9, 10)
+            p.ldpost(3, 2)
+            p.ipass(13, 3)
+            p.iop(1, 13, "+", 1)
+            p.ldpost(3, 2)
+            p.ipass(13, 3)
+            p.iop(2, 13, "+", 2)
+            cls._norm(p, 1, 2)
+            p.stpost(5, 2)
+            p.ipass(0, 1)
+            _sat(p, 0)
+            p.iconst(12, -23)
+            p.float_(3, 0, 12)
+            p.stpost(1, 3)
+            p.fpass(7, 9)
+            p.fpass(8, 10)
+            cls._split(p, 9, 10, 0)
+        p.loop(C["n1"], 32, one)
+        ss(p, BH, 1)
+        ss(p, BL, 2)
+        _xb(p, L, 0)
+        p.seti(2, 0)
+        p.ldi(0, 0x20, 2)                       # y_30
+        _wi(p, 0, 0)
+        ss(p, Y330, 0)
+        p.ldi(0, 0xA0 + 30, 2)
+        p.lsh(0, 0, 8)
+        p.ash(0, 0, -8)
+        ss(p, YS20, 0)
+        p.iconst(0, 0)
+        p.sti(0x22, 2, 0)
+        p.sti(0x23, 2, 0)
 
 
 class PIRC(_Cym):
     NAME, ID, KIND = "PI-RC", 70, "RC"
+
+
+class PICC(_Cym):
+    NAME, ID, KIND = "PI-CC", 71, "CC"
+
+
+class PIHH(_Cym):
+    NAME, ID, KIND = "PI-HH", 72, "HH"
+    PNAMES = ("PTCH", "DEC", "CLSN", "RING", "AG", "AU", "BR", "CLOS")
 
 
 MACHINES = (PIRC,)

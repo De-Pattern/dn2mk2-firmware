@@ -17,7 +17,9 @@ The model, a block (32 samples at 44.1 kHz):
 
 Words are floats (Q23 / 2^23); the envelopes that are multiplied once a block truncate as
 the 56300's do (core.mpy_floor); the pointer's step, Y1 x Y0 >> 20 (46 bits), is exact
-(imul_floor). State words (S, core.S0..): 15/19 envelopes, 16/17 the pointer (fraction,
+(imul_floor); the modes' coefficients are the 56300's integer arithmetic exactly (48-bit
+products and sums, `_prod`): in float they were one LSB off, which moved the ringing modes
+enough to cost 40 dB (54 dB -> 93+ dB against the reference). State words (S, core.S0..): 15/19 envelopes, 16/17 the pointer (fraction,
 int from the table's start), 18 LP1, 20..22 the lines' write positions, 23..25 their taps,
 28 the integrator's leak, 29/30/31 the line lowpasses, 32/33 the integrator, 34/35 noise,
 36/38 envelopes, 39 the noise integrator (never initialised: 0 as the reference assumes),
@@ -152,35 +154,97 @@ def _onepole(p: Prog, L: K.Layout, st: int, coef, src, dst: int, extra=None) -> 
     ss(p, st, 4)
 
 
-import os as _os
-_EXP = {k: 1 for k in _os.environ.get("PIEXP", "").split(",") if k}
+def _word(p: Prog, d: int) -> None:
+    """Rd = Fd (a Q23 word) as its integer. Clobbers R12."""
+    p.fconst(12, 2.0 ** 23)
+    p.fop(d, d, "*", 12)
+    p.trunc(d, d)
 
 
-def _exact_coef(p, L, half, rs):   # EXPERIMENT
-    from ..perc.dsl import flt, bits
-    def wd(x): return int(round(x * 2 ** 23))
-    def sat(a): return max(-(1 << 23), min((1 << 23) - 1, a >> 24))
-    def m(a, b): return a * b * 2
-    i2 = p.i[2]
-    T = wd(flt(p.mem.get(i2))); V = wd(flt(p.mem.get(i2 + 32))); U = wd(flt(p.mem.get(i2 + 64)))
-    mult, W8, W2 = wd(p.F(8)), wd(p.F(9)), wd(p.F(10))
-    F = sat(m(T, mult))
-    b = -m(F, F); y0 = b >> 24; y1 = m(0x155555, y0) >> 24
-    C = sat((0x7FFFFF << 24) + b + m(y1, y0))
-    g = sat(m(U, W8)) if half else U
-    idx = m(V, W2) >> 24
-    R = wd(flt(p.mem.get(L.T["PISD_CURVE"] + 4 * idx)))
-    if rs:
-        a = (m(R, C) << 1) - (1 << 47)
-    else:
-        a = (m(R, C) - (1 << 46)) << 1
-    c1 = sat(a)
-    b = -m(R, R); c0 = b >> 24
-    a += b
-    y0 = sat(a)
-    c2 = sat(m(g, y0) << 1)
-    for r, v in ((2, c0), (1, c1), (15, c2)):
-        p.setF(r, v * 2.0 ** -23)
+def _clamp(p: Prog, d: int) -> None:
+    """Rd = Rd through the limiter (24 bits). Clobbers R12."""
+    p.iconst(12, 0x7FFFFF)
+    p.iop(d, d, "MIN", 12)
+    p.iconst(12, -0x800000)
+    p.iop(d, d, "MAX", 12)
+
+
+def _add(p: Prog, h: int, lo: int, h2: int, lo2: int) -> None:
+    """(Rh, Rlo) += (Rh2, Rlo2): 48-bit sums as (signed high word, low 24 bits); Rh2 and
+    Rlo2 in R8..R11. Clobbers R12, R13."""
+    p.iop(lo, lo2, "+", lo)
+    p.lsh(13, lo, -24)
+    p.iop(h, h2, "+", h)
+    p.iop(h, 13, "+", h)
+    p.iconst(12, 0xFFFFFF)
+    p.iop(lo, lo, "AND", 12)
+
+
+def _asl(p: Prog, h: int, lo: int) -> None:
+    """(Rh, Rlo) <<= 1. Clobbers R12, R13."""
+    p.lsh(lo, lo, 1)
+    p.lsh(13, lo, -24)
+    p.ipass(12, h)
+    p.iop(h, 12, "+", h)
+    p.iop(h, 13, "+", h)
+    p.iconst(12, 0xFFFFFF)
+    p.iop(lo, lo, "AND", 12)
+
+
+def _prod_body(p: Prog) -> None:
+    p.iconst(12, 0)
+    p.float_(8, 4, 12)
+    p.float_(13, 5, 12)
+    p.fop(8, 8, "*", 13)                       # the product's sign
+    p.iop(13, 12, "-", 4)
+    p.iop(13, 13, "MAX", 4)
+    p.iop(14, 12, "-", 5)
+    p.iop(14, 14, "MAX", 5)
+    p.iconst(12, 4095)
+    p.iop(1, 13, "AND", 12)
+    p.lsh(0, 13, -12)
+    p.iop(3, 14, "AND", 12)
+    p.lsh(2, 14, -12)
+    for r in (0, 1, 2, 3):
+        p.iconst(12, 0)
+        p.float_(r, r, 12)
+    p.fop(13, 0, "*", 3)
+    p.fop(14, 1, "*", 2)
+    p.trunc(13, 13)
+    p.trunc(14, 14)
+    p.iop(13, 13, "+", 14)                     # m
+    p.fop(14, 1, "*", 3)
+    p.trunc(14, 14)                            # n
+    p.lsh(15, 13, 13)
+    p.lsh(12, 14, 1)
+    p.iop(15, 12, "+", 15)
+    p.iconst(12, 0xFFFFFF)
+    p.iop(7, 15, "AND", 12)                    # low
+    p.lsh(14, 14, -12)
+    p.iop(13, 13, "+", 14)
+    p.lsh(13, 13, -11)
+    p.fop(14, 0, "*", 2)
+    p.trunc(14, 14)
+    p.lsh(14, 14, 1)
+    p.iop(6, 13, "+", 14)                      # high
+
+    def neg():
+        p.iconst(12, 0)
+        p.iop(6, 12, "-", 6)
+
+        def borrow():
+            p.iconst(12, -1)
+            p.iop(6, 12, "+", 6)
+            p.iconst(12, 1 << 24)
+            p.iop(7, 12, "-", 7)
+        p.ifz(7, "NE", borrow)
+    p.ifz(8, "LT", neg, kind="f")
+
+
+def _prod(p: Prog) -> None:
+    """(R6, R7) = the 56300's product of the words R4, R5 (signed, |x| <= 2^23): 2 R4 R5
+    = R6 2^24 + R7, R7 in 0..2^24, exactly. Clobbers R0-R3, R8, R12-R15."""
+    p.call("pisd_prod", lambda: _prod_body(p))
 
 
 class _PI:
@@ -390,7 +454,7 @@ class _PI:
         w(p, 4, 2)
         K.mul_k(p, 4, 4, float(cls.GAINK))
         p.trunc(4, 4)
-        K.table_f(p, L, 5, "PISD_GAIN", 4, 12)
+        K.table_f(p, L, 5, "PI_GAIN_142B49", 4, 12)
         p.st(C["a"], 5)
         K.mul_k(p, 5, 5, 0x5A827A * Q)
         p.st(C["b"], 5)
@@ -568,68 +632,102 @@ class _PI:
         ss(p, 32, 4)
         ss(p, 33, 5)
 
-        # the modes' coefficients: frequency F (x y:$fe for the first four, x pitch for
-        # the rest), C = 1 - F^2 + F^4 / 6, radius R = CURVE[V DEC]; c0 = -R^2,
-        # c1 = 2 R C - 1, c2 = 2 g (2 R C - 1 - R^2)
+        # the modes' coefficients, in the 56300's integer arithmetic (a radius or cosine
+        # one LSB off moves a ringing mode's pitch and decay audibly over a hit):
+        # F = T x (y:$fe for the first four modes, W1 the rest), C = 1 - F^2 + F^4 / 6,
+        # R = CURVE[V DEC], c0 = -R^2, c1 = 2 R C - 1, c2 = 2 g (2 R C - 1 - R^2), g the
+        # mode's gain (x RING for the last four)
         p.iconst(1, T)
         p.seti(2, 1)
         _i5(p, L, COEF)
-        w(p, 9, 8)
-        w(p, 10, 2)
+        w(p, 4, 8)
+        _word(p, 4)
+        p.st(C["f"], 4)
         for half in (0, 1):
             if half:
-                w(p, 8, 1)
+                w(p, 4, 1)
             else:
-                p.ld(8, C["n3"])
+                p.ld(4, C["n3"])
+            _word(p, 4)
+            p.st(C["e"], 4)
 
             def coef(half=half):
                 p.ldi(4, 0, 2)
-                p.fop(4, 4, "*", 8)
-                K.sat(p, 4)
-                p.fop(5, 4, "*", 4)
-                p.fconst(12, 0.0)
-                p.fop(5, 12, "-", 5)               # -F^2
-                p.fconst(12, 0x155555 * Q)
-                p.fop(7, 12, "*", 5)
-                p.fconst(12, TOP)
-                p.fop(11, 12, "+", 5)
-                p.fop(7, 7, "*", 5)
-                p.fop(11, 11, "+", 7)
-                K.sat(p, 11)                       # C
-                p.ldi(6, 16, 2)
+                _word(p, 4)
+                p.ld(5, C["e"])
+                _prod(p)
+                _clamp(p, 6)                       # F
+                p.ipass(4, 6)
+                p.iconst(12, 0)
+                p.iop(5, 12, "-", 6)
+                _prod(p)                           # b = -F^2
+                p.st(C["b"], 6)
+                p.st(C["c"], 7)
+                p.ipass(5, 6)
+                p.iconst(4, 0x155555)
+                _prod(p)
+                p.ipass(4, 6)                      # y1 = y0 / 6
+                p.ld(5, C["b"])
+                _prod(p)                           # y1 y0
+                p.ld(9, C["c"])
+                p.ld(10, C["b"])
+                _add(p, 6, 7, 10, 9)
+                p.iconst(12, 0x7FFFFF)
+                p.iop(6, 12, "+", 6)
+                _clamp(p, 6)
+                p.st(C["d"], 6)                    # C
+                p.ldi(4, 16, 2)
+                _word(p, 4)
                 if half:
-                    p.fop(6, 6, "*", 9)
-                    K.sat(p, 6)                    # g
+                    p.ld(5, C["f"])
+                    _prod(p)
+                    _clamp(p, 6)
+                    p.ipass(4, 6)
+                p.st(C["a"], 4)                    # g
                 p.ldi(7, 8, 2)
+                w(p, 10, 2)
                 p.fop(7, 7, "*", 10)
                 p.fconst(12, 2.0 ** 23)
                 p.fop(7, 7, "*", 12)
                 p.trunc(7, 7)
-                K.table_f(p, L, 14, "PISD_CURVE", 7, 12)   # R
-                p.fop(15, 14, "*", 11)
+                K.table_f(p, L, 4, "PI_CURVE_142949", 7, 12)
+                _word(p, 4)
+                p.st(C["n2"], 4)                   # R
+                p.ld(5, C["d"])
+                _prod(p)                           # R C
                 if rs:
-                    p.fop(15, 15, "+", 15)
-                    p.fconst(12, 1.0)
-                    p.fop(15, 15, "-", 12)
+                    _asl(p, 6, 7)
+                    p.iconst(12, -0x800000)
+                    p.iop(6, 12, "+", 6)
                 else:
-                    p.fconst(12, 0.5)
-                    p.fop(15, 15, "-", 12)
-                    p.fop(15, 15, "+", 15)
-                p.fpass(1, 15)
-                K.sat(p, 1)                        # c1
-                p.fop(2, 14, "*", 14)
-                p.fconst(12, 0.0)
-                p.fop(2, 12, "-", 2)               # c0
-                p.fop(15, 15, "+", 2)
-                K.sat(p, 15)
-                p.fop(15, 6, "*", 15)
-                p.fop(15, 15, "+", 15)
-                K.sat(p, 15)                       # c2
-                if p.run and _EXP.get("coef"):
-                    _exact_coef(p, L, half, rs)
-                p.stpost(5, 2)
-                p.stpost(5, 1)
-                p.stpost(5, 15)
+                    p.iconst(12, -0x400000)
+                    p.iop(6, 12, "+", 6)
+                    _asl(p, 6, 7)
+                p.ipass(9, 6)
+                p.ipass(10, 7)                     # a = 2 R C - 1
+                p.ipass(11, 6)
+                _clamp(p, 11)
+                p.st(C["b"], 11)                   # c1
+                p.ld(4, C["n2"])
+                p.iconst(12, 0)
+                p.iop(5, 12, "-", 4)
+                _prod(p)                           # -R^2
+                p.st(C["c"], 6)                    # c0
+                _add(p, 6, 7, 9, 10)
+                _clamp(p, 6)
+                p.ipass(5, 6)
+                p.ld(4, C["a"])
+                _prod(p)
+                _asl(p, 6, 7)
+                _clamp(p, 6)                       # c2
+                for k in ("c", "b"):
+                    p.ld(4, C[k])
+                    p.iconst(12, -23)
+                    p.float_(4, 4, 12)
+                    p.stpost(5, 4)
+                p.iconst(12, -23)
+                p.float_(6, 6, 12)
+                p.stpost(5, 6)
                 p.ldpost(12, 5)
                 p.ldpost(12, 2)
             p.loop(C["n1"], 4, coef)

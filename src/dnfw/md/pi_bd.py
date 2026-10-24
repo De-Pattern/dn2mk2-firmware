@@ -329,7 +329,7 @@ def _render(p: Prog, L: K.Layout) -> None:
     _clear(p)
     _mac(p, 4, 5)
     _floor(p, 6, 23)
-    K.table_f(p, L, 7, "PIBD_GAIN", 6, 12)
+    K.table_f(p, L, 7, "PI_GAIN_142B49", 6, 12)
     p.st(C["f"], 7)
     p.fconst(5, 0x5A827A * Q)
     _prod(p, 4, 7, 5)
@@ -534,7 +534,7 @@ def _render(p: Prog, L: K.Layout) -> None:
         _clear(p)
         _mac(p, 5, 7)
         _floor(p, 11, 23)
-        K.table_f(p, L, 5, "PIBD_CURVE", 11, 12)    # r
+        K.table_f(p, L, 5, "PI_CURVE_142949", 11, 12)    # r
         _prod(p, 7, 5, 4, sh=22, add=-0x800000)     # c1
         _prod(p, 14, 5, 5, neg=True)                # c0
         _clear(p)

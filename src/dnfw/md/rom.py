@@ -144,7 +144,9 @@ def os_longs(vma: int, n: int) -> list[int]:
 
 # the host's tables (the scale functions read them) and DSP2's ROM tables
 HOST_TABLES = {"P": (0x24BD94, 128), "D": (0x24BF94, 512), "Q": (0x24C794, 512), "R": (0x24D794, 128),
-               "A": (0x2462E8, 512)}             # v0.24: A, P-IMA's four 128-long tables
+               "A": (0x2462E8, 512),             # v0.24: P-IMA's four 128-long tables
+               "S": (0x24DA14, 256),             #   tblS: P-I BD, MT and SD
+               "B": (0x24BB90, 128)}             #   tblB: P-I CC's HARD
 DSP_TABLES = {
     "TRXBD_CLICK1": (0x10050C, 288), "TRXBD_CLICK2": (0x10062C, 288), "X140000": (0x140000, 8448),
     "SNAP100881": (0x100881, 4128), "TRXXT_CLICK1": (0x10190F, 32), "TRXXT_CLICK2": (0x10192F, 32),
