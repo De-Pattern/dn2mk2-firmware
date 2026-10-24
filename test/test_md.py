@@ -29,6 +29,8 @@ def test_machine_matches_the_machinedrum(name):
     M = MM.BY_NAME[name]
     bad = []
     for case in B.golden(name)["cases"]:
+        if case.get("reads_unloaded_memory"):   # P-IRC: its pointer leaves the sine (runtime data on the MD)
+            continue
         ours, theirs = B.run_case(M, case)
         r = B.compare(ours, theirs)
         if r["snr_db"] < LOWER.get(name, MIN_SNR_DB) and r["rms_err"] > QUIET_RMS:
