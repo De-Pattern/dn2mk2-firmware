@@ -157,7 +157,6 @@ SMP_REC_IDS = tuple(r for r, _sh, _lo in _smp.REC_PAGE)            # every sampl
 def smp_named(name: str) -> dict[int, tuple[str, str]]:
     """record -> (long, short) on a sample machine's track"""
     out = {r: (lo, sh) for r, sh, lo in _smp.PAGES.get(name, _smp.PAGES["ONESHOT"]) if r}
-    out.update({r: (lo, sh) for r, sh, lo in _smp.REC_PAGE if r})      # page 2, the recorder
     out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in range(238, 263) if r not in out})
     return out
 
@@ -298,7 +297,7 @@ def smp_c_header() -> str:
             f"#define SMP_REC_SECONDS10 {_smp.REC_FRAMES * 10 // 48000}\n"
             f"#define SMP_REC_SOURCES {len(_smp.SRC_NAMES)}\n"
             f"static const char smp_rec_chan[3][4] = {{{', '.join(q + m + q for m in ('L+R', 'L', 'R'))}}};\n"
-            f"static const char smp_rec_src[{len(_smp.SRC_NAMES)}][6] = {{{', '.join(q + m + q for m in _smp.SRC_NAMES)}}};\n"
+            f"static const char smp_rec_src[{len(_smp.SRC_NAMES)}][8] = {{{', '.join(q + m + q for m in _smp.SRC_NAMES)}}};\n"
             f"static const char smp_bars[8][4] = {{{', '.join(q + b + q for b in ('1', '2', '4', '8', '8', '8', '8', '8'))}}};\n"
             f"static const unsigned char smp_bars_steps[7] = {{{', '.join(map(str, _smp.BARS_STEPS))}}};\n"
             f"static const unsigned char smp_seg_steps[7] = {{{', '.join(map(str, _smp.SEG_STEPS))}}};\n"
@@ -474,7 +473,7 @@ wr_count:
     bne.s   5f
     moveq   #{len(CZ_PAGES)},%d0
     rts
-5:  moveq   #3,%d0                         | a sample machine: its two pages and the recorder
+5:  moveq   #2,%d0                         | a sample machine: its two pages (v0.22: the recorder is FUNC + VOICE)
     rts
 1:  move.l  %sp@(8),%d0
     cmpi.l  #{NEW_TYPE},%d0

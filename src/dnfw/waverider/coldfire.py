@@ -374,6 +374,16 @@ QUANT_SITE = 0x40037BE6                  # the setter's write: movea.l %d0,%a0 ;
 QUANT_STOCK = bytes.fromhex("204031832a14")
 TDM_SITE = 0x40026098                    # the SSI ISR, its transmit fill done: move.l %fp,%d2 ; addi.l #-72,%d2 (v0.16)
 TDM_STOCK = bytes.fromhex("240e0682ffffffb8")
+# v0.22, the RECORDER as a screen of its own (csrc/sampler/rec.c): the UI loop's queue
+# receive (every key and knob item passes it first), its draw of the screen (the recorder
+# over it), and the main key handler's FUNC + VOICE (stock: unison on/off) opening it
+UI_POP_SITE = 0x4002F17E                # jsr 0x40001928: the UI queue's receive, in the UI loop
+UI_POP_STOCK = bytes.fromhex("4eb940001928")
+SCREEN_SITE = 0x4002E4CA                # jsr 0x4011d32a(screen, canvas): the views drawn
+SCREEN_STOCK = bytes.fromhex("4eb94011d32a")
+REC_COMBO_SITE = 0x4005F008             # the VOICE case's FUNC branch: push, jsr 0x40046bfe (unison)
+REC_COMBO_STOCK = bytes.fromhex("2f2a00a44eb940046bfe")
+REC_COMBO_EXIT = 0x4005FC50             # the handler's common exit (the key offered to the base)
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
 POLL_STOCK = bytes.fromhex("4eb94011d2f4")
 
@@ -518,6 +528,24 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(POLL_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_poll"]),
          "the UI loop's redraw test: wr_poll asks for a redraw while a modulation marker on "
          "Waverider's page would move, then answers as stock", POLL_STOCK)
+
+    # v0.22: the RECORDER's screen -- its keys and knobs, its draw, FUNC + VOICE
+    _need(content, UI_POP_SITE - 6, bytes.fromhex("48794059d214"), "the UI loop pushes its queue")
+    _need(content, UI_POP_SITE + 6, bytes.fromhex("588f72292440"), "... then takes the item: moveq #41 ; movea d0,a2")
+    edit(UI_POP_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_ui_pop"]),
+         "the UI loop's queue receive: smp_ui_pop takes the recorder's keys and knobs while "
+         "it is up, and the sample list's UP/DOWN; everything else as stock", UI_POP_STOCK)
+    _need(content, SCREEN_SITE - 4, bytes.fromhex("2f0b2f0a"), "the UI loop pushes canvas, screen")
+    edit(SCREEN_SITE, bytes.fromhex("4eb9") + _long(csyms["wr_screen"]),
+         "the UI loop's draw of its screen: stock's, then the RECORDER over it while it is up",
+         SCREEN_STOCK)
+    _need(content, REC_COMBO_SITE - 4, bytes.fromhex("60000ff4"), "the VOICE case without FUNC ends just before")
+    _need(content, REC_COMBO_EXIT, bytes.fromhex("2f022f0a4eb94011c674"), "the key handler's common exit")
+    disp = REC_COMBO_EXIT - (REC_COMBO_SITE + 8)
+    edit(REC_COMBO_SITE, bytes.fromhex("4eb9") + _long(csyms["rec_combo"]) + bytes.fromhex("6000")
+         + disp.to_bytes(2, "big"),
+         "FUNC + VOICE: the RECORDER opens or closes (stock: unison on/off; VOICE alone "
+         "still opens its menu)", REC_COMBO_STOCK)
 
     # the sample link: SysEx in (v0.14); out over the TDM link alone (v0.20)
     edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),

@@ -404,6 +404,7 @@ def main() -> int:
     p.add_argument("--json", default=None)
     p.add_argument("--stock", action="store_true", help="install nothing: the control")
     p.add_argument("--regs-at", action="append", default=[], help="record registers at VA")
+    p.add_argument("--item-log", action="store_true", help="log every UI-queue item the main loop pops")
     p.add_argument("--access", action="append", default=[], metavar="VA:N",
                    help="record every read and write of N bytes at VA, by PC")
     p.add_argument("--count", action="append", default=[], metavar="VA",
@@ -588,6 +589,18 @@ def main() -> int:
             key = f"{address:#010x}: " + " ".join(chain.split(" ")[:12])
             stacks[key] = stacks.get(key, 0) + 1
         uc.hook_add(UC_HOOK_CODE, stacked, begin=int(va, 0), end=int(va, 0))
+
+    # v0.22: every UI-queue item the main loop pops (type, code, flags, time), after the
+    # pop at 0x4002f17e: how keys and encoders arrive (the recorder's input filter)
+    items: list = []
+    if a.item_log:
+        def popped(uc_, address, size, user):
+            item = uc.reg_read(K.UC_M68K_REG_D0)
+            try:
+                items.append(bytes(uc.mem_read(item, 16)).hex())
+            except Exception:                   # noqa: BLE001
+                items.append(f"unreadable {item:#x}")
+        uc.hook_add(UC_HOOK_CODE, popped, begin=0x4002F184, end=0x4002F184)
 
     regs_at: dict[str, list] = {}
     for va in a.regs_at:
@@ -889,7 +902,7 @@ def main() -> int:
               "direct_calls": calls_made,
               "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
               "screen_frames": panel.frames() - frames_at_reset[0],
-              "panel_writers": panel_writers}
+              "panel_writers": panel_writers, "items": items}
     print(json.dumps(result, indent=1))
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(result, indent=1) + "\n")

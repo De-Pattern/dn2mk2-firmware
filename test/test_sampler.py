@@ -163,14 +163,14 @@ def test_the_recorder_records_and_plays_back():
     sig = [0.5 * math.sin(2 * math.pi * 440 * k / 48000) for k in range(32 * 20)]
     h.block(ONE, recorder=True)
     assert _check(h) and h.status()[0] == SM.STATUS_MAGIC          # idle
-    h.command(SM.CMD_NOW, src=0, dest=1)                            # IN, SAMP 125
+    h.command(SM.CMD_NOW, src=0, dest=SM.REC_FIRST + 1, place=0x123)   # IN, SAMP 125
     for b in range(20):
         h.block(ONE, recorder=True, inp=sig[32 * b:32 * b + 32])
     st = h.status()
     assert _check(h) and st[0] == SM.STATUS_MAGIC | 2 and st[2] == 10 and st[1] == 1
     assert abs(st[3] / 32767 - 0.5) < 0.01                          # the peak, for the meter
     ent = h.L.pool + 8 + 16 * (SM.REC_FIRST + 1)
-    assert h.mem.get(ent) == h.L.pool + SM.REC_OFFSET + (1 << SM.REC_SLOT_SHIFT)
+    assert h.mem.get(ent) == h.L.pool + SM.REC_OFFSET + 0x123 * 512
     assert h.mem.get(ent + 4) == 32 * 20 and h.mem.get(ent + 12) == SM.FMT_I16
     h.command(SM.CMD_STOP)
     h.block(ONE, recorder=True)
@@ -212,7 +212,7 @@ def test_the_recorder_records_a_track_and_a_channel():
     _route(h, list(range(16)))
     g = SM.TRK_GAIN
     left, right = [0.25 * g] * 32, [-0.5 * g] * 32
-    h.command(SM.CMD_NOW, src=2 + 5, chan=2, dest=3)                # TRK6, MONO R, SAMP 127
+    h.command(SM.CMD_NOW, src=2 + 5, chan=2, dest=SM.REC_FIRST + 3)  # TRK6, MONO R, SAMP 127
     h.block(ONE, recorder=True, trk={5: (left, right), 4: ([0.9 * g] * 32, [0.9 * g] * 32)})
     ent = h.L.pool + 8 + 16 * (SM.REC_FIRST + 3)
     w = h.mem.get(h.mem.get(ent))
@@ -220,9 +220,29 @@ def test_the_recorder_records_a_track_and_a_channel():
     h.command(SM.CMD_MONITOR, src=2 + 5, chan=1)                    # the meter on TRK6 L
     h.block(ONE, recorder=True, trk={5: (left, right)})
     assert abs(h.status()[3] / 32767 - 0.25) < 0.001
-    _route(h, [9] * 16)                                             # every track in slot 9
+    # v0.22: track t is bucket t whatever the voices' routing says (the routing halves say
+    # which track each DSP voice plays; v0.21 read bucket route[t], the owner's report)
+    _route(h, [9] * 16)                                             # every voice playing track 9
     h.block(ONE, recorder=True, trk={5: (left, right), 9: ([0.125 * g] * 32, right)})
-    assert abs(h.status()[3] / 32767 - 0.125) < 0.001
+    assert abs(h.status()[3] / 32767 - 0.25) < 0.001
+
+
+def test_a_recording_goes_where_it_is_placed_and_stops_at_the_areas_end():
+    # v0.22: the ColdFire places a recording in the recordings' area (512-byte units) and
+    # names its slot; the DSP never records past the pool's end, whatever it is asked
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    last = (SM.REC_BYTES - SM.REC_MIN_BYTES) // SM.REC_UNIT
+    h.command(SM.CMD_NOW, dest=40, place=0xFFFF)                    # asked past the end: clamped
+    ent = h.L.pool + 8 + 16 * 40
+    for b in range(SM.REC_MIN_BYTES // 64 + 4):                     # 32 frames, 64 bytes a block
+        h.block(ONE, recorder=True, inp=[0.3] * 32)
+    assert h.mem.get(ent) == h.L.pool + SM.REC_OFFSET + last * SM.REC_UNIT
+    assert h.mem.get(ent + 4) == SM.REC_MIN_BYTES // 2 and h.status()[0] == SM.STATUS_MAGIC | 3
+    h.command(SM.CMD_NOW, dest=200)                                 # a slot past the last: the last
+    h.block(ONE, recorder=True, inp=[0.3] * 32)
+    assert h.mem.get(h.L.pool + 8 + 16 * (SM.POOL_SLOTS - 2) + 4) == 32
 
 
 def test_r_strt_play_starts_at_the_first_note():
@@ -257,8 +277,10 @@ def test_the_host_tool_leaves_the_recorders_slots():
     assert SM.POOL_SLOTS >= SM.REC_FIRST + SM.REC_SLOTS
     src = (pathlib.Path(__file__).resolve().parents[1] / "tools" / "dn2samples.py").read_text()
     assert "SM.USER_SLOTS" in src
+    # v0.22: a send keeps every recording (an entry whose frames lie in the recordings'
+    # area), in its own slot if the new image leaves it empty, else in the first empty one
     c = (pathlib.Path(__file__).resolve().parents[1] / "csrc" / "sampler" / "link.c").read_text()
-    assert f"16u * {SM.REC_FIRST}u" in c and f"16u * {SM.REC_FIRST + SM.REC_SLOTS}u" in c
+    assert "is_recording(k)" in c and "rec_keep" in c and "smp_rec_place" in c
 
 
 def test_a_loop_follows_len_loop_and_play_while_it_sounds():
@@ -310,8 +332,6 @@ def test_one_detent_a_choice_lands_inside_each_choice():
     for v in range(121):
         assert zone(SM.QUANT[3][2], v + 4) == sum(1 for x in SM.SEG_STEPS if v >= x)
         assert zone(SM.QUANT[4][2], v) == min(4, v // 24)
-    for v in range(128):
-        assert zone(SM.QUANT[5][2], v) == v * len(SM.SRC_NAMES) // 128
 
 
 def _rx(h, units, high=True, pg=0):

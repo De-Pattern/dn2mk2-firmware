@@ -160,11 +160,6 @@ static void f_samp(int v, char *buf)
         put(buf, "OFF", 4);
         return;
     }
-    if (s >= SMP_REC_FIRST + 1 && s <= SMP_REC_FIRST + 4) {   /* the recorder's slots */
-        put(buf, "REC ", 4);
-        put_num(buf + 4, s - SMP_REC_FIRST);
-        return;
-    }
     int n = smp_count();
     if (n >= 0 && s <= n) {                     /* your samples: their names */
         const char *nm = smp_name(s - 1);
@@ -174,43 +169,6 @@ static void f_samp(int v, char *buf)
         }
     }
     put_num(buf, s);                            /* nothing there (v0.20: no test sounds) */
-}
-
-static void f_src(int v, char *buf)
-{
-    int c = coarse(v, SMP_RSRC_ID) * SMP_REC_SOURCES / 128;
-    put(buf, smp_rec_src[c > SMP_REC_SOURCES - 1 ? SMP_REC_SOURCES - 1 : c], 5);
-}
-
-static void f_chan(int v, char *buf)
-{
-    static const char *n[3] = {"MONO L+R", "MONO L", "MONO R"};
-    int c = coarse(v, SMP_RCHAN_ID);
-    put(buf, n[c > 2 ? 2 : c < 0 ? 0 : c], 8);
-}
-
-static void f_onoff(int v, char *buf)
-{
-    put(buf, (v >> 8) & 0xFF ? "ON" : "OFF", 3);
-}
-
-static void f_rstrt(int v, char *buf)
-{
-    put(buf, (v >> 8) & 0xFF ? "PLAY" : "THRES", 5);
-}
-
-static void f_dest(int v, char *buf)
-{
-    put_num(buf, SMP_REC_FIRST + 1 + (((v >> 8) & 0xFF) & 3));
-}
-
-static void f_rlen(int v, char *buf)
-{
-    int c = coarse(v, SMP_RLEN_ID);
-    if (c <= 0)
-        put(buf, "MAX", 3);
-    else
-        put_num(buf, c);
 }
 
 static void f_slce(int v, char *buf)            /* GRID's SLCE: NOTE, then 1..63 (v0.18, the DT2's) */
@@ -230,10 +188,9 @@ static void f_slen(int v, char *buf)            /* GRID's LEN: how many slices, 
 /* the records whose text is ours on a sample machine's track; 239, SLCE's and LEN's
  * records only on GRID's (ONESHOT's STRT, LOOP and CFAD are the same records) */
 static const u16 fmt_ids[] = {SMP_PLAY_REC, SMP_MODE_REC, SMP_BARS_REC, SMP_SEG_REC, SMP_GRID_REC,
-                              SMP_SAMP_REC, SMP_RSRC_ID, SMP_RCHAN_ID, SMP_ARM_ID, SMP_RSTRT_ID,
-                              SMP_RDST_ID, SMP_RLEN_ID, SMP_SLICE_ID, SMP_SLEN_ID};
-static void (*const fmt_fns[])(int, char *) = {f_play, f_mode, f_bars, f_seg, f_grid, f_samp, f_src,
-                                               f_chan, f_onoff, f_rstrt, f_dest, f_rlen, f_slce, f_slen};
+                              SMP_SAMP_REC, SMP_SLICE_ID, SMP_SLEN_ID};
+static void (*const fmt_fns[])(int, char *) = {f_play, f_mode, f_bars, f_seg, f_grid, f_samp,
+                                               f_slce, f_slen};   /* (v0.22: the recorder's are a screen's now) */
 #define NFMT (int)(sizeof fmt_ids / sizeof fmt_ids[0])
 static void *stock_fmt[NFMT] __attribute__((section(".data")));
 static int fmt_saved __attribute__((section(".data"))) = 0;

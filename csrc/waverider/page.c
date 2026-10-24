@@ -181,6 +181,18 @@ static void ping_names(void)
     ping_on = on;
 }
 
+/* v0.22: the UI loop's draw of its screen (0x4011d32a(screen, canvas), at 0x4002e4ca),
+ * then, while it is up, the RECORDER over all of it (rec.c, smp_page.c) */
+#define SCREEN_DRAW ((void (*)(void *, void *))0x4011D32Au)
+void wr_screen(void *screen, void *canvas)
+{
+    extern int rec_visible(void);
+    extern void rec_screen_draw(void *canvas);
+    SCREEN_DRAW(screen, canvas);
+    if (rec_visible())
+        rec_screen_draw(canvas);
+}
+
 /* the UI loop's redraw test, as stock (and the names kept current, once a loop; and
  * v0.15: the sample link's +Drive copy loaded once the device is up) */
 extern void smp_boot(void);
@@ -649,7 +661,7 @@ void wr_page_draw(void *view, void *canvas)
     int res = kind == 2;                        /* RESONATOR's page */
     int cz = kind == 3;                         /* CZ's */
     int smp = kind >= SMP_KIND0;                /* a sample machine's: one page */
-    if (page < 0 || page >= (smp ? 3 : cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
+    if (page < 0 || page >= (smp ? 2 : cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
         page = 0;
     if (kind == 1) {                            /* PERC: the names TYPE has now */
         u8 flag;
@@ -662,13 +674,8 @@ void wr_page_draw(void *view, void *canvas)
             return;
     }
 
-    if (smp) {                                  /* the DT2's SRC pages 1 and 2; page 3 the recorder */
+    if (smp) {                                  /* the DT2's SRC pages 1 and 2 (v0.22: the recorder is FUNC + VOICE) */
         extern void smp_page_draw(void *view, void *canvas, int kind, int wave);
-        extern void smp_rec_draw(void *view, void *canvas);
-        if (page == 2) {                        /* the RECORDER fills the screen, as the DT2's */
-            smp_rec_draw(view, canvas);
-            return;
-        }
         smp_page_draw(view, canvas, kind, page == 1);
         ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
         int n = PAGE_COUNT(view);

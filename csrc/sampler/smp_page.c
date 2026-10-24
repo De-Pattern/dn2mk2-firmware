@@ -39,6 +39,7 @@ typedef unsigned char u8;
 #define BOT_Y 7
 
 extern int smp_count(void);
+extern int smp_slot_empty(int k);
 extern int smp_lstate;                  /* link.c: 0 idle, 4 done, else loading */
 extern const char *smp_name(int k);
 extern const u8 *smp_overview(int k);    /* 100 column peaks, 0..255 (link.c, v0.16) */
@@ -446,7 +447,8 @@ static void mini_mode(void *c, int x, int y, int mode)
  * after SAMP changes, five slots around the chosen one, the chosen one framed */
 #define LIST_FRAMES 1500u
 static int list_slot __attribute__((section(".data"))) = -1;
-static void *list_view __attribute__((section(".data"))) = 0;
+void *smp_list_view __attribute__((section(".data"))) = 0;   /* rec.c's UI filter asks after it */
+#define list_view smp_list_view
 static u32 list_at __attribute__((section(".data"))) = 0;
 
 static void slot_name(int k, char *out)
@@ -455,12 +457,10 @@ static void slot_name(int k, char *out)
     int cnt = smp_count();
     if (k <= 0)
         n = "OFF";
-    else if (k > SMP_REC_FIRST && k <= SMP_REC_FIRST + 4) {
-        out[0] = 'R'; out[1] = 'E'; out[2] = 'C'; out[3] = ' ';
-        out[4] = (char)('0' + k - SMP_REC_FIRST); out[5] = 0;
-        return;
-    } else if (cnt >= 0 && k <= cnt)
+    else if (cnt >= 0 && k <= cnt)
         n = smp_name(k - 1);
+    if (k > 0 && !(n && n[0]) && !smp_slot_empty(k - 1))
+        n = "SAMPLE";                           /* something there, without a name (v0.15's recordings) */
     int j = 0;
     if (n && n[0])
         for (; j < 7 && n[j]; j++)
@@ -483,6 +483,11 @@ int smp_list_up(void *view)
 void smp_list_hold(void)
 {
     list_at = *(volatile u32 *)0x4058E8D4u;
+}
+
+void smp_list_close(void)                       /* SAMP's knob pushed: the highlighted one it is */
+{
+    list_at = *(volatile u32 *)0x4058E8D4u - LIST_FRAMES;
 }
 
 static void sample_list(void *c, void *view, int slot)
@@ -602,16 +607,14 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     sample_list(c, view, slot);
 }
 
-/* page 3, the RECORDER, laid out as the DT2's (its manual 13.1 and the owner's photograph):
- * RECORDER and the input meter across the top; SRC on the left; the RECORD NOW box in the
- * middle (YES), THRES on the right; DEST (the DT2's MON place), R.LEN, R.STRT and ARM's
- * switch along the bottom. The page draws over the stock header and machine box. */
-#define FONT_BIG 0x44507EF0u                    /* the stock header's 11-pixel font */
-extern void *rec_view;
-extern u32 rec_seen;
-extern int rec_src, rec_chan, rec_thres, rec_dest, rec_rlen, rec_rstrt, rec_arm;
+/* v0.22: the RECORDER, the DT2's SAMPLING screen as the DN2 has room for it, over the
+ * whole screen while it is up (rec.c: FUNC + VOICE). Across the top RECORDER and the
+ * source's meter, THRES ticked; SRC on the left; the RECORD box in the middle (what YES
+ * does, or what the recorder is doing); THRES on the right; DEST, R.LEN, R.STRT and ARM's
+ * switch along the bottom, each over its label, at the knobs' places. */
+extern int rec_src, rec_thres, rec_dest, rec_rlen, rec_rstrt, rec_saved_slot;
 extern int rec_state, rec_peak, rec_link;
-extern u32 rec_frames, rec_heard;
+extern u32 rec_frames, rec_heard, rec_room;
 #define FRAMES_NOW (*(volatile u32 *)0x4058E8D4u)
 
 static void clear(void *c, int x0, int y0, int x1, int y1)
@@ -633,87 +636,92 @@ static int meter_x(int v, int w)
     return pos < 0 ? 0 : pos;
 }
 
-void smp_rec_draw(void *view, void *c)
+void rec_screen_draw(void *c)
 {
-    int top;
-    rec_view = view;
-    rec_seen = FRAMES_NOW + 1u;
-    rec_src = value(view, SMP_RSRC_ID, &top) * SMP_REC_SOURCES / (top + 1);
-    rec_chan = value(view, SMP_RCHAN_ID, 0);
-    rec_thres = value(view, SMP_RTHR_ID, 0);
-    rec_dest = value(view, SMP_RDST_ID, 0);
-    rec_rlen = value(view, SMP_RLEN_ID, 0);
-    rec_rstrt = value(view, SMP_RSTRT_ID, 0);
-    rec_arm = value(view, SMP_ARM_ID, 0);
     int heard = rec_heard && FRAMES_NOW + 1u - rec_heard < 1500u;
     int state = heard ? rec_state : 0;
+    clear(c, 0, 0, 127, 63);
 
-    clear(c, 0, 0, 23, 52);                     /* the stock machine box and level */
-
-    /* the input meter under the header: a bar, filled to the source's peak, THRES ticked */
-    int mx0 = 2, mx1 = 125, my0 = 46, my1 = 51, w = mx1 - mx0 - 2;
+    /* the title and the meter */
+    LABEL(c, 25, 57, "%s", "RECORDER");
+    hline(c, 0, 50, 54, 0);
+    int mx0 = 54, mx1 = 126, my0 = 55, my1 = 62, w = mx1 - mx0 - 2;
     box(c, mx0, my0, mx1, my1, 0);
     int lv = heard ? meter_x(rec_peak, w) : 0;
     if (lv > 0)
         fill(c, mx0 + 1, my0 + 1, mx0 + lv, my1 - 1);
     int tx = mx0 + 1 + rec_thres * w / 120;
     vline(c, tx, my0 - 2, my0 - 1, 0);
-    vline(c, tx, my1 + 1, my1 + 2, 0);
 
-    /* SRC, on the left: the source over the channel */
+    /* SRC, on the left: the source in two lines (EXT over L+R, TRK over its number) */
     const char *src = smp_rec_src[rec_src > SMP_REC_SOURCES - 1 ? SMP_REC_SOURCES - 1 : rec_src];
-    TEXT(c, FONT, 14, 37, CENTRED, "%.5s", src);
-    TEXT(c, FONT, 14, 30, CENTRED, "%.3s", smp_rec_chan[rec_chan > 2 ? 2 : rec_chan]);
-    LABEL(c, 14, 22, "%s", "SRC");
+    char a[6] = {0}, b[6] = {0};
+    int k = 0, j = 0;
+    while (src[k] && src[k] != ' ' && k < 5) { a[k] = src[k]; k++; }
+    if (src[k] == ' ') k++;
+    while (src[k] && j < 5) b[j++] = src[k++];
+    if (!b[0] && a[0] == 'T') {                 /* TRK12 -> TRK / 12 */
+        b[0] = a[3]; b[1] = a[4]; a[3] = 0; a[4] = 0;
+    }
+    LABEL(c, 13, 43, "%s", a);
+    if (b[0])
+        LABEL(c, 13, 35, "%s", b);
+    LABEL(c, 13, 25, "%s", "SRC");
 
-    /* the RECORD NOW box: what YES does, or what the recorder is doing */
-    int bx0 = 31, bx1 = 95, by0 = 22, by1 = 43;
+    /* the RECORD box: what YES does, or what the recorder is doing */
+    int bx0 = 29, bx1 = 97, by0 = 22, by1 = 48;
     box(c, bx0, by0, bx1, by1, 1);
+    int cx = (bx0 + bx1) / 2;
     if (state == 2) {
-        fill(c, bx0 + 4, by0 + 8, bx0 + 10, by0 + 14);   /* a solid dot: recording */
+        fill(c, bx0 + 5, by0 + 15, bx0 + 11, by0 + 21);   /* a solid dot: recording */
         int ds = (int)(rec_frames / 4800u);
-        TEXT(c, FONT, bx0 + 14, by0 + 12, 0, "REC");
-        TEXT(c, FONT, bx0 + 14, by0 + 4, 0, "%d.%d s", ds / 10, ds % 10);
+        LABEL(c, cx + 6, by0 + 16, "%s", "REC");
+        LABEL(c, cx, by0 + 8, "%d.%d S", ds / 10, ds % 10);
+        LABEL(c, cx, by0 + 1, "%s", "YES:STOP");
     } else if (state == 1) {
-        TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 12, CENTRED, "ARMED");
-        TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 4, CENTRED, rec_rstrt ? "ON PLAY" : "ON THRES");
+        LABEL(c, cx, by0 + 16, "%s", "ARMED");
+        LABEL(c, cx, by0 + 8, "%s", rec_rstrt ? "ON PLAY" : "ON THRES");
+        LABEL(c, cx, by0 + 1, "%s", "NO:CANCEL");
     } else if (!heard || rec_link < 0) {
-        /* v0.20: the DSP is not answering (no status), or did not take the last command
-         * (its status does not echo it): YES would do nothing, so say so */
-        TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 12, CENTRED, !heard ? "NO DSP" : "NO LINK");
-        TEXT(c, FONT, (bx0 + bx1) / 2, by0 + 4, CENTRED, !heard ? "STATUS" : "TO DSP");
+        LABEL(c, cx, by0 + 16, "%s", !heard ? "NO DSP" : "NO LINK");
+        LABEL(c, cx, by0 + 8, "%s", !heard ? "STATUS" : "TO DSP");
+    } else if (rec_room < 0x10000u) {
+        LABEL(c, cx, by0 + 16, "%s", "NO ROOM");
+        LABEL(c, cx, by0 + 8, "%s", "CHANGE DEST");
     } else {
-        fill(c, bx0 + 3, by0 + 7, bx0 + 17, by0 + 15);   /* YES, cut out of a filled badge */
-        glyph(c, bx0 + 5, by0 + 9, 'Y', 0);
-        glyph(c, bx0 + 9, by0 + 9, 'E', 0);
-        glyph(c, bx0 + 13, by0 + 9, 'S', 0);
-        TEXT(c, FONT, bx0 + 20, by0 + 12, 0, "RECORD");
-        TEXT(c, FONT, bx0 + 20, by0 + 4, 0, state == 3 ? "AGAIN!" : "NOW!");
+        fill(c, bx0 + 4, by0 + 14, bx0 + 18, by0 + 22);   /* YES, cut out of a filled badge */
+        glyph(c, bx0 + 6, by0 + 16, 'Y', 0);
+        glyph(c, bx0 + 10, by0 + 16, 'E', 0);
+        glyph(c, bx0 + 14, by0 + 16, 'S', 0);
+        LABEL(c, cx + 11, by0 + 16, "%s", state == 3 ? "AGAIN" : "RECORD");
+        u32 secs = rec_room / 96000u;           /* int16 at 48 kHz */
+        LABEL(c, cx, by0 + 6, "%d S FREE", (int)(secs > 999 ? 999 : secs));
+        if (state == 3 && rec_saved_slot >= 0)
+            LABEL(c, cx, by0 + 0, "SAVED %d", rec_saved_slot + 1);
     }
 
     /* THRES, on the right */
-    TEXT(c, FONT, 111, 33, CENTRED, "%d", rec_thres);
-    LABEL(c, 111, 22, "%s", "THRES");
+    LABEL(c, 113, 34, "%d", rec_thres);
+    LABEL(c, 113, 22, "%s", "THRES");
 
     /* the bottom row: DEST, R.LEN, R.STRT, ARM */
-    w_samp(c, 3, 5, SMP_REC_FIRST + 1 + rec_dest);
-    LABEL(c, 14, 0, "%s", "DEST");
+    w_samp(c, 1, 5, rec_dest < 0 ? 0 : rec_dest + 1);
+    LABEL(c, 13, 0, "%s", "DEST");
     if (rec_rlen <= 0) {
-        TEXT(c, FONT, 50, 13, CENTRED, "MAX");
-        TEXT(c, FONT, 50, 6, CENTRED, "%d.%d", SMP_REC_SECONDS10 / 10, SMP_REC_SECONDS10 % 10);
+        LABEL(c, 47, 12, "%s", "MAX");
     } else {
-        TEXT(c, FONT, 50, 13, CENTRED, "%d", rec_rlen);
-        TEXT(c, FONT, 50, 6, CENTRED, "STEPS");
+        LABEL(c, 47, 12, "%d", rec_rlen);
+        LABEL(c, 47, 6, "%s", "STEPS");
     }
-    LABEL(c, 50, 0, "%s", "R.LEN");
-    TEXT(c, FONT, 82, 8, CENTRED, rec_rstrt ? "PLAY" : "THRES");
-    LABEL(c, 82, 0, "%s", "R.STRT");
+    LABEL(c, 47, 0, "%s", "R.LEN");
+    LABEL(c, 80, 9, "%s", rec_rstrt ? "PLAY" : "THRES");
+    LABEL(c, 80, 0, "%s", "R.STRT");
     int on = state == 1 || state == 2;           /* ARM's switch: what the DSP is doing */
-    int sx0 = 103, sx1 = 119, sy0 = 8, sy1 = 14;
+    int sx0 = 104, sx1 = 122, sy0 = 8, sy1 = 15;
     box(c, sx0, sy0, sx1, sy1, 0);
     if (on)
-        fill(c, sx1 - 7, sy0 + 2, sx1 - 2, sy1 - 2);
+        fill(c, sx1 - 8, sy0 + 2, sx1 - 2, sy1 - 2);
     else
-        box(c, sx0 + 2, sy0 + 2, sx0 + 7, sy1 - 2, 0);
-    LABEL(c, 111, 0, "%s", "ARM");
+        box(c, sx0 + 2, sy0 + 2, sx0 + 8, sy1 - 2, 0);
+    LABEL(c, 113, 0, "%s", "ARM");
 }

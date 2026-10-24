@@ -147,12 +147,13 @@ class Harness:
         self.set(SM.LOOP_REC, 0)
         self.set(SM.SLEN_REC, 0)
 
-    def command(self, cmd: int, src: int = 0, chan: int = 0, thres: float = 0.0, dest: int = 0,
-                frames: int = SM.REC_FRAMES) -> None:
-        """the ColdFire's next recorder command, as the sample link writes it"""
+    def command(self, cmd: int, src: int = 0, chan: int = 0, thres: float = 0.0,
+                dest: int = SM.REC_FIRST, frames: int = SM.REC_FRAMES, place: int = 0) -> None:
+        """the ColdFire's next recorder command, as the sample link writes it (v0.22: DEST a
+        slot, PLACE where in the recordings' area, in 512-byte units)"""
         a = self.L.pool + SM.CMD_OFFSET
         seq = (self.mem.get(a) + 1) & 0xFFFFFFFF
-        for k, w in enumerate((seq, cmd, src, chan, int(thres * 32767), dest << 24 | frames)):
+        for k, w in enumerate((seq, cmd, src, chan | place << 8, int(thres * 32767), dest << 24 | frames)):
             self.mem.put(a + 4 * k, w)
 
     def status(self) -> list[int]:

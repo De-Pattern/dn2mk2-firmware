@@ -1577,9 +1577,9 @@ def recorder(p: Prog, L: Layout) -> None:
         p.iconst(12, 17)
         p.iop(4, 4, "MIN", 12)
         p.st(C["rsrc"], 4)
-        p.ld(4, cmd + 12)                     # channel: 0 L+R, 1 L, 2 R
-        p.iconst(12, 0)
-        p.iop(4, 4, "MAX", 12)
+        p.ld(4, cmd + 12)                     # channel: 0 L+R, 1 L, 2 R (bits 0..1; v0.22: the
+        p.iconst(12, 3)                       # recording's place in bits 8..23)
+        p.iop(4, 4, "AND", 12)
         p.iconst(12, 2)
         p.iop(4, 4, "MIN", 12)
         p.st(C["rchan"], 4)
@@ -1590,23 +1590,37 @@ def recorder(p: Prog, L: Layout) -> None:
 
         def start(state):
             def body():                       # the slot, emptied
-                p.ld(4, cmd + 20)
-                p.lsh(5, 4, -24)              # dest 0..3
-                p.iconst(12, 3)
-                p.iop(5, 5, "AND", 12)
-                p.iconst(12, 0x00FFFFFF)
-                p.iop(6, 4, "AND", 12)        # frames: 32 .. the slot's whole length
-                p.iconst(12, 32)
-                p.iop(6, 6, "MAX", 12)
-                p.iconst(12, SM.REC_FRAMES)
+                # v0.22: where the frames go, in the recordings' area: REC_OFFSET + 512 u,
+                # u = bits 8..23 of the channel word (the ColdFire's allocation); and
+                # never past the pool's end
+                p.ld(6, cmd + 12)
+                p.lsh(6, 6, -8)
+                p.iconst(12, 0xFFFF)
+                p.iop(6, 6, "AND", 12)
+                p.iconst(12, (SM.REC_BYTES - SM.REC_MIN_BYTES) // SM.REC_UNIT)
                 p.iop(6, 6, "MIN", 12)
-                p.st(C["rmax"], 6)
-                p.lsh(6, 5, SM.REC_SLOT_SHIFT)  # 8 MB a slot
+                p.lsh(6, 6, 9)                # x 512 bytes
+                p.st(C["tmp"], 6)             # the offset into the area
+                p.iconst(12, SM.REC_BYTES)
+                p.ipass(13, 6)
+                p.iop(7, 12, "-", 13)         # the room left, bytes
+                p.lsh(7, 7, -1)               # .. as int16 frames
+                p.ld(4, cmd + 20)
+                p.iconst(12, 0x00FFFFFF)
+                p.iop(8, 4, "AND", 12)        # frames: 32 .. the room, the DT2's 66 s at most
+                p.iconst(12, 32)
+                p.iop(8, 8, "MAX", 12)
+                p.iconst(12, SM.REC_FRAMES)
+                p.iop(8, 8, "MIN", 12)
+                p.iop(8, 8, "MIN", 7)
+                p.st(C["rmax"], 8)
+                p.ld(6, C["tmp"])
                 p.iconst(13, L.pool + SM.REC_OFFSET)
                 p.iop(6, 13, "+", 6)
                 p.st(C["rbase"], 6)
-                p.iconst(13, SM.REC_FIRST)
-                p.iop(5, 13, "+", 5)
+                p.lsh(5, 4, -24)              # dest: the slot, 0 .. POOL_SLOTS - 2 (SAMP 1..)
+                p.iconst(12, SM.POOL_SLOTS - 2)
+                p.iop(5, 5, "MIN", 12)
                 p.lsh(5, 5, 4)
                 p.iconst(13, L.pool + 8)
                 p.iop(5, 13, "+", 5)
@@ -1692,25 +1706,17 @@ def recorder(p: Prog, L: Layout) -> None:
     p.iconst(12, 2)
 
     def track():
-        # track t is in the slot its routing half says (s16 at TRK_ROUTE + 2t, 0..15;
-        # the ColdFire's slot map, normally t): the panned block 0x1c244d left there
+        # v0.22: track t's audio is bucket t of the buffer 0x1c244d fills. The routing
+        # halves (TRK_ROUTE + 2v) say which TRACK each DSP voice v plays: 0x1c244d sums
+        # voice v into bucket route[v]. v0.15..v0.21 read bucket route[t], which is track
+        # t's bucket only while voice t belongs to track t (the owner's v0.21 report: a
+        # silent track's meter moved, recordings of a track were another's or silence).
         p.ld(8, C["rsrc"])
         p.iconst(12, -2)
         p.iop(8, 12, "+", 8)                  # t
-        p.lsh(9, 8, -1)
-        p.lsh(9, 9, 2)
-        p.iconst(12, SM.TRK_ROUTE)
-        p.iop(9, 12, "+", 9)
-        p.seti(1, 9)
-        p.ldi(10, 0, 1)                       # the word holding t's half
-        p.iconst(12, 1)
-        p.iop(8, 8, "AND", 12)
-        p.ifz(8, "NE", lambda: p.lsh(10, 10, -16))
-        p.iconst(12, 0xFFFF)
-        p.iop(10, 10, "AND", 12)
         p.iconst(12, 15)
-        p.if_(10, "GT", 12, lambda: p.iconst(10, 0), kind="i")   # negative or past 15: slot 0
-        p.lsh(10, 10, 8)                      # 0x100 a slot
+        p.iop(8, 8, "MIN", 12)
+        p.lsh(10, 8, 8)                       # 0x100 a bucket
         p.iconst(12, SM.TRK_BUF)
         p.iop(9, 12, "+", 10)
     p.if_(8, "GE", 12, track, kind="i")

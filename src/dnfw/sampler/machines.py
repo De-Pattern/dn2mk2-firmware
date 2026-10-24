@@ -108,6 +108,11 @@ USER_SLOTS = 122                           # what the host tool may fill (SAMP 1
 REC_OFFSET = 96 << 20                      # their frames: 96..128 MB into the pool (v0.16)
 REC_SLOT_SHIFT = 23                        # 8 MB a slot
 REC_FRAMES = 66 * 48000                    # the DT2's maximum: 66 s of int16 at 48 kHz (v0.16)
+# v0.22: the recordings' area is the pool's last 32 MB, shared: a recording goes where the
+# ColdFire finds room (link.c's smp_rec_place), at REC_OFFSET + 512 u, into any slot
+REC_BYTES = (128 << 20) - REC_OFFSET
+REC_UNIT = 512
+REC_MIN_BYTES = 0x10000                    # the least room a recording starts in
 IN_BUF = 0x268538                          # the engine's input block: L 32 floats, R at +0x80
 MIX_BUF = 0x268438                         # the main mix (the last block's when we run)
 TRK_BUF = 0x259F68                         # track t's audio, panned, the last block's: L at
@@ -132,7 +137,9 @@ RSRC_REC, RCHAN_REC, RTHR_REC, RDST_REC, RLEN_REC, RSTRT_REC, ARM_REC = 252, 259
 REC_PAGE = ((252, "SRC", "Rec Source"), (259, "CHAN", "Rec Channel"), (0, "-", "Record Now"),
             (243, "THRES", "Rec Threshold"), (248, "DEST", "Rec Slot"), (253, "R.LEN", "Rec Length"),
             (251, "R.STRT", "Rec Start"), (247, "ARM", "Arm"))
-SRC_NAMES = ("IN", "MAIN") + tuple(f"TRK{t}" for t in range(1, 17))     # 18 sources: v * 18 // 128
+# v0.22, the RECORDER's SRC (rec.c): the input's channels as choices of their own, as the
+# DT2's; the DSP still takes a source (0 the input, 1 MAIN, 2 + t) and a channel
+SRC_NAMES = ("EXT L+R", "EXT L", "EXT R", "MAIN") + tuple(f"TRK{t}" for t in range(1, 17))
 CHAN_NAMES = ("MONO L+R", "MONO L", "MONO R")
 RLEN_MAX = 0                               # R.LEN 0 is MAX, 1..127 steps of the sequencer
 
@@ -157,7 +164,7 @@ QUANT = (
     (("WERP", "STRETCH", "REPITCH"), BARS_REC, BARS_STEPS[:3], (0, 25, 50, 75)),
     (("WERP",), SEG_REC, tuple(4 + x for x in SEG_STEPS[:2]), (24, 64, 104)),
     (("GRID",), GRID_REC, (24, 48, 72, 96), (0, 24, 48, 72, 96)),
-    (ALL, RSRC_REC, _zones(len(SRC_NAMES), 128), (0,) + _zones(len(SRC_NAMES), 128)),
+    # (v0.15..v0.21 had the recorder's SRC here: v0.22's recorder is a screen of its own)
 )
 QUANT_STEP = (                                  # (machines, record, raw coarse a choice)
     (("GRID", "SLICE"), SLICE_REC, 2),

@@ -59,10 +59,12 @@ typedef unsigned char u8;
 #if !defined(POOL_BYTES) || !defined(REC_OFFSET) || !defined(TX_WORDS) || !defined(SMP_MIRROR)
 #error "the sampler's constants are passed by the build (dnfw.waverider.cpage)"
 #endif
-#define REC_DIR_START (8u + 16u * 123u)          /* the recorder's entries: REC_FIRST.. */
-#define REC_DIR_END (8u + 16u * 127u)            /* .. REC_FIRST + REC_SLOTS */
-_Static_assert(REC_DIR_START == 8u + 16u * REC_FIRST && REC_DIR_END == 8u + 16u * (REC_FIRST + REC_SLOTS),
-               "the recorder's directory entries");
+/* v0.22: recordings go into the pool's last REC_BYTES (from REC_OFFSET), wherever there is
+ * room, and into any slot (rec.c's DEST): a directory entry whose frames lie there is a
+ * recording, kept on the +Drive and kept when the host tool sends a new image */
+#define REC_BYTES (POOL_BYTES - REC_OFFSET)
+#define ENTRY(k) (DIR + 8 + 16 * (u32)(k))
+#define NAME(k) (DIR + NAMES_OFFSET + NAME_BYTES * (u32)(k))
 _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in our RAM");
 
 #define REPLY_TAIL ((volatile u16 *)0x80005E40u)                    /* 0x800053a4 + 0xa9c: the DSP's status */
@@ -111,6 +113,7 @@ u32 smp_cmds __attribute__((section(".data"))) = 0;                /* commands s
 u32 smp_hi __attribute__((section(".data"))) = 0;                  /* the image's bytes (0: none) */
 u32 smp_walk __attribute__((section(".data"))) = 0;                /* bytes loaded into the DSP */
 static int dir_ok __attribute__((section(".data"))) = 0;          /* DIR holds a whole directory */
+static int rec_keep __attribute__((section(".data"))) = 0;        /* a send merges DIR's recordings (v0.22) */
 
 static u32 checksum(const u8 *p, u32 n)
 {
@@ -623,14 +626,74 @@ static u32 s_since __attribute__((section(".data"))) = 0;
 static u32 s_tries __attribute__((section(".data"))) = 0;
 static u32 s_frames __attribute__((section(".data"))) = 0;
 
-/* from rec.c when a recording is done: SLOT 0..3, FRAMES recorded */
-void smp_save_recording(int slot, u32 frames)
+static int is_recording(u32 k)                  /* slot K's frames lie in the recordings' area */
 {
-    if (!store_ok() || frames == 0 || sstate)
+    const u8 *e = ENTRY(k);
+    u32 a = le32(e), f = le32(e + 4);
+    return dir_ok && a >= SMP_POOL_DDR + REC_OFFSET && a < SMP_POOL_DDR + POOL_BYTES && f;
+}
+
+/* slot K holds nothing (SAMP K + 1) */
+int smp_slot_empty(int k)
+{
+    if (k < 0 || k >= POOL_SLOTS)
+        return 0;
+    if (!dir_ok)
+        return 1;
+    const u8 *e = ENTRY(k);
+    return le32(e) < SMP_POOL_DDR + DATA_OFFSET || le32(e + 4) == 0;
+}
+
+/* where a recording into slot DEST may go: the largest stretch of the recordings' area
+ * that no other slot's recording uses (DEST's own old one is free: the recording replaces
+ * it). -> its start, bytes into the area, a multiple of 512; *ROOM its length */
+u32 smp_rec_place(int dest, u32 *room)
+{
+    u32 best = 0, best_len = 0;
+    for (int c = -1; c < POOL_SLOTS; c++) {    /* each candidate start: 0, or a recording's end */
+        u32 s = 0;
+        if (c >= 0) {
+            if (c == dest || !is_recording((u32)c))
+                continue;
+            const u8 *e = ENTRY(c);
+            s = (le32(e) - SMP_POOL_DDR - REC_OFFSET + le32(e + 4) * 2u + 511u) & ~511u;
+        }
+        if (s >= REC_BYTES)
+            continue;
+        u32 next = REC_BYTES;
+        int inside = 0;
+        for (int k = 0; k < POOL_SLOTS; k++) {
+            if (k == dest || !is_recording((u32)k))
+                continue;
+            const u8 *e = ENTRY(k);
+            u32 a = le32(e) - SMP_POOL_DDR - REC_OFFSET, b = a + le32(e + 4) * 2u;
+            if (a <= s && s < b)
+                inside = 1;
+            if (a >= s && a < next)
+                next = a & ~511u;
+        }
+        if (!inside && next > s && next - s > best_len) {
+            best = s;
+            best_len = next - s;
+        }
+    }
+    *room = best_len;
+    return best;
+}
+
+/* from rec.c when a recording is done: into slot SLOT, its frames at OFF bytes into the
+ * recordings' area, FRAMES of them */
+static u32 s_place __attribute__((section(".data"))) = 0;
+void smp_save_recording(int slot, u32 off, u32 frames)
+{
+    if (!store_ok() || frames == 0 || sstate || slot < 0 || slot >= POOL_SLOTS - 1 || off >= REC_BYTES)
         return;
-    s_slot = (u32)slot & 3u;
+    if (frames > (REC_BYTES - off) / 2u)
+        frames = (REC_BYTES - off) / 2u;
+    s_slot = (u32)slot;
+    s_place = off;
     s_frames = frames;
-    s_off = REC_OFFSET + (s_slot << REC_SLOT_SHIFT);
+    s_off = REC_OFFSET + off;
     s_end = s_off + ((frames * 2u + 511u) & ~511u);
     smp_saved = 0;
     sstate = 1;
@@ -681,20 +744,26 @@ static void save_poll(void)
                 save_window();
                 return;
             }
-            /* the slot's directory entry, into the image's directory page */
-            u8 *e = DIR + 8 + 16 * (REC_FIRST + s_slot);
-            put_le32(e, SMP_POOL_DDR + REC_OFFSET + (s_slot << REC_SLOT_SHIFT));
-            put_le32(e + 4, s_frames);
-            put_le32(e + 8, 0x3F800000u);                    /* rate 1.0 */
-            put_le32(e + 12, 1);                             /* int16 */
-            u32 bytes = smp_hi > s_end ? smp_hi : s_end;
+            /* the slot's directory entry and name, into the image's directory page */
             if (!dir_ok) {                                   /* no image yet: an empty pool */
                 for (u32 k = 0; k < DIR_BYTES; k++)
-                    if (k < 8 + 16 * REC_FIRST || k >= REC_DIR_END)
-                        DIR[k] = 0;
+                    DIR[k] = 0;
                 put_le32(DIR, POOL_MAGIC);
                 dir_ok = 1;
             }
+            u8 *e = ENTRY(s_slot);
+            put_le32(e, SMP_POOL_DDR + REC_OFFSET + s_place);
+            put_le32(e + 4, s_frames);
+            put_le32(e + 8, 0x3F800000u);                    /* rate 1.0 */
+            put_le32(e + 12, 1);                             /* int16 */
+            u8 *nm = NAME(s_slot);                           /* REC + the slot, as SAMP shows it */
+            u32 sn = s_slot + 1;
+            nm[0] = 'R'; nm[1] = 'E'; nm[2] = 'C';
+            nm[3] = (u8)('0' + sn / 100); nm[4] = (u8)('0' + sn / 10 % 10); nm[5] = (u8)('0' + sn % 10);
+            nm[6] = 0; nm[7] = 0;
+            if (le32(DIR + 4) < s_slot + 1)                  /* the count covers it */
+                put_le32(DIR + 4, s_slot + 1);
+            u32 bytes = smp_hi > s_end ? smp_hi : s_end;
             if (image_write(0, DIR_BYTES, DIR) != 0 || header_write(bytes) != 0) {
                 sstate = 0;
                 smp_saved = -1;
@@ -741,12 +810,30 @@ static int up_flush(void)
     if (n == 0)
         return 0;
     n = (n + 511u) & ~511u;
-    if (up_block == 0) {                        /* the directory page: yours, but the */
-        for (u32 k = 0; k < DIR_BYTES; k++)     /* recorder's entries stay the +Drive's */
-            if (k < REC_DIR_START || k >= REC_DIR_END)
-                DIR[k] = STAGE(2)[k];
-            else
-                STAGE(2)[k] = DIR[k];
+    if (up_block == 0) {                        /* the directory page: yours, and the */
+        u8 *nd = STAGE(2);                      /* recordings kept (v0.22: in any slot) */
+        u32 count = le32(nd + 4);
+        for (u32 k = 0; k < POOL_SLOTS - 1 && rec_keep; k++) {
+            if (!is_recording(k))
+                continue;
+            u32 j = k;                          /* its own slot, if the new image leaves it */
+            if (le32(nd + 8 + 16 * j + 4) != 0) {           /* empty; else the first empty */
+                for (j = 0; j < POOL_SLOTS - 1 && le32(nd + 8 + 16 * j + 4) != 0; j++)
+                    ;
+                if (j >= POOL_SLOTS - 1)
+                    continue;                   /* no room: it is not kept */
+            }
+            for (u32 b = 0; b < 16; b++)
+                nd[8 + 16 * j + b] = ENTRY(k)[b];
+            for (u32 b = 0; b < NAME_BYTES; b++)
+                nd[NAMES_OFFSET + NAME_BYTES * j + b] = NAME(k)[b];
+            if (count < j + 1)
+                count = j + 1;
+        }
+        put_le32(nd + 4, count);
+        for (u32 k = 0; k < DIR_BYTES; k++)
+            DIR[k] = nd[k];
+        rec_keep = 0;
     }
     int r = image_write(up_block, n, STAGE(2));
     up_block = 0xFFFFFFFFu;
@@ -874,26 +961,29 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         } else {
             smp_lstate = L_IDLE;                    /* no load runs while the image changes */
             job_data = 0;
-            if (!dir_ok)                        /* no recordings kept yet */
-                for (u32 k = REC_DIR_START; k < REC_DIR_END; k++)
-                    DIR[k] = 0;
-            dir_ok = 0;
-            up_bytes = bytes;
+            rec_keep = dir_ok;                  /* DIR holds the old image's directory: */
+            up_bytes = bytes;                   /* its recordings are merged into the new */
             up_block = 0xFFFFFFFFu;
             up_fill = 0;
         }
     } else if (cmd == 9) {                      /* END */
         u32 bytes = up_bytes;
-        for (u32 k = REC_FIRST; k < REC_FIRST + REC_SLOTS; k++) {   /* and the recordings' */
-            const u8 *e = DIR + 8 + 16 * k;
+        if (up_flush() != 0)
+            up_bytes = 0;                       /* -> refused below */
+        if (up_bytes && le32(DIR) == POOL_MAGIC)
+            dir_ok = 1;                         /* DIR is the new directory, recordings merged */
+        for (u32 k = 0; k < POOL_SLOTS; k++) {  /* the image runs to its last recording too */
+            if (!is_recording(k))
+                continue;
+            const u8 *e = ENTRY(k);
             u32 a = le32(e), f = le32(e + 4);
-            if (a >= SMP_POOL_DDR + REC_OFFSET && a - SMP_POOL_DDR + f * 2u > bytes)
+            if (a - SMP_POOL_DDR + f * 2u > bytes)
                 bytes = a - SMP_POOL_DDR + f * 2u;
         }
         bytes = (bytes + 511u) & ~511u;
         if (bytes > POOL_BYTES)
             bytes = POOL_BYTES;
-        if (!up_bytes || up_flush() != 0 || le32(DIR) != POOL_MAGIC
+        if (!up_bytes || le32(DIR) != POOL_MAGIC || image_write(0, DIR_BYTES, DIR) != 0
             || header_write(bytes) != 0) {
             rp[3] = 1;
         } else {

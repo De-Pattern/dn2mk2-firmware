@@ -1,18 +1,27 @@
-/* The recorder's ColdFire end (docs/sampler.md, v0.15): the RECORDER page (SYN page 3 of a
- * sample machine, drawn by smp_page.c's smp_rec_draw), its YES key, ARM, and the
- * commands it sends the DSP (link.c's smp_command; dnfw.sampler.program.recorder).
+/* The recorder's ColdFire end (docs/sampler.md; v0.22: the DT2's SAMPLING screen, global).
  *
- * Nothing about the recorder is saved with a sound. Its settings sit on the page's records
- * (SRC, CHAN, THRES, DEST, R.LEN, R.STRT), but the DSP only ever acts on a command, and a
- * command is only sent while the page is on the screen:
- *   - YES records at once (or stops a recording), as the DT2's RECORD NOW;
- *   - turning ARM arms the recorder (R.STRT THRES: at the threshold; PLAY: at the first
- *     note any track plays) or, armed or recording, stops it. ARM's switch shows what the
- *     DSP is doing, not the record's value, so a sound saved with ARM on arms nothing.
- *   - SRC and CHAN are sent as they change, so the meter shows the source.
- * A recording, once it ends, is saved to the +Drive (link.c's smp_save_recording, v0.16).
- * The DSP answers in the SPI reply's tail (link.c's smp_status): its state, the command it
- * last took, the frames recorded, the block's peak.
+ * FUNC + VOICE (the DN2's unison toggle, replaced; VOICE alone still opens its menu)
+ * opens the RECORDER over whatever page is up, and closes it again. While it is up its
+ * eight knobs are the recorder's, not the track's (smp_ui_pop takes them out of the UI
+ * queue before any view sees them):
+ *
+ *   A SRC     EXT L+R, EXT L, EXT R, MAIN, TRK1..16
+ *   D THRES   0..120, the meter's tick
+ *   E DEST    the slot the recording goes into (SAMP 1..127); the next empty one
+ *   F R.LEN   MAX, or 1..128 sixteenth steps at the tempo
+ *   G R.STRT  THRES (when the input reaches THRES) or PLAY (the first note any track plays)
+ *   H ARM     a turn arms the recorder (or, armed or recording, stops it)
+ *   YES       records at once, or stops; NO closes the screen (a recording goes on)
+ *
+ * Any page key, [TRK], [PTN], [SONG], [PRESET] or [SETTINGS] closes it and does what it
+ * does; PLAY, STOP, the trigs and FUNC pass through and keep it up. FUNC + VOICE brings
+ * it back; a recording runs on behind any page, as on the DT2.
+ *
+ * A recording goes where there is room in the recordings' area (link.c's smp_rec_place:
+ * the largest free stretch; the slot's own old recording is freed), into the slot DEST
+ * names; when it ends it is saved to the +Drive with the name RECnnn (link.c), and DEST
+ * moves on to the next empty slot. The DSP answers in the SPI reply's tail (smp_status):
+ * its state, the command it last took, the frames recorded, the block's peak.
  */
 #include "wr_gen.h"
 
@@ -24,13 +33,9 @@ typedef unsigned char u8;
 #define CTL_FRAME ((volatile u16 *)0x80005E60u)
 #define TEMPO_WORD 108                                               /* the frame's BPM x 120 (byte 216) */
 #define KEY_ORIG ((int (*)(void *, void *))0x40016480u)              /* the parameter page's key handler */
-#define KEY_CODE ((int (*)(void *))0x40116018u)
-#define KEY_PRESSED ((int (*)(void *))0x401160BCu)
-#define KEY_YES 10
-#define KEY_UP 11                                                    /* UP 11, NO 12, LEFT 13, DOWN 14, RIGHT 15 */
-#define KEY_NO 12
-#define KEY_RIGHT 15
-#define VISIBLE 750u                                                 /* frames: half a second */
+/* the UI queue's receive: the item in d0. Declared as returning an integer: GCC takes a
+ * returned pointer from a0, where the stock code leaves nothing of the kind */
+#define UI_POP ((u32 (*)(void *))0x40001928u)
 
 #define CMD_ARM 1
 #define CMD_NOW 2
@@ -38,51 +43,71 @@ typedef unsigned char u8;
 #define CMD_MONITOR 4
 #define CMD_ARM_PLAY 5
 
+/* UI-queue items (16 bytes): type, then code, flags (keys) or index, delta (knobs) */
+#define IT_KEY 0
+#define IT_KNOB 1
+#define IT_DROP 0xFF                                                 /* past every case: the loop skips it */
+#define F_PRESS 0x01
+#define F_RELEASE 0x10
+enum { K_TRIG = 1, K_MOD = 6, K_PRESET = 7, K_SETTINGS = 8, K_YES = 10, K_UP = 11, K_NO = 12,
+       K_LEFT = 13, K_DOWN = 14, K_RIGHT = 15, K_TRK = 16, K_PTN = 23, K_SONG = 24,
+       K_ENC_A = 41, K_ENC_H = 48 };
+
 extern u32 smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
 extern int smp_status(u16 *out);
-extern void smp_save_recording(int slot, u32 frames);
+extern void smp_save_recording(int slot, u32 off, u32 frames);
+extern u32 smp_rec_place(int dest, u32 *room);
+extern int smp_slot_empty(int k);
+extern int smp_list_up(void *view);
+extern void smp_list_hold(void);
+extern void smp_list_close(void);
+extern void *smp_list_view;
 
-/* what the page last drew (smp_rec_draw fills these each time it draws) */
-void *rec_view __attribute__((section(".data"))) = 0;
-u32 rec_seen __attribute__((section(".data"))) = 0;          /* FRAMES then, + 1 (0: never) */
-int rec_src __attribute__((section(".data"))) = 0;           /* 0 IN, 1 MAIN, 2 + t */
-int rec_chan __attribute__((section(".data"))) = 0;
-int rec_thres __attribute__((section(".data"))) = 0;         /* 0..120 */
-int rec_dest __attribute__((section(".data"))) = 0;          /* 0..3: SAMP 124..127 */
-int rec_rlen __attribute__((section(".data"))) = 0;          /* 0 MAX, else steps */
-int rec_rstrt __attribute__((section(".data"))) = 0;         /* 0 THRES, 1 PLAY */
-int rec_arm __attribute__((section(".data"))) = 0;           /* the ARM record's value */
+/* the recorder's settings: the instrument's, not a sound's (none of it is saved) */
+int rec_overlay __attribute__((section(".data"))) = 0;      /* the screen is up */
+int rec_src __attribute__((section(".data"))) = 0;          /* SMP_REC_SOURCES choices */
+int rec_thres __attribute__((section(".data"))) = 0;        /* 0..120 */
+int rec_dest __attribute__((section(".data"))) = -1;        /* slot 0..126 (SAMP 1..127); -1 not chosen */
+int rec_rlen __attribute__((section(".data"))) = 0;         /* 0 MAX, else steps */
+int rec_rstrt __attribute__((section(".data"))) = 0;        /* 0 THRES, 1 PLAY */
+u32 rec_room __attribute__((section(".data"))) = 0;         /* bytes free for the next recording */
 
 /* what the DSP last said */
-int rec_state __attribute__((section(".data"))) = 0;         /* 0 idle, 1 armed, 2 recording, 3 done */
+int rec_state __attribute__((section(".data"))) = 0;        /* 0 idle, 1 armed, 2 recording, 3 done */
 u32 rec_frames __attribute__((section(".data"))) = 0;
-int rec_peak __attribute__((section(".data"))) = 0;          /* 0..32767 */
-u32 rec_heard __attribute__((section(".data"))) = 0;         /* FRAMES of the last good status, + 1 */
-/* v0.20: whether the DSP took our last command (its status echoes the sequence): 1 yes,
- * -1 no answer within a second of sending it, 0 not known yet */
-int rec_link __attribute__((section(".data"))) = 0;
+int rec_peak __attribute__((section(".data"))) = 0;         /* 0..32767 */
+u32 rec_heard __attribute__((section(".data"))) = 0;        /* FRAMES of the last good status, + 1 */
+int rec_link __attribute__((section(".data"))) = 0;         /* the DSP took our last command: 1, -1 no, 0 ? */
+int rec_saved_slot __attribute__((section(".data"))) = -1;  /* the last recording's slot, for the screen */
+
 static u32 sent_seq __attribute__((section(".data"))) = 0;
 static u32 sent_at __attribute__((section(".data"))) = 0;
-
-static int arm_known __attribute__((section(".data"))) = 0;
-static int arm_last __attribute__((section(".data"))) = 0;
 static int mon_known __attribute__((section(".data"))) = 0;
-static int mon_src __attribute__((section(".data"))) = 0;
-static int mon_chan __attribute__((section(".data"))) = 0;
+static int mon_src __attribute__((section(".data"))) = -1;
 static u16 st[16] __attribute__((section(".data")));
-static int rec_taken __attribute__((section(".data"))) = 0;   /* the slot a recording goes into */
+static int rec_taken __attribute__((section(".data"))) = -1;   /* the slot the recording goes into */
+static u32 rec_off __attribute__((section(".data"))) = 0;      /* .. its place in the area */
 static int was_recording __attribute__((section(".data"))) = 0;
+static u32 eaten __attribute__((section(".data"))) = 0;        /* keys whose press we took: their release too */
 
 int rec_visible(void)
 {
-    return rec_seen && FRAMES + 1u - rec_seen < VISIBLE;
+    return rec_overlay;
 }
 
-/* the frames R.LEN asks for: MAX the slot's whole length, else that many sixteenth steps
- * at the tempo (BPM x 120 in the frame: 48,000 x 60 / 4 x 120 / that = 86,400,000 / it) */
+/* the DSP's source and channel for a SRC choice: EXT L+R, L, R; MAIN; TRK1..16 */
+static void src_of(int s, u32 *src, u32 *chan)
+{
+    if (s < 3) { *src = 0; *chan = (u32)s; }
+    else if (s == 3) { *src = 1; *chan = 0; }
+    else { *src = (u32)(s - 2); *chan = 0; }
+}
+
+/* the frames R.LEN asks for: MAX the most the DSP records (66 s), else that many sixteenth
+ * steps at the tempo (BPM x 120 in the frame: 48,000 x 60 / 4 x 120 / that = 86,400,000 / it) */
 static u32 rec_length(void)
 {
-    u32 full = 1u << 20;
+    u32 full = 0xFFFFFFu;
     if (rec_rlen <= 0)
         return full;
     u32 bpm120 = CTL_FRAME[TEMPO_WORD];
@@ -92,25 +117,65 @@ static u32 rec_length(void)
     return f > full ? full : f;
 }
 
+static int next_empty(int from)
+{
+    for (int j = 0; j < 127; j++) {
+        int k = (from + j) % 127;
+        if (smp_slot_empty(k))
+            return k;
+    }
+    return from % 127;
+}
+
 static void send(int cmd)
 {
-    u32 thr = (u32)rec_thres * 32767u / 120u;
-    sent_seq = smp_command((u32)cmd, (u32)rec_src, (u32)rec_chan, thr, (u32)rec_dest << 24 | rec_length());
+    u32 src, chan, thr = (u32)rec_thres * 32767u / 120u;
+    src_of(rec_src, &src, &chan);
+    if (rec_dest < 0)
+        rec_dest = next_empty(0);
+    u32 place = 0;
+    if (cmd == CMD_NOW || cmd == CMD_ARM || cmd == CMD_ARM_PLAY) {
+        u32 room;
+        place = smp_rec_place(rec_dest, &room);
+        rec_room = room;
+        if (room < 0x10000u)                    /* no room: nothing is recorded */
+            return;
+        rec_taken = rec_dest;
+        rec_off = place;
+    }
+    sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8, thr,
+                           (u32)rec_dest << 24 | rec_length());
     sent_at = FRAMES;
     if (rec_link < 0)
         rec_link = 0;
-    if (cmd == CMD_NOW || cmd == CMD_ARM || cmd == CMD_ARM_PLAY)
-        rec_taken = rec_dest;
-    if (cmd != CMD_MONITOR) {
-        mon_src = rec_src;
-        mon_chan = rec_chan;
-    }
+    mon_src = rec_src;
 }
 
-/* YES on the page: RECORD NOW, or stop a recording */
 void rec_yes(void)
 {
     send(rec_state == 2 ? CMD_STOP : CMD_NOW);
+}
+
+static void rec_arm_toggle(void)
+{
+    if (rec_state == 1 || rec_state == 2)
+        send(CMD_STOP);
+    else
+        send(rec_rstrt ? CMD_ARM_PLAY : CMD_ARM);
+}
+
+/* FUNC + VOICE (coldfire.py's REC_COMBO_SITE, in the main key handler's VOICE case) */
+void rec_combo(void)
+{
+    rec_overlay = !rec_overlay;
+    if (rec_overlay) {
+        mon_known = 0;
+        if (rec_dest < 0 || (!smp_slot_empty(rec_dest) && rec_dest != rec_saved_slot))
+            rec_dest = next_empty(rec_dest < 0 ? 0 : rec_dest);
+        u32 room;
+        smp_rec_place(rec_dest, &room);
+        rec_room = room;
+    }
 }
 
 /* from the UI loop (page.c's wr_poll), every pass */
@@ -123,58 +188,129 @@ void rec_poll(void)
         rec_heard = FRAMES + 1u;
         if (sent_seq && st[1] == (u16)sent_seq)
             rec_link = 1;
-        /* a recording has ended (v0.16): it is kept on the +Drive, as the DT2 keeps its
-         * recordings, and is there again after a power cycle */
+        /* a recording has ended: it is kept on the +Drive, as the DT2 keeps its
+         * recordings, and is there again after a power cycle; DEST moves on */
         if (rec_state == 2)
             was_recording = 1;
         else if (was_recording) {
             was_recording = 0;
-            smp_save_recording(rec_taken, rec_frames);
+            if (rec_taken >= 0) {
+                smp_save_recording(rec_taken, rec_off, rec_frames);
+                rec_saved_slot = rec_taken;
+                rec_dest = next_empty(rec_taken + 1);
+                if (rec_dest == rec_taken)
+                    rec_dest = rec_taken;
+            }
         }
     }
     if (sent_seq && rec_link == 0 && FRAMES - sent_at > 1500u)
         rec_link = -1;                          /* sent, and no echo within a second */
-    if (!rec_visible()) {                       /* off the page: nothing is sent */
-        arm_known = mon_known = 0;
+    if (!rec_overlay) {                         /* off the screen: no monitoring is sent */
+        mon_known = 0;
         return;
     }
-    if (!mon_known || rec_src != mon_src || rec_chan != mon_chan) {
+    if (!mon_known || rec_src != mon_src) {
         mon_known = 1;
-        mon_src = rec_src;
-        mon_chan = rec_chan;
         if (rec_state != 2)                     /* not while recording: the source stays */
             send(CMD_MONITOR);
-    }
-    if (!arm_known) {                           /* what ARM was when the page came up */
-        arm_known = 1;
-        arm_last = rec_arm;
-    } else if (rec_arm != arm_last) {           /* turned: a toggle */
-        arm_last = rec_arm;
-        if (rec_state == 1 || rec_state == 2)
-            send(CMD_STOP);
-        else
-            send(rec_rstrt ? CMD_ARM_PLAY : CMD_ARM);
+        mon_src = rec_src;
     }
 }
 
-/* the parameter page's key handler (its vtable slot at 0x401d49a8 points here): YES on the
- * RECORDER page is ours; everything else, and every other page, is stock's */
-extern int smp_list_up(void *view);
-extern void smp_list_hold(void);
+static int clamp(int v, int lo, int hi)
+{
+    return v < lo ? lo : v > hi ? hi : v;
+}
 
+/* a knob on the recorder's screen: INDEX 1..8 (A..H), DELTA detents */
+static void knob(int index, int delta)
+{
+    switch (index) {
+    case 1: rec_src = clamp(rec_src + delta, 0, SMP_REC_SOURCES - 1); break;
+    case 4: rec_thres = clamp(rec_thres + delta, 0, 120); break;
+    case 5: if (rec_state != 2 && rec_state != 1) rec_dest = clamp((rec_dest < 0 ? 0 : rec_dest) + delta, 0, 126);
+        break;
+    case 6: rec_rlen = clamp(rec_rlen + delta, 0, 128); break;
+    case 7: rec_rstrt = delta > 0 ? 1 : 0; break;
+    case 8: rec_arm_toggle(); break;
+    default: break;
+    }
+}
+
+static int closes(u32 code)
+{
+    return (code >= K_TRIG && code <= K_MOD) || code == K_PRESET || code == K_SETTINGS
+           || code == K_TRK || code == K_PTN || code == K_SONG;
+}
+
+/* the UI loop's queue receive (coldfire.py's UI_POP_SITE): every item passes here before
+ * any view sees it. With the recorder up, its keys and knobs are taken; with the sample
+ * list up, UP and DOWN become SAMP's knob (D) a detent, and pushing that knob closes the
+ * list. A taken item's type becomes IT_DROP, which the loop passes over. */
+u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
+{
+    u8 *it = (u8 *)UI_POP(queue);
+    if (!it)
+        return (u32)it;
+    u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
+    u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
+    if (it[0] == IT_KEY && code < 32 && (eaten >> code & 1)) {
+        if (flags & F_RELEASE) {                /* the release of a key we took */
+            eaten &= ~(1u << code);
+            it[0] = IT_DROP;
+        }
+        return (u32)it;
+    }
+    if (rec_overlay) {
+        if (it[0] == IT_KNOB) {
+            u32 index = code;
+            int delta = (signed char)it[8];
+            if (index >= 1 && index <= 8) {
+                knob((int)index, delta);
+                it[0] = IT_DROP;
+            }
+            return (u32)it;
+        }
+        if (it[0] != IT_KEY)
+            return (u32)it;
+        int press = (flags & F_PRESS) && !(flags & F_RELEASE);
+        if (code == K_YES || code == K_NO || (code >= K_UP && code <= K_RIGHT)
+            || (code >= K_ENC_A && code <= K_ENC_H)) {
+            if (press && code == K_YES)
+                rec_yes();
+            if (press && code == K_NO)
+                rec_overlay = 0;                /* the screen closes; a recording goes on */
+            if (press && code < 32)
+                eaten |= 1u << code;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+        if (press && closes(code))
+            rec_overlay = 0;                    /* the key does what it does, and the page shows */
+        return (u32)it;
+    }
+    /* the sample list (smp_page.c): UP / DOWN a slot, the SAMP knob's push closes it */
+    if (it[0] == IT_KEY && smp_list_view && smp_list_up(smp_list_view)) {
+        int press = (flags & F_PRESS) && !(flags & F_RELEASE);
+        if (press && (code == K_UP || code == K_DOWN)) {
+            it[0] = IT_KNOB;                    /* SAMP's knob (D), one detent */
+            it[4] = it[5] = it[6] = 0;
+            it[7] = 4;
+            it[8] = code == K_DOWN ? 1 : 0xFF;
+            it[9] = it[10] = it[11] = 0;
+            eaten |= 1u << code;
+            smp_list_hold();
+            return (u32)it;
+        }
+        if (press && code == K_ENC_A + 3)
+            smp_list_close();
+    }
+    return (u32)it;
+}
+
+/* the parameter page's key handler (its vtable slot at 0x401d49a8 points here): stock's,
+ * as it was before v0.15 (the recorder's keys arrive through smp_ui_pop now) */
 int smp_key(void *view, void *ev)
 {
-    int code = KEY_CODE(ev);
-    if (view == rec_view && rec_visible() && code == KEY_YES) {
-        if (KEY_PRESSED(ev) & 0xFF)
-            rec_yes();
-        return 1;
-    }
-    /* v0.20: while the sample list is up, the arrows keep it up (they paged and closed it,
-     * owner on v0.19); SAMP's encoder moves through it */
-    if (code >= KEY_UP && code <= KEY_RIGHT && code != KEY_NO && smp_list_up(view)) {
-        smp_list_hold();
-        return 1;
-    }
     return KEY_ORIG(view, ev);
 }
