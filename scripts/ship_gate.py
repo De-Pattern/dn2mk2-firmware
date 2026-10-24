@@ -257,6 +257,8 @@ def main() -> int:
             syms = work / "link16_syms.json"
             syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith("smp_")}))
             scen = ("save", "fast", "dead", "high", "lowram") if "smp_ram" in lay else ("save", "fast", "dead")
+            if "smp_slices_set" in lay:
+                scen += ("slices",)             # v0.23: the slice editor's reading and saving
             steps = ",".join(f"link16:{syms}:{sc}" for sc in scen)
             rc, out = run("link16", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                      "--build", bdir, "--snapshot", snap, "--steps", steps,
@@ -264,7 +266,7 @@ def main() -> int:
                           env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
                                                    / "section_3_MAIN_OS.bin"),
                                "DNFW_EMU_FLAGS": '{"weakptr": false}'})
-            oks = re.findall(r"link16 (save|fast|dead|high|lowram): .*\"ok\": (true|false)", out)
+            oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices): .*\"ok\": (true|false)", out)
             good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
             gate("sample link (ColdFire)", good,
                  "save, fast (a lost packet resent), dead (nothing gets through: the loader "
@@ -344,6 +346,53 @@ def main() -> int:
             gate("recorder flow (ColdFire)", good,
                  "TRIM's ends move, YES on to NAME (spelt by knob and arrows), YES on to ASSIGN, a "
                  "[TRIG] key makes track 3 ONESHOT on the slot" if good else why)
+
+        # 6e. v0.23, SLICE: its menus drawn over the page (the menu, the grid dialog, the
+        # editor with a slice table), the editor's keys and knobs moving the picked slice;
+        # and in KEYBOARD mode on a SLICE track (SLCE NOTE) trig 4 plays note C0 + 3 and
+        # trig 1 C0, the notes SLCE's NOTE mode turns into slices 4 and 1
+        if "slc_state" in lay:
+            import struct as _st                # noqa: PLC0415
+            g = {k: hex(lay[k]) for k in ("slc_state", "slc_nfr", "slc_ns", "slc_cur", "slc_sl")}
+            from dnfw.sampler import machines as SMx    # noqa: PLC0415
+            hires = hex(SMx.MIRROR + 0x78000)
+            pat = bytes((k * 37) % 200 for k in range(1024)).hex()
+            tb = _st.pack(">9I", 0, 30000, 0, 36000, 70000, 40000, 72000, 140000, 72000).hex()
+            kit = 0x4210C08C
+            pk = ",".join(f"poke:{kit + 52 + 1163 * t + 0xDE:#x}:0d,poke:{kit + 52 + 1163 * t + 108:#x}:0000"
+                          for t in range(16))
+            steps = (f"wait:2,png:p0,poke:{g['slc_state']}:00000001,wait:6,png:m,"
+                     f"poke:{g['slc_state']}:00000002,wait:6,png:g,"
+                     f"poke:{hires}:{pat},poke:{g['slc_nfr']}:00023280,poke:{g['slc_ns']}:00000003,"
+                     f"poke:{g['slc_cur']}:00000000,poke:{g['slc_sl']}:{tb},poke:{g['slc_state']}:00000004,"
+                     f"wait:6,png:e1,right,wait:5,spin:4:6,wait:5,png:e2,mem:{g['slc_cur']}:4,"
+                     f"mem:{g['slc_sl']}:36,no,wait:6,mem:{g['slc_state']}:4,"
+                     f"{pk},tap:18,wait:6,press:28,wait:6,release:28,wait:6,press:25,wait:6,release:25,wait:6")
+            js = work / "slice.json"
+            rc, out = run("slice menus", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                                          "--build", bdir, "--snapshot", snap, "--steps", steps,
+                                          "--regs-at", "0x400576ca",
+                                          "--png-dir", work / "slice", "--json", js], logs,
+                          env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
+                                                   / "section_3_MAIN_OS.bin"),
+                               "DNFW_EMU_FLAGS": '{"weakptr": false}'})
+            why, good = out[-800:], False
+            if rc == 0 and js.exists():
+                r = json.loads(js.read_text())
+                m = r["memory"]
+                shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "m", "g", "e1", "e2")}
+                table = list(_st.unpack(">9I", bytes.fromhex(m[g["slc_sl"]])))
+                notes = [int(x["D4"], 16) for x in r["regs_at"].get("0x400576ca", [])]
+                facts = {"drawn": len({shots[n] for n in shots}) >= 4,
+                         "picked": int(m[g["slc_cur"]], 16) == 1,
+                         "start moved": table[3] > 36000 and table[:3] == [0, 30000, 0],
+                         "closed": int(m[g["slc_state"]], 16) == 0,
+                         "slice notes": notes == [15, 12]}
+                good = all(facts.values())
+                why = str(facts) + f" notes {notes}"
+            gate("SLICE menus and SLICES keys (ColdFire)", good,
+                 "menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
+                 "closes; KEYBOARD trig 4 / trig 1 on a SLICE track play C0+3 / C0" if good else why)
 
         # 7. unit tests
         tests = [t for t in TESTS if (ROOT / t).exists()]

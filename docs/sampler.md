@@ -486,3 +486,40 @@ note that met an empty region while the knobs moved (STRT at its end, LEN at 0) 
 silent when they came back. `oneshot_bounds` now keeps at least 32 frames, or a 508th of
 the sample (a quarter of LEN 1's stretch), whichever is more, and holds STRT that far from
 the end (`MIN_REGION`). The same bounds serve STRETCH and REPITCH.
+
+## v0.23: SLICE's own menus, its editor, and SLICES on the trig keys
+
+**YES on a SLICE track's page** (slice.c; `slc_page_seen` is set while smp_page.c draws a
+SLICE page and cleared by the keys that leave it) opens the DT2's SLICE menu:
+- **CREATE SLICE GRID**: SLICES (E) 2..64 and TR.DET (H). YES makes them: an even grid,
+  or with TR.DET a slice at each transient (the host tool's onset finder, on the sample
+  read back from the +Drive: `smp_analyse`, a 64 KB chunk a UI pass, then `smp_onsets`),
+  as many as SLICES at most. NO cancels.
+- **EDIT SLICE POINTS**: the sample's waveform (1,024 columns read back from the +Drive)
+  with its slices; LEFT/RIGHT pick one, **E** START, **H** END, **D** LOOP, **F** ZOOM
+  (1x..32x), FUNC + F the height, **G** POS; a detent is a 128th of the view (FUNC held:
+  a frame). FUNC + YES adds a slice at the view's middle, FUNC + NO removes the picked
+  one, NO leaves and keeps the edit. A sample with no slices starts as one slice.
+- The DT2's CREATE LINEAR/RANDOM LOCKS are not here (they write sequencer locks).
+
+**Where slices made here live.** A sample sent without slices has no room after its
+frames for a table, so slices made on the instrument go to the **slice area**: 768 bytes
+(64 x start, end, loop) a slot in the recordings' area's last 128 KB
+(`SM.SLICE_AREA`; the recordings' area is 128 KB shorter). The entry's format word gets
+bit 16 and the count; the DSP then reads that slot's table there (`V['sla']`). Saved:
+the slot's sectors to the +Drive, the directory too; sent: the table, then the entry,
+through the loader's checked path. At power-on the area loads after the slots when any
+entry has bit 16. A v0.22 recording reaching into the area (only if 32 MB of recordings
+had been made) keeps the area unused: the menu says SLICE AREA IN USE.
+
+**No slices plays the whole sample** (v0.19..v0.22: nothing played, which is why SLICE
+seemed dead on samples sent without cue points).
+
+**SLICES on the trig keys.** In KEYBOARD mode, on a SLICE track whose SLCE is NOTE, trig
+key k plays slice k + 1: the KeyboardView's call for a key's notes (`0x40034460(kbd,
+&notes, k)` at `0x40058be8`) goes to `slc_keynotes`, which answers the single note C0 + k
+(SLCE's NOTE mode plays slice (note - 12) mod slices); every other track and mode gets
+stock's notes. Stock does the rest (held keys, MIDI out, live recording: the notes record
+and replay the same slices). The stock TRIG MODE menu has a SLICES entry the DN2 build
+disables (value 1024, refused by its setter); it is left alone. The keys' LEDs still show
+the keyboard.

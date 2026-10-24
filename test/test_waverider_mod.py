@@ -309,3 +309,17 @@ def test_the_lfo_list_asks_wr_lfo_mask_which_asks_stock():
 def test_trk_clear_reads_the_real_machine():
     # v0.22: TRK + CLEAR's getMachineType call is one of the identity sites
     assert any(va == 0x40071EB6 for va, _op, _w in CF.IDENTITY_SITES)
+
+
+def test_v023_keyboard_notes_ask_slc_keynotes_which_asks_stock():
+    # the KeyboardView's call for a trig key's notes goes to slc_keynotes (slice.c), which
+    # gives slice k's note on a SLICE track and otherwise calls stock's 0x40034460
+    c = waverider.SPEC["c_chunk"]
+    lo, hi = c["load"], c["load"] + len(bytes.fromhex(c["code"]))
+    e = _edit(CF.KEYNOTES_SITE)
+    assert bytes.fromhex(e["stock"]) == CF.KEYNOTES_STOCK
+    new = bytes.fromhex(e["new"])
+    assert new[:2] == bytes.fromhex("4eb9") and len(new) == 6
+    target = struct.unpack(">I", new[2:])[0]
+    assert lo <= target < hi
+    assert struct.pack(">I", 0x40034460) in _chunked(target, 256)
