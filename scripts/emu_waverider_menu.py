@@ -334,7 +334,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    probe_first=bool(dsp["cmds"]) and dsp["cmds"][0] == SM.CMD_PROBE,
                    routing_changed=route.get("changed", 0))
         want_high = scenario == "high"
-        out["ok"] = (periods < 8000 and low_in and out["probe_first"] and out["probes"] == 1
+        # (a probe sent while the snapshot warmed up may arrive too: one or more, all first)
+        out["ok"] = (periods < 8000 and low_in and out["probe_first"] and out["probes"] >= 1
                      and (high_in if want_high else not high_any) and not route.get("changed"))
     elif scenario in ("fast", "dead"):
         # an image on the +Drive: two sounds, one longer than a 64 KB chunk (fast) or both

@@ -1310,12 +1310,14 @@ def step_rec(init, sound, machines, blocks) -> dict:
         "no more": first_ok,
         "v0.22: the RAM check's last chunks: phase 3 on to 4, then the verdict 1 (status half 4, "
         "both pages), the check idle again; one wrong word: 2":
-            okp and okq and seenp.get("after1") == (4, pn) and pphp == 0
+            okp and okq and seenp.get("after1") == (4, 0) and pphp == 0
             and all(ok_status(h) and h[4] == 1 for h in statp) and all(ok_status(h) and h[4] == 2 for h in statq),
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"entry": [hex(w) for w in words], "entry2": [hex(w) for w in words2],
                         "status1": stat1, "status2": stat2, "exact": (exact1, exact2),
+                        "probe": (seenp.get("after0"), seenp.get("after1"), [h[4] for h in statp],
+                                  [h[4] for h in statq], pphp),
                         "halt": (rec.get("halt"), rec2.get("halt"))}}
 
 

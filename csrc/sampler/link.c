@@ -906,6 +906,8 @@ void smp_boot(void)
         /* v0.22: first the DSP's RAM check (about 0.7 s); then the image loads, past
          * RAM_PROVEN only if the check passed */
         smp_booted = 1;
+        smp_ram = 0;                                    /* this power-on's verdict, not an older one */
+        ram_top = RAM_PROVEN;
         ram_seq = smp_command(CMD_PROBE, 0, 0, 0, 0);
         ram_since = FRAMES;
     }
