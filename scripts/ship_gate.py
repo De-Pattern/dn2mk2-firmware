@@ -528,6 +528,11 @@ def main() -> int:
                                  "wait:8", "png:b1", mem(lay["smp_fb_open"]), "yes", "wait:8", "png:b2",
                                  mem(lay["smp_fb_folder"]), "down", "wait:2", "yes", "wait:8", "png:b3",
                                  mem(samp0, 2), mem(lay["smp_fb_open"]), mem(lay["smp_lst_open"])]
+            # the SAMPLE ACTION menu: into "loops", RIGHT on its sample, DELETE, asked, YES
+            st += samp_all(2) + ["wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
+                                 "down", "wait:4", "yes", "wait:6", "right", "wait:6", "png:m1", "down", "wait:3",
+                                 "down", "wait:3", "yes", "wait:6", "png:m2", "yes", "wait:8", "png:m3",
+                                 mem(M + 8 + 16 + 4, 4)]
             st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0200", f"poke:{cell:#x}:0400",
                    f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
                    f"poke:{cell:#x}:0000", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
@@ -553,13 +558,15 @@ def main() -> int:
                              and shots["b1"] != shots["b2"],
                              "a sample picked: SAMP, both closed": m[f"{sp}@6"] == "0100" and int(m[f"{fo}@7"], 16) == 0
                              and int(m[f"{lo}@8"], 16) == 0,
-                             "modulated SAMP through the loaded slots": [m[ce], m[f"{ce}@10"], m[f"{ce}@11"]]
+                             "DELETE in the SAMPLE ACTION menu empties the slot": m[hex(M + 28)] == "00000000"
+                             and len({pathlib.Path(r["screens"][n]).read_bytes() for n in ("m1", "m2", "m3")}) == 3,
+                             "modulated SAMP through the loaded slots": [m[ce], m[f"{ce}@11"], m[f"{ce}@12"]]
                              == ["0100", "0400", "0200"]}
                     good = all(facts.values())
                     why = str(facts)
                 return good, ("the playhead drawn where the DSP says; the list opens with SAMP, DOWN moves it, NO "
                               "puts it back; FUNC + YES's browser enters a folder and assigns a sample; "
-                              "modulation on SAMP steps through the loaded slots" if good else why)
+                              "its SAMPLE ACTION menu deletes; modulation on SAMP steps through the loaded slots" if good else why)
             gate("sample list, browser, playhead (ColdFire)",
                  *cached("sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body))
 

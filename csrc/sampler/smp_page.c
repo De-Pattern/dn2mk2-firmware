@@ -670,23 +670,50 @@ void smp_list_draw(void *c)
     scrollbar(c, x1 - 1, 1, 43, slot, 128);
 }
 
-/* -- v0.25: the folder browser (ASSIGN SAMPLE), FUNC + YES in the list: the folders the
- * import tool sent, then the samples in none; a folder's samples inside it. YES (or
- * RIGHT) opens a folder or assigns the sample to the track (SAMP), NO (or LEFT) goes back
- * up, and out of the browser at the top. Over the whole screen (page.c's wr_screen). */
+/* -- v0.25: the folder browser (ASSIGN SAMPLE), FUNC + YES in the list, as the DT2's +Drive
+ * browser (its manual 13.6): folders only at the top -- the import tool's, then INCOMING
+ * (what was sent in no folder) and RECORDED (the recorder's) -- and a folder's samples
+ * inside it, each with the slot it plays from (>A009), as the DT2 marks a loaded sample.
+ * YES opens a folder, or gives the track the sample (the DT2's quick assign); NO goes back
+ * up, and out at the top. RIGHT on a sample opens the SAMPLE ACTION menu: LOAD TO TRK,
+ * RENAME, DELETE (asked first). Every sample is in RAM from power-on, so the DT2's LOAD
+ * TO PROJECT has nothing to do here. Over the whole screen (page.c's wr_screen). */
+extern int smp_is_recording(int k);
+#define FB_INCOMING (-2)
+#define FB_RECORDED (-3)
 int smp_fb_open __attribute__((section(".data"))) = 0;
 int smp_fb_folder __attribute__((section(".data"))) = -1;   /* -1 the top */
 int smp_fb_cur __attribute__((section(".data"))) = 0;
+int smp_fb_menu __attribute__((section(".data"))) = 0;      /* the SAMPLE ACTION menu: 0 shut, 1 up, 2 DELETE asked */
+int smp_fb_mcur __attribute__((section(".data"))) = 0;
 
-/* the browser's items where it is: N of them; item I as a folder (-> its index, *slot -1)
- * or a sample (-> -1, *slot its slot) */
+static int fb_in(int k, int folder)              /* slot K (holding something) shows in FOLDER */
+{
+    int f = smp_folder_of(k);
+    if (folder == FB_RECORDED)
+        return f < 0 && smp_is_recording(k);
+    if (folder == FB_INCOMING)
+        return f < 0 && !smp_is_recording(k);
+    return f == folder;
+}
+
+static int fb_has(int folder)
+{
+    for (int k = 0; k < 128; k++)
+        if (!smp_slot_empty(k) && fb_in(k, folder))
+            return 1;
+    return 0;
+}
+
+/* the browser's items where it is: N of them; item I as a folder (-> its index, or
+ * FB_INCOMING / FB_RECORDED; *slot -1) or a sample (-> -1, *slot its slot) */
 int smp_fb_count(void)
 {
-    int n = 0, fc = smp_folder_count();
-    if (smp_fb_folder < 0)
-        n = fc;
+    int n = 0;
+    if (smp_fb_folder == -1)
+        return smp_folder_count() + fb_has(FB_INCOMING) + fb_has(FB_RECORDED);
     for (int k = 0; k < 128; k++)
-        if (!smp_slot_empty(k) && smp_folder_of(k) == smp_fb_folder)
+        if (!smp_slot_empty(k) && fb_in(k, smp_fb_folder))
             n++;
     return n;
 }
@@ -694,18 +721,43 @@ int smp_fb_count(void)
 int smp_fb_item(int i, int *slot)
 {
     *slot = -1;
-    if (smp_fb_folder < 0) {
+    if (smp_fb_folder == -1) {
         int fc = smp_folder_count();
         if (i < fc)
             return i;
         i -= fc;
+        if (fb_has(FB_INCOMING) && i-- == 0)
+            return FB_INCOMING;
+        if (fb_has(FB_RECORDED) && i == 0)
+            return FB_RECORDED;
+        return -1;
     }
     for (int k = 0; k < 128; k++)
-        if (!smp_slot_empty(k) && smp_folder_of(k) == smp_fb_folder && i-- == 0) {
+        if (!smp_slot_empty(k) && fb_in(k, smp_fb_folder) && i-- == 0) {
             *slot = k;
             return -1;
         }
     return -1;
+}
+
+/* the top's item that is folder F (to land on it coming back up) */
+int smp_fb_index_of(int f)
+{
+    int keep = smp_fb_folder, n, slot;
+    smp_fb_folder = -1;
+    n = smp_fb_count();
+    for (int i = 0; i < n; i++)
+        if (smp_fb_item(i, &slot) == f && slot < 0) {
+            smp_fb_folder = keep;
+            return i;
+        }
+    smp_fb_folder = keep;
+    return 0;
+}
+
+static const char *fb_folder_name(int f)
+{
+    return f == FB_INCOMING ? "incoming" : f == FB_RECORDED ? "recorded" : smp_folder_name(f);
 }
 
 static void folder_icon(void *c, int x, int y)
@@ -720,6 +772,9 @@ int smp_fb_visible(void)
     return smp_fb_open;
 }
 
+#define FB_ACTIONS 3
+static const char *const fb_actions[FB_ACTIONS] = {"LOAD TO TRK", "RENAME", "DELETE"};
+
 void smp_fb_draw(void *c, int samp)
 {
     for (int y = 0; y <= 63; y++)
@@ -727,14 +782,16 @@ void smp_fb_draw(void *c, int samp)
             SET_PIXEL(c, x, y, 0);
     char num[4];
     num3(num, samp);
-    if (smp_fb_folder < 0)
+    if (smp_fb_folder == -1)
         LABEL(c, 64, 57, "ASSIGN SAMPLE > A%s", num);
-    else
-        LABEL(c, 64, 57, "%.18s > A%s", smp_folder_name(smp_fb_folder), num);
+    else {
+        folder_icon(c, 2, 57);
+        LABEL(c, 64, 57, "%.22s", fb_folder_name(smp_fb_folder));
+    }
     hline(c, 0, 127, 55, 0);
     int n = smp_fb_count();
     if (n == 0) {
-        TEXT(c, FONT, 64, 28, CENTRED, "%s", smp_folder_count() || smp_count() > 0 ? "EMPTY" : "NO SAMPLES");
+        TEXT(c, FONT, 64, 28, CENTRED, "%s", "NO SAMPLES");
         return;
     }
     if (smp_fb_cur >= n)
@@ -746,23 +803,49 @@ void smp_fb_draw(void *c, int samp)
         top = n - 6;
     if (top < 0)
         top = 0;
+    int wide = smp_fb_menu ? 62 : 123;          /* the action menu takes the right half */
     for (int r = 0; r < 6 && top + r < n; r++) {
         int i = top + r, y = 46 - 9 * r, slot;
         int f = smp_fb_item(i, &slot);
-        if (f >= 0) {
-            TEXT(c, FONT, 3, y, 0, "%.18s", smp_folder_name(f));
-            folder_icon(c, 112, y);
+        if (slot < 0) {
+            TEXT(c, FONT, 3, y, 0, smp_fb_menu ? "%.9s" : "%.18s", fb_folder_name(f));
+            if (!smp_fb_menu)
+                folder_icon(c, 112, y);
         } else {
-            char nm[21];
-            slot_name(slot + 1, nm, 20);
+            char nm[21], sn[4];
+            slot_name(slot + 1, nm, smp_fb_menu ? 9 : 14);
             TEXT(c, FONT, 3, y, 0, "%s", nm);
-            if (slot + 1 == samp)
-                TEXT(c, FONT, 104, y, 0, "%s", "*");
+            if (!smp_fb_menu) {
+                num3(sn, slot + 1);
+                LABEL(c, 109, y, ">A%s", sn);  /* the slot it plays from */
+                if (slot + 1 == samp)
+                    fill(c, 0, y, 1, y + 4);   /* the track's own */
+            }
         }
         if (i == smp_fb_cur)
-            box(c, 0, y - 2, 123, y + 7, 0);
+            box(c, 0, y - 2, wide, y + 7, 0);
     }
     scrollbar(c, 126, 1, 53, smp_fb_cur, n);
+    if (smp_fb_menu) {                          /* SAMPLE ACTION, as the DT2's: a list at the right */
+        for (int y = 0; y <= 54; y++)
+            for (int x = 65; x <= 124; x++)
+                SET_PIXEL(c, x, y, 0);
+        vline(c, 65, 0, 54, 1);
+        if (smp_fb_menu == 2) {
+            TEXT(c, FONT, 95, 38, CENTRED, "%s", "DELETE?");
+            LABEL(c, 95, 24, "%s", "YES / NO");
+            return;
+        }
+        for (int a = 0; a < FB_ACTIONS; a++) {
+            int y = 46 - 9 * a;
+            if (a == 0)
+                TEXT(c, FONT, 68, y, 0, "LOAD TRK %d", (int)UI_TRACK + 1);
+            else
+                TEXT(c, FONT, 68, y, 0, "%s", fb_actions[a]);
+            if (a == smp_fb_mcur)
+                box(c, 66, y - 2, 124, y + 7, 0);
+        }
+    }
 }
 
 void smp_page_draw(void *view, void *c, int kind, int wave)

@@ -66,6 +66,10 @@ extern void *smp_list_view;
 extern int smp_lst_orig, smp_overlay_dirty;     /* v0.25: the list, the folder browser */
 extern int smp_fb_open, smp_fb_folder, smp_fb_cur;
 extern int smp_fb_item(int i, int *slot);
+extern int smp_fb_menu, smp_fb_mcur;
+extern int smp_fb_index_of(int f);
+extern void smp_discard(int k);
+static void rename_start(int slot);
 static int lst_func __attribute__((section(".data"))) = 0;
 #define UI_TRACK_NOW (*(volatile unsigned char *)0x42431A6Cu)
 int smp_set_samp(int track, int value);
@@ -373,6 +377,18 @@ static void name_step(int d)
             nm_text[j] = ' ';
 }
 
+static int nm_only __attribute__((section(".data"))) = 0;   /* v0.25: the browser's RENAME */
+
+static void rename_start(int slot)
+{
+    if (slot < 0 || slot > 126 || rec_phase != PH_REC)
+        return;
+    trim_slot = slot;
+    name_start();
+    nm_only = 1;
+    rec_overlay = 1;
+}
+
 static void name_done(void)
 {
     char t[8];
@@ -388,6 +404,11 @@ static void name_done(void)
     }
     as_done = -1;
     rec_phase = PH_ASSIGN;
+    if (nm_only) {                              /* the browser's RENAME: done, back to the page */
+        nm_only = 0;
+        rec_phase = PH_REC;
+        rec_overlay = 0;
+    }
 }
 
 /* a TRIM knob: E START, H END, a detent a 200th of the recording (FUNC: finer) */
@@ -466,7 +487,11 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
     } else if (rec_phase == PH_NAME) {
         if (code == K_YES)
             name_done();
-        else if (code == K_NO) {
+        else if (code == K_NO && nm_only) {    /* the browser's RENAME, left as it was */
+            nm_only = 0;
+            rec_phase = PH_REC;
+            rec_overlay = 0;
+        } else if (code == K_NO) {
             as_done = -1;
             rec_phase = PH_ASSIGN;              /* the name it has */
         } else if (code == K_LEFT && nm_cur > 0)
@@ -551,9 +576,14 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     /* v0.25: the folder browser (smp_page.c): over everything while it is up */
     if (smp_fb_open) {
         smp_overlay_dirty = 1;
-        if (it[0] == IT_KNOB) {                 /* any knob: through the items */
-            int delta = (signed char)it[8];
-            smp_fb_cur += delta > 0 ? 1 : delta < 0 ? -1 : 0;
+        if (it[0] == IT_KNOB) {                 /* any knob: through the items (or the menu) */
+            int delta = (signed char)it[8], d = delta > 0 ? 1 : delta < 0 ? -1 : 0;
+            if (smp_fb_menu == 1) {
+                smp_fb_mcur += d;
+                if (smp_fb_mcur < 0) smp_fb_mcur = 0;
+                if (smp_fb_mcur > 2) smp_fb_mcur = 2;
+            } else if (!smp_fb_menu)
+                smp_fb_cur += d;
             it[0] = IT_DROP;
             return (u32)it;
         }
@@ -566,24 +596,51 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             it[0] = IT_DROP;
             if (!press)
                 return (u32)it;
-            if (code == K_UP && smp_fb_cur > 0)
+            int slot, f = smp_fb_item(smp_fb_cur, &slot);
+            int t = (int)UI_TRACK_NOW;
+            if (smp_fb_menu == 2) {             /* DELETE asked */
+                if (code == K_YES && slot >= 0)
+                    smp_discard(slot);
+                smp_fb_menu = 0;
+            } else if (smp_fb_menu == 1) {      /* SAMPLE ACTION */
+                if (code == K_UP && smp_fb_mcur > 0)
+                    smp_fb_mcur--;
+                else if (code == K_DOWN && smp_fb_mcur < 2)
+                    smp_fb_mcur++;
+                else if (code == K_NO || code == K_LEFT)
+                    smp_fb_menu = 0;
+                else if (code == K_YES && slot >= 0) {
+                    smp_fb_menu = 0;
+                    if (smp_fb_mcur == 0) {     /* LOAD TO TRK */
+                        smp_set_samp(t, slot + 1);
+                        smp_fb_open = 0;
+                        smp_list_settle(slot + 1);
+                    } else if (smp_fb_mcur == 1) {   /* RENAME: the NAME screen, alone */
+                        smp_fb_open = 0;
+                        smp_list_close();
+                        rename_start(slot);
+                    } else
+                        smp_fb_menu = 2;        /* DELETE: asked first */
+                }
+            } else if (code == K_UP && smp_fb_cur > 0)
                 smp_fb_cur--;
             else if (code == K_DOWN)
                 smp_fb_cur++;
-            else if (code == K_YES || code == K_RIGHT) {
-                int slot, f = smp_fb_item(smp_fb_cur, &slot);
-                if (f >= 0) {
-                    smp_fb_folder = f;
-                    smp_fb_cur = 0;
-                } else if (slot >= 0) {
-                    smp_set_samp((int)UI_TRACK_NOW, slot + 1);
-                    smp_fb_open = 0;
-                    smp_list_settle(slot + 1);  /* the sample is the track's: back to the page */
-                }
+            else if (code == K_RIGHT && slot >= 0) {
+                smp_fb_menu = 1;
+                smp_fb_mcur = 0;
+            } else if ((code == K_YES || code == K_RIGHT) && slot < 0 && f != -1) {
+                smp_fb_folder = f;              /* into the folder */
+                smp_fb_cur = 0;
+            } else if (code == K_YES && slot >= 0) {   /* the DT2's quick assign */
+                smp_set_samp(t, slot + 1);
+                smp_fb_open = 0;
+                smp_list_settle(slot + 1);
             } else if (code == K_NO || code == K_LEFT) {
-                if (smp_fb_folder >= 0) {
-                    smp_fb_cur = smp_fb_folder;
+                if (smp_fb_folder != -1) {
+                    int back = smp_fb_folder;
                     smp_fb_folder = -1;
+                    smp_fb_cur = smp_fb_index_of(back);
                 } else
                     smp_fb_open = 0;            /* back to the list */
             }
@@ -591,6 +648,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         }
         if (press && closes(code)) {
             smp_fb_open = 0;
+            smp_fb_menu = 0;
             smp_list_close();
         }
         return (u32)it;

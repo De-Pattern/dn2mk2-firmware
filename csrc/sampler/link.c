@@ -594,6 +594,12 @@ static void sums(const u8 *buf, u32 words, u32 *a, u32 *b)
     *b = y;
 }
 
+static int is_recording(u32 k);
+int smp_is_recording(int k)                     /* v0.25: the browser's "recorded" folder */
+{
+    return k >= 0 && k < POOL_SLOTS && is_recording((u32)k);
+}
+
 /* -- v0.25: the long names and folders (the import tool's; dnfw.sampler.machines META_*) -- */
 #define META ((u8 *)(SMP_MIRROR + 0x80000u))
 #define META_ROOM 0x2000u
