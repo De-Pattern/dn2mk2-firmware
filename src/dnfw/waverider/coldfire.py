@@ -51,7 +51,7 @@ NEW_TYPES = (5, 6, 7, 8, 9, 10, 11, 12, 13)  # PERC; RESONATOR (docs/rings.md); 
                                         # Digitakt II's sample machines (docs/sampler.md): WaveTone clones
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's place
-MACHINE_NAMES = {5: ("Perc", "PRC"), 6: ("Resonator", "RSN"), 7: ("CZ Phase", "CZP"),
+MACHINE_NAMES = {5: ("Perc", "PRC"), 6: ("SID 6581", "SID"), 7: ("DPRO Wave", "DPW"),   # v0.26: the Monomachine's
                  8: ("Oneshot", "ONE"), 9: ("Werp", "WRP"), 10: ("Stretch", "STR"),
                  11: ("Repitch", "RPT"), 12: ("Grid", "GRD"), 13: ("Slice", "SLC")}
 # RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list

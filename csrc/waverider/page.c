@@ -337,210 +337,31 @@ static void perc_picture(void *c, void *view)
     }
 }
 
-/* RESONATOR's picture across the middle: one vertical line a mode, at its pitch above
- * the note (STRC moves them from harmonic through a bar to a plate), its height the
- * mode's level at POS (sin(pi n POS), dnfw.rings.live), the first 24 within 4 octaves.
- * Integers only: the anchors in tenths of a semitone (res_anchor), a 64-step sine. */
-static const unsigned char res_sin64[65] = {
-    0, 6, 12, 19, 25, 31, 37, 43, 49, 54, 60, 65, 71, 76, 81, 85, 90, 94, 98, 102, 106, 109,
-    112, 115, 117, 120, 122, 123, 125, 126, 126, 127, 127, 127, 126, 126, 125, 123, 122, 120,
-    117, 115, 112, 109, 106, 102, 98, 94, 90, 85, 81, 76, 71, 65, 60, 54, 49, 43, 37, 31, 25,
-    19, 12, 6, 0};
-
-static int res_sin(int x)                       /* x in 1/128 of a half turn -> +-127 */
-{
-    x &= 255;
-    int s = x < 128 ? 1 : -1;
-    x &= 127;
-    return s * res_sin64[x >> 1];
-}
-
-#define RES_SPAN 480                            /* tenths of a semitone across the picture */
-#define RES_BASE 24                             /* canvas row of the baseline */
-#define RES_TALL 12
-
-static void modes(void *c, void *view)
+/* v0.26: the Monomachine's machines (types 6, 7: docs/mnm.md), each one page of its eight
+ * parameters on PERC's eight records. A parameter's knob (0..127) as the DSP reads it
+ * (dnfw.perc.program: p = clamp((value >> 8) - lo, 0, top) / top, knob = p x 127, rounded);
+ * an enumerated one shows its choice by name, as the Monomachine's screen does. */
+static int mnm_knob(void *view, int j)
 {
     u8 flag;
-    int st = GET_VALUE(view, 239, &flag);       /* STRC: WAV1, 0..0x7800 */
-    int pos = GET_VALUE(view, 246, &flag);      /* POS: OFS1, 0..0x6400 */
-    if (st < 0) st = 0;
-    if (st > 0x7800) st = 0x7800;
-    if (pos < 0) pos = 0;
-    if (pos > 0x6400) pos = 0x6400;
-    int a, frac;                                /* the anchor pair and 0..256 between them */
-    if (st <= 0x3C00) { a = 0; frac = st * 256 / 0x3C00; }
-    else { a = 1; frac = (st - 0x3C00) * 256 / 0x3C00; }
-    int p = 2 + 48 * pos / 0x6400;              /* POS, in hundredths of a length: 2..50 */
-    for (int x = 0; x < WR_WIDTH; x += 2)
-        px(c, WAVE_X + x, RES_BASE);
-    for (int n = 0; n < 24; n++) {
-        int lo = res_anchor[a][n], hi = res_anchor[a + 1][n];
-        int semi = lo + (hi - lo) * frac / 256;
-        if (semi > RES_SPAN)
-            break;
-        int x = WAVE_X + semi * (WR_WIDTH - 1) / RES_SPAN;
-        int amp = res_sin((n + 1) * p * 128 / 100);
-        if (amp < 0) amp = -amp;
-        int h = 1 + amp * RES_TALL / 127;
-        column(c, x, RES_BASE + 1, RES_BASE + h);
+    int v = (GET_VALUE(view, perc_param_ids[j], &flag) >> 8) - mnm_lo[j];
+    int top = mnm_top[j];
+    v = v < 0 ? 0 : v > top ? top : v;
+    return (v * 127 * 2 + top) / (2 * top);
+}
+
+static const char *mnm_text(void *view, int m, int j)
+{
+    static char num[6] __attribute__((section(".data")));
+    int n = mnm_choices[m][j];
+    if (!n)
+        return 0;                                   /* a knob */
+    int c = (mnm_knob(view, j) * n) >> 7;
+    if (n == MNM_WAVES) {                           /* DPRO-WAVE's WAVE: S01..S32 */
+        num[0] = 'S'; num[1] = '0' + (c + 1) / 10; num[2] = '0' + (c + 1) % 10; num[3] = 0;
+        return num;
     }
-}
-
-/* CZ (docs/cz.md). Page 1: the wave pair as the voice plays it with the DCW envelope
- * at its top (two cycles, the pair's first wave then its second, at DCW depth), and its
- * enumerated controls' values as text where their labels would be. Pages 2 and 3: the
- * DCW envelope, eight steps of (rate, level), the page's four steps solid and the
- * others dotted, a mark at the sustain step. Integers only: a phase in 1/256 turn, the
- * DCW in 1/256, res_sin's 64-step sine. dnfw.cz.live.wave is the sound; this is its
- * picture. */
-static const char cz_wave_names[8][4] = {"SAW", "SQR", "PLS", "DBL", "SWP", "RS1", "RS2", "RS3"};
-static const char cz_wave_short[8][3] = {"SW", "SQ", "PL", "DB", "SP", "R1", "R2", "R3"};
-static const char cz_sel_names[4][5] = {"1", "2", "1+1'", "1+2'"};
-static const char cz_oct_names[3][6] = {"OCT0", "OCT+1", "OCT-1"};
-static const char cz_mod_names[3][6] = {"RING", "OFF", "NOISE"};
-static const char cz_sus_names[9][6] = {"SUS1", "SUS2", "SUS3", "SUS4", "SUS5", "SUS6",
-                                        "SUS7", "SUS8", "NOSUS"};
-
-static int cz_get(void *view, u32 id)
-{
-    u8 flag;
-    int v = GET_VALUE(view, id, &flag);
-    const int *r = RECORD(id);
-    return v < r[2] ? r[2] : v > r[3] ? r[3] : v;
-}
-
-static int cz_wave_index(void *view)        /* 0..32, as dnfw.cz.live.controls */
-{
-    int k = cz_get(view, 239) * 33 / 0x7800;
-    return k > 32 ? 32 : k;
-}
-
-static int cz_knee(int x, int d)            /* phase bent at d: 0..d -> 0..128, d..256 -> 128..256 */
-{
-    return x < d ? x * 128 / d : 128 + (x - d) * 128 / (256 - d);
-}
-
-/* wave W at phase p (0..255) and DCW d (0..256) -> -127..127 */
-static int cz_wave(int w, int p, int d)
-{
-    int f;
-    if (w == 0) {
-        f = cz_knee(p, 128 - 125 * d / 256);
-    } else if (w == 1) {
-        int wd = 128 - 125 * d / 256, h = p < 128 ? p : p - 128;
-        int q = h * 128 / wd;
-        f = (p < 128 ? 0 : 128) + (q > 128 ? 128 : q);
-    } else if (w == 2) {
-        int wd = 256 - 243 * d / 256;
-        f = p * 256 / wd;
-        if (f > 256) f = 256;
-    } else if (w == 3) {
-        f = p < 128 ? p * (256 + d) / 256 : 128 * (256 + d) / 256 + (p - 128) * (256 - d) / 256;
-    } else if (w == 4) {
-        int x = 2 * p > 256 ? 256 : 2 * p;
-        int g = p < 128 ? cz_knee(x, 26) : 256;
-        f = ((256 - d) * p + d * g) / 256;
-    } else {
-        int k = 256 + 15 * d;                   /* the resonance, harmonic 1..16, in 1/256 */
-        int x = (k * p / 256) & 255;
-        int r = (127 - res_sin(x + 64)) / 2;    /* 0..127 */
-        int win = w == 5 ? 256 - p : w == 6 ? 256 - (2 * p > 256 ? 2 * p - 256 : 256 - 2 * p)
-                : (2 * (256 - p) > 256 ? 256 : 2 * (256 - p));
-        return r * win / 128 - 127;
-    }
-    return -res_sin(f + 64);
-}
-
-static void cz_wave_picture(void *c, void *view)
-{
-    int k = cz_wave_index(view);
-    int d = cz_get(view, 241) * 256 / 0x7F00;   /* DCW depth, the envelope at its top */
-    int half = WR_WIDTH / 2, last = 0;
-    for (int x = 0; x < WR_WIDTH; x++) {
-        int w = cz_combos[k][x < half ? 0 : 1];
-        int p = (x % half) * 256 / half;
-        int y = WAVE_CY + cz_wave(w, p, d) * WAVE_AMP / 127;
-        if (x == 0 || x == half)
-            column(c, WAVE_X + x, y, y);
-        else
-            column(c, WAVE_X + x, last, y);
-        last = y;
-    }
-}
-
-static int cz_99(void *view, u32 id)        /* a rate's or level's 0..99 */
-{
-    const int *r = RECORD(id);
-    int span = r[3] - r[2];
-    return span > 0 ? (cz_get(view, id) - r[2]) * 99 / span : 0;
-}
-
-static void cz_line(void *c, int x0, int y0, int x1, int y1, int dotted)
-{
-    int dx = x1 - x0, dy = y1 > y0 ? y1 - y0 : y0 - y1, sy = y1 > y0 ? 1 : -1;
-    int err = dx - dy, n = 0;
-    for (;;) {
-        if (!dotted || (n++ & 1) == 0)
-            px(c, x0, y0);
-        if (x0 == x1 && y0 == y1)
-            break;
-        int e2 = 2 * err;
-        if (e2 > -dy) { err -= dy; x0++; }
-        if (e2 < dx) { err += dx; y0 += sy; }
-    }
-}
-
-#define CZ_ENV_BASE 14
-#define CZ_ENV_TALL 26
-
-static void cz_envelope(void *c, void *view, int page)
-{
-    int wid[8], total = 0;
-    for (int k = 0; k < 8; k++) {
-        wid[k] = 3 + (99 - cz_99(view, cz_rate_ids[k])) / 6;   /* slower: wider */
-        total += wid[k];
-    }
-    int sus = cz_get(view, 243) * 9 / 0x7800;
-    int x = WAVE_X, y = CZ_ENV_BASE, used = 0;
-    for (int k = 0; k < 8; k++) {
-        used += wid[k];
-        int nx = WAVE_X + used * (WR_WIDTH - 1) / total;
-        int ny = CZ_ENV_BASE + cz_99(view, cz_level_ids[k]) * CZ_ENV_TALL / 99;
-        cz_line(c, x, y, nx, ny, (k >> 2) != page - 1);
-        if (k == sus)
-            for (int yy = CZ_ENV_BASE; yy <= CZ_ENV_BASE + CZ_ENV_TALL; yy += 3)
-                px(c, nx, yy);
-        x = nx;
-        y = ny;
-    }
-}
-
-static const char *cz_text(void *view, u32 id, const char *label)
-{
-    static char pair[6] __attribute__((section(".data")));
-    if (id == 239) {
-        int k = cz_wave_index(view), a = cz_combos[k][0], b = cz_combos[k][1];
-        if (a == b)
-            return cz_wave_names[a];
-        pair[0] = cz_wave_short[a][0]; pair[1] = cz_wave_short[a][1]; pair[2] = '+';
-        pair[3] = cz_wave_short[b][0]; pair[4] = cz_wave_short[b][1]; pair[5] = 0;
-        return pair;
-    }
-    int v = cz_get(view, id) >> 8;
-    if (id == 248)
-        return cz_sel_names[v > 3 ? 3 : v];
-    if (id == 259)
-        return cz_oct_names[v > 2 ? 2 : v];
-    if (id == 249)
-        return cz_mod_names[v > 2 ? 2 : v];
-    if (id == 247)
-        return v ? "KF ON" : "KFOFF";
-    if (id == 243) {
-        int k = cz_get(view, id) * 9 / 0x7800;
-        return cz_sus_names[k > 8 ? 8 : k];
-    }
-    return label;
+    return mnm_choice_names[mnm_choice_at[m][j] + c];
 }
 
 /* The sample machines (docs/sampler.md). A control's 0..top value, as the DSP reads it
@@ -703,10 +524,9 @@ void wr_page_draw(void *view, void *canvas)
 {
     int page = ((int (*)(void *))method(view, 132))(view);
     int kind = wr_active();
-    int res = kind == 2;                        /* RESONATOR's page */
-    int cz = kind == 3;                         /* CZ's */
+    int mnm = kind == 2 || kind == 3;           /* v0.26: a Monomachine machine's: one page */
     int smp = kind >= SMP_KIND0;                /* a sample machine's: one page */
-    if (page < 0 || page >= (smp ? 2 : cz ? CZ_PAGES : res ? RES_PAGES : WR_PAGES))
+    if (page < 0 || page >= (smp ? 2 : mnm ? 1 : WR_PAGES))
         page = 0;
     if (kind == 1) {                            /* PERC: the names TYPE has now */
         u8 flag;
@@ -728,32 +548,22 @@ void wr_page_draw(void *view, void *canvas)
             PAGE_DOTS(view, canvas, n, page, 7);
         return;
     }
-    if ((res || cz) && page == 0) {             /* v0.20: page 1 as knobs, in the Elektron grid */
+    if (mnm) {                                  /* the Monomachine's grid of eight */
         extern void smp_knob_page(void *view, void *canvas, const unsigned short *ids,
                                   const char *const *labels, const char *const *texts);
         const char *labels[8], *texts[8];
         for (int i = 0; i < 8; i++) {
-            labels[i] = cz ? cz_labels[0][i] : res_labels[0][i];
-            texts[i] = cz ? cz_text(view, cz_ids[0][i], labels[i]) : labels[i];
-            if (texts[i] == labels[i])
-                texts[i] = 0;                   /* a knob; else a choice, shown by name */
-            else if (cz && cz_ids[0][i] == 247)
-                texts[i] = cz_get(view, 247) >> 8 ? "ON" : "OFF";   /* KF under its own label */
+            labels[i] = mnm_labels[kind - 2][i];
+            texts[i] = mnm_text(view, kind - 2, i);
         }
-        smp_knob_page(view, canvas, cz ? cz_ids[0] : res_ids[0], labels, texts);
+        smp_knob_page(view, canvas, perc_param_ids, labels, texts);
         ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);
         int n = PAGE_COUNT(view);
         if (n > 1)
             PAGE_DOTS(view, canvas, n, page, 7);
         return;
     }
-    if (cz && page == 0)
-        cz_wave_picture(canvas, view);
-    else if (cz)
-        cz_envelope(canvas, view, page);
-    else if (res)
-        modes(canvas, view);
-    else if (smp)
+    if (smp)
         smp_picture(canvas, view, kind);
     else
         perc_picture(canvas, view);
@@ -761,18 +571,14 @@ void wr_page_draw(void *view, void *canvas)
     for (int i = 0; i < 8; i++) {
         int top = i < 4;
         int cx = COL0 + COLW * (i & 3) + COLW / 2;
-        u32 id = smp ? smp_ids[kind - SMP_KIND0][i] : cz ? cz_ids[page][i] : res ? res_ids[page][i]
-                 : wr_ids[page][i];
-        const char *label = smp ? "-" : cz ? cz_labels[page][i] : res ? res_labels[page][i]
-                            : wr_labels[page][i];
-        if (cz)
-            label = cz_text(view, id, label);   /* CZ: page 1's values as text */
-        else if (!res && id)
+        u32 id = smp ? smp_ids[kind - SMP_KIND0][i] : wr_ids[page][i];
+        const char *label = smp ? "-" : wr_labels[page][i];
+        if (id)
             label = NAME_SHORT(id);             /* PERC, samples: the name wr_names gave the record */
         if (smp && id)
             label = smp_text(view, id, kind, label);
         TEXT(canvas, FONT, cx, top ? TOP_LABEL_Y : BOT_LABEL_Y, CENTRED, "%.5s", label);
-        if (!id || (!res && !cz && label[0] == '-' && !label[1]))
+        if (!id || (label[0] == '-' && !label[1]))
             continue;                           /* an empty place, or a parameter this machine lacks */
         u8 flag;
         int set = GET_VALUE(view, id, &flag);

@@ -116,37 +116,77 @@ def type_of(word: int) -> int:
     return (min(127, max(0, word >> 8)) * _perc.N) >> 7
 
 
-# RESONATOR (machine 6, docs/rings.md): one page, on WaveTone records whose range and
-# default fit (dnfw.rings.live's table), named while a RESONATOR track is active
-RES_TITLE, RES_SUBTITLE = "RES", "Resonator"
-RES_PAGES = ((238, 241, 239, 258, 254, 246, 240, 245),)   # TUNE LEV STRC BRIT / DAMP POS EXCT HIT
-RES_LABELS = {238: "TUNE", 241: "LEV", 239: "STRC", 258: "BRIT",
-              254: "DAMP", 246: "POS", 240: "EXCT", 245: "HIT"}
-RES_LONG_NAMES = {238: "Tune", 241: "Level", 239: "Structure", 258: "Brightness",
-                  254: "Damping", 246: "Position", 240: "Exciter", 245: "Hit Level"}
-RES_UNUSED = tuple(r for r in range(238, 263) if r not in RES_LABELS)
+# v0.26: the Monomachine's machines (types 6, 7: docs/mnm.md), one page each, on PERC's
+# eight records (PARAM_IDS), named per machine while such a track is active
+from ..mnm import machines as _mnm
+MNM_LONG = {"PW": "Pulse Width", "PWAD": "PW Sweep", "PWRS": "PW Restart", "WAVE": "Waveform",
+            "MOD": "Modulation", "MSRC": "Mod Source", "MFRQ": "Mod Freq", "TUNE": "Tune",
+            "WP": "Wave Position", "WPM": "WP Mod", "WPRS": "WP Restart", "SYNC": "Sync",
+            "SFRQ": "Sync Freq", "---": "Unused"}
+# the enumerated parameters: their choices by name, as the Monomachine shows them (0: a knob)
+MNM_CHOICES = {
+    "SID 6581": {"PWRS": ("OFF", "ON"), "WAVE": ("TRI", "SAW", "PULS", "MIX", "NOIS"),
+                 "MOD": ("OFF", "RING", "SYNC", "R+S"), "MSRC": ("MFRQ", "PRCH")},
+    "DPRO-WAVE": {"WAVE": 32, "WPRS": ("OFF", "ON"), "SYNC": ("OFF", "SFRQ", "PRCH")},
+}
+MNM_WAVES = 32
 
-# CZ (machine 7, docs/cz.md): three pages -- the voice, then the DCW envelope's eight
-# rates and levels -- on WaveTone records (dnfw.cz.live's table); page 1's WAVE, SEL,
-# OCT, MOD, KF and SUS draw their value as text where the label would be
-CZ_TITLE, CZ_SUBTITLE = "CZ", "CZ Phase"
-CZ_PAGES = (
-    (239, 248, 242, 259, 249, 241, 247, 243),   # WAVE SEL DET OCT / MOD DCW KF SUS
-    (240, 246, 244, 250, 245, 252, 253, 254),   # R1 R2 R3 R4 / L1 L2 L3 L4
-    (255, 256, 257, 258, 260, 261, 262, 238),   # R5 R6 R7 R8 / L5 L6 L7 L8
-)
-CZ_LABELS = {239: "WAVE", 248: "SEL", 242: "DET", 259: "OCT", 249: "MOD", 241: "DCW",
-             247: "KF", 243: "SUS",
-             240: "R1", 246: "R2", 244: "R3", 250: "R4", 245: "L1", 252: "L2", 253: "L3", 254: "L4",
-             255: "R5", 256: "R6", 257: "R7", 258: "R8", 260: "L5", 261: "L6", 262: "L7", 238: "L8"}
-CZ_LONG_NAMES = {239: "Wave", 248: "Line Select", 242: "Line 2 Detune", 259: "Line 2 Octave",
-                 249: "Line 2 Mod", 241: "DCW Depth", 247: "DCW Key Follow", 243: "DCW Sustain",
-                 **{r: f"DCW Rate {k + 1}" for k, r in enumerate((240, 246, 244, 250, 255, 256, 257, 258))},
-                 **{r: f"DCW Level {k + 1}" for k, r in enumerate((245, 252, 253, 254, 260, 261, 262, 238))}}
-CZ_UNUSED = tuple(r for r in range(238, 263) if r not in CZ_LABELS)
-# the records the page draws as text, and the envelope's (rate, level) pairs in step order
-CZ_RATE_IDS = (240, 246, 244, 250, 255, 256, 257, 258)
-CZ_LEVEL_IDS = (245, 252, 253, 254, 260, 261, 262, 238)
+
+# the page tables the shims keep for kinds 2 and 3 (RESONATOR's and CZ's names until v0.25):
+# now the two Monomachine machines, one page of PERC's eight records each
+def _mnm_page(k):
+    M = _mnm.MACHINES[k]
+    return ((PARAM_IDS,), {r: (sh if sh != "---" else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)})
+
+
+RES_TITLE, RES_SUBTITLE = "SID", "SID 6581"
+RES_PAGES, RES_LABELS = _mnm_page(0)
+CZ_TITLE, CZ_SUBTITLE = "DPW", "DPRO Wave"
+CZ_PAGES, CZ_LABELS = _mnm_page(1)
+
+
+def mnm_named(k: int) -> dict[int, tuple[str, str]]:
+    """record -> (long, short) on a Monomachine machine's track"""
+    M = _mnm.MACHINES[k]
+    out = {r: (MNM_LONG.get(sh, sh), sh if sh != "---" else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)}
+    out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in range(238, 263) if r not in out})
+    return out
+
+
+def mnm_c_header() -> str:
+    q = chr(34)
+    names, rows_n, rows_at = [], [], []
+    for M in _mnm.MACHINES:
+        ch = MNM_CHOICES.get(M.NAME, {})
+        n_row, at_row = [], []
+        for sh in M.PNAMES:
+            c = ch.get(sh, 0)
+            if isinstance(c, int):
+                n_row.append(c)
+                at_row.append(0)
+            else:
+                n_row.append(len(c))
+                at_row.append(len(names))
+                names += list(c)
+        rows_n.append(n_row)
+        rows_at.append(at_row)
+
+    def arr(rows):
+        return ", ".join("{" + ", ".join(map(str, r)) + "}" for r in rows)
+    labels = ", ".join("{" + ", ".join(q + (sh if sh != "---" else "-") + q for sh in M.PNAMES) + "}"
+                       for M in _mnm.MACHINES)
+    lines = [
+        f"#define MNM_N {len(_mnm.MACHINES)}",
+        f"#define MNM_WAVES {MNM_WAVES}",
+        f"static const char mnm_labels[MNM_N][8][6] = {{{labels}}};",
+        f"static const unsigned char mnm_lo[8] = {{{', '.join(str(lo) for _r, _s, lo, _t in _perc.PARAMS)}}};",
+        f"static const unsigned char mnm_top[8] = {{{', '.join(str(t) for _r, _s, _lo, t in _perc.PARAMS)}}};",
+        f"static const unsigned char mnm_choices[MNM_N][8] = {{{arr(rows_n)}}};",
+        f"static const unsigned char mnm_choice_at[MNM_N][8] = {{{arr(rows_at)}}};",
+        f"static const char mnm_choice_names[{max(1, len(names))}][5] = {{{', '.join(q + n + q for n in names)}}};",
+    ]
+    return "\n".join(lines) + "\n"
+
 
 # the Digitakt II's sample machines (types 8..12, docs/sampler.md): one page each, on
 # WaveTone records (dnfw.sampler.machines.PAGES); named per machine by wr_names, as PERC's
@@ -212,20 +252,6 @@ def perc_names() -> list[list[tuple[str, str]]]:
     return [[(LONG[sh], sh) for sh in _perc.PNAMES[name]] for name in _perc.NAMES]
 
 
-def res_named() -> dict[int, tuple[str, str]]:
-    """The same for a RESONATOR track."""
-    out = {r: (RES_LONG_NAMES[r], RES_LABELS[r]) for r in RES_LABELS}
-    out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in RES_UNUSED})
-    return out
-
-
-def cz_named() -> dict[int, tuple[str, str]]:
-    """The same for a CZ track."""
-    out = {r: (CZ_LONG_NAMES[r], CZ_LABELS[r]) for r in CZ_LABELS}
-    out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in CZ_UNUSED})
-    return out
-
-
 def c_header() -> str:
     """The control tables, as C for `wr_gen.h`: per page, eight record ids and labels
     (Waverider's, then RESONATOR's); the names `wr_names` swaps in for each machine (a
@@ -233,44 +259,22 @@ def c_header() -> str:
     q = chr(34)
     ids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in PAGES)
     names = ",\n".join(" {" + ", ".join(f'"{label(r)}"' for r in page) + "}" for page in PAGES)
-    rids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in RES_PAGES)
-    rnames = ",\n".join(" {" + ", ".join(q + RES_LABELS.get(r, "-") + q for r in page) + "}"
-                         for page in RES_PAGES)
-    from ..rings import live as rings_live
-    res_anchor = ", ".join("{" + ", ".join(str(round(10 * v)) for v in a) + "}"
-                           for a in rings_live._anchor_semitones())
     wr = {r: (lo, sh) for r, lo, sh in named()}
-    res = res_named()
-    cz = cz_named()
+    mnm = [mnm_named(k) for k in range(len(_mnm.MACHINES))]
     smp = [smp_named(n) for n in _smp.NAMES]
-    order = sorted(set(wr) | set(res) | set(cz) | set(PARAM_IDS) | {r for m in smp for r in m})
-    zids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in CZ_PAGES)
-    znames = ",\n".join(" {" + ", ".join(q + CZ_LABELS.get(r, "-") + q for r in page) + "}"
-                         for page in CZ_PAGES)
-    from ..cz import live as cz_live
-    combos = ", ".join(f"{{{a}, {b}}}" for a, b in cz_live.COMBOS)
+    order = sorted(set(wr) | set(PARAM_IDS) | {r for m in mnm + smp for r in m})
 
     def row(m, col):
         return "{" + ", ".join(q + m[r][col] + q if r in m else "0" for r in order) + "}"
     return (f"#define WR_PAGES {len(PAGES)}\n"
             f"static const unsigned short wr_ids[WR_PAGES][8] = {{\n{ids}\n}};\n"
             f"static const char wr_labels[WR_PAGES][8][6] = {{\n{names}\n}};\n"
-            f"#define RES_PAGES {len(RES_PAGES)}\n"
-            f"static const unsigned short res_ids[RES_PAGES][8] = {{\n{rids}\n}};\n"
-            f"static const char res_labels[RES_PAGES][8][6] = {{\n{rnames}\n}};\n"
             f"#define WR_NAMED {len(order)}\n"
             f"static const unsigned short wr_named_ids[WR_NAMED] = {{{', '.join(map(str, order))}}};\n"
-            f"#define WR_KINDS {3 + len(smp)}\n"
-            f"static const char *const wr_named_long[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 0) for m in [wr, res, cz] + smp)}}};\n"
-            f"static const char *const wr_named_short[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 1) for m in [wr, res, cz] + smp)}}};\n"
-            f"#define CZ_PAGES {len(CZ_PAGES)}\n"
-            f"static const unsigned short cz_ids[CZ_PAGES][8] = {{\n{zids}\n}};\n"
-            f"static const char cz_labels[CZ_PAGES][8][6] = {{\n{znames}\n}};\n"
-            f"static const unsigned short cz_rate_ids[8] = {{{', '.join(map(str, CZ_RATE_IDS))}}};\n"
-            f"static const unsigned short cz_level_ids[8] = {{{', '.join(map(str, CZ_LEVEL_IDS))}}};\n"
-            f"static const unsigned char cz_combos[{len(cz_live.COMBOS)}][2] = {{{combos}}};\n"
-            f"static const short res_anchor[3][24] = {{{res_anchor}}};\n"
-            + perc_c_header() + smp_c_header())
+            f"#define WR_KINDS {1 + len(mnm) + len(smp)}\n"
+            f"static const char *const wr_named_long[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 0) for m in [wr] + mnm + smp)}}};\n"
+            f"static const char *const wr_named_short[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 1) for m in [wr] + mnm + smp)}}};\n"
+            + perc_c_header() + smp_c_header() + mnm_c_header())
 
 
 def smp_c_header() -> str:

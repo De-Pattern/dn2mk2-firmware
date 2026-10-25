@@ -4125,7 +4125,7 @@ wr_sm_next_93.:
       R12 = 0x10;
       COMP(R0, R12);
       IF LT JUMP 0xbf245d;                   // -> wr_sm_slot_92.
-      JUMP 0x172980;                    // rings.asm's wr_rings, then CZ, then PING (which restores)
+      JUMP 0x170280;                    // rings.asm's wr_rings, then CZ, then PING (which restores)
 .GLOBAL wr_sm_sub_exp2.;
 wr_sm_sub_exp2.:
       R12 = 0x41800000;                 // 16.0
