@@ -86,7 +86,7 @@ input[type=file] { display: none; }
 <script>
 const $ = (s) => document.querySelector(s);
 const files = {};
-let builds = [], out = null, worker = null, busy = false;
+let builds = [], out = null, worker = null, busy = false, failed = false;
 
 async function sha256(buf) {
   const h = await crypto.subtle.digest("SHA-256", buf);
@@ -96,7 +96,7 @@ function cur() { return builds.find(b => b.version === $("#ver").value); }
 function ready() {
   const n = ["dn2", "dt2", "md"].filter(k => files[k]).length;
   $("#go").disabled = busy || n < 3 || !cur();
-  if (!busy && !out) setState(n < 3 ? `waiting for the files (${n} of 3)` : "ready", n < 3 ? "" : "ok");
+  if (!busy && !out && !failed) setState(n < 3 ? `waiting for the files (${n} of 3)` : "ready", n < 3 ? "" : "ok");
 }
 function setState(t, cls = "") { const s = $("#state"); s.textContent = t; s.className = "pill " + cls; }
 function log(t) { const l = $("#log"); l.textContent += t + "\n"; l.scrollTop = l.scrollHeight; }
@@ -107,13 +107,13 @@ fetch("patcher/builds.json", { cache: "no-cache" }).then(r => r.json()).then(lis
   $("#verNote").textContent = list.length ? "sha256 " + list[0].sha256.slice(0, 12) + "…" : "none";
   ready();
 }).catch(() => { $("#verNote").textContent = "could not load the list"; $("#verNote").className = "pill bad"; });
-$("#ver").onchange = () => { const b = cur(); $("#verNote").textContent = "sha256 " + b.sha256.slice(0, 12) + "…"; out = null; $("#save").disabled = true; $("#result").textContent = ""; ready(); };
+$("#ver").onchange = () => { const b = cur(); failed = false; $("#verNote").textContent = "sha256 " + b.sha256.slice(0, 12) + "…"; out = null; $("#save").disabled = true; $("#result").textContent = ""; ready(); };
 
 function take(k, f, box) {
   f.arrayBuffer().then(buf => {
     files[k] = { name: f.name, bytes: new Uint8Array(buf) };
     box.querySelector("small").textContent = `${f.name} · ${(f.size / 1048576).toFixed(2)} MB`;
-    out = null; $("#save").disabled = true; ready();
+    out = null; failed = false; $("#save").disabled = true; ready();
   });
 }
 document.querySelectorAll(".file").forEach(box => {
@@ -127,7 +127,8 @@ document.querySelectorAll(".file").forEach(box => {
 
 $("#go").onclick = () => {
   const b = cur(); if (!b) return;
-  busy = true; out = null; $("#save").disabled = true; $("#log").textContent = ""; $("#result").textContent = "";
+  if (!window.crypto || !crypto.subtle) { setState("needs https", "bad"); return; }
+  busy = true; failed = false; out = null; $("#save").disabled = true; $("#log").textContent = ""; $("#result").textContent = "";
   $("#result").className = "note";
   setState("building…"); $("#state").insertAdjacentHTML("afterbegin", '<span class="spin"></span> ');
   ready();
@@ -138,6 +139,7 @@ $("#go").onclick = () => {
     if (m.log !== undefined) { log(m.log); return; }
     busy = false;
     if (m.error) {
+      failed = true;
       setState("stopped", "bad");
       $("#result").className = "note bad";
       $("#result").textContent = "The build stopped: " + m.error;
@@ -152,6 +154,7 @@ $("#go").onclick = () => {
       $("#result").textContent = `Built in ${secs} s. sha256 ${got} — exactly v${b.version}'s cleared file. Save it, then flash.`;
       $("#save").disabled = false;
     } else {
+      failed = true;
       setState("does not match: do not flash", "bad");
       $("#result").className = "note bad";
       $("#result").textContent = `The result (sha256 ${got.slice(0, 16)}…) is not v${b.version}'s cleared file (${b.sha256.slice(0, 16)}…). Do not flash anything from this. Check the three files are the versions named above.`;
