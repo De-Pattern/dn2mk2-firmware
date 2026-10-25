@@ -1036,9 +1036,38 @@ static void trim_draw(void *c)
     LABEL(c, 112, 2, "%s", "TRIM>|");
 }
 
+/* v0.25: FUNC held on FILE NAME: the DT2's character grid under the name */
+extern const char nm_grid[];
+extern int nm_gsel, smp_func_held;
+static void name_grid_draw(void *c)
+{
+    LABEL(c, 64, 56, "%s", "FILE NAME");
+    box(c, 6, 41, 121, 51, 0);
+    for (int j = 0; j < 7; j++) {
+        char ch = nm_text[j] ? nm_text[j] : ' ';
+        if (ch != ' ')
+            LABEL(c, 14 + 8 * j, 44, "%c", ch);
+        if (j == nm_cur)
+            fill(c, 11 + 8 * j, 42, 17 + 8 * j, 42);
+    }
+    for (int g = 0; nm_grid[g]; g++) {
+        int col = g % 14, row = g / 14, x = 12 + 8 * col, y = 29 - 10 * row;
+        if (g == nm_gsel)
+            box(c, x - 4, y - 2, x + 4, y + 7, 0);
+        if (nm_grid[g] != ' ')
+            LABEL(c, x, y, "%c", nm_grid[g]);
+        else
+            hline(c, x - 2, x + 2, y, 1);
+    }
+}
+
 /* v0.25: the DT2's FILE NAME screen */
 static void name_draw(void *c)
 {
+    if (smp_func_held) {
+        name_grid_draw(c);
+        return;
+    }
     LABEL(c, 64, 56, "%s", "FILE NAME");
     box(c, 6, 36, 121, 48, 0);
     for (int j = 0; j < 7; j++) {
@@ -1049,12 +1078,13 @@ static void name_draw(void *c)
         if (j == nm_cur)                        /* the cursor: a bar under it */
             fill(c, x - 3, 37, x + 3, 38);
     }
-    LABEL(c, 34, 24, "%s", "FN+NO:DELETE");
-    LABEL(c, 34, 17, "%s", "FN+YES:INSERT");
-    LABEL(c, 34, 10, "%s", "YES:SAVE");
-    LABEL(c, 98, 24, "%s", "U/D:CHAR +/-");
-    LABEL(c, 98, 17, "%s", "L/R:MOVE");
-    LABEL(c, 98, 10, "%s", "NO:ABORT");
+    LABEL(c, 34, 26, "%s", "FN+ARROW:EDIT");
+    LABEL(c, 34, 19, "%s", "FN+NO:DELETE");
+    LABEL(c, 34, 12, "%s", "FN+YES:INSERT");
+    LABEL(c, 34, 5, "%s", "YES:SAVE");
+    LABEL(c, 98, 26, "%s", "U/D:CHAR +/-");
+    LABEL(c, 98, 19, "%s", "L/R:MOVE");
+    LABEL(c, 98, 12, "%s", "NO:ABORT");
 }
 
 /* v0.25: ASSIGN, the DT2's question over the trim screen */

@@ -616,3 +616,7 @@ the keyboard.
   keyboard's octave (stock's: KEYBOARD + UP/DOWN) moves the keys on by 16 slices an octave
   (the octave read from the note stock gives [TRIG 9]: 60 at the middle octave).
 - **GRID's icon** on page 1: its slice count as a grid of cells, 2 x 1 to 8 x 8.
+- **FILE NAME's grid** (the owner's photo of the DT2's): while FUNC is held, the name sits
+  over a grid of the characters a slot name takes (A-Z, - _, 0-9, space); FUNC + the arrows
+  move through it, and letting FUNC go puts the picked character at the cursor (a blank
+  opens the grid at A). FUNC + YES and FUNC + NO still insert and delete.

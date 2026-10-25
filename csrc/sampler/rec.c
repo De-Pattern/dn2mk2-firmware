@@ -94,6 +94,12 @@ char nm_text[8] __attribute__((section(".data")));           /* the name being e
 int nm_cur __attribute__((section(".data"))) = 0;
 int as_done __attribute__((section(".data"))) = -1;          /* the track it went to, for the screen */
 static const char NM_SET[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
+/* v0.25: the DT2's character grid, while FUNC is held on FILE NAME (the owner's photo):
+ * FUNC + the arrows move through it, and letting FUNC go puts the character at the cursor */
+const char nm_grid[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ-_0123456789 ";
+#define NM_GRID_W 14
+int nm_gsel __attribute__((section(".data"))) = 0;          /* the grid's cell */
+static int nm_gpicked __attribute__((section(".data"))) = 0;  /* an arrow moved it this hold */
 
 /* the recorder's settings: the instrument's, not a sound's (none of it is saved) */
 int rec_overlay __attribute__((section(".data"))) = 0;      /* the screen is up */
@@ -589,6 +595,13 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
         } else if (code == K_NO) {
             as_done = -1;
             rec_phase = PH_ASSIGN;              /* the name it has */
+        } else if (smp_func_held && code >= K_UP && code <= K_RIGHT) {  /* the grid */
+            int n = (int)sizeof nm_grid - 1;
+            int d = code == K_LEFT ? -1 : code == K_RIGHT ? 1 : code == K_UP ? -NM_GRID_W : NM_GRID_W;
+            int g = nm_gsel + d;
+            if (g >= 0 && g < n)
+                nm_gsel = g;
+            nm_gpicked = 1;
         } else if (code == K_LEFT && nm_cur > 0)
             nm_cur--;
         else if (code == K_RIGHT && nm_cur < 6)
@@ -626,8 +639,26 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
      * and the list's YES then did nothing (the owner's v0.24 report). Released is "not
      * down", for every key. */
     int down = (flags & F_PRESS) && !(flags & F_RELEASE);
-    if (it[0] == IT_KEY && code == K_FUNC)
+    if (it[0] == IT_KEY && code == K_FUNC) {
+        if (rec_overlay && rec_phase == PH_NAME) {
+            if (down && !smp_func_held) {       /* the grid opens on the cursor's character */
+                char ch = nm_text[nm_cur] ? nm_text[nm_cur] : ' ';
+                int g = 0;
+                while (nm_grid[g] && nm_grid[g] != ch)
+                    g++;
+                nm_gsel = nm_grid[g] && ch != ' ' ? g : 0;   /* a blank: from A */
+                nm_gpicked = 0;
+            } else if (!down && nm_gpicked) {   /* let go: the picked character goes in */
+                nm_text[nm_cur] = nm_grid[nm_gsel];
+                for (int j = 0; j < nm_cur; j++)
+                    if (!nm_text[j])
+                        nm_text[j] = ' ';
+                nm_gpicked = 0;
+            }
+            smp_overlay_dirty = 1;
+        }
         smp_func_held = down;
+    }
     if (rec_pv_on && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
         preview(0);                             /* FUNC + YES let go: the preview stops */
     if (it[0] == IT_KEY && code < 32 && (eaten >> code & 1)) {
