@@ -209,6 +209,8 @@ void wr_screen(void *screen, void *canvas)
     extern int smp_fb_visible(void);
     extern void smp_fb_draw(void *canvas, int samp);
     extern int smp_samp_of(int track);
+    extern int smp_list_visible(void);
+    extern void smp_list_draw(void *canvas);
     SCREEN_DRAW(screen, canvas);
     if (rec_visible())
         rec_screen_draw(canvas);
@@ -216,6 +218,8 @@ void wr_screen(void *screen, void *canvas)
         slc_draw(canvas);
     else if (smp_fb_visible())                  /* v0.25: the folder browser (ASSIGN SAMPLE) */
         smp_fb_draw(canvas, smp_samp_of(UI_TRACK));
+    else if (smp_list_visible())                /* v0.25: the sample list, over the title bar too */
+        smp_list_draw(canvas);
 }
 
 /* the UI loop's redraw test, as stock (and the names kept current, once a loop; and

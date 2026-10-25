@@ -61,6 +61,7 @@ extern int smp_slot_empty(int k);
 extern int smp_list_up(void *view);
 extern void smp_list_hold(void);
 extern void smp_list_close(void);
+extern void smp_list_settle(int v);
 extern void *smp_list_view;
 extern int smp_lst_orig, smp_overlay_dirty;     /* v0.25: the list, the folder browser */
 extern int smp_fb_open, smp_fb_folder, smp_fb_cur;
@@ -577,7 +578,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 } else if (slot >= 0) {
                     smp_set_samp((int)UI_TRACK_NOW, slot + 1);
                     smp_fb_open = 0;
-                    smp_list_close();           /* the sample is the track's: back to the page */
+                    smp_list_settle(slot + 1);  /* the sample is the track's: back to the page */
                 }
             } else if (code == K_NO || code == K_LEFT) {
                 if (smp_fb_folder >= 0) {
@@ -618,7 +619,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 smp_list_close();
             } else {                            /* NO: as it was */
                 smp_set_samp(t, smp_lst_orig);
-                smp_list_close();
+                smp_list_settle(smp_lst_orig);
             }
             return (u32)it;
         }

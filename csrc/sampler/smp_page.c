@@ -576,6 +576,13 @@ void smp_list_close(void)
     smp_overlay_dirty = 1;
 }
 
+/* closed with SAMP set to V by us (NO, the browser): that change does not bring it back */
+void smp_list_settle(int v)
+{
+    list_slot = v;
+    smp_list_close();
+}
+
 static void num3(char *o, int k)
 {
     o[0] = (char)('0' + k / 100 % 10);
@@ -594,9 +601,13 @@ static void scrollbar(void *c, int x, int y0, int y1, int at, int n)
     fill(c, x - 1, ty, x + 1, ty + th - 1);
 }
 
+static u32 lst_seen_at __attribute__((section(".data"))) = 0;    /* the page under it, last drawn */
+
 static void sample_list(void *c, void *view, int slot)
 {
+    (void)c;
     u32 now = *(volatile u32 *)0x4058E8D4u;
+    lst_seen_at = now;
     if (view != smp_list_view || list_slot < 0) {   /* first sight of this page: no list */
         smp_list_view = view;
         list_slot = slot;
@@ -607,30 +618,45 @@ static void sample_list(void *c, void *view, int slot)
         if (!smp_lst_open) {
             smp_lst_open = 1;
             smp_lst_orig = list_slot;
+            smp_overlay_dirty = 1;
         }
         list_slot = slot;
         list_at = now;
     }
-    if (!smp_lst_open)
-        return;
-    if (now - list_at >= LIST_IDLE) {          /* left alone: kept, as YES */
+    if (smp_lst_open && now - list_at >= LIST_IDLE) {   /* left alone: kept, as YES */
         smp_lst_open = 0;
-        return;
+        smp_overlay_dirty = 1;
     }
-    int x0 = 26, x1 = 127, y0 = 0, y1 = 63;
-    for (int y = y0; y <= y1; y++)
+}
+
+/* the list over the screen (page.c's wr_screen, after the page and its title bar): the
+ * DT2's header in the title bar, the bank, five slots around SAMP's, the scroll bar */
+int smp_list_visible(void)
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    return smp_lst_open && now - lst_seen_at < 3000u;
+}
+
+void smp_list_draw(void *c)
+{
+    int slot = list_slot < 0 ? 0 : list_slot;
+    int x0 = 26, x1 = 127;
+    for (int y = 0; y <= 63; y++)
         for (int x = x0; x <= x1; x++)
             SET_PIXEL(c, x, y, 0);
-    vline(c, x0, y0, y1, 0);
-    /* the header, as the DT2's: what YES, NO and FUNC + YES do */
-    LABEL(c, x0 + 51, 57, "%s", "YES:OK  NO:X  FN+YES:D");
+    vline(c, x0, 0, 54, 0);
+    for (int y = 55; y <= 63; y++)              /* the title bar's name: the header goes there */
+        for (int x = 15; x < x0; x++)
+            SET_PIXEL(c, x, y, 0);
+    /* the title bar: what YES, NO and FUNC + YES do, as the DT2 writes it there */
+    LABEL(c, x0 + 51, 57, "%s", "YES:OK NO:X FN+YES:D");
     hline(c, x0 + 1, x1, 55, 0);
-    /* the bank row: the DN2 has the one bank of 128 */
-    LABEL(c, x0 + 51, 48, "%s", "< A >");
-    box(c, x0 + 44, 46, x0 + 58, 54, 0);
+    /* the bank: the DN2 has the one bank of 128 */
+    LABEL(c, x0 + 51, 47, "%s", "A");
+    box(c, x0 + 45, 45, x0 + 57, 53, 0);
     /* five slots around the chosen one, it outlined */
     for (int r = 0; r < 5; r++) {
-        int k = slot - 2 + r, y = 38 - 9 * r;
+        int k = slot - 2 + r, y = 36 - 9 * r;
         if (k < 0 || k > 127)
             continue;
         char nm[19], num[4];
@@ -641,7 +667,7 @@ static void sample_list(void *c, void *view, int slot)
         if (k == slot)
             box(c, x0 + 1, y - 2, x1 - 4, y + 7, 0);
     }
-    scrollbar(c, x1 - 1, 1, 44, slot, 128);
+    scrollbar(c, x1 - 1, 1, 43, slot, 128);
 }
 
 /* -- v0.25: the folder browser (ASSIGN SAMPLE), FUNC + YES in the list: the folders the

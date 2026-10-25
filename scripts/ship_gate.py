@@ -480,6 +480,89 @@ def main() -> int:
                               if good else why)
             gate("SLICE menus and SLICES keys (ColdFire)", *cached("SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body))
 
+        # 6f. v0.25: the sample pages' playhead (the DSP's positions, poked as the link would
+        # leave them), the DT2-style sample list (it opens on SAMP's change; DOWN moves SAMP,
+        # NO puts it back and closes it), the folder browser (FUNC + YES: a folder entered, a
+        # sample picked sets SAMP and closes both), and modulation on SAMP moved through the
+        # loaded slots (smp_mod_apply, called on the parameter mirror)
+        if "smp_mod_apply" in lay:
+            from dnfw.sampler import machines as SMx    # noqa: PLC0415
+            M = SMx.MIRROR
+            kit = 0x4210C08C
+            snd0 = kit + 52
+            samp0 = snd0 + 0x6A
+
+            def samp_all(v):
+                return [f"poke:{kit + 52 + 1163 * t + 0x6A:#x}:{v:02x}00" for t in range(16)]
+            d = bytearray(0x1000)
+            struct.pack_into("<II", d, 0, 0x31504D53, 4)
+            for k, (fr, nm) in enumerate([(48000, "KICK"), (96000, "SHS_HAU"), (0, ""), (24000, "SNARE")]):
+                if fr:
+                    struct.pack_into("<IIfI", d, 8 + 16 * k, 0x84001000 + 0x40000 * k, fr, 1.0, 1)
+                d[0x808 + 8 * k:0x808 + 8 * k + len(nm)] = nm.encode()
+            ov = bytes((40 + (j * 7) % 150) for j in range(100))
+            fb, sb = SMx.META_FOLDER_BYTES, SMx.META_SLOT_BYTES
+            mt = bytearray(SMx.META_BYTES)
+            struct.pack_into("<III", mt, 0, SMx.META_MAGIC, 1, 2)
+            mt[12:22] = b"drum_loops"
+            mt[12 + fb:12 + fb + 5] = b"loops"
+            for k in range(128):
+                mt[12 + SMx.META_FOLDERS * fb + sb * k] = 0xFF
+            for k, f, nm in ((0, 0, "kick"), (1, 1, "shs_haunt_tape_56_drum_lo"), (3, 0xFF, "snare")):
+                r0 = 12 + SMx.META_FOLDERS * fb + sb * k
+                mt[r0] = f
+                mt[r0 + 4:r0 + 4 + len(nm)] = nm.encode()
+            cell = 0x800068E4 + 34 + 86
+            mem = lambda va, n=4: f"mem:{va:#x}:{n}"          # noqa: E731
+            st = ["wait:2"] + [f"poke:{kit + 52 + 1163 * t + 0xDE:#x}:08" for t in range(16)] + samp_all(2)
+            st += [f"poke:{M:#x}:{d[:0xC10].hex()}"] + [f"poke:{M + 0x1000 + 100 * k:#x}:{ov.hex()}" for k in (0, 1, 3)]
+            st += [f"poke:{M + 0x80000:#x}:{mt.hex()}", f"poke:{lay['smp_dir_ok']:#x}:00000001",
+                   f"poke:{lay['smp_meta_ok']:#x}:00000001"]
+            st += ["wait:6", "tap:2", "wait:6", "png:p2", f"poke:{lay['smp_periods']:#x}:00000000",
+                   f"poke:{lay['smp_pos_at']:#x}:00000000", f"poke:{lay['smp_pos']:#x}:" + "8000" * 16,
+                   "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:12", "png:ph2",
+                   "tap:2", "wait:6"]
+            st += samp_all(4) + ["wait:10", "png:l1", mem(lay["smp_lst_open"]), "down", "wait:8", "png:l2",
+                                 mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2), mem(lay["smp_lst_open"])]
+            st += samp_all(3) + ["wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
+                                 "wait:8", "png:b1", mem(lay["smp_fb_open"]), "yes", "wait:8", "png:b2",
+                                 mem(lay["smp_fb_folder"]), "down", "wait:2", "yes", "wait:8", "png:b3",
+                                 mem(samp0, 2), mem(lay["smp_fb_open"]), mem(lay["smp_lst_open"])]
+            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0200", f"poke:{cell:#x}:0400",
+                   f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
+                   f"poke:{cell:#x}:0000", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
+                   f"poke:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
+            js = work / "samplist.json"
+            sl_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", ",".join(st), "--png-dir", work / "samplist", "--json", js]
+
+            def sl_body(tdir):
+                rc, out = run("sample list", sl_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and js.exists():
+                    r = json.loads(js.read_text())
+                    m = r["memory"]
+                    shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p2", "ph1", "ph2", "l1", "b1", "b2")}
+                    lo, fo, ff = (hex(lay[k]) for k in ("smp_lst_open", "smp_fb_open", "smp_fb_folder"))
+                    sp, ce = hex(samp0), hex(cell)
+                    facts = {"playhead drawn and moving": len({shots["p2"], shots["ph1"], shots["ph2"]}) == 3,
+                             "list opens": int(m[lo], 16) == 1,
+                             "DOWN moves SAMP": m[sp] == "0500",
+                             "NO puts it back and closes": m[f"{sp}@2"] == "0200" and int(m[f"{lo}@3"], 16) == 0,
+                             "browser opens, a folder entered": int(m[fo], 16) == 1 and int(m[ff], 16) == 0
+                             and shots["b1"] != shots["b2"],
+                             "a sample picked: SAMP, both closed": m[f"{sp}@6"] == "0100" and int(m[f"{fo}@7"], 16) == 0
+                             and int(m[f"{lo}@8"], 16) == 0,
+                             "modulated SAMP through the loaded slots": [m[ce], m[f"{ce}@10"], m[f"{ce}@11"]]
+                             == ["0100", "0400", "0200"]}
+                    good = all(facts.values())
+                    why = str(facts)
+                return good, ("the playhead drawn where the DSP says; the list opens with SAMP, DOWN moves it, NO "
+                              "puts it back; FUNC + YES's browser enters a folder and assigns a sample; "
+                              "modulation on SAMP steps through the loaded slots" if good else why)
+            gate("sample list, browser, playhead (ColdFire)",
+                 *cached("sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body))
+
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest
             print("  (waiting for the SHARC runner)", flush=True)

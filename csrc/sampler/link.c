@@ -125,7 +125,8 @@ int smp_booted __attribute__((section(".data"))) = 0;
 u32 smp_cmds __attribute__((section(".data"))) = 0;                /* commands sent */
 u32 smp_hi __attribute__((section(".data"))) = 0;                  /* the image's bytes (0: none) */
 u32 smp_walk __attribute__((section(".data"))) = 0;                /* bytes loaded into the DSP */
-static int dir_ok __attribute__((section(".data"))) = 0;          /* DIR holds a whole directory */
+int smp_dir_ok __attribute__((section(".data"))) = 0;            /* DIR holds a whole directory */
+#define dir_ok smp_dir_ok
 /* v0.22: the DSP's RAM check this power-on (dnfw.sampler.machines.CMD_PROBE): until it has
  * passed, nothing loads past RAM_PROVEN (what ran on the instrument before v0.22) */
 int smp_ram __attribute__((section(".data"))) = 0;               /* 0 not yet, 1 passed, 2 failed or no answer */
@@ -598,7 +599,8 @@ static void sums(const u8 *buf, u32 words, u32 *a, u32 *b)
 #define META_ROOM 0x2000u
 _Static_assert(META_BYTES <= META_ROOM && 0x80000u + META_ROOM <= SMP_MIRROR_BYTES, "the meta block fits");
 _Static_assert(META_PTR + 12u <= CMD_OFFSET, "the meta pointer lies before the command block");
-static int meta_ok __attribute__((section(".data"))) = 0;
+int smp_meta_ok __attribute__((section(".data"))) = 0;
+#define meta_ok smp_meta_ok
 
 static void meta_read(void)
 {
