@@ -42,7 +42,7 @@ W0, NW = 0, 64                           # the host's words, W[k] at k (k = 1..6
 S0, NS = 64, 96                          # the machine's state
 B0, NB = 160, 67                         # the stream: 3 old samples, then two blocks of 32
 OUT0 = B0 + 35                           # where a block is rendered (B[35..66])
-VW = dict(pos=228, mach=229, live=230, inp=231, trg=232, last=233, want=234, dirty=235, quiet=244)   # the voice's own
+VW = dict(pos=228, mach=229, live=230, inp=231, trg=232, last=233, want=234, dirty=235, quiet=244, chg=245)   # the voice's own
 INP0 = 236                               # the eight 14-bit inputs (ints), 236..243
 MD_WORDS = 256
 MD_STRIDE = 4 * MD_WORDS                 # 1 KB a slot

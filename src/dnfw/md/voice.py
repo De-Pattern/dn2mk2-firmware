@@ -126,10 +126,11 @@ def advance(p: Prog, L: K.Layout) -> None:
         K.vw(p, 1, "mach")
         p.e("COMP(R0, R1);")
 
-        def change():
+        def change():                          # init runs after the host (below)
             K.vw(p, 0, "want")
             K.vws(p, "mach", 0)
-            _each(p, L, "init")
+            p.iconst(0, 1)
+            K.vws(p, "chg", 0)
         p._branch(lambda: p.r[0] != p.r[1], "NE", change, None)
     p.ifz(0, "NE", change_if_new)
     K.vw(p, 0, "trg")
@@ -145,6 +146,16 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.iconst(0, 0)
         K.vws(p, "dirty", 0)
     p.ifz(0, "NE", host)
+    # v0.24: a new machine's init after its host scale function, as the Machinedrum (and
+    # its golden runs) order them: some inits overwrite a host word (P-IRC's DEC), so
+    # init first made the first hit after choosing a machine sound like the second
+    K.vw(p, 0, "chg")
+
+    def init():
+        _each(p, L, "init")
+        p.iconst(0, 0)
+        K.vws(p, "chg", 0)
+    p.ifz(0, "NE", init)
     K.vw(p, 0, "trg")
 
     def trig():

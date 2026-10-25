@@ -26,7 +26,8 @@ def test_every_machine_has_its_name_and_some_parameters():
         e = b[ui.O_MACH + ui.MACH_BYTES * k:ui.O_MACH + ui.MACH_BYTES * (k + 1)]
         nib = int.from_bytes(e[:4], "big")
         synth, mach = e[4:7].decode(), e[7:9].decode()
-        assert f"{synth}-{mach}" == name, (k, name, synth, mach)
+        # (v0.24: the P-I machines as the MD shows them, "P-I" and the machine)
+        assert f"{synth}-{mach}" == name or (synth == "P-I" and name == f"PI-{mach}"), (k, name, synth, mach)
         assert e[9] == 0
         # at least one parameter exists (nibble bit 0), and no clip on a cell's last column
         cells = [nib >> (28 - 4 * s) & 15 for s in range(8)]

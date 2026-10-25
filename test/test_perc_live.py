@@ -49,7 +49,7 @@ def _record_value(knob: int, top: int) -> float | None:
 
 
 def test_every_machine_is_the_machinedrums():
-    assert PM.NAMES == MM.NAMES and PM.N == 25
+    assert PM.NAMES == MM.NAMES and PM.N == 34          # v0.24: and the nine P-I machines
     assert set(PM.NAMES) == set(MM.DEFAULTS)
 
 
