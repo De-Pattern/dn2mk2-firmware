@@ -18,6 +18,7 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 
 #define TYPE_FIRST 8
+#define SEG_DETENTS 3                           /* v0.25: WERP's SEG, detents a choice */
 #define TYPES 6                                 /* v0.19: SLICE */
 #define SOUND_TYPE 0xDE                         /* the sound's machine type byte */
 #define SOUND_VALUES 0x14                       /* its values, a 16-bit word a slot */
@@ -51,6 +52,22 @@ int smp_quant(u8 *s, int slot, int value)
         if (nc == oc)
             return value;                       /* a fine move: as it is */
         int zo = zone_of(q, oc), z = zone_of(q, nc);
+        if (d >= -8 && d <= 8 && slot == SMP_SEG_SLOT) {
+            /* v0.25, WERP's SEG: three detents a choice (owner: one detent each made the
+             * middle choice easy to skip, and left the knob most of its turn with nothing
+             * to do); a pause or a turn back starts the count again */
+            static int seg_acc __attribute__((section(".data"))) = 0;
+            static u32 seg_at __attribute__((section(".data"))) = 0;
+            u32 now = *(volatile u32 *)0x4058E8D4u;
+            int dir = d > 0 ? 1 : -1;
+            if (now - seg_at > 900u || (seg_acc > 0) != (dir > 0))
+                seg_acc = 0;
+            seg_at = now;
+            seg_acc += dir;
+            if (seg_acc > -SEG_DETENTS && seg_acc < SEG_DETENTS)
+                return old;                     /* not yet: the choice stays */
+            seg_acc = 0;
+        }
         if (d >= -8 && d <= 8) {                /* a detent (or a pushed one): the next choice */
             z = zo + (d > 0 ? 1 : -1);
             if (z < 0) z = 0;

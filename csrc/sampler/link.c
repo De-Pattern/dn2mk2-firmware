@@ -1422,3 +1422,61 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
     tx[m++] = 0xF7;
     SYSEX_SEND(tx, m, 0, PORT_USB);
 }
+
+/* -- v0.25: an LFO (or any modulation) on SAMP steps through the loaded samples ----------
+ *
+ * The ColdFire applies modulation each tick into the per-voice parameter mirror the frame
+ * is built from (0x400db22c(mirror); docs/engine-state.md): mirror block b's parameter s
+ * at 0x800068E4 + 34 + 202 b + 2 s, the sound on voice b at 0x800052A8 + 4 b. SAMP
+ * modulated over the 128 slots mostly landed on empty ones, so a note played nothing.
+ * Here, after the stock apply, a sample machine's modulated SAMP is moved by the same
+ * number of steps through the slots that hold something, from the one SAMP is set to
+ * (wrapping round them), as the DT2's project slots, which hold only loaded samples. An
+ * unmodulated SAMP, and every other parameter and machine, are left as stock wrote them. */
+#define MOD_APPLY ((void (*)(void *))0x400DB22Cu)
+#define MIRROR_CELL(b, s) ((volatile u16 *)(0x800068E4u + 34u + 202u * (u32)(b) + 2u * (u32)(s)))
+#define VOICE_SOUND(b) (*(u8 *volatile *)(0x800052A8u + 4u * (u32)(b)))
+#define SAMP_SLOT 43                            /* SAMP's frame slot (sound + 20 + 2 x 43) */
+#define SOUND_TYPE 0xDE
+
+void smp_mod_apply(void *mirror)
+{
+    MOD_APPLY(mirror);
+    if (!dir_ok)
+        return;
+    for (u32 b = 0; b < 16; b++) {
+        u8 *snd = VOICE_SOUND(b);
+        if (!snd || snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
+            continue;                           /* not a sample machine */
+        u32 set = snd[20 + 2 * SAMP_SLOT];      /* the high byte: the value, 0 OFF, k: slot k - 1 */
+        volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
+        int heard = *cell >> 8;
+        int k = heard - (int)set;
+        if (k == 0 || set == 0 || set > POOL_SLOTS)
+            continue;
+        int n = 0, at = -1, exact = 0;          /* the loaded slots; the last at or below SAMP's */
+        for (int j = 0; j < POOL_SLOTS; j++) {
+            if (smp_slot_empty(j))
+                continue;
+            if (j <= (int)set - 1) {
+                at = n;
+                exact = j == (int)set - 1;
+            }
+            n++;
+        }
+        if (n == 0)
+            continue;
+        /* SAMP on an empty slot sits between two loaded ones: a step up is the one above,
+         * a step down the one below */
+        int base = exact ? at : (k > 0 ? at : at + 1);
+        int idx = ((base + k) % n + n) % n;
+        for (int j = 0; j < POOL_SLOTS; j++) {  /* the idx-th loaded slot */
+            if (smp_slot_empty(j))
+                continue;
+            if (idx-- == 0) {
+                *cell = (u16)((j + 1) << 8);
+                break;
+            }
+        }
+    }
+}

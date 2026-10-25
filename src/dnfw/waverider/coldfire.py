@@ -393,6 +393,8 @@ LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc
 LFO_MASK_STOCK = 0x400DC30E
 KEYNOTES_SITE = 0x40058BE8              # v0.23: KeyboardView's jsr 0x40034460(kbd, &notes, key)
 KEYNOTES_STOCK = bytes.fromhex("4eb940034460")
+MODAPPLY_SITE = 0x40027196              # v0.25: the per-frame driver's jsr 0x400db22c (apply modulation)
+MODAPPLY_STOCK = bytes.fromhex("4eb9400db22c")
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
 POLL_STOCK = bytes.fromhex("4eb94011d2f4")
 
@@ -561,6 +563,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(KEYNOTES_SITE, bytes.fromhex("4eb9") + _long(csyms["slc_keynotes"]),
          "a trig key's notes in KEYBOARD mode: on a SLICE track (SLCE NOTE) slice k, else stock's",
          KEYNOTES_STOCK)
+
+    # v0.25: modulation on SAMP steps through the loaded samples (link.c, smp_mod_apply)
+    _need(content, MODAPPLY_SITE - 4, bytes.fromhex("2f002440"), "the driver pushes the mirror (move.l %d0,-(sp); movea.l %d0,%a2)")
+    edit(MODAPPLY_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_mod_apply"]),
+         "the per-frame modulation apply: stock's 0x400db22c, then a sample machine's modulated SAMP "
+         "moved through the loaded slots", MODAPPLY_STOCK)
 
     # v0.22: the LFOs' destination list leaves out the WaveTone records our machines do not use
     _need(content, LFO_MASK_LEA, bytes.fromhex("45f9400dc30e"), "the destination list: lea 0x400dc30e,%a2")
