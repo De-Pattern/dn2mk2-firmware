@@ -47,4 +47,8 @@ def test_no_coldfire_source_writes_the_frame():
         for addr in ("0x80005E6", "0x80005e6", "0x80006", "0x80005F", "0x80005f"):
             for line in text.splitlines():
                 if addr in line:
-                    assert "#define CTL_FRAME ((volatile u16 *)0x80005E60u)" in line, (f.name, line)
+                    # v0.25: the per-voice parameter mirror (smp_mod_apply writes SAMP's cell,
+                    # which a static assert in link.c puts past the frame's end)
+                    assert ("#define CTL_FRAME ((volatile u16 *)0x80005E60u)" in line
+                            or "#define MIRROR_CELL(b, s) ((volatile u16 *)(0x800068E4u" in line
+                            or "_Static_assert(0x800068E4u + 34u + 2u * SAMP_SLOT >= 0x80005E60u + 2748u" in line), (f.name, line)

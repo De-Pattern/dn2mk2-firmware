@@ -1514,7 +1514,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
  *
  * The ColdFire applies modulation each tick into the per-voice parameter mirror the frame
  * is built from (0x400db22c(mirror); docs/engine-state.md): mirror block b's parameter s
- * at 0x800068E4 + 34 + 202 b + 2 s, the sound on voice b at 0x800052A8 + 4 b. SAMP
+ * at the mirror base (MIRROR_CELL) + 34 + 202 b + 2 s, the sound on voice b at 0x800052A8 + 4 b. SAMP
  * modulated over the 128 slots mostly landed on empty ones, so a note played nothing.
  * Here, after the stock apply, a sample machine's modulated SAMP is moved by the same
  * number of steps through the slots that hold something, from the one SAMP is set to
@@ -1524,6 +1524,9 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
 #define MIRROR_CELL(b, s) ((volatile u16 *)(0x800068E4u + 34u + 202u * (u32)(b) + 2u * (u32)(s)))
 #define VOICE_SOUND(b) (*(u8 *volatile *)(0x800052A8u + 4u * (u32)(b)))
 #define SAMP_SLOT 43                            /* SAMP's frame slot (sound + 20 + 2 x 43) */
+/* the only cell written, block 0's lowest of them, lies past the frame (CTL_FRAME, 2,748
+ * bytes: test_sources): the mirror is not the frame, and nothing here touches the frame */
+_Static_assert(0x800068E4u + 34u + 2u * SAMP_SLOT >= 0x80005E60u + 2748u, "SAMP's mirror cells lie past the frame");
 #define SOUND_TYPE 0xDE
 
 void smp_mod_apply(void *mirror)
