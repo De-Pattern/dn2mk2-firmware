@@ -247,8 +247,11 @@ int wr_poll(void *screen)
     int slc = slc_visible() || slc_busy();      /* v0.23: SLICE's menus, and their notes */
     extern int smp_wants_redraw(void);          /* v0.25: a sample page's moving playhead */
     extern int smp_overlay_dirty;               /* v0.25: the sample list and the browser */
-    if (smp_overlay_dirty) {
+    extern int slc_state;                       /* v0.25: a SLICE/GRID menu opening or moving */
+    static int slc_last __attribute__((section(".data"))) = 0;   /* on is drawn at once, not */
+    if (smp_overlay_dirty || slc_state != slc_last) {            /* at the next redraw tick */
         smp_overlay_dirty = 0;
+        slc_last = slc_state;
         SET_DIRTY(screen);
     }
     if ((rec_visible() || slc || slc_was || smp_wants_redraw()) && (int)(FRAMES_NOW - rec_next) >= 0) {
