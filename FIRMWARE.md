@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.22** | 2026-10-24 | The RECORDER is its own screen (FUNC + VOICE) with the DT2's TRIM, NAME and ASSIGN steps; recordings to any slot; 400 MB for samples (after a RAM check at power-on); MD machines +6 dB; a browser import tool; ONESHOT never goes silent at LEN 0 | `builds/v0.22-RECORDER/` | yes |
+| **v0.23** | 2026-10-24 | SLICE's own menus (YES: EDIT SLICE POINTS, CREATE SLICE GRID with SLICES 2-64 and TR.DET), the slice editor, SLICES on the trig keys (KEYBOARD, SLCE NOTE); a sample with no slices plays whole | `builds/v0.23-SLICE/` | yes |
+| v0.22 | 2026-10-24 | The RECORDER is its own screen (FUNC + VOICE) with the DT2's TRIM, NAME and ASSIGN steps; recordings to any slot; 400 MB for samples (after a RAM check at power-on); MD machines +6 dB; a browser import tool; ONESHOT never goes silent at LEN 0 | `builds/v0.22-RECORDER/` | yes |
 | v0.21 | 2026-10-23 | RESONATOR and CZ PHASE page 1 in the Elektron style: knobs for continuous controls, choices (WAVE, SEL, OCT, MOD, KF, SUS) by name in a box | `builds/v0.21-KNOBS/` | yes |
 | v0.20 | 2026-10-23 | Fixes: the buzz on WaveTone/FM after a sample or PERC track (the link no longer touches the DSP's per-track routing), the RECORDER's flashing, SLICE's pages, the sample list; PERC drawn as the Machinedrum's screen; sample pages in the DT2's own geometry | `builds/v0.20-FIXES/` | yes |
 | v0.19 | 2026-10-23 | SLICE, the Digitakt II's sixth sample machine: your WAV's cue points (or a grid, or its hits) as up to 64 slices, SLCE / LEN / NOTE mode, slices marked on the waveform | `builds/v0.19-SLICE/` | yes |
@@ -56,6 +57,65 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.23 — SLICE (its menus, its editor, SLICES on the trig keys)
+
+`DN2mod_v0.23_SLICE_OS1.11.syx`
+sha256 `d3468486559f4ad14c378a8b99d875b06ee2be31dde4c6cd69da37d97cc1c5ee`
+Gate: CLEARED TO FLASH, 2026-10-24 (USB size 1,999,901 of 2,097,152). Source: commit `2f63d3e`. Docs: `docs/sampler.md` ("v0.23: SLICE's own menus, its editor, and SLICES on the trig keys").
+
+Everything in v0.22, plus:
+
+**Adds.**
+- **YES on a SLICE track's page** opens the DT2's SLICE menu: **EDIT SLICE POINTS** and
+  **CREATE SLICE GRID**. UP/DOWN pick, YES opens, NO closes.
+- **CREATE SLICE GRID**: **SLICES** (E) 2–64 and **TR.DET** (H) off/on. YES makes the slices,
+  NO cancels.
+  - TR.DET off: an even grid.
+  - TR.DET on: the sample is read back from the +Drive (a short "READING THE SAMPLE" wait),
+    and a slice starts at each hit, up to SLICES of them.
+- **EDIT SLICE POINTS**: the sample's waveform with its slices.
+  - **LEFT/RIGHT** pick a slice. **E** START, **H** END and **D** LOOP move its points.
+    **F** zooms; FUNC + F zooms the height. **G** scrolls.
+  - Hold FUNC while turning for single-frame steps.
+  - **FUNC + YES** adds a slice where the view is, and **FUNC + NO** removes the picked one.
+  - **NO** leaves and saves.
+- **Your slices are kept**: on the +Drive, and in the DSP at once, as soon as you leave the
+  editor or make a grid.
+- **SLICES on the trig keys**: on a SLICE track with **SLCE set to NOTE**, turn on
+  **KEYBOARD** mode, and trig keys 1–16 play slices 1–16.
+  - It records into patterns as notes, so playback hits the same slices.
+  - The key lights still show the keyboard layout.
+- **A sample with no slices now plays whole** on SLICE. Before, it played nothing, which is
+  why SLICE seemed dead on samples sent without cue points.
+
+**Test** (after the regression check):
+1. **SLICE on a plain sample.** Put a sample with no slices on a SLICE track: it plays the
+   whole sample.
+2. **The grid.** YES on the SLICE page, then CREATE SLICE GRID. Set SLICES to 8, then YES.
+   The page-2 markers show 8 slices, and SLCE 1–8 each play one.
+3. **Transients.** Again with TR.DET ON on a drum loop: the slices start on the hits.
+4. **The editor.** YES, then EDIT SLICE POINTS. Step through the slices with LEFT/RIGHT, move
+   START and END, zoom in, and FUNC + YES to add a slice. NO leaves. Play the slices: your
+   edits are heard.
+5. **After power-off.** Power-cycle: the slices are still there.
+6. **SLICES keys.** Set SLCE to NOTE and turn on KEYBOARD. Trig 1 plays slice 1, trig 2 slice
+   2, and so on. Record a few into a pattern and play it back.
+7. **Other tracks.** KEYBOARD mode on a WaveTone or ONESHOT track plays notes as before.
+
+**Known issues / not yet done.**
+- The DT2's **CREATE LINEAR LOCKS / RANDOM LOCKS** are not here.
+- The SLICES keys work through KEYBOARD mode, not a TRIG MODE entry. The DN2's own SLICES
+  entry exists but is switched off in its firmware, and turning it on would take five
+  patches to stock code.
+- The waveform in the editor is drawn from 1,024 points of the sample. At the deepest zoom
+  it is coarse, but the slice points themselves are exact.
+- Slices made on the instrument are kept in a 128 KB area at the end of the recordings'
+  area, so the recordings' area is 128 KB smaller.
+- **Not seen on hardware yet:** reading a sample back for TR.DET and the editor (checked
+  against a model of the +Drive in the emulator), and the KEYBOARD path on the real panel.
 
 ---
 
