@@ -734,3 +734,30 @@ def test_v023_slices_made_on_the_instrument_come_from_the_slice_area():
         assert abs(min(nz) - a / n) < 0.05 and abs(max(nz) - b / n) < 0.05, k
     assert SM.SLICE_AREA + SM.POOL_SLOTS * SM.SLICE_TABLE_BYTES <= SM.REC_END
     assert SM.REC_OFFSET + SM.REC_BYTES == SM.SLICE_AREA
+
+
+def test_idle_link_sends_the_play_positions():
+    """v0.25: with no SEND running, the DSP's packet is each track's play position (the
+    playhead on the sample pages), as the voices stood when the block began: track 0
+    plays and its unit is its read position as a fraction of the sample x POS_ONE; the
+    others play nothing (POS_NONE)."""
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    seen, before = [], None
+    for b in range(6):
+        pg = b & 1
+        h.mem.put(SM.TDM_PAGE, pg)
+        h.block(ONE, trig=(b == 1), recorder=True)
+        base = SM.TDM_TX + (pg << 11) + 56
+        pk = SL.pos_decode(lambda o: h.mem.get(base + o))
+        assert pk is not None and len(pk) == 16
+        assert all(u == SM.POS_NONE for u in pk[1:])
+        if before and before[0] and before[2]:
+            want = int(min(max(before[1] / before[2], 0.0), 1.0) * SM.POS_ONE)
+            assert abs(pk[0] - want) <= 1, (pk[0], want)
+            seen.append(pk[0])
+        else:
+            assert pk[0] == SM.POS_NONE
+        before = [h.mem.get(h.L.state + 4 * P.V[k]) for k in ("on", "pos", "frames")]
+    assert len(seen) >= 3 and seen == sorted(seen) and seen[-1] > seen[0]

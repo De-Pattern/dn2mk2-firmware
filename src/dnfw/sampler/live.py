@@ -224,6 +224,20 @@ def rx_page(units, high: bool = True) -> dict[int, int]:
     return out
 
 
+def pos_decode(word_at) -> list[int] | None:
+    """v0.25: the DSP's idle packet, checked: each track's position unit (POS_NONE: none),
+    or None"""
+    u = []
+    for i in range(SM.TX_UNITS):
+        w = word_at(64 * (i >> 1) + 4 * (i & 1))
+        if w >> 24 != SM.TDM_TAG:
+            return None
+        u.append((w >> 8) & 0xFFFF)
+    if u[0] != SM.POS_MAGIC or u[63] != (SM.LINK_SEED + sum(u[:63])) & 0xFFFF:
+        return None
+    return u[1:17]
+
+
 def tx_decode(word_at) -> list[int] | None:
     """the DSP's packet from its transmit page (WORD_AT(byte offset from slot 14 of frame
     0) -> word), checked: [offset, seq, words...] or None"""

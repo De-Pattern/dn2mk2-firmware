@@ -216,7 +216,22 @@ static volatile u32 rx_base __attribute__((section(".data"))) = 0;   /* their fi
 static volatile u32 rx_n __attribute__((section(".data"))) = 0;
 static volatile u32 rx_have[CHUNK_WORDS / TX_WORDS / 32 + 1] __attribute__((section(".data")));
 
-static volatile u32 periods __attribute__((section(".data"))) = 0;   /* smp_tdm's calls */
+volatile u32 smp_periods __attribute__((section(".data"))) = 0;   /* smp_tdm's calls */
+#define periods smp_periods
+/* v0.25: each track's play position as the DSP last sent it (POS_NONE: none; else its
+ * fraction of the sample x POS_ONE), and when (periods) */
+volatile u16 smp_pos[16] __attribute__((section(".data"))) = {0};
+volatile u32 smp_pos_at __attribute__((section(".data"))) = 0;
+
+/* track T's playhead as a fraction x POS_ONE, or -1: none (nothing playing, or no news from
+ * the DSP for a while) */
+int smp_playhead(int t)
+{
+    if (t < 0 || t > 15 || periods - smp_pos_at > 64u)
+        return -1;
+    u32 v = smp_pos[t];
+    return v == POS_NONE ? -1 : (int)v;
+}
 
 void smp_tdm(u32 h)
 {
@@ -268,9 +283,9 @@ void smp_tdm(u32 h)
     u32 sum = LINK_SEED, w0 = r[14], sh;
     /* the justification, from the magic: right (TAG << 16 | v, as stock's slots arrive)
      * or left (TAG << 24 | v << 8); then every unit is read the same way */
-    if (((w0 >> 16) & 0xFF) == TDM_TAG && (u16)w0 == TX_MAGIC)
+    if (((w0 >> 16) & 0xFF) == TDM_TAG && ((u16)w0 == TX_MAGIC || (u16)w0 == POS_MAGIC))
         sh = 0;
-    else if ((w0 >> 24) == TDM_TAG && (u16)(w0 >> 8) == TX_MAGIC)
+    else if ((w0 >> 24) == TDM_TAG && ((u16)(w0 >> 8) == TX_MAGIC || (u16)(w0 >> 8) == POS_MAGIC))
         sh = 8;
     else
         return;
@@ -282,7 +297,15 @@ void smp_tdm(u32 h)
         if (i < 63)
             sum += v[i];
     }
-    if (v[0] != TX_MAGIC || (u16)sum != v[63])
+    if ((u16)sum != v[63])
+        return;
+    if (v[0] == POS_MAGIC) {                    /* v0.25: idle, the voices' play positions */
+        for (int t = 0; t < 16; t++)
+            smp_pos[t] = v[1 + t];
+        smp_pos_at = periods;
+        return;
+    }
+    if (v[0] != TX_MAGIC)
         return;
     smp_tdm_heard++;
     rx_seq = v[1];

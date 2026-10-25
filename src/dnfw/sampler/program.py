@@ -2167,8 +2167,10 @@ def probe(p: Prog, L: Layout) -> None:
 def tdm_tx(p: Prog, L: Layout) -> None:
     """The fast link out (v0.16): while a SEND is running, the next 29 pool words in slots
     14..15 of the TDM transmit page this block (64 units: MAGIC, sequence, the word
-    offset, 58 units of data, the count, a check), each as TAG << 24 | v << 8; idle, those
-    slots are zeroed, so the ColdFire sees no packet."""
+    offset, 58 units of data, the count, a check), each as TAG << 24 | v << 8. v0.25:
+    idle, the voices' play positions instead (POS_MAGIC, then a unit a track: POS_NONE, or
+    the position as a fraction of the sample x POS_ONE; zeros; the check), which the
+    ColdFire draws as the sample pages' playhead."""
     K = LK
     p.ld(0, SM.TDM_PAGE)
     p.iconst(12, 1)
@@ -2179,20 +2181,63 @@ def tdm_tx(p: Prog, L: Layout) -> None:
     p.st(K["pg"], 0)
     p.ld(0, K["sbusy"])
 
-    def idle():
-        p.ld(0, K["pg"])
-        p.st(K["a"], 0)
+    def idle():                               # v0.25: the play positions
+        p.iconst(6, SM.POS_MAGIC)
+        p.st(SM.LINK_BUF, 6)
+        p.iconst(0, 0)
+        p.st(K["u"], 0)
 
-        def clear():                          # (the loop takes R0 and R12 each time round)
-            p.ld(0, K["a"])
-            p.iconst(6, 0)
-            p.seti(1, 0)
-            p.sti(0, 1, 6)
-            p.sti(1, 1, 6)
-            p.iconst(12, 64)
+        def track():
+            p.ld(0, K["u"])
+            p.lsh(1, 0, 7)                    # the track's state: state + 128 t
+            p.iconst(12, L.state)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.iconst(5, SM.POS_NONE)
+            p.ldi(2, V["on"], 1)
+            p.ldi(3, V["frames"], 1)
+
+            def playing():
+                p.ldi(4, V["pos"], 1)
+                p.iconst(12, 0)
+                p.float_(3, 3, 12)
+                p.float_(4, 4, 12)
+                PM._recip_inline(p, 6, 3, 7)  # F6 = 1 / frames
+                p.fop(4, 4, "*", 6)
+                p.fconst(12, float(SM.POS_ONE))
+                p.fop(4, 4, "*", 12)
+                p.fconst(12, 0.0)
+                p.fop(4, 4, "MAX", 12)
+                p.fconst(12, float(SM.POS_ONE))
+                p.fop(4, 4, "MIN", 12)
+                p.trunc(5, 4)
+            p.ifz(2, "NE", lambda: p.ifz(3, "GT", playing))
+            p.ld(0, K["u"])
+            p.lsh(1, 0, 2)
+            p.iconst(12, SM.LINK_BUF + 4)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.sti(0, 1, 5)
+            p.iconst(12, 1)
             p.iop(0, 12, "+", 0)
-            p.st(K["a"], 0)
-        p.loop(K["v"], 32, clear)
+            p.st(K["u"], 0)
+        p.loop(K["v"], 16, track)
+        p.iconst(0, 17)
+        p.st(K["u"], 0)
+
+        def zero():
+            p.ld(0, K["u"])
+            p.lsh(1, 0, 2)
+            p.iconst(12, SM.LINK_BUF)
+            p.iop(1, 12, "+", 1)
+            p.seti(1, 1)
+            p.iconst(6, 0)
+            p.sti(0, 1, 6)
+            p.iconst(12, 1)
+            p.iop(0, 12, "+", 0)
+            p.st(K["u"], 0)
+        p.loop(K["v"], SM.TX_UNITS - 1 - 17, zero)
+        _tx_out(p, K)
 
     def busy():
         # the units: build into the buffer, then write them out tagged
@@ -2246,6 +2291,28 @@ def tdm_tx(p: Prog, L: Layout) -> None:
             p.iop(0, 12, "+", 0)
             p.st(K["u"], 0)
         p.loop(K["v"], SM.TX_WORDS, word)
+        _tx_out(p, K)
+        # on
+        p.ld(4, K["spos"])
+        p.ld(5, K["cnt"])
+        p.ipass(12, 4)
+        p.iop(4, 12, "+", 5)
+        p.st(K["spos"], 4)
+        p.ld(6, K["sseq"])
+        p.iconst(12, 1)
+        p.iop(6, 12, "+", 6)
+        p.st(K["sseq"], 6)
+        p.ld(5, K["send"])
+        p.e("COMP(R4, R5);")
+        p._branch(lambda: s32(p.r[4]) >= s32(p.r[5]), "GE",
+                  lambda: (p.iconst(6, 0), p.st(K["sbusy"], 6)), None)
+    p.ifz(0, "EQ", idle, busy)
+
+
+def _tx_out(p: Prog, K) -> None:
+    """LINK_BUF's 64 units: unit 63 the check of the first 63, then each out tagged, unit i
+    at frame i >> 1, slot 14 + (i & 1), in this block's page (K['pg'])."""
+    if True:
         p.iconst(5, SM.LINK_SEED)             # the check
         p.iconst(0, 0)
         p.st(K["u"], 0)
@@ -2296,21 +2363,6 @@ def tdm_tx(p: Prog, L: Layout) -> None:
             p.iop(0, 12, "+", 0)
             p.st(K["u"], 0)
         p.loop(K["v"], SM.TX_UNITS, out)
-        # on
-        p.ld(4, K["spos"])
-        p.ld(5, K["cnt"])
-        p.ipass(12, 4)
-        p.iop(4, 12, "+", 5)
-        p.st(K["spos"], 4)
-        p.ld(6, K["sseq"])
-        p.iconst(12, 1)
-        p.iop(6, 12, "+", 6)
-        p.st(K["sseq"], 6)
-        p.ld(5, K["send"])
-        p.e("COMP(R4, R5);")
-        p._branch(lambda: s32(p.r[4]) >= s32(p.r[5]), "GE",
-                  lambda: (p.iconst(6, 0), p.st(K["sbusy"], 6)), None)
-    p.ifz(0, "EQ", idle, busy)
 
 
 def verify_step(p: Prog, L: Layout) -> None:

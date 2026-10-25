@@ -236,7 +236,8 @@ int wr_poll(void *screen)
     slc_poll();
     static int slc_was __attribute__((section(".data"))) = 0;
     int slc = slc_visible() || slc_busy();      /* v0.23: SLICE's menus, and their notes */
-    if ((rec_visible() || slc || slc_was) && (int)(FRAMES_NOW - rec_next) >= 0) {
+    extern int smp_wants_redraw(void);          /* v0.25: a sample page's moving playhead */
+    if ((rec_visible() || slc || slc_was || smp_wants_redraw()) && (int)(FRAMES_NOW - rec_next) >= 0) {
         rec_next = FRAMES_NOW + REC_REDRAW;
         SET_DIRTY(screen);
         slc_was = slc;                          /* once more after it closes: the page again */

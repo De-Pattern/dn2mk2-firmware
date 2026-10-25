@@ -624,7 +624,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen",
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
-                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n"):   # the sample link's state (v0.15)
+                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)

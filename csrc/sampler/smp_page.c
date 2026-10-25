@@ -454,6 +454,43 @@ static void marker(void *c, int x, int cy, int dotted)
     }
 }
 
+/* v0.25: the playhead, as the DT2 draws it over the strip: a double line where the voice
+ * is reading (the DSP sends each track's position every block, link.c), cleared either
+ * side so it reads over the wave */
+extern int smp_playhead(int t);
+#define UI_TRACK (*(volatile u8 *)0x42431A6Cu)
+
+static u32 ph_drawn_at __attribute__((section(".data"))) = 0;    /* the waveform page's last draw */
+static int ph_was __attribute__((section(".data"))) = -1;         /* the playhead it drew (-1 none) */
+
+/* the UI loop asks (page.c's wr_poll): the waveform page is up and its playhead moves, or
+ * has just stopped (one more draw clears it) */
+int smp_wants_redraw(void)
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    if (now - ph_drawn_at > 1800u)              /* not drawn for over a second: not up (FRAMES: ~1500 a second) */
+        return 0;
+    int ph = smp_playhead(UI_TRACK);
+    return ph >= 0 || ph_was >= 0;
+}
+
+static void playhead(void *c, int x0, int w, int cy)
+{
+    int ph = smp_playhead(UI_TRACK);
+    ph_drawn_at = *(volatile u32 *)0x4058E8D4u;
+    ph_was = ph;
+    if (ph < 0)
+        return;
+    int x = x0 + (int)((unsigned)ph * (unsigned)(w - 2) / POS_ONE);
+    for (int y = cy - SMP_WAVE_AMP - 1; y <= cy + SMP_WAVE_AMP + 1; y++) {
+        SET_PIXEL(c, x - 1, y, 0);
+        SET_PIXEL(c, x, y, 1);
+        SET_PIXEL(c, x + 1, y, 0);
+        SET_PIXEL(c, x + 2, y, 1);
+        SET_PIXEL(c, x + 3, y, 0);
+    }
+}
+
 /* the machine box at the left, as the DT2 labels it: SMP over the page number (the stock
  * page draws SYN there; its letters are overwritten in the same 3 x 6 hand) */
 static void smp_box(void *c)
@@ -639,6 +676,10 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
                 marker(c, x0 + lp, cy, 1);
         }
     }
+    if (slot >= 1 && smp_overview(slot - 1))
+        playhead(c, x0, w, cy);
+    else
+        ph_was = -1;
     /* the bottom row: E, F, G's labels (WERP: its icons), H's level as the DT2's pill */
     for (int i = 4; i < 7; i++) {
         if (!ids[i])
