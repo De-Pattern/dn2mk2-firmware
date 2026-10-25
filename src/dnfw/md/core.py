@@ -311,13 +311,11 @@ def mpyf_any(p: Prog, d: int, a: int, b: int) -> None:
 # the start): mode 0, x = r; 1, p1 + r; 2, 2 p1 - p2 + r; 3, 3 p1 - 3 p2 + p3 + r.
 
 Z_GROUP = 16
-Z_PER_BLOCK = 1024                          # words decoded a DN2 block (64 groups)
+Z_PER_BLOCK = 2048                          # words decoded a DN2 block (128 groups): 29 blocks
 
 
 def _table_layout() -> dict[str, tuple[int, int]]:
     at, out = 0, {}
-    out["sine"] = (at, SINE_N)
-    at += 4 * SINE_N
     for name, (_a, n) in rom.HOST_TABLES.items():
         if name != "P":
             out[f"host{name}"] = (at, n)
@@ -325,6 +323,8 @@ def _table_layout() -> dict[str, tuple[int, int]]:
     for name, (_a, n) in rom.DSP_TABLES.items():
         out[name] = (at, n)
         at += 4 * n
+    out["sine"] = (at, SINE_N)                 # last: the tables are whole first (13 blocks)
+    at += 4 * SINE_N
     nz = at // 4
     out["zpad"] = (at, -nz % Z_PER_BLOCK)       # rounds the decoded words to whole blocks
     at += 4 * out["zpad"][1]
@@ -340,13 +340,14 @@ Z_N = None                                   # the decoded words (set below)
 
 
 def _z_values() -> list[int]:
-    """The words zpack decodes to, in order (signed 24-bit): the sine, then the tables."""
-    vals = list(md_sine_words())
+    """The words zpack decodes to, in order (signed 24-bit): the tables, then the sine."""
+    vals = []
     for name, (_a, n) in rom.HOST_TABLES.items():
         if name != "P":
             vals += [_s24(x) for x in rom.host_table(name)]
     for name in rom.DSP_TABLES:
         vals += [_s24(x) for x in rom.dsp_table(name)]
+    vals += md_sine_words()
     vals += [0] * (-len(vals) % Z_PER_BLOCK)
     return vals
 
@@ -490,7 +491,7 @@ def table_fill(p: Prog, L: Layout) -> None:
     def more():
         p.ld(0, C["fill"])
         p.lsh(1, 0, 2)
-        p.iconst(12, L.T["sine"])
+        p.iconst(12, L.tables)
         p.iop(1, 12, "+", 1)
         p.seti(2, 1)                           # I2: where the words go
 

@@ -77,7 +77,7 @@ What it took:
   output back into their phase, so one LSB becomes another waveform within a few hundred
   samples. `core.md_sine_words` is that recursion in Python (equal to the emulator's
   table). v0.24: the DSP decodes the table, with every Q23 table, from one compressed
-  stream (`zpack`, below), 1,024 words a block for the first 58 blocks after power-on.
+  stream (`zpack`, below), 2,048 words a block for the first 29 blocks after power-on, the tables first.
   The runner checks the DSP's table against it.
 - **The 56300's truncation where it feeds back**: envelopes multiplied once a block or
   once a sample (`mpy_floor`, `env_mul`), filter coefficients and recursions on
@@ -175,7 +175,8 @@ The P-I machines' code and tables took the DSP image over its 1 MiB upload buffe
   (a predictor, 0-3: none, the last word, a line through the last two, a parabola through
   the last three; and a width) and 16 residuals of that width. 46.7 KB, where the
   sine's corrections and the tables packed 24 bits a word took 101.7 KB. The DSP decodes
-  1,024 words a block after power-on (58 blocks, 39 ms), as it filled the sine before.
+  2,048 words a block after power-on (29 blocks, 19 ms; the tables in the first 13), as it
+  filled the sine before.
   `core.z_decode` is the decoder in Python; the model runs the DSP's own (`bench`).
 - **The host's scale function once**: the voice ran it from two places (a note, and
   dirty words), and the chain of 34 machines was emitted twice (35 KB).

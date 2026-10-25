@@ -135,7 +135,7 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
         from dnfw.md import bench as MDB
         L = PL.layout().md
         for a, w in MDB.table_mem(L).items():
-            if L.T["sine"] <= a < L.T[MDK.SHIPPED]:
+            if L.tables <= a < L.T[MDK.SHIPPED]:
                 m2.poke(runner.state, a, w)
         m2.poke(runner.state, L.C["fill"], MDK.Z_N)
     return runner
@@ -831,7 +831,7 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
         # and the packed tables, unpacked into their floats (unpack_fill), word for word
         from dnfw.md import bench as MDB
         want = MDB.table_mem(L.md)
-        lo, hi = L.md.T["hostD"], L.md.T[MDK.SHIPPED]
+        lo, hi = L.md.tables, L.md.T[MDK.SHIPPED]
         tables_ok = all((m2.word(st, a) or 0) == want.get(a, 0) for a in range(lo, hi, 4))
         sine_ok = sine_ok and tables_ok
     runs["sine"].pop("state", None)
