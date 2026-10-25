@@ -25,3 +25,5 @@ and nothing of Elektron's is ever published.
 
 Checked: v0.24's zip, run under Pyodide 0.27.7 in node from the DN2 1.11 .syx, the DT2
 1.17 .syx and the MD 1.63 .syx, gave f5853cdb... (v0.24's cleared sha256) in 3.4 minutes.
+The page itself, end to end in headless Chromium (the three files chosen, Build, the worker,
+the sha256 compare): 202 s, "exactly v0.24's cleared file", Save enabled.
