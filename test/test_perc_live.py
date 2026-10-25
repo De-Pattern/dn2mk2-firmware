@@ -62,7 +62,12 @@ def test_the_voice_plays_the_machinedrums_default_hit_at_48k(name):
         pytest.fail("no reference (docs/md.md)")
     case = MDB.golden(name)["cases"][0]
     assert case["name"] == "default"
-    inputs = case["events"][0][1]
+    inputs, start = case["events"][0][1], 0
+    if getattr(MM.MACHINES[MM.NAMES.index(name)], "INIT_FIRST", False):
+        # v0.24: its first note after the machine is chosen is silent on the MD; the voice
+        # runs its init first, so that note is the MD's second (golden 'second_hit')
+        case = next(c for c in MDB.golden(name)["cases"] if c["name"] == "second_hit")
+        start, inputs = case["events"][1][0], case["events"][1][1]
     params = []
     for (_rid, _slot, _lo, top), x in zip(PM.PARAMS, inputs):
         v = _record_value(x >> 7, top)
@@ -72,9 +77,9 @@ def test_the_voice_plays_the_machinedrums_default_hit_at_48k(name):
     h = PL.Harness()
     h.set_controls(PM.NAMES.index(name), params)
     ours = []
-    for b in range(case["nblocks"] - 4):
+    for b in range(case["nblocks"] - start - 4):
         ours += h.block(60.0, b == 0)
-    want = _resampled(MDB.unpack(case["out"]), len(ours))
+    want = _resampled(MDB.unpack(case["out"])[32 * start:], len(ours))
     r = MDB.compare(ours, want)
     assert r["snr_db"] > 60 or r["rms_err"] < 2 ** -20, r
 

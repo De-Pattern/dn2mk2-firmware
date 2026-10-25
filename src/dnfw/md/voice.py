@@ -25,6 +25,7 @@ from . import machines as MM
 from ..perc.dsl import Prog
 
 N = len(MM.MACHINES)
+INIT_FIRST = [k for k, M in enumerate(MM.MACHINES) if getattr(M, "INIT_FIRST", False)]
 KNOB_SCALE = 16256.0                          # knob 0..1 -> 0..127 << 7
 START = 35.0                                  # the read position that asks for a new block
 QUIET_LEVEL = 2.0 ** -21                      # a block whose peak is under this is silence
@@ -131,6 +132,15 @@ def advance(p: Prog, L: K.Layout) -> None:
             K.vws(p, "mach", 0)
             p.iconst(0, 1)
             K.vws(p, "chg", 0)
+            for k in INIT_FIRST:               # ... but these machines' before it
+                K.vw(p, 0, "mach")
+                p.iconst(12, k)
+
+                def first(M=MM.MACHINES[k]):
+                    M.init(p, L)               # (its own init only: the chain is emitted once, below)
+                    p.iconst(0, 0)
+                    K.vws(p, "chg", 0)
+                p.if_(0, "EQ", 12, first, kind="i")
         p._branch(lambda: p.r[0] != p.r[1], "NE", change, None)
     p.ifz(0, "NE", change_if_new)
     K.vw(p, 0, "trg")

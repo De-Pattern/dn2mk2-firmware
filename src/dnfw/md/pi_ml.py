@@ -15,8 +15,9 @@ pole are exact words, so a mode rings at the Machinedrum's frequency. The modes'
 states are floats (Q23): their rounding is far below the 24-bit output.
 
 Quirks kept: init sets word 3 (HARD) to 0 after the host's words, so the first note after
-the machine is chosen is silent on the Machinedrum (on the DN2 the voice runs init before
-the host's words, so it is not). The excitation's step 6 pass, as the firmware has it,
+the machine is chosen is silent on the Machinedrum. Not kept on the DN2: the voice runs
+this machine's init before the host's words (INIT_FIRST; every other machine's after, as
+the MD does), so that note plays, as the MD's second would. The excitation's step 6 pass, as the firmware has it,
 leaves only the block's first excited sample in the sum (its state words Y24, Y25 stay 0);
 the three per-block decays at Y28..Y30 are never read and are left out.
 """
@@ -128,6 +129,9 @@ class PIML:
     the amplitude envelope (ints); per-block temps; the modes' (a, x1) and (k2, k1, g);
     the block's lowpassed excitation."""
     NAME, ID = "PI-ML", 67
+    # v0.24: the voice runs this machine's init before its host words (the others' after,
+    # as the Machinedrum does): the MD's own order leaves its first note silent (HARD 0)
+    INIT_FIRST = True
     PNAMES = ("PTCH", "DEC", "HARD", "TENS", "-", "-", "-", "-")
     PI, PF, TENV, LP, AMP, XI, XF, FE, LPF, H0, CS, E8, CC, AW = range(14)
     RES = 16                       # 8 x (a, x1), floats
