@@ -106,13 +106,15 @@ SC_WORDS = ("t", "count", "out", "tr", "type", "note", "trig", "sbase",
             # v0.12: the track effects -- their seven controls, three filters, the block's set-up
             *(f"q{k}" for k in range(7)),
             "s3k", "s3a1", "s3a2", "s3a3", "s4k", "s4a1", "s4a2", "s4a3",
-            "s5k", "s5a1", "s5a2", "s5a3", "buf", "amd", "amdt", "eqm", "fxam", "fxeq", "fxhp", "fxlp", "fxy")
+            "s5k", "s5a1", "s5a2", "s5a3", "buf", "amd", "amdt", "eqm", "fxam", "fxeq", "fxhp", "fxlp", "fxy",
+            "mnm", "lev")   # v0.26: the Monomachine machine (index + 1, 0 PERC), the output level
 
 
 class Layout:
     """Addresses the program is built for (dnfw.waverider.dsp provides them)."""
 
-    def __init__(self, state, scratch, tables, sin, md_state=None, md_tables=None):
+    def __init__(self, state, scratch, tables, sin, md_state=None, md_tables=None,
+                 mnm_scratch=0, mnm_tables=0):
         self.state, self.tables, self.sin = state, tables, sin
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
         _, at = tables_bytes()
@@ -123,6 +125,9 @@ class Layout:
         assert len(MDK.SC_WORDS) <= 24
         self.md = MDK.Layout(md_state if md_state is not None else 0, self.C["c0"],
                              md_tables if md_tables is not None else 0)
+        # v0.26: the Monomachine machines' buffers and tables (dnfw.mnm, docs/mnm.md)
+        from ..mnm import core as MNC
+        self.md.mnm = MNC.Layout(self, mnm_scratch, mnm_tables)
 
 
 # -- primitives -----------------------------------------------------------------------------

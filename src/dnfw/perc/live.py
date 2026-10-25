@@ -28,7 +28,8 @@ def layout(state=None, scratch=None, tables=None, sin=None) -> M.Layout:
         _, at = SL.tables_bytes()
         sin = dsp.SHFT_TABLES_DDR + at["sin"]
     return M.Layout(state=state, scratch=scratch, tables=tables, sin=sin,
-                    md_state=dsp.MD_STATE_DDR, md_tables=dsp.MD_TABLES_DDR)
+                    md_state=dsp.MD_STATE_DDR, md_tables=dsp.MD_TABLES_DDR,
+                    mnm_scratch=dsp.MNM_SCRATCH_DDR, mnm_tables=dsp.MNM_TABLES_DDR)
 
 
 def table_words(L: M.Layout) -> dict[int, int]:

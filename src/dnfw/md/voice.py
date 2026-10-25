@@ -24,7 +24,13 @@ from . import core as K
 from . import machines as MM
 from ..perc.dsl import Prog
 
-N = len(MM.MACHINES)
+N = len(MM.MACHINES)                          # PERC's TYPE spans these
+try:                                          # v0.26: the Monomachine's synth machines, chosen by
+    from ..mnm import machines as _MNM        # their machine type, after the Machinedrum's
+    ALL = MM.MACHINES + _MNM.MACHINES
+except ImportError:                           # pragma: no cover
+    ALL = MM.MACHINES
+N_ALL = len(ALL)
 INIT_FIRST = [k for k, M in enumerate(MM.MACHINES) if getattr(M, "INIT_FIRST", False)]
 KNOB_SCALE = 16256.0                          # knob 0..1 -> 0..127 << 7
 START = 35.0                                  # the read position that asks for a new block
@@ -42,10 +48,13 @@ def _same_code(step: str) -> dict[int, int]:
         getattr(M, step)(q, _PROBE_L)
         return q.text()
     out, seen = {}, {}
-    for k, M in enumerate(MM.MACHINES):
+    for k, M in enumerate(ALL):
+        if hasattr(M, "MNM"):                 # their own code each, but one host (the same)
+            out[k] = seen.setdefault("mnm_host", k) if step == "host" else k
+            continue
         f = getattr(M, step)
         key = getattr(f, "__func__", f)
-        if key in seen and text(MM.MACHINES[seen[key]]) == text(M):
+        if key in seen and text(ALL[seen[key]]) == text(M):
             out[k] = seen[key]
         else:
             seen.setdefault(key, k)
@@ -61,15 +70,15 @@ def _each(p: Prog, L: K.Layout, step: str) -> None:
     mode, each distinct code once; run mode calls the one machine."""
     if p.run:
         K.vw(p, 0, "mach")
-        getattr(MM.MACHINES[min(p.r[0], N - 1)], step)(p, L)
+        getattr(ALL[min(p.r[0], N_ALL - 1)], step)(p, L)
         return
     same = _same_code(step)
     end = p.label(f"md_{step}_end")
     body = {k: p.label(f"md_{step}_{k}") for k in set(same.values())}
     K.vw(p, 0, "mach")                         # once: each body leaves by JUMP, so R0 stays
-    for k, M in enumerate(MM.MACHINES):
+    for k, M in enumerate(ALL):
         nxt = p.label("md_next")
-        if k < N - 1:
+        if k < N_ALL - 1:
             p.iconst(12, k)
             p.e("COMP(R0, R12);")
             p.jump("NE", nxt)
@@ -79,7 +88,7 @@ def _each(p: Prog, L: K.Layout, step: str) -> None:
             getattr(M, step)(p, L)
             p.jump("", end)
         else:
-            p.comment(f"---- {M.NAME} {step}: {MM.MACHINES[same[k]].NAME}'s ----")
+            p.comment(f"---- {M.NAME} {step}: {ALL[same[k]].NAME}'s ----")
             p.jump("", body[same[k]])
         p.place(nxt)
     p.place(end)
@@ -239,7 +248,8 @@ def inputs(p: Prog, L: K.Layout, knobs: list[int]) -> None:
         p._branch(lambda: p.r[0] != p.r[1], "NE", changed, None)
 
 
-def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: float = 1.0) -> None:
+def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: float = 1.0,
+          level_word: int | None = None) -> None:
     """One DN2 block (steps 1-4): KNOBS the scratch words of the eight knobs, Rnote nonzero
     for a note, Rwant the machine TYPE asks for (0..N-1). Output at I4 (advanced past the
     block). Clobbers everything but I3."""
@@ -289,9 +299,15 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
         p.fop(10, 2, "-", 0)
         p.fop(9, 9, "+", 10)
         p.fop(9, 9, "*", 8)
-        p.fconst(12, 0.5 * level)
-        p.fop(9, 9, "*", 12)
-        p.fconst(12, level)
+        if level_word is None:
+            p.fconst(12, 0.5 * level)
+            p.fop(9, 9, "*", 12)
+            p.fconst(12, level)
+        else:                                  # v0.26: the level from a word (x 0.5, then x level:
+            p.fconst(12, 0.5)                  # the same product, bit for bit)
+            p.fop(9, 9, "*", 12)
+            p.ld(12, level_word)
+            p.fop(9, 9, "*", 12)
         p.fop(10, 1, "*", 12)
         p.fop(9, 9, "+", 10)
         p.stpost(4, 9)

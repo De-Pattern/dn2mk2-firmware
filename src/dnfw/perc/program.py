@@ -26,6 +26,10 @@ TRIG_WORD = 0x25C4AC
 BUFFERS = 0x254A60
 RECORDS, RECORD_STRIDE = 0x2554B8, 0x234
 MACHINE_TYPE = 5
+# v0.26: the Monomachine's synth machines (docs/mnm.md), each its own machine type, in PERC's
+# voice: type -> index in dnfw.mnm.machines.MACHINES
+MNM_TYPES = {6: 0, 7: 1}                 # SID 6581, DPRO-WAVE (CZ's and RESONATOR's types until v0.25)
+MNM_LEVEL = 0.25                         # a Monomachine machine's full scale on a DN2 track
 SEED = 0x2545F491
 OFF_LEVEL = 0.0002
 
@@ -72,6 +76,14 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     if p.run:
         p.iconst(9, t)
         p.st(C["t"], 9)
+    # v0.26: which Monomachine machine (index + 1), 0 for PERC, from the frame's type word
+    p.ld(9, C["t"], "t")
+    raw_type(p, 2)
+    p.iconst(0, 0)
+    for typ, k in MNM_TYPES.items():
+        p.iconst(12, typ)
+        p.if_(2, "EQ", 12, lambda k=k: p.iconst(0, k + 1), kind="i")
+    p.st(C["mnm"], 0)
     p.ld(9, C["t"], "t")
     p.lsh(12, 9, 7)
     p.iconst(11, L.state)
@@ -98,6 +110,8 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.fconst(12, MDV.N / 128.0)               # 0..127 over the machines (v0.17)
     p.fop(4, 4, "*", 12)
     p.trunc(4, 4)
+    p.ld(5, C["mnm"])                         # v0.26: a Monomachine machine's type picks it
+    p.ifz(5, "NE", lambda: (p.iconst(12, MDV.N - 1), p.iop(4, 12, "+", 5)))
     p.st(C["type"], 4)
     for k, (_rid, slot, lo, top) in enumerate(M.PARAMS + M.FX_PARAMS):
         half(p, 4, M.frame_offset(slot), 10)
@@ -137,12 +151,35 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.iconst(0, 1)
         M.vs(p, "on", 0)
     p.ifz(0, "EQ", fresh)
+    # the level, and for a Monomachine machine the note (float semitones, as RESONATOR reads it)
+    p.fconst(0, MD_LEVEL)
+    p.st(C["lev"], 0)
+    p.ld(0, C["mnm"])
+
+    def mnm_note():
+        from ..mnm import core as MNC
+        p.fconst(0, MNM_LEVEL)
+        p.st(C["lev"], 0)
+        p.ld(9, C["t"])
+        p.lsh(12, 9, 2)
+        p.iconst(11, NOTE_CELLS)
+        p.iop(12, 11, "+", 12)
+        p.seti(1, 12)
+        p.ldi(8, 0, 1)
+        p.lsh(12, 8, -23)
+        p.iconst(13, 0xFF)
+        p.iop(12, 12, "AND", 13)
+        p.if_(12, "EQ", 13, lambda: p.iconst(8, 0), kind="i")    # NaN, infinite: 0
+        p.ifz(8, "LT", lambda: p.iconst(8, 0))                    # negative: 0
+        MNC.vws(p, "pitch", 8)
+    p.ifz(0, "NE", mnm_note)
     p.ld(2, C["trig"])
     p.ld(5, C["type"])
-    MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, MD_LEVEL)
+    MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"])
     p.ld(12, C["sbase"])
     p.seti(2, 12, "this slot's state, again")
-    fx(p, L)
+    p.ld(0, C["mnm"])
+    p.ifz(0, "EQ", lambda: fx(p, L))          # the Machinedrum's track effects: PERC's only
 
 
 def fx(p: Prog, L: M.Layout) -> None:
@@ -368,6 +405,13 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.iop(12, 11, "+", 12)
     p.seti(4, 12, "record: 0x2554b8 + 0x234 t")
     raw_type(p, 2)
+    for typ in MNM_TYPES:                     # v0.26: a Monomachine machine is PERC's voice too
+        p.iconst(12, typ)
+        p.e("COMP(R2, R12);")
+        skip = p.label("mnm")
+        p.jump("NE", skip)
+        p.iconst(2, MACHINE_TYPE)
+        p.place(skip)
     p.ipass(0, 2)
     p.iconst(12, MACHINE_TYPE)
     p.e("COMP(R0, R12);")

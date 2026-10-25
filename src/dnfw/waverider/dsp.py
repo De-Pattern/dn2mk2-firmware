@@ -127,25 +127,14 @@ SHFT_TABLES_DDR = 0x81212000
 GRAN_STATE_DM, GRAN_STATE_STRIDE = SHFT_STATE_DM + 16 * SHFT_STATE_STRIDE, 128   # 0x2e4b00
 GRAN_TABLES_DDR = 0x81214000
 GRAN_BUF_DDR, GRAN_BUF_STRIDE = 0x81400000, 0x20000
-# RESONATOR (docs/rings.md, machine type 6): its code (entered from machine5_live's
-# tail, on to wr_cz), a scratch block (the exciter and the mode sum of one voice, the
-# loop's counters) in the reader span's tail; its tables (dnfw.rings.live) and its 16
-# voices' state in DDR (the state zeros: a fill block), read once a mode a block.
-# (v0.6 had the scratch at 0x2e6400 and the tables at 0x2e6600; CZ took that room.)
-RINGS_CODE_DM, RINGS_CODE_SPAN = 0x2E5300, 0xE40
-RINGS_SW = RINGS_CODE_DM // 2                                # 0x172980
-RINGS_SCRATCH_DM = 0x2DDB00                                  # after reader_m5's code + padding
-RINGS_STATE_DDR, RINGS_STATE_STRIDE = 0x81200000, 256
-RINGS_TABLES_DDR = RINGS_STATE_DDR + 16 * RINGS_STATE_STRIDE  # 0x81201000
-# CZ (docs/cz.md, machine type 7): its code (entered from rings.asm's tail, on to
-# wr_ping) up to 0x2e7000, the end of the memory M5c's tables proved free on the
-# instrument; a scratch block in the reader span's tail; its 16 voices' state and its
-# tables in DDR
-CZ_SCRATCH_DM = RINGS_SCRATCH_DM + 0x200                     # 0x2ddd00
-CZ_CODE_DM = RINGS_CODE_DM + RINGS_CODE_SPAN                 # 0x2e6140
-CZ_SW = CZ_CODE_DM // 2                                      # 0x1730a0 (0x173000 until v0.10)
-CZ_STATE_DDR, CZ_STATE_STRIDE = 0x81202000, 64
-CZ_TABLES_DDR = CZ_STATE_DDR + 16 * CZ_STATE_STRIDE          # 0x81202400
+# v0.26: RESONATOR and CZ are gone (their types are the Monomachine machines', in PERC's
+# voice: docs/mnm.md); their L1 code and scratch are zeros, their DDR the Monomachine's:
+# its scratch (the decimator's buffers), then 16 slots' own state, 2 KB each
+MNM_SCRATCH_DDR = 0x81200000
+MNM_STATE_DDR, MNM_STATE_STRIDE = 0x81204000, 0x800
+# its tables (from the owner's Monomachine OS) come over the fast link into the pool's
+# last 256 KB (the last recorder slot's tail: a recording stops at 66 s, 6.3 of its 8 MB)
+MNM_TABLES_DDR = SMP_POOL_DDR + (128 << 20) - (256 << 10)
 
 DDR_FLOOR = 0x80600000                       # nothing of ours below this in DDR
 IDLE_DM = 0x2DEA00                           # idle_load.asm
@@ -175,7 +164,8 @@ LOOKUP16_DM = 0x2DEE04                       # 16 words; 0x2dee00 is the [-1] gu
 MACHINE_TYPES = 16
 SMP_ENGINE_SLOT = 5                          # the engine slot the sample machines borrow
 SMP_TYPES = range(8, 14)                     # ONESHOT WERP STRETCH REPITCH GRID SLICE (v0.19)
-ENGINES = {5: "PERC", 6: "RESONATOR", 7: "CZ", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
+ENGINES = {5: "PERC", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
+MNM_TYPES = (6, 7)                           # v0.26: the Monomachine machines (PERC's voice, so PERC's slot)
 
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
 IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")
@@ -203,8 +193,8 @@ def lookup16() -> bytes:
     and above would read past them). PERC and the sample machines tell themselves apart by
     the frame's own type word; one whose machine has no renderer yet stays silent on that
     slot. Any other type reads 0 (FM Tone), as stock answers 5-7."""
-    table = [t if t < 5 or t in ENGINES and t < 8 else SMP_ENGINE_SLOT if t in SMP_TYPES else 0
-             for t in range(MACHINE_TYPES)]
+    table = [t if t < 5 or t in ENGINES and t < 8 else
+             SMP_ENGINE_SLOT if t in SMP_TYPES or t in MNM_TYPES else 0 for t in range(MACHINE_TYPES)]
     return struct.pack(f"<{1 + MACHINE_TYPES}I", 0, *table)
 
 
@@ -231,7 +221,7 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "lookup_ptr", "ping", "rings", "cz", "gran",
+                         "entry_mark", "emark_jump", "lookup_ptr", "ping", "gran",
                          "pvmix", "pvmix_jump")}
 
 
@@ -260,8 +250,6 @@ def spans() -> list[tuple[str, int, bytes]]:
     obj = objects()
     raw = [
         ("free since v0.11 (Waverider's reader and osc 2; zeros)", REGION[0], b""),
-        ("RESONATOR scratch (zeros)", RINGS_SCRATCH_DM, bytes(0x200)),
-        ("CZ scratch (zeros)", CZ_SCRATCH_DM, bytes(0x100)),
         ("state: save area, PERC scratch, idle_load's counters (zeros)", STATE_DM, bytes(STATE_BYTES)),
         ("PERC state: 16 voices x 128 bytes (zeros)", PERC_STATE_DM, bytes(16 * PERC_STATE_STRIDE)),
         ("idle_load.asm (wr_idle)", IDLE_DM, obj["idle_load"]),
@@ -273,15 +261,13 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("the recorder's staging block: 32 floats (zeros)", SMP_STAGE_DM, bytes(0x80)),
         ("the fast link's scratch and packet buffer (zeros; v0.16)", SMP_LINK_DM, bytes(0x500)),
         ("sample machines' decimators: 16 voices x 48 bytes (zeros; v0.18)", SMP_DEC_DM, bytes(16 * 48)),
-        ("W2 random table, 256 float32 (RESONATOR, CZ, GRAN)", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
+        ("W2 random table, 256 float32 (GRAN)", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
         ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
         ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),
         ("gran.asm (wr_gran)", GRAN_CODE_DM, obj["gran"]),
         ("GRAN scratch (zeros)", GRAN_SCRATCH_DM, bytes(0x100)),
         ("SHFT state: 16 tracks x 256 bytes (zeros)", SHFT_STATE_DM, bytes(16 * SHFT_STATE_STRIDE)),
         ("GRAN state: 16 tracks x 128 bytes (zeros)", GRAN_STATE_DM, bytes(16 * GRAN_STATE_STRIDE)),
-        ("rings.asm (wr_rings)", RINGS_CODE_DM, obj["rings"]),
-        ("cz.asm (wr_cz)", CZ_CODE_DM, obj["cz"]),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):
@@ -304,16 +290,6 @@ def _shft_tables() -> bytes:
     return shft_live.tables_bytes()[0]
 
 
-def _rings_tables() -> bytes:
-    from ..rings import live as rings_live
-    return rings_live.tables_bytes()[0]
-
-
-def _cz_tables() -> bytes:
-    from ..cz import live as cz_live
-    return cz_live.tables_bytes()[0]
-
-
 def _md_core():
     from ..md import core
     return core
@@ -328,11 +304,8 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
     """(what, load address, payload) of each DDR span (load address = address): the
     machines' and filters' state (zeros, so fill blocks) and tables."""
     return [
-        ("RESONATOR state: 16 voices x 256 bytes (zeros)", RINGS_STATE_DDR,
-         bytes(16 * RINGS_STATE_STRIDE)),
-        ("RESONATOR tables", RINGS_TABLES_DDR, _rings_tables()),
-        ("CZ state: 16 voices x 64 bytes (zeros)", CZ_STATE_DDR, bytes(16 * CZ_STATE_STRIDE)),
-        ("CZ tables", CZ_TABLES_DDR, _cz_tables()),
+        ("Monomachine scratch and 16 slots' state (zeros; v0.26)", MNM_SCRATCH_DDR,
+         bytes(MNM_STATE_DDR - MNM_SCRATCH_DDR + 16 * MNM_STATE_STRIDE)),
         ("PING tables", PING_TABLES_DDR, _ping_tables()),
         ("SHFT tables", SHFT_TABLES_DDR, _shft_tables()),
         ("GRAN tables", GRAN_TABLES_DDR, _gran_tables()),
