@@ -447,6 +447,12 @@ static void slices_add(u32 off, u32 bytes, const u8 *buf)
     }
 }
 
+static void overview_clear(int k)
+{
+    for (u32 j = 0; j < OVERVIEW_W; j++)
+        OVERVIEW[OVERVIEW_W * (u32)k + j] = 0;
+}
+
 /* the overview of the slots whose frames lie in [OFF, OFF + BYTES) of the pool, from BUF */
 static void overview_add(u32 off, u32 bytes, const u8 *buf)
 {
@@ -799,6 +805,8 @@ static u32 s_n __attribute__((section(".data"))) = 0;    /* this window's words 
 static u32 s_since __attribute__((section(".data"))) = 0;
 static u32 s_tries __attribute__((section(".data"))) = 0;
 static u32 s_frames __attribute__((section(".data"))) = 0;
+static u32 s_peak __attribute__((section(".data"))) = 0;      /* v0.25: for the normalising */
+static u32 s_place __attribute__((section(".data"))) = 0;
 
 static int is_recording(u32 k)                  /* slot K's frames lie in the recordings' area */
 {
@@ -870,7 +878,6 @@ u32 smp_rec_place(int dest, u32 *room)
 
 /* from rec.c when a recording is done: into slot SLOT, its frames at OFF bytes into the
  * recordings' area, FRAMES of them */
-static u32 s_place __attribute__((section(".data"))) = 0;
 void smp_save_recording(int slot, u32 off, u32 frames)
 {
     if (!store_ok() || frames == 0 || sstate || slot < 0 || slot >= POOL_SLOTS - 1 || off >= REC_BYTES)
@@ -898,7 +905,75 @@ void smp_save_recording(int slot, u32 off, u32 frames)
     for (u32 j = 0; j < OVERVIEW_W; j++)
         OVERVIEW[OVERVIEW_W * (u32)slot + j] = 0;
     smp_saved = 0;
+    s_peak = 0;
     sstate = 1;
+}
+
+/* v0.25: the largest |frame| of the recording in the window BUF (bytes [OFF, OFF + BYTES) of
+ * the pool), for the normalising after the save */
+static void peak_add(u32 off, u32 bytes, const u8 *buf)
+{
+    u32 lo = REC_OFFSET + s_place, hi = lo + s_frames * 2u;
+    u32 a = lo > off ? lo : off, b = hi < off + bytes ? hi : off + bytes;
+    for (u32 x = a & ~1u; x + 1 < b; x += 2) {
+        int v = (short)(buf[x - off] | buf[x - off + 1] << 8);
+        if (v < 0) v = -v;
+        if ((u32)v > s_peak) s_peak = (u32)v;
+    }
+}
+
+/* v0.25: the recording brought to full scale, as the DT2 normalises one (its peak to
+ * NORM_PEAK), in the +Drive's copy, a chunk a pass; then the loader's own path (read,
+ * sent, checked) gives the DSP the same frames */
+#define NORM_PEAK 32700u
+static void norm_chunk(void)
+{
+    u32 lo = REC_OFFSET + s_place, hi = lo + s_frames * 2u;
+    u32 n = s_end - s_off;
+    if (n > CHUNK)
+        n = CHUNK;
+    u8 *b = STAGE(1);
+    if (image_read(s_off, n, b) != 0) {
+        sstate = 0;
+        smp_saved = -1;
+        return;
+    }
+    u32 g = (NORM_PEAK << 16) / s_peak;               /* the gain, 16 fractional bits */
+    int gi = (int)(g >> 16), gf = (int)(g & 0xFFFFu);
+    u32 a = lo > s_off ? lo : s_off, e = hi < s_off + n ? hi : s_off + n;
+    for (u32 x = a & ~1u; x + 1 < e; x += 2) {
+        int v = (short)(b[x - s_off] | b[x - s_off + 1] << 8);
+        int w = v * gi + ((v * gf) >> 16);
+        if (w > 32767) w = 32767;
+        if (w < -32768) w = -32768;
+        b[x - s_off] = (u8)w;
+        b[x - s_off + 1] = (u8)((u32)w >> 8);
+    }
+    if (image_write(s_off, n, b) != 0) {
+        sstate = 0;
+        smp_saved = -1;
+        return;
+    }
+    s_off += n;
+}
+
+int smp_norm_state(void)                        /* 1 normalising, 0 not */
+{
+    return sstate >= 3;
+}
+
+int smp_work_pct(void)                          /* how far the save, or the normalising, is */
+{
+    u32 lo = (REC_OFFSET + s_place) & ~511u, span = s_end > lo ? s_end - lo : 1u, at;
+    if (sstate == 4)
+        at = l_off > lo ? l_off - lo : 0u;
+    else if (sstate >= 1)
+        at = s_off > lo ? s_off - lo : 0u;
+    else
+        return 100;
+    if (sstate == 3 || sstate == 4)             /* the normalising: the +Drive, then the DSP */
+        return (int)((sstate == 3 ? 0u : 50u) + (at >> 8) * 50u / ((span >> 8) + 1u));
+    return (int)((at >> 8) * 100u / ((span >> 8) + 1u));
 }
 
 static void save_window(void)
@@ -930,6 +1005,33 @@ static int window_whole(void)
 
 static void save_poll(void)
 {
+    if (sstate == 3) {                          /* v0.25: normalising the +Drive's copy */
+        if (s_off < s_end) {
+            norm_chunk();
+            return;
+        }
+        if (smp_lstate != L_DONE && smp_lstate != L_IDLE)
+            return;
+        u32 lo = (REC_OFFSET + s_place) & ~511u;   /* then the DSP's, as the loader loads */
+        overview_clear((int)s_slot);
+        l_kind = K_FRAMES;
+        l_off = lo;
+        l_end = s_end;
+        l_entry = -1;
+        l_slot = POOL_SLOTS + 1;
+        area_push = -1;
+        fast_on = 1;
+        smp_lstate = L_READ;
+        sstate = 4;
+        return;
+    }
+    if (sstate == 4) {
+        if (smp_lstate == L_DONE || smp_lstate == L_IDLE) {
+            sstate = 0;
+            smp_saved = smp_lstate == L_DONE ? 1 : -1;
+        }
+        return;
+    }
     if (sstate == 1) {
         save_window();
     } else if (sstate == 2) {
@@ -941,6 +1043,7 @@ static void save_poll(void)
                 return;
             }
             overview_add(s_off, s_n * 4u, STAGE(1));
+            peak_add(s_off, s_n * 4u, STAGE(1));
             s_off += s_n * 4u;
             if (s_off < s_end) {
                 save_window();
@@ -966,6 +1069,11 @@ static void save_poll(void)
                 return;
             }
             smp_hi = bytes;
+            if (s_peak >= 64u && s_peak < NORM_PEAK - 64u) {   /* quieter than full: normalised */
+                s_off = (REC_OFFSET + s_place) & ~511u;
+                sstate = 3;
+                return;
+            }
             sstate = 0;
             smp_saved = 1;
         } else if (periods - s_since > 3000u) {               /* two seconds: ask again */

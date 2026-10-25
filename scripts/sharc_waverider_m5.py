@@ -479,7 +479,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,tdm,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,pvmix,tdm,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -578,6 +578,12 @@ def main(argv=None):
             results["3d_rec"] = step_rec(init, sound, machines, a.blocks)
             gc.collect()
             show(results["3d_rec"])
+
+        if "pvmix" in steps:
+            print("\nstep 3f: the recorder's preview (after the engine's mix)")
+            results["3f_pvmix"] = step_pvmix(snap, m2mach, m5, stock_img)
+            gc.collect()
+            show(results["3f_pvmix"])
 
         if "tdm" in steps:
             print("\nstep 3e: the fast link (TDM)")
@@ -1155,9 +1161,9 @@ def step_rec(init, sound, machines, blocks) -> dict:
     def bits(x):
         return struct.unpack("<I", struct.pack("<f", x))[0]
 
-    def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES, place=0):
+    def command(r, seq, cmd, src=0, chan=0, dest=0, frames=SM.REC_FRAMES, place=0, thres=0):
         # v0.22: DEST the slot, PLACE where in the recordings' area (512-byte units)
-        for k, w in enumerate((seq, cmd, src, chan | place << 8, 0, (SM.REC_FIRST + dest) << 24 | frames)):
+        for k, w in enumerate((seq, cmd, src, chan | place << 8, thres, (SM.REC_FIRST + dest) << 24 | frames)):
             m2.poke(r.state, cmd_at + 4 * k, w)
 
     def status(st):
@@ -1197,6 +1203,8 @@ def step_rec(init, sound, machines, blocks) -> dict:
             command(r, 1, SM.CMD_NOW, src=0, dest=0)
         if b == n:
             command(r, 2, SM.CMD_STOP)
+        if b == n + 2:                       # v0.25: PREVIEW frames [11, 101) of it: [10, 101)
+            command(r, 3, SM.CMD_PREVIEW, src=SM.REC_FIRST, chan=11, thres=101)
         for k in range(32):
             x = bits(sig[32 * b + k] if b < n else 0.0)
             m2.poke(r.state, SM.IN_BUF + 4 * k, x)
@@ -1210,6 +1218,8 @@ def step_rec(init, sound, machines, blocks) -> dict:
     stat1 = status(st) if ok1 else []
     back = smp_series(rec, 0)[-play * BLOCK:] if ok1 else []
     exact1 = smp_exact(rec) if ok1 else (0, 1, 1)
+    C = SL.layout().C
+    pv1 = (m2.word(st, C["pva"]), m2.word(st, C["pvn"])) if ok1 else None
     rec.pop("state", None)
 
     # run 2: TRK6, MONO L
@@ -1293,8 +1303,11 @@ def step_rec(init, sound, machines, blocks) -> dict:
         "entry, int16 at 8 MB into the pool)": ok1 and words[1] == 32 * n
             and words[0] == dsp.SMP_POOL_DDR + SM.REC_OFFSET and words[3] == SM.FMT_I16,
         "the recorded frames are the input's, as the model converts them": ok1 and got == want,
-        "STOP keeps the slot; the status says done (3), in both reply pages, checked":
-            ok1 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 3 and h[2] == (32 * n) >> 6 for h in stat1),
+        "STOP keeps the slot; the status says done (3), and (v0.25) a preview playing (+16), in both reply "
+        "pages, checked":
+            ok1 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 3 | 16 and h[2] == (32 * n) >> 6 for h in stat1),
+        "v0.25: PREVIEW of frames [11, 101): from frame 10 (on a word), 45 words, for pvmix":
+            ok1 and pv1 == (words[0] + 20, 45),
         "SAMP 124 plays the recording back": ok1 and len(back) == play * BLOCK and V.peak(back) > 0.3,
         "TRK6, MONO L: track 6's bucket's left (the voices' routing elsewhere), back to its level, "
         "into SAMP 125 at 8 MB into the recordings' area (within 2 LSB)":
@@ -1320,6 +1333,89 @@ def step_rec(init, sound, machines, blocks) -> dict:
 
 
 # -- step 3e: the fast link (v0.16, docs/sampler.md) -------------------------------------------------
+
+def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
+    """v0.25: the driver's call of 0x1c9d3f, run from its site (sw 0x1c9fd2) until it is
+    back in the driver after the call (sw 0x1c9fdb), on the stock image and on the build: with no preview the two are identical in
+    every register and every word written; with one, the build is exactly stock run on the
+    block the model mixes (dnfw.sampler.program.pvmix: each of the 32 frames added on L
+    and R), every register and every word, but the preview's own words; it ends after the
+    words it has."""
+    L = SL.layout()
+    C = L.C
+    REC_AT = dsp.SMP_POOL_DDR + SM.REC_OFFSET + 0x4000
+    pairs = [((k * 1237) & 0xFFFF) | (((k * 7919 + 3) & 0xFFFF) << 16) for k in range(40)]
+    regs = {f"R{k}": 0x01010101 * (k + 1) for k in range(16)}
+    regs.update({"I1": 0x2DF000, "R2": 0x00C0FFEE})
+
+    mix_in = [struct.unpack("<I", struct.pack("<f", 0.01 * k - 0.3))[0] for k in range(64)]
+
+    def run(image, words_left, mix0=mix_in):
+        r = init_on(snap, m2mach, image).fresh_call(dsp.PVMIX_SITE_SW, regs=regs)
+        for k in range(64):
+            m2.poke(r.state, SM.MIX_BUF + 4 * k, mix0[k])
+        for k, w in enumerate(pairs):
+            m2.poke(r.state, REC_AT + 4 * k, w)
+        m2.poke(r.state, C["pva"], REC_AT)
+        m2.poke(r.state, C["pvn"], words_left)
+        before = dict(r.state.overlay)
+        # the call made, back in the driver. The emulator notes a CJUMP's return as the
+        # instruction after its delay slots and checks the callee's return against it; the
+        # callee returns through the C stack's word (the second push: 0x1c9fda, + 1), which
+        # is stock's in both. From wr_pvmix the note is our tail's address, so at the call's
+        # target it is set to the one stock's call notes, and the return itself is checked.
+        how = fx.run(r, 200000, fx.Fixups(), stop_at=[0x1C9D3F])
+        if how[0] == "stop":
+            if r.state.call_stack and r.state.call_stack[-1] == dsp.PVMIX_SW + (len(dsp.pvmix_object()) - 6) // 2:
+                r.state.call_stack[-1] = 0x1C9FDB
+            how = fx.run(r, 200000, fx.Fixups(), stop_at=[0x1C9FDB])
+        return r, how, before
+
+    def mix(r):
+        return [m2.word(r.state, SM.MIX_BUF + 4 * k) or 0 for k in range(64)]
+
+    def model(words_left, mix0):
+        from dnfw.perc.dsl import Mem
+        mem = Mem(lambda a: 0)
+        for k in range(64):
+            mem.put(SM.MIX_BUF + 4 * k, mix0[k])
+        for k, w in enumerate(pairs):
+            mem.put(REC_AT + 4 * k, w)
+        mem.put(C["pva"], REC_AT)
+        mem.put(C["pvn"], words_left)
+        SP.pvmix_run(L, mem)
+        return [mem.get(SM.MIX_BUF + 4 * k) for k in range(64)], mem.get(C["pva"]), mem.get(C["pvn"])
+
+    own = {C[w] for w in ("pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa")}
+    out, checks = {}, {}
+    for name, left in (("none", 0), ("full", 40), ("tail", 5)):
+        want, pva, pvn = model(left, mix_in)
+        rs, hs, _ = run(stock, 0, want)        # stock, given the mix the preview makes
+        rm, hm, _ = run(m5, left)
+        ok = hs[0] == "stop" and hm[0] == "stop"
+        same_regs = ok and rm.state.uregs == rs.state.uregs
+        diff = sorted(a for a in set(rm.state.overlay) | set(rs.state.overlay)
+                      if rm.state.overlay.get(a) != rs.state.overlay.get(a))
+        mixr = range(SM.MIX_BUF, SM.MIX_BUF + 256)
+        # the overlay holds load (byte) addresses: DM + 0x28000000
+        stray = [a for a in diff if not any(o <= a - dsp.LOAD_ALIAS < o + 4 or o <= a < o + 4 for o in own)]
+        got = mix(rm)
+        checks[f"{name}: both make the call and come back after it"] = ok
+        checks[f"{name}: every register as stock's"] = same_regs
+        checks[f"{name}: every word written as stock's (given the mixed block), but the preview's own"] = ok and not stray
+        checks[f"{name}: the mix as the model's ({min(left, 16)} words added)"] = ok and got == want
+        if left == 0:
+            checks["none: the mix untouched"] = ok and got == mix_in
+        checks[f"{name}: pva, pvn moved on as the model's"] = ok and (
+            m2.word(rm.state, C["pva"]), m2.word(rm.state, C["pvn"])) == (pva, pvn)
+        rd = {k: (rs.state.uregs.get(k), rm.state.uregs.get(k)) for k in set(rs.state.uregs) | set(rm.state.uregs)
+              if rs.state.uregs.get(k) != rm.state.uregs.get(k)}
+        out[name] = {"how": [str(x) for x in hm], "stray": [hex(a) for a in stray[:8]],
+                     "regs_differing": {str(k): [str(a), str(b)] for k, (a, b) in list(rd.items())[:12]}}
+        if os.environ.get("PVMIX_DEBUG"):
+            print(name, out[name])
+    return {"ok": all(checks.values()), "checks": checks, "numbers": out}
+
 
 def step_tdm(init, sound, machines, blocks) -> dict:
     """The fast link's DSP end on the SHARC: the ColdFire's packets poked into slots 8..15

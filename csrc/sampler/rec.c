@@ -84,7 +84,7 @@ int smp_assign(int track, int slot);                 /* below: 0 done */
 
 /* v0.22: after a recording, the DT2's steps (manual 13.2, 9..11): TRIM, then NAME, then
  * ASSIGN (a [TRIG] key: that track plays it; NO: none). rec_phase 0 is the RECORDER. */
-enum { PH_REC, PH_TRIM, PH_NAME, PH_ASSIGN };
+enum { PH_REC, PH_TRIM, PH_NAME, PH_ASSIGN, PH_WORK };   /* v0.25: WORK, NORMALIZING */
 int rec_phase __attribute__((section(".data"))) = PH_REC;
 int trim_slot __attribute__((section(".data"))) = -1;
 u32 trim_n __attribute__((section(".data"))) = 0;           /* its frames, as recorded */
@@ -197,8 +197,10 @@ static void rec_arm_toggle(void)
 }
 
 /* FUNC + VOICE (coldfire.py's REC_COMBO_SITE, in the main key handler's VOICE case) */
+static void preview(int on);
 void rec_combo(void)
 {
+    preview(0);
     rec_overlay = !rec_overlay;
     rec_phase = PH_REC;                         /* a recording mid-TRIM keeps what it is */
     if (rec_overlay) {
@@ -209,6 +211,36 @@ void rec_combo(void)
         smp_rec_place(rec_dest, &room);
         rec_room = room;
     }
+}
+
+/* v0.25: the RECORDING screen's waveform, as the DT2 draws it while it records: the
+ * peak of each column's stretch, REC_WAVE_W columns of rec_wave_span frames; when the
+ * recording passes the last, the columns pair up and each spans twice as long */
+#define REC_WAVE_W 120
+u8 rec_wave[REC_WAVE_W] __attribute__((section(".data")));
+u32 rec_wave_span __attribute__((section(".data"))) = 2400;    /* 50 ms a column to start */
+extern int smp_overlay_dirty;
+
+static void rec_wave_reset(void)
+{
+    for (int j = 0; j < REC_WAVE_W; j++)
+        rec_wave[j] = 0;
+    rec_wave_span = 2400;
+}
+
+static void rec_wave_add(u32 frames, int peak)
+{
+    while (frames / rec_wave_span >= REC_WAVE_W) {
+        for (int j = 0; j < REC_WAVE_W / 2; j++)
+            rec_wave[j] = rec_wave[2 * j] > rec_wave[2 * j + 1] ? rec_wave[2 * j] : rec_wave[2 * j + 1];
+        for (int j = REC_WAVE_W / 2; j < REC_WAVE_W; j++)
+            rec_wave[j] = 0;
+        rec_wave_span *= 2u;
+    }
+    u32 c = frames / rec_wave_span;
+    u8 v = (u8)(peak >> 7);
+    if (v > rec_wave[c])
+        rec_wave[c] = v;
 }
 
 /* from the UI loop (page.c's wr_poll), every pass */
@@ -223,15 +255,19 @@ void rec_poll(void)
             rec_link = 1;
         /* a recording has ended: it is kept on the +Drive, as the DT2 keeps its
          * recordings, and is there again after a power cycle; DEST moves on */
-        if (rec_state == 2)
+        if (rec_state == 2) {
+            if (!was_recording)
+                rec_wave_reset();
+            rec_wave_add(rec_frames, rec_peak);
             was_recording = 1;
+        }
         else if (was_recording) {
             was_recording = 0;
             if (rec_taken >= 0) {
                 smp_save_recording(rec_taken, rec_off, rec_frames);
                 rec_saved_slot = rec_taken;
-                if (rec_overlay) {                  /* on to TRIM, as the DT2 */
-                    rec_phase = PH_TRIM;
+                if (rec_overlay) {                  /* NORMALIZING, then TRIM, as the DT2 */
+                    rec_phase = PH_WORK;
                     trim_slot = rec_taken;
                     trim_n = rec_frames;
                     trim_s = 0;
@@ -242,6 +278,16 @@ void rec_poll(void)
                     rec_dest = rec_taken;
             }
         }
+    }
+    if (rec_phase == PH_WORK && smp_saved != 0) {   /* v0.25: saved (and normalised): TRIM */
+        u32 n = smp_frames(trim_slot);
+        if (n) {
+            trim_n = n;
+            trim_s = 0;
+            trim_e = n;
+        }
+        rec_phase = PH_TRIM;
+        smp_overlay_dirty = 1;
     }
     if (sent_seq && rec_link == 0 && FRAMES - sent_at > 1500u)
         rec_link = -1;                          /* sent, and no echo within a second */
@@ -411,26 +457,67 @@ static void name_done(void)
     }
 }
 
-/* a TRIM knob: E START, H END, a detent a 200th of the recording (FUNC: finer) */
+/* v0.25: FUNC as it is held now, kept from every FUNC press and release the UI queue
+ * carries (they all pass here, and on to stock). The DN2's own key items' bit 1 is not a
+ * FUNC chord: on the instrument a plain YES carries it (the owner's v0.24: YES on TRIM and
+ * on a SLICE track did nothing), so nothing here reads it. */
+int smp_func_held __attribute__((section(".data"))) = 0;
+u32 rec_dbg[33] __attribute__((section(".data")));
+int rec_pv_on __attribute__((section(".data"))) = 0;      /* a preview playing, while held */
+static u32 knob_at __attribute__((section(".data"))) = 0;    /* the last trim knob's FRAMES */
+#define CMD_PREVIEW 9
+extern int smp_overlay_dirty;
+
+static void preview(int on)
+{
+    if (on && trim_slot >= 0)
+        smp_command(CMD_PREVIEW, (u32)trim_slot, trim_s, trim_e, 0);
+    else if (rec_pv_on)
+        smp_command(CMD_PREVIEW, (u32)(trim_slot < 0 ? 0 : trim_slot), 0, 0, 0);
+    rec_pv_on = on && trim_slot >= 0;
+}
+
+/* a TRIM knob: E START, H END. A detent moves a 1000th of the recording, more the faster
+ * the knob turns (as a sample machine's start moves), a 10,000th with FUNC held */
 static void trim_knob(int index, int delta, int fine)
 {
-    u32 step = trim_n / (fine ? 2000u : 200u);
-    if (step < 32u)
-        step = 32u;
+    u32 now = FRAMES, dt = now - knob_at;
+    knob_at = now;
+    int ad = delta < 0 ? -delta : delta;
+    u32 mul = fine ? 1u : dt < 12u ? 12u : dt < 30u ? 5u : dt < 60u ? 2u : 1u;
+    u32 step = trim_n / (fine ? 10000u : 1000u) * mul * (u32)ad;
+    if (step < 2u)
+        step = 2u;
+    int sgn = delta < 0 ? -1 : 1;
     if (index == 5) {
-        int v = (int)trim_s + delta * (int)step;
+        int v = (int)trim_s + sgn * (int)step;
         if (v < 0) v = 0;
         if ((u32)v + 64u > trim_e) v = (int)trim_e - 64;
         trim_s = (u32)(v < 0 ? 0 : v);
     } else if (index == 8) {
-        int v = (int)trim_e + delta * (int)step;
+        int v = (int)trim_e + sgn * (int)step;
         if ((u32)(v < 0 ? 0 : v) < trim_s + 64u) v = (int)trim_s + 64;
         if ((u32)v > trim_n) v = (int)trim_n;
         trim_e = (u32)v;
     }
+    smp_overlay_dirty = 1;                      /* drawn at once, not at the next tick */
 }
 
-static int func_held __attribute__((section(".data"))) = 0;
+/* the DT2's FILE NAME keys: a character at the cursor removed (FUNC + NO), a space put in
+ * (FUNC + YES) */
+static void name_delete(void)
+{
+    for (int j = nm_cur; j < 6; j++)
+        nm_text[j] = nm_text[j + 1];
+    nm_text[6] = 0;
+}
+
+static void name_insert(void)
+{
+    for (int j = 6; j > nm_cur; j--)
+        nm_text[j] = nm_text[j - 1];
+    nm_text[nm_cur] = ' ';
+}
 
 static u32 after_pop(u8 *it, u32 code, u32 flags)
 {
@@ -438,9 +525,11 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
         int delta = (signed char)it[8];
         if (code >= 1 && code <= 9) {                /* A..H, and LEVEL/DATA (9) */
             if (rec_phase == PH_TRIM)
-                trim_knob((int)code, delta, func_held);
-            else if (rec_phase == PH_NAME)
+                trim_knob((int)code, delta, smp_func_held);
+            else if (rec_phase == PH_NAME) {
                 name_step(delta);
+                smp_overlay_dirty = 1;
+            }
             it[0] = IT_DROP;
         }
         return (u32)it;
@@ -448,17 +537,17 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
     if (it[0] != IT_KEY)
         return (u32)it;
     int press = (flags & F_PRESS) && !(flags & F_RELEASE);
-    int chord = (flags & 0x02) != 0;
-    if (code == K_FUNC) {                       /* FUNC goes on to stock, and is noted */
-        func_held = press ? 1 : (flags & F_RELEASE) ? 0 : func_held;
+    if (code == K_FUNC)                         /* FUNC goes on to stock (noted in smp_ui_pop) */
         return (u32)it;
-    }
     int ours = code == K_YES || code == K_NO || (code >= K_UP && code <= K_RIGHT)
                || (code >= K_ENC_A && code <= K_ENC_H);
     if (rec_phase == PH_ASSIGN && smp_trig_track(code) >= 0)
         ours = 1;
+    if (rec_phase == PH_WORK)                   /* NORMALIZING: the keys wait */
+        ours = ours || code == K_SETTINGS;
     if (!ours) {
-        if (press && closes(code)) {
+        if (press && closes(code) && rec_phase != PH_WORK) {
+            preview(0);
             rec_overlay = 0;
             rec_phase = PH_REC;
         }
@@ -469,23 +558,30 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
     it[0] = IT_DROP;
     if (!press)
         return (u32)it;
+    smp_overlay_dirty = 1;
     if (rec_phase == PH_TRIM) {
-        if (code == K_YES && !chord && !func_held) {
+        if (code == K_YES && smp_func_held) {           /* FUNC + YES: heard while held */
+            preview(1);
+        } else if (code == K_YES) {                     /* YES: saved, START..END */
+            preview(0);
             if (trim_s > 0 || trim_e < trim_n)
                 smp_trim(trim_slot, trim_s, trim_e);
             name_start();
-        } else if (code == K_NO && (chord || func_held)) {   /* FUNC + NO: the recording is dropped */
+        } else if (code == K_NO && smp_func_held) {     /* FUNC + NO: the recording is dropped */
+            preview(0);
             smp_discard(trim_slot);
             rec_saved_slot = -1;
             rec_dest = trim_slot;
             rec_phase = PH_REC;
-        } else if (code == K_NO) {
-            name_start();                       /* untrimmed */
         } else if (code == K_LEFT || code == K_RIGHT) {
             trim_knob(code == K_LEFT ? 5 : 8, code == K_LEFT ? -1 : 1, 1);
         }
     } else if (rec_phase == PH_NAME) {
-        if (code == K_YES)
+        if (code == K_YES && smp_func_held)
+            name_insert();
+        else if (code == K_NO && smp_func_held)
+            name_delete();
+        else if (code == K_YES)
             name_done();
         else if (code == K_NO && nm_only) {    /* the browser's RENAME, left as it was */
             nm_only = 0;
@@ -524,8 +620,20 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         return (u32)it;
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
+    if (it[0] == IT_KEY) { extern u32 rec_dbg[33]; u32 k = rec_dbg[32]++ & 31u; rec_dbg[k] = (u32)it[0] << 28 | code << 16 | (flags & 0xFFFFu); }
+    /* v0.25: a key's item: bit 0 while it is down (a press), bit 4 on most keys' release,
+     * bit 1 while FUNC is held. FUNC's own release carries neither bit 0 nor bit 4 (the
+     * emulator's panel, read through smp_ui_pop): v0.22..v0.24 waited for bit 4 and so
+     * kept FUNC "held" for good after its first use -- YES on TRIM, a SLICE track's YES
+     * and the list's YES then did nothing (the owner's v0.24 report). Released is "not
+     * down", for every key. */
+    int down = (flags & F_PRESS) && !(flags & F_RELEASE);
+    if (it[0] == IT_KEY && code == K_FUNC)
+        smp_func_held = down;
+    if (rec_pv_on && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
+        preview(0);                             /* FUNC + YES let go: the preview stops */
     if (it[0] == IT_KEY && code < 32 && (eaten >> code & 1)) {
-        if (flags & F_RELEASE) {                /* the release of a key we took */
+        if (!down) {                            /* the release of a key we took */
             eaten &= ~(1u << code);
             it[0] = IT_DROP;
         }
@@ -570,9 +678,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             rec_overlay = 0;                    /* the key does what it does, and the page shows */
         return (u32)it;
     }
-    /* v0.25: FUNC, noted for the list's FUNC + YES (it goes on to stock as ever) */
-    if (it[0] == IT_KEY && code == K_FUNC)
-        lst_func = (flags & F_PRESS) && !(flags & F_RELEASE) ? 1 : (flags & F_RELEASE) ? 0 : lst_func;
+    lst_func = smp_func_held;                   /* v0.25: the list's FUNC + YES */
     /* v0.25: the folder browser (smp_page.c): over everything while it is up */
     if (smp_fb_open) {
         smp_overlay_dirty = 1;

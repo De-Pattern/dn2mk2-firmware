@@ -35,7 +35,8 @@ TOOLCHAIN = "selache selas -proc ADSP-21569 (js216/selache 2b26d3b, GPL-3.0, WSL
 ENTRY_LINE = f"JUMP {dsp.COUNT_SW:#x};"           # the block counter, which goes on to PERC
 IDLE_LINE = f"JUMP {dsp.IDLE_SW:#x};"
 EMARK_LINE = f"JUMP {dsp.EMARK_SW:#x};"
-LOOKUP_LINE = f"I5 = {dsp.LOOKUP16_DM:#x};"        # the machine lookup's base (v0.13)
+LOOKUP_LINE = f"I5 = {dsp.LOOKUP16_DM:#x};"
+PVMIX_LINE = f"JUMP {dsp.PVMIX_SW:#x};"           # v0.25: the driver's call of 0x1c9d3f, via the preview        # the machine lookup's base (v0.13)
 
 
 def sha(path: pathlib.Path) -> str:
@@ -85,6 +86,8 @@ def main(argv=None) -> int:
             rings = assemble("rings", dsp.RINGS_SW, work)
             cz = assemble("cz", dsp.CZ_SW, work)
             gran = assemble("gran", dsp.GRAN_SW, work)
+            pvmix = assemble("pvmix", dsp.PVMIX_SW, work)
+            pjump = one_jump(PVMIX_LINE, dsp.PVMIX_SITE_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
             lptr = one_jump(LOOKUP_LINE, dsp.LOOKUP_SITE_SW, work)
             jump = one_jump(ENTRY_LINE, dsp.ENTRY_SW, work)
@@ -99,6 +102,8 @@ def main(argv=None) -> int:
             rings = committed("rings")
             cz = committed("cz")
             gran = committed("gran")
+            pvmix = committed("pvmix")
+            pjump = old["pvmix_jump"]
             ejump = old["emark_jump"]
             lptr = old["lookup_ptr"]
             if "entry_jump" not in old or "idle_jump" not in old:
@@ -117,7 +122,9 @@ def main(argv=None) -> int:
             "ping": {k: v for k, v in ping.items() if k != "instruction_offsets"},
             "rings": {k: v for k, v in rings.items() if k != "instruction_offsets"},
             "cz": {k: v for k, v in cz.items() if k != "instruction_offsets"},
-            "gran": {k: v for k, v in gran.items() if k != "instruction_offsets"}}
+            "gran": {k: v for k, v in gran.items() if k != "instruction_offsets"},
+            "pvmix": {k: v for k, v in pvmix.items() if k != "instruction_offsets"},
+            "pvmix_jump": pjump}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")
     print(f"wrote {dsp.CODE.relative_to(ROOT)}: perc {len(perc['object_parcels_be']) // 2} B, ping {len(ping['object_parcels_be']) // 2} B, entry {len(jump['object_parcels_be']) // 2} B")
     return 0

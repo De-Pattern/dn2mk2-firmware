@@ -36,7 +36,10 @@ STATE_STRIDE = 128                       # v0.15: 32 words (the time machines)
 SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
             "tune", "play", "samp", "a", "b", "c", "lev", "x", "y", "n", "tmp",
             "pph", "pix", "pbad", "pres", "pcnt",   # v0.22: the RAM check (probe); before, v0.14..v0.19's mailbox
-            *(f"spare{k}" for k in range(12)),        # (unused since v0.20; kept for the layout)
+            # v0.25: the recorder's preview (pvmix): its next word's address, the words left,
+            # the loop's count and its save area (R0..R3, R12, R13, I1, ASTAT)
+            "pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa",
+            "spare11",
             "sr", "dir", "add", "smode", "nseg", "nin", "nout", "acc", "pass", "lp",   # v0.15; v0.18 kill, add, pass, lp
             "xfn", "xfa", "xfi", "xfs",                # CFAD: its length, where it starts, 1/length, the shift
             # the recorder: its state (0 idle, 1 armed, 2 recording, 3 full), slot entry,
@@ -1744,6 +1747,35 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iconst(6, 3)
             p.st(C["pres"], 6)
         p.if_(2, "EQ", 12, probe_start, kind="i")
+        p.ld(2, cmd + 4)
+        p.iconst(12, SM.CMD_PREVIEW)
+
+        def preview():                        # v0.25: frames [first, end) of the slot, to pvmix
+            p.ld(5, cmd + 8)
+            p.iconst(12, 0)
+            p.iop(5, 5, "MAX", 12)
+            p.iconst(12, SM.POOL_SLOTS - 1)
+            p.iop(5, 5, "MIN", 12)
+            p.lsh(5, 5, 4)
+            p.iconst(13, L.pool + 8)
+            p.iop(5, 13, "+", 5)
+            p.seti(1, 5)
+            p.ldi(6, 0, 1)                    # the frames' address
+            p.ldi(7, 1, 1)                    # their count
+            p.ld(8, cmd + 12)                 # first, on a word
+            p.iconst(12, -2)
+            p.iop(8, 8, "AND", 12)
+            p.ld(9, cmd + 16)                 # end, at most the count
+            p.iop(9, 9, "MIN", 7)
+            p.iop(9, 9, "-", 8)
+            p.iconst(12, 0)
+            p.iop(9, 9, "MAX", 12)            # none if end <= first
+            p.lsh(9, 9, -1)                   # words, two frames each
+            p.lsh(8, 8, 1)
+            p.iop(6, 8, "+", 6)
+            p.st(C["pva"], 6)
+            p.st(C["pvn"], 9)
+        p.if_(2, "EQ", 12, preview, kind="i")
     p.e("COMP(R0, R1);")
     p._branch(lambda: p.r[0] != p.r[1], "NE", new_command, None)
 
@@ -2431,6 +2463,14 @@ def status(p: Prog, L: Layout) -> None:
         if k == 0:
             p.iconst(12, SM.STATUS_MAGIC)
             p.iop(0, 12, "+", 0)
+            p.ld(1, C["pvn"])                     # v0.25: + 16 while a preview plays
+            p.iconst(12, 0)
+            p.iop(1, 1, "MAX", 12)
+            p.iconst(12, 1)
+            p.iop(1, 1, "MIN", 12)
+            p.lsh(1, 1, 4)
+            p.ipass(12, 0)
+            p.iop(0, 12, "+", 1)
         p.iconst(12, 0xFFFF)
         p.iop(0, 0, "AND", 12)
         p.st(SM.LINK_BUF + 0x300 + 4 * k, 0)      # staged halves (the buffer's spare end)
@@ -2567,3 +2607,123 @@ def run_voice(L: Layout, read, t: int, mtype: int, mem=None):
     p.st(L.C["type"], 0)
     voice(p, L, t)
     return p, mem
+
+
+# -- v0.25: the recorder's preview, after the engine's mix -----------------------------------
+# The per-block driver calls 0x1c9d3f (the master mix at MIX_BUF into the SPORT page) at
+# sw 0x1c9fd2 with `CJUMP 0x1c9d3f (DB)` and its two delay-slot instructions (the C call's
+# pushes). The build puts `JUMP wr_pvmix` there (dnfw.waverider.dsp.PVMIX_SITE_SW);
+# wr_pvmix adds the preview's next 32 frames to both sides of the mix, then performs the
+# displaced call itself: its last three instructions are the stock's own, copied in by the
+# build over PVMIX_TAIL (dsp.pvmix_object), so the call, its pushes and its return are the
+# stock's. Every register it uses is saved first and restored after, ASTAT included.
+PVMIX_TAIL = (0x5A5A0001, 0x5A5A0002, 0x5A5A0003)    # `R0 = TAIL[k];`: 48-bit placeholders
+PVMIX_SAVE = (0, 1, 2, 3, 12, 13)
+
+
+def pvmix(p: Prog, L: Layout) -> None:
+    """MIX_BUF += frames [pva, pva + 2 min(pvn, 16)) of the preview (int16 pairs, the low
+    half first), on L and R alike; pva and pvn move on. Uses R0..R3, R12, R13, I1."""
+    C = L.C
+    p.ld(0, C["pvn"])
+    p.iconst(12, 0)
+
+    def some():
+        p.iconst(0, 0)
+        p.st(C["pvk"], 0)
+
+        def word():
+            p.ld(1, C["pvk"])
+            p.ld(2, C["pvn"])
+
+            def one():
+                p.lsh(12, 1, 2)
+                p.ld(13, C["pva"])
+                p.iop(13, 13, "+", 12)
+                p.seti(1, 13)
+                p.ldi(2, 0, 1)                # two frames
+                p.lsh(3, 2, 16)               # the first (low half) on top
+                p.iconst(12, 0xFFFF0000 - (1 << 32))
+                p.iop(2, 2, "AND", 12)        # the second, on top
+                p.iconst(12, -31)
+                p.float_(3, 3, 12)            # int16 / 32768
+                p.float_(2, 2, 12)
+                p.lsh(12, 1, 3)
+                p.iconst(13, SM.MIX_BUF)
+                p.iop(13, 13, "+", 12)        # frames 2k and 2k + 1, L; R at + 32 words
+                p.seti(1, 13)
+                for k, x in ((0, 3), (1, 2), (32, 3), (33, 2)):
+                    p.ldi(0, k, 1)
+                    p.fop(0, 0, "+", x)
+                    p.sti(k, 1, 0)
+                p.ld(1, C["pvk"])
+            p.if_(1, "LT", 2, one, kind="i")
+            p.iconst(12, 1)
+            p.ipass(13, 1)
+            p.iop(1, 13, "+", 12)
+            p.st(C["pvk"], 1)
+        _loop16(p, C, word)
+        p.ld(0, C["pvn"])                     # on: 16 words, or what was left
+        p.iconst(12, 16)
+        p.iop(1, 0, "MIN", 12)
+        p.iop(0, 0, "-", 1)
+        p.st(C["pvn"], 0)
+        p.lsh(1, 1, 2)
+        p.ld(13, C["pva"])
+        p.iop(13, 13, "+", 1)
+        p.st(C["pva"], 13)
+    p.if_(0, "GT", 12, some, kind="i")
+
+
+def _loop16(p: Prog, C, body) -> None:
+    """for 16 times body(); the count in pvk (body() counts it up from 0)"""
+    top = p.label("pv")
+    p.place(top)
+    if p.run:
+        while True:
+            body()
+            if p.mem.get(C["pvk"]) >= 16:
+                return
+    body()
+    p.ld(0, C["pvk"])
+    p.iconst(12, 16)
+    p.e("COMP(R0, R12);")
+    p.jump("LT", top)
+
+
+def pvmix_program(L: Layout, prefix: str = "pv") -> str:
+    """pvmix.asm: the driver's JUMP at PVMIX_SITE_SW comes here; on to the stock call."""
+    C = L.C
+    p = Prog("emit", prefix=prefix)
+    p.raw("// pvmix.asm -- the recorder's preview, added to the main mix after the engine")
+    p.raw("// (docs/sampler.md, v0.25). GENERATED by scripts/gen_smp_asm.py from")
+    p.raw("// dnfw.sampler.program.pvmix; do not edit by hand.")
+    p.raw("")
+    p.raw(".SECTION/PM seg_pmco;")
+    p.raw("")
+    p.raw(".GLOBAL wr_pvmix.;")
+    p.raw("wr_pvmix.:")
+    for r in PVMIX_SAVE:
+        p.st(C[f"pvs{r}"], r)
+    p.e(f"DM({C['pvsi']:#x}) = I1;")
+    p.e(f"DM({C['pvsa']:#x}) = ASTAT;")
+    pvmix(p, L)
+    p.e(f"ASTAT = DM({C['pvsa']:#x});")
+    p.e(f"I1 = DM({C['pvsi']:#x});")
+    for r in PVMIX_SAVE:
+        p.ld(r, C[f"pvs{r}"])
+    for w in PVMIX_TAIL:                      # the stock call, copied in by the build
+        p.e(f"R0 = {w:#x};", "placeholder: the stock instruction")
+    # the call returns here when it returns through the PC stack (a CJUMP's return
+    # address is the instruction after its delay slots): on as stock, after them
+    p.e("JUMP 0x1c9fdb;", "the driver, after its call of 0x1c9d3f")
+    p.emit_subs()
+    p.raw(".wr_pvmix..end:")
+    p.raw("      .type wr_pvmix.,STT_FUNC;")
+    return p.text()
+
+
+def pvmix_run(L: Layout, mem) -> Prog:
+    p = Prog("run", mem=mem)
+    pvmix(p, L)
+    return p

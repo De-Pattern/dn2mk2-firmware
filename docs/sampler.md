@@ -557,3 +557,45 @@ the keyboard.
   the per-voice mirror the frame is built from; an unmodulated SAMP is left alone.
 - **WERP's SEG** takes three detents a choice, not one (owner: the middle choice was easy
   to skip).
+
+### v0.25: after a recording, as the DT2 (the owner's v0.24 report and photos)
+
+- **The keys.** The DN2's key items carry a bit (1 of the flags word) that v0.22..v0.24
+  read as "FUNC held". On the instrument a plain YES carries it too, so YES on TRIM and
+  YES on a SLICE track's page did nothing (the emulator's panel never set it). FUNC is now
+  kept by `smp_ui_pop` itself (`smp_func_held`), from every FUNC press and release, for
+  the recorder, the list, the browser and SLICE; nothing reads that bit.
+- **RECORDING.** While the DSP records, the RECORDER shows the DT2's recording screen: the
+  meter, the waveform as it comes in (`rec_wave`: 120 columns of the status's peaks; when
+  it passes the last, columns pair up), the time, YES: STOP.
+- **SAVING, NORMALIZING.** When it stops, the recording is read back and saved to the
+  +Drive as before (`smp_save_recording`), and its peak noted (`peak_add`). Below 32,700
+  (and above 64: silence stays as it is), it is normalised to 32,700, the DT2's
+  "NORMALIZING...": the +Drive's copy a chunk a pass (`norm_chunk`, a 16.16 gain in
+  32-bit arithmetic), then the DSP's through the loader's own path (read, sent,
+  VERIFY-checked), the overview redrawn from it. The screen shows which, with a bar.
+- **TRIM** (the DT2's 13.2 step 9): Y:SAVE keeps START..END and goes on to the name;
+  FN+N:DEL drops the recording; **FN+Y plays START..END while FUNC + YES are held**
+  (letting either go stops it); there is no "NO: ALL". E and H move START and END: a
+  detent a 1,000th of the recording, up to 12 times that as the knob turns faster, a
+  10,000th with FUNC held; the screen is redrawn on each turn.
+- **FILE NAME**: U/D the character, L/R the cursor, FN+NO deletes the character at the
+  cursor, FN+YES inserts a space there, YES saves, NO keeps the name it has. Seven
+  characters (the instrument's slot names).
+- **ASSIGN SAMPLE TO TRACK?** over the trim screen: a [TRIG] key, or NO to skip. The
+  recording is on the +Drive either way.
+- **The preview on the DSP** (`dnfw.sampler.program.pvmix`, `CMD_PREVIEW`). Nothing in the
+  sample machines can play a slot without a track's voice (whose amp is shut without a
+  note), so the preview is added to the main mix after the engine has made it: the
+  per-block driver's call of 0x1c9d3f (the mix into the SPORT page, sw 0x1c9fd2: `CJUMP
+  0x1c9d3f (DB)` and its two delay-slot pushes) becomes `JUMP wr_pvmix`. wr_pvmix saves
+  every register it uses (R0..R3, R12, R13, I1, ASTAT), adds the preview's next 32 frames
+  to both sides of the mix, restores them, and makes the stock's call itself with the
+  stock's own three instructions (copied in by the build, `dsp.pvmix_object`); the callee
+  returns through the C stack's word to 0x1c9fdb as before. The SHARC runner's step 3f
+  runs the site to its return on the stock image and on the build: with no preview the
+  two are identical in every register and every word written; with one, the build is
+  exactly the stock run on the block the model mixes, every register and every word but
+  the preview's own. The command (slot, first frame, end frame) is taken by the recorder;
+  the status's state word carries +16 while one plays. 223 bytes of the DSP's 1 MiB upload
+  buffer are left.

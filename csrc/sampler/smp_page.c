@@ -337,13 +337,23 @@ static void w_slen(void *c, int x, int y, int n)
     LABEL(c, cx, y + 4, "%d", n);
 }
 
-static void w_gridicon(void *c, int x, int y)
+/* v0.25: GRID's icon as the DT2 draws it: the slice count as a grid of cells (2: 2 x 1,
+ * 4: 2 x 2, 8: 4 x 2, 16: 4 x 4, 32: 8 x 4, 64: 8 x 8) in a 16 x 16 square */
+static void w_gridicon(void *c, int x, int y, int n)
 {
-    int cx = x + 12;
-    fill(c, cx - 7, y + 9, cx - 1, y + 15);
-    fill(c, cx + 1, y + 9, cx + 7, y + 15);
-    fill(c, cx - 7, y + 1, cx - 1, y + 7);
-    fill(c, cx + 1, y + 1, cx + 7, y + 7);
+    int cx = x + 12, cols = 1, rows = 1;
+    while (cols * rows < n) {
+        if (cols <= rows) cols *= 2; else rows *= 2;
+    }
+    int w = 16 / cols, h = 16 / rows, x0 = cx - 8, y0 = y;
+    for (int r = 0; r < rows; r++)
+        for (int k = 0; k < cols; k++) {
+            int a = x0 + k * w, b = y0 + r * h;
+            if (w > 2 && h > 2)
+                fill(c, a, b, a + w - 2, b + h - 2);
+            else
+                on(c, a, b);
+        }
 }
 
 /* one cell: its widget at (X, Y) and, LABELLED, its label under it */
@@ -360,8 +370,10 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
         w_slce(c, x, y, v >> 1);                /* 0 NOTE, 1..63 */
     else if (sliced && id == SMP_SLEN_ID)
         w_slen(c, x, y, (v >> 1) + 1);
-    else if (kind == SMP_GRID_KIND && id == SMP_GRID_ID)
-        w_gridicon(c, x, y);
+    else if (kind == SMP_GRID_KIND && id == SMP_GRID_ID) {
+        int gi = v / 24;
+        w_gridicon(c, x, y, smp_grids[gi > 4 ? 4 : gi]);
+    }
     else if (w == W_BIPOLAR)
         w_bipolar(c, x, y, v, top);
     else if (w == W_PLAY)
@@ -983,23 +995,13 @@ extern int rec_phase, trim_slot, nm_cur, as_done, smp_saved;
 extern u32 trim_n, trim_s, trim_e;
 extern char nm_text[8];
 
-static void secs(void *c, int x, int y, u32 frames)        /* 1.234 S */
+/* the recording's waveform in [x0, x1] about yc, +-h: the slot's overview (100 columns) */
+static void wave(void *c, int slot, int x0, int x1, int yc, int h, u32 s, u32 e, u32 n)
 {
-    u32 ms = frames / 48u;
-    LABEL(c, x, y, "%d.%d%d%d", (int)(ms / 1000u), (int)(ms / 100u % 10u), (int)(ms / 10u % 10u),
-          (int)(ms % 10u));
-}
-
-static void trim_draw(void *c)
-{
-    LABEL(c, 14, 57, "%s", "TRIM");
-    LABEL(c, 104, 57, "SAMP %d", trim_slot + 1);
-    hline(c, 0, 127, 54, 1);
-    const u8 *o = smp_overview(trim_slot);
-    int x0 = 4, x1 = 123, yc = 36, h = 13, w = x1 - x0 + 1;
-    u32 n = trim_n ? trim_n : 1;
-    int sx = x0 + (int)((trim_s >> 4) * (u32)w / ((n >> 4) + 1u));
-    int ex = x0 + (int)((trim_e >> 4) * (u32)w / ((n >> 4) + 1u));
+    const u8 *o = smp_overview(slot);
+    int w = x1 - x0 + 1;
+    int sx = x0 + (int)((s >> 4) * (u32)w / ((n >> 4) + 1u));
+    int ex = x0 + (int)((e >> 4) * (u32)w / ((n >> 4) + 1u));
     if (ex > x1) ex = x1;
     hline(c, x0, x1, yc, 1);
     if (o)
@@ -1011,46 +1013,96 @@ static void trim_draw(void *c)
                 if (inside || ((x + y) & 1) == 0)       /* outside the trim: half lit */
                     on(c, x, y);
         }
-    else
-        LABEL(c, 64, 39, "%s", smp_saved == 0 ? "SAVING" : "NO WAVEFORM");
     vline(c, sx, yc - h - 2, yc + h + 2, 0);
     vline(c, ex, yc - h - 2, yc + h + 2, 0);
     fill(c, sx, yc + h + 1, sx + 2, yc + h + 2);
     fill(c, ex - 2, yc + h + 1, ex, yc + h + 2);
-    LABEL(c, 64, 14, "%s", "YES OK  NO ALL  F+NO DROP");
-    secs(c, 14, 7, trim_s);
-    LABEL(c, 14, 0, "%s", "START");
-    secs(c, 64, 7, trim_e - trim_s);
-    LABEL(c, 64, 0, "%s", "LENGTH");
-    secs(c, 113, 7, trim_e);
-    LABEL(c, 113, 0, "%s", "END");
 }
 
+/* v0.25: the DT2's trim screen after a recording (its manual's 13.2 step 9; the owner's
+ * photos): the keys across the top, the waveform with START and END, |<TRIM on E and
+ * TRIM>| on H across the bottom */
+static void trim_draw(void *c)
+{
+    box(c, 2, 55, 125, 63, 0);
+    LABEL(c, 64, 57, "%s", "Y:SAVE FN+N:DEL FN+Y:PLAY");
+    box(c, 2, 11, 125, 53, 0);
+    if (smp_overview(trim_slot))
+        wave(c, trim_slot, 4, 123, 32, 18, trim_s, trim_e, trim_n ? trim_n : 1);
+    else
+        LABEL(c, 64, 30, "%s", "NO WAVEFORM");
+    LABEL(c, 16, 2, "%s", "|<TRIM");
+    LABEL(c, 64, 2, "%d.%d S", (int)((trim_e - trim_s) / 48000u), (int)((trim_e - trim_s) / 4800u % 10u));
+    LABEL(c, 112, 2, "%s", "TRIM>|");
+}
+
+/* v0.25: the DT2's FILE NAME screen */
 static void name_draw(void *c)
 {
-    LABEL(c, 14, 57, "%s", "NAME");
-    LABEL(c, 104, 57, "SAMP %d", trim_slot + 1);
-    hline(c, 0, 127, 54, 1);
+    LABEL(c, 64, 56, "%s", "FILE NAME");
+    box(c, 6, 36, 121, 48, 0);
     for (int j = 0; j < 7; j++) {
-        int x = 22 + 14 * j;
+        int x = 14 + 8 * j;
         char ch = nm_text[j] ? nm_text[j] : ' ';
-        LABEL(c, x, 32, "%c", ch == ' ' ? '_' : ch);
-        if (j == nm_cur)
-            fill(c, x - 4, 27, x + 4, 28);
+        if (ch != ' ')
+            LABEL(c, x, 40, "%c", ch);
+        if (j == nm_cur)                        /* the cursor: a bar under it */
+            fill(c, x - 3, 37, x + 3, 38);
     }
-    LABEL(c, 64, 12, "%s", "UP/DN:LETTER  L/R:MOVE");
-    LABEL(c, 64, 2, "%s", "YES:SAVE  NO:KEEP");
+    LABEL(c, 34, 24, "%s", "FN+NO:DELETE");
+    LABEL(c, 34, 17, "%s", "FN+YES:INSERT");
+    LABEL(c, 34, 10, "%s", "YES:SAVE");
+    LABEL(c, 98, 24, "%s", "U/D:CHAR +/-");
+    LABEL(c, 98, 17, "%s", "L/R:MOVE");
+    LABEL(c, 98, 10, "%s", "NO:ABORT");
 }
 
+/* v0.25: ASSIGN, the DT2's question over the trim screen */
 static void assign_draw(void *c)
 {
-    LABEL(c, 18, 57, "%s", "ASSIGN");
-    LABEL(c, 104, 57, "SAMP %d", trim_slot + 1);
-    hline(c, 0, 127, 54, 1);
-    LABEL(c, 64, 38, "%s", "PRESS A TRIG KEY:");
-    LABEL(c, 64, 30, "%s", "THAT TRACK PLAYS IT");
-    LABEL(c, 64, 18, "%s", "SYNTH TRK: ONESHOT");
-    LABEL(c, 64, 4, "%s", "NO: NONE");
+    trim_draw(c);
+    clear(c, 3, 18, 124, 46);
+    box(c, 3, 18, 124, 46, 0);
+    box(c, 5, 20, 122, 44, 0);
+    LABEL(c, 64, 35, "%s", "ASSIGN SAMPLE TO TRACK?");
+    LABEL(c, 64, 25, "%s", "TRG 1-16   NO:SKIP");
+}
+
+/* v0.25: NORMALIZING (and the +Drive's save before it), as the DT2 shows it */
+static void work_draw(void *c)
+{
+    extern int smp_norm_state(void);
+    extern int smp_work_pct(void);
+    LABEL(c, 64, 34, "%s", smp_norm_state() ? "NORMALIZING..." : "SAVING...");
+    int pct = smp_work_pct();
+    box(c, 24, 20, 103, 26, 0);
+    if (pct > 0)
+        fill(c, 25, 21, 25 + (pct > 100 ? 100 : pct) * 77 / 100, 25);
+}
+
+/* v0.25: the DT2's screen while it records: the meter, the waveform as it comes in, the
+ * time and YES: STOP */
+extern u8 rec_wave[];
+extern u32 rec_wave_span;
+static void recording_draw(void *c, int heard)
+{
+    LABEL(c, 25, 57, "%s", "RECORDER");
+    int mx0 = 54, mx1 = 126, my0 = 55, my1 = 62, w = mx1 - mx0 - 2;
+    box(c, mx0, my0, mx1, my1, 0);
+    int lv = heard ? meter_x(rec_peak, w) : 0;
+    if (lv > 0)
+        fill(c, mx0 + 1, my0 + 1, mx0 + lv, my1 - 1);
+    box(c, 2, 11, 125, 53, 0);
+    hline(c, 4, 123, 32, 1);
+    u32 cols = rec_frames / rec_wave_span + 1u;
+    for (int x = 0; x < 120 && (u32)x < cols; x++) {
+        int a = rec_wave[x] * 19 / 255;
+        vline(c, 4 + x, 32 - a, 32 + a, 0);
+    }
+    u32 sec = rec_frames / 48000u;
+    LABEL(c, 22, 2, "%s", "RECORDING");
+    LABEL(c, 64, 2, "%d:%d%d", (int)(sec / 60u), (int)(sec % 60u / 10u), (int)(sec % 10u));
+    LABEL(c, 106, 2, "%s", "YES: STOP");
 }
 
 void rec_screen_draw(void *c)
@@ -1061,13 +1113,19 @@ void rec_screen_draw(void *c)
             trim_draw(c);
         else if (rec_phase == 2)
             name_draw(c);
-        else
+        else if (rec_phase == 3)
             assign_draw(c);
+        else
+            work_draw(c);
         return;
     }
     int heard = rec_heard && FRAMES_NOW + 1u - rec_heard < 1500u;
     int state = heard ? rec_state : 0;
     clear(c, 0, 0, 127, 63);
+    if (state == 2) {                           /* v0.25: recording: the DT2's screen */
+        recording_draw(c, heard);
+        return;
+    }
 
     /* the title and the meter */
     LABEL(c, 25, 57, "%s", "RECORDER");

@@ -92,6 +92,8 @@ MD_STATE_DDR = 0x82100000
 SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200e3000 (v0.24; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
 SMP_L2_SPAN = 0x5000                         # the code is about 19 KB (v0.18: the DT2 reader; 32 KB until v0.16)
 SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf1800 (v0.24; 0xbea000 v0.17..v0.23)
+PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (wr_pvmix)
+PVMIX_SW = 0xB80000 + (PVMIX_L2_LOAD - 0x20000000) // 2
 SMP_STATE_DM, SMP_STATE_STRIDE = 0x2DEF00, 128  # 16 voices x 128 bytes (v0.15)
 SMP_SCRATCH_DM = 0x2DF700                    # after 16 x 128 bytes of state (v0.15)
 SMP_STAGE_DM = SMP_SCRATCH_DM + 0x100        # the recorder's block (dnfw.sampler.machines.REC_STAGE)
@@ -180,6 +182,13 @@ IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")
 IDLE_RETURN_SW = 0xB88AAB                    # the loop's top: call prvCheckTasksWaitingTermination
 CALL_SITE_SW = 0x1C9FB9                      # the handler's `r4 = 0x268438` before `cjump 0x1c2712`
 CALL_SITE_STOCK = bytes.fromhex("040f26003884")
+# v0.25: the recorder's preview (dnfw.sampler.program.pvmix). The per-block driver's call of
+# 0x1c9d3f (the main mix into the SPORT page): `CJUMP 0x1c9d3f (DB)` and its two delay-slot
+# pushes, 18 bytes from sw 0x1c9fd2. The site becomes `JUMP PVMIX_SW`; wr_pvmix ends with
+# these same three instructions (absolute: the call, its pushes and its return are stock's).
+PVMIX_SITE_SW = 0x1C9FD2
+PVMIX_SITE_STOCK = bytes.fromhex("04181c003f9dfe5f00814d18c09f1c00da9f")
+PVMIX_ROOM = 0x400                           # its place: the last 1 KB of the sample machines' L2 span
 
 
 class DspError(ValueError):
@@ -222,7 +231,24 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "lookup_ptr", "ping", "rings", "cz", "gran")}
+                         "entry_mark", "emark_jump", "lookup_ptr", "ping", "rings", "cz", "gran",
+                         "pvmix", "pvmix_jump")}
+
+
+def pvmix_object() -> bytes:
+    """wr_pvmix with its last three instructions (48-bit placeholders) replaced by the
+    stock's own call of 0x1c9d3f and its delay-slot pushes (section7 checks the stock has
+    exactly these at PVMIX_SITE_SW)"""
+    code = objects()["pvmix"]
+    site = PVMIX_SITE_STOCK
+    from ..sampler.program import PVMIX_TAIL
+    code, after = code[:-6], code[-6:]          # the JUMP back to the driver stays
+    tail = code[-len(PVMIX_SITE_STOCK):]
+    for k, w in enumerate(PVMIX_TAIL):
+        c = tail[6 * k:6 * k + 6]               # `R0 = imm32` (17a): its low parcels the immediate
+        if c[2:4] != (w >> 16).to_bytes(2, "little") or c[4:6] != (w & 0xFFFF).to_bytes(2, "little"):
+            raise DspError(f"pvmix.asm's last instructions are not its placeholders ({tail.hex()})")
+    return code[:-len(PVMIX_SITE_STOCK)] + site + after
 
 
 def spans() -> list[tuple[str, int, bytes]]:
@@ -346,6 +372,14 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
     for what, name, at, span in (("perc.asm (wr_perc), in L2", "perc", PERC_L2_LOAD, PERC_L2_SPAN),
                                  ("smp.asm (wr_smp), in L2", "smp", SMP_L2_LOAD, SMP_L2_SPAN)):
         code = obj[name]
+        if name == "smp":                       # v0.25: wr_pvmix in the span's last 1 KB
+            room = PVMIX_L2_LOAD - at
+            pv = pvmix_object()
+            if room - len(code) < 64 or PVMIX_ROOM - len(pv) < 64:
+                raise DspError(f"smp.asm ({len(code)} bytes) or pvmix.asm ({len(pv)}) leaves fewer than "
+                               "64 bytes of its room")
+            out.append((what, at, code + bytes(room - len(code)) + pv + bytes(PVMIX_ROOM - len(pv))))
+            continue
         if span - len(code) < 64:
             raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
         out.append((what, at, code + bytes(span - len(code))))
@@ -403,7 +437,11 @@ def placements() -> list[dict]:
              "stock": sharc_object.load_bytes(LOOKUP_SITE_STOCK).hex(), "new": obj["lookup_ptr"].hex()},
             {"what": f"patch: the idle loop's back edge at sw {IDLE_SITE_SW:#x} -> JUMP {IDLE_SW:#x}",
              "load_address": f"{l2_sw_to_load(IDLE_SITE_SW):#010x}", "bytes": len(obj["idle_jump"]),
-             "stock": IDLE_SITE_STOCK.hex(), "new": obj["idle_jump"].hex()}]
+             "stock": IDLE_SITE_STOCK.hex(), "new": obj["idle_jump"].hex()},
+            {"what": f"patch: the driver's call of 0x1c9d3f at sw {PVMIX_SITE_SW:#x} -> JUMP {PVMIX_SW:#x} "
+                     "(the recorder's preview, then the same call)",
+             "load_address": f"{sw_to_load(PVMIX_SITE_SW):#010x}", "bytes": len(PVMIX_SITE_STOCK),
+             "stock": PVMIX_SITE_STOCK.hex(), "new": (obj["pvmix_jump"] + PVMIX_SITE_STOCK[6:]).hex()}]
     return out
 
 
@@ -524,6 +562,10 @@ def section7(stock: bytes) -> bytes:
         raise DspError("sw 0xb88abb is not the stock idle loop's `jump (pc,-0x10)`")
     if bootstream.read_span(stock, sw_to_load(CALL_SITE_SW), len(CALL_SITE_STOCK)) != CALL_SITE_STOCK:
         raise DspError("sw 0x1c9fb9 is not the stock `r4 = 0x268438`")
+    if bootstream.read_span(stock, sw_to_load(PVMIX_SITE_SW), len(PVMIX_SITE_STOCK)) != PVMIX_SITE_STOCK:
+        raise DspError("sw 0x1c9fd2 is not the stock `CJUMP 0x1c9d3f (DB)` and its two pushes")
+    if len(obj["pvmix_jump"]) != 6:
+        raise DspError("the preview's JUMP is not one 48-bit instruction")
     if len(obj["emark_jump"]) != len(CALL_SITE_STOCK):
         raise DspError(f"the entry-mark JUMP is {len(obj['emark_jump'])} bytes, not {len(CALL_SITE_STOCK)}")
     lookup = struct.unpack("<8I", bootstream.read_span(stock, dm_to_load(LOOKUP_DM), 32))
@@ -546,6 +588,7 @@ def section7(stock: bytes) -> bytes:
     bootstream.write_span(out, sw_to_load(LOOKUP_SITE_SW), obj["lookup_ptr"])
     bootstream.write_span(out, l2_sw_to_load(IDLE_SITE_SW), obj["idle_jump"])
     bootstream.write_span(out, sw_to_load(CALL_SITE_SW), obj["emark_jump"])
+    bootstream.write_span(out, sw_to_load(PVMIX_SITE_SW), obj["pvmix_jump"])
     result = bytes(out)
     walked = bootstream.walk(result)
     if not walked.complete or walked.stopped_at != len(result):

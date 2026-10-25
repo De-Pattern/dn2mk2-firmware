@@ -42,6 +42,11 @@ def main(argv=None) -> int:
             text, be, offs = R.resolve(text, dsp.SMP_SW, pathlib.Path(tmp))
         print(f"resolved at sw {dsp.SMP_SW:#x}: {len(offs)} instructions, {len(be)} bytes")
     OUT.write_text(text, encoding="utf-8", newline="\n")
+    pv = P.pvmix_program(SL.layout())          # v0.25: the recorder's preview
+    if not a.no_resolve:
+        with tempfile.TemporaryDirectory() as tmp:
+            pv, _be, _offs = R.resolve(pv, dsp.PVMIX_SW, pathlib.Path(tmp))
+    (OUT.parent / "pvmix.asm").write_text(pv, encoding="utf-8", newline="\n")
     n = sum(1 for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//"))
     print(f"wrote {OUT.relative_to(ROOT)}: {n} instructions")
     return 0

@@ -134,6 +134,11 @@ CMD_OFFSET = 0xF00                         # the command block in the pool's dir
 CMD_WORDS = 6                              #   seq, cmd, src, chan, thres (0..32767), dest << 24 | frames
 CMD_NONE, CMD_ARM, CMD_NOW, CMD_STOP, CMD_MONITOR, CMD_ARM_PLAY, CMD_SEND, CMD_VERIFY = 0, 1, 2, 3, 4, 5, 6, 7
 CMD_PROBE = 8
+# PREVIEW (v0.25): the recorder's FUNC + YES. src = the slot, chan = the first frame, thres =
+# the end frame: the DSP adds frames [first, end) of the slot (int16, mono) to the main mix,
+# after the engine has made it (dnfw.sampler.program.pvmix, at the driver's call of
+# 0x1c9d3f); first >= end stops it. The status word's bit 4 says one is playing.
+CMD_PREVIEW = 9
 # PROBE (v0.22): is all of the 512 MB part there? PROBE_BYTES at PROBE_LO and at PROBE_LO +
 # 256 MB (PROBE_HI) are filled with two patterns, then both read back (more than the DSP's
 # data cache holds, so the reads come from the RAM). A 256 MB part would put the second

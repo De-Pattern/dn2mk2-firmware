@@ -444,13 +444,13 @@ int slc_pop(u8 *it)
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
     int press = it[0] == IT_KEY && (flags & F_PRESS) && !(flags & F_RELEASE);
-    if (it[0] == IT_KEY && code == K_FUNC) {
-        func = press ? 1 : (flags & F_RELEASE) ? 0 : func;
+    extern int smp_func_held;                   /* v0.25: rec.c keeps FUNC for all (the key */
+    func = smp_func_held;                       /* items' bit 1 is not FUNC: see there) */
+    if (it[0] == IT_KEY && code == K_FUNC)
         return 0;                               /* FUNC goes on to stock */
-    }
     if (slc_state == S_OFF) {
         /* YES on a SLICE track's page opens the menu */
-        if (press && code == K_YES && slc_page_seen && !func && !(flags & 0x02)) {
+        if (press && code == K_YES && slc_page_seen && !func) {
             int k = track_slot();
             if (k == -2)
                 return 0;
@@ -494,7 +494,7 @@ int slc_pop(u8 *it)
         return 0;
     if (!press)
         return 1;
-    int chord = (flags & 0x02) != 0;
+    int chord = func;
     if (slc_state == S_MENU) {
         if (code == K_UP || code == K_DOWN)
             menu_sel ^= 1;
@@ -528,13 +528,32 @@ int slc_pop(u8 *it)
  * dnfw.sampler.program.slice_bounds), as one note. Everything else stock's: the call the
  * KeyboardView makes for a key's notes (0x40058be8, coldfire.py's KEYNOTES_SITE) comes here.
  * VEC is the stock vector (begin, end, capacity) of 32-bit notes; -> nonzero: notes given. */
+/* v0.25: GRID too (its SLICE at NOTE), and more than 16 slices: KEYBOARD's octave (stock's,
+ * [KEYBOARD] + [UP]/[DOWN], or [UP]/[DOWN] with U/D KEY MODE at KB OCT) moves the keys on
+ * by 16 slices an octave, as the DT2's octave moves its notes on. The octave is read from
+ * the note stock gives [TRIG 9] (the octave's lowest; KB_C0 at the middle octave). */
+#define GRID_TYPE 12                            /* dnfw.sampler.machines.TYPE_OF["GRID"] */
+#define KB_C0 60u
+u32 slc_kb_c __attribute__((section(".data"))) = 0;
 u32 slc_keynotes(u32 kbd, u32 *vec, u32 k)
 {
     u32 t = ACTIVE_TRACK;
     if (KIT && t <= 15 && k < 16 && vec && vec[0] && vec[2] >= vec[0] + 4u) {
         volatile u8 *s = (volatile u8 *)SOUND(t);
-        if ((signed char)s[0xDE] == SLICE_TYPE && SOUND_VALUE(SOUND(t), SMP_SLICE_ID) == 0) {
-            *(u32 *)vec[0] = 12u + k;
+        int ty = (signed char)s[0xDE];
+        if ((ty == SLICE_TYPE || ty == GRID_TYPE) && SOUND_VALUE(SOUND(t), SMP_SLICE_ID) == 0) {
+            u32 buf[8], tv[3] = {(u32)buf, (u32)buf, (u32)(buf + 8)};
+            int bank = 0;
+            if (KEYNOTES(kbd, tv, 8u) && tv[1] > tv[0]) {
+                slc_kb_c = buf[0];
+                bank = ((int)buf[0] - (int)KB_C0) / 12;
+                if ((int)buf[0] < (int)KB_C0 && ((int)KB_C0 - (int)buf[0]) % 12)
+                    bank--;
+            }
+            int idx = (16 * bank + (int)k) % 64;
+            if (idx < 0)
+                idx += 64;
+            *(u32 *)vec[0] = 12u + (u32)idx;
             vec[1] = vec[0] + 4u;
             return 1;
         }
