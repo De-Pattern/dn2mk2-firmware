@@ -1,0 +1,13 @@
+{
+  "name": "DN2 Sample Import",
+  "short_name": "DN2 Import",
+  "description": "Samples to the Digitone II sampler mod, over USB MIDI",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#111214",
+  "theme_color": "#111214",
+  "icons": [
+    {"src": "icons/dn2-import-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "icons/dn2-import-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}
+  ]
+}
