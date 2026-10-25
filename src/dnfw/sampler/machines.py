@@ -206,6 +206,17 @@ TDM_TX = 0x2C08E8                           # its transmit ring
 TDM_PAGE = 0x268A38                         # the page this block (0 / 1), stable in the engine
 TDM_TAG = 0xA5
 RX_MAGIC, TX_MAGIC = 0x5A32, 0x5A33
+# v0.25, the DT2-style sample list: long names and folders (the import tool's), in a
+# block of the image the directory page points at (bytes META_PTR.. of the page: magic,
+# its offset into the image (512-aligned), its bytes). The block: META_MAGIC, version,
+# the folders' count, META_FOLDERS x META_FOLDER_BYTES folder names, then POOL_SLOTS
+# records of META_SLOT_BYTES: the slot's folder (0xFF none), three zeros, its long name.
+META_PTR = 0xC08                            # after the names (0x808 + 128 x 8 = 0xC08)
+META_PTR_MAGIC = 0x52544D53                 # 'SMTR'
+META_MAGIC = 0x54454D53                     # 'SMET'
+META_FOLDERS, META_FOLDER_BYTES = 64, 32
+META_SLOT_BYTES, META_NAME_BYTES = 40, 36
+META_BYTES = 12 + META_FOLDERS * META_FOLDER_BYTES + 128 * META_SLOT_BYTES     # 7,180
 POS_MAGIC = 0x5A34                          # v0.25: idle, the voices' play positions (tdm_tx)
 POS_NONE = 0xFFFF                           #   a track that plays nothing
 POS_ONE = 0xFFFE                            #   a position: its fraction of the sample, x this

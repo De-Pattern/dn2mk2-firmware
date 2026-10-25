@@ -62,6 +62,13 @@ extern int smp_list_up(void *view);
 extern void smp_list_hold(void);
 extern void smp_list_close(void);
 extern void *smp_list_view;
+extern int smp_lst_orig, smp_overlay_dirty;     /* v0.25: the list, the folder browser */
+extern int smp_fb_open, smp_fb_folder, smp_fb_cur;
+extern int smp_fb_item(int i, int *slot);
+static int lst_func __attribute__((section(".data"))) = 0;
+#define UI_TRACK_NOW (*(volatile unsigned char *)0x42431A6Cu)
+int smp_set_samp(int track, int value);
+int smp_samp_of(int track);
 extern u32 smp_frames(int k);
 extern int smp_trim(int k, u32 s, u32 e);
 extern void smp_discard(int k);
@@ -309,6 +316,31 @@ int smp_assign(int track, int slot)
     return 0;
 }
 
+/* v0.25: SAMP on TRACK set to VALUE (0 OFF, k slot k - 1) as the knob sets it, and read */
+int smp_set_samp(int track, int value)
+{
+    if (track < 0 || track > 15 || value < 0 || value > 127 || !KIT)
+        return -1;
+    int ty = SOUND_TYPE(track);
+    if (ty < ONESHOT || ty >= ONESHOT + SMP_N)
+        return -1;                              /* not a sample machine: nothing to set */
+    u32 owner = UI_OWNER();
+    if (!owner)
+        return -1;
+    u32 ps = PARAM_SET(owner, SMP_SAMP_ID, (u32)track);
+    if (!ps)
+        return -1;
+    SET_VALUE(ps, SMP_SAMP_ID, (u32)value << 8, (u32)track, 0, 0, 1);
+    return 0;
+}
+
+int smp_samp_of(int track)
+{
+    if (track < 0 || track > 15 || !KIT)
+        return 0;
+    return *(volatile u8 *)(KIT + 52u + 1163u * (u32)track + 20u + 2u * 43u);
+}
+
 /* a [TRIG] key's track, or -1 */
 int smp_trig_track(u32 code)
 {
@@ -512,20 +544,87 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             rec_overlay = 0;                    /* the key does what it does, and the page shows */
         return (u32)it;
     }
-    /* the sample list (smp_page.c): UP / DOWN a slot, the SAMP knob's push closes it */
+    /* v0.25: FUNC, noted for the list's FUNC + YES (it goes on to stock as ever) */
+    if (it[0] == IT_KEY && code == K_FUNC)
+        lst_func = (flags & F_PRESS) && !(flags & F_RELEASE) ? 1 : (flags & F_RELEASE) ? 0 : lst_func;
+    /* v0.25: the folder browser (smp_page.c): over everything while it is up */
+    if (smp_fb_open) {
+        smp_overlay_dirty = 1;
+        if (it[0] == IT_KNOB) {                 /* any knob: through the items */
+            int delta = (signed char)it[8];
+            smp_fb_cur += delta > 0 ? 1 : delta < 0 ? -1 : 0;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+        if (it[0] != IT_KEY)
+            return (u32)it;
+        int press = (flags & F_PRESS) && !(flags & F_RELEASE);
+        if (code == K_YES || code == K_NO || (code >= K_UP && code <= K_RIGHT)) {
+            if (press && code < 32)
+                eaten |= 1u << code;
+            it[0] = IT_DROP;
+            if (!press)
+                return (u32)it;
+            if (code == K_UP && smp_fb_cur > 0)
+                smp_fb_cur--;
+            else if (code == K_DOWN)
+                smp_fb_cur++;
+            else if (code == K_YES || code == K_RIGHT) {
+                int slot, f = smp_fb_item(smp_fb_cur, &slot);
+                if (f >= 0) {
+                    smp_fb_folder = f;
+                    smp_fb_cur = 0;
+                } else if (slot >= 0) {
+                    smp_set_samp((int)UI_TRACK_NOW, slot + 1);
+                    smp_fb_open = 0;
+                    smp_list_close();           /* the sample is the track's: back to the page */
+                }
+            } else if (code == K_NO || code == K_LEFT) {
+                if (smp_fb_folder >= 0) {
+                    smp_fb_cur = smp_fb_folder;
+                    smp_fb_folder = -1;
+                } else
+                    smp_fb_open = 0;            /* back to the list */
+            }
+            return (u32)it;
+        }
+        if (press && closes(code)) {
+            smp_fb_open = 0;
+            smp_list_close();
+        }
+        return (u32)it;
+    }
+    /* the sample list (smp_page.c): UP / DOWN a slot, YES keeps, NO puts SAMP back, FUNC +
+     * YES the browser, SAMP's push keeps; a page key closes it as YES */
     if (it[0] == IT_KEY && smp_list_view && smp_list_up(smp_list_view)) {
         int press = (flags & F_PRESS) && !(flags & F_RELEASE);
-        if (press && (code == K_UP || code == K_DOWN)) {
-            it[0] = IT_KNOB;                    /* SAMP's knob (D), one detent */
-            it[4] = it[5] = it[6] = 0;
-            it[7] = 4;
-            it[8] = code == K_DOWN ? 1 : 0xFF;
-            it[9] = it[10] = it[11] = 0;
-            eaten |= 1u << code;
+        int t = (int)UI_TRACK_NOW;
+        if (code == K_UP || code == K_DOWN || code == K_YES || code == K_NO) {
+            if (press && code < 32)
+                eaten |= 1u << code;
+            it[0] = IT_DROP;
+            if (!press)
+                return (u32)it;
             smp_list_hold();
+            if (code == K_UP || code == K_DOWN) {
+                int v = smp_samp_of(t) + (code == K_DOWN ? 1 : -1);
+                if (v >= 0 && v <= 127)
+                    smp_set_samp(t, v);
+            } else if (code == K_YES && lst_func) {
+                smp_fb_open = 1;
+                smp_fb_folder = -1;
+                smp_fb_cur = 0;
+            } else if (code == K_YES) {
+                smp_list_close();
+            } else {                            /* NO: as it was */
+                smp_set_samp(t, smp_lst_orig);
+                smp_list_close();
+            }
             return (u32)it;
         }
         if (press && code == K_ENC_A + 3)
+            smp_list_close();
+        else if (press && closes(code))
             smp_list_close();
     }
     return (u32)it;

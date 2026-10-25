@@ -593,10 +593,95 @@ static void sums(const u8 *buf, u32 words, u32 *a, u32 *b)
     *b = y;
 }
 
+/* -- v0.25: the long names and folders (the import tool's; dnfw.sampler.machines META_*) -- */
+#define META ((u8 *)(SMP_MIRROR + 0x80000u))
+#define META_ROOM 0x2000u
+_Static_assert(META_BYTES <= META_ROOM && 0x80000u + META_ROOM <= SMP_MIRROR_BYTES, "the meta block fits");
+_Static_assert(META_PTR + 12u <= CMD_OFFSET, "the meta pointer lies before the command block");
+static int meta_ok __attribute__((section(".data"))) = 0;
+
+static void meta_read(void)
+{
+    meta_ok = 0;
+    if (!dir_ok || le32(DIR + META_PTR) != META_PTR_MAGIC)
+        return;
+    u32 off = le32(DIR + META_PTR + 4), n = le32(DIR + META_PTR + 8);
+    if (n < META_BYTES || n > META_ROOM || (off & 511u) || off < DATA_OFFSET || off + n > smp_hi
+        || (off < REC_END && off + n > REC_OFFSET))
+        return;
+    n = (n + 511u) & ~511u;
+    if (n > META_ROOM || image_read(off, n, META) != 0 || le32(META) != META_MAGIC)
+        return;
+    META[12 + META_FOLDERS * META_FOLDER_BYTES - 1] = 0;
+    for (u32 f = 0; f < META_FOLDERS; f++)          /* every string ends inside its field */
+        META[12 + META_FOLDER_BYTES * f + META_FOLDER_BYTES - 1] = 0;
+    for (u32 k = 0; k < POOL_SLOTS; k++)
+        META[12 + META_FOLDERS * META_FOLDER_BYTES + META_SLOT_BYTES * k + META_SLOT_BYTES - 1] = 0;
+    meta_ok = 1;
+}
+
+static const u8 *meta_slot(int k)
+{
+    return META + 12 + META_FOLDERS * META_FOLDER_BYTES + META_SLOT_BYTES * (u32)k;
+}
+
+/* slot K's long name (the tool's), if it has one and the instrument's own short name is
+ * still what the tool made of it (its stem: upper case, A-Z 0-9 space _ # -, seven at most:
+ * a rename on the instrument wins); else its short name */
+const char *smp_long_name(int k)
+{
+    if (k < 0 || k >= POOL_SLOTS)
+        return "";
+    const char *sh = smp_name(k);
+    if (!meta_ok)
+        return sh;
+    const char *ln = (const char *)meta_slot(k) + 4;
+    if (!ln[0])
+        return sh;
+    char st[8];
+    int n = 0;
+    for (int j = 0; ln[j] && n < 7; j++) {
+        char c = ln[j];
+        if (c >= 'a' && c <= 'z')
+            c = (char)(c - 32);
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '_' || c == '#' || c == '-')
+            st[n++] = c;
+    }
+    st[n] = 0;
+    for (int j = 0; j < 8; j++) {
+        if (st[j] != sh[j])
+            return sh;
+        if (!st[j])
+            break;
+    }
+    return ln;
+}
+
+int smp_folder_count(void)
+{
+    return meta_ok ? (int)(le32(META + 8) > META_FOLDERS ? META_FOLDERS : le32(META + 8)) : 0;
+}
+
+const char *smp_folder_name(int f)
+{
+    if (f < 0 || f >= smp_folder_count())
+        return "";
+    return (const char *)META + 12 + META_FOLDER_BYTES * (u32)f;
+}
+
+int smp_folder_of(int k)                        /* -1: in no folder */
+{
+    if (!meta_ok || k < 0 || k >= POOL_SLOTS)
+        return -1;
+    int f = meta_slot(k)[0];
+    return f < smp_folder_count() ? f : -1;
+}
+
 void smp_load(void)                             /* load (again) whatever the image holds */
 {
     smp_hi = header_read();
     dir_ok = smp_hi != 0;
+    meta_read();
     if (!dir_ok) {
         smp_lstate = L_IDLE;
         return;

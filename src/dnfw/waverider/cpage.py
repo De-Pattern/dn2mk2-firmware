@@ -43,7 +43,8 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
                    "NAME_BYTES": SM.NAME_BYTES, "DATA_OFFSET": hex(SM.DATA_OFFSET),
                    "POOL_SLOTS": SM.POOL_SLOTS}
         for name in ("POOL_BYTES", "REC_OFFSET", "REC_END", "RAM_PROVEN", "SLICE_AREA", "CMD_OFFSET", "STATUS_MAGIC", "TDM_TAG",
-                     "RX_MAGIC", "TX_MAGIC", "POS_MAGIC", "POS_NONE", "POS_ONE"):      # v0.16; v0.25 POS
+                     "RX_MAGIC", "TX_MAGIC", "POS_MAGIC", "POS_NONE", "POS_ONE", "META_PTR", "META_PTR_MAGIC", "META_MAGIC", "META_FOLDERS",
+                     "META_FOLDER_BYTES", "META_SLOT_BYTES", "META_NAME_BYTES", "META_BYTES"):      # v0.16; v0.25 POS
             defines[name] = hex(getattr(SM, name)) + "u"
         for name in ("REC_FIRST", "REC_SLOTS", "REC_SLOT_SHIFT", "CMD_SEND", "CMD_VERIFY", "CMD_PROBE",
                      "RX_WORDS", "TX_WORDS", "CMD_WORDS"):

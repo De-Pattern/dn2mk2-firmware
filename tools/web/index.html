@@ -82,9 +82,11 @@ progress { width: 100%; height: 12px; accent-color: var(--accent); }
 
   <section>
     <h2>2 · Samples to send</h2>
-    <div id="drop">Drop WAV files here, or <button id="browseBtn">Browse…</button>
+    <div id="drop">Drop WAV files or folders here, or <button id="browseBtn">Browse files…</button> <button id="folderBtn">Browse a folder…</button>
       <input id="fileIn" type="file" accept=".wav,audio/wav,audio/x-wav" multiple hidden>
+      <input id="dirIn" type="file" webkitdirectory multiple hidden>
     </div>
+    <datalist id="folderList"></datalist>
     <div class="row" style="margin-top:10px">
       <label>Slices for SLICE:
         <select id="sliceSel">
@@ -105,10 +107,11 @@ progress { width: 100%; height: 12px; accent-color: var(--accent); }
     </div>
     <p id="modeNote" class="note"></p>
     <table id="list" style="margin-top:10px">
-      <thead><tr><th>Slot</th><th>Name</th><th class="hide-sm">File</th><th class="num">Length</th><th class="num hide-sm">Slices</th><th class="num">Size</th><th></th></tr></thead>
+      <thead><tr><th>Slot</th><th>Name</th><th>Folder</th><th class="hide-sm">File</th><th class="num">Length</th><th class="num hide-sm">Slices</th><th class="num">Size</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
-    <p id="listNote" class="note">Drag rows to change their slots. Slots 1–122 are yours; names are seven characters.</p>
+    <p id="listNote" class="note">Drag rows to change their slots. Slots 1–122 are yours.</p>
+    <p class="note">Names: the instrument's list shows the whole name (up to 35 characters); the seven letters under it are its short name, shown where there is less room. A folder groups samples in the instrument's sample browser (FUNC + YES in the sample list). A dropped folder's samples get its name.</p>
   </section>
 
   <section>
@@ -163,7 +166,11 @@ const DN2 = (() => {
     DSP_RATE: 48000, POOL_DDR: 0x84000000,
     HEADER: [0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01],
     CMD: { HELLO: 1, WRITE: 2, STATUS: 3, BEGIN: 8, END: 9, DIR: 10 },
+    /* v0.25: long names and folders (dnfw.sampler.machines META_*) */
+    META_PTR: 0xC08, META_PTR_MAGIC: 0x52544D53, META_MAGIC: 0x54454D53, META_FOLDERS: 64,
+    META_FOLDER_BYTES: 32, META_SLOT_BYTES: 40, META_NAME_BYTES: 36, LONG_MAX: 35, FOLDER_MAX: 31,
   };
+  C.META_BYTES = 12 + C.META_FOLDERS * C.META_FOLDER_BYTES + C.POOL_SLOTS * C.META_SLOT_BYTES;
   C.HOLE_BYTES = C.REC_END - C.REC_OFFSET;           /* what a send skips */
   C.SLICE_AREA = C.REC_END - (128 << 10);           /* v0.23: slices made on the instrument */
   C.REC_BYTES = C.SLICE_AREA - C.REC_OFFSET;
@@ -315,7 +322,7 @@ const DN2 = (() => {
    * against the instrument), keptEnd: the end of their data; adds: [{k, frames, rate, name,
    * slices}] -> {dir: the directory page, at: where the new data goes, data, end: the image} */
   const BLOCK = 0x10000;
-  function addPlan(kept, keptEnd, adds, hole = [C.REC_OFFSET, C.REC_END], base = C.POOL_DDR) {
+  function addPlan(kept, keptEnd, adds, hole = [C.REC_OFFSET, C.REC_END], base = C.POOL_DDR, meta = null) {
     const dir = new Uint8Array(C.DATA_OFFSET), dv = new DataView(dir.buffer);
     const taken = new Set(adds.map(a => a.k));
     let count = 0;
@@ -339,6 +346,11 @@ const DN2 = (() => {
       count = Math.max(count, a.k + 1);
     }
     dv.setUint32(0, C.POOL_MAGIC, true); dv.setUint32(4, count, true);
+    if (meta) {                                       /* v0.25: the names and folders after them */
+      const m = metaAt(at, meta.length, hole);
+      if (m > at) parts.push(new Uint8Array(m - at));
+      parts.push(meta); putMetaPtr(dir, m, meta.length); at = m + meta.length;
+    }
     const data = new Uint8Array(at - start); let o = 0;
     for (const p of parts) { data.set(p, o); o += p.length; }
     return { dir, at: start, data, end: at };
@@ -346,10 +358,52 @@ const DN2 = (() => {
   function payloadBytes(len) {                      /* what a send moves: all but the hole */
     return len > C.REC_END ? len - C.HOLE_BYTES : Math.min(len, C.REC_OFFSET);
   }
+  function short(long) {                         /* v0.25: the instrument's seven letters of a long name */
+    return long.toUpperCase().replace(/[^A-Z0-9 _#-]/g, "").slice(0, 7) || "SAMPLE";
+  }
   function stem(name) {
     return name.replace(/\.[^.]*$/, "").toUpperCase().replace(/[^A-Z0-9 _#-]/g, "").slice(0, 7) || "SAMPLE";
   }
-  return { C, BLOCK, pack7, unpack7, request, parse, be32, rd32, readWav, onsets, slicesFrom, slicing, itemBytes, itemData, putEntry, poolBytes, addPlan, payloadBytes, stem };
+  /* v0.25: the meta block for SLOTS ([{long, folder}] or null, slot 0 first) -> bytes,
+   * 512-padded; folders in order of first use, at most META_FOLDERS (the rest: none) */
+  function metaBytes(slots) {
+    const out = new Uint8Array(Math.ceil(C.META_BYTES / 512) * 512), dv = new DataView(out.buffer);
+    const folders = [];
+    const ascii = (str, max) => Array.from(str.slice(0, max), ch => { const c = ch.charCodeAt(0); return c >= 32 && c < 127 ? c : 63; });
+    slots.forEach((m, k) => {
+      const rec = 12 + C.META_FOLDERS * C.META_FOLDER_BYTES + C.META_SLOT_BYTES * k;
+      out[rec] = 0xFF;
+      if (!m) return;
+      const f = (m.folder || "").trim().slice(0, C.FOLDER_MAX);
+      if (f) {
+        let i = folders.indexOf(f);
+        if (i < 0 && folders.length < C.META_FOLDERS) { folders.push(f); i = folders.length - 1; }
+        if (i >= 0) out[rec] = i;
+      }
+      out.set(ascii(m.long || "", C.LONG_MAX), rec + 4);
+    });
+    for (let k = slots.length; k < C.POOL_SLOTS; k++) out[12 + C.META_FOLDERS * C.META_FOLDER_BYTES + C.META_SLOT_BYTES * k] = 0xFF;
+    dv.setUint32(0, C.META_MAGIC, true); dv.setUint32(4, 1, true); dv.setUint32(8, folders.length, true);
+    folders.forEach((f, i) => out.set(ascii(f, C.META_FOLDER_BYTES - 1), 12 + C.META_FOLDER_BYTES * i));
+    return out;
+  }
+  /* where a block of BYTES goes after an image of LEN: the next 512, past the recordings */
+  function metaAt(len, bytes, hole = [C.REC_OFFSET, C.REC_END]) {
+    let at = Math.ceil(len / 512) * 512;
+    if (hole && at < hole[1] && at + bytes > hole[0]) at = hole[1];
+    return at;
+  }
+  function putMetaPtr(dir, at, bytes) {
+    const dv = new DataView(dir.buffer, dir.byteOffset);
+    dv.setUint32(C.META_PTR, C.META_PTR_MAGIC, true); dv.setUint32(C.META_PTR + 4, at, true); dv.setUint32(C.META_PTR + 8, bytes, true);
+  }
+  /* POOL (poolBytes') with META after it, the directory pointing at it -> a new image */
+  function attachMeta(pool, meta, hole = [C.REC_OFFSET, C.REC_END]) {
+    const at = metaAt(pool.length, meta.length, hole), out = new Uint8Array(at + meta.length);
+    out.set(pool); out.set(meta, at); putMetaPtr(out, at, meta.length);
+    return out;
+  }
+  return { C, BLOCK, metaBytes, metaAt, putMetaPtr, attachMeta, short, pack7, unpack7, request, parse, be32, rd32, readWav, onsets, slicesFrom, slicing, itemBytes, itemData, putEntry, poolBytes, addPlan, payloadBytes, stem };
 })();
 if (typeof module !== "undefined") module.exports = DN2;
 </script>
@@ -371,13 +425,15 @@ if (typeof module !== "undefined") module.exports = DN2;
   const MEM_KEY = "dn2.sent.v1";      /* what this browser last sent (the directory, for Add) */
   function memRead() { try { return JSON.parse(localStorage.getItem(MEM_KEY) || "null"); } catch (e) { return null; } }
   function memWrite(m) { try { localStorage.setItem(MEM_KEY, JSON.stringify(m)); } catch (e) { /* no storage: Add stays off */ } }
-  function memFromDir(dir, end) {      /* the directory page we sent -> what to remember */
+  function memFromDir(dir, end, metas = []) {      /* the directory page we sent -> what to remember */
     const dv = new DataView(dir.buffer, dir.byteOffset), entries = [];
     for (let k = 0; k < C.POOL_SLOTS; k++) {
       const addr = dv.getUint32(8 + 16 * k, true), fr = dv.getUint32(12 + 16 * k, true);
       if (!fr || addr < C.POOL_DDR + C.DATA_OFFSET) continue;
       let name = ""; for (let c = 0; c < C.NAME_BYTES; c++) { const b = dir[C.NAMES_OFFSET + C.NAME_BYTES * k + c]; if (!b) break; name += String.fromCharCode(b); }
-      entries.push({ k, e: Array.from(dir.subarray(8 + 16 * k, 24 + 16 * k)), name, off: addr - C.POOL_DDR, frames: fr });
+      const m = metas[k] || {};
+      entries.push({ k, e: Array.from(dir.subarray(8 + 16 * k, 24 + 16 * k)), name, off: addr - C.POOL_DDR, frames: fr,
+                     long: m.long || "", folder: m.folder || "" });
     }
     return { entries, end, date: new Date().toISOString() };
   }
@@ -390,7 +446,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     const mine = dev.slots.filter(s => !s.rec), byK = new Map(m.entries.map(e => [e.k, e]));
     const same = mine.length === m.entries.length && mine.every(s => { const e = byK.get(s.k); return e && e.off === s.off && e.frames === s.frames && e.name === s.name; });
     if (!same) return { why: "The instrument's samples are not what this browser last sent (trimmed, renamed or recorded over there, or sent from elsewhere). Use Replace all once; Add works from then on." };
-    return { kept: m.entries.map(e => ({ k: e.k, entry: Uint8Array.from(e.e), name: e.name })), end: m.end };
+    return { kept: m.entries.map(e => ({ k: e.k, entry: Uint8Array.from(e.e), name: e.name, long: e.long || "", folder: e.folder || "" })), end: m.end };
   }
   function usedSlots() {               /* slots the list must not take by default */
     const u = new Set();
@@ -482,6 +538,29 @@ if (typeof module !== "undefined") module.exports = DN2;
   }
 
   /* -- files -- */
+  /* v0.25: a dropped folder: its WAVs, each with the folder's path (below the drop) */
+  async function entriesOf(entry, path, out) {
+    if (entry.isFile) {
+      const f = await new Promise((res, rej) => entry.file(res, rej));
+      f.folder = path; out.push(f);
+    } else if (entry.isDirectory) {
+      const rd = entry.createReader(), sub = path ? path + "/" + entry.name : entry.name;
+      for (;;) {
+        const batch = await new Promise((res, rej) => rd.readEntries(res, rej));
+        if (!batch.length) break;
+        for (const e of batch) await entriesOf(e, sub, out);
+      }
+    }
+  }
+  async function dropped(dt) {
+    const out = [], plain = [];
+    const ents = [...dt.items || []].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    if (!ents.length) return addFiles([...dt.files]);
+    for (const e of ents) { if (e.isDirectory) await entriesOf(e, "", out); else plain.push(e); }
+    for (const e of plain) await entriesOf(e, "", out);
+    out.sort((a, b) => (a.folder + "/" + a.name).localeCompare(b.folder + "/" + b.name, undefined, { numeric: true }));
+    return addFiles(out);
+  }
   async function addFiles(files) {
     for (const f of files) {
       if (!/\.wav$/i.test(f.name)) { log(`${f.name}: not a .wav, skipped`); continue; }
@@ -489,7 +568,9 @@ if (typeof module !== "undefined") module.exports = DN2;
       try {
         const w = DN2.readWav(await f.arrayBuffer());
         if (!w.frames.length) throw new Error("no frames");
-        items.push({ file: f.name, name: DN2.stem(f.name), w, slices: DN2.slicing($("sliceSel").value, w), slot: null });
+        const long = f.name.replace(/\.[^.]*$/, "").slice(0, C.LONG_MAX);
+        items.push({ file: f.name, long, name: DN2.short(long), folder: (f.folder || "").slice(0, C.FOLDER_MAX), w,
+                     slices: DN2.slicing($("sliceSel").value, w), slot: null });
       } catch (e) { log(`${f.name}: ${e.message || e}`); }
     }
     refresh();
@@ -529,12 +610,15 @@ if (typeof module !== "undefined") module.exports = DN2;
       const slotCell = mode === "fill" ? `<td class="slot">SAMP ${k + 1}</td>`
         : `<td class="slot">SAMP <input type="number" class="slotIn" min="1" max="${C.USER_SLOTS}" value="${it.slot == null ? "" : it.slot + 1}" style="width:4.5em"></td>`;
       const over = mode !== "fill" && it.slot != null && devAt.get(it.slot);
-      tr.innerHTML = `${slotCell}<td><input type="text" maxlength="7" value="${it.name}"></td>
+      const esc = v => String(v).replace(/[<&>"]/g, ch => ({ "<": "&lt;", "&": "&amp;", ">": "&gt;", '"': "&quot;" })[ch]);
+      tr.innerHTML = `${slotCell}<td><input type="text" class="longIn" maxlength="${C.LONG_MAX}" value="${esc(it.long)}" style="width:14em;text-transform:none"><div class="note slot" style="margin:2px 0 0">${esc(it.name)}</div></td>
+        <td><input type="text" class="folderIn" list="folderList" maxlength="${C.FOLDER_MAX}" value="${esc(it.folder)}" placeholder="–" style="width:9em;text-transform:none"></td>
         <td class="hide-sm">${it.file.replace(/[<&>]/g, "")}${over ? ` <span class="pill warn">${over.rec ? "recording moves" : "replaces " + over.name.replace(/[<&>]/g, "")}</span>` : ""}</td>
         <td class="num">${(it.w.frames.length / it.w.rate).toFixed(2)} s</td>
         <td class="num hide-sm">${it.slices.length || "–"}</td><td class="num">${fmtMB(sz)}</td><td><button class="x" title="Remove">✕</button></td>`;
-      tr.querySelector("input[type=text]").oninput = e => { it.name = e.target.value.toUpperCase().replace(/[^A-Z0-9 _#-]/g, "").slice(0, 7); };
-      tr.querySelector("input[type=text]").onchange = refresh;
+      tr.querySelector(".longIn").oninput = e => { it.long = e.target.value.replace(/[^ -~]/g, "").slice(0, C.LONG_MAX); it.name = DN2.short(it.long); tr.querySelector(".note").textContent = it.name; };
+      tr.querySelector(".longIn").onchange = refresh;
+      tr.querySelector(".folderIn").onchange = e => { it.folder = e.target.value.replace(/[^ -~]/g, "").trim().slice(0, C.FOLDER_MAX); refresh(); };
       const si = tr.querySelector(".slotIn");
       if (si) si.onchange = e => { const v = parseInt(e.target.value, 10); it.slot = Number.isFinite(v) ? v - 1 : null; refresh(); };
       tr.querySelector(".x").onclick = () => { items.splice(k, 1); refresh(); };
@@ -546,8 +630,10 @@ if (typeof module !== "undefined") module.exports = DN2;
       }
       tb.append(tr);
     });
+    const fl = $("folderList"); fl.innerHTML = "";
+    [...new Set([...items.map(it => it.folder), ...(memRead()?.entries || []).map(e => e.folder || "")].filter(Boolean))].forEach(f => { const o = document.createElement("option"); o.value = f; fl.append(o); });
     const prob = slotProblems();
-    $("listNote").textContent = prob || (!items.length ? `No samples yet. Slots 1–${C.USER_SLOTS} are yours; names are seven characters.`
+    $("listNote").textContent = prob || (!items.length ? `No samples yet. Slots 1–${C.USER_SLOTS} are yours.`
       : mode === "fill" ? `${items.length} sample(s) go to SAMP 1–${items.length}, in this order. Drag rows to change their slots.`
       : `${items.length} sample(s), each to the slot beside it.`);
     $("listNote").className = "note " + (prob ? "bad" : "");
@@ -626,19 +712,24 @@ if (typeof module !== "undefined") module.exports = DN2;
       st.textContent = "building"; st.className = "pill";
       const audio = it => ({ frames: it.w.frames, rate: it.w.rate, name: it.name, slices: it.slices });
       let parts, end, remember, total;
+      const metas = [];                       /* v0.25: each slot's long name and folder */
+      const meta = it => ({ long: it.long, folder: it.folder });
       if (mode === "add") {
         const kp = checkKeep();
         if (!kp.kept) throw new Error(kp.why);
-        const pl = DN2.addPlan(kp.kept, kp.end, items.map(it => ({ k: it.slot, ...audio(it) })));
+        kp.kept.forEach(e => { metas[e.k] = { long: e.long, folder: e.folder }; });
+        items.forEach(it => { metas[it.slot] = meta(it); });
+        const pl = DN2.addPlan(kp.kept, kp.end, items.map(it => ({ k: it.slot, ...audio(it) })), undefined, undefined,
+                               DN2.metaBytes(Array.from({ length: C.POOL_SLOTS }, (_, k) => metas[k] || null)));
         parts = [[pl.dir, 0], [pl.data, pl.at]]; end = pl.end;
-        remember = memFromDir(pl.dir, pl.end);
+        remember = memFromDir(pl.dir, pl.end, metas);
       } else {
         let list;
-        if (mode === "fill") list = items.map(audio);
-        else { list = []; items.forEach(it => { while (list.length <= it.slot) list.push(null); list[it.slot] = audio(it); }); }
-        const pool = DN2.poolBytes(list);
+        if (mode === "fill") { list = items.map(audio); items.forEach((it, k) => { metas[k] = meta(it); }); }
+        else { list = []; items.forEach(it => { while (list.length <= it.slot) list.push(null); list[it.slot] = audio(it); metas[it.slot] = meta(it); }); }
+        const pool = DN2.attachMeta(DN2.poolBytes(list), DN2.metaBytes(Array.from({ length: C.POOL_SLOTS }, (_, k) => metas[k] || null)));
         parts = [[pool, 0]]; end = pool.length;
-        remember = memFromDir(pool.subarray(0, C.DATA_OFFSET), pool.length);
+        remember = memFromDir(pool.subarray(0, C.DATA_OFFSET), pool.length, metas);
       }
       total = parts.reduce((a, [b, at]) => a + b.length - Math.max(0, Math.min(at + b.length, C.REC_END) - Math.max(at, C.REC_OFFSET)), 0);
       log(`${items.length} sample(s), image to ${fmtMB(end)}, ${fmtMB(total)} to send`);
@@ -682,7 +773,13 @@ if (typeof module !== "undefined") module.exports = DN2;
   const drop = $("drop");
   ["dragenter", "dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
-  drop.addEventListener("drop", e => addFiles([...e.dataTransfer.files]));
+  drop.addEventListener("drop", e => dropped(e.dataTransfer));
+  $("folderBtn").onclick = () => $("dirIn").click();
+  $("dirIn").onchange = e => {
+    const fs = [...e.target.files].map(f => { const p = (f.webkitRelativePath || "").split("/"); f.folder = p.slice(0, -1).join("/"); return f; });
+    fs.sort((a, b) => (a.folder + "/" + a.name).localeCompare(b.folder + "/" + b.name, undefined, { numeric: true }));
+    addFiles(fs); e.target.value = "";
+  };
   $("sliceSel").onchange = reslice;
   $("modeSel").onchange = e => { mode = e.target.value; items.forEach(it => { if (mode === "fill") it.slot = null; }); refresh(); };
   $("clearBtn").onclick = () => { items = []; refresh(); };

@@ -522,88 +522,221 @@ static void mini_mode(void *c, int x, int y, int mode)
     TEXT(c, FONT, x + 18, y, CENTRED, "%c", mode == 0 || mode == 1 ? 'R' : 'F');
 }
 
-/* the sample list (v0.16), as the DT2 shows its sample names while SAMP turns: for a second
- * after SAMP changes, five slots around the chosen one, the chosen one framed */
-#define LIST_FRAMES 1500u
+/* v0.25: the sample list as the DT2's (its manual 9.7): turning SAMP brings it up over the
+ * right of the page, and it stays: SAMP (or UP / DOWN) moves through the slots -- the
+ * track plays the one outlined, so its [TRIG] previews it -- YES keeps it, NO puts SAMP
+ * back as it was, FUNC + YES opens the folder browser (ASSIGN SAMPLE, below). Pushing
+ * SAMP keeps it too, and a page key closes it as YES does. Its keys are rec.c's
+ * (smp_ui_pop). Long names and folders come from the import tool (link.c's meta). */
+extern const char *smp_long_name(int k);
+extern int smp_folder_count(void);
+extern const char *smp_folder_name(int f);
+extern int smp_folder_of(int k);
+#define LIST_IDLE 30000u                         /* FRAMES (~1500 a second): 20 s untouched, it closes */
+int smp_lst_open __attribute__((section(".data"))) = 0;
+int smp_lst_orig __attribute__((section(".data"))) = 0;   /* SAMP when it came up */
+void *smp_list_view __attribute__((section(".data"))) = 0;   /* the page it is on */
 static int list_slot __attribute__((section(".data"))) = -1;
-void *smp_list_view __attribute__((section(".data"))) = 0;   /* rec.c's UI filter asks after it */
-#define list_view smp_list_view
 static u32 list_at __attribute__((section(".data"))) = 0;
+int smp_overlay_dirty __attribute__((section(".data"))) = 0;   /* page.c's wr_poll redraws */
 
-static void slot_name(int k, char *out)
+static void slot_name(int k, char *out, int max)   /* SAMP value K (0 OFF) */
 {
     const char *n = 0;
     int cnt = smp_count();
     if (k <= 0)
         n = "OFF";
-    else if (cnt >= 0 && k <= cnt)
-        n = smp_name(k - 1);
+    else if (cnt >= 0 && k <= cnt && !smp_slot_empty(k - 1))
+        n = smp_long_name(k - 1);
     if (k > 0 && !(n && n[0]) && !smp_slot_empty(k - 1))
         n = "SAMPLE";                           /* something there, without a name (v0.15's recordings) */
+    if (!(n && n[0]))
+        n = "---";                              /* the DT2's empty slot */
     int j = 0;
-    if (n && n[0])
-        for (; j < 7 && n[j]; j++)
-            out[j] = n[j];
-    else {                                      /* v0.20: nothing loaded there */
-        static const char e[] = "EMPTY";
-        for (; e[j]; j++)
-            out[j] = e[j];
-    }
+    for (; j < max && n[j]; j++)
+        out[j] = n[j];
     out[j] = 0;
 }
 
-/* the list is up on VIEW's page (rec.c's key handler: UP and DOWN keep it, v0.20) */
+/* the list is up on VIEW's page (rec.c's key filter asks) */
 int smp_list_up(void *view)
 {
-    u32 now = *(volatile u32 *)0x4058E8D4u;
-    return view == list_view && list_slot >= 0 && now - list_at < LIST_FRAMES;
+    return smp_lst_open && view == smp_list_view;
 }
 
 void smp_list_hold(void)
 {
     list_at = *(volatile u32 *)0x4058E8D4u;
+    smp_overlay_dirty = 1;
 }
 
-void smp_list_close(void)                       /* SAMP's knob pushed: the highlighted one it is */
+void smp_list_close(void)
 {
-    list_at = *(volatile u32 *)0x4058E8D4u - LIST_FRAMES;
+    smp_lst_open = 0;
+    smp_overlay_dirty = 1;
+}
+
+static void num3(char *o, int k)
+{
+    o[0] = (char)('0' + k / 100 % 10);
+    o[1] = (char)('0' + k / 10 % 10);
+    o[2] = (char)('0' + k % 10);
+    o[3] = 0;
+}
+
+static void scrollbar(void *c, int x, int y0, int y1, int at, int n)
+{
+    vline(c, x, y0, y1, 1);
+    if (n <= 1)
+        return;
+    int h = y1 - y0 + 1, th = h / 6 < 3 ? 3 : h / 6;
+    int ty = y1 - (h - th) * at / (n - 1) - th + 1;
+    fill(c, x - 1, ty, x + 1, ty + th - 1);
 }
 
 static void sample_list(void *c, void *view, int slot)
 {
     u32 now = *(volatile u32 *)0x4058E8D4u;
-    if (view != list_view || list_slot < 0) {   /* first sight of this page: no list */
-        list_view = view;
+    if (view != smp_list_view || list_slot < 0) {   /* first sight of this page: no list */
+        smp_list_view = view;
         list_slot = slot;
-        list_at = now - LIST_FRAMES;
+        smp_lst_open = 0;
         return;
     }
     if (slot != list_slot) {
+        if (!smp_lst_open) {
+            smp_lst_open = 1;
+            smp_lst_orig = list_slot;
+        }
         list_slot = slot;
         list_at = now;
     }
-    if (now - list_at >= LIST_FRAMES)
+    if (!smp_lst_open)
         return;
-    int x0 = 26, x1 = 124, y0 = 1, y1 = 46;
+    if (now - list_at >= LIST_IDLE) {          /* left alone: kept, as YES */
+        smp_lst_open = 0;
+        return;
+    }
+    int x0 = 26, x1 = 127, y0 = 0, y1 = 63;
     for (int y = y0; y <= y1; y++)
         for (int x = x0; x <= x1; x++)
             SET_PIXEL(c, x, y, 0);
-    box(c, x0, y0, x1, y1, 0);
+    vline(c, x0, y0, y1, 0);
+    /* the header, as the DT2's: what YES, NO and FUNC + YES do */
+    LABEL(c, x0 + 51, 57, "%s", "YES:OK  NO:X  FN+YES:D");
+    hline(c, x0 + 1, x1, 55, 0);
+    /* the bank row: the DN2 has the one bank of 128 */
+    LABEL(c, x0 + 51, 48, "%s", "< A >");
+    box(c, x0 + 44, 46, x0 + 58, 54, 0);
+    /* five slots around the chosen one, it outlined */
     for (int r = 0; r < 5; r++) {
-        int k = slot - 2 + r, y = y1 - 9 - 8 * r;
+        int k = slot - 2 + r, y = 38 - 9 * r;
         if (k < 0 || k > 127)
             continue;
-        char nm[8], num[4];
-        slot_name(k, nm);
-        num[0] = k >= 100 ? (char)('0' + k / 100) : ' ';
-        num[1] = k >= 10 ? (char)('0' + k / 10 % 10) : ' ';
-        num[2] = (char)('0' + k % 10);
-        num[3] = 0;
-        TEXT(c, FONT, x0 + 3, y, 0, "%.3s", num);
-        TEXT(c, FONT, x0 + 24, y, 0, "%.7s", nm);
+        char nm[19], num[4];
+        slot_name(k, nm, 18);
+        num3(num, k);
+        TEXT(c, FONT, x0 + 3, y, 0, "%s", num);
+        TEXT(c, FONT, x0 + 23, y, 0, "%s", nm);
         if (k == slot)
-            box(c, x0 + 1, y - 1, x1 - 1, y + 7, 0);
+            box(c, x0 + 1, y - 2, x1 - 4, y + 7, 0);
     }
+    scrollbar(c, x1 - 1, 1, 44, slot, 128);
+}
+
+/* -- v0.25: the folder browser (ASSIGN SAMPLE), FUNC + YES in the list: the folders the
+ * import tool sent, then the samples in none; a folder's samples inside it. YES (or
+ * RIGHT) opens a folder or assigns the sample to the track (SAMP), NO (or LEFT) goes back
+ * up, and out of the browser at the top. Over the whole screen (page.c's wr_screen). */
+int smp_fb_open __attribute__((section(".data"))) = 0;
+int smp_fb_folder __attribute__((section(".data"))) = -1;   /* -1 the top */
+int smp_fb_cur __attribute__((section(".data"))) = 0;
+
+/* the browser's items where it is: N of them; item I as a folder (-> its index, *slot -1)
+ * or a sample (-> -1, *slot its slot) */
+int smp_fb_count(void)
+{
+    int n = 0, fc = smp_folder_count();
+    if (smp_fb_folder < 0)
+        n = fc;
+    for (int k = 0; k < 128; k++)
+        if (!smp_slot_empty(k) && smp_folder_of(k) == smp_fb_folder)
+            n++;
+    return n;
+}
+
+int smp_fb_item(int i, int *slot)
+{
+    *slot = -1;
+    if (smp_fb_folder < 0) {
+        int fc = smp_folder_count();
+        if (i < fc)
+            return i;
+        i -= fc;
+    }
+    for (int k = 0; k < 128; k++)
+        if (!smp_slot_empty(k) && smp_folder_of(k) == smp_fb_folder && i-- == 0) {
+            *slot = k;
+            return -1;
+        }
+    return -1;
+}
+
+static void folder_icon(void *c, int x, int y)
+{
+    box(c, x, y, x + 8, y + 5, 0);
+    hline(c, x + 1, x + 3, y + 6, 0);
+    fill(c, x + 1, y + 1, x + 7, y + 4);
+}
+
+int smp_fb_visible(void)
+{
+    return smp_fb_open;
+}
+
+void smp_fb_draw(void *c, int samp)
+{
+    for (int y = 0; y <= 63; y++)
+        for (int x = 0; x <= 127; x++)
+            SET_PIXEL(c, x, y, 0);
+    char num[4];
+    num3(num, samp);
+    if (smp_fb_folder < 0)
+        LABEL(c, 64, 57, "ASSIGN SAMPLE > A%s", num);
+    else
+        LABEL(c, 64, 57, "%.18s > A%s", smp_folder_name(smp_fb_folder), num);
+    hline(c, 0, 127, 55, 0);
+    int n = smp_fb_count();
+    if (n == 0) {
+        TEXT(c, FONT, 64, 28, CENTRED, "%s", smp_folder_count() || smp_count() > 0 ? "EMPTY" : "NO SAMPLES");
+        return;
+    }
+    if (smp_fb_cur >= n)
+        smp_fb_cur = n - 1;
+    if (smp_fb_cur < 0)
+        smp_fb_cur = 0;
+    int top = smp_fb_cur - 2;
+    if (top > n - 6)
+        top = n - 6;
+    if (top < 0)
+        top = 0;
+    for (int r = 0; r < 6 && top + r < n; r++) {
+        int i = top + r, y = 46 - 9 * r, slot;
+        int f = smp_fb_item(i, &slot);
+        if (f >= 0) {
+            TEXT(c, FONT, 3, y, 0, "%.18s", smp_folder_name(f));
+            folder_icon(c, 112, y);
+        } else {
+            char nm[21];
+            slot_name(slot + 1, nm, 20);
+            TEXT(c, FONT, 3, y, 0, "%s", nm);
+            if (slot + 1 == samp)
+                TEXT(c, FONT, 104, y, 0, "%s", "*");
+        }
+        if (i == smp_fb_cur)
+            box(c, 0, y - 2, 123, y + 7, 0);
+    }
+    scrollbar(c, 126, 1, 53, smp_fb_cur, n);
 }
 
 void smp_page_draw(void *view, void *c, int kind, int wave)

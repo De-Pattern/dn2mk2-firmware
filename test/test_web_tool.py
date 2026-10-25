@@ -36,7 +36,9 @@ def _node(js: str):
 def test_the_constants_are_the_builds():
     c = _node("console.log(JSON.stringify(DN2.C))")
     for k in ("POOL_MAGIC", "POOL_SLOTS", "USER_SLOTS", "NAMES_OFFSET", "NAME_BYTES", "DATA_OFFSET",
-              "FMT_I16", "MAX_SLICES", "REC_OFFSET", "REC_END", "POOL_BYTES", "REC_BYTES", "HOLE_BYTES", "SLICE_AREA"):
+              "FMT_I16", "MAX_SLICES", "REC_OFFSET", "REC_END", "POOL_BYTES", "REC_BYTES", "HOLE_BYTES", "SLICE_AREA",
+              "META_PTR", "META_PTR_MAGIC", "META_MAGIC", "META_FOLDERS", "META_FOLDER_BYTES", "META_SLOT_BYTES",
+              "META_NAME_BYTES", "META_BYTES"):
         assert c[k] == getattr(SM, k), k
     assert c["POOL_DDR"] == dsp.SMP_POOL_DDR
 
@@ -149,3 +151,30 @@ def test_pick_leaves_the_slots_between_empty():
     assert struct.unpack_from("<II", got, 0) == (SM.POOL_MAGIC, 3)
     assert got[8:40] == bytes(32)
     assert struct.unpack_from("<II", got, 40) == (dsp.SMP_POOL_DDR + SM.DATA_OFFSET, 2)
+
+
+def test_the_long_names_and_folders_block():
+    """v0.25: the meta block (long names, folders) after the image, the directory pointing
+    at it, as link.c's meta_read takes it: 512-aligned, past the image, folders in order."""
+    js = r"""
+      const s = n => ({frames: Float32Array.from({length: n}, () => 0.1), rate: 48000, name: "X", slices: []});
+      const pool = DN2.poolBytes([s(1000), null, s(333)]);
+      const meta = DN2.metaBytes([{long: "shs_haunt_tape_56_drum_lo", folder: "drum_loops"}, null,
+                                  {long: "Break (v2)", folder: "breaks"}]);
+      const img = DN2.attachMeta(pool, meta);
+      console.log(JSON.stringify({pool: pool.length, img: Array.from(img), meta: meta.length,
+                                  short: [DN2.short("shs_haunt_tape_56_drum_lo"), DN2.short("Break (v2)")]}))"""
+    r = _node(js)
+    img = bytes(r["img"])
+    magic, at, n = struct.unpack_from("<III", img, SM.META_PTR)
+    assert magic == SM.META_PTR_MAGIC and at % 512 == 0 and at >= r["pool"] and n == r["meta"] >= SM.META_BYTES
+    m = img[at:at + n]
+    assert struct.unpack_from("<III", m, 0) == (SM.META_MAGIC, 1, 2)
+    fo = 12
+    assert m[fo:fo + 10] == b"drum_loops" and m[fo + 32:fo + 38] == b"breaks"
+    rec = 12 + SM.META_FOLDERS * SM.META_FOLDER_BYTES
+    assert m[rec] == 0 and m[rec + 4:rec + 29] == b"shs_haunt_tape_56_drum_lo"
+    assert m[rec + SM.META_SLOT_BYTES] == 0xFF
+    assert m[rec + 2 * SM.META_SLOT_BYTES] == 1 and m[rec + 2 * SM.META_SLOT_BYTES + 4:rec + 2 * SM.META_SLOT_BYTES + 14] == b"Break (v2)"
+    assert all(m[rec + SM.META_SLOT_BYTES * k] == 0xFF for k in range(3, 128))
+    assert r["short"] == ["SHS_HAU", "BREAK V"]          # link.c makes the same of the long names

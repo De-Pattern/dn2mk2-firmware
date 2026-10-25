@@ -206,11 +206,16 @@ void wr_screen(void *screen, void *canvas)
     extern void rec_screen_draw(void *canvas);
     extern int slc_visible(void);
     extern void slc_draw(void *canvas);
+    extern int smp_fb_visible(void);
+    extern void smp_fb_draw(void *canvas, int samp);
+    extern int smp_samp_of(int track);
     SCREEN_DRAW(screen, canvas);
     if (rec_visible())
         rec_screen_draw(canvas);
     else if (slc_visible())
         slc_draw(canvas);
+    else if (smp_fb_visible())                  /* v0.25: the folder browser (ASSIGN SAMPLE) */
+        smp_fb_draw(canvas, smp_samp_of(UI_TRACK));
 }
 
 /* the UI loop's redraw test, as stock (and the names kept current, once a loop; and
@@ -237,6 +242,11 @@ int wr_poll(void *screen)
     static int slc_was __attribute__((section(".data"))) = 0;
     int slc = slc_visible() || slc_busy();      /* v0.23: SLICE's menus, and their notes */
     extern int smp_wants_redraw(void);          /* v0.25: a sample page's moving playhead */
+    extern int smp_overlay_dirty;               /* v0.25: the sample list and the browser */
+    if (smp_overlay_dirty) {
+        smp_overlay_dirty = 0;
+        SET_DIRTY(screen);
+    }
     if ((rec_visible() || slc || slc_was || smp_wants_redraw()) && (int)(FRAMES_NOW - rec_next) >= 0) {
         rec_next = FRAMES_NOW + REC_REDRAW;
         SET_DIRTY(screen);
