@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.21** | 2026-10-23 | RESONATOR and CZ PHASE page 1 in the Elektron style: knobs for continuous controls, choices (WAVE, SEL, OCT, MOD, KF, SUS) by name in a box | `builds/v0.21-KNOBS/` | yes |
+| **v0.22** | 2026-10-24 | The RECORDER is its own screen (FUNC + VOICE) with the DT2's TRIM, NAME and ASSIGN steps; recordings to any slot; 400 MB for samples (after a RAM check at power-on); MD machines +6 dB; a browser import tool; ONESHOT never goes silent at LEN 0 | `builds/v0.22-RECORDER/` | yes |
+| v0.21 | 2026-10-23 | RESONATOR and CZ PHASE page 1 in the Elektron style: knobs for continuous controls, choices (WAVE, SEL, OCT, MOD, KF, SUS) by name in a box | `builds/v0.21-KNOBS/` | yes |
 | v0.20 | 2026-10-23 | Fixes: the buzz on WaveTone/FM after a sample or PERC track (the link no longer touches the DSP's per-track routing), the RECORDER's flashing, SLICE's pages, the sample list; PERC drawn as the Machinedrum's screen; sample pages in the DT2's own geometry | `builds/v0.20-FIXES/` | yes |
 | v0.19 | 2026-10-23 | SLICE, the Digitakt II's sixth sample machine: your WAV's cue points (or a grid, or its hits) as up to 64 slices, SLCE / LEN / NOTE mode, slices marked on the waveform | `builds/v0.19-SLICE/` | yes |
 | v0.18 | 2026-10-23 | The Digitakt II's own sample engine: its interpolator and decimator, its STRETCH, WERP's clock, GRID NOTE mode, BARS 1-8 and SEG 1/32-1/8, no clicks at starts, ends and retriggers | `builds/v0.18-DT2-ENGINE/` | yes |
@@ -55,6 +56,103 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.22 — RECORDER (its own screen, trim/name/assign, 400 MB)
+
+`DN2mod_v0.22_RECORDER_OS1.11.syx`
+sha256 `accc18df58ef54348933a9830d9e9310e4bef521dcd33339fcb8ccf7ed718f94`
+Gate: CLEARED TO FLASH, 2026-10-24 (USB size 1,995,356 of 2,097,152). Source: commit `e6810ac`. Docs: `docs/sampler.md` ("v0.22: the RECORDER is a screen of its own"), `docs/md.md` ("v0.22: level").
+
+Everything in v0.21, plus:
+
+**Adds.**
+- **The RECORDER is a screen of its own**, as on the Digitakt II. **FUNC + VOICE** opens it
+  over any page and on any track. The same combo closes it, and so does NO. (Stock's
+  FUNC + VOICE unison toggle is replaced.) The page keys, PRESET, SETTINGS, TRK, PTN and
+  SONG also close it. A recording keeps going after the screen closes. While it is up, its
+  knobs and keys act on the recorder only and never touch the track's sound.
+  - **A** SRC: **EXT L+R**, **EXT L**, **EXT R**, **MAIN**, **TRK1-16**. The screen shows
+    only the input you chose.
+  - **D** THRES, **E** DEST (the slot the recording goes to), **F** R.LEN, **G** R.STRT,
+    **H** ARM. YES records, and YES again stops.
+- **After a recording, the DT2's steps:**
+  - **TRIM**: the waveform, with **E** START and **H** END. Hold FUNC for finer steps;
+    LEFT and RIGHT nudge. **YES** keeps the trimmed part, **NO** keeps it all,
+    **FUNC + NO** throws the recording away.
+  - **NAME**: seven characters. A knob or UP/DOWN changes the letter, LEFT/RIGHT moves.
+    **YES** saves the name, **NO** keeps RECnnn.
+  - **ASSIGN**: press a **[TRIG] key** and that track plays the sample. A synth track
+    becomes ONESHOT first. **NO** assigns none.
+- **Recordings go to any slot**, not four fixed ones. They share a 32 MB area (about 5½
+  minutes). DEST starts on the first empty slot and moves to the next empty one after each
+  recording.
+- **400 MB for samples** (it was 128 MB), on the +Drive and in the DSP's RAM: 368 MB of
+  your own plus the 32 MB recordings area. At every power-on the DSP first checks that all
+  of its RAM is really there (about 0.7 s). Only then does anything load past 128 MB; if
+  the check fails, everything stays as in v0.21. `python tools/dn2samples.py hello` tells
+  you which happened.
+- **The Machinedrum machines are 6 dB louder**, level with WaveTone and FM Tone at their
+  defaults. Their sound and parameters are unchanged.
+- **The sample list:** **UP/DOWN** move through it, and **pressing the SAMP encoder**
+  chooses and closes it.
+- **GRID and SLICE** show the number of slices you chose (the box, the icon and the page-2
+  markers), not up to 4.
+- **LFO destinations:** a custom machine's unused parameters ("-") are gone from its list.
+- **A browser import tool** (`tools/web/index.html`, on `main`/`checks`, not on `builds`).
+  Open it in Chrome or Edge, from disk or a web host. Pick the Digitone II's MIDI ports,
+  then drop or browse WAVs. It shows which slot each sample goes to, what is on the
+  instrument now, the memory used, sent and left, and a transfer-time estimate. Then send.
+  `dn2samples.py` also gains `dir`, which lists the slots.
+
+**Fixes.**
+- **Recording a track recorded the wrong thing or silence, and the meter moved on a silent
+  track.** The recorder read the DSP's mix buckets by the wrong index. TRK1-16 now record
+  and meter exactly that track.
+- **TRK + CLEAR turned a sample, PERC, RESONATOR or CZ track into WaveTone.** It now keeps
+  the machine and resets its sound.
+- **ONESHOT went silent with LEN at its lowest, and a held looped note could stop for good
+  while you moved STRT or LEN.** The region could become empty, and an empty region ends
+  the note. Now ONESHOT always keeps at least a tiny region (32 frames, or 1/508 of the
+  sample): the knobs' extremes play a very short loop, and a held note survives any sweep.
+
+**Test** (after the regression check):
+1. **The RAM check.** After power-on, run `python tools/dn2samples.py hello`. It should
+   say "the DSP's RAM check: passed". Tell me if it says FAILED.
+2. **The combo.** On any track and page, hold FUNC and press VOICE: the RECORDER fills the
+   screen. FUNC + VOICE again closes it, and so does NO. Turn knobs A-H while it is up:
+   the track's sound must not change.
+3. **EXT input.** Set SRC to EXT L+R and play into the inputs: the meter must move. Try
+   EXT L and EXT R. (The recorder reads the same input buffer the DN2's mixer plays, as the
+   emulator shows, so this should work now. Tell me if it does not.)
+4. **A track.** Set SRC to TRK1 with track 1 playing: the meter moves. On a silent track it
+   stays still.
+5. **Record, trim, name, assign.** YES, play, YES. TRIM shows the waveform: move START
+   (E) and END (H), then YES. Spell a name, YES. Press trig 3: track 3 becomes ONESHOT and
+   plays your recording from the trimmed start.
+6. **FUNC + NO** on TRIM throws a recording away: its slot is empty again.
+7. **After power-off.** Power-cycle: recordings, their trims and names are still there.
+8. **MD level.** Play a PERC kick next to a WaveTone or FM Tone track at defaults: about
+   the same loudness.
+9. **The list, GRID/SLICE, TRK + CLEAR and LFO**, as described above.
+   ONESHOT: hold a looped note and sweep STRT and LEN to both ends and back. It keeps
+   sounding, and LEN at 0 plays a very short loop.
+10. **The browser tool.** Open `tools/web/index.html` in Chrome, Connect, and check that
+    section 4 lists what is on the instrument. Drop a few WAVs and send them.
+11. **Over 128 MB** (only if test 1 passed and you have that many samples): send more than
+    128 MB with the new `dn2samples.py`. All slots load after power-on.
+
+**Known issues / not yet done.**
+- **The 400 MB pool has not run on hardware before.** That is why the RAM check exists. If
+  it fails, you lose nothing; the pool just stays at 128 MB.
+- **No FUNC + YES preview on TRIM**, no zoom, and no normalising (the DT2 normalises
+  recordings).
+- **No trig-key audition** in the sample list. The DT2's TUNE ruler is still plain text.
+- **The emulator does not change parameters on knob turns.** UP/DOWN in the sample list
+  and the slice count from turning SLCE were checked in code and with set values, not by
+  turning. The recorder's own knobs were checked in the emulator.
+- **The LFO list filter** is checked by unit tests only, not in the emulator.
 
 ---
 
