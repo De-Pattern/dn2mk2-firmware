@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DN2 Mod Patcher</title>
+<link rel="icon" type="image/png" href="icons/dn2-import-192.png">
+<link rel="apple-touch-icon" href="icons/dn2-import-180.png">
+<meta name="theme-color" content="#111214">
+<style>
+:root {
+  --bg: #111214; --panel: #1a1c1f; --line: #2c2f34; --text: #e8e6e1; --dim: #8d9096;
+  --accent: #ff8a3d; --ok: #63c27a; --warn: #e8c14a; --bad: #e5604f;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f4f2ee; --panel: #ffffff; --line: #dcd8d0; --text: #1d1d1f; --dim: #6b6b70;
+    --accent: #d9661c; --ok: #2f8a48; --warn: #a77f00; --bad: #c23a2b;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 20px 16px 60px; }
+h1 { font: 600 20px/1.2 ui-monospace, "SF Mono", Consolas, monospace; letter-spacing: .04em; margin: 0 0 4px; }
+.sub { color: var(--dim); margin: 0 0 18px; }
+.sub a, .note a { color: var(--accent); }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+section h2 { font: 600 12px/1 ui-monospace, Consolas, monospace; letter-spacing: .12em; text-transform: uppercase; color: var(--dim); margin: 0 0 12px; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+select, button { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; }
+button { cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #111; font-weight: 600; }
+button:disabled { opacity: .45; cursor: default; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--dim); }
+.pill.ok { color: var(--ok); border-color: var(--ok); } .pill.bad { color: var(--bad); border-color: var(--bad); } .pill.warn { color: var(--warn); border-color: var(--warn); }
+.files { display: grid; gap: 10px; }
+.file { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.file.over { border-color: var(--accent); }
+.file b { font-weight: 600; }
+.file small { color: var(--dim); grid-column: 1 / -1; overflow-wrap: anywhere; }
+.mono { font-family: ui-monospace, Consolas, monospace; }
+.note { color: var(--dim); font-size: 13px; margin: 10px 0 0; }
+.note.bad { color: var(--bad); } .note.ok { color: var(--ok); }
+#log { font: 12px/1.5 ui-monospace, Consolas, monospace; color: var(--dim); white-space: pre-wrap; max-height: 220px; overflow: auto; margin: 10px 0 0; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s 1s linear infinite; vertical-align: -2px; }
+@keyframes s { to { transform: rotate(360deg); } }
+input[type=file] { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>DN2 MOD PATCHER</h1>
+  <p class="sub">Builds the Digitone II mod firmware here, in this page, from your own copies of three Elektron OS files. Nothing is uploaded anywhere.
+    <a href="./">← DN2 Sample Import</a></p>
+
+  <section>
+    <h2>1 · Version</h2>
+    <div class="row"><select id="ver"></select><span id="verNote" class="pill">loading…</span></div>
+    <p class="note">Each version here was cleared by the project's ship gate. The page builds it, then checks the result is byte for byte that cleared file (its sha256) before it lets you save it.</p>
+  </section>
+
+  <section>
+    <h2>2 · Your stock files</h2>
+    <div class="files">
+      <label class="file" data-k="dn2"><span><b>Digitone II OS 1.11</b> <span class="mono">.syx</span> or Elektron's .zip — the file that gets patched</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
+      <label class="file" data-k="dt2"><span><b>Digitakt II OS 1.17</b> (or 1.16) <span class="mono">.syx</span> or .zip — its DSP's sample-reading tables</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
+      <label class="file" data-k="md"><span><b>Machinedrum UW OS 1.63</b> <span class="mono">.syx</span>, .bin or .zip — its machines' tables, for PERC</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.bin,.zip"></label>
+    </div>
+    <p class="note">All three are free downloads from Elektron's support pages for each instrument. Drop them on their boxes, or choose them.</p>
+  </section>
+
+  <section>
+    <h2>3 · Build</h2>
+    <div class="row"><button id="go" class="primary" disabled>Build</button><span id="state" class="pill">waiting for the files</span><button id="save" disabled>Save the .syx</button></div>
+    <p id="result" class="note"></p>
+    <div id="log"></div>
+  </section>
+
+  <section>
+    <h2>4 · Flash</h2>
+    <p class="note" style="margin-top:0">Back up the +Drive and your projects first (Elektron Transfer). Then send the saved file as any Digitone II OS update: drag it onto Elektron Transfer with the instrument running and connected by USB. The stock OS 1.11 file, sent the same way, puts it back. If an update ever fails to start, the recovery route is the Early Start-up Menu (hold [FUNC] while powering on, then [TRIG 4]), receiving the stock file over a DIN MIDI cable (not USB) from Transfer's SysEx window.</p>
+    <p class="note">Each version's notes, tests and known issues are in the project's FIRMWARE.md.</p>
+  </section>
+</main>
+<script>
+const $ = (s) => document.querySelector(s);
+const files = {};
+let builds = [], out = null, worker = null, busy = false;
+
+async function sha256(buf) {
+  const h = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function cur() { return builds.find(b => b.version === $("#ver").value); }
+function ready() {
+  const n = ["dn2", "dt2", "md"].filter(k => files[k]).length;
+  $("#go").disabled = busy || n < 3 || !cur();
+  if (!busy && !out) setState(n < 3 ? `waiting for the files (${n} of 3)` : "ready", n < 3 ? "" : "ok");
+}
+function setState(t, cls = "") { const s = $("#state"); s.textContent = t; s.className = "pill " + cls; }
+function log(t) { const l = $("#log"); l.textContent += t + "\n"; l.scrollTop = l.scrollHeight; }
+
+fetch("patcher/builds.json", { cache: "no-cache" }).then(r => r.json()).then(list => {
+  builds = list;
+  $("#ver").innerHTML = list.map((b, i) => `<option value="${b.version}">v${b.version} ${b.name}${i ? "" : " (latest)"}</option>`).join("");
+  $("#verNote").textContent = list.length ? "sha256 " + list[0].sha256.slice(0, 12) + "…" : "none";
+  ready();
+}).catch(() => { $("#verNote").textContent = "could not load the list"; $("#verNote").className = "pill bad"; });
+$("#ver").onchange = () => { const b = cur(); $("#verNote").textContent = "sha256 " + b.sha256.slice(0, 12) + "…"; out = null; $("#save").disabled = true; $("#result").textContent = ""; ready(); };
+
+function take(k, f, box) {
+  f.arrayBuffer().then(buf => {
+    files[k] = { name: f.name, bytes: new Uint8Array(buf) };
+    box.querySelector("small").textContent = `${f.name} · ${(f.size / 1048576).toFixed(2)} MB`;
+    out = null; $("#save").disabled = true; ready();
+  });
+}
+document.querySelectorAll(".file").forEach(box => {
+  const k = box.dataset.k, inp = box.querySelector("input");
+  box.querySelector("button").onclick = (e) => { e.preventDefault(); inp.click(); };
+  inp.onchange = () => inp.files[0] && take(k, inp.files[0], box);
+  box.ondragover = (e) => { e.preventDefault(); box.classList.add("over"); };
+  box.ondragleave = () => box.classList.remove("over");
+  box.ondrop = (e) => { e.preventDefault(); box.classList.remove("over"); const f = e.dataTransfer.files[0]; if (f) take(k, f, box); };
+});
+
+$("#go").onclick = () => {
+  const b = cur(); if (!b) return;
+  busy = true; out = null; $("#save").disabled = true; $("#log").textContent = ""; $("#result").textContent = "";
+  $("#result").className = "note";
+  setState("building…"); $("#state").insertAdjacentHTML("afterbegin", '<span class="spin"></span> ');
+  ready();
+  worker = worker || new Worker("patcher-worker.js");
+  const t0 = performance.now();
+  worker.onmessage = async (e) => {
+    const m = e.data;
+    if (m.log !== undefined) { log(m.log); return; }
+    busy = false;
+    if (m.error) {
+      setState("stopped", "bad");
+      $("#result").className = "note bad";
+      $("#result").textContent = "The build stopped: " + m.error;
+      ready(); return;
+    }
+    const got = await sha256(m.done);
+    const secs = Math.round((performance.now() - t0) / 1000);
+    if (got === b.sha256) {
+      out = m.done;
+      setState("matches the cleared build", "ok");
+      $("#result").className = "note ok";
+      $("#result").textContent = `Built in ${secs} s. sha256 ${got} — exactly v${b.version}'s cleared file. Save it, then flash.`;
+      $("#save").disabled = false;
+    } else {
+      setState("does not match: do not flash", "bad");
+      $("#result").className = "note bad";
+      $("#result").textContent = `The result (sha256 ${got.slice(0, 16)}…) is not v${b.version}'s cleared file (${b.sha256.slice(0, 16)}…). Do not flash anything from this. Check the three files are the versions named above.`;
+    }
+    ready();
+  };
+  worker.postMessage({ zipUrl: "patcher/" + b.zip, zipSha: b.zip_sha256,
+    files: { dn2: files.dn2, dt2: files.dt2, md: files.md } });
+};
+
+$("#save").onclick = () => {
+  const b = cur(); if (!out || !b) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
+  a.download = b.file; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+};
+</script>
+</body>
+</html>

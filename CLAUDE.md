@@ -45,4 +45,7 @@ When a build prints `CLEARED TO FLASH`, in the same session:
 2. Copy it and its `.gate.json` to the `builds` branch as
    `vX.Y-NAME/DN2mod_vX.Y_NAME_OS1.11.syx` (a worktree), with `FIRMWARE.md` as that
    branch's `README.md`, and push. Renaming keeps the sha256, so the gate record holds.
-3. Firmware never goes on `main` (`.gitignore`); only the `builds` branch carries it.
+3. Bundle it for the in-browser patcher (`docs/patcher.md`):
+   `python scripts/web_bundle.py BUILD.syx X.Y NAME ../../dn2-tools/patcher`, then commit and
+   push dn2-tools. It refuses a build whose gate record does not clear it.
+4. Firmware never goes on `main` (`.gitignore`); only the `builds` branch carries it.
