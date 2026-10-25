@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.23** | 2026-10-24 | SLICE's own menus (YES: EDIT SLICE POINTS, CREATE SLICE GRID with SLICES 2-64 and TR.DET), the slice editor, SLICES on the trig keys (KEYBOARD, SLCE NOTE); a sample with no slices plays whole | `builds/v0.23-SLICE/` | yes |
+| **v0.24** | 2026-10-25 | The Machinedrum's nine P-I machines on PERC (PI-BD, SD, MT, ML, MA, RS, RC, CC, HH) from your MD firmware, +6 dB; the first hit after choosing an MD machine is now the MD's own | `builds/v0.24-PI/` | yes |
+| v0.23 | 2026-10-24 | SLICE's own menus (YES: EDIT SLICE POINTS, CREATE SLICE GRID with SLICES 2-64 and TR.DET), the slice editor, SLICES on the trig keys (KEYBOARD, SLCE NOTE); a sample with no slices plays whole | `builds/v0.23-SLICE/` | yes |
 | v0.22 | 2026-10-24 | The RECORDER is its own screen (FUNC + VOICE) with the DT2's TRIM, NAME and ASSIGN steps; recordings to any slot; 400 MB for samples (after a RAM check at power-on); MD machines +6 dB; a browser import tool; ONESHOT never goes silent at LEN 0 | `builds/v0.22-RECORDER/` | yes |
 | v0.21 | 2026-10-23 | RESONATOR and CZ PHASE page 1 in the Elektron style: knobs for continuous controls, choices (WAVE, SEL, OCT, MOD, KF, SUS) by name in a box | `builds/v0.21-KNOBS/` | yes |
 | v0.20 | 2026-10-23 | Fixes: the buzz on WaveTone/FM after a sample or PERC track (the link no longer touches the DSP's per-track routing), the RECORDER's flashing, SLICE's pages, the sample list; PERC drawn as the Machinedrum's screen; sample pages in the DT2's own geometry | `builds/v0.20-FIXES/` | yes |
@@ -57,6 +58,49 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.24 — PI (the Machinedrum's physical-model machines on PERC)
+
+`DN2mod_v0.24_PI_OS1.11.syx`
+sha256 `f5853cdb5947204c5ada072f96ea02eb1890a015a2bc151a697b0fe67401d78c`
+Gate: CLEARED TO FLASH, 2026-10-25 (USB size 2,013,940 of 2,097,152; DSP image 1,047,296 of 1,048,575). Source: commit `7589d67`. Docs: `docs/md.md` ("v0.24: the tables' stream (`zpack`) and the P-I machines' room").
+
+Everything in v0.23, plus:
+
+**Adds.**
+- **The Machinedrum's nine P-I machines on PERC's TYPE**, after GND-IM: **PI-BD, PI-SD,
+  PI-MT, PI-ML, PI-MA, PI-RS, PI-RC, PI-CC, PI-HH** (the manual's P-I BD, SD, XT/MT, ML,
+  MA, RS, RC, CC, HH, pages A-9 and A-10). Each is its DSP code and its host scale function
+  from your MD firmware, ported as the other MD machines were, with the same page and
+  parameter names as on the MD, and the same +6 dB as the other MD machines.
+- How close they are to the MD (its own DSP code, run in an emulator, the golden runs in
+  `test/test_md.py`): PI-MA exact; the others within 81 to 100 dB of the MD's own output
+  (PI-BD 81, PI-RC 88, PI-MT 89, PI-ML 90, PI-RS 93, PI-SD 93, PI-HH 100; PI-CC by level).
+
+**Changed.**
+- **TYPE's range now covers 34 machines**, so a TYPE value saved in a kit may now pick a
+  neighbouring machine (the knob is spread over 34 instead of 25). Set TYPE again on
+  saved PERC kits.
+- **The first hit after choosing any MD machine** is now the MD's own first hit (the
+  machine's init runs after its parameters are read, as on the MD). Except **PI-ML**: on
+  the MD its first note after choosing it is silent; here it plays, as the MD's second.
+- The DSP's MD tables ship compressed and are decoded in the first 19 ms after power-on (as
+  the sine was filled before); the tables are the same, word for word.
+
+**Test** (after the regression check):
+1. **Each P-I machine.** On a PERC track, turn TYPE through PI-BD ... PI-HH. Each shows its
+   name as the MD does (P-I BD ... P-I HH) and its eight parameters, and plays.
+2. **Against the MD**, if you have it to hand: the same parameters on both, by ear.
+3. **The other MD machines** (TRX, EFM, GND) sound as in v0.23.
+4. **Many at once.** Eight PERC tracks on P-I machines playing together: no dropouts.
+
+**Known issues / not yet done.**
+- **Not heard on hardware yet.** The P-I machines are checked against the MD's own code in
+  the emulator, and the DSP's code against its model in the SHARC runner.
+- The P-I machines are the heaviest MD machines (about 9,000 to 19,000 DSP instructions a
+  44.1 kHz block each); the DSP's load with many at once is not measured on hardware.
 
 ---
 

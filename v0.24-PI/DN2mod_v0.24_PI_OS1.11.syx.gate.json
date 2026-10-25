@@ -1,0 +1,25 @@
+{
+  "build": "BUILD.syx",
+  "sha256": "f5853cdb5947204c5ada072f96ea02eb1890a015a2bc151a697b0fe67401d78c",
+  "stock": "Digitone_II_OS1.11.syx",
+  "date": "2026-10-25T11:08:32",
+  "gates": {
+    "preflight": "PASS: bootstrap/updater/meta/Outbox untouched, signature, DSP size",
+    "DSP identity": "PASS: section 7 is exactly dsp.section7(stock), the image the SHARC gate runs",
+    "SHARC runner": "PASS: all steps PASS, incl. types 0-4 bit-identical to stock",
+    "ColdFire: code 0x4670c000..0x4670c1cc": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x46ac0000..0x46ac8d80": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x4670f800..0x4670f8b2": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x4670f000..0x4670f068": "PASS: no scale-8 addressing",
+    "ColdFire: code 0x46ae0000..0x46ae1aac": "PASS: no scale-8 addressing",
+    "ColdFire: MAIN OS": "PASS: 16 hit(s), all in appended data that never executes",
+    "boot from reset": "PASS: booted and drew its UI, no fault",
+    "engine + LOAD/SAVE": "PASS: evaluator clean, CODE intact, machine and filter types round-trip",
+    "sample link (ColdFire)": "PASS: save, fast (a lost packet resent), dead (nothing gets through: the loader stops); every byte loaded and saved; the frame's routing words stock's in every period; v0.22: the RAM check first, past 128 MB loaded only when it passes (high, lowram)",
+    "recorder screen (ColdFire)": "PASS: FUNC+VOICE opens it, knob A moves SRC with no write to the sound, NO closes it, the screen drawn throughout",
+    "recorder flow (ColdFire)": "PASS: TRIM's ends move, YES on to NAME (spelt by knob and arrows), YES on to ASSIGN, a [TRIG] key makes track 3 ONESHOT on the slot",
+    "SLICE menus and SLICES keys (ColdFire)": "PASS: menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO closes; KEYBOARD trig 4 / trig 1 on a SLICE track play C0+3 / C0",
+    "unit tests": "PASS: 212 passed, 1 skipped in 457.28s (0:07:37)"
+  },
+  "logs": "/home/claude/dn2/wt24/out/ship_gate_pwkthy0w/logs"
+}
