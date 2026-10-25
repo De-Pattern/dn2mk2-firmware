@@ -36,6 +36,13 @@ prints `DO NOT FLASH` and exits non-zero. A build changed after its gate needs a
 gate: the record names the sha256 it cleared.
 
 It takes about an hour, mostly the two ColdFire emulator runs. Run it unattended.
+
+**v0.25 (the owner's go-ahead, 2026-10-25): the SHARC runner runs beside the ColdFire
+steps, and a long step's pass is reused only when nothing it read has changed**
+(`scripts/gate_cache.py`): every file its processes opened, the directories they listed,
+the native libraries and programs they ran, and this script's own inputs, each hashed
+(sha256) when it passed. One differing byte, or a file gone, and the step runs again. The
+record says which steps were reused and from which pass.
 """
 
 from __future__ import annotations
@@ -51,6 +58,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -63,6 +71,9 @@ from dnfw.firmware.load import load                        # noqa: E402
 from dnfw.mods import platform                             # noqa: E402
 from dnfw.patch import area                                # noqa: E402
 from dnfw.waverider import dsp                             # noqa: E402
+
+sys.path.insert(0, str(HERE))
+import gate_cache                                          # noqa: E402
 
 MAIN_BASE = 0x40000400
 # CODE chunks that hold only data, reached through a pointer and never jumped to.
@@ -98,16 +109,45 @@ class Stop(Exception):
     pass
 
 
-def run(name, cmd, log_dir, env=None, cwd=ROOT):
-    """Run CMD, log its output to LOG_DIR/NAME.log, -> (rc, output)."""
+LIVE: list[subprocess.Popen] = []            # steps running (the SHARC runner beside the rest)
+
+
+def run(name, cmd, log_dir, env=None, cwd=ROOT, trace=None):
+    """Run CMD, log its output to LOG_DIR/NAME.log, -> (rc, output). TRACE: a directory for
+    the step's trace (gate_cache: what it read)."""
     print(f"  $ {' '.join(str(c) for c in cmd)}", flush=True)
     t = time.time()
-    r = subprocess.run([str(c) for c in cmd], cwd=cwd, env={**os.environ, **(env or {})},
-                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    (log_dir / f"{name}.log").write_text(r.stdout)
-    print(f"    rc {r.returncode}, {round(time.time() - t)} s, log {log_dir / (name + '.log')}",
+    env = {**os.environ, **(env or {})}
+    if trace is not None:
+        trace.mkdir(parents=True, exist_ok=True)
+        env["DNFW_GATE_TRACE"] = str(trace)
+        env["PYTHONPATH"] = os.pathsep.join([str(HERE / "gate_trace")]
+                                            + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
+    proc = subprocess.Popen([str(c) for c in cmd], cwd=cwd, env=env,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    LIVE.append(proc)
+    out, _ = proc.communicate()
+    LIVE.remove(proc)
+    (log_dir / f"{name}.log").write_text(out)
+    print(f"    rc {proc.returncode}, {round(time.time() - t)} s, log {log_dir / (name + '.log')}",
           flush=True)
-    return r.returncode, r.stdout
+    return proc.returncode, out
+
+
+def own_inputs() -> dict[str, str]:
+    """What this script's verdicts read: itself, the cache and tracer, and every module of
+    the repository it has imported (the build's layout among them)."""
+    files = {HERE / "ship_gate.py", HERE / "gate_cache.py", HERE / "gate_trace" / "sitecustomize.py",
+             ROOT / "src/dnfw/mods/waverider_code.json", ROOT / "src/dnfw/waverider/sharc_code.json"}
+    for m in list(sys.modules.values()):
+        f = getattr(m, "__file__", None)
+        if f and pathlib.Path(f).resolve().is_relative_to(ROOT):
+            files.add(pathlib.Path(f).resolve())
+    out = {}
+    for f in sorted(files):
+        if f.is_file():
+            out[str(f)] = "f:" + hashlib.sha256(f.read_bytes()).hexdigest()
+    return out
 
 
 def main() -> int:
@@ -140,6 +180,26 @@ def main() -> int:
         if not ok:
             raise Stop(name)
 
+    reused: dict[str, str] = {}
+
+    def cached(name, cmds, body):
+        """A long step: reused if a pass with these commands read nothing that has changed
+        since (gate_cache); else BODY(trace) -> (ok, detail), and a pass is kept."""
+        key = [gate_cache.norm_cmd(c, work) for c in cmds]
+        rec = gate_cache.lookup(ROOT, name, key, work)
+        if rec:
+            reused[name] = rec["date"]
+            print(f"  (reused: the pass of {rec['date']}, build {rec['build'][:12]}; its "
+                  f"{len(rec['inputs'])} inputs are byte-identical now)", flush=True)
+            return True, rec["detail"] + " [reused: no input changed]"
+        tdir = work / "traces" / "".join(c if c.isalnum() else "_" for c in name)
+        ok, detail = body(tdir)
+        if ok:
+            ins = gate_cache.inputs(tdir, work, logs)
+            ins.update(own_inputs())
+            gate_cache.store(ROOT, name, key, ins, detail, sha)
+        return ok, detail
+
     try:
         # 1. preflight
         stock = load(read_image(a.stock))
@@ -165,11 +225,26 @@ def main() -> int:
             gate("DSP identity", same, "section 7 is exactly dsp.section7(stock), the image "
                  "the SHARC gate runs" if same else "section 7 is not what the SHARC gate "
                  "tests; its result would not apply to this file")
-            rc, out = run("sharc_m5", [sys.executable, "scripts/sharc_waverider_m5.py",
-                                       "--image", a.stock, "--digikit", a.digikit_sharc], logs)
-            gate("SHARC runner", rc == 0, "all steps PASS, incl. types 0-4 bit-identical "
-                 "to stock" if rc == 0 else out[-800:])
+            # v0.25: beside the ColdFire steps (its own core); its verdict is taken before
+            # the unit tests
+            sharc_cmd = [sys.executable, "scripts/sharc_waverider_m5.py", "--image", a.stock,
+                         "--digikit", a.digikit_sharc]
+
+            def sharc_body(tdir):
+                rc, out = run("sharc_m5", sharc_cmd, logs, trace=tdir)
+                return rc == 0, ("all steps PASS, incl. types 0-4 bit-identical to stock"
+                                 if rc == 0 else out[-800:])
+
+            def sharc_thread():
+                try:
+                    sharc_box.append(cached("SHARC runner", [sharc_cmd], sharc_body))
+                except Exception as e:          # noqa: BLE001
+                    sharc_box.append((False, f"the runner did not run: {e}"))
+            sharc_box: list = []
+            sharc = threading.Thread(target=sharc_thread, daemon=True)
+            sharc.start()
         else:
+            sharc = None
             results["DSP identity"] = results["SHARC runner"] = "n/a: section 7 is stock"
 
         # 4. ColdFire instruction set
@@ -221,10 +296,13 @@ def main() -> int:
              else f"{len(bad)} in executed code, first at {bad[0]:#x}")
 
         # 5. boot from reset
-        rc, out = run("boot_check", [a.venv, "-u", "scripts/emu_boot_check.py",
-                                     bdir / "section_3_MAIN_OS.bin"], logs)
-        gate("boot from reset", rc == 0 and "booted and drew its UI" in out,
-             "booted and drew its UI, no fault" if rc == 0 else out[-800:])
+        boot_cmd = [a.venv, "-u", "scripts/emu_boot_check.py", bdir / "section_3_MAIN_OS.bin"]
+
+        def boot_body(tdir):
+            rc, out = run("boot_check", boot_cmd, logs, trace=tdir)
+            good = rc == 0 and "booted and drew its UI" in out
+            return good, "booted and drew its UI, no fault" if good else out[-800:]
+        gate("boot from reset", *cached("boot from reset", [boot_cmd], boot_body))
 
         # 6. engine + LOAD/SAVE
         # PERC (5), RESONATOR (6), CZ (7) and the sample machines (8..13, v0.13; 13 SLICE,
@@ -239,11 +317,14 @@ def main() -> int:
                                             "--filter-type", "8", "--filter-type", "9",
                                             "--filter-max", "8"]
                                            if dsp_changed else [])
-        rc, out = run("boot_engine", [a.venv, "-u", "scripts/emu_boot_engine.py",
-                                      "--build", bdir, "--frames", "8", *types], logs)
-        clean = rc == 0 and "ran clean" in out and "FAIL" not in out and "corrupt" not in out
-        gate("engine + LOAD/SAVE", clean, "evaluator clean, CODE intact, machine and filter "
-             "types round-trip" if clean else out[-800:])
+        eng_cmd = [a.venv, "-u", "scripts/emu_boot_engine.py", "--build", bdir, "--frames", "8", *types]
+
+        def eng_body(tdir):
+            rc, out = run("boot_engine", eng_cmd, logs, trace=tdir)
+            clean = rc == 0 and "ran clean" in out and "FAIL" not in out and "corrupt" not in out
+            return clean, ("evaluator clean, CODE intact, machine and filter types round-trip"
+                           if clean else out[-800:])
+        gate("engine + LOAD/SAVE", *cached("engine + LOAD/SAVE", [eng_cmd], eng_body))
 
         # 6b. the sample link on the ColdFire (v0.16): the +Drive's image loaded over the
         # fast link with a packet lost (resent), the loader stopping when nothing gets
@@ -253,6 +334,8 @@ def main() -> int:
         from dnfw.mods import waverider as W        # noqa: PLC0415
         lay = W.SPEC.get("layout", {})
         snap = ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"
+        EMU_ENV = {"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"]) / "section_3_MAIN_OS.bin"),
+                   "DNFW_EMU_FLAGS": '{"weakptr": false}'}
         if "smp_tdm_sent" in lay:
             syms = work / "link16_syms.json"
             syms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith("smp_")}))
@@ -260,19 +343,19 @@ def main() -> int:
             if "smp_slices_set" in lay:
                 scen += ("slices",)             # v0.23: the slice editor's reading and saving
             steps = ",".join(f"link16:{syms}:{sc}" for sc in scen)
-            rc, out = run("link16", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
-                                     "--build", bdir, "--snapshot", snap, "--steps", steps,
-                                     "--png-dir", work / "link16"], logs,
-                          env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
-                                                   / "section_3_MAIN_OS.bin"),
-                               "DNFW_EMU_FLAGS": '{"weakptr": false}'})
-            oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices): .*\"ok\": (true|false)", out)
-            good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
-            gate("sample link (ColdFire)", good,
-                 "save, fast (a lost packet resent), dead (nothing gets through: the loader "
-                 "stops); every byte loaded and saved; the frame's routing words stock's in "
-                 "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
-                 "passes (high, lowram)" if good else out[-800:])
+            l16_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                       "--build", bdir, "--snapshot", snap, "--steps", steps,
+                       "--png-dir", work / "link16"]
+
+            def l16_body(tdir):
+                rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices): .*\"ok\": (true|false)", out)
+                good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
+                return good, ("save, fast (a lost packet resent), dead (nothing gets through: the loader "
+                              "stops); every byte loaded and saved; the frame's routing words stock's in "
+                              "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
+                              "passes (high, lowram)" if good else out[-800:])
+            gate("sample link (ColdFire)", *cached("sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body))
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
         # change the recorder and never the track's sound, NO closes it, and the UI keeps
@@ -283,26 +366,27 @@ def main() -> int:
                      f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,png:a2,no,"
                      f"wait:30,mem:{ov}:4,png:a3,wait:5,png:a4")
             js = work / "recorder.json"
-            rc, out = run("recorder", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+            rec_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                        "--build", bdir, "--snapshot", snap, "--steps", steps,
-                                       "--png-dir", work / "recorder", "--json", js], logs,
-                          env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
-                                                   / "section_3_MAIN_OS.bin"),
-                               "DNFW_EMU_FLAGS": '{"weakptr": false}'})
-            why = out[-800:]
-            good = False
-            if rc == 0 and js.exists():
-                r = json.loads(js.read_text())
-                m = r["memory"]
-                seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@3")]
-                shots = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "a2", "a4")]
-                good = (seen == [0, 1, 0] and int(m[src], 16) == 3 and not r["setter_writes"]
-                        and r["screen_frames"] > 0 and shots[1] != shots[0] and shots[1] != shots[2])
-                why = (f"overlay {seen}, src {int(m[src], 16)}, setter writes "
-                       f"{len(r['setter_writes'])}, frames {r['screen_frames']}")
-            gate("recorder screen (ColdFire)", good,
-                 "FUNC+VOICE opens it, knob A moves SRC with no write to the sound, NO closes it, "
-                 "the screen drawn throughout" if good else why)
+                                       "--png-dir", work / "recorder", "--json", js]
+
+            def rec_body(tdir):
+                rc, out = run("recorder", rec_cmd, logs, env=EMU_ENV, trace=tdir)
+                why = out[-800:]
+                good = False
+                if rc == 0 and js.exists():
+                    r = json.loads(js.read_text())
+                    m = r["memory"]
+                    seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@3")]
+                    shots = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "a2", "a4")]
+                    good = (seen == [0, 1, 0] and int(m[src], 16) == 3 and not r["setter_writes"]
+                            and r["screen_frames"] > 0 and shots[1] != shots[0] and shots[1] != shots[2])
+                    why = (f"overlay {seen}, src {int(m[src], 16)}, setter writes "
+                           f"{len(r['setter_writes'])}, frames {r['screen_frames']}")
+                return good, ("FUNC+VOICE opens it, knob A moves SRC with no write to the sound, NO closes it, "
+                 "the screen drawn throughout"
+                              if good else why)
+            gate("recorder screen (ColdFire)", *cached("recorder screen (ColdFire)", [rec_cmd, sorted(EMU_ENV.items())], rec_body))
 
         # 6d. after a recording (v0.22): TRIM (knobs E and H move the ends), NAME (a knob
         # and the arrows spell it), ASSIGN (a [TRIG] key: that track becomes ONESHOT playing
@@ -321,31 +405,32 @@ def main() -> int:
                      f"mem:{g['nm_text']}:8,png:n1,yes,wait:10,mem:{g['rec_phase']}:4,png:a1,tap:27,"
                      f"wait:20,mem:{g['rec_phase']}:4,mem:{snd}:256,png:r1")
             js = work / "recflow.json"
-            rc, out = run("recorder flow", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+            flow_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                             "--build", bdir, "--snapshot", snap, "--steps", steps,
-                                            "--png-dir", work / "recflow", "--json", js], logs,
-                          env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
-                                                   / "section_3_MAIN_OS.bin"),
-                               "DNFW_EMU_FLAGS": '{"weakptr": false}'})
-            why, good = out[-800:], False
-            if rc == 0 and js.exists():
-                r = json.loads(js.read_text())
-                m = r["memory"]
-                ph = g["rec_phase"]
-                phases = [int(m[k], 16) for k in (ph, f"{ph}@6", f"{ph}@7")]
-                before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[f"{snd}@8"])
-                facts = {"kit": m["0x800052a0"] == f"{kit:08x}",
-                         "trim": (int(m[g["trim_s"]], 16), int(m[g["trim_e"]], 16)) == (2400, 94560),
-                         "phases": phases == [2, 3, 0],
-                         "name": bytes.fromhex(m[g["nm_text"]])[:3] == b"CC\0",
-                         "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
-                         "samp": after[0x6A] == 5,
-                         "frames": r["screen_frames"] > 0}
-                good = all(facts.values())
-                why = str(facts)
-            gate("recorder flow (ColdFire)", good,
-                 "TRIM's ends move, YES on to NAME (spelt by knob and arrows), YES on to ASSIGN, a "
-                 "[TRIG] key makes track 3 ONESHOT on the slot" if good else why)
+                                            "--png-dir", work / "recflow", "--json", js]
+
+            def flow_body(tdir):
+                rc, out = run("recorder flow", flow_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and js.exists():
+                    r = json.loads(js.read_text())
+                    m = r["memory"]
+                    ph = g["rec_phase"]
+                    phases = [int(m[k], 16) for k in (ph, f"{ph}@6", f"{ph}@7")]
+                    before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[f"{snd}@8"])
+                    facts = {"kit": m["0x800052a0"] == f"{kit:08x}",
+                             "trim": (int(m[g["trim_s"]], 16), int(m[g["trim_e"]], 16)) == (2400, 94560),
+                             "phases": phases == [2, 3, 0],
+                             "name": bytes.fromhex(m[g["nm_text"]])[:3] == b"CC\0",
+                             "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
+                             "samp": after[0x6A] == 5,
+                             "frames": r["screen_frames"] > 0}
+                    good = all(facts.values())
+                    why = str(facts)
+                return good, ("TRIM's ends move, YES on to NAME (spelt by knob and arrows), YES on to ASSIGN, a "
+                 "[TRIG] key makes track 3 ONESHOT on the slot"
+                              if good else why)
+            gate("recorder flow (ColdFire)", *cached("recorder flow (ColdFire)", [flow_cmd, sorted(EMU_ENV.items())], flow_body))
 
         # 6e. v0.23, SLICE: its menus drawn over the page (the menu, the grid dialog, the
         # editor with a slice table), the editor's keys and knobs moving the picked slice;
@@ -369,44 +454,55 @@ def main() -> int:
                      f"mem:{g['slc_sl']}:36,no,wait:6,mem:{g['slc_state']}:4,"
                      f"{pk},tap:18,wait:6,press:28,wait:6,release:28,wait:6,press:25,wait:6,release:25,wait:6")
             js = work / "slice.json"
-            rc, out = run("slice menus", [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+            slc_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                           "--build", bdir, "--snapshot", snap, "--steps", steps,
                                           "--regs-at", "0x400576ca",
-                                          "--png-dir", work / "slice", "--json", js], logs,
-                          env={"DT2_MAIN_IMG": str(pathlib.Path(os.environ["DT2_SECTIONS"])
-                                                   / "section_3_MAIN_OS.bin"),
-                               "DNFW_EMU_FLAGS": '{"weakptr": false}'})
-            why, good = out[-800:], False
-            if rc == 0 and js.exists():
-                r = json.loads(js.read_text())
-                m = r["memory"]
-                shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "m", "g", "e1", "e2")}
-                table = list(_st.unpack(">9I", bytes.fromhex(m[g["slc_sl"]])))
-                notes = [int(x["D4"], 16) for x in r["regs_at"].get("0x400576ca", [])]
-                facts = {"drawn": len({shots[n] for n in shots}) >= 4,
-                         "picked": int(m[g["slc_cur"]], 16) == 1,
-                         "start moved": table[3] > 36000 and table[:3] == [0, 30000, 0],
-                         "closed": int(m[g["slc_state"]], 16) == 0,
-                         "slice notes": notes == [15, 12]}
-                good = all(facts.values())
-                why = str(facts) + f" notes {notes}"
-            gate("SLICE menus and SLICES keys (ColdFire)", good,
-                 "menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
-                 "closes; KEYBOARD trig 4 / trig 1 on a SLICE track play C0+3 / C0" if good else why)
+                                          "--png-dir", work / "slice", "--json", js]
+
+            def slc_body(tdir):
+                rc, out = run("slice menus", slc_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and js.exists():
+                    r = json.loads(js.read_text())
+                    m = r["memory"]
+                    shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "m", "g", "e1", "e2")}
+                    table = list(_st.unpack(">9I", bytes.fromhex(m[g["slc_sl"]])))
+                    notes = [int(x["D4"], 16) for x in r["regs_at"].get("0x400576ca", [])]
+                    facts = {"drawn": len({shots[n] for n in shots}) >= 4,
+                             "picked": int(m[g["slc_cur"]], 16) == 1,
+                             "start moved": table[3] > 36000 and table[:3] == [0, 30000, 0],
+                             "closed": int(m[g["slc_state"]], 16) == 0,
+                             "slice notes": notes == [15, 12]}
+                    good = all(facts.values())
+                    why = str(facts) + f" notes {notes}"
+                return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
+                 "closes; KEYBOARD trig 4 / trig 1 on a SLICE track play C0+3 / C0"
+                              if good else why)
+            gate("SLICE menus and SLICES keys (ColdFire)", *cached("SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body))
 
         # 7. unit tests
+        if sharc is not None:                   # v0.25: the runner beside the rest
+            print("  (waiting for the SHARC runner)", flush=True)
+            sharc.join()
+            gate("SHARC runner", *(sharc_box[0] if sharc_box else (False, "the runner did not finish")))
         tests = [t for t in TESTS if (ROOT / t).exists()]
-        rc, out = run("pytest", [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                                 "-m", "not slow", *tests], logs, env={"PYTHONPATH": "src"})
-        gate("unit tests", rc == 0, out.strip().splitlines()[-1] if out.strip() else "")
+        py_cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", "not slow", *tests]
+
+        def py_body(tdir):
+            rc, out = run("pytest", py_cmd, logs, env={"PYTHONPATH": "src"}, trace=tdir)
+            return rc == 0, out.strip().splitlines()[-1] if out.strip() else ""
+        gate("unit tests", *cached("unit tests", [py_cmd], py_body))
 
     except Stop as s:
+        for proc in list(LIVE):                 # the SHARC runner, if it is still going
+            proc.kill()
         print(f"\nGATE FAILED at: {s}\n\n  DO NOT FLASH {a.build.name}.\n  Logs: {logs}")
         return 1
 
     record = {"build": a.build.name, "sha256": sha, "stock": a.stock.name,
               "date": datetime.datetime.now().isoformat(timespec="seconds"),
-              "gates": results, "logs": str(logs)}
+              "gates": results, "logs": str(logs),
+              "reused": {k: f"the pass of {v}: every file it read is byte-identical" for k, v in reused.items()}}
     out = a.build.with_name(a.build.name + ".gate.json")
     out.write_text(json.dumps(record, indent=2))
     print(f"ALL GATES PASS on sha256 {sha[:16]}…\n  record: {out}\n\n"

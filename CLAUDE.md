@@ -15,6 +15,15 @@ metadata, Outbox untouched; signature; DSP size) → DSP identity → SHARC runn
 (types 0–4 bit-identical to stock) → ColdFire instruction-set check → boot from
 reset → engine + SAVE/LOAD → unit tests. About an hour; run it in the background.
 
+**Exact reuse (owner, 2026-10-25).** Every build still gets a full gate run and its own
+record. The SHARC runner runs alongside the ColdFire steps. A long step's earlier pass is
+reused only when nothing that step read has changed. What it read is traced: every file
+its processes opened, the directories they listed, the native libraries and programs they
+ran, and the gate's own inputs. Each is hashed (sha256) when the step passes. One
+differing byte, or a missing file, means the step runs again (`scripts/gate_cache.py`).
+The record's `reused` field says which steps were reused and from which pass. Never
+widen what counts as "unchanged".
+
 - The pass is recorded in `BUILD.syx.gate.json` with the build's sha256. A file
   whose sha256 differs from its record has not been gated.
 - If any gate fails, or cannot run (missing tool, emulator, objdump), the answer
