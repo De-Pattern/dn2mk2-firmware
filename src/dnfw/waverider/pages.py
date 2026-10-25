@@ -291,6 +291,8 @@ def smp_c_header() -> str:
             f"#define SMP_GRID_KIND {SMP_FIRST_KIND + _smp.NAMES.index('GRID')}\n"
             f"#define SMP_WERP_KIND {SMP_FIRST_KIND + _smp.NAMES.index('WERP')}\n"
             f"#define SMP_SLICE_KIND {SMP_FIRST_KIND + _smp.NAMES.index('SLICE')}\n"
+            f"#define SMP_STRETCH_KIND {SMP_FIRST_KIND + _smp.NAMES.index('STRETCH')}\n"
+            f"#define SMP_REPITCH_KIND {SMP_FIRST_KIND + _smp.NAMES.index('REPITCH')}\n"
             f"#define SMP_BARS_ID {_smp.BARS_REC}\n#define SMP_SEG_ID {_smp.SEG_REC}\n"
             f"#define SMP_MODE_ID {_smp.MODE_REC}\n"
             f"static const unsigned short smp_rec_ids[8] = {{{', '.join(str(r) for r in SMP_REC_IDS)}}};\n"

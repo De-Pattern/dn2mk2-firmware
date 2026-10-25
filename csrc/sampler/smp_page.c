@@ -828,6 +828,12 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         if (b > w - 1) b = w - 1;
         marker(c, x0 + a, cy, 0);
         marker(c, x0 + b, cy, 0);
+        if (kind == SMP_STRETCH_KIND || kind == SMP_REPITCH_KIND) {
+            /* v0.25: the region's bars (BARS 1, 2, 4, 8: what STRT..LEN lasts), dotted */
+            int n = 1 << steps_index(value(view, SMP_BARS_ID, 0), smp_bars_steps);
+            for (int j = 1; j < n; j++)
+                marker(c, x0 + a + (b - a) * j / n, cy, 1);
+        }
         if (kind == SMP_KIND0) {
             int lp = value(view, SMP_LOOP_ID, 0) * (w - 1) / 127;
             int mode = value(view, SMP_PLAY_ID, 0) * 4 / 128;

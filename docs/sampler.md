@@ -523,3 +523,37 @@ stock's notes. Stock does the rest (held keys, MIDI out, live recording: the not
 and replay the same slices). The stock TRIG MODE menu has a SLICES entry the DN2 build
 disables (value 1024, refused by its setter); it is left alone. The keys' LEDs still show
 the keyboard.
+
+## v0.25: the playhead, the DT2's sample list and browser, modulated SAMP
+
+- **The playhead.** With no SEND running, the DSP's TDM packet carries each track's play
+  position (`POS_MAGIC`, then a unit a track: `POS_NONE` or the read position as a
+  fraction of the sample x `POS_ONE`; `program.tdm_tx`). link.c keeps them (`smp_pos`,
+  with the period they came in), and the waveform page draws the DT2's double line where
+  the active track's voice reads. That follows p-locked starts, LFOs on STRT and LEN,
+  WERP's segments and STRETCH's head (its position jumps a grain, 43 ms, at a time). While
+  it moves, the page asks the UI loop for redraws at the recorder's rate (25 a second).
+  STRETCH and REPITCH also mark the region's bars (BARS: 1, 2, 4, 8), dotted.
+- **The sample list** (DT2 manual 9.7): turning SAMP brings it up, and it stays. SAMP or
+  UP/DOWN move through the slots. The track plays the outlined one, so its [TRIG]
+  previews it. YES (or pushing SAMP) keeps it, NO puts SAMP back as it was, and FUNC + YES
+  opens the browser. A page key keeps it, as YES does. The DT2's header goes in the title
+  bar ("YES:OK NO:X FN+YES:D"), then the bank (the DN2's one bank, A) and five slots with
+  their long names; an empty slot is "---".
+- **The browser** (ASSIGN SAMPLE > A0nn): the import tool's folders first, then the
+  samples that are in none; a folder's samples inside it. YES/RIGHT opens a folder or
+  gives the track the sample, NO/LEFT goes back up, and out at the top. Every sample is
+  already in RAM (the pool loads whole at power-on), so picking one only sets SAMP. The
+  DT2 copies a +Drive sample into the slot instead.
+- **Long names and folders**: the import tool writes a block after the image
+  (`META_*`: each slot's folder and name up to 35 characters, 64 folders), pointed at from
+  the directory page (`META_PTR`). link.c reads it with the directory. A long name shows
+  only while the slot's short name is still what the tool made of it, so a rename on the
+  instrument wins. Older firmware ignores the block.
+- **Modulation on SAMP** (an LFO, or any of the six sources) steps through the slots that
+  hold something, from the one SAMP is set to, wrapping round them, as the DT2's project
+  slots hold only loaded samples. Before, it mostly landed on empty slots and played
+  nothing. `smp_mod_apply` runs after the stock apply (`0x400db22c`, at `0x40027196`) on
+  the per-voice mirror the frame is built from; an unmodulated SAMP is left alone.
+- **WERP's SEG** takes three detents a choice, not one (owner: the middle choice was easy
+  to skip).
