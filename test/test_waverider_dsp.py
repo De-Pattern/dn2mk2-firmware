@@ -101,7 +101,7 @@ def test_loaded_image_holds_our_bytes(built):
         assert bootstream.read_span(built, at, len(payload)) == payload, what
 
 
-def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
+def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     entry = bootstream.read_span(built, dsp.sw_to_load(dsp.ENTRY_SW), 8)
     assert entry == bytes.fromhex("3e06160000f60100")          # jump 0x16f600 (the block counter) ; nop
     # v0.13: the stock 8-entry lookup stays stock; its base pointer (sw 0x1c2958) moves to
@@ -137,10 +137,14 @@ def test_the_four_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     look_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.LOOKUP_SITE_SW), 6)[0][0]
     idle_off = bootstream.spans(stock7, dsp.l2_sw_to_load(dsp.IDLE_SITE_SW), 6)[0][0]
     call_off = bootstream.spans(stock7, dsp.sw_to_load(dsp.CALL_SITE_SW), 6)[0][0]
-    allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 12))
-               | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6)))
+    # v0.25: the driver's call of 0x1c9d3f becomes JUMP wr_pvmix (its two delay slots stay)
+    pv = dsp.sw_to_load(dsp.PVMIX_SITE_SW)
+    assert bootstream.read_span(stock7, pv, 18) == dsp.PVMIX_SITE_STOCK
+    assert bootstream.read_span(built, pv, 18) == dsp.objects()["pvmix_jump"] + dsp.PVMIX_SITE_STOCK[6:]
+    pv_off = bootstream.spans(stock7, pv, 6)[0][0]
     allowed = (set(range(entry_off, entry_off + 8)) | set(range(look_off, look_off + 6))
-               | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6)))
+               | set(range(idle_off, idle_off + 6)) | set(range(call_off, call_off + 6))
+               | set(range(pv_off, pv_off + 6)))
     assert diff and set(diff) <= allowed
 
 
@@ -178,8 +182,15 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     assert dsp.SMP_L2_LOAD == dsp.PERC_L2_LOAD + dsp.PERC_L2_SPAN
     for (what, at, payload), name in zip(spans, ("perc", "smp")):
         code = dsp.objects()[name]
-        assert payload[:len(code)] == code and not any(payload[len(code):])
-        assert len(payload) - len(code) >= 64
+        if name == "smp":                        # v0.25: wr_pvmix in the span's last 1 KB
+            pv, room = dsp.pvmix_object(), dsp.PVMIX_L2_LOAD - at
+            assert payload[room:room + len(pv)] == pv and not any(payload[room + len(pv):])
+            assert len(payload) - room - len(pv) >= 64
+            payload_code = payload[:room]
+        else:
+            payload_code = payload
+        assert payload_code[:len(code)] == code and not any(payload_code[len(code):])
+        assert len(payload_code) - len(code) >= 64
         assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.L2_NOCACHE - 0x10000
         assert bootstream.read_span(built, at, len(payload)) == payload
     for b in bootstream.walk(stock7).blocks:

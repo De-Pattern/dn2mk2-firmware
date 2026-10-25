@@ -101,7 +101,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
          "test/test_shft_live.py", "test/test_rings_live.py", "test/test_cz_live.py",
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
-         "test/test_sources.py", "test/test_md_ui.py"]
+         "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 
@@ -388,21 +388,29 @@ def main() -> int:
                               if good else why)
             gate("recorder screen (ColdFire)", *cached("recorder screen (ColdFire)", [rec_cmd, sorted(EMU_ENV.items())], rec_body))
 
-        # 6d. after a recording (v0.22): TRIM (knobs E and H move the ends), NAME (a knob
-        # and the arrows spell it), ASSIGN (a [TRIG] key: that track becomes ONESHOT playing
-        # the slot, through stock's MACHINE SEL commit and setValue), each step's key
-        if "rec_phase" in lay:
-            g = {k: hex(lay[k]) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n",
-                                           "trim_s", "trim_e", "nm_text")}
+        # 6d. after a recording (v0.22; v0.25 as the DT2's): SAVING/NORMALIZING (phase 4) on to
+        # TRIM once saved; TRIM's ends move (E, H); FUNC + YES plays the preview while held
+        # (a command each way, FUNC's release seen); YES on to FILE NAME (spelt by knob and
+        # arrows; FUNC + YES inserts, FUNC + NO deletes), YES on to ASSIGN, a [TRIG] key
+        # makes track 3 ONESHOT playing the slot (stock's MACHINE SEL commit and setValue)
+        if "rec_phase" in lay and "rec_pv_on" in lay:
+            g = {k: hex(lay[k]) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
+                                           "trim_e", "nm_text", "rec_pv_on", "smp_func_held", "smp_cmds",
+                                           "smp_saved")}
             kit = 0x4210C08C                    # the snapshot's live kit ([0x800052a0])
             snd = hex(kit + 52 + 1163 * 2)      # track 3's sound
             steps = (f"wait:3,mem:0x800052a0:4,mem:{snd}:256,poke:{g['trim_slot']}:00000004,"
-                     f"poke:{g['trim_n']}:00017700,poke:{g['trim_s']}:00000000,"
-                     f"poke:{g['trim_e']}:00017700,poke:{g['rec_overlay']}:00000001,"
-                     f"poke:{g['rec_phase']}:00000001,wait:20,png:t1,spin:4:5,wait:5,"
-                     f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,yes,wait:10,"
-                     f"mem:{g['rec_phase']}:4,spin:0:3,wait:3,right,wait:3,spin:0:2,wait:3,up,wait:10,"
-                     f"mem:{g['nm_text']}:8,png:n1,yes,wait:10,mem:{g['rec_phase']}:4,png:a1,tap:27,"
+                     f"poke:{g['trim_n']}:00017700,poke:{g['trim_s']}:00000000,poke:{g['trim_e']}:00017700,"
+                     f"poke:{g['smp_saved']}:00000000,poke:{g['rec_overlay']}:00000001,"
+                     f"poke:{g['rec_phase']}:00000004,wait:10,mem:{g['rec_phase']}:4,"
+                     f"poke:{g['smp_saved']}:00000001,wait:10,mem:{g['rec_phase']}:4,png:t1,spin:4:5,wait:5,"
+                     f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,mem:{g['smp_cmds']}:4,"
+                     f"press:17,wait:2,press:10,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_cmds']}:4,"
+                     f"release:10,wait:3,release:17,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_func_held']}:4,"
+                     f"mem:{g['smp_cmds']}:4,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,spin:0:3,wait:3,right,"
+                     f"wait:3,spin:0:2,wait:3,mem:{g['nm_text']}:8,press:17,wait:2,yes,wait:3,release:17,wait:3,"
+                     f"mem:{g['nm_text']}:8,press:17,wait:2,no,wait:3,release:17,wait:3,mem:{g['nm_text']}:8,"
+                     f"png:n1,yes,wait:10,mem:{g['rec_phase']}:4,png:a1,tap:27,"
                      f"wait:20,mem:{g['rec_phase']}:4,mem:{snd}:256,png:r1")
             js = work / "recflow.json"
             flow_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
@@ -415,21 +423,28 @@ def main() -> int:
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
                     m = r["memory"]
-                    ph = g["rec_phase"]
-                    phases = [int(m[k], 16) for k in (ph, f"{ph}@6", f"{ph}@7")]
-                    before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[f"{snd}@8"])
+                    ph, cm, pv = g["rec_phase"], g["smp_cmds"], g["rec_pv_on"]
+                    phases = [int(m[k], 16) for k in (ph, f"{ph}@3", f"{ph}@12", f"{ph}@16", f"{ph}@17")]
+                    cmds = [int(m[k], 16) for k in (cm, f"{cm}@8", f"{cm}@11")]
+                    before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[f"{snd}@18"])
+                    s0, e0 = int(m[g["trim_s"]], 16), int(m[g["trim_e"]], 16)
+                    names = [bytes.fromhex(m[k])[:4] for k in (g["nm_text"], f"{g['nm_text']}@14",
+                                                               f"{g['nm_text']}@15")]
                     facts = {"kit": m["0x800052a0"] == f"{kit:08x}",
-                             "trim": (int(m[g["trim_s"]], 16), int(m[g["trim_e"]], 16)) == (2400, 94560),
-                             "phases": phases == [2, 3, 0],
-                             "name": bytes.fromhex(m[g["nm_text"]])[:3] == b"CC\0",
+                             "phases": phases == [4, 1, 2, 3, 0],
+                             "trim": 0 < s0 < e0 < 0x17700,
+                             "preview": int(m[pv], 16) == 1 and int(m[f"{pv}@9"], 16) == 0
+                             and cmds[1] == cmds[0] + 1 and cmds[2] == cmds[1] + 1
+                             and int(m[g["smp_func_held"]], 16) == 0,
+                             "name": names == [b"CB\0\0", b"C B\0", b"CB\0\0"],
                              "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
                              "samp": after[0x6A] == 5,
                              "frames": r["screen_frames"] > 0}
                     good = all(facts.values())
-                    why = str(facts)
-                return good, ("TRIM's ends move, YES on to NAME (spelt by knob and arrows), YES on to ASSIGN, a "
-                 "[TRIG] key makes track 3 ONESHOT on the slot"
-                              if good else why)
+                    why = str(facts) + f" phases {phases} cmds {cmds} names {names}"
+                return good, ("SAVING on to TRIM; TRIM's ends move; FUNC + YES previews while held; YES on to "
+                              "FILE NAME (knob, arrows, FUNC + YES inserts, FUNC + NO deletes), YES on to ASSIGN, "
+                              "a [TRIG] key makes track 3 ONESHOT on the slot" if good else why)
             gate("recorder flow (ColdFire)", *cached("recorder flow (ColdFire)", [flow_cmd, sorted(EMU_ENV.items())], flow_body))
 
         # 6e. v0.23, SLICE: its menus drawn over the page (the menu, the grid dialog, the
@@ -479,6 +494,41 @@ def main() -> int:
                  "closes; KEYBOARD trig 4 / trig 1 on a SLICE track play C0+3 / C0"
                               if good else why)
             gate("SLICE menus and SLICES keys (ColdFire)", *cached("SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body))
+
+        # 6g. v0.25, GRID's ALLOCATE SLICE (YES on a GRID track's page): trigs placed on steps
+        # 1, 3, 5 in GRID RECORDING; CREATE LINEAR LOCKS locks slices 1, 2, 3 on them (the
+        # stock's own lock calls, read back through its GET); RANDOM again, then NO puts
+        # back the linear ones
+        if "slc_alloc_n" in lay:
+            from dnfw.sampler import machines as SMx    # noqa: PLC0415
+            sid = SMx.SLICE_REC
+            kit = 0x4210C08C
+            get = ",".join(f"call:0x40037c52:0:{sid}:{k},wait:2" for k in (0, 2, 4))
+            steps = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,tap:19,wait:6,tap:25,wait:4,"
+                     f"tap:27,wait:4,tap:29,wait:4,tap:19,wait:6,yes,wait:6,png:m,yes,wait:6,"
+                     f"mem:{lay['slc_alloc_n']:#x}:4,{get},yes,wait:6,down,wait:3,yes,wait:6,yes,wait:6,"
+                     f"no,wait:6,mem:{lay['slc_state']:#x}:4,{get}")
+            js = work / "alloc.json"
+            al_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", steps, "--png-dir", work / "alloc", "--json", js]
+
+            def al_body(tdir):
+                rc, out = run("grid allocate", al_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and js.exists():
+                    r = json.loads(js.read_text())
+                    m = r["memory"]
+                    d0 = [c["d0"] for c in r["direct_calls"]]
+                    facts = {"three trigs locked": int(m[hex(lay["slc_alloc_n"])], 16) == 3,
+                             "linear: slices 1, 2, 3": d0[:3] == [512, 1024, 1536],
+                             "closed": int(m[hex(lay["slc_state"])], 16) == 0,
+                             "NO puts the locks back": d0[4:6] == [1024, 1536]}
+                    good = all(facts.values())
+                    why = str(facts) + f" {d0}"
+                return good, ("GRID's ALLOCATE SLICE: LINEAR locks slices 1..3 on three placed trigs; NO after "
+                              "RANDOM puts them back" if good else why)
+            gate("GRID allocate slice locks (ColdFire)",
+                 *cached("GRID allocate slice locks (ColdFire)", [al_cmd, sorted(EMU_ENV.items())], al_body))
 
         # 6f. v0.25: the sample pages' playhead (the DSP's positions, poked as the link would
         # leave them), the DT2-style sample list (it opens on SAMP's change; DOWN moves SAMP,

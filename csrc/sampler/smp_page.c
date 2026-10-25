@@ -864,7 +864,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
 {
     u32 ids[8];
     extern int slc_page_seen;
-    slc_page_seen = kind == SMP_SLICE_KIND;     /* v0.23: YES here opens SLICE's menu (slice.c) */
+    slc_page_seen = kind == SMP_SLICE_KIND ? 1 : kind == SMP_GRID_KIND ? 2 : 0;   /* YES: SLICE's menu, GRID's ALLOCATE SLICE (slice.c) */
     for (int i = 0; i < 8; i++)
         ids[i] = smp_ids[kind - SMP_KIND0][i];
     smp_box(c);

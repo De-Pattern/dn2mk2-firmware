@@ -597,5 +597,22 @@ the keyboard.
   two are identical in every register and every word written; with one, the build is
   exactly the stock run on the block the model mixes, every register and every word but
   the preview's own. The command (slot, first frame, end frame) is taken by the recorder;
-  the status's state word carries +16 while one plays. 223 bytes of the DSP's 1 MiB upload
+  the status's state word carries +16 while one plays. 219 bytes of the DSP's 1 MiB upload
   buffer are left.
+
+### v0.25: GRID and SLICE: slices to the trigs, KEYBOARD's octave, GRID's icon
+
+- **ALLOCATE SLICE** (the DT2's, its manual A.2.6): YES on a GRID track's page opens
+  CREATE LINEAR LOCKS / CREATE RANDOM LOCKS / NO: CANCEL LOCKS; SLICE's menu gains the two
+  as well. LINEAR locks SLICE to slice 1, 2, 3 .. on the track's note trigs in order
+  (wrapping round the slices); RANDOM a slice at random each, again on each YES; NO puts
+  back the SLICE locks there were. The locks are made through the stock's own calls, the
+  path a held [TRIG] and a turned knob take (found in the emulator: GRID RECORDING, a held
+  trig, a knob turn reach `0x4003ceee` through the active track's parameter set's vtable at
+  `0x401db7fc`: +0x40 GET, +0x44 SET (value << 8, as setValue), +0x48 CLEAR); a track's
+  note trigs come from its pattern track (`0x4003b2ea(0x4003efa8(owner), track)`, its
+  length `0x4004f896`, a note trig at a step `0x4004f0f4`). Gate step 6g.
+- **KEYBOARD**, SLICE at NOTE, GRID as well as SLICE: [TRIG] k plays slice k, and the
+  keyboard's octave (stock's: KEYBOARD + UP/DOWN) moves the keys on by 16 slices an octave
+  (the octave read from the note stock gives [TRIG 9]: 60 at the middle octave).
+- **GRID's icon** on page 1: its slice count as a grid of cells, 2 x 1 to 8 x 8.

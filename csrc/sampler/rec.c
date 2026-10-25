@@ -462,7 +462,6 @@ static void name_done(void)
  * FUNC chord: on the instrument a plain YES carries it (the owner's v0.24: YES on TRIM and
  * on a SLICE track did nothing), so nothing here reads it. */
 int smp_func_held __attribute__((section(".data"))) = 0;
-u32 rec_dbg[33] __attribute__((section(".data")));
 int rec_pv_on __attribute__((section(".data"))) = 0;      /* a preview playing, while held */
 static u32 knob_at __attribute__((section(".data"))) = 0;    /* the last trim knob's FRAMES */
 #define CMD_PREVIEW 9
@@ -620,7 +619,6 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         return (u32)it;
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
-    if (it[0] == IT_KEY) { extern u32 rec_dbg[33]; u32 k = rec_dbg[32]++ & 31u; rec_dbg[k] = (u32)it[0] << 28 | code << 16 | (flags & 0xFFFFu); }
     /* v0.25: a key's item: bit 0 while it is down (a press), bit 4 on most keys' release,
      * bit 1 while FUNC is held. FUNC's own release carries neither bit 0 nor bit 4 (the
      * emulator's panel, read through smp_ui_pop): v0.22..v0.24 waited for bit 4 and so

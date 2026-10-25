@@ -1,6 +1,8 @@
 /* v0.23: SLICE's own menus, as the Digitakt II's (its manual, 13.4 and the SLICE machine):
  *
- *   YES on a SLICE track's page   the SLICE menu: EDIT SLICE POINTS, CREATE SLICE GRID
+ *   YES on a SLICE track's page   the SLICE menu: EDIT SLICE POINTS, CREATE SLICE GRID,
+ *                                CREATE LINEAR LOCKS, CREATE RANDOM LOCKS (v0.25)
+ *   YES on a GRID track's page    ALLOCATE SLICE: CREATE LINEAR / RANDOM LOCKS, NO cancels (v0.25)
  *   CREATE SLICE GRID            SLICES (E) 2..64, TR.DET (H) off/on; YES makes them, NO cancels
  *                                (TR.DET: a slice at each transient, as many as SLICES at most)
  *   EDIT SLICE POINTS            the sample's waveform with its slices; LEFT/RIGHT pick one,
@@ -52,9 +54,9 @@ extern int smp_slices_get(int k, u32 *t);
 extern int smp_slices_set(int k, const u32 *t, int n);
 extern int smp_area_ok(void);
 
-enum { S_OFF, S_MENU, S_GRID, S_WAIT, S_EDIT };
+enum { S_OFF, S_MENU, S_GRID, S_WAIT, S_EDIT, S_ALLOC };   /* v0.25: ALLOC, GRID's ALLOCATE SLICE */
 int slc_state __attribute__((section(".data"))) = S_OFF;
-int slc_page_seen __attribute__((section(".data"))) = 0;   /* smp_page.c: a SLICE page is up */
+int slc_page_seen __attribute__((section(".data"))) = 0;   /* smp_page.c: 1 a SLICE page is up, 2 GRID's */
 static int menu_sel __attribute__((section(".data"))) = 0;
 int slc_grid_n __attribute__((section(".data"))) = 16;
 static int grid_tr __attribute__((section(".data"))) = 0;
@@ -125,17 +127,129 @@ static void secs(void *c, int x, int y, u32 f)
     LABEL(c, x, y, "%d.%d%dS", (int)(ms / 1000u), (int)(ms / 100u % 10u), (int)(ms / 10u % 10u));
 }
 
+/* -- v0.25: slices to the placed trigs, as the DT2's CREATE LINEAR / RANDOM LOCKS --------- */
+/* The stock's own lock calls on the active track (the knob-and-held-trig path's: its
+ * parameter set's vtable at 0x401db7fc, +0x40, +0x44, +0x48): a lock's value is the raw
+ * value << 8, as setValue's; GET answers -1 for none. A track's trigs: its pattern track
+ * (0x4003b2ea(0x4003efa8(owner), track)), its length (0x4004f896) and whether a step holds
+ * a note trig (0x4004f0f4: a trig, and not a lock trig). Found in the emulator: a held
+ * [TRIG] and a turned knob in GRID RECORDING reach 0x4003ceee through these. */
+#define LOCK_GET ((int (*)(u32, u32, u32))0x40037C52u)            /* (this, id, step) */
+#define LOCK_SET ((u32 (*)(u32, u32, u32, u32))0x40037CB6u)       /* (this, id, value << 8, step) */
+#define LOCK_CLEAR ((u32 (*)(u32, u32, u32))0x40037D22u)          /* (this, id, step) */
+#define UI_OWNER ((u32 (*)(void))0x4018A97Au)
+#define PATTERN_OF ((u32 (*)(u32))0x4003EFA8u)
+#define PTRACK ((u32 (*)(u32, u32))0x4003B2EAu)
+#define PTRACK_LEN ((int (*)(u32))0x4004F896u)
+#define PTRACK_NOTE ((u32 (*)(u32, u32))0x4004F0F4u)
+#define GRID_TYPE 12
+#define STEPS 128
+static short lk_old[STEPS] __attribute__((section(".data")));       /* the SLICE locks before */
+static int lk_kept __attribute__((section(".data"))) = 0;            /* lk_old holds them */
+static u32 lk_rand __attribute__((section(".data"))) = 0x2545F491u;
+int slc_alloc_n __attribute__((section(".data"))) = 0;               /* the trigs it locked */
+
+static u32 ptrack(void)
+{
+    u32 owner = UI_OWNER();
+    if (!owner || ACTIVE_TRACK > 15)
+        return 0;
+    u32 pat = PATTERN_OF(owner);
+    return pat ? PTRACK(pat, ACTIVE_TRACK) : 0;
+}
+
+static int track_slices(void)                    /* the active track's slices: GRID's count, SLICE's own */
+{
+    u32 t = ACTIVE_TRACK;
+    if (!KIT || t > 15)
+        return 0;
+    volatile u8 *s = (volatile u8 *)SOUND(t);
+    if ((signed char)s[0xDE] == GRID_TYPE) {
+        int gi = SOUND_VALUE(SOUND(t), SMP_GRID_ID) / 24;
+        return smp_grids[gi > 4 ? 4 : gi];
+    }
+    int k = track_slot();
+    if (k < 0)
+        return 0;
+    static u32 t3[3 * SLMAX] __attribute__((section(".data")));
+    return smp_slices_get(k, t3);
+}
+
+/* RANDOM 0: slice 1, 2, 3 .. on the note trigs in order (wrapping round the slices);
+ * 1: a slice at random each. -> the trigs locked */
+static int alloc_locks(int random)
+{
+    u32 tr = ptrack();
+    int n = track_slices();
+    if (!tr || n <= 0)
+        return 0;
+    if (n > 63)
+        n = 63;                                 /* SLICE's top: slice 63 */
+    int len = PTRACK_LEN(tr);
+    if (len > STEPS)
+        len = STEPS;
+    if (!lk_kept) {
+        for (int k = 0; k < STEPS; k++)
+            lk_old[k] = (short)(k < len ? LOCK_GET(0, SMP_SLICE_ID, (u32)k) : -1);
+        lk_kept = 1;
+    }
+    int j = 0;
+    lk_rand ^= FRAMES;
+    for (int k = 0; k < len; k++) {
+        if (!(PTRACK_NOTE(tr, (u32)k) & 0xFF))
+            continue;
+        int sl;
+        if (random) {
+            lk_rand ^= lk_rand << 13; lk_rand ^= lk_rand >> 17; lk_rand ^= lk_rand << 5;
+            sl = (int)(lk_rand % (u32)n) + 1;
+        } else
+            sl = j % n + 1;
+        LOCK_SET(0, SMP_SLICE_ID, (u32)(2 * sl) << 8, (u32)k);
+        j++;
+    }
+    slc_alloc_n = j;
+    return j;
+}
+
+static void alloc_cancel(void)                  /* NO: the locks as they were */
+{
+    if (!lk_kept)
+        return;
+    for (int k = 0; k < STEPS; k++) {
+        int v = lk_old[k];
+        if (v >= 0)
+            LOCK_SET(0, SMP_SLICE_ID, (u32)v, (u32)k);
+        else if (LOCK_GET(0, SMP_SLICE_ID, (u32)k) >= 0)
+            LOCK_CLEAR(0, SMP_SLICE_ID, (u32)k);
+    }
+    lk_kept = 0;
+}
+
 static void menu_draw(void *c)
 {
-    popup(c, 14, 14, 113, 52);
-    static const char *items[2] = {"EDIT SLICE POINTS", "CREATE SLICE GRID"};
-    for (int k = 0; k < 2; k++) {
-        int y = 41 - 12 * k;
+    popup(c, 12, 6, 115, 58);
+    static const char *items[4] = {"EDIT SLICE POINTS", "CREATE SLICE GRID", "CREATE LINEAR LOCKS",
+                                   "CREATE RANDOM LOCKS"};
+    for (int k = 0; k < 4; k++) {
+        int y = 47 - 10 * k;
         if (k == menu_sel)
-            box(c, 17, y - 3, 110, y + 7);
+            box(c, 15, y - 2, 112, y + 6);
         LABEL(c, 64, y, "%s", items[k]);
     }
-    LABEL(c, 64, 18, "%s", "YES:OPEN  NO:CLOSE");
+    LABEL(c, 64, 9, "%s", "YES:OPEN  NO:CLOSE");
+}
+
+static void alloc_draw(void *c)                 /* GRID's, as the DT2 draws it */
+{
+    popup(c, 10, 12, 117, 54);
+    static const char *items[2] = {"CREATE LINEAR LOCKS", "CREATE RANDOM LOCKS"};
+    for (int k = 0; k < 2; k++) {
+        int y = 43 - 10 * k;
+        if (k == menu_sel)
+            box(c, 13, y - 2, 114, y + 6);
+        LABEL(c, 64, y, "%s", items[k]);
+    }
+    LABEL(c, 64, 17, "%s", "NO: CANCEL LOCKS");
 }
 
 static void grid_draw(void *c)
@@ -237,6 +351,8 @@ void slc_draw(void *c)
         wait_draw(c);
     else if (slc_state == S_EDIT)
         edit_draw(c);
+    else if (slc_state == S_ALLOC)
+        alloc_draw(c);
     if (slc_state != S_EDIT && msg && FRAMES - msg_at < 2250u) {
         popup(c, 20, 26, 107, 38);
         LABEL(c, 64, 29, "%s", msg);
@@ -450,7 +566,13 @@ int slc_pop(u8 *it)
         return 0;                               /* FUNC goes on to stock */
     if (slc_state == S_OFF) {
         /* YES on a SLICE track's page opens the menu */
-        if (press && code == K_YES && slc_page_seen && !func) {
+        if (press && code == K_YES && slc_page_seen == 2 && !func) {   /* v0.25: GRID's ALLOCATE SLICE */
+            menu_sel = 0;
+            lk_kept = 0;
+            slc_state = S_ALLOC;
+            return 1;
+        }
+        if (press && code == K_YES && slc_page_seen == 1 && !func) {
             int k = track_slot();
             if (k == -2)
                 return 0;
@@ -495,15 +617,42 @@ int slc_pop(u8 *it)
     if (!press)
         return 1;
     int chord = func;
-    if (slc_state == S_MENU) {
+    if (slc_state == S_ALLOC) {
         if (code == K_UP || code == K_DOWN)
             menu_sel ^= 1;
+        else if (code == K_NO) {
+            alloc_cancel();
+            slc_state = S_OFF;
+        } else if (code == K_YES) {
+            int n = alloc_locks(menu_sel);
+            if (!n)
+                note("NO TRIGS TO LOCK");
+            if (menu_sel == 0 || !n) {               /* LINEAR: done; RANDOM: again on YES */
+                lk_kept = 0;
+                slc_state = S_OFF;
+            }
+        } else if (code == K_LEFT) {                 /* kept, closed */
+            lk_kept = 0;
+            slc_state = S_OFF;
+        }
+    } else if (slc_state == S_MENU) {
+        if (code == K_UP)
+            menu_sel = (menu_sel + 3) & 3;
+        else if (code == K_DOWN)
+            menu_sel = (menu_sel + 1) & 3;
         else if (code == K_NO)
             slc_state = S_OFF;
         else if (code == K_YES && menu_sel == 0)
             start_analysis(S_EDIT);
-        else if (code == K_YES)
+        else if (code == K_YES && menu_sel == 1)
             slc_state = S_GRID;
+        else if (code == K_YES) {                    /* v0.25: CREATE LINEAR / RANDOM LOCKS */
+            lk_kept = 0;
+            if (!alloc_locks(menu_sel == 3))
+                note("NO TRIGS TO LOCK");
+            lk_kept = 0;
+            slc_state = S_OFF;
+        }
     } else if (slc_state == S_GRID) {
         if (code == K_NO)
             slc_state = S_OFF;
