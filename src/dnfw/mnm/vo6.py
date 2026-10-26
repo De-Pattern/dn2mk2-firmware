@@ -480,6 +480,7 @@ def _blit(p: Prog, L: C.Layout) -> None:
     ring[q0 + 1 + k] += x1 T[0x152 - f + 32k] + y0 T[0x153 - f + 32k] (k = 0..15): the
     kernel's P:0x3AA, its two arms (T: y:$131..$333, VO 'blit')"""
     base = L.VO["blit"] - 4 * 0x131
+    _qconsts(p)
     for arm in (0, 1):
         p.ld(3, _a(L, "q0"))
         addk(p, 3, 3, 17 if arm == 0 else 1)
@@ -500,12 +501,13 @@ def _blit(p: Prog, L: C.Layout) -> None:
             p.ldi(6, -1 if arm == 0 else 1, 1)
             _ring_addr(p, L, 7, 3)
             p.seti(2, 7)
-            p.ldi(8, 0, 2)
+            p.ldi(10, 0, 2)
             p.fop(5, 5, "*", 1)
-            p.fop(8, 8, "+", 5)
+            p.fop(10, 10, "+", 5)
             p.fop(6, 6, "*", 2)
-            p.fop(8, 8, "+", 6)
-            p.sti(0, 2, 8)
+            p.fop(10, 10, "+", 6)
+            _floor(p, 10, 0, 15)
+            p.sti(0, 2, 10)
             addk(p, 3, 3, 1)
             addk(p, 4, 4, -128 if arm == 0 else 128)
         p.loop(_a(L, "n3"), 16, tap)
@@ -831,12 +833,15 @@ def _crossfade(p, L, k):
     p.iconst(12, _a(L, "EXC"))
     p.seti(2, 12)
 
+    _qconsts(p)
+
     def one():
         p.ldpost(3, 5)
         p.ldi(4, 0, 2)
         p.fop(3, 3, "*", 1)
         p.fop(4, 4, "*", 2)
         p.fop(3, 3, "+", 4)
+        _floor(p, 3, 0, 15)
         C.sat(p, 3)
         p.stpost(2, 3)
     p.loop(_a(L, "n3"), 16, one)
@@ -970,9 +975,12 @@ def _consonant(p: Prog, L: C.Layout, k: int) -> None:
         p.iconst(12, _a(L, "EXC"))
         p.seti(5, 12)
 
+        _qconsts(p)
+
         def one():
             p.ldi(2, 0, 5)
             p.fop(2, 2, "*", 1)
+            _floor(p, 2, 0, 15)
             C.sat(p, 2)
             p.stpost(5, 2)
         p.loop(_a(L, "n3"), 16, one)
@@ -998,12 +1006,14 @@ def _consonant(p: Prog, L: C.Layout, k: int) -> None:
         p.iconst(12, _a(L, "EXC"))
         p.seti(2, 12)
         p.fconst(3, 0.5)
+        _qconsts(p)
 
         def one():
             p.ldi(1, 0, 5)
             p.fop(1, 1, "*", 3)
             p.ldpost(2, 2)
             p.fop(1, 1, "+", 2)
+            _floor(p, 1, 0, 15)
             C.sat(p, 1)
             p.stpost(5, 1)
         p.loop(_a(L, "n3"), 16, one)
@@ -1092,7 +1102,7 @@ def _res_body(p: Prog, L: C.Layout, parallel: bool) -> None:
 def _formant_loop(p: Prog, L: C.Layout) -> None:
     """k = 0..7: formant k & 3's targets (series for k < 4, parallel after), ramps, filter"""
     for k, (m, r) in enumerate(FORM):
-        p.fconst(1, s24(m) * Q23)
+        p.iconst(1, -s24(m))
         p.st(_a(L, f"m{k}"), 1)
         p.fconst(1, s24(r) * Q23)
         p.st(_a(L, f"r{k}"), 1)
@@ -1126,21 +1136,19 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
         mulq(p)                                # j
         # c1 = C1[fk][j]
         _c1_addr(p, L)
-        # c2 = cos[i] x m[fk]
-        p.ld(1, _a(L, "q0"))
-        p.lsh(1, 1, 2)
-        p.iconst(12, L.VO["cos"])
-        p.iop(1, 12, "+", 1)
-        p.seti(1, 1)
-        p.ldi(5, 0, 1)
+        # c2 = MPY(cos[i], M[fk]) exactly: floor(-cos x |M|), M < 0
+        p.ld(3, _a(L, "q0"))
+        _tab(p, L, 1, "cos", 3)
+        p.iconst(12, 0)
+        p.iop(1, 12, "-", 1)
         p.ld(9, _a(L, "f"))
         p.lsh(9, 9, 2)
         p.iconst(12, _a(L, "m0"))
         p.iop(9, 12, "+", 9)
         p.seti(1, 9)
-        p.ldi(6, 0, 1)
-        p.fop(5, 5, "*", 6)
-        C.sat(p, 5)                            # c2
+        p.ldi(2, 0, 1)
+        mulqs(p)
+        i2f(p, 5, 1)                           # c2
         p.ld(9, _a(L, "f"))
         p.lsh(9, 9, 2)
         p.iconst(12, _a(L, "r0"))
@@ -1169,12 +1177,15 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
         p.fop(5, 5, "*", 12)
         p.iconst(12, _a(L, "RAMP"))
         p.seti(2, 12)
+        _qconsts(p)
 
         def ramp():
             p.fpass(6, 1)
+            _floor(p, 6, 0, 15)
             C.sat(p, 6)
             p.stpost(2, 6)
             p.fpass(6, 2)
+            _floor(p, 6, 0, 15)
             C.sat(p, 6)
             p.stpost(2, 6)
             p.fop(1, 1, "+", 4)
@@ -1283,16 +1294,20 @@ def _source(p: Prog, L: C.Layout) -> None:
     p.iconst(12, _a(L, "EXC"))
     p.seti(1, 12)
 
+    _qconsts(p)
+
     def exc():
         p.ldi(4, 0, 5)
         p.ldpost(6, 2)
         p.fop(7, 4, "*", 2)
         p.fop(6, 6, "*", 3)
         p.fop(7, 7, "+", 6)
+        _floor(p, 7, 10, 15)
         C.sat(p, 7)
         p.stpost(1, 7)
         p.fconst(12, 0.125)
         p.fop(4, 4, "*", 12)
+        _floor(p, 4, 10, 15)
         p.stpost(5, 4)
     p.loop(_a(L, "n1"), 16, exc)
 
@@ -1427,22 +1442,28 @@ def _gain_mix(p: Prog, L: C.Layout) -> None:
     p.iconst(12, _a(L, "UNV"))
     p.seti(2, 12)
 
+    _qconsts(p)
+
     def one():
         p.fpass(7, 4)
+        _floor(p, 7, 12, 15)
         C.sat(p, 7)                             # G[n]
-        p.fpass(8, 5)
-        C.sat(p, 8)                             # y31[n]
-        p.ldpost(9, 5)
-        p.fop(9, 9, "*", 7)
+        p.fpass(2, 5)
+        _floor(p, 2, 12, 15)
+        C.sat(p, 2)                             # y31[n]
+        p.ldpost(0, 5)
+        p.fop(0, 0, "*", 7)
         p.fconst(12, 4096.0)
-        p.fop(9, 9, "*", 12)
+        p.fop(0, 0, "*", 12)
         p.ldpost(10, 1)
         p.fop(10, 10, "*", 6)
+        _floor(p, 10, 12, 15)
         C.sat(p, 10)
-        p.fop(10, 10, "*", 8)
-        p.fop(9, 9, "+", 10)
-        C.sat(p, 9)
-        p.stpost(2, 9)
+        p.fop(10, 10, "*", 2)
+        p.fop(0, 0, "+", 10)
+        _floor(p, 0, 12, 15)
+        C.sat(p, 0)
+        p.stpost(2, 0)
         p.fop(4, 4, "+", 1)
         p.fop(5, 5, "+", 3)
     p.loop(_a(L, "n1"), 16, one)
