@@ -580,7 +580,7 @@ def main(argv=None):
 
         if "smp" in steps:
             print("\nstep 3b: the sample machines")
-            s3b = step_smp(init, sound, machines, a.blocks)
+            s3b = step_smp(warm(), sound, machines, a.blocks)   # v0.26: PERC beside them needs its tables whole (as 0.7 s after power-on)
             results["3b_smp"] = {k: v for k, v in s3b.items() if k != "runs"}
             show(s3b)
             mr = s3b["runs"]["mixed"]
