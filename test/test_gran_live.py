@@ -83,7 +83,7 @@ def test_layout_code_state_and_ddr():
     obj = dsp.objects()
     assert dsp.GRAN_CODE_DM + len(obj["gran"]) + 64 <= dsp.GRAN_SCRATCH_DM
     assert dsp.GRAN_SCRATCH_DM + 0x100 <= dsp.SHFT_STATE_DM
-    assert dsp.GRAN_STATE_DM + 16 * dsp.GRAN_STATE_STRIDE <= dsp.RINGS_CODE_DM
+    assert dsp.GRAN_STATE_DM + 16 * dsp.GRAN_STATE_STRIDE <= dsp.REGION[1]   # (v0.26: RESONATOR's room after it is free)
     assert dsp.GRAN_BUF_STRIDE == 4 * G.BUF_N
     spans = {w: (at, len(p)) for w, at, p in dsp.ddr_spans()}
     ordered = sorted((at, at + n) for at, n in spans.values())
@@ -113,8 +113,8 @@ def test_every_generated_asm_is_what_its_generator_writes_now():
 
     def norm(text):
         return lit.sub(lambda m: (m.group(1) or m.group(2)) + "0x0;" + (m.group(3) or "")[1:], text)
-    for gen, name in (("gen_ping_asm", "ping"), ("gen_rings_asm", "rings"), ("gen_cz_asm", "cz"),
-                      ("gen_gran_asm", "gran")):
+    for gen, name in (("gen_ping_asm", "ping"), ("gen_gran_asm", "gran"),
+                      ("gen_smp_asm", "smp")):          # (v0.26: RESONATOR, CZ gone)
         mod = importlib.import_module(gen)
         import gen_ping_asm
         gen_ping_asm.n_label[0] = 0                     # labels count from a fresh run's

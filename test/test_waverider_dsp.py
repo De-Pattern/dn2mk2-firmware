@@ -43,8 +43,8 @@ def built(stock7) -> bytes:
 def test_committed_objects_match_their_sources():
     spec = json.loads(dsp.CODE.read_text(encoding="utf-8"))
     for key, name in (("perc", "perc"), ("idle_load", "idle_load"), ("block_count", "block_count"),
-                      ("entry_mark", "entry_mark"), ("ping", "ping"), ("rings", "rings"), ("cz", "cz"),
-                      ("gran", "gran")):
+                      ("entry_mark", "entry_mark"), ("ping", "ping"),
+                      ("gran", "gran")):                    # (v0.26: RESONATOR and CZ gone)
         src = (SHARC / f"{name}.asm").read_bytes().replace(b"\r\n", b"\n")
         assert spec[key]["source_sha256"] == hashlib.sha256(src).hexdigest(), name
         csrc = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
@@ -154,19 +154,20 @@ def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
 def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     from dnfw.md import core as MDK
     ddr = dsp.ddr_spans()
-    # RESONATOR's state (zeros) and tables, CZ's state (zeros) and tables, PING's, SHFT's,
-    # GRAN's and PERC's tables, GRAN's buffers (zeros); Waverider's wavetables went in v0.11
-    assert [a for _, a, _ in ddr] == [dsp.RINGS_STATE_DDR, dsp.RINGS_TABLES_DDR,
-                                      dsp.CZ_STATE_DDR, dsp.CZ_TABLES_DDR,
+    # the Monomachine's scratch and state (zeros; v0.26: RESONATOR's and CZ's state and
+    # tables went), PING's, SHFT's, GRAN's and PERC's tables, GRAN's buffers (zeros);
+    # Waverider's wavetables went in v0.11. v0.26: the Machinedrum's shipped tables (the
+    # host's pitch table, zpack) are not in the image: the ColdFire sends them at power-on
+    assert [a for _, a, _ in ddr] == [dsp.MNM_SCRATCH_DDR,
                                       dsp.PING_TABLES_DDR, dsp.SHFT_TABLES_DDR,
                                       dsp.GRAN_TABLES_DDR, dsp.PERC_TABLES_DDR,
                                       dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
-                                      dsp.MD_TABLES_DDR + MDK.TABLE_LAYOUT[MDK.SHIPPED][0],
                                       dsp.MD_STATE_DDR, dsp.GRAN_BUF_DDR,
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
-    assert not any(ddr[0][2]) and not any(ddr[2][2]) and not any(ddr[-1][2])
-    assert not any(ddr[9][2]) and not any(ddr[11][2])     # the MD's sine (the DSP fills it), its voices
+    assert not any(ddr[0][2]) and not any(ddr[-1][2])
+    assert not any(ddr[6][2]) and not any(ddr[7][2])      # the MD's tables (the DSP fills them), its voices
+    assert dsp.MD_TABLES_DDR + len(ddr[6][2]) <= dsp.MD_STATE_DDR
     # v0.17: the sample pool's directory begins with its magic, and holds nothing (the
     # +Drive's samples are loaded in; the test sounds are gone)
     assert struct.unpack_from("<II", ddr[-2][2]) == (0x31504D53, 0)
@@ -211,10 +212,10 @@ def test_the_region_is_written_end_to_end_and_code_is_nop_padded():
     assert all(e == a for e, a in zip(ends, at[1:]))           # no unwritten gap
     obj = dsp.objects()
     code_spans = [x for x in sp if "asm" in x[0]]
-    assert len(code_spans) == 7       # (the 16-type lookup is data, not code)
+    assert len(code_spans) == 5       # (the type lookup is data, not code; v0.26: RESONATOR, CZ gone)
     # v0.11: Waverider's reader, loop and osc 2 are gone (their room is zeros); PERC is in L2
     for (what, _, payload), code in zip(code_spans, (obj["idle_load"], obj["block_count"], obj["entry_mark"],
-                                                     obj["ping"], obj["gran"], obj["rings"], obj["cz"])):
+                                                     obj["ping"], obj["gran"])):
         assert payload[:len(code)] == code
         assert len(payload) - len(code) >= 64 and not any(payload[len(code):]), what
 
@@ -297,10 +298,10 @@ def _code_lines(name):
     return [ln for ln in lines if ln and not ln.startswith(".") and not ln.endswith(":")]
 
 
-def test_smp_hands_on_to_resonator_and_writes_only_saved_registers():
-    # v0.13: PERC -> the sample machines -> RESONATOR; PING's tail restores what PERC saved
+def test_smp_hands_on_to_ping_and_writes_only_saved_registers():
+    # v0.13: PERC -> the sample machines -> (v0.26) PING, whose tail restores what PERC saved
     lines = _code_lines("smp")
-    assert f"JUMP {dsp.RINGS_SW:#x};" in lines
+    assert f"JUMP {dsp.PING_SW:#x};" in lines
     import re
     for ln in lines:
         m = re.match(r"(I|M|L|B)(\d+) =", ln)

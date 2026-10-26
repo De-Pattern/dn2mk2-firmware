@@ -109,10 +109,10 @@ def test_two_slots_keep_their_own_state():
 
 def test_the_program_assembles_from_the_model():
     from dnfw.waverider import dsp
-    text = PP.program(PL.layout(), dsp.RINGS_SW)
+    text = PP.program(PL.layout(), dsp.SMP_SW)
     lines = [ln for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//")]
     assert 5000 < len(lines) < 30000
-    assert f"JUMP {dsp.RINGS_SW:#x};" in text
+    assert f"JUMP {dsp.SMP_SW:#x};" in text
 
 
 def _ravel_fx(x, q, fs=48000.0):

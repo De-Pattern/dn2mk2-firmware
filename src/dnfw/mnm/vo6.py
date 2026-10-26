@@ -64,7 +64,7 @@ EXC, UNV, C30, RAMP, CO, WRD = 0, 16, 32, 48, 80, 96
 _WORDS = ("F0", "F1", "F2", "F3", "O0", "O1", "O2", "O3", "O4", "O5", "O6", "O7", "w", "P", "Q",
           "p", "rb", "x1", "y0", "q0", "f", "n1", "n2", "n3", "vn", "vp", "st", "sto", "R", "g",
           "x37", "c1", "step1", "step2", "src", "dst", "kk", "x1t", "stt", "skip", "go",
-          "m0", "m1", "m2", "m3", "r0", "r1", "r2", "r3", "n4")
+          "m0", "m1", "m2", "m3", "r0", "r1", "r2", "r3", "n4", "R0i", "R1i", "R2i", "R3i")
 
 
 def _a(L: C.Layout, name: str) -> int:
@@ -1099,6 +1099,87 @@ def _res_body(p: Prog, L: C.Layout, parallel: bool) -> None:
     p.sti(1, 0, 3)
 
 
+def _split(p: Prog, r: int, fh: int, fl: int) -> None:
+    """Ffh, Ffl = the int word Rr's halves as floats: r = fh 4096 + fl, fl 0..4095 (fh not r).
+    Clobbers R12."""
+    assert r != fh
+    p.ash(fh, r, -12)
+    p.iconst(12, 0xFFF)
+    p.iop(fl, r, "AND", 12)
+    p.iconst(12, 0)
+    p.float_(fh, fh, 12)
+    p.float_(fl, fl, 12)
+
+
+def _word(p: Prog, d: int, f: int) -> None:
+    """Rd = the Q23 word the float Ff holds (exactly). Clobbers R12."""
+    p.fconst(12, 2.0 ** 23)
+    p.fop(d, f, "*", 12)
+    p.trunc(d, d)
+
+
+def _prod(p: Prog, uh: int, ul: int, vh: int, vl: int, sub: bool, twice: bool = False) -> None:
+    """A (R14), M (R15), W (R13) +-= u x v's partial products (12-bit halves, exact in float):
+    u v = A 2^24 + M 2^12 + W. Clobbers F11."""
+    op = "-" if sub else "+"
+    for a, b, r in ((uh, vh, 14), (uh, vl, 15), (ul, vh, 15), (ul, vl, 13)):
+        p.fop(11, a, "*", b)
+        p.trunc(11, 11)
+        if twice:
+            p.lsh(11, 11, 1)
+        p.iop(r, r, op, 11)
+
+
+def _ser_body(p: Prog, L: C.Layout) -> None:
+    """The series resonator in the 56300's arithmetic, exactly: y = lim(floor((c1 x - c2 y1 -
+    c2 y1 - R y2) / 2^23)) on the words (a high-Q formant rings a float's one-LSB slip up to
+    ~35 LSB, and the voiced path is amplified 4096 times). I5 the input, I2 the output, I0 the
+    state (y1, y2), I1 the ramps (c1, c2), the word 'R' (int)."""
+    p.ldi(1, 0, 0)
+    _word(p, 7, 1)
+    _split(p, 7, 1, 2)                         # y1
+    p.ldi(3, 1, 0)
+    _word(p, 7, 3)
+    _split(p, 7, 3, 4)                         # y2
+    p.ld(7, _a(L, "R"))
+    _split(p, 7, 5, 6)
+    p.iconst(12, _a(L, "RAMP"))
+    p.seti(1, 12)
+
+    def one():
+        p.iconst(14, 0)
+        p.iconst(15, 0)
+        p.iconst(13, 0)
+        p.ldpost(9, 5)
+        _word(p, 9, 9)
+        _split(p, 9, 7, 8)                     # x
+        p.ldpost(10, 1)
+        _word(p, 10, 10)
+        _split(p, 10, 9, 10)                   # c1
+        _prod(p, 9, 10, 7, 8, False)
+        p.ldpost(7, 1)
+        _word(p, 7, 7)
+        _split(p, 7, 9, 10)                    # c2
+        _prod(p, 9, 10, 1, 2, True, twice=True)
+        _prod(p, 5, 6, 3, 4, True)
+        p.ash(13, 13, -12)
+        p.iop(15, 15, "+", 13)
+        p.ash(15, 15, -11)
+        p.iop(14, 14, "+", 14)
+        p.iop(14, 14, "+", 15)                 # floor(sum / 2^23)
+        limi(p, 14)
+        p.fpass(3, 1)
+        p.fpass(4, 2)
+        _split(p, 14, 1, 2)
+        i2f(p, 7, 14)
+        p.stpost(2, 7)
+    p.loop(_a(L, "n4"), 16, one)
+    p.ldi(7, -1, 2)
+    p.sti(0, 0, 7)
+    p.ldi(7, -2, 2)
+    p.sti(1, 0, 7)
+
+
 def _formant_loop(p: Prog, L: C.Layout) -> None:
     """k = 0..7: formant k & 3's targets (series for k < 4, parallel after), ramps, filter"""
     for k, (m, r) in enumerate(FORM):
@@ -1106,6 +1187,8 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
         p.st(_a(L, f"m{k}"), 1)
         p.fconst(1, s24(r) * Q23)
         p.st(_a(L, f"r{k}"), 1)
+        p.iconst(1, s24(r))
+        p.st(_a(L, f"R{k}i"), 1)
     p.iconst(0, 0)
     p.st(_a(L, "kk"), 0)
 
@@ -1209,7 +1292,14 @@ def _formant_loop(p: Prog, L: C.Layout) -> None:
                                     p.iconst(12, _a(L, "C30")), p.seti(2, 12)),
                   lambda: (p.iconst(12, _a(L, "C30")), p.seti(5, 12),
                            p.iconst(12, _a(L, "EXC")), p.seti(2, 12)))
-            p.call("vo6_ser", lambda: _res_body(p, L, False))
+            p.ld(9, _a(L, "f"))
+            p.lsh(9, 9, 2)
+            p.iconst(12, _a(L, "R0i"))
+            p.iop(9, 12, "+", 9)
+            p.seti(1, 9)
+            p.ldi(9, 0, 1)
+            p.st(_a(L, "R"), 9)
+            p.call("vo6_ser", lambda: _ser_body(p, L))
 
         def parallel():
             p.iconst(12, 4)

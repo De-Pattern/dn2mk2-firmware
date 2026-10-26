@@ -733,7 +733,8 @@ def test_v023_slices_made_on_the_instrument_come_from_the_slice_area():
         nz = play(2 * (k + 1))
         assert abs(min(nz) - a / n) < 0.05 and abs(max(nz) - b / n) < 0.05, k
     assert SM.SLICE_AREA + SM.POOL_SLOTS * SM.SLICE_TABLE_BYTES <= SM.REC_END
-    assert SM.REC_OFFSET + SM.REC_BYTES == SM.SLICE_AREA
+    assert SM.REC_OFFSET + SM.REC_BYTES == SM.TABLE_AREA      # v0.26: then the tables the ColdFire sends
+    assert SM.TABLE_AREA + SM.TABLE_ROOM == SM.SLICE_AREA and SM.TABLE_AREA <= SM.TABLE_READY < SM.SLICE_AREA
 
 
 def test_idle_link_sends_the_play_positions():
