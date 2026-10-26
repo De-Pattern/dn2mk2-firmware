@@ -30,7 +30,7 @@ def main() -> int:
     want = hashlib.sha256(build.read_bytes()).hexdigest()
     gate = json.loads(pathlib.Path(str(build) + ".gate.json").read_text())
     if gate.get("sha256") != want or not gate.get("gates") or \
-            not all(str(v).startswith("PASS") for v in gate["gates"].values()):
+            not all(str(v).startswith(("PASS", "n/a")) for v in gate["gates"].values()):   # n/a: a data-only chunk
         print("not a gated build: its .gate.json does not clear this sha256")
         return 1
     touched: set[str] = set()

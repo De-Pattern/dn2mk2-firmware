@@ -94,6 +94,7 @@ async function sha256(buf) {
   const h = await crypto.subtle.digest("SHA-256", buf);
   return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
+function label(b) { return (/^\d/.test(b.version) ? "v" : "") + b.version; }   // MNM-1: a separate line, no v
 function cur() { return builds.find(b => b.version === $("#ver").value); }
 function inputs() { const b = cur(); return (b && b.inputs) || ["dn2", "dt2", "md"]; }
 function ready() {
@@ -108,7 +109,7 @@ function log(t) { const l = $("#log"); l.textContent += t + "\n"; l.scrollTop = 
 
 fetch("patcher/builds.json", { cache: "no-cache" }).then(r => r.json()).then(list => {
   builds = list;
-  $("#ver").innerHTML = list.map((b, i) => `<option value="${b.version}">v${b.version} ${b.name}${i ? "" : " (latest)"}</option>`).join("");
+  $("#ver").innerHTML = list.map((b, i) => `<option value="${b.version}">${label(b)} ${b.name}${i ? "" : " (latest)"}</option>`).join("");
   $("#verNote").textContent = list.length ? "sha256 " + list[0].sha256.slice(0, 12) + "…" : "none";
   ready();
 }).catch(() => { $("#verNote").textContent = "could not load the list"; $("#verNote").className = "pill bad"; });
@@ -204,13 +205,13 @@ $("#go").onclick = () => {
       out = m.done;
       setState("matches the cleared build", "ok");
       $("#result").className = "note ok";
-      $("#result").textContent = `Built in ${secs} s. sha256 ${got} — exactly v${b.version}'s cleared file. Save it, then flash.`;
+      $("#result").textContent = `Built in ${secs} s. sha256 ${got} — exactly ${label(b)}'s cleared file. Save it, then flash.`;
       $("#save").disabled = false;
     } else {
       failed = true;
       setState("does not match: do not flash", "bad");
       $("#result").className = "note bad";
-      $("#result").textContent = `The result (sha256 ${got.slice(0, 16)}…) is not v${b.version}'s cleared file (${b.sha256.slice(0, 16)}…). Do not flash anything from this. Check the files are the versions named above.`;
+      $("#result").textContent = `The result (sha256 ${got.slice(0, 16)}…) is not ${label(b)}'s cleared file (${b.sha256.slice(0, 16)}…). Do not flash anything from this. Check the files are the versions named above.`;
     }
     ready();
   };
