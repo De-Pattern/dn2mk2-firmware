@@ -1860,6 +1860,12 @@ def mnm_words(k: int, knobs=None) -> dict:
     return {slot: PL.word_of(x / 127.0, top, lo) for (_rid, slot, lo, top), x in zip(PM.PARAMS, knobs)}
 
 
+def _slim(run: dict) -> dict:
+    """a run without the emulator's state (the Monomachine step keeps 16 runs: memory)"""
+    run.pop("state", None)
+    return run
+
+
 def step_mnm(init, sound, machines, blocks) -> dict:
     """Each Monomachine machine (its own machine type, PERC's voice) on track 0, beside the
     other on track 1: every such track's buffer and state bit-exact to dnfw.perc.program run
@@ -1882,11 +1888,11 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     runs = {}
     for k, name in enumerate(MM.NAMES):
         t0 = time.perf_counter()
-        runs[f"{name}"] = run_blocks(init, frames(k, other=(k + 1) % len(MM.NAMES)), blocks)
-        runs[f"{name}_72"] = run_blocks(init, frames(k, note=0x4800), blocks)
-        runs[f"{name}_tops"] = run_blocks(init, frames(k, knobs=[127] * 8), blocks)
+        runs[f"{name}"] = _slim(run_blocks(init, frames(k, other=(k + 1) % len(MM.NAMES)), blocks))
+        runs[f"{name}_72"] = _slim(run_blocks(init, frames(k, note=0x4800), blocks))
+        runs[f"{name}_tops"] = _slim(run_blocks(init, frames(k, knobs=[127] * 8), blocks))
         print(f"    {name}: {round(time.perf_counter() - t0)} s", flush=True)
-    runs["silent"] = run_blocks(init, frames(0, trig=()), blocks)
+    runs["silent"] = _slim(run_blocks(init, frames(0, trig=()), blocks))
     # the budget: SID on tracks 0..3 at once; those whose cost fits PP.MNM_BUDGET in track
     # order play, the rest are silent
     sid = MM.NAMES.index("SID 6581")
@@ -1899,7 +1905,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             for slot, w in mnm_words(sid).items():
                 f.param(t, slot, w)
         return f.to_bytes()
-    runs["budget"] = run_blocks(init, four, blocks)
+    runs["budget"] = _slim(run_blocks(init, four, blocks))
     ok_runs = all(r["ok"] for r in runs.values())
     exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
     peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in MM.NAMES}
