@@ -316,8 +316,9 @@ def vo6_words() -> tuple[int, ...]:
     out = [s24(v) for v in words(*VO_C1)] + [s24(v) for v in words(*VO_COS)]
     out += [s24(Y.get(VO_BLIT[0] + k, 0)) for k in range(VO_BLIT[1])]
     out += list(vo6_log()) + list(vo6_clen())
-    out += [v for row in VO_TRIG for v in row]
-    out += vo6_cons()
+    out += [row[f] for f in range(VO_TRIG_W) for row in VO_TRIG]     # field-major: zpack packs it
+    c = vo6_cons()
+    out += [c[VO_CONS_W * k + f] for f in range(VO_CONS_W) for k in range(21)]
     return tuple(out)
 
 
@@ -363,7 +364,8 @@ VO_OPS, VO_CONS_W = 4, 4 * 8 + 8
 
 
 def vo6_cons() -> list[int]:
-    """VO_CONS as table words: per consonant 4 ops x 8, then kind, xk, c0..c4, y40"""
+    """VO_CONS as rows: per consonant 4 ops x 8, then kind, xk, c0..c4, y40 (vo6_words stores them
+    field-major: word f of consonant k at 21 f + k)"""
     out = []
     for ops, kind, xk, co, y40 in VO_CONS:
         for k in range(VO_OPS):

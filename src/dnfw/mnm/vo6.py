@@ -269,14 +269,16 @@ def trig(p: Prog, L: C.Layout) -> None:
     C.knob(p, 3, 5)
     _tab(p, L, 9, "clen", 3)
     p.st(_a(L, "x1t"), 9)
-    # the row (16 words at trig + 64 k), read in order through I1
-    p.lsh(3, 2, 6)
+    # the row: field f at trig + 4 (21 f + k) (field-major), read in order
+    p.lsh(3, 2, 2)
     p.iconst(12, L.VO["trig"])
     p.iop(3, 12, "+", 3)
     p.seti(1, 3)
+    field = [0]
 
     def nxt(d):
-        p.ldpost(d, 1)
+        p.ldi(d, 21 * field[0], 1)
+        field[0] += 1
         _word(p, d, d)
 
     def plus_x1(name):                         # c, then (+ x1?)
@@ -932,10 +934,11 @@ def _vals(p: Prog, L: C.Layout, d: int, r: int) -> None:
 
 
 def _op(p: Prog, L: C.Layout) -> None:
-    """one offset op from the row at I0 (8 words): O[m1] = MPY(lim(C - V[v]), W), O[m2] = MPY(that, g2)"""
+    """one offset op at I0 (8 fields, 21 words apart): O[m1] = MPY(lim(C - V[v]), W),
+    O[m2] = MPY(that, g2)"""
     regs = (9, 10, 11, 4, 13, 5, 14, 15)       # v, C, wm, wv, wc, m1, m2, g2 (ints)
-    for r in regs:
-        p.ldpost(r, 0)
+    for i, r in enumerate(regs):
+        p.ldi(r, 21 * i, 0)
         _word(p, r, r)
     for r, name in ((13, "kk"), (14, "src"), (15, "dst")):
         p.st(_a(L, name), r)
@@ -987,35 +990,25 @@ def _op(p: Prog, L: C.Layout) -> None:
 def _render(p: Prog, L: C.Layout) -> None:
     """CONS's renderer from its row (rom.VO_CONS): offsets, the unvoiced source, y40"""
     row = 4 * (4 * 8 + 8)
-    ls(p, 1, "k")
-    p.lsh(2, 1, 5)
-    p.lsh(1, 1, 3)
-    p.ipass(12, 2)
-    p.iop(1, 12, "+", 1)                       # 40 k
+    ls(p, 1, "k")                              # field f of consonant k at cons + 4 (21 f + k)
     p.lsh(1, 1, 2)
     p.iconst(12, L.VO["cons"])
     p.iop(1, 12, "+", 1)
     p.st(_a(L, "row"), 1)
-    addk(p, 2, 1, 4 * 32)
-    p.seti(0, 2)
-    for name in ("kind", "xk"):
-        p.ldpost(3, 0)
+    p.seti(0, 1)
+    for f, name in ((32, "kind"), (33, "xk"), (39, "st")):     # st: y40's rule
+        p.ldi(3, 21 * f, 0)
         _word(p, 3, 3)
         p.st(_a(L, name), 3)
     # the coefficients' 12-bit halves (CO, floats) for the exact biquad
     p.iconst(12, _a(L, "CO"))
     p.seti(2, 12)
-
-    def coef():
-        p.ldpost(3, 0)
+    for f in range(34, 39):
+        p.ldi(3, 21 * f, 0)
         _word(p, 3, 3)
         _split(p, 3, 4, 5)
         p.stpost(2, 4)
         p.stpost(2, 5)
-    p.loop(_a(L, "n3"), 5, coef)
-    p.ldpost(3, 0)
-    _word(p, 3, 3)
-    p.st(_a(L, "st"), 3)                       # y40's rule
     p.ld(9, _a(L, "kind"))
     p.iconst(12, 4)
     p.if_(9, "EQ", 12, lambda: _trill(p, L), kind="i")
@@ -1036,7 +1029,7 @@ def _render(p: Prog, L: C.Layout) -> None:
         p.seti(0, 1)
         _op(p, L)
         p.ld(1, _a(L, "opp"))
-        addk(p, 1, 1, 32)
+        addk(p, 1, 1, 4 * 21 * 8)
         p.st(_a(L, "opp"), 1)
     p.loop(_a(L, "n2"), 4, op)
     # the source: 0 the noise / 8; 1 its biquad; 2 the excitation's biquad and the crossfade;
