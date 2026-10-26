@@ -132,9 +132,8 @@ GRAN_BUF_DDR, GRAN_BUF_STRIDE = 0x81400000, 0x20000
 # its scratch (the decimator's buffers), then 16 slots' own state, 2 KB each
 MNM_SCRATCH_DDR = 0x81200000
 MNM_STATE_DDR, MNM_STATE_STRIDE = 0x81204000, 0x800
-# its tables (from the owner's Monomachine OS) come over the fast link into the pool's
-# last 256 KB (the last recorder slot's tail: a recording stops at 66 s, 6.3 of its 8 MB)
-MNM_TABLES_DDR = SMP_POOL_DDR + (128 << 20) - (256 << 10)
+# its tables (from the owner's Monomachine OS) are decoded with the Machinedrum's, after
+# the sine (dnfw.md.core.TABLE_LAYOUT["mnm"]), from what the ColdFire sends at power-on
 
 DDR_FLOOR = 0x80600000                       # nothing of ours below this in DDR
 IDLE_DM = 0x2DEA00                           # idle_load.asm
@@ -314,8 +313,8 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
          _smp_tables()),
         ("Machinedrum sine and tables (zeros: the DSP decodes them; v0.24)", MD_TABLES_DDR,
          bytes(_md_core().TABLE_LAYOUT[_md_core().SHIPPED][0])),
-        ("Machinedrum tables (from the owner's MD firmware)", MD_TABLES_DDR + _md_core().TABLE_LAYOUT[_md_core().SHIPPED][0],
-         _md_core().tables_bytes()),
+        # v0.26: what ships (the host's pitch table and zpack) comes over the fast link from
+        # the ColdFire at power-on (dnfw.mods.waverider's table chunk): not in this stream
         ("Machinedrum voices: 16 slots x 1 KB (zeros)", MD_STATE_DDR, bytes(16 * _md_core().MD_STRIDE)),
         ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE)),
         ("sample pool: its empty directory's magic and count (v0.17: no test sounds; the +Drive's load in)",

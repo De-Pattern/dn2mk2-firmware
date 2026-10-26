@@ -60,6 +60,26 @@ here they read the 32 ROM DigiPRO waves (twice).
 - **The increments**: on the DSP each machine's `pitch` computes them in float from the
   DN2's pitch; `dnfw.mnm.exact` computes them in the Monomachine's integer arithmetic.
 
+## The tables, over the fast link
+
+The DSP image had about 50 KB to spare, so the tables no longer ride in it. The ColdFire
+carries them (a CODE chunk at `TABLE_LOAD`, 0x47000000: magic, length, data) and sends them
+first over the sample link at power-on (`csrc/sampler/link.c`, K_TABLES), to the pool's
+table area (`dnfw.sampler.machines.TABLE_AREA`, 512 KB below the slice area); K_READY then
+writes `TABLE_MAGIC` at `TABLE_READY`. The DSP's `table_fill` (`dnfw.md.core`) waits for
+that word, then decodes zpack 2,048 words a block, as before. PERC's voices, the Machinedrum
+machines' too, stay silent until the fill is whole (about 40 blocks).
+
+What ships: the Machinedrum's host pitch table and zpack, which now also carries the
+Monomachine's tables after the sine (`TABLE_LAYOUT["mnm"]`, starting a block). They are
+stored compactly, and the fill restores them exactly:
+- DPRO-WAVE's ROM words as (hi, lo) pairs (lo = the low 12 bits, signed; hi = the rest),
+  which `_mnm_fix` turns back into (hi x 4096 + lo, lo x 4096): the word and its low sample
+  << 12, exact in float (`dnfw.mnm.rom.packed_words`);
+- SID's combined waveforms (8 bits << 16) as the 8 bits; `sid.py` scales them back.
+
+The shipped tables came to 65 KB (94 KB with the words as they are).
+
 ## Checks
 
 `test/test_mnm.py`: every golden case of every machine in run mode, with the increments

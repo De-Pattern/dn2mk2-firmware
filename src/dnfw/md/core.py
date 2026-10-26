@@ -63,10 +63,18 @@ class Layout:
     """Where the MD voices live (dnfw.waverider.dsp gives the addresses). DELAY: the
     P-I machines' delay lines, PI_DELAY_STRIDE a slot (default 1 MB past the state)."""
 
-    def __init__(self, state: int, scratch: int, tables: int, delay: int | None = None):
+    def __init__(self, state: int, scratch: int, tables: int, delay: int | None = None,
+                 shipped: int | None = None, ready: int | None = None):
         self.state, self.tables = state, tables
         self.delay = state + 0x100000 if delay is None else delay
         self.T = {name: tables + off for name, (off, _n) in TABLE_LAYOUT.items()}
+        # v0.26: what ships (the host's pitch table, zpack) arrives over the fast link at
+        # SHIPPED, and READY holds TABLE_MAGIC once it is all there (None: in place, ready)
+        if shipped is not None:
+            base = TABLE_LAYOUT[SHIPPED][0]
+            for name in ("hostP", "zpack", "_end"):
+                self.T[name] = shipped + TABLE_LAYOUT[name][0] - base
+        self.ready = ready
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
 
 
@@ -325,6 +333,11 @@ def _table_layout() -> dict[str, tuple[int, int]]:
         at += 4 * n
     out["sine"] = (at, SINE_N)                 # last: the tables are whole first (13 blocks)
     at += 4 * SINE_N
+    out["mpad"] = (at, -(at // 4) % Z_PER_BLOCK)  # the Monomachine's start a block (table_fill's fix)
+    at += 4 * out["mpad"][1]
+    n = len(_mnm_values())                     # v0.26: then the Monomachine's (dnfw.mnm.rom)
+    out["mnm"] = (at, n)
+    at += 4 * n
     nz = at // 4
     out["zpad"] = (at, -nz % Z_PER_BLOCK)       # rounds the decoded words to whole blocks
     at += 4 * out["zpad"][1]
@@ -349,7 +362,22 @@ def _z_values() -> list[int]:
         vals += [_s24(x) for x in rom.dsp_table(name)]
     vals += md_sine_words()
     vals += [0] * (-len(vals) % Z_PER_BLOCK)
+    vals += _mnm_values()
+    vals += [0] * (-len(vals) % Z_PER_BLOCK)
     return vals
+
+
+def _mnm_values() -> list[int]:
+    """v0.26: the Monomachine machines' tables (signed 24-bit), when the owner's
+    Monomachine OS is there (dnfw.mnm.rom.table_words; none without it)"""
+    from ..mnm import rom as mnm_rom
+    return list(mnm_rom.packed_words()) if mnm_rom.available() else []
+
+
+def _mnm_pairs() -> int:
+    """The Monomachine's (hi, lo) pairs at its tables' start (dnfw.mnm.rom.packed_words)."""
+    from ..mnm import rom as mnm_rom
+    return mnm_rom.WAVE_WORDS // 2 if mnm_rom.available() else 0
 
 
 def _z_width(xs: list[int]) -> int:
@@ -477,13 +505,66 @@ def _z_read(p: Prog, L: Layout, n: int, signed: bool) -> None:
     p.st(C["cw"], 0)
 
 
+def _mnm_fix(p: Prog, L: Layout) -> None:
+    """v0.26: in a block of the Monomachine's (hi, lo) pairs (they start a block: "mpad"),
+    each pair -> (hi x 4096 + lo, lo x 4096): the ROM word and its low sample << 12, both
+    exact in float (dnfw.mnm.rom.packed_words). Clobbers R0-R2, R8-R14, I1."""
+    pairs = _mnm_pairs()
+    if not pairs:
+        return
+    C = L.C
+    w0 = TABLE_LAYOUT["mnm"][0] // 4
+    p.ld(8, C["fill"])
+    p.iconst(12, w0)
+    p.iop(0, 8, "-", 12)                       # the block's word, from the pairs' start
+
+    def inside():
+        p.ld(1, C["fill"])
+        p.lsh(1, 1, 2)
+        p.iconst(12, L.tables)
+        p.iop(13, 12, "+", 1)                  # R13: the block's first word
+        p.iconst(14, L.tables + 4 * (w0 + 2 * pairs))  # R14: past the last pair
+        p.fconst(10, 4096.0)
+
+        def pair():
+            def fix():
+                p.seti(1, 13)
+                p.ldi(8, 0, 1)
+                p.ldi(9, 1, 1)
+                p.fop(8, 8, "*", 10)
+                p.fop(8, 8, "+", 9)
+                p.fop(9, 9, "*", 10)
+                p.sti(0, 1, 8)
+                p.sti(1, 1, 9)
+            p.if_(13, "LT", 14, fix, kind="i")
+            p.iconst(2, 8)
+            p.iop(13, 13, "+", 2)
+        p.loop(C["h"], Z_PER_BLOCK // 2, pair)
+
+    def nonneg():
+        p.iconst(12, 2 * pairs)
+        p.if_(0, "LT", 12, inside, kind="i")
+    p.ifz(0, "GE", nonneg)
+
+
 def table_fill(p: Prog, L: Layout) -> None:
     """Z_PER_BLOCK more words of the sine and the Q23 tables from zpack, from C['fill']
     (0 at power-on, as are the bit position C['cw'] and the last words C['cs'], C['cv'],
     C['ufill'])
     until all Z_N are (C['fill'] = Z_N). Each word x is stored as FLOAT x BY -23. Clobbers
-    R0-R13, I1, I2."""
+    R0-R14, I1, I2 (v0.26: and the Monomachine pairs fixed, _mnm_fix)."""
     C = L.C
+    if L.ready is not None:                    # v0.26: not until the ColdFire has sent them
+        from ..sampler.machines import TABLE_MAGIC
+        p.ld(0, L.ready)
+        p.iconst(12, TABLE_MAGIC)
+        skip = p.label("zwait")
+        p.e("COMP(R0, R12);")
+        p.jump("NE", skip) if not p.run else None
+        if p.run and p.r[0] != TABLE_MAGIC:
+            return
+    else:
+        skip = None
     p.ld(0, C["fill"])
     p.iconst(12, Z_N)
     p.e("COMP(R0, R12);")
@@ -540,8 +621,11 @@ def table_fill(p: Prog, L: Layout) -> None:
                 p.stpost(2, 4)
             p.loop(C["n3"], Z_GROUP, word)
         p.loop(C["tmp"], Z_PER_BLOCK // Z_GROUP, group)
+        _mnm_fix(p, L)
         p.ld(0, C["fill"])
         p.iconst(12, Z_PER_BLOCK)
         p.iop(0, 12, "+", 0)
         p.st(C["fill"], 0)
     p._branch(lambda: p.r[0] < Z_N, "LT", more, None)
+    if skip is not None:
+        p.place(skip)

@@ -277,6 +277,8 @@ def _mix(p: Prog, L: C.Layout) -> None:
             p.iop(8, 12, "+", 8)
             p.seti(3, 8)
             p.ldi(9, 0, 3)
+            p.fconst(12, 65536.0)                 # the tables hold the words >> 16
+            p.fop(9, 9, "*", 12)
             p.stpost(5, 9)
             p.stpost(5, 9)
         p.ld(6, W["c"])

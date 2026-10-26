@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from dnfw.mnm import bench, rom, sid, wave
+from dnfw.mnm import bench, ddrw, dens, rom, sid, wave
 from dnfw.mnm import core as C
 
-MACHINES = {"WAVE": wave, "SID": sid}
+MACHINES = {"WAVE": wave, "SID": sid, "DENS": dens, "DDRW": ddrw}
 pytestmark = pytest.mark.skipif(not (rom.available() and bench.GOLDEN.is_dir()),
                                 reason="needs the owner's Monomachine OS and the golden runs")
 

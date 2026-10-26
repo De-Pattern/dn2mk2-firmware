@@ -117,7 +117,15 @@ REC_END = 128 << 20                        # v0.22: the recordings' area stays 9
 # slot, in the recordings' area's last 128 KB (proven RAM; loaded at power-on like the rest)
 SLICE_TABLE_BYTES = 768                    # 64 x 12
 SLICE_AREA = REC_END - (128 << 10)
-REC_BYTES = SLICE_AREA - REC_OFFSET        # v0.23: the recordings' area ends at the slice area
+# v0.26: the tables the ColdFire sends at power-on (the Machinedrum's and the Monomachine's,
+# from the owner's firmware files: dnfw.md.core.tables_bytes), in the 512 KB before the slice
+# area; READY (that range's last 512 bytes) holds TABLE_MAGIC once every chunk checked out
+TABLE_ROOM = 512 << 10
+TABLE_AREA = SLICE_AREA - TABLE_ROOM
+TABLE_READY = SLICE_AREA - 512
+TABLE_MAGIC = 0x4D4E5442                   # "BTNM" in memory
+TABLE_LOAD = 0x47000000                    # their bytes in the ColdFire's RAM (a CODE chunk): magic, length, data
+REC_BYTES = TABLE_AREA - REC_OFFSET        # v0.23: the recordings' area ends at the slice area (v0.26: the tables)
 USER_HOLE = (REC_OFFSET, REC_END)           # yours: 0..96 MB, then 128..400 MB (dn2samples.py skips the hole)
 HOLE_BYTES = REC_END - REC_OFFSET              # what a send skips: the recordings and the slice area
 USER_BYTES = POOL_BYTES - HOLE_BYTES - DATA_OFFSET

@@ -52,10 +52,10 @@ _TM: dict[int, int] = {}
 
 def table_mem(L: C.Layout) -> dict[int, int]:
     if not _TM:
-        for k, v in enumerate(rom.wave_samples()):
+        for k, v in enumerate(rom.table_words()):     # as table_fill stores them
             _TM[L.tables + 4 * k] = bits(v * C.Q23)
-        for k, v in enumerate(rom.words(*rom.COMB)):
-            _TM[L.COMB + 4 * k] = bits(rom.s24(v) * C.Q23)
+        from . import dpro
+        _TM.update(dpro.bench_words(L))           # DPRO's stand-in, as the DSP builds it
         from ..perc import machines as PM
         data, _ = PM.tables_bytes()
         for k in range(0, len(data), 4):

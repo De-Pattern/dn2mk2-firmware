@@ -67,7 +67,11 @@ def main() -> int:
     man = outdir / "builds.json"
     rows = json.loads(man.read_text()) if man.exists() else []
     rows = [r for r in rows if r["version"] != version]
-    rows.insert(0, {"version": version, "name": name, "sha256": want, "zip": zname,
+    row_inputs = ["dn2", "dt2", "md"]
+    mnm = sys.modules.get("dnfw.mnm.rom")      # v0.26: the build read the Monomachine OS too
+    if mnm is not None and str(mnm.path().resolve()) in touched:
+        row_inputs.append("mnm")
+    rows.insert(0, {"version": version, "name": name, "sha256": want, "zip": zname, "inputs": row_inputs,
                     "zip_sha256": hashlib.sha256(zbuf.getvalue()).hexdigest(),
                     "file": f"DN2mod_v{version}_{name}_OS1.11.syx"})
     man.write_text(json.dumps(rows, indent=1) + "\n")

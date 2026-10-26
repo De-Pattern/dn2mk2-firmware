@@ -20,6 +20,8 @@ BUF = 0x00300000                          # where this harness puts the slot's b
 def layout(state=None, scratch=None, tables=None, sin=None) -> M.Layout:
     """Where the build puts PERC (dnfw.waverider.dsp), unless told otherwise."""
     from ..waverider import dsp
+    from ..sampler import machines as SM
+    from ..md import core as MDC
     state = dsp.PERC_STATE_DM if state is None else state
     scratch = dsp.PERC_SCRATCH_DM if scratch is None else scratch
     tables = dsp.PERC_TABLES_DDR if tables is None else tables
@@ -29,7 +31,10 @@ def layout(state=None, scratch=None, tables=None, sin=None) -> M.Layout:
         sin = dsp.SHFT_TABLES_DDR + at["sin"]
     return M.Layout(state=state, scratch=scratch, tables=tables, sin=sin,
                     md_state=dsp.MD_STATE_DDR, md_tables=dsp.MD_TABLES_DDR,
-                    mnm_scratch=dsp.MNM_SCRATCH_DDR, mnm_tables=dsp.MNM_TABLES_DDR)
+                    mnm_scratch=dsp.MNM_SCRATCH_DDR,
+                    mnm_tables=dsp.MD_TABLES_DDR + MDC.TABLE_LAYOUT["mnm"][0],
+                    md_shipped=dsp.SMP_POOL_DDR + SM.TABLE_AREA,
+                    md_ready=dsp.SMP_POOL_DDR + SM.TABLE_READY)
 
 
 def table_words(L: M.Layout) -> dict[int, int]:

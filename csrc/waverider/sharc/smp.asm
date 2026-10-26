@@ -405,11 +405,11 @@ wr_sm_else_30.:
       R6 = LSHIFT R6 BY -8;
       R12 = 0xffff;
       R6 = R6 AND R12;
-      R12 = 0xfe80;
+      R12 = 0xfa80;
       R6 = MIN(R6, R12);
       R6 = LSHIFT R6 BY 9;
       DM(0x2df748) = R6;
-      R12 = 0x1fe0000;
+      R12 = 0x1f60000;
       R13 = PASS R6;
       R7 = R12 - R13;
       R7 = LSHIFT R7 BY -1;
@@ -457,11 +457,11 @@ wr_sm_else_35.:
       R6 = LSHIFT R6 BY -8;
       R12 = 0xffff;
       R6 = R6 AND R12;
-      R12 = 0xfe80;
+      R12 = 0xfa80;
       R6 = MIN(R6, R12);
       R6 = LSHIFT R6 BY 9;
       DM(0x2df748) = R6;
-      R12 = 0x1fe0000;
+      R12 = 0x1f60000;
       R13 = PASS R6;
       R7 = R12 - R13;
       R7 = LSHIFT R7 BY -1;
@@ -508,11 +508,11 @@ wr_sm_else_36.:
       R6 = LSHIFT R6 BY -8;
       R12 = 0xffff;
       R6 = R6 AND R12;
-      R12 = 0xfe80;
+      R12 = 0xfa80;
       R6 = MIN(R6, R12);
       R6 = LSHIFT R6 BY 9;
       DM(0x2df748) = R6;
-      R12 = 0x1fe0000;
+      R12 = 0x1f60000;
       R13 = PASS R6;
       R7 = R12 - R13;
       R7 = LSHIFT R7 BY -1;
@@ -4125,7 +4125,7 @@ wr_sm_next_93.:
       R12 = 0x10;
       COMP(R0, R12);
       IF LT JUMP 0xbf245d;                   // -> wr_sm_slot_92.
-      JUMP 0x170280;                    // rings.asm's wr_rings, then CZ, then PING (which restores)
+      JUMP 0x170280;                    // ping.asm's wr_ping (which restores; v0.26: RESONATOR and CZ gone)
 .GLOBAL wr_sm_sub_exp2.;
 wr_sm_sub_exp2.:
       R12 = 0x41800000;                 // 16.0

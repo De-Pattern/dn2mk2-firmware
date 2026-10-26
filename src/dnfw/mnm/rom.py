@@ -139,3 +139,181 @@ def wave_samples() -> tuple[int, ...]:
     for w in words(*WAVES):
         out += [s24(w), s24(w << 12)]
     return tuple(out)
+
+
+# -- DPRO-DENS / DPRO-DDRW (v0.26) ----------------------------------------------------------
+PCH = (0x101AFB, 128)                         # DENS: PCH ratio, knob -> r x 0x200000
+WID = (0x101BFB, 128), (0x101CFB, 128)        # DDRW: WID detune down / up (0x400000 unison)
+EXP = (0x140000, 2048)                        # the kernels' exp table
+
+
+@functools.lru_cache(maxsize=1)
+def kernel_xy() -> tuple[dict[int, int], dict[int, int]]:
+    """DSP A's kernel image (block 1): its internal X and Y memory records."""
+    d = blocks()[1]
+    X: dict[int, int] = {}
+    Y: dict[int, int] = {}
+    o = 6 if d[0] == 3 else 0
+    if d[o] == 4:
+        o += 6
+    while o < len(d):
+        t = _w(d, o)
+        if t > 2:
+            break
+        a, n = _w(d, o + 3), _w(d, o + 6)
+        if t:
+            sp = X if t == 1 else Y
+            for k in range(n):
+                sp[a + k] = _w(d, o + 9 + 3 * k)
+        o += 9 + 3 * n
+    return X, Y
+
+
+@functools.lru_cache(maxsize=1)
+def interp_words() -> tuple[int, ...]:
+    """The DDRW/DENS interpolator (kernel P:0x421): 32 phases x 5 taps as (B_i, 2 A_i) pairs,
+    signed Q23 words: B from x/y:0x334.. (stride 0x20), A the slope set (the residual's product
+    is MPYSU: 2 A). The kernel's internal X/Y memory (block 1)."""
+    X, Y = kernel_xy()
+    out = []
+    for ph in range(32):
+        c = 0x334 + ph
+        B = (Y[c + 0x20], X[c + 0x60], Y[c + 0x80], Y[c + 0xC0], Y[c + 0xE0])
+        A = (Y[c], Y[c + 0x40], Y[c + 0x60], Y[c + 0xA0], X[c + 0xC0])
+        for b, a in zip(B, A):
+            out += [s24(b), 2 * s24(a)]
+    return tuple(out)
+
+
+DEC2 = (0x1583E8, 0x4092FF, 0x66E24C, 0, 0x05DA6B, 0x2A8F65, 0x54E3CE, 0, 0x778898)
+"""the kernel's 2:1 allpass decimator (P:0x458): nine stages' c, even samples' four, odd's five"""
+HALFBAND = (-0x40000, 0, 0x240000, 0x400000, 0x240000, 0, -0x40000)
+"""the Digibank stand-in's halfband (taps -3..3: -1/32, 0, 9/32, 1/2), dnfw.mnm.dpro.build"""
+
+
+def dpro_words() -> tuple[int, ...]:
+    """DPRO-DENS / DPRO-DDRW's tables, signed words (the DSP holds each as FLOAT w BY -23), in
+    the order dnfw.mnm.core.DP_TABLES lays them out: the interpolator (320), the decimator's
+    c (9), the stand-in's halfband (7), PCH (128: r x 2^21 = 1.0), WID down / up less 0x400000
+    (2 x 128), the bit reduction (X48, X49: 2 x 128). TIME (0x7FFFFF/(k+1)) is computed."""
+    out = list(interp_words()) + [s24(c) for c in DEC2] + list(HALFBAND)
+    out += [s24(v) for v in words(*PCH)]
+    out += [s24(v) - 0x400000 for t in WID for v in words(*t)]
+    out += list(br_table())
+    return tuple(out)
+
+
+@functools.lru_cache(maxsize=1)
+def br_table() -> tuple[int, ...]:
+    """DDRW's bit reduction (P:0x147BE5) for BR 0..127: (X48, X49) pairs, the words the
+    reducer reads: e = 192 BR (1/2048 octave), n = e >> 11, f = e & 0x7FF; X48 = a1 of
+    (exp[f] >> 13) << n, X49 = a1 of exp[0x7FF - f] >> 8 >> n (accumulators, a1 = >> 24)."""
+    ex = words(*EXP)
+    out = []
+    for k in range(128):
+        e = 192 * k
+        n, f = e >> 11, e & 0x7FF
+        a = (s24(ex[f]) << 24) >> 13 << n
+        b = (s24(ex[(0x7FF - f) & 0x7FF] if f else ex[0x7FF]) << 24) >> 8 >> n
+        out += [(a >> 24) & 0xFFFFFF, (b >> 24) & 0xFFFFFF]
+    return tuple(out)
+
+
+@functools.lru_cache(maxsize=1)
+def table_words() -> tuple[int, ...]:
+    """Every table the machines read, in the order dnfw.mnm.core.Layout addresses them
+    (signed words; the DSP holds each as FLOAT w BY -23): DPRO-WAVE's samples, then
+    SID's combined waveforms >> 16 (each render scales them back), then DPRO-DENS/DDRW's
+    (dpro_words; their Digibank stand-in the DSP builds itself, dnfw.mnm.dpro.build), then
+    VO-6's (vo6_words)."""
+    return wave_samples() + comb8() + dpro_words() + vo6_words()
+
+
+WAVE_WORDS = 33 * 512                         # the samples' words at the tables' start
+
+
+def packed_words() -> tuple[int, ...]:
+    """table_words() as zpack carries them: DPRO-WAVE's samples as (hi, lo) pairs, one per
+    ROM word w (lo = its low 12 bits, signed; hi = (w - lo) >> 12), which the DSP's fill
+    turns back into (w, lo << 12) (dnfw.md.core.table_fill: hi x 4096 + lo, lo x 4096, exact
+    in float); then the rest as they are. Half the bits of the words themselves."""
+    out = []
+    for w in words(*WAVES):
+        lo = s24(w << 12) >> 12
+        out += [(s24(w) - lo) >> 12, lo]
+    return tuple(out) + table_words()[WAVE_WORDS:]
+
+
+def comb8() -> tuple[int, ...]:
+    """SID's combined waveforms as the tables hold them: each word >> 16 (8 bits << 16)."""
+    return tuple(s24(w) >> 16 for w in words(*COMB))
+
+
+# -- VO-6 (v0.26, dnfw.mnm.vo6) -------------------------------------------------------------
+VO_C1 = (0x1001D1, 4 * 0x620)                 # the four resonators' input gains (j = F 0x620 >> 23)
+VO_COS = (0x141B23, 0x614)                    # cos(2 pi f / 44100) on F's index (i = F 0x614 >> 23)
+VO_BLIT = (0x131, 0x333 - 0x131 + 1)          # the pulse's shape: DSP A's kernel, internal Y
+VO_LOG = (0x1445C6, 256)                      # the AGC's log2 mantissas
+# the trig's consonant set-ups (P:0x146577.. through x:0x101A51 + k), one row a consonant: x32,
+# y32 = x1?, x33, y33, x34, x35, x36 (c, + x1?), y36, x37 (0: c; 1: c0 + kk CVOL / 128), x40 (c,
+# + x1?), V-SW?, B's y39 (the 56300's immediates; x1 the CLEN term)
+VO_TRIG = (
+    (0x76E3, 0, 0xDC, 0x4A4E, 0xBE3, 2, 0, 0, 0xEDC6, 0, 0, 0, 0, 0, 0, 0),
+    (0x2E709E, 0, 0, 0x17384F, 0x76E3, 1, 0, 0, 0x2526E, 0, 0, 0, 0x7C, 0, 1, 1),
+    (0x2E709E, 0, 0x18, 0x420C4, 0xEDC6, 1, 2, 0, 0x2526E, 1, 0x147AE, 0x8F5C3, 0, 0, 1, 0),
+    (0xEDC6, 1, 0x37, 0x12937, 0x76E3, 1, 0xC0, 1, 0xEDC6, 1, 0xCCCCD, 0x733333, 0, 0, 1, 0),
+    (0x2E709E, 0, 0x18, 0x420C4, 0xEDC6, 1, 0x1B, 0, 0x2526E, 1, 0x66666, 0x266666, 0, 0, 1, 0),
+    (0xEDC6, 1, 0x37, 0, 0x2E709E, 1, 0x8F, 1, 0x18C4A, 1, 0x147AE, 0xA3D71, 0, 0, 1, 0),
+    (0xEDC6, 1, 0xD, 0, 0x76E3, 2, 0x89, 0, 0x2526E, 0, 0, 0, 0x113, 1, 1, 0),
+    (0x2E709E, 0, 0x37, 0, 0xEDC6, 1, 0x39, 0, 0xEDC6, 1, 0x147AE, 0x400000, 0, 0, 1, 0),
+    (0xEDC6, 1, 0x89, 0, 0x153AD, 2, 0x89, 0, 0x2526E, 0, 0, 0, 0xEA, 1, 1, 0),
+    (0xEDC6, 1, 0x89, 0, 0x153AD, 2, 0x89, 0, 0x2526E, 0, 0, 0, 0xEA, 1, 1, 0),
+    (0xEDC6, 1, 0x89, 0, 0x153AD, 2, 0x89, 0, 0x2526E, 0, 0, 0, 0xEA, 1, 1, 0),
+    (0x949B9, 0, 0xD, 0x3B717, 0x4755, 1, 0x1B, 0, 0x2526E, 1, 0x66666, 0x266666, 0, 0, 1, 0),
+    (0xEDC6, 1, 0xD, 0, 0x76E3, 2, 0x52, 0, 0x18C4A, 0, 0, 0, 0xC0, 1, 1, 0),
+    (0x2526E, 1, 0x89, 0, 0x153AD, 2, 0x37, 0, 0x2526E, 0, 0, 0, 0xB3, 1, 1, 0),
+    (0xEDC6, 1, 0x37, 0x12937, 0x76E3, 1, 0xC0, 1, 0xEDC6, 1, 0xA3D7, 0x66666, 0, 0, 1, 0),
+    (0x18C4A, 1, 0x6E, 0, 0xEDC6, 1, 0xC0, 1, 0x2526E, 1, 0x147AE, 0xAE148, 0, 0, 1, 0),
+    (0x2E709E, 0, 0x52, 0x13D08, 0x2F8E, 1, 0x55, 0, 0xA9D6, 1, 0x147AE, 0x333333, 0, 0, 1, 0),
+    (0xEDC6, 1, 0x37, 0x12937, 0x76E3, 1, 0xC0, 1, 0xEDC6, 1, 0xCCCCD, 0x666666, 0, 0, 1, 0),
+    (0x2E709E, 1, 0x18, 0x10831, 0x5F1C, 1, 0x39, 1, 0x17F81, 1, 0x147AE, 0xAE148, 0, 0, 1, 0),
+    (0xEDC6, 1, 0x37, 0, 0xEDC6, 2, 0x37, 0, 0x18C4A, 0, 0x19999A, 0, 0x7C, 1, 1, 0),
+    (0xEDC6, 1, 0x37, 0x12937, 0x76E3, 1, 0xC0, 1, 0xEDC6, 1, 0xA3D7, 0x66666, 0, 0, 1, 0),
+)
+VO_TRIG_W = 16
+
+
+def vo6_clen() -> tuple[int, ...]:
+    """CLEN 0..127 -> x1 = lim(0x562 x ((CLEN^2)^2)), each square a 24-bit MPY (the trig's)"""
+    def mpy_a1(x, y):
+        return min((s24(x) * s24(y)) << 1 >> 24, 0x7FFFFF)
+    out = []
+    for k in range(128):
+        x0 = mpy_a1(k << 16, k << 16)
+        x0 = mpy_a1(x0, x0)
+        out.append(mpy_a1(0x562, x0))
+    return tuple(out)
+
+
+def vo6_log() -> tuple[int, ...]:
+    """the AGC's log2 mantissa words L as the gain uses them: L / 2^14, rounded half to even
+    (the render's RND, exact: what L contributes to the rounded exponent)"""
+    out = []
+    for L in words(*VO_LOG):
+        q, r = divmod(L, 1 << 14)
+        if r > 1 << 13 or (r == 1 << 13 and q & 1):
+            q += 1
+        out.append(q)
+    return tuple(out)
+
+
+@functools.lru_cache(maxsize=1)
+def vo6_words() -> tuple[int, ...]:
+    """VO-6's tables in dnfw.mnm.core.VO_TABLES's order (signed 24-bit words): the gains, the
+    cosines, the pulse shape, the log mantissas, CLEN's terms, the consonants' set-ups"""
+    _, Y = kernel_xy()
+    out = [s24(v) for v in words(*VO_C1)] + [s24(v) for v in words(*VO_COS)]
+    out += [s24(Y.get(VO_BLIT[0] + k, 0)) for k in range(VO_BLIT[1])]
+    out += list(vo6_log()) + list(vo6_clen())
+    out += [v for row in VO_TRIG for v in row]
+    return tuple(out)

@@ -1,11 +1,12 @@
 """The DN2 mod patcher, run in the browser (Pyodide) by dn2-tools' index.html.
 
-It builds the mod from the owner's own three files, the same way the gated build was
-made, and the page then checks the result's sha256 against the gated build's. Nothing
-of Elektron's is shipped with it: the DN2 OS 1.11 file is patched, the DT2's DSP image
-(section 7 of DT2 OS 1.17) and the Machinedrum's OS 1.63 are read for their tables.
+It builds the mod from the owner's own files, the same way the gated build was made, and
+the page then checks the result's sha256 against the gated build's. Nothing of Elektron's
+is shipped with it: the DN2 OS 1.11 file is patched, the DT2's DSP image (section 7 of DT2
+OS 1.17), the Machinedrum's OS 1.63 and (v0.26 on) the Monomachine's OS 1.32B are read for
+their tables.
 
-    build(dn2, dt2, md, out) -> the sha256 of OUT
+    build(dn2, dt2, md, out, mnm=None) -> the sha256 of OUT
 """
 
 from __future__ import annotations
@@ -83,7 +84,7 @@ def dt2_section7(data: bytes) -> bytes:
     return body
 
 
-def build(dn2: str, dt2: str, md: str, out: str) -> str:
+def build(dn2: str, dt2: str, md: str, out: str, mnm: str | None = None) -> str:
     WORK.mkdir(parents=True, exist_ok=True)
     d = WORK / "dn2.syx"
     d.write_bytes(unzip(pathlib.Path(dn2).read_bytes(), (".syx",)))
@@ -99,6 +100,17 @@ def build(dn2: str, dt2: str, md: str, out: str) -> str:
         rom.blocks()
     except Exception as e:                       # noqa: BLE001
         raise PatchError(f"that is not the Machinedrum UW OS 1.63 ({e})") from None
+    if mnm is not None:                          # v0.26: the Monomachine machines' tables
+        mb = WORK / "mnm_os132b.syx"
+        mb.write_bytes(unzip(pathlib.Path(mnm).read_bytes(), (".syx",)))
+        os.environ["MNM_OS"] = str(mb)
+        from dnfw.mnm import rom as mnm_rom
+        try:
+            mnm_rom.blocks()
+        except Exception as e:                   # noqa: BLE001
+            raise PatchError(f"that is not the Monomachine SFX-6 OS 1.32B ({e})") from None
+    else:                                        # (v0.24, v0.25: none)
+        os.environ["MNM_OS"] = str(WORK / "no-mnm")
     from dnfw.cli.main import main
     rc = main(["mods", "apply", dn2, "--mod", "waverider", "-o", out])
     if rc not in (0, None) or not pathlib.Path(out).is_file():

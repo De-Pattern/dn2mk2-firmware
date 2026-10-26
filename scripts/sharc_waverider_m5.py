@@ -27,7 +27,8 @@ dispatch, per-track chain), as Milestone 4 does. Steps, each PASS/FAIL
    type-5 run tracks 1-15 match a stock run; the stock filter types likewise.
 5. **frame** (with --frame/--frame-be/--frames) -- a caller's frame(s), used verbatim
    every block; every type-5 track bit-exact to the model.
-6-9. **PING, SHFT, GRAN, RESONATOR, CZ** -- each bit-exact to its own model.
+6-7. **PING, SHFT, GRAN** -- each bit-exact to its own model.
+8. **The Monomachine machines** (v0.26) -- bit-exact to PERC's program, as PERC's voice.
 
 Every step writes WAVs under out/waverider/m5_*.wav (48 kHz, 16-bit mono, >= 2 s).
 Runner blocks are short, so a WAV made of them is LOOPED and says so.
@@ -128,6 +129,13 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
                                                       for k in range(16)]])
     for k in range(0, len(pool), 4):
         m2.poke(runner.state, dsp.SMP_POOL_DDR + k, struct.unpack_from("<I", pool, k)[0])
+    # v0.26: the tables the ColdFire sends over the link at power-on (the host's pitch table
+    # and zpack, at the pool's table area), then the word that says they are whole
+    Lm = PL.layout().md
+    shipped = MDK.tables_bytes()
+    for k in range(0, len(shipped), 4):
+        m2.poke(runner.state, Lm.shipped + k, struct.unpack_from("<I", shipped, k)[0])
+    m2.poke(runner.state, Lm.ready, SM.TABLE_MAGIC)
     if warm:
         # v0.17: the Machinedrum's sine and tables as the DSP has them 0.7 s after power-on
         # (it fills them itself, 32 blocks; the "sine" run checks that fill word for word),
@@ -214,7 +222,8 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             for t in range(16):
                 rec = V.track_record(t)
                 if (m2.word(r.state, rec + V.TRACK_MACHINE) == 5
-                        and frame_word(r.state, FR.header_offset(FR.MACHINE, t)) == PP.MACHINE_TYPE):
+                        and frame_word(r.state, FR.header_offset(FR.MACHINE, t))
+                        in (PP.MACHINE_TYPE, *PP.MNM_TYPES)):         # v0.26: and the Monomachine's
                     ins[t] = {"note": V.bits_f32(m2.word(r.state, NOTE_CELL + 4 * t) or 0),
                               "trig": bool(((m2.word(r.state, TRIG_WORD) or 0) >> 16) & (1 << t)),
                               "type": frame_word(r.state, FR.slot_offset(t, PM.TYPE_REC[1])),
@@ -284,7 +293,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             out["setup"].append(("none-arm", b, None))
 
         hooks = {m3.DISPATCH: at_dispatch, dsp.PERC_SW: at_loop, dsp.SMP_SW: at_after_perc,
-                 dsp.RINGS_SW: at_after_smp,
+                 dsp.PING_SW: at_after_smp,
                  LOOP_RESUME: at_resume,
                  m3.AMP_STAGE: amp, AMP_RETURN: amp_ret, SETUP_GUARD: guard,
                  SETUP_TABLE_READ: table_read, SETUP_NONE: none_arm}
@@ -378,13 +387,13 @@ def selmap_text(code: bytes, work: pathlib.Path) -> dict[int, tuple[int, str]]:
 
 def perc_links_ok() -> bool:
     """PERC: the block counter's jump into wr_perc (L2), and wr_perc's tail into
-    rings.asm's wr_rings: addresses, not labels."""
+    ping.asm's wr_ping (v0.26: RESONATOR and CZ gone): addresses, not labels."""
     count = (SHARC / "block_count.asm").read_text(encoding="utf-8")
     perc = (SHARC / "perc.asm").read_text(encoding="utf-8")
     return (f"JUMP {dsp.PERC_SW:#x};" in count
             and re.findall(r"JUMP (0x[0-9a-f]+);\s*// smp.asm's wr_smp", perc) == [f"{dsp.SMP_SW:#x}"]
-            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// rings.asm's wr_rings",
-                           (SHARC / "smp.asm").read_text(encoding="utf-8")) == [f"{dsp.RINGS_SW:#x}"])
+            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// ping.asm's wr_ping",
+                           (SHARC / "smp.asm").read_text(encoding="utf-8")) == [f"{dsp.PING_SW:#x}"])
 
 
 def gran_links_ok() -> bool:
@@ -402,8 +411,7 @@ def gran_links_ok() -> bool:
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
     for name, load_sw in (("perc", dsp.PERC_SW), ("smp", dsp.SMP_SW), ("block_count", dsp.COUNT_SW),
-                          ("ping", dsp.PING_SW), ("rings", dsp.RINGS_SW),
-                          ("cz", dsp.CZ_SW), ("gran", dsp.GRAN_SW)):
+                          ("ping", dsp.PING_SW), ("gran", dsp.GRAN_SW)):
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -441,7 +449,7 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("perc", "smp", "block_count", "ping", "rings", "cz", "gran")) \
+             for n in ("perc", "smp", "block_count", "ping", "gran")) \
         and perc_links_ok() and gran_links_ok() and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
@@ -479,7 +487,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,pvmix,tdm,stock,ping,shft,gran,rings,cz,frame")   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,pvmix,tdm,stock,ping,shft,gran,mnm,frame")   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -515,7 +523,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("perc", "smp", "block_count", "ping", "rings", "cz", "gran"):
+            for n in ("perc", "smp", "block_count", "ping", "gran"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
@@ -616,15 +624,10 @@ def main(argv=None):
             results["7b_gran"] = step_gran(warm(), sound, machines)             # (track 0 is PERC)
             show(results["7b_gran"])
 
-        if "rings" in steps:
-            print("\nstep 8: RESONATOR")
-            results["8_rings"] = step_rings(init, sound, machines, a.blocks)
-            show(results["8_rings"])
-
-        if "cz" in steps:
-            print("\nstep 9: CZ")
-            results["9_cz"] = step_cz(init, sound, machines, a.blocks)
-            show(results["9_cz"])
+        if "mnm" in steps:
+            print("\nstep 8: the Monomachine machines (v0.26)")
+            results["8_mnm"] = step_mnm(warm(), sound, machines, a.blocks)
+            show(results["8_mnm"])
 
         frames = load_frames(a)
         if frames and "frame" in steps:
@@ -1426,7 +1429,7 @@ def step_tdm(init, sound, machines, blocks) -> dict:
     page, every word, decoded as the ColdFire decodes it; every sample track stays
     bit-exact.
 
-    The transmit page is read right after the sample machines' program (at RINGS_SW): the
+    The transmit page is read right after the sample machines' program (at PING_SW, v0.26): the
     runner puts each block's frame where the codec's DAC page is (m4.unpack_call), which
     reaches over the transmit page's first 24 frames, before the next block's dispatch. On
     the instrument the frame arrives in its own SPI page (docs/link-research.md)."""
@@ -1479,7 +1482,7 @@ def step_tdm(init, sound, machines, blocks) -> dict:
         return base_frame(sound, machines, t0=ONE, trigger=(b == 1),
                           overrides=smp_words({SM.SAMP_REC: 1})).to_bytes()
     run = run_blocks(init, frames, total, extra_hooks={m3.DISPATCH: at_dispatch,
-                                                       dsp.RINGS_SW: after_smp})
+                                                       dsp.PING_SW: after_smp})
     ok = run["ok"]
     st = run["state"].state if ok else None
 
@@ -1839,282 +1842,72 @@ def step_gran(init, sound, machines) -> dict:
             "numbers": {k: {kk: vv for kk, vv in v.items() if kk != "want"} for k, v in results.items()}}
 
 
-# -- step 8: RESONATOR (docs/rings.md) ------------------------------------------------------------
+# -- step 8: the Monomachine machines (v0.26, docs/mnm.md) ---------------------------------------
 
-def run_rings(init, sound, machines, blocks, words0, words1, others=None, trig_every=0, ftype1=None):
-    """Tracks 0 and 1 on machine 6 (RESONATOR) with frame words WORDS0 / WORDS1 (param slot
-    -> 16-bit), the rest OTHERS ({track: machine}); triggered on block 1 (and every
-    TRIG_EVERY blocks after, if set). Taps at wr_rings' entry: each track's buffer, the
-    note, the trigger, its machine type and its eight control words."""
-    from dnfw.rings import live as RL
-    taps = []
-
-    def at_entry(r):
-        bufs = [m2.word(r.state, V.TRACK_BUFFERS + 4 * t) for t in range(16)]
-        trig = (m2.word(r.state, TRIG_WORD) or 0) >> 16
-        tap = {}
-        for t in range(16):
-            rec = V.track_record(t)
-            words = {}
-            for slot in RL.CONTROL_SLOTS:
-                words[slot] = frame_word(r.state, RL.frame_offset(slot, t))
-            tap[t] = {"before": [m2.word(r.state, bufs[t] + 4 * k) or 0 for k in range(BLOCK)],
-                      "note": f32_of(m2.word(r.state, NOTE_CELL + 4 * t)),
-                      "trig": bool(trig & (1 << t)),
-                      "mtype": m2.word(r.state, rec + 0x1B4),
-                      "words": words}
-        taps.append(tap)
-
-    def frames(b):
-        hit = b == 1 or (trig_every and b > 1 and (b - 1) % trig_every == 0)
-        f = base_frame(sound, machines, t0=RL.MACHINE_TYPE, others={1: RL.MACHINE_TYPE, **(others or {})},
-                       trigger=hit, trigger_others=True, overrides=words0)
-        for t in [1] + [t for t, m in (others or {}).items() if m == RL.MACHINE_TYPE]:
-            f.sound(t, {**machines.get(1, {}), TUN1: TUN1_ZERO, **words1})
-        if ftype1 is not None:
-            f.header(FR.FILTER, 1, ftype1)
-        return f.to_bytes()
-    run = run_blocks(init, frames, blocks, extra_hooks={dsp.RINGS_SW: at_entry})
-    return run, taps
+def mnm_words(k: int, knobs=None) -> dict:
+    """frame slot -> word for the Monomachine machine K's eight knobs (0..127, default its
+    own defaults), on PERC's eight parameter records (as page.c's mnm_knob reads them)"""
+    from dnfw.mnm import machines as MM
+    knobs = MM.DEFAULTS[MM.NAMES[k]] if knobs is None else knobs
+    return {slot: PL.word_of(x / 127.0, top, lo) for (_rid, slot, lo, top), x in zip(PM.PARAMS, knobs)}
 
 
-def step_rings(init, sound, machines, blocks) -> dict:
-    """RESONATOR on tracks 0 and 1 (machine 6), WaveTone on track 2, FM Tone on 3: every
-    type-6 track bit-exact to dnfw.rings.live, audible and bounded, other tracks
-    untouched by wr_rings; a second run with retriggers, the noise exciter and a plate."""
-    from dnfw.rings import live as RL
-    T = RL.tables()
-    base = dict(RL.DEFAULTS)
-    cases = {
-        "defaults (harmonic, bright, long) + a bar": (
-            base, {**base, RL.P_STRC: 0x3C00, RL.P_BRIT: 0x4000, RL.P_DAMP: 0x5000}, 0),
-        "plate + noise exciter, retriggered every 6 blocks": (
-            {**base, RL.P_STRC: 0x7800, RL.P_EXCT: 0x6400, RL.P_DAMP: 0x2000, RL.P_TUN: 0x4C00},
-            {**base, RL.P_POS: 0x0000, RL.P_HIT: 0x7F00, RL.P_LEV: 0x7F00}, 6),
-        "six machine-6 voices: the first four render, the rest are silent": (
-            base, {**base, RL.P_STRC: 0x5000}, 0),
-    }
-    others = {"six machine-6 voices: the first four render, the rest are silent":
-              {2: RL.MACHINE_TYPE, 3: RL.MACHINE_TYPE, 4: RL.MACHINE_TYPE, 5: RL.MACHINE_TYPE, 6: 1}}
-    results = {}
-    for name, (w0, w1, every) in cases.items():
-        run, taps = run_rings(init, sound, machines, blocks, w0, w1,
-                              others=others.get(name, {2: 1, 3: 0}), trig_every=every)
-        if not run["ok"] or len(taps) != blocks:
-            results[name] = {"ok": False, "why": run.get("halt") or f"{len(taps)} entries"}
-            continue
-        voices = {t: RL.Voice() for t in range(16)}
-        mism, peaks, untouched, seen = {}, {}, True, set()
-        for b, tap in enumerate(taps):
-            after = run["machine"][b]
-            keep = VOICES.plan({t: (tap[t]["trig"], bool(voices[t].active), voices[t].age)
-                                for t in range(16) if tap[t]["mtype"] == RL.MACHINE_TYPE},
-                               RL.MAX_VOICES)
-            for t in range(16):
-                x = tap[t]
-                if x["mtype"] != RL.MACHINE_TYPE:
-                    untouched &= [bits_of(v) for v in after[t]] == x["before"]
-                    continue
-                seen.add(t)
-                want, did = RL.block(voices[t], keep[t], x["words"], x["note"], x["trig"], T)
-                got = [bits_of(v) for v in after[t]]
-                mism[t] = mism.get(t, 0) + sum(1 for g, w in zip(got, want) if g != bits_of(w))
-                peaks[t] = max(peaks.get(t, 0.0), max(abs(v) for v in after[t] if v == v))
-        results[name] = {"ok": True, "mismatches": mism, "peaks": peaks,
-                         "others_untouched": untouched, "tracks": sorted(seen)}
-    six = results.get("six machine-6 voices: the first four render, the rest are silent", {})
+def step_mnm(init, sound, machines, blocks) -> dict:
+    """Each Monomachine machine (its own machine type, PERC's voice) on track 0, beside the
+    other on track 1: every such track's buffer and state bit-exact to dnfw.perc.program run
+    on the DSP's memory at PERC's entry, every block; audible and bounded; note 72 an octave
+    over note 60; an untriggered track silent."""
+    from dnfw.mnm import machines as MM
+    types = {k: typ for typ, k in PP.MNM_TYPES.items()}
+
+    def frames(k, note=0x3C00, trig=(1,), knobs=None, other=None):
+        def fb(b):
+            others = {1: types[other]} if other is not None else None
+            f = base_frame(sound, machines, t0=types[k], overrides=mnm_words(k, knobs), note=note,
+                           trigger=b in trig, others=others, trigger_others=True)
+            if other is not None:
+                for slot, w in mnm_words(other).items():
+                    f.param(1, slot, w)
+            return f.to_bytes()
+        return fb
+
+    runs = {}
+    for k, name in enumerate(MM.NAMES):
+        t0 = time.perf_counter()
+        runs[f"{name}"] = run_blocks(init, frames(k, other=1 - k), blocks)
+        runs[f"{name}_72"] = run_blocks(init, frames(k, note=0x4800), blocks)
+        runs[f"{name}_tops"] = run_blocks(init, frames(k, knobs=[127] * 8), blocks)
+        print(f"    {name}: {round(time.perf_counter() - t0)} s", flush=True)
+    runs["silent"] = run_blocks(init, frames(0, trig=()), blocks)
+    ok_runs = all(r["ok"] for r in runs.values())
+    exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
+    peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in MM.NAMES}
+    other = {name: V.peak(perc_series(runs[name], 1)) if runs[name]["ok"] else None for name in MM.NAMES}
+    zc = {name: (zero_crossings(perc_series(runs[name], 0)), zero_crossings(perc_series(runs[f"{name}_72"], 0)))
+          for name in MM.NAMES if runs[name]["ok"] and runs[f"{name}_72"]["ok"]}
+    silent = perc_series(runs["silent"], 0)
+    n = {"exact_voice_blocks_out_state_mismatches": exact, "peaks": peaks, "peaks_track1": other,
+         "zero_crossings_note60_note72": zc,
+         "instructions_per_block": {k: round(r.get("instructions", 0) / max(blocks, 1))
+                                    for k, r in runs.items() if r["ok"]},
+         "wall_s": {k: r.get("wall_s") for k, r in runs.items()},
+         "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}
     checks = {
-        "RESONATOR runs on every machine-6 track, and only on them":
-            all(r.get("ok") for r in results.values())
-            and all(r["tracks"] == [0, 1] for k, r in results.items() if r is not six)
-            and six.get("tracks") == [0, 1, 2, 3, 4, 5],
-        "with six machine-6 voices the first four sound and the fifth and sixth are silent":
-            bool(six.get("ok")) and all(six["peaks"][t] > 0.001 for t in (0, 1, 2, 3))
-            and all(six["peaks"][t] == 0.0 for t in (4, 5)),
-        "every RESONATOR track bit-exact to dnfw.rings.live, fed the DSP's own inputs, in every "
-        "block (harmonic, bar, plate; mallet and noise; retriggers)":
-            all(r.get("ok") and not any(r["mismatches"].values()) for r in results.values()),
-        "every rendered RESONATOR voice is audible and bounded (0.001 < peak <= 0.9)":
-            all(r.get("ok") and all(0.001 < p <= 0.9 + 1e-6 for t, p in r["peaks"].items()
-                                    if not (r is six and t in (4, 5)))
-                for r in results.values()),
-        "WaveTone, FM Tone and the MIDI tracks pass through wr_rings bit-identical":
-            all(r.get("ok") and r["others_untouched"] for r in results.values()),
+        "every run returns every block": ok_runs,
+        "every Monomachine track's buffer and state, every block of every run, are bit-exact to "
+        "dnfw.perc.program run on the DSP's memory at PERC's entry":
+            ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for k, v in exact.items() if k != "silent")
+            and exact.get("silent", (0, 1, 1))[1:] == (0, 0),
+        "each machine sounds on track 0 and beside it on track 1 (peak > 0.01)":
+            all(v is not None and v > 0.01 for v in list(peaks.values()) + list(other.values())),
+        "nothing is non-finite or above 4.0 in any buffer":
+            ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["perc"]
+                            for v in blk.values() for x in v["out"]),
+        "note 72 is an octave over note 60 (zero crossings x 1.8 .. 2.2)":
+            len(zc) == len(MM.NAMES) and all(a > 0 and 1.8 <= b / a <= 2.2 for a, b in zc.values()),
+        "control: no trigger is silent (every sample 0)": bool(silent) and all(x == 0.0 for x in silent),
     }
-    return {"ok": all(checks.values()), "checks": checks, "numbers": results}
-
-
-# -- step 9: CZ (docs/cz.md) -----------------------------------------------------------------------
-
-def _cz_wave_word(index: int) -> int:
-    """the WAVE frame word whose 33-way choice is INDEX"""
-    return int((index + 0.5) * 0x7800 / 33)
-
-
-def _cz_sus_word(step: int) -> int:
-    """the SUS frame word for sustain step 0..7, or 8 for none"""
-    return int((step + 0.5) * 0x7800 / 9)
-
-
-def run_cz(init, sound, machines, blocks, words, others=None, trig_every=0, off_at=None,
-           trig_at=None):
-    """WORDS = {track: frame words (param slot -> 16-bit)} for the machine-7 tracks (track
-    0 among them), the rest OTHERS ({track: machine}); triggered on block 1 (and every
-    TRIG_EVERY blocks after, if set). Taps at wr_cz's entry: each track's buffer, note,
-    trigger, machine type and control words."""
-    from dnfw.cz import live as CL
-    taps = []
-
-    def at_entry(r):
-        bufs = [m2.word(r.state, V.TRACK_BUFFERS + 4 * t) for t in range(16)]
-        trig = (m2.word(r.state, TRIG_WORD) or 0) >> 16
-        off = (m2.word(r.state, TRIG_WORD + 4) or 0) & 0xFFFF       # mask 36: the note-off
-        tap = {}
-        for t in range(16):
-            rec = V.track_record(t)
-            tap[t] = {"before": [m2.word(r.state, bufs[t] + 4 * k) or 0 for k in range(BLOCK)],
-                      "note": f32_of(m2.word(r.state, NOTE_CELL + 4 * t)),
-                      "trig": bool(trig & (1 << t)),
-                      "off": bool(off & (1 << t)),
-                      "mtype": m2.word(r.state, rec + 0x1B4),
-                      "words": {slot: frame_word(r.state, CL.frame_offset(slot, t))
-                                for slot in CL.CONTROL_SLOTS}}
-        taps.append(tap)
-
-    mtypes = {**{t: CL.MACHINE_TYPE for t in words if t}, **(others or {})}
-
-    def frames(b):
-        hit = b == 1 or (trig_every and b > 1 and (b - 1) % trig_every == 0)
-        if trig_at is not None:
-            hit = False
-        f = base_frame(sound, machines, t0=CL.MACHINE_TYPE, others=mtypes,
-                       trigger=hit, trigger_others=True, overrides=words[0])
-        for t in (trig_at or {}).get(b, ()):
-            f.trigger(t, masks=(34,))
-        for t, w in words.items():
-            if t:
-                f.sound(t, {**machines.get(1, {}), TUN1: TUN1_ZERO, **w})
-        for t in (off_at or {}).get(b, ()):
-            f.trigger(t, masks=(36,))
-        return f.to_bytes()
-    run = run_blocks(init, frames, blocks, extra_hooks={dsp.CZ_SW: at_entry})
-    return run, taps
-
-
-def step_cz(init, sound, machines, blocks) -> dict:
-    """CZ (machine 7) on several tracks beside WaveTone and FM Tone: every type-7 track
-    bit-exact to dnfw.cz.live in every block -- all eight waves, wave pairs, the four
-    SELECTs, ring and noise, the octaves, key follow, sustain steps and none, the DCW
-    envelope through its steps, retriggers -- audible and bounded; the voice cap; other
-    tracks untouched by wr_cz."""
-    from dnfw.cz import live as CL
-    T = CL.tables()
-    blocks = max(blocks, 16)
-    base = dict(CL.DEFAULTS)
-    fast = {**{p: 0x6400 for p in CL.P_RATES[:4]}, **{p: 0x7F00 for p in CL.P_RATES[4:]}}
-    levels = dict(zip(CL.P_LEVELS, (0x7F00, 0x3400, 0x6800, 0x1000, 0x7F00, 0x4000, 0x0000,
-                                    0x400 + int(0.7 * 0x7800))))
-    W, S = _cz_wave_word, _cz_sus_word
-    cases = {
-        "saw and square, the DCW envelope through all eight steps (no sustain); 1+1' detuned": (
-            {0: {**base, **fast, **levels, CL.P_WAVE: W(0), CL.P_SUS: S(8), CL.P_DCW: 0x7F00},
-             1: {**base, **levels, CL.P_WAVE: W(1), CL.P_SEL: 0x200, CL.P_DET: 0x5E00,
-                 CL.P_SUS: S(2), CL.P_RATES[0]: 0x6000, CL.P_RATES[1]: 0x5800}},
-            {2: 1, 3: 0}, 0),
-        "pulse and saw-pulse, 1+2' ring an octave up, key follow, retriggered every 5 blocks": (
-            {0: {**base, **fast, **levels, CL.P_WAVE: W(2), CL.P_SEL: 0x300, CL.P_MOD: 0,
-                 CL.P_OCT: 0x100, CL.P_KF: 0x100, CL.P_SUS: S(3)},
-             1: {**base, **fast, CL.P_WAVE: W(4), CL.P_SEL: 0x300, CL.P_MOD: 0x100,
-                 CL.P_OCT: 0x200, CL.P_DET: 0x2800, CL.P_SUS: S(8)}},
-            {2: 1, 3: 0}, 5),
-        "resonant pairs and double: 1+2' noise, line 2 alone; pairs alternate by cycle": (
-            {0: {**base, **fast, **levels, CL.P_WAVE: W(28), CL.P_SEL: 0x300, CL.P_MOD: 0x200,
-                 CL.P_SUS: S(8)},
-             1: {**base, **fast, **levels, CL.P_WAVE: W(31), CL.P_SUS: S(5), CL.P_KF: 0x100},
-             2: {**base, **fast, **levels, CL.P_WAVE: W(29), CL.P_SEL: 0x100, CL.P_SUS: S(8)}},
-            {3: 1, 4: 0}, 0),
-        "eight machine-7 voices: the first six render, the rest are silent": (
-            {t: {**base, **fast, **levels, CL.P_WAVE: W(30 if t % 2 else 9 + t)}
-             for t in range(8)},
-            {8: 1}, 0),
-    }
-    rel = "the note-off: sustain on step 2, key-up at block 8 (a released and a held voice)"
-    cases[rel] = ({0: {**base, **levels, CL.P_RATES[0]: 0x6400, CL.P_RATES[1]: 0x6400,
-                       **{p: 0x7F00 for p in CL.P_RATES[4:]}, CL.P_RATES[2]: 0x6400,
-                       CL.P_RATES[3]: 0x6400, CL.P_SUS: S(1), CL.P_DCW: 0x7F00},
-                   1: {**base, **fast, **levels, CL.P_SUS: S(1), CL.P_WAVE: W(3)}},
-                  {2: 1, 3: 0}, 0)
-    offs = {rel: {8: (0,), 12: (1,)}}
-    steal = "voice stealing: eight notes one after another on slots 0-7: the newest six sound"
-    cases[steal] = ({t: {**base, **fast, **levels, CL.P_WAVE: W(t)} for t in range(8)}, {8: 1}, 0)
-    trig_ats = {steal: {1 + 2 * t: (t,) for t in range(8)}}
-    cap = "eight machine-7 voices: the first six render, the rest are silent"
-    results = {}
-    for name, (words, others, every) in cases.items():
-        run, taps = run_cz(init, sound, machines, blocks, words, others=others, trig_every=every,
-                           off_at=offs.get(name), trig_at=trig_ats.get(name))
-        if not run["ok"] or len(taps) != blocks:
-            results[name] = {"ok": False, "why": run.get("halt") or f"{len(taps)} entries"}
-            continue
-        voices = {t: CL.Voice() for t in range(16)}
-        mism, peaks, untouched, seen, steps, offs_seen = {}, {}, True, set(), {}, set()
-        sounding = {}
-        for b, tap in enumerate(taps):
-            after = run["machine"][b]
-            keep = VOICES.plan({t: (tap[t]["trig"], bool(voices[t].active), voices[t].age)
-                                for t in range(16) if tap[t]["mtype"] == CL.MACHINE_TYPE},
-                               CL.MAX_VOICES)
-            for t in range(16):
-                x = tap[t]
-                if x["mtype"] != CL.MACHINE_TYPE:
-                    untouched &= [bits_of(v) for v in after[t]] == x["before"]
-                    continue
-                seen.add(t)
-                want, did = CL.block(voices[t], keep[t], x["words"], x["note"], x["trig"], T,
-                                     off=x["off"])
-                sounding.setdefault(b, set()).update({t} if did else set())
-                steps[t] = max(steps.get(t, 0), voices[t].step)
-                if x["off"]:
-                    offs_seen.add((b, t))
-                got = [bits_of(v) for v in after[t]]
-                mism[t] = mism.get(t, 0) + sum(1 for g, w in zip(got, want) if g != bits_of(w))
-                peaks[t] = max(peaks.get(t, 0.0), max(abs(v) for v in after[t] if v == v))
-        results[name] = {"ok": True, "mismatches": mism, "peaks": peaks, "steps": steps,
-                         "others_untouched": untouched, "tracks": sorted(seen),
-                         "offs": sorted(offs_seen),
-                         "last_sounding": sorted(sounding.get(blocks - 1, set()))}
-    six = results.get(cap, {})
-    first = results.get(next(iter(cases)), {})
-    checks = {
-        "CZ runs on every machine-7 track, and only on them":
-            all(r.get("ok") for r in results.values())
-            and all(r["tracks"] == sorted(cases[k][0]) for k, r in results.items()),
-        "with eight machine-7 voices the first six sound and the seventh and eighth are silent":
-            bool(six.get("ok")) and all(six["peaks"][t] > 0.001 for t in range(6))
-            and all(six["peaks"][t] == 0.0 for t in (6, 7)),
-        "every CZ track bit-exact to dnfw.cz.live, fed the DSP's own inputs, in every block":
-            all(r.get("ok") and not any(r["mismatches"].values()) for r in results.values()),
-        "every rendered CZ voice is audible and bounded (0.01 < peak <= 1.0)":
-            all(r.get("ok") and all(0.01 < p <= 1.0 for t, p in r["peaks"].items()
-                                    if not (r is six and t in (6, 7)))
-                for r in results.values()),
-        "the DCW envelope reached its last step on the no-sustain voice":
-            bool(first.get("ok")) and first["steps"].get(0) == 7,
-        "the note-off reaches wr_cz on its track and block, and sends both sustained voices "
-        "on past their sustain step":
-            bool(results.get(rel, {}).get("ok"))
-            # block 1's trigger carries all four masks (base_frame), so 36 rides along with
-            # the note-on there: the contract lets the trigger win, and the DSP agreed
-            and {(8, 0), (12, 1)} <= set(results[rel]["offs"])
-            and all(b in (1, 8, 12) for b, _ in results[rel]["offs"])
-            and results[rel]["steps"].get(0, 0) >= 2 and results[rel]["steps"].get(1, 0) >= 2,
-        "voice stealing: with notes on eight slots in turn the six newest sound at the end "
-        "(slots 2-7) and the two oldest were stolen, whatever their slot":
-            bool(results.get(steal, {}).get("ok")) and results[steal]["last_sounding"] == [2, 3, 4, 5, 6, 7],
-        "WaveTone, FM Tone and the MIDI tracks pass through wr_cz bit-identical":
-            all(r.get("ok") and r["others_untouched"] for r in results.values()),
-    }
-    return {"ok": all(checks.values()), "checks": checks, "numbers": results}
+    return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
 
 
 def step_filters_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -> dict:

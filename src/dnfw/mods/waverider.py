@@ -75,7 +75,22 @@ def _chunks() -> list[tuple[int, bytes, str]]:
     md = _md_ui()
     if md is not None:
         out.append(md)
+    out.append(_tables())
     return out
+
+
+def _tables() -> tuple[int, bytes, str]:
+    """v0.26: the tables the ColdFire sends the DSP at power-on (csrc/sampler/link.c,
+    K_TABLES): the Machinedrum's (and the Monomachine's) from the owner's own firmware
+    files, read now (never committed): TABLE_MAGIC, the length, then the bytes."""
+    import struct
+    from ..md import core as md_core
+    from ..sampler import machines as SM
+    data = md_core.tables_bytes()
+    if len(data) > SM.TABLE_ROOM - 512:
+        raise ModError(f"the tables ({len(data):,} B) do not fit the DSP's table area")
+    return (SM.TABLE_LOAD, struct.pack("<II", SM.TABLE_MAGIC, len(data)) + data,
+            "the Machinedrum's and Monomachine's tables, sent to the DSP at power-on (v0.26)")
 
 
 def _md_ui() -> tuple[int, bytes, str] | None:

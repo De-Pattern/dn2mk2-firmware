@@ -99,7 +99,7 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
-         "test/test_shft_live.py", "test/test_rings_live.py", "test/test_cz_live.py",
+         "test/test_shft_live.py", "test/test_mnm.py",
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)

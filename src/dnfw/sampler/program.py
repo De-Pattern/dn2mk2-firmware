@@ -2592,7 +2592,7 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.iconst(12, 16)
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
-    p.e(f"JUMP {next_sw:#x};", "rings.asm's wr_rings, then CZ, then PING (which restores)")
+    p.e(f"JUMP {next_sw:#x};", "ping.asm's wr_ping (which restores; v0.26: RESONATOR and CZ gone)")
     p.emit_subs()
     p.raw(".wr_smp..end:")
     p.raw("      .type wr_smp.,STT_FUNC;")

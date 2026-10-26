@@ -56,6 +56,9 @@ def table_mem(L: K.Layout) -> dict[int, int]:
         base = L.T[K.SHIPPED]
         for k in range(0, len(data), 4):
             m[base + k] = struct.unpack_from("<I", data, k)[0]
+        if L.ready is not None:                # v0.26: as the ColdFire leaves it once sent
+            from ..sampler.machines import TABLE_MAGIC
+            m[L.ready] = TABLE_MAGIC
         mem = Mem(lambda a: m.get(a, 0))
         p = Prog("run", mem=mem)
         for _ in range(K.Z_N // K.Z_PER_BLOCK):

@@ -35,6 +35,7 @@ button:disabled { opacity: .45; cursor: default; }
 .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--dim); }
 .pill.ok { color: var(--ok); border-color: var(--ok); } .pill.bad { color: var(--bad); border-color: var(--bad); } .pill.warn { color: var(--warn); border-color: var(--warn); }
 .files { display: grid; gap: 10px; }
+.file[hidden] { display: none; }
 .file { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .file.over { border-color: var(--accent); }
 .file b { font-weight: 600; }
@@ -66,8 +67,9 @@ input[type=file] { display: none; }
       <label class="file" data-k="dn2"><span><b>Digitone II OS 1.11</b> <span class="mono">.syx</span> or Elektron's .zip — the file that gets patched</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
       <label class="file" data-k="dt2"><span><b>Digitakt II OS 1.17</b> (or 1.16) <span class="mono">.syx</span> or .zip — its DSP's sample-reading tables</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
       <label class="file" data-k="md"><span><b>Machinedrum UW OS 1.63</b> <span class="mono">.syx</span>, .bin or .zip — its machines' tables, for PERC</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.bin,.zip"></label>
+      <label class="file" data-k="mnm" hidden><span><b>Monomachine SFX-6 OS 1.32B</b> <span class="mono">.syx</span> or .zip — its machines' tables (SID, DigiPRO, VO-6)</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
     </div>
-    <p class="note">All three are free downloads from Elektron's support pages for each instrument. Drop them on their boxes, or choose them.</p>
+    <p class="note">All of them are free downloads from Elektron's support pages for each instrument. Drop them on their boxes, or choose them.</p>
   </section>
 
   <section>
@@ -93,10 +95,13 @@ async function sha256(buf) {
   return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 function cur() { return builds.find(b => b.version === $("#ver").value); }
+function inputs() { const b = cur(); return (b && b.inputs) || ["dn2", "dt2", "md"]; }
 function ready() {
-  const n = ["dn2", "dt2", "md"].filter(k => files[k]).length;
-  $("#go").disabled = busy || n < 3 || !cur();
-  if (!busy && !out && !failed) setState(n < 3 ? `waiting for the files (${n} of 3)` : "ready", n < 3 ? "" : "ok");
+  const need = inputs();
+  document.querySelectorAll(".file").forEach(box => { box.hidden = !need.includes(box.dataset.k); });
+  const n = need.filter(k => files[k]).length, all = need.length;
+  $("#go").disabled = busy || n < all || !cur();
+  if (!busy && !out && !failed) setState(n < all ? `waiting for the files (${n} of ${all})` : "ready", n < all ? "" : "ok");
 }
 function setState(t, cls = "") { const s = $("#state"); s.textContent = t; s.className = "pill " + cls; }
 function log(t) { const l = $("#log"); l.textContent += t + "\n"; l.scrollTop = l.scrollHeight; }
@@ -157,12 +162,13 @@ $("#go").onclick = () => {
       failed = true;
       setState("does not match: do not flash", "bad");
       $("#result").className = "note bad";
-      $("#result").textContent = `The result (sha256 ${got.slice(0, 16)}…) is not v${b.version}'s cleared file (${b.sha256.slice(0, 16)}…). Do not flash anything from this. Check the three files are the versions named above.`;
+      $("#result").textContent = `The result (sha256 ${got.slice(0, 16)}…) is not v${b.version}'s cleared file (${b.sha256.slice(0, 16)}…). Do not flash anything from this. Check the files are the versions named above.`;
     }
     ready();
   };
-  worker.postMessage({ zipUrl: "patcher/" + b.zip, zipSha: b.zip_sha256,
-    files: { dn2: files.dn2, dt2: files.dt2, md: files.md } });
+  const need = inputs();
+  worker.postMessage({ zipUrl: "patcher/" + b.zip, zipSha: b.zip_sha256, inputs: need,
+    files: Object.fromEntries(need.map(k => [k, files[k]])) });
 };
 
 $("#save").onclick = () => {

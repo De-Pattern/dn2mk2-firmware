@@ -63,7 +63,7 @@ typedef unsigned char u8;
  * is room, and into any slot (rec.c's DEST): a directory entry whose frames lie there is a
  * recording, kept on the +Drive and kept when the host tool sends a new image. Yours are
  * below it and above it, to POOL_BYTES (400 MB): the host tool skips the recordings' area. */
-#define REC_BYTES (SLICE_AREA - REC_OFFSET)       /* v0.23: the slice area follows */
+#define REC_BYTES (TABLE_AREA - REC_OFFSET)       /* v0.23: the slice area follows; v0.26: the tables first */
 #define ENTRY(k) (DIR + 8 + 16 * (u32)(k))
 #define NAME(k) (DIR + NAMES_OFFSET + NAME_BYTES * (u32)(k))
 _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in our RAM");
@@ -501,7 +501,7 @@ static u16 st[16] __attribute__((section(".data")));
  * the count, so the page can name the slots, and nothing points at frames not yet there);
  * then each used slot's frames, the recorder's included, and at once that slot's entry,
  * so a slot plays as soon as it is in; last the whole directory page again. -> 0 when done */
-enum { K_BLANK, K_FRAMES, K_ENTRY, K_FULL, K_AREA };
+enum { K_BLANK, K_FRAMES, K_ENTRY, K_FULL, K_AREA, K_TABLES, K_READY };
 static int area_due __attribute__((section(".data"))) = 0;      /* the slice area loads at the end */
 static int area_push __attribute__((section(".data"))) = -1;    /* one slot's table to the DSP */
 static int l_area_read __attribute__((section(".data"))) = 0;   /* K_AREA from the +Drive (else from the copy) */
@@ -509,8 +509,40 @@ int smp_area_ok(void);
 static int l_kind __attribute__((section(".data"))) = K_BLANK;
 static int l_entry __attribute__((section(".data"))) = -1;       /* the entry due next */
 
+/* v0.26: the tables (TABLE_LOAD: magic, length, data), sent before anything else at
+ * power-on, the +Drive's image or not; READY's magic once every chunk checked out */
+#define TBL ((const u8 *)TABLE_LOAD)
+int smp_tables __attribute__((section(".data"))) = 0;   /* 0 not yet, 1 sending, 2 sent, -1 none */
+static u32 tbl_bytes(void)
+{
+    if (le32(TBL) != TABLE_MAGIC)
+        return 0;
+    u32 n = (le32(TBL + 4) + 511u) & ~511u;
+    return n && n <= TABLE_ROOM - 512u ? n : 0;
+}
+
+
 static int next_range(void)
 {
+    if (smp_tables == 1 && l_kind != K_TABLES && l_kind != K_READY) {
+        l_kind = K_TABLES;
+        l_off = TABLE_AREA;
+        l_end = TABLE_AREA + tbl_bytes();
+        return 1;
+    }
+    if (smp_tables == 1 && l_kind == K_TABLES) {
+        l_kind = K_READY;
+        l_off = TABLE_READY;
+        l_end = TABLE_READY + 512u;
+        return 1;
+    }
+    if (smp_tables == 1) {                      /* READY checked out */
+        smp_tables = 2;
+        l_kind = K_BLANK;
+        l_end = 0;
+        if (!dir_ok)
+            return 0;
+    }
     if (l_slot == 0 && l_kind == K_BLANK && l_end == 0) {
         l_off = 0;
         l_end = CMD_OFFSET;                     /* up to the command block: the DSP's */
@@ -545,6 +577,8 @@ static int next_range(void)
             area_due = 1;
         if (lo >= ram_top || bytes > ram_top - lo)             /* v0.22: past the RAM proven */
             continue;
+        if (lo < TABLE_AREA + TABLE_ROOM && lo + bytes > TABLE_AREA)
+            continue;                                           /* v0.26: over the tables (an old recording) */
         l_kind = K_FRAMES;
         l_off = lo & ~511u;
         l_end = (lo + bytes + 511u) & ~511u;
@@ -696,7 +730,9 @@ void smp_load(void)                             /* load (again) whatever the ima
     smp_hi = header_read();
     dir_ok = smp_hi != 0;
     meta_read();
-    if (!dir_ok) {
+    if (smp_tables == 0)                        /* v0.26: the tables, once, first */
+        smp_tables = tbl_bytes() ? 1 : -1;
+    if (!dir_ok && smp_tables != 1) {
         smp_lstate = L_IDLE;
         return;
     }
@@ -732,6 +768,13 @@ static void load_poll(void)
                 for (u32 k = 0; k < n; k++)
                     STAGE(0)[k] = SLAREA[l_off - SLICE_AREA + k];
             }
+        } else if (l_kind == K_TABLES) {                    /* v0.26: from the ColdFire's RAM */
+            for (u32 k = 0; k < n; k++)
+                STAGE(0)[k] = TBL[8 + (l_off - TABLE_AREA) + k];
+        } else if (l_kind == K_READY) {
+            for (u32 k = 0; k < n; k++)
+                STAGE(0)[k] = 0;
+            put_le32(STAGE(0), TABLE_MAGIC);
         } else if (l_kind == K_FRAMES) {
             if (image_read(l_off, n, STAGE(0)) != 0) {
                 smp_lstate = L_IDLE;                            /* the +Drive refused: stop */

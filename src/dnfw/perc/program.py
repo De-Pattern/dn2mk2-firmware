@@ -407,16 +407,16 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     raw_type(p, 2)
     for typ in MNM_TYPES:                     # v0.26: a Monomachine machine is PERC's voice too
         p.iconst(12, typ)
-        p.e("COMP(R2, R12);")
-        skip = p.label("mnm")
-        p.jump("NE", skip)
-        p.iconst(2, MACHINE_TYPE)
-        p.place(skip)
+        p.if_(2, "EQ", 12, lambda: p.iconst(2, MACHINE_TYPE), kind="i")
     p.ipass(0, 2)
     p.iconst(12, MACHINE_TYPE)
     p.e("COMP(R0, R12);")
     other = p.label("other")
     p.jump("NE", other)
+    p.ld(0, L.md.C["fill"])                   # v0.26: silent until the tables (sent by the
+    p.iconst(12, MDK.Z_N)                     # ColdFire at power-on) are decoded
+    p.e("COMP(R0, R12);")
+    p.jump("LT", other)
     voice(p, L)
     p.jump("", nxt)
     # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
@@ -437,7 +437,7 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.iconst(12, 16)
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
-    p.e(f"JUMP {rings_sw:#x};", "smp.asm's wr_smp, then RESONATOR, CZ, PING (which restores)")
+    p.e(f"JUMP {rings_sw:#x};", "smp.asm's wr_smp, then PING (which restores)")
     p.emit_subs()
     p.raw(".wr_perc..end:")
     p.raw("      .type wr_perc.,STT_FUNC;")
