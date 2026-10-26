@@ -615,14 +615,23 @@ static void scrollbar(void *c, int x, int y0, int y1, int at, int n)
 
 static u32 lst_seen_at __attribute__((section(".data"))) = 0;    /* the page under it, last drawn */
 
-static void sample_list(void *c, void *view, int slot)
+static int list_trk __attribute__((section(".data"))) = -1;     /* the track it last saw */
+static int list_kind __attribute__((section(".data"))) = -1;    /* and its machine */
+
+static void sample_list(void *c, void *view, int slot, int kind)
 {
     (void)c;
     u32 now = *(volatile u32 *)0x4058E8D4u;
     lst_seen_at = now;
-    if (view != smp_list_view || list_slot < 0) {   /* first sight of this page: no list */
+    int trk = UI_TRACK;
+    /* first sight of this page, another track or another machine: SAMP's value is taken as it is, and no
+     * list comes up -- only turning SAMP brings it (v0.26: switching to a sample track
+     * opened it, as its SAMP differed from the last track's) */
+    if (view != smp_list_view || list_slot < 0 || trk != list_trk || kind != list_kind) {
         smp_list_view = view;
         list_slot = slot;
+        list_trk = trk;
+        list_kind = kind;
         smp_lst_open = 0;
         return;
     }
@@ -871,7 +880,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     if (!wave) {                                /* page 1: the widgets and their labels */
         for (int i = 0; i < 8; i++)
             cell(c, view, kind, ids[i], CELL_X(i & 3), i < 4 ? TOP_Y : BOT_Y, 1, 0);
-        sample_list(c, view, value(view, SMP_SAMP_ID, 0));
+        sample_list(c, view, value(view, SMP_SAMP_ID, 0), kind);
         return;
     }
     /* page 2: the top row, unlabelled, raised a little; the waveform; the bottom labels */
@@ -958,7 +967,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         int top, v = value(view, ids[7], &top);
         w_pill(c, CELL_X(3), 0, v, top);
     }
-    sample_list(c, view, slot);
+    sample_list(c, view, slot, kind);
 }
 
 /* v0.22: the RECORDER, the DT2's SAMPLING screen as the DN2 has room for it, over the

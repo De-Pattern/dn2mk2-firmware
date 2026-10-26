@@ -449,8 +449,9 @@ def main() -> int:
 
         # 6e. v0.23, SLICE: its menus drawn over the page (the menu, the grid dialog, the
         # editor with a slice table), the editor's keys and knobs moving the picked slice;
-        # and in KEYBOARD mode on a SLICE track (SLCE NOTE) trig 4 plays note C0 + 3 and
-        # trig 1 C0, the notes SLCE's NOTE mode turns into slices 4 and 1
+        # and in KEYBOARD mode on a SLICE track (SLCE NOTE) the lit keys play the slices in
+        # their chromatic order (v0.26): trig 9 (C) slice 1, trig 2 (C#) slice 2, trig 10 (D)
+        # slice 3 -- notes C0, C0 + 1, C0 + 2, which SLCE's NOTE mode turns into those slices
         if "slc_state" in lay:
             import struct as _st                # noqa: PLC0415
             g = {k: hex(lay[k]) for k in ("slc_state", "slc_nfr", "slc_ns", "slc_cur", "slc_sl")}
@@ -466,8 +467,13 @@ def main() -> int:
                      f"poke:{hires}:{pat},poke:{g['slc_nfr']}:00023280,poke:{g['slc_ns']}:00000003,"
                      f"poke:{g['slc_cur']}:00000000,poke:{g['slc_sl']}:{tb},poke:{g['slc_state']}:00000004,"
                      f"wait:6,png:e1,right,wait:5,spin:4:6,wait:5,png:e2,mem:{g['slc_cur']}:4,"
-                     f"mem:{g['slc_sl']}:36,no,wait:6,mem:{g['slc_state']}:4,"
-                     f"{pk},tap:18,wait:6,press:28,wait:6,release:28,wait:6,press:25,wait:6,release:25,wait:6")
+                     f"mem:{g['slc_sl']}:36,"
+                     # v0.26: FUNC + RIGHT splits the picked slice in two, FUNC + LEFT removes it
+                     f"press:17,wait:2,right,wait:3,release:17,wait:3,mem:{g['slc_ns']}:4,mem:{g['slc_sl']}:48,"
+                     f"press:17,wait:2,left,wait:3,release:17,wait:3,mem:{g['slc_ns']}:4,"
+                     f"no,wait:6,mem:{g['slc_state']}:4,"
+                     f"{pk},tap:18,wait:6,press:33,wait:6,release:33,wait:6,press:26,wait:6,release:26,wait:6,"
+                     f"press:34,wait:6,release:34,wait:6")
             js = work / "slice.json"
             slc_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                           "--build", bdir, "--snapshot", snap, "--steps", steps,
@@ -483,15 +489,21 @@ def main() -> int:
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "m", "g", "e1", "e2")}
                     table = list(_st.unpack(">9I", bytes.fromhex(m[g["slc_sl"]])))
                     notes = [int(x["D4"], 16) for x in r["regs_at"].get("0x400576ca", [])]
+                    split = list(_st.unpack(">12I", bytes.fromhex(m[f"{g['slc_sl']}@3"])))
                     facts = {"drawn": len({shots[n] for n in shots}) >= 4,
                              "picked": int(m[g["slc_cur"]], 16) == 1,
                              "start moved": table[3] > 36000 and table[:3] == [0, 30000, 0],
+                             # slice 2 (start s, end 70000) split at its middle: s..mid, mid..70000
+                             "split": int(m[g["slc_ns"]], 16) == 4 and split[4] == table[3]
+                             and split[6] == split[4] + (70000 - split[4]) // 2 and split[7] == 70000
+                             and split[9:12] == [70000, 140000, 72000],
+                             "removed": int(m[f"{g['slc_ns']}@4"], 16) == 3,
                              "closed": int(m[g["slc_state"]], 16) == 0,
-                             "slice notes": notes == [15, 12]}
+                             "slice notes": notes == [12, 13, 14]}
                     good = all(facts.values())
                     why = str(facts) + f" notes {notes}"
                 return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
-                 "closes; KEYBOARD trig 4 / trig 1 on a SLICE track play C0+3 / C0"
+                 "closes; KEYBOARD trigs 9, 2, 10 (C, C#, D) on a SLICE track play slices 1, 2, 3 (C0, C0+1, C0+2)"
                               if good else why)
             gate("SLICE menus and SLICES keys (ColdFire)", *cached("SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body))
 
