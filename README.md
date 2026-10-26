@@ -34,6 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| MNM-1 | 2026-10-26 | **A separate line**: v0.25 without CZ/RESONATOR, plus the Monomachine's SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens and VO-6 | `builds/MNM-1-MONOMACHINE/` | yes |
 | **v0.25** | 2026-10-26 | The playhead on the waveform; the DT2's sample list and +Drive-style folder browser (SAMPLE ACTION: load, rename, delete); the recorder as the DT2's (RECORDING, NORMALIZING, TRIM with preview, FILE NAME, ASSIGN); GRID/SLICE slice locks; KEYBOARD's next 16 slices; an LFO on SAMP steps through your samples; the in-browser patcher | `builds/v0.25-BROWSER/` | yes |
 | v0.24 | 2026-10-25 | The Machinedrum's nine P-I machines on PERC (PI-BD, SD, MT, ML, MA, RS, RC, CC, HH) from your MD firmware, +6 dB; the first hit after choosing an MD machine is now the MD's own | `builds/v0.24-PI/` | yes |
 | v0.23 | 2026-10-24 | SLICE's own menus (YES: EDIT SLICE POINTS, CREATE SLICE GRID with SLICES 2-64 and TR.DET), the slice editor, SLICES on the trig keys (KEYBOARD, SLCE NOTE); a sample with no slices plays whole | `builds/v0.23-SLICE/` | yes |
@@ -59,6 +60,56 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## MNM-1 — MONOMACHINE (a separate line: v0.25 + the Monomachine's synth machines)
+
+`DN2mod_MNM-1_MONOMACHINE_OS1.11.syx` (in `builds/MNM-1-MONOMACHINE/`)
+sha256 `daa47def96b036fdd3aeeef66504daf17a0399349c46f765aa395e6d50e37273`
+Gate: CLEARED TO FLASH, 2026-10-26 (USB size 2,047,775 of 2,097,152; DSP image 1,013,668 of 1,048,575). Source: branch `monomachine`, commit `cd0dbbf`. Docs: `docs/mnm.md` on that branch.
+
+**Not a numbered version.** It is everything in v0.25 except CZ PHASE and RESONATOR (removed),
+plus the Monomachine machines. The numbered line (v0.25 and on) stays without them until we
+decide which line goes on. The patcher builds it too: it asks for a fourth file, the
+**Monomachine SFX-6 OS 1.32B** .syx, for this build only.
+
+**Adds.**
+- **Five machines from the Monomachine**, each its own MACHINE SEL entry, after PERC: **SID 6581**,
+  **DPRO Wave**, **DPRO Ddrw**, **DPRO Dens** and **VO-6**, from your Monomachine OS (every
+  reference case of the Monomachine's own DSP code matches, at 60 dB or better). One page each,
+  the Monomachine's eight parameters; choices by name (SID's waves and modes, VO-6's 21
+  consonants, DENS's pitches, the waves as S01..S32).
+- **Every machine's note 60 is middle C** (261.6 Hz), as the DN2's own (DPRO Wave plays an
+  octave up from the Monomachine's, where it sits an octave under the others).
+- **The tables travel at power-on**: the Machinedrum's and Monomachine's tables are sent to the
+  DSP over the sample link at power-on rather than living in the DSP's image (which frees
+  about 35 KB there). PERC's machines are silent for the first ~0.1 s after power-on, and DDRW
+  and DENS for ~8 s (the DSP builds their waves).
+
+**Test** (after the regression check and v0.25's tests):
+1. MACHINE SEL: the five appear after PERC, before the sample machines; each loads, shows its page.
+2. Play each at C3, C4, C5: in tune with an FM Tone track at the same notes.
+3. SID: WAVE through TRI/SAW/PULS/MIX/NOIS; PW and PWAD on PULS; MOD RING/SYNC.
+4. DPRO Wave: WAVE S01..S32, WP and WPM.
+5. DPRO Ddrw: WAV1/WAV2 with MIX; TIME on a wave change; BR1/BR2 bit reduction.
+6. DPRO Dens: PCH2..4 (OFF, -12..+12, the ratios).
+7. VO-6: VOC1/VOC2 for the vowel; CONS M, N, S with CLEN/CVOL; V-SW OFF ends on the consonant.
+8. SAVE PROJECT, power-cycle, reload: the tracks keep their machines and knobs.
+9. Three SID tracks at once: the third is silent (the DSP budget, below).
+
+**Known issues / not done.**
+- **The DSP budget.** The Monomachine voices never go quiet (as on the Monomachine) and cost
+  2 to 10 Machinedrum voices each, so they are rendered in track order while their total cost
+  fits a budget: two SIDs, four DPRO Waves, one DDRW and one DENS, or two VO-6 at once; a
+  track past it is silent. The budget is set from the model, not measured on the instrument.
+- **Mono**, one voice a track, as the Monomachine.
+- **The knobs start where WaveTone's are** when the machine is chosen, not at the Monomachine's
+  defaults (VO-6's VOIC at 100 whispers): set them after choosing.
+- **DDRW and DENS** read stand-in waves built from the 32 DigiPRO ROM waves (your Monomachine's
+  own Digibank is in its flash, not in the OS file). **DENS's chorus** (CHRL/CHRW) is not
+  ported. **DPRO-BBOX** does not fit.
+- **Not seen on hardware yet**: anything of it. All checked in the emulators.
 
 ---
 
