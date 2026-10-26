@@ -1911,6 +1911,10 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
     peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in MM.NAMES}
     budget = [V.peak(perc_series(runs["budget"], t)) if runs["budget"]["ok"] else None for t in range(4)]
+    # still sounding at the end (a voice that writes over its own words falls silent after
+    # its first block, and its model with it: v0.26 WIP)
+    late = {name: V.peak(perc_series(runs[name], 0)[-4 * BLOCK:]) if runs[name]["ok"] else None
+            for name in MM.NAMES}
     other = {name: V.peak(perc_series(runs[name], 1)) if runs[name]["ok"] else None for name in MM.NAMES}
     silent = perc_series(runs["silent"], 0)
     n = {"exact_voice_blocks_out_state_mismatches": exact, "peaks": peaks, "peaks_track1": other,
@@ -1926,6 +1930,8 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             and exact.get("silent", (0, 1, 1))[1:] == (0, 0),
         "each machine sounds on track 0 and beside it on track 1 (peak > 0.01)":
             all(v is not None and v > 0.01 for v in list(peaks.values()) + list(other.values())),
+        "each machine is still sounding in the run's last four blocks (peak > 0.005)":
+            all(v is not None and v > 0.005 for v in late.values()),
         "nothing is non-finite or above 4.0 in any buffer":
             ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["perc"]
                             for v in blk.values() for x in v["out"]),
@@ -1934,6 +1940,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]),
     }
     n["budget_peaks"] = budget
+    n["late_peaks"] = late
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
 
 
