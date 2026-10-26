@@ -437,16 +437,20 @@ def _pulses(p: Prog, L: C.Layout) -> None:
             p.lsh(4, 2, -19)
             p.st(_a(L, "f"), 4)                # the shape's phase, 0..31
             p.iconst(12, 0x7FFFF)
-            p.iop(4, 2, "AND", 12)
-            p.lsh(4, 4, 5)                     # y0 of MPYSU (0x10, b0): the weight << 5
-            p.iconst(12, 0)
-            p.float_(4, 4, 12)
-            p.fconst(12, 0xCCCCD * 2.0 ** -47)
-            p.fop(4, 4, "*", 12)               # x1 = 0.1 w
-            p.st(_a(L, "x1"), 4)
-            p.fconst(12, 0xCCCCD * Q23)
-            p.fop(5, 12, "-", 4)
-            p.st(_a(L, "y0"), 5)               # y0 = 0.1 - x1
+            p.iop(1, 2, "AND", 12)
+            p.lsh(1, 1, 5)                     # y0 of MPYSU (0x10, b0): the weight << 5
+            p.iconst(2, 0xCCCCD)
+            mulq(p)                            # floor(0xCCCCD w / 2^23), R3 its low 23 bits
+            p.iconst(12, 1)
+            p.iop(4, 1, "AND", 12)
+            p.lsh(4, 4, 23)
+            p.iop(3, 3, "OR", 4)               # the low 24 bits of 0xCCCCD w
+            p.lsh(1, 1, -1)
+            p.st(_a(L, "x1"), 1)               # x1 = floor(0xCCCCD w / 2^24)
+            p.iconst(2, 0xCCCCD)
+            p.iop(2, 2, "-", 1)
+            p.ifz(3, "NE", lambda: (p.iconst(12, 1), p.iop(2, 2, "-", 12)))
+            p.st(_a(L, "y0"), 2)               # y0 = floor(0xCCCCD - 0xCCCCD w / 2^24)
             _blit(p, L)
             # the phase moves on a period
             ls(p, 1, "pi")
@@ -480,7 +484,6 @@ def _blit(p: Prog, L: C.Layout) -> None:
     ring[q0 + 1 + k] += x1 T[0x152 - f + 32k] + y0 T[0x153 - f + 32k] (k = 0..15): the
     kernel's P:0x3AA, its two arms (T: y:$131..$333, VO 'blit')"""
     base = L.VO["blit"] - 4 * 0x131
-    _qconsts(p)
     for arm in (0, 1):
         p.ld(3, _a(L, "q0"))
         addk(p, 3, 3, 17 if arm == 0 else 1)
@@ -494,19 +497,31 @@ def _blit(p: Prog, L: C.Layout) -> None:
         addk(p, 4, 4, base)
 
         def tap(arm=arm):
-            p.ld(1, _a(L, "x1"))
-            p.ld(2, _a(L, "y0"))
+            p.ld(9, _a(L, "x1"))
+            _split(p, 9, 1, 2)
+            p.ld(9, _a(L, "y0"))
+            _split(p, 9, 5, 6)
+            p.iconst(14, 0)
+            p.iconst(15, 0)
+            p.iconst(13, 0)
             p.seti(1, 4)
-            p.ldi(5, 0, 1)
-            p.ldi(6, -1 if arm == 0 else 1, 1)
+            for k, (fv) in ((0, 1), (-1 if arm == 0 else 1, 5)):
+                p.ldi(7, k, 1)
+                _word(p, 9, 7)
+                _split(p, 9, 7, 8)
+                _prod(p, fv, fv + 1, 7, 8, False)
+            p.ash(13, 13, -12)
+            p.iop(15, 15, "+", 13)
+            p.ash(15, 15, -11)
+            p.iop(14, 14, "+", 14)
+            p.iop(14, 14, "+", 15)             # floor((x1 T + y0 T') / 2^23)
             _ring_addr(p, L, 7, 3)
             p.seti(2, 7)
             p.ldi(10, 0, 2)
-            p.fop(5, 5, "*", 1)
-            p.fop(10, 10, "+", 5)
-            p.fop(6, 6, "*", 2)
-            p.fop(10, 10, "+", 6)
-            _floor(p, 10, 0, 15)
+            _word(p, 10, 10)
+            p.iop(14, 14, "+", 10)
+            limi(p, 14)
+            i2f(p, 10, 14)
             p.sti(0, 2, 10)
             addk(p, 3, 3, 1)
             addk(p, 4, 4, -128 if arm == 0 else 128)

@@ -279,7 +279,7 @@ def unsigned(p: Prog, d: int, f: int) -> None:
 
 
 # -- the Digibank stand-in, built by the DSP ------------------------------------------------
-BUILD_PER_BLOCK = 12                          # outputs a call (about 2,000 instructions)
+BUILD_PER_BLOCK = 8                           # outputs a call (at most about 1,900 instructions)
 
 
 def _build_one(p: Prog, L: C.Layout) -> None:
@@ -320,53 +320,50 @@ def _build_one(p: Prog, L: C.Layout) -> None:
     p.st(W["wb"], 5)                            # the ROM wave's samples (pass 0)
     p.ld(1, G["j"])
     p.iconst(12, -3)
-    p.iop(1, 12, "+", 1)
-    p.st(W["i0"], 1)
+    p.iop(1, 12, "+", 1)                        # k = j - 3 (R1), the sum in F9
     p.iconst(12, L.DT["hb"])
     p.seti(2, 12)
     p.fconst(9, 0.0)
-    p.st(W["fr"], 9)
+    p.ld(10, W["msk"])
 
-    def tap():
-        p.ld(1, W["i0"])
-        p.ld(2, W["msk"])
-        p.iop(2, 1, "AND", 2)                   # k
-        p.iconst(12, 1)
-        p.iop(1, 12, "+", 1)
-        p.st(W["i0"], 1)
-        p.ld(3, G["l"])
-
-        def src():                              # the ROM wave, zero-stuffed
-            p.fconst(4, 0.0)
+    def tap(src):
+        def body():
+            p.iop(2, 1, "AND", 10)              # k mod N
             p.iconst(12, 1)
-            p.iop(5, 2, "AND", 12)
+            p.iop(1, 12, "+", 1)
+            if src:                             # the ROM wave, zero-stuffed (x 2)
+                p.fconst(4, 0.0)
+                p.iop(5, 2, "AND", 12)
 
-            def even():
-                p.lsh(5, 2, 1)                  # (k >> 1) x 4
-                p.ld(6, W["wb"])
-                addr(p, 5, 5, 6)
+                def even():
+                    p.lsh(5, 2, 1)              # (k >> 1) x 4
+                    p.iop(5, 11, "+", 5)
+                    p.seti(1, 5)
+                    p.ldi(4, 0, 1)
+                    p.fop(4, 4, "+", 4)
+                p.ifz(5, "EQ", even)
+            else:                               # level l-1's word, its sample bits
+                p.lsh(5, 2, 2)
+                p.iop(5, 11, "+", 5)
                 p.seti(1, 5)
                 p.ldi(4, 0, 1)
-                p.fop(4, 4, "+", 4)
-            p.ifz(5, "EQ", even)
+                p.iconst(12, 0xFFFF00)
+                p.iop(4, 4, "AND", 12)
+                q23(p, 4, 4)
+            p.ldpost(5, 2)
+            p.fop(4, 4, "*", 5)
+            p.fop(9, 9, "+", 4)
+        return lambda: p.loop(W["t"], 7, body)
+    p.ld(3, G["l"])
 
-        def lev():
-            p.lsh(5, 2, 2)
-            p.ld(6, W["fb"])
-            addr(p, 5, 5, 6)
-            p.seti(1, 5)
-            p.ldi(4, 0, 1)
-            p.iconst(12, 0xFFFF00)
-            p.iop(4, 4, "AND", 12)
-            q23(p, 4, 4)
-        p.ifz(3, "EQ", src, lev)
-        p.ldpost(5, 2)
-        p.fop(4, 4, "*", 5)
-        p.ld(9, W["fr"])
-        p.fop(9, 9, "+", 4)
-        p.st(W["fr"], 9)
-    p.loop(W["t"], 7, tap)
-    p.ld(9, W["fr"])
+    def src():
+        p.ld(11, W["wb"])
+        tap(True)()
+
+    def lev():
+        p.ld(11, W["fb"])
+        tap(False)()
+    p.ifz(3, "EQ", src, lev)
     p.fconst(12, 32768.0)
     p.fop(9, 9, "*", 12)
     p.fconst(12, 32767.0)
