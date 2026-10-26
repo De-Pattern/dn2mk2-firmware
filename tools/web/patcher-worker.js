@@ -1,5 +1,6 @@
 /* DN2 mod patcher: builds the mod in Python (Pyodide) off the page's thread.
- * In:  {zipUrl, zipSha, files: {dn2, dt2, md}: {name, bytes}}
+ * In:  {zipUrl, zipSha, inputs, files: {dn2, dt2, md[, mnm]}: {name, bytes}}
+ *      (inputs: the files this version's build reads; v0.26 on adds mnm)
  * Out: {log: text} ... then {done: bytes} or {error: text} */
 const PYODIDE = "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/";
 importScripts(PYODIDE + "pyodide.js");
@@ -13,6 +14,7 @@ async function hex(buf) {
 
 self.onmessage = async (e) => {
   const { zipUrl, zipSha, files } = e.data;
+  const inputs = e.data.inputs || ["dn2", "dt2", "md"];
   const log = (t) => self.postMessage({ log: t });
   try {
     if (!py) {
@@ -30,9 +32,10 @@ self.onmessage = async (e) => {
     py.FS.mkdirTree(run + "/in");
     py.FS.mkdirTree(run + "/code");
     py.unpackArchive(zip, "zip", { extractDir: run + "/code" });
-    for (const k of ["dn2", "dt2", "md"]) py.FS.writeFile(run + "/in/" + k, files[k].bytes);
+    for (const k of inputs) py.FS.writeFile(run + "/in/" + k, files[k].bytes);
     log("Building (a few minutes; the page stays usable)...");
     py.globals.set("RUN", run);
+    py.globals.set("MNM", inputs.includes("mnm") ? run + "/in/mnm" : null);
     py.runPython(`
 import sys, os, pathlib
 for m in [m for m in sys.modules if m == "dnfw" or m.startswith("dnfw.") or m == "dn2patch"]:
@@ -41,7 +44,8 @@ sys.path = [p for p in sys.path if not p.startswith("/run")]
 sys.path.insert(0, RUN + "/code")
 import dn2patch
 dn2patch.WORK = pathlib.Path(RUN + "/work")
-SHA = dn2patch.build(RUN + "/in/dn2", RUN + "/in/dt2", RUN + "/in/md", RUN + "/out.syx")
+kw = {"mnm": MNM} if MNM else {}
+SHA = dn2patch.build(RUN + "/in/dn2", RUN + "/in/dt2", RUN + "/in/md", RUN + "/out.syx", **kw)
 `);
     const out = py.FS.readFile(run + "/out.syx");
     self.postMessage({ done: out }, [out.buffer]);

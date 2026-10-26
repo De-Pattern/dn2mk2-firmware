@@ -35,6 +35,7 @@ button:disabled { opacity: .45; cursor: default; }
 .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--dim); }
 .pill.ok { color: var(--ok); border-color: var(--ok); } .pill.bad { color: var(--bad); border-color: var(--bad); } .pill.warn { color: var(--warn); border-color: var(--warn); }
 .files { display: grid; gap: 10px; }
+.file[hidden] { display: none; }
 .file { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
 .file.over { border-color: var(--accent); }
 .file b { font-weight: 600; }
@@ -66,8 +67,9 @@ input[type=file] { display: none; }
       <label class="file" data-k="dn2"><span><b>Digitone II OS 1.11</b> <span class="mono">.syx</span> or Elektron's .zip — the file that gets patched</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
       <label class="file" data-k="dt2"><span><b>Digitakt II OS 1.17</b> (or 1.16) <span class="mono">.syx</span> or .zip — its DSP's sample-reading tables</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
       <label class="file" data-k="md"><span><b>Machinedrum UW OS 1.63</b> <span class="mono">.syx</span>, .bin or .zip — its machines' tables, for PERC</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.bin,.zip"></label>
+      <label class="file" data-k="mnm" hidden><span><b>Monomachine SFX-6 OS 1.32B</b> <span class="mono">.syx</span> or .zip — its machines' tables (SID, DigiPRO, VO-6)</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
     </div>
-    <p class="note">All three are free downloads from Elektron's support pages for each instrument. Drop them on their boxes, or choose them.</p>
+    <p class="note">All of them are free downloads from Elektron's support pages for each instrument. Drop them on their boxes, or choose them. This browser remembers them for next time (they stay on this device; nothing is uploaded). <a href="#" id="forget">Forget my files</a></p>
   </section>
 
   <section>
@@ -93,10 +95,13 @@ async function sha256(buf) {
   return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, "0")).join("");
 }
 function cur() { return builds.find(b => b.version === $("#ver").value); }
+function inputs() { const b = cur(); return (b && b.inputs) || ["dn2", "dt2", "md"]; }
 function ready() {
-  const n = ["dn2", "dt2", "md"].filter(k => files[k]).length;
-  $("#go").disabled = busy || n < 3 || !cur();
-  if (!busy && !out && !failed) setState(n < 3 ? `waiting for the files (${n} of 3)` : "ready", n < 3 ? "" : "ok");
+  const need = inputs();
+  document.querySelectorAll(".file").forEach(box => { box.hidden = !need.includes(box.dataset.k); });
+  const n = need.filter(k => files[k]).length, all = need.length;
+  $("#go").disabled = busy || n < all || !cur();
+  if (!busy && !out && !failed) setState(n < all ? `waiting for the files (${n} of ${all})` : "ready", n < all ? "" : "ok");
 }
 function setState(t, cls = "") { const s = $("#state"); s.textContent = t; s.className = "pill " + cls; }
 function log(t) { const l = $("#log"); l.textContent += t + "\n"; l.scrollTop = l.scrollHeight; }
@@ -109,12 +114,60 @@ fetch("patcher/builds.json", { cache: "no-cache" }).then(r => r.json()).then(lis
 }).catch(() => { $("#verNote").textContent = "could not load the list"; $("#verNote").className = "pill bad"; });
 $("#ver").onchange = () => { const b = cur(); failed = false; $("#verNote").textContent = "sha256 " + b.sha256.slice(0, 12) + "…"; out = null; $("#save").disabled = true; $("#result").textContent = ""; ready(); };
 
+// The files you choose are kept in this browser (IndexedDB), so the next visit has them
+// already: nothing is uploaded anywhere. "Forget my files" clears them.
+const DB = { name: "dn2patch", store: "files" };
+function db() {
+  return new Promise((ok, bad) => {
+    const r = indexedDB.open(DB.name, 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(DB.store);
+    r.onsuccess = () => ok(r.result);
+    r.onerror = () => bad(r.error);
+  });
+}
+async function keep(k, v) {
+  try {
+    const d = await db();
+    await new Promise((ok, bad) => {
+      const t = d.transaction(DB.store, "readwrite");
+      v ? t.objectStore(DB.store).put(v, k) : t.objectStore(DB.store).delete(k);
+      t.oncomplete = ok; t.onerror = () => bad(t.error);
+    });
+  } catch (e) { /* private window or storage off: the page works as before, without remembering */ }
+}
+async function recall() {
+  try {
+    const d = await db();
+    const all = await new Promise((ok, bad) => {
+      const t = d.transaction(DB.store, "readonly"), st = t.objectStore(DB.store), got = {};
+      const c = st.openCursor();
+      c.onsuccess = () => { const cur = c.result; if (cur) { got[cur.key] = cur.value; cur.continue(); } else ok(got); };
+      c.onerror = () => bad(c.error);
+    });
+    for (const [k, v] of Object.entries(all)) {
+      const box = document.querySelector(`.file[data-k="${k}"]`);
+      if (!box || !v || !v.bytes) continue;
+      files[k] = v;
+      shown(box, v.name, v.bytes.length, true);
+    }
+    ready();
+  } catch (e) { /* nothing remembered */ }
+}
+function shown(box, name, n, remembered) {
+  box.querySelector("small").textContent = `${name} · ${(n / 1048576).toFixed(2)} MB${remembered ? " · remembered" : ""}`;
+}
 function take(k, f, box) {
   f.arrayBuffer().then(buf => {
     files[k] = { name: f.name, bytes: new Uint8Array(buf) };
-    box.querySelector("small").textContent = `${f.name} · ${(f.size / 1048576).toFixed(2)} MB`;
+    shown(box, f.name, f.size, false);
+    keep(k, files[k]);
     out = null; failed = false; $("#save").disabled = true; ready();
   });
+}
+async function forget() {
+  for (const k of Object.keys(files)) { delete files[k]; await keep(k, null); }
+  document.querySelectorAll(".file small").forEach(s => { s.textContent = "not chosen"; });
+  out = null; failed = false; $("#save").disabled = true; ready();
 }
 document.querySelectorAll(".file").forEach(box => {
   const k = box.dataset.k, inp = box.querySelector("input");
@@ -157,13 +210,17 @@ $("#go").onclick = () => {
       failed = true;
       setState("does not match: do not flash", "bad");
       $("#result").className = "note bad";
-      $("#result").textContent = `The result (sha256 ${got.slice(0, 16)}…) is not v${b.version}'s cleared file (${b.sha256.slice(0, 16)}…). Do not flash anything from this. Check the three files are the versions named above.`;
+      $("#result").textContent = `The result (sha256 ${got.slice(0, 16)}…) is not v${b.version}'s cleared file (${b.sha256.slice(0, 16)}…). Do not flash anything from this. Check the files are the versions named above.`;
     }
     ready();
   };
-  worker.postMessage({ zipUrl: "patcher/" + b.zip, zipSha: b.zip_sha256,
-    files: { dn2: files.dn2, dt2: files.dt2, md: files.md } });
+  const need = inputs();
+  worker.postMessage({ zipUrl: "patcher/" + b.zip, zipSha: b.zip_sha256, inputs: need,
+    files: Object.fromEntries(need.map(k => [k, files[k]])) });
 };
+
+$("#forget").onclick = (e) => { e.preventDefault(); forget(); };
+recall();
 
 $("#save").onclick = () => {
   const b = cur(); if (!out || !b) return;
