@@ -78,8 +78,9 @@ machines. The ColdFire's type range, names, MACHINE SEL list and group, its page
   DENS, at once. The SHARC has about 250,000 cycles a frame free beside the stock engines
   (`docs/sharc-load.md`); the budget is to be raised or lowered from a reading on the
   instrument (`tools/dn2sharc_load.py`).
-- **VO-6 is played 24 semitones down** (`machines.TRANSPOSE`): the Monomachine's kernel
-  pitch puts its note 60 at 1046 Hz, two octaves over the others'.
+- **DPRO-WAVE is played an octave up** (`machines.TRANSPOSE`): on the Monomachine, for the
+  same pitch, it sounds an octave under SID, DDRW, DENS and VO-6 (their golden runs). So
+  each machine's note 60 is 261.6 Hz, as the DN2's own machines' (test_perc_live).
 - **Its AMP level** (y:(r6+175), the kernel's amp envelope, which gates the voiced path):
   that of an AMP attack of 0 (0 at the trig, then + 0x400000 a block to full), so its
   pre-delay is 0.

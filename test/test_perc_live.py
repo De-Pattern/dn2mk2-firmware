@@ -217,7 +217,7 @@ def _f0(x, rate):
 
 def test_v026_the_monomachine_machines_play_the_dn2s_note():
     """on PERC's program (the model the runner holds the DSP to): each Monomachine machine
-    at note 60 near 261.6 Hz (VO-6 too: it is played 24 semitones down) and note 72 an
+    at note 60 near 261.6 Hz (DPRO-WAVE: an octave up, machines.TRANSPOSE) and note 72 an
     octave over it, within 3 %"""
     from dnfw.md import core as MDK
     from dnfw.mnm import dpro, machines as MNM

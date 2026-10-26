@@ -35,8 +35,8 @@ def _host(p: Prog, L: K.Layout) -> None:
 
 # v0.26: semitones added to the DN2's note, so each machine's note 60 is 261.6 Hz as the
 # DN2's own: on the Monomachine, for the same pitch, DPRO-WAVE sounds an octave under SID,
-# DDRW and DENS (its 512-sample waves read through a window twice that), VO-6 two over
-TRANSPOSE = {"DPRO-WAVE": 12, "VO-6": -24}
+# DDRW, DENS and VO-6
+TRANSPOSE = {"DPRO-WAVE": 12}
 
 
 def _pitch(p: Prog, L: K.Layout, transpose: int = 0) -> None:
