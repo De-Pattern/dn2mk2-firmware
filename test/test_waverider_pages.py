@@ -133,7 +133,8 @@ def test_each_sample_machine_has_its_descriptor_and_names():
             if rid:
                 assert named[rid] == (long_, short)
     hdr = pages.c_header()
-    assert "#define WR_KINDS 9" in hdr and "#define SMP_KIND0 4" in hdr
+    # a kind (is_wr: the type - 4) for every type of ours, 5..TYPES_LAST (v0.26: 14.. too)
+    assert f"#define WR_KINDS {pages.TYPES_LAST - 4}" in hdr and "#define SMP_KIND0 4" in hdr
     assert '"KICK", "SNARE", "HAT", "BEAT"' in hdr
 
 
