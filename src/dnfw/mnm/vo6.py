@@ -1,0 +1,1213 @@
+"""VO-6 (docs/mnm.md): the Monomachine's vowel/consonant voice, at the Monomachine's own rate
+(16 samples a block, no decimator).
+
+Per block: a band-limited pulse train (32-tap pulses from the kernel's table, at w Hz, w the
+increment's word: the period 44100 / w samples, kept as whole samples and 24 fraction bits)
+plus a noise word stream (VOIC mixes them) excites four resonators in series (the formants:
+F1, F2 from VOC1, VOC2; F3 = max(0x6277C6, F2 + 0x1A52F); F4 0x679171; bandwidths 50, 75, 100,
+150 Hz); the same four in parallel filter the unvoiced source (noise / 8, or a consonant's
+biquad on it); an AGC (1 / RMS of the voiced output, from the Monomachine's log and exp tables)
+and three per-block envelopes (the onset y35, the consonant's transition y31, the vowel gate
+y39) set the mix, and a fixed biquad shapes the output. CONS picks one of 21 consonant
+set-ups (a table row at the trig) and renderers (formant offsets, the source's biquad).
+
+The Monomachine's per-block decisions are kept exact: the envelopes, counters and offsets
+are its 24-bit words (ints here), and their products are exact (`_mulq`); the pulse phase
+is its 24.24 sum. The signal path is float.
+
+y:(r6+175), the Monomachine kernel's AMP envelope level, gates the voiced path. The DN2 has no
+such envelope here: the level is that of an AMP attack of 0 (S_LEV): 0 at the trig, then after
+each block min(level + 0x400000, 0x7FFFFF).
+
+State (S): the envelopes' words (x31..x40, y31..y40), the consonant (x54) and the trill
+(y54, x55, y55), the pulse phase, the ring position, the noise words, the frozen formants and
+pitch (x49.., y51: the pre-delay's), the resonators', biquads' and ramps' states (floats), the
+level follower, the AMP level. The pulse ring (64 floats): the slot's delay area
+(dnfw.md.core.delay_base). Parameters: VOC1 VOC2 V-SW VOIC CONS CLEN CVOL TUNE.
+"""
+
+from __future__ import annotations
+
+import math
+
+from . import core as C
+from ..md import core as K
+from ..perc.dsl import Prog
+
+NAME, ID = "VO-6", 11
+PNAMES = ("VOC1", "VOC2", "V-SW", "VOIC", "CONS", "CLEN", "CVOL", "TUNE")
+DEFAULTS = (64, 64, 96, 0, 0, 64, 64, 64)
+M24 = 0xFFFFFF
+Q23 = C.Q23
+
+_S = ("x31", "y31", "x32", "y32", "x33", "y33", "x34", "x35", "y35", "x36", "y36", "x37", "y37",
+      "x39", "y39", "x40", "y40", "k", "y54", "x55", "y55",
+      "pi", "pf", "rp", "nb", "nx", "z0", "z1", "z2", "z3", "zw", "zp", "zq", "lev",
+      # floats
+      "pb", "pa", "g", "t31", "cb", "ob")
+S = {n: k for k, n in enumerate(_S)}
+S["cb"] = len(_S) - 2                        # the consonant biquad: x1, x2, y1, y2
+S["ob"] = S["cb"] + 4                        # the output biquad
+S["ser"] = S["ob"] + 4                       # the series resonators: y1, y2 each
+S["par"] = S["ser"] + 8
+S["tx"] = S["par"] + 8                       # the series targets: c1, c2 each
+S["ty"] = S["tx"] + 8
+NSTATE = S["ty"] + 8
+assert NSTATE <= K.NS
+
+FORM = ((0x8074B7, 0x7F1766), (0x80AF13, 0x7EA3B7), (0x80E96E, 0x7E3072), (0x815E23, 0x7D4B22))
+OUT_EQ = (0x3FFFD6, 0x941206, 0x2E6F69, 0x8B8D50, 0x372839)
+LEV_STEP, LEV_TOP = 0x400000, 0x7FFFFF
+
+# scratch in the shared IN buffer (floats unless said)
+EXC, UNV, C30, RAMP, CO, WRD = 0, 16, 32, 48, 80, 96
+_WORDS = ("F0", "F1", "F2", "F3", "O0", "O1", "O2", "O3", "O4", "O5", "O6", "O7", "w", "P", "Q",
+          "p", "rb", "x1", "y0", "q0", "f", "n1", "n2", "n3", "vn", "vp", "st", "sto", "R", "g",
+          "x37", "c1", "step1", "step2", "src", "dst", "kk", "x1t", "stt", "skip", "go",
+          "m0", "m1", "m2", "m3", "r0", "r1", "r2", "r3", "n4")
+
+
+def _a(L: C.Layout, name: str) -> int:
+    if name in _WORDS:
+        return L.IN + 4 * (WRD + _WORDS.index(name))
+    return L.IN + 4 * {"EXC": EXC, "UNV": UNV, "C30": C30, "RAMP": RAMP, "CO": CO}[name]
+
+
+def s24(v: int) -> int:
+    v &= M24
+    return v - (1 << 24) if v & 0x800000 else v
+
+
+# -- small emitters ------------------------------------------------------------------------
+def ls(p: Prog, d: int, name: str, off: int = 0) -> None:
+    K.s(p, d, S[name] + off)
+
+
+def ss(p: Prog, name: str, r: int, off: int = 0) -> None:
+    K.ss(p, S[name] + off, r)
+
+
+def setk(p: Prog, name: str, v: int, t: int = 0) -> None:
+    p.iconst(t, v)
+    ss(p, name, t)
+
+
+def add(p: Prog, d: int, a: int, b: int) -> None:
+    if 8 <= a <= 15:
+        p.iop(d, a, "+", b)
+    else:
+        assert b != 12
+        p.ipass(12, a)
+        p.iop(d, 12, "+", b)
+
+
+def addk(p: Prog, d: int, a: int, k: int) -> None:
+    assert a != 12
+    p.iconst(12, k)
+    p.iop(d, 12, "+", a)
+
+
+def limi(p: Prog, r: int) -> None:
+    """Rr = the 24-bit limiter (ints)"""
+    p.iconst(12, 0x7FFFFF)
+    p.iop(r, r, "MIN", 12)
+    p.iconst(12, -0x800000)
+    p.iop(r, r, "MAX", 12)
+
+
+def i2f(p: Prog, d: int, r: int) -> None:
+    """Fd = the Q23 word Rr as a fraction. Clobbers R12."""
+    p.iconst(12, -23)
+    p.float_(d, r, 12)
+
+
+def f2i(p: Prog, d: int, f: int, t: int = 13) -> None:
+    """Rd = floor(Ff x 2^23). Clobbers R12, Rt."""
+    p.fconst(12, 2.0 ** 23)
+    p.fop(t, f, "*", 12)
+    p.trunc(d, t)
+    p.iconst(12, 0)
+    p.float_(12, d, 12)
+    p.if_(12, "GT", t, lambda: (p.iconst(12, 1), p.iop(d, d, "-", 12)))
+
+
+def _mulq_body(p: Prog) -> None:
+    """R1 = floor(R1 x R2 / 2^23) exactly (the 56300's MPY then a1), R2 >= 0, R1 >= 0 (or R2 = 0);
+    R3 = the product's low 23 bits (0: exact). Clobbers R4-R7, R12, R13."""
+    p.lsh(3, 1, -12)
+    p.iconst(12, 0xFFF)
+    p.iop(4, 1, "AND", 12)
+    p.lsh(5, 2, -12)
+    p.iop(6, 2, "AND", 12)
+    p.iconst(12, 0)
+    for r in (3, 4, 5, 6):
+        p.float_(r, r, 12)
+    p.fop(7, 3, "*", 5)
+    p.trunc(7, 7)                              # hh
+    p.fop(13, 3, "*", 6)
+    p.trunc(13, 13)
+    p.fop(3, 4, "*", 5)
+    p.trunc(3, 3)
+    p.iop(13, 13, "+", 3)                      # m
+    p.fop(4, 4, "*", 6)
+    p.trunc(4, 4)                              # l
+    p.lsh(3, 13, 12)
+    p.ipass(12, 3)
+    p.iop(3, 12, "+", 4)
+    p.iconst(12, 0x7FFFFF)
+    p.iop(3, 3, "AND", 12)                     # the low 23 bits
+    p.lsh(4, 4, -12)
+    p.iop(13, 13, "+", 4)
+    p.lsh(13, 13, -11)
+    p.lsh(7, 7, 1)
+    p.iop(1, 13, "+", 7)
+
+
+def mulq(p: Prog) -> None:
+    p.call("vo6_mulq", lambda: _mulq_body(p))
+
+
+def mulqs(p: Prog) -> None:
+    """R1 = floor(R1 x R2 / 2^23), R1 signed, R2 >= 0 (MPY, a1). Clobbers R3-R8, R12, R13."""
+    p.ipass(8, 1)
+
+    def neg():
+        p.iconst(12, 0)
+        p.iop(1, 12, "-", 1)
+        mulq(p)
+        p.iconst(12, 0)
+        p.iop(1, 12, "-", 1)
+        p.ifz(3, "NE", lambda: (p.iconst(12, 1), p.iop(1, 1, "-", 12)))
+    p.ifz(8, "LT", neg, lambda: mulq(p))
+
+
+def mulc(p: Prog, r: int, c: int, neg: bool = False) -> None:
+    """R1 = floor(+-Rr x c / 2^23), c a 24-bit constant (signed). Clobbers R2-R8, R12, R13."""
+    if r != 1:
+        p.ipass(1, r)
+    if c < 0:
+        c, neg = -c, not neg
+    if neg:
+        p.iconst(12, 0)
+        p.iop(1, 12, "-", 1)
+    p.iconst(2, c)
+    mulqs(p)
+
+
+# -- init, trig ------------------------------------------------------------------------------
+def _f2(p: Prog, d: int) -> None:
+    """Rd = F2 = 0x49F427 + MPY(0x19AA73, VOC2 << 16). Clobbers R1-R8, R12, R13."""
+    C.knob(p, 1, 1)
+    p.lsh(1, 1, 16)
+    p.iconst(2, 0x19AA73)
+    mulq(p)
+    addk(p, d, 1, 0x49F427)
+
+
+def init(p: Prog, L: C.Layout) -> None:
+    from . import exact as X
+    p.iconst(0, 0)
+    for k in range(NSTATE):
+        K.ss(p, k, 0)
+    setk(p, "rp", 48)
+    setk(p, "nb", 0xA)
+    setk(p, "nx", 1)
+    setk(p, "y35", s24(0xC8192D))              # the kernel's y0 at the 56300's call
+    setk(p, "z0", 0x6277C6)                    # (the Monomachine's init loses F1: F3's word)
+    _f2(p, 0)
+    ss(p, "z1", 0)
+    setk(p, "z2", 0x6277C6)
+    setk(p, "z3", 0x679171)
+    setk(p, "zw", 0x64)
+    per = X.vo6_period(0x64)
+    setk(p, "zp", per >> 24)
+    setk(p, "zq", per & M24)
+    # the ring, in the slot's delay area
+    K.delay_base(p, L.md, 0)
+    p.seti(5, 0)
+    p.iconst(6, 0)
+    p.loop(_a(L, "n1"), 64, lambda: p.stpost(5, 6))
+
+
+def _tab(p: Prog, L: C.Layout, d: int, name: str, idx: int) -> None:
+    """Rd = table NAME's word at Ridx (an int; the tables hold them as Q23 floats). Clobbers
+    R12, R13, I1."""
+    p.lsh(13, idx, 2)
+    p.iconst(12, L.VO[name])
+    p.iop(13, 12, "+", 13)
+    p.seti(1, 13)
+    p.ldi(d, 0, 1)
+    p.fconst(12, 2.0 ** 23)
+    p.fop(d, d, "*", 12)
+    p.trunc(d, d)
+
+
+def trig(p: Prog, L: C.Layout) -> None:
+    # the level follower's power doubles (asl, limited)
+    ls(p, 1, "pb")
+    p.fop(1, 1, "+", 1)
+    p.fconst(12, C.TOP)
+    p.fop(1, 1, "MIN", 12)
+    ss(p, "pb", 1)
+    for name, v in (("x31", 1), ("y31", 0), ("x35", 2), ("y37", 0), ("x39", 3), ("y39", 0x7FFFF8),
+                    ("y40", 1), ("y54", 1), ("x55", 0), ("y55", 0xF), ("y32", 0), ("lev", 0)):
+        setk(p, name, v)
+    # the consonant: k = CONS x 21 / 128; its row
+    C.knob(p, 1, 4)
+    p.ipass(12, 1)
+    p.lsh(2, 1, 2)
+    p.iop(2, 12, "+", 2)                       # 5 CONS
+    p.lsh(3, 1, 4)
+    p.ipass(12, 3)
+    p.iop(2, 12, "+", 2)                       # 21 CONS
+    p.lsh(2, 2, -7)
+    ss(p, "k", 2)
+    # x1 = the CLEN term
+    C.knob(p, 3, 5)
+    _tab(p, L, 9, "clen", 3)
+    p.st(_a(L, "x1t"), 9)
+    # the row: 16 words at trig + 64 k
+    p.lsh(3, 2, 6)
+    p.iconst(12, L.VO["trig"])
+    p.iop(3, 12, "+", 3)
+    p.st(_a(L, "st"), 3)
+
+    def field(d, j):
+        p.ld(13, _a(L, "st"))
+        p.iconst(12, 4 * j)
+        p.iop(13, 12, "+", 13)
+        p.seti(1, 13)
+        p.ldi(d, 0, 1)
+        p.fconst(12, 2.0 ** 23)
+        p.fop(d, d, "*", 12)
+        p.trunc(d, d)
+
+    for j, name in ((0, "x32"), (2, "x33"), (3, "y33"), (4, "x34"), (5, "x35"), (8, "y36")):
+        field(9, j)
+        ss(p, name, 9)
+
+    def plus_x1(j_c, j_flag, name):
+        field(9, j_c)
+        field(10, j_flag)
+
+        def add_x1():
+            p.ld(11, _a(L, "x1t"))
+            p.iop(9, 9, "+", 11)
+        p.ifz(10, "NE", add_x1)
+        ss(p, name, 9)
+    field(10, 1)
+    p.ifz(10, "NE", lambda: (p.ld(9, _a(L, "x1t")), ss(p, "y32", 9)))
+    plus_x1(6, 7, "x36")
+    plus_x1(12, 13, "x40")
+    # x37: c, or c0 + kk CVOL / 128
+    field(9, 9)
+
+    def cvol():
+        C.knob(p, 1, 6)
+        p.lsh(1, 1, 16)
+        field(2, 11)
+        mulq(p)
+        field(9, 10)
+        p.iop(9, 9, "+", 1)
+        ss(p, "x37", 9)
+    p.ifz(9, "NE", cvol, lambda: (field(9, 10), ss(p, "x37", 9)))
+    # V-SW below 64: the vowel ends (x39 = 1); B's y39 then 0x770A3D
+    field(9, 14)
+
+    def vsw():
+        C.knob(p, 10, 2)
+        p.iconst(12, 64)
+
+        def off():
+            setk(p, "x39", 1)
+            field(9, 15)
+            p.ifz(9, "NE", lambda: setk(p, "y39", 0x770A3D))
+        p.if_(10, "LT", 12, off, kind="i")
+    p.ifz(9, "NE", vsw)
+
+
+# -- the pitch ----------------------------------------------------------------------------
+def exact(A: int, F: int, knobs, pre: int = 0) -> dict:
+    from . import exact as X
+    return X.vo6_incs(A)
+
+
+def pitch(p: Prog, L: C.Layout) -> None:
+    """VW i3 = w = the increment's word (Hz); i1, i2 = the period 44100 / w, whole samples and
+    24 fraction bits. Clobbers R0-R4, R12-R15, I12."""
+    from ..perc import machines as PM
+    C.vw(p, 1, "A")
+    p.trunc(1, 1)
+    p.iconst(12, 1)
+    p.iop(1, 1, "MAX", 12)
+    C.vws(p, "i3", 1)
+    p.iconst(12, 0)
+    p.float_(2, 1, 12)
+    PM.recip(p, 2, 2)
+    p.fconst(12, 44100.0)
+    p.fop(2, 2, "*", 12)
+    p.trunc(3, 2)
+    C.vws(p, "i1", 3)
+    p.iconst(12, 0)
+    p.float_(4, 3, 12)
+    p.fop(2, 2, "-", 4)
+    p.fconst(12, 2.0 ** 24)
+    p.fop(2, 2, "*", 12)
+    p.trunc(2, 2)
+    p.iconst(12, M24)
+    p.iop(2, 2, "AND", 12)
+    C.vws(p, "i2", 2)
+
+
+# -- the block -----------------------------------------------------------------------------
+def _formants(p: Prog, L: C.Layout) -> None:
+    """F0..F3 (ints) and w, P, Q: the knobs', or the frozen ones (x35 <= 1)"""
+    C.knob(p, 1, 0)
+    p.lsh(1, 1, 16)
+    p.iconst(2, 0x1300A8)
+    mulq(p)
+    addk(p, 9, 1, 0x3C0D29)
+    p.st(_a(L, "F0"), 9)
+    _f2(p, 9)
+    p.st(_a(L, "F1"), 9)
+    p.iconst(10, 0x6277C6)
+    p.ipass(12, 10)
+    p.iop(11, 12, "-", 9)
+    p.iconst(12, 0x1A52F)
+    p.if_(11, "LT", 12, lambda: addk(p, 10, 9, 0x1A52F), kind="i")
+    p.st(_a(L, "F2"), 10)
+    p.iconst(9, 0x679171)
+    p.st(_a(L, "F3"), 9)
+    for k, v in enumerate(("i3", "i1", "i2")):
+        C.vw(p, 9, v)
+        p.st(_a(L, ("w", "P", "Q")[k]), 9)
+    ls(p, 1, "x35")
+    p.iconst(12, 1)
+    pairs = (("F0", "z0"), ("F1", "z1"), ("F2", "z2"), ("F3", "z3"), ("w", "zw"), ("P", "zp"),
+             ("Q", "zq"))
+
+    def frozen():
+        for w, z in pairs:
+            ls(p, 9, z)
+            p.st(_a(L, w), 9)
+
+    def keep():
+        for w, z in pairs:
+            p.ld(9, _a(L, w))
+            ss(p, z, 9)
+    p.if_(1, "LE", 12, frozen, keep, kind="i")
+
+
+def _ring_addr(p: Prog, L: C.Layout, d: int, r: int) -> None:
+    """Rd = the ring word (Rr & 63)'s address. Clobbers R12."""
+    p.iconst(12, 63)
+    p.iop(d, r, "AND", 12)
+    p.lsh(d, d, 2)
+    p.ld(12, _a(L, "rb"))
+    p.iop(d, 12, "+", d)
+
+
+def _pulses(p: Prog, L: C.Layout) -> None:
+    """The ring moves on 16, the 16 behind it cleared; every pulse due in this block (phase
+    <= 16 samples) adds the 32-tap shape at its position and fraction."""
+    K.delay_base(p, L.md, 0)
+    p.st(_a(L, "rb"), 0)
+    ls(p, 1, "rp")
+    addk(p, 1, 1, 16)
+    p.iconst(12, 63)
+    p.iop(1, 1, "AND", 12)
+    ss(p, "rp", 1)
+    p.st(_a(L, "p"), 1)
+    addk(p, 2, 1, 48)
+    _ring_addr(p, L, 3, 2)
+    p.seti(5, 3)
+    p.iconst(6, 0)
+    p.loop(_a(L, "n1"), 16, lambda: p.stpost(5, 6))
+
+    def one():
+        ls(p, 1, "pi")
+        ls(p, 2, "pf")
+        p.iconst(12, 16)
+
+        def due():
+            p.ld(3, _a(L, "p"))
+            add(p, 3, 3, 1)
+            addk(p, 3, 3, -1)
+            p.st(_a(L, "q0"), 3)
+            p.lsh(4, 2, -19)
+            p.st(_a(L, "f"), 4)                # the shape's phase, 0..31
+            p.iconst(12, 0x7FFFF)
+            p.iop(4, 2, "AND", 12)
+            p.lsh(4, 4, 5)                     # y0 of MPYSU (0x10, b0): the weight << 5
+            p.iconst(12, 0)
+            p.float_(4, 4, 12)
+            p.fconst(12, 0xCCCCD * 2.0 ** -47)
+            p.fop(4, 4, "*", 12)               # x1 = 0.1 w
+            p.st(_a(L, "x1"), 4)
+            p.fconst(12, 0xCCCCD * Q23)
+            p.fop(5, 12, "-", 4)
+            p.st(_a(L, "y0"), 5)               # y0 = 0.1 - x1
+            _blit(p, L)
+            # the phase moves on a period
+            ls(p, 1, "pi")
+            ls(p, 2, "pf")
+            p.ld(3, _a(L, "Q"))
+            add(p, 2, 2, 3)
+            p.iconst(12, 1 << 24)
+
+            def carry():
+                p.iop(2, 2, "-", 12)
+                addk(p, 1, 1, 1)
+            p.if_(2, "GE", 12, carry, kind="i")
+            p.ld(3, _a(L, "P"))
+            add(p, 1, 1, 3)
+            ss(p, "pi", 1)
+            ss(p, "pf", 2)
+
+        def at16():
+            p.ifz(2, "EQ", due)
+        p.if_(1, "LT", 12, due, lambda: p.if_(1, "EQ", 12, at16, kind="i"), kind="i")
+    p.loop(_a(L, "n2"), 7, one)
+    ls(p, 1, "pi")
+    addk(p, 1, 1, -16)
+    ss(p, "pi", 1)
+
+
+
+
+def _blit(p: Prog, L: C.Layout) -> None:
+    """ring[q0 + 16 + k] += x1 T[0x312 + f - 32k] + y0 T[0x311 + f - 32k], then
+    ring[q0 + 1 + k] += x1 T[0x152 - f + 32k] + y0 T[0x153 - f + 32k] (k = 0..15): the
+    kernel's P:0x3AA, its two arms (T: y:$131..$333, VO 'blit')"""
+    base = L.VO["blit"] - 4 * 0x131
+    for arm in (0, 1):
+        p.ld(3, _a(L, "q0"))
+        addk(p, 3, 3, 16 if arm == 0 else 1)
+        p.ld(4, _a(L, "f"))
+        if arm == 0:
+            addk(p, 4, 4, 0x312)
+        else:
+            p.iconst(12, 0x152)
+            p.iop(4, 12, "-", 4)
+        p.lsh(4, 4, 2)
+        addk(p, 4, 4, base)
+
+        def tap(arm=arm):
+            p.ld(1, _a(L, "x1"))
+            p.ld(2, _a(L, "y0"))
+            p.seti(1, 4)
+            p.ldi(5, 0, 1)
+            p.ldi(6, -1 if arm == 0 else 1, 1)
+            _ring_addr(p, L, 7, 3)
+            p.seti(2, 7)
+            p.ldi(8, 0, 2)
+            p.fop(5, 5, "*", 1)
+            p.fop(8, 8, "+", 5)
+            p.fop(6, 6, "*", 2)
+            p.fop(8, 8, "+", 6)
+            p.sti(0, 2, 8)
+            addk(p, 3, 3, 1)
+            addk(p, 4, 4, -128 if arm == 0 else 128)
+        p.loop(_a(L, "n3"), 16, tap)
+
+
+# -- the envelopes ----------------------------------------------------------------------------
+def _envelopes(p: Prog, L: C.Layout) -> None:
+    """x35/y35 the onset, x31/y31 the transition, x39/y39 the vowel gate (146A79..146B2C)"""
+    STT, SKIP, GO = _a(L, "stt"), _a(L, "skip"), _a(L, "go")
+
+    def stt(v):
+        p.iconst(9, v)
+        p.st(STT, 9)
+
+    def when(v, body):
+        p.ld(9, STT)
+        p.iconst(12, v)
+        p.if_(9, "EQ", 12, body, kind="i")
+
+    p.iconst(9, 0)
+    p.st(SKIP, 9)
+    stt(0)
+    ls(p, 9, "x35")
+    p.iconst(12, 2)
+
+    def pre():                                 # 1: the pre-delay
+        ls(p, 1, "y35")
+        ls(p, 2, "lev")
+        mulqs(p)
+        p.iconst(12, 0x147AE)
+
+        def big():
+            addk(p, 1, 1, -0xEDC6)
+            ss(p, "y35", 1)
+            p.iconst(9, 1)
+            p.st(SKIP, 9)
+
+        def small():
+            setk(p, "y35", 0)
+            ls(p, 2, "y37")
+
+            def count():
+                addk(p, 2, 2, -1)
+                ss(p, "y37", 2)
+                p.iconst(9, 1)
+                p.st(SKIP, 9)
+            p.ifz(2, "GT", count, lambda: (setk(p, "x35", 2), stt(2)))
+        p.if_(1, "GT", 12, big, small, kind="i")
+
+    p.if_(9, "LT", 12, pre, lambda: p.if_(9, "EQ", 12, lambda: stt(2), lambda: stt(3), kind="i"),
+          kind="i")
+
+    def rest():
+        def hold():
+            ls(p, 2, "x36")
+
+            def count():
+                addk(p, 2, 2, -1)
+                ss(p, "x36", 2)
+                stt(0)
+            p.ifz(2, "GT", count, lambda: (setk(p, "x35", 3), stt(3)))
+        when(2, hold)
+
+        def rise():
+            ls(p, 1, "y35")
+            p.iconst(12, 0x7EB852)
+
+            def top():
+                setk(p, "y35", 0x7FFFAC)
+                setk(p, "x35", 4)
+
+            def up():
+                ls(p, 2, "y36")
+                add(p, 1, 1, 2)
+                limi(p, 1)
+                ss(p, "y35", 1)
+            p.if_(1, "GT", 12, top, up, kind="i")
+        when(3, rise)
+        # x31: 1 rise by x32, 2 hold y32, 3 fall by y33 for x33 blocks, 4 fall by x34, 5
+        ls(p, 9, "x31")
+        p.iconst(12, 2)
+        p.if_(9, "LT", 12, lambda: stt(1), lambda: (
+            p.iconst(12, 2), p.if_(9, "EQ", 12, lambda: stt(2), lambda: (
+                p.iconst(12, 3), p.if_(9, "EQ", 12, lambda: stt(3), lambda: stt(4), kind="i")),
+                kind="i")), kind="i")
+
+        def s1():
+            ls(p, 1, "y31")
+            p.iconst(12, 0x7EB852)
+
+            def up():
+                ls(p, 2, "x32")
+                add(p, 1, 1, 2)
+                limi(p, 1)
+                ss(p, "y31", 1)
+                stt(0)
+            p.if_(1, "GT", 12, lambda: (setk(p, "x31", 2), stt(2)), up, kind="i")
+
+        def s2():
+            ls(p, 2, "y32")
+            p.ifz(2, "GT", lambda: (addk(p, 2, 2, -1), ss(p, "y32", 2), stt(0)),
+                  lambda: (setk(p, "x31", 3), stt(3)))
+
+        def s3():
+            ls(p, 2, "x33")
+
+            def fall():
+                addk(p, 2, 2, -1)
+                ss(p, "x33", 2)
+                ls(p, 1, "y31")
+                ls(p, 3, "y33")
+                p.iop(1, 1, "-", 3)
+                limi(p, 1)
+                ss(p, "y31", 1)
+                stt(0)
+            p.ifz(2, "GT", fall, lambda: (setk(p, "x31", 4), stt(4)))
+
+        def s4():
+            ls(p, 1, "y31")
+            p.iconst(12, 0x147AE)
+
+            def fall():
+                ls(p, 2, "x34")
+                p.iop(1, 1, "-", 2)
+                limi(p, 1)
+                ss(p, "y31", 1)
+            p.if_(1, "GE", 12, fall, lambda: (setk(p, "y31", 0), setk(p, "x31", 5)), kind="i")
+        when(1, s1)
+        when(2, s2)
+        when(3, s3)
+        when(4, s4)
+        # x39: 1 wait x40 blocks, 2 fade y39 by 0x2526E, 3 on
+        p.iconst(9, 0)
+        p.st(GO, 9)
+        ls(p, 9, "x39")
+        p.iconst(12, 2)
+
+        def wait():
+            ls(p, 2, "x40")
+
+            def next_():
+                ls(p, 3, "x39")
+                addk(p, 3, 3, 1)
+                ss(p, "x39", 3)
+                p.iconst(9, 1)
+                p.st(GO, 9)
+            p.ifz(2, "GT", lambda: (addk(p, 2, 2, -1), ss(p, "x40", 2)), next_)
+        p.if_(9, "LT", 12, wait, lambda: p.if_(9, "EQ", 12, lambda: (p.iconst(9, 1), p.st(GO, 9)),
+                                                 kind="i"), kind="i")
+
+        def fade():
+            ls(p, 1, "y39")
+            p.iconst(12, 0x147AE)
+
+            def down():
+                addk(p, 1, 1, -0x2526E)
+                ss(p, "y39", 1)
+
+            def off():
+                ls(p, 3, "x39")
+                addk(p, 3, 3, 1)
+                ss(p, "x39", 3)
+                setk(p, "y39", 0)
+            p.if_(1, "GE", 12, down, off, kind="i")
+        p.ld(9, GO)
+        p.ifz(9, "NE", fade)
+    p.ld(9, SKIP)
+    p.ifz(9, "EQ", rest)
+
+
+# -- the consonants' renderers -----------------------------------------------------------------
+def _toward(p, L, fi, c, dsts):
+    """O[d] = MPY(lim(c - F[fi]), y31)"""
+    p.ld(3, _a(L, f"F{fi}"))
+    p.iconst(1, c)
+    p.iop(1, 1, "-", 3)
+    limi(p, 1)
+    ls(p, 2, "y31")
+    mulqs(p)
+    for d in dsts:
+        p.st(_a(L, f"O{d}"), 1)
+
+
+def _neg35(p, L, d):
+    """Rd = lim(0x7FFFF8 - y35)"""
+    ls(p, 3, "y35")
+    p.iconst(d, 0x7FFFF8)
+    p.iop(d, d, "-", 3)
+    limi(p, d)
+
+
+def _k35(p, L, c, dsts):
+    """O[d] = MPY(lim(0x7FFFF8 - y35), c)"""
+    _neg35(p, L, 1)
+    mulc(p, 1, c)
+    for d in dsts:
+        p.st(_a(L, f"O{d}"), 1)
+
+
+def _k31(p, L, c, dsts, neg=False):
+    """O[d] = +-MPY(c, y31)"""
+    ls(p, 1, "y31")
+    mulc(p, 1, c, neg)
+    for d in dsts:
+        p.st(_a(L, f"O{d}"), 1)
+
+
+def _down(p, L, fi, c, d1, d2=None):
+    """B, P: O[d1] = -MPY(MPY(F, c), lim(0x7FFFF8 - y35)); O[d2] = its half"""
+    p.ld(1, _a(L, f"F{fi}"))
+    p.iconst(2, c)
+    mulq(p)
+    p.iconst(12, 0)
+    p.iop(1, 12, "-", 1)
+    p.ipass(9, 1)
+    _neg35(p, L, 2)
+    p.ipass(1, 9)
+    mulqs(p)
+    p.st(_a(L, f"O{d1}"), 1)
+    if d2 is not None:
+        p.ash(1, 1, -1)
+        p.st(_a(L, f"O{d2}"), 1)
+
+
+def _y40(p, L, name, cond, v):
+    ls(p, 9, name)
+    p.iconst(12, v)
+    p.if_(9, cond, 12, lambda: setk(p, "y40", 2), kind="i")
+
+
+def _copy(p, L, src, dst):
+    p.iconst(12, _a(L, src))
+    p.seti(5, 12)
+    p.iconst(12, _a(L, dst))
+    p.seti(2, 12)
+    p.loop(_a(L, "n3"), 16, lambda: (p.ldpost(1, 5), p.stpost(2, 1)))
+
+
+def _bq_body(p: Prog, L: C.Layout) -> None:
+    """y = 2 (c0 x + c1 x1 + c2 x2 - c3 y1 - c4 y2), limited, the limited y fed back: I5 the
+    input, I2 the output, I0 the state (x1, x2, y1, y2), CO the coefficients (0x1471AC/0x1471CB)"""
+    p.ld(8, _a(L, "CO"))
+    p.ld(9, _a(L, "CO") + 4)
+    p.ld(10, _a(L, "CO") + 8)
+    p.ld(11, _a(L, "CO") + 12)
+    p.ldi(2, 0, 0)
+    p.ldi(3, 1, 0)
+    p.ldi(4, 2, 0)
+    p.ldi(5, 3, 0)
+
+    def one():
+        p.ldpost(1, 5)
+        p.fop(6, 8, "*", 1)
+        p.fop(7, 9, "*", 2)
+        p.fop(6, 6, "+", 7)
+        p.fop(7, 10, "*", 3)
+        p.fop(6, 6, "+", 7)
+        p.fop(7, 11, "*", 4)
+        p.fop(6, 6, "-", 7)
+        p.ld(13, _a(L, "CO") + 16)
+        p.fop(7, 13, "*", 5)
+        p.fop(6, 6, "-", 7)
+        p.fop(6, 6, "+", 6)
+        C.sat(p, 6)
+        p.stpost(2, 6)
+        p.fpass(3, 2)
+        p.fpass(2, 1)
+        p.fpass(5, 4)
+        p.fpass(4, 6)
+    p.loop(_a(L, "n4"), 16, one)
+    p.sti(0, 0, 2)
+    p.sti(1, 0, 3)
+    p.sti(2, 0, 4)
+    p.sti(3, 0, 5)
+
+
+def _biquad(p, L, coefs, src, dst, state):
+    for k, c in enumerate(coefs):
+        p.fconst(1, s24(c) * Q23)
+        p.st(_a(L, "CO") + 4 * k, 1)
+    p.iconst(12, _a(L, src))
+    p.seti(5, 12)
+    p.iconst(12, _a(L, dst))
+    p.seti(2, 12)
+    p.ld(1, L.md.C["mdb"])
+    addk(p, 1, 1, 4 * (K.S0 + S[state]))
+    p.seti(0, 1)
+    p.call("vo6_bq", lambda: _bq_body(p, L))
+
+
+def _crossfade(p, L, k):
+    """EXC = y31 UNV + (y31 - k) EXC (L: k 1.0, M N Z: 0x7FFFF8)"""
+    ls(p, 1, "y31")
+    i2f(p, 1, 1)
+    p.fconst(12, k)
+    p.fop(2, 1, "-", 12)
+    p.iconst(12, _a(L, "UNV"))
+    p.seti(5, 12)
+    p.iconst(12, _a(L, "EXC"))
+    p.seti(2, 12)
+
+    def one():
+        p.ldpost(3, 5)
+        p.ldi(4, 0, 2)
+        p.fop(3, 3, "*", 1)
+        p.fop(4, 4, "*", 2)
+        p.fop(3, 3, "+", 4)
+        C.sat(p, 3)
+        p.stpost(2, 3)
+    p.loop(_a(L, "n3"), 16, one)
+
+
+def _trill(p, L):
+    """RR: y54 the phase; x55 up by 0x28F5C a block to 0x7FFFAC, held 15 blocks (y55), down to 0,
+    held 15, again (146C3B..146C88)"""
+    STT = _a(L, "stt")
+
+    def stt(v):
+        p.iconst(9, v)
+        p.st(STT, 9)
+
+    def when(v, body):
+        p.ld(9, STT)
+        p.iconst(12, v)
+        p.if_(9, "EQ", 12, body, kind="i")
+    ls(p, 9, "y54")
+    p.iconst(12, 2)
+    p.if_(9, "LT", 12, lambda: stt(1), lambda: (
+        p.iconst(12, 2), p.if_(9, "EQ", 12, lambda: stt(2), lambda: (
+            p.iconst(12, 3), p.if_(9, "EQ", 12, lambda: stt(3), lambda: stt(4), kind="i")),
+            kind="i")), kind="i")
+
+    def s1():
+        ls(p, 1, "x55")
+        p.iconst(12, 0x7EB852)
+        p.if_(1, "GE", 12, lambda: (setk(p, "x55", 0x7FFFAC), setk(p, "y54", 2), stt(2)),
+              lambda: (addk(p, 1, 1, 0x28F5C), ss(p, "x55", 1), stt(0)), kind="i")
+
+    def hold(nxt):
+        def body():
+            ls(p, 1, "y55")
+            p.ifz(1, "GT", lambda: (addk(p, 1, 1, -1), ss(p, "y55", 1), stt(0)),
+                  lambda: (setk(p, "y55", 0xF), setk(p, "y54", nxt), stt(nxt if nxt == 3 else 0)))
+        return body
+
+    def s3():
+        ls(p, 1, "x55")
+        p.iconst(12, 0x28F5C)
+        p.if_(1, "GT", 12, lambda: (addk(p, 1, 1, -0x28F5C), ss(p, "x55", 1), stt(0)),
+              lambda: (setk(p, "x55", 0), setk(p, "y54", 4), stt(4)), kind="i")
+    when(1, s1)
+    when(2, hold(3))
+    when(3, s3)
+    when(4, hold(1))
+
+
+def _consonant(p: Prog, L: C.Layout, k: int) -> None:
+    if k == 0:
+        _copy(p, L, "C30", "UNV")
+    elif k == 1:                                   # B
+        _down(p, L, 0, 0xCCCCD, 0)
+        _down(p, L, 1, 0xCCCCD, 1)
+        _y40(p, L, "x35", "GT", 3)
+        _copy(p, L, "C30", "UNV")
+    elif k in (2, 14, 17):                         # D, S, TJ
+        c, g, co = {2: (0x6AF0DD, 0x400000, (0xB57FC, 0x16AFF7, 0xB57FC, 0xDF712C, 0xDEEC2)),
+                    14: (0x6D68A3, 0x400000, (0x26729D, 0xB31AC6, 0x26729D, 0xBDBFC1, 0x178A36)),
+                    17: (0x66D3E8, 0x7EB852, (0x56916, 0xF52DD4, 0x56916, 0x41ABC5, 0x17501D))}[k]
+        _toward(p, L, 1, c, [5])
+        if g == 0x400000:
+            p.ash(1, 1, -1)
+        else:
+            mulc(p, 1, g)
+        p.st(_a(L, "O1"), 1)
+        _biquad(p, L, co, "C30", "UNV", "cb")
+    elif k == 3:                                   # F
+        _toward(p, L, 0, 0x423899, [0, 4])
+        _toward(p, L, 1, 0x5747BC, [1, 5])
+        _biquad(p, L, (0x44345, 0, 0xFBBCBB, 0x108B19, 0x377976), "C30", "UNV", "cb")
+    elif k == 4:                                   # G
+        _k35(p, L, 0x511C4C, [2])
+        _y40(p, L, "x35", "GT", 3)
+        _biquad(p, L, (0xF879, 0x1F0F3, 0xF879, 0x98261C, 0x2BBBCA), "C30", "UNV", "cb")
+    elif k == 5:                                   # H
+        _k35(p, L, 0x41CF5, [0, 1, 2, 3])
+        _k31(p, L, 0x41CF5, [4, 5, 6, 7])
+        _y40(p, L, "x35", "GT", 3)
+        _biquad(p, L, (0x30E9A, 0x61D34, 0x30E9A, 0xAD3392, 0x1F06D6), "C30", "UNV", "cb")
+    elif k == 6:                                   # J
+        _toward(p, L, 0, 0x40543D, [0])
+        _toward(p, L, 1, 0x607E5B, [1])
+        _toward(p, L, 2, 0x652EBA, [2])
+        _copy(p, L, "C30", "UNV")
+    elif k == 7:                                   # K
+        _k35(p, L, 0x41CF5, [2])
+        ls(p, 3, "y31")
+        p.iconst(1, 0x7FFFF8)
+        p.iop(1, 1, "-", 3)
+        limi(p, 1)
+        mulc(p, 1, 0x41CF5)
+        p.st(_a(L, "O6"), 1)
+        _biquad(p, L, (0x6A9D, 0xD53A, 0x6A9D, 0x8F6951, 0x324122), "C30", "UNV", "cb")
+        _y40(p, L, "x35", "GT", 3)
+    elif k in (8, 10):                             # L, N
+        _toward(p, L, 0, 0x3C0D29, [0])
+        _toward(p, L, 1, 0x5C2239, [1])
+        co = (0x3DCC43, 0x896360, 0x3DCC43, 0x896360, 0x3B9885) if k == 8 else \
+             (0x37F898, 0x91F8F7, 0x37F898, 0x91F8F7, 0x2FF130)
+        _biquad(p, L, co, "EXC", "UNV", "cb")
+        _crossfade(p, L, 1.0 if k == 8 else 0x7FFFF8 * Q23)
+    elif k == 9:                                   # M
+        _k31(p, L, 0x1B2583, [0], neg=True)
+        _biquad(p, L, (0x3BBCBB, 0x89BC72, 0x3BBCBB, 0x89BC72, 0x377976), "EXC", "UNV", "cb")
+        _crossfade(p, L, 0x7FFFF8 * Q23)
+    elif k == 11:                                  # P
+        _down(p, L, 0, 0x266666, 4, 0)
+        _down(p, L, 1, 0x266666, 5, 1)
+        _y40(p, L, "x31", "GT", 4)
+        _biquad(p, L, (0x4B6F, 0x96DD, 0x4B6F, 0x8CDB9B, 0x345220), "C30", "UNV", "cb")
+    elif k == 12:                                  # R
+        _k31(p, L, 0x3C0D29, [0], neg=True)
+        _toward(p, L, 2, 0x5AA728, [2])
+        _copy(p, L, "C30", "UNV")
+    elif k == 13:                                  # RR
+        _trill(p, L)
+        ls(p, 1, "x55")
+        ls(p, 2, "y31")
+        mulq(p)
+        mulc(p, 1, 0x3C0D29, True)
+        p.st(_a(L, "O0"), 1)
+        _toward(p, L, 2, 0x5AA728, [2])
+        ls(p, 1, "y31")
+        mulc(p, 1, 0x59999A)
+        p.iconst(12, 0x7FFFAC)
+        p.iop(1, 12, "-", 1)
+        limi(p, 1)
+        i2f(p, 1, 1)
+        p.iconst(12, _a(L, "EXC"))
+        p.seti(5, 12)
+
+        def one():
+            p.ldi(2, 0, 5)
+            p.fop(2, 2, "*", 1)
+            C.sat(p, 2)
+            p.stpost(5, 2)
+        p.loop(_a(L, "n3"), 16, one)
+        _copy(p, L, "C30", "UNV")
+        _y40(p, L, "x31", "EQ", 5)
+    elif k in (15, 18):                            # SJ, TH
+        _toward(p, L, 0, 0x40543D, [0, 4])
+        _toward(p, L, 1, 0x607E5B, [1, 5])
+        _toward(p, L, 2, 0x652EBA, [6])
+        _biquad(p, L, (0x1DA8C4, 0, 0xE2573C, 0xDABCB2, 0x4AE79), "C30", "UNV", "cb")
+    elif k == 16:                                  # T
+        _toward(p, L, 1, 0x6262B7, [1, 5])
+        _biquad(p, L, (0x4774A, 0x8EE95, 0x4774A, 0xB7E897, 0x19F492), "C30", "UNV", "cb")
+    elif k == 19:                                  # V
+        _toward(p, L, 0, 0x423899, [0])
+        _toward(p, L, 1, 0x5747BC, [1])
+        _biquad(p, L, (0x24AB6, 0xFB6A94, 0x24AB6, 0x597817, 0x22A2F0), "C30", "UNV", "cb")
+    elif k == 20:                                  # Z: x:$30 = noise / 16 + the excitation
+        _toward(p, L, 0, 0x40543D, [0])
+        _toward(p, L, 1, 0x607E5B, [1])
+        p.iconst(12, _a(L, "C30"))
+        p.seti(5, 12)
+        p.iconst(12, _a(L, "EXC"))
+        p.seti(2, 12)
+        p.fconst(3, 0.5)
+
+        def one():
+            p.ldi(1, 0, 5)
+            p.fop(1, 1, "*", 3)
+            p.ldpost(2, 2)
+            p.fop(1, 1, "+", 2)
+            C.sat(p, 1)
+            p.stpost(5, 1)
+        p.loop(_a(L, "n3"), 16, one)
+        _biquad(p, L, (0x3CDB1F, 0x8649C2, 0x3CDB1F, 0x867152, 0x39DDCF), "C30", "UNV", "cb")
+        _crossfade(p, L, 0x7FFFF8 * Q23)
+
+
+def _consonants(p: Prog, L: C.Layout) -> None:
+    """x35 == 1 or y40 > 1: none (the noise / 8 is the unvoiced source); else CONS's renderer"""
+    p.iconst(0, 0)
+    for d in range(8):
+        p.st(_a(L, f"O{d}"), 0)
+
+    def pick():
+        groups = {}
+        for k in range(21):
+            groups.setdefault({18: 15, 10: 8}.get(k, k), []).append(k)
+
+        def chain(items):
+            if not items:
+                return
+            (k0, ks), rest = items[0], items[1:]
+            ls(p, 9, "k")
+
+            def test(ks=ks, k0=k0):
+                if len(ks) == 1:
+                    p.iconst(12, ks[0])
+                    p.if_(9, "EQ", 12, lambda: _consonant(p, L, k0), lambda: chain(rest), kind="i")
+                else:
+                    p.iconst(12, ks[0])
+                    p.if_(9, "EQ", 12, lambda: _consonant(p, L, ks[0]), lambda: (
+                        ls(p, 9, "k"), p.iconst(12, ks[1]),
+                        p.if_(9, "EQ", 12, lambda: _consonant(p, L, ks[1]), lambda: chain(rest),
+                              kind="i")), kind="i")
+            test()
+        chain(sorted(groups.items()))
+
+    ls(p, 9, "x35")
+    p.iconst(12, 1)
+
+    def maybe():
+        ls(p, 9, "y40")
+        p.iconst(12, 1)
+        p.if_(9, "GT", 12, lambda: _copy(p, L, "C30", "UNV"), pick, kind="i")
+    p.if_(9, "EQ", 12, lambda: _copy(p, L, "C30", "UNV"), maybe, kind="i")
+
+
+# -- the resonators ------------------------------------------------------------------------
+def _res_body(p: Prog, L: C.Layout, parallel: bool) -> None:
+    """y = c1 x - c2 y1 - c2 y1 - R y2 (y1, y2 limited), c1/c2 ramped (RAMP); series: the
+    limited y to I2; parallel: I2's word + y, limited. I5 the input, I0 the state (y1, y2), R"""
+    p.ld(10, _a(L, "R"))
+    p.ldi(2, 0, 0)
+    p.ldi(3, 1, 0)
+    p.iconst(12, _a(L, "RAMP"))
+    p.seti(1, 12)
+
+    def one():
+        p.ldpost(1, 5)
+        p.ldpost(4, 1)
+        p.ldpost(5, 1)
+        p.fop(6, 4, "*", 1)
+        p.fop(7, 5, "*", 2)
+        p.fop(6, 6, "-", 7)
+        p.fop(6, 6, "-", 7)
+        p.fop(7, 10, "*", 3)
+        p.fop(6, 6, "-", 7)
+        if parallel:
+            p.ldi(7, 0, 2)
+            p.fop(7, 7, "+", 6)
+            C.sat(p, 7)
+            p.stpost(2, 7)
+        p.fpass(3, 2)
+        p.fpass(2, 6)
+        C.sat(p, 2)
+        if not parallel:
+            p.stpost(2, 2)
+    p.loop(_a(L, "n4"), 16, one)
+    p.sti(0, 0, 2)
+    p.sti(1, 0, 3)
+
+
+def _formant_loop(p: Prog, L: C.Layout) -> None:
+    """k = 0..7: formant k & 3's targets (series for k < 4, parallel after), ramps, filter"""
+    for k, (m, r) in enumerate(FORM):
+        p.fconst(1, s24(m) * Q23)
+        p.st(_a(L, f"m{k}"), 1)
+        p.fconst(1, s24(r) * Q23)
+        p.st(_a(L, f"r{k}"), 1)
+    p.iconst(0, 0)
+    p.st(_a(L, "kk"), 0)
+
+    def one():
+        p.ld(8, _a(L, "kk"))
+        p.iconst(12, 3)
+        p.iop(9, 8, "AND", 12)                 # fk
+        p.st(_a(L, "f"), 9)
+        # x1 = lim(F + O)
+        p.lsh(10, 9, 2)
+        p.iconst(12, _a(L, "F0"))
+        p.iop(10, 12, "+", 10)
+        p.seti(1, 10)
+        p.ldi(1, 0, 1)
+        p.lsh(10, 8, 2)
+        p.iconst(12, _a(L, "O0"))
+        p.iop(10, 12, "+", 10)
+        p.seti(1, 10)
+        p.ldi(2, 0, 1)
+        add(p, 1, 1, 2)
+        limi(p, 1)
+        p.st(_a(L, "x1"), 1)
+        p.iconst(2, 0x614)
+        mulq(p)
+        p.st(_a(L, "q0"), 1)                   # i
+        p.ld(1, _a(L, "x1"))
+        p.iconst(2, 0x620)
+        mulq(p)                                # j
+        # c1 = C1[fk][j]
+        _c1_addr(p, L)
+        # c2 = cos[i] x m[fk]
+        p.ld(1, _a(L, "q0"))
+        p.lsh(1, 1, 2)
+        p.iconst(12, L.VO["cos"])
+        p.iop(1, 12, "+", 1)
+        p.seti(1, 1)
+        p.ldi(5, 0, 1)
+        p.ld(9, _a(L, "f"))
+        p.lsh(9, 9, 2)
+        p.iconst(12, _a(L, "m0"))
+        p.iop(9, 12, "+", 9)
+        p.seti(1, 9)
+        p.ldi(6, 0, 1)
+        p.fop(5, 5, "*", 6)
+        C.sat(p, 5)                            # c2
+        p.ld(9, _a(L, "f"))
+        p.lsh(9, 9, 2)
+        p.iconst(12, _a(L, "r0"))
+        p.iop(9, 12, "+", 9)
+        p.seti(1, 9)
+        p.ldi(6, 0, 1)
+        p.st(_a(L, "R"), 6)
+        # the targets' state: tx + 2 k
+        p.ld(1, L.md.C["mdb"])
+        p.ld(8, _a(L, "kk"))
+        p.lsh(8, 8, 3)
+        p.iop(1, 8, "+", 1)
+        addk(p, 1, 1, 4 * (K.S0 + S["tx"]))
+        p.seti(0, 1)
+        p.ld(4, _a(L, "c1"))
+        p.ldi(1, 0, 0)                         # old c1
+        p.ldi(2, 1, 0)                         # old c2
+        p.sti(0, 0, 4)
+        p.sti(1, 0, 5)
+        p.fop(4, 4, "-", 1)
+        C.sat(p, 4)
+        p.fop(5, 5, "-", 2)
+        C.sat(p, 5)
+        p.fconst(12, 1.0 / 16.0)
+        p.fop(4, 4, "*", 12)
+        p.fop(5, 5, "*", 12)
+        p.iconst(12, _a(L, "RAMP"))
+        p.seti(2, 12)
+
+        def ramp():
+            p.fpass(6, 1)
+            C.sat(p, 6)
+            p.stpost(2, 6)
+            p.fpass(6, 2)
+            C.sat(p, 6)
+            p.stpost(2, 6)
+            p.fop(1, 1, "+", 4)
+            p.fop(2, 2, "+", 5)
+        p.loop(_a(L, "n3"), 16, ramp)
+        # the filter: its state at ser + 2 k (par follows ser)
+        p.ld(1, L.md.C["mdb"])
+        p.ld(8, _a(L, "kk"))
+        p.lsh(8, 8, 3)
+        p.iop(1, 8, "+", 1)
+        addk(p, 1, 1, 4 * (K.S0 + S["ser"]))
+        p.seti(0, 1)
+        p.ld(8, _a(L, "kk"))
+        p.iconst(12, 4)
+
+        def series():
+            # EXC -> C30 -> EXC -> C30 -> EXC
+            p.iconst(12, 1)
+            p.iop(9, 8, "AND", 12)
+            p.ifz(9, "EQ", lambda: (p.iconst(12, _a(L, "EXC")), p.seti(5, 12),
+                                    p.iconst(12, _a(L, "C30")), p.seti(2, 12)),
+                  lambda: (p.iconst(12, _a(L, "C30")), p.seti(5, 12),
+                           p.iconst(12, _a(L, "EXC")), p.seti(2, 12)))
+            p.call("vo6_ser", lambda: _res_body(p, L, False))
+
+        def parallel():
+            p.iconst(12, 4)
+
+            def clear():
+                p.iconst(12, _a(L, "C30"))
+                p.seti(5, 12)
+                p.iconst(6, 0)
+                p.loop(_a(L, "n3"), 16, lambda: p.stpost(5, 6))
+            p.ld(8, _a(L, "kk"))
+            p.if_(8, "EQ", 12, clear, kind="i")
+            p.iconst(12, _a(L, "UNV"))
+            p.seti(5, 12)
+            p.iconst(12, _a(L, "C30"))
+            p.seti(2, 12)
+            p.call("vo6_par", lambda: _res_body(p, L, True))
+        p.if_(8, "LT", 12, series, parallel, kind="i")
+        p.ld(8, _a(L, "kk"))
+        addk(p, 8, 8, 1)
+        p.st(_a(L, "kk"), 8)
+    p.loop(_a(L, "n2"), 8, one)
+
+
+def _c1_addr(p: Prog, L: C.Layout) -> None:
+    """c1 = C1[0x620 fk + j] (R1 = j, word f = fk) -> word c1. Clobbers R2, R3, R9, R12, I1."""
+    p.ld(9, _a(L, "f"))
+    p.iconst(2, 0)
+    for b in (5, 6, 9, 10):                    # 0x620 = 2^10 + 2^9 + 2^6 + 2^5
+        p.lsh(3, 9, b)
+        p.ipass(12, 3)
+        p.iop(2, 12, "+", 2)
+    p.ipass(12, 2)
+    p.iop(2, 12, "+", 1)
+    p.lsh(2, 2, 2)
+    p.iconst(12, L.VO["c1"])
+    p.iop(2, 12, "+", 2)
+    p.seti(1, 2)
+    p.ldi(3, 0, 1)
+    p.st(_a(L, "c1"), 3)

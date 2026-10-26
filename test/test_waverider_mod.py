@@ -57,9 +57,10 @@ def test_applies_to_both_sections(applied, dn2_111):
     assert len(main) == len(dn2_111.container.find(3).unpack())
     # pages, the page renderer (its own chunk since v0.13), machines, PING (the wave
     # display chunk went with Waverider, v0.11); v0.20: and, when the owner's MD OS is
-    # there, the Machinedrum's screen graphics (copied to RAM, never run: no init entry)
+    # there, the Machinedrum's screen graphics (copied to RAM, never run: no init entry);
+    # v0.26: and the tables the ColdFire sends the DSP at power-on (dnfw.mods.waverider._tables)
     from dnfw.md import rom as md_rom
-    want = 5 if md_rom.available() else 4
+    want = 6 if md_rom.available() else 4
     assert [kind for kind, _ in chunks] == [platform.area.CODE] * want
     assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
