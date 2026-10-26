@@ -107,13 +107,16 @@ def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     # v0.13: the stock 8-entry lookup stays stock; its base pointer (sw 0x1c2958) moves to
     # a 16-entry copy with the same [-1] guard
     assert struct.unpack("<8I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP_DM), 32)) == dsp.LOOKUP_STOCK
-    lookup = struct.unpack("<17I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP16_DM - 4), 68))
+    n = dsp.MACHINE_TYPES                                        # 16 (v0.26: 17 with a type 16)
+    lookup = struct.unpack(f"<{n + 1}I", bootstream.read_span(built, dsp.dm_to_load(dsp.LOOKUP16_DM - 4), 4 * n + 4))
     assert lookup[0] == struct.unpack("<I", bootstream.read_span(stock7, dsp.dm_to_load(dsp.LOOKUP_DM - 4), 4))[0] == 0
-    assert lookup[1:9] == (0, 1, 2, 3, 4, 5, 6, 7)
-    # the sample machines (8..12) borrow PERC's engine slot; nothing reads past slot 7
-    assert lookup[9:14] == (dsp.SMP_ENGINE_SLOT,) * 5 and dsp.SMP_ENGINE_SLOT == 5
+    assert lookup[1:7] == (0, 1, 2, 3, 4, 5)
+    # the sample machines (8..13) and the Monomachine's (6, 7, 14..) borrow PERC's engine
+    # slot; nothing reads past slot 7
+    assert dsp.SMP_ENGINE_SLOT == 5
+    assert all(lookup[1 + t] == 5 for t in (*dsp.SMP_TYPES, *dsp.MNM_TYPES))
     assert all(v in (0, k) for k, v in enumerate(lookup[1:])
-               if k not in dsp.SMP_TYPES) and max(lookup) <= 7
+               if k not in dsp.SMP_TYPES and k not in dsp.MNM_TYPES) and max(lookup) <= 7
     assert bootstream.read_span(built, dsp.sw_to_load(dsp.LOOKUP_SITE_SW), 6) == dsp.objects()["lookup_ptr"]
     # the idle loop's back edge, jump (pc,-0x10) at sw 0xb88abb in L2, becomes JUMP 0x16f500
     site = dsp.l2_sw_to_load(dsp.IDLE_SITE_SW)

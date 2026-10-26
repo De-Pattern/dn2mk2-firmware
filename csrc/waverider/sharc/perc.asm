@@ -39,7 +39,7 @@ wr_perc.:
       COMP(R0, R12);
       IF NE JUMP 0xbe01c3;                   // -> wr_pk_zwait_1.
       R0 = DM(0x2ddf10);
-      R12 = 0x14000;
+      R12 = 0x16800;
       COMP(R0, R12);
       IF GE JUMP 0xbe01c3;                   // -> wr_pk_else_2.
       R0 = DM(0x2ddf10);
@@ -276,7 +276,7 @@ wr_pk_else_19.:
       COMP(R0, R12);
       IF NE JUMP 0xbec696;                   // -> wr_pk_other_20.
       R0 = DM(0x2ddf10);
-      R12 = 0x14000;
+      R12 = 0x16800;
       COMP(R0, R12);
       IF LT JUMP 0xbec696;                   // -> wr_pk_other_20.
       R9 = DM(0x2dde80);                // t

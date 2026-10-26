@@ -79,7 +79,7 @@ static int wr_active(void)
     if (t > 15 || !kit)
         return 0;
     signed char m = (signed char)kit[52u + 1163u * t + 0xDEu];
-    return m >= 5 && m <= 13 ? m - 4 : 0;      /* v0.19: 13 SLICE */
+    return m >= 5 && m <= WR_TYPES_LAST ? m - 4 : 0;   /* v0.19: 13 SLICE; v0.26: the Monomachine's 14.. */
 }
 
 /* v0.22: the LFOs' destination list (0x4003951e) asks each of the track's 101 slots'
@@ -524,8 +524,9 @@ void wr_page_draw(void *view, void *canvas)
 {
     int page = ((int (*)(void *))method(view, 132))(view);
     int kind = wr_active();
-    int mnm = kind == 2 || kind == 3;           /* v0.26: a Monomachine machine's: one page */
-    int smp = kind >= SMP_KIND0;                /* a sample machine's: one page */
+    int mi = mnm_index(kind);                   /* v0.26: a Monomachine machine's: one page */
+    int mnm = mi >= 0;
+    int smp = kind >= SMP_KIND0 && kind < SMP_KIND0 + SMP_N;   /* a sample machine's */
     if (page < 0 || page >= (smp ? 2 : mnm ? 1 : WR_PAGES))
         page = 0;
     if (kind == 1) {                            /* PERC: the names TYPE has now */
@@ -553,8 +554,8 @@ void wr_page_draw(void *view, void *canvas)
                                   const char *const *labels, const char *const *texts);
         const char *labels[8], *texts[8];
         for (int i = 0; i < 8; i++) {
-            labels[i] = mnm_labels[kind - 2][i];
-            texts[i] = mnm_text(view, kind - 2, i);
+            labels[i] = mnm_labels[mi][i];
+            texts[i] = mnm_text(view, mi, i);
         }
         smp_knob_page(view, canvas, perc_param_ids, labels, texts);
         ((void (*)(void *, void *, int))method(view, 184))(view, canvas, 0);

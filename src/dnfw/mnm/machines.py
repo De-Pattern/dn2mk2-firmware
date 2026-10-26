@@ -113,3 +113,14 @@ def _adapter(M):
 MACHINES = tuple(_adapter(M) for M in MODULES)
 NAMES = tuple(M.NAME for M in MACHINES)
 DEFAULTS = {M.NAME: M.DEFAULTS for M in MODULES}
+
+# each machine its own machine type (MACHINE SEL entry), in MODULES order: CZ's and
+# RESONATOR's former types, then the ones after the sample machines (8..13). One table for
+# the ColdFire (dnfw.waverider.coldfire, pages), the DSP's lookup (dnfw.waverider.dsp) and
+# PERC's voice (dnfw.perc.program).
+TYPE_SLOTS = (6, 7, 14, 15, 16)
+TYPES = TYPE_SLOTS[:len(MACHINES)]
+# MACHINE SEL's names (long, short), as the DN2 lists its own
+LIST_NAMES = {"SID 6581": ("SID 6581", "SID"), "DPRO-WAVE": ("DPRO Wave", "DPW"),
+              "DPRO-DDRW": ("DPRO Ddrw", "DDW"), "DPRO-DENS": ("DPRO Dens", "DNS"),
+              "VO-6": ("VO-6", "VO6")}

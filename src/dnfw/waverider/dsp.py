@@ -160,11 +160,12 @@ MACHINE7 = 7                                 # CZ: lookup[7] = 7 (stock 0, FM To
 LOOKUP_SITE_SW = 0x1C2958                    # I5 = 0x25d748
 LOOKUP_SITE_STOCK = bytes.fromhex("0f150025d748")   # parcels, MSW first
 LOOKUP16_DM = 0x2DEE04                       # 16 words; 0x2dee00 is the [-1] guard (0)
-MACHINE_TYPES = 16
+from ..mnm import machines as _mnm_types    # noqa: E402
+MACHINE_TYPES = max(16, max(_mnm_types.TYPES) + 1)   # v0.26: 17 with a Monomachine machine at 16
 SMP_ENGINE_SLOT = 5                          # the engine slot the sample machines borrow
 SMP_TYPES = range(8, 14)                     # ONESHOT WERP STRETCH REPITCH GRID SLICE (v0.19)
 ENGINES = {5: "PERC", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
-MNM_TYPES = (6, 7)                           # v0.26: the Monomachine machines (PERC's voice, so PERC's slot)
+MNM_TYPES = _mnm_types.TYPES                 # v0.26: the Monomachine machines (PERC's voice, so PERC's slot)
 
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
 IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")

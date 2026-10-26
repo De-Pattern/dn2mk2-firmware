@@ -221,7 +221,7 @@ void smp_formats(int kind)
             stock_fmt[k] = RECORD_FMT(fmt_ids[k]);
         fmt_saved = 1;
     }
-    int smp = kind >= SMP_KIND0;
+    int smp = kind >= SMP_KIND0 && kind < SMP_KIND0 + SMP_N;   /* (v0.26: 10.. the Monomachine's) */
     for (int k = 0; k < NFMT; k++) {
         void *f = stock_fmt[k];
         int grid_only = fmt_ids[k] == SMP_GRID_REC;

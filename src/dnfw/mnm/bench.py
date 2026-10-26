@@ -38,12 +38,14 @@ def golden(name: str) -> dict:
 
 PERC_TABLES = 0x00700000
 PERC_SCRATCH = 0x00090000
+MD_DELAY = 0x00900000                    # (STATE + 1 MB, the default, is SCRATCH here)
 
 
 def layout() -> C.Layout:
     from ..perc import machines as PM
     perc = PM.Layout(state=0x000A0000, scratch=PERC_SCRATCH, tables=PERC_TABLES, sin=0,
                      md_state=STATE, md_tables=0x00600000, mnm_scratch=SCRATCH, mnm_tables=TABLES)
+    perc.md.delay = MD_DELAY                     # the slots' delay areas (VO-6's pulse ring), apart
     return perc.md.mnm
 
 

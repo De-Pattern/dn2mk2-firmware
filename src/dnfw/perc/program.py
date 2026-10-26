@@ -28,7 +28,8 @@ RECORDS, RECORD_STRIDE = 0x2554B8, 0x234
 MACHINE_TYPE = 5
 # v0.26: the Monomachine's synth machines (docs/mnm.md), each its own machine type, in PERC's
 # voice: type -> index in dnfw.mnm.machines.MACHINES
-MNM_TYPES = {6: 0, 7: 1}                 # SID 6581, DPRO-WAVE (CZ's and RESONATOR's types until v0.25)
+from ..mnm import machines as _mnm_types   # noqa: E402
+MNM_TYPES = {t: k for k, t in enumerate(_mnm_types.TYPES)}   # 6, 7 (CZ's and RESONATOR's until v0.25), 14..
 MNM_LEVEL = 0.25                         # a Monomachine machine's full scale on a DN2 track
 SEED = 0x2545F491
 OFF_LEVEL = 0.0002

@@ -476,13 +476,13 @@ def _pulses(p: Prog, L: C.Layout) -> None:
 
 
 def _blit(p: Prog, L: C.Layout) -> None:
-    """ring[q0 + 16 + k] += x1 T[0x312 + f - 32k] + y0 T[0x311 + f - 32k], then
+    """ring[q0 + 17 + k] += x1 T[0x312 + f - 32k] + y0 T[0x311 + f - 32k], then
     ring[q0 + 1 + k] += x1 T[0x152 - f + 32k] + y0 T[0x153 - f + 32k] (k = 0..15): the
     kernel's P:0x3AA, its two arms (T: y:$131..$333, VO 'blit')"""
     base = L.VO["blit"] - 4 * 0x131
     for arm in (0, 1):
         p.ld(3, _a(L, "q0"))
-        addk(p, 3, 3, 16 if arm == 0 else 1)
+        addk(p, 3, 3, 17 if arm == 0 else 1)
         p.ld(4, _a(L, "f"))
         if arm == 0:
             addk(p, 4, 4, 0x312)
@@ -744,13 +744,32 @@ def _copy(p, L, src, dst):
     p.loop(_a(L, "n3"), 16, lambda: (p.ldpost(1, 5), p.stpost(2, 1)))
 
 
+def _qconsts(p: Prog) -> None:
+    """the floor quantizer's constants: F8 2^23, R9 -23, F11 2^100, F13 -2^-23, F14 0"""
+    p.fconst(8, 2.0 ** 23)
+    p.iconst(9, -23)
+    p.fconst(11, 2.0 ** 100)
+    p.fconst(13, -Q23)
+    p.fconst(14, 0.0)
+
+
+def _floor(p: Prog, x: int, t: int, u: int) -> None:
+    """Fx = floor(Fx 2^23) / 2^23 (the 56300's a1: a word's value, the limiter's truncation), no
+    branch: trunc, then one LSB down where that went up (Fx - trunc < 0). Clobbers Ft, Fu."""
+    p.fop(t, x, "*", 8)
+    p.trunc(t, t)
+    p.float_(t, t, 9)
+    p.fop(u, x, "-", t)
+    p.fop(u, u, "*", 11)
+    p.fop(u, u, "MIN", 14)
+    p.fop(u, u, "MAX", 13)
+    p.fop(x, t, "+", u)
+
+
 def _bq_body(p: Prog, L: C.Layout) -> None:
     """y = 2 (c0 x + c1 x1 + c2 x2 - c3 y1 - c4 y2), limited, the limited y fed back: I5 the
     input, I2 the output, I0 the state (x1, x2, y1, y2), CO the coefficients (0x1471AC/0x1471CB)"""
-    p.ld(8, _a(L, "CO"))
-    p.ld(9, _a(L, "CO") + 4)
-    p.ld(10, _a(L, "CO") + 8)
-    p.ld(11, _a(L, "CO") + 12)
+    _qconsts(p)
     p.ldi(2, 0, 0)
     p.ldi(3, 1, 0)
     p.ldi(4, 2, 0)
@@ -758,17 +777,22 @@ def _bq_body(p: Prog, L: C.Layout) -> None:
 
     def one():
         p.ldpost(1, 5)
-        p.fop(6, 8, "*", 1)
-        p.fop(7, 9, "*", 2)
+        p.ld(10, _a(L, "CO"))
+        p.fop(6, 10, "*", 1)
+        p.ld(10, _a(L, "CO") + 4)
+        p.fop(7, 10, "*", 2)
         p.fop(6, 6, "+", 7)
+        p.ld(10, _a(L, "CO") + 8)
         p.fop(7, 10, "*", 3)
         p.fop(6, 6, "+", 7)
-        p.fop(7, 11, "*", 4)
+        p.ld(10, _a(L, "CO") + 12)
+        p.fop(7, 10, "*", 4)
         p.fop(6, 6, "-", 7)
-        p.ld(13, _a(L, "CO") + 16)
-        p.fop(7, 13, "*", 5)
+        p.ld(10, _a(L, "CO") + 16)
+        p.fop(7, 10, "*", 5)
         p.fop(6, 6, "-", 7)
         p.fop(6, 6, "+", 6)
+        _floor(p, 6, 7, 15)
         C.sat(p, 6)
         p.stpost(2, 6)
         p.fpass(3, 2)
@@ -1029,8 +1053,9 @@ def _consonants(p: Prog, L: C.Layout) -> None:
 
 # -- the resonators ------------------------------------------------------------------------
 def _res_body(p: Prog, L: C.Layout, parallel: bool) -> None:
-    """y = c1 x - c2 y1 - c2 y1 - R y2 (y1, y2 limited), c1/c2 ramped (RAMP); series: the
-    limited y to I2; parallel: I2's word + y, limited. I5 the input, I0 the state (y1, y2), R"""
+    """y = c1 x - c2 y1 - c2 y1 - R y2 (y1, y2 the limited outputs), c1/c2 ramped (RAMP); series:
+    the limited y to I2; parallel: I2's word + y, limited. I5 the input, I0 the state (y1, y2), R"""
+    _qconsts(p)
     p.ld(10, _a(L, "R"))
     p.ldi(2, 0, 0)
     p.ldi(3, 1, 0)
@@ -1050,10 +1075,12 @@ def _res_body(p: Prog, L: C.Layout, parallel: bool) -> None:
         if parallel:
             p.ldi(7, 0, 2)
             p.fop(7, 7, "+", 6)
+            _floor(p, 7, 0, 15)
             C.sat(p, 7)
             p.stpost(2, 7)
         p.fpass(3, 2)
         p.fpass(2, 6)
+        _floor(p, 2, 0, 15)
         C.sat(p, 2)
         if not parallel:
             p.stpost(2, 2)
@@ -1199,7 +1226,7 @@ def _c1_addr(p: Prog, L: C.Layout) -> None:
     """c1 = C1[0x620 fk + j] (R1 = j, word f = fk) -> word c1. Clobbers R2, R3, R9, R12, I1."""
     p.ld(9, _a(L, "f"))
     p.iconst(2, 0)
-    for b in (5, 6, 9, 10):                    # 0x620 = 2^10 + 2^9 + 2^6 + 2^5
+    for b in (5, 9, 10):                       # 0x620 = 2^10 + 2^9 + 2^5
         p.lsh(3, 9, b)
         p.ipass(12, 3)
         p.iop(2, 12, "+", 2)
@@ -1211,3 +1238,233 @@ def _c1_addr(p: Prog, L: C.Layout) -> None:
     p.seti(1, 2)
     p.ldi(3, 0, 1)
     p.st(_a(L, "c1"), 3)
+
+
+# -- the source ------------------------------------------------------------------------------
+def _source(p: Prog, L: C.Layout) -> None:
+    """16 noise words (s = b + x, t = x + s, mod 2^24, eight times) -> C30; EXC = noise VOIC / 2^16
+    + ring (VOIC / 256 - 1/2), limited; C30 = noise / 8"""
+    ls(p, 1, "nb")
+    ls(p, 2, "nx")
+    p.iconst(12, _a(L, "C30"))
+    p.seti(5, 12)
+
+    def one():
+        add(p, 3, 1, 2)
+        p.iconst(12, M24)
+        p.iop(3, 3, "AND", 12)                  # s
+        add(p, 4, 2, 3)
+        p.iconst(12, M24)
+        p.iop(4, 4, "AND", 12)                  # t
+        p.ipass(1, 3)
+        p.ipass(2, 4)
+        for r in (3, 4):
+            p.lsh(5, r, 8)
+            p.iconst(12, -31)
+            p.float_(5, 5, 12)
+            p.stpost(5, 5)
+    p.loop(_a(L, "n1"), 8, one)
+    ss(p, "nb", 2)
+    ss(p, "nx", 1)
+    C.knob(p, 1, 3)
+    p.iconst(12, -16)
+    p.float_(2, 1, 12)                          # VOIC / 2^16
+    p.iconst(12, -8)
+    p.float_(3, 1, 12)
+    p.fconst(12, 0.5)
+    p.fop(3, 3, "-", 12)                        # VOIC / 256 - 1/2
+    p.ld(1, _a(L, "p"))
+    p.lsh(1, 1, 2)
+    p.ld(12, _a(L, "rb"))
+    p.iop(1, 12, "+", 1)
+    p.seti(2, 1)
+    p.iconst(12, _a(L, "C30"))
+    p.seti(5, 12)
+    p.iconst(12, _a(L, "EXC"))
+    p.seti(1, 12)
+
+    def exc():
+        p.ldi(4, 0, 5)
+        p.ldpost(6, 2)
+        p.fop(7, 4, "*", 2)
+        p.fop(6, 6, "*", 3)
+        p.fop(7, 7, "+", 6)
+        C.sat(p, 7)
+        p.stpost(1, 7)
+        p.fconst(12, 0.125)
+        p.fop(4, 4, "*", 12)
+        p.stpost(5, 4)
+    p.loop(_a(L, "n1"), 16, exc)
+
+
+# -- the level, the AGC, the gain, the mix ---------------------------------------------------
+def _follower(p: Prog, L: C.Layout) -> None:
+    """on the voiced output (EXC): power b += x^2 - lim(b) y0, level a += (lim(b) - lim(a)) y0,
+    y0 = w + 0x20C5 (Q23); lim the limited words (floored)"""
+    C.vw(p, 1, "i3")
+    addk(p, 1, 1, 0x20C5)
+    i2f(p, 10, 1)
+    _qconsts(p)
+    ls(p, 2, "pb")
+    ls(p, 3, "pa")
+    p.iconst(12, _a(L, "EXC"))
+    p.seti(5, 12)
+
+    def one():
+        p.ldpost(1, 5)
+        p.fpass(4, 2)
+        _floor(p, 4, 5, 7)
+        C.sat(p, 4)                             # x1 = lim(b)
+        p.fop(5, 1, "*", 1)
+        p.fop(2, 2, "+", 5)
+        p.fop(5, 4, "*", 10)
+        p.fop(2, 2, "-", 5)
+        p.fpass(6, 3)
+        _floor(p, 6, 5, 7)
+        C.sat(p, 6)                             # lim(a)
+        p.fop(5, 4, "*", 10)
+        p.fop(3, 3, "+", 5)
+        p.fop(5, 6, "*", 10)
+        p.fop(3, 3, "-", 5)
+    p.loop(_a(L, "n1"), 16, one)
+    ss(p, "pb", 2)
+    ss(p, "pa", 3)
+
+
+def _exp2_poly() -> tuple[float, ...]:
+    """2^x on [0, 1], degree 7 (least squares on Chebyshev nodes), low order first"""
+    import numpy as np
+    x = 0.5 + 0.5 * np.cos(np.pi * (np.arange(64) + 0.5) / 64)
+    return tuple(float(c) for c in np.polyfit(x, 2.0 ** x, 7)[::-1])
+
+
+def _agc(p: Prog, L: C.Layout) -> None:
+    """g = 2^(k / 2048 - 1) 2^(12 - e2), k = 2047 - (X & 0x7FF), e2 = X >> 11, X = max(0, 49152 +
+    1024 e - LOG[m]) for the level a (its low Q23 bit set: 'or #1') = 1.m x 2^(e - 1), m its top
+    8 mantissa bits: the render's clb / log table / exp table (P:0x14712B..0x147146)"""
+    ls(p, 1, "pa")
+    p.fconst(12, 2.0 ** 23)
+    p.fop(2, 1, "*", 12)
+    p.trunc(2, 2)
+    p.iconst(12, 1)
+    p.iop(2, 2, "AND", 12)
+    p.ifz(2, "EQ", lambda: (p.fconst(12, Q23), p.fop(1, 1, "+", 12)))
+    p.lsh(2, 1, -23)
+    p.iconst(12, 0xFF)
+    p.iop(2, 2, "AND", 12)                      # the biased exponent
+    p.lsh(3, 1, -15)
+    p.iop(3, 3, "AND", 12)                      # m
+    _tab(p, L, 4, "log", 3)
+    p.lsh(2, 2, 10)
+    addk(p, 2, 2, 49152 - 126 * 1024)
+    p.iop(2, 2, "-", 4)
+    p.iconst(12, 0)
+    p.iop(2, 2, "MAX", 12)                      # X
+    p.lsh(3, 2, -11)                            # e2
+    p.iconst(12, 0x7FF)
+    p.iop(4, 2, "AND", 12)
+    p.iconst(5, 0x7FF)
+    p.iop(4, 5, "-", 4)                         # k
+    p.iconst(12, -11)
+    p.float_(4, 4, 12)                          # k / 2048
+    cs = _exp2_poly()
+    p.fconst(5, cs[-1])
+    for c in reversed(cs[:-1]):
+        p.fop(5, 5, "*", 4)
+        p.fconst(12, c)
+        p.fop(5, 5, "+", 12)                    # 2^(k / 2048)
+    p.fconst(12, 2.0 ** 29)
+    p.fop(5, 5, "*", 12)
+    p.trunc(5, 5)
+    p.iconst(12, -18)
+    p.iop(3, 12, "-", 3)                        # 2^(11 - e2) / 2^29
+    p.float_(5, 5, 3)
+    p.fconst(12, C.TOP)
+    p.fop(5, 5, "MIN", 12)
+    p.st(_a(L, "g"), 5)
+
+
+def _gain_mix(p: Prog, L: C.Layout) -> None:
+    """y35 = MPY(y39, MPY(y35, L)), L = 0x7FFFF8 (x35 == 1) or lim(level << 8); G = g y35;
+    G and y31 ramped; mix (UNV) = (G voiced) << 12 + y31 lim(unvoiced x37)"""
+    p.iconst(2, 0x7FFFF8)
+    ls(p, 9, "x35")
+    p.iconst(12, 1)
+
+    def lev():
+        ls(p, 2, "lev")
+        p.lsh(2, 2, 8)
+        p.iconst(12, 0x7FFFFF)
+        p.iop(2, 2, "MIN", 12)
+    p.if_(9, "NE", 12, lev, kind="i")
+    ls(p, 1, "y35")
+    mulqs(p)
+    ls(p, 2, "y39")
+    mulqs(p)
+    ss(p, "y35", 1)
+    i2f(p, 1, 1)
+    p.ld(2, _a(L, "g"))
+    p.fop(1, 1, "*", 2)                         # G
+    ls(p, 3, "y31")
+    i2f(p, 3, 3)
+    ls(p, 4, "g")                               # the old targets
+    ls(p, 5, "t31")
+    ss(p, "g", 1)
+    ss(p, "t31", 3)
+    p.fop(1, 1, "-", 4)
+    C.sat(p, 1)
+    p.fop(3, 3, "-", 5)
+    C.sat(p, 3)
+    p.fconst(12, 1.0 / 16.0)
+    p.fop(1, 1, "*", 12)
+    p.fop(3, 3, "*", 12)
+    ls(p, 6, "x37")
+    i2f(p, 6, 6)
+    p.iconst(12, _a(L, "EXC"))
+    p.seti(5, 12)
+    p.iconst(12, _a(L, "C30"))
+    p.seti(1, 12)
+    p.iconst(12, _a(L, "UNV"))
+    p.seti(2, 12)
+
+    def one():
+        p.fpass(7, 4)
+        C.sat(p, 7)                             # G[n]
+        p.fpass(8, 5)
+        C.sat(p, 8)                             # y31[n]
+        p.ldpost(9, 5)
+        p.fop(9, 9, "*", 7)
+        p.fconst(12, 4096.0)
+        p.fop(9, 9, "*", 12)
+        p.ldpost(10, 1)
+        p.fop(10, 10, "*", 6)
+        C.sat(p, 10)
+        p.fop(10, 10, "*", 8)
+        p.fop(9, 9, "+", 10)
+        C.sat(p, 9)
+        p.stpost(2, 9)
+        p.fop(4, 4, "+", 1)
+        p.fop(5, 5, "+", 3)
+    p.loop(_a(L, "n1"), 16, one)
+
+
+def half(p: Prog, L: C.Layout) -> None:
+    """One Monomachine block: 16 samples at I4."""
+    _formants(p, L)
+    _pulses(p, L)
+    _source(p, L)
+    _envelopes(p, L)
+    _consonants(p, L)
+    _formant_loop(p, L)
+    _follower(p, L)
+    _agc(p, L)
+    _gain_mix(p, L)
+    _biquad(p, L, OUT_EQ, "UNV", "C30", "ob")
+    p.iconst(12, _a(L, "C30"))
+    p.seti(5, 12)
+    p.loop(_a(L, "n1"), 16, lambda: (p.ldpost(1, 5), p.stpost(4, 1)))
+    ls(p, 1, "lev")
+    addk(p, 1, 1, LEV_STEP)
+    p.iconst(12, LEV_TOP)
+    p.iop(1, 1, "MIN", 12)
+    ss(p, "lev", 1)

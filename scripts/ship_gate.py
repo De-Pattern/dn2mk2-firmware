@@ -305,12 +305,14 @@ def main() -> int:
         gate("boot from reset", *cached("boot from reset", [boot_cmd], boot_body))
 
         # 6. engine + LOAD/SAVE
-        # PERC (5), RESONATOR (6), CZ (7) and the sample machines (8..13, v0.13; 13 SLICE,
-        # v0.19) are kept by LOAD; 14 still loads as FM Tone
-        types = ["--machine-type", "3"] + (["--machine-type", "5", "--machine-type", "6",
-                                            "--machine-type", "7", "--machine-type", "8",
-                                            "--machine-type", "12", "--machine-type", "13",
-                                            "--machine-type", "14", "--machine-max", "13"]
+        # PERC (5), the Monomachine's (6, 7, v0.26: 14..) and the sample machines (8..13,
+        # v0.13; 13 SLICE, v0.19) are kept by LOAD; the first type past ours still loads as
+        # FM Tone
+        from dnfw.waverider import coldfire as _cf
+        last = _cf.TYPES_LAST
+        mtypes = sorted({5, 6, 7, 8, 12, 13, *range(14, last + 1), last + 1})
+        types = ["--machine-type", "3"] + ([x for t in mtypes for x in ("--machine-type", str(t))]
+                                           + ["--machine-max", str(last)]
                                            if dsp_changed else [])
         # PING (6), SHFT (7) and GRAN (8) are kept by LOAD; 9 still loads as Multi-Mode
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",

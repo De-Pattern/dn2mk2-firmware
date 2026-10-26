@@ -225,9 +225,9 @@ def _dec2(p: Prog, L: C.Layout) -> None:
             p.fop(6, 4, "-", 2)
             p.fop(6, 6, "*", 3)
             p.fop(2, 1, "+", 6)
-            C.sat(p, 2)                         # the 56300 stores (and feeds back) it limited
+            p.sti(0, 5, 2)                      # (the next stage limits it as it reads it)
+            C.sat(p, 2)                         # fed back limited, as the 56300 stores it
             p.fpass(1, 4)
-            p.sti(0, 5, 2)
             p.iconst(13, 8)
             p.iop(5, 13, "+", 5)
         p.loop(W["j"], 16, one)
@@ -496,8 +496,9 @@ def digibank_reference(L: C.Layout | None = None) -> tuple[int, ...]:
         import hashlib, os, pathlib, struct, tempfile
         from . import bench
         L = L or bench.layout()
-        key = hashlib.sha256(pathlib.Path(__file__).read_bytes()
-                             + repr(rom.table_words()).encode()).hexdigest()[:16]
+        import inspect
+        src = inspect.getsource(_build_one) + inspect.getsource(build) + inspect.getsource(q23)
+        key = hashlib.sha256((src + repr(rom.table_words()) + repr(L.DIGI)).encode()).hexdigest()[:16]
         f = pathlib.Path(tempfile.gettempdir()) / f"dnfw_mnm_digibank_{key}.bin"
         if f.exists():
             _REF = struct.unpack(f"<{C.DIGI_WORDS}I", f.read_bytes())

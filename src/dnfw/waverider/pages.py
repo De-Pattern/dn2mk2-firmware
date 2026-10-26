@@ -55,8 +55,10 @@ ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
 KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t
 SOUND_BASE, SOUND_STRIDE, SOUND_TYPE = 52, 1163, 0xDE
 NEW_TYPE, CLONE = 5, 1
-TYPES_LAST = 13                   # dnfw.waverider.coldfire.TYPES_LAST: 5..13 are ours (v0.20: 13,
-                                  # SLICE, had been left out here: its track got WaveTone's pages)
+from ..mnm import machines as _mnm_types
+TYPES_LAST = max(13, *_mnm_types.TYPES)   # dnfw.waverider.coldfire.TYPES_LAST: 5.. are ours (v0.20: 13,
+                                  # SLICE, had been left out here: its track got WaveTone's pages;
+                                  # v0.26: the Monomachine's from 14 on)
 GET_SHORT_NAME = 0x400372DA
 EMPTY_PAGE = 0x42432BD4           # the readers' own empty-page fallback
 TAG = 10                          # the tag every stock SYN descriptor ends with
@@ -132,17 +134,15 @@ MNM_CHOICES = {
 MNM_WAVES = 32
 
 
-# the page tables the shims keep for kinds 2 and 3 (RESONATOR's and CZ's names until v0.25):
-# now the two Monomachine machines, one page of PERC's eight records each
-def _mnm_page(k):
-    M = _mnm.MACHINES[k]
-    return ((PARAM_IDS,), {r: (sh if sh != "---" else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)})
-
-
-RES_TITLE, RES_SUBTITLE = "SID", "SID 6581"
-RES_PAGES, RES_LABELS = _mnm_page(0)
-CZ_TITLE, CZ_SUBTITLE = "DPW", "DPRO Wave"
-CZ_PAGES, CZ_LABELS = _mnm_page(1)
+# the Monomachine's machines (v0.26; kinds 2 and 3 were RESONATOR's and CZ's until v0.25):
+# is_wr's kind is the type - 4, so 2, 3 (types 6, 7) and 10.. (types 14..); one page of
+# PERC's eight records each, labelled per machine
+MNM_KINDS = tuple(t - 4 for t in _mnm_types.TYPES)
+MNM_PAGE = PARAM_IDS
+MNM_LABELS = [{r: (sh if sh != "---" else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)}
+              for M in _mnm.MACHINES]
+MNM_TITLES = tuple(_mnm.LIST_NAMES[n][1] for n in _mnm.NAMES)
+MNM_SUBTITLES = tuple(_mnm.LIST_NAMES[n][0] for n in _mnm.NAMES)
 
 
 def mnm_named(k: int) -> dict[int, tuple[str, str]]:
@@ -177,6 +177,12 @@ def mnm_c_header() -> str:
                        for M in _mnm.MACHINES)
     lines = [
         f"#define MNM_N {len(_mnm.MACHINES)}",
+        "/* is_wr's kind -> the Monomachine machine's index, -1 for any other kind */",
+        "static inline int mnm_index(int kind)",
+        "{",
+        *[f"    if (kind == {kd}) return {k};" for k, kd in enumerate(MNM_KINDS)],
+        "    return -1;",
+        "}",
         f"#define MNM_WAVES {MNM_WAVES}",
         f"static const char mnm_labels[MNM_N][8][6] = {{{labels}}};",
         f"static const unsigned char mnm_lo[8] = {{{', '.join(str(lo) for _r, _s, lo, _t in _perc.PARAMS)}}};",
@@ -263,6 +269,13 @@ def c_header() -> str:
     mnm = [mnm_named(k) for k in range(len(_mnm.MACHINES))]
     smp = [smp_named(n) for n in _smp.NAMES]
     order = sorted(set(wr) | set(PARAM_IDS) | {r for m in mnm + smp for r in m})
+    # by kind (is_wr: the type - 4), from 1: PERC, the sample machines at SMP_FIRST_KIND..,
+    # the Monomachine's at MNM_KINDS
+    by_kind = {1: wr, **{SMP_FIRST_KIND + k: m for k, m in enumerate(smp)},
+               **{kd: m for kd, m in zip(MNM_KINDS, mnm)}}
+    if sorted(by_kind) != list(range(1, len(by_kind) + 1)):
+        raise ValueError(f"the kinds are not 1..n: {sorted(by_kind)}")
+    kinds = [by_kind[k] for k in sorted(by_kind)]
 
     def row(m, col):
         return "{" + ", ".join(q + m[r][col] + q if r in m else "0" for r in order) + "}"
@@ -271,9 +284,9 @@ def c_header() -> str:
             f"static const char wr_labels[WR_PAGES][8][6] = {{\n{names}\n}};\n"
             f"#define WR_NAMED {len(order)}\n"
             f"static const unsigned short wr_named_ids[WR_NAMED] = {{{', '.join(map(str, order))}}};\n"
-            f"#define WR_KINDS {1 + len(mnm) + len(smp)}\n"
-            f"static const char *const wr_named_long[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 0) for m in [wr] + mnm + smp)}}};\n"
-            f"static const char *const wr_named_short[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 1) for m in [wr] + mnm + smp)}}};\n"
+            f"#define WR_KINDS {len(kinds)}\n"
+            f"static const char *const wr_named_long[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 0) for m in kinds)}}};\n"
+            f"static const char *const wr_named_short[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 1) for m in kinds)}}};\n"
             + perc_c_header() + smp_c_header() + mnm_c_header())
 
 
@@ -285,7 +298,7 @@ def smp_c_header() -> str:
     ids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in SMP_PAGES)
     names = ", ".join(q + n + q for n in _smp.NAMES)
     snd = ", ".join(q + n + q for n in smp_live.TEST_NAMES)
-    return (f"#define SMP_KIND0 4\n#define SMP_N {len(_smp.NAMES)}\n"
+    return (f"#define SMP_KIND0 4\n#define SMP_N {len(_smp.NAMES)}\n#define WR_TYPES_LAST {TYPES_LAST}\n"
             f"static const unsigned short smp_ids[SMP_N][8] = {{\n{ids}\n}};\n"
             f"static const char smp_machine[SMP_N][8] = {{{names}}};\n"
             f"#define SMP_PLAY_ID {_smp.PLAY_REC}\n#define SMP_SAMP_ID {_smp.SAMP_REC}\n"
@@ -427,24 +440,23 @@ def source(page_draw: int, cell: int) -> str:
                      f"    .long {', '.join(str(e) for e in entries)}\n"
                      f"    .long {TAG}")
     page_data = "\n".join(pages)
-    rtable = "\n".join(f"    .long {rid}, rlab_{rid}" for rid in RES_LABELS)
-    rstrings = "\n".join(f'rlab_{rid}: .asciz "{name}"' for rid, name in RES_LABELS.items())
-    res_page_data = "\n".join(f"    .long res_title, res_subtitle\n"
-                              f"    .long {', '.join(str(e) for e in entries)}\n"
-                              f"    .long {TAG}" for entries in RES_PAGES)
-    ztable = "\n".join(f"    .long {rid}, zlab_{rid}" for rid in CZ_LABELS)
-    zstrings = "\n".join(f'zlab_{rid}: .asciz "{name}"' for rid, name in CZ_LABELS.items())
-    cz_page_data = "\n".join(f"    .long cz_title, cz_subtitle\n"
-                             f"    .long {', '.join(str(e) for e in entries)}\n"
-                             f"    .long {TAG}" for entries in CZ_PAGES)
+    mtables = "\n".join(f"    .long mnm_labels_{k}" for k in range(len(MNM_LABELS)))
+    mtables += "\n" + "\n".join(f"mnm_labels_{k}:\n" + "\n".join(f"    .long {rid}, mlab_{k}_{rid}" for rid in lab)
+                                + "\n    .long 0" for k, lab in enumerate(MNM_LABELS))
+    mstrings = "\n".join(f'mlab_{k}_{rid}: .asciz "{name}"' for k, lab in enumerate(MNM_LABELS)
+                          for rid, name in lab.items())
+    mnm_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
+                              f"    .long {', '.join(str(e) for e in MNM_PAGE)}\n"
+                              f"    .long {TAG}" for k in range(len(MNM_LABELS)))
     smp_page_data = "\n".join(f"    .long smp_title_{k}, smp_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in entries)}\n"
                               f"    .long {TAG}" for k, entries in enumerate(SMP_PAGES))
     smp_page_data += ("\nsmp_rec_descriptor:\n    .long smp_rec_title, smp_rec_subtitle\n"
                       f"    .long {', '.join(str(e) for e in SMP_REC_IDS)}\n    .long {TAG}")
     return f"""
-| -- the active track's machine, as ours: d0 = 1 PERC (5), 2 RESONATOR (6), 3 CZ (7),
-| 4..8 the sample machines (8..12), else 0; every other register kept
+| -- the active track's machine, as ours: d0 = its type - 4 for types 5..{TYPES_LAST}: 1 PERC,
+| 4..9 the sample machines (8..13), 2, 3 and 10.. the Monomachine's (6, 7, 14..), else 0;
+| every other register kept
 is_wr:
     move.l  %a0,%sp@-
     move.l  %d1,%sp@-
@@ -476,13 +488,13 @@ wr_count:
     bne.s   3f
     moveq   #{len(PAGES)},%d0
     rts
-3:  subq.l  #1,%d0
-    bne.s   4f
-    moveq   #{len(RES_PAGES)},%d0
-    rts
-4:  subq.l  #1,%d0
-    bne.s   5f
-    moveq   #{len(CZ_PAGES)},%d0
+3:  moveq   #2,%d1                         | d0 = kind - 1: 1, 2 and 9.. the Monomachine's
+    cmp.l   %d1,%d0
+    bls.s   4f
+    moveq   #8,%d1
+    cmp.l   %d1,%d0
+    bls.s   5f
+4:  moveq   #1,%d0                         | a Monomachine machine: its one page
     rts
 5:  moveq   #2,%d0                         | a sample machine: its two pages (v0.22: the recorder is FUNC + VOICE)
     rts
@@ -515,27 +527,23 @@ wr_page:
     mulu.w  %d1,%d0
     addi.l  #descriptors,%d0
     bra.s   2f
-5:  subq.l  #1,%d0
-    bne.s   7f
-    move.l  %sp@(16),%d0
-    moveq   #{len(RES_PAGES)},%d1
+| d0 = kind - 1: 1, 2 -> the Monomachine's 0, 1; 3..8 a sample machine; 9.. -> 2..
+5:  moveq   #9,%d1
     cmp.l   %d1,%d0
-    bcc.s   6b
+    bcc.s   7f
+    moveq   #3,%d1
+    cmp.l   %d1,%d0
+    bcc.s   4f
+    addq.l  #6,%d0
+7:  subq.l  #7,%d0                         | the Monomachine machine's index
+    move.l  %sp@(16),%d1                   | its one page
+    bne.s   6b
     moveq   #44,%d1
     mulu.w  %d1,%d0
-    addi.l  #res_descriptors,%d0
+    addi.l  #mnm_descriptors,%d0
     bra.s   2f
-7:  subq.l  #1,%d0
-    bne.s   8f
-    move.l  %sp@(16),%d0
-    moveq   #{len(CZ_PAGES)},%d1
-    cmp.l   %d1,%d0
-    bcc.s   6b
-    moveq   #44,%d1
-    mulu.w  %d1,%d0
-    addi.l  #cz_descriptors,%d0
-    bra.s   2f
-| a sample machine (d0 = its kind - 4): pages 0 and 1 its own (the DT2's SRC page 1 and
+4:  subq.l  #2,%d0
+| a sample machine (d0 = its kind - 3): pages 0 and 1 its own (the DT2's SRC page 1 and
 | page 2, the same parameters), page 2 the recorder
 8:  move.l  %sp@(16),%d1
     subq.l  #2,%d1
@@ -566,16 +574,21 @@ wr_label:
     bsr.w   is_wr
     tst.l   %d0
     beq.s   9f
-    moveq   #{SMP_FIRST_KIND},%d1
-    cmp.l   %d1,%d0
-    bge.s   9f
     lea     labels,%a0
     subq.l  #1,%d0
     beq.s   0f
-    lea     res_label_table,%a0
-    subq.l  #1,%d0
-    beq.s   0f
-    lea     cz_label_table,%a0
+    moveq   #3,%d1                         | d0 = kind - 1: 1, 2 and 9.. the Monomachine's,
+    cmp.l   %d1,%d0                        | 3..8 a sample machine (the stock names)
+    bcs.s   3f
+    moveq   #9,%d1
+    cmp.l   %d1,%d0
+    bcs.s   9f
+    subq.l  #6,%d0
+3:  subq.l  #1,%d0                         | the Monomachine machine's index
+    lsl.l   #2,%d0
+    lea     mnm_label_tables,%a0
+    adda.l  %d0,%a0
+    movea.l %a0@,%a0
 0:  move.l  %sp@(8),%d0
 1:  move.l  %a0@+,%d1
     beq.s   9f
@@ -657,32 +670,23 @@ wr_id9:
 labels:
 {table}
     .long 0
-res_label_table:
-{rtable}
-    .long 0
-cz_label_table:
-{ztable}
-    .long 0
+mnm_label_tables:
+{mtables}
 descriptors:
 {page_data}
-res_descriptors:
-{res_page_data}
-cz_descriptors:
-{cz_page_data}
+mnm_descriptors:
+{mnm_page_data}
 smp_descriptors:
 {smp_page_data}
 {_rep("subtitle", SUBTITLE)}
-{_rep("res_subtitle", RES_SUBTITLE)}
-{_rep("res_title", RES_TITLE)}
-{_rep("cz_subtitle", CZ_SUBTITLE)}
-{_rep("cz_title", CZ_TITLE)}
+{chr(10).join(_rep(f"mnm_title_{k}", t) for k, t in enumerate(MNM_TITLES))}
+{chr(10).join(_rep(f"mnm_subtitle_{k}", t) for k, t in enumerate(MNM_SUBTITLES))}
 {chr(10).join(_rep(f"smp_title_{k}", t) for k, t in enumerate(SMP_TITLES))}
 {chr(10).join(_rep(f"smp_subtitle_{k}", t) for k, t in enumerate(SMP_SUBTITLES))}
 {_rep("smp_rec_title", "REC")}
 {_rep("smp_rec_subtitle", "Recorder")}
 {chr(10).join(_rep(f"title_{k}", t) for k, t in enumerate(TITLES))}
 {strings}
-{rstrings}
-{zstrings}
+{mstrings}
     .align 2
 """

@@ -47,13 +47,18 @@ from dataclasses import dataclass
 
 BASE = 0x40000400
 NEW_TYPE = 5
-NEW_TYPES = (5, 6, 7, 8, 9, 10, 11, 12, 13)  # PERC; RESONATOR (docs/rings.md); CZ (docs/cz.md); the
-                                        # Digitakt II's sample machines (docs/sampler.md): WaveTone clones
+from ..mnm import machines as _mnm           # noqa: E402
+# PERC; the Monomachine's machines (docs/mnm.md: 6, 7, then 14.. after the sample machines);
+# the Digitakt II's sample machines (docs/sampler.md, 8..13): all WaveTone clones
+NEW_TYPES = tuple(range(5, max(13, *_mnm.TYPES) + 1))
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's place
-MACHINE_NAMES = {5: ("Perc", "PRC"), 6: ("SID 6581", "SID"), 7: ("DPRO Wave", "DPW"),   # v0.26: the Monomachine's
+MACHINE_NAMES = {5: ("Perc", "PRC"),
                  8: ("Oneshot", "ONE"), 9: ("Werp", "WRP"), 10: ("Stretch", "STR"),
-                 11: ("Repitch", "RPT"), 12: ("Grid", "GRD"), 13: ("Slice", "SLC")}
+                 11: ("Repitch", "RPT"), 12: ("Grid", "GRD"), 13: ("Slice", "SLC"),
+                 **{t: _mnm.LIST_NAMES[n] for t, n in zip(_mnm.TYPES, _mnm.NAMES)}}   # v0.26
+if set(MACHINE_NAMES) != set(NEW_TYPES):
+    raise ImportError(f"machine types {sorted(set(NEW_TYPES) - set(MACHINE_NAMES))} have no machine")
 # RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list
 # outgrew the three caves W5 used, so all of it is a platform CODE chunk in RAM, after
 # PING's (dnfw.ping.coldfire.LOAD) and below the platform runtime; the caves are
@@ -66,7 +71,7 @@ LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
 # PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
 # order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
-LIST_NEW = (0, 2, 1, 3, 5, 6, 7, 8, 9, 10, 11, 13, 12, 4)   # v0.19: SLICE before GRID, the DT2's order
+LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, 4)   # v0.19: SLICE before GRID, the DT2's order
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -150,9 +155,8 @@ def _long(v: int) -> bytes:
     return struct.pack(">I", v & 0xFFFFFFFF)
 
 
-SAMPLE_GROUP = 3                        # our synth machines: PERC (5), RESONATOR (6), CZ (7)
-SAMPLE_TYPES_LAST = 7
-SAMPLER_GROUP = 4                       # the sample machines (8..12), a section of their own
+SAMPLE_GROUP = 3                        # our synth machines: PERC (5), the Monomachine's (6, 7, 14..)
+SAMPLER_GROUP = 4                       # the sample machines (8..13), a section of their own
 SAMPLER_FIRST, SAMPLER_LAST = 8, 13
 TYPES_LAST = NEW_TYPES[-1]              # every type 5..TYPES_LAST is a WaveTone clone
 
@@ -161,28 +165,30 @@ TYPES_LAST = NEW_TYPES[-1]              # every type 5..TYPES_LAST is a WaveTone
 # groups are only compared for equality, so a third one is just another section.
 GROUP_SOURCE = f"""
 | group(type), rewritten in place at {GROUP_FN:#010x}: the synths 0..3 -> 1, MIDI (4)
-| -> 2, our synth machines {NEW_TYPE}..{SAMPLE_TYPES_LAST} -> {SAMPLE_GROUP}, the sample
-| machines {SAMPLER_FIRST}..{SAMPLER_LAST} -> {SAMPLER_GROUP}, anything else 0 (stock: 0..3 -> 1,
-| 4 -> 2). d0 holds the answer to each test before it is made, and every branch follows
-| the instruction that set its flags: `moveq` clears C, so it never sits between a
-| `subq` and its `bcs`/`bls` (the first version of this did, and put the synths in group
-| 0 -- the emulator caught it). Borrows are unsigned, after the sign test. Callers read
-| the low byte. 34 bytes, the stock function's own size.
+| -> 2, the sample machines {SAMPLER_FIRST}..{SAMPLER_LAST} -> {SAMPLER_GROUP}, every other type from
+| {NEW_TYPE} on (PERC, the Monomachine's: 5..7, 14..) -> {SAMPLE_GROUP}, a negative one 0 (stock: 0..3 ->
+| 1, 4 -> 2, else 0). d0 holds the answer to each test before it is made, and every
+| branch follows the instruction that set its flags: `moveq` clears C, so it never sits
+| between a `subq` and its `bcs` (the first version of this did, and put the synths in
+| group 0 -- the emulator caught it). Borrows are unsigned, after the sign test. Callers
+| read the low byte. 34 bytes, the stock function's own size (v0.26: 5..7 and 14.. one
+| group, so the Monomachine's machines after the sample machines in type order still sit
+| together in the list).
+    moveq   #0,%d0
     move.l  %sp@(4),%d1
-    blt.s   0f
+    blt.s   9f
     moveq   #1,%d0
     subq.l  #4,%d1
     bcs.s   9f
     moveq   #2,%d0
     tst.l   %d1
     beq.s   9f
-    moveq   #{SAMPLE_GROUP},%d0
-    subq.l  #{SAMPLE_TYPES_LAST - 4},%d1
-    bls.s   9f
     moveq   #{SAMPLER_GROUP},%d0
-    subq.l  #{SAMPLER_LAST - SAMPLE_TYPES_LAST},%d1
-    bls.s   9f
-0:  moveq   #0,%d0
+    subq.l  #{SAMPLER_FIRST - 4},%d1
+    bcs.s   8f
+    subq.l  #{SAMPLER_LAST - SAMPLER_FIRST + 1},%d1
+    bcs.s   9f
+8:  moveq   #{SAMPLE_GROUP},%d0
 9:  rts
 """
 
@@ -481,8 +487,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          f"MACHINE SEL list: the vector's capacity, {n} longs", bytes.fromhex("41e80014"))
     edit(LIST_BEGIN, bytes.fromhex("4879") + _long(layout["list"]),
          "MACHINE SEL list: the copy's start", bytes.fromhex("4879") + _long(LIST_STOCK_VA))
-    edit(GROUP_FN, group_function(assemble), f"the MACHINE SEL group: types {NEW_TYPES[0]}.."
-         f"{SAMPLE_TYPES_LAST} are a section of their own ({SAMPLE_GROUP}), divided off like MIDI",
+    edit(GROUP_FN, group_function(assemble), f"the MACHINE SEL group: our synth machines ({SAMPLE_GROUP}) "
+         f"and the sample machines ({SAMPLER_GROUP}) are sections of their own, divided off like MIDI",
          GROUP_STOCK)
 
     # 2. the names
