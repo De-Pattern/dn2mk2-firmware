@@ -97,7 +97,7 @@ DP_TABLES = (("interp", 320), ("dec2", 9), ("hb", 7), ("pch", 128), ("wid", 256)
 # VO-6's tables after them (dnfw.mnm.rom.vo6_words): the gains, the cosines, the pulse shape,
 # the AGC's log mantissas, CLEN's terms, the 21 consonants' set-ups (16 words each)
 VO_TABLES = (("c1", 4 * 0x620), ("cos", 0x614), ("blit", 0x333 - 0x131 + 1), ("log", 256),
-             ("clen", 128), ("trig", 21 * 16))
+             ("clen", 128), ("trig", 21 * 16), ("cons", 21 * 40))
 DIGI_WORDS = 32 * 2048
 DIGI_OFF = 0x46000
 """The stand-in's 256 KB (32 x 2048 words, built by the DSP: dnfw.mnm.dpro.build), from the

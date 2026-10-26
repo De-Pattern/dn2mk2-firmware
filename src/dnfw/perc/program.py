@@ -31,6 +31,15 @@ MACHINE_TYPE = 5
 from ..mnm import machines as _mnm_types   # noqa: E402
 MNM_TYPES = {t: k for k, t in enumerate(_mnm_types.TYPES)}   # 6, 7 (CZ's and RESONATOR's until v0.25), 14..
 MNM_LEVEL = 0.25                         # a Monomachine machine's full scale on a DN2 track
+# v0.26: the DSP's room for the Monomachine voices. They never go quiet (as on the
+# Monomachine, a voice plays until the next note), and one costs as much as two to ten of
+# the Machinedrum's, so each block they are rendered in track order while their cost (the
+# instructions a DN2 block takes, measured in the model at the most each can take,
+# test_perc_live) fits MNM_BUDGET; a track past it plays silence that block. About half of
+# what the SHARC has free beside the stock engines (docs/sharc-load.md: ~250,000 cycles).
+MNM_COST = {"SID 6581": 60_000, "DPRO-WAVE": 34_000, "DPRO-DDRW": 78_000, "DPRO-DENS": 70_000,
+            "VO-6": 60_000}
+MNM_BUDGET = 150_000
 SEED = 0x2545F491
 OFF_LEVEL = 0.0002
 
@@ -174,9 +183,35 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
         p.ifz(8, "LT", lambda: p.iconst(8, 0))                    # negative: 0
         MNC.vws(p, "pitch", 8)
     p.ifz(0, "NE", mnm_note)
-    p.ld(2, C["trig"])
-    p.ld(5, C["type"])
-    MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"])
+    # v0.26: a Monomachine voice only while the block's Monomachine cost fits MNM_BUDGET
+    p.iconst(0, 0)
+    p.st(C["mskip"], 0)
+    p.ld(0, C["mnm"])
+
+    def budget():
+        from ..mnm import machines as MNM
+        p.ld(8, C["mcost"])
+        for k, name in enumerate(MNM.NAMES):
+            p.iconst(12, k + 1)
+            p.if_(0, "EQ", 12, lambda name=name: p.iconst(1, MNM_COST[name]), kind="i")
+        p.iop(8, 8, "+", 1)
+        p.iconst(12, MNM_BUDGET)
+        p.if_(8, "GT", 12, lambda: (p.iconst(0, 1), p.st(C["mskip"], 0)),
+              lambda: p.st(C["mcost"], 8), kind="i")
+    p.ifz(0, "NE", budget)
+
+    def render():
+        p.ld(2, C["trig"])
+        p.ld(5, C["type"])
+        MDV.block(p, L.md, [C[f"p{k}"] for k in range(8)], 2, 5, level_word=C["lev"])
+
+    def silence():                            # past the budget: this block is silent
+        p.ld(0, C["buf"])
+        p.seti(4, 0)
+        p.fconst(1, 0.0)
+        p.loop(C["tmp"], 32, lambda: p.stpost(4, 1))
+    p.ld(0, C["mskip"])
+    p.ifz(0, "NE", silence, render)
     p.ld(12, C["sbase"])
     p.seti(2, 12, "this slot's state, again")
     p.ld(0, C["mnm"])
@@ -389,6 +424,10 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
         p.e(f"DM({SAVE + 4 * k:#x}) = {r};")
     from ..md import core as MDK
     MDK.table_fill(p, L.md)                    # the Machinedrum's sine and tables, 1024 words a block until whole (v0.24: zpack)
+    from ..mnm import dpro as MNP
+    MNP.build(p, L.md.mnm)                     # v0.26: then DENS's and DDRW's Digibank stand-in, 8 words a block
+    p.iconst(0, 0)
+    p.st(L.C["mcost"], 0)                      # v0.26: no Monomachine voice rendered yet this block
     p.iconst(0, 0)
     p.st(L.C["t"], 0)
     top = p.label("slot")

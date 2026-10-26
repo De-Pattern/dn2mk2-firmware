@@ -173,3 +173,31 @@ def test_the_effects_are_off_at_the_records_defaults():
     k = PM.NAMES.index("TRX-SD")
     assert PL.Harness().render(k, PL.defaults("TRX-SD"), 0.01, fx=PL.FX_OFF) == \
         PL.Harness().render(k, PL.defaults("TRX-SD"), 0.01)
+
+
+def test_v026_the_monomachine_costs_cover_what_each_voice_takes():
+    """each Monomachine machine's MNM_COST is at least the instructions its voice takes in a
+    DN2 block (the model's steps), at its defaults, every knob up, every knob down and a few
+    random settings, over notes an octave apart"""
+    import random
+    from dnfw.md import core as MDK
+    from dnfw.mnm import dpro, machines as MM
+    from dnfw.mnm import rom as MROM
+    if not MROM.available():
+        pytest.skip("needs the owner's Monomachine OS")
+    rnd = random.Random(1)
+    for typ, k in PP.MNM_TYPES.items():
+        name = MM.NAMES[k]
+        worst = 0
+        for knobs in [list(MM.DEFAULTS[name]), [127] * 8, [0] * 8] + [[rnd.randrange(128) for _ in range(8)]
+                                                                     for _ in range(3)]:
+            h = PL.Harness()
+            h.words.update(dpro.bench_words(h.L.md.mnm))
+            h.words[h.L.md.C["fill"]] = MDK.Z_N
+            h.set_mnm(typ, knobs)
+            for b in range(6):
+                h.steps = 0
+                h.block(note=60 + 12 * (b % 3), trig=b == 0)
+                worst = max(worst, h.steps)
+        assert worst <= PP.MNM_COST[name], (name, worst)
+    assert PP.MNM_BUDGET >= max(PP.MNM_COST[n] for n in MM.NAMES)    # any one of them alone plays

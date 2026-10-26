@@ -356,8 +356,12 @@ static const char *mnm_text(void *view, int m, int j)
     int n = mnm_choices[m][j];
     if (!n)
         return 0;                                   /* a knob */
-    int c = (mnm_knob(view, j) * n) >> 7;
-    if (n == MNM_WAVES) {                           /* DPRO-WAVE's WAVE: S01..S32 */
+    int k = mnm_knob(view, j);
+    if (n == MNM_PCH)                               /* DENS's PCH2..4: by the ROM's table */
+        return mnm_choice_names[mnm_choice_at[m][j] + mnm_pch_idx[k > 127 ? 127 : k]];
+    int c = (k * n) >> 7;
+    if (n == MNM_WAVES || n == 2 * MNM_WAVES) {     /* the ROM waves: S01..S32 (DDRW, DENS: the */
+        c &= MNM_WAVES - 1;                         /* Digibank's 64, here the 32 twice) */
         num[0] = 'S'; num[1] = '0' + (c + 1) / 10; num[2] = '0' + (c + 1) % 10; num[3] = 0;
         return num;
     }

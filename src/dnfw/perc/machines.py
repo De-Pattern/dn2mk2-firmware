@@ -107,7 +107,8 @@ SC_WORDS = ("t", "count", "out", "tr", "type", "note", "trig", "sbase",
             *(f"q{k}" for k in range(7)),
             "s3k", "s3a1", "s3a2", "s3a3", "s4k", "s4a1", "s4a2", "s4a3",
             "s5k", "s5a1", "s5a2", "s5a3", "buf", "amd", "amdt", "eqm", "fxam", "fxeq", "fxhp", "fxlp", "fxy",
-            "mnm", "lev")   # v0.26: the Monomachine machine (index + 1, 0 PERC), the output level
+            "mnm", "lev",   # v0.26: the Monomachine machine (index + 1, 0 PERC), the output level,
+            "mcost", "mskip")  # the Monomachine voices' cost so far this block, this one's over the budget
 
 
 class Layout:

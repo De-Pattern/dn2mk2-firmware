@@ -64,7 +64,9 @@ EXC, UNV, C30, RAMP, CO, WRD = 0, 16, 32, 48, 80, 96
 _WORDS = ("F0", "F1", "F2", "F3", "O0", "O1", "O2", "O3", "O4", "O5", "O6", "O7", "w", "P", "Q",
           "p", "rb", "x1", "y0", "q0", "f", "n1", "n2", "n3", "vn", "vp", "st", "sto", "R", "g",
           "x37", "c1", "step1", "step2", "src", "dst", "kk", "x1t", "stt", "skip", "go",
-          "m0", "m1", "m2", "m3", "r0", "r1", "r2", "r3", "n4", "R0i", "R1i", "R2i", "R3i")
+          "m0", "m1", "m2", "m3", "r0", "r1", "r2", "r3", "n4", "R0i", "R1i", "R2i", "R3i",
+          "dt", "step", "row", "opp", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "xk",
+          "kind")
 
 
 def _a(L: C.Layout, name: str) -> int:
@@ -163,35 +165,34 @@ def _mulq_body(p: Prog) -> None:
     p.iop(1, 13, "+", 7)
 
 
-def mulq(p: Prog) -> None:
-    p.call("vo6_mulq", lambda: _mulq_body(p))
-
-
-def mulqs(p: Prog) -> None:
-    """R1 = floor(R1 x R2 / 2^23), R1 signed, R2 >= 0 (MPY, a1). Clobbers R3-R8, R12, R13."""
-    p.ipass(8, 1)
+def _mul_body(p: Prog) -> None:
+    """R1 = floor(R1 R2 / 2^23) (the 56300's MPY, a1), any signs; R3 = |R1 R2|'s low 23 bits.
+    Clobbers R2, R4-R8, R12, R13."""
+    p.iconst(8, 0)
+    p.ifz(2, "LT", lambda: (p.iconst(12, 0), p.iop(2, 12, "-", 2), p.iop(1, 12, "-", 1)))
+    p.ifz(1, "LT", lambda: (p.iconst(12, 0), p.iop(1, 12, "-", 1), p.iconst(8, 1)))
+    _mulq_body(p)
 
     def neg():
         p.iconst(12, 0)
         p.iop(1, 12, "-", 1)
-        mulq(p)
-        p.iconst(12, 0)
-        p.iop(1, 12, "-", 1)
         p.ifz(3, "NE", lambda: (p.iconst(12, 1), p.iop(1, 1, "-", 12)))
-    p.ifz(8, "LT", neg, lambda: mulq(p))
+    p.ifz(8, "NE", neg)
+
+
+def mul(p: Prog) -> None:
+    p.call("vo6_mul", lambda: _mul_body(p))
+
+
+mulq = mulqs = mul
 
 
 def mulc(p: Prog, r: int, c: int, neg: bool = False) -> None:
     """R1 = floor(+-Rr x c / 2^23), c a 24-bit constant (signed). Clobbers R2-R8, R12, R13."""
     if r != 1:
         p.ipass(1, r)
-    if c < 0:
-        c, neg = -c, not neg
-    if neg:
-        p.iconst(12, 0)
-        p.iop(1, 12, "-", 1)
-    p.iconst(2, c)
-    mulqs(p)
+    p.iconst(2, -c if neg else c)
+    mul(p)
 
 
 # -- init, trig ------------------------------------------------------------------------------
@@ -206,9 +207,11 @@ def _f2(p: Prog, d: int) -> None:
 
 def init(p: Prog, L: C.Layout) -> None:
     from . import exact as X
-    p.iconst(0, 0)
-    for k in range(NSTATE):
-        K.ss(p, k, 0)
+    p.ld(1, L.md.C["mdb"])
+    addk(p, 1, 1, 4 * K.S0)
+    p.seti(5, 1)
+    p.iconst(6, 0)
+    p.loop(_a(L, "n1"), NSTATE, lambda: p.stpost(5, 6))
     setk(p, "rp", 48)
     setk(p, "nb", 0xA)
     setk(p, "nx", 1)
@@ -266,53 +269,47 @@ def trig(p: Prog, L: C.Layout) -> None:
     C.knob(p, 3, 5)
     _tab(p, L, 9, "clen", 3)
     p.st(_a(L, "x1t"), 9)
-    # the row: 16 words at trig + 64 k
+    # the row (16 words at trig + 64 k), read in order through I1
     p.lsh(3, 2, 6)
     p.iconst(12, L.VO["trig"])
     p.iop(3, 12, "+", 3)
-    p.st(_a(L, "st"), 3)
+    p.seti(1, 3)
 
-    def field(d, j):
-        p.ld(13, _a(L, "st"))
-        p.iconst(12, 4 * j)
-        p.iop(13, 12, "+", 13)
-        p.seti(1, 13)
-        p.ldi(d, 0, 1)
-        p.fconst(12, 2.0 ** 23)
-        p.fop(d, d, "*", 12)
-        p.trunc(d, d)
+    def nxt(d):
+        p.ldpost(d, 1)
+        _word(p, d, d)
 
-    for j, name in ((0, "x32"), (2, "x33"), (3, "y33"), (4, "x34"), (5, "x35"), (8, "y36")):
-        field(9, j)
+    def plus_x1(name):                         # c, then (+ x1?)
+        nxt(9)
+        nxt(10)
+        p.ifz(10, "NE", lambda: (p.ld(11, _a(L, "x1t")), p.iop(9, 9, "+", 11)))
         ss(p, name, 9)
-
-    def plus_x1(j_c, j_flag, name):
-        field(9, j_c)
-        field(10, j_flag)
-
-        def add_x1():
-            p.ld(11, _a(L, "x1t"))
-            p.iop(9, 9, "+", 11)
-        p.ifz(10, "NE", add_x1)
-        ss(p, name, 9)
-    field(10, 1)
+    nxt(9)
+    ss(p, "x32", 9)
+    nxt(10)
     p.ifz(10, "NE", lambda: (p.ld(9, _a(L, "x1t")), ss(p, "y32", 9)))
-    plus_x1(6, 7, "x36")
-    plus_x1(12, 13, "x40")
-    # x37: c, or c0 + kk CVOL / 128
-    field(9, 9)
+    for name in ("x33", "y33", "x34", "x35"):
+        nxt(9)
+        ss(p, name, 9)
+    plus_x1("x36")
+    nxt(9)
+    ss(p, "y36", 9)
+    nxt(10)                                    # x37: c, or c0 + MPY(kk, CVOL << 16)
+    nxt(9)
+    nxt(2)
 
     def cvol():
+        p.st(_a(L, "kk"), 9)
         C.knob(p, 1, 6)
         p.lsh(1, 1, 16)
-        field(2, 11)
-        mulq(p)
-        field(9, 10)
+        mul(p)
+        p.ld(9, _a(L, "kk"))
         p.iop(9, 9, "+", 1)
-        ss(p, "x37", 9)
-    p.ifz(9, "NE", cvol, lambda: (field(9, 10), ss(p, "x37", 9)))
-    # V-SW below 64: the vowel ends (x39 = 1); B's y39 then 0x770A3D
-    field(9, 14)
+    p.ifz(10, "NE", cvol)
+    ss(p, "x37", 9)
+    plus_x1("x40")
+    nxt(9)                                     # V-SW below 64: the vowel ends (x39 = 1)
+    nxt(11)                                    # B: then y39 = 0x770A3D
 
     def vsw():
         C.knob(p, 10, 2)
@@ -320,8 +317,7 @@ def trig(p: Prog, L: C.Layout) -> None:
 
         def off():
             setk(p, "x39", 1)
-            field(9, 15)
-            p.ifz(9, "NE", lambda: setk(p, "y39", 0x770A3D))
+            p.ifz(11, "NE", lambda: setk(p, "y39", 0x770A3D))
         p.if_(10, "LT", 12, off, kind="i")
     p.ifz(9, "NE", vsw)
 
@@ -479,10 +475,44 @@ def _pulses(p: Prog, L: C.Layout) -> None:
 
 
 
+def _tap_body(p: Prog, L: C.Layout) -> None:
+    """ring[R3] = lim(ring[R3] + floor((x1 T[R4] + y0 T[R4 + dt]) / 2^23)), exactly; then R3 + 1,
+    R4 + step (the words dt, step: bytes). Clobbers R1, R2, R5-R15, I0-I2."""
+    p.ld(9, _a(L, "x1"))
+    _split(p, 9, 1, 2)
+    p.ld(9, _a(L, "y0"))
+    _split(p, 9, 5, 6)
+    p.iconst(14, 0)
+    p.iconst(15, 0)
+    p.iconst(13, 0)
+    p.seti(1, 4)
+    p.ld(9, _a(L, "dt"))
+    p.iop(9, 9, "+", 4)
+    p.seti(0, 9)
+    for i, fv in ((1, 1), (0, 5)):
+        p.ldi(7, 0, i)
+        _word(p, 9, 7)
+        _split(p, 9, 7, 8)
+        _prod(p, fv, fv + 1, 7, 8, False)
+    _sum(p, 23)                                # floor((x1 T + y0 T') / 2^23)
+    _ring_addr(p, L, 7, 3)
+    p.seti(2, 7)
+    p.ldi(10, 0, 2)
+    _word(p, 10, 10)
+    p.iop(14, 14, "+", 10)
+    limi(p, 14)
+    i2f(p, 10, 14)
+    p.sti(0, 2, 10)
+    addk(p, 3, 3, 1)
+    p.ld(9, _a(L, "step"))
+    p.ipass(12, 9)
+    p.iop(4, 12, "+", 4)
+
+
 def _blit(p: Prog, L: C.Layout) -> None:
     """ring[q0 + 17 + k] += x1 T[0x312 + f - 32k] + y0 T[0x311 + f - 32k], then
     ring[q0 + 1 + k] += x1 T[0x152 - f + 32k] + y0 T[0x153 - f + 32k] (k = 0..15): the
-    kernel's P:0x3AA, its two arms (T: y:$131..$333, VO 'blit')"""
+    kernel's P:0x3AA, its two arms (T: y:$131..$333, VO 'blit'), exactly"""
     base = L.VO["blit"] - 4 * 0x131
     for arm in (0, 1):
         p.ld(3, _a(L, "q0"))
@@ -495,33 +525,11 @@ def _blit(p: Prog, L: C.Layout) -> None:
             p.iop(4, 12, "-", 4)
         p.lsh(4, 4, 2)
         addk(p, 4, 4, base)
-
-        def tap(arm=arm):
-            p.ld(9, _a(L, "x1"))
-            _split(p, 9, 1, 2)
-            p.ld(9, _a(L, "y0"))
-            _split(p, 9, 5, 6)
-            p.iconst(14, 0)
-            p.iconst(15, 0)
-            p.iconst(13, 0)
-            p.seti(1, 4)
-            for k, (fv) in ((0, 1), (-1 if arm == 0 else 1, 5)):
-                p.ldi(7, k, 1)
-                _word(p, 9, 7)
-                _split(p, 9, 7, 8)
-                _prod(p, fv, fv + 1, 7, 8, False)
-            _sum(p, 23)                        # floor((x1 T + y0 T') / 2^23)
-            _ring_addr(p, L, 7, 3)
-            p.seti(2, 7)
-            p.ldi(10, 0, 2)
-            _word(p, 10, 10)
-            p.iop(14, 14, "+", 10)
-            limi(p, 14)
-            i2f(p, 10, 14)
-            p.sti(0, 2, 10)
-            addk(p, 3, 3, 1)
-            addk(p, 4, 4, -128 if arm == 0 else 128)
-        p.loop(_a(L, "n3"), 16, tap)
+        p.iconst(9, -4 if arm == 0 else 4)
+        p.st(_a(L, "dt"), 9)
+        p.iconst(9, -128 if arm == 0 else 128)
+        p.st(_a(L, "step"), 9)
+        p.loop(_a(L, "n3"), 16, lambda: p.call("vo6_tap", lambda: _tap_body(p, L)))
 
 
 # -- the envelopes ----------------------------------------------------------------------------
@@ -690,71 +698,12 @@ def _envelopes(p: Prog, L: C.Layout) -> None:
 
 
 # -- the consonants' renderers -----------------------------------------------------------------
-def _toward(p, L, fi, c, dsts):
-    """O[d] = MPY(lim(c - F[fi]), y31)"""
-    p.ld(3, _a(L, f"F{fi}"))
-    p.iconst(1, c)
-    p.iop(1, 1, "-", 3)
-    limi(p, 1)
-    ls(p, 2, "y31")
-    mulqs(p)
-    for d in dsts:
-        p.st(_a(L, f"O{d}"), 1)
-
-
-def _neg35(p, L, d):
-    """Rd = lim(0x7FFFF8 - y35)"""
-    ls(p, 3, "y35")
-    p.iconst(d, 0x7FFFF8)
-    p.iop(d, d, "-", 3)
-    limi(p, d)
-
-
-def _k35(p, L, c, dsts):
-    """O[d] = MPY(lim(0x7FFFF8 - y35), c)"""
-    _neg35(p, L, 1)
-    mulc(p, 1, c)
-    for d in dsts:
-        p.st(_a(L, f"O{d}"), 1)
-
-
-def _k31(p, L, c, dsts, neg=False):
-    """O[d] = +-MPY(c, y31)"""
-    ls(p, 1, "y31")
-    mulc(p, 1, c, neg)
-    for d in dsts:
-        p.st(_a(L, f"O{d}"), 1)
-
-
-def _down(p, L, fi, c, d1, d2=None):
-    """B, P: O[d1] = -MPY(MPY(F, c), lim(0x7FFFF8 - y35)); O[d2] = its half"""
-    p.ld(1, _a(L, f"F{fi}"))
-    p.iconst(2, c)
-    mulq(p)
-    p.iconst(12, 0)
-    p.iop(1, 12, "-", 1)
-    p.ipass(9, 1)
-    _neg35(p, L, 2)
-    p.ipass(1, 9)
-    mulqs(p)
-    p.st(_a(L, f"O{d1}"), 1)
-    if d2 is not None:
-        p.ash(1, 1, -1)
-        p.st(_a(L, f"O{d2}"), 1)
-
-
-def _y40(p, L, name, cond, v):
-    ls(p, 9, name)
-    p.iconst(12, v)
-    p.if_(9, cond, 12, lambda: setk(p, "y40", 2), kind="i")
-
-
 def _copy(p, L, src, dst):
     p.iconst(12, _a(L, src))
     p.seti(5, 12)
     p.iconst(12, _a(L, dst))
     p.seti(2, 12)
-    p.loop(_a(L, "n3"), 16, lambda: (p.ldpost(1, 5), p.stpost(2, 1)))
+    p.call("vo6_copy", lambda: p.loop(_a(L, "n4"), 16, lambda: (p.ldpost(1, 5), p.stpost(2, 1))))
 
 
 def _qconsts(p: Prog) -> None:
@@ -863,15 +812,11 @@ def _bqx_body(p: Prog, L: C.Layout) -> None:
 
 
 def _biquad(p, L, coefs, src, dst, state):
+    """the output biquad (state 'ob', COEFS constants, float) or the consonant's (state 'cb',
+    exact: CO already holds its coefficients' halves, COEFS None)"""
     exact = state == "cb"
-    for k, c in enumerate(coefs):
-        if exact:
-            w = s24(c)
-            p.fconst(1, float(w >> 12))
-            p.st(_a(L, "CO") + 8 * k, 1)
-            p.fconst(1, float(w & 0xFFF))
-            p.st(_a(L, "CO") + 8 * k + 4, 1)
-        else:
+    if not exact:
+        for k, c in enumerate(coefs):
             p.fconst(1, s24(c) * Q23)
             p.st(_a(L, "CO") + 4 * k, 1)
     p.iconst(12, _a(L, src))
@@ -887,13 +832,13 @@ def _biquad(p, L, coefs, src, dst, state):
         p.call("vo6_bq", lambda: _bq_body(p, L))
 
 
-def _crossfade(p, L, k):
-    """EXC = lim(floor((y31 UNV + lim(y31 - k) EXC) / 2^23)) exactly (L: k 0x800000 = 1.0; M N Z:
-    0x7FFFF8)"""
+def _crossfade(p, L):
+    """EXC = lim(floor((y31 UNV + lim(y31 + xk) EXC) / 2^23)) exactly (xk: L -0x800000 = -1.0,
+    M N Z -0x7FFFF8)"""
     ls(p, 9, "y31")
     _split(p, 9, 1, 2)
-    p.iconst(12, k)
-    p.iop(9, 9, "-", 12)
+    p.ld(10, _a(L, "xk"))
+    p.iop(9, 9, "+", 10)
     limi(p, 9)
     _split(p, 9, 3, 4)
     p.iconst(12, _a(L, "UNV"))
@@ -964,134 +909,217 @@ def _trill(p, L):
     when(4, hold(1))
 
 
-def _consonant(p: Prog, L: C.Layout, k: int) -> None:
-    if k == 0:
-        _copy(p, L, "C30", "UNV")
-    elif k == 1:                                   # B
-        _down(p, L, 0, 0xCCCCD, 0)
-        _down(p, L, 1, 0xCCCCD, 1)
-        _y40(p, L, "x35", "GT", 3)
-        _copy(p, L, "C30", "UNV")
-    elif k in (2, 14, 17):                         # D, S, TJ
-        c, g, co = {2: (0x6AF0DD, 0x400000, (0xB57FC, 0x16AFF7, 0xB57FC, 0xDF712C, 0xDEEC2)),
-                    14: (0x6D68A3, 0x400000, (0x26729D, 0xB31AC6, 0x26729D, 0xBDBFC1, 0x178A36)),
-                    17: (0x66D3E8, 0x7EB852, (0x56916, 0xF52DD4, 0x56916, 0x41ABC5, 0x17501D))}[k]
-        _toward(p, L, 1, c, [5])
-        if g == 0x400000:
-            p.ash(1, 1, -1)
-        else:
-            mulc(p, 1, g)
-        p.st(_a(L, "O1"), 1)
-        _biquad(p, L, co, "C30", "UNV", "cb")
-    elif k == 3:                                   # F
-        _toward(p, L, 0, 0x423899, [0, 4])
-        _toward(p, L, 1, 0x5747BC, [1, 5])
-        _biquad(p, L, (0x44345, 0, 0xFBBCBB, 0x108B19, 0x377976), "C30", "UNV", "cb")
-    elif k == 4:                                   # G
-        _k35(p, L, 0x511C4C, [2])
-        _y40(p, L, "x35", "GT", 3)
-        _biquad(p, L, (0xF879, 0x1F0F3, 0xF879, 0x98261C, 0x2BBBCA), "C30", "UNV", "cb")
-    elif k == 5:                                   # H
-        _k35(p, L, 0x41CF5, [0, 1, 2, 3])
-        _k31(p, L, 0x41CF5, [4, 5, 6, 7])
-        _y40(p, L, "x35", "GT", 3)
-        _biquad(p, L, (0x30E9A, 0x61D34, 0x30E9A, 0xAD3392, 0x1F06D6), "C30", "UNV", "cb")
-    elif k == 6:                                   # J
-        _toward(p, L, 0, 0x40543D, [0])
-        _toward(p, L, 1, 0x607E5B, [1])
-        _toward(p, L, 2, 0x652EBA, [2])
-        _copy(p, L, "C30", "UNV")
-    elif k == 7:                                   # K
-        _k35(p, L, 0x41CF5, [2])
-        ls(p, 3, "y31")
-        p.iconst(1, 0x7FFFF8)
-        p.iop(1, 1, "-", 3)
+def _store_mask(p: Prog, L: C.Layout) -> None:
+    """O[d] = R6 for each bit d of R5. Clobbers R5, R7, R12, I2."""
+    p.iconst(7, _a(L, "O0"))
+
+    def one():
+        p.iconst(12, 1)
+        p.iop(12, 5, "AND", 12)
+        p.ifz(12, "NE", lambda: (p.seti(2, 7), p.sti(0, 2, 6)))
+        p.lsh(5, 5, -1)
+        addk(p, 7, 7, 4)
+    p.loop(_a(L, "n3"), 8, one)
+
+
+def _vals(p: Prog, L: C.Layout, d: int, r: int) -> None:
+    """Rd = V[Rr] (V: 0, F0..F3, y35, y31, x55 at v0..). Clobbers R12, I1."""
+    p.lsh(d, r, 2)
+    p.iconst(12, _a(L, "v0"))
+    p.iop(d, 12, "+", d)
+    p.seti(1, d)
+    p.ldi(d, 0, 1)
+
+
+def _op(p: Prog, L: C.Layout) -> None:
+    """one offset op from the row at I0 (8 words): O[m1] = MPY(lim(C - V[v]), W), O[m2] = MPY(that, g2)"""
+    regs = (9, 10, 11, 4, 13, 5, 14, 15)       # v, C, wm, wv, wc, m1, m2, g2 (ints)
+    for r in regs:
+        p.ldpost(r, 0)
+        _word(p, r, r)
+    for r, name in ((13, "kk"), (14, "src"), (15, "dst")):
+        p.st(_a(L, name), r)
+
+    def go():
+        p.st(_a(L, "c1"), 5)
+        p.st(_a(L, "g"), 10)
+        _vals(p, L, 1, 9)
+        p.ld(10, _a(L, "g"))
+        p.iop(1, 10, "-", 1)
         limi(p, 1)
-        mulc(p, 1, 0x41CF5)
-        p.st(_a(L, "O6"), 1)
-        _biquad(p, L, (0x6A9D, 0xD53A, 0x6A9D, 0x8F6951, 0x324122), "C30", "UNV", "cb")
-        _y40(p, L, "x35", "GT", 3)
-    elif k in (8, 10):                             # L, N
-        _toward(p, L, 0, 0x3C0D29, [0])
-        _toward(p, L, 1, 0x5C2239, [1])
-        co = (0x3DCC43, 0x896360, 0x3DCC43, 0x896360, 0x3B9885) if k == 8 else \
-             (0x37F898, 0x91F8F7, 0x37F898, 0x91F8F7, 0x2FF130)
-        _biquad(p, L, co, "EXC", "UNV", "cb")
-        _crossfade(p, L, 0x800000 if k == 8 else 0x7FFFF8)
-    elif k == 9:                                   # M
-        _k31(p, L, 0x1B2583, [0], neg=True)
-        _biquad(p, L, (0x3BBCBB, 0x89BC72, 0x3BBCBB, 0x89BC72, 0x377976), "EXC", "UNV", "cb")
-        _crossfade(p, L, 0x7FFFF8)
-    elif k == 11:                                  # P
-        _down(p, L, 0, 0x266666, 4, 0)
-        _down(p, L, 1, 0x266666, 5, 1)
-        _y40(p, L, "x31", "GT", 4)
-        _biquad(p, L, (0x4B6F, 0x96DD, 0x4B6F, 0x8CDB9B, 0x345220), "C30", "UNV", "cb")
-    elif k == 12:                                  # R
-        _k31(p, L, 0x3C0D29, [0], neg=True)
-        _toward(p, L, 2, 0x5AA728, [2])
+        p.st(_a(L, "x1"), 1)                   # lim(C - V)
+        # W by its mode (R11): 0 V[wv], 1 wv, 2 -MPY(V[wv], wc), 3 MPY(V[wv], V[wc])
+        p.ipass(2, 4)
+        p.iconst(12, 1)
+
+        def m0():
+            _vals(p, L, 2, 4)
+
+        def m23():
+            _vals(p, L, 1, 4)
+            p.ld(13, _a(L, "kk"))
+            p.iconst(12, 3)
+            p.if_(11, "EQ", 12, lambda: _vals(p, L, 2, 13), lambda: p.ipass(2, 13), kind="i")
+            mul(p)
+            p.iconst(12, 2)
+            p.if_(11, "EQ", 12, lambda: (p.iconst(12, 0), p.iop(1, 12, "-", 1)), kind="i")
+            p.ipass(2, 1)
+        p.ifz(11, "EQ", m0, lambda: p.if_(11, "GT", 12, m23, kind="i"))
+        p.ld(1, _a(L, "x1"))
+        mul(p)
+        p.ipass(6, 1)
+        p.ld(5, _a(L, "c1"))
+        p.st(_a(L, "x1"), 1)
+        _store_mask(p, L)
+
+        def second():
+            p.ld(1, _a(L, "x1"))
+            p.ld(2, _a(L, "dst"))
+            mul(p)
+            p.ipass(6, 1)
+            p.ld(5, _a(L, "src"))
+            _store_mask(p, L)
+        p.ld(14, _a(L, "src"))
+        p.ifz(14, "NE", second)
+    p.ifz(5, "NE", go)
+
+
+def _render(p: Prog, L: C.Layout) -> None:
+    """CONS's renderer from its row (rom.VO_CONS): offsets, the unvoiced source, y40"""
+    row = 4 * (4 * 8 + 8)
+    ls(p, 1, "k")
+    p.lsh(2, 1, 5)
+    p.lsh(1, 1, 3)
+    p.ipass(12, 2)
+    p.iop(1, 12, "+", 1)                       # 40 k
+    p.lsh(1, 1, 2)
+    p.iconst(12, L.VO["cons"])
+    p.iop(1, 12, "+", 1)
+    p.st(_a(L, "row"), 1)
+    addk(p, 2, 1, 4 * 32)
+    p.seti(0, 2)
+    for name in ("kind", "xk"):
+        p.ldpost(3, 0)
+        _word(p, 3, 3)
+        p.st(_a(L, name), 3)
+    # the coefficients' 12-bit halves (CO, floats) for the exact biquad
+    p.iconst(12, _a(L, "CO"))
+    p.seti(2, 12)
+
+    def coef():
+        p.ldpost(3, 0)
+        _word(p, 3, 3)
+        _split(p, 3, 4, 5)
+        p.stpost(2, 4)
+        p.stpost(2, 5)
+    p.loop(_a(L, "n3"), 5, coef)
+    p.ldpost(3, 0)
+    _word(p, 3, 3)
+    p.st(_a(L, "st"), 3)                       # y40's rule
+    p.ld(9, _a(L, "kind"))
+    p.iconst(12, 4)
+    p.if_(9, "EQ", 12, lambda: _trill(p, L), kind="i")
+    # V: 0, F0..F3, y35, y31, x55
+    p.iconst(3, 0)
+    p.st(_a(L, "v0"), 3)
+    for k in range(4):
+        p.ld(3, _a(L, f"F{k}"))
+        p.st(_a(L, f"v{k + 1}"), 3)
+    for k, name in ((5, "y35"), (6, "y31"), (7, "x55")):
+        ls(p, 3, name)
+        p.st(_a(L, f"v{k}"), 3)
+    p.ld(1, _a(L, "row"))
+    p.st(_a(L, "opp"), 1)
+
+    def op():
+        p.ld(1, _a(L, "opp"))
+        p.seti(0, 1)
+        _op(p, L)
+        p.ld(1, _a(L, "opp"))
+        addk(p, 1, 1, 32)
+        p.st(_a(L, "opp"), 1)
+    p.loop(_a(L, "n2"), 4, op)
+    # the source: 0 the noise / 8; 1 its biquad; 2 the excitation's biquad and the crossfade;
+    # 3 Z: noise / 16 + the excitation, its biquad, the crossfade; 4 RR: the excitation scaled
+    p.ld(9, _a(L, "kind"))
+
+    def copy():
         _copy(p, L, "C30", "UNV")
-    elif k == 13:                                  # RR
-        _trill(p, L)
-        ls(p, 1, "x55")
-        ls(p, 2, "y31")
-        mulq(p)
-        mulc(p, 1, 0x3C0D29, True)
-        p.st(_a(L, "O0"), 1)
-        _toward(p, L, 2, 0x5AA728, [2])
-        ls(p, 1, "y31")
-        mulc(p, 1, 0x59999A)
-        p.iconst(12, 0x7FFFAC)
-        p.iop(1, 12, "-", 1)
-        limi(p, 1)
-        i2f(p, 1, 1)
-        p.iconst(12, _a(L, "EXC"))
-        p.seti(5, 12)
 
-        _qconsts(p)
+    def bq(src):
+        return lambda: _biquad(p, L, None, src, "UNV", "cb")
 
-        def one():
-            p.ldi(2, 0, 5)
-            p.fop(2, 2, "*", 1)
-            _floor(p, 2, 0, 15)
-            C.sat(p, 2)
-            p.stpost(5, 2)
-        p.loop(_a(L, "n3"), 16, one)
-        _copy(p, L, "C30", "UNV")
-        _y40(p, L, "x31", "EQ", 5)
-    elif k in (15, 18):                            # SJ, TH
-        _toward(p, L, 0, 0x40543D, [0, 4])
-        _toward(p, L, 1, 0x607E5B, [1, 5])
-        _toward(p, L, 2, 0x652EBA, [6])
-        _biquad(p, L, (0x1DA8C4, 0, 0xE2573C, 0xDABCB2, 0x4AE79), "C30", "UNV", "cb")
-    elif k == 16:                                  # T
-        _toward(p, L, 1, 0x6262B7, [1, 5])
-        _biquad(p, L, (0x4774A, 0x8EE95, 0x4774A, 0xB7E897, 0x19F492), "C30", "UNV", "cb")
-    elif k == 19:                                  # V
-        _toward(p, L, 0, 0x423899, [0])
-        _toward(p, L, 1, 0x5747BC, [1])
-        _biquad(p, L, (0x24AB6, 0xFB6A94, 0x24AB6, 0x597817, 0x22A2F0), "C30", "UNV", "cb")
-    elif k == 20:                                  # Z: x:$30 = noise / 16 + the excitation
-        _toward(p, L, 0, 0x40543D, [0])
-        _toward(p, L, 1, 0x607E5B, [1])
-        p.iconst(12, _a(L, "C30"))
-        p.seti(5, 12)
-        p.iconst(12, _a(L, "EXC"))
-        p.seti(2, 12)
-        p.fconst(3, 0.5)
-        _qconsts(p)
+    def k2():
+        bq("EXC")()
 
-        def one():
-            p.ldi(1, 0, 5)
-            p.fop(1, 1, "*", 3)
-            p.ldpost(2, 2)
-            p.fop(1, 1, "+", 2)
-            _floor(p, 1, 0, 15)
-            C.sat(p, 1)
-            p.stpost(5, 1)
-        p.loop(_a(L, "n3"), 16, one)
-        _biquad(p, L, (0x3CDB1F, 0x8649C2, 0x3CDB1F, 0x867152, 0x39DDCF), "C30", "UNV", "cb")
-        _crossfade(p, L, 0x7FFFF8)
+    def k3():
+        _zmix(p, L)
+        bq("C30")()
+
+    def k4():
+        _rrscale(p, L)
+        copy()
+
+    def kind(n, then, else_):
+        p.ld(9, _a(L, "kind"))
+        p.iconst(12, n)
+        p.if_(9, "EQ", 12, then, else_, kind="i")
+    kind(0, copy, lambda: kind(1, bq("C30"), lambda: kind(2, k2, lambda: kind(3, k3, k4))))
+    p.ld(9, _a(L, "xk"))                       # kinds 2, 3: the crossfade (xk != 0)
+    p.ifz(9, "NE", lambda: _crossfade(p, L))
+    # y40 = 2 when: 1 x35 > 3; 2 x31 > 4; 3 x31 == 5
+    p.ld(9, _a(L, "st"))
+
+    def y40(name, cond, v):
+        ls(p, 10, name)
+        p.iconst(12, v)
+        p.if_(10, cond, 12, lambda: setk(p, "y40", 2), kind="i")
+
+    def rule(n, then, else_=None):
+        p.ld(9, _a(L, "st"))
+        p.iconst(12, n)
+        p.if_(9, "EQ", 12, then, else_, kind="i")
+    rule(1, lambda: y40("x35", "GT", 3), lambda: rule(2, lambda: y40("x31", "GT", 4),
+                                                       lambda: rule(3, lambda: y40("x31", "EQ", 5))))
+
+
+def _zmix(p: Prog, L: C.Layout) -> None:
+    """Z: C30 = lim(C30 / 2 + EXC) (exact in float)"""
+    p.iconst(12, _a(L, "C30"))
+    p.seti(5, 12)
+    p.iconst(12, _a(L, "EXC"))
+    p.seti(2, 12)
+    p.fconst(3, 0.5)
+
+    def one():
+        p.ldi(1, 0, 5)
+        p.fop(1, 1, "*", 3)
+        p.ldpost(2, 2)
+        p.fop(1, 1, "+", 2)
+        C.sat(p, 1)
+        p.stpost(5, 1)
+    p.loop(_a(L, "n3"), 16, one)
+
+
+def _rrscale(p: Prog, L: C.Layout) -> None:
+    """RR: EXC = lim(MPY(EXC, lim(0x7FFFAC - MPY(0x59999A, y31))))"""
+    ls(p, 1, "y31")
+    mulc(p, 1, 0x59999A)
+    p.iconst(12, 0x7FFFAC)
+    p.iop(1, 12, "-", 1)
+    limi(p, 1)
+    i2f(p, 1, 1)
+    _qconsts(p)
+    p.iconst(12, _a(L, "EXC"))
+    p.seti(5, 12)
+
+    def one():
+        p.ldi(2, 0, 5)
+        p.fop(2, 2, "*", 1)
+        _floor(p, 2, 0, 15)
+        C.sat(p, 2)
+        p.stpost(5, 2)
+    p.loop(_a(L, "n3"), 16, one)
 
 
 def _consonants(p: Prog, L: C.Layout) -> None:
@@ -1099,38 +1127,13 @@ def _consonants(p: Prog, L: C.Layout) -> None:
     p.iconst(0, 0)
     for d in range(8):
         p.st(_a(L, f"O{d}"), 0)
-
-    def pick():
-        groups = {}
-        for k in range(21):
-            groups.setdefault({18: 15, 10: 8}.get(k, k), []).append(k)
-
-        def chain(items):
-            if not items:
-                return
-            (k0, ks), rest = items[0], items[1:]
-            ls(p, 9, "k")
-
-            def test(ks=ks, k0=k0):
-                if len(ks) == 1:
-                    p.iconst(12, ks[0])
-                    p.if_(9, "EQ", 12, lambda: _consonant(p, L, k0), lambda: chain(rest), kind="i")
-                else:
-                    p.iconst(12, ks[0])
-                    p.if_(9, "EQ", 12, lambda: _consonant(p, L, ks[0]), lambda: (
-                        ls(p, 9, "k"), p.iconst(12, ks[1]),
-                        p.if_(9, "EQ", 12, lambda: _consonant(p, L, ks[1]), lambda: chain(rest),
-                              kind="i")), kind="i")
-            test()
-        chain(sorted(groups.items()))
-
     ls(p, 9, "x35")
     p.iconst(12, 1)
 
     def maybe():
         ls(p, 9, "y40")
         p.iconst(12, 1)
-        p.if_(9, "GT", 12, lambda: _copy(p, L, "C30", "UNV"), pick, kind="i")
+        p.if_(9, "GT", 12, lambda: _copy(p, L, "C30", "UNV"), lambda: _render(p, L), kind="i")
     p.if_(9, "EQ", 12, lambda: _copy(p, L, "C30", "UNV"), maybe, kind="i")
 
 

@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import pytest
 
-from dnfw.mnm import bench, ddrw, dens, rom, sid, wave
+from dnfw.mnm import bench, ddrw, dens, rom, sid, vo6, wave
 from dnfw.mnm import core as C
 
-MACHINES = {"WAVE": wave, "SID": sid, "DENS": dens, "DDRW": ddrw}
+MACHINES = {"WAVE": wave, "SID": sid, "DENS": dens, "DDRW": ddrw, "VO6": vo6}
 pytestmark = pytest.mark.skipif(not (rom.available() and bench.GOLDEN.is_dir()),
                                 reason="needs the owner's Monomachine OS and the golden runs")
 
@@ -61,3 +61,21 @@ def test_pitch(name):
         want = M.exact(A, F, knobs)
         got = b.mem.get(b.L.md.state + 4 * C.VW["i1"])
         assert abs(got - want["i1"]) <= max(2, 1e-4 * want["i1"]), (F, got, want)
+
+
+def test_vo6_tables_where_the_layout_says():
+    """VO-6's tables (rom.vo6_words) sit in rom.table_words where core.Layout addresses them"""
+    L = bench.layout()
+    words = rom.table_words()
+    at = (L.VO["c1"] - L.tables) // 4
+    assert words[at:at + len(rom.vo6_words())] == rom.vo6_words()
+    assert sum(n for _, n in C.VO_TABLES) == len(rom.vo6_words())
+
+
+def test_digibank_room():
+    """DPRO's stand-in (built by the DSP, 256 KB at the Monomachine tables + DIGI_OFF) lies past
+    the Machinedrum/Monomachine tables' end and below the Machinedrum voices (1 MB on)."""
+    from dnfw.md import core as K
+    mnm = K.TABLE_LAYOUT["mnm"][0]
+    lo, hi = mnm + C.DIGI_OFF, mnm + C.DIGI_OFF + 4 * C.DIGI_WORDS
+    assert lo >= K.TABLE_LAYOUT["_end"][0] and hi <= 0x100000, (hex(lo), hex(hi))

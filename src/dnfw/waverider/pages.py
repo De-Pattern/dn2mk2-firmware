@@ -124,14 +124,49 @@ from ..mnm import machines as _mnm
 MNM_LONG = {"PW": "Pulse Width", "PWAD": "PW Sweep", "PWRS": "PW Restart", "WAVE": "Waveform",
             "MOD": "Modulation", "MSRC": "Mod Source", "MFRQ": "Mod Freq", "TUNE": "Tune",
             "WP": "Wave Position", "WPM": "WP Mod", "WPRS": "WP Restart", "SYNC": "Sync",
-            "SFRQ": "Sync Freq", "---": "Unused"}
+            "SFRQ": "Sync Freq", "---": "Unused",
+            # DPRO-DDRW, DPRO-DENS (v0.26)
+            "WAV1": "Wave 1", "MIX": "Wave Mix", "WAV2": "Wave 2", "TIME": "Fade Time",
+            "BR1": "Bit Reduce 1", "WID": "Detune Width", "BR2": "Bit Reduce 2",
+            "PCH2": "Pitch 2", "PCH3": "Pitch 3", "PCH4": "Pitch 4"}
+# parameters the port does not run (DENS's chorus is the Monomachine's effect after the
+# machine): drawn as "-", as an unused one
+MNM_UNPORTED = {"CHRL", "CHRW"}
+
+
+def _pch_names() -> tuple[tuple[int, ...], tuple[str, ...]]:
+    """DENS's PCH2..4: the knob -> its choice (the ROM's ratio table runs, 33 of them),
+    and their names as the Monomachine's: semitones -12..+12, OFF for 1.0, else the ratio"""
+    import fractions
+    import itertools
+    import math
+    from ..mnm import rom as mrom
+    if not mrom.available():
+        return tuple(range(128)), tuple(str(k) for k in range(128))
+    t = mrom.words(*mrom.PCH)
+    idx, names = [], []
+    for v, g in itertools.groupby(t):
+        r = v / 0x200000
+        st = 12 * math.log2(r)
+        if abs(st - round(st)) < 1e-3:
+            n = "OFF" if round(st) == 0 else f"{round(st):+d}"
+        else:
+            f = fractions.Fraction(r).limit_denominator(6)
+            n = f"{f.numerator}/{f.denominator}"
+        idx += [len(names)] * len(list(g))
+        names.append(n)
+    return tuple(idx), tuple(names)
 # the enumerated parameters: their choices by name, as the Monomachine shows them (0: a knob)
 MNM_CHOICES = {
     "SID 6581": {"PWRS": ("OFF", "ON"), "WAVE": ("TRI", "SAW", "PULS", "MIX", "NOIS"),
                  "MOD": ("OFF", "RING", "SYNC", "R+S"), "MSRC": ("MFRQ", "PRCH")},
     "DPRO-WAVE": {"WAVE": 32, "WPRS": ("OFF", "ON"), "SYNC": ("OFF", "SFRQ", "PRCH")},
+    # the Digibank's 64 (here the ROM's 32, twice: S01..S32) and DENS's pitches (by table)
+    "DPRO-DDRW": {"WAV1": 64, "WAV2": 64},
+    "DPRO-DENS": {"WAVE": 64, "PCH2": "pch", "PCH3": "pch", "PCH4": "pch"},
 }
 MNM_WAVES = 32
+MNM_PCH = 255                       # mnm_choices' mark: the choice by mnm_pch_idx[knob]
 
 
 # the Monomachine's machines (v0.26; kinds 2 and 3 were RESONATOR's and CZ's until v0.25):
@@ -139,7 +174,7 @@ MNM_WAVES = 32
 # PERC's eight records each, labelled per machine
 MNM_KINDS = tuple(t - 4 for t in _mnm_types.TYPES)
 MNM_PAGE = PARAM_IDS
-MNM_LABELS = [{r: (sh if sh != "---" else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)}
+MNM_LABELS = [{r: (sh if sh != "---" and sh not in MNM_UNPORTED else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)}
               for M in _mnm.MACHINES]
 MNM_TITLES = tuple(_mnm.LIST_NAMES[n][1] for n in _mnm.NAMES)
 MNM_SUBTITLES = tuple(_mnm.LIST_NAMES[n][0] for n in _mnm.NAMES)
@@ -148,7 +183,8 @@ MNM_SUBTITLES = tuple(_mnm.LIST_NAMES[n][0] for n in _mnm.NAMES)
 def mnm_named(k: int) -> dict[int, tuple[str, str]]:
     """record -> (long, short) on a Monomachine machine's track"""
     M = _mnm.MACHINES[k]
-    out = {r: (MNM_LONG.get(sh, sh), sh if sh != "---" else "-") for r, sh in zip(PARAM_IDS, M.PNAMES)}
+    out = {r: ((MNM_LONG.get(sh, sh), sh) if sh != "---" and sh not in MNM_UNPORTED else (UNUSED_LONG, "-"))
+           for r, sh in zip(PARAM_IDS, M.PNAMES)}
     out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in range(238, 263) if r not in out})
     return out
 
@@ -161,7 +197,11 @@ def mnm_c_header() -> str:
         n_row, at_row = [], []
         for sh in M.PNAMES:
             c = ch.get(sh, 0)
-            if isinstance(c, int):
+            if c == "pch":
+                n_row.append(MNM_PCH)
+                at_row.append(len(names))
+                names += list(_pch_names()[1])
+            elif isinstance(c, int):
                 n_row.append(c)
                 at_row.append(0)
             else:
@@ -173,8 +213,9 @@ def mnm_c_header() -> str:
 
     def arr(rows):
         return ", ".join("{" + ", ".join(map(str, r)) + "}" for r in rows)
-    labels = ", ".join("{" + ", ".join(q + (sh if sh != "---" else "-") + q for sh in M.PNAMES) + "}"
-                       for M in _mnm.MACHINES)
+    labels = ", ".join("{" + ", ".join(q + (sh if sh != "---" and sh not in MNM_UNPORTED else "-") + q
+                                       for sh in M.PNAMES) + "}" for M in _mnm.MACHINES)
+    pidx = _pch_names()[0]
     lines = [
         f"#define MNM_N {len(_mnm.MACHINES)}",
         "/* is_wr's kind -> the Monomachine machine's index, -1 for any other kind */",
@@ -184,6 +225,8 @@ def mnm_c_header() -> str:
         "    return -1;",
         "}",
         f"#define MNM_WAVES {MNM_WAVES}",
+        f"#define MNM_PCH {MNM_PCH}",
+        f"static const unsigned char mnm_pch_idx[128] = {{{', '.join(map(str, pidx))}}};",
         f"static const char mnm_labels[MNM_N][8][6] = {{{labels}}};",
         f"static const unsigned char mnm_lo[8] = {{{', '.join(str(lo) for _r, _s, lo, _t in _perc.PARAMS)}}};",
         f"static const unsigned char mnm_top[8] = {{{', '.join(str(t) for _r, _s, _lo, t in _perc.PARAMS)}}};",

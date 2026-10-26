@@ -16,11 +16,11 @@ F = note x 2048 / 12 + TUNE x 683 / 128 (TUNE 64: in tune), 0..0x5800; A = 2^(F 
 from __future__ import annotations
 
 from . import core as C
-from . import sid, wave
+from . import ddrw, dens, sid, wave
 from ..md import core as K
 from ..perc.dsl import Prog
 
-MODULES = (sid, wave)
+MODULES = (sid, wave, ddrw, dens)           # their types: TYPES below (6, 7, 14, 15)
 F_TOP = 0x5800
 
 

@@ -146,6 +146,10 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
             if L.tables <= a < L.T[MDK.SHIPPED]:
                 m2.poke(runner.state, a, w)
         m2.poke(runner.state, L.C["fill"], MDK.Z_N)
+        # v0.26: and the Digibank stand-in DENS and DDRW read, built (8 s after the tables)
+        from dnfw.mnm import dpro as MNP
+        for a, w in MNP.bench_words(L.mnm).items():
+            m2.poke(runner.state, a, w)
     return runner
 
 
@@ -219,6 +223,9 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             fp = _Prog("run", mem=filled)
             fp.spill = PERC_L.md.C["ash"]
             MDK.table_fill(fp, PERC_L.md)
+            from dnfw.mnm import dpro as MNP           # v0.26: and the Digibank stand-in's build
+            MNP.build(fp, PERC_L.md.mnm)
+            filled.put(PERC_L.C["mcost"], 0)           # and the Monomachine voices' cost, carried slot to slot
             for t in range(16):
                 rec = V.track_record(t)
                 if (m2.word(r.state, rec + V.TRACK_MACHINE) == 5
@@ -231,6 +238,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                                          for _rid, slot, _lo, _top in PM.PARAMS]}
                     st = r.state
                     p, mem = PP.run_voice(PERC_L, filled.get, t)
+                    filled.put(PERC_L.C["mcost"], mem.get(PERC_L.C["mcost"]))
                     buf = m2.word(st, PP.BUFFERS + 4 * t) or 0
                     model[t] = {"out": [mem.get(buf + 4 * k) for k in range(BLOCK)],
                                 "state": [mem.get(PERC_L.state + 128 * t + 4 * k)
@@ -1879,9 +1887,23 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         runs[f"{name}_tops"] = run_blocks(init, frames(k, knobs=[127] * 8), blocks)
         print(f"    {name}: {round(time.perf_counter() - t0)} s", flush=True)
     runs["silent"] = run_blocks(init, frames(0, trig=()), blocks)
+    # the budget: SID on tracks 0..3 at once; those whose cost fits PP.MNM_BUDGET in track
+    # order play, the rest are silent
+    sid = MM.NAMES.index("SID 6581")
+    fits = PP.MNM_BUDGET // PP.MNM_COST["SID 6581"]
+
+    def four(b):
+        f = base_frame(sound, machines, t0=types[sid], overrides=mnm_words(sid), trigger=b == 1,
+                       others={t: types[sid] for t in (1, 2, 3)}, trigger_others=True)
+        for t in (1, 2, 3):
+            for slot, w in mnm_words(sid).items():
+                f.param(t, slot, w)
+        return f.to_bytes()
+    runs["budget"] = run_blocks(init, four, blocks)
     ok_runs = all(r["ok"] for r in runs.values())
     exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
     peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in MM.NAMES}
+    budget = [V.peak(perc_series(runs["budget"], t)) if runs["budget"]["ok"] else None for t in range(4)]
     other = {name: V.peak(perc_series(runs[name], 1)) if runs[name]["ok"] else None for name in MM.NAMES}
     zc = {name: (zero_crossings(perc_series(runs[name], 0)), zero_crossings(perc_series(runs[f"{name}_72"], 0)))
           for name in MM.NAMES if runs[name]["ok"] and runs[f"{name}_72"]["ok"]}
@@ -1906,7 +1928,10 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         "note 72 is an octave over note 60 (zero crossings x 1.8 .. 2.2)":
             len(zc) == len(MM.NAMES) and all(a > 0 and 1.8 <= b / a <= 2.2 for a, b in zc.values()),
         "control: no trigger is silent (every sample 0)": bool(silent) and all(x == 0.0 for x in silent),
+        f"the budget: of four SID tracks the first {fits} play, the rest are silent":
+            None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]),
     }
+    n["budget_peaks"] = budget
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
 
 

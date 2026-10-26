@@ -78,6 +78,16 @@ class Harness:
         for (_rid, slot, lo, top), x in zip(M.PARAMS + M.FX_PARAMS, list(params) + list(fx or FX_OFF)):
             self._half(M.frame_offset(slot), word_of(x, top, lo))
 
+    def set_mnm(self, mtype: int, knobs) -> None:
+        """v0.26: the track on machine type MTYPE (a Monomachine machine's: the frame's type
+        word at 148 + 2 t), its eight knobs 0..127 on PERC's eight records"""
+        a = M.FRAME + 148 + 2 * self.t
+        w = self.mem.get(a & ~3)
+        w = (w & 0xFFFF) | (mtype << 16) if a & 2 else (w & 0xFFFF0000) | mtype
+        self.mem.put(a & ~3, w)
+        for (_rid, slot, lo, top), x in zip(M.PARAMS, knobs):
+            self._half(M.frame_offset(slot), word_of(x / 127.0, top, lo))
+
     def _half(self, off: int, value: int) -> None:
         a = M.FRAME + off + 146 * self.t
         w = self.mem.get(a & ~3)

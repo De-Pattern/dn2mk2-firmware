@@ -310,10 +310,63 @@ def vo6_log() -> tuple[int, ...]:
 @functools.lru_cache(maxsize=1)
 def vo6_words() -> tuple[int, ...]:
     """VO-6's tables in dnfw.mnm.core.VO_TABLES's order (signed 24-bit words): the gains, the
-    cosines, the pulse shape, the log mantissas, CLEN's terms, the consonants' set-ups"""
+    cosines, the pulse shape, the log mantissas, CLEN's terms, the consonants' set-ups and
+    renderers"""
     _, Y = kernel_xy()
     out = [s24(v) for v in words(*VO_C1)] + [s24(v) for v in words(*VO_COS)]
     out += [s24(Y.get(VO_BLIT[0] + k, 0)) for k in range(VO_BLIT[1])]
     out += list(vo6_log()) + list(vo6_clen())
     out += [v for row in VO_TRIG for v in row]
+    out += vo6_cons()
     return tuple(out)
+
+
+# the consonants' renderers (P:0x146B3D.. through x:0x101A66 + k), as data: up to four offset
+# ops, each O[mask] = MPY(lim(C - V[v]), W) and then O[mask2] = MPY(that, g2), W by mode (0:
+# V[w]; 1: the constant w; 2: -MPY(V[w], c); 3: MPY(V[w], V[c])), V = (0, F0..F3, y35, y31,
+# x55); the source (0: the noise / 8; 1: a biquad on it; 2: a biquad on the excitation, then
+# the crossfade to xk; 3: Z's mix, the biquad, the crossfade; 4: RR's trill and scaling), its
+# five coefficients, and when y40 ends the consonant (1: x35 > 3; 2: x31 > 4; 3: x31 == 5)
+_T = lambda v, c, m1, m2=0, g2=0: (v, c, 0, 6, 0, m1, m2, g2)              # MPY(lim(c - V), y31)
+VO_CONS = (
+    ((), 0, 0, (0,) * 5, 0),
+    (((5, 0x7FFFF8, 2, 1, 0xCCCCD, 1, 0, 0), (5, 0x7FFFF8, 2, 2, 0xCCCCD, 2, 0, 0)), 0, 0, (0,) * 5, 1),
+    ((_T(2, 0x6AF0DD, 32, 2, 0x400000),), 1, 0, (0xB57FC, 0x16AFF7, 0xB57FC, 0xDF712C, 0xDEEC2), 0),
+    ((_T(1, 0x423899, 17), _T(2, 0x5747BC, 34)), 1, 0, (0x44345, 0, 0xFBBCBB, 0x108B19, 0x377976), 0),
+    (((5, 0x7FFFF8, 1, 0x511C4C, 0, 4, 0, 0),), 1, 0, (0xF879, 0x1F0F3, 0xF879, 0x98261C, 0x2BBBCA), 1),
+    (((5, 0x7FFFF8, 1, 0x41CF5, 0, 15, 0, 0), _T(0, 0x41CF5, 240)), 1, 0,
+     (0x30E9A, 0x61D34, 0x30E9A, 0xAD3392, 0x1F06D6), 1),
+    ((_T(1, 0x40543D, 1), _T(2, 0x607E5B, 2), _T(3, 0x652EBA, 4)), 0, 0, (0,) * 5, 0),
+    (((5, 0x7FFFF8, 1, 0x41CF5, 0, 4, 0, 0), (6, 0x7FFFF8, 1, 0x41CF5, 0, 64, 0, 0)), 1, 0,
+     (0x6A9D, 0xD53A, 0x6A9D, 0x8F6951, 0x324122), 1),
+    ((_T(1, 0x3C0D29, 1), _T(2, 0x5C2239, 2)), 2, 0x800000,
+     (0x3DCC43, 0x896360, 0x3DCC43, 0x896360, 0x3B9885), 0),
+    ((_T(0, -0x1B2583, 1),), 2, 0x7FFFF8, (0x3BBCBB, 0x89BC72, 0x3BBCBB, 0x89BC72, 0x377976), 0),
+    ((_T(1, 0x3C0D29, 1), _T(2, 0x5C2239, 2)), 2, 0x7FFFF8,
+     (0x37F898, 0x91F8F7, 0x37F898, 0x91F8F7, 0x2FF130), 0),
+    (((5, 0x7FFFF8, 2, 1, 0x266666, 16, 1, 0x400000), (5, 0x7FFFF8, 2, 2, 0x266666, 32, 2, 0x400000)),
+     1, 0, (0x4B6F, 0x96DD, 0x4B6F, 0x8CDB9B, 0x345220), 2),
+    ((_T(0, -0x3C0D29, 1), _T(3, 0x5AA728, 4)), 0, 0, (0,) * 5, 0),
+    (((0, -0x3C0D29, 3, 7, 6, 1, 0, 0), _T(3, 0x5AA728, 4)), 4, 0, (0,) * 5, 3),
+    ((_T(2, 0x6D68A3, 32, 2, 0x400000),), 1, 0, (0x26729D, 0xB31AC6, 0x26729D, 0xBDBFC1, 0x178A36), 0),
+    ((_T(1, 0x40543D, 17), _T(2, 0x607E5B, 34), _T(3, 0x652EBA, 64)), 1, 0,
+     (0x1DA8C4, 0, 0xE2573C, 0xDABCB2, 0x4AE79), 0),
+    ((_T(2, 0x6262B7, 34),), 1, 0, (0x4774A, 0x8EE95, 0x4774A, 0xB7E897, 0x19F492), 0),
+    ((_T(2, 0x66D3E8, 32, 2, 0x7EB852),), 1, 0, (0x56916, 0xF52DD4, 0x56916, 0x41ABC5, 0x17501D), 0),
+    ((_T(1, 0x40543D, 17), _T(2, 0x607E5B, 34), _T(3, 0x652EBA, 64)), 1, 0,
+     (0x1DA8C4, 0, 0xE2573C, 0xDABCB2, 0x4AE79), 0),
+    ((_T(1, 0x423899, 1), _T(2, 0x5747BC, 2)), 1, 0, (0x24AB6, 0xFB6A94, 0x24AB6, 0x597817, 0x22A2F0), 0),
+    ((_T(1, 0x40543D, 1), _T(2, 0x607E5B, 2)), 3, 0x7FFFF8,
+     (0x3CDB1F, 0x8649C2, 0x3CDB1F, 0x867152, 0x39DDCF), 0),
+)
+VO_OPS, VO_CONS_W = 4, 4 * 8 + 8
+
+
+def vo6_cons() -> list[int]:
+    """VO_CONS as table words: per consonant 4 ops x 8, then kind, xk, c0..c4, y40"""
+    out = []
+    for ops, kind, xk, co, y40 in VO_CONS:
+        for k in range(VO_OPS):
+            out += list(ops[k]) if k < len(ops) else [0] * 8
+        out += [kind, -xk] + [s24(c) for c in co] + [y40]          # xk: what the crossfade adds
+    return out
