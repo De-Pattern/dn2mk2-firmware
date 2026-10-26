@@ -1882,7 +1882,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     runs = {}
     for k, name in enumerate(MM.NAMES):
         t0 = time.perf_counter()
-        runs[f"{name}"] = run_blocks(init, frames(k, other=1 - k), blocks)
+        runs[f"{name}"] = run_blocks(init, frames(k, other=(k + 1) % len(MM.NAMES)), blocks)
         runs[f"{name}_72"] = run_blocks(init, frames(k, note=0x4800), blocks)
         runs[f"{name}_tops"] = run_blocks(init, frames(k, knobs=[127] * 8), blocks)
         print(f"    {name}: {round(time.perf_counter() - t0)} s", flush=True)
