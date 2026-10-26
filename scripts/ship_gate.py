@@ -78,7 +78,11 @@ import gate_cache                                          # noqa: E402
 MAIN_BASE = 0x40000400
 # CODE chunks that hold only data, reached through a pointer and never jumped to.
 # Each is listed by name, on purpose: a chunk is assumed to execute unless it is here.
-DATA_ONLY: dict[int, str] = {}       # (Waverider's wave-display bytes were one, until v0.11)
+DATA_ONLY: dict[int, str] = {       # (Waverider's wave-display bytes were one, until v0.11)
+    # the Monomachine build: the tables csrc/sampler/link.c sends the DSP at power-on (read
+    # as bytes from TABLE_LOAD, never called; dnfw.mods.waverider._tables)
+    0x47000000: "the DSP's tables, sent at power-on by the sample link (data, never called)",
+}
 
 
 def code_ranges() -> dict[int, list[tuple[int, int]]]:
