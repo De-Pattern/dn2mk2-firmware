@@ -497,7 +497,7 @@ def main() -> int:
                              "split": int(m[g["slc_ns"]], 16) == 4 and split[3] == table[3]
                              and split[6] == split[3] + (70000 - split[3]) // 2 == split[4]
                              and split[7] == 70000
-                             and split[9:12] == [70000, 140000, 72000],
+                             and split[9:12] == [72000, 140000, 72000],   # slice 3, as it was
                              "removed": int(m[f"{g['slc_ns']}@4"], 16) == 3,
                              "closed": int(m[g["slc_state"]], 16) == 0,
                              # trig 9, 10 (the bottom row's first two: the lowest notes) slices
