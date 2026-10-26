@@ -16,11 +16,11 @@ F = note x 2048 / 12 + TUNE x 683 / 128 (TUNE 64: in tune), 0..0x5800; A = 2^(F 
 from __future__ import annotations
 
 from . import core as C
-from . import ddrw, dens, sid, wave
+from . import ddrw, dens, sid, vo6, wave
 from ..md import core as K
 from ..perc.dsl import Prog
 
-MODULES = (sid, wave, ddrw, dens)           # their types: TYPES below (6, 7, 14, 15)
+MODULES = (sid, wave, ddrw, dens, vo6)      # their types: TYPES below (6, 7, 14, 15, 16)
 F_TOP = 0x5800
 
 
@@ -33,10 +33,18 @@ def _host(p: Prog, L: K.Layout) -> None:
         K.ws(p, C.P0 + k, 0)
 
 
-def _pitch(p: Prog, L: K.Layout) -> None:
+# v0.26: semitones added to the DN2's note: VO-6's kernel pitch sounds two octaves over the
+# others' (note 60 at 1046 Hz), so on the DN2 it plays where they do
+TRANSPOSE = {"VO-6": -24}
+
+
+def _pitch(p: Prog, L: K.Layout, transpose: int = 0) -> None:
     """VW F, A and pre from VW pitch and TUNE. Clobbers R0-R3, R12-R15, I1, I12."""
     from ..perc import machines as PM
     C.vw(p, 1, "pitch")
+    if transpose:
+        p.fconst(12, float(transpose))
+        p.fop(1, 1, "+", 12)
     p.fconst(12, 2048.0 / 12.0)
     p.fop(1, 1, "*", 12)
     C.knob(p, 2, 7)
@@ -76,7 +84,7 @@ def _pitch(p: Prog, L: K.Layout) -> None:
 def _render(M):
     def render(p: Prog, L: K.Layout) -> None:
         mL = L.mnm
-        _pitch(p, L)
+        _pitch(p, L, TRANSPOSE.get(M.NAME, 0))
         M.pitch(p, mL)
         p.iconst(0, 0)
         p.st(mL.W["half"], 0)

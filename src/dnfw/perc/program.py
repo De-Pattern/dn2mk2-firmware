@@ -38,7 +38,7 @@ MNM_LEVEL = 0.25                         # a Monomachine machine's full scale on
 # test_perc_live) fits MNM_BUDGET; a track past it plays silence that block. About half of
 # what the SHARC has free beside the stock engines (docs/sharc-load.md: ~250,000 cycles).
 MNM_COST = {"SID 6581": 60_000, "DPRO-WAVE": 34_000, "DPRO-DDRW": 78_000, "DPRO-DENS": 70_000,
-            "VO-6": 60_000}
+            "VO-6": 75_000}
 MNM_BUDGET = 150_000
 SEED = 0x2545F491
 OFF_LEVEL = 0.0002

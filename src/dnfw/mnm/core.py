@@ -95,7 +95,8 @@ class Layout:
 # the DPRO tables after COMB (dnfw.mnm.rom.dpro_words, floats as the fill stores them)
 DP_TABLES = (("interp", 320), ("dec2", 9), ("hb", 7), ("pch", 128), ("wid", 256), ("br", 256))
 # VO-6's tables after them (dnfw.mnm.rom.vo6_words): the gains, the cosines, the pulse shape,
-# the AGC's log mantissas, CLEN's terms, the 21 consonants' set-ups (16 words each)
+# the AGC's log mantissas, CLEN's terms, the 21 consonants' set-ups (16 words each) and
+# renderers (40 words each), these two field-major
 VO_TABLES = (("c1", 4 * 0x620), ("cos", 0x614), ("blit", 0x333 - 0x131 + 1), ("log", 256),
              ("clen", 128), ("trig", 21 * 16), ("cons", 21 * 40))
 DIGI_WORDS = 32 * 2048

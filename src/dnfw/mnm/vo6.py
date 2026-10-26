@@ -11,9 +11,14 @@ and three per-block envelopes (the onset y35, the consonant's transition y31, th
 y39) set the mix, and a fixed biquad shapes the output. CONS picks one of 21 consonant
 set-ups (a table row at the trig) and renderers (formant offsets, the source's biquad).
 
-The Monomachine's per-block decisions are kept exact: the envelopes, counters and offsets
-are its 24-bit words (ints here), and their products are exact (`_mulq`); the pulse phase
-is its 24.24 sum. The signal path is float.
+Numbers. The per-block decisions are the Monomachine's exactly: the envelopes, counters,
+offsets and the pulse phase (24.24) are its 24-bit words (ints here), their products exact
+(`mul`: 12-bit halves, each partial product exact in float, summed as ints). Where a float's
+one-LSB slip would grow -- the series resonators (a high-Q formant rings it up ~35 LSB, and
+the voiced path is amplified 4096 times), the formant ramps, the consonant biquad on the
+excitation and its crossfade, the pulse taps -- the arithmetic is the 56300's exactly, the
+same way. Elsewhere it is float, each limited store floored as the 56300's (`_floor`).
+test/test_mnm.py holds it to the Monomachine's output (its code in an emulator).
 
 y:(r6+175), the Monomachine kernel's AMP envelope level, gates the voiced path. The DN2 has no
 such envelope here: the level is that of an AMP attack of 0 (S_LEV): 0 at the trig, then after
@@ -121,16 +126,6 @@ def i2f(p: Prog, d: int, r: int) -> None:
     """Fd = the Q23 word Rr as a fraction. Clobbers R12."""
     p.iconst(12, -23)
     p.float_(d, r, 12)
-
-
-def f2i(p: Prog, d: int, f: int, t: int = 13) -> None:
-    """Rd = floor(Ff x 2^23). Clobbers R12, Rt."""
-    p.fconst(12, 2.0 ** 23)
-    p.fop(t, f, "*", 12)
-    p.trunc(d, t)
-    p.iconst(12, 0)
-    p.float_(12, d, 12)
-    p.if_(12, "GT", t, lambda: (p.iconst(12, 1), p.iop(d, d, "-", 12)))
 
 
 def _mulq_body(p: Prog) -> None:
