@@ -510,11 +510,7 @@ def _blit(p: Prog, L: C.Layout) -> None:
                 _word(p, 9, 7)
                 _split(p, 9, 7, 8)
                 _prod(p, fv, fv + 1, 7, 8, False)
-            p.ash(13, 13, -12)
-            p.iop(15, 15, "+", 13)
-            p.ash(15, 15, -11)
-            p.iop(14, 14, "+", 14)
-            p.iop(14, 14, "+", 15)             # floor((x1 T + y0 T') / 2^23)
+            _sum(p, 23)                        # floor((x1 T + y0 T') / 2^23)
             _ring_addr(p, L, 7, 3)
             p.seti(2, 7)
             p.ldi(10, 0, 2)
@@ -823,10 +819,61 @@ def _bq_body(p: Prog, L: C.Layout) -> None:
     p.sti(3, 0, 5)
 
 
+def _bqx_body(p: Prog, L: C.Layout) -> None:
+    """The consonant biquad in the 56300's arithmetic, exactly: y = lim(floor(2 (c0 x + c1 x1 +
+    c2 x2 - c3 y1 - c4 y2) / 2^23)) on the words; the coefficients' 12-bit halves at CO (10
+    floats). I5 the input, I2 the output, I0 the state (x1, x2, y1, y2)."""
+    for k, (h, l) in enumerate(((3, 4), (5, 6), (7, 8), (9, 10))):
+        p.ldi(1, k, 0)
+        _word(p, 13, 1)
+        _split(p, 13, h, l)
+
+    def one():
+        p.ldpost(1, 5)
+        _word(p, 13, 1)
+        _split(p, 13, 1, 2)
+        p.iconst(14, 0)
+        p.iconst(15, 0)
+        p.iconst(13, 0)
+        for k, (h, l), sub in ((0, (1, 2), False), (1, (3, 4), False), (2, (5, 6), False),
+                               (3, (7, 8), True), (4, (9, 10), True)):
+            p.ld(0, _a(L, "CO") + 8 * k)
+            p.ld(11, _a(L, "CO") + 8 * k + 4)
+            _prod(p, 0, 11, h, l, sub, t=12)
+        _sum(p, 22)
+        limi(p, 14)
+        p.fpass(5, 3)
+        p.fpass(6, 4)
+        p.fpass(3, 1)
+        p.fpass(4, 2)
+        p.fpass(9, 7)
+        p.fpass(10, 8)
+        _split(p, 14, 7, 8)
+        i2f(p, 0, 14)
+        p.stpost(2, 0)
+    p.loop(_a(L, "n4"), 16, one)
+    p.ldi(1, -1, 5)
+    p.sti(0, 0, 1)
+    p.ldi(1, -2, 5)
+    p.sti(1, 0, 1)
+    p.ldi(1, -1, 2)
+    p.sti(2, 0, 1)
+    p.ldi(1, -2, 2)
+    p.sti(3, 0, 1)
+
+
 def _biquad(p, L, coefs, src, dst, state):
+    exact = state == "cb"
     for k, c in enumerate(coefs):
-        p.fconst(1, s24(c) * Q23)
-        p.st(_a(L, "CO") + 4 * k, 1)
+        if exact:
+            w = s24(c)
+            p.fconst(1, float(w >> 12))
+            p.st(_a(L, "CO") + 8 * k, 1)
+            p.fconst(1, float(w & 0xFFF))
+            p.st(_a(L, "CO") + 8 * k + 4, 1)
+        else:
+            p.fconst(1, s24(c) * Q23)
+            p.st(_a(L, "CO") + 4 * k, 1)
     p.iconst(12, _a(L, src))
     p.seti(5, 12)
     p.iconst(12, _a(L, dst))
@@ -834,31 +881,42 @@ def _biquad(p, L, coefs, src, dst, state):
     p.ld(1, L.md.C["mdb"])
     addk(p, 1, 1, 4 * (K.S0 + S[state]))
     p.seti(0, 1)
-    p.call("vo6_bq", lambda: _bq_body(p, L))
+    if exact:
+        p.call("vo6_bqx", lambda: _bqx_body(p, L))
+    else:
+        p.call("vo6_bq", lambda: _bq_body(p, L))
 
 
 def _crossfade(p, L, k):
-    """EXC = y31 UNV + (y31 - k) EXC (L: k 1.0, M N Z: 0x7FFFF8)"""
-    ls(p, 1, "y31")
-    i2f(p, 1, 1)
-    p.fconst(12, k)
-    p.fop(2, 1, "-", 12)
+    """EXC = lim(floor((y31 UNV + lim(y31 - k) EXC) / 2^23)) exactly (L: k 0x800000 = 1.0; M N Z:
+    0x7FFFF8)"""
+    ls(p, 9, "y31")
+    _split(p, 9, 1, 2)
+    p.iconst(12, k)
+    p.iop(9, 9, "-", 12)
+    limi(p, 9)
+    _split(p, 9, 3, 4)
     p.iconst(12, _a(L, "UNV"))
     p.seti(5, 12)
     p.iconst(12, _a(L, "EXC"))
     p.seti(2, 12)
 
-    _qconsts(p)
-
     def one():
-        p.ldpost(3, 5)
-        p.ldi(4, 0, 2)
-        p.fop(3, 3, "*", 1)
-        p.fop(4, 4, "*", 2)
-        p.fop(3, 3, "+", 4)
-        _floor(p, 3, 0, 15)
-        C.sat(p, 3)
-        p.stpost(2, 3)
+        p.iconst(14, 0)
+        p.iconst(15, 0)
+        p.iconst(13, 0)
+        p.ldpost(5, 5)
+        _word(p, 9, 5)
+        _split(p, 9, 5, 6)
+        _prod(p, 1, 2, 5, 6, False)
+        p.ldi(7, 0, 2)
+        _word(p, 9, 7)
+        _split(p, 9, 7, 8)
+        _prod(p, 3, 4, 7, 8, False)
+        _sum(p, 23)
+        limi(p, 14)
+        i2f(p, 7, 14)
+        p.stpost(2, 7)
     p.loop(_a(L, "n3"), 16, one)
 
 
@@ -959,11 +1017,11 @@ def _consonant(p: Prog, L: C.Layout, k: int) -> None:
         co = (0x3DCC43, 0x896360, 0x3DCC43, 0x896360, 0x3B9885) if k == 8 else \
              (0x37F898, 0x91F8F7, 0x37F898, 0x91F8F7, 0x2FF130)
         _biquad(p, L, co, "EXC", "UNV", "cb")
-        _crossfade(p, L, 1.0 if k == 8 else 0x7FFFF8 * Q23)
+        _crossfade(p, L, 0x800000 if k == 8 else 0x7FFFF8)
     elif k == 9:                                   # M
         _k31(p, L, 0x1B2583, [0], neg=True)
         _biquad(p, L, (0x3BBCBB, 0x89BC72, 0x3BBCBB, 0x89BC72, 0x377976), "EXC", "UNV", "cb")
-        _crossfade(p, L, 0x7FFFF8 * Q23)
+        _crossfade(p, L, 0x7FFFF8)
     elif k == 11:                                  # P
         _down(p, L, 0, 0x266666, 4, 0)
         _down(p, L, 1, 0x266666, 5, 1)
@@ -1033,7 +1091,7 @@ def _consonant(p: Prog, L: C.Layout, k: int) -> None:
             p.stpost(5, 1)
         p.loop(_a(L, "n3"), 16, one)
         _biquad(p, L, (0x3CDB1F, 0x8649C2, 0x3CDB1F, 0x867152, 0x39DDCF), "C30", "UNV", "cb")
-        _crossfade(p, L, 0x7FFFF8 * Q23)
+        _crossfade(p, L, 0x7FFFF8)
 
 
 def _consonants(p: Prog, L: C.Layout) -> None:
@@ -1133,16 +1191,26 @@ def _word(p: Prog, d: int, f: int) -> None:
     p.trunc(d, d)
 
 
-def _prod(p: Prog, uh: int, ul: int, vh: int, vl: int, sub: bool, twice: bool = False) -> None:
+def _prod(p: Prog, uh: int, ul: int, vh: int, vl: int, sub: bool, twice: bool = False,
+          t: int = 11) -> None:
     """A (R14), M (R15), W (R13) +-= u x v's partial products (12-bit halves, exact in float):
-    u v = A 2^24 + M 2^12 + W. Clobbers F11."""
+    u v = A 2^24 + M 2^12 + W. Clobbers Rt."""
     op = "-" if sub else "+"
     for a, b, r in ((uh, vh, 14), (uh, vl, 15), (ul, vh, 15), (ul, vl, 13)):
-        p.fop(11, a, "*", b)
-        p.trunc(11, 11)
+        p.fop(t, a, "*", b)
+        p.trunc(t, t)
         if twice:
-            p.lsh(11, 11, 1)
-        p.iop(r, r, op, 11)
+            p.lsh(t, t, 1)
+        p.iop(r, r, op, t)
+
+
+def _sum(p: Prog, k: int) -> None:
+    """R14 = floor((A 2^24 + M 2^12 + W) / 2^k), k = 23 (a MPY's a1) or 22 (after an ASL)"""
+    p.ash(13, 13, -12)
+    p.iop(15, 15, "+", 13)
+    p.ash(15, 15, -(k - 12))
+    p.lsh(14, 14, 24 - k)
+    p.iop(14, 14, "+", 15)
 
 
 def _ser_body(p: Prog, L: C.Layout) -> None:
@@ -1177,11 +1245,7 @@ def _ser_body(p: Prog, L: C.Layout) -> None:
         _split(p, 7, 9, 10)                    # c2
         _prod(p, 9, 10, 1, 2, True, twice=True)
         _prod(p, 5, 6, 3, 4, True)
-        p.ash(13, 13, -12)
-        p.iop(15, 15, "+", 13)
-        p.ash(15, 15, -11)
-        p.iop(14, 14, "+", 14)
-        p.iop(14, 14, "+", 15)                 # floor(sum / 2^23)
+        _sum(p, 23)
         limi(p, 14)
         p.fpass(3, 1)
         p.fpass(4, 2)

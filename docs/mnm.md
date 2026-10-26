@@ -40,13 +40,19 @@ bit for bit (`mnm_models.py`).
 | DPRO-WAVE | 6 | WAVE WP WPM WPRS SYNC SFRQ --- TUNE | one of 32 single-cycle waves (512 x 12-bit), linear interpolation at 4x through a 512..1023-sample window that WP (swept by WPM) slides into the next wave; hard sync per block to SFRQ or the previous track's pitch |
 | SID 6581 | 3 | PW PWAD PWRS WAVE MOD MSRC MFRQ TUNE | two 24-bit phase accumulators at 12x; TRI, SAW, PULS (swept), MIX (the chip's combined waves, a 4096-entry table), NOIS (two linked shift registers, sampled at the phase's wrap); RING, SYNC, R+S |
 | VO-6 | 11 | VOC1 VOC2 V-SW VOIC CONS CLEN CVOL TUNE | (being modelled) |
-| DPRO-DDRW | 32 | WAV1 MIX WAV2 TIME BR1 WID BR2 TUNE | (being modelled) |
-| DPRO-DENS | 33 | PCH2 PCH3 PCH4 WAVE --- CHRL CHRW TUNE | (being modelled) |
+| DPRO-DDRW | 32 | WAV1 MIX WAV2 TIME BR1 WID BR2 TUNE | two Digibank waves at 2x, each at its own pitch (WID detunes them up to -/+53 cents, scaled by 1 - abs(2 MIX - 1)), crossfading from the previous wave on a change (TIME), bit-reduced (BR1/BR2: 15 bits at 0 down to 3 at 127), each read at two mip levels crossfaded over the octave's top 1/16; MIX ramped over the block; the kernel's 2:1 allpass decimator |
+| DPRO-DENS | 33 | PCH2 PCH3 PCH4 WAVE --- CHRL CHRW TUNE | four oscillators on one Digibank wave at 2x, three at PCH2..4's ratios (-12..+12 semitones and 2/3 3/4 4/5 5/6 6/5 5/4 4/3 3/2; the middle, 1.0, is OFF), band-limited by mip level with a crossfade over each octave's top 1/16 toward a partner sample held in the finer level's low bytes; mixed at 0.633 each (silent at 20 kHz and up, or at the first one's Hz); the 2:1 decimator. CHRL/CHRW are the Monomachine's chorus after the machine (not here) |
 
 **DPRO-BBOX** (24 drum samples, 63,049 words: about 189 KB) does not fit the firmware: the
 whole image has 77 KB to spare under the 2 MiB the USB upgrade takes. **DDRW and DENS** read
-the Monomachine's user Digibank (64 waves in its own flash), which is not in the OS file;
-here they read the 32 ROM DigiPRO waves (twice).
+the Monomachine's user Digibank (64 waves in its own flash, 2048 words a wave: nine mip
+levels, 1024 >> L samples, each word a 16-bit sample << 8 with a crossfade partner's byte),
+which is not in the OS file. Here the DSP builds a stand-in once the tables are filled
+(`dnfw.mnm.dpro.build`, 8 outputs a block, about 8 s; DENS and DDRW are silent until it is
+done): the 32 ROM DigiPRO waves through a 7-tap halfband chain (level 0 the ROM wave
+upsampled, each level the last one's halfband, its even samples the next level and all of
+them that level's partner), 256 KB of DDR (`core.DIGI_OFF`); wave n reads stack n & 31.
+The golden runs load the same words (`dpro.digibank_reference`, the build run in run mode).
 
 ## On the DN2
 
