@@ -750,16 +750,45 @@ u32 slc_keynotes(u32 kbd, u32 *vec, u32 k)
         volatile u8 *s = (volatile u8 *)SOUND(t);
         int ty = (signed char)s[0xDE];
         if ((ty == SLICE_TYPE || ty == GRID_TYPE) && SOUND_VALUE(SOUND(t), SMP_SLICE_ID) == 0) {
-            /* v0.26: the key's own note, as the keyboard lays them out (its lit keys,
-             * chromatic): the middle octave's C is slice 1, C# slice 2 .. on up through the
-             * lit keys in order, as the DT2's KEYBOARD with SLICE at NOTE ("slices play from
-             * C1 upwards, wrapping after the last"); each octave up or down moves them on 12.
-             * v0.25 gave key K slice K + 1, so the unlit keys' slices could not be played */
-            u32 buf[8], tv[3] = {(u32)buf, (u32)buf, (u32)(buf + 8)};
-            if (!KEYNOTES(kbd, tv, k) || tv[1] <= tv[0])
+            /* v0.26: the slices in the order of the keys' notes, as the keyboard lays them
+             * out (chromatic: its lit keys; a folded scale: all 16): the key with the
+             * lowest note plays slice 1, the next slice 2 .., as the DT2's KEYBOARD with
+             * SLICE at NOTE ("slices play from C1 upwards, wrapping after the last"). Each
+             * octave up or down (KEYBOARD + UP/DOWN) moves them on by as many slices as the
+             * keys play. v0.25 gave TRIG k slice k, so the unlit keys' slices could not be
+             * played (and the lit ones' came out of order) */
+            u32 buf[8], tv[3];
+            int note[16], mine = -1;
+            for (u32 j = 0; j < 16u; j++) {
+                tv[0] = tv[1] = (u32)buf;
+                tv[2] = (u32)(buf + 8);
+                note[j] = KEYNOTES(kbd, tv, j) && tv[1] > tv[0] ? (int)buf[0] : -1;
+            }
+            mine = note[k];
+            if (mine < 0)
                 return 0;                       /* a key with no note: none */
-            slc_kb_c = buf[0];
-            int idx = ((int)buf[0] - (int)KB_C0) % 64;
+            int rank = 0, per = 0;
+            for (int j = 0; j < 16; j++) {      /* distinct notes: below the key's, and in all */
+                if (note[j] < 0)
+                    continue;
+                int dup = 0;
+                for (int i = 0; i < j; i++)
+                    if (note[i] == note[j])
+                        dup = 1;
+                if (dup)
+                    continue;
+                per++;
+                if (note[j] < mine)
+                    rank++;
+            }
+            int bank = 0;                       /* the octave: TRIG 9's note against the middle C */
+            if (note[8] >= 0) {
+                bank = (note[8] - (int)KB_C0) / 12;
+                if (note[8] < (int)KB_C0 && ((int)KB_C0 - note[8]) % 12)
+                    bank--;
+            }
+            slc_kb_c = (u32)mine;
+            int idx = (rank + per * bank) % 64;
             if (idx < 0)
                 idx += 64;
             *(u32 *)vec[0] = 12u + (u32)idx;    /* the DSP: (note - 12) mod the slices */
