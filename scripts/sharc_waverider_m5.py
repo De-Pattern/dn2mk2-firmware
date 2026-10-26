@@ -134,7 +134,7 @@ def init_on(snap, m2mach, image: Image, warm: bool = False):
     Lm = PL.layout().md
     shipped = MDK.tables_bytes()
     for k in range(0, len(shipped), 4):
-        m2.poke(runner.state, Lm.shipped + k, struct.unpack_from("<I", shipped, k)[0])
+        m2.poke(runner.state, Lm.T[MDK.SHIPPED] + k, struct.unpack_from("<I", shipped, k)[0])
     m2.poke(runner.state, Lm.ready, SM.TABLE_MAGIC)
     if warm:
         # v0.17: the Machinedrum's sine and tables as the DSP has them 0.7 s after power-on
