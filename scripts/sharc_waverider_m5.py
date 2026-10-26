@@ -1868,9 +1868,10 @@ def _slim(run: dict) -> dict:
 
 def step_mnm(init, sound, machines, blocks) -> dict:
     """Each Monomachine machine (its own machine type, PERC's voice) on track 0, beside the
-    other on track 1: every such track's buffer and state bit-exact to dnfw.perc.program run
-    on the DSP's memory at PERC's entry, every block; audible and bounded; note 72 an octave
-    over note 60; an untriggered track silent."""
+    next one on track 1, and with every knob up: every such track's buffer and state
+    bit-exact to dnfw.perc.program run on the DSP's memory at PERC's entry, every block;
+    audible and bounded; an untriggered track silent; the DSP budget in track order. (Their
+    pitch is test_perc_live's, on the same program in the model.)"""
     from dnfw.mnm import machines as MM
     types = {k: typ for typ, k in PP.MNM_TYPES.items()}
 
@@ -1880,6 +1881,7 @@ def step_mnm(init, sound, machines, blocks) -> dict:
             f = base_frame(sound, machines, t0=types[k], overrides=mnm_words(k, knobs), note=note,
                            trigger=b in trig, others=others, trigger_others=True)
             if other is not None:
+                f.header(FR.NOTE, 1, note)               # the same note on track 1
                 for slot, w in mnm_words(other).items():
                     f.param(1, slot, w)
             return f.to_bytes()
@@ -1889,7 +1891,6 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     for k, name in enumerate(MM.NAMES):
         t0 = time.perf_counter()
         runs[f"{name}"] = _slim(run_blocks(init, frames(k, other=(k + 1) % len(MM.NAMES)), blocks))
-        runs[f"{name}_72"] = _slim(run_blocks(init, frames(k, note=0x4800), blocks))
         runs[f"{name}_tops"] = _slim(run_blocks(init, frames(k, knobs=[127] * 8), blocks))
         print(f"    {name}: {round(time.perf_counter() - t0)} s", flush=True)
     runs["silent"] = _slim(run_blocks(init, frames(0, trig=()), blocks))
@@ -1911,11 +1912,8 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in MM.NAMES}
     budget = [V.peak(perc_series(runs["budget"], t)) if runs["budget"]["ok"] else None for t in range(4)]
     other = {name: V.peak(perc_series(runs[name], 1)) if runs[name]["ok"] else None for name in MM.NAMES}
-    zc = {name: (zero_crossings(perc_series(runs[name], 0)), zero_crossings(perc_series(runs[f"{name}_72"], 0)))
-          for name in MM.NAMES if runs[name]["ok"] and runs[f"{name}_72"]["ok"]}
     silent = perc_series(runs["silent"], 0)
     n = {"exact_voice_blocks_out_state_mismatches": exact, "peaks": peaks, "peaks_track1": other,
-         "zero_crossings_note60_note72": zc,
          "instructions_per_block": {k: round(r.get("instructions", 0) / max(blocks, 1))
                                     for k, r in runs.items() if r["ok"]},
          "wall_s": {k: r.get("wall_s") for k, r in runs.items()},
@@ -1931,8 +1929,6 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         "nothing is non-finite or above 4.0 in any buffer":
             ok_runs and all(math.isfinite(x) and abs(x) <= 4.0 for r in runs.values() for blk in r["perc"]
                             for v in blk.values() for x in v["out"]),
-        "note 72 is an octave over note 60 (zero crossings x 1.8 .. 2.2)":
-            len(zc) == len(MM.NAMES) and all(a > 0 and 1.8 <= b / a <= 2.2 for a, b in zc.values()),
         "control: no trigger is silent (every sample 0)": bool(silent) and all(x == 0.0 for x in silent),
         f"the budget: of four SID tracks the first {fits} play, the rest are silent":
             None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]),

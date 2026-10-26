@@ -104,6 +104,7 @@ class Harness:
         self.mem.put(P.BUFFERS + 4 * t, BUF)
         for k in range(32):
             self.mem.put(BUF + 4 * k, bits(0.0))
+        self.mem.put(self.L.C["mcost"], 0)          # v0.26: as the program sets it each block
         p, _ = P.run_voice(self.L, None, t, mem=self.mem)
         self.steps += p.steps
         return [flt(self.mem.get(BUF + 4 * k)) for k in range(32)]

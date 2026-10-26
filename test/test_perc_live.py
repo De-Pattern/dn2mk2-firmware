@@ -201,3 +201,45 @@ def test_v026_the_monomachine_costs_cover_what_each_voice_takes():
                 worst = max(worst, h.steps)
         assert worst <= PP.MNM_COST[name], (name, worst)
     assert PP.MNM_BUDGET >= max(PP.MNM_COST[n] for n in MM.NAMES)    # any one of them alone plays
+
+
+def _f0(x, rate):
+    """the fundamental by autocorrelation: the best lag past the first dip"""
+    import numpy as np
+    x = np.asarray(x, dtype=float)
+    x = x - x.mean()
+    ac = np.correlate(x, x, "full")[len(x) - 1:]
+    lo = int(rate / 2000)
+    dip = lo + int(np.argmax(ac[lo:] < 0)) if (ac[lo:] < 0).any() else lo
+    lag = dip + int(np.argmax(ac[dip:len(x) // 2]))
+    return rate / lag
+
+
+def test_v026_the_monomachine_machines_play_the_dn2s_note():
+    """on PERC's program (the model the runner holds the DSP to): each Monomachine machine
+    at note 60 near 261.6 Hz (VO-6 too: it is played 24 semitones down) and note 72 an
+    octave over it, within 3 %"""
+    from dnfw.md import core as MDK
+    from dnfw.mnm import dpro, machines as MNM
+    from dnfw.mnm import rom as MROM
+    if not MROM.available():
+        pytest.skip("needs the owner's Monomachine OS")
+    # plain settings: SID's TRI, WAVE's first wave, DDRW one wave, DENS one oscillator, VO-6's
+    # vowel with no consonant; TUNE 64
+    knobs = {"SID 6581": (64, 0, 0, 0, 0, 0, 64, 64), "DPRO-WAVE": (0, 0, 0, 0, 0, 0, 0, 64),
+             "DPRO-DDRW": (0, 0, 0, 0, 0, 0, 0, 64), "DPRO-DENS": (63, 63, 63, 0, 0, 0, 0, 64),
+             "VO-6": (64, 64, 127, 0, 0, 0, 0, 64)}
+    for typ, k in PP.MNM_TYPES.items():
+        name = MNM.NAMES[k]
+        f = []
+        for note in (60, 72):
+            h = PL.Harness()
+            h.words.update(dpro.bench_words(h.L.md.mnm))
+            h.words[h.L.md.C["fill"]] = MDK.Z_N
+            h.set_mnm(typ, knobs[name])
+            out = []
+            for b in range(48):
+                out += h.block(note=float(note), trig=b == 0)
+            f.append(_f0(out[32 * 16:], PM.RATE))
+        assert abs(f[0] / 261.63 - 1) < 0.03, (name, f)
+        assert abs(f[1] / f[0] / 2 - 1) < 0.03, (name, f)

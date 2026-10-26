@@ -84,6 +84,12 @@ def _pitch(p: Prog, L: K.Layout, transpose: int = 0) -> None:
 def _render(M):
     def render(p: Prog, L: K.Layout) -> None:
         mL = L.mnm
+        # I4 is the caller's (the slot's output: dnfw.md.voice.advance keeps I3, I4); the
+        # halves below walk their own (v0.26 WIP wrote the voice's output over its words)
+        p.e("R0 = I4;")
+        if p.run:
+            p.r[0] = p.i[4]
+        p.st(mL.W["i4s"], 0)
         _pitch(p, L, TRANSPOSE.get(M.NAME, 0))
         M.pitch(p, mL)
         p.iconst(0, 0)
@@ -105,6 +111,8 @@ def _render(M):
             p.iop(2, 12, "+", 13)
             p.st(mL.W["half"], 2)
         p.loop(mL.W["tmp"], 2, one)
+        p.ld(0, mL.W["i4s"])
+        p.seti(4, 0)
     return render
 
 

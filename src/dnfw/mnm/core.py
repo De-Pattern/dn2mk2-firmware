@@ -111,4 +111,5 @@ SC_WORDS = ("n4", "n5", "half", "inner", "shift", "tmp", "tmp2", "ph", "inc", "l
             # DPRO (dnfw.mnm.dpro)
             "b", "bs", "u", "hf", "sh", "msk", "boff", "i0", "fr", "il", "wx", "g", "m", "out", "k",
             "j", "t", "st", "P", "osc", "bit", "cb", "fb", "w", "y1", "n2", "x1", "fd", "rate", "x48",
-            "x49", "wb", "sb")
+            "x49", "wb", "sb",
+            "i4s")              # the render's caller's I4 (dnfw.mnm.machines._render keeps it)
