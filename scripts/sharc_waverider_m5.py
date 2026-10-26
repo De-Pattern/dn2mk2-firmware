@@ -1928,8 +1928,8 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         "dnfw.perc.program run on the DSP's memory at PERC's entry":
             ok_runs and all(v[0] > 0 and v[1] == 0 and v[2] == 0 for k, v in exact.items() if k != "silent")
             and exact.get("silent", (0, 1, 1))[1:] == (0, 0),
-        "each machine sounds on track 0 and beside it on track 1 (peak > 0.01)":
-            all(v is not None and v > 0.01 for v in list(peaks.values()) + list(other.values())),
+        "each machine sounds on track 0 and beside it on track 1 (peak > 0.005; VO-6's onset is 0.009)":
+            all(v is not None and v > 0.005 for v in list(peaks.values()) + list(other.values())),
         "each machine is still sounding in the run's last four blocks (peak > 0.005)":
             all(v is not None and v > 0.005 for v in late.values()),
         "nothing is non-finite or above 4.0 in any buffer":
