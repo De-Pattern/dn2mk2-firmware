@@ -237,6 +237,15 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                               "params": [frame_word(r.state, FR.slot_offset(t, slot))
                                          for _rid, slot, _lo, _top in PM.PARAMS]}
                     st = r.state
+                    if filled.get(PERC_L.md.C["fill"]) < MDK.Z_N:
+                        # v0.26: wr_perc runs no voice until the tables are whole (perc.program):
+                        # the slot's buffer and state stay as they are
+                        buf = m2.word(st, PP.BUFFERS + 4 * t) or 0
+                        model[t] = {"out": [filled.get(buf + 4 * k) for k in range(BLOCK)],
+                                    "state": [filled.get(PERC_L.state + 128 * t + 4 * k)
+                                              for k in range(PM.STATE_WORDS)],
+                                    "steps": 0}
+                        continue
                     p, mem = PP.run_voice(PERC_L, filled.get, t)
                     filled.put(PERC_L.C["mcost"], mem.get(PERC_L.C["mcost"]))
                     buf = m2.word(st, PP.BUFFERS + 4 * t) or 0
@@ -848,7 +857,7 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
         # and the packed tables, unpacked into their floats (unpack_fill), word for word
         from dnfw.md import bench as MDB
         want = MDB.table_mem(L.md)
-        lo, hi = L.md.tables, L.md.T[MDK.SHIPPED]
+        lo, hi = L.md.tables, L.md.tables + 4 * MDK.Z_N      # (v0.26: what ships is elsewhere)
         tables_ok = all((m2.word(st, a) or 0) == want.get(a, 0) for a in range(lo, hi, 4))
         sine_ok = sine_ok and tables_ok
     runs["sine"].pop("state", None)
