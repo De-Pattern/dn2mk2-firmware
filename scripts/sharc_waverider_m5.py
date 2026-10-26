@@ -1857,7 +1857,7 @@ def mnm_words(k: int, knobs=None) -> dict:
     own defaults), on PERC's eight parameter records (as page.c's mnm_knob reads them)"""
     from dnfw.mnm import machines as MM
     knobs = MM.DEFAULTS[MM.NAMES[k]] if knobs is None else knobs
-    return {slot: PL.word_of(x / 127.0, top, lo) for (_rid, slot, lo, top), x in zip(PM.PARAMS, knobs)}
+    return {slot: PL.knob_word(x, top, lo) for (_rid, slot, lo, top), x in zip(PM.PARAMS, knobs)}
 
 
 def _slim(run: dict) -> dict:

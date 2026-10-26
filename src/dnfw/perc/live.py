@@ -59,6 +59,14 @@ def word_of(value: float, top: int, low: int) -> int:
     return (min(top, max(0, round(value * top))) + low) << 8
 
 
+def knob_word(knob: int, top: int, low: int) -> int:
+    """v0.26: a Monomachine knob (0..127) as the frame word of a PERC record spanning
+    0..TOP: the value whose knob, as the DSP and the page read it (v / top x 127, rounded),
+    is KNOB, or the nearest (TUN1/TUN2 span 0..120: some knobs have no value)."""
+    v = min(range(top + 1), key=lambda v: (abs(int(v / top * 127 + 0.5) - knob), v))
+    return (v + low) << 8
+
+
 class Harness:
     def __init__(self, t: int = 0, L: M.Layout | None = None):
         self.t, self.L = t, L or layout()
@@ -86,7 +94,7 @@ class Harness:
         w = (w & 0xFFFF) | (mtype << 16) if a & 2 else (w & 0xFFFF0000) | mtype
         self.mem.put(a & ~3, w)
         for (_rid, slot, lo, top), x in zip(M.PARAMS, knobs):
-            self._half(M.frame_offset(slot), word_of(x / 127.0, top, lo))
+            self._half(M.frame_offset(slot), knob_word(x, top, lo))
 
     def _half(self, off: int, value: int) -> None:
         a = M.FRAME + off + 146 * self.t
