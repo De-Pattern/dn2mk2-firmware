@@ -570,7 +570,7 @@ def main() -> int:
                    f"poke:{lay['smp_meta_ok']:#x}:00000001"]
             st += ["wait:6", "tap:2", "wait:6", "png:p2", f"poke:{lay['smp_periods']:#x}:00000000",
                    f"poke:{lay['smp_pos_at']:#x}:00000000", f"poke:{lay['smp_pos']:#x}:" + "8000" * 16,
-                   "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:12", "png:ph2",
+                   "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:36", "png:ph2",
                    "tap:2", "wait:6"]
             st += samp_all(4) + ["wait:10", "png:l1", mem(lay["smp_lst_open"]), "down", "wait:8", "png:l2",
                                  mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2), mem(lay["smp_lst_open"])]
