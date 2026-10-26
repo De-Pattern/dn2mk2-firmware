@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.24** | 2026-10-25 | The Machinedrum's nine P-I machines on PERC (PI-BD, SD, MT, ML, MA, RS, RC, CC, HH) from your MD firmware, +6 dB; the first hit after choosing an MD machine is now the MD's own | `builds/v0.24-PI/` | yes |
+| **v0.25** | 2026-10-26 | The playhead on the waveform; the DT2's sample list and +Drive-style folder browser (SAMPLE ACTION: load, rename, delete); the recorder as the DT2's (RECORDING, NORMALIZING, TRIM with preview, FILE NAME, ASSIGN); GRID/SLICE slice locks; KEYBOARD's next 16 slices; an LFO on SAMP steps through your samples; the in-browser patcher | `builds/v0.25-BROWSER/` | yes |
+| v0.24 | 2026-10-25 | The Machinedrum's nine P-I machines on PERC (PI-BD, SD, MT, ML, MA, RS, RC, CC, HH) from your MD firmware, +6 dB; the first hit after choosing an MD machine is now the MD's own | `builds/v0.24-PI/` | yes |
 | v0.23 | 2026-10-24 | SLICE's own menus (YES: EDIT SLICE POINTS, CREATE SLICE GRID with SLICES 2-64 and TR.DET), the slice editor, SLICES on the trig keys (KEYBOARD, SLCE NOTE); a sample with no slices plays whole | `builds/v0.23-SLICE/` | yes |
 | v0.22 | 2026-10-24 | The RECORDER is its own screen (FUNC + VOICE) with the DT2's TRIM, NAME and ASSIGN steps; recordings to any slot; 400 MB for samples (after a RAM check at power-on); MD machines +6 dB; a browser import tool; ONESHOT never goes silent at LEN 0 | `builds/v0.22-RECORDER/` | yes |
 | v0.21 | 2026-10-23 | RESONATOR and CZ PHASE page 1 in the Elektron style: knobs for continuous controls, choices (WAVE, SEL, OCT, MOD, KF, SUS) by name in a box | `builds/v0.21-KNOBS/` | yes |
@@ -58,6 +59,132 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.25 — BROWSER (the playhead, the DT2's sample list and folder browser)
+
+`DN2mod_v0.25_BROWSER_OS1.11.syx`
+sha256 `bf838003ef8beb29f5903cd5a67f59cae4f6bfebead35ac11877b19cfc2a7f9a`
+Gate: CLEARED TO FLASH, 2026-10-26 (USB size 2,019,596 of 2,097,152; DSP image 1,048,356 of 1,048,575). Source: commit `ba3347c` (gate script `d7182bb`). Docs: `docs/sampler.md` ("v0.25: the playhead, the DT2's sample list and browser, modulated SAMP").
+
+Everything in v0.24, plus:
+
+**Adds.**
+- **The playhead.** On every sample machine's waveform page, a double line shows where the
+  voice is reading, as on the DT2. It follows p-locked starts, LFOs on STRT and LEN,
+  WERP's segments and STRETCH's head.
+- **STRETCH and REPITCH mark their bars** on the waveform (BARS 1, 2, 4, 8), dotted,
+  between the start and end markers.
+- **The sample list, as the DT2's.** Turning SAMP brings it up, and it stays up:
+  - SAMP or **UP/DOWN** move through the slots. The track plays the outlined slot, so its
+    [TRIG] previews it.
+  - **YES** (or pushing SAMP) keeps it, and **NO** puts SAMP back as it was.
+  - The title bar reads YES:OK NO:X FN+YES:D, as the DT2's.
+  - Long names show in full; an empty slot is "---".
+- **The folder browser: FUNC + YES** in the list opens it, as the DT2's +Drive browser.
+  - At the top, folders only: yours (from the import tool), then **incoming** (sent in no
+    folder) and **recorded** (the recorder's).
+  - Inside a folder, each sample with the slot it plays from (**▸A009**).
+  - **YES** opens a folder, or gives the track the sample (the DT2's quick assign).
+    **NO/LEFT** goes back up, and out of the browser at the top.
+  - **RIGHT** on a sample opens **SAMPLE ACTION**: LOAD TO TRK, RENAME (the naming
+    screen), and DELETE (asks first).
+- **Long names and folders** come from the import tool. It keeps your folders: drop a
+  folder, or use "Browse a folder", and each sample gets its folder's name. Names can be
+  up to 35 characters.
+- **An LFO on SAMP steps through your loaded samples**, from the one SAMP is set to, and
+  wraps round them. Before, it mostly landed on empty slots and played nothing.
+- **WERP's SEG** takes three detents for each choice, instead of one.
+- **The recorder, as the DT2's** (its manual's 13.2 and your photos):
+  - While it records: the **RECORDING** screen, the waveform as it comes in, the time,
+    YES: STOP.
+  - When it stops: **SAVING...** then **NORMALIZING...** (a bar each): the recording is
+    brought to full scale (its peak to 32,700) on the +Drive and in the DSP.
+  - **TRIM**: Y:SAVE keeps START..END and goes on to the name; FN+N:DEL drops it;
+    **FN+Y plays START..END while you hold FUNC + YES**. No "NO: ALL". E and H move
+    START and END smoothly (faster as you turn faster; FUNC held: fine).
+  - **FILE NAME**: U/D the letter, L/R the cursor, FUNC + NO deletes, FUNC + YES
+    inserts, YES saves, NO keeps the name. Hold FUNC: the character grid appears; FUNC +
+    the arrows pick a character, and letting FUNC go puts it at the cursor.
+  - **ASSIGN SAMPLE TO TRACK?**: a [TRIG] key, or NO to skip. It is on the +Drive
+    either way.
+- **GRID's icon** on page 1 shows the slice count as a grid (2 .. 64 cells), as the DT2's.
+- **Slices to your trigs** (the DT2's ALLOCATE SLICE): on a GRID track's page, YES opens
+  CREATE LINEAR LOCKS / CREATE RANDOM LOCKS / NO: CANCEL LOCKS. LINEAR locks slice 1, 2,
+  3 .. onto the track's placed note trigs in order; RANDOM a random slice each (YES again
+  re-rolls); NO puts back the locks there were. SLICE's menu (YES on a SLICE track) has
+  the same two at its end.
+- **GRID and SLICE, SLICE at NOTE, KEYBOARD mode**: [TRIG] 1..16 play slices 1..16 (GRID
+  too, now), and KEYBOARD's octave (KEYBOARD + UP/DOWN, as the DT2 moves its notes) moves
+  them on by 16: slices 17..32, 33..48, 49..64.
+- **The import tool**:
+  - **Slots**: Replace all, in list order (as before); Replace all, choosing each slot;
+    or Add, which sends only the new samples into the slots you choose and keeps the rest.
+  - **Long names and folders.**
+  - It installs as an app from https://de-pattern.github.io/dn2mk2/.
+- **The DN2 Mod Patcher** (https://de-pattern.github.io/dn2mk2/patcher.html)
+  builds this file in the browser from your own DN2 1.11, DT2 1.17 and MD UW 1.63 files,
+  and saves it only if its sha256 is this build's (`docs/patcher.md`). v0.24 is there too.
+
+**Test** (after the regression check):
+1. **Send samples in folders** with the import tool: drop a folder of folders, then Send.
+2. **The list.** On a ONESHOT track, turn SAMP. The list stays up with long names.
+   - UP/DOWN move through it, and [TRIG] plays the outlined sample.
+   - NO puts the old sample back. Turn SAMP again and press YES: it keeps the new one.
+3. **The browser.** In the list, FUNC + YES. Open a folder (YES), pick a sample (YES): the
+   track plays it, and the page is back. Then RIGHT on a sample: RENAME it, and DELETE
+   another (YES twice).
+4. **The playhead.** On page 2 of ONESHOT, play a long sample: the double line moves
+   across. P-lock STRT on a few steps: the line starts where each lock says. Try WERP and
+   STRETCH too.
+5. **STRETCH's bars.** On STRETCH page 2, set BARS to 4: three dotted lines between start
+   and end.
+6. **LFO on SAMP.** Load 4–5 samples, put an LFO (FREE, slow, some depth) on SAMP:
+   successive notes step through your samples, with no silent ones.
+7. **WERP's SEG**: three detents for each choice.
+8. **Add in the import tool**: send two more samples with Add into empty slots. The
+   others are still there.
+9. **Record.** FUNC + VOICE, YES: the RECORDING screen draws the waveform as it comes in.
+   YES stops: SAVING..., NORMALIZING... (a quiet recording comes back at full level).
+10. **TRIM.** Move E and H (smooth, faster as you turn faster). Hold FUNC + YES: it plays
+    START..END while held, and stops when you let go. YES: FILE NAME. Spell a name (FUNC +
+    YES inserts, FUNC + NO deletes), YES: ASSIGN SAMPLE TO TRACK?, a [TRIG]: that track
+    plays it. Then FUNC + NO on a second recording's TRIM drops it.
+11. **SLICE's menu**: on a SLICE track, YES opens it (after using FUNC too). Its last two
+    items lock slices onto placed trigs.
+12. **GRID**: place trigs, YES on its page: CREATE LINEAR LOCKS puts slices 1, 2, 3 .. on
+    them; RANDOM shuffles (YES again re-rolls); NO puts them back. Page 1's GRID icon
+    changes with the slice count.
+13. **KEYBOARD on GRID or SLICE with SLICE at NOTE**: trigs 1..16 play slices 1..16;
+    KEYBOARD + UP: 17..32.
+
+**Fixed.**
+- **YES did nothing on TRIM, and on a SLICE track's page (no slice menu)**, after FUNC had
+  been used once: FUNC's release carries no release flag, so v0.22..v0.24 kept FUNC
+  "held" for good. FUNC is now read as it is.
+- **SLICE's and GRID's menus** are drawn as soon as they open or move (they waited for the
+  page's next redraw tick before).
+
+**Known issues / not yet done.**
+- **ONESHOT's FORWARD LOOP** sometimes not looping (your v0.24 report): not reproduced in
+  the model yet (the loop region, the knob follow and a REV LOOP / FWD LOOP switch all loop
+  there). The exact PLAY, STRT, LEN, LOOP and trig LEN when it happens would find it.
+- **The preview** plays into the main mix at full level, after the master; it is not on a
+  track, so the track's level, filter and FX do not touch it (as the DT2's preview).
+- **Slices past 16 in KEYBOARD mode** follow the DT2: KEYBOARD + UP/DOWN (its octave) moves
+  the keys on by 16 slices; PAGE stays the pattern page.
+- **The browser picks among the samples already loaded.** The DT2's copies a sample from
+  the +Drive into the slot; here every sample is in RAM from power-on, so picking one only
+  sets SAMP.
+- **One bank (A, 128 slots).** The DT2 has eight.
+- **Presets from samples are not in this build.** It would need the DN2's own preset
+  naming screen patched, and I left that alone rather than risk how presets save.
+- **The playhead is the DSP's position at the start of each block**, so STRETCH's moves
+  in 43 ms steps.
+- **Not seen on hardware yet**: the playhead's rate on the real screen, the list's keys on
+  the real panel, the LFO stepping through samples, and the import tool's folders. All
+  were checked in the emulator, with the DSP's positions and the modulation mirror poked.
 
 ---
 
