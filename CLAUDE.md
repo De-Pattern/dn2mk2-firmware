@@ -46,6 +46,10 @@ When a build prints `CLEARED TO FLASH`, in the same session:
    `vX.Y-NAME/DN2mod_vX.Y_NAME_OS1.11.syx` (a worktree), with `FIRMWARE.md` as that
    branch's `README.md`, and push. Renaming keeps the sha256, so the gate record holds.
 3. Bundle it for the in-browser patcher (`docs/patcher.md`):
-   `python scripts/web_bundle.py BUILD.syx X.Y NAME ../../dn2-tools/patcher`, then commit and
-   push dn2-tools. It refuses a build whose gate record does not clear it.
+   `python scripts/web_bundle.py BUILD.syx X.Y NAME ../../dn2mk2/patcher`, then commit and
+   push dn2mk2 (github.com/De-Pattern/dn2mk2, the site at de-pattern.github.io/dn2mk2; it
+   replaced the older dn2-tools site on 2026-10-27). Its commits are signed
+   `De-Pattern <239624238+De-Pattern@users.noreply.github.com>`, never with the owner's
+   name or email (owner: the site must not link to his name). It refuses a build whose
+   gate record does not clear it.
 4. Firmware never goes on `main` (`.gitignore`); only the `builds` branch carries it.

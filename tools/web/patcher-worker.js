@@ -44,6 +44,9 @@ sys.path = [p for p in sys.path if not p.startswith("/run")]
 sys.path.insert(0, RUN + "/code")
 import dn2patch
 dn2patch.WORK = pathlib.Path(RUN + "/work")
+import hashlib
+if hashlib.sha256(dn2patch.unzip(pathlib.Path(RUN + "/in/dn2").read_bytes(), (".syx",))).hexdigest() != "2af43e65e3d8390b41c9f66222620f8cce027d73ed87db00c80b440f628472e0":
+    raise dn2patch.PatchError("the Digitone II file is not stock OS 1.11 (a later OS such as 1.12, or a modified file). The mod is built only from Elektron's OS 1.11 file.")
 kw = {"mnm": MNM} if MNM else {}
 SHA = dn2patch.build(RUN + "/in/dn2", RUN + "/in/dt2", RUN + "/in/md", RUN + "/out.syx", **kw)
 `);
