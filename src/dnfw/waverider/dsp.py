@@ -90,7 +90,7 @@ MD_STATE_DDR = 0x82100000
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
 SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200e3000 (v0.24; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
-SMP_L2_SPAN = 0x5000                         # the code is about 19 KB (v0.18: the DT2 reader; 32 KB until v0.16)
+SMP_L2_SPAN = 0x6000                         # v0.28: 24 KB (the re-latch took the code past 19 KB; 20 KB v0.18..v0.27, 32 KB until v0.16)
 SMP_SW = 0xB80000 + (SMP_L2_LOAD - 0x20000000) // 2          # 0xbf1800 (v0.24; 0xbea000 v0.17..v0.23)
 PVMIX_L2_LOAD = SMP_L2_LOAD + SMP_L2_SPAN - 0x400           # v0.25: pvmix.asm (wr_pvmix)
 PVMIX_SW = 0xB80000 + (PVMIX_L2_LOAD - 0x20000000) // 2

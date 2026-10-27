@@ -38,10 +38,10 @@ def test_chunk_place():
 def test_list_has_ping_last():
     n = len(P.LIST_NEW)
     got = struct.unpack(f">{n}i", _at(LAY["ping_list"], 4 * n))
-    assert got == (0, 1, 4, 3, 5, 2, 6, 7, 8)
+    assert got == (0, 1, 4, 3, 5, 2, 6)                 # v0.28: SHFT (7) and GRAN (8) removed
     assert LAY["ping_list_end"] == LAY["ping_list"] + 4 * n
-    assert _edit(P.LIST_ALLOC)["new"] == "48780024"
-    assert _edit(P.LIST_CAP)["new"] == "41e80024"
+    assert _edit(P.LIST_ALLOC)["new"] == "4878001c"
+    assert _edit(P.LIST_CAP)["new"] == "41e8001c"
     assert _edit(P.LIST_BEGIN)["new"] == "4879" + f"{LAY['ping_list']:08x}"
     assert _edit(P.LIST_END)["new"] == "4879" + f"{LAY['ping_list_end']:08x}"
 

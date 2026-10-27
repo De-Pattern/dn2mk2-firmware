@@ -28972,16 +28972,16 @@ wr_pk_gskip_41.:
       R9 = R10 + R9;
       I5 = R9;
       R9 = DM(0, I5);
-      I5 = R9;                          // the slot's buffer
+      I4 = R9;                          // the slot's buffer
       R8 = 0x0;
       R0 = 0x8;
       DM(0x2de014) = R0;
 .GLOBAL wr_pk_loop_1538.;
 wr_pk_loop_1538.:
-      DM(I5, M6) = F8;
-      DM(I5, M6) = F8;
-      DM(I5, M6) = F8;
-      DM(I5, M6) = F8;
+      DM(I4, M6) = F8;
+      DM(I4, M6) = F8;
+      DM(I4, M6) = F8;
+      DM(I4, M6) = F8;
       R0 = DM(0x2de014);
       R12 = 0x1;
       R0 = R0 - R12;

@@ -124,7 +124,9 @@ def around(p, t_word: int, cost: int, buffers: int, voice) -> None:
     p.iop(9, 10, "+", 9)
     p.seti(5, 9)
     p.ldi(9, 0, 5)
-    p.seti(5, 9, "the slot's buffer")
+    # I4, not I5: I5 is the DT2 decimator's, used only pre-modified (its L5 may be a
+    # circular length on the unit, which a post-modify would wrap into stock memory)
+    p.seti(4, 9, "the slot's buffer")
     p.iconst(8, 0)
-    p.loop(COUNT, 8, lambda: [p.stpost(5, 8) for _ in range(4)])
+    p.loop(COUNT, 8, lambda: [p.stpost(4, 8) for _ in range(4)])
     p.place(done)
