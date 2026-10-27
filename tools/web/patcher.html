@@ -47,6 +47,10 @@ button:disabled { opacity: .45; cursor: default; }
 .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s 1s linear infinite; vertical-align: -2px; }
 @keyframes s { to { transform: rotate(360deg); } }
 input[type=file] { display: none; }
+details { margin-top: 10px; } summary { cursor: pointer; }
+.guide { margin: 6px 0 0; padding-left: 18px; color: var(--text); font-size: 13px; }
+.guide li { margin: 4px 0; }
+.key { font: 600 11px ui-monospace, Consolas, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 </style>
 </head>
 <body>
@@ -83,7 +87,42 @@ input[type=file] { display: none; }
     <h2>4 · Flash</h2>
     <p class="note" style="margin-top:0"><b>If your Digitone II runs OS 1.12 or later</b>, flashing the mod takes it back to a 1.11-based OS: projects and sounds saved under the newer OS may not open on it. Back them up first, and keep the newer OS file to go back to.</p>
     <p class="note">Back up the +Drive and your projects first (Elektron Transfer). Then send the saved file as any Digitone II OS update: drag it onto Elektron Transfer with the instrument running and connected by USB. The stock OS 1.11 file, sent the same way, puts it back. If an update ever fails to start, the recovery route is the Early Start-up Menu (hold [FUNC] while powering on, then [TRIG 4]), receiving the stock file over a DIN MIDI cable (not USB) from Transfer's SysEx window.</p>
-    <p class="note">Each version's notes, tests and known issues are in the project's FIRMWARE.md.</p>
+    <p class="note">Each version's notes, tests and known issues are in the project's FIRMWARE.md. What to know before and after flashing: <a href="#readme">Read me</a>, below.</p>
+  </section>
+
+  <section id="readme">
+    <h2>5 · Read me</h2>
+    <p class="note" style="margin-top:0">The mod adds machines and features the DN2's manual doesn't cover. Where to find them, what to watch out for, and what isn't there yet.</p>
+    <details open><summary><b>Where things are</b></summary>
+      <ul class="guide">
+        <li><b>New machines:</b> MACHINE SEL ([FUNC] + [SYN]), after Swarmer: <b>Perc</b> (the Machinedrum's machines), the Digitakt II sample machines (<b>Oneshot, Werp, Stretch, Repitch, Grid, Slice</b>) and, from v0.27, the Monomachine's <b>SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens, VO-6</b>.</li>
+        <li><b>Perc:</b> page 2's TYPE picks the machine (TRX, EFM, GND, P-I). It can be p-locked per step.</li>
+        <li><b>Sample recorder:</b> <span class="key">FUNC</span> + <span class="key">VOICE</span>. After a recording: TRIM (E/H move the ends, FUNC + YES plays it), FILE NAME (hold FUNC for the character grid; FUNC + PLAY clears the name), then ASSIGN: press a [TRIG] key to load it on that track.</li>
+        <li><b>Sample list:</b> turn SAMP. In the list, <span class="key">FUNC</span> + <span class="key">YES</span> opens the +Drive browser (folders; RIGHT on a sample: load, rename, delete).</li>
+        <li><b>Slices:</b> on a Slice track's page press <span class="key">YES</span> (edit slice points, create a slice grid, linear/random locks). In the editor: LEFT/RIGHT pick a slice, FUNC + RIGHT splits it, FUNC + LEFT removes it, FUNC + YES plays it, E/H/D move start/end/loop, FUNC + G moves it whole, YES or NO closes. On a Grid track YES gives ALLOCATE SLICE.</li>
+        <li><b>Slices on the keyboard:</b> KEYBOARD mode on a Slice or Grid track with SLCE at NOTE plays the slices in order.</li>
+        <li><b>PING:</b> in the FILTER type list.</li>
+        <li><b>Your own samples:</b> send them with <a href="./">DN2 Sample Import</a>. They load from the +Drive at every power-on.</li>
+      </ul>
+    </details>
+    <details><summary><b>Watch out for</b></summary>
+      <ul class="guide">
+        <li><b>Stock OS 1.11 only.</b> On OS 1.12 or later, flashing takes you back to a 1.11-based OS (see Flash).</li>
+        <li><b>Back up</b> the +Drive and your projects before every flash. Keep the stock 1.11 file and a DIN MIDI cable for recovery.</li>
+        <li><b>DSP time.</b> The Machinedrum and Monomachine machines are heavy. Several of them sounding at once, with p-locks, can use more DSP time than a frame has. From v0.27, a voice that won't fit is silent for that moment, a short gap on that track. Before v0.27 the audio could stop until a reboot.</li>
+        <li><b>Monomachine voices</b> are mono and never go quiet on their own (as on the Monomachine): shape them with the AMP envelope.</li>
+        <li><b>From v0.28,</b> SHIFT and GRAN are gone from the filters. Sounds that used them load with Multi-Mode.</li>
+        <li><b>The recorder</b> may not hear its input until SRC is switched away and back once (being looked at).</li>
+      </ul>
+    </details>
+    <details><summary><b>Not there yet / coming</b></summary>
+      <ul class="guide">
+        <li>Digitakt II <b>Sounds</b> (sample presets), multi-select in the sample list, zero-crossing snap in the slice editor.</li>
+        <li>Monomachine: DPRO-BBOX (doesn't fit), DENS's chorus. The pages drawn as the Monomachine's own screens arrive in v0.28.</li>
+        <li>Work on the DSP load: how many heavy voices can run at once.</li>
+        <li>A build on OS 1.12 (Outbox): not planned yet.</li>
+      </ul>
+    </details>
   </section>
 </main>
 <script>
