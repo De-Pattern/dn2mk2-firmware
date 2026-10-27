@@ -242,15 +242,24 @@ def main() -> int:
             # v0.28: the step is scripts/gate_sharc.py's; its reuse record holds what the
             # runner read and that file, not this script or the ColdFire's artefacts
             import gate_sharc                   # noqa: PLC0415
-            sharc_cmd = gate_sharc.command(a.stock, a.digikit_sharc)
-
-            def sharc_body(tdir):
-                rc, out = run("sharc_m5", sharc_cmd, logs, trace=tdir)
-                return gate_sharc.verdict(rc, out)
 
             def sharc_thread():
+                # v0.28: in parts (gate_sharc.parts: together the runner's default steps), each
+                # cached on its own; the verdict is every part's
                 try:
-                    sharc_box.append(cached("SHARC runner", [sharc_cmd], sharc_body, own=gate_sharc.OWN))
+                    verdicts = []
+                    for k, steps in enumerate(gate_sharc.parts()):
+                        cmd = gate_sharc.command(a.stock, a.digikit_sharc, steps, f"part{k}")
+
+                        def body(tdir, cmd=cmd, k=k):
+                            rc, out = run(f"sharc_m5_part{k}", cmd, logs, trace=tdir)
+                            return gate_sharc.verdict(rc, out)
+                        ok, detail = cached(f"SHARC runner: {','.join(steps)}", [cmd], body, own=gate_sharc.OWN)
+                        verdicts.append((ok, f"{','.join(steps)}: {detail}"))
+                        if not ok:
+                            break
+                    good = all(v for v, _ in verdicts) and len(verdicts) == len(gate_sharc.parts())
+                    sharc_box.append((good, "; ".join(d for _, d in verdicts)))
                 except Exception as e:          # noqa: BLE001
                     sharc_box.append((False, f"the runner did not run: {e}"))
             sharc_box: list = []
