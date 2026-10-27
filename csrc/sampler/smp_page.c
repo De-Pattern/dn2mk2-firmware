@@ -666,7 +666,9 @@ static void sample_list(void *c, void *view, int slot, int kind)
         /* v0.27: only a turn of SAMP brings the list; a value set otherwise (TRACK + PLAY's
          * clear, a project or sound loaded) is taken as it is (owner: clearing a sample track
          * opened the list) */
-        if (!smp_lst_open && now - smp_samp_turned > 300u) {
+        int turned = smp_samp_turned != 0x80000000u && now - smp_samp_turned < 3000u;
+        smp_samp_turned = 0x80000000u;          /* one turn, one change */
+        if (!smp_lst_open && !turned) {
             list_slot = slot;
             return;
         }

@@ -602,16 +602,21 @@ def main() -> int:
                    "tap:2", "wait:6"]
             # v0.27: SAMP set without a turn (TRACK + PLAY's clear, a load) leaves the list
             # closed; a turn of SAMP (encoder D) opens it
+            # (the emulator's encoders do not move a stock page's value, so a turn is the stock
+            # setter's own call of smp_quant on SAMP's slot, then the value it writes)
+            def turn(v):
+                return [f"call:{lay['smp_quant']:#x}:sound0:{SMx.RECORDS[SMx.SAMP_REC][0]}:{v << 8:#x}",
+                        f"poke:{samp0:#x}:{v:02x}00"]
             st += samp_all(3) + ["wait:10", "png:l0", mem(lay["smp_lst_open"])]
-            st += samp_all(2) + ["wait:10", "spin:3:2", "wait:10", "png:l1", mem(lay["smp_lst_open"]), "down",
+            st += samp_all(2) + ["wait:10"] + turn(4) + ["wait:10", "png:l1", mem(lay["smp_lst_open"]), "down",
                                  "wait:8", "png:l2", mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2),
                                  mem(lay["smp_lst_open"])]
-            st += samp_all(2) + ["wait:10", "spin:3:1", "wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
+            st += samp_all(2) + ["wait:10"] + turn(3) + ["wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
                                  "wait:8", "png:b1", mem(lay["smp_fb_open"]), "yes", "wait:8", "png:b2",
                                  mem(lay["smp_fb_folder"]), "down", "wait:2", "yes", "wait:8", "png:b3",
                                  mem(samp0, 2), mem(lay["smp_fb_open"]), mem(lay["smp_lst_open"])]
             # the SAMPLE ACTION menu: into "loops", RIGHT on its sample, DELETE, asked, YES
-            st += samp_all(3) + ["wait:10", "spin:3:-1", "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
+            st += samp_all(3) + ["wait:10"] + turn(2) + ["wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
                                  "down", "wait:4", "yes", "wait:6", "right", "wait:6", "png:m1", "down", "wait:3",
                                  "down", "wait:3", "yes", "wait:6", "png:m2", "yes", "wait:8", "png:m3",
                                  mem(M + 8 + 16 + 4, 4)]
