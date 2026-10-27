@@ -101,6 +101,80 @@ def ctl(p: Prog, d: int, rec: int, k146: int) -> None:
     p.iop(d, d, "MIN", 12)
 
 
+# v0.28 (a user's report: "when I trigger the next slice, sometimes a small section of the
+# slice before plays"): SLICE and GRID take their slice when the note comes (SLCE, or the
+# note itself in NOTE mode). If the step's SLCE lock or its note reaches the DSP a block
+# after the trigger, the note latches the slice before and plays it. So for the note's
+# first RELATCH_BLOCKS blocks, a change of SLCE or of the note is taken as the note again
+# (C['trig'] = 1: the old start fades over the block, the right slice starts). Each slot:
+# SLCE, the note cell's word, the blocks since its note (in the room W2's random table
+# had, which v0.28 left free).
+RELATCH = 0x2E0100
+RELATCH_BLOCKS = 2
+
+
+def relatch(p: Prog, L: Layout) -> None:
+    C = L.C
+    p.ld(9, C["t"])
+    p.lsh(12, 9, 4)
+    p.iconst(11, RELATCH)
+    p.iop(12, 11, "+", 12)
+    p.seti(5, 12, "this slot's latch words")
+    PP.t146(p, 10, 9)
+    ctl(p, 6, SM.SLICE_REC, 10)              # SLCE now (R6)
+    p.ld(9, C["t"])
+    p.lsh(12, 9, 2)
+    p.iconst(11, PP.NOTE_CELLS)
+    p.iop(12, 11, "+", 12)
+    p.seti(1, 12)
+    p.ldi(7, 0, 1)                           # the note cell's word now (R7)
+    p.ld(0, C["trig"])
+
+    def remember():
+        p.sti(0, 5, 6)
+        p.sti(1, 5, 7)
+        p.iconst(8, 0)
+        p.sti(2, 5, 8)
+
+    def young():                             # no note this block: within its first blocks?
+        p.ldi(8, 2, 5)
+        p.iconst(12, RELATCH_BLOCKS)
+
+        def check():
+            p.iconst(12, 1)
+            p.iop(8, 12, "+", 8)
+            p.sti(2, 5, 8)
+            p.ld(0, C["type"])               # SLICE or GRID now, and its note still on
+            p.iconst(1, 0)
+            p.iconst(12, SM.TYPE_OF["SLICE"])
+            p.if_(0, "EQ", 12, lambda: p.iconst(1, 1), kind="i")
+            p.iconst(12, SM.TYPE_OF["GRID"])
+            p.if_(0, "EQ", 12, lambda: p.iconst(1, 1), kind="i")
+
+            def sliced():
+                v(p, 0, "on")
+
+                def on():
+                    p.ldi(0, 0, 5)
+                    p.ldi(1, 1, 5)
+                    p.e("R0 = R0 - R6;")
+                    p.e("R1 = R1 - R7;")
+                    if p.run:
+                        p.r[0] = (p.r[0] - p.r[6]) & 0xFFFFFFFF
+                        p.r[1] = (p.r[1] - p.r[7]) & 0xFFFFFFFF
+                    p.iop(0, 0, "OR", 1)
+
+                    def again():
+                        p.iconst(0, 1)
+                        p.st(C["trig"], 0)
+                        remember()
+                    p.ifz(0, "NE", again)
+                p.ifz(0, "NE", on)
+            p.ifz(1, "NE", sliced)
+        p.if_(8, "LT", 12, check, kind="i")
+    p.ifz(0, "NE", remember, young)
+
+
 def tofloat(p: Prog, d: int, a: int, scale: float = 1.0) -> None:
     """Fd = float(Ra) * scale. Clobbers R12."""
     p.iconst(12, 0)
@@ -128,6 +202,7 @@ def voice(p: Prog, L: Layout, t: int | None = None) -> None:
     PP._shift_by(p, 1, 9)
     p.iop(0, 0, "AND", 1)
     p.st(C["trig"], 0)
+    relatch(p, L)                            # v0.28: a SLICE/GRID note whose slice came a block late
     # the controls this block
     p.ld(9, C["t"])
     PP.t146(p, 10, 9)
