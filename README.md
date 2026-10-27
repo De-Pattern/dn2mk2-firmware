@@ -34,8 +34,9 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
+| **v0.26** | 2026-10-26 | The slice editor as the DT2's (FUNC + RIGHT splits, FUNC + LEFT removes, FUNC + YES previews, FUNC + G moves, playhead); KEYBOARD plays slices in order; no pop-ups (sample list, slice menus); PLAY/MODE/BARS/GRID four detents a choice; browser NO closes; name screen FUNC + PLAY clears, grid wraps, cursor moves on | `builds/v0.26-SLICES/` | yes |
 | MNM-1 | 2026-10-26 | **A separate line**: v0.25 without CZ/RESONATOR, plus the Monomachine's SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens and VO-6 | `builds/MNM-1-MONOMACHINE/` | yes |
-| **v0.25** | 2026-10-26 | The playhead on the waveform; the DT2's sample list and +Drive-style folder browser (SAMPLE ACTION: load, rename, delete); the recorder as the DT2's (RECORDING, NORMALIZING, TRIM with preview, FILE NAME, ASSIGN); GRID/SLICE slice locks; KEYBOARD's next 16 slices; an LFO on SAMP steps through your samples; the in-browser patcher | `builds/v0.25-BROWSER/` | yes |
+| v0.25 | 2026-10-26 | The playhead on the waveform; the DT2's sample list and +Drive-style folder browser (SAMPLE ACTION: load, rename, delete); the recorder as the DT2's (RECORDING, NORMALIZING, TRIM with preview, FILE NAME, ASSIGN); GRID/SLICE slice locks; KEYBOARD's next 16 slices; an LFO on SAMP steps through your samples; the in-browser patcher | `builds/v0.25-BROWSER/` | yes |
 | v0.24 | 2026-10-25 | The Machinedrum's nine P-I machines on PERC (PI-BD, SD, MT, ML, MA, RS, RC, CC, HH) from your MD firmware, +6 dB; the first hit after choosing an MD machine is now the MD's own | `builds/v0.24-PI/` | yes |
 | v0.23 | 2026-10-24 | SLICE's own menus (YES: EDIT SLICE POINTS, CREATE SLICE GRID with SLICES 2-64 and TR.DET), the slice editor, SLICES on the trig keys (KEYBOARD, SLCE NOTE); a sample with no slices plays whole | `builds/v0.23-SLICE/` | yes |
 | v0.22 | 2026-10-24 | The RECORDER is its own screen (FUNC + VOICE) with the DT2's TRIM, NAME and ASSIGN steps; recordings to any slot; 400 MB for samples (after a RAM check at power-on); MD machines +6 dB; a browser import tool; ONESHOT never goes silent at LEN 0 | `builds/v0.22-RECORDER/` | yes |
@@ -60,6 +61,69 @@ Every flash, every version:
 | v0.3 | 2026-10-11 | Waverider W2: all page-1 controls, built-in scanner, its names in the LFO lists | `builds/v0.3-Waverider-W2/` | yes |
 | v0.2 | 2026-10-11 | Waverider W5: 11 tables, POS glide, display that follows the sound | none (superseded) | before the gate |
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
+
+---
+
+## v0.26 — SLICES (the slice editor as the DT2's, and your v0.25 notes)
+
+`DN2mod_v0.26_SLICES_OS1.11.syx`
+sha256 `4ad096d1aa153063241fef58c8720f2742c54d786fd236995ec03b5e2b745626`
+Gate: CLEARED TO FLASH, 2026-10-26 (USB size 2,020,101 of 2,097,152; DSP image 1,048,356 of 1,048,575). Source: commit `b752ec4`. Docs: `docs/sampler.md`.
+
+Everything in v0.25, plus:
+
+**Changes (your v0.25 notes).**
+- **Nothing pops up by itself.** A sample track opens on its page: the sample list comes up
+  only when you turn SAMP (switching tracks or machines no longer opens it), and SLICE's and
+  GRID's menus only on YES. YES with the list or the browser up is theirs (it keeps the
+  sample), so GRID's ALLOCATE SLICE no longer gets in the way of loading a sample.
+- **PLAY** (every sample machine), WERP's **MODE**, **BARS** and GRID's **GRID** take four
+  detents a choice, instead of one (a pause of two seconds or a turn back starts the count
+  again). WERP's SEG stays at three.
+- **The browser**: NO closes it from anywhere (and the list under it; SAMP stays as it is).
+  LEFT goes up a folder, and at the top does nothing.
+- **The slice editor, as the DT2's** (its manual, A.2.5):
+  - **FUNC + RIGHT** splits the current slice in two at its middle (the others as they
+    were); **FUNC + LEFT** removes it (the audio stays).
+  - **FUNC + YES** plays the current slice while held.
+  - **FUNC + G** moves the whole slice, its length kept.
+  - **YES** or **NO** closes the editor.
+  - The **playhead** is drawn: you see which slice is playing.
+  - (v0.25's FUNC + YES added a slice in the middle of the view, which could land out of
+    sight; its FUNC + NO removed one.)
+- **CREATE SLICE GRID** goes on to the editor once the grid is made, as the DT2 does.
+- **KEYBOARD on a SLICE or GRID track** (SLICE at NOTE): the keys play the slices in the
+  order of their notes, however the keyboard is laid out: chromatic (its lit keys: TRIG 9
+  slice 1, TRIG 2 slice 2, TRIG 10 slice 3 ..) or folded to a scale (all 16, the bottom row
+  first). Each octave up or down (KEYBOARD + UP/DOWN) moves them on by as many slices as the
+  keys play, wrapping after the last slice (the DT2's "slices play from C1 upwards,
+  wrapping"). v0.25 gave TRIG k slice k, so the unlit keys' slices could not be played.
+- **The FILE NAME screen**: **FUNC + PLAY** clears the name; in the character grid (FUNC +
+  the arrows) LEFT/RIGHT wrap round the row; a picked character moves the cursor on.
+
+**Test** (after the regression check):
+1. Switch between a sample track and other tracks: the sample list does not open. Turn SAMP:
+   it does.
+2. On a GRID track, turn SAMP, press YES: the sample is kept, no ALLOCATE SLICE menu. Then
+   YES on the page: the menu.
+3. PLAY: four detents a choice through REV, REV LOOP, FWD LOOP, FWD.
+4. The browser: into a folder, LEFT back up, LEFT again (stays), NO (closes).
+5. SLICE: YES, CREATE SLICE GRID with 4: the editor opens. FUNC + RIGHT on slice 2: five
+   slices, slice 2 halved. FUNC + LEFT: four again. FUNC + YES: slice heard while held.
+   FUNC + G: the slice moves. Play the track: the playhead moves in the editor.
+6. KEYBOARD (SLICE at NOTE): the lit keys from the lowest up play slices 1, 2, 3 .. in order (with KB FOLD too).
+7. Record, on to FILE NAME: FUNC + PLAY clears; hold FUNC and press RIGHT past the row's end
+   (wraps); let FUNC go: the character goes in and the cursor moves on.
+
+**Known issues / not yet done.**
+- **The recorder's input** only listening after SRC is switched away and back (your v0.24
+  report): not looked at yet; please check it on this build.
+- **Zero-crossing snap** (the DT2's FUNC + E/H/D) is not there: FUNC with E/H/D moves a
+  point by one frame, as before.
+- **The +Drive-style multi-select** (YES ticking several samples) and **Sounds** (presets
+  for sample tracks): to be decided after the DT2 review.
+- **Not seen on hardware yet**: all of the above; the editor's keys and the KEYBOARD slice
+  layout were checked in the emulator.
 
 ---
 
