@@ -221,7 +221,7 @@ def objects() -> dict[str, bytes]:
     spec = _code()
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
-                         "entry_mark", "emark_jump", "lookup_ptr", "ping", "gran",
+                         "entry_mark", "emark_jump", "lookup_ptr", "ping",
                          "pvmix", "pvmix_jump")}
 
 
@@ -261,13 +261,8 @@ def spans() -> list[tuple[str, int, bytes]]:
         ("the recorder's staging block: 32 floats (zeros)", SMP_STAGE_DM, bytes(0x80)),
         ("the fast link's scratch and packet buffer (zeros; v0.16)", SMP_LINK_DM, bytes(0x500)),
         ("sample machines' decimators: 16 voices x 48 bytes (zeros; v0.18)", SMP_DEC_DM, bytes(16 * 48)),
-        ("W2 random table, 256 float32 (GRAN)", W2_RND_DM, struct.pack("<256f", *live.rnd_table())),
         ("ping.asm (wr_ping)", PING_CODE_DM, obj["ping"]),
         ("PING state: 16 tracks x 128 bytes, then scratch (zeros)", PING_STATE_DM, bytes(16 * 128 + 0x40)),
-        ("gran.asm (wr_gran)", GRAN_CODE_DM, obj["gran"]),
-        ("GRAN scratch (zeros)", GRAN_SCRATCH_DM, bytes(0x100)),
-        ("SHFT state: 16 tracks x 256 bytes (zeros)", SHFT_STATE_DM, bytes(16 * SHFT_STATE_STRIDE)),
-        ("GRAN state: 16 tracks x 128 bytes (zeros)", GRAN_STATE_DM, bytes(16 * GRAN_STATE_STRIDE)),
     ]
     out = []
     for k, (what, at, payload) in enumerate(raw):
@@ -307,8 +302,6 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("Monomachine scratch and 16 slots' state (zeros; v0.26)", MNM_SCRATCH_DDR,
          bytes(MNM_STATE_DDR - MNM_SCRATCH_DDR + 16 * MNM_STATE_STRIDE)),
         ("PING tables", PING_TABLES_DDR, _ping_tables()),
-        ("SHFT tables", SHFT_TABLES_DDR, _shft_tables()),
-        ("GRAN tables", GRAN_TABLES_DDR, _gran_tables()),
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
         ("the DT2 sample reader's coefficients (from the owner's DT2 image; v0.18)", SMP_TABLES_DDR,
          _smp_tables()),
@@ -317,7 +310,6 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         # v0.26: what ships (the host's pitch table and zpack) comes over the fast link from
         # the ColdFire at power-on (dnfw.mods.waverider's table chunk): not in this stream
         ("Machinedrum voices: 16 slots x 1 KB (zeros)", MD_STATE_DDR, bytes(16 * _md_core().MD_STRIDE)),
-        ("GRAN buffers: 16 tracks x 32768 float32 (zeros)", GRAN_BUF_DDR, bytes(16 * GRAN_BUF_STRIDE)),
         ("sample pool: its empty directory's magic and count (v0.17: no test sounds; the +Drive's load in)",
          SMP_POOL_DDR, _smp_pool()[:8]),
         ("sample pool: the rest of its directory and names (zeros)", SMP_POOL_DDR + 8,

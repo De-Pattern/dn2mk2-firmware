@@ -31,6 +31,11 @@ MACHINE_TYPE = 5
 from ..mnm import machines as _mnm_types   # noqa: E402
 MNM_TYPES = {t: k for k, t in enumerate(_mnm_types.TYPES)}   # 6, 7 (CZ's and RESONATOR's until v0.25), 14..
 MNM_LEVEL = 0.25                         # a Monomachine machine's full scale on a DN2 track
+# v0.27: each machine's own (owner: MNM-1 was quiet). 0.25 put SID's default sound at a peak
+# of 0.046 on its track's buffer, DPRO Wave's 0.022, DDRW's 0.26, DENS's 0.13, VO-6's 0.015,
+# where the Machinedrum machines peak at 1.0..1.4 (the model, 2026-10-27); each now peaks
+# about 1.0 at its defaults. MODULES order (SID, WAVE, DDRW, DENS, VO-6).
+MNM_LEVELS = (5.4, 11.5, 0.95, 2.0, 16.5)
 # v0.26: the DSP's room for the Monomachine voices. They never go quiet (as on the
 # Monomachine, a voice plays until the next note), and one costs as much as two to ten of
 # the Machinedrum's, so each block they are rendered in track order while their cost (the
@@ -168,8 +173,9 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
 
     def mnm_note():
         from ..mnm import core as MNC
-        p.fconst(0, MNM_LEVEL)
-        p.st(C["lev"], 0)
+        for k, lev in enumerate(MNM_LEVELS):    # v0.27: the machine's own level
+            p.iconst(12, k + 1)
+            p.if_(0, "EQ", 12, lambda lev=lev: (p.fconst(1, lev), p.st(C["lev"], 1)), kind="i")
         p.ld(9, C["t"])
         p.lsh(12, 9, 2)
         p.iconst(11, NOTE_CELLS)

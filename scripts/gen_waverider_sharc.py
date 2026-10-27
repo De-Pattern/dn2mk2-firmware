@@ -83,7 +83,6 @@ def main(argv=None) -> int:
             count = assemble("block_count", dsp.COUNT_SW, work)
             emark = assemble("entry_mark", dsp.EMARK_SW, work)
             ping = assemble("ping", dsp.PING_SW, work)
-            gran = assemble("gran", dsp.GRAN_SW, work)
             pvmix = assemble("pvmix", dsp.PVMIX_SW, work)
             pjump = one_jump(PVMIX_LINE, dsp.PVMIX_SITE_SW, work)
             ejump = one_jump(EMARK_LINE, dsp.CALL_SITE_SW, work)
@@ -97,7 +96,6 @@ def main(argv=None) -> int:
             count = committed("block_count")
             emark = committed("entry_mark")
             ping = committed("ping")
-            gran = committed("gran")
             pvmix = committed("pvmix")
             pjump = old["pvmix_jump"]
             ejump = old["emark_jump"]
@@ -116,7 +114,6 @@ def main(argv=None) -> int:
             "emark_jump": ejump,
             "lookup_ptr": lptr,
             "ping": {k: v for k, v in ping.items() if k != "instruction_offsets"},
-            "gran": {k: v for k, v in gran.items() if k != "instruction_offsets"},
             "pvmix": {k: v for k, v in pvmix.items() if k != "instruction_offsets"},
             "pvmix_jump": pjump}
     dsp.CODE.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8", newline="\n")

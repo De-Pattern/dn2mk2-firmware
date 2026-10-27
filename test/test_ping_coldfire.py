@@ -51,18 +51,18 @@ def _cstr(va: int) -> str:
     return CODE[off:CODE.index(b"\0", off)].decode()
 
 
-def test_names_rows_six_seven_and_eight():
-    for t, want in ((6, ("Ping", "PING")), (7, ("Shift", "SHFT")), (8, ("Grains", "GRAN"))):
+def test_names_row_six():
+    for t, want in ((6, ("Ping", "PING")),):                # v0.27: SHFT and GRAN removed
         lo, sh, third = struct.unpack(">III", _at(LAY["ping_names"] + 12 * t, 12))
         assert (_cstr(lo), _cstr(sh), third) == (*want, 0)
     for bound, base, _op, col in P.NAME_SITES:
-        assert _edit(bound)["stock"] == "7205" and _edit(bound)["new"] == "7208"
+        assert _edit(bound)["stock"] == "7205" and _edit(bound)["new"] == "7206"
         assert _edit(base + 2)["new"] == f"{LAY['ping_names'] + col:08x}"
 
 
 def test_load_keeps_six_and_hooks():
     e = _edit(P.LOAD_BOUND)
-    assert (e["stock"], e["new"]) == ("143c0007", "143c000a")
+    assert (e["stock"], e["new"]) == ("143c0007", "143c0008")
     assert _edit(P.SLOT_SITE)["new"] == "4ef9" + f"{LAY['ping_slot']:08x}"
     assert _edit(P.SLOT_SITE)["stock"] == P.SLOT_STOCK.hex()
     assert _edit(P.OVER_SITE)["new"] == "4eb9" + f"{LAY['ping_over']:08x}"

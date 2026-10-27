@@ -171,6 +171,17 @@ MNM_CHOICES = {
     "VO-6": {"V-SW": ("OFF", "ON"), "CONS": ("-", "B", "D", "F", "G", "H", "J", "K", "L", "M", "N",
                                             "P", "R", "RR", "S", "SJ", "T", "TJ", "TH", "V", "Z")},
 }
+# v0.27: the controls the Monomachine draws as other than a knob (owner, 2026-10-27; 0 a knob,
+# 1 empty): 2 a grid the marker steps through row by row (DPRO-WAVE's WAVE, VO-6's CONS), 3 a
+# bar sliding along a line (DDRW's WAV1, WAV2; DENS's WAVE), 4 a needle at the bottom moving
+# left or right (DENS's PCH2..4), 5 a knob switch pointing at its position (SID's, DPRO-WAVE's
+# WPRS and SYNC, VO-6's V-SW)
+MNM_WIDGET = {("DPRO-WAVE", "WAVE"): 2, ("VO-6", "CONS"): 2,
+              ("DPRO-DDRW", "WAV1"): 3, ("DPRO-DDRW", "WAV2"): 3, ("DPRO-DENS", "WAVE"): 3,
+              ("DPRO-DENS", "PCH2"): 4, ("DPRO-DENS", "PCH3"): 4, ("DPRO-DENS", "PCH4"): 4,
+              ("SID 6581", "PWRS"): 5, ("SID 6581", "WAVE"): 5, ("SID 6581", "MOD"): 5,
+              ("SID 6581", "MSRC"): 5, ("DPRO-WAVE", "WPRS"): 5, ("DPRO-WAVE", "SYNC"): 5,
+              ("VO-6", "V-SW"): 5}
 MNM_WAVES = 32
 MNM_PCH = 255                       # mnm_choices' mark: the choice by mnm_pch_idx[knob]
 
@@ -239,6 +250,11 @@ def mnm_c_header() -> str:
         f"static const unsigned char mnm_choices[MNM_N][8] = {{{arr(rows_n)}}};",
         f"static const unsigned char mnm_choice_at[MNM_N][8] = {{{arr(rows_at)}}};",
         f"static const char mnm_choice_names[{max(1, len(names))}][5] = {{{', '.join(q + n + q for n in names)}}};",
+        # v0.27: the frame slot of each of the eight (smp_quant's 4 detents a choice), and each
+        # control's widget as the Monomachine draws it (docs/mnm-pages-plan.md)
+        f"static const unsigned char mnm_slot[8] = {{{', '.join(str(sl) for _r, sl, _lo, _t in _perc.PARAMS)}}};",
+        "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH };",
+        f"static const unsigned char mnm_widget[MNM_N][8] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in M.PNAMES] for M in _mnm.MACHINES])}}};",
     ]
     return "\n".join(lines) + "\n"
 

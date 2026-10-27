@@ -47,9 +47,9 @@ import struct
 
 BASE = 0x40000400
 NEW_FILTER = 6                          # PING
-NEW_FILTERS = (6, 7, 8)                 # PING, SHFT (docs/shft.md), GRAN (docs/gran.md)
+NEW_FILTERS = (6,)                      # PING (v0.27: SHFT and GRAN, 7 and 8, removed: they load as Multi-Mode)
 CLONE = 0                               # Multi-Mode
-NAMES = {6: ("Ping", "PING"), 7: ("Shift", "SHFT"), 8: ("Grains", "GRAN")}
+NAMES = {6: ("Ping", "PING")}
 LONG_NAME, SHORT_NAME = NAMES[6]
 
 LOAD = 0x4670F000                       # Waverider's region (pages.LOAD..C_END), its last 4 KB

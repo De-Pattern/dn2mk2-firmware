@@ -553,7 +553,12 @@ void wr_page_draw(void *view, void *canvas)
             PAGE_DOTS(view, canvas, n, page, 7);
         return;
     }
-    if (mnm) {                                  /* the Monomachine's grid of eight */
+    if (mnm) {                                  /* v0.27: the Monomachine's own screen */
+        extern int mnm_page_draw(void *view, void *canvas, int mi);
+        if (mnm_page_draw(view, canvas, mi))
+            return;
+    }
+    if (mnm) {                                  /* the Monomachine's grid of eight (no MD OS read) */
         extern void smp_knob_page(void *view, void *canvas, const unsigned short *ids,
                                   const char *const *labels, const char *const *texts);
         const char *labels[8], *texts[8];

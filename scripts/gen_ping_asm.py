@@ -39,7 +39,7 @@ TAB = {name: dsp.PING_TABLES_DDR + off for name, off in AT.items()}
 LENS = {name: len(t) for name, t in L.tables().items()}
 STATE = dsp.PING_STATE_DM
 _, SAT = SL.tables_bytes()
-STAB = {name: dsp.SHFT_TABLES_DDR + off for name, off in SAT.items()}
+STAB = {name: 0 for name in SAT}                   # v0.27: SHFT removed (its code is no longer emitted)
 
 
 def imm(v: int) -> str:
@@ -281,12 +281,7 @@ def build() -> str:
     place(lo)
     emit("      R6 = 0xffff;")
     emit("      R0 = R0 AND R6;")
-    emit(f"      R1 = {SL.FILTER_TYPE};".ljust(40) + "// SHFT")
-    emit("      COMP(R0, R1);")
-    jump("EQ", "wr_s_track")
-    emit("      R1 = 8;".ljust(40) + "// GRAN (gran.asm, docs/gran.md)")
-    emit("      COMP(R0, R1);")
-    emit(f"      IF EQ JUMP {dsp.GRAN_SW:#x};".ljust(40) + "// gran.asm's wr_gran, which comes back to wr_p_next")
+    # v0.27: SHFT (7) and GRAN (8) removed (owner, 2026-10-27): only PING (6) is ours
     emit(f"      R1 = {L.FILTER_TYPE};")
     emit("      COMP(R0, R1);")
     jump("NE", "wr_p_next")
@@ -720,7 +715,6 @@ def build() -> str:
     emit("      I5 = DM(-24, I6);")
     emit("      R10 = DM(-34, I6);")
     emit("      JUMP 0x1c944c;")
-    shft_path()
     emit(".wr_ping..end:")
     emit("      .type wr_ping.,STT_FUNC;")
     return "\n".join(lines) + "\n"

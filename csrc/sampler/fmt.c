@@ -37,10 +37,83 @@ static int zone_of(const struct smp_q *q, int c)
     return z;
 }
 
+/* v0.27: the Monomachine machines' choices (waves, switches, consonants, PCH's steps) as the
+ * sample machines' (owner: "remember the detents ... on the ones with choices"): a short list
+ * (8 or fewer) four detents a choice, a long one (the 32/64 waves, the 21 consonants, PCH's 33
+ * steps) one detent a choice; a knob as it is. The choice is the page's (page.c mnm_text):
+ * knob = the value over its record's span x 127, rounded; choice = knob x n / 128, or PCH's
+ * table. A choice is written as the middle of its knob range. */
+static int mnm_kn(int j, int v)
+{
+    int top = mnm_top[j];
+    v -= mnm_lo[j];
+    v = v < 0 ? 0 : v > top ? top : v;
+    return (v * 254 + top) / (2 * top);
+}
+
+static int mnm_ch(int n, int k)
+{
+    return n == MNM_PCH ? mnm_pch_idx[k > 127 ? 127 : k] : (k * n) >> 7;
+}
+
+static int mnm_rep(int j, int n, int c)        /* the value (coarse) in the middle of choice C */
+{
+    int a = -1, b = -1;
+    for (int k = 0; k < 128; k++)
+        if (mnm_ch(n, k) == c) {
+            if (a < 0)
+                a = k;
+            b = k;
+        }
+    if (a < 0)
+        a = b = 0;
+    int k = (a + b) / 2, top = mnm_top[j];
+    return mnm_lo[j] + (k * 2 * top + 127) / 254;
+}
+
+static int mnm_quant(int mi, int slot, int old, int value)
+{
+    int j = 0;
+    while (j < 8 && mnm_slot[j] != slot)
+        j++;
+    if (j == 8 || !mnm_choices[mi][j])
+        return value;                           /* not one of the eight, or a knob */
+    int n = mnm_choices[mi][j], count = n == MNM_PCH ? mnm_pch_idx[127] + 1 : n;
+    int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
+    if (nc == oc)
+        return value;
+    int c;
+    if (d >= -8 && d <= 8) {
+        static int m_acc __attribute__((section(".data"))) = 0;
+        static u32 m_at __attribute__((section(".data"))) = 0;
+        static int m_slot __attribute__((section(".data"))) = -1;
+        int need = count <= 8 ? 4 : 1;
+        u32 now = *(volatile u32 *)0x4058E8D4u;
+        int dir = d > 0 ? 1 : -1;
+        if (now - m_at > 3000u || (m_acc > 0) != (dir > 0) || m_slot != slot)   /* 2 s */
+            m_acc = 0;
+        m_at = now;
+        m_slot = slot;
+        m_acc += dir;
+        if (m_acc > -need && m_acc < need)
+            return old;                         /* not yet: the choice stays */
+        m_acc = 0;
+        c = mnm_ch(n, mnm_kn(j, oc)) + dir;
+    } else {
+        c = mnm_ch(n, mnm_kn(j, nc));          /* a jump: the choice it lands in */
+    }
+    if (c < 0) c = 0;
+    if (c > count - 1) c = count - 1;
+    return mnm_rep(j, n, c) << 8;
+}
+
 /* from the setter's write (hooks.S, smp_quant_hook): S = the sound, SLOT, VALUE the
  * value about to be written (coarse << 8 | fine) -> the value to write */
 int smp_quant(u8 *s, int slot, int value)
 {
+    int mi = mnm_index((signed char)s[SOUND_TYPE] - 4);     /* v0.27: is_wr's kind */
+    if (mi >= 0)
+        return mnm_quant(mi, slot, *(volatile u16 *)(s + SOUND_VALUES + 2 * slot), value);
     int type = (signed char)s[SOUND_TYPE] - TYPE_FIRST;
     if (type < 0 || type >= TYPES)
         return value;

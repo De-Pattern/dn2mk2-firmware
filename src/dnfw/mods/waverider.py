@@ -35,9 +35,9 @@ from . import RAM, Extent, ModError, Result, platform
 from ..waverider import dsp
 
 ID = "waverider"
-NAME = "PERC, RESONATOR and CZ machines; PING, SHFT and GRAN filters"
-SUMMARY = ("PERC (24 drum machines, type 5), RESONATOR and CZ in MACHINE SEL; PING, SHFT "
-           "and GRAN in the filter list. Modified DSP code.")
+NAME = "PERC, the sample machines and the Monomachine machines; the PING filter"
+SUMMARY = ("PERC (the Machinedrum's machines), the Digitakt II sample machines and the Monomachine's "
+           "machines in MACHINE SEL; PING in the filter list. Modified DSP code.")
 DEVICE = 0x15                      # Digitone II
 MAIN_OS, DSP_STREAM = 3, 7
 BASE = 0x40000400

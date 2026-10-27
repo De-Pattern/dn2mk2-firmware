@@ -278,3 +278,182 @@ int md_page_draw(void *view, void *c, int page, int type)
     text(c, SMALL, 29, 2, page ? "TFX " : "SYNT", 4, 0);
     return 1;
 }
+
+/* -- v0.27: the Monomachine machines' page, drawn as the Monomachine draws it ---------------
+ * (owner's screenshots of its manual, docs/mnm-pages-plan.md). The same screen as PERC's
+ * (the Monomachine's and the Machinedrum's main screens are one design): the tempo, LEV, the
+ * kit box (here the track and the machine's family), the machine line DPRO>WAVE; on the
+ * right two rows of four cells, each its name over its control. A knob is the MD's knob; a
+ * control with choices is drawn as the Monomachine draws it, its choice by name under it:
+ *   MW_GRID   a box of rows the marker steps through, left to right, row by row (WAVE, CONS)
+ *   MW_SLIDE  a bar sliding along a line (DDRW's WAV1/WAV2, DENS's WAVE)
+ *   MW_VU     a needle at the bottom of a box, left to right (DENS's PCH2..4)
+ *   MW_SWITCH a round switch, a line through it pointing at the position (SID's, WPRS, SYNC, V-SW)
+ * An unused place (---, DENS's chorus) is left empty. */
+static const char *const mnm_family[MNM_N] = {"SID", "DIGIPRO", "DIGIPRO", "DIGIPRO", "VO"};
+static const char *const mnm_fam_short[MNM_N] = {"SID", "DPRO", "DPRO", "DPRO", "VO"};
+static const char *const mnm_mach_short[MNM_N] = {"6581", "WAVE", "DDRW", "DENS", "VO-6"};
+
+static int mnm_k(void *view, int j)             /* knob 0..127, as the DSP and page.c read it */
+{
+    u8 flag;
+    int top = mnm_top[j];
+    int v = (GET_VALUE(view, perc_param_ids[j], &flag) >> 8) - mnm_lo[j];
+    v = v < 0 ? 0 : v > top ? top : v;
+    return (v * 254 + top) / (2 * top);
+}
+
+static int mnm_choice_count(int n)
+{
+    return n == MNM_PCH ? mnm_pch_idx[127] + 1 : n;
+}
+
+static int mnm_choice_of(int n, int k)
+{
+    return n == MNM_PCH ? mnm_pch_idx[k > 127 ? 127 : k] : (k * n) >> 7;
+}
+
+static const char *mnm_value_text(int mi, int j, int c)
+{
+    static char num[6] __attribute__((section(".data")));
+    int n = mnm_choices[mi][j];
+    if (n == MNM_WAVES || n == 2 * MNM_WAVES) {
+        int w = (c & (MNM_WAVES - 1)) + 1;
+        num[0] = 'S'; num[1] = (char)('0' + w / 10); num[2] = (char)('0' + w % 10); num[3] = 0;
+        return num;
+    }
+    return mnm_choice_names[mnm_choice_at[mi][j] + c];
+}
+
+static void line(void *c, int x0, int y0, int x1, int y1)
+{
+    int dx = x1 > x0 ? x1 - x0 : x0 - x1, dy = y1 > y0 ? y1 - y0 : y0 - y1;
+    int sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1, err = dx - dy;
+    for (;;) {
+        put(c, x0, y0, 1);
+        if (x0 == x1 && y0 == y1)
+            break;
+        int e2 = 2 * err;
+        if (e2 > -dy) { err -= dy; x0 += sx; }
+        if (e2 < dx) { err += dx; y0 += sy; }
+    }
+}
+
+static void mnm_widget_draw(void *c, int w, int x0, int ky, int ch, int count)
+{
+    int last = count > 1 ? count - 1 : 1;
+    if (w == MW_GRID) {                         /* rows of dots; the marker steps along them */
+        int rows = count > 24 ? 4 : 3, per = (count + rows - 1) / rows;
+        int row = ch / per, col = ch % per;
+        for (int r = 0; r < rows; r++) {
+            int y = ky + 14 - 3 * r;
+            for (int x = x0 + 3; x <= x0 + 16; x += 2)
+                put(c, x, y, 1);
+        }
+        int mx = x0 + 3 + (per > 1 ? col * 12 / (per - 1) : 6), my = ky + 14 - 3 * row;
+        fill(c, mx, my - 1, mx + 1, my + 1, 1);
+    } else if (w == MW_SLIDE) {                 /* a bar along a line */
+        for (int x = x0 + 2; x <= x0 + 17; x++)
+            put(c, x, ky + 10, 1);
+        int bx = x0 + 2 + ch * 15 / last;
+        fill(c, bx, ky + 7, bx + 1, ky + 13, 1);
+    } else if (w == MW_VU) {                    /* a meter's box, its needle from the bottom */
+        for (int x = x0 + 2; x <= x0 + 17; x++)
+            put(c, x, ky + 14, 1);
+        fill(c, x0 + 2, ky + 11, x0 + 2, ky + 14, 1);
+        fill(c, x0 + 17, ky + 11, x0 + 17, ky + 14, 1);
+        for (int x = x0 + 4; x <= x0 + 15; x += 3)
+            put(c, x, ky + 13, 1);
+        int nx = x0 + 3 + ch * 13 / last;
+        fill(c, nx, ky + 7, nx, ky + 12, 1);
+    } else if (w == MW_SWITCH) {                /* a round switch, a line through it */
+        static const signed char dir[5][2] = {{-3, 3}, {-1, 3}, {0, 3}, {1, 3}, {3, 3}};
+        int cx = x0 + 10, cy = ky + 10;
+        for (int x = 0, y = 4, e = 1 - 4; x <= y; x++) {          /* a circle, radius 4 */
+            put(c, cx + x, cy + y, 1); put(c, cx - x, cy + y, 1); put(c, cx + x, cy - y, 1); put(c, cx - x, cy - y, 1);
+            put(c, cx + y, cy + x, 1); put(c, cx - y, cy + x, 1); put(c, cx + y, cy - x, 1); put(c, cx - y, cy - x, 1);
+            if (e < 0) e += 2 * x + 3;
+            else { e += 2 * (x - y) + 5; y--; }
+        }
+        int d = count > 1 ? ch * 4 / last : 0;
+        line(c, cx - dir[d][0], cy - dir[d][1], cx + dir[d][0], cy + dir[d][1]);
+    }
+}
+
+int mnm_page_draw(void *view, void *c, int mi)
+{
+    if (!ok() || mi < 0 || mi >= MNM_N)
+        return 0;
+    int t = UI_TRACK;
+    fill(c, 0, 0, 127, 53, 0);
+    grid(c);
+    for (int s = 0; s < 8; s++) {
+        int col = s & 3, row = s >> 2;
+        int x0 = 48 + 20 * col, ny = row ? NAME_B : NAME_A, ky = row ? KNOB_B : KNOB_A;
+        int w = mnm_widget[mi][s];
+        const char *name = mnm_labels[mi][s];
+        if (w == MW_EMPTY || (name[0] == '-' && !name[1]))
+            continue;
+        int len = slen(name, 4);
+        text(c, SMALL, x0 + (20 - text_w(SMALL, name, len)) / 2, ny, name, len, 1);
+        int k = mnm_k(view, s), n = mnm_choices[mi][s];
+        if (w == MW_KNOB || !n) {
+            blit(c, x0 + 4, ky, MDUI_KNOB_COLS, 13, MDUI + MDUI_KNOB, 1);
+            blit(c, x0 + 6, ky + 2, MDUI_PTR_COLS, 7, MDUI + MDUI_PTR + 2 * MDUI_PTR_COLS * k, 0);
+        } else {
+            int count = mnm_choice_count(n), ch = mnm_choice_of(n, k);
+            if (ch > count - 1) ch = count - 1;
+            mnm_widget_draw(c, w, x0, ky, ch, count);
+            const char *v = mnm_value_text(mi, s, ch);
+            int vl = slen(v, 4);
+            text(c, SMALL, x0 + (20 - text_w(SMALL, v, vl)) / 2, ky, v, vl, 1);
+        }
+        if (locked(view, perc_param_ids[s]))   /* p-locked, as stock lights it */
+            invert(c, x0 + 1, row ? 1 : DOT_M + 1, x0 + 19, row ? DOT_M - 1 : 53);
+    }
+
+    /* the left: the tempo, LEV, the kit box, the line under it, the machine line */
+    {
+        u32 bpm120 = CTL_FRAME[TEMPO_WORD];
+        char b[8];
+        int n = fmt_int(b, (int)(bpm120 / 120u), 0);
+        b[n++] = '.';
+        b[n++] = (char)('0' + (bpm120 % 120u) / 12u);
+        b[n] = 0;
+        if (bpm120 >= 1200u)
+            text(c, BIG, 1, 41, b, n, 1);
+    }
+    text(c, SMALL, 33, 48, "LEV", 3, 1);
+    for (int y = 34; y <= 46; y += 3) {
+        put(c, 33, y, 1); put(c, 34, y, 1);
+        put(c, 43, y, 1); put(c, 44, y, 1);
+    }
+    {
+        u8 flag;
+        const int *r = RECORD(TRACK_LEVEL_ID);
+        int span = r[3] - r[2], v = GET_VALUE(view, TRACK_LEVEL_ID, &flag) - r[2];
+        int h = span > 0 ? v * 13 / span : 0;
+        if (h > 13) h = 13;
+        if (h > 0)
+            fill(c, 37, 34, 40, 33 + h, 1);
+    }
+    fill(c, 2, 18, 45, 31, 1);
+    {
+        char b[8] = {'T', 'R', 'K', ':', 0, 0, 0, 0};
+        b[4] = (char)('0' + (t + 1) / 10);
+        b[5] = (char)('0' + (t + 1) % 10);
+        text(c, SMALL, 2 + (44 - text_w(SMALL, b, 6)) / 2, 25, b, 6, 0);
+        const char *f = mnm_family[mi];
+        int len = slen(f, 8);
+        text(c, SMALL, 2 + (44 - text_w(SMALL, f, len)) / 2, 19, f, len, 0);
+    }
+    text(c, SYM, 3, 11, ">MNM", 4, 1);
+    fill(c, 1, 2, 45, 6, 1);
+    {
+        const char *f = mnm_fam_short[mi], *m = mnm_mach_short[mi];
+        int x = 1 + text(c, SMALL, 1, 2, f, slen(f, 4), 0);
+        x += text(c, SYM, x, 2, ">", 1, 0);
+        text(c, SMALL, x + 1, 2, m, slen(m, 4), 0);
+    }
+    return 1;
+}

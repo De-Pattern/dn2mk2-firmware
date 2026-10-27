@@ -318,10 +318,9 @@ def main() -> int:
         types = ["--machine-type", "3"] + ([x for t in mtypes for x in ("--machine-type", str(t))]
                                            + ["--machine-max", str(last)]
                                            if dsp_changed else [])
-        # PING (6), SHFT (7) and GRAN (8) are kept by LOAD; 9 still loads as Multi-Mode
+        # v0.27: SHFT (7) and GRAN (8) removed: 7 and 8 load as Multi-Mode now
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",
-                                            "--filter-type", "8", "--filter-type", "9",
-                                            "--filter-max", "8"]
+                                            "--filter-type", "8", "--filter-max", "6"]
                                            if dsp_changed else [])
         eng_cmd = [a.venv, "-u", "scripts/emu_boot_engine.py", "--build", bdir, "--frames", "8", *types]
 
