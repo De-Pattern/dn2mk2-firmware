@@ -19,8 +19,37 @@ import sys
 HERE = pathlib.Path(__file__).resolve().parent
 
 
-def command(stock: str, digikit_sharc: str) -> list:
-    return [sys.executable, "scripts/sharc_waverider_m5.py", "--image", stock, "--digikit", digikit_sharc]
+def default_steps() -> list[str]:
+    """the runner's own default step list, read from its source (so no step is ever left out)"""
+    import re
+    src = (HERE / "sharc_waverider_m5.py").read_text(encoding="utf-8")
+    m = re.search(r'add_argument\("--steps", default="([^"]+)"', src)
+    return m.group(1).split(",")
+
+
+# v0.28: the runner in parts, each a step of its own with its own reuse record, so a gate cut
+# off by a time limit keeps the parts that passed (the whole runner took more than two hours
+# beside the ColdFire steps). The parts together are exactly the runner's default steps.
+GROUPS = (("decode", "map", "voice", "guard"), ("smp",), ("link", "rec", "pvmix", "tdm"),
+          ("stock", "ping", "shft", "gran"), ("mnm", "frame"))
+
+
+def parts() -> list[list[str]]:
+    want = default_steps()
+    out = [[s for s in g if s in want] for g in GROUPS]
+    out = [g for g in out if g]
+    left = [s for s in want if not any(s in g for g in out)]
+    if left:
+        out.append(left)                        # any step not grouped runs in a part of its own
+    assert sorted(s for g in out for s in g) == sorted(want)
+    return out
+
+
+def command(stock: str, digikit_sharc: str, steps: list[str] | None = None, tag: str = "") -> list:
+    cmd = [sys.executable, "scripts/sharc_waverider_m5.py", "--image", stock, "--digikit", digikit_sharc]
+    if steps is not None:
+        cmd += ["--steps", ",".join(steps), "--tag", tag or "part"]
+    return cmd
 
 
 def verdict(rc: int, out: str) -> tuple[bool, str]:
