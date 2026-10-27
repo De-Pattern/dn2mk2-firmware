@@ -428,6 +428,8 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     MNP.build(p, L.md.mnm)                     # v0.26: then DENS's and DDRW's Digibank stand-in, 8 words a block
     p.iconst(0, 0)
     p.st(L.C["mcost"], 0)                      # v0.26: no Monomachine voice rendered yet this block
+    from . import guard as G
+    G.entry(p)                                 # v0.27: the frame's length and the time our voices have
     p.iconst(0, 0)
     p.st(L.C["t"], 0)
     top = p.label("slot")
@@ -457,7 +459,7 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.iconst(12, MDK.Z_N)                     # ColdFire at power-on) are decoded
     p.e("COMP(R0, R12);")
     p.jump("LT", other)
-    voice(p, L)
+    G.around(p, L.C["t"], G.COST_PERC, BUFFERS, lambda: voice(p, L))   # v0.27: if it fits in the frame
     p.jump("", nxt)
     # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
     # (v0.12: v0.11 resumed what it had left ringing)

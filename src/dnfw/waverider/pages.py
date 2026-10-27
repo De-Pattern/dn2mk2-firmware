@@ -405,7 +405,8 @@ def smp_quant_header() -> str:
             f"#define SMP_BARS_REC {_smp.BARS_REC}\n#define SMP_SEG_REC {_smp.SEG_REC}\n"
             f"#define SMP_GRID_REC {_smp.GRID_REC}\n#define SMP_SAMP_REC {_smp.SAMP_REC}\n"
             f"#define SMP_SEG_LO {_smp.RECORDS[_smp.SEG_REC][1]}\n"
-            f"#define SMP_SEG_SLOT {_smp.RECORDS[_smp.SEG_REC][0]}\n")
+            f"#define SMP_SEG_SLOT {_smp.RECORDS[_smp.SEG_REC][0]}\n"
+            f"#define SMP_SAMP_SLOT {_smp.RECORDS[_smp.SAMP_REC][0]}\n")
 SMP_WAVE_W, SMP_WAVE_AMP = 100, 11         # the waveform strip: columns, half-height in pixels
 SMP_GLYPHS = "0123456789AB/-YES"
 

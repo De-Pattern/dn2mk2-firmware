@@ -64,12 +64,12 @@ input[type=file] { display: none; }
   <section>
     <h2>2 · Your stock files</h2>
     <div class="files">
-      <label class="file" data-k="dn2"><span><b>Digitone II OS 1.11</b> <span class="mono">.syx</span> or Elektron's .zip — the file that gets patched</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
+      <label class="file" data-k="dn2"><span><b>Digitone II OS 1.11</b> <span class="mono">.syx</span> or Elektron's .zip — the file that gets patched (exactly 1.11: not 1.12 or later)</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
       <label class="file" data-k="dt2"><span><b>Digitakt II OS 1.17</b> (or 1.16) <span class="mono">.syx</span> or .zip — its DSP's sample-reading tables</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
       <label class="file" data-k="md"><span><b>Machinedrum UW OS 1.63</b> <span class="mono">.syx</span>, .bin or .zip — its machines' tables, for PERC</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.bin,.zip"></label>
       <label class="file" data-k="mnm" hidden><span><b>Monomachine SFX-6 OS 1.32B</b> <span class="mono">.syx</span> or .zip — its machines' tables (SID, DigiPRO, VO-6)</span><button type="button">Choose…</button><small>not chosen</small><input type="file" accept=".syx,.zip"></label>
     </div>
-    <p class="note">All of them are free downloads from Elektron's support pages for each instrument. Drop them on their boxes, or choose them. This browser remembers them for next time (they stay on this device; nothing is uploaded). <a href="#" id="forget">Forget my files</a></p>
+    <p class="note"><b>The Digitone II file must be stock OS 1.11</b>, even if your instrument runs a later OS: the mod is built on 1.11, and the page stops if it is given any other version. All of them are free downloads from Elektron's support pages for each instrument. Drop them on their boxes, or choose them. This browser remembers them for next time (they stay on this device; nothing is uploaded). <a href="#" id="forget">Forget my files</a></p>
   </section>
 
   <section>
@@ -81,7 +81,8 @@ input[type=file] { display: none; }
 
   <section>
     <h2>4 · Flash</h2>
-    <p class="note" style="margin-top:0">Back up the +Drive and your projects first (Elektron Transfer). Then send the saved file as any Digitone II OS update: drag it onto Elektron Transfer with the instrument running and connected by USB. The stock OS 1.11 file, sent the same way, puts it back. If an update ever fails to start, the recovery route is the Early Start-up Menu (hold [FUNC] while powering on, then [TRIG 4]), receiving the stock file over a DIN MIDI cable (not USB) from Transfer's SysEx window.</p>
+    <p class="note" style="margin-top:0"><b>If your Digitone II runs OS 1.12 or later</b>, flashing the mod takes it back to a 1.11-based OS: projects and sounds saved under the newer OS may not open on it. Back them up first, and keep the newer OS file to go back to.</p>
+    <p class="note">Back up the +Drive and your projects first (Elektron Transfer). Then send the saved file as any Digitone II OS update: drag it onto Elektron Transfer with the instrument running and connected by USB. The stock OS 1.11 file, sent the same way, puts it back. If an update ever fails to start, the recovery route is the Early Start-up Menu (hold [FUNC] while powering on, then [TRIG 4]), receiving the stock file over a DIN MIDI cable (not USB) from Transfer's SysEx window.</p>
     <p class="note">Each version's notes, tests and known issues are in the project's FIRMWARE.md.</p>
   </section>
 </main>

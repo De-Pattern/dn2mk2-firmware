@@ -455,8 +455,9 @@ def main() -> int:
 
         # 6e. v0.23, SLICE: its menus drawn over the page (the menu, the grid dialog, the
         # editor with a slice table), the editor's keys and knobs moving the picked slice;
-        # and in KEYBOARD mode on a SLICE track (SLCE NOTE) trig 4 plays note C0 + 3 and
-        # trig 1 C0, the notes SLCE's NOTE mode turns into slices 4 and 1
+        # and in KEYBOARD mode on a SLICE track (SLCE NOTE) the keys play the slices in the
+        # order of their notes (v0.26): trig 9, 10 (the lowest) slices 1, 2 (notes C0, C0 + 1,
+        # which SLCE's NOTE mode turns into those slices), trig 2 (higher) a later one
         if "slc_state" in lay:
             import struct as _st                # noqa: PLC0415
             g = {k: hex(lay[k]) for k in ("slc_state", "slc_nfr", "slc_ns", "slc_cur", "slc_sl")}
@@ -472,8 +473,13 @@ def main() -> int:
                      f"poke:{hires}:{pat},poke:{g['slc_nfr']}:00023280,poke:{g['slc_ns']}:00000003,"
                      f"poke:{g['slc_cur']}:00000000,poke:{g['slc_sl']}:{tb},poke:{g['slc_state']}:00000004,"
                      f"wait:6,png:e1,right,wait:5,spin:4:6,wait:5,png:e2,mem:{g['slc_cur']}:4,"
-                     f"mem:{g['slc_sl']}:36,no,wait:6,mem:{g['slc_state']}:4,"
-                     f"{pk},tap:18,wait:6,press:28,wait:6,release:28,wait:6,press:25,wait:6,release:25,wait:6")
+                     f"mem:{g['slc_sl']}:36,"
+                     # v0.26: FUNC + RIGHT splits the picked slice in two, FUNC + LEFT removes it
+                     f"press:17,wait:2,right,wait:3,release:17,wait:3,mem:{g['slc_ns']}:4,mem:{g['slc_sl']}:48,"
+                     f"press:17,wait:2,left,wait:3,release:17,wait:3,mem:{g['slc_ns']}:4,"
+                     f"no,wait:6,mem:{g['slc_state']}:4,"
+                     f"{pk},tap:18,wait:6,press:33,wait:6,release:33,wait:6,press:34,wait:6,release:34,wait:6,"
+                     f"press:26,wait:6,release:26,wait:6")
             js = work / "slice.json"
             slc_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                           "--build", bdir, "--snapshot", snap, "--steps", steps,
@@ -489,15 +495,24 @@ def main() -> int:
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "m", "g", "e1", "e2")}
                     table = list(_st.unpack(">9I", bytes.fromhex(m[g["slc_sl"]])))
                     notes = [int(x["D4"], 16) for x in r["regs_at"].get("0x400576ca", [])]
+                    split = list(_st.unpack(">12I", bytes.fromhex(m[f"{g['slc_sl']}@3"])))
                     facts = {"drawn": len({shots[n] for n in shots}) >= 4,
                              "picked": int(m[g["slc_cur"]], 16) == 1,
                              "start moved": table[3] > 36000 and table[:3] == [0, 30000, 0],
+                             # slice 2 (start s, end 70000) split at its middle: s..mid, mid..70000
+                             "split": int(m[g["slc_ns"]], 16) == 4 and split[3] == table[3]
+                             and split[6] == split[3] + (70000 - split[3]) // 2 == split[4]
+                             and split[7] == 70000
+                             and split[9:12] == [72000, 140000, 72000],   # slice 3, as it was
+                             "removed": int(m[f"{g['slc_ns']}@4"], 16) == 3,
                              "closed": int(m[g["slc_state"]], 16) == 0,
-                             "slice notes": notes == [15, 12]}
+                             # trig 9, 10 (the bottom row's first two: the lowest notes) slices
+                             # 1, 2; trig 2 (the top row: a higher note) a later one
+                             "slice notes": len(notes) == 3 and notes[:2] == [12, 13] and notes[2] > 13}
                     good = all(facts.values())
                     why = str(facts) + f" notes {notes}"
                 return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
-                 "closes; KEYBOARD trig 4 / trig 1 on a SLICE track play C0+3 / C0"
+                 "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; KEYBOARD on a SLICE track: trigs 9, 10 play slices 1, 2 and trig 2 a later one (the keys' notes in order)"
                               if good else why)
             gate("SLICE menus and SLICES keys (ColdFire)", *cached("SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body))
 
@@ -578,14 +593,18 @@ def main() -> int:
                    f"poke:{lay['smp_pos_at']:#x}:00000000", f"poke:{lay['smp_pos']:#x}:" + "8000" * 16,
                    "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:36", "png:ph2",
                    "tap:2", "wait:6"]
-            st += samp_all(4) + ["wait:10", "png:l1", mem(lay["smp_lst_open"]), "down", "wait:8", "png:l2",
-                                 mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2), mem(lay["smp_lst_open"])]
-            st += samp_all(3) + ["wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
+            # v0.27: SAMP set without a turn (TRACK + PLAY's clear, a load) leaves the list
+            # closed; a turn of SAMP (encoder D) opens it
+            st += samp_all(3) + ["wait:10", "png:l0", mem(lay["smp_lst_open"])]
+            st += samp_all(2) + ["wait:10", "spin:3:2", "wait:10", "png:l1", mem(lay["smp_lst_open"]), "down",
+                                 "wait:8", "png:l2", mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2),
+                                 mem(lay["smp_lst_open"])]
+            st += samp_all(2) + ["wait:10", "spin:3:1", "wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
                                  "wait:8", "png:b1", mem(lay["smp_fb_open"]), "yes", "wait:8", "png:b2",
                                  mem(lay["smp_fb_folder"]), "down", "wait:2", "yes", "wait:8", "png:b3",
                                  mem(samp0, 2), mem(lay["smp_fb_open"]), mem(lay["smp_lst_open"])]
             # the SAMPLE ACTION menu: into "loops", RIGHT on its sample, DELETE, asked, YES
-            st += samp_all(2) + ["wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
+            st += samp_all(3) + ["wait:10", "spin:3:-1", "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
                                  "down", "wait:4", "yes", "wait:6", "right", "wait:6", "png:m1", "down", "wait:3",
                                  "down", "wait:3", "yes", "wait:6", "png:m2", "yes", "wait:8", "png:m3",
                                  mem(M + 8 + 16 + 4, 4)]
@@ -607,20 +626,21 @@ def main() -> int:
                     lo, fo, ff = (hex(lay[k]) for k in ("smp_lst_open", "smp_fb_open", "smp_fb_folder"))
                     sp, ce = hex(samp0), hex(cell)
                     facts = {"playhead drawn and moving": len({shots["p2"], shots["ph1"], shots["ph2"]}) == 3,
-                             "list opens": int(m[lo], 16) == 1,
+                             "v0.27: SAMP set without a turn leaves the list closed": int(m[lo], 16) == 0,
+                             "list opens on a turn": int(m[f"{lo}@1"], 16) == 1,
                              "DOWN moves SAMP": m[sp] == "0500",
-                             "NO puts it back and closes": m[f"{sp}@2"] == "0200" and int(m[f"{lo}@3"], 16) == 0,
+                             "NO puts it back and closes": m[f"{sp}@3"] == "0200" and int(m[f"{lo}@4"], 16) == 0,
                              "browser opens, a folder entered": int(m[fo], 16) == 1 and int(m[ff], 16) == 0
                              and shots["b1"] != shots["b2"],
-                             "a sample picked: SAMP, both closed": m[f"{sp}@6"] == "0100" and int(m[f"{fo}@7"], 16) == 0
-                             and int(m[f"{lo}@8"], 16) == 0,
+                             "a sample picked: SAMP, both closed": m[f"{sp}@7"] == "0100" and int(m[f"{fo}@8"], 16) == 0
+                             and int(m[f"{lo}@9"], 16) == 0,
                              "DELETE in the SAMPLE ACTION menu empties the slot": m[hex(M + 28)] == "00000000"
                              and len({pathlib.Path(r["screens"][n]).read_bytes() for n in ("m1", "m2", "m3")}) == 3,
-                             "modulated SAMP through the loaded slots": [m[ce], m[f"{ce}@11"], m[f"{ce}@12"]]
+                             "modulated SAMP through the loaded slots": [m[ce], m[f"{ce}@12"], m[f"{ce}@13"]]
                              == ["0100", "0400", "0200"]}
                     good = all(facts.values())
                     why = str(facts)
-                return good, ("the playhead drawn where the DSP says; the list opens with SAMP, DOWN moves it, NO "
+                return good, ("the playhead drawn where the DSP says; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
                               "puts it back; FUNC + YES's browser enters a folder and assigns a sample; "
                               "its SAMPLE ACTION menu deletes; modulation on SAMP steps through the loaded slots" if good else why)
             gate("sample list, browser, playhead (ColdFire)",

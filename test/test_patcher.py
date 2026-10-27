@@ -1,4 +1,4 @@
-"""tools/patcher/dn2patch.py, the in-browser patcher's Python (dn2-tools' patcher.html).
+"""tools/patcher/dn2patch.py, the in-browser patcher's Python (dn2mk2's patcher.html).
 
 What it adds to the build is reading the owner's files as Elektron ship them: the
 Machinedrum's .syx rebuilt into its flash image, the DT2's section 7 taken from its .syx,

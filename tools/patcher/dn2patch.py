@@ -1,4 +1,4 @@
-"""The DN2 mod patcher, run in the browser (Pyodide) by dn2-tools' index.html.
+"""The DN2 mod patcher, run in the browser (Pyodide) by dn2mk2's index.html.
 
 It builds the mod from the owner's own files, the same way the gated build was made, and
 the page then checks the result's sha256 against the gated build's. Nothing of Elektron's

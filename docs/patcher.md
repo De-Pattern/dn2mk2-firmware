@@ -1,4 +1,4 @@
-# The in-browser patcher (dn2-tools' patcher.html)
+# The in-browser patcher (dn2mk2's patcher.html)
 
 The mod's build is pure Python (the standard library only) and reads Elektron's files:
 the DN2 OS 1.11 it patches, the DT2 OS 1.16/1.17 DSP image (section 7, for the sample
@@ -21,7 +21,7 @@ and nothing of Elektron's is ever published.
   `.gate.json` beside it, every gate PASS, the same sha256), builds it again here noting
   every dnfw module and data file the build touches, checks the rebuild is byte-identical,
   and writes `OUTDIR/dnfw-VERSION.zip` and its row in `OUTDIR/builds.json`.
-- `tools/web/patcher.html` and `patcher-worker.js` (copied to dn2-tools) run it in a
+- `tools/web/patcher.html` and `patcher-worker.js` (copied to dn2mk2) run it in a
   worker with Pyodide 0.27.7 from jsDelivr. The worker checks the zip's sha256 against
   builds.json; the page saves the result **only if its sha256 is the cleared build's**.
   Anything else is shown as "does not match: do not flash".

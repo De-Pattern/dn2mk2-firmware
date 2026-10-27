@@ -330,6 +330,18 @@ static void edit_draw(void *c)
         if (xl >= 0)
             vline(c, xl, yc - h, yc + h, 1);
     }
+    /* v0.26: where the track is playing (as the sample pages' playhead) */
+    extern int smp_playhead(int t);
+    int ph = smp_playhead((int)ACTIVE_TRACK);
+    if (ph >= 0 && slc_nfr) {
+        int xp = fx((u32)ph * (slc_nfr >> 8) / (POS_ONE >> 8));   /* (32-bit: no libgcc) */
+        if (xp >= 2 && xp <= 125)
+            for (int yy = yc - h - 1; yy <= yc + h + 1; yy++) {   /* cleared either side, so */
+                off(c, xp - 1, yy);                              /* it reads over the wave */
+                on(c, xp, yy);
+                off(c, xp + 1, yy);
+            }
+    }
     hline(c, 0, 127, 9, 0);
     LABEL(c, 13, 1, "%s", "START");
     LABEL(c, 47, 1, "%s", "ZOOM");
@@ -360,17 +372,6 @@ void slc_draw(void *c)
 }
 
 /* -- the work ---------------------------------------------------------------------------- */
-
-static void sort_slices(void)
-{
-    for (int i = 1; i < slc_ns; i++)
-        for (int j = i; j > 0 && slc_sl[3 * j] < slc_sl[3 * (j - 1)]; j--)
-            for (int w = 0; w < 3; w++) {
-                u32 t = slc_sl[3 * j + w];
-                slc_sl[3 * j + w] = slc_sl[3 * (j - 1) + w];
-                slc_sl[3 * (j - 1) + w] = t;
-            }
-}
 
 static void from_starts(const u32 *st, int n)    /* each to the next start, the last to the end */
 {
@@ -463,7 +464,7 @@ void slc_poll(void)
     if (st == 2) {
         if (wait_for == S_GRID) {
             make_grid();
-            slc_state = S_OFF;
+            edit_open();                        /* v0.26: on to the editor, as the DT2's */
         } else {
             edit_open();
         }
@@ -473,10 +474,12 @@ void slc_poll(void)
     }
 }
 
-static u32 step_of(void)                        /* a detent: a 128th of the view (FUNC: a frame) */
+static u32 step_of(void)                        /* a detent: a 128th of the view */
 {
+    /* v0.27: the same with FUNC held (owner: FUNC is held for FUNC + YES's preview between
+     * every small move; v0.23..v0.26 moved a frame a detent with FUNC, which crawled) */
     u32 s = view_n() / 128u;
-    return func ? 1u : (s ? s : 1u);
+    return s ? s : 1u;
 }
 
 static void move(u32 *v, int d, u32 lo, u32 hi)
@@ -504,6 +507,20 @@ static void edit_knob(int idx, int d)
         follow_view();
         return;
     case 7: {                                                     /* G POS */
+        if (func && slc_ns) {                   /* v0.26, FUNC + G: the whole slice moves, */
+            u32 len = *e - *s, lo = *l - *s;    /* its length kept (the DT2's) */
+            u32 st3 = view_n() / 128u ? view_n() / 128u : 1u;   /* (not FUNC's fine step) */
+            u32 a = st3 * (u32)(d < 0 ? -d : d);
+            if (d < 0)
+                *s = *s > a ? *s - a : 0u;
+            else
+                *s = *s + a + len <= slc_nfr ? *s + a : slc_nfr - len;
+            *e = *s + len;
+            *l = *s + lo;
+            follow_view();
+            dirty = 1;
+            return;
+        }
         u32 v = view_n(), m = slc_nfr > v ? slc_nfr - v : 0u, st2 = v / 16u ? v / 16u : 1u;
         u32 a = st2 * (u32)(d < 0 ? -d : d);
         view0 = d < 0 ? (view0 > a ? view0 - a : 0u) : (view0 + a < m ? view0 + a : m);
@@ -515,41 +532,79 @@ static void edit_knob(int idx, int d)
     dirty = 1;
 }
 
+/* v0.26: FUNC + YES plays the current slice while held (the recorder's preview, after the
+ * engine's mix: rec.c's TRIM preview), as the DT2's slice editor previews it */
+#define CMD_PREVIEW 9
+extern u32 smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
+static int pv_on __attribute__((section(".data"))) = 0;
+
+static void slice_preview(int on)
+{
+    if (on && slc_ns && slot >= 0) {
+        u32 *sl = &slc_sl[3 * slc_cur];
+        smp_command(CMD_PREVIEW, (u32)slot, sl[0], sl[1], 0);
+        pv_on = 1;
+    } else if (pv_on) {
+        smp_command(CMD_PREVIEW, (u32)(slot < 0 ? 0 : slot), 0, 0, 0);
+        pv_on = 0;
+    }
+}
+
+/* the slice editor's keys, as the DT2's (its manual, A.2.5 USING THE SLICE EDITOR):
+ * LEFT / RIGHT the previous / next slice; FUNC + RIGHT splits the current slice in two (the
+ * others as they were); FUNC + LEFT removes it (the audio stays); FUNC + YES previews it
+ * while held; YES or NO closes the editor. v0.25's FUNC + YES added a slice at the view's
+ * middle, which could land out of sight, and FUNC + NO removed one. */
 static void edit_key(u32 code, int chord)
 {
-    if (code == K_LEFT && slc_cur > 0) {
-        slc_cur--;
-        follow_view();
-    } else if (code == K_RIGHT && slc_cur + 1 < slc_ns) {
-        slc_cur++;
-        follow_view();
-    } else if (code == K_YES && (chord || func) && slc_ns < SLMAX) {   /* a slice at the view's middle */
-        u32 at = view0 + view_n() / 2u;
-        if (at >= slc_nfr)
-            at = slc_nfr - 1u;
-        slc_sl[3 * slc_ns] = at;
-        slc_sl[3 * slc_ns + 1] = slc_nfr;
-        slc_sl[3 * slc_ns + 2] = at;
-        slc_ns++;
-        sort_slices();
-        for (int k = 0; k < slc_ns; k++) {
-            if (slc_sl[3 * k] == at)
-                slc_cur = k;
-            if (k + 1 < slc_ns && slc_sl[3 * k + 1] > slc_sl[3 * (k + 1)])
-                slc_sl[3 * k + 1] = slc_sl[3 * (k + 1)];
+    int fn = chord || func;
+    if (code == K_RIGHT && fn) {                 /* split the current slice in two */
+        if (slc_ns == 0 && slc_nfr > 1u) {        /* none yet: the whole sample is one */
+            slc_sl[0] = 0;
+            slc_sl[1] = slc_nfr;
+            slc_sl[2] = 0;
+            slc_ns = 1;
+            slc_cur = 0;
+        }
+        if (slc_ns > 0 && slc_ns < SLMAX) {
+            u32 *c = &slc_sl[3 * slc_cur];
+            u32 st = c[0], en = c[1];
+            if (en > st + 1u) {
+                u32 mid = st + (en - st) / 2u;
+                for (int k = slc_ns; k > slc_cur + 1; k--)     /* room after the current */
+                    for (int w = 0; w < 3; w++)
+                        slc_sl[3 * k + w] = slc_sl[3 * (k - 1) + w];
+                c[1] = mid;
+                if (c[2] >= mid)
+                    c[2] = st;
+                slc_sl[3 * (slc_cur + 1)] = mid;
+                slc_sl[3 * (slc_cur + 1) + 1] = en;
+                slc_sl[3 * (slc_cur + 1) + 2] = mid;
+                slc_ns++;
+                follow_view();
+            }
         }
         dirty = 1;
-    } else if (code == K_NO && (chord || func)) {                  /* the picked slice goes */
-        if (slc_ns > 1) {
+    } else if (code == K_LEFT && fn) {           /* remove the current slice */
+        if (slc_ns > 0) {
             for (int k = slc_cur; k + 1 < slc_ns; k++)
                 for (int w = 0; w < 3; w++)
                     slc_sl[3 * k + w] = slc_sl[3 * (k + 1) + w];
             slc_ns--;
             if (slc_cur >= slc_ns)
-                slc_cur = slc_ns - 1;
+                slc_cur = slc_ns > 0 ? slc_ns - 1 : 0;
             dirty = 1;
         }
-    } else if (code == K_NO) {
+    } else if (code == K_LEFT && slc_cur > 0) {
+        slc_cur--;
+        follow_view();
+    } else if (code == K_RIGHT && slc_cur + 1 < slc_ns) {
+        slc_cur++;
+        follow_view();
+    } else if (code == K_YES && fn) {
+        slice_preview(1);
+    } else if (code == K_YES || code == K_NO) {
+        slice_preview(0);
         edit_close();
     }
 }
@@ -565,6 +620,9 @@ int slc_pop(u8 *it)
     if (it[0] == IT_KEY && code == K_FUNC)
         return 0;                               /* FUNC goes on to stock */
     if (slc_state == S_OFF) {
+        extern int smp_lst_open, smp_fb_open;   /* v0.26: YES with the sample list or the */
+        if (smp_lst_open || smp_fb_open)        /* browser up is theirs (keep the sample), */
+            return 0;                           /* not the slice menus' */
         /* YES on a SLICE track's page opens the menu */
         if (press && code == K_YES && slc_page_seen == 2 && !func) {   /* v0.25: GRID's ALLOCATE SLICE */
             menu_sel = 0;
@@ -614,8 +672,11 @@ int slc_pop(u8 *it)
     int ours = code == K_YES || code == K_NO || (code >= K_UP && code <= K_RIGHT) || (code >= 41 && code <= 48);
     if (!ours)
         return 0;
-    if (!press)
+    if (!press) {
+        if (code == K_YES && pv_on)             /* v0.26: the preview while held */
+            slice_preview(0);
         return 1;
+    }
     int chord = func;
     if (slc_state == S_ALLOC) {
         if (code == K_UP || code == K_DOWN)
@@ -663,7 +724,7 @@ int slc_pop(u8 *it)
                 int i16;
                 slc_nfr = smp_slot_frames(slot, &i16);
                 make_grid();
-                slc_state = S_OFF;
+                start_analysis(S_EDIT);         /* v0.26: on to the editor (its waveform read), as the DT2's */
             }
         }
     } else if (slc_state == S_EDIT) {
@@ -691,18 +752,48 @@ u32 slc_keynotes(u32 kbd, u32 *vec, u32 k)
         volatile u8 *s = (volatile u8 *)SOUND(t);
         int ty = (signed char)s[0xDE];
         if ((ty == SLICE_TYPE || ty == GRID_TYPE) && SOUND_VALUE(SOUND(t), SMP_SLICE_ID) == 0) {
-            u32 buf[8], tv[3] = {(u32)buf, (u32)buf, (u32)(buf + 8)};
-            int bank = 0;
-            if (KEYNOTES(kbd, tv, 8u) && tv[1] > tv[0]) {
-                slc_kb_c = buf[0];
-                bank = ((int)buf[0] - (int)KB_C0) / 12;
-                if ((int)buf[0] < (int)KB_C0 && ((int)KB_C0 - (int)buf[0]) % 12)
+            /* v0.26: the slices in the order of the keys' notes, as the keyboard lays them
+             * out (chromatic: its lit keys; a folded scale: all 16): the key with the
+             * lowest note plays slice 1, the next slice 2 .., as the DT2's KEYBOARD with
+             * SLICE at NOTE ("slices play from C1 upwards, wrapping after the last"). Each
+             * octave up or down (KEYBOARD + UP/DOWN) moves them on by as many slices as the
+             * keys play. v0.25 gave TRIG k slice k, so the unlit keys' slices could not be
+             * played (and the lit ones' came out of order) */
+            u32 buf[8], tv[3];
+            int note[16], mine = -1;
+            for (u32 j = 0; j < 16u; j++) {
+                tv[0] = tv[1] = (u32)buf;
+                tv[2] = (u32)(buf + 8);
+                note[j] = KEYNOTES(kbd, tv, j) && tv[1] > tv[0] ? (int)buf[0] : -1;
+            }
+            mine = note[k];
+            if (mine < 0)
+                return 0;                       /* a key with no note: none */
+            int rank = 0, per = 0;
+            for (int j = 0; j < 16; j++) {      /* distinct notes: below the key's, and in all */
+                if (note[j] < 0)
+                    continue;
+                int dup = 0;
+                for (int i = 0; i < j; i++)
+                    if (note[i] == note[j])
+                        dup = 1;
+                if (dup)
+                    continue;
+                per++;
+                if (note[j] < mine)
+                    rank++;
+            }
+            int bank = 0;                       /* the octave: TRIG 9's note against the middle C */
+            if (note[8] >= 0) {
+                bank = (note[8] - (int)KB_C0) / 12;
+                if (note[8] < (int)KB_C0 && ((int)KB_C0 - note[8]) % 12)
                     bank--;
             }
-            int idx = (16 * bank + (int)k) % 64;
+            slc_kb_c = (u32)mine;
+            int idx = (rank + per * bank) % 64;
             if (idx < 0)
                 idx += 64;
-            *(u32 *)vec[0] = 12u + (u32)idx;
+            *(u32 *)vec[0] = 12u + (u32)idx;    /* the DSP: (note - 12) mod the slices */
             vec[1] = vec[0] + 4u;
             return 1;
         }

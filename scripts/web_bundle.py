@@ -1,4 +1,4 @@
-"""Bundle the build's Python for dn2-tools' in-browser patcher (tools/patcher).
+"""Bundle the build's Python for dn2mk2's in-browser patcher (tools/patcher).
 
     python scripts/web_bundle.py BUILD.syx VERSION NAME OUTDIR
 
