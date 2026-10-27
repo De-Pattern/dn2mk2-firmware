@@ -140,6 +140,30 @@ static int knob(void *view, u32 id)
     return (v * 127 + top / 2) / top;
 }
 
+/* v0.27: a p-locked control drawn as stock draws it, its cell inverted (owner's photo: a
+ * trig held, its locked parameters lit). The stock getter's flag (0x4006538e's third
+ * argument) is what the stock grid (0x40017498) tests to draw a cell highlighted. The
+ * canvas, as 0x40113b90 reads it: +4 width, +8 height, +12 words a column, +16 the bits
+ * (a column's words, bit 31 - (y & 31) of word y >> 5). */
+static int locked(void *view, u32 id)
+{
+    u8 flag = 0;
+    if (!id)
+        return 0;
+    (void)GET_VALUE(view, id, &flag);
+    return flag != 0;
+}
+
+static void invert(void *c, int x0, int y0, int x1, int y1)
+{
+    const int *cv = (const int *)c;
+    u32 *bits = (u32 *)cv[4];
+    for (int x = x0; x <= x1; x++)
+        for (int y = y0; y <= y1; y++)
+            if (x >= 0 && y >= 0 && x < cv[1] && y < cv[2] && y <= 53)
+                bits[x * cv[3] + (y >> 5)] ^= 0x80000000u >> (y & 31);
+}
+
 /* the rows, under the header (y 54..63): the MD's, closed up by eight */
 #define LINE_Y 0                /* the solid line along the bottom (MD 0) */
 #define KNOB_B 3                /* the bottom row's knobs (MD 5) */
@@ -193,6 +217,8 @@ int md_page_draw(void *view, void *c, int page, int type)
             const char *syn = (const char *)mach + 4, *m = (const char *)mach + 7;
             text(c, SMALL, x0 + (20 - text_w(SMALL, syn, 3)) / 2, ky + 7, syn, 3, 1);
             text(c, SYM, x0 + (20 - text_w(SYM, m, 2)) / 2, ky + 1, m, 2, 1);
+            if (locked(view, id))               /* v0.27: p-locked, as stock lights it */
+                invert(c, x0 + 1, row ? 1 : DOT_M + 1, x0 + 19, row ? DOT_M - 1 : 53);
             continue;
         }
         int v = knob(view, id);
@@ -200,6 +226,8 @@ int md_page_draw(void *view, void *c, int page, int type)
         blit(c, x0 + 6, ky + 2, MDUI_PTR_COLS, 7, MDUI + MDUI_PTR + 2 * MDUI_PTR_COLS * v, 0);
         if ((n & 2) && col < 3)
             blit(c, x0 + 16, ky + CLIP_UP, MDUI_CLIP_COLS, 16, MDUI + MDUI_CLIP, 1);
+        if (locked(view, id))                   /* v0.27: p-locked, as stock lights it */
+            invert(c, x0 + 1, row ? 1 : DOT_M + 1, x0 + 19, row ? DOT_M - 1 : 53);
     }
 
     /* the left: the tempo */

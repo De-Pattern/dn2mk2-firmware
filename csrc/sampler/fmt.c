@@ -44,6 +44,10 @@ int smp_quant(u8 *s, int slot, int value)
     int type = (signed char)s[SOUND_TYPE] - TYPE_FIRST;
     if (type < 0 || type >= TYPES)
         return value;
+    if (slot == SMP_SAMP_SLOT) {                /* v0.27: SAMP turned by hand (smp_page.c's list) */
+        extern u32 smp_samp_turned;
+        smp_samp_turned = *(volatile u32 *)0x4058E8D4u;
+    }
     int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     int oc = old >> 8, nc = (value >> 8) & 0xFF, d = nc - oc;
     for (int k = 0; k < SMP_NQ; k++) {

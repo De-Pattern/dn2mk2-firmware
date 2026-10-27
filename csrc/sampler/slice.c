@@ -474,10 +474,12 @@ void slc_poll(void)
     }
 }
 
-static u32 step_of(void)                        /* a detent: a 128th of the view (FUNC: a frame) */
+static u32 step_of(void)                        /* a detent: a 128th of the view */
 {
+    /* v0.27: the same with FUNC held (owner: FUNC is held for FUNC + YES's preview between
+     * every small move; v0.23..v0.26 moved a frame a detent with FUNC, which crawled) */
     u32 s = view_n() / 128u;
-    return func ? 1u : (s ? s : 1u);
+    return s ? s : 1u;
 }
 
 static void move(u32 *v, int d, u32 lo, u32 hi)

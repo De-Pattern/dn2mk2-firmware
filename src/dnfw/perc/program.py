@@ -351,6 +351,8 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
         p.e(f"DM({SAVE + 4 * k:#x}) = {r};")
     from ..md import core as MDK
     MDK.table_fill(p, L.md)                    # the Machinedrum's sine and tables, 1024 words a block until whole (v0.24: zpack)
+    from . import guard as G
+    G.entry(p)                                 # v0.27: the frame's length and the time our voices have
     p.iconst(0, 0)
     p.st(L.C["t"], 0)
     top = p.label("slot")
@@ -373,7 +375,7 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.e("COMP(R0, R12);")
     other = p.label("other")
     p.jump("NE", other)
-    voice(p, L)
+    G.around(p, L.C["t"], G.COST_PERC, BUFFERS, lambda: voice(p, L))   # v0.27: if it fits in the frame
     p.jump("", nxt)
     # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
     # (v0.12: v0.11 resumed what it had left ringing)

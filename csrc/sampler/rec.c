@@ -250,8 +250,11 @@ static void rec_wave_add(u32 frames, int peak)
 }
 
 /* from the UI loop (page.c's wr_poll), every pass */
+static void rpt_poll(void);
+
 void rec_poll(void)
 {
+    rpt_poll();
     if (smp_status(st)) {
         rec_state = st[0] & 3;
         rec_frames = (u32)st[2] << 6;              /* 64 frames a unit (v0.16) */
@@ -524,6 +527,59 @@ static void name_insert(void)
     nm_text[nm_cur] = ' ';
 }
 
+/* the name grid: an arrow moves the selection (v0.26: LEFT/RIGHT round its row) */
+static void grid_move(u32 code)
+{
+    int n = (int)sizeof nm_grid - 1;
+    if (code == K_LEFT || code == K_RIGHT) {
+        int r0 = nm_gsel / NM_GRID_W * NM_GRID_W;
+        int w = n - r0 < NM_GRID_W ? n - r0 : NM_GRID_W;
+        int col = nm_gsel - r0 + (code == K_RIGHT ? 1 : -1);
+        nm_gsel = r0 + (col + w) % w;
+    } else {
+        int g = nm_gsel + (code == K_UP ? -NM_GRID_W : NM_GRID_W);
+        if (g >= 0 && g < n)
+            nm_gsel = g;
+    }
+    nm_gpicked = 1;
+}
+
+/* v0.27: LEFT/RIGHT held on FILE NAME repeat (owner: as the DN2's own naming screen), a
+ * short wait and then a steady step; rec_poll steps them, the key's release stops them */
+#define RPT_WAIT 600u                           /* 0.4 s, in the 1.5 kHz ticks of 0x4058e8d4 */
+#define RPT_STEP 120u                           /* then 12.5 a second */
+static u32 rpt_code __attribute__((section(".data"))) = 0;
+static u32 rpt_next __attribute__((section(".data"))) = 0;
+static int rpt_grid __attribute__((section(".data"))) = 0;
+
+static void rpt_start(u32 code)
+{
+    rpt_code = code;
+    rpt_grid = smp_func_held;
+    rpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
+}
+
+static void rpt_poll(void)
+{
+    if (!rpt_code)
+        return;
+    if (!rec_overlay || rec_phase != PH_NAME || rpt_grid != smp_func_held) {
+        rpt_code = 0;
+        return;
+    }
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    if ((int)(now - rpt_next) < 0)
+        return;
+    rpt_next = now + RPT_STEP;
+    if (rpt_grid)
+        grid_move(rpt_code);
+    else if (rpt_code == K_LEFT && nm_cur > 0)
+        nm_cur--;
+    else if (rpt_code == K_RIGHT && nm_cur < 6)
+        nm_cur++;
+    smp_overlay_dirty = 1;
+}
+
 static u32 after_pop(u8 *it, u32 code, u32 flags)
 {
     if (it[0] == IT_KNOB) {
@@ -604,22 +660,16 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
             as_done = -1;
             rec_phase = PH_ASSIGN;              /* the name it has */
         } else if (smp_func_held && code >= K_UP && code <= K_RIGHT) {  /* the grid */
-            int n = (int)sizeof nm_grid - 1;
-            if (code == K_LEFT || code == K_RIGHT) {    /* v0.26: round its row, end to end */
-                int r0 = nm_gsel / NM_GRID_W * NM_GRID_W;
-                int w = n - r0 < NM_GRID_W ? n - r0 : NM_GRID_W;
-                int col = nm_gsel - r0 + (code == K_RIGHT ? 1 : -1);
-                nm_gsel = r0 + (col + w) % w;
-            } else {
-                int g = nm_gsel + (code == K_UP ? -NM_GRID_W : NM_GRID_W);
-                if (g >= 0 && g < n)
-                    nm_gsel = g;
-            }
-            nm_gpicked = 1;
-        } else if (code == K_LEFT && nm_cur > 0)
+            grid_move(code);
+            if (code == K_LEFT || code == K_RIGHT)
+                rpt_start(code);
+        } else if (code == K_LEFT && nm_cur > 0) {
             nm_cur--;
-        else if (code == K_RIGHT && nm_cur < 6)
+            rpt_start(code);
+        } else if (code == K_RIGHT && nm_cur < 6) {
             nm_cur++;
+            rpt_start(code);
+        }
         else if (code == K_UP || code == K_DOWN)
             name_step(code == K_UP ? 1 : -1);
     } else if (rec_phase == PH_ASSIGN) {
@@ -675,6 +725,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         }
         smp_func_held = down;
     }
+    if (it[0] == IT_KEY && !down && code == rpt_code)
+        rpt_code = 0;                           /* v0.27: the held arrow let go */
     if (rec_pv_on && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
         preview(0);                             /* FUNC + YES let go: the preview stops */
     if (it[0] == IT_KEY && code < 32 && (eaten >> code & 1)) {

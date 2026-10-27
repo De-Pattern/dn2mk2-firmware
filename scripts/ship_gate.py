@@ -587,14 +587,18 @@ def main() -> int:
                    f"poke:{lay['smp_pos_at']:#x}:00000000", f"poke:{lay['smp_pos']:#x}:" + "8000" * 16,
                    "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:36", "png:ph2",
                    "tap:2", "wait:6"]
-            st += samp_all(4) + ["wait:10", "png:l1", mem(lay["smp_lst_open"]), "down", "wait:8", "png:l2",
-                                 mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2), mem(lay["smp_lst_open"])]
-            st += samp_all(3) + ["wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
+            # v0.27: SAMP set without a turn (TRACK + PLAY's clear, a load) leaves the list
+            # closed; a turn of SAMP (encoder D) opens it
+            st += samp_all(3) + ["wait:10", "png:l0", mem(lay["smp_lst_open"])]
+            st += samp_all(2) + ["wait:10", "spin:3:2", "wait:10", "png:l1", mem(lay["smp_lst_open"]), "down",
+                                 "wait:8", "png:l2", mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2),
+                                 mem(lay["smp_lst_open"])]
+            st += samp_all(2) + ["wait:10", "spin:3:1", "wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
                                  "wait:8", "png:b1", mem(lay["smp_fb_open"]), "yes", "wait:8", "png:b2",
                                  mem(lay["smp_fb_folder"]), "down", "wait:2", "yes", "wait:8", "png:b3",
                                  mem(samp0, 2), mem(lay["smp_fb_open"]), mem(lay["smp_lst_open"])]
             # the SAMPLE ACTION menu: into "loops", RIGHT on its sample, DELETE, asked, YES
-            st += samp_all(2) + ["wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
+            st += samp_all(3) + ["wait:10", "spin:3:-1", "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
                                  "down", "wait:4", "yes", "wait:6", "right", "wait:6", "png:m1", "down", "wait:3",
                                  "down", "wait:3", "yes", "wait:6", "png:m2", "yes", "wait:8", "png:m3",
                                  mem(M + 8 + 16 + 4, 4)]
@@ -616,20 +620,21 @@ def main() -> int:
                     lo, fo, ff = (hex(lay[k]) for k in ("smp_lst_open", "smp_fb_open", "smp_fb_folder"))
                     sp, ce = hex(samp0), hex(cell)
                     facts = {"playhead drawn and moving": len({shots["p2"], shots["ph1"], shots["ph2"]}) == 3,
-                             "list opens": int(m[lo], 16) == 1,
+                             "v0.27: SAMP set without a turn leaves the list closed": int(m[lo], 16) == 0,
+                             "list opens on a turn": int(m[f"{lo}@1"], 16) == 1,
                              "DOWN moves SAMP": m[sp] == "0500",
-                             "NO puts it back and closes": m[f"{sp}@2"] == "0200" and int(m[f"{lo}@3"], 16) == 0,
+                             "NO puts it back and closes": m[f"{sp}@3"] == "0200" and int(m[f"{lo}@4"], 16) == 0,
                              "browser opens, a folder entered": int(m[fo], 16) == 1 and int(m[ff], 16) == 0
                              and shots["b1"] != shots["b2"],
-                             "a sample picked: SAMP, both closed": m[f"{sp}@6"] == "0100" and int(m[f"{fo}@7"], 16) == 0
-                             and int(m[f"{lo}@8"], 16) == 0,
+                             "a sample picked: SAMP, both closed": m[f"{sp}@7"] == "0100" and int(m[f"{fo}@8"], 16) == 0
+                             and int(m[f"{lo}@9"], 16) == 0,
                              "DELETE in the SAMPLE ACTION menu empties the slot": m[hex(M + 28)] == "00000000"
                              and len({pathlib.Path(r["screens"][n]).read_bytes() for n in ("m1", "m2", "m3")}) == 3,
-                             "modulated SAMP through the loaded slots": [m[ce], m[f"{ce}@11"], m[f"{ce}@12"]]
+                             "modulated SAMP through the loaded slots": [m[ce], m[f"{ce}@12"], m[f"{ce}@13"]]
                              == ["0100", "0400", "0200"]}
                     good = all(facts.values())
                     why = str(facts)
-                return good, ("the playhead drawn where the DSP says; the list opens with SAMP, DOWN moves it, NO "
+                return good, ("the playhead drawn where the DSP says; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
                               "puts it back; FUNC + YES's browser enters a folder and assigns a sample; "
                               "its SAMPLE ACTION menu deletes; modulation on SAMP steps through the loaded slots" if good else why)
             gate("sample list, browser, playhead (ColdFire)",

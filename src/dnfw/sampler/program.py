@@ -2572,7 +2572,8 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.jump("LE", mute)
     p.jump("", other)
     p.place(body)
-    voice(p, L)
+    from ..perc import guard as G
+    G.around(p, L.C["t"], G.COST_SMP, PP.BUFFERS, lambda: voice(p, L))   # v0.27: if it fits in the frame
     p.jump("", nxt)
     p.place(mute)
     silence(p, L)

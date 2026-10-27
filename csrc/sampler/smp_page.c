@@ -356,6 +356,30 @@ static void w_gridicon(void *c, int x, int y, int n)
         }
 }
 
+/* v0.27: a p-locked control drawn as stock draws it, its cell inverted (owner's photo: a
+ * trig held, its locked parameters lit). The stock getter's flag (0x4006538e's third
+ * argument) is what the stock grid (0x40017498) tests to draw a cell highlighted. The
+ * canvas, as 0x40113b90 reads it: +4 width, +8 height, +12 words a column, +16 the bits
+ * (a column's words, bit 31 - (y & 31) of word y >> 5). */
+static int locked(void *view, u32 id)
+{
+    u8 flag = 0;
+    if (!id)
+        return 0;
+    (void)GET_VALUE(view, id, &flag);
+    return flag != 0;
+}
+
+static void invert(void *c, int x0, int y0, int x1, int y1)
+{
+    const int *cv = (const int *)c;
+    u32 *bits = (u32 *)cv[4];
+    for (int x = x0; x <= x1; x++)
+        for (int y = y0; y <= y1; y++)
+            if (x >= 0 && y >= 0 && x < cv[1] && y < cv[2] && y <= 53)
+                bits[x * cv[3] + (y >> 5)] ^= 0x80000000u >> (y & 31);
+}
+
 /* one cell: its widget at (X, Y) and, LABELLED, its label under it */
 static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labelled, int pill)
 {
@@ -409,6 +433,8 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
     }
     if (labelled && id)
         LABEL(c, x + 12, y - 7, "%.4s", label);
+    if (locked(view, id))
+        invert(c, x - 1, y - 8, x + 24, y + 19);
 }
 
 /* v0.20: RESONATOR's and CZ's first pages (page.c), as the Elektron grid: eight knobs at
@@ -615,6 +641,7 @@ static void scrollbar(void *c, int x, int y0, int y1, int at, int n)
 
 static u32 lst_seen_at __attribute__((section(".data"))) = 0;    /* the page under it, last drawn */
 
+u32 smp_samp_turned __attribute__((section(".data"))) = 0x80000000u;   /* when SAMP was last turned (fmt.c) */
 static int list_trk __attribute__((section(".data"))) = -1;     /* the track it last saw */
 static int list_kind __attribute__((section(".data"))) = -1;    /* and its machine */
 
@@ -636,6 +663,13 @@ static void sample_list(void *c, void *view, int slot, int kind)
         return;
     }
     if (slot != list_slot) {
+        /* v0.27: only a turn of SAMP brings the list; a value set otherwise (TRACK + PLAY's
+         * clear, a project or sound loaded) is taken as it is (owner: clearing a sample track
+         * opened the list) */
+        if (!smp_lst_open && now - smp_samp_turned > 300u) {
+            list_slot = slot;
+            return;
+        }
         if (!smp_lst_open) {
             smp_lst_open = 1;
             smp_lst_orig = list_slot;
@@ -919,6 +953,23 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
                 on(c, x + 1, cy - 1); on(c, x + 1, cy); on(c, x + 1, cy + 1); on(c, x + 2, cy);   /* its flag */
             }
             vline(c, x0 + w - 1, cy - SMP_WAVE_AMP - 2, cy + SMP_WAVE_AMP + 2, 0);
+            /* v0.27: the slice playing now (where the voice reads), a bar over and under it
+             * (owner: as the DT2 lights the slice that plays) */
+            int ph = smp_playhead(UI_TRACK);
+            if (ph >= 0) {
+                int xp = x0 + (int)((unsigned)ph * (unsigned)(w - 2) / POS_ONE);
+                for (int j = 0; j < n; j++) {
+                    int a = SLICE_X(j), b = SLICE_X(j + 1);
+                    if (xp >= a && (xp < b || j == n - 1)) {
+                        for (int x = a + 1; x < b; x++)
+                            for (int y = 0; y < 2; y++) {
+                                on(c, x, cy - SMP_WAVE_AMP - 4 + y);
+                                on(c, x, cy + SMP_WAVE_AMP + 3 + y);
+                            }
+                        break;
+                    }
+                }
+            }
         }
 #undef SLICE_X
     } else if (kind == SMP_WERP_KIND) {         /* the whole sample, its segments marked */
