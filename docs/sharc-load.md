@@ -204,3 +204,47 @@ Three independent points agree:
 
 ## Open
 - **What the count covers.** This is the handler's own count. Whether it includes all voice rendering (the engine task at `0x1c9fe7` loops on the handler) or leaves some DSP work out has not been read.
+
+## The frame-time guard (v0.27, `dnfw.perc.guard`)
+
+**Why.** The owner's v0.26 report: two PERC tracks p-locked, with a sample track and an
+FM Tone track, gave a short loud click and then no audio at all, the sequencer still
+running, until a reboot; at other times an FM track picked up a gritty, bit-crushed layer
+while PERC played. In the runner (2026-10-27):
+
+- **Not memory.** An FM Tone track with two PERC tracks struck beside it differs from FM
+  Tone alone in one block (28 words, the block after the strike); the same block differs
+  in the same way when the two tracks are stock MIDI, FM Drum or WaveTone tracks struck
+  instead. A diff of all DSP memory after the strike showed no stock word written by PERC.
+  So PERC does not overwrite what the stock engine uses.
+- **Time.** In the model, an exact Machinedrum voice costs 3,000..29,000 instructions a
+  block sounding, and up to 41,000 when a note and a parameter change (a p-lock, TYPE
+  above all) meet in one block: the host's scale function, the machine's init and trig.
+  Our voices run inside the frame's work after the stock machines (the splice at sw
+  `0x1c9448`), where the instrument had about 37 % of a 666,667-cycle frame free
+  (above). Two such voices with a sample voice can take the frame past its end, and the
+  audio stopping is what a missed frame looks like.
+
+**What it does.** Once a frame, at PERC's entry, the frame's length is MARK0 minus the
+last frame's MARK0 (entry_mark.asm stamps EMUCLK as the handler calls the per-block
+routine), kept when it is between 300,000 and 3,000,000 cycles; the limit is 0.6 of it
+(400,000 until a frame has been measured). Before each PERC voice (the Monomachine
+machines among them) and each sample voice: how far into the frame we are (EMUCLK minus
+MARK0), plus the voice's expected cost (its last cost, measured around its render, times
+1.5, at least 60,000), must be under the limit; if not, the voice is silent for that block
+(its buffer zeroed, its state kept) and counted, and its expected cost eased by a
+quarter so that it is tried again. 0.6 leaves the stock work after our voices (effects,
+mix: about 0.29 of a frame on the instrument) and some room for interrupts.
+
+**Words** (DM, free between PERC's scratch and idle_load's state): LIMIT 0x2de000, the
+last MARK0 0x2de004, skips 0x2de008, the voice's start 0x2de00c, the frame's length
+0x2de010, the zeroing loop's count 0x2de014, PERC's slots' costs 0x2de040, the sample
+slots' 0x2de080.
+
+**Checked** (`sharc_waverider_m5.py` step 3g): the runner's EMUCLK does not move, so
+every voice plays and every voice stays bit-exact to its model (all the other steps);
+fed as if the frame were spent before track 1's voice, track 1 is silent from that block
+with its state kept, the skips counted one a block, track 0 bit-exact throughout.
+
+**Not yet measured on the instrument:** the real cost of each voice and how often the
+guard skips. The limit is a fraction of the measured frame, not a guess at the clock.

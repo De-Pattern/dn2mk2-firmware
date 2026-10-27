@@ -504,7 +504,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,smp,link,rec,pvmix,tdm,stock,ping,shft,gran,mnm,frame")   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,smp,link,rec,pvmix,tdm,stock,ping,shft,gran,mnm,frame")   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -576,6 +576,12 @@ def main(argv=None):
                 wav("perc_amp_out.wav", runs["g0"]["amp_out"], a.seconds, wavs,
                     "TRX-BD at the amp's output, the end of the per-track chain")
             del s3, runs                        # each run holds a whole DSP memory: free them
+            gc.collect()
+
+        if "guard" in steps:
+            print("\nstep 3g: the frame-time guard")
+            results["3g_guard"] = step_guard(warm(), sound, machines, a.blocks)
+            show(results["3g_guard"])
             gc.collect()
 
         if "smp" in steps:
@@ -919,6 +925,87 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
             and all(x == 0.0 for x in back),
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
+
+
+# -- step 3g: the frame-time guard (v0.27, dnfw.perc.guard) ---------------------------------------
+
+def _after_emuclk(name: str) -> list[int]:
+    """sw addresses of the instructions after each `R8 = EMUCLK;` in NAME.asm (its object's offsets)."""
+    spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
+    src = [ln.split("//", 1)[0].strip() for ln in (SHARC / f"{name}.asm").read_text().splitlines()]
+    src = [c for c in src if c and not c.startswith(".") and not c.endswith(":")]
+    offs = spec["instruction_offsets"]
+    assert len(offs) == len(src), f"{name}: {len(offs)} offsets, {len(src)} instructions"
+    base = int(spec["load_sw"], 0) if isinstance(spec["load_sw"], str) else spec["load_sw"]
+    return [base + offs[k + 1] // 2 for k, c in enumerate(src) if c == "R8 = EMUCLK;"]
+
+
+def step_guard(init, sound, machines, blocks) -> dict:
+    """Two PERC tracks (0: TRX-SD, 1: EFM-SD), both struck on block 1. The runner's EMUCLK does
+    not move, so the guard plays every voice (control run: every block bit-exact, no skip). Then
+    the clock is fed as if the frame were spent before track 1's voice from block FORCE on: its
+    buffer is all zeros there, its voice state is what it was at PERC's entry (kept, not run),
+    the skip counter counts those blocks, and track 0 is bit-exact throughout."""
+    from dnfw.perc import guard as G
+    FORCE = 3
+    sd, efm = PM.NAMES.index("TRX-SD"), PM.NAMES.index("EFM-SD")
+    at = _after_emuclk("perc")
+
+    def fb(b):
+        f = base_frame(sound, machines, overrides=perc_words(sd), trigger=b == 1, others={1: 5},
+                       trigger_others=True)
+        for slot, w in perc_words(efm).items():
+            f.param(1, slot, w)
+        return f.to_bytes()
+
+    seen = {"entry": [], "exit": [], "block": [0]}
+
+    def runs(force):
+        seen["entry"].clear()
+        seen["exit"].clear()
+        blk = {"b": -1}
+
+        def at_perc(r):
+            blk["b"] += 1
+            seen["entry"].append([m2.word(r.state, PERC_L.state + 128 + 4 * k) or 0 for k in range(PM.STATE_WORDS)])
+
+        def at_smp(r):
+            if len(seen["exit"]) < len(seen["entry"]):
+                seen["exit"].append([m2.word(r.state, PERC_L.state + 128 + 4 * k) or 0 for k in range(PM.STATE_WORDS)])
+
+        def feed(r):
+            t = m2.word(r.state, PERC_L.C["t"]) or 0
+            if force and t == 1 and blk["b"] >= FORCE:
+                mark0 = m2.word(r.state, G.MARK0) or 0
+                r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const((mark0 + 0x10000000) & 0xFFFFFFFF)
+        return run_blocks(init, fb, blocks, extra_hooks={dsp.PERC_SW: at_perc, dsp.SMP_SW: at_smp, at[0]: feed})
+
+    ctl = runs(False)
+    ctl_skips = m2.word(ctl["state"].state, G.SKIPS) if ctl["ok"] else None
+    ctl_exact = perc_exact(ctl) if ctl["ok"] else None
+    fr = runs(True)
+    skips = m2.word(fr["state"].state, G.SKIPS) if fr["ok"] else None
+    t1 = [blk.get(1, {}).get("out", []) for blk in fr["perc"]] if fr["ok"] else []
+    t0_bad = sum(blk[0]["out_mismatches"] + blk[0]["state_mismatches"] for blk in fr["perc"] if 0 in blk) if fr["ok"] else -1
+    t1_early_bad = sum(blk[1]["out_mismatches"] + blk[1]["state_mismatches"]
+                       for b, blk in enumerate(fr["perc"]) if b < FORCE and 1 in blk) if fr["ok"] else -1
+    kept = fr["ok"] and all(seen["entry"][b] == seen["exit"][b] for b in range(FORCE, len(seen["exit"])))
+    n = {"emuclk_reads": [hex(x) for x in at], "control_skips": ctl_skips, "control_exact": ctl_exact,
+         "forced_skips": skips, "track1_peaks": [V.peak(o) if o else None for o in t1]}
+    checks = {
+        "the guard reads the clock twice a voice (before, after)": len(at) == 2,
+        "control: with the clock still, no voice is skipped and every voice is bit-exact":
+            ctl["ok"] and ctl_skips == 0 and ctl_exact[0] > 0 and ctl_exact[1:] == (0, 0),
+        "fed past the limit: track 1 is silent from that block (its buffer all zeros)":
+            fr["ok"] and len(t1) == blocks and all(all(x == 0.0 for x in t1[b]) for b in range(FORCE, blocks))
+            and max(V.peak(t1[b]) for b in range(FORCE)) > 0.0,   # (it sounded before)
+        "... its voice state kept as it was (not run)": kept,
+        "... the skips counted, one a block": skips == blocks - FORCE,
+        "... and track 0, and track 1 before it, bit-exact to the model": t0_bad == 0 and t1_early_bad == 0,
+    }
+    for r in (ctl, fr):
+        r.pop("state", None)
+    return {"ok": all(checks.values()), "checks": checks, "numbers": n}
 
 
 # -- step 3b: the sample machines (v0.13, docs/sampler.md) ----------------------------------------

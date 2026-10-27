@@ -477,6 +477,9 @@ def main() -> int:
                      # v0.26: FUNC + RIGHT splits the picked slice in two, FUNC + LEFT removes it
                      f"press:17,wait:2,right,wait:3,release:17,wait:3,mem:{g['slc_ns']}:4,mem:{g['slc_sl']}:48,"
                      f"press:17,wait:2,left,wait:3,release:17,wait:3,mem:{g['slc_ns']}:4,"
+                     # v0.27: FUNC held, E moves the start at its normal step (FUNC + YES's preview between moves)
+                     f"mem:{g['slc_cur']}:4,mem:{g['slc_sl']}:36,press:17,wait:2,spin:4:3,wait:5,release:17,wait:3,"
+                     f"mem:{g['slc_sl']}:36,"
                      f"no,wait:6,mem:{g['slc_state']}:4,"
                      f"{pk},tap:18,wait:6,press:33,wait:6,release:33,wait:6,press:34,wait:6,release:34,wait:6,"
                      f"press:26,wait:6,release:26,wait:6")
@@ -505,6 +508,10 @@ def main() -> int:
                              and split[7] == 70000
                              and split[9:12] == [72000, 140000, 72000],   # slice 3, as it was
                              "removed": int(m[f"{g['slc_ns']}@4"], 16) == 3,
+                             "FUNC + E: the normal step": (lambda c, a, b: b[3 * c] - a[3 * c] >= 3 * (0x23280 // 128))(
+                                 int(m[f"{g['slc_cur']}@5"], 16),
+                                 _st.unpack(">9I", bytes.fromhex(m[f"{g['slc_sl']}@6"])),
+                                 _st.unpack(">9I", bytes.fromhex(m[f"{g['slc_sl']}@7"]))),
                              "closed": int(m[g["slc_state"]], 16) == 0,
                              # trig 9, 10 (the bottom row's first two: the lowest notes) slices
                              # 1, 2; trig 2 (the top row: a higher note) a later one
@@ -512,7 +519,7 @@ def main() -> int:
                     good = all(facts.values())
                     why = str(facts) + f" notes {notes}"
                 return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
-                 "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; KEYBOARD on a SLICE track: trigs 9, 10 play slices 1, 2 and trig 2 a later one (the keys' notes in order)"
+                 "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; FUNC + E moves at the normal step; KEYBOARD on a SLICE track: trigs 9, 10 play slices 1, 2 and trig 2 a later one (the keys' notes in order)"
                               if good else why)
             gate("SLICE menus and SLICES keys (ColdFire)", *cached("SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body))
 
