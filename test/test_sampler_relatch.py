@@ -12,7 +12,7 @@ from dnfw.sampler import live as SL, machines as SM            # noqa: E402
 T = SM.TYPE_OF["SLICE"]
 
 
-def _run(when: int | None, blocks: int = 14):
+def _run(when: int | None, blocks: int = 40):
     beat = len(SL.test_samples()[3])
     sl = [(), (), (), [(beat * k // 16, beat * (k + 1) // 16, beat * k // 16) for k in range(16)]]
     h = SL.Harness(0, slices=sl)
@@ -32,7 +32,13 @@ def test_a_slice_lock_a_block_late_is_taken():
     assert all(on[b] == late[b + 1] for b in range(8, 13))
 
 
+def test_a_note_a_few_blocks_late_is_taken():
+    # the key's note (here SLCE) four blocks after its trigger (KEYBOARD's first press)
+    on, late = _run(6), _run(10)
+    assert all(on[b] == late[b + 4] for b in range(12, 30))
+
+
 def test_a_change_long_after_the_note_is_not_a_note():
-    # SLCE turned well after the note: the note goes on with its slice (as before)
-    base, turned = _run(None), _run(10)
+    # SLCE turned 16 ms and more after the note: the note goes on with its slice (as before)
+    base, turned = _run(None), _run(6 + 24 + 2)
     assert base == turned

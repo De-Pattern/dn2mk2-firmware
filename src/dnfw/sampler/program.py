@@ -108,9 +108,12 @@ def ctl(p: Prog, d: int, rec: int, k146: int) -> None:
 # first RELATCH_BLOCKS blocks, a change of SLCE or of the note is taken as the note again
 # (C['trig'] = 1: the old start fades over the block, the right slice starts). Each slot:
 # SLCE, the note cell's word, the blocks since its note (in the room W2's random table
-# had, which v0.28 left free).
+# had, which v0.28 left free). The owner's account of it (2026-10-27): in KEYBOARD mode,
+# the first press of a new key plays the slice before "real quick", then its own; later
+# presses of that key are right: the key's note reaches the DSP after its trigger. 24
+# blocks (16 ms) covers that; a turn of SLCE that soon after a note means that note.
 RELATCH = 0x2E0100
-RELATCH_BLOCKS = 2
+RELATCH_BLOCKS = 24
 
 
 def relatch(p: Prog, L: Layout) -> None:
