@@ -666,6 +666,45 @@ def main() -> int:
             gate("sample list, browser, playhead (ColdFire)",
                  *cached("sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body))
 
+        # 6h. v0.28: the Monomachine machines' pages drawn as the Monomachine's (each machine its
+        # own screen, none the stock grid), and their choices' detents (WPRS, two choices: four
+        # detents a choice, through smp_quant as the stock setter calls it)
+        if "smp_quant" in lay:
+            from dnfw.mnm import machines as MMx    # noqa: PLC0415
+            from dnfw.perc import machines as PMx   # noqa: PLC0415
+            kit = 0x4210C08C
+            snd0 = kit + 52
+            st = ["wait:2", "png:stock"]
+            for ty in MMx.TYPES:
+                st += [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", "wait:20", f"png:m{ty}"]
+            wslot = PMx.PARAMS[3][1]             # DPRO-WAVE's WPRS: the fourth place
+            st += [f"poke:{snd0 + 0xDE:#x}:{MMx.TYPES[MMx.NAMES.index('DPRO-WAVE')]:02x}",
+                   f"poke:{snd0 + 0x14 + 2 * wslot:#x}:0000", "wait:4"]
+            st += [f"call:{lay['smp_quant']:#x}:sound0:{wslot}:0x100"] * 4
+            js = work / "mnmpages.json"
+            mp_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                      "--snapshot", snap, "--steps", ",".join(st), "--png-dir", work / "mnmpages", "--json", js]
+
+            def mp_body(tdir):
+                rc, out = run("mnm pages", mp_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and js.exists():
+                    r = json.loads(js.read_text())
+                    shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in r["screens"]}
+                    pages = [shots[f"m{ty}"] for ty in MMx.TYPES]
+                    d0 = [c["d0"] for c in r["direct_calls"]]
+                    top = PMx.PARAMS[3][3]
+                    on = (95 * 2 * top + 127) // 254 << 8
+                    facts = {"each machine its own page, none the stock grid":
+                             len(set(pages)) == len(pages) and shots["stock"] not in pages,
+                             "WPRS: three detents keep OFF, the fourth gives ON": d0 == [0, 0, 0, on]}
+                    good = all(facts.values())
+                    why = str(facts) + f" d0 {d0}"
+                return good, ("the five Monomachine pages drawn, each its own; a two-choice control "
+                              "four detents a choice" if good else why)
+            gate("Monomachine pages and detents (ColdFire)",
+                 *cached("Monomachine pages and detents (ColdFire)", [mp_cmd, sorted(EMU_ENV.items())], mp_body))
+
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest
             print("  (waiting for the SHARC runner)", flush=True)
