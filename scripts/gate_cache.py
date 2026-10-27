@@ -53,7 +53,12 @@ def _real(path: str, work: pathlib.Path) -> str:
 
 
 def norm_cmd(cmd, work: pathlib.Path) -> list[str]:
-    return [_norm(str(c), work) for c in cmd]
+    """A command with this run's work directory written @WORK, wherever it appears in an
+    argument (v0.28: the sample link's --steps name its symbols file inside the work
+    directory, so its key changed every run and the step was never reused; the file itself
+    is traced, @WORK/link16_syms.json, and compared like any input)."""
+    w = str(work)
+    return [_norm(str(c), work).replace(w + os.sep, "@WORK" + os.sep) for c in cmd]
 
 
 def inputs(trace_dir: pathlib.Path, work: pathlib.Path, logs: pathlib.Path) -> dict[str, str]:
