@@ -612,10 +612,11 @@ def main() -> int:
             # closed; a turn of SAMP (encoder D) opens it
             # (the emulator's encoders do not move a stock page's value, so a turn is the stock
             # setter's own call of smp_quant on SAMP's slot, then the value it writes)
-            def turn(v):
+            def turn(v):                        # (and a redraw asked for, as the turn's own would)
                 return [f"call:{lay['smp_quant']:#x}:sound0:{SMx.RECORDS[SMx.SAMP_REC][0]}:{v << 8:#x}",
-                        f"poke:{samp0:#x}:{v:02x}00"]
-            st += samp_all(3) + ["wait:10", "png:l0", mem(lay["smp_lst_open"])]
+                        f"poke:{samp0:#x}:{v:02x}00", f"poke:{lay['smp_overlay_dirty']:#x}:00000001"]
+            st += samp_all(3) + [f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:10", "png:l0",
+                                 mem(lay["smp_lst_open"])]      # (redrawn: the change is seen, and opens nothing)
             st += samp_all(2) + ["wait:10"] + turn(4) + ["wait:10", "png:l1", mem(lay["smp_lst_open"]), "down",
                                  "wait:8", "png:l2", mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2),
                                  mem(lay["smp_lst_open"])]
