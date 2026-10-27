@@ -448,7 +448,7 @@ int mnm_page_draw(void *view, void *c, int mi)
         text(c, SMALL, 2 + (44 - text_w(SMALL, f, len)) / 2, 19, f, len, 0);
     }
     text(c, SYM, 3, 11, ">MNM", 4, 1);
-    fill(c, 1, 2, 45, 6, 1);
+    fill(c, 0, 1, 46, 7, 1);                    /* a row clear above and below the letters */
     {
         const char *f = mnm_fam_short[mi], *m = mnm_mach_short[mi];
         int x = 1 + text(c, SMALL, 1, 2, f, slen(f, 4), 0);
