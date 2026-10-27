@@ -138,15 +138,21 @@ def run(name, cmd, log_dir, env=None, cwd=ROOT, trace=None):
     return proc.returncode, out
 
 
-def own_inputs() -> dict[str, str]:
+def own_inputs(own=None) -> dict[str, str]:
     """What this script's verdicts read: itself, the cache and tracer, and every module of
-    the repository it has imported (the build's layout among them)."""
-    files = {HERE / "ship_gate.py", HERE / "gate_cache.py", HERE / "gate_trace" / "sitecustomize.py",
-             ROOT / "src/dnfw/mods/waverider_code.json", ROOT / "src/dnfw/waverider/sharc_code.json"}
-    for m in list(sys.modules.values()):
-        f = getattr(m, "__file__", None)
-        if f and pathlib.Path(f).resolve().is_relative_to(ROOT):
-            files.add(pathlib.Path(f).resolve())
+    the repository it has imported (the build's layout among them). OWN (v0.28): a step
+    whose verdict reads only those files (and its own traced run): the cache, the tracer
+    and OWN."""
+    files = {HERE / "gate_cache.py", HERE / "gate_trace" / "sitecustomize.py"}
+    if own is not None:
+        files |= {pathlib.Path(f).resolve() for f in own}
+    else:
+        files |= {HERE / "ship_gate.py", ROOT / "src/dnfw/mods/waverider_code.json",
+                  ROOT / "src/dnfw/waverider/sharc_code.json"}
+        for m in list(sys.modules.values()):
+            f = getattr(m, "__file__", None)
+            if f and pathlib.Path(f).resolve().is_relative_to(ROOT):
+                files.add(pathlib.Path(f).resolve())
     out = {}
     for f in sorted(files):
         if f.is_file():
@@ -186,9 +192,11 @@ def main() -> int:
 
     reused: dict[str, str] = {}
 
-    def cached(name, cmds, body):
+    def cached(name, cmds, body, own=None):
         """A long step: reused if a pass with these commands read nothing that has changed
-        since (gate_cache); else BODY(trace) -> (ok, detail), and a pass is kept."""
+        since (gate_cache); else BODY(trace) -> (ok, detail), and a pass is kept. OWN: the
+        files the step's verdict reads (v0.28, the SHARC runner's: gate_sharc.py), else
+        all of this script's own inputs."""
         key = [gate_cache.norm_cmd(c, work) for c in cmds]
         rec = gate_cache.lookup(ROOT, name, key, work)
         if rec:
@@ -200,7 +208,7 @@ def main() -> int:
         ok, detail = body(tdir)
         if ok:
             ins = gate_cache.inputs(tdir, work, logs)
-            ins.update(own_inputs())
+            ins.update(own_inputs(own))
             gate_cache.store(ROOT, name, key, ins, detail, sha)
         return ok, detail
 
@@ -231,17 +239,18 @@ def main() -> int:
                  "tests; its result would not apply to this file")
             # v0.25: beside the ColdFire steps (its own core); its verdict is taken before
             # the unit tests
-            sharc_cmd = [sys.executable, "scripts/sharc_waverider_m5.py", "--image", a.stock,
-                         "--digikit", a.digikit_sharc]
+            # v0.28: the step is scripts/gate_sharc.py's; its reuse record holds what the
+            # runner read and that file, not this script or the ColdFire's artefacts
+            import gate_sharc                   # noqa: PLC0415
+            sharc_cmd = gate_sharc.command(a.stock, a.digikit_sharc)
 
             def sharc_body(tdir):
                 rc, out = run("sharc_m5", sharc_cmd, logs, trace=tdir)
-                return rc == 0, ("all steps PASS, incl. types 0-4 bit-identical to stock"
-                                 if rc == 0 else out[-800:])
+                return gate_sharc.verdict(rc, out)
 
             def sharc_thread():
                 try:
-                    sharc_box.append(cached("SHARC runner", [sharc_cmd], sharc_body))
+                    sharc_box.append(cached("SHARC runner", [sharc_cmd], sharc_body, own=gate_sharc.OWN))
                 except Exception as e:          # noqa: BLE001
                     sharc_box.append((False, f"the runner did not run: {e}"))
             sharc_box: list = []
@@ -601,16 +610,21 @@ def main() -> int:
                    "tap:2", "wait:6"]
             # v0.27: SAMP set without a turn (TRACK + PLAY's clear, a load) leaves the list
             # closed; a turn of SAMP (encoder D) opens it
+            # (the emulator's encoders do not move a stock page's value, so a turn is the stock
+            # setter's own call of smp_quant on SAMP's slot, then the value it writes)
+            def turn(v):
+                return [f"call:{lay['smp_quant']:#x}:sound0:{SMx.RECORDS[SMx.SAMP_REC][0]}:{v << 8:#x}",
+                        f"poke:{samp0:#x}:{v:02x}00"]
             st += samp_all(3) + ["wait:10", "png:l0", mem(lay["smp_lst_open"])]
-            st += samp_all(2) + ["wait:10", "spin:3:2", "wait:10", "png:l1", mem(lay["smp_lst_open"]), "down",
+            st += samp_all(2) + ["wait:10"] + turn(4) + ["wait:10", "png:l1", mem(lay["smp_lst_open"]), "down",
                                  "wait:8", "png:l2", mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2),
                                  mem(lay["smp_lst_open"])]
-            st += samp_all(2) + ["wait:10", "spin:3:1", "wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
+            st += samp_all(2) + ["wait:10"] + turn(3) + ["wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
                                  "wait:8", "png:b1", mem(lay["smp_fb_open"]), "yes", "wait:8", "png:b2",
                                  mem(lay["smp_fb_folder"]), "down", "wait:2", "yes", "wait:8", "png:b3",
                                  mem(samp0, 2), mem(lay["smp_fb_open"]), mem(lay["smp_lst_open"])]
             # the SAMPLE ACTION menu: into "loops", RIGHT on its sample, DELETE, asked, YES
-            st += samp_all(3) + ["wait:10", "spin:3:-1", "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
+            st += samp_all(3) + ["wait:10"] + turn(2) + ["wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
                                  "down", "wait:4", "yes", "wait:6", "right", "wait:6", "png:m1", "down", "wait:3",
                                  "down", "wait:3", "yes", "wait:6", "png:m2", "yes", "wait:8", "png:m3",
                                  mem(M + 8 + 16 + 4, 4)]

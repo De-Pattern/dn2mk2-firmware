@@ -22,7 +22,10 @@ its processes opened, the directories they listed, the native libraries and prog
 ran, and the gate's own inputs. Each is hashed (sha256) when the step passes. One
 differing byte, or a missing file, means the step runs again (`scripts/gate_cache.py`).
 The record's `reused` field says which steps were reused and from which pass. Never
-widen what counts as "unchanged".
+widen what counts as "unchanged". (v0.28, owner 2026-10-27: the SHARC runner's verdict is
+`scripts/gate_sharc.py`'s, so its record holds what the runner read and that file, not
+`ship_gate.py` or the ColdFire's artefacts, which it never reads; DSP identity, never
+reused, ties its pass to the build.)
 
 - The pass is recorded in `BUILD.syx.gate.json` with the build's sha256. A file
   whose sha256 differs from its record has not been gated.
