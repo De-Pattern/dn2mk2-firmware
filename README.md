@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.26** | 2026-10-26 | The slice editor as the DT2's (FUNC + RIGHT splits, FUNC + LEFT removes, FUNC + YES previews, FUNC + G moves, playhead); KEYBOARD plays slices in order; no pop-ups (sample list, slice menus); PLAY/MODE/BARS/GRID four detents a choice; browser NO closes; name screen FUNC + PLAY clears, grid wraps, cursor moves on | `builds/v0.26-SLICES/` | yes |
+| **v0.27** | 2026-10-27 | v0.26 and MNM-1 merged into one line (the five Monomachine machines, without CZ/RESONATOR); the DSP frame-time guard against the audio dropout; TRACK + PLAY no longer opens the sample list; FILE NAME arrows repeat; slice editor moves with FUNC held; the playing slice marked; p-locked controls lit | `builds/v0.27-GUARD/` | yes |
+| v0.26 | 2026-10-26 | The slice editor as the DT2's (FUNC + RIGHT splits, FUNC + LEFT removes, FUNC + YES previews, FUNC + G moves, playhead); KEYBOARD plays slices in order; no pop-ups (sample list, slice menus); PLAY/MODE/BARS/GRID four detents a choice; browser NO closes; name screen FUNC + PLAY clears, grid wraps, cursor moves on | `builds/v0.26-SLICES/` | yes |
 | MNM-1 | 2026-10-26 | **A separate line**: v0.25 without CZ/RESONATOR, plus the Monomachine's SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens and VO-6 | `builds/MNM-1-MONOMACHINE/` | yes |
 | v0.25 | 2026-10-26 | The playhead on the waveform; the DT2's sample list and +Drive-style folder browser (SAMPLE ACTION: load, rename, delete); the recorder as the DT2's (RECORDING, NORMALIZING, TRIM with preview, FILE NAME, ASSIGN); GRID/SLICE slice locks; KEYBOARD's next 16 slices; an LFO on SAMP steps through your samples; the in-browser patcher | `builds/v0.25-BROWSER/` | yes |
 | v0.24 | 2026-10-25 | The Machinedrum's nine P-I machines on PERC (PI-BD, SD, MT, ML, MA, RS, RC, CC, HH) from your MD firmware, +6 dB; the first hit after choosing an MD machine is now the MD's own | `builds/v0.24-PI/` | yes |
@@ -63,6 +64,75 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.27 — GUARD (the lines merged, the DSP's frame-time guard, your v0.26 notes)
+
+`DN2mod_v0.27_GUARD_OS1.11.syx`
+sha256 `6e5acd44434c7c603318cc02dbbdfd5a69e576cc9600ae3295de90cf8b30c2e5`
+Gate: CLEARED TO FLASH, 2026-10-27 (USB size 2,049,189 of 2,097,152; DSP image 1,014,276 of 1,048,575). Source: commit `4f25038`. Docs: `docs/sharc-load.md` (the guard), `docs/mnm.md`, `docs/sampler.md`.
+
+**The lines are one again.** v0.27 is v0.26 merged into the Monomachine line (MNM-1): everything
+in v0.26, plus the five Monomachine machines (SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens, VO-6),
+without CZ PHASE and RESONATOR. v0.26 stays as the fallback. The patcher asks for the
+**Monomachine SFX-6 OS 1.32B** file as a fourth file for this build. The Monomachine machines are
+as they were in MNM-1 (their fixes and redrawn pages come next).
+
+**The DSP's frame-time guard (your audio dropout).** Two PERC tracks p-locked, with a sample
+track and an FM track, gave a loud click and then no audio until a reboot. In the emulator
+PERC does not overwrite anything the stock engine uses; what it does is take time: an exact
+Machinedrum voice costs up to about 41,000 DSP instructions a block when a note and a p-lock
+(TYPE above all) land together, and our voices run inside the DSP's per-frame work, after the
+stock machines. Too much of that and the frame runs past its end, which stops the audio.
+Now, before each PERC voice (the Monomachine machines included) and each sample voice, the DSP
+reads its own cycle counter: a voice that will not fit in what is left of this frame is
+**silent for that one block** (a tiny gap on that track) instead of overrunning. The frame's
+length and each voice's cost are measured on the DSP as it runs. (The first v0.27 build
+cleared every emulator check but failed a unit test: the guard cleared a skipped voice's buffer
+through an address register our code never steps through, as its wrap-around is not proven off.
+It now uses the one the rest of our code does. That build was never sent.)
+
+**Your v0.26 notes.**
+- **TRACK + PLAY's clear no longer opens the sample list.** Only turning SAMP opens it (a value
+  set any other way, a clear, a load or an assign, is taken as it is). This is also why an
+  assign after recording could seem not to take: the list popped up, and NO put SAMP back.
+- **Assign to a track** (after recording, a [TRIG] key): the track plays the new slot (see
+  above).
+- **FILE NAME: LEFT/RIGHT repeat while held**, after a short wait (0.4 s, then 12 a second):
+  in the character grid (FUNC held) and along the name.
+- **The slice editor: E, H and D move at their normal step with FUNC held**, so you can keep
+  FUNC down and press YES to preview between moves.
+- **SLICE/GRID page 2: the slice playing now is marked** with a bar over and under it.
+- **P-locked controls are lit** (drawn inverted, as the stock pages draw them) on the sample
+  machines' pages and PERC's, while a trig with locks is held.
+- (The "SMP" machine-select label idea is dropped, as you said.)
+
+**Test** (after the regression check):
+1. Your v0.26 crash case: two PERC tracks with p-locks (TYPE too), a sample track, an FM track.
+   No dead audio. If the DSP is out of time you may hear a short gap on a PERC or sample track;
+   tell me how often and on which tracks.
+2. A busy pattern with FM tracks and one PERC track: no gaps (if there are, the limit is too
+   tight; tell me).
+3. A sample track: TRACK + PLAY: the list does not open; turn SAMP: it does.
+4. Record, TRIM, NAME, ASSIGN to a track with a [TRIG] key: that track's SAMP is the new slot.
+5. FILE NAME: hold FUNC, hold RIGHT: the grid steps on by itself after a moment; hold RIGHT
+   without FUNC: the cursor moves along.
+6. Slice editor: hold FUNC, turn E: the start moves as without FUNC; press YES: preview.
+7. SLICE track, page 2, play it: the playing slice is marked.
+8. Hold a trig with p-locks on a sample track and on a PERC track: the locked controls are lit.
+9. The Monomachine machines: MNM-1's tests (above), as a check that they came across.
+
+**Known issues / not done.**
+- **The guard's limit** (0.6 of the frame) is set from the measured frame and the stock work
+  we measured in September, not from a reading of this build: it may skip more or less than it
+  needs to. Your report sets it.
+- **Monomachine**: MNM-1's known issues still stand (dead notes, mostly VO-6; quiet levels;
+  choice knobs needing several turns; empty params not drawn as empty squares; DDRW's BR1/BR2
+  inaudible); fixes and the pages redrawn as the Monomachine's come next. Their own instruction
+  budget is still in place beside the guard.
+- **SHIFT and GRAN** are still in (to be removed next, as decided); PING stays for now.
+- **The recorder's input** only listening after SRC is switched away and back (your v0.24
+  report): not looked at yet.
+- **Not seen on hardware yet**: all of the above; checked in the emulators.
 
 ## v0.26 — SLICES (the slice editor as the DT2's, and your v0.25 notes)
 
