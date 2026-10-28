@@ -336,3 +336,17 @@ def test_no_source_is_left_with_its_branch_targets_unresolved():
     for name in ("perc", "smp", "ping", "block_count", "pvmix", "entry_mark", "idle_load"):
         src = (SHARC / f"{name}.asm").read_text(encoding="utf-8")
         assert not re.search(r"JUMP\s+0x0;|=\s*0x0;\s*// return address", src), name
+
+
+def test_every_branch_to_a_label_lands_inside_its_own_code():
+    # v0.28: the sample span grew, pvmix moved, and its jumps still named the old place
+    # (the gate's runner caught it): a `JUMP 0x.. // -> label.` lands in its own object
+    import json
+    import re
+    for name in ("perc", "smp", "ping", "pvmix", "block_count"):
+        spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
+        lo = int(spec["load_sw"], 16) if isinstance(spec["load_sw"], str) else spec["load_sw"]
+        hi = lo + len(bytes.fromhex(spec["object_parcels_be"])) // 2
+        src = (SHARC / f"{name}.asm").read_text(encoding="utf-8")
+        for m in re.finditer(r"JUMP\s+(0x[0-9a-fA-F]+);\s*//\s*->\s*\w+\.", src):
+            assert lo <= int(m.group(1), 16) < hi, (name, m.group(0))
