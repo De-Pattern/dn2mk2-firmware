@@ -1704,6 +1704,23 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
 _Static_assert(0x800068E4u + 34u + 2u * SAMP_SLOT >= 0x80005E60u + 2748u, "SAMP's mirror cells lie past the frame");
 #define SOUND_TYPE 0xDE
 
+/* v0.29: the modulation's reach follows its depth (the owner: depth did not move it as it
+ * should). The stock apply moves SAMP by up to 127 slot steps at full depth; over a pool of
+ * N loaded samples that wrapped round them many times, so any depth past a few sounded the
+ * same. Now the offset is scaled: full depth reaches N loaded samples either way, half
+ * depth N / 2, and it stops at the first and last loaded sample (as the DT2's slots stop at
+ * their ends) rather than wrapping. SLICE (a SLICE track's SLCE on a slice, not NOTE)
+ * likewise: full depth reaches the sample's slice count, held between its first and last
+ * slice -- never past them, and never down onto NOTE. */
+static int mod_scale(int k, int n)              /* a stock offset (+-127) -> +-n, rounded */
+{
+    int x = k * n;
+    return (x >= 0 ? x + 64 : x - 64) / 128;
+}
+
+#define SLCE_SLOT 44                            /* SLCE's frame slot (sound + 20 + 2 x 44) */
+#define SLICE_TYPE 13
+
 void smp_mod_apply(void *mirror)
 {
     MOD_APPLY(mirror);
@@ -1717,31 +1734,47 @@ void smp_mod_apply(void *mirror)
         volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
         int heard = *cell >> 8;
         int k = heard - (int)set;
-        if (k == 0 || set == 0 || set > POOL_SLOTS)
-            continue;
-        int n = 0, at = -1, exact = 0;          /* the loaded slots; the last at or below SAMP's */
-        for (int j = 0; j < POOL_SLOTS; j++) {
-            if (smp_slot_empty(j))
-                continue;
-            if (j <= (int)set - 1) {
-                at = n;
-                exact = j == (int)set - 1;
+        if (k != 0 && set != 0 && set <= POOL_SLOTS) {
+            int n = 0, at = -1, exact = 0;      /* the loaded slots; the last at or below SAMP's */
+            for (int j = 0; j < POOL_SLOTS; j++) {
+                if (smp_slot_empty(j))
+                    continue;
+                if (j <= (int)set - 1) {
+                    at = n;
+                    exact = j == (int)set - 1;
+                }
+                n++;
             }
-            n++;
-        }
-        if (n == 0)
-            continue;
-        /* SAMP on an empty slot sits between two loaded ones: a step up is the one above,
-         * a step down the one below */
-        int base = exact ? at : (k > 0 ? at : at + 1);
-        int idx = ((base + k) % n + n) % n;
-        for (int j = 0; j < POOL_SLOTS; j++) {  /* the idx-th loaded slot */
-            if (smp_slot_empty(j))
-                continue;
-            if (idx-- == 0) {
-                *cell = (u16)((j + 1) << 8);
-                break;
+            if (n > 0) {
+                int off = mod_scale(k, n);
+                /* SAMP on an empty slot sits between two loaded ones: a step up is the one
+                 * above, a step down the one below */
+                int base = exact ? at : (off > 0 ? at : at + 1);
+                int idx = base + off;
+                if (idx < 0) idx = 0;
+                if (idx > n - 1) idx = n - 1;
+                for (int j = 0; j < POOL_SLOTS; j++) {   /* the idx-th loaded slot */
+                    if (smp_slot_empty(j))
+                        continue;
+                    if (idx-- == 0) {
+                        *cell = (u16)((j + 1) << 8);
+                        break;
+                    }
+                }
             }
         }
+        if (snd[SOUND_TYPE] != SLICE_TYPE)
+            continue;
+        u32 sset = snd[20 + 2 * SLCE_SLOT];     /* 0..127: slice (value >> 1), 0 NOTE */
+        volatile u16 *scell = MIRROR_CELL(b, SLCE_SLOT);
+        int sk = (int)(*scell >> 8) - (int)sset;
+        int slot = (int)(*cell >> 8) - 1;       /* the sample it plays, after the above */
+        int ns = 0;
+        if (sk == 0 || (sset >> 1) == 0 || slot < 0 || !smp_slices(slot, &ns) || ns < 1)
+            continue;
+        int sl = (int)(sset >> 1) + mod_scale(sk, ns);
+        if (sl < 1) sl = 1;
+        if (sl > ns) sl = ns;
+        *scell = (u16)((u32)(2 * sl) << 8);
     }
 }

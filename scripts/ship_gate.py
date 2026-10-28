@@ -640,10 +640,12 @@ def main() -> int:
                                  "down", "wait:4", "yes", "wait:6", "right", "wait:6", "png:m1", "down", "wait:3",
                                  "down", "wait:3", "yes", "wait:6", "png:m2", "yes", "wait:8", "png:m3",
                                  mem(M + 8 + 16 + 4, 4)]
-            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0200", f"poke:{cell:#x}:0400",
+            # (v0.29: the reach scaled by depth over the 3 loaded samples, held at the ends:
+            # +43 one sample on, +125 to the last and no further, +1 none)
+            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0200", f"poke:{cell:#x}:2d00",
                    f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"poke:{cell:#x}:0000", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"poke:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
+                   f"poke:{cell:#x}:7f00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
+                   f"poke:{cell:#x}:0300", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
             js = work / "samplist.json"
             sl_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                       "--snapshot", snap, "--steps", ",".join(st), "--png-dir", work / "samplist", "--json", js]
@@ -668,8 +670,8 @@ def main() -> int:
                              and int(m[f"{lo}@9"], 16) == 0,
                              "DELETE in the SAMPLE ACTION menu empties the slot": m[hex(M + 28)] == "00000000"
                              and len({pathlib.Path(r["screens"][n]).read_bytes() for n in ("m1", "m2", "m3")}) == 3,
-                             "modulated SAMP through the loaded slots": [m[ce], m[f"{ce}@12"], m[f"{ce}@13"]]
-                             == ["0100", "0400", "0200"]}
+                             "modulated SAMP through the loaded slots, by depth, held at the last":
+                             [m[ce], m[f"{ce}@12"], m[f"{ce}@13"]] == ["0400", "0400", "0200"]}
                     good = all(facts.values())
                     why = str(facts)
                 return good, ("the playhead drawn where the DSP says; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
