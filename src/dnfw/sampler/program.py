@@ -39,7 +39,7 @@ SC_WORDS = ("t", "count", "tr", "trig", "sbase", "type", "rate", "kill",
             # v0.25: the recorder's preview (pvmix): its next word's address, the words left,
             # the loop's count and its save area (R0..R3, R12, R13, I1, ASTAT)
             "pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa",
-            "spare11",
+            "pvl0", "pvln",                 # v0.30: the preview's start and length, the latter + LOOP_BIT to loop
             "sr", "dir", "add", "smode", "nseg", "nin", "nout", "acc", "pass", "lp",   # v0.15; v0.18 kill, add, pass, lp
             "xfn", "xfa", "xfi", "xfs",                # CFAD: its length, where it starts, 1/length, the shift
             # the recorder: its state (0 idle, 1 armed, 2 recording, 3 full), slot entry,
@@ -1853,6 +1853,10 @@ def recorder(p: Prog, L: Layout) -> None:
             p.iop(6, 8, "+", 6)
             p.st(C["pva"], 6)
             p.st(C["pvn"], 9)
+            p.st(C["pvl0"], 6)                # v0.30: where it starts again if it loops
+            p.ld(8, cmd + 20)                 # (the command's last word: nonzero, loop)
+            p.ifz(8, "NE", lambda: (p.iconst(12, PV_LOOP), p.iop(9, 9, "OR", 12)))
+            p.st(C["pvln"], 9)
         p.if_(2, "EQ", 12, preview, kind="i")
     p.e("COMP(R0, R1);")
     p._branch(lambda: p.r[0] != p.r[1], "NE", new_command, None)
@@ -2701,6 +2705,9 @@ PVMIX_TAIL = (0x5A5A0001, 0x5A5A0002, 0x5A5A0003)    # `R0 = TAIL[k];`: 48-bit p
 PVMIX_SAVE = (0, 1, 2, 3, 12, 13)
 
 
+PV_LOOP = 1 << 30                           # v0.30: pvln's loop bit
+
+
 def pvmix(p: Prog, L: Layout) -> None:
     """MIX_BUF += frames [pva, pva + 2 min(pvn, 16)) of the preview (int16 pairs, the low
     half first), on L and R alike; pva and pvn move on. Uses R0..R3, R12, R13, I1."""
@@ -2752,6 +2759,22 @@ def pvmix(p: Prog, L: Layout) -> None:
         p.ld(13, C["pva"])
         p.iop(13, 13, "+", 1)
         p.st(C["pva"], 13)
+        # v0.30: at its end, a looping preview starts again (the slice editor's D)
+        p.ld(0, C["pvn"])
+
+        def again():
+            p.ld(1, C["pvln"])
+            p.iconst(12, PV_LOOP)
+            p.iop(2, 1, "AND", 12)
+
+            def loop():
+                p.iconst(12, PV_LOOP - 1)
+                p.iop(1, 1, "AND", 12)
+                p.st(C["pvn"], 1)
+                p.ld(13, C["pvl0"])
+                p.st(C["pva"], 13)
+            p.ifz(2, "NE", loop)
+        p.ifz(0, "EQ", again)
     p.if_(0, "GT", 12, some, kind="i")
 
 

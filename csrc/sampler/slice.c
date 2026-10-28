@@ -76,6 +76,9 @@ static int zoom __attribute__((section(".data"))) = 0;      /* 0..5: the view is
 static int vzoom __attribute__((section(".data"))) = 0;     /* 0..3: the height x 1, 2, 4, 8 */
 static u32 view0 __attribute__((section(".data"))) = 0;     /* the view's first frame */
 static int dirty __attribute__((section(".data"))) = 0;
+static int pv_on __attribute__((section(".data"))) = 0;      /* FUNC + YES's preview playing */
+static u32 pv_at __attribute__((section(".data"))) = 0;      /* v0.30: FRAMES when it started */
+static int pv_loop __attribute__((section(".data"))) = 0;    /* v0.30: D: 0 once, 1 looping */
 
 int slc_visible(void)
 {
@@ -297,7 +300,17 @@ static void edit_draw(void *c)
     LABEL(c, 34, 57, "< SLICE %d%d/%d%d >", (slc_cur + 1) / 10, (slc_cur + 1) % 10, slc_ns / 10, slc_ns % 10);
     if (slc_ns)
         secs(c, 84, 57, slc_sl[3 * slc_cur + 1] - slc_sl[3 * slc_cur]);
-    LABEL(c, 115, 57, "%s", "LOOP");
+    /* v0.30: D is the preview's play mode, drawn as the DT2's PLAY icons (owner): an arrow
+     * to a bar, once; an arrow round a loop, looping */
+    hline(c, 106, 116, 59, 0);
+    on(c, 115, 58); on(c, 115, 60); on(c, 114, 57); on(c, 114, 61);
+    if (pv_loop) {
+        vline(c, 106, 56, 59, 0);
+        hline(c, 106, 120, 56, 0);
+        vline(c, 120, 56, 59, 0);
+        hline(c, 117, 120, 59, 0);
+    } else
+        vline(c, 118, 56, 62, 0);
     hline(c, 0, 127, 54, 0);
     /* the waveform */
     const u8 *hr = smp_hires();
@@ -332,11 +345,17 @@ static void edit_draw(void *c)
         if (xl >= 0)
             vline(c, xl, yc - h, yc + h, 1);
     }
-    /* v0.26: where the track is playing (as the sample pages' playhead) */
-    extern int smp_playhead(int t);
-    int ph = smp_playhead((int)ACTIVE_TRACK);
-    if (ph >= 0 && slc_nfr) {
-        int xp = fx((u32)ph * (slc_nfr >> 8) / (POS_ONE >> 8));   /* (32-bit: no libgcc) */
+    /* v0.30: where the preview is (owner: the track's playhead, drawn here before, drifted
+     * with whatever the track was doing): the frames since it started, 32 a 1.5 kHz tick,
+     * from the slice's start; wrapping round the slice when it loops, gone at its end */
+    if (pv_on && slc_ns) {
+        u32 *sl = &slc_sl[3 * slc_cur], len = sl[1] > sl[0] ? sl[1] - sl[0] : 1u;
+        u32 run = (FRAMES - pv_at) * 32u;
+        int xp = -1;
+        if (pv_loop)
+            run %= len;
+        if (run < len)
+            xp = fx(sl[0] + run);
         if (xp >= 2 && xp <= 125)
             for (int yy = yc - h - 1; yy <= yc + h + 1; yy++) {   /* cleared either side, so */
                 off(c, xp - 1, yy);                              /* it reads over the wave */
@@ -499,7 +518,10 @@ static void edit_knob(int idx, int d)
         return;
     u32 *s = &slc_sl[3 * slc_cur], *e = s + 1, *l = s + 2;
     switch (idx) {
-    case 4: move(l, d, *s, *e - 1u); break;                      /* D LOOP */
+    case 4:                                                       /* D: the preview's mode (v0.30) */
+        pv_loop = d > 0;
+        (void)l;
+        return;
     case 5: move(s, d, 0, *e - 1u); if (*l < *s) *l = *s; break;  /* E START */
     case 6:                                                       /* F ZOOM; FUNC: the height */
         if (func)
@@ -538,14 +560,15 @@ static void edit_knob(int idx, int d)
  * engine's mix: rec.c's TRIM preview), as the DT2's slice editor previews it */
 #define CMD_PREVIEW 9
 extern u32 smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
-static int pv_on __attribute__((section(".data"))) = 0;
+/* (pv_on, pv_at, pv_loop: with the editor's state, above) */
 
 static void slice_preview(int on)
 {
     if (on && slc_ns && slot >= 0) {
         u32 *sl = &slc_sl[3 * slc_cur];
-        smp_command(CMD_PREVIEW, (u32)slot, sl[0], sl[1], 0);
+        smp_command(CMD_PREVIEW, (u32)slot, sl[0], sl[1], (u32)pv_loop);   /* v0.30: and its mode */
         pv_on = 1;
+        pv_at = FRAMES;
     } else if (pv_on) {
         smp_command(CMD_PREVIEW, (u32)(slot < 0 ? 0 : slot), 0, 0, 0);
         pv_on = 0;

@@ -562,8 +562,26 @@ static void rpt_start(u32 code)
     rpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
 }
 
+/* v0.30: UP/DOWN held in the sample list or the folder browser step on by themselves, as
+ * FILE NAME's arrows (owner): 0.4 s, then 12.5 a second, until let go */
+static u32 lrpt_code __attribute__((section(".data"))) = 0;
+static u32 lrpt_next __attribute__((section(".data"))) = 0;
+static void lst_step(u32 code);
+
+static void lrpt_poll(void)
+{
+    if (!lrpt_code)
+        return;
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    if ((int)(now - lrpt_next) < 0)
+        return;
+    lrpt_next = now + RPT_STEP;
+    lst_step(lrpt_code);
+}
+
 static void rpt_poll(void)
 {
+    lrpt_poll();
     if (!rpt_code)
         return;
     if (!rec_overlay || rec_phase != PH_NAME || rpt_grid != smp_func_held) {
@@ -730,6 +748,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     }
     if (it[0] == IT_KEY && !down && code == rpt_code)
         rpt_code = 0;                           /* v0.27: the held arrow let go */
+    if (it[0] == IT_KEY && !down && code == lrpt_code)
+        lrpt_code = 0;                          /* v0.30: and the list's */
     if (rec_pv_on && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
         preview(0);                             /* FUNC + YES let go: the preview stops */
     if (it[0] == IT_KEY && code < 32 && (eaten >> code & 1)) {
@@ -836,10 +856,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                         rename_start(slot);
                     }
                 }
-            } else if (code == K_UP && smp_fb_cur > 0)
-                smp_fb_cur--;
-            else if (code == K_DOWN)
-                smp_fb_cur++;
+            } else if (code == K_UP || code == K_DOWN) {
+                lst_step(code);
+                lrpt_code = code;               /* v0.30: held, it goes on */
+                lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
+            }
             else if (code == K_YES && smp_func_held && slot >= 0)
                 smp_fb_mark(slot, !smp_fb_marked(slot));    /* v0.29: FUNC + YES marks */
             else if (code == K_YES && smp_func_held && on_folder)
@@ -889,9 +910,9 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 return (u32)it;
             smp_list_hold();
             if (code == K_UP || code == K_DOWN) {
-                int v = smp_samp_of(t) + (code == K_DOWN ? 1 : -1);
-                if (v >= 0 && v <= 127)
-                    smp_set_samp(t, v);
+                lst_step(code);
+                lrpt_code = code;               /* v0.30: held, it goes on */
+                lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
             } else if (code == K_YES && lst_func) {
                 smp_fb_open = 1;
                 smp_fb_unmark_all();
@@ -911,6 +932,39 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             smp_list_close();
     }
     return (u32)it;
+}
+
+/* v0.30: one UP/DOWN step in the folder browser (its items, or the action menu) or the
+ * sample list (SAMP); a held arrow's repeat comes here too, and stops when neither is up */
+static void lst_step(u32 code)
+{
+    if (smp_fb_open) {
+        smp_overlay_dirty = 1;
+        if (smp_fb_menu == 2)                   /* DELETE asked: nothing to move */
+            return;
+        if (smp_fb_menu == 1) {
+            int ks, kf = smp_fb_item(smp_fb_cur, &ks), last = smp_fb_nactions(ks < 0 && kf != -1) - 1;
+            if (code == K_UP && smp_fb_mcur > 0)
+                smp_fb_mcur--;
+            else if (code == K_DOWN && smp_fb_mcur < last)
+                smp_fb_mcur++;
+            return;
+        }
+        if (code == K_UP && smp_fb_cur > 0)
+            smp_fb_cur--;
+        else if (code == K_DOWN)
+            smp_fb_cur++;                       /* (held at the last item when drawn) */
+        return;
+    }
+    if (smp_list_view && smp_list_up(smp_list_view)) {
+        int t = (int)UI_TRACK_NOW;
+        smp_list_hold();
+        int v = smp_samp_of(t) + (code == K_DOWN ? 1 : -1);
+        if (v >= 0 && v <= 127)
+            smp_set_samp(t, v);
+        return;
+    }
+    lrpt_code = 0;                              /* neither up: the repeat ends */
 }
 
 /* the parameter page's key handler (its vtable slot at 0x401d49a8 points here): stock's,

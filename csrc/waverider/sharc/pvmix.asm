@@ -17,7 +17,7 @@ wr_pvmix.:
       R0 = DM(0x2df764);
       R12 = 0x0;
       COMP(R0, R12);
-      IF LE JUMP 0xbf468e;                   // -> wr_pv_else_1.
+      IF LE JUMP 0xbf46ae;                   // -> wr_pv_else_1.
       R0 = 0x0;
       DM(0x2df768) = R0;
 .GLOBAL wr_pv_pv_2.;
@@ -73,6 +73,23 @@ wr_pv_else_3.:
       R13 = DM(0x2df760);
       R13 = R13 + R1;
       DM(0x2df760) = R13;
+      R0 = DM(0x2df764);
+      R0 = PASS R0;
+      IF NE JUMP 0xbf46ae;                   // -> wr_pv_else_4.
+      R1 = DM(0x2df790);
+      R12 = 0x40000000;
+      R2 = R1 AND R12;
+      R2 = PASS R2;
+      IF EQ JUMP 0xbf46ae;                   // -> wr_pv_else_5.
+      R12 = 0x3fffffff;
+      R1 = R1 AND R12;
+      DM(0x2df764) = R1;
+      R13 = DM(0x2df78c);
+      DM(0x2df760) = R13;
+.GLOBAL wr_pv_else_5.;
+wr_pv_else_5.:
+.GLOBAL wr_pv_else_4.;
+wr_pv_else_4.:
 .GLOBAL wr_pv_else_1.;
 wr_pv_else_1.:
       ASTAT = DM(0x2df788);

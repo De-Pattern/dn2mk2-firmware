@@ -3796,3 +3796,8 @@ On the instrument, the SHARC's time from the per-block routine's entry to the ma
 - The combo: the manual's own PERSONALIZE shortcuts are "hold [SETTINGS] + [TRIG 1..3]" (LED intensity) and "+ [TRIG 9]" (backlight), so a hold [SETTINGS] + an unused TRIG fits the idiom. Still to read: which TRIG keys the SETTINGS-hold handler acts on. The combo must not collide with the private combos kept in dn_sysex.
 
 **Order:** a RAM-only flag on the combo first; then the PERSONALIZE item; then its persistence.
+
+## Far future: a modulation matrix (owner, 2026-10-28)
+
+A mod matrix like the one in gdeo607's Digitone mods (https://github.com/gdeo607/digi1_mods):
+noted for the long-term roadmap only, after the +Drive work and the pending fixes.

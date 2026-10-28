@@ -1494,7 +1494,7 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
 
     mix_in = [struct.unpack("<I", struct.pack("<f", 0.01 * k - 0.3))[0] for k in range(64)]
 
-    def run(image, words_left, mix0=mix_in):
+    def run(image, words_left, mix0=mix_in, loop=False):
         r = init_on(snap, m2mach, image).fresh_call(dsp.PVMIX_SITE_SW, regs=regs)
         for k in range(64):
             m2.poke(r.state, SM.MIX_BUF + 4 * k, mix0[k])
@@ -1502,6 +1502,9 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
             m2.poke(r.state, REC_AT + 4 * k, w)
         m2.poke(r.state, C["pva"], REC_AT)
         m2.poke(r.state, C["pvn"], words_left)
+        if loop:                                # v0.30: a looping preview (the slice editor's D)
+            m2.poke(r.state, C["pvl0"], REC_AT)
+            m2.poke(r.state, C["pvln"], words_left | SP.PV_LOOP)
         before = dict(r.state.overlay)
         # the call made, back in the driver. The emulator notes a CJUMP's return as the
         # instruction after its delay slots and checks the callee's return against it; the
@@ -1518,7 +1521,7 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
     def mix(r):
         return [m2.word(r.state, SM.MIX_BUF + 4 * k) or 0 for k in range(64)]
 
-    def model(words_left, mix0):
+    def model(words_left, mix0, loop=False):
         from dnfw.perc.dsl import Mem
         mem = Mem(lambda a: 0)
         for k in range(64):
@@ -1527,15 +1530,19 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
             mem.put(REC_AT + 4 * k, w)
         mem.put(C["pva"], REC_AT)
         mem.put(C["pvn"], words_left)
+        if loop:
+            mem.put(C["pvl0"], REC_AT)
+            mem.put(C["pvln"], words_left | SP.PV_LOOP)
         SP.pvmix_run(L, mem)
         return [mem.get(SM.MIX_BUF + 4 * k) for k in range(64)], mem.get(C["pva"]), mem.get(C["pvn"])
 
-    own = {C[w] for w in ("pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa")}
+    own = {C[w] for w in ("pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa",
+                          "pvl0", "pvln")}
     out, checks = {}, {}
-    for name, left in (("none", 0), ("full", 40), ("tail", 5)):
-        want, pva, pvn = model(left, mix_in)
+    for name, left, loop in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True)):
+        want, pva, pvn = model(left, mix_in, loop)
         rs, hs, _ = run(stock, 0, want)        # stock, given the mix the preview makes
-        rm, hm, _ = run(m5, left)
+        rm, hm, _ = run(m5, left, loop=loop)
         ok = hs[0] == "stop" and hm[0] == "stop"
         same_regs = ok and rm.state.uregs == rs.state.uregs
         diff = sorted(a for a in set(rm.state.overlay) | set(rs.state.overlay)
@@ -1550,6 +1557,9 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         checks[f"{name}: the mix as the model's ({min(left, 16)} words added)"] = ok and got == want
         if left == 0:
             checks["none: the mix untouched"] = ok and got == mix_in
+        if loop:                                # v0.30: at its end it starts again
+            checks["loop: at its end the preview starts again (pva back at its start, pvn its length)"] = (
+                (pva, pvn) == (REC_AT, left))
         checks[f"{name}: pva, pvn moved on as the model's"] = ok and (
             m2.word(rm.state, C["pva"]), m2.word(rm.state, C["pvn"])) == (pva, pvn)
         rd = {k: (rs.state.uregs.get(k), rm.state.uregs.get(k)) for k in set(rs.state.uregs) | set(rm.state.uregs)
