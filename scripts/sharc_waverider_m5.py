@@ -1010,6 +1010,36 @@ def step_guard(init, sound, machines, blocks) -> dict:
         "... the skips counted, one a block": skips == blocks - FORCE,
         "... and track 0, and track 1 before it, bit-exact to the model": t0_bad == 0 and t1_early_bad == 0,
     }
+    # v0.29: the voices newest first. TRX-SD on slots 0, 1, 2, each struck in turn (blocks 1,
+    # 3, 5: dynamic allocation), the clock fed so that only the first voice a block fits:
+    # that one is always the newest note, the older ones skipped (before, slot 0 kept it)
+    def ob(b):
+        f = base_frame(sound, machines, overrides=perc_words(sd), trigger=b == 1, others={1: 5, 2: 5})
+        for t in (1, 2):
+            for slot, w in perc_words(sd).items():
+                f.param(t, slot, w)
+            if b == 1 + 2 * t:
+                f.trigger(t)
+        return f.to_bytes()
+    ran = {"n": 0}
+
+    def o_entry(r):
+        ran["n"] = 0
+
+    def o_feed(r):
+        if ran["n"] >= 1:
+            mark0 = m2.word(r.state, G.MARK0) or 0
+            r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const((mark0 + 0x10000000) & 0xFFFFFFFF)
+        ran["n"] += 1
+    orr = run_blocks(init, ob, 7, extra_hooks={dsp.PERC_SW: o_entry, at[0]: o_feed})
+
+    def opk(b, t):
+        return V.peak(orr["perc"][b][t]["out"]) if orr["ok"] and t in orr["perc"][b] else 0.0
+    n["order_peaks"] = [[round(opk(b, t), 3) for t in range(3)] for b in range(7)]
+    checks["v0.29: newest first: with time for one voice a block, the newest note plays and the older are skipped"] = (
+        orr["ok"] and opk(1, 0) > 0.005 and opk(3, 1) > 0.005 and opk(3, 0) == 0.0
+        and opk(5, 2) > 0.005 and opk(5, 0) == 0.0 and opk(5, 1) == 0.0)
+    orr.pop("state", None)
     for r in (ctl, fr):
         r.pop("state", None)
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}

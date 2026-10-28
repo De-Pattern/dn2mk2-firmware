@@ -350,3 +350,15 @@ def test_every_branch_to_a_label_lands_inside_its_own_code():
         src = (SHARC / f"{name}.asm").read_text(encoding="utf-8")
         for m in re.finditer(r"JUMP\s+(0x[0-9a-fA-F]+);\s*//\s*->\s*\w+\.", src):
             assert lo <= int(m.group(1), 16) < hi, (name, m.group(0))
+
+
+def test_the_voice_order_lives_in_the_monomachine_scratch_tail():
+    # v0.29: the slots' keys, costs and order (dnfw.perc.program) in the Monomachine
+    # scratch's free tail, past what dnfw.mnm.core uses, inside the scratch span
+    from dnfw.perc import program as PP
+    from dnfw.perc import live as PL
+    L = PL.layout()
+    assert PP.MNM_SCRATCH == dsp.MNM_SCRATCH_DDR == L.md.mnm.scratch
+    used = max(L.md.mnm.DG.values()) + 4
+    assert used <= PP.MNM_SCRATCH + PP.MNM_KEYS_OFF
+    assert PP.MNM_SCRATCH + PP.SMP_I + 4 <= dsp.MNM_STATE_DDR

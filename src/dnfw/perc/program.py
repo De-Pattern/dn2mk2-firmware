@@ -53,6 +53,14 @@ MNM_BUDGET = 150_000
 # Monomachine machine; a voice plays if the costs of the voices with smaller keys, and its
 # own, fit the budget. In the Monomachine scratch's free tail (dnfw.mnm.core uses < 4 KB).
 MNM_KEYS_OFF, MNM_COSTS_OFF = 0x3000, 0x3040
+# v0.29: and every voice of ours (PERC, the Monomachine's, the sample machines') is rendered
+# newest first: the owner's PERC test (TRX-CY, dynamic allocation) heard voices 1-8 and
+# then silence -- the ringing older voices took the frame in slot order and the guard
+# skipped every newer one. ORDER: the slots by key, the newest first (the ones not ours
+# last); PERC's loop and the sample machines' loop walk it (their own index words).
+ORDER_OFF, RANK_U, RANK_N, PERC_I, SMP_I = 0x3080, 0x30C0, 0x30C4, 0x30C8, 0x30CC
+MNM_SCRATCH = 0x81200000                   # dsp.MNM_SCRATCH_DDR (test_waverider_dsp holds them equal)
+ORDER = MNM_SCRATCH + ORDER_OFF
 MNM_AGE_TOP = (1 << 26) - 1
 MNM_NONE = 0x7FFFFFF0
 SEED = 0x2545F491
@@ -95,9 +103,10 @@ def raw_type(p: Prog, d: int) -> None:
 
 
 def mnm_ages(p: Prog, L: M.Layout) -> None:
-    """v0.29: every slot's key and Monomachine cost for this block (MNM_KEYS_OFF). Clobbers
-    R0-R5, R10, R12, R13, I1."""
+    """v0.29: every slot's key and Monomachine cost for this block (MNM_KEYS_OFF), and the
+    slots in key order (ORDER_OFF). Clobbers R0-R14, I1."""
     from ..mnm import machines as MNM
+    from ..sampler import machines as SMx
     keys = L.md.mnm.scratch + MNM_KEYS_OFF
     costs = L.md.mnm.scratch + MNM_COSTS_OFF
     p.ld(3, TRIG_WORD)
@@ -106,9 +115,13 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
         p.iconst(10, 2 * u)
         half(p, 2, 148, 10)                    # the slot's machine type, as raw_type
         p.iconst(4, 0)
+        p.iconst(14, 0)                        # R14: ours (PERC, Monomachine, a sample machine)
         for typ, k in MNM_TYPES.items():
             p.iconst(12, typ)
-            p.if_(2, "EQ", 12, lambda c=MNM_COST[MNM.NAMES[k]]: p.iconst(4, c), kind="i")
+            p.if_(2, "EQ", 12, lambda c=MNM_COST[MNM.NAMES[k]]: (p.iconst(4, c), p.iconst(14, 1)), kind="i")
+        for typ in (MACHINE_TYPE, *range(SMx.FIRST_TYPE, SMx.FIRST_TYPE + len(SMx.ENGINED))):
+            p.iconst(12, typ)
+            p.if_(2, "EQ", 12, lambda: p.iconst(14, 1), kind="i")
         p.st(costs + 4 * u, 4)
 
         def mnm(u=u):
@@ -127,7 +140,42 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
         def none(u=u):
             p.iconst(5, MNM_NONE | u)
             p.st(keys + 4 * u, 5)
-        p.ifz(4, "NE", mnm, none)
+        p.ifz(14, "NE", mnm, none)
+    # the slots in key order: slot u goes to place (how many keys are smaller)
+    order = L.md.mnm.scratch + ORDER_OFF
+    p.iconst(0, 0)
+    p.st(L.md.mnm.scratch + RANK_U, 0)
+
+    def place():
+        p.ld(9, L.md.mnm.scratch + RANK_U)
+        p.lsh(12, 9, 2)
+        p.iconst(11, keys)
+        p.iop(12, 11, "+", 12)
+        p.seti(1, 12)
+        p.ldi(6, 0, 1)                         # slot u's key
+        p.iconst(8, 0)
+        for v in range(16):
+            p.ld(7, keys + 4 * v)
+            p.if_(7, "LT", 6, lambda: (p.iconst(12, 1), p.iop(8, 8, "+", 12)), kind="i")
+        p.lsh(12, 8, 2)
+        p.iconst(11, order)
+        p.iop(12, 11, "+", 12)
+        p.seti(1, 12)
+        p.sti(0, 1, 9)                         # ORDER[place] = u
+        p.iconst(12, 1)
+        p.iop(9, 9, "+", 12)
+        p.st(L.md.mnm.scratch + RANK_U, 9)
+    p.loop(L.md.mnm.scratch + RANK_N, 16, place)
+
+
+def order_slot(p: Prog, idx: int) -> None:
+    """v0.29: C['t'] (the caller's) = ORDER[the index word IDX]; R9 = it. Clobbers R0, R12, I1."""
+    p.ld(0, idx)
+    p.lsh(12, 0, 2)
+    p.iconst(9, ORDER)
+    p.iop(12, 9, "+", 12)
+    p.seti(1, 12)
+    p.ldi(9, 0, 1)
 
 
 def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
@@ -493,11 +541,12 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     from . import guard as G
     G.entry(p)                                 # v0.27: the frame's length and the time our voices have
     p.iconst(0, 0)
-    p.st(L.C["t"], 0)
+    p.st(L.md.mnm.scratch + PERC_I, 0)
     top = p.label("slot")
     nxt = p.label("next")
     p.place(top)
-    p.ld(9, L.C["t"])
+    order_slot(p, L.md.mnm.scratch + PERC_I)   # v0.29: the newest first
+    p.st(L.C["t"], 9)
     p.lsh(12, 9, 9)
     p.lsh(13, 9, 5)
     p.iop(12, 12, "+", 13)
@@ -534,10 +583,10 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.iconst(0, 0)
     M.vs(p, "on", 0)
     p.place(nxt)
-    p.ld(0, L.C["t"])
+    p.ld(0, L.md.mnm.scratch + PERC_I)
     p.iconst(12, 1)
     p.iop(0, 12, "+", 0)
-    p.st(L.C["t"], 0)
+    p.st(L.md.mnm.scratch + PERC_I, 0)
     p.iconst(12, 16)
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
