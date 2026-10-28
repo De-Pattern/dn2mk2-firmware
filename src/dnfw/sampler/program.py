@@ -2336,7 +2336,14 @@ def tdm_tx(p: Prog, L: Layout) -> None:
             p.iop(0, 12, "+", 0)
             p.st(K["u"], 0)
         p.loop(K["v"], 16, track)
-        p.iconst(0, 17)
+        from ..perc import guard as G          # v0.30: unit 17, the slots the guard skipped since
+        p.ld(6, G.SKIPMASK)                    # the last packet (the pages' CPU flag); then cleared
+        p.iconst(12, 0xFFFF)
+        p.iop(6, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 4 * 17, 6)
+        p.iconst(6, 0)
+        p.st(G.SKIPMASK, 6)
+        p.iconst(0, 18)
         p.st(K["u"], 0)
 
         def zero():
@@ -2350,7 +2357,7 @@ def tdm_tx(p: Prog, L: Layout) -> None:
             p.iconst(12, 1)
             p.iop(0, 12, "+", 0)
             p.st(K["u"], 0)
-        p.loop(K["v"], SM.TX_UNITS - 1 - 17, zero)
+        p.loop(K["v"], SM.TX_UNITS - 1 - 18, zero)
         _tx_out(p, K)
 
     def busy():

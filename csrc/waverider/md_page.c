@@ -238,7 +238,10 @@ int md_page_draw(void *view, void *c, int page, int type)
         b[n++] = '.';
         b[n++] = (char)('0' + (bpm120 % 120u) / 12u);
         b[n] = 0;
-        if (bpm120 >= 1200u)
+        extern int smp_skipped_any(void);       /* v0.30: the DSP left a voice out for time */
+        if (smp_skipped_any())
+            text(c, BIG, 1, 41, "CPU", 3, 1);
+        else if (bpm120 >= 1200u)
             text(c, BIG, 1, 41, b, n, 1);
     }
     /* the level bar: the track's LEVEL */
@@ -420,7 +423,10 @@ int mnm_page_draw(void *view, void *c, int mi)
         b[n++] = '.';
         b[n++] = (char)('0' + (bpm120 % 120u) / 12u);
         b[n] = 0;
-        if (bpm120 >= 1200u)
+        extern int smp_skipped_any(void);       /* v0.30: the DSP left a voice out for time */
+        if (smp_skipped_any())
+            text(c, BIG, 1, 41, "CPU", 3, 1);
+        else if (bpm120 >= 1200u)
             text(c, BIG, 1, 41, b, n, 1);
     }
     text(c, SMALL, 33, 48, "LEV", 3, 1);

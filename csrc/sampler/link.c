@@ -223,6 +223,25 @@ volatile u32 smp_periods __attribute__((section(".data"))) = 0;   /* smp_tdm's c
  * fraction of the sample x POS_ONE), and when (periods) */
 volatile u16 smp_pos[16] __attribute__((section(".data"))) = {0};
 volatile u32 smp_pos_at __attribute__((section(".data"))) = 0;
+/* v0.30: when the DSP's frame guard last left each slot silent (periods, 0 never): the
+ * PERC and Monomachine pages show CPU, in place of the tempo, while any is recent (a user: VO-6 went silent after a
+ * second -- this tells a DSP-time skip from anything else) */
+volatile u32 smp_skip_at[16] __attribute__((section(".data"))) = {0};
+
+int smp_skipped(int t)                          /* skipped within the last half second */
+{
+    if (t < 0 || t > 15 || !smp_skip_at[t])
+        return 0;
+    return periods - smp_skip_at[t] < 750u;
+}
+
+int smp_skipped_any(void)                       /* any voice, within the last half second */
+{
+    for (int t = 0; t < 16; t++)
+        if (smp_skipped(t))
+            return 1;
+    return 0;
+}
 
 /* track T's playhead as a fraction x POS_ONE, or -1: none (nothing playing, or no news from
  * the DSP for a while) */
@@ -304,6 +323,9 @@ void smp_tdm(u32 h)
         for (int t = 0; t < 16; t++)
             smp_pos[t] = v[1 + t];
         smp_pos_at = periods;
+        for (int t = 0; t < 16; t++)            /* v0.30: the slots the DSP's guard skipped */
+            if (v[17] >> t & 1u)
+                smp_skip_at[t] = periods | 1u;
         return;
     }
     if (v[0] != TX_MAGIC)

@@ -31,6 +31,7 @@ SKIPS = GUARD + 0x08             # voices left silent, cumulative
 START = GUARD + 0x0C             # EMUCLK as the current voice began
 PERIOD = GUARD + 0x10            # the last frame's length, cycles
 COUNT = GUARD + 0x14             # the zeroing loop's counter
+SKIPMASK = GUARD + 0x18          # v0.30: the slots skipped since the ColdFire last heard (bit t), sent and cleared by smp's idle packet
 COST_PERC = GUARD + 0x40         # 16 words: each PERC slot's last cost, cycles
 COST_SMP = GUARD + 0x80          # 16 words: each sample slot's
 END = GUARD + 0xC0
@@ -118,6 +119,14 @@ def around(p, t_word: int, cost: int, buffers: int, voice) -> None:
     p.iconst(9, 1)
     p.iop(8, 8, "+", 9)
     p.st(SKIPS, 8)
+    p.ld(9, t_word)                            # v0.30: and which slot, for the page's CPU flag
+    p.iconst(10, 1)
+    p.e("R10 = LSHIFT R10 BY R9;")
+    if p.run:
+        p.setR(10, 1 << (p.r[9] & 31))
+    p.ld(8, SKIPMASK)
+    p.iop(8, 8, "OR", 10)
+    p.st(SKIPMASK, 8)
     p.ld(9, t_word)
     p.lsh(9, 9, 2)
     p.iconst(10, buffers)
