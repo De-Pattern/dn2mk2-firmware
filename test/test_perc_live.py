@@ -111,7 +111,7 @@ def test_the_program_assembles_from_the_model():
     from dnfw.waverider import dsp
     text = PP.program(PL.layout(), dsp.SMP_SW)
     lines = [ln for ln in text.splitlines() if ln.startswith("      ") and not ln.strip().startswith("//")]
-    assert 5000 < len(lines) < 30000
+    assert 5000 < len(lines) < 34000          # (v0.29: the voice order and resting took it past 30,000; the L2 span is the real bound, test_waverider_dsp)
     assert f"JUMP {dsp.SMP_SW:#x};" in text
 
 

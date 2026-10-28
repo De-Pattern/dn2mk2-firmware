@@ -59,6 +59,15 @@ MNM_KEYS_OFF, MNM_COSTS_OFF = 0x3000, 0x3040
 # skipped every newer one. ORDER: the slots by key, the newest first (the ones not ours
 # last); PERC's loop and the sample machines' loop walk it (their own index words).
 ORDER_OFF, RANK_U, RANK_N, PERC_I, SMP_I = 0x3080, 0x30C0, 0x30C4, 0x30C8, 0x30CC
+# v0.29: a Monomachine voice rests once its sound has died away after the AMP envelope (the
+# owner: two Monomachine tracks sounding, a third stayed silent -- the budget held by voices
+# whose notes had ended long before). At PERC's entry a type-5 track's buffer still holds
+# its last block as the chain left it, after AMP (measured in the runner); QUIET_BLOCKS
+# blocks under QUIET_LEVEL there, no note, and the voice rests: no cost, silent, until its
+# next note. QUIET counts each slot's blocks at RESTS_OFF.
+RESTS_OFF = 0x3100
+MNM_QUIET_LEVEL = 2.0 ** -21
+MNM_QUIET_BLOCKS = 64                      # 43 ms
 MNM_SCRATCH = 0x81200000                   # dsp.MNM_SCRATCH_DDR (test_waverider_dsp holds them equal)
 ORDER = MNM_SCRATCH + ORDER_OFF
 MNM_AGE_TOP = (1 << 26) - 1
@@ -125,6 +134,34 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
         p.st(costs + 4 * u, 4)
 
         def mnm(u=u):
+            rests = L.md.mnm.scratch + RESTS_OFF
+            p.iconst(12, 1 << u)
+            p.iop(12, 3, "AND", 12)
+
+            def struck():
+                p.iconst(0, 0)
+                p.st(rests + 4 * u, 0)
+
+            def listen():                      # the block the chain left in its buffer
+                p.ld(0, BUFFERS + 4 * u)
+                p.seti(4, 0)
+                p.fconst(7, 0.0)
+
+                def peak():
+                    p.ldpost(6, 4)
+                    p.fop(7, 7, "MAX", 6)
+                    p.fconst(13, 0.0)
+                    p.fop(6, 13, "-", 6)
+                    p.fop(7, 7, "MAX", 6)
+                p.loop(L.md.mnm.scratch + RANK_N, 32, peak)
+                p.ld(0, rests + 4 * u)
+                p.fconst(12, MNM_QUIET_LEVEL)
+                p.if_(7, "LT", 12, lambda: (p.iconst(12, 1), p.iop(0, 12, "+", 0)), lambda: p.iconst(0, 0))
+                p.st(rests + 4 * u, 0)
+            p.ifz(12, "NE", struck, listen)
+            p.ld(0, rests + 4 * u)
+            p.iconst(12, MNM_QUIET_BLOCKS)
+            p.if_(0, "GE", 12, lambda: (p.iconst(4, 0), p.st(costs + 4 * u, 4)), kind="i")   # resting: free
             p.ld(13, keys + 4 * u)
             p.lsh(13, 13, -4)                  # its age last block
             p.iconst(12, MNM_AGE_TOP)
@@ -304,6 +341,9 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
             p.if_(7, "LT", 6, lambda u=u: (p.ld(5, L.md.mnm.scratch + MNM_COSTS_OFF + 4 * u),
                                            p.iop(8, 8, "+", 5)), kind="i")
         p.iop(8, 8, "+", 1)
+        p.ldi(5, (RESTS_OFF - MNM_KEYS_OFF) // 4, 1)    # v0.29: resting (its sound died away)
+        p.iconst(12, MNM_QUIET_BLOCKS)
+        p.if_(5, "GE", 12, lambda: p.iconst(8, MNM_BUDGET + 1), kind="i")
         p.iconst(12, MNM_BUDGET)
         p.if_(8, "GT", 12, lambda: (p.iconst(0, 1), p.st(C["mskip"], 0)),
               lambda: p.st(C["mcost"], 8), kind="i")

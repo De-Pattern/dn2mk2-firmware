@@ -2055,6 +2055,25 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         return f.to_bytes()
     dyn_blocks = max(blocks, 9)
     runs["dynamic"] = _slim(run_blocks(init, dyn, dyn_blocks))
+
+    # v0.29: a voice whose sound has died away (here its track's LEVEL at 0: nothing after
+    # the chain) rests after PP.MNM_QUIET_BLOCKS blocks -- no cost -- and its next note wakes it
+    REST_AT = PP.MNM_QUIET_BLOCKS + 4
+    seen_cost = {}
+
+    def rest_frame(b):
+        f = base_frame(sound, machines, t0=types[sid], overrides=mnm_words(sid), trigger=b in (1, REST_AT))
+        if b < REST_AT:
+            f.header(FR.LEVEL, 0, 0)
+        return f.to_bytes()
+
+    def rest_hook(r):
+        seen_cost[len(seen_cost)] = m2.word(r.state, PERC_L.md.mnm.scratch + PP.MNM_COSTS_OFF) or 0
+    rr = run_blocks(init, rest_frame, REST_AT + 3, extra_hooks={dsp.SMP_SW: rest_hook})
+    rest_peak_after = max(V.peak(rr["perc"][b][0]["out"]) for b in (REST_AT, REST_AT + 1, REST_AT + 2)) \
+        if rr["ok"] and all(0 in rr["perc"][b] for b in (REST_AT, REST_AT + 1, REST_AT + 2)) else 0.0
+    rest_ok = rr["ok"] and seen_cost.get(REST_AT - 2) == 0 and seen_cost.get(2, 0) > 0 and rest_peak_after > 0.01
+    rr.pop("state", None)
     ok_runs = all(r["ok"] for r in runs.values())
     exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
     peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in MM.NAMES}
@@ -2098,6 +2117,9 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         all(v > 0.01 for v in newest) and all(v > 0.01 for v in last[4 - fits:])
         and all(v == 0.0 for v in last[:4 - fits]))
     n["dynamic_newest_peaks"], n["dynamic_last_peaks"] = newest, last
+    checks["v0.29: a voice whose sound has died away rests (no cost) and its next note wakes it"] = rest_ok
+    n["rest_costs"] = {k: seen_cost.get(k) for k in (2, REST_AT - 2, REST_AT + 1)}
+    n["rest_peak_after"] = rest_peak_after
     n["budget_peaks"] = budget
     n["late_peaks"] = late
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}
