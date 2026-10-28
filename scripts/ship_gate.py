@@ -705,7 +705,7 @@ def main() -> int:
                         r = json.loads(mjs.read_text())
                         m, calls = r["memory"], [c.get("d0") for c in r.get("direct_calls", [])]
                         shots = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("s1", "s2", "s3", "s4", "s5")]
-                        d0 = [int(str(x), 0) if x is not None else None for x in calls]
+                        d0 = [int(str(x), 0) if x is not None else None for x in calls][1:]   # (the first: the turn's smp_quant)
                         facts = {"the top: three items (two folders, INCOMING)": d0[:1] == [3],
                                  "FUNC + YES on a folder marks its sample": d0[1:2] == [1],
                                  "SELECT ALL on the second folder: two marked": d0[2:3] == [2],
