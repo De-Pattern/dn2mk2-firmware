@@ -31,6 +31,12 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 | O11 | Keep the selected sample when switching between Digitakt machines | later (quality of life) |
 | O12 | The sample pool is slow to load at power-on: +Drive storage soon, researched first (menus, navigation, structure, behaviour) | planned |
 
+## For v0.30 (owner, 2026-10-28)
+
+- Sample browser (folders, INCOMING, RECORDED, the sample list): UP/DOWN held scroll on by
+  themselves, as FILE NAME's arrows do since v0.27 (rec.c's rpt_start / rpt_poll: 0.4 s, then
+  12 a second). Today a held arrow moves one item.
+
 ## Requests
 
 - Stereo sampling from the inputs (bearsshuffle)
