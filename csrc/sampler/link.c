@@ -245,12 +245,29 @@ int smp_skipped_any(void)                       /* any voice, within the last ha
 
 /* track T's playhead as a fraction x POS_ONE, or -1: none (nothing playing, or no news from
  * the DSP for a while) */
+/* v0.30: the DSP sends a position per VOICE (its slot's state), not per track; with the
+ * DN2's voice allocation track t's notes play on any voice (docs/link-research.md: the
+ * ColdFire's slot -> track table 0x80005308, which the frame builder sends as the DSP's
+ * routing). v0.25..v0.29 drew voice t's position for track t: right only while voice t
+ * played track t (the owner: the playing-slice marker lagged the sound). Now the voices
+ * the table gives to track t, the playing one nearest its start (the newest note); none
+ * there: voice t's, as before. */
+#define SLOT_TRACK ((volatile u32 *)0x80005308u)
 int smp_playhead(int t)
 {
     if (t < 0 || t > 15 || periods - smp_pos_at > 64u)
         return -1;
-    u32 v = smp_pos[t];
-    return v == POS_NONE ? -1 : (int)v;
+    u32 best = POS_NONE;
+    for (int v = 0; v < 16; v++) {
+        u32 tr = SLOT_TRACK[v], pos = smp_pos[v];
+        if (tr != (u32)t || pos == POS_NONE)
+            continue;
+        if (best == POS_NONE || pos < best)
+            best = pos;
+    }
+    if (best == POS_NONE)
+        best = smp_pos[t];
+    return best == POS_NONE ? -1 : (int)best;
 }
 
 void smp_tdm(u32 h)
