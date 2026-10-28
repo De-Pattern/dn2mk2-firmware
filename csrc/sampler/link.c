@@ -968,7 +968,10 @@ static void peak_add(u32 off, u32 bytes, const u8 *buf)
 /* v0.25: the recording brought to full scale, as the DT2 normalises one (its peak to
  * NORM_PEAK), in the +Drive's copy, a chunk a pass; then the loader's own path (read,
  * sent, checked) gives the DSP the same frames */
-#define NORM_PEAK 32700u
+/* v0.30: to -6 dB, and by at most +24 dB (a user, and the owner: "incredibly loud" -- full
+ * scale sat far above the DN2's own machines, and a quiet take's noise came up with it) */
+#define NORM_PEAK 16384u
+#define NORM_MAX_GAIN 16u
 static void norm_chunk(void)
 {
     u32 lo = REC_OFFSET + s_place, hi = lo + s_frames * 2u;
@@ -982,6 +985,8 @@ static void norm_chunk(void)
         return;
     }
     u32 g = (NORM_PEAK << 16) / s_peak;               /* the gain, 16 fractional bits */
+    if (g > (NORM_MAX_GAIN << 16))
+        g = NORM_MAX_GAIN << 16;
     int gi = (int)(g >> 16), gf = (int)(g & 0xFFFFu);
     u32 a = lo > s_off ? lo : s_off, e = hi < s_off + n ? hi : s_off + n;
     for (u32 x = a & ~1u; x + 1 < e; x += 2) {
