@@ -30,6 +30,7 @@ typedef unsigned short u16;
 typedef unsigned char u8;
 
 #define FRAMES (*(volatile u32 *)0x4058E8D4u)                         /* frames since boot, 1,500 a second */
+#define REC_THR_FLOOR 33u                       /* v0.30: THRES 0's level, -60 dB, under any real input */
 #define CTL_FRAME ((volatile u16 *)0x80005E60u)
 #define TEMPO_WORD 108                                               /* the frame's BPM x 120 (byte 216) */
 #define KEY_ORIG ((int (*)(void *, void *))0x40016480u)              /* the parameter page's key handler */
@@ -171,6 +172,8 @@ static int next_empty(int from)
 static void send(int cmd)
 {
     u32 src, chan, thr = (u32)rec_thres * 32767u / 120u;
+    if (thr < REC_THR_FLOOR)                    /* v0.30: THRES 0 waits for a sound, not for */
+        thr = REC_THR_FLOOR;                    /* silence (a user: it began on nothing) */
     src_of(rec_src, &src, &chan);
     if (rec_dest < 0)
         rec_dest = next_empty(0);
@@ -197,12 +200,23 @@ void rec_yes(void)
     send(rec_state == 2 ? CMD_STOP : CMD_NOW);
 }
 
-static void rec_arm_toggle(void)
+/* v0.30: H's turn, as one action a turn (a user: "the knob acceleration is wonky on ARM":
+ * every detent toggled it, so a quick turn armed, stopped and armed again). Right arms,
+ * left stops; after an action the knob is left alone for 0.4 s. */
+static u32 arm_at __attribute__((section(".data"))) = 0;
+
+static void rec_arm_turn(int delta)
 {
-    if (rec_state == 1 || rec_state == 2)
+    u32 now = FRAMES;
+    if (arm_at && now - arm_at < 600u)
+        return;
+    if (delta > 0 && rec_state != 1 && rec_state != 2)
+        send(rec_rstrt ? CMD_ARM_PLAY : CMD_ARM);
+    else if (delta < 0 && (rec_state == 1 || rec_state == 2))
         send(CMD_STOP);
     else
-        send(rec_rstrt ? CMD_ARM_PLAY : CMD_ARM);
+        return;
+    arm_at = now ? now : 1u;
 }
 
 /* FUNC + VOICE (coldfire.py's REC_COMBO_SITE, in the main key handler's VOICE case) */
@@ -330,7 +344,7 @@ static void knob(int index, int delta)
         break;
     case 6: rec_rlen = clamp(rec_rlen + delta, 0, 128); break;
     case 7: rec_rstrt = delta > 0 ? 1 : 0; break;
-    case 8: rec_arm_toggle(); break;
+    case 8: rec_arm_turn(delta); break;
     default: break;
     }
 }
