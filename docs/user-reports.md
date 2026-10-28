@@ -12,7 +12,7 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 | U3 | A trig can't be pre-muted (trig mute), especially on the custom machines (zugada_) | **open**: our PERC/sample voices may not honour the trig-mute flag |
 | U4 | SYN + YES (randomize) on a Machinedrum machine crashes sometimes (zugada_) | **likely the DSP overrun (fixed v0.27's guard)**: every MD machine with random settings, all 8 controls and 7 effects, twice each, runs bit-exact, finite, no halt in the DSP model; SYN + YES on PERC in the emulator randomizes (TYPE too) and draws without fault. Retest on v0.27+ |
 | U5 | After switching a track from an MD machine to a stock DN2 machine, the MD machine is still heard in the background (zugada_) | **open**: the model silences a track that leaves PERC; check the hardware path |
-| U6 | Delete all samples / folders sent by the import tool (zugada_) | multi-select delete, planned |
+| U6 | Delete all samples / folders sent by the import tool (zugada_) | v0.29 multi-select delete |
 
 ## The owner's reports (v0.27, 2026-10-28)
 
@@ -23,12 +23,12 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 | O3 | Monomachine voices quieter again in v0.27 (v0.28 sets each machine's level: check) | check on v0.28 |
 | O4 | The CPU guard: two all-p-locked PERC tracks, a 64-step DENS, a one-shot track with p-locks, then a Slice track with 48 slices and heavy FX: no dropout | **works** (v0.27) |
 | O5 | Froze on the sample pool's list after clearing a Slice track and loading a new sample; reboot | **open** (as U2) |
-| O6 | The playing-slice marker on Slice/Grid lags behind the sound | open |
+| O6 | The playing-slice marker on Slice/Grid lags behind the sound | v0.30: the page drew voice t's position for track t; with voice allocation the track plays on other voices. Now the track's own voices (the ColdFire's slot -> track table). Check |
 | O7 | GRID: the last slice plays on the next trig when switching slices (v0.27) | v0.28's re-latch: check |
-| O8 | Slice creation window: the playhead drifts and doesn't follow the preview; encoder D is the preview's loop mode: draw the forward / reverse / off icons as the DT2 pages do, not "LOOP" | open |
-| O9 | A CLEAR SLICE GRID item in the slice menu | open |
-| O10 | P-lock indicators on the Monomachine pages (as on the other machines) | open |
-| O11 | Keep the selected sample when switching between Digitakt machines | later (quality of life) |
+| O8 | Slice creation window: the playhead drifts and doesn't follow the preview; encoder D is the preview's loop mode: draw the forward / reverse / off icons as the DT2 pages do, not "LOOP" | v0.30 |
+| O9 | A CLEAR SLICE GRID item in the slice menu | v0.29 |
+| O10 | P-lock indicators on the Monomachine pages (as on the other machines) | in since v0.28 (locked controls drawn inverted): check |
+| O11 | Keep the selected sample when switching between Digitakt machines | v0.30 (MACHINE SEL between two sample machines keeps SAMP; gate 6k) |
 | O12 | The sample pool is slow to load at power-on: +Drive storage soon, researched first (menus, navigation, structure, behaviour) | planned |
 
 ## For v0.30 (owner, 2026-10-28)
@@ -50,8 +50,10 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   USB) opens our "no samples loaded" pop-up instead: the update can't be accepted. Workaround:
   NO, select a stock track, send again. Same kind as the save question on a SLICE page
   (fixed in v0.29 for FUNC + key questions only): our pages must hand YES/NO to any stock
-  question or pop-up that is up (v0.30)
-- TRIG + YES (the stock sound preview) opens our lock menu on PERC instead (v0.30)
+  question or pop-up that is up: done in v0.30 (a stock question's keys are stock's, found by
+  the screen's view list; gate 6j)
+- TRIG + YES (the stock sound preview) opens our lock menu on PERC instead: v0.30, a YES with
+  another key held is stock's (gate 6j)
 
 ## Requests
 
