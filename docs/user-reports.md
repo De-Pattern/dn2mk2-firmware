@@ -10,7 +10,7 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 | U1 | MD machines: sometimes no sound on any pattern until a power cycle (zugada_); v0.26 "very unstable, no sound for more than a few minutes" (mistahairplane) | the frame overrun: v0.27's guard. Confirm on v0.27 |
 | U2 | Sample (DT2) machines: choosing a sample while the pattern plays freezes the unit; a power cycle clears it. "Most of the crashes are on the Digitakt machines" (zugada_) | **open**: not reproduced yet. v0.27 changed when the list opens; check the load path while playing |
 | U3 | A trig can't be pre-muted (trig mute), especially on the custom machines (zugada_) | **open**: our PERC/sample voices may not honour the trig-mute flag |
-| U4 | SYN + YES (randomize) on a Machinedrum machine crashes sometimes (zugada_) | **open**: randomized values out of our ranges (TYPE?) |
+| U4 | SYN + YES (randomize) on a Machinedrum machine crashes sometimes (zugada_) | **likely the DSP overrun (fixed v0.27's guard)**: every MD machine with random settings, all 8 controls and 7 effects, twice each, runs bit-exact, finite, no halt in the DSP model; SYN + YES on PERC in the emulator randomizes (TYPE too) and draws without fault. Retest on v0.27+ |
 | U5 | After switching a track from an MD machine to a stock DN2 machine, the MD machine is still heard in the background (zugada_) | **open**: the model silences a track that leaves PERC; check the hardware path |
 | U6 | Delete all samples / folders sent by the import tool (zugada_) | multi-select delete, planned |
 
