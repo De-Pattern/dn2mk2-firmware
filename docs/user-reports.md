@@ -37,6 +37,13 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   themselves, as FILE NAME's arrows do since v0.27 (rec.c's rpt_start / rpt_poll: 0.4 s, then
   12 a second). Today a held arrow moves one item.
 
+## misterairplane (Discord, v0.28, 2026-10-28)
+
+- The recorder started recording with THRES at 0 and nothing playing, on touching a knob:
+  THRES 0 now waits for sound (-60 dB floor) (v0.30)
+- ARM's knob "acceleration is wonky": each detent toggled arm/stop; now right arms, left
+  stops, one action a turn (v0.30)
+
 ## Requests
 
 - Stereo sampling from the inputs (bearsshuffle)
