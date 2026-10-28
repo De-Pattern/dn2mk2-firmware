@@ -72,36 +72,14 @@ def test_grains_never_read_ahead_of_the_write_head():
     assert G.GUARD + big + G.SCATTER + big < G.BUF_N
 
 
-def test_the_filter_list_names_and_type_text():
-    assert PCF.NEW_FILTERS[-1] == G.FILTER_TYPE and PCF.NAMES[8] == ("Grains", "GRAN")
-    assert PP.TYPE_TEXT[8] == G.MODES
-    assert {PP.SETS[8][r][1] for r in (36, 37, 38, 49, 45, 47)} == {"SIZE", "DENS", "MODE", "SPRD",
-                                                                     "FDBK", "MIX"}
-
-
-def test_layout_code_state_and_ddr():
-    obj = dsp.objects()
-    assert dsp.GRAN_CODE_DM + len(obj["gran"]) + 64 <= dsp.GRAN_SCRATCH_DM
-    assert dsp.GRAN_SCRATCH_DM + 0x100 <= dsp.SHFT_STATE_DM
-    assert dsp.GRAN_STATE_DM + 16 * dsp.GRAN_STATE_STRIDE <= dsp.REGION[1]   # (v0.26: RESONATOR's room after it is free)
-    assert dsp.GRAN_BUF_STRIDE == 4 * G.BUF_N
-    spans = {w: (at, len(p)) for w, at, p in dsp.ddr_spans()}
-    ordered = sorted((at, at + n) for at, n in spans.values())
-    assert all(a1 <= b0 for (_, a1), (b0, _) in zip(ordered, ordered[1:]))
-    assert dsp.GRAN_BUF_DDR + 16 * dsp.GRAN_BUF_STRIDE <= 0x85000000     # below the runner's strays
-
-
-def test_the_jumps_between_ping_and_gran_land_on_their_labels():
-    import sharc_resolve_jumps as R
+def test_gran_is_not_in_the_build():
+    # v0.28: GRAN (and SHFT) removed (owner, 2026-10-27): the filter list ends at PING, no
+    # type text or page for 8, no GRAN object in the DSP image, and PING jumps nowhere near
+    # GRAN's former code (the model above stays, for a return)
+    assert PCF.NEW_FILTERS == (6,) and 8 not in PP.TYPE_TEXT and 8 not in PP.SETS
+    assert "gran" not in dsp.objects()
     ping = (SHARC / "ping.asm").read_text(encoding="utf-8")
-    spec = json.loads((SHARC / "ping.json").read_text(encoding="utf-8"))
-    nxt = dsp.PING_SW + spec["instruction_offsets"][R.labels(ping)["wr_p_next"]] // 2
-    g = (SHARC / "gran.asm").read_text(encoding="utf-8")
-    assert f"IF EQ JUMP {dsp.GRAN_SW:#x};" in ping
-    back = re.compile(r"JUMP (0x[0-9a-f]+);\s*// ping.asm's wr_p_next")
-    assert [int(x, 16) for x in back.findall(g)] == [nxt]
-    gs = json.loads((SHARC / "gran.json").read_text(encoding="utf-8"))
-    assert int(gs["load_sw"], 16) == dsp.GRAN_SW
+    assert f"JUMP {dsp.GRAN_SW:#x};" not in ping and "wr_gran" not in ping
 
 
 def test_every_generated_asm_is_what_its_generator_writes_now():
