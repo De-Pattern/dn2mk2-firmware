@@ -2061,9 +2061,9 @@ def step_mnm(init, sound, machines, blocks) -> dict:
 
     def dpk(b, t):
         return V.peak(dynr["perc"][b][t]["out"]) if dynr["ok"] and t in dynr["perc"][b] else 0.0
-    newest = [dpk(1 + 2 * k, k) for k in range(4)]
+    newest = [max(dpk(1 + 2 * k, k), dpk(2 + 2 * k, k)) for k in range(4)]   # (a SID note's onset can fall in the next block)
     last = [dpk(dyn_blocks - 1, t) for t in range(4)]
-    checks["v0.29, dynamic allocation: each new note sounds on its block; at the end the newest " \
+    checks["v0.29, dynamic allocation: each new note sounds by the block after its own; at the end the newest " \
            f"{fits} play and the oldest are silent"] = (
         all(v > 0.01 for v in newest) and all(v > 0.01 for v in last[4 - fits:])
         and all(v == 0.0 for v in last[:4 - fits]))
