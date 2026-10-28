@@ -44,6 +44,15 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 - ARM's knob "acceleration is wonky": each detent toggled arm/stop; now right arms, left
   stops, one action a turn (v0.30)
 
+## ema:blskk (Discord, v0.28, PERC, 2026-10-28)
+
+- On a PERC or sample track, YES on the OS's "do you want to update? Y/N" (firmware sent over
+  USB) opens our "no samples loaded" pop-up instead: the update can't be accepted. Workaround:
+  NO, select a stock track, send again. Same kind as the save question on a SLICE page
+  (fixed in v0.29 for FUNC + key questions only): our pages must hand YES/NO to any stock
+  question or pop-up that is up (v0.30)
+- TRIG + YES (the stock sound preview) opens our lock menu on PERC instead (v0.30)
+
 ## Requests
 
 - Stereo sampling from the inputs (bearsshuffle)
