@@ -94,6 +94,14 @@ details { margin-top: 10px; } summary { cursor: pointer; }
   <section id="readme">
     <h2>5 · Read me</h2>
     <p class="note" style="margin-top:0">The mod adds machines and features the DN2's manual doesn't cover. Where to find them, what to watch out for, and what isn't there yet.</p>
+    <details open><summary><b>What's in it</b></summary>
+      <ul class="guide">
+        <li><b>Machinedrum:</b> every MD machine except the sample-based E-12s, as one machine, <b>Perc</b>. Its TYPE control picks the machine (all 33) and can be p-locked, so each step of a Perc track can be a different MD machine. Each machine has a second page the MD doesn't have: Octatrack-style EQ, amplitude modulation and a B/W filter.</li>
+        <li><b>Monomachine:</b> SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens and VO-6.</li>
+        <li><b>Digitakt II:</b> all its machines, Slice included. Samples live in a 400 MB pool in RAM (not on the +Drive yet), sent with the sample import tool. You can also record external audio and resample.</li>
+        <li><b>OS 1.11 only</b> (not 1.12), so no Outbox yet.</li>
+      </ul>
+    </details>
     <details open><summary><b>Where things are</b></summary>
       <ul class="guide">
         <li><b>New machines:</b> MACHINE SEL ([FUNC] + [SYN]), after Swarmer: <b>Perc</b> (the Machinedrum's machines), the Digitakt II sample machines (<b>Oneshot, Werp, Stretch, Repitch, Grid, Slice</b>) and, from v0.27, the Monomachine's <b>SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens, VO-6</b>.</li>
@@ -112,14 +120,19 @@ details { margin-top: 10px; } summary { cursor: pointer; }
         <li><b>Back up</b> the +Drive and your projects before every flash. Keep the stock 1.11 file and a DIN MIDI cable for recovery.</li>
         <li><b>DSP time.</b> The Machinedrum and Monomachine machines are heavy. Several of them sounding at once, with p-locks, can use more DSP time than a frame has. From v0.27, a voice that won't fit is silent for that moment, a short gap on that track. Before v0.27 the audio could stop until a reboot.</li>
         <li><b>Monomachine voices</b> are mono and never go quiet on their own (as on the Monomachine): shape them with the AMP envelope.</li>
+        <li><b>Monomachine tracks: set VOICE SETUP to lock 1 voice.</b> With dynamic voice allocation (the default), most notes on a Monomachine track don't sound, and a voice it used can be heard on another track. Being fixed.</li>
+        <li><b>Picking a sample right after clearing a Slice track</b> can freeze the sample list (a reboot clears it). Being looked at.</li>
+        <li><b>The sample pool</b> loads at every power-on, so a large pool takes a while. +Drive storage is planned.</li>
+        <li><b>Slice and Grid:</b> the playing-slice marker lags behind what you hear.</li>
         <li><b>From v0.28,</b> SHIFT and GRAN are gone from the filters. Sounds that used them load with Multi-Mode.</li>
         <li><b>The recorder</b> may not hear its input until SRC is switched away and back once (being looked at).</li>
       </ul>
     </details>
     <details><summary><b>Not there yet / coming</b></summary>
       <ul class="guide">
-        <li>Digitakt II <b>Sounds</b> (sample presets), multi-select in the sample list, zero-crossing snap in the slice editor.</li>
-        <li>Monomachine: DPRO-BBOX (doesn't fit), DENS's chorus. The pages drawn as the Monomachine's own screens arrive in v0.28.</li>
+        <li>Multi-select in the sample browser (mark samples or whole folders, delete them together): v0.29.</li>
+        <li>Samples on the +Drive (its free ~19 GB), Digitakt II <b>Sounds</b> (sample presets), zero-crossing snap in the slice editor.</li>
+        <li>Monomachine: DPRO-BBOX (doesn't fit), DENS's chorus.</li>
         <li>Work on the DSP load: how many heavy voices can run at once.</li>
         <li>A build on OS 1.12 (Outbox): not planned yet.</li>
       </ul>
