@@ -640,12 +640,14 @@ def main() -> int:
                                  "down", "wait:4", "yes", "wait:6", "right", "wait:6", "png:m1", "down", "wait:3",
                                  "down", "wait:3", "yes", "wait:6", "png:m2", "yes", "wait:8", "png:m3",
                                  mem(M + 8 + 16 + 4, 4)]
-            # (v0.29: the reach scaled by depth over the 3 loaded samples, held at the ends:
-            # +43 one sample on, +125 to the last and no further, +1 none)
-            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0200", f"poke:{cell:#x}:2d00",
+            # (v0.30: the reach scaled by depth over the loaded samples, held at the ends. The
+            # DELETE above emptied slot 1, so two are loaded: slots 0 and 3. SAMP 1 (slot 0):
+            # +43 one sample on (SAMP 4), +125 to the last and no further (SAMP 4), +1 none
+            # (SAMP 1). v0.29's first form set SAMP 2, the slot just deleted, and counted three)
+            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0100", f"poke:{cell:#x}:2c00",
                    f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"poke:{cell:#x}:7f00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"poke:{cell:#x}:0300", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
+                   f"poke:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
+                   f"poke:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
             js = work / "samplist.json"
             sl_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                       "--snapshot", snap, "--steps", ",".join(st), "--png-dir", work / "samplist", "--json", js]
@@ -671,7 +673,7 @@ def main() -> int:
                              "DELETE in the SAMPLE ACTION menu empties the slot": m[hex(M + 28)] == "00000000"
                              and len({pathlib.Path(r["screens"][n]).read_bytes() for n in ("m1", "m2", "m3")}) == 3,
                              "modulated SAMP through the loaded slots, by depth, held at the last":
-                             [m[ce], m[f"{ce}@12"], m[f"{ce}@13"]] == ["0400", "0400", "0200"]}
+                             [m[ce], m[f"{ce}@12"], m[f"{ce}@13"]] == ["0400", "0400", "0100"]}
                     good = all(facts.values())
                     why = str(facts)
                 return good, ("the playhead drawn where the DSP says; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
