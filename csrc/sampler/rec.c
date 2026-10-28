@@ -68,6 +68,9 @@ extern int smp_fb_open, smp_fb_folder, smp_fb_cur;
 extern int smp_fb_item(int i, int *slot);
 extern int smp_fb_menu, smp_fb_mcur;
 extern int smp_fb_index_of(int f);
+extern int smp_fb_marked(int k), smp_fb_nactions(int on_folder);     /* v0.29: multi-select */
+extern void smp_fb_mark(int k, int on), smp_fb_mark_folder(int folder), smp_fb_unmark_all(void);
+extern void smp_fb_delete(int slot, int folder);
 extern void smp_discard(int k);
 static void rename_start(int slot);
 static int lst_func __attribute__((section(".data"))) = 0;
@@ -782,9 +785,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         if (it[0] == IT_KNOB) {                 /* any knob: through the items (or the menu) */
             int delta = (signed char)it[8], d = delta > 0 ? 1 : delta < 0 ? -1 : 0;
             if (smp_fb_menu == 1) {
+                int ks, kf = smp_fb_item(smp_fb_cur, &ks), last = smp_fb_nactions(ks < 0) - 1;
+                (void)kf;
                 smp_fb_mcur += d;
                 if (smp_fb_mcur < 0) smp_fb_mcur = 0;
-                if (smp_fb_mcur > 2) smp_fb_mcur = 2;
+                if (smp_fb_mcur > last) smp_fb_mcur = last;
             } else if (!smp_fb_menu)
                 smp_fb_cur += d;
             it[0] = IT_DROP;
@@ -801,18 +806,25 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 return (u32)it;
             int slot, f = smp_fb_item(smp_fb_cur, &slot);
             int t = (int)UI_TRACK_NOW;
+            int on_folder = slot < 0 && f != -1;
             if (smp_fb_menu == 2) {             /* DELETE asked */
-                if (code == K_YES && slot >= 0)
-                    smp_discard(slot);
+                if (code == K_YES && (slot >= 0 || on_folder))
+                    smp_fb_delete(slot, f);     /* v0.29: the marked ones, or this one, or the folder's */
                 smp_fb_menu = 0;
             } else if (smp_fb_menu == 1) {      /* SAMPLE ACTION */
+                int act = on_folder ? (smp_fb_mcur == 0 ? 3 : 2) : smp_fb_mcur;
                 if (code == K_UP && smp_fb_mcur > 0)
                     smp_fb_mcur--;
-                else if (code == K_DOWN && smp_fb_mcur < 2)
+                else if (code == K_DOWN && smp_fb_mcur < smp_fb_nactions(on_folder) - 1)
                     smp_fb_mcur++;
                 else if (code == K_NO || code == K_LEFT)
                     smp_fb_menu = 0;
-                else if (code == K_YES && slot >= 0) {
+                else if (code == K_YES && act == 3) {      /* v0.29: SELECT ALL (or CLEAR ALL) */
+                    smp_fb_menu = 0;
+                    smp_fb_mark_folder(on_folder ? f : smp_fb_folder);
+                } else if (code == K_YES && act == 2 && (slot >= 0 || on_folder)) {
+                    smp_fb_menu = 2;            /* DELETE: asked first */
+                } else if (code == K_YES && slot >= 0) {
                     smp_fb_menu = 0;
                     if (smp_fb_mcur == 0) {     /* LOAD TO TRK */
                         smp_set_samp(t, slot + 1);
@@ -822,17 +834,20 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                         smp_fb_open = 0;
                         smp_list_close();
                         rename_start(slot);
-                    } else
-                        smp_fb_menu = 2;        /* DELETE: asked first */
+                    }
                 }
             } else if (code == K_UP && smp_fb_cur > 0)
                 smp_fb_cur--;
             else if (code == K_DOWN)
                 smp_fb_cur++;
-            else if (code == K_RIGHT && slot >= 0) {
-                smp_fb_menu = 1;
+            else if (code == K_YES && smp_func_held && slot >= 0)
+                smp_fb_mark(slot, !smp_fb_marked(slot));    /* v0.29: FUNC + YES marks */
+            else if (code == K_YES && smp_func_held && on_folder)
+                smp_fb_mark_folder(f);
+            else if (code == K_RIGHT && (slot >= 0 || on_folder)) {
+                smp_fb_menu = 1;                /* v0.29: on a folder too (SELECT ALL, DELETE) */
                 smp_fb_mcur = 0;
-            } else if ((code == K_YES || code == K_RIGHT) && slot < 0 && f != -1) {
+            } else if (code == K_YES && on_folder) {
                 smp_fb_folder = f;              /* into the folder */
                 smp_fb_cur = 0;
             } else if (code == K_YES && slot >= 0) {   /* the DT2's quick assign */
@@ -847,6 +862,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 }
             } else if (code == K_NO) {          /* v0.26: NO closes it from anywhere, and the */
                 smp_fb_open = 0;                /* list under it (SAMP stays as it is) */
+                smp_fb_unmark_all();
                 smp_fb_folder = -1;
                 smp_list_close();
             }
@@ -855,6 +871,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         if (press && closes(code)) {
             smp_fb_open = 0;
             smp_fb_menu = 0;
+            smp_fb_unmark_all();
             smp_list_close();
         }
         return (u32)it;
@@ -877,6 +894,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     smp_set_samp(t, v);
             } else if (code == K_YES && lst_func) {
                 smp_fb_open = 1;
+                smp_fb_unmark_all();
                 smp_fb_folder = -1;
                 smp_fb_cur = 0;
             } else if (code == K_YES) {

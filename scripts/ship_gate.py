@@ -614,6 +614,7 @@ def main() -> int:
             st += [f"poke:{M:#x}:{d[:0xC10].hex()}"] + [f"poke:{M + 0x1000 + 100 * k:#x}:{ov.hex()}" for k in (0, 1, 3)]
             st += [f"poke:{M + 0x80000:#x}:{mt.hex()}", f"poke:{lay['smp_dir_ok']:#x}:00000001",
                    f"poke:{lay['smp_meta_ok']:#x}:00000001"]
+            base = list(st)                     # (the pool as loaded: 6i starts from it too)
             st += ["wait:6", "tap:2", "wait:6", "png:p2", f"poke:{lay['smp_periods']:#x}:00000000",
                    f"poke:{lay['smp_pos_at']:#x}:00000000", f"poke:{lay['smp_pos']:#x}:" + "8000" * 16,
                    "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:36", "png:ph2",
@@ -676,6 +677,50 @@ def main() -> int:
                               "its SAMPLE ACTION menu deletes; modulation on SAMP steps through the loaded slots" if good else why)
             gate("sample list, browser, playhead (ColdFire)",
                  *cached("sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body))
+
+            # 6i. v0.29: multi-select in the browser (a user's report: no way to delete all the
+            # samples sent in). At the top, FUNC + YES marks every sample of "drum_loops"
+            # (kick); RIGHT on "loops" opens its menu, SELECT ALL marks its sample; RIGHT,
+            # DELETE: "DELETE 2?", YES: slots 0 and 1 emptied, the snare (no folder) kept; the
+            # marks cleared, the browser still up, and the two emptied folders no longer shown
+            if "smp_fb_mark_count" in lay:
+                fbc, fbm = lay["smp_fb_count"], lay["smp_fb_mark_count"]
+                lead = ["wait:6", "tap:2", "wait:6", f"poke:{lay['smp_periods']:#x}:00000000",     # (as 6f: the
+                        f"poke:{lay['smp_pos_at']:#x}:00000000", "wait:12", "tap:2", "wait:6"]      # clock set)
+                ms = base + lead + samp_all(3) + [f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:10"] + turn(2) + [
+                    "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", f"call:{fbc:#x}",
+                    "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:6", "png:s1", f"call:{fbm:#x}",
+                    "down", "wait:4", "right", "wait:6", "png:s2", "yes", "wait:6", f"call:{fbm:#x}",
+                    "right", "wait:6", "down", "wait:3", "png:s3", "yes", "wait:6", "png:s4", "yes", "wait:10",
+                    "png:s5", mem(M + 8), mem(M + 24), mem(M + 56), f"call:{fbm:#x}", mem(lay["smp_fb_open"]),
+                    f"call:{fbc:#x}"]
+                mjs = work / "multisel.json"
+                ms_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                          "--snapshot", snap, "--steps", ",".join(ms), "--png-dir", work / "multisel", "--json", mjs]
+
+                def ms_body(tdir):
+                    rc, out = run("multi-select", ms_cmd, logs, env=EMU_ENV, trace=tdir)
+                    why, good = out[-800:], False
+                    if rc == 0 and mjs.exists():
+                        r = json.loads(mjs.read_text())
+                        m, calls = r["memory"], [c.get("d0") for c in r.get("direct_calls", [])]
+                        shots = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("s1", "s2", "s3", "s4", "s5")]
+                        d0 = [int(str(x), 0) if x is not None else None for x in calls]
+                        facts = {"the top: three items (two folders, INCOMING)": d0[:1] == [3],
+                                 "FUNC + YES on a folder marks its sample": d0[1:2] == [1],
+                                 "SELECT ALL on the second folder: two marked": d0[2:3] == [2],
+                                 "DELETE 2: slots 0 and 1 emptied, the snare kept": m[hex(M + 8)] == "00000000"
+                                 and m[hex(M + 24)] == "00000000" and m[hex(M + 56)] != "00000000",
+                                 "the marks cleared, the browser up, only INCOMING left":
+                                 d0[3:5] == [0, 1] and int(m[hex(lay["smp_fb_open"])], 16) == 1,
+                                 "each step drawn": len(set(shots)) == 5}
+                        good = all(facts.values())
+                        why = f"{facts} d0={d0}"
+                    return good, ("FUNC + YES marks a folder's samples; SELECT ALL a folder's; DELETE takes the "
+                                  "marked ones (DELETE 2?), keeps the rest, clears the marks, hides emptied folders"
+                                  if good else why)
+                gate("multi-select delete (ColdFire)",
+                     *cached("multi-select delete (ColdFire)", [ms_cmd, sorted(EMU_ENV.items())], ms_body))
 
         # 6h. v0.28: the Monomachine machines' pages drawn as the Monomachine's (each machine its
         # own screen, none the stock grid), and their choices' detents (WPRS, two choices: four

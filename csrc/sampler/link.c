@@ -1136,6 +1136,17 @@ static void save_poll(void)
 
 static int dir_due __attribute__((section(".data"))) = 0;       /* DIR to the +Drive when idle */
 static int push_slot __attribute__((section(".data"))) = -1;    /* an entry the DSP must take */
+/* v0.29: and the ones behind it (a multi-select DELETE changes many at once; each goes to
+ * the DSP in turn, as one does) */
+static u32 push_more[4] __attribute__((section(".data"))) = {0, 0, 0, 0};
+
+static void push_entry(int k)
+{
+    if (push_slot < 0 || push_slot == k)
+        push_slot = k;
+    else if (k >= 0 && k < 128)
+        push_more[k >> 5] |= 1u << (k & 31);
+}
 static int area_slot_due __attribute__((section(".data"))) = -1; /* v0.23: a slot's slice table to the +Drive and the DSP */
 
 /* slot K's frames: 0 if none */
@@ -1166,7 +1177,7 @@ int smp_trim(int k, u32 s, u32 e)
     for (u32 j = 0; j < OVERVIEW_W; j++)
         o[j] = t[j];
     dir_due = 1;
-    push_slot = k;
+    push_entry(k);
     return 0;
 }
 
@@ -1184,7 +1195,7 @@ void smp_discard(int k)
     for (u32 j = 0; j < OVERVIEW_W; j++)
         OVERVIEW[OVERVIEW_W * (u32)k + j] = 0;
     dir_due = 1;
-    push_slot = k;
+    push_entry(k);
 }
 
 /* slot K's name (NAME_BYTES - 1 characters at most) */
@@ -1370,7 +1381,7 @@ int smp_slices_set(int k, const u32 *t, int n)
     }
     area_slot_due = k;                          /* to the +Drive, then the DSP */
     dir_due = 1;
-    push_slot = k;
+    push_entry(k);
     return 0;
 }
 
@@ -1405,6 +1416,13 @@ static void edits_poll(void)
         area_push = area_slot_due;                  /* the table goes before the entry */
         area_slot_due = -1;
     }
+    if (push_slot < 0)                              /* v0.29: the next one waiting */
+        for (int k = 0; k < 128; k++)
+            if (push_more[k >> 5] & (1u << (k & 31))) {
+                push_more[k >> 5] &= ~(1u << (k & 31));
+                push_slot = k;
+                break;
+            }
     if (push_slot >= 0 && fast_on) {                /* the loader's own path: sent, checked */
         l_entry = push_slot;
         push_slot = -1;

@@ -743,6 +743,11 @@ int smp_fb_folder __attribute__((section(".data"))) = -1;   /* -1 the top */
 int smp_fb_cur __attribute__((section(".data"))) = 0;
 int smp_fb_menu __attribute__((section(".data"))) = 0;      /* the SAMPLE ACTION menu: 0 shut, 1 up, 2 DELETE asked */
 int smp_fb_mcur __attribute__((section(".data"))) = 0;
+/* v0.29: multi-select (zugada_'s report: no way to delete all the samples sent in). FUNC +
+ * YES marks a sample, or every sample of a folder at the top; SELECT ALL in the SAMPLE
+ * ACTION menu marks the folder's; DELETE takes the marked ones if any, else the sample (or,
+ * on a folder, the folder's samples). Marks last until the browser closes. */
+static u32 fb_marks[4] __attribute__((section(".data"))) = {0, 0, 0, 0};
 
 static int fb_in(int k, int folder)              /* slot K (holding something) shows in FOLDER */
 {
@@ -762,13 +767,101 @@ static int fb_has(int folder)
     return 0;
 }
 
+int smp_fb_marked(int k)
+{
+    return k >= 0 && k < 128 && ((fb_marks[k >> 5] >> (k & 31)) & 1u);
+}
+
+void smp_fb_mark(int k, int on)
+{
+    if (k < 0 || k >= 128)
+        return;
+    u32 b = 1u << (k & 31);
+    if (on)
+        fb_marks[k >> 5] |= b;
+    else
+        fb_marks[k >> 5] &= ~b;
+}
+
+void smp_fb_unmark_all(void)
+{
+    for (int i = 0; i < 4; i++)
+        fb_marks[i] = 0;
+}
+
+int smp_fb_mark_count(void)
+{
+    int n = 0;
+    for (int k = 0; k < 128; k++)
+        if (smp_fb_marked(k) && !smp_slot_empty(k))
+            n++;
+    return n;
+}
+
+/* FOLDER's samples: how many, and how many of them marked */
+static int fb_size(int folder, int *marked)
+{
+    int n = 0, m = 0;
+    for (int k = 0; k < 128; k++)
+        if (!smp_slot_empty(k) && fb_in(k, folder)) {
+            n++;
+            m += smp_fb_marked(k);
+        }
+    if (marked)
+        *marked = m;
+    return n;
+}
+
+/* every sample of FOLDER marked, or (all of them marked already) none */
+void smp_fb_mark_folder(int folder)
+{
+    int m, n = fb_size(folder, &m), on = m < n;
+    for (int k = 0; k < 128; k++)
+        if (!smp_slot_empty(k) && fb_in(k, folder))
+            smp_fb_mark(k, on);
+}
+
+int smp_fb_folder_full(int folder)              /* every one of its samples marked */
+{
+    int m, n = fb_size(folder, &m);
+    return n > 0 && m == n;
+}
+
+/* what DELETE takes: the marked samples, else SLOT, else FOLDER's samples */
+int smp_fb_delete_count(int slot, int folder)
+{
+    int n = smp_fb_mark_count();
+    if (n)
+        return n;
+    return slot >= 0 ? 1 : folder != -1 ? fb_size(folder, 0) : 0;
+}
+
+extern void smp_discard(int k);
+void smp_fb_delete(int slot, int folder)
+{
+    if (smp_fb_mark_count()) {
+        for (int k = 0; k < 128; k++)
+            if (smp_fb_marked(k) && !smp_slot_empty(k))
+                smp_discard(k);
+    } else if (slot >= 0)
+        smp_discard(slot);
+    else if (folder != -1)
+        for (int k = 0; k < 128; k++)
+            if (!smp_slot_empty(k) && fb_in(k, folder))
+                smp_discard(k);
+    smp_fb_unmark_all();
+}
+
 /* the browser's items where it is: N of them; item I as a folder (-> its index, or
  * FB_INCOMING / FB_RECORDED; *slot -1) or a sample (-> -1, *slot its slot) */
 int smp_fb_count(void)
 {
     int n = 0;
-    if (smp_fb_folder == -1)
-        return smp_folder_count() + fb_has(FB_INCOMING) + fb_has(FB_RECORDED);
+    if (smp_fb_folder == -1) {                  /* v0.29: a folder emptied by DELETE is not shown */
+        for (int f = 0; f < smp_folder_count(); f++)
+            n += fb_has(f);
+        return n + fb_has(FB_INCOMING) + fb_has(FB_RECORDED);
+    }
     for (int k = 0; k < 128; k++)
         if (!smp_slot_empty(k) && fb_in(k, smp_fb_folder))
             n++;
@@ -779,10 +872,9 @@ int smp_fb_item(int i, int *slot)
 {
     *slot = -1;
     if (smp_fb_folder == -1) {
-        int fc = smp_folder_count();
-        if (i < fc)
-            return i;
-        i -= fc;
+        for (int f = 0; f < smp_folder_count(); f++)
+            if (fb_has(f) && i-- == 0)
+                return f;
         if (fb_has(FB_INCOMING) && i-- == 0)
             return FB_INCOMING;
         if (fb_has(FB_RECORDED) && i == 0)
@@ -829,8 +921,12 @@ int smp_fb_visible(void)
     return smp_fb_open;
 }
 
-#define FB_ACTIONS 3
-static const char *const fb_actions[FB_ACTIONS] = {"LOAD TO TRK", "RENAME", "DELETE"};
+/* the SAMPLE ACTION menu: on a sample LOAD TRK n, RENAME, DELETE, SELECT ALL; on a folder
+ * (v0.29) SELECT ALL, DELETE */
+int smp_fb_nactions(int on_folder)
+{
+    return on_folder ? 2 : 4;
+}
 
 void smp_fb_draw(void *c, int samp)
 {
@@ -839,7 +935,10 @@ void smp_fb_draw(void *c, int samp)
             SET_PIXEL(c, x, y, 0);
     char num[4];
     num3(num, samp);
-    if (smp_fb_folder == -1)
+    int marks = smp_fb_mark_count();
+    if (marks)
+        LABEL(c, 64, 57, "%d SELECTED", marks);
+    else if (smp_fb_folder == -1)
         LABEL(c, 64, 57, "ASSIGN SAMPLE > A%s", num);
     else {
         folder_icon(c, 2, 57);
@@ -868,6 +967,8 @@ void smp_fb_draw(void *c, int samp)
             TEXT(c, FONT, 3, y, 0, smp_fb_menu ? "%.9s" : "%.18s", fb_folder_name(f));
             if (!smp_fb_menu)
                 folder_icon(c, 112, y);
+            if (smp_fb_folder_full(f))          /* v0.29: every sample in it marked */
+                invert(c, 1, y - 1, wide - 1, y + 6);
         } else {
             char nm[21], sn[4];
             slot_name(slot + 1, nm, smp_fb_menu ? 9 : 14);
@@ -878,6 +979,8 @@ void smp_fb_draw(void *c, int samp)
                 if (slot + 1 == samp)
                     fill(c, 0, y, 1, y + 4);   /* the track's own */
             }
+            if (smp_fb_marked(slot))            /* v0.29: marked, drawn lit */
+                invert(c, 2, y - 1, wide - 1, y + 6);
         }
         if (i == smp_fb_cur)
             box(c, 0, y - 2, wide, y + 7, 0);
@@ -888,17 +991,31 @@ void smp_fb_draw(void *c, int samp)
             for (int x = 65; x <= 124; x++)
                 SET_PIXEL(c, x, y, 0);
         vline(c, 65, 0, 54, 1);
+        int slot, f = smp_fb_item(smp_fb_cur, &slot), on_folder = slot < 0;
+        int del = smp_fb_delete_count(slot, f);
         if (smp_fb_menu == 2) {
-            TEXT(c, FONT, 95, 38, CENTRED, "%s", "DELETE?");
+            if (del == 1)
+                TEXT(c, FONT, 95, 38, CENTRED, "%s", "DELETE?");
+            else
+                TEXT(c, FONT, 95, 38, CENTRED, "DELETE %d?", del);
             LABEL(c, 95, 24, "%s", "YES / NO");
             return;
         }
-        for (int a = 0; a < FB_ACTIONS; a++) {
+        int all = smp_fb_folder_full(on_folder ? f : smp_fb_folder);
+        for (int a = 0; a < smp_fb_nactions(on_folder); a++) {
             int y = 46 - 9 * a;
-            if (a == 0)
+            int act = on_folder ? (a == 0 ? 3 : 2) : a;        /* the sample menu's numbers */
+            if (act == 0)
                 TEXT(c, FONT, 68, y, 0, "LOAD TRK %d", (int)UI_TRACK + 1);
-            else
-                TEXT(c, FONT, 68, y, 0, "%s", fb_actions[a]);
+            else if (act == 1)
+                TEXT(c, FONT, 68, y, 0, "%s", "RENAME");
+            else if (act == 2) {
+                if (del > 1)
+                    TEXT(c, FONT, 68, y, 0, "DELETE %d", del);
+                else
+                    TEXT(c, FONT, 68, y, 0, "%s", "DELETE");
+            } else
+                TEXT(c, FONT, 68, y, 0, "%s", all ? "CLEAR ALL" : "SELECT ALL");
             if (a == smp_fb_mcur)
                 box(c, 66, y - 2, 124, y + 7, 0);
         }

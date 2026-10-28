@@ -49,7 +49,8 @@ LOAD = 0x4670C000                 # RAM above BSS, clear of every declared range
 # v0.13: the C page renderer is a CODE chunk of its own, well above the others (it outgrew
 # the room after this assembly, LOAD + 0x600 .. PING's chunk)
 C_LOAD = 0x46AC0000                # clear of the emulator harnesses' stack and scratch (0x46a00000..)
-C_SPAN = 0x10000
+C_SPAN = 0x20000                   # v0.29: up to the MD graphics at 0x46ae0000 (64 KB until v0.28; the
+                                  # multi-select took it past); all unclaimed RAM above BSS (docs/memory-map.md)
 C_END = 0x46710000                # the platform runtime starts here
 ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
 KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t

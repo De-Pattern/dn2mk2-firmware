@@ -638,7 +638,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen",
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
-                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables"):   # the sample link's state (v0.15)
+                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)

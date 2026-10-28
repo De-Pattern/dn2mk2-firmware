@@ -50,3 +50,15 @@ def test_the_mod_places_the_blob_where_the_page_reads_it():
     assert pages.MDUI_LOAD % 4 == 0
     assert f"#define MDUI_LOAD {pages.MDUI_LOAD:#x}" in pages.md_c_header().replace("0X", "0x") \
         or str(pages.MDUI_LOAD) in pages.md_c_header() or hex(pages.MDUI_LOAD) in pages.md_c_header().lower()
+
+
+def test_the_page_renderer_stops_before_the_md_graphics():
+    # v0.29: the renderer's span grew to 128 KB (the multi-select took it past 64 KB); it
+    # must end before the Machinedrum's graphics chunk, and both above BSS (memory-map.md)
+    import json
+    import pathlib
+    spec = json.loads((pathlib.Path(__file__).resolve().parent.parent
+                       / "src/dnfw/mods/waverider_code.json").read_text())
+    c = spec["c_chunk"]
+    assert c["load"] == pages.C_LOAD and c["load"] + len(bytes.fromhex(c["code"])) <= pages.C_LOAD + pages.C_SPAN
+    assert pages.C_LOAD + pages.C_SPAN <= pages.MDUI_LOAD and pages.C_LOAD > 0x466B74D0
