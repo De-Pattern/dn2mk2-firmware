@@ -122,6 +122,8 @@ note.
 - **Fixed in the v0.30 work, not in this build:** LFO depth to SAMP/SLCE and empty slots, held
   UP/DOWN scrolling in the lists, the recorder starting at THRES 0 and its ARM knob, too-loud
   normalization (now to -6 dB), the slice editor's playhead and loop preview.
+- **Several heavy Monomachine voices sounding at once** are still limited by the DSP's time:
+  the newest play, the oldest are skipped (and rest once they die away).
 - **Not looked at yet:** the freeze after clearing a slice track then turning SAMP, slice
   marker lag, trig mute on our machines, an MD machine still heard after switching machines.
 - **Not seen on hardware yet**: all of the above; checked in the emulators.
