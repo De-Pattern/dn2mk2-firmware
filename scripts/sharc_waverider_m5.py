@@ -1037,8 +1037,8 @@ def step_guard(init, sound, machines, blocks) -> dict:
         return V.peak(orr["perc"][b][t]["out"]) if orr["ok"] and t in orr["perc"][b] else 0.0
     n["order_peaks"] = [[round(opk(b, t), 3) for t in range(3)] for b in range(7)]
     checks["v0.29: newest first: with time for one voice a block, the newest note plays and the older are skipped"] = (
-        orr["ok"] and opk(1, 0) > 0.005 and opk(3, 1) > 0.005 and opk(3, 0) == 0.0
-        and opk(5, 2) > 0.005 and opk(5, 0) == 0.0 and opk(5, 1) == 0.0)
+        orr["ok"] and opk(2, 0) > 0.005 and opk(4, 1) > 0.005 and opk(4, 0) == 0.0   # (a hit is heard
+        and opk(6, 2) > 0.005 and opk(6, 0) == 0.0 and opk(6, 1) == 0.0)            # from the next block)
     orr.pop("state", None)
     for r in (ctl, fr):
         r.pop("state", None)
