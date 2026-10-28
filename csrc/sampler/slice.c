@@ -58,6 +58,7 @@ enum { S_OFF, S_MENU, S_GRID, S_WAIT, S_EDIT, S_ALLOC };   /* v0.25: ALLOC, GRID
 int slc_state __attribute__((section(".data"))) = S_OFF;
 int slc_page_seen __attribute__((section(".data"))) = 0;   /* smp_page.c: 1 a SLICE page is up, 2 GRID's */
 static int menu_sel __attribute__((section(".data"))) = 0;
+#define MENU_N 5                                /* v0.29: and CLEAR SLICE GRID (owner) */
 int slc_grid_n __attribute__((section(".data"))) = 16;
 static int grid_tr __attribute__((section(".data"))) = 0;
 static int slot __attribute__((section(".data"))) = -1;
@@ -227,16 +228,16 @@ static void alloc_cancel(void)                  /* NO: the locks as they were */
 
 static void menu_draw(void *c)
 {
-    popup(c, 12, 6, 115, 58);
-    static const char *items[4] = {"EDIT SLICE POINTS", "CREATE SLICE GRID", "CREATE LINEAR LOCKS",
-                                   "CREATE RANDOM LOCKS"};
-    for (int k = 0; k < 4; k++) {
-        int y = 47 - 10 * k;
+    popup(c, 12, 1, 115, 61);
+    static const char *items[MENU_N] = {"EDIT SLICE POINTS", "CREATE SLICE GRID", "CREATE LINEAR LOCKS",
+                                        "CREATE RANDOM LOCKS", "CLEAR SLICE GRID"};
+    for (int k = 0; k < MENU_N; k++) {
+        int y = 51 - 9 * k;
         if (k == menu_sel)
             box(c, 15, y - 2, 112, y + 6);
         LABEL(c, 64, y, "%s", items[k]);
     }
-    LABEL(c, 64, 9, "%s", "YES:OPEN  NO:CLOSE");
+    LABEL(c, 64, 4, "%s", "YES:OPEN  NO:CLOSE");
 }
 
 static void alloc_draw(void *c)                 /* GRID's, as the DT2 draws it */
@@ -698,16 +699,19 @@ int slc_pop(u8 *it)
         }
     } else if (slc_state == S_MENU) {
         if (code == K_UP)
-            menu_sel = (menu_sel + 3) & 3;
+            menu_sel = (menu_sel + MENU_N - 1) % MENU_N;
         else if (code == K_DOWN)
-            menu_sel = (menu_sel + 1) & 3;
+            menu_sel = (menu_sel + 1) % MENU_N;
         else if (code == K_NO)
             slc_state = S_OFF;
         else if (code == K_YES && menu_sel == 0)
             start_analysis(S_EDIT);
         else if (code == K_YES && menu_sel == 1)
             slc_state = S_GRID;
-        else if (code == K_YES) {                    /* v0.25: CREATE LINEAR / RANDOM LOCKS */
+        else if (code == K_YES && menu_sel == 4) {   /* v0.29: CLEAR SLICE GRID: none, it plays whole */
+            note(smp_slices_set(slot, 0, 0) == 0 ? "SLICES CLEARED" : "NOTHING TO CLEAR");
+            slc_state = S_OFF;
+        } else if (code == K_YES) {                  /* v0.25: CREATE LINEAR / RANDOM LOCKS */
             lk_kept = 0;
             if (!alloc_locks(menu_sel == 3))
                 note("NO TRIGS TO LOCK");

@@ -226,6 +226,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             from dnfw.mnm import dpro as MNP           # v0.26: and the Digibank stand-in's build
             MNP.build(fp, PERC_L.md.mnm)
             filled.put(PERC_L.C["mcost"], 0)           # and the Monomachine voices' cost, carried slot to slot
+            PP.mnm_ages(fp, PERC_L)                    # v0.29: and their ages (the newest first)
             for t in range(16):
                 rec = V.track_record(t)
                 if (m2.word(r.state, rec + V.TRACK_MACHINE) == 5
@@ -2009,6 +2010,21 @@ def step_mnm(init, sound, machines, blocks) -> dict:
                 f.param(t, slot, w)
         return f.to_bytes()
     runs["budget"] = _slim(run_blocks(init, four, blocks))
+
+    # v0.29: dynamic voice allocation -- each new note on a new slot (0, 1, 2, 3 at blocks
+    # 1, 3, 5, 7), the older voices still sounding: the newest always plays, and once more
+    # than fit, the oldest are the ones silenced (before, the first slots kept the budget)
+    def dyn(b):
+        f = base_frame(sound, machines, t0=types[sid], overrides=mnm_words(sid), trigger=b == 1,
+                       others={t: types[sid] for t in (1, 2, 3)})
+        for t in (1, 2, 3):
+            for slot, w in mnm_words(sid).items():
+                f.param(t, slot, w)
+            if b == 1 + 2 * t:
+                f.trigger(t)
+        return f.to_bytes()
+    dyn_blocks = max(blocks, 9)
+    runs["dynamic"] = _slim(run_blocks(init, dyn, dyn_blocks))
     ok_runs = all(r["ok"] for r in runs.values())
     exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
     peaks = {name: V.peak(perc_series(runs[name], 0)) if runs[name]["ok"] else None for name in MM.NAMES}
@@ -2041,6 +2057,17 @@ def step_mnm(init, sound, machines, blocks) -> dict:
         f"the budget: of four SID tracks the first {fits} play, the rest are silent":
             None not in budget and all(v > 0.01 for v in budget[:fits]) and all(v == 0.0 for v in budget[fits:]),
     }
+    dynr = runs["dynamic"]
+
+    def dpk(b, t):
+        return V.peak(dynr["perc"][b][t]["out"]) if dynr["ok"] and t in dynr["perc"][b] else 0.0
+    newest = [dpk(1 + 2 * k, k) for k in range(4)]
+    last = [dpk(dyn_blocks - 1, t) for t in range(4)]
+    checks["v0.29, dynamic allocation: each new note sounds on its block; at the end the newest " \
+           f"{fits} play and the oldest are silent"] = (
+        all(v > 0.01 for v in newest) and all(v > 0.01 for v in last[4 - fits:])
+        and all(v == 0.0 for v in last[:4 - fits]))
+    n["dynamic_newest_peaks"], n["dynamic_last_peaks"] = newest, last
     n["budget_peaks"] = budget
     n["late_peaks"] = late
     return {"ok": all(checks.values()), "checks": checks, "numbers": n, "runs": runs}

@@ -45,6 +45,16 @@ MNM_LEVELS = (5.4, 11.5, 0.95, 2.0, 16.5)
 MNM_COST = {"SID 6581": 60_000, "DPRO-WAVE": 34_000, "DPRO-DDRW": 78_000, "DPRO-DENS": 70_000,
             "VO-6": 75_000}
 MNM_BUDGET = 150_000
+# v0.29: which Monomachine voices get the budget: the newest first (the owner, 2026-10-28:
+# with the DN2's dynamic voice allocation each note lands on a new voice; the older ones,
+# which never go quiet, kept the budget in slot order, so most new notes were silent --
+# CZ's v0.10 bug again, docs/cz.md). At PERC's entry every slot gets a key, its age in
+# blocks (0 the block it is triggered) times 16 plus the slot, or NONE for a slot not on a
+# Monomachine machine; a voice plays if the costs of the voices with smaller keys, and its
+# own, fit the budget. In the Monomachine scratch's free tail (dnfw.mnm.core uses < 4 KB).
+MNM_KEYS_OFF, MNM_COSTS_OFF = 0x3000, 0x3040
+MNM_AGE_TOP = (1 << 26) - 1
+MNM_NONE = 0x7FFFFFF0
 SEED = 0x2545F491
 OFF_LEVEL = 0.0002
 
@@ -82,6 +92,42 @@ def raw_type(p: Prog, d: int) -> None:
     word tells them apart. Needs C['t'] in R9; clobbers R0, R1, R10, R12, I1."""
     p.iop(10, 9, "+", 9)
     half(p, d, 148, 10)
+
+
+def mnm_ages(p: Prog, L: M.Layout) -> None:
+    """v0.29: every slot's key and Monomachine cost for this block (MNM_KEYS_OFF). Clobbers
+    R0-R5, R10, R12, R13, I1."""
+    from ..mnm import machines as MNM
+    keys = L.md.mnm.scratch + MNM_KEYS_OFF
+    costs = L.md.mnm.scratch + MNM_COSTS_OFF
+    p.ld(3, TRIG_WORD)
+    p.lsh(3, 3, -16)                           # the slots' note triggers
+    for u in range(16):
+        p.iconst(10, 2 * u)
+        half(p, 2, 148, 10)                    # the slot's machine type, as raw_type
+        p.iconst(4, 0)
+        for typ, k in MNM_TYPES.items():
+            p.iconst(12, typ)
+            p.if_(2, "EQ", 12, lambda c=MNM_COST[MNM.NAMES[k]]: p.iconst(4, c), kind="i")
+        p.st(costs + 4 * u, 4)
+
+        def mnm(u=u):
+            p.ld(13, keys + 4 * u)
+            p.lsh(13, 13, -4)                  # its age last block
+            p.iconst(12, MNM_AGE_TOP)
+            p.if_(13, "LT", 12, lambda: (p.iconst(12, 1), p.iop(13, 13, "+", 12)), kind="i")
+            p.iconst(12, 1 << u)
+            p.iop(12, 3, "AND", 12)
+            p.ifz(12, "NE", lambda: p.iconst(13, 0))    # a note this block: the newest
+            p.lsh(13, 13, 4)
+            p.iconst(12, u)
+            p.iop(13, 13, "OR", 12)
+            p.st(keys + 4 * u, 13)
+
+        def none(u=u):
+            p.iconst(5, MNM_NONE | u)
+            p.st(keys + 4 * u, 5)
+        p.ifz(4, "NE", mnm, none)
 
 
 def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
@@ -195,11 +241,20 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.ld(0, C["mnm"])
 
     def budget():
-        from ..mnm import machines as MNM
-        p.ld(8, C["mcost"])
-        for k, name in enumerate(MNM.NAMES):
-            p.iconst(12, k + 1)
-            p.if_(0, "EQ", 12, lambda name=name: p.iconst(1, MNM_COST[name]), kind="i")
+        # v0.29: the newer voices' costs first (mnm_ages), then this one's
+        keys = L.md.mnm.scratch + MNM_KEYS_OFF
+        p.ld(8, C["t"])
+        p.lsh(12, 8, 2)
+        p.iconst(11, keys)
+        p.iop(12, 11, "+", 12)
+        p.seti(1, 12)
+        p.ldi(6, 0, 1)                         # this slot's key
+        p.ldi(1, (MNM_COSTS_OFF - MNM_KEYS_OFF) // 4, 1)   # and its cost
+        p.iconst(8, 0)
+        for u in range(16):
+            p.ld(7, keys + 4 * u)
+            p.if_(7, "LT", 6, lambda u=u: (p.ld(5, L.md.mnm.scratch + MNM_COSTS_OFF + 4 * u),
+                                           p.iop(8, 8, "+", 5)), kind="i")
         p.iop(8, 8, "+", 1)
         p.iconst(12, MNM_BUDGET)
         p.if_(8, "GT", 12, lambda: (p.iconst(0, 1), p.st(C["mskip"], 0)),
@@ -434,6 +489,7 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     MNP.build(p, L.md.mnm)                     # v0.26: then DENS's and DDRW's Digibank stand-in, 8 words a block
     p.iconst(0, 0)
     p.st(L.C["mcost"], 0)                      # v0.26: no Monomachine voice rendered yet this block
+    mnm_ages(p, L)                             # v0.29: the newest Monomachine voices first
     from . import guard as G
     G.entry(p)                                 # v0.27: the frame's length and the time our voices have
     p.iconst(0, 0)
