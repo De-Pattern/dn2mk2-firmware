@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.27** | 2026-10-27 | v0.26 and MNM-1 merged into one line (the five Monomachine machines, without CZ/RESONATOR); the DSP frame-time guard against the audio dropout; TRACK + PLAY no longer opens the sample list; FILE NAME arrows repeat; slice editor moves with FUNC held; the playing slice marked; p-locked controls lit | `builds/v0.27-GUARD/` | yes |
+| **v0.28** | 2026-10-28 | The Monomachine machines drawn as the Monomachine's (animated controls), their choice knobs with detents, each machine its own level; SHIFT and GRAN removed; KEYBOARD's first press of a new slice plays only that slice | `builds/v0.28-MNM/` | yes |
+| v0.27 | 2026-10-27 | v0.26 and MNM-1 merged into one line (the five Monomachine machines, without CZ/RESONATOR); the DSP frame-time guard against the audio dropout; TRACK + PLAY no longer opens the sample list; FILE NAME arrows repeat; slice editor moves with FUNC held; the playing slice marked; p-locked controls lit | `builds/v0.27-GUARD/` | yes |
 | v0.26 | 2026-10-26 | The slice editor as the DT2's (FUNC + RIGHT splits, FUNC + LEFT removes, FUNC + YES previews, FUNC + G moves, playhead); KEYBOARD plays slices in order; no pop-ups (sample list, slice menus); PLAY/MODE/BARS/GRID four detents a choice; browser NO closes; name screen FUNC + PLAY clears, grid wraps, cursor moves on | `builds/v0.26-SLICES/` | yes |
 | MNM-1 | 2026-10-26 | **A separate line**: v0.25 without CZ/RESONATOR, plus the Monomachine's SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens and VO-6 | `builds/MNM-1-MONOMACHINE/` | yes |
 | v0.25 | 2026-10-26 | The playhead on the waveform; the DT2's sample list and +Drive-style folder browser (SAMPLE ACTION: load, rename, delete); the recorder as the DT2's (RECORDING, NORMALIZING, TRIM with preview, FILE NAME, ASSIGN); GRID/SLICE slice locks; KEYBOARD's next 16 slices; an LFO on SAMP steps through your samples; the in-browser patcher | `builds/v0.25-BROWSER/` | yes |
@@ -64,6 +65,62 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.28 — MNM (the Monomachine machines redrawn, their detents and levels; SHIFT and GRAN removed; the slice fix)
+
+`DN2mod_v0.28_MNM_OS1.11.syx`
+sha256 `5c4f69fde4008f118b626f4f7f4fa7f4f51de6f538e0812d002aa81e5a057215`
+Gate: CLEARED TO FLASH, 2026-10-28 (USB size 2,046,260 of 2,097,152; DSP image 1,005,724 of 1,048,575). Source: commit `2395702`. Docs: `docs/mnm-pages-plan.md`, `docs/mnm.md`, `docs/sampler.md`.
+
+Everything in v0.27, plus:
+
+**The Monomachine machines' pages, drawn as the Monomachine draws them.** Each of the five
+machines has its own screen in the Monomachine's style instead of the DN2's grid, with:
+- DPRO Wave's WAVE and VO-6's CONS: a marker stepping through the rows, left to right, top to
+  bottom.
+- DPRO Ddrw's WAV1 and WAV2: a bar sliding along a line.
+- DPRO Dens's PCH2-PCH4: a needle along the bottom, like a VU meter.
+- SID 6581's choice controls: a switch knob pointing at the choice.
+- VO-6's V-SW: a two-position switch.
+- The machine's name in a bar along the top.
+
+**Their choice knobs have detents**, as the DT2 machines' do: four detents a choice on a short
+list (eight choices or fewer), one on a long list. No more turning several times to move one
+step.
+
+**Each Monomachine machine has its own level.** They were far too quiet in MNM-1 and v0.27
+(some notes may have seemed dead for it). Now each is set to about the loudness of a stock DN2
+machine at its defaults.
+
+**SHIFT and GRAN are removed** (filter types 7 and 8), as decided; PING stays. A track saved
+with SHIFT or GRAN loads as Multi-Mode. This also frees DSP time and room.
+
+**The slice fix (a user's report).** On a SLICE or GRID track in KEYBOARD mode, the first press
+of a key for a new slice could play a moment of the previous slice before the right one. The
+DSP now takes the note again if the slice or note arrives just after the trigger (within about
+16 ms).
+
+**Gate changes.** The gate now also draws each Monomachine page and checks the detents, and
+checks that every DSP jump lands in its own code (two builds were stopped by this before this
+one).
+
+**Test** (after the regression check):
+1. Each Monomachine machine (SID 6581, DPRO Wave, Ddrw, Dens, VO-6): the page is the new one,
+   and the animations move as you turn WAVE, CONS, WAV1/WAV2, PCH2-4, the SID choices, V-SW.
+2. A choice control on a Monomachine page: one choice per four detents; no skipping.
+3. Their loudness next to a stock FM track at defaults: about the same. Tell me which machine
+   is still too quiet or too loud, and whether any notes are still dead.
+4. A SLICE track, KEYBOARD on: press a new slice key for the first time: only that slice plays.
+5. A project saved with SHIFT or GRAN on a track: it loads, as Multi-Mode.
+6. The v0.27 tests, below, if you have not run them.
+
+**Known issues / not done.**
+- **The guard's limit** is still the v0.27 setting: your v0.27 test sets it.
+- **Not yet looked at:** the user reports in `docs/user-reports.md` (a freeze choosing a sample
+  while playing, trig mute on our machines, SYN + YES on Machinedrum machines, an MD machine
+  still heard after switching to a stock machine), multi-select in the sample list, the
+  recorder's input only listening after SRC is switched away and back.
+- **Not seen on hardware yet**: all of the above; checked in the emulators.
 
 ## v0.27 — GUARD (the lines merged, the DSP's frame-time guard, your v0.26 notes)
 
