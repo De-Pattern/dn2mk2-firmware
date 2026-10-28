@@ -578,7 +578,7 @@ wr_pk_loop_46.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0429;                   // -> wr_pk_loop_46.
       R0 = DM(-0x7edfcf00);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe044f;                   // -> wr_pk_else_47.
       R12 = 0x1;
@@ -752,7 +752,7 @@ wr_pk_loop_69.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0541;                   // -> wr_pk_loop_69.
       R0 = DM(-0x7edfcefc);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe0567;                   // -> wr_pk_else_70.
       R12 = 0x1;
@@ -926,7 +926,7 @@ wr_pk_loop_92.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0659;                   // -> wr_pk_loop_92.
       R0 = DM(-0x7edfcef8);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe067f;                   // -> wr_pk_else_93.
       R12 = 0x1;
@@ -1100,7 +1100,7 @@ wr_pk_loop_115.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0771;                   // -> wr_pk_loop_115.
       R0 = DM(-0x7edfcef4);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe0797;                   // -> wr_pk_else_116.
       R12 = 0x1;
@@ -1274,7 +1274,7 @@ wr_pk_loop_138.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0889;                   // -> wr_pk_loop_138.
       R0 = DM(-0x7edfcef0);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe08af;                   // -> wr_pk_else_139.
       R12 = 0x1;
@@ -1448,7 +1448,7 @@ wr_pk_loop_161.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe09a1;                   // -> wr_pk_loop_161.
       R0 = DM(-0x7edfceec);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe09c7;                   // -> wr_pk_else_162.
       R12 = 0x1;
@@ -1622,7 +1622,7 @@ wr_pk_loop_184.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0ab9;                   // -> wr_pk_loop_184.
       R0 = DM(-0x7edfcee8);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe0adf;                   // -> wr_pk_else_185.
       R12 = 0x1;
@@ -1796,7 +1796,7 @@ wr_pk_loop_207.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0bd1;                   // -> wr_pk_loop_207.
       R0 = DM(-0x7edfcee4);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe0bf7;                   // -> wr_pk_else_208.
       R12 = 0x1;
@@ -1970,7 +1970,7 @@ wr_pk_loop_230.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0ce9;                   // -> wr_pk_loop_230.
       R0 = DM(-0x7edfcee0);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe0d0f;                   // -> wr_pk_else_231.
       R12 = 0x1;
@@ -2144,7 +2144,7 @@ wr_pk_loop_253.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0e01;                   // -> wr_pk_loop_253.
       R0 = DM(-0x7edfcedc);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe0e27;                   // -> wr_pk_else_254.
       R12 = 0x1;
@@ -2318,7 +2318,7 @@ wr_pk_loop_276.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe0f19;                   // -> wr_pk_loop_276.
       R0 = DM(-0x7edfced8);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe0f3f;                   // -> wr_pk_else_277.
       R12 = 0x1;
@@ -2492,7 +2492,7 @@ wr_pk_loop_299.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe1031;                   // -> wr_pk_loop_299.
       R0 = DM(-0x7edfced4);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe1057;                   // -> wr_pk_else_300.
       R12 = 0x1;
@@ -2666,7 +2666,7 @@ wr_pk_loop_322.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe1149;                   // -> wr_pk_loop_322.
       R0 = DM(-0x7edfced0);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe116f;                   // -> wr_pk_else_323.
       R12 = 0x1;
@@ -2840,7 +2840,7 @@ wr_pk_loop_345.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe1261;                   // -> wr_pk_loop_345.
       R0 = DM(-0x7edfcecc);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe1287;                   // -> wr_pk_else_346.
       R12 = 0x1;
@@ -3014,7 +3014,7 @@ wr_pk_loop_368.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe1379;                   // -> wr_pk_loop_368.
       R0 = DM(-0x7edfcec8);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe139f;                   // -> wr_pk_else_369.
       R12 = 0x1;
@@ -3188,7 +3188,7 @@ wr_pk_loop_391.:
       DM(-0x7edfcf3c) = R0;
       IF NE JUMP 0xbe1492;                   // -> wr_pk_loop_391.
       R0 = DM(-0x7edfcec4);
-      R12 = 0x35000000;                 // 4.76837158203125e-07
+      R12 = 0x37800000;                 // 1.52587890625e-05
       COMP(F7, F12);
       IF GE JUMP 0xbe14b8;                   // -> wr_pk_else_392.
       R12 = 0x1;

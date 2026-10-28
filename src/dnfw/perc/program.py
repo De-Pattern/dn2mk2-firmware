@@ -66,7 +66,7 @@ ORDER_OFF, RANK_U, RANK_N, PERC_I, SMP_I = 0x3080, 0x30C0, 0x30C4, 0x30C8, 0x30C
 # blocks under QUIET_LEVEL there, no note, and the voice rests: no cost, silent, until its
 # next note. QUIET counts each slot's blocks at RESTS_OFF.
 RESTS_OFF = 0x3100
-MNM_QUIET_LEVEL = 2.0 ** -21
+MNM_QUIET_LEVEL = 2.0 ** -16                # -96 dB: an AMP envelope's tail and a filter's are under it
 MNM_QUIET_BLOCKS = 64                      # 43 ms
 MNM_SCRATCH = 0x81200000                   # dsp.MNM_SCRATCH_DDR (test_waverider_dsp holds them equal)
 ORDER = MNM_SCRATCH + ORDER_OFF

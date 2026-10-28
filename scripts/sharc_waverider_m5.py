@@ -2056,20 +2056,28 @@ def step_mnm(init, sound, machines, blocks) -> dict:
     dyn_blocks = max(blocks, 9)
     runs["dynamic"] = _slim(run_blocks(init, dyn, dyn_blocks))
 
-    # v0.29: a voice whose sound has died away (here its track's LEVEL at 0: nothing after
-    # the chain) rests after PP.MNM_QUIET_BLOCKS blocks -- no cost -- and its next note wakes it
+    # v0.29: a voice whose sound has died away after the chain rests after
+    # PP.MNM_QUIET_BLOCKS blocks -- no cost -- and its next note wakes it. The runner's AMP
+    # never closes (no note-off), so the chain's silence is made right after track 0's amp
+    # (its buffer zeroed there, as an AMP envelope that has closed would leave it, which is
+    # what PERC's entry reads next block); the voice's own render, taken at the sample
+    # machines' entry, is what the check reads after the wake
     REST_AT = PP.MNM_QUIET_BLOCKS + 4
     seen_cost = {}
 
     def rest_frame(b):
-        f = base_frame(sound, machines, t0=types[sid], overrides=mnm_words(sid), trigger=b in (1, REST_AT))
-        if b < REST_AT:
-            f.header(FR.LEVEL, 0, 0)
-        return f.to_bytes()
+        return base_frame(sound, machines, t0=types[sid], overrides=mnm_words(sid),
+                          trigger=b in (1, REST_AT)).to_bytes()
 
     def rest_hook(r):
         seen_cost[len(seen_cost)] = m2.word(r.state, PERC_L.md.mnm.scratch + PP.MNM_COSTS_OFF) or 0
-    rr = run_blocks(init, rest_frame, REST_AT + 3, extra_hooks={dsp.SMP_SW: rest_hook})
+
+    def hush(r):                                # after the amp: the chain's block silent
+        if len(seen_cost) <= REST_AT - 1:
+            buf = m2.word(r.state, PP.BUFFERS) or 0
+            for k in range(BLOCK):
+                m2.poke(r.state, buf + 4 * k, 0)
+    rr = run_blocks(init, rest_frame, REST_AT + 3, extra_hooks={dsp.SMP_SW: rest_hook, AMP_RETURN: hush})
     rest_peak_after = max(V.peak(rr["perc"][b][0]["out"]) for b in (REST_AT, REST_AT + 1, REST_AT + 2)) \
         if rr["ok"] and all(0 in rr["perc"][b] for b in (REST_AT, REST_AT + 1, REST_AT + 2)) else 0.0
     rest_ok = rr["ok"] and seen_cost.get(REST_AT - 2) == 0 and seen_cost.get(2, 0) > 0 and rest_peak_after > 0.01
