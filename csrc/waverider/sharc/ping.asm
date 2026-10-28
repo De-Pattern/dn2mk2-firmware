@@ -32,7 +32,7 @@ wr_p_track.:
       R0 = DM(0, I1);
       R7 = -16;
       R1 = PASS R1;
-      IF EQ JUMP 0x0;                   // -> wr_p_ftlo_1.
+      IF EQ JUMP 0x1702a2;                   // -> wr_p_ftlo_1.
       R0 = LSHIFT R0 BY R7;
 .GLOBAL wr_p_ftlo_1.;
 wr_p_ftlo_1.:
@@ -40,7 +40,7 @@ wr_p_ftlo_1.:
       R0 = R0 AND R6;
       R1 = 6;
       COMP(R0, R1);
-      IF NE JUMP 0x0;                   // -> wr_p_next.
+      IF NE JUMP 0x170915;                   // -> wr_p_next.
       R12 = LSHIFT R9 BY 7;
       R11 = 0x2e1d00;
       R12 = R11 + R12;
@@ -82,10 +82,10 @@ wr_p_ftlo_1.:
       R13 = 0xff;
       R12 = R12 AND R13;
       COMP(R12, R13);
-      IF EQ JUMP 0x0;                   // -> wr_p_note0_2.
+      IF EQ JUMP 0x17030b;                   // -> wr_p_note0_2.
       R11 = PASS R11;
-      IF LT JUMP 0x0;                   // -> wr_p_note0_2.
-      JUMP 0x0;                         // -> wr_p_noteok_3.
+      IF LT JUMP 0x17030b;                   // -> wr_p_note0_2.
+      JUMP 0x17030c;                         // -> wr_p_noteok_3.
 .GLOBAL wr_p_note0_2.;
 wr_p_note0_2.:
       R11 = R11 - R11;
@@ -186,10 +186,10 @@ wr_p_noteok_3.:
       R6 = 0x40200000;                  // 2.5
       R12 = 1;
       COMP(R8, R12);
-      IF EQ JUMP 0x0;                   // -> wr_p_nohit_4.
+      IF EQ JUMP 0x1703fd;                   // -> wr_p_nohit_4.
       R12 = 3;
       COMP(R8, R12);
-      IF EQ JUMP 0x0;                   // -> wr_p_nohit_4.
+      IF EQ JUMP 0x1703fd;                   // -> wr_p_nohit_4.
       R7 = DM(17, I2);                  // base
       // F6 = hit[F7], interpolated
       R12 = R12 - R12;
@@ -217,7 +217,7 @@ wr_p_nohit_4.:
       DM(26, I2) = R0;                  // late
       R12 = 3;
       COMP(R8, R12);
-      IF NE JUMP 0x0;                   // -> wr_p_notlpg_5.
+      IF NE JUMP 0x170444;                   // -> wr_p_notlpg_5.
       R0 = 120;
       DM(26, I2) = R0;                  // late
       R0 = -0x40800000;                 // -1.0
@@ -267,7 +267,7 @@ wr_p_notlpg_5.:
       R2 = 1;
       R2 = LSHIFT R2 BY R9;
       R0 = R0 AND R2;
-      IF EQ JUMP 0x0;                   // -> wr_p_notrig_6.
+      IF EQ JUMP 0x170474;                   // -> wr_p_notrig_6.
       R0 = 1;
       DM(6, I2) = R0;                   // stage
       DM(9, I2) = R0;                   // hit
@@ -283,7 +283,7 @@ wr_p_notrig_6.:
       I0 = R0;                          // this track's 32 floats
       R0 = DM(0x2dde24);                // the block size (the dispatch's R9)
       R0 = PASS R0;
-      IF EQ JUMP 0x0;                   // -> wr_p_next.
+      IF EQ JUMP 0x170915;                   // -> wr_p_next.
       DM(28, I2) = R0;                  // left
 .GLOBAL wr_p_sample.;
 wr_p_sample.:
@@ -293,15 +293,15 @@ wr_p_sample.:
       // the strike: hit 0 is none; h = hit - 1 - late; 0 <= h < 15 adds strike_hit * click[h]
       R0 = DM(9, I2);                   // hit
       R0 = PASS R0;
-      IF EQ JUMP 0x0;                   // -> wr_p_hdone_7.
+      IF EQ JUMP 0x1704c3;                   // -> wr_p_hdone_7.
       R1 = DM(26, I2);                  // late
       R2 = R0 - R1;
       R12 = 1;
       R2 = R2 - R12;
-      IF LT JUMP 0x0;                   // -> wr_p_nostrike_8.
+      IF LT JUMP 0x1704b7;                   // -> wr_p_nostrike_8.
       R12 = 15;
       COMP(R2, R12);
-      IF GE JUMP 0x0;                   // -> wr_p_nostrike_8.
+      IF GE JUMP 0x1704b7;                   // -> wr_p_nostrike_8.
       R2 = LSHIFT R2 BY 2;
       R12 = -0x7edeea88;                // strike (DDR)
       R2 = R12 + R2;
@@ -314,7 +314,7 @@ wr_p_sample.:
 wr_p_nostrike_8.:
       R1 = DM(27, I2);                  // hit_end
       COMP(R0, R1);
-      IF GT JUMP 0x0;                   // -> wr_p_hdone_7.
+      IF GT JUMP 0x1704c3;                   // -> wr_p_hdone_7.
       R12 = 1;
       R0 = R12 + R0;
       DM(9, I2) = R0;                   // hit
@@ -324,7 +324,7 @@ wr_p_hdone_7.:
       R0 = DM(6, I2);                   // stage
       R12 = 1;
       COMP(R0, R12);
-      IF NE JUMP 0x0;                   // -> wr_p_edec_9.
+      IF NE JUMP 0x170544;                   // -> wr_p_edec_9.
       R4 = DM(7, I2);                   // x
       F5 = PASS F4;                     // x
       R12 = 0x43800000;                 // 256.0
@@ -332,7 +332,7 @@ wr_p_hdone_7.:
       R6 = DM(24, I2);                  // curve
       R12 = R12 - R12;
       COMP(F6, F12);
-      IF GE JUMP 0x0;                   // -> wr_p_cpos_12.
+      IF GE JUMP 0x170505;                   // -> wr_p_cpos_12.
       // F9 = log[F13], interpolated
       R12 = R12 - R12;
       F13 = MAX(F13, F12);
@@ -354,7 +354,7 @@ wr_p_hdone_7.:
       F9 = F9 - F5;
       F9 = F6 * F9;
       F9 = F5 - F9;
-      JUMP 0x0;                         // -> wr_p_cdone_13.
+      JUMP 0x17052c;                         // -> wr_p_cdone_13.
 .GLOBAL wr_p_cpos_12.;
 wr_p_cpos_12.:
       // F9 = exp[F13], interpolated
@@ -386,17 +386,17 @@ wr_p_cdone_13.:
       DM(7, I2) = R4;                   // x
       R12 = 0x3f800000;                 // 1.0
       COMP(F4, F12);
-      IF LT JUMP 0x0;                   // -> wr_p_edone_11.
+      IF LT JUMP 0x1705c7;                   // -> wr_p_edone_11.
       R0 = 2;
       DM(6, I2) = R0;                   // stage
       R0 = R0 - R0;
       DM(7, I2) = R0;                   // x
-      JUMP 0x0;                         // -> wr_p_edone_11.
+      JUMP 0x1705c7;                         // -> wr_p_edone_11.
 .GLOBAL wr_p_edec_9.;
 wr_p_edec_9.:
       R12 = 2;
       COMP(R0, R12);
-      IF NE JUMP 0x0;                   // -> wr_p_eidle_10.
+      IF NE JUMP 0x1705c6;                   // -> wr_p_eidle_10.
       R4 = DM(7, I2);                   // x
       R12 = 0x3f800000;                 // 1.0
       F4 = F12 - F4;
@@ -406,7 +406,7 @@ wr_p_edec_9.:
       R6 = DM(24, I2);                  // curve
       R12 = R12 - R12;
       COMP(F6, F12);
-      IF GE JUMP 0x0;                   // -> wr_p_cpos_14.
+      IF GE JUMP 0x170589;                   // -> wr_p_cpos_14.
       // F9 = log[F13], interpolated
       R12 = R12 - R12;
       F13 = MAX(F13, F12);
@@ -428,7 +428,7 @@ wr_p_edec_9.:
       F9 = F9 - F5;
       F9 = F6 * F9;
       F9 = F5 - F9;
-      JUMP 0x0;                         // -> wr_p_cdone_15.
+      JUMP 0x1705b0;                         // -> wr_p_cdone_15.
 .GLOBAL wr_p_cpos_14.;
 wr_p_cpos_14.:
       // F9 = exp[F13], interpolated
@@ -460,11 +460,11 @@ wr_p_cdone_15.:
       DM(7, I2) = R4;                   // x
       R12 = 0x3f800000;                 // 1.0
       COMP(F4, F12);
-      IF LT JUMP 0x0;                   // -> wr_p_edone_11.
+      IF LT JUMP 0x1705c7;                   // -> wr_p_edone_11.
       R0 = R0 - R0;
       DM(6, I2) = R0;                   // stage
       DM(7, I2) = R0;                   // x
-      JUMP 0x0;                         // -> wr_p_edone_11.
+      JUMP 0x1705c7;                         // -> wr_p_edone_11.
 .GLOBAL wr_p_eidle_10.;
 wr_p_eidle_10.:
       R9 = R9 - R9;                     // a = 0.0
@@ -473,7 +473,7 @@ wr_p_edone_11.:
       R0 = DM(16, I2);                  // kind
       R12 = 3;
       COMP(R0, R12);
-      IF EQ JUMP 0x0;                   // -> wr_p_lpg.
+      IF EQ JUMP 0x1707a4;                   // -> wr_p_lpg.
       // SVF, LADR, VCFQ: p = base + env a; g = interp(g, p)
       R4 = DM(18, I2);                  // env
       F4 = F4 * F9;
@@ -503,7 +503,7 @@ wr_p_edone_11.:
       R0 = DM(16, I2);                  // kind
       R12 = 1;
       COMP(R0, R12);
-      IF EQ JUMP 0x0;                   // -> wr_p_ladr.
+      IF EQ JUMP 0x1706d8;                   // -> wr_p_ladr.
       // SVF / VCFQ: k = interp(w, p) * inv_tau, or VCFQ's past its edge
       // F4 = w[F11], interpolated
       R12 = R12 - R12;
@@ -532,11 +532,11 @@ wr_p_edone_11.:
       R0 = DM(16, I2);                  // kind
       R12 = 2;
       COMP(R0, R12);
-      IF NE JUMP 0x0;                   // -> wr_p_kset_16.
+      IF NE JUMP 0x170648;                   // -> wr_p_kset_16.
       R5 = DM(20, I2);                  // res
       R12 = 0x3f7851ec;                 // 0.97
       COMP(F5, F12);
-      IF LT JUMP 0x0;                   // -> wr_p_kset_16.
+      IF LT JUMP 0x170648;                   // -> wr_p_kset_16.
       R4 = DM(29, I2);                  // k_vcfq
 .GLOBAL wr_p_kset_16.;
 wr_p_kset_16.:
@@ -579,13 +579,13 @@ wr_p_kset_16.:
       R12 = R12 - R12;
       F14 = F12 - F6;                   // -x
       COMP(F6, F12);
-      IF LT JUMP 0x0;                   // -> wr_p_neg_18.
+      IF LT JUMP 0x170696;                   // -> wr_p_neg_18.
       F14 = PASS F6;                    // |x|
 .GLOBAL wr_p_neg_18.;
 wr_p_neg_18.:
       R12 = 0x3f800000;                 // 1.0
       COMP(F14, F12);
-      IF LE JUMP 0x0;                   // -> wr_p_lin_17.
+      IF LE JUMP 0x1706bc;                   // -> wr_p_lin_17.
       F14 = F14 - F12;                  // |x| - k
       R12 = 0x3f99999a;                 // 1.2
       F14 = MIN(F14, F12);              // o
@@ -597,9 +597,9 @@ wr_p_neg_18.:
       F15 = F12 + F15;                  // y = k + (o - o^2 / 2room)
       R12 = R12 - R12;
       COMP(F6, F12);
-      IF LT JUMP 0x0;                   // -> wr_p_kneg_20.
+      IF LT JUMP 0x1706ba;                   // -> wr_p_kneg_20.
       F6 = PASS F15;
-      JUMP 0x0;                         // -> wr_p_lin_17.
+      JUMP 0x1706bc;                         // -> wr_p_lin_17.
 .GLOBAL wr_p_kneg_20.;
 wr_p_kneg_20.:
       F6 = F12 - F15;
@@ -615,12 +615,12 @@ wr_p_lin_17.:
       R12 = 2;
       F10 = PASS F7;                    // low (SVF)
       COMP(R0, R12);
-      IF NE JUMP 0x0;                   // -> wr_p_lowk_21.
+      IF NE JUMP 0x1706d4;                   // -> wr_p_lowk_21.
       F10 = PASS F6;                    // band (VCFQ)
 .GLOBAL wr_p_lowk_21.;
 wr_p_lowk_21.:
       F10 = F10 * F9;
-      JUMP 0x0;                         // -> wr_p_out.
+      JUMP 0x1708db;                         // -> wr_p_out.
 .GLOBAL wr_p_ladr.;
 wr_p_ladr.:
       // the ladder (live.ladder): F15 = g
@@ -730,18 +730,18 @@ wr_p_ladr.:
       F4 = F12 + F4;
       F10 = F10 * F4;
       F10 = F10 * F9;
-      JUMP 0x0;                         // -> wr_p_out.
+      JUMP 0x1708db;                         // -> wr_p_out.
 .GLOBAL wr_p_lpg.;
 wr_p_lpg.:
       // the vactrol: rise 0.026 a sample, fall dec_vac * vac_table[vac * 64]
       R4 = DM(8, I2);                   // vac
       COMP(F9, F4);
-      IF LE JUMP 0x0;                   // -> wr_p_fall_22.
+      IF LE JUMP 0x1707b4;                   // -> wr_p_fall_22.
       F5 = F9 - F4;
       R12 = 0x3cd4fdf4;                 // 0.026000000536441803
       F5 = F5 * F12;
       F4 = F4 + F5;
-      JUMP 0x0;                         // -> wr_p_vset_23.
+      JUMP 0x1707eb;                         // -> wr_p_vset_23.
 .GLOBAL wr_p_fall_22.;
 wr_p_fall_22.:
       F11 = PASS F4;
@@ -864,13 +864,13 @@ wr_p_vset_23.:
       R12 = R12 - R12;
       F14 = F12 - F6;                   // -x
       COMP(F6, F12);
-      IF LT JUMP 0x0;                   // -> wr_p_neg_25.
+      IF LT JUMP 0x170899;                   // -> wr_p_neg_25.
       F14 = PASS F6;                    // |x|
 .GLOBAL wr_p_neg_25.;
 wr_p_neg_25.:
       R12 = 0x3f800000;                 // 1.0
       COMP(F14, F12);
-      IF LE JUMP 0x0;                   // -> wr_p_lin_24.
+      IF LE JUMP 0x1708bf;                   // -> wr_p_lin_24.
       F14 = F14 - F12;                  // |x| - k
       R12 = 0x3f99999a;                 // 1.2
       F14 = MIN(F14, F12);              // o
@@ -882,9 +882,9 @@ wr_p_neg_25.:
       F15 = F12 + F15;                  // y = k + (o - o^2 / 2room)
       R12 = R12 - R12;
       COMP(F6, F12);
-      IF LT JUMP 0x0;                   // -> wr_p_kneg_27.
+      IF LT JUMP 0x1708bd;                   // -> wr_p_kneg_27.
       F6 = PASS F15;
-      JUMP 0x0;                         // -> wr_p_lin_24.
+      JUMP 0x1708bf;                         // -> wr_p_lin_24.
 .GLOBAL wr_p_kneg_27.;
 wr_p_kneg_27.:
       F6 = F12 - F15;
@@ -909,13 +909,13 @@ wr_p_out.:
       R12 = R12 - R12;
       F14 = F12 - F10;                  // -x
       COMP(F10, F12);
-      IF LT JUMP 0x0;                   // -> wr_p_neg_29.
+      IF LT JUMP 0x1708e4;                   // -> wr_p_neg_29.
       F14 = PASS F10;                   // |x|
 .GLOBAL wr_p_neg_29.;
 wr_p_neg_29.:
       R12 = 0x3f19999a;                 // 0.6
       COMP(F14, F12);
-      IF LE JUMP 0x0;                   // -> wr_p_lin_28.
+      IF LE JUMP 0x17090a;                   // -> wr_p_lin_28.
       F14 = F14 - F12;                  // |x| - k
       R12 = 0x3f19999a;                 // 0.6
       F14 = MIN(F14, F12);              // o
@@ -927,9 +927,9 @@ wr_p_neg_29.:
       F15 = F12 + F15;                  // y = k + (o - o^2 / 2room)
       R12 = R12 - R12;
       COMP(F10, F12);
-      IF LT JUMP 0x0;                   // -> wr_p_kneg_31.
+      IF LT JUMP 0x170908;                   // -> wr_p_kneg_31.
       F10 = PASS F15;
-      JUMP 0x0;                         // -> wr_p_lin_28.
+      JUMP 0x17090a;                         // -> wr_p_lin_28.
 .GLOBAL wr_p_kneg_31.;
 wr_p_kneg_31.:
       F10 = F12 - F15;
@@ -940,7 +940,7 @@ wr_p_lin_28.:
       R12 = 1;
       R0 = R0 - R12;
       DM(28, I2) = R0;                  // left
-      IF NE JUMP 0x0;                   // -> wr_p_sample.
+      IF NE JUMP 0x17048b;                   // -> wr_p_sample.
 .GLOBAL wr_p_next.;
 wr_p_next.:
       R0 = DM(0x2e2500);
@@ -949,7 +949,7 @@ wr_p_next.:
       DM(0x2e2500) = R0;
       R12 = 16;
       COMP(R0, R12);
-      IF LT JUMP 0x0;                   // -> wr_p_track.
+      IF LT JUMP 0x170284;                   // -> wr_p_track.
       R0 = DM(0x2dde00);
       R1 = DM(0x2dde04);
       R2 = DM(0x2dde08);

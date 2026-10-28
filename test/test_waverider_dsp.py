@@ -327,3 +327,12 @@ def test_perc_saves_what_ping_restores_and_hands_on_to_resonator():
             # (v0.24: and I0, the P-I machines', saved with the rest)
             assert f"{m.group(1)}{m.group(2)}" in ("I0", "I1", "I2", "I3", "I4", "I5", "I12"), ln
     assert not any(re.search(r"\bCALL\b|\bDO\b|\bRTS\b", ln) for ln in lines)
+
+
+def test_no_source_is_left_with_its_branch_targets_unresolved():
+    # v0.28: ping.asm regenerated without scripts/sharc_resolve_jumps.py assembled with
+    # JUMP 0x0 throughout (the SHARC runner caught it); every shipped source is resolved
+    import re
+    for name in ("perc", "smp", "ping", "block_count", "pvmix", "entry_mark", "idle_load"):
+        src = (SHARC / f"{name}.asm").read_text(encoding="utf-8")
+        assert not re.search(r"JUMP\s+0x0;|=\s*0x0;\s*// return address", src), name

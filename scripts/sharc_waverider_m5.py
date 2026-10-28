@@ -413,6 +413,12 @@ def perc_links_ok() -> bool:
                            (SHARC / "smp.asm").read_text(encoding="utf-8")) == [f"{dsp.PING_SW:#x}"])
 
 
+def no_gran_link() -> bool:
+    """v0.28: GRAN and SHFT removed: nothing in ping.asm jumps to their former code."""
+    ping = (SHARC / "ping.asm").read_text(encoding="utf-8")
+    return f"JUMP {dsp.GRAN_SW:#x};" not in ping and "wr_gran" not in ping and "wr_s_track" not in ping
+
+
 def gran_links_ok() -> bool:
     """GRAN: ping.asm's jump into wr_gran, and wr_gran's back to ping's wr_p_next."""
     import sharc_resolve_jumps as R                      # noqa: PLC0415
@@ -428,7 +434,7 @@ def gran_links_ok() -> bool:
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
     for name, load_sw in (("perc", dsp.PERC_SW), ("smp", dsp.SMP_SW), ("block_count", dsp.COUNT_SW),
-                          ("ping", dsp.PING_SW), ("gran", dsp.GRAN_SW)):
+                          ("ping", dsp.PING_SW)):                          # v0.28: GRAN removed
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -466,8 +472,8 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("perc", "smp", "block_count", "ping", "gran")) \
-        and perc_links_ok() and gran_links_ok() and entry.type_name.startswith("8a") \
+             for n in ("perc", "smp", "block_count", "ping")) \
+        and perc_links_ok() and no_gran_link() and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
 
@@ -540,7 +546,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("perc", "smp", "block_count", "ping", "gran"):
+            for n in ("perc", "smp", "block_count", "ping"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
