@@ -411,6 +411,24 @@ int smp_set_samp(int track, int value)
     return 0;
 }
 
+/* v0.30: MACHINE SEL's commit (its call at 0x4005bba0): from one sample machine to another
+ * the sample stays (the owner: switching between DT2 machines lost it; the commit resets the
+ * sound to the new machine's defaults, SAMP to OFF). Anything else is stock's. */
+u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
+{
+    int keep = 0;
+    if (track < 16 && KIT) {
+        int old = SOUND_TYPE(track);
+        int ty = (int)type;
+        if (old != ty && old >= ONESHOT && old < ONESHOT + SMP_N && ty >= ONESHOT && ty < ONESHOT + SMP_N)
+            keep = smp_samp_of((int)track);
+    }
+    u32 r = MACHINE_COMMIT(model, track, type, a, b);
+    if (keep > 0 && SOUND_TYPE(track) == (int)type && smp_samp_of((int)track) != keep)
+        smp_set_samp((int)track, keep);
+    return r;
+}
+
 int smp_samp_of(int track)
 {
     if (track < 0 || track > 15 || !KIT)

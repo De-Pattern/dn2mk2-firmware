@@ -399,6 +399,8 @@ LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc
 LFO_MASK_STOCK = 0x400DC30E
 KEYNOTES_SITE = 0x40058BE8              # v0.23: KeyboardView's jsr 0x40034460(kbd, &notes, key)
 KEYNOTES_STOCK = bytes.fromhex("4eb940034460")
+MACHSEL_COMMIT_SITE = 0x4005BBA0        # v0.30: MACHINE SEL's jsr 0x40031880 (commit(model, track, type, 1, 1))
+MACHSEL_COMMIT_STOCK = bytes.fromhex("4eb940031880")
 MODAPPLY_SITE = 0x40027196              # v0.25: the per-frame driver's jsr 0x400db22c (apply modulation)
 MODAPPLY_STOCK = bytes.fromhex("4eb9400db22c")
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
@@ -569,6 +571,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(KEYNOTES_SITE, bytes.fromhex("4eb9") + _long(csyms["slc_keynotes"]),
          "a trig key's notes in KEYBOARD mode: on a SLICE track (SLCE NOTE) slice k, else stock's",
          KEYNOTES_STOCK)
+
+    # v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner's request: the
+    # commit resets the sound to the machine's defaults, SAMP to OFF; measured in the emulator)
+    edit(MACHSEL_COMMIT_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_machine_commit"]),
+         "MACHINE SEL's commit: between two sample machines SAMP is kept (rec.c)", MACHSEL_COMMIT_STOCK)
 
     # v0.25: modulation on SAMP steps through the loaded samples (link.c, smp_mod_apply)
     _need(content, MODAPPLY_SITE - 4, bytes.fromhex("2f002440"), "the driver pushes the mirror (move.l %d0,-(sp); movea.l %d0,%a2)")

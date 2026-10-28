@@ -805,6 +805,33 @@ def main() -> int:
             gate("stock questions and held keys (ColdFire)",
                  *cached("stock questions and held keys (ColdFire)", [q_cmd, sorted(EMU_ENV.items())], q_body))
 
+        # 6k. v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner: the stock
+        # commit resets the sound to the new machine's defaults, SAMP to OFF). Track 1 on
+        # ONESHOT with SAMP 5; MACHINE SEL, DOWN, YES: the next sample machine, SAMP still 5
+        if "smp_machine_commit" in lay:
+            kit = 0x4210C08C
+            sa, ty = kit + 52 + 20 + 2 * 43, kit + 52 + 0xDE
+            ks = (f"wait:3,poke:{ty:#x}:08,poke:{sa:#x}:0500,wait:4,tap:2,wait:6,func-src,wait:20,down,wait:4,"
+                  f"yes,wait:20,types,mem:{sa:#x}:2")
+            kjs = work / "keepsamp.json"
+            k_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                     "--snapshot", snap, "--steps", ks, "--png-dir", work / "keepsamp", "--json", kjs]
+
+            def k_body(tdir):
+                rc, out = run("keep SAMP", k_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and kjs.exists():
+                    r = json.loads(kjs.read_text())
+                    m = r["memory"]
+                    types = m.get("types@0") or [None]
+                    facts = {"the next sample machine chosen": types[0] == 9,
+                             "SAMP kept": m.get(hex(sa)) == "0500"}
+                    good = all(facts.values())
+                    why = f"{facts} types={types} mem={m}"
+                return good, ("MACHINE SEL from ONESHOT to the next sample machine keeps SAMP" if good else why)
+            gate("SAMP kept across sample machines (ColdFire)",
+                 *cached("SAMP kept across sample machines (ColdFire)", [k_cmd, sorted(EMU_ENV.items())], k_body))
+
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest
             print("  (waiting for the SHARC runner)", flush=True)
