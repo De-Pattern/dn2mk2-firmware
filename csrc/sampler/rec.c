@@ -724,6 +724,41 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
  * any view sees it. With the recorder up, its keys and knobs are taken; with the sample
  * list up, UP and DOWN become SAMP's knob (D) a detent, and pushing that knob closes the
  * list. A taken item's type becomes IT_DROP, which the loop passes over. */
+/* v0.30: a stock question up (a user's report: on a SLICE track, the OS update's "UPGRADE
+ * OS NOW?" answered by our page: "NO SAMPLE ON SAMP"; and FUNC + SETTINGS's save question,
+ * v0.29). The screen (0x4011d32a's first argument, page.c's wr_screen_obj) keeps its views
+ * in a list: node +0 the next, +8 the view; the sentinel at screen + 20, the first node at
+ * screen + 28 (0x4011d32a's own walk). A question (0x40112a2e: "SAVE ALL PATTERNS AND
+ * PROJ SETTINGS? Y/N", "UPGRADE OS NOW?") is a view of class 0x40206264 put at the list's
+ * end while it is up (measured: FUNC + SETTINGS in the emulator, the list grows from 7 to
+ * 8 views, the question's NO takes it out again). While one is up every key is stock's. */
+#define QUESTION_VTABLE 0x40206264u
+static int ram_ok(u32 a)
+{
+    return a >= 0x40000000u && a < 0x48000000u && !(a & 3);
+}
+int smp_question_up(void)
+{
+    extern void *wr_screen_obj;
+    u32 s = (u32)wr_screen_obj;
+    if (!ram_ok(s))
+        return 0;
+    u32 node = *(volatile u32 *)(s + 28);
+    for (int n = 0; n < 32 && ram_ok(node) && node != s + 20; n++) {
+        u32 v = *(volatile u32 *)(node + 8);
+        if (ram_ok(v) && *(volatile u32 *)v == QUESTION_VTABLE)
+            return 1;
+        node = *(volatile u32 *)node;
+    }
+    return 0;
+}
+
+/* v0.30: the keys held now (codes 0..63), every key item seen here: TRIG + YES (stock's
+ * sound preview) opened GRID's lock menu (a user's report); a YES with another key held is
+ * stock's */
+u32 smp_held_lo __attribute__((section(".data"), aligned(4))) = 0;
+u32 smp_held_hi __attribute__((section(".data"), aligned(4))) = 0;
+
 u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
 {
     u8 *it = (u8 *)UI_POP(queue);
@@ -738,6 +773,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
      * and the list's YES then did nothing (the owner's v0.24 report). Released is "not
      * down", for every key. */
     int down = (flags & F_PRESS) && !(flags & F_RELEASE);
+    if (it[0] == IT_KEY && code < 64) {
+        u32 *h = code < 32 ? &smp_held_lo : &smp_held_hi;
+        u32 bit = 1u << (code & 31);
+        *h = down ? *h | bit : *h & ~bit;
+    }
     if (it[0] == IT_KEY && code == K_FUNC) {
         if (rec_overlay && rec_phase == PH_NAME) {
             if (down && !smp_func_held) {       /* the grid opens on the cursor's character */
@@ -771,6 +811,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             eaten &= ~(1u << code);
             it[0] = IT_DROP;
         }
+        return (u32)it;
+    }
+    if (it[0] == IT_KEY && smp_question_up()) {
+        extern int slc_stock_asked;             /* v0.30: a stock question's keys; its */
+        slc_stock_asked = 0;                    /* answer is not left for the next YES */
         return (u32)it;
     }
     if (!rec_overlay) {                          /* v0.23: SLICE's menus (slice.c) */

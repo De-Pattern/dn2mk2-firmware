@@ -200,8 +200,10 @@ static void ping_names(void)
 /* v0.22: the UI loop's draw of its screen (0x4011d32a(screen, canvas), at 0x4002e4ca),
  * then, while it is up, the RECORDER over all of it (rec.c, smp_page.c) */
 #define SCREEN_DRAW ((void (*)(void *, void *))0x4011D32Au)
+void *wr_screen_obj __attribute__((section(".data"), aligned(4))) = 0;   /* v0.30: its views (rec.c) */
 void wr_screen(void *screen, void *canvas)
 {
+    wr_screen_obj = screen;
     extern int rec_visible(void);
     extern void rec_screen_draw(void *canvas);
     extern int slc_visible(void);

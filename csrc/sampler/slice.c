@@ -58,7 +58,7 @@ enum { S_OFF, S_MENU, S_GRID, S_WAIT, S_EDIT, S_ALLOC };   /* v0.25: ALLOC, GRID
 int slc_state __attribute__((section(".data"))) = S_OFF;
 int slc_page_seen __attribute__((section(".data"))) = 0;   /* smp_page.c: 1 a SLICE page is up, 2 GRID's */
 static int menu_sel __attribute__((section(".data"))) = 0;
-static int stock_asked __attribute__((section(".data"))) = 0;   /* v0.29: FUNC + a key since the last YES/NO */
+int slc_stock_asked __attribute__((section(".data"), aligned(4))) = 0;   /* v0.29: FUNC + a key since the last YES/NO */
 #define MENU_N 5                                /* v0.29: and CLEAR SLICE GRID (owner) */
 int slc_grid_n __attribute__((section(".data"))) = 16;
 static int grid_tr __attribute__((section(".data"))) = 0;
@@ -652,11 +652,15 @@ int slc_pop(u8 *it)
          * "SAVE ALL PATTERNS AND PROJ SETTINGS? Y/N", owner's photo): its YES or NO is the
          * question's, not the slice menus' */
         if (press && func && code != K_YES)
-            stock_asked = 1;
-        if (press && (code == K_YES || code == K_NO) && stock_asked && !func) {
-            stock_asked = 0;
+            slc_stock_asked = 1;
+        if (press && (code == K_YES || code == K_NO) && slc_stock_asked && !func) {
+            slc_stock_asked = 0;
             return 0;
         }
+        /* v0.30: YES with another key held (TRIG + YES: stock's sound preview) is stock's */
+        extern u32 smp_held_lo, smp_held_hi;
+        if (press && code == K_YES && ((smp_held_lo & ~(1u << K_YES | 1u << K_FUNC)) || smp_held_hi))
+            return 0;
         /* YES on a SLICE track's page opens the menu */
         if (press && code == K_YES && slc_page_seen == 2 && !func) {   /* v0.25: GRID's ALLOCATE SLICE */
             menu_sel = 0;

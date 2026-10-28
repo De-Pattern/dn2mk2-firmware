@@ -763,6 +763,48 @@ def main() -> int:
             gate("Monomachine pages and detents (ColdFire)",
                  *cached("Monomachine pages and detents (ColdFire)", [mp_cmd, sorted(EMU_ENV.items())], mp_body))
 
+        # 6j. v0.30: a stock question's keys are stock's (a user's report: on a sample track, the
+        # OS update's "UPGRADE OS NOW?" answered by our page; v0.29's save question), and a YES
+        # with another key held (TRIG + YES) is stock's. On a GRID track's page: TRIG 1 held,
+        # YES: no menu. FUNC + SETTINGS's SAVE ALL question (d0 forced at 0x4005f5c6: the
+        # emulator's project was never saved, so stock offers the slot list instead) is seen
+        # up (smp_question_up 1); its YES is the question's (it closes, no menu); back on the
+        # page, YES opens the menu, NO closes it
+        if "smp_question_up" in lay:
+            kit = 0x4210C08C
+            Q, H, S = lay["smp_question_up"], lay["smp_held_lo"], lay["slc_state"]
+            qs = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,call:{Q:#x},press:25,wait:2,yes,"
+                  f"wait:4,mem:{H:#x}:4,release:25,wait:6,mem:{S:#x}:4,mem:{H:#x}:4,press:17,wait:2,tap:8,"
+                  f"wait:2,release:17,wait:20,png:q,call:{Q:#x},yes,wait:30,mem:{S:#x}:4,call:{Q:#x},tap:2,"
+                  f"wait:6,yes,wait:6,png:m,mem:{S:#x}:4,no,wait:6,mem:{S:#x}:4")
+            qjs = work / "question.json"
+            q_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                     "--snapshot", snap, "--set-d0-at", "0x4005f5c6:0", "--steps", qs,
+                     "--png-dir", work / "question", "--json", qjs]
+
+            def q_body(tdir):
+                rc, out = run("stock question", q_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and qjs.exists():
+                    r = json.loads(qjs.read_text())
+                    m = r["memory"]
+                    d0 = [c["d0"] for c in r["direct_calls"]]
+                    shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("q", "m")}
+                    facts = {"TRIG 1 held: seen held": m[hex(H)] == "02000000",
+                             "TRIG 1 + YES: stock's, no menu": int(m[hex(S)], 16) == 0,
+                             "let go: nothing held": m[f"{hex(H)}@2"] == "00000000",
+                             "the question seen up, then gone": d0 == [0, 1, 0],
+                             "its YES the question's: no menu": int(m[f"{hex(S)}@3"], 16) == 0,
+                             "then YES on the page opens the menu, NO closes it":
+                             int(m[f"{hex(S)}@4"], 16) != 0 and int(m[f"{hex(S)}@5"], 16) == 0,
+                             "the question drawn": shots["q"] != shots["m"]}
+                    good = all(facts.values())
+                    why = f"{facts} d0={d0} mem={m}"
+                return good, ("a stock question's YES is the question's; TRIG + YES is stock's; the page's "
+                              "own YES still opens its menu" if good else why)
+            gate("stock questions and held keys (ColdFire)",
+                 *cached("stock questions and held keys (ColdFire)", [q_cmd, sorted(EMU_ENV.items())], q_body))
+
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest
             print("  (waiting for the SHARC runner)", flush=True)

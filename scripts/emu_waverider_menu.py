@@ -569,6 +569,10 @@ def main() -> int:
     p.add_argument("--panel-writers", default=None, metavar="X0,Y0,X1,Y1",
                    help="every write to the two panel buffers (0x44622bc8, 0x44622fc8; 16 B a row) "
                         "inside the pixel box, with the code addresses on the stack")
+    p.add_argument("--set-d0-at", action="append", default=[], metavar="VA:VALUE",
+                   help="set d0 to VALUE each time VA is reached (a stock condition this "
+                        "emulator cannot meet, e.g. a saved project: 0x4005f5c6:0 lets FUNC + "
+                        "SETTINGS put up its SAVE ALL question)")
     p.add_argument("--watch-types", action="store_true",
                    help="log every write to a track's machine type byte (sound+0xDE)")
     a = p.parse_args()
@@ -853,6 +857,12 @@ def main() -> int:
         return counted["n"]
 
     guest_call.returned = returned
+    for spec in a.set_d0_at:
+        va, val = (int(x, 0) for x in spec.split(":"))
+
+        def set_d0(uc_, address, size, user, val=val):
+            uc_.reg_write(K.UC_M68K_REG_D0, val & 0xFFFFFFFF)
+        uc.hook_add(UC_HOOK_CODE, set_d0, begin=va, end=va)
     panel = Panel(machine, png_dir=str(png_dir))
     panel.settle(a.warmup)
     for step in [s.strip() for s in a.steps.split(",") if s.strip()]:
