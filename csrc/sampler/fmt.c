@@ -71,6 +71,8 @@ static int mnm_rep(int j, int n, int c)        /* the value (coarse) in the midd
     return mnm_lo[j] + (k * 2 * top + 127) / 254;
 }
 
+static int fq_click __attribute__((section(".data"))) = 0;      /* v0.32: a FUNC click (+1/-1), else 0 */
+
 static int mnm_quant(int mi, int slot, int old, int value)
 {
     int j = 0;
@@ -87,7 +89,7 @@ static int mnm_quant(int mi, int slot, int old, int value)
         static int m_acc __attribute__((section(".data"))) = 0;
         static u32 m_at __attribute__((section(".data"))) = 0;
         static int m_slot __attribute__((section(".data"))) = -1;
-        int need = count <= 8 ? 4 : 1;
+        int need = fq_click ? 1 : count <= 8 ? 4 : 1;   /* v0.32: FUNC: one a click */
         u32 now = *(volatile u32 *)0x4058E8D4u;
         int dir = d > 0 ? 1 : -1;
         if (now - m_at > 3000u || (m_acc > 0) != (dir > 0) || m_slot != slot)   /* 2 s */
@@ -107,53 +109,72 @@ static int mnm_quant(int mi, int slot, int old, int value)
     return mnm_rep(j, n, c) << 8;
 }
 
-/* v0.32: FUNC + turn on our machines' controls (a tester's list, v0.30). Stock gives some
- * parameter records a FUNC jump (WaveTone's TUNE by octaves, its waves); our controls sit on
- * stock records, and on the ones that carry a jump the stock jump lands on one fixed value
- * and stays there whatever the turn (TUNE at 50, BR1 SU at 0, PLAY MODE at 0 ...). So when
- * FUNC is held, the track is on one of our machines and the value the stock wants to write
- * did not move the way the knob turned, the turn is taken as a plain one: the old value
- * moved by the knob's own detents, kept inside the record's range. A stock jump that does
- * move with the knob (PERC's PTCH by intervals, DPRO WAVE's waves) is left as it is. The
- * knob and its detents come from the UI item (rec.c smp_ui_pop: smp_knob_d, smp_knob_at). */
+/* v0.32: FUNC + turn on our machines' controls (a tester's list, v0.30; the owner: a
+ * control that jumps with FUNC should go on jumping to its next value, one that does not
+ * should not move). Stock gives some parameter records a FUNC jump (WaveTone's TUNE by
+ * octaves, its waves). Our controls sit on stock records, and on most of the ones that
+ * carry a jump the stock jump lands on one fixed value and stays there (TUNE at 50, BR1 SU
+ * at 0, PLAY MODE at 0 ...). So, with FUNC held, a fresh knob turn and a track on one of
+ * our machines, each control is one of:
+ *   KEEP    stock's jump is right for it: the sample machines' TUNE and PERC's first
+ *           control (record 238: by octaves), PERC's TYPE;
+ *   CHOICE  a control of choices (waves, modes, voice types, SEG, BARS, PCH): the next
+ *           choice the way the knob turned, one a click;
+ *   NONE    anything else: it does not move, as a stock control with no jump.
+ * The knob comes from the UI item (rec.c smp_ui_pop: smp_knob_d, smp_knob_at). */
 extern int smp_func_held;
 extern int smp_knob_d;
 extern u32 smp_knob_at;
-#define RECORDS_N 1100u                         /* records at 0x401F7F94, 60 bytes each */
 #define KNOB_FRESH 150u                         /* 100 ms: the turn this write comes from */
+enum { F_OFF, F_KEEP, F_CHOICE, F_NONE };
 
-static int ours(u8 *s)
+static int func_kind(u8 *s, int slot)
 {
+    if (!smp_func_held || !smp_knob_d || *(volatile u32 *)0x4058E8D4u - smp_knob_at > KNOB_FRESH)
+        return F_OFF;
     int ty = (signed char)s[SOUND_TYPE];
-    return ty == 5 || mnm_index(ty - 4) >= 0 || (ty >= TYPE_FIRST && ty < TYPE_FIRST + TYPES);
-}
-
-static int func_turn(u8 *s, int slot, int value, u32 id)
-{
-    if (!smp_func_held || !smp_knob_d || id >= RECORDS_N || !ours(s))
-        return value;
-    if (*(volatile u32 *)0x4058E8D4u - smp_knob_at > KNOB_FRESH)
-        return value;
-    const int *r = (const int *)(0x401F7F94u + 60u * id);
-    if (r[1] != slot)
-        return value;                           /* not the record this slot is */
-    int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
-    int d = ((value >> 8) & 0xFF) - (old >> 8);
-    if (d != 0 && (d > 0) == (smp_knob_d > 0))
-        return value;                           /* stock's jump moves with the knob: kept */
-    int lo = r[2] >> 8, hi = r[3] >> 8, c = (old >> 8) + smp_knob_d;
-    if (hi < lo)
-        return value;
-    if (c < lo) c = lo;
-    if (c > hi) c = hi;
-    return c << 8 | (old & 0xFF);
+    if (ty == 5)                                /* PERC */
+        return slot == PERC_PTCH_SLOT || slot == PERC_TYPE_SLOT ? F_KEEP : F_NONE;
+    int mi = mnm_index(ty - 4);
+    if (mi >= 0) {
+        for (int j = 0; j < 8; j++)
+            if (mnm_slot[j] == slot)
+                return mnm_choices[mi][j] ? F_CHOICE : F_NONE;
+        return F_NONE;
+    }
+    int type = ty - TYPE_FIRST;
+    if (type < 0 || type >= TYPES)
+        return F_OFF;                           /* a stock machine: stock's */
+    if (slot == SMP_TUNE_SLOT)
+        return F_KEEP;
+    for (int k = 0; k < SMP_NQ; k++)
+        if (smp_q[k].slot == slot && (smp_q[k].types & (1 << type)))
+            return F_CHOICE;
+    for (int k = 0; k < SMP_NQS; k++)
+        if (smp_qs[k].slot == slot && (smp_qs[k].types & (1 << type)))
+            return F_CHOICE;
+    return F_NONE;
 }
 
 /* from the setter's write (hooks.S, smp_quant_hook): S = the sound, SLOT, VALUE the
  * value about to be written (coarse << 8 | fine), ID its record -> the value to write */
 int smp_quant(u8 *s, int slot, int value, u32 id)
 {
-    value = func_turn(s, slot, value, id);
+    (void)id;
+    int fk = func_kind(s, slot);
+    int old0 = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
+    if (fk == F_NONE)
+        return old0;
+    if (fk == F_CHOICE) {                       /* one choice a click, the knob's way: a */
+        fq_click = smp_knob_d > 0 ? 1 : -1;     /* detent's worth past the old value, */
+        int oc0 = old0 >> 8;                    /* each table's own step below */
+        if ((oc0 == 0 && fq_click < 0) || (oc0 == 255 && fq_click > 0)) {
+            fq_click = 0;
+            return old0;                        /* at the end already */
+        }
+        value = (oc0 + fq_click) << 8;
+    } else
+        fq_click = 0;
     int mi = mnm_index((signed char)s[SOUND_TYPE] - 4);     /* v0.27: is_wr's kind */
     if (mi >= 0)
         return mnm_quant(mi, slot, *(volatile u16 *)(s + SOUND_VALUES + 2 * slot), value);
@@ -181,7 +202,7 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
             static int q_acc __attribute__((section(".data"))) = 0;
             static u32 q_at __attribute__((section(".data"))) = 0;
             static int q_slot __attribute__((section(".data"))) = -1;
-            int need = slot == SMP_SEG_SLOT ? SEG_DETENTS : CHOICE_DETENTS;
+            int need = fq_click ? 1 : slot == SMP_SEG_SLOT ? SEG_DETENTS : CHOICE_DETENTS;
             u32 now = *(volatile u32 *)0x4058E8D4u;
             int dir = d > 0 ? 1 : -1;
             if (now - q_at > 3000u || (q_acc > 0) != (dir > 0) || q_slot != slot)   /* 2 s */

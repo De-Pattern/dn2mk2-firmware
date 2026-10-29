@@ -917,33 +917,45 @@ def main() -> int:
             gate("SAMP kept across sample machines (ColdFire)",
                  *cached("SAMP kept across sample machines (ColdFire)", [k_cmd, sorted(EMU_ENV.items())], k_body))
 
-        # 6m. v0.32: FUNC + turn on our machines' controls (a tester's list): when stock's FUNC
-        # jump would leave the value where it is, or move it against the knob, the turn is a
-        # plain one; a jump that moves with the knob is kept; nothing changes without FUNC, with
-        # a stale knob, or on a stock machine. (The emulator's encoders do not move a stock
-        # page's value: the setter's own call of smp_quant is made, with the record id, the
-        # knob's last turn poked and its time copied from the UI clock by the stock memcpy.)
+        # 6m. v0.32: FUNC + turn on our machines' controls (a tester's list; the owner: a control
+        # that jumps with FUNC goes on jumping to its next value, one that does not stays put).
+        # Stock's jump kept where it is right (PERC's first control, by octaves); a control of
+        # choices steps one choice a click the way the knob turned; any other control of ours
+        # stays where it was; nothing changes without FUNC, with a stale knob, or on a stock
+        # machine. (The emulator's encoders do not move a stock page's value: the setter's own
+        # call of smp_quant is made, the knob's last turn poked and its time copied from the UI
+        # clock by the stock memcpy.)
         if "smp_knob_at" in lay:
-            from dnfw.perc import machines as PMf   # noqa: PLC0415
+            from dnfw.mnm import machines as MMf      # noqa: PLC0415
+            from dnfw.perc import machines as PMf     # noqa: PLC0415
+            from dnfw.sampler import machines as SMf  # noqa: PLC0415
             kit = 0x4210C08C
             snd0 = kit + 52
-            rid, slot = PMf.PARAMS[0][0], PMf.PARAMS[0][1]
-            va = snd0 + 20 + 2 * slot
             clock, memcpy = 0x4058E8D4, 0x40134490
+            ptch, other = PMf.PARAMS[0][1], PMf.PARAMS[2][1]
+            wprs, wlo, wtop = PMf.PARAMS[3][1], PMf.PARAMS[3][2], PMf.PARAMS[3][3]
+            w_on = wlo + (95 * 2 * wtop + 127) // 254
+            w_off = wlo + (31 * 2 * wtop + 127) // 254
+            dwave = MMf.TYPES[MMf.NAMES.index("DPRO-WAVE")]
+            q = next(r for r in SMf.QUANT if r[1] == SMf.PLAY_REC and "ONESHOT" in r[0])
+            play = SMf.RECORDS[SMf.PLAY_REC][0]
+            p_from, p_to = q[3][0], q[3][1]
 
-            def fcase(ty, held, knob, fresh, value):
-                s = [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", f"poke:{va:#x}:2000",
-                     f"poke:{lay['smp_func_held']:#x}:{held:08x}", f"poke:{lay['smp_knob_d']:#x}:{knob & 0xFFFFFFFF:08x}"]
+            def fcase(ty, slot, old, held, knob, fresh, value):
+                s = [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", f"poke:{snd0 + 20 + 2 * slot:#x}:{old:04x}",
+                     f"poke:{lay['smp_func_held']:#x}:{held:08x}",
+                     f"poke:{lay['smp_knob_d']:#x}:{knob & 0xFFFFFFFF:08x}"]
                 s += [f"call:{memcpy:#x}:{lay['smp_knob_at']:#x}:{clock:#x}:4"] if fresh else \
-                     [f"poke:{lay['smp_knob_at']:#x}:00000000"]
-                return s + [f"call:{lay['smp_quant']:#x}:sound0:{slot}:{value:#x}:{rid}"]
-            cases = [("stuck, turned right: a plain turn", (5, 1, 1, True, 0x2000), 0x2100),
-                     ("stuck, turned left: a plain turn", (5, 1, -1, True, 0x2000), 0x1F00),
-                     ("against the knob: a plain turn", (5, 1, 2, True, 0x1000), 0x2200),
-                     ("a jump with the knob: kept", (5, 1, 1, True, 0x2C00), 0x2C00),
-                     ("no FUNC: as it is", (5, 0, 1, True, 0x2000), 0x2000),
-                     ("a stale knob: as it is", (5, 1, 1, False, 0x2000), 0x2000),
-                     ("a stock machine: as it is", (1, 1, 1, True, 0x2000), 0x2000)]
+                     [f"poke:{lay['smp_knob_at']:#x}:80000000"]   # (half the clock away: stale)
+                return s + [f"call:{lay['smp_quant']:#x}:sound0:{slot}:{value:#x}:0"]
+            cases = [("PERC's first control: stock's octave jump kept", (5, ptch, 0x4000, 1, 1, True, 0x4C00), 0x4C00),
+                     ("PERC, another control: it stays put", (5, other, 0x2000, 1, 1, True, 0x7F00), 0x2000),
+                     ("DPRO WAVE's WPRS, right: the next choice in one click", (dwave, wprs, w_off << 8, 1, 1, True, 0x0000), w_on << 8),
+                     ("DPRO WAVE's WPRS, left: back in one click", (dwave, wprs, w_on << 8, 1, -1, True, 0x7F00), w_off << 8),
+                     ("ONESHOT's PLAY, right: the next mode in one click", (8, play, p_from << 8, 1, 1, True, 0x0000), p_to << 8),
+                     ("no FUNC: as it is", (5, other, 0x2000, 0, 1, True, 0x2100), 0x2100),
+                     ("a stale knob: as it is", (5, other, 0x2000, 1, 1, False, 0x2100), 0x2100),
+                     ("a stock machine: as it is", (1, other, 0x2000, 1, 1, True, 0x2100), 0x2100)]
             fs = ["wait:3"]
             for _n, args, _w in cases:
                 fs += fcase(*args)
@@ -956,14 +968,15 @@ def main() -> int:
                 rc, out = run("FUNC + turn", f_cmd, logs, env=EMU_ENV, trace=tdir)
                 why, good = out[-800:], False
                 if rc == 0 and fjs.exists():
-                    calls = [c for c in json.loads(fjs.read_text())["calls"] if c["fn"] == hex(lay["smp_quant"])]
+                    calls = [c for c in json.loads(fjs.read_text())["direct_calls"]
+                             if int(str(c.get("fn", "0")), 0) == lay["smp_quant"]]
                     got = [c["d0"] & 0xFFFF for c in calls]
                     facts = {n: (g == w) for (n, _a, w), g in zip(cases, got)}
                     good = len(got) == len(cases) and all(facts.values())
                     why = f"{facts} got={[hex(g) for g in got]}"
-                return good, ("FUNC + turn on PERC: a stuck or backward stock jump becomes a plain turn, either "
-                              "way; a jump with the knob kept; no change without FUNC, with a stale knob, or on a "
-                              "stock machine" if good else why)
+                return good, ("FUNC + turn: PERC's first control keeps stock's octave jumps; other controls of ours "
+                              "stay put; choices step one a click either way (WPRS, PLAY); no change without FUNC, "
+                              "with a stale knob, or on a stock machine" if good else why)
             gate("FUNC + turn (ColdFire)", *cached("FUNC + turn (ColdFire)", [f_cmd, sorted(EMU_ENV.items())], f_body))
 
         # 7. unit tests

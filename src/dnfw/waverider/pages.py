@@ -423,7 +423,12 @@ def smp_quant_header() -> str:
             f"#define SMP_GRID_REC {_smp.GRID_REC}\n#define SMP_SAMP_REC {_smp.SAMP_REC}\n"
             f"#define SMP_SEG_LO {_smp.RECORDS[_smp.SEG_REC][1]}\n"
             f"#define SMP_SEG_SLOT {_smp.RECORDS[_smp.SEG_REC][0]}\n"
-            f"#define SMP_SAMP_SLOT {_smp.RECORDS[_smp.SAMP_REC][0]}\n")
+            f"#define SMP_SAMP_SLOT {_smp.RECORDS[_smp.SAMP_REC][0]}\n"
+            # v0.32: FUNC + turn: the controls whose stock FUNC jump is right for us (sample
+            # TUNE and PERC's first control by octaves on record 238, PERC's TYPE)
+            f"#define SMP_TUNE_SLOT {_smp.RECORDS[_smp.TUNE_REC][0]}\n"
+            f"#define PERC_PTCH_SLOT {_perc.PARAMS[0][1]}\n"
+            f"#define PERC_TYPE_SLOT {_perc.TYPE_REC[1]}\n")
 SMP_WAVE_W, SMP_WAVE_AMP = 100, 11         # the waveform strip: columns, half-height in pixels
 SMP_GLYPHS = "0123456789AB/-YES"
 
