@@ -643,7 +643,7 @@ The plan and the owner's decisions are `docs/drive-library-plan.md` (§6a). What
   browser draws without re-checking every entry.
 - **The browser** (FUNC + YES in the sample list) opens at a top level: **PROJECT RAM**
   (the pool's slots, as before, grouped by folder) and **+DRIVE** (the library's folders).
-  It reopens where it was last. In +DRIVE: YES ticks a sample (as the DT2), RIGHT opens
+  It opens at that top level with the cursor on the store last used. In +DRIVE: YES ticks a sample (as the DT2), RIGHT opens
   SAMPLE ACTION: **LOAD TO PROJECT** (the ticked ones, or the one under the cursor, into the
   first empty slots: read from the +Drive 64 KB a pass, written into the pool's image and
   its directory, then loaded into the DSP: seconds, not minutes), **LOAD TO TRK** (loads it,
