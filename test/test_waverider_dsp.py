@@ -157,17 +157,25 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     # tables went), PING's and PERC's tables (v0.27: SHFT's and GRAN's, GRAN's buffers went);
     # Waverider's wavetables went in v0.11. v0.26: the Machinedrum's shipped tables (the
     # host's pitch table, zpack) are not in the image: the ColdFire sends them at power-on
-    assert [a for _, a, _ in ddr] == [dsp.MNM_SCRATCH_DDR,
-                                      dsp.PING_TABLES_DDR,
+    assert [a for _, a, _ in ddr] == [dsp.PING_TABLES_DDR,
                                       dsp.SHFT_TABLES_DDR,                      # v0.31: AMD's sine
                                       dsp.PERC_TABLES_DDR,
                                       dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
-                                      dsp.MD_STATE_DDR,
+                                      dsp.MD_DELAY_DDR,                         # v0.32: P-I's lines, zeroed
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
-    assert not any(ddr[0][2]) and not any(ddr[-1][2])
-    assert not any(ddr[5][2]) and not any(ddr[6][2])      # the MD's tables (the DSP fills them), its voices
-    assert dsp.MD_TABLES_DDR + len(ddr[5][2]) <= dsp.MD_STATE_DDR
+    assert not any(ddr[-1][2])
+    assert not any(ddr[4][2]) and not any(ddr[5][2])      # the MD's tables (the DSP fills them), P-I's lines
+    assert dsp.MD_TABLES_DDR + len(ddr[4][2]) <= dsp.MD_DELAY_DDR
+    # v0.32: the voices' working state in L2 (zeros), inside the room proven on units
+    from dnfw.perc import live as PL
+    L = PL.layout()
+    l2 = {a: p for _, a, p in dsp.l2_spans()}
+    assert L.md.state == dsp.MD_STATE_L2 and L.md.mnm.scratch == dsp.MNM_SCRATCH_L2
+    assert L.md.delay == dsp.MD_DELAY_DDR                 # not state + 1 MB: L2 has no room for it
+    assert not any(l2[dsp.MD_STATE_L2]) and len(l2[dsp.MD_STATE_L2]) == 16 * MDK.MD_STRIDE
+    assert not any(l2[dsp.MNM_SCRATCH_L2]) and dsp.MD_STATE_L2 + 16 * MDK.MD_STRIDE <= dsp.MNM_SCRATCH_L2
+    assert 0x20088400 <= dsp.MD_STATE_L2 and dsp.MNM_SCRATCH_L2 + dsp.MNM_SCRATCH_BYTES <= 0x200B0000
     # v0.17: the sample pool's directory begins with its magic, and holds nothing (the
     # +Drive's samples are loaded in; the test sounds are gone)
     assert struct.unpack_from("<II", ddr[-2][2]) == (0x31504D53, 0)
@@ -181,8 +189,13 @@ def test_perc_code_is_in_l2_above_the_stock_image_and_below_the_uncached_window(
     # nothing reads or writes L2 above the image's end, 0x2008823c
     # v0.13: the sample machines' code follows PERC's span
     spans = dsp.l2_spans()
+    data = spans[2:]                             # v0.32: the voices' state, zeros, below the code
+    spans = spans[:2]
     assert [(at, len(pl)) for _, at, pl in spans] == [(dsp.PERC_L2_LOAD, dsp.PERC_L2_SPAN),
                                                       (dsp.SMP_L2_LOAD, dsp.SMP_L2_SPAN)]
+    for _w, at, payload in data:
+        assert dsp.L2_IMAGE_END + 0x10000 <= at and at + len(payload) <= dsp.PERC_L2_LOAD
+        assert bootstream.read_span(built, at, len(payload)) == payload
     assert dsp.SMP_L2_LOAD == dsp.PERC_L2_LOAD + dsp.PERC_L2_SPAN
     for (what, at, payload), name in zip(spans, ("perc", "smp")):
         code = dsp.objects()[name]
@@ -360,10 +373,10 @@ def test_the_voice_order_lives_in_the_monomachine_scratch_tail():
     from dnfw.perc import program as PP
     from dnfw.perc import live as PL
     L = PL.layout()
-    assert PP.MNM_SCRATCH == dsp.MNM_SCRATCH_DDR == L.md.mnm.scratch
+    assert PP.MNM_SCRATCH == dsp.MNM_SCRATCH_L2 == L.md.mnm.scratch
     used = max(L.md.mnm.DG.values()) + 4
     assert used <= PP.MNM_SCRATCH + PP.MNM_KEYS_OFF
-    assert PP.MNM_SCRATCH + PP.SMP_I + 4 <= dsp.MNM_STATE_DDR
+    assert PP.MNM_SCRATCH + PP.SMP_I + 4 <= dsp.MNM_SCRATCH_L2 + dsp.MNM_SCRATCH_BYTES
 
 
 def test_every_table_perc_reads_is_loaded_by_a_span():

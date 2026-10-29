@@ -1070,6 +1070,42 @@ def step_guard(init, sound, machines, blocks) -> dict:
     orr.pop("state", None)
     for r in (ctl, fr):
         r.pop("state", None)
+    # v0.32: the limit from the stock's measured tail (guard.tail_limit). Each block, before
+    # PERC's entry, the clock's words are set as a 666,667-cycle frame would leave them (the
+    # last MARK0 a frame back) and idle_load's AFTER moved on by our time (100,000) plus a
+    # tail TAIL; LIMIT is read at the sample machines' entry, after PERC's
+    P = 666_667
+
+    def limit_of(tail_d, ours=100_000):
+        def at_perc(r):
+            mark0 = m2.word(r.state, G.MARK0) or 0
+            m2.poke(r.state, G.PREV, (mark0 - P) & 0xFFFFFFFF)
+            if tail_d is not None:
+                pm = m2.word(r.state, G.PREV_MARK) or 0
+                m2.poke(r.state, G.OURS_END, (pm + ours) & 0xFFFFFFFF)
+                pa = m2.word(r.state, G.PREV_AFTER) or 0
+                m2.poke(r.state, G.AFTER, (pa + ours + tail_d) & 0xFFFFFFFF)
+        got = []
+        rr = run_blocks(init, fb, 3, extra_hooks={dsp.PERC_SW: at_perc,
+                                                  dsp.SMP_SW: lambda r: got.append(m2.word(r.state, G.LIMIT) or 0)})
+        rr.pop("state", None)
+        return got
+
+    def want(tail_pk):
+        six = (P >> 1) + (P >> 4) + (P >> 5) + (P >> 7)
+        lim = max(P - tail_pk - (P >> 3), P >> 2)
+        return min(six, lim)
+    tl = limit_of(300_000)
+    tl_ctl = limit_of(None)
+    tl_bad = limit_of(500_000)                 # past 0.7 P: not a reading
+    pk = 300_000 - (300_000 >> 12)             # held, eased once
+    n["tail_limits"] = {"tail_300k": tl, "none": tl_ctl, "tail_500k": tl_bad}
+    checks["v0.32: a measured stock tail of 300,000 cycles sets LIMIT = P - tail - P/8 (below 0.6 P)"] = (
+        len(tl) == 3 and tl[-1] in (want(pk), want(pk - (pk >> 12))) and tl[-1] < want(0))
+    checks["v0.32: ... no reading (the idle task did not run) leaves 0.6 P, as before"] = (
+        len(tl_ctl) == 3 and all(x == want(0) for x in tl_ctl))
+    checks["v0.32: ... a reading past 0.7 P is not taken: 0.6 P"] = (
+        len(tl_bad) == 3 and all(x == want(0) for x in tl_bad))
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
 
 

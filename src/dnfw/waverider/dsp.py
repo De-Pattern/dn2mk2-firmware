@@ -86,7 +86,17 @@ PERC_TABLES_DDR = 0x81216000                 # dnfw.perc.machines.tables_bytes
 # itself, then the host's and DSP2's tables, read from the owner's MD firmware at build
 # time), and 16 slots x 1 KB of words
 MD_TABLES_DDR = 0x82000000
-MD_STATE_DDR = 0x82100000
+# v0.32: the voices' working state out of DDR into L2 (docs/others-dn2-research.md: on the
+# unit a DDR access costs several times its instruction; L2 0x20088400..0x200B0000 is proven
+# on units, by complex-ping's mods, and nothing of the stock's touches L2 above its image,
+# scripts/sharc_l2_ceiling.py). The Machinedrum's 16 slots x 1 KB (the Monomachine voices
+# keep theirs in the same slots), then the Monomachine's shared scratch (and the voice order
+# in its tail). The P-I delay lines (128 KB, too big for the room) stay in DDR, at the
+# address they always had, now loaded with zeros at power-on too.
+MD_STATE_L2 = 0x200A0000
+MNM_SCRATCH_L2 = 0x200A4000
+MNM_SCRATCH_BYTES = 0x4000
+MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
 SMP_L2_LOAD = PERC_L2_LOAD + PERC_L2_SPAN    # 0x200e3000 (v0.24; 0x200d4000 v0.17..v0.23, 0x200d0000 until v0.16)
@@ -130,8 +140,7 @@ GRAN_BUF_DDR, GRAN_BUF_STRIDE = 0x81400000, 0x20000
 # v0.26: RESONATOR and CZ are gone (their types are the Monomachine machines', in PERC's
 # voice: docs/mnm.md); their L1 code and scratch are zeros, their DDR the Monomachine's:
 # its scratch (the decimator's buffers), then 16 slots' own state, 2 KB each
-MNM_SCRATCH_DDR = 0x81200000
-MNM_STATE_DDR, MNM_STATE_STRIDE = 0x81204000, 0x800
+
 # its tables (from the owner's Monomachine OS) are decoded with the Machinedrum's, after
 # the sine (dnfw.md.core.TABLE_LAYOUT["mnm"]), from what the ColdFire sends at power-on
 
@@ -299,8 +308,6 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
     """(what, load address, payload) of each DDR span (load address = address): the
     machines' and filters' state (zeros, so fill blocks) and tables."""
     return [
-        ("Monomachine scratch and 16 slots' state (zeros; v0.26)", MNM_SCRATCH_DDR,
-         bytes(MNM_STATE_DDR - MNM_SCRATCH_DDR + 16 * MNM_STATE_STRIDE)),
         ("PING tables", PING_TABLES_DDR, _ping_tables()),
         # v0.31: PERC's amp modulation (AMD) reads SHFT's sine here (dnfw.perc.live.layout).
         # v0.28 dropped this span with SHFT, so AMD read whatever the DDR held: on the
@@ -315,7 +322,8 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
          bytes(_md_core().TABLE_LAYOUT[_md_core().SHIPPED][0])),
         # v0.26: what ships (the host's pitch table and zpack) comes over the fast link from
         # the ColdFire at power-on (dnfw.mods.waverider's table chunk): not in this stream
-        ("Machinedrum voices: 16 slots x 1 KB (zeros)", MD_STATE_DDR, bytes(16 * _md_core().MD_STRIDE)),
+        ("Machinedrum P-I delay lines: 16 slots x 8 KB (zeros; v0.32)", MD_DELAY_DDR,
+         bytes(16 * _md_core().PI_DELAY_STRIDE)),
         ("sample pool: its empty directory's magic and count (v0.17: no test sounds; the +Drive's load in)",
          SMP_POOL_DDR, _smp_pool()[:8]),
         ("sample pool: the rest of its directory and names (zeros)", SMP_POOL_DDR + 8,
@@ -360,6 +368,11 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
         if span - len(code) < 64:
             raise DspError(f"{name}.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
         out.append((what, at, code + bytes(span - len(code))))
+    # v0.32: the voices' working state (zeros)
+    out.append(("Machinedrum voices: 16 slots x 1 KB, in L2 (zeros; v0.32)", MD_STATE_L2,
+                bytes(16 * _md_core().MD_STRIDE)))
+    out.append(("Monomachine scratch and the voice order, in L2 (zeros; v0.32)", MNM_SCRATCH_L2,
+                bytes(MNM_SCRATCH_BYTES)))
     return out
 
 

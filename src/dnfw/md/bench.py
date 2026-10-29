@@ -22,7 +22,7 @@ from ..perc.dsl import Mem, Prog, bits
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 GOLDEN = pathlib.Path(os.environ.get("MD_GOLDEN", str(ROOT.parent / "md163" / "research" / "emu56k" / "golden")))
-STATE = 0x82100000                     # where the build puts slot 0 (dnfw.waverider.dsp.MD_STATE_DDR)
+STATE = 0x82100000                     # the bench's own slot 0 (the build's, until v0.31; v0.32 puts it in L2)
 SCRATCH = 0x2DF000
 TABLES = 0x82000000                    # dnfw.waverider.dsp.MD_TABLES_DDR
 

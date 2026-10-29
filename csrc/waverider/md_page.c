@@ -239,7 +239,15 @@ int md_page_draw(void *view, void *c, int page, int type)
         b[n++] = (char)('0' + (bpm120 % 120u) / 12u);
         b[n] = 0;
         extern int smp_skipped_any(void);       /* v0.30: the DSP left a voice out for time */
-        if (smp_skipped_any())
+        extern int smp_func_held, smp_dsp_load(void);
+        int ld = smp_func_held ? smp_dsp_load() : -1;
+        if (ld >= 0) {                          /* v0.32: FUNC held: the DSP's load, percent */
+            char d[6];
+            int m = fmt_int(d, ld > 999 ? 999 : ld, 0);
+            d[m++] = '%';
+            d[m] = 0;
+            text(c, BIG, 1, 41, d, m, 1);
+        } else if (smp_skipped_any())
             text(c, BIG, 1, 41, "CPU", 3, 1);
         else if (bpm120 >= 1200u)
             text(c, BIG, 1, 41, b, n, 1);
@@ -424,7 +432,15 @@ int mnm_page_draw(void *view, void *c, int mi)
         b[n++] = (char)('0' + (bpm120 % 120u) / 12u);
         b[n] = 0;
         extern int smp_skipped_any(void);       /* v0.30: the DSP left a voice out for time */
-        if (smp_skipped_any())
+        extern int smp_func_held, smp_dsp_load(void);
+        int ld = smp_func_held ? smp_dsp_load() : -1;
+        if (ld >= 0) {                          /* v0.32: FUNC held: the DSP's load, percent */
+            char d[6];
+            int m = fmt_int(d, ld > 999 ? 999 : ld, 0);
+            d[m++] = '%';
+            d[m] = 0;
+            text(c, BIG, 1, 41, d, m, 1);
+        } else if (smp_skipped_any())
             text(c, BIG, 1, 41, "CPU", 3, 1);
         else if (bpm120 >= 1200u)
             text(c, BIG, 1, 41, b, n, 1);

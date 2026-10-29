@@ -2343,7 +2343,8 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         p.st(SM.LINK_BUF + 4 * 17, 6)
         p.iconst(6, 0)
         p.st(G.SKIPMASK, 6)
-        p.iconst(0, 18)
+        G.meter(p, SM.LINK_BUF + 4 * 18)       # v0.32: unit 18, the DSP's load (permille)
+        p.iconst(0, 19)
         p.st(K["u"], 0)
 
         def zero():
@@ -2357,7 +2358,7 @@ def tdm_tx(p: Prog, L: Layout) -> None:
             p.iconst(12, 1)
             p.iop(0, 12, "+", 0)
             p.st(K["u"], 0)
-        p.loop(K["v"], SM.TX_UNITS - 1 - 18, zero)
+        p.loop(K["v"], SM.TX_UNITS - 1 - 19, zero)
         _tx_out(p, K)
 
     def busy():
@@ -2683,6 +2684,7 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.iconst(12, 16)
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
+    G.end_mark(p)                            # v0.32: our voices' time, for the guard's limit
     p.e(f"JUMP {next_sw:#x};", "ping.asm's wr_ping (which restores; v0.26: RESONATOR and CZ gone)")
     p.emit_subs()
     p.raw(".wr_smp..end:")

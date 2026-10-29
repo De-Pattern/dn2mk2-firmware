@@ -115,7 +115,7 @@ class Layout:
     """Addresses the program is built for (dnfw.waverider.dsp provides them)."""
 
     def __init__(self, state, scratch, tables, sin, md_state=None, md_tables=None,
-                 mnm_scratch=0, mnm_tables=0, md_shipped=None, md_ready=None):
+                 mnm_scratch=0, mnm_tables=0, md_shipped=None, md_ready=None, md_delay=None):
         self.state, self.tables, self.sin = state, tables, sin
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
         _, at = tables_bytes()
@@ -126,7 +126,7 @@ class Layout:
         assert len(MDK.SC_WORDS) <= 24
         self.md = MDK.Layout(md_state if md_state is not None else 0, self.C["c0"],
                              md_tables if md_tables is not None else 0,
-                             shipped=md_shipped, ready=md_ready)
+                             shipped=md_shipped, ready=md_ready, delay=md_delay)
         # v0.26: the Monomachine machines' buffers and tables (dnfw.mnm, docs/mnm.md)
         from ..mnm import core as MNC
         self.md.mnm = MNC.Layout(self, mnm_scratch, mnm_tables)

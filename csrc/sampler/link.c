@@ -235,6 +235,19 @@ int smp_skipped(int t)                          /* skipped within the last half 
     return periods - smp_skip_at[t] < 750u;
 }
 
+/* v0.32: the DSP's load, the peak of the last half second, from the idle packets (unit 18,
+ * permille; dnfw.perc.guard.meter); -1 while none came in the last second */
+volatile u32 smp_load_peak __attribute__((section(".data"))) = 0;
+volatile u32 smp_load_at __attribute__((section(".data"))) = 0;
+volatile u32 smp_load_seen __attribute__((section(".data"))) = 0;
+
+int smp_dsp_load(void)
+{
+    if (!smp_load_seen || periods - smp_load_seen > 1500u)
+        return -1;
+    return (int)((smp_load_peak + 5u) / 10u);      /* percent */
+}
+
 int smp_skipped_any(void)                       /* any voice, within the last half second */
 {
     for (int t = 0; t < 16; t++)
@@ -343,6 +356,13 @@ void smp_tdm(u32 h)
         for (int t = 0; t < 16; t++)            /* v0.30: the slots the DSP's guard skipped */
             if (v[17] >> t & 1u)
                 smp_skip_at[t] = periods | 1u;
+        if (v[18] <= 1000u && v[18] != 0) {     /* v0.32: the DSP's load (permille), its peak */
+            if (v[18] >= smp_load_peak || periods - smp_load_at > 750u) {   /* over half a second */
+                smp_load_peak = v[18];
+                smp_load_at = periods;
+            }
+            smp_load_seen = periods | 1u;
+        }
         return;
     }
     if (v[0] != TX_MAGIC)

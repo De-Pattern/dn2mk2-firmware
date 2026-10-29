@@ -979,6 +979,39 @@ def main() -> int:
                               "with a stale knob, or on a stock machine" if good else why)
             gate("FUNC + turn (ColdFire)", *cached("FUNC + turn (ColdFire)", [f_cmd, sorted(EMU_ENV.items())], f_body))
 
+        # 6n. v0.32: the DSP load meter. smp_dsp_load gives the last half second's peak (the
+        # idle packets' unit 18, permille) in percent, rounded, and -1 when none came in the last
+        # second; a PERC page with FUNC held draws it in the tempo's place
+        if "smp_dsp_load" in lay:
+            kit = 0x4210C08C
+            ms = ["wait:3", f"poke:{kit + 52 + 0xDE:#x}:05", "wait:6", "png:tempo",
+                  f"poke:{lay['smp_load_peak']:#x}:00000274",                  # 628 permille
+                  f"call:{0x40134490:#x}:{lay['smp_load_seen']:#x}:{lay['smp_periods']:#x}:4",
+                  f"call:{lay['smp_dsp_load']:#x}",
+                  f"poke:{lay['smp_func_held']:#x}:00000001", "wait:6", "png:load",
+                  f"poke:{lay['smp_func_held']:#x}:00000000",
+                  f"poke:{lay['smp_load_seen']:#x}:00000000",
+                  f"call:{lay['smp_dsp_load']:#x}", "wait:4"]
+            mjs = work / "meter.json"
+            m_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                     "--snapshot", snap, "--steps", ",".join(ms), "--png-dir", work / "meter", "--json", mjs]
+
+            def m_body(tdir):
+                rc, out = run("load meter", m_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and mjs.exists():
+                    r = json.loads(mjs.read_text())
+                    d0 = [c["d0"] for c in r["direct_calls"] if int(str(c["fn"]), 0) == lay["smp_dsp_load"]]
+                    shots = {k: pathlib.Path(v).read_bytes() for k, v in r["screens"].items()}
+                    facts = {"628 permille reads 63 %": d0[:1] == [63],
+                             "none in the last second reads -1": d0[1:2] == [-1],
+                             "FUNC held draws something else in the tempo's place": shots.get("tempo") != shots.get("load")}
+                    good = len(d0) == 2 and all(facts.values())
+                    why = f"{facts} d0={d0}"
+                return good, ("the DSP load meter: the half second's peak in percent, none when the DSP is "
+                              "silent; drawn in place of the tempo while FUNC is held" if good else why)
+            gate("DSP load meter (ColdFire)", *cached("DSP load meter (ColdFire)", [m_cmd, sorted(EMU_ENV.items())], m_body))
+
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest
             print("  (waiting for the SHARC runner)", flush=True)
