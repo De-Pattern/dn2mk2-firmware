@@ -852,6 +852,24 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
         trigger=b == 1).to_bytes(), blocks)
     runs["tops"] = run_blocks(init, frames(PM.NAMES.index("EFM-CB"), params=[1.0] * 8), blocks)
     runs["bottoms"] = run_blocks(init, frames(PM.NAMES.index("TRX-CY"), params=[0.0] * 8), blocks)
+    # v0.31: a Machinedrum voice rests once the chain's block has stayed silent
+    # PP.MNM_QUIET_BLOCKS blocks (as the Monomachine's, v0.29), and its next note wakes it.
+    # GND-SN with every control at its top never decays; the chain's silence is made right
+    # after track 0's amp, as in step_mnm's rest run. The control: the same without it.
+    rest_at = PP.MNM_QUIET_BLOCKS + 4
+    sn = PM.NAMES.index("GND-SN")
+    hushed = {"on": True}
+
+    def hush(r):
+        if hushed["on"] and len(r_seen) < rest_at - 1:
+            buf = m2.word(r.state, PP.BUFFERS) or 0
+            for k in range(BLOCK):
+                m2.poke(r.state, buf + 4 * k, 0)
+    r_seen = []
+    runs["rest"] = _slim(run_blocks(init, frames(sn, trig=(1, rest_at), params=[1.0] * 8), rest_at + 3,
+                                    extra_hooks={dsp.SMP_SW: lambda r: r_seen.append(1), AMP_RETURN: hush}))
+    hushed["on"] = False
+    runs["rest_ctl"] = _slim(run_blocks(init, frames(sn, trig=(1,), params=[1.0] * 8), rest_at + 3))
     ok_runs = all(r["ok"] for r in runs.values())
     exact = {k: perc_exact(r) for k, r in runs.items() if r["ok"]}
     peaks = {PM.NAMES[k]: V.peak(perc_series(runs[f"g{k // 8}"], k % 8)) if runs[f"g{k // 8}"]["ok"] else None
@@ -883,6 +901,12 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
     silent = perc_series(runs["silent"], 0)
     trig_bits = [x[0]["trig"] for x in m0["t5_inputs"] if 0 in x] if m0["ok"] else []
     fxs = perc_series(runs["fx"], 0)
+    def rest_pk(name, b):
+        r = runs[name]
+        return V.peak(r["perc"][b][0]["out"]) if r["ok"] and b < len(r["perc"]) and 0 in r["perc"][b] else None
+    rest_quiet = rest_pk("rest", rest_at - 2)
+    rest_ctl = rest_pk("rest_ctl", rest_at - 2)
+    rest_wake = max((rest_pk("rest", b) or 0.0) for b in (rest_at, rest_at + 1))
     lv = runs["leave"]
     back = [x for b, blk in enumerate(lv["perc"]) if b >= LEAVE[1] and 0 in blk for x in blk[0]["out"]] if lv["ok"] else []
     before = [x for b, blk in enumerate(lv["perc"]) if b < LEAVE[0] and 0 in blk for x in blk[0]["out"]] if lv["ok"] else []
@@ -896,6 +920,7 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
                                    for k, r in runs.items() if r["ok"]},
          "amp_out_peak_m0": V.peak(m0["amp_out"]) if m0["ok"] else None,
          "silent_peak": V.peak(silent) if silent else 0.0,
+         "rest_quiet_control_wake": (rest_quiet, rest_ctl, rest_wake),
          "instructions_per_block_m0": round(m0.get("instructions", 0) / max(blocks, 1)),
          "wall_s": {k: r.get("wall_s") for k, r in runs.items()},
          "halts": {k: r.get("halt") for k, r in runs.items() if not r["ok"]}}
@@ -927,6 +952,9 @@ def step_perc(init, sound, machines, blocks, cold=None) -> dict:
         "control: no trigger is silent (every PERC sample 0)": bool(silent) and all(x == 0.0 for x in silent),
         "v0.12: the track effects change the sound (every one on: the block differs from TRX-SD's own)":
             bool(fxs) and bool(one) and fxs != one and all(math.isfinite(x) for x in fxs),
+        "v0.31: a Machinedrum voice whose sound has died away after the chain rests (renders nothing), "
+        "its next note wakes it; the control, never hushed, still renders":
+            rest_quiet == 0.0 and rest_ctl is not None and rest_ctl > 0.005 and rest_wake > 0.005,
         "v0.12: a track that leaves PERC while it rings is silent when it comes back with no note":
             bool(before) and V.peak(before) > 0.005 and len(back) >= BLOCK * 2
             and all(x == 0.0 for x in back),

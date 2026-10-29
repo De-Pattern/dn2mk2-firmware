@@ -349,6 +349,21 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
               lambda: p.st(C["mcost"], 8), kind="i")
     p.ifz(0, "NE", budget)
 
+    def md_rest():
+        # v0.31: a Machinedrum voice rests too once its sound has died away after the AMP
+        # (depaffect: eight PERC tracks with dynamic allocation stopped all audio; each note
+        # takes another voice, and the old ones went on costing a full render each block)
+        p.ld(8, C["t"])
+        p.lsh(12, 8, 2)
+        p.iconst(11, L.md.mnm.scratch + RESTS_OFF)
+        p.iop(12, 11, "+", 12)
+        p.seti(1, 12)
+        p.ldi(5, 0, 1)
+        p.iconst(12, MNM_QUIET_BLOCKS)
+        p.if_(5, "GE", 12, lambda: (p.iconst(0, 1), p.st(C["mskip"], 0)), kind="i")
+    p.ld(0, C["mnm"])
+    p.ifz(0, "EQ", md_rest)
+
     def render():
         p.ld(2, C["trig"])
         p.ld(5, C["type"])
