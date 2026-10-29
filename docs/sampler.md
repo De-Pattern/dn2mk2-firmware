@@ -620,3 +620,42 @@ the keyboard.
   over a grid of the characters a slot name takes (A-Z, - _, 0-9, space); FUNC + the arrows
   move through it, and letting FUNC go puts the picked character at the cursor (a blank
   opens the grid at A). FUNC + YES and FUNC + NO still insert and delete.
+
+## v0.31: the +Drive library, faster start, LOAD TO PROJECT
+
+The plan and the owner's decisions are `docs/drive-library-plan.md` (§6a). What v0.31 does:
+
+- **Faster start (priority loading).** At power-on the pool still loads whole (the TDM link's
+  ~0.7 MB/s sets the time), but in a new order: the samples the current kit's sample tracks
+  use (their SAMP slots) go first, then the rest (`load_order()` in `link.c`,
+  `smp_l_order`). The pattern can play while the rest loads; the waveform shows
+  **LOADING n%** meanwhile. The gate's link16 `fast` scenario checks that a kit slot's
+  middle arrives before the others.
+- **The library** (`csrc/sampler/lib.c`): from sector `0x700000` of the +Drive (above the
+  pool's image at `0x600000`, inside the free region of `docs/drive-storage-research.md`)
+  to the end of the device, about 20 GB. A superblock (`DN2L`), an index of 2,048
+  64-byte entries (start sector, frames, rate, format, folder, sectors, name of 35
+  characters, a check word), 64 folders (INCOMING and RECORDED first), then the samples as
+  int16 mono, each a contiguous run of sectors (first fit; a deleted one's room is reused).
+  Every read and write is bounds-checked against the region and the device's size before
+  the stock block driver (`0x4012c59a` / `0x4012c780`, sector-addressed) is called. A copy of
+  the index lives in RAM (`SMP_MIRROR + 1 MB`); counts per folder are cached so the
+  browser draws without re-checking every entry.
+- **The browser** (FUNC + YES in the sample list) opens at a top level: **PROJECT RAM**
+  (the pool's slots, as before, grouped by folder) and **+DRIVE** (the library's folders).
+  It reopens where it was last. In +DRIVE: YES ticks a sample (as the DT2), RIGHT opens
+  SAMPLE ACTION: **LOAD TO PROJECT** (the ticked ones, or the one under the cursor, into the
+  first empty slots: read from the +Drive 64 KB a pass, written into the pool's image and
+  its directory, then loaded into the DSP: seconds, not minutes), **LOAD TO TRK** (loads it,
+  then sets the track's SAMP to it), DELETE, SELECT ALL; on a folder, LOAD TO PROJECT /
+  SELECT ALL / DELETE. A library sample already in the pool (same length and name) loads
+  no second copy. In PROJECT RAM, DELETE is called **UNLOAD**. NO goes up a level and closes
+  the browser at the top; **NO held** goes to the top; a page key closes it.
+- **Sending into the library** (sample link 5, SysEx commands 16..23, little-endian):
+  `tools/dn2samples.py lib-send FILES --folder NAME`, `lib-list`, `lib-delete N`, `lib-info`,
+  and the import tool's **Into the +Drive library** mode (which also lists and deletes).
+  Each sample is sent in order and checked (adler-32 over its bytes) before its index entry
+  is written, so a cut-off send leaves no entry. Nothing in the project's pool changes until
+  LOAD TO PROJECT on the instrument.
+- **Not yet** (v0.32): one pool per project, presets that bring their sample, RENAME and
+  preview in +DRIVE, MOVE / CREATE DIR, slices kept in the library, pool banks.
