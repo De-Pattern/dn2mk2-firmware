@@ -72,7 +72,7 @@ _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in 
 #define TDM_TX(h) ((volatile u32 *)(0x4E6E0100u + ((u32)(h) << 11)))
 #define TDM_RX(h) ((volatile u32 *)(0x4E6DF100u + ((u32)(h) << 11)))
 
-#define PROTO 4                                 /* v0.22: 400 MB, the recordings' area a hole */
+#define PROTO 5                                 /* v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
 #define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
 #define BLK_READY (*(volatile u32 *)0x4461B68Cu)                    /* the device is up */
@@ -1538,6 +1538,8 @@ void smp_boot(void)
             return;
         ram_top = smp_ram == 1 ? POOL_BYTES : RAM_PROVEN;
         smp_booted = 2;
+        extern void smp_lib_boot(void);
+        smp_lib_boot();                                 /* v0.31: the library's index (lib.c) */
         smp_load();
     }
     load_poll();
@@ -1760,6 +1762,9 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
             for (u32 c = 0; c < 8; c++)
                 rp[r++] = dir_ok && k < POOL_SLOTS && fr ? NAME(k)[c] : 0;
         }
+    } else if (cmd >= 16 && cmd <= 23) {        /* v0.31 (link 5): the +Drive's library (lib.c) */
+        extern u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
+        r = smp_lib_rx(cmd, rq, n, rp, r, &rp[3]);
     } else {
         rp[3] = 2;
     }

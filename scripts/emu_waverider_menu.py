@@ -514,6 +514,94 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out["ok"] = (loaded and an == 2 and near and len(ons) == 4 and set_rc == 0
                      and order == ["area", "entry"] and back_n == 3 and back == table
                      and out["disk_table"] == table and not route.get("changed"))
+    elif scenario == "lib":
+        # v0.31: the +Drive's library over SysEx (csrc/sampler/lib.c): a folder made (the
+        # library formatted on that first write), two samples sent and read back byte for
+        # byte, one deleted and a third sent into its hole, everything read again from the
+        # +Drive as at power-on; every write inside the library's region; then a device too
+        # small for it: nothing written at all
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        from dn2probe import pack7, unpack7     # noqa: PLC0415
+        LIB, LIB_DATA = 0x700000, 0x700000 + 1 + 256 + 4
+        buf = SENTINEL + 0x1000
+        replies = []
+
+        def at_sender(uc_, address, size, user):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            b, n, _ab, _port = struct.unpack(">4I", bytes(uc.mem_read(sp + 4, 16)))
+            replies.append(bytes(uc.mem_read(b, n)))
+        hs = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+
+        def sx(cmd, payload=b""):
+            msg = bytes([0xF0, 0, 0x20, 0x3C, 0x7D, 1]) + pack7(struct.pack(">HB", 7, cmd) + payload) + b"\xF7"
+            machine.write(buf, msg)
+            replies.clear()
+            call("smp_rx", buf, len(msg), 2)
+            if not replies:
+                return None, b""
+            m = unpack7(replies[-1][6:-1])
+            return m[3], m[4:]
+
+        def adler(b, s=1):
+            a_, b_ = s & 0xFFFF, s >> 16
+            for x in b:
+                a_ = (a_ + x) % 65521
+                b_ = (b_ + a_) % 65521
+            return b_ << 16 | a_
+
+        def send(name, folder, data):
+            frames = len(data) // 2
+            st, r = sx(18, struct.pack("<IBBI", frames, 1, folder, 0x3F800000) + name.encode())
+            if st != 0:
+                return None
+            idx, at = struct.unpack_from("<II", r)
+            for o in range(0, len(data), 300):
+                st, _ = sx(19, struct.pack("<I", o) + data[o:o + 300])
+                if st != 0:
+                    return None
+            st, r = sx(20, struct.pack("<I", adler(data)))
+            return (idx, at) if st == 0 else None
+
+        for _ in range(200):                    # past the boot's RAM check: the library is read
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        st0, info0 = sx(16)
+        st_f, rf = sx(17, b"DRUMS")
+        a = bytes(rng.randrange(256) for _ in range(6000))
+        b = bytes(rng.randrange(256) for _ in range(2000))
+        c = bytes(rng.randrange(256) for _ in range(1000))
+        ra = send("KICK A", rf[0] if rf else 0, a)
+        rb = send("SNARE B", 0, b)
+        st_d, _ = sx(22, struct.pack("<H", ra[0] if ra else 0))
+        rc = send("HAT C", 0, c)
+
+        def on_disk(at, n):
+            return b"".join(disk.get(at + k, bytes(512)) for k in range((n + 511) // 512))[:n]
+        machine.write(syms["smp_lib_state"], bytes(4))      # as at power-on: read it all again
+        st_l, lst = sx(21, struct.pack("<H", 0))
+        names = [lst[4 + 31 * j + 7:4 + 31 * j + 31].split(b"\0")[0].decode() for j in range(4)] if lst else []
+        wrote = sorted(disk)
+        out.update(info0=list(struct.unpack_from("<5I", info0)) if info0 else None, folder=rf[0] if rf else None,
+                   a=ra, b=rb, c=rc, delete=st_d, names=names,
+                   writes=long("smp_lib_writes"), lowest_write=hex(wrote[0]) if wrote else None)
+        ok = (st0 == 0 and out["info0"] and out["info0"][0] == 1 and st_f == 0 and rf[0] == 2
+              and ra and rb and rc and ra[1] == LIB_DATA and rc[1] == LIB_DATA and rc[0] == ra[0]
+              and rb[1] >= LIB_DATA + 12 and st_d == 0
+              and on_disk(rb[1], len(b)) == b and on_disk(rc[1], len(c)) == c
+              and names[:2] == ["HAT C", "SNARE B"]
+              and all(s >= LIB for s in wrote))
+        # a device too small for the library: refused, and not one more sector written
+        before = dict(disk)
+        machine.write(BLK_SECTORS, struct.pack(">I", 0x700100))
+        machine.write(syms["smp_lib_state"], bytes(4))
+        st_s, _ = sx(17, b"MORE")
+        st_s2, _ = sx(18, struct.pack("<IBBI", 100, 1, 0, 0x3F800000) + b"X")
+        out["small_refused"] = st_s != 0 and st_s2 != 0 and disk == before
+        machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))
+        uc.hook_del(hs)
+        out["ok"] = bool(ok and out["small_refused"])
     elif scenario == "save":
         # a recording of 3,000 frames on the DSP, 16 MB into the recordings' area, for slot
         # 40 (SAMP 41; v0.22: any slot, any place); no image on the +Drive yet

@@ -366,6 +366,8 @@ def main() -> int:
             scen = ("save", "fast", "dead", "high", "lowram") if "smp_ram" in lay else ("save", "fast", "dead")
             if "smp_slices_set" in lay:
                 scen += ("slices",)             # v0.23: the slice editor's reading and saving
+            if "smp_lib_state" in lay:
+                scen += ("lib",)                # v0.31: the +Drive's library, bounded to its region
             steps = ",".join(f"link16:{syms}:{sc}" for sc in scen)
             l16_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                        "--build", bdir, "--snapshot", snap, "--steps", steps,
@@ -373,12 +375,14 @@ def main() -> int:
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
                 return good, ("save, fast (a lost packet resent), dead (nothing gets through: the loader "
                               "stops); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
-                              "passes (high, lowram)" if good else out[-800:])
+                              "passes (high, lowram); v0.31: the kit's samples first; the +Drive's library written, read back, "
+                              "a hole reused, every write inside its region, a small device refused (lib)"
+                              if good else out[-800:])
             gate("sample link (ColdFire)", *cached("sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body))
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
