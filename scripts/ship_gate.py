@@ -238,6 +238,14 @@ def main() -> int:
             gate("DSP identity", same, "section 7 is exactly dsp.section7(stock), the image "
                  "the SHARC gate runs" if same else "section 7 is not what the SHARC gate "
                  "tests; its result would not apply to this file")
+            # v0.32: the hardware rules no emulator sees (complex-ping's hwrules.py, from a
+            # checkout of his digitone-2-modding-skill beside this repository): our code and
+            # round each patch, against the stock image's own
+            skill = ROOT.parent / "digitone-2-modding-skill"
+            rc, out = run("hwrules", [sys.executable, "scripts/gate_hwrules.py", a.stock, a.build, skill], logs,
+                          env={"PYTHONPATH": "src"})
+            gate("DSP hardware rules", rc == 0 and "PASS:" in out, out.strip().splitlines()[-1] if out.strip() else
+                 "gate_hwrules.py printed nothing")
             # v0.25: beside the ColdFire steps (its own core); its verdict is taken before
             # the unit tests
             # v0.28: the step is scripts/gate_sharc.py's; its reuse record holds what the

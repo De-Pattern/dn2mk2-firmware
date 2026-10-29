@@ -11,7 +11,7 @@ my unit."*)
     DT2_SECTIONS=../sec111 python scripts/ship_gate.py ../Digitone_II_OS1.11.syx BUILD.syx
 
 It runs, in order, and stops at the first failure: preflight (bootstrap, updater,
-metadata, Outbox untouched; signature; DSP size) → DSP identity → SHARC runner
+metadata, Outbox untouched; signature; DSP size) → DSP identity → DSP hardware rules → SHARC runner
 (types 0–4 bit-identical to stock) → ColdFire instruction-set check → boot from
 reset → engine + SAVE/LOAD → unit tests. About an hour; run it in the background.
 
