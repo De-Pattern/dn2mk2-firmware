@@ -158,14 +158,16 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     # Waverider's wavetables went in v0.11. v0.26: the Machinedrum's shipped tables (the
     # host's pitch table, zpack) are not in the image: the ColdFire sends them at power-on
     assert [a for _, a, _ in ddr] == [dsp.MNM_SCRATCH_DDR,
-                                      dsp.PING_TABLES_DDR, dsp.PERC_TABLES_DDR,
+                                      dsp.PING_TABLES_DDR,
+                                      dsp.SHFT_TABLES_DDR,                      # v0.31: AMD's sine
+                                      dsp.PERC_TABLES_DDR,
                                       dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_STATE_DDR,
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[0][2]) and not any(ddr[-1][2])
-    assert not any(ddr[4][2]) and not any(ddr[5][2])      # the MD's tables (the DSP fills them), its voices
-    assert dsp.MD_TABLES_DDR + len(ddr[4][2]) <= dsp.MD_STATE_DDR
+    assert not any(ddr[5][2]) and not any(ddr[6][2])      # the MD's tables (the DSP fills them), its voices
+    assert dsp.MD_TABLES_DDR + len(ddr[5][2]) <= dsp.MD_STATE_DDR
     # v0.17: the sample pool's directory begins with its magic, and holds nothing (the
     # +Drive's samples are loaded in; the test sounds are gone)
     assert struct.unpack_from("<II", ddr[-2][2]) == (0x31504D53, 0)
@@ -362,3 +364,24 @@ def test_the_voice_order_lives_in_the_monomachine_scratch_tail():
     used = max(L.md.mnm.DG.values()) + 4
     assert used <= PP.MNM_SCRATCH + PP.MNM_KEYS_OFF
     assert PP.MNM_SCRATCH + PP.SMP_I + 4 <= dsp.MNM_STATE_DDR
+
+
+def test_every_table_perc_reads_is_loaded_by_a_span():
+    """v0.31: v0.28 dropped SHFT's tables, and with them the sine PERC's amp modulation
+    reads (L.sin): AMD then read whatever the DDR held, and on the instrument any AMD above
+    0 silenced everything until a reboot. Every table PERC's program reads must lie inside
+    a span the image loads, byte for byte the model's."""
+    from dnfw.perc import live as PL, machines as PM
+    from dnfw.shft import live as SL
+    L = PL.layout()
+    spans = [(a, a + len(b), b) for _, a, b in dsp.ddr_spans()]
+
+    def loaded(lo, data):
+        for a, z, b in spans:
+            if a <= lo and lo + len(data) <= z:
+                return b[lo - a:lo - a + len(data)] == data
+        return False
+    sdata, at = SL.tables_bytes()
+    assert loaded(L.sin, sdata[at["sin"]:at["pow2"]]), "PERC's sine (AMD) is not loaded"
+    pdata, _ = PM.tables_bytes()
+    assert loaded(L.tables, pdata), "PERC's tables are not loaded"

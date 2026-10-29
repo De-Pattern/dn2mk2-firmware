@@ -302,6 +302,12 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("Monomachine scratch and 16 slots' state (zeros; v0.26)", MNM_SCRATCH_DDR,
          bytes(MNM_STATE_DDR - MNM_SCRATCH_DDR + 16 * MNM_STATE_STRIDE)),
         ("PING tables", PING_TABLES_DDR, _ping_tables()),
+        # v0.31: PERC's amp modulation (AMD) reads SHFT's sine here (dnfw.perc.live.layout).
+        # v0.28 dropped this span with SHFT, so AMD read whatever the DDR held: on the
+        # instrument any AMD above 0 silenced everything until a reboot (users' reports on
+        # v0.29 and v0.30). The sine only; test_waverider_dsp checks every table PERC reads
+        # is loaded by a span.
+        ("PERC's amp-modulation sine (SHFT's table, kept for AMD)", SHFT_TABLES_DDR, _perc_sine()),
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
         ("the DT2 sample reader's coefficients (from the owner's DT2 image; v0.18)", SMP_TABLES_DDR,
          _smp_tables()),
@@ -314,6 +320,12 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
          SMP_POOL_DDR, _smp_pool()[:8]),
         ("sample pool: the rest of its directory and names (zeros)", SMP_POOL_DDR + 8,
          bytes(len(_smp_pool()) - 8))]
+
+
+def _perc_sine() -> bytes:
+    from ..shft import live as SL
+    data, at = SL.tables_bytes()
+    return data[at["sin"]:at["pow2"]]
 
 
 def _smp_tables() -> bytes:

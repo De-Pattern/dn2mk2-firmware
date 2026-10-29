@@ -55,6 +55,17 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 - TRIG + YES (the stock sound preview) opens our lock menu on PERC instead: v0.30, a YES with
   another key held is stock's (gate 6j)
 
+## Discord, v0.29 / v0.30 (2026-10-28 evening)
+
+- **AMD (amp mod depth) on a PERC (Machinedrum) track silences everything until a reboot**
+  (depaffect, P-I BD, v0.29 and v0.30). **Found**: AMD reads a sine table that lived with
+  SHFT; v0.28 removed SHFT and the table with it, so AMD read uninitialised DSP memory.
+  Fixed (the table loaded again for AMD) with a unit test that every table PERC reads is
+  loaded: v0.30.1 / v0.31.
+- "Some machines' controls do not work", "sound cutting out" (kazeko, v0.29); "easy to get
+  the sound to cut out with a few Machinedrum engines" (depaffect): DSP time (v0.30 shows
+  CPU when it happens), or the AMD fault above. Ask which controls.
+
 ## Requests
 
 - Stereo sampling from the inputs (bearsshuffle)
