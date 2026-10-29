@@ -984,11 +984,12 @@ def main() -> int:
         # second; a PERC page with FUNC held draws it in the tempo's place
         if "smp_dsp_load" in lay:
             kit = 0x4210C08C
-            ms = ["wait:3", f"poke:{kit + 52 + 0xDE:#x}:05", "wait:6", "png:tempo",
+            ms = ["wait:3", f"poke:{kit + 52 + 0xDE:#x}:05", "wait:20", "png:tempo",
                   f"poke:{lay['smp_load_peak']:#x}:00000274",                  # 628 permille
-                  f"call:{0x40134490:#x}:{lay['smp_load_seen']:#x}:{lay['smp_periods']:#x}:4",
+                  # (the emulator runs no audio periods: the clock and the packet's time are set)
+                  f"poke:{lay['smp_periods']:#x}:00001000", f"poke:{lay['smp_load_seen']:#x}:00000fff",
                   f"call:{lay['smp_dsp_load']:#x}",
-                  f"poke:{lay['smp_func_held']:#x}:00000001", "wait:6", "png:load",
+                  f"poke:{lay['smp_func_held']:#x}:00000001", "tap:2", "wait:10", "png:load",   # (a page key: drawn again)
                   f"poke:{lay['smp_func_held']:#x}:00000000",
                   f"poke:{lay['smp_load_seen']:#x}:00000000",
                   f"call:{lay['smp_dsp_load']:#x}", "wait:4"]
