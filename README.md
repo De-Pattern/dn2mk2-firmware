@@ -36,6 +36,10 @@ projects, presets and kits.
 [Versions](#versions) · [Credits](#credits) · [Licence](#licence)
 
 ---
+<p align="center">
+  <img src="docs/dn2mk2logo.png" alt="logo" width="760">
+</p>
+
 
 ## What's in it
 
