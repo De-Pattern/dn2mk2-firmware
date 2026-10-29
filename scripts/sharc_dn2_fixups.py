@@ -405,6 +405,7 @@ def run(runner, max_steps: int, fix: Fixups, stop_at=()):
             fix.note("skip", pc)
             continue
         if pc in fix.hooks:
+            runner.steps_n = n                  # v0.32: a hook may read the block's count so far
             fix.hooks[pc](runner)
             if runner.state.pc_sw != pc:
                 n += 1

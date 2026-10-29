@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -589,6 +589,12 @@ def main(argv=None):
             print("\nstep 3g: the frame-time guard")
             results["3g_guard"] = step_guard(warm(), sound, machines, a.blocks)
             show(results["3g_guard"])
+            gc.collect()
+
+        if "stress" in steps:
+            print("\nstep 3s: the stress test (the clock made to move)")
+            results["3s_stress"] = step_stress(warm(), sound, machines)
+            show(results["3s_stress"])
             gc.collect()
 
         if "smp" in steps:
@@ -1106,6 +1112,113 @@ def step_guard(init, sound, machines, blocks) -> dict:
         len(tl_ctl) == 3 and all(x == want(0) for x in tl_ctl))
     checks["v0.32: ... a reading past 0.7 P is not taken: 0.6 P"] = (
         len(tl_bad) == 3 and all(x == want(0) for x in tl_bad))
+    return {"ok": all(checks.values()), "checks": checks, "numbers": n}
+
+
+# -- step 3s: the stress test (v0.32) -----------------------------------------------------------
+
+def step_stress(init, sound, machines) -> dict:
+    """v0.32: the DSP's time under load, with the clock made to move. The runner's EMUCLK
+    stands still; here every read of it in our code (the guard's, our end mark, the meter)
+    gets the block's start plus K x the instructions run in the block so far, MARK0 the
+    block's start and MARK our entry, a frame P apart: the guard then works as on the unit,
+    K standing for what a DN2 cycle costs an instruction (memory stalls: the unit's load is
+    several times its instruction count; K = 3 here, past what v0.27..v0.31 were measured
+    at). Scenario A (depaffect's): sixteen PERC voices, EFM-SD, a new note on the next voice
+    each block (dynamic allocation). B: four Monomachine voices (VO-6, DDRW, DENS, SID) and
+    four PERC. Each block must end, our voices done by 0.8 P (the guard checks before each
+    voice; one voice may run past LIMIT by its own cost), the newest note heard, voices
+    left out (and counted) when time is short, nothing non-finite."""
+    from dnfw.perc import guard as G
+    from dnfw.mnm import machines as MMx
+    K, P = 3, 666_667
+    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
+    efm = PM.NAMES.index("EFM-SD")
+    td = PM.NAMES.index("TRX-BD")
+    res = {}
+
+    def scenario(name, blocks, frame_of):
+        b_now = {"b": 0}
+        ends = []
+
+        def clock(r):
+            base = (b_now["b"] + 1) * P
+            r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const((base + K * getattr(r, "steps_n", 0)) & 0xFFFFFFFF)
+
+        def at_perc(r):
+            base = (b_now["b"] + 1) * P
+            m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
+            m2.poke(r.state, G.MARK, (base + K * getattr(r, "steps_n", 0)) & 0xFFFFFFFF)
+
+        def at_end(r):
+            pass
+        hooks = {dsp.PERC_SW: at_perc}
+        hooks.update({s: clock for s in sites})
+        got = {"limit": [], "end": [], "skips": []}
+
+        def fb(b):
+            b_now["b"] = b
+            return frame_of(b)
+        rr = run_blocks(init, fb, blocks, extra_hooks=hooks)
+        st = rr.get("state")
+        skips = m2.word(st.state, G.SKIPS) if rr["ok"] else None
+        end = m2.word(st.state, G.OURS_END) if rr["ok"] else None
+        mark0 = m2.word(st.state, G.MARK0) if rr["ok"] else None
+        limit = m2.word(st.state, G.LIMIT) if rr["ok"] else None
+        rr.pop("state", None)
+        return rr, skips, ((end - mark0) & 0xFFFFFFFF) if end is not None else None, limit
+
+    def a_frame(b):
+        f = base_frame(sound, machines, overrides=perc_words(efm), trigger=False, others={t: 5 for t in range(1, 16)})
+        for t in range(1, 16):
+            for slot, w in perc_words(efm).items():
+                f.param(t, slot, w)
+        f.trigger(b % 16)
+        return f.to_bytes()
+    ra, sa, ea, la = scenario("A", 20, a_frame)
+    names = ("VO-6", "DPRO-DDRW", "DPRO-DENS", "SID 6581")
+
+    def b_frame(b):
+        f = base_frame(sound, machines, overrides=perc_words(td), trigger=False,
+                       others={**{t: MMx.TYPES[MMx.NAMES.index(n)] for t, n in zip(range(4), names)},
+                               **{t: 5 for t in range(4, 8)}})
+        for t, n in zip(range(4), names):
+            for slot, w in mnm_words(MMx.NAMES.index(n)).items():
+                f.param(t, slot, w)
+        for t in range(4, 8):
+            for slot, w in perc_words(td).items():
+                f.param(t, slot, w)
+        if b % 2 == 0:
+            f.trigger((b // 2) % 8)
+        return f.to_bytes()
+    rb, sb, eb, lb = scenario("B", 16, b_frame)
+
+    def newest_heard(rr, every):
+        if not rr["ok"]:
+            return 0.0
+        hits = tot = 0
+        for b in range(2, len(rr["perc"])):
+            t = (b - 1) % every if every == 16 else None
+            if t is None:
+                continue
+            tot += 1
+            blk = rr["perc"][b]
+            if t in blk and V.peak(blk[t]["out"]) > 0.001:
+                hits += 1
+        return hits / max(tot, 1)
+    fin = all(math.isfinite(x) for rr in (ra, rb) if rr["ok"] for blk in rr["perc"]
+              for v in blk.values() for x in v["out"])
+    n = {"K": K, "skips": {"A": sa, "B": sb}, "our_end_over_P": {"A": ea and round(ea / P, 3), "B": eb and round(eb / P, 3)},
+         "limit": {"A": la, "B": lb}, "newest_heard_A": newest_heard(ra, 16),
+         "instructions_per_block": {"A": ra.get("instructions", 0) // 20, "B": rb.get("instructions", 0) // 16}}
+    checks = {
+        "every block of both returns": ra["ok"] and rb["ok"],
+        "our voices done by 0.8 of the frame in both (the guard's limit holds under load)":
+            ea is not None and eb is not None and ea <= 0.8 * P and eb <= 0.8 * P,
+        "with time short, voices are left out and counted (A)": bool(sa),
+        "A: the newest note is heard in most blocks (newest first)": n["newest_heard_A"] >= 0.8,
+        "nothing non-finite": fin,
+    }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
 
 
