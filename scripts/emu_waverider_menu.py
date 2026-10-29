@@ -377,7 +377,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         last_word = {}
         for slot in range(2):
             addr, fr, _r, _f = struct.unpack_from("<IIfI", img, 8 + 16 * slot)
-            k = (addr - base + fr * 2) // 4 - 1
+            # a word in its middle: a chunk's 512-byte rounding takes in a neighbour's edge
+            k = (addr - base + fr) // 4
             last_word[slot] = (k, struct.unpack_from("<I", img, k * 4)[0])
         done_at = {}
         status_out()
