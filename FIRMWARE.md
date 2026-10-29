@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.30.1** | 2026-10-29 | Hotfix on v0.30: PERC's AMD no longer silences everything until a reboot (the sine it reads is loaded again) | `builds/v0.30.1-AMDFIX/` | yes |
+| **v0.31** | 2026-10-29 | The +Drive library (about 20 GB, folders; LOAD TO PROJECT / LOAD TO TRK in the browser's +DRIVE), sent from the import tool or dn2samples.py; the kit's samples load first at power-on (LOADING n%); a finished Machinedrum voice frees its DSP time; the browser's NO / NO held / page keys | `builds/v0.31-DRIVE/` | yes |
+| v0.30.1 | 2026-10-29 | Hotfix on v0.30: PERC's AMD no longer silences everything until a reboot (the sine it reads is loaded again) | `builds/v0.30.1-AMDFIX/` | yes |
 | v0.30 | 2026-10-28 | Stock Y/N questions (the OS update, the save) answered on every page; TRIG + YES is stock's; MACHINE SEL keeps SAMP between sample machines; the slice marker follows the track's voice; LFO depth on SAMP/SLCE; recorder THRES and ARM; gentler normalize; held arrows scroll the lists; the slice editor's preview; CPU on screen | `builds/v0.30-FIXES/` | yes |
 | v0.29 | 2026-10-28 | Voices play newest first (PERC past 8 voices, Monomachine dead notes under dynamic allocation); a finished Monomachine voice frees its DSP time (the third track silent); multi-select and SELECT ALL/DELETE in the folder browser; CLEAR SLICE GRID; YES answers the save question on a SLICE/GRID page | `builds/v0.29-VOICES/` | yes |
 | v0.28 | 2026-10-28 | The Monomachine machines drawn as the Monomachine's (animated controls), their choice knobs with detents, each machine its own level; SHIFT and GRAN removed; KEYBOARD's first press of a new slice plays only that slice | `builds/v0.28-MNM/` | yes |
@@ -68,6 +69,68 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.31 — DRIVE (the +Drive library, faster start, Machinedrum voices that rest)
+
+`DN2mod_v0.31_DRIVE_OS1.11.syx`
+sha256 `9445fa093b86ddaa224969c84f8c49d67fe2fe21f9690ae837705337984bff28`
+Gate: CLEARED TO FLASH, 2026-10-29 (USB size 2,055,451 of 2,097,152; DSP image 1,017,060 of 1,048,575). Source: commit `9a37fd8a` (the gate's own scripts at `a2ff05da`). Docs: `docs/sampler.md` (v0.31), `docs/drive-library-plan.md`, `docs/user-reports.md`, `docs/mute-research.md`.
+
+Everything in v0.30.1, plus:
+
+**The +Drive library** (the plan you approved: the DT2's two stores). A library on the +Drive,
+about 20 GB in our own region (never touched by the stock OS), with folders (INCOMING,
+RECORDED and yours) and up to 2,048 samples. The browser (FUNC + YES in the sample list) now
+opens on **PROJECT RAM** (the slots, as before) and **+DRIVE**. In +DRIVE: YES ticks samples,
+RIGHT opens SAMPLE ACTION: **LOAD TO PROJECT** (into the first empty slots, in seconds),
+**LOAD TO TRK** (loads it and puts the track's SAMP on it), DELETE, SELECT ALL. A sample
+already in the project is not loaded twice. In PROJECT RAM, DELETE is called UNLOAD.
+
+**Leaving the browser** (your choice): NO goes up a level and closes it at the top, **NO held**
+goes straight to the top, a page key closes it.
+
+**Sending into the library**: the import tool's new mode *Into the +Drive library* (it also
+lists what is on the +Drive and deletes), or `tools/dn2samples.py lib-send FILES --folder NAME`
+(`lib-list`, `lib-delete`, `lib-info`). Each sample is checked before it is kept; a cut-off send
+leaves nothing behind. Nothing in the project changes until you LOAD TO PROJECT.
+
+**Faster start**: at power-on the samples the kit's sample tracks use load first, so the
+pattern can play while the rest load; the waveform shows **LOADING n%** meanwhile. (The whole
+load takes as long as before: the DSP link's speed sets it.)
+
+**Machinedrum voices rest** (depaffect's report: eight PERC tracks with dynamic allocation cut
+the sound out; locking each track to one voice avoided it). Each new note takes another voice
+while the old ones went on costing a full render; now a Machinedrum voice whose sound has died
+away (after the AMP) rests and costs nothing until its next note, as the Monomachine voices do
+since v0.29.
+
+**Gate changes.** New: the library written, read back, a hole reused, every write inside its
+region and a small device refused; LOAD TO PROJECT's bytes into the DSP; the kit's sample
+first at power-on; the +DRIVE browser; a Machinedrum voice rests and wakes (runner,
+bit-exact). The sample link's dead-link scenario is now a step of its own.
+
+**Test** (after the regression check):
+1. Power-on with samples kept: **LOADING n%** on a sample track's waveform; the pattern plays
+   while it counts.
+2. Import tool, *Into the +Drive library*: send a few WAVs into a folder you name. On the
+   instrument: FUNC + YES in the sample list, +DRIVE, the folder: they are there.
+3. RIGHT on one: **LOAD TO PROJECT**: it gets a slot (PROJECT RAM shows it) and plays.
+   **LOAD TO TRK** on another: the track's SAMP moves to it.
+4. Tick two with YES, LOAD TO PROJECT: both load. Load one again: no second copy.
+5. NO in a folder goes up; NO at the top closes; NO held goes to the top; a page key closes.
+6. Eight PERC tracks, dynamic voice allocation, a busy pattern: does the sound still cut
+   out? (Watch for **CPU** on the PERC page.)
+7. The import tool's library list: delete one from there; it is gone on the instrument
+   (reopen +DRIVE).
+
+**Known issues / not done.**
+- Not in the library yet: RENAME, preview (FUNC + YES) in +DRIVE, MOVE, CREATE DIR, slices.
+- One project pool for all projects still (per-project pools: next after v0.32).
+- Pool banks: not yet (`docs/drive-library-plan.md` §10).
+- FUNC + turn on our machines' controls: fixed in v0.32 (coming next).
+- **Heavy DSP use** can still run out of time: v0.32 is the big fix (the voices' state in
+  fast memory, a measured guard, a load meter).
+- **Not seen on hardware yet**: all of the above; checked in the emulators.
 
 ## v0.30.1 — AMDFIX (PERC's amp modulation no longer kills the sound)
 

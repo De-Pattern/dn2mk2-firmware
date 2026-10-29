@@ -369,6 +369,18 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         for k in range(len(recp) // 512):
             disk[STORE_SECTOR + 1 + rec_off // 512 + k] = recp[512 * k:512 * k + 512]
         retries0 = long("smp_retries")       # (the machine runs the scenarios in turn: its count goes on)
+        # v0.31: track 1 a ONESHOT on SAMP 2 (slot 1): its sample loads before slot 0's
+        kit = struct.unpack(">I", machine.read(0x800052A0, 4))[0]
+        if scenario == "fast" and kit:
+            machine.write(kit + 52 + 0xDE, bytes([8]))
+            machine.write(kit + 52 + 20 + 2 * 43, bytes([2, 0]))
+        last_word = {}
+        for slot in range(2):
+            addr, fr, _r, _f = struct.unpack_from("<IIfI", img, 8 + 16 * slot)
+            # a word in its middle: a chunk's 512-byte rounding takes in a neighbour's edge
+            k = (addr - base + fr) // 4
+            last_word[slot] = (k, struct.unpack_from("<I", img, k * 4)[0])
+        done_at = {}
         status_out()
         periods = 0
         limit = int(os.environ.get("LINK16_LIMIT", 4000 if scenario == "fast" else 30000))
@@ -376,6 +388,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             period()
             call("smp_boot")
             periods += 1
+            for slot, (k, v) in last_word.items():
+                if slot not in done_at and pool.get(k) == v:
+                    done_at[slot] = periods
             if periods % 25 == 0:
                 log.append([periods, long("smp_walk"), long("smp_retries"), long("smp_lstate"),
                             long("smp_tdm_sent"), len(dsp["cmds"]), io["reads"]])
@@ -406,9 +421,15 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    hi=long("smp_hi"), disk_reads=io["reads"], disk_writes=io["writes"],
                    disk_errors=io.get("errors", [])[:3], routing_changed=route.get("changed", 0),
                    lstate=long("smp_lstate"))
+        out["loaded_at"] = done_at
+        if "smp_l_order" in syms:
+            out["order"] = list(machine.read(syms["smp_l_order"], 4))
         if scenario == "fast":
             out["ok"] = (not wrong and not frames_wrong and periods < limit and out["cmd_packets"] > 0
                          and not route.get("changed"))
+            # v0.31: the kit's sample first (slot 1, though slot 0 comes first in the image)
+            out["kit_first"] = bool(kit) and 1 in done_at and 0 in done_at and done_at[1] < done_at[0]
+            out["ok"] = out["ok"] and out["kit_first"]
         else:
             # nothing gets through: the loader tries each chunk seven times and stops, and
             # the frame stays stock's
@@ -493,6 +514,128 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out["ok"] = (loaded and an == 2 and near and len(ons) == 4 and set_rc == 0
                      and order == ["area", "entry"] and back_n == 3 and back == table
                      and out["disk_table"] == table and not route.get("changed"))
+    elif scenario == "lib":
+        # v0.31: the +Drive's library over SysEx (csrc/sampler/lib.c): a folder made (the
+        # library formatted on that first write), two samples sent and read back byte for
+        # byte, one deleted and a third sent into its hole, everything read again from the
+        # +Drive as at power-on; every write inside the library's region; then a device too
+        # small for it: nothing written at all
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        from dn2probe import pack7, unpack7     # noqa: PLC0415
+        LIB, LIB_DATA = 0x700000, 0x700000 + 1 + 256 + 4
+        buf = SENTINEL + 0x1000
+        replies = []
+
+        def at_sender(uc_, address, size, user):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            b, n, _ab, _port = struct.unpack(">4I", bytes(uc.mem_read(sp + 4, 16)))
+            replies.append(bytes(uc.mem_read(b, n)))
+        hs = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+
+        def sx(cmd, payload=b""):
+            msg = bytes([0xF0, 0, 0x20, 0x3C, 0x7D, 1]) + pack7(struct.pack(">HB", 7, cmd) + payload) + b"\xF7"
+            machine.write(buf, msg)
+            replies.clear()
+            call("smp_rx", buf, len(msg), 2)
+            if not replies:
+                return None, b""
+            m = unpack7(replies[-1][6:-1])
+            return m[3], m[4:]
+
+        def adler(b, s=1):
+            a_, b_ = s & 0xFFFF, s >> 16
+            for x in b:
+                a_ = (a_ + x) % 65521
+                b_ = (b_ + a_) % 65521
+            return b_ << 16 | a_
+
+        def send(name, folder, data):
+            frames = len(data) // 2
+            st, r = sx(18, struct.pack("<IBBI", frames, 1, folder, 0x3F800000) + name.encode())
+            if st != 0:
+                return None
+            idx, at = struct.unpack_from("<II", r)
+            for o in range(0, len(data), 300):
+                st, _ = sx(19, struct.pack("<I", o) + data[o:o + 300])
+                if st != 0:
+                    return None
+            st, r = sx(20, struct.pack("<I", adler(data)))
+            return (idx, at) if st == 0 else None
+
+        for _ in range(200):                    # past the boot's RAM check: the library is read
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        st0, info0 = sx(16)
+        st_f, rf = sx(17, b"DRUMS")
+        a = bytes(rng.randrange(256) for _ in range(6000))
+        b = bytes(rng.randrange(256) for _ in range(2000))
+        c = bytes(rng.randrange(256) for _ in range(1000))
+        ra = send("KICK A", rf[0] if rf else 0, a)
+        rb = send("SNARE B", 0, b)
+        st_d, _ = sx(22, struct.pack("<H", ra[0] if ra else 0))
+        rc = send("HAT C", 0, c)
+
+        def on_disk(at, n):
+            return b"".join(disk.get(at + k, bytes(512)) for k in range((n + 511) // 512))[:n]
+        machine.write(syms["smp_lib_state"], bytes(4))      # as at power-on: read it all again
+        st_l, lst = sx(21, struct.pack("<H", 0))
+        names = [lst[4 + 31 * j + 7:4 + 31 * j + 31].split(b"\0")[0].decode() for j in range(4)] if lst else []
+        wrote = sorted(disk)
+        out.update(info0=list(struct.unpack_from("<5I", info0)) if info0 else None, folder=rf[0] if rf else None,
+                   a=ra, b=rb, c=rc, delete=st_d, names=names,
+                   writes=long("smp_lib_writes"), lowest_write=hex(wrote[0]) if wrote else None)
+        ok = (st0 == 0 and out["info0"] and out["info0"][0] == 1 and st_f == 0 and rf[0] == 2
+              and ra and rb and rc and ra[1] == LIB_DATA and rc[1] == LIB_DATA and rc[0] == ra[0]
+              and rb[1] >= LIB_DATA + 12 and st_d == 0
+              and on_disk(rb[1], len(b)) == b and on_disk(rc[1], len(c)) == c
+              and names[:2] == ["HAT C", "SNARE B"]
+              and all(s >= LIB for s in wrote))
+        # LOAD TO PROJECT: SNARE B and HAT C into the first empty pool slots (no pool yet:
+        # a directory made), each slot's frames on the +Drive's pool image and sent to the DSP
+        lp_ok = False
+        if "smp_lib_load" in syms and rb and rc:
+            call("smp_lib_load", rb[0])
+            call("smp_lib_load", rc[0])
+            for _ in range(4000):
+                period()
+                call("smp_boot")
+                if long("smp_lp_done") >= 2 and long("smp_lstate") in (0, 4):
+                    break
+            for _ in range(200):                # the second slot to the DSP, the directory saved
+                period()
+                call("smp_boot")
+            d = b"".join(disk.get(STORE_SECTOR + 1 + k, bytes(512)) for k in range(8))
+            ents = [struct.unpack_from("<IIfI", d, 8 + 16 * s) for s in range(2)]
+            nms = [d[SM.NAMES_OFFSET + SM.NAME_BYTES * s:SM.NAMES_OFFSET + SM.NAME_BYTES * (s + 1)].split(b"\0")[0].decode()
+                   for s in range(2)]
+
+            def img_at(addr, n):
+                lo = addr - base
+                return b"".join(disk.get(STORE_SECTOR + 1 + lo // 512 + k, bytes(512)) for k in range((n + 511) // 512))[:n]
+
+            def dsp_at(addr, n):
+                lo = (addr - base) // 4
+                return b"".join(struct.pack("<I", pool.get(lo + j, 0)) for j in range((n + 3) // 4))[:n]
+            out.update(lp_done=long("smp_lp_done"), lp_full=long("smp_lp_full"), lp_names=nms,
+                       lp_frames=[e[1] for e in ents])
+            lp_ok = (long("smp_lp_done") == 2 and nms == ["SNARE B", "HAT C"] and [e[1] for e in ents] == [1000, 500]
+                     and img_at(ents[0][0], 2000) == b and img_at(ents[1][0], 1000) == c
+                     and dsp_at(ents[0][0], 2000) == b and dsp_at(ents[1][0], 1000) == c
+                     and all(s >= STORE_SECTOR for s in disk))
+        out["load_to_project"] = lp_ok
+        ok = ok and lp_ok
+        # a device too small for the library: refused, and not one more sector written
+        before = dict(disk)
+        machine.write(BLK_SECTORS, struct.pack(">I", 0x700100))
+        machine.write(syms["smp_lib_state"], bytes(4))
+        st_s, _ = sx(17, b"MORE")
+        st_s2, _ = sx(18, struct.pack("<IBBI", 100, 1, 0, 0x3F800000) + b"X")
+        out["small_refused"] = st_s != 0 and st_s2 != 0 and disk == before
+        machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))
+        uc.hook_del(hs)
+        out["ok"] = bool(ok and out["small_refused"])
     elif scenario == "save":
         # a recording of 3,000 frames on the DSP, 16 MB into the recordings' area, for slot
         # 40 (SAMP 41; v0.22: any slot, any place); no image on the +Drive yet

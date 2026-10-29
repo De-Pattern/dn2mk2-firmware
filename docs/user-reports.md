@@ -9,7 +9,7 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 |---|---|---|
 | U1 | MD machines: sometimes no sound on any pattern until a power cycle (zugada_); v0.26 "very unstable, no sound for more than a few minutes" (mistahairplane) | the frame overrun: v0.27's guard. Confirm on v0.27 |
 | U2 | Sample (DT2) machines: choosing a sample while the pattern plays freezes the unit; a power cycle clears it. "Most of the crashes are on the Digitakt machines" (zugada_) | **open**: not reproduced yet. v0.27 changed when the list opens; check the load path while playing |
-| U3 | A trig can't be pre-muted (trig mute), especially on the custom machines (zugada_) | **open**: our PERC/sample voices may not honour the trig-mute flag |
+| U3 | A trig can't be pre-muted (trig mute), especially on the custom machines (zugada_) | **researched (docs/mute-research.md)**: stock mute only drops a muted track's new trigs on the ColdFire, so our voices get no note either; a sounding note ends by note-off through the stock AMP. Not reproduced: need the machine, LEN, and the exact keys |
 | U4 | SYN + YES (randomize) on a Machinedrum machine crashes sometimes (zugada_) | **likely the DSP overrun (fixed v0.27's guard)**: every MD machine with random settings, all 8 controls and 7 effects, twice each, runs bit-exact, finite, no halt in the DSP model; SYN + YES on PERC in the emulator randomizes (TYPE too) and draws without fault. Retest on v0.27+ |
 | U5 | After switching a track from an MD machine to a stock DN2 machine, the MD machine is still heard in the background (zugada_) | **open**: the model silences a track that leaves PERC; check the hardware path |
 | U6 | Delete all samples / folders sent by the import tool (zugada_) | v0.29 multi-select delete |
@@ -65,6 +65,26 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 - "Some machines' controls do not work", "sound cutting out" (kazeko, v0.29); "easy to get
   the sound to cut out with a few Machinedrum engines" (depaffect): DSP time (v0.30 shows
   CPU when it happens), or the AMD fault above. Ask which controls.
+  **depaffect's follow-up (v0.30, also v0.27), 2026-10-29:** eight PERC tracks soon mute all
+  audio, *but not when each track's voice allocation is locked to 1 voice*; with the lock,
+  CPU shows and the sound keeps playing. So the cut-out comes with dynamic voice allocation:
+  each new note lands on another voice while the old ones still render, so eight tracks hold
+  many more PERC voices than eight. The guard (v0.27) leaves voices out but the whole DSP
+  still stops. **v0.31**: a Machinedrum voice now rests once its sound has died away after
+  the AMP (64 blocks under -96 dB, as the Monomachine's since v0.29), so finished voices cost
+  nothing and the newest-first order (v0.29) has the time for new notes (runner: bit-exact,
+  rests, wakes on its next note). To confirm on the instrument: eight PERC tracks, dynamic
+  allocation.
+
+- **FUNC + turn does nothing on our machines' controls** (Discord tester, v0.30, 2026-10-29).
+  On stock pages FUNC while turning makes a value jump to set positions (DT2 manual §6.2.1:
+  NOTE by octaves, delay time by tempo steps). On ours the value stays put: DDRW (BR1 SU,
+  WID, WAV2, TIME, TUNE), DENS (PCH4, WAVE, TUNE), VO-6 (CONS, CLEN, TUNE, V-SW, voice type),
+  SID (PWRS, WAVE, MOD, MSRC, TUNE), PERC (RAMP, RDEC, START, NOISE, CLIP, AMF, EQF, EQG, FLTW,
+  FILTER Q), ONESHOT (LENGTH, PLAY MODE), WERP (SEG, BARS), STRETCH/REPITCH's matching
+  controls. **Open**: find what the stock knob handler does with FUNC held (a jump table per
+  parameter, from the parameter's descriptor) and give ours a plain turn, or jumps where they
+  mean something (TUNE by semitone/octave, choices by one).
 
 ## Requests
 

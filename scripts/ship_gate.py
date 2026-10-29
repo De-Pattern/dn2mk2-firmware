@@ -366,19 +366,42 @@ def main() -> int:
             scen = ("save", "fast", "dead", "high", "lowram") if "smp_ram" in lay else ("save", "fast", "dead")
             if "smp_slices_set" in lay:
                 scen += ("slices",)             # v0.23: the slice editor's reading and saving
+            if "smp_lib_state" in lay:
+                scen += ("lib",)                # v0.31: the +Drive's library, bounded to its region
+            # v0.31: "dead" (every packet lost: the RAM check's four seconds, then seven tries
+            # three seconds apart before the loader stops) takes about an hour in the emulator
+            # on its own, so it is a step of its own, cached on its own: the gate's run fits
+            # the two-hour limit, and a run cut off there keeps whichever step passed
+            dead = [sc for sc in scen if sc == "dead"]
+            scen = tuple(sc for sc in scen if sc != "dead")
             steps = ",".join(f"link16:{syms}:{sc}" for sc in scen)
             l16_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                        "--build", bdir, "--snapshot", snap, "--steps", steps,
                        "--png-dir", work / "link16"]
+            if dead:
+                ld_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                          "--build", bdir, "--snapshot", snap, "--steps", f"link16:{syms}:dead",
+                          "--png-dir", work / "link16dead"]
+
+                def ld_body(tdir):
+                    rc, out = run("link16 dead", ld_cmd, logs, env=EMU_ENV, trace=tdir)
+                    oks = re.findall(r"link16 dead: .*\"ok\": (true|false)", out)
+                    good = rc == 0 and oks == ["true"]
+                    return good, ("dead (nothing gets through): the RAM check gives up after four seconds, "
+                                  "the loader tries each chunk seven times and stops, nothing reaches the "
+                                  "DSP's routing" if good else out[-800:])
+                gate("sample link, dead link (ColdFire)",
+                     *cached("sample link, dead link (ColdFire)", [ld_cmd, sorted(EMU_ENV.items())], ld_body))
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
-                return good, ("save, fast (a lost packet resent), dead (nothing gets through: the loader "
-                              "stops); every byte loaded and saved; the frame's routing words stock's in "
+                return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
-                              "passes (high, lowram)" if good else out[-800:])
+                              "passes (high, lowram); v0.31: the kit's samples first; the +Drive's library written, read back, "
+                              "a hole reused, every write inside its region, a small device refused (lib)"
+                              if good else out[-800:])
             gate("sample link (ColdFire)", *cached("sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body))
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
@@ -632,12 +655,13 @@ def main() -> int:
                                  "wait:8", "png:l2", mem(samp0, 2), "no", "wait:8", "png:l3", mem(samp0, 2),
                                  mem(lay["smp_lst_open"])]
             st += samp_all(2) + ["wait:10"] + turn(3) + ["wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
-                                 "wait:8", "png:b1", mem(lay["smp_fb_open"]), "yes", "wait:8", "png:b2",
+                                 "wait:8", "yes", "wait:6", "png:b1", mem(lay["smp_fb_open"]), "yes", "wait:8", "png:b2",
                                  mem(lay["smp_fb_folder"]), "down", "wait:2", "yes", "wait:8", "png:b3",
                                  mem(samp0, 2), mem(lay["smp_fb_open"]), mem(lay["smp_lst_open"])]
+            # (v0.31: FUNC + YES opens on the two stores, the cursor on PROJECT RAM: YES enters it)
             # the SAMPLE ACTION menu: into "loops", RIGHT on its sample, DELETE, asked, YES
             st += samp_all(3) + ["wait:10"] + turn(2) + ["wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
-                                 "down", "wait:4", "yes", "wait:6", "right", "wait:6", "png:m1", "down", "wait:3",
+                                 "yes", "wait:6", "down", "wait:4", "yes", "wait:6", "right", "wait:6", "png:m1", "down", "wait:3",
                                  "down", "wait:3", "yes", "wait:6", "png:m2", "yes", "wait:8", "png:m3",
                                  mem(M + 8 + 16 + 4, 4)]
             # (v0.30: the reach scaled by depth over the loaded samples, held at the ends. The
@@ -692,7 +716,8 @@ def main() -> int:
                 lead = ["wait:6", "tap:2", "wait:6", f"poke:{lay['smp_periods']:#x}:00000000",     # (as 6f: the
                         f"poke:{lay['smp_pos_at']:#x}:00000000", "wait:12", "tap:2", "wait:6"]      # clock set)
                 ms = base + lead + samp_all(3) + [f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:10"] + turn(2) + [
-                    "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", f"call:{fbc:#x}",
+                    "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", "yes", "wait:6",
+                    f"call:{fbc:#x}",
                     "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:6", "png:s1", f"call:{fbm:#x}",
                     "down", "wait:4", "right", "wait:6", "png:s2", "yes", "wait:6", f"call:{fbm:#x}",
                     "right", "wait:6", "down", "wait:3", "png:s3", "yes", "wait:6", "png:s4", "yes", "wait:10",
@@ -725,6 +750,74 @@ def main() -> int:
                                   if good else why)
                 gate("multi-select delete (ColdFire)",
                      *cached("multi-select delete (ColdFire)", [ms_cmd, sorted(EMU_ENV.items())], ms_body))
+
+            # 6l. v0.31: the browser's two stores and the +Drive's library. A library of three
+            # samples (two in INCOMING, one in DRUMS) put in its RAM as lib.c reads it at
+            # power-on; FUNC + YES opens on the two stores, UP to +DRIVE, YES: its folders
+            # (2); YES into the first (2 samples); YES ticks one (1 selected); RIGHT, LOAD TO
+            # PROJ (the first action), YES: queued (pending); NO: back to +DRIVE's folders;
+            # NO: back to the two stores; NO: closed
+            if "smp_fb_store" in lay and "smp_lp_queued" in lay:
+                import zlib as _z                # noqa: F401
+                LRAM = SMx.MIRROR + 0x100000
+                LDATA = 0x700000 + 1 + 256 + 4
+
+                def adl(b, s=1):
+                    a_, b_ = s & 0xFFFF, s >> 16
+                    for x in b:
+                        a_ = (a_ + x) % 65521
+                        b_ = (b_ + a_) % 65521
+                    return b_ << 16 | a_
+
+                def lent(start, frames, folder, name):
+                    e = bytearray(64)
+                    struct.pack_into("<III", e, 0, start, frames, 0x3F800000)
+                    e[12], e[13] = 1, folder
+                    struct.pack_into("<I", e, 20, (frames * 2 + 511) // 512)
+                    e[24:24 + len(name)] = name.encode()
+                    struct.pack_into("<I", e, 60, adl(bytes(e[:60])) ^ 0x4C494245)
+                    return bytes(e)
+                idx = lent(LDATA, 1000, 0, "inc one") + lent(LDATA + 4, 1000, 0, "inc two") + lent(LDATA + 8, 500, 2, "drum one")
+                fold = b"INCOMING".ljust(32, b"\0") + b"RECORDED".ljust(32, b"\0") + b"DRUMS".ljust(32, b"\0")
+                lsteps = [f"poke:{LRAM + 0x200:#x}:{idx.hex()}", f"poke:{LRAM + 0x200 + 2048 * 64:#x}:{fold.hex()}",
+                          f"poke:{lay['smp_lib_state']:#x}:00000002", f"call:{lay['smp_lib_refresh']:#x}"]
+                fbs, pend = lay["smp_fb_store"], lay["smp_lib_pending"]
+                ds = base + lead + lsteps + samp_all(3) + [f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:10"] + turn(2) + [
+                    "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", "png:d0", mem(fbs),
+                    "up", "wait:4", "yes", "wait:6", "png:d1", mem(fbs), f"call:{fbc:#x}",
+                    "yes", "wait:6", "png:d2", f"call:{fbc:#x}", "yes", "wait:6", "png:d3", f"call:{fbm:#x}",
+                    "right", "wait:6", "png:d4", "yes", "wait:6", mem(lay["smp_lp_queued"]),
+                    "no", "wait:6", mem(lay["smp_fb_folder"]), mem(fbs), "no", "wait:6", mem(fbs),
+                    "no", "wait:6", mem(lay["smp_fb_open"])]
+                djs = work / "drive.json"
+                d_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                         "--snapshot", snap, "--steps", ",".join(ds), "--png-dir", work / "drive", "--json", djs]
+
+                def d_body(tdir):
+                    rc, out = run("+drive browser", d_cmd, logs, env=EMU_ENV, trace=tdir)
+                    why, good = out[-800:], False
+                    if rc == 0 and djs.exists():
+                        r = json.loads(djs.read_text())
+                        m = r["memory"]
+                        d0 = [int(str(c.get("d0")), 0) for c in r.get("direct_calls", [])][2:]   # (the refresh's, the turn's)
+                        sh = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("d0", "d1", "d2", "d3", "d4")]
+                        S = hex(fbs)
+                        facts = {"opens on the two stores": int(m[S], 16) == 0xFFFFFFFF,
+                                 "UP, YES: +DRIVE, its two folders": int(m[f"{S}@1"], 16) == 1 and d0[0:1] == [2],
+                                 "YES: INCOMING's two samples": d0[1:2] == [2],
+                                 "YES ticks one": d0[2:3] == [1],
+                                 "LOAD TO PROJ queues it": int(m[hex(lay["smp_lp_queued"])], 16) == 1,
+                                 "NO: +DRIVE's folders": int(m[hex(lay["smp_fb_folder"])], 16) == 0xFFFFFFFF
+                                 and int(m[f"{S}@4"], 16) == 1,
+                                 "NO: the two stores": int(m[f"{S}@5"], 16) == 0xFFFFFFFF,
+                                 "NO: closed": int(m[hex(lay["smp_fb_open"])], 16) == 0,
+                                 "each step drawn": len(set(sh)) == 5}
+                        good = all(facts.values())
+                        why = f"{facts} d0={d0} mem={m}"
+                    return good, ("the two stores, +DRIVE's folders and samples, a tick, LOAD TO PROJECT "
+                                  "queued, NO back up a level each time and closed at the top" if good else why)
+                gate("+DRIVE browser (ColdFire)",
+                     *cached("+DRIVE browser (ColdFire)", [d_cmd, sorted(EMU_ENV.items())], d_body))
 
         # 6h. v0.28: the Monomachine machines' pages drawn as the Monomachine's (each machine its
         # own screen, none the stock grid), and their choices' detents (WPRS, two choices: four

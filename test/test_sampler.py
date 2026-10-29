@@ -661,7 +661,9 @@ def test_v022_send_skips_the_recordings_area_and_link4_reports_the_ram():
     assert sum(n for _, n in sent) == len(pool) - SM.HOLE_BYTES
     assert sent[-1][0] + sent[-1][1] == len(pool)
     src = (pathlib.Path(__file__).resolve().parents[1] / "csrc/sampler/link.c").read_text()
-    assert "(at < REC_END && at + k > REC_OFFSET)" in src and "#define PROTO 4" in src
+    assert "(at < REC_END && at + k > REC_OFFSET)" in src
+    import re
+    assert int(re.search(r"#define PROTO (\d+)", src).group(1)) >= 4      # (v0.31: 5, the library)
 
 
 def test_v022_len_at_its_lowest_still_loops_and_a_held_note_survives_the_knobs():
@@ -762,3 +764,72 @@ def test_idle_link_sends_the_play_positions():
             assert pk[0] == SM.POS_NONE
         before = [h.mem.get(h.L.state + 4 * P.V[k]) for k in ("on", "pos", "frames")]
     assert len(seen) >= 3 and seen == sorted(seen) and seen[-1] > seen[0]
+
+
+class _FakeLib:
+    """v0.31: the +Drive library's SysEx side, as csrc/sampler/lib.c answers it (cmds 16..23,
+    little-endian), to hold the host tool's packing to it."""
+
+    def __init__(self):
+        self.folders = ["INCOMING", "RECORDED"]
+        self.entries = {}
+        self.w = None
+
+    def call(self, cmd, payload=b"", timeout=2.0):
+        rq = b"\0\0" + bytes([cmd]) + payload          # lib.c reads after seq and cmd
+        if cmd == 17:
+            name = rq[3:34].split(b"\0")[0].decode()
+            if name not in self.folders:
+                self.folders.append(name)
+            return bytes([self.folders.index(name)])
+        if cmd == 18:
+            frames, fmt, folder = struct.unpack_from("<IBB", rq, 3)
+            rate = struct.unpack_from("<f", rq, 9)[0]
+            k = next(i for i in range(2048) if i not in self.entries)
+            self.w = dict(k=k, frames=frames, fmt=fmt, folder=folder, rate=rate,
+                          name=rq[13:].decode(), data=bytearray())
+            return struct.pack("<II", k, 0x700105)
+        if cmd == 19:
+            at = struct.unpack_from("<I", rq, 3)[0]
+            assert at == len(self.w["data"])
+            self.w["data"] += rq[7:]
+            return struct.pack("<I", len(self.w["data"]))
+        if cmd == 20:
+            import dn2samples as D
+            w = self.w
+            assert len(w["data"]) == w["frames"] * (2 if w["fmt"] else 4)
+            assert struct.unpack_from("<I", rq, 3)[0] == D.lib_adler(bytes(w["data"]))
+            self.entries[w["k"]] = w
+            return struct.pack("<I", w["k"])
+        if cmd == 21:
+            k0 = rq[3] | rq[4] << 8
+            out = struct.pack("<I", len(self.entries))
+            for k in range(k0, k0 + 4):
+                e = self.entries.get(k)
+                out += struct.pack("<HIB", k, e["frames"] if e else 0, e["folder"] if e else 0xFF)
+                out += (e["name"].encode()[:24] if e else b"").ljust(24, b"\0")
+            return out
+        if cmd == 23:
+            f0 = rq[3]
+            return b"".join((self.folders[f].encode() if f < len(self.folders) else b"").ljust(24, b"\0")
+                            for f in range(f0, f0 + 4))
+        raise AssertionError(cmd)
+
+
+def test_the_host_tool_sends_into_the_drive_library(tmp_path):
+    import dn2samples as D
+    p = tmp_path / "kick.wav"
+    with wave.open(str(p), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(44100)
+        w.writeframes(b"".join(struct.pack("<h", int(12000 * math.sin(k / 7))) for k in range(1000)))
+    lib = _FakeLib()
+    D.lib_send(lib, [p], "DRUMS", 300)
+    e = lib.entries[0]
+    assert e["frames"] == 1000 and e["fmt"] == SM.FMT_I16 and lib.folders[e["folder"]] == "DRUMS"
+    assert abs(e["rate"] - 44100 / 48000) < 1e-6 and e["name"] == "KICK"
+    assert D.lib_list(lib) == [(0, "DRUMS", "KICK", 1000)]
+    assert D.lib_adler(b"abc") == 0x024D0127                      # zlib's adler32
+    c = (pathlib.Path(__file__).resolve().parents[1] / "csrc" / "sampler" / "lib.c").read_text()
+    assert "cmd == 18" in c and "rate = lget(rq + 9)" in c and "rq[13 + c]" in c

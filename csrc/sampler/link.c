@@ -72,7 +72,7 @@ _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in 
 #define TDM_TX(h) ((volatile u32 *)(0x4E6E0100u + ((u32)(h) << 11)))
 #define TDM_RX(h) ((volatile u32 *)(0x4E6DF100u + ((u32)(h) << 11)))
 
-#define PROTO 4                                 /* v0.22: 400 MB, the recordings' area a hole */
+#define PROTO 5                                 /* v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
 #define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
 #define BLK_READY (*(volatile u32 *)0x4461B68Cu)                    /* the device is up */
@@ -561,6 +561,63 @@ static u32 tbl_bytes(void)
 }
 
 
+/* v0.31: the order the slots load in (the owner: the pool is slow to load at power-on):
+ * first the samples the kit's sample tracks are set to (SAMP, as the page reads it), so the
+ * pattern plays while the rest comes in; then every other slot, in order. A slot plays as
+ * soon as it is in (its entry follows its frames), whatever the order. No kit yet: in order. */
+u8 smp_l_order[POOL_SLOTS] __attribute__((section(".data")));
+static int l_order_ok __attribute__((section(".data"))) = 0;
+u32 smp_walk_total __attribute__((section(".data"))) = 0;   /* the frames' bytes due this load */
+#define L_KIT (*(volatile u32 *)0x800052A0u)
+#define L_TYPE(t) (*(volatile signed char *)(L_KIT + 52u + 1163u * (u32)(t) + 0xDEu))
+extern int smp_samp_of(int track);
+
+static void load_order(void)
+{
+    u8 taken[POOL_SLOTS];
+    int n = 0;
+    for (int k = 0; k < POOL_SLOTS; k++)
+        taken[k] = 0;
+    if (L_KIT)
+        for (int t = 0; t < 16; t++) {
+            int ty = L_TYPE(t), s = smp_samp_of(t);
+            if (ty < 8 || ty > 13 || s < 1 || s > POOL_SLOTS || taken[s - 1])
+                continue;
+            taken[s - 1] = 1;
+            smp_l_order[n++] = (u8)(s - 1);
+        }
+    for (int k = 0; k < POOL_SLOTS; k++)
+        if (!taken[k])
+            smp_l_order[n++] = (u8)k;
+    l_order_ok = 1;
+}
+
+/* slot K's frames as the next range (then its entry) -> 0: nothing to load */
+static int slot_range(u32 k)
+{
+    const u8 *e = DIR + 8 + 16 * k;
+    u32 addr = le32(e), fr = le32(e + 4), fmt = e[12];
+    if (addr < SMP_POOL_DDR + DATA_OFFSET || fr == 0)
+        return 0;
+    u32 lo = addr - SMP_POOL_DDR, bytes = fr * (fmt ? 2u : 4u);
+    u32 ns, tbl = slice_table(e, &ns);                  /* v0.19: and its slices, if any */
+    if (ns && !(e[14] & 1))
+        bytes = tbl - lo + 12u * ns;
+    if (e[14] & 1)
+        area_due = 1;
+    if (lo >= ram_top || bytes > ram_top - lo)             /* v0.22: past the RAM proven */
+        return 0;
+    if (lo < TABLE_AREA + TABLE_ROOM && lo + bytes > TABLE_AREA)
+        return 0;                                           /* v0.26: over the tables (an old recording) */
+    l_kind = K_FRAMES;
+    l_off = lo & ~511u;
+    l_end = (lo + bytes + 511u) & ~511u;
+    if (l_end > ram_top)
+        l_end = ram_top;
+    l_entry = (int)k;
+    return 1;
+}
+
 static int next_range(void)
 {
     if (smp_tables == 1 && l_kind != K_TABLES && l_kind != K_READY) {
@@ -602,30 +659,11 @@ static int next_range(void)
         l_entry = -1;
         return 1;
     }
-    while (l_slot < POOL_SLOTS) {
-        u32 k = l_slot++;
-        const u8 *e = DIR + 8 + 16 * k;
-        u32 addr = le32(e), fr = le32(e + 4), fmt = e[12];
-        if (addr < SMP_POOL_DDR + DATA_OFFSET || fr == 0)
-            continue;
-        u32 lo = addr - SMP_POOL_DDR, bytes = fr * (fmt ? 2u : 4u);
-        u32 ns, tbl = slice_table(e, &ns);                  /* v0.19: and its slices, if any */
-        if (ns && !(e[14] & 1))
-            bytes = tbl - lo + 12u * ns;
-        if (e[14] & 1)
-            area_due = 1;
-        if (lo >= ram_top || bytes > ram_top - lo)             /* v0.22: past the RAM proven */
-            continue;
-        if (lo < TABLE_AREA + TABLE_ROOM && lo + bytes > TABLE_AREA)
-            continue;                                           /* v0.26: over the tables (an old recording) */
-        l_kind = K_FRAMES;
-        l_off = lo & ~511u;
-        l_end = (lo + bytes + 511u) & ~511u;
-        if (l_end > ram_top)
-            l_end = ram_top;
-        l_entry = (int)k;
-        return 1;
-    }
+    if (l_slot == 0 && !l_order_ok)
+        load_order();
+    while (l_slot < POOL_SLOTS)
+        if (slot_range(smp_l_order[l_slot++]))
+            return 1;
     if (l_slot == POOL_SLOTS && area_due) {     /* v0.23: the slice area, before the page */
         area_due = 0;
         if (smp_area_ok()) {
@@ -780,6 +818,14 @@ void smp_load(void)                             /* load (again) whatever the ima
     for (u32 k = 0; k < POOL_SLOTS * SLICE_MAX; k++)
         SLICECOL[k] = 0;
     smp_walk = 0;
+    smp_walk_total = 0;                         /* v0.31: the frames due, for LOADING n% */
+    for (u32 k = 0; k < POOL_SLOTS; k++) {
+        const u8 *e = DIR + 8 + 16 * k;
+        u32 addr = le32(e), fr = le32(e + 4);
+        if (addr >= SMP_POOL_DDR + DATA_OFFSET && fr)
+            smp_walk_total += fr * (e[12] ? 2u : 4u);
+    }
+    l_order_ok = 0;
     fast_on = 1;
     l_slot = 0;
     l_kind = K_BLANK;
@@ -1475,6 +1521,204 @@ static void edits_poll(void)
     }
 }
 
+/* -- v0.31: LOAD TO PROJECT: a library sample (lib.c) into the first empty pool slot ----------
+ * Queued from the browser; one at a time, one 64 KB chunk a pass while the loader and the
+ * saver are idle: room in the pool's own areas (first fit among the slots' extents and the
+ * meta block), the frames copied +Drive to +Drive, the slot's entry and name, the directory
+ * saved, then that slot sent to the DSP by the loader's own checked path. */
+extern int smp_lib_used(int k);
+extern u32 smp_lib_frames(int k);
+extern int smp_lib_fmt(int k);
+extern u32 smp_lib_rate(int k);
+extern const char *smp_lib_name(int k);
+extern int smp_lib_read(int k, u32 off, u32 bytes, void *buf);
+extern u8 *smp_lib_stage(void);
+extern int smp_lib_busy(void);
+#define LPQ 16
+static short lp_q[LPQ] __attribute__((section(".data")));
+static u32 lp_head __attribute__((section(".data"))) = 0, lp_tail __attribute__((section(".data"))) = 0;
+static int lp_k __attribute__((section(".data"))) = -1;      /* the library entry being copied */
+static int lp_slot __attribute__((section(".data"))) = -1;
+static u32 lp_off __attribute__((section(".data"))) = 0, lp_bytes __attribute__((section(".data"))) = 0;
+static u32 lp_at __attribute__((section(".data"))) = 0;
+int smp_lp_done __attribute__((section(".data"))) = 0;       /* loaded since the browser asked */
+int smp_lp_full __attribute__((section(".data"))) = 0;       /* refused: no slot or no room */
+static int one_due __attribute__((section(".data"))) = -1;    /* a slot for the DSP, when idle */
+
+u32 smp_lp_queued __attribute__((section(".data"))) = 0;    /* ever queued (the gate reads it) */
+
+int smp_lib_load(int k)                          /* -> 0 queued */
+{
+    if (!smp_lib_used(k) || lp_head - lp_tail >= LPQ)
+        return -1;
+    lp_q[lp_head++ % LPQ] = (short)k;
+    smp_lp_queued++;
+    return 0;
+}
+
+int smp_lib_pending(void) { return (int)(lp_head - lp_tail) + (lp_k >= 0); }
+
+/* the pool slot holding library entry K (same frames, same short name), or -1 */
+static void stem7(const char *ln, char *st)
+{
+    int n = 0;
+    for (int j = 0; ln[j] && n < 7; j++) {
+        char c = ln[j];
+        if (c >= 'a' && c <= 'z')
+            c = (char)(c - 32);
+        if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || c == '_' || c == '#' || c == '-')
+            st[n++] = c;
+    }
+    st[n] = 0;
+}
+
+int smp_lib_slot_of(int k)
+{
+    if (!dir_ok || !smp_lib_used(k))
+        return -1;
+    char st[8];
+    stem7(smp_lib_name(k), st);
+    u32 fr = smp_lib_frames(k);
+    for (int s = 0; s < REC_FIRST; s++) {
+        if (smp_slot_empty(s) || le32(ENTRY(s) + 4) != fr)
+            continue;
+        const char *nm = smp_name(s);
+        int j = 0;
+        while (j < 8 && st[j] == nm[j] && st[j])
+            j++;
+        if (j < 8 && st[j] == nm[j])
+            return s;
+    }
+    return -1;
+}
+
+static int clashes(u32 a, u32 z, u32 lo, u32 hi) { return a < hi && lo < z; }
+
+/* BYTES (512-rounded) of room in the pool's areas -> its offset, or 0 */
+static u32 pool_room(u32 bytes)
+{
+    static const u32 seg[2][2] = {{DATA_OFFSET, REC_OFFSET}, {REC_END, POOL_BYTES}};
+    for (int g = 0; g < 2; g++) {
+        u32 cand = seg[g][0], top = seg[g][1] < ram_top ? seg[g][1] : ram_top;
+        for (int pass = 0; pass <= POOL_SLOTS + 1; pass++) {
+            int moved = 0;
+            if (cand + bytes > top)
+                break;
+            for (u32 s = 0; s < POOL_SLOTS; s++) {
+                const u8 *e = ENTRY(s);
+                u32 addr = le32(e), fr = le32(e + 4);
+                if (addr < SMP_POOL_DDR + DATA_OFFSET || !fr)
+                    continue;
+                u32 lo = addr - SMP_POOL_DDR, n = fr * (e[12] ? 2u : 4u), ns, tbl = slice_table(e, &ns);
+                if (ns && !(e[14] & 1))
+                    n = tbl - lo + 12u * ns;
+                u32 hi = (lo + n + 511u) & ~511u;
+                if (clashes(cand, cand + bytes, lo & ~511u, hi)) {
+                    cand = hi;
+                    moved = 1;
+                }
+            }
+            if (le32(DIR + META_PTR) == META_PTR_MAGIC) {
+                u32 mo = le32(DIR + META_PTR + 4), mn = (le32(DIR + META_PTR + 8) + 511u) & ~511u;
+                if (clashes(cand, cand + bytes, mo, mo + mn)) {
+                    cand = mo + mn;
+                    moved = 1;
+                }
+            }
+            if (clashes(cand, cand + bytes, TABLE_AREA, SLICE_AREA + SLAREA_BYTES)) {
+                cand = SLICE_AREA + SLAREA_BYTES;
+                moved = 1;
+            }
+            if (!moved)
+                return cand + bytes <= top ? cand : 0;
+        }
+    }
+    return 0;
+}
+
+static void lp_poll(void)
+{
+    if (sstate || (smp_lstate != L_DONE && smp_lstate != L_IDLE) || smp_lib_busy())
+        return;
+    if (one_due >= 0) {                              /* the copied slot to the DSP */
+        if (slot_range((u32)one_due)) {
+            l_slot = POOL_SLOTS + 1;
+            smp_lstate = L_READ;
+        }
+        one_due = -1;
+        return;
+    }
+    if (lp_k < 0) {
+        if (lp_head == lp_tail)
+            return;
+        int k = lp_q[lp_tail++ % LPQ];
+        if (!smp_lib_used(k) || smp_lib_slot_of(k) >= 0)
+            return;                                  /* gone, or already in the pool */
+        if (!dir_ok) {                               /* no pool yet: an empty directory */
+            for (u32 b = 0; b < DIR_BYTES; b++)
+                DIR[b] = 0;
+            put_le32(DIR, POOL_MAGIC);
+            dir_ok = 1;
+            smp_hi = DIR_BYTES;
+        }
+        int s = 0;
+        while (s < REC_FIRST && !smp_slot_empty(s))
+            s++;
+        u32 bytes = (smp_lib_frames(k) * (smp_lib_fmt(k) ? 2u : 4u) + 511u) & ~511u;
+        u32 off = s < REC_FIRST ? pool_room(bytes) : 0;
+        if (!off) {
+            smp_lp_full = 1;
+            return;
+        }
+        lp_k = k;
+        lp_slot = s;
+        lp_off = off;
+        lp_bytes = bytes;
+        lp_at = 0;
+        return;
+    }
+    u32 n = lp_bytes - lp_at;
+    if (n > CHUNK)
+        n = CHUNK;
+    u8 *buf = smp_lib_stage();
+    if (smp_lib_read(lp_k, lp_at, n, buf) != 0 || image_write(lp_off + lp_at, n, buf) != 0) {
+        lp_k = -1;                                   /* the +Drive refused: this one stops */
+        return;
+    }
+    lp_at += n;
+    if (lp_at < lp_bytes)
+        return;
+    u8 *e = ENTRY(lp_slot);                          /* done: the entry, the name */
+    put_le32(e, SMP_POOL_DDR + lp_off);
+    put_le32(e + 4, smp_lib_frames(lp_k));
+    put_le32(e + 8, smp_lib_rate(lp_k));
+    put_le32(e + 12, (u32)smp_lib_fmt(lp_k));
+    char st[8];
+    stem7(smp_lib_name(lp_k), st);
+    smp_rename(lp_slot, st);
+    if (le32(DIR + 4) < (u32)lp_slot + 1)
+        put_le32(DIR + 4, (u32)lp_slot + 1);
+    if (meta_ok) {                                   /* its long name; in no folder */
+        u8 *m = (u8 *)meta_slot(lp_slot);
+        const char *ln = smp_lib_name(lp_k);
+        m[0] = 0xFF;
+        u32 j = 0;
+        for (; j < META_NAME_BYTES - 1 && ln[j]; j++)
+            m[4 + j] = (u8)ln[j];
+        for (; j < META_NAME_BYTES; j++)
+            m[4 + j] = 0;
+        u32 mo = le32(DIR + META_PTR + 4), mn = (le32(DIR + META_PTR + 8) + 511u) & ~511u;
+        image_write(mo, mn, META);
+    }
+    if (smp_hi < lp_off + lp_bytes)
+        smp_hi = lp_off + lp_bytes;
+    overview_clear(lp_slot);
+    dir_due = 1;                                     /* saved when idle (edits_poll) */
+    one_due = lp_slot;
+    smp_lp_done++;
+    lp_k = -1;
+}
+
 /* from the UI loop (page.c's wr_poll), every pass */
 void smp_boot(void)
 {
@@ -1497,11 +1741,14 @@ void smp_boot(void)
             return;
         ram_top = smp_ram == 1 ? POOL_BYTES : RAM_PROVEN;
         smp_booted = 2;
+        extern void smp_lib_boot(void);
+        smp_lib_boot();                                 /* v0.31: the library's index (lib.c) */
         smp_load();
     }
     load_poll();
     save_poll();
     edits_poll();
+    lp_poll();                                          /* v0.31: LOAD TO PROJECT */
     analyse_poll();
 }
 
@@ -1719,6 +1966,9 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
             for (u32 c = 0; c < 8; c++)
                 rp[r++] = dir_ok && k < POOL_SLOTS && fr ? NAME(k)[c] : 0;
         }
+    } else if (cmd >= 16 && cmd <= 23) {        /* v0.31 (link 5): the +Drive's library (lib.c) */
+        extern u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
+        r = smp_lib_rx(cmd, rq, n, rp, r, &rp[3]);
     } else {
         rp[3] = 2;
     }
