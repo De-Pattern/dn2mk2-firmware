@@ -561,6 +561,37 @@ static u32 tbl_bytes(void)
 }
 
 
+/* v0.31: the order the slots load in (the owner: the pool is slow to load at power-on):
+ * first the samples the kit's sample tracks are set to (SAMP, as the page reads it), so the
+ * pattern plays while the rest comes in; then every other slot, in order. A slot plays as
+ * soon as it is in (its entry follows its frames), whatever the order. No kit yet: in order. */
+u8 smp_l_order[POOL_SLOTS] __attribute__((section(".data")));
+static int l_order_ok __attribute__((section(".data"))) = 0;
+u32 smp_walk_total __attribute__((section(".data"))) = 0;   /* the frames' bytes due this load */
+#define L_KIT (*(volatile u32 *)0x800052A0u)
+#define L_TYPE(t) (*(volatile signed char *)(L_KIT + 52u + 1163u * (u32)(t) + 0xDEu))
+extern int smp_samp_of(int track);
+
+static void load_order(void)
+{
+    u8 taken[POOL_SLOTS];
+    int n = 0;
+    for (int k = 0; k < POOL_SLOTS; k++)
+        taken[k] = 0;
+    if (L_KIT)
+        for (int t = 0; t < 16; t++) {
+            int ty = L_TYPE(t), s = smp_samp_of(t);
+            if (ty < 8 || ty > 13 || s < 1 || s > POOL_SLOTS || taken[s - 1])
+                continue;
+            taken[s - 1] = 1;
+            smp_l_order[n++] = (u8)(s - 1);
+        }
+    for (int k = 0; k < POOL_SLOTS; k++)
+        if (!taken[k])
+            smp_l_order[n++] = (u8)k;
+    l_order_ok = 1;
+}
+
 static int next_range(void)
 {
     if (smp_tables == 1 && l_kind != K_TABLES && l_kind != K_READY) {
@@ -602,8 +633,10 @@ static int next_range(void)
         l_entry = -1;
         return 1;
     }
+    if (l_slot == 0 && !l_order_ok)
+        load_order();
     while (l_slot < POOL_SLOTS) {
-        u32 k = l_slot++;
+        u32 k = smp_l_order[l_slot++];
         const u8 *e = DIR + 8 + 16 * k;
         u32 addr = le32(e), fr = le32(e + 4), fmt = e[12];
         if (addr < SMP_POOL_DDR + DATA_OFFSET || fr == 0)
@@ -780,6 +813,14 @@ void smp_load(void)                             /* load (again) whatever the ima
     for (u32 k = 0; k < POOL_SLOTS * SLICE_MAX; k++)
         SLICECOL[k] = 0;
     smp_walk = 0;
+    smp_walk_total = 0;                         /* v0.31: the frames due, for LOADING n% */
+    for (u32 k = 0; k < POOL_SLOTS; k++) {
+        const u8 *e = DIR + 8 + 16 * k;
+        u32 addr = le32(e), fr = le32(e + 4);
+        if (addr >= SMP_POOL_DDR + DATA_OFFSET && fr)
+            smp_walk_total += fr * (e[12] ? 2u : 4u);
+    }
+    l_order_ok = 0;
     fast_on = 1;
     l_slot = 0;
     l_kind = K_BLANK;

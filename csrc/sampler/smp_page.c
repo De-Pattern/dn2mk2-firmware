@@ -469,11 +469,28 @@ static void waveform(void *c, int slot, int x0, int cy)
         hline(c, x0, x0 + SMP_WAVE_W - 1, cy, 1);
         int bx = x0 + SMP_WAVE_W / 2;
         for (int y = cy - 4; y <= cy + 4; y++)
-            for (int x = bx - 16; x <= bx + 16; x++)
+            for (int x = bx - 24; x <= bx + 24; x++)
                 SET_PIXEL(c, x, y, 0);
         int named = slot >= 1 && slot <= smp_count() && smp_name(slot - 1)[0];
+        int loading = named && smp_lstate != 0 && smp_lstate != 4;
+        extern u32 smp_walk, smp_walk_total;    /* v0.31: how far the pool's load is */
+        static char pc[12] __attribute__((section(".data")));
+        if (loading && smp_walk_total) {
+            u32 p = smp_walk_total > 0x01000000u ? smp_walk / (smp_walk_total / 100u)
+                                                 : smp_walk * 100u / smp_walk_total;
+            if (p > 99u)
+                p = 99u;
+            const char *w = "LOADING ";
+            int i = 0;
+            while (w[i]) { pc[i] = w[i]; i++; }
+            if (p >= 10u)
+                pc[i++] = (char)('0' + p / 10u);
+            pc[i++] = (char)('0' + p % 10u);
+            pc[i++] = '%';
+            pc[i] = 0;
+        }
         TEXT(c, FONT, bx, cy - 3, CENTRED, slot < 1 ? "OFF"
-             : named && smp_lstate != 0 && smp_lstate != 4 ? "LOADING" : "EMPTY");
+             : loading ? (smp_walk_total ? pc : "LOADING") : "EMPTY");
         return;
     }
     for (int k = 0; k < SMP_WAVE_W; k++) {

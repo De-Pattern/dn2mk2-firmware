@@ -369,6 +369,17 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         for k in range(len(recp) // 512):
             disk[STORE_SECTOR + 1 + rec_off // 512 + k] = recp[512 * k:512 * k + 512]
         retries0 = long("smp_retries")       # (the machine runs the scenarios in turn: its count goes on)
+        # v0.31: track 1 a ONESHOT on SAMP 2 (slot 1): its sample loads before slot 0's
+        kit = struct.unpack(">I", machine.read(0x800052A0, 4))[0]
+        if scenario == "fast" and kit:
+            machine.write(kit + 52 + 0xDE, bytes([8]))
+            machine.write(kit + 52 + 20 + 2 * 43, bytes([2, 0]))
+        last_word = {}
+        for slot in range(2):
+            addr, fr, _r, _f = struct.unpack_from("<IIfI", img, 8 + 16 * slot)
+            k = (addr - base + fr * 2) // 4 - 1
+            last_word[slot] = (k, struct.unpack_from("<I", img, k * 4)[0])
+        done_at = {}
         status_out()
         periods = 0
         limit = int(os.environ.get("LINK16_LIMIT", 4000 if scenario == "fast" else 30000))
@@ -376,6 +387,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             period()
             call("smp_boot")
             periods += 1
+            for slot, (k, v) in last_word.items():
+                if slot not in done_at and pool.get(k) == v:
+                    done_at[slot] = periods
             if periods % 25 == 0:
                 log.append([periods, long("smp_walk"), long("smp_retries"), long("smp_lstate"),
                             long("smp_tdm_sent"), len(dsp["cmds"]), io["reads"]])
@@ -406,9 +420,15 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    hi=long("smp_hi"), disk_reads=io["reads"], disk_writes=io["writes"],
                    disk_errors=io.get("errors", [])[:3], routing_changed=route.get("changed", 0),
                    lstate=long("smp_lstate"))
+        out["loaded_at"] = done_at
+        if "smp_l_order" in syms:
+            out["order"] = list(machine.read(syms["smp_l_order"], 4))
         if scenario == "fast":
             out["ok"] = (not wrong and not frames_wrong and periods < limit and out["cmd_packets"] > 0
                          and not route.get("changed"))
+            # v0.31: the kit's sample first (slot 1, though slot 0 comes first in the image)
+            out["kit_first"] = bool(kit) and 1 in done_at and 0 in done_at and done_at[1] < done_at[0]
+            out["ok"] = out["ok"] and out["kit_first"]
         else:
             # nothing gets through: the loader tries each chunk seven times and stops, and
             # the frame stays stock's
