@@ -141,6 +141,32 @@ then              the LIBRARY: an index + sample files
    (phase 2)? It is the quickest win for the slow start.
 4. **One pool for all projects** until phase 4, as today: OK?
 
+## 6a. The owner's decisions (2026-10-28)
+
+1. **Shape approved**: the +Drive library and the project's pool, as the DT2's. **Pool
+   banks** (a BANK control beside SAMP, A-H, 8 x 127 slots) only if they can be drawn and
+   reached close to the DT2's; otherwise 127 slots stay, and the owner is told.
+2. **FUNC + YES** opens the browser (as today).
+3. **Faster start first**: priority loading at power-on (phase 3's first item) comes before
+   the menus. Order now: **(a)** priority loading and LOADING n/N, **(b)** the library store,
+   **(c)** +DRIVE / PROJECT RAM, **(d)** per-project pools, **(e)** presets that bring their
+   sample.
+4. **One pool per project**, as the DT2 (phase 4).
+5. **Leaving the browser**: NO goes up a level and closes it at the top; NO held goes to the
+   top; any page key (SRC, FLTR, AMP, FX, MOD, TRK, PTN) closes it at once and does its job.
+
+## 6b. Presets ("sounds") that bring their sample
+
+A DN2 preset already keeps the whole sound record, so a preset saved from one of our sample
+machines keeps the machine, SAMP and every page's settings (to confirm on hardware: save one
+from a sample track and a PERC track, load it on another track). But SAMP is a **slot
+number**: recalled after the pool has changed, it plays whatever is in that slot now. The DT2
+links a preset to its sample by hash. Ours, later: when a preset is saved, our region notes
+the library sample in that slot (one record for each of the DN2's 2,048 presets); when it is
+loaded, that sample is loaded into the pool if it is not there, and SAMP set to it. Presets
+stay in the DN2's own banks, named and browsed as now (FUNC + LEVEL, the trig keys for the
+bank). Kits keep sixteen sounds and take the same fix.
+
 ## 7. Open research before phase 1
 
 - The active project's slot number in the OS (for phase 4).
@@ -148,3 +174,26 @@ then              the LIBRARY: an index + sample files
   not the bottleneck today, the TDM link is; to confirm for priority loading).
 - Whether the link's 0.7 MB/s can be raised (more TDM slots, or the RGPIO page link
   `docs/drive-storage-research.md` §4 describes): a separate, riskier project.
+
+## 8. Other people's research (shared by the owner, 2026-10-28)
+
+- **lalzart, digitakt-ii-firmware-research-public** (DT2 OS 1.15C, documentation only,
+  CC0; nothing run on a device): the DT2 keeps a track's sample as a signed **Project
+  slot** (parameter 0xcd at track receiver +0x4c), resolved through Project state to its
+  backing; samples reach the SHARC as **five-word resource descriptors and 4 KiB pages**
+  over the ColdFire's **Rapid-GPIO** byte/strobe/ready port (0x8c000000, RGPIO15..8 a
+  byte, RGPIO7 strobe, RGPIO0 ready) into the SHARC's **link port 0 under DMA** (source
+  0x51, a 0x401-dword receive block, a 1,025-entry resource table). The DT2's sample
+  file: a 64-byte header (+1 mono/stereo, +4 payload bytes big-endian, +8 rate 48000),
+  the payload, a 16-byte trailer. **For us:** the DN2 has the same board and the
+  ColdFire end (`docs/drive-storage-research.md` §4) but no SHARC receiver; a receiver of
+  our own on LP0 could replace the 0.7 MB/s TDM link for loading. That is the only route
+  to a much faster power-on load, and it is the riskiest part (the external join between
+  the two ends is unproven there too). Phase 5 research, not part of phases 1-4.
+- **naturarum, dn2-cfw** (DN2 1.12 custom firmware notes): stock DSP DDR use (the stock
+  delay's state at 0x8005912c..0x80451814, the reverb's from 0x80000018) confirms our
+  areas from 0x81200000 up sit clear of stock's. Also a reminder that DN2 OS 1.12 exists;
+  this mod stays on 1.11.
+- **digikit** (the emulator and SHARC tools) and **angellinares/dn2_firmware_explore**
+  (this repository's origin) are what this project is built on already;
+  **elektron-firmware-tool** covers what `dnfw` does here (unpack, repack, checksums).
