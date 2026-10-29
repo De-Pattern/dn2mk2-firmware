@@ -37,7 +37,7 @@ projects, presets and kits.
 
 ---
 <p align="center">
-  <img src="dn2mk2logo.png" alt="logo" width="760">
+  <img src="docs/dn2mk2logo.png" alt="logo" width="760">
 </p>
 
 
