@@ -807,6 +807,14 @@ def main() -> int:
             gate("stock questions and held keys (ColdFire)",
                  *cached("stock questions and held keys (ColdFire)", [q_cmd, sorted(EMU_ENV.items())], q_body))
 
+        # v0.30: a check keyed on a C symbol must not be skipped because the symbol never
+        # reached the layout (6k was, once: smp_machine_commit was linked but not listed)
+        csrc_text = "".join(f.read_text() for f in (ROOT / "csrc").rglob("*.c"))
+        for sym, what in (("smp_question_up", "stock questions and held keys (ColdFire)"),
+                          ("smp_machine_commit", "SAMP kept across sample machines (ColdFire)")):
+            if re.search(rf"\b{sym}\s*\(", csrc_text) and sym not in lay:
+                gate(what, False, f"{sym} is in the C but not in the layout: the check cannot run")
+
         # 6k. v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner: the stock
         # commit resets the sound to the new machine's defaults, SAMP to OFF). Track 1 on
         # ONESHOT with SAMP 5; MACHINE SEL, DOWN, YES: the next sample machine, SAMP still 5
