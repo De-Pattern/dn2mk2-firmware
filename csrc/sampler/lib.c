@@ -433,3 +433,6 @@ int smp_lib_read(int k, u32 off, u32 bytes, void *buf)
 
 u32 smp_lib_rate(int k) { return smp_lib_used(k) ? lget(E(k) + 8) : 0; }
 int smp_lib_fmt(int k) { return smp_lib_used(k) ? E(k)[12] : 0; }
+
+u8 *smp_lib_stage(void) { return LSTAGE; }      /* link.c's LOAD TO PROJECT copies through it */
+int smp_lib_busy(void) { return w_idx >= 0; }   /* a send from the computer is using it */

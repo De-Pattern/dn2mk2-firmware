@@ -592,6 +592,40 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
               and on_disk(rb[1], len(b)) == b and on_disk(rc[1], len(c)) == c
               and names[:2] == ["HAT C", "SNARE B"]
               and all(s >= LIB for s in wrote))
+        # LOAD TO PROJECT: SNARE B and HAT C into the first empty pool slots (no pool yet:
+        # a directory made), each slot's frames on the +Drive's pool image and sent to the DSP
+        lp_ok = False
+        if "smp_lib_load" in syms and rb and rc:
+            call("smp_lib_load", rb[0])
+            call("smp_lib_load", rc[0])
+            for _ in range(4000):
+                period()
+                call("smp_boot")
+                if long("smp_lp_done") >= 2 and long("smp_lstate") in (0, 4):
+                    break
+            for _ in range(200):                # the second slot to the DSP, the directory saved
+                period()
+                call("smp_boot")
+            d = b"".join(disk.get(STORE_SECTOR + 1 + k, bytes(512)) for k in range(8))
+            ents = [struct.unpack_from("<IIfI", d, 8 + 16 * s) for s in range(2)]
+            nms = [d[SM.NAMES_OFFSET + SM.NAME_BYTES * s:SM.NAMES_OFFSET + SM.NAME_BYTES * (s + 1)].split(b"\0")[0].decode()
+                   for s in range(2)]
+
+            def img_at(addr, n):
+                lo = addr - base
+                return b"".join(disk.get(STORE_SECTOR + 1 + lo // 512 + k, bytes(512)) for k in range((n + 511) // 512))[:n]
+
+            def dsp_at(addr, n):
+                lo = (addr - base) // 4
+                return b"".join(struct.pack("<I", pool.get(lo + j, 0)) for j in range((n + 3) // 4))[:n]
+            out.update(lp_done=long("smp_lp_done"), lp_full=long("smp_lp_full"), lp_names=nms,
+                       lp_frames=[e[1] for e in ents])
+            lp_ok = (long("smp_lp_done") == 2 and nms == ["SNARE B", "HAT C"] and [e[1] for e in ents] == [1000, 500]
+                     and img_at(ents[0][0], 2000) == b and img_at(ents[1][0], 1000) == c
+                     and dsp_at(ents[0][0], 2000) == b and dsp_at(ents[1][0], 1000) == c
+                     and all(s >= STORE_SECTOR for s in disk))
+        out["load_to_project"] = lp_ok
+        ok = ok and lp_ok
         # a device too small for the library: refused, and not one more sector written
         before = dict(disk)
         machine.write(BLK_SECTORS, struct.pack(">I", 0x700100))
