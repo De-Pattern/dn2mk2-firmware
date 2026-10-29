@@ -7,19 +7,23 @@ are to Discord's #announcements by `.github/workflows/discord-release.yml` (Disc
 attached to a release: players build the cleared file with the patcher from their own
 Elektron OS files.
 
-The shape (as the posts so far):
+The shape (the owner's posts, from v0.29): lowercase and casual, players' words, short
+bullets, credit the reporter.
 
-    # vX.Y · NAME
+    # 🚨 vX.Y is out: NAME
 
-    One or two lines: what this version is for.
+    patcher: de-pattern.github.io/dn2mk2
 
-    **New** / **Fixed** / **Changed**: short bullets, players' words, credit the reporter.
+    **fixed / new**
+    - what changed, in a line or two each (what was wrong, what it does now)
 
-    **Test** (after the regression check): numbered, each one a thing to do and what to hear.
+    **test**
+    1. a thing to do, and what you should hear or see
 
-    **Known issues**: bullets.
+    **known issues**
+    - what still misbehaves, with a workaround where there is one
 
-    **Coming next** (not available yet): bullets.
+    **coming next (not available yet)**
+    - what the next version is for
 
-    Get it: the DN2 Mod Patcher (https://de-pattern.github.io/dn2mk2/patcher.html), build vX.Y
-    from your own OS files; sha256 `…` (first and last 8). Back up your +Drive first.
+    sha256 `first8…last8` · back up your +Drive first · not made or supported by Elektron
