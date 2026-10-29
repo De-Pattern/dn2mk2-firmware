@@ -195,3 +195,9 @@ inharmonic modes).
    DN2 mod): LOOP (track/mix/input looper), cross-modulation between LFOs and arps, per-track
    insert effects, GROOVE (weighted steps in place of swing), envelope followers, a DSP load
    meter. Its code may also show other ways of handling the DSP budget; not studied yet.
+
+## After v0.32 (owner, 2026-10-29)
+
+- Remove what is left of the retired engines: SHIFT (frequency shifter), GRAN (granular
+  filter type), CZ PHASE and RESONATOR: their code, generators, tables, DSP spans, tests
+  and gate steps, once v0.31 and v0.32 are out.
