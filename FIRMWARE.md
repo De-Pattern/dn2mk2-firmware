@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.28** | 2026-10-28 | The Monomachine machines drawn as the Monomachine's (animated controls), their choice knobs with detents, each machine its own level; SHIFT and GRAN removed; KEYBOARD's first press of a new slice plays only that slice | `builds/v0.28-MNM/` | yes |
+| **v0.29** | 2026-10-28 | Voices play newest first (PERC past 8 voices, Monomachine dead notes under dynamic allocation); a finished Monomachine voice frees its DSP time (the third track silent); multi-select and SELECT ALL/DELETE in the folder browser; CLEAR SLICE GRID; YES answers the save question on a SLICE/GRID page | `builds/v0.29-VOICES/` | yes |
+| v0.28 | 2026-10-28 | The Monomachine machines drawn as the Monomachine's (animated controls), their choice knobs with detents, each machine its own level; SHIFT and GRAN removed; KEYBOARD's first press of a new slice plays only that slice | `builds/v0.28-MNM/` | yes |
 | v0.27 | 2026-10-27 | v0.26 and MNM-1 merged into one line (the five Monomachine machines, without CZ/RESONATOR); the DSP frame-time guard against the audio dropout; TRACK + PLAY no longer opens the sample list; FILE NAME arrows repeat; slice editor moves with FUNC held; the playing slice marked; p-locked controls lit | `builds/v0.27-GUARD/` | yes |
 | v0.26 | 2026-10-26 | The slice editor as the DT2's (FUNC + RIGHT splits, FUNC + LEFT removes, FUNC + YES previews, FUNC + G moves, playhead); KEYBOARD plays slices in order; no pop-ups (sample list, slice menus); PLAY/MODE/BARS/GRID four detents a choice; browser NO closes; name screen FUNC + PLAY clears, grid wraps, cursor moves on | `builds/v0.26-SLICES/` | yes |
 | MNM-1 | 2026-10-26 | **A separate line**: v0.25 without CZ/RESONATOR, plus the Monomachine's SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens and VO-6 | `builds/MNM-1-MONOMACHINE/` | yes |
@@ -65,6 +66,67 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.29 — VOICES (newest voice first, Monomachine voices that rest, multi-select, your v0.27 notes)
+
+`DN2mod_v0.29_VOICES_OS1.11.syx`
+sha256 `a2a37dd753caffef09b288336384df7c21715e8470712ab3a262013dff6e35f0`
+Gate: CLEARED TO FLASH, 2026-10-28 (USB size 2,049,593 of 2,097,152; DSP image 1,015,508 of 1,048,575). Source: commit `9b747fb`. Docs: `docs/user-reports.md`, `docs/mnm.md`, `docs/sampler.md`.
+
+Everything in v0.28, plus:
+
+**Voices play newest first.** With dynamic voice allocation every note goes to a new voice.
+Our machines drew their voices in slot order, so older voices that were still ringing took
+the DSP's frame time and the guard skipped the newest note. That was your PERC test (voices
+1-8, then one wrong, then silence) and the dead Monomachine notes. Now PERC, the Monomachine
+machines and the sample machines all draw the newest voice first; if anything must be
+skipped, it is the oldest.
+
+**A finished Monomachine voice rests.** A Monomachine voice kept its DSP time after its sound
+had died away, so two tracks held the whole budget and a third stayed silent. A voice now
+rests after about a second under -96 dB with no new note: no DSP time, silent, until its
+next note.
+
+**Multi-select in the folder browser** (a user's report: no way to clear out everything sent
+in). FUNC + YES marks a sample, or all of a folder's samples when on the folder. RIGHT on a
+folder, or SAMPLE ACTION, has SELECT ALL / CLEAR ALL; DELETE takes the marked ones
+(DELETE n?). Emptied folders are no longer shown.
+
+**CLEAR SLICE GRID** in the SLICE menu: removes all of the slot's slices.
+
+**The save question on a SLICE/GRID page.** FUNC + SETTINGS's save question opened the slice
+menu when you pressed YES; YES and NO now answer the question.
+
+**Gate changes.** The gate now checks multi-select in the browser, that the newest voice is
+the one that plays, and that a resting Monomachine voice costs nothing and wakes on its next
+note.
+
+**Test** (after the regression check):
+1. PERC (e.g. TRX-CY), dynamic voice allocation, notes fast across many voices: every note
+   sounds, past the 8th, and none plays another machine's sound.
+2. Three or more Monomachine tracks, one after another, the earlier ones left silent for a
+   couple of seconds: the new track plays. Then all of them together: tell me where it stops.
+3. Folder browser: FUNC + YES on a few samples, then DELETE: "DELETE n?" and only those go.
+   RIGHT on a folder: SELECT ALL, then DELETE. The empty folder disappears.
+4. SLICE menu: CLEAR SLICE GRID: no slices left; the sample plays whole.
+5. On a SLICE or GRID page, FUNC + SETTINGS's save question: YES saves (no slice menu).
+6. The v0.28 tests, below, if you have not run them.
+
+**Known issues / not done.**
+- **Firmware update prompt on a PERC or sample track** (a user's report, v0.28): YES on
+  "do you want to update?" opens "no samples loaded" instead. Until v0.30: press NO, select a
+  stock track, then send the firmware again. TRIG + YES (sound preview) opens the lock menu
+  on PERC: same cause, also v0.30.
+- **VO-6 silent after about a second** (a user's report, v0.28): most likely the guard skipping
+  it for DSP time on hardware; v0.30 shows CPU on screen when the guard skips.
+- **Fixed in the v0.30 work, not in this build:** LFO depth to SAMP/SLCE and empty slots, held
+  UP/DOWN scrolling in the lists, the recorder starting at THRES 0 and its ARM knob, too-loud
+  normalization (now to -6 dB), the slice editor's playhead and loop preview.
+- **Several heavy Monomachine voices sounding at once** are still limited by the DSP's time:
+  the newest play, the oldest are skipped (and rest once they die away).
+- **Not looked at yet:** the freeze after clearing a slice track then turning SAMP, slice
+  marker lag, trig mute on our machines, an MD machine still heard after switching machines.
+- **Not seen on hardware yet**: all of the above; checked in the emulators.
 
 ## v0.28 — MNM (the Monomachine machines redrawn, their detents and levels; SHIFT and GRAN removed; the slice fix)
 
