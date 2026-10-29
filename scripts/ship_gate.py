@@ -368,17 +368,36 @@ def main() -> int:
                 scen += ("slices",)             # v0.23: the slice editor's reading and saving
             if "smp_lib_state" in lay:
                 scen += ("lib",)                # v0.31: the +Drive's library, bounded to its region
+            # v0.31: "dead" (every packet lost: the RAM check's four seconds, then seven tries
+            # three seconds apart before the loader stops) takes about an hour in the emulator
+            # on its own, so it is a step of its own, cached on its own: the gate's run fits
+            # the two-hour limit, and a run cut off there keeps whichever step passed
+            dead = [sc for sc in scen if sc == "dead"]
+            scen = tuple(sc for sc in scen if sc != "dead")
             steps = ",".join(f"link16:{syms}:{sc}" for sc in scen)
             l16_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                        "--build", bdir, "--snapshot", snap, "--steps", steps,
                        "--png-dir", work / "link16"]
+            if dead:
+                ld_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                          "--build", bdir, "--snapshot", snap, "--steps", f"link16:{syms}:dead",
+                          "--png-dir", work / "link16dead"]
+
+                def ld_body(tdir):
+                    rc, out = run("link16 dead", ld_cmd, logs, env=EMU_ENV, trace=tdir)
+                    oks = re.findall(r"link16 dead: .*\"ok\": (true|false)", out)
+                    good = rc == 0 and oks == ["true"]
+                    return good, ("dead (nothing gets through): the RAM check gives up after four seconds, "
+                                  "the loader tries each chunk seven times and stops, nothing reaches the "
+                                  "DSP's routing" if good else out[-800:])
+                gate("sample link, dead link (ColdFire)",
+                     *cached("sample link, dead link (ColdFire)", [ld_cmd, sorted(EMU_ENV.items())], ld_body))
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
                 oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
-                return good, ("save, fast (a lost packet resent), dead (nothing gets through: the loader "
-                              "stops); every byte loaded and saved; the frame's routing words stock's in "
+                return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
                               "passes (high, lowram); v0.31: the kit's samples first; the +Drive's library written, read back, "
                               "a hole reused, every write inside its region, a small device refused (lib)"
