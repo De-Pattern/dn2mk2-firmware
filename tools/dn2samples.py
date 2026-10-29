@@ -10,6 +10,13 @@
     python tools/dn2samples.py forget                   the +Drive's copy no longer loads
     python tools/dn2samples.py build A.wav ... -o pool.bin   the pool as it would be sent (no device)
 
+  v0.31 and later, the +Drive's library (about 20 GB; LOAD TO PROJECT on the instrument puts
+  a library sample into a slot, in the browser's +DRIVE):
+    python tools/dn2samples.py lib-send A.wav FOLDER ... --folder DRUMS   into a library folder
+    python tools/dn2samples.py lib-list                 what the library holds (entry numbers)
+    python tools/dn2samples.py lib-delete 12 13         delete library entries by number
+    python tools/dn2samples.py lib-info                 how full it is
+
     options: --port "Digitone II" (a substring of the port name), --chunk 256 (bytes a message)
 
 What happens (docs/sampler.md): this tool lays the samples out as the DSP's pool -- a
@@ -50,6 +57,8 @@ from dn2probe import pack7, unpack7          # noqa: E402  (Elektron's 7-bit pac
 
 HEADER = bytes([0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01])
 HELLO, WRITE, STATUS, CLEAR, SAVE, LOAD, FORGET, BEGIN, END, DIR = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+# v0.31 (sample link 5): the +Drive's library (csrc/sampler/lib.c); replies little-endian
+L_INFO, L_FOLDER, L_BEGIN, L_WRITE, L_END, L_LIST, L_DELETE, L_FOLDERS = 16, 17, 18, 19, 20, 21, 22, 23
 STATUS_TEXT = {0: "ok", 1: "refused", 2: "unknown command", 3: "the +Drive refused the write"}
 DSP_RATE = 48000
 LINK_BYTES_PER_S = 24 * 1500
@@ -344,10 +353,72 @@ def cmd_send(link, pool, names, chunk):
           f"{len(names)} (they stay until power-off; the instrument keeps refreshing them)")
 
 
+def lib_adler(b: bytes, s: int = 1) -> int:
+    a_, b_ = s & 0xFFFF, s >> 16
+    for x in b:
+        a_ = (a_ + x) % 65521
+        b_ = (b_ + a_) % 65521
+    return b_ << 16 | a_
+
+
+def lib_send(link, paths, folder, chunk):
+    """v0.31: each WAV into the +Drive's library, in FOLDER (made if new): int16 mono, at
+    its own rate, as the pool holds them. Nothing changes in the project's pool: LOAD TO
+    PROJECT on the instrument (+DRIVE in the browser) puts a sample in a slot."""
+    f = link.call(L_FOLDER, folder.upper().encode("ascii", "replace")[:31])[0]
+    if f == 0xFF:
+        raise SystemExit(f"folder {folder!r}: refused (64 folders at most)")
+    for p in paths:
+        s, r = read_wav_any(p)
+        if not s:
+            print(f"  {p}: no frames, skipped")
+            continue
+        peak = max(abs(x) for x in s)
+        if peak > 1.0:
+            s = [x / peak for x in s]
+        data = struct.pack(f"<{len(s)}h", *(max(-32768, min(32767, round(x * 32768))) for x in s))
+        name = pathlib.Path(p).stem.upper()[:35].encode("ascii", "replace")
+        b = link.call(L_BEGIN, struct.pack("<IBBf", len(s), 1, f, r / DSP_RATE) + name)
+        idx, at = struct.unpack_from("<II", b)
+        t0 = time.time()
+        for o in range(0, len(data), chunk):
+            link.call(L_WRITE, struct.pack("<I", o) + data[o:o + chunk])
+        link.call(L_END, struct.pack("<I", lib_adler(data)), timeout=10.0)
+        dt = time.time() - t0
+        print(f"  {name.decode():35s} {len(s) / r:6.2f} s  -> entry {idx} ({len(data) / max(dt, 1e-3) / 1024:.0f} KB/s)")
+
+
+def lib_list(link):
+    names = []
+    folders = []
+    for f0 in range(0, 64, 4):
+        p = link.call(L_FOLDERS, bytes([f0]))
+        for j in range(4):
+            folders.append(p[24 * j:24 * j + 24].split(b"\0")[0].decode("ascii", "replace"))
+    n = struct.unpack_from("<I", link.call(L_LIST, struct.pack("<H", 0)))[0]
+    seen = 0
+    for k0 in range(0, 2048, 4):
+        if seen >= n:
+            break
+        p = link.call(L_LIST, struct.pack("<H", k0))
+        for j in range(4):
+            o = 4 + 31 * j
+            idx = p[o] | p[o + 1] << 8
+            fr = struct.unpack_from("<I", p, o + 2)[0]
+            fo = p[o + 6]
+            nm = p[o + 7:o + 31].split(b"\0")[0].decode("ascii", "replace")
+            if fr:
+                seen += 1
+                names.append((idx, folders[fo] if fo < len(folders) else "?", nm, fr))
+    return names
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("command", choices=("hello", "send", "status", "clear", "build", "save", "load", "forget", "dir"))
+    ap.add_argument("command", choices=("hello", "send", "status", "clear", "build", "save", "load", "forget", "dir",
+                                        "lib-info", "lib-send", "lib-list", "lib-delete"))
+    ap.add_argument("--folder", default="INCOMING", help="lib-send: the library folder (made if new)")
     ap.add_argument("--keep", action="store_true", help="send: then save on the +Drive")
     ap.add_argument("files", nargs="*")
     ap.add_argument("--port", default="Digitone II")
@@ -380,6 +451,24 @@ def main(argv=None):
             if ram is not None:
                 print("  the DSP's RAM check: " + {0: "not run yet", 1: "passed (all 400 MB load)",
                                                      2: "FAILED: only the first 128 MB load"}.get(ram, str(ram)))
+        elif a.command.startswith("lib-"):                 # v0.31 (link 5): the +Drive's library
+            if proto < 5:
+                raise SystemExit("the library needs v0.31 or later on the instrument")
+            if a.command == "lib-info":
+                st, cap, n, sectors, data0 = struct.unpack("<5I", link.call(L_INFO)[:20])
+                free_gb = (sectors - data0) * 512 / 2 ** 30 if sectors > data0 else 0
+                print({0: "not read yet", 1: "none yet (made on the first send)", 2: "ready",
+                       0xFFFFFFFF: "the +Drive refused"}.get(st, st), f": {n} of {cap} samples; "
+                      f"the region is about {free_gb:.1f} GB")
+            elif a.command == "lib-send":
+                lib_send(link, wav_list(a.files), a.folder, a.chunk)
+            elif a.command == "lib-list":
+                for idx, fo, nm, fr in lib_list(link):
+                    print(f"  {idx:4d}  {fo:16s} {nm:35s} {fr / DSP_RATE:7.2f} s")
+            else:
+                for x in a.files:
+                    link.call(L_DELETE, struct.pack("<H", int(x)))
+                    print(f"  entry {x} deleted")
         elif a.command == "status":
             print(status(link))
         elif a.command == "dir":                            # v0.22 (link 4): what the slots hold
