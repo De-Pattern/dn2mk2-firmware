@@ -1,0 +1,94 @@
+# Each cleared firmware: a GitHub release and its announcement in Discord's #announcements.
+#
+# Claude publishes a cleared build (CLAUDE.md, "Every cleared build is published"), then
+# commits its announcement as releases/vX.Y.md on main and pushes the tag vX.Y. This job:
+#   1. makes the GitHub release vX.Y, its notes that file (no firmware is attached: the .syx
+#      stays on the builds branch, and players build it with the patcher from their own
+#      Elektron files);
+#   2. posts the same notes to #announcements through the webhook in the repository secret
+#      DISCORD_WEBHOOK_URL, as "De-Pattern".
+# Both happen here because a release made with the workflow's own token does not start
+# other workflows. A release made by hand (the GitHub page) is announced by the second job.
+# Re-announce one: Actions > this workflow > Run workflow, with its tag.
+name: Release and announce
+
+on:
+  push:
+    tags: ['v*']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to announce again (its releases/TAG.md)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  from-tag:
+    if: github.event_name != 'release'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: The notes
+        id: notes
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          F="releases/$TAG.md"
+          test -f "$F" || { echo "::error::$F is missing: commit the announcement before the tag"; exit 1; }
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "file=$F" >> "$GITHUB_OUTPUT"
+          # the first line, "# TITLE", is the release's name; the rest its notes
+          head -1 "$F" | sed 's/^# *//' > title.txt
+          tail -n +2 "$F" | sed '1{/^$/d}' > body.md
+      - name: The GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.notes.outputs.tag }}" --verify-tag \
+            --title "$(cat title.txt)" --notes-file body.md
+      - name: Post to #announcements
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          URL: ${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ steps.notes.outputs.tag }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "::warning::DISCORD_WEBHOOK_URL is not set: not announced"; exit 0; fi
+          jq -n --rawfile t title.txt --rawfile b body.md --arg u "$URL" '{
+            username: "De-Pattern",
+            allowed_mentions: {parse: []},
+            embeds: [{
+              title: ($t | rtrimstr("\n")),
+              description: ($b[0:4000] + (if ($b|length) > 4000 then "\n\n…the rest on GitHub" else "" end)),
+              color: 15105570,
+              footer: {text: "DN2 mk2 mod · unofficial, not made or supported by Elektron"}
+            }]
+          }' | curl -fsS -H "Content-Type: application/json" -d @- "$WEBHOOK"
+
+  # a release published by hand on GitHub (not by the job above)
+  from-release:
+    if: github.event_name == 'release' && github.event.release.author.login != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to #announcements
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          NAME: ${{ github.event.release.name }}
+          TAG: ${{ github.event.release.tag_name }}
+          BODY: ${{ github.event.release.body }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "::warning::DISCORD_WEBHOOK_URL is not set: not announced"; exit 0; fi
+          jq -n --arg n "${NAME:-$TAG}" --arg b "$BODY" '{
+            username: "De-Pattern",
+            allowed_mentions: {parse: []},
+            embeds: [{
+              title: $n,
+              description: ($b[0:4000] + (if ($b|length) > 4000 then "\n\n…the rest on GitHub" else "" end)),
+              color: 15105570,
+              footer: {text: "DN2 mk2 mod · unofficial, not made or supported by Elektron"}
+            }]
+          }' | curl -fsS -H "Content-Type: application/json" -d @- "$WEBHOOK"

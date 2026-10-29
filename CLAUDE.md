@@ -56,3 +56,8 @@ When a build prints `CLEARED TO FLASH`, in the same session:
    name or email (owner: the site must not link to his name). It refuses a build whose
    gate record does not clear it.
 4. Firmware never goes on `main` (`.gitignore`); only the `builds` branch carries it.
+5. Announce it: commit its Discord announcement as `releases/vX.Y.md` on `main`
+   (`releases/README.md`: first line `# vX.Y · NAME`, then the post, with a **Coming next
+   (not available yet)** section), then push the tag `vX.Y` on that commit. The workflow
+   `discord-release.yml` makes the GitHub release from that file and posts it to Discord's
+   #announcements as De-Pattern. Never attach firmware to a release.
