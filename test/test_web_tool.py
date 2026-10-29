@@ -36,7 +36,7 @@ def _node(js: str):
 def test_the_constants_are_the_builds():
     c = _node("console.log(JSON.stringify(DN2.C))")
     for k in ("POOL_MAGIC", "POOL_SLOTS", "USER_SLOTS", "NAMES_OFFSET", "NAME_BYTES", "DATA_OFFSET",
-              "FMT_I16", "MAX_SLICES", "REC_OFFSET", "REC_END", "POOL_BYTES", "REC_BYTES", "HOLE_BYTES", "SLICE_AREA",
+              "FMT_I16", "MAX_SLICES", "REC_OFFSET", "REC_END", "POOL_BYTES", "REC_BYTES", "HOLE_BYTES", "SLICE_AREA", "TABLE_AREA",
               "META_PTR", "META_PTR_MAGIC", "META_MAGIC", "META_FOLDERS", "META_FOLDER_BYTES", "META_SLOT_BYTES",
               "META_NAME_BYTES", "META_BYTES"):
         assert c[k] == getattr(SM, k), k
@@ -178,3 +178,27 @@ def test_the_long_names_and_folders_block():
     assert m[rec + 2 * SM.META_SLOT_BYTES] == 1 and m[rec + 2 * SM.META_SLOT_BYTES + 4:rec + 2 * SM.META_SLOT_BYTES + 14] == b"Break (v2)"
     assert all(m[rec + SM.META_SLOT_BYTES * k] == 0xFF for k in range(3, 128))
     assert r["short"] == ["SHS_HAU", "BREAK V"]          # link.c makes the same of the long names
+
+
+def test_the_library_send_is_what_lib_c_reads():
+    # v0.31 (link 5): BEGIN <u32 frames, u8 fmt, u8 folder, f32 rate, name>, little-endian;
+    # the int16 data and adler (seed 1) as dn2samples.lib_send's; a LIST reply parsed
+    import dn2samples as D
+    r = _node("""
+      const fr = new Float32Array(100).map((_, i) => Math.sin(i / 5) * 0.5);
+      const data = DN2.libSample({ frames: fr });
+      const lst = new Uint8Array(4 + 4 * 31); lst[0] = 1;
+      lst[4] = 7; lst[6] = 100; lst[10] = 2; lst.set([75, 73, 67, 75], 11);
+      console.log(JSON.stringify({ begin: DN2.libBegin(100, 3, 44100, "kick 1"), data: [...data],
+                                   adler: DN2.adler(data), list: DN2.libList(lst) }));
+    """)
+    b = bytes(r["begin"])
+    frames, fmt, folder, rate = struct.unpack_from("<IBBf", b)
+    assert (frames, fmt, folder) == (100, SM.FMT_I16, 3) and abs(rate - 44100 / 48000) < 1e-6
+    assert b[10:] == b"KICK 1"
+    import math
+    want = struct.pack("<100h", *(max(-32768, min(32767, round(math.sin(i / 5) * 0.5 * 32768))) for i in range(100)))
+    assert len(r["data"]) == 200
+    assert max(abs(x - y) for x, y in zip(struct.unpack("<100h", bytes(r["data"])), struct.unpack("<100h", want))) <= 1
+    assert r["adler"] == D.lib_adler(bytes(r["data"]))
+    assert r["list"]["count"] == 1 and r["list"]["rows"][0] == {"k": 7, "frames": 100, "folder": 2, "name": "KICK"}
