@@ -9,197 +9,192 @@
   ▘ ▝   m k 2   ·   m o d
 ```
 
-# DN2-mk2-Mod
+# DN2 mk2 mod
 
-**New synth engines and effects for the Elektron Digitone II, built as
-firmware mods you apply to your own OS file.**
+**New machines for the Elektron Digitone II, built from your own copy of Elektron's OS.**
 
-The Digitone II ships five machines. This project adds more: wavetable,
-granular, resonator and others, running on the instrument's own SHARC+ DSP and
-sitting in MACHINE SEL beside the stock ones. Every change is checked in an
-emulator before it goes near hardware, and the way back to stock is always one
-MIDI transfer away.
+The Digitone II ships with five machines. This mod adds three families more, running on
+the instrument's own DSP and sitting in MACHINE SEL beside the stock ones:
 
-It builds on [**dn2_firmware_explore**](https://github.com/xrcstrecords/dn2_firmware_explore)
-by Ángel Linares, which mapped the firmware, wrote the tooling, and put the
-first new machine (Waverider) on the instrument. Everything from upstream is
-here with its history; this repository adds engines on top. The upstream
-README is kept at [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
+- **The Digitakt II's sample machines**: ONESHOT, WERP, STRETCH, REPITCH, GRID and SLICE,
+  with the DT2's own sample engine, its pages, sample list and browser, a recorder, and
+  your WAVs sent over USB and kept on the +Drive.
+- **PERC, the Machinedrum**: the MD's TRX, EFM, GND and P-I machines (34 of them) from the
+  Machinedrum's own firmware, with its track effects.
+- **The Monomachine**: SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6, from the
+  Monomachine's own firmware, drawn as the Monomachine draws them.
 
-> **No Elektron firmware lives in this repository, original or modified, and
-> none ever will.** You bring the OS file Elektron publish for your instrument;
-> every mod applies to *your* copy and checks it is the exact file it was
-> measured against before writing anything.
+Everything else on the instrument works as stock: the stock machines, the sequencer,
+projects, presets and kits.
 
----
+> **Not made or supported by Elektron.** This is unofficial firmware. You flash it at your
+> own risk. Back up your +Drive first, every time.
 
-## The engines
-
-| | engine | what it is | state |
-|---|---|---|---|
-| 💾 | **Digitakt II sample machines** | machine types 8-12: ONESHOT, WERP, STRETCH, REPITCH, GRID on DT2-style SRC pages; a sample pool in the DSP's memory; your WAVs sent over USB (`tools/dn2samples.py`) and kept on the +Drive | **v0.13** → [`docs/sampler.md`](docs/sampler.md) |
-| 🥁 | **PERC** | machine type 5 (since v0.11, in Waverider's place): the owner's 24 Ravel PERC drum machines (TRX, EFM, GND; after the Machinedrum's), TYPE plus eight per-machine parameters | **gated v0.11**, awaiting a flash → [`docs/perc.md`](docs/perc.md) |
-| 🌊 | **Waverider** | wavetable machine after Tonverk's Wavefinder; type 5 up to v0.10 | **removed in v0.11** for PERC; its docs stay for the record → [`docs/w5-tables.md`](docs/w5-tables.md) |
-| ✨ | **GRAINS** | granular synthesis on wavetables, after the Virus TI grain tables: formant grains (SYNC) and clouds (CLOUD) | **reference model + demos**; control layout awaiting sign-off → [`docs/grains.md`](docs/grains.md) |
-| 💧 | **PING** (in Waverider) | a filter section for round, liquid pings: SVF, Roland-style 4-pole, Serge-VCFQ-style band-pass, vactrol LPG; own envelope with log/exp curves and a strike | **reference model + demos**; awaiting the owner's ear → [`docs/ping.md`](docs/ping.md) |
-| 🔀 | **Frequency shifter** | a send/master effect after Tonverk's | planned, next after GRAINS G1 |
-| 🎻 | **Resonator** | polyphonic string/modal resonator, after Mutable Instruments Rings (MIT) | planned: port of open-source C to the SHARC |
-| 🥁 | **Digitakt II machines** | same DSP family, so their code moves across; you supply both OS files and nothing of Elektron's is redistributed | upstream proved it offline (ONESHOT) |
-| 🧪 | **Syntakt / Model:Cycles / Monomachine / Machinedrum voices** | those boxes run their engines on different processors (ColdFire, DSP56300), so these are **new implementations by ear**, not ports | later |
-
-### Hear PING before it exists
-
-`ping/demos/` holds the planned filter section for Waverider, rendered from its
-reference model (`ping/model.py`, `docs/ping.md`): SVF, LADR (4-pole), VCFQ and a
-vactrol LPG, with their own envelope and a strike, aimed at round, watery pings.
-Regenerate with `python ping/demos.py`.
-
-### Make a wavetable from any sample
-
-`dnfw waverider slice voice.wav -o voice_wt.wav --preview sweep.wav` turns any
-short WAV into a wavetable the way Tonverk does: one exact cycle per frame where the
-sound is pitched (so a voice becomes a playable table of its own waveforms), fixed
-windows where it is not (`_wt1024` in the name sets their size, as on Tonverk), each
-frame band-limited. The output is a standard wavetable WAV (Serum, Vital, Tonverk).
-
-### Hear GRAINS before it exists
-
-`grains/demos/` holds renders from the reference model on Waverider's two
-built-in tables:
-
-| file | what to listen for |
-|---|---|
-| `01_sync_formant_sweep.wav` | one held C2, FMNT −12 → +24: the vowel moves, the pitch does not |
-| `02_sync_size_sweep.wav` | SIZE 1 → 4: buzzy and wide → ringing and vocal |
-| `03_sync_spread.wav` | SPRD 0 → 7: a doubled, chorused formant |
-| `04_sync_talking_bass.wav` | POS and FMNT moving together on the harmonic table |
-| `05_sync_melody.wav` | a short line, to hear it as an instrument |
-| `06_cloud_density.wav` | CLOUD: sparse → dense, scattered and scanning |
-| `07_cloud_pitch_jitter.wav` | CLOUD with pitch scatter: shimmer and smear |
-
-Regenerate them with `python grains/demos.py`.
+**Contents:** [What's in it](#whats-in-it) · [Install](#install) ·
+[Going back, and recovery](#going-back-and-recovery) · [Compatibility](#compatibility) ·
+[Known limitations](#known-limitations) · [How it's made and tested](#how-its-made-and-tested) ·
+[Versions](#versions) · [Credits](#credits) · [Licence](#licence)
 
 ---
 
-## Before you flash anything
+## What's in it
 
-**Read [`docs/SAFETY.md`](docs/SAFETY.md).** It lists every way a flash could
-harm a DN2 and what stops each one. In short:
+### The Digitakt II's sample machines
 
-1. **Use OS 1.11.** Every address in this project is measured on Digitone II
-   OS 1.11 (sha256 `2af43e65…472e0`). The tools refuse anything else.
-2. **The bootstrap is never touched.** `dnfw mods apply` refuses to write a
-   build whose bootstrap, updater, metadata or Outbox section differs from
-   stock by a single byte, so the recovery route always survives.
-3. **Have a 5-pin DIN MIDI cable to the DN2's MIDI IN.** Recovery (hold
-   [FUNC] at power-on → [TRIG 4] → Transfer's *Legacy OS upgrade*) does not
-   work over USB. **Prove it once with stock 1.11** before flashing anything
-   modified.
-4. **Preflight the exact file you send:**
-   `dnfw preflight Digitone_II_OS1.11.syx build.syx` must print `PASS`.
-5. **Back up the +Drive**, start at **low volume**, and run the regression
-   check in `docs/SAFETY.md` after every flash.
+Machine types ONESHOT, WERP, STRETCH, REPITCH, GRID and SLICE, on the DT2's two SRC pages.
 
-This is unofficial firmware. Elektron does not support it, and you flash it at
-your own risk.
+- **The DT2's sample engine**: its interpolator and decimator, STRETCH's time-stretch,
+  WERP's clock, no clicks at starts, ends and retriggers.
+- **SLICE**: up to 64 slices from your WAV's cue points, a grid, or its hits; its own menu
+  (**YES** on the page): EDIT SLICE POINTS, CREATE SLICE GRID; the slice editor
+  ([FUNC] + [RIGHT] splits, [FUNC] + [LEFT] removes); slices on the [TRIG] keys in KEYBOARD.
+- **GRID**: ALLOCATE SLICE (linear or random slice locks on the track's trigs).
+- **The sample list and browser**: turn SAMP and the list opens with each slot's long
+  name; [FUNC] + [YES] opens the browser, folders and SAMPLE ACTION (load, rename, delete,
+  select all), as the DT2's.
+- **The recorder** ([FUNC] + [VOICE]): IN, MAIN or any track; the DT2's TRIM, NAME and
+  ASSIGN steps; recordings kept across power cycles.
+- **Your samples**: up to 122 slots and 400 MB, sent from the computer with the
+  [in-browser import tool](https://de-pattern.github.io/dn2mk2/) or `tools/dn2samples.py`,
+  kept on the +Drive and loaded at power-on (`docs/sampler.md`).
+- **Modulation**: an LFO on SAMP or SLCE steps through your loaded samples or slices.
 
----
+### PERC: the Machinedrum
 
-## Quick start
+One machine, TYPE choosing among the Machinedrum's TRX, EFM, GND and P-I machines. Each is
+a port of the MD's own code from its firmware (you supply the MD's OS file), checked
+sample for sample against it. Page 1: the machine's eight parameters, named as on the MD.
+Page 2: TYPE and the MD's track effects (AMD, AMF, EQF, EQG, FLTF, FLTW, FLTQ).
+TYPE is p-lockable.
 
-Python 3.11+, no runtime dependencies for the tools themselves.
+### The Monomachine
 
-```sh
-pip install -e .
-dnfw inspect Digitone_II_OS1.11.syx
-dnfw mods list
-dnfw mods apply Digitone_II_OS1.11.syx --mod waverider -o waverider.syx
-```
+SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6, each its own machine type, ported
+from the Monomachine's firmware (you supply its OS file). Their pages are drawn as the
+Monomachine's, choice knobs move one choice a few detents, and each is levelled to sit
+beside the stock machines.
 
-The upstream mods (`lfo4`, `arpmodes`, `fxmod`, `moddest`, `lfowaves`,
-`midiarp`, `arpplocks`, `bootscreen`, `transients`, `songguard`) all work the
-same way; see `docs/UPSTREAM-README.md` and `docs/mods.md`.
+### Under the hood
 
-### The gates
-
-| gate | command | needs |
-|---|---|---|
-| unit tests | `pytest -m "not slow"` | pytest, numpy |
-| GRAINS model | `pytest test/test_grains_model.py` | numpy |
-| integrity + signature | `dnfw inspect build.syx` | — |
-| **safety preflight** | `dnfw preflight STOCK.syx build.syx` (also run by `mods apply`) | — |
-| safety guard's own tests | `pytest test/test_safety.py` | stock 1.11 in `00_Resources/` |
-| **everything, on the file you flash** | `scripts/ship_gate.py STOCK.syx build.syx` → `CLEARED TO FLASH` | all of the below |
-| boot from reset | `scripts/emu_boot_check.py` | [digikit](https://github.com/m-dwyer/digikit) (ColdFire emulator) |
-| DSP voice | `scripts/sharc_waverider_m5.py` | digikit's `work/sharc-emulator`, [selache](https://github.com/js216/selache) |
-
-Upstream works on Windows + WSL. This fork also runs the DSP gates natively on
-Linux (`sharc_waverider_render.py` skips the WSL hop when there is none).
-Several scripts still expect upstream's paths under `/mnt/d/01_Code/Z_Personal/`;
-symlinking your checkouts there is the quickest way through for now.
+- **A CPU guard**: if the DSP runs short of time, our voices are left out for a block
+  (newest notes first, finished voices free) instead of the audio stopping, and the page
+  shows **CPU** while it happens.
+- **Stock questions stay stock's**: the OS update and save questions take their keys on
+  every page.
 
 ---
 
-## Layout
+## Install
 
-```
-src/dnfw/         the tool: container, codec, integrity, mods, waverider
-grains/           GRAINS: model.py (the reference), demos.py, demos/*.wav
-csrc/             our own ColdFire C/asm and SHARC asm (waverider/, lfo4/, ...)
-scripts/          builders and emulator gates
-test/             pytest
-docs/             everything measured, with evidence; grains.md is new here
-site/             upstream's in-browser patcher
-```
+You need a Digitone II on **OS 1.11**, Chrome or Edge, a USB cable, Elektron Transfer,
+and your own copies of these Elektron OS files (the patcher asks for them; nothing of
+Elektron's is published here):
 
-## Changes from upstream
+- Digitone II OS 1.11 (the one it patches)
+- Digitakt II OS 1.17 (the sample engine's tables)
+- Machinedrum UW OS 1.63 (PERC's machines)
+- Monomachine SFX-6 OS 1.32B (the Monomachine machines)
 
-As required by the AGPL, a dated record of what this repository changes:
+Then:
 
-- **2026-10-06** — forked from `dn2_firmware_explore` at `8c40698`
-  (2026-10-01).
-- **2026-10-06** — `scripts/sharc_waverider_render.py`: run selache natively
-  when WSL is absent.
-- **2026-10-06** — GRAINS: `grains/` (reference model, demos),
-  `test/test_grains_model.py`, `docs/grains.md`.
-- **2026-10-06** — this README; the upstream README moved to
-  `docs/UPSTREAM-README.md`.
-- **2026-10-06** — safety: `src/dnfw/safety.py` (the preflight, enforced in
-  `dnfw mods apply`), `dnfw preflight`, `test/test_safety.py`,
-  `docs/SAFETY.md`.
-- **2026-10-11** — Waverider W5: `dnfw.waverider.factory` (11 original tables),
-  the tables moved to DSP DDR, TBL on `DRIF`, the POS glide (`machine5_live.asm`,
-  `live.glide`), the display following the heard value (`page.c`), the display data
-  as its own RAM chunk; the preflight's DSP limit tightened to the uploader's real
-  check; `scripts/sharc_ddr_ceiling.py`, `scripts/emu_install_snapshot.py`;
-  `docs/w5-tables.md`.
-- **2026-10-11** — `scripts/ship_gate.py`: every gate on the exact file, every build
-  (`CLAUDE.md`); `docs/SAFETY.md`: the recovery cable's role.
-- **2026-10-11** — Waverider W2: LEV and the scanner (RATE, MPOS, MLEV, MOVE) on page
-  1, in `machine5_live.asm` and `live` (bit-exact); Waverider's names in every
-  destination list (`wr_names`, `page.c`); the code ranges a CODE chunk executes,
-  recorded for the gate (`__text_end`, `labels`); `dnfw waverider slice`
-  (`waverider.slicer`); `docs/w2-scanner.md`.
+1. **Back up** your projects, presets and samples with Transfer.
+2. **Prove recovery once** with stock 1.11 over a DIN MIDI cable
+   ([Going back, and recovery](#going-back-and-recovery)). Until this has worked once,
+   flash nothing modified.
+3. Open the **[DN2 Mod Patcher](https://de-pattern.github.io/dn2mk2/patcher.html)**, pick a
+   version, give it your OS files. It builds the firmware in your browser (a few minutes)
+   and lets you save it **only if it is byte for byte the version that passed the gate**.
+4. Send the saved `.syx` to the Digitone with Transfer, at low volume, as any OS update.
+5. Run the **regression check** (`docs/SAFETY.md`, about 10 minutes): the stock machines,
+   effects, a pattern, a p-lock, save and reload. Then the version's own tests in
+   [`FIRMWARE.md`](FIRMWARE.md).
+
+To send samples: the [import tool](https://de-pattern.github.io/dn2mk2/) (Chrome or Edge,
+USB CONFIG set to USB MIDI or Overbridge, Transfer closed).
+
+---
+
+## Going back, and recovery
+
+- **Back to stock**: send Elektron's own `Digitone_II_OS1.11.syx` with Transfer, as any
+  update.
+- **If it will not boot**: hold [FUNC] while powering on, press [TRIG 4], and send stock
+  1.11 with Transfer's *Legacy OS upgrade mode* over a **5-pin DIN MIDI cable** to the
+  Digitone's MIDI IN (USB does not work in this mode). It takes about 12 minutes; do not
+  interrupt it. The mod never touches the bootstrap that runs this, and the build tool
+  refuses any file that would.
+
+`docs/SAFETY.md` lists every way a flash could harm a Digitone II and what stops each one.
+
+---
+
+## Compatibility
+
+- **Digitone II OS 1.11 only.** Every address is measured on 1.11; the tools refuse any
+  other file. A unit on 1.10 updates to stock 1.11 first; one on 1.12 goes back to 1.11
+  (`docs/SAFETY.md`).
+- Projects, presets and kits are stock's formats. Projects that use the mod's machines need
+  the mod to play those tracks; back them up before going back to stock.
+- Your samples live in a region of the +Drive stock never uses; stock firmware ignores it.
+
+## Known limitations
+
+- **DSP time.** The Machinedrum and Monomachine machines cost far more DSP than the stock
+  ones. With many of them sounding at once the CPU guard leaves voices out (CPU shows), and
+  heavy use with dynamic voice allocation can still cut the sound out.
+  Locking each heavy track to one voice helps. Making this solid is the current priority.
+- **Power-on load time** grows with the samples you keep (about 30 s for 20 MB).
+- The open reports, and what each version fixes, are in [`FIRMWARE.md`](FIRMWARE.md) and
+  `docs/user-reports.md`.
+
+---
+
+## How it's made and tested
+
+The mod is built by a Python tool from Elektron's files, as patches to the ColdFire's code
+and the DSP's image. **No build is published until `scripts/ship_gate.py` prints
+`CLEARED TO FLASH` on that exact file**:
+
+- **Preflight**: the bootstrap, updater, metadata and Outbox are byte-identical to
+  stock; signature and sizes checked.
+- **DSP**: the stock machines are bit-identical to stock in a SHARC simulator, and every
+  new voice is bit-exact to its reference model, block by block.
+- **ColdFire**: the build boots from reset in an emulator, its engine, save and load run,
+  and every new screen and key is driven and checked.
+- **Unit tests.**
+
+The patcher only saves a file whose sha256 is the cleared build's. What remains unchecked
+until it is on hardware is said in each version's notes.
+
+Building it yourself: Python 3.11+, `pip install -e .`, then
+`dnfw mods apply Digitone_II_OS1.11.syx --mod waverider -o build.syx` (the other OS files in
+`00_Resources/`). The gates need [digikit](https://github.com/m-dwyer/digikit) and
+[selache](https://github.com/js216/selache) (`docs/SAFETY.md`, `docs/emulator.md`).
+
+## Versions
+
+Every version, newest first, with its sha256, what it adds and what to test:
+[`FIRMWARE.md`](FIRMWARE.md). The files themselves are on the `builds` branch, and the
+patcher builds any of them from your OS files.
 
 ## Credits
 
-- **[dn2_firmware_explore](https://github.com/xrcstrecords/dn2_firmware_explore)**
-  — Ángel Linares. The firmware map, the tooling, the upstream mods and
-  Waverider. Its own credits (elektron-firmware-tool, octa-bt-pt, octabam,
-  digikit, selache, DNX) are in `docs/UPSTREAM-README.md` and
-  `THIRD-PARTY.md`.
-- **[digikit](https://github.com/m-dwyer/digikit)** — the ColdFire and
-  SHARC emulators (GPL-2.0-or-later), used as external tools.
-- **[selache](https://github.com/js216/selache)** — the SHARC+ assembler and
-  C compiler (GPL-3.0), used as an external tool.
+- **[dn2_firmware_explore](https://github.com/xrcstrecords/dn2_firmware_explore)** by
+  Ángel Linares: the firmware map, the tooling and the first new machine. This project
+  started as its fork; what changed is in
+  [`docs/CHANGES-FROM-UPSTREAM.md`](docs/CHANGES-FROM-UPSTREAM.md), and its README is kept
+  at [`docs/UPSTREAM-README.md`](docs/UPSTREAM-README.md).
+- **[digikit](https://github.com/m-dwyer/digikit)**: the ColdFire and SHARC emulators
+  (GPL-2.0-or-later), used as external tools.
+- **[selache](https://github.com/js216/selache)**: the SHARC+ assembler (GPL-3.0), used as
+  an external tool.
+- **[elektron-firmware-tool](https://github.com/mischa85/elektron-firmware-tool)** and the
+  others in [`THIRD-PARTY.md`](THIRD-PARTY.md).
 
-Not affiliated with Elektron. *Digitone*, *Digitakt*, *Syntakt*, *Tonverk*,
-*Model:Cycles*, *Monomachine* and *Machinedrum* are Elektron's; *Virus* is
-Access Music's; *Rings* is Mutable Instruments'. Names are used only to
-describe what an engine is modelled on.
+Not affiliated with Elektron. *Digitone*, *Digitakt*, *Machinedrum* and *Monomachine* are
+Elektron's; names are used only to say what a machine is modelled on.
 
 ## Licence
 
-[GNU AGPL-3.0-or-later](LICENSE), as upstream. Use it, fork it, change it;
-keep the notices and pass on the same freedoms. A modified version you
-distribute, or run as a service, stays open.
+[GNU AGPL-3.0-or-later](LICENSE), as upstream. Use it, fork it, change it; keep the
+notices and pass on the same freedoms.
