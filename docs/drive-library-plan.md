@@ -197,3 +197,54 @@ bank). Kits keep sixteen sounds and take the same fix.
 - **digikit** (the emulator and SHARC tools) and **angellinares/dn2_firmware_explore**
   (this repository's origin) are what this project is built on already;
   **elektron-firmware-tool** covers what `dnfw` does here (unpack, repack, checksums).
+
+## 9. Technical design for v0.31 (the library store and its menus)
+
+**Region.** The pool's image stays where it is (sector `0x600000`, its header, then up to
+400 MB: it ends below `0x6C8001`). The library starts at **sector `0x700000` (3.5 GiB)** and
+runs to the device's end (about 19.5 GiB). Every library read and write is checked against
+`[0x700000, device sectors)` before the block driver is called, as the pool's are.
+
+| sectors from `0x700000` | what |
+|---|---|
+| 0 | superblock: magic `DN2L`, version 1, capacity 2,048, the index's checksum, its own check |
+| 1 .. 256 | the index: 2,048 entries of 64 bytes |
+| 257 .. 260 | 64 folder names of 32 bytes: 0 INCOMING, 1 RECORDED, 2.. yours |
+| 261 .. | the samples' frames, each one extent of whole sectors |
+
+**An entry (64 bytes).** First sector of its frames (0: the entry is free), frames, rate
+(as the pool's entries: a float ratio), format (int16 mono as the pool's), folder, flags,
+a check of the frames (adler-32, as the link's), the name (36 characters).
+
+**Allocation.** First fit among the extents the index holds, so a delete leaves a hole the
+next sample can use; the device never moves frames (no compaction on the instrument).
+
+**In the ColdFire's RAM.** The index and folders are read at power-on into the mirror's free
+part (`SMP_MIRROR + 0x100000`, 132 KB; nothing else uses it) and written back sector by
+sector when they change.
+
+**The computer.** New SysEx commands on the sample link (proto 5): LIB_INFO, LIB_BEGIN
+(name, folder, frames, format, rate: an entry and its room), LIB_WRITE (data, in order),
+LIB_END (the check; the entry is written last, so an interrupted send leaves nothing),
+LIB_LIST, LIB_DELETE, LIB_FOLDER. `tools/dn2samples.py lib send|list|delete` uses them; the
+site's import tool follows.
+
+**LOAD TO PROJECT.** For each ticked sample: the first empty pool slot (1..122), room in the
+pool's frames area (first fit among the slots' extents), the frames copied +Drive to +Drive
+through a 64 KB stage, the slot's entry, name and long name written, the directory saved,
+then that one slot sent to the DSP (the loader's per-slot path: frames, then its entry). The
+pool on the +Drive stays the master copy of what the project holds.
+
+**The browser.** FUNC + YES opens it on a top level of two lines, **+DRIVE** and **PROJECT
+RAM**. PROJECT RAM is today's browser (the pool's slots by folder), its DELETE renamed
+UNLOAD. +DRIVE lists the library's folders, then a folder's samples (those in the pool show
+their slot). YES ticks; RIGHT opens SAMPLE ACTION: LOAD TO PROJECT, LOAD TO TRK, RENAME,
+DELETE, SELECT ALL / CLEAR ALL. NO goes up and closes at the top; NO held goes to the top;
+a page key closes it. Preview of a sample that is only on the +Drive (FUNC + YES) comes
+with v0.32: today's preview plays from the DSP's pool.
+
+**Gate.** Emulator checks on a simulated +Drive: the library written over SysEx and read
+back byte for byte; nothing written outside the library's region (every block write
+recorded and bounded); a delete then a send reusing its hole; LOAD TO PROJECT putting the
+frames, entry and name in the first empty slot and sending that slot to the DSP; the
+browser's two levels, ticks and actions drawn and working.
