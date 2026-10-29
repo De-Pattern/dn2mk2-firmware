@@ -58,6 +58,7 @@ When a build prints `CLEARED TO FLASH`, in the same session:
 4. Firmware never goes on `main` (`.gitignore`); only the `builds` branch carries it.
 5. Announce it: commit its Discord announcement as `releases/vX.Y.md` on `main`
    (`releases/README.md`: first line `# vX.Y · NAME`, then the post, with a **Coming next
-   (not available yet)** section), then push the tag `vX.Y` on that commit. The workflow
-   `discord-release.yml` makes the GitHub release from that file and posts it to Discord's
-   #announcements as De-Pattern. Never attach firmware to a release.
+   (not available yet)** section) and push it: a new `releases/v*.md` on `main` is the
+   trigger (this session's git route cannot push tags). The workflow `discord-release.yml`
+   makes the release and its tag from that file and posts it to Discord's #announcements as
+   De-Pattern. Never attach firmware to a release.

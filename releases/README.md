@@ -1,6 +1,6 @@
 # Release announcements
 
-One file a release, `releases/vX.Y.md`, committed on `main` before the tag `vX.Y` is pushed.
+One file a release, `releases/vX.Y.md`: pushing it, new, to `main` makes the release vX.Y and its tag.
 Its first line, `# TITLE`, names the GitHub release; the rest is the notes, posted as they
 are to Discord's #announcements by `.github/workflows/discord-release.yml` (Discord markdown:
 **bold**, bullet lines, links; at most about 4,000 characters, the rest cut). No firmware is
