@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.30** | 2026-10-28 | Stock Y/N questions (the OS update, the save) answered on every page; TRIG + YES is stock's; MACHINE SEL keeps SAMP between sample machines; the slice marker follows the track's voice; LFO depth on SAMP/SLCE; recorder THRES and ARM; gentler normalize; held arrows scroll the lists; the slice editor's preview; CPU on screen | `builds/v0.30-FIXES/` | yes |
+| **v0.30.1** | 2026-10-29 | Hotfix on v0.30: PERC's AMD no longer silences everything until a reboot (the sine it reads is loaded again) | `builds/v0.30.1-AMDFIX/` | yes |
+| v0.30 | 2026-10-28 | Stock Y/N questions (the OS update, the save) answered on every page; TRIG + YES is stock's; MACHINE SEL keeps SAMP between sample machines; the slice marker follows the track's voice; LFO depth on SAMP/SLCE; recorder THRES and ARM; gentler normalize; held arrows scroll the lists; the slice editor's preview; CPU on screen | `builds/v0.30-FIXES/` | yes |
 | v0.29 | 2026-10-28 | Voices play newest first (PERC past 8 voices, Monomachine dead notes under dynamic allocation); a finished Monomachine voice frees its DSP time (the third track silent); multi-select and SELECT ALL/DELETE in the folder browser; CLEAR SLICE GRID; YES answers the save question on a SLICE/GRID page | `builds/v0.29-VOICES/` | yes |
 | v0.28 | 2026-10-28 | The Monomachine machines drawn as the Monomachine's (animated controls), their choice knobs with detents, each machine its own level; SHIFT and GRAN removed; KEYBOARD's first press of a new slice plays only that slice | `builds/v0.28-MNM/` | yes |
 | v0.27 | 2026-10-27 | v0.26 and MNM-1 merged into one line (the five Monomachine machines, without CZ/RESONATOR); the DSP frame-time guard against the audio dropout; TRACK + PLAY no longer opens the sample list; FILE NAME arrows repeat; slice editor moves with FUNC held; the playing slice marked; p-locked controls lit | `builds/v0.27-GUARD/` | yes |
@@ -67,6 +68,28 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.30.1 — AMDFIX (PERC's amp modulation no longer kills the sound)
+
+`DN2mod_v0.30.1_AMDFIX_OS1.11.syx`
+sha256 `fa681de7a6a9815ded7dc9492fa70e6f6d0b1d8bdb08ad15ef4a0bbcc97ed03f`
+Gate: CLEARED TO FLASH, 2026-10-29. Source: commit `be7a74a3` (branch `v0301`, v0.30 plus one fix).
+
+Everything in v0.30, plus one fix (depaffect's and others' reports, v0.29 and v0.30): on a
+PERC track, **AMD** (the Machinedrum's amp modulation, page 2) above 0 silenced all audio
+until a reboot. AMD reads a sine table that v0.28 stopped loading into the DSP when SHIFT and
+GRAN were removed (the table lived with SHIFT's). The table is loaded again, on its own, and a
+new test checks that every table PERC reads is loaded.
+
+**Test** (after the regression check):
+1. A PERC track (any machine, P-I BD is a good one), a pattern playing: turn AMD up slowly
+   from 0 to 127, and AMF across its range. The hits are amplitude-modulated; nothing goes
+   silent, other tracks keep playing.
+2. The v0.30 tests, below, if you have not run them.
+
+**Known issues**: as v0.30's, below. New since v0.30 (in v0.31's work): FUNC + turn does not
+move our machines' controls; heavy PERC use with dynamic voice allocation can stop the sound
+(lock each track to 1 voice meanwhile).
 
 ## v0.30 — FIXES (stock questions answered, SAMP kept, LFO depth, the recorder, CPU shown, your v0.28/v0.29 notes)
 
