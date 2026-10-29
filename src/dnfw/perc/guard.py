@@ -147,6 +147,10 @@ def meter(p, dst: int) -> None:
     seconds). Emit only (the runner's model never builds the idle packet). Clobbers R8,
     R10-R13."""
     from .machines import _recip_inline
+    if p.run:                                  # the model (dnfw.sampler.live's packets): no clock, 0
+        p.iconst(8, 0)
+        p.st(dst, 8)
+        return
     p.comment("v0.32: the DSP's load since the last idle packet, permille")
     zero = p.label("mzero")
     done = p.label("mdone")

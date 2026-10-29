@@ -661,7 +661,9 @@ def test_v022_send_skips_the_recordings_area_and_link4_reports_the_ram():
     assert sum(n for _, n in sent) == len(pool) - SM.HOLE_BYTES
     assert sent[-1][0] + sent[-1][1] == len(pool)
     src = (pathlib.Path(__file__).resolve().parents[1] / "csrc/sampler/link.c").read_text()
-    assert "(at < REC_END && at + k > REC_OFFSET)" in src and "#define PROTO 4" in src
+    assert "(at < REC_END && at + k > REC_OFFSET)" in src
+    import re
+    assert int(re.search(r"#define PROTO (\d+)", src).group(1)) >= 4      # (v0.31: 5, the library)
 
 
 def test_v022_len_at_its_lowest_still_loops_and_a_held_note_survives_the_knobs():
