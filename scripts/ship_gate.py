@@ -885,8 +885,9 @@ def main() -> int:
         # reached the layout (6k was, once: smp_machine_commit was linked but not listed)
         csrc_text = "".join(f.read_text() for f in (ROOT / "csrc").rglob("*.c"))
         for sym, what in (("smp_question_up", "stock questions and held keys (ColdFire)"),
-                          ("smp_machine_commit", "SAMP kept across sample machines (ColdFire)")):
-            if re.search(rf"\b{sym}\s*\(", csrc_text) and sym not in lay:
+                          ("smp_machine_commit", "SAMP kept across sample machines (ColdFire)"),
+                          ("smp_knob_at", "FUNC + turn (ColdFire)")):
+            if re.search(rf"\b{sym}\b", csrc_text) and sym not in lay:
                 gate(what, False, f"{sym} is in the C but not in the layout: the check cannot run")
 
         # 6k. v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner: the stock
@@ -915,6 +916,55 @@ def main() -> int:
                 return good, ("MACHINE SEL from ONESHOT to the next sample machine keeps SAMP" if good else why)
             gate("SAMP kept across sample machines (ColdFire)",
                  *cached("SAMP kept across sample machines (ColdFire)", [k_cmd, sorted(EMU_ENV.items())], k_body))
+
+        # 6m. v0.32: FUNC + turn on our machines' controls (a tester's list): when stock's FUNC
+        # jump would leave the value where it is, or move it against the knob, the turn is a
+        # plain one; a jump that moves with the knob is kept; nothing changes without FUNC, with
+        # a stale knob, or on a stock machine. (The emulator's encoders do not move a stock
+        # page's value: the setter's own call of smp_quant is made, with the record id, the
+        # knob's last turn poked and its time copied from the UI clock by the stock memcpy.)
+        if "smp_knob_at" in lay:
+            from dnfw.perc import machines as PMf   # noqa: PLC0415
+            kit = 0x4210C08C
+            snd0 = kit + 52
+            rid, slot = PMf.PARAMS[0][0], PMf.PARAMS[0][1]
+            va = snd0 + 20 + 2 * slot
+            clock, memcpy = 0x4058E8D4, 0x40134490
+
+            def fcase(ty, held, knob, fresh, value):
+                s = [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", f"poke:{va:#x}:2000",
+                     f"poke:{lay['smp_func_held']:#x}:{held:08x}", f"poke:{lay['smp_knob_d']:#x}:{knob & 0xFFFFFFFF:08x}"]
+                s += [f"call:{memcpy:#x}:{lay['smp_knob_at']:#x}:{clock:#x}:4"] if fresh else \
+                     [f"poke:{lay['smp_knob_at']:#x}:00000000"]
+                return s + [f"call:{lay['smp_quant']:#x}:sound0:{slot}:{value:#x}:{rid}"]
+            cases = [("stuck, turned right: a plain turn", (5, 1, 1, True, 0x2000), 0x2100),
+                     ("stuck, turned left: a plain turn", (5, 1, -1, True, 0x2000), 0x1F00),
+                     ("against the knob: a plain turn", (5, 1, 2, True, 0x1000), 0x2200),
+                     ("a jump with the knob: kept", (5, 1, 1, True, 0x2C00), 0x2C00),
+                     ("no FUNC: as it is", (5, 0, 1, True, 0x2000), 0x2000),
+                     ("a stale knob: as it is", (5, 1, 1, False, 0x2000), 0x2000),
+                     ("a stock machine: as it is", (1, 1, 1, True, 0x2000), 0x2000)]
+            fs = ["wait:3"]
+            for _n, args, _w in cases:
+                fs += fcase(*args)
+            fs += [f"poke:{lay['smp_func_held']:#x}:00000000", f"poke:{snd0 + 0xDE:#x}:01", "wait:4"]
+            fjs = work / "functurn.json"
+            f_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                     "--snapshot", snap, "--steps", ",".join(fs), "--png-dir", work / "functurn", "--json", fjs]
+
+            def f_body(tdir):
+                rc, out = run("FUNC + turn", f_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and fjs.exists():
+                    calls = [c for c in json.loads(fjs.read_text())["calls"] if c["fn"] == hex(lay["smp_quant"])]
+                    got = [c["d0"] & 0xFFFF for c in calls]
+                    facts = {n: (g == w) for (n, _a, w), g in zip(cases, got)}
+                    good = len(got) == len(cases) and all(facts.values())
+                    why = f"{facts} got={[hex(g) for g in got]}"
+                return good, ("FUNC + turn on PERC: a stuck or backward stock jump becomes a plain turn, either "
+                              "way; a jump with the knob kept; no change without FUNC, with a stale knob, or on a "
+                              "stock machine" if good else why)
+            gate("FUNC + turn (ColdFire)", *cached("FUNC + turn (ColdFire)", [f_cmd, sorted(EMU_ENV.items())], f_body))
 
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest

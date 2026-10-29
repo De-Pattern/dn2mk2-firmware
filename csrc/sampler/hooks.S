@@ -31,11 +31,12 @@ smp_rx_hook:
 smp_quant_hook:
         lea     -12(%sp), %sp
         movem.l %d0-%d1/%a1, (%sp)
+        move.l  %d4, -(%sp)                     | v0.32: the record id (the setter's d4)
         move.l  %d3, -(%sp)
         move.l  %d2, -(%sp)
         move.l  %d0, -(%sp)
         jsr     smp_quant
-        lea     12(%sp), %sp
+        lea     16(%sp), %sp
         move.l  %d0, %d3
         movem.l (%sp), %d0-%d1/%a1
         lea     12(%sp), %sp

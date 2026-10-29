@@ -107,10 +107,53 @@ static int mnm_quant(int mi, int slot, int old, int value)
     return mnm_rep(j, n, c) << 8;
 }
 
-/* from the setter's write (hooks.S, smp_quant_hook): S = the sound, SLOT, VALUE the
- * value about to be written (coarse << 8 | fine) -> the value to write */
-int smp_quant(u8 *s, int slot, int value)
+/* v0.32: FUNC + turn on our machines' controls (a tester's list, v0.30). Stock gives some
+ * parameter records a FUNC jump (WaveTone's TUNE by octaves, its waves); our controls sit on
+ * stock records, and on the ones that carry a jump the stock jump lands on one fixed value
+ * and stays there whatever the turn (TUNE at 50, BR1 SU at 0, PLAY MODE at 0 ...). So when
+ * FUNC is held, the track is on one of our machines and the value the stock wants to write
+ * did not move the way the knob turned, the turn is taken as a plain one: the old value
+ * moved by the knob's own detents, kept inside the record's range. A stock jump that does
+ * move with the knob (PERC's PTCH by intervals, DPRO WAVE's waves) is left as it is. The
+ * knob and its detents come from the UI item (rec.c smp_ui_pop: smp_knob_d, smp_knob_at). */
+extern int smp_func_held;
+extern int smp_knob_d;
+extern u32 smp_knob_at;
+#define RECORDS_N 1100u                         /* records at 0x401F7F94, 60 bytes each */
+#define KNOB_FRESH 150u                         /* 100 ms: the turn this write comes from */
+
+static int ours(u8 *s)
 {
+    int ty = (signed char)s[SOUND_TYPE];
+    return ty == 5 || mnm_index(ty - 4) >= 0 || (ty >= TYPE_FIRST && ty < TYPE_FIRST + TYPES);
+}
+
+static int func_turn(u8 *s, int slot, int value, u32 id)
+{
+    if (!smp_func_held || !smp_knob_d || id >= RECORDS_N || !ours(s))
+        return value;
+    if (*(volatile u32 *)0x4058E8D4u - smp_knob_at > KNOB_FRESH)
+        return value;
+    const int *r = (const int *)(0x401F7F94u + 60u * id);
+    if (r[1] != slot)
+        return value;                           /* not the record this slot is */
+    int old = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
+    int d = ((value >> 8) & 0xFF) - (old >> 8);
+    if (d != 0 && (d > 0) == (smp_knob_d > 0))
+        return value;                           /* stock's jump moves with the knob: kept */
+    int lo = r[2] >> 8, hi = r[3] >> 8, c = (old >> 8) + smp_knob_d;
+    if (hi < lo)
+        return value;
+    if (c < lo) c = lo;
+    if (c > hi) c = hi;
+    return c << 8 | (old & 0xFF);
+}
+
+/* from the setter's write (hooks.S, smp_quant_hook): S = the sound, SLOT, VALUE the
+ * value about to be written (coarse << 8 | fine), ID its record -> the value to write */
+int smp_quant(u8 *s, int slot, int value, u32 id)
+{
+    value = func_turn(s, slot, value, id);
     int mi = mnm_index((signed char)s[SOUND_TYPE] - 4);     /* v0.27: is_wr's kind */
     if (mi >= 0)
         return mnm_quant(mi, slot, *(volatile u16 *)(s + SOUND_VALUES + 2 * slot), value);

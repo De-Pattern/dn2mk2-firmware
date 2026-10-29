@@ -805,12 +805,19 @@ int smp_question_up(void)
 u32 smp_held_lo __attribute__((section(".data"), aligned(4))) = 0;
 u32 smp_held_hi __attribute__((section(".data"), aligned(4))) = 0;
 
+int smp_knob_d __attribute__((section(".data"))) = 0;       /* v0.32: the last knob turn (fmt.c func_turn) */
+u32 smp_knob_at __attribute__((section(".data"))) = 0;
+
 u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock receive returns it */
 {
     u8 *it = (u8 *)UI_POP(queue);
     if (!it)
         return (u32)it;
     u32 code = (u32)it[4] << 24 | (u32)it[5] << 16 | (u32)it[6] << 8 | it[7];
+    if (it[0] == IT_KNOB && code >= 1 && code <= 8) {           /* A..H */
+        smp_knob_d = (signed char)it[8];
+        smp_knob_at = *(volatile u32 *)0x4058E8D4u;
+    }
     u32 flags = (u32)it[8] << 24 | (u32)it[9] << 16 | (u32)it[10] << 8 | it[11];
     /* v0.25: a key's item: bit 0 while it is down (a press), bit 4 on most keys' release,
      * bit 1 while FUNC is held. FUNC's own release carries neither bit 0 nor bit 4 (the
