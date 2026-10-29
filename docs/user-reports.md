@@ -75,6 +75,16 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   track's old voice fades in a block, as the DT2 does), then measure eight PERC tracks with
   dynamic allocation in the runner.
 
+- **FUNC + turn does nothing on our machines' controls** (Discord tester, v0.30, 2026-10-29).
+  On stock pages FUNC while turning makes a value jump to set positions (DT2 manual §6.2.1:
+  NOTE by octaves, delay time by tempo steps). On ours the value stays put: DDRW (BR1 SU,
+  WID, WAV2, TIME, TUNE), DENS (PCH4, WAVE, TUNE), VO-6 (CONS, CLEN, TUNE, V-SW, voice type),
+  SID (PWRS, WAVE, MOD, MSRC, TUNE), PERC (RAMP, RDEC, START, NOISE, CLIP, AMF, EQF, EQG, FLTW,
+  FILTER Q), ONESHOT (LENGTH, PLAY MODE), WERP (SEG, BARS), STRETCH/REPITCH's matching
+  controls. **Open**: find what the stock knob handler does with FUNC held (a jump table per
+  parameter, from the parameter's descriptor) and give ours a plain turn, or jumps where they
+  mean something (TUNE by semitone/octave, choices by one).
+
 ## Requests
 
 - Stereo sampling from the inputs (bearsshuffle)
