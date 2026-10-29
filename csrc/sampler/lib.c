@@ -100,12 +100,39 @@ static int lib_wr(u32 sector, u32 bytes, const void *buf)
 
 static u32 entry_check(const u8 *e) { return adler(e, 60, 1u) ^ 0x4C494245u; }
 
+/* which entries hold a sample, worked out once when the index is read or changes (the
+ * browser asks thousands of times a frame: the check itself is far too slow for that) */
+static u32 used_bits[LIB_CAP / 32] __attribute__((section(".data")));
+static u16 fold_n[LIB_FOLDERS] __attribute__((section(".data")));   /* samples in each folder */
+
+static void used_set(int k)
+{
+    const u8 *e = E(k);
+    u32 b = 1u << (k & 31);
+    if (lget(e) >= LIB_DATA && lget(e + 60) == entry_check(e) && e[13] < LIB_FOLDERS)
+        used_bits[k >> 5] |= b;
+    else
+        used_bits[k >> 5] &= ~b;
+}
+
+static void used_all(void)
+{
+    for (int k = 0; k < LIB_CAP / 32; k++)
+        used_bits[k] = 0;
+    for (int k = 0; k < LIB_CAP; k++)
+        used_set(k);
+    for (int f = 0; f < LIB_FOLDERS; f++)
+        fold_n[f] = 0;
+    for (int k = 0; k < LIB_CAP; k++)
+        if ((used_bits[k >> 5] >> (k & 31)) & 1u)
+            fold_n[E(k)[13]]++;
+}
+
 int smp_lib_used(int k)                         /* entry K holds a sample */
 {
     if (smp_lib_state != 2 || k < 0 || k >= LIB_CAP)
         return 0;
-    const u8 *e = E(k);
-    return lget(e) >= LIB_DATA && lget(e + 60) == entry_check(e);
+    return (used_bits[k >> 5] >> (k & 31)) & 1u;
 }
 
 static u32 sb_check(void) { return ~SB[0] ^ SB[1] ^ SB[2] ^ 0x5AA5C33Cu; }
@@ -146,6 +173,7 @@ void smp_lib_boot(void)
         smp_lib_state = -1;
         return;
     }
+    used_all();
     smp_lib_state = 2;
 }
 
@@ -173,6 +201,7 @@ static int lib_format(void)
     if (lib_wr(LIB_INDEX, LIB_INDEX_SECTORS * 512u, IDX) != 0
         || lib_wr(LIB_FOLDER_AT, LIB_FOLDER_SECTORS * 512u, FOLD) != 0 || sb_write() != 0)
         return -1;
+    used_all();
     smp_lib_state = 2;
     return 0;
 }
@@ -365,6 +394,7 @@ u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
             for (u32 b = 0; b < 64; b++)
                 E(w_idx)[b] = 0;
         }
+        used_all();
         put32(rp + r, (u32)w_idx); r += 4;
         w_idx = -1;
         return r;
@@ -406,6 +436,7 @@ int smp_lib_delete(int k)
         return -1;
     for (u32 b = 0; b < 64; b++)
         E(k)[b] = 0;
+    used_all();
     return index_sector_write(k);
 }
 
@@ -420,6 +451,7 @@ int smp_lib_rename(int k, const char *name)
     for (; c < LIB_NAME; c++)
         e[24 + c] = 0;
     lput(e + 60, entry_check(e));
+    used_all();
     return index_sector_write(k);
 }
 
@@ -436,3 +468,10 @@ int smp_lib_fmt(int k) { return smp_lib_used(k) ? E(k)[12] : 0; }
 
 u8 *smp_lib_stage(void) { return LSTAGE; }      /* link.c's LOAD TO PROJECT copies through it */
 int smp_lib_busy(void) { return w_idx >= 0; }   /* a send from the computer is using it */
+
+void smp_lib_refresh(void) { if (smp_lib_state == 2) used_all(); }   /* the index changed in RAM */
+
+int smp_lib_folder_count(int f)                 /* samples in folder F */
+{
+    return smp_lib_state == 2 && f >= 0 && f < LIB_FOLDERS ? fold_n[f] : 0;
+}

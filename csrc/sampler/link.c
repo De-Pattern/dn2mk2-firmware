@@ -1545,11 +1545,14 @@ int smp_lp_done __attribute__((section(".data"))) = 0;       /* loaded since the
 int smp_lp_full __attribute__((section(".data"))) = 0;       /* refused: no slot or no room */
 static int one_due __attribute__((section(".data"))) = -1;    /* a slot for the DSP, when idle */
 
+u32 smp_lp_queued __attribute__((section(".data"))) = 0;    /* ever queued (the gate reads it) */
+
 int smp_lib_load(int k)                          /* -> 0 queued */
 {
     if (!smp_lib_used(k) || lp_head - lp_tail >= LPQ)
         return -1;
     lp_q[lp_head++ % LPQ] = (short)k;
+    smp_lp_queued++;
     return 0;
 }
 

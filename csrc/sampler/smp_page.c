@@ -765,6 +765,36 @@ int smp_fb_mcur __attribute__((section(".data"))) = 0;
  * ACTION menu marks the folder's; DELETE takes the marked ones if any, else the sample (or,
  * on a folder, the folder's samples). Marks last until the browser closes. */
 static u32 fb_marks[4] __attribute__((section(".data"))) = {0, 0, 0, 0};
+/* v0.31: the browser's two stores, as the DT2's SAMPLES menu (docs/drive-library-plan.md):
+ * -1 the top (+DRIVE, PROJECT RAM), 0 PROJECT RAM (the pool, as before), 1 +DRIVE (the
+ * library, lib.c). In +DRIVE an item's "slot" is a library entry. */
+int smp_fb_store __attribute__((section(".data"))) = -1;
+int smp_fb_last_store __attribute__((section(".data"))) = 0;   /* where the top's cursor lands (PROJECT RAM until +DRIVE is used) */
+#define FB_DRIVE (-4)
+#define FB_RAM (-5)
+#define LB_CAP 2048
+static u32 lb_marks[LB_CAP / 32] __attribute__((section(".data")));
+extern int smp_lib_used(int k), smp_lib_folder_of(int k), smp_lib_slot_of(int k);
+extern const char *smp_lib_name(int k), *smp_lib_folder_name(int f);
+extern int smp_lib_delete(int k), smp_lib_load(int k), smp_lib_pending(void);
+
+static int lb_in(int k, int folder) { return smp_lib_used(k) && smp_lib_folder_of(k) == folder; }
+
+extern int smp_lib_folder_count(int f);
+static int lb_has(int folder) { return smp_lib_folder_count(folder) > 0; }
+
+static int lb_marked(int k) { return k >= 0 && k < LB_CAP && ((lb_marks[k >> 5] >> (k & 31)) & 1u); }
+
+static void lb_mark(int k, int on)
+{
+    if (k < 0 || k >= LB_CAP)
+        return;
+    u32 b = 1u << (k & 31);
+    if (on)
+        lb_marks[k >> 5] |= b;
+    else
+        lb_marks[k >> 5] &= ~b;
+}
 
 static int fb_in(int k, int folder)              /* slot K (holding something) shows in FOLDER */
 {
@@ -786,11 +816,17 @@ static int fb_has(int folder)
 
 int smp_fb_marked(int k)
 {
+    if (smp_fb_store == 1)
+        return lb_marked(k);
     return k >= 0 && k < 128 && ((fb_marks[k >> 5] >> (k & 31)) & 1u);
 }
 
 void smp_fb_mark(int k, int on)
 {
+    if (smp_fb_store == 1) {
+        lb_mark(k, on);
+        return;
+    }
     if (k < 0 || k >= 128)
         return;
     u32 b = 1u << (k & 31);
@@ -804,11 +840,18 @@ void smp_fb_unmark_all(void)
 {
     for (int i = 0; i < 4; i++)
         fb_marks[i] = 0;
+    for (int i = 0; i < LB_CAP / 32; i++)
+        lb_marks[i] = 0;
 }
 
 int smp_fb_mark_count(void)
 {
     int n = 0;
+    if (smp_fb_store == 1) {
+        for (int k = 0; k < LB_CAP; k++)
+            n += lb_marked(k) && smp_lib_used(k);
+        return n;
+    }
     for (int k = 0; k < 128; k++)
         if (smp_fb_marked(k) && !smp_slot_empty(k))
             n++;
@@ -819,6 +862,16 @@ int smp_fb_mark_count(void)
 static int fb_size(int folder, int *marked)
 {
     int n = 0, m = 0;
+    if (smp_fb_store == 1) {
+        for (int k = 0; k < LB_CAP; k++)
+            if (lb_in(k, folder)) {
+                n++;
+                m += lb_marked(k);
+            }
+        if (marked)
+            *marked = m;
+        return n;
+    }
     for (int k = 0; k < 128; k++)
         if (!smp_slot_empty(k) && fb_in(k, folder)) {
             n++;
@@ -833,6 +886,12 @@ static int fb_size(int folder, int *marked)
 void smp_fb_mark_folder(int folder)
 {
     int m, n = fb_size(folder, &m), on = m < n;
+    if (smp_fb_store == 1) {
+        for (int k = 0; k < LB_CAP; k++)
+            if (lb_in(k, folder))
+                lb_mark(k, on);
+        return;
+    }
     for (int k = 0; k < 128; k++)
         if (!smp_slot_empty(k) && fb_in(k, folder))
             smp_fb_mark(k, on);
@@ -856,6 +915,20 @@ int smp_fb_delete_count(int slot, int folder)
 extern void smp_discard(int k);
 void smp_fb_delete(int slot, int folder)
 {
+    if (smp_fb_store == 1) {                    /* v0.31: from the +Drive's library */
+        if (smp_fb_mark_count()) {
+            for (int k = 0; k < LB_CAP; k++)
+                if (lb_marked(k) && smp_lib_used(k))
+                    smp_lib_delete(k);
+        } else if (slot >= 0)
+            smp_lib_delete(slot);
+        else if (folder != -1)
+            for (int k = 0; k < LB_CAP; k++)
+                if (lb_in(k, folder))
+                    smp_lib_delete(k);
+        smp_fb_unmark_all();
+        return;
+    }
     if (smp_fb_mark_count()) {
         for (int k = 0; k < 128; k++)
             if (smp_fb_marked(k) && !smp_slot_empty(k))
@@ -869,11 +942,42 @@ void smp_fb_delete(int slot, int folder)
     smp_fb_unmark_all();
 }
 
+int smp_fb_load_project(int slot, int folder)
+{
+    int n = 0;
+    if (smp_fb_store != 1)
+        return 0;
+    if (smp_fb_mark_count()) {
+        for (int k = 0; k < LB_CAP; k++)
+            if (lb_marked(k) && smp_lib_used(k))
+                n += smp_lib_load(k) == 0;
+    } else if (slot >= 0)
+        n += smp_lib_load(slot) == 0;
+    else if (folder != -1)
+        for (int k = 0; k < LB_CAP; k++)
+            if (lb_in(k, folder))
+                n += smp_lib_load(k) == 0;
+    smp_fb_unmark_all();
+    return n;
+}
+
 /* the browser's items where it is: N of them; item I as a folder (-> its index, or
  * FB_INCOMING / FB_RECORDED; *slot -1) or a sample (-> -1, *slot its slot) */
 int smp_fb_count(void)
 {
     int n = 0;
+    if (smp_fb_store == -1)
+        return 2;                               /* v0.31: +DRIVE, PROJECT RAM */
+    if (smp_fb_store == 1) {
+        if (smp_fb_folder == -1) {
+            for (int f = 0; f < 64; f++)
+                n += lb_has(f);
+            return n;
+        }
+        for (int k = 0; k < LB_CAP; k++)
+            n += lb_in(k, smp_fb_folder);
+        return n;
+    }
     if (smp_fb_folder == -1) {                  /* v0.29: a folder emptied by DELETE is not shown */
         for (int f = 0; f < smp_folder_count(); f++)
             n += fb_has(f);
@@ -888,6 +992,22 @@ int smp_fb_count(void)
 int smp_fb_item(int i, int *slot)
 {
     *slot = -1;
+    if (smp_fb_store == -1)
+        return i == 0 ? FB_DRIVE : i == 1 ? FB_RAM : -1;
+    if (smp_fb_store == 1) {
+        if (smp_fb_folder == -1) {
+            for (int f = 0; f < 64; f++)
+                if (lb_has(f) && i-- == 0)
+                    return f;
+            return -1;
+        }
+        for (int k = 0; k < LB_CAP; k++)
+            if (lb_in(k, smp_fb_folder) && i-- == 0) {
+                *slot = k;
+                return -1;
+            }
+        return -1;
+    }
     if (smp_fb_folder == -1) {
         for (int f = 0; f < smp_folder_count(); f++)
             if (fb_has(f) && i-- == 0)
@@ -923,6 +1043,12 @@ int smp_fb_index_of(int f)
 
 static const char *fb_folder_name(int f)
 {
+    if (f == FB_DRIVE)
+        return "+DRIVE";
+    if (f == FB_RAM)
+        return "PROJECT RAM";
+    if (smp_fb_store == 1)
+        return smp_lib_folder_name(f);
     return f == FB_INCOMING ? "incoming" : f == FB_RECORDED ? "recorded" : smp_folder_name(f);
 }
 
@@ -942,7 +1068,20 @@ int smp_fb_visible(void)
  * (v0.29) SELECT ALL, DELETE */
 int smp_fb_nactions(int on_folder)
 {
+    if (smp_fb_store == 1)
+        return on_folder ? 3 : 4;
     return on_folder ? 2 : 4;
+}
+
+/* the action at place A of the SAMPLE ACTION menu: 0 LOAD TO TRK, 1 RENAME, 2 DELETE (in
+ * PROJECT RAM: UNLOAD), 3 SELECT ALL, 4 LOAD TO PROJECT (v0.31: +DRIVE) */
+int smp_fb_action(int on_folder, int a)
+{
+    static const signed char ram_s[4] = {0, 1, 2, 3}, ram_f[2] = {3, 2};
+    static const signed char lib_s[4] = {4, 0, 2, 3}, lib_f[3] = {4, 3, 2};
+    if (smp_fb_store == 1)
+        return on_folder ? lib_f[a < 0 ? 0 : a > 2 ? 2 : a] : lib_s[a < 0 ? 0 : a > 3 ? 3 : a];
+    return on_folder ? ram_f[a < 0 ? 0 : a > 1 ? 1 : a] : ram_s[a < 0 ? 0 : a > 3 ? 3 : a];
 }
 
 void smp_fb_draw(void *c, int samp)
@@ -952,9 +1091,15 @@ void smp_fb_draw(void *c, int samp)
             SET_PIXEL(c, x, y, 0);
     char num[4];
     num3(num, samp);
-    int marks = smp_fb_mark_count();
-    if (marks)
+    int marks = smp_fb_mark_count(), pend = smp_lib_pending();
+    if (pend)                                   /* v0.31: LOAD TO PROJECT under way */
+        LABEL(c, 64, 57, "LOADING TO PROJECT %d", pend);
+    else if (marks)
         LABEL(c, 64, 57, "%d SELECTED", marks);
+    else if (smp_fb_store == -1)
+        LABEL(c, 64, 57, "%s", "SAMPLES");
+    else if (smp_fb_folder == -1 && smp_fb_store == 1)
+        LABEL(c, 64, 57, "%s", "+DRIVE");
     else if (smp_fb_folder == -1)
         LABEL(c, 64, 57, "ASSIGN SAMPLE > A%s", num);
     else {
@@ -964,7 +1109,7 @@ void smp_fb_draw(void *c, int samp)
     hline(c, 0, 127, 55, 0);
     int n = smp_fb_count();
     if (n == 0) {
-        TEXT(c, FONT, 64, 28, CENTRED, "%s", "NO SAMPLES");
+        TEXT(c, FONT, 64, 28, CENTRED, "%s", smp_fb_store == 1 ? "+DRIVE EMPTY" : "NO SAMPLES");
         return;
     }
     if (smp_fb_cur >= n)
@@ -986,6 +1131,16 @@ void smp_fb_draw(void *c, int samp)
                 folder_icon(c, 112, y);
             if (smp_fb_folder_full(f))          /* v0.29: every sample in it marked */
                 invert(c, 1, y - 1, wide - 1, y + 6);
+        } else if (smp_fb_store == 1) {         /* v0.31: a library sample; its slot if in the pool */
+            char sn[4];
+            int s = smp_lib_slot_of(slot);
+            TEXT(c, FONT, 3, y, 0, smp_fb_menu ? "%.9s" : "%.18s", smp_lib_name(slot));
+            if (!smp_fb_menu && s >= 0) {
+                num3(sn, s + 1);
+                LABEL(c, 109, y, ">A%s", sn);
+            }
+            if (smp_fb_marked(slot))
+                invert(c, 2, y - 1, wide - 1, y + 6);
         } else {
             char nm[21], sn[4];
             slot_name(slot + 1, nm, smp_fb_menu ? 9 : 14);
@@ -1011,26 +1166,30 @@ void smp_fb_draw(void *c, int samp)
         int slot, f = smp_fb_item(smp_fb_cur, &slot), on_folder = slot < 0;
         int del = smp_fb_delete_count(slot, f);
         if (smp_fb_menu == 2) {
+            const char *w = smp_fb_store == 1 ? "DELETE" : "UNLOAD";   /* v0.31: the pool's is UNLOAD */
             if (del == 1)
-                TEXT(c, FONT, 95, 38, CENTRED, "%s", "DELETE?");
+                TEXT(c, FONT, 95, 38, CENTRED, "%s?", w);
             else
-                TEXT(c, FONT, 95, 38, CENTRED, "DELETE %d?", del);
+                TEXT(c, FONT, 95, 38, CENTRED, "%s %d?", w, del);
             LABEL(c, 95, 24, "%s", "YES / NO");
             return;
         }
         int all = smp_fb_folder_full(on_folder ? f : smp_fb_folder);
         for (int a = 0; a < smp_fb_nactions(on_folder); a++) {
             int y = 46 - 9 * a;
-            int act = on_folder ? (a == 0 ? 3 : 2) : a;        /* the sample menu's numbers */
-            if (act == 0)
+            int act = smp_fb_action(on_folder, a);
+            const char *w = smp_fb_store == 1 ? "DELETE" : "UNLOAD";
+            if (act == 4)
+                TEXT(c, FONT, 68, y, 0, "%s", "LOAD TO PROJ");
+            else if (act == 0)
                 TEXT(c, FONT, 68, y, 0, "LOAD TRK %d", (int)UI_TRACK + 1);
             else if (act == 1)
                 TEXT(c, FONT, 68, y, 0, "%s", "RENAME");
             else if (act == 2) {
                 if (del > 1)
-                    TEXT(c, FONT, 68, y, 0, "DELETE %d", del);
+                    TEXT(c, FONT, 68, y, 0, "%s %d", w, del);
                 else
-                    TEXT(c, FONT, 68, y, 0, "%s", "DELETE");
+                    TEXT(c, FONT, 68, y, 0, "%s", w);
             } else
                 TEXT(c, FONT, 68, y, 0, "%s", all ? "CLEAR ALL" : "SELECT ALL");
             if (a == smp_fb_mcur)
