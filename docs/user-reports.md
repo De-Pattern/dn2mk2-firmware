@@ -70,10 +70,11 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   CPU shows and the sound keeps playing. So the cut-out comes with dynamic voice allocation:
   each new note lands on another voice while the old ones still render, so eight tracks hold
   many more PERC voices than eight. The guard (v0.27) leaves voices out but the whole DSP
-  still stops. To do: give PERC/MD voices the newest-first budget the Monomachine voices have
-  (v0.29), and stop rendering a voice its own track has moved on from (a retriggered
-  track's old voice fades in a block, as the DT2 does), then measure eight PERC tracks with
-  dynamic allocation in the runner.
+  still stops. **v0.31**: a Machinedrum voice now rests once its sound has died away after
+  the AMP (64 blocks under -96 dB, as the Monomachine's since v0.29), so finished voices cost
+  nothing and the newest-first order (v0.29) has the time for new notes (runner: bit-exact,
+  rests, wakes on its next note). To confirm on the instrument: eight PERC tracks, dynamic
+  allocation.
 
 - **FUNC + turn does nothing on our machines' controls** (Discord tester, v0.30, 2026-10-29).
   On stock pages FUNC while turning makes a value jump to set positions (DT2 manual §6.2.1:
