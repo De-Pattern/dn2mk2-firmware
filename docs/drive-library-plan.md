@@ -248,3 +248,13 @@ back byte for byte; nothing written outside the library's region (every block wr
 recorded and bounded); a delete then a send reusing its hole; LOAD TO PROJECT putting the
 frames, entry and name in the first empty slot and sending that slot to the DSP; the
 browser's two levels, ticks and actions drawn and working.
+
+## 10. Pool banks: not in v0.31 (2026-10-29)
+
+The owner's condition (§6a.1) was banks only if they can be close to the DT2's and clean.
+They cannot be clean yet: SAMP is a stock parameter slot whose range (0..127) the OS keeps,
+saves in every sound and kit, and modulates; 8 x 127 slots needs a second parameter (a BANK
+control) that the OS would save and recall with the sound, and the DSP's pool directory
+(128 entries, 400 MB) would have to grow or be paged per bank. Both are doable but touch the
+saved-sound format and the DSP's loader, so they wait for the per-project pools (v0.32), which
+change the same directory. Until then: 122 slots of yours, the 20 GB library behind them.
