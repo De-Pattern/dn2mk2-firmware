@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.29** | 2026-10-28 | Voices play newest first (PERC past 8 voices, Monomachine dead notes under dynamic allocation); a finished Monomachine voice frees its DSP time (the third track silent); multi-select and SELECT ALL/DELETE in the folder browser; CLEAR SLICE GRID; YES answers the save question on a SLICE/GRID page | `builds/v0.29-VOICES/` | yes |
+| **v0.30** | 2026-10-28 | Stock Y/N questions (the OS update, the save) answered on every page; TRIG + YES is stock's; MACHINE SEL keeps SAMP between sample machines; the slice marker follows the track's voice; LFO depth on SAMP/SLCE; recorder THRES and ARM; gentler normalize; held arrows scroll the lists; the slice editor's preview; CPU on screen | `builds/v0.30-FIXES/` | yes |
+| v0.29 | 2026-10-28 | Voices play newest first (PERC past 8 voices, Monomachine dead notes under dynamic allocation); a finished Monomachine voice frees its DSP time (the third track silent); multi-select and SELECT ALL/DELETE in the folder browser; CLEAR SLICE GRID; YES answers the save question on a SLICE/GRID page | `builds/v0.29-VOICES/` | yes |
 | v0.28 | 2026-10-28 | The Monomachine machines drawn as the Monomachine's (animated controls), their choice knobs with detents, each machine its own level; SHIFT and GRAN removed; KEYBOARD's first press of a new slice plays only that slice | `builds/v0.28-MNM/` | yes |
 | v0.27 | 2026-10-27 | v0.26 and MNM-1 merged into one line (the five Monomachine machines, without CZ/RESONATOR); the DSP frame-time guard against the audio dropout; TRACK + PLAY no longer opens the sample list; FILE NAME arrows repeat; slice editor moves with FUNC held; the playing slice marked; p-locked controls lit | `builds/v0.27-GUARD/` | yes |
 | v0.26 | 2026-10-26 | The slice editor as the DT2's (FUNC + RIGHT splits, FUNC + LEFT removes, FUNC + YES previews, FUNC + G moves, playhead); KEYBOARD plays slices in order; no pop-ups (sample list, slice menus); PLAY/MODE/BARS/GRID four detents a choice; browser NO closes; name screen FUNC + PLAY clears, grid wraps, cursor moves on | `builds/v0.26-SLICES/` | yes |
@@ -66,6 +67,77 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.30 — FIXES (stock questions answered, SAMP kept, LFO depth, the recorder, CPU shown, your v0.28/v0.29 notes)
+
+`DN2mod_v0.30_FIXES_OS1.11.syx`
+sha256 `55f56c0145eb64d188a076ded6855bbe5c9c0da29854f4decfe98d91773d16e2`
+Gate: CLEARED TO FLASH, 2026-10-28 (USB size 2,050,704 of 2,097,152; DSP image 1,015,692 of 1,048,575). Source: commit `50dddae5`. Docs: `docs/user-reports.md`, `docs/sampler.md`, `docs/drive-library-plan.md`.
+
+Everything in v0.29, plus:
+
+**A stock question's keys are stock's** (a user's report). On a PERC or sample track, YES on
+the OS update's "UPGRADE OS NOW?" opened our "no sample" note instead, so the update could
+not be accepted there; v0.29 fixed the save question only. Now, while any stock Y/N question
+is up, every key goes to it (found by the screen's own list of views, measured in the
+emulator). **A YES with another key held is stock's too**: TRIG + YES (the sound preview)
+no longer opens GRID's lock menu.
+
+**MACHINE SEL keeps SAMP** between two sample machines (your request): ONESHOT to WERP, say,
+keeps the sample; the rest of the sound still takes the new machine's defaults.
+
+**The slice marker follows the right voice.** The DSP reports a play position per voice;
+with dynamic voice allocation a track's notes play on any voice, and the page drew voice
+t's for track t, so the marker could lag or jump. It now takes the track's own voices.
+
+**LFO on SAMP or SLCE** reaches as far as its depth says: scaled over your loaded samples
+(or the sample's slices), held at the first and last instead of wrapping, never onto an
+empty slot or SLICE's NOTE.
+
+**The recorder** (misterairplane's reports): THRES 0 now waits for a sound (a -60 dB
+floor), so touching a knob no longer starts a recording on silence; ARM (knob H) arms on a
+right turn and stops on a left, one action a turn. **Normalize** brings a take to -6 dB
+(not full scale), by at most +24 dB; a louder take is left alone.
+
+**Lists**: holding UP or DOWN in the sample list and the folder browser scrolls.
+
+**Slice editor**: the playhead is the preview's own and no longer drifts; D is the
+preview's mode (once / looping), drawn with the DT2's play icons.
+
+**CPU on screen**: the PERC and Monomachine pages show **CPU** in place of the tempo while
+the DSP's guard is leaving a voice out for lack of time (for the VO-6 report: if CPU shows
+when VO-6 goes quiet, it is DSP time).
+
+**Gate changes.** New emulator checks: a stock question takes its YES (and the page's own
+YES still opens its menu), TRIG + YES is stock's, SAMP kept across MACHINE SEL; the LFO
+scaling, the preview's loop and the recorder floor are checked bit-exact in the runner.
+
+**Test** (after the regression check):
+1. On a SLICE or GRID track, FUNC + SETTINGS's save question: YES saves (no slice menu).
+   Next time you flash (this file again, or the next one), do it from a SLICE or GRID
+   track: YES on "UPGRADE OS NOW?" starts the update.
+2. On a GRID track, hold TRIG and press YES: the stock preview, no lock menu. YES alone:
+   the lock menu, as before.
+3. A sample track with a sample on SAMP: MACHINE SEL to another sample machine: same
+   sample.
+4. A SLICE track, dynamic voices, notes fast: the playing-slice marker follows the sound.
+5. LFO on SAMP, depth small then large: small moves a few samples, large reaches the last;
+   no empty slots.
+6. Recorder: THRES 0, nothing playing, touch a knob: no recording; ARM: right arms, left
+   stops. A quiet recording normalized: about -6 dB, not loud.
+7. Hold DOWN in the sample list: it scrolls.
+8. Slice editor: preview with D on once and looping; the playhead follows.
+9. VO-6 (or many heavy voices): when sound drops out, does CPU show?
+10. The v0.29 tests, below, if you have not run them.
+
+**Known issues / not done.**
+- **Heavy voices** can still run out of DSP time (CPU shows when they do); VO-6 is the
+  first to make cheaper.
+- **Not reproduced yet** (need your details): the freeze after clearing a slice track and
+  turning SAMP; trig mute on our machines; an MD machine heard after switching machines.
+- **Check on hardware:** GRID's re-latch (v0.28), the Monomachine levels, p-lock
+  indicators on the Monomachine pages (in since v0.28).
+- **Not seen on hardware yet**: all of the above; checked in the emulators.
 
 ## v0.29 — VOICES (newest voice first, Monomachine voices that rest, multi-select, your v0.27 notes)
 
