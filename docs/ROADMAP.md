@@ -184,3 +184,14 @@ lookup and the filter envelope's form):
 Tuning for percussion: strike-led, an option for FREQ not to follow the note (fixed
 pitch), a noise component in the strike, and later a modal "bowl" sub-type (a few
 inharmonic modes).
+
+## Priorities (owner, 2026-10-29)
+
+1. **DSP stability first**: the Machinedrum, Monomachine and sample machines stable, smooth
+   and reliable in CPU terms before any new feature (bugs still fixed meanwhile).
+2. **Parameter slides** next once stability allows: a per-trig slide (TRIG page 2: SLD on,
+   SLEN in steps) gliding every value the trig changes from the track's current one.
+3. **Later, maybe**: from complex-ping's Overtone (github.com/complex-ping/overtone, also a
+   DN2 mod): LOOP (track/mix/input looper), cross-modulation between LFOs and arps, per-track
+   insert effects, GROOVE (weighted steps in place of swing), envelope followers, a DSP load
+   meter. Its code may also show other ways of handling the DSP budget; not studied yet.
