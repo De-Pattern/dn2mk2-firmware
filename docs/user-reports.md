@@ -65,6 +65,15 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 - "Some machines' controls do not work", "sound cutting out" (kazeko, v0.29); "easy to get
   the sound to cut out with a few Machinedrum engines" (depaffect): DSP time (v0.30 shows
   CPU when it happens), or the AMD fault above. Ask which controls.
+  **depaffect's follow-up (v0.30, also v0.27), 2026-10-29:** eight PERC tracks soon mute all
+  audio, *but not when each track's voice allocation is locked to 1 voice*; with the lock,
+  CPU shows and the sound keeps playing. So the cut-out comes with dynamic voice allocation:
+  each new note lands on another voice while the old ones still render, so eight tracks hold
+  many more PERC voices than eight. The guard (v0.27) leaves voices out but the whole DSP
+  still stops. To do: give PERC/MD voices the newest-first budget the Monomachine voices have
+  (v0.29), and stop rendering a voice its own track has moved on from (a retriggered
+  track's old voice fades in a block, as the DT2 does), then measure eight PERC tracks with
+  dynamic allocation in the runner.
 
 ## Requests
 
