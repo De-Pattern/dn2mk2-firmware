@@ -651,15 +651,20 @@ int slc_pop(u8 *it)
         /* v0.29: FUNC + a key may put up a stock question over the page (FUNC + SETTINGS:
          * "SAVE ALL PATTERNS AND PROJ SETTINGS? Y/N", owner's photo): its YES or NO is the
          * question's, not the slice menus' */
-        if (press && func && code != K_YES)
+        /* v0.33: only FUNC + a page or menu key (1..8: TRIG..MOD, PRESET, SETTINGS) can put up
+         * such a question; v0.29..v0.32 took any FUNC combo (FUNC + an arrow, a [TRIG], ...),
+         * and the next YES on a SLICE track was swallowed (the owner: YES did nothing) */
+        if (press && func && code >= 1 && code <= 8)
             slc_stock_asked = 1;
         if (press && (code == K_YES || code == K_NO) && slc_stock_asked && !func) {
             slc_stock_asked = 0;
             return 0;
         }
-        /* v0.30: YES with another key held (TRIG + YES: stock's sound preview) is stock's */
+        /* v0.30: YES with a [TRIG] held (TRIG + YES: stock's sound preview) is stock's. v0.33:
+         * the [TRIG] keys only (25..40), not any key: a key whose release never comes
+         * through as one (as FUNC's once did) would keep every later YES stock's */
         extern u32 smp_held_lo, smp_held_hi;
-        if (press && code == K_YES && ((smp_held_lo & ~(1u << K_YES | 1u << K_FUNC)) || smp_held_hi))
+        if (press && code == K_YES && ((smp_held_lo & 0xFE000000u) || (smp_held_hi & 0x1FFu)))
             return 0;
         /* YES on a SLICE track's page opens the menu */
         if (press && code == K_YES && slc_page_seen == 2 && !func) {   /* v0.25: GRID's ALLOCATE SLICE */

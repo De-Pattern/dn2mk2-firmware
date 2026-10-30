@@ -530,7 +530,10 @@ def main() -> int:
                      f"mem:{g['slc_cur']}:4,mem:{g['slc_sl']}:36,press:17,wait:2,spin:4:3,wait:5,release:17,wait:3,"
                      f"mem:{g['slc_sl']}:36,"
                      f"no,wait:6,mem:{g['slc_state']}:4,"
-                     f"{pk},tap:18,wait:6,press:33,wait:6,release:33,wait:6,press:34,wait:6,release:34,wait:6,"
+                     # v0.33: YES on the SLICE track's page answers (the menu, or NO SAMPLE ON
+                     # SAMP) after a FUNC combo on it (FUNC + LEFT): it was swallowed (owner)
+                     f"{pk},tap:2,wait:10,png:y0,press:17,wait:2,left,wait:3,release:17,wait:6,yes,wait:8,png:y1,"
+                     f"no,wait:6,tap:18,wait:6,press:33,wait:6,release:33,wait:6,press:34,wait:6,release:34,wait:6,"
                      f"press:26,wait:6,release:26,wait:6")
             js = work / "slice.json"
             slc_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
@@ -544,11 +547,12 @@ def main() -> int:
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
                     m = r["memory"]
-                    shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "m", "g", "e1", "e2")}
+                    shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "m", "g", "e1", "e2", "y0", "y1")}
                     table = list(_st.unpack(">9I", bytes.fromhex(m[g["slc_sl"]])))
                     notes = [int(x["D4"], 16) for x in r["regs_at"].get("0x400576ca", [])]
                     split = list(_st.unpack(">12I", bytes.fromhex(m[f"{g['slc_sl']}@3"])))
-                    facts = {"drawn": len({shots[n] for n in shots}) >= 4,
+                    facts = {"drawn": len({shots[n] for n in ("p0", "m", "g", "e1", "e2")}) >= 4,
+                             "v0.33: YES after FUNC + LEFT answers on a SLICE page": shots["y0"] != shots["y1"],
                              "picked": int(m[g["slc_cur"]], 16) == 1,
                              "start moved": table[3] > 36000 and table[:3] == [0, 30000, 0],
                              # slice 2 (start s, end 70000) split at its middle: s..mid, mid..70000
