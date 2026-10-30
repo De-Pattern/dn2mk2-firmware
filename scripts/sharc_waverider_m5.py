@@ -1203,6 +1203,48 @@ def step_stress(init, sound, machines) -> dict:
         return f.to_bytes()
     rb, sb, eb, lb = scenario("B", 16, b_frame)
 
+    # v0.33, the worst cases (the owner's list): C, sixteen P-I voices (the heaviest
+    # Machinedrum family), a new note on the next voice every block with every control
+    # moving (p-locks on every step); D, sixteen Monomachine voices (VO-6 and DENS in
+    # turn), the same; E, one track retriggered every block (zuzsw's RTRG at 1/80 and
+    # faster) beside fifteen sounding EFM voices
+    import random as _rr
+    rnd = _rr.Random(80)
+    pi = [k for k, n in enumerate(PM.NAMES) if n.startswith("PI-")]
+
+    def c_frame(b):
+        f = base_frame(sound, machines, overrides=perc_words(pi[0]), trigger=False, others={t: 5 for t in range(1, 16)})
+        for t in range(16):
+            k = pi[(t + b) % len(pi)]
+            for slot, w in perc_words(k, params=[rnd.random() for _ in range(8)]).items():
+                f.param(t, slot, w)
+        f.trigger(b % 16)
+        return f.to_bytes()
+    rc, sc, ec, lc = scenario("C", 20, c_frame)
+    mn = [MMx.NAMES.index("VO-6"), MMx.NAMES.index("DPRO-DENS")]
+
+    def d_frame(b):
+        f = base_frame(sound, machines, t0=MMx.TYPES[mn[0]], trigger=False,
+                       others={t: MMx.TYPES[mn[t % 2]] for t in range(1, 16)})
+        for t in range(16):
+            for slot, w in mnm_words(mn[t % 2], [rnd.randrange(128) for _ in range(8)]).items():
+                f.param(t, slot, w)
+        f.trigger(b % 16)
+        return f.to_bytes()
+    rd, sd, ed, ld = scenario("D", 20, d_frame)
+
+    def e_frame(b):
+        f = base_frame(sound, machines, overrides=perc_words(td), trigger=False, others={t: 5 for t in range(1, 16)})
+        for t in range(1, 16):
+            for slot, w in perc_words(efm).items():
+                f.param(t, slot, w)
+        if b == 1:
+            for t in range(1, 16):
+                f.trigger(t)
+        f.trigger(0)                            # track 0 again, every block
+        return f.to_bytes()
+    re_, se, ee, le = scenario("E", 16, e_frame)
+
     def newest_heard(rr, every):
         if not rr["ok"]:
             return 0.0
@@ -1216,15 +1258,26 @@ def step_stress(init, sound, machines) -> dict:
             if t in blk and V.peak(blk[t]["out"]) > 0.001:
                 hits += 1
         return hits / max(tot, 1)
-    fin = all(math.isfinite(x) for rr in (ra, rb) if rr["ok"] for blk in rr["perc"]
+    fin = all(math.isfinite(x) for rr in (ra, rb, rc, rd, re_) if rr["ok"] for blk in rr["perc"]
               for v in blk.values() for x in v["out"])
+    fin_bufs = all(math.isfinite(x) for rr in (rc, rd, re_) if rr["ok"] for blk in rr["buffers"]
+                   for t in range(16) for x in blk[t])
     n = {"K": K, "skips": {"A": sa, "B": sb}, "our_end_over_P": {"A": ea and round(ea / P, 3), "B": eb and round(eb / P, 3)},
          "limit": {"A": la, "B": lb}, "newest_heard_A": newest_heard(ra, 16),
          "instructions_per_block": {"A": ra.get("instructions", 0) // 20, "B": rb.get("instructions", 0) // 16}}
+    n.update({"skips_worst": {"C": sc, "D": sd, "E": se},
+              "our_end_over_P_worst": {k: v and round(v / P, 3) for k, v in (("C", ec), ("D", ed), ("E", ee))}})
     checks = {
         "every block of both returns": ra["ok"] and rb["ok"],
         "our voices done by 0.8 of the frame in both (the guard's limit holds under load)":
             ea is not None and eb is not None and ea <= 0.8 * P and eb <= 0.8 * P,
+        "v0.33, the worst cases: every block of C (16 P-I, all controls moving), D (16 VO-6/DENS, "
+        "all controls moving) and E (a retrigger every block beside 15 voices) returns":
+            rc["ok"] and rd["ok"] and re_["ok"],
+        "v0.33: in each, our voices done by 0.8 of the frame (the guard leaves voices out instead)":
+            all(x is not None and x <= 0.8 * P for x in (ec, ed, ee)),
+        "v0.33: in C and D, with time short, voices are left out and counted": bool(sc) and bool(sd),
+        "v0.33: every track buffer finite, no NaN, in C, D and E": fin_bufs,
         "with time short, voices are left out and counted (A)": bool(sa),
         "A: the newest note is heard in most blocks (newest first)": n["newest_heard_A"] >= 0.8,
         "nothing non-finite": fin,
