@@ -488,7 +488,9 @@ void slc_poll(void)
     if (!wait_at)
         wait_at = FRAMES | 1u;
     int st = smp_analysis(0);
-    if (st == 1 && FRAMES - wait_at > 45000u) { /* v0.33: 30 s and still reading: give up */
+    if (st == 1 && FRAMES - wait_at > 180000u) {    /* v0.33: 2 minutes and still reading: give up */
+        extern void smp_analyse_cancel(void);
+        smp_analyse_cancel();
         note("CANNOT READ IT");
         slc_state = S_OFF;
         return;
@@ -709,6 +711,8 @@ int slc_pop(u8 *it)
     }
     if (slc_state == S_WAIT) {                  /* nothing while it reads, but NO leaves (v0.33: */
         if (press && code == K_NO) {            /* a read that never ends must not hold every key) */
+            extern void smp_analyse_cancel(void);
+            smp_analyse_cancel();
             slc_state = S_OFF;
             return 1;
         }

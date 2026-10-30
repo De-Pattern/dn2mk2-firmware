@@ -836,11 +836,11 @@ def main() -> int:
                     "no", "wait:6", mem(lay["smp_fb_open"]),
                     # v0.33: MOVE SELECTED, then MOVE HERE (the DT2's 13.6.5): open again (on
                     # +DRIVE now), INCOMING, tick "inc one", RIGHT, MOVE SELECT (the fourth),
-                    # NO up to the folders, DOWN to DRUMS, RIGHT, MOVE HERE (the third): DRUMS
+                    # NO up to the folders, DOWN twice to DRUMS, RIGHT, MOVE HERE (the third): DRUMS
                     # then holds two
                     "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", "yes", "wait:6", "yes", "wait:6",
                     "yes", "wait:4", "right", "wait:4", "down", "wait:2", "down", "wait:2", "down", "wait:2", "yes", "wait:4",
-                    "no", "wait:6", "down", "wait:4", "right", "wait:4", "png:mv", "down", "wait:2", "down", "wait:2",
+                    "no", "wait:6", "down", "wait:4", "down", "wait:4", "right", "wait:4", "png:mv", "down", "wait:2", "down", "wait:2",
                     "yes", "wait:6", "yes", "wait:6", f"call:{fbc:#x}", "png:mv2"]
                 djs = work / "drive.json"
                 d_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
@@ -856,7 +856,8 @@ def main() -> int:
                         sh = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("d0", "d1", "d2", "d3", "d4")]
                         S = hex(fbs)
                         facts = {"opens on the two stores": int(m[S], 16) == 0xFFFFFFFF,
-                                 "UP, YES: +DRIVE, its two folders": int(m[f"{S}@1"], 16) == 1 and d0[0:1] == [2],
+                                 "UP, YES: +DRIVE, its three folders (v0.33: RECORDED shows, named, though empty)":
+                                 int(m[f"{S}@1"], 16) == 1 and d0[0:1] == [3],
                                  "YES: INCOMING's two samples": d0[1:2] == [2],
                                  "YES ticks one": d0[2:3] == [1],
                                  "v0.33: FUNC + YES held previews it; let go, it stops":

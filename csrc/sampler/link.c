@@ -950,6 +950,8 @@ static void load_poll(void)
         smp_retries++;                                      /* wrong, or no answer: again */
         if (++l_tries > 6) {
             fast_on = 0;                                    /* nothing gets through: stop */
+            if (l_kind == K_PREVIEW)
+                pv_k = -1;                                  /* v0.33: and no preview of half of it */
             smp_lstate = L_IDLE;
             return;
         }
@@ -975,6 +977,13 @@ static u32 s_tries __attribute__((section(".data"))) = 0;
 static u32 s_frames __attribute__((section(".data"))) = 0;
 static u32 s_peak __attribute__((section(".data"))) = 0;      /* v0.25: for the normalising */
 static u32 s_place __attribute__((section(".data"))) = 0;
+
+/* v0.33: where the recorder's save is (the recorder's NORMALIZING waits on it): a value that
+ * changes while it moves, 0 when none runs */
+u32 smp_save_mark(void)
+{
+    return sstate ? (s_off ^ (u32)sstate << 28 ^ s_tries << 24) | 1u : 0u;
+}
 
 static int is_recording(u32 k)                  /* slot K's frames lie in the recordings' area */
 {
@@ -1390,6 +1399,9 @@ int smp_analysis(int *pct)
     return an_state;
 }
 
+int smp_analysis_slot(void) { return an_slot; }   /* v0.33: whose the analysis is */
+void smp_analyse_cancel(void) { if (an_state == 1) an_state = 0; }   /* v0.33: NO left it */
+
 const u8 *smp_hires(void)
 {
     return HIRES;
@@ -1687,8 +1699,8 @@ int smp_lib_preview(int k)                       /* -> 0: asked; -1: not now */
         b = PREVIEW_BYTES;
     b = (b + 511u) & ~511u;
     u32 off = pool_room(b);
-    if (!off)
-        return -1;
+    if (!off || off > POOL_BYTES - PREVIEW_BYTES)
+        return -1;                              /* (the DSP holds a preview below that: the review) */
     pv_k = k;
     pv_off = off;
     pv_bytes = b;

@@ -1543,6 +1543,9 @@ def step_smp(init, sound, machines, blocks) -> dict:
                        ("bad_end", (dsp.SMP_POOL_DDR + SM.POOL_BYTES - 0x100, 4800, 1)),
                        ("bad_fmt", (dsp.SMP_POOL_DDR + 0x1000, 4800, 7)), ("bad_zero", (dsp.SMP_POOL_DDR + 0x1000, 0, 1))):
         runs[name] = rb(init, frames(ONE, hat), blocks, extra_hooks=bad_entry(*args))
+    # (and on a SLICE track, with the bad entry claiming slices: none is read; the review's case)
+    runs["bad_slices"] = rb(init, frames(SM.TYPE_OF["SLICE"], smp_words({SM.SAMP_REC: 3, SM.SLICE_REC: 6})), blocks,
+                            extra_hooks=bad_entry(0x80000000, 48000, 1 | 8 << 8))
     runs["retrig"] = rb(init, frames(ONE, smp_words(), trig=(1, RETRIG)), blocks)
     runs["tops"] = rb(init, frames(GRID, smp_words({r: 127 for r in SM.RECORDS})), blocks)
     # v0.19, SLICE on BEAT's own sixteen slices: slice 3 and the next; NOTE, C1 + 5 (the sixth)
@@ -1618,7 +1621,7 @@ def step_smp(init, sound, machines, blocks) -> dict:
         "v0.33: an entry outside the pool (below, above, too long, past its end, an unknown format, no "
         "frames) plays as an empty slot: silent, finite, bit-exact (above)":
             all(runs[k]["ok"] and all(x == 0.0 for x in smp_series(runs[k], 0))
-                for k in ("bad_below", "bad_above", "bad_long", "bad_end", "bad_fmt", "bad_zero")),
+                for k in ("bad_below", "bad_above", "bad_long", "bad_end", "bad_fmt", "bad_zero", "bad_slices")),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]

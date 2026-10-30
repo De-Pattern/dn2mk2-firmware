@@ -427,7 +427,7 @@ def entry_check(p: Prog, L: Layout) -> None:
     one, garbage) plays as an empty slot (base 0, frames 0) instead of reading DDR at an
     arbitrary address -- which on the unit can return NaN (one NaN in a feedback state, the
     send FX, silences everything until a restart) or worse. R5 base, R6 frames, R8 the format
-    word; clobbers R9..R13."""
+    word (all three cleared when it is not trusted); clobbers R9..R13."""
     p.iconst(13, 0)                           # bad
     bad = lambda: p.iconst(13, 1)             # noqa: E731
     p.iconst(12, L.pool)
@@ -448,7 +448,9 @@ def entry_check(p: Prog, L: Layout) -> None:
     p.iop(11, 10, "+", 11)                    # its end's offset
     p.iconst(12, SM.POOL_BYTES)
     p.if_(11, "GT", 12, bad, kind="i")
-    p.ifz(13, "NE", lambda: (p.iconst(5, 0), p.iconst(6, 0)))
+    # (the format word too: its slice count and area bit are as untrusted as the rest, and a
+    # SLICE track would read its slice table from base + ... = near 0; the independent review)
+    p.ifz(13, "NE", lambda: (p.iconst(5, 0), p.iconst(6, 0), p.iconst(8, 0)))
 
 
 MIN_REGION = 32                                # v0.22: the shortest ONESHOT region, frames

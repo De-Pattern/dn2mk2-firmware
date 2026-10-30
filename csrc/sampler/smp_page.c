@@ -789,7 +789,13 @@ extern int smp_lib_delete(int k), smp_lib_load(int k), smp_lib_pending(void);
 static int lb_in(int k, int folder) { return smp_lib_used(k) && smp_lib_folder_of(k) == folder; }
 
 extern int smp_lib_folder_count(int f);
-static int lb_has(int folder) { return smp_lib_folder_count(folder) > 0; }
+/* v0.33: a named folder shows even empty (NEW FOLDER's, and so a MOVE HERE target; the
+ * review: an empty new folder was hidden and could not be used) */
+static int lb_has(int folder)
+{
+    const char *n = smp_lib_folder_name(folder);
+    return smp_lib_folder_count(folder) > 0 || (n && n[0]);
+}
 
 static int lb_marked(int k) { return k >= 0 && k < LB_CAP && ((lb_marks[k >> 5] >> (k & 31)) & 1u); }
 
@@ -932,10 +938,13 @@ void smp_fb_delete(int slot, int folder)
                     smp_lib_delete(k);
         } else if (slot >= 0)
             smp_lib_delete(slot);
-        else if (folder != -1)
+        else if (folder != -1) {
             for (int k = 0; k < LB_CAP; k++)
                 if (lb_in(k, folder))
                     smp_lib_delete(k);
+            extern int smp_lib_folder_drop(int f);
+            smp_lib_folder_drop(folder);        /* v0.33: emptied: the folder goes too */
+        }
         smp_fb_unmark_all();
         return;
     }
@@ -1161,7 +1170,8 @@ void smp_fb_draw(void *c, int samp)
     hline(c, 0, 127, 55, 0);
     int n = smp_fb_count();
     if (n == 0) {
-        TEXT(c, FONT, 64, 28, CENTRED, "%s", smp_fb_store == 1 ? "+DRIVE EMPTY" : "NO SAMPLES");
+        TEXT(c, FONT, 64, 28, CENTRED, "%s", smp_fb_store == 1 ? (smp_fb_folder == -1 ? "+DRIVE EMPTY" : "EMPTY FOLDER")
+                                                 : "NO SAMPLES");
         return;
     }
     if (smp_fb_cur >= n)
@@ -1483,7 +1493,8 @@ static void trim_draw(void *c)
     box(c, 2, 55, 125, 63, 0);
     LABEL(c, 64, 57, "%s", "Y:SAVE FN+N:DEL FN+Y:PLAY");
     box(c, 2, 11, 125, 53, 0);
-    if (trim_zoom > 0 && smp_analysis(0) == 2)
+    extern int smp_analysis_slot(void);
+    if (trim_zoom > 0 && smp_analysis(0) == 2 && smp_analysis_slot() == trim_slot)
         wave_zoom(c, 4, 123, 32, 17, trim_s, trim_e, trim_n ? trim_n : 1);
     else if (smp_overview(trim_slot))
         wave(c, trim_slot, 4, 123, 32, 18, trim_s, trim_e, trim_n ? trim_n : 1);

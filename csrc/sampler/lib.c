@@ -469,6 +469,17 @@ int smp_lib_folder_make(const char *name)
     return lib_format() == 0 ? folder_find(nm, 1) : -1;
 }
 
+/* v0.33: DELETE on an empty folder takes the folder away (the 64 are not used up by NEW
+ * FOLDER's); INCOMING (0) and RECORDED (1) stay */
+int smp_lib_folder_drop(int f)
+{
+    if (smp_lib_state != 2 || f < 2 || f >= LIB_FOLDERS || fold_n[f] > 0 || !FOLD[LIB_FOLDER_BYTES * (u32)f])
+        return -1;
+    folder_set(f, "");
+    used_all();
+    return lib_wr(LIB_FOLDER_AT, LIB_FOLDER_SECTORS * 512u, FOLD);
+}
+
 int smp_lib_rename(int k, const char *name)
 {
     if (!smp_lib_used(k))

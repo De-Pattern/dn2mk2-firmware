@@ -117,7 +117,8 @@ int rec_overlay __attribute__((section(".data"))) = 0;      /* the screen is up 
 int rec_src __attribute__((section(".data"))) = 0;          /* SMP_REC_SOURCES choices */
 int rec_thres __attribute__((section(".data"))) = 0;        /* 0..120 */
 int rec_dest __attribute__((section(".data"))) = -1;        /* slot 0..126 (SAMP 1..127); -1 not chosen */
-static u32 work_at __attribute__((section(".data"))) = 0;   /* v0.33: when NORMALIZING began */
+static u32 work_at __attribute__((section(".data"))) = 0;   /* v0.33: when the save last moved */
+static u32 work_mark __attribute__((section(".data"))) = 0;
 int trim_zoom __attribute__((section(".data"))) = 0;      /* v0.33: TRIM's zoom, 0..3: 1x..8x */
 u32 trim_pos __attribute__((section(".data"))) = 0;       /* v0.33: its window's first frame */
 int rec_rlen __attribute__((section(".data"))) = 0;         /* 0 MAX, else steps */
@@ -190,6 +191,9 @@ static void send(int cmd)
      * DT2 has none). A recording goes into the first empty slot, found as it starts; when
      * none is empty, nothing is recorded */
     if (cmd == CMD_NOW || cmd == CMD_ARM || cmd == CMD_ARM_PLAY) {
+        extern u32 smp_save_mark(void);
+        if (smp_save_mark())                    /* v0.33: the last take still saving: */
+            return;                             /* not a new one into a slot it may take */
         rec_dest = next_empty(0);
         if (!smp_slot_empty(rec_dest)) {
             rec_room = 0;
@@ -326,9 +330,19 @@ void rec_poll(void)
             }
         }
     }
-    if (rec_phase == PH_WORK && smp_saved == 0 && FRAMES - work_at > 30000u) {
-        rec_phase = PH_REC;                     /* v0.33: 20 s and the save not done: the */
-        smp_overlay_dirty = 1;                  /* RECORDER again, not NORMALIZING for good */
+    if (rec_phase == PH_WORK && smp_saved == 0) {
+        /* v0.33: a save that has stopped moving for 20 s: the RECORDER again, not
+         * NORMALIZING for good. Only when it does not move: a long take's save takes long
+         * (the review: a total limit cut real saves short) */
+        extern u32 smp_save_mark(void);
+        u32 mk = smp_save_mark();
+        if (mk != work_mark) {
+            work_mark = mk;
+            work_at = FRAMES | 1u;
+        } else if (FRAMES - work_at > 30000u) {
+            rec_phase = PH_REC;
+            smp_overlay_dirty = 1;
+        }
     }
     if (rec_phase == PH_WORK && smp_saved != 0) {   /* v0.25: saved (and normalised): TRIM */
         u32 n = smp_frames(trim_slot);
