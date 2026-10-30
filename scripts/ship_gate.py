@@ -1176,6 +1176,19 @@ def main() -> int:
                               "answers after MACHINE SEL" if good else why)
             gate("overlays let go (ColdFire)", *cached("overlays let go (ColdFire)", [h_cmd, sorted(EMU_ENV.items())], h_body))
 
+        # 6q. v0.33: the sample pages driven at random (scripts/emu_fuzz_ui.py: SAMP turns,
+        # the list, the browser and its menu, page and [TRIG] keys, MACHINE SEL, the machine
+        # changed under the page, the audio interrupt's frame build between them): two seeds,
+        # each must finish, fault nothing in our code and answer the last probe
+        if "smp_lst_open" in lay:
+            fz_cmd = [sys.executable, "scripts/emu_fuzz_ui.py", bdir, "3,7", "--steps", "24",
+                      "--venv", a.venv, "--snapshot", snap, "--json", work / "fuzz.json"]
+
+            def fz_body(tdir):
+                rc, out = run("ui fuzz", fz_cmd, logs, env={**EMU_ENV, "PYTHONPATH": str(ROOT / "src")}, trace=tdir)
+                return rc == 0, (out.strip().splitlines()[-1] if rc == 0 else out[-800:])
+            gate("UI fuzz, two seeds (ColdFire)", *cached("UI fuzz, two seeds (ColdFire)", [fz_cmd, sorted(EMU_ENV.items())], fz_body))
+
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest
             print("  (waiting for the SHARC runner)", flush=True)
