@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.31** | 2026-10-29 | The +Drive library (about 20 GB, folders; LOAD TO PROJECT / LOAD TO TRK in the browser's +DRIVE), sent from the import tool or dn2samples.py; the kit's samples load first at power-on (LOADING n%); a finished Machinedrum voice frees its DSP time; the browser's NO / NO held / page keys | `builds/v0.31-DRIVE/` | yes |
+| **v0.32** | 2026-10-29 | The DSP-time fix: the Machinedrum and Monomachine voices' working state in the DSP's fast internal memory, a CPU guard that measures the stock's share, a DSP load meter (FUNC held on PERC/Monomachine pages); FUNC + turn on our controls | `builds/v0.32-DSP/` | yes |
+| v0.31 | 2026-10-29 | The +Drive library (about 20 GB, folders; LOAD TO PROJECT / LOAD TO TRK in the browser's +DRIVE), sent from the import tool or dn2samples.py; the kit's samples load first at power-on (LOADING n%); a finished Machinedrum voice frees its DSP time; the browser's NO / NO held / page keys | `builds/v0.31-DRIVE/` | yes |
 | v0.30.1 | 2026-10-29 | Hotfix on v0.30: PERC's AMD no longer silences everything until a reboot (the sine it reads is loaded again) | `builds/v0.30.1-AMDFIX/` | yes |
 | v0.30 | 2026-10-28 | Stock Y/N questions (the OS update, the save) answered on every page; TRIG + YES is stock's; MACHINE SEL keeps SAMP between sample machines; the slice marker follows the track's voice; LFO depth on SAMP/SLCE; recorder THRES and ARM; gentler normalize; held arrows scroll the lists; the slice editor's preview; CPU on screen | `builds/v0.30-FIXES/` | yes |
 | v0.29 | 2026-10-28 | Voices play newest first (PERC past 8 voices, Monomachine dead notes under dynamic allocation); a finished Monomachine voice frees its DSP time (the third track silent); multi-select and SELECT ALL/DELETE in the folder browser; CLEAR SLICE GRID; YES answers the save question on a SLICE/GRID page | `builds/v0.29-VOICES/` | yes |
@@ -69,6 +70,62 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.32 — DSP (the DSP-time fix: fast memory, a measured guard, a load meter; FUNC + turn)
+
+`DN2mod_v0.32_DSP_OS1.11.syx`
+sha256 `a992f5228d13a4a2199cda3252262aeb1f4465fed8bbbc7b51cdfac7495f9289`
+Gate: CLEARED TO FLASH, 2026-10-29 (USB size 2,056,057 of 2,097,152; DSP image 1,017,424 of 1,048,575). Source: commit `39260f25`. Docs: `docs/dsp-time.md`, `docs/others-dn2-research.md`, `docs/user-reports.md`.
+
+Everything in v0.31, plus:
+
+**The voices' working state in fast memory** (what complex-ping's research taught us: on the
+unit, DSP cost is mostly memory access). The Machinedrum voices' state (the Monomachine voices
+keep theirs in the same slots) and the Monomachine's shared buffers moved from the DSP's
+external DDR into its on-chip L2, inside the range proven on units. The P-I delay lines stay in
+DDR (too big), now cleared at power-on.
+
+**The CPU guard measures instead of assuming.** It left our voices 60 % of each frame,
+assuming the stock's own work after them (the voice chain, effects, mix) took the rest; with
+many voices that work grows, and the frame could overrun (the sound cutting out). Now it
+measures that work each frame and gives our voices only what is left, never more than before.
+
+**A DSP load meter**: hold FUNC on a PERC or Monomachine page: the tempo's place shows the
+DSP's load in percent (the last half second's peak). CPU still shows there when a voice is
+left out for time.
+
+**FUNC + turn** on our machines' controls (a tester's list): stock's jumps kept where they are
+right (PERC's first control by octaves, the sample machines' TUNE, PERC's TYPE); controls of
+choices (waves, modes, voice types, PLAY MODE, SEG, BARS, PCH) step one choice a click; any
+other control of ours does not move with FUNC (as a stock control with no jump). Before, many
+stuck at one value.
+
+**Gate changes.** New: the **DSP hardware rules** no emulator sees (complex-ping's checker, on
+all 36,660 instructions of ours and round each patch: none broken); a **stress test** in the
+runner with the clock made to move (sixteen PERC voices under dynamic allocation, and four
+Monomachine voices with four PERC, at three times the emulator's cost: every block ends with
+our voices done by 57 % / 49 % of the frame, voices left out and counted, the newest note always
+heard); the guard's measured limit; the meter; FUNC + turn's eight cases.
+
+**Test** (after the regression check):
+1. Hold FUNC on a PERC page with a pattern playing: a percentage in the tempo's place. Note
+   it with a few PERC tracks, then with a Monomachine track or two added.
+2. depaffect's case: eight PERC tracks, dynamic allocation, busy: does the sound stay? Watch
+   the meter and CPU.
+3. Two or three heavy Monomachine tracks (VO-6, DDRW, DENS) together: do they hold? VO-6
+   alone past one second (the old report)?
+4. FUNC + turn: PERC's PTCH (octaves), DPRO WAVE's wave (one a click), ONESHOT's PLAY MODE
+   (one a click), RAMP (does not move).
+5. The v0.31 tests, below, if you have not run them.
+
+**Known issues / not done.**
+- The fast-memory saving cannot be measured in the emulator (it charges every access alike):
+  the meter on the unit is the measure. Tell us the numbers.
+- The Machinedrum and Monomachine tables and the P-I delay lines are still in DDR (next, if
+  the meter shows they matter).
+- Not in the library yet: rename, preview, move, create folder, slices; one pool for all
+  projects.
+- **Not seen on hardware yet**: all of the above; checked in the emulators.
 
 ## v0.31 — DRIVE (the +Drive library, faster start, Machinedrum voices that rest)
 
