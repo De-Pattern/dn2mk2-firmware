@@ -443,6 +443,32 @@ int smp_lib_delete(int k)
     return index_sector_write(k);
 }
 
+/* v0.33: MOVE SELECTED / MOVE HERE (as the DT2's 13.6.5): entry K into folder F */
+int smp_lib_move(int k, int f)
+{
+    if (!smp_lib_used(k) || f < 0 || f >= LIB_FOLDERS || !FOLD[LIB_FOLDER_BYTES * (u32)f])
+        return -1;
+    u8 *e = E(k);
+    if (e[13] == (u8)f)
+        return 0;
+    e[13] = (u8)f;
+    lput(e + 60, entry_check(e));
+    used_all();
+    return index_sector_write(k);
+}
+
+/* v0.33: CREATE FOLDER: NAME's folder (made if new) -> its index, -1 none (full, or the
+ * +Drive refused) */
+int smp_lib_folder_make(const char *name)
+{
+    u8 nm[LIB_FOLDER_BYTES];
+    for (u32 k = 0; k < LIB_FOLDER_BYTES; k++)
+        nm[k] = 0;
+    for (u32 k = 0; k < LIB_FOLDER_BYTES - 1 && name[k]; k++)
+        nm[k] = (u8)name[k];
+    return lib_format() == 0 ? folder_find(nm, 1) : -1;
+}
+
 int smp_lib_rename(int k, const char *name)
 {
     if (!smp_lib_used(k))

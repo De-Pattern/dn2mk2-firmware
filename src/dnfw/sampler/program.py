@@ -1864,21 +1864,43 @@ def recorder(p: Prog, L: Layout) -> None:
 
         def preview():                        # v0.25: frames [first, end) of the slot, to pvmix
             p.ld(5, cmd + 8)
-            p.iconst(12, 0)
-            p.iop(5, 5, "MAX", 12)
-            p.iconst(12, SM.POOL_SLOTS - 1)
-            p.iop(5, 5, "MIN", 12)
-            p.lsh(5, 5, 4)
-            p.iconst(13, L.pool + 8)
-            p.iop(5, 13, "+", 5)
-            p.seti(1, 5)
-            p.ldi(6, 0, 1)                    # the frames' address
-            p.ldi(7, 1, 1)                    # their count
-            p.ld(8, cmd + 12)                 # first, on a word
-            p.iconst(12, -2)
+
+            def of_slot():
+                p.iconst(12, 0)
+                p.iop(5, 5, "MAX", 12)
+                p.iconst(12, SM.POOL_SLOTS - 1)
+                p.iop(5, 5, "MIN", 12)
+                p.lsh(5, 5, 4)
+                p.iconst(13, L.pool + 8)
+                p.iop(5, 13, "+", 5)
+                p.seti(1, 5)
+                p.ldi(6, 0, 1)                # the frames' address
+                p.ldi(7, 1, 1)                # their count
+                p.ld(8, cmd + 12)             # first
+                p.ld(9, cmd + 16)             # end
+
+            def at_offset():                  # v0.33: +DRIVE's preview, sent to a free stretch
+                p.ld(6, cmd + 12)             # of the pool: its offset, its frames; from 0
+                p.iconst(12, SM.DATA_OFFSET)
+                p.iop(6, 6, "MAX", 12)
+                p.iconst(12, SM.POOL_BYTES - PREVIEW_BYTES)
+                p.iop(6, 6, "MIN", 12)
+                p.iconst(12, -2)
+                p.iop(6, 6, "AND", 12)
+                p.iconst(13, L.pool)
+                p.iop(6, 13, "+", 6)
+                p.ld(7, cmd + 16)
+                p.iconst(12, PREVIEW_BYTES // 2)
+                p.iop(7, 7, "MIN", 12)
+                p.iconst(12, 0)
+                p.iop(7, 7, "MAX", 12)
+                p.iconst(8, 0)                # the window: [0, count)
+                p.ipass(9, 7)
+            p.iconst(12, PREVIEW_AT)
+            p.if_(5, "EQ", 12, at_offset, of_slot, kind="i")
+            p.iconst(12, -2)                  # first, on a word
             p.iop(8, 8, "AND", 12)
-            p.ld(9, cmd + 16)                 # end, at most the count
-            p.iop(9, 9, "MIN", 7)
+            p.iop(9, 9, "MIN", 7)             # end, at most the count
             p.iop(9, 9, "-", 8)
             p.iconst(12, 0)
             p.iop(9, 9, "MAX", 12)            # none if end <= first
@@ -2749,6 +2771,8 @@ PVMIX_SAVE = (0, 1, 2, 3, 12, 13)
 
 
 PV_LOOP = 1 << 30                           # v0.30: pvln's loop bit
+PREVIEW_AT = 0xFFFF                         # v0.33: CMD_PREVIEW's slot word for +DRIVE's preview
+PREVIEW_BYTES = 10 * 48000 * 2              # its longest: the DT2's ten seconds, int16 mono
 
 
 def pvmix(p: Prog, L: Layout) -> None:

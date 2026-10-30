@@ -30,7 +30,7 @@ def default_steps() -> list[str]:
 # v0.28: the runner in parts, each a step of its own with its own reuse record, so a gate cut
 # off by a time limit keeps the parts that passed (the whole runner took more than two hours
 # beside the ColdFire steps). The parts together are exactly the runner's default steps.
-GROUPS = (("decode", "map", "voice", "guard"), ("stress",), ("smp",), ("link", "rec", "pvmix", "tdm"),
+GROUPS = (("decode", "map", "voice", "guard"), ("stress",), ("garbage",), ("smp",), ("link", "rec", "pvmix", "tdm"),
           ("stock", "ping", "shft", "gran"), ("mnm", "frame"))
 
 

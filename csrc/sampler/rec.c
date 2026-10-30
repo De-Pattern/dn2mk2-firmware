@@ -70,7 +70,7 @@ extern int smp_fb_open, smp_fb_folder, smp_fb_cur;
 extern int smp_fb_item(int i, int *slot);
 extern int smp_fb_menu, smp_fb_mcur;
 extern int smp_fb_index_of(int f);
-extern int smp_fb_marked(int k), smp_fb_nactions(int on_folder);     /* v0.29: multi-select */
+extern int smp_fb_marked(int k), smp_fb_nactions(int on_folder), smp_fb_mark_count(void), smp_fb_moving;     /* v0.29: multi-select */
 extern void smp_fb_mark(int k, int on), smp_fb_mark_folder(int folder), smp_fb_unmark_all(void);
 extern void smp_fb_delete(int slot, int folder);
 extern int smp_fb_store, smp_fb_last_store;                         /* v0.31: +DRIVE / PROJECT RAM */
@@ -182,6 +182,16 @@ static void send(int cmd)
     if (thr < REC_THR_FLOOR)                    /* v0.30: THRES 0 waits for a sound, not for */
         thr = REC_THR_FLOOR;                    /* silence (a user: it began on nothing) */
     src_of(rec_src, &src, &chan);
+    /* v0.33: no DEST (the owner: choosing a slot by number risked writing over a sample; the
+     * DT2 has none). A recording goes into the first empty slot, found as it starts; when
+     * none is empty, nothing is recorded */
+    if (cmd == CMD_NOW || cmd == CMD_ARM || cmd == CMD_ARM_PLAY) {
+        rec_dest = next_empty(0);
+        if (!smp_slot_empty(rec_dest)) {
+            rec_room = 0;
+            return;
+        }
+    }
     if (rec_dest < 0)
         rec_dest = next_empty(0);
     u32 place = 0;
@@ -235,8 +245,7 @@ void rec_combo(void)
     rec_phase = PH_REC;                         /* a recording mid-TRIM keeps what it is */
     if (rec_overlay) {
         mon_known = 0;
-        if (rec_dest < 0 || (!smp_slot_empty(rec_dest) && rec_dest != rec_saved_slot))
-            rec_dest = next_empty(rec_dest < 0 ? 0 : rec_dest);
+        rec_dest = next_empty(0);               /* v0.33: the first empty slot, shown */
         u32 room;
         smp_rec_place(rec_dest, &room);
         rec_room = room;
@@ -276,9 +285,11 @@ static void rec_wave_add(u32 frames, int peak)
 /* from the UI loop (page.c's wr_poll), every pass */
 static void rpt_poll(void);
 
+static void fb_pv_poll(void);
 void rec_poll(void)
 {
     rpt_poll();
+    fb_pv_poll();
     if (smp_status(st)) {
         rec_state = st[0] & 3;
         rec_frames = (u32)st[2] << 6;              /* 64 frames a unit (v0.16) */
@@ -306,9 +317,7 @@ void rec_poll(void)
                     trim_s = 0;
                     trim_e = rec_frames;
                 }
-                rec_dest = next_empty(rec_taken + 1);
-                if (rec_dest == rec_taken)
-                    rec_dest = rec_taken;
+                rec_dest = next_empty(0);           /* v0.33: the next recording's, shown */
             }
         }
     }
@@ -347,8 +356,7 @@ static void knob(int index, int delta)
     switch (index) {
     case 1: rec_src = clamp(rec_src + delta, 0, SMP_REC_SOURCES - 1); break;
     case 4: rec_thres = clamp(rec_thres + delta, 0, 120); break;
-    case 5: if (rec_state != 2 && rec_state != 1) rec_dest = clamp((rec_dest < 0 ? 0 : rec_dest) + delta, 0, 126);
-        break;
+    /* E: v0.33, no DEST (send() takes the first empty slot) */
     case 6: rec_rlen = clamp(rec_rlen + delta, 0, 128); break;
     case 7: rec_rstrt = delta > 0 ? 1 : 0; break;
     case 8: rec_arm_turn(delta); break;
@@ -488,6 +496,22 @@ static void name_step(int d)
 
 static int nm_only __attribute__((section(".data"))) = 0;   /* v0.25: the browser's RENAME */
 
+/* v0.33: CREATE FOLDER's name, on the naming screen (nm_only 2); the browser stays under it */
+static void folder_name_start(void)
+{
+    if (rec_phase != PH_REC)
+        return;
+    for (int j = 0; j < 8; j++)
+        nm_text[j] = 0;
+    nm_text[0] = 'N', nm_text[1] = 'E', nm_text[2] = 'W';
+    nm_cur = 3;
+    nm_gsel = 0;
+    nm_gpicked = 0;
+    nm_only = 2;
+    rec_phase = PH_NAME;
+    rec_overlay = 1;
+}
+
 static void rename_start(int slot)
 {
     if (slot < 0 || slot > 126 || rec_phase != PH_REC)
@@ -507,7 +531,13 @@ static void name_done(void)
         if (t[j] != ' ')
             last = j;
     }
-    if (last >= 0) {                            /* trailing spaces off; an empty name stays as it was */
+    if (last >= 0 && nm_only == 2) {           /* v0.33: CREATE FOLDER */
+        extern int smp_lib_folder_make(const char *name);
+        t[last + 1] = 0;
+        smp_lib_folder_make(t);
+        extern void smp_lib_refresh(void);
+        smp_lib_refresh();
+    } else if (last >= 0) {                     /* trailing spaces off; an empty name stays as it was */
         t[last + 1] = 0;
         smp_rename(trim_slot, t);
     }
@@ -529,6 +559,47 @@ int rec_pv_on __attribute__((section(".data"))) = 0;      /* a preview playing, 
 static u32 knob_at __attribute__((section(".data"))) = 0;    /* the last trim knob's FRAMES */
 #define CMD_PREVIEW 9
 extern int smp_overlay_dirty;
+
+/* v0.33: the browser's preview (FUNC + YES on a sample, while held): a PROJECT RAM sample,
+ * or a library sample already in the pool, from its slot; any other library sample through
+ * link.c's +DRIVE preview. The first ten seconds, as the DT2's. */
+#define FB_PV_FRAMES (10u * 48000u)
+static int fb_pv __attribute__((section(".data"))) = 0;    /* 1 from a slot, 2 from the +Drive */
+extern int smp_lib_preview(int k);
+extern void smp_lib_preview_stop(void);
+extern u32 smp_lib_frames(int k);
+extern u32 smp_slot_frames(int k, int *i16);
+
+static void fb_preview_stop(void)
+{
+    if (fb_pv == 1)
+        smp_command(CMD_PREVIEW, 0, 0, 0, 0);
+    else if (fb_pv == 2)
+        smp_lib_preview_stop();
+    fb_pv = 0;
+}
+
+static void fb_preview(int slot)
+{
+    fb_preview_stop();
+    int s = smp_fb_store == 1 ? smp_lib_slot_of(slot) : slot;
+    if (s >= 0 && !smp_slot_empty(s)) {
+        int i16 = 0;
+        u32 fr = smp_slot_frames(s, &i16);
+        if (!i16)
+            return;                             /* the preview reads int16 (a float32 slot: none) */
+        smp_command(CMD_PREVIEW, (u32)s, 0, fr < FB_PV_FRAMES ? fr : FB_PV_FRAMES, 0);
+        fb_pv = 1;
+    } else if (smp_fb_store == 1 && smp_lib_preview(slot) == 0) {
+        fb_pv = 2;
+    }
+}
+
+static void fb_pv_poll(void)                    /* the browser closed: its preview stops */
+{
+    if (fb_pv && !smp_fb_open)
+        fb_preview_stop();
+}
 
 static void preview(int on)
 {
@@ -903,6 +974,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         lrpt_code = 0;                          /* v0.30: and the list's */
     if (rec_pv_on && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
         preview(0);                             /* FUNC + YES let go: the preview stops */
+    if (fb_pv && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
+        fb_preview_stop();                      /* v0.33: and the browser's */
     if (it[0] == IT_KEY && code < 32 && (eaten >> code & 1)) {
         eaten &= ~(1u << code);
         if (!down) {                            /* the release of a key we took */
@@ -1020,6 +1093,23 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     smp_fb_mark_folder(on_folder ? f : smp_fb_folder);
                 } else if (code == K_YES && act == 2 && (slot >= 0 || on_folder)) {
                     smp_fb_menu = 2;            /* DELETE: asked first */
+                } else if (code == K_YES && act == 5) {     /* v0.33: MOVE SELECTED: these, */
+                    smp_fb_menu = 0;                        /* (this one if none is ticked) */
+                    if (!smp_fb_mark_count() && slot >= 0)
+                        smp_fb_mark(slot, 1);
+                    smp_fb_moving = smp_fb_mark_count() > 0;
+                } else if (code == K_YES && act == 6) {     /* v0.33: MOVE HERE */
+                    smp_fb_menu = 0;
+                    int to = on_folder ? f : smp_fb_folder;
+                    extern int smp_lib_move(int k, int f);
+                    if (to >= 0)
+                        for (int k = 0; k < 2048; k++)
+                            if (smp_lib_used(k) && smp_fb_marked(k))
+                                smp_lib_move(k, to);
+                    smp_fb_unmark_all();
+                } else if (code == K_YES && act == 7) {     /* v0.33: CREATE FOLDER: its name */
+                    smp_fb_menu = 0;
+                    folder_name_start();
                 } else if (code == K_YES && act == 4) {     /* v0.31: LOAD TO PROJECT */
                     smp_fb_menu = 0;
                     smp_fb_load_project(slot, on_folder ? f : -1);
@@ -1052,6 +1142,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 lrpt_code = code;               /* v0.30: held, it goes on */
                 lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
             }
+            else if (code == K_YES && smp_func_held && slot >= 0)
+                fb_preview(slot);                   /* v0.33: FUNC + YES previews while held, as the DT2's */
             else if (code == K_YES && slot >= 0)    /* v0.33: YES ticks in both stores, as the DT2's */
                 smp_fb_mark(slot, !smp_fb_marked(slot));    /* (13.6.2: PROJECT RAM too); RIGHT acts */
             else if (code == K_YES && smp_func_held && on_folder)

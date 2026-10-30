@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,garbage,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -591,6 +591,11 @@ def main(argv=None):
             show(results["3g_guard"])
             gc.collect()
 
+        if "garbage" in steps:
+            print("\nstep 3g: voice state and scratch full of garbage (v0.33)")
+            results["3g_garbage"] = step_garbage(warm(), sound, machines)
+            show(results["3g_garbage"])
+            gc.collect()
         if "stress" in steps:
             print("\nstep 3s: the stress test (the clock made to move)")
             results["3s_stress"] = step_stress(warm(), sound, machines)
@@ -1222,6 +1227,70 @@ def step_stress(init, sound, machines) -> dict:
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
 
 
+def step_garbage(init, sound, machines) -> dict:
+    """v0.33 (the freeze and silence reports; complex-ping: power-on memory holds garbage, NaN
+    common, and one NaN in a feedback state silences the unit): every Machinedrum and
+    Monomachine machine started on voice state that is not what a previous note left -- the
+    sixteen 1 KB voice slots in L2 and the Monomachine's shared scratch (keys, costs, the
+    voice order) filled with 0xFFFFFFFF (NaN) or random words before the first block. Each
+    run must return every block (no halt, no stray jump), the machine's track must be
+    finite from the note's block on, and PERC's bit-exact to its model (which reads the same
+    memory at entry)."""
+    import random as _r
+    from dnfw.mnm import machines as MMx
+    fills = {"nan": lambda k: 0xFFFFFFFF, "random": (lambda g: lambda k: g.getrandbits(32))(_r.Random(33))}
+    spans = [(dsp.MD_STATE_L2, 16 * 1024), (dsp.MNM_SCRATCH_L2, dsp.MNM_SCRATCH_BYTES)]
+    res, bad = {}, []
+
+    def filled(fill):
+        done = {"n": 0}
+
+        def poke(r):
+            if done["n"]:
+                return
+            done["n"] = 1
+            for a, n in spans:
+                for k in range(0, n, 4):
+                    m2.poke(r.state, a + k, fill(k))
+        return {dsp.PERC_SW: poke}
+
+    def finite_from(rr, t, b0=1):
+        return rr["ok"] and all(math.isfinite(x) for blk in rr["buffers"][b0:] for x in blk[t])
+    for fname, fill in fills.items():
+        for g in range((PM.N + 7) // 8):         # the Machinedrum machines, eight tracks a run
+            n_g = min(8, PM.N - 8 * g)
+
+            def fb(b, g=g, n_g=n_g):
+                f = base_frame(sound, machines, overrides=perc_words(8 * g), trigger=b == 1,
+                               others={t: 5 for t in range(1, n_g)}, trigger_others=True)
+                for t in range(1, n_g):
+                    for slot, w in perc_words(8 * g + t).items():
+                        f.param(t, slot, w)
+                return f.to_bytes()
+            rr = run_blocks(init, fb, 6, extra_hooks=filled(fill))
+            ok = rr["ok"] and all(finite_from(rr, t) for t in range(n_g)) and perc_exact(rr)[1:] == (0, 0)
+            res[f"{fname}_md{g}"] = {"ok": ok, "halt": rr.get("halt")}
+            if not ok:
+                bad.append(f"{fname}_md{g}")
+        for k, name in enumerate(MMx.NAMES):    # each Monomachine machine, beside a PERC voice
+            def fb(b, k=k):
+                f = base_frame(sound, machines, t0=MMx.TYPES[k], trigger=b == 1, others={1: 5}, trigger_others=True)
+                for slot, w in mnm_words(k).items():
+                    f.param(0, slot, w)
+                for slot, w in perc_words(0).items():
+                    f.param(1, slot, w)
+                return f.to_bytes()
+            rr = run_blocks(init, fb, 6, extra_hooks=filled(fill))
+            ok = rr["ok"] and finite_from(rr, 0) and finite_from(rr, 1)
+            res[f"{fname}_{name}"] = {"ok": ok, "halt": rr.get("halt")}
+            if not ok:
+                bad.append(f"{fname}_{name}")
+        print(f"    garbage {fname}: {len([k for k in res if k.startswith(fname)])} runs", flush=True)
+    checks = {"every Machinedrum and Monomachine machine, started on NaN or random voice state and "
+              "scratch: every block returns, its track finite, PERC bit-exact": not bad}
+    return {"ok": not bad, "checks": checks, "numbers": {"failing": bad, "runs": res}}
+
+
 # -- step 3b: the sample machines (v0.13, docs/sampler.md) ----------------------------------------
 
 def smp_words(values: dict | None = None) -> dict:
@@ -1563,6 +1632,22 @@ def step_rec(init, sound, machines, blocks) -> dict:
     pv1 = (m2.word(st, C["pva"]), m2.word(st, C["pvn"])) if ok1 else None
     rec.pop("state", None)
 
+    # v0.33: +DRIVE's preview, at an offset into the pool (PREVIEW_AT): 4,800 frames at 64 KB
+    # in; then one past the pool's end and too long, held to its last ten seconds' room
+    pv_at = {}
+    for name, (off, fr) in (("at", (0x10000, 4800)), ("clamped", (0x7FFFFFF0, 0x7FFFFFFF))):
+        def at_dispatch_p(r, off=off, fr=fr, seen={"b": 0}):
+            if seen["b"] == 1:
+                command(r, 9, SM.CMD_PREVIEW, src=SP.PREVIEW_AT, chan=off, thres=fr)
+            seen["b"] += 1
+
+        def frames_p(b):
+            return base_frame(sound, machines, t0=ONE, trigger=False, overrides=smp_words({SM.SAMP_REC: 1})).to_bytes()
+        rp = run_blocks(init, frames_p, 3, extra_hooks={m3.DISPATCH: at_dispatch_p})
+        sp = rp["state"].state if rp["ok"] else None
+        pv_at[name] = (m2.word(sp, C["pva"]), m2.word(sp, C["pvn"]), m2.word(sp, C["pvl0"])) if rp["ok"] else None
+        rp.pop("state", None)
+
     # run 2: TRK6, MONO L
     g = SM.TRK_GAIN
     left = [0.3 * _m.sin(2 * _m.pi * 500 * k / 48000) for k in range(32 * n)]
@@ -1649,6 +1734,11 @@ def step_rec(init, sound, machines, blocks) -> dict:
             ok1 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 3 | 16 and h[2] == (32 * n) >> 6 for h in stat1),
         "v0.25: PREVIEW of frames [11, 101): from frame 10 (on a word), 45 words, for pvmix":
             ok1 and pv1 == (words[0] + 20, 45),
+        "v0.33: PREVIEW at an offset (+DRIVE's): 4,800 frames at 64 KB in, 2,400 words; past the "
+        "pool's end and too long: held to the last ten seconds' room, ten seconds":
+            pv_at.get("at") == (dsp.SMP_POOL_DDR + 0x10000, 2400, dsp.SMP_POOL_DDR + 0x10000)
+            and pv_at.get("clamped") == (dsp.SMP_POOL_DDR + SM.POOL_BYTES - SP.PREVIEW_BYTES,
+                                         SP.PREVIEW_BYTES // 4, dsp.SMP_POOL_DDR + SM.POOL_BYTES - SP.PREVIEW_BYTES),
         "SAMP 124 plays the recording back": ok1 and len(back) == play * BLOCK and V.peak(back) > 0.3,
         "TRK6, MONO L: track 6's bucket's left (the voices' routing elsewhere), back to its level, "
         "into SAMP 125 at 8 MB into the recordings' area (within 2 LSB)":

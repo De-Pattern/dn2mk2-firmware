@@ -844,8 +844,10 @@ void smp_fb_mark(int k, int on)
         fb_marks[k >> 5] &= ~b;
 }
 
+extern int smp_fb_moving;
 void smp_fb_unmark_all(void)
 {
+    smp_fb_moving = 0;
     for (int i = 0; i < 4; i++)
         fb_marks[i] = 0;
     for (int i = 0; i < LB_CAP / 32; i++)
@@ -1092,21 +1094,45 @@ int smp_fb_visible(void)
 
 /* the SAMPLE ACTION menu: on a sample LOAD TRK n, RENAME, DELETE, SELECT ALL; on a folder
  * (v0.29) SELECT ALL, DELETE */
+/* v0.33: +DRIVE's MOVE SELECTED (the ticked samples remembered), then MOVE HERE in the
+ * folder they go to; CREATE FOLDER (the DT2's 13.6.5) */
+int smp_fb_moving __attribute__((section(".data"))) = 0;
+
+static int lib_actions(int on_folder, signed char *out)
+{
+    int n = 0;
+    out[n++] = 4;                               /* LOAD TO PROJ */
+    if (!on_folder)
+        out[n++] = 0;                           /* LOAD TRK */
+    out[n++] = 3;                               /* SELECT ALL */
+    if (smp_fb_moving)
+        out[n++] = 6;                           /* MOVE HERE */
+    else if (!on_folder)
+        out[n++] = 5;                           /* MOVE SELECTED */
+    out[n++] = 2;                               /* DELETE */
+    out[n++] = 7;                               /* CREATE FOLDER */
+    return n;
+}
+
 int smp_fb_nactions(int on_folder)
 {
+    signed char a[8];
     if (smp_fb_store == 1)
-        return on_folder ? 3 : 4;
+        return lib_actions(on_folder, a);
     return on_folder ? 2 : 4;
 }
 
 /* the action at place A of the SAMPLE ACTION menu: 0 LOAD TO TRK, 1 RENAME, 2 DELETE (in
- * PROJECT RAM: UNLOAD), 3 SELECT ALL, 4 LOAD TO PROJECT (v0.31: +DRIVE) */
+ * PROJECT RAM: UNLOAD), 3 SELECT ALL, 4 LOAD TO PROJECT (v0.31: +DRIVE), 5 MOVE SELECTED,
+ * 6 MOVE HERE, 7 CREATE FOLDER (v0.33: +DRIVE) */
 int smp_fb_action(int on_folder, int a)
 {
     static const signed char ram_s[4] = {0, 1, 2, 3}, ram_f[2] = {3, 2};
-    static const signed char lib_s[4] = {4, 0, 2, 3}, lib_f[3] = {4, 3, 2};
-    if (smp_fb_store == 1)
-        return on_folder ? lib_f[a < 0 ? 0 : a > 2 ? 2 : a] : lib_s[a < 0 ? 0 : a > 3 ? 3 : a];
+    if (smp_fb_store == 1) {
+        signed char l[8];
+        int n = lib_actions(on_folder, l);
+        return l[a < 0 ? 0 : a > n - 1 ? n - 1 : a];
+    }
     return on_folder ? ram_f[a < 0 ? 0 : a > 1 ? 1 : a] : ram_s[a < 0 ? 0 : a > 3 ? 3 : a];
 }
 
@@ -1211,6 +1237,12 @@ void smp_fb_draw(void *c, int samp)
                 TEXT(c, FONT, 68, y, 0, "LOAD TRK %d", (int)UI_TRACK + 1);
             else if (act == 1)
                 TEXT(c, FONT, 68, y, 0, "%s", "RENAME");
+            else if (act == 5)
+                TEXT(c, FONT, 68, y, 0, "%s", "MOVE SELECT");
+            else if (act == 6)
+                TEXT(c, FONT, 68, y, 0, "%s", "MOVE HERE");
+            else if (act == 7)
+                TEXT(c, FONT, 68, y, 0, "%s", "NEW FOLDER");
             else if (act == 2) {
                 if (del > 1)
                     TEXT(c, FONT, 68, y, 0, "%s %d", w, del);
@@ -1582,8 +1614,8 @@ void rec_screen_draw(void *c)
         LABEL(c, cx, by0 + 16, "%s", !heard ? "NO DSP" : "NO LINK");
         LABEL(c, cx, by0 + 8, "%s", !heard ? "STATUS" : "TO DSP");
     } else if (rec_room < 0x10000u) {
-        LABEL(c, cx, by0 + 16, "%s", "NO ROOM");
-        LABEL(c, cx, by0 + 8, "%s", "CHANGE DEST");
+        LABEL(c, cx, by0 + 16, "%s", smp_slot_empty(rec_dest < 0 ? 0 : rec_dest) ? "NO ROOM" : "NO FREE SLOT");
+        LABEL(c, cx, by0 + 8, "%s", "UNLOAD ONE");
     } else {
         fill(c, bx0 + 4, by0 + 14, bx0 + 18, by0 + 22);   /* YES, cut out of a filled badge */
         glyph(c, bx0 + 6, by0 + 16, 'Y', 0);
@@ -1602,9 +1634,10 @@ void rec_screen_draw(void *c)
     LABEL(c, 113, 34, "%d", rec_thres);
     LABEL(c, 113, 22, "%s", "THRES");
 
-    /* the bottom row: DEST, R.LEN, R.STRT, ARM */
+    /* the bottom row: the slot the next recording goes into (v0.33: shown, not chosen: the
+     * first empty one), R.LEN, R.STRT, ARM */
     w_samp(c, 1, 5, rec_dest < 0 ? 0 : rec_dest + 1);
-    LABEL(c, 13, 0, "%s", "DEST");
+    LABEL(c, 13, 0, "%s", "INTO");
     if (rec_rlen <= 0) {
         LABEL(c, 47, 12, "%s", "MAX");
     } else {

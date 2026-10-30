@@ -824,9 +824,21 @@ def main() -> int:
                     "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", "png:d0", mem(fbs),
                     "up", "wait:4", "yes", "wait:6", "png:d1", mem(fbs), f"call:{fbc:#x}",
                     "yes", "wait:6", "png:d2", f"call:{fbc:#x}", "yes", "wait:6", "png:d3", f"call:{fbm:#x}",
+                    # v0.33: FUNC + YES held on a sample previews it (+DRIVE's: asked of the
+                    # loader); let go, it stops
+                    "press:17", "wait:2", "press:10", "wait:6", mem(lay["smp_pv_state"]),
+                    "release:10", "wait:2", "release:17", "wait:4", mem(lay["smp_pv_state"]), f"call:{fbm:#x}",
                     "right", "wait:6", "png:d4", "yes", "wait:6", mem(lay["smp_lp_queued"]),
                     "no", "wait:6", mem(lay["smp_fb_folder"]), mem(fbs), "no", "wait:6", mem(fbs),
-                    "no", "wait:6", mem(lay["smp_fb_open"])]
+                    "no", "wait:6", mem(lay["smp_fb_open"]),
+                    # v0.33: MOVE SELECTED, then MOVE HERE (the DT2's 13.6.5): open again (on
+                    # +DRIVE now), INCOMING, tick "inc one", RIGHT, MOVE SELECT (the fourth),
+                    # NO up to the folders, DOWN to DRUMS, RIGHT, MOVE HERE (the third): DRUMS
+                    # then holds two
+                    "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", "yes", "wait:6", "yes", "wait:6",
+                    "yes", "wait:4", "right", "wait:4", "down", "wait:2", "down", "wait:2", "down", "wait:2", "yes", "wait:4",
+                    "no", "wait:6", "down", "wait:4", "right", "wait:4", "png:mv", "down", "wait:2", "down", "wait:2",
+                    "yes", "wait:6", "yes", "wait:6", f"call:{fbc:#x}", "png:mv2"]
                 djs = work / "drive.json"
                 d_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                          "--snapshot", snap, "--steps", ",".join(ds), "--png-dir", work / "drive", "--json", djs]
@@ -844,10 +856,15 @@ def main() -> int:
                                  "UP, YES: +DRIVE, its two folders": int(m[f"{S}@1"], 16) == 1 and d0[0:1] == [2],
                                  "YES: INCOMING's two samples": d0[1:2] == [2],
                                  "YES ticks one": d0[2:3] == [1],
+                                 "v0.33: FUNC + YES held previews it; let go, it stops":
+                                 int(m[hex(lay["smp_pv_state"])], 16) in (1, 2, 3)
+                                 and int(m[f"{hex(lay['smp_pv_state'])}@3"], 16) == 0,
+                                 "the preview ticks nothing (still one)": d0[3:4] == [1],
+                                 "v0.33: MOVE SELECTED, MOVE HERE: DRUMS holds two": d0[4:5] == [2],
                                  "LOAD TO PROJ queues it": int(m[hex(lay["smp_lp_queued"])], 16) == 1,
                                  "NO: +DRIVE's folders": int(m[hex(lay["smp_fb_folder"])], 16) == 0xFFFFFFFF
-                                 and int(m[f"{S}@4"], 16) == 1,
-                                 "NO: the two stores": int(m[f"{S}@5"], 16) == 0xFFFFFFFF,
+                                 and int(m[f"{S}@6"], 16) == 1,
+                                 "NO: the two stores": int(m[f"{S}@7"], 16) == 0xFFFFFFFF,
                                  "NO: closed": int(m[hex(lay["smp_fb_open"])], 16) == 0,
                                  "each step drawn": len(set(sh)) == 5}
                         good = all(facts.values())
