@@ -573,6 +573,15 @@ static void name_delete(void)
     nm_text[6] = 0;
 }
 
+/* v0.33: FUNC + NO also steps the cursor back (the owner: held, it clears letter after
+ * letter, right to left, as the naming screen's character pick steps forward) */
+static void name_backdel(void)
+{
+    name_delete();
+    if (nm_cur > 0)
+        nm_cur--;
+}
+
 static void name_insert(void)
 {
     for (int j = 6; j > nm_cur; j--)
@@ -664,7 +673,9 @@ static void rpt_poll(void)
     if ((int)(now - rpt_next) < 0)
         return;
     rpt_next = now + RPT_STEP;
-    if (rpt_grid)
+    if (rpt_code == K_NO)
+        name_backdel();
+    else if (rpt_grid)
         grid_move(rpt_code);
     else if (rpt_code == K_LEFT && nm_cur > 0)
         nm_cur--;
@@ -741,8 +752,10 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
             nm_gpicked = 0;
         } else if (code == K_YES && smp_func_held)
             name_insert();
-        else if (code == K_NO && smp_func_held)
-            name_delete();
+        else if (code == K_NO && smp_func_held) {
+            name_backdel();
+            rpt_start(code);                    /* v0.33: held, it goes on */
+        }
         else if (code == K_YES)
             name_done();
         else if (code == K_NO && nm_only) {    /* the browser's RENAME, left as it was */

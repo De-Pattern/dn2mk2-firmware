@@ -465,6 +465,10 @@ def main() -> int:
                      f"mem:{g['smp_cmds']}:4,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,spin:0:3,wait:3,right,"
                      f"wait:3,spin:0:2,wait:3,mem:{g['nm_text']}:8,press:17,wait:2,yes,wait:3,release:17,wait:3,"
                      f"mem:{g['nm_text']}:8,press:17,wait:2,no,wait:3,release:17,wait:3,mem:{g['nm_text']}:8,"
+                     # v0.33: FUNC + NO steps the cursor back too (owner: held, it clears letter
+                     # after letter; the repeat runs on the unit's 1.5 kHz clock, which the
+                     # emulator barely moves): "CB", cursor on B -> "CB", cursor on C -> "B"
+                     f"press:17,wait:2,press:12,wait:10,release:12,wait:3,release:17,wait:3,mem:{g['nm_text']}:8,"
                      f"png:n1,yes,wait:10,mem:{g['rec_phase']}:4,png:a1,tap:27,"
                      f"wait:20,mem:{g['rec_phase']}:4,mem:{snd}:256,png:r1")
             js = work / "recflow.json"
@@ -479,9 +483,9 @@ def main() -> int:
                     r = json.loads(js.read_text())
                     m = r["memory"]
                     ph, cm, pv = g["rec_phase"], g["smp_cmds"], g["rec_pv_on"]
-                    phases = [int(m[k], 16) for k in (ph, f"{ph}@3", f"{ph}@12", f"{ph}@16", f"{ph}@17")]
+                    phases = [int(m[k], 16) for k in (ph, f"{ph}@3", f"{ph}@12", f"{ph}@17", f"{ph}@18")]
                     cmds = [int(m[k], 16) for k in (cm, f"{cm}@8", f"{cm}@11")]
-                    before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[f"{snd}@18"])
+                    before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[f"{snd}@19"])
                     s0, e0 = int(m[g["trim_s"]], 16), int(m[g["trim_e"]], 16)
                     names = [bytes.fromhex(m[k])[:4] for k in (g["nm_text"], f"{g['nm_text']}@14",
                                                                f"{g['nm_text']}@15")]
@@ -492,6 +496,7 @@ def main() -> int:
                              and cmds[1] == cmds[0] + 1 and cmds[2] == cmds[1] + 1
                              and int(m[g["smp_func_held"]], 16) == 0,
                              "name": names == [b"CB\0\0", b"C B\0", b"CB\0\0"],
+                             "v0.33: FUNC + NO steps back: a second one takes the letter before": bytes.fromhex(m[f"{g['nm_text']}@16"])[:2] == b"B\0",
                              "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
                              "samp": after[0x6A] == 5,
                              "frames": r["screen_frames"] > 0}
