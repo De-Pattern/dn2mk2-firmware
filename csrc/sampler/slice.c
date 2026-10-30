@@ -477,11 +477,22 @@ static void start_analysis(int then)
 }
 
 /* from the UI loop (page.c's wr_poll), every pass */
+static u32 wait_at __attribute__((section(".data"))) = 0;
+
 void slc_poll(void)
 {
-    if (slc_state != S_WAIT)
+    if (slc_state != S_WAIT) {
+        wait_at = 0;
         return;
+    }
+    if (!wait_at)
+        wait_at = FRAMES | 1u;
     int st = smp_analysis(0);
+    if (st == 1 && FRAMES - wait_at > 45000u) { /* v0.33: 30 s and still reading: give up */
+        note("CANNOT READ IT");
+        slc_state = S_OFF;
+        return;
+    }
     if (st == 2) {
         if (wait_for == S_GRID) {
             make_grid();
@@ -696,8 +707,13 @@ int slc_pop(u8 *it)
             slc_page_seen = 0;                  /* off the page: smp_page.c says when it is back */
         return 0;
     }
-    if (slc_state == S_WAIT)
-        return it[0] == IT_KEY || it[0] == IT_KNOB;   /* nothing while it reads */
+    if (slc_state == S_WAIT) {                  /* nothing while it reads, but NO leaves (v0.33: */
+        if (press && code == K_NO) {            /* a read that never ends must not hold every key) */
+            slc_state = S_OFF;
+            return 1;
+        }
+        return it[0] == IT_KEY || it[0] == IT_KNOB;
+    }
     if (it[0] == IT_KNOB) {
         int d = (signed char)it[8];
         if (code < 1 || code > 9)

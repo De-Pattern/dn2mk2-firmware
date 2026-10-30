@@ -591,6 +591,11 @@ def main(argv=None):
             show(results["3g_guard"])
             gc.collect()
 
+        if "cost" in steps:
+            print("\nstep 3c: each machine's cost, one voice (v0.33)")
+            results["3c_cost"] = step_cost(warm(), sound, machines)
+            show(results["3c_cost"])
+            gc.collect()
         if "garbage" in steps:
             print("\nstep 3g: voice state and scratch full of garbage (v0.33)")
             results["3g_garbage"] = step_garbage(warm(), sound, machines)
@@ -1225,6 +1230,101 @@ def step_stress(init, sound, machines) -> dict:
         "nothing non-finite": fin,
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
+
+
+def _count_memory():
+    """wrap every module's DM read and write: -> (counts dict, undo). Counts by region:
+    L1 (the core's own), L2 (0x20000000..), DDR (0x80000000..)"""
+    counts = {"L1": 0, "L2": 0, "DDR": 0, "on": False}
+
+    import sys as _s0
+    conc = _s0.modules["sharc_core.memory"]._concrete_address
+
+    def region(a):
+        a = conc(a)
+        if a is None:
+            return None
+        return "DDR" if a >= 0x80000000 else "L2" if 0x20000000 <= a < 0x20200000 else "L1"
+    import sys as _s
+    orig_r, orig_w = fx._dm_read, fx._dm_write
+
+    def rd(state, address, width, *a, **k):
+        if counts["on"]:
+            g = region(address)
+            if g:
+                counts[g] += 1
+        return orig_r(state, address, width, *a, **k)
+
+    def wr(state, address, width, value):
+        if counts["on"]:
+            g = region(address)
+            if g:
+                counts[g] += 1
+        return orig_w(state, address, width, value)
+    patched = []
+    for m in list(_s.modules.values()):
+        for name, new in (("_dm_read", rd), ("_dm_write", wr)):
+            if getattr(m, name, None) in (orig_r, orig_w) and getattr(m, name) is (orig_r if name == "_dm_read" else orig_w):
+                patched.append((m, name, getattr(m, name)))
+                setattr(m, name, new)
+
+    def undo():
+        for m, name, f in patched:
+            setattr(m, name, f)
+    return counts, undo
+
+
+def step_cost(init, sound, machines) -> dict:
+    """v0.33: what each machine costs the DSP, one voice sounding: instructions of our code a
+    block, and its memory accesses by region (on the unit an L2 access costs several times an
+    instruction, a DDR one about ten: complex-ping's measurements). Six blocks after the note,
+    less a run with nothing sounding. Written to the report; docs/dsp-cost.md reads it."""
+    from dnfw.mnm import machines as MMx
+    counts, undo = _count_memory()
+    rows = {}
+
+    def measure(name, fb):
+        ins = {}
+
+        def at_perc(r):
+            ins["a"] = r.steps_n
+            counts["on"] = True
+
+        def at_ping(r):
+            ins.setdefault("sum", 0)
+            ins["sum"] += r.steps_n - ins.get("a", r.steps_n)
+            counts["on"] = False
+        for k in ("L1", "L2", "DDR"):
+            counts[k] = 0
+        rr = run_blocks(init, fb, 8, extra_hooks={dsp.PERC_SW: at_perc, dsp.PING_SW: at_ping})
+        n = 8
+        rows[name] = {"ok": rr["ok"], "instructions": ins.get("sum", 0) // n,
+                      **{k: counts[k] // n for k in ("L1", "L2", "DDR")}}
+
+    try:
+        measure("(nothing)", lambda b: base_frame(sound, machines, trigger=False).to_bytes())
+        for k, name in enumerate(PM.NAMES):
+            measure(name, (lambda k: lambda b: base_frame(sound, machines, overrides=perc_words(k), trigger=b == 1).to_bytes())(k))
+        for k, name in enumerate(MMx.NAMES):
+            def fb(b, k=k):
+                f = base_frame(sound, machines, t0=MMx.TYPES[k], trigger=b == 1)
+                for slot, w in mnm_words(k).items():
+                    f.param(0, slot, w)
+                return f.to_bytes()
+            measure(name, fb)
+        for name in ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE"):
+            measure(name, (lambda ty: lambda b: base_frame(sound, machines, t0=ty, trigger=b == 1,
+                                                          overrides=smp_words({SM.SAMP_REC: 4})).to_bytes())(SM.TYPE_OF[name]))
+    finally:
+        undo()
+    base = rows["(nothing)"]
+    table = {k: {"instructions": v["instructions"] - base["instructions"], "L1": v["L1"] - base["L1"],
+                 "L2": v["L2"] - base["L2"], "DDR": v["DDR"] - base["DDR"],
+                 "estimate": (v["instructions"] - base["instructions"]) + 4 * (v["L2"] - base["L2"])
+                 + 10 * (v["DDR"] - base["DDR"]), "ok": v["ok"]} for k, v in rows.items() if k != "(nothing)"}
+    ok = all(v["ok"] for v in rows.values())
+    return {"ok": ok, "checks": {"every machine measured (every block returned)": ok},
+            "numbers": {"per_voice_block": table, "nothing": base}}
 
 
 def step_garbage(init, sound, machines) -> dict:

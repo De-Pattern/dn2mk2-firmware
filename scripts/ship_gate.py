@@ -1135,6 +1135,47 @@ def main() -> int:
             gate("Monomachine start values (ColdFire)",
                  *cached("Monomachine start values (ColdFire)", [o_cmd, sorted(EMU_ENV.items())], o_body))
 
+        # 6p. v0.33: our overlays let go when the page under them goes (docs/freeze-hunt.md).
+        # The sample list opened on track 1 (a SAMP turn), then TRK + [TRIG 2] to track 2, a
+        # stock machine: the next UP is not the list's (it closes); then MACHINE SEL in and
+        # out (FUNC + SRC, NO), and YES on a SLICE track's page still answers (its menu, or
+        # NO SAMPLE ON SAMP)
+        if "smp_lst_open" in lay and "smp_held_lo" in lay:
+            from dnfw.sampler import machines as SMp    # noqa: PLC0415
+            kit = 0x4210C08C
+            snd0, snd1 = kit + 52, kit + 52 + 1163
+            srec = SMp.RECORDS[SMp.SAMP_REC][0]
+            lo_ = lay["smp_lst_open"]
+            hs = [f"wait:3,poke:{snd0 + 0xDE:#x}:08,poke:{snd1 + 0xDE:#x}:00,poke:{snd0 + 0x6A:#x}:0200",
+                  "wait:4,tap:2,wait:8",
+                  f"call:{lay['smp_quant']:#x}:sound0:{srec}:{3 << 8:#x}:{SMp.SAMP_REC}",
+                  f"poke:{snd0 + 0x6A:#x}:0300,poke:{lay['smp_overlay_dirty']:#x}:00000001,wait:10,png:h0,mem:{lo_:#x}:4",
+                  "press:16,wait:2,press:26,wait:3,release:26,wait:2,release:16,wait:10,mem:0x42431a6c:1",
+                  f"up,wait:6,mem:{lo_:#x}:4,png:h1",
+                  "press:16,wait:2,press:25,wait:3,release:25,wait:2,release:16,wait:10",
+                  f"poke:{snd0 + 0xDE:#x}:0d,poke:{snd0 + 0x6A:#x}:0000,wait:4,tap:2,wait:8",
+                  "func-src,wait:20,no,wait:10,png:h2,yes,wait:8,png:h3"]
+            hjs = work / "hooks.json"
+            h_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                     "--snapshot", snap, "--steps", ",".join(hs), "--png-dir", work / "hooks", "--json", hjs]
+
+            def h_body(tdir):
+                rc, out = run("hooks let go", h_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and hjs.exists():
+                    r = json.loads(hjs.read_text())
+                    m = r["memory"]
+                    sh = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("h2", "h3")}
+                    facts = {"the list opens on track 1": int(m[hex(lo_)], 16) == 1,
+                             "TRK + [TRIG 2]: track 2": int(m["0x42431a6c"], 16) == 1,
+                             "UP there: the list closed, not taking it": int(m[f"{hex(lo_)}@2"], 16) == 0,
+                             "after MACHINE SEL in and out, YES on a SLICE page answers": sh["h2"] != sh["h3"]}
+                    good = all(facts.values())
+                    why = f"{facts} mem={m}"
+                return good, ("the sample list lets go when another track is active; YES on a SLICE page "
+                              "answers after MACHINE SEL" if good else why)
+            gate("overlays let go (ColdFire)", *cached("overlays let go (ColdFire)", [h_cmd, sorted(EMU_ENV.items())], h_body))
+
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest
             print("  (waiting for the SHARC runner)", flush=True)

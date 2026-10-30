@@ -117,6 +117,7 @@ int rec_overlay __attribute__((section(".data"))) = 0;      /* the screen is up 
 int rec_src __attribute__((section(".data"))) = 0;          /* SMP_REC_SOURCES choices */
 int rec_thres __attribute__((section(".data"))) = 0;        /* 0..120 */
 int rec_dest __attribute__((section(".data"))) = -1;        /* slot 0..126 (SAMP 1..127); -1 not chosen */
+static u32 work_at __attribute__((section(".data"))) = 0;   /* v0.33: when NORMALIZING began */
 int trim_zoom __attribute__((section(".data"))) = 0;      /* v0.33: TRIM's zoom, 0..3: 1x..8x */
 u32 trim_pos __attribute__((section(".data"))) = 0;       /* v0.33: its window's first frame */
 int rec_rlen __attribute__((section(".data"))) = 0;         /* 0 MAX, else steps */
@@ -315,6 +316,7 @@ void rec_poll(void)
                 rec_saved_slot = rec_taken;
                 if (rec_overlay) {                  /* NORMALIZING, then TRIM, as the DT2 */
                     rec_phase = PH_WORK;
+                    work_at = FRAMES | 1u;
                     trim_slot = rec_taken;
                     trim_n = rec_frames;
                     trim_s = 0;
@@ -323,6 +325,10 @@ void rec_poll(void)
                 rec_dest = next_empty(0);           /* v0.33: the next recording's, shown */
             }
         }
+    }
+    if (rec_phase == PH_WORK && smp_saved == 0 && FRAMES - work_at > 30000u) {
+        rec_phase = PH_REC;                     /* v0.33: 20 s and the save not done: the */
+        smp_overlay_dirty = 1;                  /* RECORDER again, not NORMALIZING for good */
     }
     if (rec_phase == PH_WORK && smp_saved != 0) {   /* v0.25: saved (and normalised): TRIM */
         u32 n = smp_frames(trim_slot);
