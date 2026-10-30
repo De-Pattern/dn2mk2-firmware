@@ -1872,7 +1872,22 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
     c = run_blocks(init_on(snap, m2mach, m5), frames(5), blocks)        # track 0 type 5, M5 image
     d = run_blocks(init_on(snap, m2mach, m5), frames(SM.TYPE_OF["ONESHOT"]), blocks)   # track 0 ONESHOT
     e = run_blocks(init_on(snap, m2mach, m5), frames(SM.TYPE_OF["WERP"]), blocks)      # track 0 WERP
-    ok_runs = a["ok"] and b["ok"] and c["ok"] and d["ok"] and e["ok"]
+    # v0.33: each Monomachine machine on track 0 (the owner's v0.32 report: with one MnM track a
+    # noise on every track's notes, the stock machines' and the input's): tracks 1-15 must stay
+    # the stock run's, bit for bit, while it plays
+    from dnfw.mnm import machines as MMx
+
+    def mnm_frames(k):
+        def f(b):
+            fr = base_frame(sound, machines, t0=MMx.TYPES[k], others=others, trigger=(b == 1), trigger_others=True)
+            for slot, w in mnm_words(k).items():
+                fr.param(0, slot, w)
+            return fr.to_bytes()
+        return f
+    mn = {MMx.NAMES[k]: run_blocks(init_on(snap, m2mach, m5), mnm_frames(k), blocks) for k in range(len(MMx.NAMES))}
+    ok_runs = a["ok"] and b["ok"] and c["ok"] and d["ok"] and e["ok"] and all(x["ok"] for x in mn.values())
+    mn_bad = {n: [t for t in range(1, 16) if any(blk[t] != sb[t] for blk, sb in zip(x["buffer_bits"], b["buffer_bits"]))]
+              for n, x in mn.items()} if ok_runs else None
     # compared as bit patterns: the runner's FM Tone voice can produce NaN, and NaN != NaN
     all16 = ok_runs and a["buffer_bits"] == b["buffer_bits"]
     t1_15 = ok_runs and [blk[1:] for blk in c["buffer_bits"]] == [blk[1:] for blk in b["buffer_bits"]]
@@ -1885,11 +1900,13 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
         "v0.13: track 0 ONESHOT (8), then WERP (9): tracks 1-15 bit-identical to the stock run":
             ok_runs and all([blk[1:] for blk in x["buffer_bits"]] == [blk[1:] for blk in b["buffer_bits"]]
                             for x in (d, e)),
+        "v0.33: a Monomachine machine on track 0 (each of them): tracks 1-15 bit-identical to the stock run":
+            ok_runs and not any(mn_bad.values()),
         "stock machines wrote their tracks (non-zero bits on at least one of tracks 1-4)":
             bool(set(active) & {1, 2, 3, 4}),
     }
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"others": others, "tracks_with_nonzero_bits_stock": active,
+            "numbers": {"others": others, "tracks_with_nonzero_bits_stock": active, "mnm_tracks_differing": mn_bad,
                         "tracks_with_nan_stock": nan,
                         "peaks_stock": [max((V.peak([x for x in blk[t] if x == x]) for blk in b["buffers"]), default=0)
                                         for t in range(16)] if ok_runs else None,
