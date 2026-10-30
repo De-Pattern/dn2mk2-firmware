@@ -254,6 +254,10 @@ def mnm_c_header() -> str:
         # v0.27: the frame slot of each of the eight (smp_quant's 4 detents a choice), and each
         # control's widget as the Monomachine draws it (docs/mnm-pages-plan.md)
         f"static const unsigned char mnm_slot[8] = {{{', '.join(str(sl) for _r, sl, _lo, _t in _perc.PARAMS)}}};",
+        # v0.33: each machine's own start (dnfw.mnm's DEFAULTS), set by MACHINE SEL (rec.c), as
+        # the words the eight records take (perc.live.knob_word), and the records' ids
+        f"static const unsigned short mnm_rid[8] = {{{', '.join(str(r) for r, _s, _lo, _t in _perc.PARAMS)}}};",
+        f"static const unsigned short mnm_default[MNM_N][8] = {{{arr([[_knob_word(x, t, lo) for (_r, _s, lo, t), x in zip(_perc.PARAMS, _mnm.DEFAULTS[M.NAME])] for M in _mnm.MACHINES])}}};",
         "enum { MW_KNOB, MW_EMPTY, MW_GRID, MW_SLIDE, MW_VU, MW_SWITCH };",
         f"static const unsigned char mnm_widget[MNM_N][8] = {{{arr([[MNM_WIDGET.get((M.NAME, sh), 1 if sh == '---' or sh in MNM_UNPORTED else 0) for sh in M.PNAMES] for M in _mnm.MACHINES])}}};",
     ]
@@ -398,6 +402,11 @@ def smp_c_header() -> str:
 
 
 SMP_FIRST_KIND = 4                 # is_wr's answer for type 8; 5..8 for 9..12
+
+
+def _knob_word(x, top, lo):
+    from ..perc import live as _pl
+    return _pl.knob_word(x, top, lo)
 
 
 def smp_quant_header() -> str:

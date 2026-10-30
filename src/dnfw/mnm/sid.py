@@ -24,7 +24,9 @@ from ..perc.dsl import Prog
 
 NAME, ID = "SID 6581", 3
 PNAMES = ("PW", "PWAD", "PWRS", "WAVE", "MOD", "MSRC", "MFRQ", "TUNE")
-DEFAULTS = (0, 0, 96, 0, 0, 0, 64, 64)
+# v0.33: WAVE on PULS and PW at the middle (a square) as MACHINE SEL's start (the owner: at the
+# shared record's MIX it was silent at first); the rest the Monomachine's
+DEFAULTS = (64, 0, 95, 64, 0, 0, 64, 64)   # (PWRS 95: ON, where its detents put it)
 COEF = (0x3EF3C2, 0xFE01EB, 0x82F338, 0x01D9BC, 0x3CD5C5, 0x0650D5, 0x8400A4, 0xF9AF2B,
         0xC22E5F, 0x04866C)
 GAIN = 0x6186

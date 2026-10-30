@@ -1040,6 +1040,43 @@ def main() -> int:
                               "silent; drawn in place of the tempo while FUNC is held" if good else why)
             gate("DSP load meter (ColdFire)", *cached("DSP load meter (ColdFire)", [m_cmd, sorted(EMU_ENV.items())], m_body))
 
+        # 6o. v0.33: MACHINE SEL to a Monomachine machine gives it its own start (dnfw.mnm's
+        # DEFAULTS: SID on PULS, PW at the middle), not the shared records' defaults. A real
+        # MACHINE SEL first (6k's: ONESHOT to the next sample machine; its commit's arguments
+        # kept), then the commit called again for track 1 to SID: its eight records' words
+        if "smp_machine_commit" in lay:
+            from dnfw.mnm import machines as MMo     # noqa: PLC0415
+            from dnfw.perc import machines as PMo    # noqa: PLC0415
+            from dnfw.perc import live as PLo        # noqa: PLC0415
+            kit = 0x4210C08C
+            snd0 = kit + 52
+            sa, ty = snd0 + 20 + 2 * 43, snd0 + 0xDE
+            sid = MMo.TYPES[MMo.NAMES.index("SID 6581")]
+            cm = lay["smp_machine_commit"]
+            want = [PLo.knob_word(x, top, lo) for (_r, _s, lo, top), x in zip(PMo.PARAMS, MMo.DEFAULTS["SID 6581"])]
+            os_ = (f"wait:3,poke:{ty:#x}:08,poke:{sa:#x}:0500,wait:4,tap:2,wait:6,func-src,wait:20,down,wait:4,"
+                   f"yes,wait:20,call:{cm:#x}:arg1@{cm:#x}:0:{sid}:arg4@{cm:#x}:arg5@{cm:#x},wait:10,types,"
+                   + ",".join(f"mem:{snd0 + 20 + 2 * sl:#x}:2" for _r, sl, _lo, _t in PMo.PARAMS))
+            ojs = work / "mnmdefaults.json"
+            o_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                     "--snapshot", snap, "--args-at", hex(cm), "--steps", os_, "--png-dir", work / "mnmdefaults",
+                     "--json", ojs]
+
+            def o_body(tdir):
+                rc, out = run("mnm defaults", o_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and ojs.exists():
+                    m = json.loads(ojs.read_text())["memory"]
+                    types = m.get("types@0") or [None]
+                    got = [int(m.get(f"{snd0 + 20 + 2 * sl:#x}", "0") or "0", 16) for _r, sl, _lo, _t in PMo.PARAMS]
+                    facts = {"track 1 is SID": types[0] == sid, "its eight controls at SID's own start": got == want}
+                    good = all(facts.values())
+                    why = f"{facts} got={[hex(g) for g in got]} want={[hex(w) for w in want]} types={types}"
+                return good, ("MACHINE SEL to SID: its eight controls at its own start (PULS, PW at the middle)"
+                              if good else why)
+            gate("Monomachine start values (ColdFire)",
+                 *cached("Monomachine start values (ColdFire)", [o_cmd, sorted(EMU_ENV.items())], o_body))
+
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest
             print("  (waiting for the SHARC runner)", flush=True)

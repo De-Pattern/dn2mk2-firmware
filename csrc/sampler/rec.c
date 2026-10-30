@@ -429,9 +429,21 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
         if (old != ty && old >= ONESHOT && old < ONESHOT + SMP_N && ty >= ONESHOT && ty < ONESHOT + SMP_N)
             keep = smp_samp_of((int)track);
     }
+    int was = track < 16 && KIT ? SOUND_TYPE(track) : -1;
     u32 r = MACHINE_COMMIT(model, track, type, a, b);
     if (keep > 0 && SOUND_TYPE(track) == (int)type && smp_samp_of((int)track) != keep)
         smp_set_samp((int)track, keep);
+    /* v0.33: a Monomachine machine starts as its own (dnfw.mnm DEFAULTS: SID on a square
+     * wave), not at the shared records' defaults (the owner: SID silent at first, on MIX) */
+    int mi = track < 16 && KIT && SOUND_TYPE(track) == (int)type && was != (int)type ? mnm_index((int)type - 4) : -1;
+    if (mi >= 0) {
+        u32 owner = UI_OWNER();
+        for (int j = 0; owner && j < 8; j++) {
+            u32 ps = PARAM_SET(owner, mnm_rid[j], track);
+            if (ps)
+                SET_VALUE(ps, mnm_rid[j], (u32)mnm_default[mi][j], track, 0, 0, 1);
+        }
+    }
     return r;
 }
 
