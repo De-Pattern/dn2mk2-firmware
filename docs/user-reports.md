@@ -107,7 +107,7 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 
 - **SID silent at first** (owner, v0.32): MACHINE SEL gave the Monomachine machines the shared
   records' defaults (SID's WAVE on MIX). **v0.33**: each starts as its own (dnfw.mnm DEFAULTS),
-  SID on PULS with PW at the middle; gate 6o.
+  SID on TRI (its first wave; PW at the middle for PULS); gate 6o.
 - **DDRW's BR1 / BR2 (bitcrush) not heard** (owner, v0.32). **Open**: check the port against
   the Monomachine's (the runner's DDRW model at BR 0 vs 127).
 - **Owner's checks at the next install** (asked to be reminded): (1) a fresh project plays at
