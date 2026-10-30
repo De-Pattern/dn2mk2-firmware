@@ -122,3 +122,20 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 - A build with only the Machinedrum and Monomachine machines (douleursolitude)
 - "Ensemble machines need work" (ModernDevotion): which machine is unclear; asked for plain-English detail
 - A Discord (taktonmusic)
+
+## Pablo Se7en and the owner (Discord, v0.32, 2026-10-30)
+
+- **LFO DEPTH and SPEED don't snap with FUNC on our tracks** (the owner and Pablo): stock
+  snaps DEPTH to -128 / 0 / 127.98 and SPEED to 0, +-8, 12, 16, 24, 32, 48, 63.99 (-64).
+  v0.32's FUNC + turn held every control it did not know on our machines, the LFO pages'
+  too. **v0.33**: only our machines' own records (238..260) change; gate 6m checks LFO
+  controls on PERC, Monomachine and ONESHOT.
+- **Freeze on the sample list** (Pablo, video: ONESHOT, the SAMP list up, keys do nothing,
+  no audio). The third report of it (U2, O5). **Open, first after v0.33's fixes**: the list's
+  load path while the pattern plays.
+- **A track stuck on its machine** (Pablo, PERC): MACHINE SEL would not change it until the
+  track was cleared. **Open**: may be the same as the SLICE/GRID YES (MACHINE SEL's keys'
+  releases never reach the mod); to check with MACHINE SEL from PERC.
+- **The owner's crackle** (v0.32, one Monomachine track): not the Digitone (headphones
+  clean); something in the studio chain. The runner now checks that every Monomachine machine
+  leaves the stock tracks bit-identical.
