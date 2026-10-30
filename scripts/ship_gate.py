@@ -664,8 +664,11 @@ def main() -> int:
                                  mem(lay["smp_lst_open"])]
             st += samp_all(2) + ["wait:10"] + turn(3) + ["wait:10", "png:l4", "press:17", "wait:2", "yes", "wait:2", "release:17",
                                  "wait:8", "yes", "wait:6", "png:b1", mem(lay["smp_fb_open"]), "yes", "wait:8", "png:b2",
-                                 mem(lay["smp_fb_folder"]), "down", "wait:2", "yes", "wait:8", "png:b3",
+                                 mem(lay["smp_fb_folder"]), "down", "wait:2", "yes", "wait:8", "png:b3t",
+                                 mem(samp0, 2), mem(lay["smp_fb_open"]),
+                                 "right", "wait:6", "yes", "wait:8", "png:b3",
                                  mem(samp0, 2), mem(lay["smp_fb_open"]), mem(lay["smp_lst_open"])]
+            # (v0.33: YES on a sample in PROJECT RAM ticks it, as the DT2's; RIGHT, LOAD TRK assigns)
             # (v0.31: FUNC + YES opens on the two stores, the cursor on PROJECT RAM: YES enters it)
             # the SAMPLE ACTION menu: into "loops", RIGHT on its sample, DELETE, asked, YES
             st += samp_all(3) + ["wait:10"] + turn(2) + ["wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8",
@@ -700,16 +703,18 @@ def main() -> int:
                              "NO puts it back and closes": m[f"{sp}@3"] == "0200" and int(m[f"{lo}@4"], 16) == 0,
                              "browser opens, a folder entered": int(m[fo], 16) == 1 and int(m[ff], 16) == 0
                              and shots["b1"] != shots["b2"],
-                             "a sample picked: SAMP, both closed": m[f"{sp}@7"] == "0100" and int(m[f"{fo}@8"], 16) == 0
-                             and int(m[f"{lo}@9"], 16) == 0,
+                             "v0.33: YES on a sample ticks it: SAMP kept, the browser up":
+                             m[f"{sp}@7"] == "0300" and int(m[f"{fo}@8"], 16) == 1,
+                             "RIGHT, LOAD TRK: SAMP, both closed": m[f"{sp}@9"] == "0100" and int(m[f"{fo}@10"], 16) == 0
+                             and int(m[f"{lo}@11"], 16) == 0,
                              "DELETE in the SAMPLE ACTION menu empties the slot": m[hex(M + 28)] == "00000000"
                              and len({pathlib.Path(r["screens"][n]).read_bytes() for n in ("m1", "m2", "m3")}) == 3,
                              "modulated SAMP through the loaded slots, by depth, held at the last":
-                             [m[ce], m[f"{ce}@12"], m[f"{ce}@13"]] == ["0400", "0400", "0100"]}
+                             [m[ce], m[f"{ce}@14"], m[f"{ce}@15"]] == ["0400", "0400", "0100"]}
                     good = all(facts.values())
                     why = str(facts)
                 return good, ("the playhead drawn where the DSP says; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
-                              "puts it back; FUNC + YES's browser enters a folder and assigns a sample; "
+                              "puts it back; FUNC + YES's browser enters a folder, YES ticks a sample and RIGHT, LOAD TRK assigns it; "
                               "its SAMPLE ACTION menu deletes; modulation on SAMP steps through the loaded slots" if good else why)
             gate("sample list, browser, playhead (ColdFire)",
                  *cached("sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body))

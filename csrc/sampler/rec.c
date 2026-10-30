@@ -1003,6 +1003,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     if (act == 0) {             /* LOAD TO TRK */
                         smp_set_samp(t, slot + 1);
                         smp_fb_open = 0;
+                        smp_fb_unmark_all();    /* v0.33: closed, so its ticks go (as a page key's) */
                         smp_list_settle(slot + 1);
                     } else if (act == 1) {      /* RENAME: the NAME screen, alone */
                         smp_fb_open = 0;
@@ -1015,10 +1016,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 lrpt_code = code;               /* v0.30: held, it goes on */
                 lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
             }
-            else if (code == K_YES && slot >= 0 && smp_fb_store == 1)
-                smp_fb_mark(slot, !smp_fb_marked(slot));    /* v0.31: in +DRIVE YES ticks, as the DT2's */
-            else if (code == K_YES && smp_func_held && slot >= 0)
-                smp_fb_mark(slot, !smp_fb_marked(slot));    /* v0.29: FUNC + YES marks */
+            else if (code == K_YES && slot >= 0)    /* v0.33: YES ticks in both stores, as the DT2's */
+                smp_fb_mark(slot, !smp_fb_marked(slot));    /* (13.6.2: PROJECT RAM too); RIGHT acts */
             else if (code == K_YES && smp_func_held && on_folder)
                 smp_fb_mark_folder(f);
             else if (code == K_RIGHT && (slot >= 0 || on_folder)) {
@@ -1027,10 +1026,6 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             } else if (code == K_YES && on_folder) {
                 smp_fb_folder = f;              /* into the folder */
                 smp_fb_cur = 0;
-            } else if (code == K_YES && slot >= 0) {   /* the DT2's quick assign */
-                smp_set_samp(t, slot + 1);
-                smp_fb_open = 0;
-                smp_list_settle(slot + 1);
             } else if (code == K_LEFT) {        /* up a folder; at the top it stays (v0.26) */
                 if (smp_fb_folder != -1) {
                     int back = smp_fb_folder;

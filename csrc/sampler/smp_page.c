@@ -748,8 +748,8 @@ void smp_list_draw(void *c)
  * browser (its manual 13.6): folders only at the top -- the import tool's, then INCOMING
  * (what was sent in no folder) and RECORDED (the recorder's) -- and a folder's samples
  * inside it, each with the slot it plays from (>A009), as the DT2 marks a loaded sample.
- * YES opens a folder, or gives the track the sample (the DT2's quick assign); NO goes back
- * up, and out at the top. RIGHT on a sample opens the SAMPLE ACTION menu: LOAD TO TRK,
+ * YES opens a folder, or ticks a sample (v0.33, in PROJECT RAM too, as the DT2's 13.6.2; it
+ * gave the track the sample before); NO goes back up, and out at the top. RIGHT on a sample opens the SAMPLE ACTION menu: LOAD TO TRK,
  * RENAME, DELETE (asked first). Every sample is in RAM from power-on, so the DT2's LOAD
  * TO PROJECT has nothing to do here. Over the whole screen (page.c's wr_screen). */
 extern int smp_is_recording(int k);
