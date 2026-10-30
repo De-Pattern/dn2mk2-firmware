@@ -115,8 +115,11 @@ static void used_set(int k)
         used_bits[k >> 5] &= ~b;
 }
 
+u32 smp_lib_rev __attribute__((section(".data"))) = 0;   /* v0.33: bumped whenever the index may have changed */
+
 static void used_all(void)
 {
+    smp_lib_rev++;
     for (int k = 0; k < LIB_CAP / 32; k++)
         used_bits[k] = 0;
     for (int k = 0; k < LIB_CAP; k++)

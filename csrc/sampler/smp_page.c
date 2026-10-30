@@ -20,6 +20,7 @@
 
 typedef unsigned int u32;
 typedef unsigned char u8;
+typedef unsigned short u16;
 
 #define GET_VALUE ((int (*)(void *, u32, u8 *))0x4006538E)
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90)
@@ -703,6 +704,13 @@ static void sample_list(void *c, void *view, int slot, int kind)
     }
 }
 
+/* v0.33: the list belongs to the track it opened on. Another track active (its page drawn
+ * by stock, or not yet drawn) means it is gone: it must not go on taking keys unseen */
+int smp_list_elsewhere(void)
+{
+    return smp_lst_open && list_trk >= 0 && UI_TRACK != list_trk;
+}
+
 /* the list over the screen (page.c's wr_screen, after the page and its title bar): the
  * DT2's header in the title bar, the bank, five slots around SAMP's, the scroll bar */
 int smp_list_visible(void)
@@ -963,6 +971,27 @@ int smp_fb_load_project(int slot, int folder)
 
 /* the browser's items where it is: N of them; item I as a folder (-> its index, or
  * FB_INCOMING / FB_RECORDED; *slot -1) or a sample (-> -1, *slot its slot) */
+/* v0.33: a +DRIVE folder's samples, listed once (Pablo: slowdowns with a large library; the
+ * browser walked all 2,048 entries for its count and again for each of its six rows, every
+ * redraw). Rebuilt when the folder or the library's index changes. */
+extern u32 smp_lib_rev;
+static u16 lb_list[LB_CAP] __attribute__((section(".data")));
+static int lb_list_n __attribute__((section(".data"))) = 0;
+static int lb_list_folder __attribute__((section(".data"))) = -100;
+static u32 lb_list_rev __attribute__((section(".data"))) = 0xFFFFFFFFu;
+
+static void lb_list_make(void)
+{
+    if (lb_list_folder == smp_fb_folder && lb_list_rev == smp_lib_rev)
+        return;
+    lb_list_n = 0;
+    for (int k = 0; k < LB_CAP; k++)
+        if (lb_in(k, smp_fb_folder))
+            lb_list[lb_list_n++] = (u16)k;
+    lb_list_folder = smp_fb_folder;
+    lb_list_rev = smp_lib_rev;
+}
+
 int smp_fb_count(void)
 {
     int n = 0;
@@ -974,9 +1003,8 @@ int smp_fb_count(void)
                 n += lb_has(f);
             return n;
         }
-        for (int k = 0; k < LB_CAP; k++)
-            n += lb_in(k, smp_fb_folder);
-        return n;
+        lb_list_make();
+        return lb_list_n;
     }
     if (smp_fb_folder == -1) {                  /* v0.29: a folder emptied by DELETE is not shown */
         for (int f = 0; f < smp_folder_count(); f++)
@@ -1001,11 +1029,9 @@ int smp_fb_item(int i, int *slot)
                     return f;
             return -1;
         }
-        for (int k = 0; k < LB_CAP; k++)
-            if (lb_in(k, smp_fb_folder) && i-- == 0) {
-                *slot = k;
-                return -1;
-            }
+        lb_list_make();
+        if (i >= 0 && i < lb_list_n)
+            *slot = lb_list[i];
         return -1;
     }
     if (smp_fb_folder == -1) {

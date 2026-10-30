@@ -665,8 +665,8 @@ int slc_pop(u8 *it)
          * keys' releases itself, so SRC stayed "held" and every later YES was stock's until
          * SRC was pressed again (the owner's dead SLICE and GRID menus; held_lo 0x404 in the
          * emulator after it) */
-        extern u32 smp_held_lo, smp_held_hi;
-        if (press && code == K_YES && ((smp_held_lo & 0xFE000000u) || (smp_held_hi & 0x1FFu)))
+        extern int smp_trig_held(void);
+        if (press && code == K_YES && smp_trig_held())
             return 0;
         /* YES on a SLICE track's page opens the menu */
         if (press && code == K_YES && slc_page_seen == 2 && !func) {   /* v0.25: GRID's ALLOCATE SLICE */

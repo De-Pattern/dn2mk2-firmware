@@ -60,6 +60,7 @@ extern void smp_save_recording(int slot, u32 off, u32 frames);
 extern u32 smp_rec_place(int dest, u32 *room);
 extern int smp_slot_empty(int k);
 extern int smp_list_up(void *view);
+extern int smp_lst_open;
 extern void smp_list_hold(void);
 extern void smp_list_close(void);
 extern void smp_list_settle(int v);
@@ -828,6 +829,22 @@ int smp_question_up(void)
  * sound preview) opened GRID's lock menu (a user's report); a YES with another key held is
  * stock's */
 u32 smp_held_lo __attribute__((section(".data"), aligned(4))) = 0;
+u32 smp_trig_at[16] __attribute__((section(".data"), aligned(4)));
+
+/* v0.33: a [TRIG] held now: down, and pressed in the last 10 s (a release that went elsewhere
+ * leaves its bit set; TRIG + YES is a quick chord, so an old one is not held) */
+int smp_trig_held(void)
+{
+    extern u32 smp_held_hi;
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    for (int k = 0; k < 16; k++) {
+        u32 code = 25u + (u32)k;
+        u32 on = code < 32 ? (smp_held_lo >> code) & 1u : (smp_held_hi >> (code - 32)) & 1u;
+        if (on && now - smp_trig_at[k] < 15000u)
+            return 1;
+    }
+    return 0;
+}
 u32 smp_held_hi __attribute__((section(".data"), aligned(4))) = 0;
 
 int smp_knob_d __attribute__((section(".data"))) = 0;       /* v0.32: the last knob turn (fmt.c func_turn) */
@@ -855,6 +872,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         u32 *h = code < 32 ? &smp_held_lo : &smp_held_hi;
         u32 bit = 1u << (code & 31);
         *h = down ? *h | bit : *h & ~bit;
+        if (down && code >= 25 && code <= 40)   /* v0.33: when each [TRIG] went down */
+            smp_trig_at[code - 25] = *(volatile u32 *)0x4058E8D4u;
     }
     if (it[0] == IT_KEY && code == K_FUNC) {
         if (rec_overlay && rec_phase == PH_NAME) {
@@ -885,11 +904,15 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     if (rec_pv_on && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
         preview(0);                             /* FUNC + YES let go: the preview stops */
     if (it[0] == IT_KEY && code < 32 && (eaten >> code & 1)) {
+        eaten &= ~(1u << code);
         if (!down) {                            /* the release of a key we took */
-            eaten &= ~(1u << code);
             it[0] = IT_DROP;
+            return (u32)it;
         }
-        return (u32)it;
+        /* v0.33: a press of a key whose release we were still waiting for: that release
+         * went elsewhere (a stock screen takes some keys' releases itself, as MACHINE SEL
+         * does SRC's). v0.25..v0.32 handed this press, and every later one, to stock until
+         * a release came through: our menus on that key went dead. It is a new press. */
     }
     if (it[0] == IT_KEY && smp_question_up()) {
         extern int slc_stock_asked;             /* v0.30: a stock question's keys; its */
@@ -1069,6 +1092,12 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     }
     /* the sample list (smp_page.c): UP / DOWN a slot, YES keeps, NO puts SAMP back, FUNC +
      * YES the browser, SAMP's push keeps; a page key closes it as YES */
+    /* v0.33: the list takes keys only on its own track's page. Left open when another
+     * track became active (a stock machine's page, which never closes it) it went on taking
+     * UP, DOWN, YES and NO, unseen, for up to 20 s */
+    extern int smp_list_elsewhere(void);
+    if (it[0] == IT_KEY && smp_list_elsewhere())
+        smp_list_close();
     if (it[0] == IT_KEY && smp_list_view && smp_list_up(smp_list_view)) {
         int press = (flags & F_PRESS) && !(flags & F_RELEASE);
         int t = (int)UI_TRACK_NOW;

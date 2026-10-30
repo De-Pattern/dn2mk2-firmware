@@ -385,6 +385,9 @@ def start(p: Prog, L: Layout) -> None:
             p.ldi(7, 2, 1)
             vs(p, "rate", 7)
             p.ldi(8, 3, 1)                   # the format: 0 float32, 1 int16 (v0.14)
+            entry_check(p, L)                # v0.33: an entry that does not lie in the pool plays as empty
+            vs(p, "base", 5)
+            vs(p, "frames", 6)
             p.lsh(9, 8, -8)                  # v0.19: bits 8..15 the slices it has
             p.iconst(12, 0xFF)
             p.iop(9, 9, "AND", 12)
@@ -415,6 +418,37 @@ def start(p: Prog, L: Layout) -> None:
         p._branch(lambda: s32(p.r[4]) < s32(p.r[0]), "LT", inrange, None)
     p.e("COMP(R0, R12);")
     p._branch(lambda: p.r[0] == p.r[12], "EQ", found, None)
+
+
+def entry_check(p: Prog, L: Layout) -> None:
+    """v0.33 (the freeze and silence reports): a slot's entry is trusted only if its frames lie
+    inside the pool: base at least DATA_OFFSET in, 1 .. POOL_BYTES/4 frames, int16 or float32,
+    and its end within POOL_BYTES. Anything else (an entry half-written by the link, a stale
+    one, garbage) plays as an empty slot (base 0, frames 0) instead of reading DDR at an
+    arbitrary address -- which on the unit can return NaN (one NaN in a feedback state, the
+    send FX, silences everything until a restart) or worse. R5 base, R6 frames, R8 the format
+    word; clobbers R9..R13."""
+    p.iconst(13, 0)                           # bad
+    bad = lambda: p.iconst(13, 1)             # noqa: E731
+    p.iconst(12, L.pool)
+    p.iop(10, 5, "-", 12)                     # base's offset into the pool (signed: below it < 0)
+    p.iconst(12, SM.DATA_OFFSET)
+    p.if_(10, "LT", 12, bad, kind="i")
+    p.iconst(12, SM.POOL_BYTES)
+    p.if_(10, "GE", 12, bad, kind="i")
+    p.ifz(6, "LE", bad)
+    p.iconst(12, SM.POOL_BYTES // 4)
+    p.if_(6, "GT", 12, bad, kind="i")
+    p.lsh(11, 6, 1)                           # int16: 2 bytes a frame
+    p.iconst(12, 0xFF)
+    p.iop(9, 8, "AND", 12)
+    p.ifz(9, "EQ", lambda: p.lsh(11, 11, 1))  # float32: 4
+    p.iconst(12, 1)
+    p.if_(9, "GT", 12, bad, kind="i")
+    p.iop(11, 10, "+", 11)                    # its end's offset
+    p.iconst(12, SM.POOL_BYTES)
+    p.if_(11, "GT", 12, bad, kind="i")
+    p.ifz(13, "NE", lambda: (p.iconst(5, 0), p.iconst(6, 0)))
 
 
 MIN_REGION = 32                                # v0.22: the shortest ONESHOT region, frames

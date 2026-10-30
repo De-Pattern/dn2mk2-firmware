@@ -2040,6 +2040,11 @@ void smp_mod_apply(void *mirror)
     MOD_APPLY(mirror);
     if (!dir_ok)
         return;
+    /* v0.33: the loaded slots, listed once a frame and only if a voice needs them (this runs
+     * in the audio interrupt, 1,500 times a second: v0.25..v0.32 walked the 128 slots twice
+     * for every modulated voice, up to 4,096 checks a frame with SAMP modulated on 16) */
+    u8 loaded[POOL_SLOTS];
+    int nl = -1;
     for (u32 b = 0; b < 16; b++) {
         u8 *snd = VOICE_SOUND(b);
         if (!snd || snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
@@ -2049,15 +2054,16 @@ void smp_mod_apply(void *mirror)
         int heard = *cell >> 8;
         int k = heard - (int)set;
         if (k != 0 && set != 0 && set <= POOL_SLOTS) {
-            int n = 0, at = -1, exact = 0;      /* the loaded slots; the last at or below SAMP's */
-            for (int j = 0; j < POOL_SLOTS; j++) {
-                if (smp_slot_empty(j))
-                    continue;
-                if (j <= (int)set - 1) {
-                    at = n;
-                    exact = j == (int)set - 1;
-                }
-                n++;
+            if (nl < 0) {
+                nl = 0;
+                for (int j = 0; j < POOL_SLOTS; j++)
+                    if (!smp_slot_empty(j))
+                        loaded[nl++] = (u8)j;
+            }
+            int n = nl, at = -1, exact = 0;     /* the loaded slots; the last at or below SAMP's */
+            for (int i = 0; i < nl && loaded[i] <= (int)set - 1; i++) {
+                at = i;
+                exact = loaded[i] == (int)set - 1;
             }
             if (n > 0) {
                 int off = mod_scale(k, n);
@@ -2067,14 +2073,7 @@ void smp_mod_apply(void *mirror)
                 int idx = base + off;
                 if (idx < 0) idx = 0;
                 if (idx > n - 1) idx = n - 1;
-                for (int j = 0; j < POOL_SLOTS; j++) {   /* the idx-th loaded slot */
-                    if (smp_slot_empty(j))
-                        continue;
-                    if (idx-- == 0) {
-                        *cell = (u16)((j + 1) << 8);
-                        break;
-                    }
-                }
+                *cell = (u16)((loaded[idx] + 1) << 8);   /* the idx-th loaded slot */
             }
         }
         if (snd[SOUND_TYPE] != SLICE_TYPE)
