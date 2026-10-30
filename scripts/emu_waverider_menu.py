@@ -1007,6 +1007,19 @@ def main() -> int:
             uc_.reg_write(K.UC_M68K_REG_D0, val & 0xFFFFFFFF)
         uc.hook_add(UC_HOOK_CODE, set_d0, begin=va, end=va)
     panel = Panel(machine, png_dir=str(png_dir))
+    # v0.33: what a freeze leaves (the owner's and testers' reports): the firmware's own fault
+    # reporter (V%02x M%x P%08x: an exception), memory the CPU touched outside every mapped
+    # region, and `alive` checkpoints (frames composed so far, the CPU's PC: a run whose
+    # frames stop while keys are pressed is hung)
+    reported = []
+
+    def fault_reporter(uc_, address, size, user):
+        sp = uc.reg_read(K.UC_M68K_REG_A7)
+        reported.append({"at": len(alive), "step": step_now["name"], "ret": f"{struct.unpack('>I', bytes(uc.mem_read(sp, 4)))[0]:#010x}",
+                         "a2": f"{uc.reg_read(K.UC_M68K_REG_A2):#010x}",
+                         "stack": bytes(uc.mem_read(sp, 96)).hex()})
+    alive = []
+    uc.hook_add(UC_HOOK_CODE, fault_reporter, begin=0x4011EA6A, end=0x4011EA6A)
     panel.settle(a.warmup)
     for step in [s.strip() for s in a.steps.split(",") if s.strip()]:
         step_now["name"] = step
@@ -1018,6 +1031,8 @@ def main() -> int:
             panel.tap(KEYS[step])
         elif step.startswith("png:"):
             shots[step[4:]] = panel.screen(step[4:])
+        elif step.startswith("alive:"):          # v0.33: a liveness checkpoint
+            alive.append({"name": step[6:], "frames": panel.frames(), "pc": f"{uc.reg_read(K.UC_M68K_REG_PC):#010x}"})
         elif step.startswith("wait:"):
             panel.settle(int(float(step[5:]) * 1_000_000))
         elif step.startswith("turn:"):
@@ -1202,7 +1217,10 @@ def main() -> int:
               "direct_calls": calls_made,
               "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
               "screen_frames": panel.frames() - frames_at_reset[0],
-              "panel_writers": panel_writers, "items": items}
+              "panel_writers": panel_writers, "items": items,
+              "alive": alive, "fault_reports": reported,
+              "faults": [{k: (f"{v:#x}" if isinstance(v, int) else sorted(f"{x:#x}" for x in v)[:8] if isinstance(v, set) else v)
+                          for k, v in r.items()} for r in getattr(machine.m, "faults", [])[:20]]}
     print(json.dumps(result, indent=1))
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps(result, indent=1) + "\n")

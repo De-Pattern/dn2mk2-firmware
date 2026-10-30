@@ -474,7 +474,7 @@ def test_repitch_ignores_the_note_and_tune_as_the_dt2s():
 def test_grid_slce_note_lets_the_note_pick_the_slice_at_the_samples_pitch():
     g = SM.TYPE_OF["GRID"]
     for k in (0, 3, 9):
-        by_note = _play(g, {SM.SAMP_REC: 4, SM.SLICE_REC: 0}, 12, note=12.0 + k)
+        by_note = _play(g, {SM.SAMP_REC: 4, SM.SLICE_REC: 0}, 12, note=24.0 + k)
         by_knob = _play(g, {SM.SAMP_REC: 4, SM.SLICE_REC: 2 * (k + 1)}, 12, note=60.0)
         assert any(abs(x) > 1e-3 for x in by_note) and by_note == by_knob, k
 
@@ -554,7 +554,7 @@ def test_slice_plays_the_samples_own_slices():
     assert abs(max(nz) - 1800 / n) < 0.05
     nz = play(2 * 9)                           # past the last: the last
     assert abs(min(nz) - 1800 / n) < 0.05
-    nz = play(0, note=12.0 + 4)                # NOTE: C1 + 4 -> slice 4 mod 3 = 1 (the second)
+    nz = play(0, note=24.0 + 4)                # NOTE: C1 + 4 -> slice 4 mod 3 = 1 (the second)
     assert abs(min(nz) - 1000 / n) < 0.05 and abs(max(nz) - 1800 / n) < 0.05
     whole = play(2, slices=())                 # v0.23: no slices: the whole sample (v0.19..v0.22: nothing)
     assert abs(min(whole) - 0.0) < 0.05 and abs(max(whole) - 1.0) < 0.05

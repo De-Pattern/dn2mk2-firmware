@@ -385,6 +385,9 @@ def start(p: Prog, L: Layout) -> None:
             p.ldi(7, 2, 1)
             vs(p, "rate", 7)
             p.ldi(8, 3, 1)                   # the format: 0 float32, 1 int16 (v0.14)
+            entry_check(p, L)                # v0.33: an entry that does not lie in the pool plays as empty
+            vs(p, "base", 5)
+            vs(p, "frames", 6)
             p.lsh(9, 8, -8)                  # v0.19: bits 8..15 the slices it has
             p.iconst(12, 0xFF)
             p.iop(9, 9, "AND", 12)
@@ -415,6 +418,39 @@ def start(p: Prog, L: Layout) -> None:
         p._branch(lambda: s32(p.r[4]) < s32(p.r[0]), "LT", inrange, None)
     p.e("COMP(R0, R12);")
     p._branch(lambda: p.r[0] == p.r[12], "EQ", found, None)
+
+
+def entry_check(p: Prog, L: Layout) -> None:
+    """v0.33 (the freeze and silence reports): a slot's entry is trusted only if its frames lie
+    inside the pool: base at least DATA_OFFSET in, 1 .. POOL_BYTES/4 frames, int16 or float32,
+    and its end within POOL_BYTES. Anything else (an entry half-written by the link, a stale
+    one, garbage) plays as an empty slot (base 0, frames 0) instead of reading DDR at an
+    arbitrary address -- which on the unit can return NaN (one NaN in a feedback state, the
+    send FX, silences everything until a restart) or worse. R5 base, R6 frames, R8 the format
+    word (all three cleared when it is not trusted); clobbers R9..R13."""
+    p.iconst(13, 0)                           # bad
+    bad = lambda: p.iconst(13, 1)             # noqa: E731
+    p.iconst(12, L.pool)
+    p.iop(10, 5, "-", 12)                     # base's offset into the pool (signed: below it < 0)
+    p.iconst(12, SM.DATA_OFFSET)
+    p.if_(10, "LT", 12, bad, kind="i")
+    p.iconst(12, SM.POOL_BYTES)
+    p.if_(10, "GE", 12, bad, kind="i")
+    p.ifz(6, "LE", bad)
+    p.iconst(12, SM.POOL_BYTES // 4)
+    p.if_(6, "GT", 12, bad, kind="i")
+    p.lsh(11, 6, 1)                           # int16: 2 bytes a frame
+    p.iconst(12, 0xFF)
+    p.iop(9, 8, "AND", 12)
+    p.ifz(9, "EQ", lambda: p.lsh(11, 11, 1))  # float32: 4
+    p.iconst(12, 1)
+    p.if_(9, "GT", 12, bad, kind="i")
+    p.iop(11, 10, "+", 11)                    # its end's offset
+    p.iconst(12, SM.POOL_BYTES)
+    p.if_(11, "GT", 12, bad, kind="i")
+    # (the format word too: its slice count and area bit are as untrusted as the rest, and a
+    # SLICE track would read its slice table from base + ... = near 0; the independent review)
+    p.ifz(13, "NE", lambda: (p.iconst(5, 0), p.iconst(6, 0), p.iconst(8, 0)))
 
 
 MIN_REGION = 32                                # v0.22: the shortest ONESHOT region, frames
@@ -488,12 +524,12 @@ def slice_bounds(p: Prog, L: Layout) -> None:
         p.lsh(4, 4, -1)
         v(p, 6, "nsl")
 
-        def by_note():                         # (note - 12) mod nsl
+        def by_note():                         # (note - 24) mod nsl: from C1, as the DT2 (v0.33; C0 before)
             p.iconst(0, 1)
             vs(p, "fixed", 0)
             p.ld(5, C["note"])
             p.trunc(4, 5)
-            p.iconst(12, -12)
+            p.iconst(12, -SM.SLICE_NOTE_BASE)
             p.iop(4, 12, "+", 4)
             tofloat(p, 2, 4)
             tofloat(p, 3, 6)
@@ -672,12 +708,12 @@ def region(p: Prog, L: Layout) -> None:
         p.iconst(0, 0)
         vs(p, "fixed", 0)
 
-        def by_note():                       # NOTE: (note - 12) mod n picks it, the pitch stays
+        def by_note():                       # NOTE: (note - 24) mod n picks it (from C1, as the DT2; v0.33), the pitch stays
             p.iconst(0, 1)
             vs(p, "fixed", 0)
             p.ld(5, C["note"])
             p.trunc(4, 5)
-            p.iconst(12, -12)
+            p.iconst(12, -SM.SLICE_NOTE_BASE)
             p.iop(4, 12, "+", 4)
             p.iconst(12, -1)
             p.iop(12, 12, "+", 6)            # n - 1 (n is a power of two)
@@ -1830,21 +1866,43 @@ def recorder(p: Prog, L: Layout) -> None:
 
         def preview():                        # v0.25: frames [first, end) of the slot, to pvmix
             p.ld(5, cmd + 8)
-            p.iconst(12, 0)
-            p.iop(5, 5, "MAX", 12)
-            p.iconst(12, SM.POOL_SLOTS - 1)
-            p.iop(5, 5, "MIN", 12)
-            p.lsh(5, 5, 4)
-            p.iconst(13, L.pool + 8)
-            p.iop(5, 13, "+", 5)
-            p.seti(1, 5)
-            p.ldi(6, 0, 1)                    # the frames' address
-            p.ldi(7, 1, 1)                    # their count
-            p.ld(8, cmd + 12)                 # first, on a word
-            p.iconst(12, -2)
+
+            def of_slot():
+                p.iconst(12, 0)
+                p.iop(5, 5, "MAX", 12)
+                p.iconst(12, SM.POOL_SLOTS - 1)
+                p.iop(5, 5, "MIN", 12)
+                p.lsh(5, 5, 4)
+                p.iconst(13, L.pool + 8)
+                p.iop(5, 13, "+", 5)
+                p.seti(1, 5)
+                p.ldi(6, 0, 1)                # the frames' address
+                p.ldi(7, 1, 1)                # their count
+                p.ld(8, cmd + 12)             # first
+                p.ld(9, cmd + 16)             # end
+
+            def at_offset():                  # v0.33: +DRIVE's preview, sent to a free stretch
+                p.ld(6, cmd + 12)             # of the pool: its offset, its frames; from 0
+                p.iconst(12, SM.DATA_OFFSET)
+                p.iop(6, 6, "MAX", 12)
+                p.iconst(12, SM.POOL_BYTES - PREVIEW_BYTES)
+                p.iop(6, 6, "MIN", 12)
+                p.iconst(12, -2)
+                p.iop(6, 6, "AND", 12)
+                p.iconst(13, L.pool)
+                p.iop(6, 13, "+", 6)
+                p.ld(7, cmd + 16)
+                p.iconst(12, PREVIEW_BYTES // 2)
+                p.iop(7, 7, "MIN", 12)
+                p.iconst(12, 0)
+                p.iop(7, 7, "MAX", 12)
+                p.iconst(8, 0)                # the window: [0, count)
+                p.ipass(9, 7)
+            p.iconst(12, PREVIEW_AT)
+            p.if_(5, "EQ", 12, at_offset, of_slot, kind="i")
+            p.iconst(12, -2)                  # first, on a word
             p.iop(8, 8, "AND", 12)
-            p.ld(9, cmd + 16)                 # end, at most the count
-            p.iop(9, 9, "MIN", 7)
+            p.iop(9, 9, "MIN", 7)             # end, at most the count
             p.iop(9, 9, "-", 8)
             p.iconst(12, 0)
             p.iop(9, 9, "MAX", 12)            # none if end <= first
@@ -2715,6 +2773,8 @@ PVMIX_SAVE = (0, 1, 2, 3, 12, 13)
 
 
 PV_LOOP = 1 << 30                           # v0.30: pvln's loop bit
+PREVIEW_AT = 0xFFFF                         # v0.33: CMD_PREVIEW's slot word for +DRIVE's preview
+PREVIEW_BYTES = 10 * 48000 * 2              # its longest: the DT2's ten seconds, int16 mono
 
 
 def pvmix(p: Prog, L: Layout) -> None:

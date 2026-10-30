@@ -60,6 +60,7 @@ extern void smp_save_recording(int slot, u32 off, u32 frames);
 extern u32 smp_rec_place(int dest, u32 *room);
 extern int smp_slot_empty(int k);
 extern int smp_list_up(void *view);
+extern int smp_lst_open;
 extern void smp_list_hold(void);
 extern void smp_list_close(void);
 extern void smp_list_settle(int v);
@@ -69,7 +70,7 @@ extern int smp_fb_open, smp_fb_folder, smp_fb_cur;
 extern int smp_fb_item(int i, int *slot);
 extern int smp_fb_menu, smp_fb_mcur;
 extern int smp_fb_index_of(int f);
-extern int smp_fb_marked(int k), smp_fb_nactions(int on_folder);     /* v0.29: multi-select */
+extern int smp_fb_marked(int k), smp_fb_nactions(int on_folder), smp_fb_mark_count(void), smp_fb_moving;     /* v0.29: multi-select */
 extern void smp_fb_mark(int k, int on), smp_fb_mark_folder(int folder), smp_fb_unmark_all(void);
 extern void smp_fb_delete(int slot, int folder);
 extern int smp_fb_store, smp_fb_last_store;                         /* v0.31: +DRIVE / PROJECT RAM */
@@ -116,6 +117,10 @@ int rec_overlay __attribute__((section(".data"))) = 0;      /* the screen is up 
 int rec_src __attribute__((section(".data"))) = 0;          /* SMP_REC_SOURCES choices */
 int rec_thres __attribute__((section(".data"))) = 0;        /* 0..120 */
 int rec_dest __attribute__((section(".data"))) = -1;        /* slot 0..126 (SAMP 1..127); -1 not chosen */
+static u32 work_at __attribute__((section(".data"))) = 0;   /* v0.33: when the save last moved */
+static u32 work_mark __attribute__((section(".data"))) = 0;
+int trim_zoom __attribute__((section(".data"))) = 0;      /* v0.33: TRIM's zoom, 0..3: 1x..8x */
+u32 trim_pos __attribute__((section(".data"))) = 0;       /* v0.33: its window's first frame */
 int rec_rlen __attribute__((section(".data"))) = 0;         /* 0 MAX, else steps */
 int rec_rstrt __attribute__((section(".data"))) = 0;        /* 0 THRES, 1 PLAY */
 u32 rec_room __attribute__((section(".data"))) = 0;         /* bytes free for the next recording */
@@ -143,12 +148,13 @@ int rec_visible(void)
     return rec_overlay;
 }
 
-/* the DSP's source and channel for a SRC choice: EXT L+R, L, R; MAIN; TRK1..16 */
+/* the DSP's source and channel: v0.33, SRC (IN, MAIN, TRK1..16: the DSP's 0, 1, 2 + t) and
+ * CHAN (L+R, L, R) apart, as the DT2's newer OS */
+int rec_chan __attribute__((section(".data"))) = 0;
 static void src_of(int s, u32 *src, u32 *chan)
 {
-    if (s < 3) { *src = 0; *chan = (u32)s; }
-    else if (s == 3) { *src = 1; *chan = 0; }
-    else { *src = (u32)(s - 2); *chan = 0; }
+    *src = (u32)(s < 0 ? 0 : s);
+    *chan = (u32)(rec_chan < 0 ? 0 : rec_chan > 2 ? 2 : rec_chan);
 }
 
 /* the frames R.LEN asks for: MAX the most the DSP records (66 s), else that many sixteenth
@@ -181,6 +187,19 @@ static void send(int cmd)
     if (thr < REC_THR_FLOOR)                    /* v0.30: THRES 0 waits for a sound, not for */
         thr = REC_THR_FLOOR;                    /* silence (a user: it began on nothing) */
     src_of(rec_src, &src, &chan);
+    /* v0.33: no DEST (the owner: choosing a slot by number risked writing over a sample; the
+     * DT2 has none). A recording goes into the first empty slot, found as it starts; when
+     * none is empty, nothing is recorded */
+    if (cmd == CMD_NOW || cmd == CMD_ARM || cmd == CMD_ARM_PLAY) {
+        extern u32 smp_save_mark(void);
+        if (smp_save_mark())                    /* v0.33: the last take still saving: */
+            return;                             /* not a new one into a slot it may take */
+        rec_dest = next_empty(0);
+        if (!smp_slot_empty(rec_dest)) {
+            rec_room = 0;
+            return;
+        }
+    }
     if (rec_dest < 0)
         rec_dest = next_empty(0);
     u32 place = 0;
@@ -234,8 +253,7 @@ void rec_combo(void)
     rec_phase = PH_REC;                         /* a recording mid-TRIM keeps what it is */
     if (rec_overlay) {
         mon_known = 0;
-        if (rec_dest < 0 || (!smp_slot_empty(rec_dest) && rec_dest != rec_saved_slot))
-            rec_dest = next_empty(rec_dest < 0 ? 0 : rec_dest);
+        rec_dest = next_empty(0);               /* v0.33: the first empty slot, shown */
         u32 room;
         smp_rec_place(rec_dest, &room);
         rec_room = room;
@@ -275,9 +293,11 @@ static void rec_wave_add(u32 frames, int peak)
 /* from the UI loop (page.c's wr_poll), every pass */
 static void rpt_poll(void);
 
+static void fb_pv_poll(void);
 void rec_poll(void)
 {
     rpt_poll();
+    fb_pv_poll();
     if (smp_status(st)) {
         rec_state = st[0] & 3;
         rec_frames = (u32)st[2] << 6;              /* 64 frames a unit (v0.16) */
@@ -300,15 +320,28 @@ void rec_poll(void)
                 rec_saved_slot = rec_taken;
                 if (rec_overlay) {                  /* NORMALIZING, then TRIM, as the DT2 */
                     rec_phase = PH_WORK;
+                    work_at = FRAMES | 1u;
                     trim_slot = rec_taken;
                     trim_n = rec_frames;
                     trim_s = 0;
                     trim_e = rec_frames;
                 }
-                rec_dest = next_empty(rec_taken + 1);
-                if (rec_dest == rec_taken)
-                    rec_dest = rec_taken;
+                rec_dest = next_empty(0);           /* v0.33: the next recording's, shown */
             }
+        }
+    }
+    if (rec_phase == PH_WORK && smp_saved == 0) {
+        /* v0.33: a save that has stopped moving for 20 s: the RECORDER again, not
+         * NORMALIZING for good. Only when it does not move: a long take's save takes long
+         * (the review: a total limit cut real saves short) */
+        extern u32 smp_save_mark(void);
+        u32 mk = smp_save_mark();
+        if (mk != work_mark) {
+            work_mark = mk;
+            work_at = FRAMES | 1u;
+        } else if (FRAMES - work_at > 30000u) {
+            rec_phase = PH_REC;
+            smp_overlay_dirty = 1;
         }
     }
     if (rec_phase == PH_WORK && smp_saved != 0) {   /* v0.25: saved (and normalised): TRIM */
@@ -319,6 +352,10 @@ void rec_poll(void)
             trim_e = n;
         }
         rec_phase = PH_TRIM;
+        trim_zoom = 0;                          /* v0.33: whole, and its fine waveform read */
+        trim_pos = 0;
+        extern int smp_analyse(int k);
+        smp_analyse(trim_slot);
         smp_overlay_dirty = 1;
     }
     if (sent_seq && rec_link == 0 && FRAMES - sent_at > 1500u)
@@ -345,9 +382,9 @@ static void knob(int index, int delta)
 {
     switch (index) {
     case 1: rec_src = clamp(rec_src + delta, 0, SMP_REC_SOURCES - 1); break;
+    case 2: rec_chan = clamp(rec_chan + delta, 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
     case 4: rec_thres = clamp(rec_thres + delta, 0, 120); break;
-    case 5: if (rec_state != 2 && rec_state != 1) rec_dest = clamp((rec_dest < 0 ? 0 : rec_dest) + delta, 0, 126);
-        break;
+    /* E: v0.33, no DEST (send() takes the first empty slot) */
     case 6: rec_rlen = clamp(rec_rlen + delta, 0, 128); break;
     case 7: rec_rstrt = delta > 0 ? 1 : 0; break;
     case 8: rec_arm_turn(delta); break;
@@ -429,9 +466,21 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
         if (old != ty && old >= ONESHOT && old < ONESHOT + SMP_N && ty >= ONESHOT && ty < ONESHOT + SMP_N)
             keep = smp_samp_of((int)track);
     }
+    int was = track < 16 && KIT ? SOUND_TYPE(track) : -1;
     u32 r = MACHINE_COMMIT(model, track, type, a, b);
     if (keep > 0 && SOUND_TYPE(track) == (int)type && smp_samp_of((int)track) != keep)
         smp_set_samp((int)track, keep);
+    /* v0.33: a Monomachine machine starts as its own (dnfw.mnm DEFAULTS: SID on a square
+     * wave), not at the shared records' defaults (the owner: SID silent at first, on MIX) */
+    int mi = track < 16 && KIT && SOUND_TYPE(track) == (int)type && was != (int)type ? mnm_index((int)type - 4) : -1;
+    if (mi >= 0) {
+        u32 owner = UI_OWNER();
+        for (int j = 0; owner && j < 8; j++) {
+            u32 ps = PARAM_SET(owner, mnm_rid[j], track);
+            if (ps)
+                SET_VALUE(ps, mnm_rid[j], (u32)mnm_default[mi][j], track, 0, 0, 1);
+        }
+    }
     return r;
 }
 
@@ -475,6 +524,22 @@ static void name_step(int d)
 
 static int nm_only __attribute__((section(".data"))) = 0;   /* v0.25: the browser's RENAME */
 
+/* v0.33: CREATE FOLDER's name, on the naming screen (nm_only 2); the browser stays under it */
+static void folder_name_start(void)
+{
+    if (rec_phase != PH_REC)
+        return;
+    for (int j = 0; j < 8; j++)
+        nm_text[j] = 0;
+    nm_text[0] = 'N', nm_text[1] = 'E', nm_text[2] = 'W';
+    nm_cur = 3;
+    nm_gsel = 0;
+    nm_gpicked = 0;
+    nm_only = 2;
+    rec_phase = PH_NAME;
+    rec_overlay = 1;
+}
+
 static void rename_start(int slot)
 {
     if (slot < 0 || slot > 126 || rec_phase != PH_REC)
@@ -494,7 +559,13 @@ static void name_done(void)
         if (t[j] != ' ')
             last = j;
     }
-    if (last >= 0) {                            /* trailing spaces off; an empty name stays as it was */
+    if (last >= 0 && nm_only == 2) {           /* v0.33: CREATE FOLDER */
+        extern int smp_lib_folder_make(const char *name);
+        t[last + 1] = 0;
+        smp_lib_folder_make(t);
+        extern void smp_lib_refresh(void);
+        smp_lib_refresh();
+    } else if (last >= 0) {                     /* trailing spaces off; an empty name stays as it was */
         t[last + 1] = 0;
         smp_rename(trim_slot, t);
     }
@@ -517,6 +588,47 @@ static u32 knob_at __attribute__((section(".data"))) = 0;    /* the last trim kn
 #define CMD_PREVIEW 9
 extern int smp_overlay_dirty;
 
+/* v0.33: the browser's preview (FUNC + YES on a sample, while held): a PROJECT RAM sample,
+ * or a library sample already in the pool, from its slot; any other library sample through
+ * link.c's +DRIVE preview. The first ten seconds, as the DT2's. */
+#define FB_PV_FRAMES (10u * 48000u)
+static int fb_pv __attribute__((section(".data"))) = 0;    /* 1 from a slot, 2 from the +Drive */
+extern int smp_lib_preview(int k);
+extern void smp_lib_preview_stop(void);
+extern u32 smp_lib_frames(int k);
+extern u32 smp_slot_frames(int k, int *i16);
+
+static void fb_preview_stop(void)
+{
+    if (fb_pv == 1)
+        smp_command(CMD_PREVIEW, 0, 0, 0, 0);
+    else if (fb_pv == 2)
+        smp_lib_preview_stop();
+    fb_pv = 0;
+}
+
+static void fb_preview(int slot)
+{
+    fb_preview_stop();
+    int s = smp_fb_store == 1 ? smp_lib_slot_of(slot) : slot;
+    if (s >= 0 && !smp_slot_empty(s)) {
+        int i16 = 0;
+        u32 fr = smp_slot_frames(s, &i16);
+        if (!i16)
+            return;                             /* the preview reads int16 (a float32 slot: none) */
+        smp_command(CMD_PREVIEW, (u32)s, 0, fr < FB_PV_FRAMES ? fr : FB_PV_FRAMES, 0);
+        fb_pv = 1;
+    } else if (smp_fb_store == 1 && smp_lib_preview(slot) == 0) {
+        fb_pv = 2;
+    }
+}
+
+static void fb_pv_poll(void)                    /* the browser closed: its preview stops */
+{
+    if (fb_pv && !smp_fb_open)
+        fb_preview_stop();
+}
+
 static void preview(int on)
 {
     if (on && trim_slot >= 0)
@@ -528,13 +640,41 @@ static void preview(int on)
 
 /* a TRIM knob: E START, H END. A detent moves a 1000th of the recording, more the faster
  * the knob turns (as a sample machine's start moves), a 10,000th with FUNC held */
+/* v0.33: TRIM's zoom (F: 1, 2, 4, 8 times, as the DT2's) and the window's place (G); the
+ * window follows the end last moved. smp_page.c draws it from the slot's fine waveform. */
+
+static void trim_follow(u32 at)                 /* keep AT inside the window */
+{
+    u32 span = trim_n >> trim_zoom;
+    if (at < trim_pos || at >= trim_pos + span)
+        trim_pos = at > span / 2u ? at - span / 2u : 0u;
+    if (trim_pos + span > trim_n)
+        trim_pos = trim_n > span ? trim_n - span : 0u;
+}
+
 static void trim_knob(int index, int delta, int fine)
 {
     u32 now = FRAMES, dt = now - knob_at;
     knob_at = now;
     int ad = delta < 0 ? -delta : delta;
+    if (index == 6) {                           /* F: zoom */
+        int z = trim_zoom + (delta > 0 ? 1 : -1);
+        trim_zoom = z < 0 ? 0 : z > 3 ? 3 : z;
+        trim_follow(trim_s);
+        smp_overlay_dirty = 1;
+        return;
+    }
+    if (index == 7) {                           /* G: the window along the sample */
+        u32 span = trim_n >> trim_zoom, mv = span / 8u * (u32)ad;
+        if (delta < 0)
+            trim_pos = trim_pos > mv ? trim_pos - mv : 0u;
+        else
+            trim_pos = trim_pos + mv + span > trim_n ? (trim_n > span ? trim_n - span : 0u) : trim_pos + mv;
+        smp_overlay_dirty = 1;
+        return;
+    }
     u32 mul = fine ? 1u : dt < 12u ? 12u : dt < 30u ? 5u : dt < 60u ? 2u : 1u;
-    u32 step = trim_n / (fine ? 10000u : 1000u) * mul * (u32)ad;
+    u32 step = (trim_n >> trim_zoom) / (fine ? 10000u : 1000u) * mul * (u32)ad;   /* finer when zoomed */
     if (step < 2u)
         step = 2u;
     int sgn = delta < 0 ? -1 : 1;
@@ -543,11 +683,13 @@ static void trim_knob(int index, int delta, int fine)
         if (v < 0) v = 0;
         if ((u32)v + 64u > trim_e) v = (int)trim_e - 64;
         trim_s = (u32)(v < 0 ? 0 : v);
+        trim_follow(trim_s);
     } else if (index == 8) {
         int v = (int)trim_e + sgn * (int)step;
         if ((u32)(v < 0 ? 0 : v) < trim_s + 64u) v = (int)trim_s + 64;
         if ((u32)v > trim_n) v = (int)trim_n;
         trim_e = (u32)v;
+        trim_follow(trim_e > 0u ? trim_e - 1u : 0u);
     }
     smp_overlay_dirty = 1;                      /* drawn at once, not at the next tick */
 }
@@ -559,6 +701,15 @@ static void name_delete(void)
     for (int j = nm_cur; j < 6; j++)
         nm_text[j] = nm_text[j + 1];
     nm_text[6] = 0;
+}
+
+/* v0.33: FUNC + NO also steps the cursor back (the owner: held, it clears letter after
+ * letter, right to left, as the naming screen's character pick steps forward) */
+static void name_backdel(void)
+{
+    name_delete();
+    if (nm_cur > 0)
+        nm_cur--;
 }
 
 static void name_insert(void)
@@ -652,7 +803,9 @@ static void rpt_poll(void)
     if ((int)(now - rpt_next) < 0)
         return;
     rpt_next = now + RPT_STEP;
-    if (rpt_grid)
+    if (rpt_code == K_NO)
+        name_backdel();
+    else if (rpt_grid)
         grid_move(rpt_code);
     else if (rpt_code == K_LEFT && nm_cur > 0)
         nm_cur--;
@@ -729,8 +882,10 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
             nm_gpicked = 0;
         } else if (code == K_YES && smp_func_held)
             name_insert();
-        else if (code == K_NO && smp_func_held)
-            name_delete();
+        else if (code == K_NO && smp_func_held) {
+            name_backdel();
+            rpt_start(code);                    /* v0.33: held, it goes on */
+        }
         else if (code == K_YES)
             name_done();
         else if (code == K_NO && nm_only) {    /* the browser's RENAME, left as it was */
@@ -803,6 +958,22 @@ int smp_question_up(void)
  * sound preview) opened GRID's lock menu (a user's report); a YES with another key held is
  * stock's */
 u32 smp_held_lo __attribute__((section(".data"), aligned(4))) = 0;
+u32 smp_trig_at[16] __attribute__((section(".data"), aligned(4)));
+
+/* v0.33: a [TRIG] held now: down, and pressed in the last 10 s (a release that went elsewhere
+ * leaves its bit set; TRIG + YES is a quick chord, so an old one is not held) */
+int smp_trig_held(void)
+{
+    extern u32 smp_held_hi;
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    for (int k = 0; k < 16; k++) {
+        u32 code = 25u + (u32)k;
+        u32 on = code < 32 ? (smp_held_lo >> code) & 1u : (smp_held_hi >> (code - 32)) & 1u;
+        if (on && now - smp_trig_at[k] < 15000u)
+            return 1;
+    }
+    return 0;
+}
 u32 smp_held_hi __attribute__((section(".data"), aligned(4))) = 0;
 
 int smp_knob_d __attribute__((section(".data"))) = 0;       /* v0.32: the last knob turn (fmt.c func_turn) */
@@ -830,6 +1001,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         u32 *h = code < 32 ? &smp_held_lo : &smp_held_hi;
         u32 bit = 1u << (code & 31);
         *h = down ? *h | bit : *h & ~bit;
+        if (down && code >= 25 && code <= 40)   /* v0.33: when each [TRIG] went down */
+            smp_trig_at[code - 25] = *(volatile u32 *)0x4058E8D4u;
     }
     if (it[0] == IT_KEY && code == K_FUNC) {
         if (rec_overlay && rec_phase == PH_NAME) {
@@ -859,12 +1032,18 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         lrpt_code = 0;                          /* v0.30: and the list's */
     if (rec_pv_on && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
         preview(0);                             /* FUNC + YES let go: the preview stops */
+    if (fb_pv && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
+        fb_preview_stop();                      /* v0.33: and the browser's */
     if (it[0] == IT_KEY && code < 32 && (eaten >> code & 1)) {
+        eaten &= ~(1u << code);
         if (!down) {                            /* the release of a key we took */
-            eaten &= ~(1u << code);
             it[0] = IT_DROP;
+            return (u32)it;
         }
-        return (u32)it;
+        /* v0.33: a press of a key whose release we were still waiting for: that release
+         * went elsewhere (a stock screen takes some keys' releases itself, as MACHINE SEL
+         * does SRC's). v0.25..v0.32 handed this press, and every later one, to stock until
+         * a release came through: our menus on that key went dead. It is a new press. */
     }
     if (it[0] == IT_KEY && smp_question_up()) {
         extern int slc_stock_asked;             /* v0.30: a stock question's keys; its */
@@ -972,6 +1151,23 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     smp_fb_mark_folder(on_folder ? f : smp_fb_folder);
                 } else if (code == K_YES && act == 2 && (slot >= 0 || on_folder)) {
                     smp_fb_menu = 2;            /* DELETE: asked first */
+                } else if (code == K_YES && act == 5) {     /* v0.33: MOVE SELECTED: these, */
+                    smp_fb_menu = 0;                        /* (this one if none is ticked) */
+                    if (!smp_fb_mark_count() && slot >= 0)
+                        smp_fb_mark(slot, 1);
+                    smp_fb_moving = smp_fb_mark_count() > 0;
+                } else if (code == K_YES && act == 6) {     /* v0.33: MOVE HERE */
+                    smp_fb_menu = 0;
+                    int to = on_folder ? f : smp_fb_folder;
+                    extern int smp_lib_move(int k, int f);
+                    if (to >= 0)
+                        for (int k = 0; k < 2048; k++)
+                            if (smp_lib_used(k) && smp_fb_marked(k))
+                                smp_lib_move(k, to);
+                    smp_fb_unmark_all();
+                } else if (code == K_YES && act == 7) {     /* v0.33: CREATE FOLDER: its name */
+                    smp_fb_menu = 0;
+                    folder_name_start();
                 } else if (code == K_YES && act == 4) {     /* v0.31: LOAD TO PROJECT */
                     smp_fb_menu = 0;
                     smp_fb_load_project(slot, on_folder ? f : -1);
@@ -991,6 +1187,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     if (act == 0) {             /* LOAD TO TRK */
                         smp_set_samp(t, slot + 1);
                         smp_fb_open = 0;
+                        smp_fb_unmark_all();    /* v0.33: closed, so its ticks go (as a page key's) */
                         smp_list_settle(slot + 1);
                     } else if (act == 1) {      /* RENAME: the NAME screen, alone */
                         smp_fb_open = 0;
@@ -1003,10 +1200,10 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 lrpt_code = code;               /* v0.30: held, it goes on */
                 lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
             }
-            else if (code == K_YES && slot >= 0 && smp_fb_store == 1)
-                smp_fb_mark(slot, !smp_fb_marked(slot));    /* v0.31: in +DRIVE YES ticks, as the DT2's */
             else if (code == K_YES && smp_func_held && slot >= 0)
-                smp_fb_mark(slot, !smp_fb_marked(slot));    /* v0.29: FUNC + YES marks */
+                fb_preview(slot);                   /* v0.33: FUNC + YES previews while held, as the DT2's */
+            else if (code == K_YES && slot >= 0)    /* v0.33: YES ticks in both stores, as the DT2's */
+                smp_fb_mark(slot, !smp_fb_marked(slot));    /* (13.6.2: PROJECT RAM too); RIGHT acts */
             else if (code == K_YES && smp_func_held && on_folder)
                 smp_fb_mark_folder(f);
             else if (code == K_RIGHT && (slot >= 0 || on_folder)) {
@@ -1015,10 +1212,6 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             } else if (code == K_YES && on_folder) {
                 smp_fb_folder = f;              /* into the folder */
                 smp_fb_cur = 0;
-            } else if (code == K_YES && slot >= 0) {   /* the DT2's quick assign */
-                smp_set_samp(t, slot + 1);
-                smp_fb_open = 0;
-                smp_list_settle(slot + 1);
             } else if (code == K_LEFT) {        /* up a folder; at the top it stays (v0.26) */
                 if (smp_fb_folder != -1) {
                     int back = smp_fb_folder;
@@ -1049,6 +1242,12 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     }
     /* the sample list (smp_page.c): UP / DOWN a slot, YES keeps, NO puts SAMP back, FUNC +
      * YES the browser, SAMP's push keeps; a page key closes it as YES */
+    /* v0.33: the list takes keys only on its own track's page. Left open when another
+     * track became active (a stock machine's page, which never closes it) it went on taking
+     * UP, DOWN, YES and NO, unseen, for up to 20 s */
+    extern int smp_list_elsewhere(void);
+    if (it[0] == IT_KEY && smp_list_elsewhere())
+        smp_list_close();
     if (it[0] == IT_KEY && smp_list_view && smp_list_up(smp_list_view)) {
         int press = (flags & F_PRESS) && !(flags & F_RELEASE);
         int t = (int)UI_TRACK_NOW;

@@ -477,11 +477,24 @@ static void start_analysis(int then)
 }
 
 /* from the UI loop (page.c's wr_poll), every pass */
+static u32 wait_at __attribute__((section(".data"))) = 0;
+
 void slc_poll(void)
 {
-    if (slc_state != S_WAIT)
+    if (slc_state != S_WAIT) {
+        wait_at = 0;
         return;
+    }
+    if (!wait_at)
+        wait_at = FRAMES | 1u;
     int st = smp_analysis(0);
+    if (st == 1 && FRAMES - wait_at > 180000u) {    /* v0.33: 2 minutes and still reading: give up */
+        extern void smp_analyse_cancel(void);
+        smp_analyse_cancel();
+        note("CANNOT READ IT");
+        slc_state = S_OFF;
+        return;
+    }
     if (st == 2) {
         if (wait_for == S_GRID) {
             make_grid();
@@ -651,15 +664,22 @@ int slc_pop(u8 *it)
         /* v0.29: FUNC + a key may put up a stock question over the page (FUNC + SETTINGS:
          * "SAVE ALL PATTERNS AND PROJ SETTINGS? Y/N", owner's photo): its YES or NO is the
          * question's, not the slice menus' */
-        if (press && func && code != K_YES)
+        /* v0.33: only FUNC + a page or menu key (1..8: TRIG..MOD, PRESET, SETTINGS) can put up
+         * such a question; v0.29..v0.32 took any FUNC combo (FUNC + an arrow, a [TRIG], ...),
+         * and the next YES on a SLICE track was swallowed (the owner: YES did nothing) */
+        if (press && func && code >= 1 && code <= 8)
             slc_stock_asked = 1;
         if (press && (code == K_YES || code == K_NO) && slc_stock_asked && !func) {
             slc_stock_asked = 0;
             return 0;
         }
-        /* v0.30: YES with another key held (TRIG + YES: stock's sound preview) is stock's */
-        extern u32 smp_held_lo, smp_held_hi;
-        if (press && code == K_YES && ((smp_held_lo & ~(1u << K_YES | 1u << K_FUNC)) || smp_held_hi))
+        /* v0.30: YES with a [TRIG] held (TRIG + YES: stock's sound preview) is stock's. v0.33:
+         * the [TRIG] keys only (25..40), not any key: MACHINE SEL (FUNC + SRC) takes its
+         * keys' releases itself, so SRC stayed "held" and every later YES was stock's until
+         * SRC was pressed again (the owner's dead SLICE and GRID menus; held_lo 0x404 in the
+         * emulator after it) */
+        extern int smp_trig_held(void);
+        if (press && code == K_YES && smp_trig_held())
             return 0;
         /* YES on a SLICE track's page opens the menu */
         if (press && code == K_YES && slc_page_seen == 2 && !func) {   /* v0.25: GRID's ALLOCATE SLICE */
@@ -689,8 +709,15 @@ int slc_pop(u8 *it)
             slc_page_seen = 0;                  /* off the page: smp_page.c says when it is back */
         return 0;
     }
-    if (slc_state == S_WAIT)
-        return it[0] == IT_KEY || it[0] == IT_KNOB;   /* nothing while it reads */
+    if (slc_state == S_WAIT) {                  /* nothing while it reads, but NO leaves (v0.33: */
+        if (press && code == K_NO) {            /* a read that never ends must not hold every key) */
+            extern void smp_analyse_cancel(void);
+            smp_analyse_cancel();
+            slc_state = S_OFF;
+            return 1;
+        }
+        return it[0] == IT_KEY || it[0] == IT_KNOB;
+    }
     if (it[0] == IT_KNOB) {
         int d = (signed char)it[8];
         if (code < 1 || code > 9)
@@ -775,7 +802,7 @@ int slc_pop(u8 *it)
 }
 
 /* v0.23, the DT2's SLICES trig mode: in KEYBOARD mode, on a SLICE track whose SLCE is NOTE,
- * trig key K plays slice K + 1 (the note C0 + K, which SLCE's NOTE mode turns into slice K:
+ * trig key K plays slice K + 1 (the note C1 + K, which SLCE's NOTE mode turns into slice K:
  * dnfw.sampler.program.slice_bounds), as one note. Everything else stock's: the call the
  * KeyboardView makes for a key's notes (0x40058be8, coldfire.py's KEYNOTES_SITE) comes here.
  * VEC is the stock vector (begin, end, capacity) of 32-bit notes; -> nonzero: notes given. */
@@ -834,7 +861,7 @@ u32 slc_keynotes(u32 kbd, u32 *vec, u32 k)
             int idx = (rank + per * bank) % 64;
             if (idx < 0)
                 idx += 64;
-            *(u32 *)vec[0] = 12u + (u32)idx;    /* the DSP: (note - 12) mod the slices */
+            *(u32 *)vec[0] = 24u + (u32)idx;    /* the DSP: (note - 24) mod the slices (v0.33: from C1) */
             vec[1] = vec[0] + 4u;
             return 1;
         }

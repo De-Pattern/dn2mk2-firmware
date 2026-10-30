@@ -20,6 +20,7 @@
 
 typedef unsigned int u32;
 typedef unsigned char u8;
+typedef unsigned short u16;
 
 #define GET_VALUE ((int (*)(void *, u32, u8 *))0x4006538E)
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90)
@@ -703,6 +704,13 @@ static void sample_list(void *c, void *view, int slot, int kind)
     }
 }
 
+/* v0.33: the list belongs to the track it opened on. Another track active (its page drawn
+ * by stock, or not yet drawn) means it is gone: it must not go on taking keys unseen */
+int smp_list_elsewhere(void)
+{
+    return smp_lst_open && list_trk >= 0 && UI_TRACK != list_trk;
+}
+
 /* the list over the screen (page.c's wr_screen, after the page and its title bar): the
  * DT2's header in the title bar, the bank, five slots around SAMP's, the scroll bar */
 int smp_list_visible(void)
@@ -748,8 +756,8 @@ void smp_list_draw(void *c)
  * browser (its manual 13.6): folders only at the top -- the import tool's, then INCOMING
  * (what was sent in no folder) and RECORDED (the recorder's) -- and a folder's samples
  * inside it, each with the slot it plays from (>A009), as the DT2 marks a loaded sample.
- * YES opens a folder, or gives the track the sample (the DT2's quick assign); NO goes back
- * up, and out at the top. RIGHT on a sample opens the SAMPLE ACTION menu: LOAD TO TRK,
+ * YES opens a folder, or ticks a sample (v0.33, in PROJECT RAM too, as the DT2's 13.6.2; it
+ * gave the track the sample before); NO goes back up, and out at the top. RIGHT on a sample opens the SAMPLE ACTION menu: LOAD TO TRK,
  * RENAME, DELETE (asked first). Every sample is in RAM from power-on, so the DT2's LOAD
  * TO PROJECT has nothing to do here. Over the whole screen (page.c's wr_screen). */
 extern int smp_is_recording(int k);
@@ -781,7 +789,13 @@ extern int smp_lib_delete(int k), smp_lib_load(int k), smp_lib_pending(void);
 static int lb_in(int k, int folder) { return smp_lib_used(k) && smp_lib_folder_of(k) == folder; }
 
 extern int smp_lib_folder_count(int f);
-static int lb_has(int folder) { return smp_lib_folder_count(folder) > 0; }
+/* v0.33: a named folder shows even empty (NEW FOLDER's, and so a MOVE HERE target; the
+ * review: an empty new folder was hidden and could not be used) */
+static int lb_has(int folder)
+{
+    const char *n = smp_lib_folder_name(folder);
+    return smp_lib_folder_count(folder) > 0 || (n && n[0]);
+}
 
 static int lb_marked(int k) { return k >= 0 && k < LB_CAP && ((lb_marks[k >> 5] >> (k & 31)) & 1u); }
 
@@ -836,8 +850,10 @@ void smp_fb_mark(int k, int on)
         fb_marks[k >> 5] &= ~b;
 }
 
+extern int smp_fb_moving;
 void smp_fb_unmark_all(void)
 {
+    smp_fb_moving = 0;
     for (int i = 0; i < 4; i++)
         fb_marks[i] = 0;
     for (int i = 0; i < LB_CAP / 32; i++)
@@ -922,10 +938,13 @@ void smp_fb_delete(int slot, int folder)
                     smp_lib_delete(k);
         } else if (slot >= 0)
             smp_lib_delete(slot);
-        else if (folder != -1)
+        else if (folder != -1) {
             for (int k = 0; k < LB_CAP; k++)
                 if (lb_in(k, folder))
                     smp_lib_delete(k);
+            extern int smp_lib_folder_drop(int f);
+            smp_lib_folder_drop(folder);        /* v0.33: emptied: the folder goes too */
+        }
         smp_fb_unmark_all();
         return;
     }
@@ -963,6 +982,27 @@ int smp_fb_load_project(int slot, int folder)
 
 /* the browser's items where it is: N of them; item I as a folder (-> its index, or
  * FB_INCOMING / FB_RECORDED; *slot -1) or a sample (-> -1, *slot its slot) */
+/* v0.33: a +DRIVE folder's samples, listed once (Pablo: slowdowns with a large library; the
+ * browser walked all 2,048 entries for its count and again for each of its six rows, every
+ * redraw). Rebuilt when the folder or the library's index changes. */
+extern u32 smp_lib_rev;
+static u16 lb_list[LB_CAP] __attribute__((section(".data")));
+static int lb_list_n __attribute__((section(".data"))) = 0;
+static int lb_list_folder __attribute__((section(".data"))) = -100;
+static u32 lb_list_rev __attribute__((section(".data"))) = 0xFFFFFFFFu;
+
+static void lb_list_make(void)
+{
+    if (lb_list_folder == smp_fb_folder && lb_list_rev == smp_lib_rev)
+        return;
+    lb_list_n = 0;
+    for (int k = 0; k < LB_CAP; k++)
+        if (lb_in(k, smp_fb_folder))
+            lb_list[lb_list_n++] = (u16)k;
+    lb_list_folder = smp_fb_folder;
+    lb_list_rev = smp_lib_rev;
+}
+
 int smp_fb_count(void)
 {
     int n = 0;
@@ -974,9 +1014,8 @@ int smp_fb_count(void)
                 n += lb_has(f);
             return n;
         }
-        for (int k = 0; k < LB_CAP; k++)
-            n += lb_in(k, smp_fb_folder);
-        return n;
+        lb_list_make();
+        return lb_list_n;
     }
     if (smp_fb_folder == -1) {                  /* v0.29: a folder emptied by DELETE is not shown */
         for (int f = 0; f < smp_folder_count(); f++)
@@ -1001,11 +1040,9 @@ int smp_fb_item(int i, int *slot)
                     return f;
             return -1;
         }
-        for (int k = 0; k < LB_CAP; k++)
-            if (lb_in(k, smp_fb_folder) && i-- == 0) {
-                *slot = k;
-                return -1;
-            }
+        lb_list_make();
+        if (i >= 0 && i < lb_list_n)
+            *slot = lb_list[i];
         return -1;
     }
     if (smp_fb_folder == -1) {
@@ -1066,21 +1103,45 @@ int smp_fb_visible(void)
 
 /* the SAMPLE ACTION menu: on a sample LOAD TRK n, RENAME, DELETE, SELECT ALL; on a folder
  * (v0.29) SELECT ALL, DELETE */
+/* v0.33: +DRIVE's MOVE SELECTED (the ticked samples remembered), then MOVE HERE in the
+ * folder they go to; CREATE FOLDER (the DT2's 13.6.5) */
+int smp_fb_moving __attribute__((section(".data"))) = 0;
+
+static int lib_actions(int on_folder, signed char *out)
+{
+    int n = 0;
+    out[n++] = 4;                               /* LOAD TO PROJ */
+    if (!on_folder)
+        out[n++] = 0;                           /* LOAD TRK */
+    out[n++] = 3;                               /* SELECT ALL */
+    if (smp_fb_moving)
+        out[n++] = 6;                           /* MOVE HERE */
+    else if (!on_folder)
+        out[n++] = 5;                           /* MOVE SELECTED */
+    out[n++] = 2;                               /* DELETE */
+    out[n++] = 7;                               /* CREATE FOLDER */
+    return n;
+}
+
 int smp_fb_nactions(int on_folder)
 {
+    signed char a[8];
     if (smp_fb_store == 1)
-        return on_folder ? 3 : 4;
+        return lib_actions(on_folder, a);
     return on_folder ? 2 : 4;
 }
 
 /* the action at place A of the SAMPLE ACTION menu: 0 LOAD TO TRK, 1 RENAME, 2 DELETE (in
- * PROJECT RAM: UNLOAD), 3 SELECT ALL, 4 LOAD TO PROJECT (v0.31: +DRIVE) */
+ * PROJECT RAM: UNLOAD), 3 SELECT ALL, 4 LOAD TO PROJECT (v0.31: +DRIVE), 5 MOVE SELECTED,
+ * 6 MOVE HERE, 7 CREATE FOLDER (v0.33: +DRIVE) */
 int smp_fb_action(int on_folder, int a)
 {
     static const signed char ram_s[4] = {0, 1, 2, 3}, ram_f[2] = {3, 2};
-    static const signed char lib_s[4] = {4, 0, 2, 3}, lib_f[3] = {4, 3, 2};
-    if (smp_fb_store == 1)
-        return on_folder ? lib_f[a < 0 ? 0 : a > 2 ? 2 : a] : lib_s[a < 0 ? 0 : a > 3 ? 3 : a];
+    if (smp_fb_store == 1) {
+        signed char l[8];
+        int n = lib_actions(on_folder, l);
+        return l[a < 0 ? 0 : a > n - 1 ? n - 1 : a];
+    }
     return on_folder ? ram_f[a < 0 ? 0 : a > 1 ? 1 : a] : ram_s[a < 0 ? 0 : a > 3 ? 3 : a];
 }
 
@@ -1109,7 +1170,8 @@ void smp_fb_draw(void *c, int samp)
     hline(c, 0, 127, 55, 0);
     int n = smp_fb_count();
     if (n == 0) {
-        TEXT(c, FONT, 64, 28, CENTRED, "%s", smp_fb_store == 1 ? "+DRIVE EMPTY" : "NO SAMPLES");
+        TEXT(c, FONT, 64, 28, CENTRED, "%s", smp_fb_store == 1 ? (smp_fb_folder == -1 ? "+DRIVE EMPTY" : "EMPTY FOLDER")
+                                                 : "NO SAMPLES");
         return;
     }
     if (smp_fb_cur >= n)
@@ -1185,6 +1247,12 @@ void smp_fb_draw(void *c, int samp)
                 TEXT(c, FONT, 68, y, 0, "LOAD TRK %d", (int)UI_TRACK + 1);
             else if (act == 1)
                 TEXT(c, FONT, 68, y, 0, "%s", "RENAME");
+            else if (act == 5)
+                TEXT(c, FONT, 68, y, 0, "%s", "MOVE SELECT");
+            else if (act == 6)
+                TEXT(c, FONT, 68, y, 0, "%s", "MOVE HERE");
+            else if (act == 7)
+                TEXT(c, FONT, 68, y, 0, "%s", "NEW FOLDER");
             else if (act == 2) {
                 if (del > 1)
                     TEXT(c, FONT, 68, y, 0, "%s %d", w, del);
@@ -1377,17 +1445,65 @@ static void wave(void *c, int slot, int x0, int x1, int yc, int h, u32 s, u32 e,
 /* v0.25: the DT2's trim screen after a recording (its manual's 13.2 step 9; the owner's
  * photos): the keys across the top, the waveform with START and END, |<TRIM on E and
  * TRIM>| on H across the bottom */
+/* v0.33: TRIM zoomed (F: 2, 4, 8 times; G moves along): the window [pos, pos + n >> zoom)
+ * from the slot's fine waveform (link.c's analysis, 1,024 columns over the whole sample) */
+extern int trim_zoom;
+extern u32 trim_pos;
+extern const u8 *smp_hires(void);
+extern int smp_analysis(int *pct);
+
+static void wave_zoom(void *c, int x0, int x1, int yc, int h, u32 s, u32 e, u32 n)
+{
+    const u8 *hr = smp_hires();
+    u32 span = n >> trim_zoom, a = trim_pos;
+    if (!span)
+        span = 1;
+    int w = x1 - x0 + 1;
+    hline(c, x0, x1, yc, 1);
+    for (int x = x0; x <= x1; x++) {
+        u32 f0 = a + (u32)(x - x0) * (span / (u32)w), f1 = f0 + span / (u32)w;
+        u32 c0 = f0 / ((n >> 10) + 1u), c1 = f1 / ((n >> 10) + 1u);   /* (1,024 columns) */
+        int pk = 0;
+        for (u32 k = c0; k <= c1 && k < 1024u; k++)
+            if (hr[k] > pk)
+                pk = hr[k];
+        int amp = pk * h / 255, inside = f0 >= s && f0 < e;
+        for (int y = yc - amp; y <= yc + amp; y++)
+            if (inside || ((x + y) & 1) == 0)
+                on(c, x, y);
+    }
+    if (s >= a && s < a + span) {               /* the ends, where they are in view */
+        int sx = x0 + (int)((s - a) / ((span / (u32)w) + 1u));
+        vline(c, sx, yc - h - 2, yc + h + 2, 0);
+        fill(c, sx, yc + h + 1, sx + 2, yc + h + 2);
+    }
+    if (e > a && e <= a + span) {
+        int ex = x0 + (int)((e - a) / ((span / (u32)w) + 1u));
+        if (ex > x1) ex = x1;
+        vline(c, ex, yc - h - 2, yc + h + 2, 0);
+        fill(c, ex - 2, yc + h + 1, ex, yc + h + 2);
+    }
+    int bw = w >> trim_zoom;                    /* where the window is, along the top */
+    int bx = x0 + (int)(a / ((n / (u32)w) + 1u));
+    hline(c, bx, bx + (bw < 2 ? 2 : bw), yc - h - 3, 0);
+}
+
 static void trim_draw(void *c)
 {
     box(c, 2, 55, 125, 63, 0);
     LABEL(c, 64, 57, "%s", "Y:SAVE FN+N:DEL FN+Y:PLAY");
     box(c, 2, 11, 125, 53, 0);
-    if (smp_overview(trim_slot))
+    extern int smp_analysis_slot(void);
+    if (trim_zoom > 0 && smp_analysis(0) == 2 && smp_analysis_slot() == trim_slot)
+        wave_zoom(c, 4, 123, 32, 17, trim_s, trim_e, trim_n ? trim_n : 1);
+    else if (smp_overview(trim_slot))
         wave(c, trim_slot, 4, 123, 32, 18, trim_s, trim_e, trim_n ? trim_n : 1);
     else
         LABEL(c, 64, 30, "%s", "NO WAVEFORM");
     LABEL(c, 16, 2, "%s", "|<TRIM");
-    LABEL(c, 64, 2, "%d.%d S", (int)((trim_e - trim_s) / 48000u), (int)((trim_e - trim_s) / 4800u % 10u));
+    if (trim_zoom > 0)
+        LABEL(c, 46, 2, "%s", trim_zoom == 1 ? "2X" : trim_zoom == 2 ? "4X" : "8X");
+    LABEL(c, 72, 2, "%d.%d S", (int)((trim_e - trim_s) / 48000u), (int)((trim_e - trim_s) / 4800u % 10u));
     LABEL(c, 112, 2, "%s", "TRIM>|");
 }
 
@@ -1523,19 +1639,12 @@ void rec_screen_draw(void *c)
     int tx = mx0 + 1 + rec_thres * w / 120;
     vline(c, tx, my0 - 2, my0 - 1, 0);
 
-    /* SRC, on the left: the source in two lines (EXT over L+R, TRK over its number) */
+    /* SRC, on the left: the source over its channel (v0.33: CHAN, knob B, apart: IN / L+R,
+     * TRK12 / L) */
+    extern int rec_chan;
     const char *src = smp_rec_src[rec_src > SMP_REC_SOURCES - 1 ? SMP_REC_SOURCES - 1 : rec_src];
-    char a[6] = {0}, b[6] = {0};
-    int k = 0, j = 0;
-    while (src[k] && src[k] != ' ' && k < 5) { a[k] = src[k]; k++; }
-    if (src[k] == ' ') k++;
-    while (src[k] && j < 5) b[j++] = src[k++];
-    if (!b[0] && a[0] == 'T') {                 /* TRK12 -> TRK / 12 */
-        b[0] = a[3]; b[1] = a[4]; a[3] = 0; a[4] = 0;
-    }
-    LABEL(c, 13, 43, "%s", a);
-    if (b[0])
-        LABEL(c, 13, 35, "%s", b);
+    LABEL(c, 13, 43, "%s", src);
+    LABEL(c, 13, 35, "%s", smp_rec_chan[rec_chan < 0 ? 0 : rec_chan > SMP_REC_CHANS - 1 ? SMP_REC_CHANS - 1 : rec_chan]);
     LABEL(c, 13, 25, "%s", "SRC");
 
     /* the RECORD box: what YES does, or what the recorder is doing */
@@ -1556,8 +1665,8 @@ void rec_screen_draw(void *c)
         LABEL(c, cx, by0 + 16, "%s", !heard ? "NO DSP" : "NO LINK");
         LABEL(c, cx, by0 + 8, "%s", !heard ? "STATUS" : "TO DSP");
     } else if (rec_room < 0x10000u) {
-        LABEL(c, cx, by0 + 16, "%s", "NO ROOM");
-        LABEL(c, cx, by0 + 8, "%s", "CHANGE DEST");
+        LABEL(c, cx, by0 + 16, "%s", smp_slot_empty(rec_dest < 0 ? 0 : rec_dest) ? "NO ROOM" : "NO FREE SLOT");
+        LABEL(c, cx, by0 + 8, "%s", "UNLOAD ONE");
     } else {
         fill(c, bx0 + 4, by0 + 14, bx0 + 18, by0 + 22);   /* YES, cut out of a filled badge */
         glyph(c, bx0 + 6, by0 + 16, 'Y', 0);
@@ -1576,9 +1685,10 @@ void rec_screen_draw(void *c)
     LABEL(c, 113, 34, "%d", rec_thres);
     LABEL(c, 113, 22, "%s", "THRES");
 
-    /* the bottom row: DEST, R.LEN, R.STRT, ARM */
+    /* the bottom row: the slot the next recording goes into (v0.33: shown, not chosen: the
+     * first empty one), R.LEN, R.STRT, ARM */
     w_samp(c, 1, 5, rec_dest < 0 ? 0 : rec_dest + 1);
-    LABEL(c, 13, 0, "%s", "DEST");
+    LABEL(c, 13, 0, "%s", "INTO");
     if (rec_rlen <= 0) {
         LABEL(c, 47, 12, "%s", "MAX");
     } else {

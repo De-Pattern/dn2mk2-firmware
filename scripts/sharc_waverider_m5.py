@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,garbage,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -591,6 +591,16 @@ def main(argv=None):
             show(results["3g_guard"])
             gc.collect()
 
+        if "cost" in steps:
+            print("\nstep 3c: each machine's cost, one voice (v0.33)")
+            results["3c_cost"] = step_cost(warm(), sound, machines)
+            show(results["3c_cost"])
+            gc.collect()
+        if "garbage" in steps:
+            print("\nstep 3g: voice state and scratch full of garbage (v0.33)")
+            results["3g_garbage"] = step_garbage(warm(), sound, machines)
+            show(results["3g_garbage"])
+            gc.collect()
         if "stress" in steps:
             print("\nstep 3s: the stress test (the clock made to move)")
             results["3s_stress"] = step_stress(warm(), sound, machines)
@@ -1193,6 +1203,51 @@ def step_stress(init, sound, machines) -> dict:
         return f.to_bytes()
     rb, sb, eb, lb = scenario("B", 16, b_frame)
 
+    # v0.33, the worst cases (the owner's list): C, sixteen P-I voices (the heaviest
+    # Machinedrum family), a new note on the next voice every block with every control
+    # moving (p-locks on every step); D, sixteen Monomachine voices (VO-6 and DENS in
+    # turn), the same; E, one track retriggered every block (zuzsw's RTRG at 1/80 and
+    # faster) beside fifteen sounding EFM voices
+    import random as _rr
+    rnd = _rr.Random(80)
+    pi = [k for k, n in enumerate(PM.NAMES) if n.startswith("PI-")]
+
+    def c_frame(b):
+        f = base_frame(sound, machines, overrides=perc_words(pi[0]), trigger=False, others={t: 5 for t in range(1, 16)})
+        for t in range(16):
+            k = pi[(t + b) % len(pi)]
+            # (v0.33, Moog: a PERC track burst into noise, then all silent: the track effects
+            # too, at random, the resonant filters included)
+            for slot, w in perc_words(k, params=[rnd.random() for _ in range(8)],
+                                      fx=[rnd.random() for _ in range(7)]).items():
+                f.param(t, slot, w)
+        f.trigger(b % 16)
+        return f.to_bytes()
+    rc, sc, ec, lc = scenario("C", 20, c_frame)
+    mn = [MMx.NAMES.index("VO-6"), MMx.NAMES.index("DPRO-DENS")]
+
+    def d_frame(b):
+        f = base_frame(sound, machines, t0=MMx.TYPES[mn[0]], trigger=False,
+                       others={t: MMx.TYPES[mn[t % 2]] for t in range(1, 16)})
+        for t in range(16):
+            for slot, w in mnm_words(mn[t % 2], [rnd.randrange(128) for _ in range(8)]).items():
+                f.param(t, slot, w)
+        f.trigger(b % 16)
+        return f.to_bytes()
+    rd, sd, ed, ld = scenario("D", 20, d_frame)
+
+    def e_frame(b):
+        f = base_frame(sound, machines, overrides=perc_words(td), trigger=False, others={t: 5 for t in range(1, 16)})
+        for t in range(1, 16):
+            for slot, w in perc_words(efm).items():
+                f.param(t, slot, w)
+        if b == 1:
+            for t in range(1, 16):
+                f.trigger(t)
+        f.trigger(0)                            # track 0 again, every block
+        return f.to_bytes()
+    re_, se, ee, le = scenario("E", 16, e_frame)
+
     def newest_heard(rr, every):
         if not rr["ok"]:
             return 0.0
@@ -1206,20 +1261,190 @@ def step_stress(init, sound, machines) -> dict:
             if t in blk and V.peak(blk[t]["out"]) > 0.001:
                 hits += 1
         return hits / max(tot, 1)
-    fin = all(math.isfinite(x) for rr in (ra, rb) if rr["ok"] for blk in rr["perc"]
+    fin = all(math.isfinite(x) for rr in (ra, rb, rc, rd, re_) if rr["ok"] for blk in rr["perc"]
               for v in blk.values() for x in v["out"])
+    fin_bufs = all(math.isfinite(x) for rr in (rc, rd, re_) if rr["ok"] for blk in rr["buffers"]
+                   for t in range(16) for x in blk[t])
     n = {"K": K, "skips": {"A": sa, "B": sb}, "our_end_over_P": {"A": ea and round(ea / P, 3), "B": eb and round(eb / P, 3)},
          "limit": {"A": la, "B": lb}, "newest_heard_A": newest_heard(ra, 16),
          "instructions_per_block": {"A": ra.get("instructions", 0) // 20, "B": rb.get("instructions", 0) // 16}}
+    n.update({"skips_worst": {"C": sc, "D": sd, "E": se},
+              "our_end_over_P_worst": {k: v and round(v / P, 3) for k, v in (("C", ec), ("D", ed), ("E", ee))}})
     checks = {
         "every block of both returns": ra["ok"] and rb["ok"],
         "our voices done by 0.8 of the frame in both (the guard's limit holds under load)":
             ea is not None and eb is not None and ea <= 0.8 * P and eb <= 0.8 * P,
+        "v0.33, the worst cases: every block of C (16 P-I, all controls and track effects moving), D (16 VO-6/DENS, "
+        "all controls moving) and E (a retrigger every block beside 15 voices) returns":
+            rc["ok"] and rd["ok"] and re_["ok"],
+        "v0.33: in each, our voices done by 0.8 of the frame (the guard leaves voices out instead)":
+            all(x is not None and x <= 0.8 * P for x in (ec, ed, ee)),
+        "v0.33: in C and D, with time short, voices are left out and counted": bool(sc) and bool(sd),
+        "v0.33: every track buffer finite, no NaN, in C, D and E": fin_bufs,
         "with time short, voices are left out and counted (A)": bool(sa),
         "A: the newest note is heard in most blocks (newest first)": n["newest_heard_A"] >= 0.8,
         "nothing non-finite": fin,
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
+
+
+def _count_memory():
+    """wrap every module's DM read and write: -> (counts dict, undo). Counts by region:
+    L1 (the core's own), L2 (0x20000000..), DDR (0x80000000..)"""
+    counts = {"L1": 0, "L2": 0, "DDR": 0, "on": False}
+
+    import sys as _s0
+    conc = _s0.modules["sharc_core.memory"]._concrete_address
+
+    def region(a):
+        a = conc(a)
+        if a is None:
+            return None
+        return "DDR" if a >= 0x80000000 else "L2" if 0x20000000 <= a < 0x20200000 else "L1"
+    import sys as _s
+    orig_r, orig_w = fx._dm_read, fx._dm_write
+
+    def rd(state, address, width, *a, **k):
+        if counts["on"]:
+            g = region(address)
+            if g:
+                counts[g] += 1
+        return orig_r(state, address, width, *a, **k)
+
+    def wr(state, address, width, value):
+        if counts["on"]:
+            g = region(address)
+            if g:
+                counts[g] += 1
+        return orig_w(state, address, width, value)
+    patched = []
+    for m in list(_s.modules.values()):
+        for name, new in (("_dm_read", rd), ("_dm_write", wr)):
+            if getattr(m, name, None) in (orig_r, orig_w) and getattr(m, name) is (orig_r if name == "_dm_read" else orig_w):
+                patched.append((m, name, getattr(m, name)))
+                setattr(m, name, new)
+
+    def undo():
+        for m, name, f in patched:
+            setattr(m, name, f)
+    return counts, undo
+
+
+def step_cost(init, sound, machines) -> dict:
+    """v0.33: what each machine costs the DSP, one voice sounding: instructions of our code a
+    block, and its memory accesses by region (on the unit an L2 access costs several times an
+    instruction, a DDR one about ten: complex-ping's measurements). Six blocks after the note,
+    less a run with nothing sounding. Written to the report; docs/dsp-cost.md reads it."""
+    from dnfw.mnm import machines as MMx
+    counts, undo = _count_memory()
+    rows = {}
+
+    def measure(name, fb):
+        ins = {}
+
+        def at_perc(r):
+            ins["a"] = r.steps_n
+            counts["on"] = True
+
+        def at_ping(r):
+            ins.setdefault("sum", 0)
+            ins["sum"] += r.steps_n - ins.get("a", r.steps_n)
+            counts["on"] = False
+        for k in ("L1", "L2", "DDR"):
+            counts[k] = 0
+        rr = run_blocks(init, fb, 8, extra_hooks={dsp.PERC_SW: at_perc, dsp.PING_SW: at_ping})
+        n = 8
+        rows[name] = {"ok": rr["ok"], "instructions": ins.get("sum", 0) // n,
+                      **{k: counts[k] // n for k in ("L1", "L2", "DDR")}}
+
+    try:
+        measure("(nothing)", lambda b: base_frame(sound, machines, trigger=False).to_bytes())
+        for k, name in enumerate(PM.NAMES):
+            measure(name, (lambda k: lambda b: base_frame(sound, machines, overrides=perc_words(k), trigger=b == 1).to_bytes())(k))
+        for k, name in enumerate(MMx.NAMES):
+            def fb(b, k=k):
+                f = base_frame(sound, machines, t0=MMx.TYPES[k], trigger=b == 1)
+                for slot, w in mnm_words(k).items():
+                    f.param(0, slot, w)
+                return f.to_bytes()
+            measure(name, fb)
+        for name in ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE"):
+            measure(name, (lambda ty: lambda b: base_frame(sound, machines, t0=ty, trigger=b == 1,
+                                                          overrides=smp_words({SM.SAMP_REC: 4})).to_bytes())(SM.TYPE_OF[name]))
+    finally:
+        undo()
+    base = rows["(nothing)"]
+    table = {k: {"instructions": v["instructions"] - base["instructions"], "L1": v["L1"] - base["L1"],
+                 "L2": v["L2"] - base["L2"], "DDR": v["DDR"] - base["DDR"],
+                 "estimate": (v["instructions"] - base["instructions"]) + 4 * (v["L2"] - base["L2"])
+                 + 10 * (v["DDR"] - base["DDR"]), "ok": v["ok"]} for k, v in rows.items() if k != "(nothing)"}
+    ok = all(v["ok"] for v in rows.values())
+    return {"ok": ok, "checks": {"every machine measured (every block returned)": ok},
+            "numbers": {"per_voice_block": table, "nothing": base}}
+
+
+def step_garbage(init, sound, machines) -> dict:
+    """v0.33 (the freeze and silence reports; complex-ping: power-on memory holds garbage, NaN
+    common, and one NaN in a feedback state silences the unit): every Machinedrum and
+    Monomachine machine started on voice state that is not what a previous note left -- the
+    sixteen 1 KB voice slots in L2 and the Monomachine's shared scratch (keys, costs, the
+    voice order) filled with 0xFFFFFFFF (NaN) or random words before the first block. Each
+    run must return every block (no halt, no stray jump), the machine's track must be
+    finite from the note's block on, and PERC's bit-exact to its model (which reads the same
+    memory at entry)."""
+    import random as _r
+    from dnfw.mnm import machines as MMx
+    fills = {"nan": lambda k: 0xFFFFFFFF, "random": (lambda g: lambda k: g.getrandbits(32))(_r.Random(33))}
+    spans = [(dsp.MD_STATE_L2, 16 * 1024), (dsp.MNM_SCRATCH_L2, dsp.MNM_SCRATCH_BYTES)]
+    res, bad = {}, []
+
+    def filled(fill):
+        done = {"n": 0}
+
+        def poke(r):
+            if done["n"]:
+                return
+            done["n"] = 1
+            for a, n in spans:
+                for k in range(0, n, 4):
+                    m2.poke(r.state, a + k, fill(k))
+        return {dsp.PERC_SW: poke}
+
+    def finite_from(rr, t, b0=1):
+        return rr["ok"] and all(math.isfinite(x) for blk in rr["buffers"][b0:] for x in blk[t])
+    for fname, fill in fills.items():
+        for g in range((PM.N + 7) // 8):         # the Machinedrum machines, eight tracks a run
+            n_g = min(8, PM.N - 8 * g)
+
+            def fb(b, g=g, n_g=n_g):
+                f = base_frame(sound, machines, overrides=perc_words(8 * g), trigger=b == 1,
+                               others={t: 5 for t in range(1, n_g)}, trigger_others=True)
+                for t in range(1, n_g):
+                    for slot, w in perc_words(8 * g + t).items():
+                        f.param(t, slot, w)
+                return f.to_bytes()
+            rr = run_blocks(init, fb, 6, extra_hooks=filled(fill))
+            ok = rr["ok"] and all(finite_from(rr, t) for t in range(n_g)) and perc_exact(rr)[1:] == (0, 0)
+            res[f"{fname}_md{g}"] = {"ok": ok, "halt": rr.get("halt")}
+            if not ok:
+                bad.append(f"{fname}_md{g}")
+        for k, name in enumerate(MMx.NAMES):    # each Monomachine machine, beside a PERC voice
+            def fb(b, k=k):
+                f = base_frame(sound, machines, t0=MMx.TYPES[k], trigger=b == 1, others={1: 5}, trigger_others=True)
+                for slot, w in mnm_words(k).items():
+                    f.param(0, slot, w)
+                for slot, w in perc_words(0).items():
+                    f.param(1, slot, w)
+                return f.to_bytes()
+            rr = run_blocks(init, fb, 6, extra_hooks=filled(fill))
+            ok = rr["ok"] and finite_from(rr, 0) and finite_from(rr, 1)
+            res[f"{fname}_{name}"] = {"ok": ok, "halt": rr.get("halt")}
+            if not ok:
+                bad.append(f"{fname}_{name}")
+        print(f"    garbage {fname}: {len([k for k in res if k.startswith(fname)])} runs", flush=True)
+    checks = {"every Machinedrum and Monomachine machine, started on NaN or random voice state and "
+              "scratch: every block returns, its track finite, PERC bit-exact": not bad}
+    return {"ok": not bad, "checks": checks, "numbers": {"failing": bad, "runs": res}}
 
 
 # -- step 3b: the sample machines (v0.13, docs/sampler.md) ----------------------------------------
@@ -1305,13 +1530,32 @@ def step_smp(init, sound, machines, blocks) -> dict:
     runs["off"] = rb(init, frames(ONE, smp_words({SM.SAMP_REC: 0})), blocks)
     runs["empty_slot"] = rb(init, frames(ONE, smp_words({SM.SAMP_REC: 90})), blocks)
     runs["silent"] = rb(init, frames(ONE, smp_words(), trig=()), blocks)
+
+    # v0.33: an entry that does not lie in the pool (half-written, stale, garbage) plays as
+    # an empty slot: the hat's (SAMP 3) entry overwritten each block at PERC's entry, before
+    # the sample machines (and their model) read it
+    def bad_entry(base, frames_, fmt):
+        def poke(r):
+            ent = dsp.SMP_POOL_DDR + 8 + 16 * 2
+            for k, w in enumerate((base, frames_, 48000, fmt)):
+                m2.poke(r.state, ent + 4 * k, w & 0xFFFFFFFF)
+        return {dsp.PERC_SW: poke}              # (before the machines' model reads it at SMP_SW)
+    hat = smp_words({SM.SAMP_REC: 3})
+    for name, args in (("bad_below", (0x80000000, 48000, 1)), ("bad_above", (dsp.SMP_POOL_DDR + SM.POOL_BYTES, 4800, 1)),
+                       ("bad_long", (dsp.SMP_POOL_DDR + 0x1000, 0x7FFFFFFF, 1)),
+                       ("bad_end", (dsp.SMP_POOL_DDR + SM.POOL_BYTES - 0x100, 4800, 1)),
+                       ("bad_fmt", (dsp.SMP_POOL_DDR + 0x1000, 4800, 7)), ("bad_zero", (dsp.SMP_POOL_DDR + 0x1000, 0, 1))):
+        runs[name] = rb(init, frames(ONE, hat), blocks, extra_hooks=bad_entry(*args))
+    # (and on a SLICE track, with the bad entry claiming slices: none is read; the review's case)
+    runs["bad_slices"] = rb(init, frames(SM.TYPE_OF["SLICE"], smp_words({SM.SAMP_REC: 3, SM.SLICE_REC: 6})), blocks,
+                            extra_hooks=bad_entry(0x80000000, 48000, 1 | 8 << 8))
     runs["retrig"] = rb(init, frames(ONE, smp_words(), trig=(1, RETRIG)), blocks)
     runs["tops"] = rb(init, frames(GRID, smp_words({r: 127 for r in SM.RECORDS})), blocks)
     # v0.19, SLICE on BEAT's own sixteen slices: slice 3 and the next; NOTE, C1 + 5 (the sixth)
     SLC = SM.TYPE_OF["SLICE"]
     runs["slice"] = rb(init, frames(SLC, smp_words({SM.SAMP_REC: 4, SM.SLICE_REC: 6, SM.SLEN_REC: 2})), blocks)
     runs["slice_note"] = rb(init, frames(SLC, smp_words({SM.SAMP_REC: 4, SM.SLICE_REC: 0}),
-                                         note=(12 + 5) << 8), blocks)
+                                         note=(24 + 5) << 8), blocks)
     runs["bottoms"] = rb(init, frames(ONE, smp_words({r: 0 for r in SM.RECORDS} | {SM.SAMP_REC: 1,
                                                                                        SM.LEV_REC: 100})), blocks)
     print(f"    sample machines: {round(time.perf_counter() - t0)} s", flush=True)
@@ -1377,6 +1621,10 @@ def step_smp(init, sound, machines, blocks) -> dict:
             and smp_series(runs["cfad"], 0) == smp_series(runs["nocfad"], 0),
         "v0.19: SLICE plays BEAT's own slices, by SLCE and by the note (peak > 0.05; bit-exact above)":
             all(runs[k]["ok"] and V.peak(smp_series(runs[k], 0)) > 0.05 for k in ("slice", "slice_note")),
+        "v0.33: an entry outside the pool (below, above, too long, past its end, an unknown format, no "
+        "frames) plays as an empty slot: silent, finite, bit-exact (above)":
+            all(runs[k]["ok"] and all(x == 0.0 for x in smp_series(runs[k], 0))
+                for k in ("bad_below", "bad_above", "bad_long", "bad_end", "bad_fmt", "bad_zero", "bad_slices")),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]
@@ -1543,6 +1791,22 @@ def step_rec(init, sound, machines, blocks) -> dict:
     pv1 = (m2.word(st, C["pva"]), m2.word(st, C["pvn"])) if ok1 else None
     rec.pop("state", None)
 
+    # v0.33: +DRIVE's preview, at an offset into the pool (PREVIEW_AT): 4,800 frames at 64 KB
+    # in; then one past the pool's end and too long, held to its last ten seconds' room
+    pv_at = {}
+    for name, (off, fr) in (("at", (0x10000, 4800)), ("clamped", (0x7FFFFFF0, 0x7FFFFFFF))):
+        def at_dispatch_p(r, off=off, fr=fr, seen={"b": 0}):
+            if seen["b"] == 1:
+                command(r, 9, SM.CMD_PREVIEW, src=SP.PREVIEW_AT, chan=off, thres=fr)
+            seen["b"] += 1
+
+        def frames_p(b):
+            return base_frame(sound, machines, t0=ONE, trigger=False, overrides=smp_words({SM.SAMP_REC: 1})).to_bytes()
+        rp = run_blocks(init, frames_p, 3, extra_hooks={m3.DISPATCH: at_dispatch_p})
+        sp = rp["state"].state if rp["ok"] else None
+        pv_at[name] = (m2.word(sp, C["pva"]), m2.word(sp, C["pvn"]), m2.word(sp, C["pvl0"])) if rp["ok"] else None
+        rp.pop("state", None)
+
     # run 2: TRK6, MONO L
     g = SM.TRK_GAIN
     left = [0.3 * _m.sin(2 * _m.pi * 500 * k / 48000) for k in range(32 * n)]
@@ -1629,6 +1893,11 @@ def step_rec(init, sound, machines, blocks) -> dict:
             ok1 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 3 | 16 and h[2] == (32 * n) >> 6 for h in stat1),
         "v0.25: PREVIEW of frames [11, 101): from frame 10 (on a word), 45 words, for pvmix":
             ok1 and pv1 == (words[0] + 20, 45),
+        "v0.33: PREVIEW at an offset (+DRIVE's): 4,800 frames at 64 KB in, 2,400 words; past the "
+        "pool's end and too long: held to the last ten seconds' room, ten seconds":
+            pv_at.get("at") == (dsp.SMP_POOL_DDR + 0x10000, 2400, dsp.SMP_POOL_DDR + 0x10000)
+            and pv_at.get("clamped") == (dsp.SMP_POOL_DDR + SM.POOL_BYTES - SP.PREVIEW_BYTES,
+                                         SP.PREVIEW_BYTES // 4, dsp.SMP_POOL_DDR + SM.POOL_BYTES - SP.PREVIEW_BYTES),
         "SAMP 124 plays the recording back": ok1 and len(back) == play * BLOCK and V.peak(back) > 0.3,
         "TRK6, MONO L: track 6's bucket's left (the voices' routing elsewhere), back to its level, "
         "into SAMP 125 at 8 MB into the recordings' area (within 2 LSB)":
@@ -1872,7 +2141,22 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
     c = run_blocks(init_on(snap, m2mach, m5), frames(5), blocks)        # track 0 type 5, M5 image
     d = run_blocks(init_on(snap, m2mach, m5), frames(SM.TYPE_OF["ONESHOT"]), blocks)   # track 0 ONESHOT
     e = run_blocks(init_on(snap, m2mach, m5), frames(SM.TYPE_OF["WERP"]), blocks)      # track 0 WERP
-    ok_runs = a["ok"] and b["ok"] and c["ok"] and d["ok"] and e["ok"]
+    # v0.33: each Monomachine machine on track 0 (the owner's v0.32 report: with one MnM track a
+    # noise on every track's notes, the stock machines' and the input's): tracks 1-15 must stay
+    # the stock run's, bit for bit, while it plays
+    from dnfw.mnm import machines as MMx
+
+    def mnm_frames(k):
+        def f(b):
+            fr = base_frame(sound, machines, t0=MMx.TYPES[k], others=others, trigger=(b == 1), trigger_others=True)
+            for slot, w in mnm_words(k).items():
+                fr.param(0, slot, w)
+            return fr.to_bytes()
+        return f
+    mn = {MMx.NAMES[k]: run_blocks(init_on(snap, m2mach, m5), mnm_frames(k), blocks) for k in range(len(MMx.NAMES))}
+    ok_runs = a["ok"] and b["ok"] and c["ok"] and d["ok"] and e["ok"] and all(x["ok"] for x in mn.values())
+    mn_bad = {n: [t for t in range(1, 16) if any(blk[t] != sb[t] for blk, sb in zip(x["buffer_bits"], b["buffer_bits"]))]
+              for n, x in mn.items()} if ok_runs else None
     # compared as bit patterns: the runner's FM Tone voice can produce NaN, and NaN != NaN
     all16 = ok_runs and a["buffer_bits"] == b["buffer_bits"]
     t1_15 = ok_runs and [blk[1:] for blk in c["buffer_bits"]] == [blk[1:] for blk in b["buffer_bits"]]
@@ -1885,11 +2169,13 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
         "v0.13: track 0 ONESHOT (8), then WERP (9): tracks 1-15 bit-identical to the stock run":
             ok_runs and all([blk[1:] for blk in x["buffer_bits"]] == [blk[1:] for blk in b["buffer_bits"]]
                             for x in (d, e)),
+        "v0.33: a Monomachine machine on track 0 (each of them): tracks 1-15 bit-identical to the stock run":
+            ok_runs and not any(mn_bad.values()),
         "stock machines wrote their tracks (non-zero bits on at least one of tracks 1-4)":
             bool(set(active) & {1, 2, 3, 4}),
     }
     return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"others": others, "tracks_with_nonzero_bits_stock": active,
+            "numbers": {"others": others, "tracks_with_nonzero_bits_stock": active, "mnm_tracks_differing": mn_bad,
                         "tracks_with_nan_stock": nan,
                         "peaks_stock": [max((V.peak([x for x in blk[t] if x == x]) for blk in b["buffers"]), default=0)
                                         for t in range(16)] if ok_runs else None,

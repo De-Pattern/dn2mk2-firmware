@@ -115,8 +115,11 @@ static void used_set(int k)
         used_bits[k >> 5] &= ~b;
 }
 
+u32 smp_lib_rev __attribute__((section(".data"))) = 0;   /* v0.33: bumped whenever the index may have changed */
+
 static void used_all(void)
 {
+    smp_lib_rev++;
     for (int k = 0; k < LIB_CAP / 32; k++)
         used_bits[k] = 0;
     for (int k = 0; k < LIB_CAP; k++)
@@ -438,6 +441,43 @@ int smp_lib_delete(int k)
         E(k)[b] = 0;
     used_all();
     return index_sector_write(k);
+}
+
+/* v0.33: MOVE SELECTED / MOVE HERE (as the DT2's 13.6.5): entry K into folder F */
+int smp_lib_move(int k, int f)
+{
+    if (!smp_lib_used(k) || f < 0 || f >= LIB_FOLDERS || !FOLD[LIB_FOLDER_BYTES * (u32)f])
+        return -1;
+    u8 *e = E(k);
+    if (e[13] == (u8)f)
+        return 0;
+    e[13] = (u8)f;
+    lput(e + 60, entry_check(e));
+    used_all();
+    return index_sector_write(k);
+}
+
+/* v0.33: CREATE FOLDER: NAME's folder (made if new) -> its index, -1 none (full, or the
+ * +Drive refused) */
+int smp_lib_folder_make(const char *name)
+{
+    u8 nm[LIB_FOLDER_BYTES];
+    for (u32 k = 0; k < LIB_FOLDER_BYTES; k++)
+        nm[k] = 0;
+    for (u32 k = 0; k < LIB_FOLDER_BYTES - 1 && name[k]; k++)
+        nm[k] = (u8)name[k];
+    return lib_format() == 0 ? folder_find(nm, 1) : -1;
+}
+
+/* v0.33: DELETE on an empty folder takes the folder away (the 64 are not used up by NEW
+ * FOLDER's); INCOMING (0) and RECORDED (1) stay */
+int smp_lib_folder_drop(int f)
+{
+    if (smp_lib_state != 2 || f < 2 || f >= LIB_FOLDERS || fold_n[f] > 0 || !FOLD[LIB_FOLDER_BYTES * (u32)f])
+        return -1;
+    folder_set(f, "");
+    used_all();
+    return lib_wr(LIB_FOLDER_AT, LIB_FOLDER_SECTORS * 512u, FOLD);
 }
 
 int smp_lib_rename(int k, const char *name)

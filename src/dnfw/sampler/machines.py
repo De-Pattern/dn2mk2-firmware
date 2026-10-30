@@ -174,8 +174,11 @@ REC_PAGE = ((252, "SRC", "Rec Source"), (259, "CHAN", "Rec Channel"), (0, "-", "
             (251, "R.STRT", "Rec Start"), (247, "ARM", "Arm"))
 # v0.22, the RECORDER's SRC (rec.c): the input's channels as choices of their own, as the
 # DT2's; the DSP still takes a source (0 the input, 1 MAIN, 2 + t) and a channel
-SRC_NAMES = ("EXT L+R", "EXT L", "EXT R", "MAIN") + tuple(f"TRK{t}" for t in range(1, 17))
-CHAN_NAMES = ("MONO L+R", "MONO L", "MONO R")
+# v0.33: SRC and CHAN apart, as the DT2's newer OS (the owner): SRC IN, MAIN, TRK1..16 (the
+# DSP's source numbers: 0, 1, 2 + t); CHAN MONO L+R, MONO L, MONO R for any of them (the DSP
+# records one channel; the DT2's STEREO L R is not here). Choice k of SRC is source k.
+SRC_NAMES = ("IN", "MAIN") + tuple(f"TRK{t}" for t in range(1, 17))
+CHAN_NAMES = ("L+R", "L", "R")
 RLEN_MAX = 0                               # R.LEN 0 is MAX, 1..127 steps of the sequencer
 
 # -- one detent a choice (v0.15) -------------------------------------------------------------
@@ -241,3 +244,9 @@ LINK_WORDS = ("u", "v", "w", "sum", "bad", "good", "lseq", "nbad", "sbusy", "spo
               "sseq", "cnt", "off", "a", "pg",
               "vpos", "vend", "vsum", "vsum2", "vdone", "vseq")       # VERIFY: the running sum of a word range
 VERIFY_CHUNK = 1024                          # words a block VERIFY adds up
+
+# v0.33: SLCE at NOTE picks slice (note - SLICE_NOTE_BASE) mod the slices: from C1 (MIDI 24),
+# as the DT2's manual ("slices play from C1 and upwards, wrapping around after the last
+# slice"). v0.18..v0.32 counted from C0, so a C5 trig (72) played slice 5 of 8 where the DT2
+# plays slice 1 (blskk's report, v0.32)
+SLICE_NOTE_BASE = 24

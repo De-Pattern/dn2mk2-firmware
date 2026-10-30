@@ -86,6 +86,34 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   parameter, from the parameter's descriptor) and give ours a plain turn, or jumps where they
   mean something (TUNE by semitone/octave, choices by one).
 
+- **MACHINE SEL to a sample machine keeps the track's filter, amp and FX** (blskk, v0.32):
+  "instead of starting fresh". **Not a bug**: the owner checked, stock keeps those pages
+  switching between its own machines (FM TONE to WAVETONE); ours matches it.
+- **After installing a new version, MD and Monomachine tracks silent until the track is
+  cleared** (owner, v0.31/v0.32; often, not always): clearing the track (no reboot needed)
+  brings them back, and they stay fine. With dynamic allocation on SID, "shared voices" for a
+  minute; back to one voice and a clear fixed it. **Open**: likely what the project kept from
+  the earlier version (a sound saved with an older version's controls), or a voice slot's state
+  carried from another track's voice. To find: does it happen with a project saved on the same
+  version (power-cycle without installing)? Does a fresh project after an install play at once?
+- **SLICE/GRID at NOTE: more slices shift the layout** (blskk, v0.32): a C5 trig played slice
+  1 of 4 but slice 5 of 8. Ours counted from C0 ((note - 12) mod n); the DT2 counts from C1
+  ("slices play from C1 and upwards, wrapping"): (72 - 24) mod 8 = 0. **v0.33**: from C1, the
+  DSP and KEYBOARD's slice keys alike.
+- **Perform mode, CONTROL ALL, RTRG with LEN at 1/80** (zuzsw, v0.32): four PERC tracks each
+  locked to one voice, the meter at 76 %; patterns 1-3 sound right, pattern 4 "garbled".
+  **Open**: waiting for details (what pattern 4 should sound like; whether stock machines do
+  the same at that retrig rate).
+
+- **SID silent at first** (owner, v0.32): MACHINE SEL gave the Monomachine machines the shared
+  records' defaults (SID's WAVE on MIX). **v0.33**: each starts as its own (dnfw.mnm DEFAULTS),
+  SID on TRI (its first wave; PW at the middle for PULS); gate 6o.
+- **DDRW's BR1 / BR2 (bitcrush) not heard** (owner, v0.32). **Open**: check the port against
+  the Monomachine's (the runner's DDRW model at BR 0 vs 127).
+- **Owner's checks at the next install** (asked to be reminded): (1) a fresh project plays at
+  once, and an old project after a power-cycle alone (the silent-until-cleared report); (2) SID
+  starts audible; (3) DDRW BR1/BR2.
+
 ## Requests
 
 - Stereo sampling from the inputs (bearsshuffle)
@@ -94,3 +122,36 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 - A build with only the Machinedrum and Monomachine machines (douleursolitude)
 - "Ensemble machines need work" (ModernDevotion): which machine is unclear; asked for plain-English detail
 - A Discord (taktonmusic)
+
+## Pablo Se7en and the owner (Discord, v0.32, 2026-10-30)
+
+- **LFO DEPTH and SPEED don't snap with FUNC on our tracks** (the owner and Pablo): stock
+  snaps DEPTH to -128 / 0 / 127.98 and SPEED to 0, +-8, 12, 16, 24, 32, 48, 63.99 (-64).
+  v0.32's FUNC + turn held every control it did not know on our machines, the LFO pages'
+  too. **v0.33**: only our machines' own records (238..260) change; gate 6m checks LFO
+  controls on PERC, Monomachine and ONESHOT.
+- **Freeze on the sample list** (Pablo, video: ONESHOT, the SAMP list up, keys do nothing,
+  no audio). The third report of it (U2, O5). **v0.33**: the paths found closed
+  (`docs/freeze-hunt.md`: stray DSP reads from a bad sample entry, keys whose release went
+  elsewhere, the list left open on another track); not reproduced exactly, open until a tester
+  confirms.
+- **Slowdowns with a large +Drive library** (Pablo). **v0.33**: the +DRIVE browser no longer
+  walks the whole library for every row it draws.
+- **A track stuck on its machine** (Pablo, PERC): it would not change until the track was
+  cleared. **Asked**: MACHINE SEL, or PERC's TYPE knob? TYPE is p-lockable, and trigs with a
+  TYPE lock keep their machine whatever the knob says (clearing the track removes the locks).
+  v0.33's lost-release fixes cover the MACHINE SEL case if it was that.
+- **The owner's crackle** (v0.32, one Monomachine track): not the Digitone (headphones
+  clean); something in the studio chain. The runner now checks that every Monomachine machine
+  leaves the stock tracks bit-identical.
+
+## The owner's Discord audit (2026-10-30, `docs/feedback/2026-10-30-discord.csv`)
+
+Twenty bugs and twenty-eight requests, sorted by the owner's export. Mapped to what we have:
+B01 all-audio-cut (14 reports: v0.33's output guard and entry check), B06/B19 the sample-list
+freeze (v0.33's paths), B08 FUNC + turn on LFO (v0.33), B16-B18 (v0.33). **Open, first after v0.33**: B10 PERC: switching LFO pages between two PERC tracks shows the
+other track's parameter menu (the owner: important). B13 the recorder's normalising too loud
+(a design question). The rest are old and, per the owner, fixed since: B03 (v0.29), B11/B12
+(v0.30), B14 (VO-6, v0.29's voice fixes); B15 (PERC notes late, v0.27) only if it comes back. Requests to weigh: pattern direct jump, Markov
+song mode, LFO matrix, trigless trigs, parameter slides (planned), screen streaming, MD/MnM
+preset import, per-track flanger/phaser.

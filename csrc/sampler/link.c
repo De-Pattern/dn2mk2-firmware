@@ -560,7 +560,7 @@ static u16 st[16] __attribute__((section(".data")));
  * the count, so the page can name the slots, and nothing points at frames not yet there);
  * then each used slot's frames, the recorder's included, and at once that slot's entry,
  * so a slot plays as soon as it is in; last the whole directory page again. -> 0 when done */
-enum { K_BLANK, K_FRAMES, K_ENTRY, K_FULL, K_AREA, K_TABLES, K_READY };
+enum { K_BLANK, K_FRAMES, K_ENTRY, K_FULL, K_AREA, K_TABLES, K_READY, K_PREVIEW };
 static int area_due __attribute__((section(".data"))) = 0;      /* the slice area loads at the end */
 static int area_push __attribute__((section(".data"))) = -1;    /* one slot's table to the DSP */
 static int l_area_read __attribute__((section(".data"))) = 0;   /* K_AREA from the +Drive (else from the copy) */
@@ -854,6 +854,19 @@ void smp_load(void)                             /* load (again) whatever the ima
     smp_lstate = next_range() ? L_READ : L_DONE;
 }
 
+/* v0.33: +DRIVE's preview (FUNC + YES on a library sample, as the DT2's: its first ten
+ * seconds through the main mix while held). The sample is not in the pool, so its first
+ * PREVIEW_BYTES go from the +Drive to a stretch of the DSP's pool no slot uses (pool_room),
+ * through the loader's checked path, and never to the +Drive's image; the DSP plays them
+ * from there (CMD_PREVIEW at PREVIEW_AT) once the first PV_START bytes are in. */
+#define PREVIEW_AT 0xFFFFu                  /* dnfw.sampler.program.PREVIEW_AT, PREVIEW_BYTES */
+#define PREVIEW_BYTES (10u * 48000u * 2u)
+#define PV_START 0x20000u
+static int pv_k __attribute__((section(".data"))) = -1;     /* the library entry, -1 none */
+static u32 pv_off __attribute__((section(".data"))) = 0;
+static u32 pv_bytes __attribute__((section(".data"))) = 0;
+int smp_pv_state __attribute__((section(".data"))) = 0;  /* 0 none, 1 asked, 2 loading, 3 playing */
+
 static void load_poll(void)
 {
     if (smp_lstate == L_READ) {
@@ -880,6 +893,13 @@ static void load_poll(void)
             for (u32 k = 0; k < n; k++)
                 STAGE(0)[k] = 0;
             put_le32(STAGE(0), TABLE_MAGIC);
+        } else if (l_kind == K_PREVIEW) {                   /* v0.33: +DRIVE's preview, from the library */
+            extern int smp_lib_read(int k, u32 off, u32 bytes, void *buf);
+            if (pv_k < 0 || smp_lib_read(pv_k, l_off - pv_off, n, STAGE(0)) != 0) {
+                pv_k = -1;
+                smp_lstate = L_IDLE;
+                return;
+            }
         } else if (l_kind == K_FRAMES) {
             if (image_read(l_off, n, STAGE(0)) != 0) {
                 smp_lstate = L_IDLE;                            /* the +Drive refused: stop */
@@ -930,6 +950,8 @@ static void load_poll(void)
         smp_retries++;                                      /* wrong, or no answer: again */
         if (++l_tries > 6) {
             fast_on = 0;                                    /* nothing gets through: stop */
+            if (l_kind == K_PREVIEW)
+                pv_k = -1;                                  /* v0.33: and no preview of half of it */
             smp_lstate = L_IDLE;
             return;
         }
@@ -955,6 +977,13 @@ static u32 s_tries __attribute__((section(".data"))) = 0;
 static u32 s_frames __attribute__((section(".data"))) = 0;
 static u32 s_peak __attribute__((section(".data"))) = 0;      /* v0.25: for the normalising */
 static u32 s_place __attribute__((section(".data"))) = 0;
+
+/* v0.33: where the recorder's save is (the recorder's NORMALIZING waits on it): a value that
+ * changes while it moves, 0 when none runs */
+u32 smp_save_mark(void)
+{
+    return sstate ? (s_off ^ (u32)sstate << 28 ^ s_tries << 24) | 1u : 0u;
+}
 
 static int is_recording(u32 k)                  /* slot K's frames lie in the recordings' area */
 {
@@ -1370,6 +1399,9 @@ int smp_analysis(int *pct)
     return an_state;
 }
 
+int smp_analysis_slot(void) { return an_slot; }   /* v0.33: whose the analysis is */
+void smp_analyse_cancel(void) { if (an_state == 1) an_state = 0; }   /* v0.33: NO left it */
+
 const u8 *smp_hires(void)
 {
     return HIRES;
@@ -1656,10 +1688,66 @@ static u32 pool_room(u32 bytes)
     return 0;
 }
 
+int smp_lib_preview(int k)                       /* -> 0: asked; -1: not now */
+{
+    extern int smp_lib_used(int k), smp_lib_fmt(int k);
+    extern u32 smp_lib_frames(int k);
+    if (!smp_lib_used(k) || !smp_lib_fmt(k) || smp_tables == 1 || !dir_ok)
+        return -1;                              /* int16 only (the DSP's preview reads int16) */
+    u32 b = smp_lib_frames(k) * 2u;
+    if (b > PREVIEW_BYTES)
+        b = PREVIEW_BYTES;
+    b = (b + 511u) & ~511u;
+    u32 off = pool_room(b);
+    if (!off || off > POOL_BYTES - PREVIEW_BYTES)
+        return -1;                              /* (the DSP holds a preview below that: the review) */
+    pv_k = k;
+    pv_off = off;
+    pv_bytes = b;
+    smp_pv_state = 1;
+    return 0;
+}
+
+void smp_lib_preview_stop(void)
+{
+    if (smp_pv_state == 3)
+        smp_command(CMD_PREVIEW, PREVIEW_AT, 0, 0, 0);
+    if (smp_pv_state == 2 && l_kind == K_PREVIEW)
+        l_end = l_off;                          /* the chunk in flight is the last */
+    smp_pv_state = 0;
+    pv_k = -1;
+}
+
+static void pv_poll(void)
+{
+    if (smp_pv_state == 2 && pv_k < 0)
+        smp_pv_state = 0;                           /* the +Drive refused it */
+    if (smp_pv_state == 2 && (l_kind != K_PREVIEW || smp_lstate == L_DONE || smp_lstate == L_IDLE
+                          || l_off - pv_off >= (pv_bytes < PV_START ? pv_bytes : PV_START))) {
+        smp_command(CMD_PREVIEW, PREVIEW_AT, pv_off, (pv_bytes / 2u), 0);
+        smp_pv_state = 3;
+    }
+}
+
 static void lp_poll(void)
 {
+    pv_poll();
     if (sstate || (smp_lstate != L_DONE && smp_lstate != L_IDLE) || smp_lib_busy())
         return;
+    if (smp_pv_state == 1) {                             /* v0.33: +DRIVE's preview */
+        if (smp_tables == 1 || pv_k < 0) {
+            smp_pv_state = 0;
+            return;
+        }
+        l_kind = K_PREVIEW;
+        l_off = pv_off;
+        l_end = pv_off + pv_bytes;
+        l_slot = POOL_SLOTS + 1;
+        l_entry = -1;
+        smp_pv_state = 2;
+        smp_lstate = L_READ;
+        return;
+    }
     if (one_due >= 0) {                              /* the copied slot to the DSP */
         if (slot_range((u32)one_due)) {
             l_slot = POOL_SLOTS + 1;
@@ -2040,6 +2128,11 @@ void smp_mod_apply(void *mirror)
     MOD_APPLY(mirror);
     if (!dir_ok)
         return;
+    /* v0.33: the loaded slots, listed once a frame and only if a voice needs them (this runs
+     * in the audio interrupt, 1,500 times a second: v0.25..v0.32 walked the 128 slots twice
+     * for every modulated voice, up to 4,096 checks a frame with SAMP modulated on 16) */
+    u8 loaded[POOL_SLOTS];
+    int nl = -1;
     for (u32 b = 0; b < 16; b++) {
         u8 *snd = VOICE_SOUND(b);
         if (!snd || snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
@@ -2049,15 +2142,16 @@ void smp_mod_apply(void *mirror)
         int heard = *cell >> 8;
         int k = heard - (int)set;
         if (k != 0 && set != 0 && set <= POOL_SLOTS) {
-            int n = 0, at = -1, exact = 0;      /* the loaded slots; the last at or below SAMP's */
-            for (int j = 0; j < POOL_SLOTS; j++) {
-                if (smp_slot_empty(j))
-                    continue;
-                if (j <= (int)set - 1) {
-                    at = n;
-                    exact = j == (int)set - 1;
-                }
-                n++;
+            if (nl < 0) {
+                nl = 0;
+                for (int j = 0; j < POOL_SLOTS; j++)
+                    if (!smp_slot_empty(j))
+                        loaded[nl++] = (u8)j;
+            }
+            int n = nl, at = -1, exact = 0;     /* the loaded slots; the last at or below SAMP's */
+            for (int i = 0; i < nl && loaded[i] <= (int)set - 1; i++) {
+                at = i;
+                exact = loaded[i] == (int)set - 1;
             }
             if (n > 0) {
                 int off = mod_scale(k, n);
@@ -2067,14 +2161,7 @@ void smp_mod_apply(void *mirror)
                 int idx = base + off;
                 if (idx < 0) idx = 0;
                 if (idx > n - 1) idx = n - 1;
-                for (int j = 0; j < POOL_SLOTS; j++) {   /* the idx-th loaded slot */
-                    if (smp_slot_empty(j))
-                        continue;
-                    if (idx-- == 0) {
-                        *cell = (u16)((j + 1) << 8);
-                        break;
-                    }
-                }
+                *cell = (u16)((loaded[idx] + 1) << 8);   /* the idx-th loaded slot */
             }
         }
         if (snd[SOUND_TYPE] != SLICE_TYPE)
