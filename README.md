@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.32** | 2026-10-29 | The DSP-time fix: the Machinedrum and Monomachine voices' working state in the DSP's fast internal memory, a CPU guard that measures the stock's share, a DSP load meter (FUNC held on PERC/Monomachine pages); FUNC + turn on our controls | `builds/v0.32-DSP/` | yes |
+| **v0.33** | 2026-10-30 | The freeze hunt: a guard against all audio cutting out (a runaway voice), keys and menus that went dead (SLICE/GRID's YES after MACHINE SEL, keys whose release went elsewhere, the sample list left open on another track), stray DSP reads from a bad sample entry, a garbage-state and worst-case DSP stress test, a UI fuzz in the gate; +DRIVE preview (FUNC + YES), MOVE SELECTED, NEW FOLDER; PROJECT RAM ticks with YES; the recorder: no DEST, SRC/CHAN apart, TRIM zoom; slices from C1; SID on TRI; FUNC + NO backspace; LFO FUNC snaps back | `builds/v0.33-STEADY/` | yes |
+| v0.32 | 2026-10-29 | The DSP-time fix: the Machinedrum and Monomachine voices' working state in the DSP's fast internal memory, a CPU guard that measures the stock's share, a DSP load meter (FUNC held on PERC/Monomachine pages); FUNC + turn on our controls | `builds/v0.32-DSP/` | yes |
 | v0.31 | 2026-10-29 | The +Drive library (about 20 GB, folders; LOAD TO PROJECT / LOAD TO TRK in the browser's +DRIVE), sent from the import tool or dn2samples.py; the kit's samples load first at power-on (LOADING n%); a finished Machinedrum voice frees its DSP time; the browser's NO / NO held / page keys | `builds/v0.31-DRIVE/` | yes |
 | v0.30.1 | 2026-10-29 | Hotfix on v0.30: PERC's AMD no longer silences everything until a reboot (the sine it reads is loaded again) | `builds/v0.30.1-AMDFIX/` | yes |
 | v0.30 | 2026-10-28 | Stock Y/N questions (the OS update, the save) answered on every page; TRIG + YES is stock's; MACHINE SEL keeps SAMP between sample machines; the slice marker follows the track's voice; LFO depth on SAMP/SLCE; recorder THRES and ARM; gentler normalize; held arrows scroll the lists; the slice editor's preview; CPU on screen | `builds/v0.30-FIXES/` | yes |
@@ -70,6 +71,92 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.33 — STEADY (the freeze hunt, +DRIVE preview and folders, the recorder reworked)
+
+`DN2mod_v0.33_STEADY_OS1.11.syx`
+sha256 `4161fa4cc0c5d755116a889357741e27c3599e6ee8e931382d42f4d28b9f4cef`
+Gate: CLEARED TO FLASH, 2026-10-30 (USB size 2,058,481 of 2,097,152; DSP image 1,017,908 of 1,048,575). Source: commit `70b7178d`. Docs: `docs/freeze-hunt.md`, `docs/dsp-cost.md`, `docs/user-reports.md`.
+
+Everything in v0.32, plus:
+
+**Dead keys and menus** (the owner, Pablo, Discord; `docs/freeze-hunt.md`):
+- SLICE and GRID's YES menus went dead after MACHINE SEL: that screen takes SYN's release
+  itself, SYN stayed "held", and a YES with any key held went to stock. Now only a held [TRIG]
+  (TRIG + YES, stock's preview) does.
+- A key whose release went elsewhere left every later press of it going to stock: now a new
+  press is a new press.
+- The sample list, left open when another track became active, went on taking UP, DOWN, YES and
+  NO unseen: it closes now.
+- After any FUNC combination the next YES or NO went to a stock question that was not there:
+  only FUNC + a page or menu key counts now.
+- The slice menu's wait (reading a sample) and the recorder's NORMALIZING can no longer hold
+  the keys forever: NO leaves the first; the second gives up when the save stops moving.
+
+**All audio cutting out until a restart** (Moog, CAT and others: the most reported bug; one
+report heard white noise from a PERC track first). That is a voice running away to infinity,
+then NaN, which the delay and reverb keep. Now every sample a Machinedrum or Monomachine voice
+writes is held to a safe level, and a voice whose output goes non-finite is silenced and wiped
+for that block, so it can never reach the effects. And a sample entry that does not lie in the
+sample pool (half-sent, stale, garbage) plays as an empty slot instead of reading memory at a
+stray address.
+
+**Slowdowns** (Pablo): the +DRIVE browser no longer walks the whole library for each row it
+draws; SAMP modulation lists the loaded slots once a frame.
+
+**LFO DEPTH and SPEED snap with FUNC again** on our tracks (the owner, Pablo): v0.32's FUNC +
+turn held them still; it now touches only our machines' own controls.
+
+**New**:
+- **+DRIVE preview**: FUNC + YES held on a sample plays its first ten seconds (PROJECT RAM's
+  too), as the DT2's.
+- **MOVE SELECTED / MOVE HERE** and **NEW FOLDER** in +DRIVE's SAMPLE ACTION menu; empty named
+  folders show; DELETE on an emptied folder removes it.
+- **PROJECT RAM**: YES ticks (YES again unticks), RIGHT acts (LOAD TRK, UNLOAD the ticked ones,
+  RENAME, SELECT ALL), as +DRIVE and the DT2.
+- **The recorder**: no DEST (a recording goes into the first empty slot, shown as INTO, never
+  over a sample); SRC (A: IN, MAIN, TRK1..16) and CHAN (B: L+R, L, R) apart; **TRIM zoom** (F:
+  2, 4, 8 times; G moves along; finer trims when zoomed).
+- **FUNC + NO** on FILE NAME deletes and steps back; held, it clears the name.
+- **SLICE/GRID at NOTE count slices from C1**, as the DT2 (blskk): a note plays the same slice
+  however many there are.
+- **Monomachine machines start as their own** on MACHINE SEL: SID on TRI, its first wave.
+
+**Gate changes**: the build checked to be this tree's, byte for byte, and its ColdFire code
+current; runner: bad sample entries (seven), every Machinedrum and Monomachine machine started
+on NaN or random voice state, each Monomachine machine beside stock tracks (bit-identical), the
+worst cases (16 P-I voices with every control moving, 16 VO-6/DENS likewise, a retrigger every
+block beside 15 voices: our voices done by 0.56 / 0.42 / 0.58 of the frame, voices left out,
+everything finite), the offset preview, each machine's measured cost (`docs/dsp-cost.md`);
+ColdFire: YES on SLICE after MACHINE SEL, the overlays letting go, FUNC + turn on LFO controls,
+the preview, MOVE, TRIM zoom, FUNC + NO, and a UI fuzz (random sample-page key sequences with
+the audio interrupt between them). An independent review of every change since v0.32; its
+findings fixed.
+
+**Test** (after the regression check):
+1. SLICE track: MACHINE SEL to GRID and back, then YES on the page: the menu opens. GRID: YES
+   opens ALLOCATE SLICE.
+2. Open the SAMP list on a sample track, switch to an FM track: YES/NO/arrows work there.
+3. LFO page on a PERC, Monomachine and ONESHOT track: FUNC + turn DEPTH and SPEED snap.
+4. +DRIVE: FUNC + YES held on a sample: it plays (a moment's wait if it is not in the project).
+   Tick some, MOVE SELECTED, another folder, RIGHT, MOVE HERE. NEW FOLDER, name it, YES.
+5. PROJECT RAM: YES ticks several; RIGHT, UNLOAD.
+6. Record: no DEST (INTO shows the slot); B changes L+R/L/R; on TRIM, F zooms, G moves, the
+   ends trim finer; FUNC + NO held on the name clears it.
+7. A SLICE track at NOTE: C1 plays the first slice whatever the count.
+8. MACHINE SEL to SID: it sounds at once (TRI).
+9. **Your install checks**: a fresh project plays at once; an old project plays after a plain
+   power-cycle (the silent-until-cleared report).
+
+**Known issues / not done.**
+- Pablo's exact freeze and Kokozi's silent samples are not reproduced; the all-audio-cut is
+  guarded against but its first cause (which voice runs away, on which settings) is not known.
+  Tell us if any of them come back, with the steps.
+- The Monomachine tables still live in DDR: DPRO DDRW is the heaviest machine because of it
+  (`docs/dsp-cost.md`); moving them to fast memory is next.
+- The emulators do not model the two chips' timing or the link between them; a timing model is
+  planned.
+- **Not seen on hardware yet**: all of the above; checked in the emulators.
 
 ## v0.32 — DSP (the DSP-time fix: fast memory, a measured guard, a load meter; FUNC + turn)
 
