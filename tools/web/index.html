@@ -123,8 +123,8 @@ progress { width: 100%; height: 12px; accent-color: var(--accent); }
       <span><i style="background:var(--new)"></i>what you send</span>
     </div>
     <div class="stats">
-      <div class="stat"><b id="sCap">–</b><span>room for yours</span></div>
-      <div class="stat"><b id="sNow">–</b><span>yours on it now</span></div>
+      <div class="stat"><b id="sCap">–</b><span id="lCap">room for yours</span></div>
+      <div class="stat"><b id="sNow">–</b><span id="lNow">yours on it now</span></div>
       <div class="stat"><b id="sSend">–</b><span>to send</span></div>
       <div class="stat"><b id="sLeft">–</b><span>free after sending</span></div>
       <div class="stat"><b id="sRec">–</b><span>recordings (kept)</span></div>
@@ -444,6 +444,7 @@ if (typeof module !== "undefined") module.exports = DN2;
   const C = DN2.C;
   const MB = 1 << 20;
   const fmtMB = b => (b / MB).toFixed(b < 10 * MB ? 2 : 1) + " MB";
+  const fmtSize = b => b >= 1024 * MB ? (b / (1024 * MB)).toFixed(2) + " GB" : fmtMB(b);
   const fmtS = f => (f / C.DSP_RATE).toFixed(2) + " s";
   const log = t => { const l = $("log"); l.textContent += t + "\n"; l.scrollTop = l.scrollHeight; };
 
@@ -585,7 +586,12 @@ if (typeof module !== "undefined") module.exports = DN2;
       count = r.count;
       r.rows.forEach(e => { if (e.frames) rows.push(e); });
     }
-    dev.lib = { rows, folders };
+    /* INFO: state, capacity, count, the +Drive's sectors, the library's first data sector: its room */
+    const ip = (await call(C.LIB.INFO, [])).payload, iw = o => ip[o] | ip[o + 1] << 8 | ip[o + 2] << 16 | (ip[o + 3] << 24 >>> 0);
+    const sectors = iw(12) >>> 0, first = iw(16) >>> 0;
+    const room = sectors > first ? (sectors - first) * 512 : null;
+    const used = rows.reduce((a, e) => a + Math.ceil(2 * e.frames / 512) * 512, 0);   /* whole sectors each */
+    dev.lib = { rows, folders, room, used };
   }
 
   /* -- files -- */
@@ -714,23 +720,37 @@ if (typeof module !== "undefined") module.exports = DN2;
     const recs = dev ? dev.slots.filter(s => s.rec).reduce((a, s) => a + s.frames * 2, 0) : null;
     const kept = mode === "add" && keep && keep.kept ? Math.max(0, Math.min(keep.end, C.REC_OFFSET) - C.DATA_OFFSET) + Math.max(0, keep.end - C.REC_END) : 0;
     const used = mode === "add" ? (pl.len ? Math.max(0, Math.min(pl.len, C.REC_OFFSET) - C.DATA_OFFSET) + Math.max(0, pl.len - C.REC_END) : kept) : send;
-    $("sCap").textContent = fmtMB(cap);
-    $("sNow").textContent = now == null ? "–" : fmtMB(now);
-    $("sSend").textContent = fmtMB(send);
-    $("sLeft").textContent = fmtMB(Math.max(0, cap - used));
+    /* v0.31: into the +Drive library its room is the +Drive's, not the project pool's */
+    const lib = mode === "lib", lr = dev && dev.lib ? dev.lib : null;
+    const libSend = lib ? items.reduce((a, it) => a + Math.ceil(2 * it.w.frames.length / 512) * 512, 0) : 0;
+    const libFree = lr && lr.room != null ? Math.max(0, lr.room - lr.used) : null;
+    $("lCap").textContent = lib ? "room in the +Drive library" : "room for yours";
+    $("lNow").textContent = lib ? "in the library now" : "yours on it now";
+    $("sCap").textContent = lib ? (lr && lr.room != null ? fmtSize(lr.room) : "–") : fmtMB(cap);
+    $("sNow").textContent = lib ? (lr ? fmtSize(lr.used) : "–") : now == null ? "–" : fmtMB(now);
+    $("sSend").textContent = fmtSize(lib ? libSend : send);
+    $("sLeft").textContent = lib ? (libFree == null ? "–" : fmtSize(Math.max(0, libFree - libSend))) : fmtMB(Math.max(0, cap - used));
     $("sRec").textContent = recs == null ? "–" : `${fmtMB(recs)} of ${fmtMB(C.REC_BYTES)}`;
     const secs = pl.send ? (pl.send / rate) : 0;
     $("sTime").textContent = pl.send ? (secs < 90 ? `${Math.ceil(secs)} s` : `${Math.round(secs / 60)} min`) : "–";
     const bar = $("bar"); bar.innerHTML = "";
+    if (lib) {                                  /* the library's bar: what is in it, what you send */
+      const whole = lr && lr.room ? lr.room : 1;
+      const seg = (bytes, color, title) => { const d = document.createElement("div"); d.style.width = (100 * Math.min(bytes, whole) / whole) + "%"; d.style.background = color; d.title = title; bar.append(d); };
+      if (lr && lr.room) { seg(lr.used, "var(--yours)", "in the library: " + fmtSize(lr.used)); seg(libSend, "var(--new)", "what you send: " + fmtSize(libSend)); }
+    } else {
     const seg = (bytes, color, title) => { const d = document.createElement("div"); d.style.width = (100 * bytes / (cap + C.HOLE_BYTES)) + "%"; d.style.background = color; d.title = title; bar.append(d); };
     if (kept) seg(kept, "var(--yours)", "yours, kept: " + fmtMB(kept));
     seg(Math.min(mode === "add" ? Math.max(0, used - kept) : send, cap), "var(--new)", "what you send: " + fmtMB(send));
     if (recs) seg(recs, "var(--rec)", "recordings: " + fmtMB(recs));
-    const over = mode === "lib" ? false : used > cap || pl.len > (ramOk ? C.POOL_BYTES : C.REC_OFFSET) || (!ramOk && pl.len > top);
-    $("memNote").textContent = over ? `Too much: there is room for ${fmtMB(cap)}. Remove some samples.`
+    }
+    const over = lib ? libFree != null && libSend > libFree : used > cap || pl.len > (ramOk ? C.POOL_BYTES : C.REC_OFFSET) || (!ramOk && pl.len > top);
+    $("memNote").textContent = over && lib ? `Too much: the library has ${fmtSize(libFree)} free. Remove some samples, or delete some from the library below.`
+      : lib ? (lr && lr.room != null ? "The +Drive library, shared by every project. The project's own 400 MB (its slots) fills only when you load samples on the instrument." : "")
+      : over ? `Too much: there is room for ${fmtMB(cap)}. Remove some samples.`
       : (!ramOk && dev ? "The instrument's RAM check did not pass this power-on, so only the first 128 MB load: room for 96 MB of yours." : "");
     $("memNote").className = "note " + (over ? "bad" : (!ramOk && dev ? "warn" : ""));
-    document.querySelector(".legend").innerHTML = (kept ? '<span><i style="background:var(--yours)"></i>yours, kept</span>' : "")
+    document.querySelector(".legend").innerHTML = lib ? '<span><i style="background:var(--yours)"></i>in the library</span><span><i style="background:var(--new)"></i>what you send</span>' : (kept ? '<span><i style="background:var(--yours)"></i>yours, kept</span>' : "")
       + '<span><i style="background:var(--rec)"></i>recordings (kept)</span><span><i style="background:var(--new)"></i>what you send</span>';
 
     /* the instrument's slots */
