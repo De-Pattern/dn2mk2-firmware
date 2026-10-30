@@ -87,8 +87,15 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   mean something (TUNE by semitone/octave, choices by one).
 
 - **MACHINE SEL to a sample machine keeps the track's filter, amp and FX** (blskk, v0.32):
-  "instead of starting fresh". **Open**: first, what stock does switching between its own
-  machines (FM TONE to WAVETONE): if stock keeps those pages, ours matches it.
+  "instead of starting fresh". **Not a bug**: the owner checked, stock keeps those pages
+  switching between its own machines (FM TONE to WAVETONE); ours matches it.
+- **After installing a new version, MD and Monomachine tracks silent until the track is
+  cleared** (owner, v0.31/v0.32; often, not always): clearing the track (no reboot needed)
+  brings them back, and they stay fine. With dynamic allocation on SID, "shared voices" for a
+  minute; back to one voice and a clear fixed it. **Open**: likely what the project kept from
+  the earlier version (a sound saved with an older version's controls), or a voice slot's state
+  carried from another track's voice. To find: does it happen with a project saved on the same
+  version (power-cycle without installing)? Does a fresh project after an install play at once?
 - **SLICE/GRID at NOTE: more slices shift the layout** (blskk, v0.32): a C5 trig played slice
   1 of 4 but slice 5 of 8. Ours counted from C0 ((note - 12) mod n); the DT2 counts from C1
   ("slices play from C1 and upwards, wrapping"): (72 - 24) mod 8 = 0. **v0.33**: from C1, the
