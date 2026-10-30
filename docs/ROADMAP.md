@@ -201,3 +201,19 @@ inharmonic modes).
 - Remove what is left of the retired engines: SHIFT (frequency shifter), GRAN (granular
   filter type), CZ PHASE and RESONATOR: their code, generators, tables, DSP spans, tests
   and gate steps, once v0.31 and v0.32 are out.
+
+## The +Drive library, then a Transfer-style page (owner, 2026-10-30)
+
+1. **On the instrument first**: RENAME, MOVE (MOVE SELECTED, then MOVE HERE, as the DT2's
+   13.6.5) and CREATE FOLDER in the +DRIVE browser, and the link commands for each, so the
+   computer can do the same (lib.c: rename an entry, change its folder, add a folder;
+   each write to the index checked, as the rest).
+2. **Then the import tool as Elektron Transfer's Explore**: two panes, the computer's
+   folders on the left (the browser's folder access), the +Drive library on the right by
+   folder. Drag from left to right sends; on the right, drag to move between folders,
+   rename, delete and new folder from a right-click menu, each tick-selectable; the transfer
+   queue below with each file's progress and result. The pool (PROJECT RAM) and the
+   recordings stay their own view.
+3. Also asked: **capicola** (heavylight's keyframe stretch, AGPL, github.com/heavylight-
+   industries/keyframer-lab) as a CAPI switch on STRETCH, as the DT2 mod's; after the
+   stability work (its SHARC glue, run.asm and dt2.c, not public yet).
