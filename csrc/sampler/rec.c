@@ -146,12 +146,13 @@ int rec_visible(void)
     return rec_overlay;
 }
 
-/* the DSP's source and channel for a SRC choice: EXT L+R, L, R; MAIN; TRK1..16 */
+/* the DSP's source and channel: v0.33, SRC (IN, MAIN, TRK1..16: the DSP's 0, 1, 2 + t) and
+ * CHAN (L+R, L, R) apart, as the DT2's newer OS */
+int rec_chan __attribute__((section(".data"))) = 0;
 static void src_of(int s, u32 *src, u32 *chan)
 {
-    if (s < 3) { *src = 0; *chan = (u32)s; }
-    else if (s == 3) { *src = 1; *chan = 0; }
-    else { *src = (u32)(s - 2); *chan = 0; }
+    *src = (u32)(s < 0 ? 0 : s);
+    *chan = (u32)(rec_chan < 0 ? 0 : rec_chan > 2 ? 2 : rec_chan);
 }
 
 /* the frames R.LEN asks for: MAX the most the DSP records (66 s), else that many sixteenth
@@ -361,6 +362,7 @@ static void knob(int index, int delta)
 {
     switch (index) {
     case 1: rec_src = clamp(rec_src + delta, 0, SMP_REC_SOURCES - 1); break;
+    case 2: rec_chan = clamp(rec_chan + delta, 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
     case 4: rec_thres = clamp(rec_thres + delta, 0, 120); break;
     /* E: v0.33, no DEST (send() takes the first empty slot) */
     case 6: rec_rlen = clamp(rec_rlen + delta, 0, 128); break;

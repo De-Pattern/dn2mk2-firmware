@@ -1628,19 +1628,12 @@ void rec_screen_draw(void *c)
     int tx = mx0 + 1 + rec_thres * w / 120;
     vline(c, tx, my0 - 2, my0 - 1, 0);
 
-    /* SRC, on the left: the source in two lines (EXT over L+R, TRK over its number) */
+    /* SRC, on the left: the source over its channel (v0.33: CHAN, knob B, apart: IN / L+R,
+     * TRK12 / L) */
+    extern int rec_chan;
     const char *src = smp_rec_src[rec_src > SMP_REC_SOURCES - 1 ? SMP_REC_SOURCES - 1 : rec_src];
-    char a[6] = {0}, b[6] = {0};
-    int k = 0, j = 0;
-    while (src[k] && src[k] != ' ' && k < 5) { a[k] = src[k]; k++; }
-    if (src[k] == ' ') k++;
-    while (src[k] && j < 5) b[j++] = src[k++];
-    if (!b[0] && a[0] == 'T') {                 /* TRK12 -> TRK / 12 */
-        b[0] = a[3]; b[1] = a[4]; a[3] = 0; a[4] = 0;
-    }
-    LABEL(c, 13, 43, "%s", a);
-    if (b[0])
-        LABEL(c, 13, 35, "%s", b);
+    LABEL(c, 13, 43, "%s", src);
+    LABEL(c, 13, 35, "%s", smp_rec_chan[rec_chan < 0 ? 0 : rec_chan > SMP_REC_CHANS - 1 ? SMP_REC_CHANS - 1 : rec_chan]);
     LABEL(c, 13, 25, "%s", "SRC");
 
     /* the RECORD box: what YES does, or what the recorder is doing */

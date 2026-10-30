@@ -389,6 +389,7 @@ def smp_c_header() -> str:
             f"#define SMP_ARM_ID {_smp.ARM_REC}\n#define SMP_REC_FIRST {_smp.REC_FIRST}\n"
             f"#define SMP_REC_SECONDS10 {_smp.REC_FRAMES * 10 // 48000}\n"
             f"#define SMP_REC_SOURCES {len(_smp.SRC_NAMES)}\n"
+            f"#define SMP_REC_CHANS {len(_smp.CHAN_NAMES)}\n"
             f"static const char smp_rec_chan[3][4] = {{{', '.join(q + m + q for m in ('L+R', 'L', 'R'))}}};\n"
             f"static const char smp_rec_src[{len(_smp.SRC_NAMES)}][8] = {{{', '.join(q + m + q for m in _smp.SRC_NAMES)}}};\n"
             f"static const char smp_bars[8][4] = {{{', '.join(q + b + q for b in ('1', '2', '4', '8', '8', '8', '8', '8'))}}};\n"
