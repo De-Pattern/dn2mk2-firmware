@@ -117,6 +117,8 @@ int rec_overlay __attribute__((section(".data"))) = 0;      /* the screen is up 
 int rec_src __attribute__((section(".data"))) = 0;          /* SMP_REC_SOURCES choices */
 int rec_thres __attribute__((section(".data"))) = 0;        /* 0..120 */
 int rec_dest __attribute__((section(".data"))) = -1;        /* slot 0..126 (SAMP 1..127); -1 not chosen */
+int trim_zoom __attribute__((section(".data"))) = 0;      /* v0.33: TRIM's zoom, 0..3: 1x..8x */
+u32 trim_pos __attribute__((section(".data"))) = 0;       /* v0.33: its window's first frame */
 int rec_rlen __attribute__((section(".data"))) = 0;         /* 0 MAX, else steps */
 int rec_rstrt __attribute__((section(".data"))) = 0;        /* 0 THRES, 1 PLAY */
 u32 rec_room __attribute__((section(".data"))) = 0;         /* bytes free for the next recording */
@@ -329,6 +331,10 @@ void rec_poll(void)
             trim_e = n;
         }
         rec_phase = PH_TRIM;
+        trim_zoom = 0;                          /* v0.33: whole, and its fine waveform read */
+        trim_pos = 0;
+        extern int smp_analyse(int k);
+        smp_analyse(trim_slot);
         smp_overlay_dirty = 1;
     }
     if (sent_seq && rec_link == 0 && FRAMES - sent_at > 1500u)
@@ -612,13 +618,41 @@ static void preview(int on)
 
 /* a TRIM knob: E START, H END. A detent moves a 1000th of the recording, more the faster
  * the knob turns (as a sample machine's start moves), a 10,000th with FUNC held */
+/* v0.33: TRIM's zoom (F: 1, 2, 4, 8 times, as the DT2's) and the window's place (G); the
+ * window follows the end last moved. smp_page.c draws it from the slot's fine waveform. */
+
+static void trim_follow(u32 at)                 /* keep AT inside the window */
+{
+    u32 span = trim_n >> trim_zoom;
+    if (at < trim_pos || at >= trim_pos + span)
+        trim_pos = at > span / 2u ? at - span / 2u : 0u;
+    if (trim_pos + span > trim_n)
+        trim_pos = trim_n > span ? trim_n - span : 0u;
+}
+
 static void trim_knob(int index, int delta, int fine)
 {
     u32 now = FRAMES, dt = now - knob_at;
     knob_at = now;
     int ad = delta < 0 ? -delta : delta;
+    if (index == 6) {                           /* F: zoom */
+        int z = trim_zoom + (delta > 0 ? 1 : -1);
+        trim_zoom = z < 0 ? 0 : z > 3 ? 3 : z;
+        trim_follow(trim_s);
+        smp_overlay_dirty = 1;
+        return;
+    }
+    if (index == 7) {                           /* G: the window along the sample */
+        u32 span = trim_n >> trim_zoom, mv = span / 8u * (u32)ad;
+        if (delta < 0)
+            trim_pos = trim_pos > mv ? trim_pos - mv : 0u;
+        else
+            trim_pos = trim_pos + mv + span > trim_n ? (trim_n > span ? trim_n - span : 0u) : trim_pos + mv;
+        smp_overlay_dirty = 1;
+        return;
+    }
     u32 mul = fine ? 1u : dt < 12u ? 12u : dt < 30u ? 5u : dt < 60u ? 2u : 1u;
-    u32 step = trim_n / (fine ? 10000u : 1000u) * mul * (u32)ad;
+    u32 step = (trim_n >> trim_zoom) / (fine ? 10000u : 1000u) * mul * (u32)ad;   /* finer when zoomed */
     if (step < 2u)
         step = 2u;
     int sgn = delta < 0 ? -1 : 1;
@@ -627,11 +661,13 @@ static void trim_knob(int index, int delta, int fine)
         if (v < 0) v = 0;
         if ((u32)v + 64u > trim_e) v = (int)trim_e - 64;
         trim_s = (u32)(v < 0 ? 0 : v);
+        trim_follow(trim_s);
     } else if (index == 8) {
         int v = (int)trim_e + sgn * (int)step;
         if ((u32)(v < 0 ? 0 : v) < trim_s + 64u) v = (int)trim_s + 64;
         if ((u32)v > trim_n) v = (int)trim_n;
         trim_e = (u32)v;
+        trim_follow(trim_e > 0u ? trim_e - 1u : 0u);
     }
     smp_overlay_dirty = 1;                      /* drawn at once, not at the next tick */
 }

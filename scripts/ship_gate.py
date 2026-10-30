@@ -473,7 +473,8 @@ def main() -> int:
                      f"poke:{g['smp_saved']}:00000000,poke:{g['rec_overlay']}:00000001,"
                      f"poke:{g['rec_phase']}:00000004,wait:10,mem:{g['rec_phase']}:4,"
                      f"poke:{g['smp_saved']}:00000001,wait:10,mem:{g['rec_phase']}:4,png:t1,spin:4:5,wait:5,"
-                     f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,mem:{g['smp_cmds']}:4,"
+                     f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,spin:5:2,wait:5,png:tz,"
+                     f"mem:{g['smp_cmds']}:4,"
                      f"press:17,wait:2,press:10,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_cmds']}:4,"
                      f"release:10,wait:3,release:17,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_func_held']}:4,"
                      f"mem:{g['smp_cmds']}:4,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,spin:0:3,wait:3,right,"
@@ -484,7 +485,7 @@ def main() -> int:
                      # emulator barely moves): "CB", cursor on B -> "CB", cursor on C -> "B"
                      f"press:17,wait:2,press:12,wait:10,release:12,wait:3,release:17,wait:3,mem:{g['nm_text']}:8,"
                      f"png:n1,yes,wait:10,mem:{g['rec_phase']}:4,png:a1,tap:27,"
-                     f"wait:20,mem:{g['rec_phase']}:4,mem:{snd}:256,png:r1")
+                     f"wait:20,mem:{g['rec_phase']}:4,mem:{snd}:256,png:r1,mem:{lay['trim_zoom']:#x}:4")
             js = work / "recflow.json"
             flow_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                                             "--build", bdir, "--snapshot", snap, "--steps", steps,
@@ -513,7 +514,9 @@ def main() -> int:
                              "v0.33: FUNC + NO steps back: a second one takes the letter before": bytes.fromhex(m[f"{g['nm_text']}@16"])[:2] == b"B\0",
                              "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
                              "samp": after[0x6A] == 5,
-                             "frames": r["screen_frames"] > 0}
+                             "frames": r["screen_frames"] > 0,
+                             "v0.33: F zooms TRIM (drawn)": int(m[f"{lay['trim_zoom']:#x}"], 16) >= 1
+                             and pathlib.Path(r["screens"]["tz"]).read_bytes() != pathlib.Path(r["screens"]["t2"]).read_bytes()}
                     good = all(facts.values())
                     why = str(facts) + f" phases {phases} cmds {cmds} names {names}"
                 return good, ("SAVING on to TRIM; TRIM's ends move; FUNC + YES previews while held; YES on to "

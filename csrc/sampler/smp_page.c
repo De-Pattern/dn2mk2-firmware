@@ -1435,17 +1435,64 @@ static void wave(void *c, int slot, int x0, int x1, int yc, int h, u32 s, u32 e,
 /* v0.25: the DT2's trim screen after a recording (its manual's 13.2 step 9; the owner's
  * photos): the keys across the top, the waveform with START and END, |<TRIM on E and
  * TRIM>| on H across the bottom */
+/* v0.33: TRIM zoomed (F: 2, 4, 8 times; G moves along): the window [pos, pos + n >> zoom)
+ * from the slot's fine waveform (link.c's analysis, 1,024 columns over the whole sample) */
+extern int trim_zoom;
+extern u32 trim_pos;
+extern const u8 *smp_hires(void);
+extern int smp_analysis(int *pct);
+
+static void wave_zoom(void *c, int x0, int x1, int yc, int h, u32 s, u32 e, u32 n)
+{
+    const u8 *hr = smp_hires();
+    u32 span = n >> trim_zoom, a = trim_pos;
+    if (!span)
+        span = 1;
+    int w = x1 - x0 + 1;
+    hline(c, x0, x1, yc, 1);
+    for (int x = x0; x <= x1; x++) {
+        u32 f0 = a + (u32)(x - x0) * (span / (u32)w), f1 = f0 + span / (u32)w;
+        u32 c0 = f0 / ((n >> 10) + 1u), c1 = f1 / ((n >> 10) + 1u);   /* (1,024 columns) */
+        int pk = 0;
+        for (u32 k = c0; k <= c1 && k < 1024u; k++)
+            if (hr[k] > pk)
+                pk = hr[k];
+        int amp = pk * h / 255, inside = f0 >= s && f0 < e;
+        for (int y = yc - amp; y <= yc + amp; y++)
+            if (inside || ((x + y) & 1) == 0)
+                on(c, x, y);
+    }
+    if (s >= a && s < a + span) {               /* the ends, where they are in view */
+        int sx = x0 + (int)((s - a) / ((span / (u32)w) + 1u));
+        vline(c, sx, yc - h - 2, yc + h + 2, 0);
+        fill(c, sx, yc + h + 1, sx + 2, yc + h + 2);
+    }
+    if (e > a && e <= a + span) {
+        int ex = x0 + (int)((e - a) / ((span / (u32)w) + 1u));
+        if (ex > x1) ex = x1;
+        vline(c, ex, yc - h - 2, yc + h + 2, 0);
+        fill(c, ex - 2, yc + h + 1, ex, yc + h + 2);
+    }
+    int bw = w >> trim_zoom;                    /* where the window is, along the top */
+    int bx = x0 + (int)(a / ((n / (u32)w) + 1u));
+    hline(c, bx, bx + (bw < 2 ? 2 : bw), yc - h - 3, 0);
+}
+
 static void trim_draw(void *c)
 {
     box(c, 2, 55, 125, 63, 0);
     LABEL(c, 64, 57, "%s", "Y:SAVE FN+N:DEL FN+Y:PLAY");
     box(c, 2, 11, 125, 53, 0);
-    if (smp_overview(trim_slot))
+    if (trim_zoom > 0 && smp_analysis(0) == 2)
+        wave_zoom(c, 4, 123, 32, 17, trim_s, trim_e, trim_n ? trim_n : 1);
+    else if (smp_overview(trim_slot))
         wave(c, trim_slot, 4, 123, 32, 18, trim_s, trim_e, trim_n ? trim_n : 1);
     else
         LABEL(c, 64, 30, "%s", "NO WAVEFORM");
     LABEL(c, 16, 2, "%s", "|<TRIM");
-    LABEL(c, 64, 2, "%d.%d S", (int)((trim_e - trim_s) / 48000u), (int)((trim_e - trim_s) / 4800u % 10u));
+    if (trim_zoom > 0)
+        LABEL(c, 46, 2, "%s", trim_zoom == 1 ? "2X" : trim_zoom == 2 ? "4X" : "8X");
+    LABEL(c, 72, 2, "%d.%d S", (int)((trim_e - trim_s) / 48000u), (int)((trim_e - trim_s) / 4800u % 10u));
     LABEL(c, 112, 2, "%s", "TRIM>|");
 }
 
