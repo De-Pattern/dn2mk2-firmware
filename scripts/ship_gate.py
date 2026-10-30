@@ -531,8 +531,10 @@ def main() -> int:
                      f"mem:{g['slc_sl']}:36,"
                      f"no,wait:6,mem:{g['slc_state']}:4,"
                      # v0.33: YES on the SLICE track's page answers (the menu, or NO SAMPLE ON
-                     # SAMP) after a FUNC combo on it (FUNC + LEFT): it was swallowed (owner)
-                     f"{pk},tap:2,wait:10,png:y0,press:17,wait:2,left,wait:3,release:17,wait:6,yes,wait:8,png:y1,"
+                     # SAMP) after MACHINE SEL (FUNC + SRC, NO: its keys' releases never reach the
+                     # mod, so SRC stayed "held" and every YES went to stock: the owner's dead
+                     # SLICE/GRID menus, reproduced) and a FUNC combo on the page (FUNC + LEFT)
+                     f"{pk},tap:2,wait:10,func-src,wait:20,no,wait:10,png:y0,press:17,wait:2,left,wait:3,release:17,wait:6,yes,wait:8,png:y1,"
                      f"no,wait:6,tap:18,wait:6,press:33,wait:6,release:33,wait:6,press:34,wait:6,release:34,wait:6,"
                      f"press:26,wait:6,release:26,wait:6")
             js = work / "slice.json"

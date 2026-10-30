@@ -661,8 +661,10 @@ int slc_pop(u8 *it)
             return 0;
         }
         /* v0.30: YES with a [TRIG] held (TRIG + YES: stock's sound preview) is stock's. v0.33:
-         * the [TRIG] keys only (25..40), not any key: a key whose release never comes
-         * through as one (as FUNC's once did) would keep every later YES stock's */
+         * the [TRIG] keys only (25..40), not any key: MACHINE SEL (FUNC + SRC) takes its
+         * keys' releases itself, so SRC stayed "held" and every later YES was stock's until
+         * SRC was pressed again (the owner's dead SLICE and GRID menus; held_lo 0x404 in the
+         * emulator after it) */
         extern u32 smp_held_lo, smp_held_hi;
         if (press && code == K_YES && ((smp_held_lo & 0xFE000000u) || (smp_held_hi & 0x1FFu)))
             return 0;
