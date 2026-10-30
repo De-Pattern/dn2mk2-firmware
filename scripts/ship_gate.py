@@ -564,7 +564,7 @@ def main() -> int:
                              "closed": int(m[g["slc_state"]], 16) == 0,
                              # trig 9, 10 (the bottom row's first two: the lowest notes) slices
                              # 1, 2; trig 2 (the top row: a higher note) a later one
-                             "slice notes": len(notes) == 3 and notes[:2] == [12, 13] and notes[2] > 13}
+                             "slice notes": len(notes) == 3 and notes[:2] == [24, 25] and notes[2] > 25}   # v0.33: from C1 (24), as the DT2
                     good = all(facts.values())
                     why = str(facts) + f" notes {notes}"
                 return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
