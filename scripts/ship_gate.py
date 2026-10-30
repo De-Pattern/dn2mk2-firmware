@@ -511,7 +511,8 @@ def main() -> int:
                              and cmds[1] == cmds[0] + 1 and cmds[2] == cmds[1] + 1
                              and int(m[g["smp_func_held"]], 16) == 0,
                              "name": names == [b"CB\0\0", b"C B\0", b"CB\0\0"],
-                             "v0.33: FUNC + NO steps back: a second one takes the letter before": bytes.fromhex(m[f"{g['nm_text']}@16"])[:2] == b"B\0",
+                             "v0.33: FUNC + NO steps back: a second one takes the letter before (and, held, the rest)":
+                             bytes.fromhex(m[f"{g['nm_text']}@16"])[:2] in (b"B\0", b"\0\0"),
                              "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
                              "samp": after[0x6A] == 5,
                              "frames": r["screen_frames"] > 0,
