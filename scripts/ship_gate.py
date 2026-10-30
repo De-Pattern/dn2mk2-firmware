@@ -220,6 +220,20 @@ def main() -> int:
         (logs / "preflight.log").write_text(text)
         gate("preflight", ok, "bootstrap/updater/meta/Outbox untouched, signature, DSP size"
              if ok else text[-600:])
+        # v0.33: the ColdFire code the build carries is what csrc/ compiles to now (v0.33's
+        # first builds carried a waverider_code.json older than three C fixes, and the gate's
+        # emulator steps tested the old code; scripts/gen_waverider_code.py --check)
+        rc_c, out_c = run("code fresh", [sys.executable, "scripts/gen_waverider_code.py", "--check"], logs,
+                          env={"PYTHONPATH": str(ROOT / "src")})
+        gate("ColdFire code current", rc_c == 0, out_c.strip()[-400:])
+        # and the file under test is what this tree builds, byte for byte (so every step below
+        # tests these sources, not an older build of them)
+        rb = work / "rebuilt.syx"
+        rc_b, out_b = run("rebuild", [sys.executable, "-c", "from dnfw.cli.main import main; main()", "mods", "apply",
+                                      a.stock, "--mod", "waverider", "-o", rb], logs, env={"PYTHONPATH": str(ROOT / "src")})
+        same_b = rc_b == 0 and rb.exists() and read_image(rb) == build_bytes
+        gate("the build is this tree's", same_b, "dnfw mods apply here gives the same file, byte for byte"
+             if same_b else ("it differs: rebuild it from this tree" if rc_b == 0 else out_b[-400:]))
 
         built = load(build_bytes)
         sec3 = built.container.find(3).unpack()

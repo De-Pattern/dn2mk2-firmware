@@ -1,6 +1,8 @@
 """Assemble Waverider's ColdFire half ahead of time, for `dnfw mods`.
 
-    python scripts/gen_waverider_code.py
+    python scripts/gen_waverider_code.py [--check]
+
+--check writes nothing: exit 0 only if the committed file is what the sources compile to now.
 
 Runs `dnfw.waverider.coldfire.compose` on stock Digitone II 1.11 MAIN OS (the GNU
 m68k assembler and GCC, natively or through WSL, are needed here and nowhere else:
@@ -78,7 +80,13 @@ def main() -> int:
         "machines_chunk": {"load": built["machines_chunk"]["load"],
                            "code": built["machines_chunk"]["code"].hex()},
     }
-    OUT_JSON.write_bytes((json.dumps(code, indent=1) + "\n").encode())
+    text = (json.dumps(code, indent=1) + "\n").encode()
+    if "--check" in sys.argv[1:]:               # v0.33: the gate's: the committed code is the sources'
+        same = OUT_JSON.read_bytes() == text
+        print(f"{OUT_JSON.relative_to(ROOT)} {'matches' if same else 'is STALE against'} csrc/ and the composer "
+              f"({'' if same else 'run scripts/gen_waverider_code.py'})")
+        return 0 if same else 1
+    OUT_JSON.write_bytes(text)
     size = sum(len(e["new"]) // 2 for e in edits)
     print(f"wrote {OUT_JSON.relative_to(ROOT)}: {len(edits)} edits, {size} B, "
           f"{len(code['guards'])} guards; replays to the compose output byte for byte")
