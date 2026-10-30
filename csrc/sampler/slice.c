@@ -775,7 +775,7 @@ int slc_pop(u8 *it)
 }
 
 /* v0.23, the DT2's SLICES trig mode: in KEYBOARD mode, on a SLICE track whose SLCE is NOTE,
- * trig key K plays slice K + 1 (the note C0 + K, which SLCE's NOTE mode turns into slice K:
+ * trig key K plays slice K + 1 (the note C1 + K, which SLCE's NOTE mode turns into slice K:
  * dnfw.sampler.program.slice_bounds), as one note. Everything else stock's: the call the
  * KeyboardView makes for a key's notes (0x40058be8, coldfire.py's KEYNOTES_SITE) comes here.
  * VEC is the stock vector (begin, end, capacity) of 32-bit notes; -> nonzero: notes given. */
@@ -834,7 +834,7 @@ u32 slc_keynotes(u32 kbd, u32 *vec, u32 k)
             int idx = (rank + per * bank) % 64;
             if (idx < 0)
                 idx += 64;
-            *(u32 *)vec[0] = 12u + (u32)idx;    /* the DSP: (note - 12) mod the slices */
+            *(u32 *)vec[0] = 24u + (u32)idx;    /* the DSP: (note - 24) mod the slices (v0.33: from C1) */
             vec[1] = vec[0] + 4u;
             return 1;
         }

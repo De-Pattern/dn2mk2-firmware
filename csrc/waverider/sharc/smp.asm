@@ -3591,7 +3591,7 @@ wr_sm_else_291.:
       DM(26, I2) = R0;                  // fixed
       R5 = DM(0x2df7fc);
       R4 = TRUNC F5;
-      R12 = -0xc;
+      R12 = -0x18;
       R4 = R12 + R4;
       R12 = -0x1;
       R12 = R12 + R6;
@@ -3704,7 +3704,7 @@ wr_sm_else_300.:
       DM(26, I2) = R0;                  // fixed
       R5 = DM(0x2df7fc);
       R4 = TRUNC F5;
-      R12 = -0xc;
+      R12 = -0x18;
       R4 = R12 + R4;
       R12 = 0x0;
       F2 = FLOAT R4 BY R12;

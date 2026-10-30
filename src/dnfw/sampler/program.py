@@ -488,12 +488,12 @@ def slice_bounds(p: Prog, L: Layout) -> None:
         p.lsh(4, 4, -1)
         v(p, 6, "nsl")
 
-        def by_note():                         # (note - 12) mod nsl
+        def by_note():                         # (note - 24) mod nsl: from C1, as the DT2 (v0.33; C0 before)
             p.iconst(0, 1)
             vs(p, "fixed", 0)
             p.ld(5, C["note"])
             p.trunc(4, 5)
-            p.iconst(12, -12)
+            p.iconst(12, -SM.SLICE_NOTE_BASE)
             p.iop(4, 12, "+", 4)
             tofloat(p, 2, 4)
             tofloat(p, 3, 6)
@@ -672,12 +672,12 @@ def region(p: Prog, L: Layout) -> None:
         p.iconst(0, 0)
         vs(p, "fixed", 0)
 
-        def by_note():                       # NOTE: (note - 12) mod n picks it, the pitch stays
+        def by_note():                       # NOTE: (note - 24) mod n picks it (from C1, as the DT2; v0.33), the pitch stays
             p.iconst(0, 1)
             vs(p, "fixed", 0)
             p.ld(5, C["note"])
             p.trunc(4, 5)
-            p.iconst(12, -12)
+            p.iconst(12, -SM.SLICE_NOTE_BASE)
             p.iop(4, 12, "+", 4)
             p.iconst(12, -1)
             p.iop(12, 12, "+", 6)            # n - 1 (n is a power of two)

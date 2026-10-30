@@ -1311,7 +1311,7 @@ def step_smp(init, sound, machines, blocks) -> dict:
     SLC = SM.TYPE_OF["SLICE"]
     runs["slice"] = rb(init, frames(SLC, smp_words({SM.SAMP_REC: 4, SM.SLICE_REC: 6, SM.SLEN_REC: 2})), blocks)
     runs["slice_note"] = rb(init, frames(SLC, smp_words({SM.SAMP_REC: 4, SM.SLICE_REC: 0}),
-                                         note=(12 + 5) << 8), blocks)
+                                         note=(24 + 5) << 8), blocks)
     runs["bottoms"] = rb(init, frames(ONE, smp_words({r: 0 for r in SM.RECORDS} | {SM.SAMP_REC: 1,
                                                                                        SM.LEV_REC: 100})), blocks)
     print(f"    sample machines: {round(time.perf_counter() - t0)} s", flush=True)

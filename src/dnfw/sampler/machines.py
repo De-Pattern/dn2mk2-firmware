@@ -241,3 +241,9 @@ LINK_WORDS = ("u", "v", "w", "sum", "bad", "good", "lseq", "nbad", "sbusy", "spo
               "sseq", "cnt", "off", "a", "pg",
               "vpos", "vend", "vsum", "vsum2", "vdone", "vseq")       # VERIFY: the running sum of a word range
 VERIFY_CHUNK = 1024                          # words a block VERIFY adds up
+
+# v0.33: SLCE at NOTE picks slice (note - SLICE_NOTE_BASE) mod the slices: from C1 (MIDI 24),
+# as the DT2's manual ("slices play from C1 and upwards, wrapping around after the last
+# slice"). v0.18..v0.32 counted from C0, so a C5 trig (72) played slice 5 of 8 where the DT2
+# plays slice 1 (blskk's report, v0.32)
+SLICE_NOTE_BASE = 24
