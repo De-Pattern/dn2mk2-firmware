@@ -131,11 +131,16 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   too. **v0.33**: only our machines' own records (238..260) change; gate 6m checks LFO
   controls on PERC, Monomachine and ONESHOT.
 - **Freeze on the sample list** (Pablo, video: ONESHOT, the SAMP list up, keys do nothing,
-  no audio). The third report of it (U2, O5). **Open, first after v0.33's fixes**: the list's
-  load path while the pattern plays.
-- **A track stuck on its machine** (Pablo, PERC): MACHINE SEL would not change it until the
-  track was cleared. **Open**: may be the same as the SLICE/GRID YES (MACHINE SEL's keys'
-  releases never reach the mod); to check with MACHINE SEL from PERC.
+  no audio). The third report of it (U2, O5). **v0.33**: the paths found closed
+  (`docs/freeze-hunt.md`: stray DSP reads from a bad sample entry, keys whose release went
+  elsewhere, the list left open on another track); not reproduced exactly, open until a tester
+  confirms.
+- **Slowdowns with a large +Drive library** (Pablo). **v0.33**: the +DRIVE browser no longer
+  walks the whole library for every row it draws.
+- **A track stuck on its machine** (Pablo, PERC): it would not change until the track was
+  cleared. **Asked**: MACHINE SEL, or PERC's TYPE knob? TYPE is p-lockable, and trigs with a
+  TYPE lock keep their machine whatever the knob says (clearing the track removes the locks).
+  v0.33's lost-release fixes cover the MACHINE SEL case if it was that.
 - **The owner's crackle** (v0.32, one Monomachine track): not the Digitone (headphones
   clean); something in the studio chain. The runner now checks that every Monomachine machine
   leaves the stock tracks bit-identical.
