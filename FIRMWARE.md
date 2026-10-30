@@ -34,7 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.33** | 2026-10-30 | The freeze hunt: keys and menus that went dead (SLICE/GRID's YES after MACHINE SEL, keys whose release went elsewhere, the sample list left open on another track), stray DSP reads from a bad sample entry, a garbage-state and worst-case DSP stress test, a UI fuzz in the gate; +DRIVE preview (FUNC + YES), MOVE SELECTED, NEW FOLDER; PROJECT RAM ticks with YES; the recorder: no DEST, SRC/CHAN apart, TRIM zoom; slices from C1; SID on TRI; FUNC + NO backspace; LFO FUNC snaps back | `builds/v0.33-STEADY/` | yes |
+| **v0.33** | 2026-10-30 | The freeze hunt: a guard against all audio cutting out (a runaway voice), keys and menus that went dead (SLICE/GRID's YES after MACHINE SEL, keys whose release went elsewhere, the sample list left open on another track), stray DSP reads from a bad sample entry, a garbage-state and worst-case DSP stress test, a UI fuzz in the gate; +DRIVE preview (FUNC + YES), MOVE SELECTED, NEW FOLDER; PROJECT RAM ticks with YES; the recorder: no DEST, SRC/CHAN apart, TRIM zoom; slices from C1; SID on TRI; FUNC + NO backspace; LFO FUNC snaps back | `builds/v0.33-STEADY/` | yes |
 | v0.32 | 2026-10-29 | The DSP-time fix: the Machinedrum and Monomachine voices' working state in the DSP's fast internal memory, a CPU guard that measures the stock's share, a DSP load meter (FUNC held on PERC/Monomachine pages); FUNC + turn on our controls | `builds/v0.32-DSP/` | yes |
 | v0.31 | 2026-10-29 | The +Drive library (about 20 GB, folders; LOAD TO PROJECT / LOAD TO TRK in the browser's +DRIVE), sent from the import tool or dn2samples.py; the kit's samples load first at power-on (LOADING n%); a finished Machinedrum voice frees its DSP time; the browser's NO / NO held / page keys | `builds/v0.31-DRIVE/` | yes |
 | v0.30.1 | 2026-10-29 | Hotfix on v0.30: PERC's AMD no longer silences everything until a reboot (the sine it reads is loaded again) | `builds/v0.30.1-AMDFIX/` | yes |
@@ -75,8 +75,8 @@ Every flash, every version:
 ## v0.33 — STEADY (the freeze hunt, +DRIVE preview and folders, the recorder reworked)
 
 `DN2mod_v0.33_STEADY_OS1.11.syx`
-sha256 `SHA_HERE`
-Gate: CLEARED TO FLASH, 2026-10-30 (USB size 2,058,380 of 2,097,152; DSP image 1,017,680 of 1,048,575). Source: commit `SRC_HERE`. Docs: `docs/freeze-hunt.md`, `docs/dsp-cost.md`, `docs/user-reports.md`.
+sha256 `4161fa4cc0c5d755116a889357741e27c3599e6ee8e931382d42f4d28b9f4cef`
+Gate: CLEARED TO FLASH, 2026-10-30 (USB size 2,058,481 of 2,097,152; DSP image 1,017,908 of 1,048,575). Source: commit `70b7178d`. Docs: `docs/freeze-hunt.md`, `docs/dsp-cost.md`, `docs/user-reports.md`.
 
 Everything in v0.32, plus:
 
@@ -93,9 +93,13 @@ Everything in v0.32, plus:
 - The slice menu's wait (reading a sample) and the recorder's NORMALIZING can no longer hold
   the keys forever: NO leaves the first; the second gives up when the save stops moving.
 
-**The DSP**: a sample entry that does not lie in the sample pool (half-sent, stale, garbage) now
-plays as an empty slot instead of reading memory at a stray address (which can give NaN: one
-NaN in the delay or reverb silences the unit until a restart).
+**All audio cutting out until a restart** (Moog, CAT and others: the most reported bug; one
+report heard white noise from a PERC track first). That is a voice running away to infinity,
+then NaN, which the delay and reverb keep. Now every sample a Machinedrum or Monomachine voice
+writes is held to a safe level, and a voice whose output goes non-finite is silenced and wiped
+for that block, so it can never reach the effects. And a sample entry that does not lie in the
+sample pool (half-sent, stale, garbage) plays as an empty slot instead of reading memory at a
+stray address.
 
 **Slowdowns** (Pablo): the +DRIVE browser no longer walks the whole library for each row it
 draws; SAMP modulation lists the loaded slots once a frame.
@@ -145,8 +149,9 @@ findings fixed.
    power-cycle (the silent-until-cleared report).
 
 **Known issues / not done.**
-- Pablo's exact freeze, CAT's all-audio-cut and Kokozi's silent samples are not reproduced; the
-  paths found are closed. Tell us if they come back, with the steps.
+- Pablo's exact freeze and Kokozi's silent samples are not reproduced; the all-audio-cut is
+  guarded against but its first cause (which voice runs away, on which settings) is not known.
+  Tell us if any of them come back, with the steps.
 - The Monomachine tables still live in DDR: DPRO DDRW is the heaviest machine because of it
   (`docs/dsp-cost.md`); moving them to fast memory is next.
 - The emulators do not model the two chips' timing or the link between them; a timing model is
