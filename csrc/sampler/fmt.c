@@ -127,12 +127,19 @@ extern int smp_knob_d;
 extern u32 smp_knob_at;
 #define KNOB_FRESH 150u                         /* 100 ms: the turn this write comes from */
 enum { F_OFF, F_KEEP, F_CHOICE, F_NONE };
+#define OWN_REC_FIRST 238u                      /* our records (dnfw.perc / dnfw.sampler machines) */
+#define OWN_REC_LAST 260u
 
-static int func_kind(u8 *s, int slot)
+static int func_kind(u8 *s, int slot, u32 id)
 {
     if (!smp_func_held || !smp_knob_d || *(volatile u32 *)0x4058E8D4u - smp_knob_at > KNOB_FRESH)
         return F_OFF;
     int ty = (signed char)s[SOUND_TYPE];
+    /* v0.33: only our machines' own controls, records 238..260 (PERC's, the Monomachine's
+     * and the sample machines' pages); LFO, filter, amp and FX keep stock's FUNC jumps (the
+     * owner and a tester: LFO DEPTH and SPEED snapped to nothing on our tracks in v0.32) */
+    if (id < OWN_REC_FIRST || id > OWN_REC_LAST)
+        return F_OFF;
     if (ty == 5)                                /* PERC */
         return slot == PERC_PTCH_SLOT || slot == PERC_TYPE_SLOT ? F_KEEP : F_NONE;
     int mi = mnm_index(ty - 4);
@@ -160,8 +167,7 @@ static int func_kind(u8 *s, int slot)
  * value about to be written (coarse << 8 | fine), ID its record -> the value to write */
 int smp_quant(u8 *s, int slot, int value, u32 id)
 {
-    (void)id;
-    int fk = func_kind(s, slot);
+    int fk = func_kind(s, slot, id);
     int old0 = *(volatile u16 *)(s + SOUND_VALUES + 2 * slot);
     if (fk == F_NONE)
         return old0;

@@ -998,13 +998,18 @@ def main() -> int:
             play = SMf.RECORDS[SMf.PLAY_REC][0]
             p_from, p_to = q[3][0], q[3][1]
 
+            rid = {sl: r for r, sl, _lo, _t in PMf.PARAMS}
+            rid[play] = SMf.PLAY_REC
+            lfo_rec, lfo_slot = 94, 60                # v0.33: an LFO record (stock's, LFO3's first)
+
             def fcase(ty, slot, old, held, knob, fresh, value):
                 s = [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", f"poke:{snd0 + 20 + 2 * slot:#x}:{old:04x}",
                      f"poke:{lay['smp_func_held']:#x}:{held:08x}",
                      f"poke:{lay['smp_knob_d']:#x}:{knob & 0xFFFFFFFF:08x}"]
                 s += [f"call:{memcpy:#x}:{lay['smp_knob_at']:#x}:{clock:#x}:4"] if fresh else \
                      [f"poke:{lay['smp_knob_at']:#x}:80000000"]   # (half the clock away: stale)
-                return s + [f"call:{lay['smp_quant']:#x}:sound0:{slot}:{value:#x}:0"]
+                r = lfo_rec if slot == lfo_slot else rid[slot]       # (the setter passes the record: v0.33 reads it)
+                return s + [f"call:{lay['smp_quant']:#x}:sound0:{slot}:{value:#x}:{r}"]
             cases = [("PERC's first control: stock's octave jump kept", (5, ptch, 0x4000, 1, 1, True, 0x4C00), 0x4C00),
                      ("PERC, another control: it stays put", (5, other, 0x2000, 1, 1, True, 0x7F00), 0x2000),
                      ("DPRO WAVE's WPRS, right: the next choice in one click", (dwave, wprs, w_off << 8, 1, 1, True, 0x0000), w_on << 8),
@@ -1012,7 +1017,10 @@ def main() -> int:
                      ("ONESHOT's PLAY, right: the next mode in one click", (8, play, p_from << 8, 1, 1, True, 0x0000), p_to << 8),
                      ("no FUNC: as it is", (5, other, 0x2000, 0, 1, True, 0x2100), 0x2100),
                      ("a stale knob: as it is", (5, other, 0x2000, 1, 1, False, 0x2100), 0x2100),
-                     ("a stock machine: as it is", (1, other, 0x2000, 1, 1, True, 0x2100), 0x2100)]
+                     ("a stock machine: as it is", (1, other, 0x2000, 1, 1, True, 0x2100), 0x2100),
+                     ("v0.33: an LFO control on PERC: stock's FUNC jump kept", (5, lfo_slot, 0x2000, 1, 1, True, 0x4000), 0x4000),
+                     ("v0.33: an LFO control on a Monomachine track: stock's", (dwave, lfo_slot, 0x2000, 1, 1, True, 0x4000), 0x4000),
+                     ("v0.33: an LFO control on ONESHOT: stock's", (8, lfo_slot, 0x2000, 1, 1, True, 0x4000), 0x4000)]
             fs = ["wait:3"]
             for _n, args, _w in cases:
                 fs += fcase(*args)
