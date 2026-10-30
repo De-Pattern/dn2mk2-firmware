@@ -149,10 +149,9 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 
 Twenty bugs and twenty-eight requests, sorted by the owner's export. Mapped to what we have:
 B01 all-audio-cut (14 reports: v0.33's output guard and entry check), B06/B19 the sample-list
-freeze (v0.33's paths), B08 FUNC + turn on LFO (v0.33), B16-B18 (v0.33). **New to us, for
-after v0.33**: B10 PERC: switching LFO pages between two PERC tracks shows the other track's
-parameter menu; B13 the recorder's normalising too loud; B14 VO-6 silent after about a second
-(v0.28, retest); B15 PERC notes starting late (v0.27, retest); B11/B12 the recorder at THRES 0
-and ARM (v0.28; v0.30 changed both: retest). Requests to weigh: pattern direct jump, Markov
+freeze (v0.33's paths), B08 FUNC + turn on LFO (v0.33), B16-B18 (v0.33). **Open, first after v0.33**: B10 PERC: switching LFO pages between two PERC tracks shows the
+other track's parameter menu (the owner: important). B13 the recorder's normalising too loud
+(a design question). The rest are old and, per the owner, fixed since: B03 (v0.29), B11/B12
+(v0.30), B14 (VO-6, v0.29's voice fixes); B15 (PERC notes late, v0.27) only if it comes back. Requests to weigh: pattern direct jump, Markov
 song mode, LFO matrix, trigless trigs, parameter slides (planned), screen streaming, MD/MnM
 preset import, per-track flanger/phaser.
