@@ -86,6 +86,18 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   parameter, from the parameter's descriptor) and give ours a plain turn, or jumps where they
   mean something (TUNE by semitone/octave, choices by one).
 
+- **MACHINE SEL to a sample machine keeps the track's filter, amp and FX** (blskk, v0.32):
+  "instead of starting fresh". **Open**: first, what stock does switching between its own
+  machines (FM TONE to WAVETONE): if stock keeps those pages, ours matches it.
+- **SLICE/GRID at NOTE: more slices shift the layout** (blskk, v0.32): a C5 trig played slice
+  1 of 4 but slice 5 of 8. Ours counted from C0 ((note - 12) mod n); the DT2 counts from C1
+  ("slices play from C1 and upwards, wrapping"): (72 - 24) mod 8 = 0. **v0.33**: from C1, the
+  DSP and KEYBOARD's slice keys alike.
+- **Perform mode, CONTROL ALL, RTRG with LEN at 1/80** (zuzsw, v0.32): four PERC tracks each
+  locked to one voice, the meter at 76 %; patterns 1-3 sound right, pattern 4 "garbled".
+  **Open**: waiting for details (what pattern 4 should sound like; whether stock machines do
+  the same at that retrig rate).
+
 ## Requests
 
 - Stereo sampling from the inputs (bearsshuffle)
