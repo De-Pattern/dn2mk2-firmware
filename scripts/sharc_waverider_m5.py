@@ -1216,7 +1216,10 @@ def step_stress(init, sound, machines) -> dict:
         f = base_frame(sound, machines, overrides=perc_words(pi[0]), trigger=False, others={t: 5 for t in range(1, 16)})
         for t in range(16):
             k = pi[(t + b) % len(pi)]
-            for slot, w in perc_words(k, params=[rnd.random() for _ in range(8)]).items():
+            # (v0.33, Moog: a PERC track burst into noise, then all silent: the track effects
+            # too, at random, the resonant filters included)
+            for slot, w in perc_words(k, params=[rnd.random() for _ in range(8)],
+                                      fx=[rnd.random() for _ in range(7)]).items():
                 f.param(t, slot, w)
         f.trigger(b % 16)
         return f.to_bytes()
@@ -1271,7 +1274,7 @@ def step_stress(init, sound, machines) -> dict:
         "every block of both returns": ra["ok"] and rb["ok"],
         "our voices done by 0.8 of the frame in both (the guard's limit holds under load)":
             ea is not None and eb is not None and ea <= 0.8 * P and eb <= 0.8 * P,
-        "v0.33, the worst cases: every block of C (16 P-I, all controls moving), D (16 VO-6/DENS, "
+        "v0.33, the worst cases: every block of C (16 P-I, all controls and track effects moving), D (16 VO-6/DENS, "
         "all controls moving) and E (a retrigger every block beside 15 voices) returns":
             rc["ok"] and rd["ok"] and re_["ok"],
         "v0.33: in each, our voices done by 0.8 of the frame (the guard leaves voices out instead)":

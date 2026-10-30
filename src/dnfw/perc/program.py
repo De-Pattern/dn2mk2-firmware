@@ -380,6 +380,51 @@ def voice(p: Prog, L: M.Layout, t: int | None = None) -> None:
     p.seti(2, 12, "this slot's state, again")
     p.ld(0, C["mnm"])
     p.ifz(0, "EQ", lambda: fx(p, L))          # the Machinedrum's track effects: PERC's only
+    out_guard(p, L)
+
+
+OUT_LIMIT = 8.0                                # v0.33: our voices' samples, at most (+- 18 dBFS)
+
+
+def out_guard(p: Prog, L: M.Layout) -> None:
+    """v0.33 (Moog, CAT: a PERC track burst into white noise, then all audio went silent until
+    a restart -- the signature of a voice blowing up: a resonant filter or a feedback state
+    running away to infinity, then NaN, which the stock chain carries into the delay and
+    reverb, where it stays). Every sample of the block our voice wrote is held to
+    +-OUT_LIMIT; and if one is not finite (infinite or NaN: its exponent all ones), the whole
+    block is zeroed and the voice's state cleared (its 'on' word with it: the next block starts
+    it fresh, as a new machine), so nothing non-finite ever leaves our code. Uses R0, R12,
+    R13, F0, F12, I2, I4 and fxy (a flag, free after the effects)."""
+    C = L.C
+    p.iconst(0, 0)
+    p.st(C["fxy"], 0)
+    p.ld(0, C["buf"])
+    p.seti(4, 0, "the slot's buffer, the guard")
+
+    def sample():
+        p.ldi(0, 0, 4)
+        p.lsh(12, 0, -23)
+        p.iconst(13, 0xFF)
+        p.iop(12, 12, "AND", 13)
+        p.if_(12, "EQ", 13, lambda: (p.iconst(13, 1), p.st(C["fxy"], 13)), kind="i")
+        p.fconst(12, OUT_LIMIT)
+        p.fop(0, 0, "MIN", 12)
+        p.fconst(12, -OUT_LIMIT)
+        p.fop(0, 0, "MAX", 12)
+        p.stpost(4, 0)
+    p.loop(C["tmp"], 32, sample)
+
+    def blown():
+        p.ld(0, C["buf"])
+        p.seti(4, 0)
+        p.fconst(0, 0.0)
+        p.loop(C["tmp"], 32, lambda: p.stpost(4, 0))
+        p.ld(12, C["sbase"])
+        p.seti(2, 12, "this slot's state, cleared")
+        p.iconst(0, 0)
+        p.loop(C["tmp"], 32, lambda: p.stpost(2, 0))
+    p.ld(0, C["fxy"])
+    p.ifz(0, "NE", blown)
 
 
 def fx(p: Prog, L: M.Layout) -> None:
