@@ -202,3 +202,35 @@ def test_the_library_send_is_what_lib_c_reads():
     assert max(abs(x - y) for x, y in zip(struct.unpack("<100h", bytes(r["data"])), struct.unpack("<100h", want))) <= 1
     assert r["adler"] == D.lib_adler(bytes(r["data"]))
     assert r["list"]["count"] == 1 and r["list"]["rows"][0] == {"k": 7, "frames": 100, "folder": 2, "name": "KICK"}
+
+
+def _ext80(rate: float) -> bytes:
+    import math
+    m, e = math.frexp(rate)                      # rate = m * 2**e, 0.5 <= m < 1
+    return struct.pack(">HQ", 16383 + e - 1, int(m * 2 ** 64))
+
+
+@pytest.mark.parametrize("comp", ["NONE", "sowt", "fl32"])
+def test_an_aiff_reads_as_the_same_wav(comp):
+    """2026-10-31: AIFF and AIFF-C (big-endian, sowt, float) give the WAV's frames, rate and cues"""
+    n, rate = 300, 44100
+    ch = [[int(9000 * ((i * 37 + c * 11) % 200 - 100) / 100) for i in range(n)] for c in (0, 1)]
+    inter = [ch[c][i] for i in range(n) for c in (0, 1)]
+    wav_data = struct.pack(f"<{2 * n}h", *inter)
+    wav = (b"RIFF" + struct.pack("<I", 36 + len(wav_data)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 1, 2, rate, rate * 4, 4, 16)
+           + b"data" + struct.pack("<I", len(wav_data)) + wav_data)
+    if comp == "fl32":
+        snd, bits = struct.pack(f">{2 * n}f", *[v / 32768 for v in inter]), 32
+    else:
+        snd, bits = struct.pack(("<" if comp == "sowt" else ">") + f"{2 * n}h", *inter), 16
+    comm = struct.pack(">hIh", 2, n, bits) + _ext80(rate) + (b"" if comp == "NONE" else comp.encode() + b"\x00\x00")
+    mark = struct.pack(">HhI", 2, 1, 50) + b"\x01a" + struct.pack(">hI", 2, 120) + b"\x00\x00"
+    chunks = [(b"COMM", comm), (b"MARK", mark), (b"SSND", struct.pack(">II", 0, 0) + snd)]
+    body = (b"AIFC" if comp != "NONE" else b"AIFF") + b"".join(t + struct.pack(">I", len(c)) + c + b"\x00" * (len(c) & 1) for t, c in chunks)
+    aiff = b"FORM" + struct.pack(">I", len(body)) + body
+    r = _node(f"""const buf = b => Uint8Array.from(Buffer.from(b, "base64")).buffer;
+      const a = DN2.readAiff(buf("{__import__('base64').b64encode(aiff).decode()}")), w = DN2.readWav(buf("{__import__('base64').b64encode(wav).decode()}"));
+      console.log(JSON.stringify({{a: Array.from(a.frames), w: Array.from(w.frames), ar: a.rate, wr: w.rate, cues: a.cues}}))""")
+    assert r["ar"] == r["wr"] == rate
+    assert r["cues"] == [50, 120]
+    assert len(r["a"]) == n and max(abs(x - y) for x, y in zip(r["a"], r["w"])) < 1e-6

@@ -81,13 +81,19 @@ main { max-width: 1240px; }
 .pane-head b { font: 600 12px/1 ui-monospace, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
 .pane-head button, .pane-foot button { padding: 4px 9px; font-size: 13px; }
 .spacer { flex: 1; }
-.pane-body { flex: 1; overflow: auto; height: 400px; min-height: 200px; resize: vertical; }
+.pane-body { flex: none; overflow: auto; height: 420px; min-height: 200px; resize: vertical; }
+.pane-foot { margin-top: auto; }
 .pane-body table { margin: 0; }
+.navline { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--accent) 6%, var(--bg)); }
+.navline .x { color: var(--accent); padding: 0; font-size: 13px; }
+.navline .here { font: 600 13px/1.3 ui-monospace, Consolas, monospace; }
+.navline .note { margin: 0; }
 .pane-body thead th { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); }
 .pane-body .empty { color: var(--dim); text-align: center; padding: 60px 16px; }
 #drop .pane-body:has(#dropHint:not([style*="none"])) { border: 2px dashed var(--line); border-radius: 8px; margin: 8px; }
 .pane-foot .note { margin: 0; }
-.crumb { font: 600 12px/1 ui-monospace, Consolas, monospace; color: var(--dim); }
+.crumb { font: 600 12px/1 ui-monospace, Consolas, monospace; color: var(--text); }
+tr.up b.here { color: var(--text); font-family: ui-monospace, Consolas, monospace; }
 .crumb a { color: var(--accent); cursor: pointer; text-decoration: none; }
 .mid { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; width: 120px; text-align: center; }
 .mid .note { margin: 0; font-size: 12px; }
@@ -95,7 +101,7 @@ th.ck, td.ck { width: 28px; padding-right: 0; }
 tr.sel td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 tr.folder td { cursor: pointer; }
 tr.folder:hover td, tr.up:hover td { background: color-mix(in srgb, var(--text) 6%, transparent); }
-tr.up td { cursor: pointer; color: var(--dim); }
+tr.up td { cursor: pointer; color: var(--dim); background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); }
 .ico { display: inline-block; width: 1.3em; color: var(--accent); }
 #modeSel, #sliceSel { max-width: 100%; }
 label.proj-only { max-width: 100%; }
@@ -153,7 +159,7 @@ label.proj-only { max-width: 100%; }
       <div class="pane" id="drop">
         <div class="pane-head"><b>This computer</b><span class="spacer"></span>
           <button id="browseBtn">Add files…</button> <button id="folderBtn">Add a folder…</button>
-          <input id="fileIn" type="file" accept=".wav,audio/wav,audio/x-wav" multiple hidden>
+          <input id="fileIn" type="file" accept="audio/*,.wav,.wave,.aif,.aiff,.aifc,.flac,.mp3,.ogg,.oga,.opus,.m4a,.aac,.caf" multiple hidden>
           <input id="dirIn" type="file" webkitdirectory multiple hidden>
         </div>
         <div class="pane-body">
@@ -161,7 +167,7 @@ label.proj-only { max-width: 100%; }
             <thead><tr><th class="ck"><input type="checkbox" id="listAll" aria-label="Select all"></th><th class="proj-only">Slot</th><th>Name</th><th>Folder</th><th class="num hide-sm">Length</th><th class="num proj-only hide-sm">Slices</th><th class="num">Size</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
-          <div class="empty" id="dropHint">Drop WAV files or folders here</div>
+          <div class="empty" id="dropHint">Drop audio files or folders here<br><span style="font-size:12px">WAV, AIFF, FLAC, MP3, OGG, M4A</span></div>
         </div>
         <div class="pane-foot"><span id="listNote" class="note"></span><span class="spacer"></span>
           <button id="removeSelBtn" disabled>Remove selected</button> <button id="clearBtn">Clear</button></div>
@@ -176,6 +182,7 @@ label.proj-only { max-width: 100%; }
           <button id="delSelBtn" class="lib-only" disabled>Delete selected</button>
           <button id="reloadBtn" title="Read the instrument again" disabled>↻</button>
         </div>
+        <div id="libNav" class="navline lib-only" style="display:none"><button id="upBtn" class="x" title="Back to all folders">‹ All folders</button><span class="note">/</span><b class="here"></b><span class="note" id="navCount"></span></div>
         <div class="pane-body">
           <table id="libT" class="lib-only"><thead><tr><th class="ck"><input type="checkbox" id="libAll" aria-label="Select all"></th><th>Name</th><th class="num">Size</th><th></th></tr></thead><tbody></tbody></table>
           <table id="dev" class="proj-only"><thead><tr><th>Slot</th><th>Name</th><th class="num">Length</th><th>Kind</th></tr></thead><tbody></tbody></table>
@@ -185,7 +192,7 @@ label.proj-only { max-width: 100%; }
       </div>
     </div>
     <datalist id="folderList"></datalist>
-    <p class="note">Select samples on the left and press Send, or drag them onto the right; WAVs dropped straight onto the +Drive go into the folder that is open. Names: the instrument's list shows the whole name (up to 35 characters); the seven letters under it are its short name. A dropped folder's samples get its name as their folder. Moving, renaming and removing empty folders: on the instrument for now (+DRIVE, RIGHT); from here with the next firmware.</p>
+    <p class="note">Select samples on the left and press Send, or drag them onto the right; audio files dropped straight onto the +Drive go into the folder that is open. Names: the instrument's list shows the whole name (up to 35 characters); the seven letters under it are its short name. A dropped folder's samples get its name as their folder. Moving, renaming and removing empty folders: on the instrument for now (+DRIVE, RIGHT); from here with the next firmware.</p>
   </section>
 
   <section>
@@ -314,6 +321,45 @@ const DN2 = (() => {
       out[i] = s / ch;
     }
     return { frames: out, rate: fmt.rate, cues: [...new Set(cues)].sort((a, b) => a - b) };
+  }
+  /* an AIFF or AIFF-C (NONE, sowt, fl32, fl64) -> as readWav; its markers are the cues */
+  function readAiff(buf) {
+    const d = new DataView(buf);
+    const tag = (o) => String.fromCharCode(d.getUint8(o), d.getUint8(o + 1), d.getUint8(o + 2), d.getUint8(o + 3));
+    if (buf.byteLength < 12 || tag(0) !== "FORM" || (tag(8) !== "AIFF" && tag(8) !== "AIFC")) throw new Error("not an AIFF file");
+    let at = 12, comm = null, ssnd = null; const cues = [];
+    const ext80 = o => {                       /* the 80-bit extended sample rate */
+      const e = d.getUint16(o) & 0x7FFF, hi = d.getUint32(o + 2), lo = d.getUint32(o + 6);
+      return e === 0 && hi === 0 && lo === 0 ? 0 : (hi * 2 ** 32 + lo) * 2 ** (e - 16383 - 63);
+    };
+    while (at + 8 <= buf.byteLength) {
+      const id = tag(at), size = d.getUint32(at + 4), body = at + 8;
+      if (id === "COMM") comm = { ch: d.getInt16(body), frames: d.getUint32(body + 2), bits: d.getInt16(body + 6), rate: ext80(body + 8),
+                                  comp: tag(8) === "AIFC" && size >= 22 ? tag(body + 18).toLowerCase() : "none" };
+      else if (id === "SSND") ssnd = { at: body + 8 + d.getUint32(body), size: Math.min(size - 8, buf.byteLength - body - 8) };
+      else if (id === "MARK") { const n = d.getUint16(body); let m = body + 2; for (let k = 0; k < n; k++) { cues.push(d.getUint32(m + 2)); m += 6; const l = d.getUint8(m); m += 1 + l + ((l + 1) & 1); } }
+      at = body + size + (size & 1);
+    }
+    if (!comm || !ssnd) throw new Error("no COMM or SSND chunk");
+    const fl = comm.comp === "fl32" || comm.comp === "fl64", little = comm.comp === "sowt";
+    if (!fl && !little && comm.comp !== "none") throw new Error(`compressed AIFF-C (${comm.comp}) is not read here`);
+    const bps = fl ? (comm.comp === "fl64" ? 8 : 4) : Math.ceil(comm.bits / 8), ch = comm.ch;
+    const n = Math.min(comm.frames, Math.floor(ssnd.size / (bps * ch))), out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      let s = 0;
+      for (let c = 0; c < ch; c++) {
+        const o = ssnd.at + (i * ch + c) * bps; let x;
+        if (fl) x = bps === 8 ? d.getFloat64(o) : d.getFloat32(o);
+        else if (bps === 1) x = d.getInt8(o) / 128;
+        else if (bps === 2) x = d.getInt16(o, little) / 32768;
+        else if (bps === 3) { let v = little ? d.getUint8(o) | d.getUint8(o + 1) << 8 | d.getUint8(o + 2) << 16 : d.getUint8(o) << 16 | d.getUint8(o + 1) << 8 | d.getUint8(o + 2); if (v & 0x800000) v -= 0x1000000; x = v / 8388608; }
+        else if (bps === 4) x = d.getInt32(o, little) / 2147483648;
+        else throw new Error(`${comm.bits}-bit samples are not read here`);
+        s += x;
+      }
+      out[i] = s / ch;
+    }
+    return { frames: out, rate: Math.round(comm.rate), cues: [...new Set(cues)].filter(c => c < n).sort((a, b) => a - b) };
   }
 
   function onsets(s, rate, most = 64) {
@@ -498,7 +544,7 @@ const DN2 = (() => {
     }
     return { count: dv.getUint32(0, true), rows };
   }
-  return { C, BLOCK, libSample, le32, libBegin, adler, libList, metaBytes, metaAt, putMetaPtr, attachMeta, short, pack7, unpack7, request, parse, be32, rd32, readWav, onsets, slicesFrom, slicing, itemBytes, itemData, putEntry, poolBytes, addPlan, payloadBytes, stem };
+  return { C, BLOCK, readAiff, libSample, le32, libBegin, adler, libList, metaBytes, metaAt, putMetaPtr, attachMeta, short, pack7, unpack7, request, parse, be32, rd32, readWav, onsets, slicesFrom, slicing, itemBytes, itemData, putEntry, poolBytes, addPlan, payloadBytes, stem };
 })();
 if (typeof module !== "undefined") module.exports = DN2;
 </script>
@@ -692,10 +738,10 @@ if (typeof module !== "undefined") module.exports = DN2;
   }
   async function addFiles(files) {
     for (const f of files) {
-      if (!/\.wav$/i.test(f.name)) { log(`${f.name}: not a .wav, skipped`); continue; }
+      if (!AUDIO.test(f.name)) { if (!/^\./.test(f.name)) log(`${f.name}: not an audio file, skipped`); continue; }
       if (mode !== "lib" && items.length >= C.USER_SLOTS) { log(`${f.name}: all ${C.USER_SLOTS} slots are taken`); break; }
       try {
-        const w = DN2.readWav(await f.arrayBuffer());
+        const w = await readAudio(await f.arrayBuffer());
         if (!w.frames.length) throw new Error("no frames");
         const long = f.name.replace(/\.[^.]*$/, "").slice(0, C.LONG_MAX);
         items.push({ file: f.name, long, name: DN2.short(long), folder: (f.folder || "").slice(0, C.FOLDER_MAX), w,
@@ -703,6 +749,20 @@ if (typeof module !== "undefined") module.exports = DN2;
       } catch (e) { log(`${f.name}: ${e.message || e}`); }
     }
     refresh();
+  }
+  /* WAV and AIFF read here (their own rate, cue points kept); FLAC, MP3, OGG, M4A and the
+   * rest through the browser's decoder, at the DSP's 48 kHz */
+  const AUDIO = /\.(wav|wave|aif|aiff|aifc|flac|mp3|ogg|oga|opus|m4a|aac|caf)$/i;
+  async function readAudio(buf) {
+    const m = String.fromCharCode(...new Uint8Array(buf, 0, Math.min(12, buf.byteLength)));
+    if (m.startsWith("RIFF") && m.slice(8) === "WAVE") return DN2.readWav(buf);
+    if (m.startsWith("FORM") && /AIF[FC]/.test(m.slice(8))) return DN2.readAiff(buf);
+    const ctx = new OfflineAudioContext(1, 1, C.DSP_RATE);
+    let ab;
+    try { ab = await ctx.decodeAudioData(buf); } catch (e) { throw new Error("this browser cannot decode it"); }
+    const n = ab.length, out = new Float32Array(n);
+    for (let c = 0; c < ab.numberOfChannels; c++) { const x = ab.getChannelData(c); for (let i = 0; i < n; i++) out[i] += x[i] / ab.numberOfChannels; }
+    return { frames: out, rate: ab.sampleRate, cues: [] };
   }
   function reslice() { items.forEach(it => { it.slices = DN2.slicing($("sliceSel").value, it.w); }); refresh(); }
 
@@ -883,6 +943,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     const add = (html, cls, onopen) => { const tr = document.createElement("tr"); tr.innerHTML = html; if (cls) tr.className = cls; if (onopen) tr.onclick = e => { if (!e.target.closest("input,button")) onopen(); }; lt.append(tr); return tr; };
     const tick = (key, tr) => { const c = tr.querySelector(".ck input"); if (!c) return; c.checked = libSel.has(key); if (c.checked) tr.classList.add("sel"); c.onchange = e => { e.target.checked ? libSel.add(key) : libSel.delete(key); refresh(); }; };
     let keys = [];
+    const nav = $("libNav"); nav.style.display = "none";
     if (libAt == null) {
       const count = new Map(); lr.rows.forEach(e => count.set(e.folder, (count.get(e.folder) || 0) + 1));
       const fs = [...new Set([...lr.folders.map((n, f) => n ? f : -1).filter(f => f >= 0), ...count.keys()])]
@@ -894,14 +955,17 @@ if (typeof module !== "undefined") module.exports = DN2;
       });
       if (!fs.length) add(`<td></td><td class="note" colspan="3">The library is empty: send samples into it, or make a folder.</td>`);
     } else {
-      add(`<td></td><td colspan="3"><span class="ico">‹</span>.. (all folders)</td>`, "up", () => openFolder(null));
+      const nIn = lr.rows.filter(e => e.folder === libAt).length;
+      nav.style.display = ""; nav.querySelector(".here").textContent = libFolder(libAt);
+      $("navCount").textContent = `${nIn} sample${nIn === 1 ? "" : "s"}`;
       const rows = lr.rows.filter(e => e.folder === libAt).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      const seen = new Map(); rows.forEach(e => seen.set(e.name, (seen.get(e.name) || 0) + 1));
       rows.forEach(e => {
-        const tr = add(`<td class="ck"><input type="checkbox" aria-label="Select"></td><td class="slot">${esc(e.name)}</td><td class="num">${fmtSize(2 * e.frames)}</td><td><button class="x" title="Delete from the +Drive">✕</button></td>`);
+        const tr = add(`<td class="ck"><input type="checkbox" aria-label="Select"></td><td class="slot" title="entry ${e.k}">${esc(e.name)}${seen.get(e.name) > 1 ? ` <span class="note">#${e.k}</span>` : ""}</td><td class="num">${fmtSize(2 * e.frames)}</td><td><button class="x" title="Delete from the +Drive">✕</button></td>`);
         tick(e.k, tr); keys.push(e.k);
         tr.querySelector(".x").onclick = () => libDelete([e.k]);
       });
-      if (!rows.length) add(`<td></td><td class="note" colspan="3">Empty folder: drop WAVs here, or select samples on the left and Send.</td>`);
+      if (!rows.length) add(`<td></td><td class="note" colspan="3">Empty folder: drop audio files here, or select samples on the left and Send.</td>`);
     }
     const all = $("libAll"), nk = keys.filter(k => libSel.has(k)).length;
     all.checked = !!keys.length && nk === keys.length; all.indeterminate = nk > 0 && nk < keys.length; all.disabled = !keys.length;
@@ -1118,6 +1182,7 @@ if (typeof module !== "undefined") module.exports = DN2;
   $("removeSelBtn").onclick = () => { items = items.filter(it => !it.sel); refresh(); };
   $("listAll").onchange = e => { items.forEach(it => { it.sel = e.target.checked; }); refresh(); };
   $("newFolderBtn").onclick = newFolder;
+  $("upBtn").onclick = () => openFolder(null);
   $("delSelBtn").onclick = () => libDelete(selEntries().map(e => e.k));
   $("reloadBtn").onclick = async () => { if (busy || !dev) return; busy = true; refresh(); try { await readDir(); await readLib(); } catch (x) { log(String(x.message || x)); } busy = false; refresh(); };
   $("sendBtn").onclick = send;

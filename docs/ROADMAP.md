@@ -222,7 +222,12 @@ inharmonic modes).
    firmware**: link commands for MOVE (`smp_lib_move`), RENAME (`smp_lib_rename`) and
    removing an empty folder (`smp_lib_folder_drop`); the unit-side functions exist since
    v0.33, only lib.c's `smp_lib_rx` lacks the commands (24, 25, 26), then drag-to-move and
-   rename on the right pane.
+   rename on the right pane. Also for that firmware: LIST sends only 24 of a name's 35
+   characters, so long names that share a start (sample packs: "CYMATICS - TRAP & 808S 8…")
+   all look the same on the page (it tags repeats with their entry number until then);
+   a LIST with the whole name.
+   (2026-10-31: the page also reads AIFF / AIFF-C and, through the browser's decoder,
+   FLAC, MP3, OGG and M4A, at 48 kHz.)
 3. Also asked: **capicola** (heavylight's keyframe stretch, AGPL, github.com/heavylight-
    industries/keyframer-lab) as a CAPI switch on STRETCH, as the DT2 mod's; after the
    stability work (its SHARC glue, run.asm and dt2.c, not public yet).
