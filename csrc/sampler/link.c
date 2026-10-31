@@ -40,6 +40,13 @@
  *   7 FORGET  -> the +Drive's image is marked empty (its header sector zeroed)
  *   8 BEGIN   u32 bytes -> a new image follows (the old one is marked empty first)
  *   9 END     -> the image is complete: its header is written, and it is loaded
+ *  24 DIAG    -> v0.34: u32 guard wipes, u32 slot | type << 8, u32 where, u32 slots mask,
+ *                u32 periods since the last wipe, u32 load %, u32 load peak (permille),
+ *                u32 slots ever skipped for time, u32 periods, u32 frames, then the last
+ *                SCAN's: u32 non-finite words, u32 the first one's index (0xFFFFFFFF none),
+ *                u32 done (its sequence, low 16, when the range is scanned), u32 its sequence
+ *  25 SCAN    u32 DSP byte address, u32 words -> u16 seq: the DSP counts the non-finite
+ *                words there, VERIFY_CHUNK a block (docs/timing-model.md)
  *
  * Nothing here writes anything but its own RAM, the eMMC region above and the TDM slots
  * above. It never writes the frame (CTL_FRAME): test_sources checks the C for it.
@@ -241,6 +248,22 @@ volatile u32 smp_load_peak __attribute__((section(".data"))) = 0;
 volatile u32 smp_load_at __attribute__((section(".data"))) = 0;
 volatile u32 smp_load_seen __attribute__((section(".data"))) = 0;
 
+/* v0.34: the DSP's output guard's record (dnfw.perc.guard BLOWN_*; docs/timing-model.md):
+ * from the idle packets' units 19..22. A voice that went non-finite was wiped; this says
+ * which, its machine, and where its memory first held a non-finite word, so the unit itself
+ * can say what poisons a voice (the owner's O13: P-I machines dead on the same voices) */
+volatile u32 smp_blown_count __attribute__((section(".data"))) = 0;   /* the DSP's count (16-bit) */
+volatile u32 smp_blown_info __attribute__((section(".data"))) = 0;    /* slot | type << 8 */
+volatile u32 smp_blown_where __attribute__((section(".data"))) = 0xFFFF;
+volatile u32 smp_blown_mask __attribute__((section(".data"))) = 0;    /* slots, cumulative this power-on */
+volatile u32 smp_blown_at __attribute__((section(".data"))) = 0;      /* periods | 1 when the count last moved */
+static u32 scan_seq __attribute__((section(".data"))) = 0;           /* the last SCAN's sequence (SysEx 25) */
+
+int smp_blown_recent(void)                      /* the last two seconds */
+{
+    return smp_blown_at && periods - smp_blown_at < 3000u;
+}
+
 int smp_dsp_load(void)
 {
     if (!smp_load_seen || periods - smp_load_seen > 1500u)
@@ -362,6 +385,13 @@ void smp_tdm(u32 h)
                 smp_load_at = periods;
             }
             smp_load_seen = periods | 1u;
+        }
+        smp_blown_mask |= v[19];                /* v0.34: the output guard's record */
+        if (v[22] != smp_blown_count) {
+            smp_blown_count = v[22];
+            smp_blown_info = v[20];
+            smp_blown_where = v[21];
+            smp_blown_at = periods | 1u;
         }
         return;
     }
@@ -2077,6 +2107,35 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
     } else if (cmd >= 16 && cmd <= 23) {        /* v0.31 (link 5): the +Drive's library (lib.c) */
         extern u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
         r = smp_lib_rx(cmd, rq, n, rp, r, &rp[3]);
+    } else if (cmd == 24) {                     /* v0.34: DIAG -> the DSP's guard record and load */
+        put32(rp + r, smp_blown_count); r += 4;
+        put32(rp + r, smp_blown_info); r += 4;
+        put32(rp + r, smp_blown_where); r += 4;
+        put32(rp + r, smp_blown_mask); r += 4;
+        put32(rp + r, smp_blown_at ? periods - smp_blown_at : 0xFFFFFFFFu); r += 4;
+        put32(rp + r, (u32)smp_dsp_load()); r += 4;
+        put32(rp + r, smp_load_peak); r += 4;
+        u32 sk = 0;
+        for (int t = 0; t < 16; t++)
+            if (smp_skip_at[t])
+                sk |= 1u << t;
+        put32(rp + r, sk); r += 4;
+        put32(rp + r, periods); r += 4;
+        put32(rp + r, FRAMES); r += 4;
+        /* and the last SCAN's result (VERIFY's status halves: count, first index, done seq) */
+        u16 h[16];
+        int ok = smp_status(h);
+        put32(rp + r, ok ? ((u32)h[11] << 16 | h[10]) : 0xFFFFFFFFu); r += 4;
+        put32(rp + r, ok ? ((u32)h[13] << 16 | h[12]) : 0xFFFFFFFFu); r += 4;
+        put32(rp + r, ok ? h[14] : 0); r += 4;
+        put32(rp + r, scan_seq); r += 4;
+    } else if (cmd == 25) {                     /* v0.34: SCAN u32 address, u32 words -> u16 seq */
+        if (n < 11) {
+            rp[3] = 1;
+        } else {
+            scan_seq = smp_command(CMD_SCAN, get32(rq + 3), get32(rq + 7), 0, 0);
+            rp[r++] = scan_seq >> 8; rp[r++] = scan_seq;
+        }
     } else {
         rp[3] = 2;
     }

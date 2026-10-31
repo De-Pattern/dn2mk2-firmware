@@ -14,6 +14,7 @@ import math
 from . import machines as M
 from .dsl import Prog
 from ..md import voice as MDV
+from ..md import core as MDK
 
 MD_LEVEL = 1.4                            # the Machinedrum's full scale on a DN2 track: v0.22 +6 dB (0.7 in v0.17..v0.21),
                                           # its default hits as loud as WaveTone's and FM Tone's default notes
@@ -415,14 +416,74 @@ def out_guard(p: Prog, L: M.Layout) -> None:
     p.loop(C["tmp"], 32, sample)
 
     def blown():
+        # v0.34: the record first (docs/timing-model.md; the owner's O13: P-I machines silent
+        # on the same voices every time). Which slot and machine, and the first non-finite
+        # word in the voice's P-I delay lines; none: the poison was in the voice's own state
+        # (the filters', zeroed here), its input, or the effects
+        from . import guard as G
+        p.comment("v0.34: the guard's record: count, slot | type << 8, the mask")
+        p.ld(1, G.BLOWN_COUNT)
+        p.iconst(12, 1)
+        p.iop(1, 12, "+", 1)
+        p.st(G.BLOWN_COUNT, 1)
+        p.ld(1, C["type"])
+        p.lsh(1, 1, 8)
+        p.ld(12, C["t"])
+        p.iop(1, 1, "OR", 12)
+        p.st(G.BLOWN_INFO, 1)
+        p.iconst(1, 1)
+        p.ld(12, C["t"])
+        _shift_by(p, 1, 12)                   # 1 << t
+        p.ld(12, G.BLOWN_MASK)
+        p.iop(1, 1, "OR", 12)
+        p.st(G.BLOWN_MASK, 1)
+        p.iconst(1, G.WHERE_NONE)
+        p.st(G.BLOWN_WHERE, 1)
+        p.iconst(1, 0)
+        p.st(C["fxy"], 1, "the scan's index")
+
+        def scan(n: int, tag: int):
+            """I5 walks N words; the first non-finite one's index | TAG and bits are kept"""
+            def word():
+                p.ldpost(1, 5)
+                p.lsh(12, 1, -23)
+                p.iconst(13, 0xFF)
+                p.iop(12, 12, "AND", 13)
+
+                def first():
+                    p.ld(13, G.BLOWN_WHERE)
+                    p.iconst(12, G.WHERE_NONE)
+
+                    def keep():
+                        p.st(G.BLOWN_WORD, 1)
+                        p.ld(13, C["fxy"])
+                        p.iconst(12, tag)
+                        p.iop(13, 13, "OR", 12)
+                        p.st(G.BLOWN_WHERE, 13)
+                    p.if_(13, "EQ", 12, keep, kind="i")
+                p.if_(12, "EQ", 13, first, kind="i")
+                p.ld(13, C["fxy"])
+                p.iconst(12, 1)
+                p.iop(13, 12, "+", 13)
+                p.st(C["fxy"], 13)
+            p.loop(C["tmp"], n, word)
+        # (the delay lines only: the voice's stream holds the tainted output itself, and
+        # its machine words hold integers, -1 among them, whose bits are the core's NaN)
+        MDK.delay_base(p, L.md, 1)
+        p.seti(5, 1, "the P-I delay lines")
+        scan(MDK.PI_DELAY_WORDS, G.WHERE_DELAY)
+        # then the wipe: the block silent and the voice's state zeroed, so the next block
+        # starts it fresh (reset: its words and delay lines cleared). v0.33 stored R0 here,
+        # which loop() uses as its counter: the state got 32, 31 .. 1 instead of zeros, its
+        # 'on' word with them, so the voice never reset and stayed silent until a power-on
         p.ld(0, C["buf"])
         p.seti(4, 0)
-        p.fconst(0, 0.0)
-        p.loop(C["tmp"], 32, lambda: p.stpost(4, 0))
+        p.fconst(1, 0.0)
+        p.loop(C["tmp"], 32, lambda: p.stpost(4, 1))
         p.ld(12, C["sbase"])
         p.seti(2, 12, "this slot's state, cleared")
-        p.iconst(0, 0)
-        p.loop(C["tmp"], 32, lambda: p.stpost(2, 0))
+        p.iconst(1, 0)
+        p.loop(C["tmp"], 32, lambda: p.stpost(2, 1))
     p.ld(0, C["fxy"])
     p.ifz(0, "NE", blown)
 

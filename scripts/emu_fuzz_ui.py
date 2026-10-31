@@ -21,6 +21,13 @@ an `alive` checkpoint. A seed fails on:
 
 Exit 0 when every seed passes. Each seed's steps are printed, so a failure is replayed by
 running emu_waverider_menu.py with them.
+
+v0.34 (docs/timing-model.md): by default the audio interrupt fires on its own, every
+--isr-frame instructions of the UI's, through the real path (digikit's SSI0/eDMA event
+source: the DMA's major loop, vector 170, the forced vector 191, the ISR's rte), so it
+preempts the mod's UI code at random points as on the unit, the firmware's clocks run, and
+a seed also fails on a CPU exception (on the unit: the EXCEPTION screen), on the interrupt
+no longer being delivered, or on more than one frame in twenty overrunning its budget.
 """
 from __future__ import annotations
 
@@ -69,7 +76,7 @@ def pool_steps(lay) -> list[str]:
     return st
 
 
-def seed_steps(lay, seed: int, n: int) -> list[str]:
+def seed_steps(lay, seed: int, n: int, real_isr: bool = False) -> list[str]:
     from dnfw.sampler import machines as SMx
     rnd = random.Random(seed)
     types = [SMx.TYPE_OF[m] for m in ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE")]
@@ -96,7 +103,9 @@ def seed_steps(lay, seed: int, n: int) -> list[str]:
         (3, lambda: [f"press:{25 + rnd.randrange(16)}", "wait:3", f"release:{25 + rnd.randrange(16)}"]),
         (1, lambda: ["func-src", "wait:20", rnd.choice(("no", "down", "up")), "wait:4", rnd.choice(("no", "yes"))]),
         (2, lambda: [f"poke:{KIT + 52 + 0xDE:#x}:{rnd.choice(types):02x}", f"poke:{lay['smp_overlay_dirty']:#x}:00000001"]),
-        (5, lambda: [f"frame:f{rnd.randrange(1 << 30)}"]),
+        # (v0.34: with the audio interrupt firing on its own, no frame: steps: the ISR runs
+        # every F instructions anyway, preempting whatever the UI is doing; a wait instead)
+        (5, lambda: [f"wait:{rnd.choice((1, 2, 4))}"] if real_isr else [f"frame:f{rnd.randrange(1 << 30)}"]),
         (1, lambda: ["tap:20"]),                                                  # PLAY
     ]
     weights = [w for w, _ in acts]
@@ -119,7 +128,7 @@ def our_ranges(lay) -> list[tuple[int, int]]:
     return out
 
 
-def judge(r: dict, lay, baseline_pages: set) -> tuple[bool, dict]:
+def judge(r: dict, lay, baseline_pages: set, real_isr: bool = False) -> tuple[bool, dict]:
     ours = our_ranges(lay)
     new = [f for f in r.get("faults", []) if f.get("page") not in baseline_pages]
     in_ours = [f for f in new if any(a <= int(f["first_pc"], 16) < b for a, b in ours)]
@@ -127,6 +136,12 @@ def judge(r: dict, lay, baseline_pages: set) -> tuple[bool, dict]:
     stalls = [b["name"] for a, b in zip(al, al[1:]) if b["frames"] <= a["frames"]]
     shots = {k: pathlib.Path(v).read_bytes() for k, v in r.get("screens", {}).items() if pathlib.Path(v).exists()}
     probe_ok = "p1" in shots and "p2" in shots and shots["p1"] != shots["p2"]
+    # v0.34: with the interrupt delivered as the hardware delivers it (an exception frame,
+    # the ISR's own rte), the firmware's fault reporter is a real sign: a CPU exception on
+    # the unit draws EXCEPTION and halts (docs/timing-model.md). (Entered by `frame:` as a
+    # subroutine, the ISR's rte faulted every time, which is why v0.33 dropped the sign.)
+    isr = r.get("isr") or {}
+    exceptions = [(f.get("step"), f.get("vector"), f.get("fault_pc")) for f in r.get("fault_reports", [])]
     # (an exception aborts the emulator itself -- unicorn does not dispatch them -- so it shows
     # as a run that did not finish. 0x4011ea6a, the firmware's formatter, runs on stock too:
     # it is no fault sign. A checkpoint with no new frame is not a freeze by itself -- nothing
@@ -135,8 +150,15 @@ def judge(r: dict, lay, baseline_pages: set) -> tuple[bool, dict]:
     facts = {"no memory fault from the mod's code": not in_ours,
              "the last probe: out of everything, two page keys each change the screen": probe_ok,
              "frames composed by the end": len(al) >= 2 and al[-1]["frames"] > al[0]["frames"]}
+    if real_isr:
+        facts["no CPU exception (the firmware's fault reporter never ran)"] = not exceptions
+        facts["the audio interrupt kept being delivered (its frames count up to the end)"] = isr.get("frames", 0) > 0 \
+            and isr.get("delivered", 0) >= isr.get("vector170", 0) - 1
+        facts["no audio frame overran its budget by more than one in twenty"] = \
+            isr.get("overruns", 0) * 20 <= max(1, isr.get("delivered", 0))
     return all(facts.values()), {"facts": facts, "new_faults": new[:5], "stalls": stalls[:5],
-                                 "fault_reports": r.get("fault_reports", [])[:3]}
+                                 "fault_reports": r.get("fault_reports", [])[:3], "exceptions": exceptions[:5],
+                                 "isr": isr}
 
 
 def main(argv=None) -> int:
@@ -147,6 +169,10 @@ def main(argv=None) -> int:
     p.add_argument("--venv", default=str(ROOT.parent / "digikit/.venv/bin/python"))
     p.add_argument("--snapshot", default=str(ROOT.parent / "digikit/out/snapshots/dn2-1.11/ui800M-v014.snap"))
     p.add_argument("--json", type=pathlib.Path)
+    p.add_argument("--isr-frame", type=int, default=75_000,
+                   help="v0.34: the audio interrupt fires on its own every F instructions of the UI's "
+                        "(emu_waverider_menu.py --isr-frame; the unit's ISR takes about 55 %% of a frame, "
+                        "and runs about 40,000 instructions here, so 75,000). 0: the old way, `frame:` steps")
     a = p.parse_args(argv)
     from dnfw.mods import waverider as W
     lay = W.SPEC["layout"]
@@ -161,25 +187,27 @@ def main(argv=None) -> int:
         js = work / f"{name}.json"
         cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", str(ROOT), "--build", str(a.build_dir),
                "--snapshot", a.snapshot, "--steps", ",".join(steps), "--png-dir", str(work / name), "--json", str(js)]
+        if a.isr_frame:
+            cmd += ["--isr-frame", str(a.isr_frame)]
         proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
         if proc.returncode != 0 or not js.exists():
             return None, proc.stdout[-1500:] + proc.stderr[-1500:]
         return json.loads(js.read_text()), ""
 
     # the baseline: the same pool, nothing pressed (the pages stock touches anyway)
-    base, why = run("baseline", seed_steps(lay, 0, 0))
+    base, why = run("baseline", seed_steps(lay, 0, 0, bool(a.isr_frame)))
     if base is None:
         print("FAIL: the baseline run did not finish:", why)
         return 1
     baseline_pages = {f.get("page") for f in base.get("faults", [])}
     report, bad = {}, []
     for s in seeds:
-        steps = seed_steps(lay, s, a.steps)
+        steps = seed_steps(lay, s, a.steps, bool(a.isr_frame))
         r, why = run(f"seed{s}", steps)
         if r is None:
             ok, info = False, {"crashed": why}
         else:
-            ok, info = judge(r, lay, baseline_pages)
+            ok, info = judge(r, lay, baseline_pages, bool(a.isr_frame))
         report[s] = {"ok": ok, **info}
         print(f"seed {s}: {'PASS' if ok else 'FAIL'} {'' if ok else json.dumps(info)[:600]}", flush=True)
         if not ok:

@@ -447,6 +447,41 @@ def test_verify_sums_a_word_range_and_reports_it():
     assert st[15] == (SM.LINK_SEED + sum(st[:15])) & 0xFFFF
 
 
+def test_v034_scan_counts_the_non_finite_words_of_any_range():
+    """SCAN (docs/timing-model.md): a range of DSP memory by address -- a P-I voice's delay
+    lines in DDR here -- walked a chunk a block; the status reports how many words are NaN
+    or infinite and the first one's index, then the command's sequence when it is done."""
+    from dnfw.waverider import dsp
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h = SL.Harness(0)
+    h.defaults()
+    base, n = dsp.MD_DELAY_DDR + 8192 * 3, 2048          # slot 3's lines
+    for k in range(n):
+        h.mem.put(base + 4 * k, 0)
+    h.mem.put(base + 4 * 700, 0x7FC00000)                 # a NaN
+    h.mem.put(base + 4 * 1900, 0xFF800000)                # -inf
+    h.mem.put(base + 4 * 1901, 0xFFFFFFFF)                # the core's own NaN
+    a = h.L.pool + SM.CMD_OFFSET
+    for k, w in enumerate((9, SM.CMD_SCAN, base, n, 0, 0)):
+        h.mem.put(a + 4 * k, w)
+    h.block(ONE, recorder=True)
+    st = h.status()
+    assert st[14] == 0, "not done after one block (1024 words a block)"
+    h.block(ONE, recorder=True)
+    h.block(ONE, recorder=True)
+    st = h.status()
+    assert st[14] == 9, "done: the command's sequence"
+    assert st[10] | st[11] << 16 == 3, "three non-finite words"
+    assert st[12] | st[13] << 16 == 700, "the first one's index"
+    # a clean range: none, the first index SCAN_NONE
+    for k, w in enumerate((10, SM.CMD_SCAN, base, 512, 0, 0)):
+        h.mem.put(a + 4 * k, w)
+    h.block(ONE, recorder=True)
+    h.block(ONE, recorder=True)
+    st = h.status()
+    assert st[14] == 10 and st[10] | st[11] << 16 == 0 and st[12] | st[13] << 16 == SM.SCAN_NONE
+
+
 def test_smp_asm_is_the_program_as_it_now_is():
     # v0.16: csrc/waverider/sharc/smp.asm is written by scripts/gen_smp_asm.py from
     # dnfw.sampler.program; a change to the program without a regeneration ships the old

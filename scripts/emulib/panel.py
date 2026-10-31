@@ -60,6 +60,10 @@ class Panel:
         if self.timers is None:
             raise SystemExit("this snapshot carries no timer state to claim")
         self.png_dir = pathlib.Path(png_dir)
+        # v0.34 (docs/timing-model.md): the audio interrupt at its real cadence, when the
+        # machine was built with digikit's SSI0/eDMA event source (Machine(ssi0_request_hz=..))
+        ssi = machine.ev.get("ssi0_dma") if hasattr(machine, "ev") else None
+        self.events = (ssi,) if ssi is not None else ()
 
     # --- time ---------------------------------------------------------------
     def settle(self, instructions=SETTLE):
@@ -83,7 +87,7 @@ class Panel:
         while done < instructions:
             budget = min(CHUNK, instructions - done)
             self.m.pc, ran, _stop = longrun.spin(self.m.m, self.m.pc, budget,
-                                                 pits=self.timers, fast=True)
+                                                 pits=self.timers, fast=True, async_events=self.events)
             done += ran
             if ran == 0:
                 break

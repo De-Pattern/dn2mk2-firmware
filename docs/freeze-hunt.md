@@ -40,3 +40,14 @@ does nothing until a track is cleared or the machine changed twice; slowdowns wi
 - "Stuck on its machine" (Pablo, PERC): needs which control (MACHINE SEL, or PERC's TYPE).
   TYPE is p-lockable: a pattern with TYPE locks keeps those trigs' machines whatever the
   knob says, and clearing the track removes the locks.
+
+## v0.34: the timing model (docs/timing-model.md)
+
+What the emulators could not see, now modelled or instrumented: the audio interrupt at
+its real cadence preempting our ColdFire code (gate 6q runs the fuzz on it; a CPU exception
+is a failing sign again, now that the ISR is delivered the real way); the DSP's cost as
+memory, not instructions (runner 3s-F); the output guard's wipe, which v0.33 got wrong (the
+voice never reset: O13), with a record of which voice and where; and SCAN, which lets the
+unit itself say whether a voice's memory is poisoned before any note plays. The three
+symptoms are told apart by what stopped: a ColdFire exception always draws EXCEPTION; a
+stopped DSP leaves the UI alive; a poisoned DSP is silent with everything else working.

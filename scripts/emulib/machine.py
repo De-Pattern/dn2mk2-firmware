@@ -50,6 +50,40 @@ class Machine:
         self.ret = STACK + 0x800
         self.at = SCRATCH
         self.count = 0
+        self.bitrev_count = 0
+        self._bitrev_shim()
+
+    def _bitrev_shim(self):
+        """v0.34 (docs/timing-model.md): BITREV Dn (0x00C0..0x00C7, ColdFire ISA_C) is not
+        decoded by the patched Unicorn (digikit shims FF1 and MOVEC the same way, per
+        address). Stock's voice allocation uses `bitrev; ff1` to find the lowest set bit
+        of its free-voice mask whenever a note triggers, so with the audio interrupt
+        running on its own, the first [TRIG] press raised vector 4 at 0x4002aa80 -- on
+        stock firmware too. Pre-scanned over MAIN OS once; a hook at an address that is
+        never an instruction boundary simply never fires."""
+        import os
+        from unicorn import UC_HOOK_CODE
+        from unicorn.m68k_const import UC_M68K_REG_D0, UC_M68K_REG_PC
+        base = 0x40000400
+        try:
+            image = open(os.environ["DT2_MAIN_IMG"], "rb").read()
+        except (KeyError, OSError):
+            return
+
+        def make(reg):
+            def h(uc, addr, size, data):
+                v = uc.reg_read(reg) & 0xFFFFFFFF
+                uc.reg_write(reg, int(f"{v:032b}"[::-1], 2))
+                uc.reg_write(UC_M68K_REG_PC, addr + 2)
+                self.bitrev_count += 1
+            return h
+        n = 0
+        for off in range(0, len(image) - 1, 2):
+            w = image[off] << 8 | image[off + 1]
+            if 0x00C0 <= w <= 0x00C7:
+                self.uc.hook_add(UC_HOOK_CODE, make(UC_M68K_REG_D0 + (w & 7)), begin=base + off, end=base + off)
+                n += 1
+        self.bitrev_sites = n
 
     # --- memory -----------------------------------------------------------
     def write(self, va, data):

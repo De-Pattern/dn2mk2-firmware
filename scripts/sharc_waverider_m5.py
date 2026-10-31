@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,garbage,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,garbage,wipe,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -600,6 +600,11 @@ def main(argv=None):
             print("\nstep 3g: voice state and scratch full of garbage (v0.33)")
             results["3g_garbage"] = step_garbage(warm(), sound, machines)
             show(results["3g_garbage"])
+            gc.collect()
+        if "wipe" in steps:
+            print("\nstep 3w: the output guard's wipe, a poisoned P-I voice (v0.34)")
+            results["3w_wipe"] = step_wipe(warm(), sound, machines)
+            show(results["3w_wipe"])
             gc.collect()
         if "stress" in steps:
             print("\nstep 3s: the stress test (the clock made to move)")
@@ -1146,23 +1151,43 @@ def step_stress(init, sound, machines) -> dict:
     efm = PM.NAMES.index("EFM-SD")
     td = PM.NAMES.index("TRX-BD")
     res = {}
+    # v0.34 (docs/timing-model.md): the clock charged by where each access lands, as the
+    # unit does (cost is memory, not instructions: docs/others-dn2-research.md), instead of
+    # K an instruction: cycles = instructions + MEM_SCALE x (4 x L2 + 10 x DDR), the weights
+    # complex-ping's, MEM_SCALE from the silent frame (step 3c's calibration: the unit's
+    # 416,000 cycles against the runner's counts). Scenario F runs C's worst case on it.
+    counts, undo_counts = _count_memory()
+    # (3c's calibration, 2026-10-31: the silent block is 170,461 instructions, 1,032 L2 and
+    # 26,923 DDR accesses in the runner; the unit's 416,000 cycles give S = 0.898)
+    MEM_SCALE = float(os.environ.get("DNFW_MEM_SCALE", "0.9"))
 
-    def scenario(name, blocks, frame_of):
+    def scenario(name, blocks, frame_of, memory_clock=False):
         b_now = {"b": 0}
         ends = []
 
+        def cycles(r):
+            n = getattr(r, "steps_n", 0)
+            if not memory_clock:
+                return K * n
+            return int(n + MEM_SCALE * (4 * counts["L2"] + 10 * counts["DDR"]))
+
         def clock(r):
             base = (b_now["b"] + 1) * P
-            r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const((base + K * getattr(r, "steps_n", 0)) & 0xFFFFFFFF)
+            r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const((base + cycles(r)) & 0xFFFFFFFF)
+
+        def at_dispatch(r):
+            for k in ("L1", "L2", "DDR"):
+                counts[k] = 0
+            counts["on"] = memory_clock
 
         def at_perc(r):
             base = (b_now["b"] + 1) * P
             m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
-            m2.poke(r.state, G.MARK, (base + K * getattr(r, "steps_n", 0)) & 0xFFFFFFFF)
+            m2.poke(r.state, G.MARK, (base + cycles(r)) & 0xFFFFFFFF)
 
         def at_end(r):
             pass
-        hooks = {dsp.PERC_SW: at_perc}
+        hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch}
         hooks.update({s: clock for s in sites})
         got = {"limit": [], "end": [], "skips": []}
 
@@ -1247,6 +1272,8 @@ def step_stress(init, sound, machines) -> dict:
         f.trigger(0)                            # track 0 again, every block
         return f.to_bytes()
     re_, se, ee, le = scenario("E", 16, e_frame)
+    rf, sf, ef, lf = scenario("F", 20, c_frame, memory_clock=True)   # v0.34: C's worst case on the memory clock
+    undo_counts()
 
     def newest_heard(rr, every):
         if not rr["ok"]:
@@ -1268,8 +1295,10 @@ def step_stress(init, sound, machines) -> dict:
     n = {"K": K, "skips": {"A": sa, "B": sb}, "our_end_over_P": {"A": ea and round(ea / P, 3), "B": eb and round(eb / P, 3)},
          "limit": {"A": la, "B": lb}, "newest_heard_A": newest_heard(ra, 16),
          "instructions_per_block": {"A": ra.get("instructions", 0) // 20, "B": rb.get("instructions", 0) // 16}}
-    n.update({"skips_worst": {"C": sc, "D": sd, "E": se},
-              "our_end_over_P_worst": {k: v and round(v / P, 3) for k, v in (("C", ec), ("D", ed), ("E", ee))}})
+    n.update({"skips_worst": {"C": sc, "D": sd, "E": se, "F": sf},
+              "our_end_over_P_worst": {k: v and round(v / P, 3) for k, v in (("C", ec), ("D", ed), ("E", ee), ("F", ef))},
+              "memory_clock_scale": MEM_SCALE})
+    fin_f = rf["ok"] and all(math.isfinite(x) for blk in rf["buffers"] for t in range(16) for x in blk[t])
     checks = {
         "every block of both returns": ra["ok"] and rb["ok"],
         "our voices done by 0.8 of the frame in both (the guard's limit holds under load)":
@@ -1281,6 +1310,9 @@ def step_stress(init, sound, machines) -> dict:
             all(x is not None and x <= 0.8 * P for x in (ec, ed, ee)),
         "v0.33: in C and D, with time short, voices are left out and counted": bool(sc) and bool(sd),
         "v0.33: every track buffer finite, no NaN, in C, D and E": fin_bufs,
+        "v0.34: F (C's case on the memory-cost clock): every block returns, our voices done by 0.8 of the "
+        "frame, voices left out and counted, every buffer finite":
+            rf["ok"] and ef is not None and ef <= 0.8 * P and bool(sf) and fin_f,
         "with time short, voices are left out and counted (A)": bool(sa),
         "A: the newest note is heard in most blocks (newest first)": n["newest_heard_A"] >= 0.8,
         "nothing non-finite": fin,
@@ -1357,7 +1389,24 @@ def step_cost(init, sound, machines) -> dict:
         rows[name] = {"ok": rr["ok"], "instructions": ins.get("sum", 0) // n,
                       **{k: counts[k] // n for k in ("L1", "L2", "DDR")}}
 
+    # v0.34 (docs/timing-model.md): the whole block too, nothing sounding -- the stock's
+    # unpack, its machines' standing work, the mix -- to calibrate the cost clock against
+    # the unit: its silent frame takes about 416,000 cycles (reply word 0, docs/sharc-load.md),
+    # 62 % of the 666,667. cycles = instructions + S x (4 L2 + 10 DDR) solved for S
+    whole = {}
+
+    def whole_block(name, fb):
+        for k in ("L1", "L2", "DDR"):
+            counts[k] = 0
+        counts["on"] = True
+        rr = run_blocks(init, fb, 4)
+        counts["on"] = False
+        whole[name] = {"instructions": rr.get("instructions", 0) // 4, **{k: counts[k] // 4 for k in ("L1", "L2", "DDR")}}
     try:
+        whole_block("silent", lambda b: base_frame(sound, machines, trigger=False).to_bytes())
+        whole_block("fm_tone_note", lambda b: base_frame(sound, machines, t0=0, trigger=b == 1).to_bytes())
+        for k in ("L1", "L2", "DDR"):
+            counts[k] = 0
         measure("(nothing)", lambda b: base_frame(sound, machines, trigger=False).to_bytes())
         for k, name in enumerate(PM.NAMES):
             measure(name, (lambda k: lambda b: base_frame(sound, machines, overrides=perc_words(k), trigger=b == 1).to_bytes())(k))
@@ -1379,8 +1428,12 @@ def step_cost(init, sound, machines) -> dict:
                  "estimate": (v["instructions"] - base["instructions"]) + 4 * (v["L2"] - base["L2"])
                  + 10 * (v["DDR"] - base["DDR"]), "ok": v["ok"]} for k, v in rows.items() if k != "(nothing)"}
     ok = all(v["ok"] for v in rows.values())
+    sil = whole.get("silent", {})
+    mem = 4 * sil.get("L2", 0) + 10 * sil.get("DDR", 0)
+    scale = round((416_000 - sil.get("instructions", 0)) / mem, 3) if mem else None
     return {"ok": ok, "checks": {"every machine measured (every block returned)": ok},
-            "numbers": {"per_voice_block": table, "nothing": base}}
+            "numbers": {"per_voice_block": table, "nothing": base, "whole_block": whole,
+                        "unit_silent_cycles": 416_000, "memory_weight_scale": scale}}
 
 
 def step_garbage(init, sound, machines) -> dict:
@@ -1444,6 +1497,79 @@ def step_garbage(init, sound, machines) -> dict:
         print(f"    garbage {fname}: {len([k for k in res if k.startswith(fname)])} runs", flush=True)
     checks = {"every Machinedrum and Monomachine machine, started on NaN or random voice state and "
               "scratch: every block returns, its track finite, PERC bit-exact": not bad}
+    return {"ok": not bad, "checks": checks, "numbers": {"failing": bad, "runs": res}}
+
+
+def step_wipe(init, sound, machines) -> dict:
+    """v0.34 (the owner's O13: P-I machines silent on the same voices every time; the cause:
+    v0.33's output guard stored its loop counter instead of zeros when it wiped a voice, so
+    a voice that once went non-finite never reset). For PI-BD and PI-RS on track 0: a note on
+    block 1; from block 4 the voice's P-I delay lines are all NaN (as poisoned memory on the
+    unit); the guard must wipe the voice once (BLOWN_COUNT 1, its slot and type recorded,
+    WHERE naming the delay lines), the tainted block must be silent, the voice's state must
+    be all zeros after that block, and a new note on block 8 must sound, finite, with no
+    second wipe. PERC bit-exact to its model throughout (the model, like the core, carries a
+    NaN input through every float operation)."""
+    from dnfw.perc import guard as G
+    from dnfw.md import core as MDK
+    res, bad = {}, []
+    for name in ("PI-BD", "PI-RS"):
+        k = PM.NAMES.index(name)
+        done = {"poked": 0, "state_after": None}
+
+        def at_dispatch(r, done=done):
+            # block 4's dispatch, before PERC's entry (where run_blocks runs the model on the
+            # DSP's memory, so the model sees the poison too): the delay lines all NaN
+            done["blocks"] = done.get("blocks", 0) + 1
+            if done["blocks"] == 5 and not done["poked"]:
+                done["poked"] = 1
+                base = dsp.MD_DELAY_DDR
+                for j in range(MDK.PI_DELAY_WORDS):
+                    m2.poke(r.state, base + 4 * j, 0xFFC00000)
+
+        def at_perc(r, done=done):
+            # block 5's entry: the state the wipe left, and the record
+            if done.get("blocks") == 6:
+                done["state_after"] = [m2.word(r.state, dsp.PERC_STATE_DM + 4 * j) for j in range(32)]
+                done["count_after"] = m2.word(r.state, G.BLOWN_COUNT)
+                done["info"] = m2.word(r.state, G.BLOWN_INFO)
+                done["where"] = m2.word(r.state, G.BLOWN_WHERE)
+                done["word"] = m2.word(r.state, G.BLOWN_WORD)
+
+        def fb(b, k=k):
+            return base_frame(sound, machines, overrides=perc_words(k), trigger=b in (1, 8)).to_bytes()
+        rr = run_blocks(init, fb, 12, extra_hooks={m3.DISPATCH: at_dispatch, dsp.PERC_SW: at_perc})
+        st = rr.get("state")
+        count_end = m2.word(st.state, G.BLOWN_COUNT) if rr["ok"] else None
+        mask = m2.word(st.state, G.BLOWN_MASK) if rr["ok"] else None
+        rr.pop("state", None)
+        # PERC's own output for track 0 (what the guard left), not the buffer after the stock chain
+        outs = [blk[0]["out"] if 0 in blk else [] for blk in rr["perc"]] if rr["ok"] else []
+        peak = lambda b0, b1: max((abs(x) for blk in outs[b0:b1] for x in blk), default=0.0)   # noqa: E731
+        tainted_silent = rr["ok"] and len(outs[4]) == 32 and all(x == 0.0 for x in outs[4])
+        after = rr["ok"] and all(math.isfinite(x) for blk in outs[5:] for x in blk)
+        checks = {
+            "the note sounds before the poison (blocks 1..3)": rr["ok"] and peak(1, 4) > 0.01,
+            "the poisoned block is silent (block 4)": tainted_silent,
+            "the guard wiped the voice once, at that block": done.get("count_after") == 1 and count_end == 1,
+            # (BLOWN_MASK is sent and cleared by the link's idle packet every block: the
+            # ColdFire's copy is checked in test_perc_live and the link's unit test)
+            "the record: slot 0, this machine, the delay lines, the NaN": done.get("info") == k << 8
+                and done.get("where") == G.WHERE_DELAY and done.get("word") == 0xFFC00000,
+            "the voice's state is all zeros after the wipe": done.get("state_after") is not None
+                and all(w == 0 for w in done["state_after"]),
+            "the new note sounds (blocks 8..11), finite": rr["ok"] and peak(8, 12) > 0.01 and after,
+            "PERC bit-exact to its model": rr["ok"] and perc_exact(rr)[1:] == (0, 0),
+        }
+        res[name] = {"ok": all(checks.values()), "checks": checks, "halt": rr.get("halt"),
+                     "debug": {"done": {k: v for k, v in done.items() if k != "state_after"}, "state_after": done.get("state_after"),
+                               "count_end": count_end, "mask": mask, "peaks": [peak(b, b + 1) for b in range(12)],
+                               "perc": perc_exact(rr) if rr["ok"] else None,
+                               "mism": [(b, {t: (v["out_mismatches"], v["state_mismatches"]) for t, v in blk.items()}) for b, blk in enumerate(rr.get("perc", []))]}}
+        if not res[name]["ok"]:
+            bad.append(name)
+        print(f"    wipe {name}: {'ok' if res[name]['ok'] else 'FAIL'}", flush=True)
+    checks = {f"{name}: {c}": v for name, r in res.items() for c, v in r["checks"].items()}
     return {"ok": not bad, "checks": checks, "numbers": {"failing": bad, "runs": res}}
 
 

@@ -112,6 +112,24 @@ static int slen(const char *s, int n)
     return k;
 }
 
+/* v0.34: FUNC held, within two seconds of the DSP's output guard wiping a voice: "V" + the
+ * voice (1..16, as VOICE SETUP counts; 'A'..'G' for 10..16 in three characters) + where its
+ * memory first went non-finite: D its delay lines, S its stream, X neither (the input or the
+ * effects) -> 1; else 0. docs/timing-model.md: the unit says what poisons a voice */
+static int blown_text(char *b)
+{
+    extern int smp_blown_recent(void);
+    extern volatile u32 smp_blown_info, smp_blown_where;
+    if (!smp_blown_recent())
+        return 0;
+    u32 t = smp_blown_info & 15u, w = smp_blown_where;
+    b[0] = 'V';
+    b[1] = t < 9 ? (char)('1' + t) : (char)('A' + t - 9);
+    b[2] = w == 0xFFFFu ? 'X' : (w & 0x8000u) ? 'D' : 'S';
+    b[3] = 0;
+    return 1;
+}
+
 static int fmt_int(char *b, int v, int sign)
 {
     int n = 0;
@@ -241,7 +259,9 @@ int md_page_draw(void *view, void *c, int page, int type)
         extern int smp_skipped_any(void);       /* v0.30: the DSP left a voice out for time */
         extern int smp_func_held, smp_dsp_load(void);
         int ld = smp_func_held ? smp_dsp_load() : -1;
-        if (ld >= 0) {                          /* v0.32: FUNC held: the DSP's load, percent */
+        if (ld >= 0 && blown_text(b)) {         /* v0.34: a voice the guard just wiped: V<n><where> */
+            text(c, BIG, 1, 41, b, 3, 1);
+        } else if (ld >= 0) {                   /* v0.32: FUNC held: the DSP's load, percent */
             char d[6];
             int m = fmt_int(d, ld > 999 ? 999 : ld, 0);
             d[m++] = '%';
@@ -434,7 +454,9 @@ int mnm_page_draw(void *view, void *c, int mi)
         extern int smp_skipped_any(void);       /* v0.30: the DSP left a voice out for time */
         extern int smp_func_held, smp_dsp_load(void);
         int ld = smp_func_held ? smp_dsp_load() : -1;
-        if (ld >= 0) {                          /* v0.32: FUNC held: the DSP's load, percent */
+        if (ld >= 0 && blown_text(b)) {         /* v0.34: a voice the guard just wiped: V<n><where> */
+            text(c, BIG, 1, 41, b, 3, 1);
+        } else if (ld >= 0) {                   /* v0.32: FUNC held: the DSP's load, percent */
             char d[6];
             int m = fmt_int(d, ld > 999 ? 999 : ld, 0);
             d[m++] = '%';

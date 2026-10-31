@@ -99,6 +99,7 @@ TYPE_READS = {0x400254B4: 2, 0x40031BD2: 0, 0x40031C1C: 0, 0x40036478: 0, 0x4003
 GETTER_RTS = 0x4003647C                 # rts of the machine-type getter 0x40036462
 TRACK_GETTER_EXIT = 0x4004B81E          # getMachineType(track) 0x4004b7f2: the common exit
 ISR = 0x40025E36                        # the audio frame handler: modulation, frame, send
+ISR_RTE = 0x40027BC6                    # its only rte (docs/usbprobe.md)
 SYSEX_ROUTER, SYSEX_SENDER = 0x4012166E, 0x401233F2    # docs/usbprobe.md
 FRAME_BUILT = 0x400275A2                # the builder's sixteen passes are done
 FRAME = 0x80005E60
@@ -698,6 +699,16 @@ def main() -> int:
                    help="record every read and write of N bytes at VA, by PC")
     p.add_argument("--count", action="append", default=[], metavar="VA",
                    help="count the entries to VA (after reset-trace, if one is given)")
+    p.add_argument("--snapshot-image", default=None,
+                   help="the MAIN OS section the snapshot was booted with (default: <snapshot>.section_3_MAIN_OS.bin): "
+                        "its edits are put back to stock before the build is installed")
+    p.add_argument("--isr-frame", type=int, default=0, metavar="F",
+                   help="v0.34: the audio interrupt fires on its own, every F instructions of the "
+                        "UI's (digikit's SSI0/eDMA48/50 event source: the DMA's minor loops, the "
+                        "channel-50 major interrupt, vector 170, the forced vector 191, the ISR "
+                        "0x40025e36 preempting whatever runs), as on the unit, where it takes "
+                        "about 55 %% of the ColdFire's time (docs/timing-model.md). 0: only "
+                        "`frame:` steps enter it, as before")
     p.add_argument("--stack-at", action="append", default=[], metavar="VA",
                    help="at every entry to VA, the code addresses on the stack: who calls it")
     p.add_argument("--regs-last", type=int, default=0, metavar="N",
@@ -723,8 +734,46 @@ def main() -> int:
     root = pathlib.Path(a.root)
     build = root / a.build
     png_dir = pathlib.Path(a.png_dir) if a.png_dir else build / ("screens-stock" if a.stock else "screens")
-    machine = Machine(a.snapshot)
+    # v0.34: the SSI request cadence that makes one audio frame (32 requests, the TCD's
+    # major loop) F instructions long, on digikit's instruction clock (emu.pit.INSTR_PER_SEC)
+    isr_flags = {}
+    if a.isr_frame:
+        INSTR_PER_SEC = 4_680_000              # emu.pit.INSTR_PER_SEC (digikit is on the path once Machine is built)
+        isr_flags = dict(ssi0_request_hz=max(1, round(32 * INSTR_PER_SEC / a.isr_frame)), ssi0_legacy_upgrade=True)
+    machine = Machine(a.snapshot, **isr_flags)
+    if a.isr_frame:
+        from emu.pit import INSTR_PER_SEC as _ips
+        assert _ips == INSTR_PER_SEC, "digikit's instruction clock changed: recalibrate --isr-frame"
+        # The snapshot's vector 170 is the frame-alignment routine (docs/audio-dma.md: it
+        # searches the receive half for the DSP's 0x007FFFFF marker, then installs the
+        # pending normal channel-50 callback, which forces vector 191, the audio ISR). The
+        # emulator has no DSP to send the marker, so do what its success path does: the
+        # pending callbacks into vectors 168 and 170, cleared, and the aligned flag set
+        pend170, pend168 = machine.long(0x42C4BAF4), machine.long(0x42C4BAF8)
+        if machine.long(0x400002A8) == 0x400D5470 and pend170:
+            machine.write(0x400002A8, struct.pack(">I", pend170))
+            machine.write(0x42C4BAF4, b"\0\0\0\0")
+            if pend168:
+                machine.write(0x400002A0, struct.pack(">I", pend168))
+                machine.write(0x42C4BAF8, b"\0\0\0\0")
+            machine.write(0x42C4BAFC, b"\x01")
+            print(f"  audio ISR at its real rate: one frame every {a.isr_frame:,} instructions; "
+                  f"vector 170 -> {pend170:#010x} (the alignment's pending callback), vector 191 -> {machine.long(0x400002FC):#010x}")
     stock = open(os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin"), "rb").read()
+    # v0.34: the snapshot was booted on a build of its own (ui800M-v014: v0.14's), whose
+    # edits are still in its memory. A site that build hooked and this one leaves stock
+    # (v0.14's frame-builder hook at 0x400276a2, to code that is no longer there) stayed
+    # hooked, so the audio ISR jumped into dead code and faulted -- every `frame:` step
+    # did, the fault absorbed. The section the snapshot was booted with sits beside it
+    # (<snapshot>.section_3_MAIN_OS.bin): its edits go back to stock first
+    snap_image = pathlib.Path(a.snapshot_image) if a.snapshot_image else pathlib.Path(a.snapshot + ".section_3_MAIN_OS.bin")
+    if snap_image.exists():
+        back = [(va, stock[va - 0x40000400:va - 0x40000400 + len(b)]) for va, b in differences(stock, snap_image.read_bytes())
+                if va + len(b) <= 0x40000400 + len(stock)]
+        machine.apply(back)
+        print(f"  restored stock at {len(back)} site(s) the snapshot's own build ({snap_image.name}) had edited")
+    elif a.isr_frame:
+        raise SystemExit(f"--isr-frame needs the snapshot's own section beside it: {snap_image}")
     if not a.stock:
         image = (build / "section_3_MAIN_OS.bin").read_bytes()
         runs = differences(stock, image)
@@ -1015,11 +1064,42 @@ def main() -> int:
 
     def fault_reporter(uc_, address, size, user):
         sp = uc.reg_read(K.UC_M68K_REG_A7)
+        # v0.34: the handler's argument is the exception frame (the default handler 0x40001252
+        # saves SP at 0x4058d164 and passes it): its format/vector word and the faulting PC
+        frame = struct.unpack(">I", bytes(uc.mem_read(sp + 4, 4)))[0]
+        fv = struct.unpack(">H", bytes(uc.mem_read(frame, 2)))[0]
         reported.append({"at": len(alive), "step": step_now["name"], "ret": f"{struct.unpack('>I', bytes(uc.mem_read(sp, 4)))[0]:#010x}",
+                         "vector": (fv >> 2) & 0xFF, "fault_pc": f"{struct.unpack('>I', bytes(uc.mem_read(frame + 4, 4)))[0]:#010x}",
                          "a2": f"{uc.reg_read(K.UC_M68K_REG_A2):#010x}",
                          "stack": bytes(uc.mem_read(sp, 96)).hex()})
     alive = []
     uc.hook_add(UC_HOOK_CODE, fault_reporter, begin=0x4011EA6A, end=0x4011EA6A)
+    # v0.34: with the interrupt firing on its own, its deliveries and its cost. The cost is
+    # the instructions from the ISR's entry to its rte, measured for every delivery with a
+    # per-instruction hook while inside it (the hook is added at the entry and removed at the
+    # rte, so the UI's own run stays uncounted and fast); the worst, the mean, and how many
+    # ran past F (an overrun: on the unit the next frame's interrupt is late and the UI starves)
+    isr = {"delivered": 0, "cost": [], "overruns": 0, "frames0": machine.long(0x4058E8D4), "in": [0], "h": [None]}
+    ssi = machine.ev.get("ssi0_dma")
+    if ssi is not None:
+        def isr_tick(uc_, address, size, user):
+            isr["in"][0] += 1
+
+        def isr_enter(uc_, address, size, user):
+            if isr["h"][0] is None:
+                isr["in"][0] = 0
+                isr["h"][0] = uc.hook_add(UC_HOOK_CODE, isr_tick)
+
+        def isr_leave(uc_, address, size, user):
+            if isr["h"][0] is not None:
+                uc.hook_del(isr["h"][0])
+                isr["h"][0] = None
+                isr["delivered"] += 1
+                isr["cost"].append(isr["in"][0])
+                if isr["in"][0] > a.isr_frame:
+                    isr["overruns"] += 1
+        uc.hook_add(UC_HOOK_CODE, isr_enter, begin=ISR, end=ISR)
+        uc.hook_add(UC_HOOK_CODE, isr_leave, begin=ISR_RTE, end=ISR_RTE)
     panel.settle(a.warmup)
     for step in [s.strip() for s in a.steps.split(",") if s.strip()]:
         step_now["name"] = step
@@ -1219,6 +1299,13 @@ def main() -> int:
               "screen_frames": panel.frames() - frames_at_reset[0],
               "panel_writers": panel_writers, "items": items,
               "alive": alive, "fault_reports": reported,
+              "isr": None if ssi is None else {
+                  "frame_instructions": a.isr_frame, "delivered": isr["delivered"],
+                  "vector170": ssi.vector170, "vector191": ssi.vector191, "requests": ssi.requests,
+                  "frames": machine.long(0x4058E8D4) - isr["frames0"],
+                  "cost_max": max(isr["cost"], default=0),
+                  "cost_mean": round(sum(isr["cost"]) / len(isr["cost"])) if isr["cost"] else 0,
+                  "overruns": isr["overruns"]},
               "faults": [{k: (f"{v:#x}" if isinstance(v, int) else sorted(f"{x:#x}" for x in v)[:8] if isinstance(v, set) else v)
                           for k, v in r.items()} for r in getattr(machine.m, "faults", [])[:20]]}
     print(json.dumps(result, indent=1))

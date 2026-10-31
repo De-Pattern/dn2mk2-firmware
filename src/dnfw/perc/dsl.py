@@ -185,6 +185,14 @@ class Prog:
             self.e(f"F{d} = F{a} {op} F{b};", note)
         if self.run:
             x, y = self.F(a), self.F(b)
+            # v0.34: as the core (the PGR's float ALU and multiplier entries, Fx + Fy, MIN,
+            # MAX among them): a NaN INPUT gives an all-ones result, whichever operand it
+            # is. Python's min(1.0, nan) is 1.0, so until v0.33 the model could clamp a NaN
+            # away that the DSP carries on (and the output guard then wipes): the model and
+            # the unit disagreed on exactly the case the guard exists for
+            if math.isnan(x) or math.isnan(y):
+                self.r[d] = 0xFFFFFFFF
+                return
             v = {"+": lambda: x + y, "-": lambda: x - y, "*": lambda: x * y,
                  "MIN": lambda: min(x, y), "MAX": lambda: max(x, y)}[op]()
             self.setF(d, f32(v))

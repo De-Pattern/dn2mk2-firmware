@@ -1846,9 +1846,39 @@ def recorder(p: Prog, L: Layout) -> None:
             p.st(K["vsum"], 6)
             p.st(K["vsum2"], 6)
             p.st(K["vdone"], 6)
+            p.st(K["vmode"], 6)
             p.ld(6, cmd)                      # its own sequence, for vdone
             p.st(K["vseq"], 6)
         p.if_(2, "EQ", 12, verify, kind="i")
+        p.ld(2, cmd + 4)
+        p.iconst(12, SM.CMD_SCAN)
+
+        def scan():                           # v0.34: non-finite words in [src, src + 4 chan)
+            K = LK
+            p.ld(4, cmd + 8)                  # the address itself (any memory), 4-aligned
+            p.iconst(12, -4)
+            p.iop(4, 4, "AND", 12)
+            p.st(K["vpos"], 4)
+            p.st(K["vstart"], 4)
+            p.ld(5, cmd + 12)
+            p.iconst(12, 0)
+            p.iop(5, 5, "MAX", 12)
+            p.iconst(12, 1 << 20)             # at most 4 MB a scan
+            p.iop(5, 5, "MIN", 12)
+            p.lsh(5, 5, 2)
+            p.ipass(12, 4)
+            p.iop(5, 12, "+", 5)
+            p.st(K["vend"], 5)
+            p.iconst(6, 0)
+            p.st(K["vsum"], 6)
+            p.st(K["vdone"], 6)
+            p.iconst(6, SM.SCAN_NONE)
+            p.st(K["vsum2"], 6)
+            p.iconst(6, 1)
+            p.st(K["vmode"], 6)
+            p.ld(6, cmd)
+            p.st(K["vseq"], 6)
+        p.if_(2, "EQ", 12, scan, kind="i")
         p.ld(2, cmd + 4)
         p.iconst(12, SM.CMD_PROBE)
 
@@ -2402,7 +2432,26 @@ def tdm_tx(p: Prog, L: Layout) -> None:
         p.iconst(6, 0)
         p.st(G.SKIPMASK, 6)
         G.meter(p, SM.LINK_BUF + 4 * 18)       # v0.32: unit 18, the DSP's load (permille)
-        p.iconst(0, 19)
+        # v0.34: units 19..22, the output guard's record (docs/timing-model.md): the slots
+        # wiped since the last packet (then cleared), the last one's slot | type << 8,
+        # where its memory first held a non-finite word, and the count
+        p.ld(6, G.BLOWN_MASK)
+        p.iconst(12, 0xFFFF)
+        p.iop(6, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 4 * 19, 6)
+        p.iconst(6, 0)
+        p.st(G.BLOWN_MASK, 6)
+        p.ld(6, G.BLOWN_INFO)
+        p.iconst(12, 0xFFFF)
+        p.iop(6, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 4 * 20, 6)
+        p.ld(6, G.BLOWN_WHERE)
+        p.iop(6, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 4 * 21, 6)
+        p.ld(6, G.BLOWN_COUNT)
+        p.iop(6, 6, "AND", 12)
+        p.st(SM.LINK_BUF + 4 * 22, 6)
+        p.iconst(0, 23)
         p.st(K["u"], 0)
 
         def zero():
@@ -2416,7 +2465,7 @@ def tdm_tx(p: Prog, L: Layout) -> None:
             p.iconst(12, 1)
             p.iop(0, 12, "+", 0)
             p.st(K["u"], 0)
-        p.loop(K["v"], SM.TX_UNITS - 1 - 19, zero)
+        p.loop(K["v"], SM.TX_UNITS - 1 - 23, zero)
         _tx_out(p, K)
 
     def busy():
@@ -2547,38 +2596,81 @@ def _tx_out(p: Prog, K) -> None:
 
 def verify_step(p: Prog, L: Layout) -> None:
     """VERIFY's work this block: up to VERIFY_CHUNK words of [vpos, vend) into two sums
-    (a += w, b += a, mod 2^32); at the end, vdone = the command's sequence."""
+    (a += w, b += a, mod 2^32); at the end, vdone = the command's sequence. v0.34, SCAN
+    (vmode 1): vpos and vend are byte addresses; vsum counts the words whose exponent is
+    all ones, vsum2 keeps the first one's index."""
     K, C = LK, L.C
     p.ld(4, K["vpos"])
     p.ld(5, K["vend"])
     p.e("COMP(R4, R5);")
 
     def work():
-        p.lsh(6, 4, 2)
-        p.iconst(12, L.pool)
-        p.iop(6, 12, "+", 6)
-        p.seti(4, 6)
+        p.ld(0, K["vmode"])
 
-        def word():
-            p.ld(4, K["vpos"])
-            p.ld(5, K["vend"])
-            p.e("COMP(R4, R5);")
+        def verify_words():
+            p.lsh(6, 4, 2)
+            p.iconst(12, L.pool)
+            p.iop(6, 12, "+", 6)
+            p.seti(4, 6)
 
-            def add():
-                p.ldpost(6, 4)
-                p.ld(7, K["vsum"])
-                p.ipass(12, 7)
-                p.iop(7, 12, "+", 6)
-                p.st(K["vsum"], 7)
-                p.ld(8, K["vsum2"])
-                p.ipass(12, 8)
-                p.iop(8, 12, "+", 7)
-                p.st(K["vsum2"], 8)
-                p.iconst(12, 1)
-                p.iop(4, 12, "+", 4)
-                p.st(K["vpos"], 4)
-            p._branch(lambda: s32(p.r[4]) < s32(p.r[5]), "LT", add, None)
-        p.loop(K["v"], SM.VERIFY_CHUNK, word)
+            def word():
+                p.ld(4, K["vpos"])
+                p.ld(5, K["vend"])
+                p.e("COMP(R4, R5);")
+
+                def add():
+                    p.ldpost(6, 4)
+                    p.ld(7, K["vsum"])
+                    p.ipass(12, 7)
+                    p.iop(7, 12, "+", 6)
+                    p.st(K["vsum"], 7)
+                    p.ld(8, K["vsum2"])
+                    p.ipass(12, 8)
+                    p.iop(8, 12, "+", 7)
+                    p.st(K["vsum2"], 8)
+                    p.iconst(12, 1)
+                    p.iop(4, 12, "+", 4)
+                    p.st(K["vpos"], 4)
+                p._branch(lambda: s32(p.r[4]) < s32(p.r[5]), "LT", add, None)
+            p.loop(K["v"], SM.VERIFY_CHUNK, word)
+
+        def scan_words():
+            p.seti(4, 4)                      # vpos is the address
+
+            def word():
+                p.ld(4, K["vpos"])
+                p.ld(5, K["vend"])
+                p.e("COMP(R4, R5);")
+
+                def look():
+                    p.ldpost(6, 4)
+                    p.lsh(7, 6, -23)
+                    p.iconst(12, 0xFF)
+                    p.iop(7, 7, "AND", 12)
+
+                    def bad():
+                        p.ld(8, K["vsum"])
+                        p.iconst(12, 1)
+                        p.iop(8, 12, "+", 8)
+                        p.st(K["vsum"], 8)
+                        p.ld(8, K["vsum2"])
+                        p.iconst(12, SM.SCAN_NONE)
+
+                        def first():
+                            p.ld(8, K["vstart"])
+                            p.ld(4, K["vpos"])
+                            p.iop(8, 4, "-", 8)       # the word's offset
+                            p.lsh(8, 8, -2)
+                            p.st(K["vsum2"], 8)
+                        p.if_(8, "EQ", 12, first, kind="i")
+                    p.if_(7, "EQ", 12, bad, kind="i")
+                    p.ld(4, K["vpos"])
+                    p.iconst(12, 4)
+                    p.iop(4, 12, "+", 4)
+                    p.st(K["vpos"], 4)
+                p._branch(lambda: s32(p.r[4]) < s32(p.r[5]), "LT", look, None)
+            p.loop(K["v"], SM.VERIFY_CHUNK, word)
+        p.ifz(0, "NE", scan_words, verify_words)
         p.ld(4, K["vpos"])
         p.ld(5, K["vend"])
         p.e("COMP(R4, R5);")
