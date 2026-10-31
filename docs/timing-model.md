@@ -135,9 +135,11 @@ exception frame and left by its own `rte`. The harness now opts in:
   - the patched Unicorn does not decode ColdFire's `BITREV` (ISA_C), and stock's voice
     allocation finds its lowest free voice with `bitrev; ff1` on every note: the first
     [TRIG] press with the interrupt running raised vector 4 at `0x4002aa80` on stock
-    firmware itself. digikit shims `FF1` and `MOVEC` per address; `emulib.machine` now
-    shims `BITREV` the same way. (Before this, no note ever allocated a voice in the
-    emulator: a whole class of stock behaviour was never run.)
+    firmware itself. digikit shims `FF1` and `MOVEC` per address; `emulib.machine` catches
+    `BITREV` at the firmware's default exception handler instead (a vector-4 frame whose PC
+    holds the opcode is emulated and popped: one hook, no cost; 947 per-address hooks on
+    every `0x00Cn` word had halved the emulator's speed). Before this, no note ever
+    allocated a voice in the emulator: a whole class of stock behaviour was never run.
 - What it reports (`isr` in the JSON): deliveries (vector 170, vector 191, the ISR's rte),
   the frames counted, the ISR's cost per delivery (instructions from its entry to its rte,
   worst and mean) and **overruns** (a delivery costing more than F: on the unit the next
