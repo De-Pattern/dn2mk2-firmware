@@ -21,8 +21,10 @@ the instrument's own DSP and sitting in MACHINE SEL beside the stock ones:
   your WAVs sent over USB and kept on the +Drive.
 - **PERC, the Machinedrum**: the MD's TRX, EFM, GND and P-I machines (34 of them) from the
   Machinedrum's own firmware, with its track effects.
-- **The Monomachine**: SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6, from the
-  Monomachine's own firmware, drawn as the Monomachine draws them.
+- **The Monomachine, polyphonic**: SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6,
+  from the Monomachine's own firmware, drawn as the Monomachine draws them. The
+  Monomachine played one note per track; here every note gets its own voice, so they play
+  chords.
 
 Everything else on the instrument works as stock: the stock machines, the sequencer,
 projects, presets and kits.
@@ -77,6 +79,12 @@ SID 6581, DPRO WAVE, DPRO DDRW, DPRO DENS and VO-6, each its own machine type, p
 from the Monomachine's firmware (you supply its OS file). Their pages are drawn as the
 Monomachine's, choice knobs move one choice a few detents, and each is levelled to sit
 beside the stock machines.
+
+**Polyphonic.** The Monomachine was monophonic: six tracks, one note each. Here a
+Monomachine track is a Digitone II track, so each note takes its own voice from the DN2's
+16 (VOICE SETUP as for any track): chords and overlapping notes on SID, the DigiPROs and
+VO-6. How many sound at once is set by DSP time; VO-6, the heaviest, costs about 7 % of it
+a voice.
 
 ### Under the hood
 

@@ -97,7 +97,7 @@ details { margin-top: 10px; } summary { cursor: pointer; }
     <details open><summary><b>What's in it</b></summary>
       <ul class="guide">
         <li><b>Machinedrum:</b> every MD machine except the sample-based E-12s, as one machine, <b>Perc</b>. Its TYPE control picks the machine (all 33) and can be p-locked, so each step of a Perc track can be a different MD machine. Each machine has a second page the MD doesn't have: Octatrack-style EQ, amplitude modulation and a B/W filter.</li>
-        <li><b>Monomachine:</b> SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens and VO-6.</li>
+        <li><b>Monomachine, polyphonic:</b> SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens and VO-6. The Monomachine played one note per track; here every note gets its own voice from the DN2's 16, so they play chords (as many at once as DSP time allows).</li>
         <li><b>Digitakt II:</b> all its machines, Slice included. Samples live in a 400 MB pool in RAM (not on the +Drive yet), sent with the sample import tool. You can also record external audio and resample.</li>
         <li><b>OS 1.11 only</b> (not 1.12), so no Outbox yet.</li>
       </ul>
@@ -119,8 +119,7 @@ details { margin-top: 10px; } summary { cursor: pointer; }
         <li><b>Stock OS 1.11 only.</b> On OS 1.12 or later, flashing takes you back to a 1.11-based OS (see Flash).</li>
         <li><b>Back up</b> the +Drive and your projects before every flash. Keep the stock 1.11 file and a DIN MIDI cable for recovery.</li>
         <li><b>DSP time.</b> The Machinedrum and Monomachine machines are heavy. Several of them sounding at once, with p-locks, can use more DSP time than a frame has. From v0.27, a voice that won't fit is silent for that moment, a short gap on that track. Before v0.27 the audio could stop until a reboot.</li>
-        <li><b>Monomachine voices</b> are mono and never go quiet on their own (as on the Monomachine): shape them with the AMP envelope.</li>
-        <li><b>Monomachine tracks: set VOICE SETUP to lock 1 voice.</b> With dynamic voice allocation (the default), most notes on a Monomachine track don't sound, and a voice it used can be heard on another track. Being fixed.</li>
+        <li><b>Monomachine voices</b> never go quiet on their own (as on the Monomachine): shape them with the AMP envelope.</li>
         <li><b>Picking a sample right after clearing a Slice track</b> can freeze the sample list (a reboot clears it). Being looked at.</li>
         <li><b>The sample pool</b> loads at every power-on, so a large pool takes a while. +Drive storage is planned.</li>
         <li><b>Slice and Grid:</b> the playing-slice marker lags behind what you hear.</li>
