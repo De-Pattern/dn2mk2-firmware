@@ -145,7 +145,17 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   clean); something in the studio chain. The runner now checks that every Monomachine machine
   leaves the stock tracks bit-identical.
 
-## The owner's Discord audit (2026-10-30, `docs/feedback/2026-10-30-discord.csv`)
+## misterairplane (Discord, v0.33, 2026-10-31)
+
+| # | report | first look | status |
+|---|---|---|---|
+| M1 | VO-6: no audio at some CONS settings, around J-RR; not every time. At some CLEN settings the notes go too | new in v0.33: the output guard zeroes a voice that goes non-finite (it used to poison the effects instead). A consonant at J-RR or a CLEN value may drive VO-6's state to inf/NaN, and the guard now silences that voice | **open**: runner sweep of VO-6 over every CONS and CLEN, looking for non-finite output; then fix the cause in the machine, not the guard |
+| M2 | Can't have more than two voices of any Monomachine engine | sounds like O1 (only a few voices sounding under dynamic allocation), which v0.29 fixed; may have come back | **open**: ask: two tracks, or two notes on one track? voice allocation LOCK or dynamic? |
+| M3 | FUNC + YES preview in +DRIVE retriggers rapidly instead of playing through | likely v0.33's own: a key whose press was taken earlier is now handled as a new press, so the held YES's repeats each restart `fb_preview` | **open, v0.34**: a held YES on the same sample keeps playing; only a new press restarts |
+| M4 | Do samples record in stereo? Is there USB recording? | the pool and every sample machine are mono by design (the import tool mixes to mono too); stereo means twice the memory and new voice code. USB audio as a recorder source: check whether the stock OS routes it to the DSP | answered; requests |
+| M5 | One sample in PROJECT RAM won't play, but previews fine in the browser | v0.33's entry check plays an untrusted slot as empty; a valid sample it wrongly rejects would do exactly this. The check's rules match the link's (base past DATA_OFFSET, end inside 400 MB, format 0/1) | **open, first**: ask which slot, how it got there (Replace all, LOAD TO PROJ, a recording), its length; read that slot's entry over the link |
+
+, `docs/feedback/2026-10-30-discord.csv`)
 
 Twenty bugs and twenty-eight requests, sorted by the owner's export. Mapped to what we have:
 B01 all-audio-cut (14 reports: v0.33's output guard and entry check), B06/B19 the sample-list
