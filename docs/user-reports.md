@@ -145,15 +145,26 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   clean); something in the studio chain. The runner now checks that every Monomachine machine
   leaves the stock tracks bit-identical.
 
+## The owner (v0.33, 2026-10-31)
+
+| # | report | status |
+|---|---|---|
+| O14 | Holding SYN on a stock machine shows every on-screen parameter's value on the SYN pages; on the mod's machines it does not | **open, next build**: the held-key value overlay (stock's page draw does it for its own parameter records; our pages draw their own) |
+
+## blskk (Discord, 2026-10-31; the owner: not at face value, asked for specifics)
+
+- "the sample import program doesn't take a folder of files that well", "skipping wav files": the page reads a folder progressively now with a count and a skip summary (2026-10-31); a folder with nested .WAV files loads in the harness. Open until he says which files.
+- "arpeggiator, note edit and sampler make the digitone crash": no steps; the owner's arpeggiator works on every track. Open.
+
 ## misterairplane (Discord, v0.33, 2026-10-31)
 
 | # | report | first look | status |
 |---|---|---|---|
 | M1 | VO-6: no audio at some CONS settings, around J-RR; not every time. At some CLEN settings the notes go too | new in v0.33: the output guard zeroes a voice that goes non-finite (it used to poison the effects instead). A consonant at J-RR or a CLEN value may drive VO-6's state to inf/NaN, and the guard now silences that voice | **open**: runner sweep of VO-6 over every CONS and CLEN, looking for non-finite output; then fix the cause in the machine, not the guard |
-| M2 | Can't have more than two voices of any Monomachine engine | sounds like O1 (only a few voices sounding under dynamic allocation), which v0.29 fixed; may have come back | **not reproduced** (owner, v0.32, a new project: five MnM tracks, many voices on every engine). Ask: two tracks, or two notes on one track? LOCK or dynamic? an old project? |
+| M2 | Can't have more than two voices of any Monomachine engine | sounds like O1 (only a few voices sounding under dynamic allocation), which v0.29 fixed; may have come back | **not reproduced** (owner, v0.32, a new project: five MnM tracks, many voices on every engine). misterairplane (2026-10-31): two voices system-wide, two tracks or two notes on one track alike, LOCK or dynamic alike. Next: which machines, which OS version he is on (v0.29 fixed exactly this), a fresh project |
 | M3 | FUNC + YES preview in +DRIVE retriggers rapidly instead of playing through | likely v0.33's own: a key whose press was taken earlier is now handled as a new press, so the held YES's repeats each restart `fb_preview` | **open, v0.34**: a held YES on the same sample keeps playing; only a new press restarts |
 | M4 | Do samples record in stereo? Is there USB recording? | the pool and every sample machine are mono by design (the import tool mixes to mono too); stereo means twice the memory and new voice code. USB audio as a recorder source: check whether the stock OS routes it to the DSP | answered; requests |
-| M5 | One sample in PROJECT RAM won't play, but previews fine in the browser | v0.33's entry check plays an untrusted slot as empty; a valid sample it wrongly rejects would do exactly this. The check's rules match the link's (base past DATA_OFFSET, end inside 400 MB, format 0/1) | **open, first**: ask which slot, how it got there (Replace all, LOAD TO PROJ, a recording), its length; read that slot's entry over the link |
+| M5 | One sample in PROJECT RAM won't play, but previews fine in the browser | v0.33's entry check plays an untrusted slot as empty; a valid sample it wrongly rejects would do exactly this. The check's rules match the link's (base past DATA_OFFSET, end inside 400 MB, format 0/1) | misterairplane (2026-10-31): sample slot 2, recorded directly on the machine; slot 1, recorded on a previous build, plays. **Next**: a recording's entry (the recorder's hole, format 1) through v0.33's entry check: read slot 2's entry over the link (DIR) and run entry_check on it; SysEx DIAG/SCAN (v0.34) on his unit |
 | O13 | (owner, v0.33) PERC P-I BD: the same voices always silent (voice 1 almost always, then 4 or 3); VOICE SETUP lock 1: silent every note; waiting changes nothing; CPU 52-70 %. P-I RS: voices 1, 4, 9, 10, 12, more than half the time | **found, v0.33's own**: the output guard's wipe (`perc/program.py` `out_guard` `blown()`) stores R0, which `dsl.loop` uses as its counter: it writes 32, 31 .. 1 instead of zeros, so a voice that once went non-finite never resets (`on` stays 32; the MD words and the P-I delay lines in DDR keep the NaN) and stays silent until a power-on. Not reproduced: why voices 1 and 4 go non-finite at all (P-I's own arithmetic is clamped; suspects: the delay lines at 0x82200000, outside the proven DDR range, written by something on the unit; or circular-buffer L registers at PERC's entry). **v0.34 (docs/timing-model.md)**: the wipe fixed (the voice resets, the next note sounds), the model's NaN made the core's, runner step 3w and a unit test; the guard records which voice and whether its delay lines held the NaN (FUNC held: `V1D` / `V1X` in the tempo's place; SysEx DIAG), and SCAN (SysEx 25) counts non-finite words in any DSP memory range, so the owner's unit can say whether voice 1's lines are poisoned at power-on, while idle, or only after a note. Still open: what poisons them |
 
 , `docs/feedback/2026-10-30-discord.csv`)

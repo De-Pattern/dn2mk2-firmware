@@ -125,12 +125,12 @@ label.proj-only { max-width: 100%; }
   <section>
     <h2>1 · Instrument</h2>
     <div class="row">
-      <select id="outSel" aria-label="MIDI output"></select>
-      <select id="inSel" aria-label="MIDI input"></select>
+      <label class="note" style="margin:0">to <select id="outSel" aria-label="MIDI output"></select></label>
+      <label class="note" style="margin:0">from <select id="inSel" aria-label="MIDI input"></select></label>
       <button id="connectBtn" class="primary">Connect</button>
       <span id="connState" class="pill">not connected</span>
     </div>
-    <p id="devInfo" class="note">Allow MIDI (with SysEx) when the browser asks. Pick the ports named Digitone II.</p>
+    <p id="devInfo" class="note">Allow MIDI (with SysEx) when the browser asks. Two ports, both named Digitone II: the one this page sends to, and the one it listens on (USB MIDI has one of each).</p>
   </section>
 
   <section id="xfer" class="lib-mode">
@@ -158,7 +158,7 @@ label.proj-only { max-width: 100%; }
     <div class="panes">
       <div class="pane" id="drop">
         <div class="pane-head"><b>This computer</b><span class="spacer"></span>
-          <button id="browseBtn">Add files…</button> <button id="folderBtn">Add a folder…</button>
+          <button id="browseBtn">Add files…</button> <button id="folderBtn" title="Your system's folder dialog shows folders only; every audio file inside the one you pick is added, subfolders included">Add a folder…</button>
           <input id="fileIn" type="file" accept="audio/*,.wav,.wave,.aif,.aiff,.aifc,.flac,.mp3,.ogg,.oga,.opus,.m4a,.aac,.caf" multiple hidden>
           <input id="dirIn" type="file" webkitdirectory multiple hidden>
         </div>
@@ -736,9 +736,15 @@ if (typeof module !== "undefined") module.exports = DN2;
     out.sort((a, b) => (a.folder + "/" + a.name).localeCompare(b.folder + "/" + b.name, undefined, { numeric: true }));
     return addFiles(out);
   }
+  let loading = null;             /* {done, total, skipped} while a batch of files is read */
   async function addFiles(files) {
-    for (const f of files) {
-      if (!AUDIO.test(f.name)) { if (!/^\./.test(f.name)) log(`${f.name}: not an audio file, skipped`); continue; }
+    files = [...files];
+    const audio = files.filter(f => AUDIO.test(f.name));
+    const other = files.filter(f => !AUDIO.test(f.name) && !/^\./.test(f.name));
+    other.forEach(f => log(`${f.name}: not an audio file, skipped`));
+    loading = { done: 0, total: audio.length, skipped: other.length, bad: 0 };
+    refresh();
+    for (const f of audio) {
       if (mode !== "lib" && items.length >= C.USER_SLOTS) { log(`${f.name}: all ${C.USER_SLOTS} slots are taken`); break; }
       try {
         const w = await readAudio(await f.arrayBuffer());
@@ -746,8 +752,12 @@ if (typeof module !== "undefined") module.exports = DN2;
         const long = f.name.replace(/\.[^.]*$/, "").slice(0, C.LONG_MAX);
         items.push({ file: f.name, long, name: DN2.short(long), folder: (f.folder || "").slice(0, C.FOLDER_MAX), w,
                      slices: DN2.slicing($("sliceSel").value, w), slot: null, sel: false });
-      } catch (e) { log(`${f.name}: ${e.message || e}`); }
+      } catch (e) { loading.bad++; log(`${f.name}: ${e.message || e}`); }
+      loading.done++;
+      if (loading.done % 8 === 0) refresh();   /* a big folder shows up as it loads, not at the end */
     }
+    const l = loading; loading = null;
+    log(`${l.total} audio file(s) read${l.bad ? `, ${l.bad} could not be` : ""}${l.skipped ? `, ${l.skipped} other file(s) skipped` : ""}`);
     refresh();
   }
   /* WAV and AIFF read here (their own rate, cue points kept); FLAC, MP3, OGG, M4A and the
@@ -839,7 +849,8 @@ if (typeof module !== "undefined") module.exports = DN2;
     const fl = $("folderList"); fl.innerHTML = "";
     [...new Set([...items.map(it => it.folder), ...(memRead()?.entries || []).map(e => e.folder || "")].filter(Boolean))].forEach(f => { const o = document.createElement("option"); o.value = f; fl.append(o); });
     const prob = slotProblems();
-    $("listNote").textContent = prob || (!items.length ? (lib ? "No samples yet." : `No samples yet. Slots 1–${C.USER_SLOTS} are yours.`)
+    $("listNote").textContent = loading ? `Reading ${loading.done} of ${loading.total} audio file(s)…`
+      : prob || (!items.length ? (lib ? "No samples yet." : `No samples yet. Slots 1–${C.USER_SLOTS} are yours.`)
       : lib ? `${items.length} sample(s)` + (nSel ? `, ${nSel} ticked` : "")
       : mode === "fill" ? `${items.length} sample(s) go to SAMP 1–${items.length}, in this order. Drag rows to change their slots.`
       : `${items.length} sample(s), each to the slot beside it.`);
