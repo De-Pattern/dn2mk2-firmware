@@ -147,6 +147,15 @@ CMD_PROBE = 8
 # after the engine has made it (dnfw.sampler.program.pvmix, at the driver's call of
 # 0x1c9d3f); first >= end stops it. The status word's bit 4 says one is playing.
 CMD_PREVIEW = 9
+# SCAN (v0.34, docs/timing-model.md): src = a DM byte address (anywhere: L1, L2, DDR), chan =
+# words. The DSP walks the range VERIFY_CHUNK words a block and counts the words whose
+# exponent is all ones (NaN, infinity: what poisons a voice), keeping the first one's index;
+# VERIFY's status halves carry the count (vsum) and that index (vsum2, 0xFFFFFFFF none), and
+# vdone the command's sequence when the range is done. So the unit itself can say whether a
+# voice's memory (its P-I delay lines, its L2 slot) holds a NaN before any note plays, and
+# whether one appears while nothing plays (something else writing there).
+CMD_SCAN = 10
+SCAN_NONE = 0xFFFFFFFF
 # PROBE (v0.22): is all of the 512 MB part there? PROBE_BYTES at PROBE_LO and at PROBE_LO +
 # 256 MB (PROBE_HI) are filled with two patterns, then both read back (more than the DSP's
 # data cache holds, so the reads come from the RAM). A 256 MB part would put the second
@@ -242,7 +251,8 @@ LINK_DM = 0x2DF880                          # the link's scratch (dnfw.waverider
 LINK_BUF = 0x2DF980                         # a packet's 256 units, decoded
 LINK_WORDS = ("u", "v", "w", "sum", "bad", "good", "lseq", "nbad", "sbusy", "spos", "send",
               "sseq", "cnt", "off", "a", "pg",
-              "vpos", "vend", "vsum", "vsum2", "vdone", "vseq")       # VERIFY: the running sum of a word range
+              "vpos", "vend", "vsum", "vsum2", "vdone", "vseq",       # VERIFY: the running sum of a word range
+              "vmode", "vstart")                                      # v0.34 SCAN: 1 while scanning; the range's first address
 VERIFY_CHUNK = 1024                          # words a block VERIFY adds up
 
 # v0.33: SLCE at NOTE picks slice (note - SLICE_NOTE_BASE) mod the slices: from C1 (MIDI 24),

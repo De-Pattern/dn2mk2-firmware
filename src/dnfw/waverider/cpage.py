@@ -47,7 +47,7 @@ def compile_page(header: str, *, base: int) -> tuple[bytes, dict[str, int], int]
                      "RX_MAGIC", "TX_MAGIC", "POS_MAGIC", "POS_NONE", "POS_ONE", "META_PTR", "META_PTR_MAGIC", "META_MAGIC", "META_FOLDERS",
                      "META_FOLDER_BYTES", "META_SLOT_BYTES", "META_NAME_BYTES", "META_BYTES"):      # v0.16; v0.25 POS
             defines[name] = hex(getattr(SM, name)) + "u"
-        for name in ("REC_FIRST", "REC_SLOTS", "REC_SLOT_SHIFT", "CMD_SEND", "CMD_VERIFY", "CMD_PROBE", "CMD_PREVIEW",
+        for name in ("REC_FIRST", "REC_SLOTS", "REC_SLOT_SHIFT", "CMD_SEND", "CMD_VERIFY", "CMD_PROBE", "CMD_PREVIEW", "CMD_SCAN",
                      "RX_WORDS", "TX_WORDS", "CMD_WORDS"):
             defines[name] = int(getattr(SM, name))
         import os

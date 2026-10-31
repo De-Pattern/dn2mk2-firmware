@@ -28,7 +28,15 @@ failure:
    resent), commands included; with nothing getting through, the loader stops; a
    recording comes back over TDM and is written to a Python +Drive. Every byte checked,
    and every period the frame's routing words (0xa5a..) are stock's (v0.20).
+6q. **UI fuzz** (v0.33, `emu_fuzz_ui.py`): the sample pages driven at random, two seeds.
+   v0.34 (docs/timing-model.md): with the audio interrupt firing on its own at its real
+   cadence through the real vectors, preempting the mod's UI code; a CPU exception, the
+   interrupt no longer delivered, or audio frames overrunning their budget fail a seed.
 7. **unit tests** (`pytest -m "not slow"` on the safety, mod, PERC and filter tests).
+
+The SHARC runner's parts (v0.34): decode/map/voice/guard, stress (K = 3 and the memory-cost
+clock), garbage, **wipe** (the output guard really resets a poisoned voice and records it),
+smp, link/rec/pvmix/tdm, stock/ping, mnm/frame.
 
 Only if all pass does it write `BUILD.gate.json` beside the build (the build's
 sha256, each gate's result, the date) and print `CLEARED TO FLASH`. Anything else
@@ -1180,16 +1188,28 @@ def main() -> int:
 
         # 6q. v0.33: the sample pages driven at random (scripts/emu_fuzz_ui.py: SAMP turns,
         # the list, the browser and its menu, page and [TRIG] keys, MACHINE SEL, the machine
-        # changed under the page, the audio interrupt's frame build between them): two seeds,
-        # each must finish, fault nothing in our code and answer the last probe
+        # changed under the page): two seeds, each must finish, fault nothing in our code and
+        # answer the last probe. v0.34 (docs/timing-model.md): the audio interrupt fires on
+        # its own at its real cadence throughout (digikit's SSI0/eDMA event source, through
+        # the real vectors), preempting the mod's UI code as on the unit; a CPU exception,
+        # the interrupt no longer delivered, or audio frames overrunning fail the seed. It
+        # needs the section the snapshot was booted with beside it (its own build's edits
+        # are put back to stock first)
         if "smp_lst_open" in lay:
+            snap_sec = pathlib.Path(str(snap) + ".section_3_MAIN_OS.bin")
             fz_cmd = [sys.executable, "scripts/emu_fuzz_ui.py", bdir, "3,7", "--steps", "24",
-                      "--venv", a.venv, "--snapshot", snap, "--json", work / "fuzz.json"]
+                      "--venv", a.venv, "--snapshot", snap, "--json", work / "fuzz.json",
+                      "--isr-frame", "75000"]
 
             def fz_body(tdir):
+                if not snap_sec.exists():
+                    return False, f"missing {snap_sec} (the snapshot's own MAIN OS section): the real-rate interrupt needs it"
                 rc, out = run("ui fuzz", fz_cmd, logs, env={**EMU_ENV, "PYTHONPATH": str(ROOT / "src")}, trace=tdir)
                 return rc == 0, (out.strip().splitlines()[-1] if rc == 0 else out[-800:])
-            gate("UI fuzz, two seeds (ColdFire)", *cached("UI fuzz, two seeds (ColdFire)", [fz_cmd, sorted(EMU_ENV.items())], fz_body))
+            gate("UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)",
+                 *cached("UI fuzz, two seeds, real-rate ISR (ColdFire)", [fz_cmd, sorted(EMU_ENV.items())], fz_body))
+
+
 
         # 7. unit tests
         if sharc is not None:                   # v0.25: the runner beside the rest

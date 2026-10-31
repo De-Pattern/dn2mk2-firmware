@@ -46,7 +46,16 @@ MARK = 0x2DE124                  # block_count.asm: EMUCLK at our entry
 IDLE_TOTAL = 0x2DE110            # idle_load.asm: the idle task's cycles, cumulative
 COST_PERC = GUARD + 0x40         # 16 words: each PERC slot's last cost, cycles
 COST_SMP = GUARD + 0x80          # 16 words: each sample slot's
-END = GUARD + 0xC0
+# v0.34: the output guard's record (docs/timing-model.md): which voice went non-finite and
+# where its memory first held a non-finite word, so the unit can say what poisons a voice
+BLOWN_COUNT = GUARD + 0xC0       # voices wiped, cumulative
+BLOWN_INFO = GUARD + 0xC4        # the last: slot | machine type << 8
+BLOWN_WHERE = GUARD + 0xC8       # the last: WHERE_NONE, or the first non-finite word's index
+BLOWN_WORD = GUARD + 0xCC        # that word's bits
+BLOWN_MASK = GUARD + 0xD0        # bit t: slot t wiped since the ColdFire last heard (sent, then cleared)
+END = GUARD + 0xD4
+WHERE_NONE = 0xFFFF              # the voice's delay lines held nothing non-finite (its state, input or effects did)
+WHERE_DELAY = 0x8000             # | the first non-finite delay-line word's index (0..2047)
 LIMIT_DEFAULT = 400_000          # until a frame has been measured: 0.6 of 666,667 (1 GHz, 1,500 frames a second)
 FLOOR = 60_000                   # what a voice is expected to cost at least
 PERIOD_MIN, PERIOD_MAX = 300_000, 3_000_000

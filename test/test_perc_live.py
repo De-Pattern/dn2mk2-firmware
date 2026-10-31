@@ -243,3 +243,60 @@ def test_v026_the_monomachine_machines_play_the_dn2s_note():
             f.append(_f0(out[32 * 16:], PM.RATE))
         assert abs(f[0] / 261.63 - 1) < 0.03, (name, f)
         assert abs(f[1] / f[0] / 2 - 1) < 0.03, (name, f)
+
+
+def _peak(xs):
+    return max(abs(v) for v in xs)
+
+
+@pytest.mark.parametrize("name,where", [("PI-BD", "delay"), ("PI-RS", "delay"), ("TRX-SD", "state")])
+def test_v034_the_output_guard_really_wipes_a_poisoned_voice(name, where):
+    """v0.34 (the owner's O13: P-I machines silent on the same voices every time). A NaN in
+    a voice's memory mid-note: the block it taints is wiped, the guard's record names the
+    slot, the machine and where the poison was (its delay lines, or not there), the voice's
+    state is all zeros (v0.33's wipe stored its loop counter: 32, 31 .. 1, so the voice
+    never reset and stayed silent), and the NEXT note sounds."""
+    from dnfw.perc import guard as G
+    from dnfw.md import core as MDK
+    t = 3
+    h = PL.Harness(t)
+    k = PM.NAMES.index(name)
+    fx = (0.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.3)      # the track's filter on, so its state is read
+    h.set_controls(k, PL.defaults(name), fx)
+    first = []
+    for b in range(6):
+        first += h.block(60.0, b == 0)
+    assert _peak(first) > 0.01 and all(math.isfinite(v) for v in first)
+    # the poison: a NaN in its delay lines (slot t's: delay + 8 KB t), or in the voice's
+    # own state words (the effects', zeroed by the wipe)
+    L = h.L.md
+    delay = L.delay + MDK.PI_DELAY_STRIDE * t
+    state = h.L.state + 128 * t
+    if where == "delay":
+        at, idx = delay + 4 * 7, 7 | G.WHERE_DELAY
+    else:
+        at, idx = None, G.WHERE_NONE
+        for j in range(20, 31):                # the filters' state words
+            h.mem.put(state + 4 * j, 0x7FC00000)
+    if at is not None:
+        h.mem.put(at, 0x7FC00000)
+    for b in range(40):                        # the delay's read point reaches the word
+        tainted = h.block(60.0, False)
+        if h.mem.get(G.BLOWN_COUNT):
+            break
+    assert h.mem.get(G.BLOWN_COUNT) == 1, "the guard fired once"
+    assert all(v == 0.0 for v in tainted), "the tainted block is silent"
+    assert h.mem.get(G.BLOWN_INFO) & 0xFF == t and h.mem.get(G.BLOWN_INFO) >> 8 == k
+    assert h.mem.get(G.BLOWN_MASK) == 1 << t
+    assert h.mem.get(G.BLOWN_WHERE) == idx
+    if where == "delay":
+        assert h.mem.get(G.BLOWN_WORD) == 0x7FC00000
+    assert all(h.mem.get(state + 4 * j) == 0 for j in range(32)), "the voice's state is zeros"
+    # the next block resets it (its words and delay lines cleared), and a new note sounds
+    h.block(60.0, False)
+    assert all(h.mem.get(delay + 4 * j) == 0 for j in range(MDK.PI_DELAY_WORDS))
+    again = []
+    for b in range(6):
+        again += h.block(60.0, b == 0)
+    assert _peak(again) > 0.01 and all(math.isfinite(v) for v in again)
+    assert h.mem.get(G.BLOWN_COUNT) == 1, "no second wipe: the voice is clean"

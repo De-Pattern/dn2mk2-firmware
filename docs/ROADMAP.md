@@ -202,6 +202,28 @@ inharmonic modes).
   filter type), CZ PHASE and RESONATOR: their code, generators, tables, DSP spans, tests
   and gate steps, once v0.31 and v0.32 are out.
 
+## Requests and ideas (owner, 2026-10-31)
+
+- **A MACRO page**: 4-8 knobs on one page, each a macro of up to 5 modulation mappings
+  (mapped as the velocity and aftertouch macros in SETTINGS are, but with a knob), every
+  knob visible with a renamable label, the page per track (choose which), so several
+  macros are turned at once -- the Analog Four mk2's Perf mode. One macro per knob, all
+  its mappings moving together, live. Weight unknown; after the stability work.
+- Holding SYN to show the values on our pages (O14).
+- From the Discord audit (`docs/feedback/2026-10-30-discord.csv`): pattern direct jump,
+  Markov song mode, an LFO matrix, trigless trigs, parameter slides, screen streaming,
+  MD/MnM preset import, per-track flanger/phaser, capicola stretch, per-project sample
+  pools.
+
+## v0.34: the timing model and the P-I voices (2026-10-31, docs/timing-model.md)
+
+Done in the tree: the output guard's wipe (O13: a wiped voice never reset), its record on
+the page and over USB (DIAG), SCAN (non-finite words in any DSP memory range), the fuzz
+on the real-rate audio interrupt (gate 6q), the memory-cost clock (runner 3s-F), the
+model's NaN as the core's. Next, in order: the owner's SCAN readings on his unit (are
+voice 1's P-I lines poisoned at power-on, while idle, or after a note?), then the cause;
+the +DRIVE preview retrigger (M3); B10; the Monomachine tables to L2.
+
 ## The +Drive library, then a Transfer-style page (owner, 2026-10-30)
 
 1. **On the instrument first**: RENAME, MOVE (MOVE SELECTED, then MOVE HERE, as the DT2's

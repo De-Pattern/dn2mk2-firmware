@@ -50,6 +50,39 @@ class Machine:
         self.ret = STACK + 0x800
         self.at = SCRATCH
         self.count = 0
+        self.bitrev_count = 0
+        self._bitrev_shim()
+
+    def _bitrev_shim(self):
+        """v0.34 (docs/timing-model.md): BITREV Dn (0x00C0..0x00C7, ColdFire ISA_C) is not
+        decoded by the patched Unicorn: it raises vector 4. Stock's voice allocation uses
+        `bitrev; ff1` to find the lowest set bit of its free-voice mask whenever a note
+        triggers, so with the audio interrupt running on its own the first [TRIG] press
+        faulted at 0x4002aa80 -- on stock firmware too. Caught at the firmware's default
+        exception handler (0x40001252): a vector-4 frame whose PC holds a BITREV is
+        emulated there and the frame popped, so the handler never runs and nothing else
+        pays (947 per-address hooks on every 0x00Cn word halved the emulator's speed)."""
+        import struct
+        from unicorn import UC_HOOK_CODE
+        from unicorn.m68k_const import UC_M68K_REG_A7, UC_M68K_REG_D0, UC_M68K_REG_PC, UC_M68K_REG_SR
+        DEFAULT_HANDLER = 0x40001252
+
+        def h(uc, addr, size, data):
+            sp = uc.reg_read(UC_M68K_REG_A7)
+            fv, sr, pc = struct.unpack(">HHI", bytes(uc.mem_read(sp, 8)))
+            if (fv >> 2) & 0xFF != 4:
+                return
+            w = struct.unpack(">H", bytes(uc.mem_read(pc, 2)))[0]
+            if not 0x00C0 <= w <= 0x00C7:
+                return
+            reg = UC_M68K_REG_D0 + (w & 7)
+            v = uc.reg_read(reg) & 0xFFFFFFFF
+            uc.reg_write(reg, int(f"{v:032b}"[::-1], 2))
+            uc.reg_write(UC_M68K_REG_A7, sp + 8)
+            uc.reg_write(UC_M68K_REG_SR, sr)
+            uc.reg_write(UC_M68K_REG_PC, pc + 2)
+            self.bitrev_count += 1
+        self.uc.hook_add(UC_HOOK_CODE, h, begin=DEFAULT_HANDLER, end=DEFAULT_HANDLER)
 
     # --- memory -----------------------------------------------------------
     def write(self, va, data):
