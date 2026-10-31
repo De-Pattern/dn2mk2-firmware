@@ -36,8 +36,6 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button:disabled { opacity: .45; cursor: default; }
 .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; color: var(--dim); }
 .pill.ok { color: var(--ok); border-color: var(--ok); } .pill.bad { color: var(--bad); border-color: var(--bad); } .pill.warn { color: var(--warn); border-color: var(--warn); }
-#drop { border: 2px dashed var(--line); border-radius: 10px; padding: 26px; text-align: center; color: var(--dim); transition: border-color .15s, background .15s; }
-#drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); }
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); }
 th { color: var(--dim); font-weight: 500; font-size: 12px; }
@@ -47,7 +45,7 @@ th { color: var(--dim); font-weight: 500; font-size: 12px; }
 .scrollbox thead th { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); }
 .scrollbox tr:last-child td { border-bottom: 0; }
 .scrollbox:has(tbody:empty) { display: none; }
-td.num, th.num { text-align: right; }
+td.num, th.num { text-align: right; white-space: nowrap; }
 td input[type=number] { padding: 3px 6px; font-family: ui-monospace, Consolas, monospace; }
 td input[type=text] { width: 7.5em; padding: 3px 6px; font-family: ui-monospace, Consolas, monospace; text-transform: uppercase; }
 tr[draggable=true] { cursor: grab; }
@@ -68,6 +66,49 @@ progress { width: 100%; height: 12px; accent-color: var(--accent); }
 .x { background: none; border: none; color: var(--dim); padding: 2px 6px; }
 .x:hover { color: var(--bad); }
 @media (max-width: 640px) { .hide-sm { display: none; } td input[type=text] { width: 6em; } }
+/* v0.34 page: Transfer-style, this computer on the left, the instrument on the right */
+main { max-width: 1240px; }
+.tabs { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.tab { border: 0; border-radius: 0; background: var(--bg); color: var(--dim); padding: 7px 14px; }
+.tab + .tab { border-left: 1px solid var(--line); }
+.tab[aria-selected=true] { background: var(--accent); color: #111; font-weight: 600; }
+.panes { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; margin-top: 12px; align-items: stretch; }
+.pane { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); min-width: 0; transition: border-color .15s, background .15s; }
+.pane.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--bg)); }
+.pane-head, .pane-foot { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 10px; }
+.pane-head { border-bottom: 1px solid var(--line); }
+.pane-foot { border-top: 1px solid var(--line); min-height: 38px; }
+.pane-head b { font: 600 12px/1 ui-monospace, Consolas, monospace; letter-spacing: .1em; text-transform: uppercase; }
+.pane-head button, .pane-foot button { padding: 4px 9px; font-size: 13px; }
+.spacer { flex: 1; }
+.pane-body { flex: 1; overflow: auto; height: 400px; min-height: 200px; resize: vertical; }
+.pane-body table { margin: 0; }
+.pane-body thead th { position: sticky; top: 0; z-index: 1; background: var(--bg); box-shadow: inset 0 -1px 0 var(--line); }
+.pane-body .empty { color: var(--dim); text-align: center; padding: 60px 16px; }
+#drop .pane-body:has(#dropHint:not([style*="none"])) { border: 2px dashed var(--line); border-radius: 8px; margin: 8px; }
+.pane-foot .note { margin: 0; }
+.crumb { font: 600 12px/1 ui-monospace, Consolas, monospace; color: var(--dim); }
+.crumb a { color: var(--accent); cursor: pointer; text-decoration: none; }
+.mid { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; width: 120px; text-align: center; }
+.mid .note { margin: 0; font-size: 12px; }
+th.ck, td.ck { width: 28px; padding-right: 0; }
+tr.sel td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+tr.folder td { cursor: pointer; }
+tr.folder:hover td, tr.up:hover td { background: color-mix(in srgb, var(--text) 6%, transparent); }
+tr.up td { cursor: pointer; color: var(--dim); }
+.ico { display: inline-block; width: 1.3em; color: var(--accent); }
+#modeSel, #sliceSel { max-width: 100%; }
+label.proj-only { max-width: 100%; }
+#list td input.longIn { width: 100%; min-width: 9em; }
+#list td input.folderIn { width: 100%; min-width: 6em; }
+.lib-mode .proj-only, .proj-mode .lib-only { display: none !important; }
+.st-ok { color: var(--ok); } .st-bad { color: var(--bad); } .st-run { color: var(--accent); }
+@media (max-width: 860px) {
+  #list td input.longIn { min-width: 6em; } #list td input.folderIn { min-width: 4.5em; }
+  .panes { grid-template-columns: minmax(0, 1fr); }
+  .mid { flex-direction: row; width: auto; justify-content: flex-start; }
+  .pane-body { height: 300px; }
+}
 </style>
 </head>
 <body>
@@ -86,39 +127,65 @@ progress { width: 100%; height: 12px; accent-color: var(--accent); }
     <p id="devInfo" class="note">Allow MIDI (with SysEx) when the browser asks. Pick the ports named Digitone II.</p>
   </section>
 
-  <section>
-    <h2>2 · Samples to send</h2>
-    <div id="drop">Drop WAV files or folders here, or <button id="browseBtn">Browse files…</button> <button id="folderBtn">Browse a folder…</button>
-      <input id="fileIn" type="file" accept=".wav,audio/wav,audio/x-wav" multiple hidden>
-      <input id="dirIn" type="file" webkitdirectory multiple hidden>
-    </div>
-    <datalist id="folderList"></datalist>
-    <div class="row" style="margin-top:10px">
-      <label>Slices for SLICE:
+  <section id="xfer" class="lib-mode">
+    <h2>2 · Transfer</h2>
+    <div class="row">
+      <div class="tabs" role="tablist">
+        <button id="tabLib" class="tab" role="tab" aria-selected="true">+Drive library</button>
+        <button id="tabProj" class="tab" role="tab" aria-selected="false">Project slots (SAMP 1–122)</button>
+      </div>
+      <label class="proj-only">Slots:
+        <select id="modeSel">
+          <option value="fill">Replace all · SAMP 1, 2, 3… in list order</option>
+          <option value="pick">Replace all · choose each slot</option>
+          <option value="add">Add · keep what's on the instrument, choose each slot</option>
+        </select></label>
+      <label class="proj-only">Slices for SLICE:
         <select id="sliceSel">
           <option value="cue">the WAV's cue points</option>
           <option value="grid:4">grid of 4</option><option value="grid:8">grid of 8</option>
           <option value="grid:16">grid of 16</option><option value="grid:32">grid of 32</option>
           <option value="onsets">hits (onsets)</option><option value="none">none</option>
         </select></label>
-      <button id="clearBtn">Clear list</button>
-    </div>
-    <div class="row" style="margin-top:10px">
-      <label>Slots:
-        <select id="modeSel">
-          <option value="fill">Replace all · SAMP 1, 2, 3… in list order</option>
-          <option value="pick">Replace all · choose each slot</option>
-          <option value="add">Add · keep what's on the instrument, choose each slot</option>
-          <option value="lib">Into the +Drive library (v0.31 or later) · load them on the instrument</option>
-        </select></label>
     </div>
     <p id="modeNote" class="note"></p>
-    <div class="scrollbox" style="margin-top:10px"><table id="list">
-      <thead><tr><th>Slot</th><th>Name</th><th>Folder</th><th class="hide-sm">File</th><th class="num">Length</th><th class="num hide-sm">Slices</th><th class="num">Size</th><th></th></tr></thead>
-      <tbody></tbody>
-    </table></div>
-    <p id="listNote" class="note">Drag rows to change their slots. Slots 1–122 are yours.</p>
-    <p class="note">Names: the instrument's list shows the whole name (up to 35 characters); the seven letters under it are its short name, shown where there is less room. A folder groups samples in the instrument's sample browser (FUNC + YES in the sample list). A dropped folder's samples get its name.</p>
+    <div class="panes">
+      <div class="pane" id="drop">
+        <div class="pane-head"><b>This computer</b><span class="spacer"></span>
+          <button id="browseBtn">Add files…</button> <button id="folderBtn">Add a folder…</button>
+          <input id="fileIn" type="file" accept=".wav,audio/wav,audio/x-wav" multiple hidden>
+          <input id="dirIn" type="file" webkitdirectory multiple hidden>
+        </div>
+        <div class="pane-body">
+          <table id="list">
+            <thead><tr><th class="ck"><input type="checkbox" id="listAll" aria-label="Select all"></th><th class="proj-only">Slot</th><th>Name</th><th>Folder</th><th class="num hide-sm">Length</th><th class="num proj-only hide-sm">Slices</th><th class="num">Size</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="empty" id="dropHint">Drop WAV files or folders here</div>
+        </div>
+        <div class="pane-foot"><span id="listNote" class="note"></span><span class="spacer"></span>
+          <button id="removeSelBtn" disabled>Remove selected</button> <button id="clearBtn">Clear</button></div>
+      </div>
+      <div class="mid">
+        <button id="sendBtn" class="primary" disabled>Send →</button>
+        <p id="intoNote" class="note"></p>
+      </div>
+      <div class="pane" id="rightPane">
+        <div class="pane-head"><b>Digitone II</b> <span id="crumb" class="crumb"></span><span class="spacer"></span>
+          <button id="newFolderBtn" class="lib-only" disabled>New folder</button>
+          <button id="delSelBtn" class="lib-only" disabled>Delete selected</button>
+          <button id="reloadBtn" title="Read the instrument again" disabled>↻</button>
+        </div>
+        <div class="pane-body">
+          <table id="libT" class="lib-only"><thead><tr><th class="ck"><input type="checkbox" id="libAll" aria-label="Select all"></th><th>Name</th><th class="num">Size</th><th></th></tr></thead><tbody></tbody></table>
+          <table id="dev" class="proj-only"><thead><tr><th>Slot</th><th>Name</th><th class="num">Length</th><th>Kind</th></tr></thead><tbody></tbody></table>
+          <div class="empty" id="rightEmpty">Connect to see the instrument.</div>
+        </div>
+        <div class="pane-foot"><span id="libNote" class="note lib-only"></span><span id="devNote" class="note proj-only"></span></div>
+      </div>
+    </div>
+    <datalist id="folderList"></datalist>
+    <p class="note">Select samples on the left and press Send, or drag them onto the right; WAVs dropped straight onto the +Drive go into the folder that is open. Names: the instrument's list shows the whole name (up to 35 characters); the seven letters under it are its short name. A dropped folder's samples get its name as their folder. Moving, renaming and removing empty folders: on the instrument for now (+DRIVE, RIGHT); from here with the next firmware.</p>
   </section>
 
   <section>
@@ -140,24 +207,16 @@ progress { width: 100%; height: 12px; accent-color: var(--accent); }
   </section>
 
   <section>
-    <h2>4 · On the instrument now</h2>
-    <div class="scrollbox"><table id="dev"><thead><tr><th>Slot</th><th>Name</th><th class="num">Length</th><th>Kind</th></tr></thead><tbody></tbody></table></div>
-    <p id="devNote" class="note">Connect to read the slots.</p>
-    <h2 id="libHead" style="margin-top:18px;display:none">The +Drive library</h2>
-    <div class="scrollbox"><table id="libT" style="display:none"><thead><tr><th>#</th><th>Folder</th><th>Name</th><th class="num">Frames</th><th></th></tr></thead><tbody></tbody></table></div>
-    <p id="libNote" class="note" style="display:none"></p>
-  </section>
-
-  <section>
-    <h2>5 · Send</h2>
-    <div class="row"><button id="sendBtn" class="primary" disabled>Send to the Digitone II</button><span id="sendState" class="pill">idle</span></div>
-    <p id="sendNote" class="note">Sending replaces your samples on the instrument with this list (its slots as shown); recordings stay. The samples go to the +Drive first, then into the DSP; they load at every power-on.</p>
+    <h2>4 · Transfers</h2>
+    <div class="row"><span id="sendState" class="pill">idle</span></div>
+    <p id="sendNote" class="note"></p>
     <progress id="prog" value="0" max="1"></progress>
+    <div class="scrollbox" style="margin-top:10px"><table id="queue"><thead><tr><th>Sample</th><th>Into</th><th class="num">Size</th><th>Status</th></tr></thead><tbody></tbody></table></div>
     <div id="log"></div>
   </section>
 
   <section>
-    <h2>6 · Firmware</h2>
+    <h2>5 · Firmware</h2>
     <p class="note" style="margin-top:0">The mod itself (the sample machines, the recorder, PERC and the rest) is a Digitone II OS 1.11 update file, <span class="slot">DN2mod_vX.Y_NAME_OS1.11.syx</span>.
       Every build is checked by the project's ship gate before it is published, and only that exact file (its sha256) is cleared.
       Flash it as any Digitone II OS update (Elektron Transfer, or the instrument's SysEx receive), after backing up the +Drive.
@@ -457,7 +516,14 @@ if (typeof module !== "undefined") module.exports = DN2;
   let midi = null, out = null, inp = null, seq = 0x300, waiting = null;
   let dev = null;           /* {proto, room, ram, slots: [{k, off, frames, name}], lib: {rows, folders} | null} */
   let items = [];           /* [{file, name, w, slices, slot}] (slot: 0-based, for pick and add) */
-  let mode = "fill";        /* fill | pick | add */
+  let mode = "lib";         /* lib (the +Drive library) | fill | pick | add (the project's slots) */
+  let libAt = null;         /* the +Drive folder open on the right (its index), null: the folders */
+  const libSel = new Set(); /* ticked on the right: entry numbers, and "f<N>" for whole folders */
+  let queue = [];           /* the last send: [{name, into, bytes, st, cls}] */
+  const esc = v => String(v).replace(/[<&>"]/g, ch => ({ "<": "&lt;", "&": "&amp;", ">": "&gt;", '"': "&quot;" })[ch]);
+  /* into the library: the ticked samples, or all of them when none is ticked */
+  const toSend = () => mode !== "lib" ? items : (items.some(it => it.sel) ? items.filter(it => it.sel) : items);
+  const libFolder = f => (dev && dev.lib && dev.lib.folders[f]) || `FOLDER ${f + 1}`;
   let keep = null;          /* add: {kept: [{k, entry, name}], end} once checked, else {why} */
   const MEM_KEY = "dn2.sent.v1";      /* what this browser last sent (the directory, for Add) */
   function memRead() { try { return JSON.parse(localStorage.getItem(MEM_KEY) || "null"); } catch (e) { return null; } }
@@ -502,7 +568,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     }
   }
   function slotProblems() {
-    if (mode === "lib") return items.length > C.LIB_CAP ? `The library holds ${C.LIB_CAP} samples.` : "";
+    if (mode === "lib") return dev && dev.lib && toSend().length + dev.lib.rows.length > C.LIB_CAP ? `The library holds ${C.LIB_CAP} samples.` : "";
     if (mode === "fill") return items.length > C.USER_SLOTS ? `Only ${C.USER_SLOTS} slots.` : "";
     const seen = new Map();
     for (const it of items) {
@@ -633,7 +699,7 @@ if (typeof module !== "undefined") module.exports = DN2;
         if (!w.frames.length) throw new Error("no frames");
         const long = f.name.replace(/\.[^.]*$/, "").slice(0, C.LONG_MAX);
         items.push({ file: f.name, long, name: DN2.short(long), folder: (f.folder || "").slice(0, C.FOLDER_MAX), w,
-                     slices: DN2.slicing($("sliceSel").value, w), slot: null });
+                     slices: DN2.slicing($("sliceSel").value, w), slot: null, sel: false });
       } catch (e) { log(`${f.name}: ${e.message || e}`); }
     }
     refresh();
@@ -643,7 +709,7 @@ if (typeof module !== "undefined") module.exports = DN2;
   /* -- the page -- */
   function plan() {             /* -> {len: the image's end, send: bytes sent} without the audio */
     if (!items.length) return { len: 0, send: 0 };
-    if (mode === "lib") { const b = items.reduce((a, it) => a + 2 * it.w.frames.length, 0); return { len: 0, send: b }; }
+    if (mode === "lib") { const b = toSend().reduce((a, it) => a + 2 * it.w.frames.length, 0); return { len: 0, send: b }; }
     if (mode === "add" && keep && keep.kept) {
       let at = Math.ceil(Math.max(keep.end, C.DATA_OFFSET) / DN2.BLOCK) * DN2.BLOCK, sent = 0;
       if (at >= C.REC_OFFSET && at < C.REC_END) at = C.REC_END;
@@ -666,27 +732,37 @@ if (typeof module !== "undefined") module.exports = DN2;
   function refresh() {
     if (mode === "add") keep = checkKeep();
     assignSlots();
+    const lib = mode === "lib";
+    $("xfer").className = lib ? "lib-mode" : "proj-mode";
+    $("tabLib").setAttribute("aria-selected", lib); $("tabProj").setAttribute("aria-selected", !lib);
     const tb = $("list").tBodies[0]; tb.innerHTML = "";
     const devAt = new Map(dev ? dev.slots.map(s => [s.k, s]) : []);
     items.forEach((it, k) => {
-      const tr = document.createElement("tr"); tr.draggable = mode === "fill"; tr.dataset.k = k;
+      const tr = document.createElement("tr"); tr.draggable = mode === "fill" || lib; tr.dataset.k = k;
+      if (it.sel) tr.className = "sel";
       const sz = DN2.itemBytes(it.w.frames.length, it.slices.length);
-      const slotCell = mode === "lib" ? `<td class="slot">+DRIVE</td>` : mode === "fill" ? `<td class="slot">SAMP ${k + 1}</td>`
+      const slotCell = lib ? `<td class="slot proj-only"></td>` : mode === "fill" ? `<td class="slot">SAMP ${k + 1}</td>`
         : `<td class="slot">SAMP <input type="number" class="slotIn" min="1" max="${C.USER_SLOTS}" value="${it.slot == null ? "" : it.slot + 1}" style="width:4.5em"></td>`;
-      const over = mode !== "fill" && it.slot != null && devAt.get(it.slot);
-      const esc = v => String(v).replace(/[<&>"]/g, ch => ({ "<": "&lt;", "&": "&amp;", ">": "&gt;", '"': "&quot;" })[ch]);
-      tr.innerHTML = `${slotCell}<td><input type="text" class="longIn" maxlength="${C.LONG_MAX}" value="${esc(it.long)}" style="width:14em;text-transform:none"><div class="note slot" style="margin:2px 0 0">${esc(it.name)}</div></td>
-        <td><input type="text" class="folderIn" list="folderList" maxlength="${C.FOLDER_MAX}" value="${esc(it.folder)}" placeholder="–" style="width:9em;text-transform:none"></td>
-        <td class="hide-sm">${it.file.replace(/[<&>]/g, "")}${over ? ` <span class="pill warn">${over.rec ? "recording moves" : "replaces " + over.name.replace(/[<&>]/g, "")}</span>` : ""}</td>
-        <td class="num">${(it.w.frames.length / it.w.rate).toFixed(2)} s</td>
-        <td class="num hide-sm">${it.slices.length || "–"}</td><td class="num">${fmtMB(sz)}</td><td><button class="x" title="Remove">✕</button></td>`;
+      const over = mode !== "fill" && !lib && it.slot != null && devAt.get(it.slot);
+      tr.innerHTML = `<td class="ck"><input type="checkbox" class="selIn" ${it.sel ? "checked" : ""} aria-label="Select"></td>${slotCell}<td title="${esc(it.file)}"><input type="text" class="longIn" maxlength="${C.LONG_MAX}" value="${esc(it.long)}" style="text-transform:none"><div class="note slot" style="margin:2px 0 0">${esc(it.name)}${over ? ` <span class="pill warn">${over.rec ? "recording moves" : "replaces " + esc(over.name)}</span>` : ""}</div></td>
+        <td><input type="text" class="folderIn" list="folderList" maxlength="${C.FOLDER_MAX}" value="${esc(it.folder)}" placeholder="${lib ? "INCOMING" : "–"}" style="text-transform:none"></td>
+        <td class="num hide-sm">${(it.w.frames.length / it.w.rate).toFixed(2)} s</td>
+        <td class="num proj-only hide-sm">${it.slices.length || "–"}</td><td class="num">${fmtMB(lib ? 2 * it.w.frames.length : sz)}</td><td><button class="x" title="Remove from the list">✕</button></td>`;
+      tr.querySelector(".selIn").onchange = e => { it.sel = e.target.checked; refresh(); };
       tr.querySelector(".longIn").oninput = e => { it.long = e.target.value.replace(/[^ -~]/g, "").slice(0, C.LONG_MAX); it.name = DN2.short(it.long); tr.querySelector(".note").textContent = it.name; };
       tr.querySelector(".longIn").onchange = refresh;
       tr.querySelector(".folderIn").onchange = e => { it.folder = e.target.value.replace(/[^ -~]/g, "").trim().slice(0, C.FOLDER_MAX); refresh(); };
       const si = tr.querySelector(".slotIn");
       if (si) si.onchange = e => { const v = parseInt(e.target.value, 10); it.slot = Number.isFinite(v) ? v - 1 : null; refresh(); };
       tr.querySelector(".x").onclick = () => { items.splice(k, 1); refresh(); };
-      if (mode === "fill") {
+      if (lib) {                     /* drag onto the instrument: this row, or the ticked ones with it */
+        tr.ondragstart = e => {
+          if (!it.sel) { items.forEach(x => { x.sel = false; }); it.sel = true; }
+          e.dataTransfer.setData("application/x-dn2-items", "1"); e.dataTransfer.effectAllowed = "copy";
+          tr.classList.add("dragging");
+        };
+        tr.ondragend = () => { tr.classList.remove("dragging"); refresh(); };
+      } else if (mode === "fill") {
         tr.ondragstart = e => { tr.classList.add("dragging"); e.dataTransfer.setData("text/plain", String(k)); };
         tr.ondragend = () => tr.classList.remove("dragging");
         tr.ondragover = e => e.preventDefault();
@@ -694,11 +770,17 @@ if (typeof module !== "undefined") module.exports = DN2;
       }
       tb.append(tr);
     });
+    $("dropHint").style.display = items.length ? "none" : "";
+    const nSel = items.filter(it => it.sel).length;
+    $("listAll").checked = !!items.length && nSel === items.length;
+    $("listAll").indeterminate = nSel > 0 && nSel < items.length;
+    $("removeSelBtn").disabled = !nSel || busy;
+    $("clearBtn").disabled = !items.length || busy;
     const fl = $("folderList"); fl.innerHTML = "";
     [...new Set([...items.map(it => it.folder), ...(memRead()?.entries || []).map(e => e.folder || "")].filter(Boolean))].forEach(f => { const o = document.createElement("option"); o.value = f; fl.append(o); });
     const prob = slotProblems();
-    $("listNote").textContent = prob || (!items.length ? `No samples yet. Slots 1–${C.USER_SLOTS} are yours.`
-      : mode === "lib" ? `${items.length} sample(s) go into the +Drive library, each in its folder (INCOMING if none). Slices are not kept there.`
+    $("listNote").textContent = prob || (!items.length ? (lib ? "No samples yet." : `No samples yet. Slots 1–${C.USER_SLOTS} are yours.`)
+      : lib ? `${items.length} sample(s)` + (nSel ? `, ${nSel} ticked` : "")
       : mode === "fill" ? `${items.length} sample(s) go to SAMP 1–${items.length}, in this order. Drag rows to change their slots.`
       : `${items.length} sample(s), each to the slot beside it.`);
     $("listNote").className = "note " + (prob ? "bad" : "");
@@ -706,13 +788,13 @@ if (typeof module !== "undefined") module.exports = DN2;
       fill: "Everything of yours on the instrument is replaced by this list. Recordings stay.",
       pick: "Everything of yours on the instrument is replaced by this list, each sample in the slot you give it; the other slots are left empty. Recordings stay.",
       lib: dev && dev.proto < 5 ? "The library needs v0.31 or later on the instrument."
-        : "Nothing on the instrument's slots changes. On the instrument: FUNC + YES in the sample list, +DRIVE, the sample, RIGHT, LOAD TO PROJECT.",
+        : "The +Drive library is shared by every project; the project's slots do not change. On the instrument: FUNC + YES in the sample list, +DRIVE, the sample, RIGHT, LOAD TO PROJ. Slices are not kept in the library.",
       add: keep && keep.kept ? "Your samples on the instrument stay where they are; these go into the slots you give them (a slot that holds one of yours is replaced). Only the new samples are sent."
         : (keep ? keep.why : ""),
     }[mode];
     $("modeNote").className = "note " + ((mode === "add" && keep && !keep.kept) || (mode === "lib" && dev && dev.proto < 5) ? "warn" : "");
     $("sendNote").textContent = mode === "lib"
-      ? "Sends each sample into the +Drive library, one at a time, each checked. The project's samples and their slots stay as they are."
+      ? "Each sample goes into the +Drive library one at a time, each checked as it lands. The project's samples and their slots stay as they are."
       : mode === "add"
       ? "Sends the new samples and the slot list only. They go to the +Drive first, then everything loads into the DSP again; they load at every power-on. If a send is cut off, send again with Replace all."
       : "Sending replaces your samples on the instrument with this list; recordings stay. The samples go to the +Drive first, then into the DSP; they load at every power-on.";
@@ -727,8 +809,8 @@ if (typeof module !== "undefined") module.exports = DN2;
     const kept = mode === "add" && keep && keep.kept ? Math.max(0, Math.min(keep.end, C.REC_OFFSET) - C.DATA_OFFSET) + Math.max(0, keep.end - C.REC_END) : 0;
     const used = mode === "add" ? (pl.len ? Math.max(0, Math.min(pl.len, C.REC_OFFSET) - C.DATA_OFFSET) + Math.max(0, pl.len - C.REC_END) : kept) : send;
     /* v0.31: into the +Drive library its room is the +Drive's, not the project pool's */
-    const lib = mode === "lib", lr = dev && dev.lib ? dev.lib : null;
-    const libSend = lib ? items.reduce((a, it) => a + Math.ceil(2 * it.w.frames.length / 512) * 512, 0) : 0;
+    const lr = dev && dev.lib ? dev.lib : null;
+    const libSend = lib ? toSend().reduce((a, it) => a + Math.ceil(2 * it.w.frames.length / 512) * 512, 0) : 0;
     const libFree = lr && lr.room != null ? Math.max(0, lr.room - lr.used) : null;
     $("lCap").textContent = lib ? "room in the +Drive library" : "room for yours";
     $("lNow").textContent = lib ? "in the library now" : "yours on it now";
@@ -751,7 +833,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     if (recs) seg(recs, "var(--rec)", "recordings: " + fmtMB(recs));
     }
     const over = lib ? libFree != null && libSend > libFree : used > cap || pl.len > (ramOk ? C.POOL_BYTES : C.REC_OFFSET) || (!ramOk && pl.len > top);
-    $("memNote").textContent = over && lib ? `Too much: the library has ${fmtSize(libFree)} free. Remove some samples, or delete some from the library below.`
+    $("memNote").textContent = over && lib ? `Too much: the library has ${fmtSize(libFree)} free. Remove some samples, or delete some from the library (on the right).`
       : lib ? (lr && lr.room != null ? "The +Drive library, shared by every project. The project's own 400 MB (its slots) fills only when you load samples on the instrument." : "")
       : over ? `Too much: there is room for ${fmtMB(cap)}. Remove some samples.`
       : (!ramOk && dev ? "The instrument's RAM check did not pass this power-on, so only the first 128 MB load: room for 96 MB of yours." : "");
@@ -759,32 +841,82 @@ if (typeof module !== "undefined") module.exports = DN2;
     document.querySelector(".legend").innerHTML = lib ? '<span><i style="background:var(--yours)"></i>in the library</span><span><i style="background:var(--new)"></i>what you send</span>' : (kept ? '<span><i style="background:var(--yours)"></i>yours, kept</span>' : "")
       + '<span><i style="background:var(--rec)"></i>recordings (kept)</span><span><i style="background:var(--new)"></i>what you send</span>';
 
-    /* the instrument's slots */
+    /* the right pane: the instrument's slots, or its +Drive library */
     const db = $("dev").tBodies[0]; db.innerHTML = "";
     if (dev) {
       const mine = new Set(mode !== "fill" ? items.map(it => it.slot) : []);
       dev.slots.forEach(s => {
         const tr = document.createElement("tr");
         const kind = s.rec ? "recording · kept" : mode === "add" ? (mine.has(s.k) ? "yours · replaced" : "yours · kept") : "yours · replaced by a send";
-        tr.innerHTML = `<td class="slot">SAMP ${s.k + 1}</td><td class="slot">${s.name.replace(/[<&>]/g, "") || "–"}</td><td class="num">${fmtS(s.frames)}</td><td>${kind}</td>`;
+        tr.innerHTML = `<td class="slot">SAMP ${s.k + 1}</td><td class="slot">${esc(s.name) || "–"}</td><td class="num">${fmtS(s.frames)}</td><td>${kind}</td>`;
         db.append(tr);
       });
-      $("devNote").textContent = dev.slots.length ? "Recordings stay where they are; a recording whose slot your list takes moves to the first empty slot." : "Nothing on the instrument yet.";
-    }
+      $("devNote").textContent = dev.slots.length ? "Recordings stay where they are; a recording whose slot your list takes moves to the first empty slot." : "Nothing in the project's slots yet.";
+    } else $("devNote").textContent = "";
+    renderLib();
+    if (!lib) $("crumb").textContent = dev ? "PROJECT SLOTS" : "";
+    const ready = !!dev && !busy;
+    $("reloadBtn").disabled = !ready;
+    $("newFolderBtn").disabled = !ready || !lr;
+    $("delSelBtn").disabled = !ready || !lr || !libSel.size;
+    $("rightEmpty").style.display = !dev ? "" : lib && !lr ? "" : "none";
+    $("rightEmpty").textContent = !dev ? "Connect to see the instrument." : "The +Drive library needs v0.31 or later on the instrument.";
+    const n = toSend().length;
+    $("sendBtn").textContent = lib ? (n ? `Send ${n} →` : "Send →") : "Send →";
+    $("intoNote").textContent = !items.length ? "" : !lib ? (mode === "fill" ? (items.length > 1 ? `to SAMP 1–${items.length}` : "to SAMP 1") : "to the slots given")
+      : libAt != null ? `into ${libFolder(libAt)}` : "each into its folder";
+    $("sendBtn").disabled = !dev || !n || over || busy || !!prob || (mode === "add" && !(keep && keep.kept))
+      || (lib && (dev.proto < 5 || !lr));
+    renderQueue();
+  }
+
+  /* the +Drive library on the right: its folders, or one folder's samples */
+  function renderLib() {
     const lt = $("libT").tBodies[0]; lt.innerHTML = "";
-    const showLib = !!(dev && dev.lib);
-    ["libHead", "libT", "libNote"].forEach(id => { $(id).style.display = showLib ? "" : "none"; });
-    if (showLib) {
-      dev.lib.rows.forEach(e => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td>${e.k}</td><td>${(dev.lib.folders[e.folder] || "?").replace(/[<&>]/g, "")}</td><td class="slot">${e.name.replace(/[<&>]/g, "")}</td><td class="num">${e.frames}</td><td><button class="x" title="Delete from the +Drive">✕</button></td>`;
-        tr.querySelector(".x").onclick = () => libDelete(e);
-        lt.append(tr);
+    const lr = dev && dev.lib;
+    $("libT").style.display = lr ? "" : "none";
+    if (!lr) { $("crumb").textContent = ""; $("libNote").textContent = ""; return; }
+    if (libAt != null && !lr.folders[libAt] && !lr.rows.some(e => e.folder === libAt)) libAt = null;   /* gone */
+    const crumb = $("crumb"); crumb.innerHTML = "";
+    const top = document.createElement(libAt == null ? "span" : "a"); top.textContent = "+DRIVE"; crumb.append(top);
+    if (libAt != null) { top.onclick = () => openFolder(null); crumb.append(" / " + libFolder(libAt)); }
+    const add = (html, cls, onopen) => { const tr = document.createElement("tr"); tr.innerHTML = html; if (cls) tr.className = cls; if (onopen) tr.onclick = e => { if (!e.target.closest("input,button")) onopen(); }; lt.append(tr); return tr; };
+    const tick = (key, tr) => { const c = tr.querySelector(".ck input"); if (!c) return; c.checked = libSel.has(key); if (c.checked) tr.classList.add("sel"); c.onchange = e => { e.target.checked ? libSel.add(key) : libSel.delete(key); refresh(); }; };
+    let keys = [];
+    if (libAt == null) {
+      const count = new Map(); lr.rows.forEach(e => count.set(e.folder, (count.get(e.folder) || 0) + 1));
+      const fs = [...new Set([...lr.folders.map((n, f) => n ? f : -1).filter(f => f >= 0), ...count.keys()])]
+        .sort((a, b) => a < 2 || b < 2 ? a - b : libFolder(a).localeCompare(libFolder(b), undefined, { numeric: true }));
+      fs.forEach(f => {
+        const n = count.get(f) || 0, bytes = lr.rows.filter(e => e.folder === f).reduce((a, e) => a + 2 * e.frames, 0);
+        const tr = add(`<td class="ck">${n ? `<input type="checkbox" aria-label="Select the folder">` : ""}</td><td><span class="ico">▸</span>${esc(libFolder(f))} <span class="note">${n ? n + " sample" + (n > 1 ? "s" : "") : "empty"}</span></td><td class="num">${n ? fmtSize(bytes) : ""}</td><td></td>`, "folder", () => openFolder(f));
+        tick("f" + f, tr); if (n) keys.push("f" + f);
       });
-      $("libNote").textContent = dev.lib.rows.length ? `${dev.lib.rows.length} of ${C.LIB_CAP} samples. Deleting one here frees its room; a project slot already loaded from it keeps its copy.` : "The library is empty.";
+      if (!fs.length) add(`<td></td><td class="note" colspan="3">The library is empty: send samples into it, or make a folder.</td>`);
+    } else {
+      add(`<td></td><td colspan="3"><span class="ico">‹</span>.. (all folders)</td>`, "up", () => openFolder(null));
+      const rows = lr.rows.filter(e => e.folder === libAt).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+      rows.forEach(e => {
+        const tr = add(`<td class="ck"><input type="checkbox" aria-label="Select"></td><td class="slot">${esc(e.name)}</td><td class="num">${fmtSize(2 * e.frames)}</td><td><button class="x" title="Delete from the +Drive">✕</button></td>`);
+        tick(e.k, tr); keys.push(e.k);
+        tr.querySelector(".x").onclick = () => libDelete([e.k]);
+      });
+      if (!rows.length) add(`<td></td><td class="note" colspan="3">Empty folder: drop WAVs here, or select samples on the left and Send.</td>`);
     }
-    $("sendBtn").disabled = !dev || !items.length || over || busy || !!prob || (mode === "add" && !(keep && keep.kept))
-      || (mode === "lib" && dev.proto < 5);
+    const all = $("libAll"), nk = keys.filter(k => libSel.has(k)).length;
+    all.checked = !!keys.length && nk === keys.length; all.indeterminate = nk > 0 && nk < keys.length; all.disabled = !keys.length;
+    all.onchange = () => { keys.forEach(k => all.checked ? libSel.add(k) : libSel.delete(k)); refresh(); };
+    const free = lr.room != null ? Math.max(0, lr.room - lr.used) : null;
+    $("libNote").textContent = `${lr.rows.length} of ${C.LIB_CAP} samples` + (free != null ? ` · ${fmtSize(free)} free` : "") + (libSel.size ? ` · ${selEntries().length} ticked` : "");
+  }
+  function openFolder(f) { libAt = f; libSel.clear(); refresh(); }
+  function selEntries() {             /* the ticked samples, whole folders' included */
+    const lr = dev && dev.lib; if (!lr) return [];
+    return lr.rows.filter(e => libSel.has(e.k) || libSel.has("f" + e.folder));
+  }
+  function renderQueue() {
+    const qb = $("queue").tBodies[0]; qb.innerHTML = "";
+    queue.forEach(q => { const tr = document.createElement("tr"); tr.innerHTML = `<td class="slot">${esc(q.name)}</td><td>${esc(q.into)}</td><td class="num">${fmtSize(q.bytes)}</td><td class="${q.cls || ""}">${esc(q.st)}</td>`; qb.append(tr); });
   }
 
   /* -- sending -- */
@@ -801,45 +933,88 @@ if (typeof module !== "undefined") module.exports = DN2;
       progress(q - p); p = q;
     }
   }
-  async function libDelete(e) {
-    if (busy || !confirm(`Delete ${e.name} from the +Drive library?`)) return;
-    busy = true;
-    try { await call(C.LIB.DELETE, [e.k & 255, e.k >> 8], 10000); log(`${e.name}: deleted from the +Drive`); await readLib(); }
-    catch (x) { log(String(x.message || x)); }
+  /* delete library entries KS (after asking) */
+  async function libDelete(ks) {
+    const lr = dev && dev.lib; if (busy || !lr || !ks.length) return;
+    const rows = lr.rows.filter(e => ks.includes(e.k));
+    const what = rows.length === 1 ? rows[0].name : `${rows.length} samples`;
+    if (!confirm(`Delete ${what} from the +Drive library? This cannot be undone. Project slots already loaded from ${rows.length === 1 ? "it" : "them"} keep their copies.`)) return;
+    busy = true; refresh();
+    let gone = 0;
+    try {
+      for (const e of rows) {
+        $("sendState").textContent = `deleting ${gone + 1} of ${rows.length}`;
+        await call(C.LIB.DELETE, [e.k & 255, e.k >> 8], 10000); gone++;
+        log(`${e.name}: deleted from the +Drive`);
+      }
+      $("sendState").textContent = `deleted ${gone}`; $("sendState").className = "pill ok";
+    } catch (x) { log(String(x.message || x)); $("sendState").textContent = "delete failed"; $("sendState").className = "pill bad"; }
+    libSel.clear();
+    try { await readLib(); } catch (x) { log(String(x.message || x)); }
+    busy = false; refresh();
+  }
+  const folderBytes = name => [...String(name).toUpperCase()].map(ch => ch.charCodeAt(0)).filter(c => c >= 32 && c < 127).slice(0, C.FOLDER_MAX);
+  async function newFolder() {
+    if (busy || !dev || !dev.lib) return;
+    const name = (prompt("New folder's name (up to 31 letters):", "") || "").trim();
+    const b = folderBytes(name);
+    if (!b.length) return;
+    busy = true; refresh();
+    try {
+      const f = (await call(C.LIB.FOLDER, b, 10000)).payload[0];
+      if (f === 0xFF) throw new Error("the instrument refused the folder (64 folders at most)");
+      log(`folder ${String.fromCharCode(...b)} made`);
+      await readLib(); libAt = f; libSel.clear();
+    } catch (x) { log(String(x.message || x)); }
     busy = false; refresh();
   }
   async function sendLib() {
-    const st = $("sendState"), total = items.reduce((a, it) => a + 2 * it.w.frames.length, 0);
+    const st = $("sendState"), list = [...toSend()], into = libAt != null ? libFolder(libAt) : null;
+    const total = list.reduce((a, it) => a + 2 * it.w.frames.length, 0);
+    queue = list.map(it => ({ it, name: it.long || it.name, into: into || (it.folder || "INCOMING").toUpperCase(), bytes: 2 * it.w.frames.length, st: "waiting" }));
+    renderQueue();
     let done = 0; const t0 = performance.now();
     st.textContent = "to the +Drive library"; st.className = "pill";
-    for (const it of [...items]) {
-      const fname = [...(it.folder || "INCOMING").toUpperCase()].map(ch => ch.charCodeAt(0)).filter(c => c >= 32 && c < 127).slice(0, C.FOLDER_MAX);
-      const f = (await call(C.LIB.FOLDER, fname.length ? fname : [73, 78, 67, 79, 77, 73, 78, 71])).payload[0];
-      if (f === 0xFF) throw new Error(`folder ${it.folder}: refused (64 folders at most)`);
-      const data = DN2.libSample({ frames: it.w.frames });
-      const b = (await call(C.LIB.BEGIN, DN2.libBegin(it.w.frames.length, f, it.w.rate, it.long || it.name), 10000)).payload;
-      const k = new DataView(b.buffer, b.byteOffset, b.length).getUint32(0, true);
-      for (let o = 0; o < data.length; o += 512) {
-        await call(C.LIB.WRITE, [...DN2.le32(o), ...data.subarray(o, Math.min(o + 512, data.length))], 5000, 1);
-        done += Math.min(512, data.length - o);
-        if ((done & 0xFFFF) < 512) {
-          rate = done / Math.max((performance.now() - t0) / 1000, 0.001);
-          $("prog").value = done / total;
-          st.textContent = `to the +Drive library ${Math.floor(100 * done / total)} % · ${Math.ceil((total - done) / rate)} s left`;
+    for (const q of queue) {
+      const it = q.it;
+      q.st = "sending"; q.cls = "st-run"; renderQueue();
+      try {
+        const fname = folderBytes(q.into);
+        const f = (await call(C.LIB.FOLDER, fname.length ? fname : folderBytes("INCOMING"))).payload[0];
+        if (f === 0xFF) throw new Error(`folder ${q.into}: refused (64 folders at most)`);
+        const data = DN2.libSample({ frames: it.w.frames });
+        const b = (await call(C.LIB.BEGIN, DN2.libBegin(it.w.frames.length, f, it.w.rate, it.long || it.name), 10000)).payload;
+        const k = new DataView(b.buffer, b.byteOffset, b.length).getUint32(0, true);
+        for (let o = 0; o < data.length; o += 512) {
+          await call(C.LIB.WRITE, [...DN2.le32(o), ...data.subarray(o, Math.min(o + 512, data.length))], 5000, 1);
+          done += Math.min(512, data.length - o);
+          if ((done & 0xFFFF) < 512) {
+            rate = done / Math.max((performance.now() - t0) / 1000, 0.001);
+            $("prog").value = done / total;
+            st.textContent = `to the +Drive library ${Math.floor(100 * done / total)} % · ${Math.ceil((total - done) / rate)} s left`;
+            q.st = `sending ${Math.floor(100 * Math.min(o + 512, data.length) / data.length)} %`; renderQueue();
+          }
         }
+        await call(C.LIB.END, DN2.le32(DN2.adler(data)), 20000, 1);
+        q.st = "✓ in the library"; q.cls = "st-ok";
+        log(`${q.name}: in the library, ${q.into} (entry ${k})`);
+        items.splice(items.indexOf(it), 1);
+      } catch (e) {
+        q.st = "failed: " + (e.message || e); q.cls = "st-bad";
+        queue.filter(r => r.st === "waiting").forEach(r => { r.st = "not sent"; r.cls = "st-bad"; });
+        renderQueue();
+        throw e;
       }
-      await call(C.LIB.END, DN2.le32(DN2.adler(data)), 20000, 1);
-      log(`${it.long || it.name}: in the library (entry ${k})`);
-      items.splice(items.indexOf(it), 1);
+      renderQueue();
     }
-    st.textContent = "done"; st.className = "pill ok"; $("prog").value = 1;
     await readLib();
+    st.textContent = "done"; st.className = "pill ok"; $("prog").value = 1;
   }
   async function send() {
     busy = true; refresh();
     const st = $("sendState");
     if (mode === "lib") {
-      try { await sendLib(); } catch (e) { st.textContent = "failed"; st.className = "pill bad"; log(String(e.message || e)); }
+      try { await sendLib(); } catch (e) { st.textContent = "failed"; st.className = "pill bad"; log(String(e.message || e)); try { await readLib(); } catch (x) { /* shown on the next refresh */ } }
       busy = false; refresh(); return;
     }
     try {
@@ -867,6 +1042,7 @@ if (typeof module !== "undefined") module.exports = DN2;
       }
       total = parts.reduce((a, [b, at]) => a + b.length - Math.max(0, Math.min(at + b.length, C.REC_END) - Math.max(at, C.REC_OFFSET)), 0);
       log(`${items.length} sample(s), image to ${fmtMB(end)}, ${fmtMB(total)} to send`);
+      queue = items.map(it => ({ name: it.long || it.name, into: "SAMP " + (it.slot + 1), bytes: DN2.itemBytes(it.w.frames.length, it.slices.length), st: "in this send", cls: "st-run" })); renderQueue();
       await call(C.CMD.BEGIN, DN2.be32(end), 10000);
       st.textContent = "to the +Drive"; let done = 0; const t0 = performance.now();
       for (const [buf, at] of parts) {
@@ -891,11 +1067,13 @@ if (typeof module !== "undefined") module.exports = DN2;
         await new Promise(r => setTimeout(r, 1000));
       }
       st.textContent = "done"; st.className = "pill ok"; $("prog").value = 1;
+      queue.forEach(q => { q.st = "✓ in the slot"; q.cls = "st-ok"; });
       log(`done: ${mode === "fill" ? `SAMP 1–${items.length}` : items.map(it => "SAMP " + (it.slot + 1)).join(", ")}; they load at every power-on`);
       await readDir();
       if (mode === "add") items = [];        /* they are on it now: the list starts again */
     } catch (e) {
       st.textContent = "failed"; st.className = "pill bad"; log(String(e.message || e));
+      queue.forEach(q => { q.st = "failed: send again"; q.cls = "st-bad"; });
     }
     busy = false; refresh();
   }
@@ -904,10 +1082,28 @@ if (typeof module !== "undefined") module.exports = DN2;
   $("connectBtn").onclick = connect;
   $("browseBtn").onclick = () => $("fileIn").click();
   $("fileIn").onchange = e => { addFiles([...e.target.files]); e.target.value = ""; };
-  const drop = $("drop");
-  ["dragenter", "dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
+  const drop = $("drop"), right = $("rightPane");
+  const isItems = e => [...e.dataTransfer.types].includes("application/x-dn2-items");
+  ["dragenter", "dragover"].forEach(t => drop.addEventListener(t, e => { if (isItems(e)) return; e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
-  drop.addEventListener("drop", e => dropped(e.dataTransfer));
+  drop.addEventListener("drop", e => { if (!isItems(e)) dropped(e.dataTransfer); });
+  /* onto the instrument: rows from the left, or WAVs straight from the computer (into the open folder) */
+  const canTake = () => mode === "lib" && dev && dev.lib && !busy;
+  ["dragenter", "dragover"].forEach(t => right.addEventListener(t, e => { if (!canTake()) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; right.classList.add("over"); }));
+  right.addEventListener("dragleave", e => { if (!right.contains(e.relatedTarget)) right.classList.remove("over"); });
+  right.addEventListener("drop", async e => {
+    e.preventDefault(); right.classList.remove("over");
+    if (!canTake()) return;
+    if (!isItems(e)) {
+      const before = new Set(items);
+      await dropped(e.dataTransfer);
+      const fresh = items.filter(it => !before.has(it));
+      if (!fresh.length) return;
+      items.forEach(it => { it.sel = fresh.includes(it); });
+    }
+    refresh();
+    if (!$("sendBtn").disabled) send();
+  });
   $("folderBtn").onclick = () => $("dirIn").click();
   $("dirIn").onchange = e => {
     const fs = [...e.target.files].map(f => { const p = (f.webkitRelativePath || "").split("/"); f.folder = p.slice(0, -1).join("/"); return f; });
@@ -916,7 +1112,14 @@ if (typeof module !== "undefined") module.exports = DN2;
   };
   $("sliceSel").onchange = reslice;
   $("modeSel").onchange = e => { mode = e.target.value; items.forEach(it => { if (mode === "fill") it.slot = null; }); refresh(); };
+  $("tabLib").onclick = () => { if (busy) return; mode = "lib"; refresh(); };
+  $("tabProj").onclick = () => { if (busy) return; mode = $("modeSel").value; items.forEach(it => { if (mode === "fill") it.slot = null; }); refresh(); };
   $("clearBtn").onclick = () => { items = []; refresh(); };
+  $("removeSelBtn").onclick = () => { items = items.filter(it => !it.sel); refresh(); };
+  $("listAll").onchange = e => { items.forEach(it => { it.sel = e.target.checked; }); refresh(); };
+  $("newFolderBtn").onclick = newFolder;
+  $("delSelBtn").onclick = () => libDelete(selEntries().map(e => e.k));
+  $("reloadBtn").onclick = async () => { if (busy || !dev) return; busy = true; refresh(); try { await readDir(); await readLib(); } catch (x) { log(String(x.message || x)); } busy = false; refresh(); };
   $("sendBtn").onclick = send;
   if (navigator.requestMIDIAccess) navigator.requestMIDIAccess({ sysex: true }).then(m => { midi = m; m.onstatechange = fillPorts; fillPorts(); }).catch(() => {});
   else { $("devInfo").textContent = "This browser has no Web MIDI: use Chrome or Edge."; $("devInfo").className = "note bad"; }

@@ -214,6 +214,15 @@ inharmonic modes).
    rename, delete and new folder from a right-click menu, each tick-selectable; the transfer
    queue below with each file's progress and result. The pool (PROJECT RAM) and the
    recordings stay their own view.
+   **Done on the page (2026-10-31, link 5 as it is):** the two panes (this computer |
+   the instrument, with tabs for the +Drive library and the project slots), tick-select on
+   both sides, Send into the open folder or each into its own, drag rows (or WAVs straight
+   from the desktop) onto the right, DELETE SELECTED (whole folders' samples too), NEW
+   FOLDER, the transfer queue with each file's progress and result. **Still needs the next
+   firmware**: link commands for MOVE (`smp_lib_move`), RENAME (`smp_lib_rename`) and
+   removing an empty folder (`smp_lib_folder_drop`); the unit-side functions exist since
+   v0.33, only lib.c's `smp_lib_rx` lacks the commands (24, 25, 26), then drag-to-move and
+   rename on the right pane.
 3. Also asked: **capicola** (heavylight's keyframe stretch, AGPL, github.com/heavylight-
    industries/keyframer-lab) as a CAPI switch on STRETCH, as the DT2 mod's; after the
    stability work (its SHARC glue, run.asm and dt2.c, not public yet).
