@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.33** | 2026-10-30 | The freeze hunt: a guard against all audio cutting out (a runaway voice), keys and menus that went dead (SLICE/GRID's YES after MACHINE SEL, keys whose release went elsewhere, the sample list left open on another track), stray DSP reads from a bad sample entry, a garbage-state and worst-case DSP stress test, a UI fuzz in the gate; +DRIVE preview (FUNC + YES), MOVE SELECTED, NEW FOLDER; PROJECT RAM ticks with YES; the recorder: no DEST, SRC/CHAN apart, TRIM zoom; slices from C1; SID on TRI; FUNC + NO backspace; LFO FUNC snaps back | `builds/v0.33-STEADY/` | yes |
+| **v0.34** | 2026-10-31 | The P-I voices that stayed dead (v0.33's guard never reset a wiped voice): fixed, and the guard now says which voice and whether its delay lines held the NaN (FUNC held: `V1D`/`V1X`; SysEx DIAG); SCAN reads any DSP memory for NaN (`tools/dn2diag.py`); the model's NaN as the core's; the gate: the audio interrupt at its real rate preempting our code (fuzz), the guard's wipe (runner 3w), the DSP's memory-cost clock | `builds/v0.34-TIMING/` | yes |
+| v0.33 | 2026-10-30 | The freeze hunt: a guard against all audio cutting out (a runaway voice), keys and menus that went dead (SLICE/GRID's YES after MACHINE SEL, keys whose release went elsewhere, the sample list left open on another track), stray DSP reads from a bad sample entry, a garbage-state and worst-case DSP stress test, a UI fuzz in the gate; +DRIVE preview (FUNC + YES), MOVE SELECTED, NEW FOLDER; PROJECT RAM ticks with YES; the recorder: no DEST, SRC/CHAN apart, TRIM zoom; slices from C1; SID on TRI; FUNC + NO backspace; LFO FUNC snaps back | `builds/v0.33-STEADY/` | yes |
 | v0.32 | 2026-10-29 | The DSP-time fix: the Machinedrum and Monomachine voices' working state in the DSP's fast internal memory, a CPU guard that measures the stock's share, a DSP load meter (FUNC held on PERC/Monomachine pages); FUNC + turn on our controls | `builds/v0.32-DSP/` | yes |
 | v0.31 | 2026-10-29 | The +Drive library (about 20 GB, folders; LOAD TO PROJECT / LOAD TO TRK in the browser's +DRIVE), sent from the import tool or dn2samples.py; the kit's samples load first at power-on (LOADING n%); a finished Machinedrum voice frees its DSP time; the browser's NO / NO held / page keys | `builds/v0.31-DRIVE/` | yes |
 | v0.30.1 | 2026-10-29 | Hotfix on v0.30: PERC's AMD no longer silences everything until a reboot (the sine it reads is loaded again) | `builds/v0.30.1-AMDFIX/` | yes |
@@ -71,6 +72,69 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.34 — TIMING (the timing model, the P-I voices that stayed dead, the unit's instruments)
+
+`DN2mod_v0.34_TIMING_OS1.11.syx`
+sha256 `22e79856d6ba10a9869a8ec3e44703261371f9366a60c9a72a4bb216ac181cd6`
+Gate: CLEARED TO FLASH, 2026-10-31. Source: commit `4c65984d`. Docs: `docs/timing-model.md`, `docs/user-reports.md` (O13, M1-M5, P1, O14).
+
+Everything in v0.33, plus:
+
+**P-I machines silent on the same voices every time** (the owner's O13: voice 1, then 4;
+P-I RS 1, 4, 9, 10, 12; locked to one voice, every note dead). v0.33's output guard, when it
+wiped a voice that went non-finite, wrote its loop counter instead of zeros, so the voice
+never reset: once poisoned, dead until a power-on. The wipe is right now: the next note
+sounds. Checked on the model and on the real DSP code (runner step 3w: a P-I voice's delay
+lines all NaN mid-note, the wipe, the record, the next note heard).
+
+**Why a voice goes bad is not known yet, so the unit can now say.** When the guard wipes a
+voice it records which voice and machine and where its P-I delay lines first held a NaN.
+Hold FUNC on a PERC or Monomachine page within two seconds of it: the tempo's place shows
+`V1D` (voice 1, the NaN was in its delay lines in DDR) or `V1X` (it was not: the voice's
+own state, its input or the effects). Over USB, SysEx DIAG (24) returns the record and
+SCAN (25) counts non-finite words in any DSP memory range: `python tools/dn2diag.py` runs
+both on voice 1's and 4's lines, before a note, after the note that kills them, and while
+idle (`watch`). That answers whether the memory is poisoned at power-on, by something else
+writing there, or by our own voice.
+
+**The model's NaN is the core's.** The DSP's float operations give an all-ones result for a
+NaN input; Python's `min(1.0, nan)` is 1.0, so the model could clamp a NaN away that the
+DSP carried. Not any more.
+
+**The gate** (`docs/timing-model.md`):
+- The UI fuzz runs with the audio interrupt firing on its own at its real cadence through
+  the real vectors (digikit's SSI0/eDMA model), preempting our ColdFire code as on the unit;
+  a CPU exception (the EXCEPTION screen on a unit), a lost interrupt or an audio frame
+  overrunning its budget fails a seed. Three harness faults found on the way: every
+  `frame:` step had been faulting (the snapshot's own v0.14 hooks left in place), the
+  alignment routine held vector 170, and the emulator could not execute BITREV (no note had
+  ever allocated a voice in it).
+- Runner step 3w (above); the stress test on a clock charged by memory (instructions + 4 x
+  L2 + 10 x DDR, calibrated against the unit's silent frame: S = 0.9, complex-ping's weights
+  hold); whole-block costs in step 3c.
+- What the ISR costs: stock about 40,300 instructions a frame; our link hook 420; with
+  sixteen sample tracks modulating, about 47,600 (+18 %). The unit's stock peaks of 75-83 %
+  of a frame leave little room: cheapening our per-frame work is next.
+
+**Tests**
+1. P-I BD on a PERC track, VOICE SETUP locked to 1 voice, tap a note: it sounds every time
+   (v0.33: silent). Dynamic allocation, sixteen taps: no voice stays dead.
+2. If a tap is silent: hold FUNC at once; the tempo's place shows `V<n>D` or `V<n>X`. Say
+   which.
+3. `python tools/dn2diag.py` over USB (Chrome closed, Transfer closed): right after a
+   power-on with no note played, then after a tap, then `watch` for a minute with nothing
+   playing. Send the output.
+4. The v0.33 list still holds: a busy PERC/MnM project, SLICE/GRID YES after MACHINE SEL,
+   LFO FUNC snap, +DRIVE preview and folders, the recorder, a fresh and an old project
+   after a power-cycle.
+
+**Known issues**
+- FUNC + YES preview in +DRIVE retriggers while held (misterairplane): next build.
+- Holding SYN shows no values on our pages (O14): next build.
+- LOAD TO PROJ sometimes needs a second load (Pablo P1): next build.
+- B10 (another track's LFO menu on a PERC track): next build.
+- The cause of the poisoned P-I voices: the scans above are how it is found.
 
 ## v0.33 — STEADY (the freeze hunt, +DRIVE preview and folders, the recorder reworked)
 
