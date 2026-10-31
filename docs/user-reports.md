@@ -145,6 +145,12 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
   clean); something in the studio chain. The runner now checks that every Monomachine machine
   leaves the stock tracks bit-identical.
 
+## Pablo Se7en (Discord, v0.33, 2026-10-31)
+
+| # | report | status |
+|---|---|---|
+| P1 | LOAD TO PROJ from the +Drive: some samples don't update in that slot and have to be loaded again | **open, next build**: the load queue (link.c lp_poll, v0.31) -- a queued load whose slot was already loaded, or a DIR refresh the page does not see; ask: the same slot each time? after a send from the computer? |
+
 ## The owner (v0.33, 2026-10-31)
 
 | # | report | status |
