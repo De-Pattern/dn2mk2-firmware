@@ -1347,6 +1347,7 @@ def step_chords(init, sound, machines, need=4) -> dict:
             k = MMx.NAMES.index(name)
             typ = MMx.TYPES[k]
             b_now = {"b": 0}
+            hist_of, last_hist = [None], [None]
 
             def cycles(r):
                 return int(getattr(r, "steps_n", 0) + S * (4 * counts["L2"] + 10 * counts["DDR"]))
@@ -1358,6 +1359,10 @@ def step_chords(init, sound, machines, need=4) -> dict:
                 for x in ("L1", "L2", "DDR"):
                     counts[x] = 0
                 counts["on"] = True
+                counts["hist"] = {} if b_now["b"] == 12 else None    # one sustained block's DDR pages
+                if b_now["b"] == 13:
+                    hist_of[0] = dict(last_hist[0] or {})
+                last_hist[0] = counts["hist"] if b_now["b"] == 12 else last_hist[0]
 
             def at_perc(r):
                 base = (b_now["b"] + 1) * P
@@ -1389,7 +1394,9 @@ def step_chords(init, sound, machines, need=4) -> dict:
                 sounding.append(sum(1 for t in range(4) if t in blk and V.peak(blk[t]["out"]) > 1e-4))
             fin = rr["ok"] and all(math.isfinite(x) for blk in rr["buffers"] for t in range(16) for x in blk[t])
             over = ((end - mark0) & 0xFFFFFFFF) / P if end is not None else None
-            nums[name] = {"sounding_min": min(sounding) if sounding else 0,
+            top = sorted((hist_of[0] or {}).items(), key=lambda kv: -kv[1])[:6]
+            nums[name] = {"ddr_pages_top": [(f"{pg << 12:#010x}", n) for pg, n in top],
+                          "sounding_min": min(sounding) if sounding else 0,
                           "sounding_mean": round(sum(sounding) / max(len(sounding), 1), 2),
                           "our_end_over_P": over and round(over, 3)}
             print(f"    {name}: {nums[name]}", flush=True)
@@ -1398,6 +1405,7 @@ def step_chords(init, sound, machines, need=4) -> dict:
                 f"the frame, finite"] = (rr["ok"] and fin and over is not None and over <= 0.8
                                          and nums[name]["sounding_min"] >= want)
     finally:
+        counts["hist"] = None
         undo_counts()
     return {"ok": all(res.values()), "checks": res, "numbers": nums}
 
@@ -1414,7 +1422,12 @@ def _count_memory():
         a = conc(a)
         if a is None:
             return None
-        return "DDR" if a >= 0x80000000 else "L2" if 0x20000000 <= a < 0x20200000 else "L1"
+        if a >= 0x80000000:
+            h = counts.get("hist")              # v0.36: where in DDR, by 4 KB page, when asked
+            if h is not None:
+                h[a >> 12] = h.get(a >> 12, 0) + 1
+            return "DDR"
+        return "L2" if 0x20000000 <= a < 0x20200000 else "L1"
     import sys as _s
     orig_r, orig_w = fx._dm_read, fx._dm_write
 

@@ -4280,10 +4280,10 @@ wr_pk_else_481.:
       R12 = 0x40;
       COMP(R5, R12);
       IF LT JUMP 0xbe1c87;                   // -> wr_pk_else_482.
-      R8 = 0x249f1;
+      R8 = 0xf4241;
 .GLOBAL wr_pk_else_482.;
 wr_pk_else_482.:
-      R12 = 0x249f0;
+      R12 = 0xf4240;
       COMP(R8, R12);
       IF LE JUMP 0xbe1c96;                   // -> wr_pk_else_483.
       R0 = 0x1;
