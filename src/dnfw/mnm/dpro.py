@@ -536,4 +536,11 @@ def bench_words(L: C.Layout) -> dict[int, int]:
     """the bench's memory past the shipped tables: the stand-in, built (and its done word)"""
     out = {L.DIGI + 4 * k: v for k, v in enumerate(digibank_reference(L))}
     out[L.DG["w"]] = 32
+    if L.DT_AT is not None:                    # v0.36: and the DPRO tables' copy in L2, as build() leaves it
+        from ..perc.dsl import bits
+        words = rom.table_words()
+        k0 = (L.DT_FROM - L.tables) // 4
+        for j in range(L.DT_WORDS):
+            out[L.DT_AT + 4 * j] = bits(words[k0 + j] * C.Q23)
+        out[L.DG["c"]] = 1
     return out
