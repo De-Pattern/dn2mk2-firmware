@@ -149,18 +149,29 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 
 | # | report | status |
 |---|---|---|
-| P1 | LOAD TO PROJ from the +Drive: some samples don't update in that slot and have to be loaded again | **open, next build**: the load queue (link.c lp_poll, v0.31) -- a queued load whose slot was already loaded, or a DIR refresh the page does not see; ask: the same slot each time? after a send from the computer? |
+| P1 | LOAD TO PROJ from the +Drive: some samples don't update in that slot and have to be loaded again | **v0.35**: the queue skipped a sample "already in the pool" when a slot held one of the same length whose name matched for seven letters (a pack's "808 KICK A" / "808 KICK B"): now the whole name, rate and format too (link.c smp_lib_slot_of) |
 
 ## The owner (v0.33, 2026-10-31)
 
 | # | report | status |
 |---|---|---|
-| O14 | Holding SYN on a stock machine shows every on-screen parameter's value on the SYN pages; on the mod's machines it does not | **open, next build**: the held-key value overlay (stock's page draw does it for its own parameter records; our pages draw their own) |
+| O14 | Holding SYN on a stock machine shows every on-screen parameter's value on the SYN pages; on the mod's machines it does not | **v0.35**: stock's key task sends a bit-3 item once a key is held; ours take it as SYN held and every page of ours (PERC, the Monomachine's, the sample machines' two pages) draws its values in the labels' place until SYN is let go (gate 6r) |
 
 ## blskk (Discord, 2026-10-31; the owner: not at face value, asked for specifics)
 
 - "the sample import program doesn't take a folder of files that well", "skipping wav files": the page reads a folder progressively now with a count and a skip summary (2026-10-31); a folder with nested .WAV files loads in the harness. Open until he says which files.
 - "arpeggiator, note edit and sampler make the digitone crash": no steps; the owner's arpeggiator works on every track. Open.
+
+## The scraper's list (DELTA-01..15, `docs/feedback/2026-10-31-discord.csv`, 2026-11-01)
+
+| # | report | status |
+|---|---|---|
+| DELTA-12 | flupperich6l (v0.33): choose one of the new machines, RIGHT to the filter machines: the FLTR column empty | **v0.35, found in the emulator**: MACHINE SEL's LEFT / RIGHT (0x4005ba9c) keeps the list's top row; stock's lists never scroll, ours (17 rows) does, so from a machine low in the list the FLTR column started past its own end. `colsw` (waverider/coldfire.py) puts the cursor on the column's current machine and follows. Gate 6r drives it and checks the drawn column |
+| DELTA-11 | Kokozi (v0.33): folders deleted on the instrument stay in the Sample Manager list, unselectable | a folder emptied by ticking it (FUNC + YES) and DELETE kept its name (only DELETE on the folder itself dropped it); the page offered no way to remove an empty folder. **v0.35**: both; the page's Delete selected takes empty folders (DROP, link 6) |
+| DELTA-05 / M5 | a recording in slot 2 previews but will not play | **v0.35**: `python tools/dn2diag.py entries` reads every slot's entry (ENTRY, 27) and says what the DSP's entry check makes of it; send its output |
+| DELTA-02 / M2 | two Monomachine voices system-wide | not reproduced (owner). To ask: USB CONFIG (Overbridge streams sixteen track buffers every block: DSP time the voices then lack), the DSP load with FUNC held on the page, which build |
+| DELTA-01 / M1 | VO-6 silent at some CONS (J-RR) and CLEN | the model swept over every consonant x CLEN, a note and a retrigger (`out/vo6/sweep.py`): see v0.35's notes |
+| DELTA-07 | arpeggiator / NOTE EDIT / sampler crash | no steps; open |
 
 ## misterairplane (Discord, v0.33, 2026-10-31)
 
@@ -168,7 +179,7 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 |---|---|---|---|
 | M1 | VO-6: no audio at some CONS settings, around J-RR; not every time. At some CLEN settings the notes go too | new in v0.33: the output guard zeroes a voice that goes non-finite (it used to poison the effects instead). A consonant at J-RR or a CLEN value may drive VO-6's state to inf/NaN, and the guard now silences that voice | **open**: runner sweep of VO-6 over every CONS and CLEN, looking for non-finite output; then fix the cause in the machine, not the guard |
 | M2 | Can't have more than two voices of any Monomachine engine | sounds like O1 (only a few voices sounding under dynamic allocation), which v0.29 fixed; may have come back | **not reproduced** (owner, v0.32, a new project: five MnM tracks, many voices on every engine). misterairplane (2026-10-31): two voices system-wide, two tracks or two notes on one track alike, LOCK or dynamic alike. Next: which machines, which OS version he is on (v0.29 fixed exactly this), a fresh project |
-| M3 | FUNC + YES preview in +DRIVE retriggers rapidly instead of playing through | likely v0.33's own: a key whose press was taken earlier is now handled as a new press, so the held YES's repeats each restart `fb_preview` | **open, v0.34**: a held YES on the same sample keeps playing; only a new press restarts |
+| M3 | FUNC + YES preview in +DRIVE retriggers rapidly instead of playing through | stock's key task sends repeat items (bit 3 with bit 0) while a key stays down; stock's handlers take them only where a hold means something (its lists' arrows), ours read every bit-0 item as a press | **v0.35**: a repeat of a key our overlays took does nothing (rec.c smp_ui_pop); a held YES also no longer ticks and unticks, a held arrow no longer steps twice |
 | M4 | Do samples record in stereo? Is there USB recording? | the pool and every sample machine are mono by design (the import tool mixes to mono too); stereo means twice the memory and new voice code. USB audio as a recorder source: check whether the stock OS routes it to the DSP | answered; requests |
 | M5 | One sample in PROJECT RAM won't play, but previews fine in the browser | v0.33's entry check plays an untrusted slot as empty; a valid sample it wrongly rejects would do exactly this. The check's rules match the link's (base past DATA_OFFSET, end inside 400 MB, format 0/1) | misterairplane (2026-10-31): sample slot 2, recorded directly on the machine; slot 1, recorded on a previous build, plays. **Next**: a recording's entry (the recorder's hole, format 1) through v0.33's entry check: read slot 2's entry over the link (DIR) and run entry_check on it; SysEx DIAG/SCAN (v0.34) on his unit |
 | O13 | (owner, v0.33) PERC P-I BD: the same voices always silent (voice 1 almost always, then 4 or 3); VOICE SETUP lock 1: silent every note; waiting changes nothing; CPU 52-70 %. P-I RS: voices 1, 4, 9, 10, 12, more than half the time | **found, v0.33's own**: the output guard's wipe (`perc/program.py` `out_guard` `blown()`) stores R0, which `dsl.loop` uses as its counter: it writes 32, 31 .. 1 instead of zeros, so a voice that once went non-finite never resets (`on` stays 32; the MD words and the P-I delay lines in DDR keep the NaN) and stays silent until a power-on. Not reproduced: why voices 1 and 4 go non-finite at all (P-I's own arithmetic is clamped; suspects: the delay lines at 0x82200000, outside the proven DDR range, written by something on the unit; or circular-buffer L registers at PERC's entry). **v0.34 (docs/timing-model.md)**: the wipe fixed (the voice resets, the next note sounds), the model's NaN made the core's, runner step 3w and a unit test; the guard records which voice and whether its delay lines held the NaN (FUNC held: `V1D` / `V1X` in the tempo's place; SysEx DIAG), and SCAN (SysEx 25) counts non-finite words in any DSP memory range, so the owner's unit can say whether voice 1's lines are poisoned at power-on, while idle, or only after a note. Still open: what poisons them |
