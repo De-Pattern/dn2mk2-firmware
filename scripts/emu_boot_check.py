@@ -48,6 +48,7 @@ ROOT = pathlib.Path("/mnt/d/01_Code/Z_Personal/dn2_firmware")
 SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
 CACHE = ROOT / "out/boot-check/control.json"
 REPORTER = 0x4011EA6A
+ANIZ_LIMIT = 700_000_000                 # v0.37: through the whole intro
 
 # **The control is only a control while the emulator it was measured on stays
 # put.** This caches what a stock boot does, because stock does not change --
@@ -121,6 +122,12 @@ def run(image_path, limit, frame_at, entries=(), aniz=None):
                 if not (0 <= k < len(aniz["expect"])) or got != aniz["expect"][k]:
                     aniz["wrong"].append(k)
             m.uc.hook_add(UC_HOOK_CODE, at_show, begin=aniz["show"], end=aniz["show"])
+
+            def at_stamp(uc, address, size, user):
+                aniz["calls"] += 1
+                if aniz["calls"] == 1:
+                    aniz["first_at"] = st["n"]
+            m.uc.hook_add(UC_HOOK_CODE, at_stamp, begin=aniz["stamp"], end=aniz["stamp"])
 
     m, st, stop = dspboot.run(str(SYX), open(image_path, "rb").read(), limit=limit,
                               machine_out=holder, pre_start=pre_start)
@@ -202,7 +209,11 @@ def main() -> int:
         from dnfw import bootanim                                # noqa: PLC0415
         from dnfw.mods import bootscreen                         # noqa: PLC0415
         aniz = {"show": bootscreen.SPEC["aniz_show"], "zst": bootscreen.SPEC["zst"],
+                "stamp": bootscreen.SPEC["stamp"], "calls": 0, "first_at": None,
                 "expect": bootanim.images(), "shown": 0, "frames": set(), "wrong": []}
+        # the intro starts near 400 M instructions from reset and runs 175 frames: the boot
+        # is followed past its end (the snapshot `boot400M` is taken just before it)
+        args.limit = max(args.limit, ANIZ_LIMIT)
     ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries, aniz)
     print(f"  {os.path.basename(os.path.dirname(args.image))}: {frames} frame(s) in "
           f"{ran:,} instruction(s), {round(time.time() - started, 1)}s\n")
@@ -228,6 +239,8 @@ def main() -> int:
     # verdict rather than a footnote under it.
     if aniz is not None:
         n = len(aniz["expect"])
+        print(f"  the intro called the stamp {aniz['calls']} time(s), the first at instruction "
+              f"{aniz['first_at']}")
         print(f"  start-up animation: {aniz['shown']} frame(s) shown, {len(aniz['frames'])} of {n} "
               f"distinct, {len(aniz['wrong'])} not the artist's")
         if aniz["wrong"] or len(aniz["frames"]) != n:

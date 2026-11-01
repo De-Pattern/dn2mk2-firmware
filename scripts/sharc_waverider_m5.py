@@ -2249,6 +2249,7 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
 
     own = {C[w] for w in ("pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa",
                           "pvl0", "pvln")}
+    own |= {SM.MAIN_TAP + 4 * k for k in range(64)}     # v0.37: the MAIN tap is the preview's too
     out, checks = {}, {}
     for name, left, loop in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True)):
         want, pva, pvn = model(left, mix_in, loop)
@@ -2266,6 +2267,8 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         checks[f"{name}: every register as stock's"] = same_regs
         checks[f"{name}: every word written as stock's (given the mixed block), but the preview's own"] = ok and not stray
         checks[f"{name}: the mix as the model's ({min(left, 16)} words added)"] = ok and got == want
+        tap = [m2.word(rm.state, SM.MAIN_TAP + 4 * k) or 0 for k in range(64)]
+        checks[f"{name}: v0.37: the MAIN tap holds the mix as it came, before the preview"] = ok and tap == mix_in
         if left == 0:
             checks["none: the mix untouched"] = ok and got == mix_in
         if loop:                                # v0.30: at its end it starts again
