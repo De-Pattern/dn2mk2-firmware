@@ -34,7 +34,7 @@ wr_pv_pv_2.:
       R3 = LSHIFT R2 BY 16;
       R12 = -0x10000;
       R2 = R2 AND R12;
-      R12 = -0x1f;
+      R12 = -0x20;
       F3 = FLOAT R3 BY R12;
       F2 = FLOAT R2 BY R12;
       R12 = LSHIFT R1 BY 3;

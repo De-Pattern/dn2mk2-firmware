@@ -2871,7 +2871,8 @@ PREVIEW_BYTES = 10 * 48000 * 2              # its longest: the DT2's ten seconds
 
 def pvmix(p: Prog, L: Layout) -> None:
     """MIX_BUF += frames [pva, pva + 2 min(pvn, 16)) of the preview (int16 pairs, the low
-    half first), on L and R alike; pva and pvn move on. Uses R0..R3, R12, R13, I1."""
+    half first) at half level (v0.37), on L and R alike; pva and pvn move on. Uses R0..R3,
+    R12, R13, I1."""
     C = L.C
     p.ld(0, C["pvn"])
     p.iconst(12, 0)
@@ -2893,8 +2894,11 @@ def pvmix(p: Prog, L: Layout) -> None:
                 p.lsh(3, 2, 16)               # the first (low half) on top
                 p.iconst(12, 0xFFFF0000 - (1 << 32))
                 p.iop(2, 2, "AND", 12)        # the second, on top
-                p.iconst(12, -31)
-                p.float_(3, 3, 12)            # int16 / 32768
+                # v0.37: at half (-6 dB): int16 / 65536. At full scale the preview sat ~6 dB
+                # over a sample track at its default VOL and LEVEL ((0.78)^2 x 0.79 = 0.48),
+                # which the preview skips (\x0x/, paQ: "really high", "at least 6dB")
+                p.iconst(12, -32)
+                p.float_(3, 3, 12)            # int16 / 65536
                 p.float_(2, 2, 12)
                 p.lsh(12, 1, 3)
                 p.iconst(13, SM.MIX_BUF)
