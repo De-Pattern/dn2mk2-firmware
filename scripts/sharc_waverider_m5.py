@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,garbage,wipe,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -1401,9 +1401,12 @@ def step_chords(init, sound, machines, need=4) -> dict:
                           "our_end_over_P": over and round(over, 3)}
             print(f"    {name}: {nums[name]}", flush=True)
             want = need if name != "DPRO-DDRW" else 1
-            res[f"{name}: at least {want} of the chord's 4 voices sound in every block, done by 0.8 of "
-                f"the frame, finite"] = (rr["ok"] and fin and over is not None and over <= 0.8
-                                         and nums[name]["sounding_min"] >= want)
+            flicker = any(b2 > a2 for a2, b2 in zip(sounding, sounding[1:]))    # a dropped voice back with no note
+            nums[name]["flicker"] = flicker
+            res[f"{name}: at least {want} of the chord's 4 voices sound in every block, a voice left out stays "
+                f"out until its next note (no flicker), done by 0.8 of the frame, finite"] = (
+                rr["ok"] and fin and over is not None and over <= 0.8 and not flicker
+                and nums[name]["sounding_min"] >= want)
     finally:
         counts["hist"] = None
         undo_counts()

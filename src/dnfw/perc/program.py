@@ -731,7 +731,8 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.iconst(12, MDK.Z_N)                     # ColdFire at power-on) are decoded
     p.e("COMP(R0, R12);")
     p.jump("LT", other)
-    G.around(p, L.C["t"], G.COST_PERC, BUFFERS, lambda: voice(p, L))   # v0.27: if it fits in the frame
+    G.around(p, L.C["t"], G.COST_PERC, BUFFERS, lambda: voice(p, L),   # v0.27: if it fits in the frame
+             rests=L.md.mnm.scratch + RESTS_OFF, rest_blocks=MNM_QUIET_BLOCKS)   # v0.36: else stolen
     p.jump("", nxt)
     # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
     # (v0.12: v0.11 resumed what it had left ringing)

@@ -199,10 +199,15 @@ def end_mark(p) -> None:
     p.st(OURS_END, 8)
 
 
-def around(p, t_word: int, cost: int, buffers: int, voice) -> None:
+def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = None,
+           rest_blocks: int = 0) -> None:
     """VOICE() if it fits, else the slot's buffer zeroed and the skip counted. T_WORD:
     the scratch word holding the slot; COST: the slots' cost words; BUFFERS: the track
-    buffers' pointers (0x254a60)."""
+    buffers' pointers (0x254a60). v0.36: RESTS (the slots' rest counters) given, a voice
+    left out is stolen: its counter set to REST_BLOCKS, so it rests (silent, free) until
+    its next note, as a synth steals its oldest voice. Before, it was tried again the next
+    block and, with time short, flickered in and out (DDRW's four-note chord: one block
+    two voices, the next one)."""
     skip = p.label("gskip")
     done = p.label("gdone")
     p.e("R8 = EMUCLK;")
@@ -237,6 +242,20 @@ def around(p, t_word: int, cost: int, buffers: int, voice) -> None:
     p.place(skip)
     p.comment("no time left in this frame: the voice is silent this block (its state kept),")
     p.comment("and its expected cost eased by a quarter, so it is tried again")
+    if rests is not None:
+        p.comment("v0.36: stolen: it rests until its next note")
+        p.ld(9, t_word)
+        p.lsh(9, 9, 2)
+        p.iconst(10, rests)
+        p.iop(9, 10, "+", 9)
+        p.seti(4, 9)
+        p.iconst(9, rest_blocks)
+        p.sti(0, 4, 9)
+        p.ld(9, t_word)                        # I5 again: the slot's cost word
+        p.lsh(9, 9, 2)
+        p.iconst(10, cost)
+        p.iop(9, 10, "+", 9)
+        p.seti(5, 9)
     p.ldi(9, 0, 5)                             # I5: the slot's cost word, still
     p.lsh(10, 9, -2)
     p.e("R9 = R9 - R10;")
