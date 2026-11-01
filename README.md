@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.34** | 2026-10-31 | The P-I voices that stayed dead (v0.33's guard never reset a wiped voice): fixed, and the guard now says which voice and whether its delay lines held the NaN (FUNC held: `V1D`/`V1X`; SysEx DIAG); SCAN reads any DSP memory for NaN (`tools/dn2diag.py`); the model's NaN as the core's; the gate: the audio interrupt at its real rate preempting our code (fuzz), the guard's wipe (runner 3w), the DSP's memory-cost clock | `builds/v0.34-TIMING/` | yes |
+| **v0.35** | 2026-11-01 | The bug sweep: MACHINE SEL's empty FLTR column after choosing a machine low in the list (v0.33), the +DRIVE preview retriggering while held, SYN held shows our pages' values, LOAD TO PROJ skipping same-length samples, deleted folders left in the list (and the import page can delete folders), PERC's names on another track's LFO page (B10); `dn2diag.py entries`; a new gate step that checks the drawn MACHINE SEL columns and SYN pages | `builds/v0.35-SWEEP/` | yes |
+| v0.34 | 2026-10-31 | The P-I voices that stayed dead (v0.33's guard never reset a wiped voice): fixed, and the guard now says which voice and whether its delay lines held the NaN (FUNC held: `V1D`/`V1X`; SysEx DIAG); SCAN reads any DSP memory for NaN (`tools/dn2diag.py`); the model's NaN as the core's; the gate: the audio interrupt at its real rate preempting our code (fuzz), the guard's wipe (runner 3w), the DSP's memory-cost clock | `builds/v0.34-TIMING/` | yes |
 | v0.33 | 2026-10-30 | The freeze hunt: a guard against all audio cutting out (a runaway voice), keys and menus that went dead (SLICE/GRID's YES after MACHINE SEL, keys whose release went elsewhere, the sample list left open on another track), stray DSP reads from a bad sample entry, a garbage-state and worst-case DSP stress test, a UI fuzz in the gate; +DRIVE preview (FUNC + YES), MOVE SELECTED, NEW FOLDER; PROJECT RAM ticks with YES; the recorder: no DEST, SRC/CHAN apart, TRIM zoom; slices from C1; SID on TRI; FUNC + NO backspace; LFO FUNC snaps back | `builds/v0.33-STEADY/` | yes |
 | v0.32 | 2026-10-29 | The DSP-time fix: the Machinedrum and Monomachine voices' working state in the DSP's fast internal memory, a CPU guard that measures the stock's share, a DSP load meter (FUNC held on PERC/Monomachine pages); FUNC + turn on our controls | `builds/v0.32-DSP/` | yes |
 | v0.31 | 2026-10-29 | The +Drive library (about 20 GB, folders; LOAD TO PROJECT / LOAD TO TRK in the browser's +DRIVE), sent from the import tool or dn2samples.py; the kit's samples load first at power-on (LOADING n%); a finished Machinedrum voice frees its DSP time; the browser's NO / NO held / page keys | `builds/v0.31-DRIVE/` | yes |
@@ -72,6 +73,68 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.35 — SWEEP (the reported bugs, worked through)
+
+`DN2mod_v0.35_SWEEP_OS1.11.syx`
+sha256 `2cf0fae42cf8aacb29e483236f55d9a636edc022f0f176b315367d8875a07a4e`
+Gate: CLEARED TO FLASH, 2026-11-01 (34 gates, nothing reused). Source: commit `4d5a499b`. Docs: `docs/user-reports.md` (DELTA-01..15, the scraper's list `docs/feedback/2026-10-31-discord.csv`).
+
+Everything in v0.34, plus:
+
+**MACHINE SEL: the FLTR column empty** (flupperich6l, v0.33). Choose a machine low in the
+list (a sample machine, a Monomachine machine), RIGHT to the filters: the column was blank.
+Stock keeps the list's scroll position when LEFT / RIGHT switches columns, and stock's lists
+never scroll; ours has seventeen rows, so the filter column started past its own end. Now
+the cursor goes to the column's current machine and the list follows it. Found and checked
+in the ColdFire emulator; **a new gate step (6r) drives it and checks what the screen
+draws**, so a page of ours that draws blank fails the gate.
+
+**FUNC + YES in +DRIVE retriggered while held** (misterairplane, a second user). The OS
+sends repeat items while a key stays down; stock's own screens use them only where a hold
+means something. Ours read each one as a new press. A repeat of a key our screens took now
+does nothing: the preview plays through; a held YES no longer ticks and unticks.
+
+**Holding SYN shows the values on our pages** (the owner's O14), as on the stock machines:
+PERC, the Monomachine machines and both pages of the sample machines. Let go: the labels.
+
+**LOAD TO PROJ sometimes didn't load** (Pablo Se7en P1). A library sample was taken as
+"already in the project" when a slot held one of the same length whose name matched for
+seven letters (a pack's `808 KICK A` / `808 KICK B`). Now the whole name, rate and format.
+
+**Deleted folders stayed in the Sample Manager list** (Kokozi). A folder emptied by ticking
+it and DELETE kept its name; now it goes. The import page's *Delete selected* also removes
+ticked folders (a new link command, so the page needs this build for it).
+
+**B10**: switching LFO pages between two PERC tracks showed the other track's parameter
+names. They follow the active track now.
+
+**For a sample that previews but won't play** (misterairplane M5): `python tools/dn2diag.py
+entries` lists every slot's entry and whether the DSP will play it.
+
+**VO-6 going silent** (misterairplane M1): the model run over every consonant and CLEN,
+with retriggers (378 runs): nothing goes non-finite. Its "stays silent" was v0.33's guard
+(fixed in v0.34). If a VO-6 note is silent on v0.34 or later, hold FUNC at once and read
+the tempo's place (`V<n>D` / `V<n>X`).
+
+**Tests**
+1. MACHINE SEL ([FUNC] + [SYN]) on a track, DOWN to GRID (or SID), YES, RIGHT: the filter
+   list is shown from MULTI-MODE; LEFT: back on GRID. The same from FM TONE (stock's case).
+2. +DRIVE, a sample, hold FUNC + YES: it plays through (up to ten seconds) while held.
+3. Hold SYN on a PERC, a Monomachine and a sample machine's page: values in place of the
+   labels, both sample pages; let go: labels.
+4. Two PERC tracks with different machines, the LFO page on track 1, TRK + track 2: DEST
+   and the header name track 2's controls.
+5. LOAD TO PROJ a few samples of one pack (similar names): every one lands in its own slot.
+6. Tick an empty or full folder in +DRIVE, DELETE: the folder is gone from the list.
+7. The v0.34 list still: P-I BD locked to one voice sounds every note; `V<n>D`/`V<n>X` if
+   one is silent; `python tools/dn2diag.py` (and now `entries`) over USB.
+
+**Known issues**
+- Why a P-I or VO-6 voice goes non-finite on the unit: open; the `V<n>D` / `V<n>X` readout
+  and `dn2diag.py` are how it is found.
+- Two Monomachine voices at most (misterairplane M2): not reproduced; asked for details.
+- Arpeggiator / NOTE EDIT / sampler crash (blskk): no steps yet.
 
 ## v0.34 — TIMING (the timing model, the P-I voices that stayed dead, the unit's instruments)
 
@@ -559,7 +622,7 @@ Gate: CLEARED TO FLASH, 2026-10-27 (USB size 2,049,189 of 2,097,152; DSP image 1
 **The lines are one again.** v0.27 is v0.26 merged into the Monomachine line (MNM-1): everything
 in v0.26, plus the five Monomachine machines (SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens, VO-6),
 without CZ PHASE and RESONATOR. v0.26 stays as the fallback. The patcher asks for the
-**Monomachine SFX-6 OS 1.32B** file as a fourth file for this build. The Monomachine machines are
+**Monomachine SFX-6/60 OS 1.32B** file (`Elektron_SFX6-60_OS1.32B.syx`) as a fourth file for this build. The Monomachine machines are
 as they were in MNM-1 (their fixes and redrawn pages come next).
 
 **The DSP's frame-time guard (your audio dropout).** Two PERC tracks p-locked, with a sample
@@ -691,7 +754,7 @@ Gate: CLEARED TO FLASH, 2026-10-26 (USB size 2,047,775 of 2,097,152; DSP image 1
 **Not a numbered version.** It is everything in v0.25 except CZ PHASE and RESONATOR (removed),
 plus the Monomachine machines. The numbered line (v0.25 and on) stays without them until we
 decide which line goes on. The patcher builds it too: it asks for a fourth file, the
-**Monomachine SFX-6 OS 1.32B** .syx, for this build only.
+**Monomachine SFX-6/60 OS 1.32B** .syx (`Elektron_SFX6-60_OS1.32B.syx`), for this build only.
 
 **Adds.**
 - **Five machines from the Monomachine**, each its own MACHINE SEL entry, after PERC: **SID 6581**,
