@@ -1,9 +1,9 @@
 """v0.37: the start-up animation (by s!Rwa², the DN2MK2 community, 2026-11-01): 59 frames of
 128 x 64, one bit, played over the intro in place of Elektron's tunnel.
 
-`bootanim_dn2mk2.bin` holds the frames as the artist delivered them: 1,024 bytes a frame,
-page-major (8 pages of 128 bytes, each byte a column of 8 pixels, bit 0 the top one).
-DURATIONS_MS is the artist's timing, frame by frame.
+`bootanim_dn2mk2.json` holds the frames as the artist delivered them (base64): 1,024 bytes a
+frame, page-major (8 pages of 128 bytes, each byte a column of 8 pixels, bit 0 the top one),
+and the artist's timing, frame by frame (DURATIONS_MS here, checked against it).
 
 The firmware gets an `ANIZ` chunk (scripts/gen_bootscreen_code.py decodes it):
 
@@ -34,11 +34,16 @@ INTRO_FPS = 30
 INTRO_FRAMES = 175
 CHUNK = b"ANIZ"
 DURATIONS_MS = (160,) + (80,) * 43 + (170, 80, 160, 80, 160, 80, 80, 160) + (80,) * 6 + (240,)
-SOURCE = pathlib.Path(__file__).with_name("bootanim_dn2mk2.bin")
+SOURCE = pathlib.Path(__file__).with_name("bootanim_dn2mk2.json")
 
 
 def frames_pixels() -> list[set[tuple[int, int]]]:
-    raw = SOURCE.read_bytes()
+    import base64
+    import json
+    doc = json.loads(SOURCE.read_text())
+    raw = base64.b64decode(doc["data_base64"])
+    if tuple(doc["durations_ms"]) != DURATIONS_MS:
+        raise ValueError(f"{SOURCE.name}: the timing is not DURATIONS_MS")
     n = len(raw) // FRAME_BYTES
     if n * FRAME_BYTES != len(raw) or n != len(DURATIONS_MS):
         raise ValueError(f"{SOURCE.name}: {len(raw)} bytes, {len(DURATIONS_MS)} durations")
