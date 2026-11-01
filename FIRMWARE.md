@@ -559,7 +559,7 @@ Gate: CLEARED TO FLASH, 2026-10-27 (USB size 2,049,189 of 2,097,152; DSP image 1
 **The lines are one again.** v0.27 is v0.26 merged into the Monomachine line (MNM-1): everything
 in v0.26, plus the five Monomachine machines (SID 6581, DPRO Wave, DPRO Ddrw, DPRO Dens, VO-6),
 without CZ PHASE and RESONATOR. v0.26 stays as the fallback. The patcher asks for the
-**Monomachine SFX-6 OS 1.32B** file as a fourth file for this build. The Monomachine machines are
+**Monomachine SFX-6/60 OS 1.32B** file (`Elektron_SFX6-60_OS1.32B.syx`) as a fourth file for this build. The Monomachine machines are
 as they were in MNM-1 (their fixes and redrawn pages come next).
 
 **The DSP's frame-time guard (your audio dropout).** Two PERC tracks p-locked, with a sample
@@ -691,7 +691,7 @@ Gate: CLEARED TO FLASH, 2026-10-26 (USB size 2,047,775 of 2,097,152; DSP image 1
 **Not a numbered version.** It is everything in v0.25 except CZ PHASE and RESONATOR (removed),
 plus the Monomachine machines. The numbered line (v0.25 and on) stays without them until we
 decide which line goes on. The patcher builds it too: it asks for a fourth file, the
-**Monomachine SFX-6 OS 1.32B** .syx, for this build only.
+**Monomachine SFX-6/60 OS 1.32B** .syx (`Elektron_SFX6-60_OS1.32B.syx`), for this build only.
 
 **Adds.**
 - **Five machines from the Monomachine**, each its own MACHINE SEL entry, after PERC: **SID 6581**,

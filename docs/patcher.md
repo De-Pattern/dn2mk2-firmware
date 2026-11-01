@@ -3,7 +3,7 @@
 The mod's build is pure Python (the standard library only) and reads Elektron's files:
 the DN2 OS 1.11 it patches, the DT2 OS 1.16/1.17 DSP image (section 7, for the sample
 reader's tables), the Machinedrum UW OS 1.63 (for PERC's MD machines) and, from v0.26, the
-Monomachine SFX-6 OS 1.32B (for the Monomachine machines, `docs/mnm.md`). Each version's
+Monomachine SFX-6/60 OS 1.32B (`Elektron_SFX6-60_OS1.32B.syx`, for the Monomachine machines, `docs/mnm.md`). Each version's
 row in builds.json lists the files its build reads (`inputs`; none listed: the first three),
 and the page asks for those. So the
 same build runs in a browser under Pyodide, from the owner's own copies of those files,
