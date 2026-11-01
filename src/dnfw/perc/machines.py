@@ -115,7 +115,8 @@ class Layout:
     """Addresses the program is built for (dnfw.waverider.dsp provides them)."""
 
     def __init__(self, state, scratch, tables, sin, md_state=None, md_tables=None,
-                 mnm_scratch=0, mnm_tables=0, md_shipped=None, md_ready=None, md_delay=None):
+                 mnm_scratch=0, mnm_tables=0, md_shipped=None, md_ready=None, md_delay=None,
+                 mnm_dt=None):
         self.state, self.tables, self.sin = state, tables, sin
         self.C = {w: scratch + 4 * k for k, w in enumerate(SC_WORDS)}
         _, at = tables_bytes()
@@ -129,7 +130,7 @@ class Layout:
                              shipped=md_shipped, ready=md_ready, delay=md_delay)
         # v0.26: the Monomachine machines' buffers and tables (dnfw.mnm, docs/mnm.md)
         from ..mnm import core as MNC
-        self.md.mnm = MNC.Layout(self, mnm_scratch, mnm_tables)
+        self.md.mnm = MNC.Layout(self, mnm_scratch, mnm_tables, dt_at=mnm_dt)   # v0.36: DPRO tables in L2
 
 
 # -- primitives -----------------------------------------------------------------------------

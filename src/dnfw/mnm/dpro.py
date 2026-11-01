@@ -462,6 +462,22 @@ def build(p: Prog, L: C.Layout) -> None:
     W = L.W
 
     def go():
+        if L.DT_AT is not None:                 # v0.36: the DPRO tables to L2, once, first
+            def copy():
+                p.iconst(1, L.DT_FROM)
+                p.seti(1, 1)
+                p.iconst(1, L.DT_AT)
+                p.seti(2, 1)
+
+                def word():                      # (R0 is the loop's counter)
+                    p.ldpost(3, 1)
+                    p.stpost(2, 3)
+                p.loop(W["osc"], L.DT_WORDS, word)
+                p.iconst(1, 1)
+                p.st(L.DG["c"], 1)
+            p.ld(1, L.DG["c"])
+            p.ifz(1, "EQ", copy)
+
         def one():
             p.ld(1, L.DG["w"])
             p.iconst(12, 32)

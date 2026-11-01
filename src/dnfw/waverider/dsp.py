@@ -96,6 +96,10 @@ MD_TABLES_DDR = 0x82000000
 MD_STATE_L2 = 0x200A0000
 MNM_SCRATCH_L2 = 0x200A4000
 MNM_SCRATCH_BYTES = 0x4000
+# v0.36: the DPRO tables (DDRW's and DENS's busiest DDR reads, dnfw.mnm.core DP_TABLES: 976
+# words), copied here from the Monomachine tables by the Digibank build, once
+MNM_DT_L2 = MNM_SCRATCH_L2 + MNM_SCRATCH_BYTES        # 0x200A8000
+MNM_DT_BYTES = 0x1000
 MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
@@ -373,6 +377,8 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                 bytes(16 * _md_core().MD_STRIDE)))
     out.append(("Monomachine scratch and the voice order, in L2 (zeros; v0.32)", MNM_SCRATCH_L2,
                 bytes(MNM_SCRATCH_BYTES)))
+    out.append(("the DPRO tables' room in L2 (zeros, filled by the build; v0.36)", MNM_DT_L2,
+                bytes(MNM_DT_BYTES)))
     return out
 
 

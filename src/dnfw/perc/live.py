@@ -33,6 +33,7 @@ def layout(state=None, scratch=None, tables=None, sin=None) -> M.Layout:
                     md_state=dsp.MD_STATE_L2, md_tables=dsp.MD_TABLES_DDR,
                     md_delay=dsp.MD_DELAY_DDR, mnm_scratch=dsp.MNM_SCRATCH_L2,
                     mnm_tables=dsp.MD_TABLES_DDR + MDC.TABLE_LAYOUT["mnm"][0],
+                    mnm_dt=dsp.MNM_DT_L2,
                     md_shipped=dsp.SMP_POOL_DDR + SM.TABLE_AREA,
                     md_ready=dsp.SMP_POOL_DDR + SM.TABLE_READY)
 
