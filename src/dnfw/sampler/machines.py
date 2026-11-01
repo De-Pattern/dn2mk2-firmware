@@ -132,7 +132,13 @@ USER_BYTES = POOL_BYTES - HOLE_BYTES - DATA_OFFSET
 REC_UNIT = 512
 REC_MIN_BYTES = 0x10000                    # the least room a recording starts in
 IN_BUF = 0x268538                          # the engine's input block: L 32 floats, R at +0x80
-MIX_BUF = 0x268438                         # the main mix (the last block's when we run)
+MIX_BUF = 0x268438                         # the main mix: filled after our code runs, by the master mix's caller
+# v0.37 (the owner: resampling MAIN L+R recorded an empty sample): MIX_BUF is empty while our
+# code runs (the runner, 2026-11-01: 0.0 every block with an FM track sounding); it is whole
+# only at the master mix call, where wr_pvmix runs. pvmix copies it here first (before the
+# preview goes in, so a preview is never recorded) and the recorder's MAIN reads this: the
+# block before, L 32 floats then R 32 (dnfw.waverider.dsp.MAIN_TAP_L2)
+MAIN_TAP = 0x200A9000
 TRK_BUF = 0x259F68                         # track t's audio, panned, the last block's: L at
 TRK_STRIDE = 0x100                         # + 0x100 k, R at + 0x80 (Overbridge's per-track source B),
 TRK_ROUTE = 0x257898                       # k = the s16 at TRK_ROUTE + 2t (the ColdFire's slot map)

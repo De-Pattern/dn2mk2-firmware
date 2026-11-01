@@ -2077,6 +2077,32 @@ def step_rec(init, sound, machines, blocks) -> dict:
     rec2.pop("state", None)
     close2 = bool(got2) and max(abs(a - b) for a, b in zip(got2, want2)) <= 2 / 32768
 
+    # run 3, v0.37: MAIN, L+R (the owner: resampling MAIN recorded an empty sample; MIX_BUF is
+    # empty while our code runs, so MAIN reads the tap pvmix fills at the master mix call,
+    # SM.MAIN_TAP: poked here as pvmix would leave it, and MIX_BUF itself left empty)
+    mainL = [0.4 * _m.sin(2 * _m.pi * 220 * k / 48000) for k in range(32 * n)]
+    mainR = [0.2] * (32 * n)
+    state3 = {"b": 0}
+
+    def at_dispatch_3(r):
+        b = state3["b"]
+        if b == 0:
+            command(r, 11, SM.CMD_NOW, src=1, chan=0, dest=2, place=0x8000)
+        for k in range(32):
+            m2.poke(r.state, SM.MAIN_TAP + 4 * k, bits(mainL[32 * b + k]))
+            m2.poke(r.state, SM.MAIN_TAP + 0x80 + 4 * k, bits(mainR[32 * b + k]))
+            m2.poke(r.state, SM.MIX_BUF + 4 * k, 0)
+            m2.poke(r.state, SM.MIX_BUF + 0x80 + 4 * k, 0)
+        state3["b"] += 1
+    rec3 = run_blocks(init, frames_2, n, extra_hooks={m3.DISPATCH: at_dispatch_3})
+    ok3 = rec3["ok"]
+    st3 = rec3["state"].state if ok3 else None
+    words3, got3 = recorded(st3, 2) if ok3 else ([0] * 4, [])
+    want3 = [max(-32768, min(32767, int(min(0.999969, max(-1.0, (a + b) * 0.5)) * 32768.0))) / 32768.0
+             for a, b in zip(mainL, mainR)][:words3[1]]
+    rec3.pop("state", None)
+    close3 = bool(got3) and max(abs(a - b) for a, b in zip(got3, want3)) <= 2 / 32768
+
     # v0.22: the RAM check (CMD_PROBE) on the image's own code. Block 0 takes the command
     # and fills the low area's first 256 words; then the last chunk of phase 3 and of
     # phase 4 are set up (both areas' last 256 words as the fills would leave them; the
@@ -2138,6 +2164,9 @@ def step_rec(init, sound, machines, blocks) -> dict:
         "TRK6, MONO L: track 6's bucket's left (the voices' routing elsewhere), back to its level, "
         "into SAMP 125 at 8 MB into the recordings' area (within 2 LSB)":
             ok2 and words2[1] == 32 * n and close2 and words2[0] == dsp.SMP_POOL_DDR + SM.REC_OFFSET + 0x4000 * 512,
+        "v0.37: MAIN, L+R: the main mix as the master mix call takes it (the tap), into SAMP 126, "
+        "not silence (within 2 LSB)":
+            ok3 and words3[1] == 32 * n and close3 and max(abs(x) for x in got3) > 0.2,
         "the status while recording: state 2, the command's sequence, frames / 64, the peak":
             ok2 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 2 and h[1] == 7 and h[2] == (32 * n) >> 6
                         and abs(h[3] / 32767 - max(abs(x) for x in left[-32:])) < 0.01 for h in stat2),

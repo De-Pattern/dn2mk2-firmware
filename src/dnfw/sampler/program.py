@@ -1712,8 +1712,9 @@ def recorder(p: Prog, L: Layout) -> None:
     ARM empties the slot and waits for the block's peak to reach the threshold; NOW
     empties it and records at once; STOP ends a recording (or cancels an arm); every
     command sets the source and channel the peak is measured on (MONITOR only that).
-    Sources: IN (the codec's input as the engine converts it, 0x268538), MAIN (the last
-    block's mix, 0x268438), TRK1..16 (track t's audio, panned, the last block's: the
+    Sources: IN (the codec's input as the engine converts it, 0x268538), MAIN (v0.37: the
+    previous block's whole mix, as pvmix copies it to SM.MAIN_TAP at the master mix call;
+    MIX_BUF itself is empty while this runs), TRK1..16 (track t's audio, panned, the last block's: the
     buffer Overbridge sends, SM.TRK_BUF + 0x100 t); channels MONO L+R, L, R. Recording
     appends 32 frames a block as int16 to the slot (SAMP 124..127, 2 MB each) and keeps
     its directory entry current, so it plays at once; it stops at the frame count. Each
@@ -1955,7 +1956,7 @@ def recorder(p: Prog, L: Layout) -> None:
     p.ld(8, C["rsrc"])                        # its L (R at + 0x80)
     p.iconst(9, SM.IN_BUF)
     p.iconst(12, 1)
-    p.if_(8, "EQ", 12, lambda: p.iconst(9, SM.MIX_BUF), kind="i")
+    p.if_(8, "EQ", 12, lambda: p.iconst(9, SM.MAIN_TAP), kind="i")    # v0.37: the tap, not MIX_BUF
     p.iconst(12, 2)
 
     def track():
@@ -2874,6 +2875,11 @@ def pvmix(p: Prog, L: Layout) -> None:
     half first) at half level (v0.37), on L and R alike; pva and pvn move on. Uses R0..R3,
     R12, R13, I1."""
     C = L.C
+    # v0.37: first the whole mix, as the master mix call takes it, to the recorder's MAIN tap
+    # (sampler.machines.MAIN_TAP), before the preview goes in
+    for k in range(64):
+        p.ld(0, SM.MIX_BUF + 4 * k)
+        p.st(SM.MAIN_TAP + 4 * k, 0)
     p.ld(0, C["pvn"])
     p.iconst(12, 0)
 
