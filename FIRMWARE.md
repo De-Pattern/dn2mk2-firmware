@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.35** | 2026-11-01 | The bug sweep: MACHINE SEL's empty FLTR column after choosing a machine low in the list (v0.33), the +DRIVE preview retriggering while held, SYN held shows our pages' values, LOAD TO PROJ skipping same-length samples, deleted folders left in the list (and the import page can delete folders), PERC's names on another track's LFO page (B10); `dn2diag.py entries`; a new gate step that checks the drawn MACHINE SEL columns and SYN pages | `builds/v0.35-SWEEP/` | yes |
+| **v0.36** | 2026-11-01 | More Monomachine voices: SID, VO-6 and DENS from 2 to 4 at once, DDRW from 1 to 2 (the v0.26 fixed budget gone; the DSP-time guard decides); a voice that doesn't fit is stolen cleanly (silent until its next note) instead of chopping in and out; DDRW/DENS's busiest tables in fast memory; a four-note chord test per Monomachine machine in the gate | `builds/v0.36-VOICES/` | yes |
+| v0.35 | 2026-11-01 | The bug sweep: MACHINE SEL's empty FLTR column after choosing a machine low in the list (v0.33), the +DRIVE preview retriggering while held, SYN held shows our pages' values, LOAD TO PROJ skipping same-length samples, deleted folders left in the list (and the import page can delete folders), PERC's names on another track's LFO page (B10); `dn2diag.py entries`; a new gate step that checks the drawn MACHINE SEL columns and SYN pages | `builds/v0.35-SWEEP/` | yes |
 | v0.34 | 2026-10-31 | The P-I voices that stayed dead (v0.33's guard never reset a wiped voice): fixed, and the guard now says which voice and whether its delay lines held the NaN (FUNC held: `V1D`/`V1X`; SysEx DIAG); SCAN reads any DSP memory for NaN (`tools/dn2diag.py`); the model's NaN as the core's; the gate: the audio interrupt at its real rate preempting our code (fuzz), the guard's wipe (runner 3w), the DSP's memory-cost clock | `builds/v0.34-TIMING/` | yes |
 | v0.33 | 2026-10-30 | The freeze hunt: a guard against all audio cutting out (a runaway voice), keys and menus that went dead (SLICE/GRID's YES after MACHINE SEL, keys whose release went elsewhere, the sample list left open on another track), stray DSP reads from a bad sample entry, a garbage-state and worst-case DSP stress test, a UI fuzz in the gate; +DRIVE preview (FUNC + YES), MOVE SELECTED, NEW FOLDER; PROJECT RAM ticks with YES; the recorder: no DEST, SRC/CHAN apart, TRIM zoom; slices from C1; SID on TRI; FUNC + NO backspace; LFO FUNC snaps back | `builds/v0.33-STEADY/` | yes |
 | v0.32 | 2026-10-29 | The DSP-time fix: the Machinedrum and Monomachine voices' working state in the DSP's fast internal memory, a CPU guard that measures the stock's share, a DSP load meter (FUNC held on PERC/Monomachine pages); FUNC + turn on our controls | `builds/v0.32-DSP/` | yes |
@@ -73,6 +74,42 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.36 — VOICES (more Monomachine voices, voices stolen cleanly)
+
+`DN2mod_v0.36_VOICES_OS1.11.syx`
+sha256 `8027709cc26236356acb50291726f510d6c8b59e9781aef2456a6c39169ce135`
+Gate: CLEARED TO FLASH, 2026-11-01 (34 gates; 10 reused, each a pass whose every input is byte-identical). Source: commit `1f294618`. Docs: `docs/user-reports.md` (DELTA-02 / M2).
+
+Everything in v0.35, plus:
+
+**Only two voices on a Monomachine track** (misterairplane, the owner). A fixed allowance from
+v0.26 capped the Monomachine voices whatever the DSP's real time: 2 SID / VO-6 / DENS, 1
+DDRW, 4 WAVE, the oldest notes silenced past it. It came before the DSP-time guard (v0.27),
+which measures the frame; now the guard alone decides. Measured in the gate (four-note
+chords, the clock charged by memory as on the chip): **SID, VO-6, DENS and WAVE 4 voices,
+DDRW 2** (one DDRW voice is about a fifth of a frame).
+
+**A voice that doesn't fit is stolen, not chopped.** Before, a voice left out for time was
+tried again the next block and could flicker in and out. Now, left out twice in one note, it
+rests (silent, free) until its next note, as a synth steals its oldest voice.
+
+**DDRW and DENS lighter**: their busiest tables (3.9 KB) are copied to fast memory once at
+power-on; the same values, read faster (DDRW from 1 voice to 2).
+
+**Tests**
+1. Four-note chord on SID (or VO-6, DENS, DPRO WAVE), dynamic voice allocation: all four
+   notes sound and keep sounding.
+2. The same on DDRW: two sound; the others are silent cleanly (no chopping, no crackle).
+3. Many overlapping notes on a Monomachine track: the newest always plays; older ones drop
+   out cleanly; FUNC held shows the DSP load.
+4. The v0.35 list still: MACHINE SEL's filter column, FUNC + YES preview, SYN-held values,
+   LOAD TO PROJ, deleting folders, P-I BD locked to one voice.
+
+**Known issues**
+- DDRW at most two voices (its own cost); v0.37's DDRW saving aims at more.
+- Why a P-I or VO-6 voice sometimes goes bad on the unit: the import page's new
+  Diagnostics (section 6) is how it is found.
 
 ## v0.35 — SWEEP (the reported bugs, worked through)
 
