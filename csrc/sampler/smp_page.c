@@ -26,6 +26,7 @@ typedef unsigned short u16;
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90)
 #define TEXT      ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011545C)
 #define FONT      0x44507ED8u
+#define RECORD_FMT(id) (*(void **)(0x401F7F94u + 60u * (id) + 0x34u))   /* v0.35: its value text */
 #define LABEL_FONT 0x40291760u                  /* the stock grid's 4 x 5 label font: the DT2's labels' */
 /* the stock grid's label text (0x40115668, as 0x4006448a calls it for each cell's name):
  * (canvas, font, x, y, align 1 centred, frame 0 none, width template 0, format, ...) */
@@ -33,6 +34,7 @@ typedef unsigned short u16;
 #define LABEL(c, x, y, fmt, ...) LABEL_TEXT((c), LABEL_FONT, (x), (y), 1, 0, 0, fmt, __VA_ARGS__)
 #define CENTRED   2
 #define RECORD(id) ((const int *)(0x401F7F94u + 60u * (id)))
+extern int smp_values_held(void);                /* v0.35: SYN held long: the pages show their values (rec.c) */
 #define NAME_SHORT(id) (*(const char **)(0x401F7F94u + 60u * (id) + 0x30u))
 
 #define CELL_X(k) (21 + 26 * (k))         /* v0.20: the DT2's centres, 33 + 26 k (its own screen, measured) */
@@ -432,7 +434,15 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
             w_bars(c, x, y, bi, smp_bars[bi]);
         }
     }
-    if (labelled && id)
+    extern int smp_values_held(void);
+    if (labelled && id && smp_values_held()) {     /* v0.35: SYN held: the value, as the record's */
+        char vb[16];                            /* formatter writes it for the header (O14) */
+        u8 flag;
+        vb[0] = 0;
+        ((void (*)(int, char *))RECORD_FMT(id))(GET_VALUE(view, id, &flag), vb);
+        vb[6] = 0;
+        LABEL(c, x + 12, y - 7, "%s", vb);
+    } else if (labelled && id)
         LABEL(c, x + 12, y - 7, "%.4s", label);
     if (locked(view, id))
         invert(c, x - 1, y - 8, x + 24, y + 19);
@@ -455,7 +465,16 @@ void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *c
             int top, v = value(view, ids[i], &top);
             w_knob_at(c, x, y, v, top, 0);
         }
-        LABEL(c, x + 12, y - 7, "%.5s", labels[i]);
+        extern int smp_values_held(void);
+        if (smp_values_held()) {                   /* v0.35: SYN held: the value (O14) */
+            char vb[16];
+            u8 flag;
+            vb[0] = 0;
+            ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
+            vb[6] = 0;
+            LABEL(c, x + 12, y - 7, "%s", vb);
+        } else
+            LABEL(c, x + 12, y - 7, "%.5s", labels[i]);
     }
 }
 
@@ -933,9 +952,21 @@ void smp_fb_delete(int slot, int folder)
 {
     if (smp_fb_store == 1) {                    /* v0.31: from the +Drive's library */
         if (smp_fb_mark_count()) {
+            /* v0.35: a folder emptied this way (ticked whole, FUNC + YES, then DELETE) goes
+             * too, as one deleted by name does (Kokozi, v0.33: deleted folders stayed in the
+             * list, empty) */
+            u32 emptied[2] = {0, 0};
             for (int k = 0; k < LB_CAP; k++)
-                if (lb_marked(k) && smp_lib_used(k))
+                if (lb_marked(k) && smp_lib_used(k)) {
+                    int f = smp_lib_folder_of(k);
+                    if (f >= 2 && f < 64)
+                        emptied[f >> 5] |= 1u << (f & 31);
                     smp_lib_delete(k);
+                }
+            extern int smp_lib_folder_drop(int f);
+            for (int f = 2; f < 64; f++)
+                if (emptied[f >> 5] >> (f & 31) & 1)
+                    smp_lib_folder_drop(f);     /* (refused while it still holds samples) */
         } else if (slot >= 0)
             smp_lib_delete(slot);
         else if (folder != -1) {
@@ -1374,9 +1405,26 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
             mini_mode(c, x, 0, value(view, SMP_MODE_ID, 0) * 4 / 128);
         else if (kind == SMP_WERP_KIND && ids[i] == SMP_BARS_ID)
             fill(c, x + 6, 2, x + 17, 4);
-        else
+        else if (smp_values_held()) {           /* v0.35: SYN held: the value (O14) */
+            char vb[16];
+            u8 flag;
+            vb[0] = 0;
+            ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
+            vb[6] = 0;
+            LABEL(c, x + 12, 0, "%s", vb);
+        } else
             LABEL(c, x + 12, 0, "%.5s", NAME_SHORT(ids[i]));
     }
+    if (smp_values_held())                      /* v0.35: the top row's too (unlabelled: on the knobs' line) */
+        for (int i = 0; i < 4; i++)
+            if (ids[i]) {
+                char vb[16];
+                u8 flag;
+                vb[0] = 0;
+                ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
+                vb[6] = 0;
+                LABEL(c, CELL_X(i) + 12, TOP_Y + 3 - 7, "%s", vb);
+            }
     if (ids[7]) {
         int top, v = value(view, ids[7], &top);
         w_pill(c, CELL_X(3), 0, v, top);

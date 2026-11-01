@@ -105,7 +105,7 @@ Elektron's is published here):
 - Digitone II OS 1.11 (the one it patches)
 - Digitakt II OS 1.17 (the sample engine's tables)
 - Machinedrum UW OS 1.63 (PERC's machines)
-- Monomachine SFX-6 OS 1.32B (the Monomachine machines)
+- Monomachine SFX-6/60 OS 1.32B, Elektron's `Elektron_SFX6-60_OS1.32B.syx` (the Monomachine machines)
 
 Then:
 

@@ -123,6 +123,12 @@ GUARDS = (
     (0x4005B35C, "2a1b", "MACHINE SEL walks the list..."),
     (0x4005B364, "4eb940059274", "... and asks the group of each type"),
     (0x4005B6C2, "4eb94003134e", "MACHINE SEL's current machine (view +412) is 0x4003134e"),
+    # v0.35, colsw: the column switch, the row vectors and the follow it relies on
+    (0x4005BA9C, "254001a8", "MACHINE SEL LEFT / RIGHT writes the column (+424)"),
+    (0x4005BAB6, "256a01a001a4", "... and the cursor (+420) from the filter type (+416)"),
+    (0x4005B162, "2f0a2f02206f000c202801a8", "the type under the cursor(view) saves a2, d2; reads +424"),
+    (0x4005A92C, "206f0004202801a8", "rows in the column(view)"),
+    (0x4005A956, "2f0a2f02246f000c", "the scroll-follow(view) saves a2 and d2"),
 )
 
 
@@ -274,8 +280,53 @@ raw_track:
 1:  moveq   #-1,%d0
 2:  movea.l %sp@+,%a2
     rts
+
+| v0.35: MACHINE SEL's LEFT / RIGHT (0x4005ba9c..0x4005babc) switches the column (+424),
+| sets the cursor (+420) from the current type (+412 / +416, as if types were rows) and
+| redraws (jsr 0x4011c7ba) without the scroll-follow 0x4005a956 that UP / DOWN run. Stock's
+| lists fit the screen, so the top row (+428) was always 0; ours scrolls, so RIGHT from a
+| machine low in the SRC list kept a top row past the FLTR list's end: an empty FLTR
+| column (flupperich6l, v0.33). Here, from the redraw's jsr: the cursor on the first row
+| whose type (0x4005b162(view): the row under the cursor, through the row object) is the
+| column's current one, over the column's rows (0x4005a92c(view)); stock's cursor kept if
+| none is; the follow; then the redraw. The YES paths share the site: a no-op there.
+colsw:
+    lea     %sp@(-20),%sp
+    movem.l %d2-%d5/%a2,%sp@
+    movea.l %sp@(24),%a2
+    move.l  %a2@(420),%d5
+    move.l  %a2@(424),%d0
+    beq.s   3f
+    moveq   #1,%d1
+    cmp.l   %d0,%d1
+    bne.s   5f
+    move.l  %a2@(416),%d2
+    bra.s   4f
+3:  move.l  %a2@(412),%d2
+4:  move.l  %a2,%sp@-
+    jsr     0x4005a92c
+    addq.l  #4,%sp
+    move.l  %d0,%d4
+    moveq   #0,%d3
+1:  cmp.l   %d4,%d3
+    bge.s   7f
+    move.l  %d3,%a2@(420)
+    move.l  %a2,%sp@-
+    jsr     0x4005b162
+    addq.l  #4,%sp
+    cmp.l   %d0,%d2
+    beq.s   5f
+    addq.l  #1,%d3
+    bra.s   1b
+7:  move.l  %d5,%a2@(420)
+5:  move.l  %a2,%sp@-
+    jsr     0x4005a956
+    addq.l  #4,%sp
+    movem.l %sp@,%d2-%d5/%a2
+    lea     %sp@(20),%sp
+    jmp     0x4011c7ba
 """
-SHIM_LABELS = ("slot_shim", "canon_arg", "canon_page", "canon_track", "raw_track")
+SHIM_LABELS = ("slot_shim", "canon_arg", "canon_page", "canon_track", "raw_track", "colsw")
 
 # -- 8. the sound's "is this parameter mine?" (vtable +0x50, 0x40036bfa) --------------------
 # For a machine parameter it answers `sound+0xDE == record[param].page`. WaveTone's
@@ -399,6 +450,8 @@ LFO_MASK_LEA = 0x40039570               # the LFO destination list's lea 0x400dc
 LFO_MASK_STOCK = 0x400DC30E
 KEYNOTES_SITE = 0x40058BE8              # v0.23: KeyboardView's jsr 0x40034460(kbd, &notes, key)
 KEYNOTES_STOCK = bytes.fromhex("4eb940034460")
+MACHSEL_COLSW_SITE = 0x4005BABE         # v0.35: MACHINE SEL's redraw after LEFT / RIGHT (jsr 0x4011c7ba)
+MACHSEL_COLSW_STOCK = bytes.fromhex("4eb94011c7ba")
 MACHSEL_COMMIT_SITE = 0x4005BBA0        # v0.30: MACHINE SEL's jsr 0x40031880 (commit(model, track, type, 1, 1))
 MACHSEL_COMMIT_STOCK = bytes.fromhex("4eb940031880")
 MODAPPLY_SITE = 0x40027196              # v0.25: the per-frame driver's jsr 0x400db22c (apply modulation)
@@ -574,6 +627,10 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
 
     # v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner's request: the
     # commit resets the sound to the machine's defaults, SAMP to OFF; measured in the emulator)
+    edit(MACHSEL_COLSW_SITE, bytes.fromhex("4eb9") + _long(layout["colsw"]),
+         "MACHINE SEL LEFT / RIGHT: the cursor on the column's current machine, the scroll "
+         "following it (v0.35: an empty FLTR column after RIGHT from a machine low in the list)",
+         MACHSEL_COLSW_STOCK)
     edit(MACHSEL_COMMIT_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_machine_commit"]),
          "MACHINE SEL's commit: between two sample machines SAMP is kept (rec.c)", MACHSEL_COMMIT_STOCK)
 

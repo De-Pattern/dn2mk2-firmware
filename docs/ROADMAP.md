@@ -209,11 +209,27 @@ inharmonic modes).
   knob visible with a renamable label, the page per track (choose which), so several
   macros are turned at once -- the Analog Four mk2's Perf mode. One macro per knob, all
   its mappings moving together, live. Weight unknown; after the stability work.
-- Holding SYN to show the values on our pages (O14).
+- Holding SYN to show the values on our pages (O14): v0.35.
 - From the Discord audit (`docs/feedback/2026-10-30-discord.csv`): pattern direct jump,
   Markov song mode, an LFO matrix, trigless trigs, parameter slides, screen streaming,
   MD/MnM preset import, per-track flanger/phaser, capicola stretch, per-project sample
   pools.
+
+## v0.35: the bug sweep (2026-11-01; the owner: "we cant keep pushing releases with the same bugs present")
+
+The scraper's list (`docs/feedback/2026-10-31-discord.csv`, DELTA-01..15) worked through,
+fixed in the tree and gated: DELTA-12 (MACHINE SEL's empty FLTR column after RIGHT from a
+machine low in the list: stock keeps the list's scroll across columns; gate 6r walks it),
+DELTA-04 / M3 (a held key's repeat items restarted the +DRIVE preview; ours now ignore a
+repeat of a key they took), DELTA-08 / O14 (SYN held shows every page's values; 6r), DELTA-10
+/ P1 (LOAD TO PROJ took two library samples of one length and a seven-letter stem for one),
+DELTA-11 (a folder emptied by ticking goes; the page removes folders: DROP, link 6), B10
+(PERC's names followed the last page drawn, not the active track), M5's instrument (ENTRY,
+`dn2diag.py entries`). Open with instruments: DELTA-01 / M1 (VO-6: the model sweep over
+every consonant x CLEN, `out/vo6/sweep.py`), DELTA-02 / M2 (two voices: ask for the USB mode
+(Overbridge streams the track buffers) and the DSP load with FUNC held), DELTA-05 / M5
+(`entries` says whether the DSP will play slot 2), DELTA-07 (no steps). The gate: no page of
+ours may draw blank again -- 6r checks drawn columns and pages, not only memory.
 
 ## v0.34: the timing model and the P-I voices (2026-10-31, docs/timing-model.md)
 

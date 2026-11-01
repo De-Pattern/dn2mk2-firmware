@@ -1186,6 +1186,52 @@ def main() -> int:
                               "answers after MACHINE SEL" if good else why)
             gate("overlays let go (ColdFire)", *cached("overlays let go (ColdFire)", [h_cmd, sorted(EMU_ENV.items())], h_body))
 
+        # 6r. v0.35: MACHINE SEL's columns (flupperich6l, v0.33: with a machine low in our long
+        # SRC list chosen, RIGHT showed an empty FLTR column: stock's LEFT / RIGHT keeps the
+        # list's top row, and stock's lists never scroll). Track 1 on WaveTone: MACHINE SEL,
+        # nine DOWNs to GRID, YES, RIGHT: the FLTR column drawn with MULTI-MODE marked on its
+        # first row; LEFT: GRID under the cursor again; RIGHT once more: the same column
+        if "colsw" in lay:
+            kit = 0x4210C08C
+            ty = kit + 52 + 0xDE
+            rs = (f"wait:3,poke:{ty:#x}:01,wait:4,tap:2,wait:6,func-src,wait:20," + "down,wait:3," * 9
+                  + "png:r0,yes,wait:20,right,wait:20,png:r1,left,wait:20,png:r2,right,wait:20,png:r3,types,"
+                  + "no,wait:10,png:v0,press:2,wait:30,png:v1,release:2,wait:10,png:v2")   # v0.35: SYN held (O14)
+            rjs = work / "colsw.json"
+            r_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                     "--snapshot", snap, "--steps", rs, "--png-dir", work / "colsw", "--json", rjs]
+
+            def r_body(tdir):
+                rc, out = run("machine sel columns", r_cmd, logs, env=EMU_ENV, trace=tdir)
+                why, good = out[-800:], False
+                if rc == 0 and rjs.exists():
+                    import numpy as np                     # noqa: PLC0415
+                    from PIL import Image                  # noqa: PLC0415
+                    r = json.loads(rjs.read_text())
+
+                    def lit(name, y0, y1, x0=76, x1=116):   # the list column, in screen pixels
+                        im = np.array(Image.open(r["screens"][name]).convert("L")) > 128
+                        k = im.shape[1] // 128
+                        return float(im[y0 * k:y1 * k, x0 * k:x1 * k].mean())
+                    types = r["memory"].get("types@0") or [None]
+                    facts = {"track 1 is GRID": types[0] == 12,
+                             "RIGHT: the FLTR column's first row marked": lit("r1", 8, 16) > 0.3,
+                             "... and its list drawn": lit("r1", 8, 60) > 0.1,
+                             "LEFT: the SRC column's bottom row (GRID) marked": lit("r2", 52, 60) > 0.3,
+                             "RIGHT again: the same FLTR column": pathlib.Path(r["screens"]["r3"]).read_bytes()
+                             == pathlib.Path(r["screens"]["r1"]).read_bytes(),
+                             # O14: SYN held long on GRID's page shows its values, let go shows its labels
+                             "SYN held: the page changes": pathlib.Path(r["screens"]["v1"]).read_bytes()
+                             != pathlib.Path(r["screens"]["v0"]).read_bytes(),
+                             "SYN let go: the page as before": pathlib.Path(r["screens"]["v2"]).read_bytes()
+                             == pathlib.Path(r["screens"]["v0"]).read_bytes()}
+                    good = all(facts.values())
+                    why = f"{facts} types={types} lit={lit('r1', 8, 16):.3f}/{lit('r1', 8, 60):.3f}/{lit('r2', 52, 60):.3f}"
+                return good, ("MACHINE SEL: RIGHT from GRID shows the FLTR column from its top, LEFT returns "
+                              "to GRID; SYN held shows the page's values" if good else why)
+            gate("MACHINE SEL columns, SYN held (ColdFire)",
+                 *cached("MACHINE SEL columns, SYN held (ColdFire)", [r_cmd, sorted(EMU_ENV.items())], r_body))
+
         # 6q. v0.33: the sample pages driven at random (scripts/emu_fuzz_ui.py: SAMP turns,
         # the list, the browser and its menu, page and [TRIG] keys, MACHINE SEL, the machine
         # changed under the page): two seeds, each must finish, fault nothing in our code and

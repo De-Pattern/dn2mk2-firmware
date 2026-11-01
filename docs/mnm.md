@@ -7,7 +7,7 @@ its page drawn as the Monomachine draws it (the owner's six screenshots from its
 
 ## Where the algorithms come from
 
-The owner's Monomachine SFX-6/60 OS 1.32B (`MNM_OS`, default `../mnm132/mnm_os1.32b.syx`,
+The owner's Monomachine SFX-6/60 OS 1.32B (Elektron's `Elektron_SFX6-60_OS1.32B.syx`; `MNM_OS`, default a local copy at `../mnm132/mnm_os1.32b.syx`,
 sha256 `fe13c09f...a1710`). `../mnm132/research/` (outside the repository: Elektron's code)
 records its layout: a ColdFire host (VMA 0x200000), two DSP56303s with a kernel each, and
 an external image the kernels share (P/X/Y unified above 0x100000) holding every machine's

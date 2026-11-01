@@ -4,6 +4,7 @@
     python tools/dn2diag.py diag                 the guard's record, the DSP load, the counters
     python tools/dn2diag.py scan ADDR WORDS      non-finite words in any DSP memory range
     python tools/dn2diag.py watch [SECONDS]      the four scans again every two seconds
+    python tools/dn2diag.py entries              every pool slot's entry, and whether the DSP will play it
 
 The scans (each the DSP walking the range, 1,024 words a block, about 2 ms):
 
@@ -30,7 +31,7 @@ sys.path.insert(0, str(HERE.parent / "src"))
 
 from dn2samples import HELLO, Link  # noqa: E402
 
-DIAG, SCAN = 24, 25
+DIAG, SCAN, ENTRY = 24, 25, 27
 SCANS = (("voice 1's P-I delay lines (DDR)", 0x82200000, 2048),
          ("voice 4's P-I delay lines (DDR)", 0x82206000, 2048),
          ("the 16 voices' Machinedrum state (L2)", 0x200A0000, 4096),
@@ -86,6 +87,43 @@ def say_scans(link: Link) -> None:
             print(f"  {name}: clean")
 
 
+def entry_verdict(e: bytes, pool: int) -> str:
+    """the DSP's entry check (dnfw.sampler.program.entry_check), replayed: '' if it plays"""
+    from dnfw.sampler import machines as SM  # noqa: PLC0415
+    base, frames, rate, fmt = struct.unpack("<IIII", e)
+    if not frames and not base:
+        return "empty"
+    off = base - pool
+    if off < SM.DATA_OFFSET:
+        return f"base {off:#x} is before the pool's data ({SM.DATA_OFFSET:#x}): plays as empty"
+    if off >= SM.POOL_BYTES:
+        return f"base {off:#x} is past the pool ({SM.POOL_BYTES:#x}): plays as empty"
+    if frames <= 0 or frames > SM.POOL_BYTES // 4:
+        return f"{frames} frames: plays as empty"
+    if (fmt & 0xFF) > 1:
+        return f"format {fmt & 0xFF}: plays as empty"
+    end = off + frames * (2 if fmt & 0xFF else 4)
+    if end > SM.POOL_BYTES:
+        return f"ends at {end:#x}, past the pool: plays as empty"
+    if SM.REC_OFFSET <= off < SM.REC_END:
+        return "" if end <= SM.REC_END else f"a recording that runs past the recordings' area ({end:#x} > {SM.REC_END:#x})"
+    return ""
+
+
+def say_entries(link: Link) -> None:
+    from dnfw.sampler import machines as SM  # noqa: PLC0415
+    for k in range(SM.POOL_SLOTS):
+        p = link.call(ENTRY, bytes([k]))
+        e, name, pool = p[:16], p[16:24].split(b"\0")[0].decode("ascii", "replace"), struct.unpack(">I", p[24:28])[0]
+        base, frames, rate, fmt = struct.unpack("<IIII", e)
+        if not frames and not base:
+            continue
+        v = entry_verdict(e, pool)
+        kind = "recording" if SM.REC_OFFSET <= base - pool < SM.REC_END else "sample"
+        print(f"slot {k + 1:3d} {name:8s} {kind:9s} at {base - pool:#010x} {frames:9d} frames {rate:6d} Hz "
+              f"{'int16' if fmt & 0xFF else 'float32'} slices {fmt >> 8 & 0xFF} flags {fmt >> 16:#x}: {v or 'plays'}")
+
+
 def main(argv=None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     port_name = "Digitone II"
@@ -106,6 +144,10 @@ def main(argv=None) -> int:
         elif cmd == "scan":
             n, first = scan(link, int(args[1], 0), int(args[2], 0))
             print(f"{n} non-finite word(s)" + (f", the first at index {first}" if n else ""))
+        elif cmd == "entries":
+            if proto < 6:
+                raise SystemExit("ENTRY needs a v0.35 build")
+            say_entries(link)
         elif cmd == "watch":
             end = time.time() + (float(args[1]) if len(args) > 1 else 60.0)
             while time.time() < end:

@@ -422,6 +422,13 @@ u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
             *st = 1;
         return r;
     }
+    if (cmd == 26) {                            /* v0.35: DROP FOLDER F (empty, not 0 or 1) */
+        u32 f = n >= 4 ? rq[3] : 0xFFu;
+        extern int smp_lib_folder_drop(int f);
+        if (f >= LIB_FOLDERS || smp_lib_folder_drop((int)f) != 0)
+            *st = 1;
+        return r;
+    }
     if (cmd == 23) {                            /* FOLDERS from F: four names */
         u32 f = n >= 4 ? rq[3] : 0;
         for (int j = 0; j < 4; j++, f++)

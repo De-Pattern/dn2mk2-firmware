@@ -49,6 +49,7 @@ typedef unsigned char u8;
 #define IT_KNOB 1
 #define IT_DROP 0xFF                                                 /* past every case: the loop skips it */
 #define F_PRESS 0x01
+#define F_REPEAT 0x08                           /* v0.35: a held key's repeat (stock's "fresh press" is bit 0 and not this) */
 #define F_RELEASE 0x10
 enum { K_TRIG = 1, K_MOD = 6, K_PRESET = 7, K_SETTINGS = 8, K_YES = 10, K_UP = 11, K_NO = 12,
        K_LEFT = 13, K_DOWN = 14, K_RIGHT = 15, K_TRK = 16, K_PTN = 23, K_SONG = 24,
@@ -583,6 +584,15 @@ static void name_done(void)
  * FUNC chord: on the instrument a plain YES carries it (the owner's v0.24: YES on TRIM and
  * on a SLICE track did nothing), so nothing here reads it. */
 int smp_func_held __attribute__((section(".data"))) = 0;
+/* v0.35: SYN held long enough that stock's pages show their values (its held item, bit 3,
+ * is what turns them on; the key's release turns them off): ours show theirs (O14) */
+int smp_syn_values __attribute__((section(".data"))) = 0;
+#define K_SRC 2
+int smp_values_held(void)                       /* (and SYN still down: a release that went elsewhere ends it) */
+{
+    extern u32 smp_held_lo;
+    return smp_syn_values && (smp_held_lo >> K_SRC & 1);
+}
 int rec_pv_on __attribute__((section(".data"))) = 0;      /* a preview playing, while held */
 static u32 knob_at __attribute__((section(".data"))) = 0;    /* the last trim knob's FRAMES */
 #define CMD_PREVIEW 9
@@ -1004,6 +1014,12 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         if (down && code >= 25 && code <= 40)   /* v0.33: when each [TRIG] went down */
             smp_trig_at[code - 25] = *(volatile u32 *)0x4058E8D4u;
     }
+    if (it[0] == IT_KEY && code == K_SRC) {     /* v0.35: SYN held: the pages' values (O14) */
+        if (down && (flags & F_REPEAT))
+            smp_syn_values = 1;
+        else if (!down)
+            smp_syn_values = 0;
+    }
     if (it[0] == IT_KEY && code == K_FUNC) {
         if (rec_overlay && rec_phase == PH_NAME) {
             if (down && !smp_func_held) {       /* the grid opens on the cursor's character */
@@ -1034,6 +1050,16 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         preview(0);                             /* FUNC + YES let go: the preview stops */
     if (fb_pv && it[0] == IT_KEY && !down && (code == K_YES || code == K_FUNC))
         fb_preview_stop();                      /* v0.33: and the browser's */
+    /* v0.35: a held key's repeat (bit 3 with bit 0: the stock UI's key task sends these
+     * while a key stays down, and stock's own handlers take them only where a hold means
+     * something, its lists' arrows). Ours read every bit-0 item as a press, so a held
+     * FUNC + YES in +DRIVE restarted its preview on each (misterairplane, v0.33), a held
+     * YES ticked and unticked, and a held arrow stepped twice (our own timed repeat, v0.30,
+     * and stock's). A repeat of a key whose press we took is ours and does nothing. */
+    if (it[0] == IT_KEY && down && (flags & F_REPEAT) && code < 32 && (eaten >> code & 1)) {
+        it[0] = IT_DROP;
+        return (u32)it;
+    }
     if (it[0] == IT_KEY && code < 32 && (eaten >> code & 1)) {
         eaten &= ~(1u << code);
         if (!down) {                            /* the release of a key we took */

@@ -112,9 +112,18 @@ static int perc_of(int v)
  * every machine kept one set of names. */
 static int perc_seen __attribute__((section(".data"))) = 0;
 
+/* v0.35: the names follow the ACTIVE track's TYPE, read from its sound in the kit (the value
+ * word at +0x14 + 2 slot, as smp_quant reads and the setter writes it). perc_seen alone was
+ * the last PERC page drawn: on a stock page (the LFO's), TRK to another PERC track left the
+ * first track's names on the DEST list and the header (B10, a tester, v0.30+). The page
+ * draw still reads its own view's TYPE (GET_VALUE). */
 static int perc_type(void)
 {
-    return perc_seen;
+    u8 t = UI_TRACK;
+    unsigned char *kit = KIT_POINTER;
+    if (t > 15 || !kit)
+        return perc_seen;
+    return perc_of((int)*(volatile unsigned short *)(kit + 52u + 1163u * t + 0x14u + 2u * PERC_TYPE_SLOT));
 }
 
 /* While the active track is one of ours, WaveTone's records carry our names, so the LFO
@@ -589,7 +598,16 @@ void wr_page_draw(void *view, void *canvas)
             label = NAME_SHORT(id);             /* PERC, samples: the name wr_names gave the record */
         if (smp && id)
             label = smp_text(view, id, kind, label);
-        TEXT(canvas, FONT, cx, top ? TOP_LABEL_Y : BOT_LABEL_Y, CENTRED, "%.5s", label);
+        extern int smp_values_held(void);
+        char vb[16];
+        if (smp_values_held() && id) {             /* v0.35: SYN held: the value (O14) */
+            u8 fl;
+            vb[0] = 0;
+            ((void (*)(int, char *))(*(void **)(0x401F7F94u + 60u * id + 0x34u)))(GET_VALUE(view, id, &fl), vb);
+            vb[6] = 0;
+            label = vb;
+        }
+        TEXT(canvas, FONT, cx, top ? TOP_LABEL_Y : BOT_LABEL_Y, CENTRED, "%.6s", label);
         if (!id || (label[0] == '-' && !label[1]))
             continue;                           /* an empty place, or a parameter this machine lacks */
         u8 flag;

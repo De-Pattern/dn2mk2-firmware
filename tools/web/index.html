@@ -192,7 +192,7 @@ label.proj-only { max-width: 100%; }
       </div>
     </div>
     <datalist id="folderList"></datalist>
-    <p class="note">Select samples on the left and press Send, or drag them onto the right; audio files dropped straight onto the +Drive go into the folder that is open. Names: the instrument's list shows the whole name (up to 35 characters); the seven letters under it are its short name. A dropped folder's samples get its name as their folder. Moving, renaming and removing empty folders: on the instrument for now (+DRIVE, RIGHT); from here with the next firmware.</p>
+    <p class="note">Select samples on the left and press Send, or drag them onto the right; audio files dropped straight onto the +Drive go into the folder that is open. Names: the instrument's list shows the whole name (up to 35 characters); the seven letters under it are its short name. A dropped folder's samples get its name as their folder. Ticked folders are deleted with their samples (v0.35 or later on the instrument; before that, empty folders go on the instrument: +DRIVE, RIGHT). Moving and renaming: on the instrument.</p>
   </section>
 
   <section>
@@ -244,7 +244,7 @@ const DN2 = (() => {
     HEADER: [0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01],
     CMD: { HELLO: 1, WRITE: 2, STATUS: 3, BEGIN: 8, END: 9, DIR: 10 },
     /* v0.31 (sample link 5): the +Drive's library, little-endian (csrc/sampler/lib.c) */
-    LIB: { INFO: 16, FOLDER: 17, BEGIN: 18, WRITE: 19, END: 20, LIST: 21, DELETE: 22, FOLDERS: 23 }, LIB_CAP: 2048,
+    LIB: { INFO: 16, FOLDER: 17, BEGIN: 18, WRITE: 19, END: 20, LIST: 21, DELETE: 22, FOLDERS: 23, DROP: 26 }, LIB_CAP: 2048,
     /* v0.25: long names and folders (dnfw.sampler.machines META_*) */
     META_PTR: 0xC08, META_PTR_MAGIC: 0x52544D53, META_MAGIC: 0x54454D53, META_FOLDERS: 64,
     META_FOLDER_BYTES: 32, META_SLOT_BYTES: 40, META_NAME_BYTES: 36, LONG_MAX: 35, FOLDER_MAX: 31,
@@ -961,8 +961,8 @@ if (typeof module !== "undefined") module.exports = DN2;
         .sort((a, b) => a < 2 || b < 2 ? a - b : libFolder(a).localeCompare(libFolder(b), undefined, { numeric: true }));
       fs.forEach(f => {
         const n = count.get(f) || 0, bytes = lr.rows.filter(e => e.folder === f).reduce((a, e) => a + 2 * e.frames, 0);
-        const tr = add(`<td class="ck">${n ? `<input type="checkbox" aria-label="Select the folder">` : ""}</td><td><span class="ico">▸</span>${esc(libFolder(f))} <span class="note">${n ? n + " sample" + (n > 1 ? "s" : "") : "empty"}</span></td><td class="num">${n ? fmtSize(bytes) : ""}</td><td></td>`, "folder", () => openFolder(f));
-        tick("f" + f, tr); if (n) keys.push("f" + f);
+        const tr = add(`<td class="ck">${n || (f >= 2 && dev.proto >= 6) ? `<input type="checkbox" aria-label="Select the folder">` : ""}</td><td><span class="ico">▸</span>${esc(libFolder(f))} <span class="note">${n ? n + " sample" + (n > 1 ? "s" : "") : "empty"}</span></td><td class="num">${n ? fmtSize(bytes) : ""}</td><td></td>`, "folder", () => openFolder(f));
+        tick("f" + f, tr); if (n || (f >= 2 && dev.proto >= 6)) keys.push("f" + f);
       });
       if (!fs.length) add(`<td></td><td class="note" colspan="3">The library is empty: send samples into it, or make a folder.</td>`);
     } else {
@@ -1009,10 +1009,13 @@ if (typeof module !== "undefined") module.exports = DN2;
     }
   }
   /* delete library entries KS (after asking) */
-  async function libDelete(ks) {
-    const lr = dev && dev.lib; if (busy || !lr || !ks.length) return;
+  async function libDelete(ks, folders = []) {
+    const lr = dev && dev.lib; if (busy || !lr || (!ks.length && !folders.length)) return;
     const rows = lr.rows.filter(e => ks.includes(e.k));
-    const what = rows.length === 1 ? rows[0].name : `${rows.length} samples`;
+    /* v0.35: ticked folders go too once they are empty (the instrument's DROP, 26) */
+    folders = dev.proto >= 6 ? folders.filter(f => f >= 2) : [];
+    const what = rows.length === 1 && !folders.length ? rows[0].name
+      : [rows.length ? `${rows.length} sample${rows.length > 1 ? "s" : ""}` : "", folders.length ? `${folders.length} folder${folders.length > 1 ? "s" : ""}` : ""].filter(Boolean).join(" and ");
     if (!confirm(`Delete ${what} from the +Drive library? This cannot be undone. Project slots already loaded from ${rows.length === 1 ? "it" : "them"} keep their copies.`)) return;
     busy = true; refresh();
     let gone = 0;
@@ -1021,6 +1024,10 @@ if (typeof module !== "undefined") module.exports = DN2;
         $("sendState").textContent = `deleting ${gone + 1} of ${rows.length}`;
         await call(C.LIB.DELETE, [e.k & 255, e.k >> 8], 10000); gone++;
         log(`${e.name}: deleted from the +Drive`);
+      }
+      for (const f of folders) {
+        const r = await call(C.LIB.DROP, [f], 10000, 1).catch(() => null);
+        log(`${libFolder(f)}: ${r ? "folder removed" : "folder kept (not empty?)"}`);
       }
       $("sendState").textContent = `deleted ${gone}`; $("sendState").className = "pill ok";
     } catch (x) { log(String(x.message || x)); $("sendState").textContent = "delete failed"; $("sendState").className = "pill bad"; }
@@ -1194,7 +1201,7 @@ if (typeof module !== "undefined") module.exports = DN2;
   $("listAll").onchange = e => { items.forEach(it => { it.sel = e.target.checked; }); refresh(); };
   $("newFolderBtn").onclick = newFolder;
   $("upBtn").onclick = () => openFolder(null);
-  $("delSelBtn").onclick = () => libDelete(selEntries().map(e => e.k));
+  $("delSelBtn").onclick = () => libDelete(selEntries().map(e => e.k), [...libSel].filter(k => typeof k === "string" && k[0] === "f").map(k => +k.slice(1)));
   $("reloadBtn").onclick = async () => { if (busy || !dev) return; busy = true; refresh(); try { await readDir(); await readLib(); } catch (x) { log(String(x.message || x)); } busy = false; refresh(); };
   $("sendBtn").onclick = send;
   if (navigator.requestMIDIAccess) navigator.requestMIDIAccess({ sysex: true }).then(m => { midi = m; m.onstatechange = fillPorts; fillPorts(); }).catch(() => {});
