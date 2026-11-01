@@ -45,6 +45,10 @@ MNM_LEVELS = (5.4, 11.5, 0.95, 2.0, 16.5)
 # what the SHARC has free beside the stock engines (docs/sharc-load.md: ~250,000 cycles).
 MNM_COST = {"SID 6581": 60_000, "DPRO-WAVE": 34_000, "DPRO-DDRW": 78_000, "DPRO-DENS": 70_000,
             "VO-6": 75_000}
+# v0.36: no longer the limit (the owner and misterairplane: two voices at most on a Monomachine
+# track). 150,000 fitted 2 SID / VO-6 / DENS and 1 DDRW whatever the DSP's real time; it came
+# before the frame guard (v0.27), which measures the frame and leaves out (v0.36: steals) the
+# oldest voices that do not fit. Kept as a ceiling far above what sixteen voices can reach.
 MNM_BUDGET = 1_000_000
 # v0.29: which Monomachine voices get the budget: the newest first (the owner, 2026-10-28:
 # with the DN2's dynamic voice allocation each note lands on a new voice; the older ones,
