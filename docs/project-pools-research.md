@@ -451,3 +451,12 @@ rts`) written over `0x40040190`, `0x40042B92` and `0x400F6568` (and `70004e75` f
 runs); then `m.call(0x40042E6E, P, 17, fn)`, `m.call(0x400402D8, P, 42, fn)`,
 `m.call(0x400402D8, P, -1, fn)`, and `0x4009B402` with a `std::vector<int>` of slots built in
 scratch memory, reading `m.call(0x4003EB8A, P)` after each.
+
+## The owner's decisions (2026-11-01)
+
+1. **NEW project: an empty pool** (as the DT2). Leaning this way; the owner asked why keep
+   was suggested (only that going back to the previous project then reloads its samples).
+2. **Pool changes are remembered at once**, not only on SAVE.
+3. **Projects made before this feature share today's pool** (the legacy list) until changed.
+4. **During a switch, a track plays as soon as its own sample has arrived** (the kit's
+   first); a track whose sample is not there yet stays silent, never a wrong sample.
