@@ -200,11 +200,11 @@ def end_mark(p) -> None:
 
 
 def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = None,
-           rest_blocks: int = 0) -> None:
+           rest_blocks: int = 0, strikes: int | None = None, steal_at: int = 1) -> None:
     """VOICE() if it fits, else the slot's buffer zeroed and the skip counted. T_WORD:
     the scratch word holding the slot; COST: the slots' cost words; BUFFERS: the track
     buffers' pointers (0x254a60). v0.36: RESTS (the slots' rest counters) given, a voice
-    left out is stolen: its counter set to REST_BLOCKS, so it rests (silent, free) until
+    left out (with STRIKES, the slots' strike counters: left out STEAL_AT times in one note) is stolen: its counter set to REST_BLOCKS, so it rests (silent, free) until
     its next note, as a synth steals its oldest voice. Before, it was tried again the next
     block and, with time short, flickered in and out (DDRW's four-note chord: one block
     two voices, the next one)."""
@@ -243,14 +243,30 @@ def around(p, t_word: int, cost: int, buffers: int, voice, rests: int | None = N
     p.comment("no time left in this frame: the voice is silent this block (its state kept),")
     p.comment("and its expected cost eased by a quarter, so it is tried again")
     if rests is not None:
-        p.comment("v0.36: stolen: it rests until its next note")
-        p.ld(9, t_word)
-        p.lsh(9, 9, 2)
-        p.iconst(10, rests)
-        p.iop(9, 10, "+", 9)
-        p.seti(4, 9)
-        p.iconst(9, rest_blocks)
-        p.sti(0, 4, 9)
+        def steal():
+            p.ld(9, t_word)
+            p.lsh(9, 9, 2)
+            p.iconst(10, rests)
+            p.iop(9, 10, "+", 9)
+            p.seti(4, 9)
+            p.iconst(9, rest_blocks)
+            p.sti(0, 4, 9)
+        if strikes is None:
+            p.comment("v0.36: stolen: it rests until its next note")
+            steal()
+        else:
+            p.comment("v0.36: a strike; at STEAL_AT strikes in one note, stolen: it rests until its next note")
+            p.ld(9, t_word)
+            p.lsh(9, 9, 2)
+            p.iconst(10, strikes)
+            p.iop(9, 10, "+", 9)
+            p.seti(4, 9)
+            p.ldi(9, 0, 4)
+            p.iconst(10, 1)
+            p.iop(9, 10, "+", 9)
+            p.sti(0, 4, 9)
+            p.iconst(10, steal_at)
+            p.if_(9, "GE", 10, steal, kind="i")
         p.ld(9, t_word)                        # I5 again: the slot's cost word
         p.lsh(9, 9, 2)
         p.iconst(10, cost)

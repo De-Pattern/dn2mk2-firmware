@@ -67,6 +67,11 @@ ORDER_OFF, RANK_U, RANK_N, PERC_I, SMP_I = 0x3080, 0x30C0, 0x30C4, 0x30C8, 0x30C
 # blocks under QUIET_LEVEL there, no note, and the voice rests: no cost, silent, until its
 # next note. QUIET counts each slot's blocks at RESTS_OFF.
 RESTS_OFF = 0x3100
+# v0.36: the frame guard's strikes against each slot since its note: a voice left out a second
+# time in one note is stolen (rests until its next note); once is a one-block gap (a note's
+# first blocks cost the most: DDRW's chord lost three of its four voices to the attack alone)
+STRIKES_OFF = 0x3140
+STEAL_STRIKES = 2
 MNM_QUIET_LEVEL = 2.0 ** -16                # -96 dB: an AMP envelope's tail and a filter's are under it
 MNM_QUIET_BLOCKS = 64                      # 43 ms
 MNM_SCRATCH = 0x200A4000                   # dsp.MNM_SCRATCH_L2 (v0.32: L2; test_waverider_dsp holds them equal)
@@ -142,6 +147,7 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
             def struck():
                 p.iconst(0, 0)
                 p.st(rests + 4 * u, 0)
+                p.st(L.md.mnm.scratch + STRIKES_OFF + 4 * u, 0)    # v0.36: a new note, no strikes
 
             def listen():                      # the block the chain left in its buffer
                 p.ld(0, BUFFERS + 4 * u)
@@ -732,7 +738,8 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.e("COMP(R0, R12);")
     p.jump("LT", other)
     G.around(p, L.C["t"], G.COST_PERC, BUFFERS, lambda: voice(p, L),   # v0.27: if it fits in the frame
-             rests=L.md.mnm.scratch + RESTS_OFF, rest_blocks=MNM_QUIET_BLOCKS)   # v0.36: else stolen
+             rests=L.md.mnm.scratch + RESTS_OFF, rest_blocks=MNM_QUIET_BLOCKS,   # v0.36: else, the second
+             strikes=L.md.mnm.scratch + STRIKES_OFF, steal_at=STEAL_STRIKES)       # time in a note, stolen
     p.jump("", nxt)
     # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
     # (v0.12: v0.11 resumed what it had left ringing)
