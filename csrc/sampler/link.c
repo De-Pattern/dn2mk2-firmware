@@ -49,6 +49,8 @@
  *                words there, VERIFY_CHUNK a block (docs/timing-model.md)
  *  26 DROP    u8 folder -> v0.35: an empty library folder (not INCOMING or RECORDED) removed;
  *                status 1 if it is not empty or not there (lib.c, with 16..23)
+ *  27 ENTRY   u8 slot -> v0.35: its 16-byte pool entry (base, frames, rate, format word, little
+ *                endian), its 8-byte short name, u32 the pool's DSP address
  *
  * Nothing here writes anything but its own RAM, the eMMC region above and the TDM slots
  * above. It never writes the frame (CTL_FRAME): test_sources checks the C for it.
@@ -2123,6 +2125,13 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
             for (u32 c = 0; c < 8; c++)
                 rp[r++] = dir_ok && k < POOL_SLOTS && fr ? NAME(k)[c] : 0;
         }
+    } else if (cmd == 27) {                     /* v0.35: ENTRY K -> the slot's 16-byte entry as the DSP reads it, */
+        u32 k = n >= 4 ? rq[3] : 0xFFu;          /*   its 8-byte name, u32 the pool's DSP address (for dn2diag's */
+        for (u32 c = 0; c < 16; c++)            /*   own entry check: a slot that previews but will not play, M5) */
+            rp[r++] = dir_ok && k < POOL_SLOTS ? ENTRY(k)[c] : 0;
+        for (u32 c = 0; c < 8; c++)
+            rp[r++] = dir_ok && k < POOL_SLOTS ? NAME(k)[c] : 0;
+        put32(rp + r, SMP_POOL_DDR); r += 4;
     } else if ((cmd >= 16 && cmd <= 23) || cmd == 26) {        /* v0.31 (link 5): the +Drive's library (lib.c) */
         extern u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
         r = smp_lib_rx(cmd, rq, n, rp, r, &rp[3]);
