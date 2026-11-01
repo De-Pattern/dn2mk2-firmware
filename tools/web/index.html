@@ -230,6 +230,13 @@ label.proj-only { max-width: 100%; }
       <b><a href="patcher.html" style="color:var(--accent)">The DN2 Mod Patcher</a></b> builds it in your browser from your own copies of Elektron's stock OS files (Digitone II 1.11, Digitakt II 1.17, Machinedrum UW 1.63), and lets you save it only if it is byte for byte the cleared file.
       Each version's notes and tests: <a href="https://github.com/De-Pattern/dn2mk2-firmware/blob/builds/README.md" target="_blank" rel="noopener" style="color:var(--accent)">FIRMWARE.md</a>.</p>
   </section>
+
+  <section>
+    <h2>6 · Diagnostics</h2>
+    <p class="note" style="margin-top:0">For bug reports: asks the instrument what its DSP has seen (needs v0.34 or later, connected above). It only reads. Run it right after power-on, again right after a note goes silent, and once more after a minute with nothing playing; press Copy each time and paste the results into your report.</p>
+    <div class="row"><button id="diagBtn" disabled>Run diagnostics</button> <button id="diagCopy" disabled>Copy</button> <span id="diagState" class="pill">idle</span></div>
+    <pre id="diagOut" class="scrollbox" style="white-space:pre-wrap;min-height:3em;margin-top:10px"></pre>
+  </section>
 </main>
 
 <script id="core">
@@ -242,7 +249,7 @@ const DN2 = (() => {
     MAX_SLICES: 64, REC_OFFSET: 96 << 20, REC_END: 128 << 20, POOL_BYTES: 400 << 20,
     DSP_RATE: 48000, POOL_DDR: 0x84000000,
     HEADER: [0xF0, 0x00, 0x20, 0x3C, 0x7D, 0x01],
-    CMD: { HELLO: 1, WRITE: 2, STATUS: 3, BEGIN: 8, END: 9, DIR: 10 },
+    CMD: { HELLO: 1, WRITE: 2, STATUS: 3, BEGIN: 8, END: 9, DIR: 10, DIAG: 24, SCAN: 25, ENTRY: 27 },
     /* v0.31 (sample link 5): the +Drive's library, little-endian (csrc/sampler/lib.c) */
     LIB: { INFO: 16, FOLDER: 17, BEGIN: 18, WRITE: 19, END: 20, LIST: 21, DELETE: 22, FOLDERS: 23, DROP: 26 }, LIB_CAP: 2048,
     /* v0.25: long names and folders (dnfw.sampler.machines META_*) */
@@ -930,6 +937,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     $("reloadBtn").disabled = !ready;
     $("newFolderBtn").disabled = !ready || !lr;
     $("delSelBtn").disabled = !ready || !lr || !libSel.size;
+    $("diagBtn").disabled = busy || !dev; $("diagCopy").disabled = !$("diagOut").textContent;
     $("rightEmpty").style.display = !dev ? "" : lib && !lr ? "" : "none";
     $("rightEmpty").textContent = !dev ? "Connect to see the instrument." : "The +Drive library needs v0.31 or later on the instrument.";
     const n = toSend().length;
@@ -1162,6 +1170,77 @@ if (typeof module !== "undefined") module.exports = DN2;
 
   /* -- wiring -- */
   $("connectBtn").onclick = connect;
+  /* v0.36: the diagnostics (link commands 24 DIAG, 25 SCAN, 27 ENTRY; tools/dn2diag.py does the same) */
+  const DIAG_KEYS = ["wipes", "info", "where", "mask", "since", "load", "loadPeak", "skipped", "periods", "frames",
+                     "scanCount", "scanFirst", "scanDone", "scanSeq"];
+  const SCANS = [["voice 1's P-I delay lines", 0x82200000, 2048], ["voice 4's P-I delay lines", 0x82206000, 2048],
+                 ["the 16 voices' Machinedrum state", 0x200A0000, 4096], ["the 16 voices' PERC state", 0x2DE180, 512]];
+  async function diag() {
+    const p = (await call(C.CMD.DIAG, [], 3000, 2)).payload, d = {};
+    DIAG_KEYS.forEach((k, i) => d[k] = DN2.rd32(p, 4 * i));
+    return d;
+  }
+  async function scan(addr, words) {
+    const be = v => [v >>> 24 & 255, v >>> 16 & 255, v >>> 8 & 255, v & 255];
+    const p = (await call(C.CMD.SCAN, [...be(addr), ...be(words)], 3000, 2)).payload;
+    const seq = (p[0] << 8) | p[1], t0 = Date.now();
+    while (Date.now() - t0 < 5000) {
+      const d = await diag();
+      if (d.scanSeq === seq && d.scanDone === (seq & 0xFFFF)) return { n: d.scanCount, first: d.scanFirst === 0xFFFFFFFF ? -1 : d.scanFirst };
+      await new Promise(r => setTimeout(r, 60));
+    }
+    throw new Error("a memory scan did not finish");
+  }
+  function entryVerdict(base, frames, fmt, pool) {
+    const off = base - pool, f = fmt & 255;
+    if (off < C.DATA_OFFSET) return "plays as empty (its start is before the pool's data)";
+    if (off >= C.POOL_BYTES) return "plays as empty (its start is past the pool)";
+    if (!frames || frames > C.POOL_BYTES / 4) return `plays as empty (${frames} frames)`;
+    if (f > 1) return `plays as empty (format ${f})`;
+    if (off + frames * (f ? 2 : 4) > C.POOL_BYTES) return "plays as empty (it runs past the pool)";
+    return "plays";
+  }
+  async function runDiag() {
+    if (busy || !dev) return;
+    busy = true; refresh();
+    const out = [], say = s => { out.push(s); $("diagOut").textContent = out.join("\n"); };
+    $("diagState").textContent = "running"; $("diagState").className = "pill";
+    $("diagOut").textContent = "";
+    try {
+      say(`DN2 diagnostics, ${new Date().toLocaleString()}, sample link ${dev.proto}`);
+      const d = await diag();
+      say(`DSP load ${d.load} % (peak ${(d.loadPeak / 10).toFixed(1)} %), ${d.frames.toLocaleString()} audio frames since power-on`);
+      if (d.wipes) {
+        const slot = (d.info & 255) + 1, type = d.info >>> 8, w = d.where;
+        const where = w !== 0xFFFF && (w & 0x8000) ? `its delay lines, word ${w & 0x7FFF}` : "not its delay lines (its own state, its input or the effects)";
+        const ago = d.since === 0xFFFFFFFF ? "" : `, the last ${(d.since / 1500).toFixed(1)} s ago`;
+        say(`The output guard silenced a bad voice ${d.wipes} time(s)${ago}: last voice ${slot}, machine type ${type}, the bad value in ${where}`);
+      } else say("The output guard has silenced no voice since power-on");
+      if (d.skipped) say(`Voices left out for DSP time: ${[...Array(16).keys()].filter(t => d.skipped >> t & 1).map(t => t + 1).join(", ")}`);
+      say("Memory scans (bad values: not-a-number or infinite words):");
+      for (const [name, addr, words] of SCANS) {
+        const r = await scan(addr, words);
+        say(`  ${name}: ${r.n ? `${r.n} bad word(s), the first at index ${r.first}` : "clean"}`);
+      }
+      if (dev.proto >= 6) {
+        say("Project slots (what the DSP makes of each):");
+        for (const sl of dev.slots) {
+          const p = (await call(C.CMD.ENTRY, [sl.k], 3000, 2)).payload;
+          const dv = new DataView(Uint8Array.from(p).buffer);
+          const base = dv.getUint32(0, true), frames = dv.getUint32(4, true), fmt = dv.getUint32(12, true), pool = DN2.rd32(p, 24);
+          say(`  slot ${sl.k + 1} ${sl.name || "(no name)"}${sl.rec ? " (recording)" : ""}: ${entryVerdict(base, frames, fmt, pool)}`);
+        }
+      }
+      $("diagState").textContent = "done"; $("diagState").className = "pill ok";
+    } catch (x) {
+      const m = String(x.message || x);
+      say(/unknown command/.test(m) ? "This firmware has no diagnostics: v0.34 or later is needed." : `Stopped: ${m}`);
+      $("diagState").textContent = "failed"; $("diagState").className = "pill bad";
+    }
+    busy = false; refresh();
+  }
+  $("diagBtn").onclick = runDiag;
+  $("diagCopy").onclick = () => { try { navigator.clipboard.writeText($("diagOut").textContent); $("diagState").textContent = "copied"; } catch (e) {} };
   $("browseBtn").onclick = () => $("fileIn").click();
   $("fileIn").onchange = e => { addFiles([...e.target.files]); e.target.value = ""; };
   const drop = $("drop"), right = $("rightPane");
