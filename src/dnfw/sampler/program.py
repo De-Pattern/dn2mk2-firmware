@@ -2877,9 +2877,24 @@ def pvmix(p: Prog, L: Layout) -> None:
     C = L.C
     # v0.37: first the whole mix, as the master mix call takes it, to the recorder's MAIN tap
     # (sampler.machines.MAIN_TAP), before the preview goes in
-    for k in range(64):
-        p.ld(0, SM.MIX_BUF + 4 * k)
-        p.st(SM.MAIN_TAP + 4 * k, 0)
+    p.iconst(1, 0)
+    p.st(C["pvk"], 1)
+
+    def tap_word():                           # MAIN_TAP[k] = MIX_BUF[k], k = pvk, then pvk + 1
+        p.ld(1, C["pvk"])
+        p.lsh(12, 1, 2)
+        p.iconst(13, SM.MIX_BUF)
+        p.iop(13, 13, "+", 12)
+        p.seti(1, 13)
+        p.ldi(2, 0, 1)
+        p.iconst(13, SM.MAIN_TAP)
+        p.iop(13, 13, "+", 12)
+        p.seti(1, 13)
+        p.sti(0, 1, 2)
+        p.iconst(12, 1)
+        p.iop(1, 12, "+", 1)
+        p.st(C["pvk"], 1)
+    _loop16(p, C, tap_word, 64)
     p.ld(0, C["pvn"])
     p.iconst(12, 0)
 
@@ -2949,18 +2964,18 @@ def pvmix(p: Prog, L: Layout) -> None:
     p.if_(0, "GT", 12, some, kind="i")
 
 
-def _loop16(p: Prog, C, body) -> None:
-    """for 16 times body(); the count in pvk (body() counts it up from 0)"""
+def _loop16(p: Prog, C, body, n: int = 16) -> None:
+    """for n (16) times body(); the count in pvk (body() counts it up from 0)"""
     top = p.label("pv")
     p.place(top)
     if p.run:
         while True:
             body()
-            if p.mem.get(C["pvk"]) >= 16:
+            if p.mem.get(C["pvk"]) >= n:
                 return
     body()
     p.ld(0, C["pvk"])
-    p.iconst(12, 16)
+    p.iconst(12, n)
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
 
