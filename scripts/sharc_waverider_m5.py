@@ -1342,8 +1342,9 @@ def step_chords(init, sound, machines, need=4) -> dict:
     S = float(os.environ.get("DNFW_MEM_SCALE", "0.9"))
     notes = (0x3C00, 0x4000, 0x4300, 0x4800)      # C, E, G, C
     res, nums = {}, {}
+    only = [x for x in os.environ.get("DNFW_CHORDS_ONLY", "").split(",") if x]   # (a quicker look at some)
     try:
-        for name in MMx.NAMES:
+        for name in [n for n in MMx.NAMES if not only or n in only]:
             k = MMx.NAMES.index(name)
             typ = MMx.TYPES[k]
             b_now = {"b": 0}
@@ -1364,8 +1365,14 @@ def step_chords(init, sound, machines, need=4) -> dict:
                     hist_of[0] = dict(last_hist[0] or {})
                 last_hist[0] = counts["hist"] if b_now["b"] == 12 else last_hist[0]
 
+            trace = []
+
             def at_perc(r):
                 base = (b_now["b"] + 1) * P
+                if b_now["b"] <= 8:                 # the guard's view of the attack, for the numbers
+                    trace.append({"b": b_now["b"], "limit": m2.word(r.state, G.LIMIT),
+                                  "cost": [m2.word(r.state, G.COST_PERC + 4 * t) for t in range(4)],
+                                  "skips": m2.word(r.state, G.SKIPS)})
                 m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
                 m2.poke(r.state, G.MARK, (base + cycles(r)) & 0xFFFFFFFF)
             hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch}
@@ -1403,6 +1410,7 @@ def step_chords(init, sound, machines, need=4) -> dict:
             want = need if name != "DPRO-DDRW" else 1
             flicker = any(b2 > a2 for a2, b2 in zip(sounding, sounding[1:]))    # a dropped voice back with no note
             nums[name]["flicker"] = flicker
+            nums[name]["guard_attack"] = trace
             res[f"{name}: at least {want} of the chord's 4 voices sound in every block, a voice left out stays "
                 f"out until its next note (no flicker), done by 0.8 of the frame, finite"] = (
                 rr["ok"] and fin and over is not None and over <= 0.8 and not flicker
