@@ -47,6 +47,8 @@
  *                u32 done (its sequence, low 16, when the range is scanned), u32 its sequence
  *  25 SCAN    u32 DSP byte address, u32 words -> u16 seq: the DSP counts the non-finite
  *                words there, VERIFY_CHUNK a block (docs/timing-model.md)
+ *  26 DROP    u8 folder -> v0.35: an empty library folder (not INCOMING or RECORDED) removed;
+ *                status 1 if it is not empty or not there (lib.c, with 16..23)
  *
  * Nothing here writes anything but its own RAM, the eMMC region above and the TDM slots
  * above. It never writes the frame (CTL_FRAME): test_sources checks the C for it.
@@ -79,7 +81,7 @@ _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in 
 #define TDM_TX(h) ((volatile u32 *)(0x4E6E0100u + ((u32)(h) << 11)))
 #define TDM_RX(h) ((volatile u32 *)(0x4E6DF100u + ((u32)(h) << 11)))
 
-#define PROTO 5                                 /* v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
+#define PROTO 6                                 /* v0.35: DROP (26); v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
 #define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
 #define BLK_READY (*(volatile u32 *)0x4461B68Cu)                    /* the device is up */
@@ -1659,17 +1661,34 @@ int smp_lib_slot_of(int k)
     if (!dir_ok || !smp_lib_used(k))
         return -1;
     char st[8];
-    stem7(smp_lib_name(k), st);
-    u32 fr = smp_lib_frames(k);
+    const char *ln = smp_lib_name(k);
+    stem7(ln, st);
+    u32 fr = smp_lib_frames(k), rate = smp_lib_rate(k), fmt = (u32)smp_lib_fmt(k);
     for (int s = 0; s < REC_FIRST; s++) {
-        if (smp_slot_empty(s) || le32(ENTRY(s) + 4) != fr)
+        const u8 *e = ENTRY(s);
+        if (smp_slot_empty(s) || le32(e + 4) != fr || le32(e + 8) != rate || le32(e + 12) != fmt)
             continue;
         const char *nm = smp_name(s);
         int j = 0;
         while (j < 8 && st[j] == nm[j] && st[j])
             j++;
-        if (j < 8 && st[j] == nm[j])
-            return s;
+        if (j == 8 || st[j] != nm[j])
+            continue;
+        /* v0.35: the slot's long name too, where it has one (LOAD TO PROJ writes it): two
+         * library samples of one length whose names differ past their seventh character
+         * (a pack's "808 KICK A" and "808 KICK B") read as one, so the second never loaded
+         * (Pablo, v0.33: "some of them don't update") */
+        if (meta_ok) {
+            const u8 *m = (const u8 *)meta_slot(s);
+            if (m[0] == 0xFF && m[4]) {
+                u32 i = 0;
+                while (i < META_NAME_BYTES - 1 && m[4 + i] && m[4 + i] == (u8)ln[i])
+                    i++;
+                if (!(i == META_NAME_BYTES - 1 || (!m[4 + i] && !ln[i])))
+                    continue;
+            }
+        }
+        return s;
     }
     return -1;
 }
@@ -2104,7 +2123,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
             for (u32 c = 0; c < 8; c++)
                 rp[r++] = dir_ok && k < POOL_SLOTS && fr ? NAME(k)[c] : 0;
         }
-    } else if (cmd >= 16 && cmd <= 23) {        /* v0.31 (link 5): the +Drive's library (lib.c) */
+    } else if ((cmd >= 16 && cmd <= 23) || cmd == 26) {        /* v0.31 (link 5): the +Drive's library (lib.c) */
         extern u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
         r = smp_lib_rx(cmd, rq, n, rp, r, &rp[3]);
     } else if (cmd == 24) {                     /* v0.34: DIAG -> the DSP's guard record and load */

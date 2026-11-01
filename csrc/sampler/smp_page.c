@@ -952,9 +952,21 @@ void smp_fb_delete(int slot, int folder)
 {
     if (smp_fb_store == 1) {                    /* v0.31: from the +Drive's library */
         if (smp_fb_mark_count()) {
+            /* v0.35: a folder emptied this way (ticked whole, FUNC + YES, then DELETE) goes
+             * too, as one deleted by name does (Kokozi, v0.33: deleted folders stayed in the
+             * list, empty) */
+            u32 emptied[2] = {0, 0};
             for (int k = 0; k < LB_CAP; k++)
-                if (lb_marked(k) && smp_lib_used(k))
+                if (lb_marked(k) && smp_lib_used(k)) {
+                    int f = smp_lib_folder_of(k);
+                    if (f >= 2 && f < 64)
+                        emptied[f >> 5] |= 1u << (f & 31);
                     smp_lib_delete(k);
+                }
+            extern int smp_lib_folder_drop(int f);
+            for (int f = 2; f < 64; f++)
+                if (emptied[f >> 5] >> (f & 31) & 1)
+                    smp_lib_folder_drop(f);     /* (refused while it still holds samples) */
         } else if (slot >= 0)
             smp_lib_delete(slot);
         else if (folder != -1) {
