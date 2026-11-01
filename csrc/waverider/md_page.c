@@ -229,6 +229,12 @@ int md_page_draw(void *view, void *c, int page, int type)
         if (!(n & 1) || !id)
             continue;
         const char *name = NAME_SHORT_OF(id);
+        char vb[8];
+        extern int smp_values_held(void);
+        if (smp_values_held() && id != PERC_TYPE_ID) {     /* v0.35: SYN held: the value (O14) */
+            fmt_int(vb, knob(view, id), 0);
+            name = vb;
+        }
         int len = slen(name, 4);
         text(c, SMALL, x0 + (20 - text_w(SMALL, name, len)) / 2, ny, name, len, 1);
         if (id == PERC_TYPE_ID) {                       /* TYPE: the machine, not a knob */
@@ -425,9 +431,20 @@ int mnm_page_draw(void *view, void *c, int mi)
         const char *name = mnm_labels[mi][s];
         if (w == MW_EMPTY || (name[0] == '-' && !name[1]))
             continue;
+        int k = mnm_k(view, s), n = mnm_choices[mi][s];
+        char vb[8];
+        extern int smp_values_held(void);
+        if (smp_values_held()) {                   /* v0.35: SYN held: the value (O14): a knob's */
+            if (w == MW_KNOB || !n) {           /* number, a choice's name */
+                fmt_int(vb, k, 0);
+                name = vb;
+            } else {
+                int cnt = mnm_choice_count(n), ch = mnm_choice_of(n, k);
+                name = mnm_value_text(mi, s, ch > cnt - 1 ? cnt - 1 : ch);
+            }
+        }
         int len = slen(name, 4);
         text(c, SMALL, x0 + (20 - text_w(SMALL, name, len)) / 2, ny, name, len, 1);
-        int k = mnm_k(view, s), n = mnm_choices[mi][s];
         if (w == MW_KNOB || !n) {
             blit(c, x0 + 4, ky, MDUI_KNOB_COLS, 13, MDUI + MDUI_KNOB, 1);
             blit(c, x0 + 6, ky + 2, MDUI_PTR_COLS, 7, MDUI + MDUI_PTR + 2 * MDUI_PTR_COLS * k, 0);

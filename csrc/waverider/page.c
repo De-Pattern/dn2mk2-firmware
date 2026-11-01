@@ -589,7 +589,16 @@ void wr_page_draw(void *view, void *canvas)
             label = NAME_SHORT(id);             /* PERC, samples: the name wr_names gave the record */
         if (smp && id)
             label = smp_text(view, id, kind, label);
-        TEXT(canvas, FONT, cx, top ? TOP_LABEL_Y : BOT_LABEL_Y, CENTRED, "%.5s", label);
+        extern int smp_values_held(void);
+        char vb[16];
+        if (smp_values_held() && id) {             /* v0.35: SYN held: the value (O14) */
+            u8 fl;
+            vb[0] = 0;
+            ((void (*)(int, char *))(*(void **)(0x401F7F94u + 60u * id + 0x34u)))(GET_VALUE(view, id, &fl), vb);
+            vb[6] = 0;
+            label = vb;
+        }
+        TEXT(canvas, FONT, cx, top ? TOP_LABEL_Y : BOT_LABEL_Y, CENTRED, "%.6s", label);
         if (!id || (label[0] == '-' && !label[1]))
             continue;                           /* an empty place, or a parameter this machine lacks */
         u8 flag;
