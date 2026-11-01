@@ -61,7 +61,9 @@ def test_applies_to_both_sections(applied, dn2_111):
     # v0.26: and the tables the ColdFire sends the DSP at power-on (dnfw.mods.waverider._tables)
     from dnfw.md import rom as md_rom
     want = 6 if md_rom.available() else 4
-    assert [kind for kind, _ in chunks] == [platform.area.CODE] * want
+    # v0.37: and the start-up animation: the stamp's code and its frames (ANIZ)
+    kinds = [kind for kind, _ in chunks]
+    assert sorted(kinds) == sorted([platform.area.CODE] * (want + 1) + [b"ANIZ"])
     assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 
