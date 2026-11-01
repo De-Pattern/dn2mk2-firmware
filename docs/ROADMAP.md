@@ -210,6 +210,9 @@ inharmonic modes).
   macros are turned at once -- the Analog Four mk2's Perf mode. One macro per knob, all
   its mappings moving together, live. Weight unknown; after the stability work.
 - Holding SYN to show the values on our pages (O14): v0.35.
+- **Undecided (owner, 2026-11-01, "let's sit on it")**: PROJECT RAM shown as one list
+  (or renamed POOL) instead of split into INCOMING and RECORDED, leaving those two as
+  +DRIVE folders only.
 - From the Discord audit (`docs/feedback/2026-10-30-discord.csv`): pattern direct jump,
   Markov song mode, an LFO matrix, trigless trigs, parameter slides, screen streaming,
   MD/MnM preset import, per-track flanger/phaser, capicola stretch, per-project sample
