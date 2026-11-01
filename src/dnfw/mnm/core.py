@@ -66,7 +66,7 @@ class Layout:
     """Where the Monomachine voices' shared buffers and tables are (DDR): IN, a render's
     internal samples (up to 192); C, the decimators' coefficients; the tables (`tables`)."""
 
-    def __init__(self, perc, scratch: int, tables: int):
+    def __init__(self, perc, scratch: int, tables: int, dt_at: int | None = None):
         self.perc, self.md = perc, perc.md          # PERC's layout (its EXP2, RECIP) and its MD voices'
         self.scratch, self.tables = scratch, tables
         self.IN = scratch                           # 192 floats: the decimator's input
@@ -78,12 +78,21 @@ class Layout:
         # v0.26, DPRO-DENS / DPRO-DDRW (dnfw.mnm.dpro): scratch after the words, tables after COMB
         at = scratch + 4 * (592 + 64)
         self.BUF, self.MIX, self.W1, self.W2 = at, at + 4 * 64, at + 4 * 96, at + 4 * 128   # 64, 32, 32, 32
-        self.DG = {name: at + 4 * (160 + k) for k, name in enumerate(("w", "l", "j"))}   # the build's cursor
+        self.DG = {name: at + 4 * (160 + k) for k, name in enumerate(("w", "l", "j", "c"))}   # the build's cursor
         t = self.COMB + 4 * 4096
-        self.DT = {}
+        # v0.36: the DPRO tables are where the fill writes them (DT_SRC, DDR, in the run of the
+        # Monomachine tables); with DT_AT given (L2), build() copies them there once and every
+        # reader reads them there (DDRW's and DENS's busiest DDR reads, docs/dsp-cost.md)
+        self.DT_SRC, self.DT = {}, {}
+        self.DT_WORDS = sum(n for _, n in DP_TABLES)
+        self.DT_FROM = t
+        self.DT_AT = dt_at
+        u = dt_at if dt_at is not None else t
         for name, n in DP_TABLES:
-            self.DT[name] = t
+            self.DT_SRC[name] = t
+            self.DT[name] = u
             t += 4 * n
+            u += 4 * n
         self.DIGI = tables + DIGI_OFF               # the Digibank stand-in the DSP builds (ints)
         # v0.26, VO-6 (dnfw.mnm.vo6): its tables after the DPRO ones (rom.vo6_words)
         self.VO = {}

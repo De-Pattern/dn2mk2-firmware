@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,garbage,wipe,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -605,6 +605,11 @@ def main(argv=None):
             print("\nstep 3w: the output guard's wipe, a poisoned P-I voice (v0.34)")
             results["3w_wipe"] = step_wipe(warm(), sound, machines)
             show(results["3w_wipe"])
+            gc.collect()
+        if "chords" in steps:
+            print("\nstep 3k: four-note chords on each Monomachine machine, the memory clock (v0.36)")
+            results["3k_chords"] = step_chords(warm(), sound, machines)
+            show(results["3k_chords"])
             gc.collect()
         if "stress" in steps:
             print("\nstep 3s: the stress test (the clock made to move)")
@@ -1320,6 +1325,102 @@ def step_stress(init, sound, machines) -> dict:
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
 
 
+def step_chords(init, sound, machines, need=4) -> dict:
+    """v0.36 (the owner and misterairplane: two voices at most on a Monomachine track, the
+    oldest silenced). A chord: four notes of one Monomachine machine at once (four tracks,
+    one note each, as dynamic allocation spreads a chord), held 24 blocks, for each machine,
+    on the memory-cost clock (step 3s scenario F's: cycles = instructions + S x (4 L2 + 10
+    DDR), EMUCLK moved by it, so the frame guard decides as on the unit). Counts the voices
+    sounding in each block after the attack; NEED of them for every machine but DDRW
+    (reported: its cost is the tables in DDR). Our voices done by 0.8 of the frame,
+    everything finite."""
+    from dnfw.perc import guard as G
+    from dnfw.mnm import machines as MMx
+    P = 666_667
+    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
+    counts, undo_counts = _count_memory()
+    S = float(os.environ.get("DNFW_MEM_SCALE", "0.9"))
+    notes = (0x3C00, 0x4000, 0x4300, 0x4800)      # C, E, G, C
+    res, nums = {}, {}
+    only = [x for x in os.environ.get("DNFW_CHORDS_ONLY", "").split(",") if x]   # (a quicker look at some)
+    try:
+        for name in [n for n in MMx.NAMES if not only or n in only]:
+            k = MMx.NAMES.index(name)
+            typ = MMx.TYPES[k]
+            b_now = {"b": 0}
+            hist_of, last_hist = [None], [None]
+
+            def cycles(r):
+                return int(getattr(r, "steps_n", 0) + S * (4 * counts["L2"] + 10 * counts["DDR"]))
+
+            def clock(r):
+                r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const(((b_now["b"] + 1) * P + cycles(r)) & 0xFFFFFFFF)
+
+            def at_dispatch(r):
+                for x in ("L1", "L2", "DDR"):
+                    counts[x] = 0
+                counts["on"] = True
+                counts["hist"] = {} if b_now["b"] == 12 else None    # one sustained block's DDR pages
+                if b_now["b"] == 13:
+                    hist_of[0] = dict(last_hist[0] or {})
+                last_hist[0] = counts["hist"] if b_now["b"] == 12 else last_hist[0]
+
+            trace = []
+
+            def at_perc(r):
+                base = (b_now["b"] + 1) * P
+                if b_now["b"] <= 8:                 # the guard's view of the attack, for the numbers
+                    trace.append({"b": b_now["b"], "limit": m2.word(r.state, G.LIMIT),
+                                  "cost": [m2.word(r.state, G.COST_PERC + 4 * t) for t in range(4)],
+                                  "skips": m2.word(r.state, G.SKIPS)})
+                m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
+                m2.poke(r.state, G.MARK, (base + cycles(r)) & 0xFFFFFFFF)
+            hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch}
+            hooks.update({x: clock for x in sites})
+
+            def fb(b, typ=typ, k=k):
+                b_now["b"] = b
+                f = base_frame(sound, machines, t0=typ, overrides=mnm_words(k), trigger=False,
+                               others={t: typ for t in range(1, 4)})
+                for t in range(4):
+                    for slot, w in mnm_words(k).items():
+                        f.param(t, slot, w)
+                    f.header(FR.NOTE, t, notes[t])
+                    if b == 1:
+                        f.trigger(t)
+                return f.to_bytes()
+            rr = run_blocks(init, fb, 24, extra_hooks=hooks)
+            st = rr.get("state")
+            end = mark0 = None
+            if rr["ok"]:
+                end, mark0 = m2.word(st.state, G.OURS_END), m2.word(st.state, G.MARK0)
+            rr.pop("state", None)
+            sounding = []
+            for b in range(4, len(rr.get("perc", []))):
+                blk = rr["perc"][b]
+                sounding.append(sum(1 for t in range(4) if t in blk and V.peak(blk[t]["out"]) > 1e-4))
+            fin = rr["ok"] and all(math.isfinite(x) for blk in rr["buffers"] for t in range(16) for x in blk[t])
+            over = ((end - mark0) & 0xFFFFFFFF) / P if end is not None else None
+            top = sorted((hist_of[0] or {}).items(), key=lambda kv: -kv[1])[:6]
+            nums[name] = {"ddr_pages_top": [(f"{pg << 12:#010x}", n) for pg, n in top],
+                          "sounding_min": min(sounding) if sounding else 0,
+                          "sounding_mean": round(sum(sounding) / max(len(sounding), 1), 2),
+                          "our_end_over_P": over and round(over, 3)}
+            print(f"    {name}: {nums[name]}", flush=True)
+            want = need if name != "DPRO-DDRW" else 2      # (DDRW: ~127,000 cycles a voice; the frame holds two)
+            flicker = any(b2 > a2 for a2, b2 in zip(sounding, sounding[1:]))    # a dropped voice back with no note
+            nums[name]["flicker"] = flicker
+            nums[name]["guard_attack"] = trace
+            res[f"{name}: at least {want} of the chord's 4 voices sound in every block, a voice left out stays "
+                f"out until its next note (no flicker), done by 0.8 of the frame, finite"] = (
+                rr["ok"] and fin and over is not None and over <= 0.8 and not flicker
+                and nums[name]["sounding_min"] >= want)
+    finally:
+        counts["hist"] = None
+        undo_counts()
+    return {"ok": all(res.values()), "checks": res, "numbers": nums}
+
+
 def _count_memory():
     """wrap every module's DM read and write: -> (counts dict, undo). Counts by region:
     L1 (the core's own), L2 (0x20000000..), DDR (0x80000000..)"""
@@ -1332,7 +1433,12 @@ def _count_memory():
         a = conc(a)
         if a is None:
             return None
-        return "DDR" if a >= 0x80000000 else "L2" if 0x20000000 <= a < 0x20200000 else "L1"
+        if a >= 0x80000000:
+            h = counts.get("hist")              # v0.36: where in DDR, by 4 KB page, when asked
+            if h is not None:
+                h[a >> 12] = h.get(a >> 12, 0) + 1
+            return "DDR"
+        return "L2" if 0x20000000 <= a < 0x20200000 else "L1"
     import sys as _s
     orig_r, orig_w = fx._dm_read, fx._dm_write
 

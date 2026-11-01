@@ -45,7 +45,11 @@ MNM_LEVELS = (5.4, 11.5, 0.95, 2.0, 16.5)
 # what the SHARC has free beside the stock engines (docs/sharc-load.md: ~250,000 cycles).
 MNM_COST = {"SID 6581": 60_000, "DPRO-WAVE": 34_000, "DPRO-DDRW": 78_000, "DPRO-DENS": 70_000,
             "VO-6": 75_000}
-MNM_BUDGET = 150_000
+# v0.36: no longer the limit (the owner and misterairplane: two voices at most on a Monomachine
+# track). 150,000 fitted 2 SID / VO-6 / DENS and 1 DDRW whatever the DSP's real time; it came
+# before the frame guard (v0.27), which measures the frame and leaves out (v0.36: steals) the
+# oldest voices that do not fit. Kept as a ceiling far above what sixteen voices can reach.
+MNM_BUDGET = 1_000_000
 # v0.29: which Monomachine voices get the budget: the newest first (the owner, 2026-10-28:
 # with the DN2's dynamic voice allocation each note lands on a new voice; the older ones,
 # which never go quiet, kept the budget in slot order, so most new notes were silent --
@@ -67,6 +71,11 @@ ORDER_OFF, RANK_U, RANK_N, PERC_I, SMP_I = 0x3080, 0x30C0, 0x30C4, 0x30C8, 0x30C
 # blocks under QUIET_LEVEL there, no note, and the voice rests: no cost, silent, until its
 # next note. QUIET counts each slot's blocks at RESTS_OFF.
 RESTS_OFF = 0x3100
+# v0.36: the frame guard's strikes against each slot since its note: a voice left out a second
+# time in one note is stolen (rests until its next note); once is a one-block gap (a note's
+# first blocks cost the most: DDRW's chord lost three of its four voices to the attack alone)
+STRIKES_OFF = 0x3140
+STEAL_STRIKES = 2
 MNM_QUIET_LEVEL = 2.0 ** -16                # -96 dB: an AMP envelope's tail and a filter's are under it
 MNM_QUIET_BLOCKS = 64                      # 43 ms
 MNM_SCRATCH = 0x200A4000                   # dsp.MNM_SCRATCH_L2 (v0.32: L2; test_waverider_dsp holds them equal)
@@ -142,6 +151,7 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
             def struck():
                 p.iconst(0, 0)
                 p.st(rests + 4 * u, 0)
+                p.st(L.md.mnm.scratch + STRIKES_OFF + 4 * u, 0)    # v0.36: a new note, no strikes
 
             def listen():                      # the block the chain left in its buffer
                 p.ld(0, BUFFERS + 4 * u)
@@ -731,7 +741,9 @@ def program(L: M.Layout, rings_sw: int, prefix: str = "pk") -> str:
     p.iconst(12, MDK.Z_N)                     # ColdFire at power-on) are decoded
     p.e("COMP(R0, R12);")
     p.jump("LT", other)
-    G.around(p, L.C["t"], G.COST_PERC, BUFFERS, lambda: voice(p, L))   # v0.27: if it fits in the frame
+    G.around(p, L.C["t"], G.COST_PERC, BUFFERS, lambda: voice(p, L),   # v0.27: if it fits in the frame
+             rests=L.md.mnm.scratch + RESTS_OFF, rest_blocks=MNM_QUIET_BLOCKS,   # v0.36: else, the second
+             strikes=L.md.mnm.scratch + STRIKES_OFF, steal_at=STEAL_STRIKES)       # time in a note, stolen
     p.jump("", nxt)
     # not PERC: its voice is silenced, so a track that comes back to PERC starts clean
     # (v0.12: v0.11 resumed what it had left ringing)

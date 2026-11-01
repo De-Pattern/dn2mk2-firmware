@@ -462,6 +462,22 @@ def build(p: Prog, L: C.Layout) -> None:
     W = L.W
 
     def go():
+        if L.DT_AT is not None:                 # v0.36: the DPRO tables to L2, once, first
+            def copy():
+                p.iconst(1, L.DT_FROM)
+                p.seti(1, 1)
+                p.iconst(1, L.DT_AT)
+                p.seti(2, 1)
+
+                def word():                      # (R0 is the loop's counter)
+                    p.ldpost(3, 1)
+                    p.stpost(2, 3)
+                p.loop(W["osc"], L.DT_WORDS, word)
+                p.iconst(1, 1)
+                p.st(L.DG["c"], 1)
+            p.ld(1, L.DG["c"])
+            p.ifz(1, "EQ", copy)
+
         def one():
             p.ld(1, L.DG["w"])
             p.iconst(12, 32)
@@ -520,4 +536,11 @@ def bench_words(L: C.Layout) -> dict[int, int]:
     """the bench's memory past the shipped tables: the stand-in, built (and its done word)"""
     out = {L.DIGI + 4 * k: v for k, v in enumerate(digibank_reference(L))}
     out[L.DG["w"]] = 32
+    if L.DT_AT is not None:                    # v0.36: and the DPRO tables' copy in L2, as build() leaves it
+        from ..perc.dsl import bits
+        words = rom.table_words()
+        k0 = (L.DT_FROM - L.tables) // 4
+        for j in range(L.DT_WORDS):
+            out[L.DT_AT + 4 * j] = bits(words[k0 + j] * C.Q23)
+        out[L.DG["c"]] = 1
     return out
