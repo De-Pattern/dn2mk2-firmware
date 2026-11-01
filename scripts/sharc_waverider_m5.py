@@ -611,6 +611,10 @@ def main(argv=None):
             results["3k_chords"] = step_chords(warm(), sound, machines)
             show(results["3k_chords"])
             gc.collect()
+        if "mainsrc" in steps:
+            print("\nstep (probe): the main mix as the recorder sees it")
+            results["probe_mainsrc"] = step_mainsrc(warm(), sound, machines, a.blocks)
+            show(results["probe_mainsrc"])
         if "stress" in steps:
             print("\nstep 3s: the stress test (the clock made to move)")
             results["3s_stress"] = step_stress(warm(), sound, machines)
@@ -2247,6 +2251,30 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         if os.environ.get("PVMIX_DEBUG"):
             print(name, out[name])
     return {"ok": all(checks.values()), "checks": checks, "numbers": out}
+
+
+def step_mainsrc(init, sound, machines, blocks) -> dict:
+    """v0.37 (the owner: resampling MAIN L+R records an empty sample): the main mix buffer
+    (MIX_BUF) as our recorder sees it (at our sampler's entry) and as the master mix call
+    sees it (at the preview mixer's site), with a stock FM Tone track sounding"""
+    seen = {"smp": [], "pvmix": []}
+
+    def peak(r):
+        return max(abs(V.bits_f32(m2.word(r.state, SM.MIX_BUF + 4 * k) or 0)) for k in range(64))
+
+    def at_smp(r):
+        seen["smp"].append(peak(r))
+
+    def at_pv(r):
+        seen["pvmix"].append(peak(r))
+
+    def fb(b):
+        return base_frame(sound, machines, t0=0, trigger=b == 1).to_bytes()
+    rr = run_blocks(init, fb, 8, extra_hooks={dsp.SMP_SW: at_smp, dsp.PVMIX_SW: at_pv})
+    nums = {k: [round(x, 5) for x in v] for k, v in seen.items()}
+    print(f"    MIX_BUF peak at our sampler's entry: {nums['smp']}", flush=True)
+    print(f"    MIX_BUF peak at the master mix call:  {nums['pvmix']}", flush=True)
+    return {"ok": rr["ok"], "checks": {"ran": rr["ok"]}, "numbers": nums}
 
 
 def step_tdm(init, sound, machines, blocks) -> dict:
