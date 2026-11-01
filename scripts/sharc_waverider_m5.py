@@ -1407,7 +1407,7 @@ def step_chords(init, sound, machines, need=4) -> dict:
                           "sounding_mean": round(sum(sounding) / max(len(sounding), 1), 2),
                           "our_end_over_P": over and round(over, 3)}
             print(f"    {name}: {nums[name]}", flush=True)
-            want = need if name != "DPRO-DDRW" else 2      # (DDRW: ~127,000 cycles a voice; the frame holds two)
+            want = need if name != "DPRO-DDRW" else 3      # (v0.37: DDRW skips its zero-weight level: three fit)
             flicker = any(b2 > a2 for a2, b2 in zip(sounding, sounding[1:]))    # a dropped voice back with no note
             nums[name]["flicker"] = flicker
             nums[name]["guard_attack"] = trace

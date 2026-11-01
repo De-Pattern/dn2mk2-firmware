@@ -20,7 +20,8 @@ failure:
 4. **ColdFire instruction set** (`check_coldfire.py`): every `CODE` chunk the loader
    runs has no scale-8 addressing; and every hit in MAIN OS against stock lies past
    stock's end *and* outside every `CODE` chunk (i.e. in data that never executes).
-5. **boot from reset** (`emu_boot_check.py`): boots and draws its UI, no fault.
+5. **boot from reset** (`emu_boot_check.py`): boots and draws its UI, no fault (v0.37: and the
+   start-up animation plays, every frame the artist's).
 6. **engine + LOAD/SAVE** (`emu_boot_engine.py`): the evaluator runs clean under the
    real loader; CODE chunks intact; machine types survive a SAVE/LOAD round trip.
 6b. **sample link** (v0.16, `emu_waverider_menu.py`'s `link16`): on the ColdFire, the
@@ -350,11 +351,20 @@ def main() -> int:
 
         # 5. boot from reset
         boot_cmd = [a.venv, "-u", "scripts/emu_boot_check.py", bdir / "section_3_MAIN_OS.bin"]
+        # v0.37: the build plays the start-up animation (dnfw.bootanim): every frame the stamp
+        # shows during the boot, checked bit for bit against the artist's, all of them shown
+        from dnfw.mods import waverider as Wb   # noqa: PLC0415
+        anim = hasattr(Wb, "_boot")
+        if anim:
+            boot_cmd.append("--aniz")
 
         def boot_body(tdir):
             rc, out = run("boot_check", boot_cmd, logs, trace=tdir)
             good = rc == 0 and "booted and drew its UI" in out
-            return good, "booted and drew its UI, no fault" if good else out[-800:]
+            if anim:
+                good = good and "not the artist's" in out and ", 0 not the artist's" in out
+            return good, ("booted and drew its UI, no fault" + ("; the start-up animation: every frame shown, "
+                          "each the artist's" if anim else "") if good else out[-800:])
         gate("boot from reset", *cached("boot from reset", [boot_cmd], boot_body))
 
         # 6. engine + LOAD/SAVE

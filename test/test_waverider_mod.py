@@ -327,3 +327,30 @@ def test_v023_keyboard_notes_ask_slc_keynotes_which_asks_stock():
     target = struct.unpack(">I", new[2:])[0]
     assert lo <= target < hi
     assert struct.pack(">I", 0x40034460) in _chunked(target, 256)
+
+
+def test_v037_the_startup_animation_chunk_is_the_artists_frames():
+    """dnfw.bootanim: the ANIZ chunk decodes (as the stamp walks it) to the artist's 59
+    frames bit for bit; its table maps the 175 intro frames onto them in order, every frame
+    shown, the last held; it is small (the 2 MiB USB limit)"""
+    from dnfw import bootanim as A
+    c = A.chunk()
+    ims = A.images()
+    assert len(ims) == 59
+    assert A.decode(c) == ims
+    t = A.table()
+    assert len(t) == A.INTRO_FRAMES
+    assert list(t) == sorted(t) and set(t) == set(range(59)) and t[-1] == 58
+    assert len(c) < 8192
+
+
+def test_v037_the_build_hooks_the_intro_once_with_the_stamp():
+    """the waverider mod's MAIN OS: the intro routine's first 8 bytes jump to the boot-screen
+    stamp; the stamp's CODE chunk and the ANIZ chunk are in the platform area"""
+    import struct
+    from dnfw.mods import bootscreen as B, waverider as W
+    spec, aniz = W._boot()
+    assert spec is B.SPEC and aniz.startswith(struct.pack(">I", 59))
+    assert spec["aniz_chunk"] == "ANIZ"
+    ext = [e for e in W.extents() if "intro hook" in e.what]
+    assert len(ext) == 1 and ext[0].length == 8
