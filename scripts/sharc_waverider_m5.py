@@ -606,6 +606,11 @@ def main(argv=None):
             results["3w_wipe"] = step_wipe(warm(), sound, machines)
             show(results["3w_wipe"])
             gc.collect()
+        if "chords" in steps:
+            print("\nstep 3k: four-note chords on each Monomachine machine, the memory clock (v0.36)")
+            results["3k_chords"] = step_chords(warm(), sound, machines)
+            show(results["3k_chords"])
+            gc.collect()
         if "stress" in steps:
             print("\nstep 3s: the stress test (the clock made to move)")
             results["3s_stress"] = step_stress(warm(), sound, machines)
@@ -1318,6 +1323,83 @@ def step_stress(init, sound, machines) -> dict:
         "nothing non-finite": fin,
     }
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
+
+
+def step_chords(init, sound, machines, need=4) -> dict:
+    """v0.36 (the owner and misterairplane: two voices at most on a Monomachine track, the
+    oldest silenced). A chord: four notes of one Monomachine machine at once (four tracks,
+    one note each, as dynamic allocation spreads a chord), held 24 blocks, for each machine,
+    on the memory-cost clock (step 3s scenario F's: cycles = instructions + S x (4 L2 + 10
+    DDR), EMUCLK moved by it, so the frame guard decides as on the unit). Counts the voices
+    sounding in each block after the attack; NEED of them for every machine but DDRW
+    (reported: its cost is the tables in DDR). Our voices done by 0.8 of the frame,
+    everything finite."""
+    from dnfw.perc import guard as G
+    from dnfw.mnm import machines as MMx
+    P = 666_667
+    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp"))
+    counts, undo_counts = _count_memory()
+    S = float(os.environ.get("DNFW_MEM_SCALE", "0.9"))
+    notes = (0x3C00, 0x4000, 0x4300, 0x4800)      # C, E, G, C
+    res, nums = {}, {}
+    try:
+        for name in MMx.NAMES:
+            k = MMx.NAMES.index(name)
+            typ = MMx.TYPES[k]
+            b_now = {"b": 0}
+
+            def cycles(r):
+                return int(getattr(r, "steps_n", 0) + S * (4 * counts["L2"] + 10 * counts["DDR"]))
+
+            def clock(r):
+                r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const(((b_now["b"] + 1) * P + cycles(r)) & 0xFFFFFFFF)
+
+            def at_dispatch(r):
+                for x in ("L1", "L2", "DDR"):
+                    counts[x] = 0
+                counts["on"] = True
+
+            def at_perc(r):
+                base = (b_now["b"] + 1) * P
+                m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
+                m2.poke(r.state, G.MARK, (base + cycles(r)) & 0xFFFFFFFF)
+            hooks = {dsp.PERC_SW: at_perc, m3.DISPATCH: at_dispatch}
+            hooks.update({x: clock for x in sites})
+
+            def fb(b, typ=typ, k=k):
+                b_now["b"] = b
+                f = base_frame(sound, machines, t0=typ, overrides=mnm_words(k), trigger=False,
+                               others={t: typ for t in range(1, 4)})
+                for t in range(4):
+                    for slot, w in mnm_words(k).items():
+                        f.param(t, slot, w)
+                    f.header(FR.NOTE, t, notes[t])
+                    if b == 1:
+                        f.trigger(t)
+                return f.to_bytes()
+            rr = run_blocks(init, fb, 24, extra_hooks=hooks)
+            st = rr.get("state")
+            end = mark0 = None
+            if rr["ok"]:
+                end, mark0 = m2.word(st.state, G.OURS_END), m2.word(st.state, G.MARK0)
+            rr.pop("state", None)
+            sounding = []
+            for b in range(4, len(rr.get("perc", []))):
+                blk = rr["perc"][b]
+                sounding.append(sum(1 for t in range(4) if t in blk and V.peak(blk[t]["out"]) > 1e-4))
+            fin = rr["ok"] and all(math.isfinite(x) for blk in rr["buffers"] for t in range(16) for x in blk[t])
+            over = ((end - mark0) & 0xFFFFFFFF) / P if end is not None else None
+            nums[name] = {"sounding_min": min(sounding) if sounding else 0,
+                          "sounding_mean": round(sum(sounding) / max(len(sounding), 1), 2),
+                          "our_end_over_P": over and round(over, 3)}
+            print(f"    {name}: {nums[name]}", flush=True)
+            want = need if name != "DPRO-DDRW" else 1
+            res[f"{name}: at least {want} of the chord's 4 voices sound in every block, done by 0.8 of "
+                f"the frame, finite"] = (rr["ok"] and fin and over is not None and over <= 0.8
+                                         and nums[name]["sounding_min"] >= want)
+    finally:
+        undo_counts()
+    return {"ok": all(res.values()), "checks": res, "numbers": nums}
 
 
 def _count_memory():
