@@ -48,6 +48,7 @@ ROOT = pathlib.Path("/mnt/d/01_Code/Z_Personal/dn2_firmware")
 SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
 CACHE = ROOT / "out/boot-check/control.json"
 REPORTER = 0x4011EA6A
+ANIZ_LIMIT = 700_000_000                 # v0.37: past the intro's first frame (measured: shown before 700M)
 
 # **The control is only a control while the emulator it was measured on stays
 # put.** This caches what a stock boot does, because stock does not change --
@@ -210,9 +211,11 @@ def main() -> int:
         aniz = {"show": bootscreen.SPEC["aniz_show"], "zst": bootscreen.SPEC["zst"],
                 "stamp": bootscreen.SPEC["stamp"], "calls": 0, "first_at": None,
                 "expect": bootanim.images(), "shown": 0, "frames": set(), "wrong": []}
-        # from reset the intro's first frame comes near 316M; under dspboot the intro's
-        # timers do not run on (stock too stops at one frame), so here the first frame is
-        # checked, and scripts/emu_aniz_check.py checks every frame from `boot400M`
+        # from reset the intro first calls the stamp near 316M, and its first frame is
+        # shown (aniz_show) after the stock intro routine returns, past 450M; under dspboot
+        # the intro's timers do not run on (stock too stops at one frame), so here the first
+        # frame is checked, and scripts/emu_aniz_check.py checks every frame from `boot400M`
+        args.limit = max(args.limit, ANIZ_LIMIT)
     ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries, aniz)
     print(f"  {os.path.basename(os.path.dirname(args.image))}: {frames} frame(s) in "
           f"{ran:,} instruction(s), {round(time.time() - started, 1)}s\n")
