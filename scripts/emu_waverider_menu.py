@@ -762,6 +762,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                 if sx(19, struct.pack("<I", o) + data[o:o + 300])[0] != 0:
                     return None
             return idx if sx(20, struct.pack("<I", adler(data)))[0] == 0 else None
+        # (after another scenario on this machine the library's RAM copy is that one's: read it
+        # again from this scenario's fresh +Drive, as at power-on)
+        machine.write(syms["smp_lib_state"], bytes(4))
         _st, rf = sx(17, b"LIVE")
         n_lib = 22
         sent = []
