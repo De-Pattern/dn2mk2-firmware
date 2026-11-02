@@ -1467,6 +1467,10 @@ def main() -> int:
         # the interrupt no longer delivered, or audio frames overrunning fail the seed. It
         # needs the section the snapshot was booted with beside it (its own build's edits
         # are put back to stock first)
+        # v0.38 (blskk's crash): first a fixed arp scenario (a SLICE track at NOTE, the arp on,
+        # KEYBOARD's CHORD MEMORY with 12-note chords, keys held while the sequencer ticks, the
+        # RECORDER and ARP pages up); the seeds also turn the arp, KEYBOARD and the sequencer; every
+        # run fails on a free() of a stack address (emu_waverider_menu.py's stack_frees)
         if "smp_lst_open" in lay:
             snap_sec = pathlib.Path(str(snap) + ".section_3_MAIN_OS.bin")
             fz_cmd = [sys.executable, "scripts/emu_fuzz_ui.py", bdir, "3,7", "--steps", "24",
