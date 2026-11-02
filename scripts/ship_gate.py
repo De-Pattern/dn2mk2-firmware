@@ -1475,7 +1475,8 @@ def main() -> int:
                               f"(1 step at {b['tempo_word_after_isr'] / 120:g} BPM), exact, landing on the "
                               f"locks; {len(b['checks'])} checks; SLIDE off: {len(b['off_shas'])} frames' "
                               f"arrays and the lock table's SAVE/LOAD identical to stock 1.11; the TRIG page's SLD/SLEN "
-                              f"set through the panel")
+                              f"set through the panel, the held trig staying on after release, a page "
+                              f"paste leaving no SLD/SLEN value in a stock lock")
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 

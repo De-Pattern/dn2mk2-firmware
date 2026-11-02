@@ -23,7 +23,8 @@ and VFAD, are now **SLD** (encoder **E**) and **SLEN** (encoder **F**).
   does nothing (there is no per-sound or per-track default).
 - The trig's other p-locks are set as usual (hold the trig, turn the parameter).
 - Removing a trig (or placing one, which stock does by clearing the step) clears its SLD
-  and SLEN with its other locks.
+  and SLEN with its other locks. Releasing a held trig after turning E/F leaves it on, as
+  with any p-lock. Copy/paste does not carry SLD/SLEN (see the end of this page).
 
 **SLEN** (steps of the track, its own scale followed, at the current tempo):
 `1/8 1/4 1/2 3/4 1 1.5 2 3 4 6 8 12 16 32 64`; a SLIDE trig with no SLEN lock uses **1**.
@@ -134,10 +135,21 @@ comparison is made both ways). See the gate step's record for the numbers; the f
 - The sequencer path itself: that `0x40026bac` and the applier run for real trigs, retrigs
   and trigless trigs as read here, and that frame word 108 is the BPM x 120 while playing
   (the recorder relies on it).
-- A p-lock (stock) recorded on a held trig while turning E/F: stock never sees our turns,
-  so a trig held only to set SLD might be toggled off on release in GRID mode, as a plain
-  press is (the emulator did not show it); set SLD while also locking a parameter, or check.
-- Copy/paste of trigs, pages and tracks, and page autocopy, do not carry SLD/SLEN (stock
-  matches records by track; ours are tagged). Clear track/pattern: a cleared track may keep
-  stray SLD records (they do nothing without p-locks on the step).
+- **Settled (emulator, 2026-11-02):** a trig held in GRID RECORDING, E/F turned, released
+  stays on with its step unchanged, as with a stock p-lock. Measured on stock too: a long
+  hold's release never removes a trig (only a tap does), and pressing an empty step places a
+  trig on the press; holding an empty step and turning E leaves that trig placed, exactly as
+  holding it and turning a stock parameter does. Nothing to mark "used". E/F record nothing
+  in LIVE recording (they are set on held trigs only, like the arp p-locks).
+- **Copy/paste does not carry SLD/SLEN (known issue, left as it is).** Stock's trig copy
+  keeps slot/value pairs and its page and track copies match records by track (our records
+  are tagged, `docs/ideas-backlog.md` §18 on the arp p-locks, which needed five hooks and a
+  paste core to be carried). Measured for the page: FUNC + RECORD, FUNC + PLAY (clear), FUNC
+  + STOP (paste) leaves the pasted trigs without SLD/SLEN, and the paste may take a record of
+  ours for a stock lock of its own: the track's slides on every page are then gone. Stock's
+  locks are never touched: the taken record is rewritten whole (a value of ours on step 41,
+  outside the page, is gone after the paste, checked in the gate step), and nothing of ours
+  ends up in a stock lock. A page CLEAR leaves the cleared steps' SLD records (they do
+  nothing until a stock p-lock is set on that step again, which then slides). Clear
+  track/pattern likewise.
 - Overtone patterns: Overtone stores its slides as ids 115/116; we do not read them.

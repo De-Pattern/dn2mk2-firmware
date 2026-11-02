@@ -531,6 +531,8 @@ def main() -> int:
         panel.settle(10_000_000)
         panel.tap(key(25))                                      # a trig on step 1
         panel.settle(10_000_000)
+        P = machine.long(0x42C5A9A0)                            # the pattern: step flags u16 at +2 step (track 1)
+        flags0 = machine.word(P)
         panel.hold(key(25), 5_000_000)
         panel.settle(10_000_000)
         turn(4, 1)                                              # E: SLD on
@@ -541,6 +543,13 @@ def main() -> int:
         tbl = machine.long(lay["sl_ui_table"])
         got = [lock(tbl, 0, 0, 0), lock(tbl, 0, 0, 1)] if tbl else None
         check("trig held, E and F turned: step 1 locks SLD ON and SLEN 3 steps", got == [1, 7], f"{got}")
+        # the trig stays on after the release, as when a stock parameter is locked from a held
+        # trig (and as a long hold with nothing turned: measured, stock never removes a trig on
+        # a long hold's release; a tap removes it)
+        flags1 = machine.word(P)
+        check("trig held, E/F turned, released: the trig stays on, its step unchanged",
+              tbl == P + 97872 and flags1 == flags0 and flags1 & 1, f"step 1 flags {flags0:#06x} -> {flags1:#06x}")
+        flags_e0 = machine.word(P + 2)
         panel.hold(key(26), 5_000_000)                          # step 2: no trig, nothing to set
         panel.settle(10_000_000)
         turn(4, 1)
@@ -549,6 +558,9 @@ def main() -> int:
         panel.settle(10_000_000)
         got2 = [lock(tbl, 0, 1, 0), lock(tbl, 0, 0, 0)] if tbl else None
         check("another step held and turned: its own lock, step 1's kept", got2 == [1, 1], f"{got2}")
+        flags_e1 = machine.word(P + 2)
+        check("an empty step held, E turned, released: a trig on it, as stock's press places one",
+              not flags_e0 & 1 and flags_e1 & 0x381 == 0x381, f"step 2 flags {flags_e0:#06x} -> {flags_e1:#06x}")
         c0 = clears["n"]
         panel.tap(key(25))                                      # step 1's trig removed ...
         panel.settle(10_000_000)
@@ -569,6 +581,36 @@ def main() -> int:
         check("TRIG page 1: E goes to stock (no SLD written)", up() == 0 and
               lock(tbl, 0, 0, 0) == before == 0xFFFF)
         panel.screen("trig1_after")
+
+        # page copy, clear, paste (FUNC + RECORD, FUNC + PLAY, FUNC + STOP): stock's copy does
+        # not carry SLD/SLEN (it matches records by track), and its paste may take a record of
+        # ours for its own. It must never leave a value of ours in a stock lock: step 2's SLD
+        # record gets a value on step 41 (outside the page) first, and after the paste no stock
+        # record may hold a value there
+        def records():
+            out = []
+            for i in range(RECS):
+                h = machine.read(tbl + REC * i, 2)
+                if h != b"\xff\xff":
+                    out.append((i, h, machine.read(tbl + REC * i + 2, 256)))
+            return out
+        mine = [i for i, h, _ in records() if h == bytes([0x50, 0x20])]
+        if mine:
+            put16(tbl + REC * mine[0] + 2 + 2 * 40, 1)
+        stock_before = [(i, h.hex()) for i, h, v in records() if h[0] <= 100 and h[1] <= 16]
+        for k in (19, 20, 21):
+            panel.hold(key(17), 5_000_000)
+            panel.tap(key(k))
+            panel.settle(10_000_000)
+            panel.let_go(key(17))
+            panel.settle(10_000_000)
+        after = records()
+        leaked = [i for i, h, v in after if h[0] <= 100 and h[1] <= 16 and v[80:82] != b"\xff\xff"]
+        report["paste_ours_after"] = [i for i, h, _ in after if h[1] & 0xF0 == 0x20]
+        report["paste_stock"] = [stock_before, [(i, h.hex()) for i, h, v in after if h[0] <= 100 and h[1] <= 16]]
+        check("page copy, clear, paste: no SLD/SLEN value ends up in a stock lock", bool(mine) and not leaked,
+              f"ours before {mine}, after {report['paste_ours_after']}, leaked {leaked}")
+        panel.screen("after_paste")
 
     faults = getattr(machine.m, "faults", [])[faults_before:]
     check("no fault", not faults, f"{len(faults)} fault(s)")
