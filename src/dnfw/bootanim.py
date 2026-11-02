@@ -20,6 +20,13 @@ The firmware gets an `ANIZ` chunk (scripts/gen_bootscreen_code.py decodes it):
     longwords with the n longwords that follow -- ended by (0, 0). A skip over 255 is
     written as (255, 0) pairs first.
 
+v0.39 (piece 4, the owner): the mod's version, `MOD 0.39` (dnfw.modversion), drawn by our
+stamp over the LAST frame only, bottom right with a 1-pixel margin, in the project's 3 x 5
+font (src/dnfw/font3x5.json): an `ANZL` chunk, `+0 u32 n`, then n pairs `(u32 longword
+index, u32 mask)` the stamp ORs into the shown bitmap after it copies his frame in. His
+frames in ANIZ are never changed; `shown()` is what the panel shows (his frame, plus the
+label on the last), and the gate checks both.
+
 Frames are in the intro source bitmap's layout (`bootscreen.image_from_pixels`), stored
 upside down as the plain blit shows them (`bootscreen._images`).
 
@@ -104,6 +111,66 @@ def table() -> bytes:
         k = max(i for i, s in enumerate(starts) if s <= ms)
         out.append(k)
     return bytes(out)
+
+
+LABEL_CHUNK = b"ANZL"
+
+
+def label_text() -> str:
+    from .modversion import mod_version
+    return f"MOD {mod_version()}"
+
+
+def label_pixels(text: str | None = None) -> set[tuple[int, int]]:
+    """the label's lit pixels, (x, y) with y 0 the top as in the JSON: the 3 x 5 font, one
+    column between characters, its last column at x 126 and its last row at y 62"""
+    import json
+    font = json.loads(pathlib.Path(__file__).with_name("font3x5.json").read_text())
+    text = label_text() if text is None else text
+    gw, gh = font["width"], font["height"]
+    width = len(text) * (gw + 1) - 1
+    x0, y0 = W - 1 - width, H - 1 - gh
+    out = set()
+    for i, ch in enumerate(text):
+        rows = font["glyphs"][ch]
+        for r, row in enumerate(rows):
+            for c, bit in enumerate(row):
+                if bit == "1":
+                    out.add((x0 + i * (gw + 1) + c, y0 + r))
+    return out
+
+
+def label_clear(text: str | None = None) -> None:
+    """refuses a label that would touch his last frame's drawing (its box and a pixel round it)"""
+    lit = frames_pixels()[-1]
+    lab = label_pixels(text)
+    lx0, lx1 = min(x for x, _ in lab) - 1, max(x for x, _ in lab) + 1
+    ly0, ly1 = min(y for _, y in lab) - 1, max(y for _, y in lab) + 1
+    hit = [(x, y) for x, y in lit if lx0 <= x <= lx1 and ly0 <= y <= ly1]
+    if hit or lx1 > W or ly1 > H or lx0 < -1:
+        raise ValueError(f"the version label {sorted(lab)[:2]}.. would touch the last frame at {hit[:4]}")
+
+
+def label_chunk() -> bytes:
+    from .mods import bootscreen as B
+    label_clear()
+    im = B.image_from_pixels({(x, H - 1 - y) for x, y in label_pixels()})
+    words = struct.unpack(">256I", im)
+    pairs = [(i, w) for i, w in enumerate(words) if w]
+    return struct.pack(">I", len(pairs)) + b"".join(struct.pack(">2I", i, w) for i, w in pairs)
+
+
+def shown() -> list[bytes]:
+    """what the panel shows for each frame: his frame, and on the last the label ORed over it"""
+    ims = images()
+    n, *_ = struct.unpack_from(">I", label_chunk())
+    body = label_chunk()
+    last = bytearray(ims[-1])
+    for k in range(n):
+        i, w = struct.unpack_from(">2I", body, 4 + 8 * k)
+        v = struct.unpack_from(">I", last, 4 * i)[0] | w
+        struct.pack_into(">I", last, 4 * i, v)
+    return ims[:-1] + [bytes(last)]
 
 
 def chunk() -> bytes:

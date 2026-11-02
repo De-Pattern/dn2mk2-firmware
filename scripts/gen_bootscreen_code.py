@@ -92,6 +92,7 @@ BOOT = b"BOOT"
 ANIM = b"ANIM"
 ANIZ = b"ANIZ"                               # v0.37: an animation as frame-to-frame changes (dnfw.bootanim)
 ANIZ_MAGIC = b"ANZ1"                         # the decoder's state is set up
+ANZL = b"ANZL"                               # v0.39: a label ORed over the animation's last frame (the mod's version)
 SOURCE_OBJ = 0x42C4567C                      # the intro's source Bitmap
 CLEAR_BITMAP = 0x40114D94                    # (bitmap, 0, 1): what the intro calls first
 BLIT = 0x401157FC                            # (dst, src, 0, 0, 0): its plain copy, frames 0-4
@@ -282,6 +283,38 @@ aniz_show:                              | (the gate reads zst here: the frame de
 51: move.l  %a1@+,%a0@+
     subq.l  #1,%d1
     bne.s   51b
+| v0.39: on the last frame, an ANZL chunk's pairs (longword index, mask) ORed over it: a
+| label of ours (the mod's version, dnfw.bootanim.label_chunk) over his frame, never in it
+    movea.l %d4,%a1
+    move.l  %a1@,%d0
+    subq.l  #1,%d0
+    cmp.l   %d0,%d3
+    bne.s   55f                         | not the last frame
+    lea     {RUNTIME_VA + 8:#010x},%a1
+    move.l  %a1@+,%d1                   | chunk count
+52: subq.l  #1,%d1
+    bmi.s   55f                         | no ANZL: nothing over it
+    move.l  %a1@,%d0
+    cmpi.l  #{int.from_bytes(ANZL, 'big'):#010x},%d0
+    beq.s   53f
+    lea     %a1@(12),%a1
+    bra.s   52b
+53: move.l  %a1@(4),%d0
+    addi.l  #{RUNTIME_VA:#010x},%d0
+    movea.l %d0,%a1
+    move.l  {SOURCE_DATA_PTR:#010x},%d0
+    movea.l %d0,%a0
+    move.l  %a1@+,%d1                   | pairs
+    beq.s   55f
+54: move.l  %a1@+,%d0                   | the longword's index (0..255)
+    andi.l  #255,%d0
+    lsl.l   #2,%d0
+    move.l  %a1@+,%d2
+    or.l    %d2,%a0@(0,%d0:l)
+    subq.l  #1,%d1
+    bne.s   54b
+55:
+aniz_drawn:                             | (the gate reads the source bitmap here: what the panel shows)
     bra     23b                         | clear the panel and blit, as ANIM
 
     .align 4
@@ -289,7 +322,7 @@ zst:                                    | the decoder's state: magic, decoded, n
     .space  {16 + 4 * WORDS}
 """
 
-LABELS = ("stamp", "aniz_show", "zst")
+LABELS = ("stamp", "aniz_show", "zst", "aniz_drawn")
 
 
 def generate() -> dict:
@@ -302,7 +335,8 @@ def generate() -> dict:
     return {
         "os": "Digitone II 1.11",
         "load": LOAD_VA, "code": code.hex(), "stamp": addrs["stamp"],
-        "aniz_show": addrs["aniz_show"], "zst": addrs["zst"],
+        "aniz_show": addrs["aniz_show"], "zst": addrs["zst"], "aniz_drawn": addrs["aniz_drawn"],
+        "anzl_chunk": ANZL.decode(), "source_data_ptr": SOURCE_DATA_PTR,
         "intro_va": INTRO_VA, "intro_stock": INTRO_STOCK,
         "area_va": AREA_VA, "runtime_va": RUNTIME_VA,
         "magic": MAGIC.decode(), "boot_chunk": BOOT.decode(), "anim_chunk": ANIM.decode(),

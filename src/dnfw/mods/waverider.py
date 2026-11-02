@@ -55,6 +55,12 @@ def _boot():
     return spec, bootanim.chunk()
 
 
+def _label():
+    """v0.39: the mod's version over the animation's last frame (dnfw.bootanim.label_chunk)"""
+    from .. import bootanim
+    return bootanim.LABEL_CHUNK, bootanim.label_chunk()
+
+
 def extents(firmware=None, area_length: int = 0) -> list[Extent]:
     out = [Extent(MAIN_OS, e["va"] - BASE, len(e["new"]) // 2, e["what"]) for e in SPEC["edits"]]
     from . import bootscreen as B
@@ -172,7 +178,7 @@ def apply(firmware) -> Result:
                        "for unmodified Digitone II 1.11")
     base_os[at:at + 8] = b"\x4e\xf9" + struct.pack(">I", bspec["stamp"]) + b"\x4e\x71"
     codes += [(platform.area.CODE, platform.area.CodeChunk(bspec["load"], bytes.fromhex(bspec["code"])).pack()),
-              (bspec["aniz_chunk"].encode(), aniz)]
+              (bspec["aniz_chunk"].encode(), aniz), _label()]
     content = platform.join(bytes(base_os), others + codes)
     area_length = len(content) - platform.STOCK_LENGTH
     return Result(payloads={MAIN_OS: content, DSP_STREAM: section7},

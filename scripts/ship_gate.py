@@ -585,9 +585,10 @@ def main() -> int:
 
             def aniz_body(tdir):
                 rc, out = run("aniz_check", aniz_cmd, logs, trace=tdir)
-                good = rc == 0 and "in order: PASS" in out and f"{n_anim} of {n_anim} distinct, 0 not his" in out
-                return good, (f"all {n_anim} frames, each his, in order, to the intro's end"
-                              if good else out[-800:])
+                good = (rc == 0 and "in order: PASS" in out and f"{n_anim} of {n_anim} distinct, 0 not his" in out
+                        and ", 0 wrong; the label" in out and f"over frame(s) [{n_anim - 1}]" in out)
+                return good, (f"all {n_anim} frames, each his, in order, to the intro's end; the panel showed "
+                              f"each, the version label over the last only" if good else out[-800:])
             later("aniz", "start-up animation, every frame", "start-up animation", [aniz_cmd], aniz_body)
 
         # 6. engine + LOAD/SAVE

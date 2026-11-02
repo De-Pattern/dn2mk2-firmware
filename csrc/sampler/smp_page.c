@@ -1302,6 +1302,10 @@ void smp_fb_draw(void *c, int samp)
             box(c, 0, y - 2, wide, y + 7, 0);
     }
     scrollbar(c, 126, 1, 53, smp_fb_cur, n);
+#ifdef MOD_VERSION
+    if (smp_fb_store == -1 && !smp_fb_menu)     /* v0.39: the mod's version under the two stores */
+        LABEL(c, 64, 3, "%s", "MOD v" MOD_VERSION);
+#endif
     if (smp_fb_menu == 3) {                     /* v0.39: +DRIVE's own menu (the top): ERASE MOD DATA */
         for (int y = 0; y <= 54; y++)
             for (int x = 65; x <= 124; x++)

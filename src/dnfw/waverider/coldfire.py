@@ -514,7 +514,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # Milestone 7: Waverider's pages, as one platform CODE chunk in RAM (pages.LOAD)
     # the C page renderer first (the assembly calls it), at C_LOAD
     from .. import slides as SL
-    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header() + SL.c_header(stock),
+    from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
+    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header() + SL.c_header(stock)
+                                    + modversion.c_define(),
                                      base=pages.C_LOAD)
     if cbss:
         raise ComposeError(f"the page renderer has {cbss} bytes of BSS; nothing zeroes it")
