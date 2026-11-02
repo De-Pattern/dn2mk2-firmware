@@ -46,6 +46,8 @@ failure:
    v0.34 (docs/timing-model.md): with the audio interrupt firing on its own at its real
    cadence through the real vectors, preempting the mod's UI code; a CPU exception, the
    interrupt no longer delivered, or audio frames overrunning their budget fail a seed.
+6s. **parameter slides** (`emu_slides.py`, the build and stock 1.11): a slide's ramp exact per
+   frame and landing on the locks; SLIDE off and every lock table identical to stock's.
 7. **unit tests** (`pytest -m "not slow"` on the safety, mod, PERC and filter tests; v0.38: on
    both cores, pytest-xdist `-n 2 --dist load`, the same tests and the same pass line).
 
@@ -147,7 +149,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_shft_live.py", "test/test_mnm.py",
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py",
-         "test/test_sampler_relatch.py", "test/test_pools.py"]
+         "test/test_sampler_relatch.py", "test/test_pools.py",
+         "test/test_slides.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -183,6 +186,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("colsw", "MACHINE SEL columns, SYN held (ColdFire)"),
        ("drive", "+DRIVE browser (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
+       ("slides", "parameter slides (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("engine", "engine + LOAD/SAVE"),
@@ -1554,6 +1558,41 @@ def main() -> int:
                                  f"{res[('on', 'odd', False)]['jmp']['jmp_last']}), and from PLAY where stock plays it; "
                                  "the setting written, read back at power-on, turned off")
             later("jump", "DIRECT JUMP (ColdFire)", "DIRECT JUMP (ColdFire)", [*jcmds, sorted(EMU_ENV.items())], jump_body)
+
+        # 6s. parameter slides (docs/slides.md, scripts/emu_slides.py): on the ColdFire, a trig's
+        # locks applied as the frame ISR's note block applies them, then the real frame ISR every
+        # frame: with SLIDE on, FILTER FREQ and FM TONE's FDBK ramp to the trig's locks over SLEN,
+        # exact per frame, and land on them; a knob, a tempo change, a trigless lock, a retrig,
+        # a new sound, a trig with no p-lock; the lock table's SAVE/LOAD and step clear. With
+        # SLIDE off, and for every lock table, the same as stock 1.11 byte for byte: every frame's
+        # smoother state and output arrays (the emulator's own EMAC, and the instrument's
+        # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records
+        if "sl_smooth" in lay:
+            sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", snap,
+                        "--json", work / f"slides-{k}.json",
+                        *(["--stock"] if k == "stock" else ["--png-dir", work / "slides-png"])]
+                       for k in ("build", "stock")]
+
+            def sl_body(tdir):
+                outs = []
+                for k, cmd in zip(("build", "stock"), sl_cmds):
+                    rc, out = run(f"slides {k}", cmd, logs, env=EMU_ENV, trace=tdir)
+                    if rc != 0 or "PASS" not in out.strip().splitlines()[-1]:
+                        return False, f"{k}: " + out[-800:]
+                    outs.append(json.loads((work / f"slides-{k}.json").read_text()))
+                b, s = outs
+                same = [k for k in ("off_shas_emac", "off_shas", "plain_stored_sha", "plain_loaded_sha",
+                                    "ours_loaded_rest_sha") if b.get(k) != s.get(k)]
+                if same or not s.get("stock_skips_ours"):
+                    return False, f"differs from stock: {same or 'stock did not skip ids 200/201'}"
+                return True, (f"SLIDE on: FREQ and FDBK ramp over {b['expected_ramp_frames']} frames "
+                              f"(1 step at {b['tempo_word_after_isr'] / 120:g} BPM), exact, landing on the "
+                              f"locks; {len(b['checks'])} checks; SLIDE off: {len(b['off_shas'])} frames' "
+                              f"arrays and the lock table's SAVE/LOAD identical to stock 1.11; the TRIG page's SLD/SLEN "
+                              f"set through the panel, the held trig staying on after release, a page "
+                              f"paste leaving no SLD/SLEN value in a stock lock")
+            later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
+                  [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

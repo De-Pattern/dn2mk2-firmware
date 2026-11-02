@@ -26,7 +26,8 @@ LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "s
                 SOURCE.parents[1] / "sampler" / "slice.c",
                 SOURCE.parents[1] / "sampler" / "lib.c",
                 SOURCE.parents[1] / "sampler" / "pools.c",          # v0.38: per-project pools
-                SOURCE.parents[1] / "jump" / "jump.c", SOURCE.parents[1] / "jump" / "hooks.S"]   # DIRECT JUMP
+                SOURCE.parents[1] / "jump" / "jump.c", SOURCE.parents[1] / "jump" / "hooks.S",   # DIRECT JUMP
+                SOURCE.parents[1] / "slides" / "slide.c", SOURCE.parents[1] / "slides" / "hooks.S"]   # parameter slides
 LINK_ENTRIES = ["smp_rx_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "smp_cmds", "smp_quant_hook", "smp_tdm_hook", "smp_tdm_sent", "smp_tdm_heard", "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate", "smp_ui_pop", "wr_screen", "rec_combo", "wr_lfo_mask", "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot", "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen", "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get", "slc_keynotes", "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_mod_apply", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_load", "smp_lp_done", "smp_lp_full", "smp_lib_state", "smp_lib_writes", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom",
                 # DIRECT JUMP (csrc/jump, docs/jump.md)
                 "jmp_cue", "jmp_tick", "jmp_arm", "jmp_switch", "jmp_tracks", "jmp_key", "jmp_poll",
@@ -36,6 +37,10 @@ LINK_ENTRIES = ["smp_rx_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "s
                 "smp_pj_begin_hook", "smp_pj_loaded_hook", "smp_pj_end_hook", "smp_pj_new_hook", "smp_pj_begins", "smp_pj_ends", "smp_pj_loads", "smp_pj_news", "smp_pj_slot", "smp_pj_newslot", "smp_pj_last", "smp_blank_req", "smp_blank_sent", "smp_pl_on", "smp_pl_owner", "smp_pl_state", "smp_pl_writes", "smp_pl_switches", "smp_pl_lists_written", "smp_pl_events", "smp_pl_src", "smp_pl_boot_case", "smp_pl_gen", "smp_pl_skipped", "smp_pl_mismatch", "smp_discard", "smp_rename",
                  # v0.38: the count to the DSP after a live add (link.c K_HEAD)
                  "smp_heads", "smp_head_due", "smp_head_min", "smp_count_cover"]
+# parameter slides (csrc/slides, dnfw.slides): the hooks and the state the checks read
+SLIDE_ENTRIES = ["sl_ui_table", "sl_cell", "sl_knob", "sl_screen", "sl_page_up", "sl_page_seen", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
+                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"]
+LINK_ENTRIES = LINK_ENTRIES + SLIDE_ENTRIES
 
 
 def available() -> bool:

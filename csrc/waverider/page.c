@@ -222,7 +222,10 @@ void wr_screen(void *screen, void *canvas)
     extern int smp_samp_of(int track);
     extern int smp_list_visible(void);
     extern void smp_list_draw(void *canvas);
+    extern void sl_screen(int phase, int covered);      /* parameter slides (csrc/slides) */
+    sl_screen(0, 0);
     SCREEN_DRAW(screen, canvas);
+    sl_screen(1, rec_visible() || slc_visible() || smp_fb_visible() || smp_list_visible());
     if (rec_visible())
         rec_screen_draw(canvas);
     else if (slc_visible())
@@ -510,6 +513,8 @@ static void smp_picture(void *c, void *view, int kind)
  * is left as stock drew it. */
 void wr_cell(void *view, void *canvas, int x0, int y0, u32 id)
 {
+    extern void sl_cell(void *view, void *canvas, int x, int y, u32 id);
+    sl_cell(view, canvas, x0, y0, id);          /* parameter slides: SLD/SLEN on TRIG page 2 */
     if (id != PING_TYPE_ID)
         return;
     int set = ping_active();
