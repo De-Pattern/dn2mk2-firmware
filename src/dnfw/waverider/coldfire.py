@@ -477,7 +477,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
 
     # Milestone 7: Waverider's pages, as one platform CODE chunk in RAM (pages.LOAD)
     # the C page renderer first (the assembly calls it), at C_LOAD
-    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header(),
+    from .. import slides as SL
+    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header() + SL.c_header(stock),
                                      base=pages.C_LOAD)
     if cbss:
         raise ComposeError(f"the page renderer has {cbss} bytes of BSS; nothing zeroes it")
@@ -692,6 +693,35 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(VALID_SITE, bytes.fromhex("4eb9") + _long(layout["canon_valid"]),
          "the sound's parameter-ownership test: type 5 owns WaveTone's machine parameters",
          VALID_STOCK)
+    # parameter slides (csrc/slides, dnfw.slides, docs/slides.md): the per-voice note block
+    # and the lock applier (the trig's slide starts), the frame's smoother (every slide one
+    # frame on), the lock-list builder (the step's SLD/SLEN), the step clear, the lock table's
+    # LOAD and SAVE (our records' stored ids)
+    edit(SL.PRE_SITE, bytes.fromhex("4eb9") + _long(csyms["sl_pre_hook"]),
+         "slides: a note's voice in the frame ISR: sl_pre keeps the track's values before the trig",
+         bytes.fromhex(SL.PRE_STOCK))
+    _need(content, SL.PRE_SITE + 6, bytes.fromhex("49ec05ee670e"), "... then lea 1518(%a4),%a4 ; beq.s")
+    edit(SL.APPLY_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_apply"]) + bytes.fromhex("4e71"),
+         "slides: the lock applier 0x400db092 through sl_apply (stock's, then the trig's slide)",
+         bytes.fromhex(SL.APPLY_STOCK))
+    _need(content, SL.SMOOTH_SITE - 10, bytes.fromhex("487980003af02d42ff64"), "the ISR pushes the smoother's source")
+    edit(SL.SMOOTH_SITE, bytes.fromhex("4eb9") + _long(csyms["sl_smooth"]),
+         "slides: the frame's smoother through sl_smooth (stock's, then every slide one frame on)",
+         bytes.fromhex(SL.SMOOTH_STOCK))
+    edit(SL.BUILD_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_build"]),
+         "slides: the lock-list builder through sl_build (stock's, then the step's SLD/SLEN)",
+         bytes.fromhex(SL.BUILD_STOCK))
+    edit(SL.CLEAR_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_clear"]) + bytes.fromhex("4e71"),
+         "slides: clearing a step's locks clears its SLD/SLEN too", bytes.fromhex(SL.CLEAR_STOCK))
+    edit(SL.LOAD_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_load"]) + bytes.fromhex("4e71"),
+         "slides: a pattern's lock table LOAD keeps SLD/SLEN records (ids 200/201)",
+         bytes.fromhex(SL.LOAD_STOCK))
+    edit(SL.SAVE_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_save"]) + bytes.fromhex("4e71"),
+         "slides: a pattern's lock table SAVE stores SLD/SLEN records as ids 200/201",
+         bytes.fromhex(SL.SAVE_STOCK))
+    for name in ("sl_ui_table", "sl_page_up", "sl_page_seen", "sl_knob", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
+                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"):
+        layout[name] = csyms[name]
     layout.update(playout)
     # W2: where the C renderer's code ends (its rodata and data follow): the ship gate
     # checks [C_LOAD, c_text_end) as code

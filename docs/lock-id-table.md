@@ -67,3 +67,19 @@ FX, `0x10` chorus, `0x13`/`0x14` master, `0x16` MIDI notes, `0x17` MIDI SRC,
    29, 2, 6, 10 — LFO-grid positions. Page `0x16` is classified with the trig page
    by `TrigParameterSet`'s predicate (`docs/parameter-set-tables.md`), so they
    are trig-class data like VEL/LEN, not pool locks.
+
+## Ids above 106: who uses which (allocation, 2026-11-01)
+
+Stock 1.11 and 1.12 skip every stored lock record whose id is above 106 on LOAD
+(`0x400de594`: `moveq #106 ; bcs skip`), so these ids are ours to allocate. Each user
+keeps its records out of stock's per-track loops with a track tag in RAM.
+
+| stored id | RAM header | who | where |
+|---|---|---|---|
+| 107..110 (`--all`: ..129) | `(k, track \| 0x20)`, k 0..22 | arp p-locks (`arpplocks` mod; not in the release line) | `scripts/build_arp_plocks.py` |
+| 107..127 | `(slot - 37, track \| 0x20)` | Overtone 1.2 (another firmware; SLD = 116, SLEN = 115) | `docs/overtone-map.md` |
+| **200** | `(0x50, track \| 0x20)` | **parameter slides: SLD** (0 off, 1 on) | `docs/slides.md` |
+| **201** | `(0x51, track \| 0x20)` | **parameter slides: SLEN** (0..14, the length table) | `docs/slides.md` |
+
+Sound-level stored ids 4..32 stay reserved for LFO4 (a stock round trip zeroes them);
+slides use none. 0xFF is a free record and never an id.

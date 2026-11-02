@@ -1076,6 +1076,13 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         slc_stock_asked = 0;                    /* answer is not left for the next YES */
         return (u32)it;
     }
+    if (!rec_overlay && it[0] == IT_KNOB) {     /* parameter slides: E and F on TRIG page 2 */
+        extern int sl_knob(u32 index, int delta);
+        if (sl_knob(code, (signed char)it[8])) {
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+    }
     if (!rec_overlay) {                          /* v0.23: SLICE's menus (slice.c) */
         extern int slc_pop(u8 *it);
         if (slc_pop(it)) {
