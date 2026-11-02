@@ -132,6 +132,12 @@ Many other edits belong to other Overtone features: the follower envelopes, Soph
   - If the source value no longer equals the recorded "to" (a knob was turned or something else changed it), that slot leaves the slide at once.
   - So the slide works **per track, for all changed parameters, with one length per track**. It overrides only the smoother output and never writes the sound or the pattern.
 
+> **Correction (2026-11-01, measured in the emulator, `docs/jump.md` §1-2):** `0x42c5a91e`
+> (1.11) is not a pattern-change mode byte. It is the sequencer's tick within the step; the
+> compare with 2 is "the second tick of the step", where stock looks at the queue. Stock 1.11
+> has no pattern-change modes. The formula below is confirmed: with it every track lands where
+> stock plays the pattern from PLAY. Our DIRECT JUMP does not use the PROJECT+0x50 byte.
+
 ## 4. How instant switch computes the position **[M]**
 
 `0x4680dd8c`, after stock has switched to the new pattern P = `[0x42c5b9a0]`:
