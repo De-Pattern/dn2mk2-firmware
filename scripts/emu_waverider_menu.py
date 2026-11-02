@@ -151,6 +151,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             data = bytes(uc.mem_read(buf, n))
             for k in range(n // 512):
                 disk[sector + k] = data[512 * k:512 * k + 512]
+            if "log" in io:                     # v0.38 (emu_pools.py): every write, in order
+                io["log"].append((sector, data))
     # the stock driver does not run here: each entry becomes moveq #0,%d0 ; rts, and the
     # hook does its work first
     if not shared.get("hooked"):
@@ -592,7 +594,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
               and rb[1] >= LIB_DATA + 12 and st_d == 0
               and on_disk(rb[1], len(b)) == b and on_disk(rc[1], len(c)) == c
               and names[:2] == ["HAT C", "SNARE B"]
-              and all(s >= LIB for s in wrote))
+              # (v0.38: and the per-project pools' first power-on, its superblock and legacy list:
+              # their own region, csrc/sampler/pools.c, checked by the `pools` scenario)
+              and all(s >= LIB or 0x6D0000 <= s < 0x6E0300 for s in wrote))
         # LOAD TO PROJECT: SNARE B and HAT C into the first empty pool slots (no pool yet:
         # a directory made), each slot's frames on the +Drive's pool image and sent to the DSP
         lp_ok = False
@@ -637,6 +641,24 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))
         uc.hook_del(hs)
         out["ok"] = bool(ok and out["small_refused"])
+    elif scenario == "pools":
+        # v0.38: per-project sample pools (csrc/sampler/pools.c): scripts/emu_pools.py
+        sys.path.insert(0, str(HERE))
+        import emu_pools                        # noqa: PLC0415
+        for _ in range(200):                    # the snapshot's own boot first (the RAM check)
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        from dnfw.sampler import machines as SMx   # noqa: PLC0415
+        res = emu_pools.run({"machine": machine, "call": call, "long": long, "period": period,
+                             "disk": disk, "io": io, "pool": pool, "dsp": dsp, "syms": syms,
+                             "SL": SL, "SM": SM, "base": base, "guest_call": guest_call,
+                             "scratch": SENTINEL + 0x2000, "mirror": SMx.MIRROR})
+        disk.clear()
+        out.update(res)
+        out["ok"] = bool(res["ok"]) and not route.get("changed")
+        out["routing_changed"] = route.get("changed", 0)
     elif scenario == "save":
         # a recording of 3,000 frames on the DSP, 16 MB into the recordings' area, for slot
         # 40 (SAMP 41; v0.22: any slot, any place); no image on the +Drive yet

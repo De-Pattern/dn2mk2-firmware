@@ -33,6 +33,9 @@ failure:
    resent), commands included; with nothing getting through, the loader stops; a
    recording comes back over TDM and is written to a Python +Drive. Every byte checked,
    and every period the frame's routing words (0xa5a..) are stock's (v0.20).
+6p. **per-project pools** (v0.38, `emu_waverider_menu.py`'s `link16` `pools`, scripts/emu_pools.py):
+   the OS's LOAD, NEW and SAVE AS through the build's detours; each project its own slots, the
+   legacy pool for old ones; power cuts after every sector; the DSP never another project's sample.
 6q. **UI fuzz** (v0.33, `emu_fuzz_ui.py`): the sample pages driven at random, two seeds.
    v0.34 (docs/timing-model.md): with the audio interrupt firing on its own at its real
    cadence through the real vectors, preempting the mod's UI code; a CPU exception, the
@@ -174,6 +177,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("colsw", "MACHINE SEL columns, SYN held (ColdFire)"),
        ("drive", "+DRIVE browser (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
+       ("pools", "per-project pools (ColdFire)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
        ("fuzz", "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"),
@@ -477,7 +481,8 @@ def main() -> int:
             csrc_text = "".join(f.read_text() for f in (ROOT / "csrc").rglob("*.c"))
             for sym, what in (("smp_question_up", "stock questions and held keys (ColdFire)"),
                               ("smp_machine_commit", "SAMP kept across sample machines (ColdFire)"),
-                              ("smp_knob_at", "FUNC + turn (ColdFire)")):
+                              ("smp_knob_at", "FUNC + turn (ColdFire)"),
+                              ("smp_pl_on", "per-project pools (ColdFire)")):
                 if re.search(rf"\b{sym}\b", csrc_text) and sym not in lay:
                     gate(what, False, f"{sym} is in the C but not in the layout: the check cannot run")
             results["symbols"] = "PASS: every C-keyed check has its symbol in the layout"
@@ -639,6 +644,34 @@ def main() -> int:
                               "a hole reused, every write inside its region, a small device refused (lib)"
                               if good else out[-800:])
             later("link16", "sample link (ColdFire)", "sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body)
+
+            # 6p. v0.38: per-project sample pools (csrc/sampler/pools.c, docs/project-pools.md;
+            # scripts/emu_pools.py): the OS's own LOAD, NEW and SAVE AS through the build's
+            # detours; each project its own slots, the legacy pool for old projects, the lists
+            # across a power cycle, corrupted lists and changed frames falling back safely, a
+            # power cut after every sector of a change and of a switch, every write inside its
+            # region, the image one v0.37 reads; the DSP's directory checked every period:
+            # never another project's sample, never one half sent
+            if "smp_pl_on" in lay:
+                pl_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                          "--build", bdir, "--snapshot", snap, "--steps", f"link16:{syms}:pools",
+                          "--png-dir", work / "pools"]
+
+                def pl_body(tdir):
+                    rc, out = run("pools", pl_cmd, logs, env=EMU_ENV, trace=tdir)
+                    res = work / "pools" / "link16_pools.json"
+                    why, good = out[-800:], False
+                    if rc == 0 and res.exists():
+                        r = json.loads(res.read_text())
+                        facts = r.get("facts", {})
+                        good = bool(r.get("ok")) and len(facts) >= 16 and all(facts.values())
+                        why = json.dumps({k: v for k, v in facts.items() if not v})[:800] or out[-800:]
+                    return good, ("per-project pools: LOAD / NEW / SAVE AS through the OS's own code, each project "
+                                  "its own slots, old projects today's pool, lists kept across a power cycle, a corrupted "
+                                  "list its previous copy, changed frames silent, a power cut after every sector safe, "
+                                  "every write in its region, the DSP never another project's sample" if good else why)
+                later("pools", "per-project pools (ColdFire)", "per-project pools (ColdFire)",
+                      [pl_cmd, sorted(EMU_ENV.items())], pl_body)
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
         # change the recorder and never the track's sound, NO closes it, and the UI keeps

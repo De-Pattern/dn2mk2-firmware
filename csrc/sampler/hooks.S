@@ -62,3 +62,63 @@ smp_tdm_hook:
         move.l  %fp, %d2
         addi.l  #-72, %d2
         rts
+
+| v0.38, per-project pools (csrc/sampler/pools.c, docs/project-pools.md): four detours in the
+| OS's project code, each entered by a `jmp` (so the stack is as the stock code left it),
+| each replaying what it replaced and going on where it left off. They only count and note
+| the slot, in the OS's own task; pools.c's poll does the work in the UI task. Each bumps
+| smp_blank_req too: the audio ISR's next packets empty the DSP's directory at once, so no
+| sample track plays a sample of the old pool while the new one is set up.
+|
+| ProjectManager's load 0x40042E6E(project, slot, cb), its entry (was: lea -36(%sp),%sp ;
+| movem.l %d2-%d5/%a2,(%sp)): a LOAD begins (it may fail: smp_pj_ends says when it is over)
+        .globl  smp_pj_begin_hook
+smp_pj_begin_hook:
+        lea     -36(%sp), %sp
+        movem.l %d2-%d5/%a2, (%sp)
+        addq.l  #1, smp_pj_begins
+        addq.l  #1, smp_blank_req
+        jmp     0x40042E76
+
+| .. at 0x40042ED2, reached only when the load and the temp slot's write both succeeded, d5
+| the slot (was: move.l %d5,-(%sp) ; move.l %d3,-(%sp) ; jsr 0x4003EB62, the slot set): the
+| slot is set as stock sets it, then noted. d0 (the setter's answer) is dead from here (the
+| stock code overwrites it at 0x40042EE6); the two pushes stay for 0x40042EE2's lea to pop.
+        .globl  smp_pj_loaded_hook
+smp_pj_loaded_hook:
+        move.l  %d5, -(%sp)
+        move.l  %d3, -(%sp)
+        jsr     0x4003EB62
+        move.l  %d5, smp_pj_slot
+        moveq   #1, %d0
+        move.l  %d0, smp_pj_last
+        addq.l  #1, smp_pj_loads
+        jmp     0x40042EDA
+
+| .. its exit 0x40042EE6 (was: move.b %d4,%d0 ; movem.l (%sp),%d2-%d5/%a2 ; lea 36(%sp),%sp,
+| then rts at 0x40042EF0): the LOAD is over, whatever came of it. The count first, so the
+| move.b sets the flags as stock's did.
+        .globl  smp_pj_end_hook
+smp_pj_end_hook:
+        addq.l  #1, smp_pj_ends
+        move.b  %d4, %d0
+        movem.l (%sp), %d2-%d5/%a2
+        lea     36(%sp), %sp
+        rts
+
+| NEW 0x400428C0(project, slot) where it sets the slot, 0x40042AF0 (was: move.l 12(%fp),(%sp) ;
+| move.l %a2,-(%sp) ; jsr 0x4003EB62): the slot set as stock sets it, then noted (12(%fp) is
+| the slot: -1 for the NEW menu and CLEAR, the slot for a LOAD of an empty one). d0 is dead
+| from here (0x40042AFE's call overwrites it before anything reads it).
+        .globl  smp_pj_new_hook
+smp_pj_new_hook:
+        move.l  12(%fp), (%sp)
+        move.l  %a2, -(%sp)
+        jsr     0x4003EB62
+        move.l  12(%fp), %d0
+        move.l  %d0, smp_pj_newslot
+        moveq   #2, %d0
+        move.l  %d0, smp_pj_last
+        addq.l  #1, smp_pj_news
+        addq.l  #1, smp_blank_req
+        jmp     0x40042AFA
