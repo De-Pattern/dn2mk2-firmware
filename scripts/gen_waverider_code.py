@@ -72,7 +72,7 @@ def main() -> int:
         "names": [CF.LONG_NAME, CF.SHORT_NAME],
         "edits": edits,
         "guards": [{"va": va, "bytes": want, "what": why}
-                   for va, want, why in CF.GUARDS + ping_cf.GUARDS],
+                   for va, want, why in CF.GUARDS + CF.JUMP_GUARDS + ping_cf.GUARDS],
         "layout": {k: v for k, v in sorted(built["layout"].items())},
         "chunk": {"load": built["chunk"]["load"], "code": built["chunk"]["code"].hex()},
         "c_chunk": {"load": built["c_chunk"]["load"], "code": built["c_chunk"]["code"].hex()},

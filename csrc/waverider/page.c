@@ -241,7 +241,9 @@ int wr_poll(void *screen)
 {
     extern void rec_poll(void);
     extern int rec_visible(void);
+    extern void jmp_poll(void);
     smp_boot();
+    jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     rec_poll();
     wr_names();
     ping_names();

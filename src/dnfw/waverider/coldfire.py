@@ -436,6 +436,31 @@ QUANT_SITE = 0x40037BE6                  # the setter's write: movea.l %d0,%a0 ;
 QUANT_STOCK = bytes.fromhex("204031832a14")
 TDM_SITE = 0x40026098                    # the SSI ISR, its transmit fill done: move.l %fp,%d2 ; addi.l #-72,%d2 (v0.16)
 TDM_STOCK = bytes.fromhex("240e0682ffffffb8")
+# DIRECT JUMP (csrc/jump, docs/jump.md): the PTN view's single cue, the sequencer tick ISR's
+# queue test, arming, switch and per-track positions, and the PTN view's key handler
+JUMP_CUE_SITE = 0x400FA1DA               # jsr 0x400d93f0: the PTN view's one-pattern cue (0x400fa11e)
+JUMP_CUE_STOCK = bytes.fromhex("4eb9400d93f0")
+JUMP_ISR_SITES = (                       # (site, stock bytes, its symbol, the instruction)
+    (0x400DA406, "123942c5a91e", "jmp_tick", "move.b 0x42c5a91e,%d1: the tick's queue test (tick 2)"),
+    (0x400DA45A, "737942c5aab4", "jmp_arm", "mvs.w 0x42c5aab4,%d1: the change-length test before arming"),
+    (0x400DA6E6, "43f942c5a9c4", "jmp_switch", "lea 0x42c5a9c4,%a1: the switch's start step"),
+    (0x400DA8CC, "4879401f6b25", "jmp_tracks", "pea 0x401f6b25: the per-track positions' end"),
+)
+JUMP_KEY_SLOT = 0x402008CC               # the PTN view's key handler, in its vtable
+JUMP_KEY_STOCK = 0x400FA6BE
+JUMP_GUARDS = (                          # what the shims jump back to and rely on
+    (0x400DA40C, "7c027b01bc85", "jmp_tick resumes: moveq #2,%d6 ; mvs.b %d1,%d5 ; cmp.l %d5,%d6"),
+    (0x400DA416, "227942c5aac0", "the queue's path: movea.l 0x42c5aac0,%a1"),
+    (0x400DA460, "7e01", "jmp_arm's stock way resumes: moveq #1,%d7"),
+    (0x400DA4D2, "23c042c5a9a4", "stock's arming: move.l %d0,0x42c5a9a4 (the next pattern)"),
+    (0x400DA6EC, "4df942c5a9c8", "jmp_switch resumes: lea 0x42c5a9c8,%fp"),
+    (0x400DA6F8, "23d142c5a9bc", "... then 0x42c5a9bc = (a1): the start step"),
+    (0x400DA7CA, "1e350800", "the per-track positions read the mode from a5"),
+    (0x400DA81C, "264d", "... and the tracks from a5 (movea.l %a5,%a3)"),
+    (0x400DA904, "4bf942c5a9ea", "... until a5 is set again (lea 0x42c5a9ea,%a5)"),
+    (0x400DA8D2, "2f394028c1fc", "jmp_tracks resumes: move.l 0x4028c1fc,-(%sp)"),
+    (0x400FA1E0, "4fef001c", "the cue's caller pops its arguments"),
+)
 # v0.22, the RECORDER as a screen of its own (csrc/sampler/rec.c): the UI loop's queue
 # receive (every key and knob item passes it first), its draw of the screen (the recorder
 # over it), and the main key handler's FUNC + VOICE (stock: unison on/off) opening it
@@ -688,6 +713,19 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the SSI audio ISR after its transmit fill: smp_tdm writes the sample link's packet "
          "into TDM slots 8..15 and reads the DSP's from slots 14..15", TDM_STOCK)
 
+    # DIRECT JUMP (csrc/jump, docs/jump.md): off unless PTN + YES turns it on
+    for va, want, why in JUMP_GUARDS:
+        _need(content, va, bytes.fromhex(want), why)
+    edit(JUMP_CUE_SITE, bytes.fromhex("4eb9") + _long(csyms["jmp_cue"]),
+         "DIRECT JUMP: the PTN view's one-pattern cue: stock's, then armed if the setting is on "
+         "and the sequencer plays", JUMP_CUE_STOCK)
+    for va, stock_hex, sym, what in JUMP_ISR_SITES:
+        edit(va, bytes.fromhex("4ef9") + _long(csyms[sym]),
+             f"DIRECT JUMP, the sequencer tick: {what} -> {sym}, which replays it", bytes.fromhex(stock_hex))
+    edit(JUMP_KEY_SLOT, _long(csyms["jmp_key"]),
+         "DIRECT JUMP: the PTN view's key handler (vtable): PTN held + YES / NO sets it on / off; "
+         "everything else to stock's 0x400fa6be", _long(JUMP_KEY_STOCK))
+
     # the RECORDER page's YES (v0.15): the parameter page's key handler through smp_key,
     # which takes YES on that page and hands everything else to stock's
     edit(KEY_SLOT, _long(csyms["smp_key"]),
@@ -733,6 +771,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen",
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
                  "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom",
+                 "jmp_on", "jmp_armed", "jmp_pending", "jmp_count", "jmp_last", "jmp_loaded", "jmp_dirty",
+                 "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll",
                  # v0.38: per-project pools
                  "smp_pj_begins", "smp_pj_ends", "smp_pj_loads", "smp_pj_news", "smp_pj_slot", "smp_pj_newslot", "smp_pj_last", "smp_blank_req", "smp_blank_sent", "smp_pl_on", "smp_pl_owner", "smp_pl_state", "smp_pl_writes", "smp_pl_switches", "smp_pl_lists_written", "smp_pl_events", "smp_pl_src", "smp_pl_boot_case", "smp_pl_gen", "smp_pl_skipped", "smp_pl_mismatch", "smp_discard", "smp_rename"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
