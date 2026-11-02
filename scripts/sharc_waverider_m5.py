@@ -2183,6 +2183,44 @@ def step_rec(init, sound, machines, blocks) -> dict:
     rec3.pop("state", None)
     close3 = bool(got3) and max(abs(a - b) for a, b in zip(got3, want3)) <= 2 / 32768
 
+    # run 4, v0.38: ARM (blskk on v0.37: THRES 0 "catches everything"). IN carries a noise
+    # floor at about -50 dB (a hiss with a DC offset: over v0.30's fixed -60 dB floor, as an
+    # input with something plugged in can be) for the first `quiet` blocks, then a tone at
+    # -14 dB. THRES 0 (the ColdFire's word, 33): armed through the noise, it starts on the
+    # tone's first block. A set threshold (THRES 60, the word 16383, the DT2's plain
+    # threshold): the same input, a -14 dB tone stays under it, so it waits; then a -4 dB
+    # one starts it, on its first block
+    quiet = n // 2
+
+    def noise(k):
+        return 0.0015 + 0.0012 * (((k * 2654435761) >> 7 & 0xFFFF) / 32768.0 - 1.0)
+
+    def arm_run(thres, tone_at, tone, seq, dest, place):
+        st4 = {"b": 0}
+        sig4 = [noise(k) + (tone * _m.sin(2 * _m.pi * 440 * k / 48000) if k >= 32 * tone_at else 0.0)
+                for k in range(32 * n)]
+
+        def at_dispatch_4(r):
+            b = st4["b"]
+            if b == 0:
+                command(r, seq, SM.CMD_ARM, src=0, chan=0, dest=dest, place=place, thres=thres)
+            for k in range(32):
+                x = bits(sig4[32 * b + k])
+                m2.poke(r.state, SM.IN_BUF + 4 * k, x)
+                m2.poke(r.state, SM.IN_BUF + 0x80 + 4 * k, x)
+            st4["b"] += 1
+        r4 = run_blocks(init, frames_2, n, extra_hooks={m3.DISPATCH: at_dispatch_4})
+        if not r4["ok"]:
+            return None
+        w4, g4 = recorded(r4["state"].state, dest)
+        r4.pop("state", None)
+        want4 = [max(-32768, min(32767, int(min(0.999969, max(-1.0, x)) * 32768.0))) / 32768.0
+                 for x in sig4[32 * tone_at:]][:w4[1]]
+        return w4[1], bool(g4) and g4 == want4
+    auto = arm_run(33, quiet, 0.2, 13, 3, 0xC000)
+    plain_low = arm_run(16383, quiet, 0.2, 14, 3, 0xC000)
+    plain = arm_run(16383, quiet, 0.63, 15, 3, 0xC000)
+
     # v0.22: the RAM check (CMD_PROBE) on the image's own code. Block 0 takes the command
     # and fills the low area's first 256 words; then the last chunk of phase 3 and of
     # phase 4 are set up (both areas' last 256 words as the fills would leave them; the
@@ -2250,6 +2288,13 @@ def step_rec(init, sound, machines, blocks) -> dict:
         "the status while recording: state 2, the command's sequence, frames / 64, the peak":
             ok2 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 2 and h[1] == 7 and h[2] == (32 * n) >> 6
                         and abs(h[3] / 32767 - max(abs(x) for x in left[-32:])) < 0.01 for h in stat2),
+        "v0.38: ARM at THRES 0 waits through a -50 dB noise floor (over v0.30's -60 dB) and "
+        "starts on the tone's first block, its frames the input's":
+            auto is not None and auto[0] == 32 * (n - quiet) and auto[1],
+        "v0.38: ARM at a set threshold (THRES 60) stays armed under it (a -14 dB tone), and "
+        "starts on the first block that exceeds it (-4 dB)":
+            plain_low is not None and plain_low[0] == 0
+            and plain is not None and plain[0] == 32 * (n - quiet) and plain[1],
         "every sample track bit-exact to the model, every block of both runs":
             ok1 and ok2 and exact1[1] == exact1[2] == exact2[1] == exact2[2] == 0,
         "v0.22: the RAM check takes its command and fills 256 words a block of the low area, "
