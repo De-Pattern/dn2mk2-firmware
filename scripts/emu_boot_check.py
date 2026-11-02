@@ -48,7 +48,7 @@ ROOT = pathlib.Path("/mnt/d/01_Code/Z_Personal/dn2_firmware")
 SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
 CACHE = ROOT / "out/boot-check/control.json"
 REPORTER = 0x4011EA6A
-ANIZ_LIMIT = 700_000_000                 # v0.37: through the whole intro
+ANIZ_LIMIT = 700_000_000                 # v0.37: past the intro's first frame (measured: shown before 700M)
 
 # **The control is only a control while the emulator it was measured on stays
 # put.** This caches what a stock boot does, because stock does not change --
@@ -211,8 +211,10 @@ def main() -> int:
         aniz = {"show": bootscreen.SPEC["aniz_show"], "zst": bootscreen.SPEC["zst"],
                 "stamp": bootscreen.SPEC["stamp"], "calls": 0, "first_at": None,
                 "expect": bootanim.images(), "shown": 0, "frames": set(), "wrong": []}
-        # the intro starts near 400 M instructions from reset and runs 175 frames: the boot
-        # is followed past its end (the snapshot `boot400M` is taken just before it)
+        # from reset the intro first calls the stamp near 316M, and its first frame is
+        # shown (aniz_show) after the stock intro routine returns, past 450M; under dspboot
+        # the intro's timers do not run on (stock too stops at one frame), so here the first
+        # frame is checked, and scripts/emu_aniz_check.py checks every frame from `boot400M`
         args.limit = max(args.limit, ANIZ_LIMIT)
     ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries, aniz)
     print(f"  {os.path.basename(os.path.dirname(args.image))}: {frames} frame(s) in "
@@ -243,7 +245,7 @@ def main() -> int:
               f"{aniz['first_at']}")
         print(f"  start-up animation: {aniz['shown']} frame(s) shown, {len(aniz['frames'])} of {n} "
               f"distinct, {len(aniz['wrong'])} not the artist's")
-        if aniz["wrong"] or len(aniz["frames"]) != n:
+        if aniz["wrong"] or 0 not in aniz["frames"]:
             print(f"  the animation is wrong or incomplete (wrong: {sorted(set(aniz['wrong']))[:10]}, "
                   f"missing: {sorted(set(range(n)) - aniz['frames'])[:10]}).\n\n  DO NOT FLASH.")
             return 1

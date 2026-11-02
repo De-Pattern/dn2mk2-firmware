@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.36** | 2026-11-01 | More Monomachine voices: SID, VO-6 and DENS from 2 to 4 at once, DDRW from 1 to 2 (the v0.26 fixed budget gone; the DSP-time guard decides); a voice that doesn't fit is stolen cleanly (silent until its next note) instead of chopping in and out; DDRW/DENS's busiest tables in fast memory; a four-note chord test per Monomachine machine in the gate | `builds/v0.36-VOICES/` | yes |
+| **v0.37** | 2026-11-01 | s!Rwa²'s start-up animation (59 frames, every one checked in the gate); DDRW lighter (3 voices, same sound); resampling MAIN records the main mix (it gave an empty sample); the sample preview 6 dB down; polyphonic sample playback checked (chords on ONESHOT, WERP, SLICE) | `builds/v0.37-INTRO/` | yes |
+| v0.36 | 2026-11-01 | More Monomachine voices: SID, VO-6 and DENS from 2 to 4 at once, DDRW from 1 to 2 (the v0.26 fixed budget gone; the DSP-time guard decides); a voice that doesn't fit is stolen cleanly (silent until its next note) instead of chopping in and out; DDRW/DENS's busiest tables in fast memory; a four-note chord test per Monomachine machine in the gate | `builds/v0.36-VOICES/` | yes |
 | v0.35 | 2026-11-01 | The bug sweep: MACHINE SEL's empty FLTR column after choosing a machine low in the list (v0.33), the +DRIVE preview retriggering while held, SYN held shows our pages' values, LOAD TO PROJ skipping same-length samples, deleted folders left in the list (and the import page can delete folders), PERC's names on another track's LFO page (B10); `dn2diag.py entries`; a new gate step that checks the drawn MACHINE SEL columns and SYN pages | `builds/v0.35-SWEEP/` | yes |
 | v0.34 | 2026-10-31 | The P-I voices that stayed dead (v0.33's guard never reset a wiped voice): fixed, and the guard now says which voice and whether its delay lines held the NaN (FUNC held: `V1D`/`V1X`; SysEx DIAG); SCAN reads any DSP memory for NaN (`tools/dn2diag.py`); the model's NaN as the core's; the gate: the audio interrupt at its real rate preempting our code (fuzz), the guard's wipe (runner 3w), the DSP's memory-cost clock | `builds/v0.34-TIMING/` | yes |
 | v0.33 | 2026-10-30 | The freeze hunt: a guard against all audio cutting out (a runaway voice), keys and menus that went dead (SLICE/GRID's YES after MACHINE SEL, keys whose release went elsewhere, the sample list left open on another track), stray DSP reads from a bad sample entry, a garbage-state and worst-case DSP stress test, a UI fuzz in the gate; +DRIVE preview (FUNC + YES), MOVE SELECTED, NEW FOLDER; PROJECT RAM ticks with YES; the recorder: no DEST, SRC/CHAN apart, TRIM zoom; slices from C1; SID on TRI; FUNC + NO backspace; LFO FUNC snaps back | `builds/v0.33-STEADY/` | yes |
@@ -74,6 +75,54 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.37 — INTRO (the start-up animation, DDRW lighter, MAIN resampling)
+
+`DN2mod_v0.37_INTRO_OS1.11.syx`
+sha256 `dfd503d8816ad498eea953482984610edb4af239f4a5aa93c5448c6182a07ea0`
+Gate: CLEARED TO FLASH, 2026-11-01 (36 gates; 15 reused, each a pass whose every input is byte-identical). Source: commit `cf809997`.
+
+Everything in v0.36, plus:
+
+**The start-up animation by s!Rwa²** (the DN2MK2 community): 59 frames in place of the
+stock intro's, at the artist's own timing (`src/dnfw/bootanim.py`, the frames with the
+credit in `bootanim_dn2mk2.json`). Two new gate checks: the boot from reset shows its
+first frame, and a run of the whole intro compares every frame shown with the artist's
+(all 59, in order, none wrong).
+
+**DDRW lighter**: it skips the half of its work whose weight is exactly zero (15/16 of every
+octave), with the same output. DDRW chords: 3 voices (from 2).
+
+**Resampling MAIN gave an empty sample** (the owner). The recorder read the main mix's buffer
+while our code runs, when it is still empty (it is whole only at the master mix). pvmix
+now copies the mix there, before the preview goes in, and the recorder's MAIN reads the
+copy. The SHARC runner checks the copy is the mix as it came in.
+
+**The sample preview 6 dB down** (FUNC + YES, +DRIVE, the recorder's TRIM). It was much
+louder than the track (\x0x/, paQ). It now plays at the level of a sample track at its
+default VOL and LEVEL.
+
+**Polyphonic sample playback** (not new; it has been there since the sample machines rode
+the DN2's voice allocation, and the owner heard it on v0.35). Sample tracks play chords
+like FM tracks. Checked for this build on the DSP: four-note chords on ONESHOT and WERP,
+four voices sounding, each its own note, exact against the model; SLICE at NOTE plays
+four slices at once, each voice the same as its slice played alone. The gate's chord check
+will cover sample machines from v0.38. Voices are shared by every track; dense sample
+chords beside PERC and Monomachine tracks use up DSP time fastest.
+
+**Tests**
+1. Power on: the new animation plays to its end, then the UI as usual.
+2. A DDRW chord (dynamic allocation): three notes sound; a fourth drops out cleanly.
+3. RECORDER, SRC MAIN (L+R), with a pattern playing: the recording holds the mix.
+4. FUNC + YES preview in +DRIVE: about as loud as the same sample on a track.
+5. A chord on a ONESHOT, WERP or SLICE track (voices set to more than one): every note
+   sounds.
+6. The v0.36 list still: four-note chords on SID / VO-6 / DENS / DPRO WAVE.
+
+**Known issues**
+- DDRW: three voices at most.
+- A P-I or VO-6 voice sometimes going bad on some units: still under investigation (the
+  import page's Diagnostics).
 
 ## v0.36 — VOICES (more Monomachine voices, voices stolen cleanly)
 
