@@ -210,4 +210,6 @@ switched-to pool and its frames against the sample's own bytes (10,409 entry che
 | the image's directory changed behind our back | boot case 6: kept, into 7's list |
 | power cut after each write (and torn inside each multi-sector write) of a rename (20 sectors) and of a switch 7 -> 9 (12 sectors), the OS back with 9 and with 7 | 26 power-ons, every one a whole pool, the right owner's, lists 7 and 9 intact |
 | every sector written | inside the pool image, the lists' region or the library; the final image's header and directory as v0.37 reads them, every entry's frames whole |
-| the DSP | never held another project's sample nor one half sent (after the harness fix of its own expected-bytes table) |
+| the DSP | never held another project's sample nor one half sent (10,409 entry checks). The 6 periods in which a slot just emptied *within* a project was still in the DSP (the edit reaches the +Drive's directory one UI pass before the DSP's: the existing order) are counted apart, as that project's own sample |
+
+The gate step passed through `ship_gate.py --only pools` on the merged tree (build sha256 `044fc731...`), and `--only link16` (the existing sample-link scenarios, with the lists' first power-on in them) passed too.
