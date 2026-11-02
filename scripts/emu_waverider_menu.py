@@ -100,6 +100,9 @@ GETTER_RTS = 0x4003647C                 # rts of the machine-type getter 0x40036
 TRACK_GETTER_EXIT = 0x4004B81E          # getMachineType(track) 0x4004b7f2: the common exit
 ISR = 0x40025E36                        # the audio frame handler: modulation, frame, send
 ISR_RTE = 0x40027BC6                    # its only rte (docs/usbprobe.md)
+SEQ_ISR, SEQ_VECTOR = 0x400D987A, 121   # the sequencer's timer ISR (emu_jump.py)
+SEQ_CALLS_A_TICK = 4                    # its entries a tick (emu_jump.py, measured)
+HEAP_FREE = 0x40120270                  # the heap's free (operator delete 0x4001a0d2 jumps here)
 SYSEX_ROUTER, SYSEX_SENDER = 0x4012166E, 0x401233F2    # docs/usbprobe.md
 FRAME_BUILT = 0x400275A2                # the builder's sixteen passes are done
 FRAME = 0x80005E60
@@ -1264,6 +1267,19 @@ def main() -> int:
                          "stack": bytes(uc.mem_read(sp, 96)).hex()})
     alive = []
     uc.hook_add(UC_HOOK_CODE, fault_reporter, begin=0x4011EA6A, end=0x4011EA6A)
+    # v0.38: a free() of an address on the running stack (blskk's crash: stock grew a vector
+    # slc_keynotes had put on its stack, and freed the stack buffer to the heap; the heap is
+    # then corrupt and the unit crashes later, anywhere). Every heap free goes through
+    # 0x40120270 (operator delete 0x4001a0d2 jumps there); its pointer at sp + 4
+    stack_frees = []
+
+    def at_free(uc_, address, size, user):
+        sp = uc.reg_read(K.UC_M68K_REG_A7)
+        ptr = struct.unpack(">I", bytes(uc.mem_read(sp + 4, 4)))[0]
+        if ptr and 0 <= ptr - sp < 0x4000:
+            stack_frees.append({"step": step_now["name"], "ptr": f"{ptr:#010x}", "sp": f"{sp:#010x}",
+                                "ret": f"{struct.unpack('>I', bytes(uc.mem_read(sp, 4)))[0]:#010x}"})
+    uc.hook_add(UC_HOOK_CODE, at_free, begin=HEAP_FREE, end=HEAP_FREE)
     # v0.34: with the interrupt firing on its own, its deliveries and its cost. The cost is
     # the instructions from the ISR's entry to its rte, measured for every delivery with a
     # per-instruction hook while inside it (the hook is added at the entry and removed at the
@@ -1403,6 +1419,33 @@ def main() -> int:
             uc.hook_del(hs)
             (path.parent / (path.name + ".replies.json")).write_text(json.dumps(sent))
             print(f"  sysex: {len(msgs)} message(s), {len(sent)} repl(ies), {total:,} instructions")
+        elif step.startswith("seq:"):
+            # v0.38: seq:N, N sequencer ticks (PLAY pressed first: the trigs, the arp and its
+            # notes run). The sequencer's timer ISR (0x400d987a, vector 121) never fires here
+            # (the timers are deferred), so it is entered as the interrupt would (an exception
+            # frame; its rte returns to the sentinel), four entries a tick (emu_jump.py's
+            # measure), the UI running between ticks
+            regs = [getattr(K, f"UC_M68K_REG_{r}{i}") for r in "DA" for i in range(8)]
+            for k in range(int(step[4:]) * SEQ_CALLS_A_TICK):
+                saved = [uc.reg_read(r) for r in regs]
+                saved_pc = uc.reg_read(K.UC_M68K_REG_PC)
+                sp = STACK_TOP - 0x100
+                machine.write(sp, struct.pack(">HHI", 0x4000 | (SEQ_VECTOR << 2), 0x2000, SENTINEL))
+                machine.write(SENTINEL, bytes.fromhex("4e714e71"))
+                uc.reg_write(K.UC_M68K_REG_A7, sp)
+                stepper = getattr(machine.m, "_fast_stepper_obj", None)
+                if stepper is not None:
+                    stepper.left = 1 << 40
+                try:
+                    uc.emu_start(SEQ_ISR, SENTINEL, count=3_000_000)
+                finally:
+                    if stepper is not None:
+                        stepper.left = 0
+                    for r, v in zip(regs, saved):
+                        uc.reg_write(r, v)
+                    uc.reg_write(K.UC_M68K_REG_PC, saved_pc)
+                if k % 4 == 3:
+                    panel.settle(300_000)
         elif step.startswith("isr:"):
             # the ISR N times; the frame's words 2650..2681 (the sample link's packet,
             # big-endian 16-bit) after each, to png_dir/NAME.link.json
@@ -1488,7 +1531,7 @@ def main() -> int:
               "frames": frames, "memory": mems, "labels": labels, "pixel_callers": pixels, "access": access, "counts": counts,
               "screen_frames": panel.frames() - frames_at_reset[0],
               "panel_writers": panel_writers, "items": items,
-              "alive": alive, "fault_reports": reported,
+              "alive": alive, "fault_reports": reported, "stack_frees": stack_frees[:10],
               "isr": None if ssi is None else {
                   "frame_instructions": a.isr_frame, "delivered": isr["delivered"],
                   "vector170": ssi.vector170, "vector191": ssi.vector191, "requests": ssi.requests,

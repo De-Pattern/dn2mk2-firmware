@@ -1705,11 +1705,25 @@ def werp_next(p: Prog, L: Layout) -> None:
     p.ifz(0, "NE", segment)
 
 
+# v0.38, THRES 0 (blskk on v0.37: "it registers 0 threshold as an actual threshold, so
+# whenever you arm the sampler it automatically catches everything"; v0.30's fixed -60 dB
+# floor was not enough on his unit). The DT2 starts "when the incoming audio exceeds the
+# threshold" and asks for THR "just above the background noise" (its manual, Sampling);
+# at 0 it would start on any noise. Ours at 0 waits for sound above the source's own noise
+# instead (docs/sampler.md, "THRES 0"):
+REC_AUTO_BELOW = 64                       # a threshold word under this is THRES 0 (the ColdFire's floor, 33)
+REC_AUTO_FLOOR = 33.0 / 32767.0           # never under -60 dB (v0.30's floor)
+REC_AUTO_MARGIN = 4.0                     # 12 dB over the quietest recent block's peak
+REC_AUTO_RISE = 1.0005                    # how fast the floor creeps up: +6.5 dB a second at 1500 blocks
+REC_AUTO_EPS = 1e-6                       # ... and from nothing
+
+
 def recorder(p: Prog, L: Layout) -> None:
     """The recorder (docs/sampler.md, v0.15). The ColdFire drives it with commands it writes,
     through the sample link, into the pool's command block (SM.CMD_OFFSET): sequence,
     command, source, channel, threshold, and dest << 24 | frames. A new sequence acts:
-    ARM empties the slot and waits for the block's peak to reach the threshold; NOW
+    ARM empties the slot and waits for the block's peak to exceed the threshold (v0.38: THRES 0,
+    for one above the source's noise: REC_AUTO_*); NOW
     empties it and records at once; STOP ends a recording (or cancels an arm); every
     command sets the source and channel the peak is measured on (MONITOR only that).
     Sources: IN (the codec's input as the engine converts it, 0x268538), MAIN (v0.37: the
@@ -1796,7 +1810,20 @@ def recorder(p: Prog, L: Layout) -> None:
                 p.st(C["rst"], 7)
             return body
         p.iconst(12, SM.CMD_ARM)
-        p.if_(2, "EQ", 12, lambda: (start(1)(), p.iconst(7, 0), p.st(C["rmode"], 7)), kind="i")
+
+        def arm():
+            start(1)()
+            p.iconst(7, 0)
+            p.st(C["rmode"], 7)
+            # v0.38: THRES 0 (the ColdFire sends its floor, 33, under REC_AUTO_BELOW) arms on
+            # the first sound above the source's own noise (rmode 2, armed() below): rthr
+            # becomes that noise's level x REC_AUTO_MARGIN, learnt from the blocks after ARM;
+            # 1.0 for the first block, so it never starts on the block it learns from
+            p.ld(4, cmd + 16)
+            p.iconst(12, REC_AUTO_BELOW)
+            p.if_(4, "LT", 12, lambda: (p.iconst(7, 2), p.st(C["rmode"], 7),
+                                        p.fconst(5, 1.0), p.st(C["rthr"], 5)), kind="i")
+        p.if_(2, "EQ", 12, arm, kind="i")
         p.ld(2, cmd + 4)
         p.iconst(12, SM.CMD_ARM_PLAY)
         p.if_(2, "EQ", 12, lambda: (start(1)(), p.iconst(7, 1), p.st(C["rmode"], 7)), kind="i")
@@ -2026,16 +2053,36 @@ def recorder(p: Prog, L: Layout) -> None:
     def armed():
         p.ld(7, C["rmode"])
 
-        def on_thres():                       # the peak reached the threshold: record
+        def on_thres():                       # the peak exceeds the threshold: record (v0.38:
+            p.ld(5, C["rpk"])                 # "exceeds", the DT2 manual's word; was reaches)
+            p.ld(6, C["rthr"])
+            p.if_(5, "GT", 6, lambda: (p.iconst(0, 2), p.st(C["rst"], 0)))
+
+        def on_auto():                        # v0.38, THRES 0: the first sound above the noise
+            on_thres()
+            # the threshold follows the source's noise: REC_AUTO_MARGIN x the quietest recent
+            # block peak (it drops to a quieter block at once and creeps up slowly, so it
+            # sits at the noise's floor, a hum's or a DC offset's level), never under the
+            # -60 dB floor (v0.30)
             p.ld(5, C["rpk"])
             p.ld(6, C["rthr"])
-            p.if_(5, "GE", 6, lambda: (p.iconst(0, 2), p.st(C["rst"], 0)))
+            p.fconst(12, REC_AUTO_RISE)
+            p.fop(6, 6, "*", 12)
+            p.fconst(12, REC_AUTO_EPS)
+            p.fop(6, 6, "+", 12)
+            p.fconst(12, REC_AUTO_MARGIN)
+            p.fop(5, 5, "*", 12)
+            p.fop(6, 6, "MIN", 5)
+            p.fconst(12, REC_AUTO_FLOOR)
+            p.fop(6, 6, "MAX", 12)
+            p.st(C["rthr"], 6)
 
         def on_play():                        # R.STRT PLAY: the first note any track plays
             p.ld(5, PP.TRIG_WORD)
             p.lsh(5, 5, -16)
             p.ifz(5, "NE", lambda: (p.iconst(0, 2), p.st(C["rst"], 0)))
-        p.ifz(7, "EQ", on_thres, on_play)
+        p.iconst(12, 2)
+        p.if_(7, "EQ", 12, on_auto, lambda: p.ifz(7, "EQ", on_thres, on_play), kind="i")
     p.if_(1, "EQ", 12, armed, kind="i")
     p.ld(1, C["rst"])
     p.iconst(12, 2)
