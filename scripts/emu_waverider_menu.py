@@ -659,6 +659,171 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out.update(res)
         out["ok"] = bool(res["ok"]) and not route.get("changed")
         out["routing_changed"] = route.get("changed", 0)
+    elif scenario == "live":
+        # v0.38 (the testers: "after 10-20 added samples, new ones are silent until a restart";
+        # v0.37: "nothing I record plays, though I see its waveform"): a pool of three samples
+        # loaded at power-on (its count 3), then 22 samples added live one after another
+        # (LOAD TO PROJECT from the +Drive's library, the browser's path) and 3 recordings
+        # (the recorder's path: the DSP writes the slot's entry as it records, the ColdFire
+        # saves it), each into the first empty slot. After each, the DSP must PLAY it, by
+        # the DSP's own rule (dnfw.sampler.live.slot_plays: the magic, the count, the entry),
+        # with its entry and every frame as the +Drive's image holds them; a recording plays
+        # while it is still recording. Before v0.38 every slot at or past the count the DSP
+        # had at power-on failed here: the live path sent the entry, never the count.
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        from dn2probe import pack7, unpack7     # noqa: PLC0415
+        n0 = 3
+        snd = [[0.5 * ((k * (7 + j)) % 100 / 50 - 1) for k in range(1500 + 100 * j)] for j in range(n0)]
+        img = SL.pool_bytes(snd, base, [1.0] * n0, [SM.FMT_I16] * n0, [f"BOOT{j}" for j in range(n0)])
+        img = bytearray(img + bytes((-len(img)) % 512))
+        hdr_dir = bytes(img[:SM.DATA_OFFSET])
+
+        def adler2(b):
+            a_, b_ = 1, 0
+            for x in b:
+                a_ = (a_ + x) & 0xFFFFFFFF
+                b_ = (b_ + a_) & 0xFFFFFFFF
+            return (b_ << 16 ^ a_) & 0xFFFFFFFF
+        magic, nbytes, ck = 0x444E3251, len(img), adler2(hdr_dir)
+        disk[STORE_SECTOR] = struct.pack(">5I", magic, 2, nbytes, ck,
+                                         (~magic ^ nbytes ^ ck) & 0xFFFFFFFF).ljust(512, b"\0")
+        for k in range(len(img) // 512):
+            chunk = bytes(img[512 * k:512 * k + 512])
+            if any(chunk):
+                disk[STORE_SECTOR + 1 + k] = chunk
+        periods = 0
+        while periods < 8000:
+            period()
+            call("smp_boot")
+            periods += 1
+            if (long("smp_booted") == 2 and long("smp_lstate") in (0, 4)
+                    and all(pool.get(k // 4) == struct.unpack_from("<I", img, k)[0] for k in range(0, SM.CMD_OFFSET, 4))):
+                break
+
+        def word(a):
+            return pool.get((a - base) // 4, 0)
+
+        def disk_dir():
+            return b"".join(disk.get(STORE_SECTOR + 1 + k, bytes(512)) for k in range(8))
+
+        def img_at(addr, n):
+            lo = addr - base
+            return b"".join(disk.get(STORE_SECTOR + 1 + lo // 512 + k, bytes(512)) for k in range((n + 511) // 512))[lo % 512:lo % 512 + n]
+
+        def dsp_at(addr, n):
+            lo = (addr - base) // 4
+            return b"".join(struct.pack("<I", pool.get(lo + j, 0)) for j in range((n + 3) // 4))[:n]
+
+        def judged(slot, want_frames):
+            """the slot as the DSP holds it: plays, its entry the image's, its frames the image's"""
+            d = disk_dir()
+            ent = struct.unpack_from("<4I", d, 8 + 16 * slot)
+            dent = tuple(word(base + 8 + 16 * slot + 4 * j) for j in range(4))
+            nb = ent[1] * (2 if ent[3] & 0xFF == SM.FMT_I16 else 4)
+            return {"slot": slot, "plays": SL.slot_plays(word, base, slot), "count": word(base + 4),
+                    "entry": dent == ent, "frames": ent[1] == want_frames and nb > 0
+                    and dsp_at(ent[0], nb) == img_at(ent[0], nb)}
+        boot_ok = periods < 8000 and all(SL.slot_plays(word, base, j) for j in range(n0)) and word(base + 4) == n0
+        has_heads = "smp_heads" in syms         # (absent from builds before v0.38: run on them, it fails)
+        heads0 = long("smp_heads") if has_heads else 0
+        # the library: a folder, then 22 samples sent over SysEx (tools/dn2samples.py lib-send)
+        buf = SENTINEL + 0x1000
+        replies = []
+
+        def at_sender(uc_, address, size, user):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            b_, n_, _ab, _port = struct.unpack(">4I", bytes(uc.mem_read(sp + 4, 16)))
+            replies.append(bytes(uc.mem_read(b_, n_)))
+        hs = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+
+        def sx(cmd, payload=b""):
+            msg = bytes([0xF0, 0, 0x20, 0x3C, 0x7D, 1]) + pack7(struct.pack(">HB", 7, cmd) + payload) + b"\xF7"
+            machine.write(buf, msg)
+            replies.clear()
+            call("smp_rx", buf, len(msg), 2)
+            if not replies:
+                return None, b""
+            m = unpack7(replies[-1][6:-1])
+            return m[3], m[4:]
+
+        def adler(b, s=1):
+            a_, b_ = s & 0xFFFF, s >> 16
+            for x in b:
+                a_ = (a_ + x) % 65521
+                b_ = (b_ + a_) % 65521
+            return b_ << 16 | a_
+
+        def lib_send(name, folder, data):
+            st, r = sx(18, struct.pack("<IBBI", len(data) // 2, 1, folder, 0x3F800000) + name.encode())
+            if st != 0:
+                return None
+            idx = struct.unpack_from("<II", r)[0]
+            for o in range(0, len(data), 300):
+                if sx(19, struct.pack("<I", o) + data[o:o + 300])[0] != 0:
+                    return None
+            return idx if sx(20, struct.pack("<I", adler(data)))[0] == 0 else None
+        _st, rf = sx(17, b"LIVE")
+        n_lib = 22
+        sent = []
+        for j in range(n_lib):
+            data = bytes(rng.randrange(1, 256) for _ in range(2 * (400 + 37 * j)))
+            sent.append((lib_send(f"LIVE{j:02d}", rf[0] if rf else 0, data), 400 + 37 * j))
+        uc.hook_del(hs)
+        adds = []
+        for j, (idx, fr) in enumerate(sent):
+            if idx is None:
+                adds.append({"slot": n0 + j, "sent": False})
+                continue
+            done = long("smp_lp_done")
+            call("smp_lib_load", idx)
+            for _ in range(3000):
+                period()
+                call("smp_boot")
+                if long("smp_lp_done") > done and long("smp_lstate") in (0, 4):
+                    break
+            for _ in range(120):                # its frames, its entry, its count; the directory saved
+                period()
+                call("smp_boot")
+            adds.append(judged(n0 + j, fr))
+        # three recordings, each into the first empty slot, as rec.c makes one: the DSP writes the
+        # slot's entry as it starts (dnfw.sampler.program.recorder) and its frames as it goes,
+        # the ColdFire covers the slot with the count (smp_count_cover), then saves it
+        recs = []
+        for j in range(3):
+            slot = n0 + n_lib + j
+            place = (j * 1 << 20)
+            frames = 2000 + 300 * j
+            rec_off = SM.REC_OFFSET + place
+            for k in range(frames // 2):
+                pool[rec_off // 4 + k] = rng.randrange(1 << 32)
+            for k, w in enumerate((base + rec_off, frames, 0x3F800000, SM.FMT_I16)):
+                pool[(8 + 16 * slot) // 4 + k] = w
+            if "smp_count_cover" in syms:
+                call("smp_count_cover", slot)
+            for _ in range(60):                 # while it records
+                period()
+                call("smp_boot")
+            during = SL.slot_plays(word, base, slot)
+            call("smp_save_recording", slot, place, frames)
+            for _ in range(4000):
+                period()
+                call("smp_boot")
+                if long("smp_saved"):
+                    break
+            for _ in range(120):
+                period()
+                call("smp_boot")
+            recs.append({**judged(slot, frames), "during": during,
+                         "saved": struct.unpack(">i", machine.read(syms["smp_saved"], 4))[0]})
+        heads = long("smp_heads") - heads0 if has_heads else -1
+        bad_adds = [a for a in adds if not (a.get("plays") and a.get("entry") and a.get("frames"))]
+        bad_recs = [r for r in recs if not (r["plays"] and r["during"] and r["entry"] and r["saved"] == 1)]
+        out.update(boot_ok=boot_ok, periods=periods, adds=len(adds), heads=heads,
+                   bad_adds=bad_adds[:6], bad_recs=bad_recs, count=word(base + 4),
+                   routing_changed=route.get("changed", 0))
+        out["ok"] = bool(boot_ok and len(adds) == n_lib and not bad_adds and not bad_recs
+                         and word(base + 4) == n0 + n_lib + 3 and heads >= n_lib
+                         and not route.get("changed"))
     elif scenario == "save":
         # a recording of 3,000 frames on the DSP, 16 MB into the recordings' area, for slot
         # 40 (SAMP 41; v0.22: any slot, any place); no image on the +Drive yet

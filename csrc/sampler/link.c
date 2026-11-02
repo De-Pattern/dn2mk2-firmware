@@ -624,7 +624,18 @@ static u16 st[16] __attribute__((section(".data")));
  * the count, so the page can name the slots, and nothing points at frames not yet there);
  * then each used slot's frames, the recorder's included, and at once that slot's entry,
  * so a slot plays as soon as it is in; last the whole directory page again. -> 0 when done */
-enum { K_BLANK, K_FRAMES, K_ENTRY, K_FULL, K_AREA, K_TABLES, K_READY, K_PREVIEW };
+enum { K_BLANK, K_FRAMES, K_ENTRY, K_FULL, K_AREA, K_TABLES, K_READY, K_PREVIEW, K_HEAD };
+/* v0.38 (the testers' "new samples are silent until a restart"): the DSP plays a slot below
+ * REC_FIRST only if it is below the directory's count (word 1; dnfw.sampler.program.start),
+ * and only the whole page (BLANK, FULL: a power-on or a project's load) carried the count.
+ * A slot added live (LOAD TO PROJECT, a recording, a send's slot) past the count the DSP
+ * last had stayed silent until the next power-on. Since v0.33 a recording goes into the
+ * first empty slot, mostly the one at the count. K_HEAD: the page's first 8 bytes (the
+ * magic and the count, at least smp_head_min), sent after every live entry and when a
+ * recording starts. */
+int smp_head_due __attribute__((section(".data"))) = 0;
+u32 smp_head_min __attribute__((section(".data"))) = 0;     /* a recording's slot + 1 */
+u32 smp_heads __attribute__((section(".data"))) = 0;        /* heads that checked out (the gate) */
 static int area_due __attribute__((section(".data"))) = 0;      /* the slice area loads at the end */
 static int area_push __attribute__((section(".data"))) = -1;    /* one slot's table to the DSP */
 static int l_area_read __attribute__((section(".data"))) = 0;   /* K_AREA from the +Drive (else from the copy) */
@@ -854,6 +865,13 @@ static int next_range(void)
         if (!dir_ok)
             return 0;
     }
+    if (smp_head_due && dir_ok && l_slot > POOL_SLOTS) {   /* v0.38: the magic and the count */
+        smp_head_due = 0;
+        l_kind = K_HEAD;
+        l_off = 0;
+        l_end = 8;
+        return 1;
+    }
     if (l_slot == 0 && l_kind == K_BLANK && l_end == 0) {
         l_off = 0;
         l_end = CMD_OFFSET;                     /* up to the command block: the DSP's */
@@ -1042,6 +1060,8 @@ void smp_load(void)                             /* load (again) whatever the ima
     }
     l_order_ok = 0;
     fast_on = 1;
+    smp_head_min = 0;                           /* v0.38: the whole page carries DIR's count */
+    smp_head_due = 0;
     for (u32 k = 0; k < 4; k++)                 /* v0.38: this load finds its own */
         pl_bad[k] = 0;
     l_slot = 0;
@@ -1109,6 +1129,8 @@ static void load_poll(void)
         } else {                                            /* the directory page's: from DIR */
             for (u32 k = 0; k < n; k++)
                 STAGE(0)[k] = DIR[l_off + k];
+            if (l_off == 0 && n >= 8u && le32(DIR + 4) < smp_head_min && smp_head_min <= POOL_SLOTS)
+                put_le32(STAGE(0) + 4, smp_head_min);       /* v0.38: a recording's slot is counted */
             if (l_kind == K_BLANK)
                 for (u32 k = 8; k < 8u + 16u * POOL_SLOTS; k++)
                     STAGE(0)[k] = 0;
@@ -1152,6 +1174,10 @@ static void load_poll(void)
                 l_off += l_chunk_bytes;
                 if (l_kind == K_FRAMES && l_entry >= 0 && l_off >= l_end)
                     slot_done();
+                if (l_kind == K_ENTRY && l_slot > POOL_SLOTS && l_off >= l_end)
+                    smp_head_due = 1;                       /* v0.38: a live entry: its count next */
+                if (l_kind == K_HEAD && l_off >= l_end)
+                    smp_heads++;
                 smp_lstate = l_off < l_end || next_range() ? L_READ : L_DONE;
                 return;
             }
@@ -1476,6 +1502,7 @@ static void save_poll(void)
             }
             smp_hi = bytes;
             smp_pl_changed();                                /* v0.38: into the project's list */
+            smp_head_due = 1;                                /* v0.38: and the count to the DSP */
             if (s_peak >= 64u && s_peak < NORM_PEAK - 64u) {   /* quieter than full: normalised */
                 s_off = (REC_OFFSET + s_place) & ~511u;
                 sstate = 3;
@@ -1801,7 +1828,23 @@ static void edits_poll(void)
         push_slot = -1;
         l_slot = POOL_SLOTS + 1;
         smp_lstate = next_range() ? L_READ : L_DONE;
+    } else if (smp_head_due && fast_on && dir_ok) { /* v0.38: the count, on its own (a recording began) */
+        l_entry = -1;
+        l_slot = POOL_SLOTS + 1;
+        smp_lstate = next_range() ? L_READ : L_DONE;
     }
+}
+
+/* v0.38: a recording into slot K has begun (rec.c): the DSP plays it as it records only if
+ * its count covers K, so the count goes to the DSP now (the directory itself takes the slot
+ * when the recording is saved) */
+void smp_count_cover(int k)
+{
+    if (k < 0 || k >= REC_FIRST)
+        return;                                     /* the DSP's own slots need no count */
+    if ((u32)k + 1u > smp_head_min)
+        smp_head_min = (u32)k + 1u;
+    smp_head_due = 1;
 }
 
 /* -- v0.31: LOAD TO PROJECT: a library sample (lib.c) into the first empty pool slot ----------

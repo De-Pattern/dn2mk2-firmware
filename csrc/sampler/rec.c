@@ -213,6 +213,8 @@ static void send(int cmd)
             return;
         rec_taken = rec_dest;
         rec_off = place;
+        extern void smp_count_cover(int k);
+        smp_count_cover(rec_dest);              /* v0.38: so the DSP plays it as it records */
     }
     sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8, thr,
                            (u32)rec_dest << 24 | rec_length());

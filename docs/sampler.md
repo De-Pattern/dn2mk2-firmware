@@ -153,6 +153,18 @@ How:
   machine dispatch by `0x1c244d`), k the track's slot from its routing half (`0x257898` +
   2t, the ColdFire's slot map), scaled back by 0x1c244d's gain (11.627).
   (`docs/link-research.md` has the reading.)
+  v0.37 moved MAIN to a copy pvmix takes at the master-mix call (`MAIN_TAP`, L2
+  `0x200a9000`), on the reading that `0x268438` is empty while our code runs. The runner
+  (2026-11-02, hooks round the stock calls in `sw 0x1c2712`) says otherwise: `sw 0x1c1f1e`
+  (called at `0x1c305d`, after the voices) writes the mix there each block, and it is still
+  there at our next entry (the last block's), unless it went non-finite. Both readings record
+  the mix; the tap is kept (it is the mix as the output takes it). See `docs/user-reports.md`,
+  "Testers on v0.36 / v0.37".
+- **The count** (v0.38): the DSP plays a slot below `REC_FIRST` only while it is below the
+  directory's count (word 1). Since v0.33 a recording goes into the first empty slot, and
+  LOAD TO PROJECT does too: every one past the count the DSP had at power-on was silent
+  until the next power-on, its waveform drawn. The ColdFire now sends the page's first 8
+  bytes (`K_HEAD`) after every live entry and when a recording starts (`smp_count_cover`).
 - The recordings are in the DSP's memory only: they are lost at power-off.
 
 ## v0.22: the RECORDER is a screen of its own
