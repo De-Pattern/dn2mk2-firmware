@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -647,6 +647,12 @@ def main(argv=None):
             results["3d_rec"] = step_rec(init, sound, machines, a.blocks)
             gc.collect()
             show(results["3d_rec"])
+
+        if "mainrec" in steps:
+            print("\nstep 3m: MAIN recorded, previewed and played, in the instrument's order (v0.38)")
+            results["3m_mainrec"] = step_mainrec(init, sound, machines, a.blocks)
+            gc.collect()
+            show(results["3m_mainrec"])
 
         if "pvmix" in steps:
             print("\nstep 3f: the recorder's preview (after the engine's mix)")
@@ -2183,6 +2189,44 @@ def step_rec(init, sound, machines, blocks) -> dict:
     rec3.pop("state", None)
     close3 = bool(got3) and max(abs(a - b) for a, b in zip(got3, want3)) <= 2 / 32768
 
+    # run 4, v0.38: ARM (blskk on v0.37: THRES 0 "catches everything"). IN carries a noise
+    # floor at about -50 dB (a hiss with a DC offset: over v0.30's fixed -60 dB floor, as an
+    # input with something plugged in can be) for the first `quiet` blocks, then a tone at
+    # -14 dB. THRES 0 (the ColdFire's word, 33): armed through the noise, it starts on the
+    # tone's first block. A set threshold (THRES 60, the word 16383, the DT2's plain
+    # threshold): the same input, a -14 dB tone stays under it, so it waits; then a -4 dB
+    # one starts it, on its first block
+    quiet = n // 2
+
+    def noise(k):
+        return 0.0015 + 0.0012 * (((k * 2654435761) >> 7 & 0xFFFF) / 32768.0 - 1.0)
+
+    def arm_run(thres, tone_at, tone, seq, dest, place):
+        st4 = {"b": 0}
+        sig4 = [noise(k) + (tone * _m.sin(2 * _m.pi * 440 * k / 48000) if k >= 32 * tone_at else 0.0)
+                for k in range(32 * n)]
+
+        def at_dispatch_4(r):
+            b = st4["b"]
+            if b == 0:
+                command(r, seq, SM.CMD_ARM, src=0, chan=0, dest=dest, place=place, thres=thres)
+            for k in range(32):
+                x = bits(sig4[32 * b + k])
+                m2.poke(r.state, SM.IN_BUF + 4 * k, x)
+                m2.poke(r.state, SM.IN_BUF + 0x80 + 4 * k, x)
+            st4["b"] += 1
+        r4 = run_blocks(init, frames_2, n, extra_hooks={m3.DISPATCH: at_dispatch_4})
+        if not r4["ok"]:
+            return None
+        w4, g4 = recorded(r4["state"].state, dest)
+        r4.pop("state", None)
+        want4 = [max(-32768, min(32767, int(min(0.999969, max(-1.0, x)) * 32768.0))) / 32768.0
+                 for x in sig4[32 * tone_at:]][:w4[1]]
+        return w4[1], bool(g4) and g4 == want4
+    auto = arm_run(33, quiet, 0.2, 13, 3, 0xC000)
+    plain_low = arm_run(16383, quiet, 0.2, 14, 3, 0xC000)
+    plain = arm_run(16383, quiet, 0.63, 15, 3, 0xC000)
+
     # v0.22: the RAM check (CMD_PROBE) on the image's own code. Block 0 takes the command
     # and fills the low area's first 256 words; then the last chunk of phase 3 and of
     # phase 4 are set up (both areas' last 256 words as the fills would leave them; the
@@ -2250,6 +2294,13 @@ def step_rec(init, sound, machines, blocks) -> dict:
         "the status while recording: state 2, the command's sequence, frames / 64, the peak":
             ok2 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 2 and h[1] == 7 and h[2] == (32 * n) >> 6
                         and abs(h[3] / 32767 - max(abs(x) for x in left[-32:])) < 0.01 for h in stat2),
+        "v0.38: ARM at THRES 0 waits through a -50 dB noise floor (over v0.30's -60 dB) and "
+        "starts on the tone's first block, its frames the input's":
+            auto is not None and auto[0] == 32 * (n - quiet) and auto[1],
+        "v0.38: ARM at a set threshold (THRES 60) stays armed under it (a -14 dB tone), and "
+        "starts on the first block that exceeds it (-4 dB)":
+            plain_low is not None and plain_low[0] == 0
+            and plain is not None and plain[0] == 32 * (n - quiet) and plain[1],
         "every sample track bit-exact to the model, every block of both runs":
             ok1 and ok2 and exact1[1] == exact1[2] == exact2[1] == exact2[2] == 0,
         "v0.22: the RAM check takes its command and fills 256 words a block of the low area, "
@@ -2363,6 +2414,132 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         if os.environ.get("PVMIX_DEBUG"):
             print(name, out[name])
     return {"ok": all(checks.values()), "checks": checks, "numbers": out}
+
+
+def step_mainrec(init, sound, machines, blocks) -> dict:
+    """v0.38 (the testers: "the recorder with SRC MAIN gets no signal", "FUNC + YES in TRIM
+    never plays", "what I record does not play"): the recorder, MAIN, its TRIM preview and
+    its playback in the order the instrument runs them, block after block: the per-block
+    routine (sw 0x1c2712: the voices, our code with the recorder, the stock's master mix),
+    then the driver's master-mix call from its site (sw 0x1c9fd2: wr_pvmix, then the stock's
+    0x1c9d3f into the SPORT page), the state carried from each to the next. The runner does
+    not model the stock's FX and master path (docs/waverider-dsp-silence.md: its master goes
+    NaN), so the master mix is poked into MIX_BUF where the stock leaves it whole (after sw
+    0x1c1f1e returns, sw 0x1c3064): a known stereo signal, as a pattern's mix. RECORD NOW,
+    MAIN L+R, into a regular slot (SAMP 6, as rec.c's first empty slot), STOP; then the
+    TRIM preview (CMD_PREVIEW slot, first, end, as rec.c's preview(1)); then the slot on a
+    ONESHOT track once the count covers it (link.c's K_HEAD). Checks: the recording is the
+    mix (one block late: the tap is the last block's) within 2 LSB and not silence; the
+    SPORT page carries the mix plus the preview at half level while it plays; the slot
+    plays back."""
+    import math as _m
+    n = 10
+    ONE = SM.TYPE_OF["ONESHOT"]
+    slot = 5
+    cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
+    mixL = [0.4 * _m.sin(2 * _m.pi * 220 * k / 48000) for k in range(32 * (n + 8))]
+    mixR = [0.3 * _m.cos(2 * _m.pi * 330 * k / 48000) for k in range(32 * (n + 8))]
+
+    def bits(x):
+        return struct.unpack("<I", struct.pack("<f", x))[0]
+
+    def command(r, seq, cmd, src=0, chan=0, thres=0, last=0):
+        for k, w in enumerate((seq, cmd, src, chan, thres, last)):
+            m2.poke(r.state, cmd_at + 4 * k, w)
+    cur = {"b": 0}
+
+    def at_dispatch(r):
+        b = cur["b"]
+        if b == 0:                               # NOW, MAIN (1), L+R, into SAMP 6 at 0x8000 x 512
+            command(r, 21, SM.CMD_NOW, src=1, chan=0 | 0x8000 << 8, last=slot << 24 | SM.REC_FRAMES)
+        if b == n:
+            command(r, 22, SM.CMD_STOP)
+        if b == n + 1:                           # TRIM's FUNC + YES: the slot, START 0, END its frames
+            command(r, 23, SM.CMD_PREVIEW, src=slot, chan=0, thres=32 * n)
+        if b == n + 4:                           # the ColdFire's K_HEAD: the count covers the slot
+            m2.poke(r.state, dsp.SMP_POOL_DDR + 4, max(slot + 1, m2.word(r.state, dsp.SMP_POOL_DDR + 4) or 0))
+
+    def at_master(r):                            # the stock's master mix, whole: our known one
+        b = cur["b"]
+        for k in range(32):
+            m2.poke(r.state, SM.MIX_BUF + 4 * k, bits(mixL[32 * b + k]))
+            m2.poke(r.state, SM.MIX_BUF + 0x80 + 4 * k, bits(mixR[32 * b + k]))
+
+    def frame(b):
+        if b < n + 4:
+            return base_frame(sound, machines, t0=0, trigger=b == 1).to_bytes()
+        return base_frame(sound, machines, t0=ONE, trigger=b == n + 5,
+                          overrides=smp_words({SM.SAMP_REC: slot + 1})).to_bytes()
+    state, taps, dac, played, halt = init, [], [], [], None
+    page_l = 0x2C0478
+    for b in range(n + 8):
+        cur["b"] = b
+        rr = run_blocks(state, lambda _b, b=b: frame(b), 1,
+                        extra_hooks={m3.DISPATCH: at_dispatch, 0x1C3064: at_master})
+        if not rr["ok"]:
+            halt = rr.get("halt")
+            break
+        if b >= n + 5:
+            played += smp_series(rr, 0)
+        st0 = rr["state"]
+        idx = m2.word(st0.state, 0x268A38) or 0
+        r = st0.fresh_call(dsp.PVMIX_SITE_SW, regs={"R4": page_l + (idx << 8), "R13": 4})
+        how = fx.run(r, 400000, fx.Fixups(), stop_at=[0x1C9D3F])
+        if how[0] == "stop":
+            if r.state.call_stack and r.state.call_stack[-1] == dsp.PVMIX_SW + (len(dsp.pvmix_object()) - 6) // 2:
+                r.state.call_stack[-1] = 0x1C9FDB
+            how = fx.run(r, 400000, fx.Fixups(), stop_at=[0x1C9FDB])
+        if how[0] != "stop":
+            halt = f"the master-mix call: {how[0]} at block {b}"
+            break
+        taps.append([V.bits_f32(m2.word(r.state, SM.MAIN_TAP + 4 * k) or 0) for k in range(64)])
+        base = page_l + (idx << 8)
+        dac.append([((m2.word(r.state, base + 8 * k + 4 * c) or 0) ^ 0x80000000) - 0x80000000
+                    for k in range(32) for c in (0, 1)])
+        state = r
+    ok = halt is None
+    words, got = [0] * 4, []
+    if ok:
+        ent = dsp.SMP_POOL_DDR + 8 + 16 * slot
+        words = [m2.word(state.state, ent + 4 * k) or 0 for k in range(4)]
+        for k in range(words[1] // 2):
+            w = m2.word(state.state, words[0] + 4 * k) or 0
+            for h in (w & 0xFFFF, w >> 16):
+                got.append((h - 65536 if h >= 32768 else h) / 32768.0)
+    q = lambda x: max(-32768, min(32767, int(min(0.999969, max(-1.0, x)) * 32768.0))) / 32768.0   # noqa: E731
+    # the tap the recorder reads in block b is block b - 1's mix: block 0 records the tap as
+    # the snapshot left it, then the mix of blocks 0 .. n - 2
+    want = [q((mixL[k] + mixR[k]) * 0.5) for k in range(32 * (n - 1))]
+    close = ok and len(got) >= 32 * n and max(abs(a - b) for a, b in zip(got[32:32 * n], want)) <= 2 / 32768
+    # the preview: frames [0, 32 n) at half level, 32 a block from block n + 1's master mix
+    pv_ok = False
+    if ok and len(dac) > n + 2:
+        diffs = []
+        for j, b in enumerate((n + 1, n + 2)):
+            for k in range(32):
+                f = 32 * j + k
+                for c, mx in ((0, mixL), (1, mixR)):
+                    heard = dac[b][2 * k + c] / 2147483648.0
+                    diffs.append(abs(heard - mx[32 * b + k] - got[f] * 0.5))
+        pv_ok = max(diffs) < 1e-4 and max(abs(x) for x in got[:64]) > 0.05
+    f32 = lambda x: V.bits_f32(bits(x))         # noqa: E731  (as the DSP holds it)
+    tap_ok = ok and all(all(t[k] == f32(mixL[32 * b + k]) and t[32 + k] == f32(mixR[32 * b + k])
+                            for k in range(32)) for b, t in enumerate(taps))
+    back = max((abs(x) for x in played), default=0.0)
+    checks = {
+        "every block ran, through the per-block routine and the driver's master-mix call": ok,
+        "the MAIN tap is each block's whole master mix, as the master-mix call takes it": tap_ok,
+        "MAIN, L+R, into SAMP 6 (a regular slot): its entry, 32 n frames, int16 in the recordings' area":
+            ok and words[0] == dsp.SMP_POOL_DDR + SM.REC_OFFSET + 0x8000 * 512 and words[1] == 32 * n
+            and words[3] & 0xFF == SM.FMT_I16,
+        "the recording is the mix, one block late, within 2 LSB, and not silence":
+            bool(close) and max(abs(x) for x in got[32:32 * n]) > 0.2,
+        "TRIM's preview (FUNC + YES): the SPORT page carries the mix plus the recording at half level": pv_ok,
+        "the slot plays on a ONESHOT track once the count covers it": back > 0.05,
+    }
+    return {"ok": all(checks.values()), "checks": checks,
+            "numbers": {"halt": halt, "entry": [hex(w) for w in words], "back_peak": round(back, 4),
+                        "blocks": len(taps)}}
 
 
 def step_mainsrc(init, sound, machines, blocks) -> dict:

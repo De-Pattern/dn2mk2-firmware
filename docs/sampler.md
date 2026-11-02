@@ -153,6 +153,18 @@ How:
   machine dispatch by `0x1c244d`), k the track's slot from its routing half (`0x257898` +
   2t, the ColdFire's slot map), scaled back by 0x1c244d's gain (11.627).
   (`docs/link-research.md` has the reading.)
+  v0.37 moved MAIN to a copy pvmix takes at the master-mix call (`MAIN_TAP`, L2
+  `0x200a9000`), on the reading that `0x268438` is empty while our code runs. The runner
+  (2026-11-02, hooks round the stock calls in `sw 0x1c2712`) says otherwise: `sw 0x1c1f1e`
+  (called at `0x1c305d`, after the voices) writes the mix there each block, and it is still
+  there at our next entry (the last block's), unless it went non-finite. Both readings record
+  the mix; the tap is kept (it is the mix as the output takes it). See `docs/user-reports.md`,
+  "Testers on v0.36 / v0.37".
+- **The count** (v0.38): the DSP plays a slot below `REC_FIRST` only while it is below the
+  directory's count (word 1). Since v0.33 a recording goes into the first empty slot, and
+  LOAD TO PROJECT does too: every one past the count the DSP had at power-on was silent
+  until the next power-on, its waveform drawn. The ColdFire now sends the page's first 8
+  bytes (`K_HEAD`) after every live entry and when a recording starts (`smp_count_cover`).
 - The recordings are in the DSP's memory only: they are lost at power-off.
 
 ## v0.22: the RECORDER is a screen of its own
@@ -226,6 +238,34 @@ lands on the first, and the check fails. Only a passed check lets the loader loa
 128 MB (`ram_top`); a failed one, or no answer in four seconds, keeps it to the proven
 128 MB. Both areas are the pool's own and not yet loaded while it runs. `dn2samples.py
 hello` says which (sample link 4); `send` skips the recordings' area.
+
+### THRES and ARM (v0.38)
+
+**The DT2:** ARM "will start sampling when the incoming audio exceeds the threshold level",
+and its manual asks for THR "just above the indicated background noise of the audio
+source" (Digitakt manual, Sampling; the DT2's recorder is the same). Read literally, its
+THRES 0 starts on any noise at all, which is what blskk reported of ours on v0.37 ("it
+registers 0 threshold as an actual threshold, so whenever you arm the sampler it
+automatically catches everything"). v0.30 had already put THRES 0 at a fixed -60 dB floor;
+on his unit the input's noise was evidently above that (an input with gear plugged in, hum,
+a DC offset).
+
+**Ours:**
+- **THRES 1..120**: the DT2's plain threshold: recording starts on the first block whose
+  peak *exceeds* it (v0.38: exceeds, as the manual says; it was "reaches").
+- **THRES 0**: "the first sound above the noise". The DSP (`program.recorder`, rmode 2;
+  `REC_AUTO_*`) learns the source's noise from the blocks after ARM: the threshold is 4 x
+  (+12 dB) the quietest recent block's peak, dropping at once to a quieter block and creeping
+  up 6.5 dB a second, never under -60 dB. Hiss, hum or a DC offset at the input keeps it
+  armed; a note, a hit or a voice starts it. The first block after ARM only learns.
+- **The trade**: at THRES 0, a sound that is already playing steadily when you ARM (a held
+  pad) counts as the floor, and only something about 12 dB louder starts the recording. To
+  catch a sound already playing, press YES (RECORD NOW) or set THRES above 0.
+- The ColdFire is unchanged: it sends THRES 0 as its floor (33); the DSP takes any
+  threshold word under 64 as THRES 0.
+- Checked by the SHARC runner (`rec`): ARM at THRES 0 waits through a -50 dB noise floor
+  and starts on a tone's first block; at THRES 60 a -14 dB tone stays under it and a -4 dB
+  one starts it, on its first block. Not checked on hardware: the noise of a real input.
 
 ## How it works
 

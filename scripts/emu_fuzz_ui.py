@@ -19,6 +19,15 @@ an `alive` checkpoint. A seed fails on:
   screen: hung. (Checkpoints with no new frame are reported, not failed: nothing may have
   needed a redraw.)
 
+v0.38 (blskk: "arpeggiator, note edit and sampler make the digitone crash"): first a fixed
+scenario (`scenario_steps`: a SLICE track with SLCE at NOTE, its arp on, KEYBOARD in CHORD
+MEMORY mode with 12-note chords, PLAY, keys held while the sequencer ticks through its ISR,
+the RECORDER and the ARP page up), which must also show the arp's state changed; the seeds' actions
+gain the arp, KEYBOARD, its setup's MODE, chord memories, the ARP page and sequencer ticks
+(`seq:`); and every run fails on a heap free() of an address on the running stack
+(`stack_frees`: v0.26..v0.37's slc_keynotes handed stock an 8-note stack vector, which stock
+grew and freed).
+
 Exit 0 when every seed passes. Each seed's steps are printed, so a failure is replayed by
 running emu_waverider_menu.py with them.
 
@@ -46,6 +55,50 @@ sys.path.insert(0, str(ROOT / "src"))
 
 KIT = 0x4210C08C
 SOUND = 1163
+# v0.38 (blskk: "arpeggiator, note edit and sampler make the digitone crash"): the stock arp,
+# KEYBOARD and its chord memories (what NOTE EDIT stores) on the sample machines. The arp's
+# own settings in the sound (docs/arp-hidden-modes.md): MODE, RNG, LEN, the step mask
+ARP_MODE, ARP_RNG, ARP_LEN, ARP_MASK = 351, 353, 355, 356
+SLCE_AT = 0x6C                          # SLCE's value (record 257, slot 44): 0 is NOTE
+# the snapshot's project settings (the getter at 0x40194212, read in the emulator): +29 the
+# KEYBOARD's scale, +30 its MODE when +33 bit 0 is clear (5: the chord memories), and the
+# chord memories, one a [TRIG] key: 16 notes at +35 + 16 k, ended by -1 (0x4003c17c)
+PROJ = 0x412366CC
+KB_MODE, KB_TRACKWISE, CHORDS = 30, 33, 35
+BIG_CHORD = bytes([0, 3, 7, 10, 12, 15, 19, 22, 24, 27, 31, 34, 0xFF, 0xFF, 0xFF, 0xFF])    # 12 notes
+
+
+def chord_steps(keys) -> list[str]:
+    """KEYBOARD in CHORD MEMORY mode, the KEYS' memories holding 12 notes each (NOTE EDIT
+    allows 16): stock then gives a [TRIG] key 12 notes"""
+    return ([f"poke:{PROJ + KB_TRACKWISE:#x}:00", f"poke:{PROJ + KB_MODE:#x}:05"]
+            + [f"poke:{PROJ + CHORDS + 16 * k:#x}:{BIG_CHORD.hex()}" for k in keys])
+
+
+def arp_steps(track: int, mode: int, rng: int = 2) -> list[str]:
+    s = KIT + 52 + SOUND * track
+    return [f"poke:{s + ARP_MODE:#x}:{mode:02x}", f"poke:{s + ARP_RNG:#x}:{rng:02x}",
+            f"poke:{s + ARP_LEN:#x}:0f", f"poke:{s + ARP_MASK:#x}:ffff"]
+
+
+def scenario_steps(lay) -> list[str]:
+    """v0.38, fixed: a SLICE track with SLCE at NOTE, its arp on (UP), KEYBOARD in CHORD
+    MEMORY mode with 12-note chords; PLAY, KEYBOARD, [TRIG] keys held while the sequencer
+    ticks (the arp running), the RECORDER up over it, keys again, the arp page"""
+    from dnfw.sampler import machines as SMx
+    sl = SMx.TYPE_OF["SLICE"]
+    st = ["wait:2"] + [f"poke:{KIT + 52 + SOUND * t + 0xDE:#x}:{sl:02x}" for t in range(16)]
+    st += [f"poke:{KIT + 52 + SOUND * t + 0x6A:#x}:0100" for t in range(16)]
+    st += [f"poke:{KIT + 52 + SOUND * t + SLCE_AT:#x}:0000" for t in range(16)]
+    st += pool_steps(lay) + ["wait:6", "tap:2", "wait:8", "alive:start"]
+    st += arp_steps(0, 2) + chord_steps(range(16))
+    st += ["mem:0x405984a8:4", "tap:20", "wait:4", "seq:2", "tap:18", "wait:4", "press:25", "wait:2", "seq:6",
+           "press:27", "seq:6", "png:held", "release:25", "release:27", "seq:2", "alive:s1",
+           "press:17", "tap:50", "release:17", "wait:8", "press:30", "seq:4", "release:30", "png:rec",
+           "no", "wait:4", "tap:53", "wait:6", "press:26", "seq:4", "release:26", "mem:0x405984a8:4",
+           "tap:18", "wait:4", "tap:21", "wait:4", "alive:s2"]
+    st += ["no", "wait:4", "no", "wait:4", "tap:3", "wait:8", "alive:p1", "png:p1", "tap:2", "wait:8", "alive:p2", "png:p2"]
+    return st
 
 
 def pool_steps(lay) -> list[str]:
@@ -83,6 +136,7 @@ def seed_steps(lay, seed: int, n: int, real_isr: bool = False) -> list[str]:
     samp_rec = SMx.RECORDS[SMx.SAMP_REC][0]
     st = ["wait:2"] + [f"poke:{KIT + 52 + SOUND * t + 0xDE:#x}:{rnd.choice(types):02x}" for t in range(16)]
     st += [f"poke:{KIT + 52 + SOUND * t + 0x6A:#x}:{rnd.choice((1, 2, 3, 4)):02x}00" for t in range(16)]
+    st += [f"poke:{KIT + 52 + SOUND * t + SLCE_AT:#x}:0000" for t in range(16)]      # v0.38: SLCE at NOTE
     st += pool_steps(lay) + ["wait:6", "tap:2", "wait:8", "alive:start"]
 
     def turn():
@@ -107,6 +161,15 @@ def seed_steps(lay, seed: int, n: int, real_isr: bool = False) -> list[str]:
         # every F instructions anyway, preempting whatever the UI is doing; a wait instead)
         (5, lambda: [f"wait:{rnd.choice((1, 2, 4))}"] if real_isr else [f"frame:f{rnd.randrange(1 << 30)}"]),
         (1, lambda: ["tap:20"]),                                                  # PLAY
+        # v0.38: the arp, KEYBOARD (its setup's MODE turned), chord memories, the
+        # sequencer ticking (it does not tick here by itself), the ARP page
+        (2, lambda: arp_steps(0, rnd.choice((0, 1, 2, 3, 4)), rnd.choice((1, 2, 3)))),
+        (2, lambda: ["tap:18"]),                                                  # KEYBOARD
+        (1, lambda: ["press:17", "tap:18", "release:17", "wait:6", f"turn:4:{rnd.choice((-2, -1, 1, 2))}",
+                     "wait:3", "no"]),                                            # FUNC + KEYBOARD: MODE
+        (1, lambda: chord_steps(rnd.sample(range(16), 4))),
+        (1, lambda: ["tap:53"]),                                                  # ARP
+        (3, lambda: [f"seq:{rnd.choice((1, 2, 4))}"]),
     ]
     weights = [w for w, _ in acts]
     for i in range(n):
@@ -148,6 +211,9 @@ def judge(r: dict, lay, baseline_pages: set, real_isr: bool = False) -> tuple[bo
     # may have needed redrawing -- so the stalls are kept for the report, and the verdict is the
     # last probe's)
     facts = {"no memory fault from the mod's code": not in_ours,
+             # v0.38: a heap free() of an address on the running stack corrupts the heap
+             # (slc_keynotes' 8-note stack vector, grown by stock: blskk's crash)
+             "no stack address freed to the heap": not r.get("stack_frees"),
              "the last probe: out of everything, two page keys each change the screen": probe_ok,
              "frames composed by the end": len(al) >= 2 and al[-1]["frames"] > al[0]["frames"]}
     if real_isr:
@@ -173,6 +239,7 @@ def main(argv=None) -> int:
                    help="v0.34: the audio interrupt fires on its own every F instructions of the UI's "
                         "(emu_waverider_menu.py --isr-frame; the unit's ISR takes about 55 %% of a frame, "
                         "and runs about 40,000 instructions here, so 75,000). 0: the old way, `frame:` steps")
+    p.add_argument("--no-scenario", action="store_true", help="v0.38: the seeds only, not the fixed arp scenario")
     a = p.parse_args(argv)
     from dnfw.mods import waverider as W
     lay = W.SPEC["layout"]
@@ -201,6 +268,24 @@ def main(argv=None) -> int:
         return 1
     baseline_pages = {f.get("page") for f in base.get("faults", [])}
     report, bad = {}, []
+    # v0.38: the fixed scenario first (the arp, KEYBOARD's chord memories, the RECORDER, on a
+    # SLICE track at NOTE); it must also show the arp's state changed (its step counter)
+    if not a.no_scenario:
+        steps = scenario_steps(lay)
+        r, why = run("arpnote", steps)
+        if r is None:
+            ok, info = False, {"crashed": why}
+        else:
+            ok, info = judge(r, lay, baseline_pages, bool(a.isr_frame))
+            mem = r.get("memory", {})
+            ran = [v for k, v in mem.items() if k.startswith("0x405984a8")]
+            info["facts"]["the arp ran (its state's step counter changed)"] = len(ran) == 2 and ran[0] != ran[1]
+            ok = all(info["facts"].values())
+        report["arpnote"] = {"ok": ok, **info}
+        print(f"arpnote: {'PASS' if ok else 'FAIL'} {'' if ok else json.dumps(info)[:600]}", flush=True)
+        if not ok:
+            bad.append("arpnote")
+            (work / "arpnote.steps.txt").write_text(",".join(steps))
     for s in seeds:
         steps = seed_steps(lay, s, a.steps, bool(a.isr_frame))
         r, why = run(f"seed{s}", steps)
@@ -215,7 +300,8 @@ def main(argv=None) -> int:
             (work / f"seed{s}.steps.txt").write_text(",".join(steps))
     if a.json:
         a.json.write_text(json.dumps(report, indent=1))
-    print(f"{len(seeds) - len(bad)}/{len(seeds)} seeds pass" + (f"; failing: {bad}" if bad else ""))
+    n = len(seeds) + (0 if a.no_scenario else 1)
+    print(f"{n - len(bad)}/{n} runs pass (the arp scenario and {len(seeds)} seeds)" + (f"; failing: {bad}" if bad else ""))
     return 0 if not bad else 1
 
 

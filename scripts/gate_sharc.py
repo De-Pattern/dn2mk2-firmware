@@ -35,7 +35,7 @@ def default_steps() -> list[str]:
 # early; ship_gate stops at the first part that fails. Each part runs in its own process, so
 # the order changes nothing a part checks.
 GROUPS = (("wipe",), ("stock", "ping", "shft", "gran"), ("garbage",), ("stress",), ("chords",), ("smp",),
-          ("mnm", "frame"), ("decode", "map", "voice", "guard"), ("link", "rec", "pvmix", "tdm"))
+          ("mnm", "frame"), ("decode", "map", "voice", "guard"), ("link", "rec", "mainrec", "pvmix", "tdm"))
 
 
 def parts() -> list[list[str]]:

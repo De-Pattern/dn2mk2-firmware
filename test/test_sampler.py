@@ -868,3 +868,55 @@ def test_the_host_tool_sends_into_the_drive_library(tmp_path):
     assert D.lib_adler(b"abc") == 0x024D0127                      # zlib's adler32
     c = (pathlib.Path(__file__).resolve().parents[1] / "csrc" / "sampler" / "lib.c").read_text()
     assert "cmd == 18" in c and "rate = lget(rq + 9)" in c and "rq[13 + c]" in c
+
+
+def _plays_on_dsp(h, slot):
+    """the DSP's model plays SAMP slot + 1 on a trig: any sound in four blocks"""
+    ONE = SM.TYPE_OF["ONESHOT"]
+    h.set(SM.SAMP_REC, slot + 1)
+    out = []
+    for b in range(4):
+        out += h.block(ONE, 60.0, b == 0)
+    return any(abs(x) > 1e-6 for x in out)
+
+
+@pytest.mark.parametrize("case", ["below", "at", "past", "rec", "magic", "fmt", "base", "frames"])
+def test_v038_slot_plays_is_the_dsps_own_rule(case):
+    """SL.slot_plays (the ColdFire gates' DSP rule) answers as the DSP's model plays: the
+    count gates every slot below REC_FIRST (the testers' silent live adds), the recorder's
+    slots need none, and an entry outside the pool is silent"""
+    h = SL.Harness(0)
+    h.defaults()
+    pool = h.L.pool
+    kick = [h.mem.get(pool + 8 + 4 * j) for j in range(4)]   # slot 0's entry: real frames
+    count = h.mem.get(pool + 4)
+    slot = {"below": 1, "at": count, "past": count + 5, "rec": SM.REC_FIRST + 1}.get(case, 2)
+    ent = list(kick)
+    if case == "fmt":
+        ent[3] = (ent[3] & ~0xFF) | 2
+    if case == "base":
+        ent[0] = pool + 0x800
+    if case == "frames":
+        ent[1] = 0
+    for j, w in enumerate(ent):
+        h.mem.put(pool + 8 + 16 * slot + 4 * j, w)
+    if case == "magic":
+        h.mem.put(pool, 0)
+    want = case in ("below", "rec")
+    assert SL.slot_plays(h.mem.get, pool, slot) is want
+    assert _plays_on_dsp(h, slot) is want
+
+
+def test_v038_a_slot_past_the_count_plays_once_the_count_covers_it():
+    """the root cause of 'new samples are silent until a restart' on the DSP's side: a slot
+    with a whole entry past the count is silent; the same slot plays once word 1 covers it
+    (which the ColdFire now sends after every live entry, csrc/sampler/link.c K_HEAD)"""
+    h = SL.Harness(0)
+    h.defaults()
+    pool = h.L.pool
+    count = h.mem.get(pool + 4)
+    for j in range(4):
+        h.mem.put(pool + 8 + 16 * count + 4 * j, h.mem.get(pool + 8 + 4 * j))
+    assert not _plays_on_dsp(h, count)
+    h.mem.put(pool + 4, count + 1)
+    assert SL.slot_plays(h.mem.get, pool, count) and _plays_on_dsp(h, count)

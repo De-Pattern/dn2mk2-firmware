@@ -117,6 +117,31 @@ def test_rates() -> list[float]:
     return [TEST_STEP] * 3 + [TEST_STEP / 2]
 
 
+def slot_plays(word, base: int, slot: int) -> bool:
+    """v0.38: does the DSP play pool slot SLOT (SAMP SLOT + 1)? WORD(addr) -> the 32-bit word
+    the DSP's memory holds at ADDR; BASE the pool's address. The rule of
+    dnfw.sampler.program.start and entry_check, as plain Python, for the ColdFire gates whose
+    DSP is only memory (scripts/emu_waverider_menu.py): the directory's magic; a slot below
+    REC_FIRST must be below the directory's count (word 1), the recorder's own slots need
+    none; the entry's frames lie in the pool (base at least DATA_OFFSET in, 1 .. POOL_BYTES/4
+    frames, int16 or float32, its end within POOL_BYTES). test_sampler holds this to the
+    DSP's model. (The testers' "new samples are silent until a restart": a live add past the
+    count the DSP last had.)"""
+    if word(base) != SM.POOL_MAGIC or not 0 <= slot < SM.POOL_SLOTS:
+        return False
+    count = SM.POOL_SLOTS if slot >= SM.REC_FIRST else word(base + 4)
+    if not slot < count or (count >= 1 << 31):
+        return False
+    e = base + 8 + 16 * slot
+    addr, frames, fmt = word(e), word(e + 4), word(e + 12) & 0xFF
+    off = addr - base
+    if off < SM.DATA_OFFSET or off >= SM.POOL_BYTES:
+        return False
+    if frames == 0 or frames >= 1 << 31 or frames > SM.POOL_BYTES // 4 or fmt > 1:
+        return False
+    return off + frames * (2 if fmt == SM.FMT_I16 else 4) <= SM.POOL_BYTES
+
+
 class Harness:
     def __init__(self, t: int = 0, samples=None, rates=None, fmts=None, slices=None):
         self.t, self.L = t, layout()

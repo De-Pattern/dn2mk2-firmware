@@ -32,7 +32,10 @@ failure:
    +Drive's pool image loads into a Python DSP over the fast link (one packet lost and
    resent), commands included; with nothing getting through, the loader stops; a
    recording comes back over TDM and is written to a Python +Drive. Every byte checked,
-   and every period the frame's routing words (0xa5a..) are stock's (v0.20).
+   and every period the frame's routing words (0xa5a..) are stock's (v0.20). v0.38 (`live`):
+   22 samples added live and 3 recordings, one after another, each into the first empty
+   slot past the power-on count; each must play by the DSP's own rule (`slot_plays`: the
+   magic, the count, the entry), its frames the image's; a recording while it records.
 6p. **per-project pools** (v0.38, `emu_waverider_menu.py`'s `link16` `pools`, scripts/emu_pools.py):
    the OS's LOAD, NEW and SAVE AS through the build's detours; each project its own slots, the
    legacy pool for old ones; power cuts after every sector; the DSP never another project's sample.
@@ -615,6 +618,8 @@ def main() -> int:
                 scen += ("slices",)             # v0.23: the slice editor's reading and saving
             if "smp_lib_state" in lay:
                 scen += ("lib",)                # v0.31: the +Drive's library, bounded to its region
+            if "smp_heads" in lay:
+                scen += ("live",)               # v0.38: 22 live adds and 3 recordings, each must play
             # v0.31: "dead" (every packet lost: the RAM check's four seconds, then seven tries
             # three seconds apart before the loader stops) takes about an hour in the emulator
             # on its own, so it is a step of its own, cached on its own: the gate's run fits
@@ -641,12 +646,14 @@ def main() -> int:
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
                 return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
                               "passes (high, lowram); v0.31: the kit's samples first; the +Drive's library written, read back, "
-                              "a hole reused, every write inside its region, a small device refused (lib)"
+                              "a hole reused, every write inside its region, a small device refused (lib); v0.38: 22 samples "
+                              "added live and 3 recordings, one after another, each plays on the DSP by its own rule "
+                              "(the count covers it), a recording while it records too (live)"
                               if good else out[-800:])
             later("link16", "sample link (ColdFire)", "sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body)
 
@@ -1467,6 +1474,10 @@ def main() -> int:
         # the interrupt no longer delivered, or audio frames overrunning fail the seed. It
         # needs the section the snapshot was booted with beside it (its own build's edits
         # are put back to stock first)
+        # v0.38 (blskk's crash): first a fixed arp scenario (a SLICE track at NOTE, the arp on,
+        # KEYBOARD's CHORD MEMORY with 12-note chords, keys held while the sequencer ticks, the
+        # RECORDER and ARP pages up); the seeds also turn the arp, KEYBOARD and the sequencer; every
+        # run fails on a free() of a stack address (emu_waverider_menu.py's stack_frees)
         if "smp_lst_open" in lay:
             snap_sec = pathlib.Path(str(snap) + ".section_3_MAIN_OS.bin")
             fz_cmd = [sys.executable, "scripts/emu_fuzz_ui.py", bdir, "3,7", "--steps", "24",

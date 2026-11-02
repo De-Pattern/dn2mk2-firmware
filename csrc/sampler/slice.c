@@ -36,6 +36,7 @@ typedef unsigned char u8;
  * (its values object at sound + 6: SAMP, slot 43, at sound + 0x6a, seen in the emulator) */
 #define SOUND_VALUE(snd, id) ((int)(*(volatile u16 *)((snd) + 20u + 2u * (u32)RECORD(id)[1]) >> 8) - (RECORD(id)[2] >> 8))
 #define KEYNOTES ((u32 (*)(u32, u32 *, u32))0x40034460u)   /* KEYBOARD: a trig key's notes */
+#define VEC_FREE ((void (*)(u32))0x4001A0D2u)  /* operator delete as std::vector<int> frees (null: nothing) */
 #define SLMAX 64
 
 #define IT_KEY 0
@@ -827,12 +828,20 @@ u32 slc_keynotes(u32 kbd, u32 *vec, u32 k)
              * octave up or down (KEYBOARD + UP/DOWN) moves them on by as many slices as the
              * keys play. v0.25 gave TRIG k slice k, so the unlit keys' slices could not be
              * played (and the lit ones' came out of order) */
-            u32 buf[8], tv[3];
+            /* v0.38 (blskk: "arpeggiator, note edit and sampler make the digitone crash"):
+             * each key's notes go into an EMPTY vector, which stock grows on the heap as a
+             * std::vector grows, and we free (its operator delete). v0.26..v0.37 handed stock
+             * an 8-note vector on our stack; a key with more notes (a chord keyboard mode,
+             * a chord memory, a scale's reserve()) made stock reallocate it and FREE OUR
+             * STACK ADDRESS to the heap (0x4018b772 / 0x4018b7ec -> 0x40120270): the heap
+             * corrupt, a crash later anywhere (docs/user-reports.md) */
+            u32 tv[3];
             int note[16], mine = -1;
             for (u32 j = 0; j < 16u; j++) {
-                tv[0] = tv[1] = (u32)buf;
-                tv[2] = (u32)(buf + 8);
-                note[j] = KEYNOTES(kbd, tv, j) && tv[1] > tv[0] ? (int)buf[0] : -1;
+                tv[0] = tv[1] = tv[2] = 0;
+                u32 got = KEYNOTES(kbd, tv, j);
+                note[j] = got && tv[0] && tv[1] > tv[0] ? (int)*(u32 *)tv[0] : -1;
+                VEC_FREE(tv[0]);
             }
             mine = note[k];
             if (mine < 0)
