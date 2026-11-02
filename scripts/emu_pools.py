@@ -162,7 +162,8 @@ def run(cx):
         """every entry the DSP holds: the target's, over its own whole frames"""
         t = watch["target"]
         prev = None
-        if t == "follow":                       # (outside a switch: the pool as it is now)
+        if t == "follow":
+            watch["phase"] = "follow"                       # (outside a switch: the pool as it is now)
             t = target_from(image_dir())
             # an edit inside the same project (a slot emptied) reaches the +Drive's directory
             # one UI pass before the DSP's: the entry it had a moment ago, with its own bytes,
@@ -192,7 +193,8 @@ def run(cx):
                 data = by_name.get(want_n[k]) or known.get(e[0])
                 ok = data is not None and e[1] * 2 <= len(data) and dsp_bytes(e[0], 2 * e[1]) == data[:2 * e[1]]
             if not ok and len(watch["bad"]) < 8:
-                watch["bad"].append((k, [hex(x) for x in e], want_n.get(k)))
+                watch["bad"].append((k, [hex(x) for x in e], want_n.get(k), watch.get("where"), watch.get("phase"),
+                                     i32("smp_pl_state"), i32("smp_lstate"), long("smp_pl_switches")))
 
     def step(n=1):
         for _ in range(n):
@@ -257,6 +259,7 @@ def run(cx):
                 break
         # until the switch is applied: nothing at all may play
         watch["target"] = ([(0, 0, 0, 0)] * SM.POOL_SLOTS, {})
+        watch["phase"] = f"switch {fn.__name__}({slot}): silent"
         watch["grace"] = 0
         for i in range(6000):
             if long("smp_pl_switches") != sw0 or (i32("smp_pl_state") == 0 and i > 10):
@@ -264,8 +267,10 @@ def run(cx):
             step()
         d = image_dir()
         watch["target"] = target_from(want_dir if want_dir is not None else d)
+        watch["phase"] = f"switch {fn.__name__}({slot}): the new pool"
         n = settle()
         watch["target"] = "follow"
+        watch["cur"], watch["prev"] = target_from(image_dir()), None
         d = image_dir()
         changed = sum(1 for k, v in pool.items() if 4 * k >= SM.DATA_OFFSET and fs0.get(k) != v)
         return {"active": act, "blank_periods": blank_at, "settle": n, "owner": i32("smp_pl_owner"),
@@ -325,11 +330,14 @@ def run(cx):
             if long("smp_booted") == 2 and i32("smp_pl_state") == 0 and i32("smp_lstate") in (0, 4) and i > 20:
                 break
         watch["target"] = target_from(image_dir())
+        watch["phase"] = f"power-on {active}"
         watch["grace"] = 0
         settle()
         watch["target"] = "follow"
+        watch["cur"], watch["prev"] = target_from(image_dir()), None
         return i32("smp_pl_boot_case")
 
+    watch["where"] = "1"
     # 1. migration -------------------------------------------------------------------------
     m.write(ACTIVE, struct.pack(">b", 4))
     wlog.clear()
@@ -348,6 +356,7 @@ def run(cx):
 
     if stop < 2:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 2}
+    watch["where"] = "2"
     # 2. LOAD 7 (no list): the legacy pool, nothing but entries sent ---------------------------
     r = switch(os_load, 7)
     notes["2"] = r
@@ -358,6 +367,7 @@ def run(cx):
 
     if stop < 3:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 3}
+    watch["where"] = "3"
     # 3. a change in 7: LOAD TO PROJECT of LIBX -------------------------------------------------
     call("smp_lib_load", 0)
     for _ in range(3000):
@@ -376,6 +386,7 @@ def run(cx):
 
     if stop < 4:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 4}
+    watch["where"] = "4"
     # 4. LOAD 9 (no list), then changes in 9 ------------------------------------------------------
     r = switch(os_load, 9)
     notes["4"] = r
@@ -403,6 +414,7 @@ def run(cx):
 
     if stop < 5:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 5}
+    watch["where"] = "5"
     # 5. back and forth ---------------------------------------------------------------------------
     rs = [switch(os_load, 7), switch(os_load, 9), switch(os_load, 7)]
     notes["5"] = rs
@@ -413,6 +425,7 @@ def run(cx):
 
     if stop < 6:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 6}
+    watch["where"] = "6"
     # 6. NEW, NEW in a slot, a legacy project, the NEW one again ------------------------------------
     r_new = switch(os_new, -1)
     r_new12 = switch(os_new, 12)
@@ -426,6 +439,7 @@ def run(cx):
         and r5["pool"] == {0: "KICK", 1: "SNARE", 2: "HAT"} and r5["src"] == 128
         and r12["pool"] == {} and r12["src"] == 12 and dsp_pool() == {})
 
+    watch["where"] = "6b"
     # 6b. SAVE AS (the OS's 0x400402D8, its +Drive writes stubbed; no detour: the poll sees the
     # slot byte move): 9's pool becomes 42's too, and stays 9's
     switch(os_load, 9)
@@ -448,6 +462,7 @@ def run(cx):
 
     if stop < 7:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 7}
+    watch["where"] = "7"
     # 7. a power cycle, with 7 active; its kit's sample first -----------------------------------
     switch(os_load, 7)
     kit = struct.unpack(">I", m.read(0x800052A0, 4))[0]
@@ -467,6 +482,7 @@ def run(cx):
 
     if stop < 8:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 8}
+    watch["where"] = "8"
     # 8. a corrupted list: the previous copy; both: the legacy pool ---------------------------------
     nm = scratch + 0x200
     m.write(nm, b"HATTWO\0\0")
@@ -488,6 +504,7 @@ def run(cx):
 
     if stop < 9:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 9}
+    watch["where"] = "9"
     # 9. frames changed behind our back: silent, never wrong ----------------------------------------
     sec = STORE_SECTOR + 1 + (x_ent[0] - base) // 512 + 1
     disk[sec] = bytes(b ^ 0x55 for b in disk.get(sec, bytes(512)))
@@ -502,6 +519,7 @@ def run(cx):
 
     if stop < 10:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 10}
+    watch["where"] = "10"
     # 10. the image changed behind our back (an older build added a sample) ------------------------
     d = bytearray(image_dir())
     struct.pack_into("<4I", d, 8 + 16 * 5, *entries(d)[0])  # slot 6 = KICK's frames, as v0.37 might
@@ -519,6 +537,7 @@ def run(cx):
 
     if stop < 11:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 11}
+    watch["where"] = "11"
     # 11. power cuts: after each sector of a pool change, and of a switch ---------------------------
     def snapshot():
         return dict(disk)
@@ -613,6 +632,7 @@ def run(cx):
 
     if stop < 12:
         return {"facts": facts, "notes": notes, "ok": False, "stopped": 12}
+    watch["where"] = "12"
     # 12. where everything was written, and the image as v0.37 reads it ------------------------------
     written = sorted(disk)
     outside = [hex(s) for s in written if not (STORE_SECTOR <= s < STORE_SECTOR + 1 + SM.POOL_BYTES // 512
