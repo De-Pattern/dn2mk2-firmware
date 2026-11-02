@@ -2,7 +2,8 @@
 
     DT2_SECTIONS=/path/to/stock-1.11-sections \\
     python scripts/ship_gate.py Digitone_II_OS1.11.syx build.syx \\
-        [--venv ../digikit/.venv/bin/python] [--digikit-sharc ../digikit-wt-sharcemu]
+        [--venv ../digikit/.venv/bin/python] [--digikit-sharc ../digikit-wt-sharcemu] \\
+        [--only STEP[,STEP...]] [--list]
 
 **The owner's rule (2026-10-11): every check, on every build, every time. No
 exceptions, no "it's only a small change".** This script is that rule as code, so it
@@ -36,7 +37,8 @@ failure:
    v0.34 (docs/timing-model.md): with the audio interrupt firing on its own at its real
    cadence through the real vectors, preempting the mod's UI code; a CPU exception, the
    interrupt no longer delivered, or audio frames overrunning their budget fail a seed.
-7. **unit tests** (`pytest -m "not slow"` on the safety, mod, PERC and filter tests).
+7. **unit tests** (`pytest -m "not slow"` on the safety, mod, PERC and filter tests; v0.38: on
+   both cores, pytest-xdist `-n 2 --dist load`, the same tests and the same pass line).
 
 The SHARC runner's parts (v0.34): decode/map/voice/guard, stress (K = 3 and the memory-cost
 clock), garbage, **wipe** (the output guard really resets a poisoned voice and records it),
@@ -55,6 +57,24 @@ steps, and a long step's pass is reused only when nothing it read has changed**
 the native libraries and programs they ran, and this script's own inputs, each hashed
 (sha256) when it passed. One differing byte, or a file gone, and the step runs again. The
 record says which steps were reused and from which pass.
+
+**v0.38 (owner, 2026-11-01): faster, with nothing less checked.** The numbers above name the
+steps; they run in this order (`--list`): preflight, ColdFire code current, the build is this
+tree's, DSP identity, DSP hardware rules, the C symbols in the layout, the ColdFire instruction
+set, then the unit tests (both cores), then the SHARC runner starts beside the ColdFire emulator
+steps, which run quickest first and the hour-long dead link last. The SHARC runner's parts run
+quickest first too, and a part that fails stops the gate when the ColdFire step under way ends,
+not an hour later. Every check is the same one, on the same inputs: the order is all that moved.
+
+`--only STEP[,STEP...]` runs just those steps on the build (a SHARC runner step's name, e.g.
+`chords`, names its part). Each step's pass goes into the same reuse cache, traced exactly as in
+a full run (the setup, which makes every step's commands, runs whole either way, so a step's
+commands and this script's own inputs are the same). It never prints the clearance and never
+writes the build's `.gate.json`: only a full run clears a build.
+
+The workflow: when a change touches a step's inputs, run that step alone with `--only` first,
+until it passes. Then run the full gate, and make no edit to a test or a script while it runs:
+the full run reuses the standalone passes only while nothing they read has changed.
 """
 
 from __future__ import annotations
@@ -121,6 +141,101 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_sampler_relatch.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
+# v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
+# takes them. The quick ones, and those new code most often fails, first, so a failure shows
+# in minutes; the SHARC runner (gate_sharc.parts(), names "sharc:...") starts after the unit
+# tests, on its own core beside the ColdFire emulator steps, and a part that fails stops the
+# gate at the next step's end. What each step checks is unchanged, and the steps that are
+# never reused (preflight to the ColdFire instruction set) stay so.
+FIRST = (("preflight", "preflight (never reused)"),
+         ("code-fresh", "ColdFire code current (never reused)"),
+         ("rebuild", "the build is this tree's (never reused)"),
+         ("dsp-identity", "DSP identity (never reused)"),
+         ("hwrules", "DSP hardware rules (never reused)"),
+         ("symbols", "every C-keyed check has its symbol in the layout (never reused)"),
+         ("coldfire", "ColdFire instruction set, each code chunk and MAIN OS (never reused)"),
+         ("unit", "unit tests, both cores (pytest-xdist)"))
+# the ColdFire emulator steps: (id, the gate's name), quickest first (v0.37's timings), the
+# hour-long dead link last
+EMU = (("meter", "DSP load meter (ColdFire)"),
+       ("keepsamp", "SAMP kept across sample machines (ColdFire)"),
+       ("functurn", "FUNC + turn (ColdFire)"),
+       ("aniz", "start-up animation, every frame"),
+       ("recorder", "recorder screen (ColdFire)"),
+       ("mnmpages", "Monomachine pages and detents (ColdFire)"),
+       ("question", "stock questions and held keys (ColdFire)"),
+       ("mnmdefaults", "Monomachine start values (ColdFire)"),
+       ("alloc", "GRID allocate slice locks (ColdFire)"),
+       ("multisel", "multi-select delete (ColdFire)"),
+       ("hooks", "overlays let go (ColdFire)"),
+       ("recflow", "recorder flow (ColdFire)"),
+       ("slice", "SLICE menus and SLICES keys (ColdFire)"),
+       ("samplist", "sample list, browser, playhead (ColdFire)"),
+       ("colsw", "MACHINE SEL columns, SYN held (ColdFire)"),
+       ("drive", "+DRIVE browser (ColdFire)"),
+       ("link16", "sample link (ColdFire)"),
+       ("engine", "engine + LOAD/SAVE"),
+       ("boot", "boot from reset"),
+       ("fuzz", "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"),
+       ("link16-dead", "sample link, dead link (ColdFire)"))
+EMU_ID = {n: i for i, n in EMU}
+
+
+def sharc_ids() -> dict[str, list[str]]:
+    """{'sharc:a+b': [a, b]} for each part of the SHARC runner (gate_sharc.parts())"""
+    import gate_sharc                           # noqa: PLC0415
+    return {"sharc:" + "+".join(p): p for p in gate_sharc.parts()}
+
+
+def all_ids() -> list[tuple[str, str]]:
+    return ([*FIRST] + [(i, n) for i, n in EMU]
+            + [(i, "SHARC runner: " + ",".join(p)) for i, p in sharc_ids().items()])
+
+
+def resolve_only(spec: str) -> set[str]:
+    """--only's list -> step ids. A SHARC runner step's own name (e.g. chords) names its part;
+    'sharc' every part. Unknown names are an error."""
+    ids = {i for i, _ in all_ids()}
+    parts = sharc_ids()
+    out = set()
+    for x in (s.strip() for s in spec.split(",")):
+        if not x:
+            continue
+        if x in ids:
+            out.add(x)
+        elif x == "sharc":
+            out |= set(parts)
+        elif any(x in p for p in parts.values()):
+            out |= {i for i, p in parts.items() if x in p}
+        elif "sharc:" + x in parts:
+            out.add("sharc:" + x)
+        else:
+            raise SystemExit(f"--only: no step {x!r} (python scripts/ship_gate.py --list)")
+    return out
+
+
+def _frozen(fn):
+    """FN with its free variables bound to their values now. A deferred ColdFire step's body
+    runs after the rest of the setup, which reuses names (js, g, kit, ...); frozen, it reads
+    exactly what it read when it ran in place (v0.37 and before)."""
+    if not getattr(fn, "__closure__", None):
+        return fn
+    import types                                # noqa: PLC0415
+    cells = []
+    for c in fn.__closure__:
+        try:
+            cells.append(types.CellType(c.cell_contents))
+        except ValueError:                      # not bound yet: left as it is
+            cells.append(c)
+    new = types.FunctionType(fn.__code__, fn.__globals__, fn.__name__, fn.__defaults__, tuple(cells))
+    new.__kwdefaults__ = fn.__kwdefaults__
+    return new
+
+
+def repo_modules() -> set[str]:
+    return {str(pathlib.Path(m.__file__).resolve()) for m in list(sys.modules.values())
+            if getattr(m, "__file__", None) and pathlib.Path(m.__file__).resolve().is_relative_to(ROOT)}
+
 
 class Stop(Exception):
     pass
@@ -176,13 +291,31 @@ def own_inputs(own=None) -> dict[str, str]:
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("stock", type=pathlib.Path, help="Elektron's Digitone_II_OS1.11.syx")
-    p.add_argument("build", type=pathlib.Path, help="the exact .syx that will be flashed")
+    p.add_argument("stock", type=pathlib.Path, nargs="?", help="Elektron's Digitone_II_OS1.11.syx")
+    p.add_argument("build", type=pathlib.Path, nargs="?", help="the exact .syx that will be flashed")
     p.add_argument("--venv", default=str(ROOT.parent / "digikit/.venv/bin/python"),
                    help="python with digikit's emulator deps (unicorn)")
     p.add_argument("--digikit-sharc", default=os.environ.get(
         "DNFW_DIGIKIT_SHARC", str(ROOT.parent / "digikit-wt-sharcemu")))
+    p.add_argument("--only", metavar="STEP[,STEP...]",
+                   help="run just these steps (--list), each recorded in the reuse cache as a full run "
+                        "would; never a gate pass, never the build's .gate.json")
+    p.add_argument("--list", action="store_true", help="print the steps' names, in the full run's order")
     a = p.parse_args()
+
+    if a.list:
+        for i, n in all_ids():
+            print(f"  {i:16s} {n}")
+        print("\n  (a SHARC runner step's own name, e.g. chords, names its part; 'sharc' names them all)")
+        return 0
+    if a.stock is None or a.build is None:
+        p.error("the stock .syx and the build are required")
+    only = resolve_only(a.only) if a.only is not None else None
+    if only is not None and not only:
+        p.error("--only names no step")
+
+    def wanted(sid):
+        return only is None or sid in only
 
     if "DT2_SECTIONS" not in os.environ:
         print("DT2_SECTIONS must point at stock 1.11's extracted sections.\n\nDO NOT FLASH.")
@@ -194,7 +327,9 @@ def main() -> int:
                                          if (ROOT / "out").is_dir() else None))
     logs = work / "logs"
     logs.mkdir()
-    print(f"ship gate: {a.build.name}\n  sha256 {sha}\n  work {work}\n", flush=True)
+    print(f"ship gate: {a.build.name}\n  sha256 {sha}\n  work {work}\n"
+          + (f"  ONLY: {', '.join(sorted(only))} (a partial run: never a gate pass)\n" if only is not None else ""),
+          flush=True)
     results: dict[str, str] = {}
 
     def gate(name, ok, detail):
@@ -204,6 +339,7 @@ def main() -> int:
             raise Stop(name)
 
     reused: dict[str, str] = {}
+    setup_mods: set[str] = set()                # the repository's modules once the setup is done
 
     def cached(name, cmds, body, own=None):
         """A long step: reused if a pass with these commands read nothing that has changed
@@ -220,33 +356,38 @@ def main() -> int:
         tdir = work / "traces" / "".join(c if c.isalnum() else "_" for c in name)
         ok, detail = body(tdir)
         if ok:
+            # v0.38: this script's own inputs are the same in a full run and an --only run: the
+            # whole setup runs in both, and nothing after it may import a module of ours
+            late = repo_modules() - setup_mods
+            if own is None and late:
+                return False, (f"ship_gate imported {sorted(late)} after its setup: its own inputs would "
+                               "differ between a full and an --only run; import it in the setup")
             ins = gate_cache.inputs(tdir, work, logs)
             ins.update(own_inputs(own))
             gate_cache.store(ROOT, name, key, ins, detail, sha)
         return ok, detail
 
-    try:
-        # 1. preflight
-        stock = load(read_image(a.stock))
-        ok, text = safety.report(safety.preflight(stock, build_bytes))
-        (logs / "preflight.log").write_text(text)
-        gate("preflight", ok, "bootstrap/updater/meta/Outbox untouched, signature, DSP size"
-             if ok else text[-600:])
-        # v0.33: the ColdFire code the build carries is what csrc/ compiles to now (v0.33's
-        # first builds carried a waverider_code.json older than three C fixes, and the gate's
-        # emulator steps tested the old code; scripts/gen_waverider_code.py --check)
-        rc_c, out_c = run("code fresh", [sys.executable, "scripts/gen_waverider_code.py", "--check"], logs,
-                          env={"PYTHONPATH": str(ROOT / "src")})
-        gate("ColdFire code current", rc_c == 0, out_c.strip()[-400:])
-        # and the file under test is what this tree builds, byte for byte (so every step below
-        # tests these sources, not an older build of them)
-        rb = work / "rebuilt.syx"
-        rc_b, out_b = run("rebuild", [sys.executable, "-c", "from dnfw.cli.main import main; main()", "mods", "apply",
-                                      a.stock, "--mod", "waverider", "-o", rb], logs, env={"PYTHONPATH": str(ROOT / "src")})
-        same_b = rc_b == 0 and rb.exists() and read_image(rb) == build_bytes
-        gate("the build is this tree's", same_b, "dnfw mods apply here gives the same file, byte for byte"
-             if same_b else ("it differs: rebuild it from this tree" if rc_b == 0 else out_b[-400:]))
+    plan: dict[str, tuple] = {}                 # the ColdFire emulator steps, run in EMU's order
 
+    def later(sid, gname, cname, cmds, body):
+        assert EMU_ID.get(gname) == sid, (sid, gname)
+        plan[sid] = (gname, cname, cmds, _frozen(body))
+
+    sharc = None
+    sharc_box: list = []                        # (ok, detail) of each SHARC part as it ends
+    sharc_want: list = []
+
+    def sharc_failed():
+        """a SHARC part has failed: stop now, not after the ColdFire steps"""
+        bad = [d for ok, d in list(sharc_box) if not ok]
+        if bad:
+            gate("SHARC runner", False, bad[0])
+
+    try:
+        # setup: everything below runs in a full run and in an --only run alike (the build
+        # read, its sections written, every step's commands made), so a step's commands and
+        # this script's own inputs are the same in both
+        stock = load(read_image(a.stock))
         built = load(build_bytes)
         sec3 = built.container.find(3).unpack()
         stock3 = stock.container.find(3).unpack()
@@ -256,53 +397,91 @@ def main() -> int:
         bdir.mkdir()
         (bdir / "section_3_MAIN_OS.bin").write_bytes(sec3)
         (work / "stock_section_3_MAIN_OS.bin").write_bytes(stock3)
+        dsp_changed = sec7 != stock7
+        want7 = dsp.section7(stock7) if dsp_changed else None
+        import gate_sharc                       # noqa: PLC0415
+        from dnfw.mods import waverider as W    # noqa: PLC0415
+        lay = W.SPEC.get("layout", {})
+
+        # 1. preflight
+        if wanted("preflight"):
+            ok, text = safety.report(safety.preflight(stock, build_bytes))
+            (logs / "preflight.log").write_text(text)
+            gate("preflight", ok, "bootstrap/updater/meta/Outbox untouched, signature, DSP size"
+                 if ok else text[-600:])
+        # v0.33: the ColdFire code the build carries is what csrc/ compiles to now (v0.33's
+        # first builds carried a waverider_code.json older than three C fixes, and the gate's
+        # emulator steps tested the old code; scripts/gen_waverider_code.py --check)
+        if wanted("code-fresh"):
+            rc_c, out_c = run("code fresh", [sys.executable, "scripts/gen_waverider_code.py", "--check"], logs,
+                              env={"PYTHONPATH": str(ROOT / "src")})
+            gate("ColdFire code current", rc_c == 0, out_c.strip()[-400:])
+        # and the file under test is what this tree builds, byte for byte (so every step below
+        # tests these sources, not an older build of them)
+        if wanted("rebuild"):
+            rb = work / "rebuilt.syx"
+            rc_b, out_b = run("rebuild", [sys.executable, "-c", "from dnfw.cli.main import main; main()", "mods", "apply",
+                                          a.stock, "--mod", "waverider", "-o", rb], logs, env={"PYTHONPATH": str(ROOT / "src")})
+            same_b = rc_b == 0 and rb.exists() and read_image(rb) == build_bytes
+            gate("the build is this tree's", same_b, "dnfw mods apply here gives the same file, byte for byte"
+                 if same_b else ("it differs: rebuild it from this tree" if rc_b == 0 else out_b[-400:]))
 
         # 2 + 3. the DSP program
-        dsp_changed = sec7 != stock7
         if dsp_changed:
-            same = sec7 == dsp.section7(stock7)
-            gate("DSP identity", same, "section 7 is exactly dsp.section7(stock), the image "
-                 "the SHARC gate runs" if same else "section 7 is not what the SHARC gate "
-                 "tests; its result would not apply to this file")
+            if wanted("dsp-identity"):
+                same = sec7 == want7
+                gate("DSP identity", same, "section 7 is exactly dsp.section7(stock), the image "
+                     "the SHARC gate runs" if same else "section 7 is not what the SHARC gate "
+                     "tests; its result would not apply to this file")
             # v0.32: the hardware rules no emulator sees (complex-ping's hwrules.py, from a
             # checkout of his digitone-2-modding-skill beside this repository): our code and
             # round each patch, against the stock image's own
-            skill = ROOT.parent / "digitone-2-modding-skill"
-            rc, out = run("hwrules", [sys.executable, "scripts/gate_hwrules.py", a.stock, a.build, skill], logs,
-                          env={"PYTHONPATH": "src"})
-            gate("DSP hardware rules", rc == 0 and "PASS:" in out, out.strip().splitlines()[-1] if out.strip() else
-                 "gate_hwrules.py printed nothing")
-            # v0.25: beside the ColdFire steps (its own core); its verdict is taken before
-            # the unit tests
+            if wanted("hwrules"):
+                skill = ROOT.parent / "digitone-2-modding-skill"
+                rc, out = run("hwrules", [sys.executable, "scripts/gate_hwrules.py", a.stock, a.build, skill], logs,
+                              env={"PYTHONPATH": "src"})
+                gate("DSP hardware rules", rc == 0 and "PASS:" in out, out.strip().splitlines()[-1] if out.strip() else
+                     "gate_hwrules.py printed nothing")
+            # v0.25: beside the ColdFire steps (its own core); v0.38: started after the unit
+            # tests, its verdict looked at after each ColdFire step and taken at the end
             # v0.28: the step is scripts/gate_sharc.py's; its reuse record holds what the
             # runner read and that file, not this script or the ColdFire's artefacts
-            import gate_sharc                   # noqa: PLC0415
+            sharc_want[:] = [p for sid, p in sharc_ids().items() if wanted(sid)]
 
             def sharc_thread():
                 # v0.28: in parts (gate_sharc.parts: together the runner's default steps), each
                 # cached on its own; the verdict is every part's
                 try:
-                    verdicts = []
-                    for k, steps in enumerate(gate_sharc.parts()):
-                        cmd = gate_sharc.command(a.stock, a.digikit_sharc, steps, f"part{k}")
+                    for steps in sharc_want:
+                        cmd = gate_sharc.command(a.stock, a.digikit_sharc, steps, "part_" + "_".join(steps))
 
-                        def body(tdir, cmd=cmd, k=k):
-                            rc, out = run(f"sharc_m5_part{k}", cmd, logs, trace=tdir)
+                        def body(tdir, cmd=cmd, steps=steps):
+                            rc, out = run(f"sharc_m5_{'_'.join(steps)}", cmd, logs, trace=tdir)
                             return gate_sharc.verdict(rc, out)
                         ok, detail = cached(f"SHARC runner: {','.join(steps)}", [cmd], body, own=gate_sharc.OWN)
-                        verdicts.append((ok, f"{','.join(steps)}: {detail}"))
+                        sharc_box.append((ok, f"{','.join(steps)}: {detail}"))
+                        print(f"  (SHARC runner, {','.join(steps)}: {'PASS' if ok else 'FAIL'})", flush=True)
                         if not ok:
                             break
-                    good = all(v for v, _ in verdicts) and len(verdicts) == len(gate_sharc.parts())
-                    sharc_box.append((good, "; ".join(d for _, d in verdicts)))
                 except Exception as e:          # noqa: BLE001
                     sharc_box.append((False, f"the runner did not run: {e}"))
-            sharc_box: list = []
-            sharc = threading.Thread(target=sharc_thread, daemon=True)
-            sharc.start()
         else:
-            sharc = None
             results["DSP identity"] = results["SHARC runner"] = "n/a: section 7 is stock"
+            if only is not None and any(s.startswith("sharc:") or s in ("dsp-identity", "hwrules") for s in only):
+                print("  (section 7 is stock: the DSP steps do not apply)", flush=True)
+
+        # v0.30: a check keyed on a C symbol must not be skipped because the symbol never
+        # reached the layout (6k was, once: smp_machine_commit was linked but not listed)
+        # (v0.38: before the emulator steps; it reads only the C and the layout)
+        if wanted("symbols"):
+            csrc_text = "".join(f.read_text() for f in (ROOT / "csrc").rglob("*.c"))
+            for sym, what in (("smp_question_up", "stock questions and held keys (ColdFire)"),
+                              ("smp_machine_commit", "SAMP kept across sample machines (ColdFire)"),
+                              ("smp_knob_at", "FUNC + turn (ColdFire)")):
+                if re.search(rf"\b{sym}\b", csrc_text) and sym not in lay:
+                    gate(what, False, f"{sym} is in the C but not in the layout: the check cannot run")
+            results["symbols"] = "PASS: every C-keyed check has its symbol in the layout"
+            print("[PASS] symbols: every C-keyed check has its symbol in the layout\n", flush=True)
 
         # 4. ColdFire instruction set
         # (va, offset of its image in sec3, length) for every CODE chunk, from the
@@ -319,7 +498,7 @@ def main() -> int:
                 chunk = area.CodeChunk.unpack(blob[off:off + n])
                 code_chunks.append((chunk.load, platform.STOCK_LENGTH + off + 16,
                                     len(chunk.image), chunk.image))
-        for va, at, n, image in code_chunks:
+        for va, at, n, image in (code_chunks if wanted("coldfire") else []):
             if va in DATA_ONLY:
                 results[f"ColdFire: chunk {va:#x}"] = f"n/a: {DATA_ONLY[va]}"
                 print(f"[n/a ] ColdFire: chunk {va:#x}: {DATA_ONLY[va]}\n", flush=True)
@@ -337,20 +516,21 @@ def main() -> int:
                      if rc == 0 else out[-800:])
         # each executed range, at its place in MAIN OS's appended area (where the chunk's
         # image sits before the loader copies it): file offset + (start - load)
-        executed = [(at + lo - va, hi - lo) for va, at, n, image in code_chunks if va not in DATA_ONLY
-                    for lo, hi in code_ranges().get(va, [(va, va + n)])]
-        rc, out = run("coldfire_main", [sys.executable, "scripts/check_coldfire.py",
-                                        bdir / "section_3_MAIN_OS.bin", "--base", hex(MAIN_BASE),
-                                        "--against", work / "stock_section_3_MAIN_OS.bin"], logs)
-        if rc == 2:
-            gate("ColdFire: MAIN OS", False, "no objdump: unchecked is not passing")
-        hits = [int(h, 16) for h in HIT.findall(out)] if rc else []
-        stock_end = MAIN_BASE + len(stock3)
-        bad = [h for h in hits if h < stock_end or any(
-            MAIN_BASE + at <= h < MAIN_BASE + at + n for at, n in executed)]
-        gate("ColdFire: MAIN OS", not bad,
-             f"{len(hits)} hit(s), all in appended data that never executes" if not bad
-             else f"{len(bad)} in executed code, first at {bad[0]:#x}")
+        if wanted("coldfire"):
+            executed = [(at + lo - va, hi - lo) for va, at, n, image in code_chunks if va not in DATA_ONLY
+                        for lo, hi in code_ranges().get(va, [(va, va + n)])]
+            rc, out = run("coldfire_main", [sys.executable, "scripts/check_coldfire.py",
+                                            bdir / "section_3_MAIN_OS.bin", "--base", hex(MAIN_BASE),
+                                            "--against", work / "stock_section_3_MAIN_OS.bin"], logs)
+            if rc == 2:
+                gate("ColdFire: MAIN OS", False, "no objdump: unchecked is not passing")
+            hits = [int(h, 16) for h in HIT.findall(out)] if rc else []
+            stock_end = MAIN_BASE + len(stock3)
+            bad = [h for h in hits if h < stock_end or any(
+                MAIN_BASE + at <= h < MAIN_BASE + at + n for at, n in executed)]
+            gate("ColdFire: MAIN OS", not bad,
+                 f"{len(hits)} hit(s), all in appended data that never executes" if not bad
+                 else f"{len(bad)} in executed code, first at {bad[0]:#x}")
 
         # 5. boot from reset
         boot_cmd = [a.venv, "-u", "scripts/emu_boot_check.py", bdir / "section_3_MAIN_OS.bin"]
@@ -368,7 +548,7 @@ def main() -> int:
                 good = good and "not the artist's" in out and ", 0 not the artist's" in out
             return good, ("booted and drew its UI, no fault" + ("; the start-up animation's first frame, "
                           "the artist's" if anim else "") if good else out[-800:])
-        gate("boot from reset", *cached("boot from reset", [boot_cmd], boot_body))
+        later("boot", "boot from reset", "boot from reset", [boot_cmd], boot_body)
 
         # 5b. v0.37: the start-up animation, every frame. From reset the intro stops after its
         # first frame under the emulator (stock too), so from the snapshot taken just before
@@ -382,7 +562,7 @@ def main() -> int:
                 good = rc == 0 and "in order: PASS" in out and "59 of 59 distinct, 0 not the artist's" in out
                 return good, ("all 59 frames, each the artist's, in order, to the intro's end"
                               if good else out[-800:])
-            gate("start-up animation, every frame", *cached("start-up animation", [aniz_cmd], aniz_body))
+            later("aniz", "start-up animation, every frame", "start-up animation", [aniz_cmd], aniz_body)
 
         # 6. engine + LOAD/SAVE
         # PERC (5), the Monomachine's (6, 7, v0.26: 14..) and the sample machines (8..13,
@@ -405,7 +585,7 @@ def main() -> int:
             clean = rc == 0 and "ran clean" in out and "FAIL" not in out and "corrupt" not in out
             return clean, ("evaluator clean, CODE intact, machine and filter types round-trip"
                            if clean else out[-800:])
-        gate("engine + LOAD/SAVE", *cached("engine + LOAD/SAVE", [eng_cmd], eng_body))
+        later("engine", "engine + LOAD/SAVE", "engine + LOAD/SAVE", [eng_cmd], eng_body)
 
         # 6b. the sample link on the ColdFire (v0.16): the +Drive's image loaded over the
         # fast link with a packet lost (resent), the loader stopping when nothing gets
@@ -447,8 +627,7 @@ def main() -> int:
                     return good, ("dead (nothing gets through): the RAM check gives up after four seconds, "
                                   "the loader tries each chunk seven times and stops, nothing reaches the "
                                   "DSP's routing" if good else out[-800:])
-                gate("sample link, dead link (ColdFire)",
-                     *cached("sample link, dead link (ColdFire)", [ld_cmd, sorted(EMU_ENV.items())], ld_body))
+                later("link16-dead", "sample link, dead link (ColdFire)", "sample link, dead link (ColdFire)", [ld_cmd, sorted(EMU_ENV.items())], ld_body)
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
@@ -459,7 +638,7 @@ def main() -> int:
                               "passes (high, lowram); v0.31: the kit's samples first; the +Drive's library written, read back, "
                               "a hole reused, every write inside its region, a small device refused (lib)"
                               if good else out[-800:])
-            gate("sample link (ColdFire)", *cached("sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body))
+            later("link16", "sample link (ColdFire)", "sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body)
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
         # change the recorder and never the track's sound, NO closes it, and the UI keeps
@@ -490,7 +669,7 @@ def main() -> int:
                 return good, ("FUNC+VOICE opens it, knob A moves SRC with no write to the sound, NO closes it, "
                  "the screen drawn throughout"
                               if good else why)
-            gate("recorder screen (ColdFire)", *cached("recorder screen (ColdFire)", [rec_cmd, sorted(EMU_ENV.items())], rec_body))
+            later("recorder", "recorder screen (ColdFire)", "recorder screen (ColdFire)", [rec_cmd, sorted(EMU_ENV.items())], rec_body)
 
         # 6d. after a recording (v0.22; v0.25 as the DT2's): SAVING/NORMALIZING (phase 4) on to
         # TRIM once saved; TRIM's ends move (E, H); FUNC + YES plays the preview while held
@@ -558,7 +737,7 @@ def main() -> int:
                 return good, ("SAVING on to TRIM; TRIM's ends move; FUNC + YES previews while held; YES on to "
                               "FILE NAME (knob, arrows, FUNC + YES inserts, FUNC + NO deletes), YES on to ASSIGN, "
                               "a [TRIG] key makes track 3 ONESHOT on the slot" if good else why)
-            gate("recorder flow (ColdFire)", *cached("recorder flow (ColdFire)", [flow_cmd, sorted(EMU_ENV.items())], flow_body))
+            later("recflow", "recorder flow (ColdFire)", "recorder flow (ColdFire)", [flow_cmd, sorted(EMU_ENV.items())], flow_body)
 
         # 6e. v0.23, SLICE: its menus drawn over the page (the menu, the grid dialog, the
         # editor with a slice table), the editor's keys and knobs moving the picked slice;
@@ -634,7 +813,7 @@ def main() -> int:
                 return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
                  "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; FUNC + E moves at the normal step; KEYBOARD on a SLICE track: trigs 9, 10 play slices 1, 2 and trig 2 a later one (the keys' notes in order)"
                               if good else why)
-            gate("SLICE menus and SLICES keys (ColdFire)", *cached("SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body))
+            later("slice", "SLICE menus and SLICES keys (ColdFire)", "SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body)
 
         # 6g. v0.25, GRID's ALLOCATE SLICE (YES on a GRID track's page): trigs placed on steps
         # 1, 3, 5 in GRID RECORDING; CREATE LINEAR LOCKS locks slices 1, 2, 3 on them (the
@@ -668,8 +847,7 @@ def main() -> int:
                     why = str(facts) + f" {d0}"
                 return good, ("GRID's ALLOCATE SLICE: LINEAR locks slices 1..3 on three placed trigs; NO after "
                               "RANDOM puts them back" if good else why)
-            gate("GRID allocate slice locks (ColdFire)",
-                 *cached("GRID allocate slice locks (ColdFire)", [al_cmd, sorted(EMU_ENV.items())], al_body))
+            later("alloc", "GRID allocate slice locks (ColdFire)", "GRID allocate slice locks (ColdFire)", [al_cmd, sorted(EMU_ENV.items())], al_body)
 
         # 6f. v0.25: the sample pages' playhead (the DSP's positions, poked as the link would
         # leave them), the DT2-style sample list (it opens on SAMP's change; DOWN moves SAMP,
@@ -780,8 +958,7 @@ def main() -> int:
                 return good, ("the playhead drawn where the DSP says; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
                               "puts it back; FUNC + YES's browser enters a folder, YES ticks a sample and RIGHT, LOAD TRK assigns it; "
                               "its SAMPLE ACTION menu deletes; modulation on SAMP steps through the loaded slots" if good else why)
-            gate("sample list, browser, playhead (ColdFire)",
-                 *cached("sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body))
+            later("samplist", "sample list, browser, playhead (ColdFire)", "sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body)
 
             # 6i. v0.29: multi-select in the browser (a user's report: no way to delete all the
             # samples sent in). At the top, FUNC + YES marks every sample of "drum_loops"
@@ -825,8 +1002,7 @@ def main() -> int:
                     return good, ("FUNC + YES marks a folder's samples; SELECT ALL a folder's; DELETE takes the "
                                   "marked ones (DELETE 2?), keeps the rest, clears the marks, hides emptied folders"
                                   if good else why)
-                gate("multi-select delete (ColdFire)",
-                     *cached("multi-select delete (ColdFire)", [ms_cmd, sorted(EMU_ENV.items())], ms_body))
+                later("multisel", "multi-select delete (ColdFire)", "multi-select delete (ColdFire)", [ms_cmd, sorted(EMU_ENV.items())], ms_body)
 
             # 6l. v0.31: the browser's two stores and the +Drive's library. A library of three
             # samples (two in INCOMING, one in DRUMS) put in its RAM as lib.c reads it at
@@ -911,8 +1087,7 @@ def main() -> int:
                         why = f"{facts} d0={d0} mem={m}"
                     return good, ("the two stores, +DRIVE's folders and samples, a tick, LOAD TO PROJECT "
                                   "queued, NO back up a level each time and closed at the top" if good else why)
-                gate("+DRIVE browser (ColdFire)",
-                     *cached("+DRIVE browser (ColdFire)", [d_cmd, sorted(EMU_ENV.items())], d_body))
+                later("drive", "+DRIVE browser (ColdFire)", "+DRIVE browser (ColdFire)", [d_cmd, sorted(EMU_ENV.items())], d_body)
 
         # 6h. v0.28: the Monomachine machines' pages drawn as the Monomachine's (each machine its
         # own screen, none the stock grid), and their choices' detents (WPRS, two choices: four
@@ -950,8 +1125,7 @@ def main() -> int:
                     why = str(facts) + f" d0 {d0}"
                 return good, ("the five Monomachine pages drawn, each its own; a two-choice control "
                               "four detents a choice" if good else why)
-            gate("Monomachine pages and detents (ColdFire)",
-                 *cached("Monomachine pages and detents (ColdFire)", [mp_cmd, sorted(EMU_ENV.items())], mp_body))
+            later("mnmpages", "Monomachine pages and detents (ColdFire)", "Monomachine pages and detents (ColdFire)", [mp_cmd, sorted(EMU_ENV.items())], mp_body)
 
         # 6j. v0.30: a stock question's keys are stock's (a user's report: on a sample track, the
         # OS update's "UPGRADE OS NOW?" answered by our page; v0.29's save question), and a YES
@@ -992,17 +1166,7 @@ def main() -> int:
                     why = f"{facts} d0={d0} mem={m}"
                 return good, ("a stock question's YES is the question's; TRIG + YES is stock's; the page's "
                               "own YES still opens its menu" if good else why)
-            gate("stock questions and held keys (ColdFire)",
-                 *cached("stock questions and held keys (ColdFire)", [q_cmd, sorted(EMU_ENV.items())], q_body))
-
-        # v0.30: a check keyed on a C symbol must not be skipped because the symbol never
-        # reached the layout (6k was, once: smp_machine_commit was linked but not listed)
-        csrc_text = "".join(f.read_text() for f in (ROOT / "csrc").rglob("*.c"))
-        for sym, what in (("smp_question_up", "stock questions and held keys (ColdFire)"),
-                          ("smp_machine_commit", "SAMP kept across sample machines (ColdFire)"),
-                          ("smp_knob_at", "FUNC + turn (ColdFire)")):
-            if re.search(rf"\b{sym}\b", csrc_text) and sym not in lay:
-                gate(what, False, f"{sym} is in the C but not in the layout: the check cannot run")
+            later("question", "stock questions and held keys (ColdFire)", "stock questions and held keys (ColdFire)", [q_cmd, sorted(EMU_ENV.items())], q_body)
 
         # 6k. v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner: the stock
         # commit resets the sound to the new machine's defaults, SAMP to OFF). Track 1 on
@@ -1028,8 +1192,7 @@ def main() -> int:
                     good = all(facts.values())
                     why = f"{facts} types={types} mem={m}"
                 return good, ("MACHINE SEL from ONESHOT to the next sample machine keeps SAMP" if good else why)
-            gate("SAMP kept across sample machines (ColdFire)",
-                 *cached("SAMP kept across sample machines (ColdFire)", [k_cmd, sorted(EMU_ENV.items())], k_body))
+            later("keepsamp", "SAMP kept across sample machines (ColdFire)", "SAMP kept across sample machines (ColdFire)", [k_cmd, sorted(EMU_ENV.items())], k_body)
 
         # 6m. v0.32: FUNC + turn on our machines' controls (a tester's list; the owner: a control
         # that jumps with FUNC goes on jumping to its next value, one that does not stays put).
@@ -1099,7 +1262,7 @@ def main() -> int:
                 return good, ("FUNC + turn: PERC's first control keeps stock's octave jumps; other controls of ours "
                               "stay put; choices step one a click either way (WPRS, PLAY); no change without FUNC, "
                               "with a stale knob, or on a stock machine" if good else why)
-            gate("FUNC + turn (ColdFire)", *cached("FUNC + turn (ColdFire)", [f_cmd, sorted(EMU_ENV.items())], f_body))
+            later("functurn", "FUNC + turn (ColdFire)", "FUNC + turn (ColdFire)", [f_cmd, sorted(EMU_ENV.items())], f_body)
 
         # 6n. v0.32: the DSP load meter. smp_dsp_load gives the last half second's peak (the
         # idle packets' unit 18, permille) in percent, rounded, and -1 when none came in the last
@@ -1133,7 +1296,7 @@ def main() -> int:
                     why = f"{facts} d0={d0}"
                 return good, ("the DSP load meter: the half second's peak in percent, none when the DSP is "
                               "silent; drawn in place of the tempo while FUNC is held" if good else why)
-            gate("DSP load meter (ColdFire)", *cached("DSP load meter (ColdFire)", [m_cmd, sorted(EMU_ENV.items())], m_body))
+            later("meter", "DSP load meter (ColdFire)", "DSP load meter (ColdFire)", [m_cmd, sorted(EMU_ENV.items())], m_body)
 
         # 6o. v0.33: MACHINE SEL to a Monomachine machine gives it its own start (dnfw.mnm's
         # DEFAULTS: SID on PULS, PW at the middle), not the shared records' defaults. A real
@@ -1169,8 +1332,7 @@ def main() -> int:
                     why = f"{facts} got={[hex(g) for g in got]} want={[hex(w) for w in want]} types={types}"
                 return good, ("MACHINE SEL to SID: its eight controls at its own start (PULS, PW at the middle)"
                               if good else why)
-            gate("Monomachine start values (ColdFire)",
-                 *cached("Monomachine start values (ColdFire)", [o_cmd, sorted(EMU_ENV.items())], o_body))
+            later("mnmdefaults", "Monomachine start values (ColdFire)", "Monomachine start values (ColdFire)", [o_cmd, sorted(EMU_ENV.items())], o_body)
 
         # 6p. v0.33: our overlays let go when the page under them goes (docs/freeze-hunt.md).
         # The sample list opened on track 1 (a SAMP turn), then TRK + [TRIG 2] to track 2, a
@@ -1211,7 +1373,7 @@ def main() -> int:
                     why = f"{facts} mem={m}"
                 return good, ("the sample list lets go when another track is active; YES on a SLICE page "
                               "answers after MACHINE SEL" if good else why)
-            gate("overlays let go (ColdFire)", *cached("overlays let go (ColdFire)", [h_cmd, sorted(EMU_ENV.items())], h_body))
+            later("hooks", "overlays let go (ColdFire)", "overlays let go (ColdFire)", [h_cmd, sorted(EMU_ENV.items())], h_body)
 
         # 6r. v0.35: MACHINE SEL's columns (flupperich6l, v0.33: with a machine low in our long
         # SRC list chosen, RIGHT showed an empty FLTR column: stock's LEFT / RIGHT keeps the
@@ -1256,8 +1418,7 @@ def main() -> int:
                     why = f"{facts} types={types} lit={lit('r1', 8, 16):.3f}/{lit('r1', 8, 60):.3f}/{lit('r2', 52, 60):.3f}"
                 return good, ("MACHINE SEL: RIGHT from GRID shows the FLTR column from its top, LEFT returns "
                               "to GRID; SYN held shows the page's values" if good else why)
-            gate("MACHINE SEL columns, SYN held (ColdFire)",
-                 *cached("MACHINE SEL columns, SYN held (ColdFire)", [r_cmd, sorted(EMU_ENV.items())], r_body))
+            later("colsw", "MACHINE SEL columns, SYN held (ColdFire)", "MACHINE SEL columns, SYN held (ColdFire)", [r_cmd, sorted(EMU_ENV.items())], r_body)
 
         # 6q. v0.33: the sample pages driven at random (scripts/emu_fuzz_ui.py: SAMP turns,
         # the list, the browser and its menu, page and [TRIG] keys, MACHINE SEL, the machine
@@ -1279,29 +1440,78 @@ def main() -> int:
                     return False, f"missing {snap_sec} (the snapshot's own MAIN OS section): the real-rate interrupt needs it"
                 rc, out = run("ui fuzz", fz_cmd, logs, env={**EMU_ENV, "PYTHONPATH": str(ROOT / "src")}, trace=tdir)
                 return rc == 0, (out.strip().splitlines()[-1] if rc == 0 else out[-800:])
-            gate("UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)",
-                 *cached("UI fuzz, two seeds, real-rate ISR (ColdFire)", [fz_cmd, sorted(EMU_ENV.items())], fz_body))
+            later("fuzz", "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)", "UI fuzz, two seeds, real-rate ISR (ColdFire)", [fz_cmd, sorted(EMU_ENV.items())], fz_body)
 
+        # the setup is done: from here on, nothing may import a module of ours (cached())
+        setup_mods |= repo_modules()
 
-
-        # 7. unit tests
-        if sharc is not None:                   # v0.25: the runner beside the rest
-            print("  (waiting for the SHARC runner)", flush=True)
-            sharc.join()
-            gate("SHARC runner", *(sharc_box[0] if sharc_box else (False, "the runner did not finish")))
+        # 7. unit tests (v0.38: first of the long steps, on both cores: pytest-xdist, test by
+        # test (--dist load: test_mnm.py alone is over half the time, so file by file one core
+        # would wait on it). No test of TESTS shares a file with another (test_safety's
+        # out/safety/waverider.syx is one test's own); module fixtures and lru_caches are built
+        # in each worker. Before the SHARC runner starts, so they have both cores)
         tests = [t for t in TESTS if (ROOT / t).exists()]
-        py_cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", "not slow", *tests]
+        py_cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-m", "not slow",
+                  "-n", "2", "--dist", "load", *tests]
 
         def py_body(tdir):
+            import importlib.util               # noqa: PLC0415
+            if importlib.util.find_spec("xdist") is None:
+                return False, ("pytest-xdist is not installed for this python (pip install "
+                               "--break-system-packages pytest-xdist): unchecked is not passing")
             rc, out = run("pytest", py_cmd, logs, env={"PYTHONPATH": "src"}, trace=tdir)
-            return rc == 0, out.strip().splitlines()[-1] if out.strip() else ""
-        gate("unit tests", *cached("unit tests", [py_cmd], py_body))
+            last = out.strip().splitlines()[-1] if out.strip() else ""
+            # "586 passed, 1 skipped in 512.3s (0:08:32)": the counts, as serial pytest prints them
+            return rc == 0 and re.search(r"\b\d+ passed\b", last) is not None, last
+        if wanted("unit"):
+            gate("unit tests", *cached("unit tests", [py_cmd], py_body))
+
+        # the SHARC runner (v0.25: beside the ColdFire steps, on its own core)
+        if dsp_changed and sharc_want:
+            sharc = threading.Thread(target=sharc_thread, daemon=True)
+            sharc.start()
+
+        # 5, 5b, 6, 6b..6r. the ColdFire emulator steps, quickest first (EMU); after each, a
+        # SHARC part that has failed stops the gate
+        ran = set()
+        for sid, _gname in EMU:
+            if sid in plan and wanted(sid):
+                gname, cname, cmds, body = plan[sid]
+                sharc_failed()
+                gate(gname, *cached(cname, cmds, body))
+                ran.add(sid)
+                sharc_failed()
+
+        if sharc is not None:
+            print("  (waiting for the SHARC runner)", flush=True)
+            sharc.join()
+            if only is None:
+                good = len(sharc_box) == len(gate_sharc.parts()) and all(ok for ok, _ in sharc_box)
+                gate("SHARC runner", good, "; ".join(d for _, d in sharc_box) if sharc_box
+                     else "the runner did not finish")
+            else:
+                for k, steps in enumerate(sharc_want):
+                    ok, d = sharc_box[k] if k < len(sharc_box) else (False, "did not run: an earlier part failed")
+                    gate(f"SHARC runner: {','.join(steps)}", ok, d)
+                    ran.add("sharc:" + "+".join(steps))
 
     except Stop as s:
         for proc in list(LIVE):                 # the SHARC runner, if it is still going
             proc.kill()
         print(f"\nGATE FAILED at: {s}\n\n  DO NOT FLASH {a.build.name}.\n  Logs: {logs}")
         return 1
+
+    if only is not None:
+        # v0.38: --only: the steps asked for, each recorded in the reuse cache as a full run
+        # would record it. Never a gate pass: no record beside the build, no clearance
+        ran |= {sid for sid, _ in FIRST if sid in only and sid not in ("dsp-identity", "hwrules")}
+        ran |= {sid for sid in ("dsp-identity", "hwrules") if sid in only and dsp_changed}
+        missing = sorted(only - ran)
+        print(f"ONLY {', '.join(sorted(only))}: " + ("each asked-for step passed" if not missing else
+              f"passed, but {', '.join(missing)} did not apply to this build (not run)")
+              + f"\n  logs: {logs}\n\n  A PARTIAL RUN, NOT A GATE: do not flash on it. Only a full run of "
+              f"ship_gate.py on {a.build.name} can clear it.")
+        return 0 if not missing else 3
 
     record = {"build": a.build.name, "sha256": sha, "stock": a.stock.name,
               "date": datetime.datetime.now().isoformat(timespec="seconds"),
