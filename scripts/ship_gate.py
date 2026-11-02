@@ -34,7 +34,7 @@ failure:
    recording comes back over TDM and is written to a Python +Drive. Every byte checked,
    and every period the frame's routing words (0xa5a..) are stock's (v0.20).
 6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
-   off is stock's state every tick; on, every track lands where docs/jump.md says; a cue
+   off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector.
 6q. **UI fuzz** (v0.33, `emu_fuzz_ui.py`): the sample pages driven at random, two seeds.
    v0.34 (docs/timing-model.md): with the audio interrupt firing on its own at its real
@@ -1450,16 +1450,19 @@ def main() -> int:
         # 6s. DIRECT JUMP (csrc/jump, docs/jump.md; scripts/emu_jump.py): the sequencer ticked
         # through stock's own ISR, a pattern cued with PTN + TRIG. Off: every tick's sequencer
         # state is stock's (same digest as the stock image's run). On (PTN + YES): the switch
-        # within one step of the cue, and from the step after it every track (per pattern, and
-        # per track with lengths 5, 7, 3) on the step stock reaches playing that pattern from
-        # PLAY. On, a cue through the sequencer's own cue routine (program changes, chains,
-        # songs): stock's. The setting written to its sector, read back at power-on, NO turns
+        # within one step of the cue, and from the step after it every track goes on from its
+        # own step in the playing pattern, wrapped by its new length (Elektron's rule; per
+        # pattern, per track with lengths 5, 7, 3, and after a 12-step pattern's loop and a
+        # half into a 16-step one); with equal lengths from PLAY, where stock plays that pattern
+        # from PLAY. On, a cue through the sequencer's own cue routine (program changes,
+        # chains, songs): stock's. The setting written to its sector, read back at power-on, NO turns
         # it off. No fault anywhere
         if "jmp_on" in lay:
             jdir = work / "jump"
             jdir.mkdir(exist_ok=True)
             jruns = [("off", "pp", True), ("off", "pp", False), ("pc", "pp", False), ("on", "pp", False),
-                     ("ref", "pp", True), ("on", "pt", False), ("ref", "pt", True), ("persist", "pp", False)]
+                     ("ref", "pp", True), ("on", "pt", False), ("ref", "pt", True), ("on", "odd", False),
+                     ("persist", "pp", False)]
             jcmds = [[a.venv, "-u", "scripts/emu_jump.py", "--build", bdir, "--snapshot", snap, "--scenario", sc,
                       "--variant", var, "--png-dir", jdir / "screens", "--json", jdir / f"{sc}_{var}_{'stock' if st else 'build'}.json"]
                      + (["--stock"] if st else []) for sc, var, st in jruns]
@@ -1481,25 +1484,30 @@ def main() -> int:
                 pc = res[("pc", "pp", False)]
                 if pc["trace_digest"] != stock_off or pc["jmp"]["jmp_count"] != 0:
                     why.append("a cue not from the PTN view jumped")
-                for var in ("pp", "pt"):
-                    on, ref = res[("on", var, False)], res[("ref", var, True)]
+                for var in ("pp", "pt", "odd"):
+                    on, ref = res[("on", var, False)], res.get(("ref", var, True))
                     if on.get("on") != 1 or not on.get("sector_after_yes", "").startswith("444e3253"):
                         why.append(f"{var}: PTN + YES did not turn it on and write it")
                     sw = on.get("switch_global")
                     if sw is None or on["switch_after_cue_ticks"] > 6 or on["jmp"]["jmp_count"] != 1:
                         why.append(f"{var}: no switch within a step of the cue ({on.get('switch_after_cue_ticks')} ticks)")
                         continue
-                    after = [g for g in on["steps"] if int(g) > sw]
-                    bad = [g for g in after if on["steps"][g] != ref["steps"].get(g)]
-                    if bad or len(after) < 20:
-                        why.append(f"{var}: after the jump, steps {bad[:4]} are not where stock plays that pattern")
+                    if not on.get("rule_ok"):
+                        why.append(f"{var}: after the jump, steps {on.get('rule_bad')} do not go on from the playing pattern's")
+                    if ref is not None:
+                        after = [g for g in on["steps"] if int(g) > sw]
+                        bad = [g for g in after if on["steps"][g] != ref["steps"].get(g)]
+                        if bad or len(after) < 20:
+                            why.append(f"{var}: after the jump, steps {bad[:4]} are not where stock plays that pattern")
                 if not res[("persist", "pp", False)].get("ok"):
                     why.append("the setting did not persist (or wrote outside its sector)")
                 on = res[("on", "pp", False)]
                 return not why, ("; ".join(why) if why else
                                  f"off and a program-change cue: stock's state every tick; on: switched "
-                                 f"{on['switch_after_cue_ticks']} tick(s) after the cue, start step {on['jmp']['jmp_last']}, "
-                                 "every track (per pattern; per track, lengths 5, 7, 3) where stock plays it from PLAY; "
+                                 f"{on['switch_after_cue_ticks']} tick(s) after the cue, start step {on['jmp']['jmp_last']}; "
+                                 "every track goes on from its own step, wrapped by its new length (per pattern; per "
+                                 "track, lengths 5, 7, 3; after a 12-step pattern's loop and a half, start "
+                                 f"{res[('on', 'odd', False)]['jmp']['jmp_last']}), and from PLAY where stock plays it; "
                                  "the setting written, read back at power-on, turned off")
             later("jump", "DIRECT JUMP (ColdFire)", "DIRECT JUMP (ColdFire)", [*jcmds, sorted(EMU_ENV.items())], jump_body)
 

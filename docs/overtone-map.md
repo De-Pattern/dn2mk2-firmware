@@ -135,8 +135,9 @@ Many other edits belong to other Overtone features: the follower envelopes, Soph
 > **Correction (2026-11-01, measured in the emulator, `docs/jump.md` §1-2):** `0x42c5a91e`
 > (1.11) is not a pattern-change mode byte. It is the sequencer's tick within the step; the
 > compare with 2 is "the second tick of the step", where stock looks at the queue. Stock 1.11
-> has no pattern-change modes. The formula below is confirmed: with it every track lands where
-> stock plays the pattern from PLAY. Our DIRECT JUMP does not use the PROJECT+0x50 byte.
+> has no pattern-change modes. The formula below was confirmed (with it every track lands where
+> stock plays the pattern from PLAY), but our DIRECT JUMP follows Elektron's rule instead (from
+> the playing pattern's step) and does not use the PROJECT+0x50 byte.
 
 ## 4. How instant switch computes the position **[M]**
 

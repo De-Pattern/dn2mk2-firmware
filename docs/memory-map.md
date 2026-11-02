@@ -215,3 +215,22 @@ caves are the scarce resource; the appended area (proven by `intro-bang`) and
 RAM above BSS are not.** The mix-and-match registry (backlog §11) must allocate
 caves and RAM, not just check hooks.
 
+
+## The +Drive (eMMC) — whose sectors are whose (2026-11-01)
+
+Not RAM, but the same question: who may write where. The stock store reads and writes
+nothing above 2,224 MiB (`docs/drive-storage-research.md`); everything of ours is above it,
+each region checked against its bounds before the stock block driver (`0x4012c59a` read,
+`0x4012c780` write) is called.
+
+| sectors (512 B) | owner | what |
+|---|---|---|
+| below `0x458000` | stock | projects, sounds, samples: never written by the mod |
+| `0x600000` | the sample link (`csrc/sampler/link.c`) | the pool image's header (`DN2Q`) |
+| `0x600001` .. `0x6C8000` | the sample link | the pool image (400 MB, `POOL_BYTES`) |
+| `0x6D0000` .. `0x6D81FF` | the per-project sample pools (branch `pools`, in progress) | each project's pool list |
+| `0x6FF000` | DIRECT JUMP (`csrc/jump/jump.c`, `docs/jump.md`) | the mod's settings sector (`DN2S`, version, flags, check); bit 0: DIRECT JUMP |
+| `0x700000` .. the device's end | the +Drive library (`csrc/sampler/lib.c`) | superblock (`DN2L`), index, folders, then the samples' frames |
+
+Free between them: `0x6C8001..0x6CFFFF`, `0x6D8200..0x6FEFFF`. A new region takes a range
+from there and adds its row here and a `_Static_assert` against its neighbours in its C.

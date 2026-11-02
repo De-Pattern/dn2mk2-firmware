@@ -14,9 +14,13 @@ change counter, the tick, each track's current and next step, and a digest of th
 sequencer block (0x42c5a900..0x42c5ab00, 0x446483d0..0x446484c4).
 
 Two patterns are set up in RAM first (`--variant`): pp, A01 16 steps and A02 12, both per
-pattern at 1x; pt, A02 per track (master 16; tracks 16, 5, 7, 3, then 16). Scenarios:
+pattern at 1x; pt, A02 per track (master 16; tracks 16, 5, 7, 3, then 16); odd, A01 12 steps
+and A02 16, cued at step 18 (A01 has played one and a half loops, on its own step 6), so
+Elektron's rule (go on from the playing pattern's step) and the grid since PLAY differ.
+`rule_ok`: from the step after the switch, every track is on (its step at the switch + the
+steps since) wrapped by its new length. Scenarios:
 
-- `off`: PLAY, cue A02 (PTN + TRIG 2) at global step 3, on to step 36. With `--stock` too:
+- `off`: PLAY, cue A02 (PTN + TRIG 2) at global step 3 (odd: 18), on to step 36 (odd: 50). With `--stock` too:
   the two traces must be identical (the build with the setting off is stock).
 - `on`: PTN + YES first (the message, the setting, the sector written), then as `off`.
 - `ref`: A02 cued while stopped, then PLAY: stock playing A02 from PLAY, the control for
@@ -67,7 +71,7 @@ def main() -> int:
     p.add_argument("--build", required=True, help="a directory with the build's section_3_MAIN_OS.bin")
     p.add_argument("--snapshot", required=True)
     p.add_argument("--scenario", required=True, choices=("off", "on", "ref", "pc", "persist"))
-    p.add_argument("--variant", default="pp", choices=("pp", "pt"))
+    p.add_argument("--variant", default="pp", choices=("pp", "pt", "odd"))
     p.add_argument("--stock", action="store_true", help="install nothing: the control")
     p.add_argument("--png-dir", default=None)
     p.add_argument("--json", default=None)
@@ -134,16 +138,24 @@ def main() -> int:
 
     # the patterns
     A01, A02 = P0, P0 + PSTRIDE
-    m.write(A01 + LEN, struct.pack(">h", 16))
+    m.write(A01 + LEN, struct.pack(">h", 12 if a.variant == "odd" else 16))
     m.write(A01 + MODE, b"\0")
-    if a.variant == "pp":
+    cue_step, end_step = (18, 50) if a.variant == "odd" else (CUE_STEP, END_STEP)
+    if a.variant == "odd":
+        m.write(A02 + LEN, struct.pack(">h", 16))
+        m.write(A02 + MODE, b"\0")
+        track_len = [16] * 16
+        master_len = 16
+    elif a.variant == "pp":
         m.write(A02 + LEN, struct.pack(">h", 12))
         m.write(A02 + MODE, b"\0")
         track_len = [12] * 16
+        master_len = 12
     else:
         m.write(A02 + LEN, struct.pack(">h", 16))
         m.write(A02 + MODE, b"\1")
         track_len = [16, 5, 7, 3] + [16] * 12
+        master_len = 16
         for t, n in enumerate(track_len):
             m.write(A02 + TRK * t + TLEN, struct.pack(">h", n))
             m.write(A02 + TRK * t + TLEN + 3, b"\2")    # +1167: 1x
@@ -269,7 +281,7 @@ def main() -> int:
     record("start")
     panel.tap(PLAY)
     record("play")
-    while global_step() < CUE_STEP:
+    while global_step() < cue_step:
         ticks(1)
     # half a step in: tick 3 of step CUE_STEP
     ticks(3)
@@ -284,7 +296,7 @@ def main() -> int:
         m.write(buf, entry[:24])
         guest(CUE, buf, 1)
         record("cue")
-    while global_step() < END_STEP:
+    while global_step() < end_step:
         ticks(1)
 
     # where the pattern changed, and what each track played on the first steps after it
@@ -297,7 +309,27 @@ def main() -> int:
     for r in trace:
         if r["tick"] == 0 and r["t6"] % 6 == 0:
             steps.setdefault(r["t6"] // 6, (r["pat"], r["cur"]))
-    out["steps"] = {str(g): {"pat": v[0], "cur": v[1][:4]} for g, v in sorted(steps.items())}
+    out["steps"] = {str(g): {"pat": v[0], "cur": v[1]} for g, v in sorted(steps.items())}
+    # Elektron's rule, from this run's own trace: after the switch at step sw, track t is on
+    # (its step at sw + the steps since) wrapped by its length in the new pattern
+    sw_g = out["switch_global"]
+    if sw_g is not None and sw_g in steps:
+        at = steps[sw_g][1]
+        later = [g for g in sorted(steps) if g > sw_g]
+        # the master (the pattern's length; per track, its master length, 16 here) restarts
+        # every track when it wraps, as stock does: from the switch it goes on from
+        # jmp_last, the start step jmp_position() gave it
+        start = sym("jmp_last", 4) or 0
+        resets = [g for g in later if (start + g - sw_g - 1) % master_len == 0]
+
+        def want(g, t):
+            r = [g0 for g0 in resets if g0 <= g]
+            return (g - r[-1]) % track_len[t] if r else (at[t] + g - sw_g) % track_len[t]
+        bad = [g for g in later for t in range(16) if steps[g][1][t] != want(g, t) or steps[g][0] != 1]
+        out["rule_ok"] = not bad and len(later) >= 20
+        out["rule_bad"] = bad[:4]
+        out["first_new"] = {"step": sw_g + 1, "cur": steps.get(sw_g + 1, (0, []))[1][:4],
+                            "was": at[:4]}
     out["jmp"] = {k: sym(k, 4) for k in ("jmp_count", "jmp_last")} if syms else None
     out["faults"] = faults
     out["trace_digest"] = hashlib.sha256(json.dumps([(r["pat"], r["a91c"], r["tick"], r["t6"], r["cur"], r["next"],

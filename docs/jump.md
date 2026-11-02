@@ -1,8 +1,9 @@
 # DIRECT JUMP: an instant pattern switch
 
 **Owner's request (the Discord audit, `docs/ROADMAP.md`): "instant pattern switch".** With
-the sequencer playing, a pattern cued with PTN + TRIG starts at once, on the step it would be
-on had it been playing since PLAY, instead of at the end of the playing pattern.
+the sequencer playing, a pattern cued with PTN + TRIG starts at once, going on from where the
+playing pattern was (Elektron's DIRECT JUMP rule: "the new pattern starts playing from the
+position where the previous pattern was"), instead of at the end of the playing pattern.
 
 - **Turn it on:** hold **PTN** and press **YES**. The title bar says `DIRECT JUMP ON`.
   **Off:** hold PTN and press NO (`DIRECT JUMP OFF`). Default: off, so the instrument behaves
@@ -62,32 +63,48 @@ ticks at 1x).
 | `0x400fa1da` | `jsr 0x400d93f0` (the PTN view's one-pattern cue) | `jmp_cue`: stock's cue, then armed if the setting is on and it plays (`0x42c5a918` = 1) |
 | `0x400da406` | `move.b 0x42c5a91e,%d1` | `jmp_tick`: armed, on a tick that is not a step boundary and with no stop pending (`0x42c5a9e9`), the queue path runs now (d1 = 2) |
 | `0x400da45a` | `mvs.w 0x42c5aab4,%d1` | `jmp_arm`: armed and the head is another pattern: straight to stock's arming `0x400da4d2` (the "last step?" test skipped) |
-| `0x400da6e6` | `lea 0x42c5a9c4,%a1` | `jmp_switch`: for the switch we armed (`0x42c5a9a0` / `0x42c5a9a8` match), the start step from `jmp_position()`; stock's per-track code then reads the new pattern (a5) |
-| `0x400da8cc` | `pea 0x401f6b25` | `jmp_tracks`: each track's start step wrapped by its length |
+| `0x400da6e6` | `lea 0x42c5a9c4,%a1` | `jmp_switch`: for the switch we armed (`0x42c5a9a0` / `0x42c5a9a8` match), the master start step from `jmp_position()`; stock's per-track code then reads the new pattern (a5) |
+| `0x400da8cc` | `pea 0x401f6b25` | `jmp_tracks`: each track's start step: its own step in the playing pattern + 1, wrapped by its new length |
 | `0x402008cc` | the PTN view's key handler `0x400fa6be` | `jmp_key`: PTN + YES / NO; everything else to `0x400fa6be` |
 
 Every site's stock bytes are checked before the write, and 11 guards cover what the shims
 return to and rely on (`JUMP_GUARDS`, recorded in `waverider_code.json`).
 
-**The start step.** At the switch the ticks since PLAY (`6 * 0x42c5a9d0 + 0x42c5a9d4`, read
-before the ISR counts this tick) are one short of whole steps, and the step that plays next
-is the one after: `pos = (ticks + 1) / div + 1`, `div` = 6 in per-track mode (stock's master
-step there), else `0x401f6b08[scale]`; then `pos mod length` when the length is above 1 (as
-stock wraps; 1 or less is no wrap). This is Overtone's formula (`docs/overtone-map.md` §4),
-now measured: with it every track lands where stock plays that pattern from PLAY.
+**The start step (Elektron's rule).** The switch is at a step boundary, after that boundary's
+step of the playing pattern has been taken, so what starts is the step after it:
+
+- each track: its step now playing (`0x42c5a984[t]`) + 1, wrapped by its length in the new
+  pattern (the pattern's length per pattern, the track's per track): `jmp_wrap_tracks`;
+- the master (the change counter and the per-track reset): per pattern, track 1's step + 1;
+  per track, the playing pattern's master counter (`0x42c5a91c`, already advanced; 0 after a
+  wrap reads as its length); wrapped by the new pattern's length when that is above 1 (stock:
+  1 or less is INF, no wrap): `jmp_position`. In per-track mode the master length then
+  restarts every track as stock does.
+
+With equal lengths from PLAY this is the step the new pattern would be on had it played since
+PLAY. After a pattern of another length has looped, it follows what is playing, not the grid
+since PLAY (the first version of this used the grid, Overtone's formula; the coordinator
+asked for Elektron's rule, 2026-11-01).
 
 **Per-track mode.** Stock's per-track code after a switch reads the *old* pattern's mode and
 scales through a5 (harmless for stock: its start step is always 0). For our jump a5 is the
-new pattern, and each track's step is wrapped by its own length (stock adds no wrap there).
+new pattern, so each track's tick phase is the new pattern's at that master position; each
+track's start step is then set as above.
 
-**The latency.** Cued during step g, the switch is at the next boundary (g + 1, which still
-plays the old pattern's step, as stock's own changeover does), and the new pattern sounds
-from step g + 2 on. Measured: cued 3 ticks into step 3, switched 2 ticks later, its first
-step at step 5, on step 5 of its own.
+**The latency, and why it is not shorter.** Cued during step g, the switch is at the next
+boundary (g + 1, which still plays the old pattern's step), and the new pattern is heard from
+step g + 2. Making step g + 1 the new pattern's is not possible within stock's changeover:
+the sequencer posts each step's notes to the voice engine a whole step ahead, with a future
+timestamp, so that micro-timing can move a trig either way. Measured (`scripts/emu_jump.py`
+style, track 1, 1x): step k is posted in the first ISR entry of step k-1 (entries 0, 24, 48,
+72, 96 for steps 1..5, with `0x42c5a9d0` = k-1). A cue arriving during step g therefore finds
+step g + 1 already queued; playing the new pattern there would mean withdrawing queued voice
+messages, which stock never does and which this mod will not attempt. Stock's own changeover
+has the same one-step pipeline (the old pattern's last step plays at the switch).
 
 ## 4. Where the setting persists, and why it is safe
 
-One 512-byte sector, **`0x6FF000`** on the +Drive (eMMC), through the stock block driver
+One 512-byte sector, **`0x6FF000`** (the +Drive's map: `docs/memory-map.md`) on the +Drive (eMMC), through the stock block driver
 (`0x4012c59a` / `0x4012c780`) as the sample link and the library already use it:
 
 - `'DN2S'`, version 1, flags (bit 0: DIRECT JUMP), a check (`~magic ^ version ^ flags`);
@@ -103,26 +120,29 @@ One 512-byte sector, **`0x6FF000`** on the +Drive (eMMC), through the stock bloc
 
 ## 5. Verified in the emulator (`scripts/emu_jump.py`, digikit `ui800M-v014`)
 
-A01 16 steps, A02 12 (per pattern) or per track (master 16; tracks 16, 5, 7, 3), 1x; PLAY,
-A02 cued at global step 3, tick 3, played to step 36:
+pp: A01 16 steps, A02 12, per pattern. pt: A02 per track (master 16; tracks 16, 5, 7, 3).
+odd: A01 12 steps, A02 16. All 1x; PLAY, A02 cued 3 ticks into global step 3 (odd: 18, when
+A01 has played a loop and a half and is on its own step 6), played to step 36 (odd: 50).
 
 | run | result |
 |---|---|
 | off, this build vs the stock image | every tick's sequencer state identical (trace digest `377d5149…` both); the change at A01's end (step 15, A02's step 0 at 16) |
-| on (PTN + YES) | `DIRECT JUMP ON` shown; sector `444e3253 00000001 00000001 bbb1cdac` written; switch 2 ticks after the cue (step 4), start step 5; steps 5..36 identical to stock playing A02 from PLAY |
-| on, per track | the same, every track (lengths 16, 5, 7, 3) identical to the reference from step 5 |
+| on, pp (PTN + YES) | `DIRECT JUMP ON` shown; sector `444e3253 00000001 00000001 bbb1cdac` written; switch 2 ticks after the cue (step 4, A01's step 4 plays there); A02 from step 5 on its step 5; every step to 36 as the rule says, and identical to stock playing A02 from PLAY |
+| on, pt | the same; every track (lengths 16, 5, 7, 3) by the rule, the master restarting them at 16 and 32, identical to stock's from PLAY |
+| on, odd | switch at step 19 (A01's step 7 plays there); A02 from step 20 on its step 8 (the grid since PLAY would have given 4); every track by the rule to step 50 |
 | on, cued through `0x400d93f0` directly (program change / chain / song path) | stock's: trace digest `377d5149…`, no jump |
 | persist | on, power-on reads it back on; PTN + NO off, written, power-on reads it off; only `0x6FF000` read or written |
 
-No fault in any run. Boot from reset and the UI fuzz pass on the build.
+No fault in any run. Boot from reset passes on the build (draws its UI, the start-up frame the
+artist's).
 
 ## 6. Not verified, and open
 
 - **Hardware.** Nothing here has been on an instrument. Audio is not modelled: the trace is
   the sequencer's state, not what sounds.
-- The position follows the global grid since PLAY. After a pattern of odd length has run
-  (stock's changes restart at step 0), a jump lands on the global grid, not on "the step the
-  playing pattern is on". With patterns of one length started from PLAY the two agree.
+- Per pattern with CHANGE set shorter than the length, and per track, the master position
+  follows the change counter; mixed track scales (not 1x) take their tick phase from the new
+  pattern's master position. Neither was exercised.
 - The legacy chain gesture (PTN + TRIG held, more TRIGs) cues the first pattern through the
   single cue, so with the setting on that first pattern jumps; the chain then changes at the
   pattern's end as stock.

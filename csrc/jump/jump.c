@@ -1,6 +1,6 @@
 /* DIRECT JUMP (docs/jump.md): a pattern cued with PTN + TRIG while the sequencer plays starts
- * at once, at the step the global time since PLAY gives it, instead of at the end of the
- * playing pattern. Off unless the user turns it on: hold PTN and press YES (on) or NO (off);
+ * at once, from where the playing pattern was (Elektron's rule), instead of at the end of
+ * the playing pattern. Off unless the user turns it on: hold PTN and press YES (on) or NO (off);
  * the screen says DIRECT JUMP ON / OFF. The setting is the instrument's, kept in the mod's
  * own settings sector on the +Drive (SET_SECTOR, in our region), not in a project.
  *
@@ -18,7 +18,7 @@
  *       -> jmp_switch: for our jump, the start step (0x42c5a9c4) from jmp_position(), and
  *          stock's per-track position code reads the new pattern (a5)
  *   that code's end (0x400da8cc, pea 0x401f6b25)
- *       -> jmp_tracks: each track's start step wrapped by its own length
+ *       -> jmp_tracks: each track goes on from its own step, wrapped by its new length
  *
  * Chains, songs and MIDI program changes cue through other callers of 0x400d93f0 and never
  * arm, so they keep stock's behaviour; with the setting off nothing here changes what stock
@@ -50,13 +50,11 @@ typedef signed char s8;
 #define SEQ_PLAYING (*(volatile u32 *)0x42C5A918u)             /* 1 while it plays */
 #define SEQ_PATTERN (*(volatile u32 *)0x42C5A9A0u)             /* the playing pattern */
 #define SEQ_PREVIOUS (*(volatile u32 *)0x42C5A9A8u)            /* the one before the switch */
-#define SEQ_SIXTEENTHS (*(volatile u32 *)0x42C5A9D0u)          /* ticks since PLAY: 6 a unit, */
-#define SEQ_TICK6 (*(volatile u32 *)0x42C5A9D4u)               /* ... and 0..5 within it */
 #define TRACK_NEXT ((volatile u16 *)0x42C5A9EAu)               /* each track's start step at a switch */
-#define SCALE_TICKS ((const u32 *)0x401F6B08u)                 /* ticks a step: 2x .. 1/8x */
+#define TRACK_CUR ((volatile u8 *)0x42C5A984u)                 /* each track's step now playing */
+#define SEQ_COUNTER (*(volatile u16 *)0x42C5A91Cu)             /* the master counter, advanced at the boundary */
 #define PAT_LENGTH 122196                                      /* s16: the pattern's (master) length */
 #define PAT_MODE 122201                                        /* u8: 0 per pattern, else per track */
-#define PAT_SCALE 122202                                       /* s8: the master scale, 0..6 */
 #define TRK_STRIDE 1701                                        /* the pattern's tracks, from +0 */
 #define TRK_LENGTH 1164                                        /* s16: a track's length */
 
@@ -168,33 +166,40 @@ void jmp_cued(void)
 }
 
 /* at the switch (jmp_switch): -> the new pattern's start step, or -1 when the switch is not
- * the one we armed (then stock's 0 stands). The step that plays at the next boundary is the
- * one the new pattern would be on had it played since PLAY: at a boundary the ticks since
- * PLAY, read here before the ISR counts this tick, are one short of whole steps (measured,
- * scripts/emu_jump.py), and the step after this one is what starts */
+ * the one we armed (then stock's 0 stands). Elektron's DIRECT JUMP rule: the new pattern
+ * goes on from where the playing one was. The switch is at a step boundary, after this
+ * boundary's step of the playing pattern has been taken, so the step that starts is the one
+ * after it: per pattern, the playing pattern's step (each track's, 0x42c5a984) + 1; per
+ * track, its master counter (0x42c5a91c, already advanced: 0 after a wrap is its length).
+ * Wrapped by the new pattern's length (stock: 1 or less is no wrap, INF). Each track's own
+ * start comes after (jmp_wrap_tracks) */
 int jmp_position(void)
 {
     u32 p = SEQ_PATTERN;
-    if (p != jmp_to || SEQ_PREVIOUS != jmp_from || !p)
+    if (p != jmp_to || SEQ_PREVIOUS != jmp_from || !p || !jmp_from)
         return -1;
-    const u8 *pat = (const u8 *)p;
-    u32 ticks = SEQ_SIXTEENTHS * 6u + SEQ_TICK6;
-    s8 scale = (s8)pat[PAT_SCALE];
-    u32 div = pat[PAT_MODE] == 1 ? 6u : (scale >= 0 && scale <= 6 ? SCALE_TICKS[(int)scale] : 6u);
-    if (div == 0)
-        div = 6u;
-    u32 pos = (ticks + 1u) / div + 1u;
+    const u8 *pat = (const u8 *)p, *old = (const u8 *)jmp_from;
+    u32 next;
+    if (old[PAT_MODE] == 0) {
+        next = (u32)TRACK_CUR[0] + 1u;
+    } else {
+        next = SEQ_COUNTER;
+        s16 olen = *(const s16 *)(old + PAT_LENGTH);
+        if (next == 0 && olen > 1)
+            next = (u32)olen;
+    }
     s16 len = *(const s16 *)(pat + PAT_LENGTH);
-    if (len > 1)                                 /* stock: 1 or less is no wrap (INF) */
-        pos %= (u32)len;
+    if (len > 1)
+        next %= (u32)len;
     jmp_fix = 1;
-    jmp_last = pos;
+    jmp_last = next;
     jmp_count++;
-    return (int)pos;
+    return (int)next;
 }
 
-/* after stock's per-track positions (jmp_tracks): each track's start step inside its own
- * length (stock's code adds no wrap: it always starts at 0) */
+/* after stock's per-track positions (jmp_tracks): each track goes on from its own step in the
+ * playing pattern, the step after it, wrapped by its length in the new one (the pattern's,
+ * per pattern; the track's, per track) */
 void jmp_wrap_tracks(void)
 {
     const u8 *pat = (const u8 *)SEQ_PATTERN;
@@ -204,7 +209,9 @@ void jmp_wrap_tracks(void)
     for (int t = 0; t < 16; t++) {
         s16 len = per_track ? *(const s16 *)(pat + TRK_STRIDE * t + TRK_LENGTH)
                             : *(const s16 *)(pat + PAT_LENGTH);
-        if (len >= 1 && TRACK_NEXT[t] >= (u16)len)
-            TRACK_NEXT[t] = (u16)(TRACK_NEXT[t] % (u16)len);
+        u32 next = (u32)(u8)(TRACK_CUR[t] + 1u);
+        if (len >= 1)
+            next %= (u32)(u16)len;
+        TRACK_NEXT[t] = (u16)next;
     }
 }
