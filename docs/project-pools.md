@@ -186,3 +186,28 @@ are v0.37's format, every entry's frames whole). Coming back:
 - A real LOAD and NEW through the detours (the emulator runs the OS's code with the +Drive
   read stubbed, and NEW from its slot-setting site), the switch's real time, the eMMC's
   write time for a list (10 to 218 sectors).
+
+## Verified in the emulator (2026-11-02, `scripts/emu_pools.py`)
+
+ColdFire emulator (digikit snapshot `ui800M-v014`), the build installed, the +Drive and the
+DSP played by Python; the OS's own LOAD (`0x40042E6E`, its +Drive read and temp-slot write
+stubbed to succeed), NEW (entered at its slot-setting site) and SAVE AS (`0x400402D8`, its
+writes stubbed). Every audio period, every DSP directory entry was checked against the
+switched-to pool and its frames against the sample's own bytes (10,409 entry checks).
+
+| check | result |
+|---|---|
+| migration (a v0.37 image of 3 samples, no lists) | legacy list == the image's directory byte for byte; superblock owner 4; 0 sectors written to the pool image; the legacy list's sums filled in after the load |
+| LOAD 7 (no list) | the legacy pool; the DSP's directory empty 1 period after the LOAD; 3 slots resident, 0 frame words sent |
+| LOAD TO PROJECT in 7 | 7's own list written at once, with the new slot's sum |
+| LOAD 9 (no list), then a slot emptied and a library sample loaded in 9 | the legacy pool, 7's sample silent; the new sample placed at `0x3400..0x3A40`, clear of 7's at `0x2800..0x33B8` |
+| LOAD 7, 9, 7 | each its own slots; 0 frame words sent (all resident) |
+| NEW (-1), NEW in 12, LOAD 5 (old), LOAD 12 | empty; empty and 12's list empty; today's pool; empty |
+| SAVE AS 42 from 9 | the slot byte 42; 42's list == 9's pool, 9's kept; LOAD 42 gives it |
+| power cycle (7 active, its kit's track on slot 4) | 7's pool, load order slot 4 first (`[3, 0, 1, 2]`); 9's change kept |
+| list 9's newest copy corrupted / both | its previous copy (HAT, not HATTWO) / the legacy pool |
+| a sector of 7's library sample changed on the +Drive | 1 mismatch: that slot never reached the DSP, emptied; the other three played |
+| the image's directory changed behind our back | boot case 6: kept, into 7's list |
+| power cut after each write (and torn inside each multi-sector write) of a rename (20 sectors) and of a switch 7 -> 9 (12 sectors), the OS back with 9 and with 7 | 26 power-ons, every one a whole pool, the right owner's, lists 7 and 9 intact |
+| every sector written | inside the pool image, the lists' region or the library; the final image's header and directory as v0.37 reads them, every entry's frames whole |
+| the DSP | never held another project's sample nor one half sent (after the harness fix of its own expected-bytes table) |
