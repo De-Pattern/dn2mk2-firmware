@@ -118,7 +118,7 @@ Source: comments on "DIGITONE 2 mk2 FIRMWARE MOD: MD|DT2|MNM" (De-Patterning), r
 
 - Stereo sampling from the inputs (bearsshuffle)
 - Samples streamed from the +Drive, using its free ~19 GB (paQ75, DrLaemmerbein)
-- Polyphonic samples per track (paQ75): not planned for now
+- Polyphonic samples per track (paQ75): already there (sample tracks follow the DN2 voice allocation; the owner heard chords on v0.35); checked on the DSP for v0.37, in the gate's chord check from v0.38
 - A build with only the Machinedrum and Monomachine machines (douleursolitude)
 - "Ensemble machines need work" (ModernDevotion): which machine is unclear; asked for plain-English detail
 - A Discord (taktonmusic)
