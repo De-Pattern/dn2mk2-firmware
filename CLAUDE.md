@@ -11,9 +11,17 @@ my unit."*)
     DT2_SECTIONS=../sec111 python scripts/ship_gate.py ../Digitone_II_OS1.11.syx BUILD.syx
 
 It runs, in order, and stops at the first failure: preflight (bootstrap, updater,
-metadata, Outbox untouched; signature; DSP size) → DSP identity → DSP hardware rules → SHARC runner
-(types 0–4 bit-identical to stock) → ColdFire instruction-set check → boot from
-reset → engine + SAVE/LOAD → unit tests. About an hour; run it in the background.
+metadata, Outbox untouched; signature; DSP size) → DSP identity → DSP hardware rules → ColdFire
+instruction-set check → unit tests (both cores) → the ColdFire emulator steps, quickest first
+(the UI steps, then engine + SAVE/LOAD, boot from reset, the UI fuzz; the dead link last), with the SHARC runner
+(types 0–4 bit-identical to stock) beside them; a failing SHARC part stops it at the next step.
+`--list` prints the order. About an hour; run it in the background.
+
+**Step by step first (owner, 2026-11-01).** When a change touches a step's inputs, run that
+step alone until it passes: `... ship_gate.py STOCK BUILD.syx --only STEP[,STEP...]` (e.g.
+`--only unit,chords`). It records its pass in the reuse cache exactly as a full run would, but
+never clears a build or writes its `.gate.json`. Then run the full gate, and make no test or
+script edit once it has started: it reuses the standalone passes only while nothing changed.
 
 **Exact reuse (owner, 2026-10-25).** Every build still gets a full gate run and its own
 record. The SHARC runner runs alongside the ColdFire steps. A long step's earlier pass is
