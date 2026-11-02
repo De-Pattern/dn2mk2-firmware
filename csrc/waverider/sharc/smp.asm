@@ -774,7 +774,7 @@ wr_sm_else_40.:
       R12 = 0x1;
       COMP(R8, R12);
       IF NE JUMP 0xbf1e31;                   // -> wr_sm_else_55.
-      R9 = 0x268438;
+      R9 = 0x200a9000;
 .GLOBAL wr_sm_else_55.;
 wr_sm_else_55.:
       R12 = 0x2;

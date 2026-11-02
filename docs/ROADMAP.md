@@ -210,6 +210,12 @@ inharmonic modes).
   macros are turned at once -- the Analog Four mk2's Perf mode. One macro per knob, all
   its mappings moving together, live. Weight unknown; after the stability work.
 - Holding SYN to show the values on our pages (O14): v0.35.
+- **Port to stock OS 1.12 (future, owner 2026-11-01: not needed now).** 1.11 already has
+  Outbox 8; 1.12 adds routing the main outputs through it. The DSP program is byte for byte
+  the same in 1.12 (checked), so only the ColdFire side moves: ~385 patch sites and the C's
+  stock addresses (mostly a constant shift per region; every edit's stock-bytes check refuses
+  a misplacement), and the gate's 1.11 emulator snapshots rebuilt. Its own release; then
+  build only on 1.12. Overtone (complex-ping) is on 1.12.
 - **Undecided (owner, 2026-11-01, "let's sit on it")**: PROJECT RAM shown as one list
   (or renamed POOL) instead of split into INCOMING and RECORDED, leaving those two as
   +DRIVE folders only.

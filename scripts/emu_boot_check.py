@@ -42,12 +42,13 @@ sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/digikit-up")
 
 from emu import dspboot, symbols                              # noqa: E402
 from unicorn import UC_HOOK_CODE                              # noqa: E402
-from unicorn.m68k_const import UC_M68K_REG_A2                 # noqa: E402
+from unicorn.m68k_const import UC_M68K_REG_A2, UC_M68K_REG_D3  # noqa: E402
 
 ROOT = pathlib.Path("/mnt/d/01_Code/Z_Personal/dn2_firmware")
 SYX = ROOT / "00_Resources/00_Firmware/Digitone_II_OS1.11_dist/Digitone_II_OS1.11.syx"
 CACHE = ROOT / "out/boot-check/control.json"
 REPORTER = 0x4011EA6A
+ANIZ_LIMIT = 700_000_000                 # v0.37: past the intro's first frame (measured: shown before 700M)
 
 # **The control is only a control while the emulator it was measured on stays
 # put.** This caches what a stock boot does, because stock does not change --
@@ -79,7 +80,7 @@ def stock_path():
     return os.path.join(os.environ["DT2_SECTIONS"], "section_3_MAIN_OS.bin")
 
 
-def run(image_path, limit, frame_at, entries=()):
+def run(image_path, limit, frame_at, entries=(), aniz=None):
     """Boot from reset. -> (instructions, frames, the fault or None, reached).
 
     `entries` are the build's own routines. Whether they ran is as much a part
@@ -109,6 +110,24 @@ def run(image_path, limit, frame_at, entries=()):
             def hit(uc, address, size, user, name=name):
                 reached[name] += 1
             m.uc.hook_add(UC_HOOK_CODE, hit, begin=addr, end=addr)
+        if aniz is not None:
+            # v0.37, the start-up animation: each time the stamp's decoder has a frame
+            # ready to show (aniz_show), the frame it decoded (zst + 16, 1 KB) against the
+            # artist's frame d3 (dnfw.bootanim), bit for bit
+            def at_show(uc, address, size, user):
+                k = uc.reg_read(UC_M68K_REG_D3)
+                got = bytes(uc.mem_read(aniz["zst"] + 16, 1024))
+                aniz["shown"] += 1
+                aniz["frames"].add(k)
+                if not (0 <= k < len(aniz["expect"])) or got != aniz["expect"][k]:
+                    aniz["wrong"].append(k)
+            m.uc.hook_add(UC_HOOK_CODE, at_show, begin=aniz["show"], end=aniz["show"])
+
+            def at_stamp(uc, address, size, user):
+                aniz["calls"] += 1
+                if aniz["calls"] == 1:
+                    aniz["first_at"] = st["n"]
+            m.uc.hook_add(UC_HOOK_CODE, at_stamp, begin=aniz["stamp"], end=aniz["stamp"])
 
     m, st, stop = dspboot.run(str(SYX), open(image_path, "rb").read(), limit=limit,
                               machine_out=holder, pre_start=pre_start)
@@ -144,6 +163,9 @@ def main() -> int:
     p.add_argument("image", help="a built section_3_MAIN_OS.bin")
     p.add_argument("--limit", type=int, default=450_000_000)
     p.add_argument("--refresh-control", action="store_true")
+    p.add_argument("--aniz", action="store_true",
+                   help="v0.37: the build plays the start-up animation (dnfw.bootanim): every frame the "
+                        "stamp shows is checked against the artist's, and every frame must show")
     args = p.parse_args()
 
     profile = symbols.resolve(open(stock_path(), "rb").read())
@@ -180,7 +202,21 @@ def main() -> int:
     else:
         print("  no symbols.json beside the image: coverage cannot be reported, "
               "and a boot alone does not clear a build.")
-    ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries)
+    aniz = None
+    if args.aniz:
+        here = pathlib.Path(__file__).resolve().parent
+        sys.path.insert(0, str(here.parent / "src"))
+        from dnfw import bootanim                                # noqa: PLC0415
+        from dnfw.mods import bootscreen                         # noqa: PLC0415
+        aniz = {"show": bootscreen.SPEC["aniz_show"], "zst": bootscreen.SPEC["zst"],
+                "stamp": bootscreen.SPEC["stamp"], "calls": 0, "first_at": None,
+                "expect": bootanim.images(), "shown": 0, "frames": set(), "wrong": []}
+        # from reset the intro first calls the stamp near 316M, and its first frame is
+        # shown (aniz_show) after the stock intro routine returns, past 450M; under dspboot
+        # the intro's timers do not run on (stock too stops at one frame), so here the first
+        # frame is checked, and scripts/emu_aniz_check.py checks every frame from `boot400M`
+        args.limit = max(args.limit, ANIZ_LIMIT)
+    ran, frames, fault, reached = run(args.image, args.limit, frame_at, entries, aniz)
     print(f"  {os.path.basename(os.path.dirname(args.image))}: {frames} frame(s) in "
           f"{ran:,} instruction(s), {round(time.time() - started, 1)}s\n")
 
@@ -203,6 +239,16 @@ def main() -> int:
     # moment it did. A gate that says passed about code it never executed is
     # the exact failure it exists to prevent, so coverage is part of the
     # verdict rather than a footnote under it.
+    if aniz is not None:
+        n = len(aniz["expect"])
+        print(f"  the intro called the stamp {aniz['calls']} time(s), the first at instruction "
+              f"{aniz['first_at']}")
+        print(f"  start-up animation: {aniz['shown']} frame(s) shown, {len(aniz['frames'])} of {n} "
+              f"distinct, {len(aniz['wrong'])} not the artist's")
+        if aniz["wrong"] or 0 not in aniz["frames"]:
+            print(f"  the animation is wrong or incomplete (wrong: {sorted(set(aniz['wrong']))[:10]}, "
+                  f"missing: {sorted(set(range(n)) - aniz['frames'])[:10]}).\n\n  DO NOT FLASH.")
+            return 1
     ran_names = sorted(n for n, c in reached.items() if c)
     idle = sorted(n for n, c in reached.items() if not c)
     print(f"  booted and drew its UI ({frames} frame(s), control {base['frames']}).")

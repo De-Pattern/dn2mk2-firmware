@@ -29,6 +29,7 @@ read as PERC's controls.
 from __future__ import annotations
 
 import json
+import struct
 import pathlib
 
 from . import RAM, Extent, ModError, Result, platform
@@ -44,8 +45,20 @@ BASE = 0x40000400
 SPEC = json.loads((pathlib.Path(__file__).with_name("waverider_code.json")).read_text())
 
 
+def _boot():
+    """v0.37: the start-up animation (dnfw.bootanim, by s!Rwa²) through the boot-screen
+    mod's stamp (scripts/gen_bootscreen_code.py, its ANIZ path): the intro hook's site and
+    stock bytes, the stamp's CODE chunk, the ANIZ data chunk"""
+    from . import bootscreen as B
+    from .. import bootanim
+    spec = B.SPEC
+    return spec, bootanim.chunk()
+
+
 def extents(firmware=None, area_length: int = 0) -> list[Extent]:
     out = [Extent(MAIN_OS, e["va"] - BASE, len(e["new"]) // 2, e["what"]) for e in SPEC["edits"]]
+    from . import bootscreen as B
+    out.append(Extent(MAIN_OS, B.SPEC["intro_va"] - BASE, 8, "v0.37: the intro hook (the start-up animation)"))
     out += platform.extents(area_length)
     size = None
     if firmware is not None:
@@ -107,7 +120,9 @@ def _md_ui() -> tuple[int, bytes, str] | None:
 
 def ram() -> list[Extent]:
     from ..sampler import machines as SM
+    from . import bootscreen as B
     return ([Extent(RAM, load, len(code), what) for load, code, what in _chunks()]
+            + B.ram()
             + [Extent(RAM, SM.MIRROR, SM.MIRROR_BYTES,
                       "the sample link's mirror of the pool (csrc/sampler/link.c, v0.14)")])
 
@@ -148,7 +163,17 @@ def apply(firmware) -> Result:
         raise ModError(f"the DSP boot stream: {exc}") from exc
     codes = [(platform.area.CODE, platform.area.CodeChunk(load, code).pack())
              for load, code, _ in _chunks()]
-    content = platform.join(_main_os(main_os), others + codes)
+    # v0.37: the start-up animation: the intro routine's first 8 bytes jump to the stamp
+    bspec, aniz = _boot()
+    base_os = bytearray(_main_os(main_os))
+    at, stock = bspec["intro_va"] - BASE, bytes.fromhex(bspec["intro_stock"])
+    if bytes(base_os[at:at + 8]) != stock:
+        raise ModError(f"0x{bspec['intro_va']:08x} (the intro routine) is not stock; this mod is "
+                       "for unmodified Digitone II 1.11")
+    base_os[at:at + 8] = b"\x4e\xf9" + struct.pack(">I", bspec["stamp"]) + b"\x4e\x71"
+    codes += [(platform.area.CODE, platform.area.CodeChunk(bspec["load"], bytes.fromhex(bspec["code"])).pack()),
+              (bspec["aniz_chunk"].encode(), aniz)]
+    content = platform.join(bytes(base_os), others + codes)
     area_length = len(content) - platform.STOCK_LENGTH
     return Result(payloads={MAIN_OS: content, DSP_STREAM: section7},
                   extents=extents(firmware, area_length),

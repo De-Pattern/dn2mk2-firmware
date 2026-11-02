@@ -611,6 +611,10 @@ def main(argv=None):
             results["3k_chords"] = step_chords(warm(), sound, machines)
             show(results["3k_chords"])
             gc.collect()
+        if "mainsrc" in steps:
+            print("\nstep (probe): the main mix as the recorder sees it")
+            results["probe_mainsrc"] = step_mainsrc(warm(), sound, machines, a.blocks)
+            show(results["probe_mainsrc"])
         if "stress" in steps:
             print("\nstep 3s: the stress test (the clock made to move)")
             results["3s_stress"] = step_stress(warm(), sound, machines)
@@ -1407,7 +1411,7 @@ def step_chords(init, sound, machines, need=4) -> dict:
                           "sounding_mean": round(sum(sounding) / max(len(sounding), 1), 2),
                           "our_end_over_P": over and round(over, 3)}
             print(f"    {name}: {nums[name]}", flush=True)
-            want = need if name != "DPRO-DDRW" else 2      # (DDRW: ~127,000 cycles a voice; the frame holds two)
+            want = need if name != "DPRO-DDRW" else 3      # (v0.37: DDRW skips its zero-weight level: three fit)
             flicker = any(b2 > a2 for a2, b2 in zip(sounding, sounding[1:]))    # a dropped voice back with no note
             nums[name]["flicker"] = flicker
             nums[name]["guard_attack"] = trace
@@ -2073,6 +2077,32 @@ def step_rec(init, sound, machines, blocks) -> dict:
     rec2.pop("state", None)
     close2 = bool(got2) and max(abs(a - b) for a, b in zip(got2, want2)) <= 2 / 32768
 
+    # run 3, v0.37: MAIN, L+R (the owner: resampling MAIN recorded an empty sample; MIX_BUF is
+    # empty while our code runs, so MAIN reads the tap pvmix fills at the master mix call,
+    # SM.MAIN_TAP: poked here as pvmix would leave it, and MIX_BUF itself left empty)
+    mainL = [0.4 * _m.sin(2 * _m.pi * 220 * k / 48000) for k in range(32 * n)]
+    mainR = [0.2] * (32 * n)
+    state3 = {"b": 0}
+
+    def at_dispatch_3(r):
+        b = state3["b"]
+        if b == 0:
+            command(r, 11, SM.CMD_NOW, src=1, chan=0, dest=2, place=0x8000)
+        for k in range(32):
+            m2.poke(r.state, SM.MAIN_TAP + 4 * k, bits(mainL[32 * b + k]))
+            m2.poke(r.state, SM.MAIN_TAP + 0x80 + 4 * k, bits(mainR[32 * b + k]))
+            m2.poke(r.state, SM.MIX_BUF + 4 * k, 0)
+            m2.poke(r.state, SM.MIX_BUF + 0x80 + 4 * k, 0)
+        state3["b"] += 1
+    rec3 = run_blocks(init, frames_2, n, extra_hooks={m3.DISPATCH: at_dispatch_3})
+    ok3 = rec3["ok"]
+    st3 = rec3["state"].state if ok3 else None
+    words3, got3 = recorded(st3, 2) if ok3 else ([0] * 4, [])
+    want3 = [max(-32768, min(32767, int(min(0.999969, max(-1.0, (a + b) * 0.5)) * 32768.0))) / 32768.0
+             for a, b in zip(mainL, mainR)][:words3[1]]
+    rec3.pop("state", None)
+    close3 = bool(got3) and max(abs(a - b) for a, b in zip(got3, want3)) <= 2 / 32768
+
     # v0.22: the RAM check (CMD_PROBE) on the image's own code. Block 0 takes the command
     # and fills the low area's first 256 words; then the last chunk of phase 3 and of
     # phase 4 are set up (both areas' last 256 words as the fills would leave them; the
@@ -2134,6 +2164,9 @@ def step_rec(init, sound, machines, blocks) -> dict:
         "TRK6, MONO L: track 6's bucket's left (the voices' routing elsewhere), back to its level, "
         "into SAMP 125 at 8 MB into the recordings' area (within 2 LSB)":
             ok2 and words2[1] == 32 * n and close2 and words2[0] == dsp.SMP_POOL_DDR + SM.REC_OFFSET + 0x4000 * 512,
+        "v0.37: MAIN, L+R: the main mix as the master mix call takes it (the tap), into SAMP 126, "
+        "not silence (within 2 LSB)":
+            ok3 and words3[1] == 32 * n and close3 and max(abs(x) for x in got3) > 0.2,
         "the status while recording: state 2, the command's sequence, frames / 64, the peak":
             ok2 and all(ok_status(h) and h[0] == SM.STATUS_MAGIC | 2 and h[1] == 7 and h[2] == (32 * n) >> 6
                         and abs(h[3] / 32767 - max(abs(x) for x in left[-32:])) < 0.01 for h in stat2),
@@ -2216,6 +2249,7 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
 
     own = {C[w] for w in ("pva", "pvn", "pvk", "pvs0", "pvs1", "pvs2", "pvs3", "pvs12", "pvs13", "pvsi", "pvsa",
                           "pvl0", "pvln")}
+    own |= {SM.MAIN_TAP + 4 * k for k in range(64)}     # v0.37: the MAIN tap is the preview's too
     out, checks = {}, {}
     for name, left, loop in (("none", 0, False), ("full", 40, False), ("tail", 5, False), ("loop", 5, True)):
         want, pva, pvn = model(left, mix_in, loop)
@@ -2233,6 +2267,8 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         checks[f"{name}: every register as stock's"] = same_regs
         checks[f"{name}: every word written as stock's (given the mixed block), but the preview's own"] = ok and not stray
         checks[f"{name}: the mix as the model's ({min(left, 16)} words added)"] = ok and got == want
+        tap = [m2.word(rm.state, SM.MAIN_TAP + 4 * k) or 0 for k in range(64)]
+        checks[f"{name}: v0.37: the MAIN tap holds the mix as it came, before the preview"] = ok and tap == mix_in
         if left == 0:
             checks["none: the mix untouched"] = ok and got == mix_in
         if loop:                                # v0.30: at its end it starts again
@@ -2247,6 +2283,30 @@ def step_pvmix(snap, m2mach, m5: Image, stock: Image) -> dict:
         if os.environ.get("PVMIX_DEBUG"):
             print(name, out[name])
     return {"ok": all(checks.values()), "checks": checks, "numbers": out}
+
+
+def step_mainsrc(init, sound, machines, blocks) -> dict:
+    """v0.37 (the owner: resampling MAIN L+R records an empty sample): the main mix buffer
+    (MIX_BUF) as our recorder sees it (at our sampler's entry) and as the master mix call
+    sees it (at the preview mixer's site), with a stock FM Tone track sounding"""
+    seen = {"smp": [], "pvmix": []}
+
+    def peak(r):
+        return max(abs(V.bits_f32(m2.word(r.state, SM.MIX_BUF + 4 * k) or 0)) for k in range(64))
+
+    def at_smp(r):
+        seen["smp"].append(peak(r))
+
+    def at_pv(r):
+        seen["pvmix"].append(peak(r))
+
+    def fb(b):
+        return base_frame(sound, machines, t0=0, trigger=b == 1).to_bytes()
+    rr = run_blocks(init, fb, 8, extra_hooks={dsp.SMP_SW: at_smp, dsp.PVMIX_SW: at_pv})
+    nums = {k: [round(x, 5) for x in v] for k, v in seen.items()}
+    print(f"    MIX_BUF peak at our sampler's entry: {nums['smp']}", flush=True)
+    print(f"    MIX_BUF peak at the master mix call:  {nums['pvmix']}", flush=True)
+    return {"ok": rr["ok"], "checks": {"ran": rr["ok"]}, "numbers": nums}
 
 
 def step_tdm(init, sound, machines, blocks) -> dict:

@@ -398,3 +398,12 @@ def test_every_table_perc_reads_is_loaded_by_a_span():
     assert loaded(L.sin, sdata[at["sin"]:at["pow2"]]), "PERC's sine (AMD) is not loaded"
     pdata, _ = PM.tables_bytes()
     assert loaded(L.tables, pdata), "PERC's tables are not loaded"
+
+
+def test_v037_the_recorders_main_tap_is_one_place():
+    """the tap pvmix fills and the recorder's MAIN reads: one address, in the DSP's map,
+    in proven L2, past the DPRO tables' room"""
+    from dnfw.sampler import machines as SM
+    from dnfw.waverider import dsp
+    assert SM.MAIN_TAP == dsp.MAIN_TAP_L2 == dsp.MNM_DT_L2 + dsp.MNM_DT_BYTES
+    assert 0x20088400 <= dsp.MAIN_TAP_L2 and dsp.MAIN_TAP_L2 + dsp.MAIN_TAP_BYTES <= 0x200B0000

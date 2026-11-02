@@ -20,7 +20,11 @@ failure:
 4. **ColdFire instruction set** (`check_coldfire.py`): every `CODE` chunk the loader
    runs has no scale-8 addressing; and every hit in MAIN OS against stock lies past
    stock's end *and* outside every `CODE` chunk (i.e. in data that never executes).
-5. **boot from reset** (`emu_boot_check.py`): boots and draws its UI, no fault.
+5. **boot from reset** (`emu_boot_check.py`): boots and draws its UI, no fault (v0.37: and the
+   start-up animation's first frame is the artist's).
+5b. **start-up animation** (v0.37, `emu_aniz_check.py`): from the snapshot before the intro,
+   with the build's hook and appended area installed, all 59 frames, each the artist's, in
+   order, to the intro's last frame.
 6. **engine + LOAD/SAVE** (`emu_boot_engine.py`): the evaluator runs clean under the
    real loader; CODE chunks intact; machine types survive a SAVE/LOAD round trip.
 6b. **sample link** (v0.16, `emu_waverider_menu.py`'s `link16`): on the ColdFire, the
@@ -350,12 +354,35 @@ def main() -> int:
 
         # 5. boot from reset
         boot_cmd = [a.venv, "-u", "scripts/emu_boot_check.py", bdir / "section_3_MAIN_OS.bin"]
+        # v0.37: the build plays the start-up animation (dnfw.bootanim): every frame the stamp
+        # shows during the boot, checked bit for bit against the artist's, all of them shown
+        from dnfw.mods import waverider as Wb   # noqa: PLC0415
+        anim = hasattr(Wb, "_boot")
+        if anim:
+            boot_cmd.append("--aniz")
 
         def boot_body(tdir):
             rc, out = run("boot_check", boot_cmd, logs, trace=tdir)
             good = rc == 0 and "booted and drew its UI" in out
-            return good, "booted and drew its UI, no fault" if good else out[-800:]
+            if anim:
+                good = good and "not the artist's" in out and ", 0 not the artist's" in out
+            return good, ("booted and drew its UI, no fault" + ("; the start-up animation's first frame, "
+                          "the artist's" if anim else "") if good else out[-800:])
         gate("boot from reset", *cached("boot from reset", [boot_cmd], boot_body))
+
+        # 5b. v0.37: the start-up animation, every frame. From reset the intro stops after its
+        # first frame under the emulator (stock too), so from the snapshot taken just before
+        # it, with this build's intro hook and appended area installed as its loader would:
+        # all 59 frames, each bit for bit the artist's, in order, to the intro's last frame
+        if anim:
+            aniz_cmd = [a.venv, "-u", "scripts/emu_aniz_check.py", a.build]
+
+            def aniz_body(tdir):
+                rc, out = run("aniz_check", aniz_cmd, logs, trace=tdir)
+                good = rc == 0 and "in order: PASS" in out and "59 of 59 distinct, 0 not the artist's" in out
+                return good, ("all 59 frames, each the artist's, in order, to the intro's end"
+                              if good else out[-800:])
+            gate("start-up animation, every frame", *cached("start-up animation", [aniz_cmd], aniz_body))
 
         # 6. engine + LOAD/SAVE
         # PERC (5), the Monomachine's (6, 7, v0.26: 14..) and the sample machines (8..13,

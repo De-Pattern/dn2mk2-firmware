@@ -90,6 +90,8 @@ CODE_CAP = 0x8000                            # up to the data window at RUNTIME_
 MAGIC = b"DNFW"
 BOOT = b"BOOT"
 ANIM = b"ANIM"
+ANIZ = b"ANIZ"                               # v0.37: an animation as frame-to-frame changes (dnfw.bootanim)
+ANIZ_MAGIC = b"ANZ1"                         # the decoder's state is set up
 SOURCE_OBJ = 0x42C4567C                      # the intro's source Bitmap
 CLEAR_BITMAP = 0x40114D94                    # (bitmap, 0, 1): what the intro calls first
 BLIT = 0x401157FC                            # (dst, src, 0, 0, 0): its plain copy, frames 0-4
@@ -111,6 +113,8 @@ stamp:
     move.l  %a1@,%d0
     cmpi.l  #{int.from_bytes(ANIM, 'big'):#010x},%d0
     beq     20f
+    cmpi.l  #{int.from_bytes(ANIZ, 'big'):#010x},%d0
+    beq     40f
     cmpi.l  #{int.from_bytes(BOOT, 'big'):#010x},%d0
     beq.s   2f
     lea     %a1@(12),%a1
@@ -180,7 +184,7 @@ stamp:
 22: move.l  %a1@+,%a0@+
     subq.l  #1,%d1
     bne.s   22b
-    pea     1
+23: pea     1
     clr.l   %sp@-
     move.l  %sp@(32),%sp@-              | panel
     jsr     {CLEAR_BITMAP:#010x}
@@ -195,9 +199,97 @@ stamp:
 30: moveml  %sp@,%d2-%d4
     lea     %sp@(12),%sp
     rts
+
+| v0.37, ANIZ: as ANIM, but each frame is stored as its changes from the one before
+| (dnfw.bootanim: per frame, pairs (skip, n) of longwords to step over and to XOR, then
+| n longwords; (0, 0) ends the frame), decoded into the stamp's own 1 KB frame (zst + 16)
+| one frame after another. +0 frames, +4 table length T, +8 T bytes: the frame to show at
+| each intro frame (past T, the last), then on a long boundary the changes.
+40: move.l  %a1@(4),%d4
+    addi.l  #{RUNTIME_VA:#010x},%d4     | the chunk, kept across the call
+    move.l  %sp@(24),%sp@-              | panel
+    move.l  %sp@(24),%sp@-              | second argument
+    move.l  %sp@(24),%sp@-              | frame counter
+    bsr     9b                          | the stock intro routine
+    lea     %sp@(12),%sp
+    move.l  {SOURCE_DATA_PTR:#010x},%d0
+    beq     30b                         | bitmap not built: leave stock's frame
+    movea.l %d4,%a1
+    move.l  %sp@(16),%d0                | the intro's frame counter
+    move.l  %a1@(4),%d2                 | T
+    cmp.l   %d2,%d0
+    bcc.s   41f
+    moveq   #0,%d3
+    move.b  %a1@(8,%d0:l),%d3           | the frame to show
+    bra.s   42f
+41: move.l  %a1@,%d3
+    subq.l  #1,%d3                      | past the table: the last frame
+42: lea     zst,%a0
+    move.l  %a0@,%d0
+    cmpi.l  #{int.from_bytes(ANIZ_MAGIC, 'big'):#010x},%d0
+    bne.s   43f
+    cmp.l   %a0@(4),%d3
+    bge.s   44f                         | ahead of (or at) the frame decoded: go on from it
+43: move.l  #{int.from_bytes(ANIZ_MAGIC, 'big'):#010x},%d0
+    move.l  %d0,%a0@
+    moveq   #-1,%d0
+    move.l  %d0,%a0@(4)                 | none decoded
+    move.l  %d2,%d0
+    addi.l  #11,%d0
+    andi.l  #-4,%d0
+    add.l   %d4,%d0
+    move.l  %d0,%a0@(8)                 | the first frame's changes
+    lea     %a0@(16),%a1
+    move.l  #{WORDS},%d0
+45: clr.l   %a1@+
+    subq.l  #1,%d0
+    bne.s   45b
+44: lea     zst,%a0
+    move.l  %a0@(4),%d0
+    cmp.l   %d3,%d0
+    bge.s   50f                         | decoded up to the frame to show
+    movea.l %a0@(8),%a1                 | its changes
+    lea     %a0@(16),%a0                | the frame
+46: moveq   #0,%d0
+    move.b  %a1@+,%d0                   | skip
+    moveq   #0,%d1
+    move.b  %a1@+,%d1                   | n
+    tst.l   %d0
+    bne.s   47f
+    tst.l   %d1
+    beq.s   49f                         | (0, 0): the frame ends
+47: lsl.l   #2,%d0
+    adda.l  %d0,%a0
+    tst.l   %d1
+    beq.s   46b
+48: move.l  %a1@+,%d0
+    eor.l   %d0,%a0@+
+    subq.l  #1,%d1
+    bne.s   48b
+    bra.s   46b
+49: lea     zst,%a0
+    move.l  %a1,%a0@(8)
+    move.l  %a0@(4),%d0
+    addq.l  #1,%d0
+    move.l  %d0,%a0@(4)
+    bra.s   44b
+50:
+aniz_show:                              | (the gate reads zst here: the frame decoded, d3 which one)
+    move.l  {SOURCE_DATA_PTR:#010x},%d0
+    movea.l %d0,%a0
+    lea     zst+16,%a1
+    move.l  #{WORDS},%d1
+51: move.l  %a1@+,%a0@+
+    subq.l  #1,%d1
+    bne.s   51b
+    bra     23b                         | clear the panel and blit, as ANIM
+
+    .align 4
+zst:                                    | the decoder's state: magic, decoded, next changes, -, the frame
+    .space  {16 + 4 * WORDS}
 """
 
-LABELS = ("stamp",)
+LABELS = ("stamp", "aniz_show", "zst")
 
 
 def generate() -> dict:
@@ -210,9 +302,11 @@ def generate() -> dict:
     return {
         "os": "Digitone II 1.11",
         "load": LOAD_VA, "code": code.hex(), "stamp": addrs["stamp"],
+        "aniz_show": addrs["aniz_show"], "zst": addrs["zst"],
         "intro_va": INTRO_VA, "intro_stock": INTRO_STOCK,
         "area_va": AREA_VA, "runtime_va": RUNTIME_VA,
-        "magic": MAGIC.decode(), "boot_chunk": BOOT.decode(), "anim_chunk": ANIM.decode(), "words": WORDS,
+        "magic": MAGIC.decode(), "boot_chunk": BOOT.decode(), "anim_chunk": ANIM.decode(),
+        "aniz_chunk": ANIZ.decode(), "words": WORDS,
         "tunnel_x_va": 0x400D374E, "tunnel_y_va": 0x400D377E,
     }
 

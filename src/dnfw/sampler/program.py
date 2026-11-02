@@ -1712,8 +1712,9 @@ def recorder(p: Prog, L: Layout) -> None:
     ARM empties the slot and waits for the block's peak to reach the threshold; NOW
     empties it and records at once; STOP ends a recording (or cancels an arm); every
     command sets the source and channel the peak is measured on (MONITOR only that).
-    Sources: IN (the codec's input as the engine converts it, 0x268538), MAIN (the last
-    block's mix, 0x268438), TRK1..16 (track t's audio, panned, the last block's: the
+    Sources: IN (the codec's input as the engine converts it, 0x268538), MAIN (v0.37: the
+    previous block's whole mix, as pvmix copies it to SM.MAIN_TAP at the master mix call;
+    MIX_BUF itself is empty while this runs), TRK1..16 (track t's audio, panned, the last block's: the
     buffer Overbridge sends, SM.TRK_BUF + 0x100 t); channels MONO L+R, L, R. Recording
     appends 32 frames a block as int16 to the slot (SAMP 124..127, 2 MB each) and keeps
     its directory entry current, so it plays at once; it stops at the frame count. Each
@@ -1955,7 +1956,7 @@ def recorder(p: Prog, L: Layout) -> None:
     p.ld(8, C["rsrc"])                        # its L (R at + 0x80)
     p.iconst(9, SM.IN_BUF)
     p.iconst(12, 1)
-    p.if_(8, "EQ", 12, lambda: p.iconst(9, SM.MIX_BUF), kind="i")
+    p.if_(8, "EQ", 12, lambda: p.iconst(9, SM.MAIN_TAP), kind="i")    # v0.37: the tap, not MIX_BUF
     p.iconst(12, 2)
 
     def track():
@@ -2871,8 +2872,29 @@ PREVIEW_BYTES = 10 * 48000 * 2              # its longest: the DT2's ten seconds
 
 def pvmix(p: Prog, L: Layout) -> None:
     """MIX_BUF += frames [pva, pva + 2 min(pvn, 16)) of the preview (int16 pairs, the low
-    half first), on L and R alike; pva and pvn move on. Uses R0..R3, R12, R13, I1."""
+    half first) at half level (v0.37), on L and R alike; pva and pvn move on. Uses R0..R3,
+    R12, R13, I1."""
     C = L.C
+    # v0.37: first the whole mix, as the master mix call takes it, to the recorder's MAIN tap
+    # (sampler.machines.MAIN_TAP), before the preview goes in
+    p.iconst(1, 0)
+    p.st(C["pvk"], 1)
+
+    def tap_word():                           # MAIN_TAP[k] = MIX_BUF[k], k = pvk, then pvk + 1
+        p.ld(1, C["pvk"])
+        p.lsh(12, 1, 2)
+        p.iconst(13, SM.MIX_BUF)
+        p.iop(13, 13, "+", 12)
+        p.seti(1, 13)
+        p.ldi(2, 0, 1)
+        p.iconst(13, SM.MAIN_TAP)
+        p.iop(13, 13, "+", 12)
+        p.seti(1, 13)
+        p.sti(0, 1, 2)
+        p.iconst(12, 1)
+        p.iop(1, 12, "+", 1)
+        p.st(C["pvk"], 1)
+    _loop16(p, C, tap_word, 64)
     p.ld(0, C["pvn"])
     p.iconst(12, 0)
 
@@ -2893,8 +2915,11 @@ def pvmix(p: Prog, L: Layout) -> None:
                 p.lsh(3, 2, 16)               # the first (low half) on top
                 p.iconst(12, 0xFFFF0000 - (1 << 32))
                 p.iop(2, 2, "AND", 12)        # the second, on top
-                p.iconst(12, -31)
-                p.float_(3, 3, 12)            # int16 / 32768
+                # v0.37: at half (-6 dB): int16 / 65536. At full scale the preview sat ~6 dB
+                # over a sample track at its default VOL and LEVEL ((0.78)^2 x 0.79 = 0.48),
+                # which the preview skips (\x0x/, paQ: "really high", "at least 6dB")
+                p.iconst(12, -32)
+                p.float_(3, 3, 12)            # int16 / 65536
                 p.float_(2, 2, 12)
                 p.lsh(12, 1, 3)
                 p.iconst(13, SM.MIX_BUF)
@@ -2939,18 +2964,18 @@ def pvmix(p: Prog, L: Layout) -> None:
     p.if_(0, "GT", 12, some, kind="i")
 
 
-def _loop16(p: Prog, C, body) -> None:
-    """for 16 times body(); the count in pvk (body() counts it up from 0)"""
+def _loop16(p: Prog, C, body, n: int = 16) -> None:
+    """for n (16) times body(); the count in pvk (body() counts it up from 0)"""
     top = p.label("pv")
     p.place(top)
     if p.run:
         while True:
             body()
-            if p.mem.get(C["pvk"]) >= 16:
+            if p.mem.get(C["pvk"]) >= n:
                 return
     body()
     p.ld(0, C["pvk"])
-    p.iconst(12, 16)
+    p.iconst(12, n)
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
 

@@ -100,6 +100,9 @@ MNM_SCRATCH_BYTES = 0x4000
 # words), copied here from the Monomachine tables by the Digibank build, once
 MNM_DT_L2 = MNM_SCRATCH_L2 + MNM_SCRATCH_BYTES        # 0x200A8000
 MNM_DT_BYTES = 0x1000
+# v0.37: the main mix, as the master mix call takes it, for the recorder's MAIN (sampler.machines.MAIN_TAP)
+MAIN_TAP_L2 = MNM_DT_L2 + MNM_DT_BYTES                 # 0x200A9000
+MAIN_TAP_BYTES = 0x200
 MD_DELAY_DDR = 0x82200000                    # 16 slots x core.PI_DELAY_STRIDE
 # the sample machines (v0.13, docs/sampler.md): code in L2 after PERC's span, voices and
 # scratch in L1 (Waverider's former loop room), the sample pool in DDR from 64 MB in
@@ -379,6 +382,8 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                 bytes(MNM_SCRATCH_BYTES)))
     out.append(("the DPRO tables' room in L2 (zeros, filled by the build; v0.36)", MNM_DT_L2,
                 bytes(MNM_DT_BYTES)))
+    out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
+                bytes(MAIN_TAP_BYTES)))
     return out
 
 
