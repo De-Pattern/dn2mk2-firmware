@@ -133,6 +133,7 @@ def run(cx):
         for k in range(len(pd) // 512):
             disk[start + k] = pd[512 * k:512 * k + 512]
     # what each frame address must hold (the image's samples now, the library's once loaded)
+    by_name = {"LIBX ON": libx, "LIBY TW": liby}
     known = {struct.unpack_from("<I", img, 8 + 16 * s_)[0]: img_frames[n_] for s_, n_ in enumerate(names)}
 
     # -- what the DSP holds ------------------------------------------------------------------
@@ -173,7 +174,9 @@ def run(cx):
             watch["checked"] += 1
             ok = e == want_e[k] and k in want_n
             if ok:
-                data = known.get(e[0])
+                # the bytes it must hold: a library sample's by its name (wherever it was
+                # placed), the image's own by its address (they keep it through renames)
+                data = by_name.get(want_n[k]) or known.get(e[0])
                 ok = data is not None and e[1] * 2 <= len(data) and dsp_bytes(e[0], 2 * e[1]) == data[:2 * e[1]]
             if not ok and len(watch["bad"]) < 8:
                 watch["bad"].append((k, [hex(x) for x in e], want_n.get(k)))
