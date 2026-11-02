@@ -193,8 +193,9 @@ static void send(int cmd)
      * none is empty, nothing is recorded */
     if (cmd == CMD_NOW || cmd == CMD_ARM || cmd == CMD_ARM_PLAY) {
         extern u32 smp_save_mark(void);
-        if (smp_save_mark())                    /* v0.33: the last take still saving: */
-            return;                             /* not a new one into a slot it may take */
+        extern int smp_pl_busy(void);
+        if (smp_save_mark() || smp_pl_busy())   /* v0.33: the last take still saving: */
+            return;                             /* not a new one into a slot it may take (v0.38: nor during a project switch) */
         rec_dest = next_empty(0);
         if (!smp_slot_empty(rec_dest)) {
             rec_room = 0;
@@ -219,6 +220,20 @@ static void send(int cmd)
     if (rec_link < 0)
         rec_link = 0;
     mon_src = rec_src;
+}
+
+/* v0.38 (pools.c): a project switch stops a recording (it is kept, in the pool it was made
+ * in) and waits until it has been saved; no new one starts until the switch is done */
+int rec_running(void) { return rec_state == 1 || rec_state == 2; }
+int rec_busy(void)
+{
+    extern u32 smp_save_mark(void);
+    return rec_running() || was_recording || smp_save_mark() != 0;
+}
+void rec_halt(void)
+{
+    if (rec_running())
+        send(CMD_STOP);
 }
 
 void rec_yes(void)

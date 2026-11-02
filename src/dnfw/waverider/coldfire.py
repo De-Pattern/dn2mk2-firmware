@@ -482,6 +482,17 @@ MACHSEL_COMMIT_STOCK = bytes.fromhex("4eb940031880")
 MODAPPLY_SITE = 0x40027196              # v0.25: the per-frame driver's jsr 0x400db22c (apply modulation)
 MODAPPLY_STOCK = bytes.fromhex("4eb9400db22c")
 POLL_SITE = 0x4002E464                  # jsr 0x4011d2f4 (isDirty), its argument the screen
+# v0.38: per-project pools (csrc/sampler/pools.c, hooks.S, docs/project-pools.md): the OS's
+# project LOAD 0x40042E6E (its entry, its success where it sets the slot, its exit) and NEW
+# 0x400428C0 (where it sets the slot), each a jmp to a cave that replays what it replaced
+PJ_BEGIN_SITE = 0x40042E6E              # lea -36(%sp),%sp ; movem.l %d2-%d5/%a2,(%sp)
+PJ_BEGIN_STOCK = bytes.fromhex("4fefffdc48d7043c")
+PJ_LOADED_SITE = 0x40042ED2             # move.l %d5,-(%sp) ; move.l %d3,-(%sp) ; jsr 0x4003eb62
+PJ_LOADED_STOCK = bytes.fromhex("2f052f034ebabc8a")
+PJ_END_SITE = 0x40042EE6                # move.b %d4,%d0 ; movem.l (%sp),%d2-%d5/%a2 ; lea 36(%sp),%sp
+PJ_END_STOCK = bytes.fromhex("10044cd7043c4fef0024")
+PJ_NEW_SITE = 0x40042AF0                # move.l 12(%fp),(%sp) ; move.l %a2,-(%sp) ; jsr 0x4003eb62
+PJ_NEW_STOCK = bytes.fromhex("2eae000c2f0a4ebac06a")
 POLL_STOCK = bytes.fromhex("4eb94011d2f4")
 
 
@@ -673,6 +684,25 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "machine leaves unused (named -), stock's 0x400dc30e for everything else",
          _long(LFO_MASK_STOCK))
 
+    # v0.38: per-project pools: the four detours, entered by jmp (the stack as stock left it)
+    _need(content, PJ_BEGIN_SITE + 8, bytes.fromhex("262f0028"), "the load goes on: move.l 40(%sp),%d3")
+    _need(content, PJ_LOADED_SITE - 2, bytes.fromhex("67de"), "the load's success test just before")
+    _need(content, PJ_LOADED_SITE + 8, bytes.fromhex("42a72f03"), "the load goes on: clr.l -(%sp) ; move.l %d3,-(%sp)")
+    _need(content, PJ_END_SITE + 10, bytes.fromhex("4e75"), "the load's rts")
+    _need(content, PJ_NEW_SITE + 10, bytes.fromhex("42a72f0a"), "NEW goes on: clr.l -(%sp) ; move.l %a2,-(%sp)")
+    _need(content, 0x400428C0, bytes.fromhex("4e56ffa848d71c3c"), "NEW's entry: link.w %fp,#-88 (12(%fp) its slot)")
+    edit(PJ_BEGIN_SITE, bytes.fromhex("4ef9") + _long(csyms["smp_pj_begin_hook"]) + bytes.fromhex("4e71"),
+         "the project LOAD's entry: counted, and the DSP's directory emptied at once (per-project pools)",
+         PJ_BEGIN_STOCK)
+    edit(PJ_LOADED_SITE, bytes.fromhex("4ef9") + _long(csyms["smp_pj_loaded_hook"]) + bytes.fromhex("4e71"),
+         "the project LOAD's success: the slot set as stock, then noted for the pools' switch",
+         PJ_LOADED_STOCK)
+    edit(PJ_END_SITE, bytes.fromhex("4ef9") + _long(csyms["smp_pj_end_hook"]) + bytes.fromhex("4e714e71"),
+         "the project LOAD's exit: counted (a LOAD that failed gives the pool back)", PJ_END_STOCK)
+    edit(PJ_NEW_SITE, bytes.fromhex("4ef9") + _long(csyms["smp_pj_new_hook"]) + bytes.fromhex("4e714e71"),
+         "NEW project: the slot set as stock, then noted (an empty pool, the owner's decision 1)",
+         PJ_NEW_STOCK)
+
     # the sample link: SysEx in (v0.14); out over the TDM link alone (v0.20)
     edit(LINK_RX_SITE, bytes.fromhex("4eb9") + _long(csyms["smp_rx_hook"]),
          "the SysEx router: the sample link's requests (F0 00 20 3C 7D 01) to smp_rx", LINK_RX_STOCK)
@@ -742,7 +772,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
                  "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom",
                  "jmp_on", "jmp_armed", "jmp_pending", "jmp_count", "jmp_last", "jmp_loaded", "jmp_dirty",
-                 "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll"):   # the sample link's state (v0.15)
+                 "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll",
+                 # v0.38: per-project pools
+                 "smp_pj_begins", "smp_pj_ends", "smp_pj_loads", "smp_pj_news", "smp_pj_slot", "smp_pj_newslot", "smp_pj_last", "smp_blank_req", "smp_blank_sent", "smp_pl_on", "smp_pl_owner", "smp_pl_state", "smp_pl_writes", "smp_pl_switches", "smp_pl_lists_written", "smp_pl_events", "smp_pl_src", "smp_pl_boot_case", "smp_pl_gen", "smp_pl_skipped", "smp_pl_mismatch", "smp_discard", "smp_rename"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)
