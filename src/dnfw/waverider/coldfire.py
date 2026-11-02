@@ -806,7 +806,11 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  # v0.38: per-project pools
                  "smp_pj_begins", "smp_pj_ends", "smp_pj_loads", "smp_pj_news", "smp_pj_slot", "smp_pj_newslot", "smp_pj_last", "smp_blank_req", "smp_blank_sent", "smp_pl_on", "smp_pl_owner", "smp_pl_state", "smp_pl_writes", "smp_pl_switches", "smp_pl_lists_written", "smp_pl_events", "smp_pl_src", "smp_pl_boot_case", "smp_pl_gen", "smp_pl_skipped", "smp_pl_mismatch", "smp_discard", "smp_rename",
                  # v0.38: the count to the DSP after a live add (link.c K_HEAD)
-                 "smp_heads", "smp_head_due", "smp_head_min", "smp_count_cover"):   # the sample link's state (v0.15)
+                 "smp_heads", "smp_head_due", "smp_head_min", "smp_count_cover",
+                 # v0.39: ERASE MOD DATA (erase.c; scripts/emu_erase.py)
+                 "smp_er_lock", "smp_er_req", "smp_er_state", "smp_er_err", "smp_er_sector", "smp_er_value",
+                 "smp_er_done", "smp_er_total", "smp_er_trims", "smp_er_reads", "smp_er_checks",
+                 "smp_er_nchecks", "smp_er_job", "smp_er_start", "smp_er_poll"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)

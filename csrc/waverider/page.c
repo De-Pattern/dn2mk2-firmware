@@ -245,6 +245,8 @@ int wr_poll(void *screen)
     extern void rec_poll(void);
     extern int rec_visible(void);
     extern void jmp_poll(void);
+    extern void smp_er_poll(void);
+    smp_er_poll();                              /* v0.39: ERASE MOD DATA, a step a pass (erase.c) */
     smp_boot();
     jmp_poll();                                 /* DIRECT JUMP's setting, read and written (csrc/jump) */
     rec_poll();

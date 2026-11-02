@@ -115,7 +115,8 @@ void jmp_poll(void)
                 jmp_on = (sector[2] & SET_JUMP) != 0;
         }
     }
-    if (jmp_dirty) {
+    extern int smp_er_lock;                     /* v0.39: ERASE MOD DATA (erase.c): nothing written */
+    if (jmp_dirty && !smp_er_lock) {
         jmp_dirty = 0;
         for (int k = 0; k < 128; k++)
             sector[k] = 0;

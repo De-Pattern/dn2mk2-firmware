@@ -785,7 +785,8 @@ extern int smp_is_recording(int k);
 int smp_fb_open __attribute__((section(".data"))) = 0;
 int smp_fb_folder __attribute__((section(".data"))) = -1;   /* -1 the top */
 int smp_fb_cur __attribute__((section(".data"))) = 0;
-int smp_fb_menu __attribute__((section(".data"))) = 0;      /* the SAMPLE ACTION menu: 0 shut, 1 up, 2 DELETE asked */
+int smp_fb_menu __attribute__((section(".data"))) = 0;      /* the SAMPLE ACTION menu: 0 shut, 1 up, 2 DELETE asked;
+                                                               * v0.39: 3 +DRIVE's ERASE MOD DATA, 4 and 5 its questions, 6 erasing */
 int smp_fb_mcur __attribute__((section(".data"))) = 0;
 /* v0.29: multi-select (zugada_'s report: no way to delete all the samples sent in). FUNC +
  * YES marks a sample, or every sample of a folder at the top; SELECT ALL in the SAMPLE
@@ -1176,11 +1177,61 @@ int smp_fb_action(int on_folder, int a)
     return on_folder ? ram_f[a < 0 ? 0 : a > 1 ? 1 : a] : ram_s[a < 0 ? 0 : a > 3 ? 3 : a];
 }
 
+/* v0.39: ERASE MOD DATA's screens (erase.c; the keys in rec.c): the two questions, the
+ * progress, the result. -> 1 if drawn */
+static void hex6(char *o, u32 v)
+{
+    for (int k = 0; k < 6; k++)
+        o[k] = "0123456789ABCDEF"[(v >> (20 - 4 * k)) & 15u];
+    o[6] = 0;
+}
+
+static int er_draw(void *c)
+{
+    extern int smp_er_shown(void), smp_er_err;
+    extern u32 smp_er_percent(void), smp_er_sector;
+    int es = smp_er_shown();
+    if (smp_fb_menu < 4 && !es)
+        return 0;
+    LABEL(c, 64, 57, "%s", "ERASE MOD DATA");
+    hline(c, 0, 127, 55, 0);
+    if (es == 1 || es == 2) {
+        int pc = (int)smp_er_percent();
+        TEXT(c, FONT, 64, 40, CENTRED, "%s", es == 1 ? "ERASING" : "VERIFYING");
+        box(c, 14, 25, 113, 33, 0);
+        if (pc > 0)
+            fill(c, 15, 26, 15 + (97 * (pc > 100 ? 100 : pc)) / 100, 32);
+        LABEL(c, 64, 12, "%s", "DO NOT POWER OFF");
+    } else if (es == 3) {
+        TEXT(c, FONT, 64, 38, CENTRED, "%s", "ERASED");
+        LABEL(c, 64, 24, "%s", "RESTART THE DIGITONE");
+        LABEL(c, 64, 12, "%s", "YES / NO: CLOSE");
+    } else if (es == 4) {
+        static const char *const why[6] = {"", "REFUSED", "TRIM ERROR", "READ ERROR", "NOT ERASED", "+DRIVE NOT READY"};
+        char h[7];
+        hex6(h, smp_er_sector);
+        TEXT(c, FONT, 64, 40, CENTRED, "%s", "ERASE FAILED");
+        LABEL(c, 64, 28, "%s AT %s", why[smp_er_err >= 1 && smp_er_err <= 5 ? smp_er_err : 0], h);
+        LABEL(c, 64, 12, "%s", "RESTART, THEN AGAIN");
+    } else if (smp_fb_menu == 4) {
+        TEXT(c, FONT, 64, 40, CENTRED, "%s", "ERASE ALL SAMPLES");
+        TEXT(c, FONT, 64, 30, CENTRED, "%s", "AND MOD DATA?");
+        LABEL(c, 64, 14, "%s", "YES / NO");
+    } else {
+        TEXT(c, FONT, 64, 40, CENTRED, "%s", "ARE YOU SURE?");
+        TEXT(c, FONT, 64, 30, CENTRED, "%s", "IT CANNOT BE UNDONE");
+        LABEL(c, 64, 14, "%s", "YES / NO");
+    }
+    return 1;
+}
+
 void smp_fb_draw(void *c, int samp)
 {
     for (int y = 0; y <= 63; y++)
         for (int x = 0; x <= 127; x++)
             SET_PIXEL(c, x, y, 0);
+    if (er_draw(c))
+        return;
     char num[4];
     num3(num, samp);
     int marks = smp_fb_mark_count(), pend = smp_lib_pending();
@@ -1251,6 +1302,16 @@ void smp_fb_draw(void *c, int samp)
             box(c, 0, y - 2, wide, y + 7, 0);
     }
     scrollbar(c, 126, 1, 53, smp_fb_cur, n);
+    if (smp_fb_menu == 3) {                     /* v0.39: +DRIVE's own menu (the top): ERASE MOD DATA */
+        for (int y = 0; y <= 54; y++)
+            for (int x = 65; x <= 124; x++)
+                SET_PIXEL(c, x, y, 0);
+        vline(c, 65, 0, 54, 1);
+        TEXT(c, FONT, 68, 46, 0, "%s", "ERASE MOD");
+        TEXT(c, FONT, 68, 37, 0, "%s", "DATA");
+        box(c, 66, 35, 124, 54, 0);
+        return;
+    }
     if (smp_fb_menu) {                          /* SAMPLE ACTION, as the DT2's: a list at the right */
         for (int y = 0; y <= 54; y++)
             for (int x = 65; x <= 124; x++)

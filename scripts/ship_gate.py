@@ -39,6 +39,12 @@ failure:
 6p. **per-project pools** (v0.38, `emu_waverider_menu.py`'s `link16` `pools`, scripts/emu_pools.py):
    the OS's LOAD, NEW and SAVE AS through the build's detours; each project its own slots, the
    legacy pool for old ones; power cuts after every sector; the DSP never another project's sample.
+6e. **ERASE MOD DATA** (v0.39, `emu_erase.py`, docs/erase-mod-data.md): through the real keys
+   (+DRIVE, RIGHT, two questions; NO at either erases nothing) and link command 28, on a Python
+   +Drive logging every command: TRIM only in the mod's four regions, covering them exactly,
+   headers first; stock areas and gaps byte-identical; everything reads erased; no write
+   after the first TRIM; a bad card and a TRIM error fail at their sector; a power-on after
+   cuts at seven points boots with an empty pool, and after the whole erase as a fresh install.
 6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector.
@@ -189,6 +195,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("slides", "parameter slides (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
+       ("erase", "ERASE MOD DATA (ColdFire)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
        ("fuzz", "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"),
@@ -688,6 +695,41 @@ def main() -> int:
                                   "every write in its region, the DSP never another project's sample" if good else why)
                 later("pools", "per-project pools (ColdFire)", "per-project pools (ColdFire)",
                       [pl_cmd, sorted(EMU_ENV.items())], pl_body)
+
+            # 6e. v0.39: ERASE MOD DATA (csrc/sampler/erase.c, docs/erase-mod-data.md;
+            # scripts/emu_erase.py): the key path (+DRIVE, RIGHT, two questions; NO at either and
+            # LEFT erase nothing), link command 28 (a wrong word refused), on a Python +Drive that
+            # logs every eMMC command: TRIM only inside the four regions, covering each exactly,
+            # headers first, never a write from the first TRIM on; the stock store, the factory
+            # buffer and the gaps byte-identical; every region's sector read back erased (0x00
+            # and 0xFF cards); a card that keeps a sector and a TRIM error fail at their sector;
+            # a power-on after a cut at seven points boots with the pool empty, writing only in
+            # its regions, and after the whole erase exactly as on a +Drive never written
+            if "smp_er_state" in lay:
+                er_js = work / "erase.json"
+                er_cmd = [a.venv, "-u", "scripts/emu_erase.py", "--build", bdir, "--snapshot", snap,
+                          "--scenario", "all", "--json", er_js, "--png-dir", work / "erase"]
+
+                def er_body(tdir):
+                    rc, out = run("erase", er_cmd, logs, env=EMU_ENV, trace=tdir)
+                    why, good = out[-800:], False
+                    if rc == 0 and er_js.exists():
+                        r = json.loads(er_js.read_text())
+                        checks = r.get("checks", {})
+                        good = bool(r.get("ok")) and len(checks) >= 35 and all(c["ok"] for c in checks.values())
+                        why = json.dumps({k: c for k, c in checks.items() if not c["ok"]})[:800] or out[-800:]
+                        if good:
+                            c = r["commands"]
+                            why = (f"ERASE MOD DATA: NO at each question and LEFT erase nothing; three YES: "
+                                   f"{c['trims']} TRIM calls (CMD35/36/38), only in the four regions and "
+                                   f"covering them exactly, headers first, no write after the first; stock areas "
+                                   f"and gaps byte-identical, every region erased and verified ({r['reads']} reads); "
+                                   f"link 28 likewise (0xFF card); a kept sector and a TRIM error fail at their "
+                                   f"sector; {len(r['boot'])} power-ons after cuts boot empty, the whole erase as a "
+                                   f"fresh install; {len(checks)} checks")
+                    return good, why
+                later("erase", "ERASE MOD DATA (ColdFire)", "ERASE MOD DATA (ColdFire)",
+                      [er_cmd, sorted(EMU_ENV.items())], er_body)
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
         # change the recorder and never the track's sound, NO closes it, and the UI keeps

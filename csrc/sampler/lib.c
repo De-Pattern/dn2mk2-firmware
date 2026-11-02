@@ -88,9 +88,10 @@ static int lib_rd(u32 sector, u32 bytes, void *buf)
     return lib_in(sector, bytes) ? BLK_READ(sector, bytes, buf) : -1;
 }
 
+extern int smp_er_lock;                         /* v0.39: ERASE MOD DATA (erase.c) */
 static int lib_wr(u32 sector, u32 bytes, const void *buf)
 {
-    if (!lib_in(sector, bytes))
+    if (smp_er_lock || !lib_in(sector, bytes))
         return -1;
     smp_lib_writes += bytes / 512u;
     return BLK_WRITE(sector, bytes, buf);

@@ -237,6 +237,12 @@ label.proj-only { max-width: 100%; }
     <div class="row"><button id="diagBtn" disabled>Run diagnostics</button> <button id="diagCopy" disabled>Copy</button> <span id="diagState" class="pill">idle</span></div>
     <pre id="diagOut" class="scrollbox" style="white-space:pre-wrap;min-height:3em;margin-top:10px"></pre>
   </section>
+
+  <section>
+    <h2>7 · Erase mod data</h2>
+    <p class="note" style="margin-top:0">Before going back to stock firmware (needs v0.39 or later, connected above): erases everything the mod keeps on the +Drive (the samples in the pool, the projects' sample lists, the +Drive library, the mod's settings) and nothing of Elektron's (projects, sounds, presets are untouched). Then restart the instrument. The same is on the instrument: in the sample browser, +DRIVE, RIGHT, ERASE MOD DATA.</p>
+    <div class="row"><button id="eraseBtn" disabled>Erase mod data…</button> <span id="eraseState" class="pill">idle</span></div>
+  </section>
 </main>
 
 <script id="core">
@@ -937,7 +943,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     $("reloadBtn").disabled = !ready;
     $("newFolderBtn").disabled = !ready || !lr;
     $("delSelBtn").disabled = !ready || !lr || !libSel.size;
-    $("diagBtn").disabled = busy || !dev; $("diagCopy").disabled = !$("diagOut").textContent;
+    $("diagBtn").disabled = busy || !dev; $("eraseBtn").disabled = busy || !dev; $("diagCopy").disabled = !$("diagOut").textContent;
     $("rightEmpty").style.display = !dev ? "" : lib && !lr ? "" : "none";
     $("rightEmpty").textContent = !dev ? "Connect to see the instrument." : "The +Drive library needs v0.31 or later on the instrument.";
     const n = toSend().length;
@@ -1239,6 +1245,33 @@ if (typeof module !== "undefined") module.exports = DN2;
     }
     busy = false; refresh();
   }
+  /* v0.39: ERASE MOD DATA (link commands 28 ERASE, 29 its status; docs/erase-mod-data.md) */
+  const ERASE_WHY = ["", "refused (outside the mod's regions)", "the card's erase failed", "a read failed", "a sector did not erase", "the +Drive is not ready"];
+  async function runErase() {
+    if (busy || !dev) return;
+    if (!confirm("Erase ALL samples and mod data on the instrument's +Drive?\n\nThe pool, every project's sample list, the +Drive library and the mod's settings. Elektron's projects, sounds and presets are not touched.")) return;
+    if (!confirm("Are you sure? This cannot be undone.")) return;
+    busy = true; refresh();
+    const st = $("eraseState"), say = (t, c) => { st.textContent = t; st.className = "pill" + (c ? " " + c : ""); };
+    try {
+      await call(28, [69, 82, 65, 83, 69], 3000, 2);                  // "ERASE"
+      for (;;) {
+        await new Promise(r => setTimeout(r, 500));
+        const p = (await call(29, [], 3000, 3)).payload;
+        const state = p[0], err = p[1], done = DN2.rd32(p, 4), total = DN2.rd32(p, 8), sector = DN2.rd32(p, 12);
+        const checks = DN2.rd32(p, 28), nchecks = DN2.rd32(p, 32);
+        if (state === 1) say(`erasing ${total ? Math.floor(100 * done / total) : 0} %`);
+        else if (state === 2) say(`verifying ${nchecks ? Math.floor(100 * checks / nchecks) : 0} %`);
+        else if (state === 3) { say("ERASED: restart the instrument", "ok"); break; }
+        else if (state === 4 || err) { say(`failed: ${ERASE_WHY[err] || err} at sector 0x${sector.toString(16)}`, "bad"); break; }
+      }
+    } catch (x) {
+      const m = String(x.message || x);
+      say(/unknown command/.test(m) ? "this firmware cannot erase: v0.39 or later is needed" : `stopped: ${m}`, "bad");
+    }
+    busy = false; refresh();
+  }
+  $("eraseBtn").onclick = runErase;
   $("diagBtn").onclick = runDiag;
   $("diagCopy").onclick = () => { try { navigator.clipboard.writeText($("diagOut").textContent); $("diagState").textContent = "copied"; } catch (e) {} };
   $("browseBtn").onclick = () => $("fileIn").click();

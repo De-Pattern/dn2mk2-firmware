@@ -460,9 +460,10 @@ static int image_read(u32 off, u32 bytes, void *buf)              /* OFF, BYTES:
 }
 
 static void span_drop(u32 lo, u32 hi);
+extern int smp_er_lock;                         /* v0.39: ERASE MOD DATA under way or done (erase.c) */
 static int image_write(u32 off, u32 bytes, const void *buf)
 {
-    if (!store_ok() || off + bytes > POOL_BYTES || (off | bytes) & 511u)
+    if (smp_er_lock || !store_ok() || off + bytes > POOL_BYTES || (off | bytes) & 511u)
         return -1;
     span_drop(off, off + bytes);                /* v0.38: the DSP's copy there is the old one */
     return BLK_WRITE(STORE_SECTOR + 1u + off / 512u, bytes, buf);
@@ -470,7 +471,7 @@ static int image_write(u32 off, u32 bytes, const void *buf)
 
 static int header_write(u32 bytes)              /* 0 marks the image empty */
 {
-    if (!store_ok())
+    if (smp_er_lock || !store_ok())
         return -1;
     for (int k = 0; k < 128; k++)
         hdr[k] = 0;
@@ -2509,6 +2510,19 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
     } else if ((cmd >= 16 && cmd <= 23) || cmd == 26) {        /* v0.31 (link 5): the +Drive's library (lib.c) */
         extern u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
         r = smp_lib_rx(cmd, rq, n, rp, r, &rp[3]);
+    } else if (cmd == 28) {                     /* v0.39: ERASE MOD DATA, "ERASE" -> started at the */
+        static const u8 word[5] = {'E', 'R', 'A', 'S', 'E'};     /* next UI pass (erase.c); the */
+        int ok = n >= 8;                        /* page asks twice first */
+        for (int k = 0; ok && k < 5; k++)
+            ok = rq[3 + k] == word[k];
+        extern int smp_er_req, smp_er_state;
+        if (!ok || smp_er_state == 1 || smp_er_state == 2 || smp_er_state == 3)
+            rp[3] = 1;
+        else
+            smp_er_req = 1;
+    } else if (cmd == 29) {                     /* v0.39: ERASE STATUS (erase.c's smp_er_status) */
+        extern u32 smp_er_status(u8 *rp, u32 r);
+        r = smp_er_status(rp, r);
     } else if (cmd == 24) {                     /* v0.34: DIAG -> the DSP's guard record and load */
         put32(rp + r, smp_blown_count); r += 4;
         put32(rp + r, smp_blown_info); r += 4;

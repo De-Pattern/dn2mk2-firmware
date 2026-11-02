@@ -1143,6 +1143,28 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
     /* v0.25: the folder browser (smp_page.c): over everything while it is up */
     if (smp_fb_open) {
         smp_overlay_dirty = 1;
+        /* v0.39: ERASE MOD DATA (erase.c) under way, or its result up: the screen takes every
+         * key and knob; once it has ended, YES or NO closes the browser */
+        extern int smp_er_state;
+        if (smp_fb_menu >= 6 || smp_er_state != 0) {
+            if (it[0] == IT_KEY) {
+                int press = (flags & F_PRESS) && !(flags & F_RELEASE);
+                if (press && code < 32)
+                    eaten |= 1u << code;
+                if (press && (code == K_YES || code == K_NO) && smp_er_state != 1 && smp_er_state != 2) {
+                    if (smp_er_state == 4)
+                        smp_er_state = 0;       /* a failure seen: it may be asked again (its details kept) */
+                    smp_fb_open = 0;
+                    smp_fb_menu = 0;
+                    smp_fb_unmark_all();
+                    smp_list_close();
+                }
+                it[0] = IT_DROP;
+            } else if (it[0] == IT_KNOB) {
+                it[0] = IT_DROP;
+            }
+            return (u32)it;
+        }
         if (it[0] == IT_KNOB) {                 /* any knob: through the items (or the menu) */
             int delta = (signed char)it[8], d = delta > 0 ? 1 : delta < 0 ? -1 : 0;
             if (smp_fb_menu == 1) {
@@ -1168,9 +1190,24 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             int slot, f = smp_fb_item(smp_fb_cur, &slot);
             int t = (int)UI_TRACK_NOW;
             int on_folder = slot < 0 && f != -1;
+            if (smp_fb_menu >= 3) {             /* v0.39: ERASE MOD DATA's menu and its two questions */
+                extern int smp_er_start(void);
+                if (code == K_YES && smp_fb_menu == 5) {
+                    smp_fb_menu = 6;            /* asked twice: erase (erase.c) */
+                    smp_er_start();
+                } else if (code == K_YES) {
+                    smp_fb_menu++;              /* 3 the menu -> 4 "ERASE ALL ...?" -> 5 "ARE YOU SURE?" */
+                } else if (code == K_NO || (code == K_LEFT && smp_fb_menu == 3)) {
+                    smp_fb_menu = 0;            /* NO at either question: nothing erased */
+                }
+                return (u32)it;
+            }
             if (smp_fb_store == -1) {           /* v0.31: the top: +DRIVE, PROJECT RAM */
                 if (code == K_UP || code == K_DOWN)
                     lst_step(code);
+                else if (code == K_RIGHT && f == -4) {
+                    smp_fb_menu = 3;            /* v0.39: +DRIVE's menu: ERASE MOD DATA */
+                }
                 else if (code == K_YES && (f == -4 || f == -5)) {
                     smp_fb_store = f == -4 ? 1 : 0;
                     smp_fb_last_store = smp_fb_store;
@@ -1340,7 +1377,7 @@ static void lst_step(u32 code)
 {
     if (smp_fb_open) {
         smp_overlay_dirty = 1;
-        if (smp_fb_menu == 2)                   /* DELETE asked: nothing to move */
+        if (smp_fb_menu >= 2)                   /* DELETE asked, or ERASE's menu (v0.39): nothing to move */
             return;
         if (smp_fb_menu == 1) {
             int ks, kf = smp_fb_item(smp_fb_cur, &ks), last = smp_fb_nactions(ks < 0 && kf != -1) - 1;
