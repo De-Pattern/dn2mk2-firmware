@@ -1,9 +1,14 @@
-"""v0.37: the start-up animation (by s!Rwa², the DN2MK2 community, 2026-11-01): 59 frames of
-128 x 64, one bit, played over the intro in place of Elektron's tunnel.
+"""The start-up animation by s!Rwa² (the DN2MK2 community), played over the intro in place of
+Elektron's tunnel: 128 x 64, one bit.
 
-`bootanim_dn2mk2.json` holds the frames as the artist delivered them (base64): 1,024 bytes a
-frame, page-major (8 pages of 128 bytes, each byte a column of 8 pixels, bit 0 the top one),
-and the artist's timing, frame by frame (DURATIONS_MS here, checked against it).
+v0.39: his own frames, the 44 PBM files he made (2026-11-02), converted bit for bit;
+frames 37..43 are one picture, kept once with their time, so 38 frames. (v0.37 shipped a
+redraw of his design, made with another AI from his preview: not his frames.)
+
+`bootanim_dn2mk2.json` holds them (base64): 1,024 bytes a frame, page-major (8 pages of 128
+bytes, each byte a column of 8 pixels, bit 0 the top one), and the timing, frame by frame
+(DURATIONS_MS here, checked against it): the first frame 160 ms, every other 80 ms, the last
+held to the intro's end.
 
 The firmware gets an `ANIZ` chunk (scripts/gen_bootscreen_code.py decodes it):
 
@@ -20,7 +25,7 @@ upside down as the plain blit shows them (`bootscreen._images`).
 
 The intro runs at about 30 frames a second (175 frames; on the owner's unit, 2026-09-18,
 the ANIM path ran "more fluent than the GIF"), so intro frame f shows the frame playing at
-f / 30 s by the artist's timing; past the animation's end, its last frame stays.
+f / 30 s by his timing; past the animation's end, its last frame stays.
 """
 
 from __future__ import annotations
@@ -33,7 +38,7 @@ FRAME_BYTES = 1024
 INTRO_FPS = 30
 INTRO_FRAMES = 175
 CHUNK = b"ANIZ"
-DURATIONS_MS = (160,) + (80,) * 43 + (170, 80, 160, 80, 160, 80, 80, 160) + (80,) * 6 + (240,)
+DURATIONS_MS = (160,) + (80,) * 36 + (560,)          # (the last: frames 37..43's 7 x 80 ms, then held)
 SOURCE = pathlib.Path(__file__).with_name("bootanim_dn2mk2.json")
 
 
@@ -88,7 +93,7 @@ def delta(prev: bytes, cur: bytes) -> bytes:
 
 
 def table() -> bytes:
-    """intro frame -> the animation frame to show, by the artist's timing at INTRO_FPS"""
+    """intro frame -> the animation frame to show, by his timing at INTRO_FPS"""
     starts, t = [], 0
     for d in DURATIONS_MS:
         starts.append(t)

@@ -133,8 +133,8 @@ A01 has played a loop and a half and is on its own step 6), played to step 36 (o
 | on, cued through `0x400d93f0` directly (program change / chain / song path) | stock's: trace digest `377d5149…`, no jump |
 | persist | on, power-on reads it back on; PTN + NO off, written, power-on reads it off; only `0x6FF000` read or written |
 
-No fault in any run. Boot from reset passes on the build (draws its UI, the start-up frame the
-artist's).
+No fault in any run. Boot from reset passes on the build (draws its UI, the start-up frame as the
+animation's first; v0.37's redraw then, s!Rwa²'s own frames since v0.39).
 
 ## 6. Not verified, and open
 

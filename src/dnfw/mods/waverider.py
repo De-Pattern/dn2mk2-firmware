@@ -46,7 +46,7 @@ SPEC = json.loads((pathlib.Path(__file__).with_name("waverider_code.json")).read
 
 
 def _boot():
-    """v0.37: the start-up animation (dnfw.bootanim, by s!Rwa²) through the boot-screen
+    """v0.37: the start-up animation (dnfw.bootanim, by s!Rwa²; v0.39: his own frames) through the boot-screen
     mod's stamp (scripts/gen_bootscreen_code.py, its ANIZ path): the intro hook's site and
     stock bytes, the stamp's CODE chunk, the ANIZ data chunk"""
     from . import bootscreen as B

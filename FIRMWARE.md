@@ -34,7 +34,7 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.37** | 2026-11-01 | s!Rwa²'s start-up animation (59 frames, every one checked in the gate); DDRW lighter (3 voices, same sound); resampling MAIN records the main mix (it gave an empty sample); the sample preview 6 dB down; polyphonic sample playback checked (chords on ONESHOT, WERP, SLICE) | `builds/v0.37-INTRO/` | yes |
+| **v0.37** | 2026-11-01 | a start-up animation after s!Rwa²'s design (59 frames, a redraw of it, not his frames: see v0.37; every one checked in the gate); DDRW lighter (3 voices, same sound); resampling MAIN records the main mix (it gave an empty sample); the sample preview 6 dB down; polyphonic sample playback checked (chords on ONESHOT, WERP, SLICE) | `builds/v0.37-INTRO/` | yes |
 | v0.36 | 2026-11-01 | More Monomachine voices: SID, VO-6 and DENS from 2 to 4 at once, DDRW from 1 to 2 (the v0.26 fixed budget gone; the DSP-time guard decides); a voice that doesn't fit is stolen cleanly (silent until its next note) instead of chopping in and out; DDRW/DENS's busiest tables in fast memory; a four-note chord test per Monomachine machine in the gate | `builds/v0.36-VOICES/` | yes |
 | v0.35 | 2026-11-01 | The bug sweep: MACHINE SEL's empty FLTR column after choosing a machine low in the list (v0.33), the +DRIVE preview retriggering while held, SYN held shows our pages' values, LOAD TO PROJ skipping same-length samples, deleted folders left in the list (and the import page can delete folders), PERC's names on another track's LFO page (B10); `dn2diag.py entries`; a new gate step that checks the drawn MACHINE SEL columns and SYN pages | `builds/v0.35-SWEEP/` | yes |
 | v0.34 | 2026-10-31 | The P-I voices that stayed dead (v0.33's guard never reset a wiped voice): fixed, and the guard now says which voice and whether its delay lines held the NaN (FUNC held: `V1D`/`V1X`; SysEx DIAG); SCAN reads any DSP memory for NaN (`tools/dn2diag.py`); the model's NaN as the core's; the gate: the audio interrupt at its real rate preempting our code (fuzz), the guard's wipe (runner 3w), the DSP's memory-cost clock | `builds/v0.34-TIMING/` | yes |
@@ -84,11 +84,12 @@ Gate: CLEARED TO FLASH, 2026-11-01 (36 gates; 15 reused, each a pass whose every
 
 Everything in v0.36, plus:
 
-**The start-up animation by s!Rwa²** (the DN2MK2 community): 59 frames in place of the
-stock intro's, at the artist's own timing (`src/dnfw/bootanim.py`, the frames with the
-credit in `bootanim_dn2mk2.json`). Two new gate checks: the boot from reset shows its
-first frame, and a run of the whole intro compares every frame shown with the artist's
-(all 59, in order, none wrong).
+**The start-up animation, s!Rwa²'s design** (the DN2MK2 community): 59 frames in place of the
+stock intro's (`src/dnfw/bootanim.py`, `bootanim_dn2mk2.json`). *Correction (v0.39): these
+frames were not his. They were a redraw of his design, made with another AI from his
+preview. v0.39 replaces them with his own frames.* Two new gate checks: the boot from reset
+shows its first frame, and a run of the whole intro compares every frame shown with the
+frames in the build (all 59, in order, none wrong).
 
 **DDRW lighter**: it skips the half of its work whose weight is exactly zero (15/16 of every
 octave), with the same output. DDRW chords: 3 voices (from 2).

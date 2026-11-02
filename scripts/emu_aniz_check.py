@@ -11,9 +11,9 @@ have: the intro hook at INTRO_VA (8 bytes) and the whole appended area
 (`platform.runtime`: its header, every CODE chunk at its load address with its BSS, every
 data chunk). Nothing else of the build is written: the snapshot is stock past boot.
 
-At each `aniz_show` the decoded frame (zst + 16, 1 KB) is compared with the artist's
-frame d3 (`dnfw.bootanim.images()`). Passes when all 59 frames were shown, none wrong,
-in order (never going back), and the intro ran to its end.
+At each `aniz_show` the decoded frame (zst + 16, 1 KB) is compared with s!Rwa²'s frame d3
+(`dnfw.bootanim.images()`, his own frames since v0.39). Passes when every frame was shown,
+none wrong, in order (never going back), and the intro ran to its end.
 """
 
 from __future__ import annotations
@@ -120,7 +120,7 @@ def main() -> int:
     print(f"  the intro called the stamp {res['stamp']} time(s), intro frames "
           f"{c[0] if c else None}..{c[-1] if c else None}")
     print(f"  start-up animation: {res['shown']} frame(s) shown, {len(distinct)} of {len(expect)} "
-          f"distinct, {len(res['wrong'])} not the artist's, {len(backwards)} going back")
+          f"distinct, {len(res['wrong'])} not his, {len(backwards)} going back")
     # the intro to its last frame (the snapshot may come after its first call or two)
     ok = (bool(c) and c[-1] >= bootanim.INTRO_FRAMES - 1 and distinct == list(range(len(expect)))
           and not res["wrong"] and not backwards)
@@ -129,7 +129,7 @@ def main() -> int:
         print(f"  the animation is wrong or incomplete (wrong: {sorted(set(res['wrong']))[:10]}, "
               f"missing: {missing[:10]})\n\n  DO NOT FLASH.")
         return 1
-    print("  every frame of the animation, as the artist drew it, in order: PASS")
+    print("  every frame of the animation, his frames bit for bit, in order: PASS")
     return 0
 
 
