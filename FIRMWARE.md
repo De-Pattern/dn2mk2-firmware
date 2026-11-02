@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.37** | 2026-11-01 | s!Rwa²'s start-up animation (59 frames, every one checked in the gate); DDRW lighter (3 voices, same sound); resampling MAIN records the main mix (it gave an empty sample); the sample preview 6 dB down; polyphonic sample playback checked (chords on ONESHOT, WERP, SLICE) | `builds/v0.37-INTRO/` | yes |
+| **v0.38** | 2026-11-02 | Direct Jump (PTN + YES/NO); per-project sample pools; new samples and recordings play at once (silent until a restart since v0.33); THRES 0 waits for real sound; a SLICE/GRID KEYBOARD chord-memory crash; gate: 22 live adds + 3 recordings must play, MAIN recording, sample chords, the arp/chord-memory fuzz | `builds/v0.38-JUMP/` | yes |
+| v0.37 | 2026-11-01 | A start-up animation (a redraw based on s!Rwa²'s design) (59 frames, every one checked in the gate); DDRW lighter (3 voices, same sound); resampling MAIN records the main mix (it gave an empty sample); the sample preview 6 dB down; polyphonic sample playback checked (chords on ONESHOT, WERP, SLICE) | `builds/v0.37-INTRO/` | yes |
 | v0.36 | 2026-11-01 | More Monomachine voices: SID, VO-6 and DENS from 2 to 4 at once, DDRW from 1 to 2 (the v0.26 fixed budget gone; the DSP-time guard decides); a voice that doesn't fit is stolen cleanly (silent until its next note) instead of chopping in and out; DDRW/DENS's busiest tables in fast memory; a four-note chord test per Monomachine machine in the gate | `builds/v0.36-VOICES/` | yes |
 | v0.35 | 2026-11-01 | The bug sweep: MACHINE SEL's empty FLTR column after choosing a machine low in the list (v0.33), the +DRIVE preview retriggering while held, SYN held shows our pages' values, LOAD TO PROJ skipping same-length samples, deleted folders left in the list (and the import page can delete folders), PERC's names on another track's LFO page (B10); `dn2diag.py entries`; a new gate step that checks the drawn MACHINE SEL columns and SYN pages | `builds/v0.35-SWEEP/` | yes |
 | v0.34 | 2026-10-31 | The P-I voices that stayed dead (v0.33's guard never reset a wiped voice): fixed, and the guard now says which voice and whether its delay lines held the NaN (FUNC held: `V1D`/`V1X`; SysEx DIAG); SCAN reads any DSP memory for NaN (`tools/dn2diag.py`); the model's NaN as the core's; the gate: the audio interrupt at its real rate preempting our code (fuzz), the guard's wipe (runner 3w), the DSP's memory-cost clock | `builds/v0.34-TIMING/` | yes |
@@ -76,6 +77,61 @@ Every flash, every version:
 
 ---
 
+## v0.38 — JUMP (Direct Jump, per-project pools, silent samples fixed)
+
+`DN2mod_v0.38_JUMP_OS1.11.syx`
+sha256 `2ae262f766727f88ea0c2014c0e06a5a9115cbff9c876d961b05bab490ffef48`
+Gate: CLEARED TO FLASH, 2026-11-02 (39 gates; 33 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit). Source: commit `7c480efd`. Docs: `docs/jump.md`, `docs/project-pools.md`, `docs/user-reports.md` (T1-T4, blskk B1/B2).
+
+Everything in v0.37, plus:
+
+**New samples silent until a restart** (depaffect, ptkrm, \x0x/; since v0.33). The DSP plays a
+pool slot only below the directory's count, and only the whole directory (power-on, a project
+load) carried the count; a live add or a recording sent its frames and entry only. Since v0.33
+both go into the first empty slot, which in a pool with no gaps is past the count. Now the
+count follows every live entry, and a recording is covered while it records. MAIN recordings
+were recorded all along (the owner: meter, waveform and the TRIM preview all have the mix);
+they played back silent for the same reason. Gate: link16 `live` (22 LOAD TO PROJECTs and 3
+recordings in a row, each must play by the DSP's rule; fails on v0.37's code) and the SHARC
+runner's `mainrec`.
+
+**Direct Jump**: PTN held + YES on, + NO off (the title bar says so), kept in its own +Drive
+sector (0x6FF000). A pattern cued with PTN + TRIG while playing switches at the next step and
+carries on from the playing pattern's position (each track's, wrapped by its new length), as
+Elektron's Direct Jump. Off: the sequencer is stock's on every tick. Chains, songs and program
+changes keep stock's change at the end.
+
+**Per-project sample pools**: each of the 128 projects has its own list of the pool's samples
+(+Drive 0x6D0000..0x6E02FF, two checked copies each, power-loss safe). NEW starts empty;
+projects made before keep today's pool (the legacy list) until changed; changes are written
+at once; during a switch a track is silent until its own sample is whole, never another's.
+The first power-on copies today's directory as the legacy list and writes nothing in the pool.
+
+**THRES 0** (blskk): ARM at 0 learns the input's noise and starts on sound about 12 dB above
+it (never below -60 dB); 1..120 are the DT2's threshold, started when exceeded.
+
+**A crash on a SLICE or GRID track in KEYBOARD mode** with a chord memory of more than 8 notes
+(our key-notes buffer was freed back to the heap). Found while chasing blskk's arp report; the
+UI fuzz now drives the arp, KEYBOARD modes and 12-note chord memories.
+
+**Tests**
+1. Record a few samples, and LOAD TO PROJECT a few from +DRIVE: each plays at once.
+2. RECORDER, SRC MAIN, a pattern playing: the recording plays back.
+3. PTN + YES (DIRECT JUMP ON); cue a pattern while playing: it switches at the next step, in
+   time. PTN + NO: the change at the pattern's end, as stock.
+4. Two projects with different samples: LOAD one, the other, back: each its own pool. NEW:
+   an empty pool.
+5. Power off and on: the same project with its own pool (first check this on hardware).
+6. ARM at THRES 0 with nothing playing: it waits; play something: it records.
+7. The v0.37 list still.
+
+**Known issues**
+- A recording made in a NEW project that was never saved goes with it when another project is
+  loaded, like its patterns: save the project to keep it.
+- The TRIM preview's playhead does not move (the audio plays).
+- The start-up animation is v0.37's redraw; s!Rwa²'s own frames come in v0.39.
+- blskk's arp + note edit crash is not confirmed to be the chord-memory one.
+
 ## v0.37 — INTRO (the start-up animation, DDRW lighter, MAIN resampling)
 
 `DN2mod_v0.37_INTRO_OS1.11.syx`
@@ -84,7 +140,7 @@ Gate: CLEARED TO FLASH, 2026-11-01 (36 gates; 15 reused, each a pass whose every
 
 Everything in v0.36, plus:
 
-**The start-up animation by s!Rwa²** (the DN2MK2 community): 59 frames in place of the
+**A start-up animation, a redraw based on s!Rwa²'s design** (made from his preview with another AI, not his file; his own frames come in v0.39): 59 frames in place of the
 stock intro's, at the artist's own timing (`src/dnfw/bootanim.py`, the frames with the
 credit in `bootanim_dn2mk2.json`). Two new gate checks: the boot from reset shows its
 first frame, and a run of the whole intro compares every frame shown with the artist's
