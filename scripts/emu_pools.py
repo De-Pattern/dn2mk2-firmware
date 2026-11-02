@@ -161,8 +161,17 @@ def run(cx):
     def check_dsp():
         """every entry the DSP holds: the target's, over its own whole frames"""
         t = watch["target"]
+        prev = None
         if t == "follow":                       # (outside a switch: the pool as it is now)
             t = target_from(image_dir())
+            # an edit inside the same project (a slot emptied) reaches the +Drive's directory
+            # one UI pass before the DSP's: the entry it had a moment ago, with its own bytes,
+            # is that project's own sample still, for those few periods
+            if t != watch.get("cur"):           # the pool as it was before its last change
+                watch["prev"], watch["cur"] = watch.get("cur"), t
+            prev = watch.get("prev")
+        else:
+            watch["prev"] = watch["cur"] = None
         if t is None or watch["grace"] > 0:
             watch["grace"] -= 1
             return
@@ -173,6 +182,10 @@ def run(cx):
                 continue
             watch["checked"] += 1
             ok = e == want_e[k] and k in want_n
+            if not ok and prev is not None and e == prev[0][k] and k in prev[1]:
+                want_n = dict(want_n, **{k: prev[1][k]})
+                ok = True
+                watch["edit_lag"] = watch.get("edit_lag", 0) + 1
             if ok:
                 # the bytes it must hold: a library sample's by its name (wherever it was
                 # placed), the image's own by its address (they keep it through renames)
@@ -624,6 +637,6 @@ def run(cx):
                    "skipped": long("smp_pl_skipped"), "blank_packets": long("smp_blank_sent")}
 
     facts["the DSP never held another project's sample, nor one half sent"] = not watch["bad"] and watch["checked"] > 0
-    notes["dsp_watch"] = {"checked": watch["checked"], "bad": watch["bad"]}
+    notes["dsp_watch"] = {"checked": watch["checked"], "bad": watch["bad"], "edit_lag": watch.get("edit_lag", 0)}
     io.pop("log", None)
     return {"facts": facts, "notes": notes, "ok": all(facts.values())}
