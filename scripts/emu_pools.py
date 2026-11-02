@@ -184,7 +184,7 @@ def run(cx):
             watch["checked"] += 1
             ok = e == want_e[k] and k in want_n
             if not ok and prev is not None and e == prev[0][k] and k in prev[1]:
-                want_n = dict(want_n, **{k: prev[1][k]})
+                want_n = {**want_n, k: prev[1][k]}
                 ok = True
                 watch["edit_lag"] = watch.get("edit_lag", 0) + 1
             if ok:
