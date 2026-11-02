@@ -607,8 +607,9 @@ def main(argv=None):
             show(results["3w_wipe"])
             gc.collect()
         if "chords" in steps:
-            print("\nstep 3k: four-note chords on each Monomachine machine, the memory clock (v0.36)")
-            results["3k_chords"] = step_chords(warm(), sound, machines)
+            print("\nstep 3k: four-note chords on each Monomachine machine, the memory clock (v0.36); "
+                  "and on the sample machines ONESHOT, WERP, SLICE (v0.38)")
+            results["3k_chords"] = step_chords(warm(), sound, machines, cold=init)
             show(results["3k_chords"])
             gc.collect()
         if "mainsrc" in steps:
@@ -1329,7 +1330,7 @@ def step_stress(init, sound, machines) -> dict:
     return {"ok": all(checks.values()), "checks": checks, "numbers": n}
 
 
-def step_chords(init, sound, machines, need=4) -> dict:
+def step_chords(init, sound, machines, need=4, cold=None) -> dict:
     """v0.36 (the owner and misterairplane: two voices at most on a Monomachine track, the
     oldest silenced). A chord: four notes of one Monomachine machine at once (four tracks,
     one note each, as dynamic allocation spreads a chord), held 24 blocks, for each machine,
@@ -1337,7 +1338,10 @@ def step_chords(init, sound, machines, need=4) -> dict:
     DDR), EMUCLK moved by it, so the frame guard decides as on the unit). Counts the voices
     sounding in each block after the attack; NEED of them for every machine but DDRW
     (reported: its cost is the tables in DDR). Our voices done by 0.8 of the frame,
-    everything finite."""
+    everything finite.
+
+    v0.38: then the sample machines in chords (step_smp_chords, on COLD: the cold init, as
+    the standalone check that passed on v0.37 ran)."""
     from dnfw.perc import guard as G
     from dnfw.mnm import machines as MMx
     P = 666_667
@@ -1422,7 +1426,83 @@ def step_chords(init, sound, machines, need=4) -> dict:
     finally:
         counts["hist"] = None
         undo_counts()
+    # v0.38: the sample machines in chords (after the memory counters are undone: they run as
+    # the standalone check did, without the cost clock)
+    sres, snums = step_smp_chords(cold if cold is not None else init, sound, machines, only=only)
+    res.update(sres)
+    nums.update(snums)
     return {"ok": all(res.values()), "checks": res, "numbers": nums}
+
+
+# v0.38: SLICE at NOTE plays slice (note - 24) mod slices (from C1). The test BEAT's 16 slices
+# are its 16 steps, "K.H.SHH.K.HKS.HH" (src/dnfw/sampler/live.py): slices 0, 2, 4, 8 are kick,
+# hat, snare, kick, none of them a rest
+SMP_CHORD_SLICES = (0, 2, 4, 8)
+
+
+def step_smp_chords(init, sound, machines, blocks=12, only=()) -> tuple[dict, dict]:
+    """v0.38: sample machines in chords. Four voice slots of one sample machine at once (four
+    tracks, one note each, as the DN2's allocation spreads a chord), triggered together, BLOCKS
+    blocks. ONESHOT and WERP on SAMP 4 at notes C E G C; SLICE (SLCE NOTE) on BEAT, slices 0,
+    2, 4, 8 by notes (24 + k) << 8. For each: every voice sounds in every block after the
+    attack, the DSP equals its model (smp_exact: no output or state mismatch), everything
+    finite; ONESHOT's and WERP's voices pairwise distinct (their own notes); SLICE's each equal
+    to its slice played alone. -> (checks, numbers)"""
+    notes = (0x3C00, 0x4000, 0x4300, 0x4800)      # C, E, G, C
+    slice_notes = tuple((24 + k) << 8 for k in SMP_CHORD_SLICES)
+    cases = {
+        "ONESHOT": (SM.TYPE_OF["ONESHOT"], smp_words({SM.SAMP_REC: 4}), notes),
+        "WERP": (SM.TYPE_OF["WERP"], smp_words({SM.SAMP_REC: 4}), notes),
+        "SLICE": (SM.TYPE_OF["SLICE"], smp_words({SM.SAMP_REC: 4, SM.SLICE_REC: 0}), slice_notes),
+    }
+    res, nums = {}, {}
+    for name, (typ, words, nts) in cases.items():
+        if only and name not in only:
+            continue
+        t0 = time.perf_counter()
+
+        def fb(b, typ=typ, words=words, nts=nts):
+            f = base_frame(sound, machines, t0=typ, overrides=words, trigger=b == 1,
+                           others={t: typ for t in range(1, 4)}, trigger_others=True)
+            for t in range(4):
+                for slot, w in words.items():
+                    f.param(t, slot, w)
+                f.header(FR.NOTE, t, nts[t])
+            return f.to_bytes()
+        rr = run_blocks(init, fb, blocks)
+        rr.pop("state", None)
+        sounding = [sum(1 for t in range(4) if t in blk and V.peak(blk[t]["out"]) > 1e-4)
+                    for blk in rr.get("smp", [])[3:]]
+        n, om, sm = smp_exact(rr) if rr["ok"] else (0, -1, -1)
+        series = [smp_series(rr, t) for t in range(4)]
+        fin = rr["ok"] and all(math.isfinite(x) for blk in rr["buffers"] for t in range(16) for x in blk[t])
+        all_sound = bool(sounding) and min(sounding) == 4
+        nums[f"smp {name}"] = {"sounding": sounding, "model_blocks": n, "out_mismatches": om,
+                               "state_mismatches": sm}
+        if name == "SLICE":                 # each voice is its slice as it plays alone (two are kicks)
+            alone = []
+            for t in range(4):
+                def fs(b, typ=typ, words=words, t=t):
+                    f = base_frame(sound, machines, t0=typ, overrides=words, trigger=b == 1)
+                    f.header(FR.NOTE, 0, slice_notes[t])
+                    return f.to_bytes()
+                r1 = run_blocks(init, fs, blocks)
+                r1.pop("state", None)
+                alone.append(series[t] == smp_series(r1, 0))
+            nums[f"smp {name}"]["each_as_alone"] = alone
+            res[f"{name} (sample, SLCE NOTE): a chord of BEAT's slices {', '.join(map(str, SMP_CHORD_SLICES))} on "
+                f"four voices: all four sound in every block after the attack, each is its slice played alone, "
+                f"the DSP equals its model, finite"] = bool(rr["ok"] and fin and all_sound and om == 0 and sm == 0
+                                                             and all(alone))
+        else:
+            same = [(i, j) for i in range(4) for j in range(i + 1, 4) if series[i] == series[j]]
+            nums[f"smp {name}"]["same_pairs"] = same
+            res[f"{name} (sample): a four-note chord (SAMP 4, C E G C) on four voices: all four sound in every "
+                f"block after the attack, the voices differ, the DSP equals its model, finite"] = bool(
+                    rr["ok"] and fin and all_sound and om == 0 and sm == 0 and not same)
+        nums[f"smp {name}"]["seconds"] = round(time.perf_counter() - t0)
+        print(f"    smp {name}: {nums[f'smp {name}']}", flush=True)
+    return res, nums
 
 
 def _count_memory():
