@@ -7,14 +7,9 @@
 # points at the repository for the detail.
 name: pages
 
+# Manual only (2026-11-01): the public site is De-Pattern/dn2mk2 (de-pattern.github.io/dn2mk2),
+# and this repository has no Pages site, so a push here failed ("Create Pages site failed").
 on:
-  push:
-    # Deploys only from main, so the published page always matches what was
-    # merged. Use the manual trigger to preview a branch before then.
-    branches: [main]
-    paths:
-      - 'site/**'
-      - '.github/workflows/pages.yml'
   workflow_dispatch:
 
 permissions:
