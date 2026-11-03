@@ -387,7 +387,6 @@ int sl_ours_any(const u8 *table, u32 t)
  * trig gets with no lock (OFF, 1 step), and turning does nothing. */
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90u)   /* (canvas, x, y, on) */
 #define TEXT ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011545Cu)
-#define FONT 0x44507ED8u
 #define CENTRED 2
 #define APP ((u32 (*)(void))0x4018A97Au)
 #define TRACK_CTX ((u32 (*)(u32))0x4003EFDEu)
@@ -439,14 +438,35 @@ static int held(struct held *h)
     return 0;
 }
 
-static void box(void *c, int x0, int y0, int x1, int y1, int fill)
-{
-    for (int x = x0; x <= x1; x++)
-        for (int y = y0; y <= y1; y++) {
-            int edge = x == x0 || x == x1 || y == y0 || y == y1;
-            SET_PIXEL(c, x, y, fill ? 1 : edge);
-        }
-}
+/* v0.40 (owner, on v0.39's page: "match identically the toggle icon from RTRG above SLD ...
+ * SLEN should resemble the LEN box above"): each place is drawn as stock's cell routine
+ * 0x4006448a draws RTRG and LEN in theirs, through stock's own routines with stock's
+ * arguments (measured in the emulator, TRIG page 2: RTRG at (24, 27), LEN at (76, 27), PORT
+ * at (102, 0); canvas y up, the label at y, the widget from y + 7):
+ *
+ * - SLD: RTRG's widget, drawn by stock's widget routine 0x40036560 with RTRG's record (id
+ *   0x132; its toggle 0x400bc414 blits the sheet's frame value >> 8 at (x + 1, y + 11)), the
+ *   value 0 (OFF) or 0x100 (ON), as RTRG's own;
+ * - SLEN: LEN's box, as LEN's widget 0x400cc2b4 draws it (its font 0x40293c64, the text
+ *   centred at (x + 9, y + 13), the box (x, y + 7) .. (x + 18, y + 23)): our text, as LEN's
+ *   own table has no "1", "1.5" ... (its "1/8" is two steps);
+ * - the label as the cell routine draws it (0x40115668, font 0x40291760, centred at x + 9 on
+ *   a cleared "XXXX" width: x - 2 .. x + 20);
+ * - a lock (a trig's own value): stock's p-lock look, the widget's area inverted, 0x40114842
+ *   (x - 3, y + 6, x + 21, y + 24, -1), as the cell routine does for a locked parameter.
+ *
+ * The place is cleared first (stock's empty place shows a dotted frame there). */
+#define CELL_TEXT ((void (*)(void *, u32, int, int, int, int, u32, u32, const char *))0x40115668u)
+#define CELL_FONT 0x40291760u
+#define CELL_FMT_W 0x402170B9u                  /* "XXXX": the label's width */
+#define FMT_S 0x40219C2Du                       /* "%s" */
+#define FILL ((void (*)(void *, int, int, int, int, int))0x40114842u)   /* (c, x0, y0, x1, y1, mode) */
+#define WIDGET ((void (*)(void *, u32, u32, u32, void *, void *, int, int))0x40036560u)
+#define RTRG_ID 0x132u
+#define BOX_FONT_INIT ((void (*)(void *, u32))0x40115E6Cu)
+#define BOX_FONT_FREE ((void (*)(void *))0x40115CE8u)
+#define BOX_FONT 0x40293C64u
+#define RECT ((void (*)(void *, int, int, int, int, int))0x40114626u)    /* (c, x0, y0, x1, y1, 1) */
 
 static void clear(void *c, int x0, int y0, int x1, int y1)
 {
@@ -455,28 +475,31 @@ static void clear(void *c, int x0, int y0, int x1, int y1)
             SET_PIXEL(c, x, y, 0);
 }
 
-/* the switch, as RTRG's: a pill, the dot left (OFF) or right (ON); a lock fills it */
-static void draw_sld(void *c, int x, int y, int on, int locked)
+static void label(void *c, int x, int y, const char *name, int locked)
 {
-    clear(c, x, y, x + 23, y + 23);
-    box(c, x + 1, y + 11, x + 22, y + 21, locked);
-    int dx = on ? x + 14 : x + 4;
-    for (int i = 0; i < 6; i++)
-        for (int j = 0; j < 6; j++)
-            SET_PIXEL(c, dx + i, y + 13 + j, !locked);
-    if (on)
-        for (int i = x + 4; i < x + 13; i++)
-            SET_PIXEL(c, i, y + 16, !locked);
-    TEXT(c, FONT, x + 12, y + 1, CENTRED, "SLD");
+    CELL_TEXT(c, CELL_FONT, x + 9, y, 1, 0, CELL_FMT_W, FMT_S, name);
+    if (locked)
+        FILL(c, x - 3, y + 6, x + 21, y + 24, -1);
 }
 
-/* the length, as LEN's: its value in a box; a lock inverts it */
-static void draw_slen(void *c, int x, int y, u32 i, int locked)
+/* exported for the emulator check (scripts/emu_slides.py draws both on a canvas of its own,
+ * beside stock's RTRG and LEN drawn there by stock's routines) */
+void sl_draw_sld(void *c, int x, int y, int on, int locked)
 {
-    clear(c, x, y, x + 23, y + 23);
-    box(c, x, y + 9, x + 23, y + 23, locked);
-    TEXT(c, FONT, x + 12, y + 12, CENTRED | (locked ? 8 : 0), "%s", sl_len_text[i < SL_NLEN ? i : SL_LEN_DEFAULT]);
-    TEXT(c, FONT, x + 12, y + 1, CENTRED, "SLEN");
+    clear(c, x - 3, y, x + 21, y + 24);
+    WIDGET(0, RTRG_ID, on ? 0x100u : 0u, 0, 0, c, x, y + 7);
+    label(c, x, y, "SLD", locked);
+}
+
+void sl_draw_slen(void *c, int x, int y, u32 i, int locked)
+{
+    static u32 font[8] D;                       /* the font object (stock's: on its stack) */
+    clear(c, x - 3, y, x + 21, y + 24);
+    BOX_FONT_INIT(font, BOX_FONT);
+    TEXT(c, (u32)font, x + 9, y + 13, CENTRED, (const char *)FMT_S, sl_len_text[i < SL_NLEN ? i : SL_LEN_DEFAULT]);
+    BOX_FONT_FREE(font);
+    RECT(c, x, y + 7, x + 18, y + 23, 1);
+    label(c, x, y, "SLEN", locked);
 }
 
 void sl_cell(void *view, void *canvas, int x, int y, u32 id)
@@ -492,8 +515,8 @@ void sl_cell(void *view, void *canvas, int x, int y, u32 id)
         sld = sl_lock_get(h.table, h.track, h.first, 0);
         slen = sl_lock_get(h.table, h.track, h.first, 1);
     }
-    draw_sld(canvas, SL_X0, 0, sld == 1, sld != 0xFFFF);
-    draw_slen(canvas, SL_X0 + SL_COLW, 0, slen != 0xFFFF ? slen : SL_LEN_DEFAULT, slen != 0xFFFF);
+    sl_draw_sld(canvas, SL_X0, 0, sld == 1, sld != 0xFFFF);
+    sl_draw_slen(canvas, SL_X0 + SL_COLW, 0, slen != 0xFFFF ? slen : SL_LEN_DEFAULT, slen != 0xFFFF);
 }
 
 /* wr_screen (page.c), around each draw of the screen: PHASE 0 before, 1 after (COVERED: one
