@@ -200,6 +200,118 @@ def test_the_recorder_waits_for_its_threshold_and_stops_at_its_length():
     assert h.mem.get(ent + 4) == 64 and h.status()[0] == SM.STATUS_MAGIC | 3
 
 
+def _take_frames(h, slot):
+    ent = h.L.pool + 8 + 16 * slot
+    fr, a, got = h.mem.get(ent + 4), h.mem.get(h.L.pool + 8 + 16 * slot), []
+    for k in range(fr // 2):
+        w = h.mem.get(a + 4 * k)
+        got += [(v - 65536 if v >= 32768 else v) / 32768.0 for v in (w & 0xFFFF, w >> 16)]
+    return fr, got
+
+
+def _q(x):
+    return max(-32768, min(32767, int(min(0.999969, max(-1.0, x)) * 32768.0))) / 32768.0
+
+
+def _hum_hiss(k, ch=0):
+    """an input with nothing played into it: DC, hiss and 50 Hz hum, about -45 dB"""
+    return (0.0015 + 0.0012 * ((((k + 977 * ch) * 2654435761) >> 7 & 0xFFFF) / 32768.0 - 1.0)
+            + 0.004 * math.sin(2 * math.pi * 50 * k / 48000))
+
+
+def _tail(k, ch=0):
+    """MAIN idle after a pattern: a low reverb/delay tail and dither, about -50 dB"""
+    return (0.002 * math.exp(-k / 20000.0) * math.sin(2 * math.pi * (90 + 7 * ch) * k / 48000)
+            + 0.0004 * ((((k + 31 * ch) * 40503) >> 3 & 0xFF) / 128.0 - 1.0))
+
+
+def test_v039_the_links_commands_leave_a_take_whole():
+    # paQ and the owner on v0.38: "it only records one step and leaves the rest blank" (MAIN
+    # or a track; the take its full length, its sound only in its first fraction). v0.38's
+    # count fix sends K_HEAD and its VERIFY at every take's start; the DSP took every new
+    # command's words 2..4 as the recorder's source, channel and threshold, so VERIFY's
+    # (0, 2, 0) moved the take to IN, R. A 2 s take of MAIN, with the link's every other
+    # command while it records, is its source's from its first frame to its last
+    h = SL.Harness(0)
+    h.defaults()
+    n = 3000                                                    # 2 s
+    h.command(SM.CMD_NOW, src=1, chan=0, dest=5, place=0x100)
+    traffic = {3: (SM.CMD_VERIFY, 0, 2), 500: (SM.CMD_VERIFY, SM.DATA_OFFSET // 4, 0x4000),
+               1000: (SM.CMD_PREVIEW, P.PREVIEW_AT, 0x10000, 4800), 1002: (SM.CMD_PREVIEW, P.PREVIEW_AT, 0, 0),
+               1500: (SM.CMD_SCAN, h.L.pool, 64), 2000: (SM.CMD_SEND, SM.DATA_OFFSET // 4, 0x100),
+               2500: (SM.CMD_VERIFY, 0x10, 0x7FFF, 0x7FFF)}
+    main = lambda k, ch: 0.6 * math.sin(2 * math.pi * (220 if ch == 0 else 330) * k / 48000)   # noqa: E731
+    for b in range(n):
+        if b in traffic:
+            h.link(*traffic[b])
+        x = 32 * b
+        h.recorder(inp=([_hum_hiss(x + k) for k in range(32)], [0.0] * 32),
+                   main=([main(x + k, 0) for k in range(32)], [main(x + k, 1) for k in range(32)]),
+                   trk={3: ([0.5] * 32, [0.5] * 32)})
+    fr, got = _take_frames(h, 5)
+    want = [_q((main(k, 0) + main(k, 1)) * 0.5) for k in range(32 * n)]
+    assert fr == 32 * n
+    bad = [k for k, (a, b) in enumerate(zip(got, want)) if abs(a - b) > 2 / 32768]
+    assert not bad, f"{len(bad)} frames wrong from {bad[0] / 48000:.3f} s"
+    assert h.status()[0] == SM.STATUS_MAGIC | 2
+    # and a track, MONO L, armed at a set THRES: still the track's after the link's commands
+    h2 = SL.Harness(0)
+    h2.defaults()
+    g = SM.TRK_GAIN
+    h2.command(SM.CMD_ARM, src=2 + 2, chan=1, thres=0.5, dest=6)
+    for b in range(200):
+        if b in (2, 3, 100):
+            h2.link(SM.CMD_VERIFY, 0, 2)
+        on = b >= 20
+        lv = [0.7 * g * math.cos(2 * math.pi * 300 * (32 * b + k - 640) / 48000) * on for k in range(32)]
+        h2.recorder(inp=([_hum_hiss(32 * b + k) for k in range(32)],) * 2, trk={2: (lv, [-0.3 * g] * 32)})
+    fr2, got2 = _take_frames(h2, 6)
+    want2 = [_q(0.7 * math.cos(2 * math.pi * 300 * (k - 640) / 48000)) for k in range(32 * 20, 32 * 200)]
+    assert fr2 == len(want2) and max(abs(a - b) for a, b in zip(got2, want2)) <= 2 / 32768
+
+
+def test_v039_settings_come_only_from_the_recorders_commands():
+    assert P.REC_SETTING_CMDS == (SM.CMD_ARM, SM.CMD_NOW, SM.CMD_STOP, SM.CMD_MONITOR, SM.CMD_ARM_PLAY)
+    h = SL.Harness(0)
+    h.defaults()
+    h.command(SM.CMD_MONITOR, src=2 + 7, chan=1, thres=0.25)
+    h.recorder()
+    C = h.L.C
+    before = (h.mem.get(C["rsrc"]), h.mem.get(C["rchan"]), h.mem.get(C["rthr"]))
+    for c in (SM.CMD_SEND, SM.CMD_VERIFY, SM.CMD_PREVIEW, SM.CMD_SCAN):
+        h.link(c, 0x1234, 0x5677, 0x10)
+        h.recorder()
+        assert (h.mem.get(C["rsrc"]), h.mem.get(C["rchan"]), h.mem.get(C["rthr"])) == before, c
+
+
+@pytest.mark.parametrize("what", ["IN: DC, hiss, 50 Hz hum", "MAIN: a reverb tail, dither"])
+def test_v039_thres0_waits_through_a_real_idle_input(what):
+    # the owner on v0.38: "THRES 0 still triggers". v0.38's floor dropped AT ONCE to the
+    # quietest 0.7 ms block: a hum's or a tail's zero crossing, a tenth of its crest; the next
+    # crest started the take. Now the floor is learnt over 48 blocks, falls slowly: a second
+    # of the idle input never starts it; the sound starts it on its first block
+    h = SL.Harness(0)
+    h.defaults()
+    src = 0 if what.startswith("IN") else 1
+    idle = _hum_hiss if src == 0 else _tail
+    h.command(SM.CMD_ARM, src=src, chan=0, thres=33 / 32767, dest=7)
+    quiet, n = 1500, 1510
+    sound = lambda k: 0.3 * math.cos(2 * math.pi * 440 * (k - 32 * quiet) / 48000) if k >= 32 * quiet else 0.0  # noqa: E731
+    for b in range(n):
+        x = 32 * b
+        lr = ([idle(x + k, 0) + sound(x + k) for k in range(32)], [idle(x + k, 1) + sound(x + k) for k in range(32)])
+        if src == 0:
+            h.recorder(inp=lr)
+        else:
+            h.recorder(main=lr, inp=([0.0] * 32, [0.0] * 32))
+        if b == quiet - 1:
+            assert h.status()[0] == SM.STATUS_MAGIC | 1, f"started on the idle input at block {b}"
+    fr, got = _take_frames(h, 7)
+    assert fr == 32 * (n - quiet)
+    want = [_q((idle(k, 0) + idle(k, 1)) * 0.5 + sound(k)) for k in range(32 * quiet, 32 * n)]
+    assert max(abs(a - b) for a, b in zip(got, want)) <= 2 / 32768
+
+
 def _route(h, slots):
     for t in range(0, 16, 2):
         h.mem.put(SM.TRK_ROUTE + 2 * t, (slots[t] & 0xFFFF) | (slots[t + 1] & 0xFFFF) << 16)

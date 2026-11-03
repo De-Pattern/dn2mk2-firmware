@@ -113,7 +113,7 @@ def run(image_path, limit, frame_at, entries=(), aniz=None):
         if aniz is not None:
             # v0.37, the start-up animation: each time the stamp's decoder has a frame
             # ready to show (aniz_show), the frame it decoded (zst + 16, 1 KB) against the
-            # artist's frame d3 (dnfw.bootanim), bit for bit
+            # frame d3 (dnfw.bootanim: s!Rwa²'s own since v0.39), bit for bit
             def at_show(uc, address, size, user):
                 k = uc.reg_read(UC_M68K_REG_D3)
                 got = bytes(uc.mem_read(aniz["zst"] + 16, 1024))
@@ -165,7 +165,7 @@ def main() -> int:
     p.add_argument("--refresh-control", action="store_true")
     p.add_argument("--aniz", action="store_true",
                    help="v0.37: the build plays the start-up animation (dnfw.bootanim): every frame the "
-                        "stamp shows is checked against the artist's, and every frame must show")
+                        "stamp shows is checked against his (s!Rwa²'s), and every frame must show")
     args = p.parse_args()
 
     profile = symbols.resolve(open(stock_path(), "rb").read())
@@ -244,7 +244,7 @@ def main() -> int:
         print(f"  the intro called the stamp {aniz['calls']} time(s), the first at instruction "
               f"{aniz['first_at']}")
         print(f"  start-up animation: {aniz['shown']} frame(s) shown, {len(aniz['frames'])} of {n} "
-              f"distinct, {len(aniz['wrong'])} not the artist's")
+              f"distinct, {len(aniz['wrong'])} not his")
         if aniz["wrong"] or 0 not in aniz["frames"]:
             print(f"  the animation is wrong or incomplete (wrong: {sorted(set(aniz['wrong']))[:10]}, "
                   f"missing: {sorted(set(range(n)) - aniz['frames'])[:10]}).\n\n  DO NOT FLASH.")

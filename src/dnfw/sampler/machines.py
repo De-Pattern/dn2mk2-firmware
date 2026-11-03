@@ -248,6 +248,13 @@ META_MAGIC = 0x54454D53                     # 'SMET'
 META_FOLDERS, META_FOLDER_BYTES = 64, 32
 META_SLOT_BYTES, META_NAME_BYTES = 40, 36
 META_BYTES = 12 + META_FOLDERS * META_FOLDER_BYTES + 128 * META_SLOT_BYTES     # 7,180
+# v0.39: which +Drive library sample each slot was loaded from (LOAD TO PROJECT, link.c's
+# lp_poll): REC_FIRST words in the directory page after META_PTR's three, before the command
+# block: the library entry's frames' adler-32 (its index entry's +16) mixed with the slot's
+# pool address; 0 none (every pool the host tools make, every recording). The browser takes
+# a library sample to be in a slot only by this (smp_lib_slot_of): a pack's samples of one
+# length whose 35-character names are one (v0.38: all shown in one slot, all previewed as it)
+LIBID_OFFSET = 0xC20
 POS_MAGIC = 0x5A34                          # v0.25: idle, the voices' play positions (tdm_tx)
 POS_NONE = 0xFFFF                           #   a track that plays nothing
 POS_ONE = 0xFFFE                            #   a position: its fraction of the sample, x this

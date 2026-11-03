@@ -22,9 +22,9 @@ failure:
    runs has no scale-8 addressing; and every hit in MAIN OS against stock lies past
    stock's end *and* outside every `CODE` chunk (i.e. in data that never executes).
 5. **boot from reset** (`emu_boot_check.py`): boots and draws its UI, no fault (v0.37: and the
-   start-up animation's first frame is the artist's).
+   start-up animation's first frame is s!Rwa²'s).
 5b. **start-up animation** (v0.37, `emu_aniz_check.py`): from the snapshot before the intro,
-   with the build's hook and appended area installed, all 59 frames, each the artist's, in
+   with the build's hook and appended area installed, every frame (v0.39: 38, his own), each his, in
    order, to the intro's last frame.
 6. **engine + LOAD/SAVE** (`emu_boot_engine.py`): the evaluator runs clean under the
    real loader; CODE chunks intact; machine types survive a SAVE/LOAD round trip.
@@ -39,6 +39,12 @@ failure:
 6p. **per-project pools** (v0.38, `emu_waverider_menu.py`'s `link16` `pools`, scripts/emu_pools.py):
    the OS's LOAD, NEW and SAVE AS through the build's detours; each project its own slots, the
    legacy pool for old ones; power cuts after every sector; the DSP never another project's sample.
+6e. **ERASE MOD DATA** (v0.39, `emu_erase.py`, docs/erase-mod-data.md): through the real keys
+   (+DRIVE, RIGHT, two questions; NO at either erases nothing) and link command 28, on a Python
+   +Drive logging every command: TRIM only in the mod's four regions, covering them exactly,
+   headers first; stock areas and gaps byte-identical; everything reads erased; no write
+   after the first TRIM; a bad card and a TRIM error fail at their sector; a power-on after
+   cuts at seven points boots with an empty pool, and after the whole erase as a fresh install.
 6s. **DIRECT JUMP** (`emu_jump.py`, docs/jump.md): the sequencer ticked through stock's own ISR;
    off is stock's state every tick; on, every track goes on from its own step (Elektron's rule); a cue
    that is not the PTN view's stays stock's; the setting persists in its sector.
@@ -46,6 +52,8 @@ failure:
    v0.34 (docs/timing-model.md): with the audio interrupt firing on its own at its real
    cadence through the real vectors, preempting the mod's UI code; a CPU exception, the
    interrupt no longer delivered, or audio frames overrunning their budget fail a seed.
+6s. **parameter slides** (`emu_slides.py`, the build and stock 1.11): a slide's ramp exact per
+   frame and landing on the locks; SLIDE off and every lock table identical to stock's.
 7. **unit tests** (`pytest -m "not slow"` on the safety, mod, PERC and filter tests; v0.38: on
    both cores, pytest-xdist `-n 2 --dist load`, the same tests and the same pass line).
 
@@ -147,7 +155,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_shft_live.py", "test/test_mnm.py",
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py",
-         "test/test_sampler_relatch.py", "test/test_pools.py"]
+         "test/test_sampler_relatch.py", "test/test_pools.py",
+         "test/test_slides.py"]
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -182,9 +191,12 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("samplist", "sample list, browser, playhead (ColdFire)"),
        ("colsw", "MACHINE SEL columns, SYN held (ColdFire)"),
        ("drive", "+DRIVE browser (ColdFire)"),
+       ("drivenav", "+DRIVE keys and long names (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
+       ("slides", "parameter slides (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
+       ("erase", "ERASE MOD DATA (ColdFire)"),
        ("engine", "engine + LOAD/SAVE"),
        ("boot", "boot from reset"),
        ("fuzz", "UI fuzz, two seeds, the audio interrupt at its real rate (ColdFire)"),
@@ -548,7 +560,7 @@ def main() -> int:
         # 5. boot from reset
         boot_cmd = [a.venv, "-u", "scripts/emu_boot_check.py", bdir / "section_3_MAIN_OS.bin"]
         # v0.37: the build plays the start-up animation (dnfw.bootanim): every frame the stamp
-        # shows during the boot, checked bit for bit against the artist's, all of them shown
+        # shows during the boot, checked bit for bit against his (s!Rwa²'s), all of them shown
         from dnfw.mods import waverider as Wb   # noqa: PLC0415
         anim = hasattr(Wb, "_boot")
         if anim:
@@ -558,23 +570,26 @@ def main() -> int:
             rc, out = run("boot_check", boot_cmd, logs, trace=tdir)
             good = rc == 0 and "booted and drew its UI" in out
             if anim:
-                good = good and "not the artist's" in out and ", 0 not the artist's" in out
+                good = good and ", 0 not his" in out
             return good, ("booted and drew its UI, no fault" + ("; the start-up animation's first frame, "
-                          "the artist's" if anim else "") if good else out[-800:])
+                          "his" if anim else "") if good else out[-800:])
         later("boot", "boot from reset", "boot from reset", [boot_cmd], boot_body)
 
         # 5b. v0.37: the start-up animation, every frame. From reset the intro stops after its
         # first frame under the emulator (stock too), so from the snapshot taken just before
         # it, with this build's intro hook and appended area installed as its loader would:
-        # all 59 frames, each bit for bit the artist's, in order, to the intro's last frame
+        # every frame (v0.39: s!Rwa²'s own 38), each bit for bit his, in order, to the intro's last frame
         if anim:
+            from dnfw import bootanim as BA      # noqa: PLC0415
+            n_anim = len(BA.DURATIONS_MS)
             aniz_cmd = [a.venv, "-u", "scripts/emu_aniz_check.py", a.build]
 
             def aniz_body(tdir):
                 rc, out = run("aniz_check", aniz_cmd, logs, trace=tdir)
-                good = rc == 0 and "in order: PASS" in out and "59 of 59 distinct, 0 not the artist's" in out
-                return good, ("all 59 frames, each the artist's, in order, to the intro's end"
-                              if good else out[-800:])
+                good = (rc == 0 and "in order: PASS" in out and f"{n_anim} of {n_anim} distinct, 0 not his" in out
+                        and ", 0 wrong; the label" in out and f"over frame(s) [{n_anim - 1}]" in out)
+                return good, (f"all {n_anim} frames, each his, in order, to the intro's end; the panel showed "
+                              f"each, the version label over the last only" if good else out[-800:])
             later("aniz", "start-up animation, every frame", "start-up animation", [aniz_cmd], aniz_body)
 
         # 6. engine + LOAD/SAVE
@@ -684,6 +699,41 @@ def main() -> int:
                                   "every write in its region, the DSP never another project's sample" if good else why)
                 later("pools", "per-project pools (ColdFire)", "per-project pools (ColdFire)",
                       [pl_cmd, sorted(EMU_ENV.items())], pl_body)
+
+            # 6e. v0.39: ERASE MOD DATA (csrc/sampler/erase.c, docs/erase-mod-data.md;
+            # scripts/emu_erase.py): the key path (+DRIVE, RIGHT, two questions; NO at either and
+            # LEFT erase nothing), link command 28 (a wrong word refused), on a Python +Drive that
+            # logs every eMMC command: TRIM only inside the four regions, covering each exactly,
+            # headers first, never a write from the first TRIM on; the stock store, the factory
+            # buffer and the gaps byte-identical; every region's sector read back erased (0x00
+            # and 0xFF cards); a card that keeps a sector and a TRIM error fail at their sector;
+            # a power-on after a cut at seven points boots with the pool empty, writing only in
+            # its regions, and after the whole erase exactly as on a +Drive never written
+            if "smp_er_state" in lay:
+                er_js = work / "erase.json"
+                er_cmd = [a.venv, "-u", "scripts/emu_erase.py", "--build", bdir, "--snapshot", snap,
+                          "--scenario", "all", "--json", er_js, "--png-dir", work / "erase"]
+
+                def er_body(tdir):
+                    rc, out = run("erase", er_cmd, logs, env=EMU_ENV, trace=tdir)
+                    why, good = out[-800:], False
+                    if rc == 0 and er_js.exists():
+                        r = json.loads(er_js.read_text())
+                        checks = r.get("checks", {})
+                        good = bool(r.get("ok")) and len(checks) >= 35 and all(c["ok"] for c in checks.values())
+                        why = json.dumps({k: c for k, c in checks.items() if not c["ok"]})[:800] or out[-800:]
+                        if good:
+                            c = r["commands"]
+                            why = (f"ERASE MOD DATA: NO at each question and LEFT erase nothing; three YES: "
+                                   f"{c['trims']} TRIM calls (CMD35/36/38), only in the four regions and "
+                                   f"covering them exactly, headers first, no write after the first; stock areas "
+                                   f"and gaps byte-identical, every region erased and verified ({r['reads']} reads); "
+                                   f"link 28 likewise (0xFF card); a kept sector and a TRIM error fail at their "
+                                   f"sector; {len(r['boot'])} power-ons after cuts boot empty, the whole erase as a "
+                                   f"fresh install; {len(checks)} checks")
+                    return good, why
+                later("erase", "ERASE MOD DATA (ColdFire)", "ERASE MOD DATA (ColdFire)",
+                      [er_cmd, sorted(EMU_ENV.items())], er_body)
 
         # 6c. the RECORDER screen (v0.22): FUNC+VOICE opens it over any page, its knobs
         # change the recorder and never the track's sound, NO closes it, and the UI keeps
@@ -1134,6 +1184,123 @@ def main() -> int:
                                   "queued, NO back up a level each time and closed at the top" if good else why)
                 later("drive", "+DRIVE browser (ColdFire)", "+DRIVE browser (ColdFire)", [d_cmd, sorted(EMU_ENV.items())], d_body)
 
+                # 6l2. v0.39 (the owner, v0.38): +DRIVE's keys as Elektron's lists, and long names
+                # as the DT2's. A folder of 17: "SHORT ONE.WAV", then 16 hi-hats whose names are
+                # one but for their last two characters (his "AT HIHAT": six rows of "AT BIRDHOUSE
+                # HI-HA"). Held DOWN steps on by itself, in the list and in the action menu;
+                # FUNC + DOWN a page; a knob turned pushed in a page a detent, unpushed one; D
+                # pushed leaves +DRIVE up (stock took it); NO still goes up. An unselected long
+                # name is head...tail; the selected one scrolls from its start to its end; moved
+                # off, it is head...tail again and the new one starts from its start
+                if "smp_fb_rowtext" in lay and "smp_mq_off" in lay:
+                    hh = [f"AT BIRDHOUSE HI-HAT CLOSED VEL {k:02d}" for k in range(16)]
+                    nidx = lent(LDATA, 1000, 2, "SHORT ONE.WAV") + b"".join(
+                        lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh))
+                    nfold = b"INCOMING".ljust(32, b"\0") + b"RECORDED".ljust(32, b"\0") + b"AT HIHAT".ljust(32, b"\0")
+                    TICK = 0x4058E8D4
+                    rt, mq, cur, mcur = lay["smp_fb_rowtext"], lay["smp_mq_off"], lay["smp_fb_cur"], lay["smp_fb_mcur"]
+                    snap_ = [mem(rt, 144), mem(mq), mem(cur), mem(TICK)]
+                    ns = base + lead + [f"poke:{LRAM + 0x200:#x}:{nidx.hex()}", f"poke:{LRAM + 0x200 + 2048 * 64:#x}:{nfold.hex()}",
+                                        f"poke:{lay['smp_lib_state']:#x}:00000002", f"call:{lay['smp_lib_refresh']:#x}"]
+                    ns += samp_all(3) + [f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:10"] + turn(2) + [
+                        "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", "up", "wait:4", "yes", "wait:6",
+                        f"poke:{lay['smp_fb_folder']:#x}:00000002", f"poke:{cur:#x}:00000000",
+                        f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:6", "png:n0"] + snap_      # 0: the folder
+                    # (the emulator's clock, the 1.5 kHz ticks at 0x4058e8d4, does not run: it is set
+                    # as time would move it: the repeat's 0.4 s then 0.08 s steps, the marquee's 1 s
+                    # rest and 0.2 s a character)
+                    def clock(t):
+                        return [f"poke:{TICK:#x}:{t:08x}", "wait:2"]
+                    ns += clock(100) + ["press:14", "wait:2"] + clock(700) + clock(850) + clock(1000) + snap_   # 1: held DOWN
+                    ns += ["release:14", "wait:2"] + clock(1300) + snap_ + clock(1600) + snap_                  # 2, 3: let go
+                    # 4-19: the marquee of the row it stopped on (selected at tick 1000)
+                    MQT = (1100, 1900, 2600, 2900, 3200, 4100, 5000, 6200, 7400, 7700, 8200, 8700, 8850, 9000, 9500, 10900)
+                    for t in MQT:
+                        ns += clock(t) + snap_
+                    ns += ["down", "wait:3"] + snap_                                                               # 20: moved off
+                    ns += ["press:17", "wait:2", "down", "wait:2", "release:17", "wait:3"] + snap_                  # 21: FUNC + DOWN
+                    ns += [f"poke:{cur:#x}:00000000", "wait:3", "turn:3:1", "wait:3"] + snap_                     # 22: pushed, two detents
+                    ns += ["press:44", "wait:3", "release:44", "wait:4", mem(lay["smp_fb_open"]), mem(lay["smp_fb_store"]),
+                           mem(lay["smp_fb_folder"]), "png:n1"]
+                    ns += ["right", "wait:4"] + clock(20000) + ["press:14", "wait:2"] + clock(20700) + clock(20850) + clock(21000) + [
+                           "release:14", "wait:3", mem(mcur), mem(lay["smp_fb_menu"]),
+                           "png:n2", "no", "wait:4", "no", "wait:4", mem(lay["smp_fb_folder"]), mem(lay["smp_fb_open"])]
+                    njs = work / "drivenav.json"
+                    n_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                             "--snapshot", snap, "--steps", ",".join(ns), "--png-dir", work / "drivenav", "--json", njs]
+
+                    def n_body(tdir):
+                        rc, out = run("+drive keys, names", n_cmd, logs, env=EMU_ENV, trace=tdir)
+                        why, good = out[-800:], False
+                        if rc == 0 and njs.exists():
+                            m = json.loads(njs.read_text())["memory"]
+
+                            def at(va, i):          # the I-th read of VA
+                                ks = [k for k in m if k == hex(va) or k.startswith(hex(va) + "@")]
+                                return m[ks[i]] if i < len(ks) else None
+
+                            def i32(va, i):
+                                v = at(va, i)
+                                return None if v is None else int.from_bytes(bytes.fromhex(v), "big", signed=True)
+
+                            def rows(i):
+                                v = at(rt, i)
+                                b = bytes.fromhex(v) if v else bytes(144)
+                                return [b[24 * r:24 * r + 24].split(b"\0")[0].decode("ascii", "replace") for r in range(6)]
+                            ticks = [i32(TICK, i) for i in range(23)]
+                            curs = [i32(cur, i) for i in range(23)]
+                            offs = [i32(mq, i) for i in range(23)]
+                            r0 = rows(0)
+
+                            W = 21                         # (smp_page.c's FB_W)
+
+                            def ht(nm):                    # head...tail: ten, "...", eight
+                                return nm[:10] + "..." + nm[-8:]
+                            sel = curs[3]                  # the hi-hat held DOWN stopped on: hh[sel - 1]
+                            mq_rows = [rows(i) for i in range(3, 20)]          # (0: let go; 1..16: the marquee)
+                            name = hh[sel - 1] if sel and 1 <= sel <= 16 else ""
+                            seen = {r for rs in mq_rows for r in rs}
+                            top = max(0, min(sel - 2, 17 - 6)) if sel else 0
+                            after = rows(20)
+                            ntop = max(0, min(curs[20] - 2, 17 - 6)) if curs[20] is not None else 0
+                            end = len(name) - W
+                            # (selected at tick 1000: a second's rest (1500 ticks), a character each 300 to
+                            # its end, a second's rest, then from the start again)
+
+                            def mq_want(t):
+                                u = (t - 1000) % (3000 + 300 * end)
+                                return 0 if u < 1500 else min(end, (u - 1500) // 300)
+                            want = [mq_want(t) for t in MQT]
+                            facts = {
+                                "a short name whole, its .WAV dropped": r0[0] == "SHORT ONE",
+                                "an unselected long name head...tail (\"AT BIRDHOU...D VEL 00\")": r0[1] == ht(hh[0]) and r0[2] == ht(hh[1]),
+                                "held DOWN steps on by itself (a press and three repeats)": curs[1] == 4,
+                                "let go, it stops": curs[2] == curs[3] == curs[1],
+                                "the selected long name starts from its start": bool(name) and mq_rows[1][sel - top] == name[:W],
+                                "it scrolls on to its end, a character each 0.2 s, and starts again": offs[4:20] == want
+                                and end == 12 and max(want) == end and want[-1] > 0 and 0 in want[want.index(end):]
+                                and any(r == name[-W:] for r in mq_rows[1 + want.index(end)]),
+                                "only the selected row scrolls": all(r == ht(hh[top + j - 1]) for rs in mq_rows
+                                                                     for j, r in enumerate(rs) if top + j != sel and top + j >= 1)
+                                and all(rs[sel - top] == name[o:o + W] for rs, o in zip(mq_rows[1:], want)),
+                                "DOWN: the next": curs[20] == sel + 1,
+                                "moved off: head...tail again": after[sel - ntop] == ht(hh[sel - 1]),
+                                "the new one from its start": after[curs[20] - ntop] == hh[curs[20] - 1][:W] and offs[20] == 0,
+                                "FUNC + DOWN: a page": curs[21] == min(curs[20] + 6, 16),
+                                "a knob pushed in: a page a detent (two)": curs[22] == 12,
+                                "D pushed: +DRIVE still up, in its folder": int(m[hex(lay["smp_fb_open"])], 16) == 1
+                                and int(m[hex(lay["smp_fb_store"])], 16) == 1 and int(m[hex(lay["smp_fb_folder"])], 16) == 2,
+                                "held DOWN in the action menu steps on": i32(mcur, 0) == 4 and int(at(lay["smp_fb_menu"], 0), 16) == 1,
+                                "NO: out of the menu, then up a level": i32(lay["smp_fb_folder"], 1) == -1 and i32(lay["smp_fb_open"], 1) == 1}
+                            good = all(bool(v) for v in facts.values())
+                            why = f"{ {k: v for k, v in facts.items() if not v} } cur={curs} off={offs} ticks={ticks} rows0={r0} rows3={rows(3)} rows20={after}"
+                        return good, ("held arrows repeat in the list and the action menu, FUNC + DOWN a page, a pushed "
+                                      "knob a page a detent, D pushed keeps +DRIVE, NO goes up; long names head...tail, "
+                                      "the selected one scrolls to its end and back, moved off it is head...tail again"
+                                      if good else why[:1500])
+                    later("drivenav", "+DRIVE keys and long names (ColdFire)", "+DRIVE keys and long names (ColdFire)",
+                          [n_cmd, sorted(EMU_ENV.items())], n_body)
+
         # 6h. v0.28: the Monomachine machines' pages drawn as the Monomachine's (each machine its
         # own screen, none the stock grid), and their choices' detents (WPRS, two choices: four
         # detents a choice, through smp_quant as the stock setter calls it)
@@ -1554,6 +1721,41 @@ def main() -> int:
                                  f"{res[('on', 'odd', False)]['jmp']['jmp_last']}), and from PLAY where stock plays it; "
                                  "the setting written, read back at power-on, turned off")
             later("jump", "DIRECT JUMP (ColdFire)", "DIRECT JUMP (ColdFire)", [*jcmds, sorted(EMU_ENV.items())], jump_body)
+
+        # 6s. parameter slides (docs/slides.md, scripts/emu_slides.py): on the ColdFire, a trig's
+        # locks applied as the frame ISR's note block applies them, then the real frame ISR every
+        # frame: with SLIDE on, FILTER FREQ and FM TONE's FDBK ramp to the trig's locks over SLEN,
+        # exact per frame, and land on them; a knob, a tempo change, a trigless lock, a retrig,
+        # a new sound, a trig with no p-lock; the lock table's SAVE/LOAD and step clear. With
+        # SLIDE off, and for every lock table, the same as stock 1.11 byte for byte: every frame's
+        # smoother state and output arrays (the emulator's own EMAC, and the instrument's
+        # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records
+        if "sl_smooth" in lay:
+            sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", snap,
+                        "--json", work / f"slides-{k}.json",
+                        *(["--stock"] if k == "stock" else ["--png-dir", work / "slides-png"])]
+                       for k in ("build", "stock")]
+
+            def sl_body(tdir):
+                outs = []
+                for k, cmd in zip(("build", "stock"), sl_cmds):
+                    rc, out = run(f"slides {k}", cmd, logs, env=EMU_ENV, trace=tdir)
+                    if rc != 0 or "PASS" not in out.strip().splitlines()[-1]:
+                        return False, f"{k}: " + out[-800:]
+                    outs.append(json.loads((work / f"slides-{k}.json").read_text()))
+                b, s = outs
+                same = [k for k in ("off_shas_emac", "off_shas", "plain_stored_sha", "plain_loaded_sha",
+                                    "ours_loaded_rest_sha") if b.get(k) != s.get(k)]
+                if same or not s.get("stock_skips_ours"):
+                    return False, f"differs from stock: {same or 'stock did not skip ids 200/201'}"
+                return True, (f"SLIDE on: FREQ and FDBK ramp over {b['expected_ramp_frames']} frames "
+                              f"(1 step at {b['tempo_word_after_isr'] / 120:g} BPM), exact, landing on the "
+                              f"locks; {len(b['checks'])} checks; SLIDE off: {len(b['off_shas'])} frames' "
+                              f"arrays and the lock table's SAVE/LOAD identical to stock 1.11; the TRIG page's SLD/SLEN "
+                              f"set through the panel, the held trig staying on after release, a page "
+                              f"paste leaving no SLD/SLEN value in a stock lock")
+            later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
+                  [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

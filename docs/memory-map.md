@@ -235,3 +235,8 @@ each region checked against its bounds before the stock block driver (`0x4012c59
 
 Free between them: `0x6C8001..0x6CFFFF`, `0x6D0002..0x6D00FF`, `0x6E0300..0x6FEFFF`. A new region takes a range
 from there and adds its row here and a `_Static_assert` against its neighbours in its C.
+
+**v0.39, ERASE MOD DATA** (`csrc/sampler/erase.c`, `docs/erase-mod-data.md`) TRIMs exactly the four
+mod rows above (the pool image `0x600000..0x6C8000`, the lists' whole range `0x6D0000..0x6E02FF`, the
+settings sector, the library to the device's end) and nothing below `0x600000`. A new region must be
+added to its job table and `er_inside`, or it survives an erase.

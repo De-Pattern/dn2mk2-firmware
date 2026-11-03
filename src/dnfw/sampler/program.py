@@ -1716,6 +1716,20 @@ REC_AUTO_FLOOR = 33.0 / 32767.0           # never under -60 dB (v0.30's floor)
 REC_AUTO_MARGIN = 4.0                     # 12 dB over the quietest recent block's peak
 REC_AUTO_RISE = 1.0005                    # how fast the floor creeps up: +6.5 dB a second at 1500 blocks
 REC_AUTO_EPS = 1e-6                       # ... and from nothing
+# v0.39 (the owner on v0.38: "THRES 0 still triggers"): a 32-frame block is 0.7 ms, a 50 Hz
+# hum's or a reverb tail's cycle 20 ms and more. Its quietest blocks are its zero crossings,
+# a tenth of its crest, so v0.38's floor (dropping AT ONCE to the quietest block) sat at its
+# crossings and the next crest started the take. Now the floor is learnt over the first
+# REC_AUTO_LEARN blocks after ARM (their loudest block: a whole cycle down to 31 Hz; nothing
+# starts while it learns), and then falls by REC_AUTO_FALL a block at most (-26 dB a second:
+# a quieter source is followed within a second or so, a hum's crossing moves it a few
+# hundredths of a dB). rmode counts the blocks learnt: 2 .. 2 + REC_AUTO_LEARN.
+REC_AUTO_LEARN = 48                       # 32 ms
+REC_AUTO_FALL = 0.998
+# v0.39: the commands whose words 2..4 are the recorder's source, channel and threshold
+# (ARM, NOW, STOP, MONITOR, ARM_PLAY: consecutive); every other command's are the link's
+REC_SETTING_CMDS = (SM.CMD_ARM, SM.CMD_NOW, SM.CMD_STOP, SM.CMD_MONITOR, SM.CMD_ARM_PLAY)
+assert REC_SETTING_CMDS == tuple(range(REC_SETTING_CMDS[0], REC_SETTING_CMDS[-1] + 1))
 
 
 def recorder(p: Prog, L: Layout) -> None:
@@ -1739,9 +1753,7 @@ def recorder(p: Prog, L: Layout) -> None:
     p.ld(0, cmd)                              # the command's sequence
     p.ld(1, C["rseq"])
 
-    def new_command():
-        p.ld(0, cmd)
-        p.st(C["rseq"], 0)
+    def settings():
         p.ld(4, cmd + 8)                      # source: 0 IN, 1 MAIN, 2 + t a track
         p.iconst(12, 0)
         p.iop(4, 4, "MAX", 12)
@@ -1757,6 +1769,20 @@ def recorder(p: Prog, L: Layout) -> None:
         p.ld(4, cmd + 16)                     # the threshold, 0..32767 for a peak 0..1
         tofloat(p, 5, 4, 1.0 / 32767.0)
         p.st(C["rthr"], 5)
+
+    def new_command():
+        p.ld(0, cmd)
+        p.st(C["rseq"], 0)
+        # v0.39: only the recorder's own commands (ARM .. ARM_PLAY: REC_SETTING_CMDS) carry
+        # its source, channel and threshold. Words 2..4 of the link's (SEND, VERIFY, PROBE,
+        # PREVIEW, SCAN) are offsets and counts: taken as settings (v0.15..v0.38) they moved
+        # a running take to IN, R, threshold 0 -- since v0.38's count fix at every take's
+        # start (K_HEAD's VERIFY), so a take kept its first blocks and then IN's silence,
+        # and an armed one started on the input's hiss (paQ, the owner on v0.38)
+        p.ld(2, cmd + 4)
+        p.iconst(12, REC_SETTING_CMDS[0])
+        p.if_(2, "GE", 12, lambda: (p.iconst(12, REC_SETTING_CMDS[-1]),
+                                    p.if_(2, "LE", 12, settings, kind="i")), kind="i")
         p.ld(2, cmd + 4)                      # the command
 
         def start(state):
@@ -1821,8 +1847,9 @@ def recorder(p: Prog, L: Layout) -> None:
             # 1.0 for the first block, so it never starts on the block it learns from
             p.ld(4, cmd + 16)
             p.iconst(12, REC_AUTO_BELOW)
+            # (v0.39: 0.0, the loudest block's level gathered over REC_AUTO_LEARN blocks)
             p.if_(4, "LT", 12, lambda: (p.iconst(7, 2), p.st(C["rmode"], 7),
-                                        p.fconst(5, 1.0), p.st(C["rthr"], 5)), kind="i")
+                                        p.fconst(5, 0.0), p.st(C["rthr"], 5)), kind="i")
         p.if_(2, "EQ", 12, arm, kind="i")
         p.ld(2, cmd + 4)
         p.iconst(12, SM.CMD_ARM_PLAY)
@@ -2059,30 +2086,52 @@ def recorder(p: Prog, L: Layout) -> None:
             p.if_(5, "GT", 6, lambda: (p.iconst(0, 2), p.st(C["rst"], 0)))
 
         def on_auto():                        # v0.38, THRES 0: the first sound above the noise
-            on_thres()
-            # the threshold follows the source's noise: REC_AUTO_MARGIN x the quietest recent
-            # block peak (it drops to a quieter block at once and creeps up slowly, so it
-            # sits at the noise's floor, a hum's or a DC offset's level), never under the
-            # -60 dB floor (v0.30)
-            p.ld(5, C["rpk"])
-            p.ld(6, C["rthr"])
-            p.fconst(12, REC_AUTO_RISE)
-            p.fop(6, 6, "*", 12)
-            p.fconst(12, REC_AUTO_EPS)
-            p.fop(6, 6, "+", 12)
-            p.fconst(12, REC_AUTO_MARGIN)
-            p.fop(5, 5, "*", 12)
-            p.fop(6, 6, "MIN", 5)
-            p.fconst(12, REC_AUTO_FLOOR)
-            p.fop(6, 6, "MAX", 12)
-            p.st(C["rthr"], 6)
+            # v0.39: learning (rmode 2 .. 2 + REC_AUTO_LEARN - 1): rthr gathers the loudest
+            # block x REC_AUTO_MARGIN, and nothing starts
+            def learn():
+                p.ld(5, C["rpk"])
+                p.fconst(12, REC_AUTO_MARGIN)
+                p.fop(5, 5, "*", 12)
+                p.ld(6, C["rthr"])
+                p.fop(6, 6, "MAX", 5)
+                p.fconst(12, REC_AUTO_FLOOR)
+                p.fop(6, 6, "MAX", 12)        # never under the -60 dB floor (v0.30)
+                p.st(C["rthr"], 6)
+                p.ld(7, C["rmode"])
+                p.iconst(12, 1)
+                p.iop(7, 12, "+", 7)
+                p.st(C["rmode"], 7)
+
+            # learnt: the peak exceeds it, the take starts; else it follows the noise: up by
+            # REC_AUTO_RISE a block at most, down by REC_AUTO_FALL a block at most, toward
+            # REC_AUTO_MARGIN x this block's peak; never under the -60 dB floor
+            def follow():
+                on_thres()
+                p.ld(5, C["rpk"])
+                p.fconst(12, REC_AUTO_MARGIN)
+                p.fop(5, 5, "*", 12)
+                p.ld(6, C["rthr"])
+                p.fconst(12, REC_AUTO_FALL)
+                p.fop(8, 6, "*", 12)
+                p.fop(5, 5, "MAX", 8)         # not lower than a block's fall
+                p.fconst(12, REC_AUTO_RISE)
+                p.fop(6, 6, "*", 12)
+                p.fconst(12, REC_AUTO_EPS)
+                p.fop(6, 6, "+", 12)
+                p.fop(6, 6, "MIN", 5)         # not higher than a block's rise
+                p.fconst(12, REC_AUTO_FLOOR)
+                p.fop(6, 6, "MAX", 12)
+                p.st(C["rthr"], 6)
+            p.ld(7, C["rmode"])
+            p.iconst(12, 2 + REC_AUTO_LEARN)
+            p.if_(7, "LT", 12, learn, follow, kind="i")
 
         def on_play():                        # R.STRT PLAY: the first note any track plays
             p.ld(5, PP.TRIG_WORD)
             p.lsh(5, 5, -16)
             p.ifz(5, "NE", lambda: (p.iconst(0, 2), p.st(C["rst"], 0)))
         p.iconst(12, 2)
-        p.if_(7, "EQ", 12, on_auto, lambda: p.ifz(7, "EQ", on_thres, on_play), kind="i")
+        p.if_(7, "GE", 12, on_auto, lambda: p.ifz(7, "EQ", on_thres, on_play), kind="i")
     p.if_(1, "EQ", 12, armed, kind="i")
     p.ld(1, C["rst"])
     p.iconst(12, 2)

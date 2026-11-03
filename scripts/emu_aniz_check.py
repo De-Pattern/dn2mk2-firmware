@@ -11,9 +11,11 @@ have: the intro hook at INTRO_VA (8 bytes) and the whole appended area
 (`platform.runtime`: its header, every CODE chunk at its load address with its BSS, every
 data chunk). Nothing else of the build is written: the snapshot is stock past boot.
 
-At each `aniz_show` the decoded frame (zst + 16, 1 KB) is compared with the artist's
-frame d3 (`dnfw.bootanim.images()`). Passes when all 59 frames were shown, none wrong,
-in order (never going back), and the intro ran to its end.
+At each `aniz_show` the decoded frame (zst + 16, 1 KB) is compared with s!Rwa²'s frame d3
+(`dnfw.bootanim.images()`, his own frames since v0.39). Passes when every frame was shown,
+none wrong, in order (never going back), and the intro ran to its end. v0.39: and at each
+`aniz_drawn` the source bitmap the panel is drawn from must be `dnfw.bootanim.shown()`: his
+frame, with the mod's version label ORed over the last frame only.
 """
 
 from __future__ import annotations
@@ -53,7 +55,9 @@ def main() -> int:
     hook = bytes(content[va - bootscreen.BASE:va - bootscreen.BASE + 8])
     writes = [(va, hook)] + platform.runtime(content)
     expect = bootanim.images()
-    res = {"shown": 0, "frames": [], "wrong": [], "stamp": 0, "written": [], "skipped": [], "counters": []}
+    drawn = bootanim.shown()
+    res = {"shown": 0, "frames": [], "wrong": [], "stamp": 0, "written": [], "skipped": [], "counters": [],
+           "drawn": 0, "drawn_wrong": [], "labelled": set()}
 
     import guirun                                               # digikit
     from unicorn import UC_HOOK_CODE
@@ -98,6 +102,17 @@ def main() -> int:
             sp = uc.reg_read(UC_M68K_REG_A7)
             res["counters"].append(int.from_bytes(uc.mem_read(sp + 4, 4), "big"))
         m.uc.hook_add(UC_HOOK_CODE, at_show, begin=spec["aniz_show"], end=spec["aniz_show"])
+
+        def at_drawn(uc, address, size, user):
+            k = uc.reg_read(UC_M68K_REG_D3)
+            src = int.from_bytes(uc.mem_read(spec["source_data_ptr"], 4), "big")
+            got = bytes(uc.mem_read(src, 1024))
+            res["drawn"] += 1
+            if got != expect[k]:
+                res["labelled"].add(k)
+            if not (0 <= k < len(drawn)) or got != drawn[k]:
+                res["drawn_wrong"].append(k)
+        m.uc.hook_add(UC_HOOK_CODE, at_drawn, begin=spec["aniz_drawn"], end=spec["aniz_drawn"])
         m.uc.hook_add(UC_HOOK_CODE, at_stamp, begin=spec["stamp"], end=spec["stamp"])
         return out
 
@@ -120,16 +135,19 @@ def main() -> int:
     print(f"  the intro called the stamp {res['stamp']} time(s), intro frames "
           f"{c[0] if c else None}..{c[-1] if c else None}")
     print(f"  start-up animation: {res['shown']} frame(s) shown, {len(distinct)} of {len(expect)} "
-          f"distinct, {len(res['wrong'])} not the artist's, {len(backwards)} going back")
+          f"distinct, {len(res['wrong'])} not his, {len(backwards)} going back")
     # the intro to its last frame (the snapshot may come after its first call or two)
+    print(f"  shown on the panel: {res['drawn']} time(s), {len(res['drawn_wrong'])} wrong; the label "
+          f"({bootanim.label_text()}) over frame(s) {sorted(res['labelled'])} (the last only: {len(expect) - 1})")
     ok = (bool(c) and c[-1] >= bootanim.INTRO_FRAMES - 1 and distinct == list(range(len(expect)))
-          and not res["wrong"] and not backwards)
+          and not res["wrong"] and not backwards and res["drawn"] >= res["shown"] and not res["drawn_wrong"]
+          and sorted(res["labelled"]) == [len(expect) - 1])
     if not ok:
         missing = [k for k in range(len(expect)) if k not in set(fr)]
         print(f"  the animation is wrong or incomplete (wrong: {sorted(set(res['wrong']))[:10]}, "
               f"missing: {missing[:10]})\n\n  DO NOT FLASH.")
         return 1
-    print("  every frame of the animation, as the artist drew it, in order: PASS")
+    print("  every frame of the animation, his frames bit for bit, in order: PASS")
     return 0
 
 

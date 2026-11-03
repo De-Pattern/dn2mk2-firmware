@@ -46,13 +46,19 @@ SPEC = json.loads((pathlib.Path(__file__).with_name("waverider_code.json")).read
 
 
 def _boot():
-    """v0.37: the start-up animation (dnfw.bootanim, by s!Rwa²) through the boot-screen
+    """v0.37: the start-up animation (dnfw.bootanim, by s!Rwa²; v0.39: his own frames) through the boot-screen
     mod's stamp (scripts/gen_bootscreen_code.py, its ANIZ path): the intro hook's site and
     stock bytes, the stamp's CODE chunk, the ANIZ data chunk"""
     from . import bootscreen as B
     from .. import bootanim
     spec = B.SPEC
     return spec, bootanim.chunk()
+
+
+def _label():
+    """v0.39: the mod's version over the animation's last frame (dnfw.bootanim.label_chunk)"""
+    from .. import bootanim
+    return bootanim.LABEL_CHUNK, bootanim.label_chunk()
 
 
 def extents(firmware=None, area_length: int = 0) -> list[Extent]:
@@ -172,7 +178,7 @@ def apply(firmware) -> Result:
                        "for unmodified Digitone II 1.11")
     base_os[at:at + 8] = b"\x4e\xf9" + struct.pack(">I", bspec["stamp"]) + b"\x4e\x71"
     codes += [(platform.area.CODE, platform.area.CodeChunk(bspec["load"], bytes.fromhex(bspec["code"])).pack()),
-              (bspec["aniz_chunk"].encode(), aniz)]
+              (bspec["aniz_chunk"].encode(), aniz), _label()]
     content = platform.join(bytes(base_os), others + codes)
     area_length = len(content) - platform.STOCK_LENGTH
     return Result(payloads={MAIN_OS: content, DSP_STREAM: section7},

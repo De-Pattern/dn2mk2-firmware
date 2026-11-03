@@ -61,9 +61,10 @@ def test_applies_to_both_sections(applied, dn2_111):
     # v0.26: and the tables the ColdFire sends the DSP at power-on (dnfw.mods.waverider._tables)
     from dnfw.md import rom as md_rom
     want = 6 if md_rom.available() else 4
-    # v0.37: and the start-up animation: the stamp's code and its frames (ANIZ)
+    # v0.37: and the start-up animation: the stamp's code and its frames (ANIZ); v0.39: and
+    # the mod's version label over its last frame (ANZL)
     kinds = [kind for kind, _ in chunks]
-    assert sorted(kinds) == sorted([platform.area.CODE] * (want + 1) + [b"ANIZ"])
+    assert sorted(kinds) == sorted([platform.area.CODE] * (want + 1) + [b"ANIZ", b"ANZL"])
     assert len(applied.payloads[7]) > len(dn2_111.container.find(7).unpack())
 
 
@@ -331,19 +332,24 @@ def test_v023_keyboard_notes_ask_slc_keynotes_which_asks_stock():
     assert struct.pack(">I", 0x40034460) in _chunked(target, 256)
 
 
-def test_v037_the_startup_animation_chunk_is_the_artists_frames():
-    """dnfw.bootanim: the ANIZ chunk decodes (as the stamp walks it) to the artist's 59
-    frames bit for bit; its table maps the 175 intro frames onto them in order, every frame
-    shown, the last held; it is small (the 2 MiB USB limit)"""
+def test_v039_the_startup_animation_chunk_is_his_frames():
+    """dnfw.bootanim: the ANIZ chunk decodes (as the stamp walks it) to s!Rwa²'s 38 frames
+    bit for bit (v0.39: his own 44 PBM frames, 37..43 one picture kept once); its table maps
+    the 175 intro frames onto them in order, every frame shown, the last held; the timing is
+    the owner's (160 ms, then 80 ms each, the last held); it is small (the 2 MiB USB limit)"""
+    import json
     from dnfw import bootanim as A
     c = A.chunk()
     ims = A.images()
-    assert len(ims) == 59
+    assert len(ims) == 38
+    assert A.DURATIONS_MS == (160,) + (80,) * 36 + (560,) and sum(A.DURATIONS_MS) == 3600
     assert A.decode(c) == ims
     t = A.table()
     assert len(t) == A.INTRO_FRAMES
-    assert list(t) == sorted(t) and set(t) == set(range(59)) and t[-1] == 58
+    assert list(t) == sorted(t) and set(t) == set(range(38)) and t[-1] == 37
     assert len(c) < 8192
+    doc = json.loads(A.SOURCE.read_text())
+    assert doc["by"] == "s!Rwa²" and doc["frames"] == 38
 
 
 def test_v037_the_build_hooks_the_intro_once_with_the_stamp():
@@ -352,7 +358,45 @@ def test_v037_the_build_hooks_the_intro_once_with_the_stamp():
     import struct
     from dnfw.mods import bootscreen as B, waverider as W
     spec, aniz = W._boot()
-    assert spec is B.SPEC and aniz.startswith(struct.pack(">I", 59))
+    assert spec is B.SPEC and aniz.startswith(struct.pack(">I", 38))
     assert spec["aniz_chunk"] == "ANIZ"
     ext = [e for e in W.extents() if "intro hook" in e.what]
     assert len(ext) == 1 and ext[0].length == 8
+
+
+def test_v039_the_mod_version_comes_from_VERSION_and_fails_when_bad(tmp_path, monkeypatch):
+    """dnfw.modversion: VERSION (one line, DIGITS.DIGITS) read at compose time; a missing or
+    malformed file stops the build; the C renderer gets it as MOD_VERSION"""
+    import pytest
+    from dnfw import modversion as M
+    v = M.mod_version()
+    assert v == (M.FILE.read_text().strip()) and M.c_define() == f'#define MOD_VERSION "{v}"\n'
+    for bad in ("", "v0.39", "0.39 beta", "0.39\n\n", "1"):
+        f = tmp_path / "VERSION"
+        f.write_text(bad)
+        monkeypatch.setattr(M, "FILE", f)
+        with pytest.raises(M.VersionError):
+            M.mod_version()
+    monkeypatch.setattr(M, "FILE", tmp_path / "missing")
+    with pytest.raises(M.VersionError):
+        M.mod_version()
+
+
+def test_v039_the_version_label_is_ours_over_his_last_frame_only():
+    """dnfw.bootanim: the label (MOD x.y, the 3 x 5 font) bottom right with a 1-pixel margin,
+    clear of his last frame's drawing; ANZL holds only its pixels; what the panel shows is his
+    frames, the last with the label ORed over it, and ANIZ (his frames) is unchanged by it"""
+    import struct
+    from dnfw import bootanim as A
+    lab = A.label_pixels()
+    assert A.label_text().startswith("MOD ")
+    assert max(x for x, _ in lab) == 126 and max(y for _, y in lab) == 62
+    lit = A.frames_pixels()[-1]
+    assert not [(x, y) for x, y in lit if x >= min(x for x, _ in lab) - 1 and y >= min(y for _, y in lab) - 1]
+    shown, ims = A.shown(), A.images()
+    assert shown[:-1] == ims[:-1] and shown[-1] != ims[-1]
+    diff = sum(bin(a ^ b).count("1") for a, b in zip(shown[-1], ims[-1]))
+    assert diff == len(lab)
+    assert A.decode(A.chunk()) == ims
+    n = struct.unpack_from(">I", A.label_chunk())[0]
+    assert 0 < n <= 256 and len(A.label_chunk()) == 4 + 8 * n

@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -653,6 +653,12 @@ def main(argv=None):
             results["3m_mainrec"] = step_mainrec(init, sound, machines, a.blocks)
             gc.collect()
             show(results["3m_mainrec"])
+
+        if "recwhole" in steps:
+            print("\nstep 3r: whole takes, the ColdFire's link at work while they record (v0.39)")
+            results["3r_recwhole"] = step_recwhole(init, sound, machines, a.blocks)
+            gc.collect()
+            show(results["3r_recwhole"])
 
         if "pvmix" in steps:
             print("\nstep 3f: the recorder's preview (after the engine's mix)")
@@ -2201,7 +2207,7 @@ def step_rec(init, sound, machines, blocks) -> dict:
     def noise(k):
         return 0.0015 + 0.0012 * (((k * 2654435761) >> 7 & 0xFFFF) / 32768.0 - 1.0)
 
-    def arm_run(thres, tone_at, tone, seq, dest, place):
+    def arm_run(thres, tone_at, tone, seq, dest, place, n=n):
         st4 = {"b": 0}
         sig4 = [noise(k) + (tone * _m.sin(2 * _m.pi * 440 * k / 48000) if k >= 32 * tone_at else 0.0)
                 for k in range(32 * n)]
@@ -2223,7 +2229,9 @@ def step_rec(init, sound, machines, blocks) -> dict:
         want4 = [max(-32768, min(32767, int(min(0.999969, max(-1.0, x)) * 32768.0))) / 32768.0
                  for x in sig4[32 * tone_at:]][:w4[1]]
         return w4[1], bool(g4) and g4 == want4
-    auto = arm_run(33, quiet, 0.2, 13, 3, 0xC000)
+    # (v0.39: THRES 0 learns the floor over its first REC_AUTO_LEARN blocks; the tone after them)
+    quiet_a = getattr(SP, "REC_AUTO_LEARN", 0) + 2
+    auto = arm_run(33, quiet_a, 0.2, 13, 3, 0xC000, n=quiet_a + 6)
     plain_low = arm_run(16383, quiet, 0.2, 14, 3, 0xC000)
     plain = arm_run(16383, quiet, 0.63, 15, 3, 0xC000)
 
@@ -2296,7 +2304,7 @@ def step_rec(init, sound, machines, blocks) -> dict:
                         and abs(h[3] / 32767 - max(abs(x) for x in left[-32:])) < 0.01 for h in stat2),
         "v0.38: ARM at THRES 0 waits through a -50 dB noise floor (over v0.30's -60 dB) and "
         "starts on the tone's first block, its frames the input's":
-            auto is not None and auto[0] == 32 * (n - quiet) and auto[1],
+            auto is not None and auto[0] == 32 * 6 and auto[1],
         "v0.38: ARM at a set threshold (THRES 60) stays armed under it (a -14 dB tone), and "
         "starts on the first block that exceeds it (-4 dB)":
             plain_low is not None and plain_low[0] == 0
@@ -2540,6 +2548,164 @@ def step_mainrec(init, sound, machines, blocks) -> dict:
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"halt": halt, "entry": [hex(w) for w in words], "back_peak": round(back, 4),
                         "blocks": len(taps)}}
+
+
+def step_recwhole(init, sound, machines, blocks, n=None) -> dict:
+    """v0.39 (paQ and the owner on v0.38: "it only records one step and leaves the rest
+    blank", MAIN or a track, the stored take the length asked for, its sound only in its
+    first fraction; and "THRES 0 still triggers"). Every recording the runner made before
+    ran 10..12 blocks with nothing else on the link and checked that it played: none ran
+    while the ColdFire's loader worked. v0.38's count fix makes the loader work at every
+    take's start (smp_count_cover: K_HEAD, 8 bytes, then checked by CMD_VERIFY), and the
+    DSP took ANY new command's words 2..4 as the recorder's source, channel and threshold:
+    VERIFY's (offset 0, 2 words, 0) made it IN, R, threshold 0 for the rest of the take, and
+    an armed take started on the input's own hiss.
+
+    Here each take runs as the instrument makes it, with the ColdFire's traffic as v0.38
+    sends it (RECWHOLE_TRAFFIC=0: none, as before v0.38): the record command, K_HEAD's count
+    and its VERIFY, a 64 KB chunk's VERIFY (LOAD TO PROJECT), a +DRIVE preview held and let
+    go, a SCAN, then STOP and the save's SEND. The inputs are a real unit's: IN carries an
+    input's hiss, DC offset and 50 Hz hum throughout (-45 dB, nothing played into it); MAIN idles on a
+    reverb/delay tail with dither before the take's sound; every source has its own signal,
+    so a take that changes source is caught wherever it does. Checks, per take, over its
+    whole length: the entry's frame count is the take's, every frame its source's within
+    2 LSB; an ARM starts on the sound's first block, not on the hiss or the tail. Takes of
+    64 blocks here (the emulated SHARC's cost: about 10 s a block, the step an hour); the same takes 2 s long,
+    and a second of hum or of a tail at THRES 0, run on the model (test_sampler.py, v039_*),
+    which the runner holds this code to. On v0.38's code every take here keeps 96 frames of
+    its source, then IN's right channel."""
+    import math as _m
+    n = n or int(os.environ.get("RECWHOLE_BLOCKS", "64"))
+    traffic = os.environ.get("RECWHOLE_TRAFFIC", "1") != "0"
+    quiet = 52                                       # ARM: blocks of idle input before the sound (v0.39's
+                                                     # THRES 0 learns its floor over the first 48)
+    cmd_at = dsp.SMP_POOL_DDR + SM.CMD_OFFSET
+    ONE = SM.TYPE_OF["ONESHOT"]
+    g = SM.TRK_GAIN
+    main_tap = getattr(SM, "MAIN_TAP", SM.MIX_BUF)
+
+    def bits(x):
+        return struct.unpack("<I", struct.pack("<f", x))[0]
+
+    def q(x):
+        return max(-32768, min(32767, int(min(0.999969, max(-1.0, x)) * 32768.0))) / 32768.0
+
+    def hiss(k, ch):                                 # an input's noise, DC and 50 Hz hum: about -45 dB
+        return (0.0015 + 0.0012 * ((((k + 977 * ch) * 2654435761) >> 7 & 0xFFFF) / 32768.0 - 1.0)
+                + 0.004 * _m.sin(2 * _m.pi * 50 * k / 48000))
+
+    def tail(k, ch):                                 # MAIN idle: a reverb tail, dither (-50 dB)
+        return (0.002 * _m.exp(-k / 20000.0) * _m.sin(2 * _m.pi * (90 + 7 * ch) * k / 48000)
+                + 0.0004 * ((((k + 31 * ch) * 40503) >> 3 & 0xFF) / 128.0 - 1.0))
+
+    def source(sid, k, ch, armed_take):
+        """source SID's input, frame K, channel CH (as the DSP holds it, a track x TRK_GAIN
+        undone). An armed take's sources are idle until block QUIET"""
+        on = 1.0 if not armed_take or k >= 32 * quiet else 0.0
+        z = 2 * _m.pi * (k - 32 * quiet) / 48000       # (the sound at its crest on its first frame)
+        if sid == 0:
+            return hiss(k, ch) + on * 0.45 * _m.cos((700 if ch == 0 else 1100) * z)
+        if sid == 1:
+            return tail(k, ch) + on * 0.6 * _m.cos((220 if ch == 0 else 330) * z)
+        t = sid - 2
+        return on * (0.62 + 0.01 * t) * _m.cos((150 + 40 * t) * z + (-0.5 if ch == 0 else 0.5))
+
+    def frames_b(b):
+        return base_frame(sound, machines, t0=ONE, trigger=False, overrides=smp_words({SM.SAMP_REC: 1})).to_bytes()
+
+    def take(cmd, src, chan, thres, slot, place, armed_take):
+        cur = {"b": 0, "seq": 40}
+
+        def command(r, c, w2=0, w3=0, w4=0, w5=0):
+            cur["seq"] += 1
+            for k, w in enumerate((cur["seq"], c, w2, w3, w4, w5)):
+                m2.poke(r.state, cmd_at + 4 * k, w)
+
+        def at_dispatch(r):
+            b = cur["b"]
+            if b == 0:
+                command(r, cmd, src, chan | place << 8, thres, slot << 24 | SM.REC_FRAMES)
+            if traffic:
+                if b == 2:                           # K_HEAD: the magic and the count, then its VERIFY
+                    m2.poke(r.state, dsp.SMP_POOL_DDR + 4,
+                            max(slot + 1, m2.word(r.state, dsp.SMP_POOL_DDR + 4) or 0))
+                if b == 3:
+                    command(r, SM.CMD_VERIFY, 0, 2)
+                if b == n // 3:                      # LOAD TO PROJECT's chunk, checked
+                    command(r, SM.CMD_VERIFY, SM.DATA_OFFSET // 4, 0x4000)
+                if b == n // 2:                      # a +DRIVE preview held, and let go
+                    command(r, SM.CMD_PREVIEW, SP.PREVIEW_AT, 0x10000, 4800)
+                if b == n // 2 + 2:
+                    command(r, SM.CMD_PREVIEW, SP.PREVIEW_AT, 0, 0)
+                if b == 2 * n // 3:                  # a SCAN (tools/dn2diag.py)
+                    command(r, SM.CMD_SCAN, dsp.SMP_POOL_DDR, 64)
+            if b == n:
+                command(r, SM.CMD_STOP, src, chan, thres)
+            if traffic and b == n + 1:               # the save reads it back
+                command(r, SM.CMD_SEND, (SM.REC_OFFSET + place * 512) // 4, 0x100)
+            for k in range(32):
+                x = 32 * b + k
+                for ch in (0, 1):
+                    m2.poke(r.state, SM.IN_BUF + 0x80 * ch + 4 * k, bits(source(0, x, ch, armed_take)))
+                    m2.poke(r.state, main_tap + 0x80 * ch + 4 * k, bits(source(1, x, ch, armed_take)))
+                    for t in range(16):
+                        m2.poke(r.state, SM.TRK_BUF + SM.TRK_STRIDE * t + 0x80 * ch + 4 * k,
+                                bits(source(2 + t, x, ch, armed_take) * g))
+            cur["b"] += 1
+        rr = run_blocks(init, frames_b, n + 3, extra_hooks={m3.DISPATCH: at_dispatch})
+        if not rr["ok"]:
+            return None, [], [], rr.get("halt")
+        st = rr["state"].state
+        ent = dsp.SMP_POOL_DDR + 8 + 16 * slot
+        words = [m2.word(st, ent + 4 * k) or 0 for k in range(4)]
+        got = []
+        for k in range(words[1] // 2):
+            w = m2.word(st, words[0] + 4 * k) or 0
+            for h in (w & 0xFFFF, w >> 16):
+                got.append((h - 65536 if h >= 32768 else h) / 32768.0)
+        rr.pop("state", None)
+
+        def want_frame(x):
+            lft, rgt = source(src, x, 0, armed_take), source(src, x, 1, armed_take)
+            if src >= 2:
+                lft, rgt = lft * g * (1.0 / g), rgt * g * (1.0 / g)
+            if chan == 1:
+                rgt = lft
+            elif chan == 2:
+                lft = rgt
+            return q((lft + rgt) * 0.5)
+        start = 32 * quiet if armed_take else 0
+        return words, got, [want_frame(x) for x in range(start, 32 * n)], None
+
+    runs = (                                         # name, command, source, channel, THRES word, slot, place, armed
+        ("MAIN L+R, RECORD NOW", SM.CMD_NOW, 1, 0, 33, 5, 0x0000, False),
+        ("TRK3 MONO L, RECORD NOW", SM.CMD_NOW, 2 + 2, 1, 33, 6, 0x2000, False),
+        ("IN L+R, RECORD NOW", SM.CMD_NOW, 0, 0, 33, 9, 0x8000, False),
+        ("MAIN L+R, ARM at THRES 0", SM.CMD_ARM, 1, 0, 33, 7, 0x4000, True),
+        ("IN L+R, ARM at THRES 0 (the input's hiss and DC)", SM.CMD_ARM, 0, 0, 33, 10, 0xA000, True),
+        ("TRK3 L+R, ARM at THRES 60", SM.CMD_ARM, 2 + 2, 0, 16383, 8, 0x6000, True),
+    )
+    checks, numbers = {}, {}
+    for name, cmd, src, chan, thres, slot, place, armed_take in runs:
+        words, got, want, halt = take(cmd, src, chan, thres, slot, place, armed_take)
+        if words is None:
+            checks[f"{name}: ran"] = False
+            numbers[name] = {"halt": halt}
+            continue
+        nw = len(want)
+        bad = [k for k, (x, y) in enumerate(zip(got, want)) if abs(x - y) > 2 / 32768]
+        late = got[-32 * 4:]
+        what = (f"{name}: {nw} frames ({nw / 48000:.2f} s, the link at work throughout), every one its "
+                "source's within 2 LSB, start to end")
+        if armed_take:
+            what += "; armed through the idle input, started on the sound's first block"
+        checks[what] = words[1] == nw and len(got) == nw and not bad and max((abs(x) for x in late), default=0) > 0.1
+        numbers[name] = {"entry": [hex(w) for w in words], "frames": words[1], "want": nw,
+                         "wrong": len(bad), "first_wrong": bad[0] if bad else None,
+                         "first_wrong_s": round(bad[0] / 48000, 4) if bad else None,
+                         "late_peak": round(max((abs(x) for x in late), default=0), 4)}
+    return {"ok": all(checks.values()), "checks": checks,
+            "numbers": {"blocks": n, "traffic": traffic, **numbers}}
 
 
 def step_mainsrc(init, sound, machines, blocks) -> dict:

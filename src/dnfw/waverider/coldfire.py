@@ -513,7 +513,10 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
 
     # Milestone 7: Waverider's pages, as one platform CODE chunk in RAM (pages.LOAD)
     # the C page renderer first (the assembly calls it), at C_LOAD
-    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header(),
+    from .. import slides as SL
+    from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
+    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header() + SL.c_header(stock)
+                                    + modversion.c_define(),
                                      base=pages.C_LOAD)
     if cbss:
         raise ComposeError(f"the page renderer has {cbss} bytes of BSS; nothing zeroes it")
@@ -760,6 +763,35 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(VALID_SITE, bytes.fromhex("4eb9") + _long(layout["canon_valid"]),
          "the sound's parameter-ownership test: type 5 owns WaveTone's machine parameters",
          VALID_STOCK)
+    # parameter slides (csrc/slides, dnfw.slides, docs/slides.md): the per-voice note block
+    # and the lock applier (the trig's slide starts), the frame's smoother (every slide one
+    # frame on), the lock-list builder (the step's SLD/SLEN), the step clear, the lock table's
+    # LOAD and SAVE (our records' stored ids)
+    edit(SL.PRE_SITE, bytes.fromhex("4eb9") + _long(csyms["sl_pre_hook"]),
+         "slides: a note's voice in the frame ISR: sl_pre keeps the track's values before the trig",
+         bytes.fromhex(SL.PRE_STOCK))
+    _need(content, SL.PRE_SITE + 6, bytes.fromhex("49ec05ee670e"), "... then lea 1518(%a4),%a4 ; beq.s")
+    edit(SL.APPLY_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_apply"]) + bytes.fromhex("4e71"),
+         "slides: the lock applier 0x400db092 through sl_apply (stock's, then the trig's slide)",
+         bytes.fromhex(SL.APPLY_STOCK))
+    _need(content, SL.SMOOTH_SITE - 10, bytes.fromhex("487980003af02d42ff64"), "the ISR pushes the smoother's source")
+    edit(SL.SMOOTH_SITE, bytes.fromhex("4eb9") + _long(csyms["sl_smooth"]),
+         "slides: the frame's smoother through sl_smooth (stock's, then every slide one frame on)",
+         bytes.fromhex(SL.SMOOTH_STOCK))
+    edit(SL.BUILD_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_build"]),
+         "slides: the lock-list builder through sl_build (stock's, then the step's SLD/SLEN)",
+         bytes.fromhex(SL.BUILD_STOCK))
+    edit(SL.CLEAR_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_clear"]) + bytes.fromhex("4e71"),
+         "slides: clearing a step's locks clears its SLD/SLEN too", bytes.fromhex(SL.CLEAR_STOCK))
+    edit(SL.LOAD_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_load"]) + bytes.fromhex("4e71"),
+         "slides: a pattern's lock table LOAD keeps SLD/SLEN records (ids 200/201)",
+         bytes.fromhex(SL.LOAD_STOCK))
+    edit(SL.SAVE_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_save"]) + bytes.fromhex("4e71"),
+         "slides: a pattern's lock table SAVE stores SLD/SLEN records as ids 200/201",
+         bytes.fromhex(SL.SAVE_STOCK))
+    for name in ("sl_ui_table", "sl_page_up", "sl_page_seen", "sl_knob", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
+                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"):
+        layout[name] = csyms[name]
     layout.update(playout)
     # W2: where the C renderer's code ends (its rodata and data follow): the ship gate
     # checks [C_LOAD, c_text_end) as code
@@ -770,13 +802,17 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen",
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
-                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom",
+                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom",
                  "jmp_on", "jmp_armed", "jmp_pending", "jmp_count", "jmp_last", "jmp_loaded", "jmp_dirty",
                  "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll",
                  # v0.38: per-project pools
                  "smp_pj_begins", "smp_pj_ends", "smp_pj_loads", "smp_pj_news", "smp_pj_slot", "smp_pj_newslot", "smp_pj_last", "smp_blank_req", "smp_blank_sent", "smp_pl_on", "smp_pl_owner", "smp_pl_state", "smp_pl_writes", "smp_pl_switches", "smp_pl_lists_written", "smp_pl_events", "smp_pl_src", "smp_pl_boot_case", "smp_pl_gen", "smp_pl_skipped", "smp_pl_mismatch", "smp_discard", "smp_rename",
                  # v0.38: the count to the DSP after a live add (link.c K_HEAD)
-                 "smp_heads", "smp_head_due", "smp_head_min", "smp_count_cover"):   # the sample link's state (v0.15)
+                 "smp_heads", "smp_head_due", "smp_head_min", "smp_count_cover",
+                 # v0.39: ERASE MOD DATA (erase.c; scripts/emu_erase.py)
+                 "smp_er_lock", "smp_er_req", "smp_er_state", "smp_er_err", "smp_er_sector", "smp_er_value",
+                 "smp_er_done", "smp_er_total", "smp_er_trims", "smp_er_reads", "smp_er_checks",
+                 "smp_er_nchecks", "smp_er_job", "smp_er_start", "smp_er_poll"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)
