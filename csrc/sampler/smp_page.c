@@ -994,12 +994,19 @@ int smp_fb_mark_count(void)
 static int fb_size_d(int folder, int *marked, int deep)
 {
     int n = 0, m = 0;
-    if (smp_fb_store == 1) {
-        for (int k = 0; k < LB_CAP; k++)
-            if (deep ? lb_under(k, folder) : lb_in(k, folder)) {
-                n++;
-                m += lb_marked(k);
+    if (smp_fb_store == 1) {                    /* v0.40: the folders it covers, then lib.c's */
+        u32 in[2] = {0, 0};                     /* counts and only the marked entries (each */
+        for (int g = 0; g < 64; g++)            /* folder row asks this, each redraw) */
+            if (deep ? smp_lib_folder_under(g, folder) : g == folder) {
+                in[g >> 5] |= 1u << (g & 31);
+                n += smp_lib_folder_count(g);
             }
+        for (int i = 0; i < LB_CAP / 32 && marked; i++)
+            for (u32 w = lb_marks[i], b = 0; w; w >>= 1, b++)
+                if (w & 1u) {
+                    int f = smp_lib_folder_of(32 * i + (int)b);
+                    m += f >= 0 && (in[f >> 5] >> (f & 31) & 1u);
+                }
         if (marked)
             *marked = m;
         return n;
@@ -1035,8 +1042,18 @@ static void fb_mark_d(int folder, int deep)
 void smp_fb_mark_folder(int folder) { fb_mark_d(folder, 1); }   /* a folder's row: all it holds */
 void smp_fb_mark_here(void) { fb_mark_d(smp_fb_folder, 0); }     /* v0.40: SELECT ALL in a list: its samples */
 
+static int lb_any_marks(void)
+{
+    for (int i = 0; i < LB_CAP / 32; i++)
+        if (lb_marks[i])
+            return 1;
+    return 0;
+}
+
 int smp_fb_folder_full(int folder)              /* every one of its samples marked */
 {
+    if (smp_fb_store == 1 && !lb_any_marks())   /* v0.40: (each folder row asks, each redraw) */
+        return 0;
     int m, n = fb_size(folder, &m);
     return n > 0 && m == n;
 }
