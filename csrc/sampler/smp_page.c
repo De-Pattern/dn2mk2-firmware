@@ -1362,7 +1362,7 @@ static void hex6(char *o, u32 v)
 
 static int er_draw(void *c)
 {
-    extern int smp_er_shown(void), smp_er_err;
+    extern int smp_er_shown(void), smp_er_err, smp_er_can_resume(void);
     extern u32 smp_er_percent(void), smp_er_sector;
     int es = smp_er_shown();
     if (smp_fb_menu < 4 && !es)
@@ -1371,7 +1371,7 @@ static int er_draw(void *c)
     hline(c, 0, 127, 55, 0);
     if (es == 1 || es == 2) {
         int pc = (int)smp_er_percent();
-        TEXT(c, FONT, 64, 40, CENTRED, "%s", es == 1 ? "ERASING" : "VERIFYING");
+        TEXT(c, FONT, 64, 40, CENTRED, "%s %d%%", es == 1 ? "ERASING" : "VERIFYING", pc > 100 ? 100 : pc);
         box(c, 14, 25, 113, 33, 0);
         if (pc > 0)
             fill(c, 15, 26, 15 + (97 * (pc > 100 ? 100 : pc)) / 100, 32);
@@ -1381,12 +1381,17 @@ static int er_draw(void *c)
         LABEL(c, 64, 24, "%s", "RESTART THE DIGITONE");
         LABEL(c, 64, 12, "%s", "YES / NO: CLOSE");
     } else if (es == 4) {
-        static const char *const why[6] = {"", "REFUSED", "TRIM ERROR", "READ ERROR", "NOT ERASED", "+DRIVE NOT READY"};
+        /* v0.41: what failed, where, and what to do: a failure a new try may get past carries
+         * on when asked again (the samples are already gone: their headers went first) */
+        static const char *const why[7] = {"", "REFUSED", "CARD ERASE FAILED", "CARD READ FAILED", "NOT ERASED",
+                                           "+DRIVE NOT READY", "CARD STAYED BUSY"};
         char h[7];
         hex6(h, smp_er_sector);
-        TEXT(c, FONT, 64, 40, CENTRED, "%s", "ERASE FAILED");
-        LABEL(c, 64, 28, "%s AT %s", why[smp_er_err >= 1 && smp_er_err <= 5 ? smp_er_err : 0], h);
-        LABEL(c, 64, 12, "%s", "RESTART, THEN AGAIN");
+        int go_on = smp_er_can_resume();
+        TEXT(c, FONT, 64, 42, CENTRED, "%s", go_on ? "ERASE PAUSED" : "ERASE FAILED");
+        LABEL(c, 64, 31, "%s", why[smp_er_err >= 1 && smp_er_err <= 6 ? smp_er_err : 0]);
+        LABEL(c, 64, 22, "AT SECTOR %s", h);
+        LABEL(c, 64, 10, "%s", go_on ? "ASK AGAIN TO CONTINUE" : "RESTART, THEN AGAIN");
     } else if (smp_fb_menu == 4) {
         TEXT(c, FONT, 64, 40, CENTRED, "%s", "ERASE ALL SAMPLES");
         TEXT(c, FONT, 64, 30, CENTRED, "%s", "AND MOD DATA?");

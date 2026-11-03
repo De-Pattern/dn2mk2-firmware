@@ -1243,8 +1243,13 @@ def main() -> int:
                 # off, it is head...tail again and the new one starts from its start
                 if "smp_fb_rowtext" in lay and "smp_mq_off" in lay:
                     hh = [f"AT BIRDHOUSE HI-HAT CLOSED VEL {k:02d}" for k in range(16)]
+                    # v0.41: a user's v0.38 INCOMING folder (his video: hands off, the cursor going
+                    # between the top two rows by itself)
+                    pab = ["LC_FTR_100_FX_IMPACT_01.WAV", "LC_FTR_100_FX_RISE_01.WAV", "LC_FTR_BASS_A#_02.WAV",
+                           "LC_FTR_BASS_G.WAV", "LC_FTR_PERC_01.WAV", "LC_FTR_PERC_07_01.WAV"]
                     nidx = lent(LDATA, 1000, 2, "SHORT ONE.WAV") + b"".join(
-                        lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh))
+                        lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh)) + b"".join(
+                        lent(LDATA + 4 + 64 + 4 * k, 1000 + k, 0, nm) for k, nm in enumerate(pab))
                     nfold = b"INCOMING".ljust(32, b"\0") + b"RECORDED".ljust(32, b"\0") + b"AT HIHAT".ljust(32, b"\0")
                     TICK = 0x4058E8D4
                     rt, mq, cur, mcur = lay["smp_fb_rowtext"], lay["smp_mq_off"], lay["smp_fb_cur"], lay["smp_fb_mcur"]
@@ -1274,6 +1279,19 @@ def main() -> int:
                     ns += ["right", "wait:4"] + clock(20000) + ["press:14", "wait:2"] + clock(20700) + clock(20850) + clock(21000) + [
                            "release:14", "wait:3", mem(mcur), mem(lay["smp_fb_menu"]),
                            "png:n2", "no", "wait:4", "no", "wait:4", mem(lay["smp_fb_folder"]), mem(lay["smp_fb_open"])]
+                    # v0.41: in INCOMING with the cursor on its first row, encoder A jittering (+1, -1,
+                    # ... with no key, as a worn encoder resting between detents reports): the cursor
+                    # moves once at most and stays; then turned by hand, three detents on and three
+                    # back: a row a detent, the turn back losing one
+                    jit0 = sum(1 for x in ns if x == mem(cur))
+                    jrt = sum(1 for x in ns if x == mem(rt, 144))
+                    ns += [f"poke:{lay['smp_fb_folder']:#x}:00000000", f"poke:{cur:#x}:00000000",
+                           f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:6", mem(rt, 144), mem(cur), "png:n3"]
+                    for _ in range(6):
+                        ns += ["spin:0:1", mem(cur), "spin:0:-1", mem(cur)]
+                    ns += ["png:n4"]
+                    ns += ["spin:5:1", mem(cur), "spin:5:1", mem(cur), "spin:5:1", mem(cur),
+                           "spin:5:-1", mem(cur), "spin:5:-1", mem(cur), "spin:5:-1", mem(cur)]
                     njs = work / "drivenav.json"
                     n_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                              "--snapshot", snap, "--steps", ",".join(ns), "--png-dir", work / "drivenav", "--json", njs]
@@ -1341,11 +1359,22 @@ def main() -> int:
                                 and int(m[hex(lay["smp_fb_store"])], 16) == 1 and int(m[hex(lay["smp_fb_folder"])], 16) == 2,
                                 "held DOWN in the action menu steps on": i32(mcur, 0) == 4 and int(at(lay["smp_fb_menu"], 0), 16) == 1,
                                 "NO: out of the menu, then up a level": i32(lay["smp_fb_folder"], 1) == -1 and i32(lay["smp_fb_open"], 1) == 1}
+                            jc = [i32(cur, jit0 + k) for k in range(1 + 12 + 6)]
+                            jr = rows(jrt)
+                            jit = jc[1:13]
+                            facts.update({
+                                "INCOMING: the user's six LC_FTR_ samples, the cursor on the first":
+                                    jc[0] == 0 and jr[0].startswith("LC_FTR_100") and jr[1].startswith("LC_FTR_100"),
+                                "an encoder jittering +1/-1, no key: the cursor moves once at most, then stays (v0.41)":
+                                    None not in jit and max(jit) <= 1 and len(set(jit[1:])) == 1,
+                                "turned by hand: a row a detent; turned back, the first detent back lost (v0.41)":
+                                    None not in jc[13:] and jc[13:16] == [jit[-1] + 1, jit[-1] + 2, jit[-1] + 3]
+                                    and jc[16:19] == [jit[-1] + 3, jit[-1] + 2, jit[-1] + 1]})
                             good = all(bool(v) for v in facts.values())
-                            why = f"{ {k: v for k, v in facts.items() if not v} } cur={curs} off={offs} ticks={ticks} rows0={r0} rows3={rows(3)} rows20={after}"
+                            why = f"{ {k: v for k, v in facts.items() if not v} } cur={curs} jitter={jc} jrows={jr} off={offs} ticks={ticks} rows0={r0} rows3={rows(3)} rows20={after}"
                         return good, ("held arrows repeat in the list and the action menu, FUNC + DOWN a page, a pushed "
                                       "knob a page a detent, D pushed keeps +DRIVE, NO goes up; long names head...tail, "
-                                      "the selected one scrolls to its end and back, moved off it is head...tail again"
+                                      "the selected one scrolls to its end and back, moved off it is head...tail again; an encoder jittering +1/-1 moves the cursor once at most (v0.41)"
                                       if good else why[:1500])
                     later("drivenav", "+DRIVE keys and long names (ColdFire)", "+DRIVE keys and long names (ColdFire)",
                           [n_cmd, sorted(EMU_ENV.items())], n_body)
