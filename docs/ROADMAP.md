@@ -23,6 +23,10 @@ In this order unless the owner changes it:
 3. **Octatrack-style rec trigs**: a trig that records a set length (or until stopped),
    QREC (starts on the next bar / interval), maybe QPL; for bouncing heavy machines to
    samples.
+0. **Aggregat** (owner, 2026-11-03: "after 40"): read github.com/70b185/Aggregat (its
+   `export/aggregat.sqlite`, the research map) before the next new DN2 work, for known DN2
+   facts and dead ends (they report three DN2 mod platforms loading at the same RAM
+   address); later, maybe contribute our unit-proven facts, credited to De-Pattern only.
 4. **Capicola time-stretch** (heavylight; `Capicola Stretch for DT2.7z` in the owner's
    project): after rec trigs. A switch on the sample machines vs his separate engines:
    compare first, then the owner decides.
