@@ -728,6 +728,24 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))
         uc.hook_del(hs)
         out["ok"] = bool(ok and out["small_refused"])
+    elif scenario == "nest":
+        # v0.40: folders inside folders over the link (csrc/sampler/lib.c): scripts/emu_lib_nest.py
+        sys.path.insert(0, str(HERE))
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        import emu_lib_nest                     # noqa: PLC0415
+        from dn2probe import pack7, unpack7     # noqa: PLC0415
+        for _ in range(200):                    # past the boot's RAM check
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        res = emu_lib_nest.run({"machine": machine, "call": call, "long": long, "period": period,
+                                "disk": disk, "io": io, "syms": syms, "uc": uc, "K": K,
+                                "pack7": pack7, "unpack7": unpack7, "UC_HOOK_CODE": UC_HOOK_CODE,
+                                "sender": SYSEX_SENDER, "scratch": SENTINEL + 0x1000})
+        disk.clear()
+        out.update(res)
+        out["ok"] = bool(res["ok"]) and not route.get("changed")
     elif scenario == "pools":
         # v0.38: per-project sample pools (csrc/sampler/pools.c): scripts/emu_pools.py
         sys.path.insert(0, str(HERE))
