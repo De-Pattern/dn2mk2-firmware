@@ -106,6 +106,10 @@ _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in 
 _Static_assert(CMD_OFFSET % 4u == 0 && CMD_OFFSET >= 8u + 16u * POOL_SLOTS + NAME_BYTES * POOL_SLOTS,
                "the command block lies after the directory and the names");
 #define OVERVIEW_W 100
+/* v0.39: the library sample each slot was loaded from (dnfw.sampler.machines LIBID_OFFSET) */
+#define LIBID(k) (DIR + LIBID_OFFSET + 4u * (u32)(k))
+_Static_assert(LIBID_OFFSET >= META_PTR + 12u && LIBID_OFFSET % 4u == 0 && LIBID_OFFSET + 4u * REC_FIRST <= CMD_OFFSET,
+               "the slots' library identities lie between the meta pointer and the command block");
 
 /* our RAM (the mirror's 5 MB, laid out anew in v0.16) */
 #define DIR ((u8 *)SMP_MIRROR)                                      /* the image's directory page */
@@ -1325,6 +1329,8 @@ void smp_save_recording(int slot, u32 off, u32 frames)
         dir_ok = 1;
     }
     u8 *e = ENTRY(slot);
+    if (slot < REC_FIRST)
+        put_le32(LIBID(slot), 0);                /* v0.39: a recording: no library sample's */
     put_le32(e, SMP_POOL_DDR + REC_OFFSET + off);
     put_le32(e + 4, frames);
     put_le32(e + 8, 0x3F800000u);                    /* rate 1.0 */
@@ -1583,6 +1589,8 @@ void smp_discard(int k)
     u8 *nm = NAME(k);
     for (int j = 0; j < NAME_BYTES; j++)
         nm[j] = 0;
+    if (k < REC_FIRST)
+        put_le32(LIBID(k), 0);                   /* v0.39: no library sample's any more */
     for (u32 j = 0; j < OVERVIEW_W; j++)
         OVERVIEW[OVERVIEW_W * (u32)k + j] = 0;
     dir_due = 1;
@@ -1898,6 +1906,17 @@ static void stem7(const char *ln, char *st)
     st[n] = 0;
 }
 
+/* v0.39: the identity LOAD TO PROJECT gives a slot: the library sample's frames' adler-32
+ * (lib.c's +16: the same audio wherever it lies, and a deleted entry's hole refilled reads
+ * as another) mixed with the slot's own pool address (a slot whose frames were replaced
+ * since no longer matches); never 0, which is none */
+extern u32 smp_lib_sum(int k);
+static u32 lib_id(u32 sum, u32 addr)
+{
+    u32 id = sum ^ (addr * 0x9E3779B1u);
+    return id ? id : 1u;
+}
+
 int smp_lib_slot_of(int k)
 {
     if (!dir_ok || !smp_lib_used(k))
@@ -1905,10 +1924,19 @@ int smp_lib_slot_of(int k)
     char st[8];
     const char *ln = smp_lib_name(k);
     stem7(ln, st);
-    u32 fr = smp_lib_frames(k), rate = smp_lib_rate(k), fmt = (u32)smp_lib_fmt(k);
+    u32 fr = smp_lib_frames(k), rate = smp_lib_rate(k), fmt = (u32)smp_lib_fmt(k), sum = smp_lib_sum(k);
     for (int s = 0; s < REC_FIRST; s++) {
         const u8 *e = ENTRY(s);
         if (smp_slot_empty(s) || le32(e + 4) != fr || le32(e + 8) != rate || le32(e + 12) != fmt)
+            continue;
+        /* v0.39: only the slot LOAD TO PROJECT filled from this very sample. v0.38 went by the
+         * frames and the names alone, and a pack's samples of one length (one tempo's loops,
+         * padded one-shots) whose names are one for their 35 characters, or for their stem's
+         * seven where the pool has no long names, all read as the first loaded: shown in its
+         * slot, previewed as it, never loaded themselves (the owner, v0.38). A slot with no
+         * identity (an older pool's, a recording, the host tools') matches nothing: such a
+         * sample previews from the +Drive and loads into a slot of its own, never as another */
+        if (le32(LIBID(s)) != lib_id(sum, le32(e)))
             continue;
         const char *nm = smp_name(s);
         int j = 0;
@@ -2101,6 +2129,7 @@ static void lp_poll(void)
     put_le32(e + 4, smp_lib_frames(lp_k));
     put_le32(e + 8, smp_lib_rate(lp_k));
     put_le32(e + 12, (u32)smp_lib_fmt(lp_k));
+    put_le32(LIBID(lp_slot), lib_id(smp_lib_sum(lp_k), SMP_POOL_DDR + lp_off));   /* v0.39: which sample */
     char st[8];
     stem7(smp_lib_name(lp_k), st);
     smp_rename(lp_slot, st);

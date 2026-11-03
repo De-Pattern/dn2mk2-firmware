@@ -633,6 +633,95 @@ static void slot_name(int k, char *out, int max)   /* SAMP value K (0 OFF) */
     out[j] = 0;
 }
 
+/* v0.39: a name in W characters, as the DT2's lists: whole if it fits (a file's extension
+ * dropped); else its head, "...", its tail (the part a pack's names differ in: v0.38 showed
+ * six hi-hats as one "AT BIRDHOUSE HI-HA"); OFF >= 0: the W characters from OFF (the
+ * selected row's marquee, below) -> OUT */
+static int name_len(const char *n)
+{
+    int L = 0;
+    while (n[L] && L < 64)
+        L++;
+    for (int e = L - 1; e >= L - 5 && e > 0; e--)
+        if (n[e] == '.') {
+            char x[5] = {0, 0, 0, 0, 0};
+            for (int j = 0; j < 4 && e + 1 + j < L; j++)
+                x[j] = (char)(n[e + 1 + j] >= 'a' && n[e + 1 + j] <= 'z' ? n[e + 1 + j] - 32 : n[e + 1 + j]);
+            if (L - e - 1 >= 3 && ((x[0] == 'W' && x[1] == 'A' && x[2] == 'V' && !x[3])
+                                   || (x[0] == 'A' && x[1] == 'I' && x[2] == 'F' && (!x[3] || x[3] == 'F'))
+                                   || (x[0] == 'M' && x[1] == 'P' && x[2] == '3' && !x[3])
+                                   || (x[0] == 'F' && x[1] == 'L' && x[2] == 'A' && x[3] == 'C')))
+                return e;
+            break;
+        }
+    return L;
+}
+
+static void fit_name(const char *n, int w, int off, char *out)
+{
+    int L = name_len(n), o = 0;
+    if (L <= w) {
+        for (; o < L; o++)
+            out[o] = n[o];
+    } else if (off >= 0) {
+        if (off > L - w)
+            off = L - w;
+        for (; o < w; o++)
+            out[o] = n[off + o];
+    } else {
+        int head = (w - 3) / 2 + 1, tail = w - 3 - head;
+        for (; o < head; o++)
+            out[o] = n[o];
+        out[o++] = '.';
+        out[o++] = '.';
+        out[o++] = '.';
+        for (int j = L - tail; j < L; j++)
+            out[o++] = n[j];
+    }
+    out[o] = 0;
+}
+
+/* v0.39: the selected row's marquee: a long name rests a second on its start, steps on five
+ * characters a second to its end, rests a second there and starts again; a new selection
+ * starts it from the start, and the row left shows head...tail again. smp_marquee_poll
+ * (rec_poll, every UI pass) asks for a redraw only when the shown part moves */
+#define MQ_REST 1500u                           /* the 1.5 kHz ticks of 0x4058e8d4: a second */
+#define MQ_STEP 300u                            /* a character each 0.2 s */
+static u32 mq_key __attribute__((section(".data"))) = 0xFFFFFFFFu;
+static u32 mq_at __attribute__((section(".data"))) = 0;
+int smp_mq_off __attribute__((section(".data"))) = 0;      /* the selected row's first character */
+/* the shown part of the row selected now: from its start until the poll has seen it */
+static int mq_off(u32 key) { return key == mq_key ? smp_mq_off : 0; }
+#define LIST_KEY(slot) (0x40000000u | (u32)(slot))
+
+static int mq_steps __attribute__((section(".data"))) = 0;  /* its characters past the row's */
+
+/* the row KEY selected now (its name N in W characters; N 0: none) */
+static void mq_follow(u32 key, const char *n, int w)
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    if (key != mq_key) {
+        mq_key = key;
+        mq_at = now;
+        mq_steps = n ? name_len(n) - w : 0;
+        if (smp_mq_off)
+            smp_overlay_dirty = 1;
+        smp_mq_off = 0;
+        return;
+    }
+    int steps = mq_steps;
+    if (steps <= 0)
+        return;
+    u32 t = (now - mq_at) % (2u * MQ_REST + (u32)steps * MQ_STEP);
+    int off = t < MQ_REST ? 0 : (int)((t - MQ_REST) / MQ_STEP);
+    if (off > steps)
+        off = steps;
+    if (off != smp_mq_off) {
+        smp_mq_off = off;
+        smp_overlay_dirty = 1;
+    }
+}
+
 /* the list is up on VIEW's page (rec.c's key filter asks) */
 int smp_list_up(void *view)
 {
@@ -738,6 +827,8 @@ int smp_list_visible(void)
     return smp_lst_open && now - lst_seen_at < 3000u;
 }
 
+#define LIST_W 14                               /* v0.39: the list's characters a name (x 49..123) */
+_Static_assert(LIST_W < 19, "the list's name buffer");
 void smp_list_draw(void *c)
 {
     int slot = list_slot < 0 ? 0 : list_slot;
@@ -760,8 +851,9 @@ void smp_list_draw(void *c)
         int k = slot - 2 + r, y = 36 - 9 * r;
         if (k < 0 || k > 127)
             continue;
-        char nm[19], num[4];
-        slot_name(k, nm, 18);
+        char ln[64], nm[19], num[4];
+        slot_name(k, ln, 63);
+        fit_name(ln, LIST_W, k == slot ? mq_off(LIST_KEY(slot)) : -1, nm);   /* v0.39 */
         num3(num, k);
         TEXT(c, FONT, x0 + 3, y, 0, "%s", num);
         TEXT(c, FONT, x0 + 23, y, 0, "%s", nm);
@@ -1176,6 +1268,67 @@ int smp_fb_action(int on_folder, int a)
     return on_folder ? ram_f[a < 0 ? 0 : a > 1 ? 1 : a] : ram_s[a < 0 ? 0 : a > 3 ? 3 : a];
 }
 
+/* v0.39: the browser's characters a name: what fits before the slot (">A003") or the
+ * folder icon at x 109 in the widest glyphs (five pixels; v0.38 cut at 18 and let the
+ * rest run under the label); with the action menu up, before it (x 62) */
+#define FB_W 21
+#define FB_SLOT_W 21
+#define FB_MENU_W 11
+_Static_assert(FB_SLOT_W <= FB_W && FB_MENU_W <= FB_W && FB_W < 24, "a row's name fits its buffers (FB_W + 3, the record's 24)");
+char smp_fb_rowtext[6][24] __attribute__((section(".data")));   /* each row's name as drawn, once all are (the gate reads it) */
+static char rows_drawn[6][24] __attribute__((section(".data")));
+static void row_text(int r, const char *nm)
+{
+    int j = 0;
+    for (; j < 23 && nm[j]; j++)
+        rows_drawn[r][j] = nm[j];
+    for (; j < 24; j++)
+        rows_drawn[r][j] = 0;
+}
+static u32 fb_key(void)                         /* which row is selected, where */
+{
+    return 0x80000000u | (u32)((smp_fb_store + 2) & 3) << 28 | (u32)((smp_fb_folder + 8) & 0xFF) << 20
+           | (u32)(smp_fb_menu & 3) << 16 | (u32)(smp_fb_cur & 0xFFFF);
+}
+
+/* rec_poll, every UI pass: the selected row's marquee (above) */
+void smp_marquee_poll(void)
+{
+    if (smp_fb_open) {
+        u32 key = fb_key();
+        if (key == mq_key) {                    /* the same row: only the clock (no lookups) */
+            mq_follow(key, 0, 0);
+            return;
+        }
+        int n = smp_fb_count(), slot;
+        if (smp_fb_cur < 0 || smp_fb_cur >= n || smp_fb_menu == 2) {
+            mq_follow(key, 0, 0);
+            return;
+        }
+        int f = smp_fb_item(smp_fb_cur, &slot), w = smp_fb_menu ? FB_MENU_W : FB_W;
+        char ln[64];
+        const char *nm = ln;
+        if (slot < 0)
+            nm = fb_folder_name(f);
+        else if (smp_fb_store == 1)
+            nm = smp_lib_name(slot);
+        else {
+            slot_name(slot + 1, ln, 63);
+            w = smp_fb_menu ? FB_MENU_W : FB_SLOT_W;
+        }
+        mq_follow(key, nm, w);
+    } else if (smp_lst_open && list_slot >= 0) {
+        char ln[64];
+        if (LIST_KEY(list_slot) == mq_key)
+            mq_follow(mq_key, 0, 0);
+        else {
+            slot_name(list_slot, ln, 63);
+            mq_follow(LIST_KEY(list_slot), ln, LIST_W);
+        }
+    } else
+        mq_key = 0xFFFFFFFFu;                   /* closed: it starts again when opened */
+}
+
 void smp_fb_draw(void *c, int samp)
 {
     for (int y = 0; y <= 63; y++)
@@ -1215,11 +1368,16 @@ void smp_fb_draw(void *c, int samp)
     if (top < 0)
         top = 0;
     int wide = smp_fb_menu ? 62 : 123;          /* the action menu takes the right half */
+    for (int r = 0; r < 6; r++)
+        row_text(r, "");
     for (int r = 0; r < 6 && top + r < n; r++) {
         int i = top + r, y = 46 - 9 * r, slot;
         int f = smp_fb_item(i, &slot);
         if (slot < 0) {
-            TEXT(c, FONT, 3, y, 0, smp_fb_menu ? "%.9s" : "%.18s", fb_folder_name(f));
+            char nm[FB_W + 3];
+            fit_name(fb_folder_name(f), smp_fb_menu ? FB_MENU_W : FB_W, i == smp_fb_cur ? mq_off(fb_key()) : -1, nm);
+            TEXT(c, FONT, 3, y, 0, "%s", nm);
+            row_text(r, nm);
             if (!smp_fb_menu)
                 folder_icon(c, 112, y);
             if (smp_fb_folder_full(f))          /* v0.29: every sample in it marked */
@@ -1227,7 +1385,10 @@ void smp_fb_draw(void *c, int samp)
         } else if (smp_fb_store == 1) {         /* v0.31: a library sample; its slot if in the pool */
             char sn[4];
             int s = smp_lib_slot_of(slot);
-            TEXT(c, FONT, 3, y, 0, smp_fb_menu ? "%.9s" : "%.18s", smp_lib_name(slot));
+            char nm[FB_W + 3];                       /* v0.39: head...tail; the selected one scrolls */
+            fit_name(smp_lib_name(slot), smp_fb_menu ? FB_MENU_W : FB_W, i == smp_fb_cur ? mq_off(fb_key()) : -1, nm);
+            TEXT(c, FONT, 3, y, 0, "%s", nm);
+            row_text(r, nm);
             if (!smp_fb_menu && s >= 0) {
                 num3(sn, s + 1);
                 LABEL(c, 109, y, ">A%s", sn);
@@ -1235,9 +1396,11 @@ void smp_fb_draw(void *c, int samp)
             if (smp_fb_marked(slot))
                 invert(c, 2, y - 1, wide - 1, y + 6);
         } else {
-            char nm[21], sn[4];
-            slot_name(slot + 1, nm, smp_fb_menu ? 9 : 14);
+            char ln[64], nm[FB_W + 3], sn[4];
+            slot_name(slot + 1, ln, 63);
+            fit_name(ln, smp_fb_menu ? FB_MENU_W : FB_SLOT_W, i == smp_fb_cur ? mq_off(fb_key()) : -1, nm);
             TEXT(c, FONT, 3, y, 0, "%s", nm);
+            row_text(r, nm);
             if (!smp_fb_menu) {
                 num3(sn, slot + 1);
                 LABEL(c, 109, y, ">A%s", sn);  /* the slot it plays from */
@@ -1250,6 +1413,9 @@ void smp_fb_draw(void *c, int samp)
         if (i == smp_fb_cur)
             box(c, 0, y - 2, wide, y + 7, 0);
     }
+    for (int r = 0; r < 6; r++)
+        for (int j = 0; j < 24; j++)
+            smp_fb_rowtext[r][j] = rows_drawn[r][j];
     scrollbar(c, 126, 1, 53, smp_fb_cur, n);
     if (smp_fb_menu) {                          /* SAMPLE ACTION, as the DT2's: a list at the right */
         for (int y = 0; y <= 54; y++)
