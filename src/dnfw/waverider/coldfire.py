@@ -460,6 +460,9 @@ JUMP_GUARDS = (                          # what the shims jump back to and rely 
     (0x400DA904, "4bf942c5a9ea", "... until a5 is set again (lea 0x42c5a9ea,%a5)"),
     (0x400DA8D2, "2f394028c1fc", "jmp_tracks resumes: move.l 0x4028c1fc,-(%sp)"),
     (0x400FA1E0, "4fef001c", "the cue's caller pops its arguments"),
+    (0x400DA902, "42024bf942c5a9ea", "v0.40: jmp_arm's forced tick ends as stock's ticks past 2 (clr.b %d2 ; lea 0x42c5a9ea,%a5)"),
+    (0x400DA41C, "42b942c5aaac", "v0.40: stock's tick 2 clears the arming (why jmp_tick never takes tick 1)"),
+    (0x400DA52A, "4a01660003d4", "v0.40: ... and its ticks past 2 go to 0x400da902 (tst.b %d1 ; bne.w)"),
 )
 # v0.22, the RECORDER as a screen of its own (csrc/sampler/rec.c): the UI loop's queue
 # receive (every key and knob item passes it first), its draw of the screen (the recorder

@@ -10,7 +10,8 @@
  *   the cue (0x400fa1da, the PTN view's single-pattern cue, jsr 0x400d93f0)
  *       -> jmp_cue: stock's cue, then jmp_cued() arms if the setting is on and it plays
  *   the tick's "tick 2 of the step" test (0x400da406, moveb 0x42c5a91e,%d1)
- *       -> jmp_tick: armed, on any tick that is not a step boundary, takes the tick-2 path
+ *       -> jmp_tick: armed, on tick 2 (stock's) or a tick past it, takes the tick-2 path;
+ *          already armed (ours, or stock's own change at the end), the switch is made ours
  *   that path's change-length test (0x400da45a, mvsw 0x42c5aab4,%d1)
  *       -> jmp_arm: armed and the queue's head is another pattern: straight to stock's
  *          arming (0x400da4d2), skipping the "is this the last step" test
@@ -81,6 +82,7 @@ u8 jmp_on __attribute__((section(".data"))) = 0;          /* the setting */
 u8 jmp_armed __attribute__((section(".data"))) = 0;       /* a cue to take on the next tick */
 u8 jmp_pending __attribute__((section(".data"))) = 0;     /* armed by us: the switch is ours */
 u8 jmp_fix __attribute__((section(".data"))) = 0;         /* the tracks' steps to wrap */
+u8 jmp_forced __attribute__((section(".data"))) = 0;      /* v0.40: the queue's path run past tick 2 */
 u32 jmp_from __attribute__((section(".data"))) = 0;       /* the pattern playing when armed */
 u32 jmp_to __attribute__((section(".data"))) = 0;         /* the pattern armed */
 u32 jmp_count __attribute__((section(".data"))) = 0;      /* jumps made */
@@ -105,6 +107,10 @@ static u32 set_check(const u32 *s)
  * then written whenever it changed */
 void jmp_poll(void)
 {
+    /* v0.40: stopped, nothing armed is kept for the next PLAY (the tick runs only while it
+     * plays; a cue arms only while it plays; this and the cue are both the UI's) */
+    if (SEQ_PLAYING != 1)
+        jmp_armed = jmp_pending = 0;
     if (!set_ok())
         return;
     if (!jmp_loaded) {
@@ -167,18 +173,23 @@ void jmp_cued(void)
 }
 
 /* at the switch (jmp_switch): -> the new pattern's start step, or -1 when the switch is not
- * the one we armed (then stock's 0 stands). Elektron's DIRECT JUMP rule: the new pattern
+ * one we made ours (then stock's 0 stands). Ours: armed by jmp_arm, or stock's own change
+ * at the pattern's end that a cue came after (jmp_tick); either way from jmp_from, and to
+ * whatever the switch installs (v0.40: not only jmp_to -- a second cue before the boundary
+ * replaces the first in stock's list, and the switch takes it). Elektron's DIRECT JUMP rule: the new pattern
  * goes on from where the playing one was. The switch is at a step boundary, after this
  * boundary's step of the playing pattern has been taken, so the step that starts is the one
  * after it: per pattern, the playing pattern's step (each track's, 0x42c5a984) + 1; per
  * track, its master counter (0x42c5a91c, already advanced: 0 after a wrap is its length).
  * Wrapped by the new pattern's length (stock: 1 or less is no wrap, INF). Each track's own
- * start comes after (jmp_wrap_tracks) */
+ * start comes after (jmp_wrap_tracks). The cue is taken: nothing stays armed */
 int jmp_position(void)
 {
     u32 p = SEQ_PATTERN;
-    if (p != jmp_to || SEQ_PREVIOUS != jmp_from || !p || !jmp_from)
+    if (!p || !jmp_from || p == jmp_from || SEQ_PREVIOUS != jmp_from)
         return -1;
+    jmp_armed = 0;
+    jmp_to = p;
     const u8 *pat = (const u8 *)p, *old = (const u8 *)jmp_from;
     u32 next;
     if (old[PAT_MODE] == 0) {
