@@ -535,3 +535,78 @@ int sl_knob(u32 index, int delta)
     smp_overlay_dirty = 1;
     return 1;
 }
+
+/* ---- v0.40: copy and paste carry SLD/SLEN ----------------------------------------------
+ *
+ * v0.39's known issue: stock's copies match lock records by track, and ours are tagged
+ * (track | SL_TAG), so no copy took them, and the trig copy keeps its own slot/value list.
+ * The hooks (hooks.S) are the arp p-locks' sites and shapes (scripts/build_arp_plocks.py):
+ *
+ * - page and track paste (and their UNDO): the paste loops over the clipboard's records; one
+ *   of ours of the copied track is written onto the destination track here (sl_paste), as
+ *   stock writes its own. Stock cleared the destination's steps first through 0x4003d14e
+ *   (sl_clear: ours on those steps too), so the pasted steps' slides are the clipboard's,
+ *   exactly as their other locks, and the track's other steps keep theirs.
+ * - shift and page autocopy: the tag cleared in their track compare, so ours move with
+ *   their steps inside the record.
+ * - trig copy / paste: each copied trig's two values kept by its clipboard entry (sl_tclip),
+ *   written onto the step it is pasted on (cleared by stock just before).
+ * - pattern copy/paste: whole-pattern copies (122,478 bytes, the lock table inside) carry
+ *   our records as bytes. */
+static u8 *ctx_table(void *ctx)
+{
+    void *model = *(void **)((u8 *)ctx + 44);
+    if (!model)
+        return 0;
+    return (u8 *)((u32 (*)(void *))((*(void ***)model)[10]))(model);
+}
+
+u32 sl_pasted D;                                /* our values written by pastes (for the checks) */
+
+int sl_paste(const u8 *rec, const u8 *vals, u8 *table, int first, int count, int dt, u32 ct)
+{
+    int tb = (s8)rec[1];
+    if ((rec[0] != SL_RAM_SLD && rec[0] != SL_RAM_SLEN) || (rec[1] & 0xF0) != SL_TAG
+        || (u32)(rec[1] & 0x0F) != ct || dt < 0 || dt >= NV || !table || first < 0 || count < 0)
+        return tb;
+    u32 k = rec[0] == SL_RAM_SLEN;
+    for (int i = 0; i < count && first + i < 128; i++) {
+        u32 v = *(const u16 *)(vals + 2 + 2 * i);
+        if (v != 0xFFFF && sl_lock_set(table, (u32)dt, (u32)(first + i), k, v))
+            sl_pasted++;
+    }
+    return -2;
+}
+
+#define TCLIP 128
+u32 sl_tclip[TCLIP] D = {[0 ... TCLIP - 1] = 0xFFFFFFFFu};                          /* a copied trig's SLEN << 16 | SLD (0xffff none) */
+
+void sl_tcopy(u32 off, void *ctx, u32 step)
+{
+    u32 e = off / 72u;
+    if (e >= TCLIP)
+        return;
+    sl_tclip[e] = 0xFFFFFFFFu;
+    u8 *table = ctx ? ctx_table(ctx) : 0;
+    u32 t = ctx ? *(u32 *)((u8 *)ctx + 60) : NV;
+    if (!table || t >= NV || step > 127)
+        return;
+    sl_tclip[e] = sl_lock_get(table, t, step, 0) | sl_lock_get(table, t, step, 1) << 16;
+}
+
+void sl_tpaste(u32 off, void *ctx, u32 step)
+{
+    u32 e = off / 72u;
+    if (e >= TCLIP || !ctx || step > 127)
+        return;
+    u8 *table = ctx_table(ctx);
+    u32 t = *(u32 *)((u8 *)ctx + 60);
+    if (!table || t >= NV)
+        return;
+    u32 c = sl_tclip[e];
+    for (u32 k = 0; k < 2; k++) {
+        u32 v = (c >> (16 * k)) & 0xFFFF;
+        if (v != 0xFFFF && sl_lock_set(table, t, step, k, v))
+            sl_pasted++;
+    }
+}

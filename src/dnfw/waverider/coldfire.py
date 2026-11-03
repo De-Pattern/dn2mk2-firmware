@@ -789,8 +789,12 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(SL.SAVE_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_save"]) + bytes.fromhex("4e71"),
          "slides: a pattern's lock table SAVE stores SLD/SLEN records as ids 200/201",
          bytes.fromhex(SL.SAVE_STOCK))
+    for va, stock_hex, label in SL.PASTE_SITES:    # v0.40: copy and paste carry SLD/SLEN
+        n = len(stock_hex) // 2
+        edit(va, bytes.fromhex("4eb9") + _long(csyms[label]) + bytes.fromhex("4e71") * ((n - 6) // 2),
+             f"slides: copy/paste carries SLD/SLEN ({label})", bytes.fromhex(stock_hex))
     for name in ("sl_ui_table", "sl_page_up", "sl_page_seen", "sl_knob", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
-                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"):
+                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks", "sl_pasted", "sl_tclip", "sl_paste"):
         layout[name] = csyms[name]
     layout.update(playout)
     # W2: where the C renderer's code ends (its rodata and data follow): the ship gate

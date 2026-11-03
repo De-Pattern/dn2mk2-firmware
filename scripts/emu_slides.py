@@ -593,11 +593,11 @@ def main() -> int:
               lock(tbl, 0, 0, 0) == before == 0xFFFF)
         panel.screen("trig1_after")
 
-        # page copy, clear, paste (FUNC + RECORD, FUNC + PLAY, FUNC + STOP): stock's copy does
-        # not carry SLD/SLEN (it matches records by track), and its paste may take a record of
-        # ours for its own. It must never leave a value of ours in a stock lock: step 2's SLD
-        # record gets a value on step 41 (outside the page) first, and after the paste no stock
-        # record may hold a value there
+        # v0.40: copy and paste carry SLD/SLEN as they carry the stock locks (v0.39's known
+        # issue: they carried none, and FUNC + RECORD / PLAY / STOP here, which clears every
+        # step of the track before it pastes, left the track with no slides at all). The
+        # track's map of our locks, and of a stock lock beside them for comparison, read
+        # before the copy, after the clear and after the paste, each through the panel.
         def records():
             out = []
             for i in range(RECS):
@@ -605,23 +605,85 @@ def main() -> int:
                 if h != b"\xff\xff":
                     out.append((i, h, machine.read(tbl + REC * i + 2, 256)))
             return out
-        mine = [i for i, h, _ in records() if h == bytes([0x50, 0x20])]
-        if mine:
-            put16(tbl + REC * mine[0] + 2 + 2 * 40, 1)
-        stock_before = [(i, h.hex()) for i, h, v in records() if h[0] <= 100 and h[1] <= 16]
-        for k in (19, 20, 21):
+
+        def ours_map(t=0):
+            return {(st, k): lock(tbl, t, st, k) for st in range(128) for k in (0, 1)
+                    if lock(tbl, t, st, k) != 0xFFFF}
+
+        def stock_map(slot, t=0):
+            for i, h, v in records():
+                if h == bytes([slot, t]):
+                    return {st: struct.unpack_from(">H", v, 2 * st)[0] for st in range(128)
+                            if struct.unpack_from(">H", v, 2 * st)[0] != 0xFFFF}
+            return {}
+
+        hits = {}
+        for name, va in (("page paste", 0x40053014), ("page undo", 0x40052488), ("track paste", 0x40053728),
+                         ("track undo", 0x40052824), ("trig copy", 0x40053D1E), ("trig paste", 0x40055376)):
+            hits[name] = 0
+
+            def hit(uc_, ad, sz, us, name=name):
+                hits[name] += 1
+            uc.hook_add(UC_HOOK_CODE, hit, begin=va, end=va)
+
+        def func_key(k):
             panel.hold(key(17), 5_000_000)
             panel.tap(key(k))
             panel.settle(10_000_000)
             panel.let_go(key(17))
             panel.settle(10_000_000)
-        after = records()
-        leaked = [i for i, h, v in after if h[0] <= 100 and h[1] <= 16 and v[80:82] != b"\xff\xff"]
-        report["paste_ours_after"] = [i for i, h, _ in after if h[1] & 0xF0 == 0x20]
-        report["paste_stock"] = [stock_before, [(i, h.hex()) for i, h, v in after if h[0] <= 100 and h[1] <= 16]]
-        check("page copy, clear, paste: no SLD/SLEN value ends up in a stock lock", bool(mine) and not leaked,
-              f"ours before {mine}, after {report['paste_ours_after']}, leaked {leaked}")
+
+        # our locks on steps 2 (from above: SLD on), 6 (SLD, SLEN 1/2) and 41 (SLD, SLEN 6); a
+        # stock lock (slot 90's record of track 1) on steps 6 and 41, written as the knob would
+        panel.tap(key(30))                                      # a trig on step 6 (placing it clears the step)
+        panel.settle(10_000_000)
+        for st, sld, slen in ((5, 1, 2), (40, 1, 9)):
+            call(sl_set, tbl, 0, st, 0, sld)
+            call(sl_set, tbl, 0, st, 1, slen)
+        free = [i for i in range(RECS) if machine.read(tbl + REC * i, 2) == b"\xff\xff"][-1]
+        machine.write(tbl + REC * free, bytes([90, 0]) + b"\xff\xff" * 128)
+        machine.write(tbl + INDEX + 90, bytes([free]))
+        for st in (5, 40):
+            put16(tbl + REC * free + 2 + 2 * st, 0x1234 + st)
+        before, st_before = ours_map(), stock_map(90)
+        report["copy_before"] = {f"{a}/{b}": v for (a, b), v in before.items()}
+        func_key(19)                                            # copy
+        func_key(20)                                            # clear
+        cleared, st_cleared = ours_map(), stock_map(90)
+        func_key(21)                                            # paste
+        after, st_after = ours_map(), stock_map(90)
+        report["copy_after"] = {f"{a}/{b}": v for (a, b), v in after.items()}
+        report["copy_hits"] = dict(hits)
+        same_clear = all(((st, 0) in cleared) == (st in st_cleared) for st in (5, 40))
+        check("FUNC + RECORD, PLAY, STOP (copy, clear, paste): SLD/SLEN cleared with the stock locks, "
+              "then back exactly, every step", bool(before) and after == before and st_after == st_before
+              and same_clear and st_before != st_cleared,
+              f"before {sorted(before.items())}, cleared {sorted(cleared.items())}, after {sorted(after.items())}; "
+              f"stock {sorted(st_before)} -> {sorted(st_cleared)} -> {sorted(st_after)}; hits {hits}")
+        leaked = [i for i, h, v in records() if h[0] <= 100 and h[1] <= 16 and h != bytes([90, 0])
+                  and any(struct.unpack_from(">H", v, 2 * st)[0] != 0xFFFF for st in (1, 5, 40))]
+        check("the paste: no SLD/SLEN value in a stock lock", not leaked, f"{leaked}")
         panel.screen("after_paste")
+
+        # trig copy and paste: step 6 held, RECORD (copy); step 9 held, STOP (paste): step 9 has
+        # step 6's SLD/SLEN, as its stock lock
+        panel.hold(key(30), 5_000_000)
+        panel.tap(key(19))
+        panel.settle(10_000_000)
+        panel.let_go(key(30))
+        panel.settle(10_000_000)
+        panel.hold(key(33), 5_000_000)
+        panel.tap(key(21))
+        panel.settle(10_000_000)
+        panel.let_go(key(33))
+        panel.settle(10_000_000)
+        got = [lock(tbl, 0, 8, 0), lock(tbl, 0, 8, 1)]
+        st9 = stock_map(90).get(8)
+        report["trig_hits"] = dict(hits)
+        check("trig copy/paste: step 6's SLD/SLEN (and its stock lock) on step 9, step 6's kept",
+              got == [1, 2] and st9 == 0x1234 + 5 and [lock(tbl, 0, 5, 0), lock(tbl, 0, 5, 1)] == [1, 2],
+              f"step 9 {got}, stock {st9}, hits {hits}")
+        panel.screen("after_trig_paste")
 
     faults = getattr(machine.m, "faults", [])[faults_before:]
     check("no fault", not faults, f"{len(faults)} fault(s)")
