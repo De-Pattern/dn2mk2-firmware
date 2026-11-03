@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.38** | 2026-11-02 | Direct Jump (PTN + YES/NO); per-project sample pools; new samples and recordings play at once (silent until a restart since v0.33); THRES 0 waits for real sound; a SLICE/GRID KEYBOARD chord-memory crash; gate: 22 live adds + 3 recordings must play, MAIN recording, sample chords, the arp/chord-memory fuzz | `builds/v0.38-JUMP/` | yes |
+| **v0.39** | 2026-11-03 | Parameter slides (SLD/SLEN, TRIG page 2); resampling records the whole take (it kept ~2 ms, then the empty input); THRES 0 learns its floor; +DRIVE look-alike samples matched by identity (">A003" on every row); +DRIVE held arrows, FUNC page, pushed-knob page; long names head...tail and scrolling; ERASE MOD DATA; s!Rwa²'s own start-up animation; the mod's version on screen; gate: whole-take recordings with realistic inputs, look-alike library samples, +DRIVE keys, erase | `builds/v0.39-SLIDE/` | yes |
+| v0.38 | 2026-11-02 | Direct Jump (PTN + YES/NO); per-project sample pools; new samples and recordings play at once (silent until a restart since v0.33); THRES 0 waits for real sound; a SLICE/GRID KEYBOARD chord-memory crash; gate: 22 live adds + 3 recordings must play, MAIN recording, sample chords, the arp/chord-memory fuzz | `builds/v0.38-JUMP/` | yes |
 | v0.37 | 2026-11-01 | A start-up animation (a redraw based on s!Rwa²'s design) (59 frames, every one checked in the gate); DDRW lighter (3 voices, same sound); resampling MAIN records the main mix (it gave an empty sample); the sample preview 6 dB down; polyphonic sample playback checked (chords on ONESHOT, WERP, SLICE) | `builds/v0.37-INTRO/` | yes |
 | v0.36 | 2026-11-01 | More Monomachine voices: SID, VO-6 and DENS from 2 to 4 at once, DDRW from 1 to 2 (the v0.26 fixed budget gone; the DSP-time guard decides); a voice that doesn't fit is stolen cleanly (silent until its next note) instead of chopping in and out; DDRW/DENS's busiest tables in fast memory; a four-note chord test per Monomachine machine in the gate | `builds/v0.36-VOICES/` | yes |
 | v0.35 | 2026-11-01 | The bug sweep: MACHINE SEL's empty FLTR column after choosing a machine low in the list (v0.33), the +DRIVE preview retriggering while held, SYN held shows our pages' values, LOAD TO PROJ skipping same-length samples, deleted folders left in the list (and the import page can delete folders), PERC's names on another track's LFO page (B10); `dn2diag.py entries`; a new gate step that checks the drawn MACHINE SEL columns and SYN pages | `builds/v0.35-SWEEP/` | yes |
@@ -76,6 +77,72 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.39 — SLIDE (parameter slides, whole recordings, +DRIVE identity and keys, erase, his animation)
+
+`DN2mod_v0.39_SLIDE_OS1.11.syx`
+sha256 `cfb66854200e93e7e6a348be7e29980b3d36241c79673775b1aa1a1ae221fd10`
+Gate: CLEARED TO FLASH, 2026-11-03 (42 gates; 37 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit). Source: commit `dbbe8042`. Docs: `docs/erase-mod-data.md`, `docs/sampler.md`, `docs/user-reports.md`.
+
+Everything in v0.38, plus:
+
+**Recordings kept only their first moment** (paQ, the owner; MAIN, a track or the input; the
+take its full length, a burst then flat, saved that way). The DSP's recorder took words 2..4
+of every new command as its source, channel and threshold (v0.15..v0.38); v0.38's count fix
+sends a check (CMD_VERIFY) at every take's start, which set IN R, threshold 0: 96 frames of
+the source, then the empty input. Now only the recorder's commands (ARM, NOW, STOP, MONITOR,
+ARM_PLAY) set them. Gate: SHARC `recwhole` (six takes: MAIN, TRK3, IN; NOW and ARM at THRES 0
+and 60; the link's traffic while recording; hiss, DC, 50 Hz hum, MAIN's tail; every frame its
+source's, start to end; fails on v0.38's code).
+
+**THRES 0 started on hum or a tail** (the owner): v0.38's floor fell to the quietest block.
+Now it learns over 48 blocks (their loudest, x4; nothing starts while learning), then follows
+the noise at most -26 dB/s, +6.5 dB/s.
+
+**+DRIVE marked look-alike samples as one slot** (the owner's screenshot: six rows ">A003",
+all previewing slot 3, none loading). The match went by length, format and the name's first
+characters. LOAD TO PROJECT now records the copied sample's identity in the directory page
+(kept by the pool lists); only that slot matches; slots without one match nothing. Gate:
+link16 `lib` (7 of its 12 new facts fail on v0.38).
+
+**+DRIVE keys**: held UP/DOWN repeat (lists and the action menu), FUNC + UP/DOWN a page, the
+knob turned while pushed a page a detent; D's push stays in +DRIVE; NO goes up. **Long names**:
+head...tail (the extension dropped), the selected row scrolls (1 s, 5 chars/s, 1 s, again),
+moved off it head...tail again. Gate: `drivenav`. The preview level is unchanged (the runner
+cannot model the master path; the owner unsure it needs changing).
+
+**Parameter slides**: SLD and SLEN on TRIG page 2 (lock ids 200/201); a locked parameter ramps
+to its lock over SLEN. Off, every frame and the lock table's SAVE/LOAD are stock's. Gate: `slides`.
+
+**ERASE MOD DATA**: the sample browser's top, +DRIVE, RIGHT; two questions; erases exactly the
+mod's four +Drive regions (pool, pool lists, settings, library) with stock's TRIM, headers
+first, then reads back. Link command 28 and the import page do the same. Gate: `erase`.
+
+**s!Rwa²'s own start-up animation** (his 44 frames, 38 distinct; 160 ms, then 80 ms; the last
+holds), replacing v0.37's redraw. **The mod's version**: "MOD 0.39" over the last start-up frame,
+"MOD v0.39" at the browser's top, from `VERSION`; Elektron's OS version untouched.
+
+**Tests**
+1. RECORDER, SRC MAIN, a pattern playing: record a few seconds; TRIM shows the whole waveform;
+   it plays back whole, on a track too.
+2. The same with SRC a track, and IN.
+3. ARM at THRES 0 with nothing playing, and with a reverb tail dying: it waits for real sound.
+4. A pack with look-alike names: LOAD TO PROJECT one; only it shows its slot; the others
+   preview as themselves and load into their own slots.
+5. +DRIVE: hold DOWN; FUNC + DOWN; turn the knob pushed in; long names start...end, the
+   selected one scrolls.
+6. A locked trig with SLD on: it glides over SLEN.
+7. Start-up: his animation, "MOD 0.39" at the end; "MOD v0.39" in the browser.
+8. ERASE MOD DATA: NO at either question erases nothing (YES YES only with a backup).
+9. The v0.38 list still.
+
+**Known issues**
+- Copy/paste doesn't carry slides (a page paste can drop a track's slides).
+- The TRIM preview's playhead does not move.
+- The +DRIVE preview level unchanged (reported ~12 dB over the same sample on a track).
+- An unsaved NEW project's recording goes with it on a LOAD without saving.
+- Preset pool trig locks don't work with the mod's machines.
+- ERASE MOD DATA's duration on a unit is unmeasured; never seen on hardware.
 
 ## v0.38 — JUMP (Direct Jump, per-project pools, silent samples fixed)
 
