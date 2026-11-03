@@ -4,7 +4,30 @@ What the owner has asked for and is not built yet, in the words he asked for it,
 enough of a plan that it can be picked up cold. Upstream's own parked ideas are in
 `docs/ideas-backlog.md`.
 
-## Next
+## After v0.40 (owner, 2026-11-02 / 11-03)
+
+In this order unless the owner changes it:
+
+1. **The Monomachine / engine-direction talk** (owner: remind him once v0.40 is out). A
+   build without MM (DT2 + MD), how to branch it, one gated line or two; the MM glitch
+   (MM chords over several MD tracks: a garbled, bitcrushed background) first, since the
+   DSP-time guard should drop voices cleanly and doesn't always. Current costs:
+   `docs/dsp-cost.md` (2026-11-03); the L2 table move was measured and is not worth it.
+2. **Slides on the sample and Machinedrum machines' own controls** (owner, 2026-11-03).
+   Today only their shared slots slide (filter, amps, FX sends, LFOs). Per machine: mark
+   which of its controls are continuous (the detented choices never slide: TYPE, SAMP,
+   modes), and check each sliding control changes the sound mid-note (MD machines and
+   STRT read some controls only at note-on: those would slide silently, so leave them
+   out). Gate: choices never move during a slide; continuous ones land on the lock.
+   Start with the sample machines (TUNE) and MD.
+3. **Octatrack-style rec trigs**: a trig that records a set length (or until stopped),
+   QREC (starts on the next bar / interval), maybe QPL; for bouncing heavy machines to
+   samples.
+4. **Capicola time-stretch** (heavylight; `Capicola Stretch for DT2.7z` in the owner's
+   project): after rec trigs. A switch on the sample machines vs his separate engines:
+   compare first, then the owner decides.
+
+## Next (from v0.10; historical)
 
 Built in v0.10 (2026-10-19), waiting on the instrument:
 
