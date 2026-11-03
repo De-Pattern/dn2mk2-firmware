@@ -1575,6 +1575,12 @@ def main() -> int:
             png_dir.mkdir(parents=True, exist_ok=True)
             (png_dir / f"link16_{scenario}.json").write_text(json.dumps(result, indent=1))
             print(f"  link16 {scenario}: {json.dumps({k: v for k, v in result.items() if k != 'log'})}")
+        elif step.startswith("addl:"):
+            # v0.40: addl:VA:N, N added to the u32 at VA (the frame counter 0x4058e8d4 moved
+            # on as the audio interrupt would, without running it)
+            _, va, n = step.split(":")
+            machine.write(int(va, 0), struct.pack(">I", (machine.long(int(va, 0)) + int(n, 0)) & 0xFFFFFFFF))
+            print(f"  addl {va} += {n}")
         elif step.startswith("poke:"):
             _, va, data = step.split(":")
             machine.write(int(va, 0), bytes.fromhex(data))

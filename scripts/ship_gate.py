@@ -778,10 +778,13 @@ def main() -> int:
         # (a command each way, FUNC's release seen); YES on to FILE NAME (spelt by knob and
         # arrows; FUNC + YES inserts, FUNC + NO deletes), YES on to ASSIGN, a [TRIG] key
         # makes track 3 ONESHOT playing the slot (stock's MACHINE SEL commit and setValue)
+        # v0.40: the preview's playhead (the owner: it never moved): held, the frame counter
+        # moved on 150 twice (6,400 audio frames, as the audio interrupt would count them), the column drawn moves right each time and the
+        # screen with it; let go, none (trim_head_x -1, the screen changed again)
         if "rec_phase" in lay and "rec_pv_on" in lay:
-            g = {k: hex(lay[k]) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
-                                           "trim_e", "nm_text", "rec_pv_on", "smp_func_held", "smp_cmds",
-                                           "smp_saved")}
+            g = {k: hex(lay.get(k, 0)) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
+                                                  "trim_e", "nm_text", "rec_pv_on", "smp_func_held", "smp_cmds",
+                                                  "smp_saved", "trim_head_x")}
             kit = 0x4210C08C                    # the snapshot's live kit ([0x800052a0])
             snd = hex(kit + 52 + 1163 * 2)      # track 3's sound
             steps = (f"wait:3,mem:0x800052a0:4,mem:{snd}:256,poke:{g['trim_slot']}:00000004,"
@@ -792,8 +795,10 @@ def main() -> int:
                      f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,spin:5:2,wait:5,png:tz,"
                      f"mem:{g['smp_cmds']}:4,"
                      f"press:17,wait:2,press:10,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_cmds']}:4,"
+                     f"mem:{g['trim_head_x']}:4,png:p0,addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p1,"
+                     f"addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p2,"
                      f"release:10,wait:3,release:17,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_func_held']}:4,"
-                     f"mem:{g['smp_cmds']}:4,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,spin:0:3,wait:3,right,"
+                     f"mem:{g['smp_cmds']}:4,mem:{g['trim_head_x']}:4,png:pr,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,spin:0:3,wait:3,right,"
                      f"wait:3,spin:0:2,wait:3,mem:{g['nm_text']}:8,press:17,wait:2,yes,wait:3,release:17,wait:3,"
                      f"mem:{g['nm_text']}:8,press:17,wait:2,no,wait:3,release:17,wait:3,mem:{g['nm_text']}:8,"
                      # v0.33: FUNC + NO steps the cursor back too (owner: held, it clears letter
@@ -807,6 +812,14 @@ def main() -> int:
                                             "--build", bdir, "--snapshot", snap, "--steps", steps,
                                             "--png-dir", work / "recflow", "--json", js]
 
+            # the harness keys a repeated read of an address by its place among all reads
+            # (emu_waverider_menu.py's mem:): the n-th read of VA, worked out from the steps
+            reads = [st.split(":")[1] for st in steps.split(",") if st.startswith("mem:")]
+
+            def nth(va, n):
+                k = [i for i, x in enumerate(reads) if x == va][n]
+                return va if not n else f"{va}@{k}"
+
             def flow_body(tdir):
                 rc, out = run("recorder flow", flow_cmd, logs, env=EMU_ENV, trace=tdir)
                 why, good = out[-800:], False
@@ -814,29 +827,37 @@ def main() -> int:
                     r = json.loads(js.read_text())
                     m = r["memory"]
                     ph, cm, pv = g["rec_phase"], g["smp_cmds"], g["rec_pv_on"]
-                    phases = [int(m[k], 16) for k in (ph, f"{ph}@3", f"{ph}@12", f"{ph}@17", f"{ph}@18")]
-                    cmds = [int(m[k], 16) for k in (cm, f"{cm}@8", f"{cm}@11")]
-                    before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[f"{snd}@19"])
+                    phases = [int(m[nth(ph, k)], 16) for k in range(5)]
+                    cmds = [int(m[nth(cm, k)], 16) for k in range(3)]
+                    before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[nth(snd, 1)])
                     s0, e0 = int(m[g["trim_s"]], 16), int(m[g["trim_e"]], 16)
-                    names = [bytes.fromhex(m[k])[:4] for k in (g["nm_text"], f"{g['nm_text']}@14",
-                                                               f"{g['nm_text']}@15")]
+                    names = [bytes.fromhex(m[nth(g["nm_text"], k)])[:4] for k in range(3)]
+                    hx = g["trim_head_x"]
+                    heads = [struct.unpack(">i", bytes.fromhex(m[nth(hx, k)]))[0] for k in range(4)] \
+                        if "trim_head_x" in lay else None
+                    shot = {k: pathlib.Path(r["screens"][k]).read_bytes() for k in ("p0", "p1", "p2", "pr")}
                     facts = {"kit": m["0x800052a0"] == f"{kit:08x}",
                              "phases": phases == [4, 1, 2, 3, 0],
                              "trim": 0 < s0 < e0 < 0x17700,
-                             "preview": int(m[pv], 16) == 1 and int(m[f"{pv}@9"], 16) == 0
+                             "preview": int(m[pv], 16) == 1 and int(m[nth(pv, 1)], 16) == 0
                              and cmds[1] == cmds[0] + 1 and cmds[2] == cmds[1] + 1
                              and int(m[g["smp_func_held"]], 16) == 0,
+                             "v0.40: the preview's playhead moves with it (held: drawn, further on each "
+                             "time, the screen changing) and is gone once let go":
+                             heads is not None and 4 <= heads[0] < heads[1] < heads[2] <= 123 and heads[3] == -1
+                             and shot["p0"] != shot["p1"] != shot["p2"] != shot["pr"],
                              "name": names == [b"CB\0\0", b"C B\0", b"CB\0\0"],
                              "v0.33: FUNC + NO steps back: a second one takes the letter before (and, held, the rest)":
-                             bytes.fromhex(m[f"{g['nm_text']}@16"])[:2] in (b"B\0", b"\0\0"),
+                             bytes.fromhex(m[nth(g["nm_text"], 3)])[:2] in (b"B\0", b"\0\0"),
                              "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
                              "samp": after[0x6A] == 5,
                              "frames": r["screen_frames"] > 0,
                              "v0.33: F zooms TRIM (drawn)": int(m[f"{lay['trim_zoom']:#x}"], 16) >= 1
                              and pathlib.Path(r["screens"]["tz"]).read_bytes() != pathlib.Path(r["screens"]["t2"]).read_bytes()}
                     good = all(facts.values())
-                    why = str(facts) + f" phases {phases} cmds {cmds} names {names}"
-                return good, ("SAVING on to TRIM; TRIM's ends move; FUNC + YES previews while held; YES on to "
+                    why = str(facts) + f" phases {phases} cmds {cmds} names {names} heads {heads}"
+                return good, ("SAVING on to TRIM; TRIM's ends move; FUNC + YES previews while held, its playhead "
+                              f"moving (columns {heads[:3]}), gone at release; YES on to "
                               "FILE NAME (knob, arrows, FUNC + YES inserts, FUNC + NO deletes), YES on to ASSIGN, "
                               "a [TRIG] key makes track 3 ONESHOT on the slot" if good else why)
             later("recflow", "recorder flow (ColdFire)", "recorder flow (ColdFire)", [flow_cmd, sorted(EMU_ENV.items())], flow_body)
@@ -1757,7 +1778,9 @@ def main() -> int:
         # a new sound, a trig with no p-lock; the lock table's SAVE/LOAD and step clear. With
         # SLIDE off, and for every lock table, the same as stock 1.11 byte for byte: every frame's
         # smoother state and output arrays (the emulator's own EMAC, and the instrument's
-        # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records
+        # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records.
+        # v0.40: copy and paste through the panel (track copy/clear/paste, trig copy/paste) carry
+        # SLD/SLEN exactly as the track's stock lock beside them (both fail on v0.39's code)
         if "sl_smooth" in lay:
             sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", snap,
                         "--json", work / f"slides-{k}.json",
@@ -1780,8 +1803,9 @@ def main() -> int:
                               f"(1 step at {b['tempo_word_after_isr'] / 120:g} BPM), exact, landing on the "
                               f"locks; {len(b['checks'])} checks; SLIDE off: {len(b['off_shas'])} frames' "
                               f"arrays and the lock table's SAVE/LOAD identical to stock 1.11; the TRIG page's SLD/SLEN "
-                              f"set through the panel, the held trig staying on after release, a page "
-                              f"paste leaving no SLD/SLEN value in a stock lock")
+                              f"set through the panel, the held trig staying on after release; v0.40: track copy, "
+                              f"clear and paste carry them exactly as the stock locks, trig copy/paste too, no "
+                              f"SLD/SLEN value in a stock lock")
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
