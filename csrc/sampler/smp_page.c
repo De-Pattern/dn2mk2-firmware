@@ -1767,18 +1767,58 @@ static void wave_zoom(void *c, int x0, int x1, int yc, int h, u32 s, u32 e, u32 
     hline(c, bx, bx + (bw < 2 ? 2 : bw), yc - h - 3, 0);
 }
 
+/* v0.40: the TRIM preview's playhead (rec.c's rec_pv_frame), a column across the waveform
+ * at the frame playing, cleared either side so it reads over the wave; the column drawn
+ * kept for the checks (-1: none) */
+int trim_head_x __attribute__((section(".data"))) = -1;
+extern int rec_pv_frame(void);
+
+static void trim_head(void *c, int x0, int x1, int yc, int h, int zoomed)
+{
+    int f = rec_pv_frame(), x = -1;
+    u32 n = trim_n ? trim_n : 1u, w = (u32)(x1 - x0 + 1);
+    if (f >= 0 && (u32)f < n) {
+        if (!zoomed)
+            x = x0 + (int)(((u32)f >> 4) * w / ((n >> 4) + 1u));
+        else {
+            u32 span = n >> trim_zoom, a = trim_pos;
+            if (!span)
+                span = 1;
+            if ((u32)f >= a && (u32)f < a + span)
+                x = x0 + (int)(((u32)f - a) / ((span / w) + 1u));
+        }
+    }
+    if (x > x1)
+        x = x1;
+    trim_head_x = x;
+    if (x < x0)
+        return;
+    for (int y = yc - h - 1; y <= yc + h + 1; y++) {
+        if (x > x0)
+            SET_PIXEL(c, x - 1, y, 0);
+        on(c, x, y);
+        if (x < x1)
+            SET_PIXEL(c, x + 1, y, 0);
+    }
+}
+
 static void trim_draw(void *c)
 {
     box(c, 2, 55, 125, 63, 0);
     LABEL(c, 64, 57, "%s", "Y:SAVE FN+N:DEL FN+Y:PLAY");
     box(c, 2, 11, 125, 53, 0);
     extern int smp_analysis_slot(void);
-    if (trim_zoom > 0 && smp_analysis(0) == 2 && smp_analysis_slot() == trim_slot)
+    trim_head_x = -1;
+    if (trim_zoom > 0 && smp_analysis(0) == 2 && smp_analysis_slot() == trim_slot) {
         wave_zoom(c, 4, 123, 32, 17, trim_s, trim_e, trim_n ? trim_n : 1);
-    else if (smp_overview(trim_slot))
+        trim_head(c, 4, 123, 32, 17, 1);
+    } else if (smp_overview(trim_slot)) {
         wave(c, trim_slot, 4, 123, 32, 18, trim_s, trim_e, trim_n ? trim_n : 1);
-    else
+        trim_head(c, 4, 123, 32, 18, 0);
+    } else {
         LABEL(c, 64, 30, "%s", "NO WAVEFORM");
+        trim_head(c, 4, 123, 32, 18, 0);
+    }
     LABEL(c, 16, 2, "%s", "|<TRIM");
     if (trim_zoom > 0)
         LABEL(c, 46, 2, "%s", trim_zoom == 1 ? "2X" : trim_zoom == 2 ? "4X" : "8X");

@@ -660,11 +660,34 @@ static void fb_pv_poll(void)                    /* the browser closed: its previ
         fb_preview_stop();
 }
 
+/* v0.40: where the TRIM preview is, for TRIM's playhead (smp_page.c). The DSP plays it from
+ * trim_s to trim_e once and reports no position, only that a preview plays (its status
+ * word's +16), and the sample page's playhead (smp_playhead) is a voice's: the preview is
+ * none, so v0.25..v0.39's TRIM drew nothing that moved (the owner: "the playhead does not
+ * move"). As the slice editor's (slice.c): 32 frames a 1.5 kHz tick since it started, from
+ * the start it was sent with; -1 when none plays, once it is let go, and past its end. */
+static u32 pv_at __attribute__((section(".data"))) = 0;
+static u32 pv_s __attribute__((section(".data"))) = 0;
+static u32 pv_e __attribute__((section(".data"))) = 0;
+
+int rec_pv_frame(void)
+{
+    if (!rec_pv_on || rec_phase != PH_TRIM)
+        return -1;
+    u32 run = (FRAMES - pv_at) * 32u, at = pv_s + run;
+    if (run >= 0x40000000u || at >= pv_e)
+        return -1;
+    return (int)at;
+}
+
 static void preview(int on)
 {
-    if (on && trim_slot >= 0)
+    if (on && trim_slot >= 0) {
         smp_command(CMD_PREVIEW, (u32)trim_slot, trim_s, trim_e, 0);
-    else if (rec_pv_on)
+        pv_at = FRAMES;
+        pv_s = trim_s;
+        pv_e = trim_e;
+    } else if (rec_pv_on)
         smp_command(CMD_PREVIEW, (u32)(trim_slot < 0 ? 0 : trim_slot), 0, 0, 0);
     rec_pv_on = on && trim_slot >= 0;
 }
