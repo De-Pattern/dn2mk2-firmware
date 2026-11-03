@@ -625,8 +625,12 @@ the keyboard.
   meter, the waveform as it comes in (`rec_wave`: 120 columns of the status's peaks; when
   it passes the last, columns pair up), the time, YES: STOP.
 - **SAVING, NORMALIZING.** When it stops, the recording is read back and saved to the
-  +Drive as before (`smp_save_recording`), and its peak noted (`peak_add`). Below 32,700
-  (and above 64: silence stays as it is), it is normalised to 32,700, the DT2's
+  +Drive as before (`smp_save_recording`), and its peak noted (`peak_add`). v0.41: any
+  take that is not all zero and peaks under full scale is normalised to full scale (its
+  peak to 32,767), as the DT2, the Octatrack and the Digitakt do, however quiet it is (a
+  recorded silence becomes a noise source, the owner's wish); no cap, no floor; exact
+  zeros stay zero; nothing clips (the gain is floored). v0.30..v0.40 normalised to -6 dBFS
+  by +24 dB at most: the owner's "resampled ~6 dB under what was played". The DT2's
   "NORMALIZING...": the +Drive's copy a chunk a pass (`norm_chunk`, a 16.16 gain in
   32-bit arithmetic), then the DSP's through the loader's own path (read, sent,
   VERIFY-checked), the overview redrawn from it. The screen shows which, with a bar.
