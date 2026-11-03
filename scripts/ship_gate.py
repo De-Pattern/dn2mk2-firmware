@@ -191,6 +191,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("samplist", "sample list, browser, playhead (ColdFire)"),
        ("colsw", "MACHINE SEL columns, SYN held (ColdFire)"),
        ("drive", "+DRIVE browser (ColdFire)"),
+       ("drivenav", "+DRIVE keys and long names (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
        ("slides", "parameter slides (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
@@ -1182,6 +1183,123 @@ def main() -> int:
                     return good, ("the two stores, +DRIVE's folders and samples, a tick, LOAD TO PROJECT "
                                   "queued, NO back up a level each time and closed at the top" if good else why)
                 later("drive", "+DRIVE browser (ColdFire)", "+DRIVE browser (ColdFire)", [d_cmd, sorted(EMU_ENV.items())], d_body)
+
+                # 6l2. v0.39 (the owner, v0.38): +DRIVE's keys as Elektron's lists, and long names
+                # as the DT2's. A folder of 17: "SHORT ONE.WAV", then 16 hi-hats whose names are
+                # one but for their last two characters (his "AT HIHAT": six rows of "AT BIRDHOUSE
+                # HI-HA"). Held DOWN steps on by itself, in the list and in the action menu;
+                # FUNC + DOWN a page; a knob turned pushed in a page a detent, unpushed one; D
+                # pushed leaves +DRIVE up (stock took it); NO still goes up. An unselected long
+                # name is head...tail; the selected one scrolls from its start to its end; moved
+                # off, it is head...tail again and the new one starts from its start
+                if "smp_fb_rowtext" in lay and "smp_mq_off" in lay:
+                    hh = [f"AT BIRDHOUSE HI-HAT CLOSED VEL {k:02d}" for k in range(16)]
+                    nidx = lent(LDATA, 1000, 2, "SHORT ONE.WAV") + b"".join(
+                        lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh))
+                    nfold = b"INCOMING".ljust(32, b"\0") + b"RECORDED".ljust(32, b"\0") + b"AT HIHAT".ljust(32, b"\0")
+                    TICK = 0x4058E8D4
+                    rt, mq, cur, mcur = lay["smp_fb_rowtext"], lay["smp_mq_off"], lay["smp_fb_cur"], lay["smp_fb_mcur"]
+                    snap_ = [mem(rt, 144), mem(mq), mem(cur), mem(TICK)]
+                    ns = base + lead + [f"poke:{LRAM + 0x200:#x}:{nidx.hex()}", f"poke:{LRAM + 0x200 + 2048 * 64:#x}:{nfold.hex()}",
+                                        f"poke:{lay['smp_lib_state']:#x}:00000002", f"call:{lay['smp_lib_refresh']:#x}"]
+                    ns += samp_all(3) + [f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:10"] + turn(2) + [
+                        "wait:10", "press:17", "wait:2", "yes", "wait:2", "release:17", "wait:8", "up", "wait:4", "yes", "wait:6",
+                        f"poke:{lay['smp_fb_folder']:#x}:00000002", f"poke:{cur:#x}:00000000",
+                        f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:6", "png:n0"] + snap_      # 0: the folder
+                    # (the emulator's clock, the 1.5 kHz ticks at 0x4058e8d4, does not run: it is set
+                    # as time would move it: the repeat's 0.4 s then 0.08 s steps, the marquee's 1 s
+                    # rest and 0.2 s a character)
+                    def clock(t):
+                        return [f"poke:{TICK:#x}:{t:08x}", "wait:2"]
+                    ns += clock(100) + ["press:14", "wait:2"] + clock(700) + clock(850) + clock(1000) + snap_   # 1: held DOWN
+                    ns += ["release:14", "wait:2"] + clock(1300) + snap_ + clock(1600) + snap_                  # 2, 3: let go
+                    # 4-19: the marquee of the row it stopped on (selected at tick 1000)
+                    MQT = (1100, 1900, 2600, 2900, 3200, 4100, 5000, 6200, 7400, 7700, 8200, 8700, 8850, 9000, 9500, 10900)
+                    for t in MQT:
+                        ns += clock(t) + snap_
+                    ns += ["down", "wait:3"] + snap_                                                               # 20: moved off
+                    ns += ["press:17", "wait:2", "down", "wait:2", "release:17", "wait:3"] + snap_                  # 21: FUNC + DOWN
+                    ns += [f"poke:{cur:#x}:00000000", "wait:3", "turn:3:1", "wait:3"] + snap_                     # 22: pushed, two detents
+                    ns += ["press:44", "wait:3", "release:44", "wait:4", mem(lay["smp_fb_open"]), mem(lay["smp_fb_store"]),
+                           mem(lay["smp_fb_folder"]), "png:n1"]
+                    ns += ["right", "wait:4"] + clock(20000) + ["press:14", "wait:2"] + clock(20700) + clock(20850) + clock(21000) + [
+                           "release:14", "wait:3", mem(mcur), mem(lay["smp_fb_menu"]),
+                           "png:n2", "no", "wait:4", "no", "wait:4", mem(lay["smp_fb_folder"]), mem(lay["smp_fb_open"])]
+                    njs = work / "drivenav.json"
+                    n_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                             "--snapshot", snap, "--steps", ",".join(ns), "--png-dir", work / "drivenav", "--json", njs]
+
+                    def n_body(tdir):
+                        rc, out = run("+drive keys, names", n_cmd, logs, env=EMU_ENV, trace=tdir)
+                        why, good = out[-800:], False
+                        if rc == 0 and njs.exists():
+                            m = json.loads(njs.read_text())["memory"]
+
+                            def at(va, i):          # the I-th read of VA
+                                ks = [k for k in m if k == hex(va) or k.startswith(hex(va) + "@")]
+                                return m[ks[i]] if i < len(ks) else None
+
+                            def i32(va, i):
+                                v = at(va, i)
+                                return None if v is None else int.from_bytes(bytes.fromhex(v), "big", signed=True)
+
+                            def rows(i):
+                                v = at(rt, i)
+                                b = bytes.fromhex(v) if v else bytes(144)
+                                return [b[24 * r:24 * r + 24].split(b"\0")[0].decode("ascii", "replace") for r in range(6)]
+                            ticks = [i32(TICK, i) for i in range(23)]
+                            curs = [i32(cur, i) for i in range(23)]
+                            offs = [i32(mq, i) for i in range(23)]
+                            r0 = rows(0)
+
+                            W = 21                         # (smp_page.c's FB_W)
+
+                            def ht(nm):                    # head...tail: ten, "...", eight
+                                return nm[:10] + "..." + nm[-8:]
+                            sel = curs[3]                  # the hi-hat held DOWN stopped on: hh[sel - 1]
+                            mq_rows = [rows(i) for i in range(3, 20)]          # (0: let go; 1..16: the marquee)
+                            name = hh[sel - 1] if sel and 1 <= sel <= 16 else ""
+                            seen = {r for rs in mq_rows for r in rs}
+                            top = max(0, min(sel - 2, 17 - 6)) if sel else 0
+                            after = rows(20)
+                            ntop = max(0, min(curs[20] - 2, 17 - 6)) if curs[20] is not None else 0
+                            end = len(name) - W
+                            # (selected at tick 1000: a second's rest (1500 ticks), a character each 300 to
+                            # its end, a second's rest, then from the start again)
+
+                            def mq_want(t):
+                                u = (t - 1000) % (3000 + 300 * end)
+                                return 0 if u < 1500 else min(end, (u - 1500) // 300)
+                            want = [mq_want(t) for t in MQT]
+                            facts = {
+                                "a short name whole, its .WAV dropped": r0[0] == "SHORT ONE",
+                                "an unselected long name head...tail (\"AT BIRDHOU...D VEL 00\")": r0[1] == ht(hh[0]) and r0[2] == ht(hh[1]),
+                                "held DOWN steps on by itself (a press and three repeats)": curs[1] == 4,
+                                "let go, it stops": curs[2] == curs[3] == curs[1],
+                                "the selected long name starts from its start": bool(name) and mq_rows[1][sel - top] == name[:W],
+                                "it scrolls on to its end, a character each 0.2 s, and starts again": offs[4:20] == want
+                                and end == 12 and max(want) == end and want[-1] > 0 and 0 in want[want.index(end):]
+                                and any(r == name[-W:] for r in mq_rows[1 + want.index(end)]),
+                                "only the selected row scrolls": all(r == ht(hh[top + j - 1]) for rs in mq_rows
+                                                                     for j, r in enumerate(rs) if top + j != sel and top + j >= 1)
+                                and all(rs[sel - top] == name[o:o + W] for rs, o in zip(mq_rows[1:], want)),
+                                "DOWN: the next": curs[20] == sel + 1,
+                                "moved off: head...tail again": after[sel - ntop] == ht(hh[sel - 1]),
+                                "the new one from its start": after[curs[20] - ntop] == hh[curs[20] - 1][:W] and offs[20] == 0,
+                                "FUNC + DOWN: a page": curs[21] == min(curs[20] + 6, 16),
+                                "a knob pushed in: a page a detent (two)": curs[22] == 12,
+                                "D pushed: +DRIVE still up, in its folder": int(m[hex(lay["smp_fb_open"])], 16) == 1
+                                and int(m[hex(lay["smp_fb_store"])], 16) == 1 and int(m[hex(lay["smp_fb_folder"])], 16) == 2,
+                                "held DOWN in the action menu steps on": i32(mcur, 0) == 4 and int(at(lay["smp_fb_menu"], 0), 16) == 1,
+                                "NO: out of the menu, then up a level": i32(lay["smp_fb_folder"], 1) == -1 and i32(lay["smp_fb_open"], 1) == 1}
+                            good = all(bool(v) for v in facts.values())
+                            why = f"{ {k: v for k, v in facts.items() if not v} } cur={curs} off={offs} ticks={ticks} rows0={r0} rows3={rows(3)} rows20={after}"
+                        return good, ("held arrows repeat in the list and the action menu, FUNC + DOWN a page, a pushed "
+                                      "knob a page a detent, D pushed keeps +DRIVE, NO goes up; long names head...tail, "
+                                      "the selected one scrolls to its end and back, moved off it is head...tail again"
+                                      if good else why[:1500])
+                    later("drivenav", "+DRIVE keys and long names (ColdFire)", "+DRIVE keys and long names (ColdFire)",
+                          [n_cmd, sorted(EMU_ENV.items())], n_body)
 
         # 6h. v0.28: the Monomachine machines' pages drawn as the Monomachine's (each machine its
         # own screen, none the stock grid), and their choices' detents (WPRS, two choices: four

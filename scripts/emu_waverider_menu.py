@@ -206,6 +206,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             dsp["send"] = [a0, a0 + a1]
         elif cmd == SM.CMD_PROBE:               # v0.22: the RAM check's verdict, at once
             dsp["ram"] = dsp["ram_answer"]
+        elif cmd == SM.CMD_PREVIEW:             # v0.39: (src, first, end) as asked
+            dsp.setdefault("previews", []).append((a0, a1, words[4] if len(words) > 4 else 0))
         status_out()
 
     # v0.20: the frame's words 2650..2681 are the DSP's per-track routing; ours never
@@ -634,6 +636,88 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                      and all(s >= STORE_SECTOR for s in disk))
         out["load_to_project"] = lp_ok
         ok = ok and lp_ok
+        # v0.39 (the owner, v0.38: "all of them show as if loaded onto Slot 3 while I only loaded
+        # one, and now they sound the same when I preview"): a pack's samples of one length
+        # whose names are one for their 35 characters (the host tools keep 35; this pool has
+        # no long names, so v0.38 went by the seven-letter stem and the frames alone). Only
+        # the one loaded is in a slot; another previews its own frames from the +Drive and
+        # loads into a slot of its own; a deleted sample's hole refilled with another of the
+        # same name and length is not the slot's; the same audio sent again is; a slot with
+        # no identity (an older pool's) is no library sample's
+        lid_ok = False
+        if lp_ok and "smp_lib_slot_of" in syms:
+            def slot_of(k):
+                call("smp_lib_slot_of", k)
+                v = returned_d0()
+                return v - (1 << 32) if v >= 1 << 31 else v
+
+            def load(k):
+                done = long("smp_lp_done")
+                call("smp_lib_load", k)
+                for _ in range(4000):
+                    period()
+                    call("smp_boot")
+                    if long("smp_lp_done") > done and long("smp_lstate") in (0, 4):
+                        break
+                for _ in range(200):
+                    period()
+                    call("smp_boot")
+                return long("smp_lp_done") > done
+
+            same = "PACK LOOP 120BPM SAME NAME FOR 35 CHARS"     # 39: the first 35 kept
+            d1 = bytes(rng.randrange(256) for _ in range(3000))
+            d2 = bytes(rng.randrange(256) for _ in range(3000))
+            d3 = bytes(rng.randrange(256) for _ in range(3000))
+            r1, r2, r3 = send(same + " ONE", 0, d1), send(same + " TWO", 0, d2), send(same + " SIX", 0, d3)
+            lf = {}
+            if r1 and r2 and r3:
+                k1, k2, k3 = r1[0], r2[0], r3[0]
+                st_n, lst2 = sx(21, struct.pack("<H", k1))
+                lf["the three names one on the +Drive"] = len({lst2[4 + 31 * j + 7:4 + 31 * j + 31] for j in range(3)}) == 1
+                lf["none in a slot before"] = [slot_of(k1), slot_of(k2), slot_of(k3)] == [-1, -1, -1]
+                lf["the first loads"] = load(k1)
+                s1 = slot_of(k1)
+                lf["only the loaded one is in a slot"] = s1 >= 2 and slot_of(k2) == -1 and slot_of(k3) == -1
+                dsp.pop("previews", None)
+                call("smp_lib_preview", k2)
+                asked = returned_d0() == 0
+                for _ in range(600):
+                    period()
+                    call("smp_boot")
+                    if any(pv[0] == 0xFFFF and pv[2] > 0 for pv in dsp.get("previews", [])):
+                        break
+                for _ in range(300):            # (the rest of its frames in flight)
+                    period()
+                    call("smp_boot")
+                pvs = [pv for pv in dsp.get("previews", []) if pv[0] == 0xFFFF and pv[2] > 0]
+                heard = b"".join(struct.pack("<I", pool.get(pvs[-1][1] // 4 + j, 0)) for j in range(750)) if pvs else b""
+                lf["the second previews its own frames from the +Drive"] = asked and bool(pvs) and heard == d2
+                call("smp_lib_preview_stop")
+                for _ in range(50):
+                    period()
+                    call("smp_boot")
+                lf["the second loads, into a slot of its own"] = load(k2)
+                s2 = slot_of(k2)
+                d = b"".join(disk.get(STORE_SECTOR + 1 + k, bytes(512)) for k in range(8))
+                e2 = struct.unpack_from("<IIfI", d, 8 + 16 * s2) if s2 >= 0 else (0, 0)
+                lf["its slot holds its frames, on the DSP"] = s2 >= 0 and s2 != s1 and dsp_at(e2[0], 3000) == d2
+                lf["the first still its own, the third none"] = slot_of(k1) == s1 and slot_of(k3) == -1
+                st_x, _ = sx(22, struct.pack("<H", k1))
+                r4 = send(same + " ONE", 0, d3[::-1])
+                lf["a hole refilled: same place, name, length; not the slot's"] = (
+                    st_x == 0 and bool(r4) and r4[1] == r1[1] and slot_of(r4[0]) == -1)
+                r5 = send(same + " ONE AGAIN", 0, d1)
+                lf["the same audio sent again is the slot's"] = bool(r5) and slot_of(r5[0]) == s1
+                lid = SM.MIRROR + SM.LIBID_OFFSET + 4 * s2
+                was = machine.read(lid, 4)
+                machine.write(lid, bytes(4))
+                lf["a slot with no identity is no sample's"] = slot_of(k2) == -1
+                machine.write(lid, was)
+                lf["its identity on the +Drive's pool image"] = d[SM.LIBID_OFFSET + 4 * s2:SM.LIBID_OFFSET + 4 * s2 + 4] == was != bytes(4)
+                lid_ok = all(lf.values())
+            out["lib_identity"] = lf
+        out["lib_identity_ok"] = lid_ok
+        ok = ok and lid_ok
         # a device too small for the library: refused, and not one more sector written
         before = dict(disk)
         machine.write(BLK_SECTORS, struct.pack(">I", 0x700100))

@@ -72,6 +72,7 @@ extern int smp_fb_item(int i, int *slot);
 extern int smp_fb_menu, smp_fb_mcur;
 extern int smp_fb_index_of(int f);
 extern int smp_fb_marked(int k), smp_fb_nactions(int on_folder), smp_fb_mark_count(void), smp_fb_moving;     /* v0.29: multi-select */
+extern int smp_fb_count(void);
 extern void smp_fb_mark(int k, int on), smp_fb_mark_folder(int folder), smp_fb_unmark_all(void);
 extern void smp_fb_delete(int slot, int folder);
 extern int smp_fb_store, smp_fb_last_store;                         /* v0.31: +DRIVE / PROJECT RAM */
@@ -143,6 +144,7 @@ static int rec_taken __attribute__((section(".data"))) = -1;   /* the slot the r
 static u32 rec_off __attribute__((section(".data"))) = 0;      /* .. its place in the area */
 static int was_recording __attribute__((section(".data"))) = 0;
 static u32 eaten __attribute__((section(".data"))) = 0;        /* keys whose press we took: their release too */
+static u32 enc_eaten __attribute__((section(".data"))) = 0;    /* v0.39: the encoders' (K_ENC_A + bit) */
 
 int rec_visible(void)
 {
@@ -314,7 +316,9 @@ static void rpt_poll(void);
 static void fb_pv_poll(void);
 void rec_poll(void)
 {
+    extern void smp_marquee_poll(void);
     rpt_poll();
+    smp_marquee_poll();                         /* v0.39: the selected long name's marquee */
     fb_pv_poll();
     if (smp_status(st)) {
         rec_state = st[0] & 3;
@@ -783,6 +787,16 @@ static void rpt_start(u32 code)
 static u32 lrpt_code __attribute__((section(".data"))) = 0;
 static u32 lrpt_next __attribute__((section(".data"))) = 0;
 static void lst_step(u32 code);
+/* v0.39: one step, then (held) on by itself: the browser's every level and its action menu
+ * (v0.30..v0.38 repeated only the browser's list: the two stores and the action menu, LOAD
+ * TO PROJECT's among them, stepped once a press; the owner) */
+static void lst_press(u32 code)
+{
+    lst_step(code);
+    lrpt_code = code;
+    lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
+}
+#define FB_PAGE 6                               /* v0.39: the browser's rows: FUNC + an arrow, a pushed knob */
 
 static void lrpt_poll(void)
 {
@@ -1167,20 +1181,40 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         }
         if (it[0] == IT_KNOB) {                 /* any knob: through the items (or the menu) */
             int delta = (signed char)it[8], d = delta > 0 ? 1 : delta < 0 ? -1 : 0;
+            /* v0.39: turned while pushed in, a page a detent (as Elektron's lists) */
+            if (code >= 1 && code <= 8 && (smp_held_hi >> (K_ENC_A + code - 1 - 32) & 1u))
+                d *= FB_PAGE;
             if (smp_fb_menu == 1) {
                 int ks, kf = smp_fb_item(smp_fb_cur, &ks), last = smp_fb_nactions(ks < 0) - 1;
                 (void)kf;
                 smp_fb_mcur += d;
                 if (smp_fb_mcur < 0) smp_fb_mcur = 0;
                 if (smp_fb_mcur > last) smp_fb_mcur = last;
-            } else if (!smp_fb_menu)
+            } else if (!smp_fb_menu) {
                 smp_fb_cur += d;
+                if (smp_fb_cur < 0)
+                    smp_fb_cur = 0;             /* (the last item: held there when drawn) */
+            }
             it[0] = IT_DROP;
             return (u32)it;
         }
         if (it[0] != IT_KEY)
             return (u32)it;
         int press = (flags & F_PRESS) && !(flags & F_RELEASE);
+        /* v0.39: an encoder pushed is the browser's (held, its knob pages; above): stock took
+         * D's push, and +DRIVE closed under the owner. Its release goes with it; NO is the
+         * way out */
+        if (code >= K_ENC_A && code <= K_ENC_H) {
+            u32 b = 1u << (code - K_ENC_A);
+            if (press && !(flags & F_REPEAT))
+                enc_eaten |= b;
+            if (press || (enc_eaten & b)) {
+                if (!press)
+                    enc_eaten &= ~b;
+                it[0] = IT_DROP;
+            }
+            return (u32)it;
+        }
         if (code == K_YES || code == K_NO || (code >= K_UP && code <= K_RIGHT)) {
             if (press && code < 32)
                 eaten |= 1u << code;
@@ -1204,7 +1238,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             }
             if (smp_fb_store == -1) {           /* v0.31: the top: +DRIVE, PROJECT RAM */
                 if (code == K_UP || code == K_DOWN)
-                    lst_step(code);
+                    lst_press(code);
                 else if (code == K_RIGHT && f == -4) {
                     smp_fb_menu = 3;            /* v0.39: +DRIVE's menu: ERASE MOD DATA */
                 }
@@ -1227,10 +1261,8 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 smp_fb_menu = 0;
             } else if (smp_fb_menu == 1) {      /* SAMPLE ACTION */
                 int act = smp_fb_action(on_folder, smp_fb_mcur);
-                if (code == K_UP && smp_fb_mcur > 0)
-                    smp_fb_mcur--;
-                else if (code == K_DOWN && smp_fb_mcur < smp_fb_nactions(on_folder) - 1)
-                    smp_fb_mcur++;
+                if (code == K_UP || code == K_DOWN)
+                    lst_press(code);            /* v0.39: held, it goes on */
                 else if (code == K_NO || code == K_LEFT)
                     smp_fb_menu = 0;
                 else if (code == K_YES && act == 3) {      /* v0.29: SELECT ALL (or CLEAR ALL) */
@@ -1283,9 +1315,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     }
                 }
             } else if (code == K_UP || code == K_DOWN) {
-                lst_step(code);
-                lrpt_code = code;               /* v0.30: held, it goes on */
-                lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
+                lst_press(code);                /* v0.30: held, it goes on */
             }
             else if (code == K_YES && smp_func_held && slot >= 0)
                 fb_preview(slot);                   /* v0.33: FUNC + YES previews while held, as the DT2's */
@@ -1379,18 +1409,25 @@ static void lst_step(u32 code)
         smp_overlay_dirty = 1;
         if (smp_fb_menu >= 2)                   /* DELETE asked, or ERASE's menu (v0.39): nothing to move */
             return;
+        /* v0.39: FUNC + an arrow, a page (the menu: its first or last), as Elektron's lists */
+        int n = smp_func_held ? FB_PAGE : 1;
         if (smp_fb_menu == 1) {
             int ks, kf = smp_fb_item(smp_fb_cur, &ks), last = smp_fb_nactions(ks < 0 && kf != -1) - 1;
-            if (code == K_UP && smp_fb_mcur > 0)
-                smp_fb_mcur--;
-            else if (code == K_DOWN && smp_fb_mcur < last)
-                smp_fb_mcur++;
+            smp_fb_mcur += code == K_UP ? -n : n;
+            if (smp_fb_mcur > last)
+                smp_fb_mcur = last;
+            if (smp_fb_mcur < 0)
+                smp_fb_mcur = 0;
             return;
         }
-        if (code == K_UP && smp_fb_cur > 0)
-            smp_fb_cur--;
-        else if (code == K_DOWN)
-            smp_fb_cur++;                       /* (held at the last item when drawn) */
+        if (code == K_UP)
+            smp_fb_cur = smp_fb_cur > n ? smp_fb_cur - n : 0;
+        else if (code == K_DOWN) {
+            int last = smp_fb_count() - 1;
+            smp_fb_cur += n;                    /* (held at the last item when drawn) */
+            if (last >= 0 && smp_fb_cur > last)
+                smp_fb_cur = last;
+        }
         return;
     }
     if (smp_list_view && smp_list_up(smp_list_view)) {
