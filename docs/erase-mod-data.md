@@ -86,6 +86,51 @@ still intact (its SEC_COUNT equals the device's size). That way a unit's answer 
 the question later. TRIM unmaps the blocks in the card's FTL, and they read back erased.
 That is what a clean return to stock needs.
 
+## v0.41: TRIM ERROR on a unit, and what changed
+
+A v0.39 unit (paQ, Kingston 32 GB) stopped with **TRIM ERROR AT 817905**, and on a second
+try (after a restart) further on, at **CB1905**: both are call starts in the library's
+frames (`0x700105 + 2,048 k`).
+
+**Why (from the stock code; not seen on the bus).** The stock TRIM `0x4012c4b2` returns
+non-zero only when one of CMD35/36/38 gets no answer: its send `0x4012baac` waits (no
+timeout) for the eSDHC interrupt, and the ISR `0x4012b99e` sets −1 only on CTOE, the
+controller's command timeout. A card answers no CMD35 while it is still programming the
+last erase. Stock's wait for that, after CMD38, arms the DAT0 edge interrupt
+(`0x4012c53e`) **before** it tests DAT0 (`0x4012c544`): when DAT0 rises in between (a
+short TRIM, say of a range never written), the ISR posts the semaphore `0x4461b6c0` and
+nothing takes it. The next TRIM whose card is really busy (a range that held samples)
+then returns at once (`0x4000141a` takes the stale post), and the call after it finds the
+card busy: no answer, TRIM ERROR. A new try re-trimmed from the start (fast now: those
+ranges are unmapped) and failed later, where old data still was. The size of a call is
+not the cause, and no timeout in the driver is involved (it has none).
+
+**What it does now.**
+
+- Before every TRIM and every verify read, it reads the eSDHC's present state (`PRSSTAT`
+  `0xfc0cc024`, read only, as stock's TRIM does) and calls only when the card is idle:
+  DAT0 high, no command or data inhibit. While it is busy the pass ends and the next one
+  looks again; busy for 10 s on end stops it with **CARD STAYED BUSY**.
+- A call that fails is tried again after 0.2 s, five tries in all, before it stops (the
+  same range again: a TRIM is idempotent).
+- A failure a new try may get past (a TRIM or read that failed five times, a busy card)
+  says **ERASE PAUSED**, the reason, **AT SECTOR** n and **ASK AGAIN TO CONTINUE**:
+  asking again (no restart needed: nothing of ours writes) carries on from that call.
+  After a restart it starts again from the top, which goes quickly over what is done.
+- The screen shows the percentage (**ERASING 37%**). Link command 29 adds the retries,
+  the busy waits and whether asking again carries on.
+- Unchanged: nothing below `0x600000`, the guard on every call, headers first, the write
+  latch, the verify at the end.
+
+**After a failed v0.39 erase, is anything harmful left?** No. The headers went first (the
+first 36 calls), so the mod already sees an empty +Drive: no samples, no library, no
+lists, DIRECT JUMP off, and it formats its library again on first use. What is left is
+old sample audio in library frames the erase did not reach. Nothing reads those sectors:
+the mod finds nothing without its index, and stock firmware never reads above the
+factory buffer (`0x458000`). So it does not matter for flashing stock either; it only
+means those sectors are not trimmed (not "clean" in the card's FTL). Running the erase
+again on v0.41 (or later) finishes it.
+
 ## Power loss during the erase
 
 Each part's boot already treats a missing or invalid header as empty:
@@ -120,8 +165,14 @@ routine sends for it. The device is the owner's size (48,340,992 sectors).
   sector of the regions erased; the verify's reads inside the regions; YES closes.
 - **link**: command 28 with a wrong word refused, nothing done; `ERASE`: ERASED on a card
   whose erased state is `0xFF`, command 29 reporting it; a card that keeps one sector:
-  NOT ERASED at that sector; a TRIM that returns an error: TRIM ERROR at its sector, the
-  erase stopped there; a failure closed may be asked again.
+  NOT ERASED at that sector; a failure closed may be asked again.
+- **link, v0.41**: the card's busy line played as well (PRSSTAT bit 24). A TRIM that
+  fails once: tried again, ERASED. A flaky card (some TRIMs return while it still
+  programs, as with stock's stale post, so a command sent then gets no answer; some fail
+  once on their own): ERASED, the regions covered exactly, no command sent while the line
+  said busy. A card failing at one sector: stopped there after five tries; asked again it
+  carries on from that call and fails there again. A card that stays busy: CARD STAYED
+  BUSY, nothing sent to it. v0.39's erase fails the flaky card with TRIM ERROR.
 - **boot**: the power-ons above.
 
 ## Not verified (hardware)

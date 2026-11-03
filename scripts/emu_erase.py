@@ -116,6 +116,7 @@ class Disk:
         self.busy_after = None               # the TRIM call after which the card stays busy
         self.while_busy = 0                  # commands sent while the line said busy
         self.prs_reads = 0
+        self.busy_seen = 0                   # PRSSTAT reads that found it busy
         self.failed: list[tuple] = []        # ("T"|"R", sector, sectors): calls that returned -1
 
     def tick(self):
@@ -219,7 +220,8 @@ def harness(a, disk, ready=True):
                 d.log.append(("T", s, n))
                 d.cmds += [(35, s), (36, (s + n - 1) & 0xFFFFFFFF), (38, 1)]   # 0x4012c4b2's own
                 if d.rng is not None and d.rng.random() < 1 / 20:
-                    d.busy = d.rng.randrange(1, 8)      # returned early: still programming
+                    # returned early: still programming, briefly, or for longer than a pass's look
+                    d.busy = d.rng.randrange(1, 8) if d.rng.random() < 0.7 else d.rng.randrange(5000, 9000)
                 if d.busy_after is not None and state["calls"] >= d.busy_after:
                     d.busy = 1 << 30
                 uc.mem_write(RESULT, bytes(4))
@@ -263,6 +265,7 @@ def harness(a, disk, ready=True):
         d = state["disk"]
         d.prs_reads += 1
         busy = d.busy > 0
+        d.busy_seen += busy
         d.tick()
         v = struct.unpack(">I", bytes(uc.mem_read(PRSSTAT, 4)))[0] & ~3
         uc.mem_write(PRSSTAT, struct.pack(">I", (v & ~(1 << 24)) if busy else (v | 1 << 24)))
@@ -619,8 +622,9 @@ def run_link(a, lay, SMx):
                   f"{i32('smp_er_retries')} retried, {i32('smp_er_waits')} busy waits")
             check("a flaky card: no command sent while its busy line was low; the waits and the one-off "
                   "errors both seen",
-                  disk.while_busy == 0 and i32("smp_er_waits") > 0 and i32("smp_er_retries") > 0,
-                  f"{disk.while_busy} sent while busy, {i32('smp_er_waits')} waits, {i32('smp_er_retries')} retries")
+                  disk.while_busy == 0 and disk.busy_seen > 0 and i32("smp_er_waits") > 0 and i32("smp_er_retries") > 0,
+                  f"{disk.while_busy} sent while busy, busy seen {disk.busy_seen} times, {i32('smp_er_waits')} passes "
+                  f"waited, {i32('smp_er_retries')} retries")
         elif name == "a card failing at one sector":
             first = next((k for k in range(len(trims)) if trims[k][0] <= STUCK < trims[k][0] + trims[k][1]), None)
             call0 = STUCK - (STUCK - LIB_DATA) % 2048
