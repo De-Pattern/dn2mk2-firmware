@@ -436,7 +436,7 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
     }
     extern int smp_values_held(void);
     if (labelled && id && smp_values_held()) {     /* v0.35: SYN held: the value, as the record's */
-        char vb[16];                            /* formatter writes it for the header (O14) */
+        char vb[32];                            /* formatter writes it for the header (O14) */
         u8 flag;
         vb[0] = 0;
         ((void (*)(int, char *))RECORD_FMT(id))(GET_VALUE(view, id, &flag), vb);
@@ -467,7 +467,7 @@ void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *c
         }
         extern int smp_values_held(void);
         if (smp_values_held()) {                   /* v0.35: SYN held: the value (O14) */
-            char vb[16];
+            char vb[32];
             u8 flag;
             vb[0] = 0;
             ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
@@ -1729,7 +1729,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         else if (kind == SMP_WERP_KIND && ids[i] == SMP_BARS_ID)
             fill(c, x + 6, 2, x + 17, 4);
         else if (smp_values_held()) {           /* v0.35: SYN held: the value (O14) */
-            char vb[16];
+            char vb[32];
             u8 flag;
             vb[0] = 0;
             ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
@@ -1741,7 +1741,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     if (smp_values_held())                      /* v0.35: the top row's too (unlabelled: on the knobs' line) */
         for (int i = 0; i < 4; i++)
             if (ids[i]) {
-                char vb[16];
+                char vb[32];
                 u8 flag;
                 vb[0] = 0;
                 ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);

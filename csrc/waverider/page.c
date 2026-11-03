@@ -608,7 +608,7 @@ void wr_page_draw(void *view, void *canvas)
         if (smp && id)
             label = smp_text(view, id, kind, label);
         extern int smp_values_held(void);
-        char vb[16];
+        char vb[32];
         if (smp_values_held() && id) {             /* v0.35: SYN held: the value (O14) */
             u8 fl;
             vb[0] = 0;
