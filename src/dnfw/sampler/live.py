@@ -187,6 +187,27 @@ class Harness:
         for k, w in enumerate((seq, cmd, src, chan | place << 8, int(thres * 32767), dest << 24 | frames)):
             self.mem.put(a + 4 * k, w)
 
+    def link(self, cmd: int, *words: int) -> None:
+        """v0.39: any other command the ColdFire writes (SEND, VERIFY, PROBE, PREVIEW, SCAN),
+        its words 2.. as given (offsets and counts, not the recorder's settings)"""
+        a = self.L.pool + SM.CMD_OFFSET
+        seq = (self.mem.get(a) + 1) & 0xFFFFFFFF
+        w = list(words) + [0] * (4 - len(words))
+        for k, x in enumerate((seq, cmd, *w)):
+            self.mem.put(a + 4 * k, x)
+
+    def recorder(self, inp=None, main=None, trk=None) -> None:
+        """v0.39: the recorder's part of a block alone: IN (L, R), MAIN's tap (L, R) and the
+        tracks' buckets {t: (L, R)} as given, 32 floats each"""
+        for base, lr in ((SM.IN_BUF, inp), (SM.MAIN_TAP, main), *((SM.TRK_BUF + SM.TRK_STRIDE * t, v)
+                                                                   for t, v in (trk or {}).items())):
+            if lr is None:
+                continue
+            for c in (0, 1):
+                for k in range(32):
+                    self.mem.put(base + 0x80 * c + 4 * k, bits(lr[c][k]))
+        P.run_recorder(self.L, self.mem)
+
     def status(self) -> list[int]:
         """the 16 halves of the recorder's status, as the ColdFire reads them"""
         a = SM.REPLY_PAGES[0] + SM.REPLY_TAIL

@@ -253,19 +253,35 @@ a DC offset).
 **Ours:**
 - **THRES 1..120**: the DT2's plain threshold: recording starts on the first block whose
   peak *exceeds* it (v0.38: exceeds, as the manual says; it was "reaches").
-- **THRES 0**: "the first sound above the noise". The DSP (`program.recorder`, rmode 2;
-  `REC_AUTO_*`) learns the source's noise from the blocks after ARM: the threshold is 4 x
-  (+12 dB) the quietest recent block's peak, dropping at once to a quieter block and creeping
-  up 6.5 dB a second, never under -60 dB. Hiss, hum or a DC offset at the input keeps it
-  armed; a note, a hit or a voice starts it. The first block after ARM only learns.
+- **THRES 0**: "the first sound above the noise". The DSP (`program.recorder`, rmode 2..;
+  `REC_AUTO_*`) learns the source's noise after ARM. v0.39: over the first 48 blocks (32 ms,
+  a whole cycle of anything down to 31 Hz) the threshold becomes 4 x (+12 dB) their loudest
+  block's peak, and nothing starts while it learns; then it follows the noise, up 6.5 dB a
+  second and down 26 dB a second at most, never under -60 dB. v0.38 dropped it *at once*
+  to the quietest 0.7 ms block: a hum's or a reverb tail's zero crossing, a tenth of its
+  crest, so the next crest started the take (the owner: "THRES 0 still triggers").
+  Hiss, hum, a DC offset or MAIN's idle tail keeps it armed; a note, a hit or a voice starts it.
 - **The trade**: at THRES 0, a sound that is already playing steadily when you ARM (a held
   pad) counts as the floor, and only something about 12 dB louder starts the recording. To
   catch a sound already playing, press YES (RECORD NOW) or set THRES above 0.
 - The ColdFire is unchanged: it sends THRES 0 as its floor (33); the DSP takes any
   threshold word under 64 as THRES 0.
+- **Only the recorder's commands set it** (v0.39): the source, channel and threshold come
+  from ARM, NOW, STOP, MONITOR and ARM_PLAY (`REC_SETTING_CMDS`) only. v0.15..v0.38 took
+  them from every new command, the link's too (SEND, VERIFY, PREVIEW, SCAN: offsets and
+  counts). Since v0.38's count fix the ColdFire sends K_HEAD and its VERIFY (0, 2, 0) at
+  every take's start, so every take became IN, R, threshold 0 after its first 3 blocks:
+  "it only records one step and leaves the rest blank" (paQ, the owner), and an armed take
+  started on the input's own hiss. Before v0.38 a take ran with the link idle, unless
+  something else used it meanwhile (LOAD TO PROJECT, a TRIM's entry, a SCAN).
 - Checked by the SHARC runner (`rec`): ARM at THRES 0 waits through a -50 dB noise floor
   and starts on a tone's first block; at THRES 60 a -14 dB tone stays under it and a -4 dB
-  one starts it, on its first block. Not checked on hardware: the noise of a real input.
+  one starts it, on its first block. v0.39 (`recwhole`): six takes (MAIN, a track, IN; NOW,
+  ARM at THRES 0 and 60) with the link's commands as the ColdFire sends them while they
+  record, and real idle inputs (hiss, DC, 50 Hz hum; MAIN's tail and dither): every frame
+  its source's, start to end. The unit tests (`test_sampler.py`, `v039_*`) run 2 s takes
+  and a second of idle hum or tail on the model. Not checked on hardware: a real input's
+  noise.
 
 ## How it works
 
