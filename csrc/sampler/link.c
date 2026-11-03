@@ -1363,8 +1363,13 @@ static void peak_add(u32 off, u32 bytes, const u8 *buf)
  * NORM_PEAK), in the +Drive's copy, a chunk a pass; then the loader's own path (read,
  * sent, checked) gives the DSP the same frames */
 /* v0.30: to -6 dB, and by at most +24 dB (a user, and the owner: "incredibly loud" -- full
- * scale sat far above the DN2's own machines, and a quiet take's noise came up with it) */
-#define NORM_PEAK 16384u
+ * scale sat far above the DN2's own machines, and a quiet take's noise came up with it).
+ * v0.41 (the owner: a resampled take came out ~6 dB under what was played, "just record and
+ * normalize like the DT2 does"): to full scale again, the take's peak to 32,767 as the DT2
+ * does right after a recording; the +24 dB guardrail kept (a near-silent take is not blown
+ * up), a take under 64 left alone, one already at full scale untouched. The gain is
+ * (32,767 << 16) / peak, floored, so the peak lands on 32,767 at most: nothing clips */
+#define NORM_PEAK 32767u
 #define NORM_MAX_GAIN 16u
 static void norm_chunk(void)
 {
@@ -1513,7 +1518,7 @@ static void save_poll(void)
             smp_hi = bytes;
             smp_pl_changed();                                /* v0.38: into the project's list */
             smp_head_due = 1;                                /* v0.38: and the count to the DSP */
-            if (s_peak >= 64u && s_peak < NORM_PEAK - 64u) {   /* quieter than full: normalised */
+            if (s_peak >= 64u && s_peak < NORM_PEAK) {   /* quieter than full scale: normalised (v0.41) */
                 s_off = (REC_OFFSET + s_place) & ~511u;
                 sstate = 3;
                 return;

@@ -939,6 +939,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         slot = 40
         rec_off = SM.REC_OFFSET + place
         recw = [rng.randrange(1 << 32) for _ in range(1500)]
+        recw[700] = 0x80017FFF                  # v0.41: a full-scale frame (32767): left as it is
         for k, x in enumerate(recw):
             pool[rec_off // 4 + k] = x
         status_out()
@@ -969,10 +970,48 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    header=hdr[:12].hex(), sent_back=dsp["sent_back"],
                    heard=long("smp_tdm_heard"), disk_writes=io["writes"],
                    routing_changed=route.get("changed", 0), name=name.decode("latin-1"), count=count)
-        out["ok"] = (out["saved"] == 1 and got == exp and entry[0] == base + rec_off
-                     and entry[1] == 3000 and entry[3] == 1 and hdr[:4] == b"DN2Q"
-                     and name == b"REC041" and count >= slot + 1
-                     and not route.get("changed"))
+        ok_save = (out["saved"] == 1 and got == exp and entry[0] == base + rec_off
+                   and entry[1] == 3000 and entry[3] == 1 and hdr[:4] == b"DN2Q"
+                   and name == b"REC041" and count >= slot + 1
+                   and not route.get("changed"))
+        # v0.41 (the owner: a resampled take ~6 dB under what was played; the DT2 normalises a
+        # take's peak to full scale): takes peaking at 4,000, 32,000 and 1,000 (a sine, 2,000
+        # frames) saved in turn: each normalised in the +Drive's copy to full scale -- 32,767 at
+        # most, by the gain (32,767 << 16) / peak, link.c's own arithmetic, every frame exact --
+        # and by +24 dB (x16) at most (the 1,000 one: to 16,000). v0.30..v0.40 took them to
+        # -6 dBFS (16,384)
+        import math as _m
+        norms = []
+        for j, pk in enumerate((4000, 32000, 1000)):
+            nslot, nplace, nfr = 41 + j, (20 + 4 * j) << 20, 2000
+            noff = SM.REC_OFFSET + nplace
+            fr = [int(round(pk * _m.sin(2 * _m.pi * 7 * k / nfr + 0.3))) for k in range(nfr)]
+            fr[123] = -pk                        # (its peak, exactly)
+            for k in range(nfr // 2):
+                pool[noff // 4 + k] = (fr[2 * k] & 0xFFFF) | (fr[2 * k + 1] & 0xFFFF) << 16
+            call("smp_save_recording", nslot, nplace, nfr)
+            for _ in range(4000):
+                period()
+                call("smp_boot")
+                if long("smp_saved"):
+                    break
+            raw = b"".join(disk.get(STORE_SECTOR + 1 + noff // 512 + k, bytes(512)) for k in range((nfr * 2 + 511) // 512))
+            back = list(struct.unpack_from(f"<{nfr}h", raw))
+            g = min((32767 << 16) // pk, 16 << 16)
+            gi, gf = g >> 16, g & 0xFFFF
+
+            def scale(v):
+                w = v * gi + ((v * gf) >> 16)
+                return max(-32768, min(32767, w))
+            want = [scale(v) for v in fr]
+            peak = max(abs(v) for v in back)
+            norms.append({"peak_in": pk, "peak_out": peak, "exact": back == want,
+                          "saved": struct.unpack(">i", machine.read(syms["smp_saved"], 4))[0]})
+        out["norm"] = norms
+        ok_norm = (all(n["exact"] and n["saved"] == 1 for n in norms)
+                   and norms[0]["peak_out"] >= 32760 and norms[1]["peak_out"] >= 32760
+                   and norms[2]["peak_out"] == 16000)
+        out["ok"] = bool(ok_save and ok_norm)
     out["log"] = log[-8:]
     return out
 
