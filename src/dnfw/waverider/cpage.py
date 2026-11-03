@@ -41,7 +41,9 @@ LINK_ENTRIES = ["smp_rx_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "s
                  # v0.39: ERASE MOD DATA (erase.c)
                  "smp_er_lock", "smp_er_req", "smp_er_state", "smp_er_err", "smp_er_sector", "smp_er_value",
                  "smp_er_done", "smp_er_total", "smp_er_trims", "smp_er_reads", "smp_er_checks", "smp_er_nchecks",
-                 "smp_er_job", "smp_er_start", "smp_er_poll", "smp_fb_menu"]
+                 "smp_er_job", "smp_er_start", "smp_er_poll", "smp_fb_menu",
+                 # v0.40: folders inside folders (lib.c, smp_page.c)
+                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"]
 # parameter slides (csrc/slides, dnfw.slides): the hooks and the state the checks read
 SLIDE_ENTRIES = ["sl_ui_table", "sl_cell", "sl_knob", "sl_screen", "sl_page_up", "sl_page_seen", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
                  "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"]

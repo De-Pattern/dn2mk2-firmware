@@ -70,10 +70,11 @@ extern int smp_lst_orig, smp_overlay_dirty;     /* v0.25: the list, the folder b
 extern int smp_fb_open, smp_fb_folder, smp_fb_cur;
 extern int smp_fb_item(int i, int *slot);
 extern int smp_fb_menu, smp_fb_mcur;
-extern int smp_fb_index_of(int f);
+extern int smp_fb_index_of(int f), smp_fb_up(void);
 extern int smp_fb_marked(int k), smp_fb_nactions(int on_folder), smp_fb_mark_count(void), smp_fb_moving;     /* v0.29: multi-select */
 extern int smp_fb_count(void);
 extern void smp_fb_mark(int k, int on), smp_fb_mark_folder(int folder), smp_fb_unmark_all(void);
+extern void smp_fb_mark_here(void);
 extern void smp_fb_delete(int slot, int folder);
 extern int smp_fb_store, smp_fb_last_store;                         /* v0.31: +DRIVE / PROJECT RAM */
 extern int smp_fb_action(int on_folder, int a), smp_fb_load_project(int slot, int folder);
@@ -582,9 +583,10 @@ static void name_done(void)
             last = j;
     }
     if (last >= 0 && nm_only == 2) {           /* v0.33: CREATE FOLDER */
-        extern int smp_lib_folder_make(const char *name);
-        t[last + 1] = 0;
-        smp_lib_folder_make(t);
+        extern int smp_lib_folder_make_in(int parent, const char *name);
+        extern int smp_fb_store, smp_fb_folder;
+        t[last + 1] = 0;                        /* v0.40: in the folder that is open (none past */
+        smp_lib_folder_make_in(smp_fb_store == 1 ? smp_fb_folder : -1, t);    /* the depth limit) */
         extern void smp_lib_refresh(void);
         smp_lib_refresh();
     } else if (last >= 0) {                     /* trailing spaces off; an empty name stays as it was */
@@ -1267,7 +1269,10 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     smp_fb_menu = 0;
                 else if (code == K_YES && act == 3) {      /* v0.29: SELECT ALL (or CLEAR ALL) */
                     smp_fb_menu = 0;
-                    smp_fb_mark_folder(on_folder ? f : smp_fb_folder);
+                    if (on_folder)
+                        smp_fb_mark_folder(f);  /* (a folder: all it holds) */
+                    else
+                        smp_fb_mark_here();     /* v0.40: the list's own samples */
                 } else if (code == K_YES && act == 2 && (slot >= 0 || on_folder)) {
                     smp_fb_menu = 2;            /* DELETE: asked first */
                 } else if (code == K_YES && act == 5) {     /* v0.33: MOVE SELECTED: these, */
@@ -1330,17 +1335,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 smp_fb_folder = f;              /* into the folder */
                 smp_fb_cur = 0;
             } else if (code == K_LEFT) {        /* up a folder; at the top it stays (v0.26) */
-                if (smp_fb_folder != -1) {
-                    int back = smp_fb_folder;
-                    smp_fb_folder = -1;
-                    smp_fb_cur = smp_fb_index_of(back);
-                }
+                smp_fb_up();                    /* v0.40: to the folder it is in */
             } else if (code == K_NO) {          /* v0.31: NO goes up a level: a folder to its */
                 no_at = *(volatile u32 *)0x4058E8D4u;   /* store's top, a store's top to the two */
-                if (smp_fb_folder != -1) {      /* stores; held, straight to them (lrpt_poll) */
-                    int back = smp_fb_folder;
-                    smp_fb_folder = -1;
-                    smp_fb_cur = smp_fb_index_of(back);
+                if (smp_fb_up()) {              /* stores; held, straight to them (lrpt_poll); */
+                    /* v0.40: a folder inside a folder to that folder */
                 } else {
                     smp_fb_store = -1;
                     smp_fb_cur = smp_fb_last_store == 1 ? 0 : 1;

@@ -812,7 +812,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  # v0.39: ERASE MOD DATA (erase.c; scripts/emu_erase.py)
                  "smp_er_lock", "smp_er_req", "smp_er_state", "smp_er_err", "smp_er_sector", "smp_er_value",
                  "smp_er_done", "smp_er_total", "smp_er_trims", "smp_er_reads", "smp_er_checks",
-                 "smp_er_nchecks", "smp_er_job", "smp_er_start", "smp_er_poll"):   # the sample link's state (v0.15)
+                 "smp_er_nchecks", "smp_er_job", "smp_er_start", "smp_er_poll",
+                 # v0.40: folders inside folders
+                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)

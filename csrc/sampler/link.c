@@ -83,7 +83,7 @@ _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in 
 #define TDM_TX(h) ((volatile u32 *)(0x4E6E0100u + ((u32)(h) << 11)))
 #define TDM_RX(h) ((volatile u32 *)(0x4E6DF100u + ((u32)(h) << 11)))
 
-#define PROTO 6                                 /* v0.35: DROP (26); v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
+#define PROTO 7                                 /* v0.40: FOLDER IN (30), TREE (31): folders in folders; v0.35: DROP (26); v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
 #define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
 #define BLK_READY (*(volatile u32 *)0x4461B68Cu)                    /* the device is up */
@@ -133,7 +133,10 @@ _Static_assert(0x50000u + SLAREA_BYTES <= 0x68000u && 0x68000u + 4u * ENV_MAX <=
 _Static_assert(SLICE_AREA + SLAREA_BYTES <= REC_END && SLICE_AREA % 512u == 0, "the slice area");
 
 static u8 rq[RQ_MAX] __attribute__((section(".data")));
-static u8 rp[96] __attribute__((section(".data")));
+/* v0.40: the longest reply, LIST's four entries, is 132 bytes (4 + 4 + 4 x 31): rp was 96 and
+ * LIST ran on into rq (read before, so harmless, but never meant). Packed, 132 fits TX_MAX */
+static u8 rp[132] __attribute__((section(".data")));
+_Static_assert(6u + 132u + (132u + 6u) / 7u + 1u <= TX_MAX, "the longest reply packs into tx");
 static u8 tx[TX_MAX] __attribute__((section(".data")));
 static u32 hdr[128] __attribute__((section(".data"), aligned(16)));   /* one sector */
 int smp_booted __attribute__((section(".data"))) = 0;
@@ -2536,7 +2539,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         for (u32 c = 0; c < 8; c++)
             rp[r++] = dir_ok && k < POOL_SLOTS ? NAME(k)[c] : 0;
         put32(rp + r, SMP_POOL_DDR); r += 4;
-    } else if ((cmd >= 16 && cmd <= 23) || cmd == 26) {        /* v0.31 (link 5): the +Drive's library (lib.c) */
+    } else if ((cmd >= 16 && cmd <= 23) || cmd == 26 || cmd == 30 || cmd == 31) {   /* v0.31 (link 5): the +Drive's library (lib.c); v0.40 30, 31 */
         extern u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
         r = smp_lib_rx(cmd, rq, n, rp, r, &rp[3]);
     } else if (cmd == 28) {                     /* v0.39: ERASE MOD DATA, "ERASE" -> started at the */

@@ -156,7 +156,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py",
          "test/test_sampler_relatch.py", "test/test_pools.py",
-         "test/test_slides.py"]
+         "test/test_slides.py",
+         "test/test_libtree.py", "test/test_web_tool.py"]   # v0.40: nested folders (the model, the page's levels)
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -635,6 +636,8 @@ def main() -> int:
                 scen += ("lib",)                # v0.31: the +Drive's library, bounded to its region
             if "smp_heads" in lay:
                 scen += ("live",)               # v0.38: 22 live adds and 3 recordings, each must play
+            if "smp_lib_fpar" in lay:
+                scen += ("nest",)               # v0.40: folders inside folders over the link, power cuts
             # v0.31: "dead" (every packet lost: the RAM check's four seconds, then seven tries
             # three seconds apart before the loader stops) takes about an hour in the emulator
             # on its own, so it is a step of its own, cached on its own: the gate's run fits
@@ -661,7 +664,7 @@ def main() -> int:
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|nest): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
                 return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
@@ -669,6 +672,10 @@ def main() -> int:
                               "a hole reused, every write inside its region, a small device refused (lib); v0.38: 22 samples "
                               "added live and 3 recordings, one after another, each plays on the DSP by its own rule "
                               "(the count covers it), a recording while it records too (live)"
+                              + ("; v0.40: folders inside folders: an old flat library read as it was, a path's "
+                                 "levels made once, look-alikes apart, six deep at most, DROP refused with a folder "
+                                 "inside, one sector a change, a power cut after every sector of making and of a "
+                                 "DELETE leaves a sound tree, a v0.39 reads every name (nest)" if "nest" in scen else "")
                               if good else out[-800:])
             later("link16", "sample link (ColdFire)", "sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body)
 
@@ -1152,6 +1159,14 @@ def main() -> int:
                 djs = work / "drive.json"
                 d_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                          "--snapshot", snap, "--steps", ",".join(ds), "--png-dir", work / "drive", "--json", djs]
+                # v0.40: folders inside folders (takton: a pack's nested folders flattened into
+                # many top-level "TRANCE STARTER PAC"s): a three-level library with look-alike
+                # names at different levels and an old import's flat folder, driven through
+                # every level (scripts/emu_drive_nest.py: its facts; v0.39's code fails them)
+                nest = "smp_fb_titletext" in lay
+                njs_ = work / "drive_nest.json"
+                dn_cmd = [a.venv, "-u", "scripts/emu_drive_nest.py", "--build", bdir, "--snapshot", snap,
+                          "--json", njs_, "--png-dir", work / "drive_nest"]
 
                 def d_body(tdir):
                     rc, out = run("+drive browser", d_cmd, logs, env=EMU_ENV, trace=tdir)
@@ -1180,9 +1195,22 @@ def main() -> int:
                                  "each step drawn": len(set(sh)) == 5}
                         good = all(facts.values())
                         why = f"{facts} d0={d0} mem={m}"
+                    if good and nest:
+                        rc, out = run("+drive nested folders", dn_cmd, logs, env=EMU_ENV, trace=tdir)
+                        r = json.loads(njs_.read_text()) if njs_.exists() else {}
+                        good = rc == 0 and bool(r.get("ok")) and len(r.get("facts", {})) >= 24
+                        why = (json.dumps({k: v for k, v in r.get("facts", {}).items() if not v})[:900]
+                               + " " + json.dumps(r.get("seen", {}))[:600]) if r else out[-800:]
                     return good, ("the two stores, +DRIVE's folders and samples, a tick, LOAD TO PROJECT "
-                                  "queued, NO back up a level each time and closed at the top" if good else why)
-                later("drive", "+DRIVE browser (ColdFire)", "+DRIVE browser (ColdFire)", [d_cmd, sorted(EMU_ENV.items())], d_body)
+                                  "queued, NO back up a level each time and closed at the top"
+                                  + ("; v0.40: folders inside folders, three levels (look-alike names, an old "
+                                     "flat folder): each level's folders then samples, the path in the title, "
+                                     "preview, LOAD TO PROJECT, NO up onto the folder left, MOVE, a folder's "
+                                     "FUNC + YES all it holds, SELECT ALL a list's own, CREATE FOLDER inside, "
+                                     "DELETE of a folder with folders inside, the rest untouched" if nest else "")
+                                  if good else why)
+                later("drive", "+DRIVE browser (ColdFire)", "+DRIVE browser (ColdFire)",
+                      [d_cmd] + ([dn_cmd] if nest else []) + [sorted(EMU_ENV.items())], d_body)
 
                 # 6l2. v0.39 (the owner, v0.38): +DRIVE's keys as Elektron's lists, and long names
                 # as the DT2's. A folder of 17: "SHORT ONE.WAV", then 16 hi-hats whose names are
