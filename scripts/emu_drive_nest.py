@@ -243,7 +243,9 @@ def facts(r, lay):
             menu[1] == 2 and g(count, "dkicks") == 1 and g(rows, "dkicks")[:1] == ["EMPTY"] and g(fold, "dkicks") == 2,
         "NO: the top as it was": g(count, "top2") == 5 and g(cur, "top2") == 2,
         "DELETE on the pack: it and EMPTY gone; the rest untouched":
-            g(count, "dtsp") == 4 and g(rows, "dtsp")[:4] == ["INCOMING", "RECORDED", fit(T + "/KICKS", FB_W), "KICKS"],
+            g(count, "dtsp") == 4 and g(rows, "dtsp")[:2] == ["INCOMING", "RECORDED"] and g(rows, "dtsp")[3] == "KICKS"
+            # (the cursor stays on the third row: the flat folder, selected, from its start)
+            and g(rows, "dtsp")[2] in (fit(T + "/KICKS", FB_W), (T + "/KICKS")[:FB_W]) and g(cur, "dtsp") == 2,
         "the top-level KICKS (a look-alike) keeps its sample": g(count, "topkick") == 1 and g(rows, "topkick")[:1] == ["TOP KICK"],
         "the old flat folder, emptied by MOVE, still there": g(count, "flat") == 0 and g(fold, "flat") == 7,
     }
