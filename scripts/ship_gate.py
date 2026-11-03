@@ -638,6 +638,8 @@ def main() -> int:
                 scen += ("live",)               # v0.38: 22 live adds and 3 recordings, each must play
             if "smp_lib_fpar" in lay:
                 scen += ("nest",)               # v0.40: folders inside folders over the link, power cuts
+            if "smp_saved" in lay:
+                scen += ("norm",)               # v0.41: takes normalised to full scale (last: it leaves takes in the pool)
             # v0.31: "dead" (every packet lost: the RAM check's four seconds, then seven tries
             # three seconds apart before the loader stops) takes about an hour in the emulator
             # on its own, so it is a step of its own, cached on its own: the gate's run fits
@@ -664,7 +666,7 @@ def main() -> int:
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|nest): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|nest|norm): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
                 return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
@@ -676,6 +678,8 @@ def main() -> int:
                                  "levels made once, look-alikes apart, six deep at most, DROP refused with a folder "
                                  "inside, one sector a change, a power cut after every sector of making and of a "
                                  "DELETE leaves a sound tree, a v0.39 reads every name (nest)" if "nest" in scen else "")
+                              + ("; v0.41: takes at 4,000, 32,000 and 10 (-70 dBFS) normalised to full scale, every frame "
+                                 "exact, none clipped; an all-zero take stays zero (norm)" if "norm" in scen else "")
                               if good else out[-800:])
             later("link16", "sample link (ColdFire)", "sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body)
 
