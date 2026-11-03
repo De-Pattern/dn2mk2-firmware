@@ -400,12 +400,34 @@ static int clamp(int v, int lo, int hi)
     return v < lo ? lo : v > hi ? hi : v;
 }
 
+/* v0.41 (the owner: "a little tough to choose which option I want with the encoder"): SRC
+ * and CHAN, the recorder's choices, four detents a choice as the other choice controls since
+ * v0.26 (fmt.c smp_quant's CHOICE_DETENTS). A turn back, or a pause of 2 s, starts the
+ * count again; a fast turn's item carries several detents and counts them all */
+#define REC_CHOICE_DETENTS 4
+static int rk_acc __attribute__((section(".data"))) = 0;
+static int rk_index __attribute__((section(".data"))) = 0;
+static u32 rk_at __attribute__((section(".data"))) = 0;
+
+static int rec_choice_step(int index, int delta)    /* -> the choices to move */
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    if (rk_index != index || now - rk_at > 3000u || (rk_acc > 0 && delta < 0) || (rk_acc < 0 && delta > 0))
+        rk_acc = 0;
+    rk_index = index;
+    rk_at = now;
+    rk_acc += delta;
+    int n = rk_acc / REC_CHOICE_DETENTS;        /* (toward 0: the remainder kept) */
+    rk_acc -= n * REC_CHOICE_DETENTS;
+    return n;
+}
+
 /* a knob on the recorder's screen: INDEX 1..8 (A..H), DELTA detents */
 static void knob(int index, int delta)
 {
     switch (index) {
-    case 1: rec_src = clamp(rec_src + delta, 0, SMP_REC_SOURCES - 1); break;
-    case 2: rec_chan = clamp(rec_chan + delta, 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
+    case 1: rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1); break;
+    case 2: rec_chan = clamp(rec_chan + rec_choice_step(2, delta), 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
     case 4: rec_thres = clamp(rec_thres + delta, 0, 120); break;
     /* E: v0.33, no DEST (send() takes the first empty slot) */
     case 6: rec_rlen = clamp(rec_rlen + delta, 0, 128); break;
