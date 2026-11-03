@@ -771,8 +771,8 @@ def main() -> int:
         # (a command each way, FUNC's release seen); YES on to FILE NAME (spelt by knob and
         # arrows; FUNC + YES inserts, FUNC + NO deletes), YES on to ASSIGN, a [TRIG] key
         # makes track 3 ONESHOT playing the slot (stock's MACHINE SEL commit and setValue)
-        # v0.40: the preview's playhead (the owner: it never moved): held, the ISR run 150
-        # frames twice (6,400 audio frames), the column drawn moves right each time and the
+        # v0.40: the preview's playhead (the owner: it never moved): held, the frame counter
+        # moved on 150 twice (6,400 audio frames, as the audio interrupt would count them), the column drawn moves right each time and the
         # screen with it; let go, none (trim_head_x -1, the screen changed again)
         if "rec_phase" in lay and "rec_pv_on" in lay:
             g = {k: hex(lay.get(k, 0)) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
@@ -788,8 +788,8 @@ def main() -> int:
                      f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,spin:5:2,wait:5,png:tz,"
                      f"mem:{g['smp_cmds']}:4,"
                      f"press:17,wait:2,press:10,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_cmds']}:4,"
-                     f"mem:{g['trim_head_x']}:4,png:p0,isr:150:pv1,wait:3,mem:{g['trim_head_x']}:4,png:p1,"
-                     f"isr:150:pv2,wait:3,mem:{g['trim_head_x']}:4,png:p2,"
+                     f"mem:{g['trim_head_x']}:4,png:p0,addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p1,"
+                     f"addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p2,"
                      f"release:10,wait:3,release:17,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_func_held']}:4,"
                      f"mem:{g['smp_cmds']}:4,mem:{g['trim_head_x']}:4,png:pr,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,spin:0:3,wait:3,right,"
                      f"wait:3,spin:0:2,wait:3,mem:{g['nm_text']}:8,press:17,wait:2,yes,wait:3,release:17,wait:3,"
