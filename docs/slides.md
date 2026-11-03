@@ -18,7 +18,17 @@ and VFAD, are now **SLD** (encoder **E**) and **SLEN** (encoder **F**).
 
 - Hold a trig (in GRID RECORDING, as for any p-lock) and turn **E** right: SLIDE ON for
   that trig; left: OFF. Turn **F**: its length. Every held trig gets the value. A trig's
-  own value is drawn inverted (filled), as stock draws a p-lock.
+  own value is drawn as stock draws a p-lock (the control's area inverted).
+- v0.40 (owner, on v0.39's page: the SLD bar and SLEN box did not match the stock controls
+  above): **SLD is RTRG's switch and SLEN is LEN's box**, drawn by stock's own routines:
+  SLD through stock's widget routine `0x40036560` with RTRG's record (the same toggle icon,
+  PORT's too), SLEN as LEN's widget `0x400cc2b4` draws its box (its font `0x40293c64`, the
+  text centred at x + 9, the 19 x 17 box) with our text (LEN's table has no "1", "1.5"...);
+  the labels through the cell routine's own text call (`0x40115668`, font `0x40291760`,
+  centred, same baseline as PTIM and PORT); a lock inverts the control's area
+  (`0x40114842`, x - 3 .. x + 21, y + 6 .. y + 24), as stock's cell routine `0x4006448a`
+  does for a locked parameter. Each in its column (x 24 under RTRG, x 50 under VFAD; PTIM 76
+  and PORT 102 beside them), the stock page's empty-place dots cleared first.
 - No trig held: the places show what a trig gets without a lock (OFF, 1 step); turning
   does nothing (there is no per-sound or per-track default).
 - The trig's other p-locks are set as usual (hold the trig, turn the parameter).
@@ -128,6 +138,13 @@ comparison is made both ways). See the gate step's record for the numbers; the f
   pattern saves and loads byte-identically on both. Step clear removes the step's SLD/SLEN.
 - The TRIG page driven through the panel: page 2 draws SLD/SLEN, page 1 does not; holding
   a trig and turning E/F writes the locks; no fault.
+- v0.40, the drawing (`emu_slides.py`): `sl_draw_sld` / `sl_draw_slen` on a canvas of their
+  own against stock's cell routine `0x4006448a` drawing RTRG / LEN (with the page's own view
+  and cell) on another, pixel for pixel in the control's area: SLD OFF / ON, unlocked and
+  locked; SLEN 1/8, 1/4, 1/2 against LEN 30, 46, 62 (the same text), unlocked and locked;
+  every SLEN value with LEN's box and its text centred as LEN's; the page's own places as
+  drawn there (idle; trig held, locked); and the gate: the build's page 2, our two places
+  aside, is stock 1.11's page pixel for pixel.
 
 ## Not verified (hardware)
 

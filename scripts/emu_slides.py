@@ -558,6 +558,7 @@ def main() -> int:
             args = [machine.long(sp + 4 + 4 * i) for i in range(12)]
             if args[4] in (RTRG_ID, LEN_ID) and args[4] not in seen_cell:
                 seen_cell[args[4]] = args
+                seen_cell.setdefault("canvas", bytes(machine.read(args[1], 0x40)))   # (on the UI's stack)
         hcell = uc.hook_add(UC_HOOK_CODE, cell_hook, begin=CELL, end=CELL)
         SCR = STACK_TOP + 0x1000
 
@@ -571,10 +572,12 @@ def main() -> int:
 
         def scratch(n):
             """a canvas as the page's (its header copied), its own cleared pixels"""
-            src = seen_cell[RTRG_ID][1]
+            head = seen_cell["canvas"]
             cv, buf = SCR + 0x800 * n, SCR + 0x800 * n + 0x100
-            machine.write(cv, machine.read(src, 0x40))
-            w, stride = machine.long(src + 4), machine.long(src + 12)
+            machine.write(cv, head)
+            w, stride = struct.unpack(">I", head[4:8])[0], struct.unpack(">I", head[12:16])[0]
+            if not (0 < w <= 256 and 0 < stride <= 8):
+                raise SystemExit(f"the page's canvas header is not a bitmap: {head.hex()}")
             machine.write(cv + 16, struct.pack(">I", buf))
             machine.write(buf, bytes(4 * stride * w))
             return cv
@@ -644,7 +647,6 @@ def main() -> int:
               f"page 1 up {page1}, page 2 up {page2}, drawn {machine.long(lay['sl_page_seen'])} times")
         idle_frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
         report["trig2_frame"] = idle_frame.hex()
-        widgets_check(idle_frame)
         panel.tap(key(19))                                      # RECORD: grid recording
         panel.settle(10_000_000)
         panel.tap(key(25))                                      # a trig on step 1
@@ -656,7 +658,7 @@ def main() -> int:
         turn(4, 1)                                              # E: SLD on
         turn(5, 3)                                              # F: SLEN 1 -> 3 steps
         panel.screen("trig2_held_locked")
-        live_check(bytes(panel.capture.frames[-1]) if panel.capture.frames else b"", 1, 1, 7, 1, "held, locked")
+        held_frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
         panel.let_go(key(25))
         panel.settle(10_000_000)
         tbl = machine.long(lay["sl_ui_table"])
@@ -796,6 +798,11 @@ def main() -> int:
               got == [1, 2] and st9 == 0x1234 + 5 and [lock(tbl, 0, 5, 0), lock(tbl, 0, 5, 1)] == [1, 2],
               f"step 9 {got}, stock {st9}, hits {hits}")
         panel.screen("after_trig_paste")
+
+        # v0.40: the drawing checks, last (they call into the firmware on a canvas of their
+        # own, outside the UI's run)
+        widgets_check(idle_frame)
+        live_check(held_frame, 1, 1, 7, 1, "held, locked")
 
     faults = getattr(machine.m, "faults", [])[faults_before:]
     check("no fault", not faults, f"{len(faults)} fault(s)")
