@@ -137,8 +137,8 @@ holds), replacing v0.37's redraw. **The mod's version**: "MOD 0.39" over the las
 9. The v0.38 list still.
 
 **Known issues**
-- Copy/paste doesn't carry slides (a page paste can drop a track's slides).
-- The TRIM preview's playhead does not move.
+- Copy/paste doesn't carry slides (a page paste can drop a track's slides): fixed in v0.40 (coming next).
+- The TRIM preview's playhead does not move: fixed in v0.40 (coming next).
 - The +DRIVE preview level unchanged (reported ~12 dB over the same sample on a track).
 - An unsaved NEW project's recording goes with it on a LOAD without saving.
 - Preset pool trig locks don't work with the mod's machines.
