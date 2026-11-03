@@ -76,6 +76,16 @@ sl_copy_cmp2:
         cmp.l   60(%a2), %d0
         rts
 
+| Track clear 0x400e745c (FUNC + PLAY: the track's records freed by their track byte, at
+| 0x400e752c; was: mvs.b 1(%a0),%d1 ; cmp.l %d1,%d2): the tag cleared, ours are freed with
+| the track's stock locks. (Found under the emulator: v0.39 kept a cleared track's slides.)
+        .globl  sl_clr_cmp
+sl_clr_cmp:
+        mvs.b   1(%a0), %d1
+        bclr    #5, %d1
+        cmp.l   %d1, %d2
+        rts
+
 | paste_core(record, values, table, first step, count, destination track) -> d0: the record's
 | track byte (mvs.b), or -2 when it was one of ours of the clipboard's track, written onto the
 | destination (sl_paste, slide.c). The clipboard is the paste routine's -16(%fp); its track at

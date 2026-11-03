@@ -47,6 +47,7 @@ PASTE_SITES = (
     (0x40052948, "79338801223c0001799c", "sl_paste_d"),      # track paste's UNDO
     (0x40053F48, "2f122f2b003c", "sl_copy_hook"),            # trig copy: an entry appended
     (0x40055440, "71ab000449faf24a", "sl_paste_hook"),       # trig paste: an entry written
+    (0x400E752C, "73280001b481", "sl_clr_cmp"),              # track clear: a record's track
 )
 
 DEST_SLOTS = (4, 12, 20)                # LFO DEST: copied unsmoothed by 0x400db12a; never slid

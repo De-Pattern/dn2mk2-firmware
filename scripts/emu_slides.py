@@ -637,9 +637,12 @@ def main() -> int:
         # stock lock (slot 90's record of track 1) on steps 6 and 41, written as the knob would
         panel.tap(key(30))                                      # a trig on step 6 (placing it clears the step)
         panel.settle(10_000_000)
-        for st, sld, slen in ((5, 1, 2), (40, 1, 9)):
-            call(sl_set, tbl, 0, st, 0, sld)
+        pc0, sr0 = uc.reg_read(K.UC_M68K_REG_PC), uc.reg_read(K.UC_M68K_REG_SR)
+        for st, sld, slen in ((5, 1, 2), (40, 1, 9)):          # (call() leaves the PC at its
+            call(sl_set, tbl, 0, st, 0, sld)                    # sentinel: the UI's put back)
             call(sl_set, tbl, 0, st, 1, slen)
+        uc.reg_write(K.UC_M68K_REG_PC, pc0)
+        uc.reg_write(K.UC_M68K_REG_SR, sr0)
         free = [i for i in range(RECS) if machine.read(tbl + REC * i, 2) == b"\xff\xff"][-1]
         machine.write(tbl + REC * free, bytes([90, 0]) + b"\xff\xff" * 128)
         machine.write(tbl + INDEX + 90, bytes([free]))

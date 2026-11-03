@@ -547,6 +547,8 @@ int sl_knob(u32 index, int delta)
  *   stock writes its own. Stock cleared the destination's steps first through 0x4003d14e
  *   (sl_clear: ours on those steps too), so the pasted steps' slides are the clipboard's,
  *   exactly as their other locks, and the track's other steps keep theirs.
+ * - track clear (0x400e745c, FUNC + PLAY): it frees the track's records by their track byte;
+ *   the tag cleared there, ours go with them.
  * - shift and page autocopy: the tag cleared in their track compare, so ours move with
  *   their steps inside the record.
  * - trig copy / paste: each copied trig's two values kept by its clipboard entry (sl_tclip),
