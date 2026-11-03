@@ -594,8 +594,9 @@ def main() -> int:
         panel.screen("trig1_after")
 
         # v0.40: copy and paste carry SLD/SLEN as they carry the stock locks (v0.39's known
-        # issue: they carried none, and FUNC + RECORD / PLAY / STOP here, which clears every
-        # step of the track before it pastes, left the track with no slides at all). The
+        # issue: they carried none, and FUNC + RECORD / PLAY / STOP here, a track copy, clear
+        # (which kept ours) and paste (which clears every step first), left the track with no
+        # slides at all; hooks counted: track paste, trig copy, trig paste). The
         # track's map of our locks, and of a stock lock beside them for comparison, read
         # before the copy, after the clear and after the paste, each through the panel.
         def records():
@@ -658,7 +659,7 @@ def main() -> int:
         report["copy_after"] = {f"{a}/{b}": v for (a, b), v in after.items()}
         report["copy_hits"] = dict(hits)
         same_clear = all(((st, 0) in cleared) == (st in st_cleared) for st in (5, 40))
-        check("FUNC + RECORD, PLAY, STOP (copy, clear, paste): SLD/SLEN cleared with the stock locks, "
+        check("track copy, clear, paste (FUNC + RECORD, PLAY, STOP): SLD/SLEN cleared with the stock locks, "
               "then back exactly, every step", bool(before) and after == before and st_after == st_before
               and same_clear and st_before != st_cleared,
               f"before {sorted(before.items())}, cleared {sorted(cleared.items())}, after {sorted(after.items())}; "

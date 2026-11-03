@@ -1750,7 +1750,9 @@ def main() -> int:
         # a new sound, a trig with no p-lock; the lock table's SAVE/LOAD and step clear. With
         # SLIDE off, and for every lock table, the same as stock 1.11 byte for byte: every frame's
         # smoother state and output arrays (the emulator's own EMAC, and the instrument's
-        # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records
+        # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records.
+        # v0.40: copy and paste through the panel (track copy/clear/paste, trig copy/paste) carry
+        # SLD/SLEN exactly as the track's stock lock beside them (both fail on v0.39's code)
         if "sl_smooth" in lay:
             sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", snap,
                         "--json", work / f"slides-{k}.json",
@@ -1773,8 +1775,9 @@ def main() -> int:
                               f"(1 step at {b['tempo_word_after_isr'] / 120:g} BPM), exact, landing on the "
                               f"locks; {len(b['checks'])} checks; SLIDE off: {len(b['off_shas'])} frames' "
                               f"arrays and the lock table's SAVE/LOAD identical to stock 1.11; the TRIG page's SLD/SLEN "
-                              f"set through the panel, the held trig staying on after release, a page "
-                              f"paste leaving no SLD/SLEN value in a stock lock")
+                              f"set through the panel, the held trig staying on after release; v0.40: track copy, "
+                              f"clear and paste carry them exactly as the stock locks, trig copy/paste too, no "
+                              f"SLD/SLEN value in a stock lock")
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
