@@ -715,3 +715,42 @@ The plan and the owner's decisions are `docs/drive-library-plan.md` (§6a). What
   LOAD TO PROJECT on the instrument.
 - **Not yet** (v0.32): one pool per project, presets that bring their sample, RENAME and
   preview in +DRIVE, MOVE / CREATE DIR, slices kept in the library, pool banks.
+
+### v0.40: folders inside folders
+
+takton's report (a pack's "TRANCE STARTER PACK/KICKS/..", "../LEADS/.." showed as many
+top-level folders all reading "TRANCE STARTER PAC"): the import page sent each file's whole
+path as one flat folder name (cut at 31), lib.c kept one flat table of 64 names, and the
+browser listed them all at its top, each cut to its first 18 characters (v0.39: head...tail).
+
+- **Storage** (`lib.c`, `dnfw.sampler.libtree`): the same 64 records of 32 bytes. Byte 31 was
+  always 0; it now holds `0x80 | parent` for a folder inside a folder (its name then 30
+  characters at most). Every older library is all top-level folders and reads as it did, with
+  nothing written: no migration. A folder whose parent is not a named folder, or whose line
+  of parents is a loop or deeper than **six levels**, is taken as a top-level folder
+  (`folder_tree`), so no record can hide a sample. A folder change writes the one sector its
+  record is in (before: all four). An older build reads a nested folder by its own name, at
+  its top. The old import's flat folders ("TRANCE STARTER PACK/KICKS") stay as they are: delete
+  them and import again to get the levels (or MOVE their samples).
+- **The browser**: a folder lists its folders, then its samples. YES enters, NO and LEFT go
+  up a level onto the folder left, NO held to the top. The title is the path, head...tail
+  past 22 characters. A folder's row stands for all it holds: FUNC + YES ticks all of it,
+  LOAD TO PROJECT loads all of it, DELETE (asked first, with the count) deletes its samples
+  then its folders, deepest first; SELECT ALL on a sample ticks the list's own samples.
+  CREATE FOLDER makes it in the open folder (nothing past the sixth level). MOVE HERE takes
+  ticked samples into any folder. Preview, multi-select, the LIBID identity, key repeat, the
+  FUNC page jump, the pushed-knob page and long names work as at the top.
+- **The link** (proto 7): 17's name is a path, each level found or made inside the last; past
+  six levels the rest is not made and the sixth is the answer. **30 FOLDER IN** (parent, or
+  0xFF for the top; name) -> index, flags (1 made, 2 the parent given back: at the depth
+  limit). **31 TREE** -> 6, then each folder's parent (0xFF the top). 26 DROP also refuses a
+  folder with a folder inside it.
+- **The import page** (`tools/web/index.html`): a dropped folder's folders stay folders, each
+  level made with 30 (under the open folder, if one is); past six levels files go into the
+  sixth (logged). Its +Drive pane browses the levels and deletes a ticked folder with all it
+  holds. On an instrument before v0.40 it sends as before.
+- **Gate**: `drive` runs `scripts/emu_drive_nest.py` (three levels, look-alike names, an old
+  flat folder; fails on v0.39's code: 10 folders at the top, the pack's folder empty);
+  `link16` `nest` (`scripts/emu_lib_nest.py`): an old library read as it was, paths, the
+  depth limit, DROP, a power cut after every sector of making a tree and of a DELETE, each
+  point's tree the model's; unit tests `test/test_libtree.py`.
