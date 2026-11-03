@@ -975,18 +975,19 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                    and name == b"REC041" and count >= slot + 1
                    and not route.get("changed"))
         # v0.41 (the owner: a resampled take ~6 dB under what was played; the DT2 normalises a
-        # take's peak to full scale): takes peaking at 4,000, 32,000 and 1,000 (a sine, 2,000
-        # frames) saved in turn: each normalised in the +Drive's copy to full scale -- 32,767 at
-        # most, by the gain (32,767 << 16) / peak, link.c's own arithmetic, every frame exact --
-        # and by +24 dB (x16) at most (the 1,000 one: to 16,000). v0.30..v0.40 took them to
-        # -6 dBFS (16,384)
+        # take's peak to full scale, any take that is not silence): takes peaking at 4,000,
+        # 32,000 and 10 (-70 dBFS, a hiss's level; a sine, 2,000 frames) saved in turn: each
+        # normalised in the +Drive's copy to full scale -- 32,767 at most, by the gain
+        # (32,767 << 16) / peak, link.c's own arithmetic, every frame exact, nothing clipped;
+        # then a take of exact zeros: zeros. v0.30..v0.40 took them to -6 dBFS (16,384), the
+        # quiet one by +24 dB at most
         import math as _m
         norms = []
-        for j, pk in enumerate((4000, 32000, 1000)):
+        for j, pk in enumerate((4000, 32000, 10, 0)):
             nslot, nplace, nfr = 41 + j, (20 + 4 * j) << 20, 2000
             noff = SM.REC_OFFSET + nplace
             fr = [int(round(pk * _m.sin(2 * _m.pi * 7 * k / nfr + 0.3))) for k in range(nfr)]
-            fr[123] = -pk                        # (its peak, exactly)
+            fr[123] = -pk                        # (its peak, exactly; 0: all zero)
             for k in range(nfr // 2):
                 pool[noff // 4 + k] = (fr[2 * k] & 0xFFFF) | (fr[2 * k + 1] & 0xFFFF) << 16
             call("smp_save_recording", nslot, nplace, nfr)
@@ -997,7 +998,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                     break
             raw = b"".join(disk.get(STORE_SECTOR + 1 + noff // 512 + k, bytes(512)) for k in range((nfr * 2 + 511) // 512))
             back = list(struct.unpack_from(f"<{nfr}h", raw))
-            g = min((32767 << 16) // pk, 16 << 16)
+            g = (32767 << 16) // pk if 0 < pk < 32767 else 1 << 16
             gi, gf = g >> 16, g & 0xFFFF
 
             def scale(v):
@@ -1006,11 +1007,12 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             want = [scale(v) for v in fr]
             peak = max(abs(v) for v in back)
             norms.append({"peak_in": pk, "peak_out": peak, "exact": back == want,
+                          "clipped": any(not -32768 <= v * gi + ((v * gf) >> 16) <= 32767 for v in fr),
                           "saved": struct.unpack(">i", machine.read(syms["smp_saved"], 4))[0]})
         out["norm"] = norms
         ok_norm = (all(n["exact"] and n["saved"] == 1 for n in norms)
-                   and norms[0]["peak_out"] >= 32760 and norms[1]["peak_out"] >= 32760
-                   and norms[2]["peak_out"] == 16000)
+                   and all(n["peak_out"] in (32767, 32768) and not n["clipped"] for n in norms[:3])
+                   and norms[3]["peak_out"] == 0)
         out["ok"] = bool(ok_save and ok_norm)
     out["log"] = log[-8:]
     return out

@@ -1365,12 +1365,14 @@ static void peak_add(u32 off, u32 bytes, const u8 *buf)
 /* v0.30: to -6 dB, and by at most +24 dB (a user, and the owner: "incredibly loud" -- full
  * scale sat far above the DN2's own machines, and a quiet take's noise came up with it).
  * v0.41 (the owner: a resampled take came out ~6 dB under what was played, "just record and
- * normalize like the DT2 does"): to full scale again, the take's peak to 32,767 as the DT2
- * does right after a recording; the +24 dB guardrail kept (a near-silent take is not blown
- * up), a take under 64 left alone, one already at full scale untouched. The gain is
- * (32,767 << 16) / peak, floored, so the peak lands on 32,767 at most: nothing clips */
+ * normalize like the DT2 does"): to full scale, the take's peak to 32,767, as the DT2, the
+ * Octatrack and the Digitakt do right after a recording -- ANY take that is not all zero,
+ * however quiet (the owner: recording silence and normalising it gives a noise source to
+ * ping filters and FX with, as on those). No gain cap and no floor; a take of exact zeros
+ * stays zero, one already at full scale is untouched. The one guardrail: never clip. The
+ * gain is (32,767 << 16) / peak, floored, so the peak lands on 32,767 at most (a peak of 1:
+ * x32,767; v * gi stays within int16 since |v| <= peak) */
 #define NORM_PEAK 32767u
-#define NORM_MAX_GAIN 16u
 static void norm_chunk(void)
 {
     u32 lo = REC_OFFSET + s_place, hi = lo + s_frames * 2u;
@@ -1384,8 +1386,6 @@ static void norm_chunk(void)
         return;
     }
     u32 g = (NORM_PEAK << 16) / s_peak;               /* the gain, 16 fractional bits */
-    if (g > (NORM_MAX_GAIN << 16))
-        g = NORM_MAX_GAIN << 16;
     int gi = (int)(g >> 16), gf = (int)(g & 0xFFFFu);
     u32 a = lo > s_off ? lo : s_off, e = hi < s_off + n ? hi : s_off + n;
     for (u32 x = a & ~1u; x + 1 < e; x += 2) {
@@ -1518,7 +1518,7 @@ static void save_poll(void)
             smp_hi = bytes;
             smp_pl_changed();                                /* v0.38: into the project's list */
             smp_head_due = 1;                                /* v0.38: and the count to the DSP */
-            if (s_peak >= 64u && s_peak < NORM_PEAK) {   /* quieter than full scale: normalised (v0.41) */
+            if (s_peak > 0u && s_peak < NORM_PEAK) {     /* not all zero, under full scale: normalised (v0.41) */
                 s_off = (REC_OFFSET + s_place) & ~511u;
                 sstate = 3;
                 return;
