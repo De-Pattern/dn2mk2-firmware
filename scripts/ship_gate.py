@@ -1053,7 +1053,8 @@ def main() -> int:
             # next UI pass after 40 frames (the emulator's frame counter moves only by addl);
             # a playhead that stays in its column asks for no redraw
             ph_new = "smp_pos_in" in lay
-            if ph_new:
+            ph_cmd, phjs = None, work / "playhead.json"
+            if ph_new:                          # (a run of its own: the list's steps below are timed)
                 F_ = "0x4058e8d4"
                 pkt = 0x46A23000                 # (above the harness's call stack: SENTINEL + 0x2C00)
                 per = f"{lay['smp_periods']:#x}"
@@ -1062,11 +1063,12 @@ def main() -> int:
                 def packet(n, v0, v1):
                     return [f"poke:{per}:{n:08x}", f"poke:{pkt:#x}:{v0:04x}{v1:04x}" + "ffff" * 14,
                             f"call:{lay['smp_pos_in']:#x}:{pkt:#x}", f"addl:{F_}:40", "wait:3"]
-                st += ["mem:0x42431a6c:1"]
-                st += packet(100, 0x2000, 0xFFFF) + [f"call:{lay['smp_playhead']:#x}:0", "png:v1", mem(lay["wr_draws"])]
-                st += packet(101, 0x2100, 0xA000) + [f"call:{lay['smp_playhead']:#x}:0", "png:v2", mem(lay["wr_draws"])]
-                st += packet(102, 0x2108, 0xA008) + [f"call:{lay['smp_playhead']:#x}:0", "png:v3", mem(lay["wr_draws"])]
-                st += packet(103, 0xE000, 0xA010) + [f"call:{lay['smp_playhead']:#x}:0", "png:v4", mem(lay["wr_draws"])]
+                ps = base + ["wait:6", "tap:2", "wait:6", "png:v0", "mem:0x42431a6c:1"]
+                for n, v0, v1, nm in ((100, 0x2000, 0xFFFF, "v1"), (101, 0x2100, 0xA000, "v2"),
+                                      (102, 0x2108, 0xA008, "v3"), (103, 0xE000, 0xA010, "v4")):
+                    ps += packet(n, v0, v1) + [f"call:{lay['smp_playhead']:#x}:0", f"png:{nm}", mem(lay["wr_draws"])]
+                ph_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                          "--snapshot", snap, "--steps", ",".join(ps), "--png-dir", work / "playhead", "--json", phjs]
             st += ["tap:2", "wait:6"]
             # v0.27: SAMP set without a turn (TRACK + PLAY's clear, a load) leaves the list
             # closed; a turn of SAMP (encoder D) opens it
@@ -1114,7 +1116,7 @@ def main() -> int:
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p2", "ph1", "ph2", "l1", "b1", "b2")}
                     lo, fo, ff = (hex(lay[k]) for k in ("smp_lst_open", "smp_fb_open", "smp_fb_folder"))
                     sp, ce = hex(samp0), hex(cell)
-                    o = 5 if ph_new else 0     # (v0.40's five reads come first: the later keys move on)
+                    o = 0
                     facts = {"playhead drawn and moving": len({shots["p2"], shots["ph1"], shots["ph2"]}) == 3,
                              "v0.27: SAMP set without a turn leaves the list closed": int(m[lo], 16) == 0,
                              "list opens on a turn": int(m[f"{lo}@{1 + o}"], 16) == 1,
@@ -1131,13 +1133,17 @@ def main() -> int:
                              "modulated SAMP through the loaded slots, by depth, held at the last":
                              [m[ce], m[f"{ce}@{14 + o}"], m[f"{ce}@{15 + o}"]] == ["0400", "0400", "0100"]}
                     if ph_new:
-                        heads = [c["d0"] for c in r.get("direct_calls", []) if int(c["fn"], 16) == lay["smp_playhead"]]
-                        sh = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("v1", "v2", "v3", "v4")}
-                        dr = [int(m[k], 16) for k in (wd, f"{wd}@2", f"{wd}@3", f"{wd}@4") if k in m]
+                        prc, pout = run("playhead", ph_cmd, logs, env=EMU_ENV, trace=tdir)
+                        pr = json.loads(phjs.read_text()) if prc == 0 and phjs.exists() else {"memory": {}, "screens": {}}
+                        pm = pr["memory"]
+                        heads = [c["d0"] for c in pr.get("direct_calls", []) if int(c["fn"], 16) == lay["smp_playhead"]]
+                        sh = {n: pathlib.Path(pr["screens"][n]).read_bytes() if n in pr["screens"] else b""
+                              for n in ("v0", "v1", "v2", "v3", "v4")}
+                        dr = [int(pm[k], 16) for k in (wd, f"{wd}@2", f"{wd}@3", f"{wd}@4") if k in pm]
                         facts["v0.40: the newest note's playhead (0x2000, then 0xA000 over 0x2100, 0xA008, the first voice again at 0xE000)"] = (
-                            m.get("0x42431a6c") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
+                            pm.get("0x42431a6c") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
                         facts["v0.40: a moved playhead drawn at the next pass, a still one not redrawn"] = (
-                            len(dr) == 4 and sh["v1"] != shots["ph2"] and sh["v2"] != sh["v1"] and dr[1] > dr[0]
+                            len(dr) == 4 and sh["v1"] != sh["v0"] and sh["v2"] != sh["v1"] and dr[1] > dr[0]
                             and dr[2] == dr[1] and sh["v3"] == sh["v2"] and sh["v4"] != sh["v3"] and dr[3] > dr[2])
                         why_ph = f" playheads {heads} draws {dr}"
                     else:
@@ -1149,7 +1155,7 @@ def main() -> int:
                                  if ph_new else "") + "; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
                               "puts it back; FUNC + YES's browser enters a folder, YES ticks a sample and RIGHT, LOAD TRK assigns it; "
                               "its SAMPLE ACTION menu deletes; modulation on SAMP steps through the loaded slots" if good else why)
-            later("samplist", "sample list, browser, playhead (ColdFire)", "sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body)
+            later("samplist", "sample list, browser, playhead (ColdFire)", "sample list, browser, playhead (ColdFire)", [sl_cmd, ph_cmd, sorted(EMU_ENV.items())], sl_body)
 
             # 6i. v0.29: multi-select in the browser (a user's report: no way to delete all the
             # samples sent in). At the top, FUNC + YES marks every sample of "drum_loops"

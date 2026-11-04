@@ -539,7 +539,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         sys.path.insert(0, str(HERE.parent / "tools"))
         from dn2probe import pack7, unpack7     # noqa: PLC0415
         hits = [0, 50000, 100000, 150000]
-        n0, n1 = 200000, 600000
+        n0, n1 = 200000, 150000                # (n1: TRIM's read, more than a chunk)
         s0 = [0.0] * n0
         for h in hits:
             for k in range(6000):
@@ -697,6 +697,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             for _ in range(3):
                 ui_pass()
             attempts.append(r_)
+            print(f"    slicebusy attempt {len(attempts)}: {r_}", flush=True)
             return r_
         attempt("plain", "edit")
         attempt("plain", "grid-off")
@@ -766,6 +767,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         attempt("2 chunk reads refused", "edit")
         io["refuse"] = 5
         attempt("5 chunk reads refused", "grid-on")
+        io["refuse"] = 10                       # (more than link.c's 8 tries: the menu starts it again)
+        attempt("10 chunk reads refused", "grid-off")
         io["refuse"] = 0
         # a take saved into the sliced slot and normalised (its peak 3,000 of 32,767): the
         # menus opened at once, then mid-way through its normalising
@@ -851,7 +854,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out.update(booted=booted, lib=lib_ok, refused=io.get("refused", 0), attempts=attempts,
                    bad=[a_ for a_ in attempts if not a_["ok"]], linked=lk)
         out["ok"] = bool(booted and lib_ok and attempts and all(a_["ok"] for a_ in attempts)
-                         and io.get("refused", 0) >= 7 and lk and all(lk.values()))
+                         and io.get("refused", 0) >= 17 and lk and all(lk.values()))
     elif scenario == "lib":
         # v0.31: the +Drive's library over SysEx (csrc/sampler/lib.c): a folder made (the
         # library formatted on that first write), two samples sent and read back byte for
