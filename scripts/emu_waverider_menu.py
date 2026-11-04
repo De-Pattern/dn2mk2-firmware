@@ -939,6 +939,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         slot = 40
         rec_off = SM.REC_OFFSET + place
         recw = [rng.randrange(1 << 32) for _ in range(1500)]
+        recw[700] = 0x80017FFF                  # v0.41: a full-scale frame (32767): left as it is (norm: the rest)
         for k, x in enumerate(recw):
             pool[rec_off // 4 + k] = x
         status_out()
@@ -973,6 +974,53 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                      and entry[1] == 3000 and entry[3] == 1 and hdr[:4] == b"DN2Q"
                      and name == b"REC041" and count >= slot + 1
                      and not route.get("changed"))
+    elif scenario == "norm":
+        status_out()
+        for _ in range(200):                    # past the boot's RAM check
+            period()
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        # v0.41 (the owner: a resampled take ~6 dB under what was played; the DT2 normalises a
+        # take's peak to full scale, any take that is not silence): takes peaking at 4,000,
+        # 32,000 and 10 (-70 dBFS, a hiss's level; a sine, 2,000 frames) saved in turn: each
+        # normalised in the +Drive's copy to full scale -- 32,767 at most, by the gain
+        # (32,767 << 16) / peak, link.c's own arithmetic, every frame exact, nothing clipped;
+        # then a take of exact zeros: zeros. v0.30..v0.40 took them to -6 dBFS (16,384), the
+        # quiet one by +24 dB at most
+        import math as _m
+        norms = []
+        for j, pk in enumerate((4000, 32000, 10, 0)):
+            nslot, nplace, nfr = 41 + j, (20 + 4 * j) << 20, 2000
+            noff = SM.REC_OFFSET + nplace
+            fr = [int(round(pk * _m.sin(2 * _m.pi * 7 * k / nfr + 0.3))) for k in range(nfr)]
+            fr[123] = -pk                        # (its peak, exactly; 0: all zero)
+            for k in range(nfr // 2):
+                pool[noff // 4 + k] = (fr[2 * k] & 0xFFFF) | (fr[2 * k + 1] & 0xFFFF) << 16
+            call("smp_save_recording", nslot, nplace, nfr)
+            for _ in range(4000):
+                period()
+                call("smp_boot")
+                if long("smp_saved"):
+                    break
+            raw = b"".join(disk.get(STORE_SECTOR + 1 + noff // 512 + k, bytes(512)) for k in range((nfr * 2 + 511) // 512))
+            back = list(struct.unpack_from(f"<{nfr}h", raw))
+            g = (32767 << 16) // pk if 0 < pk < 32767 else 1 << 16
+            gi, gf = g >> 16, g & 0xFFFF
+
+            def scale(v):
+                w = v * gi + ((v * gf) >> 16)
+                return max(-32768, min(32767, w))
+            want = [scale(v) for v in fr]
+            peak = max(abs(v) for v in back)
+            norms.append({"peak_in": pk, "peak_out": peak, "exact": back == want,
+                          "clipped": any(not -32768 <= v * gi + ((v * gf) >> 16) <= 32767 for v in fr),
+                          "saved": struct.unpack(">i", machine.read(syms["smp_saved"], 4))[0]})
+        out["norm"] = norms
+        ok_norm = (all(n["exact"] and n["saved"] == 1 for n in norms)
+                   and all(n["peak_out"] in (32767, 32768) and not n["clipped"] for n in norms[:3])
+                   and norms[3]["peak_out"] == 0)
+        out["ok"] = bool(ok_norm)
     out["log"] = log[-8:]
     return out
 

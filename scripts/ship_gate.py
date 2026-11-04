@@ -638,6 +638,8 @@ def main() -> int:
                 scen += ("live",)               # v0.38: 22 live adds and 3 recordings, each must play
             if "smp_lib_fpar" in lay:
                 scen += ("nest",)               # v0.40: folders inside folders over the link, power cuts
+            if "smp_saved" in lay:
+                scen += ("norm",)               # v0.41: takes normalised to full scale (last: it leaves takes in the pool)
             # v0.31: "dead" (every packet lost: the RAM check's four seconds, then seven tries
             # three seconds apart before the loader stops) takes about an hour in the emulator
             # on its own, so it is a step of its own, cached on its own: the gate's run fits
@@ -664,7 +666,7 @@ def main() -> int:
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|nest): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|nest|norm): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
                 return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
@@ -676,6 +678,8 @@ def main() -> int:
                                  "levels made once, look-alikes apart, six deep at most, DROP refused with a folder "
                                  "inside, one sector a change, a power cut after every sector of making and of a "
                                  "DELETE leaves a sound tree, a v0.39 reads every name (nest)" if "nest" in scen else "")
+                              + ("; v0.41: takes at 4,000, 32,000 and 10 (-70 dBFS) normalised to full scale, every frame "
+                                 "exact, none clipped; an all-zero take stays zero (norm)" if "norm" in scen else "")
                               if good else out[-800:])
             later("link16", "sample link (ColdFire)", "sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body)
 
@@ -748,7 +752,7 @@ def main() -> int:
         if "rec_overlay" in lay:
             ov, src = hex(lay["rec_overlay"]), hex(lay["rec_src"])
             steps = (f"wait:5,png:p0,mem:{ov}:4,press:17,wait:3,tap:49,wait:3,release:17,"
-                     f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,png:a2,no,"
+                     f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,spin:0:9,wait:5,mem:{src}:4,png:a2,no,"
                      f"wait:30,mem:{ov}:4,png:a3,wait:5,png:a4")
             js = work / "recorder.json"
             rec_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
@@ -762,13 +766,14 @@ def main() -> int:
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
                     m = r["memory"]
-                    seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@3")]
+                    seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@4")]
+                    srcs = [int(m[k], 16) for k in (src, f"{src}@3")]     # v0.41: 3 detents, then 9 more
                     shots = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "a2", "a4")]
-                    good = (seen == [0, 1, 0] and int(m[src], 16) == 3 and not r["setter_writes"]
+                    good = (seen == [0, 1, 0] and srcs == [0, 3] and not r["setter_writes"]
                             and r["screen_frames"] > 0 and shots[1] != shots[0] and shots[1] != shots[2])
-                    why = (f"overlay {seen}, src {int(m[src], 16)}, setter writes "
+                    why = (f"overlay {seen}, src {srcs}, setter writes "
                            f"{len(r['setter_writes'])}, frames {r['screen_frames']}")
-                return good, ("FUNC+VOICE opens it, knob A moves SRC with no write to the sound, NO closes it, "
+                return good, ("FUNC+VOICE opens it, knob A moves SRC four detents a choice (3: none, 12: three; v0.41) with no write to the sound, NO closes it, "
                  "the screen drawn throughout"
                               if good else why)
             later("recorder", "recorder screen (ColdFire)", "recorder screen (ColdFire)", [rec_cmd, sorted(EMU_ENV.items())], rec_body)
@@ -1243,8 +1248,13 @@ def main() -> int:
                 # off, it is head...tail again and the new one starts from its start
                 if "smp_fb_rowtext" in lay and "smp_mq_off" in lay:
                     hh = [f"AT BIRDHOUSE HI-HAT CLOSED VEL {k:02d}" for k in range(16)]
+                    # v0.41: a user's v0.38 INCOMING folder (his video: hands off, the cursor going
+                    # between the top two rows by itself)
+                    pab = ["LC_FTR_100_FX_IMPACT_01.WAV", "LC_FTR_100_FX_RISE_01.WAV", "LC_FTR_BASS_A#_02.WAV",
+                           "LC_FTR_BASS_G.WAV", "LC_FTR_PERC_01.WAV", "LC_FTR_PERC_07_01.WAV"]
                     nidx = lent(LDATA, 1000, 2, "SHORT ONE.WAV") + b"".join(
-                        lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh))
+                        lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh)) + b"".join(
+                        lent(LDATA + 4 + 64 + 4 * k, 1000 + k, 0, nm) for k, nm in enumerate(pab))
                     nfold = b"INCOMING".ljust(32, b"\0") + b"RECORDED".ljust(32, b"\0") + b"AT HIHAT".ljust(32, b"\0")
                     TICK = 0x4058E8D4
                     rt, mq, cur, mcur = lay["smp_fb_rowtext"], lay["smp_mq_off"], lay["smp_fb_cur"], lay["smp_fb_mcur"]
@@ -1274,6 +1284,19 @@ def main() -> int:
                     ns += ["right", "wait:4"] + clock(20000) + ["press:14", "wait:2"] + clock(20700) + clock(20850) + clock(21000) + [
                            "release:14", "wait:3", mem(mcur), mem(lay["smp_fb_menu"]),
                            "png:n2", "no", "wait:4", "no", "wait:4", mem(lay["smp_fb_folder"]), mem(lay["smp_fb_open"])]
+                    # v0.41: in INCOMING with the cursor on its first row, encoder A jittering (+1, -1,
+                    # ... with no key, as a worn encoder resting between detents reports): the cursor
+                    # moves once at most and stays; then turned by hand, three detents on and three
+                    # back: a row a detent, the turn back losing one
+                    jit0 = sum(1 for x in ns if x == mem(cur))
+                    jrt = sum(1 for x in ns if x == mem(rt, 144))
+                    ns += [f"poke:{lay['smp_fb_folder']:#x}:00000000", f"poke:{cur:#x}:00000000",
+                           f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:6", mem(rt, 144), mem(cur), "png:n3"]
+                    for _ in range(6):
+                        ns += ["spin:0:1", mem(cur), "spin:0:-1", mem(cur)]
+                    ns += ["png:n4"]
+                    ns += ["spin:5:1", mem(cur), "spin:5:1", mem(cur), "spin:5:1", mem(cur),
+                           "spin:5:-1", mem(cur), "spin:5:-1", mem(cur), "spin:5:-1", mem(cur)]
                     njs = work / "drivenav.json"
                     n_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                              "--snapshot", snap, "--steps", ",".join(ns), "--png-dir", work / "drivenav", "--json", njs]
@@ -1341,11 +1364,22 @@ def main() -> int:
                                 and int(m[hex(lay["smp_fb_store"])], 16) == 1 and int(m[hex(lay["smp_fb_folder"])], 16) == 2,
                                 "held DOWN in the action menu steps on": i32(mcur, 0) == 4 and int(at(lay["smp_fb_menu"], 0), 16) == 1,
                                 "NO: out of the menu, then up a level": i32(lay["smp_fb_folder"], 1) == -1 and i32(lay["smp_fb_open"], 1) == 1}
+                            jc = [i32(cur, jit0 + k) for k in range(1 + 12 + 6)]
+                            jr = rows(jrt)
+                            jit = jc[1:13]
+                            facts.update({
+                                "INCOMING: the user's six LC_FTR_ samples, the cursor on the first":
+                                    jc[0] == 0 and jr[0].startswith("LC_FTR_100") and jr[1].startswith("LC_FTR_100"),
+                                "an encoder jittering +1/-1, no key: the cursor moves once at most, then stays (v0.41)":
+                                    None not in jit and max(jit) <= 1 and len(set(jit[1:])) == 1,
+                                "turned by hand: a row a detent; turned back, the first detent back lost (v0.41)":
+                                    None not in jc[13:] and jc[13:16] == [jit[-1] + 1, jit[-1] + 2, jit[-1] + 3]
+                                    and jc[16:19] == [jit[-1] + 3, jit[-1] + 2, jit[-1] + 1]})
                             good = all(bool(v) for v in facts.values())
-                            why = f"{ {k: v for k, v in facts.items() if not v} } cur={curs} off={offs} ticks={ticks} rows0={r0} rows3={rows(3)} rows20={after}"
+                            why = f"{ {k: v for k, v in facts.items() if not v} } cur={curs} jitter={jc} jrows={jr} off={offs} ticks={ticks} rows0={r0} rows3={rows(3)} rows20={after}"
                         return good, ("held arrows repeat in the list and the action menu, FUNC + DOWN a page, a pushed "
                                       "knob a page a detent, D pushed keeps +DRIVE, NO goes up; long names head...tail, "
-                                      "the selected one scrolls to its end and back, moved off it is head...tail again"
+                                      "the selected one scrolls to its end and back, moved off it is head...tail again; an encoder jittering +1/-1 moves the cursor once at most (v0.41)"
                                       if good else why[:1500])
                     later("drivenav", "+DRIVE keys and long names (ColdFire)", "+DRIVE keys and long names (ColdFire)",
                           [n_cmd, sorted(EMU_ENV.items())], n_body)

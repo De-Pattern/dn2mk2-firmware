@@ -29,6 +29,15 @@ Scenarios (each from a fresh machine):
   with a card whose erased state reads 0xFF; command 29's reply. Then a card that ignores
   one TRIM (a sector left as it was: NOT ERASED at that sector) and one whose TRIM returns
   an error (TRIM ERROR at its sector), each failing with the exact sector, the screen drawn.
+- **link** (v0.41, a unit's "TRIM ERROR AT 817905"): the card's busy line is played too (PRSSTAT
+  bit 24, the eSDHC's DAT0 level, read as the stock TRIM reads it). A **flaky card**: some TRIM
+  calls return while the card is still programming (stock's DAT0 wait ends early on a stale
+  post), and a command sent then gets no answer (CTOE: the call returns -1, nothing erased),
+  as does a read; some calls fail once on their own. It must end ERASED, the regions covered
+  exactly, no command ever sent while the line says busy. A card that **keeps failing at one
+  sector**: ERASE FAILED at that call's sector after 5 tries, and asked again it carries on
+  from that call (not from the start) and fails there again. A card that **stays busy**: CARD
+  STAYED BUSY, no command sent to it. v0.39's erase fails the first (TRIM ERROR).
 - **boot**: a power-on (the mod's boot code, its own RAM fresh) on each kept state: after
   the first TRIM, inside the lists, after every header, inside the pool's frames, inside
   the library's, and after the whole erase -- and on a +Drive the mod never wrote: each
@@ -65,6 +74,7 @@ SET = 0x6FF000
 LIB0, LIB_DATA = 0x700000, 0x700105
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 RESULT = SENTINEL + 0x800               # what a stubbed driver entry returns (the hook sets it)
+PRSSTAT = 0xFC0CC024                    # the eSDHC's present state: bit 24 DAT0 (v0.41)
 
 failures: list[str] = []
 report: dict = {"checks": {}}
@@ -99,6 +109,19 @@ class Disk:
         self.ignore = None                   # a sector a TRIM leaves as it was (a bad card)
         self.fail_at = None                  # the TRIM call that returns an error
         self.on_trim = None
+        # v0.41: the card's busy line (PRSSTAT's DAT0), as PRSSTAT reads and calls see it
+        self.busy = 0                        # reads (or calls) the card stays busy for
+        self.rng = None                      # a flaky card: early returns, one-off errors
+        self.stuck = None                    # a sector whose TRIM always fails
+        self.busy_after = None               # the TRIM call after which the card stays busy
+        self.while_busy = 0                  # commands sent while the line said busy
+        self.prs_reads = 0
+        self.busy_seen = 0                   # PRSSTAT reads that found it busy
+        self.failed: list[tuple] = []        # ("T"|"R", sector, sectors): calls that returned -1
+
+    def tick(self):
+        if self.busy > 0 and self.busy < 1 << 30:
+            self.busy -= 1
 
     def copy(self):
         d = Disk(self.dev, self.erased)
@@ -180,11 +203,27 @@ def harness(a, disk, ready=True):
             if address == BLK_TRIM:
                 s, n = struct.unpack(">2I", bytes(uc.mem_read(sp + 4, 8)))
                 state["calls"] += 1
+                if d.busy > 0:                  # v0.41: the card still programming: CMD35 unanswered
+                    d.while_busy += 1
+                    d.tick()
+                    d.cmds.append((35, s))
+                    d.failed.append(("T", s, n))
+                    uc.mem_write(RESULT, struct.pack(">i", -1))
+                    return
+                once = d.rng is not None and d.rng.random() < 1 / 60
+                if (d.fail_at is not None and state["calls"] == d.fail_at) or once \
+                        or (d.stuck is not None and s <= d.stuck < s + n):
+                    d.cmds.append((35, s))
+                    d.failed.append(("T", s, n))
+                    uc.mem_write(RESULT, struct.pack(">i", -1))               # no answer (CTOE)
+                    return
                 d.log.append(("T", s, n))
                 d.cmds += [(35, s), (36, (s + n - 1) & 0xFFFFFFFF), (38, 1)]   # 0x4012c4b2's own
-                if d.fail_at is not None and state["calls"] == d.fail_at:
-                    uc.mem_write(RESULT, struct.pack(">i", -2))               # the card's error
-                    return
+                if d.rng is not None and d.rng.random() < 1 / 20:
+                    # returned early: still programming, briefly, or for longer than a pass's look
+                    d.busy = d.rng.randrange(1, 8) if d.rng.random() < 0.7 else d.rng.randrange(5000, 9000)
+                if d.busy_after is not None and state["calls"] >= d.busy_after:
+                    d.busy = 1 << 30
                 uc.mem_write(RESULT, bytes(4))
                 d.trim(s, n)
                 if d.on_trim:
@@ -193,6 +232,12 @@ def harness(a, disk, ready=True):
             uc.mem_write(RESULT, bytes(4))
             s, nbytes, buf = struct.unpack(">3I", bytes(uc.mem_read(sp + 4, 12)))
             n = nbytes // 512
+            if address == BLK_READ and d.busy > 0:
+                d.while_busy += 1
+                d.tick()
+                d.failed.append(("R", s, n))
+                uc.mem_write(RESULT, struct.pack(">i", -1))
+                return
             if address == BLK_READ:
                 d.log.append(("R", s, n))
                 d.cmds.append((18, s))
@@ -212,6 +257,19 @@ def harness(a, disk, ready=True):
         uc.hook_add(UC_HOOK_CODE, blk, begin=va, end=va)
     machine.write(BLK_READY, struct.pack(">I", 1 if ready else 0))
     machine.write(BLK_SECTORS, struct.pack(">I", disk.dev))
+    # v0.41: PRSSTAT (0xfc0cc024) as the card's busy line says: DAT0 (bit 24) low while busy,
+    # no inhibit (bits 0, 1) -- each read is time passing
+    from unicorn import UC_HOOK_MEM_READ
+
+    def prs(uc_, typ, address, size, value, user):
+        d = state["disk"]
+        d.prs_reads += 1
+        busy = d.busy > 0
+        d.busy_seen += busy
+        d.tick()
+        v = struct.unpack(">I", bytes(uc.mem_read(PRSSTAT, 4)))[0] & ~3
+        uc.mem_write(PRSSTAT, struct.pack(">I", (v & ~(1 << 24)) if busy else (v | 1 << 24)))
+    uc.hook_add(UC_HOOK_MEM_READ, prs, begin=PRSSTAT, end=PRSSTAT + 3)
     machine.flush()
     return machine, state
 
@@ -475,20 +533,44 @@ def sysex(machine, uc, K, cmd, payload, seq=7):
     return got
 
 
+def covered(trims, dev):
+    """v0.41: the TRIMs that went through cover exactly the four regions (a range may be sent
+    again only after it failed, so each still once)"""
+    merged = []
+    for s, n in sorted(trims):
+        if merged and merged[-1][1] == s:
+            merged[-1][1] = s + n
+        elif merged and merged[-1][1] > s:
+            return False
+        else:
+            merged.append([s, s + n])
+    return merged == [[a, b] for a, b in regions(dev)]
+
+
 def run_link(a, lay, SMx):
     from unicorn import m68k_const as K
     from emulib.panel import NO, Panel
     out = {}
+    STUCK = LIB_DATA + 2048 * 100 + 5
     for name, dev, erased, ignore, fail_at in (("erased 0xFF", 0x900000, 0xFF, None, None),
                                                ("a sector left as it was", 0x900000, 0x00, LIB0, None),
-                                               ("a TRIM error", 0x900000, 0x00, None, 40)):
+                                               ("a TRIM error", 0x900000, 0x00, None, 40),
+                                               ("a flaky card", 0xA00000, 0x00, None, None),
+                                               ("a card failing at one sector", 0x900000, 0x00, None, None),
+                                               ("a card that stays busy", 0x900000, 0x00, None, None)):
         rng = random.Random(7)
         disk = Disk(dev, erased)
         mod, other = fill(disk, rng)
         disk.ignore, disk.fail_at = ignore, fail_at
+        if name == "a flaky card":
+            disk.rng = random.Random(41)
+        elif name == "a card failing at one sector":
+            disk.stuck = STUCK
+        elif name == "a card that stays busy":
+            disk.busy_after = 50
         machine, st = harness(a, disk)
         panel = Panel(machine, png_dir=a.png_dir or "out/erase")
-        i32 = lambda n: struct.unpack(">i", machine.read(lay[n], 4))[0]          # noqa: E731
+        i32 = lambda n: struct.unpack(">i", machine.read(lay[n], 4))[0] if n in lay else 0     # noqa: E731 (v0.41's counters: 0 on v0.39)
         f0 = len(faults(machine))
         panel.settle(20_000_000)
         mark = len(disk.log)
@@ -501,7 +583,7 @@ def run_link(a, lay, SMx):
         r = sysex(machine, machine.uc, K, 28, b"ERASE")
         ok28 = r is not None and r[3] == 0
         machine.write(lay["smp_fb_open"], struct.pack(">I", 1))      # (the browser up: the screen shows it)
-        for _ in range(200):
+        for _ in range(600):
             if i32("smp_er_state") in (3, 4):
                 break
             panel.settle(10_000_000)
@@ -522,13 +604,60 @@ def run_link(a, lay, SMx):
         elif ignore is not None:
             check("a card that leaves a sector: NOT ERASED at that sector, shown",
                   stt == 4 and err == 4 and sec == ignore and safe, f"state {stt}, err {err}, sector {sec:#x}")
-        else:
-            check("a TRIM that fails: TRIM ERROR at its sector, the erase stopped there, shown",
-                  stt == 4 and err == 2 and sec == trims[-1][0] and len(trims) == fail_at and safe,
-                  f"state {stt}, err {err}, sector {sec:#x}, {len(trims)} TRIM calls")
+        elif name == "a TRIM error":
+            # v0.41: a call that fails once is tried again after a pause, and the erase ends ERASED
+            check("a TRIM that fails once: tried again, ERASED, the regions covered exactly",
+                  stt == 3 and err == 0 and safe and covered(trims, dev) and len(disk.failed) == 1
+                  and i32("smp_er_retries") == 1 and all(disk.get(s) == bytes(512) for s in mod),
+                  f"state {stt}, err {err}, sector {sec:#x}, {len(disk.failed)} failed call(s), "
+                  f"{i32('smp_er_retries')} retried")
+        elif name == "a flaky card":
+            out[name].update(failed=len(disk.failed), while_busy=disk.while_busy, prs_reads=disk.prs_reads,
+                             retries=i32("smp_er_retries"), waits=i32("smp_er_waits"), trims=len(trims))
+            check("a flaky card (TRIMs returning while it programs, one-off errors): ERASED, the "
+                  "regions covered exactly, every sector erased",
+                  stt == 3 and err == 0 and safe and covered(trims, dev)
+                  and all(disk.get(s) == bytes(512) for s in mod),
+                  f"state {stt}, err {err}, sector {sec:#x}, {len(trims)} TRIMs, {len(disk.failed)} failed, "
+                  f"{i32('smp_er_retries')} retried, {i32('smp_er_waits')} busy waits")
+            check("a flaky card: no command sent while its busy line was low; the waits and the one-off "
+                  "errors both seen",
+                  disk.while_busy == 0 and disk.busy_seen > 0 and i32("smp_er_waits") > 0 and i32("smp_er_retries") > 0,
+                  f"{disk.while_busy} sent while busy, busy seen {disk.busy_seen} times, {i32('smp_er_waits')} passes "
+                  f"waited, {i32('smp_er_retries')} retries")
+        elif name == "a card failing at one sector":
+            first = next((k for k in range(len(trims)) if trims[k][0] <= STUCK < trims[k][0] + trims[k][1]), None)
+            call0 = STUCK - (STUCK - LIB_DATA) % 2048
+            tries1 = sum(1 for k, s0, n0 in disk.failed if k == "T" and s0 == call0)
+            check("a card failing at one sector: ERASE FAILED (CARD ERASE FAILED) at that call's sector "
+                  "after 5 tries, shown; 29 says asking again carries on",
+                  stt == 4 and err == 2 and sec == call0 and tries1 == 5 and first is None and safe
+                  and r29 is not None and len(r29) >= 53 + 4 and r29[4 + 52] == 1,
+                  f"state {stt}, err {err}, sector {sec:#x} (want {call0:#x}), {tries1} tries, "
+                  f"resume {r29[4 + 52] if r29 and len(r29) > 56 else None}")
+            n_t = len(trims)
+            mark_again = len(disk.log)
+            r = sysex(machine, machine.uc, K, 28, b"ERASE")
+            for _ in range(200):
+                panel.settle(10_000_000)
+                if i32("smp_er_state") in (3, 4):
+                    break
+            again = [(s0, n0) for k, s0, n0 in disk.log[mark_again:] if k == "T"]
+            tries2 = sum(1 for k, s0, n0 in disk.failed if k == "T" and s0 == call0)
+            check("asked again: it carries on at the failing call (no TRIM from the start again), and "
+                  "fails there again",
+                  r is not None and r[3] == 0 and i32("smp_er_state") == 4 and i32("smp_er_err") == 2
+                  and not again and tries2 == 10 and len([x for x in disk.log if x[0] == "T"]) == n_t,
+                  f"state {i32('smp_er_state')}, {len(again)} new TRIM(s), {tries2} tries in all")
+            panel.screen("erase_link_failing_again")
             panel.tap(NO, after=6_000_000)
             check("a failure seen and closed: it may be asked again (the state idle, the lock kept)",
                   i32("smp_er_state") == 0 and i32("smp_er_lock") == 1 and i32("smp_fb_open") == 0)
+        else:
+            check("a card that stays busy: CARD STAYED BUSY, no command sent to it while busy",
+                  stt == 4 and err == 6 and disk.while_busy == 0 and safe,
+                  f"state {stt}, err {err}, sector {sec:#x}, {disk.while_busy} sent while busy, "
+                  f"{len(trims)} TRIMs")
         check(f"{name}: no fault", len(faults(machine)) == f0 and not st.get("errors"))
     report["link"] = out
 

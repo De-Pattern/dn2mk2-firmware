@@ -400,12 +400,34 @@ static int clamp(int v, int lo, int hi)
     return v < lo ? lo : v > hi ? hi : v;
 }
 
+/* v0.41 (the owner: "a little tough to choose which option I want with the encoder"): SRC
+ * and CHAN, the recorder's choices, four detents a choice as the other choice controls since
+ * v0.26 (fmt.c smp_quant's CHOICE_DETENTS). A turn back, or a pause of 2 s, starts the
+ * count again; a fast turn's item carries several detents and counts them all */
+#define REC_CHOICE_DETENTS 4
+static int rk_acc __attribute__((section(".data"))) = 0;
+static int rk_index __attribute__((section(".data"))) = 0;
+static u32 rk_at __attribute__((section(".data"))) = 0;
+
+static int rec_choice_step(int index, int delta)    /* -> the choices to move */
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    if (rk_index != index || now - rk_at > 3000u || (rk_acc > 0 && delta < 0) || (rk_acc < 0 && delta > 0))
+        rk_acc = 0;
+    rk_index = index;
+    rk_at = now;
+    rk_acc += delta;
+    int n = rk_acc / REC_CHOICE_DETENTS;        /* (toward 0: the remainder kept) */
+    rk_acc -= n * REC_CHOICE_DETENTS;
+    return n;
+}
+
 /* a knob on the recorder's screen: INDEX 1..8 (A..H), DELTA detents */
 static void knob(int index, int delta)
 {
     switch (index) {
-    case 1: rec_src = clamp(rec_src + delta, 0, SMP_REC_SOURCES - 1); break;
-    case 2: rec_chan = clamp(rec_chan + delta, 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
+    case 1: rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1); break;
+    case 2: rec_chan = clamp(rec_chan + rec_choice_step(2, delta), 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
     case 4: rec_thres = clamp(rec_thres + delta, 0, 120); break;
     /* E: v0.33, no DEST (send() takes the first empty slot) */
     case 6: rec_rlen = clamp(rec_rlen + delta, 0, 128); break;
@@ -823,6 +845,39 @@ static void lst_press(u32 code)
 }
 #define FB_PAGE 6                               /* v0.39: the browser's rows: FUNC + an arrow, a pushed knob */
 
+/* v0.41 (a user's v0.38 video: hands off, the cursor going up and down between two rows by
+ * itself): the browser moves on ANY of the nine encoders, a detent a row, so one encoder that
+ * jitters (the panel reports +1, -1, +1 ... while it rests between detents) moves the cursor
+ * to and fro -- at the top, between the top two rows -- where stock would only nudge that one
+ * knob's own value. Each knob now has a little hysteresis: it moves the cursor on every detent
+ * in the way it last moved, and turned back it moves only once it is two detents back from
+ * where it last moved. A jitter of a detent either way then moves it once at most; a turn
+ * back by hand loses one detent. Reset when the browser opens. */
+static int fbk_pos[10] __attribute__((section(".data"))), fbk_at[10] __attribute__((section(".data")));
+static signed char fbk_dir[10] __attribute__((section(".data")));
+
+void fb_knob_reset(void)
+{
+    for (int k = 0; k < 10; k++)
+        fbk_pos[k] = fbk_at[k] = fbk_dir[k] = 0;
+}
+
+static int fb_knob_step(u32 code, int delta)    /* -> -1, 0 or 1: the rows to move */
+{
+    int k = code >= 1 && code <= 9 ? (int)code : 0;
+    if (delta == 0)
+        return 0;
+    fbk_pos[k] += delta > 0 ? 1 : -1;           /* (a step an item, as before: its sign) */
+    int off = fbk_pos[k] - fbk_at[k], d = off > 0 ? 1 : off < 0 ? -1 : 0;
+    if (d == 0 || (d != fbk_dir[k] && fbk_dir[k] != 0 && (off > -2 && off < 2)))
+        return 0;                               /* back to where it moved, or one detent back */
+    fbk_at[k] = fbk_pos[k];
+    fbk_dir[k] = (signed char)d;
+    if (fbk_pos[k] > (1 << 20) || fbk_pos[k] < -(1 << 20))
+        fbk_pos[k] = fbk_at[k] = 0;             /* (never far from 0) */
+    return d;
+}
+
 static void lrpt_poll(void)
 {
     extern u32 smp_held_lo;
@@ -1205,7 +1260,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             return (u32)it;
         }
         if (it[0] == IT_KNOB) {                 /* any knob: through the items (or the menu) */
-            int delta = (signed char)it[8], d = delta > 0 ? 1 : delta < 0 ? -1 : 0;
+            int delta = (signed char)it[8], d = fb_knob_step(code, delta);
             /* v0.39: turned while pushed in, a page a detent (as Elektron's lists) */
             if (code >= 1 && code <= 8 && (smp_held_hi >> (K_ENC_A + code - 1 - 32) & 1u))
                 d *= FB_PAGE;
@@ -1403,6 +1458,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
             } else if (code == K_YES && lst_func) {
                 smp_fb_open = 1;
+                fb_knob_reset();               /* v0.41: each knob's hysteresis afresh */
                 smp_fb_unmark_all();
                 smp_fb_folder = -1;
                 smp_fb_store = -1;              /* v0.31: the two stores first */

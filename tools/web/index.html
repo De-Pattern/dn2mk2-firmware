@@ -1310,7 +1310,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     busy = false; refresh();
   }
   /* v0.39: ERASE MOD DATA (link commands 28 ERASE, 29 its status; docs/erase-mod-data.md) */
-  const ERASE_WHY = ["", "refused (outside the mod's regions)", "the card's erase failed", "a read failed", "a sector did not erase", "the +Drive is not ready"];
+  const ERASE_WHY = ["", "refused (outside the mod's regions)", "the card's erase failed 5 times", "a read failed 5 times", "a sector did not erase", "the +Drive is not ready", "the card stayed busy"];
   async function runErase() {
     if (busy || !dev) return;
     if (!confirm("Erase ALL samples and mod data on the instrument's +Drive?\n\nThe pool, every project's sample list, the +Drive library and the mod's settings. Elektron's projects, sounds and presets are not touched.")) return;
@@ -1327,7 +1327,10 @@ if (typeof module !== "undefined") module.exports = DN2;
         if (state === 1) say(`erasing ${total ? Math.floor(100 * done / total) : 0} %`);
         else if (state === 2) say(`verifying ${nchecks ? Math.floor(100 * checks / nchecks) : 0} %`);
         else if (state === 3) { say("ERASED: restart the instrument", "ok"); break; }
-        else if (state === 4 || err) { say(`failed: ${ERASE_WHY[err] || err} at sector 0x${sector.toString(16)}`, "bad"); break; }
+        else if (state === 4 || err) {
+          const goOn = p.length > 52 && p[52];                           // v0.41: asking again carries on
+          say(`${goOn ? "paused" : "failed"}: ${ERASE_WHY[err] || err} at sector 0x${sector.toString(16)}${goOn ? " (press Erase again to continue)" : ""}`, "bad"); break;
+        }
       }
     } catch (x) {
       const m = String(x.message || x);
