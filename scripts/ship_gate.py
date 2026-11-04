@@ -908,9 +908,30 @@ def main() -> int:
                                           "--regs-at", "0x400576ca",
                                           "--png-dir", work / "slice", "--json", js]
 
+            # v0.40 (a user: "sometimes EDIT SLICE POINTS or CREATE SLICE GRID returns CANNOT
+            # READ IT"): the menus opened again and again, TR.DET OFF and ON, after CLEAR SLICE
+            # GRID and not, while other link work is in flight (the loader, TRIM's read of another
+            # slot, LOAD TO PROJECT, a preview, refused chunk reads, a take saving and
+            # normalising into the slot, a project switch): each must reach the editor with the
+            # slot's waveform and its grid kept; and the editor's LINKED points (the DT2's, knob
+            # A): START moves the previous END, END the next START, bounded; UNLINKED as before
+            # (emu_waverider_menu.py's link16 scenario slicebusy, the +Drive and DSP played)
+            busy_cmd = None
+            if "slc_linked" in lay:
+                bsyms = work / "slicebusy_syms.json"
+                bsyms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith(("smp_", "slc_"))}))
+                busy_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                            "--build", bdir, "--snapshot", snap, "--steps", f"link16:{bsyms}:slicebusy",
+                            "--png-dir", work / "slicebusy"]
+
             def slc_body(tdir):
                 rc, out = run("slice menus", slc_cmd, logs, env=EMU_ENV, trace=tdir)
-                why, good = out[-800:], False
+                busy_ok, busy_why = True, ""
+                if busy_cmd:
+                    brc, bout = run("slice busy", busy_cmd, logs, env=EMU_ENV, trace=tdir)
+                    busy_ok = brc == 0 and re.findall(r"link16 slicebusy: .*\"ok\": (true|false)", bout) == ["true"]
+                    busy_why = "" if busy_ok else " slicebusy: " + bout[-1500:]
+                why, good = out[-800:] + busy_why, False
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
                     m = r["memory"]
@@ -936,12 +957,16 @@ def main() -> int:
                              # trig 9, 10 (the bottom row's first two: the lowest notes) slices
                              # 1, 2; trig 2 (the top row: a higher note) a later one
                              "slice notes": len(notes) == 3 and notes[:2] == [24, 25] and notes[2] > 25}   # v0.33: from C1 (24), as the DT2
-                    good = all(facts.values())
-                    why = str(facts) + f" notes {notes}"
+                    good = all(facts.values()) and busy_ok
+                    why = str(facts) + f" notes {notes}" + busy_why
                 return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
                  "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; FUNC + E moves at the normal step; KEYBOARD on a SLICE track: trigs 9, 10 play slices 1, 2 and trig 2 a later one (the keys' notes in order)"
+                              + ("; v0.40: EDIT SLICE POINTS and CREATE SLICE GRID (TR.DET OFF, ON, after CLEAR) reach the "
+                                 "editor every time while the loader, TRIM's read, LOAD TO PROJECT, a preview, refused reads, "
+                                 "a take saving and normalising, a project switch are in flight; LINKED START/END move the "
+                                 "neighbour, bounded; UNLINKED as before" if busy_cmd else "")
                               if good else why)
-            later("slice", "SLICE menus and SLICES keys (ColdFire)", "SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body)
+            later("slice", "SLICE menus and SLICES keys (ColdFire)", "SLICE menus and SLICES keys (ColdFire)", [slc_cmd, busy_cmd, sorted(EMU_ENV.items())], slc_body)
 
         # 6g. v0.25, GRID's ALLOCATE SLICE (YES on a GRID track's page): trigs placed on steps
         # 1, 3, 5 in GRID RECORDING; CREATE LINEAR LOCKS locks slices 1, 2, 3 on them (the
@@ -1018,8 +1043,31 @@ def main() -> int:
             base = list(st)                     # (the pool as loaded: 6i starts from it too)
             st += ["wait:6", "tap:2", "wait:6", "png:p2", f"poke:{lay['smp_periods']:#x}:00000000",
                    f"poke:{lay['smp_pos_at']:#x}:00000000", f"poke:{lay['smp_pos']:#x}:" + "8000" * 16,
-                   "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:36", "png:ph2",
-                   "tap:2", "wait:6"]
+                   "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:36", "png:ph2"]
+            # v0.40 (owner: "the slice machine's on-screen indicators are a little slow to catch
+            # up"): the DSP's packets through smp_pos_in, two voices on the page's track (the
+            # snapshot's table gives every voice to track 1, the active one): a note at 0x2000,
+            # then a second at 0xA000 while the first still sounds -- the playhead is the NEWER
+            # note's (v0.30..v0.39: the lower position's, the older note's until it ended);
+            # then the first voice retriggered at 0xE000: that one. Each moved column is drawn by the
+            # next UI pass after 40 frames (the emulator's frame counter moves only by addl);
+            # a playhead that stays in its column asks for no redraw
+            ph_new = "smp_pos_in" in lay
+            if ph_new:
+                F_ = "0x4058e8d4"
+                pkt = 0x46A23000                 # (above the harness's call stack: SENTINEL + 0x2C00)
+                per = f"{lay['smp_periods']:#x}"
+                wd = f"{lay['wr_draws']:#x}"
+
+                def packet(n, v0, v1):
+                    return [f"poke:{per}:{n:08x}", f"poke:{pkt:#x}:{v0:04x}{v1:04x}" + "ffff" * 14,
+                            f"call:{lay['smp_pos_in']:#x}:{pkt:#x}", f"addl:{F_}:40", "wait:3"]
+                st += ["mem:0x42431a6c:1"]
+                st += packet(100, 0x2000, 0xFFFF) + [f"call:{lay['smp_playhead']:#x}:0", "png:v1", mem(lay["wr_draws"])]
+                st += packet(101, 0x2100, 0xA000) + [f"call:{lay['smp_playhead']:#x}:0", "png:v2", mem(lay["wr_draws"])]
+                st += packet(102, 0x2108, 0xA008) + [f"call:{lay['smp_playhead']:#x}:0", "png:v3", mem(lay["wr_draws"])]
+                st += packet(103, 0xE000, 0xA010) + [f"call:{lay['smp_playhead']:#x}:0", "png:v4", mem(lay["wr_draws"])]
+            st += ["tap:2", "wait:6"]
             # v0.27: SAMP set without a turn (TRACK + PLAY's clear, a load) leaves the list
             # closed; a turn of SAMP (encoder D) opens it
             # (the emulator's encoders do not move a stock page's value, so a turn is the stock
@@ -1066,24 +1114,39 @@ def main() -> int:
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p2", "ph1", "ph2", "l1", "b1", "b2")}
                     lo, fo, ff = (hex(lay[k]) for k in ("smp_lst_open", "smp_fb_open", "smp_fb_folder"))
                     sp, ce = hex(samp0), hex(cell)
+                    o = 5 if ph_new else 0     # (v0.40's five reads come first: the later keys move on)
                     facts = {"playhead drawn and moving": len({shots["p2"], shots["ph1"], shots["ph2"]}) == 3,
                              "v0.27: SAMP set without a turn leaves the list closed": int(m[lo], 16) == 0,
-                             "list opens on a turn": int(m[f"{lo}@1"], 16) == 1,
+                             "list opens on a turn": int(m[f"{lo}@{1 + o}"], 16) == 1,
                              "DOWN moves SAMP": m[sp] == "0500",
-                             "NO puts it back and closes": m[f"{sp}@3"] == "0200" and int(m[f"{lo}@4"], 16) == 0,
+                             "NO puts it back and closes": m[f"{sp}@{3 + o}"] == "0200" and int(m[f"{lo}@{4 + o}"], 16) == 0,
                              "browser opens, a folder entered": int(m[fo], 16) == 1 and int(m[ff], 16) == 0
                              and shots["b1"] != shots["b2"],
                              "v0.33: YES on a sample ticks it: SAMP kept, the browser up":
-                             m[f"{sp}@7"] == "0300" and int(m[f"{fo}@8"], 16) == 1,
-                             "RIGHT, LOAD TRK: SAMP, both closed": m[f"{sp}@9"] == "0100" and int(m[f"{fo}@10"], 16) == 0
-                             and int(m[f"{lo}@11"], 16) == 0,
+                             m[f"{sp}@{7 + o}"] == "0300" and int(m[f"{fo}@{8 + o}"], 16) == 1,
+                             "RIGHT, LOAD TRK: SAMP, both closed": m[f"{sp}@{9 + o}"] == "0100" and int(m[f"{fo}@{10 + o}"], 16) == 0
+                             and int(m[f"{lo}@{11 + o}"], 16) == 0,
                              "DELETE in the SAMPLE ACTION menu empties the slot": m[hex(M + 28)] == "00000000"
                              and len({pathlib.Path(r["screens"][n]).read_bytes() for n in ("m1", "m2", "m3")}) == 3,
                              "modulated SAMP through the loaded slots, by depth, held at the last":
-                             [m[ce], m[f"{ce}@14"], m[f"{ce}@15"]] == ["0400", "0400", "0100"]}
+                             [m[ce], m[f"{ce}@{14 + o}"], m[f"{ce}@{15 + o}"]] == ["0400", "0400", "0100"]}
+                    if ph_new:
+                        heads = [c["d0"] for c in r.get("direct_calls", []) if int(c["fn"], 16) == lay["smp_playhead"]]
+                        sh = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("v1", "v2", "v3", "v4")}
+                        dr = [int(m[k], 16) for k in (wd, f"{wd}@2", f"{wd}@3", f"{wd}@4") if k in m]
+                        facts["v0.40: the newest note's playhead (0x2000, then 0xA000 over 0x2100, 0xA008, the first voice again at 0xE000)"] = (
+                            m.get("0x42431a6c") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
+                        facts["v0.40: a moved playhead drawn at the next pass, a still one not redrawn"] = (
+                            len(dr) == 4 and sh["v1"] != shots["ph2"] and sh["v2"] != sh["v1"] and dr[1] > dr[0]
+                            and dr[2] == dr[1] and sh["v3"] == sh["v2"] and sh["v4"] != sh["v3"] and dr[3] > dr[2])
+                        why_ph = f" playheads {heads} draws {dr}"
+                    else:
+                        why_ph = ""
                     good = all(facts.values())
-                    why = str(facts)
-                return good, ("the playhead drawn where the DSP says; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
+                    why = str(facts) + why_ph
+                return good, ("the playhead drawn where the DSP says"
+                              + ("; v0.40: the newest note's, drawn at the next pass when its column moves, no redraw when it does not"
+                                 if ph_new else "") + "; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
                               "puts it back; FUNC + YES's browser enters a folder, YES ticks a sample and RIGHT, LOAD TRK assigns it; "
                               "its SAMPLE ACTION menu deletes; modulation on SAMP steps through the loaded slots" if good else why)
             later("samplist", "sample list, browser, playhead (ColdFire)", "sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body)

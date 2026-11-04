@@ -522,6 +522,336 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out["ok"] = (loaded and an == 2 and near and len(ons) == 4 and set_rc == 0
                      and order == ["area", "entry"] and back_n == 3 and back == table
                      and out["disk_table"] == table and not route.get("changed"))
+    elif scenario == "slicebusy":
+        # v0.40 (a user: "sometimes EDIT SLICE POINTS or CREATE SLICE GRID returns CANNOT READ
+        # IT ... the slices are created on page 2 without the Slice Editor opening ...
+        # repeatedly selecting eventually works"): the SLICE menu driven through slc_pop (the
+        # UI queue's items, as rec.c's smp_ui_pop hands them over) and slc_poll after smp_boot
+        # each UI pass (page.c's wr_poll), EDIT SLICE POINTS and CREATE SLICE GRID (TR.DET OFF
+        # and ON, after CLEAR SLICE GRID and not) again and again while other work is in
+        # flight: the loader still loading the pool, the recorder's TRIM read of another
+        # slot running, LOAD TO PROJECT queued, a +DRIVE preview, chunk reads refused by the
+        # +Drive's driver, a take saved and normalised into the sliced slot, a project switch
+        # dropping the read. Every attempt must reach the editor (a grid made first), no
+        # CANNOT READ IT, its waveform the slot's frames as the +Drive holds them at the end.
+        # Then the editor's LINKED points (the DT2's, knob A): START moves the previous end,
+        # END the next start, neighbours kept a frame wide; UNLINKED as before
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        from dn2probe import pack7, unpack7     # noqa: PLC0415
+        hits = [0, 50000, 100000, 150000]
+        n0, n1 = 200000, 600000
+        s0 = [0.0] * n0
+        for h in hits:
+            for k in range(6000):
+                s0[h + k] = 0.8 * ((k * 37 % 50) / 25 - 1) * (1 - k / 6000)
+        s1 = [0.3 * ((k * 13 % 70) / 35 - 1) for k in range(n1)]
+        img = SL.pool_bytes([s0, s1], base, [1.0, 1.0], [SM.FMT_I16] * 2, ["HITS", "LONG"])
+        img = bytearray(img + bytes((-len(img)) % 512))
+        hdr_dir = bytes(img[:SM.DATA_OFFSET])
+
+        def adler4(b):
+            a_, b_ = 1, 0
+            for x in b:
+                a_ = (a_ + x) & 0xFFFFFFFF
+                b_ = (b_ + a_) & 0xFFFFFFFF
+            return (b_ << 16 ^ a_) & 0xFFFFFFFF
+        magic, nbytes, ck = 0x444E3251, len(img), adler4(hdr_dir)
+        disk[STORE_SECTOR] = struct.pack(">5I", magic, 2, nbytes, ck,
+                                         (~magic ^ nbytes ^ ck) & 0xFFFFFFFF).ljust(512, b"\0")
+        for k in range(len(img) // 512):
+            chunk = bytes(img[512 * k:512 * k + 512])
+            if any(chunk):
+                disk[STORE_SECTOR + 1 + k] = chunk
+        # the +Drive's driver refusing reads: io["refuse"] reads into the analysis stage
+        # fail (d0 -1 at its rts), as a CMD18 error would
+        stage3 = SM.MIRROR + 0x40000
+        io["refuse"] = 0
+        io["refused"] = 0
+
+        def at_rts(uc_, address, size, user):
+            if shared["io"].pop("fail_now", False):
+                uc.reg_write(K.UC_M68K_REG_D0, 0xFFFFFFFF)
+
+        def at_read(uc_, address, size, user):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            _sec, _n, b_ = struct.unpack(">3I", bytes(uc.mem_read(sp + 4, 12)))
+            io_ = shared["io"]
+            if b_ == stage3 and io_.get("refuse", 0) > 0:
+                io_["refuse"] -= 1
+                io_["refused"] = io_.get("refused", 0) + 1
+                io_["fail_now"] = True
+        h_rts = uc.hook_add(UC_HOOK_CODE, at_rts, begin=BLK_READ + 2, end=BLK_READ + 2)
+        h_rd = uc.hook_add(UC_HOOK_CODE, at_read, begin=BLK_READ, end=BLK_READ)
+        for _ in range(300):                    # past the boot's RAM check: the directory read,
+            period()                            # the loader starts on the frames (left loading)
+            call("smp_boot")
+            if long("smp_booted") == 2:
+                break
+        call("smp_slot_frames", 0, 0)
+        booted = long("smp_booted") == 2 and returned_d0() == n0
+        # the track: the active one a SLICE track on SAMP 1 (slot 0), its page up
+        kit_ = struct.unpack(">I", machine.read(0x800052A0, 4))[0]
+        trk = machine.read(0x42431A6C, 1)[0] & 15
+        snd_ = kit_ + 52 + 1163 * trk
+        rec_ = struct.unpack(">3i", machine.read(0x401F7F94 + 60 * SM.SAMP_REC, 12))
+        machine.write(snd_ + 0xDE, bytes([13]))
+        machine.write(snd_ + 20 + 2 * rec_[1], struct.pack(">H", (1 + (rec_[2] >> 8)) << 8))
+        item = SENTINEL + 0x3000                # (above the call stack)
+        S_OFF, S_MENU, S_GRID, S_WAIT, S_EDIT = 0, 1, 2, 3, 4
+
+        def pop(kind, code, flags_or_d):
+            it = bytearray(12)
+            it[0] = kind
+            struct.pack_into(">I", it, 4, code)
+            if kind == 1:
+                it[8] = flags_or_d & 0xFF
+            else:
+                struct.pack_into(">I", it, 8, flags_or_d)
+            machine.write(item, bytes(it))
+            call("slc_pop", item)
+
+        def key(code):
+            pop(0, code, 0x01)
+            pop(0, code, 0x10)
+
+        def knob(code, d):
+            pop(1, code, d)
+
+        def ui_pass():
+            period()
+            call("smp_boot")
+            call("slc_poll")
+
+        def state():
+            return long("slc_state")
+
+        def slot0():
+            d_ = machine.read(SM.MIRROR + 8, 16)
+            return struct.unpack("<II", d_[:8])
+
+        def hires_want():
+            """HIRES as analyse_poll makes it from slot 0's frames on the +Drive now"""
+            addr, fr = slot0()
+            lo = addr - base
+            raw = b"".join(disk.get(STORE_SECTOR + 1 + (lo >> 9) + k, bytes(512))
+                           for k in range((fr * 2 + (lo & 511) + 511) // 512))[lo & 511:(lo & 511) + 2 * fr]
+            hw = [0] * 1024
+            vals = struct.unpack(f"<{fr}h", raw)
+            for i, v in enumerate(vals):
+                col = (i >> 6) * 1024 // ((fr >> 6) + 1)
+                pk = min(abs(v), 32767) >> 7
+                if col < 1024 and pk > hw[col]:
+                    hw[col] = pk
+            return bytes(hw)
+        attempts = []
+
+        def attempt(what, kind, during=None, limit=1500):
+            """open KIND (edit, grid-off, grid-on, clear+grid-off) with the menu; DURING(pass)
+            each pass while it waits. -> its record"""
+            machine.write(syms["slc_page_seen"], struct.pack(">i", 1))
+            machine.write(syms["slc_stock_asked"], bytes(4))
+            fails0 = long("slc_fails") if "slc_fails" in syms else 0
+            if kind == "clear":
+                key(10)
+                for _ in range(4):
+                    key(14)
+                key(10)                         # CLEAR SLICE GRID
+                ui_pass()
+                kind = "grid-off"
+            key(10)                             # YES on the page: the SLICE menu
+            opened = state() == S_MENU
+            if kind == "edit":
+                key(10)
+            else:
+                key(14)
+                key(10)                         # CREATE SLICE GRID's dialog
+                knob(8, 1 if kind == "grid-on" else -1)
+                key(10)
+            passes = 0
+            while state() == S_WAIT and passes < limit:
+                if during:
+                    during(passes)
+                ui_pass()
+                passes += 1
+            st_ = state()
+            ns = long("slc_ns")
+            buf_ = SENTINEL + 0x3400
+            call("smp_slices_get", 0, buf_)
+            got = returned_d0()
+            call("smp_analysis", 0)
+            an_ = returned_d0()
+            call("smp_analysis_slot")
+            an_slot = returned_d0()
+            wave = an_ == 2 and an_slot == 0 and machine.read(SM.MIRROR + 0x78000, 1024) == hires_want()
+            fails = (long("slc_fails") if "slc_fails" in syms else 0) - fails0
+            r_ = {"what": what, "kind": kind, "menu": opened, "editor": st_ == S_EDIT, "passes": passes,
+                  "ns": ns, "kept": got, "wave": wave, "fails": fails}
+            r_["ok"] = bool(opened and st_ == S_EDIT and fails == 0 and wave
+                            and (kind == "edit" or (ns == got and ns >= 1))
+                            and (kind != "grid-off" or ns == long("slc_grid_n")))
+            if st_ == S_EDIT:
+                key(12)                         # NO: the editor closes (its edit kept)
+            elif st_ != S_OFF:
+                key(12)
+                ui_pass()
+            for _ in range(3):
+                ui_pass()
+            attempts.append(r_)
+            return r_
+        attempt("plain", "edit")
+        attempt("plain", "grid-off")
+        attempt("plain", "grid-on")
+        attempt("again at once", "edit")
+        attempt("again at once", "grid-on")
+        # the recorder's TRIM read of another slot (rec.c starts one on each saved take)
+        for kind in ("edit", "grid-off", "grid-on"):
+            call("smp_analyse", 1)
+            attempt("TRIM's read running", kind)
+        call("smp_analyse", 1)
+        attempt("TRIM's read running, after CLEAR SLICE GRID", "clear")
+        attempt("after CLEAR SLICE GRID", "clear")
+        # the library: two samples sent; LOAD TO PROJECT queued, a +DRIVE preview
+        bufx = SENTINEL + 0x1000
+        replies = []
+
+        def at_sender(uc_, address, size, user):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            b_, n_, _ab, _port = struct.unpack(">4I", bytes(uc.mem_read(sp + 4, 16)))
+            replies.append(bytes(uc.mem_read(b_, n_)))
+        hs = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+
+        def sx(cmd, payload=b""):
+            msg = bytes([0xF0, 0, 0x20, 0x3C, 0x7D, 1]) + pack7(struct.pack(">HB", 7, cmd) + payload) + b"\xF7"
+            machine.write(bufx, msg)
+            replies.clear()
+            call("smp_rx", bufx, len(msg), 2)
+            if not replies:
+                return None, b""
+            m_ = unpack7(replies[-1][6:-1])
+            return m_[3], m_[4:]
+
+        def adler(b, s_=1):
+            a_, b_ = s_ & 0xFFFF, s_ >> 16
+            for x in b:
+                a_ = (a_ + x) % 65521
+                b_ = (b_ + a_) % 65521
+            return b_ << 16 | a_
+
+        def lib_send(name, folder, data):
+            st, r = sx(18, struct.pack("<IBBI", len(data) // 2, 1, folder, 0x3F800000) + name.encode())
+            if st != 0:
+                return None
+            idx = struct.unpack_from("<II", r)[0]
+            for o in range(0, len(data), 300):
+                if sx(19, struct.pack("<I", o) + data[o:o + 300])[0] != 0:
+                    return None
+            return idx if sx(20, struct.pack("<I", adler(data)))[0] == 0 else None
+        machine.write(syms["smp_lib_state"], bytes(4))
+        _st, rf = sx(17, b"SLC")
+        libs = [lib_send(f"SLC{j}", rf[0] if rf else 0, bytes(rng.randrange(1, 256) for _ in range(2 * 3000)))
+                for j in range(2)]
+        uc.hook_del(hs)
+        lib_ok = all(x is not None for x in libs)
+        if lib_ok:
+            call("smp_lib_load", libs[0])
+            attempt("LOAD TO PROJECT queued", "edit")
+            call("smp_lib_load", libs[1])
+            attempt("LOAD TO PROJECT queued", "grid-on")
+            call("smp_lib_preview", libs[1])
+            attempt("a +DRIVE preview", "grid-off")
+            call("smp_lib_preview", libs[0])
+            attempt("a +DRIVE preview", "edit")
+        # the +Drive refusing reads: two in a row, then five
+        io["refuse"] = 2
+        attempt("2 chunk reads refused", "edit")
+        io["refuse"] = 5
+        attempt("5 chunk reads refused", "grid-on")
+        io["refuse"] = 0
+        # a take saved into the sliced slot and normalised (its peak 3,000 of 32,767): the
+        # menus opened at once, then mid-way through its normalising
+        place, tfr = 8 << 20, 60000
+        toff = SM.REC_OFFSET + place
+
+        def take(seed):
+            for k in range(tfr // 2):
+                a_ = ((k * seed) % 600) * 10 - 3000
+                b_ = ((k * seed + 7) % 600) * 10 - 3000
+                pool[toff // 4 + k] = (a_ & 0xFFFF) | (b_ & 0xFFFF) << 16
+            call("smp_save_recording", 0, place, tfr)
+        take(11)
+        attempt("a take into the slot, just saving", "edit", limit=6000)
+        take(13)
+        call("smp_norm_state")
+        for _ in range(4000):                   # on to its normalising
+            ui_pass()
+            call("smp_norm_state")
+            if returned_d0():
+                break
+        attempt("a take into the slot, normalising", "grid-off", limit=6000)
+        # a project switch drops the read (pools.c's smp_pl_quiesce) once it is under way
+        sw = {"done": 0}
+
+        def switch(pass_):
+            call("smp_analysis", 0)
+            if not sw["done"] and returned_d0() == 1:
+                call("smp_analysis_slot")
+                if returned_d0() == 0:
+                    call("smp_pl_quiesce")
+                    sw["done"] = 1
+        attempt("a project switch mid-read", "edit", during=switch)
+        sw["done"] = 0
+        attempt("a project switch mid-read", "grid-on", during=switch)
+        uc.hook_del(h_rts)
+        uc.hook_del(h_rd)
+        # LINKED (the DT2's default) and UNLINKED in the editor, on an even grid of 16
+        lk = {}
+        if "slc_linked" in syms:
+            machine.write(syms["slc_page_seen"], struct.pack(">i", 1))
+            key(10)
+            key(14)
+            key(10)
+            knob(8, -1)
+            key(10)
+            for _ in range(400):
+                if state() != S_WAIT:
+                    break
+                ui_pass()
+
+            def tb():
+                return list(struct.unpack(">48I", machine.read(syms["slc_sl"], 192)))
+            nfr = long("slc_nfr")
+            stp = max(1, nfr // 128)
+            t0 = tb()
+            lk["linked default"] = long("slc_linked") == 1
+            key(15)                             # RIGHT: slice 2
+            knob(5, 3)                          # E: its start on, the previous end with it
+            t1 = tb()
+            lk["START moves the previous END"] = (t1[3] == t0[3] + 3 * stp and t1[1] == t1[3]
+                                                  and t1[4] == t0[4] and t1[0] == t0[0])
+            knob(8, 2)                          # H: its end on, the next start with it
+            t2 = tb()
+            lk["END moves the next START"] = (t2[4] == t1[4] + 2 * stp and t2[6] == t2[4]
+                                              and t2[7] == t1[7] and t2[5] >= t2[3])
+            knob(5, -100)                       # far back: stops a frame past slice 1's start
+            t3 = tb()
+            lk["START bounded by the previous slice"] = t3[3] == t3[0] + 1 and t3[1] == t3[3] and t3[2] < t3[1]
+            knob(8, 100)                        # far on: stops a frame before slice 3's end
+            t4 = tb()
+            lk["END bounded by the next slice"] = t4[4] == t4[7] - 1 and t4[6] == t4[4] and t4[8] >= t4[6]
+            knob(1, 1)                          # A: UNLINKED
+            lk["A unlinks"] = long("slc_linked") == 0
+            knob(5, 3)
+            knob(8, -3)
+            t5 = tb()
+            lk["UNLINKED: neighbours stay"] = (t5[1] == t4[1] and t5[6] == t4[6] and t5[3] == t4[3] + 3 * stp
+                                              and t5[4] == t4[4] - 3 * stp)
+            knob(1, -1)
+            lk["A links again"] = long("slc_linked") == 1
+            key(12)
+        out.update(booted=booted, lib=lib_ok, refused=io.get("refused", 0), attempts=attempts,
+                   bad=[a_ for a_ in attempts if not a_["ok"]], linked=lk)
+        out["ok"] = bool(booted and lib_ok and attempts and all(a_["ok"] for a_ in attempts)
+                         and io.get("refused", 0) >= 7 and lk and all(lk.values()))
     elif scenario == "lib":
         # v0.31: the +Drive's library over SysEx (csrc/sampler/lib.c): a folder made (the
         # library formatted on that first write), two samples sent and read back byte for
