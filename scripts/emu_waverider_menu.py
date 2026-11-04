@@ -802,8 +802,10 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                     call("smp_pl_quiesce")
                     sw["done"] = 1
         attempt("a project switch mid-read", "edit", during=switch)
+        switched = sw["done"]
         sw["done"] = 0
         attempt("a project switch mid-read", "grid-on", during=switch)
+        switched += sw["done"]
         uc.hook_del(h_rts)
         uc.hook_del(h_rd)
         # LINKED (the DT2's default) and UNLINKED in the editor, on an even grid of 16
@@ -851,10 +853,10 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             knob(1, -1)
             lk["A links again"] = long("slc_linked") == 1
             key(12)
-        out.update(booted=booted, lib=lib_ok, refused=io.get("refused", 0), attempts=attempts,
+        out.update(booted=booted, lib=lib_ok, refused=io.get("refused", 0), switched=switched, attempts=attempts,
                    bad=[a_ for a_ in attempts if not a_["ok"]], linked=lk)
         out["ok"] = bool(booted and lib_ok and attempts and all(a_["ok"] for a_ in attempts)
-                         and io.get("refused", 0) >= 17 and lk and all(lk.values()))
+                         and io.get("refused", 0) >= 17 and switched == 2 and lk and all(lk.values()))
     elif scenario == "lib":
         # v0.31: the +Drive's library over SysEx (csrc/sampler/lib.c): a folder made (the
         # library formatted on that first write), two samples sent and read back byte for
