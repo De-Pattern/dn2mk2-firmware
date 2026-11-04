@@ -611,6 +611,11 @@ the keyboard.
   slots hold only loaded samples. Before, it mostly landed on empty slots and played
   nothing. `smp_mod_apply` runs after the stock apply (`0x400db22c`, at `0x40027196`) on
   the per-voice mirror the frame is built from; an unmodulated SAMP is left alone.
+  v0.40 (a user's report, `docs/user-reports.md` P1): "modulated" is measured against the
+  voice's target (`0x80003af0`: the sound's SAMP, or the trig's p-lock), not the sound's
+  SAMP, which made a p-lock a scaled offset from the track's SAMP; SLICE's SLCE the same.
+  The LFOs are applied after this point (`0x400272d4`), so an LFO's offset is not remapped
+  (open: see P1).
 - **WERP's SEG** takes three detents a choice, not one (owner: the middle choice was easy
   to skip).
 
