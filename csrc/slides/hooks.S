@@ -86,24 +86,26 @@ sl_clr_cmp:
         cmp.l   %d1, %d2
         rts
 
-| paste_core(record, values, table, first step, count, destination track) -> d0: the record's
-| track byte (mvs.b), or -2 when it was one of ours of the clipboard's track, written onto the
-| destination (sl_paste, slide.c). The clipboard is the paste routine's -16(%fp); its track at
-| +96668. Keeps d1-d7 / a0-a6.
+| paste_core(record, values, table, first step, count, destination track, the clipboard's
+| first record) -> d0: the record's track byte (mvs.b), or -2 when it was one of ours of the
+| clipboard's track, written onto the destination (sl_paste, slide.c). The clipboard is the
+| paste routine's -16(%fp); its track at +96668. Keeps d1-d7 / a0-a6.
+| (v0.40 review: the first record, so sl_paste can count the stock records still to come.)
 sl_paste_core:
         lea     -12(%sp), %sp
         movem.l %d1/%a0-%a1, (%sp)
+        move.l  40(%sp), -(%sp)                 | the clipboard's first record
         movea.l -16(%fp), %a0
         move.l  #96668, %d1
         move.l  (%a0,%d1.l), -(%sp)             | the clipboard's track
-        move.l  40(%sp), -(%sp)                 | destination track
-        move.l  40(%sp), -(%sp)                 | count
-        move.l  40(%sp), -(%sp)                 | first step
-        move.l  40(%sp), -(%sp)                 | table
-        move.l  40(%sp), -(%sp)                 | values
-        move.l  40(%sp), -(%sp)                 | record
+        move.l  44(%sp), -(%sp)                 | destination track
+        move.l  44(%sp), -(%sp)                 | count
+        move.l  44(%sp), -(%sp)                 | first step
+        move.l  44(%sp), -(%sp)                 | table
+        move.l  44(%sp), -(%sp)                 | values
+        move.l  44(%sp), -(%sp)                 | record
         jsr     sl_paste
-        lea     28(%sp), %sp
+        lea     32(%sp), %sp
         movem.l (%sp), %d1/%a0-%a1
         lea     12(%sp), %sp
         rts
@@ -125,6 +127,7 @@ sl_paste_c:
         move.l  #96668, %d1
         rts
 sl_track_paste:
+        move.l  %a3, -(%sp)                     | the clipboard's first record
         move.l  60(%a2), -(%sp)
         pea     128
         clr.l   -(%sp)
@@ -132,7 +135,7 @@ sl_track_paste:
         pea     (%a3,%a0.l)
         pea     (%a3,%a0.l)
         bsr     sl_paste_core
-        lea     24(%sp), %sp
+        lea     28(%sp), %sp
         rts
 
 | Page pastes 0x40052634 (its UNDO) / 0x40053246: a1 + d0 the record, the page's values at
@@ -153,6 +156,7 @@ sl_paste_b:
         rts
 sl_page_paste:                                  | d1 the values' base -> d1 the result
         move.l  %d0, -(%sp)
+        move.l  %a1, -(%sp)                     | the clipboard's first record
         move.l  60(%a2), -(%sp)
         pea     16
         move.l  %d3, -(%sp)
@@ -161,7 +165,7 @@ sl_page_paste:                                  | d1 the values' base -> d1 the 
         move.l  %d1, -(%sp)
         pea     (%a1,%d0.l)
         bsr     sl_paste_core
-        lea     24(%sp), %sp
+        lea     28(%sp), %sp
         move.l  %d0, %d1
         move.l  (%sp)+, %d0
         rts
@@ -190,9 +194,10 @@ sl_copy_hook:
         move.l  60(%a3), 4(%sp)                 | R track step (the flags: the last push's, as stock)
         rts
 
-| Trig paste 0x40055440 (the destination step cleared, its stock locks written; was: mvz.b
-| 4(%a3),%d0 ; lea 0x40054690,%a4): sl_tpaste(entry, context, step), the entry's number from
-| a3's place in the clipboard's vector, a2 the track's context, (a3) the destination step.
+| Trig paste 0x40055440 (the destination step cleared, before its stock locks are written; was:
+| mvz.b 4(%a3),%d0 ; lea 0x40054690,%a4): sl_tpaste(entry, context, step, vector), the entry's
+| number from a3's place in the clipboard's vector, a2 the track's context, (a3) the
+| destination step.
         .globl  sl_paste_hook
 sl_paste_hook:
         lea     -16(%sp), %sp
@@ -200,11 +205,12 @@ sl_paste_hook:
         movea.l -92(%fp), %a0
         move.l  %a3, %d0
         sub.l   4(%a0), %d0
+        move.l  %a0, -(%sp)                     | the clipboard's vector (its entries 4(a0)..8(a0))
         move.l  (%a3), -(%sp)
         move.l  %a2, -(%sp)
         move.l  %d0, -(%sp)
         jsr     sl_tpaste
-        lea     12(%sp), %sp
+        lea     16(%sp), %sp
         movem.l (%sp), %d0-%d1/%a0-%a1
         lea     16(%sp), %sp
         mvz.b   4(%a3), %d0

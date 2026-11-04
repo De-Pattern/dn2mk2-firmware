@@ -260,24 +260,30 @@ u32 sl_lock_get(const u8 *table, u32 t, u32 step, u32 k)
     return 0xFFFF;
 }
 
-/* set (VALUE <= 0x7fff) or clear (0xffff) a lock; -> 0 when no record is free */
-int sl_lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value)
+/* set (VALUE <= 0x7fff) or clear (0xffff) a lock; -> 0 when no record is free. A new record is
+ * taken only while more than RESERVE are free (v0.40 review: a paste leaves stock's locks still to
+ * come the records they need; stock's own allocation skips a lock when none is free). */
+static int lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value, u32 reserve)
 {
     if (!table || t >= NV || step > 127)
         return 0;
     u8 head = k ? SL_RAM_SLEN : SL_RAM_SLD;
     u8 *rec = 0, *free = 0;
-    for (u32 i = 0; i < RECS && !rec; i++) {
+    u32 nfree = 0;
+    for (u32 i = 0; i < RECS; i++) {
         u8 *r = table + REC * i;
         if (r[0] == head && r[1] == (SL_TAG | t))
             rec = r;
-        else if (!free && r[0] == 0xFF)
-            free = r;
+        else if (r[0] == 0xFF) {
+            if (!free)
+                free = r;
+            nfree++;
+        }
     }
     if (!rec) {
         if (value == 0xFFFF)
             return 1;
-        if (!free)
+        if (!free || nfree <= reserve)
             return 0;
         rec = free;
         for (u32 s = 0; s < 128; s++)
@@ -296,6 +302,11 @@ int sl_lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value)
         }
     }
     return 1;
+}
+
+int sl_lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value)
+{
+    return lock_set(table, t, step, k, value, 0);
 }
 
 /* the lock-list builder 0x400d85e8(track, list, table, sound, step, ...): stock's, then the
@@ -576,6 +587,9 @@ int sl_knob(u32 index, int delta)
  *   their steps inside the record.
  * - trig copy / paste: each copied trig's two values kept by its clipboard entry (sl_tclip),
  *   written onto the step it is pasted on (cleared by stock just before).
+ * - v0.40 review: a paste takes a free record for ours only while more are free than stock's
+ *   locks still to come in the same paste need (lock_set's RESERVE), so a nearly full lock table
+ *   drops slides, never a stock lock.
  * - pattern copy/paste: whole-pattern copies (122,478 bytes, the lock table inside) carry
  *   our records as bytes. */
 static u8 *ctx_table(void *ctx)
@@ -587,18 +601,46 @@ static u8 *ctx_table(void *ctx)
 }
 
 u32 sl_pasted D;                                /* our values written by pastes (for the checks) */
+u32 sl_paste_dropped D;                         /* our values a paste left out: no record to spare */
 
-int sl_paste(const u8 *rec, const u8 *vals, u8 *table, int first, int count, int dt, u32 ct)
+/* does stock's paste still need a new record for this clipboard record? (its loop: a record of the
+ * clipboard's track, slot byte not 0xff, and no record of that slot on the destination track in
+ * the index at +20640; 0x40053246 and its three siblings). Counted generously: a slot out of the
+ * index's range counts too. */
+static int stock_needs(const u8 *r, const u8 *table, int dt, u32 ct)
+{
+    if (r[0] == 0xFF || (s8)r[1] != (int)ct)
+        return 0;
+    if (r[0] > 100)
+        return 1;
+    return (s8)table[20640 + 101 * (u32)dt + r[0]] < 0;
+}
+
+int sl_paste(const u8 *rec, const u8 *vals, u8 *table, int first, int count, int dt, u32 ct,
+             const u8 *clip)
 {
     int tb = (s8)rec[1];
     if ((rec[0] != SL_RAM_SLD && rec[0] != SL_RAM_SLEN) || (rec[1] & 0xF0) != SL_TAG
         || (u32)(rec[1] & 0x0F) != ct || dt < 0 || dt >= NV || !table || first < 0 || count < 0)
         return tb;
+    /* v0.40 review: stock's loop takes the clipboard's records in order and allocates each
+     * destination record as it goes, skipping a lock when none is free; ours are written here,
+     * inside that loop, so the stock records after this one keep the free records they need */
+    u32 reserve = RECS;                         /* (no clipboard to read: never take a free one) */
+    if (clip && rec >= clip && (u32)(rec - clip) < REC * RECS) {
+        reserve = 0;
+        for (u32 j = (u32)(rec - clip) / REC + 1; j < RECS; j++)
+            reserve += (u32)stock_needs(clip + REC * j, table, dt, ct);
+    }
     u32 k = rec[0] == SL_RAM_SLEN;
     for (int i = 0; i < count && first + i < 128; i++) {
         u32 v = *(const u16 *)(vals + 2 + 2 * i);
-        if (v != 0xFFFF && sl_lock_set(table, (u32)dt, (u32)(first + i), k, v))
+        if (v == 0xFFFF)
+            continue;
+        if (lock_set(table, (u32)dt, (u32)(first + i), k, v, reserve))
             sl_pasted++;
+        else
+            sl_paste_dropped++;
     }
     return -2;
 }
@@ -619,7 +661,37 @@ void sl_tcopy(u32 off, void *ctx, u32 step)
     sl_tclip[e] = sl_lock_get(table, t, step, 0) | sl_lock_get(table, t, step, 1) << 16;
 }
 
-void sl_tpaste(u32 off, void *ctx, u32 step)
+/* the records stock's trig paste still needs (v0.40 review): entries E.. of the clipboard's
+ * vector (VEC: its entries from +4 to +8, 72 bytes each; an entry's locks from +48 to +52, 8 bytes
+ * each, {value, slot}, written by 0x4003ceee after this hook), each slot of track T with no record
+ * in the index counted once. Anything out of shape: RECS (no free record taken). */
+static u32 tstock_needs(const u8 *vec, u32 e, const u8 *table, u32 t)
+{
+    if (!vec)
+        return RECS;
+    const u8 *b = *(const u8 *const *)(vec + 4), *end = *(const u8 *const *)(vec + 8);
+    if (!b || end < b || (u32)(end - b) > 72u * 4096u)
+        return RECS;
+    u32 seen[4], n = 0;
+    seen[0] = seen[1] = seen[2] = seen[3] = 0;
+    for (const u8 *en = b + 72u * e; en + 72 <= end; en += 72) {
+        const u8 *p = *(const u8 *const *)(en + 48), *q = *(const u8 *const *)(en + 52);
+        if (!p || q < p || (u32)(q - p) > 8u * 4096u)
+            return RECS;
+        for (; p + 8 <= q; p += 8) {
+            u32 slot = *(const u32 *)(p + 4);
+            if (slot > 100 || (s8)table[20640 + 101 * t + slot] >= 0)
+                continue;                       /* stock's setter refuses it, or has a record */
+            if (!((seen[slot >> 5] >> (slot & 31)) & 1)) {
+                seen[slot >> 5] |= 1u << (slot & 31);
+                n++;
+            }
+        }
+    }
+    return n;
+}
+
+void sl_tpaste(u32 off, void *ctx, u32 step, const u8 *vec)
 {
     u32 e = off / 72u;
     if (e >= TCLIP || !ctx || step > 127)
@@ -629,9 +701,16 @@ void sl_tpaste(u32 off, void *ctx, u32 step)
     if (!table || t >= NV)
         return;
     u32 c = sl_tclip[e];
+    if (c == 0xFFFFFFFFu)
+        return;
+    u32 reserve = tstock_needs(vec, e, table, t);
     for (u32 k = 0; k < 2; k++) {
         u32 v = (c >> (16 * k)) & 0xFFFF;
-        if (v != 0xFFFF && sl_lock_set(table, t, step, k, v))
+        if (v == 0xFFFF)
+            continue;
+        if (lock_set(table, t, step, k, v, reserve))
             sl_pasted++;
+        else
+            sl_paste_dropped++;
     }
 }
