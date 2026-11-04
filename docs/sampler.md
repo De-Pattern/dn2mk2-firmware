@@ -625,7 +625,7 @@ the keyboard.
   meter, the waveform as it comes in (`rec_wave`: 120 columns of the status's peaks; when
   it passes the last, columns pair up), the time, YES: STOP.
 - **SAVING, NORMALIZING.** When it stops, the recording is read back and saved to the
-  +Drive as before (`smp_save_recording`), and its peak noted (`peak_add`). v0.41: any
+  +Drive as before (`smp_save_recording`), and its peak noted (`peak_add`). v0.40: any
   take that is not all zero and peaks under full scale is normalised to full scale (its
   peak to 32,767), as the DT2, the Octatrack and the Digitakt do, however quiet it is (a
   recorded silence becomes a noise source, the owner's wish); no cap, no floor; exact

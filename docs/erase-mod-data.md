@@ -86,7 +86,7 @@ still intact (its SEC_COUNT equals the device's size). That way a unit's answer 
 the question later. TRIM unmaps the blocks in the card's FTL, and they read back erased.
 That is what a clean return to stock needs.
 
-## v0.41: TRIM ERROR on a unit, and what changed
+## v0.40: TRIM ERROR on a unit, and what changed
 
 A v0.39 unit (paQ, Kingston 32 GB) stopped with **TRIM ERROR AT 817905**, and on a second
 try (after a restart) further on, at **CB1905**: both are call starts in the library's
@@ -129,7 +129,7 @@ old sample audio in library frames the erase did not reach. Nothing reads those 
 the mod finds nothing without its index, and stock firmware never reads above the
 factory buffer (`0x458000`). So it does not matter for flashing stock either; it only
 means those sectors are not trimmed (not "clean" in the card's FTL). Running the erase
-again on v0.41 (or later) finishes it.
+again on v0.40 (or later) finishes it.
 
 ## Power loss during the erase
 
@@ -166,7 +166,7 @@ routine sends for it. The device is the owner's size (48,340,992 sectors).
 - **link**: command 28 with a wrong word refused, nothing done; `ERASE`: ERASED on a card
   whose erased state is `0xFF`, command 29 reporting it; a card that keeps one sector:
   NOT ERASED at that sector; a failure closed may be asked again.
-- **link, v0.41**: the card's busy line played as well (PRSSTAT bit 24). A TRIM that
+- **link, v0.40**: the card's busy line played as well (PRSSTAT bit 24). A TRIM that
   fails once: tried again, ERASED. A flaky card (some TRIMs return while it still
   programs, as with stock's stale post, so a command sent then gets no answer; some fail
   once on their own): ERASED, the regions covered exactly, no command sent while the line

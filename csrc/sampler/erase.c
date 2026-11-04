@@ -32,7 +32,7 @@
  * Started from the browser's top (rec.c: +DRIVE, RIGHT, ERASE MOD DATA, two questions) or by
  * link command 28 (link.c); stepped from the UI loop (page.c's wr_poll) about 40 ms a pass.
  *
- * v0.41 (a unit's report: "TRIM ERROR AT 817905", then further on a second try): the stock
+ * v0.40 (a unit's report: "TRIM ERROR AT 817905", then further on a second try): the stock
  * TRIM returns non-zero only when one of CMD35/36/38 got no answer (its ISR 0x4012b99e sets -1
  * on the controller's command timeout, CTOE, and on nothing else), and a card answers no
  * CMD35 while it is still programming the previous erase. Stock's own wait for that (0x4012c52c:
@@ -58,7 +58,7 @@ typedef unsigned char u8;
 #define BLK_READY (*(volatile u32 *)0x4461B68Cu)
 #define BLK_SECTORS (*(volatile u32 *)0x4461B6B0u)
 #define FRAMES_NOW (*(volatile u32 *)0x4058E8D4u)                   /* 1,500 a second */
-/* v0.41: the eSDHC's present state (MCF5441x PRSSTAT): bit 24 DAT0's level (low: the card is
+/* v0.40: the eSDHC's present state (MCF5441x PRSSTAT): bit 24 DAT0's level (low: the card is
  * busy), bit 1 CDIHB, bit 0 CIHB. Only ever read (stock's TRIM tests the same bit 24) */
 #define SD_PRSSTAT (*(volatile u32 *)0xFC0CC024u)
 #define SD_IDLE(p) (((p) & (1u << 24)) && !((p) & 3u))
@@ -79,7 +79,7 @@ typedef unsigned char u8;
 #define LIB_SECTOR 0x700000u                                        /* lib.c */
 #define LIB_DATA (LIB_SECTOR + 1u + 256u + 4u)                      /* lib.c: superblock, index, folders */
 #define ER_CHUNK 2048u                                              /* stock FORMAT's call */
-#define ER_TRIES 5u                     /* v0.41: a call (TRIM or a verify read) tried at most 5 times */
+#define ER_TRIES 5u                     /* v0.40: a call (TRIM or a verify read) tried at most 5 times */
 #define ER_PAUSE_FR 300u                /* 200 ms between tries (or ER_PAUSE_PASSES passes ... */
 #define ER_PAUSE_PASSES 8u              /* ... when the frame counter is not running) */
 #define ER_BUSY_FR 15000u               /* the card busy 10 s on end: CARD BUSY (or ... */
@@ -98,7 +98,7 @@ int smp_er_req D_ = 0;                  /* link command 28: start at the next UI
 int smp_er_state D_ = 0;                /* 0 idle, 1 erasing, 2 verifying, 3 ERASED, 4 failed */
 int smp_er_err D_ = 0;                  /* 1 guard (refused before the driver), 2 TRIM's error, 3 a read
                                          * failed, 4 a sector not erased, 5 the +Drive not up,
-                                         * 6 the card stayed busy (v0.41) */
+                                         * 6 the card stayed busy (v0.40) */
 u32 smp_er_sector D_ = 0;               /* the failing sector */
 u32 smp_er_value D_ = 0;                /* the driver's return, or the sector's first word */
 u32 smp_er_done D_ = 0;                 /* sectors erased (of smp_er_total) */
@@ -108,9 +108,9 @@ u32 smp_er_reads D_ = 0;                /* sectors read back */
 u32 smp_er_checks D_ = 0;               /* of smp_er_nchecks */
 u32 smp_er_nchecks D_ = 0;
 int smp_er_job D_ = 0;
-u32 smp_er_retries D_ = 0;              /* v0.41: calls tried again (all of them) */
-u32 smp_er_waits D_ = 0;                /* v0.41: passes that found the card busy */
-int smp_er_resume D_ = 0;               /* v0.41: 1 or 2 (the state to go back to) after a failure
+u32 smp_er_retries D_ = 0;              /* v0.40: calls tried again (all of them) */
+u32 smp_er_waits D_ = 0;                /* v0.40: passes that found the card busy */
+int smp_er_resume D_ = 0;               /* v0.40: 1 or 2 (the state to go back to) after a failure
                                          * a new try may get past: asking again carries on */
 static u32 er_tries D_ = 0;             /* this call's failed tries */
 static u32 er_hold_fr D_ = 0, er_hold_n D_ = 0;     /* a pause or a busy wait: since (frames), passes */
@@ -153,7 +153,7 @@ static int er_inside(u32 s, u32 n)
 
 static void er_fail(int err, u32 sector, u32 value)
 {
-    /* v0.41: a TRIM or read error, or a card that stayed busy, may pass on a new try: asking
+    /* v0.40: a TRIM or read error, or a card that stayed busy, may pass on a new try: asking
      * again carries on from this call (the headers are long gone; nothing of ours writes) */
     smp_er_resume = (err == 2 || err == 3 || err == 6) ? smp_er_state : 0;
     smp_er_err = err;
@@ -164,7 +164,7 @@ static void er_fail(int err, u32 sector, u32 value)
     er_tries = 0;
 }
 
-/* v0.41: -> 1 when the card may be given a command now. Otherwise this pass ends: a pause
+/* v0.40: -> 1 when the card may be given a command now. Otherwise this pass ends: a pause
  * after a failed try runs out, or the card's busy line is waited for (CARD BUSY once it has
  * been busy too long, SECTOR the call's) */
 static u32 er_since(u32 *n)
@@ -203,7 +203,7 @@ static int er_ready(u32 sector)
     return 0;
 }
 
-/* v0.41: a call failed (R its return): -> 1 if it is tried again after a pause, 0 if that was
+/* v0.40: a call failed (R its return): -> 1 if it is tried again after a pause, 0 if that was
  * its last try (the caller fails) */
 static int er_again(void)
 {
@@ -282,7 +282,7 @@ int smp_er_start(void)
     if (smp_er_state == 1 || smp_er_state == 2 || smp_er_state == 3)
         return -1;                              /* under way, or done: restart first */
     if (smp_er_resume && smp_er_lock && BLK_READY) {
-        /* v0.41: asked again after a failure a new try may get past: on from the call that
+        /* v0.40: asked again after a failure a new try may get past: on from the call that
          * failed (the erase's place and counts kept; it reads every check again from there) */
         smp_er_state = smp_er_resume;
         smp_er_resume = 0;
@@ -349,7 +349,7 @@ void smp_er_poll(void)
         }
         u32 n = b - er_pos > ER_CHUNK ? ER_CHUNK : b - er_pos;
         if (!er_ready(er_pos))
-            return;                             /* v0.41: the card busy, or a pause: next pass */
+            return;                             /* v0.40: the card busy, or a pause: next pass */
         if (er_trim(er_pos, n) != 0)
             return;
         er_pos += n;
@@ -367,7 +367,7 @@ void smp_er_poll(void)
             return;
         }
         if (!er_ready(s))
-            return;                             /* v0.41: as the TRIMs */
+            return;                             /* v0.40: as the TRIMs */
         int r = BLK_READ(s, 512u, er_buf);
         smp_er_reads++;
         calls++;
@@ -409,7 +409,7 @@ u32 smp_er_status(u8 *rp, u32 r)
     rp[r++] = ok ? CSD_BYTE(181) : 0;          /* ERASED_MEM_CONT */
     rp[r++] = ok ? CSD_BYTE(192) : 0;          /* EXT_CSD_REV */
     put(rp + r, BLK_SECTORS); r += 4;
-    put(rp + r, smp_er_retries); r += 4;        /* v0.41: calls tried again, passes the card was */
+    put(rp + r, smp_er_retries); r += 4;        /* v0.40: calls tried again, passes the card was */
     put(rp + r, smp_er_waits); r += 4;          /* busy, and whether asking again carries on */
     rp[r++] = (u8)smp_er_resume;
     return r;

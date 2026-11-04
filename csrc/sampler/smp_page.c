@@ -1381,7 +1381,7 @@ static int er_draw(void *c)
         LABEL(c, 64, 24, "%s", "RESTART THE DIGITONE");
         LABEL(c, 64, 12, "%s", "YES / NO: CLOSE");
     } else if (es == 4) {
-        /* v0.41: what failed, where, and what to do: a failure a new try may get past carries
+        /* v0.40: what failed, where, and what to do: a failure a new try may get past carries
          * on when asked again (the samples are already gone: their headers went first) */
         static const char *const why[7] = {"", "REFUSED", "CARD ERASE FAILED", "CARD READ FAILED", "NOT ERASED",
                                            "+DRIVE NOT READY", "CARD STAYED BUSY"};
