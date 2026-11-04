@@ -35,6 +35,7 @@ typedef unsigned char u8;
 #define SET_DIRTY  ((void (*)(void *))0x4011D2FEu)              /* screen: ask for one */
 #define FRAMES_NOW (*(volatile u32 *)0x4058E8D4u)               /* 1,500 a second */
 #define REC_REDRAW 60u                                          /* the recorder's: 25 a second */
+#define PH_REDRAW 30u                                           /* v0.40: a playhead's, 50 a second at most */
 #define FONT       0x44507ED8u                                  /* the grid's label font */
 #define CENTRED    2                                            /* TEXT flag: x is the centre */
 
@@ -210,9 +211,11 @@ static void ping_names(void)
  * then, while it is up, the RECORDER over all of it (rec.c, smp_page.c) */
 #define SCREEN_DRAW ((void (*)(void *, void *))0x4011D32Au)
 void *wr_screen_obj __attribute__((section(".data"), aligned(4))) = 0;   /* v0.30: its views (rec.c) */
+u32 wr_draws __attribute__((section(".data"), aligned(4))) = 0;   /* v0.40: the screen's draws (smp_page.c) */
 void wr_screen(void *screen, void *canvas)
 {
     wr_screen_obj = screen;
+    wr_draws++;
     extern int rec_visible(void);
     extern void rec_screen_draw(void *canvas);
     extern int slc_visible(void);
@@ -272,10 +275,18 @@ int wr_poll(void *screen)
         slc_last = slc_state;
         SET_DIRTY(screen);
     }
-    if ((rec_visible() || slc || slc_was || smp_wants_redraw()) && (int)(FRAMES_NOW - rec_next) >= 0) {
+    if ((rec_visible() || slc || slc_was) && (int)(FRAMES_NOW - rec_next) >= 0) {
         rec_next = FRAMES_NOW + REC_REDRAW;
         SET_DIRTY(screen);
         slc_was = slc;                          /* once more after it closes: the page again */
+    }
+    /* v0.40: a sample page's playhead (and SLICE / GRID's playing slice): redrawn as soon as
+     * its column moves (smp_page.c), 50 a second at most; v0.25..v0.39: 25 a second, and
+     * not at all once the page had gone 1.2 s undrawn (the owner: the marker lagged) */
+    static u32 ph_next __attribute__((section(".data"))) = 0;
+    if (smp_wants_redraw() && (int)(FRAMES_NOW - ph_next) >= 0) {
+        ph_next = FRAMES_NOW + PH_REDRAW;
+        SET_DIRTY(screen);
     }
     return IS_DIRTY(screen);
 }
