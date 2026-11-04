@@ -47,8 +47,10 @@ typedef unsigned char u8;
 enum { K_YES = 10, K_UP = 11, K_NO = 12, K_LEFT = 13, K_DOWN = 14, K_RIGHT = 15, K_FUNC = 17 };
 
 extern u32 smp_slot_frames(int k, int *i16);
-extern int smp_analyse(int k);
+extern int smp_analyse_ui(int k);
 extern int smp_analysis(int *pct);
+extern int smp_analysis_slot(void);
+extern void smp_analyse_cancel(void);
 extern const u8 *smp_hires(void);
 extern int smp_onsets(u32 *out, int most);
 extern int smp_slices_get(int k, u32 *t);
@@ -66,6 +68,10 @@ static int grid_tr __attribute__((section(".data"))) = 0;
 static int slot __attribute__((section(".data"))) = -1;
 u32 slc_nfr __attribute__((section(".data"))) = 0;
 static int wait_for __attribute__((section(".data"))) = 0;   /* S_GRID or S_EDIT: what the analysis is for */
+static int wait_go __attribute__((section(".data"))) = 0;    /* v0.40: 0 waiting to start the read, 1 reading */
+static int wait_made __attribute__((section(".data"))) = 0;  /* v0.40: the grid made already (TR.DET OFF) */
+static int wait_again __attribute__((section(".data"))) = 0; /* v0.40: reads started again after a failure */
+int slc_fails __attribute__((section(".data"))) = 0;         /* v0.40: CANNOT READ IT shown (the gate counts) */
 static int func __attribute__((section(".data"))) = 0;
 static const char *msg __attribute__((section(".data"))) = 0;
 static u32 msg_at __attribute__((section(".data"))) = 0;
@@ -80,6 +86,13 @@ static int dirty __attribute__((section(".data"))) = 0;
 static int pv_on __attribute__((section(".data"))) = 0;      /* FUNC + YES's preview playing */
 static u32 pv_at __attribute__((section(".data"))) = 0;      /* v0.30: FRAMES when it started */
 static int pv_loop __attribute__((section(".data"))) = 0;    /* v0.30: D: 0 once, 1 looping */
+/* v0.40, the DT2's LINKED / UNLINKED END AND START POINTS (its manual, A.2.5 USING THE SLICE
+ * EDITOR, 4: "By default, adjacent slices' end and start points are linked, meaning that by
+ * moving the current slice's endpoint, you also move the next slice's start point. Use DATA
+ * ENTRY knob A if you want to break this coupling"; the editor's screen, 1: its icon at the
+ * top left). 1 linked (the DT2's default), 0 unlinked (v0.23..v0.39's only way); kept from
+ * one opening of the editor to the next */
+int slc_linked __attribute__((section(".data"))) = 1;
 
 int slc_visible(void)
 {
@@ -274,7 +287,8 @@ static void grid_draw(void *c)
 static void wait_draw(void *c)
 {
     int pct = 0;
-    smp_analysis(&pct);
+    if (wait_go)                                /* (not another slot's read's) */
+        smp_analysis(&pct);
     popup(c, 20, 20, 107, 44);
     LABEL(c, 64, 34, "%s", "READING THE SAMPLE");
     LABEL(c, 64, 25, "%d%%", pct > 100 ? 100 : pct);
@@ -298,7 +312,14 @@ static void edit_draw(void *c)
 {
     clear(c, 0, 0, 127, 63);
     /* the top: < SLICE 01/08 > and the slice's length; LOOP on the right */
-    LABEL(c, 34, 57, "< SLICE %d%d/%d%d >", (slc_cur + 1) / 10, (slc_cur + 1) % 10, slc_ns / 10, slc_ns % 10);
+    /* v0.40: LINKED / UNLINKED (knob A), at the top left as the DT2's: two links joined,
+     * or apart */
+    box(c, 0, 57, 4, 61);
+    if (slc_linked)
+        box(c, 3, 57, 7, 61);
+    else
+        box(c, 5, 57, 9, 61);
+    LABEL(c, 40, 57, "< SLICE %d%d/%d%d >", (slc_cur + 1) / 10, (slc_cur + 1) % 10, slc_ns / 10, slc_ns % 10);
     if (slc_ns)
         secs(c, 84, 57, slc_sl[3 * slc_cur + 1] - slc_sl[3 * slc_cur]);
     /* v0.30: D is the preview's play mode, drawn as the DT2's PLAY icons (owner): an arrow
@@ -314,13 +335,15 @@ static void edit_draw(void *c)
         vline(c, 118, 56, 62, 0);
     hline(c, 0, 127, 54, 0);
     /* the waveform */
-    const u8 *hr = smp_hires();
+    /* v0.40: the waveform only when the read is this sample's, done (else HIRES may hold
+     * another slot's: TRIM's, or a read that failed) */
+    const u8 *hr = smp_analysis(0) == 2 && smp_analysis_slot() == slot ? smp_hires() : 0;
     int yc = 31, h = 20;
     u32 v = view_n();
     for (int x = 1; x <= 126; x++) {
         u32 f0 = view0 + (u32)(x - 1) * (v / 126u);
         u32 col = slc_nfr ? (f0 >> 6) * 1024u / ((slc_nfr >> 6) + 1u) : 0;
-        int a = (col < 1024u ? hr[col] : 0) * h << vzoom;
+        int a = (hr && col < 1024u ? hr[col] : 0) * h << vzoom;
         a /= 255;
         if (a > h) a = h;
         vline(c, x, yc - a, yc + a, 0);
@@ -459,6 +482,57 @@ static void follow_view(void)                   /* the picked slice's start in v
         view0 = slc_nfr > v ? slc_nfr - v : 0u;
 }
 
+/* v0.40 (a user: "sometimes EDIT SLICE POINTS or CREATE SLICE GRID returns CANNOT READ IT
+ * ... repeatedly selecting the option eventually works"; "the error appears, but the slices
+ * are created on page 2 without the Slice Editor opening"): v0.23..v0.39 asked for the read
+ * once and said CANNOT READ IT at its first refusal, and a refusal was usually only "not
+ * now": the recorder's TRIM read of the last take still running (smp_analyse takes one read
+ * at a time), a pool switch, the take still saving. CREATE SLICE GRID with TR.DET OFF made
+ * the grid first and then asked: refused, the grid stood and the error showed. Now the menu
+ * WAITS (NO leaves) until the read can start (link.c's smp_analyse_ui: ours first, and not
+ * while the slot is not final), starts it again if something dropped it (a project switch,
+ * or a failed read: three times), and says CANNOT READ IT only when the sample cannot be
+ * read; a grid once made always opens the editor (its waveform blank if the read failed). */
+static u32 wait_at __attribute__((section(".data"))) = 0;
+
+static void wait_failed(void)
+{
+    if (wait_go)
+        smp_analyse_cancel();
+    if (wait_made) {                            /* the slices are made: their editor */
+        edit_open();
+        note("NO WAVEFORM");
+        return;
+    }
+    if (wait_for == S_GRID && !grid_tr) {      /* even slices need no read: made, and edited */
+        make_grid();
+        edit_open();
+        note("NO WAVEFORM");
+        return;
+    }
+    note("CANNOT READ IT");
+    slc_fails++;
+    slc_state = S_OFF;
+}
+
+static void wait_try(void)                      /* start the read, if the slot can be read now */
+{
+    int r = smp_analyse_ui(slot);
+    if (r > 0)
+        return;                                 /* not now: waiting */
+    if (r < 0) {
+        wait_failed();
+        return;
+    }
+    int i16;
+    wait_go = 1;
+    slc_nfr = smp_slot_frames(slot, &i16);      /* (a take saved meanwhile: its length) */
+    if (wait_for == S_GRID && !grid_tr && !wait_made) {
+        make_grid();                            /* even slices need no read: made now */
+        wait_made = 1;
+    }
+}
+
 static void start_analysis(int then)
 {
     int i16;
@@ -468,18 +542,16 @@ static void start_analysis(int then)
         slc_state = S_OFF;
         return;
     }
-    if (smp_analyse(slot) != 0) {
-        note("CANNOT READ IT");
-        slc_state = S_OFF;
-        return;
-    }
     wait_for = then;
+    wait_go = 0;
+    wait_made = 0;
+    wait_again = 0;
+    wait_at = 0;
     slc_state = S_WAIT;
+    wait_try();
 }
 
 /* from the UI loop (page.c's wr_poll), every pass */
-static u32 wait_at __attribute__((section(".data"))) = 0;
-
 void slc_poll(void)
 {
     if (slc_state != S_WAIT) {
@@ -488,24 +560,28 @@ void slc_poll(void)
     }
     if (!wait_at)
         wait_at = FRAMES | 1u;
+    if (FRAMES - wait_at > 180000u) {           /* v0.33: 2 minutes and still waiting or reading: give up */
+        wait_failed();
+        return;
+    }
+    if (!wait_go) {
+        wait_try();
+        return;
+    }
     int st = smp_analysis(0);
-    if (st == 1 && FRAMES - wait_at > 180000u) {    /* v0.33: 2 minutes and still reading: give up */
-        extern void smp_analyse_cancel(void);
-        smp_analyse_cancel();
-        note("CANNOT READ IT");
-        slc_state = S_OFF;
+    if (st == 0 || smp_analysis_slot() != slot) {   /* dropped (a project switch): again */
+        wait_go = 0;
         return;
     }
     if (st == 2) {
-        if (wait_for == S_GRID) {
-            make_grid();
-            edit_open();                        /* v0.26: on to the editor, as the DT2's */
-        } else {
-            edit_open();
-        }
+        if (wait_for == S_GRID && !wait_made)
+            make_grid();                        /* TR.DET: at the hits the read found */
+        edit_open();                            /* v0.26: on to the editor, as the DT2's */
     } else if (st < 0) {
-        note("CANNOT READ IT");
-        slc_state = S_OFF;
+        if (++wait_again < 3)
+            wait_go = 0;                        /* the next pass starts it again */
+        else
+            wait_failed();
     }
 }
 
@@ -531,12 +607,26 @@ static void edit_knob(int idx, int d)
     if (!slc_ns && idx != 6 && idx != 7)
         return;
     u32 *s = &slc_sl[3 * slc_cur], *e = s + 1, *l = s + 2;
+    /* v0.40, LINKED: the neighbour that touches this slice (the previous one's end at this
+     * start, the next one's start at this end) moves with it; each keeps a frame at least */
+    u32 *pe = slc_linked && slc_cur > 0 && s[-2] == *s ? s - 2 : 0;           /* previous end */
+    u32 *ns = slc_linked && slc_cur + 1 < slc_ns && s[3] == *e ? s + 3 : 0;   /* next start */
     switch (idx) {
+    case 1:                                                       /* A: LINKED / UNLINKED (v0.40) */
+        slc_linked = d < 0;
+        return;
     case 4:                                                       /* D: the preview's mode (v0.30) */
         pv_loop = d > 0;
         (void)l;
         return;
-    case 5: move(s, d, 0, *e - 1u); if (*l < *s) *l = *s; break;  /* E START */
+    case 5:                                                       /* E START */
+        move(s, d, pe ? s[-3] + 1u : 0u, *e - 1u);
+        if (*l < *s) *l = *s;
+        if (pe) {
+            *pe = *s;
+            if (s[-1] >= *pe) s[-1] = *pe - 1u;  /* its loop inside it */
+        }
+        break;
     case 6:                                                       /* F ZOOM; FUNC: the height */
         if (func)
             vzoom = vzoom + d < 0 ? 0 : vzoom + d > 3 ? 3 : vzoom + d;
@@ -564,7 +654,14 @@ static void edit_knob(int idx, int d)
         view0 = d < 0 ? (view0 > a ? view0 - a : 0u) : (view0 + a < m ? view0 + a : m);
         return;
     }
-    case 8: move(e, d, *s + 1u, slc_nfr); if (*l >= *e) *l = *e - 1u; break;   /* H END */
+    case 8:                                                       /* H END */
+        move(e, d, *s + 1u, ns ? ns[1] - 1u : slc_nfr);
+        if (*l >= *e) *l = *e - 1u;
+        if (ns) {
+            *ns = *e;
+            if (ns[2] < *ns) ns[2] = *ns;       /* its loop inside it */
+        }
+        break;
     default: return;
     }
     dirty = 1;
@@ -712,8 +809,8 @@ int slc_pop(u8 *it)
     }
     if (slc_state == S_WAIT) {                  /* nothing while it reads, but NO leaves (v0.33: */
         if (press && code == K_NO) {            /* a read that never ends must not hold every key) */
-            extern void smp_analyse_cancel(void);
-            smp_analyse_cancel();
+            if (wait_go)                        /* v0.40: (only ours: not TRIM's while waiting) */
+                smp_analyse_cancel();
             slc_state = S_OFF;
             return 1;
         }
@@ -787,14 +884,9 @@ int slc_pop(u8 *it)
         if (code == K_NO)
             slc_state = S_OFF;
         else if (code == K_YES) {
-            if (grid_tr) {
-                start_analysis(S_GRID);         /* the transients need the sample read */
-            } else {
-                int i16;
-                slc_nfr = smp_slot_frames(slot, &i16);
-                make_grid();
-                start_analysis(S_EDIT);         /* v0.26: on to the editor (its waveform read), as the DT2's */
-            }
+            /* the transients need the sample read; v0.40: even slices too wait for it to be
+             * readable (made as its read starts, wait_try), then on to the editor */
+            start_analysis(S_GRID);
         }
     } else if (slc_state == S_EDIT) {
         edit_key(code, chord);

@@ -1627,6 +1627,8 @@ static int an_slot __attribute__((section(".data"))) = -1;
 #define D_ __attribute__((section(".data")))
 static u32 an_lo D_ = 0, an_hi D_ = 0, an_at D_ = 0;           /* bytes into the image */
 static u32 an_hop D_ = 64, an_n D_ = 0, an_acc D_ = 0, an_cnt D_ = 0;   /* frames a step; steps */
+static int an_tries D_ = 0;                                      /* v0.40: the chunk's refused reads */
+#define AN_TRIES 8
 
 /* slot K's frames and whether its frames are int16 (all that dn2samples and the recorder make) */
 u32 smp_slot_frames(int k, int *i16)
@@ -1655,10 +1657,40 @@ int smp_analyse(int k)
     an_n = 0;
     an_acc = 0;
     an_cnt = 0;
+    an_tries = 0;
     for (u32 j = 0; j < HIRES_W; j++)
         HIRES[j] = 0;
     an_state = 1;
     return 0;
+}
+
+/* v0.40 (a user: EDIT SLICE POINTS and CREATE SLICE GRID "sometimes return CANNOT READ IT;
+ * repeatedly selecting eventually works"): the slice menus' start of the read. smp_analyse
+ * refuses while any read runs, and the recorder's TRIM starts one on every saved take (rec.c),
+ * 64 KB a UI pass: a long take's ran on for seconds after the recorder closed, and every
+ * slice menu opened meanwhile said CANNOT READ IT. Here the menu's read comes first: another
+ * slot's is dropped (TRIM falls back to its overview), the same slot's is kept. And it waits,
+ * not fails, while the slot cannot be read yet: a pool switch under way, the +Drive not up,
+ * the slot's take still being saved or normalised (its frames on the +Drive not yet final),
+ * LOAD TO PROJECT still copying into it. -> 0 started (or running for K), 1 not now, -1 never
+ * (no int16 sample there, no store) */
+static int lp_into(int k);
+int smp_analyse_ui(int k)
+{
+    if (smp_pl_busy() || !BLK_READY)
+        return 1;
+    if (k < 0 || k >= POOL_SLOTS)
+        return -1;
+    if ((sstate && s_slot == (u32)k) || lp_into(k))
+        return 1;
+    int i16;
+    if (!smp_slot_frames(k, &i16) || !i16 || !store_ok())
+        return -1;
+    if (an_state == 1 && an_slot == k)
+        return 0;
+    if (an_state == 1)
+        an_state = 0;
+    return smp_analyse(k) == 0 ? 0 : -1;
 }
 
 int smp_analysis(int *pct)
@@ -1685,9 +1717,12 @@ static void analyse_poll(void)
         n = CHUNK;
     n = (n + 511u) & ~511u;
     if (image_read(an_at, n, STAGE(3)) != 0) {
+        if (++an_tries < AN_TRIES)              /* v0.40: a refused read is tried again, the */
+            return;                             /* next passes; AN_TRIES refusals in a row: failed */
         an_state = -1;
         return;
     }
+    an_tries = 0;
     u32 frames = (an_hi - an_lo) / 2u;
     for (u32 x = an_at; x < an_at + n; x += 2) {
         if (x < an_lo || x + 1 >= an_hi)
@@ -1882,6 +1917,7 @@ static short lp_q[LPQ] __attribute__((section(".data")));
 static u32 lp_head __attribute__((section(".data"))) = 0, lp_tail __attribute__((section(".data"))) = 0;
 static int lp_k __attribute__((section(".data"))) = -1;      /* the library entry being copied */
 static int lp_slot __attribute__((section(".data"))) = -1;
+static int lp_into(int k) { return lp_k >= 0 && lp_slot == k; }   /* v0.40: LOAD TO PROJECT copying into K */
 static u32 lp_off __attribute__((section(".data"))) = 0, lp_bytes __attribute__((section(".data"))) = 0;
 static u32 lp_at __attribute__((section(".data"))) = 0;
 int smp_lp_done __attribute__((section(".data"))) = 0;       /* loaded since the browser asked */
