@@ -61,14 +61,43 @@ ticks at 1x).
 | site | stock | ours |
 |---|---|---|
 | `0x400fa1da` | `jsr 0x400d93f0` (the PTN view's one-pattern cue) | `jmp_cue`: stock's cue, then armed if the setting is on and it plays (`0x42c5a918` = 1) |
-| `0x400da406` | `move.b 0x42c5a91e,%d1` | `jmp_tick`: armed, on a tick that is not a step boundary and with no stop pending (`0x42c5a9e9`), the queue path runs now (d1 = 2) |
-| `0x400da45a` | `mvs.w 0x42c5aab4,%d1` | `jmp_arm`: armed and the head is another pattern: straight to stock's arming `0x400da4d2` (the "last step?" test skipped) |
+| `0x400da406` | `move.b 0x42c5a91e,%d1` | `jmp_tick`: armed: something already armed (ours, or stock's own change at the pattern's end) is made ours; else tick 2 is stock's, and on a tick past 2 with no stop pending (`0x42c5a9e9`) the queue path runs now (d1 = 2). Never tick 1 (v0.40, §3a) |
+| `0x400da45a` | `mvs.w 0x42c5aab4,%d1` | `jmp_arm`: armed and the head is another pattern: straight to stock's arming `0x400da4d2` (the "last step?" test skipped); not another pattern on a forced tick: the tick ends as stock's past 2 (`0x400da902`) |
 | `0x400da6e6` | `lea 0x42c5a9c4,%a1` | `jmp_switch`: for the switch we armed (`0x42c5a9a0` / `0x42c5a9a8` match), the master start step from `jmp_position()`; stock's per-track code then reads the new pattern (a5) |
 | `0x400da8cc` | `pea 0x401f6b25` | `jmp_tracks`: each track's start step: its own step in the playing pattern + 1, wrapped by its new length |
 | `0x402008cc` | the PTN view's key handler `0x400fa6be` | `jmp_key`: PTN + YES / NO; everything else to `0x400fa6be` |
 
-Every site's stock bytes are checked before the write, and 11 guards cover what the shims
+Every site's stock bytes are checked before the write, and 14 guards cover what the shims
 return to and rely on (`JUMP_GUARDS`, recorded in `waverider_code.json`).
+
+### 3a. v0.40: every cue, rapid fire too
+
+Owner and a user on v0.39 hardware: DIRECT JUMP "works ~70% of the time", the rest changes
+at the pattern's end; "it works consistently if you don't rapid-fire it". Reproduced in the
+emulator (`emu_jump.py --scenario rapid`, 83 cues): **29 failed on v0.39's code**, three causes:
+
+1. **A cue taken on tick 1 was dropped.** v0.39's `jmp_tick` ran the queue's path on any tick
+   but the boundary, so a cue made after tick 0 (or after the step's last tick) armed on tick
+   1; stock's own tick 2 then ran that path again, and its first act is to clear the arming
+   (`0x400da41c`, `clr.l 0x42c5aaac`). Not the last step: nothing re-armed, and the change
+   waited for the pattern's end (or its CHANGE). One cue in three lands there (2 ticks of 6),
+   and a quick second cue after a jump lands right after a boundary: rapid fire. Now tick 1
+   waits for tick 2, where `jmp_arm` arms it; the switch is at the same boundary.
+2. **A cue after stock had armed its own change** (made on the playing pattern's last step,
+   after its tick 2): stock's switch at the end took the new cue (its cue routine replaces the
+   list) and started it at 0. Now `jmp_tick` makes that switch ours (`jmp_pending`,
+   `jmp_from`): from where the pattern was.
+3. **A second cue before the switch** (the first armed, the boundary next): the switch took
+   the newest cue, but `jmp_position` accepted only the pattern armed (`jmp_to`): start 0. Now
+   any switch we made ours goes on from `jmp_from`, to whatever it installs, and the cue is
+   taken there (`jmp_armed` cleared).
+
+Also: on a forced tick (past 2) whose head is not another pattern (the playing one cued), the
+tick ends as stock's own ticks past 2 do, so its last-step test and program change are not run
+twice; stopped, nothing armed is kept for the next PLAY (`jmp_poll`).
+
+The rule now: a cue switches at the first step boundary after it; at the one after that only
+when no tick of its step was left (cued after the step's last tick) and nothing was armed.
 
 **The start step (Elektron's rule).** The switch is at a step boundary, after that boundary's
 step of the playing pattern has been taken, so what starts is the step after it:
@@ -132,6 +161,7 @@ A01 has played a loop and a half and is on its own step 6), played to step 36 (o
 | on, odd | switch at step 19 (A01's step 7 plays there); A02 from step 20 on its step 8 (the grid since PLAY would have given 4); every track by the rule to step 50 |
 | on, cued through `0x400d93f0` directly (program change / chain / song path) | stock's: trace digest `377d5149…`, no jump |
 | persist | on, power-on reads it back on; PTN + NO off, written, power-on reads it off; only `0x6FF000` read or written |
+| rapid (v0.40) | four patterns (16, 12, 7 at 2x, 5 steps); 51 cues each 0 .. 47, 60, 72, 95 ISR entries after the previous switch (every phase of two steps), 28 pairs 0 .. 6 entries apart, 4 with PTN held across two: every cue at the first boundary (the next only after the step's last tick), the new pattern on the playing one's step + 1 wrapped by its length; v0.39's code: 29 of 83 fail |
 
 No fault in any run. Boot from reset passes on the build (draws its UI, the start-up frame as the
 animation's first; v0.37's redraw then, s!Rwa²'s own frames since v0.39).
@@ -150,3 +180,9 @@ animation's first; v0.37's redraw then, s!Rwa²'s own frames since v0.39).
 - A cue armed, the setting turned off and another pattern cued within the same step: the
   second pattern is switched to at once, at step 0 (a race of one step; not reachable by
   ordinary use).
+- The UI's cue and the sequencer ISR share `jmp_armed` / `jmp_pending` / `jmp_from`: the ISR
+  is never interrupted by the UI, the UI writes single bytes, and a switch clears what it
+  took; the emulator enters the ISR between UI steps, not mid-instruction, so an interrupt
+  inside stock's cue routine itself (its list copy) is stock's own race, unchanged.
+- A PTN cue armed and, before the boundary, a program change or chain cue replacing stock's
+  list: the switch jumps to that one (from where the pattern was).

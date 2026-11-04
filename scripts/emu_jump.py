@@ -29,6 +29,17 @@ steps since) wrapped by its new length. Scenarios:
   as program changes, chains and songs cue): stock's timing.
 - `persist`: PTN + YES, then a power-on (the setting's RAM back to its boot values; the UI
   reads the sector); PTN + NO, a power-on again.
+- `rapid` (v0.40, the owner's "works ~70% of the time, not when rapid-fired"): the setting on,
+  four patterns (A01 16 steps, A02 12, A03 7 at 2x, A04 5), cued one after another, each a
+  given number of ISR entries after the previous switch (0, 1, 2 ... 47, then 60, 72, 95: every
+  phase of the step), then pairs of cues before one switch (the second cue replacing the first,
+  0..6 entries apart, and PTN held across both). Every cue must switch to the pattern cued
+  last, at the first step boundary after it (the one after that only when no tick of the step
+  was left: cued after its last tick, with nothing armed), and the new pattern's first step must be the playing
+  pattern's step + 1 wrapped by its length. v0.39 fails it (29 of 83 cues): a cue taken on
+  tick 1 was dropped by stock's tick 2 (which clears the arming), so the change waited for the
+  pattern's end; a cue after stock had armed its own change (on the last step) started the new
+  pattern at 0; a second cue taken by the switch before it was armed started at 0.
 
 Prints one JSON line `emu_jump <scenario>: {...}`; `--json` keeps it with the trace.
 """
@@ -70,7 +81,7 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--build", required=True, help="a directory with the build's section_3_MAIN_OS.bin")
     p.add_argument("--snapshot", required=True)
-    p.add_argument("--scenario", required=True, choices=("off", "on", "ref", "pc", "persist"))
+    p.add_argument("--scenario", required=True, choices=("off", "on", "ref", "pc", "persist", "rapid"))
     p.add_argument("--variant", default="pp", choices=("pp", "pt", "odd"))
     p.add_argument("--stock", action="store_true", help="install nothing: the control")
     p.add_argument("--png-dir", default=None)
@@ -244,10 +255,13 @@ def main() -> int:
         s = disk.get(SET_SECTOR)
         return None if s is None else s[:16].hex()
 
-    if a.scenario in ("on", "persist", "pc"):
+    if a.scenario in ("on", "persist", "pc", "rapid"):
         press_with_ptn(YES, "ptn_yes")
         panel.settle(5_000_000)
         out.update(on=sym("jmp_on"), sector_after_yes=sector(), writes_after_yes=list(io["writes"]))
+
+    if a.scenario == "rapid":
+        return rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn)
 
     if a.scenario == "persist":
         # power-on: the setting's RAM as the loader leaves it (.data: off, unread), the
@@ -339,6 +353,118 @@ def main() -> int:
     if a.json:
         pathlib.Path(a.json).write_text(json.dumps({**out, "trace": trace}, indent=1))
     return 0 if not faults else 1
+
+
+def rapid(a, m, panel, out, record, trace, sym, faults, isr, u8, u32, press_with_ptn) -> int:
+    """the rapid-fire sweep (the module's docstring, `rapid`)"""
+    pats = [P0 + n * PSTRIDE for n in range(4)]
+    lens = [16, 12, 7, 5]
+    scales = [2, 2, 0, 2]                                 # A03 at 2x (3 ticks a step)
+    for pat, n, sc in zip(pats, lens, scales):
+        m.write(pat + LEN, struct.pack(">h", n))
+        m.write(pat + MODE, b"\0")
+        m.write(pat + SCALE, bytes([sc]))
+
+    def pat_index():
+        v = u32(0x42C5A9A0)
+        return (v - P0) // PSTRIDE if v >= P0 else -1
+    count = [0]
+
+    def entry():
+        isr()
+        count[0] += 1
+        if count[0] % 8 == 0:
+            panel.settle(200_000)
+        return record()
+
+    def cue(keys):
+        panel.hold(PTN, 3_000_000)
+        for k in keys:
+            panel.tap(TRIG[k], after=2_000_000)
+        panel.let_go(PTN, 3_000_000)
+        return record("cue")
+
+    record("start")
+    panel.tap(PLAY)
+    record("play")
+    for _ in range(3 * 24):                              # on into A01's step 3
+        entry()
+    plan = [(off, None) for off in [*range(48), 60, 72, 95]]
+    plan += [(off, gap) for off in (3, 9, 13, 20) for gap in range(7)]
+    plan += [(off, "held") for off in (2, 7, 11, 23)]
+    results, playing = [], pat_index()
+    for i, (off, gap) in enumerate(plan):
+        for _ in range(off):
+            entry()
+        playing = pat_index()
+        others = [n for n in range(4) if n != playing]
+        first = others[i % 3]
+        target = first
+        if gap == "held":
+            target = others[(i + 1) % 3]
+            c = cue([first, target])
+        else:
+            c = cue([first])
+            if gap is not None:
+                for _ in range(gap):
+                    entry()
+                target = next(n for n in others if n != first and n != pat_index())
+                if pat_index() == first:                     # switched already: cue from there
+                    target = next(n for n in range(4) if n != first)
+                c = cue([target])
+        cue_n = len(trace) - 1
+        jumps0 = sym("jmp_count", 4) or 0
+        # the step boundaries after the cue: a row whose tick is 0 after a row whose tick is not
+        sw = b1 = b2 = None
+        ticked = False
+        for _ in range(16 * 24 * 2):
+            prev = trace[-1]
+            r = entry()
+            if r["tick"] == 0 and prev["tick"] != 0:
+                if b1 is None:
+                    b1 = r["n"]
+                elif b2 is None:
+                    b2 = r["n"]
+            elif r["tick"] != prev["tick"] and b1 is None:
+                ticked = True                    # a tick of the cue's step after the cue
+            if r["pat"] != prev["pat"]:
+                sw = r
+                break
+        if sw is None:
+            results.append({"i": i, "off": off, "gap": gap, "ok": False, "why": "no switch"})
+            continue
+        # the first boundary; the one after only when no tick of the cue's step was left
+        # (and nothing was armed before the cue: then the first is right too)
+        row_ok = sw["n"] == b1 or (not ticked and sw["n"] == b2)
+        prev_cur = trace[sw["n"] - 1]["cur"][0] if sw["n"] > 0 else None
+        at = sw["cur"][0]                           # the old pattern's step, still played here
+        # the new pattern's first step: at the next boundary
+        nxt = None
+        for _ in range(3 * 24):
+            prev = trace[-1]
+            r = entry()
+            if r["tick"] == 0 and prev["tick"] != 0:
+                nxt = r
+                break
+        first_new = nxt["cur"][0] if nxt else None
+        want_first = (at + 1) % lens[target]
+        ok = (sw["pat"] == target and row_ok and first_new == want_first
+              and nxt is not None and nxt["pat"] == target)
+        res = {"i": i, "off": off, "gap": gap, "from": playing, "to": target, "got": sw["pat"],
+               "cue_tick": c["tick"], "ticked": ticked, "switch_row_after_cue": sw["n"] - cue_n,
+               "at_boundary": "b1" if sw["n"] == b1 else "b2" if sw["n"] == b2 else "late",
+               "want": "b1" if ticked else "b2", "at": at, "first_new": first_new,
+               "want_first": want_first, "ok": ok}
+        results.append(res)
+        # the next cue's offset counts from here: the boundary after the switch
+    bad = [r for r in results if not r["ok"]]
+    out.update(cues=len(results), bad=bad[:12], n_bad=len(bad), jumps=sym("jmp_count", 4),
+               results=results, faults=faults)
+    out["ok"] = not bad and not faults and len(results) == len(plan)
+    print(f"emu_jump rapid: {json.dumps({k: v for k, v in out.items() if k != 'results'})}", flush=True)
+    if a.json:
+        pathlib.Path(a.json).write_text(json.dumps({**out, "trace": trace}, indent=1))
+    return 0 if out["ok"] else 1
 
 
 if __name__ == "__main__":

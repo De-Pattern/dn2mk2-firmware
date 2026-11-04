@@ -501,6 +501,19 @@ def main() -> int:
     else:
         report["stock_skips_ours"] = rec5 == b"\xff\xff"
 
+    # ---- v0.40: TRIG page 2's frame on stock 1.11 (the control: our two places aside, the
+    # build's page must be stock's pixel for pixel) ----------------------------------------
+    if not build:
+        from emulib.panel import Panel                         # noqa: PLC0415
+        panel = Panel(machine, png_dir=a.png_dir or str(pathlib.Path(a.json or ".").parent / "slides-stock-png"))
+        panel.settle(5_000_000)
+        panel.tap((0, 0))
+        panel.settle(20_000_000)
+        panel.tap((0, 0))
+        panel.settle(20_000_000)
+        report["trig2_frame"] = bytes(panel.capture.frames[-1]).hex() if panel.capture.frames else None
+        panel.screen("stock_trig2_idle")
+
     # ---- the TRIG page, driven as a person would (the build only, last: it changes the UI) ---
     if build and a.png_dir:
         from emulib.panel import Panel                         # noqa: PLC0415
@@ -528,6 +541,100 @@ def main() -> int:
                 if h == bytes([head, 0x20 | t]):
                     return machine.word(tbl + REC * i + 2 + 2 * step)
             return 0xFFFF
+        # v0.40 (owner: "match identically the toggle icon from RTRG above SLD ... SLEN should
+        # resemble the LEN box above"): SLD and SLEN drawn by sl_draw_sld / sl_draw_slen on a
+        # canvas of our own, against stock's own cell routine 0x4006448a drawing RTRG and LEN
+        # (its view and cell taken from its own draw of this page) on another, pixel for pixel
+        # in the widget's area (x - 3 .. x + 21, y + 5 .. y + 24: the label's text differs);
+        # off and on, unlocked and locked (stock's p-lock look); SLEN against LEN where LEN's
+        # text is the same ("1/8", "1/4", "1/2": LEN 30, 46, 62), and for every SLEN value its
+        # box and its text's centre as LEN's. Then the page itself: our places as drawn there,
+        # everything else stock's page, pixel for pixel
+        CELL, RTRG_ID, LEN_ID = 0x4006448A, 0x132, 0x134
+        seen_cell = {}
+
+        def cell_hook(uc_, ad, sz, us):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            args = [machine.long(sp + 4 + 4 * i) for i in range(12)]
+            if args[4] in (RTRG_ID, LEN_ID) and args[4] not in seen_cell:
+                seen_cell[args[4]] = args
+                seen_cell.setdefault("canvas", bytes(machine.read(args[1], 0x40)))   # (on the UI's stack)
+        hcell = uc.hook_add(UC_HOOK_CODE, cell_hook, begin=CELL, end=CELL)
+        SCR = STACK_TOP + 0x1000
+
+        def canvas_pixels(cv):
+            w, h, stride, buf = (machine.long(cv + 4), machine.long(cv + 8), machine.long(cv + 12),
+                                 machine.long(cv + 16))
+            raw = machine.read(buf, 4 * stride * w)
+            words = struct.unpack(f">{stride * w}I", raw)
+            return {(x, y) for x in range(w) for y in range(h)
+                    if (words[x * stride + (y >> 5)] >> (31 - (y & 31))) & 1}
+
+        def scratch(n):
+            """a canvas as the page's (its header copied), its own cleared pixels"""
+            head = seen_cell["canvas"]
+            cv, buf = SCR + 0x800 * n, SCR + 0x800 * n + 0x100
+            machine.write(cv, head)
+            w, stride = struct.unpack(">I", head[4:8])[0], struct.unpack(">I", head[12:16])[0]
+            if not (0 < w <= 256 and 0 < stride <= 8):
+                raise SystemExit(f"the page's canvas header is not a bitmap: {head.hex()}")
+            machine.write(cv + 16, struct.pack(">I", buf))
+            machine.write(buf, bytes(4 * stride * w))
+            return cv
+
+        def area(px, x, y, dy=0):
+            return {(i - x, j - y) for i, j in px if x - 3 <= i <= x + 21 and y + 5 <= j <= y + 24 + dy}
+
+        def ours(kind, v, locked, x=24, y=0):
+            cv = scratch(1)
+            sym = lay["sl_draw_sld"] if kind == "sld" else lay["sl_draw_slen"]
+            call(sym, cv, x, y, v, locked)
+            return canvas_pixels(cv)
+
+        def stocks(cid, value, locked, x=24, y=0):
+            cv = scratch(2)
+            a_ = list(seen_cell[cid])
+            a_[1], a_[2], a_[3], a_[5], a_[7] = cv, x, y, value, locked
+            call(CELL, *a_)
+            return canvas_pixels(cv)
+
+        def widgets_check(frame):
+            if RTRG_ID not in seen_cell or LEN_ID not in seen_cell:
+                check("v0.40: stock's cell routine drew RTRG and LEN on page 2", False, f"{sorted(seen_cell)}")
+                return
+            for on in (0, 1):
+                for lk in (0, 1):
+                    a1, a2 = area(ours("sld", on, lk), 24, 0), area(stocks(RTRG_ID, on << 8, lk), 24, 0)
+                    check(f"v0.40: SLD {'ON' if on else 'OFF'}{' locked' if lk else ''} = stock's RTRG, pixel for pixel",
+                          a1 == a2 and len(a2) > 20, f"{len(a1 ^ a2)} pixels differ, {len(a2)} lit")
+            same = {0: 30, 1: 46, 2: 62}                        # 1/8, 1/4, 1/2: in LEN's own table
+            for k, lv in same.items():
+                for lk in (0, 1):
+                    a1, a2 = area(ours("slen", k, lk), 24, 0), area(stocks(LEN_ID, lv << 8, lk), 24, 0)
+                    check(f"v0.40: SLEN {k} unlocked/locked {lk} = stock's LEN with the same text",
+                          a1 == a2 and len(a2) > 20, f"{len(a1 ^ a2)} pixels differ")
+            box = {(i, j) for i, j in area(stocks(LEN_ID, 30 << 8, 0), 24, 0)
+                   if i in (0, 18) or j in (7, 23)}             # LEN's box: its outline
+            bad = []
+            for k in range(15):
+                px = area(ours("slen", k, 0), 24, 0)
+                text = {(i, j) for i, j in px if 0 < i < 18 and 7 < j < 23}
+                cx2 = min(i for i, _ in text) + max(i for i, _ in text) if text else -99
+                if {(i, j) for i, j in px if i in (0, 18) or j in (7, 23)} != box or abs(cx2 - 18) > 1:
+                    bad.append(k)
+            check("v0.40: every SLEN value: LEN's box, its text centred as LEN's", not bad, f"values {bad}")
+            live_check(frame, 0, 0, 4, 0, "idle")
+
+        def live_check(frame, sld, sld_lk, slen, slen_lk, what):
+            """the page's own places (canvas y up: screen row 63 - y) as sl_draw_* draws them"""
+            from emu import panel as P                          # noqa: PLC0415
+            lit = {(x, 63 - y) for x, y in P.lit(frame)}
+            for x, kind, v, lk in ((24, "sld", sld, sld_lk), (50, "slen", slen, slen_lk)):
+                want = {(i, j) for i, j in ours(kind, v, lk, x, 0) if x - 3 <= i <= x + 21 and 0 <= j <= 24}
+                got = {(i, j) for i, j in lit if x - 3 <= i <= x + 21 and 0 <= j <= 24}
+                check(f"v0.40: the page's {kind.upper()} place ({what}) is sl_draw's, label included",
+                      want == got and len(want) > 20, f"{len(want ^ got)} pixels differ")
+
         panel.settle(5_000_000)
         panel.tap(key(1))
         panel.settle(20_000_000)
@@ -538,6 +645,8 @@ def main() -> int:
         panel.screen("trig2_idle")
         check("TRIG page 2 draws SLD and SLEN (page 1 does not)", page2 == 1 and page1 == 0,
               f"page 1 up {page1}, page 2 up {page2}, drawn {machine.long(lay['sl_page_seen'])} times")
+        idle_frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
+        report["trig2_frame"] = idle_frame.hex()
         panel.tap(key(19))                                      # RECORD: grid recording
         panel.settle(10_000_000)
         panel.tap(key(25))                                      # a trig on step 1
@@ -549,6 +658,7 @@ def main() -> int:
         turn(4, 1)                                              # E: SLD on
         turn(5, 3)                                              # F: SLEN 1 -> 3 steps
         panel.screen("trig2_held_locked")
+        held_frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
         panel.let_go(key(25))
         panel.settle(10_000_000)
         tbl = machine.long(lay["sl_ui_table"])
@@ -688,6 +798,11 @@ def main() -> int:
               got == [1, 2] and st9 == 0x1234 + 5 and [lock(tbl, 0, 5, 0), lock(tbl, 0, 5, 1)] == [1, 2],
               f"step 9 {got}, stock {st9}, hits {hits}")
         panel.screen("after_trig_paste")
+
+        # v0.40: the drawing checks, last (they call into the firmware on a canvas of their
+        # own, outside the UI's run)
+        widgets_check(idle_frame)
+        live_check(held_frame, 1, 1, 7, 1, "held, locked")
 
     faults = getattr(machine.m, "faults", [])[faults_before:]
     check("no fault", not faults, f"{len(faults)} fault(s)")

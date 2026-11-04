@@ -1750,13 +1750,16 @@ def main() -> int:
         # half into a 16-step one); with equal lengths from PLAY, where stock plays that pattern
         # from PLAY. On, a cue through the sequencer's own cue routine (program changes,
         # chains, songs): stock's. The setting written to its sector, read back at power-on, NO turns
-        # it off. No fault anywhere
+        # it off. v0.40 (owner: "works ~70% of the time", not when rapid-fired): 83 cues one after
+        # another at every phase after the previous switch, pairs before one switch, PTN held
+        # across two: each at the first step boundary, from where the pattern was (v0.39's code
+        # fails 29). No fault anywhere
         if "jmp_on" in lay:
             jdir = work / "jump"
             jdir.mkdir(exist_ok=True)
             jruns = [("off", "pp", True), ("off", "pp", False), ("pc", "pp", False), ("on", "pp", False),
                      ("ref", "pp", True), ("on", "pt", False), ("ref", "pt", True), ("on", "odd", False),
-                     ("persist", "pp", False)]
+                     ("persist", "pp", False), ("rapid", "pp", False)]
             jcmds = [[a.venv, "-u", "scripts/emu_jump.py", "--build", bdir, "--snapshot", snap, "--scenario", sc,
                       "--variant", var, "--png-dir", jdir / "screens", "--json", jdir / f"{sc}_{var}_{'stock' if st else 'build'}.json"]
                      + (["--stock"] if st else []) for sc, var, st in jruns]
@@ -1795,6 +1798,10 @@ def main() -> int:
                             why.append(f"{var}: after the jump, steps {bad[:4]} are not where stock plays that pattern")
                 if not res[("persist", "pp", False)].get("ok"):
                     why.append("the setting did not persist (or wrote outside its sector)")
+                rp = res[("rapid", "pp", False)]
+                if not rp.get("ok"):
+                    why.append(f"rapid fire: {rp.get('n_bad')} of {rp.get('cues')} cues not switched at the next "
+                               f"boundary from where the pattern was, e.g. {rp.get('bad', [])[:2]}")
                 on = res[("on", "pp", False)]
                 return not why, ("; ".join(why) if why else
                                  f"off and a program-change cue: stock's state every tick; on: switched "
@@ -1802,7 +1809,9 @@ def main() -> int:
                                  "every track goes on from its own step, wrapped by its new length (per pattern; per "
                                  "track, lengths 5, 7, 3; after a 12-step pattern's loop and a half, start "
                                  f"{res[('on', 'odd', False)]['jmp']['jmp_last']}), and from PLAY where stock plays it; "
-                                 "the setting written, read back at power-on, turned off")
+                                 "the setting written, read back at power-on, turned off; v0.40: rapid fire, "
+                                 f"{res[('rapid', 'pp', False)].get('cues')} cues at every phase after a switch "
+                                 "(pairs, PTN held across two), each at the next boundary")
             later("jump", "DIRECT JUMP (ColdFire)", "DIRECT JUMP (ColdFire)", [*jcmds, sorted(EMU_ENV.items())], jump_body)
 
         # 6s. parameter slides (docs/slides.md, scripts/emu_slides.py): on the ColdFire, a trig's
@@ -1833,13 +1842,29 @@ def main() -> int:
                                     "ours_loaded_rest_sha") if b.get(k) != s.get(k)]
                 if same or not s.get("stock_skips_ours"):
                     return False, f"differs from stock: {same or 'stock did not skip ids 200/201'}"
+                # v0.40: TRIG page 2, our two places (x 21..71, the bottom 25 rows) aside, is
+                # stock 1.11's page pixel for pixel
+                fb, fs = b.get("trig2_frame"), s.get("trig2_frame")
+                if not fb or not fs:
+                    return False, "TRIG page 2: no frame from the build or stock"
+                fb, fs = bytes.fromhex(fb), bytes.fromhex(fs)
+
+                def lit(buf):
+                    return {(x, y) for x in range(128) for y in range(64)
+                            if (buf[(7 - (y // 8)) + 8 * x] >> (y % 8)) & 1}
+                ours = lambda p: 21 <= p[0] <= 71 and p[1] >= 39          # noqa: E731
+                diff = {p for p in lit(fb) ^ lit(fs) if not ours(p)}
+                if diff:
+                    return False, f"TRIG page 2 differs from stock's outside SLD/SLEN: {len(diff)} pixels, e.g. {sorted(diff)[:4]}"
                 return True, (f"SLIDE on: FREQ and FDBK ramp over {b['expected_ramp_frames']} frames "
                               f"(1 step at {b['tempo_word_after_isr'] / 120:g} BPM), exact, landing on the "
                               f"locks; {len(b['checks'])} checks; SLIDE off: {len(b['off_shas'])} frames' "
                               f"arrays and the lock table's SAVE/LOAD identical to stock 1.11; the TRIG page's SLD/SLEN "
                               f"set through the panel, the held trig staying on after release; v0.40: track copy, "
                               f"clear and paste carry them exactly as the stock locks, trig copy/paste too, no "
-                              f"SLD/SLEN value in a stock lock")
+                              f"SLD/SLEN value in a stock lock; v0.40: SLD drawn as stock's RTRG and SLEN as "
+                              f"stock's LEN pixel for pixel (off/on, unlocked/locked), the page otherwise "
+                              f"stock's")
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
