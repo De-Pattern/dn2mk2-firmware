@@ -1896,6 +1896,12 @@ def main() -> int:
         # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records.
         # v0.40: copy and paste through the panel (track copy/clear/paste, trig copy/paste) carry
         # SLD/SLEN exactly as the track's stock lock beside them (both fail on v0.39's code)
+        # v0.40 review (scripts/emu_slides_paths.py): every hooked paste site driven and counted --
+        # shift right/left, track paste and its UNDO, page copy/paste and its UNDO, page autocopy
+        # on lengthening -- each against the whole lock table; slot 80 (shift and autocopy treat
+        # our records as stock's): the same routines with and without our records make the same
+        # writes outside them, from the same memory, and never touch the sound; a track and a trig
+        # paste on a nearly full lock table keep every stock lock (939cbc42 dropped two)
         # v0.40 (a user's report): a trig with a stock p-lock on a sample machine's SAMP (ONESHOT)
         # and on SLICE's SLCE, through stock's builder and applier and the real frame ISR (with
         # smp_mod_apply): the frame's word, played through the DSP's model, is exactly the locked
@@ -1939,7 +1945,9 @@ def main() -> int:
                               f"arrays and the lock table's SAVE/LOAD identical to stock 1.11; the TRIG page's SLD/SLEN "
                               f"set through the panel, the held trig staying on after release; v0.40: track copy, "
                               f"clear and paste carry them exactly as the stock locks, trig copy/paste too, no "
-                              f"SLD/SLEN value in a stock lock; v0.40: a SAMP and a SLCE p-lock play their own sample and "
+                              f"SLD/SLEN value in a stock lock; v0.40 review: shift, page paste and both "
+                              f"UNDOs, autocopy driven (site hits {b.get('paths_hits')}), slot 80 harmless, "
+                              f"a paste on a full table keeps every stock lock; v0.40: a SAMP and a SLCE p-lock play their own sample and "
                               f"slice whatever the track's (SAMP 10 and slice 7 over SAMP 2/5, slice 2/5); "
                               f"v0.40: SLD drawn as stock's RTRG and SLEN as "
                               f"stock's LEN pixel for pixel (off/on, unlocked/locked), the page otherwise "

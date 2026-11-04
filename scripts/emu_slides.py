@@ -937,6 +937,12 @@ def main() -> int:
               f"step 9 {got}, stock {st9}, hits {hits}")
         panel.screen("after_trig_paste")
 
+        # v0.40 review: the five paste sites nothing above drives (page paste and its UNDO, track
+        # paste's UNDO, shift, page autocopy), slot 80 in shift and autocopy, and a paste on a
+        # nearly full lock table (scripts/emu_slides_paths.py)
+        from emu_slides_paths import Paths                    # noqa: PLC0415
+        Paths(machine, panel, lay, check, report).run()
+
         # v0.40: the drawing checks, last (they call into the firmware on a canvas of their
         # own, outside the UI's run)
         widgets_check(idle_frame)
