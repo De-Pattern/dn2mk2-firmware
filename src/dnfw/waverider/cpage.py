@@ -43,6 +43,9 @@ LINK_ENTRIES = ["smp_rx_hook", "smp_hi", "smp_walk", "smp_booted", "smp_key", "s
                  "smp_er_done", "smp_er_total", "smp_er_trims", "smp_er_reads", "smp_er_checks", "smp_er_nchecks",
                  "smp_er_job", "smp_er_start", "smp_er_poll", "smp_fb_menu",
                  "smp_er_retries", "smp_er_waits", "smp_er_resume",   # v0.41
+                 # v0.40: the slice menus' wait, LINKED points, the playhead's redraw (gate: slice, samplist)
+                 "slc_pop", "slc_poll", "slc_stock_asked", "slc_fails", "slc_linked", "smp_norm_state",
+                 "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",
                  # v0.40: folders inside folders (lib.c, smp_page.c)
                  "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"]
 # parameter slides (csrc/slides, dnfw.slides): the hooks and the state the checks read

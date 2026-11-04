@@ -535,25 +535,42 @@ static void marker(void *c, int x, int cy, int dotted)
 extern int smp_playhead(int t);
 #define UI_TRACK (*(volatile u8 *)0x42431A6Cu)
 
-static u32 ph_drawn_at __attribute__((section(".data"))) = 0;    /* the waveform page's last draw */
 static int ph_was __attribute__((section(".data"))) = -1;         /* the playhead it drew (-1 none) */
+/* v0.40 (owner: "the slice machine's on-screen indicators are a little slow to catch up"; the
+ * main cause was the voice drawn, link.c's smp_playhead): v0.25..v0.39 asked for a redraw 25
+ * times a second while anything played, and took the page as up while drawn in the last
+ * 1.2 s (stock redraws an idle page about every 0.4 s, emulator). Now the page is up while
+ * the screen's LAST draw drew it (page.c counts the draws), and a redraw is asked for when
+ * the column the playhead falls in differs from the one drawn (nothing else on the page is
+ * drawn from the position: the playhead, SLICE / GRID's playing-slice bar), 37 a second at
+ * most; a still playhead asks for none */
+extern u32 wr_draws;
+static u32 ph_draw_n __attribute__((section(".data"))) = 0xFFFFFFFFu;   /* wr_draws when last drawn */
+static int ph_x0 __attribute__((section(".data"))) = 0, ph_w __attribute__((section(".data"))) = 2;
+static int ph_col __attribute__((section(".data"))) = -1;        /* the column drawn (-1 none) */
 
-/* the UI loop asks (page.c's wr_poll): the waveform page is up and its playhead moves, or
- * has just stopped (one more draw clears it) */
+static int ph_column(int ph)                    /* the playhead's column, or -1 */
+{
+    return ph < 0 ? -1 : ph_x0 + (int)((unsigned)ph * (unsigned)(ph_w - 2) / POS_ONE);
+}
+
+/* the UI loop asks (page.c's wr_poll): the waveform page is up, and its playhead (and the
+ * slice it lights) would be drawn elsewhere now */
 int smp_wants_redraw(void)
 {
-    u32 now = *(volatile u32 *)0x4058E8D4u;
-    if (now - ph_drawn_at > 1800u)              /* not drawn for over a second: not up (FRAMES: ~1500 a second) */
+    if (ph_draw_n != wr_draws)                  /* the last screen drawn was not the page */
         return 0;
-    int ph = smp_playhead(UI_TRACK);
-    return ph >= 0 || ph_was >= 0;
+    return ph_column(smp_playhead(UI_TRACK)) != ph_col;
 }
 
 static void playhead(void *c, int x0, int w, int cy)
 {
     int ph = smp_playhead(UI_TRACK);
-    ph_drawn_at = *(volatile u32 *)0x4058E8D4u;
+    ph_draw_n = wr_draws;
+    ph_x0 = x0;
+    ph_w = w;
     ph_was = ph;
+    ph_col = ph_column(ph);
     if (ph < 0)
         return;
     int x = x0 + (int)((unsigned)ph * (unsigned)(w - 2) / POS_ONE);
@@ -1720,8 +1737,10 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     }
     if (slot >= 1 && smp_overview(slot - 1))
         playhead(c, x0, w, cy);
-    else
+    else {
         ph_was = -1;
+        ph_draw_n = wr_draws - 1u;              /* (no playhead on it: nothing to follow) */
+    }
     /* the bottom row: E, F, G's labels (WERP: its icons), H's level as the DT2's pill */
     for (int i = 4; i < 7; i++) {
         if (!ids[i])

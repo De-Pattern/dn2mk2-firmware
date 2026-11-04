@@ -244,6 +244,21 @@ volatile u32 smp_periods __attribute__((section(".data"))) = 0;   /* smp_tdm's c
  * fraction of the sample x POS_ONE), and when (periods) */
 volatile u16 smp_pos[16] __attribute__((section(".data"))) = {0};
 volatile u32 smp_pos_at __attribute__((section(".data"))) = 0;
+/* v0.40: when each voice's note began (periods): its position appeared, or jumped (a new
+ * note on the same voice), as the DSP's packets show it */
+volatile u32 smp_pos_born[16] __attribute__((section(".data"))) = {0};
+#define POS_JUMP (POS_ONE / 8u)                 /* more than any packet's advance: a new note */
+
+void smp_pos_in(const volatile u16 *p)          /* the 16 voices' positions of a DSP packet */
+{
+    for (int t = 0; t < 16; t++) {
+        u32 nv = p[t], ov = smp_pos[t];
+        if (nv != POS_NONE && (ov == POS_NONE || (nv > ov ? nv - ov : ov - nv) > POS_JUMP))
+            smp_pos_born[t] = periods;
+        smp_pos[t] = (u16)nv;
+    }
+    smp_pos_at = periods;
+}
 /* v0.30: when the DSP's frame guard last left each slot silent (periods, 0 never): the
  * PERC and Monomachine pages show CPU, in place of the tempo, while any is recent (a user: VO-6 went silent after a
  * second -- this tells a DSP-time skip from anything else) */
@@ -300,20 +315,26 @@ int smp_skipped_any(void)                       /* any voice, within the last ha
  * ColdFire's slot -> track table 0x80005308, which the frame builder sends as the DSP's
  * routing). v0.25..v0.29 drew voice t's position for track t: right only while voice t
  * played track t (the owner: the playing-slice marker lagged the sound). Now the voices
- * the table gives to track t, the playing one nearest its start (the newest note); none
- * there: voice t's, as before. */
+ * the table gives to track t, the newest note's; none there: voice t's, as before.
+ * v0.40 (owner: "the slice machine's on-screen indicators are a little slow to catch up"):
+ * v0.30..v0.39 took the voice whose position was LOWEST as the newest note's: on SLICE, a
+ * slice later in the sample played after an earlier one (still sounding on its voice, its
+ * release) was not shown until the earlier one ended. Now the voice whose note began last
+ * (smp_pos_born), the lowest position only between notes begun in the same period. */
 #define SLOT_TRACK ((volatile u32 *)0x80005308u)
 int smp_playhead(int t)
 {
     if (t < 0 || t > 15 || periods - smp_pos_at > 64u)
         return -1;
-    u32 best = POS_NONE;
+    u32 best = POS_NONE, age = 0;
     for (int v = 0; v < 16; v++) {
-        u32 tr = SLOT_TRACK[v], pos = smp_pos[v];
+        u32 tr = SLOT_TRACK[v], pos = smp_pos[v], a = periods - smp_pos_born[v];
         if (tr != (u32)t || pos == POS_NONE)
             continue;
-        if (best == POS_NONE || pos < best)
+        if (best == POS_NONE || a < age || (a == age && pos < best)) {
             best = pos;
+            age = a;
+        }
     }
     if (best == POS_NONE)
         best = smp_pos[t];
@@ -412,9 +433,7 @@ void smp_tdm(u32 h)
     if ((u16)sum != v[63])
         return;
     if (v[0] == POS_MAGIC) {                    /* v0.25: idle, the voices' play positions */
-        for (int t = 0; t < 16; t++)
-            smp_pos[t] = v[1 + t];
-        smp_pos_at = periods;
+        smp_pos_in(v + 1);
         for (int t = 0; t < 16; t++)            /* v0.30: the slots the DSP's guard skipped */
             if (v[17] >> t & 1u)
                 smp_skip_at[t] = periods | 1u;
@@ -1627,6 +1646,8 @@ static int an_slot __attribute__((section(".data"))) = -1;
 #define D_ __attribute__((section(".data")))
 static u32 an_lo D_ = 0, an_hi D_ = 0, an_at D_ = 0;           /* bytes into the image */
 static u32 an_hop D_ = 64, an_n D_ = 0, an_acc D_ = 0, an_cnt D_ = 0;   /* frames a step; steps */
+static int an_tries D_ = 0;                                      /* v0.40: the chunk's refused reads */
+#define AN_TRIES 8
 
 /* slot K's frames and whether its frames are int16 (all that dn2samples and the recorder make) */
 u32 smp_slot_frames(int k, int *i16)
@@ -1655,10 +1676,40 @@ int smp_analyse(int k)
     an_n = 0;
     an_acc = 0;
     an_cnt = 0;
+    an_tries = 0;
     for (u32 j = 0; j < HIRES_W; j++)
         HIRES[j] = 0;
     an_state = 1;
     return 0;
+}
+
+/* v0.40 (a user: EDIT SLICE POINTS and CREATE SLICE GRID "sometimes return CANNOT READ IT;
+ * repeatedly selecting eventually works"): the slice menus' start of the read. smp_analyse
+ * refuses while any read runs, and the recorder's TRIM starts one on every saved take (rec.c),
+ * 64 KB a UI pass: a long take's ran on for seconds after the recorder closed, and every
+ * slice menu opened meanwhile said CANNOT READ IT. Here the menu's read comes first: another
+ * slot's is dropped (TRIM falls back to its overview), the same slot's is kept. And it waits,
+ * not fails, while the slot cannot be read yet: a pool switch under way, the +Drive not up,
+ * the slot's take still being saved or normalised (its frames on the +Drive not yet final),
+ * LOAD TO PROJECT still copying into it. -> 0 started (or running for K), 1 not now, -1 never
+ * (no int16 sample there, no store) */
+static int lp_into(int k);
+int smp_analyse_ui(int k)
+{
+    if (smp_pl_busy() || !BLK_READY)
+        return 1;
+    if (k < 0 || k >= POOL_SLOTS)
+        return -1;
+    if ((sstate && s_slot == (u32)k) || lp_into(k))
+        return 1;
+    int i16;
+    if (!smp_slot_frames(k, &i16) || !i16 || !store_ok())
+        return -1;
+    if (an_state == 1 && an_slot == k)
+        return 0;
+    if (an_state == 1)
+        an_state = 0;
+    return smp_analyse(k) == 0 ? 0 : -1;
 }
 
 int smp_analysis(int *pct)
@@ -1685,9 +1736,12 @@ static void analyse_poll(void)
         n = CHUNK;
     n = (n + 511u) & ~511u;
     if (image_read(an_at, n, STAGE(3)) != 0) {
+        if (++an_tries < AN_TRIES)              /* v0.40: a refused read is tried again, the */
+            return;                             /* next passes; AN_TRIES refusals in a row: failed */
         an_state = -1;
         return;
     }
+    an_tries = 0;
     u32 frames = (an_hi - an_lo) / 2u;
     for (u32 x = an_at; x < an_at + n; x += 2) {
         if (x < an_lo || x + 1 >= an_hi)
@@ -1882,6 +1936,7 @@ static short lp_q[LPQ] __attribute__((section(".data")));
 static u32 lp_head __attribute__((section(".data"))) = 0, lp_tail __attribute__((section(".data"))) = 0;
 static int lp_k __attribute__((section(".data"))) = -1;      /* the library entry being copied */
 static int lp_slot __attribute__((section(".data"))) = -1;
+static int lp_into(int k) { return lp_k >= 0 && lp_slot == k; }   /* v0.40: LOAD TO PROJECT copying into K */
 static u32 lp_off __attribute__((section(".data"))) = 0, lp_bytes __attribute__((section(".data"))) = 0;
 static u32 lp_at __attribute__((section(".data"))) = 0;
 int smp_lp_done __attribute__((section(".data"))) = 0;       /* loaded since the browser asked */
