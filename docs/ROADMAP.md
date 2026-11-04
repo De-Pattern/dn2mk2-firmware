@@ -13,22 +13,23 @@ In this order unless the owner changes it:
    (MM chords over several MD tracks: a garbled, bitcrushed background) first, since the
    DSP-time guard should drop voices cleanly and doesn't always. Current costs:
    `docs/dsp-cost.md` (2026-11-03); the L2 table move was measured and is not worth it.
-2. **Slides on the sample and Machinedrum machines' own controls** (owner, 2026-11-03).
+2. **Octatrack-style rec trigs: the first thing built after v0.40** (owner, 2026-11-04:
+   "implement rec trigs after this"). A trig that records a set length (or until stopped),
+   QREC (starts on the next bar / interval), maybe QPL; for bouncing heavy machines to
+   samples.
+3. **Slides on the sample and Machinedrum machines' own controls** (owner, 2026-11-03).
    Today only their shared slots slide (filter, amps, FX sends, LFOs). Per machine: mark
    which of its controls are continuous (the detented choices never slide: TYPE, SAMP,
    modes), and check each sliding control changes the sound mid-note (MD machines and
    STRT read some controls only at note-on: those would slide silently, so leave them
    out). Gate: choices never move during a slide; continuous ones land on the lock.
    Start with the sample machines (TUNE) and MD.
-3. **Octatrack-style rec trigs**: a trig that records a set length (or until stopped),
-   QREC (starts on the next bar / interval), maybe QPL; for bouncing heavy machines to
-   samples.
 0. **Aggregat** (owner, 2026-11-03: "after 40"): read github.com/70b185/Aggregat (its
    `export/aggregat.sqlite`, the research map) before the next new DN2 work, for known DN2
    facts and dead ends (they report three DN2 mod platforms loading at the same RAM
    address); later, maybe contribute our unit-proven facts, credited to De-Pattern only.
 4. **Capicola time-stretch** (heavylight; `Capicola Stretch for DT2.7z` in the owner's
-   project): after rec trigs. A switch on the sample machines vs his separate engines:
+   project): after rec trigs and slides. A switch on the sample machines vs his separate engines:
    compare first, then the owner decides.
 
 ## Next (from v0.10; historical)
