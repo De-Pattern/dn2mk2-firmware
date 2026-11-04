@@ -362,7 +362,7 @@ void rec_poll(void)
         if (mk != work_mark) {
             work_mark = mk;
             work_at = FRAMES | 1u;
-        } else if (FRAMES - work_at > 30000u) {
+        } else if ((int)(FRAMES - work_at) > 30000) {   /* v0.40: signed (FRAMES unchanged since: -1) */
             rec_phase = PH_REC;
             smp_overlay_dirty = 1;
         }

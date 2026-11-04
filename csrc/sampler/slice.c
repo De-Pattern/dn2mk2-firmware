@@ -560,7 +560,12 @@ void slc_poll(void)
     }
     if (!wait_at)
         wait_at = FRAMES | 1u;
-    if (FRAMES - wait_at > 180000u) {           /* v0.33: 2 minutes and still waiting or reading: give up */
+    /* v0.33: 2 minutes and still waiting or reading: give up. v0.40: SIGNED. v0.33..v0.39
+     * compared FRAMES - (FRAMES | 1) unsigned in the pass that set it: with FRAMES even that
+     * is 0xFFFFFFFF, "2 minutes" at once, and CANNOT READ IT on about every other try of any
+     * sample longer than one 64 KB chunk (CREATE SLICE GRID, TR.DET OFF: its grid already
+     * made, no editor) -- the user's report, reproduced in the emulator (gate: slice) */
+    if ((int)(FRAMES - wait_at) > 180000) {
         wait_failed();
         return;
     }
