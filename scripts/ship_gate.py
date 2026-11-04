@@ -1049,7 +1049,10 @@ def main() -> int:
             # DELETE above emptied slot 1, so two are loaded: slots 0 and 3. SAMP 1 (slot 0):
             # +43 one sample on (SAMP 4), +125 to the last and no further (SAMP 4), +1 none
             # (SAMP 1). v0.29's first form set SAMP 2, the slot just deleted, and counted three)
-            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0100", f"poke:{cell:#x}:2c00",
+            # (v0.40: the reference is the voice's target cell, the sound's value or the trig's
+            # lock: SAMP 1 there as the sound's, as stock's sync puts it)
+            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0100", f"poke:{cell - 0x800068E4 + 0x80003AF0:#x}:0100",
+                   f"poke:{cell:#x}:2c00",
                    f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
                    f"poke:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
                    f"poke:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
@@ -1824,6 +1827,11 @@ def main() -> int:
         # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records.
         # v0.40: copy and paste through the panel (track copy/clear/paste, trig copy/paste) carry
         # SLD/SLEN exactly as the track's stock lock beside them (both fail on v0.39's code)
+        # v0.40 (a user's report): a trig with a stock p-lock on a sample machine's SAMP (ONESHOT)
+        # and on SLICE's SLCE, through stock's builder and applier and the real frame ISR (with
+        # smp_mod_apply): the frame's word, played through the DSP's model, is exactly the locked
+        # sample / slice, with the track's value on two others; unlocked trigs the track's (v0.39:
+        # the lock was a scaled offset from the track's value)
         if "sl_smooth" in lay:
             sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", snap,
                         "--json", work / f"slides-{k}.json",
@@ -1862,7 +1870,9 @@ def main() -> int:
                               f"arrays and the lock table's SAVE/LOAD identical to stock 1.11; the TRIG page's SLD/SLEN "
                               f"set through the panel, the held trig staying on after release; v0.40: track copy, "
                               f"clear and paste carry them exactly as the stock locks, trig copy/paste too, no "
-                              f"SLD/SLEN value in a stock lock; v0.40: SLD drawn as stock's RTRG and SLEN as "
+                              f"SLD/SLEN value in a stock lock; v0.40: a SAMP and a SLCE p-lock play their own sample and "
+                              f"slice whatever the track's (SAMP 10 and slice 7 over SAMP 2/5, slice 2/5); "
+                              f"v0.40: SLD drawn as stock's RTRG and SLEN as "
                               f"stock's LEN pixel for pixel (off/on, unlocked/locked), the page otherwise "
                               f"stock's")
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",

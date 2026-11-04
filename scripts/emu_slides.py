@@ -66,6 +66,142 @@ def idx(v, s):
     return 17 + 101 * v + s
 
 
+# ---- v0.40: a p-lock on a sample machine's SAMP (and SLICE's SLCE) ---------------------------
+# A user on v0.39: "The p-locked trig doesn't play the sample you lock it to, but it does seem
+# to play a different sample if you move the sample number 5 or 6 values higher or lower. It
+# also changes the p-locked trig's sample when you move the default track SAMP value."
+# smp_mod_apply (link.c, run by the frame ISR after the stock modulation apply) took any
+# difference between the voice's mirror and the SOUND's SAMP for modulation and scaled it over
+# the loaded samples, from the sound's SAMP: a lock became a scaled offset. Here the trigs are
+# stock's own lock builder and applier, every frame the real ISR (smp_mod_apply at its site),
+# and the SAMP / SLCE word the frame carries for the voice is played through the DSP's model
+# (dnfw.sampler.live, held to the assembled code by the SHARC runner): it must play exactly
+# what SAMP N (SLCE N) set on the track plays, whatever the track's own value is.
+SAMP_SLOT, SLCE_SLOT, SOUND_TYPE_AT = 43, 44, 222
+CF_FRAME = 0x80005E60
+LFO_DESTS = (4, 12, 20)                     # LFO1..3 DEST (docs/fx-master-modulation.md 4c)
+N_LOADED = 24                               # the user's "5 or 6 values": 128 / 24 = 5.3
+
+
+def samp_lock_checks(machine, call, frame, trig, table, snd, lay, put16, put32):
+    sys.path.insert(0, str(HERE.parent / "src"))
+    from dnfw.sampler import live as SL                    # noqa: PLC0415
+    from dnfw.sampler import machines as SMx               # noqa: PLC0415
+    V = 0
+    saved = {a: machine.read(a, n) for a, n in ((snd + SOUND_TYPE_AT, 1), (snd + 20 + 2 * SAMP_SLOT, 4),
+                                                *((snd + 20 + 2 * d, 2) for d in LFO_DESTS))}
+    dir_ok_was = machine.read(lay["smp_dir_ok"], 4)
+
+    # the pool as link.c's directory holds it (24 loaded slots, slot 2 with 16 slices), and the
+    # same pool for the DSP's model: slot k a level of its own, slot 2 a ramp cut in 16
+    n_sl, sl_len = 16, 256
+    ramp = [k / (n_sl * sl_len) for k in range(n_sl * sl_len)]
+    samples = [[(k + 1) / 32.0] * 3000 for k in range(N_LOADED)]
+    samples[2] = ramp
+    slices = [()] * N_LOADED
+    slices[2] = tuple((sl_len * j, sl_len * (j + 1), sl_len * j) for j in range(n_sl))
+    pool = SL.pool_bytes(samples, 0x84000000, [1.0] * N_LOADED, [0] * N_LOADED, None, slices)
+    machine.write(SMx.MIRROR, pool[:SMx.DATA_OFFSET])
+    put32(lay["smp_dir_ok"], 1)
+
+    def model(mtype, recs):
+        h = SL.Harness(0, samples=samples, rates=[1.0] * N_LOADED, fmts=[0] * N_LOADED, slices=slices)
+        h.defaults()
+        for r, v in recs.items():
+            h.set(r, v)
+        out = []
+        for b in range(8):
+            out += h.block(mtype, 60.0, b == 1)
+        return [round(x, 6) for x in out]
+
+    def heard(slot):
+        """the voice's word for SLOT: the mirror the frame is built from, and the frame's"""
+        return machine.word(OUT + 2 * idx(V, slot)), machine.word(CF_FRAME + 218 + 146 * V + 2 * (slot - 25))
+
+    def play(step, frames_now, slot):
+        trig(step, frames_now)
+        ok = all(frame() for _ in range(4))
+        return ok, heard(slot)
+
+    def lock(slot, step, value):                # a stock p-lock, in a record of its own (the
+        rec = next(i for i in range(RECS)       # SLIDE locks above hold records of ours)
+                   if machine.read(table + REC * i, 2) == b"\xff\xff")
+        machine.write(table + REC * rec, bytes([slot, 0]) + b"\xff\xff" * 128)
+        machine.write(table + INDEX + slot, bytes([rec]))
+        put16(table + REC * rec + 2 + 2 * step, value)
+
+    def set_track(slot, value):                 # the track's knob, turned a while before the trig:
+        put16(snd + 20 + 2 * slot, value << 8)  # the sound, the voice's target, and the smoother
+        put16(SRC + 2 * idx(V, slot), value << 8)       # settled on it
+        put32(STATE + 4 * idx(V, slot), value << 24)
+
+    f0 = machine.long(FRAMES) + 5000
+    # ---- ONESHOT on SAMP 2; step 1 locked to SAMP 10, step 2 not locked ----------------
+    machine.write(snd + SOUND_TYPE_AT, bytes([SMx.TYPE_OF["ONESHOT"]]))
+    put32(VSOUND + 4 * V, snd)
+    for d in LFO_DESTS:                         # the snapshot sound's LFOs off (stock applies them
+        set_track(d, 0)                         # after smp_mod_apply, on top of the frame's word)
+    set_track(SAMP_SLOT, 2)
+    lock(SAMP_SLOT, 1, 10 << 8)
+    ONE = SMx.TYPE_OF["ONESHOT"]
+    want = {n: model(ONE, {SMx.SAMP_REC: n}) for n in (2, 5, 10)}
+    check("v0.40 SAMP lock: the model's slots differ (the check can tell them apart)",
+          len({tuple(v) for v in want.values()}) == 3)
+    rows = {}
+    for tag, step, track_samp, n in (("locked", 1, 2, 10), ("unlocked", 2, 2, 2),
+                                     ("locked, track SAMP 5", 1, 5, 10), ("unlocked, track SAMP 5", 2, 5, 5)):
+        set_track(SAMP_SLOT, track_samp)
+        f0 += 100
+        ok, (out, fr) = play(step, f0, SAMP_SLOT)
+        plays = model(ONE, {SMx.SAMP_REC: fr >> 8})
+        rows[tag] = {"mirror": hex(out), "frame": hex(fr)}
+        check(f"v0.40 SAMP lock: {tag} trig (track SAMP {track_samp}) plays SAMP {n}",
+              ok and out == fr == n << 8 and plays == want[n],
+              f"mirror {out:#06x}, frame {fr:#06x}, want {n << 8:#06x}")
+    report["samp_lock"] = rows
+
+    # ---- modulation still steps through the loaded slots, now from the lock -------------
+    # (the stock apply's offset +43 at full scale: mod_scale(43, 24) = 8 loaded slots on)
+    set_track(SAMP_SLOT, 2)
+    trig(1, f0 + 100)
+    frame()
+    put16(OUT + 2 * idx(V, SAMP_SLOT), (10 + 43) << 8)
+    call(lay["smp_mod_apply"], OUT)
+    m = machine.word(OUT + 2 * idx(V, SAMP_SLOT))
+    check("v0.40 SAMP lock: modulation on a locked trig steps through the loaded slots from the lock",
+          m == 18 << 8, f"{m:#06x}, want {18 << 8:#06x} (from the track's SAMP 2 it would be 0x0c00)")
+
+    # ---- SLICE on SAMP 3 (the ramp's 16 slices), SLCE slice 2; step 3 locked to slice 7 ---
+    SLC = SMx.TYPE_OF["SLICE"]
+    machine.write(snd + SOUND_TYPE_AT, bytes([SLC]))
+    set_track(SAMP_SLOT, 3)
+    set_track(SLCE_SLOT, 4)
+    lock(SLCE_SLOT, 3, 14 << 8)
+    swant = {sl: model(SLC, {SMx.SAMP_REC: 3, SMx.SLICE_REC: 2 * sl}) for sl in (2, 5, 7)}
+    check("v0.40 SLCE lock: the model's slices differ", len({tuple(v) for v in swant.values()}) == 3)
+    srows = {}
+    for tag, step, track_sl, sl in (("locked", 3, 2, 7), ("unlocked", 2, 2, 2),
+                                    ("locked, track slice 5", 3, 5, 7), ("unlocked, track slice 5", 2, 5, 5)):
+        set_track(SLCE_SLOT, 2 * track_sl)
+        f0 += 100
+        ok, (out, fr) = play(step, f0 + 200, SLCE_SLOT)
+        plays = model(SLC, {SMx.SAMP_REC: 3, SMx.SLICE_REC: fr >> 8})
+        srows[tag] = {"mirror": hex(out), "frame": hex(fr)}
+        check(f"v0.40 SLCE lock: {tag} trig (track slice {track_sl}) plays slice {sl}",
+              ok and out == fr == (2 * sl) << 8 and plays == swant[sl],
+              f"mirror {out:#06x}, frame {fr:#06x}, want {(2 * sl) << 8:#06x}")
+    report["slce_lock"] = srows
+
+    # ---- put everything back for what follows ------------------------------------------
+    for a_, b_ in saved.items():
+        machine.write(a_, b_)
+    machine.write(lay["smp_dir_ok"], dir_ok_was)
+    machine.write(SMx.MIRROR, bytes(SMx.DATA_OFFSET))
+    call(SYNC, snd, V)
+    for s in range(101):
+        put32(STATE + 4 * idx(V, s), machine.word(SRC + 2 * idx(V, s)) << 16)
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
@@ -469,6 +605,8 @@ def main() -> int:
         check("the note-block hook replays its two instructions and keeps every register",
               r["D0"] == 0x12345678 and r["A4"] == 3 and r["D2"] == 3 and r["D3"] == 5 and r["A0"] == rec
               and r["D4"] == 0x44 and r["A2"] == 0xA2 and r["A5"] == 0xA5)
+
+        samp_lock_checks(machine, call, frame, trig, table, snd, lay, put16, put32)
 
     # ---- the stored form of a stock pattern loads the same here as on stock ----------------
     plain = machine.alloc(TABLE_BYTES)

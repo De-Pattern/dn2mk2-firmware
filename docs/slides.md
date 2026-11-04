@@ -146,6 +146,12 @@ comparison is made both ways). See the gate step's record for the numbers; the f
   drawn there (idle; trig held, locked); and the gate: the build's page 2, our two places
   aside, is stock 1.11's page pixel for pixel.
 
+- v0.40, a user's report (`docs/user-reports.md` P1), in the same harness: a stock p-lock on
+  ONESHOT's SAMP (and SLICE's SLCE), through the builder and applier and the real frame ISR
+  (with `smp_mod_apply`), carries exactly the locked value in the voice's frame word, whatever
+  the track's value; that word played through the DSP's model sounds as the locked sample
+  (slice). Fails on v0.39's code.
+
 ## Not verified (hardware)
 
 - The sound. Every number above is the ColdFire's arrays; the DSP's reading of them is

@@ -2608,9 +2608,21 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
  * Here, after the stock apply, a sample machine's modulated SAMP is moved by the same
  * number of steps through the slots that hold something, from the one SAMP is set to
  * (wrapping round them), as the DT2's project slots, which hold only loaded samples. An
- * unmodulated SAMP, and every other parameter and machine, are left as stock wrote them. */
+ * unmodulated SAMP, and every other parameter and machine, are left as stock wrote them.
+ *
+ * v0.40 (a user on v0.39: "the p-locked trig doesn't play the sample you lock it to ... it
+ * changes when you move the default track SAMP value, so the p-lock seems relative"): what
+ * the voice is set to is its TARGET cell (the smoother's source, 0x80003af0, the same
+ * layout as the mirror; docs/slides.md), which holds the sound's value or the trig's p-lock
+ * (stock's lock applier 0x400db092 writes it, and jumps the smoother there). v0.25..v0.39
+ * took the sound's own SAMP (and SLCE) instead, so a lock was a "modulation" of lock - SAMP,
+ * scaled by mod_scale to n/128 of it over the n loaded samples and counted from the track's
+ * SAMP: about one sample per 5 or 6 lock values with 20-odd loaded, moving with the track's
+ * SAMP. Now the modulation is what the stock apply added on top of the target, and it steps
+ * from the target: a locked trig plays its slot (or slice) exactly. */
 #define MOD_APPLY ((void (*)(void *))0x400DB22Cu)
 #define MIRROR_CELL(b, s) ((volatile u16 *)(0x800068E4u + 34u + 202u * (u32)(b) + 2u * (u32)(s)))
+#define TARGET_CELL(b, s) ((volatile u16 *)(0x80003AF0u + 34u + 202u * (u32)(b) + 2u * (u32)(s)))
 #define VOICE_SOUND(b) (*(u8 *volatile *)(0x800052A8u + 4u * (u32)(b)))
 #define SAMP_SLOT 43                            /* SAMP's frame slot (sound + 20 + 2 x 43) */
 /* the only cell written, block 0's lowest of them, lies past the frame (CTL_FRAME, 2,748
@@ -2649,7 +2661,7 @@ void smp_mod_apply(void *mirror)
         u8 *snd = VOICE_SOUND(b);
         if (!snd || snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
             continue;                           /* not a sample machine */
-        u32 set = snd[20 + 2 * SAMP_SLOT];      /* the high byte: the value, 0 OFF, k: slot k - 1 */
+        u32 set = *TARGET_CELL(b, SAMP_SLOT) >> 8;   /* the sound's or the lock's: 0 OFF, k: slot k - 1 */
         volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
         int heard = *cell >> 8;
         int k = heard - (int)set;
@@ -2678,7 +2690,7 @@ void smp_mod_apply(void *mirror)
         }
         if (snd[SOUND_TYPE] != SLICE_TYPE)
             continue;
-        u32 sset = snd[20 + 2 * SLCE_SLOT];     /* 0..127: slice (value >> 1), 0 NOTE */
+        u32 sset = *TARGET_CELL(b, SLCE_SLOT) >> 8;  /* the sound's or the lock's: slice (value >> 1), 0 NOTE */
         volatile u16 *scell = MIRROR_CELL(b, SLCE_SLOT);
         int sk = (int)(*scell >> 8) - (int)sset;
         int slot = (int)(*cell >> 8) - 1;       /* the sample it plays, after the above */
