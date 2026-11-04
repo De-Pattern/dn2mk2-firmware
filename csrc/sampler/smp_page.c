@@ -536,15 +536,14 @@ extern int smp_playhead(int t);
 #define UI_TRACK (*(volatile u8 *)0x42431A6Cu)
 
 static int ph_was __attribute__((section(".data"))) = -1;         /* the playhead it drew (-1 none) */
-/* v0.40 (owner: "the slice machine's on-screen indicators are a little slow to catch up"):
- * v0.25..v0.39 took the page as up while it had been drawn in the last 1.2 s, and asked for
- * a redraw only while it was up: after 1.2 s with nothing playing, no redraw was asked, so the
- * page stayed "not up", and a note that started then (its playhead, SLICE / GRID's playing-
- * slice bar) waited for stock's next redraw of the page for its own reasons (a knob, a page
- * change). Now the page is up while the screen's LAST draw drew it (page.c counts the
- * draws), and a redraw is asked for as soon as the column the playhead falls in differs
- * from the one drawn (nothing else is drawn from the position), so it follows within a UI
- * pass, and a still screen is not redrawn at all */
+/* v0.40 (owner: "the slice machine's on-screen indicators are a little slow to catch up"; the
+ * main cause was the voice drawn, link.c's smp_playhead): v0.25..v0.39 asked for a redraw 25
+ * times a second while anything played, and took the page as up while drawn in the last
+ * 1.2 s (stock redraws an idle page about every 0.4 s, emulator). Now the page is up while
+ * the screen's LAST draw drew it (page.c counts the draws), and a redraw is asked for when
+ * the column the playhead falls in differs from the one drawn (nothing else on the page is
+ * drawn from the position: the playhead, SLICE / GRID's playing-slice bar), 37 a second at
+ * most; a still playhead asks for none */
 extern u32 wr_draws;
 static u32 ph_draw_n __attribute__((section(".data"))) = 0xFFFFFFFFu;   /* wr_draws when last drawn */
 static int ph_x0 __attribute__((section(".data"))) = 0, ph_w __attribute__((section(".data"))) = 2;
