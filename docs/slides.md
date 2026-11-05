@@ -196,4 +196,42 @@ theirs. Pattern copy and paste copy the whole pattern (122,478 bytes, the lock t
 ours go with it as bytes. Gate (`slides`): copy, clear, paste through the panel restores every
 SLD/SLEN of the track exactly, cleared with the stock locks (both fail on v0.39); trig copy
 and paste puts step 6's on step 9 beside its stock lock; no value of ours in a stock record.
-Not driven here: shift, autocopy and the UNDO paths (the arp's checks drove them).
+
+**v0.40 review: every hooked site driven** (`scripts/emu_slides_paths.py`, run by the same
+`slides` step after the checks above; each check asserts its site's hit count and compares the
+whole lock table, as maps of every record's 128 values):
+
+- shift (FUNC + RIGHT, then LEFT, `0x40051158`): every record of the track, ours and stock's,
+  one step on (rotated over the pattern's length), the other tracks, every header and the index
+  untouched; LEFT gives the table back byte for byte;
+- track copy, a change, paste, paste again (track paste's UNDO, `0x40052948`): the paste gives
+  the copy, the UNDO the change, SLD/SLEN and the stock locks alike;
+- page copy (PAGE + RECORD), a change on page 1 and past it, paste (PAGE + STOP, `0x40053246`),
+  paste again (its UNDO, `0x40052634`): page 1's steps from the copy and the rest untouched, then
+  the change;
+- autocopy (`0x40050cce`): the track cleared, the pattern 16 steps (stock's own setter), then
+  lengthened in SEQUENCER PAGE SETUP (FUNC + PAGE, encoder E): page 1's locks, ours included,
+  on page 2;
+- slot 80: shift and autocopy treat our records (RAM header 0x50/0x51: "slot 80/81" to stock)
+  as their own once the tag is cleared. Read in their code, neither looks at the slot byte (they
+  move values inside each record of the track, and its per-step byte). Measured: the two stock
+  routines run from the same memory with and without our records make exactly the same writes,
+  in order, outside our records (and their stored copies: the change notice runs SAVE, i.e.
+  `sl_save`); the pattern ends the same outside them; their headers are never written; the voice
+  mirror (`0x80003af0`, `0x800068e4`) and the kit are untouched by either.
+
+Measured on the way (stock's own behaviour, not changed): a second FUNC + PLAY (or FUNC + STOP)
+right after a clear or a paste is its UNDO; stock's track clear `0x400e745c` frees records by
+their header and leaves their values (its value loop strides 260 bytes over 258-byte records),
+and stock's setter `0x4003ceee` takes a free record as it finds it.
+
+**A nearly full lock table (v0.40 review).** `sl_paste` / `sl_tpaste` write our records inside
+stock's paste loop, which allocates each destination record as it goes and silently skips a
+lock when none of the 80 is free. On 939cbc42 our records could take the records later stock
+locks needed (the gate's case: 3 free, ours first in the clipboard: 2 of 3 stock locks lost, in
+a track paste and in a trig paste). Now a free record goes to ours only while more are free than
+the stock locks still to come in the same paste need (for page/track paste and their UNDOs: the
+clipboard's later records of its track with no destination record in the index; for a trig
+paste: the distinct slots of this and later entries with no record). Otherwise the slide is
+dropped (`sl_paste_dropped` counts it): stock locks always come first. Gate: both pastes keep
+every stock lock (fail on 939cbc42).
