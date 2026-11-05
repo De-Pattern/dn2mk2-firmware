@@ -806,6 +806,49 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         sw["done"] = 0
         attempt("a project switch mid-read", "grid-on", during=switch)
         switched += sw["done"]
+        # v0.40 review: while the menu waits (READING THE SAMPLE, up to 2 minutes) the transport
+        # is stock's, as under stock's own menus (RECORD, PLAY, STOP: slc_pop hands them on,
+        # press and release); every other key and knob stays the menu's; NO still leaves.
+        # (939cbc42 took them all: PLAY/STOP dead for as long as the read waited)
+        tp = {"seen": 0}
+
+        def transport(pass_):
+            if tp["seen"] or state() != S_WAIT:
+                return
+            tp["seen"] = 1
+            got_ = {}
+            for code in (19, 20, 21, 11, 15):
+                for fl, nm in ((0x01, "press"), (0x10, "release")):
+                    pop(0, code, fl)
+                    got_[f"{code} {nm}"] = returned_d0()
+            pop(1, 5, 1)
+            got_["knob E"] = returned_d0()
+            tp["got"], tp["waiting"] = got_, state() == S_WAIT
+        io["refuse"] = 3                        # (a read that takes a few tries: the wait lasts)
+        tr_ = attempt("the transport while it waits", "edit", during=transport)
+        io["refuse"] = 0
+        g_ = tp.get("got", {})
+        transport_ok = bool(tp["seen"] and tp.get("waiting") and tr_["ok"]
+                            and all(g_[f"{c} {n}"] == 0 for c in (19, 20, 21) for n in ("press", "release"))
+                            and all(g_[f"{c} {n}"] == 1 for c in (11, 15) for n in ("press", "release"))
+                            and g_["knob E"] == 1)
+        attempts.pop()                          # (judged here, with its keys)
+        # NO still leaves the wait
+        machine.write(syms["slc_page_seen"], struct.pack(">i", 1))
+        machine.write(syms["slc_stock_asked"], bytes(4))
+        io["refuse"] = 3
+        key(10)
+        key(10)
+        ui_pass()
+        waiting_ = state() == S_WAIT
+        key(20)
+        key(12)
+        no_leaves = waiting_ and state() == S_OFF
+        io["refuse"] = 0
+        for _ in range(40):
+            ui_pass()
+        out["transport_while_waiting"] = {"keys": g_, "ok": transport_ok, "no_leaves": no_leaves}
+        print(f"    slicebusy transport: {out['transport_while_waiting']}", flush=True)
         uc.hook_del(h_rts)
         uc.hook_del(h_rd)
         # LINKED (the DT2's default) and UNLINKED in the editor, on an even grid of 16
@@ -856,7 +899,8 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         out.update(booted=booted, lib=lib_ok, refused=io.get("refused", 0), switched=switched, attempts=attempts,
                    bad=[a_ for a_ in attempts if not a_["ok"]], linked=lk)
         out["ok"] = bool(booted and lib_ok and attempts and all(a_["ok"] for a_ in attempts)
-                         and io.get("refused", 0) >= 17 and switched == 2 and lk and all(lk.values()))
+                         and io.get("refused", 0) >= 17 and switched == 2 and lk and all(lk.values())
+                         and transport_ok and no_leaves)
     elif scenario == "lib":
         # v0.31: the +Drive's library over SysEx (csrc/sampler/lib.c): a folder made (the
         # library formatted on that first write), two samples sent and read back byte for

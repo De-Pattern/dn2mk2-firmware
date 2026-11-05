@@ -44,7 +44,8 @@ typedef unsigned char u8;
 #define IT_DROP 0xFF
 #define F_PRESS 0x01
 #define F_RELEASE 0x10
-enum { K_YES = 10, K_UP = 11, K_NO = 12, K_LEFT = 13, K_DOWN = 14, K_RIGHT = 15, K_FUNC = 17 };
+enum { K_YES = 10, K_UP = 11, K_NO = 12, K_LEFT = 13, K_DOWN = 14, K_RIGHT = 15, K_FUNC = 17,
+       K_REC = 19, K_STOP = 21 };
 
 extern u32 smp_slot_frames(int k, int *i16);
 extern int smp_analyse_ui(int k);
@@ -813,6 +814,10 @@ int slc_pop(u8 *it)
         return 0;
     }
     if (slc_state == S_WAIT) {                  /* nothing while it reads, but NO leaves (v0.33: */
+        /* v0.40 review: the transport (RECORD, PLAY, STOP: 19..21) is stock's while the menu
+         * waits (up to 2 minutes), as it is under stock's own menus; v0.33..v0.40 swallowed it */
+        if (it[0] == IT_KEY && code >= K_REC && code <= K_STOP)
+            return 0;
         if (press && code == K_NO) {            /* a read that never ends must not hold every key) */
             if (wait_go)                        /* v0.40: (only ours: not TRIM's while waiting) */
                 smp_analyse_cancel();
