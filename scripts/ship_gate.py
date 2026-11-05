@@ -155,6 +155,9 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
 MNM_EXC_SEC7 = "1864d691b2f91bc8006580ab4a07701b1b7644be67fb1f5663429aabc7496ed0"
 MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
                  "test/test_mnm.py": "cbe70e82073139d8f21ba0bb58972a927ef74016"}
+# without the golden runs test_mnm collects only its 8 tests that need none (they skip as a
+# module); its 366 golden cases are not collected at all (measured on v0.39's tree, 2026-11-05)
+MNM_EXC_REST = 8
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
@@ -1994,12 +1997,15 @@ def main() -> int:
             if ok and exc is not None:
                 m = re.search(r"\b(\d+) skipped\b", last)
                 skipped = int(m.group(1)) if m else 0
-                if skipped != exc + 1:
-                    return False, (f"{last} -- under the MnM exception exactly {exc + 1} may be "
-                                   f"skipped (test_mnm's {exc} and EFM-SD's eighth knob), not {skipped}")
-                last += (f" [owner exception 2026-11-05: the Monomachine golden runs are missing; "
-                         f"test_mnm's {exc} cases not run; section 7, src/dnfw/mnm and "
-                         f"test_mnm.py byte-identical to v0.39's (dbbe804), which passed them]")
+                if skipped != exc + 1 or exc != MNM_EXC_REST:
+                    return False, (f"{last} -- under the MnM exception test_mnm must collect exactly "
+                                   f"{MNM_EXC_REST} tests (it collected {exc}) and exactly "
+                                   f"{MNM_EXC_REST + 1} may be skipped (those and EFM-SD's eighth knob), "
+                                   f"not {skipped}")
+                last += (f" [owner exception 2026-11-05: the Monomachine golden runs are missing, so "
+                         f"test_mnm's 366 golden cases are not collected and its {exc} other tests "
+                         f"skip; section 7, src/dnfw/mnm and test_mnm.py byte-identical to v0.39's "
+                         f"(dbbe804), which passed them all]")
             return ok, last
 
         def mnm_exception():
