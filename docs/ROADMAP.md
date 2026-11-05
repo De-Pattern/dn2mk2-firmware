@@ -13,6 +13,26 @@ In this order unless the owner changes it:
    (MM chords over several MD tracks: a garbled, bitcrushed background) first, since the
    DSP-time guard should drop voices cleanly and doesn't always. Current costs:
    `docs/dsp-cost.md` (2026-11-03); the L2 table move was measured and is not worth it.
+1b. **Overbridge on the mod** (owner, 2026-11-05, after Pablo Se7en's report that Overbridge
+   does not detect his modded DN2; owner: plan for it "if we arent sure about support").
+   What we know: the mod never touches the USB descriptors or Elektron's OS version string
+   (`dnfw/safety.py`, `modversion.py`). Its link uses TDM slots 8..15 in, 14..15 out, which
+   are clear of Overbridge's 42 channels (`docs/link-research.md`: slots 0..13 plus the reply
+   records). Overbridge streamed Main and tracks 1–2 on a Waverider build on 2026-09-30
+   (`docs/sharc-load.md`, [V]), before the sampler and the fast link. Since then it is
+   unverified. Plan:
+   - Hardware, the owner's unit, current build: Overbridge Engine sees the DN2 (USB CONFIG
+     = OVERBRIDGE); all channels stream with a sample machine, Waverider, MD and MM on tracks;
+     the plugin syncs a kit holding our machines; the sample link still works with
+     Overbridge open; DSP load with Overbridge streaming.
+   - A gate step: the USB/Overbridge code and data of MAIN OS byte-identical to stock (no
+     patch site inside), and, in the emulator, mode 6's packets for slots 0..13 and the
+     records unchanged while the fast link runs.
+   - If the plugin chokes on our machine IDs: document using the Overbridge audio device in
+     the DAW without the plugin. If Overbridge itself fails: find out why before anything
+     else ships.
+   - The owner mentioned a 42-channel Overbridge multichannel repo he shared earlier: not
+     found in this fork's notes; get the link from him.
 2. **Octatrack-style rec trigs: the first thing built after v0.40** (owner, 2026-11-04:
    "implement rec trigs after this"). A trig that records a set length (or until stopped),
    QREC (starts on the next bar / interval), maybe QPL; for bouncing heavy machines to
