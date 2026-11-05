@@ -149,6 +149,12 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
     if "mchunk_code_end" in lay:  # the machines chunk: the shims, then strings and tables
         out[lay["slot_shim"]] = [(lay["slot_shim"], lay["name_long_5"])]
     return out
+# v0.40 (owner, 2026-11-05): the one build the missing Monomachine golden runs may be excepted
+# for -- its DSP image (section 7) and the MnM code and test as they were at v0.39 (dbbe804).
+# Any change to these ends the exception: the golden runs must exist again.
+MNM_EXC_SEC7 = "1864d691b2f91bc8006580ab4a07701b1b7644be67fb1f5663429aabc7496ed0"
+MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
+                 "test/test_mnm.py": "cbe70e82073139d8f21ba0bb58972a927ef74016"}
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
@@ -1972,10 +1978,55 @@ def main() -> int:
             if importlib.util.find_spec("xdist") is None:
                 return False, ("pytest-xdist is not installed for this python (pip install "
                                "--break-system-packages pytest-xdist): unchecked is not passing")
+            # v0.40 (owner, 2026-11-05): the Monomachine golden runs were lost with the old
+            # workspace. The owner approved ONE exception, for this DSP image only: if they are
+            # missing, test_mnm's cases may go unrun when the build's section 7 and the MnM code
+            # and its test are byte-identical to v0.39's (source dbbe804), which passed against
+            # the real golden runs. Every other skip still counts: exactly test_mnm's cases plus
+            # the one skip every run has had (EFM-SD's eighth knob) may be skipped, no more
+            exc = mnm_exception()
+            if isinstance(exc, str):
+                return False, exc
             rc, out = run("pytest", py_cmd, logs, env={"PYTHONPATH": "src"}, trace=tdir)
             last = out.strip().splitlines()[-1] if out.strip() else ""
             # "586 passed, 1 skipped in 512.3s (0:08:32)": the counts, as serial pytest prints them
-            return rc == 0 and re.search(r"\b\d+ passed\b", last) is not None, last
+            ok = rc == 0 and re.search(r"\b\d+ passed\b", last) is not None
+            if ok and exc is not None:
+                m = re.search(r"\b(\d+) skipped\b", last)
+                skipped = int(m.group(1)) if m else 0
+                if skipped != exc + 1:
+                    return False, (f"{last} -- under the MnM exception exactly {exc + 1} may be "
+                                   f"skipped (test_mnm's {exc} and EFM-SD's eighth knob), not {skipped}")
+                last += (f" [owner exception 2026-11-05: the Monomachine golden runs are missing; "
+                         f"test_mnm's {exc} cases not run; section 7, src/dnfw/mnm and "
+                         f"test_mnm.py byte-identical to v0.39's (dbbe804), which passed them]")
+            return ok, last
+
+        def mnm_exception():
+            """None: the golden runs are there, nothing excepted. An int: the exception applies,
+            that many test_mnm cases go unrun. A str: why it does not apply (a failure)."""
+            golden = pathlib.Path(os.environ.get("MNM_GOLDEN",
+                                                 str(ROOT.parent / "mnm132" / "research" / "golden")))
+            if golden.is_dir():
+                return None
+            if hashlib.sha256(sec7).hexdigest() != MNM_EXC_SEC7:
+                return ("the Monomachine golden runs are missing and this build's DSP image is not "
+                        "v0.39's: the owner's exception (2026-11-05) does not cover it")
+            for path, want in MNM_EXC_TREES.items():
+                got = subprocess.run(["git", "rev-parse", f"HEAD:{path}"], cwd=ROOT,
+                                     capture_output=True, text=True).stdout.strip()
+                dirty = subprocess.run(["git", "status", "--porcelain", "--", path], cwd=ROOT,
+                                       capture_output=True, text=True).stdout.strip()
+                if got != want or dirty:
+                    return (f"the Monomachine golden runs are missing and {path} differs from "
+                            f"v0.39's: the owner's exception (2026-11-05) does not cover it")
+            r = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",
+                                "-p", "no:cacheprovider", "test/test_mnm.py"], cwd=ROOT,
+                               capture_output=True, text=True, env={**os.environ, "PYTHONPATH": "src"})
+            m = re.search(r"\b(\d+) tests? collected\b", r.stdout)
+            if r.returncode != 0 or not m:
+                return "the MnM exception could not count test_mnm's cases: unchecked is not passing"
+            return int(m.group(1))
         if wanted("unit"):
             gate("unit tests", *cached("unit tests", [py_cmd], py_body))
 
