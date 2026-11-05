@@ -832,7 +832,9 @@ void smp_pl_poll(void)
         }
         if (!end_at)
             end_at = smp_periods | 1u;
-        if (smp_periods - end_at < 750u)        /* half a second for a NEW that may follow */
+        /* half a second for a NEW that may follow. v0.40 review: signed, as rec.c/slice.c: with
+         * smp_periods even, end_at (| 1) is one ahead and the unsigned difference 0xffffffff */
+        if ((int)(smp_periods - end_at) < 750)
             return;
         if (!smp_pl_idle(0))
             return;

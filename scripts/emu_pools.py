@@ -32,7 +32,10 @@ What it checks, in order (each a key of the result's "facts"):
 11. a power cut after each sector of a pool change's writes, and of a switch's: every
     power-on after it finds a whole pool, the right owner's, and no list lost;
 12. every sector written lies in the pool image or the lists' region, none past the device;
-    and the image, at the end, is one v0.37 reads as it reads its own (downgrade).
+    and the image, at the end, is one v0.37 reads as it reads its own (downgrade);
+12b. (v0.40 review) a LOAD that ends with no switch waits half a second for a NEW, whether the
+    period it ended in is even or odd (939cbc42 gave the wait up at once on an even one); the
+    DSP's load stamped in the pass it is read reads as seen.
 """
 
 from __future__ import annotations
@@ -655,6 +658,49 @@ def run(cx):
                    "pl_sectors_written": long("smp_pl_writes"), "lists_written": long("smp_pl_lists_written"),
                    "switches": long("smp_pl_switches"), "events": long("smp_pl_events"),
                    "skipped": long("smp_pl_skipped"), "blank_packets": long("smp_blank_sent")}
+
+    watch["where"] = "12b"
+    # 12b. v0.40 review: a LOAD that ends with no switch (it failed) waits half a second for a NEW
+    # that may follow, at either parity of the period it ended in (939cbc42: end_at = periods | 1
+    # made the same pass's unsigned difference 0xffffffff on an even period, and the wait was
+    # given up at once: smp_load() ran in the pass the LOAD ended). The UI pass (smp_boot, its
+    # pool poll inside) run at set periods; the counters a LOAD's detours keep, moved as they do.
+    def ended_load(parity):
+        settle()
+        b, e = long("smp_pj_begins"), long("smp_pj_ends")
+        put("smp_pj_begins", b + 1)                     # the LOAD's begin detour: silence
+        step()
+        began = i32("smp_pl_state")
+        step(300)                                       # the LOAD's +Drive work (a fifth of a second)
+        if long("smp_periods") % 2 != parity:
+            step()
+        end_p = long("smp_periods")
+        put("smp_pj_ends", e + 1)                       # ... its end, no slot change: it failed
+        call("smp_boot")                                # the UI pass the end is seen in
+        at_end = i32("smp_pl_state")
+        waited = None
+        for _ in range(3000):
+            if i32("smp_pl_state") == 0:
+                waited = long("smp_periods") - end_p
+                break
+            step()
+        settle()
+        return {"began": began, "at_end": at_end, "periods_until_reload": waited, "even": end_p % 2 == 0}
+    grace = [ended_load(0), ended_load(1)]
+    p0 = (long("smp_periods") + 64) & ~1
+    # v0.40 review: the DSP's load (display only, link.c) stamped in the pass it is read
+    put("smp_periods", p0 + 8000)
+    put("smp_load_peak", 500)
+    put("smp_load_seen", (p0 + 8000) | 1)
+    call("smp_dsp_load")
+    load_shown = struct.unpack(">i", struct.pack(">I", guest_call.returned["d0"] & 0xFFFFFFFF))[0]
+    notes["12b"] = {"grace": grace, "dsp_load": load_shown}
+    facts["12b a LOAD that ends with no switch waits half a second for a NEW, on an even period and an odd one"] = (
+        all(g["began"] == 1 and g["at_end"] == 1 and g["periods_until_reload"] is not None
+            and 750 <= g["periods_until_reload"] < 1000 for g in grace)
+        and [g["even"] for g in grace] == [True, False])
+    facts["12b the DSP's load stamped in the same pass reads as seen (link.c, signed)"] = load_shown == 50
+    settle()
 
     facts["the DSP never held another project's sample, nor one half sent"] = not watch["bad"] and watch["checked"] > 0
     notes["dsp_watch"] = {"checked": watch["checked"], "bad": watch["bad"], "edit_lag": watch.get("edit_lag", 0)}

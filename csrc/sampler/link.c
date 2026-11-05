@@ -268,7 +268,7 @@ int smp_skipped(int t)                          /* skipped within the last half 
 {
     if (t < 0 || t > 15 || !smp_skip_at[t])
         return 0;
-    return periods - smp_skip_at[t] < 750u;
+    return (int)(periods - smp_skip_at[t]) < 750;   /* v0.40 review: signed (the stamp is | 1) */
 }
 
 /* v0.32: the DSP's load, the peak of the last half second, from the idle packets (unit 18,
@@ -290,12 +290,12 @@ static u32 scan_seq __attribute__((section(".data"))) = 0;           /* the last
 
 int smp_blown_recent(void)                      /* the last two seconds */
 {
-    return smp_blown_at && periods - smp_blown_at < 3000u;
+    return smp_blown_at && (int)(periods - smp_blown_at) < 3000;   /* v0.40 review: signed */
 }
 
 int smp_dsp_load(void)
 {
-    if (!smp_load_seen || periods - smp_load_seen > 1500u)
+    if (!smp_load_seen || (int)(periods - smp_load_seen) > 1500)  /* v0.40 review: signed */
         return -1;
     return (int)((smp_load_peak + 5u) / 10u);      /* percent */
 }
@@ -2620,7 +2620,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         put32(rp + r, smp_blown_info); r += 4;
         put32(rp + r, smp_blown_where); r += 4;
         put32(rp + r, smp_blown_mask); r += 4;
-        put32(rp + r, smp_blown_at ? periods - smp_blown_at : 0xFFFFFFFFu); r += 4;
+        put32(rp + r, smp_blown_at ? ((int)(periods - smp_blown_at) < 0 ? 0u : periods - smp_blown_at) : 0xFFFFFFFFu); r += 4;
         put32(rp + r, (u32)smp_dsp_load()); r += 4;
         put32(rp + r, smp_load_peak); r += 4;
         u32 sk = 0;
