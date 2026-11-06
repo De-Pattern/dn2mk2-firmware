@@ -10,11 +10,15 @@ characters (byte 30 is 0). An older build reads such a record as its own name, a
 a sector torn by a power cut, a loop), the result is a tree DEPTH deep at most in which every
 folder appears. `levels` is how a path becomes folders (lib.c's link 17, the import page).
 The emulator checks (scripts/emu_lib_nest.py) hold the firmware's answers to this model.
+
+v0.43: 128 folders (64..127 in their own sectors, lib.c LIB_HI_AT); a parent 64..127 is tagged
+0xC0 | (parent - 64) (an older build reads it as a top-level folder).
 """
 
 from __future__ import annotations
 
-FOLDERS = 64
+FOLDERS = 128                                   # v0.43 (64 before)
+LO = 64                                         # those in the library's headers
 RECORD = 32
 DEPTH = 6                                       # lib.c LIB_DEPTH: a top-level folder is depth 1
 TOP_NAME = RECORD - 1                           # 31 characters at the top
@@ -27,7 +31,7 @@ def record(name: str, parent: int | None = None) -> bytes:
     r = bytearray(RECORD)
     r[:len(b)] = b
     if parent is not None and b:
-        r[RECORD - 1] = 0x80 | parent
+        r[RECORD - 1] = 0x80 | parent if parent < LO else 0xC0 | (parent - LO)
     return bytes(r)
 
 
@@ -40,8 +44,9 @@ def tree(table: bytes) -> list[int]:
     named = [r[0] != 0 for r in rec]
     par = []
     for f, r in enumerate(rec):
-        t, p = r[RECORD - 1], r[RECORD - 1] & 0x3F
-        par.append(p if (t & 0xC0) == 0x80 and named[f] and p != f and named[p] and not r[RECORD - 2] else -1)
+        t = r[RECORD - 1]
+        p = (t & 0x3F) + (LO if (t & 0xC0) == 0xC0 else 0)
+        par.append(p if (t & 0x80) and named[f] and p != f and named[p] and not r[RECORD - 2] else -1)
     for f in range(FOLDERS):                    # a loop or too deep: from here, the top
         p, d = par[f], 1
         while p >= 0 and d <= DEPTH:

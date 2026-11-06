@@ -730,7 +730,10 @@ if (typeof module !== "undefined") module.exports = DN2;
     dev.lib = null;
     if (dev.proto < 5) return;
     const folders = [];
-    for (let f0 = 0; f0 < 64; f0 += 4) {
+    /* INFO first: v0.43's sixth word is how many folders the library holds (128; 64 before) */
+    const ip = (await call(C.LIB.INFO, [])).payload, iw = o => ip[o] | ip[o + 1] << 8 | ip[o + 2] << 16 | (ip[o + 3] << 24 >>> 0);
+    const nf = ip.length >= 24 && iw(20) > 64 && iw(20) <= 255 ? iw(20) : 64;
+    for (let f0 = 0; f0 < nf; f0 += 4) {
       const p = (await call(C.LIB.FOLDERS, [f0])).payload;
       for (let j = 0; j < 4; j++) { let s = ""; for (let c = 0; c < 24; c++) { const b = p[24 * j + c]; if (!b) break; s += String.fromCharCode(b); } folders.push(s); }
     }
@@ -742,13 +745,17 @@ if (typeof module !== "undefined") module.exports = DN2;
       r.rows.forEach(e => { if (e.frames) rows.push(e); });
     }
     /* INFO: state, capacity, count, the +Drive's sectors, the library's first data sector: its room */
-    const ip = (await call(C.LIB.INFO, [])).payload, iw = o => ip[o] | ip[o + 1] << 8 | ip[o + 2] << 16 | (ip[o + 3] << 24 >>> 0);
     const sectors = iw(12) >>> 0, first = iw(16) >>> 0;
     const room = sectors > first ? (sectors - first) * 512 : null;
     const used = rows.reduce((a, e) => a + Math.ceil(2 * e.frames / 512) * 512, 0);   /* whole sectors each */
     /* v0.40 (link 7): each folder's parent; before, every folder is at the top */
-    const parents = dev.proto >= 7 ? DN2.libTree((await call(C.LIB.TREE, [])).payload).parents : folders.map(() => -1);
-    dev.lib = { rows, folders, room, used, parents };
+    let parents = folders.map(() => -1);
+    if (dev.proto >= 7)                          /* v0.43: 64 a reply, from the folder asked for */
+      for (let f0 = 0, all = []; f0 < nf; f0 += 64) {
+        all.push(...DN2.libTree((await call(C.LIB.TREE, f0 ? [f0] : [])).payload).parents);
+        parents = all.slice(0, nf);
+      }
+    dev.lib = { rows, folders, room, used, parents, nf };
   }
 
   /* -- files -- */
@@ -1099,7 +1106,7 @@ if (typeof module !== "undefined") module.exports = DN2;
     try {
       const f = inside ? (await call(C.LIB.FOLDER_IN, [libAt, ...b], 10000)).payload[0]
                        : (await call(C.LIB.FOLDER, b, 10000)).payload[0];
-      if (f === 0xFF || (inside && f === libAt)) throw new Error(inside && f === libAt ? `the instrument keeps folders ${C.LIB_DEPTH} levels deep at most` : "the instrument refused the folder (64 folders at most)");
+      if (f === 0xFF || (inside && f === libAt)) throw new Error(inside && f === libAt ? `the instrument keeps folders ${C.LIB_DEPTH} levels deep at most` : `the instrument refused the folder (${(dev.lib && dev.lib.nf) || 64} folders at most)`);
       log(`folder ${String.fromCharCode(...b)} made`);
       await readLib(); libAt = f; libSel.clear();
     } catch (x) { log(String(x.message || x)); }
@@ -1123,8 +1130,11 @@ if (typeof module !== "undefined") module.exports = DN2;
       for (const lv of levelsOf(it)) {
         key += "/" + lv;
         if (!made.has(key)) {
-          const p = (await call(C.LIB.FOLDER_IN, [at < 0 ? 0xFF : at, ...folderBytes(lv)], 10000)).payload;
-          if (p[0] === 0xFF) throw new Error(`folder ${lv}: refused (64 folders at most)`);
+          // the instrument answers a folder it cannot make with status 1 (call() rejects it as
+          // "command 30: refused"): almost always the library's 64 folders (every level counts)
+          const p = (await call(C.LIB.FOLDER_IN, [at < 0 ? 0xFF : at, ...folderBytes(lv)], 10000).catch(e => {
+            throw new Error(/refused/.test(e.message) ? `folder ${lv}: the +Drive library has no room for another folder (${(dev.lib && dev.lib.nf) || 64} at most, every level counts): delete or merge some folders in the browser, then send again` : e.message); })).payload;
+          if (p[0] === 0xFF) throw new Error(`folder ${lv}: refused (${(dev.lib && dev.lib.nf) || 64} folders at most)`);
           if (p[1] & 2 && !capped.has(at)) { capped.add(at); log(`${it.folder}: deeper than ${C.LIB_DEPTH} levels; the rest go into ${libFolder(p[0]) || "the sixth level"}`); }
           made.set(key, p[0]);
         }
@@ -1141,7 +1151,7 @@ if (typeof module !== "undefined") module.exports = DN2;
       try {
         const fname = folderBytes(q.into);
         const f = nested ? await folderFor(it) : (await call(C.LIB.FOLDER, fname.length ? fname : folderBytes("INCOMING"))).payload[0];
-        if (f === 0xFF) throw new Error(`folder ${q.into}: refused (64 folders at most)`);
+        if (f === 0xFF) throw new Error(`folder ${q.into}: refused (${(dev.lib && dev.lib.nf) || 64} folders at most)`);
         const data = DN2.libSample({ frames: it.w.frames });
         const b = (await call(C.LIB.BEGIN, DN2.libBegin(it.w.frames.length, f, it.w.rate, it.long || it.name), 10000)).payload;
         const k = new DataView(b.buffer, b.byteOffset, b.length).getUint32(0, true);

@@ -113,9 +113,9 @@ def run(cx):
         st, r = sx(31)
         return (r[0], list(r[1:65])) if st == 0 and len(r) >= 65 else (None, None)
 
-    def names():
+    def names(n=64):
         out = []
-        for f0 in range(0, 64, 4):
+        for f0 in range(0, n, 4):
             _, p = sx(23, bytes([f0]))
             out += [p[24 * j:24 * j + 24].split(b"\0")[0].decode("ascii", "replace") for j in range(4)]
         return out
@@ -331,6 +331,45 @@ def run(cx):
     nm = names()
     facts["a v0.39 reading it sees each folder by its own name (the tag never in a name)"] = (
         all(old_names[f][:24] == nm[f] for f in range(64)) and old_names[kicks] == "KICKS" and old_names[look] == T)
+    # -- 6. v0.43 (Wolljamin: "command 30: refused", the 64 folders full): 128 folders, 64..127
+    # in their own sectors below the library (a header, then four sectors), written only once
+    # a folder past 63 is made; their parents kept; the 129th refused; all read back at boot
+    disk.clear()
+    disk.update(final)
+    boot()
+    st, info = sx(16)
+    facts["v0.43: INFO says 128 folders"] = st == 0 and len(info) >= 24 and struct.unpack_from("<I", info, 20)[0] == 128
+    HI = 0x6FF800
+    io["log"] = []
+    made = []
+    for k in range(140):
+        f, fl = folder_in(None, f"TOP{k:03d}")
+        if f is None:
+            break
+        made.append(f)
+    hi_writes = [s_ for s_, _d in io["log"] if HI <= s_ < HI + 5]
+    facts["v0.43: folders made up to 128, the next refused"] = len(made) >= 64 and max(made) == 127 and len(set(made)) == len(made)
+    facts["v0.43: folders past 63 written to their own sectors (and nowhere in the stock's or the frames' area)"] = (
+        bool(hi_writes) and all(s_ >= HI and (s_ < HI + 5 or s_ >= LIB) for s_, _d in io["log"]))
+    # a folder inside one past 63, and one past 63 inside one under 64: drop two first to make room
+    drop_a, drop_b = made[-1], made[-2]
+    sx(26, bytes([drop_a]))
+    sx(26, bytes([drop_b]))
+    inner, _fl = folder_in(100, "IN100")
+    deeper, _fl = folder_in(inner, "DEEPER") if inner is not None else (None, None)
+    want_names = names(128)
+    boot()                                       # as at power-on: everything read again
+    nm128 = names(128)
+    pars = []
+    for f0 in (0, 64):
+        st, r = sx(31, bytes([f0]))
+        pars += list(r[1:65]) if st == 0 and len(r) >= 65 else [None] * 64
+    facts["v0.43: after a reboot every folder's name the same, 128 of them"] = (
+        nm128 == want_names and sum(1 for n in nm128 if n) >= 126 and nm128[127 if 127 not in (drop_a, drop_b) else 100] != "")
+    facts["v0.43: parents past 63 kept (IN100 inside 100, DEEPER inside it)"] = (
+        inner is not None and deeper is not None and pars[inner] == 100 and pars[deeper] == inner)
+    notes["v043"] = {"made": len(made), "hi_writes": len(hi_writes), "inner": inner, "deeper": deeper,
+                     "pars": [pars[x] for x in (inner, deeper) if x is not None]}
     disk.clear()
     disk.update(after)
     io.pop("log", None)
