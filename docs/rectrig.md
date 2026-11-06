@@ -16,6 +16,11 @@ QREC in `csrc/sampler/rec.c`; the views in `csrc/sampler/smp_page.c`. Check:
   The place shows TRIG and the value, inverted when the step has one (a p-lock's look). Any
   track, any machine: the REC lock lives on that track's step. A trigless lock trig records
   without playing a note.
+- **Arm the track** (REC TRIGS view, **H** with no step held; the active track's): **OFF** (the
+  default: its REC trigs play as trigs and record nothing, so placing one overwrites nothing),
+  **ONCE** (the Octatrack's one-shot: the first REC trig that plays on the track records, then
+  the track is OFF again and the buffer keeps that take looping), **ON** (every time), four
+  detents a choice. The instrument's, not saved with the pattern.
 - **What it records**: the RECORDER's SRC and CHAN (IN, MAIN, TRK1..16), for R.LEN steps at
   the tempo; R.LEN MAX on a REC trig is the pattern's length.
 - **Play it**: SAMP **REC 1** (124) or **REC 2** (125) on any sample machine's track.
@@ -27,8 +32,11 @@ QREC in `csrc/sampler/rec.c`; the views in `csrc/sampler/smp_page.c`. Check:
   normalised, TRIM, as before.
 - Boundaries: every N steps of the master position (1, 2, 4, 8, 16, 32, 64), or PLEN, the
   pattern's first step, as the Octatrack quantises to the pattern.
-- **RIGHT** on the RECORDER: the REC TRIGS view (both buffers: EMPTY, REC, NEXT (a take
-  waiting for QPLAY), PLAY, and each take's length; Q.REC, Q.PLAY, R.LEN). **LEFT**: back.
+- **RIGHT** on the RECORDER (page 1/2): the REC TRIGS view (2/2), on the RECORDER's own grid:
+  SRC, the two buffers in the RECORD box's place (EMPTY, REC, NEXT (a take waiting for QPLAY),
+  PLAY, and each take's seconds), the active track's REC trigs on the 16 steps of its page as
+  a 4 x 4 grid (REC 1 filled, REC 2 open), E Q.REC, F Q.PLAY, G R.LEN, H the track's arm.
+  **LEFT**: back.
 
 ## How it works
 
