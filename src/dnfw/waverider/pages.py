@@ -49,8 +49,10 @@ LOAD = 0x4670C000                 # RAM above BSS, clear of every declared range
 # v0.13: the C page renderer is a CODE chunk of its own, well above the others (it outgrew
 # the room after this assembly, LOAD + 0x600 .. PING's chunk)
 C_LOAD = 0x46AC0000                # clear of the emulator harnesses' stack and scratch (0x46a00000..)
-C_SPAN = 0x20000                   # v0.29: up to the MD graphics at 0x46ae0000 (64 KB until v0.28; the
-                                  # multi-select took it past); all unclaimed RAM above BSS (docs/memory-map.md)
+C_SPAN = 0x30000                   # v0.41: up to the MD graphics, now at 0x46af0000 (v0.29..v0.40: 0x20000,
+                                  # to them at 0x46ae0000, and v0.40's renderer was within 2.5 KB of it;
+                                  # REC trigs took it past). 64 KB until v0.28; all unclaimed RAM above
+                                  # BSS (docs/memory-map.md); the pool's mirror starts at 0x46b00000
 C_END = 0x46710000                # the platform runtime starts here
 ACTIVE_TRACK = 0x42431A6C         # byte: the UI's active track, 0..15
 KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t
@@ -494,7 +496,9 @@ def perc_c_header() -> str:
             + md_c_header())
 
 
-MDUI_LOAD = 0x46AE0000                          # the Machinedrum's screen graphics (dnfw.md.ui)
+MDUI_LOAD = 0x46AF0000                          # the Machinedrum's screen graphics (dnfw.md.ui; 6.8 KB;
+                                                # v0.41: up 64 KB, past the renderer's larger span)
+assert C_LOAD + C_SPAN <= MDUI_LOAD and MDUI_LOAD + 0x8000 <= 0x46B00000, "renderer, MD graphics, the pool's mirror"
 MD_FX_NIBBLES = 0x31313311                      # AMD-AMF, EQF-EQG, FLTF-FLTW-FLTQ clipped, as the MD's
 TRACK_LEVEL_ID = 10                             # record 10, "Track Level" / LEV, 0..0x7f00 (read from the 1.11 record table)
 

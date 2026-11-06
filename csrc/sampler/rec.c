@@ -175,14 +175,16 @@ static u32 rec_length(void)
     return f > full ? full : f;
 }
 
+/* v0.41: SAMP 1..123 (slots 0..122): the four recorder slots past them are the REC
+ * buffers' (rectrig.c); a recording put there (v0.33..v0.40, a full pool) turned them off */
 static int next_empty(int from)
 {
-    for (int j = 0; j < 127; j++) {
-        int k = (from + j) % 127;
+    for (int j = 0; j < REC_FIRST; j++) {
+        int k = (from + j) % REC_FIRST;
         if (smp_slot_empty(k))
             return k;
     }
-    return from % 127;
+    return from % REC_FIRST;
 }
 
 static void send(int cmd)
@@ -219,8 +221,28 @@ static void send(int cmd)
         extern void smp_count_cover(int k);
         smp_count_cover(rec_dest);              /* v0.38: so the DSP plays it as it records */
     }
-    sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8, thr,
-                           (u32)rec_dest << 24 | rec_length());
+    u32 len = rec_length();
+    if (cmd == CMD_NOW || cmd == CMD_ARM || cmd == CMD_ARM_PLAY) {
+        /* v0.41: never past the room found (v0.22..v0.40 sent R.LEN alone, and the DSP stops
+         * only at the area's end: a long take in a fragmented area ran into the recording
+         * after it, in the DSP's RAM, until the next power-on) */
+        if (len > rec_room / 2u)
+            len = (rec_room / 2u) & ~31u;
+    }
+    extern int rt_quantised(void);
+    extern void rt_cut(void);
+    if ((cmd == CMD_NOW && !rt_quantised()) || cmd == CMD_ARM || cmd == CMD_ARM_PLAY)
+        rt_cut();                               /* v0.41: a manual take's turn: a buffer take ends here */
+    if (cmd == CMD_NOW && rt_quantised()) {     /* v0.41 QREC: at the next boundary (rectrig.c) */
+        extern u32 smp_command_words(u32 *w, u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames);
+        extern void rt_q_set(const u32 *w);
+        u32 w[6];
+        sent_seq = smp_command_words(w, (u32)cmd, src, chan | (place / 512u) << 8, thr,
+                                     (u32)rec_dest << 24 | len);
+        rt_q_set(w);
+    } else
+        sent_seq = smp_command((u32)cmd, src, chan | (place / 512u) << 8, thr,
+                               (u32)rec_dest << 24 | len);
     sent_at = FRAMES;
     if (rec_link < 0)
         rec_link = 0;
@@ -241,9 +263,20 @@ void rec_halt(void)
         send(CMD_STOP);
 }
 
+int rec_rt_take __attribute__((section(".data"))) = 0;   /* v0.41: the DSP's take is a buffer's */
+int rec_view __attribute__((section(".data"))) = 0;      /* v0.41: 0 the RECORDER, 1 REC TRIGS */
+
 void rec_yes(void)
 {
-    send(rec_state == 2 ? CMD_STOP : CMD_NOW);
+    extern int rt_q_waiting(void);
+    extern void rt_q_cancel(void);
+    if (rt_q_waiting()) {                       /* v0.41: a QREC take waiting: YES again cancels it */
+        rt_q_cancel();
+        sent_seq = 0;
+        return;
+    }
+    /* v0.41: a buffer's take is not this screen's to stop: YES records over it */
+    send(rec_state == 2 && !rec_rt_take ? CMD_STOP : CMD_NOW);
 }
 
 /* v0.30: H's turn, as one action a turn (a user: "the knob acceleration is wonky on ARM":
@@ -321,6 +354,9 @@ void rec_poll(void)
     rpt_poll();
     smp_marquee_poll();                         /* v0.39: the selected long name's marquee */
     fb_pv_poll();
+    extern void rt_poll(void);
+    extern int rt_manual, rt_q_waiting(void);
+    rt_poll();                                  /* v0.41: the REC buffers (rectrig.c) */
     if (smp_status(st)) {
         rec_state = st[0] & 3;
         rec_frames = (u32)st[2] << 6;              /* 64 frames a unit (v0.16) */
@@ -328,9 +364,17 @@ void rec_poll(void)
         rec_heard = FRAMES + 1u;
         if (sent_seq && st[1] == (u16)sent_seq)
             rec_link = 1;
+        /* v0.41: the command the DSP last took was a REC trig's (bit 15 of the echo): its take
+         * is a buffer's, not saved nor shown as this screen's (and our last command, sent
+         * before it, was taken: the link is fine) */
+        rec_rt_take = (st[1] & 0x8000u) != 0;
+        if (rec_rt_take && sent_seq && rec_link == 0)
+            rec_link = 1;
+        rt_manual = (!rec_rt_take && (rec_state == 1 || rec_state == 2)) || rt_q_waiting();
         /* a recording has ended: it is kept on the +Drive, as the DT2 keeps its
-         * recordings, and is there again after a power cycle; DEST moves on */
-        if (rec_state == 2) {
+         * recordings, and is there again after a power cycle; DEST moves on (v0.41: a
+         * buffer's take is not one: a manual take before it ended, and is saved) */
+        if (rec_state == 2 && !rec_rt_take) {
             if (!was_recording)
                 rec_wave_reset();
             rec_wave_add(rec_frames, rec_peak);
@@ -425,6 +469,16 @@ static int rec_choice_step(int index, int delta)    /* -> the choices to move */
 /* a knob on the recorder's screen: INDEX 1..8 (A..H), DELTA detents */
 static void knob(int index, int delta)
 {
+    /* v0.41 (docs/rectrig.md): a step held, H is its REC trig's lock (slide.c), on either
+     * view; on the REC TRIGS view E and F are QREC and QPLAY (rectrig.c) */
+    extern int sl_rec_knob(int delta);
+    extern void rt_knob(int index, int delta);
+    if (index == 8 && sl_rec_knob(delta))
+        return;
+    if (rec_view == 1 && (index == 5 || index == 6)) {
+        rt_knob(index, delta);
+        return;
+    }
     switch (index) {
     case 1: rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1); break;
     case 2: rec_chan = clamp(rec_chan + rec_choice_step(2, delta), 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
@@ -1231,10 +1285,21 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         int press = (flags & F_PRESS) && !(flags & F_RELEASE);
         if (code == K_YES || code == K_NO || (code >= K_UP && code <= K_RIGHT)
             || (code >= K_ENC_A && code <= K_ENC_H)) {
+            extern int rt_q_waiting(void);
+            extern void rt_q_cancel(void);
             if (press && code == K_YES)
                 rec_yes();
-            if (press && code == K_NO)
-                rec_overlay = 0;                /* the screen closes; a recording goes on */
+            if (press && code == K_NO) {
+                if (rt_q_waiting()) {           /* v0.41: a QREC take waiting: NO cancels it */
+                    rt_q_cancel();
+                    sent_seq = 0;
+                } else
+                    rec_overlay = 0;            /* the screen closes; a recording goes on */
+            }
+            if (press && (code == K_LEFT || code == K_RIGHT)) {
+                rec_view = code == K_RIGHT;     /* v0.41: RIGHT the REC TRIGS view, LEFT back */
+                smp_overlay_dirty = 1;
+            }
             if (press && code < 32)
                 eaten |= 1u << code;
             it[0] = IT_DROP;

@@ -59,7 +59,23 @@ struct ext {                                    /* in a lock list at SL_EXT */
     u32 magic;                                  /* 'SL' << 16 | track << 8 | step */
     u16 sld, slen;                              /* the step's values, 0xffff: no lock */
     u32 frame;                                  /* FRAMES + 1 of its last apply; 0 never */
+    u16 rec, pad;                               /* v0.41: its REC trig's buffer (1, 2), 0xffff none */
 };
+_Static_assert(SL_EXT + sizeof(struct ext) <= 20 + 202 * 8, "our values fit in the lock list's spare tail");
+
+/* v0.41: a record's head byte for each of our locks: k 0 SLD, 1 SLEN, 2 REC (rectrig.c) */
+static u8 head_of(u32 k)
+{
+    return k == 0 ? SL_RAM_SLD : k == 1 ? SL_RAM_SLEN : SL_RAM_REC;
+}
+static int our_head(u8 h)
+{
+    return h == SL_RAM_SLD || h == SL_RAM_SLEN || h == SL_RAM_REC;
+}
+static u32 k_of(u8 h)
+{
+    return h == SL_RAM_SLD ? 0 : h == SL_RAM_SLEN ? 1 : 2;
+}
 
 struct slide {
     u16 n;                                      /* slots sliding, 0: none */
@@ -198,6 +214,13 @@ void sl_apply(u32 v, u8 *list, void *mirror)
     sl_v[v].n = 0;
     sl_apply_stock(v, list, mirror);
     trigger(v, t, list);
+    /* v0.41: a REC trig (rectrig.c): its buffer, once for the trig (rt_trig skips the
+     * other voices of a chord, and every apply of the same step in the same frame) */
+    struct ext *e = (struct ext *)(list + SL_EXT);
+    if ((e->magic >> 16) == 0x534Cu && ((e->magic >> 8) & 0xFF) == t && (e->rec == 1 || e->rec == 2)) {
+        extern void rt_trig(u32 track, u32 step, u32 buf);
+        rt_trig(t, e->magic & 0xFF, e->rec);
+    }
 }
 
 /* Every frame, at 0x4002717e: the stock smoother, then every slide one frame on. */
@@ -243,15 +266,15 @@ u32 sl_smooth(void *src)
 
 static int ours(const u8 *r, u32 t)
 {
-    return (r[0] == SL_RAM_SLD || r[0] == SL_RAM_SLEN) && r[1] == (SL_TAG | t);
+    return our_head(r[0]) && r[1] == (SL_TAG | t);
 }
 
-/* the step's SLD (k 0) or SLEN (k 1) lock in TABLE, 0xffff: none */
+/* the step's SLD (k 0), SLEN (k 1) or REC (k 2, v0.41) lock in TABLE, 0xffff: none */
 u32 sl_lock_get(const u8 *table, u32 t, u32 step, u32 k)
 {
-    if (!table || t >= NV || step > 127)
+    if (!table || t >= NV || step > 127 || k > 2)
         return 0xFFFF;
-    u8 head = k ? SL_RAM_SLEN : SL_RAM_SLD;
+    u8 head = head_of(k);
     for (u32 i = 0; i < RECS; i++) {
         const u8 *r = table + REC * i;
         if (r[0] == head && r[1] == (SL_TAG | t))
@@ -265,9 +288,9 @@ u32 sl_lock_get(const u8 *table, u32 t, u32 step, u32 k)
  * come the records they need; stock's own allocation skips a lock when none is free). */
 static int lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value, u32 reserve)
 {
-    if (!table || t >= NV || step > 127)
+    if (!table || t >= NV || step > 127 || k > 2)
         return 0;
-    u8 head = k ? SL_RAM_SLEN : SL_RAM_SLD;
+    u8 head = head_of(k);
     u8 *rec = 0, *free = 0;
     u32 nfree = 0;
     for (u32 i = 0; i < RECS; i++) {
@@ -319,6 +342,8 @@ void sl_build(int track, u8 *list, u8 *table, void *sound, int step, int a6, int
     struct ext *e = (struct ext *)(list + SL_EXT);
     e->sld = (u16)sl_lock_get(table, (u32)track, (u32)step, 0);
     e->slen = (u16)sl_lock_get(table, (u32)track, (u32)step, 1);
+    e->rec = (u16)sl_lock_get(table, (u32)track, (u32)step, 2);
+    e->pad = 0;
     e->frame = 0;
     e->magic = 0x534C0000u | ((u32)track << 8) | (u32)step;
 }
@@ -338,6 +363,7 @@ int sl_clear(void *model, int track, int step)
     u8 *table = (u8 *)((u32 (*)(void *))((*(void ***)model)[10]))(model);
     sl_lock_set(table, (u32)track, (u32)step, 0, 0xFFFF);
     sl_lock_set(table, (u32)track, (u32)step, 1, 0xFFFF);
+    sl_lock_set(table, (u32)track, (u32)step, 2, 0xFFFF);
     return r;
 }
 
@@ -351,8 +377,8 @@ int sl_save(u8 *stored, u8 *ram)
     for (u32 i = 0; i < RECS; i++) {
         const u8 *m = ram + REC * i;
         u8 *s = stored + REC * i;
-        if ((m[0] == SL_RAM_SLD || m[0] == SL_RAM_SLEN) && (m[1] & 0xF0) == SL_TAG) {
-            s[0] = m[0] == SL_RAM_SLD ? SL_ID_SLD : SL_ID_SLEN;
+        if (our_head(m[0]) && (m[1] & 0xF0) == SL_TAG) {
+            s[0] = m[0] == SL_RAM_SLD ? SL_ID_SLD : m[0] == SL_RAM_SLEN ? SL_ID_SLEN : SL_ID_REC;
             s[1] = m[1] & 0x0F;
         }
     }
@@ -369,12 +395,12 @@ int sl_load(u8 *ram, u8 *stored)
     for (u32 i = 0; i < RECS; i++) {
         const u8 *s = stored + REC * i;
         u8 *m = ram + REC * i;
-        if ((s[0] != SL_ID_SLD && s[0] != SL_ID_SLEN) || s[1] > 15 || m[0] != 0xFF)
+        if ((s[0] != SL_ID_SLD && s[0] != SL_ID_SLEN && s[0] != SL_ID_REC) || s[1] > 15 || m[0] != 0xFF)
             continue;
         for (u32 b = 2; b < REC; b++)
             m[b] = s[b];
         m[1] = SL_TAG | s[1];
-        m[0] = s[0] == SL_ID_SLD ? SL_RAM_SLD : SL_RAM_SLEN;
+        m[0] = s[0] == SL_ID_SLD ? SL_RAM_SLD : s[0] == SL_ID_SLEN ? SL_RAM_SLEN : SL_RAM_REC;
     }
     return r;
 }
@@ -594,6 +620,55 @@ int sl_knob(u32 index, int delta)
     return 1;
 }
 
+/* ---- v0.41: the REC trig's lock, from the RECORDER overlay (rec.c, rectrig.c) -----------
+ *
+ * The RECORDER is ours (an overlay, over any track's page), so it is where a REC trig is
+ * set: a step held (in GRID RECORDING, as for any p-lock), knob H steps its REC lock
+ * through OFF, REC 1, REC 2, four detents a choice; every held step gets it, as SLD/SLEN.
+ * Any track: the lock lives on the held step of the active track, whatever its machine. */
+static int srk_acc D = 0;
+static u32 srk_at D = 0;
+u8 *sl_rec_table D;                             /* the table the last REC turn wrote (for the checks) */
+
+int sl_rec_held(u32 *val)                       /* a step held -> 1, *VAL its REC (0xffff none) */
+{
+    struct held h;
+    if (!held(&h))
+        return 0;
+    *val = sl_lock_get(h.table, h.track, h.first, 2);
+    return 1;
+}
+
+int sl_rec_knob(int delta)                      /* -> 1: a step is held and H was its REC's */
+{
+    struct held h;
+    if (!held(&h))
+        return 0;
+    u32 now = FRAMES;
+    if (now - srk_at > 3000u || (srk_acc > 0 && delta < 0) || (srk_acc < 0 && delta > 0))
+        srk_acc = 0;
+    srk_at = now;
+    srk_acc += delta;
+    int n = srk_acc / SL_CHOICE_DETENTS;
+    srk_acc -= n * SL_CHOICE_DETENTS;
+    if (!n)
+        return 1;
+    u32 cur = sl_lock_get(h.table, h.track, h.first, 2);
+    int i = cur == 1 ? 1 : cur == 2 ? 2 : 0;    /* OFF, REC 1, REC 2 */
+    i += n;
+    if (i < 0) i = 0;
+    if (i > 2) i = 2;
+    u32 v = i == 0 ? 0xFFFFu : (u32)i;
+    u8 *obj = HELD_OBJ;
+    for (u32 st = 0; st < h.len; st++)
+        if (BIT_TEST(obj + 600, st) & 0xFF)
+            sl_lock_set(h.table, h.track, st, 2, v);
+    sl_rec_table = h.table;
+    ((void (*)(void *, void *))((*(void ***)h.model)[4]))(h.model, 0);   /* the pattern changed */
+    smp_overlay_dirty = 1;
+    return 1;
+}
+
 /* ---- v0.40: copy and paste carry SLD/SLEN ----------------------------------------------
  *
  * v0.39's known issue: stock's copies match lock records by track, and ours are tagged
@@ -644,7 +719,7 @@ int sl_paste(const u8 *rec, const u8 *vals, u8 *table, int first, int count, int
              const u8 *clip)
 {
     int tb = (s8)rec[1];
-    if ((rec[0] != SL_RAM_SLD && rec[0] != SL_RAM_SLEN) || (rec[1] & 0xF0) != SL_TAG
+    if (!our_head(rec[0]) || (rec[1] & 0xF0) != SL_TAG
         || (u32)(rec[1] & 0x0F) != ct || dt < 0 || dt >= NV || !table || first < 0 || count < 0)
         return tb;
     /* v0.40 review: stock's loop takes the clipboard's records in order and allocates each
@@ -656,7 +731,7 @@ int sl_paste(const u8 *rec, const u8 *vals, u8 *table, int first, int count, int
         for (u32 j = (u32)(rec - clip) / REC + 1; j < RECS; j++)
             reserve += (u32)stock_needs(clip + REC * j, table, dt, ct);
     }
-    u32 k = rec[0] == SL_RAM_SLEN;
+    u32 k = k_of(rec[0]);
     for (int i = 0; i < count && first + i < 128; i++) {
         u32 v = *(const u16 *)(vals + 2 + 2 * i);
         if (v == 0xFFFF)
@@ -671,6 +746,7 @@ int sl_paste(const u8 *rec, const u8 *vals, u8 *table, int first, int count, int
 
 #define TCLIP 128
 u32 sl_tclip[TCLIP] D = {[0 ... TCLIP - 1] = 0xFFFFFFFFu};                          /* a copied trig's SLEN << 16 | SLD (0xffff none) */
+u8 sl_tclip_rec[TCLIP] D = {[0 ... TCLIP - 1] = 0xFFu};                            /* v0.41: its REC (0xff none) */
 
 void sl_tcopy(u32 off, void *ctx, u32 step)
 {
@@ -678,11 +754,14 @@ void sl_tcopy(u32 off, void *ctx, u32 step)
     if (e >= TCLIP)
         return;
     sl_tclip[e] = 0xFFFFFFFFu;
+    sl_tclip_rec[e] = 0xFFu;
     u8 *table = ctx ? ctx_table(ctx) : 0;
     u32 t = ctx ? *(u32 *)((u8 *)ctx + 60) : NV;
     if (!table || t >= NV || step > 127)
         return;
     sl_tclip[e] = sl_lock_get(table, t, step, 0) | sl_lock_get(table, t, step, 1) << 16;
+    u32 r = sl_lock_get(table, t, step, 2);
+    sl_tclip_rec[e] = r == 0xFFFF ? 0xFFu : (u8)r;
 }
 
 /* the records stock's trig paste still needs (v0.40 review): entries E.. of the clipboard's
@@ -725,11 +804,12 @@ void sl_tpaste(u32 off, void *ctx, u32 step, const u8 *vec)
     if (!table || t >= NV)
         return;
     u32 c = sl_tclip[e];
-    if (c == 0xFFFFFFFFu)
+    u32 cr = sl_tclip_rec[e];
+    if (c == 0xFFFFFFFFu && cr == 0xFFu)
         return;
     u32 reserve = tstock_needs(vec, e, table, t);
-    for (u32 k = 0; k < 2; k++) {
-        u32 v = (c >> (16 * k)) & 0xFFFF;
+    for (u32 k = 0; k < 3; k++) {
+        u32 v = k < 2 ? (c >> (16 * k)) & 0xFFFF : cr == 0xFFu ? 0xFFFFu : cr;
         if (v == 0xFFFF)
             continue;
         if (lock_set(table, t, step, k, v, reserve))

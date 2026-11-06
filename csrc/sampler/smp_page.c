@@ -636,8 +636,11 @@ static void slot_name(int k, char *out, int max)   /* SAMP value K (0 OFF) */
 {
     const char *n = 0;
     int cnt = smp_count();
+    extern int rt_on;
     if (k <= 0)
         n = "OFF";
+    else if (rt_on && k - 1 >= REC_FIRST && k - 1 < REC_FIRST + 4)
+        n = k - 1 == REC_FIRST ? "REC 1" : k - 1 == REC_FIRST + 1 ? "REC 2" : "---";   /* v0.41: the buffers */
     else if (cnt >= 0 && k <= cnt && !smp_slot_empty(k - 1))
         n = smp_long_name(k - 1);
     if (k > 0 && !(n && n[0]) && !smp_slot_empty(k - 1))
@@ -2041,6 +2044,60 @@ static void recording_draw(void *c, int heard)
     LABEL(c, 106, 2, "%s", "YES: STOP");
 }
 
+/* v0.41 (docs/rectrig.md): H's place with a step held: that step's REC trig (OFF, REC 1,
+ * REC 2), drawn inverted when the step has one, as a p-lock; -> 1 drawn */
+static int rt_h_draw(void *c)
+{
+    extern int sl_rec_held(u32 *val);
+    u32 v;
+    if (!sl_rec_held(&v))
+        return 0;
+    int lk = v == 1 || v == 2;
+    LABEL(c, 113, 9, "%s", lk ? (v == 1 ? "REC 1" : "REC 2") : "OFF");
+    LABEL(c, 113, 0, "%s", "TRIG");
+    if (lk)                                     /* a lock's look: the place inverted (slide.c's way) */
+        ((void (*)(void *, int, int, int, int, int))0x40114842u)(c, 102, 7, 124, 16, -1);
+    return 1;
+}
+
+/* v0.41: the RECORDER's second view (RIGHT; LEFT back): the two buffers, QREC, QPLAY */
+static void rt_view_draw(void *c)
+{
+    extern int rt_on, rt_qrec, rt_qplay, rec_rlen;
+    extern int rt_state(int b, int *tenths);
+    extern const char *rt_qname(int q);
+    LABEL(c, 25, 57, "%s", "REC TRIGS");
+    hline(c, 0, 50, 54, 0);
+    if (!rt_on) {
+        LABEL(c, 64, 40, "%s", "SAMP 124-127 HOLD");
+        LABEL(c, 64, 32, "%s", "SAVED SAMPLES:");
+        LABEL(c, 64, 24, "%s", "NO BUFFERS HERE");
+    } else {
+        static const char *const W[4] = {"EMPTY", "REC", "NEXT", "PLAY"};
+        for (int b = 0; b < 2; b++) {
+            int t, st = rt_state(b, &t), y = 40 - 12 * b;
+            LABEL(c, 20, y, "REC %d", b + 1);
+            if (st)
+                LABEL(c, 76, y, "%s %d.%d S", W[st], t / 10, t % 10);
+            else
+                LABEL(c, 76, y, "%s", W[0]);
+        }
+    }
+    LABEL(c, 13, 9, "%s", rt_qname(rt_qrec));
+    LABEL(c, 13, 0, "%s", "Q.REC");
+    LABEL(c, 47, 9, "%s", rt_qname(rt_qplay));
+    LABEL(c, 47, 0, "%s", "Q.PLAY");
+    if (rec_rlen <= 0)
+        LABEL(c, 80, 9, "%s", "PLEN");
+    else
+        LABEL(c, 80, 9, "%d", rec_rlen);
+    LABEL(c, 80, 0, "%s", "R.LEN");
+    if (!rt_h_draw(c)) {
+        LABEL(c, 113, 9, "%s", "HOLD");
+        LABEL(c, 113, 0, "%s", "A STEP");
+    }
+}
+
 void rec_screen_draw(void *c)
 {
     if (rec_phase) {
@@ -2057,8 +2114,13 @@ void rec_screen_draw(void *c)
     }
     int heard = rec_heard && FRAMES_NOW + 1u - rec_heard < 1500u;
     int state = heard ? rec_state : 0;
+    extern int rec_rt_take, rec_view;
     clear(c, 0, 0, 127, 63);
-    if (state == 2) {                           /* v0.25: recording: the DT2's screen */
+    if (rec_view == 1) {                        /* v0.41: RIGHT: the REC TRIGS view */
+        rt_view_draw(c);
+        return;
+    }
+    if (state == 2 && !rec_rt_take) {           /* v0.25: recording: the DT2's screen */
         recording_draw(c, heard);
         return;
     }
@@ -2086,7 +2148,19 @@ void rec_screen_draw(void *c)
     int bx0 = 29, bx1 = 97, by0 = 22, by1 = 48;
     box(c, bx0, by0, bx1, by1, 1);
     int cx = (bx0 + bx1) / 2;
-    if (state == 2) {
+    extern int rt_q_waiting(void), rt_qrec;
+    extern const char *rt_qname(int q);
+    if (rt_q_waiting()) {                       /* v0.41: QREC: the take waits for its step */
+        LABEL(c, cx, by0 + 16, "%s", "WAITING");
+        LABEL(c, cx, by0 + 8, "Q.REC %s", rt_qname(rt_qrec));
+        LABEL(c, cx, by0 + 1, "%s", "NO:CANCEL");
+    } else if (state == 2 && rec_rt_take) {     /* v0.41: a REC trig's take, into a buffer */
+        fill(c, bx0 + 5, by0 + 15, bx0 + 11, by0 + 21);
+        int ds = (int)(rec_frames / 4800u);
+        LABEL(c, cx + 6, by0 + 16, "%s", "TRIG");
+        LABEL(c, cx, by0 + 8, "%d.%d S", ds / 10, ds % 10);
+        LABEL(c, cx, by0 + 1, "%s", "YES:RECORD");
+    } else if (state == 2) {
         fill(c, bx0 + 5, by0 + 15, bx0 + 11, by0 + 21);   /* a solid dot: recording */
         int ds = (int)(rec_frames / 4800u);
         LABEL(c, cx + 6, by0 + 16, "%s", "REC");
@@ -2133,7 +2207,9 @@ void rec_screen_draw(void *c)
     LABEL(c, 47, 0, "%s", "R.LEN");
     LABEL(c, 80, 9, "%s", rec_rstrt ? "PLAY" : "THRES");
     LABEL(c, 80, 0, "%s", "R.STRT");
-    int on = state == 1 || state == 2;           /* ARM's switch: what the DSP is doing */
+    if (rt_h_draw(c))                           /* v0.41: a step held: its REC trig */
+        return;
+    int on = (state == 1 || state == 2) && !rec_rt_take;   /* ARM's switch: what the DSP is doing */
     int sx0 = 104, sx1 = 122, sy0 = 8, sy1 = 15;
     box(c, sx0, sy0, sx1, sy1, 0);
     if (on)

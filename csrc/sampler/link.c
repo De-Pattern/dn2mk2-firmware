@@ -189,6 +189,32 @@ static u32 cmd_seq __attribute__((section(".data"))) = 0;
 /* the DSP's next command (dnfw.sampler.program.recorder); -> its sequence number, which
  * the DSP acts on once. A full queue drops the oldest. */
 static void span_drop(u32 lo, u32 hi);
+/* v0.41: the UI's sequence numbers keep bit 15 of their low half clear: a buffer take's
+ * (rectrig.c) has it set, and the DSP echoes the low half (rec.c tells them apart by it) */
+static u32 next_seq(void)
+{
+    ++cmd_seq;
+    if (cmd_seq & 0x8000u)
+        cmd_seq += 0x8000u;
+    return cmd_seq;
+}
+
+/* v0.41 (QREC, rectrig.c): a command's words with its sequence number, not queued: the
+ * audio interrupt sends it at its boundary (smp_tdm) -> the sequence number */
+u32 smp_command_words(u32 *w, u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames)
+{
+    if (cmd == 1 || cmd == 2 || cmd == 5)
+        span_drop(REC_OFFSET, REC_END);
+    w[0] = next_seq();
+    w[1] = cmd;
+    w[2] = src;
+    w[3] = chan;
+    w[4] = thres;
+    w[5] = dest_frames;
+    smp_cmds++;
+    return w[0];
+}
+
 u32 smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames)
 {
     if (cmd == 1 || cmd == 2 || cmd == 5)       /* v0.38: ARM, NOW, ARM_PLAY: the DSP writes there */
@@ -197,7 +223,7 @@ u32 smp_command(u32 cmd, u32 src, u32 chan, u32 thres, u32 dest_frames)
     if (h - cmd_tail >= CMDQ)
         cmd_tail = h - CMDQ + 1;
     volatile u32 *c = cmdq[h % CMDQ];
-    c[0] = ++cmd_seq;
+    c[0] = next_seq();
     c[1] = cmd;
     c[2] = src;
     c[3] = chan;
@@ -352,6 +378,30 @@ static u32 blank_left __attribute__((section(".data"))) = 0;
 #define BLANK_PACKETS ((ENTRY_WORDS + RX_WORDS - 1u) / RX_WORDS)
 u32 smp_blank_sent __attribute__((section(".data"))) = 0;
 
+/* v0.41 (rectrig.c): a REC trig's command, and a QREC take's at its boundary, each sent as a
+ * queued one is (CMD_REPEAT packets), ahead of the queue but never in the middle of a queued
+ * command's repeats (the DSP would take that one again after: a STOP would end the take) */
+extern volatile u32 rt_w[6], rt_gen, q_w[6], q_fire;
+static u32 rt_seen __attribute__((section(".data"))) = 0;
+static u32 q_seen __attribute__((section(".data"))) = 0;
+static u32 rt_left __attribute__((section(".data"))) = 0;
+static u32 rt_cw[CMD_WORDS] __attribute__((section(".data")));
+u32 smp_rt_sent __attribute__((section(".data"))) = 0;     /* (for the checks) */
+
+static int rt_take(volatile u32 *w, volatile u32 *gen, u32 *seen)
+{
+    u32 g = *gen;
+    if (g == *seen)
+        return 0;
+    for (int j = 0; j < CMD_WORDS; j++)
+        rt_cw[j] = w[j];
+    if (*gen != g)
+        return 0;                               /* rewritten as it was read: the next period */
+    *seen = g;
+    rt_left = CMD_REPEAT;
+    return 1;
+}
+
 void smp_tdm(u32 h)
 {
     periods++;
@@ -361,9 +411,15 @@ void smp_tdm(u32 h)
         blank_left = BLANK_PACKETS;
         job_fast_next = job_n;                  /* (its check fails: the loader sends it again) */
     }
-    int is_cmd = cmd_tail != cmd_head;
+    if (!rt_left && !cmd_left && !rt_take(rt_w, &rt_gen, &rt_seen))
+        rt_take(q_w, &q_fire, &q_seen);
+    int is_rt = rt_left != 0;
+    int is_cmd = is_rt || cmd_tail != cmd_head;
     int is_blank = !is_cmd && blank_left;
-    if (is_cmd)                                 /* a command first: the command block's words */
+    if (is_rt)
+        for (int j = 0; j < CMD_WORDS; j++)
+            cw[j] = rt_cw[j];
+    else if (is_cmd)                            /* a command first: the command block's words */
         for (int j = 0; j < CMD_WORDS; j++)
             cw[j] = cmdq[cmd_tail % CMDQ][j];
     if (is_cmd || is_blank || (job_data && job_fast_next < job_n)) {
@@ -404,7 +460,10 @@ void smp_tdm(u32 h)
             smp_blank_sent++;
         } else if (!is_cmd)
             job_fast_next = k + n;
-        else if (++cmd_left >= CMD_REPEAT) {    /* sent a few times: one may be lost */
+        else if (is_rt) {
+            if (--rt_left == 0)
+                smp_rt_sent++;
+        } else if (++cmd_left >= CMD_REPEAT) {    /* sent a few times: one may be lost */
             cmd_left = 0;
             cmd_tail++;
         }
@@ -1299,9 +1358,16 @@ u32 smp_rec_place(int dest, u32 *room)
     /* v0.38: and every other project's recordings (pools.c): their ends are candidates too,
      * and nothing starts inside one or runs into one */
     int nres = smp_pl_res_count();
-    for (int c = -1; c < POOL_SLOTS + nres; c++) {    /* each candidate start: 0, or a recording's end */
+    extern u32 rt_rplace[4], rt_rbytes[4], rt_nx_place[2], rt_nx_need[2];
+    for (int c = -1; c < POOL_SLOTS + nres + 6; c++) {    /* each candidate start: 0, or a recording's end */
         u32 s = 0;
-        if (c >= POOL_SLOTS) {
+        if (c >= POOL_SLOTS + nres) {           /* v0.41: a buffer take's end, or a next place's */
+            int i = c - POOL_SLOTS - nres;
+            u32 a = i < 4 ? rt_rplace[i] : rt_nx_place[i - 4], z = a + (i < 4 ? rt_rbytes[i] : rt_nx_need[i - 4]);
+            if (z == a || (i < 4 && REC_FIRST + i == dest))
+                continue;
+            s = (z + 511u) & ~511u;
+        } else if (c >= POOL_SLOTS) {
             u32 z = smp_pl_res_end(c - POOL_SLOTS);
             if (z <= REC_OFFSET || z >= REC_OFFSET + REC_BYTES)
                 continue;
@@ -1327,6 +1393,9 @@ u32 smp_rec_place(int dest, u32 *room)
                 next = a & ~511u;
         }
         if (smp_pl_clash(REC_OFFSET + s, REC_OFFSET + s + 1u))
+            inside = 1;
+        extern int rt_regions(int dest, u32 s, u32 *next);   /* v0.41: the buffers' takes, and their next places */
+        if (rt_regions(dest, s, &next))
             inside = 1;
         u32 nx = smp_pl_next(REC_OFFSET + s);
         if (nx != 0xFFFFFFFFu && nx - REC_OFFSET < next)
@@ -2263,6 +2332,14 @@ void smp_boot(void)
     }
     extern void smp_pl_poll(void);
     smp_pl_poll();                                      /* v0.38: a LOAD, a NEW, a slot changed */
+    {                                                   /* v0.41: a buffer take writes the recordings' area */
+        extern volatile u32 rt_gen;
+        static u32 rt_span_seen __attribute__((section(".data"))) = 0;
+        if (rt_gen != rt_span_seen) {
+            rt_span_seen = rt_gen;
+            span_drop(REC_OFFSET, REC_END);
+        }
+    }
     load_poll();
     save_poll();
     edits_poll();
@@ -2715,6 +2792,8 @@ static int mod_scale(int k, int n)              /* a stock offset (+-127) -> +-n
 void smp_mod_apply(void *mirror)
 {
     MOD_APPLY(mirror);
+    extern void rt_frame(void);
+    rt_frame();                                 /* v0.41: QPLAY switches and QREC starts on their step */
     if (!dir_ok)
         return;
     /* v0.33: the loaded slots, listed once a frame and only if a voice needs them (this runs
@@ -2752,6 +2831,12 @@ void smp_mod_apply(void *mirror)
                 if (idx > n - 1) idx = n - 1;
                 *cell = (u16)((loaded[idx] + 1) << 8);   /* the idx-th loaded slot */
             }
+        }
+        {                                       /* v0.41: REC 1 / REC 2 to the half they play */
+            extern u32 rt_map(u32 v);
+            u32 hv = (u32)(*cell >> 8), mv = rt_map(hv);
+            if (mv != hv)
+                *cell = (u16)(mv << 8);
         }
         if (snd[SOUND_TYPE] != SLICE_TYPE)
             continue;
