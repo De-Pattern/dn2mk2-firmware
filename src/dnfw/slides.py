@@ -36,6 +36,20 @@ CLEAR_SITE, CLEAR_STOCK = 0x4003D14E, "4fefffd848d73cfc"    # clear a step's loc
 LOAD_SITE, LOAD_STOCK = 0x400DE51E, "4fefffe048d73c3c"      # pattern lock table: stored -> RAM
 SAVE_SITE, SAVE_STOCK = 0x400DE718, "4fefffe448d73c1c"      # pattern lock table: RAM -> stored
 
+# v0.40: copy and paste carry SLD/SLEN (the arp p-locks' sites, scripts/build_arp_plocks.py):
+# (site, the stock bytes, the hook's label). Each is a jsr, nops to the stock length.
+PASTE_SITES = (
+    (0x40050CCE, "71331801b0aa003c", "sl_copy_cmp1"),        # page autocopy: the track compare
+    (0x40051158, "71358801b0aa003c", "sl_copy_cmp2"),        # shift (FUNC + LEFT/RIGHT)
+    (0x40052634, "7f310801223c0001799c", "sl_paste_a"),      # page paste's UNDO: a record's track
+    (0x40053246, "7b310801223c0001799c", "sl_paste_b"),      # page paste
+    (0x4005389C, "7b338801223c0001799c", "sl_paste_c"),      # track paste
+    (0x40052948, "79338801223c0001799c", "sl_paste_d"),      # track paste's UNDO
+    (0x40053F48, "2f122f2b003c", "sl_copy_hook"),            # trig copy: an entry appended
+    (0x40055440, "71ab000449faf24a", "sl_paste_hook"),       # trig paste: an entry written
+    (0x400E752C, "73280001b481", "sl_clr_cmp"),              # track clear: a record's track
+)
+
 DEST_SLOTS = (4, 12, 20)                # LFO DEST: copied unsmoothed by 0x400db12a; never slid
 SHARED_PAGES = (0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0D, 0x0E, 0x0F, 0x1A, 0x1B, 0x1C)
 MACHINE_PAGES = (0x00, 0x01, 0x02, 0x03)    # FM TONE, WAVETONE, FM DRUM, SWARMER (types 0..3)

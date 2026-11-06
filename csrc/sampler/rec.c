@@ -70,10 +70,11 @@ extern int smp_lst_orig, smp_overlay_dirty;     /* v0.25: the list, the folder b
 extern int smp_fb_open, smp_fb_folder, smp_fb_cur;
 extern int smp_fb_item(int i, int *slot);
 extern int smp_fb_menu, smp_fb_mcur;
-extern int smp_fb_index_of(int f);
+extern int smp_fb_index_of(int f), smp_fb_up(void);
 extern int smp_fb_marked(int k), smp_fb_nactions(int on_folder), smp_fb_mark_count(void), smp_fb_moving;     /* v0.29: multi-select */
 extern int smp_fb_count(void);
 extern void smp_fb_mark(int k, int on), smp_fb_mark_folder(int folder), smp_fb_unmark_all(void);
+extern void smp_fb_mark_here(void);
 extern void smp_fb_delete(int slot, int folder);
 extern int smp_fb_store, smp_fb_last_store;                         /* v0.31: +DRIVE / PROJECT RAM */
 extern int smp_fb_action(int on_folder, int a), smp_fb_load_project(int slot, int folder);
@@ -361,7 +362,7 @@ void rec_poll(void)
         if (mk != work_mark) {
             work_mark = mk;
             work_at = FRAMES | 1u;
-        } else if (FRAMES - work_at > 30000u) {
+        } else if ((int)(FRAMES - work_at) > 30000) {   /* v0.40: signed (FRAMES unchanged since: -1) */
             rec_phase = PH_REC;
             smp_overlay_dirty = 1;
         }
@@ -399,12 +400,34 @@ static int clamp(int v, int lo, int hi)
     return v < lo ? lo : v > hi ? hi : v;
 }
 
+/* v0.41 (the owner: "a little tough to choose which option I want with the encoder"): SRC
+ * and CHAN, the recorder's choices, four detents a choice as the other choice controls since
+ * v0.26 (fmt.c smp_quant's CHOICE_DETENTS). A turn back, or a pause of 2 s, starts the
+ * count again; a fast turn's item carries several detents and counts them all */
+#define REC_CHOICE_DETENTS 4
+static int rk_acc __attribute__((section(".data"))) = 0;
+static int rk_index __attribute__((section(".data"))) = 0;
+static u32 rk_at __attribute__((section(".data"))) = 0;
+
+static int rec_choice_step(int index, int delta)    /* -> the choices to move */
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;
+    if (rk_index != index || now - rk_at > 3000u || (rk_acc > 0 && delta < 0) || (rk_acc < 0 && delta > 0))
+        rk_acc = 0;
+    rk_index = index;
+    rk_at = now;
+    rk_acc += delta;
+    int n = rk_acc / REC_CHOICE_DETENTS;        /* (toward 0: the remainder kept) */
+    rk_acc -= n * REC_CHOICE_DETENTS;
+    return n;
+}
+
 /* a knob on the recorder's screen: INDEX 1..8 (A..H), DELTA detents */
 static void knob(int index, int delta)
 {
     switch (index) {
-    case 1: rec_src = clamp(rec_src + delta, 0, SMP_REC_SOURCES - 1); break;
-    case 2: rec_chan = clamp(rec_chan + delta, 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
+    case 1: rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1); break;
+    case 2: rec_chan = clamp(rec_chan + rec_choice_step(2, delta), 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
     case 4: rec_thres = clamp(rec_thres + delta, 0, 120); break;
     /* E: v0.33, no DEST (send() takes the first empty slot) */
     case 6: rec_rlen = clamp(rec_rlen + delta, 0, 128); break;
@@ -582,9 +605,10 @@ static void name_done(void)
             last = j;
     }
     if (last >= 0 && nm_only == 2) {           /* v0.33: CREATE FOLDER */
-        extern int smp_lib_folder_make(const char *name);
-        t[last + 1] = 0;
-        smp_lib_folder_make(t);
+        extern int smp_lib_folder_make_in(int parent, const char *name);
+        extern int smp_fb_store, smp_fb_folder;
+        t[last + 1] = 0;                        /* v0.40: in the folder that is open (none past */
+        smp_lib_folder_make_in(smp_fb_store == 1 ? smp_fb_folder : -1, t);    /* the depth limit) */
         extern void smp_lib_refresh(void);
         smp_lib_refresh();
     } else if (last >= 0) {                     /* trailing spaces off; an empty name stays as it was */
@@ -660,11 +684,34 @@ static void fb_pv_poll(void)                    /* the browser closed: its previ
         fb_preview_stop();
 }
 
+/* v0.40: where the TRIM preview is, for TRIM's playhead (smp_page.c). The DSP plays it from
+ * trim_s to trim_e once and reports no position, only that a preview plays (its status
+ * word's +16), and the sample page's playhead (smp_playhead) is a voice's: the preview is
+ * none, so v0.25..v0.39's TRIM drew nothing that moved (the owner: "the playhead does not
+ * move"). As the slice editor's (slice.c): 32 frames a 1.5 kHz tick since it started, from
+ * the start it was sent with; -1 when none plays, once it is let go, and past its end. */
+static u32 pv_at __attribute__((section(".data"))) = 0;
+static u32 pv_s __attribute__((section(".data"))) = 0;
+static u32 pv_e __attribute__((section(".data"))) = 0;
+
+int rec_pv_frame(void)
+{
+    if (!rec_pv_on || rec_phase != PH_TRIM)
+        return -1;
+    u32 run = (FRAMES - pv_at) * 32u, at = pv_s + run;
+    if (run >= 0x40000000u || at >= pv_e)
+        return -1;
+    return (int)at;
+}
+
 static void preview(int on)
 {
-    if (on && trim_slot >= 0)
+    if (on && trim_slot >= 0) {
         smp_command(CMD_PREVIEW, (u32)trim_slot, trim_s, trim_e, 0);
-    else if (rec_pv_on)
+        pv_at = FRAMES;
+        pv_s = trim_s;
+        pv_e = trim_e;
+    } else if (rec_pv_on)
         smp_command(CMD_PREVIEW, (u32)(trim_slot < 0 ? 0 : trim_slot), 0, 0, 0);
     rec_pv_on = on && trim_slot >= 0;
 }
@@ -797,6 +844,39 @@ static void lst_press(u32 code)
     lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
 }
 #define FB_PAGE 6                               /* v0.39: the browser's rows: FUNC + an arrow, a pushed knob */
+
+/* v0.41 (a user's v0.38 video: hands off, the cursor going up and down between two rows by
+ * itself): the browser moves on ANY of the nine encoders, a detent a row, so one encoder that
+ * jitters (the panel reports +1, -1, +1 ... while it rests between detents) moves the cursor
+ * to and fro -- at the top, between the top two rows -- where stock would only nudge that one
+ * knob's own value. Each knob now has a little hysteresis: it moves the cursor on every detent
+ * in the way it last moved, and turned back it moves only once it is two detents back from
+ * where it last moved. A jitter of a detent either way then moves it once at most; a turn
+ * back by hand loses one detent. Reset when the browser opens. */
+static int fbk_pos[10] __attribute__((section(".data"))), fbk_at[10] __attribute__((section(".data")));
+static signed char fbk_dir[10] __attribute__((section(".data")));
+
+void fb_knob_reset(void)
+{
+    for (int k = 0; k < 10; k++)
+        fbk_pos[k] = fbk_at[k] = fbk_dir[k] = 0;
+}
+
+static int fb_knob_step(u32 code, int delta)    /* -> -1, 0 or 1: the rows to move */
+{
+    int k = code >= 1 && code <= 9 ? (int)code : 0;
+    if (delta == 0)
+        return 0;
+    fbk_pos[k] += delta > 0 ? 1 : -1;           /* (a step an item, as before: its sign) */
+    int off = fbk_pos[k] - fbk_at[k], d = off > 0 ? 1 : off < 0 ? -1 : 0;
+    if (d == 0 || (d != fbk_dir[k] && fbk_dir[k] != 0 && (off > -2 && off < 2)))
+        return 0;                               /* back to where it moved, or one detent back */
+    fbk_at[k] = fbk_pos[k];
+    fbk_dir[k] = (signed char)d;
+    if (fbk_pos[k] > (1 << 20) || fbk_pos[k] < -(1 << 20))
+        fbk_pos[k] = fbk_at[k] = 0;             /* (never far from 0) */
+    return d;
+}
 
 static void lrpt_poll(void)
 {
@@ -1180,7 +1260,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
             return (u32)it;
         }
         if (it[0] == IT_KNOB) {                 /* any knob: through the items (or the menu) */
-            int delta = (signed char)it[8], d = delta > 0 ? 1 : delta < 0 ? -1 : 0;
+            int delta = (signed char)it[8], d = fb_knob_step(code, delta);
             /* v0.39: turned while pushed in, a page a detent (as Elektron's lists) */
             if (code >= 1 && code <= 8 && (smp_held_hi >> (K_ENC_A + code - 1 - 32) & 1u))
                 d *= FB_PAGE;
@@ -1267,7 +1347,10 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     smp_fb_menu = 0;
                 else if (code == K_YES && act == 3) {      /* v0.29: SELECT ALL (or CLEAR ALL) */
                     smp_fb_menu = 0;
-                    smp_fb_mark_folder(on_folder ? f : smp_fb_folder);
+                    if (on_folder)
+                        smp_fb_mark_folder(f);  /* (a folder: all it holds) */
+                    else
+                        smp_fb_mark_here();     /* v0.40: the list's own samples */
                 } else if (code == K_YES && act == 2 && (slot >= 0 || on_folder)) {
                     smp_fb_menu = 2;            /* DELETE: asked first */
                 } else if (code == K_YES && act == 5) {     /* v0.33: MOVE SELECTED: these, */
@@ -1330,17 +1413,11 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 smp_fb_folder = f;              /* into the folder */
                 smp_fb_cur = 0;
             } else if (code == K_LEFT) {        /* up a folder; at the top it stays (v0.26) */
-                if (smp_fb_folder != -1) {
-                    int back = smp_fb_folder;
-                    smp_fb_folder = -1;
-                    smp_fb_cur = smp_fb_index_of(back);
-                }
+                smp_fb_up();                    /* v0.40: to the folder it is in */
             } else if (code == K_NO) {          /* v0.31: NO goes up a level: a folder to its */
                 no_at = *(volatile u32 *)0x4058E8D4u;   /* store's top, a store's top to the two */
-                if (smp_fb_folder != -1) {      /* stores; held, straight to them (lrpt_poll) */
-                    int back = smp_fb_folder;
-                    smp_fb_folder = -1;
-                    smp_fb_cur = smp_fb_index_of(back);
+                if (smp_fb_up()) {              /* stores; held, straight to them (lrpt_poll); */
+                    /* v0.40: a folder inside a folder to that folder */
                 } else {
                     smp_fb_store = -1;
                     smp_fb_cur = smp_fb_last_store == 1 ? 0 : 1;
@@ -1381,6 +1458,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                 lrpt_next = *(volatile u32 *)0x4058E8D4u + RPT_WAIT;
             } else if (code == K_YES && lst_func) {
                 smp_fb_open = 1;
+                fb_knob_reset();               /* v0.41: each knob's hysteresis afresh */
                 smp_fb_unmark_all();
                 smp_fb_folder = -1;
                 smp_fb_store = -1;              /* v0.31: the two stores first */

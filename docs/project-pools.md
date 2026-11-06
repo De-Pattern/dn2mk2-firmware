@@ -166,6 +166,8 @@ are v0.37's format, every entry's frames whole). Coming back:
   library; **a recording made in an unsaved project is lost with it unless the project is
   saved** (SAVE AS writes its list). Copying recordings into the library's RECORDED folder
   (the research's "adoption", question 4) would remove this; it is not built.
+  (v0.40 review: not caused by the half-second grace's unsigned compare, fixed in v0.40; that
+  only decided when a failed LOAD reloads the current pool.)
 - **Slots changed behind the OS's back** (DNX/Transfer writing `/projects/N`, COPY/PASTE,
   CLEAR or DELETE of a stored slot) keep their old list until the project there is saved
   again; a deleted project's list keeps its extents reserved (space, not data).

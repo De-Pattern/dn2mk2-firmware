@@ -460,6 +460,26 @@ JUMP_GUARDS = (                          # what the shims jump back to and rely 
     (0x400DA904, "4bf942c5a9ea", "... until a5 is set again (lea 0x42c5a9ea,%a5)"),
     (0x400DA8D2, "2f394028c1fc", "jmp_tracks resumes: move.l 0x4028c1fc,-(%sp)"),
     (0x400FA1E0, "4fef001c", "the cue's caller pops its arguments"),
+    (0x400DA902, "42024bf942c5a9ea", "v0.40: jmp_arm's forced tick ends as stock's ticks past 2 (clr.b %d2 ; lea 0x42c5a9ea,%a5)"),
+    (0x400DA41C, "42b942c5aaac", "v0.40: stock's tick 2 clears the arming (why jmp_tick never takes tick 1)"),
+    (0x400DA52A, "4a01660003d4", "v0.40: ... and its ticks past 2 go to 0x400da902 (tst.b %d1 ; bne.w)"),
+)
+# v0.40, parameter slides' SLD/SLEN drawn as stock draws RTRG and LEN (csrc/slides/slide.c,
+# sl_draw_sld / sl_draw_slen): the stock routines called, and the cell routine's and LEN
+# widget's own calls whose arguments they copy
+SLIDE_DRAW_GUARDS = (
+    (0x40036560, "4fefffec48d7007c", "slides: the widget routine (id, value, ..., canvas, x, y)"),
+    (0x400BC414, "4feffff4202f0014", "slides: RTRG's toggle widget (its sheet's frame value >> 8)"),
+    (0x40115668, "4e56ff44", "slides: the cell's label text routine"),
+    (0x40114842, "4fefffd4", "slides: the fill / invert routine (the p-lock look)"),
+    (0x40115E6C, "206f0004", "slides: the box font's set-up"),
+    (0x40115CE8, "206f0004", "slides: ... and its release"),
+    (0x40114626, "4fefffd4", "slides: the box's rectangle"),
+    (0x400CC2CE, "41f9402a0f48487940293c64", "slides: LEN's box: its table and font 0x40293c64"),
+    (0x400CC2EE, "2f04487940219c2d48780002486b0006486a00092f022f034eb94011545c",
+     "slides: LEN's box text: centred (2) at (x + 9, y + 6)"),
+    (0x40064630, "487940219c2d4879402170b942a7487800012f0a486b00094879402917602f03",
+     "slides: the cell's label: font 0x40291760 at (x + 9, y), 'XXXX' wide"),
 )
 # v0.22, the RECORDER as a screen of its own (csrc/sampler/rec.c): the UI loop's queue
 # receive (every key and knob item passes it first), its draw of the screen (the recorder
@@ -716,6 +736,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the SSI audio ISR after its transmit fill: smp_tdm writes the sample link's packet "
          "into TDM slots 8..15 and reads the DSP's from slots 14..15", TDM_STOCK)
 
+    for va, want, why in SLIDE_DRAW_GUARDS:
+        _need(content, va, bytes.fromhex(want), why)
+
     # DIRECT JUMP (csrc/jump, docs/jump.md): off unless PTN + YES turns it on
     for va, want, why in JUMP_GUARDS:
         _need(content, va, bytes.fromhex(want), why)
@@ -789,8 +812,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     edit(SL.SAVE_SITE, bytes.fromhex("4ef9") + _long(csyms["sl_save"]) + bytes.fromhex("4e71"),
          "slides: a pattern's lock table SAVE stores SLD/SLEN records as ids 200/201",
          bytes.fromhex(SL.SAVE_STOCK))
+    for va, stock_hex, label in SL.PASTE_SITES:    # v0.40: copy and paste carry SLD/SLEN
+        n = len(stock_hex) // 2
+        edit(va, bytes.fromhex("4eb9") + _long(csyms[label]) + bytes.fromhex("4e71") * ((n - 6) // 2),
+             f"slides: copy/paste carries SLD/SLEN ({label})", bytes.fromhex(stock_hex))
     for name in ("sl_ui_table", "sl_page_up", "sl_page_seen", "sl_knob", "sl_pre_hook", "sl_pre", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save",
-                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks"):
+                 "sl_lock_get", "sl_lock_set", "sl_v", "sl_cap", "sl_started", "sl_ticks", "sl_pasted", "sl_tclip", "sl_paste",
+                 "sl_draw_sld", "sl_draw_slen"):
         layout[name] = csyms[name]
     layout.update(playout)
     # W2: where the C renderer's code ends (its rodata and data follow): the ship gate
@@ -802,9 +830,9 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen",
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
-                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom",
+                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x",
                  "jmp_on", "jmp_armed", "jmp_pending", "jmp_count", "jmp_last", "jmp_loaded", "jmp_dirty",
-                 "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll",
+                 "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll", "jmp_forced",
                  # v0.38: per-project pools
                  "smp_pj_begins", "smp_pj_ends", "smp_pj_loads", "smp_pj_news", "smp_pj_slot", "smp_pj_newslot", "smp_pj_last", "smp_blank_req", "smp_blank_sent", "smp_pl_on", "smp_pl_owner", "smp_pl_state", "smp_pl_writes", "smp_pl_switches", "smp_pl_lists_written", "smp_pl_events", "smp_pl_src", "smp_pl_boot_case", "smp_pl_gen", "smp_pl_skipped", "smp_pl_mismatch", "smp_discard", "smp_rename",
                  # v0.38: the count to the DSP after a live add (link.c K_HEAD)
@@ -812,7 +840,13 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  # v0.39: ERASE MOD DATA (erase.c; scripts/emu_erase.py)
                  "smp_er_lock", "smp_er_req", "smp_er_state", "smp_er_err", "smp_er_sector", "smp_er_value",
                  "smp_er_done", "smp_er_total", "smp_er_trims", "smp_er_reads", "smp_er_checks",
-                 "smp_er_nchecks", "smp_er_job", "smp_er_start", "smp_er_poll"):   # the sample link's state (v0.15)
+                 "smp_er_nchecks", "smp_er_job", "smp_er_start", "smp_er_poll",
+                 "smp_er_retries", "smp_er_waits", "smp_er_resume",   # v0.41
+                 # v0.40: the slice menus' wait, LINKED points, the playhead's redraw (gate: slice, samplist)
+                 "slc_pop", "slc_poll", "slc_stock_asked", "slc_fails", "slc_linked", "smp_norm_state",
+                 "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",
+                 # v0.40: folders inside folders
+                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
     pbuilt = ping_cf.compose(content, edit, assemble)

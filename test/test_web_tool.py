@@ -234,3 +234,19 @@ def test_an_aiff_reads_as_the_same_wav(comp):
     assert r["ar"] == r["wr"] == rate
     assert r["cues"] == [50, 120]
     assert len(r["a"]) == n and max(abs(x - y) for x, y in zip(r["a"], r["w"])) < 1e-6
+
+
+def test_v040_folder_levels_and_tree_are_the_firmwares():
+    """the page's path -> levels is dnfw.sampler.libtree's (lib.c's link 17), upper-cased as sent"""
+    from dnfw.sampler import libtree as LT
+    paths = ["TRANCE STARTER PACK/Kicks/808", "Pack / Kicks //808/", " lead ", "a/b/c/d/e/f/g/h",
+             "p/" + "z" * 40, "q" * 40 + "/r", "Drums"]
+    js = (f"const P={json.dumps(paths)};"
+          "const t=new Uint8Array(65);t[0]=6;for(let f=0;f<64;f++)t[1+f]=0xFF;t[1+3]=2;t[1+5]=3;"
+          "console.log(JSON.stringify({lv:P.map(p=>DN2.folderLevels(p)),tree:DN2.libTree(t),"
+          "c:[DN2.C.LIB.FOLDER_IN,DN2.C.LIB.TREE,DN2.C.LIB_DEPTH]}))")
+    r = _node(js)
+    assert r["lv"] == [LT.levels(p.upper()) for p in paths]
+    assert r["tree"]["depth"] == LT.DEPTH and r["tree"]["parents"][3] == 2 and r["tree"]["parents"][5] == 3
+    assert r["tree"]["parents"][0] == -1 and len(r["tree"]["parents"]) == 64
+    assert r["c"] == [30, 31, LT.DEPTH]

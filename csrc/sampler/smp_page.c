@@ -436,7 +436,7 @@ static void cell(void *c, void *view, int kind, u32 id, int x, int y, int labell
     }
     extern int smp_values_held(void);
     if (labelled && id && smp_values_held()) {     /* v0.35: SYN held: the value, as the record's */
-        char vb[16];                            /* formatter writes it for the header (O14) */
+        char vb[32];                            /* formatter writes it for the header (O14) */
         u8 flag;
         vb[0] = 0;
         ((void (*)(int, char *))RECORD_FMT(id))(GET_VALUE(view, id, &flag), vb);
@@ -467,7 +467,7 @@ void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *c
         }
         extern int smp_values_held(void);
         if (smp_values_held()) {                   /* v0.35: SYN held: the value (O14) */
-            char vb[16];
+            char vb[32];
             u8 flag;
             vb[0] = 0;
             ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
@@ -535,25 +535,42 @@ static void marker(void *c, int x, int cy, int dotted)
 extern int smp_playhead(int t);
 #define UI_TRACK (*(volatile u8 *)0x42431A6Cu)
 
-static u32 ph_drawn_at __attribute__((section(".data"))) = 0;    /* the waveform page's last draw */
 static int ph_was __attribute__((section(".data"))) = -1;         /* the playhead it drew (-1 none) */
+/* v0.40 (owner: "the slice machine's on-screen indicators are a little slow to catch up"; the
+ * main cause was the voice drawn, link.c's smp_playhead): v0.25..v0.39 asked for a redraw 25
+ * times a second while anything played, and took the page as up while drawn in the last
+ * 1.2 s (stock redraws an idle page about every 0.4 s, emulator). Now the page is up while
+ * the screen's LAST draw drew it (page.c counts the draws), and a redraw is asked for when
+ * the column the playhead falls in differs from the one drawn (nothing else on the page is
+ * drawn from the position: the playhead, SLICE / GRID's playing-slice bar), 37 a second at
+ * most; a still playhead asks for none */
+extern u32 wr_draws;
+static u32 ph_draw_n __attribute__((section(".data"))) = 0xFFFFFFFFu;   /* wr_draws when last drawn */
+static int ph_x0 __attribute__((section(".data"))) = 0, ph_w __attribute__((section(".data"))) = 2;
+static int ph_col __attribute__((section(".data"))) = -1;        /* the column drawn (-1 none) */
 
-/* the UI loop asks (page.c's wr_poll): the waveform page is up and its playhead moves, or
- * has just stopped (one more draw clears it) */
+static int ph_column(int ph)                    /* the playhead's column, or -1 */
+{
+    return ph < 0 ? -1 : ph_x0 + (int)((unsigned)ph * (unsigned)(ph_w - 2) / POS_ONE);
+}
+
+/* the UI loop asks (page.c's wr_poll): the waveform page is up, and its playhead (and the
+ * slice it lights) would be drawn elsewhere now */
 int smp_wants_redraw(void)
 {
-    u32 now = *(volatile u32 *)0x4058E8D4u;
-    if (now - ph_drawn_at > 1800u)              /* not drawn for over a second: not up (FRAMES: ~1500 a second) */
+    if (ph_draw_n != wr_draws)                  /* the last screen drawn was not the page */
         return 0;
-    int ph = smp_playhead(UI_TRACK);
-    return ph >= 0 || ph_was >= 0;
+    return ph_column(smp_playhead(UI_TRACK)) != ph_col;
 }
 
 static void playhead(void *c, int x0, int w, int cy)
 {
     int ph = smp_playhead(UI_TRACK);
-    ph_drawn_at = *(volatile u32 *)0x4058E8D4u;
+    ph_draw_n = wr_draws;
+    ph_x0 = x0;
+    ph_w = w;
     ph_was = ph;
+    ph_col = ph_column(ph);
     if (ph < 0)
         return;
     int x = x0 + (int)((unsigned)ph * (unsigned)(w - 2) / POS_ONE);
@@ -899,6 +916,9 @@ extern const char *smp_lib_name(int k), *smp_lib_folder_name(int f);
 extern int smp_lib_delete(int k), smp_lib_load(int k), smp_lib_pending(void);
 
 static int lb_in(int k, int folder) { return smp_lib_used(k) && smp_lib_folder_of(k) == folder; }
+/* v0.40: folders inside folders (lib.c's tree): a folder's row stands for all it holds */
+extern int smp_lib_folder_parent(int f), smp_lib_folder_depth(int f), smp_lib_folder_under(int g, int f);
+static int lb_under(int k, int folder) { return smp_lib_used(k) && smp_lib_folder_under(smp_lib_folder_of(k), folder); }
 
 extern int smp_lib_folder_count(int f);
 /* v0.33: a named folder shows even empty (NEW FOLDER's, and so a MOVE HERE target; the
@@ -986,16 +1006,24 @@ int smp_fb_mark_count(void)
     return n;
 }
 
-/* FOLDER's samples: how many, and how many of them marked */
-static int fb_size(int folder, int *marked)
+/* FOLDER's samples: how many, and how many of them marked; v0.40: in +DRIVE, DEEP counts
+ * those in its folders too (a folder's row), else only its own (the list inside it) */
+static int fb_size_d(int folder, int *marked, int deep)
 {
     int n = 0, m = 0;
-    if (smp_fb_store == 1) {
-        for (int k = 0; k < LB_CAP; k++)
-            if (lb_in(k, folder)) {
-                n++;
-                m += lb_marked(k);
+    if (smp_fb_store == 1) {                    /* v0.40: the folders it covers, then lib.c's */
+        u32 in[2] = {0, 0};                     /* counts and only the marked entries (each */
+        for (int g = 0; g < 64; g++)            /* folder row asks this, each redraw) */
+            if (deep ? smp_lib_folder_under(g, folder) : g == folder) {
+                in[g >> 5] |= 1u << (g & 31);
+                n += smp_lib_folder_count(g);
             }
+        for (int i = 0; i < LB_CAP / 32 && marked; i++)
+            for (u32 w = lb_marks[i], b = 0; w; w >>= 1, b++)
+                if (w & 1u) {
+                    int f = smp_lib_folder_of(32 * i + (int)b);
+                    m += f >= 0 && (in[f >> 5] >> (f & 31) & 1u);
+                }
         if (marked)
             *marked = m;
         return n;
@@ -1010,13 +1038,16 @@ static int fb_size(int folder, int *marked)
     return n;
 }
 
-/* every sample of FOLDER marked, or (all of them marked already) none */
-void smp_fb_mark_folder(int folder)
+static int fb_size(int folder, int *marked) { return fb_size_d(folder, marked, 1); }
+
+/* every sample of FOLDER marked, or (all of them marked already) none; v0.40: in +DRIVE,
+ * DEEP: those in its folders too */
+static void fb_mark_d(int folder, int deep)
 {
-    int m, n = fb_size(folder, &m), on = m < n;
+    int m, n = fb_size_d(folder, &m, deep), on = m < n;
     if (smp_fb_store == 1) {
         for (int k = 0; k < LB_CAP; k++)
-            if (lb_in(k, folder))
+            if (deep ? lb_under(k, folder) : lb_in(k, folder))
                 lb_mark(k, on);
         return;
     }
@@ -1025,9 +1056,28 @@ void smp_fb_mark_folder(int folder)
             smp_fb_mark(k, on);
 }
 
+void smp_fb_mark_folder(int folder) { fb_mark_d(folder, 1); }   /* a folder's row: all it holds */
+void smp_fb_mark_here(void) { fb_mark_d(smp_fb_folder, 0); }     /* v0.40: SELECT ALL in a list: its samples */
+
+static int lb_any_marks(void)
+{
+    for (int i = 0; i < LB_CAP / 32; i++)
+        if (lb_marks[i])
+            return 1;
+    return 0;
+}
+
 int smp_fb_folder_full(int folder)              /* every one of its samples marked */
 {
+    if (smp_fb_store == 1 && !lb_any_marks())   /* v0.40: (each folder row asks, each redraw) */
+        return 0;
     int m, n = fb_size(folder, &m);
+    return n > 0 && m == n;
+}
+
+int smp_fb_here_full(void)                      /* v0.40: every sample of the open list marked */
+{
+    int m, n = fb_size_d(smp_fb_folder, &m, 0);
     return n > 0 && m == n;
 }
 
@@ -1044,30 +1094,53 @@ extern void smp_discard(int k);
 void smp_fb_delete(int slot, int folder)
 {
     if (smp_fb_store == 1) {                    /* v0.31: from the +Drive's library */
+        /* v0.40: the folders that go, deepest first (lib.c refuses one that still holds a
+         * sample or a folder, so a folder goes only once all inside it has gone: a power cut
+         * between any two writes leaves every sample not yet deleted in a folder shown) */
+        u32 drop[2] = {0, 0};
+        int chain[8], nc = 0;                   /* where the browser is, and the folders above */
+        for (int g = smp_fb_folder; g >= 0 && nc < 8; g = smp_lib_folder_parent(g))
+            chain[nc++] = g;
         if (smp_fb_mark_count()) {
             /* v0.35: a folder emptied this way (ticked whole, FUNC + YES, then DELETE) goes
              * too, as one deleted by name does (Kokozi, v0.33: deleted folders stayed in the
-             * list, empty) */
-            u32 emptied[2] = {0, 0};
+             * list, empty); v0.40: and a folder every sample of which was ticked (its row's
+             * FUNC + YES), with the folders inside it */
+            for (int f = 2; f < 64; f++)
+                if (smp_fb_folder_full(f))
+                    for (int g = 2; g < 64; g++)
+                        if (smp_lib_folder_under(g, f))
+                            drop[g >> 5] |= 1u << (g & 31);
             for (int k = 0; k < LB_CAP; k++)
                 if (lb_marked(k) && smp_lib_used(k)) {
                     int f = smp_lib_folder_of(k);
                     if (f >= 2 && f < 64)
-                        emptied[f >> 5] |= 1u << (f & 31);
+                        drop[f >> 5] |= 1u << (f & 31);
                     smp_lib_delete(k);
                 }
-            extern int smp_lib_folder_drop(int f);
-            for (int f = 2; f < 64; f++)
-                if (emptied[f >> 5] >> (f & 31) & 1)
-                    smp_lib_folder_drop(f);     /* (refused while it still holds samples) */
         } else if (slot >= 0)
             smp_lib_delete(slot);
         else if (folder != -1) {
-            for (int k = 0; k < LB_CAP; k++)
-                if (lb_in(k, folder))
+            for (int k = 0; k < LB_CAP; k++)    /* v0.40: and in its folders, any depth */
+                if (lb_under(k, folder))
                     smp_lib_delete(k);
-            extern int smp_lib_folder_drop(int f);
-            smp_lib_folder_drop(folder);        /* v0.33: emptied: the folder goes too */
+            for (int g = 2; g < 64; g++)        /* v0.33: emptied: the folder goes too; v0.40: */
+                if (smp_lib_folder_under(g, folder))    /* with its folders */
+                    drop[g >> 5] |= 1u << (g & 31);
+        }
+        extern int smp_lib_folder_drop(int f);
+        for (int d = 8; d >= 1; d--)
+            for (int f = 2; f < 64; f++)
+                if ((drop[f >> 5] >> (f & 31) & 1) && smp_lib_folder_depth(f) == d)
+                    smp_lib_folder_drop(f);     /* (refused while it still holds anything) */
+        if (nc && smp_fb_folder >= 0 && smp_lib_folder_count(smp_fb_folder) == 0
+            && !smp_lib_folder_name(smp_fb_folder)[0]) {
+            int to = -1;                        /* v0.40: the browser was in a folder that went: */
+            for (int j = 1; j < nc && to < 0; j++)       /* to the nearest one above still there */
+                if (smp_lib_folder_name(chain[j])[0])
+                    to = chain[j];
+            smp_fb_folder = to;
+            smp_fb_cur = 0;
         }
         smp_fb_unmark_all();
         return;
@@ -1098,7 +1171,7 @@ int smp_fb_load_project(int slot, int folder)
         n += smp_lib_load(slot) == 0;
     else if (folder != -1)
         for (int k = 0; k < LB_CAP; k++)
-            if (lb_in(k, folder))
+            if (lb_under(k, folder))            /* v0.40: and its folders' */
                 n += smp_lib_load(k) == 0;
     smp_fb_unmark_all();
     return n;
@@ -1132,14 +1205,13 @@ int smp_fb_count(void)
     int n = 0;
     if (smp_fb_store == -1)
         return 2;                               /* v0.31: +DRIVE, PROJECT RAM */
-    if (smp_fb_store == 1) {
-        if (smp_fb_folder == -1) {
-            for (int f = 0; f < 64; f++)
-                n += lb_has(f);
+    if (smp_fb_store == 1) {                    /* v0.40: the folders in it, then its samples */
+        for (int f = 0; f < 64; f++)
+            n += lb_has(f) && smp_lib_folder_parent(f) == smp_fb_folder;
+        if (smp_fb_folder == -1)
             return n;
-        }
         lb_list_make();
-        return lb_list_n;
+        return n + lb_list_n;
     }
     if (smp_fb_folder == -1) {                  /* v0.29: a folder emptied by DELETE is not shown */
         for (int f = 0; f < smp_folder_count(); f++)
@@ -1157,13 +1229,12 @@ int smp_fb_item(int i, int *slot)
     *slot = -1;
     if (smp_fb_store == -1)
         return i == 0 ? FB_DRIVE : i == 1 ? FB_RAM : -1;
-    if (smp_fb_store == 1) {
-        if (smp_fb_folder == -1) {
-            for (int f = 0; f < 64; f++)
-                if (lb_has(f) && i-- == 0)
-                    return f;
+    if (smp_fb_store == 1) {                    /* v0.40: the folders in it, then its samples */
+        for (int f = 0; f < 64; f++)
+            if (lb_has(f) && smp_lib_folder_parent(f) == smp_fb_folder && i-- == 0)
+                return f;
+        if (smp_fb_folder == -1)
             return -1;
-        }
         lb_list_make();
         if (i >= 0 && i < lb_list_n)
             *slot = lb_list[i];
@@ -1187,11 +1258,12 @@ int smp_fb_item(int i, int *slot)
     return -1;
 }
 
-/* the top's item that is folder F (to land on it coming back up) */
+/* the item that is folder F in the list it is in (to land on it coming back up): the top's,
+ * v0.40: in +DRIVE its parent's */
 int smp_fb_index_of(int f)
 {
     int keep = smp_fb_folder, n, slot;
-    smp_fb_folder = -1;
+    smp_fb_folder = smp_fb_store == 1 ? smp_lib_folder_parent(f) : -1;
     n = smp_fb_count();
     for (int i = 0; i < n; i++)
         if (smp_fb_item(i, &slot) == f && slot < 0) {
@@ -1200,6 +1272,33 @@ int smp_fb_index_of(int f)
         }
     smp_fb_folder = keep;
     return 0;
+}
+
+/* v0.40: NO (or LEFT) in a folder: up a level, onto the folder left. -> 0 at a store's top */
+int smp_fb_up(void)
+{
+    if (smp_fb_folder == -1)
+        return 0;
+    int back = smp_fb_folder;
+    smp_fb_cur = smp_fb_index_of(back);         /* (its parent's list) */
+    smp_fb_folder = smp_fb_store == 1 ? smp_lib_folder_parent(back) : -1;
+    return 1;
+}
+
+/* v0.40: the open folder's path for the title, "TRANCE STARTER PACK/KICKS/808" */
+static void fb_path(int f, char *out, int room)
+{
+    int chain[8], n = 0, o = 0;
+    for (; f >= 0 && n < 8; f = smp_lib_folder_parent(f))
+        chain[n++] = f;
+    while (n-- > 0) {
+        const char *nm = smp_lib_folder_name(chain[n]);
+        for (int j = 0; nm[j] && j < 31 && o < room - 2; j++)
+            out[o++] = nm[j];
+        if (n && o < room - 2)
+            out[o++] = '/';
+    }
+    out[o] = 0;
 }
 
 static const char *fb_folder_name(int f)
@@ -1280,7 +1379,7 @@ static void hex6(char *o, u32 v)
 
 static int er_draw(void *c)
 {
-    extern int smp_er_shown(void), smp_er_err;
+    extern int smp_er_shown(void), smp_er_err, smp_er_can_resume(void);
     extern u32 smp_er_percent(void), smp_er_sector;
     int es = smp_er_shown();
     if (smp_fb_menu < 4 && !es)
@@ -1289,7 +1388,7 @@ static int er_draw(void *c)
     hline(c, 0, 127, 55, 0);
     if (es == 1 || es == 2) {
         int pc = (int)smp_er_percent();
-        TEXT(c, FONT, 64, 40, CENTRED, "%s", es == 1 ? "ERASING" : "VERIFYING");
+        TEXT(c, FONT, 64, 40, CENTRED, "%s %d%%", es == 1 ? "ERASING" : "VERIFYING", pc > 100 ? 100 : pc);
         box(c, 14, 25, 113, 33, 0);
         if (pc > 0)
             fill(c, 15, 26, 15 + (97 * (pc > 100 ? 100 : pc)) / 100, 32);
@@ -1299,12 +1398,17 @@ static int er_draw(void *c)
         LABEL(c, 64, 24, "%s", "RESTART THE DIGITONE");
         LABEL(c, 64, 12, "%s", "YES / NO: CLOSE");
     } else if (es == 4) {
-        static const char *const why[6] = {"", "REFUSED", "TRIM ERROR", "READ ERROR", "NOT ERASED", "+DRIVE NOT READY"};
+        /* v0.40: what failed, where, and what to do: a failure a new try may get past carries
+         * on when asked again (the samples are already gone: their headers went first) */
+        static const char *const why[7] = {"", "REFUSED", "CARD ERASE FAILED", "CARD READ FAILED", "NOT ERASED",
+                                           "+DRIVE NOT READY", "CARD STAYED BUSY"};
         char h[7];
         hex6(h, smp_er_sector);
-        TEXT(c, FONT, 64, 40, CENTRED, "%s", "ERASE FAILED");
-        LABEL(c, 64, 28, "%s AT %s", why[smp_er_err >= 1 && smp_er_err <= 5 ? smp_er_err : 0], h);
-        LABEL(c, 64, 12, "%s", "RESTART, THEN AGAIN");
+        int go_on = smp_er_can_resume();
+        TEXT(c, FONT, 64, 42, CENTRED, "%s", go_on ? "ERASE PAUSED" : "ERASE FAILED");
+        LABEL(c, 64, 31, "%s", why[smp_er_err >= 1 && smp_er_err <= 6 ? smp_er_err : 0]);
+        LABEL(c, 64, 22, "AT SECTOR %s", h);
+        LABEL(c, 64, 10, "%s", go_on ? "ASK AGAIN TO CONTINUE" : "RESTART, THEN AGAIN");
     } else if (smp_fb_menu == 4) {
         TEXT(c, FONT, 64, 40, CENTRED, "%s", "ERASE ALL SAMPLES");
         TEXT(c, FONT, 64, 30, CENTRED, "%s", "AND MOD DATA?");
@@ -1325,6 +1429,8 @@ static int er_draw(void *c)
 #define FB_MENU_W 11
 _Static_assert(FB_SLOT_W <= FB_W && FB_MENU_W <= FB_W && FB_W < 24, "a row's name fits its buffers (FB_W + 3, the record's 24)");
 char smp_fb_rowtext[6][24] __attribute__((section(".data")));   /* each row's name as drawn, once all are (the gate reads it) */
+#define FB_TITLE_W 22                           /* v0.40: +DRIVE's title, the open folder's path */
+char smp_fb_titletext[24] __attribute__((section(".data")));    /* as last drawn (the gate reads it) */
 static char rows_drawn[6][24] __attribute__((section(".data")));
 static void row_text(int r, const char *nm)
 {
@@ -1398,7 +1504,15 @@ void smp_fb_draw(void *c, int samp)
         LABEL(c, 64, 57, "%s", "+DRIVE");
     else if (smp_fb_folder == -1)
         LABEL(c, 64, 57, "ASSIGN SAMPLE > A%s", num);
-    else {
+    else if (smp_fb_store == 1) {               /* v0.40: the path, head...tail if long */
+        char path[200], t[FB_TITLE_W + 3];
+        fb_path(smp_fb_folder, path, (int)sizeof path);
+        fit_name(path, FB_TITLE_W, -1, t);
+        folder_icon(c, 2, 57);
+        LABEL(c, 64, 57, "%s", t);
+        for (int j = 0; j < 24; j++)
+            smp_fb_titletext[j] = j < FB_TITLE_W + 2 ? t[j] : 0;
+    } else {
         folder_icon(c, 2, 57);
         LABEL(c, 64, 57, "%.22s", fb_folder_name(smp_fb_folder));
     }
@@ -1498,7 +1612,7 @@ void smp_fb_draw(void *c, int samp)
             LABEL(c, 95, 24, "%s", "YES / NO");
             return;
         }
-        int all = smp_fb_folder_full(on_folder ? f : smp_fb_folder);
+        int all = on_folder ? smp_fb_folder_full(f) : smp_fb_here_full();   /* v0.40: a list: its own */
         for (int a = 0; a < smp_fb_nactions(on_folder); a++) {
             int y = 46 - 9 * a;
             int act = smp_fb_action(on_folder, a);
@@ -1623,8 +1737,10 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     }
     if (slot >= 1 && smp_overview(slot - 1))
         playhead(c, x0, w, cy);
-    else
+    else {
         ph_was = -1;
+        ph_draw_n = wr_draws - 1u;              /* (no playhead on it: nothing to follow) */
+    }
     /* the bottom row: E, F, G's labels (WERP: its icons), H's level as the DT2's pill */
     for (int i = 4; i < 7; i++) {
         if (!ids[i])
@@ -1637,7 +1753,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
         else if (kind == SMP_WERP_KIND && ids[i] == SMP_BARS_ID)
             fill(c, x + 6, 2, x + 17, 4);
         else if (smp_values_held()) {           /* v0.35: SYN held: the value (O14) */
-            char vb[16];
+            char vb[32];
             u8 flag;
             vb[0] = 0;
             ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
@@ -1649,7 +1765,7 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
     if (smp_values_held())                      /* v0.35: the top row's too (unlabelled: on the knobs' line) */
         for (int i = 0; i < 4; i++)
             if (ids[i]) {
-                char vb[16];
+                char vb[32];
                 u8 flag;
                 vb[0] = 0;
                 ((void (*)(int, char *))RECORD_FMT(ids[i]))(GET_VALUE(view, ids[i], &flag), vb);
@@ -1767,18 +1883,58 @@ static void wave_zoom(void *c, int x0, int x1, int yc, int h, u32 s, u32 e, u32 
     hline(c, bx, bx + (bw < 2 ? 2 : bw), yc - h - 3, 0);
 }
 
+/* v0.40: the TRIM preview's playhead (rec.c's rec_pv_frame), a column across the waveform
+ * at the frame playing, cleared either side so it reads over the wave; the column drawn
+ * kept for the checks (-1: none) */
+int trim_head_x __attribute__((section(".data"))) = -1;
+extern int rec_pv_frame(void);
+
+static void trim_head(void *c, int x0, int x1, int yc, int h, int zoomed)
+{
+    int f = rec_pv_frame(), x = -1;
+    u32 n = trim_n ? trim_n : 1u, w = (u32)(x1 - x0 + 1);
+    if (f >= 0 && (u32)f < n) {
+        if (!zoomed)
+            x = x0 + (int)(((u32)f >> 4) * w / ((n >> 4) + 1u));
+        else {
+            u32 span = n >> trim_zoom, a = trim_pos;
+            if (!span)
+                span = 1;
+            if ((u32)f >= a && (u32)f < a + span)
+                x = x0 + (int)(((u32)f - a) / ((span / w) + 1u));
+        }
+    }
+    if (x > x1)
+        x = x1;
+    trim_head_x = x;
+    if (x < x0)
+        return;
+    for (int y = yc - h - 1; y <= yc + h + 1; y++) {
+        if (x > x0)
+            SET_PIXEL(c, x - 1, y, 0);
+        on(c, x, y);
+        if (x < x1)
+            SET_PIXEL(c, x + 1, y, 0);
+    }
+}
+
 static void trim_draw(void *c)
 {
     box(c, 2, 55, 125, 63, 0);
     LABEL(c, 64, 57, "%s", "Y:SAVE FN+N:DEL FN+Y:PLAY");
     box(c, 2, 11, 125, 53, 0);
     extern int smp_analysis_slot(void);
-    if (trim_zoom > 0 && smp_analysis(0) == 2 && smp_analysis_slot() == trim_slot)
+    trim_head_x = -1;
+    if (trim_zoom > 0 && smp_analysis(0) == 2 && smp_analysis_slot() == trim_slot) {
         wave_zoom(c, 4, 123, 32, 17, trim_s, trim_e, trim_n ? trim_n : 1);
-    else if (smp_overview(trim_slot))
+        trim_head(c, 4, 123, 32, 17, 1);
+    } else if (smp_overview(trim_slot)) {
         wave(c, trim_slot, 4, 123, 32, 18, trim_s, trim_e, trim_n ? trim_n : 1);
-    else
+        trim_head(c, 4, 123, 32, 18, 0);
+    } else {
         LABEL(c, 64, 30, "%s", "NO WAVEFORM");
+        trim_head(c, 4, 123, 32, 18, 0);
+    }
     LABEL(c, 16, 2, "%s", "|<TRIM");
     if (trim_zoom > 0)
         LABEL(c, 46, 2, "%s", trim_zoom == 1 ? "2X" : trim_zoom == 2 ? "4X" : "8X");

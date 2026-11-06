@@ -149,6 +149,15 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
     if "mchunk_code_end" in lay:  # the machines chunk: the shims, then strings and tables
         out[lay["slot_shim"]] = [(lay["slot_shim"], lay["name_long_5"])]
     return out
+# v0.40 (owner, 2026-11-05): the one build the missing Monomachine golden runs may be excepted
+# for -- its DSP image (section 7) and the MnM code and test as they were at v0.39 (dbbe804).
+# Any change to these ends the exception: the golden runs must exist again.
+MNM_EXC_SEC7 = "1864d691b2f91bc8006580ab4a07701b1b7644be67fb1f5663429aabc7496ed0"
+MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
+                 "test/test_mnm.py": "cbe70e82073139d8f21ba0bb58972a927ef74016"}
+# without the golden runs test_mnm collects only its 8 tests that need none (they skip as a
+# module); its 366 golden cases are not collected at all (measured on v0.39's tree, 2026-11-05)
+MNM_EXC_REST = 8
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
          "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
@@ -156,7 +165,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py",
          "test/test_sampler_relatch.py", "test/test_pools.py",
-         "test/test_slides.py"]
+         "test/test_slides.py",
+         "test/test_libtree.py", "test/test_web_tool.py"]   # v0.40: nested folders (the model, the page's levels)
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -635,6 +645,10 @@ def main() -> int:
                 scen += ("lib",)                # v0.31: the +Drive's library, bounded to its region
             if "smp_heads" in lay:
                 scen += ("live",)               # v0.38: 22 live adds and 3 recordings, each must play
+            if "smp_lib_fpar" in lay:
+                scen += ("nest",)               # v0.40: folders inside folders over the link, power cuts
+            if "smp_saved" in lay:
+                scen += ("norm",)               # v0.41: takes normalised to full scale (last: it leaves takes in the pool)
             # v0.31: "dead" (every packet lost: the RAM check's four seconds, then seven tries
             # three seconds apart before the loader stops) takes about an hour in the emulator
             # on its own, so it is a step of its own, cached on its own: the gate's run fits
@@ -661,7 +675,7 @@ def main() -> int:
 
             def l16_body(tdir):
                 rc, out = run("link16", l16_cmd, logs, env=EMU_ENV, trace=tdir)
-                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live): .*\"ok\": (true|false)", out)
+                oks = re.findall(r"link16 (save|fast|dead|high|lowram|slices|lib|live|nest|norm): .*\"ok\": (true|false)", out)
                 good = rc == 0 and len(oks) == len(scen) and all(v == "true" for _, v in oks)
                 return good, ("save, fast (a lost packet resent); every byte loaded and saved; the frame's routing words stock's in "
                               "every period; v0.22: the RAM check first, past 128 MB loaded only when it "
@@ -669,6 +683,12 @@ def main() -> int:
                               "a hole reused, every write inside its region, a small device refused (lib); v0.38: 22 samples "
                               "added live and 3 recordings, one after another, each plays on the DSP by its own rule "
                               "(the count covers it), a recording while it records too (live)"
+                              + ("; v0.40: folders inside folders: an old flat library read as it was, a path's "
+                                 "levels made once, look-alikes apart, six deep at most, DROP refused with a folder "
+                                 "inside, one sector a change, a power cut after every sector of making and of a "
+                                 "DELETE leaves a sound tree, a v0.39 reads every name (nest)" if "nest" in scen else "")
+                              + ("; v0.41: takes at 4,000, 32,000 and 10 (-70 dBFS) normalised to full scale, every frame "
+                                 "exact, none clipped; an all-zero take stays zero (norm)" if "norm" in scen else "")
                               if good else out[-800:])
             later("link16", "sample link (ColdFire)", "sample link (ColdFire)", [l16_cmd, sorted(EMU_ENV.items())], l16_body)
 
@@ -741,7 +761,7 @@ def main() -> int:
         if "rec_overlay" in lay:
             ov, src = hex(lay["rec_overlay"]), hex(lay["rec_src"])
             steps = (f"wait:5,png:p0,mem:{ov}:4,press:17,wait:3,tap:49,wait:3,release:17,"
-                     f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,png:a2,no,"
+                     f"wait:30,mem:{ov}:4,png:a1,spin:0:3,wait:5,mem:{src}:4,spin:0:9,wait:5,mem:{src}:4,png:a2,no,"
                      f"wait:30,mem:{ov}:4,png:a3,wait:5,png:a4")
             js = work / "recorder.json"
             rec_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
@@ -755,13 +775,14 @@ def main() -> int:
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
                     m = r["memory"]
-                    seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@3")]
+                    seen = [int(m[k], 16) for k in (ov, f"{ov}@1", f"{ov}@4")]
+                    srcs = [int(m[k], 16) for k in (src, f"{src}@3")]     # v0.41: 3 detents, then 9 more
                     shots = [pathlib.Path(r["screens"][n]).read_bytes() for n in ("p0", "a2", "a4")]
-                    good = (seen == [0, 1, 0] and int(m[src], 16) == 3 and not r["setter_writes"]
+                    good = (seen == [0, 1, 0] and srcs == [0, 3] and not r["setter_writes"]
                             and r["screen_frames"] > 0 and shots[1] != shots[0] and shots[1] != shots[2])
-                    why = (f"overlay {seen}, src {int(m[src], 16)}, setter writes "
+                    why = (f"overlay {seen}, src {srcs}, setter writes "
                            f"{len(r['setter_writes'])}, frames {r['screen_frames']}")
-                return good, ("FUNC+VOICE opens it, knob A moves SRC with no write to the sound, NO closes it, "
+                return good, ("FUNC+VOICE opens it, knob A moves SRC four detents a choice (3: none, 12: three; v0.41) with no write to the sound, NO closes it, "
                  "the screen drawn throughout"
                               if good else why)
             later("recorder", "recorder screen (ColdFire)", "recorder screen (ColdFire)", [rec_cmd, sorted(EMU_ENV.items())], rec_body)
@@ -771,10 +792,13 @@ def main() -> int:
         # (a command each way, FUNC's release seen); YES on to FILE NAME (spelt by knob and
         # arrows; FUNC + YES inserts, FUNC + NO deletes), YES on to ASSIGN, a [TRIG] key
         # makes track 3 ONESHOT playing the slot (stock's MACHINE SEL commit and setValue)
+        # v0.40: the preview's playhead (the owner: it never moved): held, the frame counter
+        # moved on 150 twice (6,400 audio frames, as the audio interrupt would count them), the column drawn moves right each time and the
+        # screen with it; let go, none (trim_head_x -1, the screen changed again)
         if "rec_phase" in lay and "rec_pv_on" in lay:
-            g = {k: hex(lay[k]) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
-                                           "trim_e", "nm_text", "rec_pv_on", "smp_func_held", "smp_cmds",
-                                           "smp_saved")}
+            g = {k: hex(lay.get(k, 0)) for k in ("rec_overlay", "rec_phase", "trim_slot", "trim_n", "trim_s",
+                                                  "trim_e", "nm_text", "rec_pv_on", "smp_func_held", "smp_cmds",
+                                                  "smp_saved", "trim_head_x")}
             kit = 0x4210C08C                    # the snapshot's live kit ([0x800052a0])
             snd = hex(kit + 52 + 1163 * 2)      # track 3's sound
             steps = (f"wait:3,mem:0x800052a0:4,mem:{snd}:256,poke:{g['trim_slot']}:00000004,"
@@ -785,8 +809,10 @@ def main() -> int:
                      f"mem:{g['trim_s']}:4,spin:7:-3,wait:5,mem:{g['trim_e']}:4,png:t2,spin:5:2,wait:5,png:tz,"
                      f"mem:{g['smp_cmds']}:4,"
                      f"press:17,wait:2,press:10,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_cmds']}:4,"
+                     f"mem:{g['trim_head_x']}:4,png:p0,addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p1,"
+                     f"addl:0x4058e8d4:150,wait:3,mem:{g['trim_head_x']}:4,png:p2,"
                      f"release:10,wait:3,release:17,wait:3,mem:{g['rec_pv_on']}:4,mem:{g['smp_func_held']}:4,"
-                     f"mem:{g['smp_cmds']}:4,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,spin:0:3,wait:3,right,"
+                     f"mem:{g['smp_cmds']}:4,mem:{g['trim_head_x']}:4,png:pr,yes,wait:10,mem:{g['rec_phase']}:4,png:n0,spin:0:3,wait:3,right,"
                      f"wait:3,spin:0:2,wait:3,mem:{g['nm_text']}:8,press:17,wait:2,yes,wait:3,release:17,wait:3,"
                      f"mem:{g['nm_text']}:8,press:17,wait:2,no,wait:3,release:17,wait:3,mem:{g['nm_text']}:8,"
                      # v0.33: FUNC + NO steps the cursor back too (owner: held, it clears letter
@@ -800,6 +826,14 @@ def main() -> int:
                                             "--build", bdir, "--snapshot", snap, "--steps", steps,
                                             "--png-dir", work / "recflow", "--json", js]
 
+            # the harness keys a repeated read of an address by its place among all reads
+            # (emu_waverider_menu.py's mem:): the n-th read of VA, worked out from the steps
+            reads = [st.split(":")[1] for st in steps.split(",") if st.startswith("mem:")]
+
+            def nth(va, n):
+                k = [i for i, x in enumerate(reads) if x == va][n]
+                return va if not n else f"{va}@{k}"
+
             def flow_body(tdir):
                 rc, out = run("recorder flow", flow_cmd, logs, env=EMU_ENV, trace=tdir)
                 why, good = out[-800:], False
@@ -807,29 +841,37 @@ def main() -> int:
                     r = json.loads(js.read_text())
                     m = r["memory"]
                     ph, cm, pv = g["rec_phase"], g["smp_cmds"], g["rec_pv_on"]
-                    phases = [int(m[k], 16) for k in (ph, f"{ph}@3", f"{ph}@12", f"{ph}@17", f"{ph}@18")]
-                    cmds = [int(m[k], 16) for k in (cm, f"{cm}@8", f"{cm}@11")]
-                    before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[f"{snd}@19"])
+                    phases = [int(m[nth(ph, k)], 16) for k in range(5)]
+                    cmds = [int(m[nth(cm, k)], 16) for k in range(3)]
+                    before, after = bytes.fromhex(m[snd]), bytes.fromhex(m[nth(snd, 1)])
                     s0, e0 = int(m[g["trim_s"]], 16), int(m[g["trim_e"]], 16)
-                    names = [bytes.fromhex(m[k])[:4] for k in (g["nm_text"], f"{g['nm_text']}@14",
-                                                               f"{g['nm_text']}@15")]
+                    names = [bytes.fromhex(m[nth(g["nm_text"], k)])[:4] for k in range(3)]
+                    hx = g["trim_head_x"]
+                    heads = [struct.unpack(">i", bytes.fromhex(m[nth(hx, k)]))[0] for k in range(4)] \
+                        if "trim_head_x" in lay else None
+                    shot = {k: pathlib.Path(r["screens"][k]).read_bytes() for k in ("p0", "p1", "p2", "pr")}
                     facts = {"kit": m["0x800052a0"] == f"{kit:08x}",
                              "phases": phases == [4, 1, 2, 3, 0],
                              "trim": 0 < s0 < e0 < 0x17700,
-                             "preview": int(m[pv], 16) == 1 and int(m[f"{pv}@9"], 16) == 0
+                             "preview": int(m[pv], 16) == 1 and int(m[nth(pv, 1)], 16) == 0
                              and cmds[1] == cmds[0] + 1 and cmds[2] == cmds[1] + 1
                              and int(m[g["smp_func_held"]], 16) == 0,
+                             "v0.40: the preview's playhead moves with it (held: drawn, further on each "
+                             "time, the screen changing) and is gone once let go":
+                             heads is not None and 4 <= heads[0] < heads[1] < heads[2] <= 123 and heads[3] == -1
+                             and shot["p0"] != shot["p1"] != shot["p2"] != shot["pr"],
                              "name": names == [b"CB\0\0", b"C B\0", b"CB\0\0"],
                              "v0.33: FUNC + NO steps back: a second one takes the letter before (and, held, the rest)":
-                             bytes.fromhex(m[f"{g['nm_text']}@16"])[:2] in (b"B\0", b"\0\0"),
+                             bytes.fromhex(m[nth(g["nm_text"], 3)])[:2] in (b"B\0", b"\0\0"),
                              "oneshot": before[0xDE] != 8 and after[0xDE] == 8,
                              "samp": after[0x6A] == 5,
                              "frames": r["screen_frames"] > 0,
                              "v0.33: F zooms TRIM (drawn)": int(m[f"{lay['trim_zoom']:#x}"], 16) >= 1
                              and pathlib.Path(r["screens"]["tz"]).read_bytes() != pathlib.Path(r["screens"]["t2"]).read_bytes()}
                     good = all(facts.values())
-                    why = str(facts) + f" phases {phases} cmds {cmds} names {names}"
-                return good, ("SAVING on to TRIM; TRIM's ends move; FUNC + YES previews while held; YES on to "
+                    why = str(facts) + f" phases {phases} cmds {cmds} names {names} heads {heads}"
+                return good, ("SAVING on to TRIM; TRIM's ends move; FUNC + YES previews while held, its playhead "
+                              f"moving (columns {heads[:3]}), gone at release; YES on to "
                               "FILE NAME (knob, arrows, FUNC + YES inserts, FUNC + NO deletes), YES on to ASSIGN, "
                               "a [TRIG] key makes track 3 ONESHOT on the slot" if good else why)
             later("recflow", "recorder flow (ColdFire)", "recorder flow (ColdFire)", [flow_cmd, sorted(EMU_ENV.items())], flow_body)
@@ -875,9 +917,30 @@ def main() -> int:
                                           "--regs-at", "0x400576ca",
                                           "--png-dir", work / "slice", "--json", js]
 
+            # v0.40 (a user: "sometimes EDIT SLICE POINTS or CREATE SLICE GRID returns CANNOT
+            # READ IT"): the menus opened again and again, TR.DET OFF and ON, after CLEAR SLICE
+            # GRID and not, while other link work is in flight (the loader, TRIM's read of another
+            # slot, LOAD TO PROJECT, a preview, refused chunk reads, a take saving and
+            # normalising into the slot, a project switch): each must reach the editor with the
+            # slot's waveform and its grid kept; and the editor's LINKED points (the DT2's, knob
+            # A): START moves the previous END, END the next START, bounded; UNLINKED as before
+            # (emu_waverider_menu.py's link16 scenario slicebusy, the +Drive and DSP played)
+            busy_cmd = None
+            if "slc_linked" in lay:
+                bsyms = work / "slicebusy_syms.json"
+                bsyms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith(("smp_", "slc_"))}))
+                busy_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
+                            "--build", bdir, "--snapshot", snap, "--steps", f"link16:{bsyms}:slicebusy",
+                            "--png-dir", work / "slicebusy"]
+
             def slc_body(tdir):
                 rc, out = run("slice menus", slc_cmd, logs, env=EMU_ENV, trace=tdir)
-                why, good = out[-800:], False
+                busy_ok, busy_why = True, ""
+                if busy_cmd:
+                    brc, bout = run("slice busy", busy_cmd, logs, env=EMU_ENV, trace=tdir)
+                    busy_ok = brc == 0 and re.findall(r"link16 slicebusy: .*\"ok\": (true|false)", bout) == ["true"]
+                    busy_why = "" if busy_ok else " slicebusy: " + bout[-1500:]
+                why, good = out[-800:] + busy_why, False
                 if rc == 0 and js.exists():
                     r = json.loads(js.read_text())
                     m = r["memory"]
@@ -903,12 +966,16 @@ def main() -> int:
                              # trig 9, 10 (the bottom row's first two: the lowest notes) slices
                              # 1, 2; trig 2 (the top row: a higher note) a later one
                              "slice notes": len(notes) == 3 and notes[:2] == [24, 25] and notes[2] > 25}   # v0.33: from C1 (24), as the DT2
-                    good = all(facts.values())
-                    why = str(facts) + f" notes {notes}"
+                    good = all(facts.values()) and busy_ok
+                    why = str(facts) + f" notes {notes}" + busy_why
                 return good, ("menu, grid dialog and editor drawn; RIGHT picks slice 2, E moves its start, NO "
                  "closes; FUNC + RIGHT splits slice 2, FUNC + LEFT removes it; FUNC + E moves at the normal step; KEYBOARD on a SLICE track: trigs 9, 10 play slices 1, 2 and trig 2 a later one (the keys' notes in order)"
+                              + ("; v0.40: EDIT SLICE POINTS and CREATE SLICE GRID (TR.DET OFF, ON, after CLEAR) reach the "
+                                 "editor every time while the loader, TRIM's read, LOAD TO PROJECT, a preview, refused reads, "
+                                 "a take saving and normalising, a project switch are in flight; LINKED START/END move the "
+                                 "neighbour, bounded; UNLINKED as before" if busy_cmd else "")
                               if good else why)
-            later("slice", "SLICE menus and SLICES keys (ColdFire)", "SLICE menus and SLICES keys (ColdFire)", [slc_cmd, sorted(EMU_ENV.items())], slc_body)
+            later("slice", "SLICE menus and SLICES keys (ColdFire)", "SLICE menus and SLICES keys (ColdFire)", [slc_cmd, busy_cmd, sorted(EMU_ENV.items())], slc_body)
 
         # 6g. v0.25, GRID's ALLOCATE SLICE (YES on a GRID track's page): trigs placed on steps
         # 1, 3, 5 in GRID RECORDING; CREATE LINEAR LOCKS locks slices 1, 2, 3 on them (the
@@ -985,8 +1052,33 @@ def main() -> int:
             base = list(st)                     # (the pool as loaded: 6i starts from it too)
             st += ["wait:6", "tap:2", "wait:6", "png:p2", f"poke:{lay['smp_periods']:#x}:00000000",
                    f"poke:{lay['smp_pos_at']:#x}:00000000", f"poke:{lay['smp_pos']:#x}:" + "8000" * 16,
-                   "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:36", "png:ph2",
-                   "tap:2", "wait:6"]
+                   "wait:12", "png:ph1", f"poke:{lay['smp_pos']:#x}:" + "C000" * 16, "wait:36", "png:ph2"]
+            # v0.40 (owner: "the slice machine's on-screen indicators are a little slow to catch
+            # up"): the DSP's packets through smp_pos_in, two voices on the page's track (the
+            # snapshot's table gives every voice to track 1, the active one): a note at 0x2000,
+            # then a second at 0xA000 while the first still sounds -- the playhead is the NEWER
+            # note's (v0.30..v0.39: the lower position's, the older note's until it ended);
+            # then the first voice retriggered at 0xE000: that one. Each moved column is drawn by the
+            # next UI pass after 40 frames (the emulator's frame counter moves only by addl);
+            # a playhead that stays in its column asks for no redraw
+            ph_new = "smp_pos_in" in lay
+            ph_cmd, phjs = None, work / "playhead.json"
+            if ph_new:                          # (a run of its own: the list's steps below are timed)
+                F_ = "0x4058e8d4"
+                pkt = 0x46A23000                 # (above the harness's call stack: SENTINEL + 0x2C00)
+                per = f"{lay['smp_periods']:#x}"
+                wd = f"{lay['wr_draws']:#x}"
+
+                def packet(n, v0, v1):
+                    return [f"poke:{per}:{n:08x}", f"poke:{pkt:#x}:{v0:04x}{v1:04x}" + "ffff" * 14,
+                            f"call:{lay['smp_pos_in']:#x}:{pkt:#x}", f"addl:{F_}:40", "wait:3"]
+                ps = base + ["wait:6", "tap:2", "wait:6", "png:v0", "mem:0x42431a6c:1"]
+                for n, v0, v1, nm in ((100, 0x2000, 0xFFFF, "v1"), (101, 0x2100, 0xA000, "v2"),
+                                      (102, 0x2108, 0xA008, "v3"), (103, 0xE000, 0xA010, "v4")):
+                    ps += packet(n, v0, v1) + [f"call:{lay['smp_playhead']:#x}:0", f"png:{nm}", mem(lay["wr_draws"])]
+                ph_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                          "--snapshot", snap, "--steps", ",".join(ps), "--png-dir", work / "playhead", "--json", phjs]
+            st += ["tap:2", "wait:6"]
             # v0.27: SAMP set without a turn (TRACK + PLAY's clear, a load) leaves the list
             # closed; a turn of SAMP (encoder D) opens it
             # (the emulator's encoders do not move a stock page's value, so a turn is the stock
@@ -1016,7 +1108,10 @@ def main() -> int:
             # DELETE above emptied slot 1, so two are loaded: slots 0 and 3. SAMP 1 (slot 0):
             # +43 one sample on (SAMP 4), +125 to the last and no further (SAMP 4), +1 none
             # (SAMP 1). v0.29's first form set SAMP 2, the slot just deleted, and counted three)
-            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0100", f"poke:{cell:#x}:2c00",
+            # (v0.40: the reference is the voice's target cell, the sound's value or the trig's
+            # lock: SAMP 1 there as the sound's, as stock's sync puts it)
+            st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0100", f"poke:{cell - 0x800068E4 + 0x80003AF0:#x}:0100",
+                   f"poke:{cell:#x}:2c00",
                    f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
                    f"poke:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
                    f"poke:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
@@ -1033,27 +1128,46 @@ def main() -> int:
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("p2", "ph1", "ph2", "l1", "b1", "b2")}
                     lo, fo, ff = (hex(lay[k]) for k in ("smp_lst_open", "smp_fb_open", "smp_fb_folder"))
                     sp, ce = hex(samp0), hex(cell)
+                    o = 0
                     facts = {"playhead drawn and moving": len({shots["p2"], shots["ph1"], shots["ph2"]}) == 3,
                              "v0.27: SAMP set without a turn leaves the list closed": int(m[lo], 16) == 0,
-                             "list opens on a turn": int(m[f"{lo}@1"], 16) == 1,
+                             "list opens on a turn": int(m[f"{lo}@{1 + o}"], 16) == 1,
                              "DOWN moves SAMP": m[sp] == "0500",
-                             "NO puts it back and closes": m[f"{sp}@3"] == "0200" and int(m[f"{lo}@4"], 16) == 0,
+                             "NO puts it back and closes": m[f"{sp}@{3 + o}"] == "0200" and int(m[f"{lo}@{4 + o}"], 16) == 0,
                              "browser opens, a folder entered": int(m[fo], 16) == 1 and int(m[ff], 16) == 0
                              and shots["b1"] != shots["b2"],
                              "v0.33: YES on a sample ticks it: SAMP kept, the browser up":
-                             m[f"{sp}@7"] == "0300" and int(m[f"{fo}@8"], 16) == 1,
-                             "RIGHT, LOAD TRK: SAMP, both closed": m[f"{sp}@9"] == "0100" and int(m[f"{fo}@10"], 16) == 0
-                             and int(m[f"{lo}@11"], 16) == 0,
+                             m[f"{sp}@{7 + o}"] == "0300" and int(m[f"{fo}@{8 + o}"], 16) == 1,
+                             "RIGHT, LOAD TRK: SAMP, both closed": m[f"{sp}@{9 + o}"] == "0100" and int(m[f"{fo}@{10 + o}"], 16) == 0
+                             and int(m[f"{lo}@{11 + o}"], 16) == 0,
                              "DELETE in the SAMPLE ACTION menu empties the slot": m[hex(M + 28)] == "00000000"
                              and len({pathlib.Path(r["screens"][n]).read_bytes() for n in ("m1", "m2", "m3")}) == 3,
                              "modulated SAMP through the loaded slots, by depth, held at the last":
-                             [m[ce], m[f"{ce}@14"], m[f"{ce}@15"]] == ["0400", "0400", "0100"]}
+                             [m[ce], m[f"{ce}@{14 + o}"], m[f"{ce}@{15 + o}"]] == ["0400", "0400", "0100"]}
+                    if ph_new:
+                        prc, pout = run("playhead", ph_cmd, logs, env=EMU_ENV, trace=tdir)
+                        pr = json.loads(phjs.read_text()) if prc == 0 and phjs.exists() else {"memory": {}, "screens": {}}
+                        pm = pr["memory"]
+                        heads = [c["d0"] for c in pr.get("direct_calls", []) if int(c["fn"], 16) == lay["smp_playhead"]]
+                        sh = {n: pathlib.Path(pr["screens"][n]).read_bytes() if n in pr["screens"] else b""
+                              for n in ("v0", "v1", "v2", "v3", "v4")}
+                        dr = [int(pm[k], 16) for k in (wd, f"{wd}@2", f"{wd}@3", f"{wd}@4") if k in pm]
+                        facts["v0.40: the newest note's playhead (0x2000, then 0xA000 over 0x2100, 0xA008, the first voice again at 0xE000)"] = (
+                            pm.get("0x42431a6c") == "00" and heads == [0x2000, 0xA000, 0xA008, 0xE000])
+                        facts["v0.40: a moved playhead drawn at the next pass, a still one not redrawn"] = (
+                            len(dr) == 4 and sh["v1"] != sh["v0"] and sh["v2"] != sh["v1"] and dr[1] > dr[0]
+                            and dr[2] == dr[1] and sh["v3"] == sh["v2"] and sh["v4"] != sh["v3"] and dr[3] > dr[2])
+                        why_ph = f" playheads {heads} draws {dr}"
+                    else:
+                        why_ph = ""
                     good = all(facts.values())
-                    why = str(facts)
-                return good, ("the playhead drawn where the DSP says; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
+                    why = str(facts) + why_ph
+                return good, ("the playhead drawn where the DSP says"
+                              + ("; v0.40: the newest note's, drawn at the next pass when its column moves, no redraw when it does not"
+                                 if ph_new else "") + "; SAMP set without a turn opens nothing, a turn opens the list, DOWN moves it, NO "
                               "puts it back; FUNC + YES's browser enters a folder, YES ticks a sample and RIGHT, LOAD TRK assigns it; "
                               "its SAMPLE ACTION menu deletes; modulation on SAMP steps through the loaded slots" if good else why)
-            later("samplist", "sample list, browser, playhead (ColdFire)", "sample list, browser, playhead (ColdFire)", [sl_cmd, sorted(EMU_ENV.items())], sl_body)
+            later("samplist", "sample list, browser, playhead (ColdFire)", "sample list, browser, playhead (ColdFire)", [sl_cmd, ph_cmd, sorted(EMU_ENV.items())], sl_body)
 
             # 6i. v0.29: multi-select in the browser (a user's report: no way to delete all the
             # samples sent in). At the top, FUNC + YES marks every sample of "drum_loops"
@@ -1152,6 +1266,14 @@ def main() -> int:
                 djs = work / "drive.json"
                 d_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                          "--snapshot", snap, "--steps", ",".join(ds), "--png-dir", work / "drive", "--json", djs]
+                # v0.40: folders inside folders (takton: a pack's nested folders flattened into
+                # many top-level "TRANCE STARTER PAC"s): a three-level library with look-alike
+                # names at different levels and an old import's flat folder, driven through
+                # every level (scripts/emu_drive_nest.py: its facts; v0.39's code fails them)
+                nest = "smp_fb_titletext" in lay
+                njs_ = work / "drive_nest.json"
+                dn_cmd = [a.venv, "-u", "scripts/emu_drive_nest.py", "--build", bdir, "--snapshot", snap,
+                          "--json", njs_, "--png-dir", work / "drive_nest"]
 
                 def d_body(tdir):
                     rc, out = run("+drive browser", d_cmd, logs, env=EMU_ENV, trace=tdir)
@@ -1180,9 +1302,22 @@ def main() -> int:
                                  "each step drawn": len(set(sh)) == 5}
                         good = all(facts.values())
                         why = f"{facts} d0={d0} mem={m}"
+                    if good and nest:
+                        rc, out = run("+drive nested folders", dn_cmd, logs, env=EMU_ENV, trace=tdir)
+                        r = json.loads(njs_.read_text()) if njs_.exists() else {}
+                        good = rc == 0 and bool(r.get("ok")) and len(r.get("facts", {})) >= 24
+                        why = (json.dumps({k: v for k, v in r.get("facts", {}).items() if not v})[:900]
+                               + " " + json.dumps(r.get("seen", {}))[:600]) if r else out[-800:]
                     return good, ("the two stores, +DRIVE's folders and samples, a tick, LOAD TO PROJECT "
-                                  "queued, NO back up a level each time and closed at the top" if good else why)
-                later("drive", "+DRIVE browser (ColdFire)", "+DRIVE browser (ColdFire)", [d_cmd, sorted(EMU_ENV.items())], d_body)
+                                  "queued, NO back up a level each time and closed at the top"
+                                  + ("; v0.40: folders inside folders, three levels (look-alike names, an old "
+                                     "flat folder): each level's folders then samples, the path in the title, "
+                                     "preview, LOAD TO PROJECT, NO up onto the folder left, MOVE, a folder's "
+                                     "FUNC + YES all it holds, SELECT ALL a list's own, CREATE FOLDER inside, "
+                                     "DELETE of a folder with folders inside, the rest untouched" if nest else "")
+                                  if good else why)
+                later("drive", "+DRIVE browser (ColdFire)", "+DRIVE browser (ColdFire)",
+                      [d_cmd] + ([dn_cmd] if nest else []) + [sorted(EMU_ENV.items())], d_body)
 
                 # 6l2. v0.39 (the owner, v0.38): +DRIVE's keys as Elektron's lists, and long names
                 # as the DT2's. A folder of 17: "SHORT ONE.WAV", then 16 hi-hats whose names are
@@ -1194,8 +1329,13 @@ def main() -> int:
                 # off, it is head...tail again and the new one starts from its start
                 if "smp_fb_rowtext" in lay and "smp_mq_off" in lay:
                     hh = [f"AT BIRDHOUSE HI-HAT CLOSED VEL {k:02d}" for k in range(16)]
+                    # v0.41: a user's v0.38 INCOMING folder (his video: hands off, the cursor going
+                    # between the top two rows by itself)
+                    pab = ["LC_FTR_100_FX_IMPACT_01.WAV", "LC_FTR_100_FX_RISE_01.WAV", "LC_FTR_BASS_A#_02.WAV",
+                           "LC_FTR_BASS_G.WAV", "LC_FTR_PERC_01.WAV", "LC_FTR_PERC_07_01.WAV"]
                     nidx = lent(LDATA, 1000, 2, "SHORT ONE.WAV") + b"".join(
-                        lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh))
+                        lent(LDATA + 4 + 4 * k, 1000 + k, 2, nm) for k, nm in enumerate(hh)) + b"".join(
+                        lent(LDATA + 4 + 64 + 4 * k, 1000 + k, 0, nm) for k, nm in enumerate(pab))
                     nfold = b"INCOMING".ljust(32, b"\0") + b"RECORDED".ljust(32, b"\0") + b"AT HIHAT".ljust(32, b"\0")
                     TICK = 0x4058E8D4
                     rt, mq, cur, mcur = lay["smp_fb_rowtext"], lay["smp_mq_off"], lay["smp_fb_cur"], lay["smp_fb_mcur"]
@@ -1225,6 +1365,19 @@ def main() -> int:
                     ns += ["right", "wait:4"] + clock(20000) + ["press:14", "wait:2"] + clock(20700) + clock(20850) + clock(21000) + [
                            "release:14", "wait:3", mem(mcur), mem(lay["smp_fb_menu"]),
                            "png:n2", "no", "wait:4", "no", "wait:4", mem(lay["smp_fb_folder"]), mem(lay["smp_fb_open"])]
+                    # v0.41: in INCOMING with the cursor on its first row, encoder A jittering (+1, -1,
+                    # ... with no key, as a worn encoder resting between detents reports): the cursor
+                    # moves once at most and stays; then turned by hand, three detents on and three
+                    # back: a row a detent, the turn back losing one
+                    jit0 = sum(1 for x in ns if x == mem(cur))
+                    jrt = sum(1 for x in ns if x == mem(rt, 144))
+                    ns += [f"poke:{lay['smp_fb_folder']:#x}:00000000", f"poke:{cur:#x}:00000000",
+                           f"poke:{lay['smp_overlay_dirty']:#x}:00000001", "wait:6", mem(rt, 144), mem(cur), "png:n3"]
+                    for _ in range(6):
+                        ns += ["spin:0:1", mem(cur), "spin:0:-1", mem(cur)]
+                    ns += ["png:n4"]
+                    ns += ["spin:5:1", mem(cur), "spin:5:1", mem(cur), "spin:5:1", mem(cur),
+                           "spin:5:-1", mem(cur), "spin:5:-1", mem(cur), "spin:5:-1", mem(cur)]
                     njs = work / "drivenav.json"
                     n_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                              "--snapshot", snap, "--steps", ",".join(ns), "--png-dir", work / "drivenav", "--json", njs]
@@ -1292,11 +1445,22 @@ def main() -> int:
                                 and int(m[hex(lay["smp_fb_store"])], 16) == 1 and int(m[hex(lay["smp_fb_folder"])], 16) == 2,
                                 "held DOWN in the action menu steps on": i32(mcur, 0) == 4 and int(at(lay["smp_fb_menu"], 0), 16) == 1,
                                 "NO: out of the menu, then up a level": i32(lay["smp_fb_folder"], 1) == -1 and i32(lay["smp_fb_open"], 1) == 1}
+                            jc = [i32(cur, jit0 + k) for k in range(1 + 12 + 6)]
+                            jr = rows(jrt)
+                            jit = jc[1:13]
+                            facts.update({
+                                "INCOMING: the user's six LC_FTR_ samples, the cursor on the first":
+                                    jc[0] == 0 and jr[0].startswith("LC_FTR_100") and jr[1].startswith("LC_FTR_100"),
+                                "an encoder jittering +1/-1, no key: the cursor moves once at most, then stays (v0.41)":
+                                    None not in jit and max(jit) <= 1 and len(set(jit[1:])) == 1,
+                                "turned by hand: a row a detent; turned back, the first detent back lost (v0.41)":
+                                    None not in jc[13:] and jc[13:16] == [jit[-1] + 1, jit[-1] + 2, jit[-1] + 3]
+                                    and jc[16:19] == [jit[-1] + 3, jit[-1] + 2, jit[-1] + 1]})
                             good = all(bool(v) for v in facts.values())
-                            why = f"{ {k: v for k, v in facts.items() if not v} } cur={curs} off={offs} ticks={ticks} rows0={r0} rows3={rows(3)} rows20={after}"
+                            why = f"{ {k: v for k, v in facts.items() if not v} } cur={curs} jitter={jc} jrows={jr} off={offs} ticks={ticks} rows0={r0} rows3={rows(3)} rows20={after}"
                         return good, ("held arrows repeat in the list and the action menu, FUNC + DOWN a page, a pushed "
                                       "knob a page a detent, D pushed keeps +DRIVE, NO goes up; long names head...tail, "
-                                      "the selected one scrolls to its end and back, moved off it is head...tail again"
+                                      "the selected one scrolls to its end and back, moved off it is head...tail again; an encoder jittering +1/-1 moves the cursor once at most (v0.41)"
                                       if good else why[:1500])
                     later("drivenav", "+DRIVE keys and long names (ColdFire)", "+DRIVE keys and long names (ColdFire)",
                           [n_cmd, sorted(EMU_ENV.items())], n_body)
@@ -1667,13 +1831,16 @@ def main() -> int:
         # half into a 16-step one); with equal lengths from PLAY, where stock plays that pattern
         # from PLAY. On, a cue through the sequencer's own cue routine (program changes,
         # chains, songs): stock's. The setting written to its sector, read back at power-on, NO turns
-        # it off. No fault anywhere
+        # it off. v0.40 (owner: "works ~70% of the time", not when rapid-fired): 83 cues one after
+        # another at every phase after the previous switch, pairs before one switch, PTN held
+        # across two: each at the first step boundary, from where the pattern was (v0.39's code
+        # fails 29). No fault anywhere
         if "jmp_on" in lay:
             jdir = work / "jump"
             jdir.mkdir(exist_ok=True)
             jruns = [("off", "pp", True), ("off", "pp", False), ("pc", "pp", False), ("on", "pp", False),
                      ("ref", "pp", True), ("on", "pt", False), ("ref", "pt", True), ("on", "odd", False),
-                     ("persist", "pp", False)]
+                     ("persist", "pp", False), ("rapid", "pp", False)]
             jcmds = [[a.venv, "-u", "scripts/emu_jump.py", "--build", bdir, "--snapshot", snap, "--scenario", sc,
                       "--variant", var, "--png-dir", jdir / "screens", "--json", jdir / f"{sc}_{var}_{'stock' if st else 'build'}.json"]
                      + (["--stock"] if st else []) for sc, var, st in jruns]
@@ -1712,6 +1879,10 @@ def main() -> int:
                             why.append(f"{var}: after the jump, steps {bad[:4]} are not where stock plays that pattern")
                 if not res[("persist", "pp", False)].get("ok"):
                     why.append("the setting did not persist (or wrote outside its sector)")
+                rp = res[("rapid", "pp", False)]
+                if not rp.get("ok"):
+                    why.append(f"rapid fire: {rp.get('n_bad')} of {rp.get('cues')} cues not switched at the next "
+                               f"boundary from where the pattern was, e.g. {rp.get('bad', [])[:2]}")
                 on = res[("on", "pp", False)]
                 return not why, ("; ".join(why) if why else
                                  f"off and a program-change cue: stock's state every tick; on: switched "
@@ -1719,7 +1890,9 @@ def main() -> int:
                                  "every track goes on from its own step, wrapped by its new length (per pattern; per "
                                  "track, lengths 5, 7, 3; after a 12-step pattern's loop and a half, start "
                                  f"{res[('on', 'odd', False)]['jmp']['jmp_last']}), and from PLAY where stock plays it; "
-                                 "the setting written, read back at power-on, turned off")
+                                 "the setting written, read back at power-on, turned off; v0.40: rapid fire, "
+                                 f"{res[('rapid', 'pp', False)].get('cues')} cues at every phase after a switch "
+                                 "(pairs, PTN held across two), each at the next boundary")
             later("jump", "DIRECT JUMP (ColdFire)", "DIRECT JUMP (ColdFire)", [*jcmds, sorted(EMU_ENV.items())], jump_body)
 
         # 6s. parameter slides (docs/slides.md, scripts/emu_slides.py): on the ColdFire, a trig's
@@ -1729,7 +1902,20 @@ def main() -> int:
         # a new sound, a trig with no p-lock; the lock table's SAVE/LOAD and step clear. With
         # SLIDE off, and for every lock table, the same as stock 1.11 byte for byte: every frame's
         # smoother state and output arrays (the emulator's own EMAC, and the instrument's
-        # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records
+        # arithmetic), what SAVE stores and LOAD restores, and stock skipping our records.
+        # v0.40: copy and paste through the panel (track copy/clear/paste, trig copy/paste) carry
+        # SLD/SLEN exactly as the track's stock lock beside them (both fail on v0.39's code)
+        # v0.40 review (scripts/emu_slides_paths.py): every hooked paste site driven and counted --
+        # shift right/left, track paste and its UNDO, page copy/paste and its UNDO, page autocopy
+        # on lengthening -- each against the whole lock table; slot 80 (shift and autocopy treat
+        # our records as stock's): the same routines with and without our records make the same
+        # writes outside them, from the same memory, and never touch the sound; a track and a trig
+        # paste on a nearly full lock table keep every stock lock (939cbc42 dropped two)
+        # v0.40 (a user's report): a trig with a stock p-lock on a sample machine's SAMP (ONESHOT)
+        # and on SLICE's SLCE, through stock's builder and applier and the real frame ISR (with
+        # smp_mod_apply): the frame's word, played through the DSP's model, is exactly the locked
+        # sample / slice, with the track's value on two others; unlocked trigs the track's (v0.39:
+        # the lock was a scaled offset from the track's value)
         if "sl_smooth" in lay:
             sl_cmds = [[a.venv, "-u", "scripts/emu_slides.py", "--build", bdir, "--snapshot", snap,
                         "--json", work / f"slides-{k}.json",
@@ -1748,12 +1934,33 @@ def main() -> int:
                                     "ours_loaded_rest_sha") if b.get(k) != s.get(k)]
                 if same or not s.get("stock_skips_ours"):
                     return False, f"differs from stock: {same or 'stock did not skip ids 200/201'}"
+                # v0.40: TRIG page 2, our two places (x 21..71, the bottom 25 rows) aside, is
+                # stock 1.11's page pixel for pixel
+                fb, fs = b.get("trig2_frame"), s.get("trig2_frame")
+                if not fb or not fs:
+                    return False, "TRIG page 2: no frame from the build or stock"
+                fb, fs = bytes.fromhex(fb), bytes.fromhex(fs)
+
+                def lit(buf):
+                    return {(x, y) for x in range(128) for y in range(64)
+                            if (buf[(7 - (y // 8)) + 8 * x] >> (y % 8)) & 1}
+                ours = lambda p: 21 <= p[0] <= 71 and p[1] >= 39          # noqa: E731
+                diff = {p for p in lit(fb) ^ lit(fs) if not ours(p)}
+                if diff:
+                    return False, f"TRIG page 2 differs from stock's outside SLD/SLEN: {len(diff)} pixels, e.g. {sorted(diff)[:4]}"
                 return True, (f"SLIDE on: FREQ and FDBK ramp over {b['expected_ramp_frames']} frames "
                               f"(1 step at {b['tempo_word_after_isr'] / 120:g} BPM), exact, landing on the "
                               f"locks; {len(b['checks'])} checks; SLIDE off: {len(b['off_shas'])} frames' "
                               f"arrays and the lock table's SAVE/LOAD identical to stock 1.11; the TRIG page's SLD/SLEN "
-                              f"set through the panel, the held trig staying on after release, a page "
-                              f"paste leaving no SLD/SLEN value in a stock lock")
+                              f"set through the panel, the held trig staying on after release; v0.40: track copy, "
+                              f"clear and paste carry them exactly as the stock locks, trig copy/paste too, no "
+                              f"SLD/SLEN value in a stock lock; v0.40 review: shift, page paste and both "
+                              f"UNDOs, autocopy driven (site hits {b.get('paths_hits')}), slot 80 harmless, "
+                              f"a paste on a full table keeps every stock lock; v0.40: a SAMP and a SLCE p-lock play their own sample and "
+                              f"slice whatever the track's (SAMP 10 and slice 7 over SAMP 2/5, slice 2/5); "
+                              f"v0.40: SLD drawn as stock's RTRG and SLEN as "
+                              f"stock's LEN pixel for pixel (off/on, unlocked/locked), the page otherwise "
+                              f"stock's")
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
@@ -1774,10 +1981,58 @@ def main() -> int:
             if importlib.util.find_spec("xdist") is None:
                 return False, ("pytest-xdist is not installed for this python (pip install "
                                "--break-system-packages pytest-xdist): unchecked is not passing")
+            # v0.40 (owner, 2026-11-05): the Monomachine golden runs were lost with the old
+            # workspace. The owner approved ONE exception, for this DSP image only: if they are
+            # missing, test_mnm's cases may go unrun when the build's section 7 and the MnM code
+            # and its test are byte-identical to v0.39's (source dbbe804), which passed against
+            # the real golden runs. Every other skip still counts: exactly test_mnm's cases plus
+            # the one skip every run has had (EFM-SD's eighth knob) may be skipped, no more
+            exc = mnm_exception()
+            if isinstance(exc, str):
+                return False, exc
             rc, out = run("pytest", py_cmd, logs, env={"PYTHONPATH": "src"}, trace=tdir)
             last = out.strip().splitlines()[-1] if out.strip() else ""
             # "586 passed, 1 skipped in 512.3s (0:08:32)": the counts, as serial pytest prints them
-            return rc == 0 and re.search(r"\b\d+ passed\b", last) is not None, last
+            ok = rc == 0 and re.search(r"\b\d+ passed\b", last) is not None
+            if ok and exc is not None:
+                m = re.search(r"\b(\d+) skipped\b", last)
+                skipped = int(m.group(1)) if m else 0
+                if skipped != exc + 1 or exc != MNM_EXC_REST:
+                    return False, (f"{last} -- under the MnM exception test_mnm must collect exactly "
+                                   f"{MNM_EXC_REST} tests (it collected {exc}) and exactly "
+                                   f"{MNM_EXC_REST + 1} may be skipped (those and EFM-SD's eighth knob), "
+                                   f"not {skipped}")
+                last += (f" [owner exception 2026-11-05: the Monomachine golden runs are missing, so "
+                         f"test_mnm's 366 golden cases are not collected and its {exc} other tests "
+                         f"skip; section 7, src/dnfw/mnm and test_mnm.py byte-identical to v0.39's "
+                         f"(dbbe804), which passed them all]")
+            return ok, last
+
+        def mnm_exception():
+            """None: the golden runs are there, nothing excepted. An int: the exception applies,
+            that many test_mnm cases go unrun. A str: why it does not apply (a failure)."""
+            golden = pathlib.Path(os.environ.get("MNM_GOLDEN",
+                                                 str(ROOT.parent / "mnm132" / "research" / "golden")))
+            if golden.is_dir():
+                return None
+            if hashlib.sha256(sec7).hexdigest() != MNM_EXC_SEC7:
+                return ("the Monomachine golden runs are missing and this build's DSP image is not "
+                        "v0.39's: the owner's exception (2026-11-05) does not cover it")
+            for path, want in MNM_EXC_TREES.items():
+                got = subprocess.run(["git", "rev-parse", f"HEAD:{path}"], cwd=ROOT,
+                                     capture_output=True, text=True).stdout.strip()
+                dirty = subprocess.run(["git", "status", "--porcelain", "--", path], cwd=ROOT,
+                                       capture_output=True, text=True).stdout.strip()
+                if got != want or dirty:
+                    return (f"the Monomachine golden runs are missing and {path} differs from "
+                            f"v0.39's: the owner's exception (2026-11-05) does not cover it")
+            r = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q",
+                                "-p", "no:cacheprovider", "test/test_mnm.py"], cwd=ROOT,
+                               capture_output=True, text=True, env={**os.environ, "PYTHONPATH": "src"})
+            m = re.search(r"\b(\d+) tests? collected\b", r.stdout)
+            if r.returncode != 0 or not m:
+                return "the MnM exception could not count test_mnm's cases: unchecked is not passing"
+            return int(m.group(1))
         if wanted("unit"):
             gate("unit tests", *cached("unit tests", [py_cmd], py_body))
 

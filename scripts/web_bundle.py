@@ -23,6 +23,40 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 
 
+STOCK = pathlib.Path(os.environ.get("DN2_STOCK_DIR", ROOT.parent / "stock"))
+STOCK_FILES = {"dt2": "Digitakt_II_OS1.17.syx", "md": "Elektron_SPS1-1UW_OS1.63.syx",
+               "mnm": "Elektron_SFX6-60_OS1.32B.syx"}
+
+
+def isolated_rebuild(zbytes: bytes, version: str) -> str:
+    """the zip's build, run as the browser runs it -> its sha256 (or an error's text)"""
+    import subprocess
+    import tempfile
+    for f in STOCK_FILES.values():
+        if not (STOCK / f).is_file():
+            return f"no {STOCK / f} (set DN2_STOCK_DIR to the folder with Elektron's files)"
+    with tempfile.TemporaryDirectory() as td:
+        run = pathlib.Path(td)
+        (run / "code").mkdir()
+        with zipfile.ZipFile(io.BytesIO(zbytes)) as z:
+            z.extractall(run / "code")
+        (run / "VERSION").write_text(version + "\n")     # as patcher-worker.js writes it
+        prog = (
+            "import sys, pathlib\n"
+            "sys.path.insert(0, sys.argv[1] + '/code')\n"
+            "import dn2patch\n"
+            "dn2patch.WORK = pathlib.Path(sys.argv[1] + '/work')\n"
+            "print('SHA=' + dn2patch.build(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[1] + '/out.syx',"
+            " mnm=sys.argv[5]))\n")
+        r = subprocess.run([sys.executable, "-I", "-c", prog, str(run), str(ROOT.parent / "Digitone_II_OS1.11.syx"),
+                            str(STOCK / STOCK_FILES["dt2"]), str(STOCK / STOCK_FILES["md"]),
+                            str(STOCK / STOCK_FILES["mnm"])], cwd=td, capture_output=True, text=True)
+        for line in r.stdout.splitlines():
+            if line.startswith("SHA="):
+                return line[4:]
+        return (r.stdout + r.stderr).strip().splitlines()[-1] if (r.stdout + r.stderr).strip() else "no output"
+
+
 def main() -> int:
     build, version, name, outdir = sys.argv[1:5]
     build = pathlib.Path(build)
@@ -62,6 +96,14 @@ def main() -> int:
                        compress_type=zipfile.ZIP_DEFLATED)
         z.writestr(zipfile.ZipInfo("dn2patch.py", (2026, 1, 1, 0, 0, 0)),
                    (ROOT / "tools" / "patcher" / "dn2patch.py").read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
+    # v0.40: rebuild from the zip ALONE, as the browser does (patcher-worker.js: the zip in
+    # RUN/code, the version as RUN/VERSION, nothing from this repository), in a clean
+    # interpreter. v0.39's bundle passed the in-repo rebuild above but stopped in the
+    # browser: the build read VERSION from the repository, which the zip does not carry.
+    iso = isolated_rebuild(zbuf.getvalue(), version)
+    if iso != want:
+        print(f"the zip alone does not rebuild the cleared file: {iso}")
+        return 1
     zname = f"dnfw-v{version}.zip"
     (outdir / zname).write_bytes(zbuf.getvalue())
     man = outdir / "builds.json"

@@ -10,6 +10,9 @@
  *   LIB_SECTOR + 0          the superblock: 'DN2L', version, capacity, its own check
  *   + 1 .. + 256            the index: LIB_CAP entries of 64 bytes, 8 a sector
  *   + 257 .. + 260          LIB_FOLDERS names of 32 bytes (0 INCOMING, 1 RECORDED)
+ *                           v0.40: byte 31 0 (a top-level folder, every folder written before
+ *                           v0.40) or 0x80 | its parent's index (a folder inside a folder; its
+ *                           name then at most 30 characters, byte 30 0). See folder_tree.
  *   + 261 ..                the frames: each sample one extent of whole sectors
  *
  * An entry: +0 its first sector (0: free), +4 frames, +8 rate (the pool's float ratio),
@@ -48,6 +51,11 @@ typedef unsigned char u8;
 #define LIB_FOLDER_AT (LIB_INDEX + LIB_INDEX_SECTORS)
 #define LIB_DATA (LIB_FOLDER_AT + LIB_FOLDER_SECTORS)
 #define LIB_NAME 36u
+/* v0.40: folders inside folders (takton's TRANCE STARTER PACK/KICKS/..: the import page sent
+ * each path as one flat name, cut at 31). A top-level folder is depth 1; LIB_DEPTH deep at most */
+#define LIB_DEPTH 6
+#define FTAG(f) (FOLD[LIB_FOLDER_BYTES * (u32)(f) + LIB_FOLDER_BYTES - 1u])
+#define FNAMED(f) (FOLD[LIB_FOLDER_BYTES * (u32)(f)] != 0)
 _Static_assert(LIB_SECTOR >= POOL_STORE_END, "the library lies above the pool's image");
 
 #define LIB_RAM (SMP_MIRROR + 0x100000u)
@@ -105,6 +113,44 @@ static u32 entry_check(const u8 *e) { return adler(e, 60, 1u) ^ 0x4C494245u; }
  * browser asks thousands of times a frame: the check itself is far too slow for that) */
 static u32 used_bits[LIB_CAP / 32] __attribute__((section(".data")));
 static u16 fold_n[LIB_FOLDERS] __attribute__((section(".data")));   /* samples in each folder */
+/* v0.40: each folder's parent as the browser takes it (-1: the top), and its depth (1: top) */
+signed char smp_lib_fpar[LIB_FOLDERS] __attribute__((section(".data")));
+static u8 fold_dep[LIB_FOLDERS] __attribute__((section(".data")));
+
+/* v0.40: the tree, worked out from the folder records whenever they or the index change.
+ * Whatever the records hold (a parent dropped by an older build, a sector torn by a power
+ * cut, a loop), the result is a tree LIB_DEPTH deep at most and every folder is in it: a
+ * folder whose parent is not a named folder, or whose line of parents does not reach the
+ * top within LIB_DEPTH, is taken as a top-level folder. Nothing is written: a record is only
+ * read differently, so no sample is ever lost or hidden. */
+static void folder_tree(void)
+{
+    for (int f = 0; f < LIB_FOLDERS; f++)       /* a byte 31 (a tag) after 31 letters: no tag (a */
+        if (FTAG(f) && FOLD[LIB_FOLDER_BYTES * (u32)f + LIB_FOLDER_BYTES - 2u])    /* torn record) */
+            FTAG(f) = 0;                        /* so every name ends inside its record */
+    for (int f = 0; f < LIB_FOLDERS; f++) {
+        u32 t = FTAG(f), p = t & 0x3Fu;
+        smp_lib_fpar[f] = (signed char)((t & 0xC0u) == 0x80u && FNAMED(f) && p != (u32)f && FNAMED(p)
+                                        && !FOLD[LIB_FOLDER_BYTES * (u32)f + LIB_FOLDER_BYTES - 2u] ? (int)p : -1);
+    }
+    for (int f = 0; f < LIB_FOLDERS; f++) {
+        int p = smp_lib_fpar[f], d = 1;
+        while (p >= 0 && d <= LIB_DEPTH) {
+            p = smp_lib_fpar[p];
+            d++;
+        }
+        if (p >= 0 || d > LIB_DEPTH)            /* a loop, or too deep: from here, the top */
+            smp_lib_fpar[f] = -1;
+    }
+    for (int f = 0; f < LIB_FOLDERS; f++) {
+        int p = smp_lib_fpar[f], d = 1;
+        while (p >= 0 && d <= LIB_DEPTH) {
+            p = smp_lib_fpar[p];
+            d++;
+        }
+        fold_dep[f] = (u8)d;
+    }
+}
 
 static void used_set(int k)
 {
@@ -130,6 +176,7 @@ static void used_all(void)
     for (int k = 0; k < LIB_CAP; k++)
         if ((used_bits[k >> 5] >> (k & 31)) & 1u)
             fold_n[E(k)[13]]++;
+    folder_tree();
 }
 
 int smp_lib_used(int k)                         /* entry K holds a sample */
@@ -181,14 +228,28 @@ void smp_lib_boot(void)
     smp_lib_state = 2;
 }
 
-static void folder_set(int f, const char *name)
+/* folder F's record: NAME, at the top (PARENT -1: 31 characters at most, byte 31 0, as
+ * every build before v0.40 wrote) or inside PARENT (30 at most, byte 31 its tag) */
+static void folder_set_in(int f, const char *name, int parent)
 {
     u8 *d = FOLD + LIB_FOLDER_BYTES * (u32)f;
-    u32 k = 0;
-    for (; k < LIB_FOLDER_BYTES - 1 && name[k]; k++)
+    u32 k = 0, max = parent >= 0 ? LIB_FOLDER_BYTES - 2u : LIB_FOLDER_BYTES - 1u;
+    for (; k < max && name[k]; k++)
         d[k] = (u8)name[k];
     for (; k < LIB_FOLDER_BYTES; k++)
         d[k] = 0;
+    if (parent >= 0 && name[0])
+        d[LIB_FOLDER_BYTES - 1] = (u8)(0x80u | (u32)parent);
+}
+
+static void folder_set(int f, const char *name) { folder_set_in(f, name, -1); }
+
+/* v0.40: one folder record's sector (16 records a sector): a change to a folder writes the
+ * one sector it is in, never the other three (before: all four, 2 KB, at each change) */
+static int folder_write(int f)
+{
+    u32 s = (u32)f / (512u / LIB_FOLDER_BYTES);
+    return lib_wr(LIB_FOLDER_AT + s, 512u, FOLD + 512u * s);
 }
 
 /* a fresh, empty library: the folders, the index zeroed, then the superblock last */
@@ -271,9 +332,18 @@ static int w_flush(void)
     return r;
 }
 
-static int folder_find(const u8 *name, int make)       /* -> its index, or -1 */
+/* v0.40: the folder NAME inside PARENT (-1: the top), made if MAKE and new -> its index, or -1.
+ * A top-level name compares as before (31 characters); one inside a folder is cut to 30. A
+ * new folder goes into the first empty record; any folder whose record still names that
+ * record as its parent (left by an older build's DELETE: shown at the top) is written as a
+ * top-level folder first, so it never turns up inside the new one. Each write is the one
+ * sector a record is in: a power cut leaves the folder made or not, never half. */
+static int folder_find_in(int parent, const u8 *name, int make)
 {
     int empty = -1;
+    u32 max = parent >= 0 ? LIB_FOLDER_BYTES - 2u : LIB_FOLDER_BYTES - 1u;
+    if (parent >= LIB_FOLDERS || (parent >= 0 && !FNAMED(parent)))
+        return -1;
     for (int f = 0; f < LIB_FOLDERS; f++) {
         const u8 *d = FOLD + LIB_FOLDER_BYTES * (u32)f;
         if (!d[0]) {
@@ -281,16 +351,70 @@ static int folder_find(const u8 *name, int make)       /* -> its index, or -1 */
                 empty = f;
             continue;
         }
-        u32 k = 0;
-        while (k < LIB_FOLDER_BYTES - 1 && d[k] && d[k] == name[k])
+        if (smp_lib_fpar[f] != parent)
+            continue;
+        u32 k = 0;                              /* (a record's name ends by its byte 31: folder_tree) */
+        while (k < max && d[k] && d[k] == name[k])
             k++;
-        if (k == LIB_FOLDER_BYTES - 1 || (!d[k] && !name[k]))
+        if (!d[k] && (k == max || !name[k]))    /* (NAME past MAX: cut there, as it is made) */
             return f;
     }
-    if (!make || empty < 0 || !name[0])
+    if (!make || empty < 0 || !name[0] || (parent >= 0 && fold_dep[parent] >= LIB_DEPTH))
         return -1;
-    folder_set(empty, (const char *)name);
-    return lib_wr(LIB_FOLDER_AT, LIB_FOLDER_SECTORS * 512u, FOLD) == 0 ? empty : -1;
+    for (int g = 0; g < LIB_FOLDERS; g++)
+        if (g != empty && FNAMED(g) && (FTAG(g) & 0xC0u) == 0x80u && (FTAG(g) & 0x3Fu) == (u32)empty) {
+            FTAG(g) = 0;
+            if (folder_write(g) != 0)
+                return -1;
+        }
+    folder_set_in(empty, (const char *)name, parent);
+    int r = folder_write(empty);
+    folder_tree();
+    if (r != 0)
+        return -1;
+    smp_lib_rev++;
+    return empty;
+}
+
+/* v0.40: link 17's name is a path, "TRANCE STARTER PACK/KICKS/808": each level found or
+ * made inside the one before ('/' between levels; empty levels skipped). Past LIB_DEPTH the
+ * rest of the path is not made: the deepest folder is the answer (its samples go there).
+ * A name with no '/' is the top-level folder it always was. -> the last level's index, -1 */
+static int folder_path(const u8 *path, u32 n, int *capped)
+{
+    int at = -1;
+    u32 k = 0;
+    *capped = 0;
+    while (k < n && path[k]) {
+        u8 part[LIB_FOLDER_BYTES];
+        u32 j = 0;
+        while (k < n && path[k] && path[k] != '/') {
+            if (j < LIB_FOLDER_BYTES - 1u)
+                part[j++] = path[k];
+            k++;
+        }
+        int sep = k < n && path[k] == '/';
+        while (sep && j > 0 && part[j - 1] == ' ')  /* "PACK / KICKS": "PACK", then "KICKS" (a */
+            j--;                                /* name with no '/' is kept as it came) */
+        for (u32 z = j; z < LIB_FOLDER_BYTES; z++)
+            part[z] = 0;
+        if (sep) {
+            k++;
+            while (k < n && path[k] == ' ')
+                k++;
+        }
+        if (!j)
+            continue;
+        if (at >= 0 && fold_dep[at] >= LIB_DEPTH) {
+            *capped = 1;
+            break;
+        }
+        int f = folder_find_in(at, part, 1);
+        if (f < 0)
+            return -1;
+        at = f;
+    }
+    return at;
 }
 
 /* the SysEx commands 16..23 (link.c's smp_rx: RQ, its N bytes; the reply's data from RP + R)
@@ -309,14 +433,40 @@ u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
         put32(rp + r, LIB_DATA); r += 4;
         return r;
     }
-    if (cmd == 17) {                            /* FOLDER name -> its index (made if new) */
-        u8 name[LIB_FOLDER_BYTES];
-        for (u32 k = 0; k < LIB_FOLDER_BYTES; k++)
-            name[k] = 3 + k < n && k < LIB_FOLDER_BYTES - 1 ? rq[3 + k] : 0;
-        int f = lib_format() == 0 ? folder_find(name, 1) : -1;
+    if (cmd == 17) {                            /* FOLDER name -> its index (made if new); */
+        int capped;                             /* v0.40: a path, each level inside the last */
+        int f = lib_format() == 0 && n > 3 ? folder_path(rq + 3, n - 3 > 200u ? 200u : n - 3, &capped) : -1;
         if (f < 0)
             *st = 1;
         rp[r++] = (u8)(f < 0 ? 0xFF : f);
+        return r;
+    }
+    if (cmd == 30) {                            /* v0.40: FOLDER IN parent (0xFF: the top), name */
+        u8 name[LIB_FOLDER_BYTES];              /*   -> its index, flags (1 made, 2 the parent at */
+        int parent = n >= 4 && rq[3] != 0xFFu ? rq[3] : -1;     /* LIB_DEPTH: the parent given) */
+        for (u32 k = 0; k < LIB_FOLDER_BYTES; k++)
+            name[k] = 4 + k < n && k < LIB_FOLDER_BYTES - 1 ? rq[4 + k] : 0;
+        int f = -1, fl = 0;
+        if (n >= 5 && lib_format() == 0 && parent < LIB_FOLDERS && (parent < 0 || FNAMED(parent))) {
+            if (parent >= 0 && fold_dep[parent] >= LIB_DEPTH) {
+                f = parent;
+                fl = 2;
+            } else {
+                int was = folder_find_in(parent, name, 0);
+                f = was >= 0 ? was : folder_find_in(parent, name, 1);
+                fl = was < 0 && f >= 0;
+            }
+        }
+        if (f < 0)
+            *st = 1;
+        rp[r++] = (u8)(f < 0 ? 0xFF : f);
+        rp[r++] = (u8)fl;
+        return r;
+    }
+    if (cmd == 31) {                            /* v0.40: TREE -> LIB_DEPTH, then each folder's */
+        rp[r++] = LIB_DEPTH;                    /*   parent as the browser takes it (0xFF the top) */
+        for (int f = 0; f < LIB_FOLDERS; f++)
+            rp[r++] = smp_lib_state == 2 && smp_lib_fpar[f] >= 0 ? (u8)smp_lib_fpar[f] : 0xFFu;
         return r;
     }
     if (cmd == 18) {                            /* BEGIN frames, fmt, folder, rate bits, name */
@@ -467,15 +617,17 @@ int smp_lib_move(int k, int f)
 
 /* v0.33: CREATE FOLDER: NAME's folder (made if new) -> its index, -1 none (full, or the
  * +Drive refused) */
-int smp_lib_folder_make(const char *name)
+int smp_lib_folder_make_in(int parent, const char *name)    /* v0.40: inside PARENT (-1 the top) */
 {
     u8 nm[LIB_FOLDER_BYTES];
     for (u32 k = 0; k < LIB_FOLDER_BYTES; k++)
         nm[k] = 0;
     for (u32 k = 0; k < LIB_FOLDER_BYTES - 1 && name[k]; k++)
         nm[k] = (u8)name[k];
-    return lib_format() == 0 ? folder_find(nm, 1) : -1;
+    return lib_format() == 0 ? folder_find_in(parent, nm, 1) : -1;
 }
+
+int smp_lib_folder_make(const char *name) { return smp_lib_folder_make_in(-1, name); }
 
 /* v0.33: DELETE on an empty folder takes the folder away (the 64 are not used up by NEW
  * FOLDER's); INCOMING (0) and RECORDED (1) stay */
@@ -483,9 +635,29 @@ int smp_lib_folder_drop(int f)
 {
     if (smp_lib_state != 2 || f < 2 || f >= LIB_FOLDERS || fold_n[f] > 0 || !FOLD[LIB_FOLDER_BYTES * (u32)f])
         return -1;
+    for (int g = 0; g < LIB_FOLDERS; g++)       /* v0.40: nor while a folder is inside it */
+        if (smp_lib_fpar[g] == f)
+            return -1;
     folder_set(f, "");
     used_all();
-    return lib_wr(LIB_FOLDER_AT, LIB_FOLDER_SECTORS * 512u, FOLD);
+    return folder_write(f);
+}
+
+/* v0.40: the tree, for the browser (smp_page.c) */
+int smp_lib_folder_parent(int f) { return smp_lib_state == 2 && f >= 0 && f < LIB_FOLDERS ? smp_lib_fpar[f] : -1; }
+int smp_lib_folder_depth(int f) { return smp_lib_state == 2 && f >= 0 && f < LIB_FOLDERS ? fold_dep[f] : 0; }
+int smp_lib_folder_under(int g, int f)          /* G is F or inside it, any depth */
+{
+    if (smp_lib_state != 2 || f < 0 || f >= LIB_FOLDERS)
+        return 0;
+    for (int d = 0; g >= 0 && g < LIB_FOLDERS && d <= LIB_DEPTH; d++, g = smp_lib_fpar[g])
+        if (g == f)
+            return 1;
+    return 0;
+}
+int smp_lib_folder_room(int f)                  /* a folder can be made inside F (-1: the top) */
+{
+    return f < 0 || (smp_lib_state == 2 && f < LIB_FOLDERS && FNAMED(f) && fold_dep[f] < LIB_DEPTH);
 }
 
 int smp_lib_rename(int k, const char *name)

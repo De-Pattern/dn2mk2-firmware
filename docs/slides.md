@@ -18,13 +18,24 @@ and VFAD, are now **SLD** (encoder **E**) and **SLEN** (encoder **F**).
 
 - Hold a trig (in GRID RECORDING, as for any p-lock) and turn **E** right: SLIDE ON for
   that trig; left: OFF. Turn **F**: its length. Every held trig gets the value. A trig's
-  own value is drawn inverted (filled), as stock draws a p-lock.
+  own value is drawn as stock draws a p-lock (the control's area inverted).
+- v0.40 (owner, on v0.39's page: the SLD bar and SLEN box did not match the stock controls
+  above): **SLD is RTRG's switch and SLEN is LEN's box**, drawn by stock's own routines:
+  SLD through stock's widget routine `0x40036560` with RTRG's record (the same toggle icon,
+  PORT's too), SLEN as LEN's widget `0x400cc2b4` draws its box (its font `0x40293c64`, the
+  text centred at x + 9, the 19 x 17 box) with our text (LEN's table has no "1", "1.5"...);
+  the labels through the cell routine's own text call (`0x40115668`, font `0x40291760`,
+  centred, same baseline as PTIM and PORT); a lock inverts the control's area
+  (`0x40114842`, x - 3 .. x + 21, y + 6 .. y + 24), as stock's cell routine `0x4006448a`
+  does for a locked parameter. Each in its column (x 24 under RTRG, x 50 under VFAD; PTIM 76
+  and PORT 102 beside them), the stock page's empty-place dots cleared first.
 - No trig held: the places show what a trig gets without a lock (OFF, 1 step); turning
   does nothing (there is no per-sound or per-track default).
 - The trig's other p-locks are set as usual (hold the trig, turn the parameter).
 - Removing a trig (or placing one, which stock does by clearing the step) clears its SLD
   and SLEN with its other locks. Releasing a held trig after turning E/F leaves it on, as
-  with any p-lock. Copy/paste does not carry SLD/SLEN (see the end of this page).
+  with any p-lock. Copy and paste carry SLD/SLEN as they carry the trig's other locks
+  (v0.40; "Copy and paste" below).
 
 **SLEN** (steps of the track, its own scale followed, at the current tempo):
 `1/8 1/4 1/2 3/4 1 1.5 2 3 4 6 8 12 16 32 64`; a SLIDE trig with no SLEN lock uses **1**.
@@ -127,6 +138,19 @@ comparison is made both ways). See the gate step's record for the numbers; the f
   pattern saves and loads byte-identically on both. Step clear removes the step's SLD/SLEN.
 - The TRIG page driven through the panel: page 2 draws SLD/SLEN, page 1 does not; holding
   a trig and turning E/F writes the locks; no fault.
+- v0.40, the drawing (`emu_slides.py`): `sl_draw_sld` / `sl_draw_slen` on a canvas of their
+  own against stock's cell routine `0x4006448a` drawing RTRG / LEN (with the page's own view
+  and cell) on another, pixel for pixel in the control's area: SLD OFF / ON, unlocked and
+  locked; SLEN 1/8, 1/4, 1/2 against LEN 30, 46, 62 (the same text), unlocked and locked;
+  every SLEN value with LEN's box and its text centred as LEN's; the page's own places as
+  drawn there (idle; trig held, locked); and the gate: the build's page 2, our two places
+  aside, is stock 1.11's page pixel for pixel.
+
+- v0.40, a user's report (`docs/user-reports.md` P1), in the same harness: a stock p-lock on
+  ONESHOT's SAMP (and SLICE's SLCE), through the builder and applier and the real frame ISR
+  (with `smp_mod_apply`), carries exactly the locked value in the voice's frame word, whatever
+  the track's value; that word played through the DSP's model sounds as the locked sample
+  (slice). Fails on v0.39's code.
 
 ## Not verified (hardware)
 
@@ -141,15 +165,73 @@ comparison is made both ways). See the gate step's record for the numbers; the f
   trig on the press; holding an empty step and turning E leaves that trig placed, exactly as
   holding it and turning a stock parameter does. Nothing to mark "used". E/F record nothing
   in LIVE recording (they are set on held trigs only, like the arp p-locks).
-- **Copy/paste does not carry SLD/SLEN (known issue, left as it is).** Stock's trig copy
-  keeps slot/value pairs and its page and track copies match records by track (our records
-  are tagged, `docs/ideas-backlog.md` §18 on the arp p-locks, which needed five hooks and a
-  paste core to be carried). Measured for the page: FUNC + RECORD, FUNC + PLAY (clear), FUNC
-  + STOP (paste) leaves the pasted trigs without SLD/SLEN, and the paste may take a record of
-  ours for a stock lock of its own: the track's slides on every page are then gone. Stock's
-  locks are never touched: the taken record is rewritten whole (a value of ours on step 41,
-  outside the page, is gone after the paste, checked in the gate step), and nothing of ours
-  ends up in a stock lock. A page CLEAR leaves the cleared steps' SLD records (they do
-  nothing until a stock p-lock is set on that step again, which then slides). Clear
-  track/pattern likewise.
+- Copy and paste on the unit (v0.40): checked under the emulator only (below).
 - Overtone patterns: Overtone stores its slides as ids 115/116; we do not read them.
+
+## Copy and paste (v0.40)
+
+v0.39 carried nothing: stock's copies match lock records by track and ours are tagged, and
+the trig copy keeps a slot/value list of its own. FUNC + RECORD, PLAY, STOP as the gate drove
+is a track copy, clear and paste: the clear (`0x400e745c`) frees the track's records by their
+track byte (ours, tagged, stayed), and the paste clears every step of the track (`0x4003d14e`
+on each, which clears ours too) and then pastes the clipboard's records, ours skipped: the
+track's slides were all gone (v0.39's note that the paste "takes a record of ours" was this:
+our emptied record freed, then reused).
+
+The fix uses the arp p-locks' sites and shapes (`scripts/build_arp_plocks.py`, each path
+driven through the UI there), `dnfw.slides.PASTE_SITES`, `csrc/slides/hooks.S`, `sl_paste`,
+`sl_tcopy`, `sl_tpaste` in `slide.c`:
+
+| site | path | what it does for ours |
+|---|---|---|
+| `0x40053246`, `0x40052634` | page paste, its UNDO | a clipboard record of ours of the copied track: its page's values onto the destination track |
+| `0x4005389c`, `0x40052948` | track paste, its UNDO | the same, all 128 steps |
+| `0x400e752c` | track clear (FUNC + PLAY, `0x400e745c`) | the track compare with the tag cleared: ours freed with the track's stock locks (v0.39 kept them) |
+| `0x40051158`, `0x40050cce` | shift (FUNC + LEFT/RIGHT), page autocopy | the track compare with the tag cleared: ours move with their steps |
+| `0x40053f48`, `0x40055440` | trig copy, trig paste | each copied trig's SLD/SLEN by clipboard entry (`sl_tclip`, 128), onto the pasted step |
+
+Stock clears the destination steps before it pastes (through `sl_clear`), so a pasted step's
+slides are the clipboard's, as its other locks are, and steps the paste does not cover keep
+theirs. Pattern copy and paste copy the whole pattern (122,478 bytes, the lock table inside):
+ours go with it as bytes. Gate (`slides`): copy, clear, paste through the panel restores every
+SLD/SLEN of the track exactly, cleared with the stock locks (both fail on v0.39); trig copy
+and paste puts step 6's on step 9 beside its stock lock; no value of ours in a stock record.
+
+**v0.40 review: every hooked site driven** (`scripts/emu_slides_paths.py`, run by the same
+`slides` step after the checks above; each check asserts its site's hit count and compares the
+whole lock table, as maps of every record's 128 values):
+
+- shift (FUNC + RIGHT, then LEFT, `0x40051158`): every record of the track, ours and stock's,
+  one step on (rotated over the pattern's length), the other tracks, every header and the index
+  untouched; LEFT gives the table back byte for byte;
+- track copy, a change, paste, paste again (track paste's UNDO, `0x40052948`): the paste gives
+  the copy, the UNDO the change, SLD/SLEN and the stock locks alike;
+- page copy (PAGE + RECORD), a change on page 1 and past it, paste (PAGE + STOP, `0x40053246`),
+  paste again (its UNDO, `0x40052634`): page 1's steps from the copy and the rest untouched, then
+  the change;
+- autocopy (`0x40050cce`): the track cleared, the pattern 16 steps (stock's own setter), then
+  lengthened in SEQUENCER PAGE SETUP (FUNC + PAGE, encoder E): page 1's locks, ours included,
+  on page 2;
+- slot 80: shift and autocopy treat our records (RAM header 0x50/0x51: "slot 80/81" to stock)
+  as their own once the tag is cleared. Read in their code, neither looks at the slot byte (they
+  move values inside each record of the track, and its per-step byte). Measured: the two stock
+  routines run from the same memory with and without our records make exactly the same writes,
+  in order, outside our records (and their stored copies: the change notice runs SAVE, i.e.
+  `sl_save`); the pattern ends the same outside them; their headers are never written; the voice
+  mirror (`0x80003af0`, `0x800068e4`) and the kit are untouched by either.
+
+Measured on the way (stock's own behaviour, not changed): a second FUNC + PLAY (or FUNC + STOP)
+right after a clear or a paste is its UNDO; stock's track clear `0x400e745c` frees records by
+their header and leaves their values (its value loop strides 260 bytes over 258-byte records),
+and stock's setter `0x4003ceee` takes a free record as it finds it.
+
+**A nearly full lock table (v0.40 review).** `sl_paste` / `sl_tpaste` write our records inside
+stock's paste loop, which allocates each destination record as it goes and silently skips a
+lock when none of the 80 is free. On 939cbc42 our records could take the records later stock
+locks needed (the gate's case: 3 free, ours first in the clipboard: 2 of 3 stock locks lost, in
+a track paste and in a trig paste). Now a free record goes to ours only while more are free than
+the stock locks still to come in the same paste need (for page/track paste and their UNDOs: the
+clipboard's later records of its track with no destination record in the index; for a trig
+paste: the distinct slots of this and later entries with no record). Otherwise the slide is
+dropped (`sl_paste_dropped` counts it): stock locks always come first. Gate: both pastes keep
+every stock lock (fail on 939cbc42).

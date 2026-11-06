@@ -260,24 +260,30 @@ u32 sl_lock_get(const u8 *table, u32 t, u32 step, u32 k)
     return 0xFFFF;
 }
 
-/* set (VALUE <= 0x7fff) or clear (0xffff) a lock; -> 0 when no record is free */
-int sl_lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value)
+/* set (VALUE <= 0x7fff) or clear (0xffff) a lock; -> 0 when no record is free. A new record is
+ * taken only while more than RESERVE are free (v0.40 review: a paste leaves stock's locks still to
+ * come the records they need; stock's own allocation skips a lock when none is free). */
+static int lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value, u32 reserve)
 {
     if (!table || t >= NV || step > 127)
         return 0;
     u8 head = k ? SL_RAM_SLEN : SL_RAM_SLD;
     u8 *rec = 0, *free = 0;
-    for (u32 i = 0; i < RECS && !rec; i++) {
+    u32 nfree = 0;
+    for (u32 i = 0; i < RECS; i++) {
         u8 *r = table + REC * i;
         if (r[0] == head && r[1] == (SL_TAG | t))
             rec = r;
-        else if (!free && r[0] == 0xFF)
-            free = r;
+        else if (r[0] == 0xFF) {
+            if (!free)
+                free = r;
+            nfree++;
+        }
     }
     if (!rec) {
         if (value == 0xFFFF)
             return 1;
-        if (!free)
+        if (!free || nfree <= reserve)
             return 0;
         rec = free;
         for (u32 s = 0; s < 128; s++)
@@ -296,6 +302,11 @@ int sl_lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value)
         }
     }
     return 1;
+}
+
+int sl_lock_set(u8 *table, u32 t, u32 step, u32 k, u32 value)
+{
+    return lock_set(table, t, step, k, value, 0);
 }
 
 /* the lock-list builder 0x400d85e8(track, list, table, sound, step, ...): stock's, then the
@@ -387,7 +398,6 @@ int sl_ours_any(const u8 *table, u32 t)
  * trig gets with no lock (OFF, 1 step), and turning does nothing. */
 #define SET_PIXEL ((void (*)(void *, int, int, int))0x40113B90u)   /* (canvas, x, y, on) */
 #define TEXT ((void (*)(void *, u32, int, int, int, const char *, ...))0x4011545Cu)
-#define FONT 0x44507ED8u
 #define CENTRED 2
 #define APP ((u32 (*)(void))0x4018A97Au)
 #define TRACK_CTX ((u32 (*)(u32))0x4003EFDEu)
@@ -439,14 +449,35 @@ static int held(struct held *h)
     return 0;
 }
 
-static void box(void *c, int x0, int y0, int x1, int y1, int fill)
-{
-    for (int x = x0; x <= x1; x++)
-        for (int y = y0; y <= y1; y++) {
-            int edge = x == x0 || x == x1 || y == y0 || y == y1;
-            SET_PIXEL(c, x, y, fill ? 1 : edge);
-        }
-}
+/* v0.40 (owner, on v0.39's page: "match identically the toggle icon from RTRG above SLD ...
+ * SLEN should resemble the LEN box above"): each place is drawn as stock's cell routine
+ * 0x4006448a draws RTRG and LEN in theirs, through stock's own routines with stock's
+ * arguments (measured in the emulator, TRIG page 2: RTRG at (24, 27), LEN at (76, 27), PORT
+ * at (102, 0); canvas y up, the label at y, the widget from y + 7):
+ *
+ * - SLD: RTRG's widget, drawn by stock's widget routine 0x40036560 with RTRG's record (id
+ *   0x132; its toggle 0x400bc414 blits the sheet's frame value >> 8 at (x + 1, y + 11)), the
+ *   value 0 (OFF) or 0x100 (ON), as RTRG's own;
+ * - SLEN: LEN's box, as LEN's widget 0x400cc2b4 draws it (its font 0x40293c64, the text
+ *   centred at (x + 9, y + 13), the box (x, y + 7) .. (x + 18, y + 23)): our text, as LEN's
+ *   own table has no "1", "1.5" ... (its "1/8" is two steps);
+ * - the label as the cell routine draws it (0x40115668, font 0x40291760, centred at x + 9 on
+ *   a cleared "XXXX" width: x - 2 .. x + 20);
+ * - a lock (a trig's own value): stock's p-lock look, the widget's area inverted, 0x40114842
+ *   (x - 3, y + 6, x + 21, y + 24, -1), as the cell routine does for a locked parameter.
+ *
+ * The place is cleared first (stock's empty place shows a dotted frame there). */
+#define CELL_TEXT ((void (*)(void *, u32, int, int, int, int, u32, u32, const char *))0x40115668u)
+#define CELL_FONT 0x40291760u
+#define CELL_FMT_W 0x402170B9u                  /* "XXXX": the label's width */
+#define FMT_S 0x40219C2Du                       /* "%s" */
+#define FILL ((void (*)(void *, int, int, int, int, int))0x40114842u)   /* (c, x0, y0, x1, y1, mode) */
+#define WIDGET ((void (*)(void *, u32, u32, u32, void *, void *, int, int))0x40036560u)
+#define RTRG_ID 0x132u
+#define BOX_FONT_INIT ((void (*)(void *, u32))0x40115E6Cu)
+#define BOX_FONT_FREE ((void (*)(void *))0x40115CE8u)
+#define BOX_FONT 0x40293C64u
+#define RECT ((void (*)(void *, int, int, int, int, int))0x40114626u)    /* (c, x0, y0, x1, y1, 1) */
 
 static void clear(void *c, int x0, int y0, int x1, int y1)
 {
@@ -455,28 +486,31 @@ static void clear(void *c, int x0, int y0, int x1, int y1)
             SET_PIXEL(c, x, y, 0);
 }
 
-/* the switch, as RTRG's: a pill, the dot left (OFF) or right (ON); a lock fills it */
-static void draw_sld(void *c, int x, int y, int on, int locked)
+static void label(void *c, int x, int y, const char *name, int locked)
 {
-    clear(c, x, y, x + 23, y + 23);
-    box(c, x + 1, y + 11, x + 22, y + 21, locked);
-    int dx = on ? x + 14 : x + 4;
-    for (int i = 0; i < 6; i++)
-        for (int j = 0; j < 6; j++)
-            SET_PIXEL(c, dx + i, y + 13 + j, !locked);
-    if (on)
-        for (int i = x + 4; i < x + 13; i++)
-            SET_PIXEL(c, i, y + 16, !locked);
-    TEXT(c, FONT, x + 12, y + 1, CENTRED, "SLD");
+    CELL_TEXT(c, CELL_FONT, x + 9, y, 1, 0, CELL_FMT_W, FMT_S, name);
+    if (locked)
+        FILL(c, x - 3, y + 6, x + 21, y + 24, -1);
 }
 
-/* the length, as LEN's: its value in a box; a lock inverts it */
-static void draw_slen(void *c, int x, int y, u32 i, int locked)
+/* exported for the emulator check (scripts/emu_slides.py draws both on a canvas of its own,
+ * beside stock's RTRG and LEN drawn there by stock's routines) */
+void sl_draw_sld(void *c, int x, int y, int on, int locked)
 {
-    clear(c, x, y, x + 23, y + 23);
-    box(c, x, y + 9, x + 23, y + 23, locked);
-    TEXT(c, FONT, x + 12, y + 12, CENTRED | (locked ? 8 : 0), "%s", sl_len_text[i < SL_NLEN ? i : SL_LEN_DEFAULT]);
-    TEXT(c, FONT, x + 12, y + 1, CENTRED, "SLEN");
+    clear(c, x - 3, y, x + 21, y + 24);
+    WIDGET(0, RTRG_ID, on ? 0x100u : 0u, 0, 0, c, x, y + 7);
+    label(c, x, y, "SLD", locked);
+}
+
+void sl_draw_slen(void *c, int x, int y, u32 i, int locked)
+{
+    static u32 font[8] D;                       /* the font object (stock's: on its stack) */
+    clear(c, x - 3, y, x + 21, y + 24);
+    BOX_FONT_INIT(font, BOX_FONT);
+    TEXT(c, (u32)font, x + 9, y + 13, CENTRED, (const char *)FMT_S, sl_len_text[i < SL_NLEN ? i : SL_LEN_DEFAULT]);
+    BOX_FONT_FREE(font);
+    RECT(c, x, y + 7, x + 18, y + 23, 1);
+    label(c, x, y, "SLEN", locked);
 }
 
 void sl_cell(void *view, void *canvas, int x, int y, u32 id)
@@ -492,8 +526,8 @@ void sl_cell(void *view, void *canvas, int x, int y, u32 id)
         sld = sl_lock_get(h.table, h.track, h.first, 0);
         slen = sl_lock_get(h.table, h.track, h.first, 1);
     }
-    draw_sld(canvas, SL_X0, 0, sld == 1, sld != 0xFFFF);
-    draw_slen(canvas, SL_X0 + SL_COLW, 0, slen != 0xFFFF ? slen : SL_LEN_DEFAULT, slen != 0xFFFF);
+    sl_draw_sld(canvas, SL_X0, 0, sld == 1, sld != 0xFFFF);
+    sl_draw_slen(canvas, SL_X0 + SL_COLW, 0, slen != 0xFFFF ? slen : SL_LEN_DEFAULT, slen != 0xFFFF);
 }
 
 /* wr_screen (page.c), around each draw of the screen: PHASE 0 before, 1 after (COVERED: one
@@ -534,4 +568,149 @@ int sl_knob(u32 index, int delta)
     ((void (*)(void *, void *))((*(void ***)h.model)[4]))(h.model, 0);
     smp_overlay_dirty = 1;
     return 1;
+}
+
+/* ---- v0.40: copy and paste carry SLD/SLEN ----------------------------------------------
+ *
+ * v0.39's known issue: stock's copies match lock records by track, and ours are tagged
+ * (track | SL_TAG), so no copy took them, and the trig copy keeps its own slot/value list.
+ * The hooks (hooks.S) are the arp p-locks' sites and shapes (scripts/build_arp_plocks.py):
+ *
+ * - page and track paste (and their UNDO): the paste loops over the clipboard's records; one
+ *   of ours of the copied track is written onto the destination track here (sl_paste), as
+ *   stock writes its own. Stock cleared the destination's steps first through 0x4003d14e
+ *   (sl_clear: ours on those steps too), so the pasted steps' slides are the clipboard's,
+ *   exactly as their other locks, and the track's other steps keep theirs.
+ * - track clear (0x400e745c, FUNC + PLAY): it frees the track's records by their track byte;
+ *   the tag cleared there, ours go with them.
+ * - shift and page autocopy: the tag cleared in their track compare, so ours move with
+ *   their steps inside the record.
+ * - trig copy / paste: each copied trig's two values kept by its clipboard entry (sl_tclip),
+ *   written onto the step it is pasted on (cleared by stock just before).
+ * - v0.40 review: a paste takes a free record for ours only while more are free than stock's
+ *   locks still to come in the same paste need (lock_set's RESERVE), so a nearly full lock table
+ *   drops slides, never a stock lock.
+ * - pattern copy/paste: whole-pattern copies (122,478 bytes, the lock table inside) carry
+ *   our records as bytes. */
+static u8 *ctx_table(void *ctx)
+{
+    void *model = *(void **)((u8 *)ctx + 44);
+    if (!model)
+        return 0;
+    return (u8 *)((u32 (*)(void *))((*(void ***)model)[10]))(model);
+}
+
+u32 sl_pasted D;                                /* our values written by pastes (for the checks) */
+u32 sl_paste_dropped D;                         /* our values a paste left out: no record to spare */
+
+/* does stock's paste still need a new record for this clipboard record? (its loop: a record of the
+ * clipboard's track, slot byte not 0xff, and no record of that slot on the destination track in
+ * the index at +20640; 0x40053246 and its three siblings). Counted generously: a slot out of the
+ * index's range counts too. */
+static int stock_needs(const u8 *r, const u8 *table, int dt, u32 ct)
+{
+    if (r[0] == 0xFF || (s8)r[1] != (int)ct)
+        return 0;
+    if (r[0] > 100)
+        return 1;
+    return (s8)table[20640 + 101 * (u32)dt + r[0]] < 0;
+}
+
+int sl_paste(const u8 *rec, const u8 *vals, u8 *table, int first, int count, int dt, u32 ct,
+             const u8 *clip)
+{
+    int tb = (s8)rec[1];
+    if ((rec[0] != SL_RAM_SLD && rec[0] != SL_RAM_SLEN) || (rec[1] & 0xF0) != SL_TAG
+        || (u32)(rec[1] & 0x0F) != ct || dt < 0 || dt >= NV || !table || first < 0 || count < 0)
+        return tb;
+    /* v0.40 review: stock's loop takes the clipboard's records in order and allocates each
+     * destination record as it goes, skipping a lock when none is free; ours are written here,
+     * inside that loop, so the stock records after this one keep the free records they need */
+    u32 reserve = RECS;                         /* (no clipboard to read: never take a free one) */
+    if (clip && rec >= clip && (u32)(rec - clip) < REC * RECS) {
+        reserve = 0;
+        for (u32 j = (u32)(rec - clip) / REC + 1; j < RECS; j++)
+            reserve += (u32)stock_needs(clip + REC * j, table, dt, ct);
+    }
+    u32 k = rec[0] == SL_RAM_SLEN;
+    for (int i = 0; i < count && first + i < 128; i++) {
+        u32 v = *(const u16 *)(vals + 2 + 2 * i);
+        if (v == 0xFFFF)
+            continue;
+        if (lock_set(table, (u32)dt, (u32)(first + i), k, v, reserve))
+            sl_pasted++;
+        else
+            sl_paste_dropped++;
+    }
+    return -2;
+}
+
+#define TCLIP 128
+u32 sl_tclip[TCLIP] D = {[0 ... TCLIP - 1] = 0xFFFFFFFFu};                          /* a copied trig's SLEN << 16 | SLD (0xffff none) */
+
+void sl_tcopy(u32 off, void *ctx, u32 step)
+{
+    u32 e = off / 72u;
+    if (e >= TCLIP)
+        return;
+    sl_tclip[e] = 0xFFFFFFFFu;
+    u8 *table = ctx ? ctx_table(ctx) : 0;
+    u32 t = ctx ? *(u32 *)((u8 *)ctx + 60) : NV;
+    if (!table || t >= NV || step > 127)
+        return;
+    sl_tclip[e] = sl_lock_get(table, t, step, 0) | sl_lock_get(table, t, step, 1) << 16;
+}
+
+/* the records stock's trig paste still needs (v0.40 review): entries E.. of the clipboard's
+ * vector (VEC: its entries from +4 to +8, 72 bytes each; an entry's locks from +48 to +52, 8 bytes
+ * each, {value, slot}, written by 0x4003ceee after this hook), each slot of track T with no record
+ * in the index counted once. Anything out of shape: RECS (no free record taken). */
+static u32 tstock_needs(const u8 *vec, u32 e, const u8 *table, u32 t)
+{
+    if (!vec)
+        return RECS;
+    const u8 *b = *(const u8 *const *)(vec + 4), *end = *(const u8 *const *)(vec + 8);
+    if (!b || end < b || (u32)(end - b) > 72u * 4096u)
+        return RECS;
+    u32 seen[4], n = 0;
+    seen[0] = seen[1] = seen[2] = seen[3] = 0;
+    for (const u8 *en = b + 72u * e; en + 72 <= end; en += 72) {
+        const u8 *p = *(const u8 *const *)(en + 48), *q = *(const u8 *const *)(en + 52);
+        if (!p || q < p || (u32)(q - p) > 8u * 4096u)
+            return RECS;
+        for (; p + 8 <= q; p += 8) {
+            u32 slot = *(const u32 *)(p + 4);
+            if (slot > 100 || (s8)table[20640 + 101 * t + slot] >= 0)
+                continue;                       /* stock's setter refuses it, or has a record */
+            if (!((seen[slot >> 5] >> (slot & 31)) & 1)) {
+                seen[slot >> 5] |= 1u << (slot & 31);
+                n++;
+            }
+        }
+    }
+    return n;
+}
+
+void sl_tpaste(u32 off, void *ctx, u32 step, const u8 *vec)
+{
+    u32 e = off / 72u;
+    if (e >= TCLIP || !ctx || step > 127)
+        return;
+    u8 *table = ctx_table(ctx);
+    u32 t = *(u32 *)((u8 *)ctx + 60);
+    if (!table || t >= NV)
+        return;
+    u32 c = sl_tclip[e];
+    if (c == 0xFFFFFFFFu)
+        return;
+    u32 reserve = tstock_needs(vec, e, table, t);
+    for (u32 k = 0; k < 2; k++) {
+        u32 v = (c >> (16 * k)) & 0xFFFF;
+        if (v == 0xFFFF)
+            continue;
+        if (lock_set(table, t, step, k, v, reserve))
+            sl_pasted++;
+        else
+            sl_paste_dropped++;
+    }
 }

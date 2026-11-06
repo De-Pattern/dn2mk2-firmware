@@ -83,7 +83,7 @@ _Static_assert(SMP_MIRROR_BYTES >= 0x10000u + 3u * 0x10000u, "the stages fit in 
 #define TDM_TX(h) ((volatile u32 *)(0x4E6E0100u + ((u32)(h) << 11)))
 #define TDM_RX(h) ((volatile u32 *)(0x4E6DF100u + ((u32)(h) << 11)))
 
-#define PROTO 6                                 /* v0.35: DROP (26); v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
+#define PROTO 7                                 /* v0.40: FOLDER IN (30), TREE (31): folders in folders; v0.35: DROP (26); v0.31: the library (16..23); v0.22: 400 MB, the recordings' area a hole */
 #define BLK_READ  ((int (*)(u32, u32, void *))0x4012C59Au)          /* (sector, bytes, buf) -> 0 ok */
 #define BLK_WRITE ((int (*)(u32, u32, const void *))0x4012C780u)
 #define BLK_READY (*(volatile u32 *)0x4461B68Cu)                    /* the device is up */
@@ -133,7 +133,10 @@ _Static_assert(0x50000u + SLAREA_BYTES <= 0x68000u && 0x68000u + 4u * ENV_MAX <=
 _Static_assert(SLICE_AREA + SLAREA_BYTES <= REC_END && SLICE_AREA % 512u == 0, "the slice area");
 
 static u8 rq[RQ_MAX] __attribute__((section(".data")));
-static u8 rp[96] __attribute__((section(".data")));
+/* v0.40: the longest reply, LIST's four entries, is 132 bytes (4 + 4 + 4 x 31): rp was 96 and
+ * LIST ran on into rq (read before, so harmless, but never meant). Packed, 132 fits TX_MAX */
+static u8 rp[132] __attribute__((section(".data")));
+_Static_assert(6u + 132u + (132u + 6u) / 7u + 1u <= TX_MAX, "the longest reply packs into tx");
 static u8 tx[TX_MAX] __attribute__((section(".data")));
 static u32 hdr[128] __attribute__((section(".data"), aligned(16)));   /* one sector */
 int smp_booted __attribute__((section(".data"))) = 0;
@@ -241,6 +244,21 @@ volatile u32 smp_periods __attribute__((section(".data"))) = 0;   /* smp_tdm's c
  * fraction of the sample x POS_ONE), and when (periods) */
 volatile u16 smp_pos[16] __attribute__((section(".data"))) = {0};
 volatile u32 smp_pos_at __attribute__((section(".data"))) = 0;
+/* v0.40: when each voice's note began (periods): its position appeared, or jumped (a new
+ * note on the same voice), as the DSP's packets show it */
+volatile u32 smp_pos_born[16] __attribute__((section(".data"))) = {0};
+#define POS_JUMP (POS_ONE / 8u)                 /* more than any packet's advance: a new note */
+
+void smp_pos_in(const volatile u16 *p)          /* the 16 voices' positions of a DSP packet */
+{
+    for (int t = 0; t < 16; t++) {
+        u32 nv = p[t], ov = smp_pos[t];
+        if (nv != POS_NONE && (ov == POS_NONE || (nv > ov ? nv - ov : ov - nv) > POS_JUMP))
+            smp_pos_born[t] = periods;
+        smp_pos[t] = (u16)nv;
+    }
+    smp_pos_at = periods;
+}
 /* v0.30: when the DSP's frame guard last left each slot silent (periods, 0 never): the
  * PERC and Monomachine pages show CPU, in place of the tempo, while any is recent (a user: VO-6 went silent after a
  * second -- this tells a DSP-time skip from anything else) */
@@ -250,7 +268,7 @@ int smp_skipped(int t)                          /* skipped within the last half 
 {
     if (t < 0 || t > 15 || !smp_skip_at[t])
         return 0;
-    return periods - smp_skip_at[t] < 750u;
+    return (int)(periods - smp_skip_at[t]) < 750;   /* v0.40 review: signed (the stamp is | 1) */
 }
 
 /* v0.32: the DSP's load, the peak of the last half second, from the idle packets (unit 18,
@@ -272,12 +290,12 @@ static u32 scan_seq __attribute__((section(".data"))) = 0;           /* the last
 
 int smp_blown_recent(void)                      /* the last two seconds */
 {
-    return smp_blown_at && periods - smp_blown_at < 3000u;
+    return smp_blown_at && (int)(periods - smp_blown_at) < 3000;   /* v0.40 review: signed */
 }
 
 int smp_dsp_load(void)
 {
-    if (!smp_load_seen || periods - smp_load_seen > 1500u)
+    if (!smp_load_seen || (int)(periods - smp_load_seen) > 1500)  /* v0.40 review: signed */
         return -1;
     return (int)((smp_load_peak + 5u) / 10u);      /* percent */
 }
@@ -297,20 +315,26 @@ int smp_skipped_any(void)                       /* any voice, within the last ha
  * ColdFire's slot -> track table 0x80005308, which the frame builder sends as the DSP's
  * routing). v0.25..v0.29 drew voice t's position for track t: right only while voice t
  * played track t (the owner: the playing-slice marker lagged the sound). Now the voices
- * the table gives to track t, the playing one nearest its start (the newest note); none
- * there: voice t's, as before. */
+ * the table gives to track t, the newest note's; none there: voice t's, as before.
+ * v0.40 (owner: "the slice machine's on-screen indicators are a little slow to catch up"):
+ * v0.30..v0.39 took the voice whose position was LOWEST as the newest note's: on SLICE, a
+ * slice later in the sample played after an earlier one (still sounding on its voice, its
+ * release) was not shown until the earlier one ended. Now the voice whose note began last
+ * (smp_pos_born), the lowest position only between notes begun in the same period. */
 #define SLOT_TRACK ((volatile u32 *)0x80005308u)
 int smp_playhead(int t)
 {
     if (t < 0 || t > 15 || periods - smp_pos_at > 64u)
         return -1;
-    u32 best = POS_NONE;
+    u32 best = POS_NONE, age = 0;
     for (int v = 0; v < 16; v++) {
-        u32 tr = SLOT_TRACK[v], pos = smp_pos[v];
+        u32 tr = SLOT_TRACK[v], pos = smp_pos[v], a = periods - smp_pos_born[v];
         if (tr != (u32)t || pos == POS_NONE)
             continue;
-        if (best == POS_NONE || pos < best)
+        if (best == POS_NONE || a < age || (a == age && pos < best)) {
             best = pos;
+            age = a;
+        }
     }
     if (best == POS_NONE)
         best = smp_pos[t];
@@ -409,9 +433,7 @@ void smp_tdm(u32 h)
     if ((u16)sum != v[63])
         return;
     if (v[0] == POS_MAGIC) {                    /* v0.25: idle, the voices' play positions */
-        for (int t = 0; t < 16; t++)
-            smp_pos[t] = v[1 + t];
-        smp_pos_at = periods;
+        smp_pos_in(v + 1);
         for (int t = 0; t < 16; t++)            /* v0.30: the slots the DSP's guard skipped */
             if (v[17] >> t & 1u)
                 smp_skip_at[t] = periods | 1u;
@@ -1360,9 +1382,16 @@ static void peak_add(u32 off, u32 bytes, const u8 *buf)
  * NORM_PEAK), in the +Drive's copy, a chunk a pass; then the loader's own path (read,
  * sent, checked) gives the DSP the same frames */
 /* v0.30: to -6 dB, and by at most +24 dB (a user, and the owner: "incredibly loud" -- full
- * scale sat far above the DN2's own machines, and a quiet take's noise came up with it) */
-#define NORM_PEAK 16384u
-#define NORM_MAX_GAIN 16u
+ * scale sat far above the DN2's own machines, and a quiet take's noise came up with it).
+ * v0.41 (the owner: a resampled take came out ~6 dB under what was played, "just record and
+ * normalize like the DT2 does"): to full scale, the take's peak to 32,767, as the DT2, the
+ * Octatrack and the Digitakt do right after a recording -- ANY take that is not all zero,
+ * however quiet (the owner: recording silence and normalising it gives a noise source to
+ * ping filters and FX with, as on those). No gain cap and no floor; a take of exact zeros
+ * stays zero, one already at full scale is untouched. The one guardrail: never clip. The
+ * gain is (32,767 << 16) / peak, floored, so the peak lands on 32,767 at most (a peak of 1:
+ * x32,767; v * gi stays within int16 since |v| <= peak) */
+#define NORM_PEAK 32767u
 static void norm_chunk(void)
 {
     u32 lo = REC_OFFSET + s_place, hi = lo + s_frames * 2u;
@@ -1376,8 +1405,6 @@ static void norm_chunk(void)
         return;
     }
     u32 g = (NORM_PEAK << 16) / s_peak;               /* the gain, 16 fractional bits */
-    if (g > (NORM_MAX_GAIN << 16))
-        g = NORM_MAX_GAIN << 16;
     int gi = (int)(g >> 16), gf = (int)(g & 0xFFFFu);
     u32 a = lo > s_off ? lo : s_off, e = hi < s_off + n ? hi : s_off + n;
     for (u32 x = a & ~1u; x + 1 < e; x += 2) {
@@ -1510,7 +1537,7 @@ static void save_poll(void)
             smp_hi = bytes;
             smp_pl_changed();                                /* v0.38: into the project's list */
             smp_head_due = 1;                                /* v0.38: and the count to the DSP */
-            if (s_peak >= 64u && s_peak < NORM_PEAK - 64u) {   /* quieter than full: normalised */
+            if (s_peak > 0u && s_peak < NORM_PEAK) {     /* not all zero, under full scale: normalised (v0.41) */
                 s_off = (REC_OFFSET + s_place) & ~511u;
                 sstate = 3;
                 return;
@@ -1619,6 +1646,8 @@ static int an_slot __attribute__((section(".data"))) = -1;
 #define D_ __attribute__((section(".data")))
 static u32 an_lo D_ = 0, an_hi D_ = 0, an_at D_ = 0;           /* bytes into the image */
 static u32 an_hop D_ = 64, an_n D_ = 0, an_acc D_ = 0, an_cnt D_ = 0;   /* frames a step; steps */
+static int an_tries D_ = 0;                                      /* v0.40: the chunk's refused reads */
+#define AN_TRIES 8
 
 /* slot K's frames and whether its frames are int16 (all that dn2samples and the recorder make) */
 u32 smp_slot_frames(int k, int *i16)
@@ -1647,10 +1676,40 @@ int smp_analyse(int k)
     an_n = 0;
     an_acc = 0;
     an_cnt = 0;
+    an_tries = 0;
     for (u32 j = 0; j < HIRES_W; j++)
         HIRES[j] = 0;
     an_state = 1;
     return 0;
+}
+
+/* v0.40 (a user: EDIT SLICE POINTS and CREATE SLICE GRID "sometimes return CANNOT READ IT;
+ * repeatedly selecting eventually works"): the slice menus' start of the read. smp_analyse
+ * refuses while any read runs, and the recorder's TRIM starts one on every saved take (rec.c),
+ * 64 KB a UI pass: a long take's ran on for seconds after the recorder closed, and every
+ * slice menu opened meanwhile said CANNOT READ IT. Here the menu's read comes first: another
+ * slot's is dropped (TRIM falls back to its overview), the same slot's is kept. And it waits,
+ * not fails, while the slot cannot be read yet: a pool switch under way, the +Drive not up,
+ * the slot's take still being saved or normalised (its frames on the +Drive not yet final),
+ * LOAD TO PROJECT still copying into it. -> 0 started (or running for K), 1 not now, -1 never
+ * (no int16 sample there, no store) */
+static int lp_into(int k);
+int smp_analyse_ui(int k)
+{
+    if (smp_pl_busy() || !BLK_READY)
+        return 1;
+    if (k < 0 || k >= POOL_SLOTS)
+        return -1;
+    if ((sstate && s_slot == (u32)k) || lp_into(k))
+        return 1;
+    int i16;
+    if (!smp_slot_frames(k, &i16) || !i16 || !store_ok())
+        return -1;
+    if (an_state == 1 && an_slot == k)
+        return 0;
+    if (an_state == 1)
+        an_state = 0;
+    return smp_analyse(k) == 0 ? 0 : -1;
 }
 
 int smp_analysis(int *pct)
@@ -1677,9 +1736,12 @@ static void analyse_poll(void)
         n = CHUNK;
     n = (n + 511u) & ~511u;
     if (image_read(an_at, n, STAGE(3)) != 0) {
+        if (++an_tries < AN_TRIES)              /* v0.40: a refused read is tried again, the */
+            return;                             /* next passes; AN_TRIES refusals in a row: failed */
         an_state = -1;
         return;
     }
+    an_tries = 0;
     u32 frames = (an_hi - an_lo) / 2u;
     for (u32 x = an_at; x < an_at + n; x += 2) {
         if (x < an_lo || x + 1 >= an_hi)
@@ -1874,6 +1936,7 @@ static short lp_q[LPQ] __attribute__((section(".data")));
 static u32 lp_head __attribute__((section(".data"))) = 0, lp_tail __attribute__((section(".data"))) = 0;
 static int lp_k __attribute__((section(".data"))) = -1;      /* the library entry being copied */
 static int lp_slot __attribute__((section(".data"))) = -1;
+static int lp_into(int k) { return lp_k >= 0 && lp_slot == k; }   /* v0.40: LOAD TO PROJECT copying into K */
 static u32 lp_off __attribute__((section(".data"))) = 0, lp_bytes __attribute__((section(".data"))) = 0;
 static u32 lp_at __attribute__((section(".data"))) = 0;
 int smp_lp_done __attribute__((section(".data"))) = 0;       /* loaded since the browser asked */
@@ -2536,7 +2599,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         for (u32 c = 0; c < 8; c++)
             rp[r++] = dir_ok && k < POOL_SLOTS ? NAME(k)[c] : 0;
         put32(rp + r, SMP_POOL_DDR); r += 4;
-    } else if ((cmd >= 16 && cmd <= 23) || cmd == 26) {        /* v0.31 (link 5): the +Drive's library (lib.c) */
+    } else if ((cmd >= 16 && cmd <= 23) || cmd == 26 || cmd == 30 || cmd == 31) {   /* v0.31 (link 5): the +Drive's library (lib.c); v0.40 30, 31 */
         extern u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st);
         r = smp_lib_rx(cmd, rq, n, rp, r, &rp[3]);
     } else if (cmd == 28) {                     /* v0.39: ERASE MOD DATA, "ERASE" -> started at the */
@@ -2557,7 +2620,7 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
         put32(rp + r, smp_blown_info); r += 4;
         put32(rp + r, smp_blown_where); r += 4;
         put32(rp + r, smp_blown_mask); r += 4;
-        put32(rp + r, smp_blown_at ? periods - smp_blown_at : 0xFFFFFFFFu); r += 4;
+        put32(rp + r, smp_blown_at ? ((int)(periods - smp_blown_at) < 0 ? 0u : periods - smp_blown_at) : 0xFFFFFFFFu); r += 4;
         put32(rp + r, (u32)smp_dsp_load()); r += 4;
         put32(rp + r, smp_load_peak); r += 4;
         u32 sk = 0;
@@ -2600,9 +2663,21 @@ void smp_rx(const u8 *msg, u32 len, u32 source)
  * Here, after the stock apply, a sample machine's modulated SAMP is moved by the same
  * number of steps through the slots that hold something, from the one SAMP is set to
  * (wrapping round them), as the DT2's project slots, which hold only loaded samples. An
- * unmodulated SAMP, and every other parameter and machine, are left as stock wrote them. */
+ * unmodulated SAMP, and every other parameter and machine, are left as stock wrote them.
+ *
+ * v0.40 (a user on v0.39: "the p-locked trig doesn't play the sample you lock it to ... it
+ * changes when you move the default track SAMP value, so the p-lock seems relative"): what
+ * the voice is set to is its TARGET cell (the smoother's source, 0x80003af0, the same
+ * layout as the mirror; docs/slides.md), which holds the sound's value or the trig's p-lock
+ * (stock's lock applier 0x400db092 writes it, and jumps the smoother there). v0.25..v0.39
+ * took the sound's own SAMP (and SLCE) instead, so a lock was a "modulation" of lock - SAMP,
+ * scaled by mod_scale to n/128 of it over the n loaded samples and counted from the track's
+ * SAMP: about one sample per 5 or 6 lock values with 20-odd loaded, moving with the track's
+ * SAMP. Now the modulation is what the stock apply added on top of the target, and it steps
+ * from the target: a locked trig plays its slot (or slice) exactly. */
 #define MOD_APPLY ((void (*)(void *))0x400DB22Cu)
 #define MIRROR_CELL(b, s) ((volatile u16 *)(0x800068E4u + 34u + 202u * (u32)(b) + 2u * (u32)(s)))
+#define TARGET_CELL(b, s) ((volatile u16 *)(0x80003AF0u + 34u + 202u * (u32)(b) + 2u * (u32)(s)))
 #define VOICE_SOUND(b) (*(u8 *volatile *)(0x800052A8u + 4u * (u32)(b)))
 #define SAMP_SLOT 43                            /* SAMP's frame slot (sound + 20 + 2 x 43) */
 /* the only cell written, block 0's lowest of them, lies past the frame (CTL_FRAME, 2,748
@@ -2641,7 +2716,7 @@ void smp_mod_apply(void *mirror)
         u8 *snd = VOICE_SOUND(b);
         if (!snd || snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
             continue;                           /* not a sample machine */
-        u32 set = snd[20 + 2 * SAMP_SLOT];      /* the high byte: the value, 0 OFF, k: slot k - 1 */
+        u32 set = *TARGET_CELL(b, SAMP_SLOT) >> 8;   /* the sound's or the lock's: 0 OFF, k: slot k - 1 */
         volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
         int heard = *cell >> 8;
         int k = heard - (int)set;
@@ -2670,7 +2745,7 @@ void smp_mod_apply(void *mirror)
         }
         if (snd[SOUND_TYPE] != SLICE_TYPE)
             continue;
-        u32 sset = snd[20 + 2 * SLCE_SLOT];     /* 0..127: slice (value >> 1), 0 NOTE */
+        u32 sset = *TARGET_CELL(b, SLCE_SLOT) >> 8;  /* the sound's or the lock's: slice (value >> 1), 0 NOTE */
         volatile u16 *scell = MIRROR_CELL(b, SLCE_SLOT);
         int sk = (int)(*scell >> 8) - (int)sset;
         int slot = (int)(*cell >> 8) - 1;       /* the sample it plays, after the above */

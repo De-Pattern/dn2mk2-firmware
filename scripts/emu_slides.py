@@ -66,6 +66,142 @@ def idx(v, s):
     return 17 + 101 * v + s
 
 
+# ---- v0.40: a p-lock on a sample machine's SAMP (and SLICE's SLCE) ---------------------------
+# A user on v0.39: "The p-locked trig doesn't play the sample you lock it to, but it does seem
+# to play a different sample if you move the sample number 5 or 6 values higher or lower. It
+# also changes the p-locked trig's sample when you move the default track SAMP value."
+# smp_mod_apply (link.c, run by the frame ISR after the stock modulation apply) took any
+# difference between the voice's mirror and the SOUND's SAMP for modulation and scaled it over
+# the loaded samples, from the sound's SAMP: a lock became a scaled offset. Here the trigs are
+# stock's own lock builder and applier, every frame the real ISR (smp_mod_apply at its site),
+# and the SAMP / SLCE word the frame carries for the voice is played through the DSP's model
+# (dnfw.sampler.live, held to the assembled code by the SHARC runner): it must play exactly
+# what SAMP N (SLCE N) set on the track plays, whatever the track's own value is.
+SAMP_SLOT, SLCE_SLOT, SOUND_TYPE_AT = 43, 44, 222
+CF_FRAME = 0x80005E60
+LFO_DESTS = (4, 12, 20)                     # LFO1..3 DEST (docs/fx-master-modulation.md 4c)
+N_LOADED = 24                               # the user's "5 or 6 values": 128 / 24 = 5.3
+
+
+def samp_lock_checks(machine, call, frame, trig, table, snd, lay, put16, put32):
+    sys.path.insert(0, str(HERE.parent / "src"))
+    from dnfw.sampler import live as SL                    # noqa: PLC0415
+    from dnfw.sampler import machines as SMx               # noqa: PLC0415
+    V = 0
+    saved = {a: machine.read(a, n) for a, n in ((snd + SOUND_TYPE_AT, 1), (snd + 20 + 2 * SAMP_SLOT, 4),
+                                                *((snd + 20 + 2 * d, 2) for d in LFO_DESTS))}
+    dir_ok_was = machine.read(lay["smp_dir_ok"], 4)
+
+    # the pool as link.c's directory holds it (24 loaded slots, slot 2 with 16 slices), and the
+    # same pool for the DSP's model: slot k a level of its own, slot 2 a ramp cut in 16
+    n_sl, sl_len = 16, 256
+    ramp = [k / (n_sl * sl_len) for k in range(n_sl * sl_len)]
+    samples = [[(k + 1) / 32.0] * 3000 for k in range(N_LOADED)]
+    samples[2] = ramp
+    slices = [()] * N_LOADED
+    slices[2] = tuple((sl_len * j, sl_len * (j + 1), sl_len * j) for j in range(n_sl))
+    pool = SL.pool_bytes(samples, 0x84000000, [1.0] * N_LOADED, [0] * N_LOADED, None, slices)
+    machine.write(SMx.MIRROR, pool[:SMx.DATA_OFFSET])
+    put32(lay["smp_dir_ok"], 1)
+
+    def model(mtype, recs):
+        h = SL.Harness(0, samples=samples, rates=[1.0] * N_LOADED, fmts=[0] * N_LOADED, slices=slices)
+        h.defaults()
+        for r, v in recs.items():
+            h.set(r, v)
+        out = []
+        for b in range(8):
+            out += h.block(mtype, 60.0, b == 1)
+        return [round(x, 6) for x in out]
+
+    def heard(slot):
+        """the voice's word for SLOT: the mirror the frame is built from, and the frame's"""
+        return machine.word(OUT + 2 * idx(V, slot)), machine.word(CF_FRAME + 218 + 146 * V + 2 * (slot - 25))
+
+    def play(step, frames_now, slot):
+        trig(step, frames_now)
+        ok = all(frame() for _ in range(4))
+        return ok, heard(slot)
+
+    def lock(slot, step, value):                # a stock p-lock, in a record of its own (the
+        rec = next(i for i in range(RECS)       # SLIDE locks above hold records of ours)
+                   if machine.read(table + REC * i, 2) == b"\xff\xff")
+        machine.write(table + REC * rec, bytes([slot, 0]) + b"\xff\xff" * 128)
+        machine.write(table + INDEX + slot, bytes([rec]))
+        put16(table + REC * rec + 2 + 2 * step, value)
+
+    def set_track(slot, value):                 # the track's knob, turned a while before the trig:
+        put16(snd + 20 + 2 * slot, value << 8)  # the sound, the voice's target, and the smoother
+        put16(SRC + 2 * idx(V, slot), value << 8)       # settled on it
+        put32(STATE + 4 * idx(V, slot), value << 24)
+
+    f0 = machine.long(FRAMES) + 5000
+    # ---- ONESHOT on SAMP 2; step 1 locked to SAMP 10, step 2 not locked ----------------
+    machine.write(snd + SOUND_TYPE_AT, bytes([SMx.TYPE_OF["ONESHOT"]]))
+    put32(VSOUND + 4 * V, snd)
+    for d in LFO_DESTS:                         # the snapshot sound's LFOs off (stock applies them
+        set_track(d, 0)                         # after smp_mod_apply, on top of the frame's word)
+    set_track(SAMP_SLOT, 2)
+    lock(SAMP_SLOT, 1, 10 << 8)
+    ONE = SMx.TYPE_OF["ONESHOT"]
+    want = {n: model(ONE, {SMx.SAMP_REC: n}) for n in (2, 5, 10)}
+    check("v0.40 SAMP lock: the model's slots differ (the check can tell them apart)",
+          len({tuple(v) for v in want.values()}) == 3)
+    rows = {}
+    for tag, step, track_samp, n in (("locked", 1, 2, 10), ("unlocked", 2, 2, 2),
+                                     ("locked, track SAMP 5", 1, 5, 10), ("unlocked, track SAMP 5", 2, 5, 5)):
+        set_track(SAMP_SLOT, track_samp)
+        f0 += 100
+        ok, (out, fr) = play(step, f0, SAMP_SLOT)
+        plays = model(ONE, {SMx.SAMP_REC: fr >> 8})
+        rows[tag] = {"mirror": hex(out), "frame": hex(fr)}
+        check(f"v0.40 SAMP lock: {tag} trig (track SAMP {track_samp}) plays SAMP {n}",
+              ok and out == fr == n << 8 and plays == want[n],
+              f"mirror {out:#06x}, frame {fr:#06x}, want {n << 8:#06x}")
+    report["samp_lock"] = rows
+
+    # ---- modulation still steps through the loaded slots, now from the lock -------------
+    # (the stock apply's offset +43 at full scale: mod_scale(43, 24) = 8 loaded slots on)
+    set_track(SAMP_SLOT, 2)
+    trig(1, f0 + 100)
+    frame()
+    put16(OUT + 2 * idx(V, SAMP_SLOT), (10 + 43) << 8)
+    call(lay["smp_mod_apply"], OUT)
+    m = machine.word(OUT + 2 * idx(V, SAMP_SLOT))
+    check("v0.40 SAMP lock: modulation on a locked trig steps through the loaded slots from the lock",
+          m == 18 << 8, f"{m:#06x}, want {18 << 8:#06x} (from the track's SAMP 2 it would be 0x0c00)")
+
+    # ---- SLICE on SAMP 3 (the ramp's 16 slices), SLCE slice 2; step 3 locked to slice 7 ---
+    SLC = SMx.TYPE_OF["SLICE"]
+    machine.write(snd + SOUND_TYPE_AT, bytes([SLC]))
+    set_track(SAMP_SLOT, 3)
+    set_track(SLCE_SLOT, 4)
+    lock(SLCE_SLOT, 3, 14 << 8)
+    swant = {sl: model(SLC, {SMx.SAMP_REC: 3, SMx.SLICE_REC: 2 * sl}) for sl in (2, 5, 7)}
+    check("v0.40 SLCE lock: the model's slices differ", len({tuple(v) for v in swant.values()}) == 3)
+    srows = {}
+    for tag, step, track_sl, sl in (("locked", 3, 2, 7), ("unlocked", 2, 2, 2),
+                                    ("locked, track slice 5", 3, 5, 7), ("unlocked, track slice 5", 2, 5, 5)):
+        set_track(SLCE_SLOT, 2 * track_sl)
+        f0 += 100
+        ok, (out, fr) = play(step, f0 + 200, SLCE_SLOT)
+        plays = model(SLC, {SMx.SAMP_REC: 3, SMx.SLICE_REC: fr >> 8})
+        srows[tag] = {"mirror": hex(out), "frame": hex(fr)}
+        check(f"v0.40 SLCE lock: {tag} trig (track slice {track_sl}) plays slice {sl}",
+              ok and out == fr == (2 * sl) << 8 and plays == swant[sl],
+              f"mirror {out:#06x}, frame {fr:#06x}, want {(2 * sl) << 8:#06x}")
+    report["slce_lock"] = srows
+
+    # ---- put everything back for what follows ------------------------------------------
+    for a_, b_ in saved.items():
+        machine.write(a_, b_)
+    machine.write(lay["smp_dir_ok"], dir_ok_was)
+    machine.write(SMx.MIRROR, bytes(SMx.DATA_OFFSET))
+    call(SYNC, snd, V)
+    for s in range(101):
+        put32(STATE + 4 * idx(V, s), machine.word(SRC + 2 * idx(V, s)) << 16)
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--build", required=True)
@@ -470,6 +606,8 @@ def main() -> int:
               r["D0"] == 0x12345678 and r["A4"] == 3 and r["D2"] == 3 and r["D3"] == 5 and r["A0"] == rec
               and r["D4"] == 0x44 and r["A2"] == 0xA2 and r["A5"] == 0xA5)
 
+        samp_lock_checks(machine, call, frame, trig, table, snd, lay, put16, put32)
+
     # ---- the stored form of a stock pattern loads the same here as on stock ----------------
     plain = machine.alloc(TABLE_BYTES)
     machine.write(plain, b"\xff" * (REC * RECS))
@@ -501,6 +639,19 @@ def main() -> int:
     else:
         report["stock_skips_ours"] = rec5 == b"\xff\xff"
 
+    # ---- v0.40: TRIG page 2's frame on stock 1.11 (the control: our two places aside, the
+    # build's page must be stock's pixel for pixel) ----------------------------------------
+    if not build:
+        from emulib.panel import Panel                         # noqa: PLC0415
+        panel = Panel(machine, png_dir=a.png_dir or str(pathlib.Path(a.json or ".").parent / "slides-stock-png"))
+        panel.settle(5_000_000)
+        panel.tap((0, 0))
+        panel.settle(20_000_000)
+        panel.tap((0, 0))
+        panel.settle(20_000_000)
+        report["trig2_frame"] = bytes(panel.capture.frames[-1]).hex() if panel.capture.frames else None
+        panel.screen("stock_trig2_idle")
+
     # ---- the TRIG page, driven as a person would (the build only, last: it changes the UI) ---
     if build and a.png_dir:
         from emulib.panel import Panel                         # noqa: PLC0415
@@ -528,6 +679,100 @@ def main() -> int:
                 if h == bytes([head, 0x20 | t]):
                     return machine.word(tbl + REC * i + 2 + 2 * step)
             return 0xFFFF
+        # v0.40 (owner: "match identically the toggle icon from RTRG above SLD ... SLEN should
+        # resemble the LEN box above"): SLD and SLEN drawn by sl_draw_sld / sl_draw_slen on a
+        # canvas of our own, against stock's own cell routine 0x4006448a drawing RTRG and LEN
+        # (its view and cell taken from its own draw of this page) on another, pixel for pixel
+        # in the widget's area (x - 3 .. x + 21, y + 5 .. y + 24: the label's text differs);
+        # off and on, unlocked and locked (stock's p-lock look); SLEN against LEN where LEN's
+        # text is the same ("1/8", "1/4", "1/2": LEN 30, 46, 62), and for every SLEN value its
+        # box and its text's centre as LEN's. Then the page itself: our places as drawn there,
+        # everything else stock's page, pixel for pixel
+        CELL, RTRG_ID, LEN_ID = 0x4006448A, 0x132, 0x134
+        seen_cell = {}
+
+        def cell_hook(uc_, ad, sz, us):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            args = [machine.long(sp + 4 + 4 * i) for i in range(12)]
+            if args[4] in (RTRG_ID, LEN_ID) and args[4] not in seen_cell:
+                seen_cell[args[4]] = args
+                seen_cell.setdefault("canvas", bytes(machine.read(args[1], 0x40)))   # (on the UI's stack)
+        hcell = uc.hook_add(UC_HOOK_CODE, cell_hook, begin=CELL, end=CELL)
+        SCR = STACK_TOP + 0x1000
+
+        def canvas_pixels(cv):
+            w, h, stride, buf = (machine.long(cv + 4), machine.long(cv + 8), machine.long(cv + 12),
+                                 machine.long(cv + 16))
+            raw = machine.read(buf, 4 * stride * w)
+            words = struct.unpack(f">{stride * w}I", raw)
+            return {(x, y) for x in range(w) for y in range(h)
+                    if (words[x * stride + (y >> 5)] >> (31 - (y & 31))) & 1}
+
+        def scratch(n):
+            """a canvas as the page's (its header copied), its own cleared pixels"""
+            head = seen_cell["canvas"]
+            cv, buf = SCR + 0x800 * n, SCR + 0x800 * n + 0x100
+            machine.write(cv, head)
+            w, stride = struct.unpack(">I", head[4:8])[0], struct.unpack(">I", head[12:16])[0]
+            if not (0 < w <= 256 and 0 < stride <= 8):
+                raise SystemExit(f"the page's canvas header is not a bitmap: {head.hex()}")
+            machine.write(cv + 16, struct.pack(">I", buf))
+            machine.write(buf, bytes(4 * stride * w))
+            return cv
+
+        def area(px, x, y, dy=0):
+            return {(i - x, j - y) for i, j in px if x - 3 <= i <= x + 21 and y + 5 <= j <= y + 24 + dy}
+
+        def ours(kind, v, locked, x=24, y=0):
+            cv = scratch(1)
+            sym = lay["sl_draw_sld"] if kind == "sld" else lay["sl_draw_slen"]
+            call(sym, cv, x, y, v, locked)
+            return canvas_pixels(cv)
+
+        def stocks(cid, value, locked, x=24, y=0):
+            cv = scratch(2)
+            a_ = list(seen_cell[cid])
+            a_[1], a_[2], a_[3], a_[5], a_[7] = cv, x, y, value, locked
+            call(CELL, *a_)
+            return canvas_pixels(cv)
+
+        def widgets_check(frame):
+            if RTRG_ID not in seen_cell or LEN_ID not in seen_cell:
+                check("v0.40: stock's cell routine drew RTRG and LEN on page 2", False, f"{sorted(seen_cell)}")
+                return
+            for on in (0, 1):
+                for lk in (0, 1):
+                    a1, a2 = area(ours("sld", on, lk), 24, 0), area(stocks(RTRG_ID, on << 8, lk), 24, 0)
+                    check(f"v0.40: SLD {'ON' if on else 'OFF'}{' locked' if lk else ''} = stock's RTRG, pixel for pixel",
+                          a1 == a2 and len(a2) > 20, f"{len(a1 ^ a2)} pixels differ, {len(a2)} lit")
+            same = {0: 30, 1: 46, 2: 62}                        # 1/8, 1/4, 1/2: in LEN's own table
+            for k, lv in same.items():
+                for lk in (0, 1):
+                    a1, a2 = area(ours("slen", k, lk), 24, 0), area(stocks(LEN_ID, lv << 8, lk), 24, 0)
+                    check(f"v0.40: SLEN {k} unlocked/locked {lk} = stock's LEN with the same text",
+                          a1 == a2 and len(a2) > 20, f"{len(a1 ^ a2)} pixels differ")
+            box = {(i, j) for i, j in area(stocks(LEN_ID, 30 << 8, 0), 24, 0)
+                   if i in (0, 18) or j in (7, 23)}             # LEN's box: its outline
+            bad = []
+            for k in range(15):
+                px = area(ours("slen", k, 0), 24, 0)
+                text = {(i, j) for i, j in px if 0 < i < 18 and 7 < j < 23}
+                cx2 = min(i for i, _ in text) + max(i for i, _ in text) if text else -99
+                if {(i, j) for i, j in px if i in (0, 18) or j in (7, 23)} != box or abs(cx2 - 18) > 1:
+                    bad.append(k)
+            check("v0.40: every SLEN value: LEN's box, its text centred as LEN's", not bad, f"values {bad}")
+            live_check(frame, 0, 0, 4, 0, "idle")
+
+        def live_check(frame, sld, sld_lk, slen, slen_lk, what):
+            """the page's own places (canvas y up: screen row 63 - y) as sl_draw_* draws them"""
+            from emu import panel as P                          # noqa: PLC0415
+            lit = {(x, 63 - y) for x, y in P.lit(frame)}
+            for x, kind, v, lk in ((24, "sld", sld, sld_lk), (50, "slen", slen, slen_lk)):
+                want = {(i, j) for i, j in ours(kind, v, lk, x, 0) if x - 3 <= i <= x + 21 and 0 <= j <= 24}
+                got = {(i, j) for i, j in lit if x - 3 <= i <= x + 21 and 0 <= j <= 24}
+                check(f"v0.40: the page's {kind.upper()} place ({what}) is sl_draw's, label included",
+                      want == got and len(want) > 20, f"{len(want ^ got)} pixels differ")
+
         panel.settle(5_000_000)
         panel.tap(key(1))
         panel.settle(20_000_000)
@@ -538,6 +783,8 @@ def main() -> int:
         panel.screen("trig2_idle")
         check("TRIG page 2 draws SLD and SLEN (page 1 does not)", page2 == 1 and page1 == 0,
               f"page 1 up {page1}, page 2 up {page2}, drawn {machine.long(lay['sl_page_seen'])} times")
+        idle_frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
+        report["trig2_frame"] = idle_frame.hex()
         panel.tap(key(19))                                      # RECORD: grid recording
         panel.settle(10_000_000)
         panel.tap(key(25))                                      # a trig on step 1
@@ -549,6 +796,7 @@ def main() -> int:
         turn(4, 1)                                              # E: SLD on
         turn(5, 3)                                              # F: SLEN 1 -> 3 steps
         panel.screen("trig2_held_locked")
+        held_frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
         panel.let_go(key(25))
         panel.settle(10_000_000)
         tbl = machine.long(lay["sl_ui_table"])
@@ -593,11 +841,12 @@ def main() -> int:
               lock(tbl, 0, 0, 0) == before == 0xFFFF)
         panel.screen("trig1_after")
 
-        # page copy, clear, paste (FUNC + RECORD, FUNC + PLAY, FUNC + STOP): stock's copy does
-        # not carry SLD/SLEN (it matches records by track), and its paste may take a record of
-        # ours for its own. It must never leave a value of ours in a stock lock: step 2's SLD
-        # record gets a value on step 41 (outside the page) first, and after the paste no stock
-        # record may hold a value there
+        # v0.40: copy and paste carry SLD/SLEN as they carry the stock locks (v0.39's known
+        # issue: they carried none, and FUNC + RECORD / PLAY / STOP here, a track copy, clear
+        # (which kept ours) and paste (which clears every step first), left the track with no
+        # slides at all; hooks counted: track paste, trig copy, trig paste). The
+        # track's map of our locks, and of a stock lock beside them for comparison, read
+        # before the copy, after the clear and after the paste, each through the panel.
         def records():
             out = []
             for i in range(RECS):
@@ -605,23 +854,99 @@ def main() -> int:
                 if h != b"\xff\xff":
                     out.append((i, h, machine.read(tbl + REC * i + 2, 256)))
             return out
-        mine = [i for i, h, _ in records() if h == bytes([0x50, 0x20])]
-        if mine:
-            put16(tbl + REC * mine[0] + 2 + 2 * 40, 1)
-        stock_before = [(i, h.hex()) for i, h, v in records() if h[0] <= 100 and h[1] <= 16]
-        for k in (19, 20, 21):
+
+        def ours_map(t=0):
+            return {(st, k): lock(tbl, t, st, k) for st in range(128) for k in (0, 1)
+                    if lock(tbl, t, st, k) != 0xFFFF}
+
+        def stock_map(slot, t=0):
+            for i, h, v in records():
+                if h == bytes([slot, t]):
+                    return {st: struct.unpack_from(">H", v, 2 * st)[0] for st in range(128)
+                            if struct.unpack_from(">H", v, 2 * st)[0] != 0xFFFF}
+            return {}
+
+        hits = {}
+        for name, va in (("page paste", 0x40053014), ("page undo", 0x40052488), ("track paste", 0x40053728),
+                         ("track undo", 0x40052824), ("trig copy", 0x40053D1E), ("trig paste", 0x40055376)):
+            hits[name] = 0
+
+            def hit(uc_, ad, sz, us, name=name):
+                hits[name] += 1
+            uc.hook_add(UC_HOOK_CODE, hit, begin=va, end=va)
+
+        def func_key(k):
             panel.hold(key(17), 5_000_000)
             panel.tap(key(k))
             panel.settle(10_000_000)
             panel.let_go(key(17))
             panel.settle(10_000_000)
-        after = records()
-        leaked = [i for i, h, v in after if h[0] <= 100 and h[1] <= 16 and v[80:82] != b"\xff\xff"]
-        report["paste_ours_after"] = [i for i, h, _ in after if h[1] & 0xF0 == 0x20]
-        report["paste_stock"] = [stock_before, [(i, h.hex()) for i, h, v in after if h[0] <= 100 and h[1] <= 16]]
-        check("page copy, clear, paste: no SLD/SLEN value ends up in a stock lock", bool(mine) and not leaked,
-              f"ours before {mine}, after {report['paste_ours_after']}, leaked {leaked}")
+
+        # our locks on steps 2 (from above: SLD on), 6 (SLD, SLEN 1/2) and 41 (SLD, SLEN 6); a
+        # stock lock (slot 90's record of track 1) on steps 6 and 41, written as the knob would
+        panel.tap(key(30))                                      # a trig on step 6 (placing it clears the step)
+        panel.settle(10_000_000)
+        pc0, sr0 = uc.reg_read(K.UC_M68K_REG_PC), uc.reg_read(K.UC_M68K_REG_SR)
+        for st, sld, slen in ((5, 1, 2), (40, 1, 9)):          # (call() leaves the PC at its
+            call(sl_set, tbl, 0, st, 0, sld)                    # sentinel: the UI's put back)
+            call(sl_set, tbl, 0, st, 1, slen)
+        uc.reg_write(K.UC_M68K_REG_PC, pc0)
+        uc.reg_write(K.UC_M68K_REG_SR, sr0)
+        free = [i for i in range(RECS) if machine.read(tbl + REC * i, 2) == b"\xff\xff"][-1]
+        machine.write(tbl + REC * free, bytes([90, 0]) + b"\xff\xff" * 128)
+        machine.write(tbl + INDEX + 90, bytes([free]))
+        for st in (5, 40):
+            put16(tbl + REC * free + 2 + 2 * st, 0x1234 + st)
+        before, st_before = ours_map(), stock_map(90)
+        report["copy_before"] = {f"{a}/{b}": v for (a, b), v in before.items()}
+        func_key(19)                                            # copy
+        func_key(20)                                            # clear
+        cleared, st_cleared = ours_map(), stock_map(90)
+        func_key(21)                                            # paste
+        after, st_after = ours_map(), stock_map(90)
+        report["copy_after"] = {f"{a}/{b}": v for (a, b), v in after.items()}
+        report["copy_hits"] = dict(hits)
+        same_clear = all(((st, 0) in cleared) == (st in st_cleared) for st in (5, 40))
+        check("track copy, clear, paste (FUNC + RECORD, PLAY, STOP): SLD/SLEN cleared with the stock locks, "
+              "then back exactly, every step", bool(before) and after == before and st_after == st_before
+              and same_clear and st_before != st_cleared,
+              f"before {sorted(before.items())}, cleared {sorted(cleared.items())}, after {sorted(after.items())}; "
+              f"stock {sorted(st_before)} -> {sorted(st_cleared)} -> {sorted(st_after)}; hits {hits}")
+        leaked = [i for i, h, v in records() if h[0] <= 100 and h[1] <= 16 and h != bytes([90, 0])
+                  and any(struct.unpack_from(">H", v, 2 * st)[0] != 0xFFFF for st in (1, 5, 40))]
+        check("the paste: no SLD/SLEN value in a stock lock", not leaked, f"{leaked}")
         panel.screen("after_paste")
+
+        # trig copy and paste: step 6 held, RECORD (copy); step 9 held, STOP (paste): step 9 has
+        # step 6's SLD/SLEN, as its stock lock
+        panel.hold(key(30), 5_000_000)
+        panel.tap(key(19))
+        panel.settle(10_000_000)
+        panel.let_go(key(30))
+        panel.settle(10_000_000)
+        panel.hold(key(33), 5_000_000)
+        panel.tap(key(21))
+        panel.settle(10_000_000)
+        panel.let_go(key(33))
+        panel.settle(10_000_000)
+        got = [lock(tbl, 0, 8, 0), lock(tbl, 0, 8, 1)]
+        st9 = stock_map(90).get(8)
+        report["trig_hits"] = dict(hits)
+        check("trig copy/paste: step 6's SLD/SLEN (and its stock lock) on step 9, step 6's kept",
+              got == [1, 2] and st9 == 0x1234 + 5 and [lock(tbl, 0, 5, 0), lock(tbl, 0, 5, 1)] == [1, 2],
+              f"step 9 {got}, stock {st9}, hits {hits}")
+        panel.screen("after_trig_paste")
+
+        # v0.40 review: the five paste sites nothing above drives (page paste and its UNDO, track
+        # paste's UNDO, shift, page autocopy), slot 80 in shift and autocopy, and a paste on a
+        # nearly full lock table (scripts/emu_slides_paths.py)
+        from emu_slides_paths import Paths                    # noqa: PLC0415
+        Paths(machine, panel, lay, check, report).run()
+
+        # v0.40: the drawing checks, last (they call into the firmware on a canvas of their
+        # own, outside the UI's run)
+        widgets_check(idle_frame)
+        live_check(held_frame, 1, 1, 7, 1, "held, locked")
 
     faults = getattr(machine.m, "faults", [])[faults_before:]
     check("no fault", not faults, f"{len(faults)} fault(s)")
