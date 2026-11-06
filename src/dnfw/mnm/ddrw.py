@@ -162,7 +162,10 @@ def _half(p: Prog, L: C.Layout) -> None:
         p.ldi(7, 0, 1)
         p.st(W["x48"], 7)                       # X48 / 2^23
         p.ldi(7, 1, 1)
-        p.st(W["x49"], 7)
+        p.fconst(12, 2.0 ** 23)
+        p.fop(7, 7, "*", 12)
+        p.trunc(7, 7)
+        p.st(W["x49"], 7)                       # X49, the integer word (v0.42: for the SSF)
         p.fconst(12, 64.0)
         p.fop(5, 5, "*", 12)
         p.trunc(5, 5)                           # the wave chosen (knob >> 1)
@@ -248,15 +251,18 @@ def _half(p: Prog, L: C.Layout) -> None:
                     p.fop(4, 4, "*", 2)
                     p.fop(4, 4, "+", 6)             # old + fade (new - old)
                     C.sat(p, 4)
-                    p.ld(3, W["x49"])
-                    p.fop(4, 4, "*", 3)
-                    p.fconst(12, 2.0 ** 23)
+                    # v0.42, exact as the DSP (P:0x3FA..0x405): its sample is a 24-bit word (the
+                    # crossfade's a1), times X49 in the 48-bit product, of which a1 is kept: the
+                    # floor of t24 x X49 / 2^23. As one fixed-point multiply: t24 << 8 (the low
+                    # byte cleared, a floor) x X49 (SSF) = floor(t24 x X49 / 2^23). (v0.41 and
+                    # older floored a float32 product: a step off at heavy BR, GOLDENS-MNM.md.)
+                    p.fconst(12, 2.0 ** 31)
                     p.fop(4, 4, "*", 12)
-                    p.fconst(12, 65536.0)
-                    p.fop(4, 4, "+", 12)
-                    p.trunc(4, 4)
-                    p.iconst(12, -65536)
-                    p.iop(4, 12, "+", 4)            # floor: the truncation that reduces the bits
+                    p.trunc(4, 4)                   # t x 2^31 (saturates at the top)
+                    p.iconst(12, -256)
+                    p.iop(4, 4, "AND", 12)          # t24 << 8
+                    p.ld(3, W["x49"])               # X49, an integer (see wave())
+                    p.mul_ssf(4, 4, 3)              # the truncation that reduces the bits
                     p.iconst(12, -1)
                     p.float_(4, 4, 12)              # / 2: X48 x t x 2^-24
                     p.ld(3, W["x48"])

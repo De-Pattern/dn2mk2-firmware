@@ -229,6 +229,16 @@ class Prog:
                  "MIN": lambda: min(s32(x), s32(y)), "MAX": lambda: max(s32(x), s32(y))}[op]()
             self.setR(d, v)
 
+    def mul_ssf(self, d: int, a: int, b: int, note: str = "") -> None:
+        """v0.42: Rd = Ra * Rb (SSF), the fixed-point multiplier: signed fractions, the 64-bit
+        product shifted left once, bits 63..32 kept (truncated: no R, so no rounding; PRM
+        p.3-9/3-10). For integers: floor(Ra x Rb / 2^31). Never both -2^31 (that wraps)."""
+        self.e(f"R{d} = R{a} * R{b} (SSF);", note)
+        if self.run:
+            x, y = s32(self.r[a]), s32(self.r[b])
+            assert not (x == y == -(1 << 31)), "SSF: -1 x -1 wraps"
+            self.setR(d, ((x * y) << 1) >> 32)
+
     def ipass(self, d: int, a: int, note: str = "") -> None:
         self.e(f"R{d} = PASS R{a};", note)
         if self.run:
