@@ -628,6 +628,7 @@ int sl_knob(u32 index, int delta)
  * Any track: the lock lives on the held step of the active track, whatever its machine. */
 static int srk_acc D = 0;
 static u32 srk_at D = 0;
+static u32 srk_key D = 0xFFFFFFFFu;             /* the held step the count is for */
 u8 *sl_rec_table D;                             /* the table the last REC turn wrote (for the checks) */
 
 int sl_rec_held(u32 *val)                       /* a step held -> 1, *VAL its REC (0xffff none) */
@@ -644,9 +645,10 @@ int sl_rec_knob(int delta)                      /* -> 1: a step is held and H wa
     struct held h;
     if (!held(&h))
         return 0;
-    u32 now = FRAMES;
-    if (now - srk_at > 3000u || (srk_acc > 0 && delta < 0) || (srk_acc < 0 && delta > 0))
-        srk_acc = 0;
+    u32 now = FRAMES, key = h.track << 8 | h.first;
+    if (key != srk_key || now - srk_at > 3000u || (srk_acc > 0 && delta < 0) || (srk_acc < 0 && delta > 0))
+        srk_acc = 0;                            /* (another step held: counted from nothing) */
+    srk_key = key;
     srk_at = now;
     srk_acc += delta;
     int n = srk_acc / SL_CHOICE_DETENTS;

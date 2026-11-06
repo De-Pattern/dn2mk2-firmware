@@ -204,6 +204,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("drivenav", "+DRIVE keys and long names (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
        ("slides", "parameter slides (ColdFire)"),
+       ("rectrig", "REC trigs, buffers, QREC, QPLAY (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -1977,6 +1978,30 @@ def main() -> int:
                               f"stock's")
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
+
+        # v0.41 (docs/rectrig.md): REC trigs into the two double-buffered REC buffers, QPLAY's
+        # switch on its boundary, QREC's held start, the guards (a manual take's turn, saved
+        # samples in SAMP 124..127), the allocator keeping buffer takes clear, the REC lock
+        # through SAVE/LOAD and the step clear, and the RECORDER's H with a step held
+        if "rt_trig" in lay:
+            rt_js = work / "rectrig.json"
+            rt_cmd = [a.venv, "-u", "scripts/emu_rectrig.py", "--build", bdir, "--snapshot", snap,
+                      "--json", rt_js, "--png-dir", work / "rectrig"]
+
+            def rt_body(tdir):
+                rc, out = run("rec trigs", rt_cmd, logs, env=EMU_ENV, trace=tdir)
+                last = out.strip().splitlines()[-1] if out.strip() else ""
+                if rc != 0 or not last.startswith("PASS"):
+                    return False, out[-900:]
+                r = json.loads(rt_js.read_text())
+                return True, (f"{last[6:]}: a REC trig takes its step into its buffer's idle half "
+                              f"(the command ahead of the queue, never mid-repeat), QPLAY PLEN switches "
+                              f"on the pattern's first step and OFF at once, QREC 8 holds a manual NOW "
+                              f"to step 8, a manual take's turn and saved samples in SAMP 124..127 "
+                              f"refuse it, the allocator keeps buffer takes clear, the REC lock "
+                              f"through SAVE/LOAD (id 202) and the clear, the RECORDER's H with a step held")
+            later("rectrig", "REC trigs, buffers, QREC, QPLAY (ColdFire)", "REC trigs, buffers, QREC, QPLAY (ColdFire)",
+                  [rt_cmd, sorted(EMU_ENV.items())], rt_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())
         setup_mods |= repo_modules()

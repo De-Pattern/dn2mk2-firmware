@@ -189,8 +189,12 @@ void rt_trig(u32 track, u32 step, u32 buf)
     u32 frames = steps * frames_a_step();
     if (frames > REC_FRAMES_MAX)
         frames = REC_FRAMES_MAX;
-    if (frames > room / 2u)
-        frames = (room / 2u) & ~31u;
+    /* never longer than the room planned for it (rt_poll: rt_nx_need, kept clear of every
+     * other take and plan): a tempo slowed, or R.LEN raised, since the last plan (it is made
+     * again every 150 ms) gives a take a little short, never one over the next */
+    u32 cap = rt_nx_need[b] < room ? rt_nx_need[b] : room;
+    if (frames > cap / 2u)
+        frames = (cap / 2u) & ~31u;
     if (frames < 4800u || clash(slot, place, frames * 2u)) {   /* under a tenth of a second, or no room */
         rt_refused++;
         rt_why = 3;
