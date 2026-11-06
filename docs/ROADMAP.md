@@ -33,10 +33,28 @@ In this order unless the owner changes it:
      else ships.
    - The owner mentioned a 42-channel Overbridge multichannel repo he shared earlier: not
      found in this fork's notes; get the link from him.
+1c. **Decided 2026-11-06 (the owner, after v0.40's release):** v0.41 = the fixes on `v041`
+   (NORMALIZING watchdog, YES over SAVING, SLEN detents) + rec trigs (item 2) + slides on our
+   machines' own controls (item 3) + the Overbridge gate step (1b); v0.42 = the DDRW exact
+   product and the **Monomachine engines re-coded** from the bit-exact code for this firmware
+   (fast memory, DSP time), gated against all 366 regenerated references with no exception;
+   heavier Machinedrum engines later, only if proven to sound and behave the same. If v0.41
+   is not ready before v0.42, they ship together on the one big gate.
+   **The "ultra stable" pass (owner 2026-11-05; discuss before starting):** every machine as
+   stable as stock; +Drive closer to the DT2's structure; all DT2 features smooth; a stronger
+   DDRW bitcrush; **Elektron-style sample and recording naming**, as the DT2's NAMING screen:
+   the character grid with FUNC, and **UP / DOWN scroll the character at the cursor through
+   the letters and numbers** (owner 2026-11-06), LEFT / RIGHT move the cursor.
 2. **Octatrack-style rec trigs: the first thing built after v0.40** (owner, 2026-11-04:
    "implement rec trigs after this"). A trig that records a set length (or until stopped),
    QREC (starts on the next bar / interval), maybe QPL; for bouncing heavy machines to
-   samples.
+   samples. **Design (owner, 2026-11-06), building in v0.41** (docs/rectrig.md): the REC lock
+   is set from the RECORDER overlay (ours, over any track): hold a step, turn H: OFF / REC 1 /
+   REC 2; it records SRC/CHAN for R.LEN steps (MAX: the pattern's length) into a RAM buffer,
+   not saved or normalised. Two buffers, each double-buffered over the DSP's four recorder
+   slots (REC 1: SAMP 124, slots 123/125; REC 2: SAMP 125, slots 124/126). QPLAY: the track
+   switches to the new take at the first boundary after it ends (OFF: as it starts); QREC: a
+   manual RECORD NOW waits for the boundary. RIGHT on the RECORDER: the REC TRIGS view.
 3. **Slides on the sample and Machinedrum machines' own controls** (owner, 2026-11-03).
    Today only their shared slots slide (filter, amps, FX sends, LFOs). Per machine: mark
    which of its controls are continuous (the detented choices never slide: TYPE, SAMP,
