@@ -1055,6 +1055,14 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
  * end while it is up (measured: FUNC + SETTINGS in the emulator, the list grows from 7 to
  * 8 views, the question's NO takes it out again). While one is up every key is stock's. */
 #define QUESTION_VTABLE 0x40206264u
+/* v0.41 (the owner, v0.40: on a SLICE/GRID track, FUNC + SETTINGS, then "YES opens the slice
+ * menu, sometimes"): the question is seen, but a YES while stock's SAVING bar is up (a second
+ * or more on the unit), or on the message after it (PROJECT SAVED, ERROR), found the page
+ * under it and opened the menu over the save. Those are views of their own classes, put at
+ * the list's end as the question is (measured in the emulator: the harness's walk: step).
+ * While any of them is up every key is stock's */
+#define PROGRESS_VTABLE 0x40206E94u
+#define MESSAGE_VTABLE 0x40206DDCu
 static int ram_ok(u32 a)
 {
     return a >= 0x40000000u && a < 0x48000000u && !(a & 3);
@@ -1068,8 +1076,11 @@ int smp_question_up(void)
     u32 node = *(volatile u32 *)(s + 28);
     for (int n = 0; n < 32 && ram_ok(node) && node != s + 20; n++) {
         u32 v = *(volatile u32 *)(node + 8);
-        if (ram_ok(v) && *(volatile u32 *)v == QUESTION_VTABLE)
-            return 1;
+        if (ram_ok(v)) {
+            u32 cls = *(volatile u32 *)v;
+            if (cls == QUESTION_VTABLE || cls == PROGRESS_VTABLE || cls == MESSAGE_VTABLE)
+                return 1;
+        }
         node = *(volatile u32 *)node;
     }
     return 0;

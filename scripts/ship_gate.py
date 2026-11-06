@@ -1516,7 +1516,13 @@ def main() -> int:
             qs = (f"wait:3,poke:{kit + 52 + 0xDE:#x}:0c,wait:4,tap:2,wait:6,call:{Q:#x},press:25,wait:2,yes,"
                   f"wait:4,mem:{H:#x}:4,release:25,wait:6,mem:{S:#x}:4,mem:{H:#x}:4,press:17,wait:2,tap:8,"
                   f"wait:2,release:17,wait:20,png:q,call:{Q:#x},yes,wait:30,mem:{S:#x}:4,call:{Q:#x},tap:2,"
-                  f"wait:6,yes,wait:6,png:m,mem:{S:#x}:4,no,wait:6,mem:{S:#x}:4")
+                  f"wait:6,yes,wait:6,png:m,mem:{S:#x}:4,no,wait:6,mem:{S:#x}:4,"
+                  # v0.41 (the owner, v0.40: "YES opens the slice menu, sometimes" while saving):
+                  # FUNC + SETTINGS, YES, and a YES while SAVING is drawn (its view 0x40206e94 at
+                  # the list's end), then one on the message after it (0x40206ddc): both stock's,
+                  # no menu; smp_question_up sees both up; the message's YES takes it down
+                  f"press:17,wait:2,tap:8,wait:2,release:17,wait:20,yes,wait:3,png:s,call:{Q:#x},yes,wait:3,"
+                  f"mem:{S:#x}:4,wait:15,png:e,call:{Q:#x},yes,wait:6,mem:{S:#x}:4,call:{Q:#x}")
             qjs = work / "question.json"
             q_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                      "--snapshot", snap, "--set-d0-at", "0x4005f5c6:0", "--steps", qs,
@@ -1530,18 +1536,23 @@ def main() -> int:
                     m = r["memory"]
                     d0 = [c["d0"] for c in r["direct_calls"]]
                     shots = {n: pathlib.Path(r["screens"][n]).read_bytes() for n in ("q", "m")}
+                    d0 = d0 + [None] * (6 - len(d0))
                     facts = {"TRIG 1 held: seen held": m[hex(H)] == "02000000",
                              "TRIG 1 + YES: stock's, no menu": int(m[hex(S)], 16) == 0,
                              "let go: nothing held": m[f"{hex(H)}@2"] == "00000000",
-                             "the question seen up, then gone": d0 == [0, 1, 0],
+                             "the question seen up, then gone": d0[:3] == [0, 1, 0],
                              "its YES the question's: no menu": int(m[f"{hex(S)}@3"], 16) == 0,
                              "then YES on the page opens the menu, NO closes it":
                              int(m[f"{hex(S)}@4"], 16) != 0 and int(m[f"{hex(S)}@5"], 16) == 0,
-                             "the question drawn": shots["q"] != shots["m"]}
+                             "the question drawn": shots["q"] != shots["m"],
+                             # v0.41
+                             "SAVING seen up: YES on it is stock's, no menu": d0[3] == 1 and int(m[f"{hex(S)}@6"], 16) == 0,
+                             "the message after it seen up: its YES takes it down, no menu":
+                             d0[4] == 1 and d0[5] == 0 and int(m[f"{hex(S)}@7"], 16) == 0}
                     good = all(facts.values())
                     why = f"{facts} d0={d0} mem={m}"
                 return good, ("a stock question's YES is the question's; TRIG + YES is stock's; the page's "
-                              "own YES still opens its menu" if good else why)
+                              "own YES still opens its menu; SAVING's and its message's keys are stock's" if good else why)
             later("question", "stock questions and held keys (ColdFire)", "stock questions and held keys (ColdFire)", [q_cmd, sorted(EMU_ENV.items())], q_body)
 
         # 6k. v0.30: MACHINE SEL from one sample machine to another keeps SAMP (owner: the stock

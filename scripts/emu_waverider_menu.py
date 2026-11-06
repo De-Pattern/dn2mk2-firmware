@@ -2026,6 +2026,19 @@ def main() -> int:
             _, va, data = step.split(":")
             machine.write(int(va, 0), bytes.fromhex(data))
             print(f"  poke {va} = {data}")
+        elif step.startswith("walk:"):
+            # v0.41: walk:SCREENPTR_VA: the screen's view list (rec.c smp_question_up's walk:
+            # the first node at screen + 28, +0 the next, +8 the view, the sentinel at screen +
+            # 20; a view's first long its class), each view's class, in order, into memory[]
+            _, va = step.split(":")
+            scr = machine.long(int(va, 0))
+            node, classes = machine.long(scr + 28), []
+            while node and node != scr + 20 and len(classes) < 32:
+                view = machine.long(node + 8)
+                classes.append(f"{machine.long(view):08x}" if view else "0")
+                node = machine.long(node)
+            key = "walk" if "walk" not in mems else f"walk@{len(mems)}"
+            mems[key] = ",".join(classes)
         elif step.startswith("mem:"):
             _, va, n = step.split(":")
             # a second read of the same address keeps the first: key it by its order
