@@ -794,7 +794,21 @@ def main() -> int:
         panel.hold(key(25), 5_000_000)
         panel.settle(10_000_000)
         turn(4, 1)                                              # E: SLD on
-        turn(5, 3)                                              # F: SLEN 1 -> 3 steps
+        # v0.41 (the owner): SLEN four detents a choice, as SRC/CHAN and the choice controls:
+        # three detents move nothing, the fourth one choice; a fast item of four is one choice;
+        # a turn back starts the count again (the three after it move nothing)
+        turn(5, 3)                                              # F: three detents: still 1 step
+        tbl_ = machine.long(lay["sl_ui_table"])
+        slen3 = lock(tbl_, 0, 0, 1) if tbl_ else None
+        turn(5, 1)                                              # the fourth: 1 -> 1.5 steps (index 5)
+        turn(5, 4)                                              # one item of four: 2 steps (6)
+        turn(5, -1)                                             # back: the count starts again
+        turn(5, 3)                                              # three on: nothing yet (6)
+        tbl_ = machine.long(lay["sl_ui_table"])
+        slen6 = lock(tbl_, 0, 0, 1) if tbl_ else None
+        turn(5, 1)                                              # 3 steps (7)
+        check("v0.41: SLEN four detents a choice (3 detents: nothing; a turn back restarts)",
+              slen3 in (0xFFFF, 4) and slen6 == 6, f"after 3 detents {slen3}, after 4, 4, -1, 3: {slen6}")
         panel.screen("trig2_held_locked")
         held_frame = bytes(panel.capture.frames[-1]) if panel.capture.frames else b""
         panel.let_go(key(25))

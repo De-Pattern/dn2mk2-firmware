@@ -540,6 +540,27 @@ void sl_screen(int phase, int covered)
         sl_page_up = sl_seen_now && !covered;
 }
 
+/* v0.41 (the owner: "detent the slide length knob as we did with the others"): SLEN, a
+ * choice control of 15 steps, four detents a choice as PLAY, MODE, BARS, GRID (fmt.c
+ * CHOICE_DETENTS) and the RECORDER's SRC and CHAN (rec.c rec_choice_step). A turn back, or a
+ * pause of 2 s, starts the count again; a fast turn's item carries several detents and counts
+ * them all. SLD is a switch (the turn's direction sets it) and keeps one detent */
+#define SL_CHOICE_DETENTS 4
+static int slk_acc __attribute__((section(".data"))) = 0;
+static u32 slk_at __attribute__((section(".data"))) = 0;
+
+static int sl_choice_step(int delta)            /* -> the choices to move */
+{
+    u32 now = *(volatile u32 *)0x4058E8D4u;     /* the 1.5 kHz ticks */
+    if (now - slk_at > 3000u || (slk_acc > 0 && delta < 0) || (slk_acc < 0 && delta > 0))
+        slk_acc = 0;
+    slk_at = now;
+    slk_acc += delta;
+    int n = slk_acc / SL_CHOICE_DETENTS;        /* (toward 0: the remainder kept) */
+    slk_acc -= n * SL_CHOICE_DETENTS;
+    return n;
+}
+
 /* an encoder turned (smp_ui_pop): E or F while the page is up -> 1, taken */
 int sl_knob(u32 index, int delta)
 {
@@ -557,7 +578,10 @@ int sl_knob(u32 index, int delta)
     if (!k)
         v = delta > 0 ? 1 : 0;
     else {
-        int n = (int)(cur != 0xFFFF ? cur : SL_LEN_DEFAULT) + delta;
+        int step = sl_choice_step(delta);       /* v0.41: four detents a choice */
+        if (!step)
+            return 1;
+        int n = (int)(cur != 0xFFFF ? cur : SL_LEN_DEFAULT) + step;
         v = (u32)(n < 0 ? 0 : n >= SL_NLEN ? SL_NLEN - 1 : n);
     }
     for (u32 s = 0; s < h.len; s++)
