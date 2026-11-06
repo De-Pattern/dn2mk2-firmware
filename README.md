@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.39** | 2026-11-03 | Parameter slides (SLD/SLEN, TRIG page 2); resampling records the whole take (it kept ~2 ms, then the empty input); THRES 0 learns its floor; +DRIVE look-alike samples matched by identity (">A003" on every row); +DRIVE held arrows, FUNC page, pushed-knob page; long names head...tail and scrolling; ERASE MOD DATA; s!Rwa²'s own start-up animation; the mod's version on screen; gate: whole-take recordings with realistic inputs, look-alike library samples, +DRIVE keys, erase | `builds/v0.39-SLIDE/` | yes |
+| **v0.40** | 2026-11-06 | Folders inside folders on the +Drive (six levels, browser and import page); SLICE no longer says CANNOT READ IT (a signed time compare), its menus wait and retry, LINKED/UNLINKED start and end; SAMP/SLCE p-locks play exactly what is locked; slides survive copy, paste and undo; the TRIM preview's and sample pages' playheads follow at once; recordings normalised to full scale as the DT2; ERASE MOD DATA waits, retries, resumes; the +DRIVE knob ignores jitter; RECORDER SRC/CHAN four detents; DIRECT JUMP on the next step every time; gate: nested folders, SLICE under link traffic, slide paste sites, normalising; the Monomachine reference cases replaced once by a byte-identity proof (owner) | `builds/v0.40-NEST/` | yes |
+| v0.39 | 2026-11-03 | Parameter slides (SLD/SLEN, TRIG page 2); resampling records the whole take (it kept ~2 ms, then the empty input); THRES 0 learns its floor; +DRIVE look-alike samples matched by identity (">A003" on every row); +DRIVE held arrows, FUNC page, pushed-knob page; long names head...tail and scrolling; ERASE MOD DATA; s!Rwa²'s own start-up animation; the mod's version on screen; gate: whole-take recordings with realistic inputs, look-alike library samples, +DRIVE keys, erase | `builds/v0.39-SLIDE/` | yes |
 | v0.38 | 2026-11-02 | Direct Jump (PTN + YES/NO); per-project sample pools; new samples and recordings play at once (silent until a restart since v0.33); THRES 0 waits for real sound; a SLICE/GRID KEYBOARD chord-memory crash; gate: 22 live adds + 3 recordings must play, MAIN recording, sample chords, the arp/chord-memory fuzz | `builds/v0.38-JUMP/` | yes |
 | v0.37 | 2026-11-01 | A start-up animation (a redraw based on s!Rwa²'s design) (59 frames, every one checked in the gate); DDRW lighter (3 voices, same sound); resampling MAIN records the main mix (it gave an empty sample); the sample preview 6 dB down; polyphonic sample playback checked (chords on ONESHOT, WERP, SLICE) | `builds/v0.37-INTRO/` | yes |
 | v0.36 | 2026-11-01 | More Monomachine voices: SID, VO-6 and DENS from 2 to 4 at once, DDRW from 1 to 2 (the v0.26 fixed budget gone; the DSP-time guard decides); a voice that doesn't fit is stolen cleanly (silent until its next note) instead of chopping in and out; DDRW/DENS's busiest tables in fast memory; a four-note chord test per Monomachine machine in the gate | `builds/v0.36-VOICES/` | yes |
@@ -77,6 +78,85 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.40 — NEST (folders inside folders, SLICE reads, normalised recordings, slides through copy/paste)
+
+`DN2mod_v0.40_NEST_OS1.11.syx`
+sha256 `a3e59afcdc7319093a58a3e653f839a021b87dd5d156c174212da726beeabf74`
+Gate: CLEARED TO FLASH, 2026-11-06 (42 gates; 37 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit; on the rebuilt bench, which reproduces v0.39's gate record step for step; with the owner's one exception, below). Source: commit `f8af1091`. Docs: `docs/sampler.md`, `docs/user-reports.md`, `docs/erase-mod-data.md`.
+
+**The gate's one exception (owner, 2026-11-05).** The workspace that held the test bench was
+replaced on 2026-11-05 and the bench was rebuilt (github.com/De-Pattern/dn2mk2-bench, private):
+the same emulator commit, snapshots and SHARC runner, proven by replaying v0.39's gate (every
+step matches its record). The Machinedrum references were regenerated from the MD's own DSP code
+and accepted. The Monomachine references are not yet accepted (3 of 366 DDRW cases differ by one
+rounding step; see known issues), so test_mnm's 366 reference cases did not run on this build.
+In their place the gate checks that the DSP program (section 7), `src/dnfw/mnm` and
+`test_mnm.py` are byte-identical to v0.39's (`dbbe804`), which passed all 366. The exception
+ends with the first build that changes the DSP program.
+
+Everything in v0.39, plus:
+
+**Folders inside folders on the +Drive** (six levels): the browser goes in and out level by level
+(NO goes up), LOAD TO PROJECT / LOAD TO TRK work from any level; a folder row counts its own
+samples; the import page makes, fills and deletes nested folders (link 17 paths, 30 FOLDER IN,
+31 TREE). Folders imported flat by older versions stay flat. Gate: `drive` (emu_drive_nest),
+link16 `nest`, unit tests (libtree model, web tool).
+
+**SLICE said CANNOT READ IT** on a sample it could play (S1): the read's 2-minute limit was compared
+signed, so a fresh read looked expired. Now compared correctly, and the SLICE/GRID menus wait for
+a readable sample and retry instead of giving up. **LINKED / UNLINKED** start and end points as the
+DT2's (knob A, LINKED by default). The transport (PLAY/STOP/RECORD) reaches the sequencer while
+the menu waits. Gate: `slice` (slicebusy: menus under link work, both project switches, 21 attempts
+with 10 refused reads, LINKED).
+
+**SAMP / SLCE p-locks played the wrong sample or slice**: a lock was taken relative to the track's
+own; it now plays exactly the sample and slice locked. Gate: unit tests, `keepsamp`.
+
+**Slides through copy and paste**: SLD/SLEN travel with copy, paste and undo (trig, page, track);
+a track clear frees them with the track's stock locks; a paste never takes a lock record a stock
+parameter still needs. Gate: `slides` (the five paste sites, a full-table paste).
+
+**The playhead**: the TRIM preview's playhead follows the audio and goes at release; on the sample
+and SLICE/GRID pages the playhead follows the newest note's voice at once (was the lowest
+position, a step late). Gate: `recflow`, `samplist`.
+
+**Recordings normalised to full scale** as the DT2 and Octatrack: any take that is not all zero
+comes up to full scale, never clipping (was -6 dBFS since v0.30); a recorded silence becomes a
+noise source. Gate: link16 `norm` (-70 dBFS take, all-zero take).
+
+**ERASE MOD DATA** (paQ's TRIM ERROR, E1): it waits for an idle card, retries, shows a percentage,
+and can be paused and resumed. **The +DRIVE cursor moving by itself** (Pablo, C1): the browser's
+knob ignores encoder jitter. **RECORDER SRC and CHAN**: four detents a choice. **DIRECT JUMP**:
+every cue switches at the next step boundary, even fired fast. **SYN held**: long values have room
+(32-byte buffers). "MOD 0.40" on screen.
+
+**Tests**
+1. +DRIVE: make a folder inside a folder (import page), browse into it on the DN2, LOAD TO PROJECT
+   from it, NO back out level by level.
+2. SLICE a sample right after loading it: no CANNOT READ IT; LINKED moves start and end together,
+   UNLINKED each on its own.
+3. Lock SAMP (or SLCE) on a trig: that exact sample (slice) plays.
+4. A track with slides: copy a trig, a page, the track; paste elsewhere: the slides come along;
+   clear the track: they go.
+5. RECORDER: record something quiet: TRIM shows it at full level, not clipped; the TRIM playhead
+   moves while previewing.
+6. RECORDER: SRC and CHAN step one choice per four detents.
+7. DIRECT JUMP on: tap pattern changes quickly; each switches on the next step.
+8. ERASE MOD DATA (only with a backup): a percentage, and it finishes, or pauses and resumes.
+9. The v0.39 list still.
+
+**Known issues**
+- DDRW at high bit-reduction settings (BR around 112) can round one step differently from a real
+  Monomachine: the model floors sample x X49 in float32 where the DSP floors the exact product
+  (43-44 dB match on 3 of 366 reference cases; since v0.26). To be fixed in the next build that
+  changes the DSP program.
+- An LFO on SAMP or SLCE doesn't step through the loaded samples yet.
+- A looping voice's playhead can jump back early on screen (the sound is right).
+- The +Drive library holds up to 2,048 samples and 64 folders.
+- An unsaved NEW project's recording goes with it on a LOAD without saving.
+- Preset pool trig locks don't work with the mod's machines.
+- The +DRIVE preview level unchanged.
 
 ## v0.39 — SLIDE (parameter slides, whole recordings, +DRIVE identity and keys, erase, his animation)
 
@@ -137,8 +217,8 @@ holds), replacing v0.37's redraw. **The mod's version**: "MOD 0.39" over the las
 9. The v0.38 list still.
 
 **Known issues**
-- Copy/paste doesn't carry slides (a page paste can drop a track's slides).
-- The TRIM preview's playhead does not move.
+- Copy/paste doesn't carry slides (a page paste can drop a track's slides): fixed in v0.40.
+- The TRIM preview's playhead does not move: fixed in v0.40.
 - The +DRIVE preview level unchanged (reported ~12 dB over the same sample on a track).
 - An unsaved NEW project's recording goes with it on a LOAD without saving.
 - Preset pool trig locks don't work with the mod's machines.
