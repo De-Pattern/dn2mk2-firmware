@@ -909,7 +909,9 @@ def main() -> int:
             kit = 0x4210C08C
             pk = ",".join(f"poke:{kit + 52 + 1163 * t + 0xDE:#x}:0d,poke:{kit + 52 + 1163 * t + 108:#x}:0000"
                           for t in range(16))
-            steps = (f"wait:2,png:p0,poke:{g['slc_state']}:00000001,wait:6,png:m,"
+            # v0.42: the menus poked over the SLICE track's page itself (slice.c closes a menu whose
+            # page the screen does not draw: NiKo's GRID report), not over the snapshot's page
+            steps = (f"wait:2,{pk},tap:2,wait:10,png:p0,poke:{g['slc_state']}:00000001,wait:6,png:m,"
                      f"poke:{g['slc_state']}:00000002,wait:6,png:g,"
                      f"poke:{hires}:{pat},poke:{g['slc_nfr']}:00023280,poke:{g['slc_ns']}:00000003,"
                      f"poke:{g['slc_cur']}:00000000,poke:{g['slc_sl']}:{tb},poke:{g['slc_state']}:00000004,"
@@ -946,7 +948,7 @@ def main() -> int:
             busy_cmd = None
             if "slc_linked" in lay:
                 bsyms = work / "slicebusy_syms.json"
-                bsyms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith(("smp_", "slc_"))}))
+                bsyms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith(("smp_", "slc_")) or k == "wr_draws"}))
                 busy_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                             "--build", bdir, "--snapshot", snap, "--steps", f"link16:{bsyms}:slicebusy",
                             "--png-dir", work / "slicebusy"]

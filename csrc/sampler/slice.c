@@ -69,7 +69,7 @@ int slc_page_seen __attribute__((section(".data"))) = 0;   /* smp_page.c: 1 a SL
  * counts only when the screen last drawn drew it (wr_draws, as the playhead's redraw test),
  * and a dialog lets go when its page is not drawn or the active track is not its own. */
 u32 slc_seen_draw __attribute__((section(".data"))) = 0xFFFFFFFFu;   /* wr_draws when a SLICE/GRID page was drawn */
-static u32 slc_open_track __attribute__((section(".data"))) = 0;     /* the track a menu opened on */
+u32 slc_open_track __attribute__((section(".data"))) = 0;            /* the track a menu opened on */
 u32 slc_letgo __attribute__((section(".data"))) = 0;                  /* (count: the gate reads it) */
 
 static int page_up(void)                        /* the screen last drawn drew a SLICE/GRID page */
