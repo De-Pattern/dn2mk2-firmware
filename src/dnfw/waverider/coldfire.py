@@ -826,7 +826,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     layout["c_load"] = pages.C_LOAD
     layout["c_text_end"] = csyms["__text_end"]
     for name in ("smp_hi", "smp_walk", "smp_booted", "smp_cmds", "smp_tdm_sent", "smp_tdm_heard",
-                 "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_load", "smp_lstate",
+                 "smp_retries", "smp_saved", "smp_boot", "smp_save_recording", "smp_save_mark", "smp_load", "smp_lstate",
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen",
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",

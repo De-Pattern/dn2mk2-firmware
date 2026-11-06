@@ -1246,7 +1246,17 @@ static u32 s_place __attribute__((section(".data"))) = 0;
  * changes while it moves, 0 when none runs */
 u32 smp_save_mark(void)
 {
-    return sstate ? (s_off ^ (u32)sstate << 28 ^ s_tries << 24) | 1u : 0u;
+    /* v0.41 (the owner: NORMALIZING sat for minutes, then the RECORDER came back; the take
+     * was fine): v0.33..v0.40's mark held only the save's own place, which stands still while
+     * the normalised take goes back to the DSP (state 4: the loader's read, send and check, a
+     * long take's for a while), and while state 3 waits for the loader to be free (a page's
+     * samples loading, a preview, LOAD TO PROJECT). v0.40 normalises every take, so every take
+     * took that road, and the 20-second watchdog in rec.c gave up on a save that was moving.
+     * The loader's place is in the mark now: only a save in which nothing moves for 20 s ends it */
+    if (!sstate)
+        return 0u;
+    return (s_off ^ (u32)sstate << 28 ^ s_tries << 24
+            ^ (sstate >= 3 ? l_off * 2654435761u ^ (u32)smp_lstate << 20 : 0u)) | 1u;
 }
 
 static int is_recording(u32 k)                  /* slot K's frames lie in the recordings' area */
