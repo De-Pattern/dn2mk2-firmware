@@ -7,6 +7,7 @@ frame's controls."""
 from __future__ import annotations
 
 import math
+import struct
 
 import pytest
 
@@ -79,9 +80,65 @@ def test_the_voice_plays_the_machinedrums_default_hit_at_48k(name):
     ours = []
     for b in range(case["nblocks"] - start - 4):
         ours += h.block(60.0, b == 0)
+    if _init_writes_host(name) and start == 0:
+        # v0.42: the voice runs the host again after a new machine's init (dnfw.md.voice), so
+        # a note plays its knobs: the Machinedrum with its machine chosen before the note,
+        # where its golden 'default' (chosen at the note) has init's words (P-I's DEC at 127;
+        # no golden case has another). Held instead: the words the first note's trig plays
+        # from are those a later note's trig plays from (the machine's own host as a note,
+        # held to every golden case by test_md.py), and the first note at the Machinedrum's
+        # rate matches a later one from silence where the machine has no noise (PI-BD)
+        first, later, s_first, s_later = _first_and_later(name, params)
+        assert first == later
+        if name in ("PI-BD",):
+            r = MDB.compare(s_first, s_later)
+            assert r["snr_db"] > 60, r
+        return
     want = _resampled(MDB.unpack(case["out"])[32 * start:], len(ours))
     r = MDB.compare(ours, want)
     assert r["snr_db"] > 60 or r["rms_err"] < 2 ** -20, r
+
+
+# v0.42: the machines whose init overwrites a host word (W2, DEC: pi_rc.py, pi_sd.py, pi_bd.py)
+INIT_WRITES_HOST = ("PI-BD", "PI-SD", "PI-RS", "PI-RC", "PI-CC", "PI-HH")
+
+
+def _init_writes_host(name):
+    return name in INIT_WRITES_HOST
+
+
+def _first_and_later(name, params):
+    """-> the host words at the first note's trig and at a later note's (after 3,000
+    blocks), and the machine's own 44.1 kHz output for 50 blocks after each"""
+    M = MM.MACHINES[MM.NAMES.index(name)]
+    trig0, render0 = M.trig, M.render
+    seen, rendered = [], []
+
+    def trig(p, L):
+        seen.append([p.mem.get(p.i[3] + 4 * k) for k in range(MDK.NW)])
+        return trig0(p, L)
+
+    def render(p, L):
+        x = render0(p, L)
+        rendered.append([struct.unpack("<f", struct.pack("<I", p.mem.get(p.i[3] + 4 * (MDK.OUT0 + j))))[0]
+                         for j in range(32)])
+        return x
+    M.trig, M.render = trig, render
+    try:
+        h = PL.Harness()
+        h.set_controls(PM.NAMES.index(name), params)
+        for b in range(60):
+            h.block(60.0, b == 0)
+        s_first = sum(rendered[:50], [])
+        for _ in range(3000):
+            h.block(60.0, False)
+        rendered.clear()
+        for b in range(60):
+            h.block(60.0, b == 0)
+        s_later = sum(rendered[:50], [])
+    finally:
+        M.trig, M.render = trig0, render0
+    return seen[0], seen[1], s_first, s_later
 
 
 def test_the_model_is_finite_and_silent_without_a_note():
@@ -300,3 +357,29 @@ def test_v034_the_output_guard_really_wipes_a_poisoned_voice(name, where):
         again += h.block(60.0, b == 0)
     assert _peak(again) > 0.01 and all(math.isfinite(v) for v in again)
     assert h.mem.get(G.BLOWN_COUNT) == 1, "no second wipe: the voice is clean"
+
+
+def _switch(seq, y, nb=24):
+    h = PL.Harness(0)
+    for name, ring, note in seq:
+        h.set_controls(PM.NAMES.index(name), PL.defaults(name))
+        for b in range(ring):
+            h.block(60.0, note and b == 0)
+    h.set_controls(PM.NAMES.index(y), PL.defaults(y))
+    out = []
+    for b in range(nb):
+        out += h.block(60.0, b == 0)
+    return out
+
+
+@pytest.mark.parametrize("y", ["TRX-CP", "PI-HH", "PI-BD", "EFM-CY"])
+def test_v042_a_voice_changing_machine_plays_as_a_fresh_one(y):
+    """v0.42 (the owner: a hi-hat played a rimshot-like note, then loud spikes, with PI-BD and
+    TRX-CP on other tracks): the voices go round the tracks, and a voice that rang another
+    machine handed this one's note must play exactly what a voice that played nothing does
+    (v0.41: a ringing PI-RS's voice handed a TRX-CP note peaked at 1.40, fresh 0.41)"""
+    for ring in (3, 17):
+        fresh = _switch([("TRX-BD", ring, False)], y)
+        for x in ("PI-BD", "PI-RS", "PI-SD", "PI-HH", "TRX-BD", "TRX-CP", "EFM-CY", "PI-ML"):
+            if x != y:
+                assert _switch([(x, ring, True)], y) == fresh, (x, y, ring)
