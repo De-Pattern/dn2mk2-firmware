@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.40** | 2026-11-06 | Folders inside folders on the +Drive (six levels, browser and import page); SLICE no longer says CANNOT READ IT (a signed time compare), its menus wait and retry, LINKED/UNLINKED start and end; SAMP/SLCE p-locks play exactly what is locked; slides survive copy, paste and undo; the TRIM preview's and sample pages' playheads follow at once; recordings normalised to full scale as the DT2; ERASE MOD DATA waits, retries, resumes; the +DRIVE knob ignores jitter; RECORDER SRC/CHAN four detents; DIRECT JUMP on the next step every time; gate: nested folders, SLICE under link traffic, slide paste sites, normalising; the Monomachine reference cases replaced once by a byte-identity proof (owner) | `builds/v0.40-NEST/` | yes |
+| **v0.41** | 2026-11-06 | REC trigs (FUNC + VOICE, hold a step, H: REC 1 / REC 2), armed per track OFF / ONCE / ON; two looping buffers REC 1 and REC 2 (SAMP 124, 125) that keep playing while they re-record; QPLAY (a take heard from the next boundary) and QREC (RECORD NOW waits for the boundary); the REC TRIGS page; slides on our own machines' controls; SLEN four detents; NORMALIZING no longer sticks; no SLICE menu over a project save; a long recording can't run into the next; gate: rectrig, own-machine slides, Overbridge's code untouched | `builds/v0.41-LOOP/` | yes |
+| v0.40 | 2026-11-06 | Folders inside folders on the +Drive (six levels, browser and import page); SLICE no longer says CANNOT READ IT (a signed time compare), its menus wait and retry, LINKED/UNLINKED start and end; SAMP/SLCE p-locks play exactly what is locked; slides survive copy, paste and undo; the TRIM preview's and sample pages' playheads follow at once; recordings normalised to full scale as the DT2; ERASE MOD DATA waits, retries, resumes; the +DRIVE knob ignores jitter; RECORDER SRC/CHAN four detents; DIRECT JUMP on the next step every time; gate: nested folders, SLICE under link traffic, slide paste sites, normalising; the Monomachine reference cases replaced once by a byte-identity proof (owner) | `builds/v0.40-NEST/` | yes |
 | v0.39 | 2026-11-03 | Parameter slides (SLD/SLEN, TRIG page 2); resampling records the whole take (it kept ~2 ms, then the empty input); THRES 0 learns its floor; +DRIVE look-alike samples matched by identity (">A003" on every row); +DRIVE held arrows, FUNC page, pushed-knob page; long names head...tail and scrolling; ERASE MOD DATA; s!Rwa²'s own start-up animation; the mod's version on screen; gate: whole-take recordings with realistic inputs, look-alike library samples, +DRIVE keys, erase | `builds/v0.39-SLIDE/` | yes |
 | v0.38 | 2026-11-02 | Direct Jump (PTN + YES/NO); per-project sample pools; new samples and recordings play at once (silent until a restart since v0.33); THRES 0 waits for real sound; a SLICE/GRID KEYBOARD chord-memory crash; gate: 22 live adds + 3 recordings must play, MAIN recording, sample chords, the arp/chord-memory fuzz | `builds/v0.38-JUMP/` | yes |
 | v0.37 | 2026-11-01 | A start-up animation (a redraw based on s!Rwa²'s design) (59 frames, every one checked in the gate); DDRW lighter (3 voices, same sound); resampling MAIN records the main mix (it gave an empty sample); the sample preview 6 dB down; polyphonic sample playback checked (chords on ONESHOT, WERP, SLICE) | `builds/v0.37-INTRO/` | yes |
@@ -78,6 +79,79 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.41 — LOOP (REC trigs, two looping buffers, QREC / QPLAY, slides on our machines)
+
+`DN2mod_v0.41_LOOP_OS1.11.syx`
+sha256 `c8a3421962bfe3c4eaa8dc1d61b25ac60c7746a16ec21242114d1a6d87df703f`
+Gate: CLEARED TO FLASH, 2026-11-06 (44 gates; 38 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit; with the owner's exception, below). Source: commit `0079833`. Docs: `docs/rectrig.md`, `docs/slides.md`, `docs/overbridge.md`, `docs/user-reports.md`.
+
+**The gate's one exception (owner, 2026-11-05)** still applies: this build's DSP program is
+v0.40's, byte for byte (v0.41 changes only the ColdFire), so test_mnm's 366 Monomachine reference
+cases are replaced by the byte-identity proof as in v0.40. It ends with v0.42, which changes the DSP.
+
+Everything in v0.40, plus:
+
+**REC trigs** (the Octatrack's recorder trigs): FUNC + VOICE (the RECORDER) over any track, hold a
+step and turn **H**: OFF / REC 1 / REC 2, four detents a choice (inverted and labelled TRIG, as a
+p-lock). That step records the RECORDER's SRC and CHAN (IN, MAIN, any track) for R.LEN steps at
+the tempo (MAX: the pattern's length). Any track, any machine; a trigless lock trig records
+without playing a note. The REC lock is a third record beside SLD/SLEN (saved, loaded, copied,
+pasted, cleared with them).
+
+**Armed per track**: RIGHT on the RECORDER for the **REC TRIGS** page (the pages now 1/2 and 2/2),
+H with no step held: **OFF** (the default: a REC trig records nothing), **ONCE** (the next one
+records, then OFF again, the buffer keeps that take looping: the Octatrack's one-shot) or **ON**
+(every pass). The page shows both buffers (EMPTY, REC, NEXT, PLAY and each take's seconds), the
+active track's REC trigs as a 4 x 4 grid (REC 1 filled, REC 2 open), Q.REC, Q.PLAY, R.LEN, ARM.
+
+**Two buffers, REC 1 and REC 2** (SAMP 124 and 125): play them on any sample machine's track. RAM
+only, as the Octatrack's: not saved, gone at a project change or power off. A take records into
+the buffer's other half, so the loop keeps playing while it records.
+
+**QPLAY** (default PLEN): a new take is heard from the first boundary after it has finished, so a
+loop never plays half a take; OFF hears it as it records. **QREC** (default OFF): with the
+sequencer playing, RECORD NOW (YES) waits for the next boundary (WAITING; YES or NO cancels).
+Boundaries every 1, 2, 4, 8, 16, 32 or 64 steps, or PLEN (the pattern's start).
+
+**Slides on our own machines**: TUNE, LEV, STRT, LEN and LOOP on the sample machines; the
+Machinedrum machines' controls their sound follows mid-note (measured per machine on the
+bit-exact model); PERC's track effects. **SLEN**: four detents a choice.
+
+**Fixed**: NORMALIZING sat for minutes then went back to the recorder (the screen gave up on a
+save that was still moving; the take was fine). The SLICE menu opened over a project save on
+SLICE/GRID tracks (YES while SAVING or its message). A manual recording into a crowded recording
+area could run into the next recording's memory until a restart (now clamped to the room found).
+
+**Overbridge**: a new gate step proves no byte the mod changes lies in an instruction
+Overbridge's audio path can run (1,907 instructions followed, none patched). Use Overbridge
+2.26.10 or later (the first for OS 1.11); the hardware checklist is in `docs/overbridge.md`.
+
+Gate: `rectrig` (22 checks), `slides` (own machines), `question` (YES on SAVING and its
+message), `recorder`/`recflow` (the NORMALIZING watchdog), `overbridge` (static, with a negative
+control).
+
+**Tests**
+1. A pattern playing, SRC MAIN: RECORDER, hold step 1, H to REC 1, R.LEN 16; RIGHT, H to ONCE.
+   Another track on ONESHOT, SAMP REC 1, a trig on step 1: after a bar the loop plays, and keeps
+   that take.
+2. QPLAY OFF: you hear it as it records. QPLAY PLEN: it switches cleanly at the pattern's start.
+3. QREC 16, YES while playing: WAITING, then it starts on the bar.
+4. A sample track, a trig with SLIDE and a TUNE lock: the pitch glides.
+5. A SLICE track, FUNC + SETTINGS, YES, YES again while SAVING shows: no slice menu.
+6. Record something long, then FUNC + YES at once: NORMALIZING finishes, TRIM shows.
+7. Overbridge (2.26.10+): the Digitone II shows online; main and track streams play.
+8. The v0.40 list still.
+
+**Known issues**
+- One recorder: a REC trig while the other buffer records cuts that take.
+- The buffers are off in a project with saved samples in SAMP 124-127 (from v0.32 or older):
+  those slots keep playing them.
+- DDRW at heavy bit reduction rounds a step differently from a real Monomachine (fixed in v0.42).
+- An LFO on SAMP or SLCE doesn't step through the loaded samples yet.
+- Preset pool trig locks don't work with the mod's machines.
+- Unverified on hardware: a take's start against its step, by ear; Overbridge with the mod
+  (`docs/overbridge.md`).
 
 ## v0.40 — NEST (folders inside folders, SLICE reads, normalised recordings, slides through copy/paste)
 
