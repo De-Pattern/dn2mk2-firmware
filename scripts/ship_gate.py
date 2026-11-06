@@ -182,6 +182,7 @@ FIRST = (("preflight", "preflight (never reused)"),
          ("hwrules", "DSP hardware rules (never reused)"),
          ("symbols", "every C-keyed check has its symbol in the layout (never reused)"),
          ("coldfire", "ColdFire instruction set, each code chunk and MAIN OS (never reused)"),
+         ("overbridge", "Overbridge's code untouched (never reused)"),
          ("unit", "unit tests, both cores (pytest-xdist)"))
 # the ColdFire emulator steps: (id, the gate's name), quickest first (v0.37's timings), the
 # hour-long dead link last
@@ -567,6 +568,22 @@ def main() -> int:
             gate("ColdFire: MAIN OS", not bad,
                  f"{len(hits)} hit(s), all in appended data that never executes" if not bad
                  else f"{len(bad)} in executed code, first at {bad[0]:#x}")
+
+        # 4b. v0.41 (docs/ROADMAP.md 1b, docs/overbridge.md): no byte the build changes lies in an
+        # instruction Overbridge's audio path can run (scripts/gate_overbridge.py: from the mode-6
+        # packet builder, the USB input to TX, the USB writer, the mode getter, and the audio
+        # interrupt up to the link's hook, followed through every branch and call); and the
+        # detector's negative control, rooted at a site the build patches, must find it
+        if wanted("overbridge"):
+            ob_args = [sys.executable, "scripts/gate_overbridge.py", work / "stock_section_3_MAIN_OS.bin",
+                       bdir / "section_3_MAIN_OS.bin"]
+            rc_o, out_o = run("overbridge", [*ob_args, "--json", work / "overbridge.json"], logs)
+            rc_c, out_c = run("overbridge_control", [*ob_args, "--control", "0x400DB092"], logs)
+            last = out_o.strip().splitlines()[-1] if out_o.strip() else ""
+            good = rc_o == 0 and rc_c == 0 and last.startswith("PASS")
+            gate("Overbridge's code untouched", good,
+                 last[6:] + " (its negative control found the patched applier)" if good
+                 else (out_o[-500:] + " | control: " + out_c[-200:]))
 
         # 5. boot from reset
         boot_cmd = [a.venv, "-u", "scripts/emu_boot_check.py", bdir / "section_3_MAIN_OS.bin"]
