@@ -239,6 +239,13 @@ class Prog:
             assert not (x == y == -(1 << 31)), "SSF: -1 x -1 wraps"
             self.setR(d, ((x * y) << 1) >> 32)
 
+    def mul_ssi(self, d: int, a: int, b: int, note: str = "") -> None:
+        """v0.42: Rd = Ra * Rb (SSI), the multiplier's signed integer form: the product's low
+        32 bits (bits 31..0 of the 80-bit result, PRM p.3-10)."""
+        self.e(f"R{d} = R{a} * R{b} (SSI);", note)
+        if self.run:
+            self.setR(d, s32(self.r[a]) * s32(self.r[b]))
+
     def ipass(self, d: int, a: int, note: str = "") -> None:
         self.e(f"R{d} = PASS R{a};", note)
         if self.run:
@@ -405,7 +412,9 @@ class Prog:
         self.place(top)
         if self.run:
             while True:
+                before = self.r[counter]
                 body()
+                assert self.r[counter] == before, f"loop_r: the body changed its count R{counter}"
                 self.iconst(one, 1)
                 self.iop(counter, counter, "-", one)
                 if self.r[counter] == 0:

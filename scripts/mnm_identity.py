@@ -6,6 +6,7 @@ cases' notes and increments, and over variants of them whose knobs change mid-no
 
     python scripts/mnm_identity.py record OUT.json      # before the re-code
     python scripts/mnm_identity.py check REF.json       # after: every output identical
+    python scripts/mnm_identity.py check REF.json VO6   # one machine, while working
 
 The golden runs (MNM_GOLDEN) give the cases' A/F words only; nothing of the Monomachine's
 output is used. Exit 0 and PASS when every output is identical, 1 and the cases otherwise.
@@ -43,12 +44,12 @@ def variants(case: dict, rnd: random.Random) -> list[dict]:
 
 
 def run_all() -> dict:
-    rnd = random.Random(0x42)
     res: dict = {}
     for name, M in MACHINES.items():
         cases = bench.golden(name)["cases"]
         per, steps, blocks = {}, 0, 0
         for case in cases:
+            rnd = random.Random(f"{name}/{case['name']}")     # its own: a partial check is the same
             for k, c in enumerate([case] + variants(case, rnd)):
                 ev = {e[0]: e for e in c["events"]}
                 b = bench.Bench(M)
@@ -70,6 +71,10 @@ def run_all() -> dict:
 
 def main() -> int:
     mode, path = sys.argv[1], pathlib.Path(sys.argv[2])
+    if len(sys.argv) > 3:                       # check only these machines (while working)
+        for n in list(MACHINES):
+            if n not in sys.argv[3].split(","):
+                del MACHINES[n]
     res = run_all()
     if mode == "record":
         path.write_text(json.dumps(res, indent=1))
@@ -82,6 +87,9 @@ def main() -> int:
             if ref[name]["cases"].get(case) != h:
                 bad.append(f"{name} {case}")
         print(f"{name}: {ref[name]['steps_a_block']:.1f} -> {r['steps_a_block']:.1f} instructions a block")
+    if len(sys.argv) > 3:
+        ref = {n: ref[n] for n in res}
+        print("ONLY " + sys.argv[3] + ": a partial check")
     if set(ref) != set(res) or any(set(ref[n]["cases"]) != set(res[n]["cases"]) for n in res):
         bad.append("the case lists differ")
     print(("PASS" if not bad else "FAIL") + f": {sum(len(r['cases']) for r in res.values())} runs, "
