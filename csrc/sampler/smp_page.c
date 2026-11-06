@@ -2060,42 +2060,60 @@ static int rt_h_draw(void *c)
     return 1;
 }
 
-/* v0.41: the RECORDER's second view (RIGHT; LEFT back): the two buffers, QREC, QPLAY */
+/* v0.41: the RECORDER's second view (RIGHT; LEFT back), on the RECORDER's own grid: its title,
+ * meter and SRC (drawn by rec_screen_draw), the RECORD box's place split in two, one dotted box a
+ * buffer (REC 1, REC 2: EMPTY, REC, NEXT, PLAY and the take's seconds), and the bottom row at the
+ * RECORDER's four places: E Q.REC, F Q.PLAY, G R.LEN, H ARM (TRIG with a step held). Every knob
+ * does what its place shows (rec.c knob) */
 static void rt_view_draw(void *c)
 {
-    extern int rt_on, rt_qrec, rt_qplay, rec_rlen;
+    extern int rt_on, rt_qrec, rt_qplay, rec_rlen, rec_state, rec_rt_take;
+    extern unsigned int rec_heard;
     extern int rt_state(int b, int *tenths);
     extern const char *rt_qname(int q);
-    LABEL(c, 25, 57, "%s", "REC TRIGS");
-    hline(c, 0, 50, 54, 0);
-    if (!rt_on) {
-        LABEL(c, 64, 40, "%s", "SAMP 124-127 HOLD");
-        LABEL(c, 64, 32, "%s", "SAVED SAMPLES:");
-        LABEL(c, 64, 24, "%s", "NO BUFFERS HERE");
-    } else {
-        static const char *const W[4] = {"EMPTY", "REC", "NEXT", "PLAY"};
-        for (int b = 0; b < 2; b++) {
-            int t, st = rt_state(b, &t), y = 40 - 12 * b;
-            LABEL(c, 20, y, "REC %d", b + 1);
-            if (st)
-                LABEL(c, 76, y, "%s %d.%d S", W[st], t / 10, t % 10);
-            else
-                LABEL(c, 76, y, "%s", W[0]);
+    static const char *const W[4] = {"EMPTY", "REC", "NEXT", "PLAY"};
+    int bx0 = 29, bx1 = 97, by0 = 22, by1 = 48, cx = (bx0 + bx1) / 2;   /* the RECORD box's own place */
+    box(c, bx0, by0, bx1, by1, 1);
+    for (int b = 0; b < 2; b++) {               /* a line a buffer, where the box's two lines are */
+        int y = b ? by0 + 6 : by0 + 16;
+        if (!rt_on) {
+            LABEL(c, cx, y, "REC%d OFF", b + 1);
+            continue;
         }
+        int t, st = rt_state(b, &t);
+        if (st)
+            LABEL(c, cx, y, "REC%d %s %d.%d", b + 1, W[st], t / 10, t % 10);
+        else
+            LABEL(c, cx, y, "REC%d %s", b + 1, W[0]);
+        if (st == 1)                            /* a solid dot: recording */
+            fill(c, bx0 + 2, y + 1, bx0 + 4, y + 3);
+    }
+    if (!rt_on) {                               /* SAMP 124..127 hold saved samples here */
+        LABEL(c, 113, 34, "%s", "SAMP");
+        LABEL(c, 113, 26, "%s", "IN USE");
     }
     LABEL(c, 13, 9, "%s", rt_qname(rt_qrec));
     LABEL(c, 13, 0, "%s", "Q.REC");
     LABEL(c, 47, 9, "%s", rt_qname(rt_qplay));
     LABEL(c, 47, 0, "%s", "Q.PLAY");
-    if (rec_rlen <= 0)
-        LABEL(c, 80, 9, "%s", "PLEN");
-    else
-        LABEL(c, 80, 9, "%d", rec_rlen);
-    LABEL(c, 80, 0, "%s", "R.LEN");
-    if (!rt_h_draw(c)) {
-        LABEL(c, 113, 9, "%s", "HOLD");
-        LABEL(c, 113, 0, "%s", "A STEP");
+    if (rec_rlen <= 0) {                        /* as the RECORDER draws R.LEN */
+        LABEL(c, 80, 12, "%s", "MAX");
+    } else {
+        LABEL(c, 80, 12, "%d", rec_rlen);
+        LABEL(c, 80, 6, "%s", "STEPS");
     }
+    LABEL(c, 80, 0, "%s", "R.LEN");
+    if (rt_h_draw(c))                           /* a step held: its REC trig */
+        return;
+    int heard = rec_heard != 0;
+    int on = heard && (rec_state == 1 || rec_state == 2) && !rec_rt_take;
+    int sx0 = 104, sx1 = 122, sy0 = 8, sy1 = 15;  /* ARM's switch, as the RECORDER draws it */
+    box(c, sx0, sy0, sx1, sy1, 0);
+    if (on)
+        fill(c, sx1 - 8, sy0 + 2, sx1 - 2, sy1 - 2);
+    else
+        box(c, sx0 + 2, sy0 + 2, sx0 + 8, sy1 - 2, 0);
+    LABEL(c, 113, 0, "%s", "ARM");
 }
 
 void rec_screen_draw(void *c)
@@ -2116,17 +2134,13 @@ void rec_screen_draw(void *c)
     int state = heard ? rec_state : 0;
     extern int rec_rt_take, rec_view;
     clear(c, 0, 0, 127, 63);
-    if (rec_view == 1) {                        /* v0.41: RIGHT: the REC TRIGS view */
-        rt_view_draw(c);
-        return;
-    }
     if (state == 2 && !rec_rt_take) {           /* v0.25: recording: the DT2's screen */
         recording_draw(c, heard);
         return;
     }
 
-    /* the title and the meter */
-    LABEL(c, 25, 57, "%s", "RECORDER");
+    /* the title and the meter (v0.41: the REC TRIGS view's too: the source it records) */
+    LABEL(c, 25, 57, "%s", rec_view == 1 ? "REC TRIGS" : "RECORDER");
     hline(c, 0, 50, 54, 0);
     int mx0 = 54, mx1 = 126, my0 = 55, my1 = 62, w = mx1 - mx0 - 2;
     box(c, mx0, my0, mx1, my1, 0);
@@ -2143,6 +2157,10 @@ void rec_screen_draw(void *c)
     LABEL(c, 13, 43, "%s", src);
     LABEL(c, 13, 35, "%s", smp_rec_chan[rec_chan < 0 ? 0 : rec_chan > SMP_REC_CHANS - 1 ? SMP_REC_CHANS - 1 : rec_chan]);
     LABEL(c, 13, 25, "%s", "SRC");
+    if (rec_view == 1) {                        /* v0.41: RIGHT: the REC TRIGS view */
+        rt_view_draw(c);
+        return;
+    }
 
     /* the RECORD box: what YES does, or what the recorder is doing */
     int bx0 = 29, bx1 = 97, by0 = 22, by1 = 48;

@@ -475,10 +475,16 @@ static void knob(int index, int delta)
     extern void rt_knob(int index, int delta);
     if (index == 8 && sl_rec_knob(delta))
         return;
-    if (rec_view == 1 && (index == 5 || index == 6)) {
-        rt_knob(index, delta);
-        return;
+    if (rec_view == 1) {                        /* the REC TRIGS view: what each place shows */
+        if (index == 5 || index == 6)
+            rt_knob(index, delta);              /* E Q.REC, F Q.PLAY: four detents a choice */
+        else if (index == 7)
+            rec_rlen = clamp(rec_rlen + delta, 0, 128);   /* G R.LEN (F on the RECORDER) */
+        else if (index == 1 || index == 2 || index == 8)
+            goto as_recorder;                   /* A SRC, B CHAN, H ARM: as on the RECORDER */
+        return;                                 /* C, D: nothing there */
     }
+as_recorder:
     switch (index) {
     case 1: rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1); break;
     case 2: rec_chan = clamp(rec_chan + rec_choice_step(2, delta), 0, 2); mon_known = 0; break;   /* v0.33: CHAN */
