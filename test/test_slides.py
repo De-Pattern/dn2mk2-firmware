@@ -47,6 +47,8 @@ def test_lengths():
 def test_ids_clear_of_stock_and_arp():
     assert SL.ID_SLD > 129 and SL.ID_SLEN > 129 and 0xFF not in (SL.ID_SLD, SL.ID_SLEN)
     assert SL.RAM_SLD <= 100 and SL.RAM_SLEN <= 100
+    assert SL.ID_REC > 129 and SL.ID_REC not in (SL.ID_SLD, SL.ID_SLEN, 0xFF)          # v0.41
+    assert SL.RAM_REC <= 100 and SL.RAM_REC not in (SL.RAM_SLD, SL.RAM_SLEN)
 
 
 def test_spec_hooks():
@@ -60,3 +62,41 @@ def test_spec_hooks():
     c0 = waverider.SPEC["c_chunk"]["load"]
     for name in ("sl_pre_hook", "sl_apply", "sl_smooth", "sl_build", "sl_clear", "sl_load", "sl_save"):
         assert c0 <= lay[name] < lay["c_text_end"]
+
+
+# -- v0.41: slides on our own machines' controls (ROADMAP 3) ------------------------------
+
+def test_sample_slides_are_continuous_only():
+    """the sample machines slide only controls the DSP reads while the note sounds, never a
+    choice (PLAY 41, SAMP 43, BARS 29, SEG 31, MODE 42); GRID/SLICE/WERP never their slice
+    or segment controls (taken at the note)"""
+    from dnfw.sampler import machines as SM
+    choices = {41, 43, 29, 31, 42}
+    for t, slots in SL.SAMPLE_SLIDE.items():
+        assert not choices & set(slots), t
+        assert 30 in slots                                # LEV: every block, every machine
+    at_note = {SM.TYPE_OF["GRID"], SM.TYPE_OF["SLICE"], SM.TYPE_OF["WERP"]}
+    for t in at_note:
+        assert set(SL.SAMPLE_SLIDE[t]) <= {25, 30}, t       # TUNE and LEV only
+
+
+def test_md_midnote_names():
+    """every machine in the table, and no unused control or *TYP ever marked"""
+    from dnfw.md import machines as MD
+    assert set(SL.MD_MIDNOTE) == {M.NAME for M in MD.MACHINES}
+    for M in MD.MACHINES:
+        for c, name in zip(SL.MD_MIDNOTE[M.NAME], M.PNAMES):
+            assert c == "." or (name != "-" and "TYP" not in name), (M.NAME, name)
+
+
+def test_md_midnote_table():
+    """MD_MIDNOTE is what the bit-exact model does: for each machine and control, a change four
+    blocks into a note is heard in the rest of it (against the same host block, nothing
+    changed). A machine whose code changes must change the table with it"""
+    assert SL.md_midnote_measure() == SL.MD_MIDNOTE
+
+
+def test_header_tables(stock):
+    h = SL.c_header(stock)
+    for name in ("sl_perc_bits[34]", "sl_perc_slot[8]", "sl_perc_fx[4]", "sl_samp[6][4]", "SL_ID_REC 202"):
+        assert name in h, name

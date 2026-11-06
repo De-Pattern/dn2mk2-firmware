@@ -123,13 +123,30 @@ void sl_pre(u32 v, u32 t)
     sl_lastv[t] = (s8)v;
 }
 
-static int continuous(int type, u32 slot)
+static int continuous(int type, u32 slot, u32 v)
 {
     if (slot > 100 || type < 0 || type == 4)
         return 0;
     if ((sl_shared[slot >> 5] >> (slot & 31)) & 1)
         return 1;
-    return type < 4 && ((sl_machine[type][slot >> 5] >> (slot & 31)) & 1);
+    if (type < 4)
+        return (sl_machine[type][slot >> 5] >> (slot & 31)) & 1;
+    /* v0.41 (dnfw.slides SAMPLE_SLIDE, MD_MIDNOTE): the sample machines' controls read while
+     * the note sounds; PERC's track effects, and the controls of its machine (TYPE's value as
+     * the DSP reads it: the voice's target, 0..127 over the machines) that its code hears
+     * mid-note. Choices, and controls taken only at the note, never slide */
+    if (type >= 8 && type <= 13)
+        return (sl_samp[type - 8][slot >> 5] >> (slot & 31)) & 1;
+    if (type == SL_PERC_TYPE) {
+        if ((sl_perc_fx[slot >> 5] >> (slot & 31)) & 1)
+            return 1;
+        u32 tv = SRC[IDX(v, SL_PERC_TYPE_SLOT)] >> 8;
+        u32 m = (tv > 127 ? 127 : tv) * SL_PERC_N >> 7;
+        for (u32 k = 0; k < 8; k++)
+            if (sl_perc_slot[k] == slot)
+                return (sl_perc_bits[m < SL_PERC_N ? m : SL_PERC_N - 1] >> k) & 1;
+    }
+    return 0;
 }
 
 static u32 ticks_a_step(u32 t)
@@ -165,7 +182,7 @@ static void trigger(u32 v, u32 t, u8 *list)
         count = NS;
     for (int j = 0; j < count; j++) {
         u32 slot = *(u16 *)(list + 20 + 8 * j);
-        if (!continuous(type, slot))
+        if (!continuous(type, slot, v))
             continue;
         u32 i = IDX(v, slot);
         u16 to = SRC[i], from = sl_cap[t][slot];

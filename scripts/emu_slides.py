@@ -639,6 +639,55 @@ def main() -> int:
     else:
         report["stock_skips_ours"] = rec5 == b"\xff\xff"
 
+    # ---- v0.41 (ROADMAP 3): slides on our machines' own controls. On a SLIDE trig, a control
+    # the engine reads while the note sounds glides (some frame strictly between the two values),
+    # and a choice, or a control the machine takes only at its trig, lands on its lock at the
+    # first frame (as stock's lock jump). ONESHOT: TUNE glides, SAMP and PLAY land. PERC on
+    # TRX-XT: PTCH and AMD (its track effect) glide, DTYP (a choice) lands. PERC on TRX-CP, whose
+    # controls its code takes at the trig (dnfw.slides MD_MIDNOTE): PTCH lands --------------
+    if build:
+        TUNE_S, SAMP_S, PLAY_S, DTYP_S, AMD_S, TYPE_S = 25, 43, 41, 47, 26, 38
+
+        def own_case(mtype, type_word, locks_from, locks_to, glide, land, tag):
+            machine.write(snd + 222, bytes([mtype]))
+            if type_word is not None:
+                put16(snd + 0x14 + 2 * TYPE_S, type_word)
+            call(SYNC, snd, V)
+            for s_ in range(101):
+                put32(STATE + 4 * idx(V, s_), u16(SRC + 2 * idx(V, s_)) << 16)
+            base = 20 + 4 * own_case.n
+            own_case.n += 1
+            for k, (slot, v) in enumerate(locks_from.items()):
+                stock_lock(2 + 8 * own_case.n + k, slot, base, v)
+            for k, (slot, v) in enumerate(locks_to.items()):
+                stock_lock(2 + 8 * own_case.n + k, slot, base + 2, v)
+            set_slide(base + 2, 1, 4)                   # SLIDE on, SLEN 1 step (expect_frames)
+            trig(base, f0 + 400 + 100 * own_case.n)
+            run(12, f"{tag} from")
+            trig(base + 2, f0 + 450 + 100 * own_case.n)
+            rows = run(expect_frames + 40, f"{tag} slide", read=tuple(locks_to))
+            res = {}
+            for slot in glide:
+                a, b = locks_from[slot], locks_to[slot]
+                seen = [r["out"][slot] for r in rows]
+                res[f"{slot} glides"] = any(min(a, b) < x < max(a, b) for x in seen) and seen[-1] == b
+            for slot in land:
+                res[f"{slot} lands"] = rows[0]["out"][slot] == locks_to[slot]
+            return res
+        own_case.n = 0
+        machine.write(table + REC * 2, b"\xff" * (REC * (RECS - 2)))   # (records 2.. for these)
+        r1 = own_case(8, None, {TUNE_S: 0x2000, SAMP_S: 0x0300, PLAY_S: 0x0000},
+                      {TUNE_S: 0x6000, SAMP_S: 0x0700, PLAY_S: 0x7F00}, (TUNE_S,), (SAMP_S, PLAY_S), "ONESHOT")
+        check("v0.41: ONESHOT on a SLIDE trig: TUNE glides; SAMP and PLAY (choices) land at once",
+              all(r1.values()), r1)
+        r2 = own_case(5, 12 << 8, {TUNE_S: 0x2000, AMD_S: 0x0000, DTYP_S: 0x0000},
+                      {TUNE_S: 0x6000, AMD_S: 0x6000, DTYP_S: 0x7F00}, (TUNE_S, AMD_S), (DTYP_S,), "TRX-XT")
+        check("v0.41: PERC on TRX-XT: PTCH and AMD glide; DTYP (a choice) lands at once", all(r2.values()), r2)
+        r3 = own_case(5, 16 << 8, {TUNE_S: 0x2000}, {TUNE_S: 0x6000}, (), (TUNE_S,), "TRX-CP")
+        check("v0.41: PERC on TRX-CP (its controls taken at the trig): PTCH lands at once", all(r3.values()), r3)
+        machine.write(snd + 222, bytes([0]))
+        call(SYNC, snd, V)
+
     # ---- v0.40: TRIG page 2's frame on stock 1.11 (the control: our two places aside, the
     # build's page must be stock's pixel for pixel) ----------------------------------------
     if not build:

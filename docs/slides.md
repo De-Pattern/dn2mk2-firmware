@@ -235,3 +235,26 @@ clipboard's later records of its track with no destination record in the index; 
 paste: the distinct slots of this and later entries with no record). Otherwise the slide is
 dropped (`sl_paste_dropped` counts it): stock locks always come first. Gate: both pastes keep
 every stock lock (fail on 939cbc42).
+
+## v0.41: our machines' own controls slide (ROADMAP 3)
+
+Until v0.40 a slide moved only the shared slots on our machines (filter, amp, FX sends,
+LFOs). Now their own controls slide too, where the engine hears them while the note sounds;
+a choice, or a control a machine takes only at its note, lands on its lock at once (as
+stock's lock jump), since sliding it would be silent or step through choices.
+
+- **Sample machines** (`dnfw.slides.SAMPLE_SLIDE`, from `dnfw.sampler.program`): TUNE and LEV
+  on all six; STRT, LEN and LOOP also on ONESHOT, STRETCH and REPITCH (they follow them while
+  the note sounds). GRID's and SLICE's slice controls and WERP's segments are taken at the
+  note. Never: PLAY, SAMP, BARS, SEG, MODE, GRID.
+- **PERC** (the Machinedrum's machines): its track effects (AMD, AMF, EQF, EQG, FLTF, FLTW,
+  FLTQ) always; of each machine's eight, those its own code hears mid-note
+  (`dnfw.slides.MD_MIDNOTE`, measured on the bit-exact model: a note, one control changed
+  four blocks in, against the same host block with nothing changed). TRX-CP, TRX-MA, TRX-CL
+  and GND-IM take every control at the trig: nothing of theirs slides. Never TYPE, any *TYP,
+  or an unused control. `test_slides.test_md_midnote_table` measures the table again every
+  gate, so a machine whose code changes cannot keep a stale one.
+- **Not yet**: RESONATOR, CZ, the Monomachine's machines (re-coded in v0.42).
+
+Checked: `scripts/emu_slides.py` (ONESHOT: TUNE glides, SAMP and PLAY land; PERC on TRX-XT:
+PTCH and AMD glide, DTYP lands; PERC on TRX-CP: PTCH lands).

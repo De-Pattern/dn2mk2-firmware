@@ -53,6 +53,72 @@ PASTE_SITES = (
     (0x400E752C, "73280001b481", "sl_clr_cmp"),              # track clear: a record's track
 )
 
+# v0.41 (ROADMAP 3, the owner 2026-11-03): slides on our machines' own controls. Only a control
+# the sound engine reads while the note sounds slides (one read at the note would slide
+# silently), and never a choice (TYPE, SAMP, PLAY, BARS, SEG, MODE, GRID, a *TYP).
+# The sample machines (types 8..13: dnfw.sampler.program): TUNE (25) and LEV (30) every block
+# (voice); ONESHOT, STRETCH and REPITCH also follow STRT (26), LEN (45) and LOOP (44) while the
+# note sounds (live: follow); GRID's and SLICE's slice and WERP's segments are taken at the note.
+SAMPLE_SLIDE = {8: (25, 30, 26, 45, 44),          # ONESHOT
+                9: (25, 30),                      # WERP
+                10: (25, 30, 26, 45),             # STRETCH
+                11: (30, 26, 45),                 # REPITCH (no TUNE on its page)
+                12: (25, 30),                     # GRID
+                13: (25, 30)}                     # SLICE
+# PERC (type 5): the Machinedrum's machines (dnfw.md). Their eight controls (dnfw.perc.machines
+# PARAMS: frame slots 25, 31, 41, 30, 43, 44, 47, 29) reach the MD's own DSP code through its
+# host words, recomputed on a block with a change; whether a change is heard while the note
+# sounds is the machine's code's: measured on the bit-exact model (test_slides
+# test_md_midnote_table: a note, one control changed four blocks in, against the same host
+# block with nothing changed; any difference in the rest of the note is a 1), every *TYP and
+# every unused control left out. Their track effects (FX_PARAMS) are applied every block.
+PERC_TYPE, PERC_TYPE_SLOT = 5, 38
+PERC_SLOTS = (25, 31, 41, 30, 43, 44, 47, 29)
+PERC_FX_SLOTS = (26, 28, 34, 35, 32, 45, 40)
+MD_MIDNOTE = {
+    "TRX-BD": "111111.1", "TRX-B2": "1..1..11", "TRX-SD": "11111111", "TRX-XT": "1111.1..",
+    "TRX-CP": "........", "TRX-RS": "111.....", "TRX-CB": "111111..", "TRX-CH": "..111...",
+    "TRX-OH": "..111...", "TRX-CY": "111111..", "TRX-MA": "........", "TRX-CL": "........",
+    "TRX-XC": "1111.1..", "TRX-S2": "1111111.", "EFM-BD": "11.11111", "EFM-SD": "11111111",
+    "EFM-XT": "11.1111.", "EFM-CP": "1..11111", "EFM-RS": "11111111", "EFM-CB": "1111111.",
+    "EFM-HH": "11111111", "EFM-CY": "1111111.", "GND-SN": "1111....", "GND-NS": "1.......",
+    "GND-IM": "........", "PI-BD": "11.111..", "PI-SD": "1111111.", "PI-MT": "11111111",
+    "PI-ML": "1111....", "PI-MA": "111.1...", "PI-RS": "111111..", "PI-RC": "11111111",
+    "PI-CC": "11.11111", "PI-HH": "11111111"}
+
+
+def md_midnote_measure(names=None, blocks: int = 40, at: int = 4) -> dict[str, str]:
+    """the measurement MD_MIDNOTE holds (slow: a few minutes for all 34)"""
+    from .md import machines as MD
+    from .md.bench import Bench
+    base = [8192] * 8
+    out = {}
+    for M in MD.MACHINES:
+        if names and M.NAME not in names:
+            continue
+
+        def run(change):
+            b = Bench(M)
+            s = list(b.block(base, True))
+            for k in range(1, blocks):
+                if k == at:
+                    inp = list(base)
+                    if change is not None:
+                        inp[change[0]] = change[1]
+                    s += b.block(inp, False)
+                else:
+                    s += b.block()
+            return s
+        ref = run(None)
+        bits = ""
+        for k, name in enumerate(M.PNAMES):
+            hit = any(any(abs(x - y) > 1e-9 for x, y in zip(run((k, v))[32 * at:], ref[32 * at:]))
+                      for v in (14000, 2000))
+            bits += "1" if hit and name != "-" and "TYP" not in name else "."
+        out[M.NAME] = bits
+    return out
+
+
 DEST_SLOTS = (4, 12, 20)                # LFO DEST: copied unsmoothed by 0x400db12a; never slid
 SHARED_PAGES = (0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0D, 0x0E, 0x0F, 0x1A, 0x1B, 0x1C)
 MACHINE_PAGES = (0x00, 0x01, 0x02, 0x03)    # FM TONE, WAVETONE, FM DRUM, SWARMER (types 0..3)
@@ -89,6 +155,11 @@ def c_header(stock: bytes) -> str:
     def words(m):
         return "{" + ", ".join(f"0x{(m >> (32 * k)) & 0xFFFFFFFF:08x}u" for k in range(4)) + "}"
     rows = ",\n ".join(words(m) for m in machine)
+    from .md import machines as MD
+    samp = ",\n ".join(words(sum(1 << x for x in SAMPLE_SLIDE[t])) for t in range(8, 14))
+    md_bits = ", ".join(str(sum(1 << k for k, c in enumerate(MD_MIDNOTE[M.NAME]) if c == "1"))
+                        for M in MD.MACHINES)
+    fx = words(sum(1 << x for x in PERC_FX_SLOTS))
     units = ", ".join(str(u) for u in SLEN_UNITS)
     texts = ", ".join(f'"{t}"' for t in SLEN_TEXT)
     return (f"\n/* parameter slides (dnfw.slides) */\n#ifdef SLIDE_C\n"
@@ -100,4 +171,10 @@ def c_header(stock: bytes) -> str:
             f"static const unsigned int sl_shared[4] = {words(shared)};\n"
             f"static const unsigned int sl_machine[4][4] = {{\n {rows}}};\n"
             f"static const unsigned short sl_units[{len(SLEN_UNITS)}] = {{{units}}};\n"
-            f"static const char *const sl_len_text[{len(SLEN_TEXT)}] = {{{texts}}};\n#endif\n")
+            f"static const char *const sl_len_text[{len(SLEN_TEXT)}] = {{{texts}}};\n"
+            f"#define SL_PERC_TYPE {PERC_TYPE}\n#define SL_PERC_TYPE_SLOT {PERC_TYPE_SLOT}\n"
+            f"#define SL_PERC_N {len(MD.MACHINES)}\n"
+            f"static const unsigned char sl_perc_slot[8] = {{{', '.join(map(str, PERC_SLOTS))}}};\n"
+            f"static const unsigned char sl_perc_bits[{len(MD.MACHINES)}] = {{{md_bits}}};\n"
+            f"static const unsigned int sl_perc_fx[4] = {fx};\n"
+            f"static const unsigned int sl_samp[6][4] = {{\n {samp}}};\n#endif\n")
