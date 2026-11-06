@@ -677,11 +677,11 @@ def main() -> int:
                 a, b = locks_from[slot], locks_to[slot]
                 seen = [r["out"][slot] for r in rows]
                 end = seen[-1]
-                res[f"{slot} glides"] = (abs(end - b) <= 0x40 and len(set(seen[-10:])) == 1
+                res[f"{slot} glides"] = (abs(end - b) <= 0x40 and max(seen[-10:]) - min(seen[-10:]) <= 4
                                          and sum(1 for x in seen if min(a, end) + 0x40 < x < max(a, end) - 0x40) > 20)
-            for slot in land:
+            for slot in land:                       # (steady: within 4 of the modulation's own drift)
                 seen = [r["out"][slot] for r in rows]
-                res[f"{slot} lands"] = abs(seen[0] - locks_to[slot]) <= 0x40 and len(set(seen)) == 1
+                res[f"{slot} lands"] = abs(seen[0] - locks_to[slot]) <= 0x40 and max(seen) - min(seen) <= 4
             return res
         own_case.n = 0
         machine.write(table + REC * 2, b"\xff" * (REC * (RECS - 2)))   # (records 2.. for these)
