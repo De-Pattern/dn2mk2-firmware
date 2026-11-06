@@ -222,35 +222,49 @@ def _half(p: Prog, L: C.Layout) -> None:
                 p.st(W["w"], 1)
                 p.iconst(12, L.BUF)
                 p.seti(5, 12)
+                # v0.42: the loop's words held in registers (v0.41 loaded i0, msk, cb, fb, w,
+                # x1, X49, X48 and the count from L2 every sample, and stored i0, w and the
+                # count): the same operations in the same order, so the same words, bit for bit
+                # (scripts/mnm_identity.py). R0 the count, R1 TOP, R5 -31 (q23's shift), R7 w,
+                # R8 i0, R9 msk, R10 cb, R11 fb, R13 x1, R14 X49, R15 X48; R12 the scratch.
+                p.ld(8, W["i0"])
+                p.ld(9, W["msk"])
+                p.ld(10, W["cb"])
+                p.ld(11, W["fb"])
+                p.ld(7, W["w"])
+                p.ld(13, W["x1"])
+                p.ld(14, W["x49"])
+                p.ld(15, W["x48"])
+                p.fconst(1, C.TOP)
+                p.iconst(5, -31)
+
+                def sat(x):                         # C.sat, TOP held in F1
+                    p.fop(x, x, "MIN", 1)
+                    p.fconst(12, -1.0)
+                    p.fop(x, x, "MAX", 12)
 
                 def one():
-                    p.ld(1, W["i0"])
-                    p.ld(2, W["msk"])
-                    p.iop(2, 1, "AND", 2)
+                    p.iop(2, 8, "AND", 9)
                     p.iconst(12, 1)
-                    p.iop(1, 12, "+", 1)
-                    p.st(W["i0"], 1)
+                    p.iop(8, 8, "+", 12)
                     p.lsh(2, 2, 2)
-                    p.ld(3, W["cb"])
-                    D.addr(p, 3, 3, 2)
+                    p.iop(3, 10, "+", 2)
                     p.seti(1, 3)
                     p.ldi(4, 0, 1)
-                    D.q23(p, 4, 4)                  # the new wave
-                    p.ld(3, W["fb"])
-                    D.addr(p, 3, 3, 2)
+                    p.lsh(4, 4, 8)
+                    p.float_(4, 4, 5)               # the new wave (D.q23)
+                    p.iop(3, 11, "+", 2)
                     p.seti(1, 3)
                     p.ldi(6, 0, 1)
-                    D.q23(p, 6, 6)                  # the previous one
-                    p.ld(1, W["w"])
-                    p.fpass(2, 1)
-                    C.sat(p, 2)
-                    p.ld(3, W["x1"])
-                    p.fop(1, 1, "+", 3)
-                    p.st(W["w"], 1)
+                    p.lsh(6, 6, 8)
+                    p.float_(6, 6, 5)               # the previous one
+                    p.fpass(2, 7)
+                    sat(2)
+                    p.fop(7, 7, "+", 13)
                     p.fop(4, 4, "-", 6)
                     p.fop(4, 4, "*", 2)
                     p.fop(4, 4, "+", 6)             # old + fade (new - old)
-                    C.sat(p, 4)
+                    sat(4)
                     # v0.42, exact as the DSP (P:0x3FA..0x405): its sample is a 24-bit word (the
                     # crossfade's a1), times X49 in the 48-bit product, of which a1 is kept: the
                     # floor of t24 x X49 / 2^23. As one fixed-point multiply: t24 << 8 (the low
@@ -261,15 +275,16 @@ def _half(p: Prog, L: C.Layout) -> None:
                     p.trunc(4, 4)                   # t x 2^31 (saturates at the top)
                     p.iconst(12, -256)
                     p.iop(4, 4, "AND", 12)          # t24 << 8
-                    p.ld(3, W["x49"])               # X49, an integer (see wave())
-                    p.mul_ssf(4, 4, 3)              # the truncation that reduces the bits
+                    p.mul_ssf(4, 4, 14)             # the truncation that reduces the bits
                     p.iconst(12, -1)
                     p.float_(4, 4, 12)              # / 2: X48 x t x 2^-24
-                    p.ld(3, W["x48"])
-                    p.fop(4, 4, "*", 3)
-                    C.sat(p, 4)
+                    p.fop(4, 4, "*", 15)
+                    sat(4)
                     p.stpost(5, 4)
-                p.loop(W["j"], D.NBUF, one)
+                p.loop_r(0, D.NBUF, one)
+                p.st(W["i0"], 8)
+                p.st(W["w"], 7)
+                p.st(W["j"], 0)
                 p.ld(1, W["bit"])
                 p.lsh(1, 1, 7)
                 p.iconst(12, L.W1)

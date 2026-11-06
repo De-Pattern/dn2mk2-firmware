@@ -393,6 +393,29 @@ class Prog:
         self.st(counter, 0)
         self.jump("NE", top)
 
+    def loop_r(self, counter: int, n_from: int | None, body, one: int = 12) -> None:
+        """v0.42: loop() with the count in register COUNTER (no scratch word: two L2 accesses
+        an iteration fewer). BODY must leave COUNTER alone (ONE it may use). N_FROM None: the
+        count is in COUNTER already, and is not 0."""
+        if n_from is not None:
+            self.iconst(counter, n_from)
+        elif self.run:
+            assert s32(self.r[counter]) > 0, "loop_r: a count of 0 or less would run 2^32 times"
+        top = self.label("loop")
+        self.place(top)
+        if self.run:
+            while True:
+                body()
+                self.iconst(one, 1)
+                self.iop(counter, counter, "-", one)
+                if self.r[counter] == 0:
+                    break
+            return
+        body()
+        self.iconst(one, 1)
+        self.iop(counter, counter, "-", one)
+        self.jump("NE", top)
+
     # -- leaf subroutines ---------------------------------------------------------------
     def call(self, name: str, body) -> None:
         """A leaf subroutine: run mode runs BODY here; emit mode jumps to its one copy with

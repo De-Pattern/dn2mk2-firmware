@@ -111,48 +111,43 @@ def phases(p: Prog, L: C.Layout) -> None:
     C.par(p, 1, 4)                              # MOD
     p.fconst(12, 0.5)
 
+    # v0.42: the two phases (b R1, a R3), x0 (R11), minc (R10) and M24 (R8) held in registers
+    # and the count in R9 (v0.41 loaded and stored the slot's words and loaded x0 and minc
+    # every sample): the same operations, the same words (scripts/mnm_identity.py)
+    def held(one):
+        C.st(p, 1, S_B)
+        C.st(p, 3, S_A)
+        p.ld(11, W["x0"])
+        p.ld(10, W["minc"])
+        p.iconst(8, M24)
+        p.loop_r(9, 192, one)
+        C.sts(p, S_B, 1)
+        C.sts(p, S_A, 3)
+        p.st(W["n4"], 9)
+
     def synced():                               # b (S_B) the note, a (S_A) the second, reset at b's wrap
         def one():
-            C.st(p, 1, S_B)
-            p.ld(2, W["x0"])
-            p.ipass(12, 1)
-            p.iop(1, 12, "+", 2)
-            C.st(p, 3, S_A)
-            p.ld(2, W["minc"])
-            p.ipass(12, 3)
-            p.iop(3, 12, "+", 2)
-            p.iconst(12, M24)
+            p.iop(1, 11, "+", 1)
+            p.iop(3, 10, "+", 3)
 
             def wrapped():
-                p.iop(1, 1, "AND", 12)
+                p.iop(1, 1, "AND", 8)
                 p.iconst(3, 0)
-            p.if_(1, "GT", 12, wrapped, kind="i")
-            p.iconst(12, M24)
-            p.iop(3, 3, "AND", 12)
-            C.sts(p, S_B, 1)
-            C.sts(p, S_A, 3)
+            p.if_(1, "GT", 8, wrapped, kind="i")
+            p.iop(3, 3, "AND", 8)
             p.stpost(2, 1)
             p.stpost(5, 3)
-        p.loop(W["n4"], 192, one)
+        held(one)
 
     def free():                                 # a the note, b the second
         def one():
-            C.st(p, 1, S_B)
-            C.st(p, 3, S_A)
             p.stpost(2, 1)
             p.stpost(5, 3)
-            p.ld(2, W["minc"])
-            p.ipass(12, 1)
-            p.iop(1, 12, "+", 2)
-            p.ld(2, W["x0"])
-            p.ipass(12, 3)
-            p.iop(3, 12, "+", 2)
-            p.iconst(12, M24)
-            p.iop(1, 1, "AND", 12)
-            p.iop(3, 3, "AND", 12)
-            C.sts(p, S_B, 1)
-            C.sts(p, S_A, 3)
-        p.loop(W["n4"], 192, one)
+            p.iop(1, 10, "+", 1)
+            p.iop(3, 11, "+", 3)
+            p.iop(1, 1, "AND", 8)
+            p.iop(3, 3, "AND", 8)
+        held(one)
     p.if_(1, "GE", 12, synced, free)
 
 
@@ -166,24 +161,27 @@ def wave_(p: Prog, L: C.Layout) -> None:
     C.knob(p, 1, 4)                             # MOD's knob: bit 5 (0x200000 of its word) = RING, R+S
     p.iconst(12, 32)
     p.iop(1, 1, "AND", 12)
+    consts, q23, fabs, sat = _held(p)
 
     def ring():                                 # IN[i] = |X[i] Y[max(i - 2, 0)]| (the 56300's pipeline)
         p.iconst(12, L.YB)
         p.seti(2, 12)
 
+        consts()
+
         def one():
             p.ldpost(3, 1)
-            _q23(p, 3, 3)
+            q23(3, 3)
             p.ldi(4, 0, 2)
-            _q23(p, 4, 4)
+            q23(4, 4)
             p.fop(3, 3, "*", 4)
-            _abs(p, 3)
-            C.sat(p, 3)
+            fabs(3)
+            sat(3)
             p.stpost(5, 3)
-            p.ld(0, W["n4"])
             p.iconst(12, 190)
             p.if_(0, "LE", 12, lambda: p.ldpost(13, 2), kind="i")
-        p.loop(W["n4"], 192, one)
+        p.loop_r(0, 192, one)
+        p.st(W["n4"], 0)
 
     def plain():
         C.par(p, 1, 3)                          # WAVE
@@ -198,6 +196,30 @@ def wave_(p: Prog, L: C.Layout) -> None:
     p.ifz(1, "NE", ring, plain)
 
 
+def _held(p: Prog):
+    """v0.42: the wave loops' constants held in registers (v0.41 loaded each as it used it):
+    R14 -31 (q23's shift), R15 TOP, R11 -1.0, R10 0.0. -> (consts(), q23(d, r), fabs(x),
+    sat(x)), the same operations as _q23, _abs and C.sat (R13 the scratch, as _abs)."""
+    def consts():
+        p.iconst(14, -31)
+        p.fconst(15, C.TOP)
+        p.fconst(11, -1.0)
+        p.fconst(10, 0.0)
+
+    def q23(d, r):
+        p.lsh(d, r, 8)
+        p.float_(d, d, 14)
+
+    def fabs(x):
+        p.fop(13, 10, "-", x)
+        p.fop(x, x, "MAX", 13)
+
+    def sat(x):
+        p.fop(x, x, "MIN", 15)
+        p.fop(x, x, "MAX", 11)
+    return consts, q23, fabs, sat
+
+
 def _abs(p: Prog, x: int) -> None:
     p.fconst(12, 0.0)
     p.fop(13, 12, "-", x)
@@ -205,24 +227,32 @@ def _abs(p: Prog, x: int) -> None:
 
 
 def _tri(p: Prog, L: C.Layout) -> None:
+    consts, q23, fabs, sat = _held(p)
+    consts()
+    p.fconst(9, 0.5)
+
     def one():
         p.ldpost(3, 1)
-        _q23(p, 3, 3)
-        _abs(p, 3)
-        p.fconst(12, 0.5)
-        p.fop(3, 3, "-", 12)
+        q23(3, 3)
+        fabs(3)
+        p.fop(3, 3, "-", 9)
         p.fop(3, 3, "+", 3)
-        C.sat(p, 3)
+        sat(3)
         p.stpost(5, 3)
-    p.loop(L.W["n4"], 192, one)
+    p.loop_r(0, 192, one)
+    p.st(L.W["n4"], 0)
 
 
 def _saw(p: Prog, L: C.Layout) -> None:
+    consts, q23, fabs, sat = _held(p)
+    consts()
+
     def one():
         p.ldpost(3, 1)
-        _q23(p, 3, 3)
+        q23(3, 3)
         p.stpost(5, 3)
-    p.loop(L.W["n4"], 192, one)
+    p.loop_r(0, 192, one)
+    p.st(L.W["n4"], 0)
 
 
 def _puls(p: Prog, L: C.Layout) -> None:
@@ -244,16 +274,20 @@ def _puls(p: Prog, L: C.Layout) -> None:
     C.sat(p, 3)
     p.st(W["thr"], 3)
 
+    consts, q23, fabs, sat = _held(p)
+    consts()
+    p.ld(4, W["thr"])
+    p.fconst(9, 128.0)
+
     def one():
         p.ldpost(3, 1)
-        _q23(p, 3, 3)
-        p.ld(4, W["thr"])
+        q23(3, 3)
         p.fop(3, 3, "-", 4)
-        p.fconst(12, 128.0)
-        p.fop(3, 3, "*", 12)
-        C.sat(p, 3)
+        p.fop(3, 3, "*", 9)
+        sat(3)
         p.stpost(5, 3)
-    p.loop(W["n4"], 192, one)
+    p.loop_r(0, 192, one)
+    p.st(W["n4"], 0)
 
 
 def _mix(p: Prog, L: C.Layout) -> None:

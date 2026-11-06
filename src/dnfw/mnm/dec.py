@@ -44,12 +44,18 @@ def _body(p: Prog, L: C.Layout) -> None:
         p.fop(13, Y1, "*", X1)
         p.fop(d, d, "+", 13)
 
+    def sat(x):                                # C.sat, TOP held in F15 (v0.42)
+        p.fop(x, x, "MIN", 15)
+        p.fconst(12, -1.0)
+        p.fop(x, x, "MAX", 12)
+
     def lim_to(xk, s):                         # X[k] = lim(s)
         p.fpass(XS[xk], s)
-        C.sat(p, XS[xk])
+        sat(XS[xk])
 
     for k in range(5):
         p.ldi(XS[k], k, 2)
+    p.fconst(15, C.TOP)
 
     def one():
         St.p5 = 0
@@ -78,11 +84,12 @@ def _body(p: Prog, L: C.Layout) -> None:
             macr_in(A); p.fpass(X0, XS[2]); coef(2)                   # x:(r2)+ : X[2], p2 -> 3
             assert St.p5 == (p5_at_inner + 10) % 10
 
-        def gated():
-            p.ld(13, L.W["n5"])
-            p.ld(14, L.W["inner"])
-            p.if_(13, "GT", 14, inner, kind="i")
-        p.loop(W["n5"], 10, gated, one=12)
+        # v0.42: the inner rounds counted in R0 (10 - inner of them), not ten rounds of a
+        # scratch count each testing it against `inner`: the same rounds, the same words
+        p.ld(14, L.W["inner"])
+        p.iconst(12, 10)
+        p.iop(0, 12, "-", 14)
+        p.ifz(0, "NE", lambda: p.loop_r(0, None, inner))
         St.p5 = p5_at_inner
         # K1..K29 (p1 = 1, p2 = 3)
         mpy(B, True); p.fpass(X0, XS[3]); coef(2)                     # p2 -> 2
@@ -111,14 +118,16 @@ def _body(p: Prog, L: C.Layout) -> None:
         p.ld(13, L.W["shift"])
         p.fop(B, B, "*", 13)
         lim_to(4, A)
-        C.sat(p, B)
+        sat(B)
         p.stpost(4, B)
         assert St.p5 == 0, St.p5
     p.loop(W["n4"], 16, one, one=12)
+    p.iconst(12, 0)
+    p.st(W["n5"], 12)                          # (v0.41's inner count, 0 at the end)
     for k in range(5):
         p.sti(k, 2, XS[k])
 
 
 def decimate(p: Prog, L: C.Layout) -> None:
-    """Run the decimator (I1, I2, I4, I5, `inner`, `shift` set). Clobbers R0-R14, I1, I4, I5."""
+    """Run the decimator (I1, I2, I4, I5, `inner`, `shift` set). Clobbers R0-R15 (v0.42: R15 too), I1, I4, I5."""
     p.call("mnm_dec", lambda: _body(p, L))
