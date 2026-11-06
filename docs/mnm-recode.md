@@ -64,6 +64,9 @@ identity check caught it (86 runs differed); that loop keeps its scratch count.
 
 `R = R * R (SSF)` and `R = R * R (SSI)` are the first fixed-point multiplies in our code
 (compute type, multiplier opcodes 0x78 and 0x70: 01 y x f 0 0 r, PRM Table). selas encodes
-them as `0x0197844e` / `0x0197044e` for `R4 = R4 * R14`; digikit's decoder and its multiplier
-(`compute_mult.py`, the gate's SHARC emulator) read them the same way. Neither form keeps state
-between instructions.
+them as `0x0197844e` / `0x0197044e` for `R4 = R4 * R14`: compute field `0x17844e`, cu 01 (the
+multiplier), opcode 0x78 / 0x70, Rn 4, Rx 4, Ry 14, as the PRM's compute-field layout (Figure
+18-1) and multiplier table give them. digikit's decoder walks them as one confident instruction
+each, and the gate's SHARC emulator (`compute_mult.py`: the exact product, doubled for signed
+fractional, bits 63..32 or 31..0) runs them; the SHARC runner's `mnm` part holds every Monomachine
+voice's output to the model bit for bit. Neither form keeps state between instructions.
