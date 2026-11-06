@@ -315,16 +315,26 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
     p.iconst(12, 4 * (K.B0 - 1))
     p.iop(0, 12, "+", 0)
     p.st(L.C["k"], 0)                          # the address of B[-1]
+    # v0.42: the read position (R6), B[-1]'s address (R13), the level's two factors (R14,
+    # R15) and the count (R5) held in registers through the 32 samples (v0.41 loaded and
+    # stored the position, loaded the address and counted in a scratch word every sample):
+    # the same operations in the same order, the same words (scripts/md_identity.py)
+    K.vw(p, 6, "pos")
+    p.ipass(13, 0)
+    if level_word is None:
+        p.fconst(14, 0.5 * level)
+        p.fconst(15, level)
+    else:                                      # v0.26: the level from a word (x 0.5, then x level:
+        p.fconst(14, 0.5)                      # the same product, bit for bit)
+        p.ld(15, level_word)
 
     def one():
-        K.vw(p, 6, "pos")
         p.trunc(7, 6)
         p.iconst(12, 0)
         p.float_(8, 7, 12)
         p.fop(8, 6, "-", 8)                    # f
         p.lsh(7, 7, 2)
-        p.ld(9, L.C["k"])
-        p.iop(7, 9, "+", 7)
+        p.iop(7, 13, "+", 7)
         p.seti(1, 7)
         p.ldpost(0, 1)                         # a = B[i-1]
         p.ldpost(1, 1)                         # b
@@ -350,19 +360,14 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
         p.fop(10, 2, "-", 0)
         p.fop(9, 9, "+", 10)
         p.fop(9, 9, "*", 8)
-        if level_word is None:
-            p.fconst(12, 0.5 * level)
-            p.fop(9, 9, "*", 12)
-            p.fconst(12, level)
-        else:                                  # v0.26: the level from a word (x 0.5, then x level:
-            p.fconst(12, 0.5)                  # the same product, bit for bit)
-            p.fop(9, 9, "*", 12)
-            p.ld(12, level_word)
-            p.fop(9, 9, "*", 12)
-        p.fop(10, 1, "*", 12)
+        p.fop(9, 9, "*", 14)
+        if level_word is not None:
+            p.fop(9, 9, "*", 15)
+        p.fop(10, 1, "*", 15)
         p.fop(9, 9, "+", 10)
         p.stpost(4, 9)
         p.fconst(12, K.STEP)
         p.fop(6, 6, "+", 12)
-        K.vws(p, "pos", 6)
-    p.loop(L.C["n1"], 32, one)
+    p.loop_r(5, 32, one)
+    K.vws(p, "pos", 6)
+    p.st(L.C["n1"], 5)

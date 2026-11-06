@@ -115,6 +115,7 @@ static u32 rt_n D = 0;
 
 /* for the checks (scripts/emu_rectrig.py) */
 u32 rt_fired D, rt_refused D, rt_swaps D, rt_qfired D, rt_why D;
+u32 rt_why_at D;                                 /* v0.42: when the last REC trig was refused (the REC TRIGS view says why) */
 static u32 last_frame D = 0xFFFFFFFFu, last_key D = 0xFFFFFFFFu;
 
 static int master_len(void)
@@ -189,11 +190,13 @@ void rt_trig(u32 track, u32 step, u32 buf)
     if (arm == ARM_OFF) {                       /* not armed: the trig plays, nothing is recorded */
         rt_refused++;
         rt_why = 4;
+        rt_why_at = FRAMES | 1u;
         return;
     }
     if (!rt_on || rt_manual) {                  /* no buffers here, or a manual take's turn */
         rt_refused++;
         rt_why = !rt_on ? 1 : 2;
+        rt_why_at = FRAMES | 1u;
         return;
     }
     int half = rt_play[b] ^ 1;
@@ -214,6 +217,7 @@ void rt_trig(u32 track, u32 step, u32 buf)
     if (frames < 4800u || clash(slot, place, frames * 2u)) {   /* under a tenth of a second, or no room */
         rt_refused++;
         rt_why = 3;
+        rt_why_at = FRAMES | 1u;
         return;
     }
     /* one recorder: a take of the other buffer still running is cut here, and keeps playing

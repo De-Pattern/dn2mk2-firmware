@@ -62,7 +62,11 @@ When a build prints `CLEARED TO FLASH`, in the same session:
    replaced the older dn2-tools site on 2026-10-27). Its commits are signed
    `De-Pattern <239624238+De-Pattern@users.noreply.github.com>`, never with the owner's
    name or email (owner: the site must not link to his name). It refuses a build whose
-   gate record does not clear it.
+   gate record does not clear it. **Then confirm GitHub Pages deployed it** (owner,
+   2026-11-06, after v0.41's deploy failed and its re-run stuck in the queue):
+   `gh api "repos/De-Pattern/dn2mk2/actions/runs?per_page=3"` until the run for that commit
+   is `completed success`; if it fails or sits queued, push an empty commit to dn2mk2 (a fresh
+   run) and check again. A release is not published until the patcher serves it.
 4. Firmware never goes on `main` (`.gitignore`); only the `builds` branch carries it.
 5. Announce it: commit its Discord announcement as `releases/vX.Y.md` on `main`
    (`releases/README.md`: first line `# vX.Y · NAME`, then the post, with a **Coming next

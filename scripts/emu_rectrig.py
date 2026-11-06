@@ -233,8 +233,9 @@ def main() -> int:
     machine.write(TRACK_CUR, bytes([4]))
     trig(4, 40_000)
     off_why, off_fired = L("rt_why"), L("rt_fired")
-    check("a track not armed (OFF, the default): its REC trig records nothing", off_fired == 0 and off_why == 4,
-          f"fired {off_fired}, why {off_why}")
+    off_at = L("rt_why_at") if "rt_why_at" in lay else 1
+    check("a track not armed (OFF, the default): its REC trig records nothing, and says why (v0.42)",
+          off_fired == 0 and off_why == 4 and off_at != 0, f"fired {off_fired}, why {off_why}, at {off_at}")
     machine.write(lay["rt_arm"] + T, b"\x02")         # ON
     gen0, sent0 = L("rt_gen"), L("smp_rt_sent")
     qhead = machine.read(lay["smp_cmds"], 4)
