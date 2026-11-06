@@ -92,8 +92,19 @@ def test_md_midnote_names():
 def test_md_midnote_table():
     """MD_MIDNOTE is what the bit-exact model does: for each machine and control, a change four
     blocks into a note is heard in the rest of it (against the same host block, nothing
-    changed). A machine whose code changes must change the table with it"""
-    assert SL.md_midnote_measure() == SL.MD_MIDNOTE
+    changed). A machine whose code changes must change the table with it. Measured in a process
+    of its own: in the gate's workers another test's module state reached the model once (an
+    OverflowError in run mode), and a measurement must not depend on what ran before it"""
+    import json
+    import os
+    import subprocess
+    import sys
+    src = str(pathlib.Path(__file__).resolve().parents[1] / "src")
+    r = subprocess.run([sys.executable, "-c", "import json; from dnfw import slides; "
+                        "print(json.dumps(slides.md_midnote_measure()))"],
+                       capture_output=True, text=True, env={**os.environ, "PYTHONPATH": src}, timeout=1800)
+    assert r.returncode == 0, r.stderr[-800:]
+    assert json.loads(r.stdout.strip().splitlines()[-1]) == SL.MD_MIDNOTE
 
 
 def test_header_tables(stock):

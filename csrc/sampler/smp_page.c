@@ -2067,8 +2067,7 @@ static int rt_h_draw(void *c)
  * does what its place shows (rec.c knob) */
 static void rt_view_draw(void *c)
 {
-    extern int rt_on, rt_qrec, rt_qplay, rec_rlen, rec_state, rec_rt_take;
-    extern unsigned int rec_heard;
+    extern int rt_on, rt_qrec, rt_qplay, rec_rlen;
     extern int rt_state(int b, int *tenths);
     extern const char *rt_qname(int q);
     static const char *const W[4] = {"EMPTY", "REC", "NEXT", "PLAY"};
@@ -2091,6 +2090,22 @@ static void rt_view_draw(void *c)
     if (!rt_on) {                               /* SAMP 124..127 hold saved samples here */
         LABEL(c, 113, 34, "%s", "SAMP");
         LABEL(c, 113, 26, "%s", "IN USE");
+    } else {                                    /* THRES's place: the track's REC trigs, 4 x 4 */
+        extern int sl_rec_page(u8 *out);
+        u8 st[16];
+        int first = sl_rec_page(st);
+        if (first >= 0) {
+            for (int i = 0; i < 16; i++) {      /* a step a cell, as the 16 [TRIG] keys sit */
+                int x = 104 + 5 * (i & 3), y = 43 - 5 * (i >> 2);
+                if (st[i] == 1)
+                    fill(c, x, y, x + 3, y + 3);         /* REC 1: filled */
+                else if (st[i] == 2)
+                    box(c, x, y, x + 3, y + 3, 0);       /* REC 2: open */
+                else
+                    fill(c, x + 1, y + 1, x + 2, y + 2); /* none: a dot */
+            }
+            LABEL(c, 113, 22, "%d-%d", first + 1, first + 16);
+        }
     }
     LABEL(c, 13, 9, "%s", rt_qname(rt_qrec));
     LABEL(c, 13, 0, "%s", "Q.REC");
@@ -2105,14 +2120,9 @@ static void rt_view_draw(void *c)
     LABEL(c, 80, 0, "%s", "R.LEN");
     if (rt_h_draw(c))                           /* a step held: its REC trig */
         return;
-    int heard = rec_heard != 0;
-    int on = heard && (rec_state == 1 || rec_state == 2) && !rec_rt_take;
-    int sx0 = 104, sx1 = 122, sy0 = 8, sy1 = 15;  /* ARM's switch, as the RECORDER draws it */
-    box(c, sx0, sy0, sx1, sy1, 0);
-    if (on)
-        fill(c, sx1 - 8, sy0 + 2, sx1 - 2, sy1 - 2);
-    else
-        box(c, sx0 + 2, sy0 + 2, sx0 + 8, sy1 - 2, 0);
+    extern int rt_arm_of(int t);                /* H: this track's REC trigs armed */
+    static const char *const A[3] = {"OFF", "ONCE", "ON"};
+    LABEL(c, 113, 9, "%s", A[rt_arm_of((int)UI_TRACK) % 3]);
     LABEL(c, 113, 0, "%s", "ARM");
 }
 
@@ -2141,8 +2151,9 @@ void rec_screen_draw(void *c)
 
     /* the title and the meter (v0.41: the REC TRIGS view's too: the source it records) */
     LABEL(c, 25, 57, "%s", rec_view == 1 ? "REC TRIGS" : "RECORDER");
+    LABEL(c, 59, 57, "%d/2", rec_view == 1 ? 2 : 1);   /* v0.41: its page, as stock's headers number theirs */
     hline(c, 0, 50, 54, 0);
-    int mx0 = 54, mx1 = 126, my0 = 55, my1 = 62, w = mx1 - mx0 - 2;
+    int mx0 = 68, mx1 = 126, my0 = 55, my1 = 62, w = mx1 - mx0 - 2;
     box(c, mx0, my0, mx1, my1, 0);
     int lv = heard ? meter_x(rec_peak, w) : 0;
     if (lv > 0)

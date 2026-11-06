@@ -657,6 +657,32 @@ int sl_rec_held(u32 *val)                       /* a step held -> 1, *VAL its RE
     return 1;
 }
 
+/* v0.41 (the REC TRIGS view's grid): the active track's REC locks on the 16 steps of the page it
+ * plays (or played last) -> the first step's number, OUT[16] each step's (0 none, 1, 2); -1 none */
+#define TRACK_CUR ((volatile u8 *)0x42C5A984u)
+int sl_rec_page(u8 *out)
+{
+    u32 ctx = TRACK_CTX(APP());
+    if (!ctx)
+        return -1;
+    void *model = *(void **)(ctx + 44);
+    u32 t = *(u32 *)(ctx + 60);
+    if (!model || t >= NV)
+        return -1;
+    u8 *table = (u8 *)((u32 (*)(void *))((*(void ***)model)[10]))(model);
+    u32 len = PATTERN_LEN(ctx);
+    if (!table || len == 0)
+        return -1;
+    if (len > 128)
+        len = 128;
+    u32 first = (TRACK_CUR[t] % len) & ~15u;
+    for (u32 i = 0; i < 16; i++) {
+        u32 v = first + i < len ? sl_lock_get(table, t, first + i, 2) : 0xFFFF;
+        out[i] = (u8)(v == 1 || v == 2 ? v : 0);
+    }
+    return (int)first;
+}
+
 int sl_rec_knob(int delta)                      /* -> 1: a step is held and H was its REC's */
 {
     struct held h;

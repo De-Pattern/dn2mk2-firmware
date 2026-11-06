@@ -480,8 +480,11 @@ static void knob(int index, int delta)
             rt_knob(index, delta);              /* E Q.REC, F Q.PLAY: four detents a choice */
         else if (index == 7)
             rec_rlen = clamp(rec_rlen + delta, 0, 128);   /* G R.LEN (F on the RECORDER) */
-        else if (index == 1 || index == 2 || index == 8)
-            goto as_recorder;                   /* A SRC, B CHAN, H ARM: as on the RECORDER */
+        else if (index == 8) {
+            extern void rt_arm_knob(int delta);
+            rt_arm_knob(delta);                 /* H: this track's REC trigs, OFF / ONCE / ON */
+        } else if (index == 1 || index == 2)
+            goto as_recorder;                   /* A SRC, B CHAN: as on the RECORDER */
         return;                                 /* C, D: nothing there */
     }
 as_recorder:

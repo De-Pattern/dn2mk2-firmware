@@ -228,6 +228,14 @@ def main() -> int:
     need = [machine.long(lay["rt_nx_need"] + 4 * b) for b in range(2)]
     want_fr = [min(4 * (86400000 // tempo), (need[b] // 2) & ~31) for b in range(2)]
     report["tempo_word"] = tempo
+    # v0.41 (the owner): a track's REC trigs record only when armed. OFF (the default): the trig
+    # records nothing; then ON for the cases below
+    machine.write(TRACK_CUR, bytes([4]))
+    trig(4, 40_000)
+    off_why, off_fired = L("rt_why"), L("rt_fired")
+    check("a track not armed (OFF, the default): its REC trig records nothing", off_fired == 0 and off_why == 4,
+          f"fired {off_fired}, why {off_why}")
+    machine.write(lay["rt_arm"] + T, b"\x02")         # ON
     gen0, sent0 = L("rt_gen"), L("smp_rt_sent")
     qhead = machine.read(lay["smp_cmds"], 4)
     machine.write(TRACK_CUR, bytes([4]))
@@ -278,6 +286,21 @@ def main() -> int:
     for _ in range(12):
         frame()
     setv("rt_qplay", 8)
+    # ONCE: the first REC trig records, then the track is OFF again (the loop kept)
+    machine.write(lay["rt_arm"] + T, b"\x01")
+    call(lay["rt_poll"])
+    f1 = L("rt_fired")
+    machine.write(TRACK_CUR, bytes([4]))
+    trig(4, 62_000)
+    after_once = machine.read(lay["rt_arm"] + T, 1)[0]
+    for _ in range(12):
+        frame()
+    machine.write(TRACK_CUR, bytes([8]))
+    trig(8, 64_000)
+    check("ONCE: the first REC trig records, then the track is OFF (the next records nothing)",
+          L("rt_fired") == f1 + 1 and after_once == 0 and L("rt_why") == 4,
+          f"fired {L('rt_fired') - f1}, arm after {after_once}, why {L('rt_why')}")
+    machine.write(lay["rt_arm"] + T, b"\x02")
 
     # ---- guards --------------------------------------------------------------------------------
     f0 = L("rt_fired")
@@ -376,6 +399,16 @@ def main() -> int:
         ov0 = L("rec_overlay")
         panel.tap(key(15))                                  # RIGHT: REC TRIGS
         panel.settle(10_000_000)
+        ut = machine.read(0x42431A6C, 1)[0]                 # the active track
+        machine.write(lay["rt_arm"] + ut, b"\x00")
+        turn(7, 3)                                          # H, no step held: three detents, nothing
+        a3 = machine.read(lay["rt_arm"] + ut, 1)[0]
+        turn(7, 1)                                          # the fourth: ONCE
+        a4 = machine.read(lay["rt_arm"] + ut, 1)[0]
+        turn(7, 4)                                          # four more: ON
+        a8 = machine.read(lay["rt_arm"] + ut, 1)[0]
+        check("REC TRIGS view, H (no step held): the active track's arm, OFF -> ONCE -> ON, four detents each",
+              a3 == 0 and a4 == 1 and a8 == 2, f"{a3}, {a4}, {a8}")
         panel.screen("rectrigs")
         check("RIGHT shows the REC TRIGS view", L("rec_view") == 1,
               f"view {L('rec_view')}, overlay before {ov0} after {L('rec_overlay')}")

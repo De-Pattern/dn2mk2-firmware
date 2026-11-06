@@ -75,6 +75,16 @@ u32 rt_pt0[2] D, rt_pfr[2] D;           /* .. FRAMES when it began, its length i
 int rt_cur D = -1;                      /* the buffer the recorder records into, -1 none */
 u32 rt_cur_end D;                       /* .. FRAMES when its take is over */
 int rt_manual D = 0;                    /* rec.c: a manual take armed, recording or waiting */
+/* v0.41 (the owner: REC trigs armed per track, "i like having the switch"): each track's REC
+ * trigs record only when armed: OFF (never: a placed REC trig overwrites nothing until armed),
+ * ONCE (the Octatrack's one-shot: the first REC trig that plays on the track records, then
+ * the track is OFF again and the buffer keeps its take), ON (every time). H on the REC TRIGS
+ * view, the active track's, four detents a choice. The instrument's, not the pattern's */
+#define ARM_OFF 0
+#define ARM_ONCE 1
+#define ARM_ON 2
+u8 rt_arm[16] D;
+#define UI_TRACK (*(volatile u8 *)0x42431A6Cu)
 
 /* QREC, QPLAY: OFF, 1, 2, 4, 8, 16, 32, 64 steps, the pattern's length (PLEN) */
 #define NQ 9
@@ -175,6 +185,12 @@ void rt_trig(u32 track, u32 step, u32 buf)
     int b = (int)buf - 1;
     if (b < 0 || b > 1)
         return;
+    u32 arm = track < 16 ? rt_arm[track] : ARM_OFF;
+    if (arm == ARM_OFF) {                       /* not armed: the trig plays, nothing is recorded */
+        rt_refused++;
+        rt_why = 4;
+        return;
+    }
     if (!rt_on || rt_manual) {                  /* no buffers here, or a manual take's turn */
         rt_refused++;
         rt_why = !rt_on ? 1 : 2;
@@ -221,6 +237,8 @@ void rt_trig(u32 track, u32 step, u32 buf)
     rt_nx_room[b] = 0;                          /* used: rt_poll finds the next */
     rt_dirty = 1;
     rt_fired++;
+    if (arm == ARM_ONCE)
+        rt_arm[track] = ARM_OFF;                /* one take: the loop is kept */
     if (QSTEPS[rt_qplay] == 0 || !SEQ_PLAYING) {
         rt_play[b] = (u8)half;                  /* QPLAY OFF: heard as it records */
         rt_pend[b] = 0;
@@ -391,6 +409,30 @@ void rt_knob(int index, int delta)
     *q += n;
     if (*q < 0) *q = 0;
     if (*q > NQ - 1) *q = NQ - 1;
+}
+
+/* H on the REC TRIGS view: the active track's arm, OFF / ONCE / ON, four detents a choice */
+static int ak_acc D = 0;
+static u32 ak_at D = 0, ak_trk D = 0xFFu;
+void rt_arm_knob(int delta)
+{
+    u32 now = FRAMES, t = UI_TRACK;
+    if (t > 15)
+        return;
+    if (t != ak_trk || now - ak_at > 3000u || (ak_acc > 0 && delta < 0) || (ak_acc < 0 && delta > 0))
+        ak_acc = 0;
+    ak_trk = t;
+    ak_at = now;
+    ak_acc += delta;
+    int n = ak_acc / 4;
+    ak_acc -= n * 4;
+    int v = (int)rt_arm[t] + n;
+    rt_arm[t] = (u8)(v < 0 ? 0 : v > 2 ? 2 : v);
+}
+
+int rt_arm_of(int t)                            /* (the view) */
+{
+    return t >= 0 && t < 16 ? rt_arm[t] : 0;
 }
 
 int rt_q_waiting(void)                          /* a QREC take not started yet */
