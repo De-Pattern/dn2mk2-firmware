@@ -1540,7 +1540,10 @@ def main() -> int:
                     facts = {"TRIG 1 held: seen held": m[hex(H)] == "02000000",
                              "TRIG 1 + YES: stock's, no menu": int(m[hex(S)], 16) == 0,
                              "let go: nothing held": m[f"{hex(H)}@2"] == "00000000",
-                             "the question seen up, then gone": d0[:3] == [0, 1, 0],
+                             # v0.41: after the question's YES the save's message is up (ERROR here:
+                             # the emulator has no card), and it is a stock popup too, so the
+                             # third probe reads 1 (0 on v0.30..v0.40, which saw only the question)
+                             "the question seen up; then the save's message": d0[:3] == [0, 1, 1],
                              "its YES the question's: no menu": int(m[f"{hex(S)}@3"], 16) == 0,
                              "then YES on the page opens the menu, NO closes it":
                              int(m[f"{hex(S)}@4"], 16) != 0 and int(m[f"{hex(S)}@5"], 16) == 0,
