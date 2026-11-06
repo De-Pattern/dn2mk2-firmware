@@ -20,8 +20,12 @@ self.onmessage = async (e) => {
     if (!py) {
       log("Loading Python (Pyodide, about 10 MB, once)...");
       py = await loadPyodide({ indexURL: PYODIDE });
-      py.setStdout({ batched: log });
-      py.setStderr({ batched: log });
+      // the build tool's closing note is for its command-line users (dnfw inspect, the
+      // repository's docs); here the page's own sha256 check does that job: not shown
+      const dev = /Nothing has been sent to an instrument|dnfw inspect|docs\/flashing\.md|recovery route .* is proven/;
+      const out = (t) => { if (!dev.test(t)) log(t); };
+      py.setStdout({ batched: out });
+      py.setStderr({ batched: out });
     }
     log("Fetching the mod's build code (" + zipUrl + ")...");
     const r = await fetch(zipUrl, { cache: "no-cache" });
@@ -33,6 +37,12 @@ self.onmessage = async (e) => {
     py.FS.mkdirTree(run + "/code");
     py.unpackArchive(zip, "zip", { extractDir: run + "/code" });
     for (const k of inputs) py.FS.writeFile(run + "/in/" + k, files[k].bytes);
+    // v0.39 on: the build reads the mod's version from VERSION beside the code's folder
+    // (dnfw/modversion.py: <root>/VERSION), which the bundle does not carry; it is the
+    // version in the bundle's own name. A wrong one would change the file, and the page's
+    // sha256 check against the cleared build would refuse it.
+    const vm = zipUrl.match(/dnfw-v([0-9]{1,3}\.[0-9]{1,3})\.zip$/);
+    if (vm) py.FS.writeFile(run + "/VERSION", vm[1] + "\n");
     log("Building (a few minutes; the page stays usable)...");
     py.globals.set("RUN", run);
     py.globals.set("MNM", inputs.includes("mnm") ? run + "/in/mnm" : null);
