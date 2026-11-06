@@ -664,15 +664,24 @@ def main() -> int:
             set_slide(base + 2, 1, 4)                   # SLIDE on, SLEN 1 step (expect_frames)
             trig(base, f0 + 400 + 100 * own_case.n)
             run(12, f"{tag} from")
+            st0 = machine.long(lay["sl_started"])
             trig(base + 2, f0 + 450 + 100 * own_case.n)
             rows = run(expect_frames + 40, f"{tag} slide", read=tuple(locks_to))
+            report.setdefault("own_cases", {})[tag] = {"started": machine.long(lay["sl_started"]) - st0,
+                                                     "first": {sl: rows[0]["out"][sl] for sl in locks_to},
+                                                     "last": {sl: rows[-1]["out"][sl] for sl in locks_to}}
+            # (a slot's output is the lock plus whatever modulation rides on it: slot 25 carries
+            # +0xc here, so "on the lock" is where it settles, within 0x40 of the lock)
             res = {}
             for slot in glide:
                 a, b = locks_from[slot], locks_to[slot]
                 seen = [r["out"][slot] for r in rows]
-                res[f"{slot} glides"] = any(min(a, b) < x < max(a, b) for x in seen) and seen[-1] == b
+                end = seen[-1]
+                res[f"{slot} glides"] = (abs(end - b) <= 0x40 and len(set(seen[-10:])) == 1
+                                         and sum(1 for x in seen if min(a, end) + 0x40 < x < max(a, end) - 0x40) > 20)
             for slot in land:
-                res[f"{slot} lands"] = rows[0]["out"][slot] == locks_to[slot]
+                seen = [r["out"][slot] for r in rows]
+                res[f"{slot} lands"] = abs(seen[0] - locks_to[slot]) <= 0x40 and len(set(seen)) == 1
             return res
         own_case.n = 0
         machine.write(table + REC * 2, b"\xff" * (REC * (RECS - 2)))   # (records 2.. for these)
@@ -684,6 +693,8 @@ def main() -> int:
                       {TUNE_S: 0x6000, AMD_S: 0x6000, DTYP_S: 0x7F00}, (TUNE_S, AMD_S), (DTYP_S,), "TRX-XT")
         check("v0.41: PERC on TRX-XT: PTCH and AMD glide; DTYP (a choice) lands at once", all(r2.values()), r2)
         r3 = own_case(5, 16 << 8, {TUNE_S: 0x2000}, {TUNE_S: 0x6000}, (), (TUNE_S,), "TRX-CP")
+        r0 = own_case(1, None, {TUNE_S: 0x2000}, {TUNE_S: 0x6000}, (TUNE_S,), (), "WAVETONE")
+        check("v0.41: the control: stock WaveTone's TUN1 (the same slot 25) glides as before", all(r0.values()), r0)
         check("v0.41: PERC on TRX-CP (its controls taken at the trig): PTCH lands at once", all(r3.values()), r3)
         machine.write(snd + 222, bytes([0]))
         call(SYNC, snd, V)
