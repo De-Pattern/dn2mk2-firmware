@@ -614,6 +614,15 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
             pop(0, code, 0x01)
             pop(0, code, 0x10)
 
+        def page_seen():
+            """the SLICE page up, as smp_page_draw leaves it: v0.42's slice.c also needs the
+            screen last drawn to have drawn it (slc_seen_draw == wr_draws) and, for a menu
+            already open, the track it opened on (this scenario draws no screen)"""
+            machine.write(syms["slc_page_seen"], struct.pack(">i", 1))
+            if "slc_seen_draw" in syms and "wr_draws" in syms:
+                machine.write(syms["slc_seen_draw"], machine.read(syms["wr_draws"], 4))
+                machine.write(syms["slc_open_track"], struct.pack(">I", trk))
+
         def knob(code, d):
             pop(1, code, d)
 
@@ -648,7 +657,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         def attempt(what, kind, during=None, limit=1500):
             """open KIND (edit, grid-off, grid-on, clear+grid-off) with the menu; DURING(pass)
             each pass while it waits. -> its record"""
-            machine.write(syms["slc_page_seen"], struct.pack(">i", 1))
+            page_seen()
             machine.write(syms["slc_stock_asked"], bytes(4))
             fails0 = long("slc_fails") if "slc_fails" in syms else 0
             if kind == "clear":
@@ -834,7 +843,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                             and g_["knob E"] == 1)
         attempts.pop()                          # (judged here, with its keys)
         # NO still leaves the wait
-        machine.write(syms["slc_page_seen"], struct.pack(">i", 1))
+        page_seen()
         machine.write(syms["slc_stock_asked"], bytes(4))
         io["refuse"] = 3
         key(10)
@@ -854,7 +863,7 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         # LINKED (the DT2's default) and UNLINKED in the editor, on an even grid of 16
         lk = {}
         if "slc_linked" in syms:
-            machine.write(syms["slc_page_seen"], struct.pack(">i", 1))
+            page_seen()
             key(10)
             key(14)
             key(10)

@@ -138,15 +138,20 @@ def start(p: Prog, L: C.Layout) -> None:
 # -- interp -------------------------------------------------------------------------------
 def _interp(p: Prog, L: C.Layout) -> None:
     W = L.W
-    p.ld(1, W["fr"])
-    p.st(W["P"], 1)
+    # v0.42: P, il, g and out held in registers (R0, R11, R13, R14) and the count in R15, the
+    # five taps unrolled (v0.41 loaded them from L2 every sample, and counted the taps in a
+    # scratch word): the same operations in the same order, the same words bit for bit
+    # (scripts/mnm_identity.py); P and out stored back at the end, as v0.41 left them.
+    p.ld(0, W["fr"])
+    p.ld(11, W["il"])
+    p.ld(13, W["g"])
+    p.ld(14, W["out"])
 
     def one():
-        p.ld(1, W["P"])
-        p.trunc(2, 1)                           # the buffer index
+        p.trunc(2, 0)                           # the buffer index
         p.iconst(12, 0)
         p.float_(3, 2, 12)
-        p.fop(3, 1, "-", 3)
+        p.fop(3, 0, "-", 3)
         p.fconst(12, 0.5)
         p.fop(3, 3, "+", 12)
         p.fconst(12, 1.0)
@@ -169,8 +174,7 @@ def _interp(p: Prog, L: C.Layout) -> None:
         p.iop(5, 12, "+", 5)
         p.seti(2, 5)
         p.fconst(7, 0.0)
-
-        def tap():
+        for _ in range(5):                      # the taps
             p.ldpost(8, 1)
             p.ldpost(9, 2)
             p.ldpost(10, 2)
@@ -178,28 +182,25 @@ def _interp(p: Prog, L: C.Layout) -> None:
             p.fop(9, 9, "+", 10)
             p.fop(9, 9, "*", 8)
             p.fop(7, 7, "+", 9)
-        p.loop(W["t"], 5, tap)
         C.sat(p, 7)
-        p.ld(10, W["g"])
-        p.fop(7, 7, "*", 10)
-        p.ld(8, W["out"])
-        p.seti(5, 8)
+        p.fop(7, 7, "*", 13)
+        p.seti(5, 14)
         p.ld(10, W["m"])
         p.ifz(10, "NE", lambda: (p.ldi(9, 0, 5), p.fop(7, 7, "+", 9)))
         p.stpost(5, 7)
         p.iconst(12, 4)
-        p.iop(8, 8, "+", 12)
-        p.st(W["out"], 8)
-        p.ld(1, W["P"])
-        p.ld(2, W["il"])
-        p.fop(1, 1, "+", 2)
-        p.st(W["P"], 1)
-    p.loop(W["k"], 32, one)
+        p.iop(14, 14, "+", 12)
+        p.fop(0, 0, "+", 11)
+    p.loop_r(15, 32, one)
+    p.st(W["P"], 0)
+    p.st(W["out"], 14)
+    p.st(W["t"], 15)                            # (v0.41's tap count, 0 at the end)
+    p.st(W["k"], 15)
 
 
 def interp(p: Prog, L: C.Layout) -> None:
     """32 samples from BUF at W fr + k il -> W out (int address, walked), x W g (float), added
-    to what is there if W m (int) != 0. Clobbers R0-R12, I1, I2, I5, I12."""
+    to what is there if W m (int) != 0. Clobbers R0-R15 (v0.42: R13-R15 too), I1, I2, I5, I12."""
     p.call("dp_interp", lambda: _interp(p, L))
 
 
@@ -218,19 +219,27 @@ def _dec2(p: Prog, L: C.Layout) -> None:
         p.ldi(1, 0, 2)
         p.ldi(2, 1, 2)
 
+        # v0.42: TOP, -1 and 8 held in R7..R9, the count in R10 (v0.41 loaded them as
+        # constants every sample and counted in a scratch word): the same words bit for bit
+        p.fconst(7, C.TOP)
+        p.fconst(8, -1.0)
+        p.iconst(9, 8)
+
         def one():
             p.seti(5, 5)
             p.ldi(4, 0, 5)
-            C.sat(p, 4)
+            p.fop(4, 4, "MIN", 7)
+            p.fop(4, 4, "MAX", 8)               # C.sat
             p.fop(6, 4, "-", 2)
             p.fop(6, 6, "*", 3)
             p.fop(2, 1, "+", 6)
             p.sti(0, 5, 2)                      # (the next stage limits it as it reads it)
-            C.sat(p, 2)                         # fed back limited, as the 56300 stores it
+            p.fop(2, 2, "MIN", 7)
+            p.fop(2, 2, "MAX", 8)               # fed back limited, as the 56300 stores it
             p.fpass(1, 4)
-            p.iconst(13, 8)
-            p.iop(5, 13, "+", 5)
-        p.loop(W["j"], 16, one)
+            p.iop(5, 9, "+", 5)
+        p.loop_r(10, 16, one)
+        p.st(W["j"], 10)
         p.stpost(2, 1)
         p.stpost(2, 2)
     p.loop(W["st"], 9, stage)

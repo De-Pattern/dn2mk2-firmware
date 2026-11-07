@@ -909,7 +909,9 @@ def main() -> int:
             kit = 0x4210C08C
             pk = ",".join(f"poke:{kit + 52 + 1163 * t + 0xDE:#x}:0d,poke:{kit + 52 + 1163 * t + 108:#x}:0000"
                           for t in range(16))
-            steps = (f"wait:2,png:p0,poke:{g['slc_state']}:00000001,wait:6,png:m,"
+            # v0.42: the menus poked over the SLICE track's page itself (slice.c closes a menu whose
+            # page the screen does not draw: NiKo's GRID report), not over the snapshot's page
+            steps = (f"wait:2,{pk},tap:2,wait:10,png:p0,poke:{g['slc_state']}:00000001,wait:6,png:m,"
                      f"poke:{g['slc_state']}:00000002,wait:6,png:g,"
                      f"poke:{hires}:{pat},poke:{g['slc_nfr']}:00023280,poke:{g['slc_ns']}:00000003,"
                      f"poke:{g['slc_cur']}:00000000,poke:{g['slc_sl']}:{tb},poke:{g['slc_state']}:00000004,"
@@ -946,7 +948,7 @@ def main() -> int:
             busy_cmd = None
             if "slc_linked" in lay:
                 bsyms = work / "slicebusy_syms.json"
-                bsyms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith(("smp_", "slc_"))}))
+                bsyms.write_text(json.dumps({k: v for k, v in lay.items() if k.startswith(("smp_", "slc_")) or k == "wr_draws"}))
                 busy_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT,
                             "--build", bdir, "--snapshot", snap, "--steps", f"link16:{bsyms}:slicebusy",
                             "--png-dir", work / "slicebusy"]
@@ -1008,6 +1010,18 @@ def main() -> int:
                      f"tap:27,wait:4,tap:29,wait:4,tap:19,wait:6,yes,wait:6,png:m,yes,wait:6,"
                      f"mem:{lay['slc_alloc_n']:#x}:4,{get},yes,wait:6,down,wait:3,yes,wait:6,yes,wait:6,"
                      f"no,wait:6,mem:{lay['slc_state']:#x}:4,{get}")
+            # v0.42 (NiKo, v0.40): CREATE RANDOM LOCKS stays open after its YES; another track
+            # (TRACK + [TRIG 2]) must close it, YES there must not open it again, and back on the
+            # GRID track YES opens it, a page key (tap 5) closes it, YES there not again
+            letgo = "slc_letgo" in lay
+            if letgo:
+                st_, lg_ = f"{lay['slc_state']:#x}", f"{lay['slc_letgo']:#x}"
+                steps += (f",yes,wait:6,down,wait:3,yes,wait:6,mem:{st_}:4,"
+                          f"press:16,wait:2,press:26,wait:3,release:26,wait:2,release:16,wait:10,"
+                          f"mem:0x42431a6c:1,mem:{st_}:4,mem:{lg_}:4,png:t2,yes,wait:8,mem:{st_}:4,png:t2y,no,wait:6,yes,wait:8,mem:{st_}:4,no,wait:6,"
+                          f"press:16,wait:2,press:25,wait:3,release:25,wait:2,release:16,wait:10,"
+                          f"yes,wait:6,mem:{st_}:4,tap:5,wait:10,mem:{st_}:4,yes,wait:8,mem:{st_}:4,png:p5y,"
+                          f"no,wait:4,tap:2,wait:8")
             js = work / "alloc.json"
             al_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                       "--snapshot", snap, "--steps", steps, "--png-dir", work / "alloc", "--json", js]
@@ -1019,14 +1033,27 @@ def main() -> int:
                     r = json.loads(js.read_text())
                     m = r["memory"]
                     d0 = [c["d0"] for c in r["direct_calls"]]
+                    sts = [int(v, 16) for k, v in m.items() if k.split("@")[0] == hex(lay["slc_state"])]
                     facts = {"three trigs locked": int(m[hex(lay["slc_alloc_n"])], 16) == 3,
                              "linear: slices 1, 2, 3": d0[:3] == [512, 1024, 1536],
-                             "closed": int(m[hex(lay["slc_state"])], 16) == 0,
+                             "closed": sts[:1] == [0],
                              "NO puts the locks back": d0[4:6] == [1024, 1536]}
+                    if letgo:
+                        trk = [int(v, 16) for k, v in m.items() if k.split("@")[0] == "0x42431a6c"]
+                        lgv = [int(v, 16) for k, v in m.items() if k.split("@")[0] == hex(lay["slc_letgo"])]
+                        facts.update({"RANDOM stays open after YES": sts[1:2] == [5],
+                                      "on track 2": trk == [1],
+                                      "another track closes it": sts[2:3] == [0] and lgv[:1] >= [1],
+                                      "YES on track 2 opens nothing": sts[3:4] == [0],
+                                      "YES again on track 2 opens nothing": sts[4:5] == [0],
+                                      "back: YES opens it": sts[5:6] == [5],
+                                      "a page key closes it": sts[6:7] == [0],
+                                      "YES off the page opens nothing": sts[7:8] == [0]})
                     good = all(facts.values())
-                    why = str(facts) + f" {d0}"
+                    why = str(facts) + f" {d0} states {sts}"
                 return good, ("GRID's ALLOCATE SLICE: LINEAR locks slices 1..3 on three placed trigs; NO after "
-                              "RANDOM puts them back" if good else why)
+                              "RANDOM puts them back" + ("; v0.42: open RANDOM lets go on another track and on another "
+                              "page, and YES there opens nothing" if letgo else "") if good else why)
             later("alloc", "GRID allocate slice locks (ColdFire)", "GRID allocate slice locks (ColdFire)", [al_cmd, sorted(EMU_ENV.items())], al_body)
 
         # 6f. v0.25: the sample pages' playhead (the DSP's positions, poked as the link would

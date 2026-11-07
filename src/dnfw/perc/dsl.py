@@ -229,6 +229,23 @@ class Prog:
                  "MIN": lambda: min(s32(x), s32(y)), "MAX": lambda: max(s32(x), s32(y))}[op]()
             self.setR(d, v)
 
+    def mul_ssf(self, d: int, a: int, b: int, note: str = "") -> None:
+        """v0.42: Rd = Ra * Rb (SSF), the fixed-point multiplier: signed fractions, the 64-bit
+        product shifted left once, bits 63..32 kept (truncated: no R, so no rounding; PRM
+        p.3-9/3-10). For integers: floor(Ra x Rb / 2^31). Never both -2^31 (that wraps)."""
+        self.e(f"R{d} = R{a} * R{b} (SSF);", note)
+        if self.run:
+            x, y = s32(self.r[a]), s32(self.r[b])
+            assert not (x == y == -(1 << 31)), "SSF: -1 x -1 wraps"
+            self.setR(d, ((x * y) << 1) >> 32)
+
+    def mul_ssi(self, d: int, a: int, b: int, note: str = "") -> None:
+        """v0.42: Rd = Ra * Rb (SSI), the multiplier's signed integer form: the product's low
+        32 bits (bits 31..0 of the 80-bit result, PRM p.3-10)."""
+        self.e(f"R{d} = R{a} * R{b} (SSI);", note)
+        if self.run:
+            self.setR(d, s32(self.r[a]) * s32(self.r[b]))
+
     def ipass(self, d: int, a: int, note: str = "") -> None:
         self.e(f"R{d} = PASS R{a};", note)
         if self.run:
@@ -381,6 +398,31 @@ class Prog:
         self.iconst(one, 1)
         self.iop(0, 0, "-", one)
         self.st(counter, 0)
+        self.jump("NE", top)
+
+    def loop_r(self, counter: int, n_from: int | None, body, one: int = 12) -> None:
+        """v0.42: loop() with the count in register COUNTER (no scratch word: two L2 accesses
+        an iteration fewer). BODY must leave COUNTER alone (ONE it may use). N_FROM None: the
+        count is in COUNTER already, and is not 0."""
+        if n_from is not None:
+            self.iconst(counter, n_from)
+        elif self.run:
+            assert s32(self.r[counter]) > 0, "loop_r: a count of 0 or less would run 2^32 times"
+        top = self.label("loop")
+        self.place(top)
+        if self.run:
+            while True:
+                before = self.r[counter]
+                body()
+                assert self.r[counter] == before, f"loop_r: the body changed its count R{counter}"
+                self.iconst(one, 1)
+                self.iop(counter, counter, "-", one)
+                if self.r[counter] == 0:
+                    break
+            return
+        body()
+        self.iconst(one, 1)
+        self.iop(counter, counter, "-", one)
         self.jump("NE", top)
 
     # -- leaf subroutines ---------------------------------------------------------------

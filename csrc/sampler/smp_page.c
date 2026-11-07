@@ -1649,7 +1649,9 @@ void smp_page_draw(void *view, void *c, int kind, int wave)
 {
     u32 ids[8];
     extern int slc_page_seen;
+    extern u32 slc_seen_draw;
     slc_page_seen = kind == SMP_SLICE_KIND ? 1 : kind == SMP_GRID_KIND ? 2 : 0;   /* YES: SLICE's menu, GRID's ALLOCATE SLICE (slice.c) */
+    slc_seen_draw = wr_draws;                   /* v0.42: drawn in this screen (slice.c's page_up) */
     for (int i = 0; i < 8; i++)
         ids[i] = smp_ids[kind - SMP_KIND0][i];
     smp_box(c);
@@ -2073,8 +2075,19 @@ static void rt_view_draw(void *c)
     static const char *const W[4] = {"EMPTY", "REC", "NEXT", "PLAY"};
     int bx0 = 29, bx1 = 97, by0 = 22, by1 = 48, cx = (bx0 + bx1) / 2;   /* the RECORD box's own place */
     box(c, bx0, by0, bx1, by1, 1);
+    /* v0.42 (NiKo: "the track keeps recording on a classic sample slot but not on REC1,
+     * which stays empty"): a REC trig that recorded nothing says why, on the box's second
+     * line, for three seconds: the track not armed (H, ARM: OFF is the default), buffers off
+     * (saved samples in SAMP 124..127), a manual take's turn, or no room */
+    extern u32 rt_why, rt_why_at;
+    static const char *const WHY[5] = {"", "BUFS OFF", "MANUAL REC", "NO ROOM", "NOT ARMED"};
+    int why = rt_why_at && (u32)(FRAMES_NOW - rt_why_at) < 4500u && rt_why >= 1 && rt_why <= 4 ? (int)rt_why : 0;
     for (int b = 0; b < 2; b++) {               /* a line a buffer, where the box's two lines are */
         int y = b ? by0 + 6 : by0 + 16;
+        if (b && why) {
+            LABEL(c, cx, y, "%s", WHY[why]);
+            continue;
+        }
         if (!rt_on) {
             LABEL(c, cx, y, "REC%d OFF", b + 1);
             continue;

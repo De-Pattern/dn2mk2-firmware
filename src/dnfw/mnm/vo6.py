@@ -758,7 +758,9 @@ def _bq_body(p: Prog, L: C.Layout) -> None:
         p.fpass(2, 1)
         p.fpass(5, 4)
         p.fpass(4, 6)
-    p.loop(_a(L, "n4"), 16, one)
+    p.loop_r(0, 16, one)                  # v0.42: the count in R0 (docs/mnm-recode.md)
+    p.iconst(12, 0)
+    p.st(_a(L, "n4"), 12)
     p.sti(0, 0, 2)
     p.sti(1, 0, 3)
     p.sti(2, 0, 4)
@@ -859,7 +861,9 @@ def _crossfade(p, L):
         limi(p, 14)
         i2f(p, 7, 14)
         p.stpost(2, 7)
-    p.loop(_a(L, "n3"), 16, one)
+    p.loop_r(0, 16, one)                  # v0.42: the count in R0 (docs/mnm-recode.md)
+    p.iconst(12, 0)
+    p.st(_a(L, "n3"), 12)
 
 
 def _trill(p, L):
@@ -1086,7 +1090,9 @@ def _zmix(p: Prog, L: C.Layout) -> None:
         p.fop(1, 1, "+", 2)
         C.sat(p, 1)
         p.stpost(5, 1)
-    p.loop(_a(L, "n3"), 16, one)
+    p.loop_r(0, 16, one)                  # v0.42: the count in R0 (docs/mnm-recode.md)
+    p.iconst(12, 0)
+    p.st(_a(L, "n3"), 12)
 
 
 def _rrscale(p: Prog, L: C.Layout) -> None:
@@ -1107,7 +1113,9 @@ def _rrscale(p: Prog, L: C.Layout) -> None:
         _floor(p, 2, 0, 15)
         C.sat(p, 2)
         p.stpost(5, 2)
-    p.loop(_a(L, "n3"), 16, one)
+    p.loop_r(3, 16, one)                  # v0.42: the count in R3 (docs/mnm-recode.md)
+    p.iconst(12, 0)
+    p.st(_a(L, "n3"), 12)
 
 
 def _consonants(p: Prog, L: C.Layout) -> None:
@@ -1208,42 +1216,64 @@ def _ser_body(p: Prog, L: C.Layout) -> None:
     """The series resonator in the 56300's arithmetic, exactly: y = lim(floor((c1 x - c2 y1 -
     c2 y1 - R y2) / 2^23)) on the words (a high-Q formant rings a float's one-LSB slip up to
     ~35 LSB, and the voiced path is amplified 4096 times). I5 the input, I2 the output, I0 the
-    state (y1, y2), I1 the ramps (c1, c2), the word 'R' (int)."""
+    state (y1, y2), I1 the ramps (c1, c2), the word 'R' (int).
+
+    v0.42: on the SHARC's fixed-point multiplier (v0.41 split every word into 12-bit halves
+    and summed four float partial products a term). Each 24-bit product p = u v (|p| < 2^46)
+    as hi = floor(p / 2^18) (u << 7 times v << 6, SSF) and lo = p mod 2^18 (SSI, the low
+    bits); then floor(S / 2^23) = floor((H + floor(L / 2^18)) / 2^5) with H, L the terms'
+    signed sums (|H| < 2^31). The same words, bit for bit (scripts/mnm_identity.py); no MR
+    accumulator is used, so nothing lives between instructions that an interrupt could take.
+    Registers: R1 y1, R3 y2 (words), R2 R << 7, R5 R, R6 2^18 - 1, R0 the count."""
     p.ldi(1, 0, 0)
-    _word(p, 7, 1)
-    _split(p, 7, 1, 2)                         # y1
+    _word(p, 1, 1)                             # y1
     p.ldi(3, 1, 0)
-    _word(p, 7, 3)
-    _split(p, 7, 3, 4)                         # y2
-    p.ld(7, _a(L, "R"))
-    _split(p, 7, 5, 6)
+    _word(p, 3, 3)                             # y2
+    p.ld(5, _a(L, "R"))
+    p.lsh(2, 5, 7)
+    p.iconst(6, 0x3FFFF)
     p.iconst(12, _a(L, "RAMP"))
     p.seti(1, 12)
 
+    def term(u, us, v, first=False, twice=False):
+        """H (R13), L (R14) +-= u x v's hi and lo; US: a register holding u << 7, or None"""
+        if us is None:
+            p.lsh(7, u, 7)
+            us = 7
+        p.lsh(8, v, 6)
+        p.mul_ssf(7, us, 8)                     # hi
+        p.mul_ssi(8, u, v)
+        p.iop(8, 8, "AND", 6)                   # lo
+        if first:
+            p.ipass(13, 7)
+            p.ipass(14, 8)
+            return
+        if twice:
+            p.lsh(7, 7, 1)
+            p.lsh(8, 8, 1)
+        p.iop(13, 13, "-", 7)
+        p.iop(14, 14, "-", 8)
+
     def one():
-        p.iconst(14, 0)
-        p.iconst(15, 0)
-        p.iconst(13, 0)
         p.ldpost(9, 5)
-        _word(p, 9, 9)
-        _split(p, 9, 7, 8)                     # x
+        _word(p, 9, 9)                          # x
         p.ldpost(10, 1)
-        _word(p, 10, 10)
-        _split(p, 10, 9, 10)                   # c1
-        _prod(p, 9, 10, 7, 8, False)
-        p.ldpost(7, 1)
-        _word(p, 7, 7)
-        _split(p, 7, 9, 10)                    # c2
-        _prod(p, 9, 10, 1, 2, True, twice=True)
-        _prod(p, 5, 6, 3, 4, True)
-        _sum(p, 23)
-        limi(p, 14)
-        p.fpass(3, 1)
-        p.fpass(4, 2)
-        _split(p, 14, 1, 2)
-        i2f(p, 7, 14)
+        _word(p, 10, 10)                        # c1
+        p.ldpost(11, 1)
+        _word(p, 11, 11)                        # c2
+        term(10, None, 9, first=True)           # + c1 x
+        term(11, None, 1, twice=True)           # - 2 c2 y1
+        term(5, 2, 3)                           # - R y2
+        p.ash(14, 14, -18)
+        p.iop(13, 13, "+", 14)
+        p.ash(13, 13, -5)                       # floor(S / 2^23)
+        limi(p, 13)
+        p.ipass(3, 1)
+        p.ipass(1, 13)
+        i2f(p, 7, 13)
         p.stpost(2, 7)
-    p.loop(_a(L, "n4"), 16, one)
+    p.loop_r(0, 16, one)
+    p.st(_a(L, "n4"), 0)
     p.ldi(7, -1, 2)
     p.sti(0, 0, 7)
     p.ldi(7, -2, 2)
@@ -1500,7 +1530,9 @@ def _follower(p: Prog, L: C.Layout) -> None:
         p.fop(3, 3, "+", 5)
         p.fop(5, 6, "*", 10)
         p.fop(3, 3, "-", 5)
-    p.loop(_a(L, "n1"), 16, one)
+    p.loop_r(0, 16, one)                  # v0.42: the count in R0 (docs/mnm-recode.md)
+    p.iconst(12, 0)
+    p.st(_a(L, "n1"), 12)
     ss(p, "pb", 2)
     ss(p, "pa", 3)
 

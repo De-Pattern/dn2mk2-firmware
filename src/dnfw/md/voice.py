@@ -32,6 +32,11 @@ except ImportError:                           # pragma: no cover
     ALL = MM.MACHINES
 N_ALL = len(ALL)
 INIT_FIRST = [k for k, M in enumerate(MM.MACHINES) if getattr(M, "INIT_FIRST", False)]
+# v0.42: the machines whose voices use the slot's delay area (core.delay_base): P-I, VO-6
+_DLY = [k for k, M in enumerate(ALL) if M.NAME.startswith("PI-") or M.NAME == "VO-6"]
+DELAY_LO, DELAY_HI = min(k for k in _DLY if ALL[k].NAME.startswith("PI-")), max(k for k in _DLY if ALL[k].NAME.startswith("PI-"))
+assert [k for k in _DLY if ALL[k].NAME.startswith("PI-")] == list(range(DELAY_LO, DELAY_HI + 1))
+DELAY_ALSO = [k for k in _DLY if not ALL[k].NAME.startswith("PI-")]
 KNOB_SCALE = 16256.0                          # knob 0..1 -> 0..127 << 7
 START = 35.0                                  # the read position that asks for a new block
 QUIET_LEVEL = 2.0 ** -21                      # a block whose peak is under this is silence
@@ -137,6 +142,37 @@ def advance(p: Prog, L: K.Layout) -> None:
         p.e("COMP(R0, R1);")
 
         def change():                          # init runs after the host (below)
+            # v0.42 (the owner: PI-HH played a rimshot-like note, then loud spikes, with PI-BD
+            # and TRX-CP on other tracks, gone with the tracks locked to one voice): the DSP's
+            # voices go round the tracks, and a voice that played another machine kept its
+            # host words, state, stream and P-I delay lines, under the new machine (a ringing
+            # PI-RS's voice handed a TRX-CP note peaked at 1.40, fresh 0.41). A voice changing
+            # machine now starts as a fresh one (reset's words, but the voice's own: the read
+            # position, the note waiting, the inputs), its delay lines too if the machine it
+            # leaves used them (the P-I machines, VO-6)
+            K.vw(p, 1, "mach")
+
+            def clear():
+                p.ld(0, L.C["mdb"])
+                p.seti(5, 0)
+                p.iconst(6, 0)
+                p.loop(L.C["n1"], K.B0 + K.NB, lambda: p.stpost(5, 6))   # W, S, the stream
+
+                def lines():
+                    K.delay_base(p, L, 0)
+                    p.seti(5, 0)
+                    p.iconst(6, 0)
+                    p.loop(L.C["n1"], K.PI_DELAY_WORDS, lambda: p.stpost(5, 6))
+                K.vw(p, 1, "mach")
+                p.iconst(12, DELAY_LO)
+                p.iconst(2, 0)
+                p.if_(1, "GE", 12, lambda: (p.iconst(12, DELAY_HI),
+                                            p.if_(1, "LE", 12, lambda: p.iconst(2, 1), kind="i")), kind="i")
+                for k in DELAY_ALSO:
+                    p.iconst(12, k)
+                    p.if_(1, "EQ", 12, lambda: p.iconst(2, 1), kind="i")
+                p.ifz(2, "NE", lines)
+            p.ifz(1, "GE", clear)
             K.vw(p, 0, "want")
             K.vws(p, "mach", 0)
             p.iconst(0, 1)
@@ -164,17 +200,32 @@ def advance(p: Prog, L: K.Layout) -> None:
         _each(p, L, "host")
         p.iconst(0, 0)
         K.vws(p, "dirty", 0)
-    p.ifz(0, "NE", host)
     # v0.24: a new machine's init after its host scale function, as the Machinedrum (and
     # its golden runs) order them: some inits overwrite a host word (P-IRC's DEC), so
-    # init first made the first hit after choosing a machine sound like the second
-    K.vw(p, 0, "chg")
+    # init first made the first hit after choosing a machine sound like the second.
+    # v0.42: then the host again, so the note plays its knobs: on the DN2 a voice changes
+    # machine whenever the voices go round the tracks, so the Machinedrum's "first hit after
+    # choosing a machine" (P-I's at DEC 127, the owner's ringing hi-hat) fell on a note in
+    # every few; now every note is the machine's own hit at its knobs (the Machinedrum's
+    # second hit after a silence). Two passes of the one emitted host (it is 4,666
+    # instructions): the second only after an init
+    p.st(L.C["hq"], 0)
 
-    def init():
-        _each(p, L, "init")
+    def hpass():
+        p.ld(0, L.C["hq"])
+        p.ifz(0, "NE", host)
         p.iconst(0, 0)
-        K.vws(p, "chg", 0)
-    p.ifz(0, "NE", init)
+        p.st(L.C["hq"], 0)
+        K.vw(p, 0, "chg")
+
+        def init():
+            _each(p, L, "init")
+            p.iconst(0, 0)
+            K.vws(p, "chg", 0)
+            p.iconst(0, 1)
+            p.st(L.C["hq"], 0)
+        p.ifz(0, "NE", init)
+    p.loop(L.C["hpass"], 2, hpass)
     K.vw(p, 0, "trg")
 
     def trig():
@@ -264,16 +315,26 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
     p.iconst(12, 4 * (K.B0 - 1))
     p.iop(0, 12, "+", 0)
     p.st(L.C["k"], 0)                          # the address of B[-1]
+    # v0.42: the read position (R6), B[-1]'s address (R13), the level's two factors (R14,
+    # R15) and the count (R5) held in registers through the 32 samples (v0.41 loaded and
+    # stored the position, loaded the address and counted in a scratch word every sample):
+    # the same operations in the same order, the same words (scripts/md_identity.py)
+    K.vw(p, 6, "pos")
+    p.ipass(13, 0)
+    if level_word is None:
+        p.fconst(14, 0.5 * level)
+        p.fconst(15, level)
+    else:                                      # v0.26: the level from a word (x 0.5, then x level:
+        p.fconst(14, 0.5)                      # the same product, bit for bit)
+        p.ld(15, level_word)
 
     def one():
-        K.vw(p, 6, "pos")
         p.trunc(7, 6)
         p.iconst(12, 0)
         p.float_(8, 7, 12)
         p.fop(8, 6, "-", 8)                    # f
         p.lsh(7, 7, 2)
-        p.ld(9, L.C["k"])
-        p.iop(7, 9, "+", 7)
+        p.iop(7, 13, "+", 7)
         p.seti(1, 7)
         p.ldpost(0, 1)                         # a = B[i-1]
         p.ldpost(1, 1)                         # b
@@ -299,19 +360,14 @@ def block(p: Prog, L: K.Layout, knobs: list[int], note: int, want: int, level: f
         p.fop(10, 2, "-", 0)
         p.fop(9, 9, "+", 10)
         p.fop(9, 9, "*", 8)
-        if level_word is None:
-            p.fconst(12, 0.5 * level)
-            p.fop(9, 9, "*", 12)
-            p.fconst(12, level)
-        else:                                  # v0.26: the level from a word (x 0.5, then x level:
-            p.fconst(12, 0.5)                  # the same product, bit for bit)
-            p.fop(9, 9, "*", 12)
-            p.ld(12, level_word)
-            p.fop(9, 9, "*", 12)
-        p.fop(10, 1, "*", 12)
+        p.fop(9, 9, "*", 14)
+        if level_word is not None:
+            p.fop(9, 9, "*", 15)
+        p.fop(10, 1, "*", 15)
         p.fop(9, 9, "+", 10)
         p.stpost(4, 9)
         p.fconst(12, K.STEP)
         p.fop(6, 6, "+", 12)
-        K.vws(p, "pos", 6)
-    p.loop(L.C["n1"], 32, one)
+    p.loop_r(5, 32, one)
+    K.vws(p, "pos", 6)
+    p.st(L.C["n1"], 5)

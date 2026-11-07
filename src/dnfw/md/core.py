@@ -79,10 +79,11 @@ class Layout:
 
 
 SC_WORDS = ("n1", "n2", "n3", "a", "b", "c", "d", "e", "f", "g", "h", "k", "fill", "tmp", "mdb",
-            "cw", "cs", "cv", "ash", "ufill")
+            "cw", "cs", "cv", "ash", "ufill", "hpass", "hq")
 # fill, cw, cs, cv, ufill: table_fill's (the words decoded, the bit, the last three words)
 # ash: the word dsl.ash saves its count register in
 # mdb: the slot's words' address (what I3 holds), for code that needs it in an R register
+# hpass, hq: v0.42, advance's two host passes (the count, whether this pass runs the host)
 
 
 def delay_base(p: Prog, L: Layout, d: int) -> None:

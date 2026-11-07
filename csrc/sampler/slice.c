@@ -61,6 +61,22 @@ extern int smp_area_ok(void);
 enum { S_OFF, S_MENU, S_GRID, S_WAIT, S_EDIT, S_ALLOC };   /* v0.25: ALLOC, GRID's ALLOCATE SLICE */
 int slc_state __attribute__((section(".data"))) = S_OFF;
 int slc_page_seen __attribute__((section(".data"))) = 0;   /* smp_page.c: 1 a SLICE page is up, 2 GRID's */
+/* v0.42 (NiKo, v0.40: "CREATE RANDOM LOCKS ... stays over the other layers when I'm switching
+ * to VOICES ... coming back every time I'm using the YES button, including on other tracks"):
+ * slc_page_seen said which page was drawn LAST, and only a page key cleared it, so after
+ * another page or track (TRACK + a trig, VOICES) YES still opened GRID's dialog, and an open
+ * dialog stayed up over any page (its YES then locked the other track's trigs). Now a page
+ * counts only when the screen last drawn drew it (wr_draws, as the playhead's redraw test),
+ * and a dialog lets go when its page is not drawn or the active track is not its own. */
+u32 slc_seen_draw __attribute__((section(".data"))) = 0xFFFFFFFFu;   /* wr_draws when a SLICE/GRID page was drawn */
+u32 slc_open_track __attribute__((section(".data"))) = 0;            /* the track a menu opened on */
+u32 slc_letgo __attribute__((section(".data"))) = 0;                  /* (count: the gate reads it) */
+
+static int page_up(void)                        /* the screen last drawn drew a SLICE/GRID page */
+{
+    extern u32 wr_draws;
+    return slc_seen_draw == wr_draws;
+}
 static int menu_sel __attribute__((section(".data"))) = 0;
 int slc_stock_asked __attribute__((section(".data"), aligned(4))) = 0;   /* v0.29: FUNC + a key since the last YES/NO */
 #define MENU_N 5                                /* v0.29: and CLEAR SLICE GRID (owner) */
@@ -553,8 +569,29 @@ static void start_analysis(int then)
 }
 
 /* from the UI loop (page.c's wr_poll), every pass */
+static void slice_preview(int on);
+
 void slc_poll(void)
 {
+    /* v0.42: a menu or dialog lets go when its page is gone or another track is active (as
+     * leaving it with LEFT: CREATE RANDOM LOCKS keeps the locks it made); the editor saves
+     * and closes on another track (as its YES / NO) */
+    if (slc_state != S_OFF && ACTIVE_TRACK != slc_open_track) {
+        if (slc_state == S_EDIT) {
+            slice_preview(0);
+            edit_close();
+        } else {
+            if (slc_state == S_WAIT && wait_go)
+                smp_analyse_cancel();
+            lk_kept = 0;
+            slc_state = S_OFF;
+        }
+        slc_letgo++;
+    } else if ((slc_state == S_ALLOC || slc_state == S_MENU || slc_state == S_GRID) && !page_up()) {
+        lk_kept = 0;
+        slc_state = S_OFF;
+        slc_letgo++;
+    }
     if (slc_state != S_WAIT) {
         wait_at = 0;
         return;
@@ -786,13 +823,17 @@ int slc_pop(u8 *it)
         if (press && code == K_YES && smp_trig_held())
             return 0;
         /* YES on a SLICE track's page opens the menu */
+        if (!page_up())
+            slc_page_seen = 0;                  /* v0.42: another page or track is up */
         if (press && code == K_YES && slc_page_seen == 2 && !func) {   /* v0.25: GRID's ALLOCATE SLICE */
             menu_sel = 0;
             lk_kept = 0;
+            slc_open_track = ACTIVE_TRACK;
             slc_state = S_ALLOC;
             return 1;
         }
         if (press && code == K_YES && slc_page_seen == 1 && !func) {
+            slc_open_track = ACTIVE_TRACK;
             int k = track_slot();
             if (k == -2)
                 return 0;
