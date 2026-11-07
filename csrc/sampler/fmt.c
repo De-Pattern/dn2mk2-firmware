@@ -17,10 +17,8 @@ typedef unsigned int u32;
 typedef unsigned short u16;
 typedef unsigned char u8;
 
-#define TYPE_FIRST 8
 #define SEG_DETENTS 3                           /* v0.25: WERP's SEG, detents a choice */
 #define CHOICE_DETENTS 4                        /* v0.26: PLAY, MODE, BARS, GRID */
-#define TYPES 6                                 /* v0.19: SLICE */
 #define SOUND_TYPE 0xDE                         /* the sound's machine type byte */
 #define SOUND_VALUES 0x14                       /* its values, a 16-bit word a slot */
 #define RECORD_FMT(id) (*(void **)(0x401F7F94u + 60u * (id) + 0x34u))
@@ -149,8 +147,8 @@ static int func_kind(u8 *s, int slot, u32 id)
                 return mnm_choices[mi][j] ? F_CHOICE : F_NONE;
         return F_NONE;
     }
-    int type = ty - TYPE_FIRST;
-    if (type < 0 || type >= TYPES)
+    int type = SMP_IDX(ty - 4);                 /* v0.44: the sample row (BOUNCE's is 6, type 17) */
+    if (type < 0)
         return F_OFF;                           /* a stock machine: stock's */
     if (slot == SMP_TUNE_SLOT)
         return F_KEEP;
@@ -184,8 +182,8 @@ int smp_quant(u8 *s, int slot, int value, u32 id)
     int mi = mnm_index((signed char)s[SOUND_TYPE] - 4);     /* v0.27: is_wr's kind */
     if (mi >= 0)
         return mnm_quant(mi, slot, *(volatile u16 *)(s + SOUND_VALUES + 2 * slot), value);
-    int type = (signed char)s[SOUND_TYPE] - TYPE_FIRST;
-    if (type < 0 || type >= TYPES)
+    int type = SMP_IDX((signed char)s[SOUND_TYPE] - 4);   /* v0.44: BOUNCE's row too */
+    if (type < 0)
         return value;
     if (slot == SMP_SAMP_SLOT) {                /* v0.27: SAMP turned by hand (smp_page.c's list) */
         extern u32 smp_samp_turned;

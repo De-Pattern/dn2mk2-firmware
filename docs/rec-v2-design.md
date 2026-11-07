@@ -1,5 +1,27 @@
 # Live sampling, second design (rec-v2) — proposal, 2026-11-07
 
+**As built (v0.44, the same day; `docs/rectrig.md` is the reference).** The owner's decisions
+on the open points, and what changed from the proposal below:
+
+- The machine is **BOUNCE** (type 17), not FLEX; to the DSP it is **STRETCH** on its buffer,
+  not ONESHOT, so a take follows the tempo (the DSP's `tempo()` takes the take's steps in
+  place of BARS). It costs DSP code after all: the buffer directory (`SM.BUF_DIR`, 16 halves
+  of address, frames, steps) and SAMP 129..144.
+- **Eight buffers, one per BOUNCE track by its BUF control** (1..8), two halves each; not the
+  two shared REC 1 / REC 2 slots. "2+1" is two tracks on one BUF.
+- Recorder trigs are placed on the **BOUNCE REC panel** (FUNC + VOICE on a BOUNCE track) with
+  the [TRIG] keys whether or not GRID RECORDING is on; the panel owns PAGE (its own page
+  counter: stock's grid-page variable was not found), and the **screen's 4 x 4 grid** shows
+  the page's trigs — the LEDs are not mirrored (stock's LED driver owns them).
+- **YES YES** (twice within 0.4 s) re-arms the one-shots; a single YES stays the manual
+  RECORD NOW. **FUNC + YES** saves the playing take to the next empty pool slot and the
+  +Drive. NO closes the panel (no "disarm").
+- The RECORDER keeps one page for every machine (page 2 gone); Q.REC and Q.PLAY live on the
+  BOUNCE panel's bottom row (E, F), R.LEN on G, the one-shots' count on H.
+- The lock table's offset was settled in the emulator: PATTERN + 97,872 (the model's getter
+  returns `*(model + 16)`); the harness checks it every run, so no RAM mirror was needed.
+- The status lines are those in `docs/rectrig.md` (section 4's wording changed).
+
 Replaces v0.41's REC trigs / REC TRIGS page. Owner's brief: Octatrack-style, intuitive, proven
 end to end, no conflicts with other keys. Read with `docs/HANDOFF-2026-11-07-rec-trigs.md`
 (what exists and what went wrong) and the Octatrack manual OS 1.40A (9.1–9.2, 12.4.5, 12.4.8).

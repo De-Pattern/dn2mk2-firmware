@@ -610,7 +610,11 @@ static int closes(u32 code)
 #define MACHINE_COMMIT ((u32 (*)(u32, u32, u32, u32, u32))0x40031880u)
 #define KIT (*(volatile u32 *)0x800052A0u)
 #define SOUND_TYPE(t) (*(volatile signed char *)(KIT + 52u + 1163u * (u32)(t) + 0xDEu))
-#define ONESHOT 8                               /* dnfw.sampler.machines.TYPE_OF; 8..8 + SMP_N - 1 */
+#define ONESHOT 8                               /* dnfw.sampler.machines.TYPE_OF; the pool-playing sample
+                                                 * machines are 8..13 (v0.44: SMP_N is 7 with BOUNCE, type 17,
+                                                 * which plays its buffer, not a SAMP: not one of these; 14 is
+                                                 * a Monomachine machine) */
+#define SAMP_MACHINE(ty) ((ty) >= ONESHOT && (ty) <= 13)
 
 int smp_assign(int track, int slot)
 {
@@ -620,7 +624,7 @@ int smp_assign(int track, int slot)
     if (!owner)
         return -1;
     int ty = SOUND_TYPE(track);
-    if (ty < ONESHOT || ty >= ONESHOT + SMP_N) {    /* not a sample machine: ONESHOT, as the DT2's audio tracks */
+    if (!SAMP_MACHINE(ty)) {                    /* not a sample machine (BOUNCE too): ONESHOT, as the DT2's audio tracks */
         MACHINE_COMMIT(owner + 0xF4u, (u32)track, ONESHOT, 1, 1);
         if (SOUND_TYPE(track) != ONESHOT)
             return -1;                          /* refused (stock's permission): nothing set */
@@ -638,7 +642,7 @@ int smp_set_samp(int track, int value)
     if (track < 0 || track > 15 || value < 0 || value > 127 || !KIT)
         return -1;
     int ty = SOUND_TYPE(track);
-    if (ty < ONESHOT || ty >= ONESHOT + SMP_N)
+    if (!SAMP_MACHINE(ty))
         return -1;                              /* not a sample machine: nothing to set */
     u32 owner = UI_OWNER();
     if (!owner)
@@ -659,7 +663,7 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
     if (track < 16 && KIT) {
         int old = SOUND_TYPE(track);
         int ty = (int)type;
-        if (old != ty && old >= ONESHOT && old < ONESHOT + SMP_N && ty >= ONESHOT && ty < ONESHOT + SMP_N)
+        if (old != ty && SAMP_MACHINE(old) && SAMP_MACHINE(ty))
             keep = smp_samp_of((int)track);
     }
     int was = track < 16 && KIT ? SOUND_TYPE(track) : -1;
