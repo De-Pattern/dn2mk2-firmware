@@ -912,6 +912,9 @@ int smp_fb_store __attribute__((section(".data"))) = -1;
 int smp_fb_last_store __attribute__((section(".data"))) = 0;   /* where the top's cursor lands (PROJECT RAM until +DRIVE is used) */
 #define FB_DRIVE (-4)
 #define FB_RAM (-5)
+/* v0.43: the +Drive library's folders (lib.c LIB_FOLDERS: 64 until v0.42, 128 since; a
+ * static assert in lib.c holds the two together) */
+#define SMP_LIB_FOLDERS 128
 #define LB_CAP 2048
 static u32 lb_marks[LB_CAP / 32] __attribute__((section(".data")));
 extern int smp_lib_used(int k), smp_lib_folder_of(int k), smp_lib_slot_of(int k);
@@ -1015,8 +1018,10 @@ static int fb_size_d(int folder, int *marked, int deep)
 {
     int n = 0, m = 0;
     if (smp_fb_store == 1) {                    /* v0.40: the folders it covers, then lib.c's */
-        u32 in[2] = {0, 0};                     /* counts and only the marked entries (each */
-        for (int g = 0; g < 64; g++)            /* folder row asks this, each redraw) */
+        u32 in[SMP_LIB_FOLDERS / 32];
+        for (int w_ = 0; w_ < SMP_LIB_FOLDERS / 32; w_++)
+            in[w_] = 0;                     /* counts and only the marked entries (each */
+        for (int g = 0; g < SMP_LIB_FOLDERS; g++)            /* folder row asks this, each redraw) */
             if (deep ? smp_lib_folder_under(g, folder) : g == folder) {
                 in[g >> 5] |= 1u << (g & 31);
                 n += smp_lib_folder_count(g);
@@ -1100,7 +1105,9 @@ void smp_fb_delete(int slot, int folder)
         /* v0.40: the folders that go, deepest first (lib.c refuses one that still holds a
          * sample or a folder, so a folder goes only once all inside it has gone: a power cut
          * between any two writes leaves every sample not yet deleted in a folder shown) */
-        u32 drop[2] = {0, 0};
+        u32 drop[SMP_LIB_FOLDERS / 32];
+        for (int w_ = 0; w_ < SMP_LIB_FOLDERS / 32; w_++)
+            drop[w_] = 0;
         int chain[8], nc = 0;                   /* where the browser is, and the folders above */
         for (int g = smp_fb_folder; g >= 0 && nc < 8; g = smp_lib_folder_parent(g))
             chain[nc++] = g;
@@ -1109,15 +1116,15 @@ void smp_fb_delete(int slot, int folder)
              * too, as one deleted by name does (Kokozi, v0.33: deleted folders stayed in the
              * list, empty); v0.40: and a folder every sample of which was ticked (its row's
              * FUNC + YES), with the folders inside it */
-            for (int f = 2; f < 64; f++)
+            for (int f = 2; f < SMP_LIB_FOLDERS; f++)
                 if (smp_fb_folder_full(f))
-                    for (int g = 2; g < 64; g++)
+                    for (int g = 2; g < SMP_LIB_FOLDERS; g++)
                         if (smp_lib_folder_under(g, f))
                             drop[g >> 5] |= 1u << (g & 31);
             for (int k = 0; k < LB_CAP; k++)
                 if (lb_marked(k) && smp_lib_used(k)) {
                     int f = smp_lib_folder_of(k);
-                    if (f >= 2 && f < 64)
+                    if (f >= 2 && f < SMP_LIB_FOLDERS)
                         drop[f >> 5] |= 1u << (f & 31);
                     smp_lib_delete(k);
                 }
@@ -1127,13 +1134,13 @@ void smp_fb_delete(int slot, int folder)
             for (int k = 0; k < LB_CAP; k++)    /* v0.40: and in its folders, any depth */
                 if (lb_under(k, folder))
                     smp_lib_delete(k);
-            for (int g = 2; g < 64; g++)        /* v0.33: emptied: the folder goes too; v0.40: */
+            for (int g = 2; g < SMP_LIB_FOLDERS; g++)        /* v0.33: emptied: the folder goes too; v0.40: */
                 if (smp_lib_folder_under(g, folder))    /* with its folders */
                     drop[g >> 5] |= 1u << (g & 31);
         }
         extern int smp_lib_folder_drop(int f);
         for (int d = 8; d >= 1; d--)
-            for (int f = 2; f < 64; f++)
+            for (int f = 2; f < SMP_LIB_FOLDERS; f++)
                 if ((drop[f >> 5] >> (f & 31) & 1) && smp_lib_folder_depth(f) == d)
                     smp_lib_folder_drop(f);     /* (refused while it still holds anything) */
         if (nc && smp_fb_folder >= 0 && smp_lib_folder_count(smp_fb_folder) == 0
@@ -1209,7 +1216,7 @@ int smp_fb_count(void)
     if (smp_fb_store == -1)
         return 2;                               /* v0.31: +DRIVE, PROJECT RAM */
     if (smp_fb_store == 1) {                    /* v0.40: the folders in it, then its samples */
-        for (int f = 0; f < 64; f++)
+        for (int f = 0; f < SMP_LIB_FOLDERS; f++)
             n += lb_has(f) && smp_lib_folder_parent(f) == smp_fb_folder;
         if (smp_fb_folder == -1)
             return n;
@@ -1233,7 +1240,7 @@ int smp_fb_item(int i, int *slot)
     if (smp_fb_store == -1)
         return i == 0 ? FB_DRIVE : i == 1 ? FB_RAM : -1;
     if (smp_fb_store == 1) {                    /* v0.40: the folders in it, then its samples */
-        for (int f = 0; f < 64; f++)
+        for (int f = 0; f < SMP_LIB_FOLDERS; f++)
             if (lb_has(f) && smp_lib_folder_parent(f) == smp_fb_folder && i-- == 0)
                 return f;
         if (smp_fb_folder == -1)

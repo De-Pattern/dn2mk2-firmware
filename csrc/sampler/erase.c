@@ -77,6 +77,8 @@ typedef unsigned char u8;
 #define PL_END (0x6D0100u + 2u * 129u * 256u)
 #define SET_SECTOR 0x6FF000u                                        /* jump.c */
 #define LIB_SECTOR 0x700000u                                        /* lib.c */
+#define LIB_HI_AT 0x6FF800u                                         /* v0.43, lib.c: folders 64..127 */
+#define LIB_HI_END (LIB_HI_AT + 1u + 4u)
 #define LIB_DATA (LIB_SECTOR + 1u + 256u + 4u)                      /* lib.c: superblock, index, folders */
 #define ER_CHUNK 2048u                                              /* stock FORMAT's call */
 #define ER_TRIES 5u                     /* v0.40: a call (TRIM or a verify read) tried at most 5 times */
@@ -91,6 +93,7 @@ _Static_assert(POOL_SECTOR >= ER_FLOOR, "the pool image lies above the floor");
 _Static_assert(POOL_STORE_END == 0x6C8001u, "the pool image ends at 0x6C8000 (docs/memory-map.md)");
 _Static_assert(PL_SB >= POOL_STORE_END && PL_END == 0x6E0300u, "the lists: 0x6D0000..0x6E02FF");
 _Static_assert(SET_SECTOR >= PL_END && SET_SECTOR < LIB_SECTOR, "the settings sector between the lists and the library");
+_Static_assert(LIB_HI_AT > SET_SECTOR && LIB_HI_END <= LIB_SECTOR, "v0.43: folders 64..127 between the settings and the library");
 _Static_assert(LIB_SECTOR > SET_SECTOR && LIB_DATA == 0x700105u, "the library's headers: 0x700000..0x700104");
 
 int smp_er_lock D_ = 0;                 /* set at the first erase call; every writer of ours refuses */
@@ -119,7 +122,7 @@ static u32 er_pos D_ = 0;               /* the next sector of the job */
 static u8 er_buf[512] __attribute__((section(".data"), aligned(16)));
 
 /* job -> [start, end) */
-#define ER_JOBS 6
+#define ER_JOBS 7
 static void er_job(int j, u32 *a, u32 *b)
 {
     u32 end = BLK_SECTORS;
@@ -128,7 +131,8 @@ static void er_job(int j, u32 *a, u32 *b)
     case 1: *a = PL_SB; *b = PL_END; return;                        /* the lists (superblocks first) */
     case 2: *a = SET_SECTOR; *b = SET_SECTOR + 1u; return;          /* the settings */
     case 3: *a = LIB_SECTOR; *b = end < LIB_DATA ? end : LIB_DATA; return;   /* the library's headers */
-    case 4: *a = POOL_SECTOR + 1u; *b = POOL_STORE_END; return;     /* the pool's frames */
+    case 4: *a = LIB_HI_AT; *b = LIB_HI_END; return;                /* v0.43: folders 64..127 */
+    case 5: *a = POOL_SECTOR + 1u; *b = POOL_STORE_END; return;     /* the pool's frames */
     default: *a = LIB_DATA; *b = end > LIB_DATA ? end : LIB_DATA; return;    /* the library's frames */
     }
 }
@@ -145,6 +149,8 @@ static int er_inside(u32 s, u32 n)
     if (s >= PL_SB && s + n <= PL_END)
         return 1;
     if (s == SET_SECTOR && n == 1u)
+        return 1;
+    if (s >= LIB_HI_AT && s + n <= LIB_HI_END)  /* v0.43 */
         return 1;
     if (s >= LIB_SECTOR)                        /* to the device's end (checked above) */
         return 1;
@@ -237,7 +243,7 @@ static int er_trim(u32 s, u32 n)
  * superblocks and each list copy's header; the settings; the library's superblock, index,
  * folders), then 64 a range spread over it, its first and last among them */
 #define ER_SPREAD 64u
-static u32 er_nhead(void) { return 1u + 2u + 2u * 129u + 1u + (LIB_DATA - LIB_SECTOR); }
+static u32 er_nhead(void) { return 1u + 2u + 2u * 129u + 1u + (LIB_DATA - LIB_SECTOR) + (LIB_HI_END - LIB_HI_AT); }
 
 static u32 er_check_sector(u32 k)
 {
@@ -250,11 +256,13 @@ static u32 er_check_sector(u32 k)
         return 0x6D0100u + 256u * (k - 3u);
     if (k == 3u + 258u)
         return SET_SECTOR;
-    if (k < h)
+    if (k < h - (LIB_HI_END - LIB_HI_AT))
         return LIB_SECTOR + (k - 262u);
+    if (k < h)                                  /* v0.43: folders 64..127's sectors */
+        return LIB_HI_AT + (k - (h - (LIB_HI_END - LIB_HI_AT)));
     k -= h;
     u32 j = k / ER_SPREAD, i = k % ER_SPREAD, a, b;
-    er_job(j == 0 ? 4 : j == 1 ? 1 : 5, &a, &b);    /* the pool's frames, the lists, the library */
+    er_job(j == 0 ? 5 : j == 1 ? 1 : 6, &a, &b);    /* the pool's frames, the lists, the library */
     if (b <= a)
         return a;
     u32 span = b - a - 1u;

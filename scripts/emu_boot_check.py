@@ -41,6 +41,7 @@ import time
 sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/digikit-up")
 
 from emu import dspboot, symbols                              # noqa: E402
+from emulib import quickboot                                  # noqa: E402
 from unicorn import UC_HOOK_CODE                              # noqa: E402
 from unicorn.m68k_const import UC_M68K_REG_A2, UC_M68K_REG_D3  # noqa: E402
 
@@ -129,8 +130,10 @@ def run(image_path, limit, frame_at, entries=(), aniz=None):
                     aniz["first_at"] = st["n"]
             m.uc.hook_add(UC_HOOK_CODE, at_stamp, begin=aniz["stamp"], end=aniz["stamp"])
 
-    m, st, stop = dspboot.run(str(SYX), open(image_path, "rb").read(), limit=limit,
-                              machine_out=holder, pre_start=pre_start)
+    # v0.43: without dspboot's per-instruction counting hook (emulib/quickboot.py): the same
+    # machine state, 1.7x faster; the instruction count of a stop is not kept
+    m, st, stop = quickboot.run(str(SYX), open(image_path, "rb").read(), limit=limit,
+                                machine_out=holder, pre_start=pre_start)
     return st["n"], state["frames"], state["fault"], reached
 
 
@@ -222,7 +225,8 @@ def main() -> int:
 
     if fault:
         rec = bytes.fromhex(fault["record"])
-        print(f"  FAULT after {fault['at']:,} instructions -- the firmware drew EXCEPTION.")
+        print("  FAULT -- the firmware drew EXCEPTION." if not fault["at"] else
+              f"  FAULT after {fault['at']:,} instructions -- the firmware drew EXCEPTION.")
         print(f"    record at {fault['a2']:#010x}: {fault['record']}")
         if len(rec) >= 8:
             print(f"    a2@(2) = {rec[2]:#04x}   a2@(4) = "
@@ -241,8 +245,8 @@ def main() -> int:
     # verdict rather than a footnote under it.
     if aniz is not None:
         n = len(aniz["expect"])
-        print(f"  the intro called the stamp {aniz['calls']} time(s), the first at instruction "
-              f"{aniz['first_at']}")
+        print(f"  the intro called the stamp {aniz['calls']} time(s)"
+              + (f", the first at instruction {aniz['first_at']}" if aniz["first_at"] else ""))
         print(f"  start-up animation: {aniz['shown']} frame(s) shown, {len(aniz['frames'])} of {n} "
               f"distinct, {len(aniz['wrong'])} not his")
         if aniz["wrong"] or 0 not in aniz["frames"]:

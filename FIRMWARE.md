@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.42** | 2026-11-06 | Monomachine machines re-coded, bit for bit, lighter on the DSP (DDRW -27%, SID -25%, DENS -21%, VO-6 -18%, WAVE -15%); DDRW's bit reduction exact (all 366 Monomachine references match); Machinedrum voices start clean on a machine change (the PI-HH clicks and loud spikes); the Machinedrum sample reader re-coded, identical; GRID/SLICE menus let go of other pages and tracks; a REC trig that records nothing says why; the Monomachine reference check back in the gate in full | `builds/v0.42-LEAN/` | yes |
+| **v0.43** | 2026-11-07 | 128 +Drive library folders (folders inside folders past 64; an older library as it was); the Monomachine voices 25-36 % lighter (their render scratch in L1, bit-exact); the gate's boot steps faster | `builds/v0.43-ROOM/` | yes |
+| v0.42 | 2026-11-06 | Monomachine machines re-coded, bit for bit, lighter on the DSP (DDRW -27%, SID -25%, DENS -21%, VO-6 -18%, WAVE -15%); DDRW's bit reduction exact (all 366 Monomachine references match); Machinedrum voices start clean on a machine change (the PI-HH clicks and loud spikes); the Machinedrum sample reader re-coded, identical; GRID/SLICE menus let go of other pages and tracks; a REC trig that records nothing says why; the Monomachine reference check back in the gate in full | `builds/v0.42-LEAN/` | yes |
 | v0.41 | 2026-11-06 | REC trigs (FUNC + VOICE, hold a step, H: REC 1 / REC 2), armed per track OFF / ONCE / ON; two looping buffers REC 1 and REC 2 (SAMP 124, 125) that keep playing while they re-record; QPLAY (a take heard from the next boundary) and QREC (RECORD NOW waits for the boundary); the REC TRIGS page; slides on our own machines' controls; SLEN four detents; NORMALIZING no longer sticks; no SLICE menu over a project save; a long recording can't run into the next; gate: rectrig, own-machine slides, Overbridge's code untouched | `builds/v0.41-LOOP/` | yes |
 | v0.40 | 2026-11-06 | Folders inside folders on the +Drive (six levels, browser and import page); SLICE no longer says CANNOT READ IT (a signed time compare), its menus wait and retry, LINKED/UNLINKED start and end; SAMP/SLCE p-locks play exactly what is locked; slides survive copy, paste and undo; the TRIM preview's and sample pages' playheads follow at once; recordings normalised to full scale as the DT2; ERASE MOD DATA waits, retries, resumes; the +DRIVE knob ignores jitter; RECORDER SRC/CHAN four detents; DIRECT JUMP on the next step every time; gate: nested folders, SLICE under link traffic, slide paste sites, normalising; the Monomachine reference cases replaced once by a byte-identity proof (owner) | `builds/v0.40-NEST/` | yes |
 | v0.39 | 2026-11-03 | Parameter slides (SLD/SLEN, TRIG page 2); resampling records the whole take (it kept ~2 ms, then the empty input); THRES 0 learns its floor; +DRIVE look-alike samples matched by identity (">A003" on every row); +DRIVE held arrows, FUNC page, pushed-knob page; long names head...tail and scrolling; ERASE MOD DATA; s!Rwa²'s own start-up animation; the mod's version on screen; gate: whole-take recordings with realistic inputs, look-alike library samples, +DRIVE keys, erase | `builds/v0.39-SLIDE/` | yes |
@@ -80,6 +81,54 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.43 — ROOM (128 +Drive folders; the Monomachine voices a quarter to a third lighter)
+
+`DN2mod_v0.43_ROOM_OS1.11.syx`
+sha256 `4089df39f689ff6382a415a1b830b1681f256c638ef9b8e5abc09e3a955920e0`
+Gate: CLEARED TO FLASH, 2026-11-07 (44 gates; 37 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit). Source: commit `b0e605a` (the gate's scripts `0253d54`). Docs: `docs/dsp-cost.md`, `docs/emu-speed.md`, `docs/drive-storage-research.md`.
+
+Everything in v0.42, plus:
+
+**128 +Drive library folders** (Wolljamin: the import page's "command 30: refused"): the library
+held 64 folders and refused the 65th. It holds 128 now; folders inside folders work past 64 too
+(a folder's parent is kept for parents under and over 64). Folders 64..127 live in their own
+sectors beside the settings sector, made the first time one is needed; an older library reads
+exactly as it was, and an older build reads this one's first 64 folders. ERASE MOD DATA clears
+them with the rest. The import page (the patcher site) lists past 64.
+
+**Lighter Monomachine machines**: the render scratch every Monomachine voice reads and writes
+through its block (the decimator's input, SID's phases, the coefficients, DPRO's buffers) moved
+from L2 to L1, the DSP's fastest memory; the bookkeeping stays in L2. The same instructions,
+every output word the same (the SHARC runner: every block of every run bit-exact to the model,
+and the garbage fill covers the new area). Per voice, a block (`docs/dsp-cost.md`): SID 36 %
+lighter, VO-6 32 %, DENS 30 %, WAVE 30 %, DDRW 25 %.
+
+**The gate, faster**: the boot steps run without the emulator's per-instruction counting hook
+(`docs/emu-speed.md`): the machine's whole memory and registers are identical with and without
+it at 700M instructions, and the boot step takes 21 minutes instead of 33.
+
+Gate: `test_libtree` (the 128-folder model and lib.c as the model), link16 `nest` (folders to
+127, the 128th refused, parents past 63, HI sectors written, a power cut after every sector,
+both TREE pages), `erase` (the HI region trimmed exactly), `drive`; the SHARC runner's `mnm`
+and `garbage` parts on the new scratch.
+
+**Tests**
+1. Import a pack with more than 64 folders, or keep making folders: no "command 30: refused"
+   until 128.
+2. Reboot: every folder and sample where it was; folders inside folders kept.
+3. A busy pattern with SID, VO-6 and DDRW voices: hold FUNC on a Monomachine page and compare
+   the load meter with v0.42's.
+4. Everything from v0.42 (Machinedrum voices clean on a machine change, GRID/SLICE menus, the
+   REC trig reasons).
+
+**Known issues**: the REC trigs of v0.41 are being redesigned (`docs/rec-v2-design.md`): a REC
+lock fires only on a step that has a note trig, and the two ARM knobs confuse; until then, put
+a note trig on the step. One recorder (a REC trig while the other buffer records cuts that
+take); buffers are off in a project with saved samples in SAMP 124-127 (from v0.32 or older);
+an LFO on SAMP or SLCE doesn't step through the loaded samples yet; preset pool trig locks don't
+work with the mod's machines yet. depaffect's report (no level on MAIN, FUNC + YES preview
+silent, v0.42) is open: unverified on hardware.
 
 ## v0.42 — LEAN (lighter Monomachine machines, clean Machinedrum voice changes)
 

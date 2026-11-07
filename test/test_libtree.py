@@ -24,7 +24,7 @@ def test_an_old_library_is_all_top_level_folders_as_it_was():
     # v0.39's import: the whole path as one flat name, 31 characters at most, byte 31 zero
     old = table({0: LT.record("INCOMING"), 1: LT.record("RECORDED"),
                  2: LT.record("TRANCE STARTER PACK/KICKS"), 3: LT.record("TRANCE STARTER PACK/LEADS/SYNTH")})
-    assert LT.tree(old) == [-1] * 64
+    assert LT.tree(old) == [-1] * LT.FOLDERS
     assert LT.names(old)[2:4] == ["TRANCE STARTER PACK/KICKS", "TRANCE STARTER PACK/LEADS/SYNTH"]
     assert old[32 * 3 + 31] == 0
 
@@ -85,10 +85,28 @@ def test_lib_c_is_the_model():
     c = (ROOT / "csrc/sampler/lib.c").read_text()
     assert re.search(r"#define LIB_DEPTH (\d+)", c).group(1) == str(LT.DEPTH)
     assert "#define FTAG(f) (FOLD[LIB_FOLDER_BYTES * (u32)(f) + LIB_FOLDER_BYTES - 1u])" in c
-    assert "(t & 0xC0u) == 0x80u" in c and "0x80u | (u32)parent" in c
+    assert "p = (t & 0x3Fu) + ((t & 0xC0u) == 0xC0u ? 64u : 0u)" in c and "(t & 0x80u) && FNAMED(f)" in c
+    assert "0x80u | (u32)parent : 0xC0u | ((u32)parent - LIB_FOLDERS_LO)" in c
+    # v0.43: 128 folders, the browser's loops the same
+    assert re.search(r"#define LIB_FOLDERS (\d+)", c).group(1) == str(LT.FOLDERS) == "128"
+    page = (ROOT / "csrc/sampler/smp_page.c").read_text()
+    assert re.search(r"#define SMP_LIB_FOLDERS (\d+)", page).group(1) == str(LT.FOLDERS)
+    assert "g < 64" not in page and "f < 64" not in page
     assert "cmd == 30" in c and "cmd == 31" in c and "folder_path(rq + 3" in c
     link = (ROOT / "csrc/sampler/link.c").read_text()
     assert re.search(r"#define PROTO (\d+)", link).group(1) == "7"
     assert "cmd == 30 || cmd == 31" in link
     # (LIST's reply, 132 bytes, fits the reply buffer: it ran on into rq before v0.40)
     assert "static u8 rp[132]" in link
+
+
+def test_v043_folders_past_63_and_their_parents():
+    """v0.43 (Wolljamin: the 64 folders full): 128 folders; a folder inside one past 63 keeps
+    its parent (0xC0 | parent - 64), and one past 63 inside one under 64 too"""
+    tab = bytearray(LT.RECORD * LT.FOLDERS)
+    for f, (name, parent) in {0: ("INCOMING", None), 1: ("RECORDED", None), 70: ("PACK", None),
+                              100: ("KICKS", 70), 10: ("LOOPS", 100), 101: ("SNARES", 10)}.items():
+        tab[LT.RECORD * f:LT.RECORD * (f + 1)] = LT.record(name, parent)
+    par = LT.tree(bytes(tab))
+    assert par[70] == -1 and par[100] == 70 and par[10] == 100 and par[101] == 10
+    assert LT.record("KICKS", 70)[-1] == 0xC0 | 6 and LT.record("LOOPS", 3)[-1] == 0x80 | 3
