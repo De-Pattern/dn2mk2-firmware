@@ -5,6 +5,10 @@ For the next session (the owner is switching to Claude Fable). Read this first, 
 
 ## 0. Rules while v0.43 is still in its gate (read before doing anything)
 
+**v0.43 ROOM was published 2026-11-07 06:50 (sha256 `4089df39...`): these rules no longer bind.
+The redesign's proposal is `docs/rec-v2-design.md` on branch `rec-v2` (worktree
+`/home/claude/dn2/recv2-wt`, main merged in), awaiting the owner's four decisions.**
+
 v0.43's gate may still be running when you start (check: `pgrep -fa ship_gate`, and
 `gh api repos/De-Pattern/dn2mk2-firmware/releases/latest --jq .tag_name` says v0.43 once it is
 out). Until v0.43 is published:
