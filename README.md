@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.43** | 2026-11-07 | 128 +Drive library folders (folders inside folders past 64; an older library as it was); the Monomachine voices 25-36 % lighter (their render scratch in L1, bit-exact); the gate's boot steps faster | `builds/v0.43-ROOM/` | yes |
+| **v0.44** | 2026-11-07 | BOUNCE, the seventh sample machine: Octatrack-style recorder trigs placed with [TRIG] (FUNC + [TRIG] a one-shot) record into the track's own buffer (8 buffers, two halves each), play the take fitted to its steps at any tempo, switch at Q.PLAY; Q.REC; FUNC + YES saves the take to the pool and +Drive; YES YES re-arms one-shots; v0.41's REC trigs, ARM knobs and REC TRIGS page gone; the CHAN icon on every RECORDER; FILE NAME UP/DOWN scroll characters | `builds/v0.44-BOUNCE/` | yes |
+| v0.43 | 2026-11-07 | 128 +Drive library folders (folders inside folders past 64; an older library as it was); the Monomachine voices 25-36 % lighter (their render scratch in L1, bit-exact); the gate's boot steps faster | `builds/v0.43-ROOM/` | yes |
 | v0.42 | 2026-11-06 | Monomachine machines re-coded, bit for bit, lighter on the DSP (DDRW -27%, SID -25%, DENS -21%, VO-6 -18%, WAVE -15%); DDRW's bit reduction exact (all 366 Monomachine references match); Machinedrum voices start clean on a machine change (the PI-HH clicks and loud spikes); the Machinedrum sample reader re-coded, identical; GRID/SLICE menus let go of other pages and tracks; a REC trig that records nothing says why; the Monomachine reference check back in the gate in full | `builds/v0.42-LEAN/` | yes |
 | v0.41 | 2026-11-06 | REC trigs (FUNC + VOICE, hold a step, H: REC 1 / REC 2), armed per track OFF / ONCE / ON; two looping buffers REC 1 and REC 2 (SAMP 124, 125) that keep playing while they re-record; QPLAY (a take heard from the next boundary) and QREC (RECORD NOW waits for the boundary); the REC TRIGS page; slides on our own machines' controls; SLEN four detents; NORMALIZING no longer sticks; no SLICE menu over a project save; a long recording can't run into the next; gate: rectrig, own-machine slides, Overbridge's code untouched | `builds/v0.41-LOOP/` | yes |
 | v0.40 | 2026-11-06 | Folders inside folders on the +Drive (six levels, browser and import page); SLICE no longer says CANNOT READ IT (a signed time compare), its menus wait and retry, LINKED/UNLINKED start and end; SAMP/SLCE p-locks play exactly what is locked; slides survive copy, paste and undo; the TRIM preview's and sample pages' playheads follow at once; recordings normalised to full scale as the DT2; ERASE MOD DATA waits, retries, resumes; the +DRIVE knob ignores jitter; RECORDER SRC/CHAN four detents; DIRECT JUMP on the next step every time; gate: nested folders, SLICE under link traffic, slide paste sites, normalising; the Monomachine reference cases replaced once by a byte-identity proof (owner) | `builds/v0.40-NEST/` | yes |
@@ -81,6 +82,58 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.44 — BOUNCE (Octatrack-style recorder trigs into a playing buffer)
+
+`DN2mod_v0.44_BOUNCE_OS1.11.syx`
+sha256 `7492556952bca6697d4b05ba858f867f71fdeb1c98b860257a48351294dbc35b`
+Gate: CLEARED TO FLASH, 2026-11-07 (44 gates; 37 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit). Source: commit `61840cd` (branch `rec-v2`). Docs: `docs/rectrig.md`, `docs/rec-v2-design.md`, `docs/sampler.md`.
+
+Everything in v0.43, plus:
+
+**BOUNCE**, the seventh sample machine (owner, NiKo and depaffect on v0.41's REC trigs: "none of
+this is working"). A BOUNCE track records into its own buffer on recorder trigs and plays it:
+- **BUF** (knob D) picks one of 8 buffers, 1..8; each has two halves, so a new take records while
+  the last one plays. Two BOUNCE tracks on one BUF: one records, both play.
+- **FUNC + VOICE**: the BOUNCE REC panel. **[TRIG 1..16]** places or removes a recorder trig on
+  that step (a 4 x 4 grid shows the page; PAGE turns it); **FUNC + [TRIG]** a one-shot (records
+  once, then spent). The trigs are the pattern's, saved, copied, pasted and undone with it, and
+  fire from the track's own step whether or not a note trig is on it.
+- At a trig the take starts (SRC/CHAN, R.LEN steps at the tempo, MAX = the pattern) into the idle
+  half; when it ends the track switches to it at the next **Q.PLAY** boundary (PLEN by default).
+- The track plays its buffer as STRETCH does: the take fitted to its steps, so a loop taken at 120
+  stays in time at 100. STRT, LEN, PLAY as on STRETCH.
+- **YES YES** re-arms spent one-shots; **FUNC + YES** saves the playing take into the next empty
+  pool slot and the +Drive's RECORDED (SAVING, NORMALIZING, TRIM, FILE NAME, ASSIGN).
+- **Q.REC**: a manual RECORD NOW waits for the next boundary while the sequencer plays.
+- The status line says what happens: EMPTY, n TRIGS, REC, NEXT, PLAYS, and why a take was
+  refused (MANUAL REC, NO ROOM, NO BUFFERS, NO +DRIVE POOL).
+
+Also: **CHAN** has its own L/R icon on every RECORDER; FILE NAME's UP/DOWN scroll the character at
+the cursor (held, they repeat). v0.41's REC trigs, the two ARM knobs and the REC TRIGS page are gone.
+
+Gate: `rectrig` (37 checks: trigs, one-shots, refusals, QREC, QPLAY, the store through SAVE/LOAD,
+the handover to a slot, the panel's keys, the CHAN icon's knob, FILE NAME's keys); the SHARC
+runner's `rec` part (a take into a buffer half, its directory entry, played back bit-exact).
+
+**Tests**
+1. New project, T1 BOUNCE, FUNC + VOICE, SRC IN (or MAIN with something playing), [TRIG 1],
+   PLAY: the line reads REC, then PLAYS, and T1 plays the loop on its note trigs.
+2. R.LEN 4 at 120 BPM, then slow the tempo: the loop stays in time.
+3. FUNC + [TRIG 5]: a one-shot records once; YES YES arms it again.
+4. FUNC + YES: the take lands in the next empty pool slot and in the +Drive's RECORDED.
+5. Two BOUNCE tracks on BUF 1: one with the trig, both play it.
+6. A plain RECORDER on an ONESHOT track: knob B moves the L/R icon; a manual take as before.
+7. Everything from v0.43 (128 folders, lighter Monomachine machines).
+
+**Known issues**: a v0.41 pattern's REC 1 / REC 2 locks show as recorder trigs on a BOUNCE track
+and are ignored elsewhere; one recorder (a trig on one buffer while another's take runs cuts that
+take); buffers are off in a project with saved samples in SAMP 124-127 (from v0.32 or older); the
+LEDs don't show recorder trigs (the panel's grid does); every sample machine with SAMP past the
+pool's last loaded slot (or OFF) keeps playing the last sample it had (the DSP skips the lookup and
+leaves the voice's entry; the fix is v0.45's); an LFO on SAMP or SLCE doesn't step through the
+loaded samples yet; preset pool trig locks don't work with the mod's machines yet. Unverified on
+hardware: the take's start against the step, by ear.
 
 ## v0.43 — ROOM (128 +Drive folders; the Monomachine voices a quarter to a third lighter)
 
