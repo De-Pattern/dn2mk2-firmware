@@ -21,8 +21,8 @@ def render(p, note=48, vel=1.0, secs=0.3, seed=1):
 
 def test_pages_are_three_by_eight_and_defaults_cover_them():
     names = [n for page in R.PAGES.values() for n in page]
-    assert [len(p) for p in R.PAGES.values()] == [8, 8, 8]
-    assert len(set(names)) == 24 and set(names) == set(R.DEFAULTS)
+    assert [len(p) for p in R.PAGES.values()] == [8, 8, 8, 8]
+    assert len(set(names)) == 32 and set(names) | set(R.EXTRA) == set(R.DEFAULTS)
 
 
 @pytest.mark.parametrize("name", list(R.CHOICES))
