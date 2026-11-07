@@ -1,4 +1,4 @@
-"""RIFT's design model (src/dnfw/rift/model.py): bounded, finite, deterministic, and doing
+"""FASCIA's design model (src/dnfw/fascia/model.py): bounded, finite, deterministic, and doing
 what each control says, before any DSP code is written against it."""
 
 import itertools
@@ -8,7 +8,7 @@ import random
 import numpy as np
 import pytest
 
-from dnfw.rift import model as R
+from dnfw.fascia import model as R
 
 
 def C(name, opt):

@@ -1,9 +1,9 @@
-"""RIFT, the sound: the design model, chosen by ear (docs/rift.md).
+"""FASCIA, the sound: the design model, chosen by ear (docs/fascia.md).
 
 Two exciters feed two modal bodies. The bodies can be coupled one way. After them come
 through-zero FM sidebands, ring modulation, frequency shift, a moving formant, a folder,
 the LPG and CHAR. This is the reference the DSP code will be held to: float64, offline,
-block-wise like the DSP (32 samples, coefficients once a block). `rift/live.py` will be
+block-wise like the DSP (32 samples, coefficients once a block). `fascia/live.py` will be
 the DSP-order float32 contract, like `rings/live.py` and `perc/live.py` before it.
 
 Controls are 0..127, as on the panel (`PAGES`). Choice controls take an index
@@ -21,16 +21,16 @@ from scipy.signal import hilbert, lfilter
 
 RATE = 48000.0
 BLOCK = 32
-MODES = 8
+MODES = 16
 IDLE = 1.0e-5                    # a block that peaks under this, exciters done: the voice ends
 OUT = 0.5                        # a full-velocity impulse's body peak, about
 # Each exciter's level into the bodies, so every type lands near OUT (sustained ones drive
-# the modes at their own pitch and build up; measured, scripts/rift_audition.py).
+# the modes at their own pitch and build up; measured, scripts/fascia_audition.py).
 TYPE_GAIN = {"STRIKE": 1.0, "BLOW": 0.04, "BOW": 0.06, "DUST": 3.5, "PULSE": 0.03, "TZFM": 0.015}
 LIMIT = (0.7, 0.001, 0.12)       # the voice's level guard: threshold, attack s, release s
 
 TYPES = ("STRIKE", "BLOW", "BOW", "DUST", "PULSE", "TZFM")
-BODIES = ("MEMB", "PLATE", "BAR", "TUBE", "STRING", "OFF")      # OFF: body B only
+BODIES = ("MEMB", "PLATE", "BAR", "VIBE", "CHIME", "BELL", "GLASS", "TUBE", "STRING", "OFF")  # OFF: B only
 
 PAGES = {
     "SYN1 EXCITERS": ("TYPA", "TYPB", "HARD", "DUST", "TZFM", "BEND", "MIX", "DEC"),
@@ -45,19 +45,72 @@ DEFAULTS = {
     "MORPH": 0, "FORM": 0, "SHIFT": 64, "RING": 0, "SIDE": 40, "FOLD": 0, "LPG": 40, "CHAR": 0,
 }
 
-# Mode-frequency ratios, the first eight of each body (the classic tables: an ideal
-# circular membrane's Bessel zeros, a free square plate, a free-free bar, a closed tube's
-# odd harmonics, a string's harmonics).
+def _plate(aspect: float = 1.31, n: int = 16):
+    fs = sorted((m / 1.0) ** 2 + (k / aspect) ** 2 for m in range(1, 8) for k in range(1, 8))
+    return tuple(f / fs[0] for f in fs[:n])
+
+
+def _bar(n: int = 16):
+    """Free-free bar: beta_k L = 4.730, 7.853, then about (k + 1/2) pi."""
+    b = [4.7300, 7.8532, 10.9956, 14.1372] + [(k + 0.5) * math.pi for k in range(5, n + 1)]
+    return tuple((x / b[0]) ** 2 for x in b[:n])
+
+
+def _glass(n: int = 16):
+    """A glass bowl (or a thin bell's ring modes): f_n ~ n (n^2 - 1) / sqrt(n^2 + 1)."""
+    f = [m * (m * m - 1) / math.sqrt(m * m + 1) for m in range(2, n + 2)]
+    return tuple(x / f[0] for x in f)
+
+
+# Mode-frequency ratios, sixteen a body, scaled so the note is the pitch you hear:
+#   MEMB   an ideal circular membrane's Bessel zeros (drums, tablas, toms, plonk)
+#   PLATE  a rectangular plate (aspect 1.31): dense, gongs, sheets, cymbals
+#   BAR    a free-free bar: glockenspiel, kalimba-like tines, wood or metal bars
+#   VIBE   a tuned bar, partials 1 : 4 : 10 (vibraphone, marimba), torsional modes beside
+#   CHIME  a tube struck at its end (tubular bell, wind chime): a free-free bar heard at
+#          its strike note, the missing fundamental of modes 4..6 (about 4.47 x mode 1)
+#   BELL   a tuned church bell: hum, prime, tierce, quint, nominal ... (measured ratios)
+#   GLASS  a glass bowl or wine glass: sparse, high, pure
+#   TUBE   an air column closed at one end: odd harmonics, hollow
+#   STRING harmonics (GEOM adds stiffness)
+_B = _bar()
 RATIOS = {
-    "MEMB": (1.000, 1.594, 2.136, 2.296, 2.653, 2.918, 3.156, 3.501),
-    "PLATE": (1.000, 2.500, 4.000, 5.000, 6.500, 8.500, 9.000, 10.000),
-    "BAR": (1.000, 2.756, 5.404, 8.933, 13.344, 18.638, 24.814, 31.871),
-    "TUBE": (1.0, 3.0, 5.0, 7.0, 9.0, 11.0, 13.0, 15.0),
-    "STRING": (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0),
+    "MEMB": (1.000, 1.594, 2.136, 2.296, 2.653, 2.918, 3.156, 3.501, 3.600, 3.652, 4.060,
+             4.154, 4.230, 4.601, 4.832, 4.903),
+    "PLATE": _plate(),
+    "BAR": _B,
+    "VIBE": (1.0, 2.86, 4.0, 6.6, 10.0, 11.9, 17.6, 18.9, 27.4, 31.0, 39.2, 45.0, 53.0,
+             60.0, 69.0, 79.0),
+    "CHIME": tuple(r / 4.47 for r in _B),
+    "BELL": (0.5, 1.0, 1.183, 1.506, 2.0, 2.514, 2.662, 3.011, 4.166, 5.433, 6.796, 8.215,
+             9.75, 11.3, 12.9, 14.5),
+    "GLASS": _glass(),
+    "TUBE": tuple(float(2 * k + 1) for k in range(16)),
+    "STRING": tuple(float(k + 1) for k in range(16)),
 }
-# Body B's pitch against A's (fixed for now; design doc: "a selectable ratio, later
-# independent tuning"). Chosen so the two bodies beat against each other musically.
-B_RATIO = {"MEMB": 1.498, "PLATE": 2.0, "BAR": 2.756, "TUBE": 1.5, "STRING": 1.0}
+# How each mode's spatial frequency follows its pitch (for POS): sqrt for 2-D bodies and
+# bars (f ~ k^2), linear for strings and air columns.
+SPATIAL = {"MEMB": 0.5, "PLATE": 0.5, "BAR": 0.5, "VIBE": 0.5, "CHIME": 0.5, "BELL": 0.5,
+           "GLASS": 0.5, "TUBE": 1.0, "STRING": 1.0}
+# Round and symmetric bodies split each mode into a near-degenerate pair: the slow beating
+# that makes bells, glasses, chimes and plates shimmer instead of sounding like filters.
+SPLIT = {"MEMB": 0.0008, "PLATE": 0.0015, "BAR": 0.0, "VIBE": 0.0, "CHIME": 0.0010,
+         "BELL": 0.0020, "GLASS": 0.0025, "TUBE": 0.0, "STRING": 0.0004}
+# Each body's own material lean (added to MATL): bells, glass and chimes ring.
+RING_BIAS = {"MEMB": -0.15, "PLATE": 0.05, "BAR": 0.0, "VIBE": 0.15, "CHIME": 0.2,
+             "BELL": 0.25, "GLASS": 0.3, "TUBE": 0.0, "STRING": 0.1}
+# Body B's pitch against A's: fixed by B's type (owner, 2026-11-07: we fine-tune the
+# interval so a pairing sounds musical at once; the patching stays free). Each is the
+# interval that type is usually paired at:
+#   TUBE 1:1    a marimba or vibraphone's resonator tube is tuned to its bar
+#   STRING 1:1  sympathetic strings ring at the note
+#   MEMB 3:2    a second drumhead a fifth up (tom stacks, talking-drum pairs)
+#   GLASS 4:3   glasses a fourth apart
+#   CHIME 3:2   wind chimes are tuned in fifths
+#   PLATE, VIBE, BELL 2:1   an octave up: a smaller plate, bar or bell
+#   BAR 2.756   the free bar's own second mode: B reinforces A's overtone
+B_RATIO = {"MEMB": 1.4983, "PLATE": 2.0, "BAR": 2.756, "VIBE": 2.0, "CHIME": 1.4983, "BELL": 2.0,
+           "GLASS": 1.3348, "TUBE": 1.0, "STRING": 1.0}
 
 VOWELS = ((730, 1090), (530, 1840), (270, 2290), (570, 840), (300, 870))  # a e i o u
 
@@ -73,7 +126,7 @@ def expmap(v: int, lo: float, hi: float) -> float:
 
 def choice(name: str, v: int) -> int:
     """The option a 0..127 value picks: equal spans (the panel's 4-detent stepping maps
-    each option to its own span, docs/rift.md)."""
+    each option to its own span, docs/fascia.md)."""
     n = len(CHOICES[name])
     return min(int(min(max(v, 0), 127) * n / 128), n - 1)
 
@@ -82,37 +135,57 @@ def mtof(note: float) -> float:
     return 440.0 * 2.0 ** ((note - 69.0) / 12.0)
 
 
-@dataclass
 class Body:
-    kind: str
-    f0: float
-    modes: int = MODES
-    y1: np.ndarray = field(default=None)
-    y2: np.ndarray = field(default=None)
+    """A modal body: up to MODES modes (each a damped two-pole resonator,
+    y = 2 r cos w y1 - r^2 y2 + g x), a near-degenerate twin per mode where the body is
+    round, and a per-hit variation of a few cents and a decibel or so (seeded), so that
+    repeated hits sound like one object struck again, not a sample replayed."""
 
-    def __post_init__(self):
-        self.y1 = np.zeros(self.modes)
-        self.y2 = np.zeros(self.modes)
+    def __init__(self, kind: str, f0: float, modes: int = MODES, seed: int = 1, vary: float = 1.0):
+        self.kind, self.f0 = kind, f0
+        rng = np.random.default_rng(seed)
+        base = np.array(RATIOS[kind][:modes])
+        k = np.arange(len(base))
+        jit = 1.0 + rng.normal(0.0, 0.0012, len(base)) * (1 + 0.15 * k) * vary
+        jit[0] = 1.0 + (jit[0] - 1.0) * 0.2                     # the pitch stays the pitch
+        aj = np.exp(rng.normal(0.0, 0.10, len(base)) * vary)
+        split = SPLIT[kind]
+        if split:
+            tw = 1.0 + split * (0.6 + 0.8 * rng.random(len(base))) * (1 + 0.3 * k)
+            base = np.concatenate([base * jit, base * jit * tw])
+            aj = np.concatenate([aj, aj * (0.5 + 0.5 * rng.random(len(aj)))])
+        else:
+            base = base * jit
+        self.base, self.aj = base, aj
+        self.n = len(base)
+        self.y1 = np.zeros(self.n)
+        self.y2 = np.zeros(self.n)
+        self.peak = 1e-9                                         # for the tension glide
+        self.level = 1.0
 
-    def coeffs(self, geom_e: float, bend: float, t60: float, matl_exp: float,
+    def coeffs(self, geom_e: float, bend: float, t60: float, matl: float,
                lpg_loss: float, pos: float, tilt: float):
-        base = np.array(RATIOS[self.kind][: self.modes])
-        ratio = base ** geom_e
+        ratio = self.base ** geom_e
         f = self.f0 * ratio * bend
-        alive = f < 0.45 * RATE
-        f = np.minimum(f, 0.45 * RATE)
+        alive = (f < 0.45 * RATE) & (f > 15.0)
+        f = np.clip(f, 15.0, 0.45 * RATE)
         w = 2 * math.pi * f / RATE
-        t60k = t60 * (1.0 / ratio) ** matl_exp / (1.0 + lpg_loss * (ratio - 1.0))
+        # MATL's damping curve: losses rising with frequency (air, internal friction);
+        # wood and plasticine lose their highs fast, metal and glass keep them
+        m = min(max(matl + RING_BIAS[self.kind], 0.0), 1.0)
+        a1, a2 = 4.0 * (1 - m) ** 2 + 0.015, 2.0 * (1 - m) ** 3 + 0.002
+        fk = f / 1000.0
+        t60k = t60 / (1.0 + a1 * fk + a2 * fk * fk) / (1.0 + lpg_loss * (ratio - 1.0).clip(0))
         r = 10.0 ** (-3.0 / (np.maximum(t60k, 1e-3) * RATE))
-        k = np.arange(1, self.modes + 1)
-        amp = np.abs(np.sin(math.pi * k * pos)) * k ** (-tilt)
-        amp = amp * alive
-        amp = amp * (OUT / max(float(np.sum(np.abs(np.sin(math.pi * k * pos)) * k ** (-tilt))), 1e-6))
+        sp = ratio ** SPATIAL[self.kind]
+        shape = np.abs(np.sin(math.pi * sp * pos)) * ratio ** (-0.7 * tilt) * self.aj
+        amp = shape * alive
+        amp = amp * (OUT / max(float(np.sum(shape)), 1e-6))
         return w, r, amp
 
     def block(self, x: np.ndarray, w, r, amp) -> np.ndarray:
         out = np.zeros_like(x)
-        for m in range(self.modes):
+        for m in range(self.n):
             if amp[m] == 0.0 and self.y1[m] == 0.0 and self.y2[m] == 0.0:
                 continue
             a1, a2 = -2.0 * r[m] * math.cos(w[m]), r[m] * r[m]
@@ -121,6 +194,9 @@ class Body:
             y, _ = lfilter([b0], [1.0, a1, a2], x, zi=zi)
             self.y2[m], self.y1[m] = (y[-2], y[-1]) if len(y) > 1 else (self.y1[m], y[-1])
             out += y
+        pk = float(np.max(np.abs(out))) if len(out) else 0.0
+        self.peak = max(self.peak, pk)
+        self.level = pk / self.peak
         return out
 
     def energy(self) -> float:
@@ -211,20 +287,24 @@ class Voice:
         self.vel = vel
         ka = BODIES[choice("BODA", p["BODA"])]
         kb = BODIES[choice("BODB", p["BODB"])]
-        self.a = Body(ka, self.f0, modes)
-        self.b = None if kb == "OFF" else Body(kb, self.f0 * B_RATIO[kb], modes)
+        self.a = Body(ka, self.f0, modes, seed=seed * 31 + 3)
+        self.b = None if kb == "OFF" else Body(kb, self.f0 * B_RATIO[kb], modes, seed=seed * 31 + 5)
         ta, tb = TYPES[choice("TYPA", p["TYPA"])], TYPES[choice("TYPB", p["TYPB"])]
         self.ea = Exciter(ta, p, self.f0, vel, seed)
         self.eb = Exciter(tb, p, self.f0, vel, seed + 7919)
         mix = u(p["MIX"])
         self.ga, self.gb = math.cos(mix * math.pi / 2), math.sin(mix * math.pi / 2)
         self.t60 = expmap(127 - p["DAMP"], 0.03, 12.0)                 # DAMP up: shorter
-        self.matl_exp = 1.6 * (1.0 - u(p["MATL"])) + 0.05               # wood .. metal
+        self.matl = u(p["MATL"])                                         # wood .. metal
         self.pos = 0.02 + 0.48 * u(p["POS"])
         self.tilt = 1.2 * (1.0 - u(p["HARD"]) * (0.5 + 0.5 * vel))      # soft hits: fewer highs
         self.geom_e = 0.6 + 0.8 * u(p["GEOM"])
         self.morph = (u(p["MORPH"]) * 0.6, self.t60 * 0.3)
-        self.bend = (u(p["BEND"]) * 12.0 * (0.5 + 0.5 * vel), 0.03)    # semitones, s
+        # BEND: tension glide. A struck membrane or a soft plonk sounds sharp while it is
+        # loud and settles as it rings (pitch follows the body's own level), plus a short
+        # contact chirp that harder hits raise
+        self.bend = u(p["BEND"]) * 7.0 * (0.4 + 0.6 * vel)              # semitones at full level
+        self.chirp = u(p["HARD"]) * vel * 0.6                          # semitones, 4 ms
         self.lpg = u(p["LPG"]) * 6.0
         self.coup = u(p["COUP"])
         self.end = None                                                 # s, when it went idle
@@ -247,14 +327,16 @@ class Voice:
             t = i / RATE
             x = self._exc(i, m)
             ge = self.geom_e + self.morph[0] * (1 - math.exp(-t / self.morph[1]))
-            bend = 2.0 ** (self.bend[0] * math.exp(-t / self.bend[1]) / 12.0)
+            ch = self.chirp * math.exp(-t / 0.004)
+            bend = 2.0 ** ((self.bend * self.a.level + ch) / 12.0)
             g = math.exp(-t / max(self.t60 * 0.25, 0.01))                # the LPG contour
             loss = self.lpg * (1.0 - g)
-            wa = self.a.coeffs(ge, bend, self.t60, self.matl_exp, loss, self.pos, self.tilt)
+            wa = self.a.coeffs(ge, bend, self.t60, self.matl, loss, self.pos, self.tilt)
             oa = self.a.block(x, *wa)
             ob = np.zeros(m)
             if self.b is not None:
-                wb = self.b.coeffs(ge, bend, self.t60, self.matl_exp, loss, self.pos * 0.73, self.tilt)
+                bb = 2.0 ** ((self.bend * self.b.level + ch) / 12.0)
+                wb = self.b.coeffs(ge, bb, self.t60, self.matl, loss, self.pos * 0.73, self.tilt)
                 # one-way, bounded: B hears (1 - c) of the exciter and c of A, A's level held
                 xb = (1.0 - self.coup) * x + self.coup * np.clip(oa, -1.0, 1.0) * 0.5
                 ob = self.b.block(xb, *wb)
