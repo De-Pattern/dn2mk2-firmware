@@ -37,6 +37,8 @@ sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/digikit-up")
 sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/dn2_firmware/scripts")
 
 from emu import dspboot                                       # noqa: E402
+# v0.43: quickboot from this repo's emulib (the path inserted above may hold an older copy)
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from emulib import quickboot                                  # noqa: E402
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
