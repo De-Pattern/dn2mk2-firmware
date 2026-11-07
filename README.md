@@ -34,7 +34,8 @@ Every flash, every version:
 
 | version | date | adds | download | gated |
 |---|---|---|---|---|
-| **v0.41** | 2026-11-06 | REC trigs (FUNC + VOICE, hold a step, H: REC 1 / REC 2), armed per track OFF / ONCE / ON; two looping buffers REC 1 and REC 2 (SAMP 124, 125) that keep playing while they re-record; QPLAY (a take heard from the next boundary) and QREC (RECORD NOW waits for the boundary); the REC TRIGS page; slides on our own machines' controls; SLEN four detents; NORMALIZING no longer sticks; no SLICE menu over a project save; a long recording can't run into the next; gate: rectrig, own-machine slides, Overbridge's code untouched | `builds/v0.41-LOOP/` | yes |
+| **v0.42** | 2026-11-06 | Monomachine machines re-coded, bit for bit, lighter on the DSP (DDRW -27%, SID -25%, DENS -21%, VO-6 -18%, WAVE -15%); DDRW's bit reduction exact (all 366 Monomachine references match); Machinedrum voices start clean on a machine change (the PI-HH clicks and loud spikes); the Machinedrum sample reader re-coded, identical; GRID/SLICE menus let go of other pages and tracks; a REC trig that records nothing says why; the Monomachine reference check back in the gate in full | `builds/v0.42-LEAN/` | yes |
+| v0.41 | 2026-11-06 | REC trigs (FUNC + VOICE, hold a step, H: REC 1 / REC 2), armed per track OFF / ONCE / ON; two looping buffers REC 1 and REC 2 (SAMP 124, 125) that keep playing while they re-record; QPLAY (a take heard from the next boundary) and QREC (RECORD NOW waits for the boundary); the REC TRIGS page; slides on our own machines' controls; SLEN four detents; NORMALIZING no longer sticks; no SLICE menu over a project save; a long recording can't run into the next; gate: rectrig, own-machine slides, Overbridge's code untouched | `builds/v0.41-LOOP/` | yes |
 | v0.40 | 2026-11-06 | Folders inside folders on the +Drive (six levels, browser and import page); SLICE no longer says CANNOT READ IT (a signed time compare), its menus wait and retry, LINKED/UNLINKED start and end; SAMP/SLCE p-locks play exactly what is locked; slides survive copy, paste and undo; the TRIM preview's and sample pages' playheads follow at once; recordings normalised to full scale as the DT2; ERASE MOD DATA waits, retries, resumes; the +DRIVE knob ignores jitter; RECORDER SRC/CHAN four detents; DIRECT JUMP on the next step every time; gate: nested folders, SLICE under link traffic, slide paste sites, normalising; the Monomachine reference cases replaced once by a byte-identity proof (owner) | `builds/v0.40-NEST/` | yes |
 | v0.39 | 2026-11-03 | Parameter slides (SLD/SLEN, TRIG page 2); resampling records the whole take (it kept ~2 ms, then the empty input); THRES 0 learns its floor; +DRIVE look-alike samples matched by identity (">A003" on every row); +DRIVE held arrows, FUNC page, pushed-knob page; long names head...tail and scrolling; ERASE MOD DATA; s!Rwa²'s own start-up animation; the mod's version on screen; gate: whole-take recordings with realistic inputs, look-alike library samples, +DRIVE keys, erase | `builds/v0.39-SLIDE/` | yes |
 | v0.38 | 2026-11-02 | Direct Jump (PTN + YES/NO); per-project sample pools; new samples and recordings play at once (silent until a restart since v0.33); THRES 0 waits for real sound; a SLICE/GRID KEYBOARD chord-memory crash; gate: 22 live adds + 3 recordings must play, MAIN recording, sample chords, the arp/chord-memory fuzz | `builds/v0.38-JUMP/` | yes |
@@ -79,6 +80,57 @@ Every flash, every version:
 | v0.1 | 2026-10-06 | Waverider: a wavetable machine in MACHINE SEL | none (superseded) | before the gate |
 
 ---
+
+## v0.42 — LEAN (lighter Monomachine machines, clean Machinedrum voice changes)
+
+`DN2mod_v0.42_LEAN_OS1.11.syx`
+sha256 `8a8be7ac51e24c3f2b4394e1e1cabc10f3a8847f17c4223eb96836f114027410`
+Gate: CLEARED TO FLASH, 2026-11-06 (44 gates; 38 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit). Source: commit `71c7222`. Docs: `docs/mnm-recode.md`, `docs/rectrig.md`.
+
+**The owner's exception of v0.40 and v0.41 has ended.** This build changes the DSP, and test_mnm's
+366 Monomachine reference cases run again in the gate, in full: all pass.
+
+Everything in v0.41, plus:
+
+**Lighter Monomachine machines**: DDRW, SID, DENS, VO-6 and DPRO WAVE re-coded for this DSP (the
+loops' values kept in registers, the fixed-point multiplies the Monomachine's own). Per voice, DSP
+instructions: DDRW 16,021 to 11,684, SID 18,802 to 14,144, DENS 17,784 to 14,102, VO-6 20,171 to
+16,608, WAVE 8,072 to 6,843. Every output word is identical to v0.41's (1,098 runs: the 366
+reference cases and two variants each, knob changes mid-note).
+
+**DDRW's bit reduction exact**: at heavy BR (around 112) it rounded one step differently from a
+Monomachine (three reference cases at 44 dB). It now does the Monomachine DSP's one fixed-point
+multiply: all 366 match (those three now 115 dB).
+
+**Machinedrum voices start clean**: a voice that last played another machine kept that machine's
+state (a ringing PI-RS's, say) into its next note: the rimshot-like clicks on PI-HH and the loud
+spikes every few voices. On a machine change the voice's state, and for the P-I and VO-6 machines
+their delay area, are cleared, and the host part runs again after the start: every switch is now
+bit-identical to a fresh voice (every MD machine, `md_identity` VOICE 34/34). The Machinedrum sample
+reader re-coded the same way, output identical.
+
+**Fixed**: the GRID random-locks screen stayed over other pages, and YES reopened it on another
+track (NiKo); GRID and SLICE menus now close on a track change or when their page is gone. A REC
+trig that recorded nothing gave no reason (NiKo): the REC TRIGS view shows BUFS OFF, MANUAL REC,
+NO ROOM or NOT ARMED for a few seconds.
+
+Gate: `test_perc_live` (a voice changing machine plays as a fresh one; host words the same on the
+first and a later note), `alloc` (the menus let go, with a negative control), `rectrig` (the reason
+shown), test_mnm in full.
+
+**Tests**
+1. A busy pattern with a few SID, DDRW, VO-6 voices: hold FUNC on a Monomachine page and compare
+   the load meter with v0.41's.
+2. The PI-HH / PI-BD / TRX-CP pattern that spiked: no clicks or spikes, PERC on any voice count.
+3. GRID random locks: open it, go to another page or track, YES: it stays closed.
+4. A REC trig on a track with buffers off: the REC TRIGS view says BUFS OFF.
+5. DDRW with BR1 or BR2 near the top: the steps sound as before.
+6. Everything from v0.41 (rec trigs, QPLAY/QREC, slides).
+
+**Known issues**: one recorder (a REC trig while the other buffer records cuts that take); buffers
+are off in a project with saved samples in SAMP 124-127 (from v0.32 or older); an LFO on SAMP or
+SLCE doesn't step through the loaded samples yet; preset pool trig locks don't work with the mod's
+machines yet.
 
 ## v0.41 — LOOP (REC trigs, two looping buffers, QREC / QPLAY, slides on our machines)
 
