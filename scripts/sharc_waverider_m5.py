@@ -1610,7 +1610,9 @@ def step_cost(init, sound, machines) -> dict:
         for k in ("L1", "L2", "DDR"):
             counts[k] = 0
         measure("(nothing)", lambda b: base_frame(sound, machines, trigger=False).to_bytes())
-        for k, name in enumerate(PM.NAMES):
+        # v0.43: DNFW_COST_ONLY=mnm measures the Monomachine machines alone (the whole run is 2 h)
+        only = os.environ.get("DNFW_COST_ONLY", "")
+        for k, name in enumerate(PM.NAMES if only != "mnm" else ()):
             measure(name, (lambda k: lambda b: base_frame(sound, machines, overrides=perc_words(k), trigger=b == 1).to_bytes())(k))
         for k, name in enumerate(MMx.NAMES):
             def fb(b, k=k):
@@ -1619,7 +1621,7 @@ def step_cost(init, sound, machines) -> dict:
                     f.param(0, slot, w)
                 return f.to_bytes()
             measure(name, fb)
-        for name in ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE"):
+        for name in (("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE") if only != "mnm" else ()):
             measure(name, (lambda ty: lambda b: base_frame(sound, machines, t0=ty, trigger=b == 1,
                                                           overrides=smp_words({SM.SAMP_REC: 4})).to_bytes())(SM.TYPE_OF[name]))
     finally:
@@ -1650,7 +1652,8 @@ def step_garbage(init, sound, machines) -> dict:
     import random as _r
     from dnfw.mnm import machines as MMx
     fills = {"nan": lambda k: 0xFFFFFFFF, "random": (lambda g: lambda k: g.getrandbits(32))(_r.Random(33))}
-    spans = [(dsp.MD_STATE_L2, 16 * 1024), (dsp.MNM_SCRATCH_L2, dsp.MNM_SCRATCH_BYTES)]
+    spans = [(dsp.MD_STATE_L2, 16 * 1024), (dsp.MNM_SCRATCH_L2, dsp.MNM_SCRATCH_BYTES),
+             (dsp.MNM_RENDER_DM, dsp.MNM_RENDER_BYTES)]          # v0.43: the render scratch in L1
     res, bad = {}, []
 
     def filled(fill):

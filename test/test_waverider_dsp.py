@@ -176,6 +176,18 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     assert not any(l2[dsp.MD_STATE_L2]) and len(l2[dsp.MD_STATE_L2]) == 16 * MDK.MD_STRIDE
     assert not any(l2[dsp.MNM_SCRATCH_L2]) and dsp.MD_STATE_L2 + 16 * MDK.MD_STRIDE <= dsp.MNM_SCRATCH_L2
     assert 0x20088400 <= dsp.MD_STATE_L2 and dsp.MNM_SCRATCH_L2 + dsp.MNM_SCRATCH_BYTES <= 0x200B0000
+    # v0.43: the Monomachine render scratch in L1, after GRAN's state, inside the region (zeros
+    # at boot: the region's tail is padding), its bookkeeping still in L2
+    from dnfw.mnm import core as MNC
+    m = L.md.mnm
+    assert m.render == dsp.MNM_RENDER_DM and m.IN == dsp.MNM_RENDER_DM and m.scratch == dsp.MNM_SCRATCH_L2
+    assert dsp.GRAN_STATE_DM + 16 * dsp.GRAN_STATE_STRIDE <= dsp.MNM_RENDER_DM
+    assert MNC.RENDER_BYTES <= dsp.MNM_RENDER_BYTES and dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES <= dsp.REGION[1]
+    assert all(dsp.MNM_RENDER_DM <= a < dsp.MNM_RENDER_DM + MNC.RENDER_BYTES
+               for a in (m.IN, m.XB, m.YB, m.COEF, m.BUF, m.MIX, m.W1, m.W2, *m.W.values(), *m.DG.values()))
+    tail = [(a, len(pl)) for _, a, pl in dsp.spans()]
+    assert any(a <= dsp.dm_to_load(dsp.MNM_RENDER_DM) and dsp.dm_to_load(dsp.MNM_RENDER_DM + dsp.MNM_RENDER_BYTES) <= a + n
+               for a, n in tail)
     # v0.17: the sample pool's directory begins with its magic, and holds nothing (the
     # +Drive's samples are loaded in; the test sounds are gone)
     assert struct.unpack_from("<II", ddr[-2][2]) == (0x31504D53, 0)

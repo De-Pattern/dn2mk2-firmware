@@ -33,6 +33,21 @@ LIB_INDEX = LIB + 1
 LIB_FOLD = LIB + 1 + 256
 LIB_DATA = LIB_FOLD + 4
 DEPTH = 6
+# v0.43: folders 64..127 (csrc/sampler/lib.c LIB_HI_AT): a header, then four sectors of records,
+# which count only when the header checks (as the firmware's hi_read takes them)
+LIB_HI_AT = 0x6FF800
+LIB_HI_MAGIC = 0x444E3246
+
+
+def folder_table(state):
+    """-> the 128 folder records as the firmware reads them at power-on from `state`."""
+    lo = b"".join(state.get(LIB_FOLD + k, bytes(512)) for k in range(4))
+    h = state.get(LIB_HI_AT, bytes(512))
+    w = struct.unpack(">4I", h[:16])
+    ok = (w[0] == LIB_HI_MAGIC and w[1] == 1 and w[2] == libtree.FOLDERS
+          and w[3] == (~w[0] ^ w[1] ^ w[2] ^ 0x3CC35AA5) & 0xFFFFFFFF)
+    hi = b"".join(state.get(LIB_HI_AT + 1 + k, bytes(512)) for k in range(4)) if ok else bytes(2048)
+    return lo + hi
 
 
 def adler(b, s=1):
@@ -110,12 +125,16 @@ def run(cx):
         return st == 0 and info and struct.unpack_from("<I", info)[0] == 2
 
     def tree():
-        st, r = sx(31)
-        return (r[0], list(r[1:65])) if st == 0 and len(r) >= 65 else (None, None)
+        # v0.43: 128 folders, TREE a page of 64 at a time (rq[3] the first folder)
+        st, r = sx(31, bytes([0]))
+        st2, r2 = sx(31, bytes([64]))
+        if st or st2 or len(r) < 65 or len(r2) < 65:
+            return None, None
+        return r[0], list(r[1:65]) + list(r2[1:65])
 
-    def names():
+    def names(n=128):
         out = []
-        for f0 in range(0, 64, 4):
+        for f0 in range(0, n, 4):
             _, p = sx(23, bytes([f0]))
             out += [p[24 * j:24 * j + 24].split(b"\0")[0].decode("ascii", "replace") for j in range(4)]
         return out
@@ -144,10 +163,10 @@ def run(cx):
 
     def sound(par, nm):
         """the tree reads as a tree: parents named, no loop, six deep at most"""
-        for f in range(64):
+        for f in range(len(par)):
             if par[f] == 0xFF:
                 continue
-            if par[f] >= 64 or not nm[par[f]] or not nm[f]:
+            if par[f] >= len(par) or not nm[par[f]] or not nm[f]:
                 return False
             g, d = f, 1
             while par[g] != 0xFF and d <= DEPTH:
@@ -263,7 +282,7 @@ def run(cx):
         rs = listing()
         if p_ is None or not sound(p_, n_):
             return False, "tree"
-        ft = b"".join(state.get(LIB_FOLD + k, bytes(512)) for k in range(4))
+        ft = folder_table(state)                       # v0.43: and folders 64..127
         if [-1 if x == 0xFF else x for x in p_] != libtree.tree(ft):
             return False, "not the model's tree (dnfw.sampler.libtree)"
         if not all(any(n == sn and f == sf for _, n, f, _ in rs) and p_[sf] == 0xFF and n_[sf]
@@ -331,6 +350,45 @@ def run(cx):
     nm = names()
     facts["a v0.39 reading it sees each folder by its own name (the tag never in a name)"] = (
         all(old_names[f][:24] == nm[f] for f in range(64)) and old_names[kicks] == "KICKS" and old_names[look] == T)
+    # -- 6. v0.43 (Wolljamin: "command 30: refused", the 64 folders full): 128 folders, 64..127
+    # in their own sectors below the library (a header, then four sectors), written only once
+    # a folder past 63 is made; their parents kept; the 129th refused; all read back at boot
+    disk.clear()
+    disk.update(final)
+    boot()
+    st, info = sx(16)
+    facts["v0.43: INFO says 128 folders"] = st == 0 and len(info) >= 24 and struct.unpack_from("<I", info, 20)[0] == 128
+    HI = 0x6FF800
+    io["log"] = []
+    made = []
+    for k in range(140):
+        f, fl = folder_in(None, f"TOP{k:03d}")
+        if f is None:
+            break
+        made.append(f)
+    hi_writes = [s_ for s_, _d in io["log"] if HI <= s_ < HI + 5]
+    facts["v0.43: folders made up to 128, the next refused"] = len(made) >= 64 and max(made) == 127 and len(set(made)) == len(made)
+    facts["v0.43: folders past 63 written to their own sectors (and nowhere in the stock's or the frames' area)"] = (
+        bool(hi_writes) and all(s_ >= HI and (s_ < HI + 5 or s_ >= LIB) for s_, _d in io["log"]))
+    # a folder inside one past 63, and one past 63 inside one under 64: drop two first to make room
+    drop_a, drop_b = made[-1], made[-2]
+    sx(26, bytes([drop_a]))
+    sx(26, bytes([drop_b]))
+    inner, _fl = folder_in(100, "IN100")
+    deeper, _fl = folder_in(inner, "DEEPER") if inner is not None else (None, None)
+    want_names = names(128)
+    boot()                                       # as at power-on: everything read again
+    nm128 = names(128)
+    pars = []
+    for f0 in (0, 64):
+        st, r = sx(31, bytes([f0]))
+        pars += list(r[1:65]) if st == 0 and len(r) >= 65 else [None] * 64
+    facts["v0.43: after a reboot every folder's name the same, 128 of them"] = (
+        nm128 == want_names and sum(1 for n in nm128 if n) >= 126 and nm128[127 if 127 not in (drop_a, drop_b) else 100] != "")
+    facts["v0.43: parents past 63 kept (IN100 inside 100, DEEPER inside it)"] = (
+        inner is not None and deeper is not None and pars[inner] == 100 and pars[deeper] == inner)
+    notes["v043"] = {"made": len(made), "hi_writes": len(hi_writes), "inner": inner, "deeper": deeper,
+                     "pars": [pars[x] for x in (inner, deeper) if x is not None]}
     disk.clear()
     disk.update(after)
     io.pop("log", None)

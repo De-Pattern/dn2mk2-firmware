@@ -15,6 +15,14 @@
  *                           name then at most 30 characters, byte 30 0). See folder_tree.
  *   + 261 ..                the frames: each sample one extent of whole sectors
  *
+ * v0.43 (Wolljamin: "failed: command 30: refused", the 64 folders full): folders 64..127 live
+ * below the library, between Direct Jump's settings and LIB_SECTOR (nothing else uses those
+ * sectors: erase.c, pools.c), as the first 64 do: LIB_HI_AT a header ('DN2F', version, its
+ * check), then four sectors of 16 records. A header that does not check (every library before
+ * v0.43) is no folders there: the first folder made past 63 writes the records, then the
+ * header. A record's tag (byte 31) names a parent 0..63 as 0x80 | parent (v0.40), 64..127 as
+ * 0xC0 | (parent - 64) (an older build reads that as a top-level folder: nothing is lost).
+ *
  * An entry: +0 its first sector (0: free), +4 frames, +8 rate (the pool's float ratio),
  * +12 format (the pool's), +13 folder, +14 flags, +16 a check of its frames (adler-32),
  * +20 its sectors, +24 its name (36), +60 a check of bytes 0..59. An entry whose check
@@ -39,14 +47,21 @@ typedef unsigned char u8;
 
 #define POOL_STORE_END (0x600000u + 1u + POOL_BYTES / 512u)         /* link.c's image ends here */
 #define LIB_SECTOR 0x700000u
+#define LIB_SECTOR_C 0x700000u
 #define LIB_MAGIC 0x444E324Cu                                       /* 'DN2L' */
 #define LIB_VERSION 1u
 #define LIB_CAP 2048
 #define LIB_ENTRY 64u
 #define LIB_INDEX_SECTORS (LIB_CAP * LIB_ENTRY / 512u)                /* 256 */
-#define LIB_FOLDERS 64
+#define LIB_FOLDERS 128                                             /* v0.43 (64 before; smp_page.c's SMP_LIB_FOLDERS) */
+#define LIB_FOLDERS_LO 64                                           /* in the library's headers */
 #define LIB_FOLDER_BYTES 32u
-#define LIB_FOLDER_SECTORS (LIB_FOLDERS * LIB_FOLDER_BYTES / 512u)    /* 4 */
+#define LIB_FOLDER_SECTORS (LIB_FOLDERS_LO * LIB_FOLDER_BYTES / 512u)   /* 4 */
+#define LIB_HI_AT 0x6FF800u                                         /* v0.43: folders 64..127's header */
+#define LIB_HI_REC (LIB_HI_AT + 1u)                                 /*   and their four sectors */
+#define LIB_HI_SECTORS ((LIB_FOLDERS - LIB_FOLDERS_LO) * LIB_FOLDER_BYTES / 512u)
+#define LIB_HI_MAGIC 0x444E3246u                                    /* 'DN2F' */
+_Static_assert(LIB_HI_AT > 0x6FF000u && LIB_HI_REC + LIB_HI_SECTORS <= LIB_SECTOR_C, "between the settings sector and the library");
 #define LIB_INDEX (LIB_SECTOR + 1u)
 #define LIB_FOLDER_AT (LIB_INDEX + LIB_INDEX_SECTORS)
 #define LIB_DATA (LIB_FOLDER_AT + LIB_FOLDER_SECTORS)
@@ -87,6 +102,9 @@ static u32 adler(const u8 *p, u32 n, u32 s)
 static int lib_in(u32 sector, u32 bytes)
 {
     u32 n = bytes / 512u;
+    if (BLK_READY && !(bytes & 511u) && bytes && BLK_SECTORS > LIB_DATA && sector >= LIB_HI_AT
+        && sector + n <= LIB_HI_REC + LIB_HI_SECTORS)
+        return 1;                               /* v0.43: folders 64..127 */
     return BLK_READY && !(bytes & 511u) && bytes && sector >= LIB_SECTOR
            && BLK_SECTORS > LIB_DATA && sector < BLK_SECTORS && n <= BLK_SECTORS - sector;
 }
@@ -129,8 +147,8 @@ static void folder_tree(void)
         if (FTAG(f) && FOLD[LIB_FOLDER_BYTES * (u32)f + LIB_FOLDER_BYTES - 2u])    /* torn record) */
             FTAG(f) = 0;                        /* so every name ends inside its record */
     for (int f = 0; f < LIB_FOLDERS; f++) {
-        u32 t = FTAG(f), p = t & 0x3Fu;
-        smp_lib_fpar[f] = (signed char)((t & 0xC0u) == 0x80u && FNAMED(f) && p != (u32)f && FNAMED(p)
+        u32 t = FTAG(f), p = (t & 0x3Fu) + ((t & 0xC0u) == 0xC0u ? 64u : 0u);   /* v0.43: 0xC0 | p - 64 */
+        smp_lib_fpar[f] = (signed char)((t & 0x80u) && FNAMED(f) && p != (u32)f && FNAMED(p)
                                         && !FOLD[LIB_FOLDER_BYTES * (u32)f + LIB_FOLDER_BYTES - 2u] ? (int)p : -1);
     }
     for (int f = 0; f < LIB_FOLDERS; f++) {
@@ -186,6 +204,45 @@ int smp_lib_used(int k)                         /* entry K holds a sample */
     return (used_bits[k >> 5] >> (k & 31)) & 1u;
 }
 
+/* v0.43: folders 64..127 (LIB_HI_AT): their header, read at boot; none there until it checks */
+static u32 hi_sec[128] __attribute__((section(".data"), aligned(16)));
+int smp_lib_hi __attribute__((section(".data"))) = 0;        /* 1: the header checks (records read) */
+static u32 hi_check(void) { return ~hi_sec[0] ^ hi_sec[1] ^ hi_sec[2] ^ 0x3CC35AA5u; }
+
+static void hi_read(void)
+{
+    u8 *hi = FOLD + LIB_FOLDERS_LO * LIB_FOLDER_BYTES;
+    smp_lib_hi = 0;
+    for (u32 k = 0; k < (LIB_FOLDERS - LIB_FOLDERS_LO) * LIB_FOLDER_BYTES; k++)
+        hi[k] = 0;
+    if (lib_rd(LIB_HI_AT, 512u, hi_sec) != 0 || hi_sec[0] != LIB_HI_MAGIC || hi_sec[1] != 1u
+        || hi_sec[2] != LIB_FOLDERS || hi_sec[3] != hi_check())
+        return;                                 /* none there (a library before v0.43) */
+    if (lib_rd(LIB_HI_REC, LIB_HI_SECTORS * 512u, hi) != 0) {
+        for (u32 k = 0; k < (LIB_FOLDERS - LIB_FOLDERS_LO) * LIB_FOLDER_BYTES; k++)
+            hi[k] = 0;
+        return;
+    }
+    smp_lib_hi = 1;
+}
+
+/* the records (all four sectors, as they are in RAM), then the header that makes them count */
+static int hi_format(void)
+{
+    if (lib_wr(LIB_HI_REC, LIB_HI_SECTORS * 512u, FOLD + LIB_FOLDERS_LO * LIB_FOLDER_BYTES) != 0)
+        return -1;
+    for (int k = 0; k < 128; k++)
+        hi_sec[k] = 0;
+    hi_sec[0] = LIB_HI_MAGIC;
+    hi_sec[1] = 1u;
+    hi_sec[2] = LIB_FOLDERS;
+    hi_sec[3] = hi_check();
+    if (lib_wr(LIB_HI_AT, 512u, hi_sec) != 0)
+        return -1;
+    smp_lib_hi = 1;
+    return 0;
+}
+
 static u32 sb_check(void) { return ~SB[0] ^ SB[1] ^ SB[2] ^ 0x5AA5C33Cu; }
 
 static int sb_write(void)
@@ -224,6 +281,7 @@ void smp_lib_boot(void)
         smp_lib_state = -1;
         return;
     }
+    hi_read();
     used_all();
     smp_lib_state = 2;
 }
@@ -238,8 +296,8 @@ static void folder_set_in(int f, const char *name, int parent)
         d[k] = (u8)name[k];
     for (; k < LIB_FOLDER_BYTES; k++)
         d[k] = 0;
-    if (parent >= 0 && name[0])
-        d[LIB_FOLDER_BYTES - 1] = (u8)(0x80u | (u32)parent);
+    if (parent >= 0 && name[0])                 /* v0.43: a parent past 63, 0xC0 | (it - 64) */
+        d[LIB_FOLDER_BYTES - 1] = (u8)(parent < LIB_FOLDERS_LO ? 0x80u | (u32)parent : 0xC0u | ((u32)parent - LIB_FOLDERS_LO));
 }
 
 static void folder_set(int f, const char *name) { folder_set_in(f, name, -1); }
@@ -249,7 +307,11 @@ static void folder_set(int f, const char *name) { folder_set_in(f, name, -1); }
 static int folder_write(int f)
 {
     u32 s = (u32)f / (512u / LIB_FOLDER_BYTES);
-    return lib_wr(LIB_FOLDER_AT + s, 512u, FOLD + 512u * s);
+    if (f < LIB_FOLDERS_LO)
+        return lib_wr(LIB_FOLDER_AT + s, 512u, FOLD + 512u * s);
+    if (!smp_lib_hi)                            /* v0.43: the first folder past 63: all four, the header */
+        return hi_format();
+    return lib_wr(LIB_HI_REC + (s - LIB_FOLDER_SECTORS), 512u, FOLD + 512u * s);
 }
 
 /* a fresh, empty library: the folders, the index zeroed, then the superblock last */
@@ -264,7 +326,8 @@ static int lib_format(void)
     folder_set(0, "INCOMING");
     folder_set(1, "RECORDED");
     if (lib_wr(LIB_INDEX, LIB_INDEX_SECTORS * 512u, IDX) != 0
-        || lib_wr(LIB_FOLDER_AT, LIB_FOLDER_SECTORS * 512u, FOLD) != 0 || sb_write() != 0)
+        || lib_wr(LIB_FOLDER_AT, LIB_FOLDER_SECTORS * 512u, FOLD) != 0 || hi_format() != 0
+        || sb_write() != 0)
         return -1;
     used_all();
     smp_lib_state = 2;
@@ -431,6 +494,7 @@ u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
         put32(rp + r, smp_lib_state == 2 ? (u32)smp_lib_count() : 0); r += 4;
         put32(rp + r, BLK_READY ? BLK_SECTORS : 0); r += 4;
         put32(rp + r, LIB_DATA); r += 4;
+        put32(rp + r, LIB_FOLDERS); r += 4;     /* v0.43: the folders it holds (64 before) */
         return r;
     }
     if (cmd == 17) {                            /* FOLDER name -> its index (made if new); */
@@ -465,8 +529,11 @@ u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
     }
     if (cmd == 31) {                            /* v0.40: TREE -> LIB_DEPTH, then each folder's */
         rp[r++] = LIB_DEPTH;                    /*   parent as the browser takes it (0xFF the top) */
-        for (int f = 0; f < LIB_FOLDERS; f++)
-            rp[r++] = smp_lib_state == 2 && smp_lib_fpar[f] >= 0 ? (u8)smp_lib_fpar[f] : 0xFFu;
+        /* v0.43: 64 folders a reply from folder rq[3] (the reply holds 132 bytes; 0 without it,
+         * as v0.40..v0.42 answered), so the page asks again at 64 when INFO says 128 */
+        int from = n >= 4 ? (int)rq[3] : 0;
+        for (int f = from; f < from + 64; f++)
+            rp[r++] = f < LIB_FOLDERS && smp_lib_state == 2 && smp_lib_fpar[f] >= 0 ? (u8)smp_lib_fpar[f] : 0xFFu;
         return r;
     }
     if (cmd == 18) {                            /* BEGIN frames, fmt, folder, rate bits, name */

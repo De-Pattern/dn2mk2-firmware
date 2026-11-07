@@ -142,6 +142,13 @@ SHFT_TABLES_DDR = 0x81212000
 # GRAN (docs/gran.md, filter type 8): 16 x 128 bytes of state in L1, its tables and
 # 16 ring buffers of 32768 float32 (128 KB a track, zeros: a fill block) in DDR
 GRAN_STATE_DM, GRAN_STATE_STRIDE = SHFT_STATE_DM + 16 * SHFT_STATE_STRIDE, 128   # 0x2e4b00
+# v0.43: the Monomachine machines' render scratch (dnfw.mnm.core.Layout: the decimator's input,
+# SID's phases, the coefficients, the words, DPRO's buffers) out of L2 into L1 after GRAN's state:
+# every Monomachine voice reads and writes it all through its block (SID about 7,000 accesses,
+# DDRW 6,800, docs/dsp-cost.md), and an L1 access costs no more than its instruction. The
+# bookkeeping (keys, costs, the voice order, rests, strikes) stays at MNM_SCRATCH_L2.
+MNM_RENDER_DM = 0x2E5400
+MNM_RENDER_BYTES = 0x1000                                    # to 0x2e6400 (core.RENDER_BYTES used)
 GRAN_TABLES_DDR = 0x81214000
 GRAN_BUF_DDR, GRAN_BUF_STRIDE = 0x81400000, 0x20000
 # v0.26: RESONATOR and CZ are gone (their types are the Monomachine machines', in PERC's
