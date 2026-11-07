@@ -39,7 +39,7 @@ PAGES = {
     "SYN1 EXCITERS": ("TYPA", "TYPB", "HARD", "DUST", "TZFM", "BEND", "MIX", "DEC"),
     "SYN2 RESONATORS": ("BODA", "BODB", "TUNE", "GEOM", "MATL", "POS", "COUP", "DAMP"),
     "SYN3 SPECTRAL": ("MORPH", "FORM", "SHIFT", "RING", "SIDE", "FOLD", "LPG", "CHAR"),
-    "SYN4 ONSET/INTERACT": ("ATK", "CLIK", "CTYP", "XMOD", "FDBK", "BUZZ", "BTUN", "VARY"),
+    "SYN4 ONSET/INTERACT": ("ATK", "CLIK", "CTYP", "XMOD", "FDBK", "BUZZ", "WATR", "VARY"),
 }
 CHOICES = {"TYPA": TYPES, "TYPB": TYPES, "BODA": BODIES[:-1], "BODB": BODIES,
            "CTYP": CLICKS, "XMOD": XMODS}
@@ -48,11 +48,9 @@ DEFAULTS = {
     "TYPA": 0, "TYPB": 1, "HARD": 90, "DUST": 20, "TZFM": 0, "BEND": 10, "MIX": 30, "DEC": 20,
     "BODA": 0, "BODB": 121, "TUNE": 64, "GEOM": 64, "MATL": 50, "POS": 40, "COUP": 0, "DAMP": 60,
     "MORPH": 0, "FORM": 0, "SHIFT": 64, "RING": 0, "SIDE": 40, "FOLD": 0, "LPG": 40, "CHAR": 0,
-    "ATK": 0, "CLIK": 0, "CTYP": 0, "XMOD": 0, "FDBK": 0, "BUZZ": 0, "BTUN": 64, "VARY": 40,
-    "WATR": 0,
+    "ATK": 0, "CLIK": 0, "CTYP": 0, "XMOD": 0, "FDBK": 0, "BUZZ": 0, "WATR": 0, "VARY": 40,
 }
-# Controls not yet on a page (their slot is the owner's call): WATR.
-EXTRA = ("WATR",)
+EXTRA = ()                       # controls not on a page (none)
 
 def _plate(aspect: float = 1.31, n: int = 16):
     fs = sorted((m / 1.0) ** 2 + (k / aspect) ** 2 for m in range(1, 8) for k in range(1, 8))
@@ -398,8 +396,8 @@ class Voice:
         ka = BODIES[choice("BODA", p["BODA"])]
         kb = BODIES[choice("BODB", p["BODB"])]
         self.a = Body(ka, self.f0, modes, seed=seed * 31 + 3, vary=vary)
-        # body B: the interval its type is paired at (B_RATIO), moved by BTUN (±24 semitones)
-        fb = self.f0 * B_RATIO.get(kb, 1.0) * 2.0 ** ((p["BTUN"] - 64) * 24 / 64 / 12)
+        # body B: the interval its type is paired at (B_RATIO; fixed, owner 2026-11-07)
+        fb = self.f0 * B_RATIO.get(kb, 1.0)
         self.b = None if kb == "OFF" else Body(kb, fb, modes, seed=seed * 31 + 5, vary=vary)
         ta, tb = TYPES[choice("TYPA", p["TYPA"])], TYPES[choice("TYPB", p["TYPB"])]
         self.ea = Exciter(ta, p, self.f0, vel, seed)
