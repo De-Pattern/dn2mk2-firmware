@@ -61,6 +61,26 @@ under it too, STRETCH's whole row. The empty run: 15,152 instructions, 943 L2, 4
 `python3 scripts/sharc_waverider_m5.py --image ../Digitone_II_OS1.11.syx --steps cost --tag before`,
 6,693 s; report `out/waverider/m5_report_before.json`.)
 
+## v0.43: the Monomachine render scratch in L1 (2026-11-07)
+
+The Monomachine machines' render scratch (the decimator's input, SID's phases, the coefficients,
+the words, DPRO's buffers: 3,280 bytes) moved from L2 to L1 block 1's tail (`dsp.MNM_RENDER_DM`,
+0x2e5400); the bookkeeping (keys, costs, the voice order, rests, strikes) stays in L2. The same
+instructions, every output word the same (the SHARC runner's mnm part: every block of every run
+bit-exact to the model). One voice, a block, `DNFW_COST_ONLY=mnm ... --steps cost`:
+
+| machine | instructions | L2 accesses v0.42 -> v0.43 | estimate v0.42 -> v0.43 | of the frame |
+|---|---|---|---|---|
+| SID 6581 | 22,108 | 3,219 -> 82 | 34,954 -> 22,406 (-36 %) | 8.4 % -> 5.4 % |
+| VO-6 | 25,365 | 3,560 -> 280 | 41,315 -> 28,195 (-32 %) | 9.9 % -> 6.8 % |
+| DPRO-DENS | 11,087 | 2,299 -> 633 | 21,903 -> 15,239 (-30 %) | 5.3 % -> 3.7 % |
+| DPRO-WAVE | 10,946 | 1,772 -> 269 | 19,904 -> 13,892 (-30 %) | 4.8 % -> 3.3 % |
+| DPRO-DDRW | 18,697 | 3,202 -> 1,139 | 33,675 -> 25,423 (-25 %) | 8.1 % -> 6.1 % |
+
+(The estimate counts an L2 access as 4 instructions and a DDR one as 10, as above; the frame is
+416,000 cycles.) DDRW's and DENS's remaining L2 reads are the DPRO tables (v0.36); WAVE's DDR
+reads its samples.
+
 ## The Monomachine machines since v0.33
 
 | machine | v0.33 estimate | now | DDR accesses v0.33 -> now | what changed |
