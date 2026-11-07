@@ -622,6 +622,15 @@ def main(argv=None):
             show(results["3s_stress"])
             gc.collect()
 
+        if "slicestatic" in steps:
+            print("\nstep 3ss: SAMP onto an empty slot at a note (dreamsaremaps, v0.42)")
+            sss = step_slicestatic(warm(), sound, machines, a.blocks)
+            results["3ss_slicestatic"] = {k: v for k, v in sss.items() if k != "runs"}
+            show(sss)
+            print("     peaks:", sss["numbers"]["peaks"])
+            del sss
+            gc.collect()
+
         if "smp" in steps:
             print("\nstep 3b: the sample machines")
             s3b = step_smp(warm(), sound, machines, a.blocks)   # v0.26: PERC beside them needs its tables whole (as 0.7 s after power-on)
@@ -1804,6 +1813,42 @@ def smp_exact(run) -> tuple[int, int, int]:
             o += v["out_mismatches"]
             st += v["state_mismatches"]
     return n, o, st
+
+
+def step_slicestatic(init, sound, machines, blocks) -> dict:
+    """dreamsaremaps (v0.42): a SLICE track playing; SAMP scrolled onto an EMPTY slot at the
+    moment a trig plays -> a blast of static. Track 0 SLICE on SAMP 4 (BEAT, loaded), a note on
+    block 1; at block K another note, with SAMP an empty slot (90) from block K - 1, K or K + 1.
+    Also the same on ONESHOT. Every block's output must stay finite and no louder than the
+    sample itself; the blocks after the empty slot's note silent."""
+    SLC, ONE = SM.TYPE_OF["SLICE"], SM.TYPE_OF["ONESHOT"]
+    K = 5
+
+    def frames(t0, at, slot=90, extra=None):
+        def fb(b):
+            w = smp_words({SM.SAMP_REC: slot if b >= at else 4, SM.SLICE_REC: 6, **(extra or {})})
+            return base_frame(sound, machines, t0=t0, overrides=w, trigger=b in (1, K)).to_bytes()
+        return fb
+    runs = {}
+    for t0, nm in ((SLC, "slice"), (ONE, "one")):
+        for at in (K - 1, K, K + 1):
+            runs[f"{nm}_at{at - K:+d}"] = run_blocks(init, frames(t0, at), blocks)
+        runs[f"{nm}_ref"] = run_blocks(init, frames(t0, 10 ** 6), blocks)   # never empty
+    peaks = {k: [round(max((abs(x) for x in blk[0]["out"]), default=0.0), 3) if 0 in blk else None
+                 for blk in r["smp"]] for k, r in runs.items() if r["ok"]}
+    ref = {nm: max(peaks[f"{nm}_ref"][:K]) for nm in ("slice", "one")}
+    checks = {
+        "every run ran": all(r["ok"] for r in runs.values()),
+        "nothing non-finite anywhere": all(math.isfinite(x) for r in runs.values() for blk in r["smp"]
+                                           for v in blk.values() for x in v["out"]),
+        "with SAMP on an empty slot a block before or at the note: the old note fades over the note's "
+        "block, no louder than the sample itself, then silence; a block after it: the note keeps the "
+        "sample it latched (as the reference run)":
+            all(max(peaks[k][K - 1:K + 1]) <= ref[nm] * 1.001 and max(peaks[k][K + 1:]) == 0.0
+                for nm in ("slice", "one") for k in (f"{nm}_at-1", f"{nm}_at+0"))
+            and all(peaks[f"{nm}_at+1"] == peaks[f"{nm}_ref"] for nm in ("slice", "one")),
+    }
+    return {"ok": all(checks.values()), "checks": checks, "numbers": {"peaks": peaks, "ref": ref}, "runs": runs}
 
 
 def step_smp(init, sound, machines, blocks) -> dict:
