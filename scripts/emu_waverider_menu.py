@@ -989,7 +989,9 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
               and names[:2] == ["HAT C", "SNARE B"]
               # (v0.38: and the per-project pools' first power-on, its superblock and legacy list:
               # their own region, csrc/sampler/pools.c, checked by the `pools` scenario)
-              and all(s >= LIB or 0x6D0000 <= s < 0x6E0300 for s in wrote))
+              # (v0.43: and folders 64..127's header and four sectors, lib.c LIB_HI_AT, written
+              # when the library is made)
+              and all(s >= LIB or 0x6D0000 <= s < 0x6E0300 or 0x6FF800 <= s < 0x6FF805 for s in wrote))
         # LOAD TO PROJECT: SNARE B and HAT C into the first empty pool slots (no pool yet:
         # a directory made), each slot's frames on the +Drive's pool image and sent to the DSP
         lp_ok = False
