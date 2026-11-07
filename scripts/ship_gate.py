@@ -205,7 +205,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("drivenav", "+DRIVE keys and long names (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
        ("slides", "parameter slides (ColdFire)"),
-       ("rectrig", "REC trigs, buffers, QREC, QPLAY (ColdFire)"),
+       ("rectrig", "BOUNCE REC trigs, buffers, QREC, QPLAY (ColdFire)"),
        ("link16", "sample link (ColdFire)"),
        ("pools", "per-project pools (ColdFire)"),
        ("erase", "ERASE MOD DATA (ColdFire)"),
@@ -2023,10 +2023,11 @@ def main() -> int:
             later("slides", "parameter slides (ColdFire)", "parameter slides (ColdFire)",
                   [*sl_cmds, sorted(EMU_ENV.items())], sl_body)
 
-        # v0.41 (docs/rectrig.md): REC trigs into the two double-buffered REC buffers, QPLAY's
-        # switch on its boundary, QREC's held start, the guards (a manual take's turn, saved
-        # samples in SAMP 124..127), the allocator keeping buffer takes clear, the REC lock
-        # through SAVE/LOAD and the step clear, and the RECORDER's H with a step held
+        # v0.44 (docs/rectrig.md): BOUNCE tracks' REC trigs into their track's buffer halves
+        # (one buffer per BOUNCE track, eight), one-shot trigs armed by YES YES and spent only
+        # when a take starts, the recorder's refusals (a manual take's turn, NO ROOM), QREC's
+        # held start, QPLAY's switch on its boundary, the REC lock (id 202) through SAVE/LOAD
+        # and the step clear, and the BOUNCE REC panel ([TRIG] toggles, YES YES, NO)
         if "rt_trig" in lay:
             rt_js = work / "rectrig.json"
             rt_cmd = [a.venv, "-u", "scripts/emu_rectrig.py", "--build", bdir, "--snapshot", snap,
@@ -2038,13 +2039,14 @@ def main() -> int:
                 if rc != 0 or not last.startswith("PASS"):
                     return False, out[-900:]
                 r = json.loads(rt_js.read_text())
-                return True, (f"{last[6:]}: a REC trig takes its step into its buffer's idle half "
-                              f"(the command ahead of the queue, never mid-repeat), QPLAY PLEN switches "
-                              f"on the pattern's first step and OFF at once, QREC 8 holds a manual NOW "
-                              f"to step 8, a manual take's turn and saved samples in SAMP 124..127 "
-                              f"refuse it, the allocator keeps buffer takes clear, the REC lock "
-                              f"through SAVE/LOAD (id 202) and the clear, the RECORDER's H with a step held")
-            later("rectrig", "REC trigs, buffers, QREC, QPLAY (ColdFire)", "REC trigs, buffers, QREC, QPLAY (ColdFire)",
+                return True, (f"{last[6:]}: a BOUNCE track's REC trig takes its step into the track's "
+                              f"buffer's idle half (the command ahead of the queue, never mid-repeat) and the "
+                              f"track plays it from the buffer directory, a one-shot (YES YES) fires once and "
+                              f"is spent only when its take started, a manual take's turn and NO ROOM refuse "
+                              f"it, QREC 8 holds a manual NOW to step 8, QPLAY PLEN switches on the pattern's "
+                              f"first step, the REC lock through SAVE/LOAD (id 202) and the clear, and the "
+                              f"BOUNCE REC panel's [TRIG] toggle, YES YES and NO")
+            later("rectrig", "BOUNCE REC trigs, buffers, QREC, QPLAY (ColdFire)", "BOUNCE REC trigs, buffers, QREC, QPLAY (ColdFire)",
                   [rt_cmd, sorted(EMU_ENV.items())], rt_body)
 
         # the setup is done: from here on, nothing may import a module of ours (cached())

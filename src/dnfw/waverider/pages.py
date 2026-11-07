@@ -449,7 +449,7 @@ def smp_quant_header() -> str:
             f"#define PERC_PTCH_SLOT {_perc.PARAMS[0][1]}\n"
             f"#define PERC_TYPE_SLOT {_perc.TYPE_REC[1]}\n")
 SMP_WAVE_W, SMP_WAVE_AMP = 100, 11         # the waveform strip: columns, half-height in pixels
-SMP_GLYPHS = "0123456789AB/-YES"
+SMP_GLYPHS = "0123456789AB/-YESLR"           # v0.44: L, R for the CHAN icon
 
 
 def smp_widgets_header() -> str:

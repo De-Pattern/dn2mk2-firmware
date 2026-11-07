@@ -264,7 +264,8 @@ void rec_halt(void)
 }
 
 int rec_rt_take __attribute__((section(".data"))) = 0;   /* v0.41: the DSP's take is a buffer's */
-int rec_view __attribute__((section(".data"))) = 0;      /* v0.41: 0 the RECORDER, 1 REC TRIGS */
+int rec_view __attribute__((section(".data"))) = 0;      /* v0.41's REC TRIGS view; v0.44: always 0 (the
+                                                         * RECORDER has one page; BOUNCE tracks their panel) */
 /* v0.44 BOUNCE (rectrig.c): on a BOUNCE track's RECORDER the sixteen [TRIG] keys are the
  * track's recorder trigs on the page shown (bn_page: PAGE steps it, the playing page when
  * the screen opens while the sequencer plays), FUNC + [TRIG] one-shots; YES YES (two within
@@ -573,15 +574,7 @@ static void knob(int index, int delta)
             goto as_recorder;
         return;
     }
-    if (rec_view == 1) {                        /* the REC TRIGS view: what each place shows */
-        if (index == 5 || index == 6)
-            rt_knob(index, delta);              /* E Q.REC, F Q.PLAY: four detents a choice */
-        else if (index == 7)
-            rec_rlen = clamp(rec_rlen + delta, 0, 128);   /* G R.LEN (F on the RECORDER) */
-        else if (index == 1 || index == 2)      /* (v0.44: H's ARM gone: REC trigs are BOUNCE's) */
-            goto as_recorder;                   /* A SRC, B CHAN: as on the RECORDER */
-        return;                                 /* C, D: nothing there */
-    }
+    /* (v0.44: the REC TRIGS view is gone; REC trigs, Q.REC and Q.PLAY are the BOUNCE REC panel's) */
 as_recorder:
     switch (index) {
     case 1: rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1); break;
@@ -1086,6 +1079,8 @@ static void rpt_poll(void)
         name_backdel();
     else if (rpt_grid)
         grid_move(rpt_code);
+    else if (rpt_code == K_UP || rpt_code == K_DOWN)   /* v0.44: UP/DOWN held scroll the character */
+        name_step(rpt_code == K_UP ? 1 : -1);
     else if (rpt_code == K_LEFT && nm_cur > 0)
         nm_cur--;
     else if (rpt_code == K_RIGHT && nm_cur < 6)
@@ -1185,8 +1180,11 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
             nm_cur++;
             rpt_start(code);
         }
-        else if (code == K_UP || code == K_DOWN)
+        else if (code == K_UP || code == K_DOWN) {   /* the character at the cursor, as the DN2's own
+                                                     * naming screen; v0.44: held, it scrolls on */
             name_step(code == K_UP ? 1 : -1);
+            rpt_start(code);
+        }
     } else if (rec_phase == PH_ASSIGN) {
         int t = smp_trig_track(code);
         if (t >= 0) {
@@ -1428,10 +1426,6 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     sent_seq = 0;
                 } else
                     rec_overlay = 0;            /* the screen closes; a recording goes on */
-            }
-            if (press && (code == K_LEFT || code == K_RIGHT) && !bn_active()) {
-                rec_view = code == K_RIGHT;     /* v0.41: RIGHT the REC TRIGS view, LEFT back */
-                smp_overlay_dirty = 1;
             }
             if (press && code < 32)
                 eaten |= 1u << code;

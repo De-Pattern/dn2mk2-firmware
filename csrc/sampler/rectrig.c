@@ -45,8 +45,14 @@ typedef unsigned char u8;
 #define FRAMES (*(volatile u32 *)0x4058E8D4u)           /* frames since boot, 1,500 a second */
 #define CTL_FRAME ((volatile u16 *)0x80005E60u)
 #define TEMPO_WORD 108                                   /* the frame's BPM x 120 */
-#define TYPE_WORD(t) (74u + (u32)(t))                    /* the frame's type word of track t (byte 148 + 2 t) */
-#define CTL_WORD(t, slot) (84u + (u32)(slot) + 73u * (u32)(t))   /* a control's word (byte 168 + 2 slot + 146 t) */
+/* a track's sound in the kit (the frame is per voice, and a track's voice moves): its type
+ * byte and its parameter words (slide.c's SOUND_BASE/SOUND_TYPE; the lock-list builder takes
+ * the parameters from sound + 48) */
+#define KIT_POINTER (*(u8 *volatile *)0x800052A0u)
+#define SOUND_STRIDE 1163u
+#define SOUND_BASE 52u
+#define SOUND_TYPE 0xDEu
+#define SOUND_PARAMS 48u
 #define SLOT_BUF 35                                      /* BUF (record 244): 0..7 */
 #define SLOT_SRC 38                                      /* SRC (record 252): 0 IN, 1 MAIN, 2.. TRK */
 #define SLOT_RLEN 40                                     /* R.LEN (record 253): 0 MAX, 1..127 steps */
@@ -164,14 +170,22 @@ static u32 frames_a_step(void)                  /* at 48 kHz: 48,000 x 60 / 4 / 
     return 86400000u / bpm120;
 }
 
-static u32 ctl(u32 t, u32 slot)                 /* a track's control as the frame carries it */
+static const u8 *sound_of(u32 t)                /* track t's sound in the kit, 0 without a kit */
 {
-    return (u32)CTL_FRAME[CTL_WORD(t, slot)] >> 8;
+    const u8 *kit = KIT_POINTER;
+    return kit && t < 16 ? kit + SOUND_BASE + SOUND_STRIDE * t : 0;
 }
 
-int rt_is_bounce(u32 t)                         /* the frame's type word: BOUNCE on track t */
+static u32 ctl(u32 t, u32 slot)                 /* a track's control, as its sound holds it */
 {
-    return t < 16 && (CTL_FRAME[TYPE_WORD(t)] & 0xFFu) == BOUNCE_TYPE;
+    const u8 *snd = sound_of(t);
+    return snd ? (u32)(*(const u16 *)(snd + SOUND_PARAMS + 2u * slot)) >> 8 : 0;
+}
+
+int rt_is_bounce(u32 t)                         /* BOUNCE on track t */
+{
+    const u8 *snd = sound_of(t);
+    return snd && snd[SOUND_TYPE] == BOUNCE_TYPE;
 }
 
 u32 rt_buf_of(u32 t)                            /* the buffer a BOUNCE track names, 0..BUF_N-1 */
@@ -216,15 +230,15 @@ static void refuse(u32 track, u32 why)
 
 /* a recorder trig on TRACK's STEP, into buffer B: the audio interrupt (rt_frame) */
 u32 rt_last_key D;                      /* the last trig's track << 8 | step (the checks) */
-void rt_trig(u32 track, u32 step, u32 b)
+int rt_trig(u32 track, u32 step, u32 b)         /* -> 1: the take started */
 {
     u32 now = FRAMES;
     rt_last_key = track << 8 | step;
     if (b >= BUF_N)
-        return;
+        return 0;
     if (!rt_on || rt_manual) {                  /* no directory yet, or a manual take's turn */
         refuse(track, !rt_on ? 1 : 2);
-        return;
+        return 0;
     }
     int half = rt_play[b] ^ 1;                  /* (a take still waiting is replaced) */
     int ix = HALF_IX(b, half), slot = HALF_SLOT(b, half);
@@ -241,7 +255,7 @@ void rt_trig(u32 track, u32 step, u32 b)
         frames = (cap / 2u) & ~31u;
     if (frames < 4800u || clash(ix, place, frames * 2u)) {   /* under a tenth of a second, or no room */
         refuse(track, 3);
-        return;
+        return 0;
     }
     /* one recorder: a take of another buffer still running is cut here, and that buffer
      * keeps playing what it played (its waiting take, cut short, is dropped) */
@@ -282,6 +296,7 @@ void rt_trig(u32 track, u32 step, u32 b)
         rt_pfr[b] = frames / 32u + 3u;
         rt_pend[b] = 1;
     }
+    return 1;
 }
 
 /* a manual take starts (rec.c, or a QREC take at its boundary): the recorder is its, so a
@@ -337,8 +352,8 @@ void rt_frame(void)
             continue;
         u32 v = sl_lock_get(table, t, cur, 2);
         if (v == RT_TRIG || v == RT_ONESHOT) {
-            rt_trig(t, cur, rt_buf_of(t));
-            if (v == RT_ONESHOT)                /* fired once: spent until YES YES */
+            int took = rt_trig(t, cur, rt_buf_of(t));
+            if (v == RT_ONESHOT && took)        /* recorded once: spent until YES YES (a refusal keeps it armed) */
                 sl_lock_set(table, t, cur, 2, RT_SPENT);
         }
     }

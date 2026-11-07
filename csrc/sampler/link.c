@@ -1358,13 +1358,14 @@ u32 smp_rec_place(int dest, u32 *room)
     /* v0.38: and every other project's recordings (pools.c): their ends are candidates too,
      * and nothing starts inside one or runs into one */
     int nres = smp_pl_res_count();
-    extern u32 rt_rplace[4], rt_rbytes[4], rt_nx_place[2], rt_nx_need[2];
-    for (int c = -1; c < POOL_SLOTS + nres + 6; c++) {    /* each candidate start: 0, or a recording's end */
+    extern u32 rt_rplace[BUF_HALVES], rt_rbytes[BUF_HALVES], rt_nx_place[BUF_N], rt_nx_need[BUF_N];   /* v0.44: 16 halves, 8 next places */
+    for (int c = -1; c < POOL_SLOTS + nres + BUF_HALVES + BUF_N; c++) {    /* each candidate start: 0, or a recording's end */
         u32 s = 0;
         if (c >= POOL_SLOTS + nres) {           /* v0.41: a buffer take's end, or a next place's */
             int i = c - POOL_SLOTS - nres;
-            u32 a = i < 4 ? rt_rplace[i] : rt_nx_place[i - 4], z = a + (i < 4 ? rt_rbytes[i] : rt_nx_need[i - 4]);
-            if (z == a || (i < 4 && REC_FIRST + i == dest))
+            u32 a = i < BUF_HALVES ? rt_rplace[i] : rt_nx_place[i - BUF_HALVES];
+            u32 z = a + (i < BUF_HALVES ? rt_rbytes[i] : rt_nx_need[i - BUF_HALVES]);
+            if (z == a || (i < BUF_HALVES && BUF_SLOT0 + i == dest))
                 continue;
             s = (z + 511u) & ~511u;
         } else if (c >= POOL_SLOTS) {

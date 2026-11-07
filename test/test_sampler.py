@@ -136,7 +136,9 @@ def test_the_host_tool_codec_and_pool(tmp_path):
 def test_the_pages_follow_the_dt2_layout():
     # v0.15: A TUNE (or nothing), B PLAY, C empty, D SAMP on every machine
     for name, page in SM.PAGES.items():
-        assert page[1][0] == SM.PLAY_REC and page[3][0] == SM.SAMP_REC, name
+        assert page[1][0] == SM.PLAY_REC, name
+        # v0.44: BOUNCE's D is BUF (its track's buffer), the rest D SAMP
+        assert page[3][0] == (SM.BUF_REC if name == "BOUNCE" else SM.SAMP_REC), name
         assert page[7][0] == SM.LEV_REC, name
         assert page[2][0] == 0, name                 # the DT2: C is an empty box on every machine
     from dnfw.waverider import pages

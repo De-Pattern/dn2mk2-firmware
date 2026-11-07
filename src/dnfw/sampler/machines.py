@@ -65,7 +65,8 @@ PAGES = {        # v0.15: the DT2's own SRC layout -- A TUNE, B PLAY, C (empty),
 }
 # how page.c draws each control (v0.15, after the DT2's widgets)
 WIDGETS = {238: "bipolar", 254: "play", 260: "knob", 256: "samp", 239: "knob", 258: "knob",
-           257: "knob", 241: "fader", 242: "seg", 255: "play", 240: "bars"}
+           257: "knob", 241: "fader", 242: "seg", 255: "play", 240: "bars",
+           244: "knob"}                           # v0.44 BOUNCE: BUF 1..8 as a knob
 # what each control's value means here
 TUNE_REC, PLAY_REC, SAMP_REC, LEV_REC = 238, 254, 256, 241
 BUF_REC = 244                              # v0.44 BOUNCE: its buffer (0..7 -> BUF 1..8)
