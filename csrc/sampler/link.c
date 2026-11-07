@@ -1653,6 +1653,11 @@ static void push_entry(int k)
 }
 static int area_slot_due __attribute__((section(".data"))) = -1; /* v0.23: a slot's slice table to the +Drive and the DSP */
 
+void smp_push_slot(int k)                       /* v0.44: a slot's entry to the DSP (a BOUNCE take saved) */
+{
+    push_entry(k);
+}
+
 /* slot K's frames: 0 if none */
 u32 smp_frames(int k)
 {
@@ -2803,7 +2808,18 @@ void smp_mod_apply(void *mirror)
     int nl = -1;
     for (u32 b = 0; b < 16; b++) {
         u8 *snd = VOICE_SOUND(b);
-        if (!snd || snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
+        if (!snd)
+            continue;
+        if (snd[SOUND_TYPE] == BOUNCE_TYPE) {   /* v0.44 BOUNCE: its buffer's playing half, or OFF */
+            extern u32 rt_bounce_samp(u32 t);
+            u32 ot = SLOT_TRACK[b];              /* the voice's track */
+            volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
+            u32 want = ot < 16 ? rt_bounce_samp(ot) : 0;
+            if ((u32)(*cell >> 8) != want)
+                *cell = (u16)(want << 8);
+            continue;
+        }
+        if (snd[SOUND_TYPE] < 8 || snd[SOUND_TYPE] > 13)
             continue;                           /* not a sample machine */
         u32 set = *TARGET_CELL(b, SAMP_SLOT) >> 8;   /* the sound's or the lock's: 0 OFF, k: slot k - 1 */
         volatile u16 *cell = MIRROR_CELL(b, SAMP_SLOT);
@@ -2831,12 +2847,6 @@ void smp_mod_apply(void *mirror)
                 if (idx > n - 1) idx = n - 1;
                 *cell = (u16)((loaded[idx] + 1) << 8);   /* the idx-th loaded slot */
             }
-        }
-        {                                       /* v0.41: REC 1 / REC 2 to the half they play */
-            extern u32 rt_map(u32 v);
-            u32 hv = (u32)(*cell >> 8), mv = rt_map(hv);
-            if (mv != hv)
-                *cell = (u16)(mv << 8);
         }
         if (snd[SOUND_TYPE] != SLICE_TYPE)
             continue;

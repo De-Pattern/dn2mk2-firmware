@@ -233,14 +233,11 @@ void sl_apply(u32 v, u8 *list, void *mirror)
     sl_v[v].n = 0;
     sl_apply_stock(v, list, mirror);
     trigger(v, t, list);
-    /* v0.41: a REC trig (rectrig.c): its buffer, once for the trig (rt_trig skips the
-     * other voices of a chord, and every apply of the same step in the same frame) */
-    struct ext *e = (struct ext *)(list + SL_EXT);
-    if ((e->magic >> 16) == 0x534Cu && ((e->magic >> 8) & 0xFF) == t && (e->rec == 1 || e->rec == 2)) {
-        extern void rt_trig(u32 track, u32 step, u32 buf);
-        rt_trig(t, e->magic & 0xFF, e->rec);
-    }
+    /* (v0.41..v0.43 fired a REC trig from here, so a step with no note never recorded; v0.44:
+     * rectrig.c's rt_frame fires from the sequencer's own step, whatever the step holds) */
 }
+
+
 
 /* Every frame, at 0x4002717e: the stock smoother, then every slide one frame on. */
 u32 sl_smooth(void *src)
@@ -864,4 +861,14 @@ void sl_tpaste(u32 off, void *ctx, u32 step, const u8 *vec)
         else
             sl_paste_dropped++;
     }
+}
+
+/* v0.44: the UI's pattern's lock table (rec.c: the recorder trigs placed and read on the
+ * BOUNCE RECORDER page), 0 when there is none */
+u8 *sl_ui_table_now(void)
+{
+    u32 ctx = TRACK_CTX(APP());
+    if (!ctx)
+        return 0;
+    return ctx_table((void *)ctx);
 }
