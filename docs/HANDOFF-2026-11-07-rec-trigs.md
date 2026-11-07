@@ -191,6 +191,58 @@ Sources: [Octatrack manual p.144](https://www.manualsdir.com/manuals/657165/elek
 [Elektronauts: ending a one-shot recorder trig early](https://www.elektronauts.com/t/prematurely-ending-the-sampling-from-a-one-shot-recorder-trig/150311),
 [Elektronauts: pickup looper using flex](https://www.elektronauts.com/t/pickup-looper-using-flex-update/249796?page=2).
 
+## 5b. The owner's idea: a FLEX (or RAM) machine that owns the recorder (2026-11-07)
+
+The owner, in his words: *"if a new track type will work, will fit in memory, and will make this
+easier and more intuitive for both rec trigs and playback trigs, we can make it kind of a one
+shot DT2 implementation of that machine we already have, but name it FLEX or RAM and have only
+that one hold the new rec menu (if thats better than a page 2, which i dont mind but maybe this
+is more intuitive?), and it can handle both the rec trigs and playback trigs by only showing the
+rec trigs on the grid when the rec menu is open and the normal trigs only show when rec menu is
+closed."*
+
+So, to evaluate and, if it holds up, build:
+
+- **A new sample machine type, FLEX (or RAM)**: ONESHOT's playback (the DT2's one-shot machine
+  we already have) with the track's own recorder buffer as its sample, and the only machine
+  that carries the new recorder menu. The Octatrack's Flex machine playing its track
+  recorder's buffer is the model (manual 9.2.3, 11.1, 11.3).
+- **One grid, two layers**: with the recorder menu open, the 16 [TRIG] keys and their LEDs are
+  the track's **recorder trigs** (place, remove, FUNC + [TRIG] one-shot); with it closed, the
+  normal (playback) trigs. As the Octatrack (manual 12.4.8, 12.10.4: "in the RECORD SETUP
+  menus, the sequencer shows only recorder trigs").
+- **QREC / QPLAY** as the Octatrack's (manual 9.1.3, the RECORDING SETUP 2 menu).
+- **Check first that it fits**: the sample machines are types 8.. (`dnfw.sampler.machines.TYPE_OF`:
+  ONESHOT, WERP, STRETCH, REPITCH, GRID, SLICE); a new type needs its MACHINE SEL entry, the
+  DSP's dispatch, its frame words, its pages, and room: the sample machines' L2 code span
+  (`dsp.SMP_L2_SPAN`, 24 KB, refused with under 64 bytes spare), each voice's 128 bytes of L1
+  state (`SMP_STATE_DM`), the L1 tail (`dsp.REGION`; v0.43 put the Monomachine render scratch at
+  0x2e5400..0x2e6400), the ColdFire's code room, and the recorder slots (123..126 today; per-track
+  buffers as the Octatrack's eight would need more pool room). If it does not fit, or is not
+  clearly easier, say so and propose the alternative (a fixed page 2 done properly).
+- Whether there is one buffer per FLEX track (the Octatrack: one per track recorder) or the two
+  shared ones, ask the owner before building.
+
+### The Octatrack manual (OS 1.40A), what to read
+
+The owner attached it (2026-11-07). In this container: `/home/claude/dn2/refs/Octatrack-User-Manual_OS1.40A.pdf`
+(text: `ot.txt` beside it). If you are in a new session without it, ask the owner to attach it
+again. It is Elektron's: never commit it to a repo. Pages (the PDF's page numbers):
+
+| pages | sections |
+|---|---|
+| 17 | 4.4 Flex and static sample slot lists (where the recorder buffers sit) |
+| 45-47 | 9.1 Recording edit and setup menus: 9.1.2 RECORDING SETUP 1 (sources, RLEN, TRIG, LOOP...), 9.1.3 RECORDING SETUP 2 (QREC, QPLAY, ...) |
+| 48 | 9.2.1 Manual sampling |
+| 49 | 9.2.2 Recorder trig sampling, 9.2.3 Playback of captured recorder samples |
+| 50-51 | 9.3 Pickup machine sampling (the looper) |
+| 56-57 | 11.1 Flex vs static machines, 11.3 assigning samples (and buffers) to machines |
+| 66 | 12.3 Recording modes (GRID RECORDING) |
+| 67-68 | 12.4 Trig types: trigless locks, trigless trigs, **one shot trigs**, slide trigs, **recorder trigs** |
+| 74-75 | 12.10 Track trig edit menu: 12.10.4 RECORDER TRIGS |
+| 81 | 13.1.3 the audio editor from track recorders |
+| 105-107 | 17.1 Track recorder sampling, recorder trigs, playback of captured samples, pickup machines (the tutorial versions) |
+
 ## 6. What a redesign has to get right (the real variables)
 
 - **Placing**: the Octatrack's model (recorder page open + GRID RECORDING: the [TRIG] keys
