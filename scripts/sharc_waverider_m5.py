@@ -1650,7 +1650,8 @@ def step_garbage(init, sound, machines) -> dict:
     import random as _r
     from dnfw.mnm import machines as MMx
     fills = {"nan": lambda k: 0xFFFFFFFF, "random": (lambda g: lambda k: g.getrandbits(32))(_r.Random(33))}
-    spans = [(dsp.MD_STATE_L2, 16 * 1024), (dsp.MNM_SCRATCH_L2, dsp.MNM_SCRATCH_BYTES)]
+    spans = [(dsp.MD_STATE_L2, 16 * 1024), (dsp.MNM_SCRATCH_L2, dsp.MNM_SCRATCH_BYTES),
+             (dsp.MNM_RENDER_DM, dsp.MNM_RENDER_BYTES)]          # v0.43: the render scratch in L1
     res, bad = {}, []
 
     def filled(fill):

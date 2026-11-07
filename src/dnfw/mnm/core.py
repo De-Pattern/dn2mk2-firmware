@@ -66,19 +66,24 @@ class Layout:
     """Where the Monomachine voices' shared buffers and tables are (DDR): IN, a render's
     internal samples (up to 192); C, the decimators' coefficients; the tables (`tables`)."""
 
-    def __init__(self, perc, scratch: int, tables: int, dt_at: int | None = None):
+    def __init__(self, perc, scratch: int, tables: int, dt_at: int | None = None,
+                 render: int | None = None):
         self.perc, self.md = perc, perc.md          # PERC's layout (its EXP2, RECIP) and its MD voices'
         self.scratch, self.tables = scratch, tables
-        self.IN = scratch                           # 192 floats: the decimator's input
-        self.XB = scratch + 4 * 192                 # 192 ints: SID's phases
-        self.YB = scratch + 4 * 384                 # 192 ints
-        self.COEF = scratch + 4 * 576               # 10 floats
-        self.W = {name: scratch + 4 * (592 + k) for k, name in enumerate(SC_WORDS)}
+        # v0.43: the render scratch (IN .. DG, RENDER_BYTES) at RENDER (L1) when given; the
+        # bookkeeping (perc.program's keys, costs, order, rests, strikes) stays at SCRATCH
+        self.render = r = scratch if render is None else render
+        self.IN = r                           # 192 floats: the decimator's input
+        self.XB = r + 4 * 192                 # 192 ints: SID's phases
+        self.YB = r + 4 * 384                 # 192 ints
+        self.COEF = r + 4 * 576               # 10 floats
+        self.W = {name: r + 4 * (592 + k) for k, name in enumerate(SC_WORDS)}
         self.COMB = tables + 4 * 33 * 512           # SID's combined waveforms (floats), after the waves
         # v0.26, DPRO-DENS / DPRO-DDRW (dnfw.mnm.dpro): scratch after the words, tables after COMB
-        at = scratch + 4 * (592 + 64)
+        at = r + 4 * (592 + 64)
         self.BUF, self.MIX, self.W1, self.W2 = at, at + 4 * 64, at + 4 * 96, at + 4 * 128   # 64, 32, 32, 32
         self.DG = {name: at + 4 * (160 + k) for k, name in enumerate(("w", "l", "j", "c"))}   # the build's cursor
+        assert self.DG["c"] + 4 - r == RENDER_BYTES
         t = self.COMB + 4 * 4096
         # v0.36: the DPRO tables are where the fill writes them (DT_SRC, DDR, in the run of the
         # Monomachine tables); with DT_AT given (L2), build() copies them there once and every
@@ -99,6 +104,10 @@ class Layout:
         for name, n in VO_TABLES:
             self.VO[name] = t
             t += 4 * n
+
+
+# v0.43: the bytes of the render scratch Layout lays out (IN .. DG), what dsp.MNM_RENDER_BYTES holds
+RENDER_BYTES = 4 * (592 + 64 + 164)
 
 
 # the DPRO tables after COMB (dnfw.mnm.rom.dpro_words, floats as the fill stores them)

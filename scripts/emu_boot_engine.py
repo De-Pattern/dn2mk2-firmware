@@ -37,6 +37,7 @@ sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/digikit-up")
 sys.path.insert(0, "/mnt/d/01_Code/Z_Personal/dn2_firmware/scripts")
 
 from emu import dspboot                                       # noqa: E402
+from emulib import quickboot                                  # noqa: E402
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 from dnfw.mods import platform                                # noqa: E402
@@ -209,11 +210,12 @@ def main() -> int:
             m.uc.hook_add(UC_HOOK_CODE, hit, begin=addr, end=addr)
 
     print(f"  booting {os.path.basename(build)} from reset, {args.limit:,} instructions")
-    m, st, stop = dspboot.run(SYX, open(f"{build}/section_3_MAIN_OS.bin", "rb").read(),
-                              limit=args.limit, machine_out=holder, pre_start=pre_start)
+    # v0.43: without dspboot's per-instruction counting hook (emulib/quickboot.py)
+    m, st, stop = quickboot.run(SYX, open(f"{build}/section_3_MAIN_OS.bin", "rb").read(),
+                                limit=args.limit, machine_out=holder, pre_start=pre_start)
     print(f"  ran {st['n']:,}, stop {stop!r}; reached {counts}")
     if fault:
-        print(f"\n  FAULT during boot at {fault['at']:,}: record {fault['record']}")
+        print(f"\n  FAULT during boot: record {fault['record']}")
         return 1
 
     after = After(m.uc)
