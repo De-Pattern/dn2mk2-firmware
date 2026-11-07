@@ -763,3 +763,22 @@ browser listed them all at its top, each cut to its first 18 characters (v0.39: 
   `link16` `nest` (`scripts/emu_lib_nest.py`): an old library read as it was, paths, the
   depth limit, DROP, a power cut after every sector of making a tree and of a DELETE, each
   point's tree the model's; unit tests `test/test_libtree.py`.
+
+## v0.44: BOUNCE, the seventh sample machine
+
+**BOUNCE** (type 17, kind 13, the last entry of MACHINE SEL's sample column) plays its track's
+recorder buffer instead of a pool slot: `docs/rectrig.md` has the whole of it. On the DSP it is
+STRETCH on a buffer half: SAMP 129..144 name the sixteen halves (eight buffers of two) through
+the **buffer directory** at `SM.BUF_DIR` (0xE10 in the directory page: address, frames, steps a
+half; no rate, no format: int16 at 48 kHz), and `tempo()` fits a take to its steps where
+STRETCH's BARS would. SAMP's record goes to 144 for that; the knob stays within 1..128 and the
+ColdFire writes a BOUNCE voice's SAMP (`smp_mod_apply`, `rt_bounce_samp`). The recorder takes a
+destination of 128.. as a buffer half (its entry is written in the directory, the take's steps in
+the command's word 4 bits 16..30). The pool's own entries, the recorder's four slots and every
+other machine are as they were (the SHARC runner: every run bit-exact; its `rec` step records a
+take into half 0 and plays SAMP 129 back).
+
+Its SYN page: TUNE, PLAY, (empty), **BUF** (1..8; record 244, PERC's slot 35, free on the
+sample machines), STRT, LEN, (empty), LEV. One detent a choice on PLAY as on the others
+(`fmt.c` takes a machine's row from `SMP_IDX`, as page.c does: the seven names are no longer
+contiguous types, 8..13 and 17, and every table that was indexed by `type - 8` goes through it).
