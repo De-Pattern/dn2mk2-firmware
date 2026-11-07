@@ -367,24 +367,51 @@ def start(p: Prog, L: Layout) -> None:
         p.iconst(12, -1)
         p.iop(4, 12, "+", 4)                 # SAMP 0 is OFF: slot = SAMP - 1
         p.st(C["samp"], 4)
-        # the recorder's slots are the DSP's own, whatever count the pool has
+        # the recorder's slots are the DSP's own, whatever count the pool has; v0.44: so are
+        # BOUNCE's buffer halves (slots BUF_SLOT0..: the buffer directory, SM.BUF_DIR)
         p.iconst(12, SM.REC_FIRST)
-        p.if_(4, "GE", 12, lambda: p.iconst(0, SM.POOL_SLOTS), kind="i")
+        p.if_(4, "GE", 12, lambda: p.iconst(0, SM.BUF_SLOT0 + SM.BUF_HALVES), kind="i")
         p.e("COMP(R4, R0);")
 
         def have():
             p.ld(4, C["samp"])
-            p.lsh(4, 4, 4)                   # 16 bytes an entry
-            p.iconst(12, L.pool + 8)
-            p.iop(4, 12, "+", 4)
-            p.seti(1, 4)
-            p.ldi(5, 0, 1)
+            p.iconst(13, 0)                  # R13: a buffer half's steps (0: a pool slot)
+            p.iconst(12, SM.BUF_SLOT0)
+
+            def pool_entry():
+                p.lsh(4, 4, 4)               # 16 bytes an entry
+                p.iconst(12, L.pool + 8)
+                p.iop(4, 12, "+", 4)
+                p.seti(1, 4)
+                p.ldi(5, 0, 1)
+                p.ldi(6, 1, 1)
+                p.ldi(7, 2, 1)
+                p.ldi(8, 3, 1)               # the format: 0 float32, 1 int16 (v0.14)
+
+            def buf_entry():                 # v0.44: address, frames, steps; rate 1, int16
+                p.iconst(12, -SM.BUF_SLOT0)
+                p.iop(4, 12, "+", 4)
+                p.lsh(5, 4, 3)
+                p.lsh(4, 4, 2)
+                p.ipass(12, 5)
+                p.iop(4, 12, "+", 4)         # x 12
+                p.iconst(12, L.pool + SM.BUF_DIR)
+                p.iop(4, 12, "+", 4)
+                p.seti(1, 4)
+                p.ldi(5, 0, 1)
+                p.ldi(6, 1, 1)
+                p.ldi(13, 2, 1)
+                p.iconst(12, 0x7FFF)
+                p.iop(13, 13, "AND", 12)
+                p.iconst(12, 1)
+                p.iop(13, 13, "MAX", 12)     # 1..32767 steps (0 would divide by it)
+                p.fconst(7, 1.0)
+                p.iconst(8, SM.FMT_I16)
+            p.if_(4, "GE", 12, buf_entry, pool_entry, kind="i")
             vs(p, "base", 5)
-            p.ldi(6, 1, 1)
             vs(p, "frames", 6)
-            p.ldi(7, 2, 1)
             vs(p, "rate", 7)
-            p.ldi(8, 3, 1)                   # the format: 0 float32, 1 int16 (v0.14)
+            p.st(C["x"], 13)                 # the steps, for below (entry_check clobbers R9..R13)
             entry_check(p, L)                # v0.33: an entry that does not lie in the pool plays as empty
             vs(p, "base", 5)
             vs(p, "frames", 6)
@@ -407,6 +434,11 @@ def start(p: Prog, L: Layout) -> None:
                 p.iconst(12, L.pool + SM.SLICE_AREA)
                 p.iop(9, 12, "+", 4)
             p.ifz(9, "NE", area)
+            # v0.44: a BOUNCE take (steps in C['x']) has no slices; its steps go in 'sla',
+            # tagged negative (an address never is), for tempo(): STRETCH fits the take to
+            # them. (slice_bounds reads 'sla' only with slices, which a take never has)
+            p.ld(13, C["x"])
+            p.ifz(13, "NE", lambda: (p.iconst(12, -0x80000000), p.iop(9, 13, "OR", 12), p.iconst(12, 0), vs(p, "nsl", 12)))
             vs(p, "sla", 9)
             p.iconst(12, 0xFF)
             p.iop(8, 8, "AND", 12)
@@ -1233,6 +1265,17 @@ def _tempo(p: Prog, L: Layout) -> None:
     p.float_(8, 8, 5)                        # bars = 2^idx
     p.fconst(12, 4 * 60 * 48000 * 120.0)
     p.fop(8, 8, "*", 12)                     # bars x 1.3824e9
+    # v0.44 BOUNCE: a take (sla negative: its steps in the low bits) lasts its steps at the
+    # tempo, not BARS: steps x 60 x 48000 x 120 / 4
+    v(p, 11, "sla")
+
+    def steps():
+        p.iconst(12, 0x7FFF)
+        p.iop(11, 11, "AND", 12)
+        tofloat(p, 8, 11)
+        p.fconst(12, 60 * 48000 * 120.0 / 4)
+        p.fop(8, 8, "*", 12)
+    p.ifz(11, "LT", steps)
     p.iconst(10, 0)
     PP.half(p, 6, TEMPO_OFFSET, 10)
     p.ifz(6, "EQ", lambda: p.iconst(6, 120 * 120))
@@ -1815,21 +1858,48 @@ def recorder(p: Prog, L: Layout) -> None:
                 p.iconst(13, L.pool + SM.REC_OFFSET)
                 p.iop(6, 13, "+", 6)
                 p.st(C["rbase"], 6)
-                p.lsh(5, 4, -24)              # dest: the slot, 0 .. POOL_SLOTS - 2 (SAMP 1..)
-                p.iconst(12, SM.POOL_SLOTS - 2)
-                p.iop(5, 5, "MIN", 12)
-                p.lsh(5, 5, 4)
-                p.iconst(13, L.pool + 8)
-                p.iop(5, 13, "+", 5)
-                p.st(C["rent"], 5)
-                p.seti(1, 5)
-                p.sti(0, 1, 6)                # address
-                p.iconst(7, 0)
-                p.sti(1, 1, 7)                # frames: none yet
-                p.fconst(7, 1.0)
-                p.sti(2, 1, 7)                # rate 1
-                p.iconst(7, SM.FMT_I16)
-                p.sti(3, 1, 7)
+                p.lsh(5, 4, -24)              # dest: the slot, 0 .. POOL_SLOTS - 2 (SAMP 1..),
+                p.iconst(12, SM.BUF_SLOT0)    # or v0.44 a buffer half BUF_SLOT0.. (its entry in
+                                              # the buffer directory: address, frames, steps)
+
+                def pool_dest():
+                    p.iconst(12, SM.POOL_SLOTS - 2)
+                    p.iop(5, 5, "MIN", 12)
+                    p.lsh(5, 5, 4)
+                    p.iconst(13, L.pool + 8)
+                    p.iop(5, 13, "+", 5)
+                    p.st(C["rent"], 5)
+                    p.seti(1, 5)
+                    p.sti(0, 1, 6)            # address
+                    p.iconst(7, 0)
+                    p.sti(1, 1, 7)            # frames: none yet
+                    p.fconst(7, 1.0)
+                    p.sti(2, 1, 7)            # rate 1
+                    p.iconst(7, SM.FMT_I16)
+                    p.sti(3, 1, 7)
+
+                def buf_dest():
+                    p.iconst(12, SM.BUF_SLOT0 + SM.BUF_HALVES - 1)
+                    p.iop(5, 5, "MIN", 12)
+                    p.iconst(12, -SM.BUF_SLOT0)
+                    p.iop(5, 12, "+", 5)
+                    p.lsh(7, 5, 3)
+                    p.lsh(5, 5, 2)
+                    p.ipass(12, 7)
+                    p.iop(5, 12, "+", 5)      # x 12
+                    p.iconst(13, L.pool + SM.BUF_DIR)
+                    p.iop(5, 13, "+", 5)
+                    p.st(C["rent"], 5)
+                    p.seti(1, 5)
+                    p.sti(0, 1, 6)            # address
+                    p.iconst(7, 0)
+                    p.sti(1, 1, 7)            # frames: none yet
+                    p.ld(7, cmd + 16)         # the take's steps: the threshold word's bits 16..30
+                    p.lsh(7, 7, -16)
+                    p.iconst(12, 0x7FFF)
+                    p.iop(7, 7, "AND", 12)
+                    p.sti(2, 1, 7)
+                p.if_(5, "GE", 12, buf_dest, pool_dest, kind="i")
                 p.iconst(7, 0)
                 p.st(C["rpos"], 7)
                 p.iconst(7, state)

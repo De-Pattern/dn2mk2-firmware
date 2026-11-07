@@ -22,7 +22,7 @@ TYPE_OF = {n: FIRST_TYPE + k for k, n in enumerate(NAMES)}
 ENGINED = NAMES                           # the machines this build renders (v0.15: all five)
 
 # record id -> (frame slot, low, top): value = clamp((word >> 8) - low, 0, top)
-RECORDS = {238: (25, 4, 120), 254: (41, 0, 127), 256: (43, 0, 127), 239: (26, 0, 120),
+RECORDS = {238: (25, 4, 120), 254: (41, 0, 127), 256: (43, 0, 144), 239: (26, 0, 120),   # v0.44: SAMP to 144 (BOUNCE's buffers, below); the knob stays 0..127
            258: (45, 0, 127), 257: (44, 0, 127), 241: (30, 0, 127), 260: (47, 0, 127),
            # v0.15, the time machines: BARS on PD1 (0..100, default 50: 1 bar), SEG on TUN2
            # (default 60: 16 segments), MODE on DEC (default 127: FWD)
@@ -255,6 +255,20 @@ META_BYTES = 12 + META_FOLDERS * META_FOLDER_BYTES + 128 * META_SLOT_BYTES     #
 # a library sample to be in a slot only by this (smp_lib_slot_of): a pack's samples of one
 # length whose 35-character names are one (v0.38: all shown in one slot, all previewed as it)
 LIBID_OFFSET = 0xC20
+# v0.44 BOUNCE: the buffer directory, in the directory page after the library ids (0xC20 +
+# 123 x 4 = 0xE0C) and before the command block (0xF00): BUF_N buffers of two halves each,
+# BUF_ENTRY bytes a half: the take's address, its frames (the DSP's recorder keeps both
+# current, as a slot's entry), its length in steps (the ColdFire's R.LEN; STRETCH fits the
+# take to that many steps at the tempo now). A voice reaches half h of buffer b as SAMP
+# BUF_SAMP0 + 2 b + h (the ColdFire's rt_map writes that into a BOUNCE track's SAMP word; the
+# knob never goes past 127); no count, no names, no slices, rate 1, int16.
+BUF_N = 8
+BUF_HALVES = 2 * BUF_N
+BUF_ENTRY = 12
+BUF_DIR = 0xE10                             # .. 0xECF
+BUF_SLOT0 = 128                             # the slot index of half 0 of buffer 0
+BUF_SAMP0 = BUF_SLOT0 + 1                   # its SAMP value (SAMP 0 is OFF: slot = SAMP - 1)
+assert BUF_DIR + BUF_HALVES * BUF_ENTRY <= CMD_OFFSET and BUF_DIR >= LIBID_OFFSET + 4 * REC_FIRST
 POS_MAGIC = 0x5A34                          # v0.25: idle, the voices' play positions (tdm_tx)
 POS_NONE = 0xFFFF                           #   a track that plays nothing
 POS_ONE = 0xFFFE                            #   a position: its fraction of the sample, x this

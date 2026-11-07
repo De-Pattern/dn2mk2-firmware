@@ -168,6 +168,14 @@ class Harness:
         w = (w & 0xFFFF) | (word << 16) if a & 2 else (w & 0xFFFF0000) | word
         self.mem.put(a & ~3, w)
 
+    def tempo(self, bpm: int) -> None:
+        """the frame's tempo word (BPM x 120)"""
+        self.mem.put(PM.FRAME + P.TEMPO_OFFSET, bpm * 120)
+
+    def spos(self) -> int:
+        """STRETCH's source position of this track's voice (V['spos'])"""
+        return flt(self.mem.get(self.L.state + P.STATE_STRIDE * self.t + 4 * P.V["spos"]))
+
     def defaults(self) -> None:
         self.set(SM.TUNE_REC, 60)        # 0 semitones
         self.set(SM.PLAY_REC, 127)       # FWD
@@ -179,12 +187,15 @@ class Harness:
         self.set(SM.SLEN_REC, 0)
 
     def command(self, cmd: int, src: int = 0, chan: int = 0, thres: float = 0.0,
-                dest: int = SM.REC_FIRST, frames: int = SM.REC_FRAMES, place: int = 0) -> None:
+                dest: int = SM.REC_FIRST, frames: int = SM.REC_FRAMES, place: int = 0,
+                steps: int = 0) -> None:
         """the ColdFire's next recorder command, as the sample link writes it (v0.22: DEST a
-        slot, PLACE where in the recordings' area, in 512-byte units)"""
+        slot, PLACE where in the recordings' area, in 512-byte units; v0.44: DEST a BOUNCE
+        buffer half BUF_SLOT0.., STEPS the take's length in steps, bits 16..30 of the
+        threshold's word)"""
         a = self.L.pool + SM.CMD_OFFSET
         seq = (self.mem.get(a) + 1) & 0xFFFFFFFF
-        for k, w in enumerate((seq, cmd, src, chan | place << 8, int(thres * 32767), dest << 24 | frames)):
+        for k, w in enumerate((seq, cmd, src, chan | place << 8, int(thres * 32767) | steps << 16, dest << 24 | frames)):
             self.mem.put(a + 4 * k, w)
 
     def link(self, cmd: int, *words: int) -> None:

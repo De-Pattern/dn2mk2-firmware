@@ -13,6 +13,7 @@ import wave
 import pytest
 
 from dnfw.perc import machines as PM
+from dnfw.perc.dsl import flt
 from dnfw.perc.dsl import Mem
 from dnfw.sampler import live as SL
 from dnfw.sampler import machines as SM
@@ -352,9 +353,16 @@ def test_a_recording_goes_where_it_is_placed_and_stops_at_the_areas_end():
         h.block(ONE, recorder=True, inp=[0.3] * 32)
     assert h.mem.get(ent) == h.L.pool + SM.REC_OFFSET + last * SM.REC_UNIT
     assert h.mem.get(ent + 4) == SM.REC_MIN_BYTES // 2 and h.status()[0] == SM.STATUS_MAGIC | 3
-    h.command(SM.CMD_NOW, dest=200)                                 # a slot past the last: the last
+    h.command(SM.CMD_NOW, dest=SM.POOL_SLOTS - 1)                   # a slot past the last: the last
     h.block(ONE, recorder=True, inp=[0.3] * 32)
     assert h.mem.get(h.L.pool + 8 + 16 * (SM.POOL_SLOTS - 2) + 4) == 32
+    # v0.44: a dest of BUF_SLOT0.. is a BOUNCE buffer half: its entry in the buffer directory
+    # (address, frames, steps), the last half for one past them
+    h.command(SM.CMD_NOW, dest=200, steps=16)
+    h.block(ONE, recorder=True, inp=[0.3] * 32)
+    e = h.L.pool + SM.BUF_DIR + SM.BUF_ENTRY * (SM.BUF_HALVES - 1)
+    assert h.mem.get(e + 4) == 32 and h.mem.get(e + 8) == 16 and h.mem.get(e) >= h.L.pool + SM.REC_OFFSET
+    assert h.mem.get(h.L.pool + 8 + 16 * (SM.POOL_SLOTS - 2) + 4) == 32        # the pool's untouched
 
 
 def test_r_strt_play_starts_at_the_first_note():
@@ -1032,3 +1040,39 @@ def test_v038_a_slot_past_the_count_plays_once_the_count_covers_it():
     assert not _plays_on_dsp(h, count)
     h.mem.put(pool + 4, count + 1)
     assert SL.slot_plays(h.mem.get, pool, count) and _plays_on_dsp(h, count)
+
+
+def test_v044_a_bounce_take_plays_from_the_buffer_directory_for_its_steps_at_the_tempo():
+    """v0.44 BOUNCE: a take recorded into buffer half BUF_SLOT0 + 3 (steps 8) has its entry in the
+    buffer directory, not the pool's; a STRETCH voice on SAMP BUF_SAMP0 + 3 plays it, fitted to
+    8 steps at the frame's tempo (twice as fast at twice the tempo), with no slices; SAMP past
+    the halves, or a half never recorded, is silent"""
+    STR = SM.TYPE_OF["STRETCH"]
+    h = SL.Harness(0)
+    h.defaults()
+    h.command(SM.CMD_NOW, dest=SM.BUF_SLOT0 + 3, place=64, steps=8)
+    for b in range(40):
+        h.block(STR, recorder=True, inp=[0.5 * (1 if (b * 32 + k) % 16 < 8 else -1) for k in range(32)])
+    h.command(SM.CMD_STOP)
+    h.block(STR, recorder=True, inp=[0.0] * 32)
+    e = h.L.pool + SM.BUF_DIR + SM.BUF_ENTRY * 3
+    assert h.mem.get(e) == h.L.pool + SM.REC_OFFSET + 64 * SM.REC_UNIT and h.mem.get(e + 4) == 40 * 32 and h.mem.get(e + 8) == 8
+    assert h.mem.get(h.L.pool + 8 + 16 * (SM.POOL_SLOTS - 2) + 4) == 0 and h.mem.get(h.L.pool + 8 + 16 * SM.REC_FIRST + 4) == 0
+
+    def play(tempo, samp):
+        h.set(SM.SAMP_REC, samp)
+        h.set(SM.PLAY_REC, 127)
+        h.tempo(tempo)
+        outs = []
+        for b in range(6):
+            outs += h.block(STR, note=60.0, trig=b == 0)
+        return outs, flt(h.mem.get(h.L.C["sr"]))
+    slow, sr120 = play(120, SM.BUF_SAMP0 + 3)
+    fast, sr240 = play(240, SM.BUF_SAMP0 + 3)
+    assert max(abs(x) for x in slow) > 0.1 and max(abs(x) for x in fast) > 0.1
+    # fitted to the steps, not BARS: the source frames an output sample = frames over the
+    # output samples 8 steps last at the tempo (1280 / 48000 at 120 BPM), twice that at 240
+    assert abs(sr120 - 1280 / 48000) < 1e-6 and abs(sr240 - 2 * 1280 / 48000) < 1e-6
+    # (the first block fades the note before out, as the DT2's retrigger does)
+    assert all(x == 0.0 for x in play(120, SM.BUF_SAMP0 + SM.BUF_HALVES)[0][32:])      # past the halves
+    assert all(x == 0.0 for x in play(120, SM.BUF_SAMP0 + 5)[0][32:])                  # never recorded
