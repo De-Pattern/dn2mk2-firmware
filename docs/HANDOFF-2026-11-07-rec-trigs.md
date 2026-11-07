@@ -3,6 +3,26 @@
 For the next session (the owner is switching to Claude Fable). Read this first, then
 `CLAUDE.md` (the rules: they are not optional), then `docs/rectrig.md` and `docs/sampler.md`.
 
+## 0. Rules while v0.43 is still in its gate (read before doing anything)
+
+v0.43's gate may still be running when you start (check: `pgrep -fa ship_gate`, and
+`gh api repos/De-Pattern/dn2mk2-firmware/releases/latest --jq .tag_name` says v0.43 once it is
+out). Until v0.43 is published:
+
+1. **Do not touch `/home/claude/dn2/v043-wt` or the `v043` branch** except to finish v0.43's gate
+   and publish it. Any edit to a file a gate step read (tests, scripts, sources, the build)
+   makes that step run again: hours lost.
+2. **Start the redesign on a new branch from `main`** in its own worktree
+   (`git worktree add ../recv2-wt -b rec-v2 origin/main`), and merge `v043` into it once v0.43 is
+   on `main`.
+3. **No heavy jobs while the gate runs.** The machine has 2 cores and the gate uses both: no
+   builds, `ship_gate.py` runs, SHARC or ColdFire emulator runs or pytest suites of your own.
+   Read code, plan, write; build and test after v0.43 is published.
+4. **Never stop or re-launch the gate's jobs from another session.** Only the session that
+   started them does that (a job killed at its 2-hour limit is re-launched as a smaller
+   `--only` batch; passes are cached).
+5. Keep to `CLAUDE.md` throughout: the gate, publishing, commits as De-Pattern.
+
 ## 1. What the owner wants
 
 Octatrack-style live sampling on the Digitone II mod, **intuitive to set up**, working on the
