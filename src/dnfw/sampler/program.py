@@ -349,10 +349,13 @@ def start(p: Prog, L: Layout) -> None:
     vs(p, "on", 0)
     vs(p, "fixed", 0)
     p.ld(0, C["type"])
+    # v0.44: BOUNCE is STRETCH on its buffer (the ColdFire writes the buffer half's SAMP)
+    p.iconst(12, SM.TYPE_OF["BOUNCE"])
+    p.if_(0, "EQ", 12, lambda: p.iconst(0, SM.TYPE_OF["STRETCH"]), kind="i")
     vs(p, "mach", 0)
     p.ld(9, C["t"])
     PP.t146(p, 10, 9)
-    ctl(p, 4, SM.SAMP_REC, 10)               # 0..127
+    ctl(p, 4, SM.SAMP_REC, 10)               # 0..127; v0.44: to 144 (a buffer half)
     p.st(C["samp"], 4)
     ctl(p, 4, SM.PLAY_REC, 10)               # 0..127 -> 0..3
     p.lsh(4, 4, -5)
@@ -2970,21 +2973,21 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
         p.e("COMP(R0, R12);")
         p.jump("EQ", body)
     # a sample machine with no renderer yet: its engine slot (PERC's) writes nothing, so
-    # the buffer is cleared here rather than left holding an old block
-    p.iconst(12, SM.FIRST_TYPE)
-    p.e("COMP(R0, R12);")
-    p.jump("LT", other)
-    p.iconst(12, SM.FIRST_TYPE + len(SM.NAMES) - 1)
-    p.e("COMP(R0, R12);")
-    mute = p.label("mute")
-    p.jump("LE", mute)
+    # the buffer is cleared here rather than left holding an old block (v0.44: the types
+    # are no longer one run, 8..13 and BOUNCE's 17, so each is named; every one is engined)
+    for ty in SM.TYPES:
+        if ty not in ours:
+            p.iconst(12, ty)
+            p.e("COMP(R0, R12);")
+            p.jump("EQ", mute := p.label("mute"))
     p.jump("", other)
     p.place(body)
     from ..perc import guard as G
     G.around(p, L.C["t"], G.COST_SMP, PP.BUFFERS, lambda: voice(p, L))   # v0.27: if it fits in the frame
     p.jump("", nxt)
-    p.place(mute)
-    silence(p, L)
+    if any(ty not in ours for ty in SM.TYPES):
+        p.place(mute)
+        silence(p, L)
     p.place(other)                           # not a sample machine: its voice off
     p.ld(9, L.C["t"])
     p.lsh(12, 9, 7)

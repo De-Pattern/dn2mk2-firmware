@@ -109,5 +109,5 @@ def test_md_midnote_table():
 
 def test_header_tables(stock):
     h = SL.c_header(stock)
-    for name in ("sl_perc_bits[34]", "sl_perc_slot[8]", "sl_perc_fx[4]", "sl_samp[6][4]", "SL_ID_REC 202"):
+    for name in ("sl_perc_bits[34]", "sl_perc_slot[8]", "sl_perc_fx[4]", "sl_samp[7][4]", "SL_ID_REC 202"):
         assert name in h, name

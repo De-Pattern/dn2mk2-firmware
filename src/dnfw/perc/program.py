@@ -138,7 +138,7 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
         for typ, k in MNM_TYPES.items():
             p.iconst(12, typ)
             p.if_(2, "EQ", 12, lambda c=MNM_COST[MNM.NAMES[k]]: (p.iconst(4, c), p.iconst(14, 1)), kind="i")
-        for typ in (MACHINE_TYPE, *range(SMx.FIRST_TYPE, SMx.FIRST_TYPE + len(SMx.ENGINED))):
+        for typ in (MACHINE_TYPE, *SMx.TYPES):      # v0.44: 8..13 and BOUNCE's 17
             p.iconst(12, typ)
             p.if_(2, "EQ", 12, lambda: p.iconst(14, 1), kind="i")
         p.st(costs + 4 * u, 4)

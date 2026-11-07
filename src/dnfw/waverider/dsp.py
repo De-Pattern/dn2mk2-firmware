@@ -184,9 +184,10 @@ LOOKUP_SITE_SW = 0x1C2958                    # I5 = 0x25d748
 LOOKUP_SITE_STOCK = bytes.fromhex("0f150025d748")   # parcels, MSW first
 LOOKUP16_DM = 0x2DEE04                       # 16 words; 0x2dee00 is the [-1] guard (0)
 from ..mnm import machines as _mnm_types    # noqa: E402
-MACHINE_TYPES = max(16, max(_mnm_types.TYPES) + 1)   # v0.26: 17 with a Monomachine machine at 16
+from ..sampler import machines as _smp_types
+MACHINE_TYPES = max(16, max(_mnm_types.TYPES) + 1, max(_smp_types.TYPES) + 1)   # v0.26: 17 with a Monomachine machine at 16; v0.44: 18, BOUNCE at 17
 SMP_ENGINE_SLOT = 5                          # the engine slot the sample machines borrow
-SMP_TYPES = range(8, 14)                     # ONESHOT WERP STRETCH REPITCH GRID SLICE (v0.19)
+SMP_TYPES = _smp_types.TYPES                 # ONESHOT WERP STRETCH REPITCH GRID SLICE (v0.19); v0.44 BOUNCE (17)
 ENGINES = {5: "PERC", 8: "ONESHOT", 12: "GRID"}   # types with an engine of ours
 MNM_TYPES = _mnm_types.TYPES                 # v0.26: the Monomachine machines (PERC's voice, so PERC's slot)
 

@@ -59,7 +59,8 @@ KIT_POINTER = 0x800052A0          # the live kit; sound t at + 52 + 1163 t
 SOUND_BASE, SOUND_STRIDE, SOUND_TYPE = 52, 1163, 0xDE
 NEW_TYPE, CLONE = 5, 1
 from ..mnm import machines as _mnm_types
-TYPES_LAST = max(13, *_mnm_types.TYPES)   # dnfw.waverider.coldfire.TYPES_LAST: 5.. are ours (v0.20: 13,
+from ..sampler import machines as _smp
+TYPES_LAST = max(13, *_mnm_types.TYPES, _smp.BOUNCE_TYPE)   # dnfw.waverider.coldfire.TYPES_LAST: 5.. are ours (v0.20: 13,
                                   # SLICE, had been left out here: its track got WaveTone's pages;
                                   # v0.26: the Monomachine's from 14 on)
 GET_SHORT_NAME = 0x400372DA
@@ -343,7 +344,8 @@ def c_header() -> str:
     order = sorted(set(wr) | set(PARAM_IDS) | {r for m in mnm + smp for r in m})
     # by kind (is_wr: the type - 4), from 1: PERC, the sample machines at SMP_FIRST_KIND..,
     # the Monomachine's at MNM_KINDS
-    by_kind = {1: wr, **{SMP_FIRST_KIND + k: m for k, m in enumerate(smp)},
+    # (v0.44: a sample machine's kind is its type - 4: 4..9, and BOUNCE's 13)
+    by_kind = {1: wr, **{_smp.TYPE_OF[n] - 4: m for n, m in zip(_smp.NAMES, smp)},
                **{kd: m for kd, m in zip(MNM_KINDS, mnm)}}
     if sorted(by_kind) != list(range(1, len(by_kind) + 1)):
         raise ValueError(f"the kinds are not 1..n: {sorted(by_kind)}")
@@ -370,7 +372,12 @@ def smp_c_header() -> str:
     ids = ",\n".join(" {" + ", ".join(str(r) for r in page) + "}" for page in SMP_PAGES)
     names = ", ".join(q + n + q for n in _smp.NAMES)
     snd = ", ".join(q + n + q for n in smp_live.TEST_NAMES)
-    return (f"#define SMP_KIND0 4\n#define SMP_N {len(_smp.NAMES)}\n#define WR_TYPES_LAST {TYPES_LAST}\n"
+    # v0.44: the kinds 4..9 are the six DT2 machines, in a run; BOUNCE's kind is 13 (type 17),
+    # its tables' row SMP_N0 (page.c's SMP_IDX(kind) gives the row, -1 for another kind)
+    return (f"#define SMP_KIND0 4\n#define SMP_N {len(_smp.NAMES)}\n#define SMP_N0 {len(_smp.NAMES) - 1}\n"
+            f"#define SMP_BOUNCE_KIND {_smp.BOUNCE_TYPE - 4}\n#define SMP_BUF_ID {_smp.BUF_REC}\n"
+            f"#define SMP_IDX(kind) ((kind) >= SMP_KIND0 && (kind) < SMP_KIND0 + SMP_N0 ? (kind) - SMP_KIND0 : (kind) == SMP_BOUNCE_KIND ? SMP_N0 : -1)\n"
+            f"#define WR_TYPES_LAST {TYPES_LAST}\n"
             f"static const unsigned short smp_ids[SMP_N][8] = {{\n{ids}\n}};\n"
             f"static const char smp_machine[SMP_N][8] = {{{names}}};\n"
             f"#define SMP_PLAY_ID {_smp.PLAY_REC}\n#define SMP_SAMP_ID {_smp.SAMP_REC}\n"
@@ -613,8 +620,14 @@ wr_page:
     mulu.w  %d1,%d0
     addi.l  #descriptors,%d0
     bra.s   2f
-| d0 = kind - 1: 1, 2 -> the Monomachine's 0, 1; 3..8 a sample machine; 9.. -> 2..
-5:  moveq   #9,%d1
+| d0 = kind - 1: 1, 2 -> the Monomachine's 0, 1; 3..8 a sample machine; 9.. -> 2..;
+| v0.44: 12 (BOUNCE, kind 13) -> the sample row 6 (d0 9 at 4:, as 3..8 give 0..5)
+5:  moveq   #{_smp.BOUNCE_TYPE - 5},%d1
+    cmp.l   %d1,%d0
+    bne.s   10f
+    moveq   #{len(_smp.NAMES) + 2},%d0
+    bra.s   4f
+10: moveq   #9,%d1
     cmp.l   %d1,%d0
     bcc.s   7f
     moveq   #3,%d1

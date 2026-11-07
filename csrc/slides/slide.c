@@ -137,6 +137,8 @@ static int continuous(int type, u32 slot, u32 v)
      * mid-note. Choices, and controls taken only at the note, never slide */
     if (type >= 8 && type <= 13)
         return (sl_samp[type - 8][slot >> 5] >> (slot & 31)) & 1;
+    if (type == 17)                                 /* v0.44: BOUNCE, the seventh row */
+        return (sl_samp[6][slot >> 5] >> (slot & 31)) & 1;
     if (type == SL_PERC_TYPE) {
         if ((sl_perc_fx[slot >> 5] >> (slot & 31)) & 1)
             return 1;

@@ -121,7 +121,7 @@ def test_no_wave_display_chunk_since_perc():
 
 def test_each_sample_machine_has_its_descriptor_and_names():
     from dnfw.sampler import machines as SM
-    assert len(pages.SMP_PAGES) == len(SM.NAMES) == 6               # v0.19: SLICE
+    assert len(pages.SMP_PAGES) == len(SM.NAMES) == 7               # v0.19: SLICE; v0.44: BOUNCE
     for k, ids in enumerate(pages.SMP_PAGES):
         at = CHUNK.find(struct.pack(">8I", *ids))
         assert at >= 8, SM.NAMES[k]
@@ -155,5 +155,9 @@ def test_every_new_type_has_our_pages():
     from dnfw.sampler import machines as SM
     assert P.TYPES_LAST == CF.TYPES_LAST == max(CF.NEW_TYPES)
     assert P.NEW_TYPE == CF.NEW_TYPES[0]
-    assert len(P.SMP_PAGES) == CF.SAMPLER_LAST - CF.SAMPLER_FIRST + 1 == len(SM.NAMES)
-    assert all(SM.TYPE_OF[n] == CF.SAMPLER_FIRST + k for k, n in enumerate(SM.NAMES))
+    assert len(P.SMP_PAGES) == CF.SAMPLER_LAST - CF.SAMPLER_FIRST + 2 == len(SM.NAMES)   # v0.44: and BOUNCE (17)
+    assert all(SM.TYPE_OF[n] == CF.SAMPLER_FIRST + k for k, n in enumerate(SM.NAMES[:6]))
+    assert SM.TYPE_OF["BOUNCE"] == SM.BOUNCE_TYPE == 17 and 17 in CF.NEW_TYPES and 17 in CF.LIST_NEW
+    # v0.44: BOUNCE's kind (13) reaches the sample tables' seventh row through SMP_IDX
+    h = P.c_header()
+    assert "#define SMP_N 7" in h and "#define SMP_N0 6" in h and "#define SMP_BOUNCE_KIND 13" in h

@@ -64,7 +64,8 @@ SAMPLE_SLIDE = {8: (25, 30, 26, 45, 44),          # ONESHOT
                 10: (25, 30, 26, 45),             # STRETCH
                 11: (30, 26, 45),                 # REPITCH (no TUNE on its page)
                 12: (25, 30),                     # GRID
-                13: (25, 30)}                     # SLICE
+                13: (25, 30),                     # SLICE
+                17: (25, 30, 26, 45)}             # v0.44 BOUNCE: STRETCH's (it is STRETCH to the DSP)
 # PERC (type 5): the Machinedrum's machines (dnfw.md). Their eight controls (dnfw.perc.machines
 # PARAMS: frame slots 25, 31, 41, 30, 43, 44, 47, 29) reach the MD's own DSP code through its
 # host words, recomputed on a block with a change; whether a change is heard while the note
@@ -156,7 +157,7 @@ def c_header(stock: bytes) -> str:
         return "{" + ", ".join(f"0x{(m >> (32 * k)) & 0xFFFFFFFF:08x}u" for k in range(4)) + "}"
     rows = ",\n ".join(words(m) for m in machine)
     from .md import machines as MD
-    samp = ",\n ".join(words(sum(1 << x for x in SAMPLE_SLIDE[t])) for t in range(8, 14))
+    samp = ",\n ".join(words(sum(1 << x for x in SAMPLE_SLIDE[t])) for t in (*range(8, 14), 17))
     md_bits = ", ".join(str(sum(1 << k for k, c in enumerate(MD_MIDNOTE[M.NAME]) if c == "1"))
                         for M in MD.MACHINES)
     fx = words(sum(1 << x for x in PERC_FX_SLOTS))
@@ -177,4 +178,4 @@ def c_header(stock: bytes) -> str:
             f"static const unsigned char sl_perc_slot[8] = {{{', '.join(map(str, PERC_SLOTS))}}};\n"
             f"static const unsigned char sl_perc_bits[{len(MD.MACHINES)}] = {{{md_bits}}};\n"
             f"static const unsigned int sl_perc_fx[4] = {fx};\n"
-            f"static const unsigned int sl_samp[6][4] = {{\n {samp}}};\n#endif\n")
+            f"static const unsigned int sl_samp[7][4] = {{\n {samp}}};\n#endif\n")
