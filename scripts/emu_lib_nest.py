@@ -33,6 +33,21 @@ LIB_INDEX = LIB + 1
 LIB_FOLD = LIB + 1 + 256
 LIB_DATA = LIB_FOLD + 4
 DEPTH = 6
+# v0.43: folders 64..127 (csrc/sampler/lib.c LIB_HI_AT): a header, then four sectors of records,
+# which count only when the header checks (as the firmware's hi_read takes them)
+LIB_HI_AT = 0x6FF800
+LIB_HI_MAGIC = 0x444E3246
+
+
+def folder_table(state):
+    """-> the 128 folder records as the firmware reads them at power-on from `state`."""
+    lo = b"".join(state.get(LIB_FOLD + k, bytes(512)) for k in range(4))
+    h = state.get(LIB_HI_AT, bytes(512))
+    w = struct.unpack(">4I", h[:16])
+    ok = (w[0] == LIB_HI_MAGIC and w[1] == 1 and w[2] == libtree.FOLDERS
+          and w[3] == (~w[0] ^ w[1] ^ w[2] ^ 0x3CC35AA5) & 0xFFFFFFFF)
+    hi = b"".join(state.get(LIB_HI_AT + 1 + k, bytes(512)) for k in range(4)) if ok else bytes(2048)
+    return lo + hi
 
 
 def adler(b, s=1):
@@ -110,10 +125,14 @@ def run(cx):
         return st == 0 and info and struct.unpack_from("<I", info)[0] == 2
 
     def tree():
-        st, r = sx(31)
-        return (r[0], list(r[1:65])) if st == 0 and len(r) >= 65 else (None, None)
+        # v0.43: 128 folders, TREE a page of 64 at a time (rq[3] the first folder)
+        st, r = sx(31, bytes([0]))
+        st2, r2 = sx(31, bytes([64]))
+        if st or st2 or len(r) < 65 or len(r2) < 65:
+            return None, None
+        return r[0], list(r[1:65]) + list(r2[1:65])
 
-    def names(n=64):
+    def names(n=128):
         out = []
         for f0 in range(0, n, 4):
             _, p = sx(23, bytes([f0]))
@@ -144,10 +163,10 @@ def run(cx):
 
     def sound(par, nm):
         """the tree reads as a tree: parents named, no loop, six deep at most"""
-        for f in range(64):
+        for f in range(len(par)):
             if par[f] == 0xFF:
                 continue
-            if par[f] >= 64 or not nm[par[f]] or not nm[f]:
+            if par[f] >= len(par) or not nm[par[f]] or not nm[f]:
                 return False
             g, d = f, 1
             while par[g] != 0xFF and d <= DEPTH:
@@ -263,7 +282,7 @@ def run(cx):
         rs = listing()
         if p_ is None or not sound(p_, n_):
             return False, "tree"
-        ft = b"".join(state.get(LIB_FOLD + k, bytes(512)) for k in range(4))
+        ft = folder_table(state)                       # v0.43: and folders 64..127
         if [-1 if x == 0xFF else x for x in p_] != libtree.tree(ft):
             return False, "not the model's tree (dnfw.sampler.libtree)"
         if not all(any(n == sn and f == sf for _, n, f, _ in rs) and p_[sf] == 0xFF and n_[sf]
