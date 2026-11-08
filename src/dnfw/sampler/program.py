@@ -19,9 +19,11 @@ from ..perc.dsl import Prog, s32
 from . import machines as SM
 from ..fascia import machines as _FSC
 
-# v0.45: FASCIA's voices are silence until its own program is chained in (program() below)
+# v0.45: FASCIA (type 18) has its own program, chained after this one (dnfw.fascia.program,
+# fascia.asm: smp.asm's tail jumps to it); until it was, this program wrote a FASCIA voice's
+# buffer silence (FASCIA_MUTE, now off: a type-18 slot is "not a sample machine" here)
 FASCIA_TYPES = (_FSC.TYPE,)
-FASCIA_MUTE = True
+FASCIA_MUTE = False
 
 V = dict(on=0, mach=1, pos=2, frac=3, lo=4, hi=5, loop=6, mode=7, base=8, frames=9, rate=10,
          last=11, low=12, fmt=13,
@@ -3031,7 +3033,7 @@ def program(L: Layout, next_sw: int, prefix: str = "sm") -> str:
     p.e("COMP(R0, R12);")
     p.jump("LT", top)
     G.end_mark(p)                            # v0.32: our voices' time, for the guard's limit
-    p.e(f"JUMP {next_sw:#x};", "ping.asm's wr_ping (which restores; v0.26: RESONATOR and CZ gone)")
+    p.e(f"JUMP {next_sw:#x};", "fascia.asm's wr_fsc (v0.45), then ping.asm's tail (which restores)")
     p.emit_subs()
     p.raw(".wr_smp..end:")
     p.raw("      .type wr_smp.,STT_FUNC;")

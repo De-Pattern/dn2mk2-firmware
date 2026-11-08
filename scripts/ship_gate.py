@@ -170,7 +170,8 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_sampler_relatch.py", "test/test_pools.py",
          "test/test_slides.py",
          "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
-         "test/test_fascia_coldfire.py"]                    # v0.45: FASCIA on the ColdFire (type 18)
+         "test/test_fascia_coldfire.py",                    # v0.45: FASCIA on the ColdFire (type 18)
+         "test/test_fascia_program.py"]                     # v0.45: FASCIA's DSP program (run mode = live.py)
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run

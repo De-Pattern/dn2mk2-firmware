@@ -1,6 +1,6 @@
 # FASCIA: a physical/spectral percussion machine (design approved 2026-11-07)
 
-Status: **the sound is approved and locked**. The DSP and UI integration are not started.
+Status: **the sound is approved and locked**. The UI is in (v0.45); the DSP program (`dnfw.fascia.program`, below) is written and held to `live.py` bit for bit; hardware unverified.
 
 The owner, on the pass-3 tour: "i love the new tour sounds. theyre all perfect. great work. that will be the new engine, exactly as you made it ... just make sure it fits in every way, look, gui animation, integration into seq and modulation and p locks, encoder feel and functionality, everything."
 
@@ -228,11 +228,34 @@ turn steps a choice one a click and leaves a knob where it is. MACHINE SEL write
 `DEFAULTS` (`rec.c` `smp_machine_commit`). Every continuous control slides onto its lock; the
 choices step (`dnfw.slides.FASCIA_SLIDE`, `slide.c continuous()`).
 
-**DSP (until the FASCIA program lands).** The machine lookup sends type 18 to PERC's engine slot
-(5), as the sample and Monomachine machines; `smp.asm` (`dnfw.sampler.program`, `FASCIA_MUTE`)
-writes a FASCIA voice's buffer silence every block: never another machine's sound, never an old
-block. That branch is the hook: the FASCIA program, a separate chained L2 program, takes these
-slots over and the branch goes.
+**DSP (v0.45).** The machine lookup sends type 18 to PERC's engine slot (5), as the sample and
+Monomachine machines. PERC's chain is now PERC -> `smp.asm` -> **`fascia.asm`** (`wr_fsc`, sw
+0xBD8800, L2 0x200B1000..0x200C0000) -> PING's tail (0x170280, the register restore). The
+program is `src/dnfw/fascia/program.py`, in the PERC DSL: its run mode is bit-exact to
+`live.py` (`test/test_fascia_program.py`; `scripts/fascia_dsp_compare.py` renders the whole
+audition and its WAVs), and the SHARC runner holds the assembled code to the run mode
+(parts `fascia`, `fchords`+`fsilence`, `fgarbage`, `fstress`; `fcost` measures).
+
+- **Layout.** A voice's state is 0xF80 bytes (16 voices in two L2 rooms: 0x20098400 for 0..7,
+  below the MD's state; 0x200A9400 for 8..15, after the main mix's tap). The block's scratch is
+  L1 0x2E6400..0x2E7000 (I5-relative, its 64-word window holding the hot words and a pool of
+  12 constants filled at `wr_fsc`'s entry). The bookkeeping (costs, strikes, steals, routine
+  return words) is in the Monomachine scratch at +0x3200. The tables (`fascia/tables.json`, 1 KB)
+  are in DDR at 0x81220000. (The plan's 0x200E9000.. range is refused by `dsp._check_l2`, 64 KB
+  short of the non-cacheable window.)
+- **Velocity.** The frame header's word `52 + 2t` holds the trig's velocity << 8 (the ColdFire's
+  frame builder copies `0x8000dd40[t]` there, 0x4002750c; `docs/modulation-matrix.md`). The
+  program reads `min(word >> 8, 127) / 127` as `live`'s `vel`.
+- **Note.** From the frame's header word `2 + 2t` (/ 256), not the note cell (engine +0x1387c
+  + 4t) that PERC and smp read: the stock unpack writes the cell after our code runs, so on a
+  trig with a new note it still holds the previous note (the runner's steal 60 -> 67: the cell
+  60 on the trig's block, 67 the next). Found by the runner's `fascia` part.
+- **Voices.** A trig arms the voice (note-on on its block); an IDLE voice rests (the guard's
+  rest list, one block); a retrigger steals with `live`'s fade. Every state word is
+  initialised by the strike, and the life words are sanitised, so power-on garbage is harmless.
+- **`live.py` changes for the DSP** (rounding-level: float32 where it was float64; not re-auditioned by the owner): DUST's grain
+  smear `HANN_VAR * dn^2` in float32; the body ratios `exp2(LOG2R)` (the DSP's 576-byte ratio
+  table dropped).
 
 **Known limits.** TRK + CLEAR re-initialises a sound from its records' own defaults (stock's
 `0x400e7d4c`), so a cleared FASCIA track starts from WaveTone's and FM Tone's defaults, not

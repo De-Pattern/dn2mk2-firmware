@@ -113,7 +113,7 @@ def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     # the sample machines (8..13) and the Monomachine's (6, 7, 14..) borrow PERC's engine
     # slot; nothing reads past slot 7
     assert dsp.SMP_ENGINE_SLOT == 5
-    # v0.45: FASCIA (18) too, silent in smp.asm until its own program (dnfw.sampler.program)
+    # v0.45: FASCIA (18) too (its program: dnfw.fascia.program, chained after smp.asm)
     assert all(lookup[1 + t] == 5 for t in (*dsp.SMP_TYPES, *dsp.MNM_TYPES, *dsp.FASCIA_TYPES))
     assert all(v in (0, k) for k, v in enumerate(lookup[1:])
                if k not in dsp.SMP_TYPES and k not in dsp.MNM_TYPES and k not in dsp.FASCIA_TYPES) and max(lookup) <= 7
@@ -162,12 +162,13 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     assert [a for _, a, _ in ddr] == [dsp.SHFT_TABLES_DDR,                      # v0.31: AMD's sine
                                       dsp.PERC_TABLES_DDR,
                                       dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
+                                      dsp.FSC_TABLES_DDR,                       # v0.45: FASCIA's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_DELAY_DDR,                         # v0.32: P-I's lines, zeroed
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[-1][2])
-    assert not any(ddr[3][2]) and not any(ddr[4][2])      # the MD's tables (the DSP fills them), P-I's lines
-    assert dsp.MD_TABLES_DDR + len(ddr[3][2]) <= dsp.MD_DELAY_DDR
+    assert not any(ddr[4][2]) and not any(ddr[5][2])      # the MD's tables (the DSP fills them), P-I's lines
+    assert dsp.MD_TABLES_DDR + len(ddr[4][2]) <= dsp.MD_DELAY_DDR
     # v0.32: the voices' working state in L2 (zeros), inside the room proven on units
     from dnfw.perc import live as PL
     L = PL.layout()
@@ -324,10 +325,12 @@ def _code_lines(name):
     return [ln for ln in lines if ln and not ln.startswith(".") and not ln.endswith(":")]
 
 
-def test_smp_hands_on_to_ping_and_writes_only_saved_registers():
-    # v0.13: PERC -> the sample machines -> (v0.26) PING, whose tail restores what PERC saved
-    lines = _code_lines("smp")
-    assert f"JUMP {dsp.PING_SW:#x};" in lines
+@pytest.mark.parametrize("name,nxt", [("smp", "FSC_SW"), ("fascia", "PING_SW")])
+def test_smp_hands_on_to_ping_and_writes_only_saved_registers(name, nxt):
+    # v0.13: PERC -> the sample machines -> (v0.26) PING, whose tail restores what PERC saved;
+    # v0.45: the sample machines -> FASCIA (type 18) -> PING's tail
+    lines = _code_lines(name)
+    assert f"JUMP {getattr(dsp, nxt):#x};" in lines
     import re
     for ln in lines:
         m = re.match(r"(I|M|L|B)(\d+) =", ln)

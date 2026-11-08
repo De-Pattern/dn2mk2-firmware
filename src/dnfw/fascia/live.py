@@ -414,7 +414,9 @@ def vel_ok(vel) -> np.float32:
 # -- constant tables (DDR) ------------------------------------------------------------------
 # log2 of each body's 16 mode ratios (float64 -> float32), 9 x 16 words
 LOG2R = {k: np.array([math.log2(r) for r in M.RATIOS[k]], F) for k in M.RATIOS}
-RATIO = {k: np.array(M.RATIOS[k], F) for k in M.RATIOS}
+# the ratios themselves (for the twins' beat, model.Body): 2^LOG2R in float32, as the DSP computes
+# them from the one table it holds (until 2026-11-08 F(ratio) directly: within 2 ulps of it)
+RATIO = {k: exp2(LOG2R[k]) for k in M.RATIOS}
 LOG2_440 = math.log2(440.0)
 C_DECAY = F(-3.0 * math.log(10.0) / RATE)        # 10^(-3/(T R)) = e^(C/T)
 F_HI, F_LO = F(0.45 * RATE), F(15.0)
@@ -742,7 +744,9 @@ class Gen:
         self.tz = TZ() if kind == "TZFM" else None
         if kind == "DUST":
             dn = max(int(np.trunc(max(self.width, F(1e-4)) * F(RATE))), 2)
-            self.grain = Smear(smear_pole(HANN_VAR * dn * dn, 4), 4)
+            # the grain's variance in float32, as the DSP computes it (F(HANN_VAR) (dn dn), dn a
+            # small int; until 2026-11-08 the float64 HANN_VAR dn^2, rounded once: 1 ulp apart)
+            self.grain = Smear(smear_pole(F(HANN_VAR) * (F(dn) * F(dn)), 4), 4)
         self.ph = F(0.0)                                 # PULSE
         self.pe = F(1.0)
         self.ep = F(1.0)

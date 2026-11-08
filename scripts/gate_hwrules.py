@@ -7,7 +7,7 @@ ships `hwrules.py`: hardware-loop shape (the last 11 instructions 48-bit), loop 
 near a loop's end, branch spacing and the 12-instruction window after a branch, and same-DAG
 loads and stores -- rules each of which silenced or crashed a unit once while both emulators
 ran the code "fine" (its references/sharc.md). This runs it on every instruction of ours in
-the build's section 7 (PERC, the sample machines, the recorder's preview, PING, the stubs)
+the build's section 7 (PERC, the sample machines, the recorder's preview, PING, FASCIA, the stubs)
 and around each patch of the stock's code, and reports only what the stock image does not
 already have at the same place. Exit 0 and PASS, or 1 and the violations.
 
@@ -40,7 +40,8 @@ def ranges() -> list[tuple[int, int, str]]:
            (dsp.PING_SW, dsp.PING_SW + len(obj["ping"]) // 2, "ping.asm"),
            (dsp.IDLE_SW, dsp.IDLE_SW + len(obj["idle_load"]) // 2, "idle_load.asm"),
            (dsp.COUNT_SW, dsp.COUNT_SW + len(obj["block_count"]) // 2, "block_count.asm"),
-           (dsp.EMARK_SW, dsp.EMARK_SW + len(obj["entry_mark"]) // 2, "entry_mark.asm")]
+           (dsp.EMARK_SW, dsp.EMARK_SW + len(obj["entry_mark"]) // 2, "entry_mark.asm"),
+           (dsp.FSC_SW, dsp.FSC_SW + len(obj["fascia"]) // 2, "fascia.asm")]       # v0.45: FASCIA
     for name, sw in (("the entry JUMP", dsp.ENTRY_SW), ("the machine lookup's base", dsp.LOOKUP_SITE_SW),
                      ("the idle loop's back edge", dsp.IDLE_SITE_SW), ("the handler's call", dsp.CALL_SITE_SW),
                      ("the driver's call of the mix", dsp.PVMIX_SITE_SW)):

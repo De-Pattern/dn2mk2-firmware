@@ -51,8 +51,8 @@ Status of the rest of v0.45, all on branch `v045`:
 ### DSP
 - PERC DSL `dnfw.perc.dsl.Prog` (emit/run). MnM machines adapt into PERC's voice (`mnm/machines.py:85-127`); dispatch is in `perc/program.py voice()`/`program()`.
 - Frame: note at header `2+2t`; params at `168 + 2*slot + 146t`; trigger from `TRIG_WORD>>16`.
-- **Velocity: no DSP code of ours reads it yet.** The path has to be found: frame field or the voice's level.
-- L2 code: perc.asm 139,188 of 143,360. **L2 0x200E9000..0x200FA000 (68 KB) is unused**, so FASCIA can be a separate chained program like smp.asm.
+- **Velocity (found, v0.45):** frame header word `52 + 2t` = the trig's velocity << 8 (ColdFire frame builder 0x4002750c copies `0x8000dd40[t]`; `docs/modulation-matrix.md`). FASCIA reads `min(w >> 8, 127) / 127`.
+- L2 code: perc.asm 139,188 of 143,360. L2 0x200E9000..0x200FA000 is unused, but `dsp._check_l2` refuses spans past 0x200EA000 (64 KB clear of the non-cacheable window), so FASCIA's code went to 0x200B1000..0x200C0000 and its voices to 0x20098400 / 0x200A9400 (docs/fascia.md, DSP).
 - L1 tail: MnM render scratch to 0x2E6400; REGION to 0x2E7000. DDR above `DDR_FLOOR`.
 - Tables: SHFT's sine (256/turn), exp2/tan, xorshift noise.
 - Cost: runner `--steps cost`. Guard: `perc/guard.py`, `docs/dsp-time.md`.

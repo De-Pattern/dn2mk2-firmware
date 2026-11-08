@@ -131,8 +131,9 @@ def test_dsp_silent_hook_and_lookup():
     from dnfw.sampler import live as SL
     t = struct.unpack(f"<{dsp.MACHINE_TYPES + 1}I", dsp.lookup16())
     assert dsp.MACHINE_TYPES >= F.TYPE + 1 and t[1 + F.TYPE] == dsp.SMP_ENGINE_SLOT
-    text = SP.program(SL.layout(), dsp.PING_SW)
-    assert SP.FASCIA_MUTE and "fmute" in text and f"R12 = {F.TYPE:#x};" in text
+    # v0.45: the mute branch is gone; smp.asm hands on to FASCIA's own program (fascia.asm)
+    text = SP.program(SL.layout(), dsp.FSC_SW)
+    assert not SP.FASCIA_MUTE and "fmute" not in text and f"JUMP {dsp.FSC_SW:#x};" in text
 
 
 def test_slides_rows():
