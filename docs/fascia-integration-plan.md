@@ -5,7 +5,8 @@ The owner's decisions:
 - RAM banks are on hold.
 - PING and Waverider are removed to make room.
 - 3 pages of 8, with the rest folded as macros (`src/dnfw/fascia/model.py` `expand()`).
-- The 3-page tour (scratchpad `fascia3/fascia_tour.wav`) is awaiting his re-approval. After it, regenerate the goldens (`scripts/fascia_golden.py` into dn2mk2-bench `goldens/fascia`), because `test_fascia_golden` fails on v1 goldens until then.
+- The 3-page tour is approved (owner, 2026-11-08: "sounds amazing"). The goldens are regenerated (dn2mk2-bench `goldens/fascia`, v2).
+- PING is out (commit 6d3ba05): the stub at PING_SW, image headroom +18,269.
 
 Status of the rest of v0.45, all on branch `v045`:
 - SAMP snap: done (rectrig 38+).
