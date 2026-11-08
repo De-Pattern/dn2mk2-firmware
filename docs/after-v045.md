@@ -22,9 +22,24 @@ mind for after so we remember to cover them once finished with this". Order: BOU
   It runs in the background after the recording's own save, as the loader does: idle-only,
   one chunk a pass, a power cut leaves either nothing or a whole entry. The name is RECnnn,
   or FILE NAME's.
-- **To decide with the owner:**
-  - whether the TRIM/NAME result is what goes in (after YES), or the raw take;
-  - what happens when the library is full: the line says so, and the pool copy stays.
+- **Owner, 2026-11-08 03:33: match the DT2's order instead.** On the DT2 the save *is* the +Drive
+  write: TRIM in the buffer, YES, name, YES, and the trimmed file lands in RECORDED. A pool slot
+  only links to it. So:
+  1. **FUNC + YES / the recorder's save:** TRIM, then FILE NAME, then the write into the library's
+     RECORDED folder, entry last. That write is the one commit point.
+  2. **The pool slot becomes a link to that library sample.** This is the same kind of slot
+     LOAD TO PROJECT makes: a LIBID, `smp_lib_slot_of`. The frames already in DDR stay as they
+     are, so nothing reloads.
+  3. **The recordings' area room is freed** once the library entry is written. There is no
+     pool-only RECnnn copy and no background job.
+  4. **Library full or no +Drive:** refuse, and say why. The take stays where it is (buffer or
+     recordings' area) as today. Nothing is deleted. (The DT2's own behaviour here is
+     unconfirmed.)
+  5. **Old projects:** pool-only RECnnn recordings keep working as they are. Each one could get a
+     SAVE TO +DRIVE action (in PROJECT RAM's SAMPLE ACTION) that writes it to RECORDED and
+     relinks the slot. There is no forced migration.
+  6. **Still to check against the DT2's manual or a unit:** the default name the save screen
+     offers.
 
 ## 2. A sample-lock trig mode for the DT2 machines (feasibility first; only if it can't hurt stability)
 - **The idea:** FUNC + UP/DOWN opens TRIG MODE. A new mode (or the stock menu's SLICES entry)
