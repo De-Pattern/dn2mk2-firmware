@@ -86,8 +86,8 @@ Every flash, every version:
 ## v0.44 — BOUNCE (Octatrack-style recorder trigs into a playing buffer)
 
 `DN2mod_v0.44_BOUNCE_OS1.11.syx`
-sha256 `7492556952bca6697d4b05ba858f867f71fdeb1c98b860257a48351294dbc35b`
-Gate: CLEARED TO FLASH, 2026-11-07 (44 gates; 37 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit). Source: commit `61840cd` (branch `rec-v2`). Docs: `docs/rectrig.md`, `docs/rec-v2-design.md`, `docs/sampler.md`.
+sha256 `6b912546525ef2a4bf6fba3268a1fd553883ba6f6340e6f4e60fe3680b0f3166`
+Gate: CLEARED TO FLASH, 2026-11-07 (44 gates; 38 reused, each a pass of this same build whose every input is byte-identical, run step by step under the two-hour job limit). Source: commit `f4b03a2` (branch `rec-v2`; the first v0.44 builds, gated with the version still 0.43 compiled in, were never published). Docs: `docs/rectrig.md`, `docs/rec-v2-design.md`, `docs/sampler.md`.
 
 Everything in v0.43, plus:
 
