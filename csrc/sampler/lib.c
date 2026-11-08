@@ -50,9 +50,25 @@ typedef unsigned char u8;
 #define LIB_SECTOR_C 0x700000u
 #define LIB_MAGIC 0x444E324Cu                                       /* 'DN2L' */
 #define LIB_VERSION 1u
-#define LIB_CAP 2048
+/* v0.45 (spacem0nkey: "maxed out the amount despite having 18gb of memory left"): 16,384
+ * entries. The first 2,048 stay where every build keeps them (LIB_INDEX); 2,048..16,383 are
+ * the extension, LIB_X_AT: a header ('DN2X', version, capacity, its check) and then 1,792
+ * sectors of entries, below the library between the per-project lists (pools.c, to
+ * 0x6E02FF) and Direct Jump's settings (0x6FF000), sectors nothing else uses (pools.c,
+ * erase.c). Like v0.43's folders past 64, it is made the first time an entry past 2,047 is
+ * written: the entries first, the header last, so a power cut leaves the first 2,048 as they
+ * were and none past them. The superblock is untouched (version 1, capacity 2,048): an older
+ * build reads the library's first 2,048 entries as always and never sees the rest. */
+#define LIB_CAP 16384
+#define LIB_CAP_LO 2048                                             /* on the +Drive at LIB_INDEX */
 #define LIB_ENTRY 64u
-#define LIB_INDEX_SECTORS (LIB_CAP * LIB_ENTRY / 512u)                /* 256 */
+#define LIB_INDEX_SECTORS (LIB_CAP_LO * LIB_ENTRY / 512u)             /* 256 */
+#define LIB_X_AT 0x6F0000u
+#define LIB_X_IDX (LIB_X_AT + 1u)
+#define LIB_X_SECTORS ((LIB_CAP - LIB_CAP_LO) * LIB_ENTRY / 512u)    /* 1,792 */
+#define LIB_X_MAGIC 0x444E3258u                                     /* 'DN2X' */
+_Static_assert(LIB_X_AT >= 0x6E0300u && LIB_X_IDX + LIB_X_SECTORS <= 0x6FF000u,
+               "the extension: between the per-project lists and the settings sector");
 #define LIB_FOLDERS 128                                             /* v0.43 (64 before; smp_page.c's SMP_LIB_FOLDERS) */
 #define LIB_FOLDERS_LO 64                                           /* in the library's headers */
 #define LIB_FOLDER_BYTES 32u
@@ -75,11 +91,17 @@ _Static_assert(LIB_SECTOR >= POOL_STORE_END, "the library lies above the pool's 
 
 #define LIB_RAM (SMP_MIRROR + 0x100000u)
 #define SB ((u32 *)LIB_RAM)                                         /* one sector */
-#define IDX ((u8 *)(LIB_RAM + 0x200u))                              /* LIB_CAP x 64 */
-#define FOLD ((u8 *)(LIB_RAM + 0x200u + LIB_CAP * LIB_ENTRY))       /* LIB_FOLDERS x 32 */
+#define IDX ((u8 *)(LIB_RAM + 0x200u))                              /* LIB_CAP_LO x 64 */
+#define FOLD ((u8 *)(LIB_RAM + 0x200u + LIB_CAP_LO * LIB_ENTRY))    /* LIB_FOLDERS x 32 */
+/* v0.45: entries 2,048..16,383 (896 KB), and the extents' scratch for lib_room (128 KB), in
+ * the mirror's free part above the per-project pools' SSUM (link.c, to + 0x22CA14) */
+#define IDXH ((u8 *)(SMP_MIRROR + 0x300000u))
+#define EXT ((u32 *)(SMP_MIRROR + 0x3E8000u))
+_Static_assert(0x300000u + (LIB_CAP - LIB_CAP_LO) * LIB_ENTRY <= 0x3E0000u
+               && 0x3E8000u + LIB_CAP * 8u <= SMP_MIRROR_BYTES, "the extension's RAM inside the mirror");
 #define LSTAGE ((u8 *)(LIB_RAM + 0x24000u))                         /* 64 KB */
 #define LCHUNK 0x10000u
-_Static_assert(0x200u + LIB_CAP * LIB_ENTRY + LIB_FOLDERS * LIB_FOLDER_BYTES <= 0x24000u, "the index fits before the stage");
+_Static_assert(0x200u + LIB_CAP_LO * LIB_ENTRY + LIB_FOLDERS * LIB_FOLDER_BYTES <= 0x24000u, "the index fits before the stage");
 _Static_assert(0x100000u + 0x24000u + 0x10000u <= 0x500000u, "inside the mirror's 5 MB");
 
 int smp_lib_state __attribute__((section(".data"))) = 0;   /* 0 not read, 1 none (no superblock), 2 ready, -1 the device refused */
@@ -105,6 +127,9 @@ static int lib_in(u32 sector, u32 bytes)
     if (BLK_READY && !(bytes & 511u) && bytes && BLK_SECTORS > LIB_DATA && sector >= LIB_HI_AT
         && sector + n <= LIB_HI_REC + LIB_HI_SECTORS)
         return 1;                               /* v0.43: folders 64..127 */
+    if (BLK_READY && !(bytes & 511u) && bytes && BLK_SECTORS > LIB_DATA && sector >= LIB_X_AT
+        && sector + n <= LIB_X_IDX + LIB_X_SECTORS)
+        return 1;                               /* v0.45: entries 2,048..16,383 */
     return BLK_READY && !(bytes & 511u) && bytes && sector >= LIB_SECTOR
            && BLK_SECTORS > LIB_DATA && sector < BLK_SECTORS && n <= BLK_SECTORS - sector;
 }
@@ -123,7 +148,7 @@ static int lib_wr(u32 sector, u32 bytes, const void *buf)
     return BLK_WRITE(sector, bytes, buf);
 }
 
-#define E(k) (IDX + LIB_ENTRY * (u32)(k))
+#define E(k) ((u32)(k) < LIB_CAP_LO ? IDX + LIB_ENTRY * (u32)(k) : IDXH + LIB_ENTRY * ((u32)(k) - LIB_CAP_LO))
 
 static u32 entry_check(const u8 *e) { return adler(e, 60, 1u) ^ 0x4C494245u; }
 
@@ -256,10 +281,57 @@ static int sb_write(void)
     return lib_wr(LIB_SECTOR, 512u, SB);
 }
 
+/* v0.45: the extension (entries 2,048..16,383) -- its header, read at boot; none there until it checks */
+static u32 x_sec[128] __attribute__((section(".data"), aligned(16)));
+int smp_lib_x __attribute__((section(".data"))) = 0;         /* 1: the header checks (entries read) */
+static u32 x_check(void) { return ~x_sec[0] ^ x_sec[1] ^ x_sec[2] ^ 0xA55AC33Cu; }
+
+static void x_read(void)
+{
+    smp_lib_x = 0;
+    for (u32 k = 0; k < (LIB_CAP - LIB_CAP_LO) * LIB_ENTRY; k++)
+        IDXH[k] = 0;
+    if (lib_rd(LIB_X_AT, 512u, x_sec) != 0 || x_sec[0] != LIB_X_MAGIC || x_sec[1] != 1u
+        || x_sec[2] != LIB_CAP || x_sec[3] != x_check())
+        return;                                 /* none there (a library before v0.45) */
+    for (u32 s = 0; s < LIB_X_SECTORS; s += 64u)
+        if (lib_rd(LIB_X_IDX + s, 64u * 512u, IDXH + 512u * s) != 0) {
+            for (u32 k = 0; k < (LIB_CAP - LIB_CAP_LO) * LIB_ENTRY; k++)
+                IDXH[k] = 0;
+            return;
+        }
+    smp_lib_x = 1;
+}
+
+/* every extension sector as it is in RAM (all free but what is being written now), then the
+ * header that makes them count */
+static int x_format(void)
+{
+    for (u32 s = 0; s < LIB_X_SECTORS; s += 64u)
+        if (lib_wr(LIB_X_IDX + s, 64u * 512u, IDXH + 512u * s) != 0)
+            return -1;
+    for (int k = 0; k < 128; k++)
+        x_sec[k] = 0;
+    x_sec[0] = LIB_X_MAGIC;
+    x_sec[1] = 1u;
+    x_sec[2] = LIB_CAP;
+    x_sec[3] = x_check();
+    if (lib_wr(LIB_X_AT, 512u, x_sec) != 0)
+        return -1;
+    smp_lib_x = 1;
+    return 0;
+}
+
 static int index_sector_write(int k)            /* the index sector entry K is in */
 {
-    u32 s = (u32)k / (512u / LIB_ENTRY);
-    return lib_wr(LIB_INDEX + s, 512u, IDX + 512u * s);
+    if ((u32)k < LIB_CAP_LO) {
+        u32 s = (u32)k / (512u / LIB_ENTRY);
+        return lib_wr(LIB_INDEX + s, 512u, IDX + 512u * s);
+    }
+    if (!smp_lib_x)                             /* v0.45: the first entry past 2,047 */
+        return x_format();
+    u32 s = ((u32)k - LIB_CAP_LO) / (512u / LIB_ENTRY);
+    return lib_wr(LIB_X_IDX + s, 512u, IDXH + 512u * s);
 }
 
 /* power-on (link.c's smp_boot, once the device is up): the superblock, the index, the
@@ -282,6 +354,7 @@ void smp_lib_boot(void)
         return;
     }
     hi_read();
+    x_read();
     used_all();
     smp_lib_state = 2;
 }
@@ -319,15 +392,20 @@ static int lib_format(void)
 {
     if (smp_lib_state != 1)
         return smp_lib_state == 2 ? 0 : -1;
-    for (u32 k = 0; k < LIB_CAP * LIB_ENTRY; k++)
+    for (u32 k = 0; k < LIB_CAP_LO * LIB_ENTRY; k++)
         IDX[k] = 0;
+    for (u32 k = 0; k < (LIB_CAP - LIB_CAP_LO) * LIB_ENTRY; k++)
+        IDXH[k] = 0;                            /* (the extension: made with its first entry) */
     for (u32 k = 0; k < LIB_FOLDERS * LIB_FOLDER_BYTES; k++)
         FOLD[k] = 0;
     folder_set(0, "INCOMING");
     folder_set(1, "RECORDED");
+    for (int k = 0; k < 128; k++)
+        x_sec[k] = 0;                           /* v0.45: an older library's extension, if any, no longer counts */
+    smp_lib_x = 0;
     if (lib_wr(LIB_INDEX, LIB_INDEX_SECTORS * 512u, IDX) != 0
         || lib_wr(LIB_FOLDER_AT, LIB_FOLDER_SECTORS * 512u, FOLD) != 0 || hi_format() != 0
-        || sb_write() != 0)
+        || lib_wr(LIB_X_AT, 512u, x_sec) != 0 || sb_write() != 0)
         return -1;
     used_all();
     smp_lib_state = 2;
@@ -354,25 +432,39 @@ const char *smp_lib_name(int k) { return smp_lib_used(k) ? (const char *)(E(k) +
 u32 smp_lib_frames(int k) { return smp_lib_used(k) ? lget(E(k) + 4) : 0; }
 
 /* the first free sector run of SECTORS from LIB_DATA among the entries' extents -> its
- * first sector, 0: none */
+ * first sector, 0: none. v0.45: the extents sorted by their start (a shell sort in the
+ * mirror's scratch), then one pass: 16,384 entries in a few hundred thousand steps (v0.31..
+ * v0.44 moved a candidate past overlapping extents pass after pass: up to n^2, too slow at
+ * 16,384) */
 static u32 lib_room(u32 sectors)
 {
-    u32 cand = LIB_DATA;
-    for (int pass = 0; pass <= LIB_CAP; pass++) {
-        int moved = 0;
-        for (int k = 0; k < LIB_CAP; k++) {
-            if (!smp_lib_used(k))
-                continue;
-            u32 s = lget(E(k)), z = s + lget(E(k) + 20);
-            if (s < cand + sectors && cand < z) {
-                cand = z;
-                moved = 1;
-            }
+    u32 n = 0;
+    for (int k = 0; k < LIB_CAP; k++)
+        if (smp_lib_used(k)) {
+            EXT[2 * n] = lget(E(k));
+            EXT[2 * n + 1] = lget(E(k)) + lget(E(k) + 20);
+            n++;
         }
-        if (!moved)
-            return cand < BLK_SECTORS && sectors <= BLK_SECTORS - cand ? cand : 0;
+    for (u32 gap = n / 2; gap > 0; gap = gap == 2 ? 1 : gap * 5 / 11) {
+        for (u32 i = gap; i < n; i++) {
+            u32 a = EXT[2 * i], z = EXT[2 * i + 1], j = i;
+            while (j >= gap && EXT[2 * (j - gap)] > a) {
+                EXT[2 * j] = EXT[2 * (j - gap)];
+                EXT[2 * j + 1] = EXT[2 * (j - gap) + 1];
+                j -= gap;
+            }
+            EXT[2 * j] = a;
+            EXT[2 * j + 1] = z;
+        }
     }
-    return 0;
+    u32 cand = LIB_DATA;
+    for (u32 i = 0; i < n; i++) {
+        if (EXT[2 * i] >= cand + sectors)
+            break;                              /* the run before this extent is free */
+        if (EXT[2 * i + 1] > cand)
+            cand = EXT[2 * i + 1];
+    }
+    return cand < BLK_SECTORS && sectors <= BLK_SECTORS - cand ? cand : 0;
 }
 
 /* -- a send from the computer: BEGIN, WRITE in order, END ------------------------------- */

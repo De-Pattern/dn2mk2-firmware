@@ -1558,6 +1558,9 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                         smp_fb_mark_folder(f);  /* (a folder: all it holds) */
                     else
                         smp_fb_mark_here();     /* v0.40: the list's own samples */
+                } else if (code == K_YES && act == 8) {     /* v0.45: SELECT UNUSED, then UNLOAD n? */
+                    extern int smp_fb_mark_unused(void);
+                    smp_fb_menu = smp_fb_mark_unused() > 0 && (slot >= 0 || on_folder) ? 2 : 0;
                 } else if (code == K_YES && act == 2 && (slot >= 0 || on_folder)) {
                     smp_fb_menu = 2;            /* DELETE: asked first */
                 } else if (code == K_YES && act == 5) {     /* v0.33: MOVE SELECTED: these, */
@@ -1570,7 +1573,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     int to = on_folder ? f : smp_fb_folder;
                     extern int smp_lib_move(int k, int f);
                     if (to >= 0)
-                        for (int k = 0; k < 2048; k++)
+                        for (int k = 0; k < 16384; k++)    /* v0.45: the library's 16,384 */
                             if (smp_lib_used(k) && smp_fb_marked(k))
                                 smp_lib_move(k, to);
                     smp_fb_unmark_all();

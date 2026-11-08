@@ -196,6 +196,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("mnmdefaults", "Monomachine start values (ColdFire)"),
        ("alloc", "GRID allocate slice locks (ColdFire)"),
        ("multisel", "multi-select delete (ColdFire)"),
+       ("unused", "SELECT UNUSED (ColdFire)"),
        ("hooks", "overlays let go (ColdFire)"),
        ("recflow", "recorder flow (ColdFire)"),
        ("slice", "SLICE menus and SLICES keys (ColdFire)"),
@@ -1257,6 +1258,64 @@ def main() -> int:
                                   "marked ones (DELETE 2?), keeps the rest, clears the marks, hides emptied folders"
                                   if good else why)
                 later("multisel", "multi-select delete (ColdFire)", "multi-select delete (ColdFire)", [ms_cmd, sorted(EMU_ENV.items())], ms_body)
+
+            # 6i2. v0.45: SELECT UNUSED (the DT2's 13.6.6; Wolljamin). Slots 0..7 loaded. Used: pattern
+            # 0's kit, track 0 (ONESHOT) on SAMP 2 (slot 1); pattern 5's kit, track 3 on SAMP 4
+            # (slot 3); a SAMP p-lock in pattern 5's table, track 3, step 0, on SAMP 7 (slot 6).
+            # A decoy: pattern 7's track 0 is an FM machine whose slot-43 byte is 8 (slot 7):
+            # not a sample machine, so not a use. Every other kit's types poked to 0 (FM).
+            # SELECT UNUSED marks {0, 2, 4, 5, 7} (5); UNLOAD empties exactly those
+            if "smp_fb_mark_unused" in lay:
+                P0, PSTR, KSTR = 0x4121898C, 122478, 23921
+                d2 = bytearray(d[:0xC10])
+                for k in range(8):
+                    struct.pack_into("<IIfI", d2, 8 + 16 * k, 0x84001000 + 0x40000 * k, 24000, 1.0, 1)
+                us = list(base) + [f"poke:{M:#x}:{d2.hex()}"]
+                for n in range(128):
+                    for t in range(16):
+                        if n == 0 or (n, t) == (5, 3):
+                            continue
+                        us.append(f"poke:{kit + KSTR * n + 52 + 1163 * t + 0xDE:#x}:00")
+                us += [f"poke:{kit + 52 + 1163 * t + 0x6A:#x}:0000" for t in range(1, 16)]
+                us += [f"poke:{kit + 52 + 0x6A:#x}:0200",
+                       f"poke:{kit + KSTR * 5 + 52 + 1163 * 3 + 0xDE:#x}:08",
+                       f"poke:{kit + KSTR * 5 + 52 + 1163 * 3 + 0x6A:#x}:0400",
+                       f"poke:{kit + KSTR * 7 + 52 + 0xDE:#x}:00",
+                       f"poke:{kit + KSTR * 7 + 52 + 0x6A:#x}:0800"]
+                for n in range(128):                    # every pattern's SAMP index: no lock
+                    tb = P0 + PSTR * n + 97872
+                    us.append(f"poke:{tb + 20640:#x}:" + "ff" * (101 * 16))
+                tb5 = P0 + PSTR * 5 + 97872
+                us += [f"poke:{tb5 + 258 * 79:#x}:2b03" + "0700" + "ffff" * 127,
+                       f"poke:{tb5 + 20640 + 101 * 3 + 43:#x}:4f",
+                       "wait:4", f"call:{lay['smp_fb_mark_unused']:#x}"]
+                us += [f"call:{lay['smp_fb_marked']:#x}:{k}" for k in range(8)]
+                us += [f"call:{lay['smp_fb_delete']:#x}:0:0xffffffff", "wait:4"] + [mem(M + 8 + 16 * k + 4) for k in range(8)]
+                ujs, usf = work / "unused.json", work / "unused.steps"
+                usf.write_text(",".join(us))
+                us_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
+                          "--snapshot", snap, "--steps", f"@{usf}", "--png-dir", work / "unused", "--json", ujs]
+
+                def us_body(tdir):
+                    rc, out = run("select unused", us_cmd, logs, env=EMU_ENV, trace=tdir)
+                    why, good = out[-800:], False
+                    if rc == 0 and ujs.exists():
+                        r = json.loads(ujs.read_text())
+                        m = r["memory"]
+                        d0 = [int(str(c.get("d0")), 0) if c.get("d0") is not None else None
+                              for c in r.get("direct_calls", [])]
+                        fr = [int(m[hex(M + 8 + 16 * k + 4)], 16) for k in range(8)]
+                        facts = {"five unused marked": d0[:1] == [5],
+                                 "the marks are 0, 2, 4, 5, 7": [x & 1 for x in d0[1:9]] == [1, 0, 1, 0, 1, 1, 0, 1],
+                                 "UNLOAD empties them, keeps 1, 3, 6 (a kit's SAMP, another pattern's kit, "
+                                 "another pattern's SAMP lock; an FM track's byte ignored)":
+                                 [x != 0 for x in fr] == [False, True, False, True, False, False, True, False]}
+                        good = all(facts.values())
+                        why = f"{facts} d0={d0} frames={fr}"
+                    return good, ("SELECT UNUSED marks the loaded slots no pattern's kit or SAMP lock uses (5 of 8: a "
+                                  "kit's SAMP, another pattern's kit, a lock in another pattern, an FM track's byte "
+                                  "ignored); UNLOAD empties exactly those" if good else why)
+                later("unused", "SELECT UNUSED (ColdFire)", "SELECT UNUSED (ColdFire)", [us_cmd, sorted(EMU_ENV.items())], us_body)
 
             # 6l. v0.31: the browser's two stores and the +Drive's library. A library of three
             # samples (two in INCOMING, one in DRUMS) put in its RAM as lib.c reads it at

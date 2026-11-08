@@ -73,6 +73,7 @@ PL0, PL_END = 0x6D0000, 0x6E0300
 SET = 0x6FF000
 HI, HI_END = 0x6FF800, 0x6FF805                 # v0.43: the library's folders 64..127 (lib.c)
 LIB0, LIB_DATA = 0x700000, 0x700105
+XA, XA_END = 0x6F0000, 0x6F0701                 # v0.45: the library's entries 2,048..16,383 (lib.c LIB_X_AT)
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 RESULT = SENTINEL + 0x800               # what a stubbed driver entry returns (the hook sets it)
 PRSSTAT = 0xFC0CC024                    # the eSDHC's present state: bit 24 DAT0 (v0.41)
@@ -89,7 +90,7 @@ def check(name, ok, detail=""):
 
 
 def regions(dev):
-    return [(POOL0, POOL_END), (PL0, PL_END), (SET, SET + 1), (HI, HI_END), (LIB0, dev)]
+    return [(POOL0, POOL_END), (PL0, PL_END), (XA, XA_END), (SET, SET + 1), (HI, HI_END), (LIB0, dev)]
 
 
 def in_regions(s, n, dev):
@@ -280,11 +281,11 @@ def fill(disk, rng):
     def junk():
         return bytes(rng.randrange(1, 255) for _ in range(512))
     mod = [POOL0, POOL0 + 1, POOL0 + 2, POOL0 + 777, 0x6C8000, PL0, PL0 + 1, PL0 + 2, 0x6D00FF, 0x6D0100, 0x6D0101,
-           0x6D0100 + 256 * 7, 0x6D0100 + 256 * 257, 0x6E02FF, SET, HI, HI + 4, LIB0, LIB0 + 1, LIB0 + 256, 0x700104, LIB_DATA,
+           0x6D0100 + 256 * 7, 0x6D0100 + 256 * 257, 0x6E02FF, XA, XA + 1, XA + 1792, SET, HI, HI + 4, LIB0, LIB0 + 1, LIB0 + 256, 0x700104, LIB_DATA,
            LIB_DATA + 1, disk.dev - 2049, disk.dev - 1] + [s for s in (0x800000, 0x1000000) if s < disk.dev]
     mod += [rng.randrange(POOL0, POOL_END) for _ in range(60)] + [rng.randrange(LIB0, disk.dev) for _ in range(60)]
     other = [0x0, 0x800, 0x1000, 0x2000, 0x58000, 0x457FFF, 0x458000, 0x500000, 0x5D7FFF, 0x5D8000, 0x5FFFFF,
-             0x6C8001, 0x6CFFFF, 0x6E0300, 0x6FEFFF, 0x6FF001, 0x6FF7FF, 0x6FF805, 0x6FFFFF]
+             0x6C8001, 0x6CFFFF, 0x6E0300, 0x6EFFFF, 0x6F0701, 0x6FEFFF, 0x6FF001, 0x6FF7FF, 0x6FF805, 0x6FFFFF]
     other += [rng.randrange(0, 0x600000) for _ in range(60)]
     for s in mod + other:
         disk.put(s, junk())
@@ -464,13 +465,14 @@ def run_ui(a, lay, SMx):
             merged.append(["OVERLAP", s])
         else:
             merged.append([s, s + n])
-    want = [[POOL0, POOL_END], [PL0, PL_END], [SET, SET + 1], [HI, HI_END], [LIB0, DEVICE]]
-    check("the TRIMs cover exactly the five regions (v0.43: folders 64..127's), each sector once",
+    want = [[POOL0, POOL_END], [PL0, PL_END], [XA, XA_END], [SET, SET + 1], [HI, HI_END], [LIB0, DEVICE]]
+    check("the TRIMs cover exactly the six regions (v0.43: folders 64..127's; v0.45: the library's extension), each sector once",
           merged == want, f"{[[hex(x) if isinstance(x, int) else x for x in m] for m in merged]}")
     order = [s for s, _ in trims[:36]]
     check("headers first: the pool's, the lists' region, the settings, the library's headers, then the frames",
           order[0] == POOL0 and order[1] == PL0 and SET in order[:36] and LIB0 in order[:36]
-          and trims[35] == (LIB0, LIB_DATA - LIB0) and trims[36] == (HI, HI_END - HI) and trims[37][0] == POOL0 + 1,
+          and trims[35] == (LIB0, LIB_DATA - LIB0) and trims[36] == (HI, HI_END - HI)
+          and trims[37] == (XA, XA_END - XA) and trims[38][0] == POOL0 + 1,
           str([hex(x) for x in order[:3]]))
     check("not one write from the first TRIM on", first_t is not None and not [x for x in log[first_t:] if x[0] == "W"],
           f"{len(writes)} write(s) in all")

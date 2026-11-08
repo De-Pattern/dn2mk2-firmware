@@ -1861,7 +1861,10 @@ def main() -> int:
         uc.hook_add(UC_HOOK_CODE, isr_enter, begin=ISR, end=ISR)
         uc.hook_add(UC_HOOK_CODE, isr_leave, begin=ISR_RTE, end=ISR_RTE)
     panel.settle(a.warmup)
-    for step in [s.strip() for s in a.steps.split(",") if s.strip()]:
+    # v0.45: --steps @FILE reads them from a file (a long setup: the 128 kits' pokes would pass
+    # the kernel's 128 KB limit on one argument)
+    steps_text = pathlib.Path(a.steps[1:]).read_text() if a.steps.startswith("@") else a.steps
+    for step in [s.strip() for s in steps_text.split(",") if s.strip()]:
         step_now["name"] = step
         if step == "func-src":
             panel.hold(FUNC, 3_000_000)
