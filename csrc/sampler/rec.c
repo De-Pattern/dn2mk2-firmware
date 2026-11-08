@@ -305,6 +305,85 @@ u32 bn_pages(void)
     return (bn_len() + 15u) / 16u;
 }
 
+/* v0.45 (owner: "Can't we just do a different color for rec trigs ... only visible when rec
+ * window is open?"): while the BOUNCE REC panel is up, the 16 [TRIG] LEDs show the page's
+ * recorder trigs (stock's LED path, docs/leds.md): the per-refresh compose (0x4002c854)
+ * clears the LedManager's arrays, then walks the views (jsr 0x4011d3b2, LED_SITE), each
+ * view claiming the LEDs it sets, the first write winning (0x4002c318 returns at once for an
+ * LED already set this refresh). bn_led_walk is that jsr: it claims the 16 trig LEDs (logical
+ * ids 26..41) first, then the walk runs as stock's, so no stock view can light them while
+ * the panel is up. Closed, it does nothing and stock's LEDs are exactly stock's. Colours are
+ * palette indices (2..17 red, 50..65 yellow, 98..113 white, 16 levels each, brightest last):
+ * a recorder trig red, a one-shot armed yellow, spent dim yellow, the playing step white,
+ * an empty step or one past the pattern unlit (stock's mode 1). */
+#define LED_WALK ((void (*)(void *))0x4011D3B2u)
+#define LED_MGR ((u32 (*)(void))0x4018AABCu)
+#define LED_SET ((void (*)(u32, u32, u32, u32))0x4002C318u)
+#define LED_DIRTY ((void (*)(void *))0x4011D314u)
+#define LED_TRIG0 26u
+#define LED_REC 17u
+#define LED_ONE 65u
+#define LED_SPENT 54u
+#define LED_HEAD 113u
+u32 bn_led_claims __attribute__((section(".data"))) = 0;      /* refreshes claimed (for the gate) */
+static u32 bn_led_sig __attribute__((section(".data"))) = 0xFFFFFFFFu;
+
+static u32 bn_led_val(u32 k, u32 *mode)         /* step k of the page shown -> palette index */
+{
+    u32 t = UI_TRACK_B, step = (u32)bn_page * 16u + k;
+    unsigned char *table = sl_ui_table_now();
+    extern u32 rt_trig_get(const unsigned char *table, u32 t, u32 step);
+    u32 v = table && step < bn_len() ? rt_trig_get(table, t, step) : 0xFFFFu;
+    int head = SEQ_PLAYING_B && t < 16 && TRACK_CUR_B[t] % bn_len() == step;
+    *mode = 2u;
+    if (v == 1)
+        return LED_REC;
+    if (v == 2)
+        return LED_ONE;
+    if (v == 3)
+        return LED_SPENT;
+    if (head)
+        return LED_HEAD;
+    *mode = 1u;
+    return 1u;
+}
+
+void bn_led_walk(void *screen)
+{
+    if (bn_active()) {
+        u32 lm = LED_MGR();
+        if (lm) {
+            for (u32 k = 0; k < 16; k++) {
+                u32 mode, val = bn_led_val(k, &mode);
+                LED_SET(lm, LED_TRIG0 + k, mode, val);
+            }
+            bn_led_claims++;
+        }
+    }
+    LED_WALK(screen);
+}
+
+/* the UI loop (rt_poll): when what the LEDs should show changes -- the panel opened or
+ * closed, a trig placed, the page turned, the playing step moved -- the screen's LEDs are
+ * asked for again (stock's View::ledsDirty path), so they follow at once and go back to
+ * stock's the moment the panel closes */
+void bn_led_poll(void)
+{
+    extern void *wr_screen_obj;
+    u32 sig = 0x5EEDu;
+    if (bn_active()) {
+        sig = 0x1000000u | (u32)bn_page << 16;
+        for (u32 k = 0; k < 16; k++) {
+            u32 mode, val = bn_led_val(k, &mode);
+            sig = sig * 31u + val * 4u + mode;
+        }
+    }
+    if (sig != bn_led_sig && wr_screen_obj) {
+        bn_led_sig = sig;
+        LED_DIRTY(wr_screen_obj);
+    }
+}
+
 void bn_open(void)                              /* the screen opened: the page shown */
 {
     u32 t = UI_TRACK_B;

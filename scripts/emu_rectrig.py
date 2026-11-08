@@ -421,6 +421,15 @@ def main() -> int:
             return ((code - 1) // 8, (code - 1) % 8)
         put32(SEQ_PLAYING, 0)
         panel.settle(5_000_000)
+        # v0.45: the trig LEDs (stock's LedManager, docs/leds.md: modes at +40, palette values at
+        # +256, 4 bytes an LED; the trig keys are ids 26..41) -- stock's before the panel opens
+        LM_PTR = 0x446478E0
+
+        def leds():
+            lm = machine.long(LM_PTR)
+            return [(machine.long(lm + 40 + 4 * i), machine.long(lm + 256 + 4 * i)) for i in range(26, 42)] if lm else []
+        led_stock = leds()
+        claims0 = L("bn_led_claims") if "bn_led_claims" in lay else None
         call(lay["rec_combo"])                              # FUNC + VOICE: the RECORDER
         panel.settle(10_000_000)
         panel.screen("bounce_recorder")
@@ -435,11 +444,20 @@ def main() -> int:
         v3 = machine.word(table + REC * [i for i in range(RECS) if machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T])][0] + 2 + 2 * 2) \
             if any(machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T]) for i in range(RECS)) else 0xFFFF
         check("[TRIG 3] on the BOUNCE RECORDER places a recorder trig on step 3 (and no note trig)", v3 == 1, f"value {v3}")
+        if claims0 is not None:
+            led3 = leds()
+            check("v0.45: the panel up, [TRIG 3]'s LED red (mode 2, palette 17), the other trig LEDs unlit "
+                  "(stock's note trigs not shown through)",
+                  L("bn_led_claims") > claims0 and led3[2] == (2, 17)
+                  and all(m_ == 1 for i, (m_, _v) in enumerate(led3) if i != 2), f"{led3[:4]} claims {L('bn_led_claims')}")
         panel.tap(key(25 + 2))
         panel.settle(10_000_000)
         v3b = machine.word(table + REC * [i for i in range(RECS) if machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T])][0] + 2 + 2 * 2) \
             if any(machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T]) for i in range(RECS)) else 0xFFFF
         check("[TRIG 3] again removes it", v3b == 0xFFFF, f"value {v3b}")
+        if claims0 is not None:
+            led3b = leds()
+            check("v0.45: removed, its LED unlit again", led3b[2:3] == [(1, 1)], f"{led3b[:4]}")
         panel.tap(key(10))                                  # YES
         panel.settle(200_000)
         panel.tap(key(10))                                  # YES again, within 0.4 s: arm
@@ -450,6 +468,12 @@ def main() -> int:
         panel.tap(key(12))                                  # NO: closes
         panel.settle(10_000_000)
         check("NO closes the RECORDER", L("rec_overlay") == 0)
+        if claims0 is not None:
+            c1 = L("bn_led_claims")
+            panel.settle(10_000_000)
+            led_after = leds()
+            check("v0.45: closed, the trig LEDs are stock's again and ours claim nothing",
+                  led_after == led_stock and L("bn_led_claims") == c1, f"{led_after[:4]} vs {led_stock[:4]}")
 
         # ---- v0.44 F1: the plain RECORDER (an ONESHOT track): CHAN as its own L/R icon over
         # SRC (the same place on the BOUNCE panel); knob B turns it L+R -> L -> R

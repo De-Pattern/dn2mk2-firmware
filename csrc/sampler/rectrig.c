@@ -415,6 +415,8 @@ int rt_regions(int dest, u32 s, u32 *next)
  * next place */
 void rt_poll(void)
 {
+    extern void bn_led_poll(void);
+    bn_led_poll();                              /* v0.45: the trig LEDs follow the panel (rec.c) */
     if (smp_blank_req != blank_seen) {          /* another project: every take is gone */
         blank_seen = smp_blank_req;
         for (int i = 0; i < BUF_HALVES; i++)
