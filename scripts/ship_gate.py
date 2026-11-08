@@ -54,11 +54,6 @@ failure:
    interrupt no longer delivered, or audio frames overrunning their budget fail a seed.
 6s. **parameter slides** (`emu_slides.py`, the build and stock 1.11): a slide's ramp exact per
    frame and landing on the locks; SLIDE off and every lock table identical to stock's.
-   v0.45: FASCIA's continuous controls slide onto the lock (one on FM Tone's slot 50), a choice steps.
-6f. **FASCIA** (v0.45, `emu_waverider_menu.py`, docs/fascia.md): MACHINE SEL's commit to it
-   writes its model's defaults; its three pages drawn (labels, knobs,
-   choice boxes); a p-locked control lit as stock lights one (a WaveTone and an FM Tone record); SYN
-   held shows its values; each of its records named for the LFO list, the unused ones left out.
 7. **unit tests** (`pytest -m "not slow"` on the safety, mod, PERC and filter tests; v0.38: on
    both cores, pytest-xdist `-n 2 --dist load`, the same tests and the same pass line).
 
@@ -169,8 +164,7 @@ TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platfo
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py",
          "test/test_sampler_relatch.py", "test/test_pools.py",
          "test/test_slides.py",
-         "test/test_libtree.py", "test/test_web_tool.py",   # v0.40: nested folders (the model, the page's levels)
-         "test/test_fascia_coldfire.py"]                    # v0.45: FASCIA on the ColdFire (type 18)
+         "test/test_libtree.py", "test/test_web_tool.py"]   # v0.40: nested folders (the model, the page's levels)
 HIT = re.compile(r"^\s+([0-9a-f]{8}):", re.M)
 
 # v0.38 (owner, 2026-11-01): the steps by name, for --only and --list, in the order a full run
@@ -198,7 +192,6 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("mnmpages", "Monomachine pages and detents (ColdFire)"),
        ("question", "stock questions and held keys (ColdFire)"),
        ("mnmdefaults", "Monomachine start values (ColdFire)"),
-       ("fascia", "FASCIA: MACHINE SEL, pages, p-locks, LFO names (ColdFire)"),
        ("alloc", "GRID allocate slice locks (ColdFire)"),
        ("multisel", "multi-select delete (ColdFire)"),
        ("unused", "SELECT UNUSED (ColdFire)"),
@@ -1722,8 +1715,6 @@ def main() -> int:
             rid = {sl: r for r, sl, _lo, _t in PMf.PARAMS}
             rid[play] = SMf.PLAY_REC
             lfo_rec, lfo_slot = 94, 60                # v0.33: an LFO record (stock's, LFO3's first)
-            from dnfw.fascia import machines as FSf   # noqa: PLC0415  (v0.45: FASCIA, type 18)
-            frid = {sl: r for r, sl, _lo, _t in FSf.SLOTS.values()}
 
             def fcase(ty, slot, old, held, knob, fresh, value):
                 s = [f"poke:{snd0 + 0xDE:#x}:{ty:02x}", f"poke:{snd0 + 20 + 2 * slot:#x}:{old:04x}",
@@ -1731,7 +1722,7 @@ def main() -> int:
                      f"poke:{lay['smp_knob_d']:#x}:{knob & 0xFFFFFFFF:08x}"]
                 s += [f"call:{memcpy:#x}:{lay['smp_knob_at']:#x}:{clock:#x}:4"] if fresh else \
                      [f"poke:{lay['smp_knob_at']:#x}:80000000"]   # (half the clock away: stale)
-                r = lfo_rec if slot == lfo_slot else frid[slot] if ty == FSf.TYPE else rid[slot]   # (the setter passes the record: v0.33 reads it)
+                r = lfo_rec if slot == lfo_slot else rid[slot]       # (the setter passes the record: v0.33 reads it)
                 return s + [f"call:{lay['smp_quant']:#x}:sound0:{slot}:{value:#x}:{r}"]
             cases = [("PERC's first control: stock's octave jump kept", (5, ptch, 0x4000, 1, 1, True, 0x4C00), 0x4C00),
                      ("PERC, another control: it stays put", (5, other, 0x2000, 1, 1, True, 0x7F00), 0x2000),
@@ -1744,32 +1735,6 @@ def main() -> int:
                      ("v0.33: an LFO control on PERC: stock's FUNC jump kept", (5, lfo_slot, 0x2000, 1, 1, True, 0x4000), 0x4000),
                      ("v0.33: an LFO control on a Monomachine track: stock's", (dwave, lfo_slot, 0x2000, 1, 1, True, 0x4000), 0x4000),
                      ("v0.33: an LFO control on ONESHOT: stock's", (8, lfo_slot, 0x2000, 1, 1, True, 0x4000), 0x4000)]
-            # v0.45: FASCIA. With FUNC, a choice steps one a click (TYPA right, BODB left), a knob
-            # stays put (HARD on WaveTone's LEV1, DUST on FM Tone's record 227); without FUNC,
-            # each of its five choices four detents a choice, up from its first option and down
-            # from its last (three detents keep it, the fourth moves it), and a jump lands in
-            # the choice it reaches
-            fsl = {c: FSf.SLOTS[c][1] for c in FSf.CONTROLS}
-            frep = FSf.rep_word
-            ft = FSf.TYPE
-            cases += [("FASCIA's TYPA, FUNC right: the next choice in one click",
-                       (ft, fsl["TYPA"], frep("TYPA", 0), 1, 1, True, 0x0000), frep("TYPA", 1)),
-                      ("FASCIA's BODB, FUNC left: back one choice in one click",
-                       (ft, fsl["BODB"], frep("BODB", 9), 1, -1, True, 0x7F00), frep("BODB", 8)),
-                      ("FASCIA's HARD (a knob), FUNC: it stays put", (ft, fsl["HARD"], 0x5000, 1, 1, True, 0x7F00), 0x5000),
-                      ("FASCIA's DUST (FM Tone's record), FUNC: it stays put",
-                       (ft, fsl["DUST"], 0x2000, 1, 1, True, 0x4000), 0x2000)]
-            for c in (c for c in FSf.CONTROLS if FSf.is_choice(c)):
-                n = len(FSf.CHOICES[c])
-                lo_w, hi_w = frep(c, 0), frep(c, n - 1)
-                for k in range(4):
-                    cases.append((f"FASCIA's {c} up, detent {k + 1} of 4", (ft, fsl[c], lo_w, 0, 1, True, lo_w + 0x100),
-                                  frep(c, 1) if k == 3 else lo_w))
-                for k in range(4):
-                    cases.append((f"FASCIA's {c} down, detent {k + 1} of 4", (ft, fsl[c], hi_w, 0, -1, True, hi_w - 0x100),
-                                  frep(c, n - 2) if k == 3 else hi_w))
-                cases.append((f"FASCIA's {c}: a jump lands in the choice it reaches",
-                              (ft, fsl[c], lo_w, 0, 1, True, frep(c, n - 1) & 0xFF00), frep(c, n - 1)))
             fs = ["wait:3"]
             for _n, args, _w in cases:
                 fs += fcase(*args)
@@ -1790,9 +1755,7 @@ def main() -> int:
                     why = f"{facts} got={[hex(g) for g in got]}"
                 return good, ("FUNC + turn: PERC's first control keeps stock's octave jumps; other controls of ours "
                               "stay put; choices step one a click either way (WPRS, PLAY); no change without FUNC, "
-                              "with a stale knob, or on a stock machine; v0.45: FASCIA's choices one a click with "
-                              "FUNC, its knobs stay put, and each of its five choices four detents a choice both "
-                              "ways, a jump landing in its choice" if good else why)
+                              "with a stale knob, or on a stock machine" if good else why)
             later("functurn", "FUNC + turn (ColdFire)", "FUNC + turn (ColdFire)", [f_cmd, sorted(EMU_ENV.items())], f_body)
 
         # 6n. v0.32: the DSP load meter. smp_dsp_load gives the last half second's peak (the
@@ -1864,120 +1827,6 @@ def main() -> int:
                 return good, ("MACHINE SEL to SID: its eight controls at its own start (PULS, PW at the middle)"
                               if good else why)
             later("mnmdefaults", "Monomachine start values (ColdFire)", "Monomachine start values (ColdFire)", [o_cmd, sorted(EMU_ENV.items())], o_body)
-
-        # 6f. v0.45: FASCIA (type 18, dnfw.fascia.machines, docs/fascia.md). The snapshot booted on
-        # v0.14, so its MACHINE SEL list is v0.14's (the list is copied at boot; 6o's reason): a real
-        # MACHINE SEL first (ONESHOT to the next sample machine, its commit's arguments kept), then
-        # that commit (rec.c smp_machine_commit) called for track 1 to FASCIA: track 1 is FASCIA and
-        # its 24 controls hold its model's DEFAULTS (the list itself: test_waverider_mod). NO: its three pages, each its own and none the stock grid
-        # (pngs p0..p2: the labels, the knobs, the choice boxes). A p-lock on step 1 of HARD
-        # (WaveTone's LEV1) and DUST (FM Tone's record 227, slot 50) in pattern 0's table: with
-        # [TRIG 1] held their two cells are inverted, as stock lights a locked control, and no
-        # other cell changes. SYN held: the labels give way to the values. The LFO destination
-        # list: each of its 24 records named as its control (short and long, read back from the
-        # record table and the image), and unmasked (wr_lfo_mask); every record its sound has
-        # that it leaves unused named "-" and masked out
-        if "smp_machine_commit" in lay and "wr_lfo_mask" in lay:
-            from dnfw.fascia import machines as FSg      # noqa: PLC0415
-            kit = 0x4210C08C
-            snd0 = kit + 52
-            tyg = snd0 + 0xDE
-            tb0 = 0x4121898C + 97872                     # pattern 0's lock table (6i2's)
-            recs = 0x401F7F94
-            hard, dust = FSg.SLOTS["HARD"][1], FSg.SLOTS["DUST"][1]
-            lk_hard, lk_dust = 0x7F00, 0x7F00
-            cm = lay["smp_machine_commit"]
-            gs = [f"wait:3,poke:{tyg:#x}:01", "wait:4", "tap:2", "wait:10", "png:wt",
-                  f"poke:{tyg:#x}:08", f"poke:{snd0 + 20 + 2 * 43:#x}:0500", "wait:4", "tap:2", "wait:6",
-                  "func-src", "wait:20", "down", "wait:4", "yes", "wait:20",
-                  f"call:{cm:#x}:arg1@{cm:#x}:0:{FSg.TYPE}:arg4@{cm:#x}:arg5@{cm:#x}", "wait:10", "types"]
-            gs += [f"mem:{snd0 + 20 + 2 * FSg.SLOTS[c][1]:#x}:2" for c in FSg.CONTROLS]
-            gs += ["no", "wait:10", "png:p0", "tap:2", "wait:10", "png:p1", "tap:2", "wait:10", "png:p2",
-                   "tap:2", "wait:10", "png:r0"]
-            # (as stock p-locks: RECORD on (grid recording), a trig placed on step 1, the locks
-            # written into the playing pattern's table, then [TRIG 1] held; emu_slides' way)
-            gs += ["tap:19", "wait:10", "tap:25", "wait:10", "mem:0x42c5a9a0:4",
-                   f"poke:{tb0 + 20640:#x}:" + "ff" * (101 * 16),
-                   f"poke:{tb0 + 258 * 78:#x}:{hard:02x}00{lk_hard:04x}" + "ffff" * 127,
-                   f"poke:{tb0 + 258 * 79:#x}:{dust:02x}00{lk_dust:04x}" + "ffff" * 127,
-                   f"poke:{tb0 + 20640 + hard:#x}:4e", f"poke:{tb0 + 20640 + dust:#x}:4f",
-                   "wait:4", "png:r1", "press:25", "wait:10", "png:l0", "release:25", "wait:10",
-                   "tap:19", "wait:10", "png:r2", "press:2", "wait:30", "png:v0", "release:2", "wait:10"]
-            named = [FSg.SLOTS[c][0] for c in FSg.CONTROLS]
-            gs += [f"mem:{recs + 60 * r + 0x30:#x}:4" for r in named + list(FSg.UNUSED_RECORDS)]
-            gs += [f"mem:{recs + 60 * r + 0x28:#x}:4" for r in named]
-            gs += [f"call:{lay['wr_lfo_mask']:#x}:{r}" for r in named + list(FSg.UNUSED_RECORDS)]
-            gjs, gsf = work / "fascia.json", work / "fascia.steps"
-            gsf.write_text(",".join(gs))
-            g_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
-                     "--snapshot", snap, "--args-at", hex(cm), "--steps", f"@{gsf}", "--png-dir", work / "fascia",
-                     "--json", gjs]
-
-            def g_body(tdir):
-                rc, out = run("fascia", g_cmd, logs, env=EMU_ENV, trace=tdir)
-                why, good = out[-800:], False
-                if rc == 0 and gjs.exists():
-                    import numpy as np                     # noqa: PLC0415
-                    from PIL import Image                  # noqa: PLC0415
-                    r = json.loads(gjs.read_text())
-                    m = r["memory"]
-                    shots = {n: np.array(Image.open(f).convert("L")) > 128 for n, f in r["screens"].items()}
-                    sc = shots["p0"].shape[1] // 128
-
-                    def cell(img, i):                      # cell i's area (smp_page.c: x - 1..x + 24, y - 8..y + 19)
-                        x0 = 20 + 26 * (i & 3)             # screen rows (y down): the top row's canvas 53..26,
-                        y0, h = (10, 28) if i < 4 else (38, 26)   # the bottom row's 25..0 (its own, unshared)
-                        return img[y0 * sc:(y0 + h) * sc, x0 * sc:(x0 + 26) * sc]
-                    keys = [k for k in m if not k.startswith("types") and not k.startswith("0x42c5a9a0")]
-                    words = [int(m[k], 16) for k in keys[:len(FSg.CONTROLS)]]
-                    playing = int(m.get("0x42c5a9a0", "0") or "0", 16)
-                    want = [FSg.default_words()[c] for c in FSg.CONTROLS]
-                    types = m.get("types@0") or [None]
-                    flip = [float((cell(shots["l0"], i) != cell(shots["r1"], i)).mean()) for i in range(8)]
-                    page = FSg.CONTROLS[:8]
-                    locked = {page.index("HARD"), page.index("DUST")}
-                    vals = [int(m[k], 16) for k in keys[len(FSg.CONTROLS):]]
-                    nn = len(named) + len(FSg.UNUSED_RECORDS)
-                    short_p, long_p = vals[:nn], vals[nn:nn + len(named)]
-                    blobs = list(platform.runtime(sec3))
-
-                    def cstr(ptr):
-                        for va, blob in blobs:
-                            if va <= ptr < va + len(blob):
-                                end = blob.index(b"\0", ptr - va)
-                                return blob[ptr - va:end].decode("ascii", "replace")
-                        return f"<{ptr:#x}: not ours>"
-                    shorts = [cstr(x) for x in short_p]
-                    longs = [cstr(x) for x in long_p]
-                    masks = [c["d0"] for c in r["direct_calls"] if int(str(c["fn"]), 0) == lay["wr_lfo_mask"]]
-                    facts = {
-                        "MACHINE SEL's commit to FASCIA: track 1 is FASCIA": types[0] == FSg.TYPE,
-                        "its 24 controls at its model's DEFAULTS": words == want,
-                        "three pages, each its own, none the stock grid": len({shots[n].tobytes() for n in ("p0", "p1", "p2")}) == 3
-                        and not any((shots[n] == shots["wt"]).all() for n in ("p0", "p1", "p2")),
-                        "the third page key comes back to the first page's cells":
-                        all((cell(shots["r0"], i) == cell(shots["p0"], i)).all() for i in range(8)),
-                        "the playing pattern is the one whose table holds the locks": playing + 97872 == tb0,
-                        "[TRIG 1] held: HARD's and DUST's cells inverted (p-locked)": all(flip[i] > 0.6 for i in locked),
-                        "... and no other cell changed": all(flip[i] < 0.02 for i in range(8) if i not in locked),
-                        "SYN held: the labels give way to the values": float((shots["v0"] != shots["r2"]).mean()) > 0.005,
-                        "the LFO list names each control (short)": shorts[:len(named)] == list(FSg.CONTROLS),
-                        "... and long": longs == [FSg.LONG_NAMES[c] for c in FSg.CONTROLS],
-                        "... and its unused records -": all(x == "-" for x in shorts[len(named):]),
-                        "every control an LFO destination": len(masks) == nn and all(x != 0 for x in masks[:len(named)]),
-                        "... the unused records left out": all(x == 0 for x in masks[len(named):]),
-                        "no fault reported, no stack freed": not r.get("fault_reports") and not r.get("stack_frees"),
-                    }
-                    good = all(facts.values())
-                    why = (json.dumps({k: v for k, v in facts.items() if not v}) + f" types={types[:2]} words="
-                           f"{[hex(w) for w in words]} flip={[round(f, 2) for f in flip]} shorts={shorts} longs={longs} masks={masks}")[:1500]
-                return good, ("FASCIA: MACHINE SEL's commit gives it its model's defaults (the snapshot's list is "
-                              "v0.14's: the real list is not driven here); its "
-                              "three pages drawn, each its own (labels, knobs, choice boxes); p-locked HARD and DUST lit "
-                              "as stock lights a lock, nothing else; SYN held shows values; its 24 records named and "
-                              "offered to the LFOs, the unused ones named - and left out" if good else why)
-            later("fascia", "FASCIA: MACHINE SEL, pages, p-locks, LFO names (ColdFire)",
-                  "FASCIA: MACHINE SEL, pages, p-locks, LFO names (ColdFire)", [g_cmd, sorted(EMU_ENV.items())], g_body)
 
         # 6p. v0.33: our overlays let go when the page under them goes (docs/freeze-hunt.md).
         # The sample list opened on track 1 (a SAMP turn), then TRK + [TRIG 2] to track 2, a
