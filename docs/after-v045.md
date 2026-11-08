@@ -20,6 +20,22 @@ mind for after so we remember to cover them once finished with this". Order: BOU
    - how it fits the take to its steps at the tempo (BOUNCE's rule);
    - what heavylight's licence allows us to ship.
 
+## v0.46 plan (owner, 2026-11-08 12:54)
+1. **Finish FASCIA's lightening and speed-up first** (branch `fascia-opt-wip`; the agent's next
+   step was to re-apply only the exact cuts).
+2. **Then measure what the rest needs:** Capicola in BOUNCE only (not every DT2 machine yet: less
+   room, less risk), the FILE NAME screen, and recordings to the +Drive. Implement what fits. If
+   room still runs short, the owner decides FASCIA against Capicola.
+3. **Recordings to the +Drive must happen, but safely:** no restructuring that can leave things
+   broken. Before any code:
+   - a written design;
+   - every power-cut point;
+   - how old projects keep working;
+   - what can go wrong;
+   - its gate steps.
+
+   The owner reviews it first.
+
 ## 1. Recordings into the +Drive library's RECORDED folder, automatically
 - **Today:** a recording (manual RECORD NOW, or a BOUNCE take saved with FUNC + YES) is saved
   into the project's pool, named RECnnn. The pool is saved on the +Drive with the project, and
