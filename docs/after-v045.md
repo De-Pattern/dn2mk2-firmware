@@ -101,3 +101,21 @@ mind for after so we remember to cover them once finished with this". Order: BOU
   - the copy/paste of locks leaving the overlay's "seen" state stale.
 - **Next:** reproduce in the emulator with locks pasted on 16 steps and D turned per step, with
   and without a pool save running (the directory's dir_due save after edits).
+
+## 4. The gate's blind spots that v0.44's freeze showed (found 2026-11-08)
+The freeze was `wr_label` reading from address 0xEE. That is fixed in v0.45, and the gate step
+`machines` catches it on v0.44. What let it through:
+- **The emulator maps low memory as zeros**, so a wild read below 0x40000000 reads 0 and
+  passes. Make the `machines` step's read trap shared code (`emulib`) and turn it on in every
+  emulator step.
+- **The steps on `ui800M-v014` drive v0.14's MACHINE SEL list**, which is built at boot:
+  - `colsw` ("nine DOWNs to GRID") and `keepsamp` ("DOWN, YES") move through stale rows;
+  - `fascia` and `mnmdefaults` call the commit directly.
+
+  Move them onto a boot-built snapshot of the build under test, as `machines` does.
+- **The UI fuzz only puts the six DT2 sample types under its pages:** add BOUNCE, FASCIA and the
+  Monomachine machines.
+- **Snapshots don't keep our code chunks' RAM pages** (every harness re-copies them), so any
+  boot-time state in the chunks is reset.
+- **`emu_boot_check` from reset never draws a page**, so it can't catch boot-draw bugs.
+- **Minor:** `wr_count` gives BOUNCE 1 SYN page where the other sample machines have 2.
