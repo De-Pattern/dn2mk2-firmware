@@ -182,3 +182,15 @@ The freeze was `wr_label` reading from address 0xEE. That is fixed in v0.45, and
 - **Naming:** the DT2's length and REC0000 are preferences, not requirements. If they don't work
   out, or 16 characters with our current naming is easier, fall back to that. Aim for: as smooth
   and stable as possible, intuitive, close to the original.
+- **FASCIA's bar (owner, 2026-11-08 14:08):** if it still causes serious issues, or even hints at a
+  crash at 1 voice, it waits until after v0.46. Keep working on making it stable.
+- **No crash may ship.** None of our changes may be able to freeze or crash the unit the way v0.44
+  did. For v0.46 that means:
+  - the `machines` step;
+  - wild-read trapping in every emulator step that draws pages: the shared read trap (blind
+    spot 4);
+  - boot-built snapshots for anything that drives MACHINE SEL or the new screens;
+  - power-cut and full-+Drive tests for the recordings path;
+  - a guard-respecting stress test for Capicola's and FASCIA's DSP code.
+
+  A feature without these checks doesn't ship.
