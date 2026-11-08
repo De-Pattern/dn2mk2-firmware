@@ -175,3 +175,10 @@ The freeze was `wr_label` reading from address 0xEE. That is fixed in v0.45, and
   boot-time state in the chunks is reset.
 - **`emu_boot_check` from reset never draws a page**, so it can't catch boot-draw bugs.
 - **Minor:** `wr_count` gives BOUNCE 1 SYN page where the other sample machines have 2.
+
+### Priority and fallbacks (owner, 2026-11-08 14:06)
+- **Order:** +Drive recordings first, then Capicola, then FASCIA. Try to get all three in. FASCIA may
+  drop to 1 voice for now.
+- **Naming:** the DT2's length and REC0000 are preferences, not requirements. If they don't work
+  out, or 16 characters with our current naming is easier, fall back to that. Aim for: as smooth
+  and stable as possible, intuitive, close to the original.
