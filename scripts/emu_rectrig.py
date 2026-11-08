@@ -374,6 +374,41 @@ def main() -> int:
     call(lay["sl_lock_set"], table, T, 8, 2, 0xFFFF)
     heads = [machine.read(table + REC * i, 2) for i in range(RECS)]
     check("clearing both recorder trigs frees our record", heads.count(bytes([RAM_REC, TAG | T])) == 0)
+    # ---- v0.45: SAMP never glides (the owner, v0.44: scrolling SAMP past the loaded samples,
+    # trigs played the last loaded one). Track 1 ONESHOT, slots 0..2 loaded; SAMP moves from 2 to
+    # 10 (past them) with the smoother still at 2: what the voice hears is 10 at once, not the
+    # smoother's glide mapped onto the loaded slots (slot 2, SAMP 3, before the fix)
+    T1, ONESHOT_TY, SAMP_SLOT, VOICE_SOUND = 1, 8, 43, 0x800052A8
+    MIRROR = 0x800068E4
+    import dnfw.waverider.dsp as DSPL
+    for k in range(3):
+        machine.write(DIR + 8 + 16 * k, struct.pack("<IIfI", DSPL.SMP_POOL_DDR + SM.DATA_OFFSET + 0x10000 * k,
+                                                    4800, 1.0, 1))
+    type_put(T1, ONESHOT_TY)
+    snd1 = kit + 52 + SOUND_STRIDE * T1
+    put32(VOICE_SOUND + 4 * T1, snd1)
+    tgt = SRC + 34 + 202 * T1 + 2 * SAMP_SLOT
+    mir = MIRROR + 34 + 202 * T1 + 2 * SAMP_SLOT
+    st = STATE + 4 * (101 * T1 + 17 + SAMP_SLOT)
+    ctl_put(T1, SAMP_SLOT, 2)
+    put16(tgt, 2 << 8)
+    put16(mir, 2 << 8)
+    put32(st, (2 << 8) << 16)
+    frame()
+    heard0 = struct.unpack(">H", machine.read(mir, 2))[0] >> 8
+    ctl_put(T1, SAMP_SLOT, 10)
+    put16(tgt, 10 << 8)                                # the sound's SAMP; the smoother's state still at 2
+    seen = []
+    for _ in range(6):
+        frame()
+        seen.append(struct.unpack(">H", machine.read(mir, 2))[0] >> 8)
+    check("SAMP past the loaded slots is heard at once, never a loaded one in its place "
+          "(v0.45: the smoother's glide was taken for modulation)",
+          heard0 == 2 and all(s == 10 for s in seen), f"before {heard0}, after {seen}")
+    put32(VOICE_SOUND + 4 * T1, 0)
+    type_put(T1, 0)
+    machine.write(DIR + 8, b"\x00" * 16 * 3)
+
     faults = getattr(machine.m, "faults", [])[faults0:]
     check("no memory faults", not faults, faults[:3])
 
