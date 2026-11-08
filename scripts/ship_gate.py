@@ -666,10 +666,10 @@ def main() -> int:
                 scen += ("live",)               # v0.38: 22 live adds and 3 recordings, each must play
             if "smp_lib_fpar" in lay:
                 scen += ("nest",)               # v0.40: folders inside folders over the link, power cuts
-            if "smp_saved" in lay:
             if "smp_rs_done" in lay:
                 scen += ("recstore",)           # v0.46: a recording into +DRIVE > RECORDED: exact, power cuts, no room
-                scen += ("norm",)               # v0.41: takes normalised to full scale (last: it leaves takes in the pool)
+            if "smp_saved" in lay:
+                scen += ("norm",)              # v0.41: takes normalised to full scale (last: it leaves takes in the pool)
             # v0.31: "dead" (every packet lost: the RAM check's four seconds, then seven tries
             # three seconds apart before the loader stops) takes about an hour in the emulator
             # on its own, so it is a step of its own, cached on its own: the gate's run fits
