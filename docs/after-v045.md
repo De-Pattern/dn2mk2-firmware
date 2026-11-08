@@ -41,6 +41,31 @@ mind for after so we remember to cover them once finished with this". Order: BOU
   6. **Still to check against the DT2's manual or a unit:** the default name the save screen
      offers.
 
+## 1b. The FILE NAME screen: the DT2's length and behaviour (owner, 2026-11-08 04:00)
+- **The DT2's screen (owner's photo):** FILE NAME, the name REC0000 (a 4-digit counter), a long
+  field that scrolls (`>>`), and the help:
+  - FUNC+ARROW: EDIT
+  - FUNC+NO: DELETE
+  - FUNC+YES: INSERT
+  - SETTINGS: RANDOM
+  - U/D: CHAR +/-
+  - L/R: MOVE CURSOR
+  - YES: SAVE
+  - NO: ABORT
+- **Ours (v0.44, on the unit):**
+  - the name is REC049 (3 digits), 7 characters at most;
+  - U/D CHAR, L/R MOVE, FUNC+NO DELETE, FUNC+YES INSERT, YES SAVE, NO ABORT;
+  - no FUNC+ARROW EDIT, no SETTINGS: RANDOM.
+- **Wanted:**
+  - the DT2's character limit (the library's names hold 35, `lib.c`);
+  - REC0000's 4 digits;
+  - the field scrolling as the DT2's does;
+  - FUNC+ARROW EDIT and SETTINGS RANDOM;
+  - the feel of the stock keys.
+- **Start from the Digitone II's own naming code** (its project and preset NAME screen, in the
+  MAIN OS): reuse it if it can be called with our buffer, or copy its behaviour exactly.
+  Find its entry, its buffer length and its key handling in the disassembly first.
+
 ## 2. A sample-lock trig mode for the DT2 machines (feasibility first; only if it can't hurt stability)
 - **The idea:** FUNC + UP/DOWN opens TRIG MODE. A new mode (or the stock menu's SLICES entry)
   on a sample-machine track makes each chromatic trig key play the next loaded sample of the
