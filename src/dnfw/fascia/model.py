@@ -35,22 +35,77 @@ CLICKS = ("SNAP", "TICK", "NOISE", "THUMP")
 XMODS = ("EXCITE", "BEND", "CHOKE", "TRADE")
 BODIES = ("MEMB", "PLATE", "BAR", "VIBE", "CHIME", "BELL", "GLASS", "TUBE", "STRING", "OFF")  # OFF: B only
 
+# v2 (owner, 2026-11-08: "fold in the 4 pages to 3"): 24 controls, the rest folded into them
+# as macros (expand()). The engine below still runs on the 32 internal controls (INTERNAL).
+XMODS_PANEL = XMODS + ("RING",)
 PAGES = {
-    "SYN1 EXCITERS": ("TYPA", "TYPB", "HARD", "DUST", "TZFM", "BEND", "MIX", "DEC"),
-    "SYN2 RESONATORS": ("BODA", "BODB", "TUNE", "GEOM", "MATL", "POS", "COUP", "DAMP"),
-    "SYN3 SPECTRAL": ("MORPH", "FORM", "SHIFT", "RING", "SIDE", "FOLD", "LPG", "CHAR"),
-    "SYN4 ONSET/INTERACT": ("ATK", "CLIK", "CTYP", "XMOD", "FDBK", "BUZZ", "WATR", "VARY"),
+    "SYN1 EXCITE": ("TYPA", "TYPB", "HARD", "DUST", "TZFM", "BEND", "MIX", "DEC"),
+    "SYN2 BODY": ("BODA", "BODB", "TUNE", "GEOM", "MATL", "POS", "COUP", "DAMP"),
+    "SYN3 SPECTRAL": ("MORPH", "SKIN", "SHIFT", "CLIK", "XMOD", "BUZZ", "LPG", "DRIVE"),
 }
-CHOICES = {"TYPA": TYPES, "TYPB": TYPES, "BODA": BODIES[:-1], "BODB": BODIES,
-           "CTYP": CLICKS, "XMOD": XMODS}
+CHOICES = {"TYPA": TYPES, "TYPB": TYPES, "BODA": BODIES[:-1], "BODB": BODIES, "XMOD": XMODS_PANEL}
 
 DEFAULTS = {
+    "TYPA": 0, "TYPB": 1, "HARD": 90, "DUST": 20, "TZFM": 0, "BEND": 10, "MIX": 30, "DEC": 20,
+    "BODA": 0, "BODB": 121, "TUNE": 64, "GEOM": 64, "MATL": 50, "POS": 40, "COUP": 0, "DAMP": 60,
+    "MORPH": 0, "SKIN": 64, "SHIFT": 64, "CLIK": 0, "XMOD": 0, "BUZZ": 0, "LPG": 40, "DRIVE": 0,
+}
+EXTRA = ()                       # controls not on a page (none)
+
+# the engine's own controls (the approved v1 set), and how the panel's 24 make them
+INTERNAL = {
     "TYPA": 0, "TYPB": 1, "HARD": 90, "DUST": 20, "TZFM": 0, "BEND": 10, "MIX": 30, "DEC": 20,
     "BODA": 0, "BODB": 121, "TUNE": 64, "GEOM": 64, "MATL": 50, "POS": 40, "COUP": 0, "DAMP": 60,
     "MORPH": 0, "FORM": 0, "SHIFT": 64, "RING": 0, "SIDE": 40, "FOLD": 0, "LPG": 40, "CHAR": 0,
     "ATK": 0, "CLIK": 0, "CTYP": 0, "XMOD": 0, "FDBK": 0, "BUZZ": 0, "WATR": 0, "VARY": 40,
 }
-EXTRA = ()                       # controls not on a page (none)
+ICHOICES = {"TYPA": TYPES, "TYPB": TYPES, "BODA": BODIES[:-1], "BODB": BODIES, "CTYP": CLICKS, "XMOD": XMODS}
+
+
+def _span(names, k: int) -> int:
+    """the middle of option k's span of 0..127 (as choice() reads it)"""
+    return int((k + 0.5) * 128 / len(names))
+
+
+def expand(panel: dict) -> dict:
+    """the panel's 24 controls -> the engine's 32:
+    HARD   its soft end (under 32) also slows the onset: swell, soft mallet, hard strike (ATK)
+    TZFM   the sideband ratio climbs with the depth (SIDE)
+    CLIK   four zones, SNAP / TICK / NOISE / THUMP, each louder across its span (CTYP, level)
+    XMOD   + RING: A x B (or a sine when B is off), COUP its depth; TRADE also feeds B back
+           into A by COUP (FDBK); EXCITE, BEND, CHOKE as before
+    SKIN   bipolar: under 64 the vowel formants (FORM), over 64 the water (WATR)
+    DRIVE  saturation (CHAR) to the middle, then folding on top (FOLD)
+    VARY   fixed at its default (40): every hit still a little different"""
+    p = {**DEFAULTS, **panel}
+    q = {k: p[k] for k in ("TYPA", "TYPB", "DUST", "BEND", "MIX", "DEC", "BODA", "BODB", "TUNE",
+                           "GEOM", "MATL", "POS", "DAMP", "MORPH", "SHIFT", "BUZZ", "LPG")}
+    q = {**INTERNAL, **q}
+    h = p["HARD"]
+    q["HARD"] = h
+    q["ATK"] = (32 - h) * 4 if h < 32 else 0
+    q["TZFM"] = p["TZFM"]
+    q["SIDE"] = int(16 + 0.75 * p["TZFM"])
+    c = p["CLIK"]
+    if c > 0:
+        z = min((c - 1) * 4 // 127, 3)
+        within = (c - 1) - z * 127 / 4
+        q["CTYP"] = _span(CLICKS, z)
+        q["CLIK"] = int(32 + 95 * min(max(within / (127 / 4), 0.0), 1.0))
+    x = XMODS_PANEL[choice("XMOD", p["XMOD"])]
+    if x == "RING":
+        q["XMOD"], q["COUP"], q["RING"] = _span(XMODS, 0), 0, p["COUP"]
+    else:
+        q["XMOD"], q["COUP"] = _span(XMODS, XMODS.index(x)), p["COUP"]
+    sk = p["SKIN"]
+    q["FORM"] = (64 - sk) * 2 if sk < 64 else 0
+    q["WATR"] = min((sk - 64) * 2, 127) if sk > 64 else 0
+    d = p["DRIVE"]
+    q["CHAR"] = min(d * 2, 127)
+    q["FOLD"] = (d - 64) * 2 if d > 64 else 0
+    return q
+
+
 
 def _plate(aspect: float = 1.31, n: int = 16):
     fs = sorted((m / 1.0) ** 2 + (k / aspect) ** 2 for m in range(1, 8) for k in range(1, 8))
@@ -143,6 +198,12 @@ def choice(name: str, v: int) -> int:
     """The option a 0..127 value picks: equal spans (the panel's 4-detent stepping maps
     each option to its own span, docs/fascia.md)."""
     n = len(CHOICES[name])
+    return min(int(min(max(v, 0), 127) * n / 128), n - 1)
+
+
+def ichoice(name: str, v: int) -> int:
+    """the engine's own choice spans (ICHOICES: XMOD's four, CTYP's four)"""
+    n = len(ICHOICES[name])
     return min(int(min(max(v, 0), 127) * n / 128), n - 1)
 
 
@@ -388,7 +449,7 @@ def click(kind: str, hard: float, rng) -> np.ndarray:
 
 class Voice:
     def __init__(self, p: dict, note: float, vel: float = 1.0, seed: int = 1, modes: int = MODES):
-        self.p = {**DEFAULTS, **p}
+        self.p = expand(p) if not p.get("_internal") else {**INTERNAL, **p}
         p = self.p
         self.f0 = mtof(note + (p["TUNE"] - 64) * 24 / 64)
         self.vel = vel
@@ -420,13 +481,13 @@ class Voice:
         self.chirp = u(p["HARD"]) * vel * 0.6                          # semitones, 4 ms
         self.lpg = u(p["LPG"]) * 6.0
         self.coup = u(p["COUP"])
-        self.xmod = XMODS[choice("XMOD", p["XMOD"])]
+        self.xmod = XMODS[ichoice("XMOD", p["XMOD"])]
         self.fdbk = u(p["FDBK"])
         self.buzz = u(p["BUZZ"])
         self.rng = np.random.default_rng(seed * 977 + 11)
         self.clk = None
         if p["CLIK"] > 0:
-            ck = CLICKS[choice("CTYP", p["CTYP"])]
+            ck = CLICKS[ichoice("CTYP", p["CTYP"])]
             self.clk = click(ck, self.hard, self.rng) * u(p["CLIK"]) * vel * 0.5
         self.end = None                                                 # s, when it went idle
 

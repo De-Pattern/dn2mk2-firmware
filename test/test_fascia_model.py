@@ -21,8 +21,32 @@ def render(p, note=48, vel=1.0, secs=0.3, seed=1):
 
 def test_pages_are_three_by_eight_and_defaults_cover_them():
     names = [n for page in R.PAGES.values() for n in page]
-    assert [len(p) for p in R.PAGES.values()] == [8, 8, 8, 8]
-    assert len(set(names)) == 32 and set(names) | set(R.EXTRA) == set(R.DEFAULTS)
+    assert [len(p) for p in R.PAGES.values()] == [8, 8, 8]          # v2: three pages (owner, 2026-11-08)
+    assert len(set(names)) == 24 and set(names) | set(R.EXTRA) == set(R.DEFAULTS)
+
+
+def test_expand_makes_every_engine_control():
+    """the panel's 24 make all 32 of the engine's, inside 0..127, for any panel"""
+    import random
+    rnd = random.Random(3)
+    for _ in range(200):
+        q = R.expand({k: rnd.randint(0, 127) for k in R.DEFAULTS})
+        assert set(q) == set(R.INTERNAL) and all(0 <= v <= 127 for v in q.values()), q
+
+
+def test_macros():
+    e = R.expand
+    assert e({"HARD": 0})["ATK"] > 0 and e({"HARD": 40})["ATK"] == 0          # HARD's soft end swells
+    assert e({"SKIN": 0})["FORM"] > 0 and e({"SKIN": 0})["WATR"] == 0         # SKIN: vowels left
+    assert e({"SKIN": 127})["WATR"] > 0 and e({"SKIN": 127})["FORM"] == 0     # water right
+    assert e({"SKIN": 64})["FORM"] == e({"SKIN": 64})["WATR"] == 0
+    assert e({"DRIVE": 60})["FOLD"] == 0 and e({"DRIVE": 120})["FOLD"] > 0    # DRIVE folds past the middle
+    ring = e({"XMOD": 127, "COUP": 90})
+    assert ring["RING"] == 90 and ring["COUP"] == 0                            # XMOD RING: COUP its depth
+    for z, kind in enumerate(R.CLICKS):                                        # CLIK's four zones
+        v = int(1 + z * 127 / 4 + 5)
+        assert R.ICHOICES["CTYP"][R.ichoice("CTYP", e({"CLIK": v})["CTYP"])] == kind
+    assert e({"CLIK": 0})["CLIK"] == 0
 
 
 @pytest.mark.parametrize("name", list(R.CHOICES))
