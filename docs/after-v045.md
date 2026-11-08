@@ -36,6 +36,30 @@ mind for after so we remember to cover them once finished with this". Order: BOU
 
    The owner reviews it first.
 
+## v0.46: the owner's decisions for working unattended (2026-11-08 14:01)
+1. **Publish:** once v0.46's full gate prints CLEARED TO FLASH, publish it unattended with the
+   usual five steps (FIRMWARE.md, the builds branch, the patcher with its deploy confirmed,
+   releases/v0.46.md).
+2. **Recordings to the +Drive:** build them without waiting for a design review, keeping the old
+   path as the fallback:
+   - the save writes into +DRIVE > RECORDED, with the entry written last;
+   - the slot links to that file;
+   - +Drive full or missing: it saves the old way (the pool's recordings area);
+   - old RECnnn recordings are untouched;
+   - power-cut points tested in the gate.
+3. **FASCIA:** 1 to 4 voices is fine ("1 voice is fine since it's a percussive voice"). Its size
+   must come down whatever happens, so there is room for Capicola and the +Drive work. Lighten
+   and speed it up, then include it only if it fits after those.
+4. **Space:** if FASCIA and Capicola don't both fit, Capicola goes in and FASCIA waits.
+5. **Capicola:** already cleared by heavylight for the mod's firmware. It goes in BOUNCE only. His
+   source never goes in a public repo.
+6. **FILE NAME:**
+   - names as long as the DT2's (read the stock naming code for its limit; the library stores
+     up to 35);
+   - the counter REC0000 (4 digits).
+7. **Cut rule:** a feature that can't be made safe, or doesn't fit, is dropped from v0.46 and kept on
+   a branch. The rest ships. The release note and FIRMWARE.md say what was dropped and why.
+
 ## 1. Recordings into the +Drive library's RECORDED folder, automatically
 - **Today:** a recording (manual RECORD NOW, or a BOUNCE take saved with FUNC + YES) is saved
   into the project's pool, named RECnnn. The pool is saved on the +Drive with the project, and
