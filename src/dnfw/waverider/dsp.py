@@ -199,21 +199,6 @@ MNM_TYPES = _mnm_types.TYPES                 # v0.26: the Monomachine machines (
 # (dnfw.sampler.program FASCIA_MUTE). Before this its lookup word was the span's zero padding:
 # FM Tone's engine, on FASCIA's records
 FASCIA_TYPES = (_fsc_types.TYPE,)
-# v0.45: FASCIA's own program (dnfw.fascia.program, fascia.asm): smp.asm's tail jumps to it, and it
-# jumps on to the shared tail at PING_SW. Its code and its 16 voices' state (STRIDE 3,968 bytes each)
-# in L2, in the room _check_l2 allows (64 KB clear of the stock image and of the non-cacheable
-# window at 0x200fa000, so 0x2009823c..0x200ea000, less what is ours): voices 0..7 below the
-# Machinedrum's state (0x20098400..0x200a0000, exactly 8 strides), voices 8..15 after the main mix's
-# tap, then the code to PERC's (0x200c0000). Its block's scratch in L1 after the Monomachine's
-# render scratch (to REGION's end, zeros as ping.asm's padding); its tables in DDR.
-FSC_STATE_L2 = 0x20098400                    # voices 0..7
-FSC_STATE2_L2 = 0x200A9400                   # voices 8..15
-FSC_STATE_SPAN = 8 * 0xF80                   # dnfw.fascia.program.STRIDE
-FSC_L2_LOAD = FSC_STATE2_L2 + FSC_STATE_SPAN  # 0x200b1000
-FSC_L2_SPAN = PERC_L2_LOAD - FSC_L2_LOAD       # to 0x200c0000: 60 KB
-FSC_SW = 0xB80000 + (FSC_L2_LOAD - 0x20000000) // 2
-FSC_SCRATCH_DM = MNM_RENDER_DM + MNM_RENDER_BYTES          # 0x2e6400 .. REGION's end 0x2e7000
-FSC_TABLES_DDR = 0x81220000
 
 IDLE_SITE_SW = 0xB88ABB                      # prvIdleTask's back edge: jump (pc,-0x10)
 IDLE_SITE_STOCK = bytes.fromhex("3e07ff00f0ff")
@@ -271,7 +256,7 @@ def objects() -> dict[str, bytes]:
     return {name: sharc_object.load_bytes(bytes.fromhex(spec[name]["object_parcels_be"]))
             for name in ("perc", "smp", "entry_jump", "idle_load", "idle_jump", "block_count",
                          "entry_mark", "emark_jump", "lookup_ptr", "ping",
-                         "pvmix", "pvmix_jump", "fascia")}
+                         "pvmix", "pvmix_jump")}
 
 
 def pvmix_object() -> bytes:
@@ -355,7 +340,6 @@ def ddr_spans() -> list[tuple[str, int, bytes]]:
         ("PERC tables", PERC_TABLES_DDR, _perc_tables()),
         ("the DT2 sample reader's coefficients (from the owner's DT2 image; v0.18)", SMP_TABLES_DDR,
          _smp_tables()),
-        ("FASCIA's tables (dnfw.fascia.program.tables_bytes; v0.45)", FSC_TABLES_DDR, _fsc_tables()),
         ("Machinedrum sine and tables (zeros: the DSP decodes them; v0.24)", MD_TABLES_DDR,
          bytes(_md_core().TABLE_LAYOUT[_md_core().SHIPPED][0])),
         # v0.26: what ships (the host's pitch table and zpack) comes over the fast link from
@@ -372,11 +356,6 @@ def _perc_sine() -> bytes:
     from ..shft import live as SL
     data, at = SL.tables_bytes()
     return data[at["sin"]:at["pow2"]]
-
-
-def _fsc_tables() -> bytes:
-    from ..fascia import program as fsc_program
-    return fsc_program.tables_bytes()
 
 
 def _smp_tables() -> bytes:
@@ -420,13 +399,6 @@ def l2_spans() -> list[tuple[str, int, bytes]]:
                 bytes(MNM_DT_BYTES)))
     out.append(("the main mix's tap for the recorder's MAIN, in L2 (zeros; v0.37)", MAIN_TAP_L2,
                 bytes(MAIN_TAP_BYTES)))
-    # v0.45: FASCIA: its voices' state (zeros: every voice off) and its code
-    out.append(("FASCIA voices 0..7, in L2 (zeros; v0.45)", FSC_STATE_L2, bytes(FSC_STATE_SPAN)))
-    out.append(("FASCIA voices 8..15, in L2 (zeros; v0.45)", FSC_STATE2_L2, bytes(FSC_STATE_SPAN)))
-    code = obj["fascia"]
-    if FSC_L2_SPAN - len(code) < 64:
-        raise DspError(f"fascia.asm ({len(code)} bytes) leaves fewer than 64 bytes of its L2 span")
-    out.append(("fascia.asm (wr_fsc), in L2 (v0.45)", FSC_L2_LOAD, code + bytes(FSC_L2_SPAN - len(code))))
     return out
 
 

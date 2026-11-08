@@ -138,17 +138,9 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
         for typ, k in MNM_TYPES.items():
             p.iconst(12, typ)
             p.if_(2, "EQ", 12, lambda c=MNM_COST[MNM.NAMES[k]]: (p.iconst(4, c), p.iconst(14, 1)), kind="i")
-        from ..fascia import machines as FSx
-        # PERC, the sample machines (v0.44: 8..13 and BOUNCE's 17), v0.45 FASCIA's 18: tested as
-        # runs of consecutive types (5; 8..13; 17..18), a compare or two each, not one a type
-        # (the loop is unrolled 16 times: the DSP's 1 MiB upload buffer)
-        for lo, hi in _runs((MACHINE_TYPE, *SMx.TYPES, FSx.TYPE)):
-            p.iconst(12, lo)
-            if lo == hi:
-                p.if_(2, "EQ", 12, lambda: p.iconst(14, 1), kind="i")
-            else:
-                p.if_(2, "GE", 12, lambda hi=hi: (p.iconst(12, hi),
-                                                  p.if_(2, "LE", 12, lambda: p.iconst(14, 1), kind="i")), kind="i")
+        for typ in (MACHINE_TYPE, *SMx.TYPES):      # v0.44: 8..13 and BOUNCE's 17
+            p.iconst(12, typ)
+            p.if_(2, "EQ", 12, lambda: p.iconst(14, 1), kind="i")
         p.st(costs + 4 * u, 4)
 
         def mnm(u=u):
@@ -222,17 +214,6 @@ def mnm_ages(p: Prog, L: M.Layout) -> None:
         p.iop(9, 9, "+", 12)
         p.st(L.md.mnm.scratch + RANK_U, 9)
     p.loop(L.md.mnm.scratch + RANK_N, 16, place)
-
-
-def _runs(types) -> list[tuple[int, int]]:
-    """the sorted distinct TYPES as runs of consecutive numbers: [(lo, hi), ...]"""
-    out = []
-    for t in sorted(set(types)):
-        if out and t == out[-1][1] + 1:
-            out[-1] = (out[-1][0], t)
-        else:
-            out.append((t, t))
-    return out
 
 
 def order_slot(p: Prog, idx: int) -> None:

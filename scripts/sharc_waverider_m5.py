@@ -75,8 +75,6 @@ from dnfw.sampler import program as SP                          # noqa: E402
 from dnfw.md import core as MDK                                 # noqa: E402
 from dnfw.waverider import frame as FR                         # noqa: E402
 from dnfw.waverider import voice as V                          # noqa: E402
-from dnfw.fascia import program as FSP                          # noqa: E402  (v0.45: FASCIA's DSP program)
-from dnfw.fascia import machines as FSM                         # noqa: E402
 
 OUT = ROOT / "out" / "waverider"
 SHARC = ROOT / "csrc" / "waverider" / "sharc"
@@ -95,12 +93,6 @@ FRAME_COPY = 0x25C48C           # where sw 0x1c2712 copies the frame image
 PERC_L = PL.layout()            # where the build puts PERC (dnfw.waverider.dsp)
 SMP_L = SL.layout()             # and the sample machines (v0.13)
 SMP_RENDERED = tuple(SM.TYPE_OF[n] for n in SM.ENGINED)
-FSC_L = FSP.layout()            # v0.45: and FASCIA
-
-
-def fsc_base(t: int) -> int:
-    """a FASCIA voice's state (dnfw.fascia.program.vbase)"""
-    return (FSC_L.state if t < 8 else FSC_L.state2) + FSP.STRIDE * (t & 7)
 
 
 # -- the machine ------------------------------------------------------------------------------
@@ -210,8 +202,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
     run on the DSP's memory at that entry); loop entries."""
     state = init
     out = {"machine": [], "amp_in": [], "amp_out": [], "buffers": [], "buffer_bits": [], "t5_inputs": [],
-           "perc": [], "smp": [], "fsc": [], "loop_entries": 0, "smp_entries": 0, "fsc_entries": 0,
-           "setup": []}
+           "perc": [], "smp": [], "loop_entries": 0, "smp_entries": 0, "setup": []}
     instr = wall = 0
     for b in range(blocks):
         tap = {}
@@ -299,38 +290,6 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                                             for k in range(SP.STATE_STRIDE // 4)]}
                               for t in tap.get("smp_model", {})}
 
-        def at_fsc(r):
-            # v0.45: FASCIA's entry, smp.asm's tail: the sample machines' outputs (as before at
-            # PING_SW), then FASCIA's model (dnfw.fascia.program run on the DSP's memory here) for
-            # every type-18 slot, in the order the DSP walks them (PERC's ORDER: the newest first)
-            at_after_smp(r)
-            if "fsc_model" in tap:
-                return
-            out["fsc_entries"] += 1
-            from dnfw.perc.dsl import Mem as _Mem
-            st = r.state
-            mem = _Mem(lambda a, st=st: m2.word(st, a) or 0)
-            order = [(m2.word(st, PP.ORDER + 4 * k) or 0) & 15 for k in range(16)]
-            model = {}
-            for t in order:
-                if t in model or frame_word(st, FR.header_offset(FR.MACHINE, t)) != FSM.TYPE:
-                    continue
-                p_, mem = FSP.run_voice(FSC_L, None, t, mem)
-                buf = m2.word(st, PP.BUFFERS + 4 * t) or 0
-                model[t] = {"out": [mem.get(buf + 4 * k) for k in range(BLOCK)],
-                            "state": [mem.get(fsc_base(t) + 4 * k) for k in range(FSP.VOICE_WORDS)],
-                            "steps": p_.steps}
-            tap["fsc_model"] = model
-
-        def at_after_fsc(r):
-            # the shared tail's entry, FASCIA's tail: what FASCIA left in each of its slots
-            if "fsc_dsp" in tap:
-                return
-            tap["fsc_dsp"] = {t: {"out": [m2.word(r.state, tap["bufs"][t] + 4 * k) or 0 for k in range(BLOCK)],
-                                  "state": [m2.word(r.state, fsc_base(t) + 4 * k) or 0
-                                            for k in range(FSP.VOICE_WORDS)]}
-                              for t in tap.get("fsc_model", {})}
-
         def at_resume(r):
             tap["machine"] = [m2.floats(r.state, tap["bufs"][t], BLOCK) for t in range(16)]
 
@@ -352,7 +311,7 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
             out["setup"].append(("none-arm", b, None))
 
         hooks = {m3.DISPATCH: at_dispatch, dsp.PERC_SW: at_loop, dsp.SMP_SW: at_after_perc,
-                 dsp.FSC_SW: at_fsc, dsp.PING_SW: at_after_fsc,
+                 dsp.PING_SW: at_after_smp,
                  LOOP_RESUME: at_resume,
                  m3.AMP_STAGE: amp, AMP_RETURN: amp_ret, SETUP_GUARD: guard,
                  SETUP_TABLE_READ: table_read, SETUP_NONE: none_arm}
@@ -390,14 +349,6 @@ def run_blocks(init, frames, blocks: int, extra_hooks=None):
                                "state_mismatches": sum(1 for x, y in zip(model[t]["state"], got.get(t, {}).get("state", [])) if x != y)
                                + (0 if t in got else SP.STATE_STRIDE // 4),
                                "out": [V.bits_f32(x) for x in got.get(t, {}).get("out", [])],
-                               "model_steps": model[t]["steps"]} for t in model})
-        model, got = tap.get("fsc_model", {}), tap.get("fsc_dsp", {})
-        out["fsc"].append({t: {"out_mismatches": sum(1 for x, y in zip(model[t]["out"], got.get(t, {}).get("out", [])) if x != y)
-                               + (0 if t in got else BLOCK),
-                               "state_mismatches": sum(1 for x, y in zip(model[t]["state"], got.get(t, {}).get("state", [])) if x != y)
-                               + (0 if t in got else FSP.VOICE_WORDS),
-                               "out": [V.bits_f32(x) for x in got.get(t, {}).get("out", [])],
-                               "bits": list(got.get(t, {}).get("out", [])),
                                "model_steps": model[t]["steps"]} for t in model})
         instr += res[2]
         state = r
@@ -453,18 +404,14 @@ def selmap_text(code: bytes, work: pathlib.Path) -> dict[int, tuple[int, str]]:
 
 
 def perc_links_ok() -> bool:
-    """PERC: the block counter's jump into wr_perc (L2), wr_perc's tail into smp.asm's
-    wr_smp, its tail into fascia.asm's wr_fsc (v0.45), and FASCIA's into ping.asm's shared tail
-    (v0.26: RESONATOR and CZ gone): addresses, not labels."""
+    """PERC: the block counter's jump into wr_perc (L2), and wr_perc's tail into
+    ping.asm's wr_ping (v0.26: RESONATOR and CZ gone): addresses, not labels."""
     count = (SHARC / "block_count.asm").read_text(encoding="utf-8")
     perc = (SHARC / "perc.asm").read_text(encoding="utf-8")
     return (f"JUMP {dsp.PERC_SW:#x};" in count
             and re.findall(r"JUMP (0x[0-9a-f]+);\s*// smp.asm's wr_smp", perc) == [f"{dsp.SMP_SW:#x}"]
-            # v0.45: smp.asm's tail into fascia.asm's wr_fsc, and FASCIA's into the shared tail
-            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// fascia.asm's wr_fsc",
-                           (SHARC / "smp.asm").read_text(encoding="utf-8")) == [f"{dsp.FSC_SW:#x}"]
-            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// the shared tail",
-                           (SHARC / "fascia.asm").read_text(encoding="utf-8")) == [f"{dsp.PING_SW:#x}"])
+            and re.findall(r"JUMP (0x[0-9a-f]+);\s*// ping.asm's wr_ping",
+                           (SHARC / "smp.asm").read_text(encoding="utf-8")) == [f"{dsp.PING_SW:#x}"])
 
 
 def no_gran_link() -> bool:
@@ -488,7 +435,7 @@ def gran_links_ok() -> bool:
 def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict:
     res = {}
     for name, load_sw in (("perc", dsp.PERC_SW), ("smp", dsp.SMP_SW), ("block_count", dsp.COUNT_SW),
-                          ("ping", dsp.PING_SW), ("fascia", dsp.FSC_SW)):  # v0.28: GRAN removed; v0.45: FASCIA
+                          ("ping", dsp.PING_SW)):                          # v0.28: GRAN removed
         spec = json.loads((SHARC / f"{name}.json").read_text(encoding="utf-8"))
         code = sharc_object.load_bytes(bytes.fromhex(spec["object_parcels_be"]))
         lines = [ln for ln in (SHARC / f"{name}.asm").read_text(encoding="utf-8").splitlines()
@@ -526,7 +473,7 @@ def decode_check(dk, image: Image, work: pathlib.Path, use_selmap: bool) -> dict
     res["entry"] = {"type": entry.type_name, "fields": {k: v for k, v in fields.items()},
                     "len": entry.length_bytes, "nop": nop.type_name, "after": nxt.type_name}
     ok = all(not res[n]["disagreements"] and res[n]["source_sha256_matches"]
-             for n in ("perc", "smp", "block_count", "ping", "fascia")) \
+             for n in ("perc", "smp", "block_count", "ping")) \
         and perc_links_ok() and no_gran_link() and entry.type_name.startswith("8a") \
         and entry.length_bytes == 6 and nop.length_bytes == 2
     return {"ok": ok, "detail": res}
@@ -564,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,tdm,stock,mnm,frame,fascia,fchords,fgarbage,fsilence,fstress")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -600,7 +547,7 @@ def main(argv=None):
             s1["ok"] = all(s1["checks"].values())
             results["1_decode"] = s1
             show(s1)
-            for n in ("perc", "smp", "block_count", "ping", "fascia"):
+            for n in ("perc", "smp", "block_count", "ping"):
                 for d in s1["detail"][n]["disagreements"][:20]:
                     print("     ", n, d)
 
@@ -669,22 +616,6 @@ def main(argv=None):
             print("\nstep (probe): the main mix as the recorder sees it")
             results["probe_mainsrc"] = step_mainsrc(warm(), sound, machines, a.blocks)
             show(results["probe_mainsrc"])
-        for key, title, fn in (("fascia", "FASCIA bit-exact to live.py: the audition, idle, a steal, p-locks (v0.45)",
-                                lambda: step_fascia(warm(), sound, machines)),
-                               ("fchords", "FASCIA chords, and beside PERC, ONESHOT, a Monomachine voice (v0.45)",
-                                lambda: step_fchords(warm(), sound, machines)),
-                               ("fgarbage", "FASCIA on garbage state (v0.45)", lambda: step_fgarbage(warm(), sound, machines)),
-                               ("fsilence", "FASCIA untriggered: silence, little cost (v0.45)",
-                                lambda: step_fsilence(warm(), sound, machines)),
-                               ("fstress", "sixteen FASCIA voices, the clock made to move (v0.45)",
-                                lambda: step_fstress(warm(), sound, machines)),
-                               ("fcost", "a FASCIA voice's cost, each audition patch (v0.45)",
-                                lambda: step_fcost(warm(), sound, machines))):
-            if key in steps:
-                print(f"\nstep 3{key}: {title}")
-                results[f"3_{key}"] = fn()
-                show(results[f"3_{key}"])
-                gc.collect()
         if "stress" in steps:
             print("\nstep 3s: the stress test (the clock made to move)")
             results["3s_stress"] = step_stress(warm(), sound, machines)
@@ -1971,8 +1902,8 @@ def step_smp(init, sound, machines, blocks) -> dict:
     runs["empty_slot"] = rb(init, frames(ONE, smp_words({SM.SAMP_REC: 90})), blocks)
     runs["silent"] = rb(init, frames(ONE, smp_words(), trig=()), blocks)
     # v0.45: FASCIA (type 18) on track 1 beside ONESHOT on track 0, both triggered, its 24
-    # controls at its defaults (and the zero ones at mid): smp.asm leaves it alone (a type-18 slot
-    # is not a sample machine), and FASCIA's own program renders it (dnfw.fascia.program)
+    # controls at its defaults (and the zero ones at mid): until its own program is chained in,
+    # smp.asm writes its buffer silence every block (dnfw.sampler.program FASCIA_MUTE)
     from dnfw.fascia import machines as FSx    # noqa: PLC0415
     fsw = {FSx.SLOTS[c][1]: FSx.default_words()[c] or 0x4000 for c in FSx.CONTROLS}
     runs["fascia"] = rb(init, frames(ONE, smp_words(), others={1: FSx.TYPE}, other_words={1: fsw}), blocks)
@@ -2073,12 +2004,10 @@ def step_smp(init, sound, machines, blocks) -> dict:
                 for k in ("bad_below", "bad_above", "bad_long", "bad_end", "bad_fmt", "bad_zero", "bad_slices")),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
-        "v0.45: a FASCIA voice (type 18, triggered, its controls set) beside ONESHOT: FASCIA's buffer is "
-        "FASCIA's program's (bit-exact to its model every block), ONESHOT sounds and is bit-exact":
-            runs["fascia"]["ok"] and len(runs["fascia"]["fsc"]) > 0
-            and fsc_exact(runs["fascia"])[0] == len(runs["fascia"]["fsc"])
-            and fsc_exact(runs["fascia"])[1:] == (0, 0)
-            and smp_exact(runs["fascia"])[1:] == (0, 0)
+        "v0.45: a FASCIA voice (type 18, triggered, its controls set) is silence every block, its "
+        "buffer zeroed (no program yet), while ONESHOT beside it sounds":
+            runs["fascia"]["ok"] and len(runs["fascia"]["buffers"]) > 0
+            and all(x == 0.0 for blk in runs["fascia"]["buffers"] for x in blk[1])
             and V.peak(smp_series(runs["fascia"], 0)) > 0.05,
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]
             and rt[BLOCK * RETRIG:] != one[BLOCK * RETRIG:],
@@ -3018,401 +2947,6 @@ def step_tdm(init, sound, machines, blocks) -> dict:
 
 # -- step 4 -------------------------------------------------------------------------------------------
 
-# -- v0.45: FASCIA (type 18, docs/fascia.md) ---------------------------------------------------
-
-FSC_OUT = ROOT / "out" / "fascia-dsp"
-
-
-def fsc_audition():
-    import fascia_audition as FA                 # noqa: PLC0415  (scripts/)
-    return FA.PATCHES
-
-
-def fsc_frame(sound, machines, tracks: dict, trig=(), others=None) -> bytes:
-    """a frame: TRACKS = {t: (panel, note, vel)} on FASCIA, OTHERS = {t: (type, words)}; TRIG the
-    tracks triggered this block"""
-    from dnfw.fascia import bench as FB          # noqa: PLC0415
-    t0 = min(tracks) if tracks else 0
-    f = base_frame(sound, machines, t0=FSM.TYPE if 0 in tracks else (others or {}).get(0, (4, {}))[0],
-                   trigger=False, others={t: ty for t, (ty, _w) in (others or {}).items() if t != 0})
-    for t, (ty, words) in (others or {}).items():
-        f.header(FR.MACHINE, t, ty)
-        f.header(FR.NOTE, t, 0x3C00)             # C4, as base_frame gives track 0
-        for slot, w in words.items():
-            f.param(t, slot, w)
-    for t, (panel, note, vel) in tracks.items():
-        f.header(FR.MACHINE, t, FSM.TYPE)
-        for c, word in FB.panel_words(panel).items():
-            f.param(t, FSM.SLOTS[c][1], word)
-        f.header(FR.NOTE, t, FB.note_word(note))
-        f.header(FSP.VEL_OFFSET, t, FB.vel_word(vel))
-    for t in trig:
-        f.trigger(t)
-    return f.to_bytes()
-
-
-def fsc_live(panel, notes: dict, blocks: int, slot: int, controls=None):
-    """live.py's voice for SLOT (seed slot + 1) on PANEL (or CONTROLS(b)), NOTES = {block: (note,
-    vel)} as the frame carries them -> 32 float32 a block"""
-    import numpy as np                           # noqa: PLC0415
-    from dnfw.fascia import bench as FB, live as LV   # noqa: PLC0415
-    v = LV.Voice(seed=slot + 1)
-    out = []
-    for b in range(blocks):
-        if b in notes:
-            n, vel = notes[b]
-            v.note_on(FB.note_seen(n), FB.vel_seen(vel))
-        out.append(v.block(FB.panel_seen(controls(b) if controls else panel)))
-    return [np.asarray(x, np.float32) for x in out]
-
-
-def fsc_exact(rr) -> tuple[int, int, int]:
-    """(blocks with FASCIA voices, output words differing from the model, state words differing)"""
-    n = om = sm = 0
-    for blk in rr.get("fsc", []):
-        for v in blk.values():
-            n += 1
-            om += v["out_mismatches"]
-            sm += v["state_mismatches"]
-    return n, om, sm
-
-
-def fsc_bits(rr, t) -> list[list[int]]:
-    return [blk[t]["bits"] if t in blk else None for blk in rr.get("fsc", [])]
-
-
-def fsc_vs_live(rr, t, want) -> tuple[int, float]:
-    """(blocks whose 32 words differ from live.py's, the max abs difference)"""
-    import numpy as np                           # noqa: PLC0415
-    bad, dmax = 0, 0.0
-    for b, w in enumerate(want):
-        got = fsc_bits(rr, t)[b] if b < len(rr.get("fsc", [])) else None
-        if got is None:
-            bad += 1
-            continue
-        g = np.array(got, np.uint32).view(np.float32)
-        if not np.array_equal(g.view(np.uint32), w.view(np.uint32)):
-            bad += 1
-        dmax = max(dmax, float(np.max(np.abs(g.astype(np.float64) - w.astype(np.float64)))))
-    return bad, dmax
-
-
-def fsc_wav(path: pathlib.Path, x) -> None:
-    import numpy as np                           # noqa: PLC0415
-    import wave as _w                            # noqa: PLC0415
-    x = np.asarray(x, np.float64)
-    pk = float(np.max(np.abs(x))) or 1.0
-    y = x / max(pk, 1.0) * 0.98
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with _w.open(str(path), "wb") as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(RATE)
-        f.writeframes((y * 32767).astype("<i2").tobytes())
-
-
-def step_fascia(init, sound, machines, blocks=8) -> dict:
-    """v0.45: FASCIA's assembled code against live.py, bit for bit. Two audition patches
-    (scripts/fascia_audition.py) on track 0: its first note struck on block 1, then BLOCKS of its
-    ring; FASCIA's buffer at its tail must be dnfw.fascia.program's model (run on the DSP's memory
-    at FASCIA's entry) and live.Voice's block (the panel the frame carries) word for word. Then
-    the idle rule: a short hit run until the voice rests (its buffer zeros, the model's and
-    live's alike), a steal (a second note while it sounds: the fade, then the strike), and p-locks
-    moving mid-note (TUNE and GEOM retune, MORPH ramps, a post stage switched on and off)."""
-    import numpy as np                           # noqa: PLC0415
-    res, bad = {}, []
-    pats = fsc_audition()
-    # (owner, 2026-11-08: the gate needs the bit-exact part, not the whole audition: two patches,
-    # a struck bar and the costliest; test_fascia_program and fascia_dsp_compare hold the rest)
-    for name in ("01_tubular_bell", "20_snare_wires"):
-        panel, evs, secs, trem = pats[name]
-        note, vel = evs[0][1], evs[0][2]
-        n = blocks + 2
-        rr = run_blocks(init, lambda b, panel=panel, note=note, vel=vel: fsc_frame(
-            sound, machines, {0: (panel, note, vel)}, trig=(0,) if b == 1 else ()), n)
-        want = fsc_live(panel, {1: (note, vel)}, n, 0)
-        ex = fsc_exact(rr)
-        lb, dmax = fsc_vs_live(rr, 0, want)
-        ok = rr["ok"] and ex[0] == n and ex[1:] == (0, 0) and lb == 0
-        got = [np.array(b_, np.uint32).view(np.float32) for b_ in fsc_bits(rr, 0) if b_ is not None]
-        res[name] = {"ok": ok, "model_mismatch": ex[1:], "live_blocks_differing": lb, "max_abs_diff": dmax,
-                     "peak": float(max((np.max(np.abs(g)) for g in got), default=0.0)), "halt": rr.get("halt")}
-        if not ok:
-            bad.append(name)
-        print(f"    fascia {name}: {'ok' if ok else 'FAIL'} (max |dsp - live| {dmax:.3g})", flush=True)
-    # the idle rule: a short hit until the voice rests
-    short = dict(BODA=0, DAMP=127, MATL=0, HARD=127, MIX=0, DEC=0, LPG=0)
-    n_idle = 120
-    rr = run_blocks(init, lambda b: fsc_frame(sound, machines, {0: (short, 60, 1.0)}, trig=(0,) if b == 1 else ()),
-                    n_idle)
-    want = fsc_live(short, {1: (60, 1.0)}, n_idle, 0)
-    ex = fsc_exact(rr)
-    lb, dmax = fsc_vs_live(rr, 0, want)
-    zeros_from = next((b for b in range(n_idle - 1, 0, -1) if np.any(want[b] != 0)), 0) + 1
-    rested = rr["ok"] and all(not any(fsc_bits(rr, 0)[b]) for b in range(zeros_from, n_idle))
-    idle = {"ok": rr["ok"] and ex[1:] == (0, 0) and lb == 0 and rested and zeros_from < n_idle,
-            "rests_after_block": zeros_from, "model_mismatch": ex[1:], "live_blocks_differing": lb}
-    # a steal: a second note on the sounding voice (the old sound faded over a block, the
-    # strike the block after), then p-locks moving every few blocks
-    pan = pats["03_vibraphone"][0]
-
-    def moving(b):
-        p_ = dict(pan)
-        if b >= 6:
-            p_["TUNE"] = 64 + 3 * (b - 6)
-        if b >= 9:
-            p_["GEOM"], p_["MORPH"] = 40 + b, 20 * (b % 3)
-        if 11 <= b < 15:
-            p_["SKIN"], p_["SHIFT"], p_["DRIVE"] = 100, 90, 100
-        return p_
-    n_st = 18
-    rr = run_blocks(init, lambda b: fsc_frame(sound, machines, {0: (moving(b), 60 if b < 4 else 67, 0.8)},
-                                              trig=(0,) if b in (1, 4) else ()), n_st)
-    want = fsc_live(None, {1: (60, 0.8), 4: (67, 0.8)}, n_st, 0, controls=moving)
-    ex = fsc_exact(rr)
-    lb, dmax2 = fsc_vs_live(rr, 0, want)
-    steal = {"ok": rr["ok"] and ex[1:] == (0, 0) and lb == 0, "model_mismatch": ex[1:], "live_blocks_differing": lb,
-             "max_abs_diff": dmax2}
-    checks = {
-        "every audition patch: strike and ring bit-exact to the model and to live.py, every block": not bad,
-        "the idle rule: a short hit rests (zeros from then on), bit-exact to the model and live.py": idle["ok"],
-        "a steal (the fade, then the strike) and p-locks moving mid-note: bit-exact to the model and live.py":
-            steal["ok"],
-    }
-    return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"patches": res, "idle": idle, "steal": steal, "failing": bad}}
-
-
-def step_fchords(init, sound, machines, blocks=8) -> dict:
-    """v0.45: several FASCIA voices at once, and FASCIA beside the other machines of ours. A:
-    four FASCIA voices, a chord (the audition's CHORD, four patches), struck together; B: FASCIA
-    on track 0 beside PERC (track 1), ONESHOT (track 2) and a Monomachine voice (track 3), all
-    struck on block 1. Every FASCIA voice bit-exact to its model and to live.py; PERC (and the
-    Monomachine voice) to PERC's model; ONESHOT to the sample machines'."""
-    from dnfw.mnm import machines as MMx         # noqa: PLC0415
-    pats = fsc_audition()
-    names = ["07_glass_bowl", "03_vibraphone", "10_steel_pan", "20_snare_wires"]
-    chord = [(60, 0.9), (64, 0.9), (67, 0.9), (71, 0.9)]
-    tracks = {t: (pats[names[t]][0], chord[t][0], chord[t][1]) for t in range(4)}
-    n = blocks + 2
-    ra = run_blocks(init, lambda b: fsc_frame(sound, machines, tracks, trig=tuple(range(4)) if b == 1 else ()), n)
-    a_ok, a_n = ra["ok"], {}
-    for t in range(4):
-        want = fsc_live(tracks[t][0], {1: chord[t]}, n, t)
-        lb, dmax = fsc_vs_live(ra, t, want)
-        a_n[t] = {"patch": names[t], "live_blocks_differing": lb, "max_abs_diff": dmax}
-        a_ok = a_ok and lb == 0
-    ea = fsc_exact(ra)
-    a_ok = a_ok and ea[1:] == (0, 0) and ea[0] == 4 * n
-    sid = MMx.NAMES.index("SID 6581")
-    others = {1: (5, perc_words(0)), 2: (SM.TYPE_OF["ONESHOT"], smp_words({SM.SAMP_REC: 4})),
-              3: (MMx.TYPES[sid], mnm_words(sid))}
-    pan = pats["13_tabla"][0]
-    rb = run_blocks(init, lambda b: fsc_frame(sound, machines, {0: (pan, 48, 1.0)}, trig=(0, 1, 2, 3) if b == 1 else (),
-                                              others=others), n)
-    want = fsc_live(pan, {1: (48, 1.0)}, n, 0)
-    lb, dmax = fsc_vs_live(rb, 0, want)
-    eb = fsc_exact(rb)
-    pe = perc_exact(rb)
-    se = smp_exact(rb)
-    # what each machine left in its slot at its program's tail (PERC's for 1 and 3, the sample
-    # machines' for 2), as the chords steps hear them (the end-of-block buffers are the stock's)
-    def _heard(key, t):
-        return V.peak([x for blk in rb.get(key, [])[2:] if t in blk for x in blk[t]["out"]]) if rb["ok"] else 0.0
-    peaks = {1: _heard("perc", 1), 2: _heard("smp", 2), 3: _heard("perc", 3)}
-    others_heard = rb["ok"] and all(peaks[t] > 1e-4 for t in (1, 2, 3))
-    checks = {
-        "A: four FASCIA voices at once (a chord): every block returns, each bit-exact to its model and live.py": a_ok,
-        "B: FASCIA beside PERC, ONESHOT and a Monomachine voice: FASCIA bit-exact to its model and live.py":
-            rb["ok"] and eb[1:] == (0, 0) and eb[0] == n and lb == 0,
-        "B: PERC and the Monomachine voice bit-exact to PERC's model, ONESHOT to the sample machines', all heard":
-            pe[1:] == (0, 0) and se[1:] == (0, 0) and others_heard,
-    }
-    return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"A": {"voices": a_n, "exact": ea}, "B": {"fascia": {"live_blocks_differing": lb, "max_abs_diff": dmax},
-                                                                "exact": eb, "perc_exact": pe, "smp_exact": se,
-                                                                "peaks_PERC_ONESHOT_MnM": peaks}}}
-
-
-def step_fgarbage(init, sound, machines) -> dict:
-    """v0.45: FASCIA started on garbage: its sixteen voices' state (both L2 rooms), its block's
-    scratch (L1) and its bookkeeping (the guard's costs, strikes, steals) filled with NaN
-    (0xFFFFFFFF) or random words before the first block. FASCIA on tracks 0..3 (four patches,
-    struck on block 2, a second note on block 4), the other twelve tracks FASCIA unstruck. Every
-    block must return, every FASCIA buffer be finite (and within the knee), and from the strike on
-    each voice bit-exact to its model (which reads the same memory at FASCIA's entry)."""
-    import random as _r
-    import numpy as np                           # noqa: PLC0415
-    fills = {"nan": lambda k: 0xFFFFFFFF, "random": (lambda g: lambda k: g.getrandbits(32))(_r.Random(18))}
-    spans = [(FSC_L.state, 8 * FSP.STRIDE), (FSC_L.state2, 8 * FSP.STRIDE),
-             (FSC_L.scratch, FSC_L.scratch_end - FSC_L.scratch), (FSC_L.cost, 0x40), (FSC_L.strikes, 0x80)]
-    pats = fsc_audition()
-    names = ["01_tubular_bell", "23_bowed_string_resin", "29_water_droplet_vibe", "15_tzfm_clank"]
-    res, bad = {}, []
-    for fname, fill in fills.items():
-        done = {"n": 0}
-
-        def poke(r, fill=fill, done=done):
-            if done["n"]:
-                return
-            done["n"] = 1
-            for a, n in spans:
-                for k in range(0, n, 4):
-                    m2.poke(r.state, a + k, fill(k))
-        tracks = {t: (pats[names[t]][0] if t < 4 else {}, 60 + t, 0.9) for t in range(16)}
-        rr = run_blocks(init, lambda b: fsc_frame(sound, machines, tracks,
-                                                  trig=tuple(range(4)) if b in (2, 4) else ()), 8,
-                        extra_hooks={dsp.PERC_SW: poke})
-        fin = rr["ok"] and all(blk is not None and all(math.isfinite(x) and abs(x) <= 0.7 for x in blk)
-                               for t in range(16) for blk in [[V.bits_f32(w) for w in (b_ or [])] for b_ in fsc_bits(rr, t)])
-        exact = rr["ok"] and all(v["out_mismatches"] == 0 and v["state_mismatches"] == 0
-                                 for blk in rr["fsc"][2:] for t, v in blk.items() if t < 4)
-        res[fname] = {"ok": rr["ok"] and fin and exact, "finite": fin, "exact_from_strike": exact,
-                      "halt": rr.get("halt")}
-        if not res[fname]["ok"]:
-            bad.append(fname)
-        print(f"    fgarbage {fname}: {res[fname]}", flush=True)
-    checks = {"FASCIA on NaN or random voice state, scratch and bookkeeping: every block returns, every "
-              "buffer finite, each struck voice bit-exact to its model from its strike": not bad}
-    return {"ok": not bad, "checks": checks, "numbers": res}
-
-
-def step_fsilence(init, sound, machines) -> dict:
-    """v0.45: FASCIA on all sixteen tracks, no trig: every buffer zeros every block, and FASCIA's
-    whole loop costs little (instructions from its entry to its tail, a block)"""
-    ins = {"sum": 0, "n": 0}
-
-    def at_in(r):
-        ins["a"] = r.steps_n
-
-    def at_out(r):
-        if "a" in ins:
-            ins["sum"] += r.steps_n - ins.pop("a")
-            ins["n"] += 1
-    tracks = {t: ({}, 60, 1.0) for t in range(16)}
-    rr = run_blocks(init, lambda b: fsc_frame(sound, machines, tracks), 6,
-                    extra_hooks={dsp.FSC_SW: at_in, dsp.PING_SW: at_out})
-    zeros = rr["ok"] and all(not any(b_ or [1]) for t in range(16) for b_ in fsc_bits(rr, t))
-    per = ins["sum"] // max(ins["n"], 1)
-    checks = {"sixteen untriggered FASCIA tracks: every buffer zeros, every block": zeros,
-              "and the whole FASCIA loop costs under 16,000 instructions a block (1,000 a slot)": per < 16_000}
-    return {"ok": all(checks.values()), "checks": checks,
-            "numbers": {"instructions_per_block": per, "exact": fsc_exact(rr)}}
-
-
-def step_fcost(init, sound, machines) -> dict:
-    """v0.45: what a FASCIA voice costs, per audition patch, one voice sounding: instructions of
-    FASCIA's loop a block (entry to tail, less the silent loop's), and its L2 and DDR accesses:
-    the strike's block, the attack (the exciters running) and the ring. -> typical (median) and
-    worst; and how many voices fit in the guard's 0.6 of a frame at K = 1 and K = 3"""
-    import statistics as _st
-    counts, undo = _count_memory()
-    rows = {}
-
-    def measure(name, panel, note, vel, n=10):
-        per = []
-
-        def at_in(r):
-            per.append([r.steps_n, None, counts["L2"], counts["DDR"]])
-            counts["on"] = True
-
-        def at_out(r):
-            if per and per[-1][1] is None:
-                per[-1][1] = r.steps_n
-                per[-1][2] = counts["L2"] - per[-1][2]
-                per[-1][3] = counts["DDR"] - per[-1][3]
-            counts["on"] = False
-        rr = run_blocks(init, lambda b: fsc_frame(sound, machines, {0: (panel, note, vel)}, trig=(0,) if b == 1 else ()),
-                        n, extra_hooks={dsp.FSC_SW: at_in, dsp.PING_SW: at_out})
-        cost = [(b - a, l2, ddr) for a, b, l2, ddr in per if b is not None]
-        return rr["ok"], cost
-    try:
-        ok0, base = measure("(nothing)", {}, 60, 1.0, 4)
-        b0 = min(c[0] for c in base) if base else 0
-        for name, (panel, evs, secs, trem) in fsc_audition().items():
-            ok, cost = measure(name, panel, evs[0][1], evs[0][2])
-            ins = [c[0] - b0 for c in cost]
-            rows[name] = {"ok": ok, "strike": ins[1] if len(ins) > 1 else None,
-                          "attack": max(ins[2:6]) if len(ins) > 5 else None,
-                          "ring": ins[-1] if ins else None,
-                          "L2_ring": cost[-1][1] if cost else None, "DDR_ring": cost[-1][2] if cost else None}
-            print(f"    fcost {name}: {rows[name]}", flush=True)
-    finally:
-        undo()
-    ok = all(r["ok"] for r in rows.values())
-    vals = [r for r in rows.values() if r["ok"] and r["ring"] is not None]
-    typical = {k: int(_st.median(r[k] for r in vals)) for k in ("strike", "attack", "ring")} if vals else {}
-    worst = {k: max(r[k] for r in vals) for k in ("strike", "attack", "ring")} if vals else {}
-    P = 666_667
-    fit = {f"K{K}": {k: int(0.6 * P // (K * max(v, 1))) for k, v in (("typical_ring", typical.get("ring", 1)),
-                                                                     ("typical_attack", typical.get("attack", 1)),
-                                                                     ("worst_attack", worst.get("attack", 1)))}
-           for K in (1, 3)}
-    return {"ok": ok, "checks": {"every audition patch measured (every block returned)": ok},
-            "numbers": {"per_patch": rows, "typical": typical, "worst": worst, "voices_in_0.6P": fit}}
-
-
-def step_fstress(init, sound, machines) -> dict:
-    """v0.45: sixteen FASCIA voices under the guard, the clock made to move (as step 3s: every
-    read of EMUCLK in our code gets the block's start plus K = 3 x the instructions run so far).
-    A new note on the next track every block (dynamic allocation) on a heavy patch (two coupled
-    bodies with BUZZ and a click), then the same on the heaviest (WATR) patch. Every block must
-    end, our voices done by 0.8 of the frame, voices left out (and counted) when time is short,
-    the newest note heard in most blocks, every buffer finite."""
-    from dnfw.perc import guard as G
-    K, P = 3, 666_667
-    sites = set(_after_emuclk("perc")) | set(_after_emuclk("smp")) | set(_after_emuclk("fascia"))
-    pats = fsc_audition()
-    out = {}
-    for label, name in (("A", "20_snare_wires"), ("B", "29_water_droplet_vibe")):
-        b_now = {"b": 0}
-
-        def clock(r):
-            base = (b_now["b"] + 1) * P
-            r.state.uregs[fx.UREG_CODES["R8"]] = fx.Const((base + K * getattr(r, "steps_n", 0)) & 0xFFFFFFFF)
-
-        def at_perc(r):
-            base = (b_now["b"] + 1) * P
-            m2.poke(r.state, G.MARK0, base & 0xFFFFFFFF)
-            m2.poke(r.state, G.MARK, (base + K * getattr(r, "steps_n", 0)) & 0xFFFFFFFF)
-        hooks = {dsp.PERC_SW: at_perc}
-        hooks.update({s_: clock for s_ in sites})
-        panel = pats[name][0]
-        tracks = {t: (panel, 48 + (t * 5) % 24, 0.9) for t in range(16)}
-        nb = 20
-
-        def fb(b, tracks=tracks):
-            b_now["b"] = b
-            return fsc_frame(sound, machines, tracks, trig=(b % 16,))
-        rr = run_blocks(init, fb, nb, extra_hooks=hooks)
-        st = rr.get("state")
-        skips = m2.word(st.state, G.SKIPS) if rr["ok"] else None
-        end = m2.word(st.state, G.OURS_END) if rr["ok"] else None
-        mark0 = m2.word(st.state, G.MARK0) if rr["ok"] else None
-        rr.pop("state", None)
-        heard = tot = 0
-        for b in range(2, nb):
-            t = b % 16
-            tot += 1
-            blk = rr["fsc"][b] if b < len(rr["fsc"]) else {}
-            if t in blk and V.peak(blk[t]["out"]) > 1e-4:
-                heard += 1
-        fin = rr["ok"] and all(math.isfinite(x) for blk in rr["buffers"] for t in range(16) for x in blk[t])
-        out[label] = {"ok": rr["ok"], "skips": skips, "our_end_over_P": round(((end - mark0) & 0xFFFFFFFF) / P, 3)
-                      if end is not None else None, "newest_heard": heard / max(tot, 1), "finite": fin,
-                      "instructions_per_block": rr.get("instructions", 0) // nb}
-        print(f"    fstress {label} ({name}): {out[label]}", flush=True)
-    checks = {
-        "every block of A and B returns": all(o["ok"] for o in out.values()),
-        "our voices done by 0.8 of the frame (the guard's limit holds)":
-            all(o["our_end_over_P"] is not None and o["our_end_over_P"] <= 0.8 for o in out.values()),
-        "with time short, voices are left out and counted": all(o["skips"] for o in out.values()),
-        "the newest note heard in most blocks (newest first)": all(o["newest_heard"] >= 0.8 for o in out.values()),
-        "every buffer finite": all(o["finite"] for o in out.values()),
-    }
-    return {"ok": all(checks.values()), "checks": checks, "numbers": out}
-
-
 def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -> dict:
     others = {1: 1, 2: 0, 3: 2, 4: 3}                       # WaveTone, FM Tone, FM Drum, Swarmer
 
@@ -3438,17 +2972,6 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
             return fr.to_bytes()
         return f
     mn = {MMx.NAMES[k]: run_blocks(init_on(snap, m2mach, m5), mnm_frames(k), blocks) for k in range(len(MMx.NAMES))}
-    # v0.45: FASCIA on track 0 (struck with the others): tracks 1-15 stay the stock run's
-    from dnfw.fascia import bench as _FB             # noqa: PLC0415
-
-    def fsc_frames(b):
-        fr = base_frame(sound, machines, t0=FSM.TYPE, others=others, trigger=(b == 1), trigger_others=True)
-        for c_, w_ in _FB.panel_words({}).items():
-            fr.param(0, FSM.SLOTS[c_][1], w_)
-        fr.header(FSP.VEL_OFFSET, 0, _FB.vel_word(0.8))
-        return fr.to_bytes()
-    fs = run_blocks(init_on(snap, m2mach, m5), fsc_frames, blocks)
-    mn["FASCIA"] = fs
     ok_runs = a["ok"] and b["ok"] and c["ok"] and d["ok"] and e["ok"] and all(x["ok"] for x in mn.values())
     mn_bad = {n: [t for t in range(1, 16) if any(blk[t] != sb[t] for blk, sb in zip(x["buffer_bits"], b["buffer_bits"]))]
               for n, x in mn.items()} if ok_runs else None
@@ -3464,11 +2987,8 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
         "v0.13: track 0 ONESHOT (8), then WERP (9): tracks 1-15 bit-identical to the stock run":
             ok_runs and all([blk[1:] for blk in x["buffer_bits"]] == [blk[1:] for blk in b["buffer_bits"]]
                             for x in (d, e)),
-        "v0.33: a Monomachine machine on track 0 (each of them), v0.45 FASCIA: tracks 1-15 bit-identical to "
-        "the stock run":
+        "v0.33: a Monomachine machine on track 0 (each of them): tracks 1-15 bit-identical to the stock run":
             ok_runs and not any(mn_bad.values()),
-        "v0.45: FASCIA on track 0 sounds, bit-exact to its model": ok_runs and fsc_exact(fs)[1:] == (0, 0)
-            and fsc_exact(fs)[0] == len(fs["fsc"]) and any(any(b_["bits"]) for blk in fs["fsc"] for b_ in blk.values()),
         "stock machines wrote their tracks (non-zero bits on at least one of tracks 1-4)":
             bool(set(active) & {1, 2, 3, 4}),
     }
