@@ -264,7 +264,55 @@ void rec_halt(void)
 }
 
 int rec_rt_take __attribute__((section(".data"))) = 0;   /* v0.41: the DSP's take is a buffer's */
-int rec_view __attribute__((section(".data"))) = 0;      /* v0.41: 0 the RECORDER, 1 REC TRIGS */
+int rec_view __attribute__((section(".data"))) = 0;      /* v0.41's REC TRIGS view; v0.44: always 0 (the
+                                                         * RECORDER has one page; BOUNCE tracks their panel) */
+/* v0.44 BOUNCE (rectrig.c): on a BOUNCE track's RECORDER the sixteen [TRIG] keys are the
+ * track's recorder trigs on the page shown (bn_page: PAGE steps it, the playing page when
+ * the screen opens while the sequencer plays), FUNC + [TRIG] one-shots; YES YES (two within
+ * 0.4 s) arms the spent one-shots again; a single YES is RECORD NOW, taken once the 0.4 s
+ * have passed with no second YES */
+int bn_page __attribute__((section(".data"))) = 0;
+u32 bn_yes_at __attribute__((section(".data"))) = 0;    /* a YES waiting for a second (0: none) */
+u32 bn_said_at __attribute__((section(".data"))) = 0;   /* the line's last word, when (ARMED n) */
+int bn_said_n __attribute__((section(".data"))) = 0;
+extern int rt_is_bounce(u32 t);
+extern unsigned char *sl_ui_table_now(void);
+extern u32 rt_trig_toggle(unsigned char *table, u32 t, u32 step, int oneshot);
+extern u32 rt_rearm(unsigned char *table, u32 t);
+#define UI_TRACK_B (*(volatile unsigned char *)0x42431A6Cu)
+#define TRACK_CUR_B ((volatile unsigned char *)0x42C5A984u)
+#define SEQ_PLAYING_B (*(volatile u32 *)0x42C5A918u)
+#define SEQ_PATTERN_B (*(volatile u32 *)0x42C5A9A0u)
+
+void bn_save(void);                             /* FUNC + YES: the take into a pool slot (below) */
+
+int bn_active(void)                             /* the RECORDER of a BOUNCE track is up */
+{
+    return rec_overlay && rec_phase == 0 && rt_is_bounce(UI_TRACK_B);
+}
+
+static u32 bn_len(void)                         /* the pattern's length for the track, 1..128 */
+{
+    const unsigned char *p = (const unsigned char *)SEQ_PATTERN_B;
+    if (!p)
+        return 16;
+    int n = p[122201] == 0 ? *(const short *)(p + 122196) : *(const short *)(p + 1701u * UI_TRACK_B + 1164u);
+    return n >= 1 && n <= 128 ? (u32)n : 16u;
+}
+
+u32 bn_pages(void)
+{
+    return (bn_len() + 15u) / 16u;
+}
+
+void bn_open(void)                              /* the screen opened: the page shown */
+{
+    u32 t = UI_TRACK_B;
+    bn_page = SEQ_PLAYING_B && t < 16 ? (TRACK_CUR_B[t] % bn_len()) / 16u : 0;
+    if ((u32)bn_page >= bn_pages())
+        bn_page = 0;
+    bn_yes_at = 0;
+}
 
 void rec_yes(void)
 {
@@ -298,6 +346,41 @@ static void rec_arm_turn(int delta)
     arm_at = now ? now : 1u;
 }
 
+/* v0.44 BOUNCE, FUNC + YES on its RECORDER: the buffer's playing take into the next empty
+ * pool slot. The slot takes the take's frames where they lie (no copy: the buffer goes on
+ * playing them, its next take goes elsewhere), and the take is saved to the +Drive,
+ * normalised and named as a manual recording is (SAVING, NORMALIZING, TRIM, FILE NAME,
+ * ASSIGN). Nothing to save, or a take still recording or waiting: the line says so */
+u32 bn_nothing_at __attribute__((section(".data"))) = 0;
+void bn_save(void)
+{
+    extern u32 rt_take_handover(u32 t, u32 *bytes, u32 *steps);
+    extern void smp_push_slot(int k);
+    u32 bytes, steps;
+    u32 place = rt_take_handover(UI_TRACK_B, &bytes, &steps);
+    if (!bytes || rec_state == 2 || rec_state == 1) {
+        bn_nothing_at = FRAMES | 1u;
+        return;
+    }
+    int slot = next_empty(0);
+    if (slot < 0 || !smp_slot_empty(slot)) {
+        bn_nothing_at = FRAMES | 1u;
+        return;
+    }
+    u32 frames = bytes / 2u;
+    smp_save_recording(slot, place, frames);
+    smp_push_slot(slot);
+    rec_saved_slot = slot;
+    rec_phase = PH_WORK;
+    work_at = FRAMES | 1u;
+    trim_slot = slot;
+    trim_n = frames;
+    trim_s = 0;
+    trim_e = frames;
+    rec_dest = next_empty(0);
+    smp_overlay_dirty = 1;
+}
+
 /* FUNC + VOICE (coldfire.py's REC_COMBO_SITE, in the main key handler's VOICE case) */
 static void preview(int on);
 void rec_combo(void)
@@ -306,6 +389,8 @@ void rec_combo(void)
     rec_overlay = !rec_overlay;
     rec_phase = PH_REC;                         /* a recording mid-TRIM keeps what it is */
     if (rec_overlay) {
+        extern void bn_open(void);
+        bn_open();                              /* v0.44 BOUNCE: the page of steps shown */
         mon_known = 0;
         rec_dest = next_empty(0);               /* v0.33: the first empty slot, shown */
         u32 room;
@@ -357,6 +442,11 @@ void rec_poll(void)
     extern void rt_poll(void);
     extern int rt_manual, rt_q_waiting(void);
     rt_poll();                                  /* v0.41: the REC buffers (rectrig.c) */
+    if (bn_yes_at && FRAMES - bn_yes_at >= 600u) {   /* v0.44: a single YES on a BOUNCE track */
+        bn_yes_at = 0;
+        if (bn_active())
+            rec_yes();
+    }
     if (smp_status(st)) {
         rec_state = st[0] & 3;
         rec_frames = (u32)st[2] << 6;              /* 64 frames a unit (v0.16) */
@@ -475,18 +565,16 @@ static void knob(int index, int delta)
     extern void rt_knob(int index, int delta);
     if (index == 8 && sl_rec_knob(delta))
         return;
-    if (rec_view == 1) {                        /* the REC TRIGS view: what each place shows */
+    if (bn_active()) {                          /* v0.44 BOUNCE: A SRC, B CHAN, E Q.REC, F Q.PLAY, G R.LEN */
         if (index == 5 || index == 6)
-            rt_knob(index, delta);              /* E Q.REC, F Q.PLAY: four detents a choice */
+            rt_knob(index, delta);
         else if (index == 7)
-            rec_rlen = clamp(rec_rlen + delta, 0, 128);   /* G R.LEN (F on the RECORDER) */
-        else if (index == 8) {
-            extern void rt_arm_knob(int delta);
-            rt_arm_knob(delta);                 /* H: this track's REC trigs, OFF / ONCE / ON */
-        } else if (index == 1 || index == 2)
-            goto as_recorder;                   /* A SRC, B CHAN: as on the RECORDER */
-        return;                                 /* C, D: nothing there */
+            rec_rlen = clamp(rec_rlen + delta, 0, 128);
+        else if (index == 1 || index == 2)
+            goto as_recorder;
+        return;
     }
+    /* (v0.44: the REC TRIGS view is gone; REC trigs, Q.REC and Q.PLAY are the BOUNCE REC panel's) */
 as_recorder:
     switch (index) {
     case 1: rec_src = clamp(rec_src + rec_choice_step(1, delta), 0, SMP_REC_SOURCES - 1); break;
@@ -522,7 +610,11 @@ static int closes(u32 code)
 #define MACHINE_COMMIT ((u32 (*)(u32, u32, u32, u32, u32))0x40031880u)
 #define KIT (*(volatile u32 *)0x800052A0u)
 #define SOUND_TYPE(t) (*(volatile signed char *)(KIT + 52u + 1163u * (u32)(t) + 0xDEu))
-#define ONESHOT 8                               /* dnfw.sampler.machines.TYPE_OF; 8..8 + SMP_N - 1 */
+#define ONESHOT 8                               /* dnfw.sampler.machines.TYPE_OF; the pool-playing sample
+                                                 * machines are 8..13 (v0.44: SMP_N is 7 with BOUNCE, type 17,
+                                                 * which plays its buffer, not a SAMP: not one of these; 14 is
+                                                 * a Monomachine machine) */
+#define SAMP_MACHINE(ty) ((ty) >= ONESHOT && (ty) <= 13)
 
 int smp_assign(int track, int slot)
 {
@@ -532,7 +624,7 @@ int smp_assign(int track, int slot)
     if (!owner)
         return -1;
     int ty = SOUND_TYPE(track);
-    if (ty < ONESHOT || ty >= ONESHOT + SMP_N) {    /* not a sample machine: ONESHOT, as the DT2's audio tracks */
+    if (!SAMP_MACHINE(ty)) {                    /* not a sample machine (BOUNCE too): ONESHOT, as the DT2's audio tracks */
         MACHINE_COMMIT(owner + 0xF4u, (u32)track, ONESHOT, 1, 1);
         if (SOUND_TYPE(track) != ONESHOT)
             return -1;                          /* refused (stock's permission): nothing set */
@@ -550,7 +642,7 @@ int smp_set_samp(int track, int value)
     if (track < 0 || track > 15 || value < 0 || value > 127 || !KIT)
         return -1;
     int ty = SOUND_TYPE(track);
-    if (ty < ONESHOT || ty >= ONESHOT + SMP_N)
+    if (!SAMP_MACHINE(ty))
         return -1;                              /* not a sample machine: nothing to set */
     u32 owner = UI_OWNER();
     if (!owner)
@@ -571,7 +663,7 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
     if (track < 16 && KIT) {
         int old = SOUND_TYPE(track);
         int ty = (int)type;
-        if (old != ty && old >= ONESHOT && old < ONESHOT + SMP_N && ty >= ONESHOT && ty < ONESHOT + SMP_N)
+        if (old != ty && SAMP_MACHINE(old) && SAMP_MACHINE(ty))
             keep = smp_samp_of((int)track);
     }
     int was = track < 16 && KIT ? SOUND_TYPE(track) : -1;
@@ -991,6 +1083,8 @@ static void rpt_poll(void)
         name_backdel();
     else if (rpt_grid)
         grid_move(rpt_code);
+    else if (rpt_code == K_UP || rpt_code == K_DOWN)   /* v0.44: UP/DOWN held scroll the character */
+        name_step(rpt_code == K_UP ? 1 : -1);
     else if (rpt_code == K_LEFT && nm_cur > 0)
         nm_cur--;
     else if (rpt_code == K_RIGHT && nm_cur < 6)
@@ -1090,8 +1184,11 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
             nm_cur++;
             rpt_start(code);
         }
-        else if (code == K_UP || code == K_DOWN)
+        else if (code == K_UP || code == K_DOWN) {   /* the character at the cursor, as the DN2's own
+                                                     * naming screen; v0.44: held, it scrolls on */
             name_step(code == K_UP ? 1 : -1);
+            rpt_start(code);
+        }
     } else if (rec_phase == PH_ASSIGN) {
         int t = smp_trig_track(code);
         if (t >= 0) {
@@ -1292,11 +1389,40 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
         if (it[0] != IT_KEY)
             return (u32)it;
         int press = (flags & F_PRESS) && !(flags & F_RELEASE);
+        if (bn_active() && press && code >= K_TRIG1 && code <= K_TRIG1 + 15) {   /* v0.44: a recorder trig */
+            u32 step = (u32)bn_page * 16u + (u32)(code - K_TRIG1);
+            unsigned char *table = sl_ui_table_now();
+            if (table && step < bn_len())
+                rt_trig_toggle(table, UI_TRACK_B, step, smp_func_held);
+            smp_overlay_dirty = 1;
+            eaten |= 1u << code;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
+        if (bn_active() && press && code == 22) {         /* PAGE: the next page of steps */
+            bn_page = (bn_page + 1) % (int)bn_pages();
+            smp_overlay_dirty = 1;
+            eaten |= 1u << code;
+            it[0] = IT_DROP;
+            return (u32)it;
+        }
         if (code == K_YES || code == K_NO || (code >= K_UP && code <= K_RIGHT)
             || (code >= K_ENC_A && code <= K_ENC_H)) {
             extern int rt_q_waiting(void);
             extern void rt_q_cancel(void);
-            if (press && code == K_YES)
+            if (press && code == K_YES && bn_active() && smp_func_held) {   /* v0.44: FUNC + YES saves the take */
+                extern void bn_save(void);
+                bn_save();
+            } else if (press && code == K_YES && bn_active()) {
+                u32 now = FRAMES;
+                if (bn_yes_at && now - bn_yes_at < 600u) {   /* YES YES: the one-shots armed again */
+                    unsigned char *table = sl_ui_table_now();
+                    bn_said_n = table ? (int)rt_rearm(table, UI_TRACK_B) : 0;
+                    bn_said_at = now | 1u;
+                    bn_yes_at = 0;
+                } else
+                    bn_yes_at = now | 1u;       /* a first YES: RECORD NOW once 0.4 s pass (rec_poll) */
+            } else if (press && code == K_YES)
                 rec_yes();
             if (press && code == K_NO) {
                 if (rt_q_waiting()) {           /* v0.41: a QREC take waiting: NO cancels it */
@@ -1304,10 +1430,6 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     sent_seq = 0;
                 } else
                     rec_overlay = 0;            /* the screen closes; a recording goes on */
-            }
-            if (press && (code == K_LEFT || code == K_RIGHT)) {
-                rec_view = code == K_RIGHT;     /* v0.41: RIGHT the REC TRIGS view, LEFT back */
-                smp_overlay_dirty = 1;
             }
             if (press && code < 32)
                 eaten |= 1u << code;

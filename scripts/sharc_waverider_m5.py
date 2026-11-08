@@ -2283,6 +2283,48 @@ def step_rec(init, sound, machines, blocks) -> dict:
     plain_low = arm_run(16383, quiet, 0.2, 14, 3, 0xC000)
     plain = arm_run(16383, quiet, 0.63, 15, 3, 0xC000)
 
+    # run 5, v0.44 BOUNCE: RECORD NOW from IN into a buffer half (dest BUF_SLOT0: the buffer
+    # directory's entry 0, SAMP 129), 4 steps, STOP after n blocks; then track 0 BOUNCE on
+    # SAMP 129 at 120 BPM plays it back (STRETCH, fitted to its steps). The directory entry
+    # is address, frames, steps (no rate, no format: int16 at 1.0), the playback bit-exact
+    BNC = SM.TYPE_OF["BOUNCE"]
+    steps5 = 4
+    state5 = {"b": 0}
+
+    def at_dispatch_5(r):
+        b = state5["b"]
+        if b == 0:
+            command(r, 17, SM.CMD_NOW, src=0, dest=SM.BUF_SLOT0 - SM.REC_FIRST, place=0x5000, thres=steps5 << 16)
+        if b == n:
+            command(r, 18, SM.CMD_STOP)
+        for k in range(32):
+            x = bits(sig[32 * b + k] if b < n else 0.0)
+            m2.poke(r.state, SM.IN_BUF + 4 * k, x)
+            m2.poke(r.state, SM.IN_BUF + 0x80 + 4 * k, x)
+        state5["b"] += 1
+
+    def frames_5(b):
+        if b < n:
+            f = base_frame(sound, machines, t0=ONE, trigger=False, overrides=smp_words({SM.SAMP_REC: 1}))
+        else:
+            f = base_frame(sound, machines, t0=BNC, trigger=(b == n), overrides=smp_words({SM.SAMP_REC: SM.BUF_SAMP0}))
+        f.put(SP.TEMPO_OFFSET, 120 * 120)
+        return f.to_bytes()
+    rec5 = run_blocks(init, frames_5, n + play, extra_hooks={m3.DISPATCH: at_dispatch_5})
+    ok5 = rec5["ok"]
+    st5 = rec5["state"].state if ok5 else None
+    bent = dsp.SMP_POOL_DDR + SM.BUF_DIR
+    words5 = [m2.word(st5, bent + 4 * k) or 0 for k in range(3)] if ok5 else [0, 0, 0]
+    got5 = []
+    if ok5:
+        for k in range(words5[1] // 2):
+            w = m2.word(st5, words5[0] + 4 * k) or 0
+            for h in (w & 0xFFFF, w >> 16):
+                got5.append((h - 65536 if h >= 32768 else h) / 32768.0)
+    back5 = smp_series(rec5, 0)[-play * BLOCK:] if ok5 else []
+    exact5 = smp_exact(rec5) if ok5 else (0, 1, 1)
+    rec5.pop("state", None)
+
     # v0.22: the RAM check (CMD_PROBE) on the image's own code. Block 0 takes the command
     # and fills the low area's first 256 words; then the last chunk of phase 3 and of
     # phase 4 are set up (both areas' last 256 words as the fills would leave them; the
@@ -2359,6 +2401,12 @@ def step_rec(init, sound, machines, blocks) -> dict:
             and plain is not None and plain[0] == 32 * (n - quiet) and plain[1],
         "every sample track bit-exact to the model, every block of both runs":
             ok1 and ok2 and exact1[1] == exact1[2] == exact2[1] == exact2[2] == 0,
+        "v0.44: RECORD NOW into a buffer half (dest 128): the buffer directory's entry 0 holds its "
+        "address (PLACE), the input's frames and its 4 steps, the frames the model's":
+            ok5 and words5 == [dsp.SMP_POOL_DDR + SM.REC_OFFSET + 0x5000 * 512, 32 * n, steps5] and got5 == want[:len(got5)]
+            and len(got5) == 32 * n,
+        "v0.44: a BOUNCE track on SAMP 129 plays the half back (STRETCH on its steps), bit-exact":
+            ok5 and len(back5) == play * BLOCK and V.peak(back5) > 0.1 and exact5[1] == exact5[2] == 0,
         "v0.22: the RAM check takes its command and fills 256 words a block of the low area, "
         "no more": first_ok,
         "v0.22: the RAM check's last chunks: phase 3 on to 4, then the verdict 1 (status half 4, "
@@ -2368,7 +2416,8 @@ def step_rec(init, sound, machines, blocks) -> dict:
     }
     return {"ok": all(checks.values()), "checks": checks,
             "numbers": {"entry": [hex(w) for w in words], "entry2": [hex(w) for w in words2],
-                        "status1": stat1, "status2": stat2, "exact": (exact1, exact2),
+                        "status1": stat1, "status2": stat2, "exact": (exact1, exact2, exact5),
+                        "entry5": [hex(w) for w in words5], "back5": V.peak(back5) if back5 else None,
                         "probe": (seenp.get("after0"), seenp.get("after1"), [h[4] for h in statp],
                                   [h[4] for h in statq], pphp),
                         "halt": (rec.get("halt"), rec2.get("halt"))}}

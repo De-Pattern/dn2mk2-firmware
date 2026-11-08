@@ -478,7 +478,7 @@ static void smp_picture(void *c, void *view, int kind)
     const char *snd = k == 0 ? "OFF" : sound_name(k);
     if (!snd)
         snd = "EMPTY";
-    TEXT(c, FONT, WAVE_X + WR_WIDTH / 2, 30, CENTRED, "%.7s", smp_machine[kind - SMP_KIND0]);
+    TEXT(c, FONT, WAVE_X + WR_WIDTH / 2, 30, CENTRED, "%.7s", smp_machine[SMP_IDX(kind)]);
     TEXT(c, FONT, WAVE_X + WR_WIDTH / 2, 21, CENTRED, "%.5s", snd);
     int w = WR_WIDTH - 8, x0 = WAVE_X + 4, a, b, loop = -1;
     if (kind == SMP_GRID_KIND) {
@@ -561,7 +561,7 @@ void wr_page_draw(void *view, void *canvas)
     int kind = wr_active();
     int mi = mnm_index(kind);                   /* v0.26: a Monomachine machine's: one page */
     int mnm = mi >= 0;
-    int smp = kind >= SMP_KIND0 && kind < SMP_KIND0 + SMP_N;   /* a sample machine's */
+    int smp = SMP_IDX(kind) >= 0;   /* a sample machine's (v0.44: BOUNCE's kind 13 too) */
     if (page < 0 || page >= (smp ? 2 : mnm ? 1 : WR_PAGES))
         page = 0;
     if (kind == 1) {                            /* PERC: the names TYPE has now */
@@ -612,7 +612,7 @@ void wr_page_draw(void *view, void *canvas)
     for (int i = 0; i < 8; i++) {
         int top = i < 4;
         int cx = COL0 + COLW * (i & 3) + COLW / 2;
-        u32 id = smp ? smp_ids[kind - SMP_KIND0][i] : wr_ids[page][i];
+        u32 id = smp ? smp_ids[SMP_IDX(kind)][i] : wr_ids[page][i];
         const char *label = smp ? "-" : wr_labels[page][i];
         if (id)
             label = NAME_SHORT(id);             /* PERC, samples: the name wr_names gave the record */

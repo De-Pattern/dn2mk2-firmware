@@ -16,13 +16,17 @@ and default suit it (a DT2 default of "full" on a record whose default is its to
 from __future__ import annotations
 
 FIRST_TYPE = 8
-NAMES = ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE")   # types 8..13 (v0.19: SLICE)
-SHORT = ("ONE", "WRP", "STRE", "RPI", "GRD", "SLC")
-TYPE_OF = {n: FIRST_TYPE + k for k, n in enumerate(NAMES)}
+# types 8..13 (v0.19: SLICE); v0.44: BOUNCE, type 17 (14..16 are the Monomachine's): to the DSP
+# it is STRETCH on its track's recorder buffer (BUF_*, below); the ColdFire's own machine
+NAMES = ("ONESHOT", "WERP", "STRETCH", "REPITCH", "GRID", "SLICE", "BOUNCE")
+SHORT = ("ONE", "WRP", "STRE", "RPI", "GRD", "SLC", "BNC")
+BOUNCE_TYPE = 17
+TYPE_OF = {n: FIRST_TYPE + k for k, n in enumerate(NAMES[:6])} | {"BOUNCE": BOUNCE_TYPE}
+TYPES = tuple(TYPE_OF[n] for n in NAMES)  # in NAMES' order
 ENGINED = NAMES                           # the machines this build renders (v0.15: all five)
 
 # record id -> (frame slot, low, top): value = clamp((word >> 8) - low, 0, top)
-RECORDS = {238: (25, 4, 120), 254: (41, 0, 127), 256: (43, 0, 127), 239: (26, 0, 120),
+RECORDS = {238: (25, 4, 120), 254: (41, 0, 127), 256: (43, 0, 144), 239: (26, 0, 120),   # v0.44: SAMP to 144 (BOUNCE's buffers, below); the knob stays 0..127
            258: (45, 0, 127), 257: (44, 0, 127), 241: (30, 0, 127), 260: (47, 0, 127),
            # v0.15, the time machines: BARS on PD1 (0..100, default 50: 1 bar), SEG on TUN2
            # (default 60: 16 segments), MODE on DEC (default 127: FWD)
@@ -30,7 +34,8 @@ RECORDS = {238: (25, 4, 120), 254: (41, 0, 127), 256: (43, 0, 127), 239: (26, 0,
            # the recorder (page 3, v0.15): ARM on TBL1 (0/1), DEST on MOD (0..3), THRES on
            # WAV2, SRC on DRIF, R.LEN on ATK, CHAN on TYPE (0..2), R.STRT on TBL2 -- all default 0
            247: (27, 0, 1), 248: (37, 0, 3), 243: (32, 0, 120), 252: (38, 0, 127), 253: (40, 0, 127),
-           259: (46, 0, 2), 251: (33, 0, 1)}
+           259: (46, 0, 2), 251: (33, 0, 1),
+           244: (35, 0, 7)}                  # v0.44 BOUNCE's BUF: buffer 1..8 (PERC's slot 35, free here)
 
 # the eight controls each machine shows, in page order A..H: (record, short, long)
 PAGES = {        # v0.15: the DT2's own SRC layout -- A TUNE, B PLAY, C (empty), D SAMP on top
@@ -43,6 +48,10 @@ PAGES = {        # v0.15: the DT2's own SRC layout -- A TUNE, B PLAY, C (empty),
     "STRETCH": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
                 (256, "SAMP", "Sample Slot"), (239, "STRT", "Start"), (258, "LEN", "Length"),
                 (240, "BARS", "Bars"), (241, "LEV", "Sample Level")),
+    # v0.44 BOUNCE: STRETCH's page with the slot's place taken by BUF (which buffer, 1..8)
+    "BOUNCE": ((238, "TUNE", "Tune"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
+               (244, "BUF", "Buffer"), (239, "STRT", "Start"), (258, "LEN", "Length"),
+               (0, "-", "Unused"), (241, "LEV", "Sample Level")),
     "REPITCH": ((0, "-", "Unused"), (254, "PLAY", "Play Mode"), (0, "-", "Unused"),
                 (256, "SAMP", "Sample Slot"), (239, "STRT", "Start"), (258, "LEN", "Length"),
                 (240, "BARS", "Bars"), (241, "LEV", "Sample Level")),
@@ -56,9 +65,11 @@ PAGES = {        # v0.15: the DT2's own SRC layout -- A TUNE, B PLAY, C (empty),
 }
 # how page.c draws each control (v0.15, after the DT2's widgets)
 WIDGETS = {238: "bipolar", 254: "play", 260: "knob", 256: "samp", 239: "knob", 258: "knob",
-           257: "knob", 241: "fader", 242: "seg", 255: "play", 240: "bars"}
+           257: "knob", 241: "fader", 242: "seg", 255: "play", 240: "bars",
+           244: "knob"}                           # v0.44 BOUNCE: BUF 1..8 as a knob
 # what each control's value means here
 TUNE_REC, PLAY_REC, SAMP_REC, LEV_REC = 238, 254, 256, 241
+BUF_REC = 244                              # v0.44 BOUNCE: its buffer (0..7 -> BUF 1..8)
 STRT_REC, LEN_REC, LOOP_REC = 239, 258, 257
 GRID_REC, SLICE_REC, SLEN_REC = 239, 257, 260
 BARS_REC, SEG_REC, MODE_REC = 240, 242, 255
@@ -255,6 +266,20 @@ META_BYTES = 12 + META_FOLDERS * META_FOLDER_BYTES + 128 * META_SLOT_BYTES     #
 # a library sample to be in a slot only by this (smp_lib_slot_of): a pack's samples of one
 # length whose 35-character names are one (v0.38: all shown in one slot, all previewed as it)
 LIBID_OFFSET = 0xC20
+# v0.44 BOUNCE: the buffer directory, in the directory page after the library ids (0xC20 +
+# 123 x 4 = 0xE0C) and before the command block (0xF00): BUF_N buffers of two halves each,
+# BUF_ENTRY bytes a half: the take's address, its frames (the DSP's recorder keeps both
+# current, as a slot's entry), its length in steps (the ColdFire's R.LEN; STRETCH fits the
+# take to that many steps at the tempo now). A voice reaches half h of buffer b as SAMP
+# BUF_SAMP0 + 2 b + h (the ColdFire's rt_map writes that into a BOUNCE track's SAMP word; the
+# knob never goes past 127); no count, no names, no slices, rate 1, int16.
+BUF_N = 8
+BUF_HALVES = 2 * BUF_N
+BUF_ENTRY = 12
+BUF_DIR = 0xE10                             # .. 0xECF
+BUF_SLOT0 = 128                             # the slot index of half 0 of buffer 0
+BUF_SAMP0 = BUF_SLOT0 + 1                   # its SAMP value (SAMP 0 is OFF: slot = SAMP - 1)
+assert BUF_DIR + BUF_HALVES * BUF_ENTRY <= CMD_OFFSET and BUF_DIR >= LIBID_OFFSET + 4 * REC_FIRST
 POS_MAGIC = 0x5A34                          # v0.25: idle, the voices' play positions (tdm_tx)
 POS_NONE = 0xFFFF                           #   a track that plays nothing
 POS_ONE = 0xFFFE                            #   a position: its fraction of the sample, x this

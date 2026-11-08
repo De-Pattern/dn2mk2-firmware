@@ -50,12 +50,14 @@ NEW_TYPE = 5
 from ..mnm import machines as _mnm           # noqa: E402
 # PERC; the Monomachine's machines (docs/mnm.md: 6, 7, then 14.. after the sample machines);
 # the Digitakt II's sample machines (docs/sampler.md, 8..13): all WaveTone clones
-NEW_TYPES = tuple(range(5, max(13, *_mnm.TYPES) + 1))
+from ..sampler import machines as _smpm         # noqa: E402
+NEW_TYPES = tuple(range(5, max(13, *_mnm.TYPES, _smpm.BOUNCE_TYPE) + 1))   # v0.44: to 17, BOUNCE
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's place
 MACHINE_NAMES = {5: ("Perc", "PRC"),
                  8: ("Oneshot", "ONE"), 9: ("Werp", "WRP"), 10: ("Stretch", "STR"),
                  11: ("Repitch", "RPT"), 12: ("Grid", "GRD"), 13: ("Slice", "SLC"),
+                 _smpm.BOUNCE_TYPE: ("Bounce", "BNC"),       # v0.44: a section of its own, after the sample machines
                  **{t: _mnm.LIST_NAMES[n] for t, n in zip(_mnm.TYPES, _mnm.NAMES)}}   # v0.26
 if set(MACHINE_NAMES) != set(NEW_TYPES):
     raise ImportError(f"machine types {sorted(set(NEW_TYPES) - set(MACHINE_NAMES))} have no machine")
@@ -71,7 +73,7 @@ LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
 # PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
 # order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
-LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, 4)   # v0.19: SLICE before GRID, the DT2's order
+LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, _smpm.BOUNCE_TYPE, 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider)
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -830,7 +832,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "rec_overlay", "rec_src", "rec_dest", "smp_ram", "rec_phase", "trim_slot",
                  "trim_n", "trim_s", "trim_e", "nm_cur", "nm_text", "slc_state", "slc_page_seen", "slc_seen_draw", "slc_letgo", "slc_open_track",
                  "smp_analyse", "smp_analysis", "smp_onsets", "smp_slices_set", "smp_slices_get",
-                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x", "rt_on", "rt_play", "rt_rplace", "rt_rbytes", "rt_pend", "rt_cur", "rt_manual", "rt_qrec", "rt_qplay", "rt_pos", "rt_steps", "rt_nx_place", "rt_nx_room", "rt_nx_need", "rt_w", "rt_gen", "q_gen", "q_fire", "q_cancel", "rt_fired", "rt_refused", "rt_swaps", "rt_qfired", "rt_why", "rt_why_at", "rt_trig", "rt_frame", "rt_map", "rt_poll", "rt_cut", "smp_rt_sent", "sl_rec_knob", "sl_rec_held", "sl_rec_table", "rec_view", "rec_rt_take", "rec_rlen", "rec_src", "rec_chan", "rt_q_set", "rt_q_waiting", "rt_arm", "rt_arm_knob", "sl_rec_page", "rt_knob", "rt_state", "smp_rec_place", "smp_slot_empty", "smp_pl_dirp", "rec_combo", "rec_overlay",
+                 "slc_nfr", "slc_sl", "slc_ns", "slc_cur", "slc_grid_n", "smp_pos", "smp_pos_at", "smp_periods", "smp_dir_ok", "smp_meta_ok", "smp_lst_open", "smp_fb_open", "smp_fb_folder", "smp_fb_cur", "smp_fb_count", "smp_fb_mark_count", "smp_fb_menu", "smp_mod_apply", "smp_quant", "smp_samp_turned", "smp_overlay_dirty", "rec_pv_on", "smp_func_held", "smp_question_up", "smp_machine_commit", "smp_rx", "smp_fb_store", "smp_lib_refresh", "smp_lib_pending", "smp_lp_queued", "smp_lib_state", "smp_lib_writes", "smp_lib_load", "smp_lib_slot_of", "smp_lib_preview", "smp_lib_preview_stop", "smp_fb_rowtext", "smp_mq_off", "smp_fb_mcur", "smp_lp_done", "smp_lp_full", "smp_l_order", "smp_walk_total", "smp_held_lo", "smp_held_hi", "smp_knob_d", "smp_knob_at", "smp_dsp_load", "smp_load_peak", "smp_load_seen", "smp_load_at", "wr_screen_obj", "rec_state", "rec_heard", "slc_kb_c", "slc_alloc_n", "smp_tables", "smp_pv_state", "trim_zoom", "trim_head_x", "rt_on", "rt_play", "rt_rplace", "rt_rbytes", "rt_pend", "rt_cur", "rt_cur_end", "rt_manual", "rt_qrec", "rt_qplay", "rt_pos", "rt_steps", "rt_nx_place", "rt_nx_room", "rt_nx_need", "rt_w", "rt_gen", "q_gen", "q_fire", "q_cancel", "rt_fired", "rt_refused", "rt_swaps", "rt_qfired", "rt_why", "rt_why_at", "rt_trig", "rt_bounce_samp", "rt_is_bounce", "rt_buf_of", "rt_trig_get", "rt_trig_toggle", "rt_rearm", "rt_count", "rt_take_handover", "rt_regions", "rt_rsteps", "rt_last_step", "rt_used", "rt_fired_at", "rt_fired_trk", "rt_why_trk", "rt_last_key", "bn_page", "bn_yes_at", "bn_active", "bn_open", "bn_save", "bn_pages", "bn_said_at", "bn_said_n", "bn_nothing_at", "sl_ui_table_now", "smp_push_slot", "rt_frame", "rt_poll", "rt_cut", "smp_rt_sent", "sl_rec_knob", "sl_rec_held", "sl_rec_table", "rec_view", "rec_rt_take", "rec_rlen", "rec_src", "rec_chan", "rt_q_set", "rt_q_waiting", "sl_rec_page", "rt_knob", "rt_state", "smp_rec_place", "smp_slot_empty", "smp_pl_dirp", "rec_combo", "rec_overlay",
                  "jmp_on", "jmp_armed", "jmp_pending", "jmp_count", "jmp_last", "jmp_loaded", "jmp_dirty",
                  "jmp_reads", "jmp_writes", "jmp_to", "jmp_from", "jmp_key", "jmp_poll", "jmp_forced",
                  # v0.38: per-project pools

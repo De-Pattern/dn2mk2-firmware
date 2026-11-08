@@ -1,37 +1,11 @@
-"""REC trigs, the REC buffers, QREC and QPLAY under digikit's ColdFire emulator (docs/rectrig.md):
-the gate's check (ship_gate.py step "rectrig").
-
-    DT2_SECTIONS=../sec111 DT2_MAIN_IMG=../sec111/section_3_MAIN_OS.bin \\
-    DNFW_EMU_FLAGS='{"weakptr": false}' ../digikit/.venv/bin/python -u scripts/emu_rectrig.py \\
-        --build out/b41 --snapshot ../digikit/out/snapshots/dn2-1.11/ui800M-v014.snap \\
-        --json out/rectrig.json [--png-dir out/rectrig]
-
-The sequencer does not play under the emulator (docs/emulator.md), so, as emu_slides does, a
-trig is what the note block runs for a voice: the lock-list builder and the applier (the
-build's sl_build / sl_apply, so rt_trig), and every frame after it is the REAL audio
-interrupt (0x40025e36 to its rte: smp_mod_apply with rt_frame and rt_map, and smp_tdm sending
-the packets). The sequencer's state the build reads is set as it would be: playing (0x42c5a918),
-the pattern's mode and length, track 1's step (0x42c5a984).
-
-What it checks (each a named check, all must pass):
-- the buffers are on with an empty directory, each has a next place, the two do not overlap;
-  off when SAMP 124 holds a saved sample (and SAMP 124 then plays that sample, untouched);
-- a REC lock (REC 1 on step 4) set, read back, through SAVE and LOAD as id 202; a step clear
-  removes it; stock's LOAD skips id 202 (a pattern saved here opens on stock 1.11);
-- the trig at step 4 fires one REC 1 take: the command (a buffer take's sequence, NOW, the
-  RECORDER's SRC/CHAN, the place, slot 125 = REC 1's idle half, R.LEN 4 steps at 120 BPM =
-  24,000 frames); the other voices of the same trig and a second apply in the frame do not
-  fire again; the packets carry it (CMD_REPEAT of them) and the UI's queue is untouched;
-- QPLAY PLEN: REC 1 keeps playing its old half while the take records and through steps 5..15,
-  and switches at the pattern's first step (rt_map: SAMP 124 -> slot 125); SAMP 126/127 play
-  nothing while the buffers are on, any other SAMP is left alone;
-- QPLAY OFF: REC 2's take (step 8) is heard at once;
-- a manual take armed or recording, or the buffers off: the trig records nothing;
-- QREC 8: a manual NOW held for the boundary: not sent on steps 5..7, sent on step 8;
-- the allocator: a manual take's place keeps clear of the buffer takes and their next places;
-- (with --png-dir) the RECORDER driven through the panel: a step held, H turned four detents:
-  that step's REC 1, three detents do nothing; RIGHT shows the REC TRIGS view.
-"""
+"""v0.44 BOUNCE: recorder trigs, the buffers, QREC, QPLAY (csrc/sampler/rectrig.c, rec.c), under
+the emulator. The build's audio interrupt is run frame by frame with the sequencer's state set
+as the sequencer would set it (playing, each track's step: TRACK_CUR), the recorder trigs in the
+playing pattern's own lock table (where rt_frame reads them), track 0's frame words as the frame
+builder carries them (type BOUNCE, BUF, R.LEN, SRC, CHAN). Checked: the table's place, a trig
+fires from the step itself (no note), its command, the packets, the QPLAY switch, the one-shot's
+spending and re-arming, 2+1, the guards, the handover, QREC; then the RECORDER through the
+panel: [TRIG] places and removes a trig, YES YES arms. docs/rectrig.md."""
 
 from __future__ import annotations
 
@@ -63,6 +37,11 @@ LIST_BYTES = 20 + 202 * 8
 STACK_TOP, SENTINEL = 0x46A20000, 0x46A20400
 REC_FIRST = 123
 RAM_REC, ID_REC, TAG = 0x52, 202, 0x20
+PAT_LOCK_TABLE = 97872                  # v0.44: the pattern's lock table inside the pattern object (rectrig.c)
+CTL_FRAME = 0x80005E60
+BOUNCE = 17
+BUF_SLOT0, BUF_N = 128, 8
+SLOT_BUF, SLOT_SRC, SLOT_RLEN, SLOT_CHAN = 35, 38, 40, 46
 
 report: dict = {"checks": {}}
 
@@ -149,44 +128,71 @@ def main() -> int:
     machine.write(DIR + 8, b"\x00" * 16 * SM.POOL_SLOTS)
     setv("smp_dir_ok", 1)
     put16(TEMPO_AT, 120 * 120)
-    setv("rec_rlen", 4)
-    setv("rec_src", 1)                  # MAIN
-    setv("rec_chan", 0)
     machine.write(lay["rt_manual"], b"\x00\x00\x00\x00")
+
+    # ---- the pattern: playing, per pattern, 16 steps; its lock table is where rectrig.c reads it
+    pat = machine.long(SEQ_PATTERN)
+    machine.write(pat + PAT_MODE, b"\x00")
+    put16(pat + PAT_LENGTH, 16)
+    put32(SEQ_PLAYING, 0)
+    table = pat + PAT_LOCK_TABLE
+    # the model's table getter (vtable +40: *(model + 16)) must give the same address
+    APP, TRACK_CTX = 0x4018A97A, 0x4003EFDE
+    app = call(APP)[0]
+    ctx = call(TRACK_CTX, app)[0]
+    model = machine.long(ctx + 44)
+    getter = machine.long(machine.long(model) + 40)
+    got = call(getter, model)[0]
+    check("the playing pattern's lock table is PATTERN + 97,872 (the model's getter says so)",
+          got == table, f"getter {got:#x}, PATTERN + off {table:#x}")
+
+    # ---- track 0 BOUNCE on BUF 1, R.LEN 4, SRC MAIN, CHAN L+R: the frame's words, as the frame
+    # builder carries the sound's (rectrig.c reads them there)
+    T, V = 0, 0
+
+    # (the frame builder, in the audio interrupt, rebuilds the frame from the kit's sounds every
+    # frame: the sound's type byte and its parameter words are what to set)
+    kit = machine.long(KIT)
+
+    def ctl_put(t, slot, value):
+        snd = kit + 52 + SOUND_STRIDE * t
+        put16(snd + 48 + 2 * slot, value << 8)
+        put16(CTL_FRAME + 168 + 2 * slot + 146 * t, value << 8)
+
+    def type_put(t, ty):
+        snd = kit + 52 + SOUND_STRIDE * t
+        machine.write(snd + 0xDE, bytes([ty]))
+        put16(CTL_FRAME + 148 + 2 * t, ty)
+    type_put(T, BOUNCE)
+    ctl_put(T, SLOT_BUF, 0)
+    ctl_put(T, SLOT_RLEN, 4)
+    ctl_put(T, SLOT_SRC, 1)
+    ctl_put(T, SLOT_CHAN, 0)
     call(lay["rt_poll"])
     on = L("rt_on")
-    nx = [machine.long(lay["rt_nx_place"] + 4 * b) for b in range(2)]
-    room = [machine.long(lay["rt_nx_room"] + 4 * b) for b in range(2)]
-    need = [machine.long(lay["rt_nx_need"] + 4 * b) for b in range(2)]
-    check("buffers on with an empty directory; each has a next place, apart",
-          on == 1 and room[0] >= need[0] > 0 and room[1] >= need[1] > 0
-          and (nx[0] + need[0] <= nx[1] or nx[1] + need[1] <= nx[0]),
-          f"on {on}, places {[hex(x) for x in nx]}, need {need}, room {room}")
-
-    # ---- the pattern and the voice (emu_slides' shape) ---------------------------------------
-    V, T = 0, 0
-    kit = machine.long(KIT)
-    snd = kit + 52 + SOUND_STRIDE * T
-    put32(OWNER + 4 * V, T)
-    call(SYNC, snd, V)
-    for s in range(101):
-        put32(STATE + 4 * (17 + s), machine.word(SRC + 2 * (17 + s)) << 16)
-    call(BITMAP_CLEAR, V)
-    machine.at = 0x46A30000
-    table = machine.alloc(TABLE_BYTES)
-    machine.write(table, b"\xff" * (REC * RECS))
-    machine.write(table + INDEX, b"\xff" * (16 * 101))
+    used = machine.read(lay["rt_used"], BUF_N)
+    nx = [machine.long(lay["rt_nx_place"] + 4 * b) for b in range(BUF_N)]
+    need = [machine.long(lay["rt_nx_need"] + 4 * b) for b in range(BUF_N)]
+    room = [machine.long(lay["rt_nx_room"] + 4 * b) for b in range(BUF_N)]
+    check("buffers on; only BUF 1 (the BOUNCE track's) has a next place planned",
+          on == 1 and list(used) == [1] + [0] * 7 and room[0] >= need[0] > 0 and all(n == 0 for n in need[1:]),
+          f"on {on}, used {list(used)}, need {need}")
 
     def rec_lock(step):
         return call(lay["sl_lock_get"], table, T, step, 2)[0] & 0xFFFF
 
-    call(lay["sl_lock_set"], table, T, 4, 2, 1)      # REC 1 on step 4
-    call(lay["sl_lock_set"], table, T, 8, 2, 2)      # REC 2 on step 8
+    # ---- recorder trigs placed as the UI places them (rt_trig_toggle on the UI's table) --------
+    v4 = call(lay["rt_trig_toggle"], table, T, 4, 0)[0] & 0xFFFF
+    v8 = call(lay["rt_trig_toggle"], table, T, 8, 1)[0] & 0xFFFF
     heads = [machine.read(table + REC * i, 2) for i in range(RECS)]
-    check("REC locks set: steps 4 (REC 1) and 8 (REC 2), one record of ours",
-          rec_lock(4) == 1 and rec_lock(8) == 2 and rec_lock(5) == 0xFFFF
-          and heads.count(bytes([RAM_REC, TAG | T])) == 1,
-          f"{rec_lock(4)}, {rec_lock(8)}, {rec_lock(5)}")
+    check("a recorder trig on step 4, a one-shot on step 8 (values 1, 2), one record of ours",
+          v4 == 1 and v8 == 2 and rec_lock(4) == 1 and rec_lock(8) == 2 and rec_lock(5) == 0xFFFF
+          and heads.count(bytes([RAM_REC, TAG | T])) == 1, f"{v4}, {v8}, {rec_lock(5)}")
+    call(lay["rt_trig_toggle"], table, T, 8, 1)       # (the one-shot off again until its own section)
+    again = call(lay["rt_trig_toggle"], table, T, 4, 0)[0] & 0xFFFF
+    back = call(lay["rt_trig_toggle"], table, T, 4, 0)[0] & 0xFFFF
+    check("[TRIG] again clears it, once more places it", again == 0xFFFF and back == 1, f"{again}, {back}")
+    machine.at = 0x46A30000
     stored = machine.alloc(TABLE_BYTES)
     call(SAVE, stored, table)
     ids = [machine.read(stored + REC * i, 1)[0] for i in range(RECS)]
@@ -194,164 +200,180 @@ def main() -> int:
     machine.write(ram2, b"\xff" * (REC * RECS))
     machine.write(ram2 + INDEX, b"\xff" * (16 * 101))
     call(LOAD, ram2, stored)
-    back = [call(lay["sl_lock_get"], ram2, T, s, 2)[0] & 0xFFFF for s in (4, 8, 5)]
-    check("SAVE stores the REC record as id 202; LOAD brings it back", ID_REC in ids and back == [1, 2, 0xFFFF],
-          f"ids {sorted(set(ids) - {255})}, back {back}")
+    rb = [call(lay["sl_lock_get"], ram2, T, s, 2)[0] & 0xFFFF for s in (4, 8, 5)]
+    check("SAVE stores the record as id 202; LOAD brings it back", ID_REC in ids and rb == [1, 0xFFFF, 0xFFFF],
+          f"ids {sorted(set(ids) - {255})}, back {rb}")
 
-    # ---- the sequencer, as it would be: playing, per pattern, 16 steps -----------------------
-    pat = machine.long(SEQ_PATTERN)
-    machine.write(pat + PAT_MODE, b"\x00")
-    put16(pat + PAT_LENGTH, 16)
+    # ---- the sequencer runs: the trig fires from the step itself (no note, no voice) ----------
     put32(SEQ_PLAYING, 1)
+    put32(FRAMES, 40_000)
 
     def at_step(s, frames=2):
-        machine.write(TRACK_CUR, bytes([s]))
+        machine.write(TRACK_CUR + T, bytes([s]))
+        machine.write(TRACK_CUR, bytes([s]))   # (track 0 is the master too)
         for _ in range(frames):
+            put32(FRAMES, machine.long(FRAMES) + 1)
             frame()
-
-    at_step(3, 3)
-    steps3 = L("rt_steps")
-
-    def trig(step, fr):
-        put32(FRAMES, fr)
-        lst = machine.alloc(LIST_BYTES)
-        machine.write(lst, b"\x5a" * LIST_BYTES)
-        call(lay["sl_pre"], V, T)
-        call(UNDO, V, SRC, snd)
-        call(BUILD, T, lst, table, snd + 48, step, step, 0)
-        call(APPLY, V, lst, SRC)
-        return lst
-
-    call(lay["rt_poll"])                               # the plan at the tempo the frames carry, as the UI makes it
+        put32(FRAMES, machine.long(FRAMES) + 160)   # a step's time passes (about 0.1 s), and
+        call(lay["rt_poll"])                        # the UI loop plans the next place, as it does every pass
+    for s in range(0, 4):
+        at_step(s)
+    f0 = L("rt_fired")
+    check("steps 0..3 fire nothing", f0 == 0, f"fired {f0}")
+    if os.environ.get("RT_DEBUG"):
+        print("DEBUG last_step", machine.read(lay["rt_last_step"], 16).hex(), "is_bounce", call(lay["rt_is_bounce"], T)[0],
+              "lock(4)", rec_lock(4), "buf_of", call(lay["rt_buf_of"], T)[0], "playing", machine.long(SEQ_PLAYING),
+              "pos", L("rt_pos"), "steps", L("rt_steps"))
+    call(lay["rt_poll"])
     tempo = machine.word(TEMPO_AT)
-    nx = [machine.long(lay["rt_nx_place"] + 4 * b) for b in range(2)]
-    need = [machine.long(lay["rt_nx_need"] + 4 * b) for b in range(2)]
-    want_fr = [min(4 * (86400000 // tempo), (need[b] // 2) & ~31) for b in range(2)]
-    report["tempo_word"] = tempo
-    # v0.41 (the owner): a track's REC trigs record only when armed. OFF (the default): the trig
-    # records nothing; then ON for the cases below
-    machine.write(TRACK_CUR, bytes([4]))
-    trig(4, 40_000)
-    off_why, off_fired = L("rt_why"), L("rt_fired")
-    off_at = L("rt_why_at") if "rt_why_at" in lay else 1
-    check("a track not armed (OFF, the default): its REC trig records nothing, and says why (v0.42)",
-          off_fired == 0 and off_why == 4 and off_at != 0, f"fired {off_fired}, why {off_why}, at {off_at}")
-    machine.write(lay["rt_arm"] + T, b"\x02")         # ON
+    nx0 = machine.long(lay["rt_nx_place"])
+    need0 = machine.long(lay["rt_nx_need"])
+    want_fr = min(4 * (86400000 // tempo), (need0 // 2) & ~31)
     gen0, sent0 = L("rt_gen"), L("smp_rt_sent")
     qhead = machine.read(lay["smp_cmds"], 4)
-    machine.write(TRACK_CUR, bytes([4]))
-    lst = trig(4, 50_000)
-    call(APPLY, V, lst, SRC)                          # the trig's chord: another apply, same frame
+    at_step(4, 3)
     w = [machine.long(lay["rt_w"] + 4 * j) for j in range(6)]
-    want_slot = REC_FIRST + 2                          # REC 1's idle half
-    check("step 4 fires one REC 1 take (a chord's other apply does not fire again)",
-          L("rt_fired") == 1 and L("rt_gen") == gen0 + 1, f"fired {L('rt_fired')}, gen {L('rt_gen') - gen0}")
-    check(f"its command: a buffer take's sequence, NOW, MAIN, L+R, its place, slot 125, R.LEN 4 steps "
-          f"at the frame's tempo ({want_fr[0]} frames)",
+    want_slot = BUF_SLOT0 + 1                          # BUF 1's idle half (half 1)
+    check("step 4 fires one take (the step itself, no note needed; the frames after it not again)",
+          L("rt_fired") == 1 and L("rt_gen") == gen0 + 1 and L("rt_last_key") == (T << 8 | 4),
+          f"fired {L('rt_fired')}, gen {L('rt_gen') - gen0}, key {L('rt_last_key'):#x}")
+    check(f"its command: a buffer take's sequence, NOW, MAIN, L+R, its place, slot {want_slot}, R.LEN 4 steps "
+          f"at the frame's tempo ({want_fr} frames), the steps in the threshold word",
           (w[0] & 0x8000) and w[1] == 2 and w[2] == 1 and (w[3] & 3) == 0
-          and (w[3] >> 8) == nx[0] // 512 and (w[5] >> 24) == want_slot and (w[5] & 0xFFFFFF) == want_fr[0],
-          [hex(x) for x in w])
+          and (w[3] >> 8) == nx0 // 512 and (w[5] >> 24) == want_slot and (w[5] & 0xFFFFFF) == want_fr
+          and (w[4] >> 16) == 4, [hex(x) for x in w])
     for _ in range(12):
+        put32(FRAMES, machine.long(FRAMES) + 1)
         frame()
     check("the packets carried it (8 repeats), the UI's queue untouched",
           L("smp_rt_sent") == sent0 + 1 and machine.read(lay["smp_cmds"], 4) == qhead,
           f"rt sent {L('smp_rt_sent') - sent0}")
-    play0 = machine.read(lay["rt_play"], 2)
-    m124 = call(lay["rt_map"], 124)[0]
-    check("QPLAY PLEN: REC 1 still plays its old half while the take records", play0[0] == 0 and m124 == 124
-          and machine.read(lay["rt_pend"], 1)[0] == 1, f"play {list(play0)}, SAMP 124 -> {m124}")
+    play0 = machine.read(lay["rt_play"], 1)[0]
+    samp0 = call(lay["rt_bounce_samp"], T)[0]
+    check("QPLAY PLEN: the track still hears nothing new while the take records (its old half empty: SAMP 0)",
+          play0 == 0 and samp0 == 0 and machine.read(lay["rt_pend"], 1)[0] == 1, f"play {play0}, SAMP {samp0}")
     for s in range(5, 16):
         at_step(s)
     mid = machine.read(lay["rt_play"], 1)[0]
     at_step(0)
     after = machine.read(lay["rt_play"], 1)[0]
-    m124b = call(lay["rt_map"], 124)[0]
-    check(".. and switches at the pattern's first step, not before (SAMP 124 -> slot 125)",
-          mid == 0 and after == 1 and m124b == want_slot + 1, f"before {mid}, after {after}, SAMP 124 -> {m124b}")
-    others = [call(lay["rt_map"], v)[0] for v in (126, 127, 50, 0)]
-    check("SAMP 126/127 play nothing while the buffers are on; other SAMP left alone",
-          others == [0, 0, 50, 0], others)
+    sampb = call(lay["rt_bounce_samp"], T)[0]
+    check(".. and switches at the pattern's first step, not before: the voice's SAMP is the half's "
+          f"({want_slot + 1})", mid == 0 and after == 1 and sampb == want_slot + 1,
+          f"before {mid}, after {after}, SAMP {sampb}")
+    steps_rec = machine.read(lay["rt_rsteps"] + 2 * (want_slot - BUF_SLOT0), 2)
+    check("the take's steps kept (4)", struct.unpack(">H", steps_rec)[0] == 4, steps_rec.hex())
 
-    # ---- QPLAY OFF: REC 2 heard as it records ------------------------------------------------
-    setv("rt_qplay", 0)
-    call(lay["rt_poll"])                               # (the UI, between the two trigs)
-    machine.write(TRACK_CUR, bytes([8]))
-    f_before = L("rt_fired")
-    trig(8, 60_000)
-    report["rec2_why"] = L("rt_why") if L("rt_fired") == f_before else 0
-    play1 = machine.read(lay["rt_play"] + 1, 1)[0]
-    w2 = [machine.long(lay["rt_w"] + 4 * j) for j in range(6)]
-    check("QPLAY OFF: REC 2's take (step 8) into slot 126, heard at once",
-          play1 == 1 and (w2[5] >> 24) == REC_FIRST + 3 and call(lay["rt_map"], 125)[0] == REC_FIRST + 4,
-          f"play {play1}, slot {w2[5] >> 24}")
-    for _ in range(12):
-        frame()
-    setv("rt_qplay", 8)
-    # ONCE: the first REC trig records, then the track is OFF again (the loop kept)
-    machine.write(lay["rt_arm"] + T, b"\x01")
-    call(lay["rt_poll"])
+    def take_over():                                   # time passes: the take ends, the UI plans the next place
+        put32(FRAMES, L("rt_cur_end") + 10)
+        call(lay["rt_poll"])
+
+    # ---- the one-shot on step 8: fires once, then spent; YES YES arms it again ----------------
+    take_over()
+    call(lay["rt_trig_toggle"], table, T, 8, 1)       # the one-shot placed now
+    for s in range(1, 8):
+        at_step(s)
     f1 = L("rt_fired")
-    machine.write(TRACK_CUR, bytes([4]))
-    trig(4, 62_000)
-    after_once = machine.read(lay["rt_arm"] + T, 1)[0]
-    for _ in range(12):
-        frame()
-    machine.write(TRACK_CUR, bytes([8]))
-    trig(8, 64_000)
-    check("ONCE: the first REC trig records, then the track is OFF (the next records nothing)",
-          L("rt_fired") == f1 + 1 and after_once == 0 and L("rt_why") == 4,
-          f"fired {L('rt_fired') - f1}, arm after {after_once}, why {L('rt_why')}")
-    machine.write(lay["rt_arm"] + T, b"\x02")
+    at_step(8, 3)
+    f2 = L("rt_fired")
+    v8s = rec_lock(8)
+    if os.environ.get("RT_DEBUG"):
+        print("DEBUG oneshot: why", L("rt_why"), "refused", L("rt_refused"), "key", hex(L("rt_last_key")), "cur", L("rt_cur"),
+              "nx_room", machine.long(lay["rt_nx_room"]), "nx_need", machine.long(lay["rt_nx_need"]), "manual", L("rt_manual"), "on", L("rt_on"))
+    check("the one-shot on step 8 fires, and is spent (3) after it", f2 == f1 + 1 and v8s == 3, f"fired {f2 - f1}, value {v8s}")
+    take_over()
+    for s in list(range(9, 16)) + list(range(0, 8)):
+        at_step(s)
+    f3 = L("rt_fired")
+    at_step(8, 3)
+    f4 = L("rt_fired")
+    check("spent: the next pass over step 8 records nothing", f4 == f3, f"fired {f4 - f3}")
+    n = call(lay["rt_rearm"], table, T)[0]
+    check("YES YES: the spent one-shot armed again (1)", n == 1 and rec_lock(8) == 2, f"{n}, {rec_lock(8)}")
+    take_over()
+    for s in list(range(9, 16)) + list(range(0, 8)):
+        at_step(s)
+    f5 = L("rt_fired")
+    at_step(8, 3)
+    check(".. and fires once more", L("rt_fired") == f5 + 1, f"fired {L('rt_fired') - f5}")
+
+    # ---- a second BOUNCE track on the same buffer, "2+1": it hears the same half --------------
+    type_put(1, BOUNCE)
+    ctl_put(1, SLOT_BUF, 0)
+    s1 = call(lay["rt_bounce_samp"], 1)[0]
+    check("a second BOUNCE track on BUF 1 hears the same half (2+1)", s1 == sampb, f"{s1} vs {sampb}")
+    ctl_put(1, SLOT_BUF, 3)
+    s1b = call(lay["rt_bounce_samp"], 1)[0]
+    check("on BUF 4 (nothing recorded) it hears nothing: SAMP 0", s1b == 0, s1b)
+    type_put(1, 8)                                     # ONESHOT again
 
     # ---- guards --------------------------------------------------------------------------------
-    f0 = L("rt_fired")
-    setv("rt_manual", 1)
-    trig(4, 70_000)
+    take_over()
+    machine.write(lay["rt_manual"], b"\x00\x00\x00\x01")
+    for s in list(range(9, 16)) + list(range(0, 4)):
+        at_step(s)
+    f6 = L("rt_fired")
+    at_step(4, 3)
     why_manual = L("rt_why")
-    setv("rt_manual", 0)
-    check("a manual take's turn: the trig records nothing", L("rt_fired") == f0 and why_manual == 2,
-          f"why {why_manual}")
-    m_place = call(lay["smp_rec_place"], 10, machine.alloc(4))[0]
-    regions = [(machine.long(lay["rt_rplace"] + 4 * i), machine.long(lay["rt_rbytes"] + 4 * i)) for i in range(4)]
-    clash = [r for r in regions if r[1] and r[0] <= m_place < r[0] + r[1]]
-    check("a manual take's place keeps clear of the buffer takes", not clash,
-          f"manual at {m_place:#x}, buffers {[(hex(x), n) for x, n in regions if n]}")
-    from dnfw.waverider import dsp as DSPm                     # noqa: PLC0415
-    machine.write(DIR + 8 + 16 * REC_FIRST, struct.pack("<IIfI", DSPm.SMP_POOL_DDR + SM.DATA_OFFSET + 0x1000, 48000, 1.0, 1))
+    check("a manual take's turn: the trig records nothing, and says why (2)", L("rt_fired") == f6 and why_manual == 2
+          and L("rt_why_at") != 0 and machine.read(lay["rt_why_trk"], 1)[0] == T, f"fired {L('rt_fired') - f6}, why {why_manual}")
+    machine.write(lay["rt_manual"], b"\x00\x00\x00\x00")
+    # the allocator keeps a manual take clear of the live halves and the planned places
+    pl = machine.long(lay["rt_rplace"] + 4 * (want_slot - BUF_SLOT0))
+    by = machine.long(lay["rt_rbytes"] + 4 * (want_slot - BUF_SLOT0))
     call(lay["rt_poll"])
-    off = L("rt_on")
-    trig(4, 80_000)
-    why_off = L("rt_why")
-    keep = call(lay["rt_map"], 124)[0]
-    check("a saved sample in SAMP 124: buffers off, the trig records nothing, SAMP 124 plays it",
-          off == 0 and L("rt_fired") == f0 and why_off == 1 and keep == 124, f"on {off}, why {why_off}, SAMP 124 -> {keep}")
-    machine.write(DIR + 8 + 16 * REC_FIRST, b"\x00" * 16)
-    call(lay["rt_poll"])
+    room_w = machine.alloc(8)
+    place = call(lay["smp_rec_place"], 5, room_w)[0]
+    rm = machine.long(room_w)
+    nxp = machine.long(lay["rt_nx_place"])
+    nxn = machine.long(lay["rt_nx_need"])
+    clash = (place < pl + by and pl < place + rm) or (place < nxp + nxn and nxp < place + rm)
+    check("a manual take's place keeps clear of the live half and the planned next take", not clash and rm > 0,
+          f"place {place:#x} room {rm:#x}; half {pl:#x}+{by:#x}; next {nxp:#x}+{nxn:#x}")
+
+    # ---- the take saved into a pool slot (FUNC + YES): the handover ---------------------------
+    take_over()
+    for s in list(range(5, 16)) + [0]:                 # the last take heard (QPLAY PLEN: the top)
+        at_step(s)
+    pl = machine.long(lay["rt_rplace"] + 4 * (want_slot - BUF_SLOT0 + 0))
+    by = machine.long(lay["rt_rbytes"] + 4 * (want_slot - BUF_SLOT0 + 0))
+    playing_half = machine.read(lay["rt_play"], 1)[0]
+    pl = machine.long(lay["rt_rplace"] + 4 * playing_half)
+    by = machine.long(lay["rt_rbytes"] + 4 * playing_half)
+    hb = machine.alloc(8)
+    hs = machine.alloc(8)
+    hp = call(lay["rt_take_handover"], T, hb, hs)[0]
+    check("the playing take hands over: its place, bytes and steps (4)",
+          hp == pl and machine.long(hb) == by and machine.long(hs) == 4, f"{hp:#x} {machine.long(hb)} {machine.long(hs)}")
+
+    # ---- a track that is not BOUNCE never fires; a BOUNCE track with no trigs neither ----------
+    type_put(T, 8)
+    for s in list(range(5, 16)) + list(range(0, 5)):
+        at_step(s)
+    f7 = L("rt_fired")
+    type_put(T, BOUNCE)
+    check("the same steps on an ONESHOT track record nothing", L("rt_fired") == f7 and f7 == L("rt_fired"), f"{f7}")
 
     # ---- QREC 8 ----------------------------------------------------------------------------------
-    setv("rt_qrec", 4)                 # QSTEPS[4] = 8
-    words = machine.alloc(24)
-    machine.write(words, struct.pack(">6I", 0x1234, 2, 0, 0, 33, 10 << 24 | 48000))
+    setv("rt_qrec", 4)                                 # 8 steps
+    qw = machine.alloc(24)
+    machine.write(qw, struct.pack(">6I", 0x0101, 2, 1, 0, 33, 5 << 24 | 4800))
+    at_step(5)
+    call(lay["rt_q_set"], qw)
     q0 = L("rt_qfired")
-    for s in (2, 3, 4):
+    for s in (6, 7):
         at_step(s)
-    call(lay["rt_q_set"], words)
-    waiting = call(lay["rt_q_waiting"])[0]
-    for s in (5, 6, 7):
-        at_step(s)
-    before = L("rt_qfired") - q0
-    at_step(8, 12)
-    check("QREC 8: a manual NOW waits through steps 5..7, goes on step 8",
-          waiting == 1 and before == 0 and L("rt_qfired") - q0 == 1 and call(lay["rt_q_waiting"])[0] == 0,
-          f"waiting {waiting}, before {before}, fired {L('rt_qfired') - q0}")
+    q1 = L("rt_qfired")
+    at_step(8)
+    q2 = L("rt_qfired")
+    check("QREC 8: a manual NOW waits through steps 5..7, goes on step 8", q1 == q0 and q2 == q0 + 1, f"{q0} {q1} {q2}")
+    setv("rt_qrec", 0)
 
     # ---- the step clear --------------------------------------------------------------------------
     call(lay["sl_lock_set"], table, T, 4, 2, 0xFFFF)
     call(lay["sl_lock_set"], table, T, 8, 2, 0xFFFF)
-    gone = all(machine.read(table + REC * i, 2) != bytes([RAM_REC, TAG | T]) for i in range(RECS))
-    check("clearing both REC locks frees our record", gone)
-    put32(SEQ_PLAYING, 0)
-
+    heads = [machine.read(table + REC * i, 2) for i in range(RECS)]
+    check("clearing both recorder trigs frees our record", heads.count(bytes([RAM_REC, TAG | T])) == 0)
     faults = getattr(machine.m, "faults", [])[faults0:]
     check("no memory faults", not faults, faults[:3])
 
@@ -362,61 +384,82 @@ def main() -> int:
 
         def key(code):
             return ((code - 1) // 8, (code - 1) % 8)
-
-        def turn(enc, delta):
-            machine.pc = panel.panelin.encoder(machine.m, panel.profile, enc, delta)
-            panel.settle(5_000_000)
+        put32(SEQ_PLAYING, 0)
         panel.settle(5_000_000)
-        panel.tap(key(19))                                  # RECORD: grid recording
-        panel.settle(10_000_000)
-        panel.tap(key(25))                                  # a trig on step 1
-        panel.settle(10_000_000)
         call(lay["rec_combo"])                              # FUNC + VOICE: the RECORDER
         panel.settle(10_000_000)
-        panel.screen("recorder")
-        panel.hold(key(25), 5_000_000)
-        panel.settle(10_000_000)
+        panel.screen("bounce_recorder")
+        act = L("rec_overlay") == 1 and L("rec_phase") == 0 and machine.read(kit + 52 + SOUND_STRIDE * T + 0xDE, 1)[0] == BOUNCE
+        check("the RECORDER of a BOUNCE track is up, the BOUNCE view (rec_overlay, phase REC, the sound BOUNCE)", act,
+              f"overlay {L('rec_overlay')}, phase {L('rec_phase')}")
         # (no harness calls from here on: a call into the firmware in the middle of the UI's run
         # takes the CPU from under the UI task -- reads only)
-        def rec_of(step):                                   # read as sl_lock_get reads it
-            tbl = L("sl_rec_table")
-            if not tbl:
-                return None
-            for i in range(RECS):
-                if machine.read(tbl + REC * i, 2) == bytes([RAM_REC, TAG | 0]):
-                    return machine.word(tbl + REC * i + 2 + 2 * step)
-            return 0xFFFF
-        turn(7, 3)                                          # H, three detents: nothing yet
-        three = rec_of(0)
-        turn(7, 1)                                          # the fourth: REC 1
-        four = rec_of(0)
-        panel.screen("recorder_held_rec1")
-        panel.let_go(key(25))
+        panel.tap(key(25 + 2))                              # [TRIG 3]: a recorder trig on step 3
         panel.settle(10_000_000)
-        HELD_OBJ = 0x446478C8
-        released = machine.read(machine.long(HELD_OBJ) + 616, 1)[0] == 0
-        check("the RECORDER, a step held, H: three detents nothing, the fourth sets REC 1; the step lets go",
-              three in (None, 0xFFFF) and four == 1 and released, f"{three}, {four}, released {released}")
-        ov0 = L("rec_overlay")
-        panel.tap(key(15))                                  # RIGHT: REC TRIGS
+        panel.screen("bounce_trig3")
+        v3 = machine.word(table + REC * [i for i in range(RECS) if machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T])][0] + 2 + 2 * 2) \
+            if any(machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T]) for i in range(RECS)) else 0xFFFF
+        check("[TRIG 3] on the BOUNCE RECORDER places a recorder trig on step 3 (and no note trig)", v3 == 1, f"value {v3}")
+        panel.tap(key(25 + 2))
         panel.settle(10_000_000)
-        ut = machine.read(0x42431A6C, 1)[0]                 # the active track
-        machine.write(lay["rt_arm"] + ut, b"\x00")
-        turn(7, 3)                                          # H, no step held: three detents, nothing
-        a3 = machine.read(lay["rt_arm"] + ut, 1)[0]
-        turn(7, 1)                                          # the fourth: ONCE
-        a4 = machine.read(lay["rt_arm"] + ut, 1)[0]
-        turn(7, 4)                                          # four more: ON
-        a8 = machine.read(lay["rt_arm"] + ut, 1)[0]
-        check("REC TRIGS view, H (no step held): the active track's arm, OFF -> ONCE -> ON, four detents each",
-              a3 == 0 and a4 == 1 and a8 == 2, f"{a3}, {a4}, {a8}")
-        panel.screen("rectrigs")
-        check("RIGHT shows the REC TRIGS view", L("rec_view") == 1,
-              f"view {L('rec_view')}, overlay before {ov0} after {L('rec_overlay')}")
-        panel.tap(key(13))                                  # LEFT: back
-        panel.settle(5_000_000)
-        check("LEFT back to the RECORDER", L("rec_view") == 0, L("rec_view"))
+        v3b = machine.word(table + REC * [i for i in range(RECS) if machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T])][0] + 2 + 2 * 2) \
+            if any(machine.read(table + REC * i, 2) == bytes([RAM_REC, TAG | T]) for i in range(RECS)) else 0xFFFF
+        check("[TRIG 3] again removes it", v3b == 0xFFFF, f"value {v3b}")
+        panel.tap(key(10))                                  # YES
+        panel.settle(200_000)
+        panel.tap(key(10))                                  # YES again, within 0.4 s: arm
+        panel.settle(10_000_000)
+        check("YES YES: taken as the arming, no RECORD NOW sent", L("bn_yes_at") == 0 and L("rec_state") != 2,
+              f"yes_at {L('bn_yes_at')}, state {L('rec_state')}")
+        panel.screen("bounce_armed")
+        panel.tap(key(12))                                  # NO: closes
+        panel.settle(10_000_000)
+        check("NO closes the RECORDER", L("rec_overlay") == 0)
 
+        # ---- v0.44 F1: the plain RECORDER (an ONESHOT track): CHAN as its own L/R icon over
+        # SRC (the same place on the BOUNCE panel); knob B turns it L+R -> L -> R
+        type_put(T, 8)                                      # ONESHOT (the UI reads the kit's sound)
+        put32(lay["rec_overlay"], 1)                        # (a write, not a call: the UI task keeps the CPU)
+        put32(lay["rec_phase"], 0)
+        put32(lay["rec_chan"], 0)
+        put32(lay["smp_overlay_dirty"], 1)
+        panel.settle(10_000_000)
+        panel.screen("recorder_chan_lr")
+        panel.push_and_turn(1, 1, times=6)                  # knob B, a few detents up
+        panel.settle(10_000_000)
+        panel.screen("recorder_chan_l")
+        check("knob B on the RECORDER turns CHAN (L+R -> L)", L("rec_chan") == 1, f"chan {L('rec_chan')}")
+        check("the RECORDER is up on the ONESHOT track, phase REC", L("rec_overlay") == 1 and L("rec_phase") == 0)
+
+        # ---- v0.44 F2: FILE NAME: UP/DOWN scroll the character at the cursor, LEFT/RIGHT move it
+        put32(lay["rec_phase"], 2)                          # PH_NAME
+        machine.write(lay["nm_text"], b"A\0\0\0\0\0\0\0")
+        put32(lay["nm_cur"], 0)
+        put32(lay["smp_overlay_dirty"], 1)
+        panel.settle(10_000_000)
+        panel.screen("file_name")
+        panel.tap(key(11))                                  # UP
+        panel.settle(10_000_000)
+        ch1 = machine.read(lay["nm_text"], 1)
+        check("UP on FILE NAME steps the character at the cursor on (A -> B)", ch1 == b"B", f"{ch1!r}")
+        panel.tap(key(14))                                  # DOWN
+        panel.settle(10_000_000)
+        panel.tap(key(14))
+        panel.settle(10_000_000)
+        ch2 = machine.read(lay["nm_text"], 1)
+        check("DOWN steps it back (B -> A -> space)", ch2 == b" ", f"{ch2!r}")
+        panel.tap(key(15))                                  # RIGHT: the cursor moves
+        panel.settle(10_000_000)
+        check("RIGHT moves the cursor", L("nm_cur") == 1, f"cur {L('nm_cur')}")
+        panel.tap(key(12))                                  # NO: the name as it is -> ASSIGN
+        panel.settle(10_000_000)
+        check("NO on FILE NAME goes on to ASSIGN", L("rec_phase") == 3, f"phase {L('rec_phase')}")
+        panel.tap(key(12))                                  # NO: skip
+        panel.settle(10_000_000)
+        check("NO on ASSIGN: back to the RECORDER", L("rec_phase") == 0, f"phase {L('rec_phase')}")
+        put32(lay["rec_overlay"], 0)
+        put32(lay["smp_overlay_dirty"], 1)
+        type_put(T, BOUNCE)
     ok = all(c["ok"] for c in report["checks"].values())
     report["ok"] = ok
     if a.json:
