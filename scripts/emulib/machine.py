@@ -52,6 +52,9 @@ class Machine:
         self.count = 0
         self.bitrev_count = 0
         self._bitrev_shim()
+        if os.environ.get("DNFW_LOWTRAP") == "1":   # v0.46: the wild-read trap (emulib/lowtrap.py)
+            from emulib.lowtrap import install
+            install(self.uc)
 
     def _bitrev_shim(self):
         """v0.34 (docs/timing-model.md): BITREV Dn (0x00C0..0x00C7, ColdFire ISA_C) is not
