@@ -33,7 +33,9 @@ LONG, SHORT = "Fascia", "FSC"             # MACHINE SEL's names (as "Perc"/"PRC"
 # unknown): FASCIA's MACHINE SEL entry is this one switch. Listed, it is a 19th entry in group 3,
 # next to the Monomachine's, so it adds no divider row. False leaves type 18 fully built but
 # unlisted (list as v0.44's).
-LISTED = True
+# v0.45 release (owner, 2026-11-08): unlisted; FASCIA ships in a later release, after its DSP
+# speed-up (branch fascia-opt-wip). Built and gated, but no MACHINE SEL entry.
+LISTED = False
 
 # -- the panel, as dnfw.fascia.model has it (held equal by test_fascia_coldfire) -------------
 TYPES = ("STRIKE", "BLOW", "BOW", "DUST", "PULSE", "TZFM")
