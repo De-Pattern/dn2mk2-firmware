@@ -1653,7 +1653,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     extern int smp_lib_move(int k, int f);
                     if (to >= 0)
                         for (int k = 0; k < 16384; k++)    /* v0.45: the library's 16,384 */
-                            if (smp_lib_used(k) && smp_fb_marked(k))
+                            if (smp_fb_marked(k) && smp_lib_used(k))
                                 smp_lib_move(k, to);
                     smp_fb_unmark_all();
                 } else if (code == K_YES && act == 7) {     /* v0.33: CREATE FOLDER: its name */
