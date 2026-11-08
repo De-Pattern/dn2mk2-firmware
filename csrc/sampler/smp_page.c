@@ -1077,9 +1077,11 @@ int smp_fb_mark_unused(void)
 int smp_fb_mark_count(void)
 {
     int n = 0;
-    if (smp_fb_store == 1) {
-        for (int k = 0; k < LB_CAP; k++)
-            n += lb_marked(k) && smp_lib_used(k);
+    if (smp_fb_store == 1) {                    /* v0.45: only the ticked bits (each redraw asks: */
+        for (int i = 0; i < LB_CAP / 32; i++)   /* 16,384 entries one by one lagged the keys) */
+            for (u32 w = lb_marks[i], b = 0; w; w >>= 1, b++)
+                if (w & 1u)
+                    n += smp_lib_used(32 * i + (int)b);
         return n;
     }
     for (int k = 0; k < 128; k++)
@@ -1198,7 +1200,9 @@ void smp_fb_delete(int slot, int folder)
                         if (smp_lib_folder_under(g, f))
                             drop[g >> 5] |= 1u << (g & 31);
             for (int k = 0; k < LB_CAP; k++)
-                if (lb_marked(k) && smp_lib_used(k)) {
+                if (!lb_marks[k >> 5])
+                    k |= 31;                    /* v0.45: a word with nothing ticked, skipped */
+                else if (lb_marked(k) && smp_lib_used(k)) {
                     int f = smp_lib_folder_of(k);
                     if (f >= 2 && f < SMP_LIB_FOLDERS)
                         drop[f >> 5] |= 1u << (f & 31);
@@ -1251,7 +1255,9 @@ int smp_fb_load_project(int slot, int folder)
         return 0;
     if (smp_fb_mark_count()) {
         for (int k = 0; k < LB_CAP; k++)
-            if (lb_marked(k) && smp_lib_used(k))
+            if (!lb_marks[k >> 5])
+                k |= 31;                        /* v0.45: a word with nothing ticked, skipped */
+            else if (lb_marked(k) && smp_lib_used(k))
                 n += smp_lib_load(k) == 0;
     } else if (slot >= 0)
         n += smp_lib_load(slot) == 0;
