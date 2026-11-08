@@ -157,7 +157,7 @@ def test_every_new_type_has_our_pages():
     assert P.NEW_TYPE == CF.NEW_TYPES[0]
     assert len(P.SMP_PAGES) == CF.SAMPLER_LAST - CF.SAMPLER_FIRST + 2 == len(SM.NAMES)   # v0.44: and BOUNCE (17)
     assert all(SM.TYPE_OF[n] == CF.SAMPLER_FIRST + k for k, n in enumerate(SM.NAMES[:6]))
-    assert SM.TYPE_OF["BOUNCE"] == SM.BOUNCE_TYPE == 17 and 17 in CF.NEW_TYPES and 17 in CF.LIST_NEW
+    assert SM.TYPE_OF["BOUNCE"] == SM.BOUNCE_TYPE == 17 and 17 in CF.NEW_TYPES and (17 in CF.LIST_NEW) == SM.BOUNCE_LISTED
     # v0.44: BOUNCE's kind (13) reaches the sample tables' seventh row through SMP_IDX
     h = P.c_header()
     assert "#define SMP_N 7" in h and "#define SMP_N0 6" in h and "#define SMP_BOUNCE_KIND 13" in h

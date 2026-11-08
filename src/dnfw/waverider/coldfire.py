@@ -74,7 +74,7 @@ LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
 # PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
 # order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
-LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, *((_fsc.TYPE,) if _fsc.LISTED else ()), 8, 9, 10, 11, 13, 12, _smpm.BOUNCE_TYPE, 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider); v0.45 FASCIA after the Monomachine's (group 3, no divider)
+LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, *((_fsc.TYPE,) if _fsc.LISTED else ()), 8, 9, 10, 11, 13, 12, *((_smpm.BOUNCE_TYPE,) if _smpm.BOUNCE_LISTED else ()), 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider); v0.45 FASCIA after the Monomachine's (group 3, no divider)
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
