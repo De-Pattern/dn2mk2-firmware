@@ -122,7 +122,10 @@ def run(cx):
         """as at power-on: the library read again from the +Drive"""
         m.write(syms["smp_lib_state"], bytes(4))
         st, info = sx(16)
-        return st == 0 and info and struct.unpack_from("<I", info)[0] == 2
+        okb = st == 0 and info and struct.unpack_from("<I", info)[0] == 2
+        if not okb:
+            print("  DEBUG boot", st, info[:24].hex() if info else None, flush=True)
+        return okb
 
     def tree():
         # v0.43: 128 folders, TREE a page of 64 at a time (rq[3] the first folder)
