@@ -551,6 +551,13 @@ def source(page_draw: int, cell: int) -> str:
                                 + "\n    .long 0" for k, lab in enumerate(MNM_LABELS))
     mstrings = "\n".join(f'mlab_{k}_{rid}: .asciz "{name}"' for k, lab in enumerate(MNM_LABELS)
                           for rid, name in lab.items())
+    # v0.45: wr_label's Monomachine dispatch, one explicit test a kind, index k into
+    # mnm_label_tables (not a range: a range let BOUNCE, kind 13, index past the table)
+    if len(MNM_KINDS) != len(MNM_LABELS):
+        raise ValueError(f"{len(MNM_KINDS)} Monomachine kinds, {len(MNM_LABELS)} label tables")
+    mnm_label_pick = "\n".join(f"    moveq   #{kd - 1},%d1\n    cmp.l   %d1,%d0\n    bne.s   wl_n{k}\n"
+                               f"    moveq   #{k},%d0\n    bra.s   wl_hit\nwl_n{k}:"
+                               for k, kd in enumerate(MNM_KINDS))
     mnm_page_data = "\n".join(f"    .long mnm_title_{k}, mnm_subtitle_{k}\n"
                               f"    .long {', '.join(str(e) for e in MNM_PAGE)}\n"
                               f"    .long {TAG}" for k in range(len(MNM_LABELS)))
@@ -708,17 +715,16 @@ wr_label:
     lea     labels,%a0
     subq.l  #1,%d0
     beq.s   0f
-    moveq   #3,%d1                         | d0 = kind - 1: 1, 2 and 9.. the Monomachine's,
-    cmp.l   %d1,%d0                        | 3..8 a sample machine (the stock names)
-    bcs.s   3f
-    moveq   #9,%d1
-    cmp.l   %d1,%d0
-    bcs.s   9f
-    moveq   #{_smp.BOUNCE_TYPE - 5},%d1          | v0.45: BOUNCE (12) and FASCIA (13): the stock
-    cmp.l   %d1,%d0                        | names (wr_names swapped them in); until v0.44 BOUNCE
-    bcc.s   9f                             | read past the Monomachine's five label tables
-    subq.l  #6,%d0
-3:  subq.l  #1,%d0                         | the Monomachine machine's index
+| d0 = kind - 1. Only a Monomachine machine's kind (MNM_KINDS, each named below) reads
+| mnm_label_tables; every other kind -- the sample machines, BOUNCE, FASCIA, and any type
+| added later -- gets the stock names (wr_names swapped them in). v0.44 tested ranges
+| here (3..8 stock, 9.. "the Monomachine's"), so BOUNCE (kind 13) read entry 5 of the
+| five-entry table: the first id of table 0 (0xEE), walked as a label table from
+| absolute address 0x000000EE -- the unit froze drawing the first cell of any page of a
+| BOUNCE track (MACHINE SEL's YES; every boot of a project holding one).
+{mnm_label_pick}
+    bra.s   9f
+wl_hit:
     lsl.l   #2,%d0
     lea     mnm_label_tables,%a0
     adda.l  %d0,%a0

@@ -207,6 +207,7 @@ EMU = (("meter", "DSP load meter (ColdFire)"),
        ("slice", "SLICE menus and SLICES keys (ColdFire)"),
        ("samplist", "sample list, browser, playhead (ColdFire)"),
        ("colsw", "MACHINE SEL columns, SYN held (ColdFire)"),
+       ("machines", "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)"),
        ("drive", "+DRIVE browser (ColdFire)"),
        ("drivenav", "+DRIVE keys and long names (ColdFire)"),
        ("jump", "DIRECT JUMP (ColdFire)"),
@@ -2063,6 +2064,39 @@ def main() -> int:
                 return good, ("MACHINE SEL: RIGHT from GRID shows the FLTR column from its top, LEFT returns "
                               "to GRID; SYN held shows the page's values" if good else why)
             later("colsw", "MACHINE SEL columns, SYN held (ColdFire)", "MACHINE SEL columns, SYN held (ColdFire)", [r_cmd, sorted(EMU_ENV.items())], r_body)
+
+        # 6s. v0.45 (v0.44's BOUNCE froze the unit on MACHINE SEL's YES, and at every power-on of
+        # a project holding a BOUNCE track: pages.py wr_label indexed past the Monomachine's label
+        # tables and walked absolute 0x000000EE, zero RAM in the emulator, nothing on the unit).
+        # Not from ui800M-v014, whose MACHINE SEL rows are v0.14's: boot400M with this build
+        # installed (its own rows), the kit given every one of our types at the UI's first draw
+        # (the newest on the active track) and booted on; then each track of ours drawn (FLTR,
+        # SYN) and every row of LIST_NEW picked through MACHINE SEL's own list. A read below
+        # 0x40000000 by code that is not stock's fails, as does EXCEPTION (scripts/emu_machine_boot.py,
+        # scripts/emu_machine_sweep.py)
+        from dnfw.waverider import coldfire as _cfm     # noqa: PLC0415
+        mb_types = sorted(_cfm.NEW_TYPES, reverse=True)
+        mb_snap, mb_js, ms_js = work / "machines-boot.snap", work / "machines-boot.json", work / "machines.json"
+        stock_sec = work / "stock_section_3_MAIN_OS.bin"
+        mb_cmd = [a.venv, "-u", "scripts/emu_machine_boot.py", "--build", bdir, "--stock", stock_sec,
+                  "--snapshot", ROOT.parent / "digikit/out/snapshots/dn2-1.11/boot400M.snap",
+                  "--types", ",".join(map(str, mb_types)), "--out", mb_snap, "--json", mb_js]
+        ms_cmd = [a.venv, "-u", "scripts/emu_machine_sweep.py", "--snapshot", mb_snap, "--stock", stock_sec,
+                  "--mod-types", ",".join(map(str, mb_types)), "--list", ",".join(map(str, _cfm.LIST_NEW)),
+                  "--png-dir", work / "machines", "--json", ms_js]
+        MB_ENV = {**EMU_ENV, "DT2_SYX": str(pathlib.Path(a.stock).resolve())}
+
+        def mb_body(tdir):
+            rc, out = run("machines: power-on", mb_cmd, logs, env=MB_ENV, trace=tdir)
+            if rc != 0 or "machine boot: PASS" not in out:
+                return False, out[-800:]
+            rc, out = run("machines: MACHINE SEL", ms_cmd, logs, env=MB_ENV, trace=tdir)
+            good = rc == 0 and "machine sweep: PASS" in out
+            return good, (f"a power-on with types {mb_types} on the tracks, each track of ours drawn, and all "
+                          f"{len(_cfm.LIST_NEW)} rows of MACHINE SEL's own list picked: no read below 0x40000000 "
+                          "by our code, no EXCEPTION" if good else out[-800:])
+        later("machines", "every machine through MACHINE SEL's own list; a power-on with ours on the tracks (ColdFire)",
+              "every machine, MACHINE SEL's own list (ColdFire)", [mb_cmd, ms_cmd, sorted(MB_ENV.items())], mb_body)
 
         # 6q. v0.33: the sample pages driven at random (scripts/emu_fuzz_ui.py: SAMP turns,
         # the list, the browser and its menu, page and [TRIG] keys, MACHINE SEL, the machine
