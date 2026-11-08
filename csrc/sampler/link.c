@@ -1724,6 +1724,30 @@ void smp_rename(int k, const char *name)
     dir_due = 1;
 }
 
+/* v0.46: a name from the naming screen (up to 35 characters): the short name its stem (upper
+ * case, A-Z 0-9 space _ # -, seven at most: as LOAD TO PROJECT makes one), and, where the
+ * pool keeps long names, the whole of it, so smp_long_name shows it and the +DRIVE browser
+ * matches it to its library copy (smp_lib_slot_of) */
+static void stem7(const char *ln, char *st);
+static int meta_due __attribute__((section(".data"))) = 0;    /* META to the +Drive when idle */
+void smp_name_set(int k, const char *name)
+{
+    if (k < 0 || k >= POOL_SLOTS || !dir_ok || !name[0])
+        return;
+    char st[8];
+    stem7(name, st);
+    smp_rename(k, st[0] ? st : name);
+    if (meta_ok && k < POOL_SLOTS) {
+        u8 *m = (u8 *)meta_slot(k);
+        u32 j = 0;
+        for (; j < META_NAME_BYTES - 1 && name[j]; j++)
+            m[4 + j] = (u8)name[j];
+        for (; j < META_NAME_BYTES; j++)
+            m[4 + j] = 0;
+        meta_due = 1;
+    }
+}
+
 /* -- v0.23: the slice editor's side (slice.c) ------------------------------------------------ */
 
 static int an_state __attribute__((section(".data"))) = 0;      /* 0 idle, 1 running, 2 done, -1 failed */
@@ -1957,6 +1981,12 @@ static void edits_poll(void)
             smp_hi = bytes;
             smp_pl_changed();                       /* v0.38: into the project's list, at once */
         }
+        return;
+    }
+    if (meta_due && meta_ok && le32(DIR + META_PTR) == META_PTR_MAGIC) {   /* v0.46: the long names */
+        meta_due = 0;
+        u32 mo = le32(DIR + META_PTR + 4), mn = (le32(DIR + META_PTR + 8) + 511u) & ~511u;
+        image_write(mo, mn, META);
         return;
     }
     if (area_slot_due >= 0) {                       /* v0.23: the slot's table's sectors */
@@ -2305,6 +2335,117 @@ static void lp_poll(void)
     lp_k = -1;
 }
 
+/* -- v0.46: a recording into +DRIVE > RECORDED, as the DT2 keeps every sampled take -----------
+ * Queued when a recording is named (rec.c: the FILE NAME's YES or NO, as it goes on to ASSIGN).
+ * The recording's own save is untouched: it is in the pool first, as it always was, so nothing
+ * here can lose it. Then, one chunk a pass while the loader, the saver, a switch, a send and
+ * LOAD TO PROJECT are all idle and the directory is saved: its frames are read back from the
+ * pool and written into free library sectors by lib.c's send path, and the library entry goes
+ * in last (one sector), in RECORDED, under the recording's name. Only then is the slot marked
+ * as that library sample (LIBID, as LOAD TO PROJECT marks it), so the +DRIVE browser shows it
+ * loaded. A power cut anywhere leaves the library without it or with all of it, and the pool as
+ * it was. The library full, or no +Drive library: the recording stays in the pool only (the
+ * owner's fallback), and the recorder's line says so. The slot changed meanwhile (dropped,
+ * trimmed, another recording): the copy stops, and nothing names what it wrote */
+extern int smp_lib_put_begin(u32 frames, int fmt, u32 rate, const char *name);
+extern int smp_lib_put(const u8 *p, u32 m);
+extern int smp_lib_put_end(void);
+extern void smp_lib_put_abort(void);
+#define RSQ 8
+#define LIB_NAME_MAX 35                             /* lib.c's LIB_NAME - 1 */
+static signed char rs_q[RSQ] __attribute__((section(".data")));
+static char rs_nm[RSQ][LIB_NAME_MAX + 1] __attribute__((section(".data")));   /* the name it goes in under */
+static u32 rs_head __attribute__((section(".data"))) = 0, rs_tail __attribute__((section(".data"))) = 0;
+static int rs_slot __attribute__((section(".data"))) = -1;    /* the recording being copied */
+static u32 rs_addr __attribute__((section(".data"))) = 0, rs_frames __attribute__((section(".data"))) = 0;
+static u32 rs_bytes __attribute__((section(".data"))) = 0, rs_at __attribute__((section(".data"))) = 0;
+u32 smp_rs_done __attribute__((section(".data"))) = 0;        /* recordings put into RECORDED (the gate reads it) */
+int smp_rs_last __attribute__((section(".data"))) = 0;        /* 1 on the +Drive, 2 the library full, 3 not now (no library) */
+
+void smp_rec_store_named(int k, const char *name)   /* rec.c: recording K is named NAME */
+{
+    if (k < 0 || k >= REC_FIRST || rs_head - rs_tail >= RSQ)
+        return;
+    char *d = rs_nm[rs_head % RSQ];
+    u32 j = 0;
+    for (; j < LIB_NAME_MAX && name && name[j]; j++)
+        d[j] = name[j];
+    d[j] = 0;
+    rs_q[rs_head++ % RSQ] = (signed char)k;
+}
+
+static void rs_poll(void)
+{
+    if (smp_pl_busy() || sstate || dir_due || lp_k >= 0 || lp_head != lp_tail
+        || (smp_lstate != L_DONE && smp_lstate != L_IDLE) || smp_pv_state == 1 || smp_pv_state == 2 || smp_er_lock)
+        return;
+    if (rs_slot < 0) {
+        if (rs_head == rs_tail)
+            return;
+        extern int smp_lib_busy(void);
+        if (smp_lib_busy())
+            return;                                  /* a send from the computer: after it */
+        int k = rs_q[rs_tail % RSQ];
+        if (!dir_ok || !store_ok() || smp_slot_empty(k) || le32(LIBID(k)) != 0) {
+            rs_tail++;                               /* gone, or already a library sample's */
+            return;
+        }
+        const u8 *e = ENTRY(k);
+        u32 addr = le32(e), frames = le32(e + 4), fmt = le32(e + 12);
+        u32 bytes = frames * (fmt ? 2u : 4u);
+        if (addr < SMP_POOL_DDR || addr - SMP_POOL_DDR + bytes > POOL_BYTES || !frames || fmt > 1u) {
+            rs_tail++;
+            return;
+        }
+        const char *name = rs_nm[rs_tail % RSQ];        /* as named on the naming screen */
+        int r = smp_lib_put_begin(frames, (int)fmt, le32(e + 8), name[0] ? name : smp_name(k));
+        if (r == 4)
+            return;                                  /* the computer started a send: later */
+        rs_tail++;
+        if (r) {
+            smp_rs_last = r == 2 ? 2 : 3;
+            return;
+        }
+        rs_slot = k;
+        rs_addr = addr;
+        rs_frames = frames;
+        rs_bytes = bytes;
+        rs_at = 0;
+        return;
+    }
+    const u8 *e = ENTRY(rs_slot);
+    if (smp_slot_empty(rs_slot) || le32(e) != rs_addr || le32(e + 4) != rs_frames) {
+        smp_lib_put_abort();                         /* the slot changed: stop */
+        rs_slot = -1;
+        return;
+    }
+    u32 n = rs_bytes - rs_at;
+    if (n > 0xF000u)
+        n = 0xF000u;
+    u32 src = rs_addr - SMP_POOL_DDR + rs_at;        /* (a trimmed take starts on any even frame) */
+    u32 lo = src & ~511u, hi = (src + n + 511u) & ~511u;
+    if (hi > POOL_BYTES || image_read(lo, hi - lo, STAGE(0)) != 0 || smp_lib_put(STAGE(0) + (src - lo), n) != 0) {
+        smp_lib_put_abort();
+        rs_slot = -1;
+        smp_rs_last = 3;
+        return;
+    }
+    rs_at += n;
+    if (rs_at < rs_bytes)
+        return;
+    extern u32 smp_lib_sum(int k);
+    int lk = smp_lib_put_end();
+    if (lk >= 0) {
+        put_le32(LIBID(rs_slot), lib_id(smp_lib_sum(lk), rs_addr));   /* the slot: that sample */
+        dir_due = 1;
+        smp_rs_done++;
+        smp_rs_last = 1;
+    } else {
+        smp_rs_last = 3;
+    }
+    rs_slot = -1;
+}
+
 /* from the UI loop (page.c's wr_poll), every pass */
 void smp_boot(void)
 {
@@ -2350,6 +2491,7 @@ void smp_boot(void)
     save_poll();
     edits_poll();
     lp_poll();                                          /* v0.31: LOAD TO PROJECT */
+    rs_poll();                                          /* v0.46: a recording into +DRIVE > RECORDED */
     analyse_poll();
 }
 

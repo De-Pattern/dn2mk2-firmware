@@ -104,8 +104,12 @@ int trim_slot __attribute__((section(".data"))) = -1;
 u32 trim_n __attribute__((section(".data"))) = 0;           /* its frames, as recorded */
 u32 trim_s __attribute__((section(".data"))) = 0;
 u32 trim_e __attribute__((section(".data"))) = 0;
-char nm_text[8] __attribute__((section(".data")));           /* the name being edited */
+/* v0.46: names up to 35 characters (the +Drive library's and the pool's long names; the
+ * owner: as long as the DT2's), 14 in view, the field scrolling with the cursor */
+#define NM_LONG 35
+char nm_text[NM_LONG + 1] __attribute__((section(".data")));  /* the name being edited */
 int nm_cur __attribute__((section(".data"))) = 0;
+int nm_max __attribute__((section(".data"))) = 7;             /* this name's limit */
 int as_done __attribute__((section(".data"))) = -1;          /* the track it went to, for the screen */
 static const char NM_SET[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
 /* v0.25: the DT2's character grid, while FUNC is held on FILE NAME (the owner's photo):
@@ -776,17 +780,22 @@ int smp_trig_track(u32 code)
     return code >= K_TRIG1 && code < K_TRIG1 + 16u ? (int)(code - K_TRIG1) : -1;
 }
 
-static void name_start(void)
+/* MAX: 35 for a recording (its name goes with it into +DRIVE > RECORDED), the pool's long
+ * names' 35 for a rename where the pool keeps them, else the short name's 7 */
+static void name_start_max(int max)
 {
-    const char *n = smp_name(trim_slot);
+    extern const char *smp_long_name(int k);
+    const char *n = smp_long_name(trim_slot);
+    nm_max = max;
     int j = 0;
-    for (; j < 7 && n && n[j]; j++)
-        nm_text[j] = n[j];
-    for (; j < 8; j++)
+    for (; j < max && n && n[j]; j++)
+        nm_text[j] = n[j] >= 'a' && n[j] <= 'z' ? (char)(n[j] - 32) : n[j];
+    for (; j <= NM_LONG; j++)
         nm_text[j] = 0;
     nm_cur = 0;
     rec_phase = PH_NAME;
 }
+static void name_start(void) { name_start_max(NM_LONG); }
 
 static void name_step(int d)
 {
@@ -808,10 +817,11 @@ static void folder_name_start(void)
 {
     if (rec_phase != PH_REC)
         return;
-    for (int j = 0; j < 8; j++)
+    for (int j = 0; j <= NM_LONG; j++)
         nm_text[j] = 0;
     nm_text[0] = 'N', nm_text[1] = 'E', nm_text[2] = 'W';
     nm_cur = 3;
+    nm_max = 30;                                /* v0.46: a folder's name inside a folder: 30 */
     nm_gsel = 0;
     nm_gpicked = 0;
     nm_only = 2;
@@ -824,16 +834,18 @@ static void rename_start(int slot)
     if (slot < 0 || slot > 126 || rec_phase != PH_REC)
         return;
     trim_slot = slot;
-    name_start();
+    extern int smp_meta_ok;
+    name_start_max(smp_meta_ok ? NM_LONG : 7);  /* v0.46: long where the pool keeps long names */
     nm_only = 1;
     rec_overlay = 1;
 }
 
+extern void smp_rec_store_named(int k, const char *name);
 static void name_done(void)
 {
-    char t[8];
+    char t[NM_LONG + 1];
     int j, last = -1;
-    for (j = 0; j < 7; j++) {
+    for (j = 0; j < nm_max && j < NM_LONG; j++) {
         t[j] = nm_text[j] ? nm_text[j] : ' ';
         if (t[j] != ' ')
             last = j;
@@ -847,10 +859,15 @@ static void name_done(void)
         smp_lib_refresh();
     } else if (last >= 0) {                     /* trailing spaces off; an empty name stays as it was */
         t[last + 1] = 0;
-        smp_rename(trim_slot, t);
+        extern void smp_name_set(int k, const char *name);
+        smp_name_set(trim_slot, t);             /* v0.46: its short name and, where kept, its long one */
     }
     as_done = -1;
     rec_phase = PH_ASSIGN;
+    if (!nm_only) {                             /* v0.46: a recording named: into +DRIVE > RECORDED */
+        extern const char *smp_long_name(int k);
+        smp_rec_store_named(trim_slot, last >= 0 ? t : smp_long_name(trim_slot));
+    }
     if (nm_only) {                              /* the browser's RENAME: done, back to the page */
         nm_only = 0;
         rec_phase = PH_REC;
@@ -1010,9 +1027,9 @@ static void trim_knob(int index, int delta, int fine)
  * (FUNC + YES) */
 static void name_delete(void)
 {
-    for (int j = nm_cur; j < 6; j++)
+    for (int j = nm_cur; j < nm_max - 1; j++)
         nm_text[j] = nm_text[j + 1];
-    nm_text[6] = 0;
+    nm_text[nm_max - 1] = 0;
 }
 
 /* v0.33: FUNC + NO also steps the cursor back (the owner: held, it clears letter after
@@ -1026,7 +1043,7 @@ static void name_backdel(void)
 
 static void name_insert(void)
 {
-    for (int j = 6; j > nm_cur; j--)
+    for (int j = nm_max - 1; j > nm_cur; j--)
         nm_text[j] = nm_text[j - 1];
     nm_text[nm_cur] = ' ';
 }
@@ -1166,7 +1183,7 @@ static void rpt_poll(void)
         name_step(rpt_code == K_UP ? 1 : -1);
     else if (rpt_code == K_LEFT && nm_cur > 0)
         nm_cur--;
-    else if (rpt_code == K_RIGHT && nm_cur < 6)
+    else if (rpt_code == K_RIGHT && nm_cur < nm_max - 1)
         nm_cur++;
     smp_overlay_dirty = 1;
 }
@@ -1232,7 +1249,7 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
         }
     } else if (rec_phase == PH_NAME) {
         if (code == K_PLAY) {                   /* v0.26, FUNC + PLAY: the name cleared */
-            for (int j = 0; j < 8; j++)
+            for (int j = 0; j <= NM_LONG; j++)
                 nm_text[j] = 0;
             nm_cur = 0;
             nm_gsel = 0;
@@ -1252,6 +1269,8 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
         } else if (code == K_NO) {
             as_done = -1;
             rec_phase = PH_ASSIGN;              /* the name it has */
+            extern const char *smp_long_name(int k);   /* v0.46: into +DRIVE > RECORDED, under it */
+            smp_rec_store_named(trim_slot, smp_long_name(trim_slot));
         } else if (smp_func_held && code >= K_UP && code <= K_RIGHT) {  /* the grid */
             grid_move(code);
             if (code == K_LEFT || code == K_RIGHT)
@@ -1259,7 +1278,7 @@ static u32 after_pop(u8 *it, u32 code, u32 flags)
         } else if (code == K_LEFT && nm_cur > 0) {
             nm_cur--;
             rpt_start(code);
-        } else if (code == K_RIGHT && nm_cur < 6) {
+        } else if (code == K_RIGHT && nm_cur < nm_max - 1) {
             nm_cur++;
             rpt_start(code);
         }
@@ -1396,7 +1415,7 @@ u32 smp_ui_pop(void *queue)                   /* -> the item, in d0 as the stock
                     if (!nm_text[j])
                         nm_text[j] = ' ';
                 nm_gpicked = 0;
-                if (nm_cur < 6)                 /* v0.26: and the cursor moves on */
+                if (nm_cur < nm_max - 1)        /* v0.26: and the cursor moves on */
                     nm_cur++;
             }
             smp_overlay_dirty = 1;

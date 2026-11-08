@@ -1902,7 +1902,33 @@ static int meter_x(int v, int w)
 /* v0.22: the DT2's steps after a recording (rec.c): TRIM, NAME, ASSIGN */
 extern int rec_phase, trim_slot, nm_cur, as_done, smp_saved;
 extern u32 trim_n, trim_s, trim_e;
-extern char nm_text[8];
+extern char nm_text[36];
+extern int nm_max;
+/* v0.46: the name field shows 14 of up to 35 characters, scrolled to keep the cursor in view;
+ * << and >> where there is more of the field either side (the DT2's >>) */
+#define NM_VIEW 14
+static int nm_off __attribute__((section(".data"))) = 0;
+static void name_field(void *c, int y, int bar_y0, int bar_y1)
+{
+    if (nm_cur < nm_off)
+        nm_off = nm_cur;
+    if (nm_cur >= nm_off + NM_VIEW)
+        nm_off = nm_cur - NM_VIEW + 1;
+    if (nm_off > 0 && nm_max <= NM_VIEW)
+        nm_off = 0;
+    for (int v = 0; v < NM_VIEW && nm_off + v < nm_max; v++) {
+        int j = nm_off + v, x = 14 + 8 * v;
+        char ch = nm_text[j] ? nm_text[j] : ' ';
+        if (ch != ' ')
+            LABEL(c, x, y, "%c", ch);
+        if (j == nm_cur)                        /* the cursor: a bar under it */
+            fill(c, x - 3, bar_y0, x + 3, bar_y1);
+    }
+    if (nm_off > 0)
+        LABEL(c, 10, y + 10, "%s", "<<");
+    if (nm_off + NM_VIEW < nm_max)
+        LABEL(c, 118, y + 10, "%s", ">>");
+}
 
 /* the recording's waveform in [x0, x1] about yc, +-h: the slot's overview (100 columns) */
 static void wave(void *c, int slot, int x0, int x1, int yc, int h, u32 s, u32 e, u32 n)
@@ -2040,13 +2066,7 @@ static void name_grid_draw(void *c)
 {
     LABEL(c, 64, 56, "%s", "FILE NAME");
     box(c, 6, 41, 121, 51, 0);
-    for (int j = 0; j < 7; j++) {
-        char ch = nm_text[j] ? nm_text[j] : ' ';
-        if (ch != ' ')
-            LABEL(c, 14 + 8 * j, 44, "%c", ch);
-        if (j == nm_cur)
-            fill(c, 11 + 8 * j, 42, 17 + 8 * j, 42);
-    }
+    name_field(c, 44, 42, 42);
     for (int g = 0; nm_grid[g]; g++) {
         int col = g % 14, row = g / 14, x = 12 + 8 * col, y = 29 - 10 * row;
         if (g == nm_gsel)
@@ -2067,14 +2087,7 @@ static void name_draw(void *c)
     }
     LABEL(c, 64, 56, "%s", "FILE NAME");
     box(c, 6, 36, 121, 48, 0);
-    for (int j = 0; j < 7; j++) {
-        int x = 14 + 8 * j;
-        char ch = nm_text[j] ? nm_text[j] : ' ';
-        if (ch != ' ')
-            LABEL(c, x, 40, "%c", ch);
-        if (j == nm_cur)                        /* the cursor: a bar under it */
-            fill(c, x - 3, 37, x + 3, 38);
-    }
+    name_field(c, 40, 37, 38);
     LABEL(c, 34, 26, "%s", "FN+ARROW:EDIT");
     LABEL(c, 34, 19, "%s", "FN+NO:DELETE");
     LABEL(c, 34, 12, "%s", "FN+YES:INSERT");
@@ -2336,8 +2349,10 @@ void rec_screen_draw(void *c)
         LABEL(c, cx, by0 + 6, "%d S FREE", (int)(secs > 999 ? 999 : secs));
         if (as_done >= 0 && rec_saved_slot >= 0)
             LABEL(c, cx, by0 + 0, "%d ON TRK %d", rec_saved_slot + 1, as_done + 1);
-        else if (state == 3 && rec_saved_slot >= 0)
-            LABEL(c, cx, by0 + 0, "SAVED %d", rec_saved_slot + 1);
+        else if (state == 3 && rec_saved_slot >= 0) {
+            extern int smp_rs_last;             /* v0.46: RECORDED full: the take is in the pool only */
+            LABEL(c, cx, by0 + 0, smp_rs_last == 2 ? "%d +DRV FULL" : "SAVED %d", rec_saved_slot + 1);
+        }
     }
 
     /* THRES, on the right */

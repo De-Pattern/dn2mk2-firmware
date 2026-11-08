@@ -1120,6 +1120,192 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))
         uc.hook_del(hs)
         out["ok"] = bool(ok and out["small_refused"])
+    elif scenario == "recstore":
+        # v0.46: a recording into +DRIVE > RECORDED (csrc/sampler/link.c rs_poll, lib.c's send
+        # path). A 75,000-frame take saved to slot 40, trimmed to start on frame 6 (not on a
+        # sector) and named; queued as the FILE NAME's YES queues it. Checked:
+        # - the library entry: RECORDED (folder 1), its name, its frames; the data on the +Drive
+        #   exactly the trimmed frames as the pool image holds them; the slot marked as that
+        #   library sample (smp_lib_slot_of), the pool's own copy untouched;
+        # - a power cut after every UI pass of it: the library read again from the +Drive has no
+        #   entry, or the whole one with every byte, never a part; the pool as it was;
+        # - the slot changed mid-copy (trimmed again): it stops, nothing in the library;
+        # - the library with no room: nothing written to it, the slot still the pool's, the
+        #   recorder's word 2 (+DRV FULL); the recording itself untouched;
+        # - a send from the computer and a recording's copy never mix: BEGIN refused while one goes in
+        sys.path.insert(0, str(HERE.parent / "tools"))
+        from dn2probe import pack7, unpack7     # noqa: PLC0415
+        buf = SENTINEL + 0x1000
+        replies = []
+
+        def at_sender(uc_, address, size, user):
+            sp = uc.reg_read(K.UC_M68K_REG_A7)
+            b, n, _ab, _port = struct.unpack(">4I", bytes(uc.mem_read(sp + 4, 16)))
+            replies.append(bytes(uc.mem_read(b, n)))
+        hs = uc.hook_add(UC_HOOK_CODE, at_sender, begin=SYSEX_SENDER, end=SYSEX_SENDER)
+
+        def sx(cmd, payload=b""):
+            msg = bytes([0xF0, 0, 0x20, 0x3C, 0x7D, 1]) + pack7(struct.pack(">HB", 7, cmd) + payload) + b"\xF7"
+            machine.write(buf, msg)
+            replies.clear()
+            call("smp_rx", buf, len(msg), 2)
+            if not replies:
+                return None, b""
+            m_ = unpack7(replies[-1][6:-1])
+            return m_[3], m_[4:]
+
+        def lib_rows():
+            """every library entry as the firmware reads it from the +Drive: (k, frames, folder, name)"""
+            machine.write(syms["smp_lib_state"], bytes(4))
+            rows, k = [], 0
+            st, r = sx(21, struct.pack("<H", 0))
+            total = struct.unpack_from("<I", r)[0] if st == 0 and r else 0
+            while len(rows) < total and k < 64:
+                st, r = sx(21, struct.pack("<H", k))
+                for j in range(4):
+                    o = 4 + 31 * j
+                    kk, fr, fo = struct.unpack_from("<H", r, o)[0], struct.unpack_from("<I", r, o + 2)[0], r[o + 6]
+                    if fo != 0xFF:
+                        rows.append((kk, fr, fo, r[o + 7:o + 31].split(b"\0")[0].decode("latin-1")))
+                k += 4
+            return rows
+
+        def lib_entry(k):
+            """lib.c's 64-byte entry K, from the +Drive's index (first 2,048: sector 0x700001 + k/8)"""
+            sec = disk.get(0x700001 + k // 8, bytes(512))
+            return sec[64 * (k % 8):64 * (k % 8) + 64]
+
+        def on_disk(at, n):
+            return b"".join(disk.get(at + k, bytes(512)) for k in range((n + 511) // 512))[:n]
+
+        def img_at(addr, n):
+            lo = addr - base
+            a0 = lo & ~511
+            raw = b"".join(disk.get(STORE_SECTOR + 1 + a0 // 512 + k, bytes(512)) for k in range((lo - a0 + n + 511) // 512))
+            return raw[lo - a0:lo - a0 + n]
+
+        def slot_of(k):
+            call("smp_lib_slot_of", k)
+            v = returned_d0()
+            return v - (1 << 32) if v >= 1 << 31 else v
+
+        def entry_of(slot):
+            return struct.unpack_from("<IIII", machine.read(SM.MIRROR + 8 + 16 * slot, 16))
+
+        def libid(slot):
+            return struct.unpack("<I", machine.read(SM.MIRROR + SM.LIBID_OFFSET + 4 * slot, 4))[0]
+
+        def run_until(cond, n=6000, snaps=None):
+            for _ in range(n):
+                period()
+                call("smp_boot")
+                if snaps is not None:
+                    snaps.append(dict(disk))
+                if cond():
+                    return True
+            return False
+
+        def record(slot, place, words):
+            rec_off = SM.REC_OFFSET + place
+            for k, x in enumerate(words):
+                pool[rec_off // 4 + k] = x
+            call("smp_save_recording", slot, place, 2 * len(words))
+            return run_until(lambda: long("smp_saved") != 0) and run_until(lambda: False, 300) is False
+
+        status_out()
+        run_until(lambda: long("smp_booted") == 2, 200)
+        facts = {}
+        st_f, rf = sx(17, b"DRUMS")             # a library (formatted on this first write)
+        facts["a library to put it into"] = st_f == 0
+        slot, frames = 40, 75000
+        words = [rng.randrange(1 << 32) for _ in range(frames // 2)]
+        facts["the take saved into slot 40 (as the recorder saves it)"] = record(slot, 16 << 20, words)
+        call("smp_trim", slot, 6, frames)       # TRIM: from frame 6 (12 bytes in: not on a sector)
+        LONG = b"MYTAKE LONG NAME FROM THE SCREEN 35"   # 35 characters: the naming screen's most
+        machine.write(SENTINEL + 0x3000, LONG + b"\0")
+        call("smp_name_set", slot, SENTINEL + 0x3000)
+        run_until(lambda: False, 300)           # the directory saved
+        e = entry_of(slot)
+        want = img_at(e[0], e[1] * 2)
+        facts["trimmed: its entry starts 12 bytes in, 74,994 frames"] = e[0] == base + SM.REC_OFFSET + (16 << 20) + 12 and e[1] == frames - 6
+        before_rows = lib_rows()
+        disk_before = dict(disk)
+        # 1. queued as the FILE NAME's YES queues it; a power cut after every pass
+        snaps = []
+        call("smp_rec_store_named", slot, SENTINEL + 0x3000)
+        done = run_until(lambda: long("smp_rs_done") >= 1 and libid(slot) != 0, 6000, snaps)
+        run_until(lambda: False, 300)
+        rows = lib_rows()
+        new = [r for r in rows if r not in before_rows]
+        k = new[0][0] if len(new) == 1 else -1
+        ent = lib_entry(k) if k >= 0 else bytes(64)
+        at, nfr, fmt, fold = struct.unpack_from("<I", ent)[0], struct.unpack_from("<I", ent, 4)[0], ent[12], ent[13]
+        facts["copied: one new library entry, in RECORDED, under its whole name, 74,994 frames, int16"] = (
+            done and len(new) == 1 and new[0][2] == 1 and ent[24:24 + 36].split(b"\0")[0] == LONG
+            and nfr == frames - 6 and fmt == 1 and fold == 1)
+        facts["its data on the +Drive: exactly the trimmed frames"] = k >= 0 and on_disk(at, len(want)) == want
+        facts["the slot is that library sample now (the +DRIVE browser: loaded)"] = k >= 0 and slot_of(k) == slot
+        facts["the pool's own copy untouched"] = img_at(e[0], len(want)) == want and entry_of(slot) == e
+        facts["the recorder's word: on the +Drive (1)"] = long("smp_rs_last") == 1
+        facts["every write in the library's region or the pool's directory"] = all(
+            s >= 0x700000 or STORE_SECTOR <= s < STORE_SECTOR + 1 + 64 or s in disk_before and disk_before[s] == disk[s]
+            for s in disk)
+        final = dict(disk)
+        bad = []
+        for i, st_ in enumerate(snaps):
+            disk.clear()
+            disk.update(st_)
+            rs = lib_rows()
+            got = [r for r in rs if r not in before_rows]
+            if not got:
+                continue
+            kk = got[0][0]
+            ee = lib_entry(kk)
+            if len(got) != 1 or not LONG.decode().startswith(got[0][3]) or on_disk(struct.unpack_from("<I", ee)[0], len(want)) != want:
+                bad.append(i)
+        disk.clear()
+        disk.update(final)
+        machine.write(syms["smp_lib_state"], bytes(4))
+        facts[f"a power cut after any of its {len(snaps)} passes: no entry, or all of it"] = not bad and len(snaps) >= 3
+        # 2. the slot changed mid-copy: stops, nothing in the library
+        slot2 = 41
+        machine.write(SENTINEL + 0x3100, b"REC042\0")
+        words2 = [rng.randrange(1 << 32) for _ in range(60000)]
+        facts["a second take saved into slot 41"] = record(slot2, 24 << 20, words2)
+        rows0 = lib_rows()
+        call("smp_rec_store_named", slot2, SENTINEL + 0x3100)
+        n0 = long("smp_lib_writes")
+        run_until(lambda: long("smp_lib_writes") > n0, 400)
+        call("smp_trim", slot2, 100, 100000)    # trimmed again under it
+        run_until(lambda: False, 800)
+        facts["the slot changed mid-copy: the copy stops, nothing in the library"] = (
+            lib_rows() == rows0 and libid(slot2) == 0)
+        # 3. no room: the library's device ends just past what it holds
+        rows1 = lib_rows()
+        before = {s: d for s, d in disk.items() if s >= 0x700000}
+        machine.write(BLK_SECTORS, struct.pack(">I", max(s for s in disk) + 2))
+        call("smp_rec_store_named", slot2, SENTINEL + 0x3100)
+        run_until(lambda: long("smp_rs_last") == 2, 600)
+        after = {s: d for s, d in disk.items() if s >= 0x700000}
+        facts["no room: nothing written to the library, the slot still the pool's, the word 2 (+DRV FULL)"] = (
+            long("smp_rs_last") == 2 and after == before and libid(slot2) == 0 and lib_rows() == rows1)
+        machine.write(BLK_SECTORS, struct.pack(">I", 0x3A00000))
+        # 4. a send from the computer while a recording goes in: refused (no room now), the recording's copy whole
+        call("smp_trim", slot2, 0, 50000)
+        run_until(lambda: False, 300)
+        e2 = entry_of(slot2)
+        want2 = img_at(e2[0], e2[1] * 2)
+        call("smp_rec_store_named", slot2, SENTINEL + 0x3100)
+        n0 = long("smp_lib_writes")
+        run_until(lambda: long("smp_lib_writes") > n0, 400)
+        st_b, _ = sx(18, struct.pack("<IBBI", 100, 1, 0, 0x3F800000) + b"HOST")
+        run_until(lambda: libid(slot2) != 0, 4000)
+        k2 = next((r[0] for r in lib_rows() if r not in rows1), -1)
+        facts["a send's BEGIN while a recording goes in: refused; the recording's copy whole"] = (
+            st_b != 0 and k2 >= 0 and on_disk(struct.unpack_from("<I", lib_entry(k2))[0], len(want2)) == want2)
+        uc.hook_del(hs)
+        out["recstore"] = facts
+        out["ok"] = all(facts.values())
     elif scenario == "nest":
         # v0.40: folders inside folders over the link (csrc/sampler/lib.c): scripts/emu_lib_nest.py
         sys.path.insert(0, str(HERE))
