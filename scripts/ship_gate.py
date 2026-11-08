@@ -1157,10 +1157,13 @@ def main() -> int:
             # (v0.40: the reference is the voice's target cell, the sound's value or the trig's
             # lock: SAMP 1 there as the sound's, as stock's sync puts it)
             st += [f"poke:0x800052a8:{snd0:08x}", f"poke:{samp0:#x}:0100", f"poke:{cell - 0x800068E4 + 0x80003AF0:#x}:0100",
-                   f"poke:{cell:#x}:2c00",
+                   f"onpc:0x400db22c:{cell:#x}:2c00",
                    f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"poke:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
-                   f"poke:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
+                   f"onpc:0x400db22c:{cell:#x}:7e00", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2),
+                   f"onpc:0x400db22c:{cell:#x}:0200", f"call:{lay['smp_mod_apply']:#x}:0x800068e4", mem(cell, 2)]
+            # (v0.45: smp_mod_apply sets SAMP to the target first -- a slot never glides -- and
+            # then runs the stock apply, which adds the modulation: the modulated value goes in
+            # where that apply adds it, on its entry, not before the call)
             js = work / "samplist.json"
             sl_cmd = [a.venv, "-u", "scripts/emu_waverider_menu.py", "--root", ROOT, "--build", bdir,
                       "--snapshot", snap, "--steps", ",".join(st), "--png-dir", work / "samplist", "--json", js]
