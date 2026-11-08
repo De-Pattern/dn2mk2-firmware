@@ -1489,7 +1489,7 @@ int smp_fb_nactions(int on_folder)
  * 6 MOVE HERE, 7 CREATE FOLDER (v0.33: +DRIVE), 8 SELECT UNUSED (v0.45: PROJECT RAM) */
 int smp_fb_action(int on_folder, int a)
 {
-    static const signed char ram_s[5] = {0, 1, 2, 3, 8}, ram_f[3] = {3, 8, 2};   /* v0.45: 8 SELECT UNUSED */
+    static const signed char ram_s[5] = {0, 1, 2, 3, 8}, ram_f[3] = {3, 2, 8};   /* v0.45: 8 SELECT UNUSED, last: DELETE keeps its place */
     if (smp_fb_store == 1) {
         signed char l[8];
         int n = lib_actions(on_folder, l);
