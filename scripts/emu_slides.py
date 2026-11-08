@@ -699,6 +699,60 @@ def main() -> int:
         machine.write(snd + 222, bytes([0]))
         call(SYNC, snd, V)
 
+        # ---- v0.45: FASCIA (type 18, dnfw.fascia.machines), last of the build's checks (its frames
+        # move the LFOs' phase, which the v0.41 cases' 'lands' tolerances above depend on): its continuous controls slide
+        # onto the lock exactly as FDBK does -- HARD (WaveTone's LEV1, slot 30) and DUST (FM
+        # Tone's record 227 on slot 50: the sound's slot 50 resolves to it for type 18 only) --
+        # and a choice (TYPA) steps: its output is the lock's from the first frame
+        from dnfw.fascia import machines as FSx    # noqa: PLC0415
+        fs = {c: FSx.SLOTS[c][1] for c in ("HARD", "DUST", "TYPA")}
+        type_was = machine.read(snd + 222, 1)
+        machine.write(snd + 222, bytes([FSx.TYPE]))
+        call(SYNC, snd, V)
+        for s_ in range(101):
+            put32(STATE + 4 * idx(V, s_), u16(SRC + 2 * idx(V, s_)) << 16)
+        call(BITMAP_CLEAR, V)
+        typa_a, typa_b = FSx.rep_word("TYPA", 0), FSx.rep_word("TYPA", 3)
+        fs_locks = {"HARD": (0x1000, 0x6000), "DUST": (0x0800, 0x7000), "TYPA": (typa_a, typa_b)}
+        for rec, (c, (a_, b_)) in zip((60, 61, 62), fs_locks.items()):
+            stock_lock(rec, fs[c], 100, a_)
+            stock_lock(rec, fs[c], 104, b_)
+        set_slide(104, 1, 4)
+        reads = tuple(fs.values())
+        trig(100, f0 + 3000)
+        run(10, "fascia trig 100", read=reads)
+        start = machine.long(lay["sl_started"])
+        trig(104, f0 + 3100)
+        frows = run(expect_frames + 20, "fascia trig 104", read=reads)
+        check("FASCIA: a slide began", machine.long(lay["sl_started"]) == start + 1)
+        for c in ("HARD", "DUST"):
+            frm, to = fs_locks[c]
+            want = ramp(frm, to, expect_frames + 20)
+            got = [r["state"][fs[c]] >> 16 for r in frows]
+            gout = [r["out"][fs[c]] for r in frows]
+            check(f"FASCIA: {c} (slot {fs[c]}) ramps {frm:#x} -> {to:#x} over {expect_frames} frames, exact",
+                  got == want, "" if got == want else f"{got[:6]} vs {want[:6]}")
+            check(f"FASCIA: {c} lands on the lock and stays",
+                  gout[expect_frames - 1:] == [to] * (len(gout) - expect_frames + 1),
+                  f"out tail {gout[expect_frames - 3:expect_frames + 3]}")
+        tout = [r["out"][fs["TYPA"]] for r in frows]
+        check("FASCIA: TYPA, a choice, steps to the lock (never slides)", tout == [typa_b] * len(tout),
+              f"{[hex(x) for x in tout[:4]]}")
+        report["fascia_slides"] = {c: [r["out"][fs[c]] for r in frows[:expect_frames + 2]] for c in fs}
+        machine.write(snd + 222, type_was)
+        # the table and the voice as this section found them (its records, their index entries,
+        # step 104's SLD/SLEN; the smoother at rest), so the checks after it see what they did before
+        for rec, c in zip((60, 61, 62), fs_locks):
+            machine.write(table + rec * REC, b"\xff" * REC)
+            machine.write(table + INDEX + 101 * T + fs[c], b"\xff")
+        call(sl_set, table, T, 104, 0, 0xFFFF)
+        call(sl_set, table, T, 104, 1, 0xFFFF)
+        call(SYNC, snd, V)
+        for s_ in range(101):
+            put32(STATE + 4 * idx(V, s_), u16(SRC + 2 * idx(V, s_)) << 16)
+        call(BITMAP_CLEAR, V)
+
+
     # ---- v0.40: TRIG page 2's frame on stock 1.11 (the control: our two places aside, the
     # build's page must be stock's pixel for pixel) ----------------------------------------
     if not build:

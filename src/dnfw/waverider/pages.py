@@ -60,7 +60,8 @@ SOUND_BASE, SOUND_STRIDE, SOUND_TYPE = 52, 1163, 0xDE
 NEW_TYPE, CLONE = 5, 1
 from ..mnm import machines as _mnm_types
 from ..sampler import machines as _smp
-TYPES_LAST = max(13, *_mnm_types.TYPES, _smp.BOUNCE_TYPE)   # dnfw.waverider.coldfire.TYPES_LAST: 5.. are ours (v0.20: 13,
+from ..fascia import machines as _fsc     # v0.45: FASCIA, type 18 (kind 14)
+TYPES_LAST = max(13, *_mnm_types.TYPES, _smp.BOUNCE_TYPE, _fsc.TYPE)   # dnfw.waverider.coldfire.TYPES_LAST: 5.. are ours (v0.20: 13,
                                   # SLICE, had been left out here: its track got WaveTone's pages;
                                   # v0.26: the Monomachine's from 14 on)
 GET_SHORT_NAME = 0x400372DA
@@ -277,6 +278,15 @@ SMP_SUBTITLES = tuple(n.capitalize() for n in _smp.NAMES)
 SMP_REC_IDS = tuple(r for r, _sh, _lo in _smp.REC_PAGE)            # every sample machine's page 2
 
 
+def fsc_named() -> dict[int, tuple[str, str]]:
+    """v0.45: record -> (long, short) on a FASCIA track: its 24 controls (dnfw.fascia.machines),
+    and every other record its sound has on our pages' slots named "-" (WaveTone's it leaves
+    unused, FM Tone's on slots 50..64 it does not use), so wr_lfo_mask leaves them out"""
+    out = {_fsc.SLOTS[c][0]: (_fsc.LONG_NAMES[c], c) for c in _fsc.CONTROLS}
+    out.update({r: (UNUSED_LONG, UNUSED_SHORT) for r in _fsc.UNUSED_RECORDS})
+    return out
+
+
 def smp_named(name: str) -> dict[int, tuple[str, str]]:
     """record -> (long, short) on a sample machine's track"""
     out = {r: (lo, sh) for r, sh, lo in _smp.PAGES.get(name, _smp.PAGES["ONESHOT"]) if r}
@@ -345,8 +355,10 @@ def c_header() -> str:
     # by kind (is_wr: the type - 4), from 1: PERC, the sample machines at SMP_FIRST_KIND..,
     # the Monomachine's at MNM_KINDS
     # (v0.44: a sample machine's kind is its type - 4: 4..9, and BOUNCE's 13)
+    fsc = fsc_named()
+    order = sorted(set(order) | set(fsc))
     by_kind = {1: wr, **{_smp.TYPE_OF[n] - 4: m for n, m in zip(_smp.NAMES, smp)},
-               **{kd: m for kd, m in zip(MNM_KINDS, mnm)}}
+               **{kd: m for kd, m in zip(MNM_KINDS, mnm)}, _fsc.KIND: fsc}
     if sorted(by_kind) != list(range(1, len(by_kind) + 1)):
         raise ValueError(f"the kinds are not 1..n: {sorted(by_kind)}")
     kinds = [by_kind[k] for k in sorted(by_kind)]
@@ -361,7 +373,8 @@ def c_header() -> str:
             f"#define WR_KINDS {len(kinds)}\n"
             f"static const char *const wr_named_long[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 0) for m in kinds)}}};\n"
             f"static const char *const wr_named_short[WR_KINDS][WR_NAMED] = {{{', '.join(row(m, 1) for m in kinds)}}};\n"
-            + perc_c_header() + smp_c_header() + mnm_c_header())
+            + perc_c_header() + smp_c_header() + mnm_c_header() + _fsc.c_header()
+            + f"#define WR_NAMED_LO {min(order)}\n#define WR_NAMED_HI {max(order)}\n")
 
 
 def smp_c_header() -> str:
@@ -546,6 +559,9 @@ def source(page_draw: int, cell: int) -> str:
                               f"    .long {TAG}" for k, entries in enumerate(SMP_PAGES))
     smp_page_data += ("\nsmp_rec_descriptor:\n    .long smp_rec_title, smp_rec_subtitle\n"
                       f"    .long {', '.join(str(e) for e in SMP_REC_IDS)}\n    .long {TAG}")
+    fsc_page_data = "\n".join(f"    .long fsc_title_{k}, fsc_subtitle_{k}\n"
+                              f"    .long {', '.join(str(_fsc.SLOTS[c][0]) for c in page)}\n"
+                              f"    .long {TAG}" for k, page in enumerate(_fsc.PAGES.values()))
     return f"""
 | -- the active track's machine, as ours: d0 = its type - 4 for types 5..{TYPES_LAST}: 1 PERC,
 | 4..9 the sample machines (8..13), 2, 3 and 10.. the Monomachine's (6, 7, 14..), else 0;
@@ -581,7 +597,12 @@ wr_count:
     bne.s   3f
     moveq   #{len(PAGES)},%d0
     rts
-3:  moveq   #2,%d1                         | d0 = kind - 1: 1, 2 and 9.. the Monomachine's
+3:  moveq   #{_fsc.KIND - 1},%d1                        | v0.45: FASCIA: its three pages
+    cmp.l   %d1,%d0
+    bne.s   11f
+    moveq   #{len(_fsc.PAGES)},%d0
+    rts
+11: moveq   #2,%d1                         | d0 = kind - 1: 1, 2 and 9.. the Monomachine's
     cmp.l   %d1,%d0
     bls.s   4f
     moveq   #8,%d1
@@ -607,7 +628,7 @@ wr_count:
 wr_page:
     bsr.w   is_wr
     tst.l   %d0
-    beq.s   3f
+    beq.w   3f
     subq.l  #1,%d0
     bne.s   5f
     move.l  %sp@(16),%d0
@@ -622,7 +643,18 @@ wr_page:
     bra.s   2f
 | d0 = kind - 1: 1, 2 -> the Monomachine's 0, 1; 3..8 a sample machine; 9.. -> 2..;
 | v0.44: 12 (BOUNCE, kind 13) -> the sample row 6 (d0 9 at 4:, as 3..8 give 0..5)
-5:  moveq   #{_smp.BOUNCE_TYPE - 5},%d1
+5:  moveq   #{_fsc.KIND - 1},%d1                        | v0.45: FASCIA: its descriptor n (0..2)
+    cmp.l   %d1,%d0
+    bne.s   12f
+    move.l  %sp@(16),%d0
+    moveq   #{len(_fsc.PAGES)},%d1
+    cmp.l   %d1,%d0
+    bcc.s   6b
+    moveq   #44,%d1
+    mulu.w  %d1,%d0
+    addi.l  #fsc_descriptors,%d0
+    bra.s   2f
+12: moveq   #{_smp.BOUNCE_TYPE - 5},%d1
     cmp.l   %d1,%d0
     bne.s   10f
     moveq   #{len(_smp.NAMES) + 2},%d0
@@ -682,6 +714,9 @@ wr_label:
     moveq   #9,%d1
     cmp.l   %d1,%d0
     bcs.s   9f
+    moveq   #{_smp.BOUNCE_TYPE - 5},%d1          | v0.45: BOUNCE (12) and FASCIA (13): the stock
+    cmp.l   %d1,%d0                        | names (wr_names swapped them in); until v0.44 BOUNCE
+    bcc.s   9f                             | read past the Monomachine's five label tables
     subq.l  #6,%d0
 3:  subq.l  #1,%d0                         | the Monomachine machine's index
     lsl.l   #2,%d0
@@ -777,12 +812,16 @@ mnm_descriptors:
 {mnm_page_data}
 smp_descriptors:
 {smp_page_data}
+fsc_descriptors:
+{fsc_page_data}
 {_rep("subtitle", SUBTITLE)}
 {chr(10).join(_rep(f"mnm_title_{k}", t) for k, t in enumerate(MNM_TITLES))}
 {chr(10).join(_rep(f"mnm_subtitle_{k}", t) for k, t in enumerate(MNM_SUBTITLES))}
 {chr(10).join(_rep(f"smp_title_{k}", t) for k, t in enumerate(SMP_TITLES))}
 {chr(10).join(_rep(f"smp_subtitle_{k}", t) for k, t in enumerate(SMP_SUBTITLES))}
 {_rep("smp_rec_title", "REC")}
+{chr(10).join(_rep(f"fsc_title_{k}", t) for k, t in enumerate(_fsc.PAGE_TITLES))}
+{chr(10).join(_rep(f"fsc_subtitle_{k}", t) for k, t in enumerate(_fsc.PAGE_SUBTITLES))}
 {_rep("smp_rec_subtitle", "Recorder")}
 {chr(10).join(_rep(f"title_{k}", t) for k, t in enumerate(TITLES))}
 {strings}

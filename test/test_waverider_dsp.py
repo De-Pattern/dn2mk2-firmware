@@ -113,9 +113,10 @@ def test_the_five_patches_and_nothing_else_in_the_stock_blocks(stock7, built):
     # the sample machines (8..13) and the Monomachine's (6, 7, 14..) borrow PERC's engine
     # slot; nothing reads past slot 7
     assert dsp.SMP_ENGINE_SLOT == 5
-    assert all(lookup[1 + t] == 5 for t in (*dsp.SMP_TYPES, *dsp.MNM_TYPES))
+    # v0.45: FASCIA (18) too, silent in smp.asm until its own program (dnfw.sampler.program)
+    assert all(lookup[1 + t] == 5 for t in (*dsp.SMP_TYPES, *dsp.MNM_TYPES, *dsp.FASCIA_TYPES))
     assert all(v in (0, k) for k, v in enumerate(lookup[1:])
-               if k not in dsp.SMP_TYPES and k not in dsp.MNM_TYPES) and max(lookup) <= 7
+               if k not in dsp.SMP_TYPES and k not in dsp.MNM_TYPES and k not in dsp.FASCIA_TYPES) and max(lookup) <= 7
     assert bootstream.read_span(built, dsp.sw_to_load(dsp.LOOKUP_SITE_SW), 6) == dsp.objects()["lookup_ptr"]
     # the idle loop's back edge, jump (pc,-0x10) at sw 0xb88abb in L2, becomes JUMP 0x16f500
     site = dsp.l2_sw_to_load(dsp.IDLE_SITE_SW)

@@ -120,8 +120,10 @@ def test_the_list_offers_our_machines_then_the_sample_machines_before_midi(appli
     # v0.15: the five sample machines in the Digitakt II's order (v0.13: ONESHOT, GRID)
     # v0.26: the Monomachine's machines after PERC (6, 7, then 14..)
     from dnfw.mnm import machines as MM
-    # v0.19: SLICE before GRID; v0.44: BOUNCE (17) last of the sample machines
-    assert types == [0, 2, 1, 3, 5, *MM.TYPES, 8, 9, 10, 11, 13, 12, 17, 4]
+    # v0.19: SLICE before GRID; v0.44: BOUNCE (17) last of the sample machines; v0.45: FASCIA
+    # (18) after the Monomachine's, in the synth section
+    from dnfw.fascia import machines as FM
+    assert types == [0, 2, 1, 3, 5, *MM.TYPES, *([18] if FM.LISTED else []), 8, 9, 10, 11, 13, 12, 17, 4]
     n = 4 * len(types)
     assert at(main, CF.LIST_ALLOC, 4) == bytes.fromhex("4878") + n.to_bytes(2, "big")   # v0.19: 14 longs
     assert at(main, CF.LIST_CAP, 4) == bytes.fromhex("41e8") + n.to_bytes(2, "big")

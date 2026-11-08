@@ -478,6 +478,49 @@ void smp_knob_page(void *view, void *c, const unsigned short *ids, const char *c
     }
 }
 
+/* v0.45: FASCIA's pages (dnfw.fascia.machines; page.c sends a FASCIA track here): the
+ * Elektron grid of smp_knob_page, eight cells at the DT2's centres, each its label under it.
+ * A continuous control is the knob; a choice (TYPA, TYPB, BODA, BODB, XMOD) its option's
+ * name in a box. A p-locked control's cell is inverted as stock lights it (cell(), above),
+ * and with SYN held each label is the value, as the header's formatter writes it (fmt.c). */
+static int fsc_knob(int j, int v)               /* a record's 0..top -> the panel's 0..127 */
+{
+    int top = fsc_top[j];
+    return top == 127 ? v : (v * 254 + top) / (2 * top);
+}
+
+void fsc_page_draw(void *view, void *c, int page)
+{
+    for (int i = 0; i < 8; i++) {
+        int j = 8 * page + i;
+        u32 id = fsc_rid[j];
+        int x = CELL_X(i & 3), y = i < 4 ? TOP_Y : BOT_Y;
+        int top, v = value(view, id, &top), n = fsc_choices[j], o = 0;
+        if (n) {                                /* a choice: its name in a box, as the DT2's */
+            int k = fsc_knob(j, v), cx = x + 12;
+            o = (k * n) >> 7;
+            if (o > n - 1)
+                o = n - 1;
+            box(c, cx - 11, y + 3, cx + 11, y + 13, 0);
+            LABEL(c, cx, y + 6, "%.4s", fsc_choice_box[fsc_choice_at[j] + o]);
+        } else
+            w_knob_at(c, x, y, v, top, 0);
+        if (smp_values_held() && n)             /* SYN held: a choice's short name (the header */
+            LABEL(c, x + 12, y - 7, "%.4s", fsc_choice_box[fsc_choice_at[j] + o]);   /* has it whole) */
+        else if (smp_values_held()) {           /* SYN held: the value (O14) */
+            char vb[32];
+            u8 flag;
+            vb[0] = 0;
+            ((void (*)(int, char *))RECORD_FMT(id))(GET_VALUE(view, id, &flag), vb);
+            vb[6] = 0;
+            LABEL(c, x + 12, y - 7, "%s", vb);
+        } else
+            LABEL(c, x + 12, y - 7, "%.5s", NAME_SHORT(id));
+        if (locked(view, id))
+            invert(c, x - 1, y - 8, x + 24, y + 19);
+    }
+}
+
 /* the waveform strip: the slot's sound, peak per column, from X0 across SMP_WAVE_W at
  * CY; 0 drawn if the slot is off or empty (a flat dotted line) */
 static void waveform(void *c, int slot, int x0, int cy)

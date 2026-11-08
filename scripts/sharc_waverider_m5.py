@@ -1901,6 +1901,12 @@ def step_smp(init, sound, machines, blocks) -> dict:
     runs["off"] = rb(init, frames(ONE, smp_words({SM.SAMP_REC: 0})), blocks)
     runs["empty_slot"] = rb(init, frames(ONE, smp_words({SM.SAMP_REC: 90})), blocks)
     runs["silent"] = rb(init, frames(ONE, smp_words(), trig=()), blocks)
+    # v0.45: FASCIA (type 18) on track 1 beside ONESHOT on track 0, both triggered, its 24
+    # controls at its defaults (and the zero ones at mid): until its own program is chained in,
+    # smp.asm writes its buffer silence every block (dnfw.sampler.program FASCIA_MUTE)
+    from dnfw.fascia import machines as FSx    # noqa: PLC0415
+    fsw = {FSx.SLOTS[c][1]: FSx.default_words()[c] or 0x4000 for c in FSx.CONTROLS}
+    runs["fascia"] = rb(init, frames(ONE, smp_words(), others={1: FSx.TYPE}, other_words={1: fsw}), blocks)
 
     # v0.33: an entry that does not lie in the pool (half-written, stale, garbage) plays as
     # an empty slot: the hat's (SAMP 3) entry overwritten each block at PERC's entry, before
@@ -1998,6 +2004,11 @@ def step_smp(init, sound, machines, blocks) -> dict:
                 for k in ("bad_below", "bad_above", "bad_long", "bad_end", "bad_fmt", "bad_zero", "bad_slices")),
         "SAMP 0 (OFF), an empty slot and no trigger are silent":
             all(s and all(x == 0.0 for x in s) for s in (off, empty, silent)),
+        "v0.45: a FASCIA voice (type 18, triggered, its controls set) is silence every block, its "
+        "buffer zeroed (no program yet), while ONESHOT beside it sounds":
+            runs["fascia"]["ok"] and len(runs["fascia"]["buffers"]) > 0
+            and all(x == 0.0 for blk in runs["fascia"]["buffers"] for x in blk[1])
+            and V.peak(smp_series(runs["fascia"], 0)) > 0.05,
         "a second note restarts the sample": bool(rt) and rt[:BLOCK * RETRIG] == one[:BLOCK * RETRIG]
             and rt[BLOCK * RETRIG:] != one[BLOCK * RETRIG:],
         "nothing non-finite or above 4.0 in any sample buffer":
