@@ -17,6 +17,13 @@ instruction-set check → unit tests (both cores) → the ColdFire emulator step
 (types 0–4 bit-identical to stock) beside them; a failing SHARC part stops it at the next step.
 `--list` prints the order. About an hour; run it in the background.
 
+**Before the first build of a release (owner, 2026-11-07, after v0.44 was gated twice with
+0.43 on its screen):** bump `VERSION` to the release's number, then run
+`python3 scripts/gen_waverider_code.py` (the version is compiled into the ColdFire chunk;
+`VERSION` alone changes nothing on screen), then build. **Every step-by-step run starts with
+the preflight steps**: `--only preflight,code-fresh,rebuild,dsp-identity,hwrules,symbols,coldfire,overbridge`
+(the full run checks them first; an `--only` run does not unless named).
+
 **Step by step first (owner, 2026-11-01).** When a change touches a step's inputs, run that
 step alone until it passes: `... ship_gate.py STOCK BUILD.syx --only STEP[,STEP...]` (e.g.
 `--only unit,chords`). It records its pass in the reuse cache exactly as a full run would, but
