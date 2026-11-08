@@ -1,5 +1,15 @@
 # PING: Waverider's filter section, as a reference model first
 
+> **Removed in v0.45 (owner, 2026-11-08), to free image space for FASCIA.** The FLTR list
+> no longer offers PING, and every ColdFire edit PING made (the list, the filter names, the
+> stored-sound LOAD bound, `slot_to_id`, the FLTR page descriptor, the response curve) is
+> back to stock. **A sound saved with PING (filter type 6) loads as Multi-Mode**, as stock
+> loads it; RING becomes Multi-Mode's resonance, so such a sound can be loud. On the DSP,
+> `ping.asm` is now only the shared tail at `0x170280` (the register restore from
+> `0x2dde00`, the two re-run stock instructions, `JUMP 0x1c944c`), which every machine of
+> ours still returns through; PING's state and its DDR tables are no longer loaded.
+> `dnfw.ping.live` stays (its float32 helpers are shared). What follows is the history.
+
 **Status: reference model + audition WAVs (2026-10-13). No firmware yet.** The owner
 picks and tunes the sound by ear; then the DSP code is written to match this model
 bit for bit, as W2's scanner matches `dnfw.waverider.live`. Design and history are

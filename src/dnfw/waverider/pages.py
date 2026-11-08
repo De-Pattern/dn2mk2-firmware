@@ -286,7 +286,7 @@ def smp_named(name: str) -> dict[int, tuple[str, str]]:
 
 LABELS_OUT = ("is_wr", "wr_count", "wr_page", "wr_label", "wr_icons", "wr_grid", "wr_id9",
               "wr_cell_tail", "labels", "descriptors")
-# PING / SHFT: every stock page cell's widget is drawn by 0x4006448a; its one exit
+# every stock page cell's widget is drawn by 0x4006448a; its one exit
 CELL_EXIT = 0x400646CA            # movem.l %sp@,%d2-%d7/%a2-%fp ; lea %sp@(80),%sp ; rts
 CELL_EXIT_STOCK = "4cd77cfc4fef00504e75"
 # W2: `labels` is where the assembly's code ends and its data (the label table, the
@@ -524,7 +524,7 @@ def md_c_header() -> str:
 def source(page_draw: int, cell: int) -> str:
     """The chunk's assembly (GNU as, ColdFire), linked at LOAD. PAGE_DRAW is the C
     renderer's entry, `wr_page_draw(view, canvas)`; CELL its `wr_cell(view, canvas, x,
-    y, id)`, run as each cell widget of a stock page finishes (PING's and SHFT's TYPE)."""
+    y, id)`, run as each cell widget of a stock page finishes (parameter slides' marks)."""
     table = "\n".join(f"    .long {rid}, lab_{rid}" for rid in LABELS)
     strings = "\n".join(f'lab_{rid}: .asciz "{name}"' for rid, name in LABELS.items())
     pages = []

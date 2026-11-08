@@ -52,15 +52,15 @@ def long_at(content: bytes, va: int) -> int:
 def test_applies_to_both_sections(applied, dn2_111):
     assert set(applied.payloads) == {3, 7}
     # MAIN OS: the stock image, plus the platform area carrying the M7 pages chunk and,
-    # since W5, the wave display's chunk, and since PING P2, PING's FLTR-list chunk
+    # since W5, the wave display's chunk, and from PING P2 to v0.44, PING's FLTR-list chunk
     main, chunks = platform.split(applied.payloads[3])
     assert len(main) == len(dn2_111.container.find(3).unpack())
-    # pages, the page renderer (its own chunk since v0.13), machines, PING (the wave
-    # display chunk went with Waverider, v0.11); v0.20: and, when the owner's MD OS is
+    # pages, the page renderer (its own chunk since v0.13), machines (the wave display
+    # chunk went with Waverider, v0.11; PING's with PING, v0.45); v0.20: and, when the owner's MD OS is
     # there, the Machinedrum's screen graphics (copied to RAM, never run: no init entry);
     # v0.26: and the tables the ColdFire sends the DSP at power-on (dnfw.mods.waverider._tables)
     from dnfw.md import rom as md_rom
-    want = 6 if md_rom.available() else 4
+    want = 5 if md_rom.available() else 3
     # v0.37: and the start-up animation: the stamp's code and its frames (ANIZ); v0.39: and
     # the mod's version label over its last frame (ANZL)
     kinds = [kind for kind, _ in chunks]
@@ -100,7 +100,7 @@ def test_the_fast_link_hook_replays_the_isr_instructions(applied, stock):
 def _chunked(va: int, n: int) -> bytes:
     """N bytes at VA from the RAM chunks the mod loads (the machines chunk holds the
     name table, the attribute rows and the list since RESONATOR)."""
-    for name in ("machines_chunk", "ping_chunk", "chunk", "c_chunk"):
+    for name in ("machines_chunk", "chunk", "c_chunk"):              # (v0.45: ping_chunk gone)
         c = waverider.SPEC[name]
         code = bytes.fromhex(c["code"])
         if c["load"] <= va and va + n <= c["load"] + len(code):
@@ -401,3 +401,23 @@ def test_v039_the_version_label_is_ours_over_his_last_frame_only():
     assert A.decode(A.chunk()) == ims
     n = struct.unpack_from(">I", A.label_chunk())[0]
     assert 0 < n <= 256 and len(A.label_chunk()) == 4 + 8 * n
+
+
+def test_v045_ping_is_gone_and_its_sites_are_stock(applied, dn2_111):
+    # v0.45 (owner, 2026-11-08): PING removed. None of its ColdFire sites is edited any more
+    # -- the FLTR type list's storage, end, capacity and start, the filter name accessors'
+    # bounds and bases, the stored-sound LOAD bound, param_set_slot_to_id, the FLTR page
+    # descriptor and its response curve -- so a sound saved with filter 6 loads as stock
+    # loads it, as Multi-Mode (the gate's engine step round-trips 6, 7 and 8 to 0)
+    sites = (0x4004DB0C, 0x4004DB2C, 0x4004DB32, 0x4004DB36,      # the FLTR list
+             0x400DC3A4, 0x400DC3B6, 0x400DC3CA, 0x400DC3DE,      # the name accessors
+             0x400DD2BC,                                          # the LOAD bound
+             0x400DC096, 0x400C24B0, 0x4006ECA0)                  # slot_to_id, descriptor, curve
+    for e in waverider.SPEC["edits"]:
+        assert not any(e["va"] <= va < e["va"] + len(e["new"]) // 2 for va in sites), hex(e["va"])
+    main, _ = platform.split(applied.payloads[3])
+    stock = dn2_111.container.find(3).unpack()
+    for va in sites:
+        assert at(main, va, 8) == at(stock, va, 8), hex(va)
+    assert at(main, 0x401DDD40, 24) == struct.pack(">6I", 0, 1, 4, 3, 5, 2)   # stock's six filters
+    assert "ping_chunk" not in waverider.SPEC and not any(k.startswith("ping_") for k in waverider.SPEC["layout"])

@@ -41,8 +41,6 @@ from __future__ import annotations
 import struct
 
 from . import pages
-from ..ping import coldfire as ping_cf
-from ..ping import pages as ping_pages
 from dataclasses import dataclass
 
 BASE = 0x40000400
@@ -63,9 +61,10 @@ if set(MACHINE_NAMES) != set(NEW_TYPES):
     raise ImportError(f"machine types {sorted(set(NEW_TYPES) - set(MACHINE_NAMES))} have no machine")
 # RESONATOR (2026-10-18): the shims, the name table, the attribute rows and the list
 # outgrew the three caves W5 used, so all of it is a platform CODE chunk in RAM, after
-# PING's (dnfw.ping.coldfire.LOAD) and below the platform runtime; the caves are
+# what was PING's (0x4670F000..; v0.45: PING removed) and below the platform runtime; the caves are
 # left as stock had them.
 MCHUNK = 0x4670F800
+PAGES_END = 0x4670F000                  # the pages assembly's room ends here (PING's chunk until v0.44)
 MCHUNK_END = 0x46710000
 
 # -- 1. the MACHINE SEL list -------------------------------------------------------------
@@ -541,7 +540,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     # the C page renderer first (the assembly calls it), at C_LOAD
     from .. import slides as SL
     from .. import modversion                   # v0.39: the mod's version (VERSION), shown at the browser's top
-    cimage, csyms, cbss = compile_c(pages.c_header() + ping_pages.c_header() + SL.c_header(stock)
+    cimage, csyms, cbss = compile_c(pages.c_header() + SL.c_header(stock)
                                     + modversion.c_define(),
                                      base=pages.C_LOAD)
     if cbss:
@@ -551,8 +550,8 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
     ptable = "\n    .align 2\n" + "\n".join(f"    .long {n}" for n in pages.LABELS_OUT) + "\n"
     pblob = assemble(pages.source(csyms["wr_page_draw"], csyms["wr_cell"]) + ptable, base=pages.LOAD)
     asm = pblob[:-4 * len(pages.LABELS_OUT)]
-    if pages.LOAD + len(asm) > ping_cf.LOAD:
-        raise ComposeError(f"the pages assembly ({len(asm)} B) runs into PING's chunk")
+    if pages.LOAD + len(asm) > PAGES_END:
+        raise ComposeError(f"the pages assembly ({len(asm)} B) runs past {PAGES_END:#010x}")
     chunk = asm
     playout = dict(zip(pages.LABELS_OUT, struct.unpack(f">{len(pages.LABELS_OUT)}I",
                                                        pblob[-4 * len(pages.LABELS_OUT):])))
@@ -653,7 +652,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
          "the SYN page draw: Waverider's own page for a Waverider track (M8.1)", GRID_STOCK)
     edit(pages.CELL_EXIT, bytes.fromhex("4ef9") + _long(playout["wr_cell_tail"]) + bytes.fromhex("4e714e71"),
          "a stock page cell's widget (0x4006448a): its exit through wr_cell_tail, which draws "
-         "PING's and SHFT's TYPE as a name", bytes.fromhex(pages.CELL_EXIT_STOCK))
+         "parameter slides' marks (v0.45: no longer PING's TYPE)", bytes.fromhex(pages.CELL_EXIT_STOCK))
     edit(pages.ID9_SITE, bytes.fromhex("4eb9") + _long(playout["wr_id9"]),
          "the SYN page draw: a CZ track's third page (id 9 to the draw) to wr_grid, not "
          "WaveTone's page-3 grid", bytes.fromhex(pages.ID9_STOCK))
@@ -857,11 +856,10 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  # v0.40: folders inside folders
                  "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
-    # PING (dnfw.ping.coldfire): filter type 6 in the FLTR list, Multi-Mode's pages
-    pbuilt = ping_cf.compose(content, edit, assemble)
-    layout.update(pbuilt["layout"])
+    # v0.45: PING removed (owner, 2026-11-08): its chunk (the FLTR list's 'Ping', the filter
+    # names, the LOAD bound, slot_to_id, the descriptor, the curve) is no longer composed, so
+    # all of those stay stock and a sound saved with filter 6 loads as Multi-Mode
     return {"content": bytes(content), "edits": edits, "layout": layout,
             "chunk": {"load": pages.LOAD, "code": chunk},
             "c_chunk": {"load": pages.C_LOAD, "code": cimage},
-            "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)},
-            "ping_chunk": pbuilt["chunk"]}
+            "machines_chunk": {"load": MCHUNK, "code": bytes(mchunk)}}

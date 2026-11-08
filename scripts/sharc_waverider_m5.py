@@ -27,7 +27,7 @@ dispatch, per-track chain), as Milestone 4 does. Steps, each PASS/FAIL
    type-5 run tracks 1-15 match a stock run; the stock filter types likewise.
 5. **frame** (with --frame/--frame-be/--frames) -- a caller's frame(s), used verbatim
    every block; every type-5 track bit-exact to the model.
-6-7. **PING, SHFT, GRAN** -- each bit-exact to its own model.
+6-7. **PING, SHFT, GRAN** -- removed (SHFT, GRAN v0.27; PING v0.45); their step functions are kept only where shared.
 8. **The Monomachine machines** (v0.26) -- bit-exact to PERC's program, as PERC's voice.
 
 Every step writes WAVs under out/waverider/m5_*.wav (48 kHz, 16-bit mono, >= 2 s).
@@ -511,7 +511,7 @@ def main(argv=None):
     p.add_argument("--frame-be", help="a frame as the ColdFire holds it at 0x80005e60 (16-bit BE)")
     p.add_argument("--frames", help="a glob of per-block frames (DSP order), sorted")
     p.add_argument("--no-selmap", action="store_true", help="skip selmap (no WSL)")
-    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,tdm,stock,ping,mnm,frame")   # v0.27: shft, gran removed   # voice: PERC
+    p.add_argument("--steps", default="decode,map,voice,guard,stress,chords,garbage,wipe,smp,link,rec,mainrec,recwhole,pvmix,tdm,stock,mnm,frame")   # v0.27: shft, gran removed; v0.45: ping removed   # voice: PERC
     p.add_argument("--tag", default="", help="names this run's frame WAVs and report: m5_frame_TAG_*.wav, m5_report_TAG.json")
     a = p.parse_args(argv)
     if a.seconds < 2:
@@ -690,11 +690,6 @@ def main(argv=None):
             results["4b_filters"] = step_filters_stock(snap, m2mach, m5, stock_img, sound, machines,
                                                        max(3, a.blocks // 2))
             show(results["4b_filters"])
-
-        if "ping" in steps:
-            print("\nstep 6: PING")
-            results["6_ping"] = step_ping(init, sound, machines, a.blocks)
-            show(results["6_ping"])
 
         if "shft" in steps:
             print("\nstep 7: SHFT")
@@ -2997,7 +2992,7 @@ def step_stock(snap, m2mach, m5: Image, stock: Image, sound, machines, blocks) -
                                   if not r["ok"]}}}
 
 
-# -- step 6: PING (docs/ping.md) -----------------------------------------------------------------
+# -- (step 6, PING, removed in v0.45; docs/ping.md) -----------------------------------------------------------------
 
 PING_FIELDS = (0x1C8, 0x1CC, 0x1D0, 0x1EC, 0x1F0, 0x1F4, 0x1F8, 0x1FC, 0x204, 0x208)
 
@@ -3018,80 +3013,9 @@ def ping_settings(kind: int, *, freq=0x4800, res=0x6000, drive=0x4000, atk=0x030
             71: atk, 72: dec, 73: curve, 74: strike, 79: keyt}
 
 
-def run_ping(init, sound, machines, blocks, kinds):
-    """Track 0 (Waverider) and track 1 (WaveTone), both on filter type 6, with the
-    PING sub-types KINDS[0] and KINDS[1], triggered on block 1. Records, per block, each
-    track's buffer where wr_ping is entered and its inputs there (the record's filter
-    floats, the note cell, the trigger bit); the buffers after it are the run's
-    `machine` tap (0x1c944c)."""
-    from dnfw.ping import live as PL
-    taps = []
-
-    def at_ping(r):
-        bufs = [m2.word(r.state, V.TRACK_BUFFERS + 4 * t) for t in range(16)]
-        trig = (m2.word(r.state, TRIG_WORD) or 0) >> 16
-        tap = {}
-        for t in range(16):
-            rec = V.track_record(t)
-            tap[t] = {"before": [m2.word(r.state, bufs[t] + 4 * k) or 0 for k in range(BLOCK)],
-                      "rec": {o: f32_of(m2.word(r.state, rec + o)) for o in PING_FIELDS},
-                      "note": f32_of(m2.word(r.state, NOTE_CELL + 4 * t)),
-                      "trig": bool(trig & (1 << t)),
-                      "ftype": frame_word(r.state, FR.FILTER + 2 * t)}
-        taps.append(tap)
-
-    def frames(b):
-        f = base_frame(sound, machines, t0=5, others={1: 1}, trigger=(b == 1), trigger_others=True,
-                       overrides={WAV1: 0x3C00, **ping_settings(kinds[0])})
-        f.header(FR.FILTER, 0, PL.FILTER_TYPE)
-        f.header(FR.FILTER, 1, PL.FILTER_TYPE)
-        f.sound(1, {**machines.get(1, {}), TUN1: TUN1_ZERO, **ping_settings(kinds[1], freq=0x3C00)})
-        return f.to_bytes()
-    run = run_blocks(init, frames, blocks, extra_hooks={dsp.PING_SW: at_ping})
-    return run, taps
-
-
-def step_ping(init, sound, machines, blocks) -> dict:
-    from dnfw.ping import live as PL
-    T = PL.tables()
-    results, numbers = {}, {}
-    for kinds in ((2, 1), (3, 0)):                          # VCFQ + LADR, then LPG + SVF
-        run, taps = run_ping(init, sound, machines, blocks, kinds)
-        name = f"{PL.TYPES[kinds[0]]}+{PL.TYPES[kinds[1]]}"
-        if not run["ok"] or len(taps) != blocks:
-            results[name] = {"ok": False, "why": run.get("halt") or f"{len(taps)} PING entries"}
-            continue
-        voices = {t: PL.Voice() for t in range(16)}
-        mism, peaks, untouched, ftypes = {0: 0, 1: 0}, {0: 0.0, 1: 0.0}, True, set()
-        for b, tap in enumerate(taps):
-            after = run["machine"][b]
-            for t in range(16):
-                x = tap[t]
-                ftypes.add((t, x["ftype"]))
-                if x["ftype"] != PL.FILTER_TYPE:
-                    untouched &= [bits_of(v) for v in after[t]] == x["before"]
-                    continue
-                want = PL.block(voices[t], [f32_of(w) for w in x["before"]], x["rec"], x["note"],
-                                x["trig"], T)
-                got = [bits_of(v) for v in after[t]]
-                mism[t] = mism.get(t, 0) + sum(1 for g, w in zip(got, want) if g != bits_of(w))
-                peaks[t] = max(peaks.get(t, 0.0), max(abs(v) for v in after[t] if v == v))
-        results[name] = {"ok": True, "mismatches": mism, "peaks": peaks, "others_untouched": untouched,
-                         "ping_tracks": sorted(t for t, f in ftypes if f == PL.FILTER_TYPE)}
-        numbers[name] = results[name]
-    checks = {
-        "PING runs on both tracks set to filter type 6, Waverider and WaveTone alike":
-            all(r.get("ping_tracks") == [0, 1] for r in results.values()),
-        "every PING track is bit-exact to dnfw.ping.live, fed the DSP's own inputs, in every block "
-        "(VCFQ, LADR, LPG, SVF)":
-            all(r.get("ok") and not any(r["mismatches"].values()) for r in results.values()),
-        "every PING track is audible and bounded (0.001 < peak <= 0.9)":
-            all(r.get("ok") and all(0.001 < p <= 0.9 + 1e-6 for p in r["peaks"].values())
-                for r in results.values()),
-        "tracks on other filter types pass through wr_ping bit-identical":
-            all(r.get("ok") and r["others_untouched"] for r in results.values()),
-    }
-    return {"ok": all(checks.values()), "checks": checks, "numbers": numbers}
+# v0.45: PING removed (owner, 2026-11-08): run_ping and step_ping went with it. ping.asm is
+# now the shared tail alone (the register restore and the rejoin at 0x1c944c), still entered
+# at PING_SW; ping_settings, f32_of, bits_of and PING_FIELDS stay for the steps below.
 
 
 # -- step 7: SHFT (docs/shft.md) -----------------------------------------------------------------

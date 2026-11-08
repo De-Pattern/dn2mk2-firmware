@@ -156,17 +156,17 @@ def test_ddr_spans_are_clear_of_the_stock_image_and_the_engine():
     # the Monomachine's scratch and state (zeros; v0.26: RESONATOR's and CZ's state and
     # tables went), PING's and PERC's tables (v0.27: SHFT's and GRAN's, GRAN's buffers went);
     # Waverider's wavetables went in v0.11. v0.26: the Machinedrum's shipped tables (the
-    # host's pitch table, zpack) are not in the image: the ColdFire sends them at power-on
-    assert [a for _, a, _ in ddr] == [dsp.PING_TABLES_DDR,
-                                      dsp.SHFT_TABLES_DDR,                      # v0.31: AMD's sine
+    # host's pitch table, zpack) are not in the image: the ColdFire sends them at power-on.
+    # v0.45: PING's tables went with PING
+    assert [a for _, a, _ in ddr] == [dsp.SHFT_TABLES_DDR,                      # v0.31: AMD's sine
                                       dsp.PERC_TABLES_DDR,
                                       dsp.SMP_TABLES_DDR,                       # v0.18: the DT2 reader's
                                       dsp.MD_TABLES_DDR,
                                       dsp.MD_DELAY_DDR,                         # v0.32: P-I's lines, zeroed
                                       dsp.SMP_POOL_DDR, dsp.SMP_POOL_DDR + 8]   # v0.17: the MD's
     assert not any(ddr[-1][2])
-    assert not any(ddr[4][2]) and not any(ddr[5][2])      # the MD's tables (the DSP fills them), P-I's lines
-    assert dsp.MD_TABLES_DDR + len(ddr[4][2]) <= dsp.MD_DELAY_DDR
+    assert not any(ddr[3][2]) and not any(ddr[4][2])      # the MD's tables (the DSP fills them), P-I's lines
+    assert dsp.MD_TABLES_DDR + len(ddr[3][2]) <= dsp.MD_DELAY_DDR
     # v0.32: the voices' working state in L2 (zeros), inside the room proven on units
     from dnfw.perc import live as PL
     L = PL.layout()

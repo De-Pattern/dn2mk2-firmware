@@ -59,7 +59,7 @@ failure:
 
 The SHARC runner's parts (v0.34): decode/map/voice/guard, stress (K = 3 and the memory-cost
 clock), garbage, **wipe** (the output guard really resets a poisoned voice and records it),
-smp, link/rec/pvmix/tdm, stock/ping, mnm/frame.
+smp, link/rec/pvmix/tdm, stock (ping until v0.44), mnm/frame.
 
 Only if all pass does it write `BUILD.gate.json` beside the build (the build's
 sha256, each gate's result, the date) and print `CLEARED TO FLASH`. Anything else
@@ -144,8 +144,6 @@ def code_ranges() -> dict[int, list[tuple[int, int]]]:
     lay = json.loads((ROOT / "src/dnfw/mods/waverider_code.json").read_text())["layout"]
     out = {lay["is_wr"]: [(lay["is_wr"], lay["labels"])],
            lay["c_load"]: [(lay["c_load"], lay["c_text_end"])]}      # v0.13: a chunk of its own
-    if "ping_slot" in lay:      # PING's chunk: its shims, then its list, names and table
-        out[lay["ping_slot"]] = [(lay["ping_slot"], lay["ping_code_end"])]
     if "mchunk_code_end" in lay:  # the machines chunk: the shims, then strings and tables
         out[lay["slot_shim"]] = [(lay["slot_shim"], lay["name_long_5"])]
     return out
@@ -160,7 +158,7 @@ MNM_EXC_TREES = {"src/dnfw/mnm": "c27c4179af8142a94794fcafac097b5b99edd267",
 MNM_EXC_REST = 8
 TESTS = ["test/test_safety.py", "test/test_mods_list.py", "test/test_mods_platform.py",
          "test/test_waverider_mod.py", "test/test_waverider_dsp.py",
-         "test/test_waverider_pages.py", "test/test_ping_coldfire.py", "test/test_ping_live.py",
+         "test/test_waverider_pages.py",                    # v0.45: test_ping_coldfire/_live dropped with PING
          "test/test_shft_live.py", "test/test_mnm.py",
          "test/test_gran_live.py", "test/test_perc_live.py", "test/test_sampler.py",
          "test/test_sources.py", "test/test_md_ui.py", "test/test_patcher.py",
@@ -631,9 +629,10 @@ def main() -> int:
         types = ["--machine-type", "3"] + ([x for t in mtypes for x in ("--machine-type", str(t))]
                                            + ["--machine-max", str(last)]
                                            if dsp_changed else [])
-        # v0.27: SHFT (7) and GRAN (8) removed: 7 and 8 load as Multi-Mode now
+        # v0.27: SHFT (7) and GRAN (8) removed: 7 and 8 load as Multi-Mode now; v0.45: PING (6)
+        # removed too, so the LOAD bound is stock again and every type above 5 loads as Multi-Mode
         types += ["--filter-type", "2"] + (["--filter-type", "6", "--filter-type", "7",
-                                            "--filter-type", "8", "--filter-max", "6"]
+                                            "--filter-type", "8", "--filter-max", "5"]
                                            if dsp_changed else [])
         eng_cmd = [a.venv, "-u", "scripts/emu_boot_engine.py", "--build", bdir, "--frames", "8", *types]
 

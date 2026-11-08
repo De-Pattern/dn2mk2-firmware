@@ -18,7 +18,7 @@ from ..patch import cbuild
 SOURCE = pathlib.Path(__file__).resolve().parents[3] / "csrc" / "waverider" / "page.c"
 ENTRY = "wr_page_draw"
 POLL = "wr_poll"                        # the UI loop's redraw test (coldfire.POLL_SITE)
-OVERLAY = "wr_cell"                     # after each stock cell widget: PING's and SHFT's TYPE
+OVERLAY = "wr_cell"                     # after each stock cell widget: parameter slides' marks
 # v0.14: the sample link (csrc/sampler), linked into the same chunk
 LINK_SOURCES = [SOURCE.parents[1] / "sampler" / "link.c", SOURCE.parents[1] / "sampler" / "hooks.S",
                 SOURCE.parents[1] / "sampler" / "smp_page.c", SOURCE.parents[1] / "sampler" / "rec.c",
