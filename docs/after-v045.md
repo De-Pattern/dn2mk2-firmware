@@ -10,6 +10,15 @@ mind for after so we remember to cover them once finished with this". Order: BOU
    pools (the RAM banks, on hold since v0.45) and other sample management.
 3. Capicola stretch (heavylight's) goes in v0.46 (owner, 2026-11-08), with that release, especially if BOUNCE works on
    hardware. His source never goes in a public repo.
+   **How (owner, 2026-11-08 05:24): Capicola is BOUNCE's stretch.** If BOUNCE proves itself on v0.45,
+   a BOUNCE track plays its take through Capicola by default. Today a BOUNCE voice is STRETCH on
+   its buffer half (grains of 43 ms). The existing stretch stays available as a switch: a choice
+   control on BOUNCE's page (4 detents an option), e.g. ALGO: CAPI / GRAIN, and any others it
+   offers. To check first:
+   - Capicola's DSP cost per voice against STRETCH's;
+   - its latency against the take's start on the step;
+   - how it fits the take to its steps at the tempo (BOUNCE's rule);
+   - what heavylight's licence allows us to ship.
 
 ## 1. Recordings into the +Drive library's RECORDED folder, automatically
 - **Today:** a recording (manual RECORD NOW, or a BOUNCE take saved with FUNC + YES) is saved
