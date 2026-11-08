@@ -276,7 +276,7 @@ static int sb_write(void)
         SB[k] = 0;
     SB[0] = LIB_MAGIC;
     SB[1] = LIB_VERSION;
-    SB[2] = LIB_CAP;
+    SB[2] = LIB_CAP_LO;                         /* v0.45: the superblock's capacity stays 2,048 (the extension's header says 16,384) */
     SB[3] = sb_check();
     return lib_wr(LIB_SECTOR, 512u, SB);
 }
@@ -344,7 +344,7 @@ void smp_lib_boot(void)
         smp_lib_state = -1;
         return;
     }
-    if (SB[0] != LIB_MAGIC || SB[1] != LIB_VERSION || SB[2] != LIB_CAP || SB[3] != sb_check()) {
+    if (SB[0] != LIB_MAGIC || SB[1] != LIB_VERSION || SB[2] != LIB_CAP_LO || SB[3] != sb_check()) {
         smp_lib_state = 1;
         return;
     }

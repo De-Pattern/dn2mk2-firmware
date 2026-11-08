@@ -123,8 +123,6 @@ def run(cx):
         m.write(syms["smp_lib_state"], bytes(4))
         st, info = sx(16)
         okb = st == 0 and info and struct.unpack_from("<I", info)[0] == 2
-        if not okb:
-            print("  DEBUG boot", st, info[:24].hex() if info else None, flush=True)
         return okb
 
     def tree():
@@ -433,8 +431,10 @@ def run(cx):
     facts["v0.45: its frames clear of every other sample's"] = (
         at2048 >= LIB_DATA and not any(LIB_DATA + 4096 + k < at2048 + sec2048 and at2048 < LIB_DATA + 4096 + k + 1
                                        for k in range(2048)))
-    facts["v0.45: the superblock untouched (version 1, capacity 2,048: an older build reads the first 2,048)"] = (
-        disk.get(LIB) == sb_before)
+    sbw = struct.unpack(">4I", (disk.get(LIB) or bytes(16))[:16])
+    facts["v0.45: the superblock untouched, and as every build writes it (version 1, capacity 2,048: "
+          "an older build reads the first 2,048)"] = (
+        disk.get(LIB) == sb_before and sbw[0] == 0x444E324C and sbw[1] == 1 and sbw[2] == 2048)
     ok_b2 = boot()
     st, info = sx(16)
     cnt2 = struct.unpack_from("<3I", info)[2] if st == 0 and len(info) >= 12 else None
