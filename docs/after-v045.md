@@ -4,6 +4,13 @@ Owner, 2026-11-08 03:24: "solve the bounce issue and get FASCIA out ... keep the
 mind for after so we remember to cover them once finished with this". Order: BOUNCE freeze fixed
 (and its gate check), FASCIA released, then these.
 
+## The order (owner's Discord post, 2026-11-08)
+1. v0.45: BOUNCE (fixed) and FASCIA in one release.
+2. Then: recorded samples save to the +Drive (1), the FILE NAME screen (1b), then larger sample
+   pools (the RAM banks, on hold since v0.45) and other sample management.
+3. Capicola stretch (heavylight's) goes in with that release, especially if BOUNCE works on
+   hardware. His source never goes in a public repo.
+
 ## 1. Recordings into the +Drive library's RECORDED folder, automatically
 - **Today:** a recording (manual RECORD NOW, or a BOUNCE take saved with FUNC + YES) is saved
   into the project's pool, named RECnnn. The pool is saved on the +Drive with the project, and
