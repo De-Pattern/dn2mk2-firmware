@@ -8,7 +8,7 @@ mind for after so we remember to cover them once finished with this". Order: BOU
 1. v0.45: BOUNCE (fixed) and FASCIA in one release.
 2. Then: recorded samples save to the +Drive (1), the FILE NAME screen (1b), then larger sample
    pools (the RAM banks, on hold since v0.45) and other sample management.
-3. Capicola stretch (heavylight's) goes in with that release, especially if BOUNCE works on
+3. Capicola stretch (heavylight's) goes in v0.46 (owner, 2026-11-08), with that release, especially if BOUNCE works on
    hardware. His source never goes in a public repo.
 
 ## 1. Recordings into the +Drive library's RECORDED folder, automatically
