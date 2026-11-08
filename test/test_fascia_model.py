@@ -110,7 +110,7 @@ def test_velocity_brightens_a_strike():
 
 
 def test_tzfm_goes_through_zero():
-    e = R.Exciter("TZFM", {**R.DEFAULTS, "TZFM": 127, "SIDE": 40}, 110.0, 1.0, 1)
+    e = R.Exciter("TZFM", {**R.INTERNAL, "TZFM": 127, "SIDE": 40}, 110.0, 1.0, 1)
     t = np.arange(2000) / R.RATE
     ratio = 0.5 + 6.5 * R.u(40) ** 1.5
     m = np.sin(2 * math.pi * 110.0 * ratio * t)

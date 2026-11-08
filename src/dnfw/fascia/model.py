@@ -98,7 +98,7 @@ def expand(panel: dict) -> dict:
     else:
         q["XMOD"], q["COUP"] = _span(XMODS, XMODS.index(x)), p["COUP"]
     sk = p["SKIN"]
-    q["FORM"] = (64 - sk) * 2 if sk < 64 else 0
+    q["FORM"] = min((64 - sk) * 2, 127) if sk < 64 else 0
     q["WATR"] = min((sk - 64) * 2, 127) if sk > 64 else 0
     d = p["DRIVE"]
     q["CHAR"] = min(d * 2, 127)
