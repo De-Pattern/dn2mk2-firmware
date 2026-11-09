@@ -184,8 +184,11 @@ static u32 ctl(u32 t, u32 slot)                 /* a track's control, as its sou
 
 int rt_is_bounce(u32 t)                         /* BOUNCE on track t */
 {
-    const u8 *snd = sound_of(t);
-    return snd && snd[SOUND_TYPE] == BOUNCE_TYPE;
+    /* v0.48 (docs/bounce-removal-plan.md, step 1): BOUNCE does nothing: no track is one for the
+     * recorder trigs, the buffers or the BOUNCE REC panel (bn_active). A loaded type-17 track
+     * plays SAMP OFF (link.c: rt_bounce_samp, no take ever) */
+    (void)t;
+    return 0;
 }
 
 u32 rt_buf_of(u32 t)                            /* the buffer a BOUNCE track names, 0..BUF_N-1 */
