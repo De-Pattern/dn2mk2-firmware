@@ -79,3 +79,17 @@ Every screen 128 x 64, drawn with the existing renderer.
 - The matrix: [TRIG n] toggles, the inverted cells, the LEDs, FLEX tracks excluded by default.
 - Old projects with BOUNCE tracks still load silent (v0.48's bouncegone step).
 - Room: the image size and the DSP time with FLEX playing on 16 tracks, within the limits.
+
+## Text and values never outgrow their place (owner, 2026-11-09)
+
+- Every value of every control is drawn at the **same place, size and baseline** whatever it is:
+  `MAX` and `16` on the same line in the same font (not v0.47's RECORDER, where R.LEN's MAX sits
+  higher and larger than a number's two-line `16 / STEPS`). A unit word is not added under some
+  values and not others; the label says what the value is.
+- Every choice is designed to fit its cell (32 px a column: about 6 label characters).
+- Status lines fit their box (no overlap: BOUNCE's `64 STEPS, FN+YES SAVES` ran out of its box
+  over SRC and the grid).
+- **Gate**: every control is turned through every value, and every status in every state is
+  drawn; the text's pixels must stay inside the control's cell or the box, at the same baseline
+  for every value of a control. The same check is applied to the existing RECORDER in v0.48
+  (R.LEN's MAX and numbers on one line; its centre box's every message).
