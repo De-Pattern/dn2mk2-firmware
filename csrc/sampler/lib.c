@@ -890,12 +890,29 @@ int smp_lib_fmt(int k) { return smp_lib_used(k) ? E(k)[12] : 0; }
  * 1 no library/refused, 2 no room (the library full: the recording stays in the pool only),
  * 4 a send from the computer is writing (try later); PUT the frames in order; END -> the entry
  * (written last), or -1; ABORT drops it (nothing names the sectors written) */
+/* v0.46: the superblock sector as read at boot: never written (all 0x00 or all 0xFF) */
+static int sb_blank(void)
+{
+    u32 a = 0, o = 0xFFFFFFFFu;
+    for (u32 k = 0; k < 128u; k++) {
+        a |= SB[k];
+        o &= SB[k];
+    }
+    return a == 0u || o == 0xFFFFFFFFu;
+}
+
 int smp_lib_put_begin(u32 frames, int fmt, u32 rate, const char *name)
 {
     if (smp_lib_state == 0)
         smp_lib_boot();
     if (w_idx >= 0)
         return 4;
+    /* a recording makes a new library only on a +Drive that never held one: a superblock that
+     * was read but does not check (another build's library, or a damaged one) is left alone,
+     * and the recording stays in the project (a send from the computer still formats, as since
+     * v0.31) */
+    if (smp_lib_state == 1 && !sb_blank())
+        return 3;
     u32 nl = 0;
     while (nl < LIB_NAME - 1 && name[nl])
         nl++;

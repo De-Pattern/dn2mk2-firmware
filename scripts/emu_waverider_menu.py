@@ -1216,6 +1216,11 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
         status_out()
         run_until(lambda: long("smp_booted") == 2, 200)
         facts = {}
+        # the scenario's own +Drive: no library on it yet (an earlier scenario's library state in
+        # RAM, on a disk since replaced, would otherwise make the first write skip its format)
+        for s_ in [s_ for s_ in disk if s_ >= 0x6F0000]:
+            del disk[s_]
+        machine.write(syms["smp_lib_state"], bytes(4))
         st_f, rf = sx(17, b"DRUMS")             # a library (formatted on this first write)
         facts["a library to put it into"] = st_f == 0
         slot, frames = 40, 75000
@@ -1314,6 +1319,31 @@ def link16(machine, uc, K, guest_call, syms, scenario, SL, SM, WD):
                             "rs_done": long("smp_rs_done"), "e2": list(e2), "rows_new": [r for r in lib_rows() if r not in rows1]}
         facts["a send's BEGIN while a recording goes in: refused; the recording's copy whole"] = (
             mid and st_b == 2 and k2 >= 0 and on_disk(struct.unpack_from("<I", lib_entry(k2))[0], len(want2)) == want2)
+        # 5. v0.46: a library the firmware does not recognise (its superblock read, not checking, not
+        # blank: another build's, or damaged): a recording leaves it alone, the take stays in the pool
+        slot3 = 42
+        words3 = [rng.randrange(1 << 32) for _ in range(20000)]
+        facts["a third take saved into slot 42"] = record(slot3, 28 << 20, words3)
+        machine.write(SENTINEL + 0x3200, b"REC043\0")
+        disk[0x700000] = bytes([0x5A]) * 512
+        machine.write(syms["smp_lib_state"], bytes(4))
+        before5 = {s_: d_ for s_, d_ in disk.items() if s_ >= 0x6F0000}
+        call("smp_rec_store_named", slot3, SENTINEL + 0x3200)
+        run_until(lambda: long("smp_rs_last") == 3, 600)
+        after5 = {s_: d_ for s_, d_ in disk.items() if s_ >= 0x6F0000}
+        facts["a library it does not recognise: left alone (nothing written there), the take the pool's, the word 3"] = (
+            long("smp_rs_last") == 3 and libid(slot3) == 0 and after5 == before5)
+        # 6. a +Drive that never held a library: the recording makes one, RECORDED, as a send does
+        for s_ in [s_ for s_ in disk if s_ >= 0x6F0000]:
+            del disk[s_]
+        machine.write(syms["smp_lib_state"], bytes(4))
+        call("smp_rec_store_named", slot3, SENTINEL + 0x3200)
+        run_until(lambda: libid(slot3) != 0, 4000)
+        rows6 = lib_rows()
+        e3 = entry_of(slot3)
+        facts["a +Drive that never held a library: one made, the take in RECORDED"] = (
+            len(rows6) == 1 and rows6[0][1] == e3[1] and rows6[0][2] == 1 and rows6[0][3] == "REC043")
+        out["diag_6"] = {"rows": rows6, "rs_last": long("smp_rs_last"), "e3": list(e3)}
         uc.hook_del(hs)
         out["recstore"] = facts
         out["ok"] = all(facts.values())
