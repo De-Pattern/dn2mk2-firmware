@@ -475,6 +475,89 @@ static u32 w_at __attribute__((section(".data"))) = 0;      /* how many came, in
 static u32 w_sum __attribute__((section(".data"))) = 1;
 static u32 w_block __attribute__((section(".data"))) = 0xFFFFFFFFu;
 static u8 w_entry[64] __attribute__((section(".data")));
+static int w_own __attribute__((section(".data"))) = 0;      /* v0.46: 0 a send from the computer, 1 a recording (link.c) */
+
+/* v0.46: the send's three steps as functions, so a recording (link.c's rs_poll) goes into the
+ * library by the very path a send takes: BEGIN finds the entry and its room, PUT writes the
+ * frames in order into free sectors (nothing names them yet), END writes the entry last, one
+ * sector: a power cut anywhere leaves the library without the sample or with all of it */
+static int w_flush(void);
+static int w_begin(u32 frames, u32 fmt, u32 folder, u32 rate, const u8 *name, u32 nlen, int own)
+{
+    if (w_idx >= 0 && w_own != own)
+        return 4;                               /* the other one is writing */
+    if (lib_format() != 0)
+        return 1;
+    u32 bytes = frames * (fmt ? 2u : 4u);
+    int k = 0;
+    while (k < LIB_CAP && smp_lib_used(k))
+        k++;
+    u32 sectors = (bytes + 511u) / 512u;
+    u32 at = frames && bytes / (fmt ? 2u : 4u) == frames && k < LIB_CAP && folder < LIB_FOLDERS
+             ? lib_room(sectors) : 0;
+    if (!at)
+        return 2;                               /* no room, or nothing to keep */
+    for (u32 b = 0; b < 64; b++)
+        w_entry[b] = 0;
+    lput(w_entry, at);
+    lput(w_entry + 4, frames);
+    lput(w_entry + 8, rate);
+    w_entry[12] = (u8)fmt;
+    w_entry[13] = (u8)folder;
+    lput(w_entry + 20, sectors);
+    for (u32 c = 0; c < LIB_NAME - 1 && c < nlen && name[c]; c++)
+        w_entry[24 + c] = name[c];
+    w_idx = k;
+    w_own = own;
+    w_start = at;
+    w_bytes = bytes;
+    w_at = 0;
+    w_sum = 1;
+    w_block = 0xFFFFFFFFu;
+    return 0;
+}
+
+static int w_put(const u8 *p, u32 m)            /* -> 0, 1 not in order or too much, 3 the +Drive refused */
+{
+    if (w_idx < 0 || m > w_bytes - w_at)
+        return 1;
+    for (u32 j = 0; j < m; j++) {
+        u32 a = w_at, b = a & ~(LCHUNK - 1u);
+        if (b != w_block) {
+            if (w_flush() != 0) {
+                w_idx = -1;
+                return 3;
+            }
+            w_block = b;
+            for (u32 z = 0; z < LCHUNK; z++)
+                LSTAGE[z] = 0;
+        }
+        LSTAGE[a - b] = p[j];
+        w_at = a + 1;
+    }
+    w_sum = adler(p, m, w_sum);
+    return 0;
+}
+
+static int w_end(void)                          /* -> 0 (the entry written), 1, 3 */
+{
+    if (w_idx < 0 || w_at != w_bytes || w_flush() != 0) {
+        w_idx = -1;
+        return 1;
+    }
+    lput(w_entry + 16, w_sum);
+    lput(w_entry + 60, entry_check(w_entry));
+    for (u32 b = 0; b < 64; b++)
+        E(w_idx)[b] = w_entry[b];
+    int r = 0;
+    if (index_sector_write(w_idx) != 0) {
+        r = 3;
+        for (u32 b = 0; b < 64; b++)
+            E(w_idx)[b] = 0;
+    }
+    used_all();
+    return r;
+}
 
 static int w_flush(void)
 {
@@ -629,86 +712,42 @@ u32 smp_lib_rx(u32 cmd, const u8 *rq, u32 n, u8 *rp, u32 r, u8 *st)
         return r;
     }
     if (cmd == 18) {                            /* BEGIN frames, fmt, folder, rate bits, name */
-        if (n < 3 + 10 || lib_format() != 0) {
-            *st = 1;
+        int e = n < 3 + 10 ? 1 : w_begin(lget(rq + 3), rq[7], rq[8], lget(rq + 9), rq + 13, n - 13, 0);
+        if (e) {
+            *st = (u8)(e == 4 ? 2 : e == 2 ? 2 : 1);   /* busy (a recording going in) reads as no room now */
             return r;
         }
-        u32 frames = lget(rq + 3), fmt = rq[7], folder = rq[8], rate = lget(rq + 9);
-        u32 bytes = frames * (fmt ? 2u : 4u);
-        int k = 0;
-        while (k < LIB_CAP && smp_lib_used(k))
-            k++;
-        u32 sectors = (bytes + 511u) / 512u;
-        u32 at = frames && bytes / (fmt ? 2u : 4u) == frames && k < LIB_CAP && folder < LIB_FOLDERS
-                 ? lib_room(sectors) : 0;
-        if (!at) {
-            *st = 2;                            /* no room, or nothing to keep */
-            return r;
-        }
-        for (u32 b = 0; b < 64; b++)
-            w_entry[b] = 0;
-        lput(w_entry, at);
-        lput(w_entry + 4, frames);
-        lput(w_entry + 8, rate);
-        w_entry[12] = (u8)fmt;
-        w_entry[13] = (u8)folder;
-        lput(w_entry + 20, sectors);
-        for (u32 c = 0; c < LIB_NAME - 1 && 13 + c < n; c++)
-            w_entry[24 + c] = rq[13 + c];
-        w_idx = k;
-        w_start = at;
-        w_bytes = bytes;
-        w_at = 0;
-        w_sum = 1;
-        w_block = 0xFFFFFFFFu;
-        put32(rp + r, (u32)k); r += 4;
-        put32(rp + r, at); r += 4;
+        put32(rp + r, (u32)w_idx); r += 4;
+        put32(rp + r, w_start); r += 4;
         return r;
     }
     if (cmd == 19) {                            /* WRITE offset, data: in order */
         u32 at = n >= 7 ? lget(rq + 3) : 0xFFFFFFFFu, m = n >= 7 ? n - 7 : 0;
-        if (w_idx < 0 || at != w_at || m > w_bytes - w_at) {
+        if (w_idx < 0 || w_own != 0 || at != w_at || m > w_bytes - w_at) {
             *st = 1;
             put32(rp + r, w_at); r += 4;        /* where it wants the next */
             return r;
         }
-        for (u32 j = 0; j < m; j++) {
-            u32 a = w_at, b = a & ~(LCHUNK - 1u);
-            if (b != w_block) {
-                if (w_flush() != 0) {
-                    *st = 3;
-                    w_idx = -1;
-                    return r;
-                }
-                w_block = b;
-                for (u32 z = 0; z < LCHUNK; z++)
-                    LSTAGE[z] = 0;
-            }
-            LSTAGE[a - b] = rq[7 + j];
-            w_at = a + 1;
+        int e = w_put(rq + 7, m);
+        if (e) {
+            *st = (u8)e;
+            return r;
         }
-        w_sum = adler(rq + 7, m, w_sum);
         put32(rp + r, w_at); r += 4;
         return r;
     }
     if (cmd == 20) {                            /* END check: the entry, last */
         u32 want = n >= 7 ? lget(rq + 3) : 0;
-        if (w_idx < 0 || w_at != w_bytes || w_flush() != 0 || want != w_sum) {
+        if (w_idx < 0 || w_own != 0 || w_at != w_bytes || want != w_sum) {
             *st = 1;
-            w_idx = -1;
+            if (w_own == 0)
+                w_idx = -1;
             return r;
         }
-        lput(w_entry + 16, w_sum);
-        lput(w_entry + 60, entry_check(w_entry));
-        for (u32 b = 0; b < 64; b++)
-            E(w_idx)[b] = w_entry[b];
-        if (index_sector_write(w_idx) != 0) {
-            *st = 3;
-            for (u32 b = 0; b < 64; b++)
-                E(w_idx)[b] = 0;
-        }
-        used_all();
-        put32(rp + r, (u32)w_idx); r += 4;
+        int k = w_idx, e = w_end();
+        if (e)
+            *st = (u8)e;
+        put32(rp + r, (u32)k); r += 4;
         w_idx = -1;
         return r;
     }
@@ -846,6 +885,56 @@ u32 smp_lib_rate(int k) { return smp_lib_used(k) ? lget(E(k) + 8) : 0; }
 /* v0.39: the adler-32 of entry K's frames (its +16, checked at END): what it is, wherever it lies */
 u32 smp_lib_sum(int k) { return smp_lib_used(k) ? lget(E(k) + 16) : 0; }
 int smp_lib_fmt(int k) { return smp_lib_used(k) ? E(k)[12] : 0; }
+
+/* v0.46: a recording into +DRIVE > RECORDED (folder 1), for link.c's rs_poll. BEGIN -> 0 started,
+ * 1 no library/refused, 2 no room (the library full: the recording stays in the pool only),
+ * 4 a send from the computer is writing (try later); PUT the frames in order; END -> the entry
+ * (written last), or -1; ABORT drops it (nothing names the sectors written) */
+/* v0.46: the superblock sector as read at boot: never written (all 0x00 or all 0xFF) */
+static int sb_blank(void)
+{
+    u32 a = 0, o = 0xFFFFFFFFu;
+    for (u32 k = 0; k < 128u; k++) {
+        a |= SB[k];
+        o &= SB[k];
+    }
+    return a == 0u || o == 0xFFFFFFFFu;
+}
+
+int smp_lib_put_begin(u32 frames, int fmt, u32 rate, const char *name)
+{
+    if (smp_lib_state == 0)
+        smp_lib_boot();
+    if (w_idx >= 0)
+        return 4;
+    /* a recording makes a new library only on a +Drive that never held one: a superblock that
+     * was read but does not check (another build's library, or a damaged one) is left alone,
+     * and the recording stays in the project (a send from the computer still formats, as since
+     * v0.31) */
+    if (smp_lib_state == 1 && !sb_blank())
+        return 3;
+    u32 nl = 0;
+    while (nl < LIB_NAME - 1 && name[nl])
+        nl++;
+    return w_begin(frames, (u32)fmt, 1u, rate, (const u8 *)name, nl, 1);
+}
+int smp_lib_put(const u8 *p, u32 m) { return w_own == 1 ? w_put(p, m) : 1; }
+int smp_lib_put_end(void)
+{
+    if (w_own != 1 || w_idx < 0)
+        return -1;
+    int k = w_idx, e = w_end();
+    w_idx = -1;
+    w_own = 0;
+    return e ? -1 : k;
+}
+void smp_lib_put_abort(void)
+{
+    if (w_own == 1) {
+        w_idx = -1;
+        w_own = 0;
+    }
+}
 
 u8 *smp_lib_stage(void) { return LSTAGE; }      /* link.c's LOAD TO PROJECT copies through it */
 int smp_lib_busy(void) { return w_idx >= 0; }   /* a send from the computer is using it */

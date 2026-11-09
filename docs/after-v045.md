@@ -194,3 +194,11 @@ The freeze was `wr_label` reading from address 0xEE. That is fixed in v0.45, and
   - a guard-respecting stress test for Capicola's and FASCIA's DSP code.
 
   A feature without these checks doesn't ship.
+- **Capicola moves to v0.47 (owner, 2026-11-08 14:29).** Port: kf.c's algorithm rewritten in our DSP DSL and
+  held bit-exact to heavylight's host build. Capicola is AGPL-3.0: confirm with heavylight that his
+  permission covers shipping it in the firmware. v0.46 is recordings to the +Drive plus the longer
+  naming screen; FASCIA goes in if it meets its bar.
+- **Capicola: on hold until further notice (owner, 2026-11-08 14:38).** heavylight's wish: anything
+  built with the code from his DT2 mod stays private until his own closed beta, so no Capicola or
+  flex-style machine in any release of ours, and none built either. His source stays where it is,
+  untouched.
