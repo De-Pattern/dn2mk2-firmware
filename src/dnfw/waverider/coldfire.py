@@ -49,15 +49,13 @@ from ..mnm import machines as _mnm           # noqa: E402
 # PERC; the Monomachine's machines (docs/mnm.md: 6, 7, then 14.. after the sample machines);
 # the Digitakt II's sample machines (docs/sampler.md, 8..13): all WaveTone clones
 from ..sampler import machines as _smpm         # noqa: E402
-from ..fascia import machines as _fsc           # noqa: E402  (v0.45: FASCIA, type 18)
-NEW_TYPES = tuple(range(5, max(13, *_mnm.TYPES, _smpm.BOUNCE_TYPE, _fsc.TYPE) + 1))   # v0.44: to 17, BOUNCE; v0.45: 18, FASCIA
+NEW_TYPES = tuple(range(5, max(13, *_mnm.TYPES, _smpm.BOUNCE_TYPE) + 1))   # v0.44: to 17, BOUNCE
 CLONE = 1                               # WaveTone
 LONG_NAME, SHORT_NAME = "Perc", "PRC"           # v0.11: PERC in Waverider's place
 MACHINE_NAMES = {5: ("Perc", "PRC"),
                  8: ("Oneshot", "ONE"), 9: ("Werp", "WRP"), 10: ("Stretch", "STR"),
                  11: ("Repitch", "RPT"), 12: ("Grid", "GRD"), 13: ("Slice", "SLC"),
                  _smpm.BOUNCE_TYPE: ("Bounce", "BNC"),       # v0.44: a section of its own, after the sample machines
-                 _fsc.TYPE: (_fsc.LONG, _fsc.SHORT),          # v0.45: FASCIA, in the synth section
                  **{t: _mnm.LIST_NAMES[n] for t, n in zip(_mnm.TYPES, _mnm.NAMES)}}   # v0.26
 if set(MACHINE_NAMES) != set(NEW_TYPES):
     raise ImportError(f"machine types {sorted(set(NEW_TYPES) - set(MACHINE_NAMES))} have no machine")
@@ -74,7 +72,7 @@ LIST_STOCK_VA = 0x401DDD58             # {0, 2, 1, 3, 4}, five longs
 LIST_STOCK = (0, 2, 1, 3, 4)
 # PERC, RESONATOR, CZ after Swarmer; then the Digitakt II's sample machines in its own
 # order (v0.15: all five; v0.13 offered ONESHOT and GRID); then MIDI
-LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, *((_fsc.TYPE,) if _fsc.LISTED else ()), 8, 9, 10, 11, 13, 12, *((_smpm.BOUNCE_TYPE,) if _smpm.BOUNCE_LISTED else ()), 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider); v0.45 FASCIA after the Monomachine's (group 3, no divider)
+LIST_NEW = (0, 2, 1, 3, 5, *_mnm.TYPES, 8, 9, 10, 11, 13, 12, *((_smpm.BOUNCE_TYPE,) if _smpm.BOUNCE_LISTED else ()), 4)   # v0.19: SLICE before GRID, the DT2's order; v0.44 BOUNCE after them (group 3: its own divider)
 LIST_ALLOC = 0x4004D8E0                 # pea 0x14 -- the vector's storage, 5 longs
 LIST_END = 0x4004D900                   # pea 0x401ddd6c -- the copy's end
 LIST_CAP = 0x4004D906                   # lea %a0@(20),%a0 -- the vector's capacity
@@ -215,8 +213,6 @@ SHIMS = f"""
 | param_set_slot_to_id, entered from {SLOT_HOOK:#010x}: the two loads it displaced,
 | then types {NEW_TYPE}..{TYPES_LAST} -> {CLONE} (WaveTone), then back. d2 is saved at entry and
 | overwritten before it is read ({SLOT_TO_ID + 0x16:#010x}).
-| v0.45: a FASCIA sound ({_fsc.TYPE}) has FM Tone's records (type 0) on slots {_fsc.FM_SLOT_FIRST}..{_fsc.FM_SLOT_LAST}, where
-| WaveTone has none: seven of its controls ride them (dnfw.fascia.machines). a0 is the slot.
 slot_shim:
     move.l  %sp@(12),%d0
     movea.l %sp@(16),%a1
@@ -224,17 +220,7 @@ slot_shim:
     blt.s   1f
     cmpi.l  #{TYPES_LAST},%d0
     bgt.s   1f
-    cmpi.l  #{_fsc.TYPE},%d0
-    bne.s   2f
-    moveq   #{_fsc.FM_SLOT_FIRST},%d0
-    cmp.l   %a0,%d0
-    bgt.s   2f
-    moveq   #{_fsc.FM_SLOT_LAST},%d0
-    cmp.l   %a0,%d0
-    blt.s   2f
-    moveq   #0,%d0
-    bra.s   1f
-2:  moveq   #{CLONE},%d0
+    moveq   #{CLONE},%d0
 1:  jmp     {SLOT_RESUME:#010x}
 
 | A one-argument per-machine UI accessor whose first two instructions were
@@ -355,26 +341,13 @@ SHIMS2 = f"""
 | from {VALID_SITE:#010x} by jsr: the type byte into d3, {NEW_TYPE}..{TYPES_LAST} read as {CLONE}, then
 | the displaced `move.l %d2,-(%sp)` under the return address. a1 is free: the jsr
 | that follows (0x400dbce8) is a scratch-register call.
-| v0.45: a FASCIA sound also owns FM Tone's records on slots {_fsc.FM_SLOT_FIRST}..{_fsc.FM_SLOT_LAST} (ids
-| {_fsc.FM_OWNED[0][0]}..{_fsc.FM_OWNED[0][1]}, {_fsc.FM_OWNED[1][0]}..{_fsc.FM_OWNED[1][1]}: record page 0), as slot_shim gives them; d2 is the parameter id.
 canon_valid:
     mvs.b   %a0@(222),%d3
     cmpi.l  #{NEW_TYPE},%d3
     blt.s   1f
     cmpi.l  #{TYPES_LAST},%d3
     bgt.s   1f
-    cmpi.l  #{_fsc.TYPE},%d3
-    bne.s   3f
-    moveq   #0,%d3
-    cmpi.l  #{_fsc.FM_OWNED[1][0]},%d2
-    blt.s   4f
-    cmpi.l  #{_fsc.FM_OWNED[1][1]},%d2
-    ble.s   1f
-4:  cmpi.l  #{_fsc.FM_OWNED[0][0]},%d2
-    blt.s   3f
-    cmpi.l  #{_fsc.FM_OWNED[0][1]},%d2
-    ble.s   1f
-3:  moveq   #{CLONE},%d3
+    moveq   #{CLONE},%d3
 1:  movea.l %sp@+,%a1
     move.l  %d2,%sp@-
     jmp     %a1@
@@ -880,9 +853,7 @@ def compose(stock: bytes, assemble, compile_c) -> dict:
                  "slc_pop", "slc_poll", "slc_stock_asked", "slc_fails", "slc_linked", "smp_norm_state",
                  "smp_pl_quiesce", "smp_analysis_slot", "smp_slot_frames", "wr_draws", "smp_pos_in", "smp_playhead",
                  # v0.40: folders inside folders
-                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete",
-                 # v0.45: FASCIA (the gate's "fascia" step asks the LFO list's mask lookup)
-                 "wr_lfo_mask", "fsc_q_off"):   # the sample link's state (v0.15)
+                 "smp_lib_fpar", "smp_fb_titletext", "smp_fb_delete"):   # the sample link's state (v0.15)
         layout[name] = csyms[name]
     # v0.45: PING removed (owner, 2026-11-08): its chunk (the FLTR list's 'Ping', the filter
     # names, the LOAD bound, slot_to_id, the descriptor, the curve) is no longer composed, so

@@ -139,8 +139,6 @@ static int continuous(int type, u32 slot, u32 v)
         return (sl_samp[type - 8][slot >> 5] >> (slot & 31)) & 1;
     if (type == 17)                                 /* v0.44: BOUNCE, the seventh row */
         return (sl_samp[6][slot >> 5] >> (slot & 31)) & 1;
-    if (type == SL_FSC_TYPE)                        /* v0.45: FASCIA's continuous controls */
-        return (sl_fsc[slot >> 5] >> (slot & 31)) & 1;
     if (type == SL_PERC_TYPE) {
         if ((sl_perc_fx[slot >> 5] >> (slot & 31)) & 1)
             return 1;

@@ -549,19 +549,6 @@ u32 smp_machine_commit(u32 model, u32 track, u32 type, u32 a, u32 b)
                 SET_VALUE(ps, mnm_rid[j], (u32)mnm_default[mi][j], track, 0, 0, 1);
         }
     }
-    /* v0.45: FASCIA starts as its model's DEFAULTS (dnfw.fascia.machines), not at the records'
-     * own defaults (WaveTone's and FM Tone's, for other machines' controls) */
-    if (track < 16 && KIT && (int)type == FSC_TYPE && SOUND_TYPE(track) == FSC_TYPE && was != FSC_TYPE) {
-        extern int fsc_q_off;                   /* the choices written as they are, not a detent */
-        u32 owner = UI_OWNER();
-        fsc_q_off = 1;
-        for (int j = 0; owner && j < FSC_N; j++) {
-            u32 ps = PARAM_SET(owner, fsc_rid[j], track);
-            if (ps)
-                SET_VALUE(ps, fsc_rid[j], (u32)fsc_default[j], track, 0, 0, 1);
-        }
-        fsc_q_off = 0;
-    }
     return r;
 }
 

@@ -36,10 +36,7 @@ def default_steps() -> list[str]:
 # the order changes nothing a part checks.
 GROUPS = (("wipe",), ("stock",), ("garbage",), ("stress",), ("chords",), ("smp",),
           ("mnm", "frame"), ("decode", "map", "voice", "guard"), ("link", "rec", "mainrec", "pvmix", "tdm"),
-          ("recwhole",),          # v0.39: whole takes with the link at work (about 70 min)
-          # v0.45: FASCIA (type 18): bit-exact to live.py (the audition, idle, a steal, p-locks);
-          # chords and beside the other machines, untriggered silence; garbage; the stress test
-          ("fascia",), ("fchords", "fsilence"), ("fgarbage",), ("fstress",))
+          ("recwhole",))          # v0.39: whole takes with the link at work (about 70 min)
 
 
 def parts() -> list[list[str]]:
